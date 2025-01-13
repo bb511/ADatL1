@@ -1,0 +1,207 @@
+data_config:
+  Read_configs:
+    BACKGROUND:
+      file_path: ../../axo-2024D-E/ZB_preprocessed_2024E_381148.h5
+      train_sector:
+      - 0
+      - 2000000
+      test_sector:
+      - 2000000
+      - 8000000
+      object_ranges:
+        met: 0
+        egs: !!python/tuple
+        - 1
+        - 13
+        muons: !!python/tuple
+        - 13
+        - 21
+        jets: !!python/tuple
+        - 21
+        - 33
+      constituents:
+        MET:
+        - true
+        EGAMMA:
+        - true
+        - true
+        - true
+        - true
+        - false
+        - false
+        - false
+        - false
+        - false
+        - false
+        - false
+        - false
+        MUON:
+        - true
+        - true
+        - true
+        - true
+        - false
+        - false
+        - false
+        - false
+        JET:
+        - true
+        - true
+        - true
+        - true
+        - true
+        - true
+        - true
+        - true
+        - true
+        - true
+        - false
+        - false
+    SIGNAL:
+      file_path: ../../axo-2024D-E/BSM_preprocessed.h5
+      MAX_NUM_SIGNALS: 200000
+      object_ranges:
+        met: 0
+        egs: !!python/tuple
+        - 1
+        - 13
+        muons: !!python/tuple
+        - 13
+        - 21
+        jets: !!python/tuple
+        - 21
+        - 33
+      constituents:
+        MET:
+        - true
+        EGAMMA:
+        - true
+        - true
+        - true
+        - true
+        - false
+        - false
+        - false
+        - false
+        - false
+        - false
+        - false
+        - false
+        MUON:
+        - true
+        - true
+        - true
+        - true
+        - false
+        - false
+        - false
+        - false
+        JET:
+        - true
+        - true
+        - true
+        - true
+        - true
+        - true
+        - true
+        - true
+        - true
+        - true
+        - false
+        - false
+  Saturation_configs:
+    saturation_mode: mask
+  Normalisation_configs:
+    scheme: RobustScaler_pow2(5,95,-2,2)
+    norm_ignore_zeros: true
+  Quantization_configs:
+    quantize_bits:
+    - 8
+    - 5
+  Processed_data_path: ./Data.h5
+determinism:
+  tf_op_determinism: true
+  numpy_determinism: true
+  python_determinism: true
+  global_seed: 123
+model:
+  encoder_config:
+    nodes:
+    - 28
+    - 15
+  latent_dim: 8
+  decoder_config:
+    nodes:
+    - 24
+    - 32
+    - 64
+    - 128
+    - 57
+  features: 57
+  ap_fixed_kernel:
+  - 6
+  - 2
+  ap_fixed_bias:
+  - 10
+  - 6
+  ap_fixed_activation:
+  - 10
+  - 6
+  ap_fixed_data:
+  - 8
+  - 5
+train:
+  train_mode: VAE
+  VAE_config:
+    alpha: 1
+    beta: 0.604108559135001
+  common:
+    batch_size: 16384
+    n_epochs: 5
+    optimiser_config:
+      optmiser: lion
+      learning_rate: 0.0001
+      weight_decay: 0
+    reconstruction_loss: cyl_PtPz_mae
+callback:
+  lr_schedule:
+    type: lr_schduler
+    name: CDRW
+    config:
+      initial_learning_rate: 0.0001
+      first_decay_steps: 32
+      t_mul: 2.0
+      m_mul: 0.65
+      alpha: 1.0e-06
+      name: CDR_W
+      warmup_epochs: 10
+threshold:
+  target_rate:
+  - 0.15
+  - 0.2
+  - 0.3
+  - 0.6
+  - 1
+  - 2
+  - 3
+  - 5
+  - 10
+  bc_khz: 28608.8064
+  ht_threshold: 280
+  precision:
+  - 8
+  - 5
+  alpha: 1
+store:
+  lite_path: ./lite.h5
+  complete_path: ./complete.h5
+  temp_path: ./
+  skip_saving_complete: false
+  build_model_path: ./build.h5
+report:
+  html_report:
+    generate: true
+    path: axo.html
+  pdf_report:
+    generate: true
+    path: axo.pdf

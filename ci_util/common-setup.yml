@@ -1,0 +1,12 @@
+.common_setup:
+  before_script:
+    - apt-get update && apt-get install -y git || apk add --no-cache git
+    - python3 -m ensurepip --upgrade
+    - python3 -m pip install --upgrade pip
+    - python3 -m pip install paramiko
+    - git clone https://gitlab-ci-token:${CI_JOB_TOKEN}@gitlab.cern.ch/cms-l1-ad/l1_anomaly_ae.git
+    - export USERNAME=${GITLAB_USER_LOGIN}
+    - export FIRST_LETTER=$(echo ${USERNAME} | cut -c1)
+    - export AFS_PATH=/afs/cern.ch/user/${FIRST_LETTER}/${USERNAME}/${JOB_NAME}
+    - export EOS_PATH=${EOS_DIR}/${USERNAME}/${JOB_NAME}
+    - export ARG_SET0="${USERNAME} ${LXPLUS_PASSWORD} ${AFS_PATH} ${CI_JOB_TOKEN} ${JOB_NAME}"

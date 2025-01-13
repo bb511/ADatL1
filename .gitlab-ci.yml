@@ -1,0 +1,61 @@
+image: python:3.8-slim
+
+workflow:
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "web"
+      when: always
+    - when: never
+
+
+
+include:
+  - local: '/ci_util/common-setup.yml'
+
+stages:
+  - setup # This stage is responsible for setting up the workspace.
+  - test
+  - submit_file_creation
+  - deploy
+  - wait
+  - cleanup
+
+Configuration-Setup:
+  stage: setup
+  extends: .common_setup
+  script:
+    - echo "Entered the setup step"
+    - python3 ./ci_util/init.py $ARG_SET0 $EOS_PATH
+  # Rest of this stage is kept empty to accomadate ntuple making if necessary
+
+SmokeTest-ConfigFiles:
+  stage: test
+  extends: .common_setup
+  script:
+    - python3 ./ci_util/smoke.py $ARG_SET0 ${CONFIG_DIR}
+    - |
+      exit_status=$?
+      if [ $exit_status -eq 0 ]; then
+          echo "Compatibility checks passed."
+          exit 0
+      else
+          echo "Compatibility checks failed."
+          exit 1
+      fi
+
+Submit_File_Creation:
+  stage: submit_file_creation
+  extends: .common_setup
+  script:
+    - python3 ./ci_util/job_maker.py $ARG_SET0 ${CONFIG_DIR}
+
+Job_Submission:
+  stage: deploy
+  extends: .common_setup
+  script:
+    - python3 ./ci_util/job_submit.py ${USERNAME} ${LXPLUS_PASSWORD} ${AFS_PATH}
+
+Job_Monitor_and_Wait:
+  stage: wait
+  extends: .common_setup
+  script:
+    - python3 ./ci_util/job_hold.py ${USERNAME} ${LXPLUS_PASSWORD} ${AFS_PATH} ${JOB_NAME}

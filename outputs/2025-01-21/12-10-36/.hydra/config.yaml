@@ -1,0 +1,118 @@
+paths:
+  root_dir: ${oc.env:PROJECT_ROOT}
+  data_dir: ${paths.root_dir}/data/
+  log_dir: ${paths.root_dir}/logs/
+  output_dir: ${hydra:runtime.output_dir}
+  work_dir: ${hydra:runtime.cwd}
+data:
+  background_data_extractor:
+    object_ranges:
+      met: 0
+      egs: (1, 13)
+      muons: (13, 21)
+      jets: (21, 33)
+    constituents:
+      MET:
+      - true
+      EGAMMA:
+      - true
+      - true
+      - true
+      - true
+      - false
+      - false
+      - false
+      - false
+      - false
+      - false
+      - false
+      - false
+      MUON:
+      - true
+      - true
+      - true
+      - true
+      - false
+      - false
+      - false
+      - false
+      JET:
+      - true
+      - true
+      - true
+      - true
+      - true
+      - true
+      - true
+      - true
+      - true
+      - true
+      - false
+      - false
+    _target_: src.data.components.extraction.CMSBackgroundDataExtractor
+    train_sector:
+    - 0
+    - 2000000
+    test_sector:
+    - 2000000
+    - 8000000
+  signal_data_extractor:
+    object_ranges:
+      met: 0
+      egs: (1, 13)
+      muons: (13, 21)
+      jets: (21, 33)
+    constituents:
+      MET:
+      - true
+      EGAMMA:
+      - true
+      - true
+      - true
+      - true
+      - false
+      - false
+      - false
+      - false
+      - false
+      - false
+      - false
+      - false
+      MUON:
+      - true
+      - true
+      - true
+      - true
+      - false
+      - false
+      - false
+      - false
+      JET:
+      - true
+      - true
+      - true
+      - true
+      - true
+      - true
+      - true
+      - true
+      - true
+      - true
+      - false
+      - false
+    _target_: src.data.components.extraction.CMSSignalDataExtractor
+    max_num_signals: 20000
+  _target_: src.data.cms.CMSDataModule
+  background_filepath: ???
+  signal_filepath: ???
+  processed_data_path: ???
+  data_processor:
+    _target_: src.data.components.processing.CMSDataProcessor
+    processed_data_path: ???
+    constituents: ${data.background_data_extractor.constituents}
+    saturation_mode: mask
+    norm_scheme: RobustScaler_pow2(5,95,-2,2)
+    norm_ignore_zeros: true
+    quantize_bits:
+    - 8
+    - 5

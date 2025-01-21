@@ -1,0 +1,26 @@
+defaults:
+  # object_ranges and constituents are common:
+  - /data@background_data_extractor: _L1AD.yaml
+  - /data@signal_data_extractor: _L1AD.yaml
+
+_target_: src.data.L1AD_datamodule.L1ADDataModule
+
+background_filepath: ???
+background_data_extractor:
+  _target_: src.data.components.extraction.L1BackgroundDataExtractor
+  train_sector: [0, 2000000]
+  test_sector: [2000000, 8000000]
+
+signal_filepath: ???
+signal_data_extractor:
+  _target_: src.data.components.extraction.L1SignalDataExtractor
+  max_num_signals: 20000 
+
+data_processor:
+  _target_: src.data.components.processing.L1DataProcessor
+  processed_data_path: ???
+  constituents: ${data.background_data_extractor.constituents}
+  saturation_mode: mask
+  norm_scheme: RobustScaler_pow2(5,95,-2,2)
+  norm_ignore_zeros: True
+  quantize_bits: [8, 5]

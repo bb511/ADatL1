@@ -1,3 +1,4 @@
+from typing import Optional
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -38,19 +39,34 @@ class QuantizedBits:
         return x
 
 class QuantizedLinear(nn.Module):
-    def __init__(self, in_features: int, out_features: int, bits: int, integer: int, alpha: float = 1.0):
+    def __init__(
+        self, 
+        in_features: int, 
+        out_features: int, 
+        kernel_quantizer: Optional[QuantizedBits] = None,
+        bias_quantizer: Optional[QuantizedBits] = None,
+        activation_quantizer: Optional[QuantizedBits] = None
+    ):
         super().__init__()
         self.linear = nn.Linear(in_features, out_features)
-        self.weight_quantizer = QuantizedBits(bits, integer, alpha)
-        self.bias_quantizer = QuantizedBits(bits, integer, alpha)
+        
+        # Quantizers with optional parameters
+        self.kernel_quantizer = kernel_quantizer or QuantizedBits(8, 0)
+        self.bias_quantizer = bias_quantizer or QuantizedBits(8, 0)
+        self.activation_quantizer = activation_quantizer
         
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         # Quantize weights and biases
-        weight_q = self.weight_quantizer(self.linear.weight)
+        weight_q = self.kernel_quantizer(self.linear.weight)
         bias_q = self.bias_quantizer(self.linear.bias) if self.linear.bias is not None else None
         
         # Compute output using quantized parameters
-        return F.linear(x, weight_q, bias_q)
+        output = F.linear(x, weight_q, bias_q)
+        
+        # Optional activation quantization
+        if self.activation_quantizer is not None:
+            output = self.activation_quantizer(output)
+        return output
 
 class QuantizedReLU(nn.Module):
     def __init__(self, bits: int, integer: int):

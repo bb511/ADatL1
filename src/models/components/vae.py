@@ -1,10 +1,6 @@
-from typing import Tuple
+from typing import Tuple, List
 import torch
 import torch.nn as nn
-import torch.nn.functional as F
-import pytorch_lightning as pl
-from typing import List, Tuple, Dict
-from omegaconf import DictConfig
 
 from src.models.components.quantized import QuantizedBits, QuantizedLinear, QuantizedReLU
 
@@ -20,7 +16,7 @@ class QuantizedEncoder(nn.Module):
     def __init__(
         self,
         input_features: int,
-        encoder_config: DictConfig,
+        nodes: List[int],
         latent_dim: int,
         precision_kernel: Tuple[int, int],
         precision_bias: Tuple[int, int],
@@ -36,7 +32,7 @@ class QuantizedEncoder(nn.Module):
         layers = []
         prev_size = input_features
         
-        for i, node in enumerate(encoder_config.nodes):
+        for i, node in enumerate(nodes):
             layers.extend([
                 QuantizedLinear(
                     prev_size, 
@@ -88,16 +84,16 @@ class Decoder(nn.Module):
     def __init__(
         self,
         latent_dim: int,
-        decoder_config: DictConfig
+        nodes: List[int]
     ):
         super().__init__()
         
         layers = []
         prev_size = latent_dim
         
-        for i, node in enumerate(decoder_config.nodes):
+        for i, node in enumerate(nodes):
             # Last layer has special initialization
-            if i == len(decoder_config.nodes) - 1:
+            if i == len(nodes) - 1:
                 layers.append(
                     nn.Linear(prev_size, node)
                 )

@@ -11,7 +11,6 @@ class QAE(pytorch_lightning.LightningModule):
         loss: nn.Module,
         optimizer: torch.optim.Optimizer,
         scheduler: DictConfig,
-        # lr: float = 1e-3,
     ):
         super().__init__()
         self.model = autoencoder

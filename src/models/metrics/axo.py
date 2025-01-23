@@ -81,7 +81,7 @@ class axo_threshold_manager():
         # Init ...
         self._open_hdf5()
         precision = self.config["precision"]
-        self.input_quantizer = quantized_bits(precision[0],precision[1],alpha=self.config["alpha"])
+        self.input_quantizer = quantized_bits(precision[0], precision[1],alpha=self.config["alpha"])
         self.get_threshold()
         self.get_axo_score()
         
@@ -158,6 +158,7 @@ class axo_threshold_manager():
         
     def get_raw_dict(self):
         return self.score_dict,self.threshold
+
     def get_score(self,thres):
                 
         signal_names = self.data_file["Signal_data"].keys()
@@ -169,5 +170,4 @@ class axo_threshold_manager():
         df["L1 SCORE"] = self.score_dict["SCORE"][str(thres)]['L1_rate']
         df["HT SCORE"] = self.score_dict["SCORE"][str(thres)]['HT_rate']
         df["AXO Improvement"] = self.score_dict["SCORE"][str(thres)]['AXO Improvement']
-        
         return df

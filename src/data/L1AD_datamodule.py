@@ -45,20 +45,23 @@ class L1ADDataModule(LightningDataModule):
 
     def __init__(
         self,
-        background_filepath: str,
-        background_data_extractor: "CMSDataExtractor",
-        signal_filepath: str,
-        signal_data_extractor: "CMSDataExtractor",
-        data_processor: "CMSDataProcessor",
+        zerobias_filepaths: str,
+        signal_filepaths: str,
+        data_extractor: "L1DataExtractor",
+        data_processor: "L1DataProcessor",
     ) -> None:
 
         super().__init__()
         self.save_hyperparameters(logger=False)
 
+        self.data_train: Optional[Dataset] = None
+        self.data_val: Optional[Dataset] = None
+        self.data_test: Optional[Dataset] = None
+
     def prepare_data(self) -> None:
-        """Get background and signal data."""
-        background_datadict = self.hparams.background_data_extractor.extract(self.hparams.background_filepath)
-        signal_datadict = self.hparams.signal_data_extractor.extract(self.hparams.background_filepath)
+        """Get zero bias data and the simulated MC signal data."""
+        zerobias_data = self.hparams.data_extractor.extract(self.hparams.background_filepaths)
+        signal_data = self.hparams.data_extractor.extract(self.hparams.signal_filepaths)
         
         # Processing of the data:
         background_datadict, signal_datadict = self.hparams.data_processor.process(background_datadict, signal_datadict)
@@ -68,3 +71,42 @@ class L1ADDataModule(LightningDataModule):
 
         # NOT SURE HOW TO PROCEED:
         
+
+    def train_dataloader(self) -> DataLoader[Any]:
+        """Create and return the train dataloader.
+
+        :return: The train dataloader.
+        """
+        return DataLoader(
+            dataset=self.data_train,
+            batch_size=self.batch_size_per_device,
+            num_workers=self.hparams.num_workers,
+            pin_memory=self.hparams.pin_memory,
+            shuffle=True,
+        )
+
+    def val_dataloader(self) -> DataLoader[Any]:
+        """Create and return the validation dataloader.
+
+        :return: The validation dataloader.
+        """
+        return DataLoader(
+            dataset=self.data_val,
+            batch_size=self.batch_size_per_device,
+            num_workers=self.hparams.num_workers,
+            pin_memory=self.hparams.pin_memory,
+            shuffle=False,
+        )
+
+    def test_dataloader(self) -> DataLoader[Any]:
+        """Create and return the test dataloader.
+
+        :return: The test dataloader.
+        """
+        return DataLoader(
+            dataset=self.data_test,
+            batch_size=self.batch_size_per_device,
+            num_workers=self.hparams.num_workers,
+            pin_memory=self.hparams.pin_memory,
+            shuffle=False,
+        )

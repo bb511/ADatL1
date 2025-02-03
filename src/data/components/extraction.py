@@ -1,33 +1,76 @@
-from typing import List
-from dataclasses import dataclass
+# Extracts the data level 1 global trigger data from the h5 files and puts it into
+# an effective format for further processing.
+
 import h5py
-import gc
 import numpy as np
 
 import logging
 logger = logging.getLogger(__name__)
 # logging.basicConfig(level=logging.INFO)
 
+from L1Trigger_data.h5convert import root2h5
+
+
 @dataclass
-class L1DataExtractor:
+class L1DataExtractor(root2h5.Root2h5):
     """Parent class for the extraction of CMS data."""
 
-    def _read_raw(self, filepath: str, **kwargs):
-        """Reads the H5 file and returns the raw data."""
-        pass
+    def __init__():
+        super().__init__()
 
-    def _strip(self, data: dict, **kwargs):
-        """Strips the data into constituents."""
-        pass
-    
-    def extract(self, filepath: str, **kwargs):
-        data = self._read_raw(filepath, **kwargs)
-        return self._strip(data, **kwargs)
+    def _select_constituents(self, data: dict, constituent_numbers: dict):
+        """Select the number of constituents for each of the objects.
+
+        :param constituent_numbers: Dictionary specifying the number of constituents
+            for each of the particle objects, e.g., "muons": 8.
+        """
+        if not self._check_subset(self.particles.keys(), constituent_numbers.keys()):
+            raise KeyError("Wrong particles given in setting the constituent numbers. "
+                           f"You can set constituents for {self.particles.keys()}.")
+
+        for particle in self.particles.keys():
+            if not particle in list(self.h5file.keys()):
+                pass
+            data[particle] = self.h5file[particle][:constituent_numbers[particle]]
+
+        return data
+
+    def _select_features(self, data: dict,  selected_features: dict):
+        """Select the features to include for each object.
+
+        :param selected_features: Dictionary specifying which features to include for
+            each of the objects, e.g., "muons": ["pT", "eta", "phi"].
+        """
+        for particle in self.particles.keys():
+            if not particle in list(self.h5file.keys()):
+                pass
+            self.particles[particle]
+
+    def _check_subset(biglist: list, sublist: list) -> bool:
+        """Checks if one list is a sublist of another list."""
+        return set(biglist).intersection(sublist) == set(sublist)
+
+    def extract(self, folder_paths: list[Path], **kwargs):
+        """Extract the data from the h5 files and put it into a numpy array.
+
+        :param folder_paths: Array of paths to the data to be extracted.
+        """
+        data = {}
+        for folder in folder_paths:
+            self.read_folder(folder)
+            data = self._select_constituents(data, constituent_numbers)
+            data = self._select_features(data, selected_features)
+            self.close_h5()
+
+        return data
+
+# Select objects.
+# Select constituents.
 
 @dataclass
-class L1BackgroundDataExtractor(L1DataExtractor):
+class L1ZeroBiasExtractor(L1DataExtractor):
     """
-    CMSDataExtractor for the extraction of CMS background data.
+    Data extractor for the zero bias data.
     
     :param train_sector: Portion of the file that will be used for training.
     :param test_sector: Portion of the file that will be used for evaluation.
@@ -39,82 +82,11 @@ class L1BackgroundDataExtractor(L1DataExtractor):
     test_sector: tuple
     object_ranges: dict
     constituents: dict
-    
-    def _read_raw(self, filepath: str):   
-        f = h5py.File(filepath,"r")
-        logger.info("H5 file opened successfully")
-        
-        dataset = f["full_data_cyl"]
-        dat_met = dataset[self.train_sector[0]:self.train_sector[1],self.object_ranges["met"],:]
-        dat_egs = dataset[self.train_sector[0]:self.train_sector[1],self.object_ranges["egs"][0]:self.object_ranges["egs"][1],:]
-        dat_muons = dataset[self.train_sector[0]:self.train_sector[1],self.object_ranges["muons"][0]:self.object_ranges["muons"][1],:]
-        dat_jets = dataset[self.train_sector[0]:self.train_sector[1],self.object_ranges["jets"][0]:self.object_ranges["jets"][1],:]
-        logger.info("Train_Data read successful")
-
-        # Few meta datas ....
-        ET = f["ET"][self.train_sector[0]:self.train_sector[1]]
-        HT = f["HT"][self.train_sector[0]:self.train_sector[1]]
-        PU = f["event_info"][self.train_sector[0]:self.train_sector[1],:]
-        L1_bits = f["L1bit"][self.train_sector[0]:self.train_sector[1]]
-        logger.info("Train_Meta read successful")
-            
-        data = {}
-        data["Train"]={
-            "DATA":{
-                "MET": dat_met,
-                "EGAMMA": dat_egs,
-                "MUON": dat_muons,
-                "JET": dat_jets
-            },
-            "META":{
-                "ET": ET,
-                "HT": HT,
-                "PU": PU,
-                "L1bits": L1_bits
-            }
-        }
-        del dat_met, dat_egs, dat_muons, dat_jets, ET, HT, PU, L1_bits
-        gc.collect()
-        logger.info("Registry and Garbage cleaning successful")
-    
-        dat_met = dataset[self.test_sector[0]:self.test_sector[1],self.object_ranges["met"],:]
-        dat_egs = dataset[self.test_sector[0]:self.test_sector[1],self.object_ranges["egs"][0]:self.object_ranges["egs"][1],:]
-        dat_muons = dataset[self.test_sector[0]:self.test_sector[1],self.object_ranges["muons"][0]:self.object_ranges["muons"][1],:]
-        dat_jets = dataset[self.test_sector[0]:self.test_sector[1],self.object_ranges["jets"][0]:self.object_ranges["jets"][1],:]
-        logger.info("Test_Data read successful")
-        
-        # Few meta datas ....
-        ET = f["ET"][self.test_sector[0]:self.test_sector[1]]
-        HT = f["HT"][self.test_sector[0]:self.test_sector[1]]
-        PU = f["event_info"][self.test_sector[0]:self.test_sector[1],:]
-        L1_bits = f["L1bit"][self.test_sector[0]:self.test_sector[1]]
-        logger.info("Test_Meta read successful")
-            
-        data["Test"] = {
-            "DATA":{
-                "MET":dat_met,
-                "EGAMMA":dat_egs,
-                "MUON": dat_muons,
-                "JET": dat_jets
-            },
-            "META":{
-                "ET":ET,
-                "HT":HT,
-                "PU":PU,
-                "L1bits":L1_bits
-            }
-        }
-        del dat_met, dat_egs, dat_muons, dat_jets, ET, HT, PU, L1_bits
-        gc.collect()
-        f.close()
-        logger.info("Registry and Garbage cleaning successful")
-        return data
-        
-    def _strip(self, data: dict):
+    def _strip(self, data: h5py.File):
         logger.info("Starting...")
         for case in ["Train", "Test"]:
             for k in data[case]["DATA"].keys():
-                if k !="MET":
+                if k != "MET":
                     data[case]["DATA"][k] = data[case]["DATA"][k][:, self.constituents[k],:]
                 else:
                     data[case]["DATA"][k] = data[case]["DATA"][k][:,None,:]
@@ -122,6 +94,7 @@ class L1BackgroundDataExtractor(L1DataExtractor):
         logger.info("Successful...")
         gc.collect()
         logger.info("Garbage cleaning successful")
+
         return data
     
     def extract(self, filepath: str):
@@ -190,7 +163,7 @@ class L1SignalDataExtractor(L1DataExtractor):
         logger.info("Starting...")
         for case in data.keys():
             for k in data[case]["DATA"].keys():
-                if k !="MET":
+                if k != "MET":
                     data[case]["DATA"][k] = data[case]["DATA"][k][:, self.constituents[k],:]
                 else:
                     data[case]["DATA"][k] = data[case]["DATA"][k][:,None,:]

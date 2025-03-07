@@ -1,26 +1,48 @@
-defaults:
-  # object_ranges and constituents are common:
-  - /data@background_data_extractor: _L1AD.yaml
-  - /data@signal_data_extractor: _L1AD.yaml
-
 _target_: src.data.L1AD_datamodule.L1ADDataModule
 
-background_filepath: ???
-background_data_extractor:
-  _target_: src.data.components.extraction.L1BackgroundDataExtractor
-  train_sector: [0, 2000000]
-  test_sector: [2000000, 8000000]
+# Fill in below with paths to folders that contain the zero bias data.
+zerobias: ${paths.zerobias}
+signal: ${paths.signal}
+background: ${paths.background}
 
-signal_filepath: ???
-signal_data_extractor:
-  _target_: src.data.components.extraction.L1SignalDataExtractor
-  max_num_signals: 20000 
+# Folder where the processed data is saved.
+processed_data_dir: ${paths.processed_data_dir}/basic
+
+data_extractor:
+  _target_: src.data.components.extraction.L1DataExtractor
+  objects: [muons, egammas, jets, taus, ET, HT, MET, MHT, FET, FHT, cicada, event_info]
+  # Choose what constituents to select from the event by applying a binary mask.
+  constituents:
+    muons: [True, True, True, True, False, False, False, False]
+    egammas: [True, True, True, True, False, False, False, False, False, False, False, False]
+    jets: [True, True, True, True, True, True, True, True, True, True, False, False]
+    taus: [True, True, True, True, True, True, True, True, True, True, True, True]
 
 data_processor:
   _target_: src.data.components.processing.L1DataProcessor
-  processed_data_path: ???
-  constituents: ${data.background_data_extractor.constituents}
-  saturation_mode: mask
-  norm_scheme: RobustScaler_pow2(5,95,-2,2)
-  norm_ignore_zeros: True
-  quantize_bits: [8, 5]
+  processed_data_dir: ${data.processed_data_dir}
+  # The features to select are specified by their index in the respective object arrays.
+  # The features follow the order in
+  # https://github.com/bb511/l1trigger_datamaker/tree/main/l1trigger_datamaker/h5convert
+  features:
+    muons: [0, 1, 3]
+    egammas: [0, 1, 2]
+    jets: [0, 1, 2]
+    taus: [0, 1, 2]
+    ET: [0]
+    HT: [0]
+    MET: [0, 1]
+    MHT: [0, 1]
+
+data_normalizer:
+  _target_: src.data.components.normalization.L1DataNormalizer
+  norm_scheme: robust
+  norm_fit_hyperparams:
+    percentiles: [95, 5]
+  cache_folder: ${data.processed_data_dir}/${data.data_normalizer.norm_scheme}
+
+# Data hyperparameters.
+train_val_test_split: [0.8, 0.1, 0.1]
+batch_size: 64
+num_workers: 0
+pin_memory: False

@@ -1,189 +1,83 @@
-# Extracts the data level 1 global trigger data from the h5 files and puts it into
-# an effective format for further processing.
+from pathlib import Path
+from dataclasses import dataclass
+import gc
 
 import h5py
 import numpy as np
 
-import logging
-logger = logging.getLogger(__name__)
-# logging.basicConfig(level=logging.INFO)
+from l1trigger_datamaker.h5convert.root2h5 import Root2h5
+from src.utils import pylogger
+from colorama import Fore, Back, Style
 
-from L1Trigger_data.h5convert import root2h5
-
+log = pylogger.RankedLogger(__name__, rank_zero_only=True)
 
 @dataclass
-class L1DataExtractor(root2h5.Root2h5):
-    """Parent class for the extraction of CMS data."""
+class L1DataExtractor(Root2h5):
+    """Parent class for the extraction of CMS L1 global trigger data."""
 
-    def __init__():
-        super().__init__()
+    def __init__(self, objects: list[str], constituents: dict):
+        """Extract data from level 1 global trigger data files saved in h5 format.
 
-    def _select_constituents(self, data: dict, constituent_numbers: dict):
-        """Select the number of constituents for each of the objects.
 
-        :param constituent_numbers: Dictionary specifying the number of constituents
-            for each of the particle objects, e.g., "muons": 8.
+        :param objects: List of the specific objects to extract from the h5 file.
+        :param constituents: Dictionary with a bool list of which constituents to
+            include, corresponding to each particle object, e.g.
+            muons: [True, True, True, True, False, False, False, False]
         """
-        if not self._check_subset(self.particles.keys(), constituent_numbers.keys()):
-            raise KeyError("Wrong particles given in setting the constituent numbers. "
-                           f"You can set constituents for {self.particles.keys()}.")
+        super().__init__()
+        self.objects = objects
+        self.constituents = constituents
 
-        for particle in self.particles.keys():
-            if not particle in list(self.h5file.keys()):
-                pass
-            data[particle] = self.h5file[particle][:constituent_numbers[particle]]
+    def extract(self, datasets: dict, **kwargs) -> dict:
+        """Extract the data from the h5 files and put it into a pandas dataframe.
+
+        :param datasets: Dictionary containing the name of the datasets and the
+            corresponding folder path associated with it.
+        """
+        data_full = {}
+        log.info(f"Extracting datasets: {list(datasets.keys())}.")
+        for dataset_name, folder_path in datasets.items():
+            folder_path = Path(folder_path)
+            h5file = self.read_folder(folder_path)
+            data = self._extract_objects(h5file)
+            h5file.close()
+            gc.collect()
+            data_full = self._append_data(data_full, data)
+
+        return data_full
+
+    def _extract_objects(self, h5file: h5py.File):
+        """Extract the objects in the h5file that are specified in the config file."""
+        if not self._check_subset(h5file.keys(), self.objects):
+            raise ValueError("The specified objects are not all present in the h5file.")
+
+        data = {}
+        for object_name in self.objects:
+            if object_name in self.particles.keys():
+                data[object_name] = self._extract_constituents(h5file, object_name)
+            else:
+                data[object_name] = h5file[object_name][:]
 
         return data
 
-    def _select_features(self, data: dict,  selected_features: dict):
-        """Select the features to include for each object.
+    def _extract_constituents(self, h5file: h5py.File, particle_type: str) -> dict:
+        """Select the number of constituents given a particle type of object."""
+        if not particle_type in h5file.keys():
+            raise KeyError(f"Particle not found in the given data file.")
 
-        :param selected_features: Dictionary specifying which features to include for
-            each of the objects, e.g., "muons": ["pT", "eta", "phi"].
-        """
-        for particle in self.particles.keys():
-            if not particle in list(self.h5file.keys()):
-                pass
-            self.particles[particle]
+        return h5file[particle_type][:][:, self.constituents[particle_type]]
 
-    def _check_subset(biglist: list, sublist: list) -> bool:
+    def _check_subset(self, biglist: list, sublist: list) -> bool:
         """Checks if one list is a sublist of another list."""
         return set(biglist).intersection(sublist) == set(sublist)
 
-    def extract(self, folder_paths: list[Path], **kwargs):
-        """Extract the data from the h5 files and put it into a numpy array.
+    def _append_data(self, data_full: dict, data: dict) -> dict:
+        """Merge a list of dictionaries into one dictionary. Dicts have same keys."""
+        if not data_full.keys():
+            data_full.update(data)
+            return data_full
 
-        :param folder_paths: Array of paths to the data to be extracted.
-        """
-        data = {}
-        for folder in folder_paths:
-            self.read_folder(folder)
-            data = self._select_constituents(data, constituent_numbers)
-            data = self._select_features(data, selected_features)
-            self.close_h5()
+        for key, values in data.items():
+            data_full[key] = np.append(data_full[key], values, axis=0)
 
-        return data
-
-# Select objects.
-# Select constituents.
-
-@dataclass
-class L1ZeroBiasExtractor(L1DataExtractor):
-    """
-    Data extractor for the zero bias data.
-    
-    :param train_sector: Portion of the file that will be used for training.
-    :param test_sector: Portion of the file that will be used for evaluation.
-    :param object_ranges: Ranges of each particle type in the data.
-    :param constituents: Constituents of each particle type in the data.
-    """
-
-    train_sector: tuple
-    test_sector: tuple
-    object_ranges: dict
-    constituents: dict
-    def _strip(self, data: h5py.File):
-        logger.info("Starting...")
-        for case in ["Train", "Test"]:
-            for k in data[case]["DATA"].keys():
-                if k != "MET":
-                    data[case]["DATA"][k] = data[case]["DATA"][k][:, self.constituents[k],:]
-                else:
-                    data[case]["DATA"][k] = data[case]["DATA"][k][:,None,:]
-
-        logger.info("Successful...")
-        gc.collect()
-        logger.info("Garbage cleaning successful")
-
-        return data
-    
-    def extract(self, filepath: str):
-        data = super().extract(filepath)
-
-        background_datadict = {}
-        for case in data.keys():
-            background_datadict[case] = {
-                "META": data[case]["META"],
-                "DATA": np.concatenate(list(data[case]["DATA"].values()), axis = 1)
-            }
-        del data
-        gc.collect()
-        return background_datadict
-
-
-@dataclass
-class L1SignalDataExtractor(L1DataExtractor):
-    """
-    CMSDataExtractor for the extraction of CMS signal data.
-    
-    :param filepath: Path to the original H5 file.
-    :param train_sector: Portion of the file that will be used for training.
-    :param test_sector: Portion of the file that will be used for evaluation.
-    """
-
-    object_ranges: dict
-    max_num_signals: int
-    constituents: dict  
-
-    def _read_raw(self, filepath: str):
-        data = {}
-
-        f = h5py.File(filepath,"r")
-        signal_names = [k for k in f.keys() if f[k].ndim == 3]
-        for signal_name in signal_names:
-            dataset = f[signal_name]
-
-            dat_met = dataset[:self.max_num_signals,self.object_ranges["met"],:]
-            dat_egs = dataset[:self.max_num_signals,self.object_ranges["egs"][0]:self.object_ranges["egs"][1],:]
-            dat_muons = dataset[:self.max_num_signals,self.object_ranges["muons"][0]:self.object_ranges["muons"][1],:]
-            dat_jets = dataset[:self.max_num_signals,self.object_ranges["jets"][0]:self.object_ranges["jets"][1],:]
-
-            ET = f[f'{signal_name}_ET'][:self.max_num_signals]  # type:ignore
-            HT = f[f'{signal_name}_HT'][:self.max_num_signals]  # type:ignore
-            PU = f[f'{signal_name}_nPV'][:self.max_num_signals]  # type:ignore
-            L1_bits = f[f'{signal_name}_l1bit'][:self.max_num_signals]  # type:ignore
-
-            data[signal_name] = {
-                "DATA":{
-                    "MET":dat_met,
-                    "EGAMMA":dat_egs,
-                    "MUON": dat_muons,
-                    "JET": dat_jets},
-                "META":{
-                    "ET":ET,
-                    "HT":HT,
-                    "PU":PU,
-                    "L1bits":L1_bits}}
-            del dat_met, dat_egs, dat_muons, dat_jets, ET, HT, PU, L1_bits
-            gc.collect()
-        f.close()
-        return data
-    
-    def _strip(self, data: dict):
-        logger.info("Starting...")
-        for case in data.keys():
-            for k in data[case]["DATA"].keys():
-                if k != "MET":
-                    data[case]["DATA"][k] = data[case]["DATA"][k][:, self.constituents[k],:]
-                else:
-                    data[case]["DATA"][k] = data[case]["DATA"][k][:,None,:]
-        logger.info("Successful...")
-        
-        gc.collect()
-        logger.info("Garbage cleaning xuccessful...")
-        return data
-
-
-    def extract(self, filepath: str):
-        data = super().extract(filepath)
-
-        signal_datadict = {}
-        for case in data.keys():
-            signal_datadict[case] = {
-                "META": data[case]["META"],
-                "DATA": np.concatenate(list(data[case]["DATA"].values()), axis = 1)
-            }
-        del data
-        gc.collect()   
-        return signal_datadict
-
+        return data_full

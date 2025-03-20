@@ -12,7 +12,7 @@ class QMLP(nn.Module):
     """
     Quantized multi-layer perceptron.
 
-    :param nodes: A list of integers representing the number of nodes in each layer.
+    :param nodes: Number of nodes composing each of the layers.
     :param qweight: Quantizer for the weight parameters.
     :param qbias: Quantizer for the bias parameters.
     :param qactivation: Quantizer for the activation output.
@@ -52,7 +52,7 @@ class QSimpleDenseNet(nn.Module):
     """
     Quantized simple fully-connected neural network.
 
-    :param nodes: A list of integers representing the number of nodes in each layer.
+    :param nodes: Number of nodes composing each of the layers.
     :param qweight: Quantizer for the weight parameters.
     :param qbias: Quantizer for the bias parameters.
     :param qactivation: Quantizer for the activation output.
@@ -97,6 +97,15 @@ class QSimpleDenseNet(nn.Module):
     
 
 class QuantizedAutoEncoder(nn.Module):
+    """
+    Quantized dense encoder-decoder network.
+
+    :param encoder_nodes: Number of nodes composing each of the encoder layers.
+    :param decoder_nodes: Number of nodes composing each of the encoder layers.
+    :param quantizer: Quantizer for all the parameters.
+    :param batchnorm: Whether to use batch normalization or not.
+    """
+
     def __init__(
         self,
         encoder_nodes: List[int],

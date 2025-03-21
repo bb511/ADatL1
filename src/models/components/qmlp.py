@@ -55,9 +55,9 @@ class QMLP(nn.Module):
         return self.net(x)
     
 
-class QuantizedAutoEncoder(nn.Module):
+class QMLPAutoEncoder(nn.Module):
     """
-    Quantized dense encoder-decoder network.
+    Quantized MLP encoder-decoder network.
 
     :param encoder_nodes: Number of nodes composing each of the encoder layers.
     :param decoder_nodes: Number of nodes composing each of the encoder layers.

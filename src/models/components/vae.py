@@ -79,6 +79,26 @@ class Decoder(nn.Module):
 
     def __init__(self, nodes: List[int]):
         super().__init__()
+        
+        layers = []
+        prev_size = latent_dim
+        
+        for i, node in enumerate(nodes):
+            # Last layer has special initialization
+            if i == len(nodes) - 1:
+                layers.append(
+                    nn.Linear(prev_size, node)
+                )
+                nn.init.uniform_(layers[-1].weight, -0.05, 0.05)
+            else:
+                layers.extend([
+                    nn.Linear(prev_size, node),
+                    nn.BatchNorm1d(node),
+                    nn.ReLU()
+                ])
+            prev_size = node
+            
+        self.decoder_layers = nn.Sequential(*layers).to(torch.float64)
 
         # Build the decoder as a MLP (no quantization) with batch normalization 
         self.net = QMLP(nodes, qweight=None, qbias=None, qactivation=None, batchnorm=True)

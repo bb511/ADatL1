@@ -1,10 +1,11 @@
 from typing import Any, Dict, Optional, Tuple
 from pathlib import Path
+import gc
 
 import torch
 import numpy as np
 from pytorch_lightning import LightningDataModule
-from torch.utils.data import ConcatDataset, DataLoader, Dataset, random_split
+from torch.utils.data import ConcatDataset, DataLoader, Dataset, random_split, Subset
 
 from src.utils import pylogger
 from colorama import Fore, Back, Style
@@ -91,16 +92,19 @@ class L1ADDataModule(LightningDataModule):
                 generator=torch.Generator().manual_seed(42)
             )
             del zerobias_data
+            gc.collect()
 
-            self.data_train = self.hparams.data_normalizer.normalize(
+            self.data_train = Subset(
+                self.hparams.data_normalizer.normalize(
                 self.data_train[:], "train.npy", fit=True
-            )
-            self.data_val = self.hparams.data_normalizer.normalize(
+            ), list(range(1000)))
+            self.data_val = Subset(self.hparams.data_normalizer.normalize(
                 self.data_val[:], "val.npy"
-            )
-            self.data_test = self.hparams.data_normalizer.normalize(
-                self.data_test[:], "test.npy"
-            )
+            ), list(range(1000)))
+            self.data_test = Subset(
+                self.hparams.data_normalizer.normalize(
+                    self.data_test[:], "test.npy"
+                ), list(range(1000)))
 
     def _check_file_exists(self, path: Path, filename: str) -> bool:
         """Checks if prepared data already exists at given path."""

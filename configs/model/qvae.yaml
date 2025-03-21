@@ -2,7 +2,7 @@ _target_: src.models.qvae.QVAE
 
 encoder:
   _target_: src.models.components.vae.QuantizedEncoder
-  input_features: 57
+  input_features: 102
   nodes: [28, 15]
   latent_dim: 8
   precision_kernel: [6, 2]
@@ -13,7 +13,12 @@ encoder:
 decoder:
   _target_: src.models.components.vae.Decoder
   latent_dim: ${model.encoder.latent_dim}
-  nodes: [24, 32, 64, 128, 57]
+  nodes:
+    - 24
+    - 32
+    - 64
+    - 128
+    - ${model.encoder.input_features}
 
 loss:
   _target_: src.models.losses.vae.VAELoss

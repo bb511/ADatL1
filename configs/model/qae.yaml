@@ -1,19 +1,20 @@
 _target_: src.models.qae.QAE
 
 autoencoder:
-  _target_: src.models.components.ae.QuantizedAutoEncoder
-  input_features: 57
-  encoder_nodes: [28, 15]
+  _target_: src.models.components.mlp.QMLPAutoEncoder
+  encoder_nodes: [57, 28, 15]
   decoder_nodes: [24, 32, 64, 128, 57]
-  precision: [8, 5]
-  use_BN: True
+  quantizer: 
+    _target_: src.models.quantization.quantizers.FixedPointQuantizer
+    bits: 8
+    integer: 5
+  
 
 loss:
   _target_: src.models.losses.cylptpz.CylPtPzMAELoss
 
-  self, norm_scales: np.ndarray, norm_biases: np.ndarray, 
-                 mask: Dict[str, np.ndarray], unscale_energy: bool = False):
-
+  # self, norm_scales: np.ndarray, norm_biases: np.ndarray, 
+  #                mask: Dict[str, np.ndarray], unscale_energy: bool = False):
 
 optimizer:
   _partial_: true

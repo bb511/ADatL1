@@ -1,23 +1,27 @@
-from typing import Tuple
-import torch
-import torch.nn as nn
-import pytorch_lightning
-from pytorch_lightning.core.optimizer import LightningOptimizer
-from omegaconf import DictConfig, OmegaConf
+from typing import Optional, Tuple
 
-class QVAE(pytorch_lightning.LightningModule):
+import torch
+from torch import nn, optim
+
+from omegaconf import OmegaConf, DictConfig
+from pytorch_lightning import LightningModule
+from pytorch_lightning.core.optimizer import LightningOptimizer
+from pytorch_lightning.utilities.memory import garbage_collection_cuda
+
+from src.models import L1ADLightningModule
+
+class QVAE(L1ADLightningModule):
     def __init__(
         self,
         encoder: nn.Module,
         decoder: nn.Module,
         loss: nn.Module,
-        optimizer: torch.optim.Optimizer,
-        scheduler: DictConfig,
-        # lr: float = 1e-3,
+        optimizer: optim.Optimizer,
+        scheduler: Optional[DictConfig] = None,
     ):
         super().__init__()
-        self.encoder, self.decoder = encoder, decoder
         self.loss = loss
+        self.encoder, self.decoder = encoder, decoder
         self.save_hyperparameters(ignore=["encoder", "decoder", "loss"])
         
     def forward(self, x: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:

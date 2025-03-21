@@ -49,7 +49,7 @@ class QMLP(nn.Module):
             )
             for ilayer in range(1, len(nodes) - 1)
         ]
-        self.net = nn.Sequential(*layers, nn.Linear(nodes[-2], nodes[-1]))
+        self.net = nn.Sequential(*layers, QuantizedLinear(nodes[-2], nodes[-1]))
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         return self.net(x)

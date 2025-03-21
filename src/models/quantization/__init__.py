@@ -1,1 +1,1 @@
-from .quantizers import Quantizer
+from .quantizers import *

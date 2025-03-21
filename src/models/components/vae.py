@@ -6,7 +6,7 @@ from src.models.quantization import Quantizer
 from src.models.quantization.layers import QuantizedLinear
 from src.models.quantization.layers import QuantizedLinear, QuantizedBatchNorm1d
 
-from src.models.components.dense import QMLP
+from src.models.components.qmlp import QMLP
 
 class Sampling(nn.Module):
     """Sampling layer for VAE. Performs reparameterization trick."""

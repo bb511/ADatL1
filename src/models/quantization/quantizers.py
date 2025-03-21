@@ -3,6 +3,17 @@ import torch
 
 import torch
 
+def new_quantizer(method: str, **kwargs):
+    """Allow to dinamically instantiate the quantizer based on the method only."""
+
+    # Include here all accepted quantization methods
+    assert method.lower() in ["fixed-point"]
+
+    if method.lower() == "fixed-point":
+        return FixedPointQuantizer(**kwargs)
+    return Quantizer(**kwargs)
+
+
 class Quantizer:
     """
     General quantizer class for reference. It can be used as identity operator: Quantizer(None, None).
@@ -17,17 +28,6 @@ class Quantizer:
     def __init__(self, bits: int, integer: int, **kwargs):
         self.bits = bits
         self.integer = integer
-
-    @classmethod
-    def new(cls, method: str, **kwargs):
-        """Allow to dinamically instantiate the quantizer based on the method only."""
-
-        # Include here all accepted quantization methods
-        assert method.lower() in ["fixed-point"]
-
-        if method.lower() == "fixed-point":
-            return FixedPointQuantizer(**kwargs)
-        return cls(**kwargs)
       
     def __call__(self, x: torch.Tensor) -> torch.Tensor:
         return x

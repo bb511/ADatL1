@@ -26,6 +26,10 @@ rootutils.setup_root(__file__, indicator=".project-root", pythonpath=True)
 # more info: https://github.com/ashleve/rootutils
 # ------------------------------------------------------------------------------------ #
 
+# Add resolvers to evaluate operations in the .yaml configuration files
+from src.utils.omegaconf import register_resolvers
+register_resolvers()
+
 from src.utils import (
     RankedLogger,
     extras,

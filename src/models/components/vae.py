@@ -1,10 +1,16 @@
-from typing import Tuple, List
+from typing import Optional, Tuple, List
 import torch
 import torch.nn as nn
 
-from src.models.components.quantized import QuantizedBits, QuantizedLinear, QuantizedReLU
+from src.models.quantization import Quantizer
+from src.models.quantization.layers import QuantizedLinear
+from src.models.quantization.layers import QuantizedLinear, QuantizedBatchNorm1d
+
+from src.models.components.dense import QMLP
 
 class Sampling(nn.Module):
+    """Sampling layer for VAE. Performs reparameterization trick."""
+
     def forward(self, inputs: Tuple[torch.Tensor, torch.Tensor]) -> torch.Tensor:
         z_mean, z_log_var = inputs
         batch = z_mean.size(0)
@@ -12,101 +18,74 @@ class Sampling(nn.Module):
         epsilon = torch.randn(batch, dim, device=z_mean.device)
         return z_mean + torch.exp(0.5 * z_log_var) * epsilon
 
+
 class QuantizedEncoder(nn.Module):
+    """Quantized encoder for AD@L1."""
+
     def __init__(
         self,
-        input_features: int,
         nodes: List[int],
-        latent_dim: int,
-        precision_kernel: Tuple[int, int],
-        precision_bias: Tuple[int, int],
-        precision_activation: Tuple[int, int],
-        precision_data: Tuple[int, int]
+        qdata: Optional[Quantizer] = None,
+        qweight: Optional[Quantizer] = None,
+        qbias: Optional[Quantizer] = None,
+        qactivation: Optional[Quantizer] = None,
     ):
         super().__init__()
         
-        # Input quantization
-        self.input_quantizer = QuantizedBits(*precision_data)
-        
-        # Build encoder layers
-        layers = []
-        prev_size = input_features
-        
-        for i, node in enumerate(nodes):
-            layers.extend([
-                QuantizedLinear(
-                    prev_size, 
-                    node,
-                    kernel_quantizer=QuantizedBits(*precision_kernel),
-                    bias_quantizer=QuantizedBits(*precision_bias)
-                ),
-                QuantizedReLU(*precision_activation)
-            ])
-            prev_size = node
-            
-        self.encoder_layers = nn.Sequential(*layers)
-        
+        # Input data quantization
+        self.qdata = qdata or Quantizer(None, None)
+
+        # The encoder will be a QMLP up to the last layer
+        qmlp = QMLP(nodes, qweight=qweight, qbias=qbias, qactivation=qactivation, batchnorm=False)
+        self.net = nn.Sequential(*list(qmlp.children())[:-1])
+     
         # Mean and log variance layers
         self.z_mean = QuantizedLinear(
-            prev_size, 
-            latent_dim,
-            kernel_quantizer=QuantizedBits(*precision_kernel),
-            bias_quantizer=QuantizedBits(*precision_bias),
-            activation_quantizer=QuantizedBits(*precision_activation)
+            in_features=nodes[-2],
+            out_features=nodes[-1],
+            qweight=qweight,
+            qbias=qbias,
+            qactivation=qactivation
         )
-        
         self.z_log_var = QuantizedLinear(
-            prev_size, 
-            latent_dim,
-            kernel_quantizer=QuantizedBits(*precision_kernel),
-            bias_quantizer=QuantizedBits(*precision_bias),
-            activation_quantizer=QuantizedBits(*precision_activation)
+            in_features=nodes[-2],
+            out_features=nodes[-1],
+            qweight=qweight,
+            qbias=qbias,
+            qactivation=qactivation
         )
         
+        # Reparameterization layer
         self.sampling = Sampling()
         
-        # Initialize log_var weights to zero (as in original)
+        # TODO: Check if this makes sense
+        # Initialize log_var weights to zero
         with torch.no_grad():
             nn.init.zeros_(self.z_log_var.linear.weight)
             nn.init.zeros_(self.z_log_var.linear.bias)
     
     def forward(self, x: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
-        x = self.input_quantizer(x)
-        x = self.encoder_layers(x)
+        # Forward pass through the network
+        x = self.net(self.qdata(x))
         
-        z_mean = self.z_mean(x)
-        z_log_var = self.z_log_var(x)
+        # Mean and log variance for reparemeterization
+        z_mean, z_log_var = self.z_mean(x), self.z_log_var(x)
         z = self.sampling((z_mean, z_log_var))
-        
         return z_mean, z_log_var, z
 
+
 class Decoder(nn.Module):
-    def __init__(
-        self,
-        latent_dim: int,
-        nodes: List[int]
-    ):
+    """Decoder for AD@L1."""
+
+    def __init__(self, nodes: List[int]):
         super().__init__()
-        
-        layers = []
-        prev_size = latent_dim
-        
-        for i, node in enumerate(nodes):
-            # Last layer has special initialization
-            if i == len(nodes) - 1:
-                layers.append(
-                    nn.Linear(prev_size, node)
-                )
-                nn.init.uniform_(layers[-1].weight, -0.05, 0.05)
-            else:
-                layers.extend([
-                    nn.Linear(prev_size, node),
-                    nn.BatchNorm1d(node),
-                    nn.ReLU()
-                ])
-            prev_size = node
-            
-        self.decoder_layers = nn.Sequential(*layers)
+
+        # Build the decoder as a MLP (no quantization) with batch normalization 
+        self.net = QMLP(nodes, qweight=None, qbias=None, qactivation=None, batchnorm=True)
+
+        # Apply uniform initialization to the weight of the last Linear() layer
+        last_layer = list(self.net.children())[-1]
+        nn.init.uniform_(last_layer.weight, -0.05, 0.05)
     
-    def forward(self, z: torch.Tensor) -> torch.Tensor:
-        return self.decoder_layers(z)
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        return self.net(x)

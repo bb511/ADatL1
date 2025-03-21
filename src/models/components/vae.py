@@ -106,7 +106,7 @@ class Decoder(nn.Module):
                 ])
             prev_size = node
             
-        self.decoder_layers = nn.Sequential(*layers)
+        self.decoder_layers = nn.Sequential(*layers).to(torch.float64)
     
     def forward(self, z: torch.Tensor) -> torch.Tensor:
         return self.decoder_layers(z)

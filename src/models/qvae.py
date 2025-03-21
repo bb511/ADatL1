@@ -26,8 +26,15 @@ class QVAE(pytorch_lightning.LightningModule):
         return z_mean, z_log_var, z, reconstruction
     
     def model_step(self, batch: torch.Tensor) -> torch.Tensor:
-        import ipdb; ipdb.set_trace()
-        total_loss, reco_loss, kl_loss = self.loss(*self(batch), target=batch)
+        batch_flat = torch.flatten(batch, start_dim=1)
+        z_mean, z_log_var, z, reconstruction = self.forward(batch_flat)
+        total_loss, reco_loss, kl_loss = self.loss(
+            reconstruction=reconstruction,
+            z_mean=z_mean,
+            z_log_var=z_log_var,
+            target=batch_flat
+        )
+
         return {
             "loss": total_loss,
             "loss_reco": reco_loss,
@@ -46,6 +53,13 @@ class QVAE(pytorch_lightning.LightningModule):
 
         loss = output.get("loss")
         self.log_dict({f"val/{key}": value for key, value in output.items()})
+        return loss
+
+    def test_step(self, batch: torch.Tensor, batch_idx: int) -> torch.Tensor:
+        output = self.model_step(batch)
+
+        loss = output.get("loss")
+        self.log_dict({f"test/{key}": value for key, value in output.items()})
         return loss
         
     def configure_optimizers(self):

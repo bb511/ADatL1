@@ -36,6 +36,7 @@ class QuantizedBits:
         # Scale back to original range
         x = x / self.scale
         
+        x = x.to(dtype=torch.float64)
         return x
 
 class QuantizedLinear(nn.Module):
@@ -59,7 +60,7 @@ class QuantizedLinear(nn.Module):
         # Quantize weights and biases
         weight_q = self.kernel_quantizer(self.linear.weight)
         bias_q = self.bias_quantizer(self.linear.bias) if self.linear.bias is not None else None
-        
+
         # Compute output using quantized parameters
         output = F.linear(x, weight_q, bias_q)
         

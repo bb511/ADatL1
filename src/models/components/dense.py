@@ -22,51 +22,11 @@ class QMLP(nn.Module):
             nodes: List[int],
             qweight: Optional[Quantizer] = None,
             qbias: Optional[Quantizer] = None,
-            qactivation: Optional[Quantizer] = None
+            qactivation: Optional[Quantizer] = None,
+            batchnorm: Optional[bool] = False
         ):
         super().__init__()
        
-        # Partial instantiation of QuantizedLinear
-        QLinear = functools.partial(
-            QuantizedLinear,
-            qweight=qweight,
-            qbias=qbias,
-            qactivation=qactivation
-        )
-
-        # Build MLP
-        layers = [
-            nn.Sequential(
-                QLinear(nodes[ilayer - 1], nodes[ilayer]),
-                QuantizedReLU(quantizer=qactivation)
-            )
-            for ilayer in range(1, len(nodes) - 1)
-        ]
-        self.net = nn.Sequential(*layers, nn.Linear(nodes[-2], nodes[-1]))
-
-    def forward(self, x: torch.Tensor) -> torch.Tensor:
-        return self.net(x)
-    
-
-class QSimpleDenseNet(nn.Module):
-    """
-    Quantized simple fully-connected neural network.
-
-    :param nodes: Number of nodes composing each of the layers.
-    :param qweight: Quantizer for the weight parameters.
-    :param qbias: Quantizer for the bias parameters.
-    :param qactivation: Quantizer for the activation output.
-    """
-
-    def __init__(
-        self,
-        nodes: List[int],
-        qweight: Optional[Quantizer] = None,
-        qbias: Optional[Quantizer] = None,
-        qactivation: Optional[Quantizer] = None
-    ):
-        super().__init__()
-
         # Partial instantiation of QuantizedLinear and QuantizedBatchNorm1d
         QLinear = functools.partial(
             QuantizedLinear,
@@ -80,17 +40,16 @@ class QSimpleDenseNet(nn.Module):
             qbias=qbias
         )
 
-        # Build net
+        # Build MLP
         layers = [
             nn.Sequential(
                 QLinear(nodes[ilayer - 1], nodes[ilayer]),
-                QBatchNorm1d(nodes[ilayer]),
+                QBatchNorm1d(nodes[ilayer]) if batchnorm else nn.Identity(),
                 QuantizedReLU(quantizer=qactivation)
             )
             for ilayer in range(1, len(nodes) - 1)
         ]
         self.net = nn.Sequential(*layers, nn.Linear(nodes[-2], nodes[-1]))
-        
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         return self.net(x)
@@ -110,45 +69,12 @@ class QuantizedAutoEncoder(nn.Module):
         self,
         encoder_nodes: List[int],
         decoder_nodes: List[int],
-        quantizer: Quantizer,
-        batchnorm: bool
+        quantizer: Optional[Quantizer] = None,
+        batchnorm: Optional[bool] = True
     ):
         super().__init__()
-
-        # Partial instantiation of QuantizedLinear and QuantizedBatchNorm1d
-        QLinear = functools.partial(
-            QuantizedLinear,
-            qweight=quantizer,
-            qbias=quantizer,
-            qactivation=quantizer
-        )
-        QBatchNorm1d = functools.partial(
-            QuantizedBatchNorm1d,
-            qweight=quantizer,
-            qbias=quantizer
-        )
-
-        # Build encoder net
-        encoder_layers = [
-            nn.Sequential(
-                QLinear(encoder_nodes[ilayer - 1], encoder_nodes[ilayer]),
-                QBatchNorm1d(encoder_nodes[ilayer]) if batchnorm else nn.Identity(),
-                QuantizedReLU(quantizer)
-            )
-            for ilayer in range(1, len(encoder_nodes) - 1)
-        ]
-        self.encoder = nn.Sequential(*encoder_layers, nn.Linear(encoder_nodes[-2], encoder_nodes[-1]))
-
-        # Build decoder net
-        decoder_layers = [
-            nn.Sequential(
-                QLinear(decoder_nodes[ilayer - 1], decoder_nodes[ilayer]),
-                QBatchNorm1d(decoder_nodes[ilayer]) if batchnorm else nn.Identity(),
-                QuantizedReLU(quantizer)
-            )
-            for ilayer in range(1, len(decoder_nodes) - 1)
-        ]
-        self.decoder = nn.Sequential(*decoder_layers, nn.Linear(decoder_nodes[-2], decoder_nodes[-1]))
+        self.encoder = QMLP(encoder_nodes, qweight=quantizer, qbias=quantizer, qactivation=quantizer, batchnorm=batchnorm)
+        self.decoder = QMLP(decoder_nodes, qweight=quantizer, qbias=quantizer, qactivation=quantizer, batchnorm=batchnorm)
         
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         x = self.encoder(x)

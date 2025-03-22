@@ -5,13 +5,14 @@ import torch.nn.functional as F
 
 from src.models.quantization import Quantizer
 
-class QuantizedReLU(nn.Module):
+    
+class QuantizedReLU(nn.ReLU):
     def __init__(self, quantizer: Quantizer):
         super().__init__()
         self.quantizer = quantizer
-        
+
     def forward(self, x: torch.Tensor) -> torch.Tensor:
-        return self.quantizer(F.relu(x))
+        return self.quantizer(super().forward(x))
 
 class QuantizedBatchNorm1d(nn.Module):
     def __init__(

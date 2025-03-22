@@ -25,8 +25,8 @@ class QuantizedLinear(nn.Linear):
         self.qactivation = qactivation or Quantizer(None, None)
 
         # Apply weight and bias initialization
-        if init_weight: init_weight(self.weight)
-        if init_bias and self.bias: init_bias(self.bias)
+        if init_weight != None: init_weight(self.weight)
+        if init_bias != None and self.bias != None: init_bias(self.bias)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         # Quantize weights and biases

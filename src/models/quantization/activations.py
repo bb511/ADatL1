@@ -7,9 +7,9 @@ from src.models.quantization import Quantizer
 
     
 class QuantizedReLU(nn.ReLU):
-    def __init__(self, quantizer: Quantizer):
+    def __init__(self, quantizer: Optional[Quantizer] = None):
         super().__init__()
-        self.quantizer = quantizer
+        self.quantizer = quantizer or Quantizer(None, None)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         return self.quantizer(super().forward(x))

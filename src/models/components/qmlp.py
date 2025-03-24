@@ -1,4 +1,4 @@
-from typing import Optional, List
+from typing import Optional, Callable, List
 import functools
 
 import torch
@@ -23,7 +23,9 @@ class QMLP(nn.Module):
             qweight: Optional[Quantizer] = None,
             qbias: Optional[Quantizer] = None,
             qactivation: Optional[Quantizer] = None,
-            batchnorm: Optional[bool] = False
+            batchnorm: Optional[bool] = False,
+            init_weight: Optional[Callable] = lambda _: None,
+            init_bias: Optional[Callable] = lambda _: None
         ):
         super().__init__()
        
@@ -32,7 +34,9 @@ class QMLP(nn.Module):
             QuantizedLinear,
             qweight=qweight,
             qbias=qbias,
-            qactivation=qactivation
+            qactivation=qactivation,
+            init_weight=init_weight,
+            init_bias=init_bias
         )
         QBatchNorm1d = functools.partial(
             QuantizedBatchNorm1d,
@@ -49,7 +53,7 @@ class QMLP(nn.Module):
             )
             for ilayer in range(1, len(nodes) - 1)
         ]
-        self.net = nn.Sequential(*layers, QuantizedLinear(nodes[-2], nodes[-1]))
+        self.net = nn.Sequential(*layers, QLinear(nodes[-2], nodes[-1]))
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         return self.net(x)

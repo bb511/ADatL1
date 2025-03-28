@@ -1,17 +1,20 @@
 #!/bin/bash
 
-# Colors
+# Enable color output
 RED='\033[0;31m'
 GREEN='\033[0;32m'
-NC='\033[0m' # No Color
+NC='\033[0m'  # No Color
 
 REQUIREMENTS_FILE="requirements.txt"
 
-# Create temporary processed file without line breaks
-processed_requirements=$(mktemp)
-sed ':a; /\\$/ { N; s/\\\n//; ba }; s/ *; */;/g' "$REQUIREMENTS_FILE" > "$processed_requirements"
+# Check if requirements.txt exists
+if [ ! -f "$REQUIREMENTS_FILE" ]; then
+    echo -e "${RED}Error: $REQUIREMENTS_FILE not found in the current directory.${NC}"
+    exit 1
+fi
 
-echo -e "\nReading requirements from ${REQUIREMENTS_FILE} (processed version)...\n"
+# Read requirements file line-by-line, ignoring comments and empty lines
+echo -e "\nReading requirements from ${REQUIREMENTS_FILE}...\n"
 failed_packages=()
 
 while IFS= read -r package || [ -n "$package" ]; do
@@ -23,7 +26,7 @@ while IFS= read -r package || [ -n "$package" ]; do
     echo -e "Installing package: ${package}..."
 
     # Attempt to install the package
-    python -m pip install --require-hashes "$package"
+    python -m pip install "$package"
     if [ $? -eq 0 ]; then
         echo -e "${GREEN}Successfully installed: ${package}${NC}"
     else
@@ -31,17 +34,16 @@ while IFS= read -r package || [ -n "$package" ]; do
         failed_packages+=("$package")
     fi
     echo
-done < "$processed_requirements"
+done < "$REQUIREMENTS_FILE"
 
-# Cleanup temporary file
-rm "$processed_requirements"
-
-# Report failures
+# Display a summary of failed packages
 if [ ${#failed_packages[@]} -ne 0 ]; then
-    echo -e "\n${RED}Failed packages:${NC}"
-    printf ' - %s\n' "${failed_packages[@]}"
+    echo -e "\n${RED}The following packages failed to install:${NC}"
+    for pkg in "${failed_packages[@]}"; do
+        echo -e "${RED}- $pkg${NC}"
+    done
     exit 1
+else
+    echo -e "\n${GREEN}All packages installed successfully!${NC}"
+    exit 0
 fi
-
-echo -e "\n${GREEN}All packages installed successfully!${NC}"
-exit 0

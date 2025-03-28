@@ -177,3 +177,6 @@ exclude_lines = [
     "raise NotImplementedError()",
     "if __name__ == .__main__.:",
 ]
+
+[tool.poetry.requires-plugins]
+poetry-plugin-export = ">=1.8"

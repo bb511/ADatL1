@@ -42,6 +42,11 @@ class VICReg(L1ADLightningModule):
         batch = batch[0]
         return torch.flatten(batch, start_dim=1).to(dtype=torch.float32)
     
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        x = self.qdata(x)
+        x = self.lor1(self.om1(self.fb1(x)))
+        return self.projector(self.model(x))
+    
     def model_step(self, batch: tuple, batch_idx: int):
         x = self._extract_batch(batch)
 

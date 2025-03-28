@@ -1,0 +1,39 @@
+# @package _global_
+
+defaults:
+  - qvae.yaml
+  - /model@model.features: vicreg
+  - override /model: fqvae.yaml
+
+
+tags: ["debug"]
+
+model:
+
+  # Change nodes to adjust to the projector size
+  encoder:
+    nodes: 
+      - '${list_at_idx: ${model.features.projector.nodes}, -1}'
+      - 28
+      - 15
+      - 8
+
+  decoder:
+    nodes: 
+      - 8
+      - 15
+      - 28
+      - '${list_at_idx: ${model.features.projector.nodes}, -1}'
+
+  features:
+    _target_: src.utils.hydra.get_object
+    path: src.models.vicreg.VICReg.load_from_checkpoint
+    checkpoint_path: ${paths.log_dir}/train/runs/2025-03-27_23-29-18/checkpoints/epoch=0-step=1.ckpt
+
+    lorentz_rotation:
+      norm_scale: 1.0
+      norm_bias: 0.0
+
+    # Same model parameters as those used in VICReg experiment
+    model:
+      nodes: [102, 29, 10]

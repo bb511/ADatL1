@@ -12,6 +12,7 @@ def register_resolvers():
     OmegaConf.register_new_resolver("classname", lambda classpath: classpath.split(".")[-1].lower()) # extract class name from DictConfig path
     OmegaConf.register_new_resolver("prod", lambda x, y: x*y)
     OmegaConf.register_new_resolver("intdiv", lambda x, y: x//y)
+    OmegaConf.register_new_resolver("substract", lambda x, y: x - y)
     OmegaConf.register_new_resolver("arange_list", lambda lst: list(range(len(lst))))
     OmegaConf.register_new_resolver("arange", lambda start, stop, step: list(range(start, stop, step)))
     OmegaConf.register_new_resolver("list_at_idx", lambda list, idx: list[idx]) # get 'list' element at index 'idx'

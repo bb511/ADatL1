@@ -6,7 +6,7 @@ from torchmetrics import Metric
 
 import h5py
 
-from src.models.components.quantized import QuantizedBits
+from src.models.quantization.activations import QuantizedBits
 
 class AXOScore(Metric):
     def __init__(

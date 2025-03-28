@@ -14,6 +14,6 @@ def get_class(path: str, **kwargs):
     return functools.partial(cl, **kwargs)
 
 def get_object(path: str, **kwargs):
-    """Feed a partially-instantiated object through hydra."""
+    """Feed an object through hydra with additional arguments."""
     cl = original_get_object(path)
-    return functools.partial(cl, **kwargs)
+    return cl(**kwargs)

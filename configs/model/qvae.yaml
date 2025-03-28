@@ -1,5 +1,7 @@
 _target_: src.models.qvae.QVAE
 
+features: null 
+
 encoder:
   _target_: src.models.components.qvae.QuantizedEncoder
 

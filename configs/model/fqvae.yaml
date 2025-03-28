@@ -1,5 +1,0 @@
-defaults:
-  - qvae.yaml
-
-_target_: src.models.qvae.FeatureQVAE
-features: ???

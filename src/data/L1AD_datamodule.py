@@ -150,6 +150,7 @@ class L1ADDataModule(LightningDataModule):
             batch_size=self.batch_size_per_device,
             num_workers=self.hparams.num_workers,
             pin_memory=self.hparams.pin_memory,
+            persistent_workers=True if self.hparams.num_workers > 0 else False,
             shuffle=True,
         )
 
@@ -163,6 +164,7 @@ class L1ADDataModule(LightningDataModule):
             batch_size=self.batch_size_per_device,
             num_workers=self.hparams.num_workers,
             pin_memory=self.hparams.pin_memory,
+            persistent_workers=True if self.hparams.num_workers > 0 else False,
             shuffle=False,
         )
 

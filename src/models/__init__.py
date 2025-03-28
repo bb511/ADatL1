@@ -28,18 +28,22 @@ class L1ADLightningModule(LightningModule):
         """Override to adjust to the specific dataset."""
         return batch
     
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        """Override with the forward pass."""
+        return self.model(x)
+    
     def model_step(self, batch: tuple, batch_idx: int):
         """Override with the model forward pass."""
         x = self._extract_batch(batch)
+        z = self.forward(batch)
         garbage_collection_cuda()
-        z = self.model(x)
         return {
             "loss": self.loss(x, z),
         }
     
     def _outlog(self, out: dict, stage: str):
         """Override with the values you want to log."""
-        return {f"{stage}/loss": out["loss"]}
+        return {f"{stage}/{k}": v for k, v in out.items()}
         
     def training_step(self, batch: tuple, batch_idx: int):
         out = self.model_step(batch, batch_idx)

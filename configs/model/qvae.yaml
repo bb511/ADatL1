@@ -1,24 +1,56 @@
 _target_: src.models.qvae.QVAE
 
+features: null 
+
 encoder:
-  _target_: src.models.components.vae.QuantizedEncoder
-  input_features: 102
-  nodes: [28, 15]
-  latent_dim: 8
-  precision_kernel: [6, 2]
-  precision_bias: [10, 6]
-  precision_activation: [10, 6]
-  precision_data: [8, 5]
+  _target_: src.models.components.qvae.QuantizedEncoder
+
+  # 57 input features, 8 latent features
+  nodes: [102, 28, 15, 8] 
+
+  qdata:
+    _target_: src.models.quantization.quantizers.FixedPointQuantizer
+    bits: 8
+    integer: 5
+
+  qweight:
+    _target_: src.models.quantization.quantizers.FixedPointQuantizer
+    bits: 6
+    integer: 2
+
+  qbias:
+    _target_: src.models.quantization.quantizers.FixedPointQuantizer
+    bits: 10
+    integer: 6
+
+  qactivation:
+    _target_: src.models.quantization.quantizers.FixedPointQuantizer
+    bits: 10
+    integer: 6
   
 decoder:
-  _target_: src.models.components.vae.Decoder
-  latent_dim: ${model.encoder.latent_dim}
-  nodes:
-    - 24
-    - 32
-    - 64
-    - 128
-    - ${model.encoder.input_features}
+  _target_: src.models.components.qvae.Decoder
+
+  nodes: [8, 15, 28, 102] # inverse of the encoder nodes
+
+  # ------------------------------------------------------------------------------------
+  # Fancy way of defining the nodes: interpolate from the encoder nodes
+  # nodes:
+  #   - '${list_at_idx: ${model.encoder.nodes}, -1}'
+  #   - 16
+  #   - 32
+  #   - 64
+  #   - 128
+  #   - '${list_at_idx: ${model.encoder.nodes}, 0}'
+  # ------------------------------------------------------------------------------------
+
+  init_last_weight:
+    _target_: src.utils.hydra.get_method
+    path: torch.nn.init.uniform_
+    a: -0.05
+    b: 0.05
+
+  init_last_bias: null
 
 loss:
   _target_: src.models.losses.vae.VAELoss

@@ -5,6 +5,7 @@ import gc
 import torch
 import numpy as np
 from pytorch_lightning import LightningDataModule
+from pytorch_lightning.utilities.combined_loader import CombinedLoader
 from torch.utils.data import ConcatDataset, DataLoader, Dataset, random_split, Subset
 
 from src.utils import pylogger
@@ -22,7 +23,9 @@ class L1ADDataModule(LightningDataModule):
         data_extractor: "L1DataExtractor",
         data_processor: "L1DataProcessor",
         data_normalizer: "L1DataNormalizer",
-        processed_data_dir: str = "data/",
+        main_data: dict,
+        additional_validation: dict,
+        additional_test: dict,
         train_val_test_split: (float, float, float) = (0.8, 0.1, 0.1),
         batch_size: int = 64,
         num_workers: int = 0,
@@ -46,8 +49,8 @@ class L1ADDataModule(LightningDataModule):
 
         super().__init__()
         self.save_hyperparameters(logger=False)
-
-        self.hparams.processed_data_dir = Path(self.hparams.processed_data_dir)
+        self.processed_data_folder = Path(self.hparams.data_processor.cache)
+        self.processed_data_folder /= self.hparams.data_processor.name
 
         self.data_train: Optional[Dataset] = None
         self.data_val: Optional[Dataset] = None
@@ -55,20 +58,17 @@ class L1ADDataModule(LightningDataModule):
 
     def prepare_data(self) -> None:
         """Get zero bias data and the simulated MC signal data."""
-        if not self._check_file_exists(self.hparams.processed_data_dir, "zerobias"):
-            log.info(Back.GREEN + "Preparing zerobias data...")
-            zerobias_data = self.hparams.data_extractor.extract(self.hparams.zerobias)
-            self.hparams.data_processor.process(zerobias_data, "zerobias")
+        log.info(Back.GREEN + "Preparing zerobias data...")
+        self.hparams.data_extractor.extract(self.hparams.zerobias, "zerobias")
+        self.hparams.data_processor.process(self.hparams.zerobias, "zerobias")
 
-        if not self._check_file_exists(self.hparams.processed_data_dir, "background"):
-            log.info(Back.GREEN + "Preparing background data...")
-            backgr_data = self.hparams.data_extractor.extract(self.hparams.background)
-            self.hparams.data_processor.process(backgr_data, "background")
+        log.info(Back.GREEN + "Preparing background data...")
+        self.hparams.data_extractor.extract(self.hparams.background, "background")
+        self.hparams.data_processor.process(self.hparams.background, "background")
 
-        if not self._check_file_exists(self.hparams.processed_data_dir, "signal"):
-            log.info(Back.GREEN + "Preparing signal data...")
-            signal_data = self.hparams.data_extractor.extract(self.hparams.signal)
-            self.hparams.data_processor.process(signal_data, "signal")
+        log.info(Back.GREEN + "Preparing signal data...")
+        self.hparams.data_extractor.extract(self.hparams.signal, "signal")
+        self.hparams.data_processor.process(self.hparams.signal, "signal")
 
     def setup(self, stage: str = None) -> None:
         """Load data. Set `self.data_train`, `self.data_val`, `self.data_test`.
@@ -76,35 +76,60 @@ class L1ADDataModule(LightningDataModule):
         :param stage: The stage to setup. Either `"fit"`, `"validate"`, `"test"`, or `
             "predict"`. Defaults to ``None``.
         """
+        self._set_batch_size()
+
+        if not self.data_train and not self.data_val and not self.data_test:
+            main_data = self._load_main_data(self.processed_data_folder)
+            self.data_train, self.data_val, self.data_test = random_split(
+                dataset=main_data,
+                lengths=self.hparams.train_val_test_split,
+                generator=torch.Generator().manual_seed(42)
+            )
+
+            self.hparams.data_normalizer.fit(self.data_train[:])
+            self.data_train = self.hparams.data_normalizer.norm(self.data_train[:], "train")
+            self.data_val = self.hparams.data_normalizer.norm(self.data_val[:], "val")
+            self.data_test = self.hparams.data_normalizer.norm(self.data_test[:], "test")
+
+        if self.hparams.additional_validation:
+            self._normalize_additional_data(self.hparams.additional_validation)
+        if self.hparams.additional_test:
+            self._normalize_additional_data(self.hparams.additional_test)
+
+    def _normalize_additional_data(self, additional_data: dict):
+        """Normalizes and caches additional validation or test data."""
+        for data_category in additional_data.keys():
+            for dataset in additional_data[data_category].keys():
+                file = self.processed_data_folder / data_category / (dataset + ".npy")
+                data = np.load(file)
+                _= self.hparams.data_normalizer.norm(data, dataset)
+
+    def _load_main_data(self, processed_data_folder: Path):
+        """Load the main data from given collection of files in the main_data dict."""
+        log.info("Using main data that is split into train, val, test:")
+        log.info(self.hparams.main_data)
+
+        for data_category in self.hparams.main_data.keys():
+            data = [
+                np.load(processed_data_folder / data_category / (data_file + ".npy"))
+                for data_file
+                in self.hparams.main_data[data_category].keys()
+            ]
+        data = np.concatenate(data, axis=0)
+
+        return data
+
+    def _set_batch_size(self):
+        """Set the batch size per device if multiple devices are available."""
         if self.trainer is not None:
             if self.hparams.batch_size % self.trainer.world_size != 0:
                 raise RuntimeError(
                     f"Batch size ({self.hparams.batch_size}) is not divisible by "
                     f"the number of devices ({self.trainer.world_size})."
                 )
-            self.batch_size_per_device = self.hparams.batch_size // self.trainer.world_size
-
-        if not self.data_train and not self.data_val and not self.data_test:
-            zerobias_data = np.load(self.hparams.processed_data_dir / "zerobias.npy")
-            self.data_train, self.data_val, self.data_test = random_split(
-                dataset=zerobias_data,
-                lengths=self.hparams.train_val_test_split,
-                generator=torch.Generator().manual_seed(42)
+            self.batch_size_per_device = (
+                self.hparams.batch_size // self.trainer.world_size
             )
-            del zerobias_data
-            gc.collect()
-
-            self.data_train = Subset(
-                self.hparams.data_normalizer.normalize(
-                self.data_train[:], "train.npy", fit=True
-            ), list(range(1000)))
-            self.data_val = Subset(self.hparams.data_normalizer.normalize(
-                self.data_val[:], "val.npy"
-            ), list(range(1000)))
-            self.data_test = Subset(
-                self.hparams.data_normalizer.normalize(
-                    self.data_test[:], "test.npy"
-                ), list(range(1000)))
 
     def _check_file_exists(self, path: Path, filename: str) -> bool:
         """Checks if prepared data already exists at given path."""
@@ -133,7 +158,7 @@ class L1ADDataModule(LightningDataModule):
 
         :return: The validation dataloader.
         """
-        return DataLoader(
+        main_val = DataLoader(
             dataset=self.data_val,
             batch_size=self.batch_size_per_device,
             num_workers=self.hparams.num_workers,
@@ -141,15 +166,44 @@ class L1ADDataModule(LightningDataModule):
             shuffle=False,
         )
 
+        dataloaders = self._dataloader_dict(self.hparams.additional_validation.keys())
+        dataloaders.update({"main_val": main_val})
+        combined_dataloader = CombinedLoader(dataloaders, 'max_size_cycle')
+
+        return combined_dataloader
+
     def test_dataloader(self) -> DataLoader[Any]:
         """Create and return the test dataloader.
 
         :return: The test dataloader.
         """
-        return DataLoader(
+        main_test = DataLoader(
             dataset=self.data_test,
             batch_size=self.batch_size_per_device,
             num_workers=self.hparams.num_workers,
             pin_memory=self.hparams.pin_memory,
             shuffle=False,
         )
+
+        dataloaders = self._dataloader_dict(self.hparams.additional_test.keys())
+        dataloaders.update({"main_test": main_test})
+
+        return dataloaders
+
+    def _dataloader_dict(self, additional_data: dict):
+        """Creates a dictionary of dataloaders of specified datasets found in dict."""
+        norm_datapath = self.hparams.data_normalizer.cache
+        for data_category in additional_data.keys():
+            for dataset in additional_data[data_category].keys():
+                file = norm_datapath  / data_category / dataset + ".npy"
+                data = np.load(file)
+                dataloader = DataLoader(
+                    dataset=data,
+                    batch_size=self.batch_size_per_device,
+                    num_workers=self.hparams.num_workers,
+                    pin_memory=self.hparams.pin_memory,
+                    shuffle=False,
+                )
+                dataloaders.update({dataset: dataloader})
+
+        return dataloaders

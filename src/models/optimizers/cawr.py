@@ -2,6 +2,8 @@ import math
 import torch
 from torch.optim.lr_scheduler import _LRScheduler
 
+# Adapted from: https://github.com/katsura-jp/pytorch-cosine-annealing-with-warmup
+
 class CosineAnnealingWarmupRestarts(_LRScheduler):
     """
         optimizer (Optimizer): Wrapped optimizer.
@@ -14,16 +16,17 @@ class CosineAnnealingWarmupRestarts(_LRScheduler):
         last_epoch (int): The index of last epoch. Default: -1.
     """
     
-    def __init__(self,
-                 optimizer : torch.optim.Optimizer,
-                 first_cycle_steps : int,
-                 cycle_mult : float = 1.,
-                 max_lr : float = 0.1,
-                 min_lr : float = 0.001,
-                 warmup_epochs : int = 0,
-                 warmup_steps : int = 0,
-                 gamma : float = 1.,
-                 last_epoch : int = -1
+    def __init__(
+        self,
+        optimizer : torch.optim.Optimizer,
+        first_cycle_steps : int,
+        cycle_mult : float = 1.,
+        max_lr : float = 0.1,
+        min_lr : float = 0.001,
+        warmup_epochs : int = 0,
+        warmup_steps : int = 0,
+        gamma : float = 1.,
+        last_epoch : int = -1
         ):
         assert warmup_steps < first_cycle_steps
         

@@ -7,9 +7,9 @@ import torch.nn.functional as F
 class VICRegLoss(nn.Module):
     def __init__(
             self,
-            inv_coef: Optional[float] = 25.0,
-            var_coef: Optional[float] = 25.0,
-            cov_coef: Optional[float] = 1.0,
+            inv_coef: Optional[float] = 50,
+            var_coef: Optional[float] = 50,
+            cov_coef: Optional[float] = 1,
         ):
         """
         VICReg-style loss combining invariance, variance, and covariance losses.
@@ -28,13 +28,19 @@ class VICRegLoss(nn.Module):
 
     def variance_loss(self, z):
         std_z = torch.sqrt(z.var(dim=0) + 1e-4)
-        return torch.mean(F.relu(1 - std_z))
+        return torch.mean(F.relu(1.0 - std_z))
 
     def covariance_loss(self, z):
         batch_size, feature_dim = z.shape
-        z = z - z.mean(dim=0, keepdim=True)  # Center embeddings
-        cov = (z.T @ z) / (batch_size - 1)  # Compute covariance matrix
-        off_diag = cov.flatten()[:-1].view(feature_dim - 1, feature_dim + 1)[:, 1:].flatten()
+
+        # Compute covariance matrix
+        z = z - z.mean(dim=0, keepdim=True)
+        cov = (z.T @ z) / (batch_size - 1)
+
+        # Remove the diagonal elements (i.e. variance terms)
+        off_diag = cov[~torch.eye(feature_dim, dtype=torch.bool)]
+
+        # Compute the covariance loss as the sum of squares of off-diagonal elements
         return off_diag.pow(2).sum() / float(feature_dim)
 
     def forward(self, z1: torch.Tensor, z2: torch.Tensor):
@@ -49,7 +55,7 @@ class VICRegLoss(nn.Module):
             torch.Tensor: Total VICReg loss.
         """
         loss_inv = self.invariance_loss(z1, z2)
-        loss_var = self.variance_loss(z1) + self.variance_loss(z2) 
+        loss_var = 0.5 * (self.variance_loss(z1) + self.variance_loss(z2))
         loss_cov = self.covariance_loss(z1) + self.covariance_loss(z2)
 
         loss_total = (

@@ -56,7 +56,7 @@ model:
 
 projector:
   _target_: src.models.components.qmlp.QMLP
-  nodes: [10, 40, 40] # check that !!
+  nodes: [10, 40] # * 4 projection
   batchnorm: true # Added batchnorm
 
   # No quantization or initialization:

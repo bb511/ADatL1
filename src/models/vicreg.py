@@ -26,7 +26,7 @@ class VICReg(L1ADLightningModule):
             **kwargs
         ):
         super().__init__(**kwargs)
-        self.save_hyperparameters(ignore=["model", "loss", "qdata", "projector", "feature_blur", "object_mask", "lorentz_rotation"])
+        self.save_hyperparameters(ignore=["model", "loss", "projector", "feature_blur", "object_mask", "lorentz_rotation"])
         self.projector = projector
 
         # Data quantization:

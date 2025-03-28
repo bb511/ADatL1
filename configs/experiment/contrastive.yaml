@@ -3,10 +3,14 @@
 defaults:
   - qvae.yaml
   - /model@model.features: vicreg
-  - override /model: fqvae.yaml
 
 
 tags: ["debug"]
+
+
+trainer:
+  min_epochs: 1
+  max_epochs: 1 # 480
 
 model:
 
@@ -14,21 +18,21 @@ model:
   encoder:
     nodes: 
       - '${list_at_idx: ${model.features.projector.nodes}, -1}'
-      - 28
-      - 15
-      - 8
+      - 9
+      - 6
+      - 4
 
   decoder:
     nodes: 
-      - 8
-      - 15
-      - 28
+      - 4
+      - 6
+      - 9
       - '${list_at_idx: ${model.features.projector.nodes}, -1}'
 
   features:
     _target_: src.utils.hydra.get_object
     path: src.models.vicreg.VICReg.load_from_checkpoint
-    checkpoint_path: ${paths.log_dir}/train/runs/2025-03-27_23-29-18/checkpoints/epoch=0-step=1.ckpt
+    checkpoint_path: ${paths.log_dir}train/runs/2025-03-28_14-22-09/checkpoints/epoch=0-step=1.ckpt
 
     lorentz_rotation:
       norm_scale: 1.0
@@ -37,3 +41,30 @@ model:
     # Same model parameters as those used in VICReg experiment
     model:
       nodes: [102, 29, 10]
+
+
+    optimizer:
+      _partial_: true
+      _target_: torch.optim.Adam
+      lr: 0.00012660618375055985
+      weight_decay: 0.0
+
+
+    scheduler:
+      # here other attributes...
+
+      scheduler:
+        _partial_: true
+        _target_: src.models.optimizers.cawr.CosineAnnealingWarmupRestarts
+        first_cycle_steps: 32
+        cycle_mult: 2
+        warmup_epochs: 10
+        gamma: 0.5
+
+        # Added by me:
+        max_lr: 0.00015
+        min_lr: 0.00005
+
+  loss:
+    beta: 0.8479820280580449
+    alpha: 0.4691963329462432

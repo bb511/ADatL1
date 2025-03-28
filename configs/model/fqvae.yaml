@@ -1,6 +1,5 @@
 defaults:
   - qvae.yaml
-  - features: vicreg.yaml
 
 _target_: src.models.qvae.FeatureQVAE
-model_checkpoint: ???
+features: ???

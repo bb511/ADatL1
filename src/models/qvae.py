@@ -1,12 +1,8 @@
 from typing import Optional, Tuple
 
 import torch
-from torch import nn, optim
+from torch import nn
 import torch.nn.functional as F
-
-from omegaconf import OmegaConf, DictConfig
-from pytorch_lightning import LightningModule
-from pytorch_lightning.core.optimizer import LightningOptimizer
 from pytorch_lightning.utilities.memory import garbage_collection_cuda
 
 from src.models import L1ADLightningModule
@@ -34,7 +30,6 @@ class QVAE(L1ADLightningModule):
     
     def model_step(self, batch: torch.Tensor, batch_idx: int) -> torch.Tensor:
         x = self._extract_batch(batch)
-
         z_mean, z_log_var, z, reconstruction = self.forward(x)
         total_loss, reco_loss, kl_loss = self.loss(
             reconstruction=reconstruction,
@@ -42,6 +37,7 @@ class QVAE(L1ADLightningModule):
             z_log_var=z_log_var,
             target=x
         )
+        garbage_collection_cuda()
 
         # Compute anomaly score
         anomaly_score = self.get_anomaly_score(x)
@@ -68,17 +64,13 @@ class FeatureQVAE(QVAE):
     def __init__(
         self,
         features: nn.Module,
-        model = None,
         **kwargs
     ):
-        super().__init__(model=None, **kwargs)
+        super().__init__(**kwargs)
         self.features = features
+        self.features.eval()
         self.save_hyperparameters(ignore=["model", "encoder", "decoder", "loss", "features"])
 
     def _extract_batch(self, batch: tuple) -> torch.Tensor:
-        batch = super()._extract_batch(batch)
-        with torch.no_grad():
-            batch = self.features(batch)
-
-        import ipdb; ipdb.set_trace()
-    
+        x = super()._extract_batch(batch)
+        return self.features(x)

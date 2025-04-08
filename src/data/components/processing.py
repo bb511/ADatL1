@@ -240,6 +240,7 @@ class L1DataProcessor:
     def _copy_metadata(self, extracted_metadata: dict, proc_metadata: dict):
         """Copy the metadata from the extracted to the processed metadata dict."""
         for obj_name in extracted_metadata.keys():
+            removed_feats = []
             if obj_name in self.remove_objects_features.keys():
                 removed_feats = self.remove_objects_features[obj_name]
             proc_metadata[obj_name] = {}

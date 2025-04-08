@@ -5,9 +5,10 @@ import numpy as np
 import yaml
 import h5py
 import gc
+from colorama import Fore, Back, Style
 
 from src.utils import pylogger
-from colorama import Fore, Back, Style
+from . import plots
 
 log = pylogger.RankedLogger(__name__)
 
@@ -16,11 +17,17 @@ log = pylogger.RankedLogger(__name__)
 class L1DataProcessor:
     extracted_path: str = "data/extracted/"
     extraction_name: str = "default"
+    remove_objects_features: dict = None
     cache: str = "data/processed/"
     name: str = "default"
 
     def process(self, datasets: dict, data_category: str):
         """Applies processing to the data and stores result in a file.
+
+        A metadata file is also saved. This metadata files stores how many constituents
+        each 'particle' type object contains, e.g., the data contains 8 muons; it also
+        stores the features pertaining to each type of object, e.g.,
+        'muons': ['pT', 'eta', 'phi'].
 
         :dataset: Dictionary with keys corresponding to the name of the processed data
             set and values corresponding to the path to the raw data.
@@ -29,41 +36,30 @@ class L1DataProcessor:
         """
         log.info(Fore.GREEN + "Processing data...")
         self.extracted_folder = Path(self.extracted_path) / self.extraction_name
-        self.extracted_folder = Path(self.extracted_folder) / data_category
+        self.extracted_metadata_file = self.extracted_folder / "metadata.yaml"
+        self.extracted_datapath = self.extracted_folder / data_category
         self.cache_folder = Path(self.cache) / self.name / data_category
-        extracted_metadata_file = self.extracted_folder / "metadata.yaml"
-        self.objects_feats = yaml.safe_load(open(extracted_metadata_file))
+
+        self.objects_feats_names = yaml.safe_load(open(self.extracted_metadata_file))
+        self.proc_metadata = self._copy_metadata(self.objects_feats_names, {})
 
         # Process the data sets.
         for dataset_name in datasets.keys():
-            if (self.cache_folder / (dataset_name + ".npy")).exists():
-                log.info(Fore.YELLOW + f"Processed data exists at {self.cache_folder}.")
+            if self._check_data_exists(dataset_name):
                 continue
-            extracted_filename = self.extracted_folder / (dataset_name + ".h5")
+
+            extracted_filename = self.extracted_datapath / (dataset_name + ".h5")
             extracted_h5 = h5py.File(extracted_filename, mode="r")
             data = self._convert_hdf2dict(extracted_h5)
             extracted_h5.close()
             gc.collect()
 
             data = self._remove_saturation(data)
+            data = self._remove_objects_features(data)
             data = self._dict2nparray(data)
             self._cache(data, dataset_name)
 
         self._cache_metadata()
-
-    def _append_numpy_dictionary(self, appender: dict, appendee: dict):
-        """Append a dictionary to another dictionary. Create key if not existent.
-
-        The values of the dictionaries are assumed to be numpy arrays.
-        """
-        if not appender.keys():
-            appender.update(appendee)
-            return appender
-
-        for key, values in appendee.items():
-            appender[key] = np.append(appender[key], appendee, axis=0)
-
-        return data_full
 
     def _remove_saturation(self, data: dict):
         """Remove saturation in the transverse momentum and the transverse energy.
@@ -90,7 +86,7 @@ class L1DataProcessor:
 
         # Get the index of the transverse energy object corresponding to the energy.
         # The transverse energy object also contains the azimuthal angle.
-        energy_idx = self.objects_feats["ET"].index("Et")
+        energy_idx = self.objects_feats_names["ET"].index("Et")
         ET_mask = data["ET"][:, 0, energy_idx] < ET_thres
         for object_name in data.keys():
             data[object_name] = data[object_name][ET_mask]
@@ -105,7 +101,9 @@ class L1DataProcessor:
         """
         for obj_name in list(set(data.keys()) & set(pT_thres.keys())):
             log.info(f"Setting pT saturated {obj_name} to 0...")
-            pT_idx = self._idx_containing_substr(self.objects_feats[obj_name], "Et")
+            pT_idx = self._idx_containing_substr(
+                self.objects_feats_names[obj_name], "Et"
+            )
             if pT_idx == -1:
                 raise ValueError(f"Could not find Et feat in object {obj_name}.")
 
@@ -120,6 +118,29 @@ class L1DataProcessor:
 
         return data
 
+    def _remove_objects_features(self, data: dict) -> dict:
+        """Removes given features in data.
+
+        If all the features of an object are removed, the object itself is removed
+        completely from the data dictionary.
+        """
+        if not self.remove_objects_features:
+            return data
+
+        log.info(f"Removing features {self.remove_objects_features}...")
+        for obj_name in self.remove_objects_features.keys():
+            if len(self.remove_objects_features[obj_name]) == len(
+                self.objects_feats_names[obj_name]
+            ):
+                del data[obj_name]
+                continue
+
+            for feat_name in self._remove_objects_features[obj_name]:
+                feat_idx = self.objects_feats_names[obj_name].index(feat_name)
+                data[obj_name] = np.delete(data[obj_name], feat_idx, axis=-1)
+
+        return data
+
     def _idx_containing_substr(self, the_list: list, substring: str) -> int:
         """Get index of string in list of strings that contains substring."""
         for i, s in enumerate(the_list):
@@ -128,18 +149,6 @@ class L1DataProcessor:
 
         return -1
 
-    def _pad_last_dim(self, nparray: np.ndarray, npad: int) -> np.ndarray:
-        """Pad last dimension of numpy array with npad zeros."""
-        pad_scheme = [(0, 0)] * len(nparray.shape)
-        pad_scheme[-1] = (0, npad)
-        nparray = np.pad(nparray, pad_scheme, constant_values=0)
-
-        return nparray
-
-    def _check_subset(self, biglist: list, sublist: list) -> bool:
-        """Checks if one list is a sublist of another list."""
-        return set(biglist).intersection(sublist) == set(sublist)
-
     def _dict2nparray(self, data: dict):
         """Converts the dictionary of numpy arrays to a concatenated numpy array.
 
@@ -147,8 +156,12 @@ class L1DataProcessor:
         If the last dimension is not equal, then the arrays are padded with zero to
         the maximum length of array found in the dictionary.
         """
-        max_nb_feats = max([len(feats) for feats in self.objects_feats.values()])
+        max_nb_feats = max([len(feats) for feats in self.objects_feats_names.values()])
         for obj_name in data.keys():
+            # Save the number of constituents the object has.
+            self.proc_metadata[obj_name]["const"] = data[obj_name].shape[1]
+
+            # Pad the objects up to the maximum number of features existing.
             if not data[obj_name].shape[-1] < max_nb_feats:
                 continue
             npad = max_nb_feats - data[obj_name].shape[-1]
@@ -159,35 +172,33 @@ class L1DataProcessor:
 
         return data
 
+    def _pad_last_dim(self, nparray: np.ndarray, npad: int) -> np.ndarray:
+        """Pad last dimension of numpy array with npad zeros."""
+        pad_scheme = [(0, 0)] * len(nparray.shape)
+        pad_scheme[-1] = (0, npad)
+        nparray = np.pad(nparray, pad_scheme, constant_values=0)
+
+        return nparray
+
     def _cache(self, data: np.ndarray, dataset_name: str):
         """Store the processed data in a numpy file."""
         self.cache_folder.mkdir(parents=True, exist_ok=True)
         cache_file = self.cache_folder / (dataset_name + ".npy")
+
+        self._plot_processed_data(data, dataset_name)
         np.save(cache_file, data)
         log.info("Cached processed data at " + Fore.GREEN + f"{cache_file}.")
 
     def _cache_metadata(self):
         """Store the metadata pertaining to which objs and feats are in the data."""
-        metadata_filepath = self.cache_folder / "metadata.yaml"
+        metadata_filepath = self.cache_folder.parent / "metadata.yaml"
+        if metadata_filepath.exists():
+            return
 
         with open(metadata_filepath, "w") as metadata_file:
-            yaml.dump(self.objects_feats, metadata_file)
+            yaml.dump(self.proc_metadata, metadata_file)
 
         log.info(f"Cached processed feature metadata at {metadata_filepath}.")
-
-    def _merge_extracted_data(self, datasets: dict, extracted_folder: Path) -> dict:
-        """Merge all the extracted data sets into one dictionary for processing."""
-
-        data = {}
-        for dataset_name in datasets.keys():
-            extracted_filename = self.extracted_folder / (dataset_name + ".h5")
-            extracted_h5 = h5py.File(extracted_filename, mode="r")
-            extracted_data = self._convert_hdf2dict(extracted_h5)
-            extracted_h5.close()
-            data = self._append_numpy_dictionary(data, extracted_data)
-            gc.collect()
-
-        return data
 
     def _convert_hdf2dict(self, h5file: h5py.File):
         """Converts an h5 file to a python dictionary. This will load it to memory."""
@@ -197,3 +208,49 @@ class L1DataProcessor:
 
         return data
 
+    def _plot_processed_data(self, data: np.ndarray, dataset_name: str):
+        """Plot the processed data into histograms.
+
+        As the processed data is a numpy array, we use previously stored metadata
+        information to keep track of which objects are plotted.
+        """
+        obj_starting_idx = 0
+        for obj_name in self.proc_metadata.keys():
+            obj_ending_idx = obj_starting_idx + self.proc_metadata[obj_name]["const"]
+            plots.plot_hist_3d(
+                data[:, obj_starting_idx:obj_ending_idx],
+                obj_name,
+                self.proc_metadata[obj_name]["feats"],
+                self.cache_folder / dataset_name,
+            )
+            obj_starting_idx = obj_ending_idx
+
+    def _check_data_exists(self, dataset_name: str) -> bool:
+        """Check if the data was processed in the same way already."""
+        if (self.cache_folder / (dataset_name + ".npy")).exists():
+            log.info(Fore.YELLOW + f"Processed data exists at {self.cache_folder}.")
+            return 1
+
+        return 0
+
+    def _check_subset(self, biglist: list, sublist: list) -> bool:
+        """Checks if one list is a sublist of another list."""
+        return set(biglist).intersection(sublist) == set(sublist)
+
+    def _copy_metadata(self, extracted_metadata: dict, proc_metadata: dict):
+        """Copy the metadata from the extracted to the processed metadata dict."""
+        for obj_name in extracted_metadata.keys():
+            if obj_name in self.remove_objects_features.keys():
+                removed_feats = self.remove_objects_features[obj_name]
+            proc_metadata[obj_name] = {}
+            proc_metadata[obj_name]["feats"] = []
+
+            for feat in extracted_metadata[obj_name]:
+                if feat in removed_feats:
+                    continue
+                proc_metadata[obj_name]["feats"].append(feat)
+
+            if len(proc_metadata[obj_name]["feats"]) == 0:
+                del proc_metadata[obj_name]
+
+        return proc_metadata

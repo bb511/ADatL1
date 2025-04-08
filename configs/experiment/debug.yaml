@@ -1,0 +1,20 @@
+# @package _global_
+
+# to execute this experiment run:
+# python train.py experiment=example
+
+defaults:
+  - override /paths: L1AD
+  - override /data: L1AD
+  - override /model: qvae
+  - override /callbacks: default
+  - override /trainer: cpu
+  - override /logger: csv
+
+tags: ["debug"]
+
+seed: 12345
+
+trainer:
+  min_epochs: 1
+  max_epochs: 1

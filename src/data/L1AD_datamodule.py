@@ -83,13 +83,17 @@ class L1ADDataModule(LightningDataModule):
             self.data_train, self.data_val, self.data_test = random_split(
                 dataset=main_data,
                 lengths=self.hparams.train_val_test_split,
-                generator=torch.Generator().manual_seed(42)
+                generator=torch.Generator().manual_seed(42),
             )
 
             self.hparams.data_normalizer.fit(self.data_train[:])
-            self.data_train = self.hparams.data_normalizer.norm(self.data_train[:], "train")
+            self.data_train = self.hparams.data_normalizer.norm(
+                self.data_train[:], "train"
+            )
             self.data_val = self.hparams.data_normalizer.norm(self.data_val[:], "val")
-            self.data_test = self.hparams.data_normalizer.norm(self.data_test[:], "test")
+            self.data_test = self.hparams.data_normalizer.norm(
+                self.data_test[:], "test"
+            )
 
         if self.hparams.additional_validation:
             self._normalize_additional_data(self.hparams.additional_validation)
@@ -102,7 +106,7 @@ class L1ADDataModule(LightningDataModule):
             for dataset in additional_data[data_category].keys():
                 file = self.processed_data_folder / data_category / (dataset + ".npy")
                 data = np.load(file)
-                _= self.hparams.data_normalizer.norm(data, dataset)
+                _ = self.hparams.data_normalizer.norm(data, dataset)
 
     def _load_main_data(self, processed_data_folder: Path):
         """Load the main data from given collection of files in the main_data dict."""
@@ -112,8 +116,7 @@ class L1ADDataModule(LightningDataModule):
         for data_category in self.hparams.main_data.keys():
             data = [
                 np.load(processed_data_folder / data_category / (data_file + ".npy"))
-                for data_file
-                in self.hparams.main_data[data_category].keys()
+                for data_file in self.hparams.main_data[data_category].keys()
             ]
         data = np.concatenate(data, axis=0)
 
@@ -168,7 +171,7 @@ class L1ADDataModule(LightningDataModule):
 
         dataloaders = self._dataloader_dict(self.hparams.additional_validation.keys())
         dataloaders.update({"main_val": main_val})
-        combined_dataloader = CombinedLoader(dataloaders, 'max_size_cycle')
+        combined_dataloader = CombinedLoader(dataloaders, "max_size_cycle")
 
         return combined_dataloader
 
@@ -195,7 +198,7 @@ class L1ADDataModule(LightningDataModule):
         norm_datapath = self.hparams.data_normalizer.cache
         for data_category in additional_data.keys():
             for dataset in additional_data[data_category].keys():
-                file = norm_datapath  / data_category / dataset + ".npy"
+                file = norm_datapath / data_category / dataset + ".npy"
                 data = np.load(file)
                 dataloader = DataLoader(
                     dataset=data,

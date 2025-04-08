@@ -1,9 +1,11 @@
 _target_: src.data.L1AD_datamodule.L1ADDataModule
 
+
 # Fill in below with paths to folders that contain the zero bias data.
 zerobias: ${paths.zerobias}
 signal: ${paths.signal}
 background: ${paths.background}
+
 
 data_extractor:
   _target_: src.data.components.extraction.L1DataExtractor
@@ -12,32 +14,32 @@ data_extractor:
     muons: ['muonIEt', 'muonIEta', 'muonIPhi']
     egammas: ['egIEt', 'egIEta', 'egIPhi']
     jets: ['jetIEt', 'jetIEta', 'jetIPhi']
-    taus: ['tauIEt', 'tauIEta', 'tauIPhi']
-    ET: ['Et', 'ETTEM']
-    HT: ['Et', 'tower_count']
+    ET: ['Et']
     MET: ['Et', 'phi']
-    MHT: ['Et', 'phi']
   constituents:
     muons: [True, True, True, True, False, False, False, False]
     egammas: [True, True, True, True, False, False, False, False, False, False, False, False]
     jets: [True, True, True, True, True, True, True, True, True, True, False, False]
-    taus: [True, True, True, True, True, True, True, True, True, True, True, True]
-  cache: ${paths.processed_data_dir}/extracted
-  name: default
+  cache: ${paths.data_dir}/extracted
+  name: axol1tl
 
 data_processor:
   _target_: src.data.components.processing.L1DataProcessor
   extracted_path: ${data.data_extractor.cache}
   extraction_name: ${data.data_extractor.name}
-  cache: ${paths.processed_data_dir}/processed
-  name: default
+  remove_objects_features:
+    ET: ['Et']
+  cache: ${paths.data_dir}/processed
+  name: axol1tl
 
 data_normalizer:
   _target_: src.data.components.normalization.L1DataNormalizer
-  norm_scheme: robust
+  norm_scheme: changrobust
   norm_hyperparams:
     percentiles: [95, 5]
-  cache: ${paths.processed_data_dir}/normed/${data.data_processor.name}
+    scale: [2, -2]
+  cache: ${paths.data_dir}/normed/${data.data_processor.name}
+  processed_data_folder: ${data.data_processor.cache}/${data.data_processor.name}
 
 # Data hyperparameters.
 main_data:

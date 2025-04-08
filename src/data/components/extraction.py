@@ -5,10 +5,11 @@ import gc
 import h5py
 import numpy as np
 import yaml
+from colorama import Fore, Back, Style
 
 from l1trigger_datamaker.h5convert.root2h5 import Root2h5
 from src.utils import pylogger
-from colorama import Fore, Back, Style
+from . import plots
 
 log = pylogger.RankedLogger(__name__, rank_zero_only=True)
 
@@ -39,7 +40,8 @@ class L1DataExtractor(Root2h5):
             extraction of the data, e.g., "basic".
         """
         super().__init__()
-        self.objects_features = self._replace_feats_name_with_index(objects_features)
+        self.objects_features_names = objects_features.copy()
+        self.objects_features_idxs = self._replace_feats_name_index(objects_features)
         self.constituents = constituents
         self.cache = Path(cache)
         self.extraction_name = name
@@ -69,18 +71,18 @@ class L1DataExtractor(Root2h5):
 
     def _extract_objects(self, h5file: h5py.File) -> dict:
         """Extract the objects in the h5file that are specified in the config file."""
-        if not self._check_subset(h5file.keys(), self.objects_features.keys()):
+        if not self._check_subset(h5file.keys(), self.objects_features_idxs.keys()):
             raise ValueError("The specified objects are not all present in the h5file.")
 
         data = {}
-        for obj in self.objects_features.keys():
+        for obj in self.objects_features_idxs.keys():
             # If object is a particle, e.g. muon, then extract constituents and feats.
             if obj in self.particles.keys():
                 data[obj] = self._extract_constituents_feats(h5file, obj)
                 continue
 
             # If object is not a particle, then extract feats directly.
-            data[obj] = h5file[obj][:][..., self.objects_features[obj]]
+            data[obj] = h5file[obj][:][..., self.objects_features_idxs[obj]]
 
         return data
 
@@ -93,16 +95,16 @@ class L1DataExtractor(Root2h5):
         if not particle in h5file.keys():
             raise KeyError(f"Particle not found in the given data file.")
 
-        if self.objects_features[particle]:
+        if self.objects_features_idxs[particle]:
             # Extract constituents.
             particle_data = h5file[particle][:][:, self.constituents[particle]]
             # Extract corresponding features for the constituents.
-            particle_data = particle_data[..., self.objects_features[particle]]
+            particle_data = particle_data[..., self.objects_features_idxs[particle]]
             return particle_data
 
         return h5file[particle_type][:][:, self.constituents[particle]]
 
-    def _replace_feats_name_with_index(self, selected_features: dict) -> dict:
+    def _replace_feats_name_index(self, selected_features: dict) -> dict:
         """Replaces the name of the feature with its index in the data array.
 
         This is done for a dictionary where for each object the user specifies which
@@ -128,6 +130,12 @@ class L1DataExtractor(Root2h5):
 
         h5file = h5py.File(cache_file, mode="w")
         for obj_name, obj_data in data.items():
+            plots.plot_hist_3d(
+                obj_data,
+                obj_name,
+                self.objects_features_names[obj_name],
+                self.cache_folder / filename,
+            )
             h5file.create_dataset(obj_name, data=obj_data, compression="gzip")
         h5file.close()
 
@@ -135,13 +143,17 @@ class L1DataExtractor(Root2h5):
 
     def _cache_metadata(self):
         """Cache the dictionary with the objects and features in the extracted data."""
-        metadata_folder = self.cache_folder
-        metadata_filepath = metadata_folder / f"metadata.yaml"
+        metadata_folder = self.cache_folder.parent
+        metadata_filepath = metadata_folder / "metadata.yaml"
 
+        if metadata_filepath.exists():
+            return
+
+        # Get the names of the features for each object in the right order.
         metadata_dict = {}
-        for obj_name in self.objects_features.keys():
+        for obj_name in self.objects_features_idxs.keys():
             object_feats = np.array(self.all_objects_feats[obj_name])
-            object_feats = object_feats[self.objects_features[obj_name]].tolist()
+            object_feats = object_feats[self.objects_features_idxs[obj_name]].tolist()
             metadata_dict[obj_name] = object_feats
 
         with open(metadata_filepath, "w") as metadata_file:

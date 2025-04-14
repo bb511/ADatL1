@@ -110,9 +110,10 @@ class L1DataNormalizer:
             if self.ignore_zeros:
                 data_feature = data_feature[data_feature > 0.000001]
             quant_high, quant_low = np.nanpercentile(data_feature, percentiles)
-            interquantile_range.append(float(quant_high - quant_low) / scale_width)
+            scaled_iq = (quant_high - quant_low) / scale_width
+            interquantile_range.append(float(scaled_iq))
             chang_shift = (quant_low * scale[0] - quant_high * scale[1]) / scale_width
-            bias.append(chang_shift)
+            bias.append(float(chang_shift))
 
         return {"bias": bias, "scaled_iq_range": interquantile_range}
 

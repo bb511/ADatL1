@@ -9,7 +9,6 @@ defaults:
   - override /model: qvae
   - override /callbacks: default
   - override /trainer: cpu
-  - override /logger: csv
 
 tags: ["debug"]
 

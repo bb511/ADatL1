@@ -9,4 +9,4 @@
 srun python3 src/train.py \
     --multirun \
     experiment=vicreg \
-    trainer=gpu \
+    trainer=cpu \

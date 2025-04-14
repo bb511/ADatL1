@@ -17,11 +17,9 @@ seed: 12345
 
 trainer:
   min_epochs: 1
-  max_epochs: 1 # 50
-  # limit_train_batches: 0.01
-  # limit_val_batches: 0.0625
-  limit_train_batches: 0.1
-  limit_val_batches: 0.1
+  max_epochs: 50
+  # limit_train_batches: 0.1
+  # limit_val_batches: 0.1
 
 data:
   num_workers: 1

@@ -1,21 +1,21 @@
 _target_: src.data.L1AD_datamodule.L1ADDataModule
 
-
-# Fill in below with paths to folders that contain the zero bias data.
+# Fill in below with paths to folders that contain the raw data in h5 format.
 zerobias: ${paths.zerobias}
 signal: ${paths.signal}
 background: ${paths.background}
 
-
+# Extract only the relevant data to use in the processing from the h5 files.
 data_extractor:
   _target_: src.data.components.extraction.L1DataExtractor
-  # Choose what constituents to select from the event by applying a binary mask.
+  # Choose which objects to use and their corresponding features.
   objects_features:
     muons: ['muonIEt', 'muonIEta', 'muonIPhi']
     egammas: ['egIEt', 'egIEta', 'egIPhi']
     jets: ['jetIEt', 'jetIEta', 'jetIPhi']
     ET: ['Et']
     MET: ['Et', 'phi']
+  # For the particle objects, choose which constituents to use.
   constituents:
     muons: [True, True, True, True, False, False, False, False]
     egammas: [True, True, True, True, False, False, False, False, False, False, False, False]
@@ -23,6 +23,9 @@ data_extractor:
   cache: ${paths.data_dir}/extracted
   name: axol1tl
 
+# Processing of the data.
+# Events saturated in the pT/transverse energy are masked/removed.
+# Specify which objects/features to remove from the data.
 data_processor:
   _target_: src.data.components.processing.L1DataProcessor
   extracted_path: ${data.data_extractor.cache}
@@ -32,6 +35,9 @@ data_processor:
   cache: ${paths.data_dir}/processed
   name: axol1tl
 
+# Normalize the data.
+# Choose which type of normalization to use and give hyperparameters of that
+# normalization scheme, if any.
 data_normalizer:
   _target_: src.data.components.normalization.L1DataNormalizer
   norm_scheme: changrobust

@@ -115,7 +115,7 @@ class L1ADDataModule(LightningDataModule):
 
         for data_category in self.hparams.main_data.keys():
             data = [
-                np.load(processed_data_folder / data_category / (data_file + ".npy"))
+                np.load(processed_data_folder / data_category / (data_file + ".npy"), mmap_mode='r')
                 for data_file in self.hparams.main_data[data_category].keys()
             ]
         data = np.concatenate(data, axis=0)
@@ -202,7 +202,7 @@ class L1ADDataModule(LightningDataModule):
         dataloaders = {}
         for data_category in additional_data.keys():
             for dataset in additional_data[data_category].keys():
-                file = norm_datapath / data_category / dataset + ".npy" 
+                file = Path(norm_datapath) / data_category / dataset + ".npy" 
                 dataloader = DataLoader(
                     dataset=np.load(file),
                     batch_size=self.batch_size_per_device,

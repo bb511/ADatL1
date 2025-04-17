@@ -1,5 +1,6 @@
 from pathlib import Path
 from dataclasses import dataclass
+from pathlib import Path
 import gc
 
 import h5py
@@ -61,7 +62,7 @@ class L1DataExtractor(Root2h5):
             if self._check_file_exists(dataset_name):
                 continue
 
-            h5file = self.read_folder(folder_path)
+            h5file = self.read_folder(Path(folder_path))
             data = self._extract_objects(h5file)
             h5file.close()
             gc.collect()
@@ -112,7 +113,8 @@ class L1DataExtractor(Root2h5):
         """
         for object_name in selected_features.keys():
             idxs = [
-                self.all_objects_feats[object_name].index(feat)
+                # self.all_objects_feats[object_name].index(feat)
+                self.objects_features_names[object_name].index(feat)
                 for feat in selected_features[object_name]
             ]
             selected_features[object_name] = idxs
@@ -152,7 +154,7 @@ class L1DataExtractor(Root2h5):
         # Get the names of the features for each object in the right order.
         metadata_dict = {}
         for obj_name in self.objects_features_idxs.keys():
-            object_feats = np.array(self.all_objects_feats[obj_name])
+            object_feats = np.array(self.objects_features_names[obj_name])
             object_feats = object_feats[self.objects_features_idxs[obj_name]].tolist()
             metadata_dict[obj_name] = object_feats
 

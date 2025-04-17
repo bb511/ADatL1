@@ -171,7 +171,7 @@ class L1ADDataModule(LightningDataModule):
             shuffle=False,
         )
 
-        dataloaders = self._dataloader_dict(self.hparams.additional_validation.keys())
+        dataloaders = self._dataloader_dict(self.hparams.additional_validation)
         dataloaders.update({"main_val": main_val})
         combined_dataloader = CombinedLoader(dataloaders, "max_size_cycle")
 
@@ -190,7 +190,7 @@ class L1ADDataModule(LightningDataModule):
             shuffle=False,
         )
 
-        dataloaders = self._dataloader_dict(self.hparams.additional_test.keys())
+        dataloaders = self._dataloader_dict(self.hparams.additional_test)
         dataloaders.update({"main_test": main_test})
 
         return dataloaders
@@ -198,6 +198,8 @@ class L1ADDataModule(LightningDataModule):
     def _dataloader_dict(self, additional_data: dict):
         """Creates a dictionary of dataloaders of specified datasets found in dict."""
         norm_datapath = self.hparams.data_normalizer.cache
+
+        dataloaders = {}
         for data_category in additional_data.keys():
             for dataset in additional_data[data_category].keys():
                 file = norm_datapath / data_category / dataset + ".npy"

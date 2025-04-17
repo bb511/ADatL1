@@ -197,15 +197,14 @@ class L1ADDataModule(LightningDataModule):
 
     def _dataloader_dict(self, additional_data: dict):
         """Creates a dictionary of dataloaders of specified datasets found in dict."""
-        norm_datapath = self.hparams.data_normalizer.cache
+        norm_datapath = Path(self.hparams.data_normalizer.cache)
 
         dataloaders = {}
         for data_category in additional_data.keys():
             for dataset in additional_data[data_category].keys():
-                file = norm_datapath / data_category / dataset + ".npy"
-                data = np.load(file)
+                file = norm_datapath / data_category / dataset + ".npy" 
                 dataloader = DataLoader(
-                    dataset=data,
+                    dataset=np.load(file),
                     batch_size=self.batch_size_per_device,
                     num_workers=self.hparams.num_workers,
                     pin_memory=self.hparams.pin_memory,

@@ -22,7 +22,7 @@ trainer:
   # limit_val_batches: 0.1
 
 data:
-  num_workers: 1
+  num_workers: 0
 
 model:
   # Totally random values:
@@ -36,7 +36,7 @@ model:
     cov_coef: 1
   
   model:
-    nodes: [102, 29, 10]
+    nodes: [57, 29, 10]
 
 logger:
   mlflow:

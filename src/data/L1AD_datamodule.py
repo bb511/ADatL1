@@ -1,4 +1,4 @@
-from typing import Any, Dict, Optional, Tuple
+from typing import Any, Optional, Tuple
 from pathlib import Path
 import gc
 
@@ -26,7 +26,7 @@ class L1ADDataModule(LightningDataModule):
         main_data: dict,
         additional_validation: dict,
         additional_test: dict,
-        train_val_test_split: (float, float, float) = (0.8, 0.1, 0.1),
+        train_val_test_split: Tuple[float, float, float] = (0.8, 0.1, 0.1),
         batch_size: int = 64,
         num_workers: int = 0,
         pin_memory: bool = False,
@@ -119,7 +119,6 @@ class L1ADDataModule(LightningDataModule):
                 for data_file in self.hparams.main_data[data_category].keys()
             ]
         data = np.concatenate(data, axis=0)
-
         return data
 
     def _set_batch_size(self):
@@ -202,7 +201,7 @@ class L1ADDataModule(LightningDataModule):
         dataloaders = {}
         for data_category in additional_data.keys():
             for dataset in additional_data[data_category].keys():
-                file = Path(norm_datapath) / data_category / dataset + ".npy" 
+                file = Path(norm_datapath) / data_category / (dataset + ".npy")
                 dataloader = DataLoader(
                     dataset=np.load(file),
                     batch_size=self.batch_size_per_device,

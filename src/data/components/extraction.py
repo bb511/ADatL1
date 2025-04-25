@@ -24,7 +24,7 @@ class L1DataExtractor(Root2h5):
         constituents: dict,
         objects_features: dict,
         cache: str = "data/extracted",
-        name: str = "default",
+        name: str = "axol1tl",
     ):
         """Extract data from level 1 global trigger data files saved in h5 format.
 
@@ -61,7 +61,7 @@ class L1DataExtractor(Root2h5):
         for dataset_name, folder_path in datasets.items():
             if self._check_file_exists(dataset_name):
                 continue
-
+                
             h5file = self.read_folder(Path(folder_path))
             data = self._extract_objects(h5file)
             h5file.close()

@@ -37,10 +37,16 @@ class VICReg(L1ADLightningModule):
         self.om1, self.om2 = copy.deepcopy(object_mask), copy.deepcopy(object_mask)
         self.lor1, self.lor2 = copy.deepcopy(lorentz_rotation), copy.deepcopy(lorentz_rotation)
 
-    def _extract_batch(self, batch):
-        # TODO: Remove this after debugging:
-        batch = batch[0]
-        return torch.flatten(batch, start_dim=1).to(dtype=torch.float32)
+    def _extract_batch(self, batch, batch_idx):
+        # TODO: MANAGE THE EXTRA DATA AS WELL: 
+        if isinstance(batch, dict):
+            main_key = [
+                key for key in list(batch.keys())
+                if key.startswith("main")
+            ][0]
+            batch = batch[main_key]
+
+        return batch.flatten(start_dim=1).to(dtype=torch.float32)
     
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         x = self.qdata(x)
@@ -48,7 +54,7 @@ class VICReg(L1ADLightningModule):
         return self.projector(self.model(x))
     
     def model_step(self, batch: tuple, batch_idx: int):
-        x = self._extract_batch(batch)
+        x = self._extract_batch(batch, batch_idx)
 
         # Quantize data
         x = self.qdata(x)

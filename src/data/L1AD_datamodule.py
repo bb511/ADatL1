@@ -201,7 +201,8 @@ class L1ADDataModule(LightningDataModule):
         dataloaders = {}
         for data_category in additional_data.keys():
             for dataset in additional_data[data_category].keys():
-                file = Path(norm_datapath) / data_category / (dataset + ".npy")
+                file = Path(norm_datapath) / (self.hparams.data_normalizer.norm_scheme + "_" + dataset + ".npy")
+                
                 dataloader = DataLoader(
                     dataset=np.load(file),
                     batch_size=self.batch_size_per_device,

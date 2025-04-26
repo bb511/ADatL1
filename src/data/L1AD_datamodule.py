@@ -78,7 +78,7 @@ class L1ADDataModule(LightningDataModule):
         """
         self._set_batch_size()
 
-        if not self.data_train and not self.data_val and not self.data_test:
+        if self.data_train is None and self.data_val is None and self.data_test is None:
             main_data = self._load_main_data(self.processed_data_folder)
             self.data_train, self.data_val, self.data_test = random_split(
                 dataset=main_data,
@@ -172,9 +172,9 @@ class L1ADDataModule(LightningDataModule):
 
         dataloaders = self._dataloader_dict(self.hparams.additional_validation)
         dataloaders.update({"main_val": main_val})
-        combined_dataloader = CombinedLoader(dataloaders, "max_size_cycle")
-
-        return combined_dataloader
+        # combined_dataloader = CombinedLoader(dataloaders, "max_size_cycle")
+        # return combined_dataloader
+        return dataloaders
 
     def test_dataloader(self) -> DataLoader[Any]:
         """Create and return the test dataloader.

@@ -12,14 +12,14 @@ class QVAE(L1ADLightningModule):
         self,
         encoder: nn.Module,
         decoder: nn.Module,
-        features: Optional[nn.Module] = nn.Identity(),
+        features: Optional[nn.Module] = None,
         **kwargs
     ):
         super().__init__(model=None, **kwargs)
         self.save_hyperparameters(ignore=["model", "features", "encoder", "decoder", "loss"])
 
         self.encoder, self.decoder = encoder, decoder
-        self.features = features
+        self.features = features if features is not None else nn.Identity()
         self.features.eval()
         
     def forward(self, x: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
@@ -27,14 +27,7 @@ class QVAE(L1ADLightningModule):
         reconstruction = self.decoder(z)
         return z_mean, z_log_var, z, reconstruction
     
-    def _extract_batch(self, batch: tuple) -> torch.Tensor:
-        # TODO: Remove after debugging:
-        batch = batch[0]
-        x = torch.flatten(batch, start_dim=1).to(dtype=torch.float32)
-        return self.features(x)
-    
-    def model_step(self, batch: torch.Tensor, batch_idx: int) -> torch.Tensor:
-        x = self._extract_batch(batch)
+    def model_step(self, x: torch.Tensor) -> torch.Tensor:
         z_mean, z_log_var, z, reconstruction = self.forward(x)
         total_loss, reco_loss, kl_loss = self.loss(
             reconstruction=reconstruction,
@@ -42,12 +35,12 @@ class QVAE(L1ADLightningModule):
             z_log_var=z_log_var,
             target=x
         )
-        garbage_collection_cuda()
+        del z_mean, z_log_var, z, reconstruction; garbage_collection_cuda()
 
         # Compute anomaly score
-        anomaly_score = self.get_anomaly_score(x)
-        if self.logger != None:
-            self.logger.experiment.add_histogram('val/anomaly_score_distribution', anomaly_score, self.current_epoch)
+        # anomaly_score = self.get_anomaly_score(x)
+        # if self.logger != None:
+        #     self.logger.experiment.add_histogram('val/anomaly_score_distribution', anomaly_score, self.current_epoch)
 
         return {
             "loss": total_loss,
@@ -55,8 +48,12 @@ class QVAE(L1ADLightningModule):
             "loss_kl": kl_loss,
         }
     
-    def get_anomaly_score(self, x: torch.Tensor):
-        """Calculate anomaly score based on reconstruction error"""
-        z_mean, _, _ = self.encoder(x)
-        reconstruction = self.decoder(z_mean)
-        return F.mse_loss(reconstruction, x, reduction='none').sum(dim=1)
+    def filter_log_dict(self, outdict: dict, stage: str):
+        """Override with the values you want to log."""
+        return {f"{stage}/{k}": v for k, v in outdict.items()}
+    
+    # def get_anomaly_score(self, x: torch.Tensor):
+    #     """Calculate anomaly score based on reconstruction error"""
+    #     z_mean, _, _ = self.encoder(x)
+    #     reconstruction = self.decoder(z_mean)
+    #     return F.mse_loss(reconstruction, x, reduction='none').sum(dim=1)

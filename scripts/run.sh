@@ -1,17 +1,17 @@
 #!/bin/bash
-#SBATCH --ntasks=1
-#SBATCH --ntasks-per-node=1
+#SBATCH --ntasks=4
+#SBATCH --ntasks-per-node=4
 #SBATCH --nodes=1
-#SBATCH --gpus-per-node=1
-#SBATCH --mem-per-cpu=30G
+#SBATCH --gpus-per-node=4
+#SBATCH --mem-per-cpu=20G
 #SBATCH --time=24:00:00
 
-# srun python3 src/train.py \
-python3 src/train.py \
+# python3 src/train.py \
+srun python3 src/train.py \
     --multirun \
-    experiment=vicreg \
-    trainer=cpu \
-    trainer.limit_train_batches=0.0000001 \
-    trainer.limit_val_batches=0.00000001 \
-    trainer.limit_test_batches=0.0000001 \
-    trainer.max_epochs=1 \
+    experiment=qvae \
+    trainer=ddp \
+    trainer.max_epochs=100 \
+    # trainer.limit_train_batches=1.23e-5 \
+    # trainer.limit_val_batches=9.8261e-5 \
+    # trainer.limit_test_batches=1.46e-4 \

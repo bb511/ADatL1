@@ -18,13 +18,12 @@ seed: 12345
 trainer:
   min_epochs: 1
   max_epochs: 1
-  # limit_train_batches: 0.01
-  # limit_val_batches: 0.0625
   limit_train_batches: 1.0
   limit_val_batches: 1.0
+  limit_test_batches: 1.0
 
 data:
-  num_workers: 10
+  num_workers: 0
 
 logger:
   mlflow:

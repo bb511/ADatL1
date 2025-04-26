@@ -9,7 +9,7 @@ defaults:
   - override /model: vicreg
   - override /callbacks: default
   - override /trainer: cpu
-  - override /logger: mlflow
+  - override /logger: both
 
 tags: ["debug"]
 
@@ -41,5 +41,14 @@ model:
 
 logger:
   mlflow:
-    experiment_name: "example"
-    run_name: "example"
+    experiment_name: debug
+    run_name: coderuns
+
+  wandb:
+    entity: viictorjimenezzz-personal
+    project: adatl1
+
+    group: debug
+    name: coderuns
+
+    

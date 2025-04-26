@@ -36,8 +36,13 @@ pa-covariate-shift/
 - Create a `.env` file to define the environment variables.
 
 ```
+poetry export --without-hashes --format=requirements.txt > requirements.txt
+./scripts/requirements.txt
+```
+
+```
 PROJECT_ROOT="."
-RES_DIR = # set to the desired location
+RES_DIR = "." # set to the desired location
 DATA_DIR = "${RES_DIR}/data"
 LOG_DIR = "${RES_DIR}/logs"
 OUTPUT_DIR = "${RES_DIR}/outputs"

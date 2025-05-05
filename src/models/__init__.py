@@ -37,9 +37,19 @@ class L1ADLightningModule(LightningModule):
             "loss": loss
         }
     
-    def filter_log_dict(self, outdict: dict, stage: str):
+    def filter_log_dict(self, outdict: dict, stage: str, dataloader_idx: int):
         """Override with the values you want to log."""
-        return {f"{stage}/{k}": v for k, v in outdict.items()}
+        if stage == "train":
+            return {
+                f"{stage}/{k}": v
+                for k, v in outdict.items()
+            }
+        
+        dset_key = list(getattr(self.trainer, f"{stage}_dataloaders").keys())[dataloader_idx]
+        return {
+            f"{stage}/{dset_key}/{k}": v
+            for k, v in outdict.items()
+        }
         
     def training_step(self, batch: torch.Tensor, batch_idx: int):
         outdict = self.model_step(
@@ -48,12 +58,13 @@ class L1ADLightningModule(LightningModule):
 
         # Decide what to log:
         self.log_dict(
-            self.filter_log_dict(outdict, "train"),
+            self.filter_log_dict(outdict, "train", dataloader_idx=0),
             prog_bar=False,
             on_step=False,
             on_epoch=True,
             logger=True,
-            sync_dist=True
+            sync_dist=True,
+            add_dataloader_idx=False
         )
         return outdict
 
@@ -64,13 +75,13 @@ class L1ADLightningModule(LightningModule):
 
         # Decide what to log:
         self.log_dict(
-            self.filter_log_dict(outdict, "val"),
+            self.filter_log_dict(outdict, "val", dataloader_idx=dataloader_idx),
             prog_bar=False,
             on_step=False,
             on_epoch=True,
             logger=True,
             sync_dist=True,
-            add_dataloader_idx=True
+            add_dataloader_idx=False
         )
         return outdict
 
@@ -81,13 +92,13 @@ class L1ADLightningModule(LightningModule):
 
         # Decide what to log:
         self.log_dict(
-            self.filter_log_dict(outdict, "test"),
+            self.filter_log_dict(outdict, "test", dataloader_idx=dataloader_idx),
             prog_bar=False,
             on_step=False,
             on_epoch=True,
             logger=True,
             sync_dist=False, # !!
-            add_dataloader_idx=True
+            add_dataloader_idx=False
         )
         return outdict
 

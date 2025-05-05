@@ -133,6 +133,16 @@ class L1ADDataModule(LightningDataModule):
                 self.hparams.batch_size // self.trainer.world_size
             )
 
+    def _remove_nans(self, data: np.ndarray) -> np.ndarray:
+        """Check for NaN values in the data and remove them."""
+        nan_mask = np.isnan(data).any(axis=(1, 2)) 
+
+        num_nan_rows = np.sum(nan_mask)
+        if num_nan_rows > 0:
+            print(f"Removing {num_nan_rows} rows with NaN values out of {len(data)} total rows")
+
+        return data[~nan_mask]
+
     def _check_file_exists(self, path: Path, filename: str) -> bool:
         """Checks if prepared data already exists at given path."""
         filepath = path / (filename + ".npy")
@@ -148,7 +158,7 @@ class L1ADDataModule(LightningDataModule):
         :return: The train dataloader.
         """
         return DataLoader(
-            dataset=self.data_train,
+            dataset=self._remove_nans(self.data_train),
             batch_size=self.batch_size_per_device,
             num_workers=self.hparams.num_workers,
             pin_memory=self.hparams.pin_memory,
@@ -162,7 +172,7 @@ class L1ADDataModule(LightningDataModule):
         :return: The validation dataloader.
         """
         main_val = DataLoader(
-            dataset=self.data_val,
+            dataset=self._remove_nans(self.data_val),
             batch_size=self.batch_size_per_device,
             num_workers=self.hparams.num_workers,
             pin_memory=self.hparams.pin_memory,
@@ -171,9 +181,7 @@ class L1ADDataModule(LightningDataModule):
         )
 
         dataloaders = self._dataloader_dict(self.hparams.additional_validation)
-        dataloaders.update({"main_val": main_val})
-        # combined_dataloader = CombinedLoader(dataloaders, "max_size_cycle")
-        # return combined_dataloader
+        dataloaders.update({"main": main_val})
         return dataloaders
 
     def test_dataloader(self) -> DataLoader[Any]:
@@ -182,7 +190,7 @@ class L1ADDataModule(LightningDataModule):
         :return: The test dataloader.
         """
         main_test = DataLoader(
-            dataset=self.data_test,
+            dataset=self._remove_nans(self.data_test),
             batch_size=self.batch_size_per_device,
             num_workers=self.hparams.num_workers,
             pin_memory=self.hparams.pin_memory,
@@ -190,7 +198,7 @@ class L1ADDataModule(LightningDataModule):
         )
 
         dataloaders = self._dataloader_dict(self.hparams.additional_test)
-        dataloaders.update({"main_test": main_test})
+        dataloaders.update({"main": main_test})
 
         return dataloaders
 
@@ -204,7 +212,7 @@ class L1ADDataModule(LightningDataModule):
                 file = Path(norm_datapath) / (self.hparams.data_normalizer.norm_scheme + "_" + dataset + ".npy")
                 
                 dataloader = DataLoader(
-                    dataset=np.load(file),
+                    dataset=self._remove_nans(np.load(file)),
                     batch_size=self.batch_size_per_device,
                     num_workers=self.hparams.num_workers,
                     pin_memory=self.hparams.pin_memory,

@@ -1,13 +1,14 @@
 defaults:
   - model_summary
   - rich_progress_bar
+  # - batch_size_finder
   - _self_
 
 # model_checkpoint:
 #   dirpath: ${paths.output_dir}/checkpoints
 #   filename: "epoch_{epoch:03d}"
-#   monitor: "val/acc"
-#   mode: "max"
+#   monitor: "val/loss"
+#   mode: "min"
 #   save_last: True
 #   auto_insert_metric_name: False
 

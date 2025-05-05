@@ -48,10 +48,6 @@ class QVAE(L1ADLightningModule):
             "loss_kl": kl_loss,
         }
     
-    def filter_log_dict(self, outdict: dict, stage: str):
-        """Override with the values you want to log."""
-        return {f"{stage}/{k}": v for k, v in outdict.items()}
-    
     # def get_anomaly_score(self, x: torch.Tensor):
     #     """Calculate anomaly score based on reconstruction error"""
     #     z_mean, _, _ = self.encoder(x)

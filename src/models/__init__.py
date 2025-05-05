@@ -37,8 +37,13 @@ class L1ADLightningModule(LightningModule):
             "loss": loss
         }
     
-    def filter_log_dict(self, outdict: dict, stage: str, dataloader_idx: int):
+    def _filter_log_dict(self, outdict: dict) -> dict:
         """Override with the values you want to log."""
+        return outdict
+    
+    def _log_dict(self, outdict: dict, stage: str, dataloader_idx: int):
+        outdict = self._filter_log_dict(outdict)
+
         if stage == "train":
             return {
                 f"{stage}/{k}": v
@@ -58,7 +63,7 @@ class L1ADLightningModule(LightningModule):
 
         # Decide what to log:
         self.log_dict(
-            self.filter_log_dict(outdict, "train", dataloader_idx=0),
+            self._log_dict(outdict, "train", dataloader_idx=0),
             prog_bar=False,
             on_step=False,
             on_epoch=True,
@@ -75,7 +80,7 @@ class L1ADLightningModule(LightningModule):
 
         # Decide what to log:
         self.log_dict(
-            self.filter_log_dict(outdict, "val", dataloader_idx=dataloader_idx),
+            self._log_dict(outdict, "val", dataloader_idx=dataloader_idx),
             prog_bar=False,
             on_step=False,
             on_epoch=True,
@@ -92,7 +97,7 @@ class L1ADLightningModule(LightningModule):
 
         # Decide what to log:
         self.log_dict(
-            self.filter_log_dict(outdict, "test", dataloader_idx=dataloader_idx),
+            self._log_dict(outdict, "test", dataloader_idx=dataloader_idx),
             prog_bar=False,
             on_step=False,
             on_epoch=True,

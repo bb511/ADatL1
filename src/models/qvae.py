@@ -43,9 +43,25 @@ class QVAE(L1ADLightningModule):
         #     self.logger.experiment.add_histogram('val/anomaly_score_distribution', anomaly_score, self.current_epoch)
 
         return {
-            "loss": total_loss,
-            "loss_reco": reco_loss,
-            "loss_kl": kl_loss,
+            # Used for backpropagation:
+            "loss": total_loss.mean(),
+
+            # Used for logging:
+            "loss/reco/mean": reco_loss.mean(),
+            "loss/kl/mean": kl_loss.mean(),
+
+            # Used for callbacks:
+            "loss/total/full": total_loss,
+            "loss/reco/full": reco_loss,
+            "loss/kl/full": kl_loss,
+        }
+
+    def _filter_log_dict(self, outdict: dict) -> dict:
+        """Override with the values you want to log."""
+        return {
+            "loss": outdict.get("loss"),
+            "loss_reco": outdict.get("loss/reco/mean"),
+            "loss_kl": outdict.get("loss/kl/mean"),
         }
     
     # def get_anomaly_score(self, x: torch.Tensor):

@@ -6,8 +6,18 @@ import io
 import base64
 from weasyprint import HTML, CSS
 
-def generate_axolotl_html_report(config, dict_axo, histogram_dict, threshold_dict, history_dict, output_file, pdf_file=None):
-    plt.style.use('default')
+
+def generate_axolotl_html_report(
+    config,
+    dict_axo,
+    histogram_dict,
+    threshold_dict,
+    history_dict,
+    output_file,
+    pdf_file=None,
+):
+    plt.style.use("default")
+
     def dict_to_html_table(config_dict):
         html = "<table border='1' cellpadding='5' cellspacing='0' style='border-collapse: collapse;'>"
         for key, value in config_dict.items():
@@ -17,24 +27,28 @@ def generate_axolotl_html_report(config, dict_axo, histogram_dict, threshold_dic
                 html += f"<tr><td><strong>{key}</strong></td><td>{value}</td></tr>"
         html += "</table>"
         return html
-    
+
     sorted_dict_axo = dict(sorted(dict_axo.items(), key=lambda item: float(item[0])))
     # Generate the HTML content for each section
-    data_config_html = dict_to_html_table(config['data_config'])
-    
-    data_config_rem = config['data_config'].copy()
+    data_config_html = dict_to_html_table(config["data_config"])
+
+    data_config_rem = config["data_config"].copy()
     data_config_rem.pop("Read_configs")
-    
-    data_config_html_read_bkg_html = dict_to_html_table(config['data_config']["Read_configs"]["BACKGROUND"])
-    data_config_html_read_sig_html = dict_to_html_table(config['data_config']["Read_configs"]["SIGNAL"])
+
+    data_config_html_read_bkg_html = dict_to_html_table(
+        config["data_config"]["Read_configs"]["BACKGROUND"]
+    )
+    data_config_html_read_sig_html = dict_to_html_table(
+        config["data_config"]["Read_configs"]["SIGNAL"]
+    )
     data_config_html_read_rem_html = dict_to_html_table(data_config_rem)
-    
-    train_config_html = dict_to_html_table(config['train'])
-    determinism_config_html = dict_to_html_table(config['determinism'])
-    model_config_html = dict_to_html_table(config['model'])
-    callback_config_html = dict_to_html_table(config['callback'])
-    threshold_config_html = dict_to_html_table(config['threshold'])
-    store_config_html = dict_to_html_table(config['store'])
+
+    train_config_html = dict_to_html_table(config["train"])
+    determinism_config_html = dict_to_html_table(config["determinism"])
+    model_config_html = dict_to_html_table(config["model"])
+    callback_config_html = dict_to_html_table(config["callback"])
+    threshold_config_html = dict_to_html_table(config["threshold"])
+    store_config_html = dict_to_html_table(config["store"])
 
     # Start building the full HTML content
     html_output = f"""
@@ -137,7 +151,9 @@ def generate_axolotl_html_report(config, dict_axo, histogram_dict, threshold_dic
     """
 
     # Number of columns for the grid layout for the tables
-    num_cols = int(math.ceil(math.sqrt(len(config))))  # Calculate the square root and round up to get a square grid
+    num_cols = int(
+        math.ceil(math.sqrt(len(config)))
+    )  # Calculate the square root and round up to get a square grid
 
     # Loop through each threshold and its corresponding DataFrame in the sorted dictionary
     for threshold, df in sorted_dict_axo.items():
@@ -162,12 +178,12 @@ def generate_axolotl_html_report(config, dict_axo, histogram_dict, threshold_dic
 
     # Plot the background histogram in the first subplot
     axes[0].set_title("ZeroBias (Background)")
-    hep.histplot(histogram_dict['background'], ax=axes[0], color='blue')
+    hep.histplot(histogram_dict["background"], ax=axes[0], color="blue")
     axes[0].set_yscale("log")
 
     # Add vertical lines for each threshold
     for thres, value in threshold_dict.items():
-        axes[0].axvline(x=value, linestyle='--', linewidth=2, label=f"{thres} kHz")
+        axes[0].axvline(x=value, linestyle="--", linewidth=2, label=f"{thres} kHz")
 
     axes[0].grid()
     axes[0].legend()
@@ -185,11 +201,11 @@ def generate_axolotl_html_report(config, dict_axo, histogram_dict, threshold_dic
 
         # Add vertical lines for each threshold
         for thres, value in threshold_dict.items():
-            ax.axvline(x=value, linestyle='--', linewidth=2, label=f"{thres} kHz")
-        
+            ax.axvline(x=value, linestyle="--", linewidth=2, label=f"{thres} kHz")
+
         ax.grid()
         ax.legend()
-        
+
         plot_index += 1  # Move to the next subplot
 
     # Hide any unused subplots
@@ -201,11 +217,11 @@ def generate_axolotl_html_report(config, dict_axo, histogram_dict, threshold_dic
 
     # Save the figure to a bytes buffer instead of a file
     buffer = io.BytesIO()
-    fig.savefig(buffer, format='png')
+    fig.savefig(buffer, format="png")
     buffer.seek(0)
 
     # Convert the image to a base64 string
-    img_str = base64.b64encode(buffer.read()).decode('utf-8')
+    img_str = base64.b64encode(buffer.read()).decode("utf-8")
 
     # Embed the image in the HTML
     html_output += f"""
@@ -222,7 +238,7 @@ def generate_axolotl_html_report(config, dict_axo, histogram_dict, threshold_dic
 
     ##################################################################################################
     # Extract all unique signal names from the first DataFrame (assuming all DataFrames have the same signal names)
-    signal_names = dict_axo[sorted_thresholds[0]]['Signal Name'].tolist()
+    signal_names = dict_axo[sorted_thresholds[0]]["Signal Name"].tolist()
 
     # Determine the number of signals
     num_signals = len(signal_names)
@@ -242,14 +258,19 @@ def generate_axolotl_html_report(config, dict_axo, histogram_dict, threshold_dic
 
         # Prepare x and y data
         x_data = [float(threshold) for threshold in sorted_thresholds]
-        y_data = [dict_axo[threshold].loc[dict_axo[threshold]['Signal Name'] == signal_name, 'AXO SCORE'].values[0] for threshold in sorted_thresholds]
-        
+        y_data = [
+            dict_axo[threshold]
+            .loc[dict_axo[threshold]["Signal Name"] == signal_name, "AXO SCORE"]
+            .values[0]
+            for threshold in sorted_thresholds
+        ]
+
         # Plot the data
-        ax.plot(x_data, y_data, marker='o', label=signal_name)
+        ax.plot(x_data, y_data, marker="o", label=signal_name)
         ax.set_title(signal_name)
-        ax.set_xlabel('Threshold (kHz)')
-        ax.set_ylabel('AXO SCORE')
-        ax.set_yscale('log')  # Set y-axis to logarithmic scale
+        ax.set_xlabel("Threshold (kHz)")
+        ax.set_ylabel("AXO SCORE")
+        ax.set_yscale("log")  # Set y-axis to logarithmic scale
         ax.grid(True)
 
     # Hide any unused subplots
@@ -257,18 +278,18 @@ def generate_axolotl_html_report(config, dict_axo, histogram_dict, threshold_dic
         fig.delaxes(axes[j])
 
     # Set the overall title for the figure
-    fig.suptitle('AXO for different Signals', fontsize=20)
+    fig.suptitle("AXO for different Signals", fontsize=20)
 
     # Adjust layout
     plt.tight_layout(rect=[0, 0.03, 1, 0.95])  # Adjust to fit the suptitle
 
     # Save the figure to a bytes buffer instead of a file
     buffer = io.BytesIO()
-    fig.savefig(buffer, format='png')
+    fig.savefig(buffer, format="png")
     buffer.seek(0)
 
     # Convert the image to a base64 string
-    img_str = base64.b64encode(buffer.read()).decode('utf-8')
+    img_str = base64.b64encode(buffer.read()).decode("utf-8")
 
     # Embed the image in the HTML
     html_output += f"""
@@ -277,8 +298,6 @@ def generate_axolotl_html_report(config, dict_axo, histogram_dict, threshold_dic
         <img src="data:image/png;base64,{img_str}" alt="AXO for different Signals">
     </div>
     """
-    
-
 
     ###################################################################################################
     # Apply the CMS style
@@ -299,12 +318,20 @@ def generate_axolotl_html_report(config, dict_axo, histogram_dict, threshold_dic
         ax = axes[i]
 
         # Plot the values with epochs as the x-axis
-        ax.plot(range(1, len(values) + 1), values, label=key, linewidth=2)  # Increase line width
-        ax.set_title(key, fontsize=20, pad=15)  # Increase title font size and add padding
-        ax.set_xlabel('Epoch', fontsize=18, labelpad=10)  # Increase x-axis label font size and add padding
+        ax.plot(
+            range(1, len(values) + 1), values, label=key, linewidth=2
+        )  # Increase line width
+        ax.set_title(
+            key, fontsize=20, pad=15
+        )  # Increase title font size and add padding
+        ax.set_xlabel(
+            "Epoch", fontsize=18, labelpad=10
+        )  # Increase x-axis label font size and add padding
         # ax.set_ylabel(key, fontsize=18, labelpad=10)  # Increase y-axis label font size and add padding
-        ax.tick_params(axis='both', which='major', labelsize=14)  # Increase tick label size
-        ax.grid(True, linestyle='--', linewidth=0.7)  # Enhance grid line visibility
+        ax.tick_params(
+            axis="both", which="major", labelsize=14
+        )  # Increase tick label size
+        ax.grid(True, linestyle="--", linewidth=0.7)  # Enhance grid line visibility
 
         # Center the axis labels
         ax.xaxis.set_label_coords(0.5, -0.1)
@@ -313,21 +340,19 @@ def generate_axolotl_html_report(config, dict_axo, histogram_dict, threshold_dic
     # Hide any unused subplots
     for j in range(i + 1, len(axes)):
         fig.delaxes(axes[j])
-    fig.suptitle('History for AXO Training', fontsize=24)
+    fig.suptitle("History for AXO Training", fontsize=24)
     # Adjust layout to prevent overlapping titles and labels
     plt.tight_layout()
-    plt.style.use('default')
-
-
+    plt.style.use("default")
 
     ########################################################################################################
     # Save the figure to a bytes buffer instead of a file
     buffer = io.BytesIO()
-    fig.savefig(buffer, format='png')
+    fig.savefig(buffer, format="png")
     buffer.seek(0)
 
     # Convert the image to a base64 string
-    img_str = base64.b64encode(buffer.read()).decode('utf-8')
+    img_str = base64.b64encode(buffer.read()).decode("utf-8")
 
     # Embed the image in the HTML
     html_output += f"""
@@ -344,9 +369,13 @@ def generate_axolotl_html_report(config, dict_axo, histogram_dict, threshold_dic
         with open(output_file, "w") as file:
             file.write(html_output)
         print(f"HTML file generated: {output_file}")
-    
+
     if pdf_file is not None:
-        HTML(string=html_output).write_pdf(pdf_file, stylesheets=[CSS(string='''
+        HTML(string=html_output).write_pdf(
+            pdf_file,
+            stylesheets=[
+                CSS(
+                    string="""
         @page { 
             size: A4 landscape; 
             margin: 1cm;
@@ -367,6 +396,8 @@ def generate_axolotl_html_report(config, dict_axo, histogram_dict, threshold_dic
             max-width: 100%;
             height: auto;
         }
-        ''')])
+        """
+                )
+            ],
+        )
         print(f"PDF file generated: {pdf_file}")
-

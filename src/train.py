@@ -9,10 +9,12 @@ from pytorch_lightning.loggers import Logger
 from omegaconf import DictConfig
 
 import rootutils
+
 rootutils.setup_root(__file__, indicator=".project-root", pythonpath=True)
 
 # Add resolvers to evaluate operations in the .yaml configuration files
 from src.utils.omegaconf import register_resolvers
+
 register_resolvers()
 
 from src.utils import (
@@ -56,7 +58,9 @@ def train(cfg: DictConfig) -> Tuple[Dict[str, Any], Dict[str, Any]]:
     logger: List[Logger] = instantiate_loggers(cfg.get("logger"))
 
     log.info(f"Instantiating trainer <{cfg.trainer._target_}>")
-    trainer: Trainer = hydra.utils.instantiate(cfg.trainer, callbacks=callbacks, logger=logger)
+    trainer: Trainer = hydra.utils.instantiate(
+        cfg.trainer, callbacks=callbacks, logger=logger
+    )
 
     object_dict = {
         "cfg": cfg,

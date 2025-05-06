@@ -19,6 +19,7 @@ class AnomalyRates(keras.callbacks.Callback):
         bc_rate: the average bunch crossing rate at the LHC; for the current runs it is
             28.61 MHz.
     """
+
     def __init__(self, raw_rate: int, threshold: int, bc_rate: float = 28.61):
         super().__init__()
         self.threshold = threshold
@@ -29,8 +30,8 @@ class AnomalyRates(keras.callbacks.Callback):
         self.loss_best = np.inf
 
     def on_epoch_end(self, epoch: int, signal_data: np.ndarray, logs=None):
-        loss_current = logs.get('loss')
-        if  not np.less(loss_current, self.loss_best):
+        loss_current = logs.get("loss")
+        if not np.less(loss_current, self.loss_best):
             return
 
         self.loss_best = loss_current
@@ -38,8 +39,8 @@ class AnomalyRates(keras.callbacks.Callback):
         model_pred = model_pred[model_pred > self.threshold]
         leve1_pred = self.level1_criteria(signal_data)
 
-        raw_rate = model_pred.shape[0]/signal_data.shape[0]
-        pure_rate = np.setxor1d(model_pred, leve1_pred).shape[0]/signal_data.shape[0]
+        raw_rate = model_pred.shape[0] / signal_data.shape[0]
+        pure_rate = np.setxor1d(model_pred, leve1_pred).shape[0] / signal_data.shape[0]
 
         print(f"Raw rate: {raw_rate}.")
         print(f"Pure rate: {pure_rate}.")
@@ -52,5 +53,4 @@ class AnomalyRates(keras.callbacks.Callback):
 
     def convert_to_fpr(self, rate: float):
         """Converts a raw rate to false positive rate, the rates are in MHz."""
-        return rate/self.bc_rate
-
+        return rate / self.bc_rate

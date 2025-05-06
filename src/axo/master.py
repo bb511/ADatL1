@@ -9,9 +9,12 @@ import mlflow  # Import MLflow
 
 from qkeras.utils import _add_supported_quantized_objects
 from qkeras import quantized_bits
-co = {}; _add_supported_quantized_objects(co)
+
+co = {}
+_add_supported_quantized_objects(co)
 
 import tensorflow as tf
+
 # gpus = tf.config.experimental.list_physical_devices('GPU')
 # for gpu in gpus:
 #     tf.config.experimental.set_memory_growth(gpu, True)
@@ -41,16 +44,23 @@ import argparse
 import yaml
 import os
 
+
 def tuple_constructor(loader, node):
     return tuple(loader.construct_sequence(node))
-yaml.add_constructor('tag:yaml.org,2002:python/tuple', tuple_constructor)
 
-def main(slave = {}, experiment_name="Experiment"):
+
+yaml.add_constructor("tag:yaml.org,2002:python/tuple", tuple_constructor)
+
+
+def main(slave={}, experiment_name="Experiment"):
     ########################################################################################################
     # MLflow Setup
     ########################################################################################################
     import mlflow  # Ensure MLflow is imported
-    mlflow.set_tracking_uri("https://mlflow-deploy-mlflow.app.cern.ch/")  # Set the tracking URI
+
+    mlflow.set_tracking_uri(
+        "https://mlflow-deploy-mlflow.app.cern.ch/"
+    )  # Set the tracking URI
     mlflow.set_experiment(experiment_name)  # Set the experiment name
 
     ########################################################################################################
@@ -58,12 +68,14 @@ def main(slave = {}, experiment_name="Experiment"):
     ########################################################################################################
     module_dir = os.path.dirname(__file__)
 
-    master = yaml.load(open(os.path.join(module_dir,"utilities/config.yml"),"r"), Loader=yaml.Loader)
+    master = yaml.load(
+        open(os.path.join(module_dir, "utilities/config.yml"), "r"), Loader=yaml.Loader
+    )
 
-    if utilities.check_compartibility(master=master,slave=slave) == 1:
+    if utilities.check_compartibility(master=master, slave=slave) == 1:
         print("Configurations are compatible")
         print("Generating new config ....")
-        daughter = utilities.merge_dict(master=master,slave=slave)
+        daughter = utilities.merge_dict(master=master, slave=slave)
     else:
         print("Smoke test failed !!! check the dictionary and the documentations")
         return 0
@@ -100,13 +112,13 @@ def main(slave = {}, experiment_name="Experiment"):
 
                 # Uncomment the following lines if you want to regenerate data when configs don't match
                 if exisitng_ser_config == present_ser_config:
-                     print("Configs match, skipping")
+                    print("Configs match, skipping")
                 else:
-                     print("[WARNING]: CONFIG DO NOT MATCH, OVERWRITING!!!")
-                     data_util.data.get_data(config_master=config["data_config"])
+                    print("[WARNING]: CONFIG DO NOT MATCH, OVERWRITING!!!")
+                    data_util.data.get_data(config_master=config["data_config"])
             else:
-                 print("File does not exist, creating data file")
-                 data_util.data.get_data(config_master=config["data_config"])
+                print("File does not exist, creating data file")
+                data_util.data.get_data(config_master=config["data_config"])
             ########################################################################################################
             # Data reading
             ########################################################################################################
@@ -126,42 +138,48 @@ def main(slave = {}, experiment_name="Experiment"):
             ########################################################################################################
             # Log Parameters to MLflow
             ########################################################################################################
-            mlflow.log_params({
-                "beta": beta_value,
-                "learning_rate": config["train"]['common']['optimiser_config'].get('learning_rate'),
-                "batch_size": config["train"]["common"]["batch_size"],
-                "n_epochs": config["train"]["common"]["n_epochs"],
-                # Add other hyperparameters as needed
-            })
+            mlflow.log_params(
+                {
+                    "beta": beta_value,
+                    "learning_rate": config["train"]["common"]["optimiser_config"].get(
+                        "learning_rate"
+                    ),
+                    "batch_size": config["train"]["common"]["batch_size"],
+                    "n_epochs": config["train"]["common"]["n_epochs"],
+                    # Add other hyperparameters as needed
+                }
+            )
             ########################################################################################################
             # Loss Setup
             ########################################################################################################
-            loss_name = config["train"]["common"]["reconstruction_loss"].split("_loss")[0]  # For users
-            constituents = config["data_config"]["Read_configs"]["BACKGROUND"]["constituents"]
+            loss_name = config["train"]["common"]["reconstruction_loss"].split("_loss")[
+                0
+            ]  # For users
+            constituents = config["data_config"]["Read_configs"]["BACKGROUND"][
+                "constituents"
+            ]
 
             compute_loss = getattr(losses, f"{loss_name}_loss")
 
             loss_reco = compute_loss(
-                norm_scales=scale,
-                norm_biases=bias,
-                mask=constituents,
-                name="Reco_loss"
+                norm_scales=scale, norm_biases=bias, mask=constituents, name="Reco_loss"
             )
             loss_kld = losses.kld()
             ########################################################################################################
             # Model Setup
             ########################################################################################################
-            config_to_vae = {**config["model"].copy(), **config["train"]["VAE_config"].copy()}
+            config_to_vae = {
+                **config["model"].copy(),
+                **config["train"]["VAE_config"].copy(),
+            }
             vae = models.VariationalAutoEncoder(
-                config=config_to_vae,
-                reco_loss=loss_reco,
-                kld_loss=loss_kld
+                config=config_to_vae, reco_loss=loss_reco, kld_loss=loss_kld
             )
             ########################################################################################################
             # Optimiser Setup
             ########################################################################################################
-            optim_config = config["train"]['common']['optimiser_config']
-            optim_name = optim_config['optmiser']
+            optim_config = config["train"]["common"]["optimiser_config"]
+            optim_name = optim_config["optmiser"]
 
             try:
                 compute_optim = getattr(optim, optim_name)
@@ -170,8 +188,12 @@ def main(slave = {}, experiment_name="Experiment"):
                 compute_optim = getattr(tf.keras.optimizers, optim_name)
 
             allowed_params_for_optim = utilities.allowed_params(compute_optim)
-            allowed_keys = list(set(optim_config.keys()).intersection(set(allowed_params_for_optim)))
-            config_to_optim = {k: v for k, v in optim_config.items() if k in allowed_keys}
+            allowed_keys = list(
+                set(optim_config.keys()).intersection(set(allowed_params_for_optim))
+            )
+            config_to_optim = {
+                k: v for k, v in optim_config.items() if k in allowed_keys
+            }
             opt = compute_optim(**config_to_optim)
             ########################################################################################################
             # Model Compilation
@@ -200,11 +222,14 @@ def main(slave = {}, experiment_name="Experiment"):
 
                 # Implementing the lrsc
                 allowed_params_for_lrsc = utilities.allowed_params(compute_lrsc)
-                allowed_keys = list(set(lrsc_config.keys()).intersection(set(allowed_params_for_lrsc)))
-                config_to_lrsc = {k: v for k, v in lrsc_config.items() if k in allowed_keys}
+                allowed_keys = list(
+                    set(lrsc_config.keys()).intersection(set(allowed_params_for_lrsc))
+                )
+                config_to_lrsc = {
+                    k: v for k, v in lrsc_config.items() if k in allowed_keys
+                }
                 lr_scheduler = tf.keras.callbacks.LearningRateScheduler(
-                    compute_lrsc(**config_to_lrsc),
-                    verbose=1
+                    compute_lrsc(**config_to_lrsc), verbose=1
                 )
                 callbacks.append(lr_scheduler)
 
@@ -212,38 +237,43 @@ def main(slave = {}, experiment_name="Experiment"):
             # Model Training
             ########################################################################################################
             history = vae.fit(
-                x_train, x_train,
+                x_train,
+                x_train,
                 callbacks=callbacks,
                 batch_size=config["train"]["common"]["batch_size"],
                 epochs=config["train"]["common"]["n_epochs"],
                 validation_split=0.1,
                 shuffle=True,
-                verbose=2
+                verbose=2,
             )
             ########################################################################################################
             # Log Metrics to MLflow
             ########################################################################################################
             # Log the training and validation losses per epoch
-            for epoch in range(len(history.history['loss'])):
-                mlflow.log_metric('train_loss', history.history['loss'][epoch], step=epoch)
-                mlflow.log_metric('val_loss', history.history['val_loss'][epoch], step=epoch)
+            for epoch in range(len(history.history["loss"])):
+                mlflow.log_metric(
+                    "train_loss", history.history["loss"][epoch], step=epoch
+                )
+                mlflow.log_metric(
+                    "val_loss", history.history["val_loss"][epoch], step=epoch
+                )
             ########################################################################################################
             # Plot and Log Training Curves
             ########################################################################################################
             # Plot training & validation loss values
             plt.figure()
-            plt.plot(history.history['loss'])
-            plt.plot(history.history['val_loss'])
-            plt.title('Model Loss')
-            plt.ylabel('Loss')
-            plt.xlabel('Epoch')
-            plt.legend(['Train', 'Validation'], loc='upper right')
+            plt.plot(history.history["loss"])
+            plt.plot(history.history["val_loss"])
+            plt.title("Model Loss")
+            plt.ylabel("Loss")
+            plt.xlabel("Epoch")
+            plt.legend(["Train", "Validation"], loc="upper right")
             # Save plot to a temporary file
-            loss_plot_path = 'loss_plot.png'
+            loss_plot_path = "loss_plot.png"
             plt.savefig(loss_plot_path)
             plt.close()
             # Log the plot
-            mlflow.log_artifact(loss_plot_path, artifact_path='plots')
+            mlflow.log_artifact(loss_plot_path, artifact_path="plots")
 
             ########################################################################################################
             # Model Trimming
@@ -259,9 +289,9 @@ def main(slave = {}, experiment_name="Experiment"):
 
             # Log distribution plots if available
             # Assuming dist_plot generates and saves plots; adjust as necessary
-            distribution_plot_path = 'distribution_plot.png'
+            distribution_plot_path = "distribution_plot.png"
             if os.path.exists(distribution_plot_path):
-                mlflow.log_artifact(distribution_plot_path, artifact_path='plots')
+                mlflow.log_artifact(distribution_plot_path, artifact_path="plots")
 
             ########################################################################################################
             # Storage and report generation
@@ -272,16 +302,27 @@ def main(slave = {}, experiment_name="Experiment"):
                 model_trim=model,
                 axo_man=axo_man,
                 dist_plot=dist_plot,
-                history_dict=history.history
+                history_dict=history.history,
             )
 
-            threshold_dict = utilities.retrieve.get_threshold_dict(config["store"]["lite_path"])
-            dict_axo = utilities.retrieve.get_axo_score_dataframes(config["store"]["lite_path"])
-            histogram_dict = utilities.retrieve.get_histogram_dict(config["store"]["lite_path"])
-            history_dict = utilities.retrieve.get_history_dict(config["store"]["lite_path"])
+            threshold_dict = utilities.retrieve.get_threshold_dict(
+                config["store"]["lite_path"]
+            )
+            dict_axo = utilities.retrieve.get_axo_score_dataframes(
+                config["store"]["lite_path"]
+            )
+            histogram_dict = utilities.retrieve.get_histogram_dict(
+                config["store"]["lite_path"]
+            )
+            history_dict = utilities.retrieve.get_history_dict(
+                config["store"]["lite_path"]
+            )
 
             report_config = config["report"]
-            if report_config["html_report"]["generate"] or report_config["pdf_report"]["generate"]:
+            if (
+                report_config["html_report"]["generate"]
+                or report_config["pdf_report"]["generate"]
+            ):
                 print("Report generation flag found !!")
                 html_path = report_config["html_report"]["path"]
                 pdf_path = report_config["pdf_report"]["path"]
@@ -292,11 +333,10 @@ def main(slave = {}, experiment_name="Experiment"):
                     threshold_dict=threshold_dict,
                     history_dict=history_dict,
                     output_file=html_path,
-                    pdf_file=pdf_path
+                    pdf_file=pdf_path,
                 )
 
                 # Log the report as an artifact
                 mlflow.log_artifact(html_path, artifact_path="Model report")
 
-            
             print("Run completing exiting ...")

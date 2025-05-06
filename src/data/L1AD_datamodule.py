@@ -115,7 +115,10 @@ class L1ADDataModule(LightningDataModule):
 
         for data_category in self.hparams.main_data.keys():
             data = [
-                np.load(processed_data_folder / data_category / (data_file + ".npy"), mmap_mode='r')
+                np.load(
+                    processed_data_folder / data_category / (data_file + ".npy"),
+                    mmap_mode="r",
+                )
                 for data_file in self.hparams.main_data[data_category].keys()
             ]
         data = np.concatenate(data, axis=0)
@@ -135,11 +138,13 @@ class L1ADDataModule(LightningDataModule):
 
     def _remove_nans(self, data: np.ndarray) -> np.ndarray:
         """Check for NaN values in the data and remove them."""
-        nan_mask = np.isnan(data).any(axis=(1, 2)) 
+        nan_mask = np.isnan(data).any(axis=(1, 2))
 
         num_nan_rows = np.sum(nan_mask)
         if num_nan_rows > 0:
-            print(f"Removing {num_nan_rows} rows with NaN values out of {len(data)} total rows")
+            print(
+                f"Removing {num_nan_rows} rows with NaN values out of {len(data)} total rows"
+            )
 
         return data[~nan_mask]
 
@@ -209,8 +214,10 @@ class L1ADDataModule(LightningDataModule):
         dataloaders = {}
         for data_category in additional_data.keys():
             for dataset in additional_data[data_category].keys():
-                file = Path(norm_datapath) / (self.hparams.data_normalizer.norm_scheme + "_" + dataset + ".npy")
-                
+                file = Path(norm_datapath) / (
+                    self.hparams.data_normalizer.norm_scheme + "_" + dataset + ".npy"
+                )
+
                 dataloader = DataLoader(
                     dataset=self._remove_nans(np.load(file)),
                     batch_size=self.batch_size_per_device,

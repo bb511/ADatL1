@@ -5,7 +5,7 @@ import torch.nn.functional as F
 
 from src.models.quantization import Quantizer
 
-    
+
 class QuantizedReLU(nn.ReLU):
     def __init__(self, quantizer: Optional[Quantizer] = None):
         super().__init__()
@@ -22,7 +22,7 @@ class QuantizedBatchNorm1d(nn.BatchNorm1d):
         qweight: Optional[Quantizer] = None,
         qbias: Optional[Quantizer] = None,
         qmean: Optional[Quantizer] = None,
-        qvar: Optional[Quantizer] = None
+        qvar: Optional[Quantizer] = None,
     ):
         super().__init__(num_features)  # Initialize nn.BatchNorm1d
 
@@ -46,8 +46,12 @@ class QuantizedBatchNorm1d(nn.BatchNorm1d):
             var = self.qvar(self.running_var)
 
             return F.batch_norm(
-                x, mean, var, weight, bias,
+                x,
+                mean,
+                var,
+                weight,
+                bias,
                 training=False,
                 momentum=self.momentum,
-                eps=self.eps
+                eps=self.eps,
             )

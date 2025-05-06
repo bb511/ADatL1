@@ -6,7 +6,7 @@ encoder:
   _target_: src.models.components.qvae.QuantizedEncoder
 
   # 57 input features, 8 latent features
-  nodes: [57, 28, 15, 8] 
+  nodes: [57, 28, 15, 8]
 
   qdata:
     _target_: src.models.quantization.quantizers.FixedPointQuantizer

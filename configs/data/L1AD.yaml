@@ -54,9 +54,11 @@ main_data:
 additional_validation:
     background:
       ${paths.background}
-additional_test:
     signal:
       ${paths.signal}
+additional_test: null
+    # signal:
+    #   ${paths.signal}
 
 train_val_test_split: [0.8, 0.1, 0.1]
 batch_size: 64

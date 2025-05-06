@@ -180,7 +180,7 @@ class L1ADDataModule(LightningDataModule):
             shuffle=False,
         )
 
-        dataloaders = self._dataloader_dict(self.hparams.additional_validation)
+        dataloaders = self._dataloader_dict(self.hparams.additional_validation or {})
         dataloaders.update({"main": main_val})
         return dataloaders
 
@@ -197,7 +197,7 @@ class L1ADDataModule(LightningDataModule):
             shuffle=False,
         )
 
-        dataloaders = self._dataloader_dict(self.hparams.additional_test)
+        dataloaders = self._dataloader_dict(self.hparams.additional_test or {})
         dataloaders.update({"main": main_test})
 
         return dataloaders

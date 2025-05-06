@@ -54,13 +54,10 @@ class VICReg(L1ADLightningModule):
 
         # Compute loss and return
         loss_inv, loss_var, loss_cov, loss_total = self.loss(z1, z2)
+
         return {
             "loss": loss_total,
             "loss_inv": loss_inv,
             "loss_var": loss_var,
             "loss_cov": loss_cov,
         }
-    
-    def filter_log_dict(self, outdict: dict, stage: str):
-        """Override with the values you want to log."""
-        return {f"{stage}/{k}": v for k, v in outdict.items()}

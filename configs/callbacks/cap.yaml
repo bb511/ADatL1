@@ -1,0 +1,7 @@
+approximation_capacity:
+  _target_: src.callbacks.cap.CAP_Callback
+  loss_name: loss/total/full
+  beta0: 1.0
+  n_epochs: 100
+  lr: 0.01
+  batch_size: ${data.batch_size}

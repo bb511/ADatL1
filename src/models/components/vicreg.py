@@ -18,12 +18,12 @@ class FastFeatureBlur(nn.Module):
         self.magnitude = magnitude
         self.strength = strength
 
-    def forward(self, x):
+    def forward(self, x: torch.Tensor):
         batch_size, feature_dim = x.shape
         
         # Mask for items to be blurred and features within each item
-        mask_p = (torch.rand(batch_size, 1) < self.prob).float()
-        mask_strength = (torch.rand(batch_size, feature_dim) < self.strength).float()
+        mask_p = (torch.rand(batch_size, 1) < self.prob).to(device=x.device, dtype=torch.float32)
+        mask_strength = (torch.rand(batch_size, feature_dim) < self.strength).to(device=x.device, dtype=torch.float32)
         
         # Combined mask with magnitude
         mask = mask_p * mask_strength * self.magnitude
@@ -43,7 +43,7 @@ class FastObjectMask(nn.Module):
         super().__init__()
         self.prob = prob
 
-    def forward(self, x):
+    def forward(self, x: torch.Tensor):
         # TODO: Check fast object mask implementation
         # This is not clear
         # batch = batch.reshape((-1, 19, 3))
@@ -58,7 +58,7 @@ class FastObjectMask(nn.Module):
             return x
         
         batch_size, feature_dim = x.shape
-        mask = (torch.rand(batch_size, feature_dim) > self.prob).float()
+        mask = (torch.rand(batch_size, feature_dim) > self.prob).to(device=x.device, dtype=torch.float32)
         return x * mask
 
 
@@ -91,12 +91,12 @@ class FastLorentzRotation(nn.Module):
         self.register_buffer('bias', torch.tensor(self.phi_indices.shape[0]).float())
     
 
-    def forward(self, x):
+    def forward(self, x: torch.Tensor):
         device = x.device
         batch_size = x.shape[0]
         
         # Create mask for batch items to rotate
-        bool_mask = (torch.rand(batch_size, device=device) < self.prob).float()
+        bool_mask = (torch.rand(batch_size, device=device) < self.prob).to(device=x.device, dtype=torch.float32)
         
         # Extract and normalize phi values
         original_phi = (x[:, self.phi_indices] * self.scale + self.bias) / self.l1_scale

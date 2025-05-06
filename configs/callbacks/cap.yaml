@@ -1,10 +1,7 @@
-
-dataset: Dataset,
-beta0: Optional[float] = 1.0,
-lr: Optional[float] = 0.01,
-n_epochs: Optional[int] = 5,
-batch_size: Optional[int] = 64,
-compute_on_step: Optional[bool] = True,
-dist_sync_on_step: Optional[bool] = False,
-process_group: Optional[Any] = None,
-dist_sync_fn: Optional[Callable] = None,
+approximation_capacity:
+  _target_: src.callbacks.cap.CAP_Callback
+  loss_name: loss/total/full
+  beta0: 1.0
+  n_epochs: 100
+  lr: 0.01
+  batch_size: ${data.batch_size}

@@ -45,7 +45,7 @@ class DatasetAwareModelCheckpoint(ModelCheckpoint):
         """Store loss values for each dataset during validation."""
         dset_key = list(getattr(trainer, "val_dataloaders").keys())[dataloader_idx]
         self.loss_cache[dset_key].append(
-            outputs[self.loss_name].detach().cpu()
+            outputs[self.loss_name].detach().cpu().unsqueeze(0)
         )
     
     def on_validation_epoch_end(self, trainer, pl_module):

@@ -1,0 +1,9 @@
+model_checkpoint_ds:
+  # _target_: src.callbacks.model_checkpoint.LeaveOneOutModelCheckpoint
+  _target_: src.callbacks.model_checkpoint.SingleDatasetModelCheckpoint
+  dirpath: ${paths.output_dir}/checkpoints
+  filename: '{epoch:02d}-{step}'
+  loss_name: loss
+  save_top_k: 1
+  mode: min
+  save_last: true

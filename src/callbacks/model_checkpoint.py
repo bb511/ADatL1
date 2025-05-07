@@ -134,7 +134,7 @@ class DatasetAwareModelCheckpoint(ModelCheckpoint):
         
         # Save the checkpoint
         filepath = os.path.join(custom_dirpath, f"{filename}.ckpt")
-        self._save_model(filepath, trainer, pl_module)
+        self._save_checkpoint(trainer=trainer, filepath=filepath)
         return filepath
 
 
@@ -150,7 +150,7 @@ class SingleDatasetModelCheckpoint(DatasetAwareModelCheckpoint):
             mean_loss = dataset_loss / num_examples if num_examples > 0 else float('inf')
             
             # Use the prefix 'single_' to identify single-dataset checkpoints
-            key = f"single_{dset_key}"
+            key = f"{dset_key}"
             self._save_top_k_custom_checkpoints(trainer, pl_module, key, mean_loss)
 
 
@@ -179,7 +179,7 @@ class LeaveOneOutModelCheckpoint(DatasetAwareModelCheckpoint):
             loo_loss = total_loss / total_examples if total_examples > 0 else float('inf')
             
             # Use the prefix 'loo_' to identify leave-one-out checkpoints
-            key = f"loo_{left_out_key}"
+            key = f"{left_out_key}"
             self._save_top_k_custom_checkpoints(trainer, pl_module, key, loo_loss)
 
 

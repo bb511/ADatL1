@@ -54,7 +54,6 @@ decoder:
 
 loss:
   _target_: src.models.losses.vae.VAELoss
-  alpha: 1.0
   beta: 0.604108559135001
   reduction: none
 

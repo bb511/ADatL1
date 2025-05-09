@@ -9,7 +9,7 @@ defaults:
   - override /model: qvae
   - override /callbacks: default
   - override /trainer: cpu
-  - override /logger: both
+  - override /logger: mlflow
 
 tags: ["debug"]
 
@@ -28,11 +28,11 @@ data:
 logger:
   mlflow:
     experiment_name: debug
-    run_name: coderuns
+    run_name: test
 
-  wandb:
-    entity: viictorjimenezzz-personal
-    project: adatl1
+  # wandb:
+  #   entity: viictorjimenezzz-personal
+  #   project: adatl1
 
-    group: debug
-    name: coderuns
+  #   group: debug
+  #   name: coderuns

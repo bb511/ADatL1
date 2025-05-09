@@ -33,13 +33,12 @@ class KLDivergenceLoss(nn.Module):
 class VAELoss(nn.Module):
     def __init__(
         self, 
-        alpha: float = 1.0, 
-        beta: float = 0.1,
+        alpha: float = 1.0,
         reduction: Literal['none', 'mean', 'sum'] = 'mean'
     ):
         super().__init__()
-        self.reco_scale = alpha * (1 - beta)
-        self.kl_scale = beta
+        self.reco_scale = (1 - alpha)
+        self.kl_scale = alpha
         self.reduction = reduction
         
         self.reconstruction_loss = ReconstructionLoss(scale=self.reco_scale)

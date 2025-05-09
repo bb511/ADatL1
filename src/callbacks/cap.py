@@ -36,18 +36,19 @@ class CAP_Callback(Callback):
 
         self.loss_cache = defaultdict(list)
 
-    def on_validation_batch_end(
-        self, trainer, pl_module, outputs, batch, batch_idx, dataloader_idx=0
-    ):
-        self.loss_cache[dataloader_idx].append(outputs[self.loss_name].detach().cpu())
+    def on_validation_batch_end(self, trainer, pl_module, outputs, batch, batch_idx, dataloader_idx=0):
+        dset_key = list(getattr(trainer, f"val_dataloaders").keys())[dataloader_idx]
+        self.loss_cache[dset_key].append(
+            outputs[self.loss_name].detach().cpu()
+        )
+
 
     def on_validation_epoch_end(self, trainer, pl_module):
-        # TODO: Decice how the stability will be computed... In this case simply consider that there will
-        # be two validation dataloaders, one for the normal and one for the anomaly data.
-        loss1 = torch.cat(self.loss_cache[0])
-        loss2 = torch.cat(self.loss_cache[1])
-        self.loss_cache = None
-        garbage_collection_cuda()
+        """Compute CAP for the two first datasets"""
+        list_dset_key = list(self.loss_cache.keys())
+        loss1 = torch.cat(self.loss_cache[list_dset_key[0]])
+        loss2 = torch.cat(self.loss_cache[list_dset_key[1]])
+        self.loss_cache = None; garbage_collection_cuda()
 
         loss_dataset = TensorDataset(
             loss1[: min(len(loss1), len(loss2))], loss2[: min(len(loss1), len(loss2))]
@@ -59,7 +60,7 @@ class CAP_Callback(Callback):
 
         pl_module.log_dict(
             {
-                "val/cap": cap,
+                "val/cap": cap.item(),
             },
             prog_bar=False,
             on_step=False,

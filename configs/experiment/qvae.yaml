@@ -11,24 +11,24 @@ defaults:
   - override /trainer: cpu
   - override /logger: mlflow
 
-tags: ["debug"]
+tags: ["alpha_lr_scan"]
 
 seed: 12345
 
 trainer:
   min_epochs: 1
   max_epochs: 1
-  limit_train_batches: 1.0
-  limit_val_batches: 1.0
-  limit_test_batches: 1.0
+  # limit_train_batches: 1.0
+  # limit_val_batches: 1.0
+  # limit_test_batches: 1.0
 
 data:
   num_workers: 0
 
 logger:
   mlflow:
-    experiment_name: debug
-    run_name: test
+    experiment_name: scan
+    # run_name:
 
   # wandb:
   #   entity: viictorjimenezzz-personal

@@ -2,10 +2,10 @@ python3 src/train.py \
     --multirun \
     experiment=qvae \
     trainer=gpu \
-    model.loss.alpha=0.1, 0.2, 0.3 \ # from 0.1 to 1
-    model.optimizer.lr=0.01, 0.001, 0.0001, 0.0001 \
-    seed=511, 6023 \
-    trainer.max_epochs=100 \
+    model.loss.alpha=0.5736625791372814 \
+    model.optimizer.lr=0.001 \
+    seed=123 \
+    trainer.max_epochs=480 \
     data.batch_size=16384 \
-    data.num_workers=32 \
+    data.num_workers=8 \
     data.pin_memory=True \

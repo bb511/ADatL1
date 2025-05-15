@@ -81,7 +81,6 @@ class L1DataExtractor(Root2h5):
             if obj in self.particles.keys():
                 data[obj] = self._extract_constituents_feats(h5file, obj)
                 continue
-
             # If object is not a particle, then extract feats directly.
             data[obj] = h5file[obj][:][..., self.objects_features_idxs[obj]]
 

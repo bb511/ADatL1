@@ -54,6 +54,7 @@ class L1DataProcessor:
             extracted_h5.close()
             gc.collect()
 
+            log.info(Fore.BLUE + f"Processing {dataset_name}")
             data = self._remove_saturation(data)
             data = self._remove_objects_features(data)
             data = self._dict2nparray(data)
@@ -228,7 +229,7 @@ class L1DataProcessor:
     def _check_data_exists(self, dataset_name: str) -> bool:
         """Check if the data was processed in the same way already."""
         if (self.cache_folder / (dataset_name + ".npy")).exists():
-            log.info(Fore.YELLOW + f"Processed data exists at {self.cache_folder}.")
+            log.info(Fore.YELLOW + f"{dataset_name} exists in {self.cache_folder}.")
             return 1
 
         return 0

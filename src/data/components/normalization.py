@@ -21,7 +21,7 @@ class L1DataNormalizer:
 
     def fit(self, data: np.ndarray):
         """Fit the normalization to data."""
-        cache_folder = Path(self.cache)
+        cache_folder = Path(self.cache) / self.norm_scheme
         cache_file = cache_folder / "metadata.yaml"
         if cache_file.exists():
             log.info(Fore.YELLOW + f"Normalization params exist at {cache_folder}.")
@@ -38,14 +38,14 @@ class L1DataNormalizer:
             log.info(f"Saving fit parameters to file {cache_file}.")
             yaml.dump(self.norm_params, output_file)
 
-    def norm(self, data: np.ndarray, flag: str) -> np.ndarray:
+    def norm(self, data: np.ndarray, dataset_name: str) -> np.ndarray:
         """Normalize the data using the hyperparameters from previously fitted data.
 
         :data: 3D numpy array containing the data to normalise.
-        :flag: String describing what kind of data to normalise, i.e., 'train', 'test',
-            'val', or it can be the name of the data set.
+        :dataset_name: String describing what kind of data to normalise, i.e., 'train',
+            'test', 'val', or it can be the name of the data set.
         """
-        cache_file = Path(self.cache) / (self.norm_scheme + f"_{flag}.npy")
+        cache_file = Path(self.cache) / self.norm_scheme / f"{dataset_name}.npy"
         if cache_file.exists():
             log.info(Fore.YELLOW + f"Normalized data exists. Loading {cache_file}.")
             return np.load(cache_file)
@@ -53,7 +53,7 @@ class L1DataNormalizer:
         norm_method = getattr(self, self.norm_scheme)
         data = norm_method(data)
 
-        self._plot_normed_data(data, flag)
+        self._plot_normed_data(data, dataset_name)
         np.save(cache_file, data)
         log.info(f"Saved normalized data at {cache_file}.")
 
@@ -104,7 +104,9 @@ class L1DataNormalizer:
         bias = []
         interquantile_range = []
 
-        scale_width = scale[0] - scale[1]
+        scale_larger = scale[0]
+        scale_smaller = scale[1]
+        scale_width = scale_larger - scale_smaller
         for feature_idx in range(data.shape[-1]):
             data_feature = data[:, :, feature_idx].flatten()
             if self.ignore_zeros:
@@ -112,7 +114,7 @@ class L1DataNormalizer:
             quant_high, quant_low = np.nanpercentile(data_feature, percentiles)
             scaled_iq = (quant_high - quant_low) / scale_width
             interquantile_range.append(float(scaled_iq))
-            chang_shift = (quant_low * scale[0] - quant_high * scale[1]) / scale_width
+            chang_shift = (quant_low * scale_larger - quant_high * scale_smaller) / scale_width
             bias.append(float(chang_shift))
 
         return {"bias": bias, "scaled_iq_range": interquantile_range}
@@ -125,10 +127,12 @@ class L1DataNormalizer:
         """
         return (data - self.norm_params["bias"]) / self.norm_params["scaled_iq_range"]
 
-    def _plot_normed_data(self, data: np.ndarray, flag: str):
+    def _plot_normed_data(self, data: np.ndarray, dataset_name: str):
         """Plot the normalised data file using the metadata info from processed file."""
         self.processed_data_folder = Path(self.processed_data_folder)
         metadata = yaml.safe_load(open(self.processed_data_folder / "metadata.yaml"))
+        cache_folder = Path(self.cache) / self.norm_scheme
+        plot_folder = cache_folder / dataset_name
 
         obj_starting_idx = 0
         for obj_name in metadata.keys():
@@ -137,6 +141,6 @@ class L1DataNormalizer:
                 data[:, obj_starting_idx:obj_ending_idx],
                 obj_name,
                 metadata[obj_name]["feats"],
-                Path(self.cache) / flag,
+                plot_folder,
             )
             obj_starting_idx = obj_ending_idx

@@ -31,18 +31,7 @@ encoder:
 decoder:
   _target_: src.models.components.qvae.Decoder
 
-  nodes: [8, 15, 28, 57] # inverse of the encoder nodes
-
-  # ------------------------------------------------------------------------------------
-  # Fancy way of defining the nodes: interpolate from the encoder nodes
-  # nodes:
-  #   - '${list_at_idx: ${model.encoder.nodes}, -1}'
-  #   - 16
-  #   - 32
-  #   - 64
-  #   - 128
-  #   - '${list_at_idx: ${model.encoder.nodes}, 0}'
-  # ------------------------------------------------------------------------------------
+  nodes: [8, 24, 32, 64, 128, 57] # v4 axol1tl architecture
 
   init_last_weight:
     _target_: src.utils.hydra.get_method
@@ -53,9 +42,8 @@ decoder:
   init_last_bias: null
 
 loss:
-  _target_: src.models.losses.vae.VAELoss
-  alpha: 0.60410
-  # beta: 0.604108559135001
+  _target_: src.models.losses.vae.CylPtPzVAELoss
+  alpha: 0.604108559135001
   reduction: none
 
 optimizer:
@@ -76,4 +64,3 @@ scheduler:
     m_mul: 0.65
     alpha: 1e-6
     warmup_epochs: 10
-    last_epoch: -1

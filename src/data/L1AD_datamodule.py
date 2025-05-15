@@ -88,12 +88,17 @@ class L1ADDataModule(LightningDataModule):
 
             self.hparams.data_normalizer.fit(self.data_train[:])
             self.data_train = self.hparams.data_normalizer.norm(
-                self.data_train[:], "train"
+                data=self.data_train[:], dataset_name="train"
             )
-            self.data_val = self.hparams.data_normalizer.norm(self.data_val[:], "val")
+            self.data_train = self._remove_nans(self.data_train, "train")
+            self.data_val = self.hparams.data_normalizer.norm(
+                data=self.data_val[:], dataset_name="val"
+            )
+            self.data_val = self._remove_nans(self.data_val, "val")
             self.data_test = self.hparams.data_normalizer.norm(
-                self.data_test[:], "test"
+                data=self.data_test[:], dataset_name="test"
             )
+            self.data_test = self._remove_nans(self.data_test, "test")
 
         if self.hparams.additional_validation:
             self._normalize_additional_data(self.hparams.additional_validation)
@@ -136,15 +141,13 @@ class L1ADDataModule(LightningDataModule):
                 self.hparams.batch_size // self.trainer.world_size
             )
 
-    def _remove_nans(self, data: np.ndarray) -> np.ndarray:
+    def _remove_nans(self, data: np.ndarray, dataset_name: str) -> np.ndarray:
         """Check for NaN values in the data and remove them."""
         nan_mask = np.isnan(data).any(axis=(1, 2))
 
         num_nan_rows = np.sum(nan_mask)
         if num_nan_rows > 0:
-            print(
-                f"Removing {num_nan_rows} rows with NaN values out of {len(data)} total rows"
-            )
+            log.info(f"Removing {num_nan_rows} NaN rows from {dataset_name} data.")
 
         return data[~nan_mask]
 
@@ -163,7 +166,7 @@ class L1ADDataModule(LightningDataModule):
         :return: The train dataloader.
         """
         return DataLoader(
-            dataset=self._remove_nans(self.data_train),
+            dataset=self.data_train,
             batch_size=self.batch_size_per_device,
             num_workers=self.hparams.num_workers,
             pin_memory=self.hparams.pin_memory,
@@ -177,7 +180,7 @@ class L1ADDataModule(LightningDataModule):
         :return: The validation dataloader.
         """
         main_val = DataLoader(
-            dataset=self._remove_nans(self.data_val),
+            dataset=self.data_val,
             batch_size=self.batch_size_per_device,
             num_workers=self.hparams.num_workers,
             pin_memory=self.hparams.pin_memory,
@@ -195,7 +198,7 @@ class L1ADDataModule(LightningDataModule):
         :return: The test dataloader.
         """
         main_test = DataLoader(
-            dataset=self._remove_nans(self.data_test),
+            dataset=self.data_test,
             batch_size=self.batch_size_per_device,
             num_workers=self.hparams.num_workers,
             pin_memory=self.hparams.pin_memory,
@@ -210,21 +213,21 @@ class L1ADDataModule(LightningDataModule):
     def _dataloader_dict(self, additional_data: dict):
         """Creates a dictionary of dataloaders of specified datasets found in dict."""
         norm_datapath = Path(self.hparams.data_normalizer.cache)
+        norm_scheme = self.hparams.data_normalizer.norm_scheme
 
         dataloaders = {}
         for data_category in additional_data.keys():
-            for dataset in additional_data[data_category].keys():
-                file = Path(norm_datapath) / (
-                    self.hparams.data_normalizer.norm_scheme + "_" + dataset + ".npy"
-                )
-
+            for dataset_name in additional_data[data_category].keys():
+                file = norm_datapath / norm_scheme / (dataset_name + ".npy")
+                data = np.load(file)
+                data = self._remove_nans(data, dataset_name)
                 dataloader = DataLoader(
-                    dataset=self._remove_nans(np.load(file)),
+                    dataset=data,
                     batch_size=self.batch_size_per_device,
                     num_workers=self.hparams.num_workers,
                     pin_memory=self.hparams.pin_memory,
                     shuffle=False,
                 )
-                dataloaders.update({dataset: dataloader})
+                dataloaders.update({dataset_name: dataloader})
 
         return dataloaders

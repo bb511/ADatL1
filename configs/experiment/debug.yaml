@@ -8,7 +8,8 @@ defaults:
   - override /data: L1AD
   - override /model: qvae
   - override /callbacks: default
-  - override /trainer: cpu
+  - override /trainer: gpu
+  - override /logger: none
 
 tags: ["debug"]
 

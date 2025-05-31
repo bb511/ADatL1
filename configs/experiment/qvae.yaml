@@ -11,24 +11,21 @@ defaults:
   - override /trainer: cpu
   - override /logger: mlflow
 
-tags: ["alpha_lr_scan"]
+tags: ["vae", "axo_v4", "reproduction"]
 
 seed: 12345
 
 trainer:
   min_epochs: 1
   max_epochs: 1
-  # limit_train_batches: 1.0
-  # limit_val_batches: 1.0
-  # limit_test_batches: 1.0
 
 data:
   num_workers: 0
 
 logger:
   mlflow:
-    experiment_name: scan
-    # run_name:
+    experiment_name: reproduction
+    run_name: axo_v4_reproduction_attempt2
 
   # wandb:
   #   entity: viictorjimenezzz-personal

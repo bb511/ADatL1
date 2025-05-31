@@ -8,7 +8,7 @@ import numpy as np
 import yaml
 from colorama import Fore, Back, Style
 
-from l1trigger_datamaker.h5convert.root2h5 import Root2h5
+from adl1t_datamaker.h5convert.root2h5 import Root2h5
 from src.utils import pylogger
 from . import plots
 
@@ -41,8 +41,10 @@ class L1DataExtractor(Root2h5):
             extraction of the data, e.g., "basic".
         """
         super().__init__()
-        self.objects_features_names = objects_features.copy()
         self.objects_features_idxs = self._replace_feats_name_index(objects_features)
+        self.objects_features_names = self._get_obj_feats_names(
+            self.objects_features_idxs
+        )
         self.constituents = constituents
         self.cache = Path(cache)
         self.extraction_name = name
@@ -55,7 +57,7 @@ class L1DataExtractor(Root2h5):
         :param data_category: String specifying the kind of data that is being extracted
             e.g., 'zerobias', 'background', or 'signal'.
         """
-        log.info(f"Extracting datasets: {list(datasets.keys())}.")
+        log.info(Fore.GREEN + f"Extracting {data_category} data.")
 
         self.cache_folder = self.cache / self.extraction_name / data_category
         for dataset_name, folder_path in datasets.items():
@@ -112,8 +114,7 @@ class L1DataExtractor(Root2h5):
         """
         for object_name in selected_features.keys():
             idxs = [
-                # self.all_objects_feats[object_name].index(feat)
-                self.objects_features_names[object_name].index(feat)
+                self.all_objects_feats[object_name].index(feat)
                 for feat in selected_features[object_name]
             ]
             selected_features[object_name] = idxs
@@ -139,7 +140,6 @@ class L1DataExtractor(Root2h5):
             )
             h5file.create_dataset(obj_name, data=obj_data, compression="gzip")
         h5file.close()
-
         log.info("Cached extracted data at " + Fore.GREEN + f"{cache_file}.")
 
     def _cache_metadata(self):
@@ -150,17 +150,20 @@ class L1DataExtractor(Root2h5):
         if metadata_filepath.exists():
             return
 
-        # Get the names of the features for each object in the right order.
-        metadata_dict = {}
-        for obj_name in self.objects_features_idxs.keys():
-            object_feats = np.array(self.objects_features_names[obj_name])
-            object_feats = object_feats[self.objects_features_idxs[obj_name]].tolist()
-            metadata_dict[obj_name] = object_feats
-
         with open(metadata_filepath, "w") as metadata_file:
-            yaml.dump(metadata_dict, metadata_file)
+            yaml.dump(self.objects_features_names, metadata_file)
 
         log.info(f"Cached extracted feature metadata at {metadata_filepath}.")
+
+    def _get_obj_feats_names(self, objects_feats_idxs: dict):
+        """Get the object features names in the right order."""
+        objects_features_names = {}
+        for obj_name in self.objects_features_idxs.keys():
+            object_feats = np.array(self.all_objects_feats[obj_name])
+            object_feats = object_feats[objects_feats_idxs[obj_name]].tolist()
+            objects_features_names[obj_name] = object_feats
+
+        return objects_features_names
 
     def _check_file_exists(self, dataset_name: str) -> bool:
         """Check if a specific data file exists."""

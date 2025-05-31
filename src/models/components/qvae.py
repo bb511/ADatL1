@@ -28,6 +28,8 @@ class QuantizedEncoder(nn.Module):
         qweight: Optional[Quantizer] = None,
         qbias: Optional[Quantizer] = None,
         qactivation: Optional[Quantizer] = None,
+        init_weight: Optional[Callable] = lambda _: None,
+        init_bias: Optional[Callable] = lambda _: None,
     ):
         super().__init__()
 
@@ -41,6 +43,8 @@ class QuantizedEncoder(nn.Module):
             qbias=qbias,
             qactivation=qactivation,
             batchnorm=False,
+            init_weight=init_weight,
+            init_bias=init_bias
         )
         self.net = nn.Sequential(*list(qmlp.net.children())[:-1])
 
@@ -51,6 +55,8 @@ class QuantizedEncoder(nn.Module):
             qweight=qweight,
             qbias=qbias,
             qactivation=qactivation,
+            init_weight=nn.init.xavier_uniform_,
+            init_bias=nn.init.zeros_,
         )
         self.z_log_var = QuantizedLinear(
             in_features=nodes[-2],
@@ -58,8 +64,7 @@ class QuantizedEncoder(nn.Module):
             qweight=qweight,
             qbias=qbias,
             qactivation=qactivation,
-            # Initialize log_var weights to zero
-            init_weight=nn.init.zeros_,
+            init_weight=nn.init.xavier_uniform_,
             init_bias=nn.init.zeros_,
         )
 
@@ -84,8 +89,11 @@ class Decoder(nn.Module):
     def __init__(
         self,
         nodes: List[int],
+        init_weight: Optional[Callable] = lambda _: None,
+        init_bias: Optional[Callable] = lambda _: None,
         init_last_weight: Optional[Callable] = None,
         init_last_bias: Optional[Callable] = None,
+        batchnorm: bool = False
     ) -> None:
         super().__init__()
         init_last_weight = init_last_weight if init_last_weight else lambda _: None
@@ -93,7 +101,13 @@ class Decoder(nn.Module):
 
         # Build the decoder as a MLP (no quantization) with batch normalization
         self.net = QMLP(
-            nodes, qweight=None, qbias=None, qactivation=None, batchnorm=True
+            nodes,
+            qweight=None,
+            qbias=None,
+            qactivation=None,
+            batchnorm=batchnorm,
+            init_weight=init_weight,
+            init_bias=init_bias,
         )
 
         # Apply initialization to the weight of the last Linear() layer

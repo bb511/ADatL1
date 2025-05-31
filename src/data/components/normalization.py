@@ -4,6 +4,7 @@ from dataclasses import dataclass, field
 import yaml
 import numpy as np
 from colorama import Fore, Back, Style
+from pytorch_lightning import loggers
 
 from src.utils import pylogger
 from . import plots
@@ -38,7 +39,7 @@ class L1DataNormalizer:
             log.info(f"Saving fit parameters to file {cache_file}.")
             yaml.dump(self.norm_params, output_file)
 
-    def norm(self, data: np.ndarray, dataset_name: str) -> np.ndarray:
+    def norm(self, data: np.ndarray, dataset_name: str, logs: loggers) -> np.ndarray:
         """Normalize the data using the hyperparameters from previously fitted data.
 
         :data: 3D numpy array containing the data to normalise.
@@ -46,14 +47,17 @@ class L1DataNormalizer:
             'test', 'val', or it can be the name of the data set.
         """
         cache_file = Path(self.cache) / self.norm_scheme / f"{dataset_name}.npy"
+        plots_path = Path(self.cache) / self.norm_scheme / dataset_name
         if cache_file.exists():
             log.info(Fore.YELLOW + f"Normalized data exists. Loading {cache_file}.")
+            self._add_plots_to_mlflow(logs, plots_path)
             return np.load(cache_file)
 
         norm_method = getattr(self, self.norm_scheme)
         data = norm_method(data)
 
         self._plot_normed_data(data, dataset_name)
+        self._add_plots_to_mlflow(logs, plots_path)
         np.save(cache_file, data)
         log.info(f"Saved normalized data at {cache_file}.")
 
@@ -108,9 +112,13 @@ class L1DataNormalizer:
         scale_smaller = scale[1]
         scale_width = scale_larger - scale_smaller
         for feature_idx in range(data.shape[-1]):
-            data_feature = data[:, :, feature_idx].flatten()
             if self.ignore_zeros:
-                data_feature = data_feature[data_feature > 0.000001]
+                # Ignore constituents with extremely small pT (basically 0).
+                mask = data[:, :, 0] > 0.000001
+                print(mask.shape)
+            print(data.shape)
+            exit(1)
+            data_feature = (data[mask])[:, :, feature_idx].flatten()
             quant_high, quant_low = np.nanpercentile(data_feature, percentiles)
             scaled_iq = (quant_high - quant_low) / scale_width
             interquantile_range.append(float(scaled_iq))
@@ -144,3 +152,9 @@ class L1DataNormalizer:
                 plot_folder,
             )
             obj_starting_idx = obj_ending_idx
+
+    def _add_plots_to_mlflow(self, logs: loggers, plots_path: Path):
+        """Adds the plots of the normalized data to the mlflow experiment."""
+        for logger in logs:
+            if isinstance(logger, loggers.mlflow.MLFlowLogger):
+                logger.experiment.log_artifact(logger.run_id, plots_path)

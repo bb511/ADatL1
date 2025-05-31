@@ -34,7 +34,7 @@ class L1DataProcessor:
         :param data_category: String specifying the kind of data that is being extracted
             e.g., 'zerobias', 'background', or 'signal'.
         """
-        log.info(Fore.GREEN + "Processing data...")
+        log.info(Fore.GREEN + f"Processing {data_category} data...")
         self.extracted_folder = Path(self.extracted_path) / self.extraction_name
         self.extracted_metadata_file = self.extracted_folder / "metadata.yaml"
         self.extracted_datapath = self.extracted_folder / data_category

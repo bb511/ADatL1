@@ -7,6 +7,7 @@ import numpy as np
 from pytorch_lightning import LightningDataModule
 from pytorch_lightning.utilities.combined_loader import CombinedLoader
 from torch.utils.data import ConcatDataset, DataLoader, Dataset, random_split, Subset
+import mlflow
 
 from src.utils import pylogger
 from colorama import Fore, Back, Style
@@ -30,6 +31,7 @@ class L1ADDataModule(LightningDataModule):
         batch_size: int = 64,
         num_workers: int = 0,
         pin_memory: bool = False,
+        prefetch_factor: int = 2
     ) -> None:
         """Initialize a `L1ADDataModule`.
 
@@ -45,6 +47,8 @@ class L1ADDataModule(LightningDataModule):
         :param batch_size: The batch size. Defaults to `64`.
         :param num_workers: The number of workers. Defaults to `0`.
         :param pin_memory: Whether to pin memory. Defaults to `False`.
+        :param prefetch_factor: Number of batches loaded in advance by each worker in
+            the DataLoader.
         """
 
         super().__init__()
@@ -58,16 +62,14 @@ class L1ADDataModule(LightningDataModule):
 
     def prepare_data(self) -> None:
         """Get zero bias data and the simulated MC signal data."""
-        log.info(Back.GREEN + "Preparing zerobias data...")
+        log.info(Back.GREEN + "Extracting Data....")
         self.hparams.data_extractor.extract(self.hparams.zerobias, "zerobias")
-        self.hparams.data_processor.process(self.hparams.zerobias, "zerobias")
-
-        log.info(Back.GREEN + "Preparing background data...")
         self.hparams.data_extractor.extract(self.hparams.background, "background")
-        self.hparams.data_processor.process(self.hparams.background, "background")
-
-        log.info(Back.GREEN + "Preparing signal data...")
         self.hparams.data_extractor.extract(self.hparams.signal, "signal")
+
+        log.info(Back.GREEN + "Processing Data....")
+        self.hparams.data_processor.process(self.hparams.zerobias, "zerobias")
+        self.hparams.data_processor.process(self.hparams.background, "background")
         self.hparams.data_processor.process(self.hparams.signal, "signal")
 
     def setup(self, stage: str = None) -> None:
@@ -88,15 +90,15 @@ class L1ADDataModule(LightningDataModule):
 
             self.hparams.data_normalizer.fit(self.data_train[:])
             self.data_train = self.hparams.data_normalizer.norm(
-                data=self.data_train[:], dataset_name="train"
+                data=self.data_train[:], dataset_name="train", logs=self.trainer.loggers
             )
             self.data_train = self._remove_nans(self.data_train, "train")
             self.data_val = self.hparams.data_normalizer.norm(
-                data=self.data_val[:], dataset_name="val"
+                data=self.data_val[:], dataset_name="val", logs=self.trainer.loggers
             )
             self.data_val = self._remove_nans(self.data_val, "val")
             self.data_test = self.hparams.data_normalizer.norm(
-                data=self.data_test[:], dataset_name="test"
+                data=self.data_test[:], dataset_name="test", logs=self.trainer.loggers
             )
             self.data_test = self._remove_nans(self.data_test, "test")
 
@@ -111,7 +113,7 @@ class L1ADDataModule(LightningDataModule):
             for dataset in additional_data[data_category].keys():
                 file = self.processed_data_folder / data_category / (dataset + ".npy")
                 data = np.load(file)
-                _ = self.hparams.data_normalizer.norm(data, dataset)
+                _ = self.hparams.data_normalizer.norm(data, dataset, self.trainer.loggers)
 
     def _load_main_data(self, processed_data_folder: Path):
         """Load the main data from given collection of files in the main_data dict."""
@@ -171,6 +173,7 @@ class L1ADDataModule(LightningDataModule):
             num_workers=self.hparams.num_workers,
             pin_memory=self.hparams.pin_memory,
             persistent_workers=True if self.hparams.num_workers > 0 else False,
+            prefetch_factor=self.hparams.prefetch_factor,
             shuffle=True,
         )
 
@@ -185,6 +188,7 @@ class L1ADDataModule(LightningDataModule):
             num_workers=self.hparams.num_workers,
             pin_memory=self.hparams.pin_memory,
             persistent_workers=True if self.hparams.num_workers > 0 else False,
+            prefetch_factor=self.hparams.prefetch_factor,
             shuffle=False,
         )
 
@@ -202,6 +206,7 @@ class L1ADDataModule(LightningDataModule):
             batch_size=self.batch_size_per_device,
             num_workers=self.hparams.num_workers,
             pin_memory=self.hparams.pin_memory,
+            prefetch_factor=self.hparams.prefetch_factor,
             shuffle=False,
         )
 
@@ -226,6 +231,7 @@ class L1ADDataModule(LightningDataModule):
                     batch_size=self.batch_size_per_device,
                     num_workers=self.hparams.num_workers,
                     pin_memory=self.hparams.pin_memory,
+                    prefetch_factor=self.hparams.prefetch_factor,
                     shuffle=False,
                 )
                 dataloaders.update({dataset_name: dataloader})

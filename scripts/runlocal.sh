@@ -1,5 +1,4 @@
 python3 src/train.py \
-    --multirun \
     experiment=qvae \
     trainer=gpu \
     model.loss.alpha=0.5736625791372814 \
@@ -9,3 +8,4 @@ python3 src/train.py \
     data.batch_size=16384 \
     data.num_workers=8 \
     data.pin_memory=True \
+    logger.mlflow.run_name=test

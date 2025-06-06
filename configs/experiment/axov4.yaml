@@ -1,0 +1,28 @@
+# @package _global_
+
+# to execute this experiment run:
+# python train.py experiment=example
+
+defaults:
+  - override /paths: axov4
+  - override /data: axov4
+  - override /model: axov4
+  - override /callbacks: default
+  - override /trainer: gpu1
+  - override /logger: mlflow
+
+tags: ["qvae", "axo_v4", "reproduction"]
+
+seed: 123
+
+trainer:
+  min_epochs: 1
+  max_epochs: 480
+
+data:
+  num_workers: 0
+
+logger:
+  mlflow:
+    experiment_name: axov4
+    run_name: kl_only_loss

@@ -1,11 +1,11 @@
 python3 src/train.py \
-    experiment=qvae \
-    trainer=gpu \
-    model.loss.alpha=0.5736625791372814 \
+    experiment=axov4 \
+    model.loss.alpha=1 \
     model.optimizer.lr=0.001 \
-    seed=123 \
     trainer.max_epochs=480 \
     data.batch_size=16384 \
-    data.num_workers=8 \
+    data.num_workers=1 \
     data.pin_memory=True \
-    logger.mlflow.run_name=test
+    data.specialized_loader=True \
+    data.device=cuda:1 \
+    # logger.mlflow.run_name= \

@@ -14,7 +14,7 @@ class QVAE(L1ADLightningModule):
         encoder: nn.Module,
         decoder: nn.Module,
         features: Optional[nn.Module] = None,
-        **kwargs
+        **kwargs,
     ):
         super().__init__(model=None, **kwargs)
         self.save_hyperparameters(

@@ -8,22 +8,22 @@ encoder:
   # 57 input features, 8 latent features
   nodes: [57, 28, 16, 8]
 
-  qdata: null
+  qdata:
     _target_: src.models.quantization.quantizers.FixedPointQuantizer
     bits: 8
     integer: 5
 
-  qweight: null
+  qweight:
     _target_: src.models.quantization.quantizers.FixedPointQuantizer
     bits: 6
     integer: 2
 
-  qbias: null
+  qbias:
     _target_: src.models.quantization.quantizers.FixedPointQuantizer
     bits: 10
     integer: 6
 
-  qactivation: null
+  qactivation:
     _target_: src.models.quantization.quantizers.FixedPointQuantizer
     bits: 10
     integer: 6
@@ -58,7 +58,7 @@ decoder:
   init_last_bias: null
 
 loss:
-  _target_: src.models.losses.vae.ClassicVAELoss
+  _target_: src.models.losses.vae.AxoV4Loss
   alpha: 0.5736625791372814
   reduction: none
 

@@ -44,7 +44,7 @@ class QuantizedEncoder(nn.Module):
             qactivation=qactivation,
             batchnorm=False,
             init_weight=init_weight,
-            init_bias=init_bias
+            init_bias=init_bias,
         )
         self.net = nn.Sequential(*list(qmlp.net.children())[:-1])
 
@@ -93,7 +93,7 @@ class Decoder(nn.Module):
         init_bias: Optional[Callable] = lambda _: None,
         init_last_weight: Optional[Callable] = None,
         init_last_bias: Optional[Callable] = None,
-        batchnorm: bool = False
+        batchnorm: bool = False,
     ) -> None:
         super().__init__()
         init_last_weight = init_last_weight if init_last_weight else lambda _: None
@@ -119,3 +119,58 @@ class Decoder(nn.Module):
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         return self.net(x)
+
+
+class Encoder(nn.Module):
+    """Simple encoder model.
+
+    :param nodes: List of ints, each int specifying the width of a layer.
+    :param init_weight: Callable method to initialize the weights of the encoder nodes.
+    :param init_bias: Callable method to initialize the biases of the encoder nodes.
+    """
+    def __init__(
+        self,
+        nodes: List[int],
+        init_weight: Optional[Callable] = lambda _: None,
+        init_bias: Optional[Callable] = lambda _: None,
+    ):
+        super().__init__()
+
+        self.init_weight = init_weight
+        self.init_bias = init_bias
+
+        # The encoder will be a QMLP up to the last layer
+        net_list = []
+        for idx in range(len(nodes) - 2):
+            net_list.append(nn.Linear(nodes[idx], nodes[idx + 1]))
+            net_list.append(nn.ReLU())
+
+        self.net = nn.Sequential(*net_list)
+        self.net.apply(self._init_weights_and_biases)
+
+        # Mean and log variance layers
+        self.z_mean = nn.Linear(nodes[-2], nodes[-1])
+        init_weight(self.z_mean.weight)
+        init_bias(self.z_mean.bias)
+        self.z_log_var = nn.Linear(nodes[-2], nodes[-1])
+        init_weight(self.z_log_var.weight)
+        init_bias(self.z_log_var.bias)
+
+        # Reparameterization layer
+        self.sampling = Sampling()
+
+    def _init_weights_and_biases(self, m):
+        if isinstance(m, nn.Linear):
+            self.init_weight(m.weight)
+            self.init_bias(m.bias)
+
+    def forward(
+        self, x: torch.Tensor
+    ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+        # Forward pass through the network
+        x = self.net(x)
+
+        # Mean and log variance for reparemeterization
+        z_mean, z_log_var = self.z_mean(x), self.z_log_var(x)
+        z = self.sampling((z_mean, z_log_var))
+        return z_mean, z_log_var, z

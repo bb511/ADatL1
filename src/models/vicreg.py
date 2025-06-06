@@ -19,7 +19,7 @@ class VICReg(L1ADLightningModule):
         object_mask: nn.Module,
         lorentz_rotation: nn.Module,
         qdata: Optional[Quantizer] = None,
-        **kwargs
+        **kwargs,
     ):
         super().__init__(**kwargs)
         self.save_hyperparameters(

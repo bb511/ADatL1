@@ -28,8 +28,7 @@ data_extractor:
 # Specify which objects/features to remove from the data.
 data_processor:
   _target_: src.data.components.processing.L1DataProcessor
-  extracted_path: ${data.data_extractor.cache}
-  extraction_name: ${data.data_extractor.name}
+  extracted_path: ${data.data_extractor.cache}/${data.data_extractor.name}
   remove_objects_features:
     ET: ['Et']
   cache: ${paths.data_dir}/processed
@@ -60,7 +59,8 @@ additional_validation:
 additional_test: null
 
 train_val_test_split: [0.8, 0.1, 0.1]
-batch_size: 64
+batch_size: 16384
 num_workers: 0
 pin_memory: False
-prefetch_factor: 6
+specialized_loader: False
+device: "cuda:0"

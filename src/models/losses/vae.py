@@ -28,50 +28,20 @@ class KLDivergenceLoss(nn.Module):
         self.scale = scale
 
     def forward(self, z_mean: torch.Tensor, z_log_var: torch.Tensor) -> torch.Tensor:
-        kl_per_observation = -0.5 * torch.sum(
+        kl_per_observation = -0.5 * torch.mean(
             1 + z_log_var - z_mean.pow(2) - z_log_var.exp(), dim=1
         )
         return self.scale * kl_per_observation
 
 
-class CylPtPzReconstructionLoss(nn.Module):
-    """Convert the pT, eta, phi input into pT, pz and compute loss there.
-
-    This trick is done since the training did not converge otherwise.
-    """
-    def __init__(self, scale: float = 1.0):
-        super().__init__()
-        self.scale = scale
-
-    def forward(self, target: torch.Tensor, reco: torch.Tensor) -> torch.Tensor:
-        # Indexes of where the pTs of the objects are, given the axo v4 input data.
-        pT_idxs = list(range(0, 55, 3))
-        eta_idxs = list(range(1, 54, 3))
-        # Append eta index for Et, which is the last element of the array and is 0.
-        # It's not in the same place as the other etas since it is zero padded.
-        eta_idxs.append(56)
-
-        # Compute the projection from pT to pz. Use real eta for the reco.
-        pT, eta = target[:, pT_idxs], target[:, eta_idxs]
-        pz = pT * torch.sinh(eta)
-        pT_pred = reco[:, pT_idxs]
-        pz_pred = pT_pred * torch.sinh(eta)
-
-        loss_per_observation = torch.mean(
-            torch.abs(pT - pT_pred) + torch.abs(pz - pz_pred), dim=1
-        )
-
-        return self.scale * loss_per_observation
-
-
 class ClassicVAELoss(nn.Module):
     def __init__(
-        self, 
+        self,
         alpha: float = 1.0,
-        reduction: Literal['none', 'mean', 'sum'] = 'mean',
+        reduction: Literal["none", "mean", "sum"] = "mean",
     ):
         super().__init__()
-        self.reco_scale = (1 - alpha)
+        self.reco_scale = 1 - alpha
         self.kl_scale = alpha
         self.reduction = reduction
 
@@ -113,7 +83,38 @@ class ClassicVAELoss(nn.Module):
             raise ValueError(f"Invalid reduction type: {reduction}")
 
 
-class CylPtPzVAELoss(ClassicVAELoss):
+class CylPtPzReconstructionLoss(nn.Module):
+    """Convert the pT, eta, phi input into pT, pz and compute loss there.
+
+    This trick is done since the training did not converge otherwise.
+    """
+
+    def __init__(self, scale: float = 1.0):
+        super().__init__()
+        self.scale = scale
+
+    def forward(self, target: torch.Tensor, reco: torch.Tensor) -> torch.Tensor:
+        # Indexes of where the pTs of the objects are, given the axo v4 input data.
+        pT_idxs = list(range(0, 55, 3))
+        # Indexes of where the eta of the objects are, given the axo v4 input data.
+        eta_idxs = list(range(1, 56, 3))
+
+        # Compute the projection from pT to pz. Use real eta for the reco.
+        pT, eta = target[:, pT_idxs], target[:, eta_idxs]
+        pz = pT * torch.sinh(eta)
+        MET_phi = target[:, -1]
+        pT_pred = reco[:, pT_idxs]
+        pz_pred = pT_pred * torch.sinh(eta)
+        MET_phi_pred = reco[:, -1]
+
+        loss_per_observation = torch.mean(
+            torch.abs(pT - pT_pred) + torch.abs(pz - pz_pred), dim=1
+        )
+
+        return self.scale * (loss_per_observation + torch.abs(MET_phi - MET_phi_pred))
+
+
+class AxoV4Loss(ClassicVAELoss):
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
         self.reconstruction_loss = CylPtPzReconstructionLoss(scale=self.reco_scale)

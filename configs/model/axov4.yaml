@@ -8,25 +8,25 @@ encoder:
   # 57 input features, 8 latent features
   nodes: [57, 28, 16, 8]
 
-  qdata:
-    _target_: src.models.quantization.quantizers.FixedPointQuantizer
-    bits: 8
-    integer: 5
+  qdata: null
+    # _target_: src.models.quantization.quantizers.FixedPointQuantizer
+    # bits: 8
+    # integer: 5
 
-  qweight:
-    _target_: src.models.quantization.quantizers.FixedPointQuantizer
-    bits: 6
-    integer: 2
+  qweight: null
+    # _target_: src.models.quantization.quantizers.FixedPointQuantizer
+    # bits: 6
+    # integer: 2
 
-  qbias:
-    _target_: src.models.quantization.quantizers.FixedPointQuantizer
-    bits: 10
-    integer: 6
+  qbias: null
+    # _target_: src.models.quantization.quantizers.FixedPointQuantizer
+    # bits: 10
+    # integer: 6
 
-  qactivation:
-    _target_: src.models.quantization.quantizers.FixedPointQuantizer
-    bits: 10
-    integer: 6
+  qactivation: null
+    # _target_: src.models.quantization.quantizers.FixedPointQuantizer
+    # bits: 10
+    # integer: 6
 
   init_weight:
     _target_: src.utils.hydra.get_method

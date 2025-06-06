@@ -8,7 +8,7 @@ defaults:
   - override /data: axov4
   - override /model: axov4
   - override /callbacks: default
-  - override /trainer: gpu1
+  - override /trainer: gpu2
   - override /logger: mlflow
 
 tags: ["qvae", "axo_v4", "reproduction"]
@@ -25,4 +25,4 @@ data:
 logger:
   mlflow:
     experiment_name: axov4
-    run_name: kl_only_loss
+    run_name: test

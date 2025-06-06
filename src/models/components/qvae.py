@@ -12,10 +12,9 @@ class Sampling(nn.Module):
 
     def forward(self, inputs: Tuple[torch.Tensor, torch.Tensor]) -> torch.Tensor:
         z_mean, z_log_var = inputs
-        batch = z_mean.size(0)
-        dim = z_mean.size(1)
-        epsilon = torch.randn(batch, dim, device=z_mean.device)
-        return z_mean + torch.exp(0.5 * z_log_var) * epsilon
+        var = torch.exp(0.5 * z_log_var)
+        epsilon = torch.randn_like(var).to(z_mean.device)
+        return z_mean + z_log_var*epsilon
 
 
 class QuantizedEncoder(nn.Module):

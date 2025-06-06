@@ -9,12 +9,11 @@
 # python3 src/train.py \
 srun python3 src/train.py \
     --multirun \
-    experiment=vicreg \
-    trainer=ddp \
-    trainer.devices=4 \
-    trainer.max_epochs=100 \
-    data.batch_size=16384 \
-    data.num_workers=50 \
-    # trainer.limit_train_batches=1.23e-5 \
-    # trainer.limit_val_batches=9.8261e-5 \
-    # trainer.limit_test_batches=1.46e-4 \
+    experiment=qvae \
+    trainer=gpu \
+    model.loss.alpha=0.1,0.2,0.3 \
+    model.loss.beta=0.1,0.2,0.3 \ 
+    trainer.limit_train_batches=0.0000001 \
+    trainer.limit_val_batches=0.00000001 \
+    trainer.limit_test_batches=0.0000001 \
+    trainer.max_epochs=1 \

@@ -1,7 +1,8 @@
 defaults:
   - default.yaml
 
-raw_data_dir: /data/deodagiu/ad_data
+# raw_data_dir: /data/deodagiu/ad_data
+raw_data_dir: /data
 
 # paths to the different types of data
 zerobias:

@@ -160,7 +160,6 @@ outputs
 
 # Fix exceptions
 !**/data/
-!**/logs/
 !**/outputs/
 !**/results/
 

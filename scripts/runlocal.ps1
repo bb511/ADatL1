@@ -3,6 +3,9 @@ python src/train.py `
     experiment=qvae `
     trainer=cpu `
     trainer.max_epochs=1 `
+    model.loss.alpha=0.1 `
+    model.optimizer.lr=0.01 `
+    seed=511 `
     trainer.limit_train_batches=1.23e-4 `
     trainer.limit_val_batches=9.8261e-4 `
     trainer.limit_test_batches=1.46e-3 `

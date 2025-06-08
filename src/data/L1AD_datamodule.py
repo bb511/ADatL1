@@ -182,6 +182,7 @@ class L1ADDataModule(LightningDataModule):
 
         dataloaders = self._dataloader_dict(self.hparams.additional_validation or {})
         dataloaders.update({"main": main_val})
+
         return dataloaders
 
     def test_dataloader(self) -> DataLoader[Any]:

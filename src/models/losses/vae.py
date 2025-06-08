@@ -113,7 +113,41 @@ class ClassicVAELoss(nn.Module):
             raise ValueError(f"Invalid reduction type: {reduction}")
 
 
-class CylPtPzVAELoss(ClassicVAELoss):
-    def __init__(self, **kwargs):
-        super().__init__(**kwargs)
-        self.reconstruction_loss = CylPtPzReconstructionLoss(scale=self.reco_scale)
+from typing import Dict
+from src.models.losses.cylptpz import CylPtPzLoss, CylPtPzMAELoss
+
+class CombinedVAELoss(nn.Module):
+    def __init__(
+        self, 
+        norm_scales: torch.Tensor,
+        norm_biases: torch.Tensor,
+        mask: Dict[str, torch.Tensor],
+        unscale_energy: bool = False,
+        alpha: float = 0.1,
+        use_mae: bool = False
+    ):
+        super().__init__()
+        
+        # Initialize component losses
+        if use_mae:
+            self.reco_loss = CylPtPzMAELoss(norm_scales, norm_biases, mask, unscale_energy)
+        else:
+            self.reco_loss = CylPtPzLoss(norm_scales, norm_biases, mask, unscale_energy)
+
+        self.kl_loss = KLDivergenceLoss()
+        
+        # Loss scaling
+        self.reco_scale = 1 - alpha
+        self.kl_scale = alpha
+        
+    def forward(self,
+                target: torch.Tensor,
+                reconstruction: torch.Tensor,
+                z_mean: torch.Tensor,
+                z_log_var: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+        
+        reco_loss = self.reco_scale * self.reco_loss(target, reconstruction)
+        kl_loss = self.kl_scale * self.kl_loss(z_mean, z_log_var)
+        total_loss = reco_loss + kl_loss
+        
+        return total_loss, reco_loss, kl_loss

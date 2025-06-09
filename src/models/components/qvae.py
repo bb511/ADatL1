@@ -42,13 +42,17 @@ class QuantizedEncoder(nn.Module):
             qactivation=qactivation
         )
         
-        # ???
+        # Log variance layer (initialized to zero)
         self.z_log_var = QuantizedLinear(
             in_features=nodes[-2],
             out_features=nodes[-1],
             qweight=qweight,
             qbias=qbias,
             qactivation=qactivation,
+            
+            # Consider Xavier initialization
+            # init_weight = lambda w: nn.init.xavier_normal_(w, gain=0.1)
+            # init_bias = lambda b: nn.init.normal_(b, mean=-1.0, std=0.1)
         
             # Initialize log_var weights to zero
             init_weight = nn.init.zeros_,

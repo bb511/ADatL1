@@ -54,7 +54,7 @@ decoder:
   init_last_bias: null
 
 loss:
-  _target_: src.models.losses.vae.CylPtPzVAELoss
+  _target_: src.models.losses.vae.AxoV4Loss
   alpha: 0.604108559135001
   reduction: none
 

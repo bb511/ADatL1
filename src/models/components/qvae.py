@@ -18,8 +18,6 @@ class Sampling(nn.Module):
 
 
 class QuantizedEncoder(nn.Module):
-    """Quantized encoder for AD@L1."""
-
     def __init__(
         self,
         nodes: List[int],
@@ -30,14 +28,12 @@ class QuantizedEncoder(nn.Module):
     ):
         super().__init__()
         
-        # Input data quantization
         self.qdata = qdata or Quantizer(None, None)
 
-        # The encoder will be a QMLP up to the last layer
         qmlp = QMLP(nodes, qweight=qweight, qbias=qbias, qactivation=qactivation, batchnorm=False)
         self.net = nn.Sequential(*list(qmlp.net.children())[:-1])
      
-        # Mean and log variance layers
+        # Mean layer (standard initialization)
         self.z_mean = QuantizedLinear(
             in_features=nodes[-2],
             out_features=nodes[-1],
@@ -45,27 +41,24 @@ class QuantizedEncoder(nn.Module):
             qbias=qbias,
             qactivation=qactivation
         )
+        
+        # ???
         self.z_log_var = QuantizedLinear(
             in_features=nodes[-2],
             out_features=nodes[-1],
             qweight=qweight,
             qbias=qbias,
             qactivation=qactivation,
-
+        
             # Initialize log_var weights to zero
             init_weight = nn.init.zeros_,
             init_bias = nn.init.zeros_
         )
         
-        # Reparameterization layer
         self.sampling = Sampling()
         
-     
     def forward(self, x: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
-        # Forward pass through the network
         x = self.net(self.qdata(x))
-        
-        # Mean and log variance for reparemeterization
         z_mean, z_log_var = self.z_mean(x), self.z_log_var(x)
         z = self.sampling((z_mean, z_log_var))
         return z_mean, z_log_var, z

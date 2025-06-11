@@ -3,27 +3,27 @@ _target_: src.models.qvae.QVAE
 features: null 
 
 encoder:
-  _target_: src.models.components.qvae.QuantizedEncoder
+  _target_: src.models.components.qvae.Encoder
 
   # 57 input features, 8 latent features
   nodes: [57, 28, 16, 8]
 
-  qdata: null
+  # qdata: null
     # _target_: src.models.quantization.quantizers.FixedPointQuantizer
     # bits: 8
     # integer: 5
 
-  qweight: null
+  # qweight: null
     # _target_: src.models.quantization.quantizers.FixedPointQuantizer
     # bits: 6
     # integer: 2
 
-  qbias: null
+  # qbias: null
     # _target_: src.models.quantization.quantizers.FixedPointQuantizer
     # bits: 10
     # integer: 6
 
-  qactivation: null
+  # qactivation: null
     # _target_: src.models.quantization.quantizers.FixedPointQuantizer
     # bits: 10
     # integer: 6

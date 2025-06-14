@@ -1,117 +1,61 @@
-# Variational autoencoder model.
-from typing import Optional, Tuple, List, Callable
+from typing import Optional, Tuple
 
 import torch
-import torch.nn as nn
+from torch import nn
+import torch.nn.functional as F
+from pytorch_lightning.utilities.memory import garbage_collection_cuda
+
+from src.models import L1ADLightningModule
 
 
-class Sampling(nn.Module):
-    """Sampling layer for VAE. Performs reparameterization trick."""
-
-    def forward(self, inputs: Tuple[torch.Tensor, torch.Tensor]) -> torch.Tensor:
-        z_mean, z_log_var = inputs
-        var = torch.exp(0.5 * z_log_var)
-        epsilon = torch.randn_like(var).to(z_mean.device)
-        return z_mean + z_log_var*epsilon
-
-
-class Encoder(nn.Module):
-    """Simple encoder model.
-
-    :param nodes: List of ints, each int specifying the width of a layer.
-    :param init_weight: Callable method to initialize the weights of the encoder nodes.
-    :param init_bias: Callable method to initialize the biases of the encoder nodes.
-    """
+class VAE(L1ADLightningModule):
     def __init__(
         self,
-        nodes: List[int],
-        init_weight: Optional[Callable] = lambda _: None,
-        init_bias: Optional[Callable] = lambda _: None,
+        encoder: nn.Module,
+        decoder: nn.Module,
+        features: Optional[nn.Module] = None,
+        **kwargs,
     ):
-        super().__init__()
+        super().__init__(model=None, **kwargs)
+        self.save_hyperparameters(
+            ignore=["model", "features", "encoder", "decoder", "loss"]
+        )
 
-        self.init_weight = init_weight
-        self.init_bias = init_bias
-
-        # The encoder will be a QMLP up to the last layer
-        net_list = []
-        for idx in range(len(nodes) - 2):
-            net_list.append(nn.Linear(nodes[idx], nodes[idx + 1]))
-            net_list.append(nn.ReLU())
-
-        self.net = nn.Sequential(*net_list)
-        self.net.apply(self._init_weights_and_biases)
-
-        # Mean and log variance layers
-        self.z_mean = nn.Linear(nodes[-2], nodes[-1])
-        init_weight(self.z_mean.weight)
-        # init_bias(self.z_mean.bias)
-        self.z_log_var = nn.Linear(nodes[-2], nodes[-1])
-        init_weight(self.z_log_var.weight)
-        # init_bias(self.z_log_var.bias)
-
-        # Reparameterization layer
-        self.sampling = Sampling()
-
-    def _init_weights_and_biases(self, m):
-        if isinstance(m, nn.Linear):
-            self.init_weight(m.weight)
-            self.init_bias(m.bias)
+        self.encoder, self.decoder = encoder, decoder
+        self.features = features if features is not None else nn.Identity()
+        self.features.eval()
 
     def forward(
         self, x: torch.Tensor
-    ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
-        # Forward pass through the network
-        x = self.net(x)
+    ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
+        z_mean, z_log_var, z = self.encoder(x)
+        reconstruction = self.decoder(z)
+        return z_mean, z_log_var, z, reconstruction
 
-        # Mean and log variance for reparemeterization
-        z_mean, z_log_var = self.z_mean(x), self.z_log_var(x)
-        z = self.sampling((z_mean, z_log_var))
-        return z_mean, z_log_var, z
+    def model_step(self, x: torch.Tensor) -> torch.Tensor:
+        z_mean, z_log_var, z, reconstruction = self.forward(x)
+        total_loss, reco_loss, kl_loss = self.loss(
+            reconstruction=reconstruction, z_mean=z_mean, z_log_var=z_log_var, target=x
+        )
+        del z_mean, z_log_var, z, reconstruction
+        garbage_collection_cuda()
 
-class Decoder(nn.Module):
-    """Decoder for AD@L1."""
+        return {
+            # Used for backpropagation:
+            "loss": total_loss.mean(),
+            # Used for logging:
+            "loss/reco/mean": reco_loss.mean(),
+            "loss/kl/mean": kl_loss.mean(),
+            # Used for callbacks:
+            "loss/total/full": total_loss,
+            "loss/reco/full": reco_loss,
+            "loss/kl/full": kl_loss,
+        }
 
-    def __init__(
-        self,
-        nodes: List[int],
-        init_weight: Optional[Callable] = lambda _: None,
-        init_bias: Optional[Callable] = lambda _: None,
-        init_last_weight: Optional[Callable] = None,
-        init_last_bias: Optional[Callable] = None,
-        batchnorm: bool = False,
-    ) -> None:
-        super().__init__()
-
-        self.init_weight = init_weight
-        self.init_bias = init_bias
-
-        init_last_weight = init_last_weight if init_last_weight else lambda _: None
-        init_last_bias = init_last_bias if init_last_bias else lambda _: None
-
-        # Build the decoder as a MLP (no quantization) with batch normalization
-        net_list = []
-        for idx in range(len(nodes) - 2):
-            net_list.append(nn.Linear(nodes[idx], nodes[idx + 1]))
-            net_list.append(nn.ReLU())
-
-        # Remove last activation.
-        net_list.pop()
-
-        self.net = nn.Sequential(*net_list)
-        self.net.apply(self._init_weights_and_biases)
-
-        # Apply initialization to the weight of the last Linear() layer
-        last_linear_layer = self.net[-1]
-        if init_last_weight != None:
-            init_last_weight(last_linear_layer.weight)
-        if init_last_weight != None and last_linear_layer.bias != None:
-            init_last_bias(last_linear_layer.bias)
-
-    def _init_weights_and_biases(self, m):
-        if isinstance(m, nn.Linear):
-            self.init_weight(m.weight)
-            self.init_bias(m.bias)
-
-    def forward(self, x: torch.Tensor) -> torch.Tensor:
-        return self.net(x)
+    def _filter_log_dict(self, outdict: dict) -> dict:
+        """Override with the values you want to log."""
+        return {
+            "loss": outdict.get("loss"),
+            "loss_reco": outdict.get("loss/reco/mean"),
+            "loss_kl": outdict.get("loss/kl/mean"),
+        }

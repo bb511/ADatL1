@@ -24,6 +24,6 @@ data:
 
 logger:
   mlflow:
-    experiment_name: axov4
+    experiment_name: debug
     # run_name: test
-    run_name: scan_lr${model.optimizer.lr}_alpha${model.loss.alpha}
+    # run_name: scan_lr${model.optimizer.lr}_alpha${model.loss.alpha}

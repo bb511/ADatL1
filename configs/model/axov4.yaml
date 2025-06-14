@@ -1,4 +1,4 @@
-_target_: src.models.qvae.QVAE
+_target_: src.models.vae.VAE
 
 features: null 
 

@@ -206,6 +206,9 @@ class L1ADDataModule(LightningDataModule):
 
         dataloaders = self._dataloader_dict(self.hparams.additional_validation or {})
         dataloaders.update({"main_val": main_val})
+
+        dataloaders = CombinedLoader(dataloaders, 'max_size_cycle')
+
         return dataloaders
 
     def test_dataloader(self) -> DataLoader[Any]:

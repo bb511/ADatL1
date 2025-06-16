@@ -37,6 +37,7 @@ class VAE(L1ADLightningModule):
         total_loss, reco_loss, kl_loss = self.loss(
             reconstruction=reconstruction, z_mean=z_mean, z_log_var=z_log_var, target=x
         )
+
         del z_mean, z_log_var, z, reconstruction
         garbage_collection_cuda()
 
@@ -59,3 +60,4 @@ class VAE(L1ADLightningModule):
             "loss_reco": outdict.get("loss/reco/mean"),
             "loss_kl": outdict.get("loss/kl/mean"),
         }
+

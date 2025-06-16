@@ -80,3 +80,8 @@ scheduler:
     m_mul: 0.65
     alpha: 1e-6
     warmup_epochs: 10
+
+anomaly_rate:
+  _target_: src.models.metrics.axo.AnomalyRate
+  target_rates: [10]
+  bc_rate: 28608.8064

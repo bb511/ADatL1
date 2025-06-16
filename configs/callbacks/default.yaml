@@ -4,6 +4,7 @@ defaults:
   # - batch_size_finder
   # - cap
   - _self_
+  # - debug
 
 # model_checkpoint:
 #   dirpath: ${paths.output_dir}/checkpoints

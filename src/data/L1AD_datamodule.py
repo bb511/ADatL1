@@ -36,6 +36,7 @@ class L1ADDataModule(LightningDataModule):
         pin_memory: bool = False,
         device: str = "cpu",
         specialized_loader: bool = False,
+        use_entire_val_dataset: bool = True,
     ) -> None:
         """Initialize a `L1ADDataModule`.
 
@@ -55,6 +56,8 @@ class L1ADDataModule(LightningDataModule):
         :param specialized_loader: Bool specifying whether to use a dataset class
             written specifically for the L1AD data (True) or use the default torch
             Dataloader (False).
+        :param use_entire_val_dataset: Bool whether to split validation data into
+            batches or use the entire dataset.
         """
 
         super().__init__()
@@ -84,7 +87,7 @@ class L1ADDataModule(LightningDataModule):
         :param stage: The stage to setup. Either `"fit"`, `"validate"`, `"test"`, or `
             "predict"`. Defaults to ``None``.
         """
-        self._set_batch_size()
+        self._set_training_batch_size()
 
         if "cuda" in self.hparams.device:
             log.info(Fore.YELLOW + f"All data will be loaded on {self.hparams.device}.")
@@ -152,7 +155,7 @@ class L1ADDataModule(LightningDataModule):
                     data, dataset, self.trainer.loggers
                 )
 
-    def _set_batch_size(self):
+    def _set_training_batch_size(self):
         """Set the batch size per device if multiple devices are available."""
         if self.trainer is not None:
             if self.hparams.batch_size % self.trainer.world_size != 0:
@@ -185,19 +188,22 @@ class L1ADDataModule(LightningDataModule):
 
         :return: The validation dataloader.
         """
+        batch_size = len(self.data_val) if self.hparams.use_entire_val_dataset else self.batch_size_per_device
+
         if self.hparams.specialized_loader:
             main_val = L1ADDataset(
-                self.data_val, batch_size=self.batch_size_per_device, shuffle=False
+                self.data_val, batch_size=batch_size, shuffle=False
             )
             dataloaders = self._specialized_loader_dict(
                 self.hparams.additional_validation or {}
             )
             dataloaders.update({"main_val": main_val})
+
             return dataloaders
 
         main_val = DataLoader(
             dataset=self.data_val,
-            batch_size=self.batch_size_per_device,
+            batch_size=batch_size,
             num_workers=self.hparams.num_workers,
             pin_memory=self.hparams.pin_memory,
             persistent_workers=True if self.hparams.num_workers > 0 else False,
@@ -206,8 +212,6 @@ class L1ADDataModule(LightningDataModule):
 
         dataloaders = self._dataloader_dict(self.hparams.additional_validation or {})
         dataloaders.update({"main_val": main_val})
-
-        dataloaders = CombinedLoader(dataloaders, 'max_size_cycle')
 
         return dataloaders
 
@@ -240,7 +244,7 @@ class L1ADDataModule(LightningDataModule):
         return dataloaders
 
     def _dataloader_dict(self, additional_data: dict):
-        """Creates a dictionary of dataloaders of specified datasets found in dict."""
+        """Creates dict of dataloaders given dictionary of paths to the data."""
         norm_datapath = Path(self.hparams.data_normalizer.cache)
         norm_scheme = self.hparams.data_normalizer.norm_scheme
 
@@ -271,8 +275,9 @@ class L1ADDataModule(LightningDataModule):
                 file = norm_datapath / norm_scheme / (dataset_name + ".npy")
                 data = np.load(file)
                 data = torch.from_numpy(data).to(self.hparams.device)
+                batch_size = len(data) if self.hparams.use_entire_val_dataset else self.batch_size_per_device
                 data = L1ADDataset(
-                    data, batch_size=self.batch_size_per_device, shuffle=False
+                    data, batch_size=batch_size, shuffle=False
                 )
                 dataloaders.update({dataset_name: data})
 

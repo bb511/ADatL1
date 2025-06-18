@@ -19,9 +19,6 @@ trainer:
   min_epochs: 1
   max_epochs: 480
 
-data:
-  num_workers: 0
-
 logger:
   mlflow:
     experiment_name: debug

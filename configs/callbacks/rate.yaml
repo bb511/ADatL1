@@ -1,0 +1,4 @@
+anomaly_rate:
+  _target_: src.callbacks.rate.AnomalyRateCallback
+  target_rates: [5, 10]
+  bc_rate: 28608.8064

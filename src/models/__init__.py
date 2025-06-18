@@ -7,7 +7,6 @@ from omegaconf import OmegaConf, DictConfig
 from pytorch_lightning import LightningModule
 from pytorch_lightning.core.optimizer import LightningOptimizer
 from pytorch_lightning.utilities.memory import garbage_collection_cuda
-from torchmetrics import Metric
 
 
 class L1ADLightningModule(LightningModule):
@@ -19,12 +18,10 @@ class L1ADLightningModule(LightningModule):
         loss: nn.Module,
         optimizer: optim.Optimizer,
         scheduler: Optional[DictConfig] = None,
-        anomaly_rate: Metric = None,
     ):
         super().__init__()
         self.loss = loss
         self.model = model
-        self.anomaly_rate = anomaly_rate
         self.save_hyperparameters(ignore=["model", "loss"])
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
@@ -73,12 +70,8 @@ class L1ADLightningModule(LightningModule):
         self, batch: torch.Tensor, batch_idx: int, dataloader_idx: Optional[int] = 0
     ):
         outdict = self.model_step(batch.flatten(start_dim=1).to(dtype=torch.float32))
-        outdict = self._log_dict(outdict, "val", dataloader_idx=dataloader_idx)
-        if "train" in "\t".join(list(outdict.keys())):
-            self.anomaly_rate.set_threshold()
-
         self.log_dict(
-            outdict,
+            self._log_dict(outdict, "val", dataloader_idx=dataloader_idx),
             prog_bar=False,
             on_step=False,
             on_epoch=True,

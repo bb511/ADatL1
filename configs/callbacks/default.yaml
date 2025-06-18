@@ -1,10 +1,11 @@
 defaults:
   - model_summary
   - rich_progress_bar
+  # - rate
   # - batch_size_finder
   # - cap
-  - _self_
   # - debug
+  - _self_
 
 # model_checkpoint:
 #   dirpath: ${paths.output_dir}/checkpoints

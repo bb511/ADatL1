@@ -1,32 +1,32 @@
-_target_: src.models.qvae.QVAE
+_target_: src.models.vae.VAE
 
 features: null 
 
 encoder:
-  _target_: src.models.components.qvae.QuantizedEncoder
+  _target_: src.models.components.vae.Encoder
 
   # 57 input features, 8 latent features
   nodes: [57, 28, 16, 8]
 
-  qdata: null
-    _target_: src.models.quantization.quantizers.FixedPointQuantizer
-    bits: 8
-    integer: 5
+  # qdata: null
+    # _target_: src.models.quantization.quantizers.FixedPointQuantizer
+    # bits: 8
+    # integer: 5
 
-  qweight: null
-    _target_: src.models.quantization.quantizers.FixedPointQuantizer
-    bits: 6
-    integer: 2
+  # qweight: null
+    # _target_: src.models.quantization.quantizers.FixedPointQuantizer
+    # bits: 6
+    # integer: 2
 
-  qbias: null
-    _target_: src.models.quantization.quantizers.FixedPointQuantizer
-    bits: 10
-    integer: 6
+  # qbias: null
+    # _target_: src.models.quantization.quantizers.FixedPointQuantizer
+    # bits: 10
+    # integer: 6
 
-  qactivation: null
-    _target_: src.models.quantization.quantizers.FixedPointQuantizer
-    bits: 10
-    integer: 6
+  # qactivation: null
+    # _target_: src.models.quantization.quantizers.FixedPointQuantizer
+    # bits: 10
+    # integer: 6
 
   init_weight:
     _target_: src.utils.hydra.get_method
@@ -37,7 +37,7 @@ encoder:
     path: torch.nn.init.zeros_
   
 decoder:
-  _target_: src.models.components.qvae.Decoder
+  _target_: src.models.components.vae.Decoder
 
   nodes: [8, 24, 32, 64, 128, 57] # v4 axol1tl architecture
 
@@ -58,7 +58,7 @@ decoder:
   init_last_bias: null
 
 loss:
-  _target_: src.models.losses.vae.ClassicVAELoss
+  _target_: src.models.losses.vae.AxoV4Loss
   alpha: 0.5736625791372814
   reduction: none
 

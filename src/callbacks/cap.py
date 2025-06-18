@@ -18,13 +18,13 @@ class CAP_Callback(Callback):
     """
 
     def __init__(
-            self,
-            loss_name: str = "loss/total/full", 
-            beta0: Optional[float] = 1.0,
-            n_epochs: Optional[int] = 100,
-            lr: Optional[float] = 0.01,
-            batch_size: Optional[int] = 64,
-        ):
+        self,
+        loss_name: str = "loss/total/full",
+        beta0: Optional[float] = 1.0,
+        n_epochs: Optional[int] = 100,
+        lr: Optional[float] = 0.01,
+        batch_size: Optional[int] = 64,
+    ):
         super().__init__()
         self.loss_name = loss_name
         self.capmetric = CAP(
@@ -36,25 +36,26 @@ class CAP_Callback(Callback):
 
         self.loss_cache = defaultdict(list)
 
-    def on_validation_batch_end(self, trainer, pl_module, outputs, batch, batch_idx, dataloader_idx=0):
+    def on_validation_batch_end(
+        self, trainer, pl_module, outputs, batch, batch_idx, dataloader_idx=0
+    ):
         dset_key = list(getattr(trainer, f"val_dataloaders").keys())[dataloader_idx]
-        self.loss_cache[dset_key].append(
-            outputs[self.loss_name].detach().cpu()
-        )
+        self.loss_cache[dset_key].append(outputs[self.loss_name].detach().cpu())
 
     def on_validation_epoch_end(self, trainer, pl_module):
         """Compute CAP for the two first datasets"""
         list_dset_key = list(self.loss_cache.keys())
         loss1 = torch.cat(self.loss_cache[list_dset_key[0]])
         loss2 = torch.cat(self.loss_cache[list_dset_key[1]])
-        self.loss_cache = None; garbage_collection_cuda()
+        self.loss_cache = None
+        garbage_collection_cuda()
 
         loss_dataset = TensorDataset(
-            loss1[:min(len(loss1), len(loss2))],
-            loss2[:min(len(loss1), len(loss2))]
+            loss1[: min(len(loss1), len(loss2))], loss2[: min(len(loss1), len(loss2))]
         )
         self.capmetric.update(loss_dataset)
-        del loss_dataset; garbage_collection_cuda()
+        del loss_dataset
+        garbage_collection_cuda()
         cap = self.capmetric.compute()
 
         pl_module.log_dict(
@@ -65,5 +66,5 @@ class CAP_Callback(Callback):
             on_step=False,
             on_epoch=True,
             logger=True,
-            sync_dist=True
+            sync_dist=True,
         )

@@ -1,0 +1,26 @@
+# @package _global_
+
+# to execute this experiment run:
+# python train.py experiment=example
+
+defaults:
+  - override /paths: axov4
+  - override /data: axov4
+  - override /model: axov4
+  - override /callbacks: default
+  - override /trainer: gpu0
+  - override /logger: mlflow
+
+tags: ["vae", "axo_v4", "scan"]
+
+seed: 123
+
+trainer:
+  min_epochs: 1
+  max_epochs: 480
+
+logger:
+  mlflow:
+    experiment_name: debug
+    # run_name: test
+    # run_name: scan_lr${model.optimizer.lr}_alpha${model.loss.alpha}

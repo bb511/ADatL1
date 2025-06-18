@@ -1,10 +1,8 @@
+# Variational autoencoder model.
 from typing import Optional, Tuple, List, Callable
+
 import torch
 import torch.nn as nn
-
-from src.models.quantization import Quantizer
-from src.models.quantization.layers import QuantizedLinear
-from src.models.components.qmlp import QMLP
 
 
 class Sampling(nn.Module):
@@ -17,72 +15,61 @@ class Sampling(nn.Module):
         return z_mean + z_log_var*epsilon
 
 
-class QuantizedEncoder(nn.Module):
+class Encoder(nn.Module):
+    """Simple encoder model.
+
+    :param nodes: List of ints, each int specifying the width of a layer.
+    :param init_weight: Callable method to initialize the weights of the encoder nodes.
+    :param init_bias: Callable method to initialize the biases of the encoder nodes.
+    """
     def __init__(
         self,
         nodes: List[int],
-        qdata: Optional[Quantizer] = None,
-        qweight: Optional[Quantizer] = None,
-        qbias: Optional[Quantizer] = None,
-        qactivation: Optional[Quantizer] = None,
         init_weight: Optional[Callable] = lambda _: None,
         init_bias: Optional[Callable] = lambda _: None,
     ):
         super().__init__()
 
-        # Input data quantization
-        self.qdata = qdata or Quantizer(None, None)
+        self.init_weight = init_weight
+        self.init_bias = init_bias
 
         # The encoder will be a QMLP up to the last layer
-        qmlp = QMLP(
-            nodes,
-            qweight=qweight,
-            qbias=qbias,
-            qactivation=qactivation,
-            batchnorm=False,
-            init_weight=init_weight,
-            init_bias=init_bias,
-        )
-        self.net = nn.Sequential(*list(qmlp.net.children())[:-1])
+        net_list = []
+        for idx in range(len(nodes) - 2):
+            net_list.append(nn.Linear(nodes[idx], nodes[idx + 1]))
+            net_list.append(nn.ReLU())
+
+        self.net = nn.Sequential(*net_list)
+        self.net.apply(self._init_weights_and_biases)
 
         # Mean and log variance layers
-        self.z_mean = QuantizedLinear(
-            in_features=nodes[-2],
-            out_features=nodes[-1],
-            qweight=qweight,
-            qbias=qbias,
-            qactivation=qactivation,
-            init_weight=nn.init.xavier_uniform_,
-            init_bias=nn.init.zeros_,
-        )
-        
-        # Log variance layer (initialized to zero)
-        self.z_log_var = QuantizedLinear(
-            in_features=nodes[-2],
-            out_features=nodes[-1],
-            qweight=qweight,
-            qbias=qbias,
-            qactivation=qactivation,
-            init_weight=nn.init.xavier_uniform_,
-            init_bias=nn.init.zeros_,
-        )
+        self.z_mean = nn.Linear(nodes[-2], nodes[-1])
+        init_weight(self.z_mean.weight)
+        # init_bias(self.z_mean.bias)
+        self.z_log_var = nn.Linear(nodes[-2], nodes[-1])
+        init_weight(self.z_log_var.weight)
+        # init_bias(self.z_log_var.bias)
 
         # Reparameterization layer
         self.sampling = Sampling()
+
+    def _init_weights_and_biases(self, m):
+        if isinstance(m, nn.Linear):
+            self.init_weight(m.weight)
+            self.init_bias(m.bias)
 
     def forward(
         self, x: torch.Tensor
     ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
         # Forward pass through the network
-        x = self.net(self.qdata(x))
+        x = self.net(x)
 
         # Mean and log variance for reparemeterization
         z_mean, z_log_var = self.z_mean(x), self.z_log_var(x)
         z = self.sampling((z_mean, z_log_var))
         return z_mean, z_log_var, z
 
-
-class QuantizedDecoder(nn.Module):
+class Decoder(nn.Module):
     """Decoder for AD@L1."""
 
     def __init__(
@@ -95,26 +82,36 @@ class QuantizedDecoder(nn.Module):
         batchnorm: bool = False,
     ) -> None:
         super().__init__()
+
+        self.init_weight = init_weight
+        self.init_bias = init_bias
+
         init_last_weight = init_last_weight if init_last_weight else lambda _: None
         init_last_bias = init_last_bias if init_last_bias else lambda _: None
 
         # Build the decoder as a MLP (no quantization) with batch normalization
-        self.net = QMLP(
-            nodes,
-            qweight=None,
-            qbias=None,
-            qactivation=None,
-            batchnorm=batchnorm,
-            init_weight=init_weight,
-            init_bias=init_bias,
-        )
+        net_list = []
+        for idx in range(len(nodes) - 2):
+            net_list.append(nn.Linear(nodes[idx], nodes[idx + 1]))
+            net_list.append(nn.ReLU())
+
+        # Remove last activation.
+        net_list.pop()
+
+        self.net = nn.Sequential(*net_list)
+        self.net.apply(self._init_weights_and_biases)
 
         # Apply initialization to the weight of the last Linear() layer
-        last_linear_layer = self.net.net[-1]
+        last_linear_layer = self.net[-1]
         if init_last_weight != None:
             init_last_weight(last_linear_layer.weight)
         if init_last_weight != None and last_linear_layer.bias != None:
             init_last_bias(last_linear_layer.bias)
+
+    def _init_weights_and_biases(self, m):
+        if isinstance(m, nn.Linear):
+            self.init_weight(m.weight)
+            self.init_bias(m.bias)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         return self.net(x)

@@ -6,16 +6,17 @@ import torch.nn.functional as F
 
 from src.models.quantization import Quantizer
 
+
 class QuantizedLinear(nn.Linear):
     def __init__(
-        self, 
-        in_features: int, 
-        out_features: int, 
+        self,
+        in_features: int,
+        out_features: int,
         qweight: Optional["Quantizer"] = None,
         qbias: Optional["Quantizer"] = None,
         qactivation: Optional["Quantizer"] = None,
         init_weight: Optional[Callable] = None,
-        init_bias: Optional[Callable] = None
+        init_bias: Optional[Callable] = None,
     ):
         super().__init__(in_features, out_features)
 
@@ -25,8 +26,10 @@ class QuantizedLinear(nn.Linear):
         self.qactivation = qactivation or Quantizer(None, None)
 
         # Apply weight and bias initialization
-        if init_weight != None: init_weight(self.weight)
-        if init_bias != None and self.bias != None: init_bias(self.bias)
+        if init_weight != None:
+            init_weight(self.weight)
+        if init_bias != None and self.bias != None:
+            init_bias(self.bias)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         # Quantize weights and biases
@@ -35,6 +38,3 @@ class QuantizedLinear(nn.Linear):
 
         # Apply the linear transformation and quantize activation
         return self.qactivation(F.linear(x, weight, bias))
-
-    
-    

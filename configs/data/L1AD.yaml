@@ -1,3 +1,6 @@
+defaults:
+  - partitions: default
+
 _target_: src.data.L1AD_datamodule.L1ADDataModule
 
 # Fill in below with paths to folders that contain the raw data in h5 format.
@@ -28,8 +31,7 @@ data_extractor:
 # Specify which objects/features to remove from the data.
 data_processor:
   _target_: src.data.components.processing.L1DataProcessor
-  extracted_path: ${data.data_extractor.cache}
-  extraction_name: ${data.data_extractor.name}
+  extracted_path: ${data.data_extractor.cache}/${data.data_extractor.name}
   remove_objects_features:
     ET: ['Et']
   cache: ${paths.data_dir}/processed
@@ -44,23 +46,18 @@ data_normalizer:
   norm_hyperparams:
     percentiles: [95, 5]
     scale: [2, -2]
+  ignore_zeros: True
   cache: ${paths.data_dir}/normed/${data.data_processor.name}
   processed_data_folder: ${data.data_processor.cache}/${data.data_processor.name}
 
-# Data hyperparameters.
-main_data:
-    zerobias:
-      ${paths.zerobias}
-additional_validation:
-    background:
-      ${paths.background}
-    signal:
-      ${paths.signal}
-additional_test: null
-    # signal:
-    #   ${paths.signal}
+# Split the main data set into 80% training, 10% validation, 10% test.
+split: [0.8, 0.1, 0.1]
 
-train_val_test_split: [0.8, 0.1, 0.1]
-batch_size: 64
-num_workers: 0
-pin_memory: False
+# Parameters specifying how and where the data is loaded.
+device: "cpu"
+loader:
+  batch_size: 16384
+  num_workers: 0
+  pin_memory: False
+  specialized_loader: False
+  use_entire_val_dataset: False

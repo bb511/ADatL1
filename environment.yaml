@@ -30,6 +30,8 @@ dependencies:
   - rich=13.*
   - pre-commit=3.*
   - pytest=7.*
+  - h5py
+  - uproot
   - ipdb
 
   # --------- loggers --------- #

@@ -169,3 +169,5 @@ outputs
 
 # SLURM output
 *.out
+data/
+logs/

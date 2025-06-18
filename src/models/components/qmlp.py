@@ -8,6 +8,7 @@ from src.models.quantization import Quantizer
 from src.models.quantization.layers import QuantizedLinear
 from src.models.quantization.activations import QuantizedReLU, QuantizedBatchNorm1d
 
+
 class QMLP(nn.Module):
     """
     Quantized multi-layer perceptron.
@@ -17,18 +18,19 @@ class QMLP(nn.Module):
     :param qbias: Quantizer for the bias parameters.
     :param qactivation: Quantizer for the activation output.
     """
+
     def __init__(
-            self,
-            nodes: List[int],
-            qweight: Optional[Quantizer] = None,
-            qbias: Optional[Quantizer] = None,
-            qactivation: Optional[Quantizer] = None,
-            batchnorm: Optional[bool] = False,
-            init_weight: Optional[Callable] = lambda _: None,
-            init_bias: Optional[Callable] = lambda _: None
-        ):
+        self,
+        nodes: List[int],
+        qweight: Optional[Quantizer] = None,
+        qbias: Optional[Quantizer] = None,
+        qactivation: Optional[Quantizer] = None,
+        batchnorm: Optional[bool] = False,
+        init_weight: Optional[Callable] = lambda _: None,
+        init_bias: Optional[Callable] = lambda _: None,
+    ):
         super().__init__()
-       
+
         # Partial instantiation of QuantizedLinear and QuantizedBatchNorm1d
         QLinear = functools.partial(
             QuantizedLinear,
@@ -36,12 +38,10 @@ class QMLP(nn.Module):
             qbias=qbias,
             qactivation=qactivation,
             init_weight=init_weight,
-            init_bias=init_bias
+            init_bias=init_bias,
         )
         QBatchNorm1d = functools.partial(
-            QuantizedBatchNorm1d,
-            qweight=qweight,
-            qbias=qbias
+            QuantizedBatchNorm1d, qweight=qweight, qbias=qbias
         )
 
         # Build MLP
@@ -49,7 +49,7 @@ class QMLP(nn.Module):
             nn.Sequential(
                 QLinear(nodes[ilayer - 1], nodes[ilayer]),
                 QBatchNorm1d(nodes[ilayer]) if batchnorm else nn.Identity(),
-                QuantizedReLU(quantizer=qactivation)
+                QuantizedReLU(quantizer=qactivation),
             )
             for ilayer in range(1, len(nodes) - 1)
         ]
@@ -57,7 +57,7 @@ class QMLP(nn.Module):
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         return self.net(x)
-    
+
 
 class QMLPAutoEncoder(nn.Module):
     """
@@ -74,12 +74,24 @@ class QMLPAutoEncoder(nn.Module):
         encoder_nodes: List[int],
         decoder_nodes: List[int],
         quantizer: Optional[Quantizer] = None,
-        batchnorm: Optional[bool] = True
+        batchnorm: Optional[bool] = True,
     ):
         super().__init__()
-        self.encoder = QMLP(encoder_nodes, qweight=quantizer, qbias=quantizer, qactivation=quantizer, batchnorm=batchnorm)
-        self.decoder = QMLP(decoder_nodes, qweight=quantizer, qbias=quantizer, qactivation=quantizer, batchnorm=batchnorm)
-        
+        self.encoder = QMLP(
+            encoder_nodes,
+            qweight=quantizer,
+            qbias=quantizer,
+            qactivation=quantizer,
+            batchnorm=batchnorm,
+        )
+        self.decoder = QMLP(
+            decoder_nodes,
+            qweight=quantizer,
+            qbias=quantizer,
+            qactivation=quantizer,
+            batchnorm=batchnorm,
+        )
+
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         x = self.encoder(x)
         x = self.decoder(x)

@@ -11,7 +11,7 @@ defaults:
   - paths: default
   - extras: default
   - hydra: default
-  - logger: mlflow
+  - logger: none
 
   # experiment configs allow for version control of specific hyperparameters
   # e.g. best hyperparameters for given model and datamodule

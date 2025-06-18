@@ -15,8 +15,7 @@ log = pylogger.RankedLogger(__name__)
 
 @dataclass
 class L1DataProcessor:
-    extracted_path: str = "data/extracted/"
-    extraction_name: str = "default"
+    extracted_path: str = "data/extracted/default"
     remove_objects_features: dict = None
     cache: str = "data/processed/"
     name: str = "default"
@@ -34,19 +33,23 @@ class L1DataProcessor:
         :param data_category: String specifying the kind of data that is being extracted
             e.g., 'zerobias', 'background', or 'signal'.
         """
-        log.info(Fore.GREEN + "Processing data...")
-        self.extracted_folder = Path(self.extracted_path) / self.extraction_name
-        self.extracted_metadata_file = self.extracted_folder / "metadata.yaml"
-        self.extracted_datapath = self.extracted_folder / data_category
-        self.cache_folder = Path(self.cache) / self.name / data_category
+        log.info(Fore.GREEN + f"Processing {data_category} data...")
 
-        self.objects_feats_names = yaml.safe_load(open(self.extracted_metadata_file))
-        self.proc_metadata = self._copy_metadata(self.objects_feats_names, {})
+        # Get the extracted data information.
+        self.extracted_path = Path(self.extracted_path)
+        self.extracted_metadata_file = self.extracted_path / "metadata.yaml"
+        self.extracted_datapath = self.extracted_path / data_category
+
+        # Folder where to cache the processed data.
+        self.cache_folder = Path(self.cache) / self.name / data_category
 
         # Process the data sets.
         for dataset_name in datasets.keys():
             if self._check_data_exists(dataset_name):
                 continue
+
+            # Copy over metadata from extracted data to processed data.
+            self.proc_metadata = yaml.safe_load(open(self.extracted_metadata_file))
 
             extracted_filename = self.extracted_datapath / (dataset_name + ".h5")
             extracted_h5 = h5py.File(extracted_filename, mode="r")
@@ -54,6 +57,7 @@ class L1DataProcessor:
             extracted_h5.close()
             gc.collect()
 
+            log.info(Fore.BLUE + f"Processing {dataset_name}")
             data = self._remove_saturation(data)
             data = self._remove_objects_features(data)
             data = self._dict2nparray(data)
@@ -86,7 +90,7 @@ class L1DataProcessor:
 
         # Get the index of the transverse energy object corresponding to the energy.
         # The transverse energy object also contains the azimuthal angle.
-        energy_idx = self.objects_feats_names["ET"].index("Et")
+        energy_idx = self.proc_metadata["ET"]["feats"].index("Et")
         ET_mask = data["ET"][:, 0, energy_idx] < ET_thres
         for object_name in data.keys():
             data[object_name] = data[object_name][ET_mask]
@@ -102,7 +106,7 @@ class L1DataProcessor:
         for obj_name in list(set(data.keys()) & set(pT_thres.keys())):
             log.info(f"Setting pT saturated {obj_name} to 0...")
             pT_idx = self._idx_containing_substr(
-                self.objects_feats_names[obj_name], "Et"
+                self.proc_metadata[obj_name]["feats"], "Et"
             )
             if pT_idx == -1:
                 raise ValueError(f"Could not find Et feat in object {obj_name}.")
@@ -127,17 +131,31 @@ class L1DataProcessor:
         if not self.remove_objects_features:
             return data
 
-        log.info(f"Removing features {self.remove_objects_features}...")
+        log.info(Fore.RED + f"Removing features {self.remove_objects_features}...")
         for obj_name in self.remove_objects_features.keys():
-            if len(self.remove_objects_features[obj_name]) == len(
-                self.objects_feats_names[obj_name]
-            ):
+            if self._remove_whole_object(obj_name):
                 del data[obj_name]
                 continue
+            data = self._remove_feature(data, obj_name)
 
-            for feat_name in self._remove_objects_features[obj_name]:
-                feat_idx = self.objects_feats_names[obj_name].index(feat_name)
-                data[obj_name] = np.delete(data[obj_name], feat_idx, axis=-1)
+        return data
+
+    def _remove_whole_object(self, obj_name: str) -> bool:
+        """Removes the whole object from the dict if all its feats are removed."""
+        nb_removed_feats = len(self.remove_objects_features[obj_name])
+        nb_object_feats = len(self.proc_metadata[obj_name]["feats"])
+        if nb_removed_feats == nb_object_feats:
+            del self.proc_metadata[obj_name]
+            return True
+
+        return False
+
+    def _remove_feature(self, data: dict, obj_name: str) -> dict:
+        """Remove specific feature from data dictionary."""
+        for feat_name in self._remove_objects_features[obj_name]:
+            feat_idx = self.proc_metadata[obj_name]["feats"].index(feat_name)
+            data[obj_name] = np.delete(data[obj_name], feat_idx, axis=-1)
+            self.proc_metadata[obj_name]["feats"].remove(feat_name)
 
         return data
 
@@ -156,19 +174,30 @@ class L1DataProcessor:
         If the last dimension is not equal, then the arrays are padded with zero to
         the maximum length of array found in the dictionary.
         """
-        max_nb_feats = max([len(feats) for feats in self.objects_feats_names.values()])
-        for obj_name in data.keys():
-            # Save the number of constituents the object has.
-            self.proc_metadata[obj_name]["const"] = data[obj_name].shape[1]
+        max_nb_feats = 0
+        for obj_name in self.proc_metadata.keys():
+            if max_nb_feats < len(self.proc_metadata[obj_name]["feats"]):
+                max_nb_feats = len(self.proc_metadata[obj_name]["feats"])
 
-            # Pad the objects up to the maximum number of features existing.
+        data = self._padding(data, max_nb_feats)
+        data = self._special_considerations(data)
+        data = [obj_data for obj_data in data.values()]
+        data = np.concatenate(data, axis=1)
+
+        return data
+
+    def _padding(self, data: dict, max_nb_feats: int):
+        """Pads the data such that it can be converted to a numpy array.
+
+        Each entry in the data dictionary is expected to be a 3D numpy array.
+        The last dimension is padded up to the maximum last dimension that is found in
+        the dictionary.
+        """
+        for obj_name in data.keys():
             if not data[obj_name].shape[-1] < max_nb_feats:
                 continue
             npad = max_nb_feats - data[obj_name].shape[-1]
             data[obj_name] = self._pad_last_dim(data[obj_name], npad)
-
-        data = [obj_data for obj_data in data.values()]
-        data = np.concatenate(data, axis=1)
 
         return data
 
@@ -179,6 +208,17 @@ class L1DataProcessor:
         nparray = np.pad(nparray, pad_scheme, constant_values=0)
 
         return nparray
+
+    def _special_considerations(self, data: dict) -> dict:
+        """Process data specific to a certain processing scheme."""
+        if self.name == "axol1tl":
+            # For MET, change the zero-pad column with the phi column.
+            # That way, in the resulting array for axo processing, phi is always on
+            # the last column and eta is zero for MET.
+            data["MET"][..., [0, 1, 2]] = data["MET"][..., [0, 2, 1]]
+            self.proc_metadata["MET"]["feats"].insert(1, "eta")
+
+        return data
 
     def _cache(self, data: np.ndarray, dataset_name: str):
         """Store the processed data in a numpy file."""
@@ -217,18 +257,20 @@ class L1DataProcessor:
         obj_starting_idx = 0
         for obj_name in self.proc_metadata.keys():
             obj_ending_idx = obj_starting_idx + self.proc_metadata[obj_name]["const"]
-            plots.plot_hist_3d(
+
+            plots.plot_hist(
                 data[:, obj_starting_idx:obj_ending_idx],
                 obj_name,
                 self.proc_metadata[obj_name]["feats"],
                 self.cache_folder / dataset_name,
             )
+
             obj_starting_idx = obj_ending_idx
 
     def _check_data_exists(self, dataset_name: str) -> bool:
         """Check if the data was processed in the same way already."""
         if (self.cache_folder / (dataset_name + ".npy")).exists():
-            log.info(Fore.YELLOW + f"Processed data exists at {self.cache_folder}.")
+            log.info(Fore.YELLOW + f"{dataset_name} exists in {self.cache_folder}.")
             return 1
 
         return 0
@@ -236,22 +278,3 @@ class L1DataProcessor:
     def _check_subset(self, biglist: list, sublist: list) -> bool:
         """Checks if one list is a sublist of another list."""
         return set(biglist).intersection(sublist) == set(sublist)
-
-    def _copy_metadata(self, extracted_metadata: dict, proc_metadata: dict):
-        """Copy the metadata from the extracted to the processed metadata dict."""
-        for obj_name in extracted_metadata.keys():
-            removed_feats = []
-            if obj_name in self.remove_objects_features.keys():
-                removed_feats = self.remove_objects_features[obj_name]
-            proc_metadata[obj_name] = {}
-            proc_metadata[obj_name]["feats"] = []
-
-            for feat in extracted_metadata[obj_name]:
-                if feat in removed_feats:
-                    continue
-                proc_metadata[obj_name]["feats"].append(feat)
-
-            if len(proc_metadata[obj_name]["feats"]) == 0:
-                del proc_metadata[obj_name]
-
-        return proc_metadata

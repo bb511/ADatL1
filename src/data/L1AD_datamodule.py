@@ -197,12 +197,15 @@ class L1ADDataModule(LightningDataModule):
         # Shuffling is by default false for the custom dataset.
         batch_size = self._get_validation_batchsize(self.data_val)
         main_val = L1ADDataset(self.data_val, batch_size=batch_size)
+        data_val = {}
+        data_val.update({"main_val": main_val})
+        if not self.aux_val:
+            return data_val
+
         for data_name, data in self.aux_val.items():
             batch_size = self._get_validation_batchsize(data)
             self.aux_val[data_name] = L1ADDataset(data, batch_size=batch_size)
 
-        data_val = {}
-        data_val.update({"main_val": main_val})
         data_val.update(self.aux_val)
 
         return data_val
@@ -215,12 +218,15 @@ class L1ADDataModule(LightningDataModule):
         # Shuffling is by default false for the custom dataset.
         batch_size = self._get_validation_batchsize(self.data_test)
         main_test = L1ADDataset(self.data_test, batch_size=batch_size)
+        data_test = {}
+        data_test.update({"main_test": main_test})
+        if not self.aux_test:
+            return data_test
+
         for data_name, data in self.aux_test.items():
             batch_size = self._get_validation_batchsize(data)
             self.aux_test[data_name] = L1ADDataset(data, batch_size=batch_size)
 
-        data_test = {}
-        data_test.update({"main_test": main_test})
         data_test.update(self.aux_test)
 
         return data_test

@@ -119,7 +119,6 @@ class L1DataProcessor:
 
         del mask
         gc.collect()
-
         return data
 
     def _remove_objects_features(self, data: dict) -> dict:
@@ -182,7 +181,7 @@ class L1DataProcessor:
         data = self._padding(data, max_nb_feats)
         data = self._special_considerations(data)
         data = [obj_data for obj_data in data.values()]
-        data = np.concatenate(data, axis=1)
+        data = np.concatenate(data, axis=1, dtype=np.int32)
 
         return data
 

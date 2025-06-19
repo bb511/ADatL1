@@ -1,7 +1,7 @@
 defaults:
   - model_summary
   - rich_progress_bar
-  # - rate
+  - rate
   # - batch_size_finder
   # - cap
   # - debug

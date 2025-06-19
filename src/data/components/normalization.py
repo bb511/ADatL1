@@ -18,6 +18,7 @@ class L1DataNormalizer:
     norm_hyperparams: dict = field(default_factory=dict)
     ignore_zeros: bool = False
     processed_data_folder: str = "data/processed/default"
+    output_dtype: str = 'float32'
     cache: str = "data/normed/default"
 
     def fit(self, data: np.ndarray) -> None:
@@ -59,7 +60,8 @@ class L1DataNormalizer:
 
     def robust(self, data: np.ndarray) -> np.ndarray:
         """Robust normalization, i.e., shift by median and divide by IQ range."""
-        return (data - self.norm_params["median"]) / self.norm_params["iq_range"]
+        data = (data - self.norm_params["median"]) / self.norm_params["iq_range"]
+        return data.astype(self.output_dtype)
 
     def robust_fit(self, data: np.ndarray, percentiles: list) -> dict:
         """Determines the parameters for robust normalisation.
@@ -115,9 +117,12 @@ class L1DataNormalizer:
             data_feature = data[..., feature_idx].flatten()
             quant_high, quant_low = np.nanpercentile(data_feature, percentiles)
             scaled_iq = (quant_high - quant_low) / scale_width
-            interquantile_range.append(float(scaled_iq))
+            interquantile_range.append(scaled_iq)
             chang_shift = (quant_low * scale_larger - quant_high * scale_smaller) / scale_width
-            bias.append(float(chang_shift))
+            bias.append(chang_shift)
+
+        bias = np.array(bias, dtype=np.float32)
+        interquantile_range = np.array(interquantile_range, dtype=np.float32)
 
         return {"bias": bias, "scaled_iq_range": interquantile_range}
 
@@ -127,7 +132,8 @@ class L1DataNormalizer:
         Shift by nubmer based on interquantile range and some given user range.
         Scale by interquantile range divided by same given user range as above.
         """
-        return (data - self.norm_params["bias"]) / self.norm_params["scaled_iq_range"]
+        data = (data - self.norm_params["bias"]) / self.norm_params["scaled_iq_range"]
+        return data.astype(self.output_dtype)
 
     def _check_fit_exists(self, fit_file: Path) -> bool:
         """Checks if the data has already been fitted for given normalization."""
@@ -141,6 +147,11 @@ class L1DataNormalizer:
     def _save_fit_params(self, cache_folder: Path, fit_file: Path) -> None:
         """Save the normalization parameters to a file."""
         cache_folder.mkdir(parents=True, exist_ok=True)
+        # Convert numpy arrays to regular list to be able to yaml dump.
+        for norm_param, values in self.norm_params.items():
+            if isinstance(values, np.ndarray):
+                self.norm_params[norm_param] = values.tolist()
+
         with open(fit_file, "w") as output_file:
             log.info(f"Saving fit parameters to file {fit_file}.")
             yaml.dump(self.norm_params, output_file)

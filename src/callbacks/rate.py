@@ -20,26 +20,35 @@ class AnomalyRateCallback(Callback):
         self.target_rates = target_rates
         self.bc_rate = bc_rate
 
-    def on_train_epoch_end(self, trainer, pl_module) -> None:
-        z_mean,_,_,_ = trainer.predict(dataloader=trainer.train_dataloader)
-        self.rate_metrics = {}
-        for target_rate in self.target_rates:
-            metric = AnomalyRate(target_rate, self.bc_rate)
-            metric.set_threshold(z_mean)
-            self.rate_metrics.update({target_rate: metric})
-
     def on_validation_epoch_end(self, trainer, pl_module) -> None:
-        outdict = {}
-        for data_name, data in trainer.val_dataloader.items():
-            z_mean,_,_,_ = trainer.predict(dataloader=data)
-            for rate in self.target_rates:
-                self.rate_metrics[rate].update(z_mean)
-                pl_module.log_dict(
-                    {f"val/{data_name}/{rate}": self.rate_metrics[rate].compute()},
-                    prog_bar=False,
-                    on_step=False,
-                    on_epoch=True,
-                    logger=True,
-                    sync_dist=True,
-                    add_dataloader_idx=False,
-                )
+        main_val = trainer.val_dataloaders["main_val"]
+        print(main_val.size())
+        exit(1)
+
+
+        # self.rate_metrics = {}
+        # for target_rate in self.target_rates:
+        #     metric = AnomalyRate(target_rate, self.bc_rate)
+        #     metric.set_threshold(z_mean)
+        #     self.rate_metrics.update({target_rate: metric})
+
+        # for data_name, data in trainer.val_dataloaders.items():
+        #     for rate in self.target_rates:
+
+        #         for batch in data:
+        #             batch = batch.flatten(start_dim=1).to(dtype=torch.float32)
+
+        #             z_mean,_,_,_ = pl_module.forward(batch)
+        #             self.rate_metrics[rate].update(z_mean)
+
+        #         pl_module.log_dict(
+        #             {f"val/{data_name}/{rate}": self.rate_metrics[rate].compute()},
+        #             prog_bar=False,
+        #             on_step=False,
+        #             on_epoch=True,
+        #             logger=True,
+        #             sync_dist=True,
+        #             add_dataloader_idx=False,
+        #         )
+
+    # def _set_thresholds(self):

@@ -55,6 +55,5 @@ data_normalizer:
 split: [0.8, 0.1, 0.1]
 
 # Parameters specifying how and where the data is loaded.
-device: "cpu"
 batch_size: 16384
 use_entire_val_dataset: False

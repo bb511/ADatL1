@@ -1,9 +1,7 @@
 python3 src/train.py \
     experiment=axov4 \
-    model.optimizer.lr=0.001 \
-    model.loss.alpha=0.5 \
-    trainer.max_epochs=5 \
-    trainer=gpu0 \
+    model.optimizer.lr=0.0001 \
+    trainer.max_epochs=100 \
     data.use_entire_val_dataset=True \
-    data.device=cpu \
-    # logger.mlflow.run_name= \
+    model.loss.alpha=0.1 \
+    trainer=gpu0 \

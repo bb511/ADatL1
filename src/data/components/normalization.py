@@ -31,7 +31,7 @@ class L1DataNormalizer:
 
         log.info(Fore.GREEN + f"Fitting {self.norm_scheme} norm to data.")
         norm_method = getattr(self, self.norm_scheme + "_fit")
-        self.norm_params = norm_method(data, **self.norm_hyperparams)
+        self.norm_params = norm_method(data[:], **self.norm_hyperparams)
 
         self._save_fit_params(cache_folder, fit_file)
 
@@ -48,15 +48,16 @@ class L1DataNormalizer:
         plots_path = Path(self.cache) / self.norm_scheme / dataset_name
         if self._check_cache_exists(cache_file):
             self._add_plots_to_mlflow(logs, plots_path)
-            return np.load(cache_file)
+            return np.load(cache_file, mmap_mode='c')
 
         norm_method = getattr(self, self.norm_scheme)
-        data = norm_method(data)
+        data = norm_method(data[:])
         self._plot_normed_data(data, dataset_name)
         self._add_plots_to_mlflow(logs, plots_path)
         self._cache_normed_data(cache_file, data)
+        del data
 
-        return data
+        return np.load(cache_file, mmap_mode='c')
 
     def robust(self, data: np.ndarray) -> np.ndarray:
         """Robust normalization, i.e., shift by median and divide by IQ range."""

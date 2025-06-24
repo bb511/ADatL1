@@ -10,7 +10,7 @@ class L1ADDataset(Dataset):
 
     The data is assumed to be already loaded in memory.
     """
-    def __init__(self, data: np.ndarray, batch_size: int, shuffle: bool = False):
+    def __init__(self, data: torch.Tensor, batch_size: int, shuffle: bool = False):
         self.data = data
         self.batch_size = batch_size
         self.max_idx = self.data.size()[0]
@@ -33,6 +33,3 @@ class L1ADDataset(Dataset):
                 ]
 
         return batch
-
-    def get_all(self):
-        return self.data

@@ -150,7 +150,6 @@ dmypy.json
 # Lightning-Hydra-Template
 configs/local/default.yaml
 /data/
-data
 /logs/
 logs
 /outputs/
@@ -166,8 +165,3 @@ outputs
 
 # Aim logging
 .aim
-
-# SLURM output
-*.out
-data/
-logs/

@@ -31,7 +31,6 @@ class L1ADDataModule(LightningDataModule):
         split: tuple,
         batch_size: int,
         use_entire_val_dataset: bool = False,
-        device: str = 'cpu',
         load_all: bool = False,
     ) -> None:
         """Prepare the L1 data from specific h5 files to be used for training.
@@ -57,9 +56,8 @@ class L1ADDataModule(LightningDataModule):
         :param batch_size: Integer specifying the batch size of the data.
         :param use_entire_val_dataset: Bool whether to disregard batch_size and use
             the entire dataset when running validation on it.
-        :param device: String specifying the device the data is loaded to.
-        :param load_all: Bool whether to load all the data to memory (ram or gpu vram)
-            before the training starts.
+        :param load_all: Bool whether to load all the data to ram before the training
+            actually starts. Leads to faster training.
         """
 
         super().__init__()
@@ -99,41 +97,27 @@ class L1ADDataModule(LightningDataModule):
                 lengths=self.hparams.split,
                 generator=torch.Generator().manual_seed(42),
             )
+            del main_data
 
-            self.hparams.data_normalizer.fit(self.data_train[:])
+            self.hparams.data_normalizer.fit(self.data_train)
             self.data_train = self._normalize_data(self.data_train, name="train")
             self.data_val = self._normalize_data(self.data_val, name="val")
             self.data_test = self._normalize_data(self.data_test, name="test")
-            self._load_data_to_device()
 
         if self.hparams.partitions["aux_validation"]:
             dataset_names = self.hparams.partitions["aux_validation"]
             self.aux_val = self._get_processed_data(dataset_names)
             self.aux_val = self._normalize_data_dict(self.aux_val)
-            self.aux_val = self._load_aux_data_to_device(self.aux_val)
 
         if self.hparams.partitions["aux_test"]:
             dataset_names = self.hparams.partitions["aux_test"]
             self.aux_test = self._get_processed_data(dataset_names)
             self.aux_test = self._normalize_data_dict(self.aux_test)
-            self.aux_test = self._load_aux_data_to_device(self.aux_test)
-
-    def _load_data_to_device(self) -> None:
-        """Loads the data numpy arrays to given device in the configuration."""
-        log.info(Fore.YELLOW + f"All data will be loaded on {self.hparams.device}.")
-        self.data_train = torch.from_numpy(self.data_train).to(self.hparams.device)
-        self.data_val = torch.from_numpy(self.data_val).to(self.hparams.device)
-        self.data_test = torch.from_numpy(self.data_test).to(self.hparams.device)
-
-    def _load_aux_data_to_device(self, aux_data: dict) -> dict:
-        for data_name, data in aux_data.items():
-            aux_data[data_name] = torch.from_numpy(data).to(self.hparams.device)
-
-        return aux_data
 
     def _normalize_data(self, data: np.ndarray, name: str):
         """Normalize a data set, given that the normalization parameters are known."""
-        return self.hparams.data_normalizer.norm(data[:], name, self.trainer.loggers)
+        data = self.hparams.data_normalizer.norm(data, name, self.trainer.loggers)
+        return torch.from_numpy(data)
 
     def _normalize_data_dict(self, data_dict: dict):
         """Normalize dictionary of data sets."""
@@ -177,6 +161,14 @@ class L1ADDataModule(LightningDataModule):
                 self.hparams.batch_size // self.trainer.world_size
             )
 
+    def transfer_batch_to_device(self, batch, device, dataloader_idx):
+        """Transfer custom dataset to gpu faster."""
+        if 'cuda' in str(device):
+            return batch.to(device, non_blocking=True)
+
+        return batch.to(device)
+
+
     def _get_validation_batchsize(self, data: np.ndarray):
         if self.hparams.use_entire_val_dataset:
             return len(data)
@@ -198,6 +190,8 @@ class L1ADDataModule(LightningDataModule):
         batch_size = self._get_validation_batchsize(self.data_val)
         main_val = L1ADDataset(self.data_val, batch_size=batch_size)
         data_val = {}
+        # Make sure main_val is always first in the dict !!!
+        # The rate callback expects this.
         data_val.update({"main_val": main_val})
         if not self.aux_val:
             return data_val

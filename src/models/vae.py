@@ -38,7 +38,7 @@ class VAE(L1ADLightningModule):
             reconstruction=reconstruction, z_mean=z_mean, z_log_var=z_log_var, target=x
         )
 
-        del z_mean, z_log_var, z, reconstruction
+        del z_log_var, z, reconstruction
         garbage_collection_cuda()
 
         return {
@@ -51,6 +51,7 @@ class VAE(L1ADLightningModule):
             "loss/total/full": total_loss,
             "loss/reco/full": reco_loss,
             "loss/kl/full": kl_loss,
+            "z_mean": z_mean
         }
 
     def _filter_log_dict(self, outdict: dict) -> dict:
@@ -60,4 +61,3 @@ class VAE(L1ADLightningModule):
             "loss_reco": outdict.get("loss/reco/mean"),
             "loss_kl": outdict.get("loss/kl/mean"),
         }
-

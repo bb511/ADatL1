@@ -1,3 +1,6 @@
+# Ignore mac stuff.
+.DS_Store
+
 # Ignore sublime text editor configuration.
 .sublime
 

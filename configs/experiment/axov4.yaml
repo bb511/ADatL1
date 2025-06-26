@@ -8,7 +8,7 @@ defaults:
   - override /data: axov4
   - override /model: axov4
   - override /callbacks: default
-  - override /trainer: gpu0
+  - override /trainer: gpu
   - override /logger: mlflow
 
 tags: ["vae", "axo_v4", "scan"]
@@ -21,6 +21,6 @@ trainer:
 
 logger:
   mlflow:
-    # experiment_name: axov4_rates
-    run_name: test
-    # run_name: scan_lr${model.optimizer.lr}_alpha${model.loss.alpha}
+    experiment_name: axov4_rates
+    # run_name: test
+    run_name: scan_lr${model.optimizer.lr}_alpha${model.loss.alpha}

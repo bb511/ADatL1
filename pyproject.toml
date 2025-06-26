@@ -22,7 +22,8 @@ dependencies = [
     "hydra-optuna-sweeper (>=1.2.0,<2.0.0)",
     "hydra-colorlog (>=1.2.0,<2.0.0)",
     "rootutils (>=1.0.7,<2.0.0)",
-    "adl1t-datamaker @ git+ssh://git@github.com/bb511/l1trigger_datamaker.git@new_h5generation"
+    "adl1t-datamaker @ git+ssh://git@github.com/bb511/l1trigger_datamaker.git@new_h5generation",
+    "retry (>=0.9.2,<0.10.0)"
 ]
 
 

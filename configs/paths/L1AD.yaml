@@ -1,7 +1,8 @@
 defaults:
   - default.yaml
 
-raw_data_dir: /data/deodagiu/adl1t_data/h5files
+# raw_data_dir: /data/deodagiu/ad_data
+raw_data_dir: /cluster/home/vjimenez/ADatL1/data
 
 # paths to the different types of data
 zerobias:

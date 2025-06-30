@@ -9,24 +9,24 @@ encoder:
   nodes: [57, 28, 16, 8]
 
   qdata: null
-    _target_: src.models.quantization.quantizers.FixedPointQuantizer
-    bits: 8
-    integer: 5
+    # _target_: src.models.quantization.quantizers.FixedPointQuantizer
+    # bits: 8
+    # integer: 5
 
   qweight: null
-    _target_: src.models.quantization.quantizers.FixedPointQuantizer
-    bits: 6
-    integer: 2
+    # _target_: src.models.quantization.quantizers.FixedPointQuantizer
+    # bits: 6
+    # integer: 2
 
   qbias: null
-    _target_: src.models.quantization.quantizers.FixedPointQuantizer
-    bits: 10
-    integer: 6
+    # _target_: src.models.quantization.quantizers.FixedPointQuantizer
+    # bits: 10
+    # integer: 6
 
   qactivation: null
-    _target_: src.models.quantization.quantizers.FixedPointQuantizer
-    bits: 10
-    integer: 6
+    # _target_: src.models.quantization.quantizers.FixedPointQuantizer
+    # bits: 10
+    # integer: 6
 
   init_weight:
     _target_: src.utils.hydra.get_method

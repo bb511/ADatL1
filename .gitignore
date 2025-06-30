@@ -1,5 +1,6 @@
 # Ignore mac stuff.
 .DS_Store
+sftp-config.json
 
 # Ignore sublime text editor configuration.
 .sublime

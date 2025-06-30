@@ -156,5 +156,8 @@ configs/local/default.yaml
 /logs/
 .env
 
+# MLflow data folder.
+notebooks/mlflow_data
+
 # Aim logging
 .aim

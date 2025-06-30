@@ -1,0 +1,270 @@
+(* Content-type: application/vnd.wolfram.mathematica *)
+
+(*** Wolfram Notebook File ***)
+(* http://www.wolfram.com/nb *)
+
+(* CreatedBy='Mathematica 13.0' *)
+
+(*CacheID: 234*)
+(* Internal cache information:
+NotebookFileLineBreakTest
+NotebookFileLineBreakTest
+NotebookDataPosition[       158,          7]
+NotebookDataLength[      9871,        262]
+NotebookOptionsPosition[      8671,        234]
+NotebookOutlinePosition[      9068,        250]
+CellTagsIndexPosition[      9025,        247]
+WindowFrame->Normal*)
+
+(* Beginning of Notebook Content *)
+Notebook[{
+
+Cell[CellGroupData[{
+Cell["KL Divergence Plots", "Title",
+ CellChangeTimes->{{3.960096894475663*^9, 
+  3.9600969070802402`*^9}},ExpressionUUID->"4beadfb1-f194-4143-a1cc-\
+44b08d630541"],
+
+Cell["Import Data", "Subtitle",
+ CellChangeTimes->{{3.9600969195697937`*^9, 
+  3.960096925532124*^9}},ExpressionUUID->"45cc394f-363a-4ecb-8fd2-\
+1dda17f10098"],
+
+Cell[BoxData[
+ RowBox[{
+  RowBox[{"(*", 
+   RowBox[{"Set", " ", "notebook", " ", 
+    RowBox[{"directory", "."}]}], "*)"}], "\[IndentingNewLine]", 
+  RowBox[{
+   RowBox[{
+    RowBox[{"SetDirectory", "[", 
+     RowBox[{"NotebookDirectory", "[", "]"}], "]"}], ";"}], 
+   "\[IndentingNewLine]", 
+   RowBox[{
+    RowBox[{"plotsDir", "=", " ", "\"\<kl_div_plots\>\""}], ";"}], 
+   "\[IndentingNewLine]", 
+   RowBox[{
+    RowBox[{"dataDir", "=", "\"\<mlflow_data\>\""}], ";"}], 
+   "\[IndentingNewLine]", 
+   RowBox[{
+    RowBox[{"experimentName", " ", "=", " ", "\"\<axov4_rates\>\""}], ";"}], 
+   "\[IndentingNewLine]", 
+   RowBox[{
+    RowBox[{
+    "desiredMetric", " ", "=", 
+     "\"\<ggXToJpsiJpsiTo2Mu2E_m7_pseudoscalar_loss_kl\>\""}], 
+    ";"}]}]}]], "Input",
+ CellChangeTimes->{
+  3.9600969097302313`*^9, {3.960096953515194*^9, 3.960097069829811*^9}, {
+   3.960097105326531*^9, 3.960097125322002*^9}, {3.960097243182164*^9, 
+   3.960097252514509*^9}, {3.960097336216174*^9, 3.960097340365428*^9}, {
+   3.960100638461439*^9, 3.960100656095158*^9}},
+ CellLabel->
+  "In[150]:=",ExpressionUUID->"81c397dd-ab0c-4b3e-955d-2dea13e85614"],
+
+Cell[BoxData[{
+ RowBox[{
+  RowBox[{"experimentDir", "=", 
+   RowBox[{"FileNameJoin", "[", 
+    RowBox[{"{", 
+     RowBox[{"dataDir", ",", " ", "experimentName"}], "}"}], "]"}]}], 
+  ";"}], "\[IndentingNewLine]", 
+ RowBox[{
+  RowBox[{"runDirs", " ", "=", " ", 
+   RowBox[{"FileNames", "[", 
+    RowBox[{"All", ",", " ", "experimentDir"}], "]"}]}], 
+  ";"}], "\[IndentingNewLine]", 
+ RowBox[{
+  RowBox[{"runNames", " ", "=", " ", 
+   RowBox[{"FileNameTake", "/@", "runDirs"}]}], ";"}]}], "Input",
+ CellChangeTimes->{
+  3.960097106322811*^9, {3.960097185119121*^9, 3.960097185714323*^9}, {
+   3.960097218900927*^9, 3.960097227577126*^9}, {3.96009728700874*^9, 
+   3.960097323643155*^9}, {3.960097358808073*^9, 3.960097416539474*^9}, {
+   3.960097763595614*^9, 3.96009785885121*^9}, 3.9600979467271557`*^9, {
+   3.960098029954648*^9, 3.9600980910272903`*^9}, {3.9600981246059628`*^9, 
+   3.960098128444661*^9}},
+ CellLabel->"In[55]:=",ExpressionUUID->"01a9b946-61ea-4210-ac0a-40967cf3130a"],
+
+Cell[CellGroupData[{
+
+Cell[BoxData[{
+ RowBox[{
+  RowBox[{"processRunName", "[", "runName_", "]"}], " ", ":=", " ", 
+  RowBox[{"(", "\[IndentingNewLine]", 
+   RowBox[{
+    RowBox[{"name", " ", "=", " ", 
+     RowBox[{"{", "}"}]}], ";", "\[IndentingNewLine]", 
+    RowBox[{"splitRunName", " ", "=", " ", 
+     RowBox[{"StringSplit", "[", 
+      RowBox[{"runName", ",", "\"\<_\>\""}], "]"}]}], ";", 
+    "\[IndentingNewLine]", 
+    RowBox[{"lrName", " ", "=", " ", 
+     RowBox[{"Select", "[", 
+      RowBox[{"splitRunName", ",", " ", 
+       RowBox[{"StringContainsQ", "[", "\"\<lr\>\"", "]"}]}], "]"}]}], ";", 
+    "\[IndentingNewLine]", 
+    RowBox[{"name", " ", "=", 
+     RowBox[{"Append", "[", 
+      RowBox[{"name", ",", " ", 
+       RowBox[{"\"\<\[Eta] = \>\"", "<>", 
+        RowBox[{"Flatten", "@", 
+         RowBox[{"StringCases", "[", 
+          RowBox[{"lrName", ",", "NumberString"}], "]"}]}]}]}], "]"}]}], ";", 
+    "\[IndentingNewLine]", 
+    RowBox[{"alphaName", " ", "=", 
+     RowBox[{"Select", "[", 
+      RowBox[{"splitRunName", ",", " ", 
+       RowBox[{"StringContainsQ", "[", "\"\<alpha\>\"", "]"}]}], "]"}]}], ";",
+     "\[IndentingNewLine]", 
+    RowBox[{"name", " ", "=", 
+     RowBox[{"Append", "[", 
+      RowBox[{"name", ",", " ", 
+       RowBox[{"\"\<\[Alpha] = \>\"", "<>", 
+        RowBox[{"Flatten", "@", 
+         RowBox[{"StringCases", "[", 
+          RowBox[{"alphaName", ",", "NumberString"}], "]"}]}]}]}], "]"}]}], 
+    ";", "\[IndentingNewLine]", "name"}], "\[IndentingNewLine]", 
+   ")"}]}], "\[IndentingNewLine]", 
+ RowBox[{"runLabels", " ", "=", 
+  RowBox[{"processRunName", "/@", "runNames"}]}]}], "Input",
+ CellChangeTimes->{{3.960098131500081*^9, 3.960098149383483*^9}, {
+  3.960098206803801*^9, 3.9600982817724543`*^9}, {3.960098570346304*^9, 
+  3.960098570504476*^9}, {3.960098660437902*^9, 3.960098741710369*^9}, {
+  3.960098808276873*^9, 3.960098912945706*^9}, {3.960098954910273*^9, 
+  3.960098971992176*^9}, {3.9600990918454027`*^9, 3.960099215520102*^9}, {
+  3.96009927087729*^9, 3.960099271615693*^9}, {3.960099387480735*^9, 
+  3.9600996585987864`*^9}, {3.960099784715207*^9, 
+  3.960099792639462*^9}},ExpressionUUID->"44957ce1-bba0-4310-8660-\
+34eaea67a122"],
+
+Cell[BoxData[
+ RowBox[{"{", 
+  RowBox[{
+   RowBox[{"{", 
+    RowBox[{"\<\"\[Eta] = 0.00025\"\>", ",", "\<\"\[Alpha] = 0.7\"\>"}], 
+    "}"}], ",", 
+   RowBox[{"{", 
+    RowBox[{"\<\"\[Eta] = 0.00025\"\>", ",", "\<\"\[Alpha] = 0.8\"\>"}], 
+    "}"}], ",", 
+   RowBox[{"{", 
+    RowBox[{"\<\"\[Eta] = 0.00025\"\>", ",", "\<\"\[Alpha] = 0.9\"\>"}], 
+    "}"}], ",", 
+   RowBox[{"{", 
+    RowBox[{"\<\"\[Eta] = 0.00075\"\>", ",", "\<\"\[Alpha] = 0.1\"\>"}], 
+    "}"}], ",", 
+   RowBox[{"{", 
+    RowBox[{"\<\"\[Eta] = 0.00075\"\>", ",", "\<\"\[Alpha] = 0.2\"\>"}], 
+    "}"}], ",", 
+   RowBox[{"{", 
+    RowBox[{"\<\"\[Eta] = 0.00075\"\>", ",", "\<\"\[Alpha] = 0.3\"\>"}], 
+    "}"}], ",", 
+   RowBox[{"{", 
+    RowBox[{"\<\"\[Eta] = 0.00075\"\>", ",", "\<\"\[Alpha] = 0.4\"\>"}], 
+    "}"}], ",", 
+   RowBox[{"{", 
+    RowBox[{"\<\"\[Eta] = 0.00075\"\>", ",", "\<\"\[Alpha] = 0.5\"\>"}], 
+    "}"}], ",", 
+   RowBox[{"{", 
+    RowBox[{"\<\"\[Eta] = 0.00075\"\>", ",", "\<\"\[Alpha] = 0.6\"\>"}], 
+    "}"}], ",", 
+   RowBox[{"{", 
+    RowBox[{"\<\"\[Eta] = 0.00075\"\>", ",", "\<\"\[Alpha] = 0.7\"\>"}], 
+    "}"}], ",", 
+   RowBox[{"{", 
+    RowBox[{"\<\"\[Eta] = 0.00075\"\>", ",", "\<\"\[Alpha] = 0.8\"\>"}], 
+    "}"}], ",", 
+   RowBox[{"{", 
+    RowBox[{"\<\"\[Eta] = 0.00075\"\>", ",", "\<\"\[Alpha] = 0.9\"\>"}], 
+    "}"}]}], "}"}]], "Output",
+ CellChangeTimes->{{3.9600996112195044`*^9, 3.960099659286364*^9}, 
+   3.960099790291852*^9},
+ CellLabel->
+  "Out[105]=",ExpressionUUID->"fa55d34e-19ae-4e2d-b8c3-0f9250119878"]
+}, Open  ]],
+
+Cell[CellGroupData[{
+
+Cell[BoxData[{
+ RowBox[{
+  RowBox[{"metrics", " ", "=", " ", 
+   RowBox[{"Intersection", "[", 
+    RowBox[{"FileNameTake", "/@", 
+     RowBox[{"Flatten", "@", 
+      RowBox[{"Table", "[", 
+       RowBox[{
+        RowBox[{"FileNames", "[", 
+         RowBox[{"All", ",", " ", 
+          RowBox[{"runDirs", "[", 
+           RowBox[{"[", "i", "]"}], "]"}]}], "]"}], ",", 
+        RowBox[{"{", 
+         RowBox[{"i", ",", " ", "1", ",", " ", 
+          RowBox[{"Length", "@", "runDirs"}]}], "}"}]}], "]"}]}]}], "]"}]}], 
+  ";"}], "\[IndentingNewLine]", 
+ RowBox[{"desiredMetric", " ", "=", " ", 
+  RowBox[{"Select", "[", 
+   RowBox[{"metrics", ",", 
+    RowBox[{"StringContainsQ", "[", "desiredMetric", "]"}]}], 
+   "]"}]}]}], "Input",
+ CellChangeTimes->{{3.9600997957638063`*^9, 3.960099889908619*^9}, {
+  3.96009995016949*^9, 3.9600999890930367`*^9}, {3.960100047441761*^9, 
+  3.960100095740443*^9}, {3.960100139476083*^9, 3.960100175827939*^9}, {
+  3.960100328055015*^9, 3.9601004133553553`*^9}, {3.960100468230259*^9, 
+  3.960100468279889*^9}, {3.960100507110359*^9, 3.9601005724292507`*^9}, {
+  3.960100648325665*^9, 3.960100649348501*^9}},
+ CellLabel->
+  "In[155]:=",ExpressionUUID->"dcb57350-15e1-4932-a77a-7c2ca270efd0"],
+
+Cell[BoxData[
+ RowBox[{"{", "\<\"val_ggXToJpsiJpsiTo2Mu2E_m7_pseudoscalar_loss_kl.dat\"\>", 
+  "}"}]], "Output",
+ CellChangeTimes->{{3.96010015030967*^9, 3.960100178123454*^9}, {
+   3.960100374935894*^9, 3.960100377568555*^9}, 3.960100415212246*^9, 
+   3.960100468841187*^9, {3.960100515773707*^9, 3.960100572907105*^9}, {
+   3.960100651045548*^9, 3.9601006583450003`*^9}},
+ CellLabel->
+  "Out[156]=",ExpressionUUID->"071314fe-12e3-4ed1-949c-43464e49fd32"]
+}, Open  ]],
+
+Cell[BoxData["\[IndentingNewLine]"], "Input",
+ CellChangeTimes->{
+  3.960100671156041*^9},ExpressionUUID->"277fa63e-f89e-4cd7-b128-\
+3ba85141981e"]
+}, Open  ]]
+},
+WindowSize->{808, 911},
+WindowMargins->{{113, Automatic}, {Automatic, 24}},
+FrontEndVersion->"13.0 for Mac OS X ARM (64-bit) (February 4, 2022)",
+StyleDefinitions->"Default.nb",
+ExpressionUUID->"2ca0792b-ce04-4105-9f84-c05248e3a4b8"
+]
+(* End of Notebook Content *)
+
+(* Internal cache information *)
+(*CellTagsOutline
+CellTagsIndex->{}
+*)
+(*CellTagsIndex
+CellTagsIndex->{}
+*)
+(*NotebookFileOutline
+Notebook[{
+Cell[CellGroupData[{
+Cell[580, 22, 164, 3, 98, "Title",ExpressionUUID->"4beadfb1-f194-4143-a1cc-44b08d630541"],
+Cell[747, 27, 159, 3, 53, "Subtitle",ExpressionUUID->"45cc394f-363a-4ecb-8fd2-1dda17f10098"],
+Cell[909, 32, 1134, 30, 136, "Input",ExpressionUUID->"81c397dd-ab0c-4b3e-955d-2dea13e85614"],
+Cell[2046, 64, 986, 22, 73, "Input",ExpressionUUID->"01a9b946-61ea-4210-ac0a-40967cf3130a"],
+Cell[CellGroupData[{
+Cell[3057, 90, 2188, 48, 220, "Input",ExpressionUUID->"44957ce1-bba0-4310-8660-34eaea67a122"],
+Cell[5248, 140, 1526, 42, 98, "Output",ExpressionUUID->"fa55d34e-19ae-4e2d-b8c3-0f9250119878"]
+}, Open  ]],
+Cell[CellGroupData[{
+Cell[6811, 187, 1223, 28, 94, "Input",ExpressionUUID->"dcb57350-15e1-4932-a77a-7c2ca270efd0"],
+Cell[8037, 217, 456, 8, 34, "Output",ExpressionUUID->"071314fe-12e3-4ed1-949c-43464e49fd32"]
+}, Open  ]],
+Cell[8508, 228, 147, 3, 52, "Input",ExpressionUUID->"277fa63e-f89e-4cd7-b128-3ba85141981e"]
+}, Open  ]]
+}
+]
+*)
+

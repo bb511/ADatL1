@@ -12,7 +12,7 @@ dependencies = [
     "torch (==2.*)",
     "torchvision (==0.*)",
     "pytorch-lightning (==2.*)",
-    "torchmetrics (==0.*)",
+    "torchmetrics (==1.*)",
     "hydra-core (==1.*)",
     "rich (==13.*)",
     "pre-commit (==3.*)",
@@ -23,7 +23,8 @@ dependencies = [
     "hydra-colorlog (>=1.2.0,<2.0.0)",
     "rootutils (>=1.0.7,<2.0.0)",
     "adl1t-datamaker @ git+ssh://git@github.com/bb511/l1trigger_datamaker.git@new_h5generation",
-    "retry (>=0.9.2,<0.10.0)"
+    "retry (>=0.9.2,<0.10.0)",
+    "capmetric @ git+ssh://git@github.com/viictorjimenezzz/cap-metric.git@main"
 ]
 
 

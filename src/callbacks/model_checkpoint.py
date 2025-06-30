@@ -62,16 +62,39 @@ class DatasetAwareModelCheckpoint(ModelCheckpoint):
 
         # Compute total loss and length for each dataset in this epoch
         epoch_loss_totals, epoch_loss_lengths = {}, {}
-        for dset_key, losses in self.loss_cache.items():
-            if len(losses) == 0:
-                continue
-            loss = torch.cat(losses)
-            epoch_loss_totals[dset_key] = loss.sum().item()
-            epoch_loss_lengths[dset_key] = len(loss)
 
-            # Restart for the next epoch:
-            self.loss_cache[dset_key] = []
+        list_dset_key = list(getattr(trainer, "val_dataloaders").keys())
+        for dset_key in list_dset_key:
+            if dset_key in self.loss_cache.keys():
+                losses = self.loss_cache[dset_key]
+                if len(losses) == 0:
+                    continue
 
+                loss = torch.cat(losses)
+                local_sum = loss.sum()
+                local_count = torch.tensor(len(loss), device=local_sum.device)
+            else:
+                # If no losses were recorded, set to zero
+                local_sum = torch.tensor(0.0, device=pl_module.device)
+                local_count = torch.tensor(0, device=pl_module.device)
+
+            if trainer.world_size > 1: # ddp
+                local_sum = local_sum.to(pl_module.device)
+                local_count = local_count.to(pl_module.device)
+
+                # Sum values across all ranks
+                torch.distributed.all_reduce(local_sum, op=torch.distributed.ReduceOp.SUM)
+                torch.distributed.all_reduce(local_count, op=torch.distributed.ReduceOp.SUM)
+
+            # Store synchronized values (if there was data)
+            if local_count.item() > 0:
+                epoch_loss_totals[dset_key] = local_sum.item()
+                epoch_loss_lengths[dset_key] = local_count.item()
+            
+            # Clear cache for next epoch
+            if dset_key in self.loss_cache:
+                self.loss_cache[dset_key] = []
+                
         # Strategy-specific implementation in subclasses
         self._process_dataset_losses(
             trainer, pl_module, epoch_loss_totals, epoch_loss_lengths

@@ -18,8 +18,6 @@ class Sampling(nn.Module):
 
 
 class QuantizedEncoder(nn.Module):
-    """Quantized encoder for AD@L1."""
-
     def __init__(
         self,
         nodes: List[int],
@@ -57,6 +55,8 @@ class QuantizedEncoder(nn.Module):
             init_weight=nn.init.xavier_uniform_,
             init_bias=nn.init.zeros_,
         )
+        
+        # Log variance layer (initialized to zero)
         self.z_log_var = QuantizedLinear(
             in_features=nodes[-2],
             out_features=nodes[-1],

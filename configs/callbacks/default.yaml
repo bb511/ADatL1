@@ -5,6 +5,8 @@ defaults:
   # - batch_size_finder
   # - cap
   # - debug
+  # - model_checkpoint_ds
+  # - cap
   - _self_
 
 # model_checkpoint:

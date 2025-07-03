@@ -4,13 +4,14 @@ from collections import defaultdict
 
 import hydra
 import rootutils
-from pytorch_lightning import LightningDataModule, LightningModule
+from pytorch_lightning import LightningDataModule
+from pytorch_lightning.loggers import Logger
 from omegaconf import DictConfig
 import torch
 
 rootutils.setup_root(__file__, indicator=".project-root", pythonpath=True)
 
-from src.utils import RankedLogger, extras, task_wrapper
+from src.utils import RankedLogger, extras, task_wrapper, instantiate_loggers
 
 log = RankedLogger(__name__, rank_zero_only=True)
 
@@ -52,7 +53,11 @@ def evaluate_checkpoints(cfg: DictConfig) -> Dict[str, Any]:
     Returns:
         Dict with results for each checkpoint
     """
-    cfg.ckpt_path = f"/cluster/home/vjimenez/ADatL1/logs/train/multiruns/{cfg.ckpt_path}/0/checkpoints"
+    if cfg.get("experiment_id"):
+        log.info(f"Resuming experiment <{cfg.resume_experiment_id}>")
+        cfg.logger.wandb.id = cfg.resume_experiment_id
+        cfg.logger.wandb.resume = "must"
+    logger: List[Logger] = instantiate_loggers(cfg.get("logger"))
 
     log.info(f"Instantiating datamodule <{cfg.data._target_}>")
     batch_size = cfg.data.batch_size
@@ -61,6 +66,10 @@ def evaluate_checkpoints(cfg: DictConfig) -> Dict[str, Any]:
     datamodule.prepare_data()
     datamodule.setup("fit")
     dataset_dictionary = datamodule.val_dataloader()
+
+    # Set device
+    device = "cuda" if torch.cuda.is_available() else "cpu"
+    log.info(f"Using device: {device}")
 
     log.info(f"Finding checkpoints in {cfg.ckpt_path}")
     checkpoints = find_all_checkpoints(cfg.ckpt_path)
@@ -80,10 +89,11 @@ def evaluate_checkpoints(cfg: DictConfig) -> Dict[str, Any]:
             state_dict = torch.load(ckpt, weights_only=False, map_location="cpu")["state_dict"]
             model.load_state_dict(state_dict, strict=True)
             model.eval()
+            model.to(device)
 
             ds = dataset_dictionary.get(dset_key)
             for ibatch in range(len(ds)):
-                output = model.model_step(ds[ibatch])["loss/total/full"]
+                output = model.model_step(ds[ibatch].to(device))["loss/total/full"]
                 cache[ckpt].append(output.detach().cpu())
 
         # Compute CAPmetric
@@ -97,13 +107,14 @@ def evaluate_checkpoints(cfg: DictConfig) -> Dict[str, Any]:
             regularization_params=None,
             binary=True,
             lr=0.01,
-            n_epochs=100,
+            n_epochs=1,
             batch_size=cfg.data.batch_size,
+            device=device,
             process_group=None,
             dist_sync_fn=None
         )
         capmetric.update(
-            *(torch.cat(ds, dim=0) for ds in cache.values())
+            *(torch.cat(ds, dim=0).to(device) for ds in cache.values())
         )
         capmetric_value = capmetric.compute()
         results[dset_key] = capmetric_value

@@ -4,6 +4,9 @@ cap_callback:
   log_every_n_epochs: 1
   pairing_type: cdf
   data_pairs:
+    baseline:
+      - main_val # ZB_run381148-381149
+      - main_val
     background0:
       - main_val # ZB_run381148-381149
       - SingleNeutrino_E-10-gun

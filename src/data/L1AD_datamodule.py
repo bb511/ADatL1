@@ -1,4 +1,4 @@
-from typing import Any, Optional, Tuple
+from typing import Any, Optional, Union
 from pathlib import Path
 from retry import retry
 
@@ -223,3 +223,43 @@ class L1ADDataModule(LightningDataModule):
         data_test.update(self.aux_test)
 
         return data_test
+
+
+
+class L1ADDataModuleDebug(L1ADDataModule):
+    """Debug version of L1ADDataModule that generates random data instead of loading real data."""
+
+    def prepare_data(self) -> None:
+        """Skip data extraction and processing for debugging."""
+        log.info(Back.GREEN + "Debug mode: Skipping data preparation...")
+        pass
+
+    def setup(self, stage: str = None) -> None:
+        """Generate random data instead of loading real data."""
+        self._set_batch_size()
+
+        if self.data_train is None and self.data_val is None and self.data_test is None:
+            log.info("Debug mode: Generating 1000 random samples with 57 features...")
+
+            # Split: 700 train, 200 val, 100 test
+            self.data_train = torch.from_numpy(np.random.randn(700, 57).astype(np.float32))
+            self.data_val = torch.from_numpy(np.random.randn(200, 57).astype(np.float32))
+            self.data_test = torch.from_numpy(np.random.randn(100, 57).astype(np.float32))
+
+            log.info(f"Generated datasets - Train: {len(self.data_train)}, "
+                    f"Val: {len(self.data_val)}, Test: {len(self.data_test)}")
+
+        # Change the mean of the components:
+        if hasattr(self.hparams, 'partitions') and self.hparams.partitions.get("aux_validation"):
+            self.aux_val = {}
+            for ids, (_, filenames) in enumerate(self.hparams.partitions["aux_validation"].items()):
+                for filename in filenames:
+                    random_data = ids + np.random.randn(100, 57).astype(np.float32)
+                    self.aux_val[filename] = torch.from_numpy(random_data)
+
+        if hasattr(self.hparams, 'partitions') and self.hparams.partitions.get("aux_test"):
+            self.aux_test = {}
+            for ids, (_, filenames) in enumerate(self.hparams.partitions["aux_test"].items()):
+                for filename in filenames:
+                    random_data = ids + np.random.randn(100, 57).astype(np.float32)
+                    self.aux_test[filename] = torch.from_numpy(random_data)

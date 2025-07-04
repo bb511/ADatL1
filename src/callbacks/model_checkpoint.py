@@ -19,6 +19,8 @@ class DatasetAwareModelCheckpoint(ModelCheckpoint):
         **kwargs: Additional arguments passed to ModelCheckpoint
     """
 
+    prefix = ""
+    
     def __init__(
         self,
         loss_name: str = "loss",
@@ -168,13 +170,16 @@ class DatasetAwareModelCheckpoint(ModelCheckpoint):
         os.makedirs(custom_dirpath, exist_ok=True)
 
         # Save the checkpoint
-        filepath = os.path.join(custom_dirpath, f"{filename}.ckpt")
+        prefix = f"{self.prefix}_" if hasattr(self, "prefix") and getattr(self, "prefix") != None else ""
+        filepath = os.path.join(custom_dirpath, f"{prefix}{filename}.ckpt")
         self._save_checkpoint(trainer=trainer, filepath=filepath)
         return filepath
 
 
 class SingleDatasetModelCheckpoint(DatasetAwareModelCheckpoint):
     """ModelCheckpoint that saves checkpoints based on individual dataset performance."""
+
+    prefix = "single"
 
     def _process_dataset_losses(
         self, trainer, pl_module, epoch_loss_totals, epoch_loss_lengths
@@ -201,6 +206,8 @@ class LeaveOneOutModelCheckpoint(DatasetAwareModelCheckpoint):
     (leave-one-out) and saves the checkpoint that performs best according to this metric.
     This helps avoid overfitting to specific anomalies in any single dataset.
     """
+
+    prefix = "loo"
 
     def _process_dataset_losses(
         self, trainer, pl_module, epoch_loss_totals, epoch_loss_lengths

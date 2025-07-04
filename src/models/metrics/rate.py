@@ -22,21 +22,19 @@ class AnomalyRate(Metric):
         self.add_state("ntriggered", default=torch.tensor(0), dist_reduce_fx="sum")
         self.add_state("nsamples", default=torch.tensor(0), dist_reduce_fx="sum")
 
-    def set_threshold(self, mu_bkg: torch.Tensor) -> None:
+    def set_threshold(self, bkg_score: torch.Tensor) -> None:
         """Get the latent space threshold for a certain rate to determine anomalies.
 
         :mu_bkg: Torch tensor containing mean of background data samples in the latent
             space of the variational autoencoder model. The training set is taken
             conventionally as background for this application.
         """
-        bkg_score = mu_bkg.pow(2)
         self.threshold = np.percentile(
             bkg_score, 100 - (self.target_rate/self.bc_rate)*100
         )
 
-    def update(self, mu: torch.Tensor) -> None:
+    def update(self, anomaly_score: torch.Tensor) -> None:
         """The anomaly score is the mu^2 of the sample in the VAE latent space."""
-        anomaly_score = mu.pow(2)
         ntriggered = len(np.where(anomaly_score > self.threshold)[0])
         self.ntriggered += ntriggered
         self.nsamples += anomaly_score.numel()

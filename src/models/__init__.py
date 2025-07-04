@@ -99,6 +99,10 @@ class L1ADLightningModule(LightningModule):
         )
         return outdict
 
+    def on_validation_epoch_end(self):
+        """Log the epochs so the mlflow plotting is not buggy."""
+        self.log("epoch_idx", float(self.current_epoch), on_epoch=True, on_step=False)
+
     def configure_optimizers(self):
         optimizer = LightningOptimizer(self.hparams.optimizer(params=self.parameters()))
 

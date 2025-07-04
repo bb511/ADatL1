@@ -51,7 +51,7 @@ class VAE(L1ADLightningModule):
             "loss/total/full": total_loss,
             "loss/reco/full": reco_loss,
             "loss/kl/full": kl_loss,
-            "z_mean": z_mean
+            "z_mean_squared": z_mean.pow(2)
         }
 
     def _filter_log_dict(self, outdict: dict) -> dict:

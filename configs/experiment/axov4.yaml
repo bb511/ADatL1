@@ -21,6 +21,7 @@ trainer:
 
 logger:
   mlflow:
-    # experiment_name: axov4_rates
-    run_name: test
-    # run_name: scan_lr${model.optimizer.lr}_alpha${model.loss.alpha}
+    experiment_name: axov4_rates_multiple_metrics
+    # experiment_name: axov4_rates_cap
+    # run_name: test
+    run_name: scan_lr${model.optimizer.lr}_alpha${model.loss.alpha}

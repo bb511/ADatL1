@@ -37,4 +37,3 @@ for idx, run_id in enumerate(run_ids):
         ])
         metric_filepath = run_dir / (metric.replace('/', '_') + ".dat")
         metric_values.astype('float32').tofile(metric_filepath)
-        print(f"Metric saved to {metric_filepath}!\n")

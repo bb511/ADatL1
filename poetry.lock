@@ -443,7 +443,7 @@ lightning = ["pytorch-lightning (>=2.5.2,<3.0.0)"]
 type = "git"
 url = "ssh://git@github.com/viictorjimenezzz/cap-metric.git"
 reference = "main"
-resolved_reference = "e8015039e6e4b3d9c744a7d75d31ecb071d115c7"
+resolved_reference = "fe29ab89c6719e3b0e1fb2fa665b72157ff29ccf"
 
 [[package]]
 name = "certifi"

@@ -1,3 +1,7 @@
+# Ignore plots folder
+notebooks/run_grids
+notebooks/dataset_grids
+
 # Ignore mac stuff.
 .DS_Store
 sftp-config.json

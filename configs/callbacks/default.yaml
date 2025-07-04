@@ -2,11 +2,10 @@ defaults:
   - model_summary
   - rich_progress_bar
   - rate
-  # - batch_size_finder
   # - cap
+  # - batch_size_finder
   # - debug
   # - model_checkpoint_ds
-  # - cap
   - _self_
 
 # model_checkpoint:

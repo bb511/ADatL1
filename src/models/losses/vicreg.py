@@ -4,13 +4,14 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
+
 class VICRegLoss(nn.Module):
     def __init__(
-            self,
-            inv_coef: Optional[float] = 50,
-            var_coef: Optional[float] = 50,
-            cov_coef: Optional[float] = 1,
-        ):
+        self,
+        inv_coef: Optional[float] = 50,
+        var_coef: Optional[float] = 50,
+        cov_coef: Optional[float] = 1,
+    ):
         """
         VICReg-style loss combining invariance, variance, and covariance losses.
 
@@ -59,12 +60,12 @@ class VICRegLoss(nn.Module):
         loss_cov = self.covariance_loss(z1) + self.covariance_loss(z2)
 
         loss_total = (
-            self.inv_coef * loss_inv +
-            self.var_coef * loss_var +
-            self.cov_coef * loss_cov
+            self.inv_coef * loss_inv
+            + self.var_coef * loss_var
+            + self.cov_coef * loss_cov
         )
         return loss_inv, loss_var, loss_cov, loss_total
-    
+
 
 class L1VICRegLoss(VICRegLoss):
 

@@ -5,7 +5,7 @@ import torch.nn.functional as F
 
 from src.models.quantization import Quantizer
 
-    
+
 class QuantizedReLU(nn.ReLU):
     def __init__(self, quantizer: Optional[Quantizer] = None):
         super().__init__()
@@ -22,11 +22,9 @@ class QuantizedBatchNorm1d(nn.BatchNorm1d):
         qweight: Optional[Quantizer] = None,
         qbias: Optional[Quantizer] = None,
         qmean: Optional[Quantizer] = None,
-        qvar: Optional[Quantizer] = None
+        qvar: Optional[Quantizer] = None,
     ):
-        super().__init__(num_features)  # Initialize nn.BatchNorm1d
-
-        # If no quantizer provided, use an identity quantizer
+        super().__init__(num_features)
         self.qweight = qweight or Quantizer(None, None)
         self.qbias = qbias or Quantizer(None, None)
         self.qmean = qmean or Quantizer(None, None)
@@ -34,20 +32,26 @@ class QuantizedBatchNorm1d(nn.BatchNorm1d):
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         if self.training:
-            # During training, use standard BatchNorm but quantize parameters
-            self.weight.data = self.qweight(self.weight.data)
-            self.bias.data = self.qbias(self.bias.data)
-            return super().forward(x)
+            weight = self.qweight(self.weight)
+            bias = self.qbias(self.bias)
+            return F.batch_norm(
+                x, self.running_mean, self.running_var, weight, bias,
+                training=True, momentum=self.momentum, eps=self.eps
+            )
         else:
-            # During inference, use quantized parameters and statistics
             weight = self.qweight(self.weight)
             bias = self.qbias(self.bias)
             mean = self.qmean(self.running_mean)
             var = self.qvar(self.running_var)
-
             return F.batch_norm(
-                x, mean, var, weight, bias,
+                x,
+                mean,
+                var,
+                weight,
+                bias,
                 training=False,
                 momentum=self.momentum,
-                eps=self.eps
+                eps=self.eps,
             )
+        
+        

@@ -1,0 +1,5 @@
+anomaly_rate:
+  _target_: src.callbacks.rate.AnomalyRateCallback # add MSE cut
+  metric_names: ["loss/total/full", "loss/kl/full", "loss/reco/full", "z_mean_squared"]
+  target_rates: [0.3, 1]
+  bc_rate: 28608.8064

@@ -1,2 +1,0 @@
-from .CosineDecayRestarts_Warmup import CosineDecayRestarts_Warmup
-CDRW = CosineDecayRestarts_Warmup

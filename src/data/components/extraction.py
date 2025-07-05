@@ -6,9 +6,9 @@ import gc
 import h5py
 import numpy as np
 import yaml
-from colorama import Fore, Back, Style
+from colorama import Fore
 
-from l1trigger_datamaker.h5convert.root2h5 import Root2h5
+from adl1t_datamaker.h5convert.root2h5 import Root2h5
 from src.utils import pylogger
 from . import plots
 
@@ -24,7 +24,7 @@ class L1DataExtractor(Root2h5):
         constituents: dict,
         objects_features: dict,
         cache: str = "data/extracted",
-        name: str = "axol1tl",
+        name: str = "default",
     ):
         """Extract data from level 1 global trigger data files saved in h5 format.
 
@@ -41,8 +41,8 @@ class L1DataExtractor(Root2h5):
             extraction of the data, e.g., "basic".
         """
         super().__init__()
-        self.objects_features_names = objects_features.copy()
         self.objects_features_idxs = self._replace_feats_name_index(objects_features)
+        self.metadata = self._get_obj_feats_names(self.objects_features_idxs)
         self.constituents = constituents
         self.cache = Path(cache)
         self.extraction_name = name
@@ -55,13 +55,13 @@ class L1DataExtractor(Root2h5):
         :param data_category: String specifying the kind of data that is being extracted
             e.g., 'zerobias', 'background', or 'signal'.
         """
-        log.info(f"Extracting datasets: {list(datasets.keys())}.")
+        log.info(Fore.GREEN + f"Extracting {data_category} data.")
 
         self.cache_folder = self.cache / self.extraction_name / data_category
         for dataset_name, folder_path in datasets.items():
             if self._check_file_exists(dataset_name):
                 continue
-                
+
             h5file = self.read_folder(Path(folder_path))
             data = self._extract_objects(h5file)
             h5file.close()
@@ -81,9 +81,11 @@ class L1DataExtractor(Root2h5):
             if obj in self.particles.keys():
                 data[obj] = self._extract_constituents_feats(h5file, obj)
                 continue
-
             # If object is not a particle, then extract feats directly.
             data[obj] = h5file[obj][:][..., self.objects_features_idxs[obj]]
+            # By default, define objects with no constituents, such as MET, to have
+            # only one constituent.
+            self.metadata[obj]["const"] = 1
 
         return data
 
@@ -96,14 +98,20 @@ class L1DataExtractor(Root2h5):
         if not particle in h5file.keys():
             raise KeyError(f"Particle not found in the given data file.")
 
-        if self.objects_features_idxs[particle]:
-            # Extract constituents.
+        # Extract constituents.
+        if particle in self.constituents.keys():
             particle_data = h5file[particle][:][:, self.constituents[particle]]
-            # Extract corresponding features for the constituents.
-            particle_data = particle_data[..., self.objects_features_idxs[particle]]
-            return particle_data
+        else:
+            particle_data = h5file[particle][:]
 
-        return h5file[particle_type][:][:, self.constituents[particle]]
+        # Extract corresponding features for the constituents.
+        if particle in self.objects_features_idxs.keys():
+            particle_data = particle_data[..., self.objects_features_idxs[particle]]
+
+        # Save number of extracted constituents to metadata.
+        self.metadata[particle]["const"] = int(np.array(self.constituents[particle]).sum())
+
+        return particle_data
 
     def _replace_feats_name_index(self, selected_features: dict) -> dict:
         """Replaces the name of the feature with its index in the data array.
@@ -113,17 +121,12 @@ class L1DataExtractor(Root2h5):
         """
         for object_name in selected_features.keys():
             idxs = [
-                # self.all_objects_feats[object_name].index(feat)
-                self.objects_features_names[object_name].index(feat)
+                self.all_objects_feats[object_name].index(feat)
                 for feat in selected_features[object_name]
             ]
             selected_features[object_name] = idxs
 
         return selected_features
-
-    def _check_subset(self, biglist: list, sublist: list) -> bool:
-        """Checks if one list is a sublist of another list."""
-        return set(biglist).intersection(sublist) == set(sublist)
 
     def _cache(self, data: dict, filename: str):
         """Store the extracted data in a h5 file."""
@@ -132,15 +135,14 @@ class L1DataExtractor(Root2h5):
 
         h5file = h5py.File(cache_file, mode="w")
         for obj_name, obj_data in data.items():
-            plots.plot_hist_3d(
+            plots.plot_hist(
                 obj_data,
                 obj_name,
-                self.objects_features_names[obj_name],
+                self.metadata[obj_name]["feats"],
                 self.cache_folder / filename,
             )
             h5file.create_dataset(obj_name, data=obj_data, compression="gzip")
         h5file.close()
-
         log.info("Cached extracted data at " + Fore.GREEN + f"{cache_file}.")
 
     def _cache_metadata(self):
@@ -151,17 +153,29 @@ class L1DataExtractor(Root2h5):
         if metadata_filepath.exists():
             return
 
-        # Get the names of the features for each object in the right order.
-        metadata_dict = {}
-        for obj_name in self.objects_features_idxs.keys():
-            object_feats = np.array(self.objects_features_names[obj_name])
-            object_feats = object_feats[self.objects_features_idxs[obj_name]].tolist()
-            metadata_dict[obj_name] = object_feats
-
         with open(metadata_filepath, "w") as metadata_file:
-            yaml.dump(metadata_dict, metadata_file)
+            yaml.dump(self.metadata, metadata_file)
 
         log.info(f"Cached extracted feature metadata at {metadata_filepath}.")
+
+    def _get_obj_feats_names(self, objects_feats_idxs: dict) -> dict:
+        """Get the extracted object features names in the right order.
+
+        The `all_objects_feats` dictionary is inherited and contains all the objects
+        and their respective features that are present in the h5 files from which we
+        extract the relevant objects and respective features in this class.
+
+        :param objects_feats_idxs: Dictionary with names of objects to be extracted
+            and the corresponding index in the raw data array.
+        """
+        metadata = {}
+        for obj_name in self.objects_features_idxs.keys():
+            object_feats = np.array(self.all_objects_feats[obj_name])
+            object_feats = object_feats[objects_feats_idxs[obj_name]].tolist()
+            metadata[obj_name] = {}
+            metadata[obj_name]["feats"] = object_feats
+
+        return metadata
 
     def _check_file_exists(self, dataset_name: str) -> bool:
         """Check if a specific data file exists."""
@@ -171,3 +185,7 @@ class L1DataExtractor(Root2h5):
             return 1
 
         return 0
+
+    def _check_subset(self, biglist: list, sublist: list) -> bool:
+        """Checks if one list is a sublist of another list."""
+        return set(biglist).intersection(sublist) == set(sublist)

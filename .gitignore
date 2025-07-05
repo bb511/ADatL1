@@ -163,9 +163,8 @@ outputs
 !**/outputs/
 !**/results/
 
+# Untrack SLURM outputs:
+*.out
 
 # Aim logging
 .aim
-
-# SLURM output
-*.out

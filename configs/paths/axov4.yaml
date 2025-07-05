@@ -1,0 +1,50 @@
+defaults:
+  - default.yaml
+
+# raw_data_dir: /data/deodagiu/adl1t_data/h5files
+# raw_data_dir: /cluster/home/vjimenez/ADatL1/data
+raw_data_dir: E:/ADatL1
+
+# paths to the different types of data
+zerobias:
+  ZB_run381148-381149: ${paths.raw_data_dir}/EphZB_2024E_run381148-381149_all_14_0_7_menuv110_1716739892
+signal:
+  GluGluHToBB_M-125: ${paths.raw_data_dir}/L1TNtupleRun3-133XWinter24/GluGluHToBB_M-125_TuneCP5_13p6TeV_powheg-pythia8
+  GluGluHToGG_M-125: ${paths.raw_data_dir}/L1TNtupleRun3-133XWinter24/GluGluHToGG_M-125_TuneCP5_13p6TeV_powheg-pythia8
+  GluGluHToGG_M-90: ${paths.raw_data_dir}/L1TNtupleRun3-133XWinter24/GluGluHToGG_M-90_TuneCP5_13p6TeV_powheg-pythia8
+  GluGluHToTauTau_M-125: ${paths.raw_data_dir}/L1TNtupleRun3-133XWinter24/GluGluHToTauTau_M-125_TuneCP5_13p6TeV_powheg-pythia8
+  GluGlutoHHto2B2WtoLNu2Q_kl-1p00_kt-1p00_c2-0p00: ${paths.raw_data_dir}/L1TNtupleRun3-133XWinter24/GluGlutoHHto2B2WtoLNu2Q_kl-1p00_kt-1p00_c2-0p00_TuneCP5_13p6TeV_powheg-pythia8
+  HHHTo6B_c3_0_d4_0: ${paths.raw_data_dir}/L1TNtupleRun3-133XWinter24/HHHTo6B_c3_0_d4_0_TuneCP5_13p6TeV_amcatnlo-pythia8
+  HHHto4B2Tau_c3-0_d4-0: ${paths.raw_data_dir}/L1TNtupleRun3-133XWinter24/HHHto4B2Tau_c3-0_d4-0_TuneCP5_13p6TeV_amcatnlo-pythia8
+  HTo2LongLivedTo4b_MH-1000_MFF-450_CTau-100000mm: ${paths.raw_data_dir}/L1TNtupleRun3-133XWinter24/HTo2LongLivedTo4b_MH-1000_MFF-450_CTau-100000mm_TuneCP5_13p6TeV-pythia8
+  HTo2LongLivedTo4b_MH-1000_MFF-450_CTau-10000mm: ${paths.raw_data_dir}/L1TNtupleRun3-133XWinter24/HTo2LongLivedTo4b_MH-1000_MFF-450_CTau-10000mm_TuneCP5_13p6TeV-pythia8
+  HTo2LongLivedTo4b_MH-125_MFF-12_CTau-900mm: ${paths.raw_data_dir}/L1TNtupleRun3-133XWinter24/HTo2LongLivedTo4b_MH-125_MFF-12_CTau-900mm_TuneCP5_13p6TeV-pythia8
+  HTo2LongLivedTo4b_MH-125_MFF-25_CTau-1500mm: ${paths.raw_data_dir}/L1TNtupleRun3-133XWinter24/HTo2LongLivedTo4b_MH-125_MFF-25_CTau-1500mm_TuneCP5_13p6TeV-pythia8
+  HTo2LongLivedTo4b_MH-125_MFF-50_CTau-3000mm: ${paths.raw_data_dir}/L1TNtupleRun3-133XWinter24/HTo2LongLivedTo4b_MH-125_MFF-50_CTau-3000mm_TuneCP5_13p6TeV-pythia8
+  SMS-Higgsino_mN2-170_mC1-160_mN1-150_HT-60: ${paths.raw_data_dir}/L1TNtupleRun3-133XWinter24/SMS-Higgsino_mN2-170_mC1-160_mN1-150_HT-60_TuneCP5_13p6TeV_pythia8
+  SMS-Higgsino_mN2-170_mC1-160_mN1-150_HT60: ${paths.raw_data_dir}/L1TNtupleRun3-133XWinter24/SMS-Higgsino_mN2-170_mC1-160_mN1-150_HT60_TuneCP5_13p6TeV-pythia8
+  SUSYGluGluToBBHToBB_NarrowWidth_M-1200_1: ${paths.raw_data_dir}/L1TNtupleRun3-133XWinter24/SUSYGluGluToBBHToBB_NarrowWidth_M-1200_TuneCP5_13p6TeV-pythia8
+  SUSYGluGluToBBHToBB_NarrowWidth_M-1200_2: ${paths.raw_data_dir}/L1TNtupleRun3-133XWinter24/SUSYGluGluToBBHToBB_NarrowWidth_M-1200_TuneCP5_13p6TeV_pythia8
+  SUSYGluGluToBBHToBB_NarrowWidth_M-120_1: ${paths.raw_data_dir}/L1TNtupleRun3-133XWinter24/SUSYGluGluToBBHToBB_NarrowWidth_M-120_TuneCP5_13p6TeV-pythia8
+  SUSYGluGluToBBHToBB_NarrowWidth_M-120_2: ${paths.raw_data_dir}/L1TNtupleRun3-133XWinter24/SUSYGluGluToBBHToBB_NarrowWidth_M-120_TuneCP5_13p6TeV_pythia8
+  SUSYGluGluToBBHToBB_NarrowWidth_M-350_1: ${paths.raw_data_dir}/L1TNtupleRun3-133XWinter24/SUSYGluGluToBBHToBB_NarrowWidth_M-350_TuneCP5_13p6TeV-pythia8
+  SUSYGluGluToBBHToBB_NarrowWidth_M-350_2: ${paths.raw_data_dir}/L1TNtupleRun3-133XWinter24/SUSYGluGluToBBHToBB_NarrowWidth_M-350_TuneCP5_13p6TeV_pythia8
+  SUSYGluGluToBBHToBB_NarrowWidth_M-600_1: ${paths.raw_data_dir}/L1TNtupleRun3-133XWinter24/SUSYGluGluToBBHToBB_NarrowWidth_M-600_TuneCP5_13p6TeV-pythia8
+  SUSYGluGluToBBHToBB_NarrowWidth_M-600_2: ${paths.raw_data_dir}/L1TNtupleRun3-133XWinter24/SUSYGluGluToBBHToBB_NarrowWidth_M-600_TuneCP5_13p6TeV_pythia8
+  VBFHToCC_M-125: ${paths.raw_data_dir}/L1TNtupleRun3-133XWinter24/VBFHToCC_M-125_TuneCP5_13p6TeV_powheg-pythia8
+  VBFHToInvisible_M-125: ${paths.raw_data_dir}/L1TNtupleRun3-133XWinter24/VBFHToInvisible_M-125_TuneCP5_13p6TeV_powheg-pythia8
+  VBFHToTauTau_M125: ${paths.raw_data_dir}/L1TNtupleRun3-133XWinter24/VBFHToTauTau_M125_TuneCP5_13p6TeV_powheg-pythia8
+  VBFHto2B_M-125: ${paths.raw_data_dir}/L1TNtupleRun3-133XWinter24/VBFHto2B_M-125_TuneCP5_13p6TeV_powheg-pythia8
+  WToTauTo3Mu: ${paths.raw_data_dir}/L1TNtupleRun3-133XWinter24/WToTauTo3Mu_TuneCP5_13p6TeV_pythia8
+  WToTauToMuMuMu: ${paths.raw_data_dir}/L1TNtupleRun3-133XWinter24/WToTauToMuMuMu_TuneCP5_13p6TeV-pythia8
+  Wlnu: ${paths.raw_data_dir}/L1TNtupleRun3-133XWinter24/Wlnu-POWHEG
+  ggXToJpsiJpsiTo2Mu2E_m7_pseudoscalar: ${paths.raw_data_dir}/L1TNtupleRun3-133XWinter24/ggXToJpsiJpsiTo2Mu2E_m7_pseudoscalar_TuneCP5_13p6TeV_jhugen-pythia8
+  ggXToYYTo2Mu2E_m14_pseudoscalar: ${paths.raw_data_dir}/L1TNtupleRun3-133XWinter24/ggXToYYTo2Mu2E_m14_pseudoscalar_TuneCP5_13p6TeV_jhugen-pythia8
+  ggXToYYTo2Mu2E_m18_pseudoscalar: ${paths.raw_data_dir}/L1TNtupleRun3-133XWinter24/ggXToYYTo2Mu2E_m18_pseudoscalar_TuneCP5_13p6TeV_jhugen-pythia8
+  ggXToYYTo2Mu2E_m26_pseudoscalar: ${paths.raw_data_dir}/L1TNtupleRun3-133XWinter24/ggXToYYTo2Mu2E_m26_pseudoscalar_TuneCP5_13p6TeV_jhugen-pythia8
+  haa-4b-ma15: ${paths.raw_data_dir}/L1TNtupleRun3-133XWinter24/haa-4b-ma15-POWHEG
+  ttHto2B_M-125: ${paths.raw_data_dir}/L1TNtupleRun3-133XWinter24/ttHto2B_M-125_TuneCP5_13p6TeV_powheg-pythia8
+  ttHto2C_M-125: ${paths.raw_data_dir}/L1TNtupleRun3-133XWinter24/ttHto2C_M-125_TuneCP5_13p6TeV_powheg-pythia8
+background:
+  SingleNeutrino_E-10-gun: ${paths.raw_data_dir}/L1TNtupleRun3-133XWinter24/SingleNeutrino_E-10-gun
+  SingleNeutrino_Pt-2To20-gun: ${paths.raw_data_dir}/L1TNtupleRun3-133XWinter24/SingleNeutrino_Pt-2To20-gun

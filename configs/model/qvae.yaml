@@ -6,7 +6,7 @@ encoder:
   _target_: src.models.components.qvae.QuantizedEncoder
 
   # 57 input features, 8 latent features
-  nodes: [57, 28, 15, 8] 
+  nodes: [57, 28, 16, 8]
 
   qdata: null
     # _target_: src.models.quantization.quantizers.FixedPointQuantizer
@@ -27,22 +27,27 @@ encoder:
     # _target_: src.models.quantization.quantizers.FixedPointQuantizer
     # bits: 10
     # integer: 6
+
+  init_weight:
+    _target_: src.utils.hydra.get_method
+    path: torch.nn.init.xavier_uniform_
+
+  init_bias:
+    _target_: src.utils.hydra.get_method
+    path: torch.nn.init.zeros_
   
 decoder:
   _target_: src.models.components.qvae.Decoder
 
-  nodes: [8, 15, 28, 57] # inverse of the encoder nodes
+  nodes: [8, 24, 32, 64, 128, 57] # v4 axol1tl architecture
 
-  # ------------------------------------------------------------------------------------
-  # Fancy way of defining the nodes: interpolate from the encoder nodes
-  # nodes:
-  #   - '${list_at_idx: ${model.encoder.nodes}, -1}'
-  #   - 16
-  #   - 32
-  #   - 64
-  #   - 128
-  #   - '${list_at_idx: ${model.encoder.nodes}, 0}'
-  # ------------------------------------------------------------------------------------
+  init_weight:
+    _target_: src.utils.hydra.get_method
+    path: torch.nn.init.xavier_uniform_
+
+  init_bias:
+    _target_: src.utils.hydra.get_method
+    path: torch.nn.init.zeros_
 
   init_last_weight:
     _target_: src.utils.hydra.get_method
@@ -53,8 +58,8 @@ decoder:
   init_last_bias: null
 
 loss:
-  _target_: src.models.losses.vae.VAELoss
-  beta: 0.604108559135001
+  _target_: src.models.losses.vae.ClassicVAELoss
+  alpha: 0.5736625791372814
   reduction: none
 
 optimizer:
@@ -75,4 +80,3 @@ scheduler:
     m_mul: 0.65
     alpha: 1e-6
     warmup_epochs: 10
-    last_epoch: -1

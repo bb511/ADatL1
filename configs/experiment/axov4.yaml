@@ -1,0 +1,35 @@
+# @package _global_
+
+defaults:
+  - /callbacks@callbacks.model_checkpoint_single: model_checkpoint_ds
+  - /callbacks@callbacks.model_checkpoint_loo: model_checkpoint_ds
+  - override /paths: axov4
+  - override /data: axov4
+  - override /model: axov4
+  - override /callbacks: default
+  - override /trainer: gpu0
+  - override /logger: wandb
+
+tags: ["vae", "axo_v4", "scan"]
+
+seed: 123
+
+trainer:
+  min_epochs: 1
+  max_epochs: 480
+
+callbacks:
+  model_checkpoint_single:
+    _target_: src.callbacks.model_checkpoint.SingleDatasetModelCheckpoint
+    loss_name: loss
+  model_checkpoint_loo:
+    _target_: src.callbacks.model_checkpoint.LeaveOneOutModelCheckpoint
+    loss_name: loss
+
+logger:
+  wandb:
+    entity: viictorjimenezzz-personal
+    project: adatl1
+
+    group: debug
+    name: coderuns

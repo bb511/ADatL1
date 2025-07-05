@@ -1,8 +1,5 @@
 # @package _global_
 
-# to execute this experiment run:
-# python train.py experiment=example
-
 defaults:
   - /callbacks@callbacks.model_checkpoint_single: model_checkpoint_ds
   - /callbacks@callbacks.model_checkpoint_loo: model_checkpoint_ds
@@ -11,7 +8,7 @@ defaults:
   - override /model: axov4
   - override /callbacks: default
   - override /trainer: gpu0
-  - override /logger: mlflow
+  - override /logger: wandb
 
 tags: ["vae", "axo_v4", "scan"]
 
@@ -30,8 +27,9 @@ callbacks:
     loss_name: loss
 
 logger:
-  mlflow:
-    # experiment_name: axov4_rates_multiple_metrics
-    # experiment_name: axov4_rates_cap
-    run_name: test
-    # run_name: scan_lr${model.optimizer.lr}_alpha${model.loss.alpha}
+  wandb:
+    entity: viictorjimenezzz-personal
+    project: adatl1
+
+    group: debug
+    name: coderuns

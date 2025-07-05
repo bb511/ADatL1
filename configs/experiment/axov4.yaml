@@ -21,10 +21,10 @@ trainer:
 callbacks:
   model_checkpoint_single:
     _target_: src.callbacks.model_checkpoint.SingleDatasetModelCheckpoint
-    loss_name: loss
+    metric_name: loss_total_full_rate0.3
   model_checkpoint_loo:
     _target_: src.callbacks.model_checkpoint.LeaveOneOutModelCheckpoint
-    loss_name: loss
+    metric_name: loss_total_full_rate0.3
 
 logger:
   wandb:

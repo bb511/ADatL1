@@ -1,5 +1,5 @@
 defaults:
-  - partitions: axov4
+  - partitions: debug
 
 _target_: src.data.L1AD_datamodule.L1ADDataModule
 

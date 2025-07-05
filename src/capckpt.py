@@ -8,6 +8,7 @@ from pytorch_lightning import LightningDataModule
 from pytorch_lightning.loggers import Logger
 from omegaconf import DictConfig
 import torch
+from pytorch_lightning.utilities.memory import garbage_collection_cuda
 
 rootutils.setup_root(__file__, indicator=".project-root", pythonpath=True)
 
@@ -59,10 +60,16 @@ def evaluate_checkpoints(cfg: DictConfig) -> Dict[str, Any]:
         cfg.logger.wandb.resume = "must"
     logger: List[Logger] = instantiate_loggers(cfg.get("logger"))
 
+    log.info(f"Instantiating trainer <{cfg.trainer._target_}>")
+    trainer: Trainer = hydra.utils.instantiate(
+        cfg.trainer, callbacks=[], logger=logger
+    )
+
     log.info(f"Instantiating datamodule <{cfg.data._target_}>")
     batch_size = cfg.data.batch_size
     datamodule: LightningDataModule = hydra.utils.instantiate(cfg.data)
     datamodule.batch_size_per_device = batch_size
+    datamodule.trainer = trainer
     datamodule.prepare_data()
     datamodule.setup("fit")
     dataset_dictionary = datamodule.val_dataloader()
@@ -92,10 +99,14 @@ def evaluate_checkpoints(cfg: DictConfig) -> Dict[str, Any]:
             model.to(device)
 
             ds = dataset_dictionary.get(dset_key)
-            for ibatch in range(len(ds)):
-                output = model.model_step(ds[ibatch].to(device))["loss/total/full"]
-                cache[ckpt].append(output.detach().cpu())
+            with torch.no_grad():
+                for ibatch in range(len(ds)):
+                    batch = ds[ibatch].flatten(start_dim=1).to(dtype=torch.float32).to(device)
+                    output = model.model_step(batch)["loss/total/full"]
+                    cache[ckpt].append(output.detach().cpu())
 
+            del batch
+            garbage_collection_cuda()
         # Compute CAPmetric
         capmetric = ApproximationCapacity(
             beta0=1.0,
@@ -107,8 +118,8 @@ def evaluate_checkpoints(cfg: DictConfig) -> Dict[str, Any]:
             regularization_params=None,
             binary=True,
             lr=0.01,
-            n_epochs=1,
-            batch_size=cfg.data.batch_size,
+            n_epochs=50,
+            batch_size=batch_size,
             device=device,
             process_group=None,
             dist_sync_fn=None
@@ -116,7 +127,10 @@ def evaluate_checkpoints(cfg: DictConfig) -> Dict[str, Any]:
         capmetric.update(
             *(torch.cat(ds, dim=0).to(device) for ds in cache.values())
         )
+
         capmetric_value = capmetric.compute()
+
+        garbage_collection_cuda()
         results[dset_key] = capmetric_value
         log.info(f"CAPmetric for {dset_key}: {capmetric_value}")
 

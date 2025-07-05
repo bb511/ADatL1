@@ -63,5 +63,3 @@ class ValidationCAP(ApproximationCapacityCallback):
         
         self.cache = defaultdict(list)
         del loss1, loss2, indices1, indices2; garbage_collection_cuda()
-
-        

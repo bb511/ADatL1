@@ -1,7 +1,8 @@
 python3 src/train.py \
+    -m \
     experiment=axov4 \
-    model.optimizer.lr=0.0001 \
-    trainer.max_epochs=100 \
-    data.use_entire_val_dataset=True \
-    model.loss.alpha=0.1 \
+    trainer.max_epochs=3 \
+    model.optimizer.lr=0.001 \
+    model.loss.alpha=0.6 \
     trainer=gpu0 \
+    data.val_batches=1 \

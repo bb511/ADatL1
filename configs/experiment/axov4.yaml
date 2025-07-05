@@ -4,6 +4,8 @@
 # python train.py experiment=example
 
 defaults:
+  - /callbacks@callbacks.model_checkpoint_single: model_checkpoint_ds
+  - /callbacks@callbacks.model_checkpoint_loo: model_checkpoint_ds
   - override /paths: axov4
   - override /data: axov4
   - override /model: axov4
@@ -19,8 +21,17 @@ trainer:
   min_epochs: 1
   max_epochs: 480
 
+callbacks:
+  model_checkpoint_single:
+    _target_: src.callbacks.model_checkpoint.SingleDatasetModelCheckpoint
+    loss_name: loss
+  model_checkpoint_loo:
+    _target_: src.callbacks.model_checkpoint.LeaveOneOutModelCheckpoint
+    loss_name: loss
+
 logger:
   mlflow:
-    # experiment_name: axov4_rates
+    # experiment_name: axov4_rates_multiple_metrics
+    # experiment_name: axov4_rates_cap
     run_name: test
     # run_name: scan_lr${model.optimizer.lr}_alpha${model.loss.alpha}

@@ -1,15 +1,12 @@
 from typing import Any, Optional, Union
 from pathlib import Path
-import gc
+from retry import retry
 
 import torch
 import numpy as np
-from pytorch_lightning import LightningDataModule
-from pytorch_lightning.utilities.combined_loader import CombinedLoader
-from torch.utils.data import ConcatDataset, DataLoader, Dataset, random_split
-from torch.utils.data import BatchSampler, RandomSampler, SequentialSampler
 import mlflow
-
+from pytorch_lightning import LightningDataModule
+from torch.utils.data import ConcatDataset, Dataset, random_split
 
 from src.utils import pylogger
 from colorama import Fore, Back, Style
@@ -21,43 +18,39 @@ log = pylogger.RankedLogger(__name__)
 class L1ADDataModule(LightningDataModule):
     def __init__(
         self,
-        zerobias: dict,
-        signal: dict,
-        background: dict,
         data_extractor: "L1DataExtractor",
         data_processor: "L1DataProcessor",
         data_normalizer: "L1DataNormalizer",
+        zerobias: dict,
+        signal: dict,
+        background: dict,
         partitions: dict,
-        split: tuple,
-        batch_size: int,
-        use_entire_val_dataset: bool = False,
-        load_all: bool = False,
+        split: tuple = (0.8, 0.1, 0.1),
+        batch_size: int = 16384,
+        val_batches: int = -1,
     ) -> None:
         """Prepare the L1 data from specific h5 files to be used for training.
 
         The h5 files need to be produced by the code at
         https://gitlab.cern.ch/cms-l1-ad/l1tntuple-maker/-/tree/new_h5generation
 
+        :param data_extractor: Class that extracts the data from the given h5 files.
+        :param data_processor: Class that processes the extracted data.
+        :param data_normalizer: Class that normalizes the processed data.
         :param zerobias: Dictionary of paths to the zerobias data.
         :param signals: Dictionary of paths to simulation data of possible anomalies.
         :param background: Dictionary of paths to simulation of data that is guaranteed
             to not contain any anomalies.
-        :param data_extractor: Class that extracts the data from the given h5 files.
-        :param data_processor: Class that processes the extracted data.
-        :param data_normalizer: Class that normalizes the processed data.
         :param partitions: Dictionary for how the data is distributed between:
             - the main data, to be split in train, val, and test
             - auxiliary datasets to be used for validation
             - auxiliary datasets to be used at the test stage
         :param split: Tuple specifying the fractions of the main data to be assigned to
             training, validation, and test.
-        :param loader: Dictionary with attributes handling the dataloading, such
-            as the batch size, number of workers, whether to use pin_memory, etc.
         :param batch_size: Integer specifying the batch size of the data.
-        :param use_entire_val_dataset: Bool whether to disregard batch_size and use
-            the entire dataset when running validation on it.
-        :param load_all: Bool whether to load all the data to ram before the training
-            actually starts. Leads to faster training.
+        :param val_batches: Integer specifying how many batches to split each
+            validation dataset into. Defaults to -1, which means to use the same batch
+            size as the training data.
         """
 
         super().__init__()
@@ -161,27 +154,33 @@ class L1ADDataModule(LightningDataModule):
                 self.hparams.batch_size // self.trainer.world_size
             )
 
+    @retry((Exception), tries=3, delay=3, backoff=0)
     def transfer_batch_to_device(self, batch, device, dataloader_idx):
-        """Transfer custom dataset to gpu faster."""
+        """Transfer custom dataset to gpu faster.
+
+        If the transfer fails, which can happen when a lot of jobs are running at
+        the same time and the gpu is out of memory, then try to transfer the data
+        again after 1 second of delay. Attempt to do this 3 times before throwing
+        an error and stopping the process.
+        """
         if 'cuda' in str(device):
             return batch.to(device, non_blocking=True)
 
         return batch.to(device)
 
-
     def _get_validation_batchsize(self, data: np.ndarray):
-        if self.hparams.use_entire_val_dataset:
-            return len(data)
+        if self.hparams.val_batches == -1:
+            return self.batch_size_per_device
 
-        return self.batch_size_per_device
+        return int(len(data)/self.hparams.val_batches)
 
-    def train_dataloader(self): # -> DataLoader[Any] | Dataset[Any]:
+    def train_dataloader(self) -> Dataset[Any]:
         """Creates an optimized dataloader for numpy arrays already in memory."""
         return L1ADDataset(
             self.data_train, batch_size=self.batch_size_per_device, shuffle=True
         )
 
-    def val_dataloader(self): # -> DataLoader[Any] | Dataset[Any]:
+    def val_dataloader(self) -> Dataset[Any]:
         """Create and return the validation dataloader.
 
         :return: The validation dataloader.
@@ -204,7 +203,7 @@ class L1ADDataModule(LightningDataModule):
 
         return data_val
 
-    def test_dataloader(self): # -> DataLoader[Any] | Dataset[Any]:
+    def test_dataloader(self) -> Dataset[Any]:
         """Create and return the test dataloader.
 
         :return: The validation dataloader.
@@ -229,27 +228,27 @@ class L1ADDataModule(LightningDataModule):
 
 class L1ADDataModuleDebug(L1ADDataModule):
     """Debug version of L1ADDataModule that generates random data instead of loading real data."""
-    
+
     def prepare_data(self) -> None:
         """Skip data extraction and processing for debugging."""
         log.info(Back.GREEN + "Debug mode: Skipping data preparation...")
         pass
-    
+
     def setup(self, stage: str = None) -> None:
         """Generate random data instead of loading real data."""
         self._set_batch_size()
-        
+
         if self.data_train is None and self.data_val is None and self.data_test is None:
             log.info("Debug mode: Generating 1000 random samples with 57 features...")
-            
+
             # Split: 700 train, 200 val, 100 test
             self.data_train = torch.from_numpy(np.random.randn(700, 57).astype(np.float32))
             self.data_val = torch.from_numpy(np.random.randn(200, 57).astype(np.float32))
             self.data_test = torch.from_numpy(np.random.randn(100, 57).astype(np.float32))
-            
+
             log.info(f"Generated datasets - Train: {len(self.data_train)}, "
                     f"Val: {len(self.data_val)}, Test: {len(self.data_test)}")
-        
+
         # Change the mean of the components:
         if hasattr(self.hparams, 'partitions') and self.hparams.partitions.get("aux_validation"):
             self.aux_val = {}
@@ -257,7 +256,7 @@ class L1ADDataModuleDebug(L1ADDataModule):
                 for filename in filenames:
                     random_data = ids + np.random.randn(100, 57).astype(np.float32)
                     self.aux_val[filename] = torch.from_numpy(random_data)
-        
+
         if hasattr(self.hparams, 'partitions') and self.hparams.partitions.get("aux_test"):
             self.aux_test = {}
             for ids, (_, filenames) in enumerate(self.hparams.partitions["aux_test"].items()):

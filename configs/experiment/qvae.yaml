@@ -27,9 +27,9 @@ logger:
     experiment_name: test
     run_name: test
 
-  wandb:
-    entity: viictorjimenezzz-personal
-    project: adatl1
+  # wandb:
+  #   entity: viictorjimenezzz-personal
+  #   project: adatl1
 
-    group: debug
-    name: coderuns
+  #   group: debug
+  #   name: coderuns

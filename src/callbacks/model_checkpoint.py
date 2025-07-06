@@ -11,7 +11,7 @@ class DatasetAwareModelCheckpoint(ModelCheckpoint):
     ModelCheckpoint class to store dataset-specific checkpoints.
 
     Args:
-        loss_name: Name of the loss key in the validation step outputs
+        metric_name: Name of the loss key in the validation step outputs
         dirpath: Directory to save the checkpoints
         filename: Checkpoint filename format
         save_top_k: Number of best checkpoints to keep per strategy
@@ -23,7 +23,7 @@ class DatasetAwareModelCheckpoint(ModelCheckpoint):
     
     def __init__(
         self,
-        loss_name: str = "loss",
+        metric_name: str = "loss",
         dirpath: Optional[str] = None,
         filename: Optional[str] = "{epoch:02d}-{step}",
         save_top_k: int = 1,
@@ -37,8 +37,8 @@ class DatasetAwareModelCheckpoint(ModelCheckpoint):
             mode=mode,
             **kwargs,
         )
-        self.loss_name = loss_name
-        self.loss_cache = defaultdict(list)
+        self.metric_name = metric_name
+        self.metric_cache = defaultdict(list)
 
         # For tracking and saving per-dataset checkpoints
         self.custom_checkpoints = defaultdict(list)
@@ -48,9 +48,11 @@ class DatasetAwareModelCheckpoint(ModelCheckpoint):
     ):
         """Store loss values for each dataset during validation."""
         dset_key = list(getattr(trainer, "val_dataloaders").keys())[dataloader_idx]
-        self.loss_cache[dset_key].append(
-            outputs[self.loss_name].detach().cpu().unsqueeze(0)
-        )
+
+        if self.metric_name in outputs.keys():
+            self.metric_cache[dset_key].append(
+                outputs[self.metric_name].detach().cpu().unsqueeze(0)
+            )
 
     def on_validation_epoch_end(self, trainer, pl_module):
         """
@@ -59,16 +61,29 @@ class DatasetAwareModelCheckpoint(ModelCheckpoint):
         Collects and processes loss data, then calls strategy-specific methods
         for checkpoint selection.
         """
-        if not self.loss_cache:
+        list_dset_key = list(getattr(trainer, "val_dataloaders").keys())
+
+        is_cache = len(self.metric_cache) > 0
+        is_metric = self.metric_name in set([k.split("/")[-1] for k in trainer.callback_metrics.keys()])
+        if not is_cache and not is_metric:
             return
+        
+        if not is_cache:
+            self.metric_cache = defaultdict(list)
+            for key, value in trainer.callback_metrics.items():
+                if key.endswith(self.metric_name):
+                    dset_key = key.split("/")[1]
+                    self.metric_cache[dset_key].append(
+                        value.detach().cpu().unsqueeze(0)
+                    )
 
         # Compute total loss and length for each dataset in this epoch
         epoch_loss_totals, epoch_loss_lengths = {}, {}
 
-        list_dset_key = list(getattr(trainer, "val_dataloaders").keys())
+        
         for dset_key in list_dset_key:
-            if dset_key in self.loss_cache.keys():
-                losses = self.loss_cache[dset_key]
+            if dset_key in self.metric_cache.keys():
+                losses = self.metric_cache[dset_key]
                 if len(losses) == 0:
                     continue
 
@@ -94,8 +109,8 @@ class DatasetAwareModelCheckpoint(ModelCheckpoint):
                 epoch_loss_lengths[dset_key] = local_count.item()
             
             # Clear cache for next epoch
-            if dset_key in self.loss_cache:
-                self.loss_cache[dset_key] = []
+            if dset_key in self.metric_cache:
+                self.metric_cache[dset_key] = []
                 
         # Strategy-specific implementation in subclasses
         self._process_dataset_losses(

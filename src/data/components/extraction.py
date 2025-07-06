@@ -6,7 +6,7 @@ import gc
 import h5py
 import numpy as np
 import yaml
-from colorama import Fore, Back, Style
+from colorama import Fore
 
 from adl1t_datamaker.h5convert.root2h5 import Root2h5
 from src.utils import pylogger

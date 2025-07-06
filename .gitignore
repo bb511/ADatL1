@@ -1,13 +1,10 @@
-# Ignore plots folder
-notebooks/run_grids
-notebooks/dataset_grids
 
 # Ignore mac stuff.
 .DS_Store
-sftp-config.json
 
 # Ignore sublime text editor configuration.
 .sublime
+sftp-config.json
 
 # Byte-compiled / optimized / DLL files
 __pycache__/
@@ -158,11 +155,21 @@ dmypy.json
 # Lightning-Hydra-Template
 configs/local/default.yaml
 /data/
+data
 /logs/
+logs
+/outputs/
+outputs
+/results/
 .env
 
-# MLflow data folder.
-notebooks/mlflow_data
+# Fix exceptions
+!**/data/
+!**/outputs/
+!**/results/
+
+# Untrack SLURM outputs:
+*.out
 
 # Aim logging
 .aim

@@ -24,7 +24,8 @@ class L1ADDataset(Dataset):
         if batch_idx == 0 and self.shuffle:
             np.random.shuffle(self.indexer)
         if batch_idx == self.max_idx-1:
-            batch = self.data[self.indexer[self.batch_idx*self.batch_size:], ...]
+            # batch = self.data[self.indexer[self.batch_idx*self.batch_size:], ...]
+            batch = self.data[self.indexer[batch_idx*self.batch_size:], ...]
         else:
             batch = self.data[
                 self.indexer[

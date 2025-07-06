@@ -20,3 +20,6 @@ deterministic: true
 
 # Debugging
 # limit_train_batches: 10
+
+# Skip sanity checking.
+num_sanity_val_steps: 0

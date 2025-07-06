@@ -155,18 +155,8 @@ dmypy.json
 # Lightning-Hydra-Template
 configs/local/default.yaml
 /data/
-data
 /logs/
-logs
-/outputs/
-outputs
-/results/
 .env
-
-# Fix exceptions
-!**/data/
-!**/outputs/
-!**/results/
 
 # Untrack SLURM outputs:
 *.out

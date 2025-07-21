@@ -8,7 +8,7 @@ defaults:
   - override /model: axov4
   - override /callbacks: default
   - override /trainer: gpu0
-  - override /logger: wandb
+  - override /logger: mlflow
 
 tags: ["vae", "axo_v4", "scan"]
 
@@ -21,14 +21,14 @@ trainer:
 callbacks:
   model_checkpoint_single:
     _target_: src.callbacks.model_checkpoint.SingleDatasetModelCheckpoint
-    metric_name: loss_total_full_rate0.3
+    metric_name: loss_kl_full_rate0.3
   model_checkpoint_loo:
     _target_: src.callbacks.model_checkpoint.LeaveOneOutModelCheckpoint
-    metric_name: loss_total_full_rate0.3
+    metric_name: loss_kl_full_rate0.3
 
 logger:
   mlflow:
-    # experiment_name: axov4_rates_multiple_metrics
-    experiment_name: axov4_rates_cap
+    experiment_name: axov4_rates_kl_checkpoint
+    # experiment_name: axov4_rates_cap_verify
     # run_name: test
     run_name: scan_lr${model.optimizer.lr}_alpha${model.loss.alpha}

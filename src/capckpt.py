@@ -75,7 +75,7 @@ def evaluate_checkpoints(cfg: DictConfig) -> Dict[str, Any]:
     dataset_dictionary = datamodule.val_dataloader()
 
     # Set device
-    device = "cuda" if torch.cuda.is_available() else "cpu"
+    device = f"cuda:{cfg.gpu_nb}" if torch.cuda.is_available() else "cpu"
     log.info(f"Using device: {device}")
 
     log.info(f"Finding checkpoints in {cfg.ckpt_path}")
@@ -87,6 +87,9 @@ def evaluate_checkpoints(cfg: DictConfig) -> Dict[str, Any]:
 
     results = {}
     for dset_key, ckpt_paths in checkpoints.items():
+        if "SingleNeutrino_E-10-gun" in dset_key:
+            continue
+
         log.info(f"Processing {len(ckpt_paths)} checkpoints for dataset '{dset_key}'")
         results[dset_key] = {}
         cache = defaultdict(list)
@@ -102,7 +105,7 @@ def evaluate_checkpoints(cfg: DictConfig) -> Dict[str, Any]:
             with torch.no_grad():
                 for ibatch in range(len(ds)):
                     batch = ds[ibatch].flatten(start_dim=1).to(dtype=torch.float32).to(device)
-                    output = model.model_step(batch)["loss/total/full"]
+                    output = model.model_step(batch)["loss/kl/full"]
                     cache[ckpt].append(output.detach().cpu())
 
             del batch
@@ -118,7 +121,7 @@ def evaluate_checkpoints(cfg: DictConfig) -> Dict[str, Any]:
             regularization_params=None,
             binary=True,
             lr=0.01,
-            n_epochs=50,
+            n_epochs=20,
             batch_size=batch_size,
             device=device,
             process_group=None,
@@ -140,8 +143,8 @@ def evaluate_checkpoints(cfg: DictConfig) -> Dict[str, Any]:
     log.info("=" * 80)
     for dset_key, capmetric in results.items():
         log.info(f"  {dset_key}: {capmetric}")
-    
-    return results
+
+    return results, {}
 
 
 @hydra.main(version_base="1.3", config_path="../configs", config_name="train.yaml")
@@ -151,7 +154,7 @@ def main(cfg: DictConfig) -> None:
     :param cfg: DictConfig configuration composed by Hydra.
     """
     extras(cfg)
-    results = evaluate_checkpoints(cfg)
+    results,_ = evaluate_checkpoints(cfg)
     
     # Optionally save results to file
     if hasattr(cfg, 'save_results') and cfg.save_results:
@@ -159,7 +162,7 @@ def main(cfg: DictConfig) -> None:
         results_path = Path(cfg.ckpt_path) / "capmetric_results.json"
         with open(results_path, 'w') as f:
             json.dump(results, f, indent=2)
-        log.info(f"Results saved to {results_path}")
+        log.info(f"Results saved to {results_path}.")
 
 
 if __name__ == "__main__":

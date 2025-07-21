@@ -1,6 +1,7 @@
-_target_: src.callbacks.cap.ValidationCAP
+_target_: src.callbacks.cap.ApproximationCapacityCallbackDebug
 output_name: loss/total/full
 log_every_n_epochs: 1
+log_optimization: false
 pairing_type: cdf
 data_pairs:
   baseline:
@@ -25,6 +26,7 @@ capmetric:
   binary: True
   lr: 0.01
   n_epochs: 50
-  batch_size: ${data.batch_size}
+  batch_size: 2048
+  normalize_gradients: true
   process_group: null
   dist_sync_fn: null

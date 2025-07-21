@@ -164,8 +164,8 @@ def evaluate_checkpoints(cfg: DictConfig) -> Dict[str, Any]:
                     output = model.model_step(batch)["loss/total/full"]
                     cache[ckpt].append(output.detach().cpu())
 
-            del batch
-            garbage_collection_cuda()
+            del ds, batch, model, state_dict; garbage_collection_cuda()
+            
         # Compute CAPmetric
         capmetric = ApproximationCapacity(
             beta0=1.0,
@@ -189,7 +189,7 @@ def evaluate_checkpoints(cfg: DictConfig) -> Dict[str, Any]:
 
         capmetric_value = capmetric.compute()
 
-        garbage_collection_cuda()
+        del capmetric; garbage_collection_cuda()
         results[dset_key] = capmetric_value
         log.info(f"CAPmetric for {dset_key}: {capmetric_value}")
 

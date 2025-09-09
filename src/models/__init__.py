@@ -2,6 +2,7 @@ from typing import Optional
 
 import torch
 from torch import nn, optim
+from retry import retry
 
 from omegaconf import OmegaConf, DictConfig
 from pytorch_lightning import LightningModule
@@ -66,6 +67,7 @@ class L1ADLightningModule(LightningModule):
         )
         return outdict
 
+    @retry((Exception), tries=3, delay=3, backoff=0)
     def validation_step(
         self, batch: torch.Tensor, batch_idx: int, dataloader_idx: Optional[int] = 0
     ):

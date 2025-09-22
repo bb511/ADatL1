@@ -161,7 +161,7 @@ outputs
 # Fix exceptions
 !**/data/
 !**/outputs/
-!**/results/
+# !**/results/
 
 # Untrack SLURM outputs:
 *.out

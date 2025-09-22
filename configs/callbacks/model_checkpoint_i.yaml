@@ -1,0 +1,9 @@
+model_checkpoint_i:
+  _target_: src.callbacks.model_checkpoint.SingleDatasetModelCheckpoint
+  # dirpath: ${paths.output_dir}/checkpoints
+  dirpath: ${paths.root_dir}/checkpoints/scan_lr${model.optimizer.lr}_alpha${model.loss.alpha}/
+  filename: '{epoch:02d}-{step}'
+  metric_name: loss_total_full_rate0.3
+  save_top_k: 1
+  mode: min
+  save_last: true

@@ -1,5 +1,3 @@
-# Custom dataset for AD data numpy array that is already loaded in memory.
-
 import torch
 import numpy as np
 from torch.utils.data import Dataset
@@ -10,8 +8,14 @@ class L1ADDataset(Dataset):
 
     The data is assumed to be already loaded in memory.
     """
-    def __init__(self, data: torch.Tensor, batch_size: int, shuffle: bool = False):
-        self.data = data
+    def __init__(
+            self,
+            data: torch.Tensor,
+            labels: torch.Tensor,
+            batch_size: int,
+            shuffle: bool = False,
+        ):
+        self.data, self.labels = data, labels
         self.batch_size = batch_size
         self.max_idx = self.data.size()[0]
         self.indexer = np.arange(self.data.size()[0])
@@ -23,14 +27,20 @@ class L1ADDataset(Dataset):
     def __getitem__(self, batch_idx: int):
         if batch_idx == 0 and self.shuffle:
             np.random.shuffle(self.indexer)
-        if batch_idx == self.max_idx-1:
-            # batch = self.data[self.indexer[self.batch_idx*self.batch_size:], ...]
-            batch = self.data[self.indexer[batch_idx*self.batch_size:], ...]
-        else:
-            batch = self.data[
-                self.indexer[
-                    batch_idx*self.batch_size:batch_idx*self.batch_size + self.batch_size],
-                    ...
-                ]
 
+        if batch_idx == self.max_idx-1:
+            batch = (
+                self.data[self.indexer[batch_idx*self.batch_size:], ...],
+                self.labels[self.indexer[batch_idx*self.batch_size:], ...] if self.labels is not None else None
+            )
+
+        else:
+            batch = (
+                self.data[
+                    self.indexer[batch_idx*self.batch_size:batch_idx*self.batch_size + self.batch_size], ...
+                ],
+                self.labels[
+                    self.indexer[batch_idx*self.batch_size:batch_idx*self.batch_size + self.batch_size], ...
+                ] if self.labels is not None else None
+            )
         return batch

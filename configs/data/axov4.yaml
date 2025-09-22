@@ -1,8 +1,7 @@
 defaults:
   - partitions: axov4
 
-_target_: src.data.L1AD_datamodule.L1ADDataModuleDebug
-# _target_: src.data.L1AD_datamodule.L1ADDataModule
+_target_: src.data.L1AD_datamodule.L1ADDataModule
 
 # Fill in below with paths to folders that contain the raw data in h5 format.
 zerobias: ${paths.zerobias}

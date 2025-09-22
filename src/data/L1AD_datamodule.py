@@ -1,12 +1,12 @@
 from typing import Any, Optional, Union
 from pathlib import Path
-from retry import retry
+# from retry import retry
 
 import torch
 import numpy as np
 import mlflow
 from pytorch_lightning import LightningDataModule
-from torch.utils.data import ConcatDataset, Dataset, random_split
+from torch.utils.data import TensorDataset, Dataset, random_split
 
 from src.utils import pylogger
 from colorama import Fore, Back, Style
@@ -56,11 +56,9 @@ class L1ADDataModule(LightningDataModule):
         super().__init__()
         self.save_hyperparameters(logger=False)
 
-        self.data_train: Optional[Dataset] = None
-        self.data_val: Optional[Dataset] = None
-        self.data_test: Optional[Dataset] = None
-        self.aux_val: Optional[Dataset] = None
-        self.aux_test: Optional[Dataset] = None
+        self.data_train, self.data_val, self.data_test = None, None, None
+        self.labels_train, self.labels_val, self.labels_test = None, None, None
+        self.aux_val, self.aux_test = None, None
 
     def prepare_data(self) -> None:
         """Get zero bias data and the simulated MC signal data."""
@@ -84,13 +82,27 @@ class L1ADDataModule(LightningDataModule):
 
         if self.data_train is None and self.data_val is None and self.data_test is None:
             main_data = self._get_processed_data(self.hparams.partitions["main_data"])
-            main_data = np.concatenate(list(main_data.values()), axis=0)
-            self.data_train, self.data_val, self.data_test = random_split(
-                dataset=main_data,
+            main_data_data, main_data_labels = [], []
+            for key, data in main_data.items():
+                main_data_data.append(data)
+                main_data_labels.append(np.full(len(data), key, dtype=object))
+            del main_data
+
+            main_labels = np.concatenate(main_data_labels, axis=0)
+            main_data = np.concatenate(main_data_data, axis=0)
+            del main_data_data, main_data_labels
+
+            splits = random_split(
+                dataset=main_labels,
                 lengths=self.hparams.split,
                 generator=torch.Generator().manual_seed(42),
             )
-            del main_data
+            train_indices, val_indices, test_indices = splits[0].indices, splits[1].indices, splits[2].indices
+           
+            # Use indices to get the corresponding data and labels
+            self.data_train, self.data_val, self.data_test = main_data[train_indices], main_data[val_indices], main_data[test_indices]
+            self.labels_train, self.labels_val, self.labels_test = main_labels[train_indices], main_labels[val_indices], main_labels[test_indices]
+            del main_data, main_labels, splits, train_indices, val_indices, test_indices
 
             self.hparams.data_normalizer.fit(self.data_train)
             self.data_train = self._normalize_data(self.data_train, name="train")
@@ -154,7 +166,7 @@ class L1ADDataModule(LightningDataModule):
                 self.hparams.batch_size // self.trainer.world_size
             )
 
-    @retry((Exception), tries=3, delay=3, backoff=0)
+    # @retry((Exception), tries=3, delay=3, backoff=0)
     def transfer_batch_to_device(self, batch, device, dataloader_idx):
         """Transfer custom dataset to gpu faster.
 
@@ -163,10 +175,11 @@ class L1ADDataModule(LightningDataModule):
         again after 1 second of delay. Attempt to do this 3 times before throwing
         an error and stopping the process.
         """
+        data, labels = batch
         if 'cuda' in str(device):
-            return batch.to(device, non_blocking=True)
+            return data.to(device, non_blocking=True), labels
 
-        return batch.to(device)
+        return data.to(device), labels
 
     def _get_validation_batchsize(self, data: np.ndarray):
         if self.hparams.val_batches == -1:
@@ -177,7 +190,7 @@ class L1ADDataModule(LightningDataModule):
     def train_dataloader(self) -> Dataset[Any]:
         """Creates an optimized dataloader for numpy arrays already in memory."""
         return L1ADDataset(
-            self.data_train, batch_size=self.batch_size_per_device, shuffle=True
+            self.data_train, self.labels_train, batch_size=self.batch_size_per_device, shuffle=True
         )
 
     def val_dataloader(self) -> Dataset[Any]:
@@ -187,7 +200,7 @@ class L1ADDataModule(LightningDataModule):
         """
         # Shuffling is by default false for the custom dataset.
         batch_size = self._get_validation_batchsize(self.data_val)
-        main_val = L1ADDataset(self.data_val, batch_size=batch_size)
+        main_val = L1ADDataset(self.data_val, self.labels_val, batch_size=batch_size)
         data_val = {}
         # Make sure main_val is always first in the dict !!!
         # The rate callback expects this.
@@ -197,7 +210,7 @@ class L1ADDataModule(LightningDataModule):
 
         for data_name, data in self.aux_val.items():
             batch_size = self._get_validation_batchsize(data)
-            self.aux_val[data_name] = L1ADDataset(data, batch_size=batch_size)
+            self.aux_val[data_name] = L1ADDataset(data, None, batch_size=batch_size)
 
         data_val.update(self.aux_val)
 
@@ -210,7 +223,7 @@ class L1ADDataModule(LightningDataModule):
         """
         # Shuffling is by default false for the custom dataset.
         batch_size = self._get_validation_batchsize(self.data_test)
-        main_test = L1ADDataset(self.data_test, batch_size=batch_size)
+        main_test = L1ADDataset(self.data_test, self.labels_test, batch_size=batch_size)
         data_test = {}
         data_test.update({"main_test": main_test})
         if not self.aux_test:
@@ -218,7 +231,7 @@ class L1ADDataModule(LightningDataModule):
 
         for data_name, data in self.aux_test.items():
             batch_size = self._get_validation_batchsize(data)
-            self.aux_test[data_name] = L1ADDataset(data, batch_size=batch_size)
+            self.aux_test[data_name] = L1ADDataset(data, None, batch_size=batch_size)
 
         data_test.update(self.aux_test)
 
@@ -241,11 +254,21 @@ class L1ADDataModuleDebug(L1ADDataModule):
         if self.data_train is None and self.data_val is None and self.data_test is None:
             log.info("Debug mode: Generating 1000 random samples with 57 features...")
 
-            # Split: 700 train, 200 val, 100 test
-            self.data_train = torch.from_numpy(np.random.randn(700, 57).astype(np.float32))
-            self.data_val = torch.from_numpy(np.random.randn(200, 57).astype(np.float32))
-            self.data_test = torch.from_numpy(np.random.randn(100, 57).astype(np.float32))
-
+            main_data = np.random.randn(1000, 57).astype(np.float32)
+            main_labels = np.concatenate([
+                np.full(400, "background", dtype=object),
+                np.full(300, "simulation_1", dtype=object),
+                np.full(300, "simulation_2", dtype=object),
+            ])
+            splits = random_split(
+                dataset=main_labels,
+                lengths=[700, 200, 100],
+                generator=torch.Generator().manual_seed(42),
+            )
+            train_indices, val_indices, test_indices = splits[0].indices, splits[1].indices, splits[2].indices
+            self.data_train, self.data_val, self.data_test = torch.from_numpy(main_data[train_indices]), torch.from_numpy(main_data[val_indices]), torch.from_numpy(main_data[test_indices])
+            self.labels_train, self.labels_val, self.labels_test = main_labels[train_indices], main_labels[val_indices], main_labels[test_indices]
+    
             log.info(f"Generated datasets - Train: {len(self.data_train)}, "
                     f"Val: {len(self.data_val)}, Test: {len(self.data_test)}")
 

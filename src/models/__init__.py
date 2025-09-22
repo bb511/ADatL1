@@ -1,7 +1,8 @@
-from typing import Optional
+from typing import Optional, Tuple
 
 import torch
 from torch import nn, optim
+# from retry import retry
 
 from omegaconf import OmegaConf, DictConfig
 from pytorch_lightning import LightningModule
@@ -50,9 +51,18 @@ class L1ADLightningModule(LightningModule):
             dataloader_idx
         ]
         return {f"{stage}/{dset_key}/{k}": v for k, v in outdict.items()}
+    
+    def _extract_batch(self, batch: Tuple[torch.Tensor]) -> torch.Tensor:
+        """Extract data from batch."""
+        data, labels = batch
+        data = data.flatten(start_dim=1).to(dtype=torch.float32)
+
+        # if labels is not None:
+        #     return data, labels
+        return data
 
     def training_step(self, batch: torch.Tensor, batch_idx: int):
-        outdict = self.model_step(batch.flatten(start_dim=1).to(dtype=torch.float32))
+        outdict = self.model_step(self._extract_batch(batch))
 
         # Decide what to log:
         self.log_dict(
@@ -66,10 +76,11 @@ class L1ADLightningModule(LightningModule):
         )
         return outdict
 
+    # @retry((Exception), tries=3, delay=3, backoff=0)
     def validation_step(
         self, batch: torch.Tensor, batch_idx: int, dataloader_idx: Optional[int] = 0
     ):
-        outdict = self.model_step(batch.flatten(start_dim=1).to(dtype=torch.float32))
+        outdict = self.model_step(self._extract_batch(batch))
         self.log_dict(
             self._log_dict(outdict, "val", dataloader_idx=dataloader_idx),
             prog_bar=False,
@@ -85,7 +96,7 @@ class L1ADLightningModule(LightningModule):
     def test_step(
         self, batch: torch.Tensor, batch_idx: int, dataloader_idx: Optional[int] = 0
     ):
-        outdict = self.model_step(batch.flatten(start_dim=1).to(dtype=torch.float32))
+        outdict = self.model_step(self._extract_batch(batch))
 
         # Decide what to log:
         self.log_dict(

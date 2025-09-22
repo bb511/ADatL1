@@ -1,0 +1,53 @@
+# @package _global_
+
+defaults:
+  - override /paths: axov4
+  - override /data: axov4
+  - override /model: axov4
+  - override /callbacks: axov4
+  - override /trainer: gpu0
+  - override /logger: wandb
+
+  - override /data/partitions@data.partitions: mivae
+
+
+tags: ["vae", "axo_v4", "scan"]
+
+seed: 123
+
+# For debugging purposes:
+# data:
+#   _target_: src.data.L1AD_datamodule.L1ADDataModuleDebug
+
+trainer:
+  min_epochs: 1
+  max_epochs: 480
+
+model:
+  _target_: src.models.mivae.MIVAE
+
+  encoder:
+    _target_: src.models.components.mivae.MIVAEEncoder
+    
+    # MI parameters
+    num_samples: 10
+    qsigmoid:
+      _target_: src.models.quantization.quantizers.FixedPointQuantizer
+      bits: 8
+      integer: 4
+      alpha: 1.0
+      symmetric: false # sigmoid output is [0, 1]
+
+  loss:
+    _target_: src.models.losses.mivae.AxoV4MIVAELoss
+    alpha: 0.1
+    gamma: 1.0
+    reduction: none
+
+logger:
+  wandb:
+    entity: viictorjimenezzz-personal
+    project: adatl1
+
+    group: debug
+    name: coderuns

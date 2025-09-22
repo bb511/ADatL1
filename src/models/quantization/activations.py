@@ -15,6 +15,17 @@ class QuantizedReLU(nn.ReLU):
         return self.quantizer(super().forward(x))
 
 
+class QuantizedSigmoid(nn.Module):
+    """Quantized sigmoid activation function."""
+    
+    def __init__(self, quantizer: Optional[Quantizer] = None):
+        super().__init__()
+        self.quantizer = quantizer or Quantizer(None, None)
+    
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        return self.quantizer(torch.sigmoid(x))
+    
+
 class QuantizedBatchNorm1d(nn.BatchNorm1d):
     def __init__(
         self,
@@ -53,5 +64,3 @@ class QuantizedBatchNorm1d(nn.BatchNorm1d):
                 momentum=self.momentum,
                 eps=self.eps,
             )
-        
-        

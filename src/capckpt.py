@@ -1,12 +1,14 @@
 from typing import Any, Dict, List
 from pathlib import Path
 from collections import defaultdict
+import os
+import json
 
 import hydra
 import rootutils
-from pytorch_lightning import LightningDataModule
+from pytorch_lightning import LightningDataModule, Trainer
 from pytorch_lightning.loggers import Logger
-from omegaconf import DictConfig
+from omegaconf import OmegaConf, DictConfig
 import torch
 from pytorch_lightning.utilities.memory import garbage_collection_cuda
 
@@ -17,6 +19,52 @@ from src.utils import RankedLogger, extras, task_wrapper, instantiate_loggers
 log = RankedLogger(__name__, rank_zero_only=True)
 
 from capmetric import ApproximationCapacity
+
+
+def _leaf_paths(config, prefix=""):
+    """Extract all leaf node paths and values from nested config."""
+    leaves = {}
+    for key, value in config.items():
+        full_key = f"{prefix}.{key}" if prefix else key
+        if isinstance(value, (dict, DictConfig)):
+            leaves.update(_leaf_paths(value, full_key))
+        else:
+            leaves[full_key] = value
+    return leaves
+
+def find_experiment(logs_path: str, checkpoint_filter: DictConfig) -> List[str]:
+    """Find experiment directories that match the given configuration filter."""
+
+    items_filter = _leaf_paths(checkpoint_filter)
+    matching_experiments = []
+    for multirun_dir in Path(logs_path).iterdir():
+        if not multirun_dir.is_dir():
+            continue
+
+        for run_dir in multirun_dir.iterdir():
+            if not run_dir.is_dir():
+                continue
+
+            config_path = run_dir / ".hydra" / "config.yaml"
+            if not config_path.exists():
+                continue
+
+            with open(config_path, 'r') as f:
+                items_config = _leaf_paths(OmegaConf.load(f))
+
+            match = True
+            for key, value in items_filter.items():
+                if key in items_config and items_config[key] != value:
+                    match = False
+                    break
+
+            if match:
+                matching_experiments.append(run_dir)
+             
+
+    # Sort by timestamp (newest first)
+    matching_experiments.sort(key = lambda exp_path: exp_path.parent.name, reverse=True)
+    return matching_experiments
 
 
 def find_all_checkpoints(base_path: str) -> Dict[str, List[str]]:
@@ -75,18 +123,32 @@ def evaluate_checkpoints(cfg: DictConfig) -> Dict[str, Any]:
     dataset_dictionary = datamodule.val_dataloader()
 
     # Set device
-    device = "cuda" if torch.cuda.is_available() else "cpu"
+    device = f"cuda:{cfg.gpu_nb}" if torch.cuda.is_available() else "cpu"
     log.info(f"Using device: {device}")
 
-    log.info(f"Finding checkpoints in {cfg.ckpt_path}")
-    checkpoints = find_all_checkpoints(cfg.ckpt_path)
+    # Find experiment checkpoints
+    ckpt_path_list = find_experiment(
+        logs_path=os.path.join(cfg.paths.log_dir, "train", "multiruns"),
+        checkpoint_filter=cfg.checkpoint_filter
+    )
+    if len(ckpt_path_list) == 0:
+        log.error("No matching experiments found. Please check your configuration.")
+        return {}
+
+    # We will use the newest matching experiment
+    ckpt_path = str(ckpt_path_list[0] / "checkpoints")
+    log.info(f"Finding checkpoints in {ckpt_path}")
+    checkpoints = find_all_checkpoints(ckpt_path)
     
     if not checkpoints:
-        log.warning(f"No checkpoints found in {cfg.ckpt_path}")
+        log.warning(f"No checkpoints found in {ckpt_path}")
         return {}
 
     results = {}
     for dset_key, ckpt_paths in checkpoints.items():
+        if "SingleNeutrino_E-10-gun" in dset_key:
+            continue
+
         log.info(f"Processing {len(ckpt_paths)} checkpoints for dataset '{dset_key}'")
         results[dset_key] = {}
         cache = defaultdict(list)
@@ -102,11 +164,11 @@ def evaluate_checkpoints(cfg: DictConfig) -> Dict[str, Any]:
             with torch.no_grad():
                 for ibatch in range(len(ds)):
                     batch = ds[ibatch].flatten(start_dim=1).to(dtype=torch.float32).to(device)
-                    output = model.model_step(batch)["loss/total/full"]
+                    output = model.model_step(batch)["loss/kl/full"]
                     cache[ckpt].append(output.detach().cpu())
 
-            del batch
-            garbage_collection_cuda()
+            del ds, batch, model, state_dict; garbage_collection_cuda()
+            
         # Compute CAPmetric
         capmetric = ApproximationCapacity(
             beta0=1.0,
@@ -118,7 +180,7 @@ def evaluate_checkpoints(cfg: DictConfig) -> Dict[str, Any]:
             regularization_params=None,
             binary=True,
             lr=0.01,
-            n_epochs=50,
+            n_epochs=20,
             batch_size=batch_size,
             device=device,
             process_group=None,
@@ -130,7 +192,7 @@ def evaluate_checkpoints(cfg: DictConfig) -> Dict[str, Any]:
 
         capmetric_value = capmetric.compute()
 
-        garbage_collection_cuda()
+        del capmetric; garbage_collection_cuda()
         results[dset_key] = capmetric_value
         log.info(f"CAPmetric for {dset_key}: {capmetric_value}")
 
@@ -140,26 +202,26 @@ def evaluate_checkpoints(cfg: DictConfig) -> Dict[str, Any]:
     log.info("=" * 80)
     for dset_key, capmetric in results.items():
         log.info(f"  {dset_key}: {capmetric}")
+
     
-    return results
+    return results, ckpt_path
 
 
-@hydra.main(version_base="1.3", config_path="../configs", config_name="train.yaml")
+@hydra.main(version_base="1.3", config_path="../configs", config_name="capckpt.yaml")
 def main(cfg: DictConfig) -> None:
     """Main entry point for CAPmetric evaluation on all checkpoints.
 
     :param cfg: DictConfig configuration composed by Hydra.
     """
     extras(cfg)
-    results = evaluate_checkpoints(cfg)
+    results, ckpt_path = evaluate_checkpoints(cfg)
     
     # Optionally save results to file
     if hasattr(cfg, 'save_results') and cfg.save_results:
-        import json
-        results_path = Path(cfg.ckpt_path) / "capmetric_results.json"
+        results_path = Path(ckpt_path) / "capmetric_results.json"
         with open(results_path, 'w') as f:
             json.dump(results, f, indent=2)
-        log.info(f"Results saved to {results_path}")
+        log.info(f"Results saved to {results_path}.")
 
 
 if __name__ == "__main__":

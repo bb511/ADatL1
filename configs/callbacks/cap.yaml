@@ -1,5 +1,6 @@
 cap_callback:
-  _target_: src.callbacks.cap.ValidationCAP
+  # _target_: src.callbacks.cap.ValidationCAP
+  _target_: capmetric.callback.ApproximationCapacityCallback
   output_name: loss/total/full
   log_every_n_epochs: 1
   pairing_type: cdf

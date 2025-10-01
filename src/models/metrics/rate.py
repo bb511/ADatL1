@@ -14,6 +14,7 @@ class AnomalyRate(Metric):
         LHC tunnel, which gives the total rate of events that are processed by
         the L1 trigger.
     """
+
     def __init__(self, target_rate: float, bc_rate: float):
         super().__init__()
         self.target_rate = target_rate
@@ -31,7 +32,7 @@ class AnomalyRate(Metric):
         :bkg_score: Torch tensor containing scores for background samples.
         """
         self.threshold = np.percentile(
-            bkg_score, 100 - (self.target_rate/self.bc_rate)*100
+            bkg_score, 100 - (self.target_rate / self.bc_rate) * 100
         )
 
     def update(self, anomaly_score: torch.Tensor) -> None:
@@ -53,6 +54,7 @@ class ClassifierRate(Metric):
         LHC tunnel, which gives the total rate of events that are processed by
         the L1 trigger.
     """
+
     def __init__(self, target_rate: float, bc_rate: float):
         super().__init__()
         self.target_rate = target_rate
@@ -70,7 +72,9 @@ class ClassifierRate(Metric):
         :bkg_score: Torch tensor containing scores for background samples.
         """
         self.threshold = np.percentile(
-            bkg_score, 100 - (self.target_rate / self.bc_rate)*100, method='inverted_cdf'
+            bkg_score,
+            100 - (self.target_rate / self.bc_rate) * 100,
+            method="inverted_cdf",
         )
 
     def update(self, classification_score: torch.Tensor) -> None:

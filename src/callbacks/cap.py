@@ -9,11 +9,7 @@ import wandb
 
 class ValidationCAP(ApproximationCapacityCallback):
 
-    def __init__(
-        self,
-        log_optimization: Optional[bool] = False,
-        **kwargs
-    ):
+    def __init__(self, log_optimization: Optional[bool] = False, **kwargs):
         super().__init__(**kwargs)
         self.log_optimization = log_optimization
 
@@ -44,7 +40,7 @@ class ValidationCAP(ApproximationCapacityCallback):
             # Compute the metric:
             self.capmetric.update(
                 loss1[: min(len(loss1), len(loss2))],
-                loss2[: min(len(loss1), len(loss2))]
+                loss2[: min(len(loss1), len(loss2))],
             )
             pl_module.log_dict(
                 {
@@ -60,30 +56,32 @@ class ValidationCAP(ApproximationCapacityCallback):
             # Log arrays with the debugging plots:
             if self.log_optimization:
                 try:
-                    cap_values = [log['cap'] for log in self.capmetric.epoch_logs]
-                    beta_values = [log['beta'] for log in self.capmetric.epoch_logs]
+                    cap_values = [log["cap"] for log in self.capmetric.epoch_logs]
+                    beta_values = [log["beta"] for log in self.capmetric.epoch_logs]
 
-                    pl_module.logger.experiment.log({
-                        f"cap-{pair_name}/cap@e={pl_module.current_epoch}": wandb.plot.line_series(
-                            xs=list(range(len(cap_values))),
-                            ys=[self.symlog(torch.tensor(cap_values)).tolist()],
-                            keys=["CAP"],
-                            title=f"CAP@{pl_module.current_epoch}",
-                            xname="epoch"
-                        ),
-                        f"cap-{pair_name}/beta@e={pl_module.current_epoch}": wandb.plot.line_series(
-                            xs=list(range(len(beta_values))),
-                            ys=[beta_values],
-                            keys=["Beta"],
-                            title=f"Beta@{pl_module.current_epoch}",
-                            xname="epoch"
-                        ),
-                    },
-                    step=pl_module.global_step
-                )
+                    pl_module.logger.experiment.log(
+                        {
+                            f"cap-{pair_name}/cap@e={pl_module.current_epoch}": wandb.plot.line_series(
+                                xs=list(range(len(cap_values))),
+                                ys=[self.symlog(torch.tensor(cap_values)).tolist()],
+                                keys=["CAP"],
+                                title=f"CAP@{pl_module.current_epoch}",
+                                xname="epoch",
+                            ),
+                            f"cap-{pair_name}/beta@e={pl_module.current_epoch}": wandb.plot.line_series(
+                                xs=list(range(len(beta_values))),
+                                ys=[beta_values],
+                                keys=["Beta"],
+                                title=f"Beta@{pl_module.current_epoch}",
+                                xname="epoch",
+                            ),
+                        },
+                        step=pl_module.global_step,
+                    )
                 except Exception as e:
                     print(f"It was not possible to log {e}.")
                     pass
 
         self.cache = defaultdict(list)
-        del loss1, loss2, indices1, indices2; garbage_collection_cuda()
+        del loss1, loss2, indices1, indices2
+        garbage_collection_cuda()

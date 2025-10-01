@@ -17,14 +17,14 @@ class QuantizedReLU(nn.ReLU):
 
 class QuantizedSigmoid(nn.Module):
     """Quantized sigmoid activation function."""
-    
+
     def __init__(self, quantizer: Optional[Quantizer] = None):
         super().__init__()
         self.quantizer = quantizer or Quantizer(None, None)
-    
+
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         return self.quantizer(torch.sigmoid(x))
-    
+
 
 class QuantizedBatchNorm1d(nn.BatchNorm1d):
     def __init__(
@@ -46,8 +46,14 @@ class QuantizedBatchNorm1d(nn.BatchNorm1d):
             weight = self.qweight(self.weight)
             bias = self.qbias(self.bias)
             return F.batch_norm(
-                x, self.running_mean, self.running_var, weight, bias,
-                training=True, momentum=self.momentum, eps=self.eps
+                x,
+                self.running_mean,
+                self.running_var,
+                weight,
+                bias,
+                training=True,
+                momentum=self.momentum,
+                eps=self.eps,
             )
         else:
             weight = self.qweight(self.weight)

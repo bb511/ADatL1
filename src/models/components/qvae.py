@@ -14,7 +14,7 @@ class Sampling(nn.Module):
         z_mean, z_log_var = inputs
         var = torch.exp(0.5 * z_log_var)
         epsilon = torch.randn_like(var).to(z_mean.device)
-        return z_mean + z_log_var*epsilon
+        return z_mean + z_log_var * epsilon
 
 
 class QuantizedEncoder(nn.Module):
@@ -55,7 +55,7 @@ class QuantizedEncoder(nn.Module):
             init_weight=nn.init.xavier_uniform_,
             init_bias=nn.init.zeros_,
         )
-        
+
         # Log variance layer (initialized to zero)
         self.z_log_var = QuantizedLinear(
             in_features=nodes[-2],

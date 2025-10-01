@@ -12,6 +12,7 @@ class BinaryClassifier(nn.Module):
     :param init_weight: Callable method to initialize the weights of the encoder nodes.
     :param init_bias: Callable method to initialize the biases of the encoder nodes.
     """
+
     def __init__(
         self,
         nodes: List[int],

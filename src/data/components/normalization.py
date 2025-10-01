@@ -18,7 +18,7 @@ class L1DataNormalizer:
     norm_hyperparams: dict = field(default_factory=dict)
     ignore_zeros: bool = False
     processed_data_folder: str = "data/processed/default"
-    output_dtype: str = 'float32'
+    output_dtype: str = "float32"
     cache: str = "data/normed/default"
 
     def fit(self, data: np.ndarray) -> None:
@@ -121,7 +121,9 @@ class L1DataNormalizer:
             quant_high, quant_low = np.nanpercentile(data_feature, percentiles)
             scaled_iq = (quant_high - quant_low) / scale_width
             interquantile_range.append(scaled_iq)
-            chang_shift = (quant_low * scale_larger - quant_high * scale_smaller) / scale_width
+            chang_shift = (
+                quant_low * scale_larger - quant_high * scale_smaller
+            ) / scale_width
             bias.append(chang_shift)
 
         bias = np.array(bias, dtype=np.float32)

@@ -12,7 +12,7 @@ class Sampling(nn.Module):
         z_mean, z_log_var = inputs
         var = torch.exp(0.5 * z_log_var)
         epsilon = torch.randn_like(var).to(z_mean.device)
-        return z_mean + z_log_var*epsilon
+        return z_mean + z_log_var * epsilon
 
 
 class Encoder(nn.Module):
@@ -22,6 +22,7 @@ class Encoder(nn.Module):
     :param init_weight: Callable method to initialize the weights of the encoder nodes.
     :param init_bias: Callable method to initialize the biases of the encoder nodes.
     """
+
     def __init__(
         self,
         nodes: List[int],
@@ -68,6 +69,7 @@ class Encoder(nn.Module):
         z_mean, z_log_var = self.z_mean(x), self.z_log_var(x)
         z = self.sampling((z_mean, z_log_var))
         return z_mean, z_log_var, z
+
 
 class Decoder(nn.Module):
     """Decoder for AD@L1."""

@@ -109,7 +109,9 @@ class L1DataExtractor(Root2h5):
             particle_data = particle_data[..., self.objects_features_idxs[particle]]
 
         # Save number of extracted constituents to metadata.
-        self.metadata[particle]["const"] = int(np.array(self.constituents[particle]).sum())
+        self.metadata[particle]["const"] = int(
+            np.array(self.constituents[particle]).sum()
+        )
 
         return particle_data
 

@@ -19,9 +19,7 @@ class Classifier(L1ADLightningModule):
         **kwargs,
     ):
         super().__init__(model=None, **kwargs)
-        self.save_hyperparameters(
-            ignore=["model", "features", "classifier", "loss"]
-        )
+        self.save_hyperparameters(ignore=["model", "features", "classifier", "loss"])
 
         self.classifier = classifier
         self.features = features if features is not None else nn.Identity()
@@ -41,7 +39,6 @@ class Classifier(L1ADLightningModule):
         classifier_logits = self.forward(x)
         classifier_loss = self.loss(score=classifier_logits.flatten(), label=y)
 
-
         return {
             # Used for backpropagation:
             "loss": classifier_loss.mean(),
@@ -49,7 +46,7 @@ class Classifier(L1ADLightningModule):
             f"loss/{self.loss.name}/mean": classifier_loss.mean(),
             # Used for callbacks:
             f"loss/{self.loss.name}/full": classifier_loss,
-            f"score": classifier_logits.sigmoid_()
+            f"score": classifier_logits.sigmoid_(),
         }
 
     def _filter_log_dict(self, outdict: dict) -> dict:
@@ -60,8 +57,12 @@ class Classifier(L1ADLightningModule):
         }
 
     def training_step(self, batch: torch.Tensor, batch_idx: int):
-        classifier_logits = self.forward(batch[0].flatten(start_dim=1).to(dtype=torch.float32))
-        classifier_loss = self.train_loss(score=classifier_logits.flatten(), label=batch[1])
+        classifier_logits = self.forward(
+            batch[0].flatten(start_dim=1).to(dtype=torch.float32)
+        )
+        classifier_loss = self.train_loss(
+            score=classifier_logits.flatten(), label=batch[1]
+        )
 
         del classifier_logits
 

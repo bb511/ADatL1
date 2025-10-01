@@ -47,9 +47,7 @@ class ClassicAELoss(nn.Module):
         elif reduction == "mean":
             return torch.mean(reco_loss_per_obs)
         elif reduction == "sum":
-            return (
-                torch.sum(reco_loss_per_obs),
-            )
+            return (torch.sum(reco_loss_per_obs),)
         else:
             raise ValueError(f"Invalid reduction type: {reduction}")
 

@@ -20,7 +20,7 @@ class DatasetAwareModelCheckpoint(ModelCheckpoint):
     """
 
     prefix = ""
-    
+
     def __init__(
         self,
         metric_name: str = "loss",
@@ -64,10 +64,12 @@ class DatasetAwareModelCheckpoint(ModelCheckpoint):
         list_dset_key = list(getattr(trainer, "val_dataloaders").keys())
 
         is_cache = len(self.metric_cache) > 0
-        is_metric = self.metric_name in set([k.split("/")[-1] for k in trainer.callback_metrics.keys()])
+        is_metric = self.metric_name in set(
+            [k.split("/")[-1] for k in trainer.callback_metrics.keys()]
+        )
         if not is_cache and not is_metric:
             return
-        
+
         if not is_cache:
             self.metric_cache = defaultdict(list)
             for key, value in trainer.callback_metrics.items():
@@ -80,7 +82,6 @@ class DatasetAwareModelCheckpoint(ModelCheckpoint):
         # Compute total loss and length for each dataset in this epoch
         epoch_loss_totals, epoch_loss_lengths = {}, {}
 
-        
         for dset_key in list_dset_key:
             if dset_key in self.metric_cache.keys():
                 losses = self.metric_cache[dset_key]
@@ -95,23 +96,27 @@ class DatasetAwareModelCheckpoint(ModelCheckpoint):
                 local_sum = torch.tensor(0.0, device=pl_module.device)
                 local_count = torch.tensor(0, device=pl_module.device)
 
-            if trainer.world_size > 1: # ddp
+            if trainer.world_size > 1:  # ddp
                 local_sum = local_sum.to(pl_module.device)
                 local_count = local_count.to(pl_module.device)
 
                 # Sum values across all ranks
-                torch.distributed.all_reduce(local_sum, op=torch.distributed.ReduceOp.SUM)
-                torch.distributed.all_reduce(local_count, op=torch.distributed.ReduceOp.SUM)
+                torch.distributed.all_reduce(
+                    local_sum, op=torch.distributed.ReduceOp.SUM
+                )
+                torch.distributed.all_reduce(
+                    local_count, op=torch.distributed.ReduceOp.SUM
+                )
 
             # Store synchronized values (if there was data)
             if local_count.item() > 0:
                 epoch_loss_totals[dset_key] = local_sum.item()
                 epoch_loss_lengths[dset_key] = local_count.item()
-            
+
             # Clear cache for next epoch
             if dset_key in self.metric_cache:
                 self.metric_cache[dset_key] = []
-                
+
         # Strategy-specific implementation in subclasses
         self._process_dataset_losses(
             trainer, pl_module, epoch_loss_totals, epoch_loss_lengths
@@ -185,7 +190,11 @@ class DatasetAwareModelCheckpoint(ModelCheckpoint):
         os.makedirs(custom_dirpath, exist_ok=True)
 
         # Save the checkpoint
-        prefix = f"{self.prefix}_" if hasattr(self, "prefix") and getattr(self, "prefix") != None else ""
+        prefix = (
+            f"{self.prefix}_"
+            if hasattr(self, "prefix") and getattr(self, "prefix") != None
+            else ""
+        )
         filepath = os.path.join(custom_dirpath, f"{prefix}{filename}.ckpt")
         self._save_checkpoint(trainer=trainer, filepath=filepath)
         return filepath

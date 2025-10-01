@@ -2,7 +2,6 @@ defaults:
   - default
 
 accelerator: gpu
-devices: 1
-# devices: [0]
-# num_nodes: 1
-# strategy: "ddp"
+devices: [0]
+num_nodes: 1
+strategy: "ddp"

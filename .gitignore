@@ -1,5 +1,4 @@
-
-# Ignore mac stuff.
+# Ignore MAC stuff.
 .DS_Store
 
 # Ignore sublime text editor configuration.
@@ -159,8 +158,20 @@ dmypy.json
 # Lightning-Hydra-Template
 configs/local/default.yaml
 /data/
+data
 /logs/
+logs
+/outputs/
+outputs
+/results/
+/checkpoints/
+checkpoints
 .env
+
+# Fix exceptions
+!**/data/
+!**/outputs/
+# !**/results/
 
 # Untrack SLURM outputs:
 *.out

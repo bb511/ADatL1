@@ -17,6 +17,7 @@ class AnomalyRateCallback(Callback):
         LHC tunnel, which gives the total rate of events that are processed by
         the L1 trigger.
     """
+
     def __init__(self, target_rates: list[int], bc_rate: int, metric_names: list[str]):
         super().__init__()
         self.target_rates = target_rates
@@ -44,7 +45,7 @@ class AnomalyRateCallback(Callback):
         self, trainer, pl_module, outputs, batch, batch_idx, dataloader_idx=0
     ):
         dset_key = list(trainer.val_dataloaders.keys())[dataloader_idx]
-        if dset_key == 'main_val':
+        if dset_key == "main_val":
             self._cache_main_output(outputs, batch_idx)
         else:
             self._setup_metrics_for_dset(dset_key, batch_idx)
@@ -111,6 +112,7 @@ class AnomalyRateCallback(Callback):
                 add_dataloader_idx=False,
             )
 
+
 class ClassifierRateCallback(Callback):
     """Calculates the how many anomalies are detected given a certain trigger rate.
 
@@ -120,6 +122,7 @@ class ClassifierRateCallback(Callback):
         LHC tunnel, which gives the total rate of events that are processed by
         the L1 trigger.
     """
+
     def __init__(self, target_rates: list[int], bc_rate: int, metric_names: list[str]):
         super().__init__()
         self.target_rates = target_rates
@@ -147,7 +150,7 @@ class ClassifierRateCallback(Callback):
         self, trainer, pl_module, outputs, batch, batch_idx, dataloader_idx=0
     ):
         dset_key = list(trainer.val_dataloaders.keys())[dataloader_idx]
-        if dset_key == 'main_val':
+        if dset_key == "main_val":
             self._cache_main_output(outputs, batch_idx)
         else:
             self._setup_metrics_for_dset(dset_key, batch_idx)

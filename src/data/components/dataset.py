@@ -8,13 +8,14 @@ class L1ADDataset(Dataset):
 
     The data is assumed to be already loaded in memory.
     """
+
     def __init__(
-            self,
-            data: torch.Tensor,
-            labels: torch.Tensor,
-            batch_size: int,
-            shuffle: bool = False,
-        ):
+        self,
+        data: torch.Tensor,
+        labels: torch.Tensor,
+        batch_size: int,
+        shuffle: bool = False,
+    ):
         self.data, self.labels = data, labels
         self.batch_size = batch_size
         self.max_idx = self.data.size()[0]
@@ -28,20 +29,36 @@ class L1ADDataset(Dataset):
         if batch_idx == 0 and self.shuffle:
             np.random.shuffle(self.indexer)
 
-        if batch_idx == self.max_idx-1:
+        if batch_idx == self.max_idx - 1:
             batch = (
-                self.data[self.indexer[batch_idx*self.batch_size:], ...],
-                self.labels[self.indexer[batch_idx*self.batch_size:], ...] if self.labels is not None else None
+                self.data[self.indexer[batch_idx * self.batch_size :], ...],
+                (
+                    self.labels[self.indexer[batch_idx * self.batch_size :], ...]
+                    if self.labels is not None
+                    else None
+                ),
             )
 
         else:
             batch = (
                 self.data[
-                    self.indexer[batch_idx*self.batch_size:batch_idx*self.batch_size + self.batch_size], ...
+                    self.indexer[
+                        batch_idx * self.batch_size : batch_idx * self.batch_size
+                        + self.batch_size
+                    ],
+                    ...,
                 ],
-                self.labels[
-                    self.indexer[batch_idx*self.batch_size:batch_idx*self.batch_size + self.batch_size], ...
-                ] if self.labels is not None else None
+                (
+                    self.labels[
+                        self.indexer[
+                            batch_idx * self.batch_size : batch_idx * self.batch_size
+                            + self.batch_size
+                        ],
+                        ...,
+                    ]
+                    if self.labels is not None
+                    else None
+                ),
             )
         return batch
 
@@ -51,13 +68,14 @@ class L1SLDataset(Dataset):
 
     The data is assumed to be already loaded in memory.
     """
+
     def __init__(
-            self,
-            data: torch.Tensor,
-            labels: torch.Tensor,
-            batch_size: int,
-            shuffle: bool = False
-        ):
+        self,
+        data: torch.Tensor,
+        labels: torch.Tensor,
+        batch_size: int,
+        shuffle: bool = False,
+    ):
 
         self.data = data
         self.labels = labels
@@ -73,18 +91,22 @@ class L1SLDataset(Dataset):
         if batch_idx == 0 and self.shuffle:
             np.random.shuffle(self.indexer)
 
-        if batch_idx == self.max_idx-1:
-            batch = self.data[self.indexer[batch_idx*self.batch_size:], ...]
-            batch_y = self.labels[self.indexer[batch_idx*self.batch_size:]]
+        if batch_idx == self.max_idx - 1:
+            batch = self.data[self.indexer[batch_idx * self.batch_size :], ...]
+            batch_y = self.labels[self.indexer[batch_idx * self.batch_size :]]
         else:
             batch = self.data[
                 self.indexer[
-                    batch_idx*self.batch_size:batch_idx*self.batch_size + self.batch_size],
-                    ...
-                ]
+                    batch_idx * self.batch_size : batch_idx * self.batch_size
+                    + self.batch_size
+                ],
+                ...,
+            ]
             batch_y = self.labels[
                 self.indexer[
-                    batch_idx*self.batch_size:batch_idx*self.batch_size + self.batch_size]
+                    batch_idx * self.batch_size : batch_idx * self.batch_size
+                    + self.batch_size
                 ]
+            ]
 
         return batch, batch_y

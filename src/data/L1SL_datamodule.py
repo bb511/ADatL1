@@ -91,24 +91,28 @@ class L1SLDatamodule(LightningDataModule):
             main_data = self._get_processed_data(self.hparams.partitions["main_data"])
             main_data_y = self._get_data_labels(main_data)
             main_data = np.concatenate(list(main_data.values()), axis=0)
-            self.data_train, self.data_test, self.data_train_y, self.data_test_y = \
+            self.data_train, self.data_test, self.data_train_y, self.data_test_y = (
                 train_test_split(
                     main_data,
                     main_data_y,
                     test_size=self.hparams.split[-1],
                     random_state=42,
-                    stratify=main_data_y
+                    stratify=main_data_y,
                 )
+            )
 
-            val_proportion = len(main_data)*self.hparams.split[1]/len(self.data_train)
-            self.data_train, self.data_val, self.data_train_y, self.data_val_y = \
+            val_proportion = (
+                len(main_data) * self.hparams.split[1] / len(self.data_train)
+            )
+            self.data_train, self.data_val, self.data_train_y, self.data_val_y = (
                 train_test_split(
                     self.data_train,
                     self.data_train_y,
                     test_size=val_proportion,
                     random_state=42,
-                    stratify=self.data_train_y
+                    stratify=self.data_train_y,
                 )
+            )
             del main_data
             del main_data_y
 
@@ -133,21 +137,23 @@ class L1SLDatamodule(LightningDataModule):
 
     def _configure_partitions(self):
         """Partition the data into main data and auxiliary data."""
-        self.hparams.partitions['main_data'].update(
-            {'signal': self.hparams.classifier_signals}
+        self.hparams.partitions["main_data"].update(
+            {"signal": self.hparams.classifier_signals}
         )
 
-        if self.hparams.partitions['aux_validation']:
-            for partition in self.hparams.partitions['aux_validation'].keys():
+        if self.hparams.partitions["aux_validation"]:
+            for partition in self.hparams.partitions["aux_validation"].keys():
                 for signal in self.hparams.classifier_signals:
-                    if signal in self.hparams.partitions['aux_validation'][partition]:
-                        self.hparams.partitions['aux_validation'][partition].remove(signal)
+                    if signal in self.hparams.partitions["aux_validation"][partition]:
+                        self.hparams.partitions["aux_validation"][partition].remove(
+                            signal
+                        )
 
-        if self.hparams.partitions['aux_test']:
-            for partition in self.hparams.partitions['aux_test'].keys():
+        if self.hparams.partitions["aux_test"]:
+            for partition in self.hparams.partitions["aux_test"].keys():
                 for signal in self.hparams.classifier_signals:
-                    if signal in self.hparams.partitions['aux_test'][partition]:
-                        self.hparams.partitions['aux_test'][partition].remove(signal)
+                    if signal in self.hparams.partitions["aux_test"][partition]:
+                        self.hparams.partitions["aux_test"][partition].remove(signal)
 
     def _normalize_data(self, data: np.ndarray, name: str):
         """Normalize a data set, given that the normalization parameters are known."""
@@ -179,7 +185,7 @@ class L1SLDatamodule(LightningDataModule):
         """Loads list of data files into a dictionary of numpy arrays."""
         data = {}
         for filename in filenames:
-            data_nparray = np.load(root_dir / (filename + '.npy'), mmap_mode='r')
+            data_nparray = np.load(root_dir / (filename + ".npy"), mmap_mode="r")
             data.update({filename: data_nparray})
 
         return data
@@ -194,7 +200,7 @@ class L1SLDatamodule(LightningDataModule):
                 labels.append(np.zeros(len(main_data[dname])))
                 self.nbackground += len(main_data[dname])
             elif dname in set(self.hparams.partitions["main_data"]["signal"]):
-                labels.append(np.ones(len(main_data[dname]))*signal_number)
+                labels.append(np.ones(len(main_data[dname])) * signal_number)
                 self.nsignal += len(main_data[dname])
                 self.signal_numbers.update({dname: signal_number})
                 signal_number += 1
@@ -205,7 +211,7 @@ class L1SLDatamodule(LightningDataModule):
 
     def get_pos_weight(self) -> float:
         """Get weight to balance the reduced population of signal samples."""
-        pos_weight = self.nbackground/self.nsignal
+        pos_weight = self.nbackground / self.nsignal
         return pos_weight
 
     def _separate_sig_bkg(self, data: torch.Tensor, labels: torch.Tensor) -> dict:
@@ -216,7 +222,7 @@ class L1SLDatamodule(LightningDataModule):
             separated_data.update({signal_name: data[mask]})
 
         # Get the 0 bias signal data.
-        separated_data.update({'main_val': data[labels == 0]})
+        separated_data.update({"main_val": data[labels == 0]})
 
         return separated_data
 
@@ -241,16 +247,20 @@ class L1SLDatamodule(LightningDataModule):
         again after 1 second of delay. Attempt to do this 3 times before throwing
         an error and stopping the process.
         """
-        if 'cuda' in str(device):
-            return batch[0].to(device, non_blocking=True), batch[1].to(device, non_blocking=True)
+        if "cuda" in str(device):
+            return batch[0].to(device, non_blocking=True), batch[1].to(
+                device, non_blocking=True
+            )
 
-        return batch[0].to(device, non_blocking=True), batch[1].to(device, non_blocking=True)
+        return batch[0].to(device, non_blocking=True), batch[1].to(
+            device, non_blocking=True
+        )
 
     def _get_validation_batchsize(self, data: np.ndarray):
         if self.hparams.val_batches == -1:
             return self.batch_size_per_device
 
-        return int(len(data)/self.hparams.val_batches)
+        return int(len(data) / self.hparams.val_batches)
 
     def train_dataloader(self) -> Dataset[Any]:
         """Creates an optimized dataloader for numpy arrays already in memory."""
@@ -258,7 +268,7 @@ class L1SLDatamodule(LightningDataModule):
             self.data_train,
             self.data_train_y,
             batch_size=self.batch_size_per_device,
-            shuffle=True
+            shuffle=True,
         )
 
     def val_dataloader(self) -> Dataset[Any]:
@@ -270,26 +280,20 @@ class L1SLDatamodule(LightningDataModule):
         separated_data = self._separate_sig_bkg(self.data_val, self.data_val_y)
 
         for signal_name, signal_data in separated_data.items():
-            if signal_name == 'main_val':
+            if signal_name == "main_val":
                 continue
             batch_size_sig = self._get_validation_batchsize(signal_data)
             signal_labels = torch.from_numpy(np.ones(len(signal_data)))
             separated_data[signal_name] = L1SLDataset(
-                signal_data,
-                signal_labels,
-                batch_size=batch_size_sig
+                signal_data, signal_labels, batch_size=batch_size_sig
             )
 
-        bkg_data = separated_data['main_val'].detach().clone()
-        del separated_data['main_val']
+        bkg_data = separated_data["main_val"].detach().clone()
+        del separated_data["main_val"]
         bkg_labels = torch.from_numpy(np.zeros(len(bkg_data)))
 
         batch_size_bkg = self._get_validation_batchsize(bkg_data)
-        bkg_data = L1SLDataset(
-            bkg_data,
-            bkg_labels,
-            batch_size=batch_size_bkg
-        )
+        bkg_data = L1SLDataset(bkg_data, bkg_labels, batch_size=batch_size_bkg)
 
         data_val = {}
         # Make sure main_val is always first in the dict !!!

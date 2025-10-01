@@ -7,13 +7,13 @@ from src.models.losses.vae import ClassicVAELoss, AxoV4Loss
 class MIVAELoss(ClassicVAELoss):
     """
     Loss function for MI-VAE.
-    
+
     Args:
         alpha: Weight for KL divergence term.
         gamma: Weight for mutual information term.
         eps: Small constant for numerical stability in MI loss.
     """
-    
+
     def __init__(
         self,
         alpha: float = 1.0,
@@ -24,7 +24,7 @@ class MIVAELoss(ClassicVAELoss):
         super().__init__(alpha=alpha, reduction=reduction)
         self.gamma = gamma
         self.eps = eps
-    
+
     @staticmethod
     def mutual_information_bernoulli_loss(
         s: torch.Tensor,
@@ -33,54 +33,58 @@ class MIVAELoss(ClassicVAELoss):
     ) -> torch.Tensor:
         """
         Calculate mutual information loss for Bernoulli-distributed latent variables.
-        
-        This loss encourages the latent representation z to be informative about 
+
+        This loss encourages the latent representation z to be informative about
         the signal/background label s.
-        
+
         Args:
             s: Signal/background labels (batch_size,)
             z: Latent representations (batch_size, latent_dim)
             eps: Small constant for numerical stability
-        
+
         Returns:
             Mutual information loss scalar
         """
         # Convert z to probabilities using sigmoid
         z_probs = torch.sigmoid(z)
-        
+
         # Calculate entropy H(Z) = -p*log(p) - (1-p)*log(1-p)
-        entropy_z = - (
-            z_probs * torch.log(z_probs + eps) + 
-            (1 - z_probs) * torch.log(1 - z_probs + eps)
+        entropy_z = -(
+            z_probs * torch.log(z_probs + eps)
+            + (1 - z_probs) * torch.log(1 - z_probs + eps)
         )
         entropy_z = entropy_z.sum(dim=1).mean()
-        
-        # Calculate conditional entropy H(Z|S)        
+
+        # Calculate conditional entropy H(Z|S)
         conditional_entropy = 0
         n_total = z.shape[0]
-        mask_signal = (s == 1)
+        mask_signal = s == 1
         if mask_signal.any():
             z_signal = z[mask_signal]
             z_signal_probs = torch.sigmoid(z_signal)
-            h_z_given_s1 = - (
-                z_signal_probs * torch.log(z_signal_probs + eps) + 
-                (1 - z_signal_probs) * torch.log(1 - z_signal_probs + eps)
+            h_z_given_s1 = -(
+                z_signal_probs * torch.log(z_signal_probs + eps)
+                + (1 - z_signal_probs) * torch.log(1 - z_signal_probs + eps)
             )
-            conditional_entropy += (mask_signal.sum().float() / n_total) * h_z_given_s1.sum(dim=1).mean()
-        
-        mask_background = (s == 0)
+            conditional_entropy += (
+                mask_signal.sum().float() / n_total
+            ) * h_z_given_s1.sum(dim=1).mean()
+
+        mask_background = s == 0
         if mask_background.any():
             z_background = z[mask_background]
             z_background_probs = torch.sigmoid(z_background)
-            h_z_given_s0 = - (
-                z_background_probs * torch.log(z_background_probs + eps) + 
-                (1 - z_background_probs) * torch.log(1 - z_background_probs + eps)
+            h_z_given_s0 = -(
+                z_background_probs * torch.log(z_background_probs + eps)
+                + (1 - z_background_probs) * torch.log(1 - z_background_probs + eps)
             )
-            conditional_entropy += (mask_background.sum().float() / n_total) * h_z_given_s0.sum(dim=1).mean()
-        
+            conditional_entropy += (
+                mask_background.sum().float() / n_total
+            ) * h_z_given_s0.sum(dim=1).mean()
+
         # I(Z;S) = H(Z) - H(Z|S)
-        return - (entropy_z - conditional_entropy) # minimize -MI
-            
+        return -(entropy_z - conditional_entropy)  # minimize -MI
+
     def forward(
         self,
         target: torch.Tensor,
@@ -93,7 +97,7 @@ class MIVAELoss(ClassicVAELoss):
     ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
         """
         Compute MI-VAE loss.
-        
+
         Args:
             target: Original input
             reconstruction: Reconstructed input
@@ -102,17 +106,17 @@ class MIVAELoss(ClassicVAELoss):
             z: Latent representation (needed for MI loss)
             s: Signal/background labels (needed for MI loss)
             reduction: Type of reduction
-            
+
         Returns:
             Tuple of (total_loss, reco_loss, kl_loss, mi_loss)
         """
         reduction = reduction if reduction is not None else self.reduction
-        
+
         # Get standard VAE losses (per observation)
         total_loss, reco_loss, kl_loss = super().forward(
             target, reconstruction, z_mean, z_log_var, reduction="none"
         )
-        
+
         # Compute MI loss if enabled
         if z is not None and s is not None:
             # MI loss is computed over the batch
@@ -122,7 +126,7 @@ class MIVAELoss(ClassicVAELoss):
             total_loss = total_loss + mi_loss_per_obs
         else:
             mi_loss_per_obs = torch.zeros_like(total_loss)
-        
+
         # Apply reduction
         if reduction == "none":
             return total_loss, reco_loss, kl_loss, mi_loss_per_obs

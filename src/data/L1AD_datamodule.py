@@ -1,5 +1,6 @@
 from typing import Any, Optional, Union
 from pathlib import Path
+
 # from retry import retry
 
 import torch
@@ -97,11 +98,23 @@ class L1ADDataModule(LightningDataModule):
                 lengths=self.hparams.split,
                 generator=torch.Generator().manual_seed(42),
             )
-            train_indices, val_indices, test_indices = splits[0].indices, splits[1].indices, splits[2].indices
-           
+            train_indices, val_indices, test_indices = (
+                splits[0].indices,
+                splits[1].indices,
+                splits[2].indices,
+            )
+
             # Use indices to get the corresponding data and labels
-            self.data_train, self.data_val, self.data_test = main_data[train_indices], main_data[val_indices], main_data[test_indices]
-            self.labels_train, self.labels_val, self.labels_test = main_labels[train_indices], main_labels[val_indices], main_labels[test_indices]
+            self.data_train, self.data_val, self.data_test = (
+                main_data[train_indices],
+                main_data[val_indices],
+                main_data[test_indices],
+            )
+            self.labels_train, self.labels_val, self.labels_test = (
+                main_labels[train_indices],
+                main_labels[val_indices],
+                main_labels[test_indices],
+            )
             del main_data, main_labels, splits, train_indices, val_indices, test_indices
 
             self.hparams.data_normalizer.fit(self.data_train)
@@ -149,7 +162,7 @@ class L1ADDataModule(LightningDataModule):
         """Loads list of data files into a dictionary of numpy arrays."""
         data = {}
         for filename in filenames:
-            data_nparray = np.load(root_dir / (filename + '.npy'), mmap_mode='r')
+            data_nparray = np.load(root_dir / (filename + ".npy"), mmap_mode="r")
             data.update({filename: data_nparray})
 
         return data
@@ -176,7 +189,7 @@ class L1ADDataModule(LightningDataModule):
         an error and stopping the process.
         """
         data, labels = batch
-        if 'cuda' in str(device):
+        if "cuda" in str(device):
             return data.to(device, non_blocking=True), labels
 
         return data.to(device), labels
@@ -185,12 +198,15 @@ class L1ADDataModule(LightningDataModule):
         if self.hparams.val_batches == -1:
             return self.batch_size_per_device
 
-        return int(len(data)/self.hparams.val_batches)
+        return int(len(data) / self.hparams.val_batches)
 
     def train_dataloader(self) -> Dataset[Any]:
         """Creates an optimized dataloader for numpy arrays already in memory."""
         return L1ADDataset(
-            self.data_train, self.labels_train, batch_size=self.batch_size_per_device, shuffle=True
+            self.data_train,
+            self.labels_train,
+            batch_size=self.batch_size_per_device,
+            shuffle=True,
         )
 
     def val_dataloader(self) -> Dataset[Any]:
@@ -238,7 +254,6 @@ class L1ADDataModule(LightningDataModule):
         return data_test
 
 
-
 class L1ADDataModuleDebug(L1ADDataModule):
     """Debug version of L1ADDataModule that generates random data instead of loading real data."""
 
@@ -255,34 +270,58 @@ class L1ADDataModuleDebug(L1ADDataModule):
             log.info("Debug mode: Generating 1000 random samples with 57 features...")
 
             main_data = np.random.randn(1000, 57).astype(np.float32)
-            main_labels = np.concatenate([
-                np.full(400, "background", dtype=object),
-                np.full(300, "simulation_1", dtype=object),
-                np.full(300, "simulation_2", dtype=object),
-            ])
+            main_labels = np.concatenate(
+                [
+                    np.full(400, "background", dtype=object),
+                    np.full(300, "simulation_1", dtype=object),
+                    np.full(300, "simulation_2", dtype=object),
+                ]
+            )
             splits = random_split(
                 dataset=main_labels,
                 lengths=[700, 200, 100],
                 generator=torch.Generator().manual_seed(42),
             )
-            train_indices, val_indices, test_indices = splits[0].indices, splits[1].indices, splits[2].indices
-            self.data_train, self.data_val, self.data_test = torch.from_numpy(main_data[train_indices]), torch.from_numpy(main_data[val_indices]), torch.from_numpy(main_data[test_indices])
-            self.labels_train, self.labels_val, self.labels_test = main_labels[train_indices], main_labels[val_indices], main_labels[test_indices]
-    
-            log.info(f"Generated datasets - Train: {len(self.data_train)}, "
-                    f"Val: {len(self.data_val)}, Test: {len(self.data_test)}")
+            train_indices, val_indices, test_indices = (
+                splits[0].indices,
+                splits[1].indices,
+                splits[2].indices,
+            )
+            self.data_train, self.data_val, self.data_test = (
+                torch.from_numpy(main_data[train_indices]),
+                torch.from_numpy(main_data[val_indices]),
+                torch.from_numpy(main_data[test_indices]),
+            )
+            self.labels_train, self.labels_val, self.labels_test = (
+                main_labels[train_indices],
+                main_labels[val_indices],
+                main_labels[test_indices],
+            )
+
+            log.info(
+                f"Generated datasets - Train: {len(self.data_train)}, "
+                f"Val: {len(self.data_val)}, Test: {len(self.data_test)}"
+            )
 
         # Change the mean of the components:
-        if hasattr(self.hparams, 'partitions') and self.hparams.partitions.get("aux_validation"):
+        if hasattr(self.hparams, "partitions") and self.hparams.partitions.get(
+            "aux_validation"
+        ):
             self.aux_val = {}
-            for ids, (_, filenames) in enumerate(self.hparams.partitions["aux_validation"].items()):
+            for ids, (_, filenames) in enumerate(
+                self.hparams.partitions["aux_validation"].items()
+            ):
                 for filename in filenames:
                     random_data = ids + np.random.randn(100, 57).astype(np.float32)
                     self.aux_val[filename] = torch.from_numpy(random_data)
 
-        if hasattr(self.hparams, 'partitions') and self.hparams.partitions.get("aux_test"):
+        if hasattr(self.hparams, "partitions") and self.hparams.partitions.get(
+            "aux_test"
+        ):
             self.aux_test = {}
-            for ids, (_, filenames) in enumerate(self.hparams.partitions["aux_test"].items()):
+            for ids, (_, filenames) in enumerate(
+                self.hparams.partitions["aux_test"].items()
+            ):
                 for filename in filenames:
                     random_data = ids + np.random.randn(100, 57).astype(np.float32)
                     self.aux_test[filename] = torch.from_numpy(random_data)

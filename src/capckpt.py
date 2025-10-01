@@ -39,7 +39,9 @@ def find_all_checkpoints(base_path: str) -> Dict[str, List[str]]:
             ckpt_files = list(subdir.glob("*.ckpt"))
             if ckpt_files:
                 checkpoints[dataset_key] = [str(f) for f in ckpt_files]
-                log.info(f"Found {len(ckpt_files)} checkpoints for dataset '{dataset_key}'")
+                log.info(
+                    f"Found {len(ckpt_files)} checkpoints for dataset '{dataset_key}'"
+                )
 
     return checkpoints
 
@@ -61,9 +63,7 @@ def evaluate_checkpoints(cfg: DictConfig) -> Dict[str, Any]:
     logger: List[Logger] = instantiate_loggers(cfg.get("logger"))
 
     log.info(f"Instantiating trainer <{cfg.trainer._target_}>")
-    trainer: Trainer = hydra.utils.instantiate(
-        cfg.trainer, callbacks=[], logger=logger
-    )
+    trainer: Trainer = hydra.utils.instantiate(cfg.trainer, callbacks=[], logger=logger)
 
     log.info(f"Instantiating datamodule <{cfg.data._target_}>")
     batch_size = cfg.data.batch_size
@@ -98,7 +98,9 @@ def evaluate_checkpoints(cfg: DictConfig) -> Dict[str, Any]:
         for ckpt in ckpt_paths:
             log.info(f"Instantiating model from checkpoint <{cfg.model._target_}>")
             model = hydra.utils.instantiate(cfg.model)
-            state_dict = torch.load(ckpt, weights_only=False, map_location="cpu")["state_dict"]
+            state_dict = torch.load(ckpt, weights_only=False, map_location="cpu")[
+                "state_dict"
+            ]
             model.load_state_dict(state_dict, strict=True)
             model.eval()
             model.to(device)
@@ -106,7 +108,12 @@ def evaluate_checkpoints(cfg: DictConfig) -> Dict[str, Any]:
             ds = dataset_dictionary.get(dset_key)
             with torch.no_grad():
                 for ibatch in range(len(ds)):
-                    batch = ds[ibatch].flatten(start_dim=1).to(dtype=torch.float32).to(device)
+                    batch = (
+                        ds[ibatch]
+                        .flatten(start_dim=1)
+                        .to(dtype=torch.float32)
+                        .to(device)
+                    )
                     output = model.model_step(batch)["loss/total/full"]
                     cache[ckpt].append(output.detach().cpu())
 
@@ -128,15 +135,14 @@ def evaluate_checkpoints(cfg: DictConfig) -> Dict[str, Any]:
             batch_size=batch_size,
             device=device,
             process_group=None,
-            dist_sync_fn=None
+            dist_sync_fn=None,
         )
-        capmetric.update(
-            *(torch.cat(ds, dim=0).to(device) for ds in cache.values())
-        )
+        capmetric.update(*(torch.cat(ds, dim=0).to(device) for ds in cache.values()))
 
         capmetric_value = capmetric.compute()
 
-        del capmetric; garbage_collection_cuda()
+        del capmetric
+        garbage_collection_cuda()
         results[dset_key] = capmetric_value
         log.info(f"CAPmetric for {dset_key}: {capmetric_value}")
 
@@ -160,10 +166,11 @@ def main(cfg: DictConfig) -> None:
     results = evaluate_checkpoints(cfg)
 
     # Optionally save results to file
-    if hasattr(cfg, 'save_results') and cfg.save_results:
+    if hasattr(cfg, "save_results") and cfg.save_results:
         import json
+
         results_path = Path(cfg.ckpt_path) / "capmetric_results.json"
-        with open(results_path, 'w') as f:
+        with open(results_path, "w") as f:
             json.dump(results, f, indent=2)
         log.info(f"Results saved to {results_path}")
 

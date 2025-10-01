@@ -2,6 +2,7 @@ from typing import Optional, Tuple
 
 import torch
 from torch import nn, optim
+
 # from retry import retry
 
 from omegaconf import OmegaConf, DictConfig
@@ -51,7 +52,7 @@ class L1ADLightningModule(LightningModule):
             dataloader_idx
         ]
         return {f"{stage}/{dset_key}/{k}": v for k, v in outdict.items()}
-    
+
     def _extract_batch(self, batch: Tuple[torch.Tensor]) -> torch.Tensor:
         """Extract data from batch."""
         data, labels = batch

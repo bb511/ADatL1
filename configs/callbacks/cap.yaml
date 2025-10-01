@@ -1,7 +1,7 @@
 cap:
   _target_: src.callbacks.cap.ValidationCAP
-  output_name: loss/total/full
-  log_every_n_epochs: 5
+  output_name: loss/kl/full
+  log_every_n_epochs: 1
   pairing_type: cdf
   data_pairs:
     baseline:
@@ -17,7 +17,7 @@ cap:
   capmetric:
     _target_: capmetric.ApproximationCapacity
     beta0: 1.0
-    normalization_type: minmax
+    normalization_type: sigmoid
     normalization_params: null
     energy_type: baseline
     energy_params: null
@@ -26,7 +26,7 @@ cap:
     binary: True
     lr: 0.01
     n_epochs: 50
-    batch_size: 2048
+    batch_size: 512
     device: cpu
     process_group: null
     dist_sync_fn: null

@@ -1,0 +1,23 @@
+# @package _global_
+
+defaults:
+  - override /paths: axov4
+  - override /data: classifier
+  - override /model: classifier
+  - override /callbacks: classifier
+  - override /trainer: gpu0
+  - override /logger: mlflow
+
+tags: ["ae", "mnist", "ad"]
+
+seed: 123
+
+trainer:
+  min_epochs: 1
+  max_epochs: 480
+
+logger:
+  mlflow:
+    experiment_name: ae_mnist_ad
+    # run_name: test
+    run_name: lr${model.optimizer.lr}_${data.classifier_signals[0]}

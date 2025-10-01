@@ -20,40 +20,19 @@ class ReconstructionLoss(nn.Module):
         return self.scale * loss_per_observation
 
 
-class KLDivergenceLoss(nn.Module):
-    """Kullback-Leibler divergence loss for VAE without reduction."""
-
-    def __init__(self, scale: float = 1.0):
-        super().__init__()
-        self.scale = scale
-
-    def forward(self, z_mean: torch.Tensor, z_log_var: torch.Tensor) -> torch.Tensor:
-        kl_per_observation = -0.5 * torch.mean(
-            1 + z_log_var - z_mean.pow(2) - z_log_var.exp(), dim=1
-        )
-        return self.scale * kl_per_observation
-
-
-class ClassicVAELoss(nn.Module):
+class ClassicAELoss(nn.Module):
     def __init__(
         self,
-        alpha: float = 1.0,
         reduction: Literal["none", "mean", "sum"] = "mean",
     ):
         super().__init__()
-        self.reco_scale = 1 - alpha
-        self.kl_scale = alpha
         self.reduction = reduction
-
         self.reconstruction_loss = ReconstructionLoss(scale=self.reco_scale)
-        self.kl_loss = KLDivergenceLoss(scale=self.kl_scale)
 
     def forward(
         self,
         target: torch.Tensor,
         reconstruction: torch.Tensor,
-        z_mean: torch.Tensor,
-        z_log_var: torch.Tensor,
         reduction: Literal["none", "mean", "sum"] = None,
     ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
 
@@ -61,23 +40,15 @@ class ClassicVAELoss(nn.Module):
 
         # Get per-observation losses
         reco_loss_per_obs = self.reconstruction_loss(target, reconstruction)
-        kl_loss_per_obs = self.kl_loss(z_mean, z_log_var)
-        total_loss_per_obs = reco_loss_per_obs + kl_loss_per_obs
 
         # Apply reduction
         if reduction == "none":
-            return total_loss_per_obs, reco_loss_per_obs, kl_loss_per_obs
+            return reco_loss_per_obs
         elif reduction == "mean":
-            return (
-                torch.mean(total_loss_per_obs),
-                torch.mean(reco_loss_per_obs),
-                torch.mean(kl_loss_per_obs),
-            )
+            return torch.mean(reco_loss_per_obs)
         elif reduction == "sum":
             return (
-                torch.sum(total_loss_per_obs),
                 torch.sum(reco_loss_per_obs),
-                torch.sum(kl_loss_per_obs),
             )
         else:
             raise ValueError(f"Invalid reduction type: {reduction}")
@@ -114,7 +85,7 @@ class CylPtPzReconstructionLoss(nn.Module):
         return self.scale * (loss_per_observation + torch.abs(MET_phi - MET_phi_pred))
 
 
-class AxoV4Loss(ClassicVAELoss):
+class CylLoss(ClassicAELoss):
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
         self.reconstruction_loss = CylPtPzReconstructionLoss(scale=self.reco_scale)

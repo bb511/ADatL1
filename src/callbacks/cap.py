@@ -13,7 +13,7 @@ class ValidationCAP(ApproximationCapacityCallback):
     """Computes CAP during training between different signals."""
 
     def __init__(self, data_pairs: dict, pairing_type: str, **kwargs):
-        super().__init__(**kwargs)
+        super().__init__(data_pairs=data_pairs, pairing_type=pairing_type, **kwargs)
         self.data_pairs = data_pairs
         self.pairing_fn = get_pairing_fn(pairing_type)
 

@@ -1,0 +1,10 @@
+defaults:
+  - model_summary
+  - rich_progress_bar
+  - anomaly_rate
+  # - cap
+  # - model_checkpoint_cap
+  - _self_
+
+model_summary:
+  max_depth: -1

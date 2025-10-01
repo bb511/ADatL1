@@ -1,0 +1,80 @@
+_target_: src.models.ae.AE
+
+features: null 
+
+encoder:
+  _target_: src.models.components.ae.Encoder
+
+  # 57 input features, 8 latent features
+  nodes: [57, 28, 16, 8]
+
+  # qdata: null
+    # _target_: src.models.quantization.quantizers.FixedPointQuantizer
+    # bits: 8
+    # integer: 5
+
+  # qweight: null
+    # _target_: src.models.quantization.quantizers.FixedPointQuantizer
+    # bits: 6
+    # integer: 2
+
+  # qbias: null
+    # _target_: src.models.quantization.quantizers.FixedPointQuantizer
+    # bits: 10
+    # integer: 6
+
+  # qactivation: null
+    # _target_: src.models.quantization.quantizers.FixedPointQuantizer
+    # bits: 10
+    # integer: 6
+
+  init_weight:
+    _target_: src.utils.hydra.get_method
+    path: torch.nn.init.xavier_uniform_
+
+  init_bias:
+    _target_: src.utils.hydra.get_method
+    path: torch.nn.init.zeros_
+  
+decoder:
+  _target_: src.models.components.vae.Decoder
+
+  nodes: [8, 24, 32, 64, 128, 57] # v4 axol1tl architecture
+
+  init_weight:
+    _target_: src.utils.hydra.get_method
+    path: torch.nn.init.xavier_uniform_
+
+  init_bias:
+    _target_: src.utils.hydra.get_method
+    path: torch.nn.init.zeros_
+
+  init_last_weight:
+    _target_: src.utils.hydra.get_method
+    path: torch.nn.init.uniform_
+    a: -0.05
+    b: 0.05
+
+  init_last_bias: null
+
+loss:
+  _target_: src.models.losses.ae.ClassicAELoss
+  reduction: none
+
+optimizer:
+  _target_: torch.optim.AdamW
+  lr: 0.001
+  # betas: (0.9, 0.99)
+  weight_decay: 0.01
+
+scheduler:
+  # here other attributes...
+  scheduler:
+    _partial_: true
+    _target_: src.models.optimizers.cdrw.CDRW
+    lr0: ${model.optimizer.lr} 
+    s0: 32
+    t_mul: 2.0
+    m_mul: 0.65
+    alpha: 1e-6
+    warmup_epochs: 10

@@ -6,7 +6,7 @@ defaults:
   - override /paths: axov4
   - override /data: axov4
   - override /model: axov4
-  - override /callbacks: default
+  - override /callbacks: axov4
   - override /trainer: gpu0
   - override /logger: mlflow
 
@@ -28,7 +28,7 @@ callbacks:
 
 logger:
   mlflow:
-    experiment_name: axov4_rates_kl_checkpoint
-    # experiment_name: axov4_rates_cap_verify
-    # run_name: test
-    run_name: scan_lr${model.optimizer.lr}_alpha${model.loss.alpha}
+    # experiment_name: axov4_rates_kl_checkpoint
+    # experiment_name: axov4_cap_dpg_approval
+    run_name: test
+    # run_name: scan_lr${model.optimizer.lr}_alpha${model.loss.alpha}

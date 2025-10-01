@@ -28,7 +28,6 @@ optimizer:
   weight_decay: 0.0
 
 scheduler:
-  # here other attributes...
   scheduler:
     _partial_: true
     _target_: src.models.optimizers.cdrw.CDRW

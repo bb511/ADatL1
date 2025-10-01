@@ -6,6 +6,10 @@
 .sublime
 sftp-config.json
 
+# Ignore notebook data.
+notebooks/mlflow_data
+notebooks/plots
+
 # Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[cod]

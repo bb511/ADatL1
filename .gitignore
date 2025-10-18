@@ -156,6 +156,7 @@ logs
 /outputs/
 outputs
 /results/
+/checkpoints/
 .env
 
 # Fix exceptions

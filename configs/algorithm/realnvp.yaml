@@ -1,0 +1,32 @@
+_target_: src.algorithms.realnvp.RealNVP
+
+# Data features:
+constituents: ${data.data_extractor.constituents}
+objects_features: ${data.data_extractor.objects_features}
+
+# Parameters of the network:
+input_dim: 57
+n_flows: 6
+hidden_dim: 32
+conditional_dim: 0
+use_batch_norm: true
+noise_scale: 0.01
+
+loss: null
+optimizer:
+  _partial_: true
+  _target_: torch.optim.Adam
+  lr: 0.0003 # small for stability
+  weight_decay: 1e-5
+  betas: [0.9, 0.999]
+
+scheduler:
+  scheduler:
+    _partial_: true
+    _target_: src.optimizers.cdrw.CDRW
+    lr0: ${algorithm.optimizer.lr}
+    s0: 64
+    t_mul: 2.0
+    m_mul: 0.9
+    alpha: 1e-6
+    warmup_epochs: 5

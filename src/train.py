@@ -48,8 +48,8 @@ def train(cfg: DictConfig) -> Tuple[Dict[str, Any], Dict[str, Any]]:
     log.info(f"Instantiating datamodule <{cfg.data._target_}>")
     datamodule: LightningDataModule = hydra.utils.instantiate(cfg.data)
 
-    log.info(f"Instantiating model <{cfg.model._target_}>")
-    model: LightningModule = hydra.utils.instantiate(cfg.model)
+    log.info(f"Instantiating algorithm <{cfg.algorithm._target_}>")
+    algorithm: LightningModule = hydra.utils.instantiate(cfg.algorithm)
 
     log.info("Instantiating callbacks...")
     callbacks: List[Callback] = instantiate_callbacks(cfg.get("callbacks"))
@@ -65,7 +65,7 @@ def train(cfg: DictConfig) -> Tuple[Dict[str, Any], Dict[str, Any]]:
     object_dict = {
         "cfg": cfg,
         "datamodule": datamodule,
-        "model": model,
+        "algorithm": algorithm,
         "callbacks": callbacks,
         "logger": logger,
         "trainer": trainer,
@@ -77,7 +77,7 @@ def train(cfg: DictConfig) -> Tuple[Dict[str, Any], Dict[str, Any]]:
 
     if cfg.get("train"):
         log.info("Starting training!")
-        trainer.fit(model=model, datamodule=datamodule, ckpt_path=cfg.get("ckpt_path"))
+        trainer.fit(model=algorithm, datamodule=datamodule, ckpt_path=cfg.get("ckpt_path"))
 
     train_metrics = trainer.callback_metrics
 
@@ -87,7 +87,7 @@ def train(cfg: DictConfig) -> Tuple[Dict[str, Any], Dict[str, Any]]:
         if ckpt_path == "":
             log.warning("Best ckpt not found! Using current weights for testing...")
             ckpt_path = None
-        trainer.test(model=model, datamodule=datamodule, ckpt_path=ckpt_path)
+        trainer.test(model=algorithm, datamodule=datamodule, ckpt_path=ckpt_path)
         log.info(f"Best ckpt path: {ckpt_path}")
 
     test_metrics = trainer.callback_metrics

@@ -1,25 +1,30 @@
-from typing import Optional
-
+from typing import Optional, Literal
 import torch
-import torch.nn as nn
 import torch.nn.functional as F
 
+from src.losses import L1ADLoss
 
-class VICRegLoss(nn.Module):
+
+class VICRegLoss(L1ADLoss):
+    """
+    VICReg-style loss combining invariance, variance, and covariance losses.
+
+    :param scale: Overall scaling factor for the loss.
+    :param inv_coef: Weight for the invariance loss (MSE loss).
+    :param var_coef: Weight for the variance regularization.
+    :param cov_coef: Weight for the covariance regularization.
+    :param reduction: Reduction method to apply to the loss ("none", "mean", "sum").
+    """
     def __init__(
         self,
+        scale: float = 1.0,
         inv_coef: Optional[float] = 50,
         var_coef: Optional[float] = 50,
         cov_coef: Optional[float] = 1,
+        reduction: Literal["none", "mean", "sum"] = "mean",
     ):
-        """
-        VICReg-style loss combining invariance, variance, and covariance losses.
-
-        :param inv_coef (float): Weight for the invariance loss (MSE loss).
-        :param var_coef (float): Weight for the variance regularization.
-        :param cov_coef (float): Weight for the covariance regularization.
-        """
-        super().__init__()
+        
+        super().__init__(scale=scale, reduction=reduction)
         self.inv_coef = inv_coef
         self.var_coef = var_coef
         self.cov_coef = cov_coef
@@ -45,16 +50,6 @@ class VICRegLoss(nn.Module):
         return off_diag.pow(2).sum() / float(feature_dim)
 
     def forward(self, z1: torch.Tensor, z2: torch.Tensor):
-        """
-        Computes the VICReg loss given two sets of embeddings.
-
-        Args:
-            z1 (torch.Tensor): First set of embeddings.
-            z2 (torch.Tensor): Second set of embeddings.
-
-        Returns:
-            torch.Tensor: Total VICReg loss.
-        """
         loss_inv = self.invariance_loss(z1, z2)
         loss_var = 0.5 * (self.variance_loss(z1) + self.variance_loss(z2))
         loss_cov = self.covariance_loss(z1) + self.covariance_loss(z2)
@@ -68,9 +63,8 @@ class VICRegLoss(nn.Module):
 
 
 class L1VICRegLoss(VICRegLoss):
-
+    """Uses biased variance (unbiased=False) for stability and halves the penalty strength."""
     def variance_loss(self, z):
-        # TODO: Check why this implementation is different
         z = z - z.mean(dim=0, keepdim=True)
         std_z = torch.sqrt(z.var(dim=0, unbiased=False) + 1e-4)
         return torch.mean(F.relu(1.0 - std_z)) / 2

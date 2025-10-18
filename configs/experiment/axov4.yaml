@@ -1,9 +1,12 @@
 # @package _global_
 
 defaults:
+  # - /model/masking: multiplicity
   - override /paths: axov4
   - override /data: axov4
-  - override /model: axov4
+  - override /algorithm: realnvp # axov4
+  # - override /algorithm: svdd
+  # - override /algorithm: realnvp
   - override /callbacks: axov4
   - override /trainer: gpu0
   - override /logger: wandb
@@ -13,8 +16,8 @@ tags: ["vae", "axo_v4", "scan"]
 seed: 123
 
 # For debugging purposes:
-# data:
-#   _target_: src.data.L1AD_datamodule.L1ADDataModuleDebug
+data:
+  _target_: src.data.L1AD_datamodule.L1ADDataModuleDebug
 
 trainer:
   min_epochs: 1

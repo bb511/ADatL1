@@ -1,0 +1,51 @@
+defaults:
+  - /model@_here_: ae
+  # - /model/masking: particle
+  # - /model/loss@loss: alignment
+
+
+_target_: src.algorithms.vae.VAE
+
+
+masking: null
+
+
+features: null 
+
+
+encoder:
+  _target_: src.models.encoder.VariationalEncoder
+
+
+loss:
+  _target_: src.losses.MultiLoss
+
+  reduction: mean
+
+  reconstruction:
+    _target_: src.losses.reconstruction.CylPtPzReconstructionLoss
+    scale: 0.25
+
+  kl:
+    _target_: src.losses.kl.KLDivergenceLoss
+    scale: '${substract: 1.0, ${algorithm.loss.reconstruction.scale}}'
+
+
+optimizer:
+  _partial_: true
+  _target_: src.optimizers.lion.Lion
+  lr: 0.0001
+  weight_decay: 0.0
+
+
+scheduler:
+  # here other attributes...
+  scheduler:
+    _partial_: true
+    _target_: src.optimizers.cdrw.CDRW
+    lr0: ${algorithm.optimizer.lr} 
+    s0: 32
+    t_mul: 2.0
+    m_mul: 0.65
+    alpha: 1e-6
+    warmup_epochs: 10

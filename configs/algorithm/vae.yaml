@@ -1,0 +1,68 @@
+defaults:
+  - /model@_here_: ae
+
+  # Here add the losses:
+  - /loss@loss.reconstruction: reconstruction
+  - /loss@loss.kl: kl
+  - /loss@loss.mi: mi
+  - /loss@loss.mmd: mmd
+  - /loss@loss.alignment: alignment
+  - /loss@loss.dipvae: dipvae
+  - /loss@loss.bvae: bvae
+  - /loss@loss.gradient: gradient
+
+
+_target_: src.algorithms.vae.VAE
+
+
+masking: null
+
+
+features: null 
+
+
+encoder:
+  _target_: src.models.encoder.VariationalEncoder
+
+
+loss:
+  _target_: src.losses.MultiLoss
+
+  reduction: mean
+
+  # Here the losses with their scale:
+  reconstruction:
+    scale: 1.0
+  kl:
+    scale: 1.0
+  mi:
+    scale: 1.0
+  mmd:
+    scale: 1.0
+  alignment:
+    scale: 1.0
+  dipvae:
+    scale: 1.0
+  betavae:
+    scale: 1.0
+  gradient:
+    scale: 1.0
+
+
+optimizer:
+  _partial_: true
+  _target_: src.optimizers.lion.Lion
+  lr: 0.0001
+  weight_decay: 0.0
+
+
+scheduler:
+  scheduler:
+    _partial_: true
+    _target_: src.optimizers.cdrw.CDRW
+    lr0: ${algorithm.optimizer.lr} 
+    s0: 32
+    t_mul: 2.0
+    m_mul: 0.65
+    alpha: 1e-6
+    warmup_epochs: 10

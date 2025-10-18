@@ -1,12 +1,11 @@
 python src/train.py `
     --multirun `
     experiment=axov4 `
+    callbacks=default `
     trainer=cpu `
-    trainer.max_epochs=5 `
-    model.loss.alpha=0.1 `
-    model.optimizer.lr=0.01 `
+    trainer.max_epochs=1 `
     seed=0 `
-    data.batch_size=50 `
+    data.batch_size=100 `
     +trainer.limit_train_batches=1 `
     +trainer.limit_val_batches=1 `
     +trainer.limit_test_batches=1 `

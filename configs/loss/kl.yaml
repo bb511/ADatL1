@@ -1,0 +1,3 @@
+_target_: src.losses.kl.KLDivergenceLoss
+scale: 1.0
+reduction: mean # "mean", "sum", "none"

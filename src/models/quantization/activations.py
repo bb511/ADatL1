@@ -26,6 +26,19 @@ class QuantizedSigmoid(nn.Module):
         return self.quantizer(torch.sigmoid(x))
 
 
+class QuantizedTanh(nn.Module):
+    """Quantized Tanh activation.
+    
+    :param quantizer: Quantizer to apply to output
+    """
+    def __init__(self, quantizer: Optional[Quantizer] = None):
+        super().__init__()
+        self.quantizer = quantizer or Quantizer(None, None)
+    
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        return self.quantizer(torch.tanh(x))
+    
+
 class QuantizedBatchNorm1d(nn.BatchNorm1d):
     def __init__(
         self,

@@ -1,0 +1,5 @@
+_target_: src.losses.mi.MILoss
+scale: 1.0
+reduction: mean # "mean", "sum", "none"
+
+eps: 1e-7

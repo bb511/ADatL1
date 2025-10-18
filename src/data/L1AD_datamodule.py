@@ -272,7 +272,7 @@ class L1ADDataModuleDebug(L1ADDataModule):
             main_data = np.random.randn(1000, 57).astype(np.float32)
             main_labels = np.concatenate(
                 [
-                    np.full(400, "background", dtype=object),
+                    np.full(400, "zerobias", dtype=object),
                     np.full(300, "simulation_1", dtype=object),
                     np.full(300, "simulation_2", dtype=object),
                 ]

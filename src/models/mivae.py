@@ -1,66 +1,60 @@
-from typing import Tuple, Union
-
+from typing import Optional
 import torch
-from pytorch_lightning.utilities.memory import garbage_collection_cuda
+import torch.nn as nn
 
-from src.models.vae import VAE
+from src.models.quantization import Quantizer
+from src.models.components.qvae import QuantizedEncoder
+from src.models.quantization.activations import QuantizedSigmoid
 
 
-class MIVAE(VAE):
+class BernoulliSampling(nn.Module):
+    """Bernoulli sampling layer for MI-VAE."""
 
-    def forward(
-        self, x: torch.Tensor
-    ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
-        """Use Bernoulli-sampled latents for decoding."""
-        z_mean, z_log_var, z, z_sample = self.encoder(x)
-        reconstruction = self.decoder(z_sample)
-        return z_mean, z_log_var, z, reconstruction
+    def __init__(
+        self,
+        num_samples: Optional[int] = 10,
+        qsigmoid: Optional[Quantizer] = None,
+    ):
+        super().__init__()
+        self.num_samples = num_samples
+        self.sigmoid = QuantizedSigmoid(qsigmoid)
 
-    def model_step(self, batch: tuple) -> dict:
-        """Add z and labels to loss calculation."""
-        x, s = batch
-        z_mean, z_log_var, z, reconstruction = self.forward(x)
-        total_loss, reco_loss, kl_loss, mi_loss = self.loss(
-            target=x,
-            reconstruction=reconstruction,
-            z_mean=z_mean,
-            z_log_var=z_log_var,
-            z=z,
-            s=s,
+    def forward(self, z: torch.Tensor) -> torch.Tensor:
+        """Sample from Bernoulli distribution based on latent z."""
+        # Convert z to probabilities
+        probs = self.sigmoid(z)
+
+        # Sample from Bernoulli distribution
+        if self.training:
+            samples = []
+            for _ in range(self.num_samples):
+                sample = torch.bernoulli(probs)
+                samples.append(sample)
+            z_sample = torch.stack(samples).mean(dim=0)
+        else:
+            z_sample = probs
+
+        return z_sample
+
+
+class MIVAEEncoder(QuantizedEncoder):
+    """Encoder for MI-VAE."""
+
+    def __init__(
+        self,
+        num_samples: Optional[int] = 10,
+        qsigmoid: Optional[Quantizer] = None,
+        **kwargs,
+    ):
+        super().__init__(**kwargs)
+        self.bernoulli_sampling = BernoulliSampling(
+            num_samples=num_samples, qsigmoid=qsigmoid
         )
 
-        del z_log_var, z, s, reconstruction
-        # garbage_collection_cuda()
+    def forward(self, x: torch.Tensor):
+        z_mean, z_log_var, z = super().forward(x)
 
-        return {
-            "loss": total_loss.mean() if hasattr(total_loss, "mean") else total_loss,
-            "loss/reco/mean": reco_loss.mean(),
-            "loss/kl/mean": kl_loss.mean(),
-            "loss/mi/mean": mi_loss.mean(),
-            "loss/total/full": total_loss,
-            "loss/reco/full": reco_loss,
-            "loss/kl/full": kl_loss,
-            "loss/mi/full": mi_loss,
-            "z_mean_squared": z_mean.pow(2),
-        }
+        # Apply Bernoulli sampling
+        z_sample = self.bernoulli_sampling(z)
 
-    def _extract_batch(self, batch: Union[torch.Tensor, Tuple]) -> torch.Tensor:
-        """Extract data and labels from batch."""
-        data, labels = batch
-        labels = torch.tensor(
-            [0 if label == "zerobias" else 1 for label in labels],
-            device=data.device,
-            dtype=torch.long,
-        )
-        return data.flatten(start_dim=1).to(dtype=torch.float32), labels
-
-    def training_step(self, batch, batch_idx):
-        return super().training_step(self._extract_batch(batch), batch_idx)
-
-    def validation_step(self, batch, batch_idx, dataloader_idx=0):
-        return super().validation_step(
-            self._extract_batch(batch), batch_idx, dataloader_idx
-        )
-
-    def test_step(self, batch, batch_idx, dataloader_idx=0):
-        return super().test_step(self._extract_batch(batch), batch_idx, dataloader_idx)
+        return z_mean, z_log_var, z, z_sample

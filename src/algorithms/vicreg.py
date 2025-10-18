@@ -1,16 +1,21 @@
-from typing import Optional
+from typing import Tuple, Dict
 import copy
 
 import torch
 import torch.nn as nn
-from pytorch_lightning.utilities.memory import garbage_collection_cuda
 
-from src.models import L1ADLightningModule
-from src.models.quantization import Quantizer
+from src.algorithms import L1ADLightningModule
 
 
 class VICReg(L1ADLightningModule):
-    """Contrastive VAE."""
+    """
+    Contrastive VAE.
+
+    :param projector: Projection head module.
+    :param feature_blur: Feature blur augmentation module.
+    :param object_mask: Object mask augmentation module.
+    :param lorentz_rotation: Lorentz rotation augmentation module.
+    """
 
     def __init__(
         self,
@@ -18,7 +23,6 @@ class VICReg(L1ADLightningModule):
         feature_blur: nn.Module,
         object_mask: nn.Module,
         lorentz_rotation: nn.Module,
-        qdata: Optional[Quantizer] = None,
         **kwargs,
     ):
         super().__init__(**kwargs)
@@ -34,9 +38,6 @@ class VICReg(L1ADLightningModule):
         )
         self.projector = projector
 
-        # Data quantization:
-        self.qdata = qdata or Quantizer(None, None)
-
         # Instantiate augmentation modules
         self.fb1, self.fb2 = copy.deepcopy(feature_blur), copy.deepcopy(feature_blur)
         self.om1, self.om2 = copy.deepcopy(object_mask), copy.deepcopy(object_mask)
@@ -45,18 +46,15 @@ class VICReg(L1ADLightningModule):
         )
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
-        x = self.qdata(x)
         x = self.lor1(self.om1(self.fb1(x)))
         return self.projector(self.model(x))
 
-    def model_step(self, x: torch.Tensor):
-        # Quantize data
-        x = self.qdata(x)
+    def model_step(self, batch: Tuple[torch.Tensor]) -> Dict[str, torch.Tensor]:
+        x, _ = batch
 
         # Apply augmentations
         x1, x2 = x.clone(), x.clone()
         del x
-        garbage_collection_cuda()
         x1 = self.lor1(self.om1(self.fb1(x1)))
         x2 = self.lor2(self.om2(self.fb2(x2)))
 
@@ -64,14 +62,20 @@ class VICReg(L1ADLightningModule):
         z1 = self.projector(self.model(x1))
         z2 = self.projector(self.model(x2))
         del x1, x2
-        garbage_collection_cuda()
 
         # Compute loss and return
         loss_inv, loss_var, loss_cov, loss_total = self.loss(z1, z2)
 
         return {
             "loss": loss_total,
-            "loss_inv": loss_inv,
-            "loss_var": loss_var,
-            "loss_cov": loss_cov,
+            "loss/inv": loss_inv,
+            "loss/var": loss_var,
+            "loss/cov": loss_cov,
+        }
+    
+    def outlog(self, outdict: dict) -> dict:
+        """Override with the values you want to log."""
+        return {
+            "loss/total": outdict.get("loss"),
+            **{k: v for k, v in outdict.items() if k != "loss"},
         }

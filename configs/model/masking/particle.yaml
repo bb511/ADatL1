@@ -1,0 +1,18 @@
+_target_: src.models.components.masking.ParticleMasking
+
+constituents: ${data.data_extractor.constituents}
+objects_features: ${data.data_extractor.objects_features}
+
+# Masking probabilities per object type
+mask_probs:
+  muons: 0.15
+  egammas: 0.15
+  jets: 0.15
+  ET: 0.05
+  MET: 0.05
+
+# Value to replace masked features with
+mask_value: 0.0
+
+# Only apply masking during training
+training_only: true

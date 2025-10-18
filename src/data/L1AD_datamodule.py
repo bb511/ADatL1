@@ -226,7 +226,8 @@ class L1ADDataModule(LightningDataModule):
 
         for data_name, data in self.aux_val.items():
             batch_size = self._get_validation_batchsize(data)
-            self.aux_val[data_name] = L1ADDataset(data, None, batch_size=batch_size)
+            labels = torch.ones(len(data)) # BUG: check this
+            self.aux_val[data_name] = L1ADDataset(data, labels, batch_size=batch_size)
 
         data_val.update(self.aux_val)
 
@@ -247,7 +248,8 @@ class L1ADDataModule(LightningDataModule):
 
         for data_name, data in self.aux_test.items():
             batch_size = self._get_validation_batchsize(data)
-            self.aux_test[data_name] = L1ADDataset(data, None, batch_size=batch_size)
+            labels = torch.ones(len(data)) # BUG: check this
+            self.aux_test[data_name] = L1ADDataset(data, labels, batch_size=batch_size)
 
         data_test.update(self.aux_test)
 

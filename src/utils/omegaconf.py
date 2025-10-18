@@ -1,4 +1,5 @@
 from omegaconf import OmegaConf
+import torch
 
 
 def register_resolvers():
@@ -39,3 +40,7 @@ def register_resolvers():
         lambda n_epochs, len_data, effective_batch_size: n_epochs
         * (len_data // effective_batch_size),
     )  # compute number of training steps
+    OmegaConf.register_new_resolver(
+        "torch_full_float",
+        lambda value, length: torch.full((length,), float(value)),
+    )

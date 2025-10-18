@@ -11,11 +11,14 @@ defaults:
   - /loss@loss.bvae: bvae
   - /loss@loss.gradient: gradient
 
+  # Consider masking:
+  - /model/masking@masking: multiplicity # "particle", "multiplicity", null
+
 
 _target_: src.algorithms.vae.VAE
 
 
-masking: null
+# masking: null
 
 
 features: null 

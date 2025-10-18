@@ -43,18 +43,12 @@ class VAE(L1ADLightningModule):
         )
         del reconstruction, x, z, s
 
-        return {
+        outdict = {
             "loss": loss,
+
+            "loss/total": loss,
             "z_mean.abs().mean()": z_mean.abs().mean(),
             "z_log_var.mean()": z_log_var.mean(),
-        }
-
-    def outlog(self, outdict: dict) -> dict:
-        """Override with the values you want to log."""
-        outdict = {
-            "loss/total": outdict.get("loss"),
-            "z_mean.abs().mean()": outdict.get("z_mean.abs().mean()"),
-            "z_log_var.mean()": outdict.get("z_log_var.mean()"),
         }
         if hasattr(self.loss, "losses"):
             outdict.update({
@@ -65,3 +59,11 @@ class VAE(L1ADLightningModule):
                 )
             })
         return outdict
+
+    def outlog(self, outdict: dict) -> dict:
+        """Override with the values you want to log."""
+        return {
+            "loss/total": outdict.get("loss"),
+            **outdict
+        }
+        

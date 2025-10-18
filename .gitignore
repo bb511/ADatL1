@@ -1,5 +1,13 @@
+# Ignore MAC stuff.
+.DS_Store
+
 # Ignore sublime text editor configuration.
 .sublime
+sftp-config.json
+
+# Ignore notebook data.
+notebooks/mlflow_data
+notebooks/plots
 
 # Byte-compiled / optimized / DLL files
 __pycache__/
@@ -149,18 +157,22 @@ dmypy.json
 
 # Lightning-Hydra-Template
 configs/local/default.yaml
-/data/
 data
-/logs/
+/data/
 logs
+/logs/
 /outputs/
 outputs
 /results/
 /checkpoints/
+<<<<<<< HEAD
+=======
+checkpoints
+>>>>>>> origin/dev/patrick
 .env
 
 # Fix exceptions
-!**/data/
+# !**/data/
 !**/outputs/
 # !**/results/
 

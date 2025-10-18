@@ -1,0 +1,5 @@
+classifier_rate:
+  _target_: src.callbacks.rate.ClassifierRateCallback
+  metric_names: ["score"]
+  target_rates: [0.3, 1]
+  bc_rate: 28608.8064

@@ -1,18 +1,10 @@
+# Simple auto-encoder model.
+
 # Variational autoencoder model.
 from typing import Optional, Tuple, List, Callable
 
 import torch
 import torch.nn as nn
-
-
-class Sampling(nn.Module):
-    """Sampling layer for VAE. Performs reparameterization trick."""
-
-    def forward(self, inputs: Tuple[torch.Tensor, torch.Tensor]) -> torch.Tensor:
-        z_mean, z_log_var = inputs
-        var = torch.exp(0.5 * z_log_var)
-        epsilon = torch.randn_like(var).to(z_mean.device)
-        return z_mean + z_log_var * epsilon
 
 
 class Encoder(nn.Module):
@@ -44,31 +36,22 @@ class Encoder(nn.Module):
         self.net.apply(self._init_weights_and_biases)
 
         # Mean and log variance layers
-        self.z_mean = nn.Linear(nodes[-2], nodes[-1])
+        self.output_layer = nn.Linear(nodes[-2], nodes[-1])
         init_weight(self.z_mean.weight)
-        # init_bias(self.z_mean.bias)
-        self.z_log_var = nn.Linear(nodes[-2], nodes[-1])
-        init_weight(self.z_log_var.weight)
-        # init_bias(self.z_log_var.bias)
-
-        # Reparameterization layer
-        self.sampling = Sampling()
 
     def _init_weights_and_biases(self, m):
         if isinstance(m, nn.Linear):
             self.init_weight(m.weight)
             self.init_bias(m.bias)
 
-    def forward(
-        self, x: torch.Tensor
-    ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+    def forward(self, x: torch.Tensor) -> Tuple[torch.Tensor]:
         # Forward pass through the network
         x = self.net(x)
 
         # Mean and log variance for reparemeterization
-        z_mean, z_log_var = self.z_mean(x), self.z_log_var(x)
-        z = self.sampling((z_mean, z_log_var))
-        return z_mean, z_log_var, z
+        z = self.output_layer(x)
+
+        return z
 
 
 class Decoder(nn.Module):

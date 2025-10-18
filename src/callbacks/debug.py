@@ -1,5 +1,6 @@
 from pytorch_lightning.callbacks import Callback
 
+
 class DebugCallback(Callback):
     def on_validation_epoch_end(self, trainer, pl_module):
         print(f"[DEBUG] Epoch: {trainer.current_epoch}")

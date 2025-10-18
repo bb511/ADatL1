@@ -21,9 +21,15 @@ trainer:
   max_epochs: 480
 
 logger:
-  wandb:
-    entity: viictorjimenezzz-personal
-    project: adatl1
+  mlflow:
+    # experiment_name: axov4_rates_kl_checkpoint
+    # experiment_name: axov4_cap_dpg_approval
+    run_name: test
+    # run_name: scan_lr${model.optimizer.lr}_alpha${model.loss.alpha}
 
-    group: debug
-    name: coderuns
+  # wandb:
+  #   entity: viictorjimenezzz-personal
+  #   project: adatl1
+
+  #   group: debug
+  #   name: coderuns

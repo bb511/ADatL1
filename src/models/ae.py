@@ -8,7 +8,7 @@ from pytorch_lightning.utilities.memory import garbage_collection_cuda
 from src.models import L1ADLightningModule
 
 
-class VAE(L1ADLightningModule):
+class AE(L1ADLightningModule):
     def __init__(
         self,
         encoder: nn.Module,
@@ -28,29 +28,22 @@ class VAE(L1ADLightningModule):
     def forward(
         self, x: torch.Tensor
     ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
-        z_mean, z_log_var, z = self.encoder(x)
+        z = self.encoder(x)
         reconstruction = self.decoder(z)
-        return z_mean, z_log_var, z, reconstruction
+        return z, reconstruction
 
     def model_step(self, x: torch.Tensor) -> torch.Tensor:
-        z_mean, z_log_var, z, reconstruction = self.forward(x)
-        total_loss, reco_loss, kl_loss = self.loss(
-            reconstruction=reconstruction, z_mean=z_mean, z_log_var=z_log_var, target=x
+        z, reconstruction = self.forward(x)
+        total_loss, reco_loss, nad_loss = self.loss(
+            reconstruction=reconstruction, latent=z, target=x
         )
-
-        del z_log_var, z, reconstruction
 
         return {
             # Used for backpropagation:
             "loss": total_loss.mean(),
             # Used for logging:
             "loss/reco/mean": reco_loss.mean(),
-            "loss/kl/mean": kl_loss.mean(),
-            # Used for callbacks:
-            "loss/total/full": total_loss,
-            "loss/reco/full": reco_loss,
-            "loss/kl/full": kl_loss,
-            "z_mean_squared": z_mean.pow(2),
+            "loss/nad/mean": kl_loss.mean(),
         }
 
     def _filter_log_dict(self, outdict: dict) -> dict:
@@ -58,5 +51,5 @@ class VAE(L1ADLightningModule):
         return {
             "loss": outdict.get("loss"),
             "loss_reco": outdict.get("loss/reco/mean"),
-            "loss_kl": outdict.get("loss/kl/mean"),
+            "loss_nad": outdict.get("loss/nad/mean"),
         }

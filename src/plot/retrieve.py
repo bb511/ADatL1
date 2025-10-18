@@ -15,25 +15,31 @@ def retrieve_from_history(run, keyname, max_retries=5):
     retries = 0
     while retries < max_retries:
         try:
-            return [row[keyname] for row in run.scan_history(keys=[keyname]) if row[keyname] is not None]
+            return [
+                row[keyname]
+                for row in run.scan_history(keys=[keyname])
+                if row[keyname] is not None
+            ]
         except CommError as e:
             if "502" in str(e) and retries < max_retries - 1:
-                wait_time = (2 ** retries) + random.random()
-                print(f"Encountered 502 error for {keyname}, retrying in {wait_time:.1f} seconds...")
+                wait_time = (2**retries) + random.random()
+                print(
+                    f"Encountered 502 error for {keyname}, retrying in {wait_time:.1f} seconds..."
+                )
                 time.sleep(wait_time)
                 retries += 1
             else:
                 print(f"Failed to retrieve {keyname} after {retries} retries")
                 return []  # Return empty list as fallback
-            
+
 
 def adatl1_wandb(
-        group: str,
-        lr: float = None,
-        alpha: float = None,
-        dirname: str = "results",
-        cache: bool = False,
-    ) -> pd.DataFrame:
+    group: str,
+    lr: float = None,
+    alpha: float = None,
+    dirname: str = "results",
+    cache: bool = False,
+) -> pd.DataFrame:
 
     api = wandb.Api(timeout=100)
     config_filters = [
@@ -42,21 +48,23 @@ def adatl1_wandb(
     ]
     runs = api.runs(
         "viictorjimenezzz-personal/adatl1",
-        filters= {
+        filters={
             "group": group,
-            "$and": [config for config in config_filters if len(config) > 0]
+            "$and": [config for config in config_filters if len(config) > 0],
         },
     )
     print(f"{len(runs)} runs found.")
 
     pathdir = osp.join(dirname, group)
     os.makedirs(dirname, exist_ok=True)
-    fname = "_".join([
-        key.split(".")[-1] + "=" + str(value)
-        for config in config_filters
-        for key, value in config.items()
-    ])
-    fname = "joint.pkl" if len(fname) == 0 else fname + ".pkl" 
+    fname = "_".join(
+        [
+            key.split(".")[-1] + "=" + str(value)
+            for config in config_filters
+            for key, value in config.items()
+        ]
+    )
+    fname = "joint.pkl" if len(fname) == 0 else fname + ".pkl"
     fpath = osp.join(pathdir, fname)
     if cache and osp.exists(fpath):
         return pd.read_pickle(fpath), fpath
@@ -69,25 +77,24 @@ def adatl1_wandb(
         # print(
         #     json.dumps(config, indent=4)
         # )
-        
+
         # Check if it's a valid L1AD run
         data_config = config.get("data", {})
         if "signal" not in data_config:
             continue
-        
+
         # Basic info
         data["id"].append(run.id)
         data["seed"].append(config.get("seed"))
         data["tags"].append(config.get("tags"))
-
 
         # Data config
         data["data/split"].append(data_config.get("split"))
         data["data/batch_size"].append(data_config.get("batch_size"))
         data["data/n_val_batches"].append(data_config.get("val_batches"))
 
-        data["data/extractor/name"].append(data_config.get("extractor",{}).get("name"))
-        data["data/processor/name"].append(data_config.get("processor",{}).get("name"))
+        data["data/extractor/name"].append(data_config.get("extractor", {}).get("name"))
+        data["data/processor/name"].append(data_config.get("processor", {}).get("name"))
 
         normalizer_cfg = data_config.get("data_normalizer", {})
         data["data/normalizer/scheme"].append(normalizer_cfg.get("norm_scheme"))
@@ -99,7 +106,6 @@ def adatl1_wandb(
         data["data/normalizer/norm_hyperparams/percentiles"].append(
             normalizer_cfg.get("norm_hyperparams", {}).get("percentiles")
         )
-        
 
         # Model config
         model_config = config.get("model", {})
@@ -136,7 +142,6 @@ def adatl1_wandb(
         for key, value in scheduler_cfg.items():
             if key not in ["_partial_"]:
                 data[f"model/scheduler/{key}"].append(value)
-        
 
         # Trainer config
         trainer_cfg = model_config.get("trainer", {})
@@ -144,7 +149,6 @@ def adatl1_wandb(
         data["trainer/accelerator"].append(trainer_cfg.get("accelerator"))
         data["trainer/devices"].append(trainer_cfg.get("devices"))
         data["trainer/deterministic"].append(trainer_cfg.get("deterministic"))
-
 
         # Callbacks config
         callbacks_cfg = model_config.get("callbacks", {})
@@ -158,8 +162,9 @@ def adatl1_wandb(
         for callback_name, callback_cfg in callbacks_cfg.items():
             if callback_name.startswith("model_checkpoint"):
                 for key in ["_target_", "mode", "metric_name"]:
-                    data[f"callbacks/{callback_name}/{key}"].append(callback_cfg.get(callback_name, {}).get(key))
-
+                    data[f"callbacks/{callback_name}/{key}"].append(
+                        callback_cfg.get(callback_name, {}).get(key)
+                    )
 
         cap_cfg = callbacks_cfg.get("approximation_capacity", {})
         for key, value in cap_cfg.items():
@@ -174,7 +179,7 @@ def adatl1_wandb(
                 "normalization_type",
                 "normalization_params",
                 "pairing_type",
-                "output_name" # same as metric name
+                "output_name",  # same as metric name
             ]:
                 data[f"callbacks/cap/{key}"].append(value)
 
@@ -183,17 +188,19 @@ def adatl1_wandb(
 
         # Metrics (this will depend on what the run logs)
         AVAILABLE_METRICS = run.history().keys()
-        for imetric, metric in tqdm(enumerate(AVAILABLE_METRICS), total=len(AVAILABLE_METRICS), desc="Retrieving metrics"):
+        for imetric, metric in tqdm(
+            enumerate(AVAILABLE_METRICS),
+            total=len(AVAILABLE_METRICS),
+            desc="Retrieving metrics",
+        ):
             # print(f"({imetric+1}/{len(AVAILABLE_METRICS)}) Retrieving {metric}")
-            data[metric].append(
-                retrieve_from_history(run, metric)
-            )
+            data[metric].append(retrieve_from_history(run, metric))
 
     df = pd.DataFrame(data)
 
     # Cache
     if cache and not osp.exists(fpath):
-        with open(fpath, 'wb') as file:
+        with open(fpath, "wb") as file:
             pickle.dump(df, file)
 
     return df, fpath

@@ -1,0 +1,8 @@
+defaults:
+  - model_summary
+  - rich_progress_bar
+  - classifier_rate
+  - _self_
+
+model_summary:
+  max_depth: -1

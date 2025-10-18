@@ -2,6 +2,7 @@ from typing import Optional, Tuple
 
 import torch
 from torch import nn, optim
+
 # from retry import retry
 
 from omegaconf import OmegaConf, DictConfig
@@ -51,7 +52,7 @@ class L1ADLightningModule(LightningModule):
             dataloader_idx
         ]
         return {f"{stage}/{dset_key}/{k}": v for k, v in outdict.items()}
-    
+
     def _extract_batch(self, batch: Tuple[torch.Tensor]) -> torch.Tensor:
         """Extract data from batch."""
         data, labels = batch
@@ -110,9 +111,14 @@ class L1ADLightningModule(LightningModule):
         )
         return outdict
 
+    def on_train_epoch_end(self):
+        """Log the epochs so the mlflow plotting is not buggy."""
+        garbage_collection_cuda()
+
     def on_validation_epoch_end(self):
         """Log the epochs so the mlflow plotting is not buggy."""
         self.log("epoch_idx", float(self.current_epoch), on_epoch=True, on_step=False)
+        garbage_collection_cuda()
 
     def configure_optimizers(self):
         optimizer = LightningOptimizer(self.hparams.optimizer(params=self.parameters()))

@@ -1,8 +1,8 @@
-approximation_capacity:
-  _target_: src.callbacks.cap.ApproximationCapacityCallbackDebug
+cap_callback:
+  # _target_: src.callbacks.cap.ValidationCAP
+  _target_: capmetric.callback.ApproximationCapacityCallback
   output_name: loss/total/full
   log_every_n_epochs: 1
-  log_optimization: false
   pairing_type: cdf
   data_pairs:
     baseline:
@@ -18,7 +18,7 @@ approximation_capacity:
   capmetric:
     _target_: capmetric.ApproximationCapacity
     beta0: 1.0
-    normalization_type: minmax
+    normalization_type: sigmoid
     normalization_params: null
     energy_type: baseline
     energy_params: null
@@ -27,7 +27,6 @@ approximation_capacity:
     binary: True
     lr: 0.01
     n_epochs: 50
-    batch_size: 2048
-    normalize_gradients: true
+    batch_size: ${data.batch_size}
     process_group: null
     dist_sync_fn: null

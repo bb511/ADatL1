@@ -13,6 +13,8 @@ class DIPVAELoss(L1ADLoss):
     :param lambda_offdiag: Weight for the off-diagonal regularization term.
     :param reduction: Reduction method to apply to the loss ("none", "mean", "sum").
     """
+
+    name: str = "dipvae"
     
     def __init__(
         self,

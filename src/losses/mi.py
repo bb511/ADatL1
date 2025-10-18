@@ -15,6 +15,8 @@ class MILoss(L1ADLoss):
         reduction: Reduction method to apply to the loss. Options are 'none', 'mean', 'sum'.
     """
 
+    name: str = "mi"
+
     def __init__(
         self,
         eps: float = 1e-7,

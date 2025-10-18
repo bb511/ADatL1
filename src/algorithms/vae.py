@@ -51,10 +51,17 @@ class VAE(L1ADLightningModule):
 
     def outlog(self, outdict: dict) -> dict:
         """Override with the values you want to log."""
-        return {
+        outdict = {
             "loss/total": outdict.get("loss"),
             "z_mean.abs().mean()": outdict.get("z_mean.abs().mean()"),
             "z_log_var.mean()": outdict.get("z_log_var.mean()"),
-            "loss/reco": self.loss.values.get("reconstruction"),
-            "loss/kl": self.loss.values.get("kl"),
         }
+        if hasattr(self.loss, "losses"):
+            outdict.update({
+                f"loss/{module.name}": value
+                for module, value in zip(
+                    self.loss.losses.values(),
+                    self.loss.values.values()
+                )
+            })
+        return outdict

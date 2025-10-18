@@ -16,6 +16,8 @@ class AlignmentLoss(L1ADLoss):
     :param strategy: Strategy to use ("push_simulations", "cluster_zerobias", "contrastive").
     :param reduction: Reduction method to apply to the loss ("none", "mean", "sum").
     """
+
+    name: str = "alignment"
     
     def __init__(
         self,

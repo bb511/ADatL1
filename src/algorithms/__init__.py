@@ -35,7 +35,8 @@ class L1ADLightningModule(LightningModule):
         x, s = batch
         z = self.forward(x)
         loss = self.loss(
-            target=x, z=z, s=s
+            z=z,
+            s=s
         )
         del z, x, s
         return {"loss": loss}

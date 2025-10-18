@@ -12,6 +12,8 @@ class GradientPenaltyLoss(L1ADLoss):
     be close to `target_norm`.
     """
 
+    name: str = "gradient"
+
     def __init__(
         self,
         scale: float = 1.0,

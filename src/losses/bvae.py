@@ -19,6 +19,8 @@ class BetaVAELoss(L1ADLoss):
     :param distance: Distance metric to use ("kl", "mmd").
     :param reduction: Reduction method to apply to the loss ("none", "mean", "sum").
     """
+
+    name: str = "betavae"
     
     def __init__(
         self,

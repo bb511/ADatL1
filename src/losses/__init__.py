@@ -10,6 +10,8 @@ class L1ADLoss(nn.Module):
     :param scale: Scaling factor for the loss.
     :param reduction: Reduction method to apply to the loss. Options are 'none', 'mean', 'sum'.
     """
+
+    name: str = "total" # name for the logs
     
     def __init__(
             self,

@@ -13,6 +13,8 @@ class ReconstructionLoss(L1ADLoss):
     :param reduction: Reduction method to apply to the loss ("none", "mean", "sum").
     """
 
+    name: str = "reco"
+
     def __init__(
             self,
             scale: float = 1.0,

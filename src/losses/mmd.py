@@ -14,6 +14,8 @@ class MMDLoss(L1ADLoss):
     :param prior: Prior distribution to sample from ("gaussian", "uniform").
     :param reduction: Reduction method to apply to the loss ("none", "mean", "sum").
     """
+
+    name: str = "mmd"
     
     def __init__(
         self,

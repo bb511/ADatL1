@@ -1,13 +1,28 @@
-# https://lightning.ai/docs/pytorch/stable/api/lightning.pytorch.callbacks.ModelCheckpoint.html
-
-model_checkpoint:
+model_checkpoint_cap_baseline:
   _target_: pytorch_lightning.callbacks.ModelCheckpoint
-  dirpath: logs/cap_checkpoints/${logger.mlflow.experiment_name}/${logger.mlflow.run_name} # directory to save the model file
-  filename: '{epoch:02d}-{step}' # checkpoint filename
-  monitor: "cap/background0" # name of the logged metric which determines when model is improving
-  verbose: False # verbosity mode
-  save_last: true # additionally always save an exact copy of the last checkpoint to a file last.ckpt
-  save_top_k: 1 # save k best models (determined by above metric)
-  mode: "max" # "max" means higher metric value is better, can be also "min"
-  auto_insert_metric_name: True # when True, the checkpoints filenames will contain the metric name
-  save_weights_only: False # if True, then only the model’s weights will be saved
+  dirpath: '${paths.root_dir}/checkpoints/${scan_dirname: ${scan}}/cap/'
+  filename: 'baseline-e={epoch:02d}-s={step}'
+  monitor: cap/baseline
+  save_top_k: 1
+  mode: max
+  save_last: false
+
+
+model_checkpoint_cap_background0:
+  _target_: pytorch_lightning.callbacks.ModelCheckpoint
+  dirpath: '${paths.root_dir}/checkpoints/${scan_dirname: ${scan}}/cap/'
+  filename: 'background0-e={epoch:02d}-s={step}'
+  monitor: cap/background0
+  save_top_k: 1
+  mode: max
+  save_last: false
+
+
+model_checkpoint_cap_background1:
+  _target_: pytorch_lightning.callbacks.ModelCheckpoint
+  dirpath: '${paths.root_dir}/checkpoints/${scan_dirname: ${scan}}/cap/'
+  filename: 'background1-e={epoch:02d}-s={step}'
+  monitor: cap/background1
+  save_top_k: 1
+  mode: max
+  save_last: false

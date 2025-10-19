@@ -1,7 +1,6 @@
 model_checkpoint_i:
   _target_: src.callbacks.model_checkpoint.SingleDatasetModelCheckpoint
-  # dirpath: ${paths.output_dir}/checkpoints
-  dirpath: ${paths.root_dir}/checkpoints/scan_lr=${scan.lr}_alpha=${scan.alpha}/
+  dirpath: '${paths.root_dir}/checkpoints/${scan_dirname: ${scan}}/'
   filename: 'e={epoch:02d}-s={step}'
   metric_name: loss/kl
   ds_keys_to_skip: null

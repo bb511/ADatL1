@@ -1,7 +1,6 @@
 model_checkpoint_loo:
   _target_: src.callbacks.model_checkpoint.LeaveOneOutModelCheckpoint
-  # dirpath: ${paths.output_dir}/checkpoints
-  dirpath: ${paths.root_dir}/checkpoints/scan_lr=${scan.lr}_alpha=${scan.alpha}/
+  dirpath: '${paths.root_dir}/checkpoints/${scan_dirname: ${scan}}/'
   filename: 'e={epoch:02d}-s={step}'
   metric_name: loss/kl
   ds_keys_to_skip:
@@ -12,4 +11,4 @@ model_checkpoint_loo:
     - SingleNeutrino_Pt-2To20-gun
   save_top_k: 1
   mode: min
-  save_last: true
+  save_last: false

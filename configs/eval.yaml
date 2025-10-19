@@ -2,17 +2,25 @@
 
 defaults:
   - _self_
-  - data: L1AD # choose datamodule with `test_dataloader()` for evaluation
-  - model: vae
-  - logger: null
+  - data: L1AD
+  - algorithm: vae
   - trainer: default
   - paths: default
+  - callbacks: default
+  - logger: none
   - extras: default
   - hydra: default
 
+  # Pass this from the script:
+  - experiment: null
+
+  # Override from experiment:
+  - override /callbacks: eval
+  - override /logger: none
+
+
 task_name: "eval"
 
-tags: ["dev"]
-
-# passing checkpoint path is necessary for evaluation
-ckpt_path: ???
+algorithm:
+  masking: null
+  features: null

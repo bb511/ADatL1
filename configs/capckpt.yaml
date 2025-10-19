@@ -1,9 +1,0 @@
-defaults:
-  - train.yaml
-
-checkpoint_filter:
-  model:
-    loss:
-      alpha: 0.0
-    optimizer:
-      lr: 0.0075

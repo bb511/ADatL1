@@ -175,7 +175,7 @@ class DatasetAwareModelCheckpoint(ModelCheckpoint):
     ):
         """Save a checkpoint with a custom key and metric value."""
         # Format filename based on the template
-        filename = self.filename or "e={epoch:02d}-s={step}"
+        filename = self.filename or "epoch={epoch:02d}__step={step}"
         filename = filename.format(
             epoch=trainer.current_epoch,
             step=trainer.global_step,
@@ -183,7 +183,7 @@ class DatasetAwareModelCheckpoint(ModelCheckpoint):
 
         # Make the key safe for filenames
         safe_string = lambda string: string.replace("/", "_").replace(":", "_").replace(" ", "_")
-        filename = f"{safe_string(key)}-{safe_string(self.metric_name)}={metric_value:.6f}-{filename}"
+        idname = f"ds={safe_string(key)}__metric={safe_string(self.metric_name)}__value={metric_value:.6f}"
 
         # Modify dirpath to include key-specific subdirectory
         dirpath = self.dirpath or trainer.default_root_dir
@@ -196,7 +196,7 @@ class DatasetAwareModelCheckpoint(ModelCheckpoint):
             if hasattr(self, "prefix") and getattr(self, "prefix") != None
             else ""
         )
-        filepath = os.path.join(custom_dirpath, f"{prefix}-{filename}.ckpt")
+        filepath = os.path.join(custom_dirpath, f"prefix={prefix}__{idname}__{filename}.ckpt")
         self._save_checkpoint(trainer=trainer, filepath=filepath)
         return filepath
 

@@ -2,7 +2,7 @@ model_checkpoint_cap_baseline:
   _target_: pytorch_lightning.callbacks.ModelCheckpoint
   dirpath: '${paths.root_dir}/checkpoints/${scan_dirname: ${scan}}/cap/'
   filename: 'baseline-{epoch}-{step}'
-  monitor: cap/baseline
+  monitor: cap/val/baseline
   save_top_k: 1
   mode: max
   save_last: false
@@ -12,7 +12,7 @@ model_checkpoint_cap_background0:
   _target_: pytorch_lightning.callbacks.ModelCheckpoint
   dirpath: '${paths.root_dir}/checkpoints/${scan_dirname: ${scan}}/cap/'
   filename: 'background0-{epoch}-{step}'
-  monitor: cap/background0
+  monitor: cap/val/background0
   save_top_k: 1
   mode: max
   save_last: false
@@ -22,7 +22,7 @@ model_checkpoint_cap_background1:
   _target_: pytorch_lightning.callbacks.ModelCheckpoint
   dirpath: '${paths.root_dir}/checkpoints/${scan_dirname: ${scan}}/cap/'
   filename: 'background1-{epoch}-{step}'
-  monitor: cap/background1
+  monitor: cap/val/background1
   save_top_k: 1
   mode: max
   save_last: false

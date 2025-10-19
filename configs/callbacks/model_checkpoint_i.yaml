@@ -1,7 +1,7 @@
 model_checkpoint_i:
   _target_: src.callbacks.model_checkpoint.SingleDatasetModelCheckpoint
   dirpath: '${paths.root_dir}/checkpoints/${scan_dirname: ${scan}}/'
-  filename: 'epoch={epoch}-step={step}'
+  filename: 'epoch={epoch}__step={step}'
   metric_name: loss/kl
   ds_keys_to_skip: null
   save_top_k: 1

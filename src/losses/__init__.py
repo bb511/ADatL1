@@ -1,4 +1,4 @@
-from typing import Literal
+from typing import Literal, Optional, List
 import torch
 import torch.nn as nn
 
@@ -52,11 +52,18 @@ class L1ADLoss(nn.Module):
 
 
 class MultiLoss(nn.Module):
-    """Wrapper to combine multiple loss functions with individual scaling."""
+    """
+    Wrapper to combine multiple loss functions with individual scaling.
+    
+    :param reduction: Reduction method to apply to the total loss. Options are 'none', 'mean', 'sum'.
+    :param list_losses: Optional list of loss names to add for backpropagation. If None, all provided losses are used.
+    :param losses: Keyword arguments where keys are loss names and values are loss module instances.
+    """
     
     def __init__(
         self,
         reduction: Literal["none", "mean", "sum"] = "none",
+        list_losses: Optional[List[str]] = None,
         **losses,
     ):
         super().__init__()
@@ -64,6 +71,7 @@ class MultiLoss(nn.Module):
         for loss_fn in losses.values():
             loss_fn.reduction = "none"
 
+        self.list_losses = list_losses or list(losses.keys())
         self.losses = nn.ModuleDict({
             name: loss_fn
             for name, loss_fn in losses.items()
@@ -82,7 +90,7 @@ class MultiLoss(nn.Module):
     ) -> torch.Tensor:
 
         self.values = {}
-        for name, loss_fn in self.losses.items():
+        for lname, loss_fn in self.losses.items():
             loss = loss_fn(**{
                 'target': target,
                 'reconstruction': reconstruction,
@@ -91,14 +99,17 @@ class MultiLoss(nn.Module):
                 'z': z,
                 's': s,
             })
-            self.values[f'{name}'] = loss
+            self.values[lname] = loss
         
-        total = torch.stack(
-            list(self.values.values()),
-            dim=0
-        ).sum(dim=0)
-        return self.reduce(total)
-        
+        list_lvalues = [
+            lvalue
+            for lname, lvalue in self.values.items()
+            if lname in self.list_losses
+        ]
+        return self.reduce(
+            torch.stack(list_lvalues, dim=0).sum(dim=0)
+        )
+
     def reduce(self, loss: torch.Tensor) -> torch.Tensor:
         """Reduce the values and return total only."""
         if self.reduction == "mean":

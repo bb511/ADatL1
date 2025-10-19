@@ -45,18 +45,21 @@ class VAE(L1ADLightningModule):
 
         outdict = {
             "loss": loss.mean(),
-
-            "loss/total": loss,
+            "loss/total": loss.mean(),
             "z_mean.abs()": z_mean.abs(),
             "z_log_var": z_log_var,
         }
         if hasattr(self.loss, "losses"):
-            outdict.update({
+            individial_losses = {
                 f"loss/{module.name}": value
                 for module, value in zip(
                     self.loss.losses.values(),
                     self.loss.values.values()
                 )
+            }
+            outdict.update({
+                "loss/total": sum(list(individial_losses.values())),
+                **individial_losses
             })
         return outdict
 

@@ -1,4 +1,4 @@
-from typing import Dict, List, Optional, Any
+from typing import List, Optional
 from collections import defaultdict
 import os
 
@@ -25,9 +25,10 @@ class DatasetAwareModelCheckpoint(ModelCheckpoint):
         self,
         metric_name: str = "loss",
         dirpath: Optional[str] = None,
-        filename: Optional[str] = "{epoch:02d}-{step}",
+        filename: Optional[str] = None,
         save_top_k: int = 1,
         mode: str = "min",
+        ds_keys_to_skip: Optional[List[str]] = None,
         **kwargs,
     ):
         super().__init__(
@@ -39,6 +40,7 @@ class DatasetAwareModelCheckpoint(ModelCheckpoint):
         )
         self.metric_name = metric_name
         self.metric_cache = defaultdict(list)
+        self.ds_keys_to_skip = ds_keys_to_skip or []
 
         # For tracking and saving per-dataset checkpoints
         self.custom_checkpoints = defaultdict(list)
@@ -48,6 +50,8 @@ class DatasetAwareModelCheckpoint(ModelCheckpoint):
     ):
         """Store loss values for each dataset during validation."""
         dset_key = list(getattr(trainer, "val_dataloaders").keys())[dataloader_idx]
+        if dset_key in self.ds_keys_to_skip:
+            return
 
         if self.metric_name in outputs.keys():
             self.metric_cache[dset_key].append(
@@ -61,16 +65,13 @@ class DatasetAwareModelCheckpoint(ModelCheckpoint):
         Collects and processes loss data, then calls strategy-specific methods
         for checkpoint selection.
         """
-        list_dset_key = list(getattr(trainer, "val_dataloaders").keys())
-
-        is_cache = len(self.metric_cache) > 0
-        is_metric = self.metric_name in set(
-            [k.split("/")[-1] for k in trainer.callback_metrics.keys()]
-        )
-        if not is_cache and not is_metric:
-            return
-
-        if not is_cache:
+        list_dset_key = [
+            ds_key for ds_key in list(getattr(trainer, "val_dataloaders").keys())
+            if ds_key not in self.ds_keys_to_skip
+        ]
+        
+        # Fill metric cache:
+        if len(self.metric_cache) == 0:
             self.metric_cache = defaultdict(list)
             for key, value in trainer.callback_metrics.items():
                 if key.endswith(self.metric_name):
@@ -174,28 +175,28 @@ class DatasetAwareModelCheckpoint(ModelCheckpoint):
     ):
         """Save a checkpoint with a custom key and metric value."""
         # Format filename based on the template
-        filename = self.filename or "{epoch:02d}-{step}"
+        filename = self.filename or "e={epoch:02d}-s={step}"
         filename = filename.format(
             epoch=trainer.current_epoch,
             step=trainer.global_step,
         )
 
         # Make the key safe for filenames
-        safe_key = key.replace("/", "_").replace(":", "_").replace(" ", "_")
-        filename = f"{filename}-{safe_key}-value_{metric_value:.6f}"
+        safe_string = lambda string: string.replace("/", "_").replace(":", "_").replace(" ", "_")
+        filename = f"{safe_string(key)}-{safe_string(self.metric_name)}={metric_value:.6f}-{filename}"
 
         # Modify dirpath to include key-specific subdirectory
         dirpath = self.dirpath or trainer.default_root_dir
-        custom_dirpath = os.path.join(dirpath, safe_key)
+        custom_dirpath = os.path.join(dirpath, safe_string(key))
         os.makedirs(custom_dirpath, exist_ok=True)
 
         # Save the checkpoint
         prefix = (
-            f"{self.prefix}_"
+            self.prefix
             if hasattr(self, "prefix") and getattr(self, "prefix") != None
             else ""
         )
-        filepath = os.path.join(custom_dirpath, f"{prefix}{filename}.ckpt")
+        filepath = os.path.join(custom_dirpath, f"{prefix}-{filename}.ckpt")
         self._save_checkpoint(trainer=trainer, filepath=filepath)
         return filepath
 
@@ -241,7 +242,7 @@ class LeaveOneOutModelCheckpoint(DatasetAwareModelCheckpoint):
         for left_out_key in epoch_loss_totals.keys():
             # Compute mean loss on all datasets EXCEPT the left-out one
             other_dsets = [k for k in epoch_loss_totals.keys() if k != left_out_key]
-
+                        
             if not other_dsets:  # Skip if there's only one dataset
                 continue
 

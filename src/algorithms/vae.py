@@ -44,11 +44,11 @@ class VAE(L1ADLightningModule):
         del reconstruction, x, z, s
 
         outdict = {
-            "loss": loss,
+            "loss": loss.mean(),
 
             "loss/total": loss,
-            "z_mean.abs().mean()": z_mean.abs().mean(),
-            "z_log_var.mean()": z_log_var.mean(),
+            "z_mean.abs()": z_mean.abs(),
+            "z_log_var": z_log_var,
         }
         if hasattr(self.loss, "losses"):
             outdict.update({
@@ -63,7 +63,7 @@ class VAE(L1ADLightningModule):
     def outlog(self, outdict: dict) -> dict:
         """Override with the values you want to log."""
         return {
-            "loss/total": outdict.get("loss"),
-            **outdict
+            k: v.mean() for k, v in outdict.items()
+            if "loss/" in k or not k.startswith("loss/")
         }
         

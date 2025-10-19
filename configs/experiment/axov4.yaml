@@ -15,6 +15,9 @@ tags: ["vae", "axo_v4", "scan"]
 
 seed: 123
 
+train: true
+test: false
+
 # For debugging purposes:
 data:
   _target_: src.data.L1AD_datamodule.L1ADDataModuleDebug

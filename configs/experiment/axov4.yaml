@@ -4,7 +4,7 @@ defaults:
   # - /model/masking: multiplicity
   - override /paths: axov4
   - override /data: axov4
-  - override /algorithm: realnvp # axov4
+  - override /algorithm: vae
   # - override /algorithm: svdd
   # - override /algorithm: realnvp
   - override /callbacks: axov4
@@ -36,3 +36,8 @@ logger:
 
   #   group: debug
   #   name: coderuns
+
+
+scan:
+  lr: ???
+  alpha: ???

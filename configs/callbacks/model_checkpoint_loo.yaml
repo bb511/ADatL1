@@ -1,7 +1,7 @@
 model_checkpoint_loo:
   _target_: src.callbacks.model_checkpoint.LeaveOneOutModelCheckpoint
   # dirpath: ${paths.output_dir}/checkpoints
-  dirpath: ${paths.root_dir}/checkpoints/scan_lr=${algorithm.optimizer.lr} #_alpha${algorithm.loss.alpha}/
+  dirpath: ${paths.root_dir}/checkpoints/scan_lr=${scan.lr}_alpha=${scan.alpha}/
   filename: 'e={epoch:02d}-s={step}'
   metric_name: loss/kl
   ds_keys_to_skip:

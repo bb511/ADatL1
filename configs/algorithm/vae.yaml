@@ -31,35 +31,29 @@ encoder:
 loss:
   _target_: src.losses.MultiLoss
 
-  reduction: mean
+  reduction: none # !! IMPORTANT !!
 
-  # Here the losses with their scale:
+  # Here the losses to use for backpropagation:
+  list_losses:
+    - reconstruction
+    - kl
+
+  # The rest of the losses are imported on top, or directly from the defaults.
   reconstruction:
-    scale: 1.0
+    scale: '${substract: 1.0, ${scan.alpha}}'
   kl:
-    scale: 1.0
-  mi:
-    scale: 1.0
-  mmd:
-    scale: 1.0
-  alignment:
-    scale: 1.0
-  dipvae:
-    scale: 1.0
-  betavae:
-    scale: 1.0
-  gradient:
-    scale: 1.0
+    scale: ${scan.alpha}
 
 
 optimizer:
   _partial_: true
   _target_: src.optimizers.lion.Lion
-  lr: 0.0001
+  lr: ${scan.lr}
   weight_decay: 0.0
 
 
 scheduler:
+  # here other attributes...
   scheduler:
     _partial_: true
     _target_: src.optimizers.cdrw.CDRW

@@ -1,7 +1,6 @@
 from typing import Optional
 from collections import defaultdict
 import torch
-from pytorch_lightning.utilities.memory import garbage_collection_cuda
 
 from capmetric.callback import ApproximationCapacityCallback
 import wandb
@@ -84,4 +83,3 @@ class ValidationCAP(ApproximationCapacityCallback):
 
         self.cache = defaultdict(list)
         del loss1, loss2, indices1, indices2
-        garbage_collection_cuda()

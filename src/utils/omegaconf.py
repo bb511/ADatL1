@@ -44,3 +44,10 @@ def register_resolvers():
         "torch_full_float",
         lambda value, length: torch.full((length,), float(value)),
     )
+    OmegaConf.register_new_resolver(
+        "scan_dirname",
+        lambda scan_dictionary: "scan_" + "_".join(
+            f"{skey}={svalue}"
+            for skey, svalue in sorted(scan_dictionary.items())
+        )
+    )

@@ -1,4 +1,4 @@
-model_checkpoint_loo:
+model_checkpoint_lko:
   _target_: src.callbacks.model_checkpoint.LeaveKOutModelCheckpoint
   dirpath: '${paths.root_dir}/checkpoints/${scan_dirname: ${scan}}/'
   filename: 'epoch={epoch}__step={step}'

@@ -1,0 +1,26 @@
+ib_annealing:
+  _target_: src.callbacks.annealing.InformationBottleneckAnnealing
+  
+  loss_name: kl
+  schedule: linear
+  start_epoch: 0
+  end_epoch: 100
+  alpha_max: 1.0
+  alpha_min: 0.0
+  strategy: capacity # choose from 'plain', 'capacity', 'pid'
+
+  cycle_length: 100
+  warmup_ratio: 0.2  
+
+  cap_gain: 0.02
+  cap_start_epoch: 0
+  cap_end_epoch: 100
+  cap_start: 0.0
+  cap_max: 20.0
+
+  pid_kp: 0.02
+  pid_ki: 0.0
+  pid_kd: 0.0
+  pid_integral_clip: 5.0
+
+  kl_metric_key: train/loss/kl

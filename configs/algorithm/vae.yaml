@@ -38,7 +38,7 @@ loss:
     - reconstruction
     - kl
 
-  # The rest of the losses are imported on top, or directly from the defaults.
+  # The rest of the losses are imported directly from the defaults.
   reconstruction:
     scale: '${substract: 1.0, ${scan.alpha}}'
   kl:

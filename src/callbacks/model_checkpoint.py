@@ -1,6 +1,7 @@
 from typing import List, Optional
-from collections import defaultdict
 import os
+from collections import defaultdict
+import itertools
 
 import torch
 from pytorch_lightning.callbacks import ModelCheckpoint
@@ -256,3 +257,63 @@ class LeaveOneOutModelCheckpoint(DatasetAwareModelCheckpoint):
             # Use the prefix 'loo_' to identify leave-one-out checkpoints
             key = f"{left_out_key}"
             self._save_top_k_custom_checkpoints(trainer, pl_module, key, loo_loss)
+
+
+class LeaveKOutModelCheckpoint(DatasetAwareModelCheckpoint):
+    """
+    ModelCheckpoint that saves checkpoints based on leave-k-out dataset performance.
+
+    For each dataset group, this callback computes the mean loss on the remaining datasets
+    (leave-k-out) and saves the checkpoint that performs best according to this metric.
+    """
+
+    prefix = "lko"
+
+    def __init__(
+        self,
+        ds_keys_selected: List[str],
+        metric_name: str = "loss",
+        dirpath: Optional[str] = None,
+        filename: Optional[str] = None,
+        save_top_k: int = 1,
+        mode: str = "min",
+        ds_keys_to_skip: Optional[List[str]] = None,
+        **kwargs,
+    ):
+        super().__init__(
+            metric_name=metric_name,
+            dirpath=dirpath,
+            save_top_k=save_top_k,
+            filename=filename,
+            mode=mode,
+            ds_keys_to_skip=ds_keys_to_skip,
+            **kwargs,
+        )
+        self.ds_keys_selected = ds_keys_selected
+    
+    def _process_dataset_losses(
+        self, trainer, pl_module, epoch_loss_totals, epoch_loss_lengths
+    ):
+        """Process dataset losses using the leave-k-out strategy."""
+
+        available_keys = [k for k in epoch_loss_totals.keys() if k not in self.ds_keys_to_skip]
+        selected_k = [k for k in available_keys if k in self.ds_keys_selected]
+        selected_k_c = [k for k in available_keys if k not in self.ds_keys_selected]
+
+        # Compute mean loss for the two groups:
+        total_loss_k = sum([epoch_loss_totals[k] for k in selected_k])
+        total_examples_k = sum([epoch_loss_lengths[k] for k in selected_k])
+        total_loss_k_c = sum([epoch_loss_totals[k] for k in selected_k_c])
+        total_examples_k_c = sum([epoch_loss_lengths[k] for k in selected_k_c])
+        if total_examples_k == 0 or total_examples_k_c == 0:
+            return
+        
+        loss_k = (
+            total_loss_k / total_examples_k if total_examples_k > 0 else float("inf")
+        )
+        self._save_top_k_custom_checkpoints(trainer, pl_module, "leave-k-in", loss_k)
+        
+        loss_k_c = (
+            total_loss_k_c / total_examples_k_c if total_examples_k_c > 0 else float("inf")
+        )
+        self._save_top_k_custom_checkpoints(trainer, pl_module, "leave-k-out", loss_k_c)

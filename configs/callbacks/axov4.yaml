@@ -4,6 +4,7 @@ defaults:
   # - rate
   - model_checkpoint_i
   - model_checkpoint_loo
+  - model_checkpoint_lko
   - cap
   - model_checkpoint_cap
   # - batch_size_finder

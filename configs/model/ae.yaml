@@ -1,5 +1,5 @@
 encoder:
-  _target_: src.models.components.MLP
+  _target_: src.models.components.mlp.MLP
 
   nodes: [57, 28, 16, 8] # 57 input features, 8 latent features
 

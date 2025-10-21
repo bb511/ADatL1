@@ -160,9 +160,7 @@ class DatasetAwareModelCheckpoint(ModelCheckpoint):
 
             # Remove any old checkpoints that didn't make the cut
             for checkpoint in sorted_checkpoints[self.save_top_k :]:
-                if checkpoint.get("filepath") and os.path.exists(
-                    checkpoint["filepath"]
-                ):
+                if checkpoint.get("filepath") and os.path.exists(checkpoint["filepath"]):
                     try:
                         os.remove(checkpoint["filepath"])
                     except OSError:
@@ -317,3 +315,10 @@ class LeaveKOutModelCheckpoint(DatasetAwareModelCheckpoint):
             total_loss_k_c / total_examples_k_c if total_examples_k_c > 0 else float("inf")
         )
         self._save_top_k_custom_checkpoints(trainer, pl_module, "leave-k-out", loss_k_c)
+
+        loss_all = (
+            (total_loss_k + total_loss_k_c) / (total_examples_k + total_examples_k_c)
+            if (total_examples_k + total_examples_k_c) > 0
+            else float("inf")
+        )
+        self._save_top_k_custom_checkpoints(trainer, pl_module, "leave-all-in", loss_all)

@@ -1,6 +1,6 @@
 from typing import Any, Dict, List, Optional, Tuple
-from collections import defaultdict
 from pathlib import Path
+from collections import defaultdict
 import itertools
 
 import hydra
@@ -31,6 +31,86 @@ log = RankedLogger(__name__, rank_zero_only=True)
 
 from src.utils.checkpoints import find_scan_checkpoints
 from capmetric import ApproximationCapacity
+
+device = "cuda" if torch.cuda.is_available() else "cpu"
+
+def _defaultdict_to_dict(d):
+    """Recursively convert defaultdict to regular dict"""
+    if isinstance(d, defaultdict):
+        d = {k: _defaultdict_to_dict(v) for k, v in d.items()}
+    return d
+
+def _cache_logits_from_checkpoints(
+        ckpt_paths: List[Path],
+        algorithm: LightningModule,
+        dataset: torch.utils.data.Dataset,
+        output_name: str = "logits",
+    ) -> torch.Tensor:
+
+    if len(ckpt_paths) == 0:
+        return torch.empty(0)
+
+    if len(ckpt_paths) > 1:
+        log.warning(
+            f"Multiple checkpoints found for combination "
+            f"Using the first one: {ckpt_paths[0]}"
+        )
+    ckpt_path = ckpt_paths[0]
+
+    # Load the logits in memory:
+    state_dict = torch.load(ckpt_path, weights_only=False, map_location="cpu")[
+        "state_dict"
+    ]
+    algorithm.load_state_dict(state_dict, strict=True)
+    algorithm.eval()
+    algorithm.to(device)
+    
+    with torch.no_grad():
+        logits = []
+        for ibatch in range(len(dataset)):
+            batch = dataset[ibatch]
+            batch = tuple([
+                t.to(device=device, dtype=torch.float32) if isinstance(t, torch.Tensor) else t
+                for t in batch
+            ])
+            output = algorithm.model_step(batch)[output_name]
+            logits.append(output.detach().cpu())
+
+    del dataset, batch, algorithm, state_dict
+    return torch.cat(logits, dim=0)
+
+def _compute_cap(
+        logits0: torch.Tensor,
+        logits1: torch.Tensor,
+        batch_size: int
+    ) -> Optional[float]:
+    
+    if len(logits0) == 0 or len(logits1) == 0:
+        return None
+
+    # Compute CAPmetric
+    capmetric = ApproximationCapacity(
+        beta0=1.0,
+        normalization_type="minmax",
+        normalization_params=None,
+        energy_type="baseline",
+        energy_params=None,
+        regularization_type="none",
+        regularization_params=None,
+        binary=True,
+        lr=0.01,
+        n_epochs=50,
+        batch_size=batch_size,
+        device=device,
+        process_group=None,
+        dist_sync_fn=None,
+    )
+    capmetric.update(
+        logits0.to(device=device),
+        logits1.to(device=device),
+    )
+    cap = capmetric.compute()
+    return cap
 
 
 @task_wrapper
@@ -75,11 +155,10 @@ def eval(cfg: DictConfig) -> Tuple[Dict[str, Any], Dict[str, Any]]:
     }
 
     log.info("Finding checkpoints...")
-    filter_groups = lambda dirname: not Path(dirname).stem.startswith("cap")
     checkpoint_dict = find_scan_checkpoints(
         dirpath=cfg.paths.checkpoints_dir,
         scan=cfg.scan,
-        filter_groups=filter_groups,
+        filter_groups=lambda dirname: all(not Path(dirname).stem.startswith(p) for p in ["cap", "leave-"]),
         filter_checkpoint=None,
         by_combination=False,
     )
@@ -102,12 +181,11 @@ def eval(cfg: DictConfig) -> Tuple[Dict[str, Any], Dict[str, Any]]:
     datamodule.setup("fit")
     dataset_dictionary = datamodule.val_dataloader() # BUG @Patrick: should I reinstantiate datasets?
     
-    log.info("Cacheing the data before CAP computation...")
-    filter_groups = lambda dirname: (not Path(dirname).stem.startswith("cap")) and (not Path(dirname).stem.startswith("main"))
+    log.info("Cacheing the data before CAP computation for SINGLE and LOO checkpoints...")
     checkpoint_dict = find_scan_checkpoints(
         dirpath=cfg.paths.checkpoints_dir,
         scan=cfg.scan,
-        filter_groups=filter_groups,
+        filter_groups=lambda dirname: all(not Path(dirname).stem.startswith(p) for p in ["cap", "leave-", "main"]),
         filter_checkpoint=None,
         by_combination=True,
     )
@@ -115,78 +193,212 @@ def eval(cfg: DictConfig) -> Tuple[Dict[str, Any], Dict[str, Any]]:
     for prefix in sorted({k[1] for k in checkpoint_dict.keys()}):
         for metric_name in sorted({k[2] for k in checkpoint_dict.keys()}):            
             for dset_key in sorted({k[0] for k in checkpoint_dict.keys()}):
-                device = "cuda" if torch.cuda.is_available() else "cpu"
-
-                ckpt_paths = checkpoint_dict.get((dset_key, prefix, metric_name), [])
-                if len(ckpt_paths) == 0:
+                logits = _cache_logits_from_checkpoints(
+                    ckpt_paths=checkpoint_dict.get((dset_key, prefix, metric_name), []),
+                    algorithm=hydra.utils.instantiate(cfg.algorithm),
+                    dataset=dataset_dictionary.get(dset_key),
+                    output_name=cfg.callbacks.cap_callback.output_name
+                )
+                if len(logits) == 0:
                     continue
 
-                if len(ckpt_paths) > 1:
-                    log.warning(
-                        f"Multiple checkpoints found for combination "
-                        f"(dset_key={dset_key}, prefix={prefix}, metric_name={metric_name}). "
-                        f"Using the first one: {ckpt_paths[0]}"
-                    )
-                ckpt_path = ckpt_paths[0]
+                cache[(dset_key, prefix, metric_name)] = logits
+                
 
-                # Load the logits in memory:
-                algorithm = hydra.utils.instantiate(cfg.algorithm)
-                state_dict = torch.load(ckpt_path, weights_only=False, map_location="cpu")[
-                    "state_dict"
-                ]
-                algorithm.load_state_dict(state_dict, strict=True)
-                algorithm.eval()
-                algorithm.to(device)
-
-                ds = dataset_dictionary.get(dset_key)
-                with torch.no_grad():
-                    logits = []
-                    for ibatch in range(len(ds)):
-                        batch = ds[ibatch]
-                        batch = tuple(t.to(device=device, dtype=torch.float32) for t in batch)
-                        output = algorithm.model_step(batch)[cfg.callbacks.cap_callback.output_name]
-                        logits.append(output.detach().cpu())
-
-                    cache[(dset_key, prefix, metric_name)] = torch.cat(logits, dim=0)
-
-                del ds, batch, algorithm, state_dict
-
+    it = -1
+    log.info("Computing SINGLE and LOO CAP...")
     results = {}
     for prefix in sorted({k[1] for k in cache}):
         for metric_name in sorted({k[2] for k in cache}):
             # Load existing dataset keys:
             dset_keys = {k[0] for k in cache if k[1] == prefix and k[2] == metric_name}
             for dset_key0, dset_key1 in itertools.combinations(sorted(dset_keys), 2):
-                # Load the appropiate logits:
-                logits0 = cache.get((dset_key0, prefix, metric_name), torch.empty(0))
-                logits1 = cache.get((dset_key1, prefix, metric_name), torch.empty(0))
-                if len(logits0) == 0 or len(logits1) == 0:
-                    continue
+                it +=1   
 
-                # Compute CAPmetric
-                capmetric = ApproximationCapacity(
-                    beta0=1.0,
-                    normalization_type="minmax",
-                    normalization_params=None,
-                    energy_type="baseline",
-                    energy_params=None,
-                    regularization_type="none",
-                    regularization_params=None,
-                    binary=True,
-                    lr=0.01,
-                    n_epochs=50,
-                    batch_size=cfg.data.batch_size,
-                    device=device,
-                    process_group=None,
-                    dist_sync_fn=None,
+                cap = _compute_cap(
+                    logits0=cache.get((dset_key0, prefix, metric_name), torch.empty(0)),
+                    logits1=cache.get((dset_key1, prefix, metric_name), torch.empty(0)),
+                    batch_size=cfg.data.batch_size
                 )
-                capmetric.update(
-                    logits0.to(device=device),
-                    logits1.to(device=device),
-                )
-                cap = capmetric.compute()
-                results[(dset_key, prefix, metric_name)] = cap
+                if cap is not None:
+                    results.setdefault(f"cap-{prefix}", {}).setdefault(metric_name, {})[(dset_key0, dset_key1)] = cap
 
+                if it > 10:break
+            if it > 10: break
+        if it > 10: break
+
+    metric_dict.update(_defaultdict_to_dict(results))
+    """
+    Here we add all the SINGLE and LOO CAP evaluations for all the signals.
+    """
+
+    log.info("Cacheing the data before CAP computation for LKO checkpoints...")
+    
+    # BUG: This assumes that single-signal checkpoints coincide with the ones available
+    # for subset selection. We assume this is true because data is fixed.
+    # Alternatively, we could store a metadata file with the leave-k groups used.
+
+    # Get the datasets that should be evaluated:
+    available_signals = sorted({k[0] for k in checkpoint_dict.keys()})
+    allowed_signals = [
+        k for k in available_signals
+        if k not in cfg.leave_k_out.ds_keys_to_skip
+    ]
+    signals_k = [
+        k for k in allowed_signals
+        if k in cfg.leave_k_out.ds_keys_selected
+    ]
+    signals_kc = [
+        k for k in allowed_signals
+        if k not in cfg.leave_k_out.ds_keys_selected
+    ]
+
+    def _cache_logits_from_lko(subset_model: str, subset_data: str):
+        assert subset_model in ["k", "kc"]; assert subset_data in ["k", "kc"]
+
+        checkpoint_key = "leave-k-in" if subset_model == "k" else "leave-k-out"
+        signals = signals_k if subset_data == "k" else signals_kc
+        
+        logits = [
+            _cache_logits_from_checkpoints(
+                ckpt_paths=checkpoint_dict.get((checkpoint_key, "lko", metric_name), []),
+                algorithm=hydra.utils.instantiate(cfg.algorithm),
+                dataset=dataset_dictionary.get(dset_key),
+                output_name=cfg.callbacks.cap_callback.output_name
+            )
+            for dset_key in signals
+        ]
+        return torch.cat(logits, dim=0)
+
+    # Get the checkpoints of the LKO evaluations:
+    checkpoint_dict = find_scan_checkpoints(
+        dirpath=cfg.paths.checkpoints_dir,
+        scan=cfg.scan,
+        filter_groups=lambda dirname: Path(dirname).stem.startswith("leave-k"),
+        filter_checkpoint=None,
+        by_combination=True,
+    )
+    cache = {}
+    for metric_name in sorted({k[2] for k in checkpoint_dict.keys()}):    
+
+        """
+        Syntax: logits_X_Y where
+            - X: data used to select the model, thus originating the checkpoint
+            - Y: data used to evaluate the CAP metric
+
+        X, Y can be "k" (subset) or "kc" (complementary)
+        """
+        logits_k_k = _cache_logits_from_lko(subset_model="k", subset_data="k")
+        logits_kc_k = _cache_logits_from_lko(subset_model="kc", subset_data="k")
+        logits_k_kc = _cache_logits_from_lko(subset_model="k", subset_data="kc")
+        logits_kc_kc = _cache_logits_from_lko(subset_model="kc", subset_data="kc")
+
+        if len(logits_k_k) == 0 or len(logits_kc_k) == 0 or len(logits_k_kc) == 0 or len(logits_kc_kc) == 0:
+            continue
+
+        cache[("k", "k", metric_name)] = logits_k_k
+        cache[("k", "kc", metric_name)] = logits_k_kc
+        cache[("kc", "k", metric_name)] = logits_kc_k
+        cache[("kc", "kc", metric_name)] = logits_kc_kc
+
+    # Evaluate cases where CAP has same data but different encoder:
+    same_data = [(("kc", "k"), ("k", "k")), (("kc", "kc"), ("k", "kc"))]
+    # Evaluate cases where CAP has same encoder but different data:
+    same_encoder = [(("k", "k"), ("k", "kc")), (("kc", "k"), ("kc", "kc"))]
+
+    # BUG: This might not be the best strategy
+    # Fix the length for the CAP evaluation:
+    min_length = min(len(v) for v in cache.values())
+
+    log.info("Computing LKO CAP...")
+    results = {}
+    for metric_name in sorted({k[2] for k in checkpoint_dict.keys()}): 
+        for ((data0, encoder0), (data1, encoder1)) in same_data + same_encoder:
+            logits0=cache.get((data0, encoder0, metric_name), torch.empty(0))
+            logits1=cache.get((data1, encoder1, metric_name), torch.empty(0))
+            cap = _compute_cap(
+                logits0=logits0[:min_length],
+                logits1=logits1[:min_length],
+                batch_size=cfg.data.batch_size
+            )
+            if cap is not None:
+                results.setdefault("cap-lko", {}).setdefault(metric_name, {})[((data0, encoder0), (data1, encoder1))] = cap
+
+    metric_dict.update(_defaultdict_to_dict(results))
+    """
+    Here we add the LKO CAP evaluations.
+    """
+
+
+    log.info("Caching the data before CAP computation between background and signal simulations...")
+
+    # Get the checkpoints of the LAI evaluations:
+    checkpoint_dict = find_scan_checkpoints(
+        dirpath=cfg.paths.checkpoints_dir,
+        scan=cfg.scan,
+        filter_groups=lambda dirname: Path(dirname).stem.startswith("leave-all-in"),
+        filter_checkpoint=None,
+        by_combination=True,
+    )
+    available_metrics_lai = sorted({k[2] for k in checkpoint_dict.keys()})
+    cache = {}
+    for metric_name in available_metrics_lai: 
+        logits = [
+            _cache_logits_from_checkpoints(
+                ckpt_paths=checkpoint_dict.get(("leave-all-in", "lko", metric_name), []),
+                algorithm=hydra.utils.instantiate(cfg.algorithm),
+                dataset=dataset_dictionary.get(dset_key),
+                output_name=cfg.callbacks.cap_callback.output_name
+            )
+            for dset_key in allowed_signals
+        ]
+        logits = torch.cat(logits, dim=0)
+        if len(logits) > 0:
+            cache[("leave-all-in", "lko", metric_name)] = logits
+    
+    checkpoint_dict = find_scan_checkpoints(
+        dirpath=cfg.paths.checkpoints_dir,
+        scan=cfg.scan,
+        filter_groups=lambda dirname: any(Path(dirname).stem.startswith(p) for p in ["main", "SingleNeutrino_E-10-gun", "SingleNeutrino_Pt-2To20-gun"]),
+        filter_checkpoint=lambda fname: Path(fname).stem.startswith("prefix=single"),
+        by_combination=True,
+    )
+    available_metrics_single = sorted({k[2] for k in checkpoint_dict.keys()})
+    for metric_name in available_metrics_single:
+        for dset_key in sorted({k[0] for k in checkpoint_dict.keys()}):
+            logits = _cache_logits_from_checkpoints(
+                ckpt_paths=checkpoint_dict.get((dset_key, "single", metric_name), []),
+                algorithm=hydra.utils.instantiate(cfg.algorithm),
+                dataset=dataset_dictionary.get(dset_key),
+                output_name=cfg.callbacks.cap_callback.output_name
+            )        
+            if len(logits) == 0:
+                continue
+
+            cache[(dset_key, "single", metric_name)] = logits
+
+    # BUG: This could be improved, see earlier as well
+    min_length = min(len(v) for v in cache.values())
+
+    log.info("Computing CAP between background and signal simulations...")
+    results = {}
+    for metric_name in set(available_metrics_lai).intersection(set(available_metrics_single)):
+        logits_all = cache.get(("leave-all-in", "lko", metric_name), torch.empty(0))
+        for dset_key in sorted({k[0] for k in cache.keys() if k[1] == "single" and k[2] == metric_name}):
+            logits_single = cache.get((dset_key, "single", metric_name), torch.empty(0))
+           
+            cap = _compute_cap(
+                logits0=logits_all[:min_length],
+                logits1=logits_single[:min_length],
+                batch_size=cfg.data.batch_size
+            )
+            if cap is not None:
+                results.setdefault("cap-background", {}).setdefault(metric_name, {})[("all-signals", dset_key)] = cap
+
+    metric_dict.update(_defaultdict_to_dict(results))
+    """
+    Here we add the CAP evaluations between background and signal simulations.
+    """
     return metric_dict, object_dict
 
 

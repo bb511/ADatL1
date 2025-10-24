@@ -4,10 +4,9 @@
 # python train.py experiment=example
 
 defaults:
-  - override /paths: L1AD
   - override /data: L1AD
-  - override /model: qvae
-  - override /callbacks: default
+  - override /model: vae
+  - override /callbacks: none
   - override /trainer: gpu
   - override /logger: none
 

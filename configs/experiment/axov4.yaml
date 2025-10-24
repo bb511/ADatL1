@@ -6,7 +6,7 @@ defaults:
   - override /model: axov4
   - override /callbacks: axov4
   - override /trainer: gpu0
-  - override /logger: wandb
+  - override /logger: mlflow
 
 tags: ["vae", "axo_v4", "scan"]
 

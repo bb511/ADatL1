@@ -1,13 +1,11 @@
+# @package paths
+
 defaults:
   - default.yaml
 
-# raw_data_dir: /data/deodagiu/adl1t_data/h5files
-# raw_data_dir: /cluster/home/vjimenez/ADatL1/data
-raw_data_dir: E:/ADatL1
-
 # paths to the different types of data
 zerobias:
-  ZB_run381148-381149: ${paths.raw_data_dir}/EphZB_2024E_run381148-381149_all_14_0_7_menuv110_1716739892
+  ZB_run381148-381149: ${paths.raw_data_dir}/EphZB_2024E_run381148-381149
 signal:
   GluGluHToBB_M-125: ${paths.raw_data_dir}/L1TNtupleRun3-133XWinter24/GluGluHToBB_M-125_TuneCP5_13p6TeV_powheg-pythia8
   GluGluHToGG_M-125: ${paths.raw_data_dir}/L1TNtupleRun3-133XWinter24/GluGluHToGG_M-125_TuneCP5_13p6TeV_powheg-pythia8
@@ -21,16 +19,11 @@ signal:
   HTo2LongLivedTo4b_MH-125_MFF-12_CTau-900mm: ${paths.raw_data_dir}/L1TNtupleRun3-133XWinter24/HTo2LongLivedTo4b_MH-125_MFF-12_CTau-900mm_TuneCP5_13p6TeV-pythia8
   HTo2LongLivedTo4b_MH-125_MFF-25_CTau-1500mm: ${paths.raw_data_dir}/L1TNtupleRun3-133XWinter24/HTo2LongLivedTo4b_MH-125_MFF-25_CTau-1500mm_TuneCP5_13p6TeV-pythia8
   HTo2LongLivedTo4b_MH-125_MFF-50_CTau-3000mm: ${paths.raw_data_dir}/L1TNtupleRun3-133XWinter24/HTo2LongLivedTo4b_MH-125_MFF-50_CTau-3000mm_TuneCP5_13p6TeV-pythia8
-  SMS-Higgsino_mN2-170_mC1-160_mN1-150_HT-60: ${paths.raw_data_dir}/L1TNtupleRun3-133XWinter24/SMS-Higgsino_mN2-170_mC1-160_mN1-150_HT-60_TuneCP5_13p6TeV_pythia8
   SMS-Higgsino_mN2-170_mC1-160_mN1-150_HT60: ${paths.raw_data_dir}/L1TNtupleRun3-133XWinter24/SMS-Higgsino_mN2-170_mC1-160_mN1-150_HT60_TuneCP5_13p6TeV-pythia8
-  SUSYGluGluToBBHToBB_NarrowWidth_M-1200_1: ${paths.raw_data_dir}/L1TNtupleRun3-133XWinter24/SUSYGluGluToBBHToBB_NarrowWidth_M-1200_TuneCP5_13p6TeV-pythia8
-  SUSYGluGluToBBHToBB_NarrowWidth_M-1200_2: ${paths.raw_data_dir}/L1TNtupleRun3-133XWinter24/SUSYGluGluToBBHToBB_NarrowWidth_M-1200_TuneCP5_13p6TeV_pythia8
-  SUSYGluGluToBBHToBB_NarrowWidth_M-120_1: ${paths.raw_data_dir}/L1TNtupleRun3-133XWinter24/SUSYGluGluToBBHToBB_NarrowWidth_M-120_TuneCP5_13p6TeV-pythia8
-  SUSYGluGluToBBHToBB_NarrowWidth_M-120_2: ${paths.raw_data_dir}/L1TNtupleRun3-133XWinter24/SUSYGluGluToBBHToBB_NarrowWidth_M-120_TuneCP5_13p6TeV_pythia8
-  SUSYGluGluToBBHToBB_NarrowWidth_M-350_1: ${paths.raw_data_dir}/L1TNtupleRun3-133XWinter24/SUSYGluGluToBBHToBB_NarrowWidth_M-350_TuneCP5_13p6TeV-pythia8
-  SUSYGluGluToBBHToBB_NarrowWidth_M-350_2: ${paths.raw_data_dir}/L1TNtupleRun3-133XWinter24/SUSYGluGluToBBHToBB_NarrowWidth_M-350_TuneCP5_13p6TeV_pythia8
-  SUSYGluGluToBBHToBB_NarrowWidth_M-600_1: ${paths.raw_data_dir}/L1TNtupleRun3-133XWinter24/SUSYGluGluToBBHToBB_NarrowWidth_M-600_TuneCP5_13p6TeV-pythia8
-  SUSYGluGluToBBHToBB_NarrowWidth_M-600_2: ${paths.raw_data_dir}/L1TNtupleRun3-133XWinter24/SUSYGluGluToBBHToBB_NarrowWidth_M-600_TuneCP5_13p6TeV_pythia8
+  SUSYGluGluToBBHToBB_NarrowWidth_M-1200: ${paths.raw_data_dir}/L1TNtupleRun3-133XWinter24/SUSYGluGluToBBHToBB_NarrowWidth_M-1200_TuneCP5_13p6TeV-pythia8
+  SUSYGluGluToBBHToBB_NarrowWidth_M-600: ${paths.raw_data_dir}/L1TNtupleRun3-133XWinter24/SUSYGluGluToBBHToBB_NarrowWidth_M-600_TuneCP5_13p6TeV-pythia8
+  SUSYGluGluToBBHToBB_NarrowWidth_M-350: ${paths.raw_data_dir}/L1TNtupleRun3-133XWinter24/SUSYGluGluToBBHToBB_NarrowWidth_M-350_TuneCP5_13p6TeV-pythia8
+  SUSYGluGluToBBHToBB_NarrowWidth_M-120: ${paths.raw_data_dir}/L1TNtupleRun3-133XWinter24/SUSYGluGluToBBHToBB_NarrowWidth_M-120_TuneCP5_13p6TeV-pythia8
   VBFHToCC_M-125: ${paths.raw_data_dir}/L1TNtupleRun3-133XWinter24/VBFHToCC_M-125_TuneCP5_13p6TeV_powheg-pythia8
   VBFHToInvisible_M-125: ${paths.raw_data_dir}/L1TNtupleRun3-133XWinter24/VBFHToInvisible_M-125_TuneCP5_13p6TeV_powheg-pythia8
   VBFHToTauTau_M125: ${paths.raw_data_dir}/L1TNtupleRun3-133XWinter24/VBFHToTauTau_M125_TuneCP5_13p6TeV_powheg-pythia8

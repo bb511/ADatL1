@@ -1,6 +1,3 @@
-# Callback that calculates the rate of anomalies.
-from collections import defaultdict
-
 import torch
 from pytorch_lightning.callbacks import Callback
 

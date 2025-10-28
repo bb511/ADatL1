@@ -165,14 +165,10 @@ logs
 outputs
 /results/
 /checkpoints/
-<<<<<<< HEAD
-=======
-checkpoints
->>>>>>> origin/dev/patrick
 .env
 
 # Fix exceptions
-# !**/data/
+!**/data/
 !**/outputs/
 # !**/results/
 

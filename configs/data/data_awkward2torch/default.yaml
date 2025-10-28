@@ -1,0 +1,9 @@
+# @package data_awkward2torch
+
+_target_: src.data.components.awkward2torch.L1DataAwkward2Torch
+workers: 16
+nconst:
+  muons: 4
+  egammas: 4
+  jets: 10
+  taus: 6

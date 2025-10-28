@@ -1,0 +1,19 @@
+# @package _global_
+
+# to execute this experiment run:
+# python train.py experiment=example
+
+defaults:
+  - override /data: L1AD
+  - override /model: vae
+  - override /callbacks: none
+  - override /trainer: gpu
+  - override /logger: none
+
+tags: ["debug"]
+
+seed: 12345
+
+trainer:
+  min_epochs: 1
+  max_epochs: 1

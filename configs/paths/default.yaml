@@ -19,3 +19,6 @@ checkpoints_dir: ${paths.root_dir}/checkpoints/
 
 # path to working directory
 work_dir: ${hydra:runtime.cwd}
+
+# path to the raw data
+raw_data_dir: ???

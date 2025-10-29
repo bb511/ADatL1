@@ -19,7 +19,7 @@ class L1DataAwkward2Torch:
     workers: int
     nconst: dict
 
-    def load_folder(self, folder_path: Path):
+    def load_folder(self, folder_path: Path) -> torch.Tensor:
         """Loads folder of parquet files containing awkward arrays to a numpy array."""
         workers = min(self.workers, (os.cpu_count() or 4))
 

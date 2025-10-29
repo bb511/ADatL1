@@ -1,5 +1,5 @@
 # Vanilla auto-encoder model implementations
-from typing import Optional, Tuple
+from typing import Optional
 
 import torch
 from torch import nn
@@ -26,9 +26,7 @@ class AE(L1ADLightningModule):
         self.features = features if features is not None else nn.Identity()
         self.features.eval()
 
-    def forward(
-        self, x: torch.Tensor
-    ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
+    def forward(self, x: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
         z = self.encoder(x)
         reconstruction = self.decoder(z)
         return z, reconstruction
@@ -44,7 +42,7 @@ class AE(L1ADLightningModule):
             "loss": total_loss.mean(),
             # Used for logging:
             "loss/reco/mean": reco_loss.mean(),
-            "loss/nad/mean": kl_loss.mean(),
+            "loss/kl/mean": kl_loss.mean(),
         }
 
     def _filter_log_dict(self, outdict: dict) -> dict:
@@ -52,5 +50,5 @@ class AE(L1ADLightningModule):
         return {
             "loss": outdict.get("loss"),
             "loss_reco": outdict.get("loss/reco/mean"),
-            "loss_nad": outdict.get("loss/nad/mean"),
+            "loss_kl": outdict.get("loss/kl/mean"),
         }

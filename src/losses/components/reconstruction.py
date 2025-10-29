@@ -6,28 +6,27 @@ from src.losses import L1ADLoss
 
 
 class ReconstructionLoss(L1ADLoss):
-    """
-    Reconstruction loss for VAE without reduction.
+    """Reconstruction loss for VAE without reduction.
     
     :param scale: Scaling factor for the loss.
     :param reduction: Reduction method to apply to the loss ("none", "mean", "sum").
     """
-
     name: str = "reco"
 
     def __init__(
-            self,
-            scale: float = 1.0,
-            reduction: Literal["none", "mean", "sum"] = "none",
-        ):
+        self,
+        scale: float = 1.0,
+        reduction: Literal["none", "mean", "sum"] = "none",
+    ):
         super().__init__(scale=scale, reduction=reduction)
 
     def forward(
-            self,
-            target: torch.Tensor,
-            reconstruction: torch.Tensor,
-            **kwargs
-        ) -> torch.Tensor:
+        self,
+        target: torch.Tensor,
+        reconstruction: torch.Tensor,
+        **kwargs
+    ) -> torch.Tensor:
+
         mse_loss = F.mse_loss(target, reconstruction, reduction="none")
         mse_per_observation = torch.mean(mse_loss, dim=tuple(range(1, mse_loss.dim())))
         return self.scale * self.reduce(mse_per_observation)

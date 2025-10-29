@@ -4,7 +4,7 @@
 # python train.py experiment=example
 
 defaults:
-  - override /data: axov4
+  - override /data: L1AD
   - override /algorithm: ae
   - override /callbacks: none
   - override /trainer: gpu

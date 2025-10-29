@@ -1,3 +1,5 @@
+# @package algorithm
+
 _target_: src.algorithms.vae.VAE
 # masking: null
 features: null

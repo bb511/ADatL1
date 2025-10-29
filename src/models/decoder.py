@@ -1,3 +1,4 @@
+# Decoder models.
 from typing import Optional, List, Callable
 
 import torch
@@ -6,8 +7,7 @@ from src.models.mlp import MLP
 
 
 class Decoder(MLP):
-    """
-    Simple decoder model.
+    """Simple decoder model.
 
     :param nodes: List of ints, each int specifying the width of a layer.
     :param init_weight: Callable method to initialize the weights of the decoder nodes.

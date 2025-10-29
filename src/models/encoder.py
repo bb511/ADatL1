@@ -1,4 +1,5 @@
-from typing import Optional, Tuple, List, Callable
+# Encoder models.
+from typing import Optional, Callable
 
 import torch
 import torch.nn as nn
@@ -20,7 +21,7 @@ class VariationalEncoder(nn.Module):
 
     def __init__(
         self,
-        nodes: List[int],
+        nodes: list[int],
         init_weight: Optional[Callable] = None,
         init_bias: Optional[Callable] = None,
     ):
@@ -40,10 +41,7 @@ class VariationalEncoder(nn.Module):
         self.z_log_var = nn.Linear(nodes[-2], nodes[-1])
         init_weight(self.z_log_var.weight)
 
-    def forward(
-        self, x: torch.Tensor
-    ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
-
+    def forward(self, x: torch.Tensor) -> tuple[torch.Tensor]:
         x = self.net(x)
         z_mean, z_log_var = self.z_mean(x), self.z_log_var(x)
         z = self.sample(z_mean, z_log_var)

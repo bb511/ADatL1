@@ -5,7 +5,10 @@ import torch.nn as nn
 
 from src.models.mlp import MLP
 
+
 class Encoder(MLP):
+    """Simple vanilla encoder, i.e., just an MLP."""
+    pass
 
 class VariationalEncoder(nn.Module):
     """Simple variational encoder model.

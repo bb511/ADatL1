@@ -2,7 +2,7 @@ from typing import Optional, List, Callable
 
 import torch
 
-from src.models.components.mlp import MLP
+from src.models.mlp import MLP
 
 
 class Decoder(MLP):

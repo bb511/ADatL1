@@ -3,6 +3,9 @@
 defaults:
   - default.yaml
 
+# Select where to extract, process, normalize etc. all this data.
+data_dir: ${.base_data_dir}/data_2024E
+
 # paths to the different types of data
 zerobias:
   ZB_run381148-381149: ${paths.raw_data_dir}/EphZB_2024E_run381148-381149

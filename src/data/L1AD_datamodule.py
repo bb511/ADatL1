@@ -113,6 +113,7 @@ class L1ADDataModule(LightningDataModule):
                 label +=1
 
         self._data_summary()
+        exit(1)
 
     def _data_summary(self):
         """Make a neat little summary of what data is being used."""
@@ -214,61 +215,6 @@ class L1ADDataModule(LightningDataModule):
             return self.batch_size_per_device
 
         return int(len(data) / self.hparams.val_batches)
-
-    def train_dataloader(self) -> Dataset[Any]:
-        """Creates an optimized dataloader for numpy arrays already in memory."""
-        return L1ADDataset(
-            self.data_train,
-            self.labels_train,
-            batch_size=self.batch_size_per_device,
-            shuffle=True,
-        )
-
-    def val_dataloader(self) -> Dataset[Any]:
-        """Create and return the validation dataloader.
-
-        :return: The validation dataloader.
-        """
-        # Shuffling is by default false for the custom dataset.
-        batch_size = self._get_validation_batchsize(self.data_val)
-        main_val = L1ADDataset(self.data_val, self.labels_val, batch_size=batch_size)
-        data_val = {}
-        # Make sure main_val is always first in the dict !!!
-        # The rate callback expects this.
-        data_val.update({"main_val": main_val})
-        if not self.aux_val:
-            return data_val
-
-        for data_name, data in self.aux_val.items():
-            batch_size = self._get_validation_batchsize(data)
-            labels = torch.ones(len(data)) # BUG: check this
-            self.aux_val[data_name] = L1ADDataset(data, labels, batch_size=batch_size)
-
-        data_val.update(self.aux_val)
-
-        return data_val
-
-    def test_dataloader(self) -> Dataset[Any]:
-        """Create and return the test dataloader.
-
-        :return: The validation dataloader.
-        """
-        # Shuffling is by default false for the custom dataset.
-        batch_size = self._get_validation_batchsize(self.data_test)
-        main_test = L1ADDataset(self.data_test, self.labels_test, batch_size=batch_size)
-        data_test = {}
-        data_test.update({"main_test": main_test})
-        if not self.aux_test:
-            return data_test
-
-        for data_name, data in self.aux_test.items():
-            batch_size = self._get_validation_batchsize(data)
-            labels = torch.ones(len(data)) # BUG: check this
-            self.aux_test[data_name] = L1ADDataset(data, labels, batch_size=batch_size)
-
-        data_test.update(self.aux_test)
-
-        return data_test
 
     def _set_batch_size(self):
         """Set the batch size per device if multiple devices are available."""

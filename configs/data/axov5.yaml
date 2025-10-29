@@ -1,11 +1,10 @@
-# This serves as a template for a data configuration card.
 defaults:
   - /paths: data_2024E
-  - data_extractor: default
-  - data_processor: default
-  - data_normalizer: default
-  - data_mlready: default
-  - data_awkward2torch: default
+  - data_extractor: axov4
+  - data_processor: axov4
+  - data_normalizer: axov4
+  - data_mlready: axov4
+  - data_awkward2torch: axov4
   - _self_
 
 _target_: src.data.L1AD_datamodule.L1ADDataModule

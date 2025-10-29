@@ -4,8 +4,12 @@
 
 _target_: src.data.components.processing.L1DataProcessor
 extracted_folder: ${data_extractor.cache_root_dir}/extracted/${data_extractor.name}
+
+# Remove events saturated in ET.
 event_filters:
   ET: 'Et < 4095'
+
+# Mask objects with energies above certain saturation thresholds.
 object_filters:
   muons: 'Et < 511'
   egammas: 'Et < 511'
@@ -13,4 +17,4 @@ object_filters:
   MET: 'Et < 4095'
 
 cache_root_dir: ${paths.data_dir}
-name: default
+name: e${data_extractor.name}_default

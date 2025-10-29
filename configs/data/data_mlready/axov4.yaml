@@ -20,6 +20,6 @@ split:
 # Split the auxiliary data into 80-20.
 split_aux: 0.8
 
-cache_root_dir: ${paths.data_dir}/
+cache_root_dir: ${paths.data_dir}
 name: default
 seed: 42

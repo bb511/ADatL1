@@ -1,0 +1,15 @@
+_target_: src.models.decoder.Decoder
+nodes: [8, 24, 32, 64, 128, 57] # v4 axol1tl architecture\
+
+init_weight:
+  _target_: src.utils.hydra.get_method
+  path: torch.nn.init.xavier_uniform_
+init_bias:
+  _target_: src.utils.hydra.get_method
+  path: torch.nn.init.zeros_
+init_last_weight:
+  _target_: src.utils.hydra.get_method
+  path: torch.nn.init.uniform_
+  a: -0.05
+  b: 0.05
+init_last_bias: null

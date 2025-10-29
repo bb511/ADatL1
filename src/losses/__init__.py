@@ -55,9 +55,12 @@ class MultiLoss(nn.Module):
     """
     Wrapper to combine multiple loss functions with individual scaling.
     
-    :param reduction: Reduction method to apply to the total loss. Options are 'none', 'mean', 'sum'.
-    :param list_losses: Optional list of loss names to add for backpropagation. If None, all provided losses are used.
-    :param losses: Keyword arguments where keys are loss names and values are loss module instances.
+    :param reduction: Reduction method to apply to the total loss.
+        Options are 'none', 'mean', 'sum'.
+    :param list_losses: Optional list of loss names to add for backpropagation.
+        If None, all provided losses are used.
+    :param losses: Keyword arguments where keys are loss names and values are
+        loss module instances.
     """
     
     def __init__(

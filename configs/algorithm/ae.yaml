@@ -1,0 +1,32 @@
+defaults:
+  - encoder: ${model.encoder}
+  - decoder: ${model.decoder}
+
+_target_: src.algorithms.ae.AE
+
+features: null 
+
+encoder: ${encoder}
+decoder: ${decoder}
+
+loss:
+  _target_: src.losses.ae.ClassicAELoss
+  reduction: none
+
+optimizer:
+  _target_: torch.optim.AdamW
+  lr: 0.001
+  # betas: (0.9, 0.99)
+  weight_decay: 0.01
+
+scheduler:
+  # here other attributes...
+  scheduler:
+    _partial_: true
+    _target_: src.models.optimizers.cdrw.CDRW
+    lr0: ${algorithm.optimizer.lr}
+    s0: 32
+    t_mul: 2.0
+    m_mul: 0.65
+    alpha: 1e-6
+    warmup_epochs: 10

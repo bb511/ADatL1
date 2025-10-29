@@ -4,11 +4,13 @@ _target_: src.data.components.mlready.L1DataMLReady
 
 processed_datapath: ${data_processor.cache_root_dir}/processed/${data_processor.name}
 
-# Select features for
+# Get features to train on.
+# Select the kinematic features of each standard object.
 select_features:
   muons: ['Et', 'eta', 'phi']
   jets: ['Et', 'eta', 'phi']
   egammas: ['Et', 'eta', 'phi']
+  taus: ['Et', 'eta', 'phi']
   MET: ['Et', 'phi']
 
 # Split the zerobias into 80% training, 10% validation, 10% test.

@@ -1,0 +1,33 @@
+# @package paths
+
+defaults:
+  - default.yaml
+
+# Select where to extract, process, normalize etc. all this data.
+data_dir: ${.base_data_dir}/data_2025G
+
+# paths to the different types of data
+zerobias:
+  ZB_run398183: ${paths.raw_data_dir}/EphZB_2025G_run398183
+signal:
+  GluGluHTo2B_Par-MH-125: ${path.raw_data_dir}/L1TNtupleRun3-142XWinter25/GluGluHTo2B_Par-MH-125_TuneCP5_13p6TeV_powhegMINLO-pythia8
+  GluGluHto2G_Par-MH-125: ${path.raw_data_dir}/L1TNtupleRun3-142XWinter25/GluGluHto2G_Par-MH-125_TuneCP5_13p6TeV_powheg-pythia8
+  GluGluHto2G_Par-MH-90: ${path.raw_data_dir}/L1TNtupleRun3-142XWinter25/GluGluHto2G_Par-MH-90_TuneCP5_13p6TeV_powheg-pythia8
+  GluGluHto2Tau_Par-MH-125: ${path.raw_data_dir}/L1TNtupleRun3-142XWinter25/GluGluHto2Tau_Par-MH-125_TuneCP5_13p6TeV_powheg-minlo-pythia8
+  GluGlutoHHto2B2WtoLNu2Q_Par-c2-0-kl-1-kt-1: ${path.raw_data_dir}/L1TNtupleRun3-142XWinter25/GluGlutoHHto2B2WtoLNu2Q_Par-c2-0-kl-1-kt-1_TuneCP5_13p6TeV_powheg-pythia8
+  HHHto4B2Tau_Par-c3-0-d4-0: ${path.raw_data_dir}/L1TNtupleRun3-142XWinter25/HHHto4B2Tau_Par-c3-0-d4-0_TuneCP5_13p6TeV_amcatnlo-pythia8
+  HHHto6B_Par-c3-0-d4-0: ${path.raw_data_dir}/L1TNtupleRun3-142XWinter25/HHHto6B_Par-c3-0-d4-0_TuneCP5_13p6TeV_amcatnlo-pythia8
+  SUSYGluGluToBBHTo2B_Par-M-1200: ${path.raw_data_dir}/L1TNtupleRun3-142XWinter25/SUSYGluGluToBBHTo2B_Par-M-1200_TuneCP5_13p6TeV_pythia8
+  SUSYGluGluToBBHToBB_Par-M-120: ${path.raw_data_dir}/L1TNtupleRun3-142XWinter25/SUSYGluGluToBBHToBB_Par-M-120_TuneCP5_13p6TeV_pythia8
+  SUSYGluGluToBBHToBB_Par-M-350: ${path.raw_data_dir}/L1TNtupleRun3-142XWinter25/SUSYGluGluToBBHToBB_Par-M-350_TuneCP5_13p6TeV_pythia8
+  SUSYGluGluToBBHToBB_Par-M-600: ${path.raw_data_dir}/L1TNtupleRun3-142XWinter25/SUSYGluGluToBBHToBB_Par-M-600_TuneCP5_13p6TeV_pythia8
+  TTHTo2C_Par-MH-125: ${path.raw_data_dir}/L1TNtupleRun3-142XWinter25/TTHTo2C_Par-MH-125_TuneCP5_13p6TeV_powheg-pythia8
+  TTHto2B_Par-MH-125: ${path.raw_data_dir}/L1TNtupleRun3-142XWinter25/TTHto2B_Par-MH-125_TuneCP5_13p6TeV_powheg-pythia8
+  VBFHTo2C_Par-MH-125: ${path.raw_data_dir}/L1TNtupleRun3-142XWinter25/VBFHTo2C_Par-MH-125_TuneCP5_13p6TeV_powheg-pythia8
+  VBFHto2B_Par-MH-125: ${path.raw_data_dir}/L1TNtupleRun3-142XWinter25/VBFHto2B_Par-MH-125_TuneCP5_13p6TeV_powheg-pythia8
+  VBFHto2Tau_Par-MH-125: ${path.raw_data_dir}/L1TNtupleRun3-142XWinter25/VBFHto2Tau_Par-MH-125_TuneCP5_13p6TeV_powheg-pythia8
+  WtoTauto3Mu: ${path.raw_data_dir}/L1TNtupleRun3-142XWinter25/WtoTauto3Mu_TuneCP5_13p6TeV_pythia8
+  ggH-suep-decay: ${path.raw_data_dir}/L1TNtupleRun3-142XWinter25/ggH-suep-decay-POWHEGnoISR
+  haa-4b-ma15: ${path.raw_data_dir}/L1TNtupleRun3-142XWinter25/haa-4b-ma15-POWHEG
+background:
+  SingleNeutrino_E-10-gun: ${path.raw_data_dir}/L1TNtupleRun3-142XWinter25/SingleNeutrino_E-10-gun

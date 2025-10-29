@@ -1,28 +1,9 @@
-defaults:
-  # Inherit from AE model.
-  - /model@_here_: ae
-
-  # Here add the losses:
-  - /loss@loss.reconstruction: reconstruction
-  - /loss@loss.kl: kl
-  - /loss@loss.mi: mi
-  - /loss@loss.mmd: mmd
-  - /loss@loss.alignment: alignment
-  - /loss@loss.dipvae: dipvae
-  - /loss@loss.bvae: bvae
-  - /loss@loss.gradient: gradient
-
-  # Consider masking:
-  - /model/masking@masking: multiplicity # "particle", "multiplicity", null
-
-
 _target_: src.algorithms.vae.VAE
 # masking: null
 features: null
 
 encoder:
   _target_: src.models.encoder.VariationalEncoder
-
 
 loss:
   _target_: src.losses.MultiLoss
@@ -36,15 +17,15 @@ loss:
 
   # The rest of the losses are imported directly from the defaults.
   reconstruction:
-    scale: '${substract: 1.0, ${scan.alpha}}'
+    scale: 0.5
   kl:
-    scale: ${scan.alpha}
+    scale: 0.5
 
 
 optimizer:
   _partial_: true
   _target_: src.optimizers.lion.Lion
-  lr: ${scan.lr}
+  lr: 0.5
   weight_decay: 0.0
 
 

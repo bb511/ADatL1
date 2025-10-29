@@ -1,7 +1,7 @@
 _target_: src.models.components.masking.ParticleMasking
 
-constituents: ${data.data_extractor.constituents}
-objects_features: ${data.data_extractor.objects_features}
+constituents: ${data.data_awkward2torch.nconst}
+objects_features: ${data.data_mlready.select_features}
 
 # Masking probabilities per object type
 mask_probs:

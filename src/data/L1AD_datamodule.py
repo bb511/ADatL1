@@ -113,7 +113,6 @@ class L1ADDataModule(LightningDataModule):
                 label +=1
 
         self._data_summary()
-        exit(1)
 
     def _data_summary(self):
         """Make a neat little summary of what data is being used."""
@@ -216,7 +215,6 @@ class L1ADDataModule(LightningDataModule):
 
         return int(len(data) / self.hparams.val_batches)
 
-<<<<<<< HEAD
     def train_dataloader(self) -> Dataset[Any]:
         """Creates an optimized dataloader for numpy arrays already in memory."""
         return L1ADDataset(
@@ -272,30 +270,6 @@ class L1ADDataModule(LightningDataModule):
 
         return data_test
 
-
-class L1ADDataModuleDebug(L1ADDataModule):
-    """Debug version of L1ADDataModule that generates random data instead of loading real data."""
-
-    def prepare_data(self) -> None:
-        """Skip data extraction and processing for debugging."""
-        log.info(Back.GREEN + "Debug mode: Skipping data preparation...")
-        pass
-
-    def setup(self, stage: str = None) -> None:
-        """Generate random data instead of loading real data."""
-        self._set_batch_size()
-
-        if self.data_train is None and self.data_val is None and self.data_test is None:
-            log.info("Debug mode: Generating 1000 random samples with 57 features...")
-
-            main_data = np.random.randn(1000, 57).astype(np.float32)
-            main_labels = np.concatenate(
-                [
-                    np.full(400, "zerobias", dtype=object),
-                    np.full(300, "simulation_1", dtype=object),
-                    np.full(300, "simulation_2", dtype=object),
-                ]
-=======
     def _set_batch_size(self):
         """Set the batch size per device if multiple devices are available."""
         if self.trainer is not None:
@@ -306,5 +280,4 @@ class L1ADDataModuleDebug(L1ADDataModule):
                 )
             self.batch_size_per_device = (
                 self.hparams.batch_size // self.trainer.world_size
->>>>>>> dev/patrick
             )

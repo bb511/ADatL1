@@ -5,7 +5,7 @@
 
 defaults:
   - override /data: L1AD
-  - override /model: vae
+  - override /algorithm: vae
   - override /callbacks: none
   - override /trainer: gpu
   - override /logger: none

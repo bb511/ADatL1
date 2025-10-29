@@ -1,4 +1,5 @@
 defaults:
+  # Inherit from AE model.
   - /model@_here_: ae
 
   # Here add the losses:
@@ -16,13 +17,8 @@ defaults:
 
 
 _target_: src.algorithms.vae.VAE
-
-
 # masking: null
-
-
-features: null 
-
+features: null
 
 encoder:
   _target_: src.models.encoder.VariationalEncoder

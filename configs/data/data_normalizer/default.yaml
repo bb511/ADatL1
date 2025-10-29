@@ -6,9 +6,12 @@
 # For the different available options, look through ~/src/data/components/normalization.py
 
 _target_: src.data.components.normalization.L1DataNormalizer
+<<<<<<< HEAD
+=======
 # Use robust normalization between the 95, 5 quantiles.
 # name: unnormalized
 # hyperparams: null
+>>>>>>> main
 name: robust
 hyperparams:
   percentiles: [0.05, 0.95]

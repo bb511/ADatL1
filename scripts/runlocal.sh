@@ -17,5 +17,4 @@ python3 src/train.py \
     experiment=debug \
     paths.raw_data_dir=/data/deodagiu/adl1t_data/parquet_files \
     trainer.max_epochs=1 \
-    model.optimizer.lr=0.001 \
     trainer=gpu0 \

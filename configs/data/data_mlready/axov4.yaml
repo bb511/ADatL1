@@ -1,0 +1,25 @@
+# @package data_mlready
+
+_target_: src.data.components.mlready.L1DataMLReady
+
+processed_datapath: ${data_processor.cache_root_dir}/processed/${data_processor.name}
+
+# Select features for
+select_features:
+  muons: ['Et', 'eta', 'phi']
+  jets: ['Et', 'eta', 'phi']
+  egammas: ['Et', 'eta', 'phi']
+  MET: ['Et', 'phi']
+
+# Split the zerobias into 80% training, 10% validation, 10% test.
+split:
+  train: 0.8
+  valid: 0.1
+  test: 0.1
+
+# Split the auxiliary data into 80-20.
+split_aux: 0.8
+
+cache_root_dir: ${paths.data_dir}/
+name: default
+seed: 42

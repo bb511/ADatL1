@@ -113,6 +113,7 @@ class L1ADDataModule(LightningDataModule):
                 label +=1
 
         self._data_summary()
+        exit(1)
 
     def _data_summary(self):
         """Make a neat little summary of what data is being used."""

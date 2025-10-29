@@ -83,7 +83,6 @@ class L1DataExtractor(object):
         """Stream batches of given obj in data to a single parquet file."""
         for batch in data(obj_name):
             batch = self._rename_features(batch, obj_name)
-            batch = self._flatten_features()
             batch = ak.to_arrow_table(batch)
             if writer is None:
                 writer = parquet.ParquetWriter(

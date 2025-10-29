@@ -74,55 +74,39 @@ class L1DataNormalizer:
                 "scale": scale
             }
 
-    # def changrobust_fit(self, data: np.ndarray, percentiles: list, scale: list) -> dict:
-    #     """Determines the parameters for changrobust normalization.
+    def _robust_axov4_fit(self, data: ak.Array, percentiles: list, scale: list):
+        """Determines the parameters for the special kind of robust norm in axov4.
 
-    #     This is Chang's (previous student) version of robust normalization and used
-    #     in the v5 version of the level 1 trigger anomaly detector to process the data.
+        This is similar to robust normalization, except that the interquantile range is
+        rescaled by scale_width = scale[0] - scale[1]. Additionally, a shift is applied
+        to each distribution, as defined below. This is to make the interquantile range
+        given by the user fit within the domain provided in the scale list, e.g.,
+        scale = [2, -2] means that the interquantile range would fit within -2 and 2.
+        """
+        self.norm_params[self.obj_name] = {}
 
-    #     :data: 3D numpy array of the data to be normalised.
-    #     :percentiles: List of the two percentiles between which the interquantile range
-    #         should be determined. The larger percentile should come first, followed
-    #         by the smaller percentile.
-    #     :scale: List of two floats which are used to determine the distribution shift
-    #         and also used to scale the interquantile range. The larger float should
-    #         come first, followed by the smaller float.
-    #     """
-    #     bias = []
-    #     interquantile_range = []
+        scale_width = scale[0] - scale[1]
+        for feat in ak.fields(data):
+            feature_data = ak.to_numpy(ak.flatten(data[feat]))
+            qlow, qhigh = np.quantile(feature_data, percentiles)
+            scaled_iqrange = (qhigh - qlow) / scale_width
+            shift = (qlow*scale[0] - qhigh*scale[1]) / scale_width
+            self.norm_params[self.obj_name][feat] = {
+                "shift": shift,
+                "scale": scaled_iqrange
+            }
 
-    #     scale_larger = scale[0]
-    #     scale_smaller = scale[1]
-    #     scale_width = scale_larger - scale_smaller
 
-    #     if self.ignore_zeros:
-    #         # Ignore constituents with extremely small pT (basically 0).
-    #         mask = data[:, :, 0] > 0.000001
-    #         data = data[mask]
+    def _robust_axov4(self, data: ak.Array, obj_name: str):
+        """Similar to robust normaliztion, applied to the training of axov4."""
+        result = data
+        params = self.norm_params[obj_name]
+        for feature in ak.fields(data):
+            normed_feature = data[feature] - params[feature]['shift']
+            normed_feature = normed_feature/params[feature]['scale']
+            result = ak.with_field(result, normed_feature, where=feature)
 
-    #     for feature_idx in range(data.shape[-1]):
-    #         data_feature = data[..., feature_idx].flatten()
-    #         quant_high, quant_low = np.nanpercentile(data_feature, percentiles)
-    #         scaled_iq = (quant_high - quant_low) / scale_width
-    #         interquantile_range.append(scaled_iq)
-    #         chang_shift = (
-    #             quant_low * scale_larger - quant_high * scale_smaller
-    #         ) / scale_width
-    #         bias.append(chang_shift)
-
-    #     bias = np.array(bias, dtype=np.float32)
-    #     interquantile_range = np.array(interquantile_range, dtype=np.float32)
-
-    #     return {"bias": bias, "scaled_iq_range": interquantile_range}
-
-    # def changrobust(self, data: np.ndarray):
-    #     """Changrobust normalization.
-
-    #     Shift by nubmer based on interquantile range and some given user range.
-    #     Scale by interquantile range divided by same given user range as above.
-    #     """
-    #     data = (data - self.norm_params["bias"]) / self.norm_params["scaled_iq_range"]
-        # return data.astype(self.output_dtype)
+        return result
 
     # def _add_plots_to_mlflow(self, logs: loggers, plots_path: Path):
     #     """Adds the plots of the normalized data to the mlflow experiment."""

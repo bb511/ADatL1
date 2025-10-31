@@ -1,13 +1,9 @@
 # @package _global_
 
 defaults:
-  # - /model/masking: multiplicity
-  - override /paths: axov4
   - override /data: axov4
-  - override /algorithm: vae
-  # - override /algorithm: svdd
-  # - override /algorithm: realnvp
-  - override /callbacks: axov4
+  - override /algorithm: axov4
+  - override /callbacks: basic
   - override /trainer: gpu0
   - override /logger: mlflow
 
@@ -18,29 +14,11 @@ seed: 123
 train: true
 test: false
 
-# For debugging purposes:
-data:
-  _target_: src.data.L1AD_datamodule.L1ADDataModuleDebug
-
 trainer:
   min_epochs: 1
   max_epochs: 480
 
 logger:
   mlflow:
-    # experiment_name: axov4_rates_kl_checkpoint
-    # experiment_name: axov4_cap_dpg_approval
+    experiment_name: axov4_reproduction
     run_name: test
-    # run_name: scan_lr${model.optimizer.lr}_alpha${model.loss.alpha}
-
-  # wandb:
-  #   entity: viictorjimenezzz-personal
-  #   project: adatl1
-
-  #   group: debug
-  #   name: coderuns
-
-
-scan:
-  lr: ???
-  alpha: ???

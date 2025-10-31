@@ -3,7 +3,7 @@
 # How to process the extracted data specified in ~/configs/data/data_extractor.
 
 _target_: src.data.components.processing.L1DataProcessor
-extracted_folder: ${data_extractor.cache_root_dir}/extracted/${data_extractor.name}
+extracted_folder: ${data.data_extractor.cache_root_dir}/extracted/${data.data_extractor.name}
 
 # Remove events saturated in ET.
 event_filters:
@@ -17,4 +17,4 @@ object_filters:
   MET: 'Et < 4095'
 
 cache_root_dir: ${paths.data_dir}
-name: e${data_extractor.name}_pdefault
+name: e${data.data_extractor.name}_pdefault

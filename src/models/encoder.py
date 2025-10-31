@@ -37,9 +37,11 @@ class VariationalEncoder(nn.Module):
 
         # Mean and log variance layers
         self.z_mean = nn.Linear(nodes[-2], nodes[-1])
-        init_weight(self.z_mean.weight)
         self.z_log_var = nn.Linear(nodes[-2], nodes[-1])
-        init_weight(self.z_log_var.weight)
+
+        if init_weight:
+            init_weight(self.z_mean.weight)
+            init_weight(self.z_log_var.weight)
 
     def forward(self, x: torch.Tensor) -> tuple[torch.Tensor]:
         x = self.net(x)

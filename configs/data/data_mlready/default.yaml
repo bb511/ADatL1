@@ -2,7 +2,7 @@
 
 _target_: src.data.components.mlready.L1DataMLReady
 
-processed_datapath: ${data_processor.cache_root_dir}/processed/${data_processor.name}
+processed_datapath: ${data.data_processor.cache_root_dir}/processed/${data.data_processor.name}
 
 # Get features to train on.
 # Select the kinematic features of each standard object.
@@ -23,5 +23,5 @@ split:
 split_aux: 0.8
 
 cache_root_dir: ${paths.data_dir}/
-name: ${data_processor.name}_default
+name: ${data.data_processor.name}_default
 seed: 42

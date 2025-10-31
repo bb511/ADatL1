@@ -82,7 +82,6 @@ class L1ADLightningModule(LightningModule):
             add_dataloader_idx=False,
             batch_size=len(batch)
         )
-
         return outdict
 
     def test_step(

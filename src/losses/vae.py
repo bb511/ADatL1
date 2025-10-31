@@ -19,7 +19,7 @@ class ClassicVAELoss(nn.Module):
         separate loss functions return loss values per event. This is then aggregated
         by computing the mean over the batch, or the sum.
     """
-    def __init__(self, scale: float, reduct: Literal["none", "mean", "sum"] = "mean"):
+    def __init__(self, scale: float, reduct: Literal["none", "mean", "sum"] = "none"):
         super().__init__()
         self.reduction = reduct
         self.reco_scale = 1 - scale

@@ -22,9 +22,9 @@ class Decoder(MLP):
         nodes: List[int],
         init_weight: Optional[Callable] = None,
         init_bias: Optional[Callable] = None,
+        batchnorm: bool = False,
         init_last_weight: Optional[Callable] = None,
         init_last_bias: Optional[Callable] = None,
-        batchnorm: bool = False,
     ) -> None:
         super().__init__(
             nodes,

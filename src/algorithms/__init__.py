@@ -64,6 +64,7 @@ class L1ADLightningModule(LightningModule):
             logger=True,
             sync_dist=True,
             add_dataloader_idx=False,
+            batch_size=len(batch)
         )
         return outdict
 
@@ -79,6 +80,7 @@ class L1ADLightningModule(LightningModule):
             logger=True,
             sync_dist=True,
             add_dataloader_idx=False,
+            batch_size=len(batch)
         )
 
         return outdict
@@ -97,6 +99,7 @@ class L1ADLightningModule(LightningModule):
             logger=True,
             sync_dist=False,  # !!
             add_dataloader_idx=False,
+            batch_size=len(batch)
         )
         return outdict
 

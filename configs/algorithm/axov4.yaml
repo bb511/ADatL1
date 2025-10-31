@@ -1,8 +1,6 @@
-# @package algorithm
+# AXO v4 configuration.
 
 defaults:
-  - /model/encoder@encoder
-  - /model/decoder@decoder
   - _self_
 
 _target_: src.algorithms.vae.VAE
@@ -11,6 +9,7 @@ features: null
 encoder:
   _target_: src.models.encoder.VariationalEncoder
   nodes: [57, 28, 16, 8] # 57 input features, 8 latent features
+
   init_weight:
     _target_: src.utils.hydra.get_method
     path: torch.nn.init.xavier_uniform_
@@ -18,8 +17,25 @@ encoder:
     _target_: src.utils.hydra.get_method
     path: torch.nn.init.zeros_
 
+decoder:
+  _target_: src.models.decoder.Decoder
+  nodes: [8, 24, 32, 64, 128, 57]
+
+  init_weight:
+    _target_: src.utils.hydra.get_method
+    path: torch.nn.init.xavier_uniform_
+  init_bias:
+    _target_: src.utils.hydra.get_method
+    path: torch.nn.init.zeros_
+  init_last_weight:
+    _target_: src.utils.hydra.get_method
+    path: torch.nn.init.uniform_
+    a: -0.05
+    b: 0.05
+  init_last_bias: null
+
 loss:
-  _target_: src.losses.vae.ClasscVAELoss
+  _target_: src.losses.vae.ClassicVAELoss
   scale: 0.5736625791372814
 
 optimizer:
@@ -29,7 +45,6 @@ optimizer:
   weight_decay: 0.0
 
 scheduler:
-  # here other attributes...
   scheduler:
     _partial_: true
     _target_: src.optimizers.cdrw.CDRW

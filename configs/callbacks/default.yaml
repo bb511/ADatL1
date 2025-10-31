@@ -1,6 +1,6 @@
 defaults:
-  - model_summary
-  - rich_progress_bar
+  - components/model_summary@model_summary
+  - components/rich_progress_bar@rich_progress_bar
   - _self_
 
 model_summary:

@@ -21,6 +21,10 @@ class L1DataAwkward2Torch:
 
     def load_folder(self, folder_path: Path) -> torch.Tensor:
         """Loads folder of parquet files containing awkward arrays to a numpy array."""
+        self.cache_filepath = folder_path / 'torch_cache.pt'
+        if self.cache_filepath.is_file():
+            return torch.load(self.cache_filepath)
+
         workers = min(self.workers, (os.cpu_count() or 4))
 
         files = sorted(folder_path.glob('*.parquet'))
@@ -28,7 +32,10 @@ class L1DataAwkward2Torch:
             data = list(ex.map(self._process_object, files))
 
         data = np.concatenate(data, axis=1)
-        return torch.from_numpy(data)
+        data = torch.from_numpy(data)
+        self._cache(data)
+
+        return data
 
     def _process_object(self, data_path: Path) -> np.ndarray:
         """Process one parquet file corresponding to an object from the data set."""
@@ -86,3 +93,12 @@ class L1DataAwkward2Torch:
 
         padder = {feat: 0 for feat in data.fields}
         return data, padder
+
+    def _cache(self, data: torch.Tensor):
+        """Cache the converted data to disk."""
+        log.info(f"Caching data at {self.cache_filepath}...")
+        parent_folder = self.cache_filepath.parents[0]
+        if not parent_folder.exists():
+            raise FileNotFoundError(Fore.RED + f"Cache folder {parent_folder} missing!")
+
+        torch.save(data, self.cache_filepath)

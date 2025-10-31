@@ -1,8 +1,2 @@
 _target_: src.models.encoder.Encoder
 nodes: [57, 28, 16, 8] # 57 input features, 8 latent features
-init_weight:
-  _target_: src.utils.hydra.get_method
-  path: torch.nn.init.xavier_uniform_
-init_bias:
-  _target_: src.utils.hydra.get_method
-  path: torch.nn.init.zeros_

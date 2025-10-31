@@ -1,5 +1,4 @@
-# @package algorithm
-
+# Template VAE configuration.
 defaults:
   - /model/encoder@encoder
   - /model/decoder@decoder
@@ -14,7 +13,7 @@ encoder:
 
 loss:
   _target_: src.losses.vae.ClassicVAELoss
-  scale: 0.5736625791372814
+  scale: 0.5
 
 optimizer:
   _partial_: true

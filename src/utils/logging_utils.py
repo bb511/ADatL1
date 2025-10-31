@@ -17,28 +17,28 @@ def log_hyperparameters(object_dict: Dict[str, Any]) -> None:
 
     :param object_dict: A dictionary containing the following objects:
         - `"cfg"`: A DictConfig object containing the main config.
-        - `"model"`: The Lightning model.
+        - `"algorithm"`: The Lightning algorithm.
         - `"trainer"`: The Lightning trainer.
     """
     hparams = {}
 
     cfg = OmegaConf.to_container(object_dict["cfg"])
-    model = object_dict["model"]
+    algorithm = object_dict["algorithm"]
     trainer = object_dict["trainer"]
 
     if not trainer.logger:
         log.warning("Logger not found! Skipping hyperparameter logging...")
         return
 
-    hparams["model"] = cfg["model"]
+    hparams["algorithm"] = cfg["algorithm"]
 
-    # save number of model parameters
-    hparams["model/params/total"] = sum(p.numel() for p in model.parameters())
-    hparams["model/params/trainable"] = sum(
-        p.numel() for p in model.parameters() if p.requires_grad
+    # save number of algorithm parameters
+    hparams["algorithm/params/total"] = sum(p.numel() for p in algorithm.parameters())
+    hparams["algorithm/params/trainable"] = sum(
+        p.numel() for p in algorithm.parameters() if p.requires_grad
     )
-    hparams["model/params/non_trainable"] = sum(
-        p.numel() for p in model.parameters() if not p.requires_grad
+    hparams["algorithm/params/non_trainable"] = sum(
+        p.numel() for p in algorithm.parameters() if not p.requires_grad
     )
 
     hparams["data"] = cfg["data"]

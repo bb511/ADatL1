@@ -31,24 +31,24 @@ class AE(L1ADLightningModule):
         reconstruction = self.decoder(z)
         return z, reconstruction
 
-    def model_step(self, x: torch.Tensor) -> torch.Tensor:
+    def model_step(self, batch: torch.Tensor) -> torch.Tensor:
+        x, y = batch
+        x = torch.flatten(x, start_dim=1)
         z, reconstruction = self.forward(x)
-        total_loss, reco_loss, nad_loss = self.loss(
-            reconstruction=reconstruction, latent=z, target=x
-        )
+        reco_loss = self.loss(reco=reconstruction, target=x)
+
+        del x, y, z
 
         return {
             # Used for backpropagation:
-            "loss": total_loss.mean(),
+            "loss": reco_loss.mean(),
             # Used for logging:
             "loss/reco/mean": reco_loss.mean(),
-            "loss/kl/mean": kl_loss.mean(),
         }
 
-    def _filter_log_dict(self, outdict: dict) -> dict:
-        """Override with the values you want to log."""
+    def outlog(self, outdict: dict) -> dict:
+        """The values of the loss that are logged."""
         return {
             "loss": outdict.get("loss"),
             "loss_reco": outdict.get("loss/reco/mean"),
-            "loss_kl": outdict.get("loss/kl/mean"),
         }

@@ -64,7 +64,7 @@ class L1DataAwkward2Torch:
 
     def _funnel_to_nparray(self, data: ak.Array, numpy_array: np.ndarray) -> np.ndarray:
         """Funnel the data from the awkward array into a numpy array of right dims."""
-        for feat_idx, feature in enumerate(data.fields):
+        for feat_idx, feature in enumerate(sorted(data.fields)):
             feature_data = ak.to_numpy(data[feature], allow_missing=False)
             if feature_data.ndim == 3 and feature_data.shape[-2] == 1:
                 feature_data = np.squeeze(feature_data, axis=(2,))

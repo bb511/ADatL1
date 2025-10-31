@@ -1,4 +1,5 @@
-# Get the encoder and decoder configuration from model/ config directory.
+# Get the encoder and decoder configuration from model/ config directory to assemble
+# the auto encoder model.
 defaults:
   - /model/encoder@encoder
   - /model/decoder@decoder
@@ -15,11 +16,9 @@ optimizer:
   _partial_: true
   _target_: torch.optim.AdamW
   lr: 0.001
-  betas: (0.9, 0.999)
   weight_decay: 0.01
 
 scheduler:
-  # here other attributes...
   scheduler:
     _partial_: true
     _target_: torch.optim.lr_scheduler.ExponentialLR

@@ -43,7 +43,7 @@ class L1DataMLReady:
 
         self.processed_datapath = Path(self.processed_datapath)
         self.mlready_dir = Path(self.cache_root_dir) / 'mlready'
-        self.cache_folder = self.mlready_dir / self.processed_datapath.stem
+        self.cache_folder = self.mlready_dir / self.name
         self.cache_folder /= normalizer.name
 
         self.select_feats = OmegaConf.to_container(self.select_features, resolve=True)

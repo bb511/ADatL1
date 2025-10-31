@@ -1,44 +1,29 @@
 # @package algorithm
 
+defaults:
+  - /model/encoder@encoder
+  - /model/decoder@decoder
+  - _self_
+
 _target_: src.algorithms.vae.VAE
-# masking: null
 features: null
 
 encoder:
   _target_: src.models.encoder.VariationalEncoder
+  nodes: [57, 28, 16, 8] # 57 input features, 8 latent features
 
 loss:
-  _target_: src.losses.MultiLoss
-
-  reduction: none # !! IMPORTANT !!
-
-  # Here the losses to use for backpropagation:
-  list_losses:
-    - reconstruction
-    - kl
-
-  # The rest of the losses are imported directly from the defaults.
-  reconstruction:
-    scale: 0.5
-  kl:
-    scale: 0.5
-
+  _target_: src.losses.vae.ClassicVAELoss
+  scale: 0.5736625791372814
 
 optimizer:
   _partial_: true
-  _target_: src.optimizers.lion.Lion
-  lr: 0.5
-  weight_decay: 0.0
-
+  _target_: torch.optim.AdamW
+  lr: 0.001
+  weight_decay: 0.01
 
 scheduler:
-  # here other attributes...
   scheduler:
     _partial_: true
-    _target_: src.optimizers.cdrw.CDRW
-    lr0: ${algorithm.optimizer.lr} 
-    s0: 32
-    t_mul: 2.0
-    m_mul: 0.65
-    alpha: 1e-6
-    warmup_epochs: 10
+    _target_: torch.optim.lr_scheduler.ExponentialLR
+    gamma: 0.95

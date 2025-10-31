@@ -21,5 +21,5 @@ split:
 split_aux: 0.8
 
 cache_root_dir: ${paths.data_dir}
-name: default
+name: ${data_processor.name}_axov4
 seed: 42

@@ -17,4 +17,4 @@ object_filters:
   MET: 'Et < 4095'
 
 cache_root_dir: ${paths.data_dir}
-name: e${data_extractor.name}_default
+name: e${data_extractor.name}_pdefault

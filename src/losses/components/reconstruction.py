@@ -53,14 +53,18 @@ class CylPtPzReconstructionLoss(ReconstructionLoss):
         # Compute the projection from pT to pz. Use real eta for the reco.
         pT, eta = target[:, pT_idxs], target[:, eta_idxs]
         pz = pT * torch.sinh(eta)
-        MET_phi = target[:, -1]
+        # The phi value of the MET object is in the 2nd position of the torch tensor
+        # for any given sample.
+        MET_phi = target[:, 2]
+        MET_phi_pred = reconstruction[:, 2]
+
         pT_pred = reconstruction[:, pT_idxs]
         pz_pred = pT_pred * torch.sinh(eta)
-        MET_phi_pred = reconstruction[:, -1]
 
         loss_per_observation = torch.mean(
             torch.abs(pT - pT_pred) + torch.abs(pz - pz_pred),
             dim=1
         )
         loss_per_observation += torch.abs(MET_phi - MET_phi_pred)
+
         return self.scale * self.reduce(loss_per_observation)

@@ -1,23 +1,31 @@
 # Variational AE loss function.
 
-from src.losses import L1ADLoss
+from typing import Literal
+
+import torch
+import torch.nn as nn
+
 from src.losses.components.reconstruction import ReconstructionLoss
 from src.losses.components.reconstruction import CylPtPzReconstructionLoss
 from src.losses.components.kl import KLDivergenceLoss
 
 
-class ClassicVAELoss(L1ADLoss):
-    def __init__(
-        self,
-        scale: float = 1.0,
-        reduction: Literal["none", "mean", "sum"] = "mean",
-    ):
-        super().__init__(reduction=reduction, scale=scale)
+class ClassicVAELoss(nn.Module):
+    """The conventional variational AE loss.
 
-        self.reco_scale = 1 - self.scale
-        self.kl_scale = self.scale
+    :param scale: Float between 0 and 1 that establishes the scale between the KL div
+        loss and the reconstruction loss.
+    :param reduct: String denoting the type of reduction used on the loss function. The
+        separate loss functions return loss values per event. This is then aggregated
+        by computing the mean over the batch, or the sum.
+    """
+    def __init__(self, scale: float, reduct: Literal["none", "mean", "sum"] = "mean"):
+        super().__init__()
+        self.reduction = reduct
+        self.reco_scale = 1 - scale
+        self.kl_scale = scale
 
-        self.reconstruction_loss = ReconstructionLoss(scale=self.reco_scale)
+        self.reco_loss = ReconstructionLoss(scale=self.reco_scale)
         self.kl_loss = KLDivergenceLoss(scale=self.kl_scale)
 
     def forward(
@@ -26,36 +34,32 @@ class ClassicVAELoss(L1ADLoss):
         reconstruction: torch.Tensor,
         z_mean: torch.Tensor,
         z_log_var: torch.Tensor,
-        reduction: Literal["none", "mean", "sum"] = None,
-    ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+    ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
 
-        reduction = reduction if reduction is not None else self.reduction
+        reco_loss = self.reco_loss(target, reconstruction)
+        kl_loss = self.kl_loss(z_mean, z_log_var)
+        total_loss = reco_loss + kl_loss
 
-        # Get per-observation losses
-        reco_loss_per_obs = self.reconstruction_loss(target, reconstruction)
-        kl_loss_per_obs = self.kl_loss(z_mean, z_log_var)
-        total_loss_per_obs = reco_loss_per_obs + kl_loss_per_obs
+        return self.reduce(reco_loss), self.reduce(kl_loss), self.reduce(total_loss)
 
-        # Apply reduction
-        if reduction == "none":
-            return total_loss_per_obs, reco_loss_per_obs, kl_loss_per_obs
-        elif reduction == "mean":
-            return (
-                torch.mean(total_loss_per_obs),
-                torch.mean(reco_loss_per_obs),
-                torch.mean(kl_loss_per_obs),
-            )
-        elif reduction == "sum":
-            return (
-                torch.sum(total_loss_per_obs),
-                torch.sum(reco_loss_per_obs),
-                torch.sum(kl_loss_per_obs),
-            )
-        else:
-            raise ValueError(f"Invalid reduction type: {reduction}")
+    def reduce(self, loss: torch.Tensor) -> torch.Tensor:
+        """Applies a reduction operation to a loss."""
+        if self.reduction == 'mean':
+            return loss.mean()
+        elif self.reduction == 'sum':
+            return loss.sum()
+
+        return loss
 
 
 class AxoV4Loss(ClassicVAELoss):
+    """The conventional VAE loss, but the reconstruction is done in a special way.
+
+    This assumes that the input is composed only of pT, eta, and phi features.
+    Moreover, it assumes that the phi feature of each object is every third element
+    in the torch Tensor that the loss function receives. Hence, THIS IS ONLY USABLE
+    WITH A VERY PARTICULAR TYPE OF DATA PROCESSING.
+    """
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
-        self.reconstruction_loss = CylPtPzReconstructionLoss(scale=self.reco_scale)
+        self.reco_loss = CylPtPzReconstructionLoss(scale=self.reco_scale)

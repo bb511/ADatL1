@@ -4,11 +4,11 @@
 # python train.py experiment=example
 
 defaults:
-  - override /data: L1AD
-  - override /algorithm: ae
-  - override /callbacks: none
+  - override /data: axov4
+  - override /algorithm: vae
+  - override /callbacks: default
   - override /trainer: gpu
-  - override /logger: none
+  - override /logger: mlflow
 
 tags: ["debug"]
 
@@ -16,4 +16,11 @@ seed: 12345
 
 trainer:
   min_epochs: 1
-  max_epochs: 1
+  max_epochs: 3
+
+test: False
+
+logger:
+  mlflow:
+    experiment_name: debug
+    run_name: test

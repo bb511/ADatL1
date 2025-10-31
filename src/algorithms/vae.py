@@ -24,20 +24,21 @@ class VAE(L1ADLightningModule):
         self.features = features if features is not None else nn.Identity()
         self.features.eval()
 
-    def forward(
-        self, x: torch.Tensor
-    ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
+    def forward(self, x: torch.Tensor) -> tuple[torch.Tensor, ...]:
         z_mean, z_log_var, z = self.encoder(x)
         reconstruction = self.decoder(z)
         return z_mean, z_log_var, z, reconstruction
 
     def model_step(self, batch: Tuple[torch.Tensor]) -> Dict[str, torch.Tensor]:
-        x, s = batch
+        x, y = batch
+        x = torch.flatten(x, start_dim=1)
         z_mean, z_log_var, z, reconstruction = self.forward(x)
-        total_loss, reco_loss, kl_loss = self.loss(
+
+        reco_loss, kl_loss, total_loss = self.loss(
             reconstruction=reconstruction, z_mean=z_mean, z_log_var=z_log_var, target=x
         )
-        del reconstruction, x, z, s
+
+        del reconstruction, x, z, y
 
         return {
             # Used for backpropagation:
@@ -52,7 +53,7 @@ class VAE(L1ADLightningModule):
             "z_mean_squared": z_mean.pow(2)
         }
 
-    def _filter_log_dict(self, outdict: dict) -> dict:
+    def outlog(self, outdict: dict) -> dict:
         """Override with the values you want to log."""
         return {
             "loss": outdict.get("loss"),

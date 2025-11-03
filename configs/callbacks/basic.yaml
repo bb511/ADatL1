@@ -1,8 +1,4 @@
 defaults:
-  - components/model_summary@model_summary
-  - components/rich_progress_bar@rich_progress_bar
+  - default
   - metrics/anomaly_rate@anomaly_rate
   - _self_
-
-model_summary:
-  max_depth: -1

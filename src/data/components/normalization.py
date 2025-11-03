@@ -98,7 +98,7 @@ class L1DataNormalizer:
 
 
     def _robust_axov4(self, data: ak.Array, obj_name: str):
-        """Similar to robust normaliztion, applied to the training of axov4."""
+        """Similar to robust normaliztion, applied to the training of axov4 and v5."""
         result = data
         params = self.norm_params[obj_name]
         for feature in ak.fields(data):
@@ -107,9 +107,3 @@ class L1DataNormalizer:
             result = ak.with_field(result, normed_feature, where=feature)
 
         return result
-
-    # def _add_plots_to_mlflow(self, logs: loggers, plots_path: Path):
-    #     """Adds the plots of the normalized data to the mlflow experiment."""
-    #     for logger in logs:
-    #         if isinstance(logger, loggers.mlflow.MLFlowLogger):
-    #             logger.experiment.log_artifact(logger.run_id, plots_path)

@@ -1,11 +1,11 @@
 # This serves as a template for a data configuration card.
 defaults:
   - /paths: data_2024E
-  - data_extractor: default
-  - data_processor: default
-  - data_normalizer: default
-  - data_mlready: default
-  - data_awkward2torch: default
+  - data_extractor/default@data_extractor
+  - data_processor/default@data_processor
+  - data_normalizer/default@data_normalizer
+  - data_mlready/default@data_mlready
+  - data_awkward2torch/default@data_awkward2torch
   - _self_
 
 _target_: src.data.L1AD_datamodule.L1ADDataModule
@@ -14,13 +14,6 @@ _target_: src.data.L1AD_datamodule.L1ADDataModule
 zerobias: ${paths.zerobias}
 signal: ${paths.signal}
 background: ${paths.background}
-
-# Configure objects to be passed to target.
-data_extractor: ${data_extractor}
-data_processor: ${data_processor}
-data_normalizer: ${data_normalizer}
-data_mlready: ${data_mlready}
-data_awkward2torch: ${data_awkward2torch}
 
 # The batch size of the data.
 batch_size: 16384

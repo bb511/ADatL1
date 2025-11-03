@@ -226,3 +226,9 @@ class L1ADDataModule(LightningDataModule):
             self.batch_size_per_device = (
                 self.hparams.batch_size // self.trainer.world_size
             )
+
+    # def _add_plots_to_mlflow(self, logs: loggers, plots_path: Path):
+    #     """Adds the plots of the normalized data to the mlflow experiment."""
+    #     for logger in logs:
+    #         if isinstance(logger, loggers.mlflow.MLFlowLogger):
+    #             logger.experiment.log_artifact(logger.run_id, plots_path)

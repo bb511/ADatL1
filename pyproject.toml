@@ -26,6 +26,7 @@ dependencies = [
     "capmetric @ git+ssh://git@github.com/viictorjimenezzz/cap-metric.git@main",
     "adl1t-datamaker @ git+https://github.com/bb511/l1trigger_datamaker.git@new_h5generation",
     "numexpr (>=2.14.1,<3.0.0)",
+    "pathvalidate (>=3.3.1,<4.0.0)",
 ]
 
 

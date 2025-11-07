@@ -1,4 +1,4 @@
-# @package data_extractor
+# @package data.data_extractor
 
 # Configuration of what features and objects to extract from the L1T data h5 files.
 

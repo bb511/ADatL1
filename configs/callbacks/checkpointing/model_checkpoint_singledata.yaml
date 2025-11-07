@@ -1,0 +1,8 @@
+# @package callbacks.checkpointing
+
+_target_: src.callbacks.model_checkpoint.SingleDatasetModelCheckpoint
+
+dirpath: '${paths.root_dir}/checkpoints/${experiment_name}/${run_name}'
+monitor: ???
+criterion: ???
+skip_ds: null

@@ -5,12 +5,15 @@
 
 defaults:
   - override /data: axov4
-  - override /algorithm: vae
+  - override /algorithm: axov4
   - override /callbacks: basic
   - override /trainer: gpu
   - override /logger: mlflow
 
 tags: ["debug"]
+
+experiment_name: debug
+run_name: test
 
 seed: 12345
 
@@ -18,9 +21,4 @@ trainer:
   min_epochs: 1
   max_epochs: 3
 
-test: False
-
-logger:
-  mlflow:
-    experiment_name: debug
-    run_name: test
+test: false

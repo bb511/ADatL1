@@ -1,3 +1,5 @@
+# package callbacks.components
+
 _target_: pytorch_lightning.callbacks.BatchSizeFinder
 mode: binsearch
 steps_per_trial: 5

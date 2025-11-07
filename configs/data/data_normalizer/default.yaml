@@ -1,4 +1,4 @@
-# @package data_normalizer
+# @package data.data_normalizer
 
 # Configuration for normalizing the processed data.
 # Choose which type of normalization to use and give hyperparameters of that

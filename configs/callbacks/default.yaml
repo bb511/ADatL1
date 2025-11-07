@@ -1,7 +1,9 @@
+# @package callbacks
+
 defaults:
-  - components/model_summary@model_summary
-  - components/rich_progress_bar@rich_progress_bar
-  - components/log_data_mlflow@log_data_mlflow
+  - util@model_summary: model_summary
+  - util@rich_progress_bar: rich_progress_bar
+  - util@log_data_mlflow: log_data_mlflow
   - _self_
 
 model_summary:

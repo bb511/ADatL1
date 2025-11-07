@@ -7,12 +7,11 @@ defaults:
   - override /trainer: gpu0
   - override /logger: mlflow
 
-tags: ["vae", "axo_v4", "scan"]
+tags: ["axo_v4", "vae"]
 
 seed: 123
 
 train: true
-test: false
 
 trainer:
   min_epochs: 1
@@ -20,5 +19,5 @@ trainer:
 
 logger:
   mlflow:
-    experiment_name: axov4_reproduction
+    experiment_name: axov4
     run_name: test

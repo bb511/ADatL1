@@ -35,13 +35,13 @@ decoder:
   init_last_bias: null
 
 loss:
-  _target_: src.losses.vae.ClassicVAELoss
+  _target_: src.losses.vae.AxoV4Loss
   scale: 0.5736625791372814
 
 optimizer:
   _partial_: true
   _target_: src.optimizers.lion.Lion
-  lr: 0.5
+  lr: 0.001
   weight_decay: 0.0
 
 scheduler:

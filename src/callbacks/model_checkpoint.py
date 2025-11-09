@@ -39,7 +39,7 @@ class LeaveOneOutModelCheckpoint(DatasetAwareModelCheckpoint):
         """Process the metric according to a leave one out strategy."""
         for dataset_name in ds_metrics.keys():
             leave_one_out_sum = sum(
-                metric_value for name, val in ds_metrics.items() if name != dataset_name
+                val for name, val in ds_metrics.items() if name != dataset_name
             )
             self.save_top_k(trainer, pl_module, dataset_name, leave_one_out_sum)
 
@@ -60,11 +60,11 @@ class LeaveKOutModelCheckpoint(DatasetAwareModelCheckpoint):
     def _process_metric_across_datasets(self, trainer, pl_module, ds_metrics: dict):
         """Process dataset losses using the leave-k-out strategy."""
         selected_sum = sum(
-            metric_value for name, val in ds_metrics.items()
+            val for name, val in ds_metrics.items()
             if name in self.selected_datasets
         )
         left_out_sum = sum(
-            metric_value for name, val in ds_metrics.items()
+            val for name, val in ds_metrics.items()
             if not name in self.selected_datasets
         )
 

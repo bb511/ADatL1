@@ -2,8 +2,8 @@
 
 defaults:
   - _self_
-  - data: L1AD
-  - algorithm: vae
+  - data: axov4
+  - algorithm: axov4
   - trainer: default
   - paths: default
   - callbacks: default
@@ -19,7 +19,11 @@ defaults:
   - override /logger: none
 
 
-task_name: "eval"
+task_name: "eval" # for the logger
+
+# For the checkpoints:
+experiment_name: axov4
+run_name: test
 
 algorithm:
   masking: null

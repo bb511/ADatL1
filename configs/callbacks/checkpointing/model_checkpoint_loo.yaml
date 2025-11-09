@@ -1,11 +1,10 @@
-model_checkpoint_loo:
-  _target_: src.callbacks.model_checkpoint.LeaveOneOutModelCheckpoint
-  dirpath: '${paths.root_dir}/checkpoints/${experiment_name}/${run_name}'
-  monitor: ???
-  criterion: ???
-  skip_ds:
-    - main_train
-    - main_val
-    - main_test
-    - SingleNeutrino_E-10-gun
-    - SingleNeutrino_Pt-2To20-gun
+_target_: src.callbacks.model_checkpoint.LeaveOneOutModelCheckpoint
+dirpath: '${paths.root_dir}/checkpoints/${experiment_name}/${run_name}'
+monitor: ???
+criterion: ???
+skip_ds:
+  - main_train
+  - main_val
+  - main_test
+  - SingleNeutrino_E-10-gun
+  - SingleNeutrino_Pt-2To20-gun

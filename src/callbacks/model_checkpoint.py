@@ -61,7 +61,8 @@ class LeaveKOutModelCheckpoint(DatasetAwareModelCheckpoint):
         """Initialize the criterion object for each dataset at the start of training."""
         self.ds_criterion = {
             "selected_ds": copy.deepcopy(self.criterion),
-            "left_out_ds": copy.deepcopy(self.criterion)
+            "left_out_ds": copy.deepcopy(self.criterion),
+            "all_in": copy.deepcopy(self.criterion)
         }
     
     def _process_metric_across_datasets(self, trainer, pl_module, ds_metrics: dict):
@@ -75,12 +76,9 @@ class LeaveKOutModelCheckpoint(DatasetAwareModelCheckpoint):
             if not name in self.selected_datasets
         )
 
+        self.save_top_k(trainer, pl_module, "all_in", selected_sum + left_out_sum)
         self.save_top_k(trainer, pl_module, "selected_ds", selected_sum)
         self.save_top_k(trainer, pl_module, "left_out_ds", left_out_sum)
 
         with open(self.dirpath / 'selected_ds.yaml', 'w', encoding='utf-8') as file:
             yaml.safe_dump(list(self.selected_datasets), file)
-
-        left_out_datasets = list(set(ds_metrics.keys()) - set(self.selected_datasets))
-        with open(self.dirpath / 'left_out_ds.yaml', 'w', encoding='utf-8') as file:
-            yaml.safe_dump(list(left_out_datasets), file)

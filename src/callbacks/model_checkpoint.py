@@ -82,5 +82,5 @@ class LeaveKOutModelCheckpoint(DatasetAwareModelCheckpoint):
             yaml.safe_dump(list(self.selected_datasets), file)
 
         left_out_datasets = list(set(ds_metrics.keys()) - set(self.selected_datasets))
-        with open(self.dirpath / 'selected_ds.yaml', 'w', encoding='utf-8') as file:
-            yaml.safe_dump(left_out_datasets, file)
+        with open(self.dirpath / 'left_out_ds.yaml', 'w', encoding='utf-8') as file:
+            yaml.safe_dump(list(left_out_datasets), file)

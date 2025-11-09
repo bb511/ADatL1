@@ -20,7 +20,7 @@ def _parse_filename(filename: str) -> Dict[str, str]:
         for key in ["dataset", "metric_value", "epoch"]
     }
 
-PREFIXES = ("single", "loo", "lko")
+PREFIXES = ("single", "loo", "lko", "cap")
 CRITERIA = ("min", "max", "last", "stable")
 
 def _find_ckpt_files(
@@ -72,20 +72,17 @@ def _find_ckpt_files(
 def _iterate_checkpoints(
     dirpath: Path,
     include_prefix: Optional[List[str]] = None,
+    exclude_prefix: Optional[List[str]] = None,
     include_ds: Optional[List[str]] = None,
     exclude_ds: Optional[List[str]] = None,
 ) -> Iterator[Dict[str, Union[str, Path]]]:
     """
     Internal helper used by find_scan_checkpoints.
-
-    Applies:
-      - prefix filter (whitelist)
-      - dataset ("ds") include list
-      - dataset ("ds") exclude list
-
     If no filters are provided, behavior is identical to calling _iter_ckpt_files(dirpath).
     """
-    list_prefix = include_prefix or []
+    exclude_prefix = exclude_prefix or []
+    list_prefix = include_prefix or list(PREFIXES)
+    list_prefix = [prefix for prefix in list_prefix if prefix not in exclude_prefix]
 
     include_ds_set = set(include_ds) if include_ds else None
     exclude_ds_set = set(exclude_ds) if exclude_ds else None

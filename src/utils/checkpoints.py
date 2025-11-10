@@ -107,6 +107,7 @@ def find_checkpoints(
     run_name: str,
     by_combination: bool = True,
     include_prefix: Optional[List[str]] = None,
+    exclude_prefix: Optional[List[str]] = None,
     include_ds: Optional[List[str]] = None,
     exclude_ds: Optional[List[str]] = None,
 ) -> Dict[Union[int, Tuple[str, str, str, str]], List[str]]:
@@ -131,7 +132,7 @@ def find_checkpoints(
 
     if by_combination is False:
         by_epoch: Dict[int, List[str]] = {}
-        for comb in _iterate_checkpoints(run_dir, include_prefix, include_ds, exclude_ds):
+        for comb in _iterate_checkpoints(run_dir, include_prefix, exclude_prefix, include_ds, exclude_ds):
             path = comb.get("path")
             epoch = _parse_filename(path.name).get("epoch")
             by_epoch.setdefault(int(epoch), []).append(str(path))
@@ -142,7 +143,7 @@ def find_checkpoints(
 
     # By (prefix, metric_name, criterion, dataset)
     combinations: Dict[Tuple[str, str, str, str], List[str]] = defaultdict(list)
-    for comb in _iterate_checkpoints(run_dir, include_prefix, include_ds, exclude_ds):
+    for comb in _iterate_checkpoints(run_dir, include_prefix, exclude_prefix, include_ds, exclude_ds):
         prefix = comb.get("prefix")
         metric_name = comb.get("metric_name")
         criterion = comb.get("criterion")

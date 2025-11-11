@@ -1,24 +1,16 @@
-model_checkpoint_lko:
-  _target_: src.callbacks.model_checkpoint.LeaveKOutModelCheckpoint
-  dirpath: '${paths.root_dir}/checkpoints/${scan_dirname: ${scan}}/'
-  filename: 'epoch={epoch}__step={step}'
-  metric_name: loss/kl
+_target_: src.callbacks.model_checkpoint.LeaveKOutModelCheckpoint
+dirpath: '${paths.root_dir}/checkpoints/${experiment_name}/${run_name}'
+selected_datasets:
+  # @Patrick: you should modify this list
+  - GluGluHToBB_M-125
+  - GluGluHToGG_M-125
+  - GluGluHToGG_M-90
+  - GluGluHToTauTau_M-125
+  - GluGlutoHHto2B2WtoLNu2Q_kl-1p00_kt-1p00_c2-0p00
 
-  ds_keys_selected:
-    # @Patrick: you should modify this list
-    - GluGluHToBB_M-125
-    - GluGluHToGG_M-125
-    - GluGluHToGG_M-90
-    - GluGluHToTauTau_M-125
-    - GluGlutoHHto2B2WtoLNu2Q_kl-1p00_kt-1p00_c2-0p00
-
-  ds_keys_to_skip:
-    - main_train
-    - main_val
-    - main_test
-    - SingleNeutrino_E-10-gun
-    - SingleNeutrino_Pt-2To20-gun
-
-  save_top_k: 1
-  mode: min
-  save_last: false
+skip_ds:
+  - main_train
+  - main_val
+  - main_test
+  - SingleNeutrino_E-10-gun
+  - SingleNeutrino_Pt-2To20-gun

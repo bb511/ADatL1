@@ -2,7 +2,7 @@
 from typing import Optional
 import yaml
 
-import torch
+import copy
 from pytorch_lightning.callbacks import Callback
 
 from src.callbacks.checkpointing.dataset_aware import DatasetAwareModelCheckpoint
@@ -39,7 +39,7 @@ class LeaveOneOutModelCheckpoint(DatasetAwareModelCheckpoint):
         """Process the metric according to a leave one out strategy."""
         for dataset_name in ds_metrics.keys():
             leave_one_out_sum = sum(
-                metric_value for name, val in ds_metrics.items() if name != dataset_name
+                val for name, val in ds_metrics.items() if name != dataset_name
             )
             self.save_top_k(trainer, pl_module, dataset_name, leave_one_out_sum)
 
@@ -56,25 +56,29 @@ class LeaveKOutModelCheckpoint(DatasetAwareModelCheckpoint):
         self.selected_datasets = selected_datasets
         self.dirpath = self.dirpath / 'lko' / self.monitor / self.criterion.name
         self.create_checkpoint_dir()
+
+    def on_train_start(self, trainer, pl_module):
+        """Initialize the criterion object for each dataset at the start of training."""
+        self.ds_criterion = {
+            "selected_ds": copy.deepcopy(self.criterion),
+            "left_out_ds": copy.deepcopy(self.criterion),
+            "all_in": copy.deepcopy(self.criterion)
+        }
     
     def _process_metric_across_datasets(self, trainer, pl_module, ds_metrics: dict):
         """Process dataset losses using the leave-k-out strategy."""
         selected_sum = sum(
-            metric_value for name, val in ds_metrics.items()
+            val for name, val in ds_metrics.items()
             if name in self.selected_datasets
         )
         left_out_sum = sum(
-            metric_value for name, val in ds_metrics.items()
+            val for name, val in ds_metrics.items()
             if not name in self.selected_datasets
         )
 
+        self.save_top_k(trainer, pl_module, "all_in", selected_sum + left_out_sum)
         self.save_top_k(trainer, pl_module, "selected_ds", selected_sum)
         self.save_top_k(trainer, pl_module, "left_out_ds", left_out_sum)
 
         with open(self.dirpath / 'selected_ds.yaml', 'w', encoding='utf-8') as file:
-            yaml.safe_dump(self.selected_datasets, file)
-
-        left_out_datasets = list(set(ds_metrics.keys()) - set(self.selected_datasets))
-        with open(self.dirpath / 'selected_ds.yaml', 'w', encoding='utf-8') as file:
-            yaml.safe_dump(left_out_datasets, file)
-
+            yaml.safe_dump(list(self.selected_datasets), file)

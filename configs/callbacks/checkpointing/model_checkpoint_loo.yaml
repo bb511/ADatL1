@@ -1,14 +1,10 @@
-model_checkpoint_loo:
-  _target_: src.callbacks.model_checkpoint.LeaveOneOutModelCheckpoint
-  dirpath: '${paths.root_dir}/checkpoints/${scan_dirname: ${scan}}/'
-  filename: 'epoch={epoch}__step={step}'
-  metric_name: loss/kl
-  ds_keys_to_skip:
-    - main_train
-    - main_val
-    - main_test
-    - SingleNeutrino_E-10-gun
-    - SingleNeutrino_Pt-2To20-gun
-  save_top_k: 1
-  mode: min
-  save_last: false
+_target_: src.callbacks.model_checkpoint.LeaveOneOutModelCheckpoint
+dirpath: '${paths.root_dir}/checkpoints/${experiment_name}/${run_name}'
+monitor: ???
+criterion: ???
+skip_ds:
+  - main_train
+  - main_val
+  - main_test
+  - SingleNeutrino_E-10-gun
+  - SingleNeutrino_Pt-2To20-gun

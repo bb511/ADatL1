@@ -29,7 +29,7 @@ from src.utils import (
 log = RankedLogger(__name__, rank_zero_only=True)
 
 
-from src.utils.checkpoints import find_scan_checkpoints
+from src.utils.checkpoints import find_checkpoints
 from capmetric import ApproximationCapacity
 
 device = "cuda" if torch.cuda.is_available() else "cpu"
@@ -155,14 +155,15 @@ def eval(cfg: DictConfig) -> Tuple[Dict[str, Any], Dict[str, Any]]:
     }
 
     log.info("Finding checkpoints...")
-    checkpoint_dict = find_scan_checkpoints(
+    checkpoint_dict = find_checkpoints(
         dirpath=cfg.paths.checkpoints_dir,
-        scan=cfg.scan,
-        filter_groups=lambda dirname: all(not Path(dirname).stem.startswith(p) for p in ["cap", "leave-"]),
-        filter_checkpoint=None,
+        experiment_name=cfg.experiment_name,
+        run_name=cfg.run_name,
         by_combination=False,
+
+        exclude_prefix=["cap", "lko"],
     )
-    for (epoch, step), ckpt_paths in checkpoint_dict.items():
+    for epoch, ckpt_paths in checkpoint_dict.items():
         # Select the checkpoint and evaluate:
         ckpt_path = ckpt_paths[0]
         trainer.test(model=algorithm, datamodule=datamodule, ckpt_path=ckpt_path)
@@ -182,12 +183,14 @@ def eval(cfg: DictConfig) -> Tuple[Dict[str, Any], Dict[str, Any]]:
     dataset_dictionary = datamodule.val_dataloader() # BUG @Patrick: should I reinstantiate datasets?
     
     log.info("Cacheing the data before CAP computation for SINGLE and LOO checkpoints...")
-    checkpoint_dict = find_scan_checkpoints(
+    checkpoint_dict = find_checkpoints(
         dirpath=cfg.paths.checkpoints_dir,
-        scan=cfg.scan,
-        filter_groups=lambda dirname: all(not Path(dirname).stem.startswith(p) for p in ["cap", "leave-", "main"]),
-        filter_checkpoint=None,
+        experiment_name=cfg.experiment_name,
+        run_name=cfg.run_name,
         by_combination=True,
+
+        exclude_prefix=["cap", "lko"],
+        exclude_ds=["main", "main_val", "main_test"]
     )
     cache = {}
     for prefix in sorted({k[1] for k in checkpoint_dict.keys()}):
@@ -271,12 +274,14 @@ def eval(cfg: DictConfig) -> Tuple[Dict[str, Any], Dict[str, Any]]:
         return torch.cat(logits, dim=0)
 
     # Get the checkpoints of the LKO evaluations:
-    checkpoint_dict = find_scan_checkpoints(
+    checkpoint_dict = find_checkpoints(
         dirpath=cfg.paths.checkpoints_dir,
-        scan=cfg.scan,
-        filter_groups=lambda dirname: Path(dirname).stem.startswith("leave-k"),
-        filter_checkpoint=None,
+        experiment_name=cfg.experiment_name,
+        run_name=cfg.run_name,
         by_combination=True,
+
+        include_prefix=["lko"],
+        include_ds=["selected_ds", "left_out_ds"]
     )
     cache = {}
     for metric_name in sorted({k[2] for k in checkpoint_dict.keys()}):    
@@ -333,12 +338,14 @@ def eval(cfg: DictConfig) -> Tuple[Dict[str, Any], Dict[str, Any]]:
     log.info("Caching the data before CAP computation between background and signal simulations...")
 
     # Get the checkpoints of the LAI evaluations:
-    checkpoint_dict = find_scan_checkpoints(
+    checkpoint_dict = find_checkpoints(
         dirpath=cfg.paths.checkpoints_dir,
-        scan=cfg.scan,
-        filter_groups=lambda dirname: Path(dirname).stem.startswith("leave-all-in"),
-        filter_checkpoint=None,
+        experiment_name=cfg.experiment_name,
+        run_name=cfg.run_name,
         by_combination=True,
+
+        include_prefix=["lko"],
+        include_ds=["all_in"]
     )
     available_metrics_lai = sorted({k[2] for k in checkpoint_dict.keys()})
     cache = {}
@@ -356,12 +363,14 @@ def eval(cfg: DictConfig) -> Tuple[Dict[str, Any], Dict[str, Any]]:
         if len(logits) > 0:
             cache[("leave-all-in", "lko", metric_name)] = logits
     
-    checkpoint_dict = find_scan_checkpoints(
+    checkpoint_dict = find_checkpoints(
         dirpath=cfg.paths.checkpoints_dir,
-        scan=cfg.scan,
-        filter_groups=lambda dirname: any(Path(dirname).stem.startswith(p) for p in ["main", "SingleNeutrino_E-10-gun", "SingleNeutrino_Pt-2To20-gun"]),
-        filter_checkpoint=lambda fname: Path(fname).stem.startswith("prefix=single"),
+        experiment_name=cfg.experiment_name,
+        run_name=cfg.run_name,
         by_combination=True,
+
+        include_prefix=["single"],
+        include_ds=["main", "SingleNeutrino_E-10-gun", "SingleNeutrino_Pt-2To20-gun"]
     )
     available_metrics_single = sorted({k[2] for k in checkpoint_dict.keys()})
     for metric_name in available_metrics_single:

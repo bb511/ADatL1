@@ -1,0 +1,103 @@
+# @package callbacks
+
+defaults:
+  - default
+  - metrics@anomaly_rate: anomaly_rate
+
+  # SINGLE
+  - checkpointing@single_dataset_min: model_checkpoint_singledata
+  - checkpointing@single_dataset_max: model_checkpoint_singledata
+  - checkpointing@single_dataset_last: model_checkpoint_singledata
+  - checkpointing@single_dataset_stable: model_checkpoint_singledata
+
+  # LOO
+  - checkpointing@loo_min: model_checkpoint_loo
+  - checkpointing@loo_max: model_checkpoint_loo
+  - checkpointing@loo_last: model_checkpoint_loo
+  - checkpointing@loo_stable: model_checkpoint_loo
+
+  # LKO
+  - checkpointing@lko_min: model_checkpoint_lko
+  - checkpointing@lko_max: model_checkpoint_lko
+  - checkpointing@lko_last: model_checkpoint_lko
+  - checkpointing@lko_stable: model_checkpoint_lko
+  - _self_
+
+# SINGLE:
+single_dataset_max:
+  monitor: loss_total_full_rate0.25
+  criterion:
+    _target_: src.callbacks.checkpointing.criterion.Max
+    top_k: 1
+
+single_dataset_min:
+  monitor: loss_total_full_rate0.25
+  criterion:
+    _target_: src.callbacks.checkpointing.criterion.Min
+    top_k: 1
+
+single_dataset_stable:
+  monitor: loss_total_full_rate0.25
+  criterion:
+    _target_: src.callbacks.checkpointing.criterion.Stable
+    threshold: 0.1
+    patience: 10
+    top_k: 1
+
+single_dataset_last:
+  monitor: loss_total_full_rate0.25
+  criterion:
+    _target_: src.callbacks.checkpointing.criterion.Last
+
+# LOO
+loo_max:
+  monitor: loss_total_full_rate0.25
+  criterion:
+    _target_: src.callbacks.checkpointing.criterion.Max
+    top_k: 1
+
+loo_min:
+  monitor: loss_total_full_rate0.25
+  criterion:
+    _target_: src.callbacks.checkpointing.criterion.Min
+    top_k: 1
+
+loo_stable:
+  monitor: loss_total_full_rate0.25
+  criterion:
+    _target_: src.callbacks.checkpointing.criterion.Stable
+    threshold: 0.1
+    patience: 10
+    top_k: 1
+
+loo_last:
+  monitor: loss_total_full_rate0.25
+  criterion:
+    _target_: src.callbacks.checkpointing.criterion.Last
+
+
+# LKO:
+lko_max:
+  monitor: loss_total_full_rate0.25
+  criterion:
+    _target_: src.callbacks.checkpointing.criterion.Max
+    top_k: 1
+
+lko_min:
+  monitor: loss_total_full_rate0.25
+  criterion:
+    _target_: src.callbacks.checkpointing.criterion.Min
+    top_k: 1
+
+lko_stable:
+  monitor: loss_total_full_rate0.25
+  criterion:
+    _target_: src.callbacks.checkpointing.criterion.Stable
+    threshold: 0.1
+    patience: 10
+    top_k: 1
+
+lko_last:
+  monitor: loss_total_full_rate0.25
+  criterion:
+    _target_: src.callbacks.checkpointing.criterion.Last

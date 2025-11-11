@@ -1,162 +1,155 @@
 from __future__ import annotations
-from typing import Any, Callable, Dict, List, Mapping, Optional, Tuple, Union, Iterable
+from typing import Dict, List, Optional, Tuple, Union, Iterator
 from pathlib import Path
 from collections import defaultdict
-from omegaconf import DictConfig
 import re
 
 import rootutils
-rootutils.setup_root(__file__, indicator=".project-root", pythonpath=True)
-
-
-def _build_scan_dirname(scan_dict: Mapping[str, Any]) -> str:
-    parts = [f"{k}={scan_dict[k]}" for k in sorted(scan_dict.keys())]
-    return "scan_" + "_".join(parts)
-
+ROOTDIR = rootutils.setup_root(__file__, indicator=".project-root", pythonpath=True)
 
 _FILENAME_RE = re.compile(
-    r'^prefix=(?P<prefix>.+?)__ds=(?P<dset_key>.+?)__metric=(?P<metric_name>.+?)__value=(?P<metric_value>.+?)__epoch=(?P<epoch>\d+)__step=(?P<step>\d+)\.ckpt$'
+    r'^ds=(?P<dataset>.+?)__value=(?P<metric_value>.+?)__epoch=(?P<epoch>\d+)\.ckpt$'
 )
 
-def _extract_dset_prefix_metric(path: Path) -> Tuple[str, str, str]:
-    """Return (dset_key, prefix, metric_name) parsed from the checkpoint filename."""
-    m = _FILENAME_RE.match(path.name)
+def _parse_filename(filename: str) -> Dict[str, str]:
+    m = _FILENAME_RE.match(filename)
     if not m:
-        raise ValueError(f"Unexpected filename format: {path.name}")
-    return m.group('dset_key'), m.group('prefix'), m.group('metric_name')
+        raise ValueError(f"Unexpected filename format: {filename}")
+    return {
+        key: m.group(key)
+        for key in ["dataset", "metric_value", "epoch"]
+    }
 
-def _extract_metric_value(path: Path) -> str:
-    """Return metric_value parsed from the checkpoint filename."""
-    m = _FILENAME_RE.match(path.name)
-    if not m:
-        raise ValueError(f"Unexpected filename format: {path.name}")
-    return m.group('metric_value')
+PREFIXES = ("single", "loo", "lko", "cap")
+CRITERIA = ("min", "max", "last", "stable")
 
-def _extract_epoch_step(path: Path) -> Optional[EpochStep]:
-    """Return epoch and step values parsed from the checkpoint filename."""
-    m = _FILENAME_RE.match(path.name)
-    if not m:
-        raise ValueError(f"Unexpected filename format: {path.name}")
-    return int(m.group('epoch')), int(m.group('step'))
+def _find_ckpt_files(
+    dirpath: Path,
+    list_prefix: Optional[List[str]] = [],
+    list_metric_name: Optional[List[str]] = [],
+    list_criterion: Optional[List[str]] = [],
+) -> Iterator[Dict[str, Union[str, Path]]]:
+    """
+    Yield checkpoint descriptors:
+        {
+            "prefix": <prefix>,
+            "metric_name": <metric_name>,
+            "criterion": <criterion>,
+            "path": Path,
+        }
+    from:
+        <prefix>/<metric_name>/<criterion>/filename.ckpt
+    """
+    list_prefix = list_prefix if len(list_prefix) > 0 else list(PREFIXES)
+    list_criterion = list_criterion if len(list_criterion) > 0 else list(CRITERIA)
 
-
-EpochStep = Tuple[int, int]
-FilterGroups = Callable[[str], bool]
-FilterCheckpoint = Callable[[str], bool] 
-
-def _extract_dataset_keys(
-    scan_dir: Union[str, Path],
-    filter_groups: Optional[FilterGroups] = None
-) -> List[Path]:
-
-    group_dirs: List[Path] = []
-    for entry in Path(scan_dir).iterdir():
-        if entry.is_dir():
-            if filter_groups(entry):
-                group_dirs.append(entry)
-
-    return group_dirs
-
-
-def _extract_checkpoint_paths(
-    dset_key: Union[str, Path],
-    filter_checkpoint: Optional[FilterCheckpoint] = None
-) -> Iterable[Tuple[Tuple[int, int], Path]]:
-
-    # Only look at immediate .ckpt files inside each group (non-recursive).
-    for ckpt in Path(dset_key).glob("*.ckpt"):
-        if not filter_checkpoint(str(ckpt)):
+    for prefix in list_prefix:
+        prefix_dir = dirpath / prefix
+        if not prefix_dir.is_dir():
             continue
-        
-        key = _extract_epoch_step(ckpt)
-        if key is None:
-            continue    
-        
-        epoch, step = key
-        yield (epoch, step), ckpt
 
+        for metric_dir in prefix_dir.iterdir():
+            if not metric_dir.is_dir():
+                continue
 
-def find_scan_checkpoints(
-    dirpath: str,
-    scan: DictConfig,
-    filter_groups: Optional[FilterGroups] = None,
-    filter_checkpoint: Optional[FilterCheckpoint] = None,
-    by_combination: bool = True
-) -> Dict[EpochStep, List[str]]:
-    """
-    Discover checkpoints organized as:
-        <dirpath>/
-          scan_<k1=v1>_<k2=v2>_.../
-            <groupA>/
-              ... epoch=X-step=Y.ckpt
-            <groupB>/
-              ... epoch=X-step=Y.ckpt
-            ...
+            metric_name = metric_dir.name
+            if len(list_metric_name) > 0 and metric_name not in list_metric_name:
+                continue
 
-    - The 'scan_*' directory name is deterministically derived from cfg.scan by sorting keys.
-    - 'filter_groups' selects which group subdirectories to include.
-    - 'filter_checkpoint' selects which .ckpt files inside a selected group to include.
-    - The result is a dict keyed by (epoch, step) -> list of all paths (strings) that match.
-
-    :param dirpath: Base directory containing scan subdirectories.
-    :param scan: DictConfig with scan parameters to build the scan directory name.
-    :param filter_groups: Optional callable to filter group subdirectories.
-    :param filter_checkpoint: Optional callable to filter checkpoint files.
-    :param by_combination: If False, keys the result by (epoch, step) tuples. Otherwise, by (dset_key, prefix, metric_name).
-    """
-
-    base_dir = Path(dirpath).expanduser().resolve()
-    scan_dict = dict(scan)
-    scan_dirname = _build_scan_dirname(scan_dict)
-    scan_dir = base_dir / scan_dirname
-
-    if not scan_dir.exists() or not scan_dir.is_dir():
-        raise FileNotFoundError(f"Scan directory not found: {scan_dir}")
-    
-    # Load the filters:
-    filter_groups = filter_groups or (lambda *_, **__: True)
-    filter_checkpoint = filter_checkpoint or (lambda *_, **__: True)
-    
-    # Extract dataset keys:
-    dset_keys = _extract_dataset_keys(
-        scan_dir=scan_dir,
-        filter_groups=filter_groups
-    )
-
-    if not by_combination:
-        by_epoch_step: Dict[EpochStep, List[str]] = {}
-        seen_paths: set[str] = set()  # prevent duplicates across groups
-        for dset_key in dset_keys:
-            for (epoch, step), ckpt in _extract_checkpoint_paths(
-                    dset_key=dset_key,
-                    filter_checkpoint=filter_checkpoint
-                ):
-
-                spath = str(ckpt)
-                if spath in seen_paths:
+            for criterion in list_criterion:
+                criterion_dir = metric_dir / criterion
+                if not criterion_dir.is_dir():
                     continue
-                seen_paths.add(spath)
 
-                by_epoch_step.setdefault((epoch, step), []).append(spath)
+                for ckpt_path in criterion_dir.glob("*.ckpt"):
+                    yield {
+                        "prefix": prefix,
+                        "metric_name": metric_name,
+                        "criterion": criterion,
+                        "path": ckpt_path,
+                    }
 
-        # For reproducibility:
-        for paths in by_epoch_step.values():
-            paths.sort()
-        return by_epoch_step
-    
+def _iterate_checkpoints(
+    dirpath: Path,
+    include_prefix: Optional[List[str]] = None,
+    exclude_prefix: Optional[List[str]] = None,
+    include_ds: Optional[List[str]] = None,
+    exclude_ds: Optional[List[str]] = None,
+) -> Iterator[Dict[str, Union[str, Path]]]:
+    """
+    Internal helper used by find_scan_checkpoints.
+    If no filters are provided, behavior is identical to calling _iter_ckpt_files(dirpath).
+    """
+    exclude_prefix = exclude_prefix or []
+    list_prefix = include_prefix or list(PREFIXES)
+    list_prefix = [prefix for prefix in list_prefix if prefix not in exclude_prefix]
 
-    # Else: just provide the standard format (dset_key, prefix, metric_name)
-    dset_keys = [dset_key.stem for dset_key in dset_keys if filter_groups(dset_key)]
-    by_combo: Dict[Tuple[str, str, str], List[Path]] = defaultdict(list)
-    for ckpt in scan_dir.glob("*/*.ckpt"):
-        try:
-            dset_key, prefix, metric_name = _extract_dset_prefix_metric(ckpt)
-            if dset_key in dset_keys and filter_checkpoint(str(ckpt)):
-                by_combo[(dset_key, prefix, metric_name)].append(ckpt)
-        except ValueError:
+    include_ds_set = set(include_ds) if include_ds else None
+    exclude_ds_set = set(exclude_ds) if exclude_ds else None
+    for comb in _find_ckpt_files(
+        dirpath=dirpath,
+        list_prefix=list_prefix,
+    ):
+        path = comb["path"]
+        ds = _parse_filename(path.name)["dataset"]
+
+        if include_ds_set is not None and ds not in include_ds_set:
+            continue
+        if exclude_ds_set is not None and ds in exclude_ds_set:
             continue
 
-    # For reproducibility:
-    for k in by_combo:
-        by_combo[k].sort()
-    return dict(by_combo)
+        yield comb
+
+
+def find_checkpoints(
+    dirpath: str,
+    experiment_name: str,
+    run_name: str,
+    by_combination: bool = True,
+    include_prefix: Optional[List[str]] = None,
+    exclude_prefix: Optional[List[str]] = None,
+    include_ds: Optional[List[str]] = None,
+    exclude_ds: Optional[List[str]] = None,
+) -> Dict[Union[int, Tuple[str, str, str, str]], List[str]]:
+    """
+    :param dirpath: Base directory containing experiment subdirectories.
+    :param experiment_name: Name given to the experiment.
+    :param run_name: Name given to the run.
+    :param filter_groups: Optional callable to filter <prefix> subdirectories.
+    :param filter_checkpoint: Optional callable to filter checkpoint files (by absolute path string).
+    :param by_combination: Instead of retrieving just the set of checkpoints, retrieve the set of hparams.
+
+    # Filters:
+    :param include_prefix: List prefixes to include. If None, all PREFIXES will be included.
+    :param include_ds: List of dset_key to include. If None, all will be included.
+    :param exclude_ds: List of dset_key to exclude. If None, all will be included.
+    """
+
+    dirpath = Path(dirpath).expanduser().resolve()
+    run_dir = (dirpath / experiment_name / run_name).resolve()
+    if not run_dir.exists() or not run_dir.is_dir():
+        raise FileNotFoundError(f"Run directory not found: {run_dir}")
+
+    if by_combination is False:
+        by_epoch: Dict[int, List[str]] = {}
+        for comb in _iterate_checkpoints(run_dir, include_prefix, exclude_prefix, include_ds, exclude_ds):
+            path = comb.get("path")
+            epoch = _parse_filename(path.name).get("epoch")
+            by_epoch.setdefault(int(epoch), []).append(str(path))
+
+        for paths in by_epoch.values():
+            paths.sort()
+        return by_epoch
+
+    # By (prefix, metric_name, criterion, dataset)
+    combinations: Dict[Tuple[str, str, str, str], List[str]] = defaultdict(list)
+    for comb in _iterate_checkpoints(run_dir, include_prefix, exclude_prefix, include_ds, exclude_ds):
+        prefix = comb.get("prefix")
+        metric_name = comb.get("metric_name")
+        criterion = comb.get("criterion")
+        dataset = _parse_filename(comb.get("path").name).get("dataset")
+        combinations[(prefix, metric_name, criterion, dataset)].append(str(comb.get("path")))
+
+    for k in combinations:
+        combinations[k].sort()
+    return dict(combinations)

@@ -1,4 +1,4 @@
-_target_: src.losses.alignment.AlignmentLoss
+_target_: src.losses.components.alignment.AlignmentLoss
 scale: 1.0
 reduction: mean # "mean", "sum", "none"
 

@@ -1,4 +1,4 @@
-_target_: src.losses.gradient.GradientPenaltyLoss
+_target_: src.losses.components.gradient.GradientPenaltyLoss
 scale: 1.0
 reduction: mean # "mean", "sum", "none"
 

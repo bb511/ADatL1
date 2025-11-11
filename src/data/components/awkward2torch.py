@@ -1,4 +1,5 @@
 # Load and convert mlready parquet files to numpy arrays.
+from typing import Union
 import os
 from dataclasses import dataclass
 from pathlib import Path
@@ -54,7 +55,7 @@ class L1DataAwkward2Torch:
         return numpy_array
 
     def _pad(
-        self, data: ak.Array, nconst: int, padder: int | ak.Record
+        self, data: ak.Array, nconst: int, padder: Union[int, ak.Record]
     ) -> tuple[ak.Array, int]:
         """Pads the jagged arrays such that they are rectangular for each object.
 

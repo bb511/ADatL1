@@ -1,0 +1,32 @@
+# @package algorithm
+
+defaults:
+  - vae.yaml
+
+  # Attach sub-loss configs to the multiloss:
+  - /loss@loss.reconstruction: reconstruction
+  - /loss@loss.kl: kl
+  - /loss@loss.mi: mi
+  - /loss@loss.mmd: mmd
+  - /loss@loss.alignment: alignment
+  - /loss@loss.dipvae: dipvae
+  - /loss@loss.bvae: bvae
+  - /loss@loss.gradient: gradient
+
+
+_target_: src.algorithms.vae.RVAE
+
+loss:
+  _target_: src.losses.components.MultiLoss
+
+  # Ignore any foreign crap: your code should only read these:
+  reduction: none
+
+  list_losses:
+    - reconstruction
+    - kl
+
+  reconstruction:
+    scale: '${substract: 1.0, ${alpha}}'
+  kl:
+    scale: ${alpha}

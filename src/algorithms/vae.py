@@ -61,3 +61,46 @@ class VAE(L1ADLightningModule):
             "loss_kl": outdict.get("loss/kl/mean"),
         }
         
+
+
+class RVAE(VAE):
+    """Regularized VAE. Overriding loss and logging."""
+
+    def model_step(self, batch: Tuple[torch.Tensor]) -> Dict[str, torch.Tensor]:
+        x, s = batch
+        z_mean, z_log_var, z, reconstruction = self.forward(x)
+        loss = self.loss(
+            reconstruction=reconstruction,
+            target=x,
+            z=z,
+            z_mean=z_mean,
+            z_log_var=z_log_var,
+            s=s
+        )
+        del reconstruction, x, z, s
+
+        outdict = {
+            "loss": loss.mean(),
+            "loss/total": loss.mean(),
+            "z_mean.abs()": z_mean.abs(),
+            "z_log_var": z_log_var,
+        }
+        if hasattr(self.loss, "losses"):
+            individial_losses = {
+                f"loss/{module.name}": value
+                for module, value in zip(
+                    self.loss.losses.values(),
+                    self.loss.values.values()
+                )
+            }
+            outdict.update({
+                "loss/total": sum(list(individial_losses.values())),
+                **individial_losses
+            })
+        return outdict
+
+    def outlog(self, outdict: dict) -> dict:
+        return {
+            k: v.mean() for k, v in outdict.items()
+            if "loss/" in k or not k.startswith("loss/")
+        }

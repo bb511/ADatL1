@@ -8,7 +8,7 @@ features: null
 
 
 encoder:
-  _target_: src.models.components.mlp.MLP
+  _target_: src.models.encoder.Encoder
 
   nodes: [57, 28, 16, 8]
   

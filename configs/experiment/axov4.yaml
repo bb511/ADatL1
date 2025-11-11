@@ -9,6 +9,9 @@ defaults:
 
 tags: ["axo_v4", "vae"]
 
+experiment_name: axov4
+run_name: test
+
 seed: 123
 
 train: true

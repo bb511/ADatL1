@@ -3,7 +3,7 @@ from typing import Literal, Optional
 
 import ot  # type: ignore
 
-from src.losses import L1ADLoss
+from src.losses.components import L1ADLoss
 
 
 class WassersteinLoss(L1ADLoss):

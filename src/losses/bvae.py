@@ -1,9 +1,9 @@
 from typing import Literal
 import torch
 
-from src.losses import L1ADLoss
-from src.losses.kl import KLDivergenceLoss
-from src.losses.mmd import MMDLoss
+from src.losses.components import L1ADLoss
+from src.losses.components.kl import KLDivergenceLoss
+from src.losses.components.mmd import MMDLoss
 
 
 class BetaVAELoss(L1ADLoss):

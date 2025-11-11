@@ -2,7 +2,7 @@ from typing import Literal
 import torch
 import torch.nn.functional as F
 
-from src.losses import L1ADLoss
+from src.losses.components import L1ADLoss
 
 
 class ReconstructionLoss(L1ADLoss):

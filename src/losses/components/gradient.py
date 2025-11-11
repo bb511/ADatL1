@@ -2,7 +2,7 @@ from typing import Literal
 
 import torch
 
-from src.losses import L1ADLoss
+from src.losses.components import L1ADLoss
 
 
 class GradientPenaltyLoss(L1ADLoss):

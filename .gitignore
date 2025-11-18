@@ -170,6 +170,11 @@ outputs
 !**/outputs/
 # !**/results/
 
+# Ignore the symbolic links
+/data
+/logs
+/checkpoints
+
 # Untrack SLURM outputs:
 *.out
 

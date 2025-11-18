@@ -1,3 +1,5 @@
+# @package data
+
 defaults:
   - /paths: data_2024E
   - data_extractor: axov4

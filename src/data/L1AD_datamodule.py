@@ -79,6 +79,10 @@ class L1ADDataModule(LightningDataModule):
     def setup(self, stage: str = None) -> None:
         """Load data. Set `self.data_train`, `self.data_val`, `self.data_test`.
 
+        Label the zerobias data with 0.
+        Label the signal simulation with labels > 0.
+        Label the background simulation with labels < 0.
+
         :param stage: The stage to setup. Either `"fit"`, `"validate"`, `"test"`, or `
             "predict"`. Defaults to ``None``.
         """
@@ -99,9 +103,19 @@ class L1ADDataModule(LightningDataModule):
             self.label_test = np.full(self.data_test.size(dim=0), label)
 
         aux_folder = data_folder / 'aux'
+        label_signal = 0
+        label_background = 0
         if not self.aux_val and not self.aux_test:
             for dataset_path in aux_folder.iterdir():
                 name = dataset_path.stem
+
+                if 'SingleNeutrino' in name:
+                    label_background += -1
+                    label = label_background
+                else:
+                    label_signal += 1
+                    label = label_signal
+
                 val = loader.load_folder(dataset_path / 'valid')
                 test = loader.load_folder(dataset_path / 'test')
 
@@ -226,9 +240,3 @@ class L1ADDataModule(LightningDataModule):
             self.batch_size_per_device = (
                 self.hparams.batch_size // self.trainer.world_size
             )
-
-    # def _add_plots_to_mlflow(self, logs: loggers, plots_path: Path):
-    #     """Adds the plots of the normalized data to the mlflow experiment."""
-    #     for logger in logs:
-    #         if isinstance(logger, loggers.mlflow.MLFlowLogger):
-    #             logger.experiment.log_artifact(logger.run_id, plots_path)

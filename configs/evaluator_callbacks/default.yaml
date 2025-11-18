@@ -1,0 +1,4 @@
+# @package evaluator_callbacks
+
+defaults:
+  - _self_

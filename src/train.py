@@ -1,4 +1,6 @@
+# Main training script.
 from typing import Any, Dict, List, Optional, Tuple
+from pathlib import Path
 
 import hydra
 import pytorch_lightning as pl
@@ -9,7 +11,6 @@ from pytorch_lightning.loggers import Logger
 from omegaconf import DictConfig
 
 import rootutils
-
 rootutils.setup_root(__file__, indicator=".project-root", pythonpath=True)
 
 # Add resolvers to evaluate operations in the .yaml configuration files
@@ -17,17 +18,14 @@ from src.utils.omegaconf import register_resolvers
 
 register_resolvers()
 
-from src.utils import (
-    RankedLogger,
-    extras,
-    get_metric_value,
-    instantiate_callbacks,
-    instantiate_loggers,
-    log_hyperparameters,
-    task_wrapper,
-)
-
-# from src.evaluate import evaluat_after_train
+from src.utils import RankedLogger
+from src.utils import extras
+from src.utils import get_metric_value
+from src.utils import instantiate_callbacks
+from src.utils import instantiate_loggers
+from src.utils import log_hyperparameters
+from src.utils import task_wrapper
+from src.evaluation.evaluator import Evaluator
 
 log = RankedLogger(__name__, rank_zero_only=True)
 
@@ -79,20 +77,20 @@ def train(cfg: DictConfig) -> Tuple[Dict[str, Any], Dict[str, Any]]:
 
     if cfg.get("train"):
         log.info("Starting training!")
-        trainer.fit(model=algorithm, datamodule=datamodule, ckpt_path=cfg.get("ckpt_path"))
+        trainer.fit(model=algorithm, datamodule=datamodule)
 
     train_metrics = trainer.callback_metrics
 
+    # Evaluate the training.
+    checkpoints_dir = cfg["paths"].get("checkpoints_dir")
+
     if cfg.get("test"):
-        log.info("Starting testing!")
-        ckpt_path = trainer.checkpoint_callback.best_model_path
-        if ckpt_path == "":
-            log.warning("Best ckpt not found! Using current weights for testing...")
-            ckpt_path = None
-        trainer.test(
-            model=algorithm, datamodule=datamodule, ckpt_path=ckpt_path, verbose=False
+        eval_callbacks = instantiate_callbacks(cfg.get('evaluator_callbacks'))
+        evaluator = hydra.utils.instantiate(
+            cfg.evaluator, callbacks=eval_callbacks, logger=logger
         )
-        log.info(f"Best ckpt path: {ckpt_path}")
+        run_ckpts_dir = Path(checkpoints_dir) / cfg.experiment_name / cfg.run_name
+        evaluator.evaluate_run(run_ckpts_dir, algorithm, datamodule)
 
     test_metrics = trainer.callback_metrics
 

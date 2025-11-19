@@ -7,5 +7,6 @@ defaults:
 accelerator: gpu
 devices: [0]
 
+strategy: single
 metric_criteria:
   loss: ['min']

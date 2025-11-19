@@ -9,6 +9,7 @@ import torch
 from pytorch_lightning import Callback, LightningDataModule, LightningModule, Trainer
 from pytorch_lightning.loggers import Logger
 from omegaconf import DictConfig
+from colorama import Fore, Back, Style
 
 import rootutils
 rootutils.setup_root(__file__, indicator=".project-root", pythonpath=True)
@@ -85,6 +86,7 @@ def train(cfg: DictConfig) -> Tuple[Dict[str, Any], Dict[str, Any]]:
     checkpoints_dir = cfg["paths"].get("checkpoints_dir")
 
     if cfg.get("test"):
+        log.info(Back.MAGENTA + 8*'-' + "STARTING TESTING" + 8*'-')
         eval_callbacks = instantiate_callbacks(cfg.get('evaluator_callbacks'))
         evaluator = hydra.utils.instantiate(
             cfg.evaluator, callbacks=eval_callbacks, logger=logger

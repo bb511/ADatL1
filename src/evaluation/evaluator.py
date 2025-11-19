@@ -66,8 +66,10 @@ class Evaluator:
         """
         datamodule.setup("test")
 
+        test_loaders = datamodule.test_dataloader()
+
         # Delegate to the test loop of a pl trainer object.
-        self.evaluator.test(ckpt_path=ckpt_path, model=model, dataloaders=datamodule)
+        self.evaluator.test(ckpt_path=ckpt_path, model=model, dataloaders=test_loaders)
 
     def evaluate_run(
         self, run_ckpts: Path, model: LightningModule, datamodule: LightningDataModule,
@@ -76,17 +78,23 @@ class Evaluator:
 
         Assume that the checkpoints are each corresponding to a particular data set.
         """
-        if not self.callbacks or not self.metric_criteria:
-            log.warn(Fore.MAGENTA + "No eval callbacks given. Skipping evaluation...")
-            return
+        self._check_conditions()
+
+        datamodule.setup("test")
+        test_loaders = datamodule.test_dataloader()
 
         ckpt_paths = self._get_ckpt_paths(run_ckpts)
         for metric, criteria in ckpt_paths.items():
-            log.info(Fore.GREEN + f"Evaluating checkpoints for metric {metric}...")
+            log.info(Fore.GREEN + f"Evaluating checkpoints for metric: {metric}...")
             for criterion, paths in criteria.items():
-                log.info(f"Evaluating criterion {criterion}")
+                log.info(f"-> Evaluating criterion {criterion}")
                 for ckpt_path in paths:
-                    self.evaluate(ckpt_path, model, datamodule)
+                    self.evaluator.test(
+                        ckpt_path=ckpt_path,
+                        model=model,
+                        dataloaders=test_loaders,
+                        verbose=False
+                    )
 
     def _get_ckpt_paths(self, ckpt_dir: Path) -> dict[list[Path]]:
         """Finds the ckpts corresponding to given metrics and respective criteria."""
@@ -96,8 +104,9 @@ class Evaluator:
         for metric in self.metric_criteria.keys():
             metric_dir = self._get_subdir(strat_dir, metric)
             for criterion in self.metric_criteria[metric]:
-                self._get_subdir(metric_dir, criterion)
-                ckpt_paths[metric][criterion].append(criterion_dir)
+                criterion_dir = self._get_subdir(metric_dir, criterion)
+                for ckpt_filepath in criterion_dir.glob('*.ckpt'):
+                    ckpt_paths[metric][criterion].append(ckpt_filepath)
 
         return ckpt_paths
 
@@ -108,6 +117,15 @@ class Evaluator:
             raise FileNotFoundError(f"Folder not found in {main_dir} for {subdir}.")
 
         return subdir
+
+    def _check_conditions(self):
+        """Checks if the criteria for running the evaluation are met."""
+        if not self.callbacks:
+            log.warn(Fore.MAGENTA + "No eval callbacks given. Skipping evaluation...")
+            return
+        if not self.metric_criteria:
+            log.warn(Fore.MAGENTA + "No metric_criteria given. Skipping evaluation...")
+            return
 
     def _extract_dataset_name(self, ckpt_path: Path):
         """Extracts the dataset name from the name of a checkpoint file.

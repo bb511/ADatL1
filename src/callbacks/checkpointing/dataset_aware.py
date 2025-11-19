@@ -7,11 +7,13 @@ import itertools
 from weakref import proxy
 from pathlib import Path
 import copy
+import shutil
 
 import torch
 from pytorch_lightning.callbacks import Callback
 
 from src.callbacks.checkpointing.criterion import Criterion
+from src.plot import horizontal_bar
 
 
 class DatasetAwareModelCheckpoint(Callback):
@@ -35,6 +37,7 @@ class DatasetAwareModelCheckpoint(Callback):
         self.dirpath = Path(dirpath)
         self.monitor = monitor
         self.criterion = criterion
+        self.topk = len(criterion.top_k_values)
         self.skip_ds = skip_ds or []
         self.save_last = self.criterion.name == 'last'
 
@@ -82,7 +85,10 @@ class DatasetAwareModelCheckpoint(Callback):
         raise NotImplementedError("Subclasses must implement _process_dataset_losses")
 
     def save_top_k(self, trainer, pl_module, dataset_name: str, metric_value: float):
-        """Save a checkpoint if it's among the top_k best for the given dataset."""
+        """Save a checkpoint if it's among the top_k best for the given dataset.
+
+        How many top_k should be saved is configured in the criterion directly.
+        """
         should_save = self.ds_criterion[dataset_name].check(metric_value)
 
         if should_save:
@@ -104,9 +110,52 @@ class DatasetAwareModelCheckpoint(Callback):
             for logger in trainer.loggers:
                 logger.after_save_checkpoint(proxy(self))
 
+    def _clean_checkpoints(self, dataset_name: str):
+        """Makes sure that the saved checkpoints are just the top_k ones."""
+        files_to_remove = [
+            ckpt['fpath'] for ckpt in self.checkpoints[dataset_name]
+            if not ckpt['value'] in self.ds_criterion[dataset_name].top_k_values
+        ]
+
+        self.checkpoints[dataset_name] = [
+            ckpt for ckpt in self.checkpoints[dataset_name]
+            if ckpt['value'] in self.ds_criterion[dataset_name].top_k_values
+        ]
+
+        for filepath in files_to_remove:
+            os.remove(filepath)
+
     def create_checkpoint_dir(self):
         """Create the directory where the checkpoints are saved."""
+        if self.dirpath.is_dir():
+            shutil.rmtree(self.dirpath)
+
         self.dirpath.mkdir(parents=True, exist_ok=True)
+
+    def on_fit_end(self, trainer, pl_module):
+        """Plot results. Save the models obtained at the end of the training."""
+        self._plot_epochs()
+        if not self.save_last:
+            return
+
+        self._ckpt_last_epoch(trainer, pl_module)
+
+    def _ckpt_last_epoch(self, trainer, pl_module):
+        """Checkpoint the model at the last epoch of the training."""
+        all_valid_datasets = list(getattr(trainer, "val_dataloaders").keys())
+        relevant_ds = [ds for ds in all_valid_datasets if ds not in self.skip_ds]
+
+        ds_metrics = {}
+        for ds_name in relevant_ds:
+            metric_value = self._get_metric(trainer.callback_metrics, ds_name)
+            filepath = self._configure_filepath(trainer, ds_name, metric_value)
+            self._save_checkpoint(trainer, pl_module, filepath)
+            ds_metrics[ds_name] = metric_value
+
+        plot_folder = self.dirpath / 'plots'
+        plot_folder.mkdir(parents=True, exist_ok=True)
+        xlabel = f"{self.monitor}"
+        horizontal_bar.plot(ds_metrics, xlabel, plot_folder)
 
     def _configure_filepath(self, trainer, ds_name: str, metric_val: float) -> Path:
         """Construct the filename out of the given properties of the checkpoint."""
@@ -124,31 +173,18 @@ class DatasetAwareModelCheckpoint(Callback):
         filename = filename + '.ckpt'
         return self.dirpath / filename
 
-    def _clean_checkpoints(self, dataset_name: str):
-        """Makes sure that the saved checkpoints are just the top_k ones."""
-        files_to_remove = [
-            ckpt['fpath'] for ckpt in self.checkpoints[dataset_name]
-            if not ckpt['value'] in self.ds_criterion[dataset_name].top_k_values
-        ]
+    def _plot_epochs(self):
+        """Plots the epochs at which the best checkpoints are saved."""
+        plot_folder = self.dirpath / 'plots'
+        plot_folder.mkdir(parents=True, exist_ok=True)
 
-        self.checkpoints[dataset_name] = [
-            ckpt for ckpt in self.checkpoints[dataset_name]
-            if ckpt['value'] in self.ds_criterion[dataset_name].top_k_values
-        ]
+        epochs = defaultdict(int)
+        values = defaultdict(float)
+        for k in range(self.topk):
+            for dataset_name in self.checkpoints.keys():
+                epochs[dataset_name] = self.checkpoints[dataset_name][k]['epoch']
+                values[dataset_name] = self.checkpoints[dataset_name][k]['value']
 
-        for filepath in files_to_remove:
-            os.remove(filepath)
-
-    def on_fit_end(self, trainer, pl_module):
-        """Save the models obtained at the end of the training."""
-        if not self.save_last:
-            return
-
-        all_valid_datasets = list(getattr(trainer, "val_dataloaders").keys())
-        relevant_ds = [ds for ds in all_valid_datasets if ds not in self.skip_ds]
-
-        ds_metrics = {}
-        for ds_name in relevant_ds:
-            metric_value = self._get_metric(trainer.callback_metrics, ds_name)
-            filepath = self._configure_filepath(trainer, ds_name, metric_value)
-            self._save_checkpoint(trainer, pl_module, filepath)
+            xlabel = f"top {k+1} epoch"
+            ylabel = f"metric value"
+            horizontal_bar.plot_yright(epochs, values, xlabel, ylabel, plot_folder)

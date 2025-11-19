@@ -4,7 +4,7 @@ from collections import defaultdict
 import torch
 from pytorch_lightning.callbacks import Callback
 
-from src.callbacks.metrics.rate import AnomalyRate
+from src.callbacks.metrics.rate import AnomalyCounter
 
 
 class AnomalyRateCallback(Callback):
@@ -89,7 +89,7 @@ class AnomalyRateCallback(Callback):
         mainval data should return the rate for which this threshold was computed.
         """
         for target_rate in self.target_rates:
-            rate = AnomalyRate(target_rate, self.bc_rate)
+            rate = AnomalyCounter(target_rate, self.bc_rate)
             rate.set_threshold(self.mainval_score_data[mname])
             rate.update(self.mainval_score_data[mname])
             rate_name = f"{mname.replace('/', '_')}_rate{target_rate}"
@@ -115,7 +115,7 @@ class AnomalyRateCallback(Callback):
         the rate on the other data sets differing from main_val.
         """
         for target_rate in self.target_rates:
-            rate = AnomalyRate(target_rate, self.bc_rate)
+            rate = AnomalyCounter(target_rate, self.bc_rate)
             rate.set_threshold(self.mainval_score_data[mname])
 
             rate_name = f"{mname.replace('/', '_')}_rate{target_rate}"
@@ -125,7 +125,7 @@ class AnomalyRateCallback(Callback):
         """Log the anomaly rates computed on each of the data sets."""
         for rate_name, rate in self.rates.items():
             pl_module.log_dict(
-                {f"val/{rate_name}": rate.compute()},
+                {f"val/{rate_name}": rate.compute('rate')},
                 prog_bar=False,
                 on_step=False,
                 on_epoch=True,

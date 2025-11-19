@@ -1,0 +1,6 @@
+# @package evaluator_callbacks
+
+defaults:
+  - default
+  - metrics@anomaly_rate: anomaly_rate
+  - _self_

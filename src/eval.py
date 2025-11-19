@@ -189,7 +189,6 @@ def eval(cfg: DictConfig) -> Tuple[Dict[str, Any], Dict[str, Any]]:
         experiment_name=cfg.experiment_name,
         run_name=cfg.run_name,
         by_combination=True,
-
         exclude_prefix=["cap", "lko"],
         exclude_ds=["main", "main_val", "main_test"]
     )

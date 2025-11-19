@@ -1,0 +1,11 @@
+# @package evaluator
+
+defaults:
+  - default
+  - _self_
+
+accelerator: gpu
+devices: [0]
+
+metric_criteria:
+  loss: ['min']

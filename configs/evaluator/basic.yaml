@@ -1,12 +1,16 @@
-# @package evaluator
+# @package evaluators
 
 defaults:
-  - default
+  - base@last_evaluator: default
+  - base@single_evaluator: default
   - _self_
 
-accelerator: gpu
-devices: [0]
+# The basic is consistent with the basic checkpointing strategy, defined in callbacks
+# directory of the config, basic.yaml file.
+last_evaluator:
+  strategy: last
 
-strategy: single
-metric_criteria:
-  loss: ['min']
+single_evaluator:
+  strategy: single
+  metric_criteria:
+    loss: ['min']

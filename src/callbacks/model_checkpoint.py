@@ -1,6 +1,8 @@
 # Different ways of doing model checkpointing.
 from typing import Optional
+from pathlib import Path
 import yaml
+import shutil
 
 import copy
 from pytorch_lightning.callbacks import Callback
@@ -82,3 +84,13 @@ class LeaveKOutModelCheckpoint(DatasetAwareModelCheckpoint):
 
         with open(self.dirpath / 'selected_ds.yaml', 'w', encoding='utf-8') as file:
             yaml.safe_dump(list(self.selected_datasets), file)
+
+
+class ClearRunCheckpointDir(Callback):
+    """Clears the checkpoint directory of a run."""
+    def __init__(self, run_ckpts_dir: str):
+        self.root_ckpts_dir = Path(root_ckpts_dir)
+
+    def on_fit_start(self, trainer, pl_module):
+        print(self.dirpath)
+        shutil.rmtree(self.dirpath)

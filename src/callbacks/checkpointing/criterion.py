@@ -65,21 +65,6 @@ class Max(Criterion):
         return False
 
 
-class Last(Criterion):
-    """Save checkpoint for the last value of the metric. Hacky way to do it.
-
-    Basically, a flag is set in the dataset_aware.py class that checks if the criterion
-    name is 'last'. If this is true, this flag enables saving the checkpoint at the
-    end of the training.
-    """
-    def __init__(self):
-        super().__init__()
-        self.name = 'last'
-
-    def check(self, metric_value: float) -> bool:
-        return False
-
-
 class Stable(Criterion):
     """Save k most stable values of the metric.
 

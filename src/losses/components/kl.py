@@ -17,7 +17,7 @@ class KLDivergenceLoss(L1ADLoss):
     def __init__(
             self,
             scale: float = 1.0,
-            reduction: Literal["none", "mean", "sum"] = "mean"
+            reduction: Literal["none", "mean", "sum"] = "none"
         ):
         super().__init__(scale=scale, reduction=reduction)
 

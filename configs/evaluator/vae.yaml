@@ -1,0 +1,15 @@
+# @package evaluators
+
+defaults:
+  - default
+  - _self_
+
+accelerator: gpu
+devices: [0]
+
+# What checkpoints to evaluate. See checkpoints directory.
+strategy: single
+metric_criteria:
+  loss_total_full_rate0.25: ['max']
+  loss_kl_full_rate0.25: ['max']
+  loss_reco_full_rate0.25: ['max']

@@ -23,6 +23,7 @@ from src.utils import RankedLogger
 from src.utils import extras
 from src.utils import get_metric_value
 from src.utils import instantiate_callbacks
+from src.utils import instantiate_evaluators
 from src.utils import instantiate_loggers
 from src.utils import log_hyperparameters
 from src.utils import task_wrapper
@@ -83,24 +84,26 @@ def train(cfg: DictConfig) -> Tuple[Dict[str, Any], Dict[str, Any]]:
     train_metrics = trainer.callback_metrics
 
     # Evaluate the training.
-    checkpoints_dir = cfg["paths"].get("checkpoints_dir")
-
+    ckpts_dir = Path(cfg["paths"].checkpoints_dir) / cfg.experiment_name / cfg.run_name
     if cfg.get("test"):
         log.info(Back.MAGENTA + 8*'-' + "STARTING TESTING" + 8*'-')
-        eval_callbacks = instantiate_callbacks(cfg.get('evaluator_callbacks'))
-        evaluator = hydra.utils.instantiate(
-            cfg.evaluator, callbacks=eval_callbacks, logger=logger
-        )
-        run_ckpts_dir = Path(checkpoints_dir) / cfg.experiment_name / cfg.run_name
-        evaluator.evaluate_run(run_ckpts_dir, algorithm, datamodule)
+        callbacks = instantiate_callbacks(cfg.get('evaluator_callbacks'))
+        evaluators = instantiate_evaluators(cfg.get('evaluators'), callbacks, logger)
+        test(evaluators, ckpts_dir, datamodule, algorithm)
 
-    test_metrics = trainer.callback_metrics
-
-    # merge train and test metrics
-    metric_dict = {**train_metrics, **test_metrics}
-
+    metric_dict = {**train_metrics}
     return metric_dict, object_dict
 
+def test(evaluators: list[Evaluator], ckpts_dir: Path, datamodule, algorithm):
+    """Evaluate the training."""
+    if not evaluators:
+        log.info(Back.YELLOW + "No evaluators found... Skipping testing")
+        return
+
+    datamodule.setup("test")
+    test_loaders = datamodule.test_dataloader()
+    for evaluator in evaluators:
+        evaluator.evaluate_run(ckpts_dir, algorithm, test_loaders)
 
 @hydra.main(version_base="1.3", config_path="../configs", config_name="train.yaml")
 def main(cfg: DictConfig) -> Optional[float]:

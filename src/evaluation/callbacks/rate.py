@@ -134,8 +134,8 @@ class AnomalyEfficiencyCallback(Callback):
         for target_rate in self.target_rates:
             # Get the rates per dataset for a specific target rate.
             rates_per_dataset = {
-                self._get_dsname(rate_name): round(rate_value.compute('efficiency').item(), 4)
-                for rate_name, rate_value in self.rates.items()
+                self._get_dsname(rate_name): round(val.compute('efficiency').item(), 4)
+                for rate_name, val in self.rates.items()
                 if f'eff{target_rate}' in rate_name
             }
 
@@ -160,7 +160,7 @@ class AnomalyEfficiencyCallback(Callback):
         path_parts = ckpts_dir.parts
         run_path_idx = path_parts.index(mlflow_logger._run_name)
         arti_dir = Path('efficiencies') / Path(*path_parts[run_path_idx+1:])
-        arti_dir = arti_dir / plot_folder.stem
+        arti_dir = arti_dir / plot_folder.parts[-1]
         # Log each image in the plot_folder as an artifact.
         for img_path in plot_folder.glob("*.png"):
             mlflow_logger.experiment.log_artifact(

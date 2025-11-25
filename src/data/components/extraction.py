@@ -42,6 +42,7 @@ class L1DataExtractor(object):
     feat_name_map: dict
     cache_root_dir: str = 'data'
     name: str = 'default'
+    verbose: bool = False
 
     def extract(self, datasets: dict, data_category: str):
         """Extract the data.
@@ -96,7 +97,8 @@ class L1DataExtractor(object):
         """Check if a specific data set was already extracted."""
         dataset_folder = self.cache_folder / dataset_name
         if dataset_folder.exists():
-            log.info(Fore.YELLOW + f"Extracted data exists: {dataset_folder}.")
+            if self.verbose:
+                log.info(Fore.YELLOW + f"Extracted data exists: {dataset_folder}.")
             return True
 
         return False

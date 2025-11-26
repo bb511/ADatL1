@@ -55,32 +55,3 @@ def instantiate_loggers(logger_cfg: DictConfig) -> List[Logger]:
             logger.append(hydra.utils.instantiate(lg_conf))
 
     return logger
-
-def instantiate_evaluators(
-        evaluators_cfg: DictConfig, callbacks: list[Callback], logger: Logger
-    ) -> List[Callback]:
-    """Instantiates evaluators from config.
-
-    :param evaluators_cfg: A DictConfig object containing evaluator configurations.
-    :param callbacks: List of callbacks objects pertaining to the evaluators.
-    :param loggers: Logger object where to log the results of the evaluation.
-    :return: A list of instantiated callbacks.
-    """
-    evaluators: List[Callback] = []
-
-    if not evaluators_cfg:
-        log.warning("No evaluators configs found! Skipping..")
-        return evaluators
-
-    if not isinstance(evaluators_cfg, DictConfig):
-        raise TypeError("Evaluators config must be a DictConfig!")
-
-    logging.getLogger("pytorch_lightning").setLevel(logging.WARNING)
-    for _, ev_conf in evaluators_cfg.items():
-        if isinstance(ev_conf, DictConfig) and "_target_" in ev_conf:
-            log.info(f"Instantiating evaluator for ckpt strat <{ev_conf.strategy}>")
-            evaluators.append(
-                hydra.utils.instantiate(ev_conf, callbacks=callbacks, logger=logger)
-            )
-
-    return evaluators

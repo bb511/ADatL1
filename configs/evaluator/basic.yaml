@@ -1,4 +1,4 @@
-# @package evaluators
+# @package evaluator
 
 defaults:
   - _self_

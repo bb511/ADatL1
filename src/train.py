@@ -24,7 +24,6 @@ from src.utils import RankedLogger
 from src.utils import extras
 from src.utils import get_metric_value
 from src.utils import instantiate_callbacks
-from src.utils import instantiate_evaluators
 from src.utils import instantiate_loggers
 from src.utils import log_hyperparameters
 from src.utils import task_wrapper

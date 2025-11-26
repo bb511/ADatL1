@@ -127,6 +127,11 @@ class Evaluator:
         This runs all the callbacks that were given to it on the test data in the
         given datamodule. The callbacks themselves are responsible for plotting their
         output if this is to be plotted.
+
+        :param ckpt_path: Path to a specific checkopint file, must end in '.ckpt'.
+        :param model: LightningModule object pertaining to the model to evaulate.
+        :param test_loaders: The test data loaders. Can correspond to multiple test
+            data sets.
         """
         # Delegate to the test loop of a pl trainer object.
         log.info(f"-> -> -> -> Evaluating checkpoint at {ckpt_path}.")

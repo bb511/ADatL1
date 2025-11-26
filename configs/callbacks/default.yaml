@@ -4,6 +4,7 @@ defaults:
   - util@model_summary: model_summary
   - util@rich_progress_bar: rich_progress_bar
   - util@log_data_mlflow: log_data_mlflow
+  - util@clear_ckpts: clear_ckpts
   - _self_
 
 model_summary:

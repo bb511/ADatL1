@@ -148,14 +148,14 @@ class DatasetAwareModelCheckpoint(Callback):
         ds_metrics = {}
         for ds_name in relevant_ds:
             metric_value = self._get_metric(trainer.callback_metrics, ds_name)
-            filepath = self._configure_filepath(trainer, ds_name, metric_value)
-            self._save_checkpoint(trainer, pl_module, filepath)
             ds_metrics[ds_name] = metric_value
 
         plot_folder = self.dirpath / 'plots'
         plot_folder.mkdir(parents=True, exist_ok=True)
         xlabel = f"{self.monitor}"
         horizontal_bar.plot(ds_metrics, xlabel, plot_folder)
+
+        self._save_checkpoint(trainer, pl_module, self.dirpath / 'last_epoch.ckpt')
 
     def _configure_filepath(self, trainer, ds_name: str, metric_val: float) -> Path:
         """Construct the filename out of the given properties of the checkpoint."""
@@ -180,7 +180,7 @@ class DatasetAwareModelCheckpoint(Callback):
 
         epochs = defaultdict(int)
         values = defaultdict(float)
-        for k in range(self.topk):
+        for k in range(self.topk - 1):
             for dataset_name in self.checkpoints.keys():
                 epochs[dataset_name] = self.checkpoints[dataset_name][k]['epoch']
                 values[dataset_name] = self.checkpoints[dataset_name][k]['value']

@@ -1,4 +1,4 @@
-# package callbacks.components
+# package callbacks.util
 
 # Log the data to mlflow artifacts.
 _target_: src.callbacks.log_data_mlflow.LogDataInfoMlFlow

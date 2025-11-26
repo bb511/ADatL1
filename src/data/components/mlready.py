@@ -30,6 +30,7 @@ class L1DataMLReady:
     cache_root_dir: str = "data/"
     name: str = "default"
     seed: int = 42
+    verbose: bool = False
 
     def prepare(self, normalizer: normalization.L1DataNormalizer):
         """Makes train set, validation set, test set, and auxiliary data.
@@ -222,7 +223,8 @@ class L1DataMLReady:
     def _check_data_exists(self, dataset_folder: Path) -> bool:
         """Check if a specific data set was already processed."""
         if dataset_folder.exists():
-            log.info(Fore.YELLOW + f"MLready data exists: {dataset_folder}.")
+            if self.verbose:
+                log.info(Fore.YELLOW + f"MLready data exists: {dataset_folder}.")
             return True
 
         return False

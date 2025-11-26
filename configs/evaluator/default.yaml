@@ -3,11 +3,4 @@
 defaults:
   - _self_
 
-_target_: src.evaluation.evaluator.Evaluator
-default_root_dir: ${paths.output_dir}
-accelerator: cpu
-devices: 'auto'
-
-# set True to to ensure deterministic results
-# makes training slower but gives more reproducibility than just setting seeds
-deterministic: true
+# The default is no evaluator, i.e., make no evaluation plots.

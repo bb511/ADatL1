@@ -3,8 +3,9 @@
 from typing import Optional
 from collections import defaultdict
 from pathlib import Path
-import re
+import logging
 
+import torch
 import pytorch_lightning
 from pytorch_lightning.loggers import Logger
 from pytorch_lightning import LightningModule, LightningDataModule
@@ -22,12 +23,12 @@ class Evaluator:
     The callbacks used here are different from the callbacks used at training time and
     are contained in src/evaluation/callbacks.
 
-    :param metric_criteria: Dictionary containing the name of each metric for which
-        checkpoints have been saved during training and one wants to produce the eval
-        plots; to each metric, there corresponds a set of criteria for which these
-        checkpoints were saved, e.g., 'min', 'max', etc...
-    :param strategy: String specifying the strategy used to checkpoint, e.g., single
-        dataset, leave one out, etc...
+    :param ckpts: Dictionary with the following structure:
+        'strategy_1':
+            'metric_1':
+                'criterion_1': ['min', 'max', etc.]
+        ...
+        This is used for speciyfing which checkpoints to actually evaluate.
     :param callbacks: List of pl.Callback objects that compute evaluation metrics on
         the test data and do all the handling of these, including plotting.
     :param logger: pl.Logger object that handles the logging for this evaluation stage.
@@ -37,78 +38,113 @@ class Evaluator:
 
     def __init__(
         self,
-        metric_criteria: dict = None,
-        strategy: str = None,
+        ckpts: dict = None,
         callbacks: Optional[list[Callback]] = None,
         logger: Optional[Logger] = None,
         **trainer_kwargs,
     ):
-        self.strategy = strategy
-        self.metric_criteria = metric_criteria
+        self.ckpts = ckpts or {}
         self.callbacks = callbacks or []
 
         # Build a *real* Trainer under the hood
         self.evaluator = pytorch_lightning.Trainer(
-            **trainer_kwargs, logger=logger, callbacks=self.callbacks
+            logger=logger,
+            callbacks=self.callbacks,
+            **trainer_kwargs,
         )
 
-    def evaluate(
+    def evaluate_run(
         self,
-        ckpt_path: Path,
+        run_folder: Path,
         model: LightningModule,
-        datamodule: LightningDataModule,
-    ) -> list[dict[str, float]]:
+        test_loaders: LightningDataModule,
+    ):
+        """Evaluates all checkpoints pertraining to a run.
+
+        Checks the self.ckpts to evaluate only checkpoints that are specified there.
+
+        :param run_folder: Path to the folder where the checkpoints for a particular run
+            are stored.
+        :param model: LightningModule object pertaining to the model to evaulate.
+        :param test_loaders: The test data loaders. Can correspond to multiple test
+            data sets.
+        """
+        if self._check_conditions():
+            return
+
+        log.info(Fore.MAGENTA + f"Evaluating run at {run_folder}...")
+
+        for strategy_name in self.ckpts.keys():
+            if strategy_name == 'last':
+                self.evaluate_last(run_folder, model, test_loaders)
+                continue
+
+            strat_subdir = self._get_subdir(run_folder, strategy_name)
+            self._evaluate_strategy(strat_subdir, model, test_loaders)
+
+    def _evaluate_strategy(self, strategy_folder: Path, model, test_loaders):
+        """Evaluate all the checkpoints corresponding to a certain strategy.
+
+        Strategy here means the strategy used to checkpoint, i.e., either a checkpoint
+        for each of the datasets, or a single checkpoint at the end of the training...
+        Expect that every subdir of a strategy folder corresponds to a certain metric
+        that was tracked during that run.
+        """
+        self.strategy_name = strategy_folder.name
+        log.info(Fore.GREEN + f"-> Evaluating strategy '{self.strategy_name}'")
+
+        for metric_name in self.ckpts[self.strategy_name].keys():
+            metric_subdir = self._get_subdir(strategy_folder, metric_name)
+            self._evaluate_metric(metric_subdir, model, test_loaders)
+
+    def _evaluate_metric(self, metric_folder: Path, model, test_loaders):
+        """Evaluate the ckpts corresponding to a metric in a run.
+
+        Expect that the folders inside metric_ckpts each correspond to a criteria on
+        that metric. By criteria we mean, e.g., min, max, etc. on that metric, where the
+        checkpoint was saved.
+        """
+        self.metric_name = metric_folder.name
+        log.info(Fore.CYAN + f"-> -> Evaluating metric '{self.metric_name}'")
+        for criterion_name in self.ckpts[self.strategy_name][self.metric_name]:
+            criterion_subdir = self._get_subdir(metric_folder, criterion_name)
+            self._evaluate_criterion(criterion_subdir, model, test_loaders)
+
+    def _evaluate_criterion(self, criterion_folder: Path, model, test_loaders):
+        """Evaluate all checkpoints associated with a given criterion.
+
+        Expect that the folder is filled with .ckpt files corresponding to checkpoints
+        on different datasets, for example.
+        """
+        criterion_name = criterion_folder.name
+        log.info(Fore.BLUE + f"-> -> -> Evaluating criterion '{criterion_name}'")
+        for ckpt_path in criterion_folder.glob("*.ckpt"):
+            self.evaluate_ckpt(ckpt_path, model, test_loaders)
+
+    def evaluate_ckpt(self, ckpt_path: Path, model, test_loaders):
         """Run test loops on given a model and a datamodule.
 
         This runs all the callbacks that were given to it on the test data in the
         given datamodule. The callbacks themselves are responsible for plotting their
         output if this is to be plotted.
         """
-        datamodule.setup("test")
-
-        test_loaders = datamodule.test_dataloader()
-
         # Delegate to the test loop of a pl trainer object.
-        self.evaluator.test(ckpt_path=ckpt_path, model=model, dataloaders=test_loaders)
+        log.info(f"-> -> -> -> Evaluating checkpoint at {ckpt_path}.")
 
-    def evaluate_run(
-        self, run_ckpts: Path, model: LightningModule, datamodule: LightningDataModule,
-    ):
-        """Computes the evaluation metrics for all the checkpoints inside a folder.
+        state_dict = torch.load(
+            ckpt_path, weights_only=False, map_location='cpu'
+        )['state_dict']
+        model.load_state_dict(state_dict, strict=True)
+        model._ckpt_path = ckpt_path
 
-        Assume that the checkpoints are each corresponding to a particular data set.
-        """
-        self._check_conditions()
+        logging.getLogger("pytorch_lightning").setLevel(logging.ERROR)
+        self.evaluator.test(model=model, dataloaders=test_loaders, verbose=False)
 
-        datamodule.setup("test")
-        test_loaders = datamodule.test_dataloader()
-
-        ckpt_paths = self._get_ckpt_paths(run_ckpts)
-        for metric, criteria in ckpt_paths.items():
-            log.info(Fore.GREEN + f"Evaluating checkpoints for metric: {metric}...")
-            for criterion, paths in criteria.items():
-                log.info(f"-> Evaluating criterion {criterion}")
-                for ckpt_path in paths:
-                    self.evaluator.test(
-                        ckpt_path=ckpt_path,
-                        model=model,
-                        dataloaders=test_loaders,
-                        verbose=False
-                    )
-
-    def _get_ckpt_paths(self, ckpt_dir: Path) -> dict[list[Path]]:
-        """Finds the ckpts corresponding to given metrics and respective criteria."""
-        ckpt_paths = defaultdict(lambda: defaultdict(list))
-
-        strat_dir = self._get_subdir(ckpt_dir, self.strategy)
-        for metric in self.metric_criteria.keys():
-            metric_dir = self._get_subdir(strat_dir, metric)
-            for criterion in self.metric_criteria[metric]:
-                criterion_dir = self._get_subdir(metric_dir, criterion)
-                for ckpt_filepath in criterion_dir.glob('*.ckpt'):
-                    ckpt_paths[metric][criterion].append(ckpt_filepath)
-
-        return ckpt_paths
+    def evaluate_last(self, run_folder: Path, model, test_loaders):
+        """Evaluate the checkpoint taken at the last epoch."""
+        log.info(Fore.GREEN + f"-> Evaluating strategy 'last'")
+        ckpt_path = run_folder / 'last.ckpt'
+        self.evaluate_ckpt(ckpt_path, model, test_loaders)
 
     def _get_subdir(self, main_dir: Path, subdir: str):
         """Checks if a dir exists and returns it if true."""
@@ -118,14 +154,13 @@ class Evaluator:
 
         return subdir
 
-    def _check_conditions(self):
+    def _check_conditions(self) -> bool:
         """Checks if the criteria for running the evaluation are met."""
         if not self.callbacks:
             log.warn(Fore.MAGENTA + "No eval callbacks given. Skipping evaluation...")
-            return
-        if not self.metric_criteria:
-            log.warn(Fore.MAGENTA + "No metric_criteria given. Skipping evaluation...")
-            return
+            return True
+
+        return False
 
     def _extract_dataset_name(self, ckpt_path: Path):
         """Extracts the dataset name from the name of a checkpoint file.

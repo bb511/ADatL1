@@ -1,4 +1,5 @@
 # Clear the directory where the checkpoints were stored if it exists.
+import os
 from pathlib import Path
 import shutil
 
@@ -11,4 +12,5 @@ class ClearRunCheckpointDir(Callback):
         self.run_ckpts_dir = Path(run_ckpts_dir)
 
     def on_fit_start(self, trainer, pl_module):
-        shutil.rmtree(self.run_ckpts_dir)
+        if os.path.exists(self.run_ckpts_dir):
+            shutil.rmtree(self.run_ckpts_dir)

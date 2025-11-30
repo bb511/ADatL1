@@ -1,4 +1,4 @@
-# package callbacks.util
+# package evaluator_callbacks.components
 
 # https://lightning.ai/docs/pytorch/latest/api/lightning.pytorch.callbacks.RichProgressBar.html
 _target_: pytorch_lightning.callbacks.RichProgressBar

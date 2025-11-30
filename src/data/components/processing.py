@@ -22,6 +22,7 @@ class L1DataProcessor:
     object_filters: dict
     cache_root_dir: str = "data/"
     name: str = "default"
+    verbose: bool = False
 
     def process(self, data_category: str):
         """Applies processing to the data and caches the processed data.
@@ -123,7 +124,8 @@ class L1DataProcessor:
     def _check_data_exists(self, cache_path: Path) -> bool:
         """Check if a specific data set was already processed."""
         if cache_path.exists():
-            log.info(Fore.YELLOW + f"Processed data exists: {cache_path}.")
+            if self.verbose:
+                log.info(Fore.YELLOW + f"Processed data exists: {cache_path}.")
             return True
 
         cache_path.mkdir(parents=True, exist_ok=True)

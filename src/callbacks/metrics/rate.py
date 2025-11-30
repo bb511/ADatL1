@@ -3,10 +3,13 @@ import numpy as np
 from torchmetrics import Metric
 
 
-class AnomalyRate(Metric):
-    """Calculates the how many anomalies are detected given a certain trigger rate.
+class AnomalyCounter(Metric):
+    """Counts the number of anomalies at a given background rate.
 
-    :target_rate: Float specifying the target rate of anomalies.
+    At the end, this can compute either the rate of anomalies or the anomaly detection
+    efficiency for the given data.
+
+    :target_rate: Float specifying the target rate of anomalies in kHz.
     :bc_rate: Float containing the bunch crossing rate in kHz. This is the
         revolution frequency of the LHC times the number of proton bunches in the
         LHC tunnel, which gives the total rate of events that are processed by
@@ -39,5 +42,10 @@ class AnomalyRate(Metric):
         self.ntriggered += ntriggered
         self.nsamples += anomaly_score.numel()
 
-    def compute(self) -> torch.Tensor:
-        return self.ntriggered.float() * self.bc_rate / self.nsamples
+    def compute(self, quantity: str) -> torch.Tensor:
+        if quantity == 'rate':
+            return self.ntriggered.float() * self.bc_rate / self.nsamples
+        elif quantity == 'efficiency':
+            return self.ntriggered.float() / self.nsamples
+        else:
+            raise ValueError(f"{quantity} is not a valid quantity to compute!")

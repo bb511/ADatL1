@@ -1,4 +1,4 @@
-# package callbacks.util
+# package evaluator_callbacks.components
 
 # https://lightning.ai/docs/pytorch/stable/api/lightning.pytorch.callbacks.RichModelSummary.html
 _target_: pytorch_lightning.callbacks.RichModelSummary

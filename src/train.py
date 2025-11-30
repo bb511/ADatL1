@@ -1,6 +1,7 @@
 # Main training script.
 from typing import Any, Dict, List, Optional, Tuple
 from pathlib import Path
+import copy
 
 import hydra
 import pytorch_lightning as pl
@@ -8,7 +9,8 @@ import pytorch_lightning as pl
 import torch
 from pytorch_lightning import Callback, LightningDataModule, LightningModule, Trainer
 from pytorch_lightning.loggers import Logger
-from omegaconf import DictConfig
+from omegaconf import OmegaConf, DictConfig
+from colorama import Fore, Back, Style
 
 import rootutils
 rootutils.setup_root(__file__, indicator=".project-root", pythonpath=True)
@@ -82,23 +84,38 @@ def train(cfg: DictConfig) -> Tuple[Dict[str, Any], Dict[str, Any]]:
     train_metrics = trainer.callback_metrics
 
     # Evaluate the training.
-    checkpoints_dir = cfg["paths"].get("checkpoints_dir")
-
     if cfg.get("test"):
-        eval_callbacks = instantiate_callbacks(cfg.get('evaluator_callbacks'))
-        evaluator = hydra.utils.instantiate(
-            cfg.evaluator, callbacks=eval_callbacks, logger=logger
-        )
-        run_ckpts_dir = Path(checkpoints_dir) / cfg.experiment_name / cfg.run_name
-        evaluator.evaluate_run(run_ckpts_dir, algorithm, datamodule)
+        log.info(Back.MAGENTA + 8*'-' + "STARTING TESTING" + 8*'-')
+        test(cfg, datamodule, algorithm, logger)
 
-    test_metrics = trainer.callback_metrics
-
-    # merge train and test metrics
-    metric_dict = {**train_metrics, **test_metrics}
-
+    metric_dict = {**train_metrics}
     return metric_dict, object_dict
 
+def test(cfg: DictConfig, datamodule, algorithm, logger):
+    """Evaluate the training."""
+    if not cfg.get('evaluator'):
+        log.info(Back.YELLOW + "No evaluator config found... Skipping testing")
+        return
+
+    # Merge the trainer configuration with the evaluator. This is done since the
+    # Evaluator object is basically a wrapper around a trainer with extra steps.
+    trainer_config = OmegaConf.to_container(cfg.trainer, resolve=True)
+    evaluator_config = OmegaConf.to_container(cfg.evaluator, resolve=True)
+    merged_dict = {**trainer_config, **evaluator_config}
+    evaluator_cfg = OmegaConf.create(merged_dict)
+
+    log.info("Instantiating evaluator callbacks...")
+    callbacks = instantiate_callbacks(cfg.get('evaluator_callbacks'))
+    log.info(f"Instantiating evaluator <{evaluator_cfg._target_}>")
+    evaluator = hydra.utils.instantiate(
+        evaluator_cfg, callbacks=callbacks, logger=logger
+    )
+
+    datamodule.setup("test")
+    test_loaders = datamodule.test_dataloader()
+    run_ckpts = Path(cfg.paths.checkpoints_dir) / cfg.experiment_name / cfg.run_name
+
+    evaluator.evaluate_run(run_ckpts, algorithm, test_loaders)
 
 @hydra.main(version_base="1.3", config_path="../configs", config_name="train.yaml")
 def main(cfg: DictConfig) -> Optional[float]:

@@ -10,6 +10,7 @@ import awkward as ak
 import mlflow
 from pytorch_lightning import LightningDataModule
 from torch.utils.data import TensorDataset, Dataset, random_split
+from pytorch_lightning.trainer.states import TrainerFn
 
 from src.utils import pylogger
 from colorama import Fore, Back, Style
@@ -126,23 +127,26 @@ class L1ADDataModule(LightningDataModule):
 
                 label +=1
 
-        self._data_summary()
+        self._data_summary(stage)
 
-    def _data_summary(self):
+    def _data_summary(self, stage: str):
         """Make a neat little summary of what data is being used."""
         log.info(Fore.MAGENTA + '-'*5 + " Data Summary " + '-'*5)
-        log.info(Fore.GREEN + f"Training data:")
-        log.info(f"Zero bias: {self.data_train.shape}")
 
-        log.info(Fore.GREEN + f"Validation data:")
-        log.info(f"Zero bias: {self.data_val.shape}")
-        for data_name, data in self.aux_val.items():
-            log.info(f"{data_name}: {data.shape}")
+        if stage == 'fit':
+            log.info(Fore.GREEN + f"Training data:")
+            log.info(f"Zero bias: {self.data_train.shape}")
 
-        log.info(Fore.GREEN + f"Test data:")
-        log.info(f"Zero bias: {self.data_test.shape}")
-        for data_name, data in self.aux_test.items():
-            log.info(f"{data_name}: {data.shape}")
+            log.info(Fore.GREEN + f"Validation data:")
+            log.info(f"Zero bias: {self.data_val.shape}")
+            for data_name, data in self.aux_val.items():
+                log.info(f"{data_name}: {data.shape}")
+
+        if stage == 'test':
+            log.info(Fore.GREEN + f"Test data:")
+            log.info(f"Zero bias: {self.data_test.shape}")
+            for data_name, data in self.aux_test.items():
+                log.info(f"{data_name}: {data.shape}")
 
     def train_dataloader(self) -> Dataset[Any]:
         """Create and return the training dataloader.

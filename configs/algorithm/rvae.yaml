@@ -27,6 +27,6 @@ loss:
     - kl
 
   reconstruction:
-    scale: '${substract: 1.0, ${alpha}}'
+    scale: '${substract: 1.0, ${algorithm.loss.kl.scale}}'
   kl:
-    scale: ${alpha}
+    scale: ???

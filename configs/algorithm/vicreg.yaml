@@ -15,7 +15,7 @@ object_mask:
   prob: 0.5709886168264394
 
 lorentz_rotation:
-  _target_: src.models.components.vicreg.FastLorentzRotation
+  _target_: src.models.augmentation.FastLorentzRotation
   _partial_: true
   prob: 0.5
 

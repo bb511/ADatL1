@@ -19,6 +19,7 @@ train: true
 trainer:
   min_epochs: 1
   max_epochs: 480
+  num_sanity_val_steps: 0
 
 logger:
   mlflow:

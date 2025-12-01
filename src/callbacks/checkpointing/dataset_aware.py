@@ -159,13 +159,14 @@ class DatasetAwareModelCheckpoint(Callback):
 
     def _configure_filepath(self, trainer, ds_name: str, metric_val: float) -> Path:
         """Construct the filename out of the given properties of the checkpoint."""
-        filename = "ds={dataset_name}__value={metric_value:.6f}"
+        filename = "ds={dataset_name}__metric={metric_name}__value={metric_value:.6f}"
         filename = filename + "__epoch={epoch:02d}"
 
         filename = filename.format(
             epoch=trainer.current_epoch,
             step=trainer.global_step,
             dataset_name=ds_name,
+            metric_name=self.monitor,
             metric_value=metric_val
         )
 

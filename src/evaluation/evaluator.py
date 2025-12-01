@@ -53,6 +53,14 @@ class Evaluator:
             **trainer_kwargs,
         )
 
+        self.evaluator.strat_name = None
+        self.evaluator.metric_name = None
+        self.evaluator.criterion_name = None
+
+    def _initialise_custom_evaluator_attributes(self):
+        """Initialise custom evaluator attributes used in the callbacks."""
+
+
     def evaluate_run(
         self,
         run_folder: Path,
@@ -91,11 +99,14 @@ class Evaluator:
         that was tracked during that run.
         """
         self.strategy_name = strategy_folder.name
+        self.evaluator.strat_name = self.strategy_name
         log.info(Fore.GREEN + f"-> Evaluating strategy '{self.strategy_name}'")
 
         for metric_name in self.ckpts[self.strategy_name].keys():
             metric_subdir = self._get_subdir(strategy_folder, metric_name)
             self._evaluate_metric(metric_subdir, model, test_loaders)
+
+        self.evaluator.strat_name = None
 
     def _evaluate_metric(self, metric_folder: Path, model, test_loaders):
         """Evaluate the ckpts corresponding to a metric in a run.
@@ -105,10 +116,13 @@ class Evaluator:
         checkpoint was saved.
         """
         self.metric_name = metric_folder.name
+        self.evaluator.metric_name = self.metric_name
         log.info(Fore.CYAN + f"-> -> Evaluating metric '{self.metric_name}'")
         for criterion_name in self.ckpts[self.strategy_name][self.metric_name]:
             criterion_subdir = self._get_subdir(metric_folder, criterion_name)
             self._evaluate_criterion(criterion_subdir, model, test_loaders)
+
+        self.evaluator.metric_name = None
 
     def _evaluate_criterion(self, criterion_folder: Path, model, test_loaders):
         """Evaluate all checkpoints associated with a given criterion.
@@ -117,9 +131,12 @@ class Evaluator:
         on different datasets, for example.
         """
         criterion_name = criterion_folder.name
+        self.evaluator.criterion_name = criterion_name
         log.info(Fore.BLUE + f"-> -> -> Evaluating criterion '{criterion_name}'")
         for ckpt_path in criterion_folder.glob("*.ckpt"):
             self.evaluate_ckpt(ckpt_path, model, test_loaders)
+
+        self.evaluator.criterion_name = None
 
     def evaluate_ckpt(self, ckpt_path: Path, model, test_loaders):
         """Run test loops on given a model and a datamodule.
@@ -148,6 +165,7 @@ class Evaluator:
     def evaluate_last(self, run_folder: Path, model, test_loaders):
         """Evaluate the checkpoint taken at the last epoch."""
         log.info(Fore.GREEN + f"-> Evaluating strategy 'last'")
+        self.evaluator.strat_name = 'last'
         ckpt_path = run_folder / 'last.ckpt'
         self.evaluate_ckpt(ckpt_path, model, test_loaders)
 

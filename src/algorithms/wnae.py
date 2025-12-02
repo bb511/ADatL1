@@ -7,7 +7,6 @@ import torch.nn as nn
 from src.algorithms import L1ADLightningModule
 from src.models.components.mcmc import SampleBuffer
 
-
 class WNAE(L1ADLightningModule):
     """
     The WNAE algorithm differs from a standard Variational Autoencoder by
@@ -35,7 +34,6 @@ class WNAE(L1ADLightningModule):
     :param replay_ratio: Fraction of initial points sampled from the replay buffer.
     :param buffer_size: Maximum size of the replay buffer.
     """
-        
     def __init__(
         self,
         encoder: nn.Module,
@@ -110,7 +108,8 @@ class WNAE(L1ADLightningModule):
             # Generate negative samples and compute their energy
             x_neg = self.sample_negative(x_pos)
             z_neg, reconstruction_neg = self.forward(x_neg)
-            energy_neg = self.loss.losses.reconstruction(
+            ### BUG: Energy is calculated wrong - actually could be right
+            energy_neg = self.loss.losses.reconstruction( 
                 target=x_neg,
                 reconstruction=reconstruction_neg,
                 z=z_neg
@@ -173,7 +172,6 @@ class WNAE(L1ADLightningModule):
     
     def sample_negative(self, x: torch.Tensor) -> torch.Tensor:
         """Generate negative samples via Langevin MCMC."""
-
         batch_size, sample_shape = x.size(0), x.size()[1:]
 
         # Initialize chain either from provided x (for CD) or from buffer / random

@@ -93,20 +93,20 @@ class L1ADDataModule(LightningDataModule):
         data_folder = self.hparams.data_mlready.cache_folder
         loader = self.hparams.data_awkward2torch
 
-        label = 0
         if self.data_train is None and self.data_val is None and self.data_test is None:
+            label = 0
             self.data_train = loader.load_folder(data_folder / 'train')
             self.data_val = loader.load_folder(data_folder / 'valid')
             self.data_test = loader.load_folder(data_folder / 'test')
 
-            self.label_train = np.full(self.data_train.size(dim=0), label)
-            self.label_val = np.full(self.data_val.size(dim=0), label)
-            self.label_test = np.full(self.data_test.size(dim=0), label)
+            self.labels_train = torch.from_numpy(np.full(self.data_train.size(dim=0), label))
+            self.labels_val = torch.from_numpy(np.full(self.data_val.size(dim=0), label))
+            self.labels_test = torch.from_numpy(np.full(self.data_test.size(dim=0), label))
 
-        aux_folder = data_folder / 'aux'
-        label_signal = 0
-        label_background = 0
         if not self.aux_val and not self.aux_test:
+            aux_folder = data_folder / 'aux'
+            label_signal = 0
+            label_background = 0
             for dataset_path in aux_folder.iterdir():
                 name = dataset_path.stem
 
@@ -120,12 +120,11 @@ class L1ADDataModule(LightningDataModule):
                 val = loader.load_folder(dataset_path / 'valid')
                 test = loader.load_folder(dataset_path / 'test')
 
+                label_tensor = torch.from_numpy(np.full(val.size(dim=0), label))
                 self.aux_val.update({name: val})
-                self.aux_val_labels.update({name: np.full(val.size(dim=0), label)})
+                self.aux_val_labels.update({name: label_tensor})
                 self.aux_test.update({name: test})
-                self.aux_test_labels.update({name: np.full(test.size(dim=0), label)})
-
-                label +=1
+                self.aux_test_labels.update({name: label_tensor})
 
         self._data_summary(stage)
 

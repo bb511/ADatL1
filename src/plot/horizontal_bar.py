@@ -62,6 +62,7 @@ def plot_yright(data: dict, ydata: dict, xlabel: str, ylabel: str, save_dir: Pat
 
     filename = sanitize_filename(xlabel)
     filename = filename.replace(" ", "_")
+    filename = filename.replace("\n", "_")
     fig.savefig(save_dir / f"{filename}.jpg", bbox_inches='tight')
     fig.clear()
     plt.close(fig)

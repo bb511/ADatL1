@@ -165,7 +165,7 @@ def write_html_section(
     """
     html_section = []
     html_section.append(
-        f"<details open><summary>{html.escape(section)} ({len(image_paths)})</summary>"
+        f"<details><summary>{html.escape(section)} ({len(image_paths)})</summary>"
         )
     html_section.append("<div class='grid'>")
     for img_path in image_paths:

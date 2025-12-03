@@ -57,9 +57,12 @@ class L1DataExtractor(object):
         self.extracted_dir = Path(self.cache_root_dir) / 'extracted'
         self.cache_folder = self.extracted_dir / self.name / data_category
         self.select_feats = OmegaConf.to_container(self.select_features, resolve=True)
+        self.existence_warn_trigger = False
 
+        nexists = 0
         for dataset_name, folder_path in datasets.items():
             if self._check_data_exists(dataset_name):
+                nexists += 1
                 continue
 
             data = Parquet2Awkward(
@@ -67,6 +70,16 @@ class L1DataExtractor(object):
             )
             self._cache(data, dataset_name)
             self._plot(dataset_name)
+
+        if nexists == len(datasets.keys()):
+            log.info(Fore.YELLOW + f"Extracted data exists in {self.cache_folder}!")
+
+        if self.existence_warn_trigger:
+            log.warn(
+                "The code only checks if there exist parquet files with the names of "
+                "objects specified in the data/data_extractor config. If you are "
+                "unsure whether the features are as expected, double check this."
+            )
 
     def _cache(self, data: Parquet2Awkward, dataset_name: str):
         """Store the extracted data in a folder corresponding to the dataset name."""
@@ -97,11 +110,24 @@ class L1DataExtractor(object):
         """Check if a specific data set was already extracted."""
         dataset_folder = self.cache_folder / dataset_name
         if dataset_folder.exists():
-            if self.verbose:
-                log.info(Fore.YELLOW + f"Extracted data exists: {dataset_folder}.")
-            return True
+            if self._check_objects_exist(dataset_folder):
+                if self.verbose:
+                    self.existence_warn_trigger = True
+                    log.info(Fore.YELLOW + f"Extracted data exists: {dataset_folder}.")
+                return True
 
         return False
+
+    def _check_objects_exist(self, dataset_folder: Path) -> bool:
+        """Checks if all objects specified in the config have been extracted."""
+        for obj_name in self.select_features.keys():
+            if self.select_features[obj_name] == 'none':
+                continue
+            obj_cache_filepath = dataset_folder / f'{obj_name}.parquet'
+            if not obj_cache_filepath.is_file():
+                return False
+
+        return True
 
     def _rename_features(self, batch: ak.Array, obj_name: str):
         """Rename the data features for object."""

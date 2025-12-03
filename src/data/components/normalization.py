@@ -3,6 +3,7 @@ from dataclasses import dataclass
 
 import numpy as np
 import awkward as ak
+import pickle
 from colorama import Fore, Back, Style
 from pytorch_lightning import loggers
 
@@ -107,3 +108,27 @@ class L1DataNormalizer:
             result = ak.with_field(result, normed_feature, where=feature)
 
         return result
+
+    def import_norm_params(self, norm_filepath: Path, obj_name: str):
+        """Import normalization parameters from a pkl file."""
+        if not norm_filepath.is_file():
+            raise FileNotFoundError(f"Norm param file not found at {norm_filepath}!")
+        if norm_filepath.suffix != '.pkl':
+            raise ValueError(
+                f"Norm params can only be exported to .pkl! "
+                f"Given file path to export to: {norm_filepath}"
+            )
+
+        with norm_filepath.open('rb') as params_file:
+            self.norm_params[obj_name] = pickle.load(params_file)
+
+    def export_norm_params(self, norm_filepath: Path, obj_name: str):
+        """Export normalization parameters from a pkl file."""
+        if norm_filepath.suffix != '.pkl':
+            raise ValueError(
+                f"Norm params can only be exported to .pkl! "
+                f"Given file path to export to: {norm_filepath}"
+            )
+
+        with norm_filepath.open('wb') as params_file:
+            pickle.dump(self.norm_params[obj_name], params_file)

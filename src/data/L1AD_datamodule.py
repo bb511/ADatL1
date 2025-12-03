@@ -30,6 +30,7 @@ class L1ADDataModule(LightningDataModule):
         data_normalizer: "L1DataNormalizer",
         data_mlready: "L1DataMLReady",
         data_awkward2torch: "L1DataAwkward2Torch",
+        train_features: dict,
         batch_size: int = 16384,
         val_batches: int = -1,
     ) -> None:
@@ -75,7 +76,9 @@ class L1ADDataModule(LightningDataModule):
         self.hparams.data_processor.process("signal")
 
         log.info(Back.GREEN + "Splitting data into train, val, test and normalizing...")
-        self.hparams.data_mlready.prepare(self.hparams.data_normalizer)
+        self.hparams.data_mlready.prepare(
+            self.hparams.data_normalizer, self.hparams.train_features
+        )
 
     def setup(self, stage: str = None) -> None:
         """Load data. Set `self.data_train`, `self.data_val`, `self.data_test`.
@@ -98,10 +101,13 @@ class L1ADDataModule(LightningDataModule):
             self.data_train = loader.load_folder(data_folder / 'train')
             self.data_val = loader.load_folder(data_folder / 'valid')
             self.data_test = loader.load_folder(data_folder / 'test')
+            ntrain = self.data_train.size(dim=0)
+            nvalid = self.data_val.size(dim=0)
+            ntest = self.data_test.size(dim=0)
 
-            self.labels_train = torch.from_numpy(np.full(self.data_train.size(dim=0), label))
-            self.labels_val = torch.from_numpy(np.full(self.data_val.size(dim=0), label))
-            self.labels_test = torch.from_numpy(np.full(self.data_test.size(dim=0), label))
+            self.labels_train = torch.from_numpy(np.full(ntrain, label))
+            self.labels_val = torch.from_numpy(np.full(nvalid, label))
+            self.labels_test = torch.from_numpy(np.full(ntest, label))
 
         if not self.aux_val and not self.aux_test:
             aux_folder = data_folder / 'aux'
@@ -243,3 +249,23 @@ class L1ADDataModule(LightningDataModule):
             self.batch_size_per_device = (
                 self.hparams.batch_size // self.trainer.world_size
             )
+
+    def get_additional_data(self, extra_feats: dict, flag: str):
+        """Hook for callbacks to get additional features.
+
+        These features compute additional interesting quantities in the callbacks.
+
+        :param extra_feats: Dictionary containing the object and the features to be
+            extracted from that object.
+        :param flag: String specifying subdirectory to put the extra feature parquet
+            files in so they don't get mixed up at training time.
+        """
+        loader = self.hparams.data_awkward2torch
+        data_folder = self.hparams.data_mlready.cache_folder
+
+        log.info(Back.GREEN + f"Extracting additional features: {extra_feats}...")
+        self.hparams.data_mlready.prepare(
+            self.hparams.data_normalizer, extra_feats, flag
+        )
+
+        return

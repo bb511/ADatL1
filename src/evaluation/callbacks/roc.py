@@ -1,4 +1,4 @@
-# Callback that computes the anomaly rate during training.
+# Callback that computes the ROC curves for each signal given a checkpoint.
 from collections import defaultdict
 from pathlib import Path
 

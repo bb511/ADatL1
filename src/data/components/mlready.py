@@ -301,6 +301,7 @@ class L1DataMLReady:
         if data_filepath.is_file():
             if self.verbose:
                 log.info(Fore.YELLOW + f"mlready data exists at {data_filepath}.")
+                log.info(Fore.YELLOW + f"Double check if it has the right feats...")
             return True
 
         return False

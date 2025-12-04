@@ -1,4 +1,5 @@
 from typing import Any, Optional, Union
+from collections import defaultdict
 from pathlib import Path
 
 # from retry import retry
@@ -15,6 +16,7 @@ from pytorch_lightning.trainer.states import TrainerFn
 from src.utils import pylogger
 from colorama import Fore, Back, Style
 from src.data.components.dataset import L1ADDataset
+from src.data.components.normalization import L1DataNormalizer
 
 log = pylogger.RankedLogger(__name__)
 
@@ -250,11 +252,13 @@ class L1ADDataModule(LightningDataModule):
                 self.hparams.batch_size // self.trainer.world_size
             )
 
-    def get_additional_data(self, extra_feats: dict, flag: str):
-        """Hook for callbacks to get additional features.
+    def get_extra(self, normalizer: L1DataNormalizer, extra_feats: dict, flag: str):
+        """Hook for callbacks to get additional data.
 
-        These features compute additional interesting quantities in the callbacks.
+        The data provided through this hook should not be already included in the
+        training data. Otherwise, no point in calling this hook.
 
+        :param normalizer: Normalizer object for the additional data.
         :param extra_feats: Dictionary containing the object and the features to be
             extracted from that object.
         :param flag: String specifying subdirectory to put the extra feature parquet
@@ -264,8 +268,21 @@ class L1ADDataModule(LightningDataModule):
         data_folder = self.hparams.data_mlready.cache_folder
 
         log.info(Back.GREEN + f"Extracting additional features: {extra_feats}...")
-        self.hparams.data_mlready.prepare(
-            self.hparams.data_normalizer, extra_feats, flag
-        )
+        self.hparams.data_mlready.prepare(normalizer, extra_feats, flag)
 
-        return
+        train_data = loader.load_folder(data_folder / 'train' / flag)
+        val_data = {}
+        test_data = {}
+        val_data.update({'main_val': loader.load_folder(data_folder / 'valid' / flag)})
+        test_data.update({'main_test': loader.load_folder(data_folder / 'test' / flag)})
+
+        aux_folder = data_folder / 'aux'
+        for dataset_path in aux_folder.iterdir():
+            name = dataset_path.stem
+
+            val = loader.load_folder(dataset_path / 'valid' / flag)
+            test = loader.load_folder(dataset_path / 'test' / flag)
+            val_data.update({name: val})
+            test_data.update({name: test})
+
+        return train_data, val_data, test_data

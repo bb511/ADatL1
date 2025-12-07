@@ -30,7 +30,7 @@ class L1ADLoss(nn.Module):
         z: torch.Tensor,
         z_mean: torch.Tensor,
         z_log_var: torch.Tensor,
-        s: torch.LongTensor,
+        y: torch.LongTensor,
     ) -> torch.Tensor:
         """
         Forward method to compute the loss.
@@ -40,7 +40,7 @@ class L1ADLoss(nn.Module):
         :param z: Latent representations (batch_size, latent_dim).
         :param z_mean: Mean of the latent distribution (for VAE).
         :param z_log_var: Log variance of the latent distribution (for VAE).
-        :param s: Signal/background labels (batch_size,).
+        :param y: Labels: < 0 for background simulations, 0 for zerobias, > 0 for signal simulations (batch_size,).
         """
         raise NotImplementedError("Forward method must be implemented in subclasses.")
     
@@ -74,10 +74,7 @@ class MultiLoss(L1ADLoss):
         super().__init__(scale=scale, reduction=reduction)
         # Eliminate reduction of individual losses
         for loss_fn in losses.values():
-            try:
-                loss_fn.reduction = "none"
-            except:
-                import ipdb; ipdb.set_trace()
+            loss_fn.reduction = "none"
 
         self.list_losses = list_losses or list(losses.keys())
         self.losses = nn.ModuleDict({
@@ -93,7 +90,7 @@ class MultiLoss(L1ADLoss):
         z_mean: torch.Tensor,
         z_log_var: torch.Tensor,
         z: torch.Tensor,
-        s: torch.LongTensor,
+        y: torch.LongTensor,
     ) -> torch.Tensor:
 
         self.values = {}
@@ -104,7 +101,7 @@ class MultiLoss(L1ADLoss):
                 'z_mean': z_mean,
                 'z_log_var': z_log_var,
                 'z': z,
-                's': s,
+                'y': y,
             })
             self.values[lname] = loss
         

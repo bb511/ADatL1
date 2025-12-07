@@ -28,18 +28,18 @@ class MILoss(L1ADLoss):
 
     @staticmethod
     def mutual_information_bernoulli_loss(
-        s: torch.Tensor,
         z: torch.Tensor,
+        y: torch.Tensor,
         eps: float = 1e-7,
     ) -> torch.Tensor:
         """
         Calculate mutual information loss for Bernoulli-distributed latent variables.
 
         This loss encourages the latent representation z to be informative about
-        the signal/background label s.
+        the signal/background distinction.
 
-        :param s: Signal/background labels (batch_size,)
         :param z: Latent representations (batch_size, latent_dim)
+        :param y: Labels: < 0 for background simulations, 0 for zerobias, > 0 for signal simulations (batch_size,).
         :param eps: Small constant for numerical stability
         """
         # Convert z to probabilities using sigmoid
@@ -55,7 +55,7 @@ class MILoss(L1ADLoss):
         # Calculate conditional entropy H(Z|S)
         conditional_entropy = 0
         n_total = z.shape[0]
-        mask_signal = s == 1 if s is not None else torch.zeros(n_total, dtype=torch.bool)
+        mask_signal = y > 0
         if mask_signal.any():
             z_signal = z[mask_signal]
             z_signal_probs = torch.sigmoid(z_signal)
@@ -67,7 +67,7 @@ class MILoss(L1ADLoss):
                 mask_signal.sum().float() / n_total
             ) * h_z_given_s1.sum(dim=1).mean()
 
-        mask_background = s == 0 if s is not None else torch.ones(n_total, dtype=torch.bool)
+        mask_background = y <= 0
         if mask_background.any():
             z_background = z[mask_background]
             z_background_probs = torch.sigmoid(z_background)
@@ -84,14 +84,11 @@ class MILoss(L1ADLoss):
 
     def forward(
         self,
-        target: torch.Tensor,
-        reconstruction: torch.Tensor,
         z: torch.Tensor,
-        z_mean: torch.Tensor,
-        z_log_var: torch.Tensor,
-        s: torch.Tensor
+        y: torch.Tensor,
+        **kwargs
     ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
         """Forward method to compute the MI loss."""
-        mi_loss_batch = self.mutual_information_bernoulli_loss(s, z, eps=self.eps)
+        mi_loss_batch = self.mutual_information_bernoulli_loss(z, y, eps=self.eps)
         mi_loss_per_obs = mi_loss_batch * torch.ones(z.shape[0], device=z.device)
         return self.scale * self.reduce(mi_loss_per_obs)

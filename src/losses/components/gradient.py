@@ -27,10 +27,7 @@ class GradientPenaltyLoss(L1ADLoss):
         self,
         target: torch.Tensor,
         reconstruction: torch.Tensor,
-        z: torch.Tensor,
-        z_mean: torch.Tensor,
-        z_log_var: torch.Tensor,
-        s: torch.LongTensor,
+        **kwargs
     ) -> torch.Tensor:
         B = target.shape[0]
 

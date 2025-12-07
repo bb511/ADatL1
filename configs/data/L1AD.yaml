@@ -17,6 +17,15 @@ zerobias: ${paths.zerobias}
 signal: ${paths.signal}
 background: ${paths.background}
 
+# Get features to train on.
+# Select the kinematic features of each standard object.
+train_features:
+  muons: ['Et', 'eta', 'phi']
+  jets: ['Et', 'eta', 'phi']
+  egammas: ['Et', 'eta', 'phi']
+  taus: ['Et', 'eta', 'phi']
+  MET: ['Et', 'phi']
+
 # The batch size of the data.
 batch_size: 16384
 

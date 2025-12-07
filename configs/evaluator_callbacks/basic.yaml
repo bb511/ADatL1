@@ -2,5 +2,7 @@
 
 defaults:
   - default
-  - metrics@anomaly_rate: anomaly_rate
+  - metrics@anomaly_efficiency: anomaly_efficiency
+  - metrics@rocs: rocs
+  - metrics@pu: pu
   - _self_

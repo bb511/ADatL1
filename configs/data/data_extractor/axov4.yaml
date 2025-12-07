@@ -11,12 +11,8 @@ select_features:
   taus: ['tauIEt', 'tauIEta', 'tauIPhi']
   ET: ['Et']
   MET: ['Et', 'phi']
-  MHT: 'none'
-  FET: 'none'
-  FHT: 'none'
-  cicada: 'none'
-  event_info: 'none'
-  seeds: 'none'
+  HT: ['Et']
+  event_info: ['nPV_True']
 
 # Change the field names for easier access when processing.
 feat_name_map:

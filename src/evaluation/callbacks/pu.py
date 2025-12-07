@@ -1,4 +1,5 @@
-# Callback that computes the anomaly rate during training.
+# Plots the correlation of the anomaly score with the pileup.
+
 from collections import defaultdict
 from pathlib import Path
 
@@ -9,33 +10,37 @@ from pytorch_lightning import Trainer, LightningModule, LightningDataModule
 
 from src.evaluation.callbacks.metrics.rate import AnomalyCounter
 from src.evaluation.callbacks import utils
+from src.data.components.normalization import L1DataNormalizer
 from src.plot import horizontal_bar
 
 
-class AnomalyEfficiencyCallback(Callback):
-    """Calculates the how many anomalies are detected given a certain trigger rate.
-
-    The checkpoints given to this callback can be saved on metrics different than
-    the ones that his callback is instantiated with. For example, you can evaluate
-    a model checkpointed on the minimum of the total loss by using the KL div as the
-    anomaly score, rather than the total loss, in this callback.
+class BkgRatePileup(Callback):
+    """Plots the correlation between the background data sets rate and the pileup.
 
     :target_rate: Float specifying the target rate of anomalies.
     :bc_rate: Float containing the bunch crossing rate in kHz. This is the
         revolution frequency of the LHC times the number of proton bunches in the
         LHC tunnel, which gives the total efficiency of events that are processed by
         the L1 trigger.
+    :datamodule: The datamodule that was used during the training of the model.
     :materic_names: Which model metrics to use as the anomaly score to calculate the
-        efficiency on.
+        rate on.
     """
 
-    def __init__(self, target_rates: list[int], bc_rate: int, metric_names: list[str]):
+    def __init__(
+        self,
+        target_rates: list[int],
+        bc_rate: int,
+        metric_names: list[str],
+        datamodule: LightningDataModule
+    ):
         super().__init__()
         self.target_rates = target_rates
         self.bc_rate = bc_rate
-        self.rates = {}
-
+        self.datamodule = datamodule
         self.metric_names = metric_names
+
+        self.rates = {}
         self.maintest_score_data = defaultdict(list)
 
     def on_test_start(self, trainer, pl_module):
@@ -47,6 +52,24 @@ class AnomalyEfficiencyCallback(Callback):
         if first_test_dset_key != "main_test":
             raise ValueError("Eff callback requires main_test first in the data dict!")
 
+        self.put_per_dataset = self._get_pileup_data()
+
+    def _get_pileup_data(self):
+        """Get the pileup data for each test data set.
+
+        # Get the nPV_True feature of the event_info object, put it in the subfolder of
+        # the data in 'test_plots_data' and don't normalize it.
+        """
+        extra_feats = {'event_info': ['nPV_True']}
+        flag = 'test_plots_data'
+        normalizer = L1DataNormalizer('unnormalized', {})
+
+        _, _, test_data = self.datamodule.get_extra(normalizer, extra_feats, flag)
+
+        print(test_data)
+        exit(1)
+        return test_data
+
     def on_test_epoch_start(self, trainer, pl_module):
         """Clear the metrics dictionary at the start of the epoch."""
         for mname in self.maintest_score_data.keys():
@@ -55,25 +78,28 @@ class AnomalyEfficiencyCallback(Callback):
     def on_test_batch_end(
         self, trainer, pl_module, outputs, batch, batch_idx, dataloader_idx=0
     ):
-        """Determine the rate for every given metric for every test data set.
+        """Determine the rate for every given metric for the simulated bkg data.
 
         First, the desired metrics are computed on the main_test data and accummulated
         across batches. The full metric distribution is used to set a threshold that
         will give a target rate or set of rates, specified by the user.
-        These thresholds are then applied on all other data sets used for test
-        to determine, by using the threshold computed on main_test, what would the rate
-        be on these other data sets.
+        These thresholds are then applied on the bkg simulation data sets, i.e., the
+        data sets that have target == -1, to determine what the rate on this other data
+        would be at that threshold.
         """
         self.dataset_name = list(trainer.test_dataloaders.keys())[dataloader_idx]
         self.total_batches = trainer.num_test_batches[dataloader_idx]
+        x, y = batch
 
         for metric_name in self.metric_names:
             if self.dataset_name == "main_test":
                 self._accumulate_maintest_output(outputs, batch_idx, metric_name)
-            else:
+            elif (y == -1).all().item():
                 if batch_idx == 0:
                     self._initialize_rate_metric(batch_idx, metric_name)
                 self._compute_batch_rate(outputs, metric_name)
+            else:
+                continue
 
     def _accumulate_maintest_output(self, outputs: dict, batch_idx: int, mname: str):
         """Accummulates the specified metric data across batches.
@@ -101,7 +127,7 @@ class AnomalyEfficiencyCallback(Callback):
             rate = AnomalyCounter(target_rate, self.bc_rate)
             rate.set_threshold(self.maintest_score_data[mname])
             rate.update(self.maintest_score_data[mname])
-            rate_name = f"{mname.replace('/', '_')}_eff{target_rate}"
+            rate_name = f"{mname.replace('/', '_')}_rate{target_rate}"
             self.rates.update({f"{self.dataset_name}/{rate_name}": rate})
 
     def _compute_batch_rate(self, outputs: dict, mname: str):
@@ -111,7 +137,7 @@ class AnomalyEfficiencyCallback(Callback):
         which events pass the rate threshold for each batch and updates the total.
         """
         for target_rate in self.target_rates:
-            rate_name = f"{mname.replace('/', '_')}_eff{target_rate}"
+            rate_name = f"{mname.replace('/', '_')}_rate{target_rate}"
             self.rates[f"{self.dataset_name}/{rate_name}"].update(
                 outputs[mname].detach().cpu()
             )
@@ -134,14 +160,14 @@ class AnomalyEfficiencyCallback(Callback):
         """Log the anomaly rates computed on each of the data sets."""
         ckpts_dir = Path(pl_module._ckpt_path).parent
         ckpt_name = Path(pl_module._ckpt_path).stem
-        plot_folder = ckpts_dir / 'plots' / ckpt_name / 'efficiencies'
+        plot_folder = ckpts_dir / 'plots' / ckpt_name / 'bkgpileup'
         plot_folder.mkdir(parents=True, exist_ok=True)
 
         for metric_name in self.metric_names:
             for target_rate in self.target_rates:
                 # Get the rates per dataset for a specific target rate
                 # and for a specific metric_name used as the anomaly score.
-                name = f"{metric_name.replace('/', '_')}_eff{target_rate}"
+                name = f"{metric_name.replace('/', '_')}_rate{target_rate}"
                 rates_per_dataset = {
                     self._get_dsname(rate_name): round(val.compute('efficiency').item(), 4)
                     for rate_name, val in self.rates.items()

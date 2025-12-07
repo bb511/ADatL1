@@ -17,17 +17,16 @@ def plot(data: dict, xlabel: str, save_dir: Path):
     dataset_names = list(data.keys())
     dataset_values = list(data.values())
 
-    fig, ax = plt.subplots(figsize=(16, 24))
+    fig, ax = plt.subplots(figsize=(8,16), dpi=60)
 
     ax.barh(dataset_names, dataset_values)
     ax.set_xlabel(xlabel)
 
     hep.cms.label("Preliminary", data=False, loc=0, ax=ax)
-    plt.tight_layout()
 
     filename = sanitize_filename(xlabel)
     filename = filename.replace(" ", "_")
-    fig.savefig(save_dir / f"{filename}.png")
+    fig.savefig(save_dir / f"{filename}.jpg", bbox_inches='tight')
     fig.clear()
     plt.close(fig)
 
@@ -46,7 +45,7 @@ def plot_yright(data: dict, ydata: dict, xlabel: str, ylabel: str, save_dir: Pat
     dataset_values = list(data.values())
     dataset_yvals = list(ydata.values())
 
-    fig, ax = plt.subplots(figsize=(24, 34))
+    fig, ax = plt.subplots(figsize=(8,16), dpi=60)
 
     ax.barh(dataset_names, dataset_values)
     ax.set_xlabel(xlabel)
@@ -61,9 +60,9 @@ def plot_yright(data: dict, ydata: dict, xlabel: str, ylabel: str, save_dir: Pat
     ax2.set_yticklabels(dataset_yvals)
     ax2.set_ylabel(ylabel)
 
-    plt.tight_layout()
     filename = sanitize_filename(xlabel)
     filename = filename.replace(" ", "_")
-    fig.savefig(save_dir / f"{filename}.png")
+    filename = filename.replace("\n", "_")
+    fig.savefig(save_dir / f"{filename}.jpg", bbox_inches='tight')
     fig.clear()
     plt.close(fig)

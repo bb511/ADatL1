@@ -144,6 +144,8 @@ class LangevinSampler(nn.Module):
 
         :return: A dictionary containing the final sample and diagnostic information.
         """
+        device = next(model.parameters()).device
+        x = x.to(device)
 
         # Ensure gradient tracking
         x = x.clone().detach().requires_grad_(True)

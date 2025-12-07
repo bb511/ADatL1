@@ -136,7 +136,7 @@ class WNAE(L1ADLightningModule):
 
         return {
             "loss": loss_total,
-            "loss/total": loss_total.detach(),
+            "loss/total/full": loss_total.detach(),
             "loss/reconstruction": loss_reco.detach(),
             "loss/wasserstein": loss_wasserstein.detach(),
             "loss/nae": loss_nae.detach(),

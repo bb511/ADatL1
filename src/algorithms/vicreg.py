@@ -41,9 +41,8 @@ class VICReg(L1ADLightningModule):
         # Instantiate augmentation modules
         self.fb1, self.fb2 = copy.deepcopy(feature_blur), copy.deepcopy(feature_blur)
         self.om1, self.om2 = copy.deepcopy(object_mask), copy.deepcopy(object_mask)
-        self.lor1, self.lor2 = copy.deepcopy(lorentz_rotation), copy.deepcopy(
-            lorentz_rotation
-        )
+        # TODO: Here add the normalization, and then pass them so that they are fully initialized:
+        self.lor1, self.lor2 = copy.deepcopy(lorentz_rotation), copy.deepcopy(lorentz_rotation)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         x = self.lor1(self.om1(self.fb1(x)))
@@ -69,9 +68,10 @@ class VICReg(L1ADLightningModule):
 
         return {
             "loss": loss_total,
-            "loss/inv": loss_inv,
-            "loss/var": loss_var,
-            "loss/cov": loss_cov,
+            "loss/total/full": loss_total.detach(),
+            "loss/inv": loss_inv.detach(),
+            "loss/var": loss_var.detach(),
+            "loss/cov": loss_cov.detach(),
         }
     
     def outlog(self, outdict: dict) -> dict:

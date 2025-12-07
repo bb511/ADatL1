@@ -47,9 +47,9 @@ class VAE(L1ADLightningModule):
             "loss/reco/mean": reco_loss.mean(),
             "loss/kl/mean": kl_loss.mean(),
             # Used for callbacks:
-            "loss/total/full": total_loss,
-            "loss/reco/full": reco_loss,
-            "loss/kl/full": kl_loss,
+            "loss/total/full": total_loss.detach(),
+            "loss/reco/full": reco_loss.detach(),
+            "loss/kl/full": kl_loss.detach(),
             "z_mean_squared": z_mean.pow(2)
         }
 

@@ -69,9 +69,9 @@ class SVDD(L1ADLightningModule):
         )
         return {
             "loss": total_loss.mean(),
+            "loss/total/full": total_loss.detach(),
             "loss/svdd/mean": total_loss.mean(),
             "loss/distance/mean": distances.mean(),
-            "z.mean().abs()": z.abs().mean(),
         }
     
     def _filter_log_dict(self, outdict: dict) -> dict:

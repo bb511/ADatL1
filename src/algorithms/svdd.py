@@ -74,7 +74,7 @@ class SVDD(L1ADLightningModule):
             "loss/distance/mean": distances.mean(),
         }
     
-    def _filter_log_dict(self, outdict: dict) -> dict:
+    def outlog(self, outdict: dict) -> dict:
         return {
             "loss": outdict.get("loss"),
             "loss_svdd": outdict.get("loss/svdd/mean"),

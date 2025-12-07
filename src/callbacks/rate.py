@@ -47,9 +47,9 @@ class AnomalyRateCallback(Callback):
     ):
         """Determine the rate for every given metric for every validation data set.
 
-        First, the desired metrics are compute on the mainval_data and accummulated
+        First, the desired metrics are computed on the mainval_data and accummulated
         across batches. The full metric distribution is used to set a threshold that
-        will give a given rate or set of rates, specified by the user.
+        will give a target rate or set of rates, specified by the user.
         These thresholds are then applied on all other data sets used for validation
         to determine, by using the threshold computed on mainval, what would the rate
         be on these other data sets.

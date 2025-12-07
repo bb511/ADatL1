@@ -54,11 +54,12 @@ class L1DataMLReady:
         self.cache_folder /= normalizer.name
         self.flag = flag
 
-        self.select_feats = OmegaConf.to_container(select_feats, resolve=True)
+        self.select_feats = select_feats
+        if OmegaConf.is_config(self.select_feats):
+            self.select_feats = OmegaConf.to_container(self.select_feats, resolve=True)
+
         self.unified_schema = self._unify_schema()
         self.rng = np.random.default_rng(self.seed)
-
-        self._data_exists_trigger = False
 
         self._prepare_maindata()
         self._prepare_auxdata()
@@ -79,13 +80,19 @@ class L1DataMLReady:
         available in the given processed data. Then, this is split into a training
         dataset, validation dataset, and test dataset in a deterministic seeded way.
         """
-        log.info(Fore.MAGENTA + "Preparing train, valid, test data...")
         obj_paths = self._get_files_per_object(self.processed_datapath / 'zerobias')
-        itrain, ivalid, itest = self._compute_main_split(obj_paths)
+        if not set(self.select_feats.keys()) <= set(obj_paths.keys()):
+            log.warn(
+                "Some objects you're trying to select are not in the extracted data\n"
+                f"selected objects = {self.select_feats.keys()}\n"
+                f"available = {obj_names}"
+            )
 
+        log.info(Fore.MAGENTA + "Preparing train, valid, test data...")
         self._train_data_exists = 0
         self._valid_data_exists = 0
         self._test_data_exists = 0
+        itrain, ivalid, itest = self._compute_main_split(obj_paths)
         for obj_name, file_paths in obj_paths.items():
             if not obj_name in self.select_feats.keys():
                 continue
@@ -195,10 +202,8 @@ class L1DataMLReady:
         """Prepare the signal and data categories, used only for validation."""
         log.info(Fore.MAGENTA + "Preparing auxiliary data...")
         self.aux_dir = self.cache_folder / 'aux'
-        self.aux_dir.mkdir(parents=True, exist_ok=True)
 
         self._aux_data_exists = []
-
         dataset_paths = self.processed_datapath / 'background'
         for dataset_path in dataset_paths.iterdir():
             self._cache_aux(dataset_path)
@@ -215,11 +220,12 @@ class L1DataMLReady:
     def _cache_aux(self, dataset_path: Path):
         """Split the aux datasets into valid, test splits, normalize, and cache."""
         cache_dir = self.aux_dir / dataset_path.stem
-        cache_dir.mkdir(parents=True, exist_ok=True)
 
         ivalid, itest = self._compute_aux_split(dataset_path)
+        obj_names = []
         for obj_path in dataset_path.glob('*.parquet'):
             obj_name = obj_path.stem
+            obj_names.append(obj_name)
             if not obj_name in self.select_feats.keys():
                 continue
 
@@ -227,7 +233,7 @@ class L1DataMLReady:
             self._cache_aux_valid(obj_dataset, cache_dir, obj_name, ivalid)
             self._cache_aux_test(obj_dataset, cache_dir, obj_name, itest)
 
-        if not cache_dir.stem in self._aux_data_exists:
+        if not cache_dir.stem in self._aux_data_exists and cache_dir.is_dir():
             log.info(Fore.GREEN + f"Cached aux set {dataset_path.stem}: {cache_dir}")
 
     def _compute_aux_split(self, dataset_path: Path):

@@ -31,7 +31,7 @@ class L1DataAwkward2Torch:
         with ThreadPoolExecutor(max_workers=workers) as ex:
             data = list(ex.map(self._process_object, files))
 
-        data = np.concatenate(data, axis=1)
+        data = np.concatenate(data, axis=1) if isinstance(data, list) else data
         data = torch.from_numpy(data)
         self._cache(data)
 

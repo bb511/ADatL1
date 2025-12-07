@@ -62,8 +62,8 @@ class L1ADDataModule(LightningDataModule):
 
         self.data_train, self.data_val, self.data_test = None, None, None
         self.labels_train, self.labels_val, self.labels_test = None, None, None
-        self.aux_val, self.aux_val_labels = {}, {}
-        self.aux_test, self.aux_test_labels = {}, {}
+        self.aux_val, self.aux_val_labels = None, None
+        self.aux_test, self.aux_test_labels = None, None
 
     def prepare_data(self) -> None:
         """Get zero bias data and the simulated MC signal data."""
@@ -95,46 +95,73 @@ class L1ADDataModule(LightningDataModule):
         self._set_batch_size()
         log.info(Back.GREEN + "Loading data in memory...")
 
-        data_folder = self.hparams.data_mlready.cache_folder
-        loader = self.hparams.data_awkward2torch
+        self.data_folder = self.hparams.data_mlready.cache_folder
+        self.loader = self.hparams.data_awkward2torch
 
-        if self.data_train is None and self.data_val is None and self.data_test is None:
-            label = 0
-            self.data_train = loader.load_folder(data_folder / 'train')
-            self.data_val = loader.load_folder(data_folder / 'valid')
-            self.data_test = loader.load_folder(data_folder / 'test')
-            ntrain = self.data_train.size(dim=0)
-            nvalid = self.data_val.size(dim=0)
-            ntest = self.data_test.size(dim=0)
+        if stage == 'fit':
+            self._load_train_data()
+            self._load_valid_data()
+        if stage == 'validate':
+            self._load_valid_data()
+        if stage == 'test':
+            self._load_test_data()
 
-            self.labels_train = torch.from_numpy(np.full(ntrain, label))
-            self.labels_val = torch.from_numpy(np.full(nvalid, label))
-            self.labels_test = torch.from_numpy(np.full(ntest, label))
-
-        if not self.aux_val and not self.aux_test:
-            aux_folder = data_folder / 'aux'
-            label_signal = 0
-            label_background = 0
-            for dataset_path in aux_folder.iterdir():
-                name = dataset_path.stem
-
-                if 'SingleNeutrino' in name:
-                    label_background += -1
-                    label = label_background
-                else:
-                    label_signal += 1
-                    label = label_signal
-
-                val = loader.load_folder(dataset_path / 'valid')
-                test = loader.load_folder(dataset_path / 'test')
-
-                label_tensor = torch.from_numpy(np.full(val.size(dim=0), label))
-                self.aux_val.update({name: val})
-                self.aux_val_labels.update({name: label_tensor})
-                self.aux_test.update({name: test})
-                self.aux_test_labels.update({name: label_tensor})
+        if stage == 'predict':
+            raise ValueError("The predict dataloader is not implemented yet.")
 
         self._data_summary(stage)
+
+    def _load_train_data(self):
+        """Set up the training data, if it is not already loaded."""
+        if self.data_train is None:
+            label = 0
+            self.data_train = self.loader.load_folder(self.data_folder / 'train')
+            ntrain = self.data_train.size(dim=0)
+            self.labels_train = torch.from_numpy(np.full(ntrain, label))
+
+    def _load_valid_data(self):
+        """Set up the validation data, if it is not already loaded."""
+        if self.data_val is None:
+            label = 0
+            self.data_val = self.loader.load_folder(self.data_folder / 'valid')
+            nvalid = self.data_val.size(dim=0)
+            self.labels_val = torch.from_numpy(np.full(nvalid, label))
+
+        if self.aux_val is None:
+            self.aux_val, self.aux_val_labels = self._load_aux_data('valid')
+
+    def _load_test_data(self):
+        """Set up the test data, if it is not already loaded."""
+        if self.data_test is None:
+            label = 0
+            self.data_test = self.loader.load_folder(self.data_folder / 'test')
+            ntest = self.data_test.size(dim=0)
+            self.labels_test = torch.from_numpy(np.full(ntest, label))
+
+        if self.aux_test is None:
+            self.aux_test, self.aux_test_labels = self._load_aux_data('test')
+
+    def _load_aux_data(self, stage: str):
+        """Load the auxiliary data, either for the test or validation stage."""
+        aux_folder = self.data_folder / 'aux'
+        label_signal = 0
+        label_background = 0
+
+        data, labels = {}, {}
+        for dataset_path in aux_folder.iterdir():
+            name = dataset_path.stem
+            if 'SingleNeutrino' in name:
+                label_background += -1
+                label = label_background
+            else:
+                label_signal += 1
+                label = label_signal
+            data_tensor = self.loader.load_folder(dataset_path / stage)
+            label_tensor = torch.from_numpy(np.full(data_tensor.size(dim=0), label))
+            data.update({name: data_tensor})
+            labels.update({name: label_tensor})
+
+        return data, labels
 
     def _data_summary(self, stage: str):
         """Make a neat little summary of what data is being used."""
@@ -144,6 +171,12 @@ class L1ADDataModule(LightningDataModule):
             log.info(Fore.GREEN + f"Training data:")
             log.info(f"Zero bias: {self.data_train.shape}")
 
+            log.info(Fore.GREEN + f"Validation data:")
+            log.info(f"Zero bias: {self.data_val.shape}")
+            for data_name, data in self.aux_val.items():
+                log.info(f"{data_name}: {data.shape}")
+
+        if stage == 'validate':
             log.info(Fore.GREEN + f"Validation data:")
             log.info(f"Zero bias: {self.data_val.shape}")
             for data_name, data in self.aux_val.items():
@@ -264,24 +297,22 @@ class L1ADDataModule(LightningDataModule):
         :param flag: String specifying subdirectory to put the extra feature parquet
             files in so they don't get mixed up at training time.
         """
-        loader = self.hparams.data_awkward2torch
-        data_folder = self.hparams.data_mlready.cache_folder
-
         log.info(Back.GREEN + f"Extracting additional features: {extra_feats}...")
         self.hparams.data_mlready.prepare(normalizer, extra_feats, flag)
 
-        train_data = loader.load_folder(data_folder / 'train' / flag)
+        exit(1)
+        train_data = self.loader.load_folder(self.data_folder / 'train' / flag)
         val_data = {}
         test_data = {}
-        val_data.update({'main_val': loader.load_folder(data_folder / 'valid' / flag)})
-        test_data.update({'main_test': loader.load_folder(data_folder / 'test' / flag)})
+        val_data.update({'main_val': self.loader.load_folder(self.data_folder / 'valid' / flag)})
+        test_data.update({'main_test': self.loader.load_folder(self.data_folder / 'test' / flag)})
 
-        aux_folder = data_folder / 'aux'
+        aux_folder = self.data_folder / 'aux'
         for dataset_path in aux_folder.iterdir():
             name = dataset_path.stem
 
-            val = loader.load_folder(dataset_path / 'valid' / flag)
-            test = loader.load_folder(dataset_path / 'test' / flag)
+            val = self.loader.load_folder(dataset_path / 'valid' / flag)
+            test = self.loader.load_folder(dataset_path / 'test' / flag)
             val_data.update({name: val})
             test_data.update({name: test})
 

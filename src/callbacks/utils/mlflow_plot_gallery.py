@@ -6,7 +6,7 @@ import html
 
 
 def build_html(root_dir: Path, title: str = "Plots Gallery") -> Path:
-    """Makes an index html file in mlflow."""
+    """Makes an index html file in mlflow that displays all plots below root_dir."""
     root_dir = root_dir.resolve()
     sections = get_image_paths(root_dir)
 

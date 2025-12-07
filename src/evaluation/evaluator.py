@@ -57,16 +57,7 @@ class Evaluator:
         self.evaluator.metric_name = None
         self.evaluator.criterion_name = None
 
-    def _initialise_custom_evaluator_attributes(self):
-        """Initialise custom evaluator attributes used in the callbacks."""
-
-
-    def evaluate_run(
-        self,
-        run_folder: Path,
-        model: LightningModule,
-        test_loaders: LightningDataModule,
-    ):
+    def evaluate_run(self, run_folder: Path, model: LightningModule, test_loader: dict):
         """Evaluates all checkpoints pertraining to a run.
 
         Checks the self.ckpts to evaluate only checkpoints that are specified there.
@@ -74,7 +65,7 @@ class Evaluator:
         :param run_folder: Path to the folder where the checkpoints for a particular run
             are stored.
         :param model: LightningModule object pertaining to the model to evaulate.
-        :param test_loaders: The test data loaders. Can correspond to multiple test
+        :param test_loader: The test data loaders. Can correspond to multiple test
             data sets.
         """
         if self._check_conditions():
@@ -84,13 +75,13 @@ class Evaluator:
 
         for strategy_name in self.ckpts.keys():
             if strategy_name == 'last':
-                self.evaluate_last(run_folder, model, test_loaders)
+                self.evaluate_last(run_folder, model, test_loader)
                 continue
 
             strat_subdir = self._get_subdir(run_folder, strategy_name)
-            self._evaluate_strategy(strat_subdir, model, test_loaders)
+            self._evaluate_strategy(strat_subdir, model, test_loader)
 
-    def _evaluate_strategy(self, strategy_folder: Path, model, test_loaders):
+    def _evaluate_strategy(self, strategy_folder: Path, model, test_loader: dict):
         """Evaluate all the checkpoints corresponding to a certain strategy.
 
         Strategy here means the strategy used to checkpoint, i.e., either a checkpoint
@@ -104,11 +95,11 @@ class Evaluator:
 
         for metric_name in self.ckpts[self.strategy_name].keys():
             metric_subdir = self._get_subdir(strategy_folder, metric_name)
-            self._evaluate_metric(metric_subdir, model, test_loaders)
+            self._evaluate_metric(metric_subdir, model, test_loader)
 
         self.evaluator.strat_name = None
 
-    def _evaluate_metric(self, metric_folder: Path, model, test_loaders):
+    def _evaluate_metric(self, metric_folder: Path, model, test_loader: dict):
         """Evaluate the ckpts corresponding to a metric in a run.
 
         Expect that the folders inside metric_ckpts each correspond to a criteria on
@@ -120,11 +111,11 @@ class Evaluator:
         log.info(Fore.CYAN + f"-> -> Evaluating metric '{self.metric_name}'")
         for criterion_name in self.ckpts[self.strategy_name][self.metric_name]:
             criterion_subdir = self._get_subdir(metric_folder, criterion_name)
-            self._evaluate_criterion(criterion_subdir, model, test_loaders)
+            self._evaluate_criterion(criterion_subdir, model, test_loader)
 
         self.evaluator.metric_name = None
 
-    def _evaluate_criterion(self, criterion_folder: Path, model, test_loaders):
+    def _evaluate_criterion(self, criterion_folder: Path, model, test_loader: dict):
         """Evaluate all checkpoints associated with a given criterion.
 
         Expect that the folder is filled with .ckpt files corresponding to checkpoints
@@ -134,11 +125,11 @@ class Evaluator:
         self.evaluator.criterion_name = criterion_name
         log.info(Fore.BLUE + f"-> -> -> Evaluating criterion '{criterion_name}'")
         for ckpt_path in criterion_folder.glob("*.ckpt"):
-            self.evaluate_ckpt(ckpt_path, model, test_loaders)
+            self.evaluate_ckpt(ckpt_path, model, test_loader)
 
         self.evaluator.criterion_name = None
 
-    def evaluate_ckpt(self, ckpt_path: Path, model, test_loaders):
+    def evaluate_ckpt(self, ckpt_path: Path, model, test_loader: dict):
         """Run test loops on given a model and a datamodule.
 
         This runs all the callbacks that were given to it on the test data in the
@@ -147,10 +138,9 @@ class Evaluator:
 
         :param ckpt_path: Path to a specific checkopint file, must end in '.ckpt'.
         :param model: LightningModule object pertaining to the model to evaulate.
-        :param test_loaders: The test data loaders. Can correspond to multiple test
+        :param test_loader: The test data loaders. Can correspond to multiple test
             data sets.
         """
-        # Delegate to the test loop of a pl trainer object.
         log.info(f"-> -> -> -> Evaluating checkpoint at {ckpt_path}.")
 
         state_dict = torch.load(
@@ -160,7 +150,7 @@ class Evaluator:
         model._ckpt_path = ckpt_path
 
         logging.getLogger("pytorch_lightning").setLevel(logging.ERROR)
-        self.evaluator.test(model=model, dataloaders=test_loaders, verbose=False)
+        self.evaluator.test(model=model, dataloaders=test_loader, verbose=False)
 
     def evaluate_last(self, run_folder: Path, model, test_loaders):
         """Evaluate the checkpoint taken at the last epoch."""

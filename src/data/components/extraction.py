@@ -61,15 +61,18 @@ class L1DataExtractor(object):
 
         nexists = 0
         for dataset_name, folder_path in datasets.items():
-            if self._check_data_exists(dataset_name):
+            existing_objs = self._check_data_exists(dataset_name)
+            if len(existing_objs) == len(self.select_feats.keys()):
                 nexists += 1
                 continue
 
-            data = Parquet2Awkward(
-                folder_path, select_feats=self.select_feats, threading=False
-            )
+            extr_objs = {
+                obj_name: obj_feats for obj_name, obj_feats in self.select_feats.items()
+                if obj_name not in existing_objs
+            }
+
+            data = Parquet2Awkward(folder_path, select_feats=extr_objs, threading=False)
             self._cache(data, dataset_name)
-            self._plot(dataset_name)
 
         if nexists == len(datasets.keys()):
             log.info(Fore.YELLOW + f"Extracted data exists in {self.cache_folder}!")
@@ -90,6 +93,7 @@ class L1DataExtractor(object):
             cache_file = dataset_folder / f'{obj_name}.parquet'
             parquet_writer = self._write_parquet(data, cache_file, obj_name)
             parquet_writer.close()
+            self._plot(dataset_name, obj_name)
 
         log.info("Cached extracted data at " + Fore.GREEN + f"{dataset_folder}.")
 
@@ -106,28 +110,31 @@ class L1DataExtractor(object):
 
         return writer
 
-    def _check_data_exists(self, dataset_name: str) -> bool:
+    def _check_data_exists(self, dataset_name: str) -> set[str]:
         """Check if a specific data set was already extracted."""
         dataset_folder = self.cache_folder / dataset_name
-        if dataset_folder.exists():
-            if self._check_objects_exist(dataset_folder):
-                if self.verbose:
-                    self.existence_warn_trigger = True
-                    log.info(Fore.YELLOW + f"Extracted data exists: {dataset_folder}.")
-                return True
+        if dataset_folder.is_dir() and any(dataset_folder.iterdir()):
+            existing_objs = self._get_existing_objs(dataset_folder)
+            if self.verbose:
+                self.existence_warn_trigger = True
+                log.info(
+                    Fore.YELLOW + f"Extracted data exists: {dataset_folder}. "
+                    f"Existing objects {existing_objs}."
+                )
 
-        return False
+            return existing_objs
 
-    def _check_objects_exist(self, dataset_folder: Path) -> bool:
+        return set()
+
+    def _get_existing_objs(self, dataset_folder: Path) -> set[str]:
         """Checks if all objects specified in the config have been extracted."""
+        existing_objs = set()
         for obj_name in self.select_features.keys():
-            if self.select_features[obj_name] == 'none':
-                continue
             obj_cache_filepath = dataset_folder / f'{obj_name}.parquet'
-            if not obj_cache_filepath.is_file():
-                return False
+            if obj_cache_filepath.is_file():
+                existing_objs.add(obj_name)
 
-        return True
+        return existing_objs
 
     def _rename_features(self, batch: ak.Array, obj_name: str):
         """Rename the data features for object."""
@@ -139,15 +146,15 @@ class L1DataExtractor(object):
 
         return batch
 
-    def _plot(self, dataset_name: str):
+    def _plot(self, dataset_name: str, obj_name: str):
         """Read and then plot the extracted data."""
         data_dir = self.cache_folder / dataset_name
         plots_dir = self.cache_folder / dataset_name / 'PLOTS'
+        object_file = data_dir / f'{obj_name}.parquet'
 
-        for object_file in data_dir.glob('*.parquet'):
-            data = ak.from_parquet(object_file)
-            obj_folder = plots_dir / object_file.stem
-            obj_folder.mkdir(parents=True, exist_ok=True)
+        data = ak.from_parquet(object_file)
+        obj_folder = plots_dir / obj_name
+        obj_folder.mkdir(parents=True, exist_ok=True)
 
-            for feature in data.fields:
-                plots.plot_hist(data[feature], feature, obj_folder)
+        for feature in data.fields:
+            plots.plot_hist(data[feature], feature, obj_folder)

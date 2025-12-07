@@ -51,6 +51,7 @@ class VICReg(L1ADLightningModule):
 
     def model_step(self, batch: Tuple[torch.Tensor]) -> Dict[str, torch.Tensor]:
         x, _ = batch
+        x = torch.flatten(x, start_dim=1)
 
         # Apply augmentations
         x1, x2 = x.clone(), x.clone()

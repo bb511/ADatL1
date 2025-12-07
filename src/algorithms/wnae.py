@@ -97,6 +97,7 @@ class WNAE(L1ADLightningModule):
 
     def model_step(self, batch: Tuple[torch.Tensor]) -> Dict[str, torch.Tensor]:
         x_pos, _ = batch
+        x_pos = torch.flatten(x_pos, start_dim=1)
         z_pos, reconstruction_pos = self.forward(x_pos)
         energy_pos = self.loss.losses.reconstruction(
             target=x_pos,

@@ -127,9 +127,7 @@ class DatasetAwareModelCheckpoint(Callback):
 
     def create_checkpoint_dir(self):
         """Create the directory where the checkpoints are saved."""
-        if self.dirpath.is_dir():
-            shutil.rmtree(self.dirpath)
-
+        shutil.rmtree(self.dirpath, ignore_errors=True)
         self.dirpath.mkdir(parents=True, exist_ok=True)
 
     def on_fit_end(self, trainer, pl_module):

@@ -12,5 +12,4 @@ class ClearRunCheckpointDir(Callback):
         self.run_ckpts_dir = Path(run_ckpts_dir)
 
     def on_fit_start(self, trainer, pl_module):
-        if os.path.exists(self.run_ckpts_dir):
-            shutil.rmtree(self.run_ckpts_dir)
+        shutil.rmtree(self.run_ckpts_dir, ignore_errors=True)

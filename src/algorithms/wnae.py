@@ -179,9 +179,9 @@ class WNAE(L1ADLightningModule):
 
         # Initialize chain either from provided x (for CD) or from buffer / random
         if self.sampling == "cd":
-            x0 = x.detach()
+            x0 = x.detach().to(self.device)
         else:
-            x0 = self._initial_samples(batch_size, sample_shape)
+            x0 = self._initial_samples(batch_size, sample_shape).to(self.device)
 
         # Generate negative samples via Langevin MCMC
         negative = self.sampler(x=x0, model=self.energy)

@@ -67,7 +67,8 @@ class RVAE(VAE):
     """Regularized VAE. Overriding loss and logging."""
 
     def model_step(self, batch: Tuple[torch.Tensor]) -> Dict[str, torch.Tensor]:
-        x, s = batch
+        x, y = batch
+        x = torch.flatten(x, start_dim=1)
         z_mean, z_log_var, z, reconstruction = self.forward(x)
         loss = self.loss(
             reconstruction=reconstruction,
@@ -75,9 +76,9 @@ class RVAE(VAE):
             z=z,
             z_mean=z_mean,
             z_log_var=z_log_var,
-            s=s
+            y=y
         )
-        del reconstruction, x, z, s
+        del reconstruction, x, z, y
 
         outdict = {
             "loss": loss.mean(),

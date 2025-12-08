@@ -1,6 +1,7 @@
 # Different ways of doing model checkpointing.
 from typing import Optional
 from pathlib import Path
+import os
 import yaml
 import shutil
 
@@ -82,7 +83,11 @@ class LeaveKOutModelCheckpoint(DatasetAwareModelCheckpoint):
         self.save_top_k(trainer, pl_module, "selected_ds", selected_sum)
         self.save_top_k(trainer, pl_module, "left_out_ds", left_out_sum)
 
-        with open(self.dirpath / 'selected_ds.yaml', 'w', encoding='utf-8') as file:
+        fpath = self.dirpath / 'selected_ds.yaml'
+        if not os.path.exists(fpath):
+            return
+        
+        with open(fpath, 'w', encoding='utf-8') as file:
             yaml.safe_dump(list(self.selected_datasets), file)
 
 

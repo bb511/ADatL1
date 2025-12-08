@@ -75,7 +75,9 @@ class AnomalyRateCallback(Callback):
         each metric across batches. The whole metric output distribution is needed to
         set a treshold that gives a certain rate.
         """
-        batch_output = outputs[mname].detach().to('cpu')
+        batch_output = outputs[mname].detach().to("cpu")
+        if batch_output.ndim == 0:
+            batch_output = batch_output.unsqueeze(0)
         self.mainval_score_data[mname].append(batch_output)
 
         if batch_idx == self.total_batches - 1:

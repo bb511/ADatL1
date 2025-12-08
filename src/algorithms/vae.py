@@ -30,15 +30,14 @@ class VAE(L1ADLightningModule):
         return z_mean, z_log_var, z, reconstruction
 
     def model_step(self, batch: Tuple[torch.Tensor]) -> Dict[str, torch.Tensor]:
-        x, y = batch
+        x, _ = batch
         x = torch.flatten(x, start_dim=1)
         z_mean, z_log_var, z, reconstruction = self.forward(x)
 
         reco_loss, kl_loss, total_loss = self.loss(
             reconstruction=reconstruction, z_mean=z_mean, z_log_var=z_log_var, target=x
         )
-
-        del reconstruction, x, z, y
+        del reconstruction, x, z
 
         return {
             # Used for backpropagation:

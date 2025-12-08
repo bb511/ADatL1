@@ -3,13 +3,13 @@ import os
 from typing import Optional
 from collections import defaultdict
 from pathvalidate import sanitize_filename
-import itertools
+import warnings
 from weakref import proxy
 from pathlib import Path
 import copy
 import shutil
+import numpy as np
 
-import torch
 from pytorch_lightning.callbacks import Callback
 
 from src.callbacks.checkpointing.criterion import Criterion
@@ -75,11 +75,13 @@ class DatasetAwareModelCheckpoint(Callback):
             if dataset_match and metric_match:
                 return metric_value.detach().cpu().numpy()
 
-        raise ValueError(
-            f"Checkpoint for metric {self.monitor} failed! " +
-            f"Did you call `log({self.monitor})` in the LightningModule?"
+        warnings.warn(
+            f"Checkpoint for metric '{self.monitor}' not found in logged metrics. "
+            f"Did you call `log('{self.monitor}')` in the LightningModule?",
+            category=UserWarning,
         )
-
+        return np.nan
+    
     def _process_metric_across_datasets(self, trainer, pl_module, ds_metrics: dict):
         """Compute a summary metric across datasets, like leave one out."""
         raise NotImplementedError("Subclasses must implement _process_dataset_losses")

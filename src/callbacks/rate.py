@@ -21,6 +21,7 @@ class AnomalyRateCallback(Callback):
 
     def __init__(self, target_rates: list[int], bc_rate: int, metric_names: list[str]):
         super().__init__()
+        self.device = None
         self.target_rates = target_rates
         self.bc_rate = bc_rate
         self.rates = {}
@@ -39,6 +40,7 @@ class AnomalyRateCallback(Callback):
 
     def on_validation_epoch_start(self, trainer, pl_module):
         """Clear the metrics dictionary at the start of the epoch."""
+        self.device = pl_module.device
         for mname in self.mainval_score_data.keys():
             self.mainval_score_data[mname] = []
 
@@ -89,7 +91,7 @@ class AnomalyRateCallback(Callback):
         mainval data should return the rate for which this threshold was computed.
         """
         for target_rate in self.target_rates:
-            rate = AnomalyCounter(target_rate, self.bc_rate)
+            rate = AnomalyCounter(target_rate, self.bc_rate).to(self.device)
             rate.set_threshold(self.mainval_score_data[mname])
             rate.update(self.mainval_score_data[mname])
             rate_name = f"{mname.replace('/', '_')}_rate{target_rate}"
@@ -115,7 +117,7 @@ class AnomalyRateCallback(Callback):
         the rate on the other data sets differing from main_val.
         """
         for target_rate in self.target_rates:
-            rate = AnomalyCounter(target_rate, self.bc_rate)
+            rate = AnomalyCounter(target_rate, self.bc_rate).to(self.device)
             rate.set_threshold(self.mainval_score_data[mname])
 
             rate_name = f"{mname.replace('/', '_')}_rate{target_rate}"

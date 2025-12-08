@@ -81,12 +81,12 @@ class RVAE(VAE):
 
         outdict = {
             "loss": loss.mean(),
-            "loss/total": loss.mean(),
+            "loss/total/full": loss.detach(),
             "z_mean.abs()": z_mean.abs(),
             "z_log_var": z_log_var,
         }
         if hasattr(self.loss, "losses"):
-            individial_losses = {
+            individual_losses = {
                 f"loss/{module.name}": value
                 for module, value in zip(
                     self.loss.losses.values(),
@@ -94,13 +94,13 @@ class RVAE(VAE):
                 )
             }
             outdict.update({
-                "loss/total": sum(list(individial_losses.values())),
-                **individial_losses
+                "loss/total": sum(list(individual_losses.values())),
+                **{k: v.mean() for k, v in individual_losses.items()}
             })
         return outdict
 
     def outlog(self, outdict: dict) -> dict:
         return {
-            k: v.mean() for k, v in outdict.items()
-            if "loss/" in k or not k.startswith("loss/")
+            k: v for k, v in outdict.items()
+            if "train/" in k and k != "loss/total/full"
         }

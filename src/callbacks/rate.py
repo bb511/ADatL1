@@ -62,7 +62,7 @@ class AnomalyRateCallback(Callback):
                 self._accumulate_mainval_output(outputs, batch_idx, metric_name)
             else:
                 if batch_idx == 0:
-                    self._initialize_rate_metric(batch_idx, metric_name)
+                    self._initialize_rate_metric(metric_name)
                 self._compute_batch_rate(outputs, metric_name)
 
 
@@ -107,7 +107,7 @@ class AnomalyRateCallback(Callback):
                 outputs[mname].detach().cpu()
             )
 
-    def _initialize_rate_metric(self, batch_idx: int, mname: str):
+    def _initialize_rate_metric(self, mname: str):
         """Initializes the rate metric for a dataset for each given target rate.
 
         The anomaly rate metric object is initialised. Then, the threshold is computed

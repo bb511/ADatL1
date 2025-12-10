@@ -5,6 +5,8 @@ defaults:
   - override /algorithm: axov4
   - override /callbacks: basic
   - override /trainer: gpu0
+  - override /evaluator: basic
+  - override /evaluator_callbacks: basic
   - override /logger: mlflow
 
 tags: ["axo_v4", "vae"]

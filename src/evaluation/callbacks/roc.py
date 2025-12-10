@@ -27,9 +27,6 @@ class ROCs(Callback):
         super().__init__()
         self.metric_names = metric_names
 
-        self.rocs = {}
-        self.aurocs = {}
-
     def on_test_start(self, trainer, pl_module):
         """Check if 'main_test' labeled dataloader is among the test dataloaders."""
         dset_names = list(trainer.test_dataloaders.keys())
@@ -38,6 +35,9 @@ class ROCs(Callback):
 
     def on_test_epoch_start(self, trainer, pl_module):
         """Clear the results dictionaries."""
+        self.rocs = {}
+        self.aurocs = {}
+
         dset_names = list(trainer.test_dataloaders.keys())
         for ds_name in dset_names:
             if ds_name == 'main_test':

@@ -5,12 +5,14 @@ defaults:
   - override /algorithm: axov4
   - override /callbacks: basic
   - override /trainer: gpu0
-  - override /logger: mlflow
+  - override /evaluator: vae
+  - override /evaluator_callbacks: basic
+  - override /logger: wandb
 
 tags: ["axo_v4", "vae"]
 
-experiment_name: axov4
-run_name: test
+experiment_name: "axov4-${lower: ${classname: ${algorithm._target_}}}"
+run_name: "bs=${data.batch_size}_lr=${algorithm.optimizer.lr}"
 
 seed: 123
 
@@ -25,3 +27,10 @@ logger:
   mlflow:
     experiment_name: axov4
     run_name: test
+  
+  # wandb:
+  #   entity: viictorjimenezzz-personal
+  #   project: adatl1
+
+  #   group: debug
+  #   name: debug

@@ -70,7 +70,11 @@ class DatasetAwareModelCheckpoint(Callback):
         make sure that this is how the callback metrics are named.
         """
         for full_metric_name, metric_value in available_metrics.items():
-            dataset_match = full_metric_name.split("/")[1] == dataset_name
+            try:
+                dataset_match = full_metric_name.split("/")[1] == dataset_name
+            except:
+                continue
+            
             metric_match = full_metric_name.split("/")[-1] == self.monitor
             if dataset_match and metric_match:
                 return metric_value.detach().cpu().numpy()
@@ -105,7 +109,8 @@ class DatasetAwareModelCheckpoint(Callback):
 
     def _save_checkpoint(self, trainer, pl_module, filepath: Path):
         """Save a checkpoint with a custom key and metric value."""
-        trainer.save_checkpoint(filepath)
+        if trainer.is_global_zero:
+            trainer.save_checkpoint(filepath)
 
         # notify loggers
         if trainer.is_global_zero:
@@ -116,7 +121,7 @@ class DatasetAwareModelCheckpoint(Callback):
         """Makes sure that the saved checkpoints are just the top_k ones."""
         files_to_remove = [
             ckpt['fpath'] for ckpt in self.checkpoints[dataset_name]
-            if not ckpt['value'] in self.ds_criterion[dataset_name].top_k_values
+            if (not ckpt['value'] in self.ds_criterion[dataset_name].top_k_values) and (os.path.exists(ckpt['fpath']))
         ]
 
         self.checkpoints[dataset_name] = [

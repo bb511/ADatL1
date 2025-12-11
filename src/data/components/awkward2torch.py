@@ -25,7 +25,6 @@ class L1DataAwkward2Torch:
         """Loads folder of parquet files containing awkward arrays to a torch tensor."""
         self.cache_filepath = folder_path / "torch_cache.pt"
         self.mapping_filepath = folder_path.parent / "object_feature_map.json"
-        import ipdb; ipdb.set_trace()
 
         # If tensor cache exists, just load it.
         if self.cache_filepath.is_file():

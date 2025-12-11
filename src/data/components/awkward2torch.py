@@ -1,6 +1,7 @@
 # Load and convert mlready parquet files to numpy arrays.
 from typing import Union
 import os
+import json
 from dataclasses import dataclass
 from pathlib import Path
 from concurrent.futures import ThreadPoolExecutor
@@ -8,7 +9,7 @@ from concurrent.futures import ThreadPoolExecutor
 import torch
 import numpy as np
 import awkward as ak
-from colorama import Fore, Back, Style
+from colorama import Fore
 
 from src.utils import pylogger
 
@@ -21,20 +22,31 @@ class L1DataAwkward2Torch:
     nconst: dict
 
     def load_folder(self, folder_path: Path) -> torch.Tensor:
-        """Loads folder of parquet files containing awkward arrays to a numpy array."""
-        self.cache_filepath = folder_path / 'torch_cache.pt'
+        """Loads folder of parquet files containing awkward arrays to a torch tensor."""
+        self.cache_filepath = folder_path / "torch_cache.pt"
+        self.mapping_filepath = folder_path.parent / "object_feature_map.json"
+        import ipdb; ipdb.set_trace()
+
+        # If tensor cache exists, just load it.
         if self.cache_filepath.is_file():
-            return torch.load(self.cache_filepath)
+            data = torch.load(self.cache_filepath)
+            return data
 
         workers = min(self.workers, (os.cpu_count() or 4))
-
-        files = sorted(folder_path.glob('*.parquet'))
+        files = sorted(folder_path.glob("*.parquet"))
         with ThreadPoolExecutor(max_workers=workers) as ex:
-            data = list(ex.map(self._process_object, files))
+            processed = list(ex.map(self._process_object, files))
 
-        data = np.concatenate(data, axis=1) if isinstance(data, list) else data
+        arrays = [arr for _, arr, _ in processed]
+        data = np.concatenate(arrays, axis=1) if isinstance(arrays, list) else arrays
         data = torch.from_numpy(data)
         self._cache(data)
+
+        # Build mapping JSON once per folder if not present
+        if not self.mapping_filepath.is_file():
+            mapping = self._build_feature_mapping(processed)
+            with open(self.mapping_filepath, "w") as f:
+                json.dump(mapping, f, indent=4)
 
         return data
 
@@ -51,8 +63,7 @@ class L1DataAwkward2Torch:
         nfeats = len(data.fields)
         numpy_array = np.empty((nevents, nconst, nfeats), dtype=np.float32)
         numpy_array = self._funnel_to_nparray(data, numpy_array)
-
-        return numpy_array
+        return obj_name, numpy_array, list(data.fields)
 
     def _pad(
         self, data: ak.Array, nconst: int, padder: Union[int, ak.Record]
@@ -103,3 +114,33 @@ class L1DataAwkward2Torch:
             raise FileNotFoundError(Fore.RED + f"Cache folder {parent_folder} missing!")
 
         torch.save(data, self.cache_filepath)
+
+    def _build_feature_mapping(self, processed: list[tuple[str, np.ndarray, list[str]]]) -> dict:
+        """
+        Build a mapping:
+        {
+          obj_name: {
+             feature_name: [list of flattened column indices],
+             ...
+          },
+          ...
+        }
+        """
+        mapping: dict[str, dict[str, list[int]]] = {}
+        offset = 0
+
+        for obj_name, arr, fields in processed:
+            # arr shape: (N, nconst, m)
+            _, nconst, m = arr.shape
+            field_to_cols = {field: [] for field in fields}
+
+            # Flattening order: c in 0..nconst-1, f in 0..m-1
+            for c in range(nconst):
+                for f, field in enumerate(fields):
+                    col_idx = offset + c * m + f
+                    field_to_cols[field].append(col_idx)
+
+            mapping[obj_name] = field_to_cols
+            offset += nconst * m
+
+        return mapping

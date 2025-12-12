@@ -21,8 +21,8 @@ optimizer:
   lr: 0.001
   weight_decay: 0.01
 
-scheduler:
-  scheduler:
-    _partial_: true
-    _target_: torch.optim.lr_scheduler.ExponentialLR
-    gamma: 0.95
+# scheduler:
+#   scheduler:
+#     _partial_: true
+#     _target_: torch.optim.lr_scheduler.ExponentialLR
+#     gamma: 0.95

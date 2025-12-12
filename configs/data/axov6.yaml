@@ -1,7 +1,7 @@
 # @package data
 
 defaults:
-  - /paths: data_2025G
+  - /paths: data_2025E+G
   - data_extractor: axov4
   - data_processor: default
   - data_normalizer: axov4

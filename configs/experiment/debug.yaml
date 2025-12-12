@@ -4,7 +4,7 @@
 # python train.py experiment=example
 
 defaults:
-  - override /data: axov4
+  - override /data: axov6
   - override /algorithm: axov4
   - override /callbacks: basic
   - override /trainer: debug

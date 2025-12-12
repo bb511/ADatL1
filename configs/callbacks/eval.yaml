@@ -1,8 +1,8 @@
+# @package callbacks
+
 defaults:
-  - model_summary
-  - rich_progress_bar
-  - cap
-  # - batch_size_finder
+  - default
+  - cap@cap_callback: cap
   - _self_
 
 model_summary:

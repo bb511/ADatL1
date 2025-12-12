@@ -8,7 +8,7 @@ features: null
 
 
 encoder:
-  _target_: src.models.components.mlp.MLP
+  _target_: src.models.encoder.Encoder
 
   nodes: [57, 28, 16, 8]
   
@@ -51,4 +51,4 @@ scheduler:
     factor: 0.5
     patience: 10
     min_lr: 1e-6
-  monitor: "train/loss/svdd/mean"
+  monitor: "train/loss_svdd"

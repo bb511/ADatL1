@@ -3,12 +3,12 @@ from typing import Literal
 import torch
 import torch.nn.functional as F
 
-from src.losses import L1ADLoss
+from src.losses.components import L1ADLoss
 
 
 class AlignmentLoss(L1ADLoss):
     """
-    Alignment loss to control separation between zerobias and simulation data.
+    Alignment loss to control separation between zerobias and background simulation data.
     
     :param scale: Scaling factor for the loss.
     :param margin: Margin for distance-based strategies.
@@ -49,13 +49,13 @@ class AlignmentLoss(L1ADLoss):
     def forward(
         self,
         z_mean: torch.Tensor,
-        s: torch.LongTensor,
+        y: torch.LongTensor,
         **kwargs
     ) -> torch.Tensor:
         
         distances = self._compute_distance(z_mean)
-        is_zerobias = s == 0 if s is not None else torch.ones(z_mean.shape[0], dtype=torch.bool, device=z_mean.device)
-        is_simulation = s == 1 if s is not None else torch.ones(z_mean.shape[0], dtype=torch.bool, device=z_mean.device)
+        is_zerobias = y == 0
+        is_simulation = y < 0
         loss = torch.zeros(z_mean.shape[0], device=z_mean.device)
         if self.strategy == "push_simulations":
             # Zerobias near origin, simulations far

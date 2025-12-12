@@ -168,6 +168,7 @@ class RealNVP(L1ADLightningModule):
     def model_step(self, batch: Tuple[torch.Tensor]) -> Dict[str, torch.Tensor]:
         """Forward pass and loss computation."""
         x, _ = batch
+        x = torch.flatten(x, start_dim=1)
 
         # context = self.get_context(x)
         context = None

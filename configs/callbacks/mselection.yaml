@@ -21,6 +21,11 @@ defaults:
   - checkpointing@lko_max: model_checkpoint_lko
   - checkpointing@lko_last: model_checkpoint_lko
   - checkpointing@lko_stable: model_checkpoint_lko
+
+  # CAP:
+  - cap@cap_callback: cap
+  - cap@_here_: model_checkpoint_cap
+
   - _self_
 
 # SINGLE:

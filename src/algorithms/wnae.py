@@ -5,7 +5,7 @@ import torch
 import torch.nn as nn
 
 from src.algorithms import L1ADLightningModule
-from src.models.components.mcmc import SampleBuffer
+from src.models.mcmc import SampleBuffer
 
 
 class WNAE(L1ADLightningModule):
@@ -97,6 +97,7 @@ class WNAE(L1ADLightningModule):
 
     def model_step(self, batch: Tuple[torch.Tensor]) -> Dict[str, torch.Tensor]:
         x_pos, _ = batch
+        x_pos = torch.flatten(x_pos, start_dim=1)
         z_pos, reconstruction_pos = self.forward(x_pos)
         energy_pos = self.loss.losses.reconstruction(
             target=x_pos,
@@ -135,7 +136,7 @@ class WNAE(L1ADLightningModule):
 
         return {
             "loss": loss_total,
-            "loss/total": loss_total.detach(),
+            "loss/total/full": loss_total.detach(),
             "loss/reconstruction": loss_reco.detach(),
             "loss/wasserstein": loss_wasserstein.detach(),
             "loss/nae": loss_nae.detach(),
@@ -178,9 +179,9 @@ class WNAE(L1ADLightningModule):
 
         # Initialize chain either from provided x (for CD) or from buffer / random
         if self.sampling == "cd":
-            x0 = x.detach()
+            x0 = x.detach().to(self.device)
         else:
-            x0 = self._initial_samples(batch_size, sample_shape)
+            x0 = self._initial_samples(batch_size, sample_shape).to(self.device)
 
         # Generate negative samples via Langevin MCMC
         negative = self.sampler(x=x0, model=self.energy)

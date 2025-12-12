@@ -1,8 +1,11 @@
 defaults:
-  - /model@_here_: ae
-
+  - /model/encoder@encoder
+  - /model/decoder@decoder
+  
   # Consider masking:
   # - /model/masking@masking: multiplicity # "particle", "multiplicity", null
+
+  - _self_
 
 
 _target_: src.algorithms.wnae.WNAE
@@ -25,7 +28,7 @@ buffer_size: 10000
 
 
 sampler:
-  _target_: src.models.components.mcmc.LangevinSampler
+  _target_: src.models.mcmc.LangevinSampler
   n_steps: 50
   step_size: 10.0
   noise_scale: 0.05
@@ -37,7 +40,7 @@ sampler:
 
 
 loss:
-  _target_: src.losses.MultiLoss
+  _target_: src.losses.components.MultiLoss
 
   reduction: none
 
@@ -50,7 +53,7 @@ loss:
   # The rest of the losses are imported directly from the defaults.
   reconstruction:
     # @Patrick: should this be the transformed one?
-    _target_: src.losses.reconstruction.ReconstructionLoss
+    _target_: src.losses.components.reconstruction.ReconstructionLoss
     scale: 1.0
   wasserstein:
     _target_: src.losses.wnae.WassersteinLoss
@@ -63,7 +66,7 @@ loss:
 optimizer:
   _partial_: true
   _target_: src.optimizers.lion.Lion
-  lr: ${scan.lr}
+  lr: 0.001
   weight_decay: 0.0
 
 

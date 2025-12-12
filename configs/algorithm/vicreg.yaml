@@ -4,23 +4,23 @@ _target_: src.algorithms.vicreg.VICReg
 
 
 feature_blur:
-  _target_: src.models.components.vicreg.FastFeatureBlur
+  _target_: src.models.augmentation.FastFeatureBlur
   prob: 0.9004016520359364
   magnitude: 0.92685112547458
   strength: 0.749655944679925
 
 
 object_mask:
-  _target_: src.models.components.vicreg.FastObjectMask
+  _target_: src.models.augmentation.FastObjectMask
   prob: 0.5709886168264394
 
 lorentz_rotation:
-  _target_: src.models.components.vicreg.FastLorentzRotation
+  _target_: src.models.augmentation.FastLorentzRotation
   _partial_: true
   prob: 0.5
 
 model:
-  _target_: src.models.components.mlp.MLP
+  _target_: src.models.mlp.MLP
 
   nodes: [57, 29, 10]
 
@@ -35,7 +35,7 @@ model:
     path: torch.nn.init.zeros_
 
 projector:
-  _target_: src.models.components.mlp.MLP
+  _target_: src.models.mlp.MLP
   nodes: [10, 40] # * 4 projection
   batchnorm: true # Added batchnorm
 

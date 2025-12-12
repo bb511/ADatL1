@@ -52,6 +52,7 @@ class SVDD(L1ADLightningModule):
         
     def model_step(self, batch: Tuple[torch.Tensor]) -> Dict[str, torch.Tensor]:
         x, _ = batch
+        x = torch.flatten(x, start_dim=1)
         z = self.forward(x)
         del x
 
@@ -68,12 +69,12 @@ class SVDD(L1ADLightningModule):
         )
         return {
             "loss": total_loss.mean(),
+            "loss/total/full": total_loss.detach(),
             "loss/svdd/mean": total_loss.mean(),
             "loss/distance/mean": distances.mean(),
-            "z.mean().abs()": z.abs().mean(),
         }
     
-    def _filter_log_dict(self, outdict: dict) -> dict:
+    def outlog(self, outdict: dict) -> dict:
         return {
             "loss": outdict.get("loss"),
             "loss_svdd": outdict.get("loss/svdd/mean"),

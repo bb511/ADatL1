@@ -21,6 +21,9 @@ class ValidationCAP(ApproximationCapacityCallback):
 
         if (pl_module.current_epoch + 1) % self.log_every_n_epochs != 0:
             return
+        
+        # Move to right device (doesn't happen under the hood)
+        self.capmetric.to(pl_module.device)
 
         # Obtain the loss from the cache:
         list_dset_key = list(self.cache.keys())

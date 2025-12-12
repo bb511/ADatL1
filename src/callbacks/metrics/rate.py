@@ -33,7 +33,8 @@ class AnomalyCounter(Metric):
         :bkg_score: Torch tensor containing scores for background samples.
         """
         self.threshold = np.percentile(
-            bkg_score, 100 - (self.target_rate / self.bc_rate) * 100
+            bkg_score.cpu().numpy(),
+            100 - (self.target_rate / self.bc_rate) * 100
         )
 
     def update(self, anomaly_score: torch.Tensor) -> None:

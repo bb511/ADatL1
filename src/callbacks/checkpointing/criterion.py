@@ -143,3 +143,15 @@ class Stable(Criterion):
                 f"Patience given in stability checkpoint callback needs to be a " +
                 f"number strictly larger than 0. Given value is {self.patience}."
             )
+
+
+class Last(Criterion):
+    """Save the last value of the metric."""
+
+    def __init__(self, top_k: int = 1):
+        self.top_k_values = np.empty(1)
+        self.name = 'last'
+
+    def check(self, metric_value: float) -> bool:
+        self.top_k_values[0] = metric_value
+        return False

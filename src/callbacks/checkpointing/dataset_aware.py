@@ -3,13 +3,13 @@ import os
 from typing import Optional
 from collections import defaultdict
 from pathvalidate import sanitize_filename
-import itertools
+import warnings
 from weakref import proxy
 from pathlib import Path
 import copy
 import shutil
+import numpy as np
 
-import torch
 from pytorch_lightning.callbacks import Callback
 
 from src.callbacks.checkpointing.criterion import Criterion
@@ -70,16 +70,22 @@ class DatasetAwareModelCheckpoint(Callback):
         make sure that this is how the callback metrics are named.
         """
         for full_metric_name, metric_value in available_metrics.items():
-            dataset_match = full_metric_name.split("/")[1] == dataset_name
+            try:
+                dataset_match = full_metric_name.split("/")[1] == dataset_name
+            except:
+                continue
+            
             metric_match = full_metric_name.split("/")[-1] == self.monitor
             if dataset_match and metric_match:
                 return metric_value.detach().cpu().numpy()
 
-        raise ValueError(
-            f"Checkpoint for metric {self.monitor} failed! " +
-            f"Did you call `log({self.monitor})` in the LightningModule?"
+        warnings.warn(
+            f"Checkpoint for metric '{self.monitor}' not found in logged metrics. "
+            f"Did you call `log('{self.monitor}')` in the LightningModule?",
+            category=UserWarning,
         )
-
+        return np.nan
+    
     def _process_metric_across_datasets(self, trainer, pl_module, ds_metrics: dict):
         """Compute a summary metric across datasets, like leave one out."""
         raise NotImplementedError("Subclasses must implement _process_dataset_losses")
@@ -103,7 +109,8 @@ class DatasetAwareModelCheckpoint(Callback):
 
     def _save_checkpoint(self, trainer, pl_module, filepath: Path):
         """Save a checkpoint with a custom key and metric value."""
-        trainer.save_checkpoint(filepath)
+        if trainer.is_global_zero:
+            trainer.save_checkpoint(filepath)
 
         # notify loggers
         if trainer.is_global_zero:
@@ -114,7 +121,7 @@ class DatasetAwareModelCheckpoint(Callback):
         """Makes sure that the saved checkpoints are just the top_k ones."""
         files_to_remove = [
             ckpt['fpath'] for ckpt in self.checkpoints[dataset_name]
-            if not ckpt['value'] in self.ds_criterion[dataset_name].top_k_values
+            if (not ckpt['value'] in self.ds_criterion[dataset_name].top_k_values) and (os.path.exists(ckpt['fpath']))
         ]
 
         self.checkpoints[dataset_name] = [
@@ -127,9 +134,7 @@ class DatasetAwareModelCheckpoint(Callback):
 
     def create_checkpoint_dir(self):
         """Create the directory where the checkpoints are saved."""
-        if self.dirpath.is_dir():
-            shutil.rmtree(self.dirpath)
-
+        shutil.rmtree(self.dirpath, ignore_errors=True)
         self.dirpath.mkdir(parents=True, exist_ok=True)
 
     def on_fit_end(self, trainer, pl_module):

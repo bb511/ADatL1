@@ -30,15 +30,14 @@ class VAE(L1ADLightningModule):
         return z_mean, z_log_var, z, reconstruction
 
     def model_step(self, batch: Tuple[torch.Tensor]) -> Dict[str, torch.Tensor]:
-        x, y = batch
+        x, _ = batch
         x = torch.flatten(x, start_dim=1)
         z_mean, z_log_var, z, reconstruction = self.forward(x)
 
         reco_loss, kl_loss, total_loss = self.loss(
             reconstruction=reconstruction, z_mean=z_mean, z_log_var=z_log_var, target=x
         )
-
-        del reconstruction, x, z, y
+        del reconstruction, x, z
 
         return {
             # Used for backpropagation:
@@ -47,9 +46,9 @@ class VAE(L1ADLightningModule):
             "loss/reco/mean": reco_loss.mean(),
             "loss/kl/mean": kl_loss.mean(),
             # Used for callbacks:
-            "loss/total/full": total_loss,
-            "loss/reco/full": reco_loss,
-            "loss/kl/full": kl_loss,
+            "loss/total/full": total_loss.detach(),
+            "loss/reco/full": reco_loss.detach(),
+            "loss/kl/full": kl_loss.detach(),
             "z_mean_squared": z_mean.pow(2)
         }
 
@@ -61,3 +60,47 @@ class VAE(L1ADLightningModule):
             "loss_kl": outdict.get("loss/kl/mean"),
         }
         
+
+
+class RVAE(VAE):
+    """Regularized VAE. Overriding loss and logging."""
+
+    def model_step(self, batch: Tuple[torch.Tensor]) -> Dict[str, torch.Tensor]:
+        x, y = batch
+        x = torch.flatten(x, start_dim=1)
+        z_mean, z_log_var, z, reconstruction = self.forward(x)
+        loss = self.loss(
+            reconstruction=reconstruction,
+            target=x,
+            z=z,
+            z_mean=z_mean,
+            z_log_var=z_log_var,
+            y=y
+        )
+        del reconstruction, x, z, y
+
+        outdict = {
+            "loss": loss.mean(),
+            "loss/total/full": loss.detach(),
+            "z_mean.abs()": z_mean.abs(),
+            "z_log_var": z_log_var,
+        }
+        if hasattr(self.loss, "losses"):
+            individual_losses = {
+                f"loss/{module.name}": value
+                for module, value in zip(
+                    self.loss.losses.values(),
+                    self.loss.values.values()
+                )
+            }
+            outdict.update({
+                "loss/total": sum(list(individual_losses.values())),
+                **{k: v.mean() for k, v in individual_losses.items()}
+            })
+        return outdict
+
+    def outlog(self, outdict: dict) -> dict:
+        return {
+            k: v for k, v in outdict.items()
+            if "train/" in k and k != "loss/total/full"
+        }

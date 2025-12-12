@@ -1,4 +1,4 @@
-_target_: src.losses.mi.MILoss
+_target_: src.losses.components.mi.MILoss
 scale: 1.0
 reduction: mean # "mean", "sum", "none"
 

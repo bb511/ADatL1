@@ -56,6 +56,7 @@ def plot_yright(data: dict, ydata: dict, xlabel: str, ylabel: str, save_dir: Pat
 
     # Match the ticks using the same index positions
     ax2.set_ylim(ax.get_ylim())
+    ax2.set_xlim(ax.get_ylim())
     ax2.set_yticks(range(len(dataset_names)))
     ax2.set_yticklabels(dataset_yvals)
     ax2.set_ylabel(ylabel)

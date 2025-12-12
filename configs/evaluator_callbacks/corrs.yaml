@@ -1,0 +1,7 @@
+# @package evaluator_callbacks
+
+defaults:
+  - basic
+  - metrics@rocs: rocs
+  - metrics@pu: pu
+  - _self_

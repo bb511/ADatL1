@@ -8,8 +8,8 @@ defaults:
   - algorithm: vae
   - callbacks: default
   - trainer: default
-  - evaluator: default
-  - evaluator_callbacks: default
+  - evaluator: null
+  - evaluator_callbacks: null
   - paths: default
   - extras: default
   - hydra: default

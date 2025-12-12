@@ -1,0 +1,39 @@
+# @package _global_
+
+# to execute this experiment run:
+# python train.py experiment=example
+
+defaults:
+  - override /data: axov6
+  - override /algorithm: vicreg
+  - override /callbacks: default
+  - override /evaluator: default
+  - override /evaluator_callbacks: default
+  - override /trainer: gpu
+  - override /logger: mlflow
+
+tags: ["vae", "2025_data"]
+
+experiment_name: vae
+run_name: test
+
+seed: 12345
+
+_target_: src.callbacks.model_checkpoint.SingleDatasetModelCheckpoint
+
+callbacks:
+  min_loss_total:
+    dirpath: '${paths.checkpoints_dir}/${experiment_name}/${run_name}'
+    monitor: loss
+    criterion: 
+      _target_: src.callbacks.checkpointing.criterion.Min
+      top_k: 1
+    skip_ds: null
+
+evaluator:
+  ckpts:
+    single:
+      loss: ['min']
+
+evaluator_callbacks:
+  # ADD computing loss.

@@ -56,6 +56,7 @@ class ParticleMasking(nn.Module):
         for obj, prob in self.object_probs.items():
             if prob <= 0.0:
                 continue
+            
             cols = self.object_columns.get(obj)
             if not cols:
                 continue

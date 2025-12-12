@@ -1,20 +1,9 @@
 _target_: src.models.components.masking.MultiplicityMasking
 
-constituents: ${data.data_awkward2torch.nconst}
-objects_features: ${data.data_mlready.select_features}
+object_feature_map_path: ${paths.data_dir}/mlready/${data.data_mlready.name}/${data.data_normalizer.name}/object_feature_map.json
 
-# Masking probability for high-multiplicity events
-high_mult_mask_prob: 0.3
+percentile: 0.75
 
-# Masking probability for low-multiplicity events  
-low_mult_mask_prob: 0.05
+mask_value: 0.0
 
-# Percentile to determine high vs low multiplicity
-# e.g., 75.0 means top 25% of events are considered high-multiplicity
-mult_threshold_percentile: 75.0
-
-# Index of ET/pT feature in each object's feature list
-et_feature_idx: 0 # ET/pT is the first feature
-
-# Only apply masking during training
 training_only: true

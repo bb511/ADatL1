@@ -1,18 +1,13 @@
 _target_: src.models.components.masking.ParticleMasking
 
-constituents: ${data.data_awkward2torch.nconst}
-objects_features: ${data.data_mlready.select_features}
+object_feature_map_path: ${paths.data_dir}/mlready/${data.data_mlready.name}/${data.data_normalizer.name}/object_feature_map.json
 
-# Masking probabilities per object type
-mask_probs:
+object_probs:
   muons: 0.15
-  egammas: 0.15
   jets: 0.15
-  ET: 0.05
+  egammas: 0.15
   MET: 0.05
 
-# Value to replace masked features with
 mask_value: 0.0
 
-# Only apply masking during training
 training_only: true

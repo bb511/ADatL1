@@ -49,9 +49,9 @@ class L1DataProcessor:
             self.event_masks_folder = self.dataset_folder / 'event_masks'
             self.object_masks_folder = self.dataset_folder / 'object_masks'
 
-            self.object_names = self._get_object_names(extracted_dataset)
+            extr_object_names = self._get_extracted_object_names(extracted_dataset)
             existing_objs = self._check_data_exists()
-            self.object_names = self.object_names - existing_objs
+            self.object_names = extr_object_names - existing_objs
 
             if len(self.object_names) == 0:
                 nexists += 1
@@ -62,6 +62,8 @@ class L1DataProcessor:
 
         if nexists == ndatasets:
             log.info(Fore.YELLOW + f"Processed data exists in {self.cache_folder}!")
+        elif nexists > 0:
+            log.info(Fore.YELLOW + f"Data partially exists in {self.cache_folder}!")
 
         if self.existence_warn_trigger:
             log.warn(
@@ -71,13 +73,25 @@ class L1DataProcessor:
                 "same, then double check this."
             )
 
-    def _get_object_names(self, dataset_path: Path) -> list[str]:
-        """Get all the object names of the data to be processed."""
-        obj_names = []
+    def _get_extracted_object_names(self, dataset_path: Path) -> list[str]:
+        """Get all the object names of the objects that were extracted."""
+        obj_names = set()
         for object_file in dataset_path.glob('*.parquet'):
-            obj_names.append(object_file.stem)
+            obj_names.add(object_file.stem)
 
-        return set(obj_names)
+        if not set(self.event_filters.keys()) <= obj_names:
+            diff = set(self.event_filters.keys()) - obj_names
+            raise FileNotFoundError(
+                f"Event filter objects {diff} not in the extracted data! "
+            )
+
+        if not set(self.object_filters.keys()) <= obj_names:
+            diff = set(self.object_filters.keys()) - obj_names
+            raise FileNotFoundError(
+                f"Object filter objects {diff} not in the extracted data! "
+            )
+
+        return obj_names
 
     def _cache_event_masks(self, extracted_dataset: Path):
         """Generate a set of masks for all the events in the data.
@@ -123,9 +137,7 @@ class L1DataProcessor:
 
             context = {feature: data[feature] for feature in data.fields}
             if obj_name in self.object_filters.keys():
-                criterion = self.object_filters[obj_name]
-                obj_mask = ak.numexpr.evaluate(criterion, context)
-                ak.to_parquet(obj_mask, self.object_masks_folder / f'{obj_name}.parquet')
+                obj_mask = self._get_obj_mask(obj_name, context)
                 data = data[obj_mask]
 
             ak.to_parquet(data, self.dataset_folder / f'{obj_name}.parquet')
@@ -133,13 +145,26 @@ class L1DataProcessor:
 
         log.info("Cached proc data: " + Fore.GREEN + f"{self.dataset_folder}.")
 
+    def _get_obj_mask(self, obj_name: str, context: dict):
+        """Import the object mask or construct it if it does not exist."""
+        obj_mask_file = self.object_masks_folder / f'{obj_name}.parquet'
+        if obj_mask_file.is_file():
+            return ak.from_parquet(obj_mask_file)
+
+        criterion = self.object_filters[obj_name]
+        obj_mask = ak.numexpr.evaluate(criterion, context)
+        ak.to_parquet(obj_mask, obj_mask_file)
+
+        return obj_mask
+
     def _check_data_exists(self) -> set[str]:
         """Check if a specific data set was already processed.
 
-        This also checks if the same objects were used in applying the event filters
-        and the object filters as given in the config. If this is not true, the data
-        is re-generated. NOTICE: this does not check if the SAME CONDITIONS were applied
-        on the features of the considered objects.
+        Also check if the same event filters and object masks were applied in their
+        processing. Return a list of existing objects, which have already been processed
+        and have a mask corresponding mask file, if they're supposed to be masked.
+        If the event filters differ from the ones provided in the config, redo the
+        processing for all the objects.
         """
         if self.dataset_folder.is_dir() and any(self.dataset_folder.iterdir()):
             object_masks_exists = self._check_object_masks()
@@ -165,12 +190,6 @@ class L1DataProcessor:
             return False
 
         for obj_name in self.event_filters.keys():
-            if not obj_name in self.object_names:
-                raise FileNotFoundError(
-                    f"{obj_name} not in the extracted data! "
-                    f"Check provided event filter dictionary: {self.event_filters}."
-                )
-
             event_mask_file = self.event_masks_folder / f'{obj_name}.parquet'
             if not event_mask_file.is_file():
                 return False
@@ -184,12 +203,6 @@ class L1DataProcessor:
 
         missing_obj_masks = set()
         for obj_name in self.object_filters.keys():
-            if not obj_name in self.object_names:
-                raise FileNotFoundError(
-                    f"{obj_name} not in the extracted data! "
-                    f"Check provided event filter dictionary: {self.object_filters}."
-                )
-
             object_mask_file = self.object_masks_folder / f'{obj_name}.parquet'
             if not object_mask_file.is_file():
                 missing_obj_masks.add(obj_name)

@@ -5,9 +5,9 @@ defaults:
   - override /algorithm: axov4
   - override /callbacks: basic
   - override /trainer: gpu0
-  - override /evaluator: vae
+  - override /evaluator: basic
   - override /evaluator_callbacks: basic
-  - override /logger: wandb
+  - override /logger: mlflow
 
 tags: ["axo_v4", "vae"]
 
@@ -27,7 +27,7 @@ logger:
   mlflow:
     experiment_name: axov4
     run_name: test
-  
+
   # wandb:
   #   entity: viictorjimenezzz-personal
   #   project: adatl1

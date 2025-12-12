@@ -1,0 +1,6 @@
+# @package evaluator_callbacks.metrics
+
+# The metric names need be specified like they are given by the model.
+_target_: src.evaluation.callbacks.score_vs_HT.ScoreCorrelationHT
+metric_names: ["loss/total/full"]
+datamodule: True

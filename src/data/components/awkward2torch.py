@@ -27,22 +27,18 @@ class L1DataAwkward2Torch:
         self.cached_objects = set()
 
     def load_folder(self, folder_path: Path) -> torch.Tensor:
-        """Loads folder of parquet files containing awkward arrays to a torch tensor."""
-        self.cache_filepath = folder_path / "torch_cache.pt"
+        """Loads folder of parquet files containing awkward arrays to a numpy array."""
+        self.cache_filepath = folder_path / 'torch_cache.pt'
         self.mapping_filepath = folder_path.parent / "object_feature_map.json"
-
-        # If tensor cache exists, just load it.
-        if self.cache_filepath.is_file():
-            data = torch.load(self.cache_filepath)
-            return data
+        if self._cache_exists():
+            return torch.load(self.cache_filepath)
 
         workers = min(self.workers, (os.cpu_count() or 4))
         files = sorted(folder_path.glob("*.parquet"))
         with ThreadPoolExecutor(max_workers=workers) as ex:
             processed = list(ex.map(self._process_object, files))
 
-        arrays = [arr for _, arr, _ in processed]
-        data = np.concatenate(arrays, axis=1) if isinstance(arrays, list) else arrays
+        data = np.concatenate([arr for _, arr, _ in processed], axis=1)
         data = torch.from_numpy(data)
         self._cache(data)
 

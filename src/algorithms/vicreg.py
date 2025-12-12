@@ -77,6 +77,8 @@ class VICReg(L1ADLightningModule):
     def outlog(self, outdict: dict) -> dict:
         """Override with the values you want to log."""
         return {
-            "loss/total": outdict.get("loss"),
-            **{k: v for k, v in outdict.items() if k != "loss"},
+            "loss": loss_total,
+            "loss/inv": loss_inv.detach(),
+            "loss/var": loss_var.detach(),
+            "loss/cov": loss_cov.detach(),
         }

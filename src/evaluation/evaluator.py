@@ -174,16 +174,3 @@ class Evaluator:
             return True
 
         return False
-
-    def _extract_dataset_name(self, ckpt_path: Path):
-        """Extracts the dataset name from the name of a checkpoint file.
-
-        Expects the file to have 'ds=[ds_name]' at some point in its name string.
-        """
-        ckpt_filename = ckpt_path.stem
-        match = re.search(r"ds=(.*?)__", ckpt_filename)
-        if not match:
-            raise ValueError(f"Dataset name not found in {ckpt_filename}")
-
-        ds_name = match.group(1)
-        return ds_name

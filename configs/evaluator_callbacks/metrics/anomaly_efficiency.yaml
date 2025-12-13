@@ -1,7 +1,7 @@
 # @package evaluator_callbacks.metrics
 
 # The metric names need be specified like they are given by the model.
-_target_: src.evaluation.callbacks.rate.AnomalyEfficiencyCallback
+_target_: src.evaluation.callbacks.efficiency.AnomalyEfficiencyCallback
 metric_names: ["loss/total/full"]
 target_rates: [0.01, 0.1, 0.25, 0.5, 1]
 bc_rate: 28608.8064

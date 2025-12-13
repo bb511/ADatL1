@@ -58,7 +58,11 @@ def _cache_logits_from_checkpoints(
     ckpt_path = ckpt_paths[0]
 
     # Load the logits in memory:
-    state_dict = torch.load(ckpt_path, weights_only=False, map_location="cpu")[
+    state_dict = torch.load(
+        ckpt_path,
+        weights_only=False,
+        map_location="cpu"
+    )[
         "state_dict"
     ]
     algorithm.load_state_dict(state_dict, strict=True)

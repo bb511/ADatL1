@@ -34,7 +34,10 @@ class L1DataAwkward2Torch:
             return torch.load(self.cache_filepath)
 
         workers = min(self.workers, (os.cpu_count() or 4))
-        files = sorted(folder_path.glob("*.parquet"))
+        files = sorted([
+            fpath for fpath in folder_path.glob("*.parquet")
+            if fpath.is_file() and not fpath.name.startswith("._")
+        ])
         with ThreadPoolExecutor(max_workers=workers) as ex:
             processed = list(ex.map(self._process_object, files))
 

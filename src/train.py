@@ -28,7 +28,6 @@ from src.utils import instantiate_eval_callbacks
 from src.utils import instantiate_loggers
 from src.utils import log_hyperparameters
 from src.utils import task_wrapper
-from src.evaluation.evaluator import Evaluator
 
 log = RankedLogger(__name__, rank_zero_only=True)
 
@@ -94,7 +93,6 @@ def train(cfg: DictConfig) -> Tuple[Dict[str, Any], Dict[str, Any]]:
 
 def test(cfg: DictConfig, datamodule, algorithm, logger):
     """Evaluate the training."""
-    print(cfg.get('evaluator'))
     if cfg.get('evaluator') is None:
         log.info(Back.YELLOW + "No evaluator config found... Skipping testing")
         return
@@ -103,6 +101,7 @@ def test(cfg: DictConfig, datamodule, algorithm, logger):
     # Evaluator object is basically a wrapper around a trainer with extra steps.
     trainer_config = OmegaConf.to_container(cfg.trainer, resolve=True)
     evaluator_config = OmegaConf.to_container(cfg.evaluator, resolve=True)
+    
     merged_dict = {**trainer_config, **evaluator_config}
     evaluator_cfg = OmegaConf.create(merged_dict)
 

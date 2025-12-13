@@ -114,6 +114,9 @@ class L1DataProcessor:
         """Applies AND logical operator between all masks in a folder, saves result."""
         masks = []
         for mask_path in masks_folder.glob("*.parquet"):
+            if not mask_path.is_file() or mask_path.name.startswith("._"):
+                continue
+            
             masks.append(ak.from_parquet(mask_path))
         if not masks:
             raise ValueError(Fore.RED + f"No files found in {masks_folder}.")

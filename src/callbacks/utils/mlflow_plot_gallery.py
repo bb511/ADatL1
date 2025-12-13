@@ -28,6 +28,9 @@ def get_image_paths(root_dir: Path):
     groups = {}
     IMG_EXTS = {".png", ".jpg", ".jpeg", ".gif", ".webp", ".svg"}
     for img_path in root_dir.rglob("*"):
+        if not img_path.is_file() or img_path.name.startswith("._"):
+            continue
+
         if img_path.suffix.lower() in IMG_EXTS and img_path.is_file():
             rel = img_path.relative_to(root_dir)
             section = rel.parts[0] if len(rel.parts) > 1 else "_root"

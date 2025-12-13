@@ -95,6 +95,9 @@ def get_image_paths(plots_dir: Path, section_prefix: str):
     groups = {}
     IMG_EXTS = {".png", ".jpg", ".jpeg", ".gif", ".webp", ".svg"}
     for img_path in plots_dir.rglob("*"):
+        if not img_path.is_file() or img_path.name.startswith("._"):
+            continue
+        
         if img_path.suffix.lower() in IMG_EXTS and img_path.is_file():
             rel = img_path.relative_to(plots_dir)
             section_name = section_prefix

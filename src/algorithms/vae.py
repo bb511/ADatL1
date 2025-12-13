@@ -25,6 +25,7 @@ class VAE(L1ADLightningModule):
         self.features.eval()
 
     def forward(self, x: torch.Tensor) -> tuple[torch.Tensor, ...]:
+        x = self.features(x)
         z_mean, z_log_var, z = self.encoder(x)
         reconstruction = self.decoder(z)
         return z_mean, z_log_var, z, reconstruction

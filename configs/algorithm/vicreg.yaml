@@ -51,12 +51,12 @@ optimizer:
   lr: 0.0001033146150433934
   weight_decay: 0.0
 
-scheduler:
-  # here other attributes...
+# scheduler:
+#   # here other attributes...
 
-  scheduler:
-    _partial_: true
-    _target_: src.optimizers.cdw.CosineWithWarmup
-    warmup_epochs: 10
-    decay_epochs: '${substract: ${trainer.max_epochs}, ${algorithm.scheduler.scheduler.warmup_epochs}}'
-    max_lr: ${algorithm.optimizer.lr}
+#   scheduler:
+#     _partial_: true
+#     _target_: src.optimizers.cdw.CosineWithWarmup
+#     warmup_epochs: 10
+#     decay_epochs: '${substract: ${trainer.max_epochs}, ${algorithm.scheduler.scheduler.warmup_epochs}}'
+#     max_lr: ${algorithm.optimizer.lr}

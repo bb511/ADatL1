@@ -6,6 +6,7 @@ import awkward as ak
 import pickle
 from colorama import Fore, Back, Style
 from pytorch_lightning import loggers
+import torch
 
 from src.utils import pylogger
 from . import plots
@@ -36,8 +37,22 @@ class L1DataNormalizer:
         """Normalize the data using the hyperparameters from previously fitted data."""
         norm_method = getattr(self, '_' + self.name)
         data = norm_method(data, obj_name)
-
         return data
+    
+    def unnorm(
+        self,
+        data: torch.Tensor,
+        norm_filepath: Path,
+        object_feature_map: dict
+    ):
+        phi_indices, norm_params = [], {}
+        for obj in object_feature_map.keys():
+            phi_indices.extend(obj.get("phi", []))
+
+        self.import_norm_params(norm_filepath, obj_name=obj)
+        import ipdb; ipdb.set_trace()
+        norm_params[obj] 
+        pass
 
     def _unnormalized(self, data: ak.Array, obj_name: str) -> ak.Array:
         return data

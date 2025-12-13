@@ -148,6 +148,8 @@ class AnomalyEfficiencyCallback(Callback):
                     for rate_name, val in self.rates.items()
                     if name in rate_name
                 }
+                # TODO: Some aggregate measure.
+                # (cond entr, sum)
 
                 xlabel = (
                     f"efficiency at threshold: {target_rate} kHz\n"

@@ -5,11 +5,11 @@ from pathlib import Path
 
 import torch
 from pytorch_lightning.callbacks import Callback
-from pytorch_lightning.loggers import MLFlowLogger, Logger
-from pytorch_lightning import Trainer, LightningModule, LightningDataModule
+from pytorch_lightning import LightningDataModule
 
 from src.evaluation.callbacks import utils
 from src.data.components.normalization import L1DataNormalizer
+from src.evaluation.callbacks.rate import AnomalyCounter
 
 
 class ScoreCorrelationHT(Callback):

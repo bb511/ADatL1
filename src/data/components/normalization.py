@@ -39,20 +39,35 @@ class L1DataNormalizer:
         data = norm_method(data, obj_name)
         return data
     
-    def unnorm(
-        self,
-        data: torch.Tensor,
-        norm_filepath: Path,
-        object_feature_map: dict
-    ):
-        phi_indices, norm_params = [], {}
-        for obj in object_feature_map.keys():
-            phi_indices.extend(obj.get("phi", []))
+    def _norm_tensor(self, object_feature_map: dict):
+        """Get a 'scale' and 'shift' tensors to directly apply to the data."""
 
-        self.import_norm_params(norm_filepath, obj_name=obj)
-        import ipdb; ipdb.set_trace()
-        norm_params[obj] 
-        pass
+        # Compute number of dimensions to preallocate scale and shift tensors:
+        ndims = sum([
+            len(inds)
+            for _, feature_map in object_feature_map.items()
+            for _, inds in feature_map.items()
+        ])
+
+        scale_tensor, shift_tensor = torch.ones(ndims, dtype=torch.float32), torch.zeros(ndims, dtype=torch.float32)
+        for obj_name, feature_map in object_feature_map.items():
+            for feat, inds in feature_map.items():
+                params = self.norm_params.get(obj_name, {}).get(feat)
+                if not params:
+                    raise ValueError(f"Mising normalization parameters for {obj_name}.")
+                
+                scale_tensor[inds] = float(params.get("scale", 1.0))
+                shift_tensor[inds] = float(params.get("shift", 0.0))
+
+        return scale_tensor, shift_tensor
+
+    def unnorm(self, data: torch.Tensor, object_feature_map: dict):
+        """Unnormalize the data using the hyperparameters from previously fitted data."""
+        scale, shift = self._norm_tensor(object_feature_map)
+        scale = scale.to(device=data.device, dtype=data.dtype)
+        shift = shift.to(device=data.device, dtype=data.dtype)
+        data.mul_(scale).add_(shift) # in-place
+        return data
 
     def _unnormalized(self, data: ak.Array, obj_name: str) -> ak.Array:
         return data

@@ -138,10 +138,7 @@ class L1DataProcessor:
         event_mask = ak.from_parquet(self.event_masks_folder / 'intersection.parquet')
         self.object_masks_folder.mkdir(parents=True, exist_ok=True)
         for obj_name in self.object_names:
-            try:
-                data = ak.from_parquet(extracted_dataset / f'{obj_name}.parquet')
-            except:
-                import ipdb; ipdb.set_trace()
+            data = ak.from_parquet(extracted_dataset / f'{obj_name}.parquet')
             data = data[event_mask]
 
             context = {feature: data[feature] for feature in data.fields}

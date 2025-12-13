@@ -72,34 +72,31 @@ class FastLorentzRotation(nn.Module):
     """
     Applies a random rotation to the phi angles of input features with given probability.
 
+    :param p: Probability of applying the rotation to each batch item
     :param norm_scale: Normalization scale factors
     :param norm_bias: Normalization bias values
-    :param p: Probability of applying the rotation to each batch item
     :param phi_indices: Indices of phi angles in the feature vector
     """
 
     def __init__(
         self,
         prob: float,
-        norm_scale: List[float],
-        norm_bias: List[float],
-        phi_indices: Optional[list] = None,
+        norm_scale: torch.Tensor,
+        norm_bias: torch.Tensor,
+        phi_mask: torch.Tensor,
     ):
         super().__init__()
         self.prob = prob
 
         # Use register_buffer to store them in the state dictionary but not as model parameters
-        phi_indices = phi_indices if phi_indices else torch.arange(0, 19, 1) + 2
         self.register_buffer(
             "l1_scale",
             torch.tensor([144] * 1 + [144] * 4 + [576] * 4 + [144] * 10)
             / (2 * torch.pi),
         )
-        self.register_buffer("phi_indices", phi_indices)
-
-        # TODO: Fix scale and bias:
-        self.register_buffer("scale", torch.ones(self.phi_indices.shape[0]).float())
-        self.register_buffer("bias", torch.tensor(self.phi_indices.shape[0]).float())
+        self.register_buffer("phi_mask", phi_mask)
+        self.register_buffer("scale", torch.where(~phi_mask, norm_scale, torch.tensor(1.0)))
+        self.register_buffer("bias", torch.where(~phi_mask, norm_bias, torch.tensor(0.0)))
 
     def forward(self, x: torch.Tensor):
         device = x.device
@@ -111,7 +108,7 @@ class FastLorentzRotation(nn.Module):
         )
 
         # Extract and normalize phi values
-        original_phi = (x[:, self.phi_indices] * self.scale + self.bias) / self.l1_scale
+        original_phi = (x * self.scale + self.bias) / self.l1_scale
 
         # Generate random rotation angles
         rotation = (torch.rand(batch_size, device=device) * 2 * torch.pi)[:, None]
@@ -125,7 +122,7 @@ class FastLorentzRotation(nn.Module):
         result = x.clone()
 
         # Replace values based on the mask
-        result[:, self.phi_indices] = (
+        result[:, self.phi_mask] = (
             (
                 bool_mask[:, None] * rotated_phi
                 + (1 - bool_mask[:, None]) * original_phi

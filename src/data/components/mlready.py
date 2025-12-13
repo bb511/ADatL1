@@ -1,18 +1,15 @@
 # Splits the data into train, validation, test... And all the auxiliary data.
-from collections.abc import Callable, Iterator
 from collections import defaultdict
 from dataclasses import dataclass
 from pathlib import Path
 
 import numpy as np
 import awkward as ak
-import pickle
 
 import pyarrow
-import pyarrow.parquet as parquet
 import pyarrow.dataset
 from omegaconf import OmegaConf
-from colorama import Fore, Back, Style
+from colorama import Fore
 
 from src.utils import pylogger
 from . import plots
@@ -81,6 +78,7 @@ class L1DataMLReady:
         dataset, validation dataset, and test dataset in a deterministic seeded way.
         """
         obj_paths = self._get_files_per_object(self.processed_datapath / 'zerobias')
+        obj_names = [obj_name for obj_name, _ in obj_paths.items()]
         if not set(self.select_feats.keys()) <= set(obj_paths.keys()):
             log.warn(
                 "Some objects you're trying to select are not in the extracted data\n"
@@ -94,7 +92,7 @@ class L1DataMLReady:
         self._test_data_exists = 0
         itrain, ivalid, itest = self._compute_main_split(obj_paths)
         for obj_name, file_paths in obj_paths.items():
-            if not obj_name in self.select_feats.keys():
+            if obj_name not in self.select_feats.keys():
                 continue
 
             obj_dataset = pyarrow.dataset.dataset(file_paths, format='parquet')

@@ -14,8 +14,8 @@ defaults:
 
 tags: ["vae", "2025_data"]
 
-experiment_name: vae
-run_name: test
+experiment_name: vae_alpha${algorithm.loss.scale}
+run_name: bs${data.batch_size}_optim${algorithm.optimizer._target_}_lr${algorithm.optimizer.lr}_wd${algorithm.optimizer.weight_decay}
 
 seed: 12345
 
@@ -23,7 +23,7 @@ callbacks:
   anomaly_rate:
     metric_names: ['loss/reco/full', 'loss/kl/full']
 
-  max_rate_kl:
+  max_rate_kl_ckpt:
     _target_: src.callbacks.model_checkpoint.SingleDatasetModelCheckpoint
     dirpath: '${paths.checkpoints_dir}/${experiment_name}/${run_name}'
     monitor: loss_kl_full_rate0.25
@@ -32,7 +32,7 @@ callbacks:
       top_k: 1
     skip_ds: null
 
-  max_rate_reco:
+  max_rate_reco_ckpt:
     _target_: src.callbacks.model_checkpoint.SingleDatasetModelCheckpoint
     dirpath: '${paths.checkpoints_dir}/${experiment_name}/${run_name}'
     monitor: loss_reco_full_rate0.25
@@ -46,5 +46,10 @@ evaluator:
     last: null
     single:
       loss: ['min']
-      loss_kl_full_rate0.25: ['max']
-      loss_reco_full_rate0.25: ['max']
+      loss_kl_full_rate1: ['max']
+      loss_reco_full_rate1: ['max']
+
+evaluator_callbacks:
+  anomaly_efficiency:
+    metric_names: ['loss/kl/full', 'loss/reco/full']
+    target_rates: [1]

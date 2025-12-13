@@ -1,12 +1,15 @@
 # @package _global_
 
 defaults:
+  # Consider masking:
+  - /model/masking@masking: multiplicity
+
   - override /data: axov4
   - override /algorithm: axov4
-  - override /callbacks: basic
+  - override /callbacks: default
   - override /trainer: gpu0
-  - override /evaluator: basic
-  - override /evaluator_callbacks: basic
+  - override /evaluator: default
+  - override /evaluator_callbacks: default
   - override /logger: mlflow
 
 tags: ["axo_v4", "vae"]
@@ -22,3 +25,15 @@ trainer:
   min_epochs: 1
   max_epochs: 480
   num_sanity_val_steps: 0
+
+logger:
+  mlflow:
+    experiment_name: ${experiment_name}
+    run_name: ${run_name}
+  
+  wandb:
+    entity: viictorjimenezzz-personal
+    project: adatl1
+
+    group: ${experiment_name}
+    name: ${run_name}

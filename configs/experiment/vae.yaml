@@ -1,27 +1,25 @@
 # @package _global_
 
-# to execute this experiment run:
-# python train.py experiment=example
-
 defaults:
   - override /data: axov6
   - override /algorithm: vae
-  - override /callbacks: basic
-  - override /trainer: gpu
+  - override /callbacks: default
+  - override /trainer: gpu0
   - override /evaluator: default
-  - override /evaluator_callbacks: basic
+  - override /evaluator_callbacks: default
   - override /logger: mlflow
 
-tags: ["vae", "2025_data"]
+seed: 123
+tags: ["axo_v6", "vae"]
 
 experiment_name: vae
 run_name: test
 
-seed: 12345
 
-callbacks: 
+callbacks:
+
   anomaly_rate:
-    metric_names: ['loss/reco/full', 'loss/kl/full']
+    metric_names: ["loss/reco/full", "loss/kl/full"]
 
   max_rate_kl:
     _target_: src.callbacks.model_checkpoint.SingleDatasetModelCheckpoint
@@ -30,7 +28,6 @@ callbacks:
     criterion:
       _target_: src.callbacks.checkpointing.criterion.Max
       top_k: 1
-    skip_ds: null
 
   max_rate_reco:
     _target_: src.callbacks.model_checkpoint.SingleDatasetModelCheckpoint
@@ -39,12 +36,16 @@ callbacks:
     criterion:
       _target_: src.callbacks.checkpointing.criterion.Max
       top_k: 1
-    skip_ds: null
+
 
 evaluator:
+
   ckpts:
     last: null
     single:
       loss: ['min']
       loss_kl_full_rate0.25: ['max']
       loss_reco_full_rate0.25: ['max']
+
+
+

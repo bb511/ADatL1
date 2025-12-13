@@ -5,7 +5,21 @@ defaults:
   - util@rich_progress_bar: rich_progress_bar
   - util@log_data_mlflow: log_data_mlflow
   - util@clear_ckpts: clear_ckpts
+  - metrics@anomaly_rate: anomaly_rate
+  - checkpointing@min_loss_total: model_checkpoint_singledata
+  - checkpointing@last_epoch: model_checkpoint
   - _self_
 
 model_summary:
   max_depth: -1
+
+min_loss_total:
+  monitor: loss
+  criterion:
+    _target_: src.callbacks.checkpointing.criterion.Min
+    top_k: 1
+
+last_epoch:
+  dirpath: '${paths.checkpoints_dir}/${experiment_name}/${run_name}/'
+  filename: last
+  save_last: true

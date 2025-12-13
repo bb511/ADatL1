@@ -3,4 +3,5 @@
 defaults:
   - util@model_summary: model_summary
   - util@rich_progress_bar: rich_progress_bar
+  - metrics@anomaly_efficiency: anomaly_efficiency
   - _self_

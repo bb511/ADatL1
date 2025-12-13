@@ -170,11 +170,10 @@ class L1DataProcessor:
         processing for all the objects.
         """
         if self.dataset_folder.is_dir() and any(self.dataset_folder.iterdir()):
-            object_masks_exists = self._check_object_masks()
             existing_objs = self._get_existing_objs()
             if self.verbose:
                 self.existence_warn_trigger = True
-                log.info(Fore.YELLOW + f"Processed data exists: {cache_path}.")
+                log.info(Fore.YELLOW + f"Processed data exists {existing_objs}.")
 
             if not self._check_event_masks():
                 return set()

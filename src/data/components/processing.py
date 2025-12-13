@@ -76,7 +76,10 @@ class L1DataProcessor:
     def _get_extracted_object_names(self, dataset_path: Path) -> list[str]:
         """Get all the object names of the objects that were extracted."""
         obj_names = set()
-        for object_file in dataset_path.glob('*.parquet'):
+        for object_file in sorted(
+            p for p in dataset_path.glob("*.parquet")
+            if p.is_file() and not p.name.startswith("._")
+        ):
             obj_names.add(object_file.stem)
 
         if not set(self.event_filters.keys()) <= obj_names:
@@ -135,7 +138,10 @@ class L1DataProcessor:
         event_mask = ak.from_parquet(self.event_masks_folder / 'intersection.parquet')
         self.object_masks_folder.mkdir(parents=True, exist_ok=True)
         for obj_name in self.object_names:
-            data = ak.from_parquet(extracted_dataset / f'{obj_name}.parquet')
+            try:
+                data = ak.from_parquet(extracted_dataset / f'{obj_name}.parquet')
+            except:
+                import ipdb; ipdb.set_trace()
             data = data[event_mask]
 
             context = {feature: data[feature] for feature in data.fields}
@@ -214,7 +220,10 @@ class L1DataProcessor:
     def _get_existing_objs(self) -> set[str]:
         """Checks if all objects specified in the config have been extracted."""
         existing_objs = set()
-        for obj_cache_filepath in self.dataset_folder.glob('*.parquet'):
+        for obj_cache_filepath in sorted(
+            p for p in self.dataset_folder.glob("*.parquet")
+            if p.is_file() and not p.name.startswith("._")
+        ):
             if obj_cache_filepath.is_file():
                 existing_objs.add(obj_cache_filepath.stem)
 

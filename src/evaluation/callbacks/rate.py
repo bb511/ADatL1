@@ -148,6 +148,8 @@ class AnomalyEfficiencyCallback(Callback):
                     for rate_name, val in self.rates.items()
                     if name in rate_name
                 }
+                # TODO: Some aggregate measure.
+                # (cond entr, sum)
 
                 xlabel = (
                     f"efficiency at threshold: {target_rate} kHz\n"
@@ -175,8 +177,10 @@ class AnomalyEfficiencyCallback(Callback):
         arti_ckpt_dir = self._resolve_arti_dir(trainer, ckpt_name)
 
         # Log each image in the given plot_folder as an artifact.
-        img_paths = sorted(plot_folder.glob('*.jpg'))
-        for img_path in img_paths:
+        for img_path in sorted(
+            p for p in plot_folder.glob("*.jpg")
+            if p.is_file() and not p.name.startswith("._")
+        ):
             mlflow_logger.experiment.log_artifact(
                 run_id=run_id,
                 local_path=str(img_path),

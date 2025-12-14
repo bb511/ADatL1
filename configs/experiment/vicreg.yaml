@@ -1,12 +1,13 @@
 # @package _global_
 
 defaults:
-  - override /data: axov6
-  - override /algorithm: vae
+  - override /data: axov4
+  - override /algorithm: vicreg
   - override /callbacks: default
   - override /trainer: gpu0
   - override /logger: mlflow
   - override /evaluator: default
+  - override /evaluator_callbacks: default
 
 seed: 123
 tags: ["axo_v6", "vae"]
@@ -14,20 +15,13 @@ tags: ["axo_v6", "vae"]
 experiment_name: vicreg
 run_name: test
 
+metrics:
+  anomaly_rate: null
+  anomaly_efficiency: null
 
 callbacks:
-
-  min_loss_total: null
   anomaly_rate: null
-
-  val_loss:
-    _target_: pytorch_lightning.callbacks.ModelCheckpoint
-    monitor: loss
-    criterion: min
-    dirpath: '${paths.checkpoints_dir}/${experiment_name}/${run_name}/'
-    filename: last
-    save_last: true
-
+  last_epoch: null
 
 evaluator:
 
@@ -37,4 +31,6 @@ evaluator:
 
 
 evaluator_callbacks:
-  # TODO LIST
+  anomaly_efficiency: null
+  test_loss:
+    _target_: src.evaluation.callbacks.loss.TestLossCallback

@@ -107,8 +107,9 @@ class FastLorentzRotation(nn.Module):
             device=x.device, dtype=torch.float32
         )
 
-        # Extract and normalize phi values
-        original_phi = (x * self.scale + self.bias) / self.l1_scale
+        # Extract and renormalize phi values
+        original_phi = (x * self.scale + self.bias)[:, self.phi_mask]
+        original_phi = original_phi / self.l1_scale
 
         # Generate random rotation angles
         rotation = (torch.rand(batch_size, device=device) * 2 * torch.pi)[:, None]
@@ -127,6 +128,7 @@ class FastLorentzRotation(nn.Module):
                 bool_mask[:, None] * rotated_phi
                 + (1 - bool_mask[:, None]) * original_phi
             ).float()
-            - self.bias
-        ) / self.scale
+            - self.bias[self.phi_mask]
+        ) / self.scale[self.phi_mask]
+
         return result

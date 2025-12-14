@@ -1,4 +1,5 @@
 from typing import Tuple, Dict, Union
+import os
 import json
 import pickle
 import copy
@@ -45,7 +46,14 @@ class VICReg(L1ADLightningModule):
         # Instantiate augmentation modules
         self.fb1, self.fb2 = copy.deepcopy(feature_blur), copy.deepcopy(feature_blur)
         self.om1, self.om2 = copy.deepcopy(object_mask), copy.deepcopy(object_mask)
-       
+
+        if isinstance(object_feature_map, str):
+            if not object_feature_map.endswith(".json"):
+                raise ValueError("The 'object_feature_map' provided is invalid.")
+        
+            with open(object_feature_map, 'r') as file:
+                object_feature_map = json.load(file)
+
         norm_scale, norm_bias = self._norm_tensor(object_feature_map, object_norm_params)
         phi_inds = [
             ind
@@ -61,22 +69,22 @@ class VICReg(L1ADLightningModule):
         )
         self.lor1, self.lor2 = copy.deepcopy(lorentz_rotation), copy.deepcopy(lorentz_rotation)
 
-    def _norm_tensor(self, object_feature_map: Union[str, dict], object_norm_params: Union[str, dict]):
+    def _norm_tensor(self, object_feature_map: dict, object_norm_params: Union[str, dict]):
         """Get a 'scale' and 'shift' tensors to directly apply to the data."""
-        
-        if isinstance(object_feature_map, str):
-            if not object_feature_map.endswith(".json"):
-                raise ValueError("The 'object_feature_map' value provided is invalid.")
-        
-            with open(object_feature_map, 'r') as file:
-                object_feature_map = json.load(file)
 
         if isinstance(object_norm_params, str):
-            if not object_norm_params.endswith(".pkl"):
-                raise ValueError("The 'object_norm_params' value provided is invalid.")
+            if not os.path.isdir(object_norm_params):
+                raise ValueError("The 'object_norm_params' provided is invalid.")
             
-            with open(object_norm_params, 'rb') as file:
-                object_norm_params = pickle.load(file)
+            norm_params_dir = str(object_norm_params)
+            object_norm_params = {}
+            for obj_name in object_feature_map.keys():
+                norm_params_path = os.path.join(norm_params_dir, f"{obj_name}_norm_params.pkl")
+                if not os.path.isfile(norm_params_path):
+                    raise ValueError(f"The normalization parameters for {obj_name} can't be found.")
+                
+                with open(norm_params_path, 'rb') as file:
+                    object_norm_params[obj_name] = pickle.load(file)
         
         # Compute number of dimensions to preallocate scale and shift tensors:
         ndims = sum([
@@ -87,12 +95,9 @@ class VICReg(L1ADLightningModule):
         scale_tensor = torch.ones(ndims, dtype=torch.float32)
         shift_tensor = torch.zeros(ndims, dtype=torch.float32)
         
-        for obj_name, feature_map in object_feature_map.items():
-            for feat, inds in feature_map.items():
-                params = object_norm_params.get(obj_name, {}).get(feat)
-                if not params:
-                    raise ValueError(f"Mising normalization parameters for {obj_name}.")
-                
+        for obj_name, feature_norm_params in object_norm_params.items():
+            for feat, params in feature_norm_params.items():
+                inds = object_feature_map[obj_name][feat]
                 scale_tensor[inds] = float(params.get("scale", 1.0))
                 shift_tensor[inds] = float(params.get("shift", 0.0))
 

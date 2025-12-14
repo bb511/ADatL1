@@ -58,6 +58,7 @@ class Evaluator:
         self.evaluator.strat_name = None
         self.evaluator.metric_name = None
         self.evaluator.criterion_name = None
+        self.evaluator.ckpt_path_name = None
 
     def evaluate_run(self, run_folder: Path, model: LightningModule, test_loader: dict):
         """Evaluates all checkpoints pertraining to a run.
@@ -75,7 +76,10 @@ class Evaluator:
 
         log.info(Fore.MAGENTA + f"Evaluating run at {run_folder}...")
 
-        for strategy_name in self.ckpts.keys():
+        for strategy_name, metric_dict in self.ckpts.items():
+            if metric_dict is None:
+                continue
+
             if strategy_name == 'last':
                 self.evaluate_last(run_folder, model, test_loader)
                 continue
@@ -129,6 +133,8 @@ class Evaluator:
         for ckpt_path in criterion_folder.glob("*.ckpt"):
             if not is_valid_ckpt(ckpt_path):
                 continue
+
+            self.evaluator.ckpt_path_name = ckpt_path.name
             self.evaluate_ckpt(ckpt_path, model, test_loader)
 
         self.evaluator.criterion_name = None

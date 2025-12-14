@@ -14,7 +14,7 @@ object_mask:
   _target_: src.models.augmentation.FastObjectMask
   prob: 0.5709886168264394
 
-object_norm_params: ${paths.data_dir}/mlready/${data.data_mlready.name}/${data.data_normalizer.name}/norm_params.pkl
+object_norm_params: ${paths.data_dir}/mlready/${data.data_mlready.name}/${data.data_normalizer.name}
 object_feature_map: ${paths.data_dir}/mlready/${data.data_mlready.name}/${data.data_normalizer.name}/object_feature_map.json
 
 lorentz_rotation:

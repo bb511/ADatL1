@@ -201,11 +201,17 @@ class L1DataMLReady:
 
         self._aux_data_exists = []
         dataset_paths = self.processed_datapath / 'background'
-        for dataset_path in dataset_paths.iterdir():
+        for dataset_path in sorted(
+            p for p in dataset_paths.iterdir()
+            if p.is_dir() and not p.name.startswith("._")
+        ):
             self._cache_aux(dataset_path)
 
         dataset_paths = self.processed_datapath / 'signal'
-        for dataset_path in dataset_paths.iterdir():
+        for dataset_path in sorted(
+            p for p in dataset_paths.iterdir()
+            if p.is_dir() and not p.name.startswith("._")
+        ):
             self._cache_aux(dataset_path)
 
         if self._aux_data_exists:

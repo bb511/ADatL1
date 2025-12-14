@@ -40,5 +40,6 @@ create_and_link_dir() {
 create_and_link_dir "$PROJECT_ROOT/data" "$DATA_DIR"
 create_and_link_dir "$PROJECT_ROOT/logs" "$LOG_DIR"
 create_and_link_dir "$PROJECT_ROOT/outputs" "$OUTPUT_DIR"
+create_and_link_dir "$PROJECT_ROOT/checkpoints" "$CHECKPOINT_DIR"
 
 echo "Symbolic links for data, logs, and outputs created successfully."

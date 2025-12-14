@@ -30,4 +30,5 @@ dependencies = [
     "colorama>=0.4.6",
     "awkward>=2.8.10",
     "mplhep>=0.4.1",
+    "wandb>=0.12.10",
 ]

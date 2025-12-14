@@ -175,23 +175,24 @@ class L1DataProcessor:
         If the event filters differ from the ones provided in the config, redo the
         processing for all the objects.
         """
-        dataset_files = [
-            p for p in self.dataset_folder.iterdir()
-            if not p.name.startswith("._")
-        ]
-        if self.dataset_folder.is_dir() and any(dataset_files):
-            existing_objs = self._get_existing_objs()
-            if self.verbose:
-                self.existence_warn_trigger = True
-                log.info(Fore.YELLOW + f"Processed data exists {existing_objs}.")
+        if self.dataset_folder.is_dir():
+            dataset_files = [
+                p for p in self.dataset_folder.iterdir()
+                if not p.name.startswith("._")
+            ]
+            if any(dataset_files):
+                existing_objs = self._get_existing_objs()
+                if self.verbose:
+                    self.existence_warn_trigger = True
+                    log.info(Fore.YELLOW + f"Processed data exists {existing_objs}.")
 
-            if not self._check_event_masks():
-                return set()
+                if not self._check_event_masks():
+                    return set()
 
-            missing_obj_masks = self._check_object_masks()
-            existing_objs = existing_objs - missing_obj_masks
+                missing_obj_masks = self._check_object_masks()
+                existing_objs = existing_objs - missing_obj_masks
 
-            return existing_objs
+                return existing_objs
 
         self.dataset_folder.mkdir(parents=True, exist_ok=True)
         return set()

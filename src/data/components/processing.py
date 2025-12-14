@@ -42,7 +42,10 @@ class L1DataProcessor:
         # Process the data sets.
         nexists = 0
         ndatasets = 0
-        for extracted_dataset in self.extracted_datapath.iterdir():
+        for extracted_dataset in sorted(
+            p for p in self.extracted_datapath.iterdir()
+            if p.is_dir() and not p.name.startswith("._")
+        ):
             ndatasets += 1
             dataset_name = extracted_dataset.stem
             self.dataset_folder = self.cache_folder / dataset_name

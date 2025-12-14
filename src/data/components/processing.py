@@ -175,7 +175,11 @@ class L1DataProcessor:
         If the event filters differ from the ones provided in the config, redo the
         processing for all the objects.
         """
-        if self.dataset_folder.is_dir() and any(self.dataset_folder.iterdir()):
+        dataset_files = [
+            p for p in self.dataset_folder.iterdir()
+            if not p.name.startswith("._")
+        ]
+        if self.dataset_folder.is_dir() and any(dataset_files):
             existing_objs = self._get_existing_objs()
             if self.verbose:
                 self.existence_warn_trigger = True

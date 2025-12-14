@@ -113,7 +113,11 @@ class L1DataExtractor(object):
     def _check_data_exists(self, dataset_name: str) -> set[str]:
         """Check if a specific data set was already extracted."""
         dataset_folder = self.cache_folder / dataset_name
-        if dataset_folder.is_dir() and any(dataset_folder.iterdir()):
+        dataset_files = [
+            p for p in dataset_folder.iterdir()
+            if not p.name.startswith("._")
+        ]
+        if dataset_folder.is_dir() and any(dataset_files):
             existing_objs = self._get_existing_objs(dataset_folder)
             if self.verbose:
                 self.existence_warn_trigger = True

@@ -147,26 +147,20 @@ class ROCs(Callback):
         if mlflow_logger is None:
             return
 
-        run_id = mlflow_logger.run_id
         arti_ckpt_dir = self._resolve_arti_dir(trainer, ckpt_name)
+        gallery_dir = arti_ckpt_dir.parent
 
         # Log each image in the given plot_folder as an artifact.
         img_paths = sorted(plot_folder.glob('*.jpg'))
         for img_path in img_paths:
             mlflow_logger.experiment.log_artifact(
-                run_id=run_id,
+                run_id=mlflow_logger.run_id,
                 local_path=str(img_path),
                 artifact_path=str(arti_ckpt_dir),
             )
 
-        # Generate an html gallery at the parent directory level.
-        gallery_dir = arti_ckpt_dir.parent
-        html_gallery = utils.mlflow.build_html(
-            mlflow_logger, plot_folder, gallery_dir, arti_ckpt_dir
-        )
-        mlflow_logger.experiment.log_text(
-            run_id, html_gallery, artifact_file=gallery_dir / 'index.html'
-        )
+        # Generate an html gallery of the logs plots in the parent dir of the arti.
+        html_gallery = utils.mlflow.make_gall(mlflow_logger, plot_folder, gallery_dir)
 
     def _resolve_arti_dir(self, trainer, ckpt_name: str):
         """Resolve the artifacts directory where the plots will be stored in mlflow."""

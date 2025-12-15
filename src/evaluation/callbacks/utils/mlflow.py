@@ -30,84 +30,80 @@ def get_mlflow_logger(trainer) -> MLFlowLogger:
     return None
 
 
-def build_html(
-    mlflow_logger: Logger,
-    plots_dir: Path,
-    gallery_dir: Path,
-    arti_dir: Path,
-) -> Path:
-    """Makes an index html file in mlflow and adds the plots in plots_dir to it."""
+def make_gall(mlflow_logger: Logger, plots_dir: Path, gallery_dir: Path) -> str:
+    """Makes an index html file in mlflow and adds the plots in plots_dir to it.
+
+    If index.html already exists at the given gallery_dir path, then append the plots
+    to it rather than generate the file from scratch.
+
+    :param mlflow_logger: The mlflow logger object used in the current run.
+    :param plots_dir: The directory where the plots to be put in the html page are.
+    :param gallery_dir: The path inside the mlflow artifacts directory structure where
+        the index.html containing the plots gallery should go. Generally this should be
+        in the parent directory where the plots are stored.
+    """
     plots_dir = plots_dir.resolve()
-    section_prefix = str(arti_dir.relative_to(gallery_dir))
-    sections = get_image_paths(plots_dir, section_prefix)
+    section_name = plots_dir.name
+    image_paths = get_image_paths(plots_dir, section_name)
 
     # Check if index file already exists.
-    index_exists = check_index_exists(mlflow_logger, gallery_dir)
-    html_page = get_html_page(mlflow_logger, gallery_dir, index_exists)
+    index_exists = check_html_exists(mlflow_logger, gallery_dir)
+    if index_exists:
+        html_page = get_html_page(mlflow_logger, gallery_dir)
+    else:
+        html_page = generate_gallery_header()
 
-    if sections:
-        for section, images in sections:
-            html_page += write_html_section(mlflow_logger, section, images, arti_dir)
+    html_page += write_gallery_section(mlflow_logger, section_name, image_paths)
+    html_page = "\n".join(html_page)
 
-    return "\n".join(html_page)
+    mlflow_logger.experiment.log_text(
+        mlflow_logger.run_id, html_page, artifact_file=gallery_dir / 'index.html'
+    )
+
+    return html_page
 
 
-def check_index_exists(mlflow_logger: Logger, gallery_dir: Path) -> bool:
+def check_html_exists(mlflow_logger: Logger, gallery_dir: Path, fname: str) -> bool:
     """Checks if the index.html already exists at the given gallery_dir.
 
     If it exists, append to the gallery path instead of rewriting the file.
     """
     run_id = mlflow_logger.run_id
     arti_files = mlflow_logger.experiment.list_artifacts(run_id, path=str(gallery_dir))
-    index_path = gallery_dir / 'index.html'
-    index_file_exists = any([file.path == str(index_path) for file in arti_files])
+    file_path = gallery_dir / f'{fname}.html'
+    file_exists = any([file.path == str(file_path) for file in arti_files])
 
     return index_file_exists
 
 
-def get_html_page(
-    mlflow_logger: Logger, gallery_dir: Path, index_exists: bool
-) -> list[str]:
-    """Get read or instantiate the html page based on whether it already exists.
-
-    If index.html already exists in gallery_dir, then import it and append the plots
-    in plots_dir to this index.html.
-    Otherwise, generate a new index.html file and write the plots to it.
-    """
+def get_html_page(mlflow_logger: Logger, gallery_dir: Path, fname: str) -> list[str]:
+    """Read fname.html html page from gallery_dir."""
     logging.getLogger("mlflow").setLevel(logging.ERROR)
-    if index_exists:
-        run = mlflow_logger.experiment.get_run(mlflow_logger.run_id)
-        artifact_uri = run.info.artifact_uri.rstrip("/")
-        index_path = (gallery_dir / 'index.html').as_posix()
-        index_path = f"{artifact_uri}/{index_path}"
-        with redirect_stdout(StringIO()):
-            html_page = mlflow.artifacts.load_text(index_path)
-        html_page = html_page.splitlines()
-    else:
-        html_page = []
-        html_page += generate_html_header()
+    run = mlflow_logger.experiment.get_run(mlflow_logger.run_id)
+    artifact_uri = run.info.artifact_uri.rstrip("/")
+    file_path = (gallery_dir / f'{fname}.html').as_posix()
+    file_path = f"{artifact_uri}/{file_path}"
+    with redirect_stdout(StringIO()):
+        html_page = mlflow.artifacts.load_text(file_path)
+    html_page = html_page.splitlines()
 
     return html_page
 
 
-def get_image_paths(plots_dir: Path, section_prefix: str):
+def get_image_paths(plots_dir: Path, section_name: str):
     """Get paths to images contained in a root directory, grouped by subfolder."""
-    groups = {}
+    image_paths = []
     IMG_EXTS = {".png", ".jpg", ".jpeg", ".gif", ".webp", ".svg"}
-    for img_path in plots_dir.rglob("*"):
+    for img_path in plots_dir.glob("*"):
         if img_path.suffix.lower() in IMG_EXTS and img_path.is_file():
-            rel = img_path.relative_to(plots_dir)
-            section_name = section_prefix
-            section_name += rel.parts[0] if len(rel.parts) > 1 else "_root"
-            groups.setdefault(section_name, []).append(img_path)
+            image_paths.append(img_path)
 
-    for section in groups.keys():
-        groups[section] = sorted(groups[section])
+    image_paths = sorted(image_paths)
 
-    return sorted(groups.items())
+    return image_paths
 
 
-def generate_html_header():
+def generate_gallery_header():
     """Generate the header for the html file."""
     html_header = [
         "<!doctype html>",
@@ -154,19 +150,19 @@ def generate_html_header():
     return html_header
 
 
-def write_html_section(
-     mlflow_logger: Logger, section: str, image_paths: list[Path, ...], arti_dir: Path
+def write_gallery_section(
+     mlflow_logger: Logger, section: str, image_paths: list[Path, ...]
 ) -> list[str, ...]:
     """Write a section of the index html file generated in build_html.
 
-    The section is made up of thumbnails that link to the original image in the MLFlow
-    artifact directory structure. Clicking the thumbnail opens the original image in
-    a new tab.
+    A section is made up of compressed small image thumbnail that expand when clicked.
+    The quality is kept low to ensure that the html page is not too big in terms of
+    memory. If the html page is larger than 50 Mb, mlflow does not display it.
     """
     html_section = []
     html_section.append(
         f"<details open><summary>{html.escape(section)} ({len(image_paths)})</summary>"
-        )
+    )
     html_section.append("<div class='grid'>")
     for img_path in image_paths:
         caption = img_path.stem

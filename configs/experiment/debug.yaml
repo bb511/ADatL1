@@ -7,8 +7,8 @@ defaults:
   - override /data: axov6
   - override /algorithm: axov4
   - override /callbacks: basic
-  - override /trainer: debug
-  - override /evaluator: basic
+  - override /trainer: cpu
+  - override /evaluator: default
   - override /evaluator_callbacks: basic
   - override /logger: mlflow
 
@@ -22,5 +22,6 @@ seed: 12345
 trainer:
   min_epochs: 1
   max_epochs: 1
+  limit_train_batches: 10
 
 test: true

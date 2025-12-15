@@ -95,7 +95,6 @@ def train(cfg: DictConfig) -> Tuple[Dict[str, Any], Dict[str, Any]]:
 
 def test(cfg: DictConfig, datamodule, algorithm, logger):
     """Evaluate the training."""
-    print(cfg.get('evaluator'))
     if cfg.get('evaluator') is None:
         log.info(Back.YELLOW + "No evaluator config found... Skipping testing")
         return

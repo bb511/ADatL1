@@ -1,8 +1,7 @@
 from typing import Any, Optional, Union
 from collections import defaultdict
 from pathlib import Path
-
-# from retry import retry
+import gc
 
 import torch
 import numpy as np
@@ -255,7 +254,14 @@ class L1ADDataModule(LightningDataModule):
 
         return data_test
 
-    # @retry((Exception), tries=3, delay=3, backoff=0)
+    def teardown(self, stage: str | None = None) -> None:
+        # Drop references to large tensors/dicts so they become collectible
+        gc.collect()
+
+        # If CUDA is ever used in other experiments, this helps allocator reuse
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
+
     def transfer_batch_to_device(self, batch, device, dataloader_idx):
         """Transfer custom dataset to gpu faster.
 

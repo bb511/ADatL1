@@ -3,17 +3,17 @@
 defaults:
   - default
   - metrics@anomaly_rate: anomaly_rate
-  - checkpointing@min_loss_total: model_checkpoint_singledata
-  - checkpointing@last_epoch: model_checkpoint
+  - checkpointing@min_loss_total_ckpt: model_checkpoint_singledata
+  - checkpointing@last_epoch_ckpt: model_checkpoint
   - _self_
 
-min_loss_total:
+min_loss_total_ckpt:
   monitor: loss
   criterion:
     _target_: src.callbacks.checkpointing.criterion.Min
     top_k: 1
 
-last_epoch:
+last_epoch_ckpt:
   dirpath: '${paths.checkpoints_dir}/${experiment_name}/${run_name}/'
   filename: last
   save_last: true

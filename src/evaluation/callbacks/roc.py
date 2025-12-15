@@ -119,7 +119,8 @@ class ROCs(Callback):
             }
 
             roc.plot(roc_per_dataset, auroc_per_dataset, metric_name, plot_folder)
-            self._log_plots_to_mlflow(trainer, ckpt_name, plot_folder)
+
+        self._log_plots_to_mlflow(trainer, ckpt_name, plot_folder)
 
     def _convert2numpy(self, arr: tuple[torch.Tensor] | torch.Tensor):
         """Convert torch tensor or list of torch tensors to numpy arrays."""

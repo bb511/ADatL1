@@ -2,6 +2,7 @@
 from typing import Any, Dict, List, Optional, Tuple
 from pathlib import Path
 import copy
+import gc
 
 import hydra
 import pytorch_lightning as pl

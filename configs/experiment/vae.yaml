@@ -23,6 +23,28 @@ callbacks:
   anomaly_rate:
     metric_names: ['loss/reco/full', 'loss/kl/full']
 
+  min_loss_total_ckpt:
+      skip_ds:
+        - GluGluHTo2B_Par-MH-125
+        - GluGluHto2G_Par-MH-125
+        - GluGluHto2G_Par-MH-90
+        - GluGluHto2Tau_Par-MH-125
+        - GluGlutoHHto2B2WtoLNu2Q_Par-c2-0-kl-1-kt-1
+        - HHHto4B2Tau_Par-c3-0-d4-0
+        - HHHto6B_Par-c3-0-d4-0
+        - SUSYGluGluToBBHTo2B_Par-M-1200
+        - SUSYGluGluToBBHToBB_Par-M-120
+        - SUSYGluGluToBBHToBB_Par-M-350
+        - SUSYGluGluToBBHToBB_Par-M-600
+        - TTHTo2C_Par-MH-125
+        - TTHto2B_Par-MH-125
+        - VBFHTo2C_Par-MH-125
+        - VBFHto2B_Par-MH-125
+        - VBFHto2Tau_Par-MH-125
+        - WtoTauto3Mu
+        - ggH-suep-decay
+        - haa-4b-ma15
+
   max_rate_kl_ckpt:
     _target_: src.callbacks.model_checkpoint.SingleDatasetModelCheckpoint
     dirpath: '${paths.checkpoints_dir}/${experiment_name}/${run_name}'
@@ -30,7 +52,9 @@ callbacks:
     criterion:
       _target_: src.callbacks.checkpointing.criterion.Max
       top_k: 1
-    skip_ds: null
+    skip_ds:
+      - main_test
+      - SingleNeutrino_E-10-gun
 
   max_rate_reco_ckpt:
     _target_: src.callbacks.model_checkpoint.SingleDatasetModelCheckpoint
@@ -39,11 +63,13 @@ callbacks:
     criterion:
       _target_: src.callbacks.checkpointing.criterion.Max
       top_k: 1
-    skip_ds: null
+    skip_ds:
+      - main_test
+      - SingleNeutrino_E-10-gun
 
 evaluator:
   ckpts:
-    last: null
+    last: true
     single:
       loss: ['min']
       loss_kl_full_rate1: ['max']

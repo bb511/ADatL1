@@ -74,6 +74,9 @@ class Evaluator:
         log.info(Fore.MAGENTA + f"Evaluating run at {run_folder}...")
 
         for strategy_name in self.ckpts.keys():
+            if self.ckpts[strategy_name] is None or self.ckpts[strategy_name] is False:
+                continue
+
             if strategy_name == 'last':
                 self.evaluate_last(run_folder, model, test_loader)
                 continue

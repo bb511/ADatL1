@@ -158,7 +158,7 @@ class AnomalyEfficiencyCallback(Callback):
                     rates_per_dataset, rates_per_dataset, xlabel, ylabel, plot_folder
                 )
 
-            self._log_plots_to_mlflow(trainer, ckpt_name, plot_folder)
+        self._log_plots_to_mlflow(trainer, ckpt_name, plot_folder)
 
     def _get_dsname(self, rate_name: str):
         """Retrieves the data set name from string specifying rate name."""

@@ -2,6 +2,7 @@
 
 _target_: src.algorithms.vicreg.VICReg
 
+seed: ${seed}
 
 feature_blur:
   _target_: src.models.augmentation.FastFeatureBlur

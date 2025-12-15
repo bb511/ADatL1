@@ -28,6 +28,7 @@ class VICReg(L1ADLightningModule):
         lorentz_rotation: nn.Module,
         object_norm_params: Union[str, dict],
         object_feature_map: Union[str, dict],
+        seed: int,
         **kwargs,
     ):
         super().__init__(**kwargs)
@@ -43,9 +44,11 @@ class VICReg(L1ADLightningModule):
         )
         self.projector = projector
 
-        # Instantiate augmentation modules
+        # Instantiate augmentation modules with different rngs
         self.fb1, self.fb2 = copy.deepcopy(feature_blur), copy.deepcopy(feature_blur)
+        self.fb1.rng.set_seed(seed); self.fb2.rng.set_seed(seed + 1)
         self.om1, self.om2 = copy.deepcopy(object_mask), copy.deepcopy(object_mask)
+        self.om1.rng.set_seed(seed); self.om2.rng.set_seed(seed + 1)
 
         if isinstance(object_feature_map, str):
             if not object_feature_map.endswith(".json"):
@@ -68,6 +71,7 @@ class VICReg(L1ADLightningModule):
             phi_mask=phi_mask
         )
         self.lor1, self.lor2 = copy.deepcopy(lorentz_rotation), copy.deepcopy(lorentz_rotation)
+        self.lor1.rng.set_seed(seed); self.lor2.rng.set_seed(seed + 1)
 
     def _norm_tensor(self, object_feature_map: dict, object_norm_params: Union[str, dict]):
         """Get a 'scale' and 'shift' tensors to directly apply to the data."""
@@ -102,10 +106,6 @@ class VICReg(L1ADLightningModule):
                 shift_tensor[inds] = float(params.get("shift", 0.0))
 
         return scale_tensor, shift_tensor
-
-    def forward(self, x: torch.Tensor) -> torch.Tensor:
-        x = self.lor1(self.om1(self.fb1(x)))
-        return self.projector(self.model(x))
 
     def model_step(self, batch: Tuple[torch.Tensor]) -> Dict[str, torch.Tensor]:
         x, _ = batch

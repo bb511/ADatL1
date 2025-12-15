@@ -59,6 +59,6 @@ class MLP(nn.Module):
     def _init_bias_wrapper(self, layer: nn.Module):
         """Initialize the bias of each layer in a way dictated by a method."""
         if isinstance(layer, nn.Linear) and not layer.bias is None:
-            return self.init_bias(layer.weight)
+            return self.init_bias(layer.bias)
 
         return None

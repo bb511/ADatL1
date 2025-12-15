@@ -32,7 +32,7 @@ class TestLossCallback(Callback):
         dset_key = list(getattr(trainer, f"test_dataloaders").keys())[dataloader_idx]        
 
         self.log_dict(
-            {f"test/ckpt={dset_ref}/ds={dset_key}/{k}": v for k, v in outdict.items()},
+            {f"test/ckpt.{dset_ref}/ds.{dset_key}/{k}": v for k, v in outdict.items()},
             prog_bar=False,
             on_step=False,
             on_epoch=True,

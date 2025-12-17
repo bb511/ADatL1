@@ -88,18 +88,6 @@ class L1ADLightningModule(LightningModule):
         self, batch: torch.Tensor, batch_idx: int, dataloader_idx: Optional[int] = 0
     ):
         outdict = self.model_step(batch)
-
-        # Decide what to log:
-        self.log_dict(
-            self._log_dict(outdict, "test", dataloader_idx=dataloader_idx),
-            prog_bar=False,
-            on_step=False,
-            on_epoch=True,
-            logger=True,
-            sync_dist=False,  # !!
-            add_dataloader_idx=False,
-            batch_size=len(batch)
-        )
         return outdict
 
     def on_train_epoch_end(self):
@@ -109,6 +97,10 @@ class L1ADLightningModule(LightningModule):
     def on_validation_epoch_end(self):
         """Log the epochs so the mlflow plotting is not buggy."""
         self.log("epoch_idx", float(self.current_epoch), on_epoch=True, on_step=False)
+        garbage_collection_cuda()
+
+    def on_test_epoch_end(self):
+        """Clean up memory."""
         garbage_collection_cuda()
 
     def outlog(self, outdict: dict) -> dict:

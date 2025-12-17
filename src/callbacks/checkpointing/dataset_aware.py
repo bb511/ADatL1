@@ -77,7 +77,7 @@ class DatasetAwareModelCheckpoint(Callback):
             
             metric_match = full_metric_name.split("/")[-1] == self.monitor
             if dataset_match and metric_match:
-                return metric_value.detach().cpu().numpy()
+                return metric_value.detach().cpu().float().numpy()
 
         warnings.warn(
             f"Checkpoint for metric '{self.monitor}' not found in logged metrics. "
@@ -121,7 +121,8 @@ class DatasetAwareModelCheckpoint(Callback):
         """Makes sure that the saved checkpoints are just the top_k ones."""
         files_to_remove = [
             ckpt['fpath'] for ckpt in self.checkpoints[dataset_name]
-            if (not ckpt['value'] in self.ds_criterion[dataset_name].top_k_values) and (os.path.exists(ckpt['fpath']))
+            if ((not ckpt['value'] in self.ds_criterion[dataset_name].top_k_values) and
+                (os.path.exists(ckpt['fpath'])))
         ]
 
         self.checkpoints[dataset_name] = [
@@ -186,7 +187,7 @@ class DatasetAwareModelCheckpoint(Callback):
 
         epochs = defaultdict(int)
         values = defaultdict(float)
-        for k in range(self.topk - 1):
+        for k in range(self.topk):
             for dataset_name in self.checkpoints.keys():
                 epochs[dataset_name] = self.checkpoints[dataset_name][k]['epoch']
                 values[dataset_name] = self.checkpoints[dataset_name][k]['value']

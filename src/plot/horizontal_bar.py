@@ -24,7 +24,8 @@ def plot(data: dict, xlabel: str, save_dir: Path):
 
     hep.cms.label("Preliminary", data=False, loc=0, ax=ax)
 
-    filename = sanitize_filename(xlabel)
+    filename = xlabel.replace("\n", "__")
+    filename = sanitize_filename(filename)
     filename = filename.replace(" ", "_")
     fig.savefig(save_dir / f"{filename}.jpg", bbox_inches='tight')
     fig.clear()
@@ -49,7 +50,7 @@ def plot_yright(data: dict, ydata: dict, xlabel: str, ylabel: str, save_dir: Pat
 
     ax.barh(dataset_names, dataset_values)
     ax.set_xlabel(xlabel)
-    ax.set_xlim(0, 0.5)
+    ax.set_xlim(0, max(dataset_values) + 0.01)
 
     hep.cms.label("Preliminary", data=False, loc=0, ax=ax)
 
@@ -61,9 +62,9 @@ def plot_yright(data: dict, ydata: dict, xlabel: str, ylabel: str, save_dir: Pat
     ax2.set_yticklabels(dataset_yvals)
     ax2.set_ylabel(ylabel)
 
-    filename = sanitize_filename(xlabel)
+    filename = xlabel.replace("\n", "__")
+    filename = sanitize_filename(filename)
     filename = filename.replace(" ", "_")
-    filename = filename.replace("\n", "_")
     fig.savefig(save_dir / f"{filename}.jpg", bbox_inches='tight')
     fig.clear()
     plt.close(fig)

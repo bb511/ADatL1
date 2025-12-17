@@ -28,6 +28,8 @@ class L1DataAwkward2Torch:
 
     def load_folder(self, folder_path: Path) -> torch.Tensor:
         """Loads folder of parquet files containing awkward arrays to a numpy array."""
+        self.cached_objects.clear()
+
         self.cache_filepath = folder_path / 'torch_cache.pt'
         self.mapping_filepath = folder_path.parent / "object_feature_map.json"
         if self._cache_exists():

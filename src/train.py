@@ -2,6 +2,7 @@
 from typing import Any, Dict, List, Optional, Tuple
 from pathlib import Path
 import copy
+import gc
 
 import hydra
 import pytorch_lightning as pl
@@ -87,14 +88,15 @@ def train(cfg: DictConfig) -> Tuple[Dict[str, Any], Dict[str, Any]]:
     # Evaluate the training.
     if cfg.get("test"):
         log.info(Back.MAGENTA + 8*'-' + "STARTING TESTING" + 8*'-')
-        test(cfg, datamodule, algorithm, logger)
+        evaluator = test(cfg, datamodule, algorithm, logger)
+
+    object_dict.update({"evaluator": evaluator})
 
     metric_dict = {**train_metrics}
     return metric_dict, object_dict
 
 def test(cfg: DictConfig, datamodule, algorithm, logger):
     """Evaluate the training."""
-    print(cfg.get('evaluator'))
     if cfg.get('evaluator') is None:
         log.info(Back.YELLOW + "No evaluator config found... Skipping testing")
         return
@@ -110,7 +112,10 @@ def test(cfg: DictConfig, datamodule, algorithm, logger):
     callbacks = instantiate_eval_callbacks(cfg.get('evaluator_callbacks'), datamodule)
     log.info(f"Instantiating evaluator <{evaluator_cfg._target_}>")
     evaluator = hydra.utils.instantiate(
-        evaluator_cfg, callbacks=callbacks, logger=logger
+        evaluator_cfg,
+        callbacks=callbacks,
+        logger=logger,
+        optimized_metric_config=cfg.get('optimized_metric_config')
     )
 
     datamodule.setup("test")
@@ -118,6 +123,7 @@ def test(cfg: DictConfig, datamodule, algorithm, logger):
     run_ckpts = Path(cfg.paths.checkpoints_dir) / cfg.experiment_name / cfg.run_name
 
     evaluator.evaluate_run(run_ckpts, algorithm, test_loader)
+    return evaluator
 
 @hydra.main(version_base="1.3", config_path="../configs", config_name="train.yaml")
 def main(cfg: DictConfig) -> Optional[float]:
@@ -131,12 +137,14 @@ def main(cfg: DictConfig) -> Optional[float]:
     extras(cfg)
 
     # train the model
-    metric_dict, _ = train(cfg)
+    metric_dict, object_dict = train(cfg)
 
     # safely retrieve metric value for hydra-based hyperparameter optimization
-    metric_value = get_metric_value(
-        metric_dict=metric_dict, metric_name=cfg.get("optimized_metric")
-    )
+    # metric_value = get_metric_value(
+        # metric_dict=metric_dict, metric_name=cfg.get("optimized_metric")
+    # )
+
+    metric_value = object_dict["evaluator"].optimized_metric
 
     # return optimized metric
     return metric_value

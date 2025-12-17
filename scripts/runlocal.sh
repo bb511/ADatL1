@@ -1,17 +1,16 @@
+# taskset -c 0-9 \
 # python3 src/train.py \
 #     -m \
+#     hparams_search=vae_optuna \
 #     experiment=debug \
 #     paths.raw_data_dir=/data/deodagiu/adl1t_data/parquet_files \
 
+taskset -c 84-95 \
 python3 src/train.py \
     -m \
+    hydra/launcher=submitit_local \
+    hydra.launcher.cpus_per_task=1 \
+    hparams_search=vae_optuna \
     experiment=vae \
     paths.raw_data_dir=/data/deodagiu/adl1t_data/parquet_files \
-    trainer.max_epochs=150 \
-    trainer=gpu0 \
-    data.batch_size=16276,32552,65104 \
-    algorithm.optimizer._target_=torch.optim.SGD,torch.optim.AdamW \
-    algorithm.optimizer.lr=1e-5,1e-4,1e-3 \
-    algorithm.optimizer.weight_decay=1e-5,1e-4,1e-3 \
-    algorithm.loss.scale=0 \
-    # algorithm.loss.scale=0.0,0.1,0.2,0.3,0.4,0.5,0.6,0.7,0.8,0.9,1.0 \
+    trainer=cpu

@@ -6,6 +6,7 @@ from pathlib import Path
 import logging
 
 import torch
+import numpy as np
 import pytorch_lightning
 from pytorch_lightning.loggers import Logger
 from pytorch_lightning import LightningModule, LightningDataModule
@@ -41,10 +42,12 @@ class Evaluator:
         ckpts: dict = None,
         callbacks: Optional[list[Callback]] = None,
         logger: Optional[Logger] = None,
+        optimized_metric_config: dict = None,
         **trainer_kwargs,
     ):
         self.ckpts = ckpts or {}
         self.callbacks = callbacks or []
+        self.optimized_metric_config = optimized_metric_config or None
 
         # Build a *real* Trainer under the hood
         self.evaluator = pytorch_lightning.Trainer(
@@ -56,6 +59,7 @@ class Evaluator:
         self.evaluator.strat_name = None
         self.evaluator.metric_name = None
         self.evaluator.criterion_name = None
+        self.optimized_metric = None
 
     def evaluate_run(self, run_folder: Path, model: LightningModule, test_loader: dict):
         """Evaluates all checkpoints pertraining to a run.
@@ -74,6 +78,9 @@ class Evaluator:
         log.info(Fore.MAGENTA + f"Evaluating run at {run_folder}...")
 
         for strategy_name in self.ckpts.keys():
+            if self.ckpts[strategy_name] is None or self.ckpts[strategy_name] is False:
+                continue
+
             if strategy_name == 'last':
                 self.evaluate_last(run_folder, model, test_loader)
                 continue
@@ -127,6 +134,8 @@ class Evaluator:
         for ckpt_path in criterion_folder.glob("*.ckpt"):
             self.evaluate_ckpt(ckpt_path, model, test_loader)
 
+        self._get_criterion_optimized_metric(self.optimized_metric_config)
+        self._make_summary_plots(criterion_folder)
         self.evaluator.criterion_name = None
 
     def evaluate_ckpt(self, ckpt_path: Path, model, test_loader: dict):
@@ -158,6 +167,7 @@ class Evaluator:
         self.evaluator.strat_name = 'last'
         ckpt_path = run_folder / 'last.ckpt'
         self.evaluate_ckpt(ckpt_path, model, test_loaders)
+        self._make_summary_plots(run_folder)
 
     def _get_subdir(self, main_dir: Path, subdir: str):
         """Checks if a dir exists and returns it if true."""
@@ -174,3 +184,54 @@ class Evaluator:
             return True
 
         return False
+
+    def _get_criterion_optimized_metric(self, optimized_metric_config: dict | None):
+        """Get one metric over all the checkpoints that are being probed for a crit.
+
+        This is used for hyperparameter optimization. The optimized_metric_config
+        points to a callback that should have a method 'get_optimized_metric'. Then,
+        this method returns one number related to what that callback computes and that
+        should be optimized. The input dict to this method should also include all the
+        args required by the get_optimized_metric method. Finally, it should include
+        the way to pick an optimized_metric across checkpointing criteria, i.e., pick
+        the maximum across criteria or the minimum, depending on the nature of the
+        optimized metric.
+        """
+        if optimized_metric_config is None:
+            return
+
+        callback_name = list(optimized_metric_config.keys())[0]
+        cb_names = [cb.__class__.__name__ for cb in self.evaluator.callbacks]
+        if not callback_name in cb_names:
+            raise ValueError(f"Callback {callback_name} not in evaluator callbacks.")
+
+        for cb in self.evaluator.callbacks:
+            if callback_name == cb.__class__.__name__:
+                params = optimized_metric_config[callback_name]
+                optimized_metric = cb.get_optimized_metric(**params)
+
+        if optimized_metric_config['direction'] == 'maximize':
+            if self.optimized_metric is None:
+                self.optimized_metric = -np.inf
+            if optimized_metric > self.optimized_metric:
+                self.optimized_metric = optimized_metric
+        elif optimized_metric_config['direction'] == 'minimize':
+            if self.optimized_metric is None:
+                self.optimized_metric = np.inf
+            if optimized_metric < self.optimized_metric:
+                self.optimized_metric = optimized_metric
+        else:
+            raise ValueError("Direction in optimized_metric_config either max or min.")
+
+    def _make_summary_plots(self, plot_folder: Path):
+        """Make summary plots for each callback.
+
+        Check if any of the callbacks have 'plot_summary_reset' method and if they do
+        call it and store result in given folder.
+        """
+        # Make summary plots for callback across evaluated checkpoints.
+        for cb in self.evaluator.callbacks:
+            method_name = 'plot_summary_reset'
+            summary_method = getattr(cb, method_name, None)
+            if callable(summary_method):
+                summary_method(self.evaluator, plot_folder)

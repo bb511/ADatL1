@@ -27,7 +27,7 @@ hydra:
     storage: sqlite:///optuna_logs/optim_v3.db
 
     # name of the study to persist optimization results
-    study_name: vae_eff_kl_1khz_search
+    study_name: test
 
     # number of parallel workers
     n_jobs: 1

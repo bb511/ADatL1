@@ -3,8 +3,8 @@
 from typing import Literal
 
 import torch
-import torch.nn as nn
 
+from src.losses.components import L1ADLoss
 from src.losses.components.reconstruction import ReconstructionLoss
 from src.losses.components.reconstruction import CylPtPzReconstructionLoss
 from src.losses.components.kl import KLDivergenceLoss
@@ -14,7 +14,7 @@ from colorama import Fore, Back, Style
 log = pylogger.RankedLogger(__name__)
 
 
-class ClassicVAELoss(nn.Module):
+class ClassicVAELoss(L1ADLoss):
     """The conventional variational AE loss.
 
     :param scale: Float between 0 and 1 that establishes the scale between the KL div
@@ -24,13 +24,12 @@ class ClassicVAELoss(nn.Module):
         by computing the mean over the batch, or the sum.
     """
     def __init__(self, scale: float, reduct: Literal["none", "mean", "sum"] = "none"):
-        super().__init__()
-        self.reduction = reduct
-        self.reco_scale = 1 - scale
-        self.kl_scale = scale
+        super().__init__(scale=scale, reduction=reduct)
+        self.reco_scale = 1 - self.scale
+        self.kl_scale = self.scale
 
-        self.reco_loss = ReconstructionLoss(scale=self.reco_scale)
-        self.kl_loss = KLDivergenceLoss(scale=self.kl_scale)
+        self.reco_loss = ReconstructionLoss(scale=self.reco_scale, reduction=reduct)
+        self.kl_loss = KLDivergenceLoss(scale=self.kl_scale, reduction=reduct)
 
     def forward(
         self,
@@ -44,16 +43,7 @@ class ClassicVAELoss(nn.Module):
         kl_loss = self.kl_loss(z_mean, z_log_var)
         total_loss = reco_loss + kl_loss
 
-        return self.reduce(reco_loss), self.reduce(kl_loss), self.reduce(total_loss)
-
-    def reduce(self, loss: torch.Tensor) -> torch.Tensor:
-        """Applies a reduction operation to a loss."""
-        if self.reduction == 'mean':
-            return loss.mean()
-        elif self.reduction == 'sum':
-            return loss.sum()
-
-        return loss
+        return reco_loss, kl_loss, total_loss
 
 
 class AxoV4Loss(ClassicVAELoss):
@@ -72,4 +62,4 @@ class AxoV4Loss(ClassicVAELoss):
             "and phi for each object, in that order. Moreover, expecting that the " +
             "first pT, eta, and phi belong to the MET object."
         )
-        self.reco_loss = CylPtPzReconstructionLoss(scale=self.reco_scale)
+        self.reco_loss = CylPtPzReconstructionLoss(scale=self.reco_scale, reduction=reduct)

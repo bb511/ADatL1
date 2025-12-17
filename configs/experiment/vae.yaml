@@ -71,7 +71,6 @@ callbacks:
 # Evaluate the checkponts that were mentioned before.
 # Compute only the efficiency for each of the checkpoints.
 evaluator:
-
   ckpts:
     last: true
     single:

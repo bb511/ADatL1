@@ -18,7 +18,6 @@ def _parse_filename(filename: str) -> Dict[str, str]:
 
 
 class TestLossCallback(Callback):
-
     def on_test_batch_end(self, trainer, pl_module, outputs, batch, batch_idx, dataloader_idx = 0):
         """Log loss values for every checkpoint."""
         try:

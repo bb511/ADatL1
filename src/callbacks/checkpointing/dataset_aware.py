@@ -184,7 +184,6 @@ class DatasetAwareModelCheckpoint(Callback):
         """Plots the epochs at which the best checkpoints are saved."""
         plot_folder = self.dirpath / 'plots'
         plot_folder.mkdir(parents=True, exist_ok=True)
-
         epochs = defaultdict(int)
         values = defaultdict(float)
         for k in range(self.topk):

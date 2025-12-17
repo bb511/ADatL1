@@ -126,18 +126,23 @@ class VICReg(L1ADLightningModule):
         loss_inv, loss_var, loss_cov, loss_total = self.loss(z1, z2)
 
         return {
-            "loss": loss_total,
+            "loss": loss_total.mean(),
+            # Used for logging:
+            "loss/inv/mean": loss_inv.mean(),
+            "loss/var/mean": loss_var.mean(),
+            "loss/cov/mean": loss_cov.mean(),
+            # Used for callbacks.
             "loss/total/full": loss_total.detach(),
-            "loss/inv": loss_inv.detach(),
-            "loss/var": loss_var.detach(),
-            "loss/cov": loss_cov.detach(),
+            "loss/inv/full": loss_inv.detach(),
+            "loss/var/full": loss_var.detach(),
+            "loss/cov/full": loss_cov.detach(),
         }
     
     def outlog(self, outdict: dict) -> dict:
         """Override with the values you want to log."""
         return {
             "loss": outdict.get("loss"),
-            "loss_inv": outdict.get("loss/inv").mean(),
-            "loss_var": outdict.get("loss/var").mean(),
-            "loss_cov": outdict.get("loss/cov").mean(),
+            "loss_inv": outdict.get("loss/inv/mean"),
+            "loss_var": outdict.get("loss/var/mean"),
+            "loss_cov": outdict.get("loss/cov/mean"),
         }

@@ -1,9 +1,9 @@
-# taskset -c 0-9 \
+taskset -c 0-3 \
 python3 src/train.py \
     -m \
-    hparams_search=vae_optuna \
     experiment=debug \
     paths.raw_data_dir=/data/deodagiu/adl1t_data/parquet_files
+    # hparams_search=vae_optuna \
 
 # taskset -c 84-95 \
 # python3 src/train.py \

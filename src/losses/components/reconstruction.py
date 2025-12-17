@@ -39,11 +39,11 @@ class CylPtPzReconstructionLoss(ReconstructionLoss):
     """
 
     def forward(
-            self,
-            target: torch.Tensor,
-            reconstruction: torch.Tensor,
-            **kwargs
-        ) -> torch.Tensor:
+        self,
+        target: torch.Tensor,
+        reconstruction: torch.Tensor,
+        **kwargs
+    ) -> torch.Tensor:
 
         # Indexes of where the pTs of the objects are, given the axo v4 input data.
         pT_idxs = list(range(0, 55, 3))

@@ -5,7 +5,7 @@
 
 defaults:
   - override /data: axov6
-  - override /algorithm: vae
+  - override /algorithm: vicreg
   - override /callbacks: basic
   - override /trainer: gpu0
   - override /evaluator: default
@@ -15,7 +15,7 @@ defaults:
 tags: ["debug"]
 
 experiment_name: debug
-run_name: test1
+run_name: test
 
 seed: 12345
 
@@ -27,31 +27,30 @@ trainer:
 test: true
 
 callbacks:
-  anomaly_rate:
-    metric_names: ['loss/reco/full', 'loss/kl/full']
-    target_rates: [1]
+  anomaly_rate: null
+  last_epoch_ckpt: null
 
-  min_loss_total_ckpt:
-    skip_ds:
-      - GluGluHTo2B_Par-MH-125
-      - GluGluHto2G_Par-MH-125
-      - GluGluHto2G_Par-MH-90
-      - GluGluHto2Tau_Par-MH-125
-      - GluGlutoHHto2B2WtoLNu2Q_Par-c2-0-kl-1-kt-1
-      - HHHto4B2Tau_Par-c3-0-d4-0
-      - HHHto6B_Par-c3-0-d4-0
-      - SUSYGluGluToBBHTo2B_Par-M-1200
-      - SUSYGluGluToBBHToBB_Par-M-120
-      - SUSYGluGluToBBHToBB_Par-M-350
-      - SUSYGluGluToBBHToBB_Par-M-600
-      - TTHTo2C_Par-MH-125
-      - TTHto2B_Par-MH-125
-      - VBFHTo2C_Par-MH-125
-      - VBFHto2B_Par-MH-125
-      - VBFHto2Tau_Par-MH-125
-      - WtoTauto3Mu
-      - ggH-suep-decay
-      - haa-4b-ma15
+  # min_loss_total_ckpt:
+  #   skip_ds:
+  #     - GluGluHTo2B_Par-MH-125
+  #     - GluGluHto2G_Par-MH-125
+  #     - GluGluHto2G_Par-MH-90
+  #     - GluGluHto2Tau_Par-MH-125
+  #     - GluGlutoHHto2B2WtoLNu2Q_Par-c2-0-kl-1-kt-1
+  #     - HHHto4B2Tau_Par-c3-0-d4-0
+  #     - HHHto6B_Par-c3-0-d4-0
+  #     - SUSYGluGluToBBHTo2B_Par-M-1200
+  #     - SUSYGluGluToBBHToBB_Par-M-120
+  #     - SUSYGluGluToBBHToBB_Par-M-350
+  #     - SUSYGluGluToBBHToBB_Par-M-600
+  #     - TTHTo2C_Par-MH-125
+  #     - TTHto2B_Par-MH-125
+  #     - VBFHTo2C_Par-MH-125
+  #     - VBFHto2B_Par-MH-125
+  #     - VBFHto2Tau_Par-MH-125
+  #     - WtoTauto3Mu
+  #     - ggH-suep-decay
+  #     - haa-4b-ma15
 
   # max_rate_kl_ckpt:
   #   _target_: src.callbacks.model_checkpoint.SingleDatasetModelCheckpoint
@@ -79,13 +78,13 @@ callbacks:
 # Compute only the efficiency for each of the checkpoints.
 evaluator:
   ckpts:
-    last: true
+    last: false
     single:
       loss: ['min']
       # loss_kl_full_rate1: ['max']
       # loss_reco_full_rate1: ['max']
 
 evaluator_callbacks:
-  anomaly_efficiency:
-    metric_names: ['loss/kl/full', 'loss/reco/full']
-    target_rates: [1]
+  anomaly_efficiency: null
+  test_loss:
+    _target_: src.evaluation.callbacks.loss.TestLossCallback

@@ -17,14 +17,13 @@ class VICRegLoss(L1ADLoss):
     """
     def __init__(
         self,
-        scale: float = 1.0,
         inv_coef: Optional[float] = 50,
         var_coef: Optional[float] = 50,
         cov_coef: Optional[float] = 1,
-        reduction: Literal["none", "mean", "sum"] = "mean",
+        reduction: Literal["none", "mean", "sum"] = "none",
     ):
         
-        super().__init__(scale=scale, reduction=reduction)
+        super().__init__(scale=None, reduction=reduction)
         self.inv_coef = inv_coef
         self.var_coef = var_coef
         self.cov_coef = cov_coef
@@ -54,11 +53,12 @@ class VICRegLoss(L1ADLoss):
         loss_var = 0.5 * (self.variance_loss(z1) + self.variance_loss(z2))
         loss_cov = self.covariance_loss(z1) + self.covariance_loss(z2)
 
-        loss_total = (
-            self.inv_coef * loss_inv
-            + self.var_coef * loss_var
-            + self.cov_coef * loss_cov
-        )
+        loss_inv = self.inv_coef * self.reduce(loss_inv)
+        loss_var = self.var_coef * self.reduce(loss_var)
+        loss_cov = self.cov_coef * self.reduce(loss_cov)
+
+        loss_total = loss_inv + loss_var + loss_cov
+
         return loss_inv, loss_var, loss_cov, loss_total
 
 

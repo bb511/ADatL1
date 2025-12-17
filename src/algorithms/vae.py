@@ -62,7 +62,6 @@ class VAE(L1ADLightningModule):
         }
         
 
-
 class RVAE(VAE):
     """Regularized VAE. Overriding loss and logging."""
 

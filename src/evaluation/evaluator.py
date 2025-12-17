@@ -176,6 +176,7 @@ class Evaluator:
         self.evaluator.strat_name = 'last'
         ckpt_path = run_folder / 'last.ckpt'
         self.evaluate_ckpt(ckpt_path, model, test_loaders)
+        self._get_criterion_optimized_metric(self.optimized_metric_config)
         self._make_summary_plots(run_folder)
 
     def _get_subdir(self, main_dir: Path, subdir: str):

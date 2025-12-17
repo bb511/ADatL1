@@ -125,9 +125,9 @@ class ROCs(Callback):
     def _convert2numpy(self, arr: tuple[torch.Tensor] | torch.Tensor):
         """Convert torch tensor or list of torch tensors to numpy arrays."""
         if isinstance(arr, tuple):
-            arr = [tens.detach().to('cpu').numpy() for tens in arr]
+            arr = [tens.detach().to('cpu').float().numpy() for tens in arr]
         elif isinstance(arr, torch.Tensor):
-            arr = arr.detach().to('cpu').numpy()
+            arr = arr.detach().to('cpu').float().numpy()
         else:
             raise ValueError(
                 "ROC callback cannot convert torch tensor to numpy array. The given "
@@ -160,7 +160,9 @@ class ROCs(Callback):
             )
 
         # Generate an html gallery of the logs plots in the parent dir of the arti.
-        html_gallery = utils.mlflow.make_gall(mlflow_logger, plot_folder, gallery_dir)
+        _ = utils.mlflow.make_gall(
+            mlflow_logger, plot_folder, gallery_dir, ckpt_name, 'index'
+        )
 
     def _resolve_arti_dir(self, trainer, ckpt_name: str):
         """Resolve the artifacts directory where the plots will be stored in mlflow."""

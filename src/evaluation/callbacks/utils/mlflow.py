@@ -30,7 +30,9 @@ def get_mlflow_logger(trainer) -> MLFlowLogger:
     return None
 
 
-def make_gall(mlflow_logger: Logger, plots_dir: Path, gallery_dir: Path) -> str:
+def make_gall(
+    mlflow_logger: Logger, plots_dir: Path, gallery_dir: Path, sec_name: str, fname
+) -> str:
     """Makes an index html file in mlflow and adds the plots in plots_dir to it.
 
     If index.html already exists at the given gallery_dir path, then append the plots
@@ -43,21 +45,20 @@ def make_gall(mlflow_logger: Logger, plots_dir: Path, gallery_dir: Path) -> str:
         in the parent directory where the plots are stored.
     """
     plots_dir = plots_dir.resolve()
-    section_name = plots_dir.name
-    image_paths = get_image_paths(plots_dir, section_name)
+    image_paths = get_image_paths(plots_dir, sec_name)
 
     # Check if index file already exists.
-    index_exists = check_html_exists(mlflow_logger, gallery_dir)
+    index_exists = check_html_exists(mlflow_logger, gallery_dir, f'{fname}.html')
     if index_exists:
-        html_page = get_html_page(mlflow_logger, gallery_dir)
+        html_page = get_html_page(mlflow_logger, gallery_dir, f'{fname}.html')
     else:
         html_page = generate_gallery_header()
 
-    html_page += write_gallery_section(mlflow_logger, section_name, image_paths)
+    html_page += write_gallery_section(mlflow_logger, sec_name, image_paths)
     html_page = "\n".join(html_page)
 
     mlflow_logger.experiment.log_text(
-        mlflow_logger.run_id, html_page, artifact_file=gallery_dir / 'index.html'
+        mlflow_logger.run_id, html_page, artifact_file=gallery_dir / f'{fname}.html'
     )
 
     return html_page
@@ -70,10 +71,9 @@ def check_html_exists(mlflow_logger: Logger, gallery_dir: Path, fname: str) -> b
     """
     run_id = mlflow_logger.run_id
     arti_files = mlflow_logger.experiment.list_artifacts(run_id, path=str(gallery_dir))
-    file_path = gallery_dir / f'{fname}.html'
+    file_path = gallery_dir / fname
     file_exists = any([file.path == str(file_path) for file in arti_files])
-
-    return index_file_exists
+    return file_exists
 
 
 def get_html_page(mlflow_logger: Logger, gallery_dir: Path, fname: str) -> list[str]:
@@ -81,7 +81,7 @@ def get_html_page(mlflow_logger: Logger, gallery_dir: Path, fname: str) -> list[
     logging.getLogger("mlflow").setLevel(logging.ERROR)
     run = mlflow_logger.experiment.get_run(mlflow_logger.run_id)
     artifact_uri = run.info.artifact_uri.rstrip("/")
-    file_path = (gallery_dir / f'{fname}.html').as_posix()
+    file_path = (gallery_dir / fname).as_posix()
     file_path = f"{artifact_uri}/{file_path}"
     with redirect_stdout(StringIO()):
         html_page = mlflow.artifacts.load_text(file_path)

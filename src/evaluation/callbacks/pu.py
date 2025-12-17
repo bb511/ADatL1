@@ -100,7 +100,7 @@ class BkgRatePileup(Callback):
         each metric across batches. The whole metric output distribution is needed to
         set a treshold that gives a certain rate.
         """
-        batch_output = outputs[mname].detach().to('cpu')
+        batch_output = outputs[mname]
         self.maintest_score_data[mname].append(batch_output)
 
         pu, _ = self.pu_per_ds['main_test'][batch_idx]
@@ -149,7 +149,7 @@ class BkgRatePileup(Callback):
         pus, inv = pus.unique(sorted=True, return_inverse=True)
 
         scores_by_pu = {
-            int(pu.item()): outputs[mname].detach().to('cpu')[inv == i]
+            int(pu.item()): outputs[mname].detach().to('cpu').float()[inv == i]
             for i, pu in enumerate(pus)
         }
         for target_rate in self.target_rates:
@@ -221,7 +221,9 @@ class BkgRatePileup(Callback):
             )
 
         # Generate an html gallery of the logs plots in the parent dir of the arti.
-        html_gallery = utils.mlflow.make_gall(mlflow_logger, plot_folder, gallery_dir)
+        _ = utils.mlflow.make_gall(
+            mlflow_logger, plot_folder, gallery_dir, ckpt_name, 'index'
+        )
 
     def _resolve_arti_dir(self, trainer, ckpt_name: str):
         """Resolve the artifacts directory where the plots will be stored in mlflow."""

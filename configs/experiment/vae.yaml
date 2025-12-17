@@ -25,6 +25,7 @@ seed: 12345
 callbacks: 
   anomaly_rate:
     metric_names: ['loss/reco/full', 'loss/kl/full']
+    target_rates: [1]
 
   min_loss_total_ckpt:
     skip_ds:

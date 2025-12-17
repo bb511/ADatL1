@@ -5,7 +5,7 @@
 
 defaults:
   - override /data: axov6
-  - override /algorithm: axov4
+  - override /algorithm: vae
   - override /callbacks: basic
   - override /trainer: cpu
   - override /evaluator: default
@@ -15,7 +15,7 @@ defaults:
 tags: ["debug"]
 
 experiment_name: debug
-run_name: test
+run_name: test1
 
 seed: 12345
 
@@ -25,3 +25,67 @@ trainer:
   limit_train_batches: 10
 
 test: true
+
+callbacks:
+  anomaly_rate:
+    metric_names: ['loss/reco/full', 'loss/kl/full']
+    target_rates: [1]
+
+  min_loss_total_ckpt:
+    skip_ds:
+      - GluGluHTo2B_Par-MH-125
+      - GluGluHto2G_Par-MH-125
+      - GluGluHto2G_Par-MH-90
+      - GluGluHto2Tau_Par-MH-125
+      - GluGlutoHHto2B2WtoLNu2Q_Par-c2-0-kl-1-kt-1
+      - HHHto4B2Tau_Par-c3-0-d4-0
+      - HHHto6B_Par-c3-0-d4-0
+      - SUSYGluGluToBBHTo2B_Par-M-1200
+      - SUSYGluGluToBBHToBB_Par-M-120
+      - SUSYGluGluToBBHToBB_Par-M-350
+      - SUSYGluGluToBBHToBB_Par-M-600
+      - TTHTo2C_Par-MH-125
+      - TTHto2B_Par-MH-125
+      - VBFHTo2C_Par-MH-125
+      - VBFHto2B_Par-MH-125
+      - VBFHto2Tau_Par-MH-125
+      - WtoTauto3Mu
+      - ggH-suep-decay
+      - haa-4b-ma15
+
+  # max_rate_kl_ckpt:
+  #   _target_: src.callbacks.model_checkpoint.SingleDatasetModelCheckpoint
+  #   dirpath: '${paths.checkpoints_dir}/${experiment_name}/${run_name}'
+  #   monitor: loss_kl_full_rate1
+  #   criterion:
+  #     _target_: src.callbacks.checkpointing.criterion.Max
+  #     top_k: 1
+  #   skip_ds:
+  #     - main_val
+  #     - SingleNeutrino_E-10-gun
+
+  # max_rate_reco_ckpt:
+  #   _target_: src.callbacks.model_checkpoint.SingleDatasetModelCheckpoint
+  #   dirpath: '${paths.checkpoints_dir}/${experiment_name}/${run_name}'
+  #   monitor: loss_reco_full_rate1
+  #   criterion:
+  #     _target_: src.callbacks.checkpointing.criterion.Max
+  #     top_k: 1
+  #   skip_ds:
+  #     - main_val
+  #     - SingleNeutrino_E-10-gun
+
+# Evaluate the checkponts that were mentioned before.
+# Compute only the efficiency for each of the checkpoints.
+evaluator:
+  ckpts:
+    last: true
+    single:
+      loss: ['min']
+      # loss_kl_full_rate1: ['max']
+      # loss_reco_full_rate1: ['max']
+
+evaluator_callbacks:
+  anomaly_efficiency:
+    metric_names: ['loss/kl/full', 'loss/reco/full']
+    target_rates: [1]

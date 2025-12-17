@@ -71,7 +71,7 @@ class AnomalyRateCallback(Callback):
         each metric across batches. The whole metric output distribution is needed to
         set a treshold that gives a certain rate.
         """
-        batch_output = outputs[mname].detach().to("cpu")
+        batch_output = outputs[mname]
         if batch_output.ndim == 0:
             batch_output = batch_output.unsqueeze(0)
         self.mainval_score_data[mname].append(batch_output)
@@ -117,9 +117,7 @@ class AnomalyRateCallback(Callback):
         """
         for target_rate in self.target_rates:
             rate_name = f"{mname.replace('/', '_')}_rate{target_rate}"
-            self.rates[f"{self.dataset_name}/{rate_name}"].update(
-                outputs[mname].detach().cpu()
-            )
+            self.rates[f"{self.dataset_name}/{rate_name}"].update(outputs[mname])
 
     def on_validation_epoch_end(self, trainer, pl_module) -> None:
         """Log the anomaly rates computed on each of the data sets."""

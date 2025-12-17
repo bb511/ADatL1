@@ -77,7 +77,7 @@ class DatasetAwareModelCheckpoint(Callback):
             
             metric_match = full_metric_name.split("/")[-1] == self.monitor
             if dataset_match and metric_match:
-                return metric_value.detach().cpu().numpy()
+                return metric_value.detach().cpu().float().numpy()
 
         warnings.warn(
             f"Checkpoint for metric '{self.monitor}' not found in logged metrics. "

@@ -29,7 +29,6 @@ from src.utils import instantiate_eval_callbacks
 from src.utils import instantiate_loggers
 from src.utils import log_hyperparameters
 from src.utils import task_wrapper
-from src.evaluation.evaluator import Evaluator
 
 log = RankedLogger(__name__, rank_zero_only=True)
 
@@ -105,6 +104,7 @@ def test(cfg: DictConfig, datamodule, algorithm, logger):
     # Evaluator object is basically a wrapper around a trainer with extra steps.
     trainer_config = OmegaConf.to_container(cfg.trainer, resolve=True)
     evaluator_config = OmegaConf.to_container(cfg.evaluator, resolve=True)
+    
     merged_dict = {**trainer_config, **evaluator_config}
     evaluator_cfg = OmegaConf.create(merged_dict)
 

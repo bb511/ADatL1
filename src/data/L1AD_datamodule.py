@@ -150,7 +150,10 @@ class L1ADDataModule(LightningDataModule):
         label_background = 0
 
         data, labels = {}, {}
-        for dataset_path in aux_folder.iterdir():
+        for dataset_path in sorted(
+            p for p in aux_folder.iterdir()
+            if p.is_dir() and not p.name.startswith("._")
+        ):
             name = dataset_path.stem
             if 'SingleNeutrino' in name:
                 label_background += -1
@@ -328,7 +331,10 @@ class L1ADDataModule(LightningDataModule):
         test_data.update({'main_test': L1ADDataset(data, self.labels_test, bs)})
 
         aux_folder = data_dir / 'aux'
-        for dataset_path in aux_folder.iterdir():
+        for dataset_path in sorted(
+            p for p in aux_folder.iterdir()
+            if p.is_dir() and not p.name.startswith("._")
+        ):
             name = dataset_path.stem
             val = self.loader.load_folder(dataset_path / 'valid' / flag)
             bs = self._get_validation_batchsize(val)

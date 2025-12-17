@@ -31,12 +31,15 @@ class L1DataAwkward2Torch:
         self.cached_objects.clear()
 
         self.cache_filepath = folder_path / 'torch_cache.pt'
-        self.mapping_filepath = folder_path.parent / "object_feature_map.json"
+        self.object_feature_map = folder_path.parent / "object_feature_map.json"
         if self._cache_exists():
             return torch.load(self.cache_filepath)
 
         workers = min(self.workers, (os.cpu_count() or 4))
-        files = sorted(folder_path.glob("*.parquet"))
+        files = sorted([
+            fpath for fpath in folder_path.glob("*.parquet")
+            if fpath.is_file() and not fpath.name.startswith("._")
+        ])
         with ThreadPoolExecutor(max_workers=workers) as ex:
             processed = list(ex.map(self._process_object, files))
 
@@ -45,9 +48,9 @@ class L1DataAwkward2Torch:
         self._cache(data)
 
         # Build mapping JSON once per folder if not present
-        if not self.mapping_filepath.is_file():
+        if not self.object_feature_map.is_file():
             mapping = self._build_feature_mapping(processed)
-            with open(self.mapping_filepath, "w") as f:
+            with open(self.object_feature_map, "w") as f:
                 json.dump(mapping, f, indent=4)
 
         return data
@@ -164,9 +167,11 @@ class L1DataAwkward2Torch:
     def _check_cache_integrity(self) -> bool:
         """Checks whether the cache includes all the ."""
         parent_folder = self.cache_filepath.parent
-        objects_in_folder = set(
-            [obj_path.stem for obj_path in parent_folder.glob('*.parquet')]
-        )
+        objects_in_folder = {
+            p.stem
+            for p in parent_folder.glob("*.parquet")
+            if p.is_file() and not p.name.startswith("._")
+        }
 
         cache_obj_file = parent_folder / 'cached_objs.pkl'
         if cache_obj_file.is_file():

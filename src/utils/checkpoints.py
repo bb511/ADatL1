@@ -23,6 +23,13 @@ def _parse_filename(filename: str) -> Dict[str, str]:
 PREFIXES = ("single", "loo", "lko", "cap")
 CRITERIA = ("min", "max", "last", "stable")
 
+def is_valid_ckpt(p: Path) -> bool:
+    return (
+        p.is_file()
+        and p.suffix == ".ckpt"
+        and not p.name.startswith("._")
+    )
+
 def _find_ckpt_files(
     dirpath: Path,
     list_prefix: Optional[List[str]] = [],
@@ -62,6 +69,9 @@ def _find_ckpt_files(
                     continue
 
                 for ckpt_path in criterion_dir.glob("*.ckpt"):
+                    if not is_valid_ckpt(ckpt_path):
+                        continue
+
                     yield {
                         "prefix": prefix,
                         "metric_name": metric_name,

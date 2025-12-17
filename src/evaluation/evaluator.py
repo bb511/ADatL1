@@ -16,6 +16,8 @@ from colorama import Fore, Back, Style
 from src.utils import pylogger
 log = pylogger.RankedLogger(__name__)
 
+from src.utils.checkpoints import is_valid_ckpt
+
 
 class Evaluator:
     """Thin wrapper around pl.Trainer that performs the evaluation of a model.
@@ -60,6 +62,7 @@ class Evaluator:
         self.evaluator.metric_name = None
         self.evaluator.criterion_name = None
         self.optimized_metric = None
+        self.evaluator.ckpt_path_name = None
 
     def evaluate_run(self, run_folder: Path, model: LightningModule, test_loader: dict):
         """Evaluates all checkpoints pertraining to a run.
@@ -132,6 +135,10 @@ class Evaluator:
         self.evaluator.criterion_name = criterion_name
         log.info(Fore.BLUE + f"-> -> -> Evaluating criterion '{criterion_name}'")
         for ckpt_path in criterion_folder.glob("*.ckpt"):
+            if not is_valid_ckpt(ckpt_path):
+                continue
+
+            self.evaluator.ckpt_path_name = ckpt_path.name
             self.evaluate_ckpt(ckpt_path, model, test_loader)
 
         self._get_criterion_optimized_metric(self.optimized_metric_config)
@@ -153,7 +160,9 @@ class Evaluator:
         log.info(f"-> -> -> -> Evaluating checkpoint at {ckpt_path}.")
 
         state_dict = torch.load(
-            ckpt_path, weights_only=False, map_location='cpu'
+            ckpt_path,
+            weights_only=False,
+            map_location='cpu'
         )['state_dict']
         model.load_state_dict(state_dict, strict=True)
         model._ckpt_path = ckpt_path

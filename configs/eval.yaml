@@ -2,12 +2,12 @@
 
 defaults:
   - _self_
-  - data: axov4
-  - algorithm: axov4
+  - data: L1AD
+  - algorithm: ae
   - trainer: default
   - paths: default
   - callbacks: default
-  - logger: none
+  - logger: null
   - extras: default
   - hydra: default
 

@@ -151,8 +151,10 @@ class ROCs(Callback):
         gallery_dir = arti_ckpt_dir.parent
 
         # Log each image in the given plot_folder as an artifact.
-        img_paths = sorted(plot_folder.glob('*.jpg'))
-        for img_path in img_paths:
+        for img_path in sorted(
+            p for p in plot_folder.glob("*.jpg")
+            if p.is_file() and not p.name.startswith("._")
+        ):
             mlflow_logger.experiment.log_artifact(
                 run_id=mlflow_logger.run_id,
                 local_path=str(img_path),

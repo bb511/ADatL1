@@ -41,14 +41,14 @@ optimizer:
   weight_decay: 1e-6
 
 
-scheduler:
-  # here other attributes...
+# scheduler:
+#   # here other attributes...
 
-  scheduler:
-    _partial_: true
-    _target_: torch.optim.lr_scheduler.ReduceLROnPlateau
-    mode: min
-    factor: 0.5
-    patience: 10
-    min_lr: 1e-6
-  monitor: "train/loss_svdd"
+#   scheduler:
+#     _partial_: true
+#     _target_: torch.optim.lr_scheduler.ReduceLROnPlateau
+#     mode: min
+#     factor: 0.5
+#     patience: 10
+#     min_lr: 1e-6
+#   monitor: "train/loss_svdd"

@@ -2,6 +2,7 @@
 
 _target_: src.algorithms.vicreg.VICReg
 
+seed: ${seed}
 
 feature_blur:
   _target_: src.models.augmentation.FastFeatureBlur
@@ -13,6 +14,9 @@ feature_blur:
 object_mask:
   _target_: src.models.augmentation.FastObjectMask
   prob: 0.5709886168264394
+
+object_norm_params: ${paths.data_dir}/mlready/${data.data_mlready.name}/${data.data_normalizer.name}
+object_feature_map: ${paths.data_dir}/mlready/${data.data_mlready.name}/${data.data_normalizer.name}/object_feature_map.json
 
 lorentz_rotation:
   _target_: src.models.augmentation.FastLorentzRotation
@@ -51,12 +55,12 @@ optimizer:
   lr: 0.0001033146150433934
   weight_decay: 0.0
 
-scheduler:
-  # here other attributes...
+# scheduler:
+#   # here other attributes...
 
-  scheduler:
-    _partial_: true
-    _target_: src.optimizers.cdw.CosineWithWarmup
-    warmup_epochs: 10
-    decay_epochs: '${substract: ${trainer.max_epochs}, ${algorithm.scheduler.scheduler.warmup_epochs}}'
-    max_lr: ${algorithm.optimizer.lr}
+#   scheduler:
+#     _partial_: true
+#     _target_: src.optimizers.cdw.CosineWithWarmup
+#     warmup_epochs: 10
+#     decay_epochs: '${substract: ${trainer.max_epochs}, ${algorithm.scheduler.scheduler.warmup_epochs}}'
+#     max_lr: ${algorithm.optimizer.lr}

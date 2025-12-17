@@ -1,5 +1,6 @@
 from typing import Dict
 import torch
+import numpy as np
 
 from src.utils import pylogger
 from src.data.components.dataset import L1ADDataset
@@ -14,7 +15,19 @@ class DebugL1ADDataModule(L1ADDataModule):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
         self.save_hyperparameters(logger=False)
-        self.sims = ["GluGluHToBB_M-125", "GluGluHToGG_M-125", "SingleNeutrino_E-10-gun", "SingleNeutrino_Pt-2To20-gun"]
+        self.bsim = ["SingleNeutrino_E-10-gun", "SingleNeutrino_Pt-2To20-gun"]
+        self.ssim = ["GluGluHToBB_M-125", "GluGluHToGG_M-125", "GluGluHToGG_M-90", "GluGluHToTauTau_M-125"]
+        self.batch_size=100
+        self.ndata = {
+            "train": 100,
+            "val": 100,
+            "test": 100
+        }
+        self.shufflers = {
+            "train": None,
+            "val": np.random.default_rng(seed=self.hparams.seed),
+            "test": np.random.default_rng(seed=self.hparams.seed+1)
+        }
 
     def prepare_data(self) -> None:
         pass
@@ -23,40 +36,39 @@ class DebugL1ADDataModule(L1ADDataModule):
         pass
 
     def train_dataloader(self) -> L1ADDataset:
+        ntrain = self.ndata.get("train")
         return L1ADDataset(
-            data=torch.randn(1000, 57, dtype=torch.float32),
-            labels=torch.cat([
-                torch.zeros(500, dtype=torch.long),
-                torch.ones(500, dtype=torch.long),
-            ]),
-            batch_size=100,
-            shuffle=True,
+            data=torch.randn(ntrain, 57, dtype=torch.float32),
+            labels=torch.zeros(ntrain, dtype=torch.long),
+            batch_size=self.batch_size,
+            shuffler=None
         )
     
-    def val_dataloader(self) -> Dict[str, L1ADDataset]:
-        return self._main_signals_datasets("val")
-    
-    def test_dataloader(self) -> Dict[str, L1ADDataset]:
-        return self._main_signals_datasets("test")
-    
-    def _main_signals_datasets(self, stage: str) -> Dict[str, L1ADDataset]:
+    def _dataset_dictionary(self, stage: str) -> Dict[str, L1ADDataset]:
+        ndata = self.ndata.get(stage)
         return {
             f"main_{stage}": L1ADDataset(
-                data=torch.randn(200, 57, dtype=torch.float32),
-                labels=torch.cat([
-                    torch.zeros(100, dtype=torch.long),
-                    torch.ones(100, dtype=torch.long),
-                ]),
-                batch_size=100,
-                shuffle=False,
+                data=torch.randn(ndata, 57, dtype=torch.float32),
+                labels=torch.zeros(ndata, dtype=torch.long),
+                batch_size=self.batch_size,
+                shuffler=self.shuffler,
             ),
             **{
                 signal_name: L1ADDataset(
-                    data=float(isignal) * torch.randn(100, 57, dtype=torch.float32),
-                    labels=torch.ones(100, dtype=torch.long),
-                    batch_size=100,
-                    shuffle=False,
+                    data=sign * float(1 + isignal) * torch.randn(ndata, 57, dtype=torch.float32),
+                    labels=torch.full((ndata,), sign * (1 + isignal), dtype=torch.long),
+                    batch_size=self.batch_size,
+                    shuffler=self.shuffler,
                 )
-                for isignal, signal_name in enumerate(self.sims)
+                for sign, sims in zip([-1, 1], [self.bsim, self.ssim])
+                for isignal, signal_name in enumerate(sims)
             }
         }
+    
+    def val_dataloader(self) -> Dict[str, L1ADDataset]:
+        return self._dataset_dictionary("val")
+    
+    def test_dataloader(self) -> Dict[str, L1ADDataset]:
+        return self._dataset_dictionary("test")
+    
+    

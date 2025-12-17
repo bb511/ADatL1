@@ -1,23 +1,20 @@
 # @package _global_
 
-# to execute this experiment run:
-# python train.py experiment=example
-
 defaults:
   - override /data: axov6
   - override /algorithm: vae
-  - override /callbacks: basic
-  - override /trainer: gpu
+  - override /callbacks: default
+  - override /trainer: gpu0
   - override /evaluator: default
-  - override /evaluator_callbacks: basic
+  - override /evaluator_callbacks: default
   - override /logger: mlflow
 
-tags: ["vae", "2025_data"]
+seed: 123
+tags: ["axo_v6", "vae"]
 
 experiment_name: vae_alpha${algorithm.loss.scale}
 run_name: bs${data.batch_size}_optim${algorithm.optimizer._target_}_lr${algorithm.optimizer.lr}_wd${algorithm.optimizer.weight_decay}
 
-seed: 12345
 
 # Make checkpoints at the minimum of the loss, only for the main data set and simulation.
 # Make checkpoints at the maximum of the rate for the signal data sets, considering
@@ -74,6 +71,7 @@ callbacks:
 # Evaluate the checkponts that were mentioned before.
 # Compute only the efficiency for each of the checkpoints.
 evaluator:
+
   ckpts:
     last: true
     single:

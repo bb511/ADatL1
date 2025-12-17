@@ -42,7 +42,10 @@ class L1DataProcessor:
         # Process the data sets.
         nexists = 0
         ndatasets = 0
-        for extracted_dataset in self.extracted_datapath.iterdir():
+        for extracted_dataset in sorted(
+            p for p in self.extracted_datapath.iterdir()
+            if p.is_dir() and not p.name.startswith("._")
+        ):
             ndatasets += 1
             dataset_name = extracted_dataset.stem
             self.dataset_folder = self.cache_folder / dataset_name
@@ -76,7 +79,10 @@ class L1DataProcessor:
     def _get_extracted_object_names(self, dataset_path: Path) -> list[str]:
         """Get all the object names of the objects that were extracted."""
         obj_names = set()
-        for object_file in dataset_path.glob('*.parquet'):
+        for object_file in sorted(
+            p for p in dataset_path.glob("*.parquet")
+            if p.is_file() and not p.name.startswith("._")
+        ):
             obj_names.add(object_file.stem)
 
         if not set(self.event_filters.keys()) <= obj_names:
@@ -114,6 +120,9 @@ class L1DataProcessor:
         """Applies AND logical operator between all masks in a folder, saves result."""
         masks = []
         for mask_path in masks_folder.glob("*.parquet"):
+            if not mask_path.is_file() or mask_path.name.startswith("._"):
+                continue
+            
             masks.append(ak.from_parquet(mask_path))
         if not masks:
             raise ValueError(Fore.RED + f"No files found in {masks_folder}.")
@@ -166,20 +175,24 @@ class L1DataProcessor:
         If the event filters differ from the ones provided in the config, redo the
         processing for all the objects.
         """
-        if self.dataset_folder.is_dir() and any(self.dataset_folder.iterdir()):
-            object_masks_exists = self._check_object_masks()
-            existing_objs = self._get_existing_objs()
-            if self.verbose:
-                self.existence_warn_trigger = True
-                log.info(Fore.YELLOW + f"Processed data exists: {cache_path}.")
+        if self.dataset_folder.is_dir():
+            dataset_files = [
+                p for p in self.dataset_folder.iterdir()
+                if not p.name.startswith("._")
+            ]
+            if any(dataset_files):
+                existing_objs = self._get_existing_objs()
+                if self.verbose:
+                    self.existence_warn_trigger = True
+                    log.info(Fore.YELLOW + f"Processed data exists {existing_objs}.")
 
-            if not self._check_event_masks():
-                return set()
+                if not self._check_event_masks():
+                    return set()
 
-            missing_obj_masks = self._check_object_masks()
-            existing_objs = existing_objs - missing_obj_masks
+                missing_obj_masks = self._check_object_masks()
+                existing_objs = existing_objs - missing_obj_masks
 
-            return existing_objs
+                return existing_objs
 
         self.dataset_folder.mkdir(parents=True, exist_ok=True)
         return set()
@@ -212,7 +225,10 @@ class L1DataProcessor:
     def _get_existing_objs(self) -> set[str]:
         """Checks if all objects specified in the config have been extracted."""
         existing_objs = set()
-        for obj_cache_filepath in self.dataset_folder.glob('*.parquet'):
+        for obj_cache_filepath in sorted(
+            p for p in self.dataset_folder.glob("*.parquet")
+            if p.is_file() and not p.name.startswith("._")
+        ):
             if obj_cache_filepath.is_file():
                 existing_objs.add(obj_cache_filepath.stem)
 

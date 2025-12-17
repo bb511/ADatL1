@@ -1,18 +1,15 @@
 # Splits the data into train, validation, test... And all the auxiliary data.
-from collections.abc import Callable, Iterator
 from collections import defaultdict
 from dataclasses import dataclass
 from pathlib import Path
 
 import numpy as np
 import awkward as ak
-import pickle
 
 import pyarrow
-import pyarrow.parquet as parquet
 import pyarrow.dataset
 from omegaconf import OmegaConf
-from colorama import Fore, Back, Style
+from colorama import Fore
 
 from src.utils import pylogger
 from . import plots
@@ -81,6 +78,7 @@ class L1DataMLReady:
         dataset, validation dataset, and test dataset in a deterministic seeded way.
         """
         obj_paths = self._get_files_per_object(self.processed_datapath / 'zerobias')
+        obj_names = [obj_name for obj_name, _ in obj_paths.items()]
         if not set(self.select_feats.keys()) <= set(obj_paths.keys()):
             log.warn(
                 "Some objects you're trying to select are not in the extracted data\n"
@@ -94,7 +92,7 @@ class L1DataMLReady:
         self._test_data_exists = 0
         itrain, ivalid, itest = self._compute_main_split(obj_paths)
         for obj_name, file_paths in obj_paths.items():
-            if not obj_name in self.select_feats.keys():
+            if obj_name not in self.select_feats.keys():
                 continue
 
             obj_dataset = pyarrow.dataset.dataset(file_paths, format='parquet')
@@ -161,7 +159,7 @@ class L1DataMLReady:
         valid_folder = self.cache_folder / 'valid' / self.flag
         valid_folder.mkdir(parents=True, exist_ok=True)
         cache_file = valid_folder / f'{obj_name}.parquet'
-
+        self._load_norm_params(obj_name)
         if self._check_data_exists(cache_file):
             self._valid_data_exists += 1
             return
@@ -169,7 +167,6 @@ class L1DataMLReady:
         valid_events = pyarrow.array(idxs)
         valid_data = ak.from_arrow(obj_data.take(valid_events))
         valid_data = valid_data[self.select_feats[obj_name]]
-        self._load_norm_params(obj_name)
         valid_data = self.normalizer.norm(valid_data, obj_name)
 
         valid_data = self._add_missing_feats(valid_data)
@@ -182,7 +179,7 @@ class L1DataMLReady:
         test_folder = self.cache_folder / 'test' / self.flag
         test_folder.mkdir(parents=True, exist_ok=True)
         cache_file = test_folder / f'{obj_name}.parquet'
-
+        self._load_norm_params(obj_name)
         if self._check_data_exists(cache_file):
             self._test_data_exists += 1
             return
@@ -190,7 +187,6 @@ class L1DataMLReady:
         test_events = pyarrow.array(idxs)
         test_data = ak.from_arrow(obj_data.take(test_events))
         test_data = test_data[self.select_feats[obj_name]]
-        self._load_norm_params(obj_name)
         test_data = self.normalizer.norm(test_data, obj_name)
 
         test_data = self._add_missing_feats(test_data)
@@ -205,11 +201,17 @@ class L1DataMLReady:
 
         self._aux_data_exists = []
         dataset_paths = self.processed_datapath / 'background'
-        for dataset_path in dataset_paths.iterdir():
+        for dataset_path in sorted(
+            p for p in dataset_paths.iterdir()
+            if p.is_dir() and not p.name.startswith("._")
+        ):
             self._cache_aux(dataset_path)
 
         dataset_paths = self.processed_datapath / 'signal'
-        for dataset_path in dataset_paths.iterdir():
+        for dataset_path in sorted(
+            p for p in dataset_paths.iterdir()
+            if p.is_dir() and not p.name.startswith("._")
+        ):
             self._cache_aux(dataset_path)
 
         if self._aux_data_exists:
@@ -223,10 +225,13 @@ class L1DataMLReady:
 
         ivalid, itest = self._compute_aux_split(dataset_path)
         obj_names = []
-        for obj_path in dataset_path.glob('*.parquet'):
+        for obj_path in sorted(
+            p for p in dataset_path.glob("*.parquet")
+            if p.is_file() and not p.name.startswith("._")
+        ):
             obj_name = obj_path.stem
             obj_names.append(obj_name)
-            if not obj_name in self.select_feats.keys():
+            if obj_name not in self.select_feats.keys():
                 continue
 
             obj_dataset = pyarrow.dataset.dataset(obj_path, format='parquet')
@@ -238,7 +243,10 @@ class L1DataMLReady:
 
     def _compute_aux_split(self, dataset_path: Path):
         """Compute the split into validation and test of the aux data."""
-        obj_paths = list(dataset_path.glob('*.parquet'))
+        obj_paths = sorted(
+            p for p in dataset_path.glob("*.parquet")
+            if p.is_file() and not p.name.startswith("._")
+        )
         first_object_filepath = obj_paths[0]
 
         obj_dataset = pyarrow.dataset.dataset(first_object_filepath, format='parquet')
@@ -256,7 +264,7 @@ class L1DataMLReady:
         valid_folder = cache_dir / 'valid' / self.flag
         valid_folder.mkdir(parents=True, exist_ok=True)
         cache_file = valid_folder / f'{obj_name}.parquet'
-
+        self._load_norm_params(obj_name)
         if self._check_data_exists(cache_file):
             self._aux_data_exists.append(cache_dir.stem)
             return
@@ -264,7 +272,6 @@ class L1DataMLReady:
         valid_events = pyarrow.array(idxs)
         valid_data = ak.from_arrow(obj_data.take(valid_events))
         valid_data = valid_data[self.select_feats[obj_name]]
-        self._load_norm_params(obj_name)
         valid_data = self.normalizer.norm(valid_data, obj_name)
 
         valid_data = self._add_missing_feats(valid_data)
@@ -276,7 +283,7 @@ class L1DataMLReady:
         test_folder = cache_dir / 'test' / self.flag
         test_folder.mkdir(parents=True, exist_ok=True)
         cache_file = test_folder / f'{obj_name}.parquet'
-
+        self._load_norm_params(obj_name)
         if self._check_data_exists(cache_file):
             self._aux_data_exists.append(cache_dir.stem)
             return
@@ -284,7 +291,6 @@ class L1DataMLReady:
         test_events = pyarrow.array(idxs)
         test_data = ak.from_arrow(obj_data.take(test_events))
         test_data = test_data[self.select_feats[obj_name]]
-        self._load_norm_params(obj_name)
         test_data = self.normalizer.norm(test_data, obj_name)
 
         test_data = self._add_missing_feats(test_data)
@@ -315,7 +321,10 @@ class L1DataMLReady:
     def _get_files_per_object(self, processed_path: Path) -> dict:
         """Get path to parquet files per object in the processed data folder."""
         obj_paths = defaultdict(list)
-        for file_path in processed_path.rglob('*.parquet'):
+        for file_path in sorted(
+            p for p in processed_path.rglob("*.parquet")
+            if p.is_file() and not p.name.startswith("._")
+        ):
             if len(file_path.relative_to(processed_path).parents) == 2:
                 obj_paths[file_path.stem].append(file_path)
 
@@ -338,7 +347,6 @@ class L1DataMLReady:
 
         norm_params_filepath = self.cache_folder / f'{obj_name}_norm_params.pkl'
         log.info(Fore.YELLOW + f"Loading norm params from {norm_params_filepath}...")
-
         self.normalizer.import_norm_params(norm_params_filepath, obj_name)
 
     def _plot(self, obj_data: ak.Array, obj_name: str, dataset_dir: Path):

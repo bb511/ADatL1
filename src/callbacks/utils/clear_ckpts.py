@@ -12,9 +12,14 @@ class ClearRunCheckpointDir(Callback):
         self.run_ckpts_dir = Path(run_ckpts_dir)
 
     def on_fit_start(self, trainer, pl_module):
-        if self.run_ckpts_dir.is_dir():
-            for item in self.run_ckpts_dir.iterdir():
+        if not self.run_ckpts_dir.is_dir():
+            return
+
+        for item in self.run_ckpts_dir.iterdir():
+            try:
                 if item.is_file() or item.is_symlink():
-                    item.unlink()
+                    item.unlink(missing_ok=True)
                 elif item.is_dir():
-                    shutil.rmtree(item)
+                    shutil.rmtree(item, ignore_errors=True)
+            except FileNotFoundError:
+                pass

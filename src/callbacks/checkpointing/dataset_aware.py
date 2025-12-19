@@ -64,7 +64,7 @@ class DatasetAwareModelCheckpoint(Callback):
         self._process_metric_across_datasets(trainer, pl_module, ds_metrics)
 
     def _get_metric(self, available_metrics: dict, dataset_name: str):
-        """Cache the value of the specified metric for one given set name.
+        """Cache the value of the specified metric for one given data set name.
 
         This is expecting the format of the metric name 'val/[dataset_name]/metric_name'
         make sure that this is how the callback metrics are named.
@@ -77,7 +77,7 @@ class DatasetAwareModelCheckpoint(Callback):
             
             metric_match = full_metric_name.split("/")[-1] == self.monitor
             if dataset_match and metric_match:
-                return metric_value.detach().cpu().float().numpy()
+                return metric_value.detach().cpu().float().item()
 
         warnings.warn(
             f"Checkpoint for metric '{self.monitor}' not found in logged metrics. "

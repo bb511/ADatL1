@@ -26,12 +26,13 @@ class VICReg(L1ADLightningModule):
         feature_blur: nn.Module,
         object_mask: nn.Module,
         lorentz_rotation: nn.Module,
-        object_norm_params: Union[str, dict],
-        object_feature_map: Union[str, dict],
+        object_norm_params: str,
+        object_feature_map: str,
         seed: int,
         **kwargs,
     ):
         super().__init__(**kwargs)
+        # Ignore saving hyperparams to avoid memory bloating.
         self.save_hyperparameters(
             ignore=[
                 "model",
@@ -42,7 +43,9 @@ class VICReg(L1ADLightningModule):
                 "lorentz_rotation",
             ]
         )
+
         self.projector = projector
+        object_feature_map = self._get_obj_feat_map(object_feature_map)
 
         # Instantiate augmentation modules with different rngs
         self.fb1, self.fb2 = copy.deepcopy(feature_blur), copy.deepcopy(feature_blur)
@@ -50,14 +53,7 @@ class VICReg(L1ADLightningModule):
         self.om1, self.om2 = copy.deepcopy(object_mask), copy.deepcopy(object_mask)
         self.om1.rng.set_seed(seed); self.om2.rng.set_seed(seed + 1)
 
-        if isinstance(object_feature_map, str):
-            if not object_feature_map.endswith(".json"):
-                raise ValueError("The 'object_feature_map' provided is invalid.")
-        
-            with open(object_feature_map, 'r') as file:
-                object_feature_map = json.load(file)
-
-        norm_scale, norm_bias = self._norm_tensor(object_feature_map, object_norm_params)
+        norm_scale, norm_bias = self._get_norm_params(object_feature_map, object_norm_params)
         phi_inds = [
             ind
             for _, feature_map in object_feature_map.items()
@@ -72,40 +68,6 @@ class VICReg(L1ADLightningModule):
         )
         self.lor1, self.lor2 = copy.deepcopy(lorentz_rotation), copy.deepcopy(lorentz_rotation)
         self.lor1.rng.set_seed(seed); self.lor2.rng.set_seed(seed + 1)
-
-    def _norm_tensor(self, object_feature_map: dict, object_norm_params: Union[str, dict]):
-        """Get a 'scale' and 'shift' tensors to directly apply to the data."""
-
-        if isinstance(object_norm_params, str):
-            if not os.path.isdir(object_norm_params):
-                raise ValueError("The 'object_norm_params' provided is invalid.")
-            
-            norm_params_dir = str(object_norm_params)
-            object_norm_params = {}
-            for obj_name in object_feature_map.keys():
-                norm_params_path = os.path.join(norm_params_dir, f"{obj_name}_norm_params.pkl")
-                if not os.path.isfile(norm_params_path):
-                    raise ValueError(f"The normalization parameters for {obj_name} can't be found.")
-                
-                with open(norm_params_path, 'rb') as file:
-                    object_norm_params[obj_name] = pickle.load(file)
-        
-        # Compute number of dimensions to preallocate scale and shift tensors:
-        ndims = sum([
-            len(inds)
-            for _, feature_map in object_feature_map.items()
-            for _, inds in feature_map.items()
-        ])
-        scale_tensor = torch.ones(ndims, dtype=torch.float32)
-        shift_tensor = torch.zeros(ndims, dtype=torch.float32)
-        
-        for obj_name, feature_norm_params in object_norm_params.items():
-            for feat, params in feature_norm_params.items():
-                inds = object_feature_map[obj_name][feat]
-                scale_tensor[inds] = float(params.get("scale", 1.0))
-                shift_tensor[inds] = float(params.get("shift", 0.0))
-
-        return scale_tensor, shift_tensor
 
     def model_step(self, batch: Tuple[torch.Tensor]) -> Dict[str, torch.Tensor]:
         x, _ = batch
@@ -126,23 +88,69 @@ class VICReg(L1ADLightningModule):
         loss_inv, loss_var, loss_cov, loss_total = self.loss(z1, z2)
 
         return {
-            "loss": loss_total.mean(),
+            "loss": loss_total,
             # Used for logging:
-            "loss/inv/mean": loss_inv.mean(),
-            "loss/var/mean": loss_var.mean(),
-            "loss/cov/mean": loss_cov.mean(),
-            # Used for callbacks.
-            "loss/total/full": loss_total.detach(),
-            "loss/inv/full": loss_inv.detach(),
-            "loss/var/full": loss_var.detach(),
-            "loss/cov/full": loss_cov.detach(),
+            "loss/inv": loss_inv.detach(),
+            "loss/var": loss_var.detach(),
+            "loss/cov": loss_cov.detach(),
         }
-    
+
     def outlog(self, outdict: dict) -> dict:
         """Override with the values you want to log."""
         return {
             "loss": outdict.get("loss"),
-            "loss_inv": outdict.get("loss/inv/mean"),
-            "loss_var": outdict.get("loss/var/mean"),
-            "loss_cov": outdict.get("loss/cov/mean"),
+            "loss_inv": outdict.get("loss/inv"),
+            "loss_var": outdict.get("loss/var"),
+            "loss_cov": outdict.get("loss/cov"),
         }
+
+    def _get_obj_feat_map(self, object_feature_map: str) -> dict:
+        """Check if the given object_feature_map path is valid.
+
+        This imports a dictionary mapping positions in the training data torch tensor
+        to strings of the features corresponding to those positions. This is needed for
+        the phi augmentation in the vicreg architecture.
+        """
+        if not object_feature_map.endswith(".json"):
+            raise ValueError("The vicreg 'object_feature_map' provided is invalid.")
+
+        with open(object_feature_map, 'r') as file:
+            object_feature_map = json.load(file)
+
+        return object_feature_map
+
+    def _get_norm_params(self, object_feature_map: dict, object_norm_params: str):
+        """Get the normalisation parameters used to normalise the data distributions.
+
+        Create a tensor that
+        This is later used to denormalise the data corresopnding to the phi indices,
+        since this is needed for the FastLorentzRotation augmentation.
+        """
+        if not os.path.isdir(object_norm_params):
+            raise ValueError("The 'object_norm_params' provided is invalid.")
+
+        norm_params_dir = str(object_norm_params)
+        object_norm_params = {}
+        for obj_name in object_feature_map.keys():
+            norm_params_path = os.path.join(norm_params_dir, f"{obj_name}_norm_params.pkl")
+            if not os.path.isfile(norm_params_path):
+                raise ValueError(f"The normalization parameters for {obj_name} can't be found.")
+            with open(norm_params_path, 'rb') as file:
+                object_norm_params[obj_name] = pickle.load(file)
+
+        # Compute number of dimensions to preallocate scale and shift tensors:
+        ndims = sum([
+            len(inds)
+            for _, feature_map in object_feature_map.items()
+            for _, inds in feature_map.items()
+        ])
+        scale_tensor = torch.ones(ndims, dtype=torch.float32)
+        shift_tensor = torch.zeros(ndims, dtype=torch.float32)
+
+        for obj_name, feature_norm_params in object_norm_params.items():
+            for feat, params in feature_norm_params.items():
+                inds = object_feature_map[obj_name][feat]
+                scale_tensor[inds] = float(params.get("scale", 1.0))
+                shift_tensor[inds] = float(params.get("shift", 0.0))
+
+        return scale_tensor, shift_tensor

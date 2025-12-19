@@ -23,35 +23,19 @@ class L1DataAwkward2Torch:
     nconst: dict
     verbose: bool = False
 
-    def __post_init__(self):
-        self.cached_objects = set()
-
     def load_folder(self, folder_path: Path) -> torch.Tensor:
         """Loads folder of parquet files containing awkward arrays to a numpy array."""
-        self.cached_objects.clear()
-
         self.cache_filepath = folder_path / 'torch_cache.pt'
         self.object_feature_map = folder_path.parent / "object_feature_map.json"
         if self._cache_exists():
             return torch.load(self.cache_filepath)
 
-        workers = min(self.workers, (os.cpu_count() or 4))
-        files = sorted([
-            fpath for fpath in folder_path.glob("*.parquet")
-            if fpath.is_file() and not fpath.name.startswith("._")
-        ])
-        with ThreadPoolExecutor(max_workers=workers) as ex:
-            processed = list(ex.map(self._process_object, files))
-
-        data = np.concatenate([arr for _, arr, _ in processed], axis=1)
+        self.cached_objects = set()
+        procd_folder = self._process_folder(folder_path)
+        self._build_feature_mapping(procd_folder)
+        data = np.concatenate([data_array for _, _, data_array in procd_folder], axis=1)
         data = torch.from_numpy(data)
         self._cache(data)
-
-        # Build mapping JSON once per folder if not present
-        if not self.object_feature_map.is_file():
-            mapping = self._build_feature_mapping(processed)
-            with open(self.object_feature_map, "w") as f:
-                json.dump(mapping, f, indent=4)
 
         return data
 
@@ -65,6 +49,24 @@ class L1DataAwkward2Torch:
                 )
             return True
         return False
+
+    def _process_folder(self, folder_path: Path) -> tuple[str, np.ndarray, list[str]]:
+        """Process an entire folder of parquet files.
+
+        The given folder path is expected to contain multiple parquet files, where each
+        parquet file stores data corresponding to an object, e.g., egammas.
+
+        Returns a tuple containing at each entry:
+            - the name of the processed object
+            - a list of the features corresponding to that object
+            - the processed object data in a numpy array
+        """
+        workers = min(self.workers, (os.cpu_count() or 4))
+        obj_file_paths = self._get_parquet_fpaths(folder_path)
+        with ThreadPoolExecutor(max_workers=workers) as ex:
+            processed_folder = list(ex.map(self._process_object, obj_file_paths))
+
+        return processed_folder
 
     def _process_object(self, data_path: Path) -> np.ndarray:
         """Process one parquet file corresponding to an object from the data set."""
@@ -80,10 +82,12 @@ class L1DataAwkward2Torch:
 
         nevents = len(data)
         nfeats = len(data.fields)
+        feats = list(data.fields)
 
         numpy_array = np.empty((nevents, nconst, nfeats), dtype=np.float32)
         numpy_array = self._funnel_to_nparray(data, numpy_array)
-        return obj_name, numpy_array, list(data.fields)
+
+        return obj_name, feats, numpy_array
 
     def _pad(
         self, data: ak.Array, nconst: int, padder: Union[int, ak.Record]
@@ -154,7 +158,7 @@ class L1DataAwkward2Torch:
 
     def _cache(self, data: torch.Tensor):
         """Cache the converted data to disk."""
-        log.info(f"Caching data at {self.cache_filepath}...")
+        log.info(f"Caching torch tensor at {self.cache_filepath}...")
         parent_folder = self.cache_filepath.parent
         if not parent_folder.exists():
             raise FileNotFoundError(f"Cache folder {parent_folder} missing!")
@@ -165,49 +169,73 @@ class L1DataAwkward2Torch:
         torch.save(data, self.cache_filepath)
 
     def _check_cache_integrity(self) -> bool:
-        """Checks whether the cache includes all the ."""
-        parent_folder = self.cache_filepath.parent
-        objects_in_folder = {
-            p.stem
-            for p in parent_folder.glob("*.parquet")
-            if p.is_file() and not p.name.startswith("._")
-        }
+        """Checks whether the cache includes all the desired data objects.
 
-        cache_obj_file = parent_folder / 'cached_objs.pkl'
+        If the objects in the folder do not match what's been previously cached, as
+        stored in the cache_objs.pkl, then rebuild the torch tensor cache.
+        """
+        cache_parent_folder = self.cache_filepath.parent
+        obj_fpaths = self._get_parquet_fpaths(cache_parent_folder)
+        existing_obj_names = {obj_path.stem for obj_path in obj_fpaths}
+
+        cache_obj_file = cache_parent_folder / 'cached_objs.pkl'
         if cache_obj_file.is_file():
             with open(cache_obj_file, 'rb') as file:
-                cached_objects = pickle.load(file)
+                previously_cached_objects = pickle.load(file)
         else:
-            cached_objects = set()
+            previously_cached_objects = set()
 
-        return objects_in_folder == cached_objects
+        return existing_obj_names == previously_cached_objects
 
-    def _build_feature_mapping(self, processed: list[tuple[str, np.ndarray, list[str]]]) -> dict:
+    def _get_parquet_fpaths(self, folder: Path) -> list[Path]:
+        """Get the parquet files in a folder while avoiding system files."""
+        parquet_file_paths = sorted([
+            fpath for fpath in folder.glob("*.parquet")
+            if fpath.is_file() and not fpath.name.startswith("._")
+        ])
+
+        return parquet_file_paths
+
+    def _build_feature_mapping(self, procd_folder: tuple):
+        """Build a map that contains metadata about the objs/feats in the torch tensor.
+
+        The map is a dictionary with the structure:
+            {
+              obj_name: {
+                 feature_name: [list of flattened column indices],
+                 ...
+              },
+              ...
+            }
         """
-        Build a mapping:
-        {
-          obj_name: {
-             feature_name: [list of flattened column indices],
-             ...
-          },
-          ...
-        }
-        """
+        if self.object_feature_map.is_file():
+            return
+
         mapping: dict[str, dict[str, list[int]]] = {}
         offset = 0
+        for obj_name, feat_names, data in processed:
+            feats_to_idxs, offset = self._2d_feature_map(data, feat_names, offset)
+            mapping[obj_name] = feats_to_idxs
 
-        for obj_name, arr, fields in processed:
-            # arr shape: (N, nconst, m)
-            _, nconst, m = arr.shape
-            field_to_cols = {field: [] for field in fields}
+        with open(self.object_feature_map, "w") as f:
+            json.dump(mapping, f, indent=4)
 
-            # Flattening order: c in 0..nconst-1, f in 0..m-1
-            for c in range(nconst):
-                for f, field in enumerate(fields):
-                    col_idx = offset + c * m + f
-                    field_to_cols[field].append(col_idx)
+    def _2d_feature_map(self, data: np.ndarray, feat_names: list[str], obj_offset: int):
+        """Compute a feature to idx map for 2d data.
 
-            mapping[obj_name] = field_to_cols
-            offset += nconst * m
+        Namely, map each feature within an object to its position in a flattened data
+        array. The obj_offset applies an offset to indices, if one wants to process
+        multiple objects.
+        """
+        nconst, nfeats = data.shape[-2:]
+        feats_to_idxs = {feat_name: [] for feat_name in feat_names}
 
-        return mapping
+        # Compute the index of each feature if the array is flat.
+        for const_idx in range(nconst):
+            for feat_idx, feat_name in enumerate(feat_names):
+                idx = offset + const_idx * nfeats + feat_idx
+                feats_to_idxs[feat_name].append(idx)
+
+        obj_offset += nconst * nfeats
+
+        return feats_to_idxs, obj_offset

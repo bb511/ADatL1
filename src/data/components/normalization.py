@@ -45,8 +45,8 @@ class L1DataNormalizer:
         # Compute number of dimensions to preallocate scale and shift tensors:
         ndims = sum([
             len(inds)
-            for _, feature_map in object_feature_map.items()
-            for _, inds in feature_map.items()
+            for feature_map in object_feature_map.values()
+            for inds in feature_map.values()
         ])
 
         scale_tensor, shift_tensor = torch.ones(ndims, dtype=torch.float32), torch.zeros(ndims, dtype=torch.float32)

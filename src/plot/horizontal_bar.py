@@ -45,6 +45,7 @@ def plot_yright(data: dict, ydata: dict, xlabel: str, ylabel: str, save_dir: Pat
     dataset_names = list(data.keys())
     dataset_values = list(data.values())
     dataset_yvals = list(ydata.values())
+    dataset_yvals = [round(yval, 4) for yval in dataset_yvals]
 
     fig, ax = plt.subplots(figsize=(8,16), dpi=60)
 

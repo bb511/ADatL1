@@ -140,7 +140,7 @@ class AnomalyEfficiencyCallback(Callback):
                 # Construct eff per data set for specific metric name and target rate.
                 name = f"{metric_name.replace('/', '_')}_eff{target_rate}"
                 efficiencies = {
-                    self._get_dsname(rate_name): round(val.compute('efficiency').item(), 4)
+                    self._get_dsname(rate_name): val.compute('efficiency').item()
                     for rate_name, val in self.rates.items()
                     if name in rate_name
                 }

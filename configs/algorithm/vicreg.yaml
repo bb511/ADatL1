@@ -3,9 +3,6 @@
 _target_: src.algorithms.vicreg.VICReg
 
 seed: ${seed}
-object_norm_params: ${paths.data_dir}/mlready/${data.data_mlready.name}/${data.data_normalizer.name}
-object_feature_map: ${paths.data_dir}/mlready/${data.data_mlready.name}/${data.data_normalizer.name}/object_feature_map.json
-
 
 feature_blur:
   _target_: src.models.augmentation.FastFeatureBlur
@@ -42,6 +39,6 @@ loss:
 
 optimizer:
   _partial_: true
-  _target_: torch.optim.Adam
+  _target_: torch.optim.AdamW
   lr: 0.0001033146150433934
   weight_decay: 0.0

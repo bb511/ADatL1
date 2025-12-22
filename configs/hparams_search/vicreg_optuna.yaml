@@ -10,11 +10,10 @@ defaults:
 # make sure this is the correct name of some metric logged in lightning module!
 optimized_metric_config: 
   callback:
-    name: AnomalyEfficiencyCallback
+    name: LossCallback
     params:
-      metric_name: loss/kl/full
-      target_rate: 1
-  direction: maximize
+      loss_name: loss
+  direction: minimize
 
 # here we define Optuna hyperparameter search
 # it optimizes for value returned from function with @hydra.main decorator
@@ -29,16 +28,16 @@ hydra:
     storage: sqlite:///optuna_logs/optim_v3.db
 
     # name of the study to persist optimization results
-    study_name: test1
+    study_name: vicreg_search_min_loss_v1
 
     # number of parallel workers
     n_jobs: 1
 
     # 'minimize' or 'maximize' the objective
-    direction: maximize
+    direction: minimize
 
     # total number of runs that will be executed
-    n_trials: 250
+    n_trials: 150
 
     # choose Optuna hyperparameter sampler
     # you can choose bayesian sampler (tpe), random search (without optimization), grid sampler, and others
@@ -50,8 +49,19 @@ hydra:
 
     # define hyperparameter search space
     params:
-      algorithm.optimizer._target_: choice(torch.optim.SGD, torch.optim.AdamW)
+      algorithm.optimizer._target_: choice(torch.optim.SGD,torch.optim.AdamW)
       algorithm.optimizer.lr: tag(log, interval(1e-4, 1e-3))
       algorithm.optimizer.weight_decay: tag(log, interval(1e-5, 1e-3))
-      algorithm.loss.scale: choice(0.0, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1.0)
       data.batch_size: choice(16276, 32552, 65104)
+
+      algorithm.feature_blur.prob: choice(0.0, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1.0)
+      algorithm.feature_blur.magnitude: choice(0.0, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1.0)
+      algorithm.feature_blur.strength: choice(0.0, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1.0)
+
+      algorithm.object_mask.prob: choice(0.0, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1.0)
+
+      algorithm.lorentz_rotation.prob: choice(0.0, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1.0)
+
+      algorithm.loss.inv_coef: tag(log, interval(10, 50))
+      algorithm.loss.var_coef: tag(log, interval(10, 50))
+      algorithm.loss.cov_coef: tag(log, interval(0.3, 3))

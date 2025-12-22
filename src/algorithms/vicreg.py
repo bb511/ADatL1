@@ -8,6 +8,10 @@ import torch
 import torch.nn as nn
 
 from src.algorithms import L1ADLightningModule
+from src.models.mlp import MLP
+from src.models.augmentation import FastFeatureBlur
+from src.models.augmentation import FastObjectMask
+from src.models.augmentation import FastLorentzRotation
 
 
 class VICReg(L1ADLightningModule):
@@ -22,12 +26,10 @@ class VICReg(L1ADLightningModule):
 
     def __init__(
         self,
-        projector: nn.Module,
-        feature_blur: nn.Module,
-        object_mask: nn.Module,
-        lorentz_rotation: nn.Module,
-        object_norm_params: str,
-        object_feature_map: str,
+        projector: MLP,
+        feature_blur: FastFeatureBlur,
+        object_mask: FastObjectMask,
+        lorentz_rotation: FastLorentzRotation,
         seed: int,
         **kwargs,
     ):
@@ -43,31 +45,60 @@ class VICReg(L1ADLightningModule):
                 "lorentz_rotation",
             ]
         )
+        self.seed = seed
 
         self.projector = projector
-        object_feature_map = self._get_obj_feat_map(object_feature_map)
 
         # Instantiate augmentation modules with different rngs
-        self.fb1, self.fb2 = copy.deepcopy(feature_blur), copy.deepcopy(feature_blur)
-        self.fb1.rng.set_seed(seed); self.fb2.rng.set_seed(seed + 1)
-        self.om1, self.om2 = copy.deepcopy(object_mask), copy.deepcopy(object_mask)
-        self.om1.rng.set_seed(seed); self.om2.rng.set_seed(seed + 1)
+        self.feature_blur_1 = copy.deepcopy(feature_blur)
+        self.feature_blur_2 = copy.deepcopy(feature_blur)
+        self.feature_blur_1.rng.set_seed(self.seed)
+        self.feature_blur_2.rng.set_seed(self.seed + 1)
 
-        norm_scale, norm_bias = self._get_norm_params(object_feature_map, object_norm_params)
-        phi_inds = [
-            ind
-            for _, feature_map in object_feature_map.items()
-            for ind in feature_map.get("phi", [])
-        ]
-        phi_mask = torch.zeros_like(norm_scale, dtype=torch.bool)
-        phi_mask[phi_inds] = True
-        lorentz_rotation = lorentz_rotation(
-            norm_scale=norm_scale,
-            norm_bias=norm_bias,
-            phi_mask=phi_mask
+        self.object_mask_1 = copy.deepcopy(object_mask)
+        self.object_mask_2 = copy.deepcopy(object_mask)
+        self.object_mask_1.rng.set_seed(self.seed)
+        self.object_mask_2.rng.set_seed(self.seed + 1)
+
+        self.lorentz_rotation = lorentz_rotation
+
+    def on_fit_start(self):
+        """Set up the Lorentz augmentations."""
+        lorentz_rotation = self._setup_phi_lorentz_rotation()
+        self.lorentz_rotation_1 = copy.deepcopy(lorentz_rotation)
+        self.lorentz_rotation_2 = copy.deepcopy(lorentz_rotation)
+        self.lorentz_rotation_1.rng.set_seed(self.seed)
+        self.lorentz_rotation_2.rng.set_seed(self.seed)
+
+    def _setup_phi_lorentz_rotation(self) -> FastLorentzRotation:
+        """Sets up the lorents rotation on the phi feature of each object.
+
+        First, get the indices of the phi values in the batch torch tensor.
+        Then, get the l1
+        """
+        object_feature_map = self.trainer.datamodule.loader.object_feature_map
+        normalizer = self.trainer.datamodule.normalizer
+        normalizer.setup_1d_denorm(object_feature_map)
+        l1_scales = self.trainer.datamodule.l1_scales
+
+        phi_idxs = []
+        l1_scale_phi = []
+        for obj_name, feature_map in object_feature_map.items():
+            for feat_name, idxs in feature_map.items():
+                if feat_name != 'phi':
+                    continue
+
+                phi_idxs.extend(idxs)
+                nconst = len(idxs)
+                l1_scale_phi.extend(nconst * [l1_scales[obj_name]['phi']])
+
+        phi_mask = torch.zeros_like(normalizer.scale_tensor, dtype=torch.bool)
+        phi_mask[phi_idxs] = True
+        l1_scale_phi = torch.tensor(l1_scale_phi, dtype=torch.float32)
+
+        return self.lorentz_rotation(
+            normalizer=normalizer, phi_mask=phi_mask, l1_scale_phi=l1_scale_phi
         )
-        self.lor1, self.lor2 = copy.deepcopy(lorentz_rotation), copy.deepcopy(lorentz_rotation)
-        self.lor1.rng.set_seed(seed); self.lor2.rng.set_seed(seed + 1)
 
     def model_step(self, batch: Tuple[torch.Tensor]) -> Dict[str, torch.Tensor]:
         x, _ = batch
@@ -76,8 +107,8 @@ class VICReg(L1ADLightningModule):
         # Apply augmentations
         x1, x2 = x.clone(), x.clone()
         del x
-        x1 = self.lor1(self.om1(self.fb1(x1)))
-        x2 = self.lor2(self.om2(self.fb2(x2)))
+        x1 = self.lorentz_rotation_1(self.object_mask_1(self.feature_blur_1(x1)))
+        x2 = self.lorentz_rotation_2(self.object_mask_2(self.feature_blur_2(x2)))
 
         # Get projections
         z1 = self.projector(self.model(x1))
@@ -103,54 +134,3 @@ class VICReg(L1ADLightningModule):
             "loss_var": outdict.get("loss/var"),
             "loss_cov": outdict.get("loss/cov"),
         }
-
-    def _get_obj_feat_map(self, object_feature_map: str) -> dict:
-        """Check if the given object_feature_map path is valid.
-
-        This imports a dictionary mapping positions in the training data torch tensor
-        to strings of the features corresponding to those positions. This is needed for
-        the phi augmentation in the vicreg architecture.
-        """
-        if not object_feature_map.endswith(".json"):
-            raise ValueError("The vicreg 'object_feature_map' provided is invalid.")
-
-        with open(object_feature_map, 'r') as file:
-            object_feature_map = json.load(file)
-
-        return object_feature_map
-
-    def _get_norm_params(self, object_feature_map: dict, object_norm_params: str):
-        """Get the normalisation parameters used to normalise the data distributions.
-
-        Create a tensor that
-        This is later used to denormalise the data corresopnding to the phi indices,
-        since this is needed for the FastLorentzRotation augmentation.
-        """
-        if not os.path.isdir(object_norm_params):
-            raise ValueError("The 'object_norm_params' provided is invalid.")
-
-        norm_params_dir = str(object_norm_params)
-        object_norm_params = {}
-        for obj_name in object_feature_map.keys():
-            norm_params_path = os.path.join(norm_params_dir, f"{obj_name}_norm_params.pkl")
-            if not os.path.isfile(norm_params_path):
-                raise ValueError(f"The normalization parameters for {obj_name} can't be found.")
-            with open(norm_params_path, 'rb') as file:
-                object_norm_params[obj_name] = pickle.load(file)
-
-        # Compute number of dimensions to preallocate scale and shift tensors:
-        ndims = sum([
-            len(inds)
-            for _, feature_map in object_feature_map.items()
-            for _, inds in feature_map.items()
-        ])
-        scale_tensor = torch.ones(ndims, dtype=torch.float32)
-        shift_tensor = torch.zeros(ndims, dtype=torch.float32)
-
-        for obj_name, feature_norm_params in object_norm_params.items():
-            for feat, params in feature_norm_params.items():
-                inds = object_feature_map[obj_name][feat]
-                scale_tensor[inds] = float(params.get("scale", 1.0))
-                shift_tensor[inds] = float(params.get("shift", 0.0))
-
-        return scale_tensor, shift_tensor

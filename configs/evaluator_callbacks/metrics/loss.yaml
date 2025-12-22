@@ -1,3 +1,4 @@
 # @package evaluator_callbacks.metrics
 
-_target_: src.evaluation.callbacks.loss.TestLossCallback
+_target_: src.evaluation.callbacks.loss.LossCallback
+loss_name: loss

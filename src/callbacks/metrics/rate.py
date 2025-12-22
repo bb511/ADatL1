@@ -3,7 +3,7 @@ import numpy as np
 from torchmetrics import Metric
 
 
-class AnomalyCounter(Metric):
+class AnomalyRate(Metric):
     """Counts the number of anomalies at a given background rate.
 
     At the end, this can compute either the rate of anomalies or the anomaly detection
@@ -32,14 +32,12 @@ class AnomalyCounter(Metric):
 
         :bkg_score: Torch tensor containing scores for background samples.
         """
-        self.threshold = np.percentile(
-            bkg_score.cpu().float().numpy(),
-            100 - (self.target_rate / self.bc_rate) * 100
-        )
+        q = 1.0 - (self.target_rate / self.bc_rate)
+        self.threshold = torch.quantile(bkg_score.float(), q).to(bkg_score.device)
 
     def update(self, anomaly_score: torch.Tensor) -> None:
         """The anomaly score can be defined in a number of ways. See model code."""
-        ntriggered = len(np.where(anomaly_score.cpu().float() > self.threshold)[0])
+        ntriggered = (anomaly_score.float() > self.threshold).sum()
         self.ntriggered += ntriggered
         self.nsamples += anomaly_score.numel()
 

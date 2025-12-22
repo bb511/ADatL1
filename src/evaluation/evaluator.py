@@ -1,15 +1,15 @@
 # Evaluator object definition. Produces the desired evaluation plots for given model
 # checkpoints saved during the training of a model.
 from typing import Optional
-from collections import defaultdict
 from pathlib import Path
 import logging
+import operator
 
 import torch
 import numpy as np
 import pytorch_lightning
 from pytorch_lightning.loggers import Logger
-from pytorch_lightning import LightningModule, LightningDataModule
+from pytorch_lightning import LightningModule
 from pytorch_lightning.callbacks import Callback
 from colorama import Fore, Back, Style
 
@@ -141,8 +141,8 @@ class Evaluator:
             self.evaluator.ckpt_path_name = ckpt_path.name
             self.evaluate_ckpt(ckpt_path, model, test_loader)
 
-        self._get_criterion_optimized_metric(self.optimized_metric_config)
-        self._make_summary_plots(criterion_folder)
+        self._get_optimized_metric(self.optimized_metric_config)
+        self._make_criterion_summary_plots(criterion_folder)
         self.evaluator.criterion_name = None
 
     def evaluate_ckpt(self, ckpt_path: Path, model, test_loader: dict):
@@ -176,8 +176,8 @@ class Evaluator:
         self.evaluator.strat_name = 'last'
         ckpt_path = run_folder / 'last.ckpt'
         self.evaluate_ckpt(ckpt_path, model, test_loaders)
-        self._get_criterion_optimized_metric(self.optimized_metric_config)
-        self._make_summary_plots(run_folder)
+        self._get_optimized_metric(self.optimized_metric_config)
+        self._make_criterion_summary_plots(run_folder)
 
     def _get_subdir(self, main_dir: Path, subdir: str):
         """Checks if a dir exists and returns it if true."""
@@ -195,53 +195,61 @@ class Evaluator:
 
         return False
 
-    def _get_criterion_optimized_metric(self, optimized_metric_config: dict | None):
-        """Get one metric over all the checkpoints that are being probed for a crit.
+    def _get_optimized_metric(self, optimized_metric_config: dict | None):
+        """Get one metric across all the checkpoints in a run to optimize for.
 
-        This is used for hyperparameter optimization. The optimized_metric_config
-        points to a callback that should have a method 'get_optimized_metric'. Then,
-        this method returns one number related to what that callback computes and that
-        should be optimized. The input dict to this method should also include all the
-        args required by the get_optimized_metric method. Finally, it should include
-        the way to pick an optimized_metric across checkpointing criteria, i.e., pick
-        the maximum across criteria or the minimum, depending on the nature of the
-        optimized metric.
+        This is used for hyperparameter optimization.
+        The 'optimized_metric_config' dictionary contains the name of a callback in the
+        evaluator. This callback should have 'get_optimized_metric' method implemented.
+        This method returns what is considered the best metric, according to its own
+        definition, across all the checkpoints in a criterion.
+        The optimized_metric_config should also contain all the hyperparameters required
+        by the 'get_optimized_metric' method.
+        Finally, it should contain a direction along which to pick from best checkpoints
+        given by different criteria.
         """
         if optimized_metric_config is None:
             return
 
-        callback_name = list(optimized_metric_config.keys())[0]
-        cb_names = [cb.__class__.__name__ for cb in self.evaluator.callbacks]
-        if not callback_name in cb_names:
-            raise ValueError(f"Callback {callback_name} not in evaluator callbacks.")
+        target_callback_name = optimized_metric_config['callback']['name']
+        target_callback_params = optimized_metric_config['callback']['params']
+        crit_optim_direction = optimized_metric_config['direction']
 
-        for cb in self.evaluator.callbacks:
-            if callback_name == cb.__class__.__name__:
-                params = optimized_metric_config[callback_name]
-                optimized_metric = cb.get_optimized_metric(**params)
+        available_callbacks = {
+            cb.__class__.__name__: cb for cb in self.evaluator.callbacks
+        }
+        try:
+            cb = available_callbacks[target_callback_name]
+        except KeyError:
+            raise ValueError(f"Callback {target_callback_name} not available.")
 
-        if optimized_metric_config['direction'] == 'maximize':
-            if self.optimized_metric is None:
-                self.optimized_metric = -np.inf
-            if optimized_metric > self.optimized_metric:
-                self.optimized_metric = optimized_metric
-        elif optimized_metric_config['direction'] == 'minimize':
-            if self.optimized_metric is None:
-                self.optimized_metric = np.inf
-            if optimized_metric < self.optimized_metric:
-                self.optimized_metric = optimized_metric
-        else:
-            raise ValueError("Direction in optimized_metric_config either max or min.")
+        optimized_metric = cb.get_optimized_metric(**target_callback_params)
+        self._set_best_across_crit(optimized_metric, direction=crit_optim_direction)
 
-    def _make_summary_plots(self, plot_folder: Path):
+    def _set_best_across_crit(self, value: float, *, direction: str) -> None:
+        """Set the best optimized metric values across all ckpt criteria."""
+        if direction == "maximize":
+            if self.optimized_metric is None or value > self.optimized_metric:
+                self.optimized_metric = value
+            return
+
+        if direction == "minimize":
+            if self.optimized_metric is None or value < self.optimized_metric:
+                self.optimized_metric = value
+            return
+
+        raise ValueError("Optimized metric direction must be 'maximize' or 'minimize'.")
+
+    def _make_criterion_summary_plots(self, plot_folder: Path):
         """Make summary plots for each callback.
 
-        Check if any of the callbacks have 'plot_summary_reset' method and if they do
+        Check if any of the callbacks have 'plot_summary' method and if they do
         call it and store result in given folder.
         """
         # Make summary plots for callback across evaluated checkpoints.
         for cb in self.evaluator.callbacks:
-            method_name = 'plot_summary_reset'
+            method_name = 'plot_summary'
             summary_method = getattr(cb, method_name, None)
             if callable(summary_method):
                 summary_method(self.evaluator, plot_folder)
+                cb.clear_crit_summary()

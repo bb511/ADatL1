@@ -7,6 +7,7 @@ defaults:
   - data_normalizer: axov4
   - data_mlready: axov4
   - data_awkward2torch: axov4
+  - l1_scales: default
   - _self_
 
 _target_: src.data.L1AD_datamodule.L1ADDataModule

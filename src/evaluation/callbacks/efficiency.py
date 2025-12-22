@@ -1,4 +1,4 @@
-# Callback that computes the anomaly rate during training.
+# Callback that computes the anomaly efficiency.
 from collections import defaultdict
 from pathlib import Path
 import pickle
@@ -9,7 +9,7 @@ from pytorch_lightning.callbacks import Callback
 from pytorch_lightning.loggers import MLFlowLogger, Logger
 from pytorch_lightning import Trainer, LightningModule, LightningDataModule
 
-from src.evaluation.callbacks.metrics.rate import AnomalyCounter
+from src.evaluation.callbacks.metrics.rate import AnomalyRate
 from src.evaluation.callbacks import utils
 from src.plot import horizontal_bar
 
@@ -31,11 +31,19 @@ class AnomalyEfficiencyCallback(Callback):
         efficiency on.
     """
 
-    def __init__(self, target_rates: list[int], bc_rate: int, metric_names: list[str]):
+    def __init__(
+        self,
+        target_rates: list[int],
+        bc_rate: int,
+        metric_names: list[str],
+        skip_ds: list[str] = []
+    ):
         super().__init__()
+        self.device = None
         self.target_rates = target_rates
         self.bc_rate = bc_rate
         self.metric_names = metric_names
+        self.skip_ds = set(skip_ds)
         self.eff_summary = defaultdict(lambda: defaultdict(lambda: defaultdict(float)))
 
     def on_test_start(self, trainer, pl_module):
@@ -43,6 +51,7 @@ class AnomalyEfficiencyCallback(Callback):
 
         # Check if 'main_test' dataset is the first dataset in the test dictionary.
         # This is required to compute the rate thresholds on the anomaly scores.
+        self.device = pl_module.device
         first_test_dset_key = list(trainer.test_dataloaders.keys())[0]
         if first_test_dset_key != "main_test":
             raise ValueError("Eff callback requires main_test first in the data dict!")
@@ -98,7 +107,7 @@ class AnomalyEfficiencyCallback(Callback):
         maintest data should return the rate for which this threshold was computed.
         """
         for target_rate in self.target_rates:
-            rate = AnomalyCounter(target_rate, self.bc_rate)
+            rate = AnomalyRate(target_rate, self.bc_rate).to(self.device)
             rate.set_threshold(self.maintest_score_data[mname])
             rate.update(self.maintest_score_data[mname])
             rate_name = f"{mname.replace('/', '_')}_eff{target_rate}"
@@ -122,7 +131,7 @@ class AnomalyEfficiencyCallback(Callback):
         the rate on the other data sets differing from main_test.
         """
         for target_rate in self.target_rates:
-            rate = AnomalyCounter(target_rate, self.bc_rate)
+            rate = AnomalyRate(target_rate, self.bc_rate).to(self.device)
             rate.set_threshold(self.maintest_score_data[mname])
 
             rate_name = f"{mname.replace('/', '_')}_eff{target_rate}"
@@ -138,30 +147,60 @@ class AnomalyEfficiencyCallback(Callback):
         for metric_name in self.metric_names:
             for target_rate in self.target_rates:
                 # Construct eff per data set for specific metric name and target rate.
-                name = f"{metric_name.replace('/', '_')}_eff{target_rate}"
-                efficiencies = {
+                relevant_rate_name = f"{metric_name.replace('/', '_')}_eff{target_rate}"
+                effs = {
                     self._get_dsname(rate_name): val.compute('efficiency').item()
                     for rate_name, val in self.rates.items()
-                    if name in rate_name
+                    if relevant_rate_name in rate_name
+                    and not self._get_dsname(rate_name) in self.skip_ds
                 }
-                self._plot(efficiencies, metric_name, target_rate, plot_folder)
-                self._store_summary(efficiencies, ckpt_name, metric_name, target_rate)
+                self._plot(effs, 'efficiency', metric_name, target_rate, plot_folder)
+                self._store_summary(effs, ckpt_name, metric_name, target_rate)
 
-        self._log_plots_to_mlflow(trainer, ckpt_name, plot_folder)
+        utils.mlflow.log_plots_to_mlflow(
+            trainer, ckpt_name, 'effs', plot_folder, make_gallery=True
+        )
 
-    def _get_dsname(self, rate_name: str):
-        """Retrieves the data set name from string specifying rate name."""
-        dataset_name = rate_name.split('/')[0]
-        return dataset_name
+    def plot_summary(self, trainer, root_folder: Path):
+        """Plot the summary metrics accummulated in eff_summary and reset this attr."""
+        plot_folder = root_folder / 'plots'
+        plot_folder.mkdir(parents=True, exist_ok=True)
+        self._cache_summary(plot_folder)
 
-    def _plot(self, effs: dict, mname: str, trate: float, plot_folder: Path):
+        for metric_name in self.eff_summary.keys():
+            for target_rate in self.eff_summary[metric_name].keys():
+                # Get the summary metric per checkpoint.
+                smet = self.eff_summary[metric_name][target_rate]
+                self._plot(smet, 'mu^2/sigma', metric_name, target_rate, plot_folder)
+
+        utils.mlflow.log_plots_to_mlflow(trainer, None, 'effs', plot_folder)
+
+    def clear_crit_summary(self):
+        self.eff_summary.clear()
+
+    def get_optimized_metric(self, metric_name: str, target_rate: float):
+        """Get one number that one should optimize on this callback.
+
+        Here, it's the maximum of the summary metric across checkpoints for a certain
+        criterion.
+        """
+        available_metrics = list(self.eff_summary.keys())
+        if not metric_name in available_metrics:
+            raise ValueError(f"Choose {available_metrics}")
+        elif not target_rate in list(self.eff_summary[metric_name].keys()):
+            raise ValueError(f"Choose {list(self.eff_summary[metric_name].keys())}")
+
+        metric_across_ckpts = self.eff_summary[metric_name][target_rate]
+        return max(metric_across_ckpts.values())
+
+    def _plot(self, data: dict, name: str, mname: str, trate: float, plot_folder: Path):
         """Plot the efficiency per data set for an anomaly metric at target rate."""
         xlabel = (
-            f"efficiency at threshold: {trate} kHz\n"
+            f"{name} at threshold: {trate} kHz\n"
             f"anomaly score: {mname}"
         )
         ylabel = ' '
-        horizontal_bar.plot_yright(effs, effs, xlabel, ylabel, plot_folder)
+        horizontal_bar.plot_yright(data, data, xlabel, ylabel, plot_folder)
 
     def _store_summary(self, effs: dict, ckpt_name: str, metric: str, trate: float):
         """Store the summary statistic for the efficiency for one checkpoint.
@@ -179,109 +218,17 @@ class AnomalyEfficiencyCallback(Callback):
 
         eps = 1e-14
         summary_metric = mean**2/(var + eps)
-        ckpt_ds = ckpt_name.split("ds=")
-        if len(ckpt_ds) > 1:
-            ckpt_ds = ckpt_ds[1].split("__")[0]
-        else:
-            ckpt_ds = ckpt_ds[0]
+        ckpt_ds = utils.misc.get_ckpt_ds_name(ckpt_name)
 
         self.eff_summary[metric][trate][ckpt_ds] = summary_metric
 
-    def _log_plots_to_mlflow(self, trainer, ckpt_name: str, plot_folder: Path):
-        """Logs the plots generated by this callback to MLFlow."""
-        mlflow_logger = utils.mlflow.get_mlflow_logger(trainer)
-        if mlflow_logger is None:
-            return
-
-        arti_ckpt_dir = self._resolve_arti_dir(trainer, ckpt_name)
-        gallery_dir = arti_ckpt_dir.parent
-
-        # Log each image in the given plot_folder as an artifact.
-        IMG_EXTS = {".png", ".jpg", ".jpeg", ".gif", ".webp", ".svg"}
-        for img_path in sorted(plot_folder.glob('*')):
-            if img_path.suffix.lower() in IMG_EXTS and img_path.is_file():
-                mlflow_logger.experiment.log_artifact(
-                    run_id=mlflow_logger.run_id,
-                    local_path=str(img_path),
-                    artifact_path=str(arti_ckpt_dir),
-                )
-
-        # Generate an html gallery of the logs plots in the parent dir of the arti.
-        _ = utils.mlflow.make_gall(
-            mlflow_logger, plot_folder, gallery_dir, ckpt_name, 'index'
-        )
-
-    def _resolve_arti_dir(self, trainer, ckpt_name: str = None):
-        """Resolve the artifacts directory where the plots will be stored in mlflow."""
-        arti_dir = Path()
-        if trainer.strat_name:
-            arti_dir = arti_dir / trainer.strat_name / 'efficiencies'
-        if trainer.metric_name:
-            arti_dir = arti_dir / trainer.metric_name
-        if trainer.criterion_name:
-            arti_dir = arti_dir / trainer.criterion_name
-
-        if arti_dir == Path():
-            arti_dir = arti_dir / 'efficiencies'
-
-        if ckpt_name is None or ckpt_name in arti_dir.parts:
-            return arti_dir
-
-        return arti_dir / ckpt_name
-
-    def get_optimized_metric(self, metric_name: str, target_rate: float):
-        """Get one number that one should optimize on this callback."""
-        available_metrics = list(self.eff_summary.keys())
-        if not metric_name in available_metrics:
-            raise ValueError(
-                "Optimized metric name not in summary metrics. "
-                f"Choose between {available_metrics}"
-            )
-        elif not target_rate in list(self.eff_summary[metric_name].keys()):
-            raise ValueError(
-                "Optimized metric target rate not in summary metrics. "
-                f"Choose between {list(self.eff_summary[metric_name].keys())}"
-            )
-
-        metric_across_ckpts = self.eff_summary[metric_name][target_rate]
-        return max(metric_across_ckpts.values())
-
-    def plot_summary_reset(self, trainer, root_folder: Path):
-        """Plot the summary metrics accummulated in eff_summary and reset this attr."""
-        plot_folder = root_folder / 'plots'
-        plot_folder.mkdir(parents=True, exist_ok=True)
-        with open(plot_folder / 'summary.pkl', 'wb') as f:
-            plain_dict = self._to_dict(self.eff_summary)
+    def _cache_summary(self, cache_folder: Path):
+        """Cache the summary metric dictionary."""
+        with open(cache_folder / 'summary.pkl', 'wb') as f:
+            plain_dict = utils.misc.to_plain_dict(self.eff_summary)
             pickle.dump(plain_dict, f, protocol=pickle.HIGHEST_PROTOCOL)
 
-        for metric_name in self.eff_summary.keys():
-            for target_rate in self.eff_summary[metric_name].keys():
-                # Get the summary metric per checkpoint.
-                smet = self.eff_summary[metric_name][target_rate]
-                xlabel = (
-                    f"mu^2/sigma at threshold: {target_rate} kHz\n"
-                    f"anomaly score: {metric_name}"
-                )
-                ylabel = ' '
-                horizontal_bar.plot_yright(smet, smet, xlabel, ylabel, plot_folder)
-
-        mlflow_logger = utils.mlflow.get_mlflow_logger(trainer)
-        if mlflow_logger is None:
-            return
-
-        arti_dir = self._resolve_arti_dir(trainer)
-        IMG_EXTS = {".png", ".jpg", ".jpeg", ".gif", ".webp", ".svg"}
-        for img_path in sorted(plot_folder.glob('*')):
-            if img_path.suffix.lower() in IMG_EXTS and img_path.is_file():
-                mlflow_logger.experiment.log_artifact(
-                    run_id=mlflow_logger.run_id,
-                    local_path=str(img_path),
-                    artifact_path=str(arti_dir),
-                )
-
-        self.eff_summary.clear()
-
-    def _to_dict(self, d):
-        if isinstance(d, defaultdict):
-            return {k: self._to_dict(v) for k, v in d.items()}
-        return d
+    def _get_dsname(self, rate_name: str):
+        """Retrieves the data set name from string specifying rate name."""
+        dataset_name = rate_name.split('/')[0]
+        return dataset_name

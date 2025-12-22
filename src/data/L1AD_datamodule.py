@@ -31,6 +31,7 @@ class L1ADDataModule(LightningDataModule):
         data_mlready: "L1DataMLReady",
         data_awkward2torch: "L1DataAwkward2Torch",
         train_features: dict,
+        l1_scales: dict,
         batch_size: int = 16384,
         val_batches: int = -1,
         seed: int = 42
@@ -64,6 +65,8 @@ class L1ADDataModule(LightningDataModule):
         self.aux_val, self.aux_val_labels = None, None
         self.aux_test, self.aux_test_labels = None, None
 
+        self.l1_scales = l1_scales
+        self.normalizer = None
         self.shuffler = np.random.default_rng(seed=seed)
 
     def prepare_data(self) -> None:
@@ -79,9 +82,8 @@ class L1ADDataModule(LightningDataModule):
         self.hparams.data_processor.process("signal")
 
         log.info(Back.GREEN + "Splitting data into train, val, test and normalizing...")
-        self.hparams.data_mlready.prepare(
-            self.hparams.data_normalizer, self.hparams.train_features
-        )
+        self.normalizer = self.hparams.data_normalizer
+        self.hparams.data_mlready.prepare(self.normalizer, self.hparams.train_features)
         self.main_cache_folder = self.hparams.data_mlready.cache_folder
 
     def setup(self, stage: str = None) -> None:

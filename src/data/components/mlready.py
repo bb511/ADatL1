@@ -97,6 +97,7 @@ class L1DataMLReady:
 
             obj_dataset = pyarrow.dataset.dataset(file_paths, format='parquet')
             self._cache_train_data(obj_dataset, obj_name, itrain)
+            self._load_norm_params(obj_name)
             self._cache_valid_data(obj_dataset, obj_name, ivalid)
             self._cache_test_data(obj_dataset, obj_name, itest)
 
@@ -159,7 +160,6 @@ class L1DataMLReady:
         valid_folder = self.cache_folder / 'valid' / self.flag
         valid_folder.mkdir(parents=True, exist_ok=True)
         cache_file = valid_folder / f'{obj_name}.parquet'
-        self._load_norm_params(obj_name)
         if self._check_data_exists(cache_file):
             self._valid_data_exists += 1
             return
@@ -179,7 +179,6 @@ class L1DataMLReady:
         test_folder = self.cache_folder / 'test' / self.flag
         test_folder.mkdir(parents=True, exist_ok=True)
         cache_file = test_folder / f'{obj_name}.parquet'
-        self._load_norm_params(obj_name)
         if self._check_data_exists(cache_file):
             self._test_data_exists += 1
             return
@@ -264,7 +263,6 @@ class L1DataMLReady:
         valid_folder = cache_dir / 'valid' / self.flag
         valid_folder.mkdir(parents=True, exist_ok=True)
         cache_file = valid_folder / f'{obj_name}.parquet'
-        self._load_norm_params(obj_name)
         if self._check_data_exists(cache_file):
             self._aux_data_exists.append(cache_dir.stem)
             return
@@ -283,7 +281,6 @@ class L1DataMLReady:
         test_folder = cache_dir / 'test' / self.flag
         test_folder.mkdir(parents=True, exist_ok=True)
         cache_file = test_folder / f'{obj_name}.parquet'
-        self._load_norm_params(obj_name)
         if self._check_data_exists(cache_file):
             self._aux_data_exists.append(cache_dir.stem)
             return

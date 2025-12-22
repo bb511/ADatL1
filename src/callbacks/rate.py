@@ -4,7 +4,7 @@ from collections import defaultdict
 import torch
 from pytorch_lightning.callbacks import Callback
 
-from src.callbacks.metrics.rate import AnomalyCounter
+from src.callbacks.metrics.rate import AnomalyRate
 
 
 class AnomalyRateCallback(Callback):
@@ -31,6 +31,7 @@ class AnomalyRateCallback(Callback):
 
         # Check if 'main_val' dataset is the first dataset in the validation dictionary.
         # This is required to compute the rate thresholds on the anomaly scores.
+        self.device = pl_module.device
         first_val_dset_key = list(trainer.val_dataloaders.keys())[0]
         if first_val_dset_key != "main_val":
             raise ValueError("Rate callback requires main_val first in the val dict!")
@@ -89,7 +90,7 @@ class AnomalyRateCallback(Callback):
         mainval data should return the rate for which this threshold was computed.
         """
         for target_rate in self.target_rates:
-            rate = AnomalyCounter(target_rate, self.bc_rate).to(self.device)
+            rate = AnomalyRate(target_rate, self.bc_rate).to(self.device)
             rate.set_threshold(self.mainval_score_data[mname])
             rate.update(self.mainval_score_data[mname])
             rate_name = f"{mname.replace('/', '_')}_rate{target_rate}"
@@ -103,7 +104,7 @@ class AnomalyRateCallback(Callback):
         the rate on the other data sets differing from main_val.
         """
         for target_rate in self.target_rates:
-            rate = AnomalyCounter(target_rate, self.bc_rate).to(self.device)
+            rate = AnomalyRate(target_rate, self.bc_rate).to(self.device)
             rate.set_threshold(self.mainval_score_data[mname])
 
             rate_name = f"{mname.replace('/', '_')}_rate{target_rate}"

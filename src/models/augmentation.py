@@ -2,6 +2,8 @@ import torch
 from torch import nn
 
 from src.models.utils import RandomNumberGenerator
+from src.data.components.normalization import L1DataNormalizer
+
 
 class FastFeatureBlur(nn.Module):
     """
@@ -53,45 +55,49 @@ class FastObjectMask(nn.Module):
         return x * mask
 
 
-
 class FastLorentzRotation(nn.Module):
     """
     Applies a random rotation to the phi angles of input features with given probability.
 
     :param p: Probability of applying the rotation to each batch item
-    :param norm_scale: Normalization scale factors
-    :param norm_bias: Normalization bias values
-    :param phi_indices: Indices of phi angles in the feature vector
+    :param normalizer: Normalizer object used to initially normalize the data, used here
+        to denormalize it such that the augmentation can be applied.
+    :param phi_mask: Masks the indices corresponding to the phi angle of each object.
     """
 
-    def __init__(self, prob: float, norm_scale: torch.Tensor, norm_bias: torch.Tensor, phi_mask: torch.Tensor):
+    def __init__(
+        self,
+        prob: float,
+        normalizer: L1DataNormalizer,
+        phi_mask: torch.Tensor,
+        l1_scale_phi: torch.Tensor,
+    ):
         super().__init__()
         self.prob = prob
         self.rng = RandomNumberGenerator()
+        self.normalizer = normalizer
 
-        self.register_buffer(
-            "l1_scale",
-            torch.tensor([144] * 1 + [144] * 4 + [576] * 4 + [144] * 10) / (2 * torch.pi),
-        )
+        self.register_buffer("l1_scale_phi", l1_scale_phi)
         self.register_buffer("phi_mask", phi_mask)
-        self.register_buffer("scale", torch.where(~phi_mask, norm_scale, torch.tensor(1.0)))
-        self.register_buffer("bias", torch.where(~phi_mask, norm_bias, torch.tensor(0.0)))
 
     def forward(self, x: torch.Tensor):
         gen = self.rng.get_generator(x.device)
-        b = x.shape[0]
+        self.l1_scale_phi = self.l1_scale_phi.to(device=x.device)
 
+        b = x.shape[0]
         bool_mask = (torch.rand(b, device=x.device, generator=gen) < self.prob).float()
 
-        original_phi = (x * self.scale + self.bias)[:, self.phi_mask]
-        original_phi = original_phi / self.l1_scale
+        augm_x = self.normalizer.denorm_1d_tensor(x.clone())
+        raw_phi = augm_x[:, self.phi_mask]
 
+        raw_phi = raw_phi * self.l1_scale_phi
         rotation = (torch.rand(b, device=x.device, generator=gen) * 2 * torch.pi)[:, None]
-        rotated_phi = torch.remainder(original_phi + rotation, 2 * torch.pi) * self.l1_scale
+        rotated_phi = torch.remainder(raw_phi + rotation, 2 * torch.pi)
+        rotated_phi = rotated_phi / self.l1_scale_phi
+        raw_phi = raw_phi / self.l1_scale_phi
 
-        result = x.clone()
-        result[:, self.phi_mask] = (
-            (bool_mask[:, None] * rotated_phi + (1 - bool_mask[:, None]) * original_phi).float()
-            - self.bias[self.phi_mask]
-        ) / self.scale[self.phi_mask]
-        return result
+        augm_x[:, self.phi_mask] = (
+            bool_mask[:, None] * rotated_phi + (1 - bool_mask[:, None]) * raw_phi
+        ).float()
+
+        return self.normalizer.norm_1d_tensor(augm_x)

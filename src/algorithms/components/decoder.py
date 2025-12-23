@@ -3,7 +3,7 @@ from typing import Optional, List, Callable
 
 import torch
 
-from src.models.mlp import MLP
+from src.algorithms.components.mlp import MLP
 
 
 class Decoder(MLP):

@@ -1,15 +1,17 @@
 # Template VAE configuration.
 defaults:
-  - /model/encoder@encoder
-  - /model/decoder@decoder
   - _self_
 
 _target_: src.algorithms.vae.VAE
 features: null
 
 encoder:
-  _target_: src.models.encoder.VariationalEncoder
+  _target_: src.algorithms.components.encoder.VariationalEncoder
   nodes: [57, 28, 16, 8] # 57 input features, 8 latent features
+
+decoder:
+  _target_: src.algorithms.components.decoder.Decoder
+  nodes: [8, 24, 32, 64, 128, 57] # v4 axol1tl architecture
 
 loss:
   _target_: src.losses.vae.ClassicVAELoss

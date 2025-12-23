@@ -1,2 +1,0 @@
-_target_: src.models.encoder.Encoder
-nodes: [57, 28, 16, 8] # 57 input features, 8 latent features

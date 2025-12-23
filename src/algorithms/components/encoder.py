@@ -4,7 +4,7 @@ from typing import Optional, Callable
 import torch
 import torch.nn as nn
 
-from src.models.mlp import MLP
+from src.algorithms.components.mlp import MLP
 
 
 class Encoder(MLP):

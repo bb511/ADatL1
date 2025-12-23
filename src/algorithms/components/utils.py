@@ -1,7 +1,12 @@
+# Utilities for the components of the algorithms.
 import torch
 
 class RandomNumberGenerator:
-    """Implement.... finish this!"""
+    """Random number generator implementation.
+
+    Used primarly in the augmentation.py script to seed the augmenter layers in
+    different ways, such that two samples are not augmented in the same way.
+    """
 
     def __init__(self):
         self._seed: int | None = None

@@ -1,7 +1,7 @@
 import torch
 from torch import nn
 
-from src.models.utils import RandomNumberGenerator
+from src.algorithms.utils import RandomNumberGenerator
 from src.data.components.normalization import L1DataNormalizer
 
 

@@ -21,8 +21,8 @@ seed: 12345
 
 trainer:
   min_epochs: 1
-  max_epochs: 100
-  # limit_train_batches: 200
+  max_epochs: 1
+  limit_train_batches: 10
 
 test: true
 

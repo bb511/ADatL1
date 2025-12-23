@@ -15,8 +15,11 @@ from src.models.augmentation import FastLorentzRotation
 
 
 class VICReg(L1ADLightningModule):
-    """
-    Contrastive VAE.
+    """VICreg deep learning algorithm.
+
+    See https://arxiv.org/abs/2105.04906 for more details.
+    Used to generate an intermediate representation on which one can run the anomaly
+    detection algorithm of choice on.
 
     :param projector: Projection head module.
     :param feature_blur: Feature blur augmentation module.

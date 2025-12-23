@@ -1,2 +1,0 @@
-_target_: src.models.decoder.Decoder
-nodes: [8, 24, 32, 64, 128, 57] # v4 axol1tl architecture\

@@ -22,8 +22,13 @@ def plot(data: dict[dict], value_name: str, save_dir: Path):
     cols = list(data[rows[0]].keys())
 
     mat = np.array([[data[r][c] for c in cols] for r in rows], dtype=float)
+    n_rows, n_cols = mat.shape
 
-    fig, ax = plt.subplots(figsize=(16, 16), dpi=120)
+    cell_size = 0.6  # inches per cell (tune if desired)
+    fig_w = max(6, n_cols * cell_size)
+    fig_h = max(6, n_rows * cell_size)
+
+    fig, ax = plt.subplots(figsize=(fig_w, fig_h), dpi=120)
     im = ax.imshow(mat, aspect="auto", cmap="viridis")
 
     # axis labels
@@ -32,11 +37,14 @@ def plot(data: dict[dict], value_name: str, save_dir: Path):
     ax.set_xticklabels([str(c) for c in cols], rotation=90)
     ax.set_yticklabels([str(r) for r in rows])
 
-    n_rows, n_cols = mat.shape
+    ax.set_xticks(np.arange(-0.5, n_cols, 1), minor=True)
+    ax.set_yticks(np.arange(-0.5, n_rows, 1), minor=True)
+    ax.grid(which="minor", color="black", linestyle="-", linewidth=0.5)
+    ax.tick_params(which="minor", bottom=False, left=False)
 
     # Heuristic: scale font size with the grid size
-    fontsize = max(6, min(14, int(220 / max(n_rows, n_cols))))
-    fmt = "{:.2g}" if max(n_rows, n_cols) > 20 else "{:.3g}"
+    fontsize = max(6, min(12, int(180 / max(n_rows, n_cols))))
+    fmt = "{:.0f}"
 
     norm = im.norm
     for i in range(n_rows):
@@ -45,14 +53,16 @@ def plot(data: dict[dict], value_name: str, save_dir: Path):
             if np.isnan(val):
                 continue
 
-            # Contrast-aware text color
             txt_color = "white" if norm(val) < 0.6 else "black"
 
-            t = ax.text(
-                j, i, fmt.format(val),
-                ha="center", va="center",
+            ax.text(
+                j, i,
+                fmt.format(val),
+                ha="center",
+                va="center",
                 fontsize=fontsize,
                 color=txt_color,
+                clip_on=True,  # ensures nothing bleeds outside the axes
             )
 
 

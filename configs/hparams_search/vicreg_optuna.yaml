@@ -25,10 +25,10 @@ hydra:
 
     # storage URL to persist optimization results
     # for example, you can use SQLite if you set 'sqlite:///example.db'
-    storage: sqlite:///optuna_logs/optim_v3.db
+    storage: sqlite:///optuna_logs/optim_v1.db
 
     # name of the study to persist optimization results
-    study_name: vicreg_search_min_loss_v1
+    study_name: vicreg_search_v2
 
     # number of parallel workers
     n_jobs: 1

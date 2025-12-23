@@ -4,7 +4,7 @@ defaults:
   - override /data: axov6
   - override /algorithm: vae
   - override /callbacks: default
-  - override /trainer: gpu0
+  - override /trainer: cpu
   - override /evaluator: default
   - override /evaluator_callbacks: default
   - override /logger: mlflow

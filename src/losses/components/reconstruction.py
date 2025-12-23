@@ -7,10 +7,11 @@ from src.losses.components import L1ADLoss
 
 class ReconstructionLoss(L1ADLoss):
     """Reconstruction loss for VAE without reduction.
-    
+
     :param scale: Scaling factor for the loss.
     :param reduction: Reduction method to apply to the loss ("none", "mean", "sum").
     """
+
     name: str = "reco"
 
     def __init__(
@@ -21,16 +22,13 @@ class ReconstructionLoss(L1ADLoss):
         super().__init__(scale=scale, reduction=reduction)
 
     def forward(
-        self,
-        target: torch.Tensor,
-        reconstruction: torch.Tensor,
-        **kwargs
+        self, target: torch.Tensor, reconstruction: torch.Tensor, **kwargs
     ) -> torch.Tensor:
 
         mse_loss = F.mse_loss(target, reconstruction, reduction="none")
         mse_per_observation = torch.mean(mse_loss, dim=tuple(range(1, mse_loss.dim())))
         return self.scale * self.reduce(mse_per_observation)
-    
+
 
 class CylPtPzReconstructionLoss(ReconstructionLoss):
     """Convert the pT, eta, phi input into pT, pz and compute loss there.
@@ -39,10 +37,7 @@ class CylPtPzReconstructionLoss(ReconstructionLoss):
     """
 
     def forward(
-        self,
-        target: torch.Tensor,
-        reconstruction: torch.Tensor,
-        **kwargs
+        self, target: torch.Tensor, reconstruction: torch.Tensor, **kwargs
     ) -> torch.Tensor:
 
         # Indexes of where the pTs of the objects are, given the axo v4 input data.
@@ -62,8 +57,7 @@ class CylPtPzReconstructionLoss(ReconstructionLoss):
         pz_pred = pT_pred * torch.sinh(eta)
 
         loss_per_observation = torch.mean(
-            torch.abs(pT - pT_pred) + torch.abs(pz - pz_pred),
-            dim=1
+            torch.abs(pT - pT_pred) + torch.abs(pz - pz_pred), dim=1
         )
         loss_per_observation += torch.abs(MET_phi - MET_phi_pred)
 

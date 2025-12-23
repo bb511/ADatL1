@@ -21,8 +21,14 @@ class AnomalyRate(Metric):
         self.target_rate = target_rate
         self.bc_rate = bc_rate
 
-        self.add_state("ntriggered", default=torch.tensor(0, dtype=torch.long), dist_reduce_fx="sum")
-        self.add_state("nsamples", default=torch.tensor(0, dtype=torch.long), dist_reduce_fx="sum")
+        self.add_state(
+            "ntriggered",
+            default=torch.tensor(0, dtype=torch.long),
+            dist_reduce_fx="sum",
+        )
+        self.add_state(
+            "nsamples", default=torch.tensor(0, dtype=torch.long), dist_reduce_fx="sum"
+        )
 
     def set_threshold(self, bkg_score: torch.Tensor) -> None:
         """Get the score threshold for a certain rate to determine anomalies.
@@ -42,9 +48,9 @@ class AnomalyRate(Metric):
         self.nsamples += anomaly_score.numel()
 
     def compute(self, quantity: str) -> torch.Tensor:
-        if quantity == 'rate':
+        if quantity == "rate":
             return self.ntriggered.float() * self.bc_rate / self.nsamples
-        elif quantity == 'efficiency':
+        elif quantity == "efficiency":
             return self.ntriggered.float() / self.nsamples
         else:
             raise ValueError(f"{quantity} is not a valid quantity to compute!")

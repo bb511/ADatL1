@@ -24,10 +24,7 @@ class GradientPenaltyLoss(L1ADLoss):
         self.target_norm = target_norm
 
     def forward(
-        self,
-        target: torch.Tensor,
-        reconstruction: torch.Tensor,
-        **kwargs
+        self, target: torch.Tensor, reconstruction: torch.Tensor, **kwargs
     ) -> torch.Tensor:
         B = target.shape[0]
 
@@ -59,6 +56,6 @@ class GradientPenaltyLoss(L1ADLoss):
         if grads is None:
             return self.scale * self.reduce(zeros_per_sample())
 
-        grad_norm = grads.view(B, -1).norm(2, dim=1)          
-        penalty  = (grad_norm - self.target_norm).pow(2) 
+        grad_norm = grads.view(B, -1).norm(2, dim=1)
+        penalty = (grad_norm - self.target_norm).pow(2)
         return self.scale * self.reduce(penalty)

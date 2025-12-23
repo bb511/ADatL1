@@ -32,10 +32,7 @@ class SVDDLoss(L1ADLoss):
             self.register_buffer("radius", torch.tensor(1.0))
 
     def forward(
-        self,
-        distances: torch.Tensor,
-        z: torch.Tensor,
-        **kwargs
+        self, distances: torch.Tensor, z: torch.Tensor, **kwargs
     ) -> torch.Tensor:
 
         if self.soft_boundary:
@@ -45,7 +42,9 @@ class SVDDLoss(L1ADLoss):
 
             # Update radius (with gradient detached)
             with torch.no_grad():
-                self.radius = torch.quantile(torch.sqrt(distances), 1 - self.nu).to(self.radius.device)
+                self.radius = torch.quantile(torch.sqrt(distances), 1 - self.nu).to(
+                    self.radius.device
+                )
 
             loss = loss.expand(distances.shape[0])
 

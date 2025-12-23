@@ -14,7 +14,7 @@ def plot(data: dict, xlabel: str, ylabel: str, title: str, save_dir: Path):
     """
     plt.style.use(hep.style.CMS)
 
-    fig, ax = plt.subplots(figsize=(6,6), dpi=60)
+    fig, ax = plt.subplots(figsize=(6, 6), dpi=60)
 
     x = list(data.keys())
     y = list(data.values())
@@ -25,7 +25,7 @@ def plot(data: dict, xlabel: str, ylabel: str, title: str, save_dir: Path):
     ax.set_title(f"{title}")
 
     ax.ticklabel_format(
-        axis='x', style="sci", scilimits=(-2, 2), useMathText=True, useOffset=False
+        axis="x", style="sci", scilimits=(-2, 2), useMathText=True, useOffset=False
     )
     ax.ticklabel_format(
         axis="y", style="sci", scilimits=(-2, 2), useMathText=True, useOffset=False
@@ -36,7 +36,7 @@ def plot(data: dict, xlabel: str, ylabel: str, title: str, save_dir: Path):
 
     filename = sanitize_filename(f"{title}_{xlabel}_{ylabel}")
     filename = filename.replace(" ", "_")
-    fig.savefig(save_dir / f"{filename}.jpg", bbox_inches='tight')
+    fig.savefig(save_dir / f"{filename}.jpg", bbox_inches="tight")
     fig.clear()
     plt.close(fig)
 
@@ -48,12 +48,12 @@ def plot_connected(data: dict, xlabel: str, ylabel: str, title: str, save_dir: P
     """
     plt.style.use(hep.style.CMS)
 
-    fig, ax = plt.subplots(figsize=(6,6), dpi=60)
+    fig, ax = plt.subplots(figsize=(6, 6), dpi=60)
 
     x = list(data.keys())
     y = list(data.values())
 
-    ax.plot(x, y, marker='o', linewidth=1.5)
+    ax.plot(x, y, marker="o", linewidth=1.5)
     ax.set_xlabel(xlabel)
     ax.set_ylabel(ylabel)
     ax.set_title(f"{title}")
@@ -64,6 +64,6 @@ def plot_connected(data: dict, xlabel: str, ylabel: str, title: str, save_dir: P
 
     filename = sanitize_filename(f"{title}_{xlabel}_{ylabel}")
     filename = filename.replace(" ", "_")
-    fig.savefig(save_dir / f"{filename}.jpg", bbox_inches='tight')
+    fig.savefig(save_dir / f"{filename}.jpg", bbox_inches="tight")
     fig.clear()
     plt.close(fig)

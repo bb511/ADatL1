@@ -1,6 +1,7 @@
 # Utilities for the components of the algorithms.
 import torch
 
+
 class RandomNumberGenerator:
     """Random number generator implementation.
 
@@ -21,7 +22,7 @@ class RandomNumberGenerator:
     def get_generator(self, device: torch.device) -> torch.Generator:
         if self._seed is None:
             raise RuntimeError("RNG seed not set.")
-        
+
         if self._gen is None or self._gen_device != device:
             self._gen = torch.Generator(device=device)
             self._gen.manual_seed(self._seed)

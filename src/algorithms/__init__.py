@@ -18,7 +18,7 @@ class L1ADLightningModule(LightningModule):
         loss: nn.Module,
         optimizer: optim.Optimizer,
         scheduler: Optional[DictConfig] = None,
-        masking: Optional[nn.Module] = None
+        masking: Optional[nn.Module] = None,
     ):
         super().__init__()
         self.loss = loss
@@ -64,7 +64,7 @@ class L1ADLightningModule(LightningModule):
             logger=True,
             sync_dist=True,
             add_dataloader_idx=False,
-            batch_size=len(batch)
+            batch_size=len(batch),
         )
         return outdict
 
@@ -80,7 +80,7 @@ class L1ADLightningModule(LightningModule):
             logger=True,
             sync_dist=True,
             add_dataloader_idx=False,
-            batch_size=len(batch)
+            batch_size=len(batch),
         )
         return outdict
 

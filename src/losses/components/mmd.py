@@ -46,7 +46,7 @@ class MMDLoss(L1ADLoss):
         """Compute kernel matrix between x and y."""
         if self.kernel == "rbf":
             dist = torch.cdist(x, y, p=2)
-            return torch.exp(-dist.pow(2) / (2 * self.kernel_bandwidth ** 2))
+            return torch.exp(-dist.pow(2) / (2 * self.kernel_bandwidth**2))
         elif self.kernel == "linear":
             return torch.mm(x, y.t())
         elif self.kernel == "poly":
@@ -130,16 +130,18 @@ class MMDLoss(L1ADLoss):
         if self.prior == "gaussian":
             z_prior = torch.randn_like(z_mean, device=device_for_mmd)
         elif self.prior == "uniform":
-            z_prior = (torch.rand_like(z_mean, device=device_for_mmd) - 0.5) * 2 * torch.sqrt(
-                torch.tensor(3.0, device=device_for_mmd)
+            z_prior = (
+                (torch.rand_like(z_mean, device=device_for_mmd) - 0.5)
+                * 2
+                * torch.sqrt(torch.tensor(3.0, device=device_for_mmd))
             )
         else:
             raise ValueError(f"Unknown prior: {self.prior}")
 
         # Blockwise sums
-        k_zz_offdiag = self._self_kernel_sum_offdiag(z_mean)        # sum_{i!=j} k(z_i,z_j)
-        k_pp_offdiag = self._self_kernel_sum_offdiag(z_prior)       # sum_{i!=j} k(p_i,p_j)
-        k_zp_sum     = self._cross_kernel_sum(z_mean, z_prior)      # sum_{i,j} k(z_i,p_j)
+        k_zz_offdiag = self._self_kernel_sum_offdiag(z_mean)  # sum_{i!=j} k(z_i,z_j)
+        k_pp_offdiag = self._self_kernel_sum_offdiag(z_prior)  # sum_{i!=j} k(p_i,p_j)
+        k_zp_sum = self._cross_kernel_sum(z_mean, z_prior)  # sum_{i,j} k(z_i,p_j)
 
         b = float(batch_size)
 

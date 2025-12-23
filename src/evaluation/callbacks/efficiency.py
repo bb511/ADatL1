@@ -36,7 +36,7 @@ class AnomalyEfficiencyCallback(Callback):
         target_rates: list[int],
         bc_rate: int,
         metric_names: list[str],
-        skip_ds: list[str] = []
+        skip_ds: list[str] = [],
     ):
         super().__init__()
         self.device = None
@@ -141,7 +141,7 @@ class AnomalyEfficiencyCallback(Callback):
         """Log the anomaly rates computed on each of the data sets."""
         ckpts_dir = Path(pl_module._ckpt_path).parent
         ckpt_name = Path(pl_module._ckpt_path).stem
-        plot_folder = ckpts_dir / 'plots' / ckpt_name / 'efficiencies'
+        plot_folder = ckpts_dir / "plots" / ckpt_name / "efficiencies"
         plot_folder.mkdir(parents=True, exist_ok=True)
 
         for metric_name in self.metric_names:
@@ -149,21 +149,21 @@ class AnomalyEfficiencyCallback(Callback):
                 # Construct eff per data set for specific metric name and target rate.
                 relevant_rate_name = f"{metric_name.replace('/', '_')}_eff{target_rate}"
                 effs = {
-                    self._get_dsname(rate_name): val.compute('efficiency').item()
+                    self._get_dsname(rate_name): val.compute("efficiency").item()
                     for rate_name, val in self.rates.items()
                     if relevant_rate_name in rate_name
                     and not self._get_dsname(rate_name) in self.skip_ds
                 }
-                self._plot(effs, 'efficiency', metric_name, target_rate, plot_folder)
+                self._plot(effs, "efficiency", metric_name, target_rate, plot_folder)
                 self._store_summary(effs, ckpt_name, metric_name, target_rate)
 
         utils.mlflow.log_plots_to_mlflow(
-            trainer, ckpt_name, 'effs', plot_folder, make_gallery=True
+            trainer, ckpt_name, "effs", plot_folder, make_gallery=True
         )
 
     def plot_summary(self, trainer, root_folder: Path):
         """Plot the summary metrics accummulated in eff_summary and reset this attr."""
-        plot_folder = root_folder / 'plots'
+        plot_folder = root_folder / "plots"
         plot_folder.mkdir(parents=True, exist_ok=True)
         self._cache_summary(plot_folder)
 
@@ -171,9 +171,9 @@ class AnomalyEfficiencyCallback(Callback):
             for target_rate in self.eff_summary[metric_name].keys():
                 # Get the summary metric per checkpoint.
                 smet = self.eff_summary[metric_name][target_rate]
-                self._plot(smet, 'mu^2/sigma', metric_name, target_rate, plot_folder)
+                self._plot(smet, "mu^2/sigma", metric_name, target_rate, plot_folder)
 
-        utils.mlflow.log_plots_to_mlflow(trainer, None, 'effs', plot_folder)
+        utils.mlflow.log_plots_to_mlflow(trainer, None, "effs", plot_folder)
 
     def clear_crit_summary(self):
         self.eff_summary.clear()
@@ -195,11 +195,8 @@ class AnomalyEfficiencyCallback(Callback):
 
     def _plot(self, data: dict, name: str, mname: str, trate: float, plot_folder: Path):
         """Plot the efficiency per data set for an anomaly metric at target rate."""
-        xlabel = (
-            f"{name} at threshold: {trate} kHz\n"
-            f"anomaly score: {mname}"
-        )
-        ylabel = ' '
+        xlabel = f"{name} at threshold: {trate} kHz\n" f"anomaly score: {mname}"
+        ylabel = " "
         horizontal_bar.plot_yright(data, data, xlabel, ylabel, plot_folder)
 
     def _store_summary(self, effs: dict, ckpt_name: str, metric: str, trate: float):
@@ -217,18 +214,18 @@ class AnomalyEfficiencyCallback(Callback):
         var = data.var()
 
         eps = 1e-14
-        summary_metric = mean**2/(var + eps)
+        summary_metric = mean**2 / (var + eps)
         ckpt_ds = utils.misc.get_ckpt_ds_name(ckpt_name)
 
         self.eff_summary[metric][trate][ckpt_ds] = summary_metric
 
     def _cache_summary(self, cache_folder: Path):
         """Cache the summary metric dictionary."""
-        with open(cache_folder / 'summary.pkl', 'wb') as f:
+        with open(cache_folder / "summary.pkl", "wb") as f:
             plain_dict = utils.misc.to_plain_dict(self.eff_summary)
             pickle.dump(plain_dict, f, protocol=pickle.HIGHEST_PROTOCOL)
 
     def _get_dsname(self, rate_name: str):
         """Retrieves the data set name from string specifying rate name."""
-        dataset_name = rate_name.split('/')[0]
+        dataset_name = rate_name.split("/")[0]
         return dataset_name

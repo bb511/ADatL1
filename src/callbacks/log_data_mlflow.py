@@ -10,6 +10,7 @@ from .utils import mlflow_plot_gallery
 
 from src.utils import pylogger
 from colorama import Fore, Back, Style
+
 log = pylogger.RankedLogger(__name__)
 
 
@@ -20,6 +21,7 @@ class LogDataInfoMlFlow(Callback):
     in MLFlow. The data is logged at each step, i.e., extraction, processing, mlready.
     See the data module for more details about what each of these steps does.
     """
+
     def __init__(self):
         super().__init__()
 
@@ -50,7 +52,7 @@ class LogDataInfoMlFlow(Callback):
 
     def _setup_data_paths(self, trainer: Trainer):
         """Get the paths to where plots of the data have been saved."""
-        data_module = getattr(trainer, 'datamodule', None)
+        data_module = getattr(trainer, "datamodule", None)
         if data_module is None:
             raise ValueError(Fore.RED + "Data module not found in trainer!")
 
@@ -58,16 +60,16 @@ class LogDataInfoMlFlow(Callback):
 
     def _log_data_distriubtions(self, mlflow_logger: MLFlowLogger) -> None:
         """Log the input data distributions plotted with the data module."""
-        mlready_data_plot_paths = self.mlready_path.rglob('PLOTS')
+        mlready_data_plot_paths = self.mlready_path.rglob("PLOTS")
         run_id = mlflow_logger.run_id
 
         for path in mlready_data_plot_paths:
             arti_path = path.relative_to(self.mlready_path)
-            arti_path = 'data' / arti_path.parent
+            arti_path = "data" / arti_path.parent
             mlflow_logger.experiment.log_artifact(run_id, path, artifact_path=arti_path)
 
             html_gallery = mlflow_plot_gallery.build_html(path)
-            gallery_path = arti_path / 'PLOTS'
+            gallery_path = arti_path / "PLOTS"
             mlflow_logger.experiment.log_text(
-                run_id, html_gallery, artifact_file=gallery_path / 'index.html'
+                run_id, html_gallery, artifact_file=gallery_path / "index.html"
             )

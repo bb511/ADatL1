@@ -27,7 +27,7 @@ def log_plots_to_mlflow(
 
     # Log each image in the given plot_folder as an artifact.
     IMG_EXTS = {".png", ".jpg", ".jpeg", ".gif", ".webp", ".svg"}
-    for img_path in sorted(plot_folder.glob('*')):
+    for img_path in sorted(plot_folder.glob("*")):
         if img_path.suffix.lower() in IMG_EXTS and img_path.is_file():
             mlflow_logger.experiment.log_artifact(
                 run_id=mlflow_logger.run_id,
@@ -37,7 +37,7 @@ def log_plots_to_mlflow(
 
     # Generate an html gallery of the logs plots in the parent dir of the arti.
     if make_gallery:
-        _ = make_gall(mlflow_logger, plot_folder, gallery_dir, ckpt_name, 'index')
+        _ = make_gall(mlflow_logger, plot_folder, gallery_dir, ckpt_name, "index")
 
 
 def get_mlflow_logger(trainer) -> MLFlowLogger:
@@ -74,9 +74,9 @@ def make_gall(
     image_paths = get_image_paths(plots_dir, sec_name)
 
     # Check if index file already exists.
-    index_exists = check_html_exists(mlflow_logger, gallery_dir, f'{fname}.html')
+    index_exists = check_html_exists(mlflow_logger, gallery_dir, f"{fname}.html")
     if index_exists:
-        html_page = get_html_page(mlflow_logger, gallery_dir, f'{fname}.html')
+        html_page = get_html_page(mlflow_logger, gallery_dir, f"{fname}.html")
     else:
         html_page = generate_gallery_header()
 
@@ -84,7 +84,7 @@ def make_gall(
     html_page = "\n".join(html_page)
 
     mlflow_logger.experiment.log_text(
-        mlflow_logger.run_id, html_page, artifact_file=gallery_dir / f'{fname}.html'
+        mlflow_logger.run_id, html_page, artifact_file=gallery_dir / f"{fname}.html"
     )
 
     return html_page
@@ -149,7 +149,6 @@ def generate_gallery_header():
         "#lightbox img{max-width:96vw;max-height:92vh;box-shadow:0 0 15px #000;border-radius:4px}",
         "#lightbox-close{position:absolute;top:12px;right:20px;color:white;font-size:28px;cursor:pointer;font-weight:bold}",
         "</style>",
-
         "<script>",
         "function openLightbox(src){",
         "  const lb = document.getElementById('lightbox');",
@@ -163,13 +162,11 @@ def generate_gallery_header():
         "  if(e.key === 'Escape') closeLightbox();",
         "});",
         "</script>",
-
         # Lightbox markup
         "<div id='lightbox' onclick='closeLightbox()'>",
         "  <span id='lightbox-close' onclick='closeLightbox()'>&times;</span>",
         "  <img id='lightbox-img' src='' onclick='event.stopPropagation()'>",
         "</div>",
-
         f"<h1>PLOTS</h1>",
     ]
 
@@ -177,7 +174,7 @@ def generate_gallery_header():
 
 
 def write_gallery_section(
-     mlflow_logger: Logger, section: str, image_paths: list[Path, ...]
+    mlflow_logger: Logger, section: str, image_paths: list[Path, ...]
 ) -> list[str, ...]:
     """Write a section of the index html file generated in build_html.
 

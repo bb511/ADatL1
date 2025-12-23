@@ -9,6 +9,7 @@ class Criterion(object):
 
     Checkpoint top k models that best fulfill the criterion.
     """
+
     def __init__(self, top_k: int = 1):
         self._validate_topk(top_k)
         self.top_k_values = np.empty(top_k)
@@ -21,16 +22,18 @@ class Criterion(object):
         """Check if given topk is a positive number larger than 0."""
         if top_k <= 0:
             raise ValueError(
-                f"top_k in the criterion of the checkpoint callback needs to be " +
-                f"strictly larger than 0. Given value is {top_k}."
+                f"top_k in the criterion of the checkpoint callback needs to be "
+                + f"strictly larger than 0. Given value is {top_k}."
             )
+
 
 class Min(Criterion):
     """Save checkpoint for minimum k values of the metric."""
+
     def __init__(self, top_k: int):
         super().__init__(top_k=top_k)
         self.top_k_values.fill(np.inf)
-        self.name = 'min'
+        self.name = "min"
 
     def check(self, metric_value: float) -> bool:
         # Get all top k values that are higher then the current value.
@@ -47,10 +50,11 @@ class Min(Criterion):
 
 class Max(Criterion):
     """Save checkpoint for maximum k values of the metric."""
+
     def __init__(self, top_k: int):
         super().__init__(top_k=top_k)
         self.top_k_values.fill(-np.inf)
-        self.name = 'max'
+        self.name = "max"
 
     def check(self, metric_value: float) -> bool:
         # Get all top k values that are lower then the current value.
@@ -73,10 +77,11 @@ class Stable(Criterion):
     :patience: How many epochs to track the stability across, i.e., for how many epochs
         should the metric stay within threshold.
     """
+
     def __init__(self, top_k: int, threshold: float, patience: int):
         super().__init__(top_k=top_k)
         self.top_k_values.fill(np.inf)
-        self.name = 'stable'
+        self.name = "stable"
 
         self.threshold = threshold
         self.patience = patience
@@ -109,7 +114,7 @@ class Stable(Criterion):
     def _increase_count(self, metric_value: float):
         """Increase the count for how many epochs the tracked metric has been stable."""
         self.epoch_counter += 1
-        self.accummulated_deviation += (metric_value - self.reference_value)**2
+        self.accummulated_deviation += (metric_value - self.reference_value) ** 2
 
     def _reset_count(self):
         """Reset the counting of stable epochs."""
@@ -132,16 +137,16 @@ class Stable(Criterion):
         above_one = self.threshold >= 1
         if below_zero or above_one:
             raise ValueError(
-                f"Threshold given in stability checkpoint callback needs to be " +
-                f"between 0 and 1. Given value is {self.threshold}"
+                f"Threshold given in stability checkpoint callback needs to be "
+                + f"between 0 and 1. Given value is {self.threshold}"
             )
 
     def _validate_patience(self):
         """Check if the given patience is a positive integer."""
         if self.patience <= 0:
             raise ValueError(
-                f"Patience given in stability checkpoint callback needs to be a " +
-                f"number strictly larger than 0. Given value is {self.patience}."
+                f"Patience given in stability checkpoint callback needs to be a "
+                + f"number strictly larger than 0. Given value is {self.patience}."
             )
 
 
@@ -150,7 +155,7 @@ class Last(Criterion):
 
     def __init__(self, top_k: int = 1):
         self.top_k_values = np.empty(1)
-        self.name = 'last'
+        self.name = "last"
 
     def check(self, metric_value: float) -> bool:
         self.top_k_values[0] = metric_value

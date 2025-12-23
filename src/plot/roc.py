@@ -17,7 +17,7 @@ def plot(roc: dict, auroc: dict, metric: str, save_dir: Path):
     plt.style.use(hep.style.CMS)
 
     for ds_name in roc.keys():
-        fig, ax = plt.subplots(figsize=(6,6), dpi=60)
+        fig, ax = plt.subplots(figsize=(6, 6), dpi=60)
         fpr, tpr, thresh = roc[ds_name]
         auc = auroc[ds_name]
         ax.plot(fpr, tpr, label=f"{metric}\n AUC = {auc:.3f}")
@@ -30,6 +30,6 @@ def plot(roc: dict, auroc: dict, metric: str, save_dir: Path):
 
         filename = sanitize_filename(f"{ds_name}_{metric}")
         filename = filename.replace(" ", "_")
-        fig.savefig(save_dir / f"{filename}.jpg", bbox_inches='tight')
+        fig.savefig(save_dir / f"{filename}.jpg", bbox_inches="tight")
         fig.clear()
         plt.close(fig)

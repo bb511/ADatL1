@@ -14,6 +14,7 @@ from pytorch_lightning.callbacks import Callback
 from colorama import Fore, Back, Style
 
 from src.utils import pylogger
+
 log = pylogger.RankedLogger(__name__)
 
 from src.utils.checkpoints import is_valid_ckpt
@@ -84,7 +85,7 @@ class Evaluator:
             if self.ckpts[strategy_name] is None or self.ckpts[strategy_name] is False:
                 continue
 
-            if strategy_name == 'last':
+            if strategy_name == "last":
                 self.evaluate_last(run_folder, model, test_loader)
                 continue
 
@@ -159,11 +160,9 @@ class Evaluator:
         """
         log.info(f"-> -> -> -> Evaluating checkpoint at {ckpt_path}.")
 
-        state_dict = torch.load(
-            ckpt_path,
-            weights_only=False,
-            map_location='cpu'
-        )['state_dict']
+        state_dict = torch.load(ckpt_path, weights_only=False, map_location="cpu")[
+            "state_dict"
+        ]
         model.load_state_dict(state_dict, strict=True)
         model._ckpt_path = ckpt_path
 
@@ -173,8 +172,8 @@ class Evaluator:
     def evaluate_last(self, run_folder: Path, model, test_loaders):
         """Evaluate the checkpoint taken at the last epoch."""
         log.info(Fore.GREEN + f"-> Evaluating strategy 'last'")
-        self.evaluator.strat_name = 'last'
-        ckpt_path = run_folder / 'last.ckpt'
+        self.evaluator.strat_name = "last"
+        ckpt_path = run_folder / "last.ckpt"
         self.evaluate_ckpt(ckpt_path, model, test_loaders)
         self._get_optimized_metric(self.optimized_metric_config)
         self._make_criterion_summary_plots(run_folder)
@@ -211,9 +210,9 @@ class Evaluator:
         if optimized_metric_config is None:
             return
 
-        target_callback_name = optimized_metric_config['callback']['name']
-        target_callback_params = optimized_metric_config['callback']['params']
-        crit_optim_direction = optimized_metric_config['direction']
+        target_callback_name = optimized_metric_config["callback"]["name"]
+        target_callback_params = optimized_metric_config["callback"]["params"]
+        crit_optim_direction = optimized_metric_config["direction"]
 
         available_callbacks = {
             cb.__class__.__name__: cb for cb in self.evaluator.callbacks
@@ -248,7 +247,7 @@ class Evaluator:
         """
         # Make summary plots for callback across evaluated checkpoints.
         for cb in self.evaluator.callbacks:
-            method_name = 'plot_summary'
+            method_name = "plot_summary"
             summary_method = getattr(cb, method_name, None)
             if callable(summary_method):
                 summary_method(self.evaluator, plot_folder)

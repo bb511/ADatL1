@@ -9,7 +9,9 @@ from src.algorithms.components.mlp import MLP
 
 class Encoder(MLP):
     """Simple vanilla encoder, i.e., just an MLP."""
+
     pass
+
 
 class VariationalEncoder(nn.Module):
     """Simple variational encoder model.
@@ -29,10 +31,7 @@ class VariationalEncoder(nn.Module):
 
         # The encoder will be a MLP up to the last layer
         self.net = MLP(
-            nodes[:-1],
-            batchnorm=False,
-            init_weight=init_weight,
-            init_bias=init_bias
+            nodes[:-1], batchnorm=False, init_weight=init_weight, init_bias=init_bias
         )
 
         # Mean and log variance layers

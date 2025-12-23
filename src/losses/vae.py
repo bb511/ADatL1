@@ -11,6 +11,7 @@ from src.losses.components.kl import KLDivergenceLoss
 
 from src.utils import pylogger
 from colorama import Fore, Back, Style
+
 log = pylogger.RankedLogger(__name__)
 
 
@@ -23,6 +24,7 @@ class ClassicVAELoss(L1ADLoss):
         separate loss functions return loss values per event. This is then aggregated
         by computing the mean over the batch, or the sum.
     """
+
     def __init__(self, scale: float, reduct: Literal["none", "mean", "sum"] = "none"):
         super().__init__(scale=scale, reduction=reduct)
         self.reco_scale = 1 - self.scale
@@ -54,12 +56,15 @@ class AxoV4Loss(ClassicVAELoss):
     in the torch Tensor that the loss function receives. Hence, THIS IS ONLY USABLE
     WITH A VERY PARTICULAR TYPE OF DATA PROCESSING.
     """
+
     def __init__(self, scale: float, reduct: Literal["none", "mean", "sum"] = "none"):
         super().__init__(scale=scale, reduct=reduct)
         log.warn(
-            Fore.YELLOW +
-            "Using AxoV4Loss. Expecting that the data is comprised only of pT, eta, " +
-            "and phi for each object, in that order. Moreover, expecting that the " +
-            "first pT, eta, and phi belong to the MET object."
+            Fore.YELLOW
+            + "Using AxoV4Loss. Expecting that the data is comprised only of pT, eta, "
+            + "and phi for each object, in that order. Moreover, expecting that the "
+            + "first pT, eta, and phi belong to the MET object."
         )
-        self.reco_loss = CylPtPzReconstructionLoss(scale=self.reco_scale, reduction=reduct)
+        self.reco_loss = CylPtPzReconstructionLoss(
+            scale=self.reco_scale, reduction=reduct
+        )

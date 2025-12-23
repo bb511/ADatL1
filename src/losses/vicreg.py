@@ -20,13 +20,14 @@ class VICRegLoss(L1ADLoss):
     :param cov_coef: Weight for the covariance regularization.
     :param reduction: Reduction method to apply to the loss ("none", "mean", "sum").
     """
+
     def __init__(
         self,
         inv_coef: Optional[float] = 50,
         var_coef: Optional[float] = 50,
         cov_coef: Optional[float] = 1,
     ):
-        
+
         super().__init__(scale=None, reduction=None)
         self.inv_coef = inv_coef
         self.var_coef = var_coef
@@ -45,7 +46,7 @@ class VICRegLoss(L1ADLoss):
         # Compute covariance matrix.
         z = z - z.mean(dim=0, keepdim=True)
         z = z * ((batch_size - 1) ** -0.5)
-        cov = (z.T @ z)
+        cov = z.T @ z
 
         # Remove the diagonal elements (i.e. variance terms).
         off_diag = cov[~torch.eye(feature_dim, dtype=torch.bool)]
@@ -71,6 +72,7 @@ class VICRegLoss(L1ADLoss):
 
 class L1VICRegLoss(VICRegLoss):
     """Uses biased variance (unbiased=False) for stability and halves the penalty strength."""
+
     def variance_loss(self, z):
         z = z - z.mean(dim=0, keepdim=True)
         std_z = torch.sqrt(z.var(dim=0, unbiased=False) + 1e-4)

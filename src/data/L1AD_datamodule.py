@@ -34,7 +34,7 @@ class L1ADDataModule(LightningDataModule):
         l1_scales: dict,
         batch_size: int = 16384,
         val_batches: int = -1,
-        seed: int = 42
+        seed: int = 42,
     ) -> None:
         """Prepare the L1 data for using it to train and validate ML models.
 
@@ -102,15 +102,15 @@ class L1ADDataModule(LightningDataModule):
         self.loader = self.hparams.data_awkward2torch
         data_dir = self.main_cache_folder
 
-        if stage == 'fit':
+        if stage == "fit":
             self._load_train_data(data_dir)
             self._load_valid_data(data_dir)
-        if stage == 'validate':
+        if stage == "validate":
             self._load_valid_data(data_dir)
-        if stage == 'test':
+        if stage == "test":
             self._load_test_data(data_dir)
 
-        if stage == 'predict':
+        if stage == "predict":
             raise ValueError("The predict dataloader is not implemented yet.")
 
         self._data_summary(stage)
@@ -119,7 +119,7 @@ class L1ADDataModule(LightningDataModule):
         """Set up the training data, if it is not already loaded."""
         if self.data_train is None:
             label = 0
-            self.data_train = self.loader.load_folder(data_dir / 'train')
+            self.data_train = self.loader.load_folder(data_dir / "train")
             ntrain = self.data_train.size(dim=0)
             self.labels_train = torch.from_numpy(np.full(ntrain, label))
 
@@ -127,37 +127,38 @@ class L1ADDataModule(LightningDataModule):
         """Set up the validation data, if it is not already loaded."""
         if self.data_val is None:
             label = 0
-            self.data_val = self.loader.load_folder(data_dir / 'valid')
+            self.data_val = self.loader.load_folder(data_dir / "valid")
             nvalid = self.data_val.size(dim=0)
             self.labels_val = torch.from_numpy(np.full(nvalid, label))
 
         if self.aux_val is None:
-            self.aux_val, self.aux_val_labels = self._load_aux_data('valid', data_dir)
+            self.aux_val, self.aux_val_labels = self._load_aux_data("valid", data_dir)
 
     def _load_test_data(self, data_dir: Path):
         """Set up the test data, if it is not already loaded."""
         if self.data_test is None:
             label = 0
-            self.data_test = self.loader.load_folder(data_dir / 'test')
+            self.data_test = self.loader.load_folder(data_dir / "test")
             ntest = self.data_test.size(dim=0)
             self.labels_test = torch.from_numpy(np.full(ntest, label))
 
         if self.aux_test is None:
-            self.aux_test, self.aux_test_labels = self._load_aux_data('test', data_dir)
+            self.aux_test, self.aux_test_labels = self._load_aux_data("test", data_dir)
 
     def _load_aux_data(self, stage: str, data_dir: Path):
         """Load the auxiliary data, either for the test or validation stage."""
-        aux_folder = data_dir / 'aux'
+        aux_folder = data_dir / "aux"
         label_signal = 0
         label_background = 0
 
         data, labels = {}, {}
         for dataset_path in sorted(
-            p for p in aux_folder.iterdir()
+            p
+            for p in aux_folder.iterdir()
             if p.is_dir() and not p.name.startswith("._")
         ):
             name = dataset_path.stem
-            if 'SingleNeutrino' in name:
+            if "SingleNeutrino" in name:
                 label_background += -1
                 label = label_background
             else:
@@ -172,9 +173,9 @@ class L1ADDataModule(LightningDataModule):
 
     def _data_summary(self, stage: str):
         """Make a neat little summary of what data is being used."""
-        log.info(Fore.MAGENTA + '-'*5 + " Data Summary " + '-'*5)
+        log.info(Fore.MAGENTA + "-" * 5 + " Data Summary " + "-" * 5)
 
-        if stage == 'fit':
+        if stage == "fit":
             log.info(Fore.GREEN + f"Training data:")
             log.info(f"Zero bias: {self.data_train.shape}")
 
@@ -183,13 +184,13 @@ class L1ADDataModule(LightningDataModule):
             for data_name, data in self.aux_val.items():
                 log.info(f"{data_name}: {data.shape}")
 
-        if stage == 'validate':
+        if stage == "validate":
             log.info(Fore.GREEN + f"Validation data:")
             log.info(f"Zero bias: {self.data_val.shape}")
             for data_name, data in self.aux_val.items():
                 log.info(f"{data_name}: {data.shape}")
 
-        if stage == 'test':
+        if stage == "test":
             log.info(Fore.GREEN + f"Test data:")
             log.info(f"Zero bias: {self.data_test.shape}")
             for data_name, data in self.aux_test.items():
@@ -230,7 +231,7 @@ class L1ADDataModule(LightningDataModule):
             data_val[dataset_name] = L1ADDataset(
                 self.aux_val[dataset_name],
                 self.aux_val_labels[dataset_name],
-                batch_size=batch_size
+                batch_size=batch_size,
             )
 
         return data_val
@@ -254,7 +255,7 @@ class L1ADDataModule(LightningDataModule):
             data_test[dataset_name] = L1ADDataset(
                 self.aux_test[dataset_name],
                 self.aux_test_labels[dataset_name],
-                batch_size=batch_size
+                batch_size=batch_size,
             )
 
         return data_test
@@ -320,29 +321,30 @@ class L1ADDataModule(LightningDataModule):
         test_data = {}
 
         train_data = L1ADDataset(
-            self.loader.load_folder(data_dir / 'train' / flag),
+            self.loader.load_folder(data_dir / "train" / flag),
             self.labels_train,
             batch_size=self.batch_size_per_device,
         )
-        data = self.loader.load_folder(data_dir / 'valid' / flag)
+        data = self.loader.load_folder(data_dir / "valid" / flag)
         bs = self._get_validation_batchsize(data)
-        val_data.update({'main_val': L1ADDataset(data, self.labels_val, bs)})
+        val_data.update({"main_val": L1ADDataset(data, self.labels_val, bs)})
 
-        data = self.loader.load_folder(data_dir / 'test' / flag)
+        data = self.loader.load_folder(data_dir / "test" / flag)
         bs = self._get_validation_batchsize(data)
-        test_data.update({'main_test': L1ADDataset(data, self.labels_test, bs)})
+        test_data.update({"main_test": L1ADDataset(data, self.labels_test, bs)})
 
-        aux_folder = data_dir / 'aux'
+        aux_folder = data_dir / "aux"
         for dataset_path in sorted(
-            p for p in aux_folder.iterdir()
+            p
+            for p in aux_folder.iterdir()
             if p.is_dir() and not p.name.startswith("._")
         ):
             name = dataset_path.stem
-            val = self.loader.load_folder(dataset_path / 'valid' / flag)
+            val = self.loader.load_folder(dataset_path / "valid" / flag)
             bs = self._get_validation_batchsize(val)
             val = L1ADDataset(val, self.aux_val_labels[name], bs)
 
-            test = self.loader.load_folder(dataset_path / 'test' / flag)
+            test = self.loader.load_folder(dataset_path / "test" / flag)
             bs = self._get_validation_batchsize(test)
             test = L1ADDataset(test, self.aux_val_labels[name], bs)
 

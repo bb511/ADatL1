@@ -47,8 +47,8 @@ def register_resolvers():
     )
     OmegaConf.register_new_resolver(
         "scan_dirname",
-        lambda scan_dictionary: "scan_" + "_".join(
-            f"{skey}={svalue}"
-            for skey, svalue in sorted(scan_dictionary.items())
-        )
+        lambda scan_dictionary: "scan_"
+        + "_".join(
+            f"{skey}={svalue}" for skey, svalue in sorted(scan_dictionary.items())
+        ),
     )

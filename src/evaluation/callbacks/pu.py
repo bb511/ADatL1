@@ -57,9 +57,9 @@ class BkgRatePileup(Callback):
         Get the nPV_True feature of the event_info object, put it in the subfolder of
         the data in 'callbacks_pileup' and don't normalize it.
         """
-        extra_feats = {'event_info': ['nPV_True']}
-        flag = 'callbacks_pileup'
-        normalizer = L1DataNormalizer('unnormalized', {})
+        extra_feats = {"event_info": ["nPV_True"]}
+        flag = "callbacks_pileup"
+        normalizer = L1DataNormalizer("unnormalized", {})
 
         _, _, test_data = datamodule.get_extra(normalizer, extra_feats, flag)
 
@@ -105,8 +105,8 @@ class BkgRatePileup(Callback):
         batch_output = outputs[mname]
         self.maintest_score_data[mname].append(batch_output)
 
-        pu, _ = self.pu_per_ds['main_test'][batch_idx]
-        pu = pu.round().int().to('cpu').view(-1)
+        pu, _ = self.pu_per_ds["main_test"][batch_idx]
+        pu = pu.round().int().to("cpu").view(-1)
         self.maintest_pu_data[mname].append(pu)
 
         if batch_idx == self.total_batches - 1:
@@ -147,11 +147,11 @@ class BkgRatePileup(Callback):
         which events pass the rate threshold for each batch and updates the total.
         """
         pus, _ = self.pu_per_ds[self.dataset_name][batch_idx]
-        pus = pus.round().int().to('cpu').view(-1)
+        pus = pus.round().int().to("cpu").view(-1)
         pus, inv = pus.unique(sorted=True, return_inverse=True)
 
         scores_by_pu = {
-            int(pu.item()): outputs[mname].detach().to('cpu').float()[inv == i]
+            int(pu.item()): outputs[mname].detach().to("cpu").float()[inv == i]
             for i, pu in enumerate(pus)
         }
         for target_rate in self.target_rates:
@@ -179,11 +179,11 @@ class BkgRatePileup(Callback):
         """Log the anomaly rates computed on each of the data sets."""
         ckpts_dir = Path(pl_module._ckpt_path).parent
         ckpt_name = Path(pl_module._ckpt_path).stem
-        plot_folder = ckpts_dir / 'plots' / ckpt_name / 'bkgpileup'
+        plot_folder = ckpts_dir / "plots" / ckpt_name / "bkgpileup"
         plot_folder.mkdir(parents=True, exist_ok=True)
 
         for rate_name, pu_rates in self.rates_per_pu.items():
-            target_rate = rate_name.split('_')[-1].replace('rate', '')
+            target_rate = rate_name.split("_")[-1].replace("rate", "")
             dataset_name = self._get_dsname(rate_name)
             pu_rates = self._compute_rates(pu_rates)
             xlabel = f"pileup"
@@ -191,17 +191,17 @@ class BkgRatePileup(Callback):
             scatter.plot_connected(pu_rates, xlabel, ylabel, dataset_name, plot_folder)
 
         utils.mlflow.log_plots_to_mlflow(
-            trainer, ckpt_name, 'pus', plot_folder, make_gallery=True
+            trainer, ckpt_name, "pus", plot_folder, make_gallery=True
         )
 
     def _get_dsname(self, rate_name: str):
         """Retrieves the data set name from string specifying rate name."""
-        dataset_name = rate_name.split('/')[0]
+        dataset_name = rate_name.split("/")[0]
         return dataset_name
 
     def _compute_rates(self, pu_rates: dict):
         """Compute the rates in the pileup_rates dictionary."""
         for pu_value, anomaly_counter in pu_rates.items():
-            pu_rates[pu_value] = anomaly_counter.compute('rate').item()
+            pu_rates[pu_value] = anomaly_counter.compute("rate").item()
 
         return pu_rates

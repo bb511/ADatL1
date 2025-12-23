@@ -56,7 +56,8 @@ def plot(data: dict[dict], value_name: str, save_dir: Path):
             txt_color = "white" if norm(val) < 0.6 else "black"
 
             ax.text(
-                j, i,
+                j,
+                i,
                 fmt.format(val),
                 ha="center",
                 va="center",
@@ -65,13 +66,12 @@ def plot(data: dict[dict], value_name: str, save_dir: Path):
                 clip_on=True,  # ensures nothing bleeds outside the axes
             )
 
-
     # colorbar
     cbar = fig.colorbar(im, ax=ax)
     cbar.set_label(f"{value_name}")
 
     filename = sanitize_filename(f"{value_name}")
     filename = filename.replace(" ", "_")
-    fig.savefig(save_dir / f"{filename}.jpg", bbox_inches='tight')
+    fig.savefig(save_dir / f"{filename}.jpg", bbox_inches="tight")
     fig.clear()
     plt.close(fig)

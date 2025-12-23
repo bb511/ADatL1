@@ -33,8 +33,8 @@ class L1DataAwkward2Torch:
         To this end, the data is made uniform, i.e., each object contains the same
         number of features via padding.
         """
-        self.cache_filepath = folder_path / 'torch_cache.pt'
-        self.object_feature_map_fpath = folder_path.parent / 'object_feature_map.json'
+        self.cache_filepath = folder_path / "torch_cache.pt"
+        self.object_feature_map_fpath = folder_path.parent / "object_feature_map.json"
         if self._cache_exists():
             if self.object_feature_map is None:
                 self._set_obj_feat_map()
@@ -173,7 +173,7 @@ class L1DataAwkward2Torch:
         if not parent_folder.exists():
             raise FileNotFoundError(f"Cache folder {parent_folder} missing!")
 
-        with open(parent_folder / 'cached_objs.pkl', 'wb') as file:
+        with open(parent_folder / "cached_objs.pkl", "wb") as file:
             pickle.dump(self.cached_objects, file)
 
         torch.save(data, self.cache_filepath)
@@ -188,9 +188,9 @@ class L1DataAwkward2Torch:
         obj_fpaths = self._get_parquet_fpaths(cache_parent_folder)
         existing_obj_names = {obj_path.stem for obj_path in obj_fpaths}
 
-        cache_obj_file = cache_parent_folder / 'cached_objs.pkl'
+        cache_obj_file = cache_parent_folder / "cached_objs.pkl"
         if cache_obj_file.is_file():
-            with open(cache_obj_file, 'rb') as file:
+            with open(cache_obj_file, "rb") as file:
                 previously_cached_objects = pickle.load(file)
         else:
             previously_cached_objects = set()
@@ -199,10 +199,13 @@ class L1DataAwkward2Torch:
 
     def _get_parquet_fpaths(self, folder: Path) -> list[Path]:
         """Get the parquet files in a folder while avoiding system files."""
-        parquet_file_paths = sorted([
-            fpath for fpath in folder.glob("*.parquet")
-            if fpath.is_file() and not fpath.name.startswith("._")
-        ])
+        parquet_file_paths = sorted(
+            [
+                fpath
+                for fpath in folder.glob("*.parquet")
+                if fpath.is_file() and not fpath.name.startswith("._")
+            ]
+        )
 
         return parquet_file_paths
 
@@ -256,5 +259,5 @@ class L1DataAwkward2Torch:
         this class. This is important for in-place denomarlisation for some of the
         model workflows.
         """
-        with open(self.object_feature_map_fpath, 'r') as file:
+        with open(self.object_feature_map_fpath, "r") as file:
             self.object_feature_map = json.load(file)

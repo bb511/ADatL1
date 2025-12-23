@@ -50,7 +50,7 @@ class VAE(L1ADLightningModule):
             "loss/total/full": total_loss.detach(),
             "loss/reco/full": reco_loss.detach(),
             "loss/kl/full": kl_loss.detach(),
-            "z_mean_squared": z_mean.pow(2)
+            "z_mean_squared": z_mean.pow(2),
         }
 
     def outlog(self, outdict: dict) -> dict:
@@ -60,7 +60,7 @@ class VAE(L1ADLightningModule):
             "loss_reco": outdict.get("loss/reco/mean"),
             "loss_kl": outdict.get("loss/kl/mean"),
         }
-        
+
 
 class RVAE(VAE):
     """Regularized VAE. Overriding loss and logging."""
@@ -75,7 +75,7 @@ class RVAE(VAE):
             z=z,
             z_mean=z_mean,
             z_log_var=z_log_var,
-            y=y
+            y=y,
         )
         del reconstruction, x, z, y
 
@@ -89,18 +89,18 @@ class RVAE(VAE):
             individual_losses = {
                 f"loss/{module.name}": value
                 for module, value in zip(
-                    self.loss.losses.values(),
-                    self.loss.values.values()
+                    self.loss.losses.values(), self.loss.values.values()
                 )
             }
-            outdict.update({
-                "loss/total": sum(list(individual_losses.values())),
-                **{k: v.mean() for k, v in individual_losses.items()}
-            })
+            outdict.update(
+                {
+                    "loss/total": sum(list(individual_losses.values())),
+                    **{k: v.mean() for k, v in individual_losses.items()},
+                }
+            )
         return outdict
 
     def outlog(self, outdict: dict) -> dict:
         return {
-            k: v for k, v in outdict.items()
-            if "train/" in k and k != "loss/total/full"
+            k: v for k, v in outdict.items() if "train/" in k and k != "loss/total/full"
         }

@@ -35,7 +35,7 @@ class MLP(nn.Module):
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         return self.net(x)
-    
+
     def _construct_net(self):
         """Build the neural network."""
         layers = []

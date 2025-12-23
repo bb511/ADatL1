@@ -29,7 +29,8 @@ class LangevinSampler(nn.Module):
     ``requires_grad=True`` if you need gradients with respect to the
     starting point.  Otherwise, the sampling will still function but
     gradients will not propagate through the sampling process.
-    """ 
+    """
+
     def __init__(
         self,
         n_steps: int = 50,
@@ -44,7 +45,9 @@ class LangevinSampler(nn.Module):
         super().__init__()
         self.n_steps = n_steps
         self.step_size = step_size
-        self.noise_scale = math.sqrt(2 * self.step_size) if noise_scale is None else noise_scale
+        self.noise_scale = (
+            math.sqrt(2 * self.step_size) if noise_scale is None else noise_scale
+        )
         self.temperature = temperature
         self.clip = tuple(clip)
         self.clip_grad = clip_grad
@@ -84,7 +87,11 @@ class LangevinSampler(nn.Module):
         if self.clip is not None:
             if self.reject_boundary:
                 # Reject any sample that falls outside the bounds
-                accept = ((x_new >= self.clip[0]) & (x_new <= self.clip[1])).view(len(x), -1).all(dim=1)
+                accept = (
+                    ((x_new >= self.clip[0]) & (x_new <= self.clip[1]))
+                    .view(len(x), -1)
+                    .all(dim=1)
+                )
                 reject = ~accept
                 # Revert rejected samples to original state
                 x_new[reject] = x[reject]
@@ -101,20 +108,22 @@ class LangevinSampler(nn.Module):
         energy_new = model(x_new)
         grad_energy_new = autograd.grad(energy_new.sum(), x_new, create_graph=True)[0]
         if self.clip_grad is not None:
-            grad_energy_new = torch.clamp(grad_energy_new, -self.clip_grad, self.clip_grad)
+            grad_energy_new = torch.clamp(
+                grad_energy_new, -self.clip_grad, self.clip_grad
+            )
 
         # Metropolis–Hastings acceptance (optional)
         results_dict: Dict[str, Any] = {}
         if self.mh:
             # See: https://arxiv.org/abs/2102.07796 for details on MALA acceptance
-            from_new = ((grad_energy + grad_energy_new) * self.step_size - noise)
+            from_new = (grad_energy + grad_energy_new) * self.step_size - noise
             from_new = from_new.view(len(x), -1).norm(p=2, dim=1, keepdim=True) ** 2
             to_new = noise.view(len(x), -1).norm(dim=1, keepdim=True, p=2) ** 2
             transition = -(from_new - to_new) / (4 * self.step_size)
             prob = -energy_new + energy
             accept_prob = torch.exp((transition + prob) / self.temperature)[:, 0]
             accept = torch.rand_like(accept_prob) < accept_prob
-            
+
             # Replace rejected samples with original ones
             x_new[~accept] = x[~accept]
             energy_new[~accept] = energy[~accept]
@@ -131,11 +140,8 @@ class LangevinSampler(nn.Module):
         )
         return x_new, energy_new, grad_energy_new, results_dict
 
-
     def forward(
-        self,
-        x: torch.Tensor,
-        model: Callable[[torch.Tensor], torch.Tensor]
+        self, x: torch.Tensor, model: Callable[[torch.Tensor], torch.Tensor]
     ) -> Dict[str, Any]:
         """Run a Langevin Monte Carlo chain.
 
@@ -191,10 +197,8 @@ class SampleBuffer:
     """
 
     def __init__(
-            self,
-            max_samples: Optional[int] = 10_000,
-            replay_ratio: Optional[float] = 0.95
-        ) -> None:
+        self, max_samples: Optional[int] = 10_000, replay_ratio: Optional[float] = 0.95
+    ) -> None:
         self.max_samples = max_samples
         self.buffer: list[torch.Tensor] = []
         self.replay_ratio = replay_ratio

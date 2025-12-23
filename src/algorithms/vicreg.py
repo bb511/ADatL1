@@ -88,12 +88,12 @@ class VICReg(L1ADLightningModule):
         l1_scale_phi = []
         for obj_name, feature_map in object_feature_map.items():
             for feat_name, idxs in feature_map.items():
-                if feat_name != 'phi':
+                if feat_name != "phi":
                     continue
 
                 phi_idxs.extend(idxs)
                 nconst = len(idxs)
-                l1_scale_phi.extend(nconst * [l1_scales[obj_name]['phi']])
+                l1_scale_phi.extend(nconst * [l1_scales[obj_name]["phi"]])
 
         phi_mask = torch.zeros_like(normalizer.scale_tensor, dtype=torch.bool)
         phi_mask[phi_idxs] = True

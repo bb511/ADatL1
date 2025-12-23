@@ -8,6 +8,7 @@ from src.losses.components.reconstruction import ReconstructionLoss
 
 class ClassicAELoss(L1ADLoss):
     """The classic AE loss, i.e., reconstruction loss between input and output."""
+
     def __init__(self, reduction: Literal["none", "mean", "sum"] = "none"):
         super().__init__(scale=None, reduction=reduction)
         self.reconstruction_loss = ReconstructionLoss(reduction=reduction)

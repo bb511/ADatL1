@@ -38,10 +38,11 @@ class L1DataExtractor(object):
     :param name: String used to name a specific method of doing the extraction of
         the data, e.g., "default", "axov4".
     """
+
     select_features: dict
     feat_name_map: dict
-    cache_root_dir: str = 'data'
-    name: str = 'default'
+    cache_root_dir: str = "data"
+    name: str = "default"
     verbose: bool = False
 
     def extract(self, datasets: dict, data_category: str):
@@ -54,7 +55,7 @@ class L1DataExtractor(object):
                 e.g., 'zerobias', 'background', or 'signal'.
         """
         log.info(Fore.GREEN + f"Extracting {data_category} data.")
-        self.extracted_dir = Path(self.cache_root_dir) / 'extracted'
+        self.extracted_dir = Path(self.cache_root_dir) / "extracted"
         self.cache_folder = self.extracted_dir / self.name / data_category
         self.select_feats = OmegaConf.to_container(self.select_features, resolve=True)
         self.existence_warn_trigger = False
@@ -67,7 +68,8 @@ class L1DataExtractor(object):
                 continue
 
             extr_objs = {
-                obj_name: obj_feats for obj_name, obj_feats in self.select_feats.items()
+                obj_name: obj_feats
+                for obj_name, obj_feats in self.select_feats.items()
                 if obj_name not in existing_objs
             }
 
@@ -90,21 +92,21 @@ class L1DataExtractor(object):
         dataset_folder.mkdir(parents=True, exist_ok=True)
 
         for obj_name in data.object_names:
-            cache_file = dataset_folder / f'{obj_name}.parquet'
+            cache_file = dataset_folder / f"{obj_name}.parquet"
             parquet_writer = self._write_parquet(data, cache_file, obj_name)
             parquet_writer.close()
             self._plot(dataset_name, obj_name)
 
         log.info("Cached extracted data at " + Fore.GREEN + f"{dataset_folder}.")
 
-    def _write_parquet(self, data, cache_file: Path, obj_name: str, writer = None):
+    def _write_parquet(self, data, cache_file: Path, obj_name: str, writer=None):
         """Stream batches of given obj in data to a single parquet file."""
         for batch in data(obj_name):
             batch = self._rename_features(batch, obj_name)
             batch = ak.to_arrow_table(batch)
             if writer is None:
                 writer = parquet.ParquetWriter(
-                    cache_file, batch.schema, compression='snappy'
+                    cache_file, batch.schema, compression="snappy"
                 )
             writer.write_table(batch)
 
@@ -116,8 +118,7 @@ class L1DataExtractor(object):
 
         if dataset_folder.is_dir():
             dataset_files = [
-                p for p in dataset_folder.iterdir()
-                if not p.name.startswith("._")
+                p for p in dataset_folder.iterdir() if not p.name.startswith("._")
             ]
             if any(dataset_files):
                 existing_objs = self._get_existing_objs(dataset_folder)
@@ -136,7 +137,7 @@ class L1DataExtractor(object):
         """Checks if all objects specified in the config have been extracted."""
         existing_objs = set()
         for obj_name in self.select_features.keys():
-            obj_cache_filepath = dataset_folder / f'{obj_name}.parquet'
+            obj_cache_filepath = dataset_folder / f"{obj_name}.parquet"
             if obj_cache_filepath.is_file():
                 existing_objs.add(obj_name)
 
@@ -155,8 +156,8 @@ class L1DataExtractor(object):
     def _plot(self, dataset_name: str, obj_name: str):
         """Read and then plot the extracted data."""
         data_dir = self.cache_folder / dataset_name
-        plots_dir = self.cache_folder / dataset_name / 'PLOTS'
-        object_file = data_dir / f'{obj_name}.parquet'
+        plots_dir = self.cache_folder / dataset_name / "PLOTS"
+        object_file = data_dir / f"{obj_name}.parquet"
 
         data = ak.from_parquet(object_file)
         obj_folder = plots_dir / obj_name

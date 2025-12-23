@@ -32,7 +32,7 @@ class Decoder(MLP):
             init_weight=init_weight,
             init_bias=init_bias,
         )
-        
+
         # Apply initialization to the weight of the last Linear() layer
         last_linear_layer = self.net[-1]
         if init_last_weight != None:

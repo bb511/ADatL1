@@ -13,6 +13,7 @@ from src.plot import matrix
 
 class LossCallback(Callback):
     """Evaluate the loss on the test data sets."""
+
     def __init__(self, loss_names: list[str]):
         self.device = None
         self.loss_names = loss_names
@@ -28,7 +29,7 @@ class LossCallback(Callback):
                 self.dset_losses[loss_name][dset_name] = SumMetric().to(self.device)
 
     def on_test_batch_end(
-        self, trainer, pl_module, outputs, batch, batch_idx, dataloader_idx = 0
+        self, trainer, pl_module, outputs, batch, batch_idx, dataloader_idx=0
     ):
         """Accummulate the mean loss of a batch, over batches.
 
@@ -44,7 +45,7 @@ class LossCallback(Callback):
         """Log the anomaly rates computed on each of the data sets."""
         ckpts_dir = Path(pl_module._ckpt_path).parent
         ckpt_name = Path(pl_module._ckpt_path).stem
-        plot_folder = ckpts_dir / 'plots' / ckpt_name / 'losses'
+        plot_folder = ckpts_dir / "plots" / ckpt_name / "losses"
         plot_folder.mkdir(parents=True, exist_ok=True)
 
         for loss_name in self.loss_names:
@@ -53,12 +54,12 @@ class LossCallback(Callback):
                 for dset_name, loss in self.dset_losses[loss_name].items()
             }
             xlabel = f"{loss_name}"
-            ylabel = ' '
+            ylabel = " "
             horizontal_bar.plot_yright(losses, losses, xlabel, ylabel, plot_folder)
             self._store_summary(loss_name, losses, ckpt_name)
 
         utils.mlflow.log_plots_to_mlflow(
-            trainer, ckpt_name, 'losses', plot_folder, make_gallery=True
+            trainer, ckpt_name, "losses", plot_folder, make_gallery=True
         )
 
     def _store_summary(self, loss_name: str, losses: dict, ckpt_name: str):
@@ -72,7 +73,7 @@ class LossCallback(Callback):
 
     def plot_summary(self, trainer, root_folder: Path):
         """Plot the summary metrics accummulated in eff_summary and reset this attr."""
-        plot_folder = root_folder / 'plots'
+        plot_folder = root_folder / "plots"
         plot_folder.mkdir(parents=True, exist_ok=True)
         self._cache_summary(plot_folder)
 
@@ -81,7 +82,7 @@ class LossCallback(Callback):
             losses_per_ckpt = self.loss_summary[loss_name]
             matrix.plot(losses_per_ckpt, loss_name, plot_folder)
 
-        utils.mlflow.log_plots_to_mlflow(trainer, None, 'losses', plot_folder)
+        utils.mlflow.log_plots_to_mlflow(trainer, None, "losses", plot_folder)
 
     def clear_crit_summary(self):
         self.loss_summary.clear()
@@ -96,12 +97,11 @@ class LossCallback(Callback):
         if not loss_name in available_losses:
             raise ValueError(f"Choose {available_losses}")
 
-        mainval_maintest_loss = self.loss_summary[loss_name]['main_val']['main_test']
+        mainval_maintest_loss = self.loss_summary[loss_name]["main_val"]["main_test"]
         return mainval_maintest_loss
 
     def _cache_summary(self, cache_folder: Path):
         """Cache the summary metric dictionary."""
-        with open(cache_folder / 'summary.pkl', 'wb') as f:
+        with open(cache_folder / "summary.pkl", "wb") as f:
             plain_dict = utils.misc.to_plain_dict(self.loss_summary)
             pickle.dump(plain_dict, f, protocol=pickle.HIGHEST_PROTOCOL)
-

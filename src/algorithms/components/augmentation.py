@@ -13,6 +13,7 @@ class FastFeatureBlur(nn.Module):
     :param magnitude: Intensity of the blurring effect.
     :param strength: Probability of each feature being affected.
     """
+
     def __init__(self, prob: float, magnitude: float, strength: float):
         super().__init__()
         self.prob = prob
@@ -25,7 +26,9 @@ class FastFeatureBlur(nn.Module):
         gen = self.rng.get_generator(x.device)
 
         mask_p = (torch.rand(b, 1, device=x.device, generator=gen) < self.prob).float()
-        mask_strength = (torch.rand(b, d, device=x.device, generator=gen) < self.strength).float()
+        mask_strength = (
+            torch.rand(b, d, device=x.device, generator=gen) < self.strength
+        ).float()
         mask = mask_p * mask_strength * self.magnitude
 
         # rand_like has no generator=... so use rand(shape,...)
@@ -39,6 +42,7 @@ class FastObjectMask(nn.Module):
 
     :param p: Probability of applying the masking transformation (0 to 1).
     """
+
     def __init__(self, prob: float):
         super().__init__()
         self.prob = prob
@@ -91,7 +95,9 @@ class FastLorentzRotation(nn.Module):
         raw_phi = augm_x[:, self.phi_mask]
 
         raw_phi = raw_phi * self.l1_scale_phi
-        rotation = (torch.rand(b, device=x.device, generator=gen) * 2 * torch.pi)[:, None]
+        rotation = (torch.rand(b, device=x.device, generator=gen) * 2 * torch.pi)[
+            :, None
+        ]
         rotated_phi = torch.remainder(raw_phi + rotation, 2 * torch.pi)
         rotated_phi = rotated_phi / self.l1_scale_phi
         raw_phi = raw_phi / self.l1_scale_phi

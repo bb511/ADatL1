@@ -35,7 +35,7 @@ class L1DataProcessor:
         log.info(Fore.GREEN + f"Processing {data_category} data...")
 
         self.extracted_datapath = Path(self.extracted_folder) / data_category
-        self.processed_dir = Path(self.cache_root_dir) / 'processed'
+        self.processed_dir = Path(self.cache_root_dir) / "processed"
         self.cache_folder = self.processed_dir / self.name / data_category
         self.existence_warn_trigger = False
 
@@ -43,14 +43,15 @@ class L1DataProcessor:
         nexists = 0
         ndatasets = 0
         for extracted_dataset in sorted(
-            p for p in self.extracted_datapath.iterdir()
+            p
+            for p in self.extracted_datapath.iterdir()
             if p.is_dir() and not p.name.startswith("._")
         ):
             ndatasets += 1
             dataset_name = extracted_dataset.stem
             self.dataset_folder = self.cache_folder / dataset_name
-            self.event_masks_folder = self.dataset_folder / 'event_masks'
-            self.object_masks_folder = self.dataset_folder / 'object_masks'
+            self.event_masks_folder = self.dataset_folder / "event_masks"
+            self.object_masks_folder = self.dataset_folder / "object_masks"
 
             extr_object_names = self._get_extracted_object_names(extracted_dataset)
             existing_objs = self._check_data_exists()
@@ -80,7 +81,8 @@ class L1DataProcessor:
         """Get all the object names of the objects that were extracted."""
         obj_names = set()
         for object_file in sorted(
-            p for p in dataset_path.glob("*.parquet")
+            p
+            for p in dataset_path.glob("*.parquet")
             if p.is_file() and not p.name.startswith("._")
         ):
             obj_names.add(object_file.stem)
@@ -108,12 +110,12 @@ class L1DataProcessor:
         """
         self.event_masks_folder.mkdir(parents=True, exist_ok=True)
         for obj_name, criterion in self.event_filters.items():
-            data = ak.from_parquet(extracted_dataset / f'{obj_name}.parquet')
+            data = ak.from_parquet(extracted_dataset / f"{obj_name}.parquet")
             context = {feature: data[feature] for feature in data.fields}
             mask = ak.numexpr.evaluate(criterion, context)
             mask = ak.all(mask, axis=1)
 
-            ak.to_parquet(mask, self.event_masks_folder / f'{obj_name}.parquet')
+            ak.to_parquet(mask, self.event_masks_folder / f"{obj_name}.parquet")
         self._intersection(self.event_masks_folder)
 
     def _intersection(self, masks_folder: Path):
@@ -122,13 +124,13 @@ class L1DataProcessor:
         for mask_path in masks_folder.glob("*.parquet"):
             if not mask_path.is_file() or mask_path.name.startswith("._"):
                 continue
-            
+
             masks.append(ak.from_parquet(mask_path))
         if not masks:
             raise ValueError(Fore.RED + f"No files found in {masks_folder}.")
 
         intersection = functools.reduce(operator.and_, masks)
-        ak.to_parquet(intersection, self.event_masks_folder / 'intersection.parquet')
+        ak.to_parquet(intersection, self.event_masks_folder / "intersection.parquet")
 
     def _cache(self, extracted_dataset: Path):
         """Processes the data and caches it.
@@ -138,10 +140,10 @@ class L1DataProcessor:
         to the data as well.
         The result of this two operations is then cached to disk.
         """
-        event_mask = ak.from_parquet(self.event_masks_folder / 'intersection.parquet')
+        event_mask = ak.from_parquet(self.event_masks_folder / "intersection.parquet")
         self.object_masks_folder.mkdir(parents=True, exist_ok=True)
         for obj_name in self.object_names:
-            data = ak.from_parquet(extracted_dataset / f'{obj_name}.parquet')
+            data = ak.from_parquet(extracted_dataset / f"{obj_name}.parquet")
             data = data[event_mask]
 
             context = {feature: data[feature] for feature in data.fields}
@@ -149,14 +151,14 @@ class L1DataProcessor:
                 obj_mask = self._get_obj_mask(obj_name, context)
                 data = data[obj_mask]
 
-            ak.to_parquet(data, self.dataset_folder / f'{obj_name}.parquet')
+            ak.to_parquet(data, self.dataset_folder / f"{obj_name}.parquet")
             self._plot(data, obj_name)
 
         log.info("Cached proc data: " + Fore.GREEN + f"{self.dataset_folder}.")
 
     def _get_obj_mask(self, obj_name: str, context: dict):
         """Import the object mask or construct it if it does not exist."""
-        obj_mask_file = self.object_masks_folder / f'{obj_name}.parquet'
+        obj_mask_file = self.object_masks_folder / f"{obj_name}.parquet"
         if obj_mask_file.is_file():
             return ak.from_parquet(obj_mask_file)
 
@@ -177,8 +179,7 @@ class L1DataProcessor:
         """
         if self.dataset_folder.is_dir():
             dataset_files = [
-                p for p in self.dataset_folder.iterdir()
-                if not p.name.startswith("._")
+                p for p in self.dataset_folder.iterdir() if not p.name.startswith("._")
             ]
             if any(dataset_files):
                 existing_objs = self._get_existing_objs()
@@ -203,7 +204,7 @@ class L1DataProcessor:
             return False
 
         for obj_name in self.event_filters.keys():
-            event_mask_file = self.event_masks_folder / f'{obj_name}.parquet'
+            event_mask_file = self.event_masks_folder / f"{obj_name}.parquet"
             if not event_mask_file.is_file():
                 return False
 
@@ -216,7 +217,7 @@ class L1DataProcessor:
 
         missing_obj_masks = set()
         for obj_name in self.object_filters.keys():
-            object_mask_file = self.object_masks_folder / f'{obj_name}.parquet'
+            object_mask_file = self.object_masks_folder / f"{obj_name}.parquet"
             if not object_mask_file.is_file():
                 missing_obj_masks.add(obj_name)
 
@@ -226,7 +227,8 @@ class L1DataProcessor:
         """Checks if all objects specified in the config have been extracted."""
         existing_objs = set()
         for obj_cache_filepath in sorted(
-            p for p in self.dataset_folder.glob("*.parquet")
+            p
+            for p in self.dataset_folder.glob("*.parquet")
             if p.is_file() and not p.name.startswith("._")
         ):
             if obj_cache_filepath.is_file():
@@ -236,8 +238,8 @@ class L1DataProcessor:
 
     def _plot(self, data: ak.Array, obj_name: str):
         """Read and then plot the processed data."""
-        plots_dir = self.dataset_folder / 'PLOTS'
-        object_file = self.dataset_folder / f'{obj_name}.parquet'
+        plots_dir = self.dataset_folder / "PLOTS"
+        object_file = self.dataset_folder / f"{obj_name}.parquet"
         obj_folder = plots_dir / obj_name
         obj_folder.mkdir(parents=True, exist_ok=True)
 

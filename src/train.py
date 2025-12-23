@@ -15,6 +15,7 @@ from omegaconf import OmegaConf, DictConfig
 from colorama import Fore, Back, Style
 
 import rootutils
+
 rootutils.setup_root(__file__, indicator=".project-root", pythonpath=True)
 
 # Add resolvers to evaluate operations in the .yaml configuration files
@@ -87,7 +88,7 @@ def train(cfg: DictConfig) -> Tuple[Dict[str, Any], Dict[str, Any]]:
 
     # Evaluate the training.
     if cfg.get("test"):
-        log.info(Back.MAGENTA + 8*'-' + "STARTING TESTING" + 8*'-')
+        log.info(Back.MAGENTA + 8 * "-" + "STARTING TESTING" + 8 * "-")
         evaluator = test(cfg, datamodule, algorithm, logger)
 
     object_dict.update({"evaluator": evaluator})
@@ -95,9 +96,10 @@ def train(cfg: DictConfig) -> Tuple[Dict[str, Any], Dict[str, Any]]:
     metric_dict = {**train_metrics}
     return metric_dict, object_dict
 
+
 def test(cfg: DictConfig, datamodule, algorithm, logger):
     """Evaluate the training."""
-    if cfg.get('evaluator') is None:
+    if cfg.get("evaluator") is None:
         log.info(Back.YELLOW + "No evaluator config found... Skipping testing")
         return
 
@@ -105,18 +107,18 @@ def test(cfg: DictConfig, datamodule, algorithm, logger):
     # Evaluator object is basically a wrapper around a trainer with extra steps.
     trainer_config = OmegaConf.to_container(cfg.trainer, resolve=True)
     evaluator_config = OmegaConf.to_container(cfg.evaluator, resolve=True)
-    
+
     merged_dict = {**trainer_config, **evaluator_config}
     evaluator_cfg = OmegaConf.create(merged_dict)
 
     log.info("Instantiating evaluator callbacks...")
-    callbacks = instantiate_eval_callbacks(cfg.get('evaluator_callbacks'), datamodule)
+    callbacks = instantiate_eval_callbacks(cfg.get("evaluator_callbacks"), datamodule)
     log.info(f"Instantiating evaluator <{evaluator_cfg._target_}>")
     evaluator = hydra.utils.instantiate(
         evaluator_cfg,
         callbacks=callbacks,
         logger=logger,
-        optimized_metric_config=cfg.get('optimized_metric_config')
+        optimized_metric_config=cfg.get("optimized_metric_config"),
     )
 
     datamodule.setup("test")
@@ -125,6 +127,7 @@ def test(cfg: DictConfig, datamodule, algorithm, logger):
 
     evaluator.evaluate_run(run_ckpts, algorithm, test_loader)
     return evaluator
+
 
 @hydra.main(version_base="1.3", config_path="../configs", config_name="train.yaml")
 def main(cfg: DictConfig) -> Optional[float]:
@@ -142,7 +145,7 @@ def main(cfg: DictConfig) -> Optional[float]:
 
     # safely retrieve metric value for hydra-based hyperparameter optimization
     # metric_value = get_metric_value(
-        # metric_dict=metric_dict, metric_name=cfg.get("optimized_metric")
+    # metric_dict=metric_dict, metric_name=cfg.get("optimized_metric")
     # )
 
     metric_value = object_dict["evaluator"].optimized_metric

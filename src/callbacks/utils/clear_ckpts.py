@@ -8,6 +8,7 @@ from pytorch_lightning.callbacks import Callback
 
 class ClearRunCheckpointDir(Callback):
     """Clears the checkpoint directory of a run."""
+
     def __init__(self, run_ckpts_dir: str):
         self.run_ckpts_dir = Path(run_ckpts_dir)
 

@@ -83,10 +83,7 @@ class MILoss(L1ADLoss):
         return -(entropy_z - conditional_entropy)  # minimize -MI
 
     def forward(
-        self,
-        z: torch.Tensor,
-        y: torch.Tensor,
-        **kwargs
+        self, z: torch.Tensor, y: torch.Tensor, **kwargs
     ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
         """Forward method to compute the MI loss."""
         mi_loss_batch = self.mutual_information_bernoulli_loss(z, y, eps=self.eps)

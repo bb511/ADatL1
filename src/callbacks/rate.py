@@ -64,7 +64,6 @@ class AnomalyRateCallback(Callback):
                     self._initialize_rate_metric(metric_name)
                 self._compute_batch_rate(outputs, metric_name)
 
-
     def _accumulate_mainval_output(self, outputs: dict, batch_idx: int, mname: str):
         """Accummulates the specified metric data across batches.
 
@@ -124,7 +123,7 @@ class AnomalyRateCallback(Callback):
         """Log the anomaly rates computed on each of the data sets."""
         for rate_name, rate in self.rates.items():
             pl_module.log_dict(
-                {f"val/{rate_name}": rate.compute('rate')},
+                {f"val/{rate_name}": rate.compute("rate")},
                 prog_bar=False,
                 on_step=False,
                 on_epoch=True,

@@ -12,13 +12,13 @@ class L1ADLoss(nn.Module):
         Options are 'none', 'mean', 'sum'.
     """
 
-    name: str = "total" # name for the logs
-    
+    name: str = "total"  # name for the logs
+
     def __init__(
-            self,
-            scale: float = 1.0,
-            reduction: Literal["none", "mean", "sum"] = "none",
-        ):
+        self,
+        scale: float = 1.0,
+        reduction: Literal["none", "mean", "sum"] = "none",
+    ):
         super().__init__()
         self.scale = scale
         self.reduction = reduction
@@ -43,7 +43,7 @@ class L1ADLoss(nn.Module):
         :param y: Labels: < 0 for background simulations, 0 for zerobias, > 0 for signal simulations (batch_size,).
         """
         raise NotImplementedError("Forward method must be implemented in subclasses.")
-    
+
     def reduce(self, loss: torch.Tensor) -> torch.Tensor:
         if self.reduction == "mean" and loss.dim() > 0:
             return loss.mean()
@@ -55,7 +55,7 @@ class L1ADLoss(nn.Module):
 class MultiLoss(L1ADLoss):
     """
     Wrapper to combine multiple loss functions with individual scaling.
-    
+
     :param reduction: Reduction method to apply to the total loss.
         Options are 'none', 'mean', 'sum'.
     :param list_losses: Optional list of loss names to add for backpropagation.
@@ -63,7 +63,7 @@ class MultiLoss(L1ADLoss):
     :param losses: Keyword arguments where keys are loss names and values are
         loss module instances.
     """
-    
+
     def __init__(
         self,
         scale: int = 1.0,
@@ -77,12 +77,14 @@ class MultiLoss(L1ADLoss):
             loss_fn.reduction = "none"
 
         self.list_losses = list_losses or list(losses.keys())
-        self.losses = nn.ModuleDict({
-            name: loss_fn
-            for name, loss_fn in losses.items()
-            if isinstance(loss_fn, nn.Module)
-        })
-        
+        self.losses = nn.ModuleDict(
+            {
+                name: loss_fn
+                for name, loss_fn in losses.items()
+                if isinstance(loss_fn, nn.Module)
+            }
+        )
+
     def forward(
         self,
         target: torch.Tensor,
@@ -95,37 +97,33 @@ class MultiLoss(L1ADLoss):
 
         self.values = {}
         for lname, loss_fn in self.losses.items():
-            loss = loss_fn(**{
-                'target': target,
-                'reconstruction': reconstruction,
-                'z_mean': z_mean,
-                'z_log_var': z_log_var,
-                'z': z,
-                'y': y,
-            })
+            loss = loss_fn(
+                **{
+                    "target": target,
+                    "reconstruction": reconstruction,
+                    "z_mean": z_mean,
+                    "z_log_var": z_log_var,
+                    "z": z,
+                    "y": y,
+                }
+            )
             self.values[lname] = loss
-        
+
         list_lvalues = [
-            lvalue
-            for lname, lvalue in self.values.items()
-            if lname in self.list_losses
+            lvalue for lname, lvalue in self.values.items() if lname in self.list_losses
         ]
-        return self.reduce(
-            torch.stack(list_lvalues, dim=0).sum(dim=0)
-        )
+        return self.reduce(torch.stack(list_lvalues, dim=0).sum(dim=0))
 
     def reduce(self, loss: torch.Tensor) -> torch.Tensor:
         """Reduce the values and return total only."""
         if self.reduction == "mean":
             loss = loss.mean()
             self.values = {
-                k: v.mean() if v.dim() > 0 else v
-                for k, v in self.values.items()
+                k: v.mean() if v.dim() > 0 else v for k, v in self.values.items()
             }
         elif self.reduction == "sum":
             loss = loss.sum()
             self.values = {
-                k: v.sum() if v.dim() > 0 else v
-                for k, v in self.values.items()
+                k: v.sum() if v.dim() > 0 else v for k, v in self.values.items()
             }
         return loss

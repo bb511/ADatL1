@@ -66,22 +66,18 @@ class WassersteinLoss(L1ADLoss):
         # emd is a scalar tensor representing the transport cost
         loss = self.scale * emd
         return self.reduce(loss)
-    
+
 
 class NAE(L1ADLoss):
     """
     Compute the energy difference between positive and negative samples.
 
-    :param scale: Scaling factor applied to the computed distance.    
+    :param scale: Scaling factor applied to the computed distance.
     """
 
     name: str = "nae"
 
-    def __init__(
-        self,
-        scale: float = 1.0,
-        **kwargs
-    ):
+    def __init__(self, scale: float = 1.0, **kwargs):
         super().__init__(scale=scale, reduction="none")
 
     def forward(

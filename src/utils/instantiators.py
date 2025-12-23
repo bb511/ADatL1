@@ -33,6 +33,7 @@ def instantiate_callbacks(callbacks_cfg: DictConfig) -> List[Callback]:
 
     return callbacks
 
+
 def instantiate_eval_callbacks(
     callbacks_cfg: DictConfig, datamodule: LightningDataModule
 ) -> List[Callback]:
@@ -55,13 +56,14 @@ def instantiate_eval_callbacks(
         if isinstance(cb_conf, DictConfig) and "_target_" in cb_conf:
             log.info(f"Instantiating callback <{cb_conf._target_}>")
             extra_kwargs = {}
-            if 'datamodule' in cb_conf and cb_conf.datamodule:
+            if "datamodule" in cb_conf and cb_conf.datamodule:
                 del cb_conf.datamodule
-                extra_kwargs['datamodule'] = datamodule
+                extra_kwargs["datamodule"] = datamodule
 
             callbacks.append(hydra.utils.instantiate(cb_conf, **extra_kwargs))
 
     return callbacks
+
 
 def instantiate_loggers(logger_cfg: DictConfig) -> List[Logger]:
     """Instantiates loggers from config.

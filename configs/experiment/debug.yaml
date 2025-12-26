@@ -9,7 +9,7 @@ defaults:
   - override /callbacks: basic
   - override /trainer: cpu
   - override /evaluator: default
-  - override /evaluator_callbacks: default
+  - override /evaluator_callbacks: basic
   - override /logger: mlflow
 
 tags: ["debug"]
@@ -20,11 +20,17 @@ run_name: test
 seed: 12345
 
 trainer:
+  # gradient_clip_algorithm: norm
+  # gradient_clip_val: 1.0
+  overfit_batches: 1
   min_epochs: 1
-  max_epochs: 1
-  limit_train_batches: 10
+  max_epochs: 50
+  # limit_train_batches: 10
+  limit_val_batches: 10
+  limit_test_batches: 10
+  # check_val_every_n_epoch: 2
 
-test: true
+# test: true
 
 callbacks:
   anomaly_rate:

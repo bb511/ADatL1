@@ -3,7 +3,7 @@ import os
 from typing import Optional
 from collections import defaultdict
 from pathvalidate import sanitize_filename
-import warnings
+
 from weakref import proxy
 from pathlib import Path
 import copy
@@ -14,6 +14,9 @@ from pytorch_lightning.callbacks import Callback
 
 from src.callbacks.checkpointing.criterion import Criterion
 from src.plot import horizontal_bar
+from src.utils import pylogger
+
+log = pylogger.RankedLogger(__name__)
 
 
 class DatasetAwareModelCheckpoint(Callback):
@@ -43,9 +46,15 @@ class DatasetAwareModelCheckpoint(Callback):
         self.save_last = self.criterion.name == "last"
 
         self.checkpoints = defaultdict(list)
+        self.ds_criterion = None
 
-    def on_train_start(self, trainer, pl_module):
+    def on_validation_start(self, trainer, pl_module):
         """Initialize the criterion object for each dataset at the start of training."""
+        if not self.ds_criterion is None:
+            return
+        if getattr(trainer, "sanity_checking", False):
+            return
+
         all_valid_datasets = list(getattr(trainer, "val_dataloaders").keys())
         relevant_ds = [ds for ds in all_valid_datasets if ds not in self.skip_ds]
 
@@ -64,26 +73,26 @@ class DatasetAwareModelCheckpoint(Callback):
 
         self._process_metric_across_datasets(trainer, pl_module, ds_metrics)
 
+    def _metric_key(self, dataset_name: str) -> str:
+        return f"val/{dataset_name}/{self.monitor}"
+
     def _get_metric(self, available_metrics: dict, dataset_name: str):
         """Cache the value of the specified metric for one given data set name.
 
         This is expecting the format of the metric name 'val/[dataset_name]/metric_name'
         make sure that this is how the callback metrics are named.
         """
-        for full_metric_name, metric_value in available_metrics.items():
-            try:
-                dataset_match = full_metric_name.split("/")[1] == dataset_name
-            except:
-                continue
-
-            metric_match = full_metric_name.split("/")[-1] == self.monitor
-            if dataset_match and metric_match:
+        metric_key = self._metric_key(dataset_name)
+        if metric_key in available_metrics:
+            metric_value = available_metrics[metric_key]
+            if hasattr(metric_value, 'detach'):
                 return metric_value.detach().cpu().float().item()
+            else:
+                return float(metric_value)
 
-        warnings.warn(
+        log.warn(
             f"Checkpoint for metric '{self.monitor}' not found in logged metrics. "
             f"Did you call `log('{self.monitor}')` in the LightningModule?",
-            category=UserWarning,
         )
         return np.nan
 

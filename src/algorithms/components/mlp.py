@@ -9,7 +9,10 @@ class MLP(nn.Module):
     """
     Multi-layer perceptron.
 
-    :param nodes: Number of nodes composing each of the layers.
+    :param nodes: List of number of nodes composing each of the layers.
+    :param batchnorm: Whether to use batch normalization after each layer or not.
+    :param init_weight: Callable method to initialize the weights of the decoder nodes.
+    :param init_bias: Callable method to initialize the biases of the decoder nodes.
     """
 
     def __init__(

@@ -4,7 +4,7 @@ from collections import defaultdict
 import pickle
 
 from pytorch_lightning.callbacks import Callback
-from torchmetrics.aggregation import SumMetric
+from torchmetrics.aggregation import MeanMetric
 
 from src.evaluation.callbacks import utils
 from src.plot import horizontal_bar
@@ -26,7 +26,7 @@ class LossCallback(Callback):
         self.dset_losses = defaultdict(lambda: defaultdict(float))
         for loss_name in self.loss_names:
             for dset_name in dset_names:
-                self.dset_losses[loss_name][dset_name] = SumMetric().to(self.device)
+                self.dset_losses[loss_name][dset_name] = MeanMetric().to(self.device)
 
     def on_test_batch_end(
         self, trainer, pl_module, outputs, batch, batch_idx, dataloader_idx=0
@@ -87,18 +87,18 @@ class LossCallback(Callback):
     def clear_crit_summary(self):
         self.loss_summary.clear()
 
-    def get_optimized_metric(self, loss_name: str):
+    def get_optimized_metric(self, loss_name: str, ckpt_ds: str, test_ds: str):
         """Get one number that one should optimize on this callback.
 
-        Here it is the value of the given loss_name that a model checkpointed on the
-        main_val obtains on the main_test.
+        Here it is the value of the given loss_name that a model checkpointed on a given
+        checkponint dataset and evaluated on a given test data set.
         """
         available_losses = list(self.loss_summary.keys())
         if not loss_name in available_losses:
             raise ValueError(f"Choose {available_losses}")
 
-        mainval_maintest_loss = self.loss_summary[loss_name]["main_val"]["main_test"]
-        return mainval_maintest_loss
+        optimized_loss = self.loss_summary[loss_name][ckpt_ds][test_ds]
+        return optimized_loss
 
     def _cache_summary(self, cache_folder: Path):
         """Cache the summary metric dictionary."""

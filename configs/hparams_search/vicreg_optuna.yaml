@@ -13,6 +13,8 @@ optimized_metric_config:
     name: LossCallback
     params:
       loss_name: loss
+      ckpt_ds: main_val
+      test_ds: main_test
   direction: minimize
 
 # here we define Optuna hyperparameter search
@@ -52,7 +54,6 @@ hydra:
       algorithm.optimizer._target_: choice(torch.optim.SGD,torch.optim.AdamW)
       algorithm.optimizer.lr: tag(log, interval(1e-4, 1e-3))
       algorithm.optimizer.weight_decay: tag(log, interval(1e-5, 1e-3))
-      data.batch_size: choice(16276, 32552, 65104)
 
       algorithm.feature_blur.prob: choice(0.0, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1.0)
       algorithm.feature_blur.magnitude: choice(0.0, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1.0)
@@ -65,3 +66,4 @@ hydra:
       algorithm.loss.inv_coef: tag(log, interval(10, 50))
       algorithm.loss.var_coef: tag(log, interval(10, 50))
       algorithm.loss.cov_coef: tag(log, interval(0.3, 3))
+      # data.batch_size: choice(16276, 32552, 65104)

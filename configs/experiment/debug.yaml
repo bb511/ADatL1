@@ -22,9 +22,9 @@ seed: 12345
 trainer:
   # gradient_clip_algorithm: norm
   # gradient_clip_val: 1.0
-  overfit_batches: 1
+  # overfit_batches: 1
   min_epochs: 1
-  max_epochs: 50
+  max_epochs: 10
   # limit_train_batches: 10
   limit_val_batches: 10
   limit_test_batches: 10

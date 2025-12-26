@@ -8,7 +8,6 @@ python3 src/train.py \
     # hydra/launcher=submitit_local \
     # hydra.launcher.cpus_per_task=1 \
 
-
 # vicreg hyperparameter search on gpu.
 # taskset -c 37-39 \
 # python3 src/train.py \

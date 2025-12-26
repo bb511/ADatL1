@@ -26,10 +26,10 @@ hydra:
 
     # storage URL to persist optimization results
     # for example, you can use SQLite if you set 'sqlite:///example.db'
-    storage: sqlite:///optuna_logs/optim_v3.db
+    storage: sqlite:///optuna_logs/optim_v2.db
 
     # name of the study to persist optimization results
-    study_name: test1
+    study_name: vae_search_broad_bs16k
 
     # number of parallel workers
     n_jobs: 1
@@ -38,7 +38,7 @@ hydra:
     direction: maximize
 
     # total number of runs that will be executed
-    n_trials: 250
+    n_trials: 80
 
     # choose Optuna hyperparameter sampler
     # you can choose bayesian sampler (tpe), random search (without optimization), grid sampler, and others
@@ -46,12 +46,15 @@ hydra:
     sampler:
       _target_: optuna.samplers.TPESampler
       # seed: 1234
-      n_startup_trials: 15 # number of random sampling runs before optimization starts
+      n_startup_trials: 60 # number of random sampling runs before optimization starts
 
-    # define hyperparameter search space
+    # define hyperparameter search space. Assumes using torch.optim.AdamW
     params:
-      algorithm.optimizer._target_: choice(torch.optim.SGD, torch.optim.AdamW)
-      algorithm.optimizer.lr: tag(log, interval(1e-4, 1e-3))
-      algorithm.optimizer.weight_decay: tag(log, interval(1e-5, 1e-3))
-      algorithm.loss.scale: choice(0.0, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1.0)
-      data.batch_size: choice(16276, 32552, 65104)
+      trainer.gradient_clip_val: choice(0.0, 0.5, 1.0, 2.0, 5.0)
+      algorithm.optimizer.betas: choice([0.9, 0.999], [0.9, 0.99], [0.95, 0.999], [0.95, 0.99])
+      algorithm.optimizer.eps: choice(1e-8, 1e-7, 1e-6, 1e-5)
+      algorithm.optimizer.lr: tag(log, interval(1e-5, 1e-3))
+      algorithm.optimizer.weight_decay: tag(log, interval(1e-10, 1e-3))
+      algorithm.loss.kl_scale: tag(log, interval(1, 1000))
+      algorithm.kl_warmup_frac: choice(0.0, 0.05, 0.1, 0.2, 0.3, 0.5)
+      # data.batch_size: choice(4096, 16276, 65104)

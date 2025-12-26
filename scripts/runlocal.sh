@@ -1,10 +1,12 @@
 # Short debug script.
-taskset -c 0-9 \
+# taskset -c 0-9 \
 python3 src/train.py \
     -m \
     experiment=debug \
     paths.raw_data_dir=/data/deodagiu/adl1t_data/parquet_files \
-    # hparams_search=vicreg_optuna \
+    # hparams_search=vae_optuna \
+    # hydra/launcher=submitit_local \
+    # hydra.launcher.cpus_per_task=1 \
 
 
 # vicreg hyperparameter search on gpu.
@@ -19,3 +21,14 @@ python3 src/train.py \
 #     paths.raw_data_dir=/data/deodagiu/adl1t_data/parquet_files \
 #     data.val_batches=4 \
 #     trainer.devices=[2]
+
+# vae hyperparameter search on cpu.
+# taskset -c 60-69 \
+# python3 src/train.py \
+#     -m \
+#     hydra/launcher=submitit_local \
+#     hydra.launcher.cpus_per_task=1 \
+#     hparams_search=vae_optuna \
+#     experiment=vae \
+#     experiment_name=vae_search_broad_bs16k \
+#     paths.raw_data_dir=/data/deodagiu/adl1t_data/parquet_files

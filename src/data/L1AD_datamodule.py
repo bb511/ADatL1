@@ -2,14 +2,15 @@ from typing import Any, Optional, Union
 from collections import defaultdict
 from pathlib import Path
 import gc
+import warnings
 
 import torch
 import numpy as np
 import awkward as ak
 
-import mlflow
 from pytorch_lightning import LightningDataModule
 from torch.utils.data import TensorDataset, Dataset
+from torch.utils.data import DataLoader
 
 from src.utils import pylogger
 from colorama import Fore, Back, Style
@@ -17,6 +18,12 @@ from src.data.components.dataset import L1ADDataset
 from src.data.components.normalization import L1DataNormalizer
 
 log = pylogger.RankedLogger(__name__)
+
+warnings.filterwarnings(
+    "ignore",
+    message=".*does not have many workers.*",
+    category=UserWarning,
+)
 
 
 class L1ADDataModule(LightningDataModule):
@@ -51,6 +58,10 @@ class L1ADDataModule(LightningDataModule):
         :param data_mlready: Class formats the data to be ready for ML pipeline.
         :param data_awkward2np: Class that converts the data from jagged awkward arrays
             to fixed size numpy arrays to give to the torch dataloader.
+        :param train_features: Dictionary where keys are strings of the objects that
+            point to list of features to be used during
+        :param l1_scales: Dictionary of the scales that the l1 trigger applies to
+            all features that could be in the data set.
         :param batch_size: Integer specifying the batch size of the data.
         :param val_batches: Integer specifying how many batches to split each
             validation dataset into. Defaults to -1, which means to use the same batch
@@ -203,11 +214,19 @@ class L1ADDataModule(LightningDataModule):
         which basically makes the loading of numpy arrays that are already in memory
         a bit faster.
         """
-        return L1ADDataset(
+        dataset = L1ADDataset(
             self.data_train,
             self.labels_train,
             batch_size=self.batch_size_per_device,
             shuffler=self.shuffler,
+        )
+
+        return DataLoader(
+            dataset,
+            batch_size=None,
+            shuffle=False,
+            num_workers=0,
+            persistent_workers=False,
         )
 
     def val_dataloader(self) -> Dataset[Any]:
@@ -222,16 +241,30 @@ class L1ADDataModule(LightningDataModule):
         # Make sure main_val is always first in the dict !!!
         # The rate callback expects this.
         main_val = L1ADDataset(self.data_val, self.labels_val, batch_size=batch_size)
+        main_val = DataLoader(
+            main_val,
+            batch_size=None,
+            shuffle=False,
+            num_workers=0,
+            persistent_workers=False,
+        )
         data_val.update({"main_val": main_val})
         if not self.aux_val:
             return data_val
 
         for dataset_name in self.aux_val.keys():
             batch_size = self._get_validation_batchsize(self.aux_val[dataset_name])
-            data_val[dataset_name] = L1ADDataset(
+            dataset = L1ADDataset(
                 self.aux_val[dataset_name],
                 self.aux_val_labels[dataset_name],
                 batch_size=batch_size,
+            )
+            data_val[dataset_name] = DataLoader(
+                dataset,
+                batch_size=None,
+                shuffle=False,
+                num_workers=0,
+                persistent_workers=False,
             )
 
         return data_val
@@ -245,6 +278,13 @@ class L1ADDataModule(LightningDataModule):
         # Shuffling is by default false for the custom dataset.
         batch_size = self._get_validation_batchsize(self.data_test)
         main_test = L1ADDataset(self.data_test, self.labels_test, batch_size=batch_size)
+        main_test = DataLoader(
+            main_test,
+            batch_size=None,
+            shuffle=False,
+            num_workers=0,
+            persistent_workers=False,
+        )
         data_test = {}
         data_test.update({"main_test": main_test})
         if not self.aux_test:
@@ -252,10 +292,17 @@ class L1ADDataModule(LightningDataModule):
 
         for dataset_name in self.aux_test.keys():
             batch_size = self._get_validation_batchsize(self.aux_test[dataset_name])
-            data_test[dataset_name] = L1ADDataset(
+            dataset = L1ADDataset(
                 self.aux_test[dataset_name],
                 self.aux_test_labels[dataset_name],
                 batch_size=batch_size,
+            )
+            data_test[dataset_name] = DataLoader(
+                dataset,
+                batch_size=None,
+                shuffle=False,
+                num_workers=0,
+                persistent_workers=False,
             )
 
         return data_test

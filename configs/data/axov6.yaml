@@ -17,6 +17,8 @@ zerobias: ${paths.zerobias}
 signal: ${paths.signal}
 background: ${paths.background}
 
+# Get features to train on.
+# Select the kinematic features of each standard object.
 train_features:
   muons: ['Et', 'eta', 'phi']
   jets: ['Et', 'eta', 'phi']
@@ -27,7 +29,7 @@ train_features:
 batch_size: 16384
 
 # How many batches to split the validation data into. -1 means use batch_size
-val_batches: 1
+val_batches: -1
 
 # Seed for shuffling the data, if any shuffling is happening.
 seed: ${seed}

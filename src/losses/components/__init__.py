@@ -47,9 +47,12 @@ class L1ADLoss(nn.Module):
     def reduce(self, loss: torch.Tensor) -> torch.Tensor:
         if self.reduction == "mean" and loss.dim() > 0:
             return loss.mean()
-        elif self.reduction == "sum" and loss.dim() > 0:
+        if self.reduction == "sum" and loss.dim() > 0:
             return loss.sum()
-        return loss
+        if self.reduction == "none" and loss.dim() >0:
+            return loss
+
+        raise ValueError(f"Unknown reduction: {self.reduction}")
 
 
 class MultiLoss(L1ADLoss):

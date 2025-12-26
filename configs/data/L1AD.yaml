@@ -31,7 +31,7 @@ train_features:
 batch_size: 16384
 
 # How many batches to split the validation data into. -1 means use batch_size
-val_batches: 1
+val_batches: -1
 
 # Seed for shuffling the data, if any shuffling is happening.
 seed: ${seed}

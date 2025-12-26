@@ -3,18 +3,25 @@
 defaults:
   - override /data: axov6
   - override /algorithm: vae
-  - override /callbacks: default
+  - override /callbacks: basic
   - override /trainer: cpu
   - override /evaluator: default
-  - override /evaluator_callbacks: default
+  - override /evaluator_callbacks: basic
   - override /logger: mlflow
 
 seed: 123
 tags: ["axo_v6", "vae"]
 
-experiment_name: vae_alpha${algorithm.loss.scale}
-run_name: bs${data.batch_size}_optim${algorithm.optimizer._target_}_lr${algorithm.optimizer.lr}_wd${algorithm.optimizer.weight_decay}
+experiment_name: vae_training
+run_name: klscale${algorithm.loss.kl_scale}_lr${algorithm.optimizer.lr}_wd${algorithm.optimizer.weight_decay}
 
+trainer:
+  gradient_clip_val: 1.0
+  gradient_clip_algorithm: norm
+  min_epochs: 1
+  max_epochs: 10
+  limit_val_batches: 10
+  limit_test_batches: 10
 
 # Make checkpoints at the minimum of the loss, only for the main data set and simulation.
 # Make checkpoints at the maximum of the rate for the signal data sets, considering

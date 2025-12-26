@@ -22,13 +22,17 @@ class AnomalyEfficiencyCallback(Callback):
     a model checkpointed on the minimum of the total loss by using the KL div as the
     anomaly score, rather than the total loss, in this callback.
 
-    :target_rate: Float specifying the target rate of anomalies.
-    :bc_rate: Float containing the bunch crossing rate in kHz. This is the
+    :param target_rate: Float specifying the target rate of anomalies.
+    :param bc_rate: Float containing the bunch crossing rate in kHz. This is the
         revolution frequency of the LHC times the number of proton bunches in the
         LHC tunnel, which gives the total efficiency of events that are processed by
         the L1 trigger.
-    :materic_names: Which model metrics to use as the anomaly score to calculate the
-        efficiency on.
+    :param materic_names: Which model metrics to use as the anomaly score to calculate
+        the efficiency on.
+    :param log_raw_mlflow: Boolean to decide whether to log the raw plots produced by
+        this callback to mlflow artifacts. Default is True. An html gallery of all the
+        plots is made by default, so if this is set to false, one can still view the
+        plots produced with this callback in the gallery.
     """
 
     def __init__(
@@ -37,6 +41,7 @@ class AnomalyEfficiencyCallback(Callback):
         bc_rate: int,
         metric_names: list[str],
         skip_ds: list[str] = [],
+        log_raw_mlflow: bool = True
     ):
         super().__init__()
         self.device = None
@@ -44,6 +49,7 @@ class AnomalyEfficiencyCallback(Callback):
         self.bc_rate = bc_rate
         self.metric_names = metric_names
         self.skip_ds = set(skip_ds)
+        self.log_raw_mlflow = log_raw_mlflow
         self.eff_summary = defaultdict(lambda: defaultdict(lambda: defaultdict(float)))
 
     def on_test_start(self, trainer, pl_module):
@@ -154,11 +160,14 @@ class AnomalyEfficiencyCallback(Callback):
                     if relevant_rate_name in rate_name
                     and not self._get_dsname(rate_name) in self.skip_ds
                 }
-                self._plot(effs, "efficiency", metric_name, target_rate, plot_folder)
+                trate = f"{target_rate} kHz"
+                ascore = f"anomaly score: {metric_name}"
+                xlabel = f"efficiency at threshold: {trate}\n{ascore}"
+                self._plot(effs, xlabel, plot_folder, percent=True)
                 self._store_summary(effs, ckpt_name, metric_name, target_rate)
 
         utils.mlflow.log_plots_to_mlflow(
-            trainer, ckpt_name, "effs", plot_folder, make_gallery=True
+            trainer, ckpt_name, "effs", plot_folder, log_raw=self.log_raw_mlflow, make_gallery=True
         )
 
     def plot_summary(self, trainer, root_folder: Path):
@@ -171,7 +180,10 @@ class AnomalyEfficiencyCallback(Callback):
             for target_rate in self.eff_summary[metric_name].keys():
                 # Get the summary metric per checkpoint.
                 smet = self.eff_summary[metric_name][target_rate]
-                self._plot(smet, "mu^2/sigma", metric_name, target_rate, plot_folder)
+                trate = f"{target_rate} kHz"
+                ascore = f"anomaly score: {metric_name}"
+                xlabel = f"mu^2/sigma at threshold: {trate}\n{ascore}"
+                self._plot(smet, xlabel, plot_folder)
 
         utils.mlflow.log_plots_to_mlflow(trainer, None, "effs", plot_folder)
 
@@ -193,11 +205,10 @@ class AnomalyEfficiencyCallback(Callback):
         metric_across_ckpts = self.eff_summary[metric_name][target_rate]
         return max(metric_across_ckpts.values())
 
-    def _plot(self, data: dict, name: str, mname: str, trate: float, plot_folder: Path):
+    def _plot(self, data: dict, xlabel: str, plot_folder: Path, percent: bool = False):
         """Plot the efficiency per data set for an anomaly metric at target rate."""
-        xlabel = f"{name} at threshold: {trate} kHz\n" f"anomaly score: {mname}"
         ylabel = " "
-        horizontal_bar.plot_yright(data, data, xlabel, ylabel, plot_folder)
+        horizontal_bar.plot_yright(data, data, xlabel, ylabel, plot_folder, percent)
 
     def _store_summary(self, effs: dict, ckpt_name: str, metric: str, trate: float):
         """Store the summary statistic for the efficiency for one checkpoint.

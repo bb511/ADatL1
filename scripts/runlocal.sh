@@ -4,6 +4,8 @@ python3 src/train.py \
     -m \
     experiment=debug \
     paths.raw_data_dir=/data/deodagiu/adl1t_data/parquet_files \
+    trainer=gpu \
+    trainer.devices=[0]
     # hparams_search=vae_optuna \
     # hydra/launcher=submitit_local \
     # hydra.launcher.cpus_per_task=1 \

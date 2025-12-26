@@ -12,11 +12,20 @@ from src.plot import matrix
 
 
 class LossCallback(Callback):
-    """Evaluate the loss on the test data sets."""
+    """Evaluate the loss on the test data sets.
 
-    def __init__(self, loss_names: list[str]):
+    :param loss_names: List of strings specifying the names of the losses that this
+        callback tracks and creates plots of.
+    :param log_raw_mlflow: Boolean to decide whether to log the raw plots produced by
+        this callback to mlflow artifacts. Default is True. An html gallery of all the
+        plots is made by default, so if this is set to false, one can still view the
+        plots produced with this callback in the gallery.
+    """
+
+    def __init__(self, loss_names: list[str], log_raw_mlflow: bool = True):
         self.device = None
         self.loss_names = loss_names
+        self.log_raw_mlflow = log_raw_mlflow
         self.loss_summary = defaultdict(lambda: defaultdict(dict))
 
     def on_test_epoch_start(self, trainer, pl_module):
@@ -59,7 +68,7 @@ class LossCallback(Callback):
             self._store_summary(loss_name, losses, ckpt_name)
 
         utils.mlflow.log_plots_to_mlflow(
-            trainer, ckpt_name, "losses", plot_folder, make_gallery=True
+            trainer, ckpt_name, "losses", plot_folder, log_raw=self.log_raw_mlflow, make_gallery=True
         )
 
     def _store_summary(self, loss_name: str, losses: dict, ckpt_name: str):

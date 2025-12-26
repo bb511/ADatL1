@@ -25,6 +25,10 @@ class BkgRatePileup(Callback):
     :datamodule: The datamodule that was used during the training of the model.
     :materic_names: Which model metrics to use as the anomaly score to calculate the
         rate on.
+    :param log_raw_mlflow: Boolean to decide whether to log the raw plots produced by
+        this callback to mlflow artifacts. Default is True. An html gallery of all the
+        plots is made by default, so if this is set to false, one can still view the
+        plots produced with this callback in the gallery.
     """
 
     def __init__(
@@ -33,12 +37,14 @@ class BkgRatePileup(Callback):
         bc_rate: int,
         metric_names: list[str],
         datamodule: LightningDataModule,
+        log_raw_mlflow: bool = True
     ):
         super().__init__()
         self.device = None
         self.target_rates = target_rates
         self.bc_rate = bc_rate
         self.metric_names = metric_names
+        self.log_raw_mlflow = log_raw_mlflow
         self.pu_per_ds = self._get_pileup_data(datamodule)
 
     def on_test_start(self, trainer, pl_module):
@@ -191,7 +197,7 @@ class BkgRatePileup(Callback):
             scatter.plot_connected(pu_rates, xlabel, ylabel, dataset_name, plot_folder)
 
         utils.mlflow.log_plots_to_mlflow(
-            trainer, ckpt_name, "pus", plot_folder, make_gallery=True
+            trainer, ckpt_name, "pus", plot_folder, log_raw=self.log_raw_mlflow, make_gallery=True
         )
 
     def _get_dsname(self, rate_name: str):

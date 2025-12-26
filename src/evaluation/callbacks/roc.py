@@ -19,13 +19,18 @@ class ROCs(Callback):
     dataloader is used to compute the FPRs. The other dataloaders are treated as signal
     no matter what they actually are. The ROC curves are computed thus.
 
-    :metric_names: List of strings specifying which model metrics to use in computing
-        the ROC curve, i.e., which model metrics to use as anomaly score.
+    :param metric_names: List of strings specifying which model metrics to use in
+        computing the ROC curve, i.e., which model metrics to use as anomaly score.
+    :param log_raw_mlflow: Boolean to decide whether to log the raw plots produced by
+        this callback to mlflow artifacts. Default is True. An html gallery of all the
+        plots is made by default, so if this is set to false, one can still view the
+        plots produced with this callback in the gallery.
     """
 
-    def __init__(self, metric_names: list[str]):
+    def __init__(self, metric_names: list[str], log_raw_mlflow: bool = True):
         super().__init__()
         self.device = None
+        self.log_raw_mlflow = log_raw_mlflow
         self.metric_names = metric_names
 
     def on_test_start(self, trainer, pl_module):
@@ -123,7 +128,7 @@ class ROCs(Callback):
             roc.plot(roc_per_dataset, auroc_per_dataset, metric_name, plot_folder)
 
         utils.mlflow.log_plots_to_mlflow(
-            trainer, ckpt_name, "rocs", plot_folder, make_gallery=True
+            trainer, ckpt_name, "rocs", plot_folder, log_raw=self.log_raw_mlflow, make_gallery=True
         )
 
     def _convert2numpy(self, arr: tuple[torch.Tensor] | torch.Tensor):

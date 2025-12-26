@@ -2,3 +2,4 @@
 
 _target_: src.evaluation.callbacks.loss.LossCallback
 loss_name: loss
+log_raw_mlflow: true

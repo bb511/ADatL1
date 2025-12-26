@@ -24,15 +24,16 @@ trainer:
   # gradient_clip_val: 1.0
   # overfit_batches: 1
   min_epochs: 1
-  max_epochs: 10
-  # limit_train_batches: 10
+  max_epochs: 1
+  limit_train_batches: 10
   limit_val_batches: 10
   limit_test_batches: 10
   # check_val_every_n_epoch: 2
 
-# test: true
+test: true
 
 callbacks:
+  log_data_mlflow: null
   anomaly_rate:
     metric_names: ['loss/reco/full', 'loss/kl/full']
     target_rates: [1]
@@ -94,3 +95,4 @@ evaluator_callbacks:
     metric_names: ['loss/kl/full', 'loss/reco/full']
     target_rates: [1]
     skip_ds: ['main_test', 'SingleNeutrino_E-10-gun']
+    log_raw_mlflow: false

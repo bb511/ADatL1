@@ -14,7 +14,6 @@ from pytorch_lightning.callbacks import Callback
 from colorama import Fore, Back, Style
 
 from src.utils import pylogger
-
 log = pylogger.RankedLogger(__name__)
 
 from src.utils.checkpoints import is_valid_ckpt

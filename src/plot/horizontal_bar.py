@@ -33,13 +33,13 @@ def plot(data: dict, xlabel: str, save_dir: Path):
 
 
 def plot_yright(
-        data: dict,
-        ydata: dict,
-        xlabel: str,
-        ylabel: str,
-        save_dir: Path,
-        percent: bool = False
-    ):
+    data: dict,
+    ydata: dict,
+    xlabel: str,
+    ylabel: str,
+    save_dir: Path,
+    percent: bool = False
+):
     """Plots the data in a horizontal bar plot.
 
     Expects a dictionary with data set names corresponding to number entries. The y-axis

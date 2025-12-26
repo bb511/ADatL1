@@ -3,3 +3,4 @@
 # The metric names need be specified like they are given by the model.
 _target_: src.evaluation.callbacks.roc.ROCs
 metric_names: ["loss/total/full"]
+log_raw_mlflow: true

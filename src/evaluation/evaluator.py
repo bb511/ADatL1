@@ -58,6 +58,7 @@ class Evaluator:
             **trainer_kwargs,
         )
 
+        self.evaluator.object_feature_map_1d = None
         self.evaluator.strat_name = None
         self.evaluator.metric_name = None
         self.evaluator.criterion_name = None

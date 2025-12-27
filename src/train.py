@@ -90,8 +90,7 @@ def train(cfg: DictConfig) -> Tuple[Dict[str, Any], Dict[str, Any]]:
     if cfg.get("test"):
         log.info(Back.MAGENTA + 8 * "-" + "STARTING TESTING" + 8 * "-")
         evaluator = test(cfg, datamodule, algorithm, logger)
-
-    object_dict.update({"evaluator": evaluator})
+        object_dict.update({"evaluator": evaluator})
 
     metric_dict = {**train_metrics}
     return metric_dict, object_dict
@@ -147,8 +146,8 @@ def main(cfg: DictConfig) -> Optional[float]:
     # metric_value = get_metric_value(
     # metric_dict=metric_dict, metric_name=cfg.get("optimized_metric")
     # )
-
-    metric_value = object_dict["evaluator"].optimized_metric
+    evaluator = object_dict.get("evaluator", None)
+    metric_value = evaluator.optimized_metric if evaluator else None
 
     # return optimized metric
     return metric_value

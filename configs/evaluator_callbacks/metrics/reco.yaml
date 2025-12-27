@@ -1,0 +1,9 @@
+# @package evaluator_callbacks.metrics
+
+_target_: src.evaluation.callbacks.reco.ReconstructionPlots
+nbatches: 1
+output_name: reconstructed_data
+datamodule: true
+ckpt_dataset: main_val
+datasets: ['main_test']
+log_raw_mlflow: true

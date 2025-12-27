@@ -197,7 +197,7 @@ class BkgRatePileup(Callback):
             scatter.plot_connected(pu_rates, xlabel, ylabel, dataset_name, plot_folder)
 
         utils.mlflow.log_plots_to_mlflow(
-            trainer, ckpt_name, "pus", plot_folder, log_raw=self.log_raw_mlflow, make_gallery=True
+            trainer, ckpt_name, "pus", plot_folder, log_raw=self.log_raw_mlflow, gallery_name='pus'
         )
 
     def _get_dsname(self, rate_name: str):

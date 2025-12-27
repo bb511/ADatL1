@@ -128,7 +128,7 @@ class ROCs(Callback):
             roc.plot(roc_per_dataset, auroc_per_dataset, metric_name, plot_folder)
 
         utils.mlflow.log_plots_to_mlflow(
-            trainer, ckpt_name, "rocs", plot_folder, log_raw=self.log_raw_mlflow, make_gallery=True
+            trainer, ckpt_name, "rocs", plot_folder, log_raw=self.log_raw_mlflow, gallery_name='rocs'
         )
 
     def _convert2numpy(self, arr: tuple[torch.Tensor] | torch.Tensor):

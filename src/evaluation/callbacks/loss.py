@@ -68,7 +68,7 @@ class LossCallback(Callback):
             self._store_summary(loss_name, losses, ckpt_name)
 
         utils.mlflow.log_plots_to_mlflow(
-            trainer, ckpt_name, "losses", plot_folder, log_raw=self.log_raw_mlflow, make_gallery=True
+            trainer, ckpt_name, "losses", plot_folder, log_raw=self.log_raw_mlflow, gallery_name='losses'
         )
 
     def _store_summary(self, loss_name: str, losses: dict, ckpt_name: str):

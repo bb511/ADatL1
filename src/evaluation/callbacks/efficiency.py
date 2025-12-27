@@ -167,7 +167,7 @@ class AnomalyEfficiencyCallback(Callback):
                 self._store_summary(effs, ckpt_name, metric_name, target_rate)
 
         utils.mlflow.log_plots_to_mlflow(
-            trainer, ckpt_name, "effs", plot_folder, log_raw=self.log_raw_mlflow, make_gallery=True
+            trainer, ckpt_name, "effs", plot_folder, log_raw=self.log_raw_mlflow, gallery_name="effs"
         )
 
     def plot_summary(self, trainer, root_folder: Path):

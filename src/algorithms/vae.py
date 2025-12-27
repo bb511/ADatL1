@@ -62,7 +62,7 @@ class VAE(L1ADLightningModule):
             target=x,
             kl_scale=kl_current_scale
         )
-        del reconstruction, x, z
+        del x, z, z_mean
 
         return {
             # Used for backpropagation:
@@ -75,7 +75,7 @@ class VAE(L1ADLightningModule):
             "loss/total/full": total_loss.detach(),
             "loss/reco/full": reco_loss.detach(),
             "loss/kl/full": kl_loss.detach(),
-            "z_mean_squared": z_mean.pow(2),
+            "reconstructed_data": reconstruction,
         }
 
     def outlog(self, outdict: dict) -> dict:

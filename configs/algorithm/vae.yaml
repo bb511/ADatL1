@@ -16,7 +16,7 @@ decoder:
 loss:
   _target_: src.losses.vae.ClassicVAELoss
   scale: 1
-  kl_scale: 193
+  kl_scale: 0
 
 # Annealing of the KL scale scalar.
 kl_warmup_frac: 0.0

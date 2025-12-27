@@ -11,7 +11,7 @@ def plot(roc: dict, auroc: dict, metric: str, save_dir: Path):
 
     Expects two dictionaries: one with the roc data, i.e., tpr, fpr and thresholds;
     the other with the auroc data. The keys in these dictionaries correspond to the
-    data set names. The metric is the name of the metric that is used as the
+    data set names. 'metric' is the name of the metric that is used as the
     anomaly score.
     """
     plt.style.use(hep.style.CMS)

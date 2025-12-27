@@ -1,5 +1,5 @@
 # Short debug script.
-# taskset -c 0-9 \
+taskset -c 0-2 \
 python3 src/train.py \
     -m \
     experiment=debug \

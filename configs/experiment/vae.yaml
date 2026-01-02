@@ -15,6 +15,10 @@ tags: ["axo_v6", "vae"]
 experiment_name: vae_training
 run_name: bs${data.batch_size}_klwarm${algorithm.kl_warmup_frac}_klscale${algorithm.loss.kl_scale}_lr${algorithm.optimizer.lr}
 
+algorithm:
+  optimizer:
+    lr: ${mul:${lr},${sqrt:${div:${data.batch_size},16384}}}
+
 trainer:
   gradient_clip_algorithm: norm
   gradient_clip_val: 1.0

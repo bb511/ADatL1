@@ -4,8 +4,6 @@ from pathlib import Path
 
 import torch
 from pytorch_lightning.callbacks import Callback
-from pytorch_lightning.loggers import MLFlowLogger, Logger
-from pytorch_lightning import Trainer, LightningModule, LightningDataModule
 from torchmetrics.classification import BinaryROC, BinaryAUROC
 
 from src.evaluation.callbacks import utils
@@ -19,19 +17,19 @@ class ROCs(Callback):
     dataloader is used to compute the FPRs. The other dataloaders are treated as signal
     no matter what they actually are. The ROC curves are computed thus.
 
-    :param metric_names: List of strings specifying which model metrics to use in
-        computing the ROC curve, i.e., which model metrics to use as anomaly score.
+    :param metric_names: String specifying the metric name that is used as anomaly
+        score. Needs to be in the outdict returned by the model.
     :param log_raw_mlflow: Boolean to decide whether to log the raw plots produced by
         this callback to mlflow artifacts. Default is True. An html gallery of all the
         plots is made by default, so if this is set to false, one can still view the
         plots produced with this callback in the gallery.
     """
 
-    def __init__(self, metric_names: list[str], log_raw_mlflow: bool = True):
+    def __init__(self, metric_name: str, log_raw_mlflow: bool = True):
         super().__init__()
         self.device = None
         self.log_raw_mlflow = log_raw_mlflow
-        self.metric_names = metric_names
+        self.metric_name = metric_name
 
     def on_test_start(self, trainer, pl_module):
         """Check if 'main_test' labeled dataloader is among the test dataloaders."""
@@ -50,37 +48,25 @@ class ROCs(Callback):
             if ds_name == "main_test":
                 # Skip the background, no point in computing ROC for bkg only.
                 continue
-            for metric_name in self.metric_names:
-                metric_name = metric_name.replace("/", "_")
-                self.rocs[f"{ds_name}/{metric_name}"] = BinaryROC().to(self.device)
-                self.aurocs[f"{ds_name}/{metric_name}"] = BinaryAUROC().to(self.device)
+            self.rocs[f"{ds_name}"] = BinaryROC().to(self.device)
+            self.aurocs[f"{ds_name}"] = BinaryAUROC().to(self.device)
 
     def on_test_batch_end(
         self, trainer, pl_module, outputs, batch, batch_idx, dataloader_idx: int = 0
     ):
         """Compute the number of true positives for the given number of thresholds."""
         dataset_name = list(trainer.test_dataloaders.keys())[dataloader_idx]
-        _, labels = batch
+        _, _, labels = batch
         labels = self._check_labels(labels, dataset_name)
-        labels = labels
 
-        for metric_name in self.metric_names:
-            scores = outputs[metric_name]
-            metric_name = metric_name.replace("/", "_")
-            if dataset_name == "main_test":
-                self._add_bkg_to_all(scores, labels, metric_name)
-                continue
-
-            self.rocs[f"{dataset_name}/{metric_name}"].update(scores, labels)
-            self.aurocs[f"{dataset_name}/{metric_name}"].update(scores, labels)
-
-    def _add_bkg_to_all(self, scores: torch.Tensor, labels: torch.Tensor, mname: str):
-        """Add the background scores to all entries in the ROCs dictionary."""
-        for name in self.rocs.keys():
-            if not name.endswith(f"/{mname}"):
-                continue
+        scores = outputs[self.metric_name].detach()
+        if dataset_name == "main_test":
             self.rocs[name].update(scores, labels)
             self.aurocs[name].update(scores, labels)
+            continue
+
+        self.rocs[f"{dataset_name}"].update(scores, labels)
+        self.aurocs[f"{dataset_name}"].update(scores, labels)
 
     def _check_labels(self, labels: torch.Tensor, dataset_name: str):
         """Checks if the labels are as expected depending on the data set.
@@ -102,7 +88,7 @@ class ROCs(Callback):
                 "except for main_test. Check this is the case."
             )
 
-        return (labels != 0).to(labels.dtype)
+        return (labels != 0).to(labels.dtype).detach()
 
     def on_test_epoch_end(self, trainer, pl_module) -> None:
         """Log the anomaly rates computed on each of the data sets."""
@@ -111,32 +97,32 @@ class ROCs(Callback):
         plot_folder = ckpts_dir / "plots" / ckpt_name / "rocs"
         plot_folder.mkdir(parents=True, exist_ok=True)
 
-        for metric_name in self.metric_names:
-            # Get the ROCs per data set.
-            metric_name = metric_name.replace("/", "_")
-            roc_per_dataset = {
-                self._get_dsname(roc_name): self._convert2numpy(val.compute())
-                for roc_name, val in self.rocs.items()
-                if roc_name.endswith(f"/{metric_name}")
-            }
-            auroc_per_dataset = {
-                self._get_dsname(auroc_name): self._convert2numpy(val.compute())
-                for auroc_name, val in self.aurocs.items()
-                if auroc_name.endswith(f"/{metric_name}")
-            }
+        # Get the ROCs per data set.
+        roc_per_dataset = {
+            ds_name: self._convert2numpy(val.compute())
+            for ds_name, val in self.rocs.items()
+        }
+        auroc_per_dataset = {
+            ds_name: self._convert2numpy(val.compute())
+            for ds_name, val in self.aurocs.items()
+        }
 
-            roc.plot(roc_per_dataset, auroc_per_dataset, metric_name, plot_folder)
-
+        roc.plot(roc_per_dataset, auroc_per_dataset, self.metric_name, plot_folder)
         utils.mlflow.log_plots_to_mlflow(
-            trainer, ckpt_name, "rocs", plot_folder, log_raw=self.log_raw_mlflow, gallery_name='rocs'
+            trainer,
+            ckpt_name,
+            "rocs",
+            plot_folder,
+            log_raw=self.log_raw_mlflow,
+            gallery_name=f'rocs_{self.metric_name}'
         )
 
     def _convert2numpy(self, arr: tuple[torch.Tensor] | torch.Tensor):
         """Convert torch tensor or list of torch tensors to numpy arrays."""
         if isinstance(arr, tuple):
-            arr = [tens.detach().to("cpu").float().numpy() for tens in arr]
+            arr = [tens.item() for tens in arr]
         elif isinstance(arr, torch.Tensor):
-            arr = arr.detach().to("cpu").float().numpy()
+            arr = arr.item()
         else:
             raise ValueError(
                 "ROC callback cannot convert torch tensor to numpy array. The given "
@@ -144,8 +130,3 @@ class ROCs(Callback):
             )
 
         return arr
-
-    def _get_dsname(self, roc_name: str):
-        """Retrieves the data set name from string specifying rate name."""
-        dataset_name = roc_name.split("/")[0]
-        return dataset_name

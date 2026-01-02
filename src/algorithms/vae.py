@@ -50,32 +50,49 @@ class VAE(L1ADLightningModule):
         self._setup_kl_annealing(self.kl_warmup_frac, total_steps)
 
     def model_step(self, batch: Tuple[torch.Tensor]) -> Dict[str, torch.Tensor]:
-        x, _ = batch
+        x, m, _ = batch
         x = torch.flatten(x, start_dim=1)
+        m = torch.flatten(m, start_dim=1).float()
         z_mean, z_log_var, z, reconstruction = self.forward(x)
 
         kl_current_scale = self.kl_scale(int(self.global_step))
-        reco_loss, kl_loss, total_loss = self.loss(
+        reco_loss, kl_raw, kl_scaled, total_loss = self.loss(
             reconstruction=reconstruction,
             z_mean=z_mean,
             z_log_var=z_log_var,
             target=x,
+            mask=m,
             kl_scale=kl_current_scale
         )
-        del x, z, z_mean
+        del x, z, z_mean, z_log_var
+
+        # Diagnosis metrics.
+        with torch.no_grad():
+            kl_quantiles = torch.tensor([0.5, 0.95, 0.99, 0.999], device=kl_raw.device)
+            kl_q50, kl_q95, kl_q99, kl_q999 = torch.quantile(kl_raw, kl_quantiles).tolist()
+            rmse_quantile = torch.tensor(0.95, device=reco_loss.device)
+            rmse_q95 = torch.quantile(torch.sqrt(reco_loss), rmse_quantile).item()
 
         return {
             # Used for backpropagation:
             "loss": total_loss.mean(),
+
             # Used for logging:
-            "loss/reco/mean": reco_loss.mean(),
-            "loss/kl/mean": kl_loss.mean(),
+            "loss/reco/mean": reco_loss.detach().mean(),
+            "loss/kl_scaled/mean": kl_scaled.detach().mean(),
+            "loss/kl_raw/mean": kl_raw.detach().mean(),
+            "loss/kl_raw/median": kl_q50,
+            "loss/kl_raw/q95": kl_q95,
+            "loss/kl_raw/q99": kl_q99,
+            "loss/kl_raw/q999": kl_q999,
             "kl_scale": kl_current_scale,
+            "loss/reco/sqrt_q95": rmse_q95,
+
             # Used for callbacks:
             "loss/total/full": total_loss.detach(),
             "loss/reco/full": reco_loss.detach(),
-            "loss/kl/full": kl_loss.detach(),
-            "reconstructed_data": reconstruction,
+            "loss/kl_raw/full": kl_raw.detach(),
+            "reconstructed_data": reconstruction.detach()
         }
 
     def outlog(self, outdict: dict) -> dict:
@@ -83,7 +100,13 @@ class VAE(L1ADLightningModule):
         return {
             "loss": outdict.get("loss"),
             "loss_reco": outdict.get("loss/reco/mean"),
-            "loss_kl": outdict.get("loss/kl/mean"),
+            "loss_kl_raw": outdict.get("loss/kl_raw/mean"),
+            "loss_kl_scaled": outdict.get("loss/kl_scaled/mean"),
+            "loss_kl_median": outdict.get("loss/kl_raw/median"),
+            "loss_kl_raw_q95": outdict.get("loss/kl_raw/q95"),
+            "loss_kl_raw_q99": outdict.get("loss/kl_raw/q99"),
+            "loss_kl_raw_q999": outdict.get("loss/kl_raw/q999"),
+            "loss_rmse_q95": outdict.get("loss/reco/sqrt_q95"),
             "kl_scale": outdict.get("kl_scale"),
         }
 

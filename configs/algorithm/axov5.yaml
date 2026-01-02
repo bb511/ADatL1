@@ -25,9 +25,9 @@ lorentz_rotation:
 
 model:
   _target_: src.models.mlp.MLP
-
-  nodes: [57, 29, 10]
-
+  in_dim: 57
+  nodes: [29]
+  out_dim: 10
   batchnorm: false
 
   init_weight:
@@ -40,11 +40,13 @@ model:
 
 projector:
   _target_: src.models.mlp.MLP
-  nodes: [10, 40] # * 4 projection
-  batchnorm: true # Added batchnorm
+  in_dim: 10
+  nodes: []
+  out_dim: 40
+  batchnorm: true
 
 loss:
-  _target_: src.losses.vicreg.L1VICRegLoss
+  _target_: src.losses.vicreg.VICRegLoss
   inv_coef: 50
   var_coef: 50
   cov_coef: 1
@@ -57,10 +59,9 @@ optimizer:
 
 scheduler:
   # here other attributes...
-
   scheduler:
-    _partial_: true
     _target_: src.optimizers.cdw.CosineWithWarmup
-    warmup_epochs: 10
-    decay_epochs: '${substract: ${trainer.max_epochs}, ${algorithm.scheduler.scheduler.warmup_epochs}}'
-    max_lr: ${algorithm.optimizer.lr}
+    _partial_: true
+    warmup_ratio: 0.1
+    min_lr_ratio: 0.05
+    warmup_start_ratio: 1e-3

@@ -17,7 +17,7 @@ class ReconstructionPlots(Callback):
     :param nbatches: Int of number of batches to plot.
     :param output_name: String with the name of the key containing the output in the
         output dictionary of the model.
-    :datamodule: The datamodule that was used during the training of the model.
+    :param datamodule: The datamodule that was used during the training of the model.
     :param ckpt_dataset: String specifying the dataset name of the checkpoints that
         this callback should be evaluated on.
     :param datasets: List of strings with the dataset names that the checkpoint should
@@ -52,6 +52,7 @@ class ReconstructionPlots(Callback):
         """
         self.input_accumulator = []
         self.output_accumulator = []
+        self.mask_accumulator = []
         ckpt_name = Path(pl_module._ckpt_path).stem
         self.ckpt_ds_name = utils.misc.get_ckpt_ds_name(ckpt_name)
 
@@ -67,20 +68,27 @@ class ReconstructionPlots(Callback):
         if (batch_idx + 1) > self.nbatches:
             return
 
-        x, _ = batch
+        x, m, _ = batch
         x = torch.flatten(x, start_dim=1)
+        m = torch.flatten(m, start_dim=1)
 
         if (batch_idx + 1) < self.nbatches:
             self.input_accumulator.append(x)
+            self.mask_accumulator.append(m)
             self.output_accumulator.append(outputs[self.output_name])
         else:
             self.input_accumulator.append(x)
+            self.mask_accumulator.append(m)
             self.output_accumulator.append(outputs[self.output_name])
+
             self.input_accumulator = torch.cat(self.input_accumulator, dim=0)
+            self.mask_accumulator = torch.cat(self.mask_accumulator, dim=0)
             self.output_accumulator = torch.cat(self.output_accumulator, dim=0)
+
             self._on_dataset_end(trainer, pl_module, dset_name)
 
             self.input_accumulator = []
+            self.mask_accumulator = []
             self.output_accumulator = []
 
     def _on_dataset_end(self, trainer, pl_module, dataset_name: str):
@@ -96,7 +104,11 @@ class ReconstructionPlots(Callback):
         for object_name, feature_map in self.object_feature_map.items():
             for feat_name, feat_idxs in feature_map.items():
                 input_feat = self.input_accumulator[:, feat_idxs]
+                mask_feat = self.mask_accumulator[:, feat_idxs]
                 output_feat = self.output_accumulator[:, feat_idxs]
+
+                input_feat = input_feat[mask_feat]
+                output_feat = output_feat[mask_feat]
 
                 # Detach and move to CPU for plotting
                 input_feat = input_feat.detach().flatten().float().cpu().numpy()
@@ -117,5 +129,5 @@ class ReconstructionPlots(Callback):
             "recos",
             plot_folder,
             log_raw=self.log_raw_mlflow,
-            gallery_name=f"{dataset_name}"
+            gallery_name=f"{dataset_name}_reco"
         )

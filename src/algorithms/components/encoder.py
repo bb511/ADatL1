@@ -23,7 +23,9 @@ class VariationalEncoder(nn.Module):
 
     def __init__(
         self,
+        in_dim: int,
         nodes: list[int],
+        out_dim: int,
         init_weight: Optional[Callable] = None,
         init_bias: Optional[Callable] = None,
     ):
@@ -31,12 +33,17 @@ class VariationalEncoder(nn.Module):
 
         # The encoder will be a MLP up to the last layer
         self.net = MLP(
-            nodes[:-1], batchnorm=False, init_weight=init_weight, init_bias=init_bias
+            in_dim,
+            nodes[:-1],
+            nodes[-1],
+            batchnorm=False,
+            init_weight=init_weight,
+            init_bias=init_bias
         )
 
         # Mean and log variance layers
-        self.z_mean = nn.Linear(nodes[-2], nodes[-1])
-        self.z_log_var = nn.Linear(nodes[-2], nodes[-1])
+        self.z_mean = nn.Linear(nodes[-1], out_dim)
+        self.z_log_var = nn.Linear(nodes[-1], out_dim)
 
         if init_weight:
             init_weight(self.z_mean.weight)
@@ -45,6 +52,7 @@ class VariationalEncoder(nn.Module):
     def forward(self, x: torch.Tensor) -> tuple[torch.Tensor]:
         x = self.net(x)
         z_mean, z_log_var = self.z_mean(x), self.z_log_var(x)
+        z_log_var = z_log_var.clamp(-20, 10)
         z = self.sample(z_mean, z_log_var)
         return z_mean, z_log_var, z
 

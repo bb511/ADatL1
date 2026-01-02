@@ -34,25 +34,31 @@ class L1DataAwkward2Torch:
         number of features via padding.
         """
         self.cache_filepath = folder_path / "torch_cache.pt"
+        self.cache_maskpath = folder_path / "torch_mask.pt"
         self.object_feature_map_fpath = folder_path.parent / "object_feature_map.json"
         if self._cache_exists():
             if self.object_feature_map is None:
                 self._set_obj_feat_map()
-            return torch.load(self.cache_filepath)
+            return torch.load(self.cache_filepath), torch.load(self.cache_maskpath)
 
         self.cached_objects = set()
         procd_folder = self._process_folder(folder_path)
 
         self._make_feature_map(procd_folder)
-        data = np.concatenate([data_array for _, _, data_array in procd_folder], axis=1)
+        data = np.concatenate([darr for _, _, darr, _ in procd_folder], axis=1)
         data = torch.from_numpy(data)
-        self._cache(data)
+        self._cache_data(data)
 
-        return data
+        mask = np.concatenate([marr for _, _, _, marr in procd_folder], axis=1)
+        mask = torch.from_numpy(mask)
+        self._cache_mask(mask)
+
+        return data, mask
 
     def _cache_exists(self) -> bool:
         """Check whether the cache exists."""
-        if self.cache_filepath.is_file() and self._check_cache_integrity():
+        files_exist = self.cache_filepath.is_file() and self.cache_maskpath.is_file()
+        if files_exist and self._check_cache_integrity():
             if self.verbose:
                 log.warn(
                     "Loading data from torch cache. If the features in the parquets "
@@ -87,8 +93,8 @@ class L1DataAwkward2Torch:
         self.cached_objects.add(obj_name)
         data = ak.from_parquet(data_path)
 
-        data, padder = self._wrap_scalars(data)
-        data, nconst = self._pad(data, nconst, padder)
+        padder = self._get_padder(data)
+        data, mask, nconst = self._pad(data, nconst, padder)
 
         nevents = len(data)
         nfeats = len(data.fields)
@@ -96,77 +102,52 @@ class L1DataAwkward2Torch:
 
         numpy_array = np.empty((nevents, nconst, nfeats), dtype=np.float32)
         numpy_array = self._funnel_to_nparray(data, numpy_array)
+        paddy_array = np.empty((nevents, nconst, nfeats), dtype=np.bool)
+        paddy_array = self._funnel_to_nparray(mask, paddy_array)
 
-        return obj_name, feats, numpy_array
+        return obj_name, feats, numpy_array, paddy_array
 
     def _pad(
-        self, data: ak.Array, nconst: int, padder: Union[int, ak.Record]
+        self, data: ak.Array, nconst: int, padder: Union[float, ak.Record]
     ) -> tuple[ak.Array, int]:
-        """Pads the jagged arrays such that they are rectangular for each object.
-
-        The None values in the awkward arrays are replaced by 0s.
-        """
+        """Pads the jagged arrays such that they are rectangular for each object."""
         if nconst is None:
-            nconst = int(ak.max(ak.num(data, axis=1)))
+            nconst = max(
+                int(ak.max(ak.num(data[f]), initial=0))
+                for f in data.fields
+            )
 
-        data = ak.pad_none(data, nconst, axis=1, clip=True)
+        data = ak.pad_none(data, nconst, axis=-1, clip=True)
+        mask = ak.Array({f: ~ak.is_none(data[f], axis=-1) for f in data.fields})
         data = ak.fill_none(data, padder)
         data = ak.values_astype(data, np.float32)
 
-        return data, nconst
+        return data, mask, nconst
 
     def _funnel_to_nparray(self, data: ak.Array, numpy_array: np.ndarray) -> np.ndarray:
         """Funnel the data from the awkward array into a numpy array of right dims."""
         for feat_idx, feature in enumerate(sorted(data.fields)):
             feature_data = ak.to_numpy(data[feature], allow_missing=False)
-            if feature_data.ndim == 3 and feature_data.shape[-2] == 1:
-                feature_data = np.squeeze(feature_data, axis=(2,))
-
             numpy_array[..., feat_idx] = feature_data
 
         return numpy_array
 
-    def _wrap_scalars(self, data: ak.Array):
-        """Gives one extra dimension to scalar data like ET, MET, etc.
+    def _get_padder(self, data: ak.Array):
+        """Determines the padder for the different types of data.
 
-        This is to be consistent with the other objects which are (nevents, nobj, feats)
-        while the scalars are (nevents, feats). This method makes the scalars into the
-        shape (nevents, 1, feats).
+        The energies and event_info are structurally different than the objects. These
+        are always 1 per sample, and hence the padder can be a scalar. Meanwhile, objs
+        like egammas can have different numbers of objects per sample, and hence the
+        padder needs to be applied per-field.
         """
         if isinstance(data[0], ak.Record):
-            padder = 0
-            data = self._make_consistent_dims(data)
-            return ak.unflatten(data, 1, axis=0), padder
+            padder = 0.0
+            return padder
 
-        padder = {feat: 0 for feat in data.fields}
-        return data, padder
+        padder = {feat: 0.0 for feat in data.fields}
+        return padder
 
-    def _make_consistent_dims(self, data: ak.Array):
-        """Wrap fields which are purely scalar and are not filled with None.
-
-        This is done because the original awkward arrays are of different structures:
-        event_info is filled with scalars
-        object data are all jagged arrays
-        event level objects such as ET are fixed size arrays but with dim=2
-        """
-        out = data
-        for name in data.fields:
-            field = data[name]
-
-            if field.ndim != 1:
-                continue
-            if ak.all(ak.is_none(field)):
-                continue
-
-            wrapped = ak.singletons(field)
-            keep = ~ak.is_none(field)
-            new_field = ak.mask(wrapped, keep)
-
-            out = ak.with_field(out, new_field, where=name)
-
-        return out
-
-    def _cache(self, data: torch.Tensor):
+    def _cache_data(self, data: torch.Tensor):
         """Cache the converted data to disk."""
         log.info(f"Caching torch tensor at {self.cache_filepath}...")
         parent_folder = self.cache_filepath.parent
@@ -177,6 +158,15 @@ class L1DataAwkward2Torch:
             pickle.dump(self.cached_objects, file)
 
         torch.save(data, self.cache_filepath)
+
+    def _cache_mask(self, mask: torch.Tensor):
+        """Cache the converted data to disk."""
+        log.info(f"Caching corresponding padding mask at {self.cache_maskpath}...")
+        parent_folder = self.cache_maskpath.parent
+        if not parent_folder.exists():
+            raise FileNotFoundError(f"Cache folder {parent_folder} missing!")
+
+        torch.save(mask, self.cache_maskpath)
 
     def _check_cache_integrity(self) -> bool:
         """Checks whether the cache includes all the desired data objects.
@@ -221,7 +211,7 @@ class L1DataAwkward2Torch:
         """
         mapping: dict[str, dict[str, list[int]]] = {}
         offset = 0
-        for obj_name, feat_names, data in procd_folder:
+        for obj_name, feat_names, data, _ in procd_folder:
             feats_to_idxs, offset = self._2d_feature_map(data, feat_names, offset)
             mapping[obj_name] = feats_to_idxs
 

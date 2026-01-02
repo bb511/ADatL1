@@ -8,10 +8,10 @@ import torch
 import torch.nn as nn
 
 from src.algorithms import L1ADLightningModule
-from src.models.mlp import MLP
-from src.models.augmentation import FastFeatureBlur
-from src.models.augmentation import FastObjectMask
-from src.models.augmentation import FastLorentzRotation
+from src.algorithms.components.mlp import MLP
+from src.algorithms.components.augmentation import FastFeatureBlur
+from src.algorithms.components.augmentation import FastObjectMask
+from src.algorithms.components.augmentation import FastLorentzRotation
 
 
 class VICReg(L1ADLightningModule):
@@ -33,7 +33,8 @@ class VICReg(L1ADLightningModule):
         feature_blur: FastFeatureBlur,
         object_mask: FastObjectMask,
         lorentz_rotation: FastLorentzRotation,
-        seed: int,
+        seed: int = 42,
+        diagnosis_metrics: bool = False,
         **kwargs,
     ):
         super().__init__(**kwargs)
@@ -49,6 +50,7 @@ class VICReg(L1ADLightningModule):
             ]
         )
         self.seed = seed
+        self.diagnosis_metrics = diagnosis_metrics
 
         self.projector = projector
 
@@ -77,7 +79,8 @@ class VICReg(L1ADLightningModule):
         """Sets up the lorents rotation on the phi feature of each object.
 
         First, get the indices of the phi values in the batch torch tensor.
-        Then, get the l1
+        Then, get the l1 scales for the phi values, to turn them into real physical phi
+        values.
         """
         object_feature_map = self.trainer.datamodule.loader.object_feature_map
         normalizer = self.trainer.datamodule.normalizer
@@ -104,7 +107,7 @@ class VICReg(L1ADLightningModule):
         )
 
     def model_step(self, batch: Tuple[torch.Tensor]) -> Dict[str, torch.Tensor]:
-        x, _ = batch
+        x, m, _ = batch
         x = torch.flatten(x, start_dim=1)
 
         # Apply augmentations
@@ -120,6 +123,13 @@ class VICReg(L1ADLightningModule):
 
         # Compute loss and return
         loss_inv, loss_var, loss_cov, loss_total = self.loss(z1, z2)
+        with torch.no_grad():
+            inv_ratio = (loss_inv / loss_total).item()
+            var_ratio = (loss_var / loss_total).item()
+            cov_ratio = (loss_cov / loss_total).item()
+            z1_std = torch.sqrt(z1.var(dim=0) + 1e-4).mean()
+            z2_std = torch.sqrt(z2.var(dim=0) + 1e-4).mean()
+            outdict_diag = self._compute_diagnosis_metrics(z1, z2)
 
         return {
             "loss": loss_total,
@@ -127,13 +137,82 @@ class VICReg(L1ADLightningModule):
             "loss/inv": loss_inv.detach(),
             "loss/var": loss_var.detach(),
             "loss/cov": loss_cov.detach(),
+            "loss/inv/ratio": inv_ratio,
+            "loss/var/ratio": var_ratio,
+            "loss/cov/ratio": cov_ratio,
+            "z1/std": z1_std,
+            "z2/std": z2_std,
+            **outdict_diag
+        }
+
+    def test_step(self, batch: torch.Tensor, batch_idx: int, dataloader_idx: int = 0):
+        x, m, _ = batch
+        x = torch.flatten(x, start_dim=1)
+        z = self.model(x)
+
+        loss_total = self.model_step(batch)['loss']
+        return {
+            "loss": loss_total.detach(),
+            "vicreg_rep_data": z.detach(),
         }
 
     def outlog(self, outdict: dict) -> dict:
         """Override with the values you want to log."""
+        diag_entries = {k: v for k, v in outdict.items() if k.startswith("diag_")}
         return {
             "loss": outdict.get("loss"),
             "loss_inv": outdict.get("loss/inv"),
             "loss_var": outdict.get("loss/var"),
             "loss_cov": outdict.get("loss/cov"),
+            "loss_inv_ratio": outdict.get("loss/inv/ratio"),
+            "loss_var_ratio": outdict.get("loss/var/ratio"),
+            "loss_cov_ratio": outdict.get("loss/cov/ratio"),
+            "z1_std": outdict.get("z1/std"),
+            "z2_std": outdict.get("z2/std"),
+            **diag_entries
         }
+
+    def _compute_diagnosis_metrics(self, z1: torch.Tensor, z2: torch.Tensor):
+        """Compute metrics to diagnose what the vicreg has learnt."""
+        diag_outdict = {}
+        if not self.diagnosis_metrics:
+            return diag_outdict
+
+        z1_efr, z1_max_sv = self._effective_rank_svd(z1)
+        z2_efr, z2_max_sv = self._effective_rank_svd(z2)
+        rep_eff_rank = min(z1_efr, z2_efr)
+        max_sv = max(z1_max_sv, z2_max_sv)
+        diag_outdict.update({"diag_eff_rank": rep_eff_rank, "diag_max_sv": max_sv})
+
+        z1_cos_similarity = self._average_pairwise_cosine(z1)
+        z2_cos_similarity = self._average_pairwise_cosine(z2)
+        avg_cos_sim = max(z1_cos_similarity, z2_cos_similarity)
+        diag_outdict.update({"diag_avg_cos_sim": avg_cos_sim})
+
+        return diag_outdict
+
+    @torch.no_grad()
+    def _effective_rank_svd(self, z, eps=1e-12):
+        zc = z - z.mean(dim=0, keepdim=True)
+        batch_size = zc.shape[0]
+        # singular values of [B, D] matrix
+        s = torch.linalg.svdvals(zc)  # length = min(B, D)
+        max_sv = (s[0] ** 2 / (batch_size - 1)).item()
+
+        eigvals = (s ** 2).clamp_min(eps)
+
+        trace_sum = eigvals.sum()
+        trace_squared_sum = (eigvals ** 2).sum()
+
+        return (trace_sum ** 2 / trace_squared_sum).item(), max_sv
+
+    @torch.no_grad()
+    def _average_pairwise_cosine(self, z):
+        # z: [B, D]
+        z = torch.nn.functional.normalize(z, dim=1)  # L2 norm
+        sim = z @ z.T                                # [B, B]
+        B = z.shape[0]
+
+        # remove diagonal (self-similarity = 1)
+        avg_cos = (sim.sum() - B) / (B * (B - 1))
+        return avg_cos.item()

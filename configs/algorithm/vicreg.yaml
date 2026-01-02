@@ -3,34 +3,39 @@
 _target_: src.algorithms.vicreg.VICReg
 
 seed: ${seed}
+diagnosis_metrics: false
 
 feature_blur:
   _target_: src.algorithms.components.augmentation.FastFeatureBlur
-  prob: 0.5
+  prob: 0.3
   magnitude: 0.5
   strength: 0.5
 
 object_mask:
   _target_: src.algorithms.components.augmentation.FastObjectMask
-  prob: 0.5
+  prob: 0.3
 
 lorentz_rotation:
   _target_: src.algorithms.components.augmentation.FastLorentzRotation
   _partial_: true
-  prob: 0.5
+  prob: 0.3
 
 model:
   _target_: src.algorithms.components.mlp.MLP
-  nodes: [57, 29, 10]
+  in_dim: 117
+  nodes: [64]
+  out_dim: 16
   batchnorm: false
 
 projector:
   _target_: src.algorithms.components.mlp.MLP
-  nodes: [10, 40] # * 4 projection
+  in_dim: ${algorithm.model.out_dim}
+  nodes: []
+  out_dim: 64
   batchnorm: true # Added batchnorm
 
 loss:
-  _target_: src.losses.vicreg.L1VICRegLoss
+  _target_: src.losses.vicreg.VICRegLoss
   inv_coef: 50
   var_coef: 50
   cov_coef: 1
@@ -38,5 +43,16 @@ loss:
 optimizer:
   _partial_: true
   _target_: torch.optim.AdamW
-  lr: 0.001
+  lr: 0.0003
   weight_decay: 0.0
+  betas: [0.9, 0.999]
+  eps: 1e-8
+
+scheduler:
+  # here other attributes...
+  scheduler:
+    _target_: src.optimizers.cdw.CosineWithWarmup
+    _partial_: true
+    warmup_ratio: 0.1
+    min_lr_ratio: 0.05
+    warmup_start_ratio: 1e-3

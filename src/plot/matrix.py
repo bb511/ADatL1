@@ -44,7 +44,7 @@ def plot(data: dict[dict], value_name: str, save_dir: Path):
 
     # Heuristic: scale font size with the grid size
     fontsize = max(6, min(12, int(180 / max(n_rows, n_cols))))
-    fmt = "{:.0f}"
+    fmt = "{:.1f}"
 
     norm = im.norm
     for i in range(n_rows):

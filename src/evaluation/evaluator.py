@@ -201,7 +201,7 @@ class Evaluator:
         The 'optimized_metric_config' dictionary contains the name of a callback in the
         evaluator. This callback should have 'get_optimized_metric' method implemented.
         This method returns what is considered the best metric, according to its own
-        definition, across all the checkpoints in a criterion.
+        definition, across all the checkpoints within a checkpointing criterion.
         The optimized_metric_config should also contain all the hyperparameters required
         by the 'get_optimized_metric' method.
         Finally, it should contain a direction along which to pick from best checkpoints
@@ -210,10 +210,28 @@ class Evaluator:
         if optimized_metric_config is None:
             return
 
-        target_callback_name = optimized_metric_config["callback"]["name"]
         target_callback_params = optimized_metric_config["callback"]["params"]
         crit_optim_direction = optimized_metric_config["direction"]
+        target_callback_name = optimized_metric_config["callback"]["name"]
+        cb = self._get_optimized_callback(target_callback_name)
 
+        ckpt_ds, main_metric_value = cb.get_optimized_metric(**target_callback_params)
+        optimized_metric = main_metric_value
+
+        if 'sec_metric' in optimized_metric_config.keys():
+            sec_metric_direction, sec_metric_value = self._get_secondary_metric(
+                optimized_metric_config['sec_metric'], ckpt_ds
+            )
+            optimized_metric = [main_metric_value, sec_metric_value]
+            crit_optim_direction = [crit_optim_direction, sec_metric_direction]
+
+        if isinstance(optimized_metric, float):
+            self._set_best_across_crit(optimized_metric, direction=crit_optim_direction)
+        else:
+            self._comp_best_across_crit(optimized_metric, directions=crit_optim_direction)
+
+    def _get_optimized_callback(self, target_callback_name: str):
+        """Get callback that returns optimized metric."""
         available_callbacks = {
             cb.__class__.__name__: cb for cb in self.evaluator.callbacks
         }
@@ -222,22 +240,68 @@ class Evaluator:
         except KeyError:
             raise ValueError(f"Callback {target_callback_name} not available.")
 
-        optimized_metric = cb.get_optimized_metric(**target_callback_params)
-        self._set_best_across_crit(optimized_metric, direction=crit_optim_direction)
+        return cb
 
-    def _set_best_across_crit(self, value: float, *, direction: str) -> None:
+    def _get_secondary_metric(self, secondary_metric_config: dict, ckpt_ds: str):
+        """Get the secondary metric value.
+
+        Evaluate this metric at the checkpoint that the main metric was evaluated,
+        specified by ckpt_ds.
+        """
+        target_callback_params = secondary_metric_config["callback"]["params"]
+        crit_optim_direction = secondary_metric_config["direction"]
+        target_callback_name = secondary_metric_config["callback"]["name"]
+        cb = self._get_optimized_callback(target_callback_name)
+
+        target_callback_params['ckpt_ds'] = ckpt_ds
+        _, metric_value = cb.get_optimized_metric(**target_callback_params)
+        return crit_optim_direction, metric_value
+
+    def _set_best_across_crit(self, value: float, *, direction: str):
         """Set the best optimized metric values across all ckpt criteria."""
+        if self.optimized_metric is None:
+            self.optimized_metric = value
+            return
+
         if direction == "maximize":
-            if self.optimized_metric is None or value > self.optimized_metric:
+            if value > self.optimized_metric:
                 self.optimized_metric = value
             return
 
         if direction == "minimize":
-            if self.optimized_metric is None or value < self.optimized_metric:
+            if value < self.optimized_metric:
                 self.optimized_metric = value
             return
 
         raise ValueError("Optimized metric direction must be 'maximize' or 'minimize'.")
+
+    def _comp_best_across_crit(self, values: list[float], *, directions: list[str]):
+        """Set the best composite metric across ckpt criteria.
+
+        This is computing the relative change for the main metric and secondary metric.
+        This is computed differently depending on the direction that the particular
+        metric should be optimised in.
+        If the sum of the relative changes is positive, i.e., a metric's improvement
+        is larger than the other metric's worsening, then save this as the new best
+        across checkpointing criteria.
+        """
+        if self.optimized_metric is None:
+            self.optimized_metric = values
+            return
+
+        relative_changes = []
+        for metric_idx, metric_value in enumerate(values):
+            direction = directions[metric_idx]
+            if direction == 'maximize':
+                relative_change = metric_value - self.optimized_metric[metric_idx]
+            elif direction == 'minimize':
+                relative_change = self.optimized_metric[metric_idx] - metric_value
+
+            relative_change = relative_change / metric_value
+            relative_changes.append(relative_change)
+
+        if sum(relative_changes) > 0:
+            self.optimized_metric = values
 
     def _make_criterion_summary_plots(self, plot_folder: Path):
         """Make summary plots for each callback.

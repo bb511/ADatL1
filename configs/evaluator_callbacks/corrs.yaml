@@ -2,6 +2,6 @@
 
 defaults:
   - basic
-  - metrics@rocs: rocs
+  - metrics@roc: roc
   - metrics@pu: pu
   - _self_

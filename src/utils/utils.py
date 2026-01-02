@@ -3,10 +3,20 @@ from importlib.util import find_spec
 from typing import Any, Callable, Dict, Optional, Tuple
 
 from omegaconf import DictConfig
+from omegaconf import OmegaConf
 
 from src.utils import pylogger, rich_utils
 
 log = pylogger.RankedLogger(__name__, rank_zero_only=True)
+
+
+def register_resolvers() -> None:
+    if not OmegaConf.has_resolver("div"):
+        OmegaConf.register_new_resolver("div", lambda a, b: float(a) / float(b))
+    if not OmegaConf.has_resolver("mul"):
+        OmegaConf.register_new_resolver("mul", lambda a, b: float(a) * float(b))
+    if not OmegaConf.has_resolver("sqrt"):
+        OmegaConf.register_new_resolver("sqrt", lambda x: float(x) ** 0.5)
 
 
 def extras(cfg: DictConfig) -> None:
@@ -19,6 +29,7 @@ def extras(cfg: DictConfig) -> None:
 
     :param cfg: A DictConfig object containing the config tree.
     """
+    register_resolvers()
     # return if no `extras` config
     if not cfg.get("extras"):
         log.warning("Extras config not found! <cfg.extras=null>")

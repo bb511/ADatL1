@@ -102,34 +102,29 @@ class Stable(Criterion):
         upper_bound = self.reference_value * (1 + self.threshold)
 
         if lower_bound <= metric_value <= upper_bound:
-            self._increase_count(metric_value)
+            self.epoch_counter += 1
             if self.epoch_counter == self.patience:
-                self._update_topk(self.accummulated_deviation)
+                ckpt_made = self._update_topk(metric_value)
                 self._reset_count()
+                return ckpt_made
         else:
             self._reset_count()
 
         return False
 
-    def _increase_count(self, metric_value: float):
-        """Increase the count for how many epochs the tracked metric has been stable."""
-        self.epoch_counter += 1
-        self.accummulated_deviation += (metric_value - self.reference_value) ** 2
-
     def _reset_count(self):
         """Reset the counting of stable epochs."""
-        self.accummulated_deviation = 0
         self.epoch_counter = 1
         self.reference_value = None
 
-    def _update_topk(self, metric_value: float):
+    def _update_topk(self, metric_value: float) -> bool:
         """Update the top_k values."""
-        mask = self.top_k_values > metric_value
+        idx = np.isinf(self.top_k_values).argmax()
+        if np.isinf(self.top_k_values).any():
+            self.top_k_values[idx] = metric_value
+            return True
 
-        # If there are any, replace the highest of them with current value.
-        if np.any(mask):
-            replace_idx = np.argmax(self.top_k_values * mask)
-            self.top_k_values[replace_idx] = metric_value
+        return False
 
     def _validate_threshold(self):
         """Check if the threshold given by user is between 0 and 1."""

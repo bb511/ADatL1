@@ -13,25 +13,37 @@ seed: 123
 tags: ["axo_v6", "vae"]
 
 experiment_name: vae_training
-run_name: klscale${algorithm.loss.kl_scale}_lr${algorithm.optimizer.lr}_wd${algorithm.optimizer.weight_decay}
+run_name: bs${data.batch_size}_klwarm${algorithm.kl_warmup_frac}_klscale${algorithm.loss.kl_scale}_lr${algorithm.optimizer.lr}
 
 trainer:
-  gradient_clip_val: 1.0
   gradient_clip_algorithm: norm
+  gradient_clip_val: 1.0
   min_epochs: 1
-  max_epochs: 10
+  max_epochs: -1
+  max_steps: 50_000
+  # limit_train_batches: 100
   limit_val_batches: 10
   limit_test_batches: 10
 
-# Make checkpoints at the minimum of the loss, only for the main data set and simulation.
-# Make checkpoints at the maximum of the rate for the signal data sets, considering
-# the kl divergence and the reco error as the anomaly score, respectively.
-callbacks: 
+test: true
+
+callbacks:
+  log_data_mlflow: null
   anomaly_rate:
-    metric_names: ['loss/reco/full', 'loss/kl/full']
+    metric_names: ['loss/kl_raw/full']
     target_rates: [1]
 
-  min_loss_total_ckpt:
+  # Checkpoints
+  min_loss_total_ckpt: null
+  stable_elbo_ckpt:
+    _target_: src.callbacks.model_checkpoint.SingleDatasetModelCheckpoint
+    dirpath: '${paths.checkpoints_dir}/${experiment_name}/${run_name}'
+    monitor: loss_kl_raw_q999
+    criterion:
+      _target_: src.callbacks.checkpointing.criterion.Stable
+      top_k: 1
+      threshold: 0.05
+      patience: 10
     skip_ds:
       - GluGluHTo2B_Par-MH-125
       - GluGluHto2G_Par-MH-125
@@ -52,11 +64,12 @@ callbacks:
       - WtoTauto3Mu
       - ggH-suep-decay
       - haa-4b-ma15
+      - SingleNeutrino_E-10-gun
 
-  max_rate_kl_ckpt:
+  max_rate_kl_raw_ckpt:
     _target_: src.callbacks.model_checkpoint.SingleDatasetModelCheckpoint
     dirpath: '${paths.checkpoints_dir}/${experiment_name}/${run_name}'
-    monitor: loss_kl_full_rate1
+    monitor: loss_kl_raw_full_rate1
     criterion:
       _target_: src.callbacks.checkpointing.criterion.Max
       top_k: 1
@@ -64,28 +77,27 @@ callbacks:
       - main_val
       - SingleNeutrino_E-10-gun
 
-  max_rate_reco_ckpt:
-    _target_: src.callbacks.model_checkpoint.SingleDatasetModelCheckpoint
-    dirpath: '${paths.checkpoints_dir}/${experiment_name}/${run_name}'
-    monitor: loss_reco_full_rate1
-    criterion:
-      _target_: src.callbacks.checkpointing.criterion.Max
-      top_k: 1
-    skip_ds:
-      - main_val
-      - SingleNeutrino_E-10-gun
-
-# Evaluate the checkponts that were mentioned before.
-# Compute only the efficiency for each of the checkpoints.
 evaluator:
   ckpts:
     last: true
     single:
-      loss: ['min']
-      loss_kl_full_rate1: ['max']
-      loss_reco_full_rate1: ['max']
+      loss_kl_raw_q999: ['stable']
+      loss_kl_raw_full_rate1: ['max']
 
 evaluator_callbacks:
   anomaly_efficiency:
-    metric_names: ['loss/kl/full', 'loss/reco/full']
+    metric_names: ['loss/kl_raw/full']
     target_rates: [1]
+    log_raw_mlflow: false
+  loss:
+    _target_: src.evaluation.callbacks.loss.LossCallback
+    loss_names: ['loss/reco/sqrt_q95']
+    log_raw_mlflow: false
+  # reco:
+  #   _target_: src.evaluation.callbacks.reco.ReconstructionPlots
+  #   nbatches: 1
+  #   output_name: reconstructed_data
+  #   datamodule: true # callback needs original datamodule
+  #   ckpt_dataset: last
+  #   datasets: ['main_test', 'SingleNeutrino_E-10-gun']
+  #   log_raw_mlflow: false

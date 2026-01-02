@@ -37,6 +37,7 @@ class ClassicVAELoss(L1ADLoss):
     def forward(
         self,
         target: torch.Tensor,
+        mask: torch.Tensor,
         reconstruction: torch.Tensor,
         z_mean: torch.Tensor,
         z_log_var: torch.Tensor,
@@ -45,13 +46,13 @@ class ClassicVAELoss(L1ADLoss):
         # The kl_scale argument allows for dynamically setting the kl_scale during
         # the training of the VAE.
         if not kl_scale is None:
-            self.kl_loss.scale = float(kl_scale)
+            self.kl_loss.set_scale(float(kl_scale))
 
-        reco_loss = self.reco_loss(target, reconstruction)
-        kl_loss = self.kl_loss(z_mean, z_log_var)
-        total_loss = self.scale*(reco_loss + kl_loss)
+        reco_loss = self.reco_loss(target, reconstruction, mask)
+        kl_raw, kl_scaled = self.kl_loss(z_mean, z_log_var)
+        total_loss = self.scale*(reco_loss + kl_scaled)
 
-        return reco_loss, kl_loss, total_loss
+        return reco_loss, kl_raw, kl_scaled, total_loss
 
 
 class AxoV4Loss(ClassicVAELoss):

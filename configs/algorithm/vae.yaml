@@ -7,19 +7,23 @@ features: null
 
 encoder:
   _target_: src.algorithms.components.encoder.VariationalEncoder
-  nodes: [57, 28, 16, 8] # 57 input features, 8 latent features
+  in_dim: 117
+  nodes: [64, 64]
+  out_dim: 48
 
 decoder:
   _target_: src.algorithms.components.decoder.Decoder
-  nodes: [8, 24, 32, 64, 128, 57] # v4 axol1tl architecture
+  in_dim: 48
+  nodes: [64, 64]
+  out_dim: 117
 
 loss:
   _target_: src.losses.vae.ClassicVAELoss
   scale: 1
-  kl_scale: 0
+  kl_scale: 0.001
 
 # Annealing of the KL scale scalar.
-kl_warmup_frac: 0.0
+kl_warmup_frac: 0.2
 
 optimizer:
   _partial_: true
@@ -28,9 +32,3 @@ optimizer:
   weight_decay: 0.0
   betas: [0.9, 0.999]
   eps: 1e-8
-
-# scheduler:
-#   scheduler:
-#     _partial_: true
-#     _target_: torch.optim.lr_scheduler.CosineAnnealingLR
-#     T_max: ${trainer.max_epochs}

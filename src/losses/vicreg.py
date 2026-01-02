@@ -37,20 +37,18 @@ class VICRegLoss(L1ADLoss):
         return F.mse_loss(z1, z2)
 
     def variance_loss(self, z):
-        std_z = torch.sqrt(z.var(dim=0) + 1e-4)
+        z = z - z.mean(dim=0, keepdim=True)
+        std_z = torch.sqrt(z.var(dim=0, unbiased=False) + 1e-4)
         return torch.mean(F.relu(1.0 - std_z))
 
     def covariance_loss(self, z):
         batch_size, feature_dim = z.shape
-
         # Compute covariance matrix.
         z = z - z.mean(dim=0, keepdim=True)
         z = z * ((batch_size - 1) ** -0.5)
         cov = z.T @ z
-
         # Remove the diagonal elements (i.e. variance terms).
         off_diag = cov[~torch.eye(feature_dim, dtype=torch.bool)]
-
         # Compute the covariance loss as the sum of squares of off-diagonal elements.
         return off_diag.pow(2).sum() / float(feature_dim)
 
@@ -68,12 +66,3 @@ class VICRegLoss(L1ADLoss):
 
     def reduce(self):
         pass
-
-
-class L1VICRegLoss(VICRegLoss):
-    """Uses biased variance (unbiased=False) for stability and halves the penalty strength."""
-
-    def variance_loss(self, z):
-        z = z - z.mean(dim=0, keepdim=True)
-        std_z = torch.sqrt(z.var(dim=0, unbiased=False) + 1e-4)
-        return torch.mean(F.relu(1.0 - std_z)) / 2

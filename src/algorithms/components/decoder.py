@@ -19,7 +19,9 @@ class Decoder(MLP):
 
     def __init__(
         self,
+        in_dim: int,
         nodes: List[int],
+        out_dim: int,
         init_weight: Optional[Callable] = None,
         init_bias: Optional[Callable] = None,
         batchnorm: bool = False,
@@ -27,7 +29,9 @@ class Decoder(MLP):
         init_last_bias: Optional[Callable] = None,
     ) -> None:
         super().__init__(
+            in_dim,
             nodes,
+            out_dim,
             batchnorm=batchnorm,
             init_weight=init_weight,
             init_bias=init_bias,

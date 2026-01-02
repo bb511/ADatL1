@@ -66,6 +66,8 @@ class L1DataNormalizer:
 
     def _unnormalized_fit(self, data: ak.Array):
         self.norm_params[self.obj_name] = {}
+        for feat in ak.fields(data):
+            self.norm_params[self.obj_name][feat] = {"shift": 0, "scale": 1}
 
     def _robust(self, data: ak.Array, obj_name: str) -> ak.Array:
         """Robust normalization, i.e., shift by median and divide by IQ range."""

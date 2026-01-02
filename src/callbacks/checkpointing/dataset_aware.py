@@ -202,10 +202,20 @@ class DatasetAwareModelCheckpoint(Callback):
         plot_folder.mkdir(parents=True, exist_ok=True)
         epochs = defaultdict(int)
         values = defaultdict(float)
+
         for k in range(self.topk):
             for dataset_name in self.checkpoints.keys():
+                if not self.checkpoints[dataset_name]:
+                    log.warn(
+                        f"No checkpoints made for  {self.criterion.__dict__} "
+                        f"on dataset {dataset_name}."
+                    )
+                    continue
                 epochs[dataset_name] = self.checkpoints[dataset_name][k]["epoch"]
                 values[dataset_name] = self.checkpoints[dataset_name][k]["value"]
+
+            if not epochs:
+                continue
 
             xlabel = f"top {k+1} epoch"
             ylabel = f"metric value"

@@ -301,10 +301,13 @@ class L1DataMLReady:
 
         This field will be filled with None.
         """
+        # Create an empty list for missing features.
+        empty_list = ak.Array([[]] * len(data))
+
         for feature in self.unified_schema:
             if feature in data.fields:
                 continue
-            data[feature] = None
+            data = ak.with_field(data, empty_list, feature)
 
         return data
 

@@ -24,6 +24,11 @@ warnings.filterwarnings(
     message=".*does not have many workers.*",
     category=UserWarning,
 )
+warnings.filterwarnings(
+    "ignore",
+    message=r"Your `IterableDataset` has `__len__` defined\..*",
+    category=UserWarning,
+)
 
 
 class L1ADDataModule(LightningDataModule):
@@ -78,7 +83,8 @@ class L1ADDataModule(LightningDataModule):
 
         self.l1_scales = l1_scales
         self.normalizer = None
-        self.shuffler = np.random.default_rng(seed=seed)
+        self.shuffler = torch.Generator()
+        self.shuffler.manual_seed(seed)
 
     def prepare_data(self) -> None:
         """Get zero bias data and the simulated MC signal data."""
@@ -130,7 +136,7 @@ class L1ADDataModule(LightningDataModule):
         """Set up the training data, if it is not already loaded."""
         if self.data_train is None:
             label = 0
-            self.data_train = self.loader.load_folder(data_dir / "train")
+            self.data_train, self.mask_train = self.loader.load_folder(data_dir / "train")
             ntrain = self.data_train.size(dim=0)
             self.labels_train = torch.from_numpy(np.full(ntrain, label))
 
@@ -138,23 +144,25 @@ class L1ADDataModule(LightningDataModule):
         """Set up the validation data, if it is not already loaded."""
         if self.data_val is None:
             label = 0
-            self.data_val = self.loader.load_folder(data_dir / "valid")
+            self.data_val, self.mask_val = self.loader.load_folder(data_dir / "valid")
             nvalid = self.data_val.size(dim=0)
             self.labels_val = torch.from_numpy(np.full(nvalid, label))
 
         if self.aux_val is None:
-            self.aux_val, self.aux_val_labels = self._load_aux_data("valid", data_dir)
+            self.aux_val, self.aux_val_mask, self.aux_val_labels =\
+                self._load_aux_data("valid", data_dir)
 
     def _load_test_data(self, data_dir: Path):
         """Set up the test data, if it is not already loaded."""
         if self.data_test is None:
             label = 0
-            self.data_test = self.loader.load_folder(data_dir / "test")
+            self.data_test, self.mask_test = self.loader.load_folder(data_dir / "test")
             ntest = self.data_test.size(dim=0)
             self.labels_test = torch.from_numpy(np.full(ntest, label))
 
         if self.aux_test is None:
-            self.aux_test, self.aux_test_labels = self._load_aux_data("test", data_dir)
+            self.aux_test, self.aux_test_mask, self.aux_test_labels =\
+                self._load_aux_data("test", data_dir)
 
     def _load_aux_data(self, stage: str, data_dir: Path):
         """Load the auxiliary data, either for the test or validation stage."""
@@ -162,7 +170,7 @@ class L1ADDataModule(LightningDataModule):
         label_signal = 0
         label_background = 0
 
-        data, labels = {}, {}
+        data, mask, labels = {}, {}, {}
         for dataset_path in sorted(
             p
             for p in aux_folder.iterdir()
@@ -175,12 +183,13 @@ class L1ADDataModule(LightningDataModule):
             else:
                 label_signal += 1
                 label = label_signal
-            data_tensor = self.loader.load_folder(dataset_path / stage)
+            data_tensor, mask_tensor = self.loader.load_folder(dataset_path / stage)
             label_tensor = torch.from_numpy(np.full(data_tensor.size(dim=0), label))
             data.update({name: data_tensor})
+            mask.update({name: mask_tensor})
             labels.update({name: label_tensor})
 
-        return data, labels
+        return data, mask, labels
 
     def _data_summary(self, stage: str):
         """Make a neat little summary of what data is being used."""
@@ -216,6 +225,7 @@ class L1ADDataModule(LightningDataModule):
         """
         dataset = L1ADDataset(
             self.data_train,
+            self.mask_train,
             self.labels_train,
             batch_size=self.batch_size_per_device,
             shuffler=self.shuffler,
@@ -240,7 +250,9 @@ class L1ADDataModule(LightningDataModule):
 
         # Make sure main_val is always first in the dict !!!
         # The rate callback expects this.
-        main_val = L1ADDataset(self.data_val, self.labels_val, batch_size=batch_size)
+        main_val = L1ADDataset(
+            self.data_val, self.mask_val, self.labels_val, batch_size=batch_size
+        )
         main_val = DataLoader(
             main_val,
             batch_size=None,
@@ -256,6 +268,7 @@ class L1ADDataModule(LightningDataModule):
             batch_size = self._get_validation_batchsize(self.aux_val[dataset_name])
             dataset = L1ADDataset(
                 self.aux_val[dataset_name],
+                self.aux_val_mask[dataset_name],
                 self.aux_val_labels[dataset_name],
                 batch_size=batch_size,
             )
@@ -277,7 +290,9 @@ class L1ADDataModule(LightningDataModule):
         """
         # Shuffling is by default false for the custom dataset.
         batch_size = self._get_validation_batchsize(self.data_test)
-        main_test = L1ADDataset(self.data_test, self.labels_test, batch_size=batch_size)
+        main_test = L1ADDataset(
+            self.data_test, self.mask_test, self.labels_test, batch_size=batch_size
+        )
         main_test = DataLoader(
             main_test,
             batch_size=None,
@@ -294,6 +309,7 @@ class L1ADDataModule(LightningDataModule):
             batch_size = self._get_validation_batchsize(self.aux_test[dataset_name])
             dataset = L1ADDataset(
                 self.aux_test[dataset_name],
+                self.aux_test_mask[dataset_name],
                 self.aux_test_labels[dataset_name],
                 batch_size=batch_size,
             )
@@ -323,17 +339,26 @@ class L1ADDataModule(LightningDataModule):
         again after 1 second of delay. Attempt to do this 3 times before throwing
         an error and stopping the process.
         """
-        data, labels = batch
+        data, mask, labels = batch
+        data = data.contiguous()
+        mask = mask.contiguous()
+        labels = labels.contiguous()
         if "cuda" in str(device):
-            return data.to(device, non_blocking=True), labels
+            data = data.pin_memory()
+            data = data.to(device, non_blocking=True)
+            mask = mask.pin_memory()
+            mask = mask.to(device, non_blocking=True)
+            labels = labels.pin_memory()
+            labels = labels.to(device, non_blocking=True)
+            return data, mask, labels
 
-        return data.to(device), labels
+        return data.to(device), mask.to(device), labels.to(device)
 
     def _get_validation_batchsize(self, data: np.ndarray):
         if self.hparams.val_batches == -1:
             return self.batch_size_per_device
 
-        return int(len(data) / self.hparams.val_batches)
+        return int(data.shape[0] / self.hparams.val_batches)
 
     def _set_batch_size(self):
         """Set the batch size per device if multiple devices are available."""
@@ -367,18 +392,20 @@ class L1ADDataModule(LightningDataModule):
         val_data = {}
         test_data = {}
 
+        data, mask = self.loader.load_folder(data_dir / "train" / flag),
         train_data = L1ADDataset(
-            self.loader.load_folder(data_dir / "train" / flag),
+            data,
+            mask,
             self.labels_train,
             batch_size=self.batch_size_per_device,
         )
-        data = self.loader.load_folder(data_dir / "valid" / flag)
+        data, mask = self.loader.load_folder(data_dir / "valid" / flag)
         bs = self._get_validation_batchsize(data)
-        val_data.update({"main_val": L1ADDataset(data, self.labels_val, bs)})
+        val_data.update({"main_val": L1ADDataset(data, mask, self.labels_val, bs)})
 
-        data = self.loader.load_folder(data_dir / "test" / flag)
+        data, mask = self.loader.load_folder(data_dir / "test" / flag)
         bs = self._get_validation_batchsize(data)
-        test_data.update({"main_test": L1ADDataset(data, self.labels_test, bs)})
+        test_data.update({"main_test": L1ADDataset(data, mask, self.labels_test, bs)})
 
         aux_folder = data_dir / "aux"
         for dataset_path in sorted(
@@ -387,13 +414,13 @@ class L1ADDataModule(LightningDataModule):
             if p.is_dir() and not p.name.startswith("._")
         ):
             name = dataset_path.stem
-            val = self.loader.load_folder(dataset_path / "valid" / flag)
+            val, val_mask = self.loader.load_folder(dataset_path / "valid" / flag)
             bs = self._get_validation_batchsize(val)
-            val = L1ADDataset(val, self.aux_val_labels[name], bs)
+            val = L1ADDataset(val, val_mask, self.aux_val_labels[name], bs)
 
-            test = self.loader.load_folder(dataset_path / "test" / flag)
+            test, test_mask = self.loader.load_folder(dataset_path / "test" / flag)
             bs = self._get_validation_batchsize(test)
-            test = L1ADDataset(test, self.aux_val_labels[name], bs)
+            test = L1ADDataset(test, test_mask, self.aux_val_labels[name], bs)
 
             val_data.update({name: val})
             test_data.update({name: test})

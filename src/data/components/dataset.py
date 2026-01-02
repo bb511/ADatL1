@@ -1,10 +1,10 @@
 import torch
 import numpy as np
 import math
-from torch.utils.data import Dataset
+from torch.utils.data import IterableDataset
 
 
-class L1ADDataset(Dataset):
+class L1ADDataset(IterableDataset):
     """Custom Dataset for loading anomaly detection numpy data.
 
     The data is assumed to be already loaded in memory.
@@ -13,30 +13,42 @@ class L1ADDataset(Dataset):
     def __init__(
         self,
         data: torch.Tensor,
-        labels: torch.Tensor,
+        mask: torch.Tensor,
+        labels: torch.Tensor | None,
         batch_size: int,
-        shuffler: np.random.Generator = None,
+        shuffler: torch.Generator | None = None,
     ):
-        self.data, self.labels = data, labels
+        assert data.shape[0] == mask.shape[0]
+        assert labels.shape[0] == data.shape[0]
+
+        self.data, self.mask, self.labels = data, mask, labels
         self.batch_size = batch_size
-        self.indexer = np.arange(self.data.size()[0])
         self.shuffler = shuffler
-        self.shuffled_indexer = self.indexer
+
+        self.n = data.shape[0]
+        self.num_batches = (self.n + self.batch_size - 1) // self.batch_size
+        self.starts = torch.arange(self.num_batches, dtype=torch.int64) * self.batch_size
 
     def __len__(self):
-        return math.ceil(len(self.data) / self.batch_size)
+        return self.num_batches
 
-    def __getitem__(self, batch_idx: int) -> tuple[torch.Tensor, torch.Tensor]:
-        if batch_idx == 0 and self.shuffler is not None:
-            self.shuffled_indexer = self.indexer.copy()
-            self.shuffler.shuffle(self.shuffled_indexer)
+    def __iter__(self) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+        if self.shuffler:
+            order = torch.randperm(self.num_batches, generator=self.shuffler)
+            starts = self.starts[order]
+        else:
+            starts = self.starts
 
-        idxer = self.shuffled_indexer if self.shuffler is not None else self.indexer
+        bs = self.batch_size
+        n = self.n
 
-        start = batch_idx * self.batch_size
-        stop = min(start + self.batch_size, self.data.shape[0])
-        nidxs = idxer[start:stop]
+        for s in starts.tolist():
+            e = s + bs
+            if e > n:
+                e = n
 
-        x = self.data[nidxs, ...]
-        y = None if self.labels is None else self.labels[nidxs, ...]
-        return x, y
+            x = self.data[s:e]
+            m = self.mask[s:e]
+            y = self.labels[s:e]
+
+            yield x, m, y

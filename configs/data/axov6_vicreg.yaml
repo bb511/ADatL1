@@ -4,7 +4,7 @@ defaults:
   - /paths: data_2025E+G
   - data_extractor: axov6
   - data_processor: axov6
-  - data_normalizer: robust
+  - data_normalizer: default
   - data_mlready: axov6
   - data_awkward2torch: axov6
   - l1_scales: default

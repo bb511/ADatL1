@@ -32,12 +32,12 @@ class AE(L1ADLightningModule):
         return z, reconstruction
 
     def model_step(self, batch: torch.Tensor) -> torch.Tensor:
-        x, y = batch
+        x, _, _ = batch
         x = torch.flatten(x, start_dim=1)
         z, reconstruction = self.forward(x)
         reco_loss = self.loss(reco=reconstruction, target=x)
 
-        del x, y, z
+        del x, z
 
         return {
             # Used for backpropagation:

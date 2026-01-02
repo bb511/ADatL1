@@ -8,7 +8,10 @@ features: null
 
 encoder:
   _target_: src.models.encoder.VariationalEncoder
-  nodes: [57, 28, 16, 8] # 57 input features, 8 latent features
+  in_dim: 57
+  nodes: [28, 16]
+  out_dim: 8
+
 
   init_weight:
     _target_: src.utils.hydra.get_method
@@ -19,7 +22,9 @@ encoder:
 
 decoder:
   _target_: src.models.decoder.Decoder
-  nodes: [8, 24, 32, 64, 128, 57]
+  in_dim: 8
+  nodes: [24, 32, 64, 128]
+  out_dim: 57
 
   init_weight:
     _target_: src.utils.hydra.get_method

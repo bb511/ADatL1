@@ -21,6 +21,7 @@ class MLP(nn.Module):
         nodes: list[int],
         out_dim: int,
         batchnorm: Optional[bool] = False,
+        affine: bool = True,
         init_weight: Optional[Callable] = None,
         init_bias: Optional[Callable] = None,
     ):
@@ -30,6 +31,7 @@ class MLP(nn.Module):
         self.out_dim = out_dim
 
         self.batchnorm = batchnorm
+        self.affine = affine
         self.init_weight = init_weight
         self.init_bias = init_bias
 
@@ -48,7 +50,10 @@ class MLP(nn.Module):
         # Hidden layers
         for hidden_dim in self.hidden_dims:
             layers.append(nn.Linear(current_dim, hidden_dim))
-            layers.append(nn.BatchNorm1d(hidden_dim) if self.batchnorm else nn.Identity())
+            layers.append(
+                nn.BatchNorm1d(hidden_dim, affine=self.affine)
+                if self.batchnorm else nn.Identity()
+            )
             layers.append(nn.ReLU())
             current_dim = hidden_dim
 

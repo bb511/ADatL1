@@ -189,6 +189,9 @@ class VICReg(L1ADLightningModule):
         avg_cos_sim = max(z1_cos_similarity, z2_cos_similarity)
         diag_outdict.update({"diag_avg_cos_sim": avg_cos_sim})
 
+        pair_cos = torch.nn.functional.cosine_similarity(z1, z2, dim=1).mean().item()
+        diag_outdict.update({"diag_avg_pair_cos_sim": pair_cos})
+
         return diag_outdict
 
     @torch.no_grad()
@@ -208,7 +211,7 @@ class VICReg(L1ADLightningModule):
 
     @torch.no_grad()
     def _average_pairwise_cosine(self, z):
-        # z: [B, D]
+        z = z - z.mean(dim=0, keepdim=True)
         z = torch.nn.functional.normalize(z, dim=1)  # L2 norm
         sim = z @ z.T                                # [B, B]
         B = z.shape[0]

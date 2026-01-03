@@ -34,7 +34,9 @@ class VICRegLoss(L1ADLoss):
         self.cov_coef = cov_coef
 
     def invariance_loss(self, z1, z2):
-        return F.mse_loss(z1, z2)
+        z1n = F.normalize(z1, dim=1)
+        z2n = F.normalize(z2, dim=1)
+        return F.mse_loss(z1n, z2n)
 
     def variance_loss(self, z):
         z = z - z.mean(dim=0, keepdim=True)
@@ -48,9 +50,9 @@ class VICRegLoss(L1ADLoss):
         z = z * ((batch_size - 1) ** -0.5)
         cov = z.T @ z
         # Remove the diagonal elements (i.e. variance terms).
-        off_diag = cov[~torch.eye(feature_dim, dtype=torch.bool)]
+        off_diag = cov[~torch.eye(feature_dim, device=z.device, dtype=torch.bool)]
         # Compute the covariance loss as the sum of squares of off-diagonal elements.
-        return off_diag.pow(2).sum() / float(feature_dim)
+        return off_diag.pow(2).mean()
 
     def forward(self, z1: torch.Tensor, z2: torch.Tensor):
         loss_inv = self.invariance_loss(z1, z2)

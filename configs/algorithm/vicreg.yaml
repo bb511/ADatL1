@@ -30,21 +30,21 @@ model:
 projector:
   _target_: src.algorithms.components.mlp.MLP
   in_dim: ${algorithm.model.out_dim}
-  nodes: []
+  nodes: [128, 128]
   out_dim: 64
   batchnorm: true # Added batchnorm
 
 loss:
   _target_: src.losses.vicreg.VICRegLoss
-  inv_coef: 50
-  var_coef: 50
-  cov_coef: 1
+  inv_coef: 25
+  var_coef: 25
+  cov_coef: 25
 
 optimizer:
   _partial_: true
   _target_: torch.optim.AdamW
   lr: 0.0003
-  weight_decay: 0.0
+  weight_decay: 1e-3
   betas: [0.9, 0.999]
   eps: 1e-8
 

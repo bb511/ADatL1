@@ -14,7 +14,7 @@ optimized_metric_config:
   callback:
     name: LossCallback
     params:
-      ckpt_ds: main_val
+      ckpt_ds: last
       test_ds: main_test
   direction: minimize
   sec_metric:
@@ -23,6 +23,7 @@ optimized_metric_config:
       params:
         ckpt_ds: null # This will be filled in with the best ckpt of the main metric.
     direction: maximize
+
 # here we define Optuna hyperparameter search
 # it optimizes for value returned from function with @hydra.main decorator
 # docs: https://hydra.cc/docs/next/plugins/optuna_sweeper
@@ -36,8 +37,7 @@ hydra:
     storage: sqlite:///optuna_logs/optim_v1.db
 
     # name of the study to persist optimization results
-    study_name: vicreg_search_b16k_phase1_fixed_v3
-    # study_name: vicreg_test_v7
+    study_name: vicreg_search_robustnorm_bs16k
 
     # number of parallel workers
     n_jobs: 1
@@ -69,7 +69,7 @@ hydra:
       algorithm.optimizer.weight_decay: tag(log, interval(1e-6, 1e-3))
       algorithm.optimizer.betas: choice([0.9, 0.999], [0.9, 0.99], [0.95, 0.999], [0.95, 0.99])
 
-      algorithm.scheduler.scheduler.warmup_ratio: interval(0.0, 0.1)
+      algorithm.scheduler.scheduler.warmup_ratio: choice(0.0, 0.01, 0.03, 0.05, 0.1)
       algorithm.scheduler.scheduler.min_lr_ratio: choice(0.0, 0.01, 0.05, 0.1)
 
       algorithm.feature_blur.prob: interval(0.1, 0.6)
@@ -79,8 +79,8 @@ hydra:
       algorithm.object_mask.prob: interval(0.0, 0.5)
       algorithm.lorentz_rotation.prob: choice(0.0, 0.3, 0.6)
 
-      algorithm.loss.var_coef: tag(log, interval(10, 60))
-      algorithm.loss.cov_coef: tag(log, interval(0.5, 5))
+      algorithm.loss.var_coef: tag(log, interval(10, 100))
+      algorithm.loss.cov_coef: tag(log, interval(10, 60))
 
       algorithm.model.out_dim: choice(16, 32, 64)
       # data.batch_size: choice(16276, 32552, 65104)

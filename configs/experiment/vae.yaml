@@ -26,7 +26,6 @@ trainer:
   min_epochs: 1
   max_epochs: -1
   max_steps: 50_000
-  limit_train_batches: 10
   limit_val_batches: 10
   limit_test_batches: 10
 

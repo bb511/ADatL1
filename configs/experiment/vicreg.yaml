@@ -1,7 +1,7 @@
 # @package _global_
 
 defaults:
-  - override /data: axov6_vicreg
+  - override /data: axov6
   - override /algorithm: vicreg
   - override /callbacks: default
   - override /trainer: cpu
@@ -20,26 +20,19 @@ trainer:
   gradient_clip_algorithm: norm
   gradient_clip_val: 1.0
   min_epochs: 1
-  max_epochs: 1
+  max_epochs: 50
   limit_val_batches: 10
   limit_test_batches: 10
 
 test: true
 
 callbacks:
-  min_loss_ckpt:
-    _target_: src.callbacks.model_checkpoint.SingleDatasetModelCheckpoint
-    dirpath: '${paths.checkpoints_dir}/${experiment_name}/${run_name}'
-    monitor: loss
-    criterion:
-      _target_: src.callbacks.checkpointing.criterion.Min
-      top_k: 1
+  min_loss_ckpt: null
 
 evaluator:
   ckpts:
-    last: false
-    single:
-      loss: ['min']
+    last: true
+    single: null
 
 evaluator_callbacks:
   loss:

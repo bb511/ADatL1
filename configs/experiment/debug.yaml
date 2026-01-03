@@ -4,7 +4,7 @@
 # python train.py experiment=example
 
 defaults:
-  - override /data: axov6_vicreg
+  - override /data: axov6
   - override /algorithm: vicreg
   - override /callbacks: default
   - override /trainer: cpu
@@ -24,9 +24,9 @@ trainer:
   gradient_clip_val: 1.0
   # overfit_batches: 1
   min_epochs: 1
-  max_epochs: 1
+  max_epochs: 50
   # max_steps: 1_000
-  # limit_train_batches: 10
+  limit_train_batches: 10
   limit_val_batches: 10
   limit_test_batches: 10
   # check_val_every_n_epoch: 2
@@ -34,13 +34,13 @@ trainer:
 test: true
 
 callbacks:
-  min_loss_ckpt:
-    _target_: src.callbacks.model_checkpoint.SingleDatasetModelCheckpoint
-    dirpath: '${paths.checkpoints_dir}/${experiment_name}/${run_name}'
-    monitor: loss
-    criterion:
-      _target_: src.callbacks.checkpointing.criterion.Min
-      top_k: 1
+  min_loss_ckpt: null
+    # _target_: src.callbacks.model_checkpoint.SingleDatasetModelCheckpoint
+    # dirpath: '${paths.checkpoints_dir}/${experiment_name}/${run_name}'
+    # monitor: loss
+    # criterion:
+    #   _target_: src.callbacks.checkpointing.criterion.Min
+    #   top_k: 1
     # skip_ds:
     #   - GluGluHTo2B_Par-MH-125
     #   - GluGluHto2G_Par-MH-125
@@ -65,9 +65,8 @@ callbacks:
 
 evaluator:
   ckpts:
-    last: false
-    single:
-      loss: ['min']
+    last: true
+    single: null
 
 evaluator_callbacks:
   loss:

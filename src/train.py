@@ -149,6 +149,11 @@ def main(cfg: DictConfig) -> Optional[float]:
     evaluator = object_dict.get("evaluator", None)
     metric_value = evaluator.optimized_metric if evaluator else None
 
+    # Clean up.
+    del object_dict
+    del metric_dict
+    gc.collect()
+
     # return optimized metric
     return metric_value
 

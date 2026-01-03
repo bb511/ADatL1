@@ -392,7 +392,7 @@ class L1ADDataModule(LightningDataModule):
         val_data = {}
         test_data = {}
 
-        data, mask = self.loader.load_folder(data_dir / "train" / flag),
+        data, mask = self.loader.load_folder(data_dir / "train" / flag)
         train_data = L1ADDataset(
             data,
             mask,

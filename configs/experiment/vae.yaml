@@ -12,12 +12,13 @@ defaults:
 seed: 123
 tags: ["axo_v6", "vae"]
 
-experiment_name: vae_training
-run_name: bs${data.batch_size}_klwarm${algorithm.kl_warmup_frac}_klscale${algorithm.loss.kl_scale}_lr${algorithm.optimizer.lr}
-
 algorithm:
   optimizer:
     lr: ${mul:${lr},${sqrt:${div:${data.batch_size},16384}}}
+
+experiment_name: vae_training
+run_name: bs${data.batch_size}_klwarm${algorithm.kl_warmup_frac}_klscale${algorithm.loss.kl_scale}_lr${algorithm.optimizer.lr}
+
 
 trainer:
   gradient_clip_algorithm: norm
@@ -25,7 +26,7 @@ trainer:
   min_epochs: 1
   max_epochs: -1
   max_steps: 50_000
-  # limit_train_batches: 100
+  limit_train_batches: 10
   limit_val_batches: 10
   limit_test_batches: 10
 

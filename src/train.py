@@ -153,6 +153,7 @@ def main(cfg: DictConfig) -> Optional[float]:
     del object_dict
     del metric_dict
     gc.collect()
+
     # return optimized metric
     return metric_value
 

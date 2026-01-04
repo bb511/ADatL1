@@ -19,7 +19,6 @@ algorithm:
 experiment_name: vae_training
 run_name: bs${data.batch_size}_klwarm${algorithm.kl_warmup_frac}_klscale${algorithm.loss.kl_scale}_lr${algorithm.optimizer.lr}
 
-
 trainer:
   gradient_clip_algorithm: norm
   gradient_clip_val: 1.0

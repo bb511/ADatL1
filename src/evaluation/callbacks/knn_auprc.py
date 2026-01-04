@@ -165,7 +165,7 @@ class KNNAUPRC(Callback):
             "knn_auprcs",
             plot_folder,
             log_raw=self.log_raw_mlflow,
-            gallery_name=f'knn_auprcs_{self.output_name}'
+            gallery_name=f"knn_auprcs_{self.output_name.replace('/', '_')}"
         )
 
     def _get_dsname(self, roc_name: str):

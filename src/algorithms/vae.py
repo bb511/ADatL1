@@ -20,6 +20,8 @@ class VAE(L1ADLightningModule):
         up the KL scaling factor over.
     :param features: An nn module to apply to the data and give a space for the vae
         to act on, e.g., vicreg.
+    :param mask: Boolean determining whether one should mask input features, i.e., mask
+        where the padded values are in the mse loss.
     """
     def __init__(
         self,
@@ -27,13 +29,14 @@ class VAE(L1ADLightningModule):
         decoder: nn.Module,
         kl_warmup_frac: float = 0.0,
         features: Optional[nn.Module] = None,
+        mask: bool = True,
         **kwargs,
     ):
         super().__init__(model=None, **kwargs)
         self.save_hyperparameters(
             ignore=["model", "features", "encoder", "decoder", "loss"]
         )
-
+        self.mask = mask
         self.encoder, self.decoder = encoder, decoder
         self.features = features if features is not None else nn.Identity()
         self.features.eval()
@@ -60,8 +63,8 @@ class VAE(L1ADLightningModule):
             reconstruction=reconstruction,
             z_mean=z_mean,
             z_log_var=z_log_var,
-            target=x,
-            mask=m,
+            target=self.features(x),
+            mask=m if self.mask else None,
             kl_scale=kl_current_scale
         )
         del x, z, z_mean, z_log_var
@@ -127,47 +130,3 @@ class VAE(L1ADLightningModule):
         self.kl_scale = LinearWarmup(
             final_value=fin_scale, warmup_frac=kl_warmup_frac, total_steps=total_steps
         )
-
-
-class RVAE(VAE):
-    """Regularized VAE. Overriding loss and logging."""
-
-    def model_step(self, batch: Tuple[torch.Tensor]) -> Dict[str, torch.Tensor]:
-        x, y = batch
-        x = torch.flatten(x, start_dim=1)
-        z_mean, z_log_var, z, reconstruction = self.forward(x)
-        loss = self.loss(
-            reconstruction=reconstruction,
-            target=x,
-            z=z,
-            z_mean=z_mean,
-            z_log_var=z_log_var,
-            y=y,
-        )
-        del reconstruction, x, z, y
-
-        outdict = {
-            "loss": loss.mean(),
-            "loss/total/full": loss.detach(),
-            "z_mean.abs()": z_mean.abs(),
-            "z_log_var": z_log_var,
-        }
-        if hasattr(self.loss, "losses"):
-            individual_losses = {
-                f"loss/{module.name}": value
-                for module, value in zip(
-                    self.loss.losses.values(), self.loss.values.values()
-                )
-            }
-            outdict.update(
-                {
-                    "loss/total": sum(list(individual_losses.values())),
-                    **{k: v.mean() for k, v in individual_losses.items()},
-                }
-            )
-        return outdict
-
-    def outlog(self, outdict: dict) -> dict:
-        return {
-            k: v for k, v in outdict.items() if "train/" in k and k != "loss/total/full"
-        }

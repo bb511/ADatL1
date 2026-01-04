@@ -89,7 +89,7 @@ class AnomalyEfficiencyCallback(Callback):
             self._accumulate_maintest_output(outputs, batch_idx)
         else:
             if self.dataset_name in self.skip_ds:
-                continue
+                return
             if batch_idx == 0:
                 self._initialize_rate_metric(labels)
             self._compute_batch_rate(outputs, labels)
@@ -106,7 +106,7 @@ class AnomalyEfficiencyCallback(Callback):
 
         if batch_idx == self.total_batches - 1:
             self.maintest_score_data = torch.cat(self.maintest_score_data, dim=0)
-            self._compute_maintest_rate(self.metric_name)
+            self._compute_maintest_rate()
 
     def _compute_maintest_rate(self):
         """Computes the desired rates on the main test data set.
@@ -177,7 +177,7 @@ class AnomalyEfficiencyCallback(Callback):
         """Compute batch rate of a background data set."""
         for target_rate in self.target_rates:
             rate_name = f"{self.dataset_name}/{target_rate}"
-            self.bkg_rates[self.rate_name].update(outputs[self.metric_name].detach())
+            self.bkg_rates[rate_name].update(outputs[self.metric_name].detach())
 
     def on_test_epoch_end(self, trainer, pl_module) -> None:
         """Log the anomaly rates computed on each of the data sets."""
@@ -193,11 +193,11 @@ class AnomalyEfficiencyCallback(Callback):
             main_eff = self._compute_eff(trate, self.main_rate)
             effs = sig_effs | bkg_effs | main_eff
 
-            trate = f"{target_rate} kHz"
+            trate_name = f"{trate} kHz"
             ascore = f"anomaly score: {self.metric_name}"
-            xlabel = f"efficiency at threshold: {trate}\n{ascore}"
+            xlabel = f"efficiency at threshold: {trate_name}\n{ascore}"
             self._plot(effs, xlabel, plot_folder, percent=True)
-            self._store_summary(sig_effs, bkg_effs, ckpt_name, self.metric_name, trate)
+            self._store_summary(sig_effs, bkg_effs, ckpt_name, trate)
 
         utils.mlflow.log_plots_to_mlflow(
             trainer,
@@ -205,7 +205,7 @@ class AnomalyEfficiencyCallback(Callback):
             "effs",
             plot_folder,
             log_raw=self.log_raw_mlflow,
-            gallery_name=f"effs_{self.metric_name}"
+            gallery_name=f"effs_{self.metric_name.replace('/', '_')}"
         )
 
     def _compute_eff(self, relevant_target_rate: float, rate_dict: dict):
@@ -225,7 +225,7 @@ class AnomalyEfficiencyCallback(Callback):
 
         for target_rate in self.eff_summary.keys():
             # Get the summary metric per checkpoint.
-            smet = self.eff_summary[metric_name][target_rate]
+            smet = self.eff_summary[target_rate]
 
             # Configure plot.
             trate = f"{target_rate} kHz"
@@ -260,7 +260,7 @@ class AnomalyEfficiencyCallback(Callback):
         ylabel = " "
         horizontal_bar.plot_yright(data, data, xlabel, ylabel, plot_folder, percent)
 
-    def _store_summary(self, sig_eff: dict, bkg_eff: dict, ckpt: str, trate: float):
+    def _store_summary(self, sig_effs: dict, bkg_effs: dict, ckpt: str, trate: float):
         """Store the summary statistic for the efficiency for one checkpoint.
 
         Here, we compute the variance of efficiency over the signal data sets and divide

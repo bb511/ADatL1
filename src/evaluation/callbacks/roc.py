@@ -114,7 +114,7 @@ class ROCs(Callback):
             "rocs",
             plot_folder,
             log_raw=self.log_raw_mlflow,
-            gallery_name=f'rocs_{self.metric_name}'
+            gallery_name=f"rocs_{self.metric_name.replace('/', '_')}"
         )
 
     def _convert2numpy(self, arr: tuple[torch.Tensor] | torch.Tensor):

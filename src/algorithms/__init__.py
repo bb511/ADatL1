@@ -15,17 +15,19 @@ class L1ADLightningModule(LightningModule):
 
     def __init__(
         self,
-        model: nn.Module,
-        loss: nn.Module,
-        optimizer: optim.Optimizer,
+        model: nn.Module = None,
+        loss: nn.Module = None,
+        optimizer: optim.Optimizer = None,
         scheduler: Optional[DictConfig] = None,
         masking: Optional[nn.Module] = None,
+        save_hyperparameters: bool = False
     ):
         super().__init__()
+        self.save_hyperparameters(ignore=["model", "loss"])
+
         self.loss = loss
         self.model = model
         self.masking = masking if masking is not None else nn.Identity()
-        self.save_hyperparameters(ignore=["model", "loss"])
 
         self._log_sum = {}
         self._log_nsteps = {}

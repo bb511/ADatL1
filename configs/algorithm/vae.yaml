@@ -3,11 +3,18 @@ defaults:
   - _self_
 
 _target_: src.algorithms.vae.VAE
-features: null
+features:
+  _target_: src.algorithms.components.features.FeaturesFromCkpt
+  ckpt_path: /data/deodagiu/adl1t/checkpoints/vicreg_feats_ckpt/lr0.006496_var75_cov17.5/last.ckpt
+  attr: model
+  litmodule_cls:
+    _target_: hydra.utils.get_class
+    path: src.algorithms.vicreg.VICReg
+mask: false
 
 encoder:
   _target_: src.algorithms.components.encoder.VariationalEncoder
-  in_dim: 117
+  in_dim: 16
   nodes: [64, 64]
   out_dim: 48
 
@@ -15,7 +22,7 @@ decoder:
   _target_: src.algorithms.components.decoder.Decoder
   in_dim: 48
   nodes: [64, 64]
-  out_dim: 117
+  out_dim: 16
 
 loss:
   _target_: src.losses.vae.ClassicVAELoss

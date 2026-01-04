@@ -142,8 +142,13 @@ class Evaluator:
             self.evaluator.ckpt_path_name = ckpt_path.name
             self.evaluate_ckpt(ckpt_path, model, test_loader)
 
-        self._get_optimized_metric(self.optimized_metric_config)
-        self._make_criterion_summary_plots(criterion_folder)
+        # Skip getting an optimized metric if no checkpoints were made for that
+        # specific criterion.
+        ckpts = list(criterion_folder.glob("*.ckpt"))
+        if ckpts != []:
+            self._get_optimized_metric(self.optimized_metric_config)
+            self._make_criterion_summary_plots(criterion_folder)
+
         self.evaluator.criterion_name = None
 
     def evaluate_ckpt(self, ckpt_path: Path, model, test_loader: dict):

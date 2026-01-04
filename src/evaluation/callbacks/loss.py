@@ -52,7 +52,11 @@ class LossCallback(Callback):
         the mean loss over that batch.
         """
         dset_name = list(trainer.test_dataloaders.keys())[dataloader_idx]
-        batch_output = outputs[self.loss_name].detach()
+        if isinstance(outputs[self.loss_name], float):
+            batch_output = outputs[self.loss_name]
+        else:
+            batch_output = outputs[self.loss_name].detach()
+
         self.dset_losses[dset_name].update(batch_output)
 
     def on_test_epoch_end(self, trainer, pl_module) -> None:
@@ -78,7 +82,7 @@ class LossCallback(Callback):
             "losses",
             plot_folder,
             log_raw=self.log_raw_mlflow,
-            gallery_name=f'losses_{self.loss_name}'
+            gallery_name=f"losses_{self.loss_name.replace('/', '_')}"
         )
 
     def _store_summary(self, losses: dict, ckpt_name: str):

@@ -11,6 +11,10 @@ defaults:
 
 tags: ["axov6", "vicreg"]
 
+algorithm:
+  optimizer:
+    lr: ${mul:${lr},${sqrt:${div:${data.batch_size},16384}}}
+
 experiment_name: vicreg_training
 run_name: lr${algorithm.optimizer.lr}_var${algorithm.loss.var_coef}_cov${algorithm.loss.cov_coef}
 
@@ -20,7 +24,7 @@ trainer:
   gradient_clip_algorithm: norm
   gradient_clip_val: 1.0
   min_epochs: 1
-  max_epochs: 50
+  max_epochs: 10
   limit_val_batches: 10
   limit_test_batches: 10
 

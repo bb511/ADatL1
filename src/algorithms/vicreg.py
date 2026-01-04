@@ -30,9 +30,9 @@ class VICReg(L1ADLightningModule):
     def __init__(
         self,
         projector: MLP,
-        feature_blur: FastFeatureBlur,
-        object_mask: FastObjectMask,
-        lorentz_rotation: FastLorentzRotation,
+        feature_blur: FastFeatureBlur = None,
+        object_mask: FastObjectMask = None,
+        lorentz_rotation: FastLorentzRotation = None,
         seed: int = 42,
         diagnosis_metrics: bool = False,
         **kwargs,
@@ -41,7 +41,6 @@ class VICReg(L1ADLightningModule):
         # Ignore saving hyperparams to avoid memory bloating.
         self.save_hyperparameters(
             ignore=[
-                "model",
                 "loss",
                 "projector",
                 "feature_blur",
@@ -55,25 +54,39 @@ class VICReg(L1ADLightningModule):
         self.projector = projector
 
         # Instantiate augmentation modules with different rngs
-        self.feature_blur_1 = copy.deepcopy(feature_blur)
-        self.feature_blur_2 = copy.deepcopy(feature_blur)
-        self.feature_blur_1.rng.set_seed(self.seed)
-        self.feature_blur_2.rng.set_seed(self.seed + 1)
+        self.feat_blurs = {}
+        feature_blur_1 = copy.deepcopy(feature_blur)
+        feature_blur_2 = copy.deepcopy(feature_blur)
+        feature_blur_1.rng.set_seed(self.seed)
+        feature_blur_2.rng.set_seed(self.seed + 1)
+        self.feat_blurs.update({'1': feature_blur_1})
+        self.feat_blurs.update({'2': feature_blur_2})
 
-        self.object_mask_1 = copy.deepcopy(object_mask)
-        self.object_mask_2 = copy.deepcopy(object_mask)
-        self.object_mask_1.rng.set_seed(self.seed)
-        self.object_mask_2.rng.set_seed(self.seed + 1)
+
+        self.obj_masks = {}
+        object_mask_1 = copy.deepcopy(object_mask)
+        object_mask_2 = copy.deepcopy(object_mask)
+        object_mask_1.rng.set_seed(self.seed)
+        object_mask_2.rng.set_seed(self.seed + 1)
+        self.obj_masks.update({'1': object_mask_1})
+        self.obj_masks.update({'2': object_mask_2})
 
         self.lorentz_rotation = lorentz_rotation
 
     def on_fit_start(self):
-        """Set up the Lorentz augmentations."""
+        """Set up the Lorentz augmentations.
+
+        Save them as dictionaries so pytorch lightning does not instantiate them when
+        loading from checkpoints, since they are not needed for inference.
+        """
+        self.lorentz_rot = {}
         lorentz_rotation = self._setup_phi_lorentz_rotation()
-        self.lorentz_rotation_1 = copy.deepcopy(lorentz_rotation)
-        self.lorentz_rotation_2 = copy.deepcopy(lorentz_rotation)
-        self.lorentz_rotation_1.rng.set_seed(self.seed)
-        self.lorentz_rotation_2.rng.set_seed(self.seed)
+        lorentz_rotation_1 = copy.deepcopy(lorentz_rotation)
+        lorentz_rotation_2 = copy.deepcopy(lorentz_rotation)
+        lorentz_rotation_1.rng.set_seed(self.seed)
+        lorentz_rotation_2.rng.set_seed(self.seed)
+        self.lorentz_rot.update({"1": lorentz_rotation_1})
+        self.lorentz_rot.update({"2": lorentz_rotation_2})
 
     def _setup_phi_lorentz_rotation(self) -> FastLorentzRotation:
         """Sets up the lorents rotation on the phi feature of each object.
@@ -113,8 +126,8 @@ class VICReg(L1ADLightningModule):
         # Apply augmentations
         x1, x2 = x.clone(), x.clone()
         del x
-        x1 = self.lorentz_rotation_1(self.object_mask_1(self.feature_blur_1(x1)))
-        x2 = self.lorentz_rotation_2(self.object_mask_2(self.feature_blur_2(x2)))
+        x1 = self.lorentz_rot['1'](self.obj_masks['1'](self.feat_blurs['1'](x1)))
+        x2 = self.lorentz_rot['2'](self.obj_masks['2'](self.feat_blurs['2'](x2)))
 
         # Get projections
         z1 = self.projector(self.model(x1))

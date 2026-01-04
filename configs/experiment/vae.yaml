@@ -12,9 +12,9 @@ defaults:
 seed: 123
 tags: ["axo_v6", "vae"]
 
-algorithm:
-  optimizer:
-    lr: ${mul:${lr},${sqrt:${div:${data.batch_size},16384}}}
+# algorithm:
+#   optimizer:
+#     lr: ${mul:${lr},${sqrt:${div:${data.batch_size},16384}}}
 
 experiment_name: vae_training
 run_name: bs${data.batch_size}_klwarm${algorithm.kl_warmup_frac}_klscale${algorithm.loss.kl_scale}_lr${algorithm.optimizer.lr}
@@ -33,7 +33,7 @@ test: true
 callbacks:
   log_data_mlflow: null
   anomaly_rate:
-    metric_names: ['loss/kl_raw/full']
+    metric_name: 'loss/kl_raw/full'
     target_rates: [1]
 
   # Checkpoints
@@ -89,12 +89,12 @@ evaluator:
 
 evaluator_callbacks:
   anomaly_efficiency:
-    metric_names: ['loss/kl_raw/full']
+    metric_name: 'loss/kl_raw/full'
     target_rates: [1]
     log_raw_mlflow: false
   loss:
     _target_: src.evaluation.callbacks.loss.LossCallback
-    loss_names: ['loss/reco/sqrt_q95']
+    loss_name: 'loss/reco/sqrt_q95'
     log_raw_mlflow: false
   # reco:
   #   _target_: src.evaluation.callbacks.reco.ReconstructionPlots

@@ -190,7 +190,7 @@ class BkgRatePileup(Callback):
             ckpt_name, "pus",
             plot_folder,
             log_raw=self.log_raw_mlflow,
-            gallery_name=f'pus_{self.metric_name}'
+            gallery_name=f"pus_{self.metric_name.replace('/', '_')}""
         )
 
     def _get_dsname(self, rate_name: str):

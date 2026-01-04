@@ -37,7 +37,7 @@ class ClassicVAELoss(L1ADLoss):
     def forward(
         self,
         target: torch.Tensor,
-        mask: torch.Tensor,
+        mask: torch.Tensor | None,
         reconstruction: torch.Tensor,
         z_mean: torch.Tensor,
         z_log_var: torch.Tensor,

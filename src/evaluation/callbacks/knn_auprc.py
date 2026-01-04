@@ -188,7 +188,7 @@ class KNNAUPRC(Callback):
         plot_folder.mkdir(parents=True, exist_ok=True)
         self._cache_summary(plot_folder)
 
-        matrix.plot(self.auprcs_summary, self.output_name, plot_folder)
+        matrix.plot(self.auprcs_summary, self.output_name.replace('/', '_'), plot_folder)
         utils.mlflow.log_plots_to_mlflow(trainer, None, "losses", plot_folder)
 
     def clear_crit_summary(self):

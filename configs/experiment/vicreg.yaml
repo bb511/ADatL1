@@ -24,13 +24,16 @@ trainer:
   gradient_clip_algorithm: norm
   gradient_clip_val: 1.0
   min_epochs: 1
-  max_epochs: 10
+  max_epochs: -1
+  max_steps: 50_000
+  # limit_train_batches: 10
   limit_val_batches: 10
   limit_test_batches: 10
 
 test: true
 
 callbacks:
+  log_data_mlflow: null
   min_loss_ckpt: null
 
 evaluator:

@@ -1,11 +1,11 @@
 # Short debug script.
-taskset -c 0-2 \
-python3 src/train.py \
-    -m \
-    experiment=debug \
-    paths.raw_data_dir=/data/deodagiu/adl1t_data/parquet_files \
-    trainer=gpu \
-    trainer.devices=[0] \
+# taskset -c 0-2 \
+# python3 src/train.py \
+#     -m \
+#     experiment=debug \
+#     paths.raw_data_dir=/data/deodagiu/adl1t_data/parquet_files \
+#     trainer=gpu \
+#     trainer.devices=[0] \
     # hparams_search=vicreg_optuna \
     # hydra/launcher=submitit_local \
     # hydra.launcher.cpus_per_task=1 \
@@ -28,29 +28,29 @@ python3 src/train.py \
 #     trainer.devices=[3]
 
 # vicreg bs study.
-# taskset -c 0-2 \
-# python3 src/train.py \
-#     -m \
-#     experiment=vicreg \
-#     paths.raw_data_dir=/data/deodagiu/adl1t_data/parquet_files \
-#     experiment_name=vicreg_feats_ckpt \
-#     trainer.gradient_clip_val=2.0 \
-#     +lr=0.006496 \
-#     algorithm.optimizer.weight_decay=3.5e-06 \
-#     algorithm.optimizer.betas='[0.9, 0.999]' \
-#     algorithm.scheduler.scheduler.warmup_ratio=0.05 \
-#     algorithm.scheduler.scheduler.min_lr_ratio=0.01 \
-#     algorithm.feature_blur.prob=0.101196 \
-#     algorithm.feature_blur.magnitude=0.112294 \
-#     algorithm.feature_blur.strength=0.27725 \
-#     algorithm.object_mask.prob=0.0479 \
-#     algorithm.lorentz_rotation.prob=0.0 \
-#     algorithm.loss.var_coef=75 \
-#     algorithm.loss.cov_coef=17.5 \
-#     algorithm.model.out_dim=16 \
-#     trainer=gpu \
-#     trainer.devices=[0]
-    # data.batch_size=4096,8192,16384,32768,49152
+taskset -c 50-59 \
+python3 src/train.py \
+    -m \
+    experiment=vicreg \
+    paths.raw_data_dir=/data/deodagiu/adl1t_data/parquet_files \
+    experiment_name=vicreg_bs_study \
+    trainer.gradient_clip_val=5.0 \
+    +lr=0.0002418 \
+    algorithm.optimizer.weight_decay=0.00053 \
+    algorithm.optimizer.betas='[0.9, 0.99]' \
+    algorithm.scheduler.scheduler.warmup_ratio=0.01 \
+    algorithm.scheduler.scheduler.min_lr_ratio=0.1 \
+    algorithm.feature_blur.prob=0.4374 \
+    algorithm.feature_blur.magnitude=0.1192 \
+    algorithm.feature_blur.strength=0.1059 \
+    algorithm.object_mask.prob=0.0479 \
+    algorithm.lorentz_rotation.prob=0.0 \
+    algorithm.loss.var_coef=73.96 \
+    algorithm.loss.cov_coef=12.09 \
+    algorithm.model.out_dim=16 \
+    data.batch_size=4096,8192,16384,32768,49152
+    # trainer=gpu \
+    # trainer.devices=[0]
 
 
 # VAE runs.

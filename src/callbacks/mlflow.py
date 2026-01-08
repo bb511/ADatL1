@@ -1,6 +1,7 @@
 # Log data set metadata to artifacts in mlflow.
 from pathlib import Path
 
+import optuna
 import torch
 from pytorch_lightning.callbacks import Callback
 from pytorch_lightning.loggers import MLFlowLogger, Logger

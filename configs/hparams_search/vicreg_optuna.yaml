@@ -1,7 +1,7 @@
 # @package _global_
 
-# example hyperparameter optimization of some experiment with Optuna:
-# python train.py -m hparams_search=mnist_optuna experiment=example
+# Initial hyperparameter study for the vicreg algorithm.
+# !!!!!! Batch size is fixed at 16384 !!!!!!!
 
 defaults:
   - override /hydra/sweeper: optuna
@@ -23,9 +23,7 @@ optimized_metric_config:
         ckpt_ds: null # This will be filled in with the best ckpt of the main metric.
     direction: maximize
 
-# here we define Optuna hyperparameter search
-# it optimizes for value returned from function with @hydra.main decorator
-# docs: https://hydra.cc/docs/next/plugins/optuna_sweeper
+
 hydra:
   mode: "MULTIRUN" # set hydra to multirun by default if this config is attached
   sweeper:
@@ -36,7 +34,7 @@ hydra:
     storage: sqlite:///optuna_logs/optim_v1.db
 
     # name of the study to persist optimization results
-    study_name: vicreg_search_robustnorm_bs16k
+    study_name: vicreg_bs16k
 
     # number of parallel workers
     n_jobs: 1
@@ -44,12 +42,10 @@ hydra:
     # 'minimize' or 'maximize' the objective
     direction: [minimize, maximize]
 
-    # total number of runs that will be executed
+    # total number of runs that will be executed per process
     n_trials: 50
 
-    # choose Optuna hyperparameter sampler
-    # you can choose bayesian sampler (tpe), random search (without optimization), grid sampler, and others
-    # docs: https://optuna.readthedocs.io/en/stable/reference/samplers.html
+    # Using nsgaii sampler with the following hyperparameters:
     sampler:
       population_size: 50
       mutation_prob: null     # keep default (1/num_params)
@@ -57,11 +53,11 @@ hydra:
       swapping_prob: 0.5      # default
       constraints_func: null  # unless you implement constraints
 
-    # define hyperparameter search space
+    # define vicreg hyperparameter search space
     params:
       trainer.gradient_clip_val: choice(0.0, 0.5, 1.0, 2.0, 5.0)
 
-      algorithm.optimizer.lr: tag(log, interval(1e-4, 1e-3))
+      algorithm.optimizer.lr: tag(log, interval(3e-5, 1e-3))
       algorithm.optimizer.weight_decay: tag(log, interval(1e-6, 1e-3))
       algorithm.optimizer.betas: choice([0.9, 0.999], [0.9, 0.99], [0.95, 0.999], [0.95, 0.99])
 
@@ -75,8 +71,8 @@ hydra:
       algorithm.object_mask.prob: interval(0.0, 0.5)
       algorithm.lorentz_rotation.prob: choice(0.0, 0.3, 0.6)
 
-      algorithm.loss.var_coef: tag(log, interval(10, 100))
-      algorithm.loss.cov_coef: tag(log, interval(10, 60))
+      algorithm.loss.inv_coef: tag(log, interval(5, 80))
+      algorithm.loss.var_coef: tag(log, interval(5, 80))
+      algorithm.loss.cov_coef: tag(log, interval(5, 50))
 
       algorithm.model.out_dim: choice(16, 32, 64)
-      # data.batch_size: choice(16276, 32552, 65104)

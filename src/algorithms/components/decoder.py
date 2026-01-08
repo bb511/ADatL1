@@ -2,6 +2,11 @@
 from typing import Optional, List, Callable
 
 import torch
+import keras
+from keras import layers
+
+from hgq.layers import QDense
+from hgq.config import QuantizerConfigScope, LayerConfigScope
 
 from src.algorithms.components.mlp import MLP
 
@@ -46,3 +51,44 @@ class Decoder(MLP):
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         return self.net(x)
+
+
+def hgq_decoder(
+    in_dim: int,
+    nodes: list[int],
+    out_dim: int,
+    batchnorm: bool = False,
+    affine: bool = True,
+    name: str = "hgq_decoder",
+):
+    """Simple dncoder in HGQv2.
+
+    :param in_dim: Int specifying input dimension.
+    :param nodes: List of ints, each int specifying the width of a layer.
+    :param out_dim: Int specifying output dimension.
+    :param init_weight: Callable method to initialize the weights of the encoder nodes.
+    :param init_bias: Callable method to initialize the biases of the encoder nodes.
+    """
+    z_in = keras.Input(shape=(in_dim,), name="z")
+
+    with (QuantizerConfigScope(place="all"), LayerConfigScope(enable_ebops=False)):
+        x = z_in
+        for i, hidden_dim in enumerate(nodes):
+            x = QDense(hidden_dim, name=f"dec_qdense_{i}")(x)
+
+            if batchnorm:
+                x = layers.BatchNormalization(
+                    scale=affine,
+                    center=affine,
+                    name=f"dec_bn_{i}",
+                )(x)
+
+            x = layers.ReLU(name=f"dec_relu_{i}")(x)
+
+        x = QDense(
+            out_dim,
+            name="dec_qdense_out",
+            dtype="float32",
+        )(x)
+
+    return keras.Model(inputs=z_in, outputs=x, name=name)

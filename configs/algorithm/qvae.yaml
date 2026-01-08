@@ -1,4 +1,4 @@
-# Template VAE configuration.
+# Template quantised VAE configuration.
 defaults:
   - _self_
 
@@ -8,13 +8,13 @@ features: null
 mask: true
 
 encoder:
-  _target_: src.algorithms.components.encoder.VariationalEncoder
+  _target_: src.algorithms.components.encoder.hgq_variational_encoder
   in_dim: 117
   nodes: [64, 64]
   out_dim: 48
 
 decoder:
-  _target_: src.algorithms.components.decoder.Decoder
+  _target_: src.algorithms.components.decoder.hgq_decoder
   in_dim: ${algorithm.encoder.out_dim}
   nodes: [64, 64]
   out_dim: 117

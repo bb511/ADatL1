@@ -70,6 +70,9 @@ class ReconstructionPlots(Callback):
 
         x, m, _ = batch
         x = torch.flatten(x, start_dim=1)
+        if hasattr(pl_module, 'features'):
+            x = pl_module.features(x)
+
         m = torch.flatten(m, start_dim=1)
 
         if (batch_idx + 1) < self.nbatches:
@@ -82,10 +85,13 @@ class ReconstructionPlots(Callback):
             self.output_accumulator.append(outputs[self.output_name])
 
             self.input_accumulator = torch.cat(self.input_accumulator, dim=0)
-            self.mask_accumulator = torch.cat(self.mask_accumulator, dim=0)
             self.output_accumulator = torch.cat(self.output_accumulator, dim=0)
+            self.mask_accumulator = torch.cat(self.mask_accumulator, dim=0)
 
-            self._on_dataset_end(trainer, pl_module, dset_name)
+            if hasattr(pl_module, 'features') and not isinstance(pl_module.features, torch.nn.Identity):
+                self._on_dataset_end_features(trainer, pl_module, dset_name)
+            else:
+                self._on_dataset_end(trainer, pl_module, dset_name)
 
             self.input_accumulator = []
             self.mask_accumulator = []
@@ -104,9 +110,9 @@ class ReconstructionPlots(Callback):
         for object_name, feature_map in self.object_feature_map.items():
             for feat_name, feat_idxs in feature_map.items():
                 input_feat = self.input_accumulator[:, feat_idxs]
-                mask_feat = self.mask_accumulator[:, feat_idxs]
                 output_feat = self.output_accumulator[:, feat_idxs]
 
+                mask_feat = self.mask_accumulator[:, feat_idxs]
                 input_feat = input_feat[mask_feat]
                 output_feat = output_feat[mask_feat]
 
@@ -122,6 +128,42 @@ class ReconstructionPlots(Callback):
                     label1='input',
                     label2='reco'
                 )
+
+        utils.mlflow.log_plots_to_mlflow(
+            trainer,
+            ckpt_name,
+            "recos",
+            plot_folder,
+            log_raw=self.log_raw_mlflow,
+            gallery_name=f"{dataset_name}_reco"
+        )
+
+    def _on_dataset_end_features(self, trainer, pl_module, dataset_name: str):
+        """Plot the overlaid histogram for each feature.
+
+        This is done when accummulation is completed for one data set.
+        """
+        ckpts_dir = Path(pl_module._ckpt_path).parent
+        ckpt_name = Path(pl_module._ckpt_path).stem
+        plot_folder = ckpts_dir / "plots" / ckpt_name / "recos" / dataset_name
+        plot_folder.mkdir(parents=True, exist_ok=True)
+
+        for feat_idx in range(self.input_accumulator.size(-1)):
+            input_feat = self.input_accumulator[:, feat_idx]
+            output_feat = self.output_accumulator[:, feat_idx]
+
+            # Detach and move to CPU for plotting
+            input_feat = input_feat.detach().flatten().float().cpu().numpy()
+            output_feat = output_feat.detach().flatten().float().cpu().numpy()
+            overlaid_hist.plot_1d(
+                x1=input_feat,
+                x2=output_feat,
+                obj_name='noobject',
+                feat_name=f'feat_{feat_idx}',
+                save_dir=plot_folder,
+                label1='input',
+                label2='reco'
+            )
 
         utils.mlflow.log_plots_to_mlflow(
             trainer,

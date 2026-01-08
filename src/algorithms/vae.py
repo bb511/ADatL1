@@ -3,6 +3,7 @@ from typing import Optional, Tuple, Dict
 
 import torch
 from torch import nn
+import keras
 
 from src.algorithms import L1ADLightningModule
 from src.algorithms.components.utils import LinearWarmup
@@ -25,8 +26,8 @@ class VAE(L1ADLightningModule):
     """
     def __init__(
         self,
-        encoder: nn.Module,
-        decoder: nn.Module,
+        encoder: nn.Module | keras.Model,
+        decoder: nn.Module | keras.Model,
         kl_warmup_frac: float = 0.0,
         features: Optional[nn.Module] = None,
         mask: bool = True,
@@ -68,6 +69,15 @@ class VAE(L1ADLightningModule):
             kl_scale=kl_current_scale
         )
         del x, z, z_mean, z_log_var
+
+        # Add additional losses if using HGQ.
+        add_loss = 0.0
+        if hasattr(self.encoder, "losses") and len(self.encoder.losses) > 0:
+            add_loss = add_loss + torch.stack([l for l in self.encoder.losses]).sum()
+        if hasattr(self.decoder, "losses") and len(self.decoder.losses) > 0:
+            add_loss = add_loss + torch.stack([l for l in self.decoder.losses]).sum()
+
+        total_loss = total_loss + add_loss
 
         # Diagnosis metrics.
         with torch.no_grad():

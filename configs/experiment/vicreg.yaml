@@ -11,12 +11,9 @@ defaults:
 
 tags: ["axov6", "vicreg"]
 
-algorithm:
-  optimizer:
-    lr: ${mul:${lr},${sqrt:${div:${data.batch_size},16384}}}
 
 experiment_name: vicreg_training
-run_name: lr${algorithm.optimizer.lr}_var${algorithm.loss.var_coef}_cov${algorithm.loss.cov_coef}
+run_name: ${short_hash:${hydra:runtime.output_dir},12}
 
 seed: 12345
 
@@ -24,22 +21,38 @@ trainer:
   gradient_clip_algorithm: norm
   gradient_clip_val: 1.0
   min_epochs: 1
-  max_epochs: -1
-  max_steps: 50_000
-  # limit_train_batches: 10
+  max_epochs: 200
   limit_val_batches: 10
   limit_test_batches: 10
 
 test: true
 
 callbacks:
+  knn_auprc:
+    _target_: src.callbacks.knn_auprc.KNNAUPRC
+    output_name: 'vicreg_rep_data'
+    reference_sample_size: 20_000
+    k: 10
+
+  max_knn_auprc_ckpt:
+    _target_: src.callbacks.model_checkpoint.SingleDatasetModelCheckpoint
+    dirpath: '${paths.checkpoints_dir}/${experiment_name}/${run_name}'
+    monitor: knn_auprc
+    criterion:
+      _target_: src.callbacks.checkpointing.criterion.Max
+      top_k: 1
+    skip_ds:
+      - main_val
+      - SingleNeutrino_E-10-gun
+
   log_data_mlflow: null
-  min_loss_ckpt: null
+
 
 evaluator:
   ckpts:
     last: true
-    single: null
+    single:
+      knn_auprc: ['max']
 
 evaluator_callbacks:
   loss:
@@ -51,5 +64,6 @@ evaluator_callbacks:
     _target_: src.evaluation.callbacks.knn_auprc.KNNAUPRC
     output_name: 'vicreg_rep_data'
     reference_sample_size: 20_000
+    skip_ds: ['SingleNeutrino_E-10-gun']
     k: 10
     log_raw_mlflow: false

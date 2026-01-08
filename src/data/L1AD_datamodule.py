@@ -224,9 +224,9 @@ class L1ADDataModule(LightningDataModule):
         a bit faster.
         """
         dataset = L1ADDataset(
-            self.data_train,
+            self.data_train.float(),
             self.mask_train,
-            self.labels_train,
+            self.labels_train.float(),
             batch_size=self.batch_size_per_device,
             shuffler=self.shuffler,
         )

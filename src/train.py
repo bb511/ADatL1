@@ -1,9 +1,11 @@
 # Main training script.
 from typing import Any, Dict, List, Optional, Tuple
 from pathlib import Path
-import copy
 import gc
 import os
+os.environ["KERAS_BACKEND"] = "torch"
+import keras
+keras.mixed_precision.set_global_policy("float32")
 
 import hydra
 import pytorch_lightning as pl
@@ -26,6 +28,7 @@ register_resolvers()
 from src.utils import RankedLogger
 from src.utils import extras
 from src.utils import get_metric_value
+from src.utils import maybe_tag_optuna_trial
 from src.utils import instantiate_callbacks
 from src.utils import instantiate_eval_callbacks
 from src.utils import instantiate_loggers

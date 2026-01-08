@@ -219,7 +219,7 @@ class AnomalyEfficiencyCallback(Callback):
 
     def plot_summary(self, trainer, root_folder: Path):
         """Plot the summary metrics accummulated in eff_summary and reset this attr."""
-        plot_folder = root_folder / "plots"
+        plot_folder = root_folder / "plots" / "eff_summary"
         plot_folder.mkdir(parents=True, exist_ok=True)
         self._cache_summary(plot_folder)
 

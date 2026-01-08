@@ -92,7 +92,7 @@ class DatasetAwareModelCheckpoint(Callback):
 
         log.warn(
             f"Checkpoint for metric '{self.monitor}' not found in logged metrics. "
-            f"Did you call `log('{self.monitor}')` in the LightningModule?",
+            f"Did you call `log('{self.monitor}')` in the LightningModule for {dataset_name}?",
         )
         return np.nan
 

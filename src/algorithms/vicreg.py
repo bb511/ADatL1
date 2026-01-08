@@ -125,7 +125,6 @@ class VICReg(L1ADLightningModule):
 
         # Apply augmentations
         x1, x2 = x.clone(), x.clone()
-        del x
         x1 = self.lorentz_rot['1'](self.obj_masks['1'](self.feat_blurs['1'](x1)))
         x2 = self.lorentz_rot['2'](self.obj_masks['2'](self.feat_blurs['2'](x2)))
 
@@ -155,6 +154,7 @@ class VICReg(L1ADLightningModule):
             "loss/cov/ratio": cov_ratio,
             "z1/std": z1_std,
             "z2/std": z2_std,
+            "vicreg_rep_data": self.model(x).detach(),
             **outdict_diag
         }
 

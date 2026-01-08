@@ -59,8 +59,11 @@ hydra:
     params:
       trainer.gradient_clip_val: choice(0.0, 0.5, 1.0, 2.0, 5.0)
       algorithm.optimizer.betas: choice([0.9, 0.999], [0.9, 0.99], [0.95, 0.999], [0.95, 0.99])
-      algorithm.optimizer.eps: choice(1e-8, 1e-7, 1e-6, 1e-5)
+      algorithm.optimizer.weight_decay: tag(log, interval(1e-8, 1e-3))
       algorithm.optimizer.lr: tag(log, interval(3e-5, 3e-3))
-      algorithm.loss.kl_scale: tag(log, interval(1e-4, 3e-3))
+      algorithm.loss.kl_scale: tag(log, interval(3e-5, 2e-3))
       algorithm.kl_warmup_frac: choice(0.0, 0.05, 0.1, 0.2, 0.3)
+      algorithm.encoder.out_dim: choice(16, 24, 32, 48, 64, 96)
+
+      # algorithm.optimizer.eps: choice(1e-8, 1e-7, 1e-6, 1e-5)
       # data.batch_size: choice(4096, 16276, 65104)

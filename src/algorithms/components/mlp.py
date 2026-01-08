@@ -4,6 +4,12 @@ import functools
 import torch
 from torch import nn
 
+import keras
+from keras import layers
+
+from hgq.layers import QDense
+from hgq.config import LayerConfigScope, QuantizerConfigScope
+
 
 class MLP(nn.Module):
     """
@@ -79,3 +85,47 @@ class MLP(nn.Module):
         if isinstance(layer, nn.Linear) and layer.bias is not None:
             return self.init_bias(layer.bias)
         return None
+
+
+def hgq_mlp(
+    in_dim: int,
+    nodes: list[int],
+    out_dim: int,
+    batchnorm: bool = False,
+    affine: bool = True,
+    kernel_initializer=None,
+    bias_initializer=None,
+    ebops: bool = False,
+    name: str = 'hgq_mlp'
+):
+    """Multi-layer perceptron in HGQv2.
+
+    :param in_dim: Int for initial dimension.
+    :param nodes: List of number of nodes composing each of the layers.
+    :param out_dim: Int for output dimension.
+    :param batchnorm: Whether to use batch normalization after each layer or not.
+    :param init_weight: Callable method to initialize the weights of the decoder nodes.
+    :param init_bias: Callable method to initialize the biases of the decoder nodes.
+    """
+    inputs = keras.Input(shape=(in_dim,), name="x")
+    x = inputs
+
+    with (QuantizerConfigScope(place="all"), LayerConfigScope(enable_ebops=ebops)):
+        for i, hidden_dim in enumerate(nodes):
+            x = QDense(
+                hidden_dim,
+                name=f"qdense_{i}",
+                kernel_initializer=kernel_initializer,
+                bias_initializer=bias_initializer
+            )(x)
+
+            if batchnorm:
+                x = layers.BatchNormalization(
+                        scale=affine, center=affine, name=f"bn_{i}"
+                    )(x)
+
+            x = layers.ReLU(name=f"relu_{i}")(x)
+
+        outputs = QDense(out_dim, name="qdense_out")(x)
+
+    return keras.Model(inputs=inputs, outputs=outputs, name=name)

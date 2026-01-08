@@ -7,13 +7,13 @@ diagnosis_metrics: false
 
 feature_blur:
   _target_: src.algorithms.components.augmentation.FastFeatureBlur
-  prob: 0.3
-  magnitude: 0.5
-  strength: 0.5
+  prob: 0.40
+  magnitude: 0.12
+  strength: 0.45
 
 object_mask:
   _target_: src.algorithms.components.augmentation.FastObjectMask
-  prob: 0.3
+  prob: 0.02
 
 lorentz_rotation:
   _target_: src.algorithms.components.augmentation.FastLorentzRotation
@@ -45,7 +45,7 @@ optimizer:
   _target_: torch.optim.AdamW
   lr: 0.0003
   weight_decay: 1e-3
-  betas: [0.9, 0.999]
+  betas: [0.9, 0.99]
   eps: 1e-8
 
 scheduler:

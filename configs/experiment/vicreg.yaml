@@ -19,12 +19,6 @@ seed: 12345
 
 algorithm:
   # Fix architecture to axov5.
-  model:
-    _target_: src.algorithms.components.mlp.MLP
-    in_dim: 57
-    nodes: [29]
-    out_dim: 10
-    batchnorm: false
   diagnosis_metrics: false
 
 trainer:

@@ -34,7 +34,7 @@ hydra:
     storage: sqlite:///optuna_logs/optim_inputsv4.db
 
     # name of the study to persist optimization results
-    study_name: test
+    study_name: vicreg_archnew_b16k
 
     # number of parallel workers
     n_jobs: 1
@@ -43,7 +43,7 @@ hydra:
     direction: [minimize, maximize]
 
     # total number of runs that will be executed per process
-    n_trials: 50
+    n_trials: 33
 
     # Using nsgaii sampler with the following hyperparameters:
     sampler:

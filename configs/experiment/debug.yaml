@@ -31,7 +31,7 @@ trainer:
   min_epochs: 1
   max_epochs: 1
   # max_steps: 1_000
-  limit_train_batches: 10
+  # limit_train_batches: 10
   limit_val_batches: 10
   limit_test_batches: 10
   # check_val_every_n_epoch: 2
@@ -40,7 +40,23 @@ test: true
 
 callbacks:
   log_data_mlflow: null
+  # Additional checkpoints for the final run (expensive).
+  # knn_auprc:
+  #   _target_: src.callbacks.knn_auprc.KNNAUPRC
+  #   output_name: 'vicreg_rep_data'
+  #   reference_sample_size: 20_000
+  #   k: 10
 
+  # max_knn_auprc_ckpt:
+  #   _target_: src.callbacks.model_checkpoint.SingleDatasetModelCheckpoint
+  #   dirpath: '${paths.checkpoints_dir}/${experiment_name}/${run_name}'
+  #   monitor: knn_auprc
+  #   criterion:
+  #     _target_: src.callbacks.checkpointing.criterion.Max
+  #     top_k: 1
+  #   skip_ds:
+  #     - main_val
+  #     - SingleNeutrino_E-10-gun
 
 evaluator:
   ckpts:

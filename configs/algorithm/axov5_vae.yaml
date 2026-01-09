@@ -1,0 +1,61 @@
+# AXO v4 configuration.
+
+defaults:
+  - _self_
+
+_target_: src.algorithms.vae.VAE
+features: null
+
+encoder:
+  _target_: src.models.encoder.VariationalEncoder
+  in_dim: 57
+  nodes: [28, 16]
+  out_dim: 8
+
+
+  init_weight:
+    _target_: src.utils.hydra.get_method
+    path: torch.nn.init.xavier_uniform_
+  init_bias:
+    _target_: src.utils.hydra.get_method
+    path: torch.nn.init.zeros_
+
+decoder:
+  _target_: src.models.decoder.Decoder
+  in_dim: 8
+  nodes: [24, 32, 64, 128]
+  out_dim: 57
+
+  init_weight:
+    _target_: src.utils.hydra.get_method
+    path: torch.nn.init.xavier_uniform_
+  init_bias:
+    _target_: src.utils.hydra.get_method
+    path: torch.nn.init.zeros_
+  init_last_weight:
+    _target_: src.utils.hydra.get_method
+    path: torch.nn.init.uniform_
+    a: -0.05
+    b: 0.05
+  init_last_bias: null
+
+loss:
+  _target_: src.losses.vae.AxoV4Loss
+  scale: 0.5736625791372814
+
+optimizer:
+  _partial_: true
+  _target_: src.optimizers.lion.Lion
+  lr: 0.001
+  weight_decay: 0.0
+
+scheduler:
+  scheduler:
+    _partial_: true
+    _target_: src.optimizers.cdrw.CDRW
+    lr0: ${algorithm.optimizer.lr}
+    s0: 32
+    t_mul: 2.0
+    m_mul: 0.65
+    alpha: 1e-6
+    warmup_epochs: 10

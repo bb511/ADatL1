@@ -2,13 +2,14 @@
 from typing import Optional, List, Callable
 
 import torch
+
 import keras
 from keras import layers
-
 from hgq.layers import QDense
 from hgq.config import QuantizerConfigScope, LayerConfigScope
 
 from src.algorithms.components.mlp import MLP
+from src.algorithms.components.mlp import hgq_mlp
 
 
 class Decoder(MLP):
@@ -57,8 +58,8 @@ def hgq_decoder(
     in_dim: int,
     nodes: list[int],
     out_dim: int,
-    batchnorm: bool = False,
-    affine: bool = True,
+    kernel_initializer=None,
+    bias_initializer=None,
     name: str = "hgq_decoder",
 ):
     """Simple dncoder in HGQv2.
@@ -72,23 +73,26 @@ def hgq_decoder(
     z_in = keras.Input(shape=(in_dim,), name="z")
 
     with (QuantizerConfigScope(place="all"), LayerConfigScope(enable_ebops=False)):
-        x = z_in
-        for i, hidden_dim in enumerate(nodes):
-            x = QDense(hidden_dim, name=f"dec_qdense_{i}")(x)
+        mlp_model = hgq_mlp(
+            in_dim=in_dim,
+            nodes=nodes[:-1],
+            out_dim=nodes[-1],
+            final_activation=True,
+            kernel_initializer=kernel_initializer,
+            bias_initializer=bias_initializer,
+            name="dec_mlp",
+        )
+        h = mlp_model(z_in)
 
-            if batchnorm:
-                x = layers.BatchNormalization(
-                    scale=affine,
-                    center=affine,
-                    name=f"dec_bn_{i}",
-                )(x)
-
-            x = layers.ReLU(name=f"dec_relu_{i}")(x)
-
-        x = QDense(
+        # x = QDense(
+        #     out_dim,
+        #     name="dec_qdense_out",
+        #     dtype="float32",
+        #     enable_iq=False
+        # )(h)
+        x = layers.Dense(
             out_dim,
             name="dec_qdense_out",
-            dtype="float32",
-        )(x)
+        )(h)
 
     return keras.Model(inputs=z_in, outputs=x, name=name)

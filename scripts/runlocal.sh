@@ -1,11 +1,11 @@
 # Short debug script.
-taskset -c 0-2 \
-python3 src/train.py \
-    -m \
-    experiment=debug \
-    paths.raw_data_dir=/data/deodagiu/adl1t_data/parquet_files \
-    trainer=gpu \
-    trainer.devices=[0] \
+# taskset -c 0-2 \
+# python3 src/train.py \
+#     -m \
+#     experiment=debug \
+#     paths.raw_data_dir=/data/deodagiu/adl1t_data/parquet_files \
+#     trainer=gpu \
+#     trainer.devices=[0] \
     # hparams_search=vae_optuna \
     # hydra/launcher=submitit_local \
     # hydra.launcher.cpus_per_task=1 \
@@ -14,18 +14,18 @@ python3 src/train.py \
 # VICreg runs.
 # ========================================================================
 # vicreg hyperparameter search.
-# taskset -c 0-2 \
-# python3 src/train.py \
-#     -m \
-#     hydra/launcher=submitit_local \
-#     hydra.launcher.cpus_per_task=1 \
-#     hydra.launcher.gpus_per_node=4 \
-#     hparams_search=vicreg_optuna \
-#     experiment=vicreg \
-#     experiment_name=vicreg_b16k_hpsearch \
-#     paths.raw_data_dir=/data/deodagiu/adl1t_data/parquet_files \
-#     trainer=gpu \
-#     trainer.devices=[0]
+taskset -c 21-23 \
+python3 src/train.py \
+    -m \
+    hydra/launcher=submitit_local \
+    hydra.launcher.cpus_per_task=1 \
+    hydra.launcher.gpus_per_node=4 \
+    hparams_search=vicreg_optuna \
+    experiment=vicreg \
+    experiment_name=vicreg_b16k_archold_inputsv4_hpsearch \
+    paths.raw_data_dir=/data/deodagiu/adl1t_data/parquet_files \
+    trainer=gpu \
+    trainer.devices=[3]
 
 # vicreg training.
 # taskset -c 0-2 \

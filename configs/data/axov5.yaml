@@ -1,12 +1,14 @@
 # @package data
 
+# Data used for training axov5. Same as v4.
+
 defaults:
   - /paths: data_2024E
-  - data_extractor: axov4
+  - data_extractor: minimal
   - data_processor: default
   - data_normalizer: axov4
-  - data_mlready: axov4
-  - data_awkward2torch: axov4
+  - data_mlready: default
+  - data_awkward2torch: minimal
   - l1_scales: default
   - _self_
 

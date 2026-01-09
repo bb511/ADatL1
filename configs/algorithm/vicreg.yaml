@@ -22,7 +22,7 @@ lorentz_rotation:
 
 model:
   _target_: src.algorithms.components.mlp.MLP
-  in_dim: 117
+  in_dim: 57
   nodes: [64]
   out_dim: 16
   batchnorm: false
@@ -32,13 +32,13 @@ projector:
   in_dim: ${algorithm.model.out_dim}
   nodes: [128, 128]
   out_dim: 64
-  batchnorm: true # Added batchnorm
+  batchnorm: true
 
 loss:
   _target_: src.losses.vicreg.VICRegLoss
   inv_coef: 25
-  var_coef: 25
-  cov_coef: 25
+  rvar_coef: 25
+  rcov_coef: 25
 
 optimizer:
   _partial_: true

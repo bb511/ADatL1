@@ -40,10 +40,11 @@ class VariationalEncoder(nn.Module):
 
         # The encoder will be a MLP up to the last layer
         self.net = MLP(
-            in_dim,
-            nodes[:-1],
-            nodes[-1],
+            in_dim=in_dim,
+            nodes=nodes[:-1],
+            out_dim=nodes[-1],
             batchnorm=False,
+            final_activation=True,
             init_weight=init_weight,
             init_bias=init_bias
         )
@@ -93,6 +94,7 @@ def hgq_variational_encoder(
             in_dim=in_dim,
             nodes=nodes[:-1],
             out_dim=nodes[-1],
+            final_activation=True,
             kernel_initializer=kernel_initializer,
             bias_initializer=bias_initializer,
             name="enc_mlp",
@@ -100,14 +102,30 @@ def hgq_variational_encoder(
         h = mlp_model(x_in)
 
         # Mean and log-variance heads (quantized)
-        z_mean = QDense(
+        # z_mean = QDense(
+        #     out_dim,
+        #     name="z_mean",
+        #     kernel_initializer=kernel_initializer,
+        #     bias_initializer=bias_initializer,
+        #     enable_iq=False
+        # )(h)
+
+        # z_log_var = QDense(
+        #     out_dim,
+        #     name="z_log_var",
+        #     kernel_initializer=kernel_initializer,
+        #     bias_initializer=bias_initializer,
+        #     enable_iq=False
+        # )(h)
+
+        z_mean = layers.Dense(
             out_dim,
             name="z_mean",
             kernel_initializer=kernel_initializer,
             bias_initializer=bias_initializer,
         )(h)
 
-        z_log_var = QDense(
+        z_log_var = layers.Dense(
             out_dim,
             name="z_log_var",
             kernel_initializer=kernel_initializer,

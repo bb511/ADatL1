@@ -1,6 +1,8 @@
 # @package data.data_processor
 
 # How to process the extracted data specified in ~/configs/data/data_extractor.
+# This is the standard pre-processing applied in axol1tl, throughout its versions.
+
 
 _target_: src.data.components.processing.L1DataProcessor
 extracted_folder: ${data.data_extractor.cache_root_dir}/extracted/${data.data_extractor.name}

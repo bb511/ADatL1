@@ -15,31 +15,20 @@ object_mask:
   _target_: src.models.augmentation.FastObjectMask
   prob: 0.5709886168264394
 
-object_norm_params: ${paths.data_dir}/mlready/${data.data_mlready.name}/${data.data_normalizer.name}
-object_feature_map: ${paths.data_dir}/mlready/${data.data_mlready.name}/${data.data_normalizer.name}/object_feature_map.json
-
 lorentz_rotation:
   _target_: src.models.augmentation.FastLorentzRotation
   _partial_: true
   prob: 0.5
 
 model:
-  _target_: src.models.mlp.MLP
+  _target_: src.algorithms.components.mlp.MLP
   in_dim: 57
   nodes: [29]
   out_dim: 10
   batchnorm: false
 
-  init_weight:
-    _target_: src.utils.hydra.get_method
-    path: torch.nn.init.xavier_uniform_
-
-  init_bias:
-    _target_: src.utils.hydra.get_method
-    path: torch.nn.init.zeros_
-
 projector:
-  _target_: src.models.mlp.MLP
+  _target_: src.algorithms.components.mlp.MLP
   in_dim: 10
   nodes: []
   out_dim: 40
@@ -47,21 +36,26 @@ projector:
 
 loss:
   _target_: src.losses.vicreg.VICRegLoss
-  inv_coef: 50
-  var_coef: 50
-  cov_coef: 1
+  inv_coef: 25
+  rvar_coef: 25
+  rcov_coef: 25
 
 optimizer:
   _partial_: true
   _target_: torch.optim.Adam
   lr: 0.0001033146150433934
-  weight_decay: 0.0
+  weight_decay: 0
+  betas: [0.9, 0.99]
+  eps: 1e-8
 
 scheduler:
   # here other attributes...
   scheduler:
-    _target_: src.optimizers.cdw.CosineWithWarmup
+    _target_: src.optimizers.cdrw.CDRW
     _partial_: true
-    warmup_ratio: 0.1
-    min_lr_ratio: 0.05
-    warmup_start_ratio: 1e-3
+    lr0: 0.0001033146150433934
+    s0: 32
+    t_mul: 2.0
+    m_mul: 0.5
+    alpha: 0.0
+    warmup_epochs: 10

@@ -1,12 +1,15 @@
 # @package data
 
+# Data for training the axov6 model. It's 2025 data from eras E and G, processed in the
+# same way as for axov4 and axov5.
+
 defaults:
   - /paths: data_2025E+G
-  - data_extractor: axov6
-  - data_processor: axov6
+  - data_extractor: minimal
+  - data_processor: default
   - data_normalizer: robust
-  - data_mlready: axov6
-  - data_awkward2torch: axov6
+  - data_mlready: default
+  - data_awkward2torch: minimal
   - l1_scales: default
   - _self_
 
@@ -23,8 +26,7 @@ train_features:
   muons: ['Et', 'eta', 'phi']
   jets: ['Et', 'eta', 'phi']
   egammas: ['Et', 'eta', 'phi']
-  taus: ['Et', 'eta', 'phi']
-  FET: ['Et', 'phi']
+  MET: ['Et', 'phi']
 
 # The batch size of the data.
 batch_size: 16384

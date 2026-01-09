@@ -16,22 +16,22 @@ class VICRegLoss(L1ADLoss):
 
     :param scale: Overall scaling factor for the loss.
     :param inv_coef: Weight for the invariance loss (MSE loss).
-    :param var_coef: Weight for the variance regularization.
-    :param cov_coef: Weight for the covariance regularization.
+    :param rvar_coef: Ratio of how much the var coefficient is with respect to the inv.
+    :param rcov_coef: Ratio of how much the cov coefficient is with respect to the inv.
     :param reduction: Reduction method to apply to the loss ("none", "mean", "sum").
     """
 
     def __init__(
         self,
         inv_coef: Optional[float] = 50,
-        var_coef: Optional[float] = 50,
-        cov_coef: Optional[float] = 1,
+        rvar_coef: Optional[float] = 50,
+        rcov_coef: Optional[float] = 1,
     ):
 
         super().__init__(scale=None, reduction=None)
         self.inv_coef = inv_coef
-        self.var_coef = var_coef
-        self.cov_coef = cov_coef
+        self.var_coef = inv_coef*rvar_coef
+        self.cov_coef = inv_coef*rcov_coef
 
     def invariance_loss(self, z1, z2):
         z1n = F.normalize(z1, dim=1)

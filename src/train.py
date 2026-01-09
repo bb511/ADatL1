@@ -2,6 +2,7 @@
 from typing import Any, Dict, List, Optional, Tuple
 from pathlib import Path
 import gc
+
 import os
 os.environ["KERAS_BACKEND"] = "torch"
 import keras
@@ -28,7 +29,6 @@ register_resolvers()
 from src.utils import RankedLogger
 from src.utils import extras
 from src.utils import get_metric_value
-from src.utils import maybe_tag_optuna_trial
 from src.utils import instantiate_callbacks
 from src.utils import instantiate_eval_callbacks
 from src.utils import instantiate_loggers

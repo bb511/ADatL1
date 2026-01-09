@@ -1,6 +1,7 @@
 # @package data.data_processor
 
 # How to process the extracted data specified in ~/configs/data/data_extractor.
+# Processes data that contains taus and the FET object.
 
 _target_: src.data.components.processing.L1DataProcessor
 extracted_folder: ${data.data_extractor.cache_root_dir}/extracted/${data.data_extractor.name}
@@ -18,4 +19,4 @@ object_filters:
   FET: 'Et < 4095'
 
 cache_root_dir: ${paths.data_dir}
-name: e${data.data_extractor.name}_paxov6
+name: e${data.data_extractor.name}_pdefaultTauFET

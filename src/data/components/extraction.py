@@ -128,7 +128,6 @@ class L1DataExtractor(object):
                         Fore.YELLOW + f"Extracted data exists: {dataset_folder}. "
                         f"Existing objects {existing_objs}."
                     )
-
                 return existing_objs
 
         return set()

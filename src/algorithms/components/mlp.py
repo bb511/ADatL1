@@ -28,6 +28,7 @@ class MLP(nn.Module):
         out_dim: int,
         batchnorm: Optional[bool] = False,
         affine: bool = True,
+        final_activation: bool = False,
         init_weight: Optional[Callable] = None,
         init_bias: Optional[Callable] = None,
     ):
@@ -35,6 +36,7 @@ class MLP(nn.Module):
         self.in_dim = in_dim
         self.hidden_dims = nodes
         self.out_dim = out_dim
+        self.final_activation = final_activation
 
         self.batchnorm = batchnorm
         self.affine = affine
@@ -65,6 +67,8 @@ class MLP(nn.Module):
 
         # Output layer
         layers.append(nn.Linear(current_dim, self.out_dim))
+        if self.final_activation:
+            layers.append(nn.ReLU())
 
         return nn.Sequential(*layers)
 
@@ -93,6 +97,7 @@ def hgq_mlp(
     out_dim: int,
     batchnorm: bool = False,
     affine: bool = True,
+    final_activation: bool = False,
     kernel_initializer=None,
     bias_initializer=None,
     ebops: bool = False,
@@ -110,13 +115,23 @@ def hgq_mlp(
     inputs = keras.Input(shape=(in_dim,), name="x")
     x = inputs
 
-    with (QuantizerConfigScope(place="all"), LayerConfigScope(enable_ebops=ebops)):
+    with (
+        QuantizerConfigScope(place={"weight", "bias"}),   # optionally add "table"
+        LayerConfigScope(enable_ebops=False),
+    ):
         for i, hidden_dim in enumerate(nodes):
-            x = QDense(
+            # x = QDense(
+            #     hidden_dim,
+            #     name=f"qdense_{i}",
+            #     kernel_initializer=kernel_initializer,
+            #     bias_initializer=bias_initializer,
+            #     enable_iq=False
+            # )(x)
+            x = layers.Dense(
                 hidden_dim,
                 name=f"qdense_{i}",
                 kernel_initializer=kernel_initializer,
-                bias_initializer=bias_initializer
+                bias_initializer=bias_initializer,
             )(x)
 
             if batchnorm:
@@ -126,6 +141,9 @@ def hgq_mlp(
 
             x = layers.ReLU(name=f"relu_{i}")(x)
 
-        outputs = QDense(out_dim, name="qdense_out")(x)
+        # outputs = QDense(out_dim, name="qdense_out", enable_iq=False)(x)
+        outputs = layers.Dense(out_dim, name="qdense_out")(x)
+        if final_activation:
+            outputs = layers.ReLU(name=f"relu_final")(outputs)
 
     return keras.Model(inputs=inputs, outputs=outputs, name=name)

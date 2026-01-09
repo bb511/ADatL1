@@ -2,10 +2,10 @@
 
 defaults:
   - /paths: data_2024E
-  - data_extractor: axov4
+  - data_extractor: minimal
   - data_processor: default
   - data_normalizer: axov4
-  - data_mlready: axov4
+  - data_mlready: default
   - data_awkward2torch: axov4
   - l1_scales: default
   - _self_
@@ -30,3 +30,6 @@ batch_size: 16384
 
 # How many batches to split the validation data into. -1 means use batch_size
 val_batches: -1
+
+# Seed for shuffling the data, if any shuffling is happening.
+seed: ${seed}

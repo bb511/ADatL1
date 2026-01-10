@@ -1,3 +1,6 @@
+# Ignore optuna
+/optuna_logs
+
 # Ignore MAC stuff.
 .DS_Store
 

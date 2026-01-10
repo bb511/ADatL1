@@ -12,9 +12,11 @@ from pytorch_lightning.loggers import Logger
 from omegaconf import DictConfig
 
 import rootutils
+
 rootutils.setup_root(__file__, indicator=".project-root", pythonpath=True)
 
 from src.utils.omegaconf import register_resolvers
+
 register_resolvers()
 
 from src.utils import (
@@ -34,18 +36,20 @@ from capmetric import ApproximationCapacity
 
 device = "cuda" if torch.cuda.is_available() else "cpu"
 
+
 def _defaultdict_to_dict(d):
     """Recursively convert defaultdict to regular dict"""
     if isinstance(d, defaultdict):
         d = {k: _defaultdict_to_dict(v) for k, v in d.items()}
     return d
 
+
 def _cache_logits_from_checkpoints(
-        ckpt_paths: List[Path],
-        algorithm: LightningModule,
-        dataset: torch.utils.data.Dataset,
-        output_name: str = "logits",
-    ) -> torch.Tensor:
+    ckpt_paths: List[Path],
+    algorithm: LightningModule,
+    dataset: torch.utils.data.Dataset,
+    output_name: str = "logits",
+) -> torch.Tensor:
 
     if len(ckpt_paths) == 0:
         raise ValueError("No checkpoint path has been selected.")
@@ -58,37 +62,38 @@ def _cache_logits_from_checkpoints(
     ckpt_path = ckpt_paths[0]
 
     # Load the logits in memory:
-    state_dict = torch.load(
-        ckpt_path,
-        weights_only=False,
-        map_location="cpu"
-    )[
+    state_dict = torch.load(ckpt_path, weights_only=False, map_location="cpu")[
         "state_dict"
     ]
     algorithm.load_state_dict(state_dict, strict=True)
     algorithm.eval()
     algorithm.to(device)
-    
+
     with torch.no_grad():
         logits = []
         for ibatch in range(len(dataset)):
             batch = dataset[ibatch]
-            batch = tuple([
-                t.to(device=device, dtype=torch.float32) if isinstance(t, torch.Tensor) else t
-                for t in batch
-            ])
+            batch = tuple(
+                [
+                    (
+                        t.to(device=device, dtype=torch.float32)
+                        if isinstance(t, torch.Tensor)
+                        else t
+                    )
+                    for t in batch
+                ]
+            )
             output = algorithm.model_step(batch)[output_name]
             logits.append(output.detach().cpu())
 
     del dataset, batch, algorithm, state_dict
     return torch.cat(logits, dim=0)
 
+
 def _compute_cap(
-        logits0: torch.Tensor,
-        logits1: torch.Tensor,
-        batch_size: int
-    ) -> Optional[float]:
-    
+    logits0: torch.Tensor, logits1: torch.Tensor, batch_size: int
+) -> Optional[float]:
+
     if len(logits0) == 0 or len(logits1) == 0:
         return None
 
@@ -131,7 +136,6 @@ def eval(cfg: DictConfig) -> Tuple[Dict[str, Any], Dict[str, Any]]:
     if cfg.get("seed"):
         pl.seed_everything(cfg.seed, workers=True)
 
-
     log.info(f"Instantiating datamodule <{cfg.data._target_}>")
     datamodule: LightningDataModule = hydra.utils.instantiate(cfg.data)
 
@@ -164,14 +168,13 @@ def eval(cfg: DictConfig) -> Tuple[Dict[str, Any], Dict[str, Any]]:
         experiment_name=cfg.experiment_name,
         run_name=cfg.run_name,
         by_combination=False,
-
         exclude_prefix=["cap", "lko"],
     )
     for epoch, ckpt_paths in checkpoint_dict.items():
         # Select the checkpoint and evaluate:
         ckpt_path = ckpt_paths[0]
         trainer.test(model=algorithm, datamodule=datamodule, ckpt_path=ckpt_path)
-        
+
         metric_dict = trainer.callback_metrics
         """
         Metrics obtained here:
@@ -184,9 +187,13 @@ def eval(cfg: DictConfig) -> Tuple[Dict[str, Any], Dict[str, Any]]:
     # BUG @Patrick: This should not be needed, signal datasets should also appear on test:
     datamodule.trainer = trainer
     datamodule.setup("fit")
-    dataset_dictionary = datamodule.val_dataloader() # BUG @Patrick: should I reinstantiate datasets?
-    
-    log.info("Cacheing the data before CAP computation for SINGLE and LOO checkpoints...")
+    dataset_dictionary = (
+        datamodule.val_dataloader()
+    )  # BUG @Patrick: should I reinstantiate datasets?
+
+    log.info(
+        "Cacheing the data before CAP computation for SINGLE and LOO checkpoints..."
+    )
     # checkpoint_dict: (prefix, metric_name, criterion, dset_key) -> [ckpt_path, ...]
     checkpoint_dict = find_checkpoints(
         dirpath=cfg.paths.checkpoints_dir,
@@ -194,11 +201,13 @@ def eval(cfg: DictConfig) -> Tuple[Dict[str, Any], Dict[str, Any]]:
         run_name=cfg.run_name,
         by_combination=True,
         exclude_prefix=["cap", "lko"],
-        exclude_ds=["main", "main_val", "main_test"]
+        exclude_ds=["main", "main_val", "main_test"],
     )
 
-    cache: Dict[(int, str), torch.Tensor] = {} # (epoch, dset_key) -> logits
-    params_to_epoch: Dict[(int, tuple)] = {} # (prefix, metric_name, criterion, dset_key) -> epoch
+    cache: Dict[(int, str), torch.Tensor] = {}  # (epoch, dset_key) -> logits
+    params_to_epoch: Dict[(int, tuple)] = (
+        {}
+    )  # (prefix, metric_name, criterion, dset_key) -> epoch
     for prefix, metric_name, criterion, dset_key in checkpoint_dict.keys():
 
         # TODO: Consider logic here, we might want to get the ckpt depending on the value!!
@@ -207,43 +216,55 @@ def eval(cfg: DictConfig) -> Tuple[Dict[str, Any], Dict[str, Any]]:
         # Compute epoch associated to parameter combination and store in the dictionary:
         epoch = _parse_filename(Path(ckpt_path).name).get("epoch")
         params_to_epoch[(prefix, metric_name, criterion, dset_key)] = epoch
-                 
+
         # Skip calculations when logits already exist:
         if (epoch, dset_key) not in cache.keys():
             logits = _cache_logits_from_checkpoints(
                 ckpt_paths=[ckpt_path],
                 algorithm=hydra.utils.instantiate(cfg.algorithm),
                 dataset=dataset_dictionary.get(dset_key),
-                output_name=cfg.callbacks.cap_callback.output_name
+                output_name=cfg.callbacks.cap_callback.output_name,
             )
             if len(logits) == 0:
                 continue
 
             cache[(epoch, dset_key)] = logits
-                
+
     it = -1
     log.info("Computing SINGLE and LOO CAP...")
 
     results = {}
-    directory_hparams = set([(prefix, metric_name, criterion) for prefix, metric_name, criterion, _ in checkpoint_dict.keys()])
+    directory_hparams = set(
+        [
+            (prefix, metric_name, criterion)
+            for prefix, metric_name, criterion, _ in checkpoint_dict.keys()
+        ]
+    )
     for prefix, metric_name, criterion in directory_hparams:
 
         # Load existing dataset keys:
-        dset_keys = {k[3] for k in checkpoint_dict.keys() if k[0] == prefix and k[1] == metric_name and k[2] == criterion}
+        dset_keys = {
+            k[3]
+            for k in checkpoint_dict.keys()
+            if k[0] == prefix and k[1] == metric_name and k[2] == criterion
+        }
         for dset_key0, dset_key1 in itertools.combinations(sorted(dset_keys), 2):
-            it +=1   
+            it += 1
 
             epoch0 = params_to_epoch.get((prefix, metric_name, criterion, dset_key0))
             epoch1 = params_to_epoch.get((prefix, metric_name, criterion, dset_key1))
             cap = _compute_cap(
                 logits0=cache.get((epoch0, dset_key0)),
                 logits1=cache.get((epoch1, dset_key1)),
-                batch_size=cfg.data.batch_size
+                batch_size=cfg.data.batch_size,
             )
             if cap is not None:
-                results.setdefault(f"cap", {}).setdefault(prefix, {}).setdefault(metric_name, {}).setdefault(criterion, {})[(dset_key0, dset_key1)] = cap
-                    
-            if it > 5:break # just for testing purposes
+                results.setdefault(f"cap", {}).setdefault(prefix, {}).setdefault(
+                    metric_name, {}
+                ).setdefault(criterion, {})[(dset_key0, dset_key1)] = cap
+
+            if it > 5:
+                break  # just for testing purposes
 
     metric_dict.update(_defaultdict_to_dict(results))
     """
@@ -251,47 +272,38 @@ def eval(cfg: DictConfig) -> Tuple[Dict[str, Any], Dict[str, Any]]:
     """
 
     log.info("Cacheing the data before CAP computation for LKO checkpoints...")
-    
+
     # BUG: This assumes that single-signal checkpoints coincide with the ones available
     # for subset selection. We assume this is true because data is fixed.
     # Alternatively, we could store a metadata file with the leave-k groups used.
 
     # Get the datasets that should be evaluated:
     available_signals = sorted({k[3] for k in checkpoint_dict.keys()})
-    allowed_signals = [
-        k for k in available_signals
-        if k not in cfg.leave_k_out.skip_ds
-    ]
-    signals_k = [
-        k for k in allowed_signals
-        if k in cfg.leave_k_out.selected_datasets
-    ]
+    allowed_signals = [k for k in available_signals if k not in cfg.leave_k_out.skip_ds]
+    signals_k = [k for k in allowed_signals if k in cfg.leave_k_out.selected_datasets]
     signals_kc = [
-        k for k in allowed_signals
-        if k not in cfg.leave_k_out.selected_datasets
+        k for k in allowed_signals if k not in cfg.leave_k_out.selected_datasets
     ]
 
     def _cache_logits_from_lko(
-            subset_model: str,
-            subset_data: str,
-            metric_name: str,
-            criterion: str
-        ):
-        assert subset_model in ["k", "kc"]; assert subset_data in ["k", "kc"]
+        subset_model: str, subset_data: str, metric_name: str, criterion: str
+    ):
+        assert subset_model in ["k", "kc"]
+        assert subset_data in ["k", "kc"]
 
         dset_key = "selected_ds" if subset_model == "k" else "left_out_ds"
         signals = signals_k if subset_data == "k" else signals_kc
-        
+
         ckpt_paths = checkpoint_dict.get(("lko", metric_name, criterion, dset_key), [])
         if len(ckpt_paths) == 0:
             return torch.empty(0)
-        
+
         logits = [
             _cache_logits_from_checkpoints(
                 ckpt_paths=[ckpt_paths[0]],
                 algorithm=hydra.utils.instantiate(cfg.algorithm),
                 dataset=dataset_dictionary.get(dset_key),
-                output_name=cfg.callbacks.cap_callback.output_name
+                output_name=cfg.callbacks.cap_callback.output_name,
             )
             for dset_key in signals
         ]
@@ -303,16 +315,20 @@ def eval(cfg: DictConfig) -> Tuple[Dict[str, Any], Dict[str, Any]]:
         experiment_name=cfg.experiment_name,
         run_name=cfg.run_name,
         by_combination=True,
-
         include_prefix=["lko"],
-        include_ds=["selected_ds", "left_out_ds"]
+        include_ds=["selected_ds", "left_out_ds"],
     )
 
     cache = {}
-    directory_hparams = set([
-        (metric_name, criterion) for prefix, metric_name, criterion, dset_key in checkpoint_dict.keys()
-        if prefix == "lko" and dset_key in ["selected_ds", "left_out_ds"] # innecessary but just in case
-    ])
+    directory_hparams = set(
+        [
+            (metric_name, criterion)
+            for prefix, metric_name, criterion, dset_key in checkpoint_dict.keys()
+            if prefix == "lko"
+            and dset_key
+            in ["selected_ds", "left_out_ds"]  # innecessary but just in case
+        ]
+    )
     for metric_name, criterion in directory_hparams:
 
         """
@@ -322,19 +338,43 @@ def eval(cfg: DictConfig) -> Tuple[Dict[str, Any], Dict[str, Any]]:
 
         X, Y can be "k" (subset) or "kc" (complementary)
         """
-        logits_k_k = _cache_logits_from_lko(subset_model="k", subset_data="k", metric_name=metric_name, criterion=criterion)
-        logits_kc_k = _cache_logits_from_lko(subset_model="kc", subset_data="k", metric_name=metric_name, criterion=criterion)
-        logits_k_kc = _cache_logits_from_lko(subset_model="k", subset_data="kc", metric_name=metric_name, criterion=criterion)
-        logits_kc_kc = _cache_logits_from_lko(subset_model="kc", subset_data="kc", metric_name=metric_name, criterion=criterion)
+        logits_k_k = _cache_logits_from_lko(
+            subset_model="k",
+            subset_data="k",
+            metric_name=metric_name,
+            criterion=criterion,
+        )
+        logits_kc_k = _cache_logits_from_lko(
+            subset_model="kc",
+            subset_data="k",
+            metric_name=metric_name,
+            criterion=criterion,
+        )
+        logits_k_kc = _cache_logits_from_lko(
+            subset_model="k",
+            subset_data="kc",
+            metric_name=metric_name,
+            criterion=criterion,
+        )
+        logits_kc_kc = _cache_logits_from_lko(
+            subset_model="kc",
+            subset_data="kc",
+            metric_name=metric_name,
+            criterion=criterion,
+        )
 
-        if len(logits_k_k) == 0 or len(logits_kc_k) == 0 or len(logits_k_kc) == 0 or len(logits_kc_kc) == 0:
+        if (
+            len(logits_k_k) == 0
+            or len(logits_kc_k) == 0
+            or len(logits_k_kc) == 0
+            or len(logits_kc_kc) == 0
+        ):
             continue
 
         cache[("k", "k", metric_name, criterion)] = logits_k_k
         cache[("k", "kc", metric_name, criterion)] = logits_k_kc
         cache[("kc", "k", metric_name, criterion)] = logits_kc_k
         cache[("kc", "kc", metric_name, criterion)] = logits_kc_kc
-
 
     # Evaluate cases where CAP has same data but different encoder:
     same_data = [(("kc", "k"), ("k", "k")), (("kc", "kc"), ("k", "kc"))]
@@ -348,27 +388,33 @@ def eval(cfg: DictConfig) -> Tuple[Dict[str, Any], Dict[str, Any]]:
     log.info("Computing LKO CAP...")
     results = {}
     for metric_name, criterion in directory_hparams:
-        for ((data0, encoder0), (data1, encoder1)) in same_data + same_encoder:
+        for (data0, encoder0), (data1, encoder1) in same_data + same_encoder:
 
-            logits0=cache.get((data0, encoder0, metric_name, criterion))
-            logits1=cache.get((data1, encoder1, metric_name, criterion))
+            logits0 = cache.get((data0, encoder0, metric_name, criterion))
+            logits1 = cache.get((data1, encoder1, metric_name, criterion))
             if logits0 is None or logits1 is None:
                 continue
 
             cap = _compute_cap(
                 logits0=logits0[:min_length],
                 logits1=logits1[:min_length],
-                batch_size=cfg.data.batch_size
+                batch_size=cfg.data.batch_size,
             )
             if cap is not None:
-                results.setdefault("cap", {}).setdefault("lko", {}).setdefault(metric_name, {}).setdefault(criterion, {})[((data0, encoder0), (data1, encoder1))] = cap
+                results.setdefault("cap", {}).setdefault("lko", {}).setdefault(
+                    metric_name, {}
+                ).setdefault(criterion, {})[
+                    ((data0, encoder0), (data1, encoder1))
+                ] = cap
 
     metric_dict.update(_defaultdict_to_dict(results))
     """
     Here we add the LKO CAP evaluations.
     """
 
-    log.info("Caching the data before CAP computation between background and signal simulations...")
+    log.info(
+        "Caching the data before CAP computation between background and signal simulations..."
+    )
 
     # Get the checkpoints of the LAI evaluations:
     checkpoint_dict = find_checkpoints(
@@ -376,30 +422,34 @@ def eval(cfg: DictConfig) -> Tuple[Dict[str, Any], Dict[str, Any]]:
         experiment_name=cfg.experiment_name,
         run_name=cfg.run_name,
         by_combination=True,
-
         include_prefix=["lko"],
-        include_ds=["all_in"]
+        include_ds=["all_in"],
     )
-    
 
     cache = {}
-    directory_hparams_lko = set([
-        (metric_name, criterion, dset_key) for prefix, metric_name, criterion, dset_key in checkpoint_dict.keys()
-        if prefix == "lko" and dset_key == "all_in" # innecessary but just to make sure
-    ])
-    for metric_name, criterion, _ in directory_hparams_lko: 
+    directory_hparams_lko = set(
+        [
+            (metric_name, criterion, dset_key)
+            for prefix, metric_name, criterion, dset_key in checkpoint_dict.keys()
+            if prefix == "lko"
+            and dset_key == "all_in"  # innecessary but just to make sure
+        ]
+    )
+    for metric_name, criterion, _ in directory_hparams_lko:
         logits = []
         for dset_key in allowed_signals:
-            ckpt_paths = checkpoint_dict.get(("lko", metric_name, criterion, dset_key), [])
+            ckpt_paths = checkpoint_dict.get(
+                ("lko", metric_name, criterion, dset_key), []
+            )
             if len(ckpt_paths) == 0:
-                break # not continue
+                break  # not continue
 
             logits.append(
                 _cache_logits_from_checkpoints(
                     ckpt_paths=[ckpt_paths[0]],
                     algorithm=hydra.utils.instantiate(cfg.algorithm),
                     dataset=dataset_dictionary.get(dset_key),
-                    output_name=cfg.callbacks.cap_callback.output_name
+                    output_name=cfg.callbacks.cap_callback.output_name,
                 )
             )
 
@@ -407,33 +457,40 @@ def eval(cfg: DictConfig) -> Tuple[Dict[str, Any], Dict[str, Any]]:
             continue
 
         cache[("lko", metric_name, criterion, "all_in")] = torch.cat(logits, dim=0)
-    
+
     checkpoint_dict = find_checkpoints(
         dirpath=cfg.paths.checkpoints_dir,
         experiment_name=cfg.experiment_name,
         run_name=cfg.run_name,
         by_combination=True,
-
         include_prefix=["single"],
-        include_ds=["main", "SingleNeutrino_E-10-gun", "SingleNeutrino_Pt-2To20-gun"]
+        include_ds=["main", "SingleNeutrino_E-10-gun", "SingleNeutrino_Pt-2To20-gun"],
     )
-    directory_hparams_lai = set([
-        (metric_name, criterion, dset_key) for prefix, metric_name, criterion, dset_key in checkpoint_dict.keys()
-        if prefix == "single" and dset_key in ["main", "SingleNeutrino_E-10-gun", "SingleNeutrino_Pt-2To20-gun"] # innecessary but just to make sure
-    ])
+    directory_hparams_lai = set(
+        [
+            (metric_name, criterion, dset_key)
+            for prefix, metric_name, criterion, dset_key in checkpoint_dict.keys()
+            if prefix == "single"
+            and dset_key
+            in [
+                "main",
+                "SingleNeutrino_E-10-gun",
+                "SingleNeutrino_Pt-2To20-gun",
+            ]  # innecessary but just to make sure
+        ]
+    )
     for metric_name, criterion, dset_key in directory_hparams_lai:
         ckpt_path = checkpoint_dict.get(("single", metric_name, criterion, dset_key))[0]
         logits = _cache_logits_from_checkpoints(
             ckpt_paths=[ckpt_path],
             algorithm=hydra.utils.instantiate(cfg.algorithm),
             dataset=dataset_dictionary.get(dset_key),
-            output_name=cfg.callbacks.cap_callback.output_name
-        )        
+            output_name=cfg.callbacks.cap_callback.output_name,
+        )
         if len(logits) == 0:
             continue
-        
-        cache[("single", metric_name, criterion, dset_key)] = logits
 
+        cache[("single", metric_name, criterion, dset_key)] = logits
 
     # BUG: This could be improved, see earlier as well
     min_length = min(len(v) for v in cache.values())
@@ -441,31 +498,46 @@ def eval(cfg: DictConfig) -> Tuple[Dict[str, Any], Dict[str, Any]]:
     log.info("Computing CAP between background and signal simulations...")
     results = {}
     intersection_lai_lko = set(
-        [(metric_name, criterion) for metric_name, criterion, _ in directory_hparams_lai]
-    ).intersection(set(
-        [(metric_name, criterion) for metric_name, criterion, _ in directory_hparams_lko]
-    ))
+        [
+            (metric_name, criterion)
+            for metric_name, criterion, _ in directory_hparams_lai
+        ]
+    ).intersection(
+        set(
+            [
+                (metric_name, criterion)
+                for metric_name, criterion, _ in directory_hparams_lko
+            ]
+        )
+    )
     for metric_name, criterion in intersection_lai_lko:
         logits_all = cache.get(("lko", metric_name, criterion, "all_in"))
         if logits_all is None:
             continue
 
-        available_dset_keys = set([
-            dset_key for prefix, metric_name_loop, criterion_loop, dset_key in cache.keys()
-            if prefix == "single" and metric_name_loop == metric_name and criterion_loop == criterion
-        ])
+        available_dset_keys = set(
+            [
+                dset_key
+                for prefix, metric_name_loop, criterion_loop, dset_key in cache.keys()
+                if prefix == "single"
+                and metric_name_loop == metric_name
+                and criterion_loop == criterion
+            ]
+        )
         for dset_key in available_dset_keys:
             logits_single = cache.get(("single", metric_name, criterion, dset_key))
             if logits_single is None:
                 continue
-           
+
             cap = _compute_cap(
                 logits0=logits_all[:min_length],
                 logits1=logits_single[:min_length],
-                batch_size=cfg.data.batch_size
+                batch_size=cfg.data.batch_size,
             )
             if cap is not None:
-                results.setdefault("cap-background", {}).setdefault(metric_name, {}).setdefault(criterion, {})[("all-signals", dset_key)] = cap
+                results.setdefault("cap-background", {}).setdefault(
+                    metric_name, {}
+                ).setdefault(criterion, {})[("all-signals", dset_key)] = cap
 
     metric_dict.update(_defaultdict_to_dict(results))
     """

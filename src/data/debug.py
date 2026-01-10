@@ -16,17 +16,18 @@ class DebugL1ADDataModule(L1ADDataModule):
         super().__init__(*args, **kwargs)
         self.save_hyperparameters(logger=False)
         self.bsim = ["SingleNeutrino_E-10-gun", "SingleNeutrino_Pt-2To20-gun"]
-        self.ssim = ["GluGluHToBB_M-125", "GluGluHToGG_M-125", "GluGluHToGG_M-90", "GluGluHToTauTau_M-125"]
-        self.batch_size=100
-        self.ndata = {
-            "train": 100,
-            "val": 100,
-            "test": 100
-        }
+        self.ssim = [
+            "GluGluHToBB_M-125",
+            "GluGluHToGG_M-125",
+            "GluGluHToGG_M-90",
+            "GluGluHToTauTau_M-125",
+        ]
+        self.batch_size = 100
+        self.ndata = {"train": 100, "val": 100, "test": 100}
         self.shufflers = {
             "train": None,
             "val": np.random.default_rng(seed=self.hparams.seed),
-            "test": np.random.default_rng(seed=self.hparams.seed+1)
+            "test": np.random.default_rng(seed=self.hparams.seed + 1),
         }
 
     def prepare_data(self) -> None:
@@ -41,9 +42,9 @@ class DebugL1ADDataModule(L1ADDataModule):
             data=torch.randn(ntrain, 57, dtype=torch.float32),
             labels=torch.zeros(ntrain, dtype=torch.long),
             batch_size=self.batch_size,
-            shuffler=None
+            shuffler=None,
         )
-    
+
     def _dataset_dictionary(self, stage: str) -> Dict[str, L1ADDataset]:
         ndata = self.ndata.get(stage)
         return {
@@ -55,20 +56,20 @@ class DebugL1ADDataModule(L1ADDataModule):
             ),
             **{
                 signal_name: L1ADDataset(
-                    data=sign * float(1 + isignal) * torch.randn(ndata, 57, dtype=torch.float32),
+                    data=sign
+                    * float(1 + isignal)
+                    * torch.randn(ndata, 57, dtype=torch.float32),
                     labels=torch.full((ndata,), sign * (1 + isignal), dtype=torch.long),
                     batch_size=self.batch_size,
                     shuffler=self.shuffler,
                 )
                 for sign, sims in zip([-1, 1], [self.bsim, self.ssim])
                 for isignal, signal_name in enumerate(sims)
-            }
+            },
         }
-    
+
     def val_dataloader(self) -> Dict[str, L1ADDataset]:
         return self._dataset_dictionary("val")
-    
+
     def test_dataloader(self) -> Dict[str, L1ADDataset]:
         return self._dataset_dictionary("test")
-    
-    

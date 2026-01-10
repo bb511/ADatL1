@@ -1,0 +1,13 @@
+# @package callbacks
+
+defaults:
+  - default
+  - metrics@anomaly_rate: anomaly_rate
+  - checkpointing@min_loss_total_ckpt: model_checkpoint_singledata
+  - _self_
+
+min_loss_total_ckpt:
+  monitor: loss
+  criterion:
+    _target_: src.callbacks.checkpointing.criterion.Min
+    top_k: 1

@@ -12,6 +12,4 @@ enable_model_summary: false
 enable_checkpointing: false
 
 ckpts:
-  last: null
-  single:
-    loss: ['min']
+  last: true

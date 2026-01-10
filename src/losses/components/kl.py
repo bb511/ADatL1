@@ -15,20 +15,20 @@ class KLDivergenceLoss(L1ADLoss):
     name: str = "kl"
 
     def __init__(
-            self,
-            scale: float = 1.0,
-            reduction: Literal["none", "mean", "sum"] = "none"
-        ):
+        self,
+        scale: float = 1.0,
+        reduction: Literal["none", "mean", "sum"] = "none"
+    ):
         super().__init__(scale=scale, reduction=reduction)
 
-    def forward(
-            self,
-            z_mean: torch.Tensor,
-            z_log_var: torch.Tensor,
-            **kwargs
-        ) -> torch.Tensor:
+    def set_scale(self, scale: float):
+        """Set the scale of the KL divegence loss object."""
+        self.scale = scale
 
-        kl_per_observation = -0.5 * torch.mean(
-            1 + z_log_var - z_mean.pow(2) - z_log_var.exp(), dim=1
+    def forward(self, z_mean: torch.Tensor, z_log_var: torch.Tensor) -> torch.Tensor:
+        kl_per_observation = -0.5 * torch.sum(
+            1 + z_log_var - z_mean.pow(2) - z_log_var.exp(),
+            dim=-1,
         )
-        return self.scale * self.reduce(kl_per_observation)
+
+        return self.reduce(kl_per_observation), self.scale * self.reduce(kl_per_observation)

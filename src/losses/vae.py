@@ -3,57 +3,56 @@
 from typing import Literal
 
 import torch
-import torch.nn as nn
 
+from src.losses.components import L1ADLoss
 from src.losses.components.reconstruction import ReconstructionLoss
 from src.losses.components.reconstruction import CylPtPzReconstructionLoss
 from src.losses.components.kl import KLDivergenceLoss
 
 from src.utils import pylogger
 from colorama import Fore, Back, Style
+
 log = pylogger.RankedLogger(__name__)
 
 
-class ClassicVAELoss(nn.Module):
+class ClassicVAELoss(L1ADLoss):
     """The conventional variational AE loss.
 
-    :param scale: Float between 0 and 1 that establishes the scale between the KL div
-        loss and the reconstruction loss: (1-scale)*reco + scale*kl.
+        L = MSE + scale*KL_div
+
+    :param scale: Float to scale the total loss with.
+    :param kl_scale: Float to scale the kl_scale with. IF kl_scale is set dynamically
+        then this parameter is the final kl_scale that should be reached.
     :param reduct: String denoting the type of reduction used on the loss function. The
         separate loss functions return loss values per event. This is then aggregated
         by computing the mean over the batch, or the sum.
     """
-    def __init__(self, scale: float, reduct: Literal["none", "mean", "sum"] = "none"):
-        super().__init__()
-        self.reduction = reduct
-        self.reco_scale = 1 - scale
-        self.kl_scale = scale
 
-        self.reco_loss = ReconstructionLoss(scale=self.reco_scale)
-        self.kl_loss = KLDivergenceLoss(scale=self.kl_scale)
+    def __init__(self, scale: float = 1, kl_scale: float = 1, reduct: str = "none"):
+        super().__init__(scale=scale, reduction=reduct)
+        self.kl_scale_final = float(kl_scale)
+        self.reco_loss = ReconstructionLoss(reduction=reduct)
+        self.kl_loss = KLDivergenceLoss(scale=self.kl_scale_final, reduction=reduct)
 
     def forward(
         self,
         target: torch.Tensor,
+        mask: torch.Tensor | None,
         reconstruction: torch.Tensor,
         z_mean: torch.Tensor,
         z_log_var: torch.Tensor,
+        kl_scale: float | None = None
     ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+        # The kl_scale argument allows for dynamically setting the kl_scale during
+        # the training of the VAE.
+        if not kl_scale is None:
+            self.kl_loss.set_scale(float(kl_scale))
 
-        reco_loss = self.reco_loss(target, reconstruction)
-        kl_loss = self.kl_loss(z_mean, z_log_var)
-        total_loss = reco_loss + kl_loss
+        reco_loss = self.reco_loss(target, reconstruction, mask)
+        kl_raw, kl_scaled = self.kl_loss(z_mean, z_log_var)
+        total_loss = self.scale*(reco_loss + kl_scaled)
 
-        return self.reduce(reco_loss), self.reduce(kl_loss), self.reduce(total_loss)
-
-    def reduce(self, loss: torch.Tensor) -> torch.Tensor:
-        """Applies a reduction operation to a loss."""
-        if self.reduction == 'mean':
-            return loss.mean()
-        elif self.reduction == 'sum':
-            return loss.sum()
-
-        return loss
+        return reco_loss, kl_raw, kl_scaled, total_loss
 
 
 class AxoV4Loss(ClassicVAELoss):
@@ -64,12 +63,12 @@ class AxoV4Loss(ClassicVAELoss):
     in the torch Tensor that the loss function receives. Hence, THIS IS ONLY USABLE
     WITH A VERY PARTICULAR TYPE OF DATA PROCESSING.
     """
-    def __init__(self, scale: float, reduct: Literal["none", "mean", "sum"] = "none"):
-        super().__init__(scale=scale, reduct=reduct)
+
+    def __init__(self, scale: float = 1, kl_scale: float = 1, reduct: str = "none"):
+        super().__init__(scale=scale, kl_scale=kl_scale, reduct=reduct)
         log.warn(
-            Fore.YELLOW +
-            "Using AxoV4Loss. Expecting that the data is comprised only of pT, eta, " +
-            "and phi for each object, in that order. Moreover, expecting that the " +
-            "first pT, eta, and phi belong to the MET object."
+            Fore.YELLOW
+            + "Using AxoV4Loss. Expecting that the mlready data config is axov4."
+            + "Moreover, expecting that the awkward2torch config is also axov4."
         )
-        self.reco_loss = CylPtPzReconstructionLoss(scale=self.reco_scale)
+        self.reco_loss = CylPtPzReconstructionLoss(reduction=reduct)

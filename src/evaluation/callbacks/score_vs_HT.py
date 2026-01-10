@@ -1,4 +1,5 @@
 # Plot the correlation of the score wtih different quantities.
+# WIP!!!!!!!!!!
 
 from collections import defaultdict
 from pathlib import Path
@@ -44,9 +45,9 @@ class ScoreCorrelationHT(Callback):
         Get the HT object and Et feature, put it in the subfolder of the data in
         'callbacks_HT' subdir and don't normalize it.
         """
-        extra_feats = {'HT': ['Et']}
-        flag = 'callbacks_HT'
-        normalizer = L1DataNormalizer('unnormalized', {})
+        extra_feats = {"HT": ["Et"]}
+        flag = "callbacks_HT"
+        normalizer = L1DataNormalizer("unnormalized", {})
 
         _, _, test_data = datamodule.get_extra(normalizer, extra_feats, flag)
 
@@ -89,11 +90,11 @@ class ScoreCorrelationHT(Callback):
         each metric across batches. The whole metric output distribution is needed to
         set a treshold that gives a certain rate.
         """
-        batch_output = outputs[mname].detach().to('cpu')
+        batch_output = outputs[mname].detach().to("cpu")
         self.maintest_score_data[mname].append(batch_output)
 
-        pu, _ = self.pu_per_ds['main_test'][batch_idx]
-        pu = pu.round().int().to('cpu').view(-1)
+        pu, _ = self.pu_per_ds["main_test"][batch_idx]
+        pu = pu.round().int().to("cpu").view(-1)
         self.maintest_pu_data[mname].append(pu)
 
         if batch_idx == self.total_batches - 1:
@@ -134,11 +135,11 @@ class ScoreCorrelationHT(Callback):
         which events pass the rate threshold for each batch and updates the total.
         """
         pus, _ = self.pu_per_ds[self.dataset_name][batch_idx]
-        pus = pus.round().int().to('cpu').view(-1)
+        pus = pus.round().int().to("cpu").view(-1)
         pus, inv = pus.unique(sorted=True, return_inverse=True)
 
         scores_by_pu = {
-            int(pu.item()): outputs[mname].detach().to('cpu')[inv == i]
+            int(pu.item()): outputs[mname].detach().to("cpu")[inv == i]
             for i, pu in enumerate(pus)
         }
         for target_rate in self.target_rates:
@@ -166,11 +167,11 @@ class ScoreCorrelationHT(Callback):
         """Log the anomaly rates computed on each of the data sets."""
         ckpts_dir = Path(pl_module._ckpt_path).parent
         ckpt_name = Path(pl_module._ckpt_path).stem
-        plot_folder = ckpts_dir / 'plots' / ckpt_name / 'bkgpileup'
+        plot_folder = ckpts_dir / "plots" / ckpt_name / "bkgpileup"
         plot_folder.mkdir(parents=True, exist_ok=True)
 
         for rate_name, pu_rates in self.rates_per_pu.items():
-            target_rate = rate_name.split('_')[-1].replace('rate', '')
+            target_rate = rate_name.split("_")[-1].replace("rate", "")
             dataset_name = self._get_dsname(rate_name)
             pu_rates = self._compute_rates(pu_rates)
             xlabel = f"pileup"
@@ -181,13 +182,13 @@ class ScoreCorrelationHT(Callback):
 
     def _get_dsname(self, rate_name: str):
         """Retrieves the data set name from string specifying rate name."""
-        dataset_name = rate_name.split('/')[0]
+        dataset_name = rate_name.split("/")[0]
         return dataset_name
 
     def _compute_rates(self, pu_rates: dict):
         """Compute the rates in the pileup_rates dictionary."""
         for pu_value, anomaly_counter in pu_rates.items():
-            pu_rates[pu_value] = anomaly_counter.compute('rate').item()
+            pu_rates[pu_value] = anomaly_counter.compute("rate").item()
 
         return pu_rates
 
@@ -197,41 +198,38 @@ class ScoreCorrelationHT(Callback):
         if mlflow_logger is None:
             return
 
-        run_id = mlflow_logger.run_id
         arti_ckpt_dir = self._resolve_arti_dir(trainer, ckpt_name)
+        gallery_dir = arti_ckpt_dir.parent
 
         # Log each image in the given plot_folder as an artifact.
         for img_path in sorted(
-            p for p in plot_folder.glob("*.jpg")
+            p
+            for p in plot_folder.glob("*.jpg")
             if p.is_file() and not p.name.startswith("._")
         ):
             mlflow_logger.experiment.log_artifact(
-                run_id=run_id,
+                run_id=mlflow_logger.run_id,
                 local_path=str(img_path),
                 artifact_path=str(arti_ckpt_dir),
             )
 
-        # Generate an html gallery at the parent directory level.
-        gallery_dir = arti_ckpt_dir.parent
-        html_gallery = utils.mlflow.build_html(
-            mlflow_logger, plot_folder, gallery_dir, arti_ckpt_dir
-        )
-        mlflow_logger.experiment.log_text(
-            run_id, html_gallery, artifact_file=gallery_dir / 'index.html'
+        # Generate an html gallery of the logs plots in the parent dir of the arti.
+        _ = utils.mlflow.make_gall(
+            mlflow_logger, plot_folder, gallery_dir, ckpt_name, "index"
         )
 
     def _resolve_arti_dir(self, trainer, ckpt_name: str):
         """Resolve the artifacts directory where the plots will be stored in mlflow."""
         arti_dir = Path()
         if trainer.strat_name:
-            arti_dir = arti_dir / trainer.strat_name / 'pileup'
+            arti_dir = arti_dir / trainer.strat_name / "pileup"
         if trainer.metric_name:
             arti_dir = arti_dir / trainer.metric_name
         if trainer.criterion_name:
             arti_dir = arti_dir / trainer.criterion_name
 
         if arti_dir == Path():
-            arti_dir = arti_dir / 'pileup'
+            arti_dir = arti_dir / "pileup"
 
         if ckpt_name in arti_dir.parts:
             return arti_dir

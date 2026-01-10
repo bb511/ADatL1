@@ -28,9 +28,7 @@ class L1DataMLReady:
     seed: int = 42
     verbose: bool = False
 
-    def prepare(
-        self, normalizer: L1DataNormalizer, select_feats: dict, flag: str = ''
-    ):
+    def prepare(self, normalizer: L1DataNormalizer, select_feats: dict, flag: str = ""):
         """Makes train set, validation set, test set, and auxiliary data.
 
         Imports the processed data. Applies normalization through the normalizer object.
@@ -46,7 +44,7 @@ class L1DataMLReady:
         self.normalizer = normalizer
 
         self.processed_datapath = Path(self.processed_datapath)
-        self.mlready_dir = Path(self.cache_root_dir) / 'mlready'
+        self.mlready_dir = Path(self.cache_root_dir) / "mlready"
         self.cache_folder = self.mlready_dir / self.name
         self.cache_folder /= normalizer.name
         self.flag = flag
@@ -77,7 +75,7 @@ class L1DataMLReady:
         available in the given processed data. Then, this is split into a training
         dataset, validation dataset, and test dataset in a deterministic seeded way.
         """
-        obj_paths = self._get_files_per_object(self.processed_datapath / 'zerobias')
+        obj_paths = self._get_files_per_object(self.processed_datapath / "zerobias")
         obj_names = [obj_name for obj_name, _ in obj_paths.items()]
         if not set(self.select_feats.keys()) <= set(obj_paths.keys()):
             log.warn(
@@ -95,8 +93,9 @@ class L1DataMLReady:
             if obj_name not in self.select_feats.keys():
                 continue
 
-            obj_dataset = pyarrow.dataset.dataset(file_paths, format='parquet')
+            obj_dataset = pyarrow.dataset.dataset(file_paths, format="parquet")
             self._cache_train_data(obj_dataset, obj_name, itrain)
+            self._load_norm_params(obj_name)
             self._cache_valid_data(obj_dataset, obj_name, ivalid)
             self._cache_test_data(obj_dataset, obj_name, itest)
 
@@ -120,11 +119,11 @@ class L1DataMLReady:
         first_object_name = list(obj_paths)[0]
         first_object_filepaths = obj_paths[first_object_name]
 
-        obj_dataset = pyarrow.dataset.dataset(first_object_filepaths, format='parquet')
+        obj_dataset = pyarrow.dataset.dataset(first_object_filepaths, format="parquet")
         nevents = obj_dataset.count_rows()
         permutation = self.rng.permutation(nevents)
-        ntrain = int(self.split['train']*nevents)
-        nvalid = int(self.split['valid']*nevents) + ntrain
+        ntrain = int(self.split["train"] * nevents)
+        nvalid = int(self.split["valid"] * nevents) + ntrain
 
         itrain = permutation[:ntrain]
         ivalid = permutation[ntrain:nvalid]
@@ -134,9 +133,9 @@ class L1DataMLReady:
 
     def _cache_train_data(self, obj_data, obj_name: str, idxs: list):
         """Get the training data split, normalize it, and then cache it."""
-        train_folder = self.cache_folder / 'train' / self.flag
+        train_folder = self.cache_folder / "train" / self.flag
         train_folder.mkdir(parents=True, exist_ok=True)
-        cache_file = train_folder / f'{obj_name}.parquet'
+        cache_file = train_folder / f"{obj_name}.parquet"
 
         if self._check_data_exists(cache_file):
             self._train_data_exists += 1
@@ -156,10 +155,9 @@ class L1DataMLReady:
 
     def _cache_valid_data(self, obj_data, obj_name: str, idxs: list):
         """Get the validation data split, normalize it, and then cache it."""
-        valid_folder = self.cache_folder / 'valid' / self.flag
+        valid_folder = self.cache_folder / "valid" / self.flag
         valid_folder.mkdir(parents=True, exist_ok=True)
-        cache_file = valid_folder / f'{obj_name}.parquet'
-        self._load_norm_params(obj_name)
+        cache_file = valid_folder / f"{obj_name}.parquet"
         if self._check_data_exists(cache_file):
             self._valid_data_exists += 1
             return
@@ -176,10 +174,9 @@ class L1DataMLReady:
 
     def _cache_test_data(self, obj_data, obj_name: str, idxs: list):
         """Get the test data split, normalize it, and then cache it."""
-        test_folder = self.cache_folder / 'test' / self.flag
+        test_folder = self.cache_folder / "test" / self.flag
         test_folder.mkdir(parents=True, exist_ok=True)
-        cache_file = test_folder / f'{obj_name}.parquet'
-        self._load_norm_params(obj_name)
+        cache_file = test_folder / f"{obj_name}.parquet"
         if self._check_data_exists(cache_file):
             self._test_data_exists += 1
             return
@@ -197,19 +194,21 @@ class L1DataMLReady:
     def _prepare_auxdata(self):
         """Prepare the signal and data categories, used only for validation."""
         log.info(Fore.MAGENTA + "Preparing auxiliary data...")
-        self.aux_dir = self.cache_folder / 'aux'
+        self.aux_dir = self.cache_folder / "aux"
 
         self._aux_data_exists = []
-        dataset_paths = self.processed_datapath / 'background'
+        dataset_paths = self.processed_datapath / "background"
         for dataset_path in sorted(
-            p for p in dataset_paths.iterdir()
+            p
+            for p in dataset_paths.iterdir()
             if p.is_dir() and not p.name.startswith("._")
         ):
             self._cache_aux(dataset_path)
 
-        dataset_paths = self.processed_datapath / 'signal'
+        dataset_paths = self.processed_datapath / "signal"
         for dataset_path in sorted(
-            p for p in dataset_paths.iterdir()
+            p
+            for p in dataset_paths.iterdir()
             if p.is_dir() and not p.name.startswith("._")
         ):
             self._cache_aux(dataset_path)
@@ -226,7 +225,8 @@ class L1DataMLReady:
         ivalid, itest = self._compute_aux_split(dataset_path)
         obj_names = []
         for obj_path in sorted(
-            p for p in dataset_path.glob("*.parquet")
+            p
+            for p in dataset_path.glob("*.parquet")
             if p.is_file() and not p.name.startswith("._")
         ):
             obj_name = obj_path.stem
@@ -234,7 +234,7 @@ class L1DataMLReady:
             if obj_name not in self.select_feats.keys():
                 continue
 
-            obj_dataset = pyarrow.dataset.dataset(obj_path, format='parquet')
+            obj_dataset = pyarrow.dataset.dataset(obj_path, format="parquet")
             self._cache_aux_valid(obj_dataset, cache_dir, obj_name, ivalid)
             self._cache_aux_test(obj_dataset, cache_dir, obj_name, itest)
 
@@ -244,15 +244,16 @@ class L1DataMLReady:
     def _compute_aux_split(self, dataset_path: Path):
         """Compute the split into validation and test of the aux data."""
         obj_paths = sorted(
-            p for p in dataset_path.glob("*.parquet")
+            p
+            for p in dataset_path.glob("*.parquet")
             if p.is_file() and not p.name.startswith("._")
         )
         first_object_filepath = obj_paths[0]
 
-        obj_dataset = pyarrow.dataset.dataset(first_object_filepath, format='parquet')
+        obj_dataset = pyarrow.dataset.dataset(first_object_filepath, format="parquet")
         nevents = obj_dataset.count_rows()
         permutation = self.rng.permutation(nevents)
-        nvalid = int(self.split_aux*nevents)
+        nvalid = int(self.split_aux * nevents)
 
         ivalid = permutation[:nvalid]
         itest = permutation[nvalid:]
@@ -261,10 +262,9 @@ class L1DataMLReady:
 
     def _cache_aux_valid(self, obj_data, cache_dir: Path, obj_name: str, idxs: list):
         """Normalize and cache the validation split of an aux dataset."""
-        valid_folder = cache_dir / 'valid' / self.flag
+        valid_folder = cache_dir / "valid" / self.flag
         valid_folder.mkdir(parents=True, exist_ok=True)
-        cache_file = valid_folder / f'{obj_name}.parquet'
-        self._load_norm_params(obj_name)
+        cache_file = valid_folder / f"{obj_name}.parquet"
         if self._check_data_exists(cache_file):
             self._aux_data_exists.append(cache_dir.stem)
             return
@@ -280,10 +280,9 @@ class L1DataMLReady:
 
     def _cache_aux_test(self, obj_data, cache_dir: Path, obj_name: str, idxs: list):
         """Normalize and cache the test split of an aux dataset."""
-        test_folder = cache_dir / 'test' / self.flag
+        test_folder = cache_dir / "test" / self.flag
         test_folder.mkdir(parents=True, exist_ok=True)
-        cache_file = test_folder / f'{obj_name}.parquet'
-        self._load_norm_params(obj_name)
+        cache_file = test_folder / f"{obj_name}.parquet"
         if self._check_data_exists(cache_file):
             self._aux_data_exists.append(cache_dir.stem)
             return
@@ -302,10 +301,13 @@ class L1DataMLReady:
 
         This field will be filled with None.
         """
+        # Create an empty list for missing features.
+        empty_list = ak.Array([[]] * len(data))
+
         for feature in self.unified_schema:
             if feature in data.fields:
                 continue
-            data[feature] = None
+            data = ak.with_field(data, empty_list, feature)
 
         return data
 
@@ -322,7 +324,8 @@ class L1DataMLReady:
         """Get path to parquet files per object in the processed data folder."""
         obj_paths = defaultdict(list)
         for file_path in sorted(
-            p for p in processed_path.rglob("*.parquet")
+            p
+            for p in processed_path.rglob("*.parquet")
             if p.is_file() and not p.name.startswith("._")
         ):
             if len(file_path.relative_to(processed_path).parents) == 2:
@@ -332,7 +335,7 @@ class L1DataMLReady:
 
     def _cache_norm_params(self, obj_name: str):
         """Save the normalization parameters to a file."""
-        norm_params_filepath = self.cache_folder / f'{obj_name}_norm_params.pkl'
+        norm_params_filepath = self.cache_folder / f"{obj_name}_norm_params.pkl"
         self.normalizer.export_norm_params(norm_params_filepath, obj_name)
 
     def _load_norm_params(self, obj_name: str):
@@ -345,13 +348,13 @@ class L1DataMLReady:
         if obj_name in self.normalizer.norm_params.keys():
             return
 
-        norm_params_filepath = self.cache_folder / f'{obj_name}_norm_params.pkl'
+        norm_params_filepath = self.cache_folder / f"{obj_name}_norm_params.pkl"
         log.info(Fore.YELLOW + f"Loading norm params from {norm_params_filepath}...")
         self.normalizer.import_norm_params(norm_params_filepath, obj_name)
 
     def _plot(self, obj_data: ak.Array, obj_name: str, dataset_dir: Path):
         """Read and then plot the processed data."""
-        plots_dir = dataset_dir / 'PLOTS'
+        plots_dir = dataset_dir / "PLOTS"
         obj_folder = plots_dir / obj_name
         obj_folder.mkdir(parents=True, exist_ok=True)
 

@@ -3,64 +3,56 @@
 _target_: src.algorithms.vicreg.VICReg
 
 seed: ${seed}
+diagnosis_metrics: false
 
 feature_blur:
-  _target_: src.models.augmentation.FastFeatureBlur
-  prob: 0.9004016520359364
-  magnitude: 0.92685112547458
-  strength: 0.749655944679925
-
+  _target_: src.algorithms.components.augmentation.FastFeatureBlur
+  prob: 0.40
+  magnitude: 0.12
+  strength: 0.45
 
 object_mask:
-  _target_: src.models.augmentation.FastObjectMask
-  prob: 0.5709886168264394
-
-object_norm_params: ${paths.data_dir}/mlready/${data.data_mlready.name}/${data.data_normalizer.name}
-object_feature_map: ${paths.data_dir}/mlready/${data.data_mlready.name}/${data.data_normalizer.name}/object_feature_map.json
+  _target_: src.algorithms.components.augmentation.FastObjectMask
+  prob: 0.02
 
 lorentz_rotation:
-  _target_: src.models.augmentation.FastLorentzRotation
+  _target_: src.algorithms.components.augmentation.FastLorentzRotation
   _partial_: true
-  prob: 0.5
+  prob: 0.3
 
 model:
-  _target_: src.models.mlp.MLP
-
-  nodes: [57, 29, 10]
-
+  _target_: src.algorithms.components.mlp.MLP
+  in_dim: 57
+  nodes: [64]
+  out_dim: 16
   batchnorm: false
 
-  init_weight:
-    _target_: src.utils.hydra.get_method
-    path: torch.nn.init.xavier_uniform_
-
-  init_bias:
-    _target_: src.utils.hydra.get_method
-    path: torch.nn.init.zeros_
-
 projector:
-  _target_: src.models.mlp.MLP
-  nodes: [10, 40] # * 4 projection
-  batchnorm: true # Added batchnorm
+  _target_: src.algorithms.components.mlp.MLP
+  in_dim: ${algorithm.model.out_dim}
+  nodes: [128, 128]
+  out_dim: 64
+  batchnorm: true
 
 loss:
-  _target_: src.losses.vicreg.L1VICRegLoss
-  inv_coef: 50
-  var_coef: 50
-  cov_coef: 1
+  _target_: src.losses.vicreg.VICRegLoss
+  inv_coef: 25
+  rvar_coef: 25
+  rcov_coef: 25
 
 optimizer:
   _partial_: true
-  _target_: torch.optim.Adam
-  lr: 0.0001033146150433934
-  weight_decay: 0.0
+  _target_: torch.optim.AdamW
+  lr: 0.0003
+  weight_decay: 1e-3
+  betas: [0.9, 0.99]
+  eps: 1e-8
 
-# scheduler:
-#   # here other attributes...
-
-#   scheduler:
-#     _partial_: true
-#     _target_: src.optimizers.cdw.CosineWithWarmup
-#     warmup_epochs: 10
-#     decay_epochs: '${substract: ${trainer.max_epochs}, ${algorithm.scheduler.scheduler.warmup_epochs}}'
-#     max_lr: ${algorithm.optimizer.lr}
+scheduler:
+  # here other attributes...
+  scheduler:
+    _target_: src.optimizers.cdw.CosineWithWarmup
+    _partial_: true
+    warmup_ratio: 0.1
+    min_lr_ratio: 0.05
+    warmup_start_ratio: 1e-3

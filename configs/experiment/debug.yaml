@@ -5,22 +5,75 @@
 
 defaults:
   - override /data: axov6
-  - override /algorithm: axov4
-  - override /callbacks: basic
-  - override /trainer: debug
-  - override /evaluator: basic
-  - override /evaluator_callbacks: basic
+  - override /algorithm: vicreg
+  - override /callbacks: default
+  - override /trainer: cpu
+  - override /evaluator: default
+  - override /evaluator_callbacks: default
   - override /logger: mlflow
 
 tags: ["debug"]
 
 experiment_name: debug
-run_name: test
+run_name: ${short_hash:${hydra:runtime.output_dir},12}
 
 seed: 12345
 
+algorithm:
+  diagnosis_metrics: false
+
 trainer:
+  # profiler: "pytorch"
+  # enable_checkpointing: false
+  gradient_clip_algorithm: norm
+  gradient_clip_val: 1.0
+  # overfit_batches: 1
   min_epochs: 1
   max_epochs: 1
+  # max_steps: 1_000
+  # limit_train_batches: 10
+  limit_val_batches: 10
+  limit_test_batches: 10
+  # check_val_every_n_epoch: 2
 
 test: true
+
+callbacks:
+  log_data_mlflow: null
+  # Additional checkpoints for the final run (expensive).
+  # knn_auprc:
+  #   _target_: src.callbacks.knn_auprc.KNNAUPRC
+  #   output_name: 'vicreg_rep_data'
+  #   reference_sample_size: 20_000
+  #   k: 10
+
+  # max_knn_auprc_ckpt:
+  #   _target_: src.callbacks.model_checkpoint.SingleDatasetModelCheckpoint
+  #   dirpath: '${paths.checkpoints_dir}/${experiment_name}/${run_name}'
+  #   monitor: knn_auprc
+  #   criterion:
+  #     _target_: src.callbacks.checkpointing.criterion.Max
+  #     top_k: 1
+  #   skip_ds:
+  #     - main_val
+  #     - SingleNeutrino_E-10-gun
+
+evaluator:
+  ckpts:
+    last: true
+    single: null
+      # knn_auprc: ['max']
+
+evaluator_callbacks:
+  loss:
+    _target_: src.evaluation.callbacks.loss.LossCallback
+    loss_name: 'loss'
+    log_raw_mlflow: false
+
+  knn_auprc:
+    _target_: src.evaluation.callbacks.knn_auprc.KNNAUPRC
+    output_name: 'vicreg_rep_data'
+    reference_sample_size: 20_000
+    skip_ds: ['SingleNeutrino_E-10-gun']
+    k: 10
+    log_raw_mlflow: false

@@ -5,30 +5,28 @@ from collections import defaultdict
 import re
 
 import rootutils
+
 ROOTDIR = rootutils.setup_root(__file__, indicator=".project-root", pythonpath=True)
 
 _FILENAME_RE = re.compile(
-    r'^ds=(?P<dataset>.+?)__value=(?P<metric_value>.+?)__epoch=(?P<epoch>\d+)\.ckpt$'
+    r"^ds=(?P<dataset>.+?)__value=(?P<metric_value>.+?)__epoch=(?P<epoch>\d+)\.ckpt$"
 )
+
 
 def _parse_filename(filename: str) -> Dict[str, str]:
     m = _FILENAME_RE.match(filename)
     if not m:
         raise ValueError(f"Unexpected filename format: {filename}")
-    return {
-        key: m.group(key)
-        for key in ["dataset", "metric_value", "epoch"]
-    }
+    return {key: m.group(key) for key in ["dataset", "metric_value", "epoch"]}
+
 
 PREFIXES = ("single", "loo", "lko", "cap")
 CRITERIA = ("min", "max", "last", "stable")
 
+
 def is_valid_ckpt(p: Path) -> bool:
-    return (
-        p.is_file()
-        and p.suffix == ".ckpt"
-        and not p.name.startswith("._")
-    )
+    return p.is_file() and p.suffix == ".ckpt" and not p.name.startswith("._")
+
 
 def _find_ckpt_files(
     dirpath: Path,
@@ -78,6 +76,7 @@ def _find_ckpt_files(
                         "criterion": criterion,
                         "path": ckpt_path,
                     }
+
 
 def _iterate_checkpoints(
     dirpath: Path,
@@ -142,7 +141,9 @@ def find_checkpoints(
 
     if by_combination is False:
         by_epoch: Dict[int, List[str]] = {}
-        for comb in _iterate_checkpoints(run_dir, include_prefix, exclude_prefix, include_ds, exclude_ds):
+        for comb in _iterate_checkpoints(
+            run_dir, include_prefix, exclude_prefix, include_ds, exclude_ds
+        ):
             path = comb.get("path")
             epoch = _parse_filename(path.name).get("epoch")
             by_epoch.setdefault(int(epoch), []).append(str(path))
@@ -153,12 +154,16 @@ def find_checkpoints(
 
     # By (prefix, metric_name, criterion, dataset)
     combinations: Dict[Tuple[str, str, str, str], List[str]] = defaultdict(list)
-    for comb in _iterate_checkpoints(run_dir, include_prefix, exclude_prefix, include_ds, exclude_ds):
+    for comb in _iterate_checkpoints(
+        run_dir, include_prefix, exclude_prefix, include_ds, exclude_ds
+    ):
         prefix = comb.get("prefix")
         metric_name = comb.get("metric_name")
         criterion = comb.get("criterion")
         dataset = _parse_filename(comb.get("path").name).get("dataset")
-        combinations[(prefix, metric_name, criterion, dataset)].append(str(comb.get("path")))
+        combinations[(prefix, metric_name, criterion, dataset)].append(
+            str(comb.get("path"))
+        )
 
     for k in combinations:
         combinations[k].sort()

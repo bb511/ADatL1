@@ -1,14 +1,15 @@
 # Evaluator object definition. Produces the desired evaluation plots for given model
 # checkpoints saved during the training of a model.
 from typing import Optional
-from collections import defaultdict
 from pathlib import Path
 import logging
+import operator
 
 import torch
+import numpy as np
 import pytorch_lightning
 from pytorch_lightning.loggers import Logger
-from pytorch_lightning import LightningModule, LightningDataModule
+from pytorch_lightning import LightningModule
 from pytorch_lightning.callbacks import Callback
 from colorama import Fore, Back, Style
 
@@ -43,10 +44,12 @@ class Evaluator:
         ckpts: dict = None,
         callbacks: Optional[list[Callback]] = None,
         logger: Optional[Logger] = None,
+        optimized_metric_config: dict = None,
         **trainer_kwargs,
     ):
         self.ckpts = ckpts or {}
         self.callbacks = callbacks or []
+        self.optimized_metric_config = optimized_metric_config or None
 
         # Build a *real* Trainer under the hood
         self.evaluator = pytorch_lightning.Trainer(
@@ -55,9 +58,11 @@ class Evaluator:
             **trainer_kwargs,
         )
 
+        self.evaluator.object_feature_map_1d = None
         self.evaluator.strat_name = None
         self.evaluator.metric_name = None
         self.evaluator.criterion_name = None
+        self.optimized_metric = None
         self.evaluator.ckpt_path_name = None
 
     def evaluate_run(self, run_folder: Path, model: LightningModule, test_loader: dict):
@@ -76,11 +81,11 @@ class Evaluator:
 
         log.info(Fore.MAGENTA + f"Evaluating run at {run_folder}...")
 
-        for strategy_name, metric_dict in self.ckpts.items():
-            if metric_dict is None:
+        for strategy_name in self.ckpts.keys():
+            if self.ckpts[strategy_name] is None or self.ckpts[strategy_name] is False:
                 continue
 
-            if strategy_name == 'last':
+            if strategy_name == "last":
                 self.evaluate_last(run_folder, model, test_loader)
                 continue
 
@@ -137,6 +142,13 @@ class Evaluator:
             self.evaluator.ckpt_path_name = ckpt_path.name
             self.evaluate_ckpt(ckpt_path, model, test_loader)
 
+        # Skip getting an optimized metric if no checkpoints were made for that
+        # specific criterion.
+        ckpts = list(criterion_folder.glob("*.ckpt"))
+        if ckpts != []:
+            self._get_optimized_metric(self.optimized_metric_config)
+            self._make_criterion_summary_plots(criterion_folder)
+
         self.evaluator.criterion_name = None
 
     def evaluate_ckpt(self, ckpt_path: Path, model, test_loader: dict):
@@ -153,11 +165,9 @@ class Evaluator:
         """
         log.info(f"-> -> -> -> Evaluating checkpoint at {ckpt_path}.")
 
-        state_dict = torch.load(
-            ckpt_path,
-            weights_only=False,
-            map_location='cpu'
-        )['state_dict']
+        state_dict = torch.load(ckpt_path, weights_only=False, map_location="cpu")[
+            "state_dict"
+        ]
         model.load_state_dict(state_dict, strict=True)
         model._ckpt_path = ckpt_path
 
@@ -167,9 +177,11 @@ class Evaluator:
     def evaluate_last(self, run_folder: Path, model, test_loaders):
         """Evaluate the checkpoint taken at the last epoch."""
         log.info(Fore.GREEN + f"-> Evaluating strategy 'last'")
-        self.evaluator.strat_name = 'last'
-        ckpt_path = run_folder / 'last.ckpt'
+        self.evaluator.strat_name = "last"
+        ckpt_path = run_folder / "last.ckpt"
         self.evaluate_ckpt(ckpt_path, model, test_loaders)
+        self._get_optimized_metric(self.optimized_metric_config)
+        self._make_criterion_summary_plots(run_folder)
 
     def _get_subdir(self, main_dir: Path, subdir: str):
         """Checks if a dir exists and returns it if true."""
@@ -186,3 +198,126 @@ class Evaluator:
             return True
 
         return False
+
+    def _get_optimized_metric(self, optimized_metric_config: dict | None):
+        """Get one metric across all the checkpoints in a run to optimize for.
+
+        This is used for hyperparameter optimization.
+        The 'optimized_metric_config' dictionary contains the name of a callback in the
+        evaluator. This callback should have 'get_optimized_metric' method implemented.
+        This method returns what is considered the best metric, according to its own
+        definition, across all the checkpoints within a checkpointing criterion.
+        The optimized_metric_config should also contain all the hyperparameters required
+        by the 'get_optimized_metric' method.
+        Finally, it should contain a direction along which to pick from best checkpoints
+        given by different criteria.
+        """
+        if optimized_metric_config is None:
+            return
+
+        target_callback_params = optimized_metric_config["callback"]["params"]
+        crit_optim_direction = optimized_metric_config["direction"]
+        target_callback_name = optimized_metric_config["callback"]["name"]
+        cb = self._get_optimized_callback(target_callback_name)
+
+        ckpt_ds, main_metric_value = cb.get_optimized_metric(**target_callback_params)
+        optimized_metric = main_metric_value
+
+        if 'sec_metric' in optimized_metric_config.keys():
+            sec_metric_direction, sec_metric_value = self._get_secondary_metric(
+                optimized_metric_config['sec_metric'], ckpt_ds
+            )
+            optimized_metric = [main_metric_value, sec_metric_value]
+            crit_optim_direction = [crit_optim_direction, sec_metric_direction]
+
+        if isinstance(optimized_metric, float):
+            self._set_best_across_crit(optimized_metric, direction=crit_optim_direction)
+        else:
+            self._comp_best_across_crit(optimized_metric, directions=crit_optim_direction)
+
+    def _get_optimized_callback(self, target_callback_name: str):
+        """Get callback that returns optimized metric."""
+        available_callbacks = {
+            cb.__class__.__name__: cb for cb in self.evaluator.callbacks
+        }
+        try:
+            cb = available_callbacks[target_callback_name]
+        except KeyError:
+            raise ValueError(f"Callback {target_callback_name} not available.")
+
+        return cb
+
+    def _get_secondary_metric(self, secondary_metric_config: dict, ckpt_ds: str):
+        """Get the secondary metric value.
+
+        Evaluate this metric at the checkpoint that the main metric was evaluated,
+        specified by ckpt_ds.
+        """
+        target_callback_params = secondary_metric_config["callback"]["params"]
+        crit_optim_direction = secondary_metric_config["direction"]
+        target_callback_name = secondary_metric_config["callback"]["name"]
+        cb = self._get_optimized_callback(target_callback_name)
+
+        target_callback_params['ckpt_ds'] = ckpt_ds
+        _, metric_value = cb.get_optimized_metric(**target_callback_params)
+        return crit_optim_direction, metric_value
+
+    def _set_best_across_crit(self, value: float, *, direction: str):
+        """Set the best optimized metric values across all ckpt criteria."""
+        if self.optimized_metric is None:
+            self.optimized_metric = value
+            return
+
+        if direction == "maximize":
+            if value > self.optimized_metric:
+                self.optimized_metric = value
+            return
+
+        if direction == "minimize":
+            if value < self.optimized_metric:
+                self.optimized_metric = value
+            return
+
+        raise ValueError("Optimized metric direction must be 'maximize' or 'minimize'.")
+
+    def _comp_best_across_crit(self, values: list[float], *, directions: list[str]):
+        """Set the best composite metric across ckpt criteria.
+
+        This is computing the relative change for the main metric and secondary metric.
+        This is computed differently depending on the direction that the particular
+        metric should be optimised in.
+        If the sum of the relative changes is positive, i.e., a metric's improvement
+        is larger than the other metric's worsening, then save this as the new best
+        across checkpointing criteria.
+        """
+        if self.optimized_metric is None:
+            self.optimized_metric = values
+            return
+
+        relative_changes = []
+        for metric_idx, metric_value in enumerate(values):
+            direction = directions[metric_idx]
+            if direction == 'maximize':
+                relative_change = metric_value - self.optimized_metric[metric_idx]
+            elif direction == 'minimize':
+                relative_change = self.optimized_metric[metric_idx] - metric_value
+
+            relative_change = relative_change / metric_value
+            relative_changes.append(relative_change)
+
+        if sum(relative_changes) > 0:
+            self.optimized_metric = values
+
+    def _make_criterion_summary_plots(self, plot_folder: Path):
+        """Make summary plots for each callback.
+
+        Check if any of the callbacks have 'plot_summary' method and if they do
+        call it and store result in given folder.
+        """
+        # Make summary plots for callback across evaluated checkpoints.
+        for cb in self.evaluator.callbacks:
+            method_name = "plot_summary"
+            summary_method = getattr(cb, method_name, None)
+            if callable(summary_method):
+                summary_method(self.evaluator, plot_folder)
+                cb.clear_crit_summary()

@@ -25,7 +25,7 @@ class WNAE(L1ADLightningModule):
         computing the reconstruction error. Defaults to the identity function.
     :param spherical: Whether to project latent representations to the unit hypersphere.
     :param clip: Optional boundaries for clipping or rejection.
-    :param sampling: Sampling strategy for generating negative samples. One of: 
+    :param sampling: Sampling strategy for generating negative samples. One of:
         "cd" (Contrastive Divergence), "pcd" (Persistent Contrastive Divergence)
         or "omi" (Out-of-Model Initialization).
         See :class:`src.utils.mcmc.SampleBuffer` for details. Default is "pcd".
@@ -35,14 +35,13 @@ class WNAE(L1ADLightningModule):
     :param replay_ratio: Fraction of initial points sampled from the replay buffer.
     :param buffer_size: Maximum size of the replay buffer.
     """
-        
+
     def __init__(
         self,
         encoder: nn.Module,
         decoder: nn.Module,
         sampler: nn.Module,
         features: Optional[nn.Module] = None,
-
         spherical: Optional[bool] = False,
         clip: Optional[Tuple[float, float]] = (0.0, 1.0),
         sampling: Optional[str] = "pcd",
@@ -54,7 +53,7 @@ class WNAE(L1ADLightningModule):
     ):
         super().__init__(model=None, **kwargs)
         self.save_hyperparameters(
-            ignore=["model", "features", "encoder", "decoder", "sampler","loss"]
+            ignore=["model", "features", "encoder", "decoder", "sampler", "loss"]
         )
 
         self.encoder, self.decoder = encoder, decoder
@@ -84,7 +83,7 @@ class WNAE(L1ADLightningModule):
 
         reconstruction = self.decoder(z)
         return z, reconstruction
-    
+
     def energy(self, x: torch.Tensor) -> torch.Tensor:
         """Compute reconstruction error (energy) for input samples."""
         z, reconstruction = self.forward(x)
@@ -112,20 +111,16 @@ class WNAE(L1ADLightningModule):
             x_neg = self.sample_negative(x_pos)
             z_neg, reconstruction_neg = self.forward(x_neg)
             energy_neg = self.loss.losses.reconstruction(
-                target=x_neg,
-                reconstruction=reconstruction_neg,
-                z=z_neg
+                target=x_neg, reconstruction=reconstruction_neg, z=z_neg
             )
         else:
             x_neg, energy_neg = x_pos, energy_pos
-
 
         # Normal reconstruction loss
         loss_reco = energy_pos.mean()
         # Wasserstein distance between positive and negative samples:
         loss_wasserstein = self.loss.losses.wasserstein(
-            target=x_pos.detach(),
-            negative_samples=x_neg.detach()
+            target=x_pos.detach(), negative_samples=x_neg.detach()
         )
         # Mean energy difference:
         loss_nae = self.loss.losses.nae(
@@ -144,11 +139,7 @@ class WNAE(L1ADLightningModule):
             # "energy_negative": energy_neg.detach(),
         }
 
-    def _initial_samples(
-            self,
-            n_samples: int,
-            shape: Tuple[int, ...]
-        ) -> torch.Tensor:
+    def _initial_samples(self, n_samples: int, shape: Tuple[int, ...]) -> torch.Tensor:
         """Generate initial points for the Langevin sampler."""
         samples = []
         n_replay = 0
@@ -163,15 +154,15 @@ class WNAE(L1ADLightningModule):
         if n_new > 0:
             if self.initial_dist == "gaussian":
                 x0_new = torch.randn((n_new,) + shape, dtype=torch.float)
-            else: # uniform
+            else:  # uniform
                 x0_new = torch.rand((n_new,) + shape, dtype=torch.float)
-            
+
             # Rescale to bounds if clipping is enabled
             if self.sampling != "omi" and self.clip is not None:
                 x0_new = x0_new * (self.clip[1] - self.clip[0]) + self.clip[0]
             samples.append(x0_new)
         return torch.cat(samples, dim=0)
-    
+
     def sample_negative(self, x: torch.Tensor) -> torch.Tensor:
         """Generate negative samples via Langevin MCMC."""
 

@@ -6,7 +6,7 @@ from pytorch_lightning.callbacks import Callback
 class RegularizationAnnealing(Callback):
     """
     General callback for annealing loss scales over training.
-    
+
     :param loss_name: Loss name to anneal the scale for.
     :param schedule: Annealing schedule type ('linear' or 'cyclic').
     :param start_value: Initial scale value.
@@ -15,6 +15,7 @@ class RegularizationAnnealing(Callback):
     :param end_epoch: Epoch to end annealing.
     :param cycle_length: Length of each cycle in epochs (if cyclic is True).
     """
+
     def __init__(
         self,
         loss_name: str,
@@ -39,7 +40,7 @@ class RegularizationAnnealing(Callback):
         """Cyclic annealing schedule."""
         cycle_pos = (epoch % self.cycle_length) / max(1, self.cycle_length)
         return self.start_value + (self.end_value - self.start_value) * cycle_pos
-    
+
     def _linear_annealing(self, epoch: int) -> float:
         """Linear annealing schedule."""
         if epoch < self.start_epoch:
@@ -47,7 +48,9 @@ class RegularizationAnnealing(Callback):
         elif epoch > self.end_epoch:
             return self.end_value
 
-        progress = (epoch - self.start_epoch) / max(1, self.end_epoch - self.start_epoch)
+        progress = (epoch - self.start_epoch) / max(
+            1, self.end_epoch - self.start_epoch
+        )
         return self.start_value + progress * (self.end_value - self.start_value)
 
     def anneal(self, epoch: int) -> float:
@@ -55,7 +58,7 @@ class RegularizationAnnealing(Callback):
         if self.schedule == "cyclic":
             return self._cyclic_annealing(epoch)
         return self._linear_annealing(epoch)
-    
+
     def _update_scale(self, pl_module, scale: float):
         """Update the scale of the targeted losses in the model."""
 
@@ -78,11 +81,11 @@ class RegularizationAnnealing(Callback):
 
     def on_train_epoch_start(self, trainer, pl_module):
         """Update loss scales at the beginning of each epoch."""
-        
+
         # Get the new annealed scale and update losses:
         scale = self.anneal(trainer.current_epoch)
         self._update_scale(pl_module, scale)
-        
+
         # Log the annealing coefficient
         pl_module.log_dict(
             {self.log_key: scale},
@@ -134,10 +137,9 @@ class InformationBottleneckAnnealing(RegularizationAnnealing):
         end_epoch: int = 50,
         alpha_max: float = 1.0,
         alpha_min: float = 0.0,
-        cycle_length: int = 100, 
+        cycle_length: int = 100,
         warmup_ratio: float = 0.2,
         strategy: str = "plain",
-
         # KL capacity schedule C_t (used by 'capacity' and 'pid')
         cap_gain: float = 0.02,
         cap_start_epoch: Optional[int] = None,
@@ -145,13 +147,11 @@ class InformationBottleneckAnnealing(RegularizationAnnealing):
         cap_start: float = 0.0,
         cap_max: float = 20.0,
         cap_cyclic: bool = False,
-
         # PID controller knobs (used by 'pid')
         pid_kp: float = 0.02,
         pid_ki: float = 0.0,
         pid_kd: float = 0.0,
         pid_integral_clip: float = 5.0,
-
         # Where to read the KL metric from callback_metrics
         kl_metric_key: str = "train/loss/kl",
     ):
@@ -172,7 +172,9 @@ class InformationBottleneckAnnealing(RegularizationAnnealing):
 
         # Capacity schedule
         self.cap_gain = cap_gain
-        self.cap_start_epoch = start_epoch if cap_start_epoch is None else cap_start_epoch
+        self.cap_start_epoch = (
+            start_epoch if cap_start_epoch is None else cap_start_epoch
+        )
         self.cap_end_epoch = end_epoch if cap_end_epoch is None else cap_end_epoch
         self.cap_start = cap_start
         self.cap_max = cap_max
@@ -186,13 +188,12 @@ class InformationBottleneckAnnealing(RegularizationAnnealing):
 
         # Metric
         self.kl_metric_key = kl_metric_key
-        
+
         # State updated across epochs
         self._last_alpha = 0.0
         self._last_kl = None
         self._pid_integral = 0.0
         self._pid_prev_error = None
-
 
     def on_train_epoch_end(self, trainer, pl_module):
         """Capture the latest KL metric for use in the next epoch's alpha."""
@@ -205,7 +206,9 @@ class InformationBottleneckAnnealing(RegularizationAnnealing):
             return self.cap_start
         if epoch >= self.cap_end_epoch:
             return self.cap_max
-        progress = (epoch - self.cap_start_epoch) / max(1, (self.cap_end_epoch - self.cap_start_epoch))
+        progress = (epoch - self.cap_start_epoch) / max(
+            1, (self.cap_end_epoch - self.cap_start_epoch)
+        )
         return self.cap_start + progress * (self.cap_max - self.cap_start)
 
     def _capacity_cyclic(self, epoch: int) -> float:
@@ -218,7 +221,11 @@ class InformationBottleneckAnnealing(RegularizationAnnealing):
         return self.cap_start + progress * (self.cap_max - self.cap_start)
 
     def _capacity(self, epoch: int, cyclic: bool) -> float:
-        return self._capacity_cyclic(epoch) if (cyclic and self.cap_cyclic) else self._capacity_linear(epoch)
+        return (
+            self._capacity_cyclic(epoch)
+            if (cyclic and self.cap_cyclic)
+            else self._capacity_linear(epoch)
+        )
 
     def _apply_pid(self, target: float, observed: Optional[float]) -> float:
         """
@@ -233,12 +240,20 @@ class InformationBottleneckAnnealing(RegularizationAnnealing):
 
         # Integral (clipped)
         self._pid_integral += error
-        self._pid_integral = max(-self.pid_integral_clip, min(self.pid_integral_clip, self._pid_integral))
+        self._pid_integral = max(
+            -self.pid_integral_clip, min(self.pid_integral_clip, self._pid_integral)
+        )
 
         # Derivative
-        derivative = 0.0 if self._pid_prev_error is None else (error - self._pid_prev_error)
+        derivative = (
+            0.0 if self._pid_prev_error is None else (error - self._pid_prev_error)
+        )
 
-        delta = self.pid_kp * error + self.pid_ki * self._pid_integral + self.pid_kd * derivative
+        delta = (
+            self.pid_kp * error
+            + self.pid_ki * self._pid_integral
+            + self.pid_kd * derivative
+        )
         self._pid_prev_error = error
 
         new_alpha = alpha + delta
@@ -250,7 +265,7 @@ class InformationBottleneckAnnealing(RegularizationAnnealing):
         - plain: 0 → alpha_max linearly from start_epoch to end_epoch
         - capacity: adjust alpha to drive KL towards C_t (monotonic capacity)
         - pid: PID controller on (KL - C_t) with monotonic capacity
-        """            
+        """
 
         if self.strategy == "capacity":
             # Compute a linear capacity target and do a simple proportional update of alpha
@@ -260,7 +275,9 @@ class InformationBottleneckAnnealing(RegularizationAnnealing):
             if self._last_kl is None:
                 alpha = super()._linear_annealing(epoch)
             else:
-                alpha = self._last_alpha + self.cap_gain * (float(self._last_kl) - float(C_t))
+                alpha = self._last_alpha + self.cap_gain * (
+                    float(self._last_kl) - float(C_t)
+                )
                 alpha = max(self.alpha_min, min(self.alpha_max, alpha))
 
         elif self.strategy == "pid":
@@ -291,14 +308,16 @@ class InformationBottleneckAnnealing(RegularizationAnnealing):
         - plain: per-cycle warmup (alpha=0) for warmup_ratio, then linear ramp to alpha_max
         - capacity: define a (possibly cyclic) capacity C_t; simple proportional update of alpha
         - pid: PID on (KL - C_t) with cyclic C_t
-        """ 
+        """
 
         if self.strategy == "capacity":
             C_t = self._capacity(epoch, cyclic=True)
             if self._last_kl is None:
                 alpha = self._plain_cyclic_annealing(epoch)
             else:
-                alpha = self._last_alpha + self.cap_gain * (float(self._last_kl) - float(C_t))
+                alpha = self._last_alpha + self.cap_gain * (
+                    float(self._last_kl) - float(C_t)
+                )
                 alpha = max(self.alpha_min, min(self.alpha_max, alpha))
 
         elif self.strategy == "pid":

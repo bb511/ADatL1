@@ -1,12 +1,22 @@
 # Get the encoder and decoder configuration from model/ config directory to assemble
 # the auto encoder model.
 defaults:
-  - /model/encoder@encoder
-  - /model/decoder@decoder
   - _self_
 
 _target_: src.algorithms.ae.AE
 features: null 
+
+encoder:
+  _target_: src.algorithms.components.encoder.Encoder
+  in_dim: 117
+  nodes: [28, 16]
+  out_dim: 8
+
+decoder:
+  _target_: src.algorithms.components.decoder.Decoder
+  in_dim: 8
+  nodes: [24, 32, 64, 128]
+  out_dim: 117
 
 loss:
   _target_: src.losses.ae.ClassicAELoss

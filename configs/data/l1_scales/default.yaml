@@ -1,0 +1,56 @@
+# @package data.l1_scales
+
+# L1 trigger scales of all the features.
+
+muons:
+  Et: 0.5
+  phi: 0.010908307824965
+  eta: 0.010875
+  phi_vtx: 0.010908307824965
+  eta_vtx: 0.010875
+  rawEt: 1
+  quality: 1
+  charge: 1
+  idx: 1
+jets:
+  Et: 0.5
+  eta: 0.5
+  phi: 0.043633231299858
+  quality: 1
+  rawEt: 1
+egammas:
+  Et: 0.5
+  eta: 0.5
+  phi: 0.043633231299858
+taus:
+  Et: 0.5
+  eta: 0.5
+  phi: 0.043633231299858
+ET:
+  Et: 0.5
+  ETTEM: 0.5
+HT:
+  Et: 0.5
+  tower_count: 1
+MET:
+  Et: 0.5
+  phi: 0.043633231299858
+MHT:
+  Et: 0.5
+  phi: 0.043633231299858
+FET:
+  Et: 0.5
+  phi: 0.043633231299858
+FHT:
+  Et: 0.5
+  phi: 0.043633231299858
+cicada:
+  CICADAScore: 1
+event_info:
+  run: 1
+  lumi: 1
+  event: 1
+  bx: 1
+  orbit: 1
+  time: 1
+  nPV_True: 1

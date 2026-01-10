@@ -68,7 +68,9 @@ def generate_html_header(title: str):
 def write_html_section(section: str, image_paths: list[Path, ...]):
     """Write section of html file, with corresponding image paths to go in it."""
     html_section = []
-    html_section.append(f"<details open><summary>{html.escape(section)} ({len(image_paths)})</summary>")
+    html_section.append(
+        f"<details open><summary>{html.escape(section)} ({len(image_paths)})</summary>"
+    )
     html_section.append("<div class='grid'>")
     for img_path in image_paths:
         caption = img_path.stem
@@ -88,12 +90,12 @@ def write_html_section(section: str, image_paths: list[Path, ...]):
 def data_uri(path: Path) -> str:
     """Get the mlflow compatible uri for given path."""
     mime = {
-        ".png":"image/png",
-        ".jpg":"image/jpeg",
-        ".jpeg":"image/jpeg",
-        ".gif":"image/gif",
-        ".webp":"image/webp",
-        ".svg":"image/svg+xml",
+        ".png": "image/png",
+        ".jpg": "image/jpeg",
+        ".jpeg": "image/jpeg",
+        ".gif": "image/gif",
+        ".webp": "image/webp",
+        ".svg": "image/svg+xml",
     }.get(path.suffix.lower(), "application/octet-stream")
 
     if path.suffix.lower() == ".svg":

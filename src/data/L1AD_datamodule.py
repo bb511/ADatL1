@@ -1,16 +1,16 @@
 from typing import Any, Optional, Union
 from collections import defaultdict
 from pathlib import Path
-
-# from retry import retry
+import gc
+import warnings
 
 import torch
 import numpy as np
 import awkward as ak
 
-import mlflow
 from pytorch_lightning import LightningDataModule
 from torch.utils.data import TensorDataset, Dataset
+from torch.utils.data import DataLoader
 
 from src.utils import pylogger
 from colorama import Fore, Back, Style
@@ -18,6 +18,17 @@ from src.data.components.dataset import L1ADDataset
 from src.data.components.normalization import L1DataNormalizer
 
 log = pylogger.RankedLogger(__name__)
+
+warnings.filterwarnings(
+    "ignore",
+    message=".*does not have many workers.*",
+    category=UserWarning,
+)
+warnings.filterwarnings(
+    "ignore",
+    message=r"Your `IterableDataset` has `__len__` defined\..*",
+    category=UserWarning,
+)
 
 
 class L1ADDataModule(LightningDataModule):
@@ -32,9 +43,10 @@ class L1ADDataModule(LightningDataModule):
         data_mlready: "L1DataMLReady",
         data_awkward2torch: "L1DataAwkward2Torch",
         train_features: dict,
+        l1_scales: dict,
         batch_size: int = 16384,
         val_batches: int = -1,
-        seed: int = 42
+        seed: int = 42,
     ) -> None:
         """Prepare the L1 data for using it to train and validate ML models.
 
@@ -51,6 +63,10 @@ class L1ADDataModule(LightningDataModule):
         :param data_mlready: Class formats the data to be ready for ML pipeline.
         :param data_awkward2np: Class that converts the data from jagged awkward arrays
             to fixed size numpy arrays to give to the torch dataloader.
+        :param train_features: Dictionary where keys are strings of the objects that
+            point to list of features to be used during
+        :param l1_scales: Dictionary of the scales that the l1 trigger applies to
+            all features that could be in the data set.
         :param batch_size: Integer specifying the batch size of the data.
         :param val_batches: Integer specifying how many batches to split each
             validation dataset into. Defaults to -1, which means to use the same batch
@@ -65,7 +81,10 @@ class L1ADDataModule(LightningDataModule):
         self.aux_val, self.aux_val_labels = None, None
         self.aux_test, self.aux_test_labels = None, None
 
-        self.shuffler = np.random.default_rng(seed=seed)
+        self.l1_scales = l1_scales
+        self.normalizer = None
+        self.shuffler = torch.Generator()
+        self.shuffler.manual_seed(seed)
 
     def prepare_data(self) -> None:
         """Get zero bias data and the simulated MC signal data."""
@@ -80,9 +99,8 @@ class L1ADDataModule(LightningDataModule):
         self.hparams.data_processor.process("signal")
 
         log.info(Back.GREEN + "Splitting data into train, val, test and normalizing...")
-        self.hparams.data_mlready.prepare(
-            self.hparams.data_normalizer, self.hparams.train_features
-        )
+        self.normalizer = self.hparams.data_normalizer
+        self.hparams.data_mlready.prepare(self.normalizer, self.hparams.train_features)
         self.main_cache_folder = self.hparams.data_mlready.cache_folder
 
     def setup(self, stage: str = None) -> None:
@@ -101,15 +119,15 @@ class L1ADDataModule(LightningDataModule):
         self.loader = self.hparams.data_awkward2torch
         data_dir = self.main_cache_folder
 
-        if stage == 'fit':
+        if stage == "fit":
             self._load_train_data(data_dir)
             self._load_valid_data(data_dir)
-        if stage == 'validate':
+        if stage == "validate":
             self._load_valid_data(data_dir)
-        if stage == 'test':
+        if stage == "test":
             self._load_test_data(data_dir)
 
-        if stage == 'predict':
+        if stage == "predict":
             raise ValueError("The predict dataloader is not implemented yet.")
 
         self._data_summary(stage)
@@ -118,7 +136,7 @@ class L1ADDataModule(LightningDataModule):
         """Set up the training data, if it is not already loaded."""
         if self.data_train is None:
             label = 0
-            self.data_train = self.loader.load_folder(data_dir / 'train')
+            self.data_train, self.mask_train = self.loader.load_folder(data_dir / "train")
             ntrain = self.data_train.size(dim=0)
             self.labels_train = torch.from_numpy(np.full(ntrain, label))
 
@@ -126,54 +144,58 @@ class L1ADDataModule(LightningDataModule):
         """Set up the validation data, if it is not already loaded."""
         if self.data_val is None:
             label = 0
-            self.data_val = self.loader.load_folder(data_dir / 'valid')
+            self.data_val, self.mask_val = self.loader.load_folder(data_dir / "valid")
             nvalid = self.data_val.size(dim=0)
             self.labels_val = torch.from_numpy(np.full(nvalid, label))
 
         if self.aux_val is None:
-            self.aux_val, self.aux_val_labels = self._load_aux_data('valid', data_dir)
+            self.aux_val, self.aux_val_mask, self.aux_val_labels =\
+                self._load_aux_data("valid", data_dir)
 
     def _load_test_data(self, data_dir: Path):
         """Set up the test data, if it is not already loaded."""
         if self.data_test is None:
             label = 0
-            self.data_test = self.loader.load_folder(data_dir / 'test')
+            self.data_test, self.mask_test = self.loader.load_folder(data_dir / "test")
             ntest = self.data_test.size(dim=0)
             self.labels_test = torch.from_numpy(np.full(ntest, label))
 
         if self.aux_test is None:
-            self.aux_test, self.aux_test_labels = self._load_aux_data('test', data_dir)
+            self.aux_test, self.aux_test_mask, self.aux_test_labels =\
+                self._load_aux_data("test", data_dir)
 
     def _load_aux_data(self, stage: str, data_dir: Path):
         """Load the auxiliary data, either for the test or validation stage."""
-        aux_folder = data_dir / 'aux'
+        aux_folder = data_dir / "aux"
         label_signal = 0
         label_background = 0
 
-        data, labels = {}, {}
+        data, mask, labels = {}, {}, {}
         for dataset_path in sorted(
-            p for p in aux_folder.iterdir()
+            p
+            for p in aux_folder.iterdir()
             if p.is_dir() and not p.name.startswith("._")
         ):
             name = dataset_path.stem
-            if 'SingleNeutrino' in name:
+            if "SingleNeutrino" in name:
                 label_background += -1
                 label = label_background
             else:
                 label_signal += 1
                 label = label_signal
-            data_tensor = self.loader.load_folder(dataset_path / stage)
+            data_tensor, mask_tensor = self.loader.load_folder(dataset_path / stage)
             label_tensor = torch.from_numpy(np.full(data_tensor.size(dim=0), label))
             data.update({name: data_tensor})
+            mask.update({name: mask_tensor})
             labels.update({name: label_tensor})
 
-        return data, labels
+        return data, mask, labels
 
     def _data_summary(self, stage: str):
         """Make a neat little summary of what data is being used."""
-        log.info(Fore.MAGENTA + '-'*5 + " Data Summary " + '-'*5)
+        log.info(Fore.MAGENTA + "-" * 5 + " Data Summary " + "-" * 5)
 
-        if stage == 'fit':
+        if stage == "fit":
             log.info(Fore.GREEN + f"Training data:")
             log.info(f"Zero bias: {self.data_train.shape}")
 
@@ -182,13 +204,13 @@ class L1ADDataModule(LightningDataModule):
             for data_name, data in self.aux_val.items():
                 log.info(f"{data_name}: {data.shape}")
 
-        if stage == 'validate':
+        if stage == "validate":
             log.info(Fore.GREEN + f"Validation data:")
             log.info(f"Zero bias: {self.data_val.shape}")
             for data_name, data in self.aux_val.items():
                 log.info(f"{data_name}: {data.shape}")
 
-        if stage == 'test':
+        if stage == "test":
             log.info(Fore.GREEN + f"Test data:")
             log.info(f"Zero bias: {self.data_test.shape}")
             for data_name, data in self.aux_test.items():
@@ -201,11 +223,20 @@ class L1ADDataModule(LightningDataModule):
         which basically makes the loading of numpy arrays that are already in memory
         a bit faster.
         """
-        return L1ADDataset(
-            self.data_train,
-            self.labels_train,
+        dataset = L1ADDataset(
+            self.data_train.float(),
+            self.mask_train,
+            self.labels_train.float(),
             batch_size=self.batch_size_per_device,
             shuffler=self.shuffler,
+        )
+
+        return DataLoader(
+            dataset,
+            batch_size=None,
+            shuffle=False,
+            num_workers=0,
+            persistent_workers=False,
         )
 
     def val_dataloader(self) -> Dataset[Any]:
@@ -219,17 +250,34 @@ class L1ADDataModule(LightningDataModule):
 
         # Make sure main_val is always first in the dict !!!
         # The rate callback expects this.
-        main_val = L1ADDataset(self.data_val, self.labels_val, batch_size=batch_size)
+        main_val = L1ADDataset(
+            self.data_val, self.mask_val, self.labels_val, batch_size=batch_size
+        )
+        main_val = DataLoader(
+            main_val,
+            batch_size=None,
+            shuffle=False,
+            num_workers=0,
+            persistent_workers=False,
+        )
         data_val.update({"main_val": main_val})
         if not self.aux_val:
             return data_val
 
         for dataset_name in self.aux_val.keys():
             batch_size = self._get_validation_batchsize(self.aux_val[dataset_name])
-            data_val[dataset_name] = L1ADDataset(
+            dataset = L1ADDataset(
                 self.aux_val[dataset_name],
+                self.aux_val_mask[dataset_name],
                 self.aux_val_labels[dataset_name],
-                batch_size=batch_size
+                batch_size=batch_size,
+            )
+            data_val[dataset_name] = DataLoader(
+                dataset,
+                batch_size=None,
+                shuffle=False,
+                num_workers=0,
+                persistent_workers=False,
             )
 
         return data_val
@@ -242,7 +290,16 @@ class L1ADDataModule(LightningDataModule):
         """
         # Shuffling is by default false for the custom dataset.
         batch_size = self._get_validation_batchsize(self.data_test)
-        main_test = L1ADDataset(self.data_test, self.labels_test, batch_size=batch_size)
+        main_test = L1ADDataset(
+            self.data_test, self.mask_test, self.labels_test, batch_size=batch_size
+        )
+        main_test = DataLoader(
+            main_test,
+            batch_size=None,
+            shuffle=False,
+            num_workers=0,
+            persistent_workers=False,
+        )
         data_test = {}
         data_test.update({"main_test": main_test})
         if not self.aux_test:
@@ -250,15 +307,30 @@ class L1ADDataModule(LightningDataModule):
 
         for dataset_name in self.aux_test.keys():
             batch_size = self._get_validation_batchsize(self.aux_test[dataset_name])
-            data_test[dataset_name] = L1ADDataset(
+            dataset = L1ADDataset(
                 self.aux_test[dataset_name],
+                self.aux_test_mask[dataset_name],
                 self.aux_test_labels[dataset_name],
-                batch_size=batch_size
+                batch_size=batch_size,
+            )
+            data_test[dataset_name] = DataLoader(
+                dataset,
+                batch_size=None,
+                shuffle=False,
+                num_workers=0,
+                persistent_workers=False,
             )
 
         return data_test
 
-    # @retry((Exception), tries=3, delay=3, backoff=0)
+    def teardown(self, stage: str | None = None) -> None:
+        # Drop references to large tensors/dicts so they become collectible
+        gc.collect()
+
+        # If CUDA is ever used in other experiments, this helps allocator reuse
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
+
     def transfer_batch_to_device(self, batch, device, dataloader_idx):
         """Transfer custom dataset to gpu faster.
 
@@ -267,17 +339,26 @@ class L1ADDataModule(LightningDataModule):
         again after 1 second of delay. Attempt to do this 3 times before throwing
         an error and stopping the process.
         """
-        data, labels = batch
+        data, mask, labels = batch
+        data = data.contiguous()
+        mask = mask.contiguous()
+        labels = labels.contiguous()
         if "cuda" in str(device):
-            return data.to(device, non_blocking=True), labels
+            data = data.pin_memory()
+            data = data.to(device, non_blocking=True)
+            mask = mask.pin_memory()
+            mask = mask.to(device, non_blocking=True)
+            labels = labels.pin_memory()
+            labels = labels.to(device, non_blocking=True)
+            return data, mask, labels
 
-        return data.to(device), labels
+        return data.to(device), mask.to(device), labels.to(device)
 
     def _get_validation_batchsize(self, data: np.ndarray):
         if self.hparams.val_batches == -1:
             return self.batch_size_per_device
 
-        return int(len(data) / self.hparams.val_batches)
+        return int(data.shape[0] / self.hparams.val_batches)
 
     def _set_batch_size(self):
         """Set the batch size per device if multiple devices are available."""
@@ -311,32 +392,35 @@ class L1ADDataModule(LightningDataModule):
         val_data = {}
         test_data = {}
 
+        data, mask = self.loader.load_folder(data_dir / "train" / flag)
         train_data = L1ADDataset(
-            self.loader.load_folder(data_dir / 'train' / flag),
+            data,
+            mask,
             self.labels_train,
             batch_size=self.batch_size_per_device,
         )
-        data = self.loader.load_folder(data_dir / 'valid' / flag)
+        data, mask = self.loader.load_folder(data_dir / "valid" / flag)
         bs = self._get_validation_batchsize(data)
-        val_data.update({'main_val': L1ADDataset(data, self.labels_val, bs)})
+        val_data.update({"main_val": L1ADDataset(data, mask, self.labels_val, bs)})
 
-        data = self.loader.load_folder(data_dir / 'test' / flag)
+        data, mask = self.loader.load_folder(data_dir / "test" / flag)
         bs = self._get_validation_batchsize(data)
-        test_data.update({'main_test': L1ADDataset(data, self.labels_test, bs)})
+        test_data.update({"main_test": L1ADDataset(data, mask, self.labels_test, bs)})
 
-        aux_folder = data_dir / 'aux'
+        aux_folder = data_dir / "aux"
         for dataset_path in sorted(
-            p for p in aux_folder.iterdir()
+            p
+            for p in aux_folder.iterdir()
             if p.is_dir() and not p.name.startswith("._")
         ):
             name = dataset_path.stem
-            val = self.loader.load_folder(dataset_path / 'valid' / flag)
+            val, val_mask = self.loader.load_folder(dataset_path / "valid" / flag)
             bs = self._get_validation_batchsize(val)
-            val = L1ADDataset(val, self.aux_val_labels[name], bs)
+            val = L1ADDataset(val, val_mask, self.aux_val_labels[name], bs)
 
-            test = self.loader.load_folder(dataset_path / 'test' / flag)
+            test, test_mask = self.loader.load_folder(dataset_path / "test" / flag)
             bs = self._get_validation_batchsize(test)
-            test = L1ADDataset(test, self.aux_val_labels[name], bs)
+            test = L1ADDataset(test, test_mask, self.aux_val_labels[name], bs)
 
             val_data.update({name: val})
             test_data.update({name: test})

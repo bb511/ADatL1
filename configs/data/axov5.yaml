@@ -1,12 +1,15 @@
 # @package data
 
+# Data used for training axov5. Same as v4.
+
 defaults:
   - /paths: data_2024E
-  - data_extractor: axov4
+  - data_extractor: minimal
   - data_processor: default
   - data_normalizer: axov4
-  - data_mlready: axov4
-  - data_awkward2torch: axov4
+  - data_mlready: default
+  - data_awkward2torch: minimal
+  - l1_scales: default
   - _self_
 
 _target_: src.data.L1AD_datamodule.L1ADDataModule
@@ -16,6 +19,8 @@ zerobias: ${paths.zerobias}
 signal: ${paths.signal}
 background: ${paths.background}
 
+# Get features to train on.
+# Select the kinematic features of each standard object.
 train_features:
   muons: ['Et', 'eta', 'phi']
   jets: ['Et', 'eta', 'phi']
@@ -26,7 +31,7 @@ train_features:
 batch_size: 16384
 
 # How many batches to split the validation data into. -1 means use batch_size
-val_batches: 1
+val_batches: -1
 
 # Seed for shuffling the data, if any shuffling is happening.
 seed: ${seed}

@@ -4,7 +4,7 @@ from collections import defaultdict
 import torch
 from pytorch_lightning.callbacks import Callback
 
-from src.callbacks.metrics.rate import AnomalyCounter
+from src.callbacks.metrics.rate import AnomalyRate
 
 
 class AnomalyRateCallback(Callback):
@@ -19,25 +19,26 @@ class AnomalyRateCallback(Callback):
         rate on.
     """
 
-    def __init__(self, target_rates: list[int], bc_rate: int, metric_names: list[str]):
+    def __init__(self, target_rates: list[int], bc_rate: int, metric_name: str):
         super().__init__()
         self.device = None
         self.target_rates = target_rates
         self.bc_rate = bc_rate
-        self.metric_names = metric_names
+        self.metric_name = metric_name
 
     def on_validation_start(self, trainer, pl_module):
         """Do checks required for this callback to work."""
 
         # Check if 'main_val' dataset is the first dataset in the validation dictionary.
         # This is required to compute the rate thresholds on the anomaly scores.
+        self.device = pl_module.device
         first_val_dset_key = list(trainer.val_dataloaders.keys())[0]
         if first_val_dset_key != "main_val":
             raise ValueError("Rate callback requires main_val first in the val dict!")
 
     def on_validation_epoch_start(self, trainer, pl_module):
         """Clear the metrics dictionary at the start of the epoch."""
-        self.mainval_score_data = defaultdict(list)
+        self.mainval_score_data = []
         self.rates = {}
 
     def on_validation_batch_end(
@@ -55,47 +56,44 @@ class AnomalyRateCallback(Callback):
         self.dataset_name = list(trainer.val_dataloaders.keys())[dataloader_idx]
         self.total_batches = trainer.num_val_batches[dataloader_idx]
 
-        for metric_name in self.metric_names:
-            if self.dataset_name == "main_val":
-                self._accumulate_mainval_output(outputs, batch_idx, metric_name)
-            else:
-                if batch_idx == 0:
-                    self._initialize_rate_metric(metric_name)
-                self._compute_batch_rate(outputs, metric_name)
+        if self.dataset_name == "main_val":
+            self._accumulate_mainval_output(outputs, batch_idx)
+        else:
+            if batch_idx == 0:
+                self._initialize_rate_metric()
+            self._compute_batch_rate(outputs)
 
-
-    def _accumulate_mainval_output(self, outputs: dict, batch_idx: int, mname: str):
+    def _accumulate_mainval_output(self, outputs: dict, batch_idx: int):
         """Accummulates the specified metric data across batches.
 
         Used if currently processing the main_val data set, accummulate the values of
         each metric across batches. The whole metric output distribution is needed to
         set a treshold that gives a certain rate.
         """
-        batch_output = outputs[mname].detach().to("cpu")
+        batch_output = outputs[self.metric_name]
         if batch_output.ndim == 0:
             batch_output = batch_output.unsqueeze(0)
-        self.mainval_score_data[mname].append(batch_output)
+        self.mainval_score_data.append(batch_output)
 
         if batch_idx == self.total_batches - 1:
-            self.mainval_score_data[mname] = torch.cat(
-                self.mainval_score_data[mname], dim=0
-            )
-            self._compute_mainval_rate(mname)
+            self.mainval_score_data = torch.cat(self.mainval_score_data, dim=0)
+            self._compute_mainval_rate()
 
-    def _compute_mainval_rate(self, mname: str):
+    def _compute_mainval_rate(self):
         """Computes the desired rates on the main validation data set.
 
         This is a sanity check. The threshold computed on the mainval and applied to the
         mainval data should return the rate for which this threshold was computed.
         """
         for target_rate in self.target_rates:
-            rate = AnomalyCounter(target_rate, self.bc_rate).to(self.device)
-            rate.set_threshold(self.mainval_score_data[mname])
-            rate.update(self.mainval_score_data[mname])
-            rate_name = f"{mname.replace('/', '_')}_rate{target_rate}"
-            self.rates.update({f"{self.dataset_name}/{rate_name}": rate})
+            rate = AnomalyRate(target_rate, self.bc_rate).to(self.device)
+            rate.set_threshold(self.mainval_score_data)
+            rate.update(self.mainval_score_data)
+            metric_name = self.metric_name.replace('/', '_')
+            rate_name = f"{self.dataset_name}/{metric_name}_rate{target_rate}kHz"
+            self.rates.update({rate_name: rate})
 
-    def _initialize_rate_metric(self, mname: str):
+    def _initialize_rate_metric(self):
         """Initializes the rate metric for a dataset for each given target rate.
 
         The anomaly rate metric object is initialised. Then, the threshold is computed
@@ -103,29 +101,28 @@ class AnomalyRateCallback(Callback):
         the rate on the other data sets differing from main_val.
         """
         for target_rate in self.target_rates:
-            rate = AnomalyCounter(target_rate, self.bc_rate).to(self.device)
-            rate.set_threshold(self.mainval_score_data[mname])
+            rate = AnomalyRate(target_rate, self.bc_rate).to(self.device)
+            rate.set_threshold(self.mainval_score_data)
+            metric_name = self.metric_name.replace('/', '_')
+            rate_name = f"{self.dataset_name}/{metric_name}_rate{target_rate}kHz"
+            self.rates.update({rate_name: rate})
 
-            rate_name = f"{mname.replace('/', '_')}_rate{target_rate}"
-            self.rates.update({f"{self.dataset_name}/{rate_name}": rate})
-
-    def _compute_batch_rate(self, outputs: dict, mname: str):
+    def _compute_batch_rate(self, outputs: dict):
         """Done after knowing the rate thresholds.
 
         For all the other validation data sets, except the main one, this calculates
         which events pass the rate threshold for each batch and updates the total.
         """
         for target_rate in self.target_rates:
-            rate_name = f"{mname.replace('/', '_')}_rate{target_rate}"
-            self.rates[f"{self.dataset_name}/{rate_name}"].update(
-                outputs[mname].detach().cpu()
-            )
+            metric_name = self.metric_name.replace('/', '_')
+            rate_name = f"{self.dataset_name}/{metric_name}_rate{target_rate}kHz"
+            self.rates[rate_name].update(outputs[self.metric_name])
 
     def on_validation_epoch_end(self, trainer, pl_module) -> None:
         """Log the anomaly rates computed on each of the data sets."""
         for rate_name, rate in self.rates.items():
             pl_module.log_dict(
-                {f"val/{rate_name}": rate.compute('rate')},
+                {f"val/{rate_name}": rate.compute("rate")},
                 prog_bar=False,
                 on_step=False,
                 on_epoch=True,

@@ -1,5 +1,8 @@
 from omegaconf import OmegaConf
 import torch
+import re
+
+import hashlib
 
 
 def register_resolvers():
@@ -21,6 +24,8 @@ def register_resolvers():
     )  # extract class name from DictConfig path
     OmegaConf.register_new_resolver("lower", lambda x: x.lower())
     OmegaConf.register_new_resolver("prod", lambda x, y: x * y)
+    OmegaConf.register_new_resolver("div", lambda x, y: float(x) / float(y))
+    OmegaConf.register_new_resolver("sqrt", lambda x: float(x) ** 0.5)
     OmegaConf.register_new_resolver("intdiv", lambda x, y: x // y)
     OmegaConf.register_new_resolver("substract", lambda x, y: x - y)
     OmegaConf.register_new_resolver("arange_list", lambda lst: list(range(len(lst))))
@@ -47,8 +52,13 @@ def register_resolvers():
     )
     OmegaConf.register_new_resolver(
         "scan_dirname",
-        lambda scan_dictionary: "scan_" + "_".join(
-            f"{skey}={svalue}"
-            for skey, svalue in sorted(scan_dictionary.items())
-        )
+        lambda scan_dictionary: "scan_"
+        + "_".join(
+            f"{skey}={svalue}" for skey, svalue in sorted(scan_dictionary.items())
+        ),
     )
+    OmegaConf.register_new_resolver("short_hash", short_hash, replace=True)
+
+
+def short_hash(value: str, length: int = 12) -> str:
+    return hashlib.sha1(value.encode("utf-8")).hexdigest()[:length]

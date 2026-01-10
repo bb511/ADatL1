@@ -1,0 +1,36 @@
+# Template quantised VAE configuration.
+defaults:
+  - _self_
+
+_target_: src.algorithms.vae.VAE
+features: null
+
+mask: true
+
+encoder:
+  _target_: src.algorithms.components.encoder.hgq_variational_encoder
+  in_dim: 117
+  nodes: [64, 64]
+  out_dim: 48
+
+decoder:
+  _target_: src.algorithms.components.decoder.hgq_decoder
+  in_dim: ${algorithm.encoder.out_dim}
+  nodes: [64, 64]
+  out_dim: 117
+
+loss:
+  _target_: src.losses.vae.ClassicVAELoss
+  scale: 1
+  kl_scale: 0.001
+
+# Annealing of the KL scale scalar.
+kl_warmup_frac: 0.2
+
+optimizer:
+  _partial_: true
+  _target_: torch.optim.AdamW
+  lr: 0.001
+  weight_decay: 0.0
+  betas: [0.9, 0.999]
+  eps: 1e-8

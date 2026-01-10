@@ -27,6 +27,7 @@ class CDRW(_LRScheduler):
             warmup_epochs (int, optional): Number of warmup epochs. Defaults to 10.
             last_epoch (int, optional): The index of last epoch. Defaults to -1.
         """
+        self.base_lr0 = lr0
         self.lr0 = lr0
         self.s0 = s0
         self.t_mul = t_mul
@@ -37,30 +38,37 @@ class CDRW(_LRScheduler):
         super().__init__(optimizer, last_epoch)
 
     def get_lr(self):
-        # Compute warmup ratio
-        warmup_ratio = min((self.last_epoch + 1) / self.warmup_epochs, 1.0)
+        # step index (PyTorch uses last_epoch as the "step count" for most schedulers)
+        step = max(self.last_epoch, 0)
 
-        # Compute cosine decay with restarts
-        def cos_decay(step, initial_lr, decay_steps, t_mul, m_mul, alpha):
-            step = min(step, decay_steps)
-            cosine_decay = 0.5 * (1 + math.cos(math.pi * step / decay_steps))
-            decayed_lr = (initial_lr - alpha) * cosine_decay + alpha
-            return decayed_lr
-
-        # Calculate learning rate
-        current_step = self.last_epoch
+        # --- Find current cycle (cycle_idx), cycle length (decay_steps), and position in cycle (t) ---
         decay_steps = self.s0
-        t = current_step
+        t = step
+        cycle_idx = 0
 
-        # Implement cosine decay with restarts logic
+        # Walk forward through cycles until we find the active one
         while t >= decay_steps:
             t -= decay_steps
-            decay_steps *= self.t_mul
-            self.lr0 *= self.m_mul
+            decay_steps = int(round(decay_steps * self.t_mul))
+            decay_steps = max(decay_steps, 1)
+            cycle_idx += 1
 
-        lr = cos_decay(t, self.lr0, decay_steps, self.t_mul, self.m_mul, self.alpha)
+        # --- Peak LR for this cycle (gamma-style decay of max LR) ---
+        lr_max = self.base_lr0 * (self.m_mul ** cycle_idx)
 
-        # Apply warmup
-        lr *= warmup_ratio
+        # --- Cosine decay within the cycle: lr_max -> alpha ---
+        # Clamp t so we never exceed decay_steps
+        t = min(t, decay_steps)
+        cosine = 0.5 * (1.0 + math.cos(math.pi * t / decay_steps))
+        lr = (lr_max - self.alpha) * cosine + self.alpha
+
+        # --- Warmup ---
+        # Option A: global warmup
+        warm = min((step + 1) / self.warmup_epochs, 1.0) if self.warmup_epochs > 0 else 1.0
+
+        # Option B: per-cycle warmup (common for warm restarts)
+        # warm = min((t + 1) / self.warmup_epochs, 1.0) if self.warmup_epochs > 0 else 1.0
+
+        lr *= warm
 
         return [lr for _ in self.base_lrs]

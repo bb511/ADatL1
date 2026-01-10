@@ -1,0 +1,8 @@
+# @package callbacks.metrics
+
+# The metric names need be specified like they are given by the model.
+_target_: src.callbacks.knn_auprc.KNNAUPRC
+output_name: "vicreg_rep_data"
+k: 10
+skip_ds: []
+reference_sample_size: 10_000

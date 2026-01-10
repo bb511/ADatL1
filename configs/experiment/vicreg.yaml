@@ -1,36 +1,72 @@
 # @package _global_
 
 defaults:
-  - override /data: axov4
+  - override /data: axov6
   - override /algorithm: vicreg
   - override /callbacks: default
-  - override /trainer: gpu0
-  - override /logger: mlflow
+  - override /trainer: cpu
   - override /evaluator: default
   - override /evaluator_callbacks: default
+  - override /logger: mlflow
 
-seed: 123
-tags: ["axo_v6", "vae"]
+tags: ["axov6", "vicreg"]
 
-experiment_name: vicreg
-run_name: test
 
-metrics:
-  anomaly_rate: null
-  anomaly_efficiency: null
+experiment_name: vicreg_training
+run_name: ${short_hash:${hydra:runtime.output_dir},12}
+
+seed: 12345
+
+algorithm:
+  # Fix architecture to axov5.
+  diagnosis_metrics: false
+
+trainer:
+  gradient_clip_algorithm: norm
+  gradient_clip_val: 1.0
+  min_epochs: 1
+  max_epochs: 50
+  limit_val_batches: 10
+  limit_test_batches: 10
+
+test: true
 
 callbacks:
-  anomaly_rate: null
-  last_epoch: null
+  log_data_mlflow: null
+  # Additional checkpoints for the final run (expensive).
+  # knn_auprc:
+  #   _target_: src.callbacks.knn_auprc.KNNAUPRC
+  #   output_name: 'vicreg_rep_data'
+  #   reference_sample_size: 20_000
+  #   k: 10
+
+  # max_knn_auprc_ckpt:
+  #   _target_: src.callbacks.model_checkpoint.SingleDatasetModelCheckpoint
+  #   dirpath: '${paths.checkpoints_dir}/${experiment_name}/${run_name}'
+  #   monitor: knn_auprc
+  #   criterion:
+  #     _target_: src.callbacks.checkpointing.criterion.Max
+  #     top_k: 1
+  #   skip_ds:
+  #     - main_val
+  #     - SingleNeutrino_E-10-gun
 
 evaluator:
-
   ckpts:
-    single:
-      loss: ['min']
-
+    last: true
+    single: null
+      # knn_auprc: ['max']
 
 evaluator_callbacks:
-  anomaly_efficiency: null
-  test_loss:
-    _target_: src.evaluation.callbacks.loss.TestLossCallback
+  loss:
+    _target_: src.evaluation.callbacks.loss.LossCallback
+    loss_name: 'loss'
+    log_raw_mlflow: false
+
+  knn_auprc:
+    _target_: src.evaluation.callbacks.knn_auprc.KNNAUPRC
+    output_name: 'vicreg_rep_data'
+    reference_sample_size: 20_000
+    skip_ds: ['SingleNeutrino_E-10-gun']
+    k: 10
+    log_raw_mlflow: false

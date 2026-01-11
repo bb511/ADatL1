@@ -34,7 +34,7 @@ hydra:
     storage: sqlite:///optuna_logs/optim_inputsv4.db
 
     # name of the study to persist optimization results
-    study_name: vicreg_archnew_b16k
+    study_name: archold_b16k_search
 
     # number of parallel workers
     n_jobs: 1

@@ -116,22 +116,16 @@ def hgq_mlp(
     x = inputs
 
     with (
-        QuantizerConfigScope(place={"weight", "bias"}),   # optionally add "table"
+        QuantizerConfigScope(place={"weight", "bias"}),
         LayerConfigScope(enable_ebops=False),
     ):
         for i, hidden_dim in enumerate(nodes):
-            # x = QDense(
-            #     hidden_dim,
-            #     name=f"qdense_{i}",
-            #     kernel_initializer=kernel_initializer,
-            #     bias_initializer=bias_initializer,
-            #     enable_iq=False
-            # )(x)
-            x = layers.Dense(
+            x = QDense(
                 hidden_dim,
                 name=f"qdense_{i}",
                 kernel_initializer=kernel_initializer,
                 bias_initializer=bias_initializer,
+                enable_iq=False
             )(x)
 
             if batchnorm:
@@ -141,8 +135,7 @@ def hgq_mlp(
 
             x = layers.ReLU(name=f"relu_{i}")(x)
 
-        # outputs = QDense(out_dim, name="qdense_out", enable_iq=False)(x)
-        outputs = layers.Dense(out_dim, name="qdense_out")(x)
+        outputs = QDense(out_dim, name="qdense_out", enable_iq=False)(x)
         if final_activation:
             outputs = layers.ReLU(name=f"relu_final")(outputs)
 

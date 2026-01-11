@@ -2,7 +2,7 @@
 
 defaults:
   - override /data: axov6
-  - override /algorithm: vicreg
+  - override /algorithm: qvicreg
   - override /callbacks: default
   - override /trainer: cpu
   - override /evaluator: default
@@ -18,14 +18,15 @@ run_name: ${short_hash:${hydra:runtime.output_dir},12}
 seed: 12345
 
 algorithm:
-  # Fix architecture to axov5.
+  # Start from set of weights.
+  ckpt: "/data/deodagiu/adl1t/checkpoints/vicreg_b16k_archold_inputsv4_hpserach/592e4f96a410/last.ckpt"
   diagnosis_metrics: false
 
 trainer:
   gradient_clip_algorithm: norm
   gradient_clip_val: 1.0
   min_epochs: 1
-  max_epochs: 50
+  max_epochs: 10
   limit_val_batches: 10
   limit_test_batches: 10
 

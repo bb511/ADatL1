@@ -5,6 +5,8 @@ _target_: src.algorithms.vicreg.VICReg
 seed: ${seed}
 diagnosis_metrics: false
 
+ckpt: ''
+
 feature_blur:
   _target_: src.algorithms.components.augmentation.FastFeatureBlur
   prob: 0.40
@@ -21,17 +23,17 @@ lorentz_rotation:
   prob: 0.3
 
 model:
-  _target_: src.algorithms.components.mlp.MLP
+  _target_: src.algorithms.components.mlp.hgq_mlp
   in_dim: 57
-  nodes: [64]
-  out_dim: 16
+  nodes: [29]
+  out_dim: 10
   batchnorm: false
 
 projector:
   _target_: src.algorithms.components.mlp.MLP
   in_dim: ${algorithm.model.out_dim}
-  nodes: [128, 128]
-  out_dim: 64
+  nodes: [64, 64]
+  out_dim: 32
   batchnorm: true
 
 loss:

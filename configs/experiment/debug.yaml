@@ -5,7 +5,7 @@
 
 defaults:
   - override /data: axov6
-  - override /algorithm: vicreg
+  - override /algorithm: qvicreg
   - override /callbacks: default
   - override /trainer: cpu
   - override /evaluator: default
@@ -29,7 +29,7 @@ trainer:
   gradient_clip_val: 1.0
   # overfit_batches: 1
   min_epochs: 1
-  max_epochs: 1
+  max_epochs: 10
   # max_steps: 1_000
   # limit_train_batches: 10
   limit_val_batches: 10

@@ -75,8 +75,9 @@ def hgq_variational_encoder(
     in_dim: int,
     nodes: list[int],
     out_dim: int,
-    kernel_initializer=None,
-    bias_initializer=None,
+    input_layer_config: dict = None,
+    output_layer_config: dict = None,
+    ebops: bool = False,
     name: str = 'hgq_var_encoder'
 ):
     """Variational Encoder in HGQv2
@@ -89,31 +90,21 @@ def hgq_variational_encoder(
     """
 
     x_in = keras.Input(shape=(in_dim,), name="x")
-    with (QuantizerConfigScope(place="all"), LayerConfigScope(enable_ebops=False)):
-        mlp_model = hgq_mlp(
-            in_dim=in_dim,
-            nodes=nodes[:-1],
-            out_dim=nodes[-1],
-            final_activation=True,
-            kernel_initializer=kernel_initializer,
-            bias_initializer=bias_initializer,
-            name="enc_mlp",
-        )
-        h = mlp_model(x_in)
+    qmlp_model = hgq_mlp(
+        in_dim=in_dim,
+        nodes=nodes[:-1],
+        out_dim=nodes[-1],
+        input_layer_config=input_layer_config,
+        ebops=ebops,
+        final_activation=True,
+        name="enc_mlp",
+    )
+    h = qmlp_model(x_in)
 
-        z_mean = layers.Dense(
-            out_dim,
-            name="z_mean",
-            kernel_initializer=kernel_initializer,
-            bias_initializer=bias_initializer,
-        )(h)
-
-        z_log_var = layers.Dense(
-            out_dim,
-            name="z_log_var",
-            kernel_initializer=kernel_initializer,
-            bias_initializer=bias_initializer,
-        )(h)
+    with LayerConfigScope(enable_ebops=ebops):
+        with QuantizerConfigScope(**output_layer_config):
+            z_mean = QDense(out_dim, name="z_mean")(h)
+            z_log_var = QDense(out_dim, name="z_log_var")(h)
 
     z_mean, z_log_var, z = Sampling(name="sampling")([z_mean, z_log_var])
 

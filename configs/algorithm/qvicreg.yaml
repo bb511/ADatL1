@@ -27,7 +27,32 @@ model:
   in_dim: 57
   nodes: [29]
   out_dim: 10
-  batchnorm: false
+  input_layer_config:
+    place: "datalane"
+    q_type: "kif"
+    i0: 5
+    f0: 3
+    trainable: false
+    ic:
+      _target_: hgq.constraints.Constant
+      value: 5
+    fc:
+      _target_: hgq.constraints.Constant
+      value: 3
+  output_layer_config:
+    place: 'all'
+    q_type: "kif"
+    i0: 5
+    f0: 3
+    trainable: false
+    ic:
+      _target_: hgq.constraints.Constant
+      value: 5
+    fc:
+      _target_: hgq.constraints.Constant
+      value: 3
+  ebops: true
+  final_activation: false
 
 projector:
   _target_: src.algorithms.components.mlp.MLP

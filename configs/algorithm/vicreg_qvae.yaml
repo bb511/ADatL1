@@ -1,4 +1,4 @@
-# VAE trained on top of vicreg output.
+# Quantised VAE trained on top of vicreg output.
 defaults:
   - _self_
 
@@ -14,16 +14,43 @@ features:
 mask: false
 
 encoder:
-  _target_: src.algorithms.components.encoder.VariationalEncoder
+  _target_: src.algorithms.components.encoder.hgq_variational_encoder
   in_dim: 10
   nodes: [9, 6]
   out_dim: 4
+  output_layer_config:
+    place: 'all'
+    q_type: "kif"
+    i0: 5
+    f0: 3
+    trainable: false
+    ic:
+      _target_: hgq.constraints.Constant
+      value: 5
+    fc:
+      _target_: hgq.constraints.Constant
+      value: 3
+  ebops: true
 
 decoder:
-  _target_: src.algorithms.components.decoder.Decoder
+  _target_: src.algorithms.components.decoder.hgq_decoder
   in_dim: ${algorithm.encoder.out_dim}
   nodes: [6, 9]
   out_dim: ${algorithm.encoder.in_dim}
+
+  output_layer_config:
+    place: 'all'
+    q_type: "kif"
+    i0: 5
+    f0: 3
+    trainable: false
+    ic:
+      _target_: hgq.constraints.Constant
+      value: 5
+    fc:
+      _target_: hgq.constraints.Constant
+      value: 3
+  ebops: true
 
 loss:
   _target_: src.losses.vae.ClassicVAELoss

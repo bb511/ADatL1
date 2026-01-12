@@ -58,8 +58,9 @@ def hgq_decoder(
     in_dim: int,
     nodes: list[int],
     out_dim: int,
-    kernel_initializer=None,
-    bias_initializer=None,
+    input_layer_config: dict = None,
+    output_layer_config: dict = None,
+    ebops: bool = False,
     name: str = "hgq_decoder",
 ):
     """Simple dncoder in HGQv2.
@@ -72,27 +73,18 @@ def hgq_decoder(
     """
     z_in = keras.Input(shape=(in_dim,), name="z")
 
-    with (QuantizerConfigScope(place="all"), LayerConfigScope(enable_ebops=False)):
-        mlp_model = hgq_mlp(
-            in_dim=in_dim,
-            nodes=nodes[:-1],
-            out_dim=nodes[-1],
-            final_activation=True,
-            kernel_initializer=kernel_initializer,
-            bias_initializer=bias_initializer,
-            name="dec_mlp",
-        )
-        h = mlp_model(z_in)
+    mlp_model = hgq_mlp(
+        in_dim=in_dim,
+        nodes=nodes[:-1],
+        out_dim=nodes[-1],
+        input_layer_config=input_layer_config,
+        final_activation=True,
+        name="dec_mlp",
+    )
+    h = mlp_model(z_in)
 
-        # x = QDense(
-        #     out_dim,
-        #     name="dec_qdense_out",
-        #     dtype="float32",
-        #     enable_iq=False
-        # )(h)
-        x = layers.Dense(
-            out_dim,
-            name="dec_qdense_out",
-        )(h)
+    with LayerConfigScope(enable_ebops=False):
+        with QuantizerConfigScope(**output_layer_config):
+            x = QDense(out_dim, name="dec_qdense_out")(h)
 
     return keras.Model(inputs=z_in, outputs=x, name=name)

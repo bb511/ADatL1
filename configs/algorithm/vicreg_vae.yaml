@@ -15,14 +15,14 @@ mask: false
 
 encoder:
   _target_: src.algorithms.components.encoder.VariationalEncoder
-  in_dim: 16
-  nodes: [64, 64]
-  out_dim: 48
+  in_dim: 10
+  nodes: [9, 6]
+  out_dim: 4
 
 decoder:
   _target_: src.algorithms.components.decoder.Decoder
   in_dim: ${algorithm.encoder.out_dim}
-  nodes: [64, 64]
+  nodes: [6, 9]
   out_dim: ${algorithm.encoder.in_dim}
 
 loss:

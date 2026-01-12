@@ -101,23 +101,6 @@ def hgq_variational_encoder(
         )
         h = mlp_model(x_in)
 
-        # Mean and log-variance heads (quantized)
-        # z_mean = QDense(
-        #     out_dim,
-        #     name="z_mean",
-        #     kernel_initializer=kernel_initializer,
-        #     bias_initializer=bias_initializer,
-        #     enable_iq=False
-        # )(h)
-
-        # z_log_var = QDense(
-        #     out_dim,
-        #     name="z_log_var",
-        #     kernel_initializer=kernel_initializer,
-        #     bias_initializer=bias_initializer,
-        #     enable_iq=False
-        # )(h)
-
         z_mean = layers.Dense(
             out_dim,
             name="z_mean",

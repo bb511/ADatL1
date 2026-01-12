@@ -32,7 +32,7 @@ model:
 projector:
   _target_: src.algorithms.components.mlp.MLP
   in_dim: ${algorithm.model.out_dim}
-  nodes: [64, 64]
+  nodes: [256, 256]
   out_dim: 32
   batchnorm: true
 

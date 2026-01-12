@@ -23,15 +23,15 @@ lorentz_rotation:
 model:
   _target_: src.algorithms.components.mlp.MLP
   in_dim: 57
-  nodes: [64]
-  out_dim: 16
+  nodes: [29]
+  out_dim: 10
   batchnorm: false
 
 projector:
   _target_: src.algorithms.components.mlp.MLP
   in_dim: ${algorithm.model.out_dim}
-  nodes: [128, 128]
-  out_dim: 64
+  nodes: [256, 256]
+  out_dim: 32
   batchnorm: true
 
 loss:

@@ -261,8 +261,7 @@ class VICReg(L1ADLightningModule):
         module_key: str,
         has_bn: bool = False,
     ):
-        """
-        Load weights from a Lightning .ckpt into either:
+        """Load weights from a Lightning .ckpt into either:
           - a PyTorch nn.Module (normal state_dict load), or
           - a Keras HGQ MLP (manual weight transfer).
 
@@ -327,7 +326,10 @@ class VICReg(L1ADLightningModule):
     def _infer_nodes_hgq(self, model):
         """Returns hidden-layer sizes (excluding output layer) of hgq MLP."""
         qdense_layers = sorted(
-            [l for l in model.layers if l.name.startswith("qdense_") and l.name != "qdense_out"],
+            [
+                l for l in model.layers
+                if l.name.startswith("qdense_") and l.name != "qdense_out"
+            ],
             key=lambda l: int(l.name.split("_")[-1]),
         )
 

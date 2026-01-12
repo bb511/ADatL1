@@ -33,10 +33,10 @@ hydra:
 
     # storage URL to persist optimization results
     # for example, you can use SQLite if you set 'sqlite:///example.db'
-    storage: sqlite:///optuna_logs/optim_v1.db
+    storage: sqlite:///optuna_logs/optim_inputsv4.db
 
     # name of the study to persist optimization results
-    study_name: vae_search_b16k_phase_1
+    study_name: vicreg_vae_b16k_archold
 
     # number of parallel workers
     n_jobs: 1
@@ -45,7 +45,7 @@ hydra:
     direction: [maximize, minimize]
 
     # total number of runs that will be executed
-    n_trials: 40
+    n_trials: 30
 
     # choose Optuna hyperparameter sampler
     # you can choose bayesian sampler (tpe), random search (without optimization), grid sampler, and others

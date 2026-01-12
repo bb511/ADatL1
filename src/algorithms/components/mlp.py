@@ -9,6 +9,7 @@ from keras import layers
 
 from hgq.layers import QDense
 from hgq.config import LayerConfigScope, QuantizerConfigScope
+from hgq.constraints import Constant
 
 
 class MLP(nn.Module):
@@ -115,28 +116,48 @@ def hgq_mlp(
     inputs = keras.Input(shape=(in_dim,), name="x")
     x = inputs
 
-    with (
-        QuantizerConfigScope(place={"weight", "bias"}),
-        LayerConfigScope(enable_ebops=False),
-    ):
-        for i, hidden_dim in enumerate(nodes):
-            x = QDense(
-                hidden_dim,
-                name=f"qdense_{i}",
-                kernel_initializer=kernel_initializer,
-                bias_initializer=bias_initializer,
-                enable_iq=False
-            )(x)
-
-            if batchnorm:
-                x = layers.BatchNormalization(
-                        scale=affine, center=affine, name=f"bn_{i}"
+    with LayerConfigScope(enable_ebops=ebops):
+        with QuantizerConfigScope(place='all'):
+            for i, hidden_dim in enumerate(nodes):
+                if i == 0:
+                    with QuantizerConfigScope(
+                        place="datalane",
+                        q_type="kif",
+                        i0=5,
+                        f0=3,
+                        trainable=False,
+                        ic=Constant(5),
+                        fc=Constant(3),
+                        heterogeneous_axis=(),
+                    ):
+                        x = QDense(
+                            hidden_dim,
+                            name="qdense_0",
+                            kernel_initializer=kernel_initializer,
+                            bias_initializer=bias_initializer,
+                            enable_iq=True
+                        )(x)
+                else:
+                    x = QDense(
+                        hidden_dim,
+                        name=f"qdense_{i}",
+                        kernel_initializer=kernel_initializer,
+                        bias_initializer=bias_initializer,
+                        enable_iq=False
                     )(x)
+
+                if batchnorm:
+                    x = layers.BatchNormalization(
+                            scale=affine, center=affine, name=f"bn_{i}"
+                        )(x)
 
             x = layers.ReLU(name=f"relu_{i}")(x)
 
-        outputs = QDense(out_dim, name="qdense_out", enable_iq=False)(x)
-        if final_activation:
-            outputs = layers.ReLU(name=f"relu_final")(outputs)
+        with QuantizerConfigScope(
+            place='all', q_type="float", m0=10, e0=5, trainable=False
+        ):
+            outputs = QDense(out_dim, name="qdense_out", enable_iq=False)(x)
+            if final_activation:
+                outputs = layers.ReLU(name=f"relu_final")(outputs)
 
     return keras.Model(inputs=inputs, outputs=outputs, name=name)

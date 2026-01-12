@@ -2,7 +2,7 @@
 
 defaults:
   - override /data: axov6
-  - override /algorithm: vae
+  - override /algorithm: vicreg_vae
   - override /callbacks: ad_basics
   - override /trainer: cpu
   - override /evaluator: default
@@ -16,15 +16,15 @@ tags: ["axo_v6", "vae"]
 experiment_name: vae_training
 run_name: ${short_hash:${hydra:runtime.output_dir},12}
 
-# algorithm:
-#   features:
-#     ckpt_path: /data/deodagiu/adl1t/checkpoints/vicreg_best_models/1f230dffb876/single/knn_auprc/max/ds=haa-4b-ma15__metric=knn_auprc__value=0.609286__epoch=122.ckpt
+algorithm:
+  features:
+    ckpt_path: /data/deodagiu/adl1t/checkpoints/qvicreg_best_models/d163c833a25d/single/knn_auprc/max/ds=GluGluHto2Tau_Par-MH-125__metric=knn_auprc__value=0.728787__epoch=12.ckpt
 
 trainer:
   gradient_clip_algorithm: norm
   gradient_clip_val: 1.0
   min_epochs: 1
-  max_epochs: 100
+  max_epochs: 50
   limit_val_batches: 10
   limit_test_batches: 10
 
@@ -33,15 +33,15 @@ test: true
 callbacks:
   log_data_mlflow: null
   anomaly_rate:
-    metric_name: 'loss/kl_raw/full'
+    metric_name: 'loss/reco/full'
     target_rates: [1]
 
   # Checkpoints
   min_loss_total_ckpt: null
-  stable_elbo_ckpt:
+  stable_mse_ckpt:
     _target_: src.callbacks.model_checkpoint.SingleDatasetModelCheckpoint
     dirpath: '${paths.checkpoints_dir}/${experiment_name}/${run_name}'
-    monitor: loss_kl_raw_q999
+    monitor: loss_rmse_q95
     criterion:
       _target_: src.callbacks.checkpointing.criterion.Stable
       top_k: 1
@@ -69,10 +69,10 @@ callbacks:
       - haa-4b-ma15
       - SingleNeutrino_E-10-gun
 
-  max_rate_kl_raw_ckpt:
+  max_rate_mse_ckpt:
     _target_: src.callbacks.model_checkpoint.SingleDatasetModelCheckpoint
     dirpath: '${paths.checkpoints_dir}/${experiment_name}/${run_name}'
-    monitor: loss_kl_raw_full_rate1kHz
+    monitor: loss_reco_full_rate1kHz
     criterion:
       _target_: src.callbacks.checkpointing.criterion.Max
       top_k: 1
@@ -84,31 +84,31 @@ evaluator:
   ckpts:
     last: true
     single:
-      loss_kl_raw_q999: ['stable']
-      loss_kl_raw_full_rate1kHz: ['max']
+      loss_rmse_q95: ['stable']
+      loss_reco_full_rate1kHz: ['max']
 
 evaluator_callbacks:
   anomaly_efficiency:
-    metric_name: 'loss/kl_raw/full'
+    metric_name: 'loss/reco/full'
     target_rates: [1]
     log_raw_mlflow: false
   loss:
     _target_: src.evaluation.callbacks.loss.LossCallback
     loss_name: 'loss/reco/sqrt_q95'
     log_raw_mlflow: false
-  reco:
-    _target_: src.evaluation.callbacks.reco.ReconstructionPlots
-    nbatches: 2
-    output_name: reconstructed_data
-    datamodule: true # callback needs original datamodule
-    ckpt_dataset: last
-    datasets: ['main_test', 'SingleNeutrino_E-10-gun']
-    log_raw_mlflow: false
-  reco_ckpt_haa4b:
-    _target_: src.evaluation.callbacks.reco.ReconstructionPlots
-    nbatches: 2
-    output_name: reconstructed_data
-    datamodule: true # callback needs original datamodule
-    ckpt_dataset: haa-4b-ma15
-    datasets: ['main_test', 'SingleNeutrino_E-10-gun']
-    log_raw_mlflow: false
+  # reco:
+  #   _target_: src.evaluation.callbacks.reco.ReconstructionPlots
+  #   nbatches: 2
+  #   output_name: reconstructed_data
+  #   datamodule: true # callback needs original datamodule
+  #   ckpt_dataset: last
+  #   datasets: ['main_test', 'SingleNeutrino_E-10-gun']
+  #   log_raw_mlflow: false
+  # reco_ckpt_haa4b:
+  #   _target_: src.evaluation.callbacks.reco.ReconstructionPlots
+  #   nbatches: 2
+  #   output_name: reconstructed_data
+  #   datamodule: true # callback needs original datamodule
+  #   ckpt_dataset: haa-4b-ma15
+  #   datasets: ['main_test', 'SingleNeutrino_E-10-gun']
+  #   log_raw_mlflow: false

@@ -9,15 +9,56 @@ mask: true
 
 encoder:
   _target_: src.algorithms.components.encoder.hgq_variational_encoder
-  in_dim: 117
-  nodes: [64, 64]
-  out_dim: 48
+  in_dim: 57
+  nodes: [9, 6]
+  out_dim: 4
+
+  input_layer_config:
+    place: "datalane"
+    q_type: "kif"
+    i0: 5
+    f0: 3
+    trainable: false
+    ic:
+      _target_: hgq.constraints.Constant
+      value: 5
+    fc:
+      _target_: hgq.constraints.Constant
+      value: 3
+
+  output_layer_config:
+    place: 'all'
+    q_type: "kif"
+    i0: 5
+    f0: 3
+    trainable: false
+    ic:
+      _target_: hgq.constraints.Constant
+      value: 5
+    fc:
+      _target_: hgq.constraints.Constant
+      value: 3
+  ebops: true
 
 decoder:
   _target_: src.algorithms.components.decoder.hgq_decoder
   in_dim: ${algorithm.encoder.out_dim}
-  nodes: [64, 64]
-  out_dim: 117
+  nodes: [6, 9]
+  out_dim: ${algorithm.encoder.in_dim}
+
+  output_layer_config:
+    place: 'all'
+    q_type: "kif"
+    i0: 5
+    f0: 3
+    trainable: false
+    ic:
+      _target_: hgq.constraints.Constant
+      value: 5
+    fc:
+      _target_: hgq.constraints.Constant
+      value: 3
+  ebops: true
 
 loss:
   _target_: src.losses.vae.ClassicVAELoss

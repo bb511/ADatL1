@@ -3,9 +3,11 @@ import os
 import json
 import pickle
 import copy
+import numpy as np
 
 import torch
 import torch.nn as nn
+import keras
 
 from src.algorithms import L1ADLightningModule
 from src.algorithms.components.mlp import MLP
@@ -25,6 +27,9 @@ class VICReg(L1ADLightningModule):
     :param feature_blur: Feature blur augmentation module.
     :param object_mask: Object mask augmentation module.
     :param lorentz_rotation: Lorentz rotation augmentation module.
+    :param seed: Int to seed the augmentations with.
+    :param diagnosis_metrics: Bool whether to run all the diagnostics or not.
+    :param ckpt: String with path pointing to a pytorch lightning checkpoint.
     """
 
     def __init__(
@@ -35,6 +40,7 @@ class VICReg(L1ADLightningModule):
         lorentz_rotation: FastLorentzRotation = None,
         seed: int = 42,
         diagnosis_metrics: bool = False,
+        ckpt: str = "",
         **kwargs,
     ):
         super().__init__(**kwargs)
@@ -50,6 +56,7 @@ class VICReg(L1ADLightningModule):
         )
         self.seed = seed
         self.diagnosis_metrics = diagnosis_metrics
+        self.ckpt_path = ckpt
 
         self.projector = projector
 
@@ -74,7 +81,7 @@ class VICReg(L1ADLightningModule):
         self.lorentz_rotation = lorentz_rotation
 
     def on_fit_start(self):
-        """Set up the Lorentz augmentations.
+        """Set up the Lorentz augmentations and load weights if given ckpt.
 
         Save them as dictionaries so pytorch lightning does not instantiate them when
         loading from checkpoints, since they are not needed for inference.
@@ -84,9 +91,16 @@ class VICReg(L1ADLightningModule):
         lorentz_rotation_1 = copy.deepcopy(lorentz_rotation)
         lorentz_rotation_2 = copy.deepcopy(lorentz_rotation)
         lorentz_rotation_1.rng.set_seed(self.seed)
-        lorentz_rotation_2.rng.set_seed(self.seed)
+        lorentz_rotation_2.rng.set_seed(self.seed + 1)
         self.lorentz_rot.update({"1": lorentz_rotation_1})
         self.lorentz_rot.update({"2": lorentz_rotation_2})
+
+        # Load weights from checkpoint.
+        if self.ckpt_path:
+            ckpt = torch.load(self.ckpt_path, map_location="cpu", weights_only=False)
+            state_dict = ckpt["state_dict"]
+            self._load_weights_from_lightning_ckpt(self.model, state_dict, 'model', False)
+            self._load_weights_from_lightning_ckpt(self.projector, state_dict, 'projector', False)
 
     def _setup_phi_lorentz_rotation(self) -> FastLorentzRotation:
         """Sets up the lorents rotation on the phi feature of each object.
@@ -142,6 +156,13 @@ class VICReg(L1ADLightningModule):
             z1_std = torch.sqrt(z1.var(dim=0) + 1e-4).mean()
             z2_std = torch.sqrt(z2.var(dim=0) + 1e-4).mean()
             outdict_diag = self._compute_diagnosis_metrics(z1, z2)
+
+        # Add additional losses if using HGQ.
+        add_loss = 0.0
+        if hasattr(self.model, "losses") and len(self.model.losses) > 0:
+            add_loss = add_loss + torch.stack([l for l in self.model.losses]).sum()
+
+        loss_total += add_loss
 
         return {
             "loss": loss_total,
@@ -232,3 +253,103 @@ class VICReg(L1ADLightningModule):
         # remove diagonal (self-similarity = 1)
         avg_cos = (sim.sum() - B) / (B * (B - 1))
         return avg_cos.item()
+
+    def _load_weights_from_lightning_ckpt(
+        self,
+        model,
+        state_dict: dict,
+        module_key: str,
+        has_bn: bool = False,
+    ):
+        """Load weights from a Lightning .ckpt into either:
+          - a PyTorch nn.Module (normal state_dict load), or
+          - a Keras HGQ MLP (manual weight transfer).
+
+        model: The torch.nn.Module OR keras.Model to load weights into
+        module_key: String of prefix in Lightning state_dict ("model" or "projector").
+        has_bn: Whether the MLP uses BatchNorm.
+        """
+        sub_sd = {
+            k[len(module_key) + 1 :]: v
+            for k, v in state_dict.items()
+            if k.startswith(module_key + ".")
+        }
+
+        if isinstance(model, torch.nn.Module) and not isinstance(model, keras.Model):
+            model.load_state_dict(sub_sd, strict=True)
+            return model
+
+        if not isinstance(model, keras.Model):
+            raise TypeError("model must be torch.nn.Module or keras.Model")
+
+        # force variable creation
+        in_dim = model.input_shape[-1]
+        _ = model(np.zeros((1, in_dim), dtype=np.float32))
+
+        nodes = self._infer_nodes_hgq(model)
+
+        # extract Linear / BN params in order
+        linear_keys = sorted(
+            k for k in sub_sd
+            if k.endswith("weight")
+            and not any(x in k.lower() for x in ["bn", "batchnorm"])
+        )
+
+        bn_keys = sorted(
+            k for k in sub_sd
+            if k.endswith("weight")
+            and any(x in k.lower() for x in ["bn", "batchnorm"])
+        )
+
+        # hidden layers
+        for i in range(len(nodes)):
+            W = sub_sd[linear_keys[i]].numpy()
+            b = sub_sd[linear_keys[i].replace("weight", "bias")].numpy()
+            self._assign_dense_like_weights(model.get_layer(f"qdense_{i}"), W, b)
+
+            if has_bn:
+                prefix = bn_keys[i].replace("weight", "")
+                gamma = sub_sd[prefix + "weight"].numpy()
+                beta  = sub_sd[prefix + "bias"].numpy()
+                mean  = sub_sd[prefix + "running_mean"].numpy()
+                var   = sub_sd[prefix + "running_var"].numpy()
+
+                model.get_layer(f"bn_{i}").set_weights([gamma, beta, mean, var])
+
+        # output layer
+        W = sub_sd[linear_keys[len(nodes)]].numpy()
+        b = sub_sd[linear_keys[len(nodes)].replace("weight", "bias")].numpy()
+        self._assign_dense_like_weights(model.get_layer("qdense_out"), W, b)
+
+        return model
+
+    def _infer_nodes_hgq(self, model):
+        """Returns hidden-layer sizes (excluding output layer) of hgq MLP."""
+        qdense_layers = sorted(
+            [
+                l for l in model.layers
+                if l.name.startswith("qdense_") and l.name != "qdense_out"
+            ],
+            key=lambda l: int(l.name.split("_")[-1]),
+        )
+
+        if not qdense_layers:
+            raise ValueError("No qdense_* layers found")
+
+        return [l.units for l in qdense_layers]
+
+    def _assign_dense_like_weights(self, layer, W_torch, b_torch=None):
+        """Assign weights and biases to QKeras dense layer."""
+        W = np.asarray(W_torch, dtype=np.float32).T
+        b = None if b_torch is None else np.asarray(b_torch, dtype=np.float32)
+
+        k = next(w for w in layer.weights if len(w.shape) == 2 and tuple(w.shape) == W.shape)
+        k.assign(W)
+
+        # bias: first 1D weight that matches b.shape (if provided)
+        if b is not None:
+            try:
+                bb = next(w for w in layer.weights if len(w.shape) == 1 and tuple(w.shape) == b.shape)
+                bb.assign(b)
+            except StopIteration:
+                pass  # bias may be disabled

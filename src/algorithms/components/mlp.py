@@ -9,6 +9,11 @@ from keras import layers
 
 from hgq.layers import QDense
 from hgq.config import LayerConfigScope, QuantizerConfigScope
+from hgq.constraints import Constant
+
+from src.utils import pylogger
+
+log = pylogger.RankedLogger(__name__)
 
 
 class MLP(nn.Module):
@@ -95,12 +100,11 @@ def hgq_mlp(
     in_dim: int,
     nodes: list[int],
     out_dim: int,
-    batchnorm: bool = False,
     affine: bool = True,
-    final_activation: bool = False,
-    kernel_initializer=None,
-    bias_initializer=None,
+    input_layer_config: dict = None,
+    output_layer_config: dict = None,
     ebops: bool = False,
+    final_activation: bool = False,
     name: str = 'hgq_mlp'
 ):
     """Multi-layer perceptron in HGQv2.
@@ -108,42 +112,34 @@ def hgq_mlp(
     :param in_dim: Int for initial dimension.
     :param nodes: List of number of nodes composing each of the layers.
     :param out_dim: Int for output dimension.
-    :param batchnorm: Whether to use batch normalization after each layer or not.
     :param init_weight: Callable method to initialize the weights of the decoder nodes.
     :param init_bias: Callable method to initialize the biases of the decoder nodes.
     """
     inputs = keras.Input(shape=(in_dim,), name="x")
     x = inputs
+    with LayerConfigScope(enable_ebops=ebops):
+        with QuantizerConfigScope(place='all'):
 
-    with (
-        QuantizerConfigScope(place={"weight", "bias"}),   # optionally add "table"
-        LayerConfigScope(enable_ebops=False),
-    ):
-        for i, hidden_dim in enumerate(nodes):
-            # x = QDense(
-            #     hidden_dim,
-            #     name=f"qdense_{i}",
-            #     kernel_initializer=kernel_initializer,
-            #     bias_initializer=bias_initializer,
-            #     enable_iq=False
-            # )(x)
-            x = layers.Dense(
-                hidden_dim,
-                name=f"qdense_{i}",
-                kernel_initializer=kernel_initializer,
-                bias_initializer=bias_initializer,
-            )(x)
+            for i, hidden_dim in enumerate(nodes):
+                if i == 0 and input_layer_config:
+                    with QuantizerConfigScope(**input_layer_config, heterogeneous_axis=()):
+                        x = QDense(hidden_dim, name="qdense_0", activation='relu')(x)
+                else:
+                    x = QDense(hidden_dim, name=f"qdense_{i}", activation='relu')(x)
 
-            if batchnorm:
-                x = layers.BatchNormalization(
-                        scale=affine, center=affine, name=f"bn_{i}"
-                    )(x)
+        if output_layer_config:
+            with QuantizerConfigScope(**output_layer_config, heterogeneous_axis=()):
+                if final_activation:
+                    outputs = QDense(out_dim, name="qdense_out", activation='relu')(x)
+                else:
+                    outputs = QDense(out_dim, name="qdense_out")(x)
+        else:
+            if final_activation:
+                outputs = QDense(out_dim, name="qdense_out", activation='relu')(x)
+            else:
+                outputs = QDense(out_dim, name="qdense_out")(x)
 
-            x = layers.ReLU(name=f"relu_{i}")(x)
+    model = keras.Model(inputs=inputs, outputs=outputs, name=name)
+    print(model.summary())
 
-        # outputs = QDense(out_dim, name="qdense_out", enable_iq=False)(x)
-        outputs = layers.Dense(out_dim, name="qdense_out")(x)
-        if final_activation:
-            outputs = layers.ReLU(name=f"relu_final")(outputs)
-
-    return keras.Model(inputs=inputs, outputs=outputs, name=name)
+    return model

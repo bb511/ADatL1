@@ -28,7 +28,7 @@ buffer_size: 10000
 
 
 sampler:
-  _target_: src.models.mcmc.LangevinSampler
+  _target_: src.algorithms.components.mcmc.LangevinSampler
   n_steps: 50
   step_size: 10.0
   noise_scale: 0.05

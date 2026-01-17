@@ -21,17 +21,13 @@ lorentz_rotation:
   prob: 0.3
 
 model:
-  _target_: src.algorithms.components.mlp.MLP
-  in_dim: 57
-  nodes: [29]
-  out_dim: 10
+  _target_: src.models.components.mlp.MLP
+  nodes: [57, 29, 10]
   batchnorm: false
 
 projector:
-  _target_: src.algorithms.components.mlp.MLP
-  in_dim: ${algorithm.model.out_dim}
-  nodes: [256, 256]
-  out_dim: 32
+  _target_: src.models.components.mlp.MLP
+  nodes: [10, 256, 256, 32]
   batchnorm: true
 
 loss:
@@ -49,7 +45,6 @@ optimizer:
   eps: 1e-8
 
 scheduler:
-  # here other attributes...
   scheduler:
     _target_: src.optimizers.cdw.CosineWithWarmup
     _partial_: true

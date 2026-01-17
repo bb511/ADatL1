@@ -5,33 +5,28 @@ _target_: src.algorithms.vicreg.VICReg
 seed: ${seed}
 
 feature_blur:
-  _target_: src.models.augmentation.FastFeatureBlur
+  _target_: src.algorithms.components.augmentation.FastFeatureBlur
   prob: 0.9004016520359364
   magnitude: 0.92685112547458
   strength: 0.749655944679925
 
-
 object_mask:
-  _target_: src.models.augmentation.FastObjectMask
+  _target_: src.algorithms.components.augmentation.FastObjectMask
   prob: 0.5709886168264394
 
 lorentz_rotation:
-  _target_: src.models.augmentation.FastLorentzRotation
+  _target_: src.algorithms.components.augmentation.FastLorentzRotation
   _partial_: true
   prob: 0.5
 
 model:
-  _target_: src.algorithms.components.mlp.MLP
-  in_dim: 57
-  nodes: [29]
-  out_dim: 10
+  _target_: src.models.components.mlp.MLP
+  nodes: [57, 29, 10]
   batchnorm: false
 
 projector:
-  _target_: src.algorithms.components.mlp.MLP
-  in_dim: 10
-  nodes: []
-  out_dim: 40
+  _target_: src.models.components.mlp.MLP
+  nodes: [10, 40]
   batchnorm: true
 
 loss:
@@ -49,7 +44,6 @@ optimizer:
   eps: 1e-8
 
 scheduler:
-  # here other attributes...
   scheduler:
     _target_: src.optimizers.cdrw.CDRW
     _partial_: true

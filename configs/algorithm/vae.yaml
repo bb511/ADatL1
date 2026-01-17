@@ -1,31 +1,24 @@
-# Template VAE configuration.
+# VAE algorithm configuration.
 defaults:
   - _self_
 
 _target_: src.algorithms.vae.VAE
 features: null
-
 mask: true
+kl_warmup_frac: 0.2
 
 encoder:
-  _target_: src.algorithms.components.encoder.VariationalEncoder
-  in_dim: 117
-  nodes: [64, 64]
-  out_dim: 48
+  _target_: src.models.encoder.VariationalEncoder
+  nodes: [117, 64, 64, 48]
 
 decoder:
-  _target_: src.algorithms.components.decoder.Decoder
-  in_dim: ${algorithm.encoder.out_dim}
-  nodes: [64, 64]
-  out_dim: 117
+  _target_: src.models.decoder.Decoder
+  nodes: [48, 64, 64, 117]
 
 loss:
   _target_: src.losses.vae.ClassicVAELoss
   scale: 1
   kl_scale: 0.001
-
-# Annealing of the KL scale scalar.
-kl_warmup_frac: 0.2
 
 optimizer:
   _partial_: true

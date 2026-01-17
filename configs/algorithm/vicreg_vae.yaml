@@ -12,26 +12,20 @@ features:
     path: src.algorithms.vicreg.VICReg
 
 mask: false
+kl_warmup_frac: 0.2
 
 encoder:
-  _target_: src.algorithms.components.encoder.VariationalEncoder
-  in_dim: 10
-  nodes: [9, 6]
-  out_dim: 4
+  _target_: src.models.encoder.VariationalEncoder
+  nodes: [10, 9, 6, 4]
 
 decoder:
-  _target_: src.algorithms.components.decoder.Decoder
-  in_dim: ${algorithm.encoder.out_dim}
-  nodes: [6, 9]
-  out_dim: ${algorithm.encoder.in_dim}
+  _target_: src.models.decoder.Decoder
+  nodes: [4, 6, 9, 10]
 
 loss:
   _target_: src.losses.vae.ClassicVAELoss
   scale: 1
   kl_scale: 0.001
-
-# Annealing of the KL scale scalar.
-kl_warmup_frac: 0.2
 
 optimizer:
   _partial_: true

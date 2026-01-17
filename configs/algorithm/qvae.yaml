@@ -1,18 +1,15 @@
-# Template quantised VAE configuration.
+# Quantised VAE algorithm configuration.
 defaults:
   - _self_
 
 _target_: src.algorithms.vae.VAE
 features: null
-
 mask: true
+kl_warmup_frac: 0.2
 
 encoder:
-  _target_: src.algorithms.components.encoder.hgq_variational_encoder
-  in_dim: 57
-  nodes: [9, 6]
-  out_dim: 4
-
+  _target_: src.models.encoder.HGQVariationalEncoder
+  nodes: [57, 9, 6, 4]
   input_layer_config:
     place: "datalane"
     q_type: "kif"
@@ -25,7 +22,6 @@ encoder:
     fc:
       _target_: hgq.constraints.Constant
       value: 3
-
   output_layer_config:
     place: 'all'
     q_type: "kif"
@@ -41,11 +37,8 @@ encoder:
   ebops: true
 
 decoder:
-  _target_: src.algorithms.components.decoder.hgq_decoder
-  in_dim: ${algorithm.encoder.out_dim}
-  nodes: [6, 9]
-  out_dim: ${algorithm.encoder.in_dim}
-
+  _target_: src.models.decoder.HGQDecoder
+  nodes: [4, 6, 9, 57]
   output_layer_config:
     place: 'all'
     q_type: "kif"
@@ -64,9 +57,6 @@ loss:
   _target_: src.losses.vae.ClassicVAELoss
   scale: 1
   kl_scale: 0.001
-
-# Annealing of the KL scale scalar.
-kl_warmup_frac: 0.2
 
 optimizer:
   _partial_: true

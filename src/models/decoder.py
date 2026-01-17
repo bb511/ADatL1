@@ -69,17 +69,18 @@ class HGQDecoder(keras.Model):
         self.output_layer_config = output_layer_config or {}
         self.ebops = ebops
 
-        self.net = HGQMLP(
+        mlp = HGQMLP(
             nodes=nodes[:-1],
             input_layer_config=self.input_layer_config,
             final_activation=True,
-            name="net"
+            name="mlp"
         )
 
         with LayerConfigScope(enable_ebops=False):
             with QuantizerConfigScope(**self.output_layer_config):
-                self.output_layer = QDense(nodes[-1], name="qdense_out")
+                output_layer = QDense(nodes[-1], name="qdense_out")
+
+        self.net = keras.Sequential([mlp, output_layer], name="net")
 
     def call(self, z):
-        h = self.net(z)
-        return self.output_layer(h)
+        return self.net(z)

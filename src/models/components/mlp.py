@@ -112,31 +112,30 @@ class HGQMLP(keras.Model):
 
     def _construct_net(self):
         layers = []
+        num_layers = len(self.nodes) - 1
+
+        def make_qdense(out_dim, name, activation, config=None):
+            if config:
+                with QuantizerConfigScope(**config, heterogeneous_axis=()):
+                    return QDense(out_dim, name=name, activation=activation)
+            return QDense(out_dim, name=name, activation=activation)
 
         with LayerConfigScope(enable_ebops=self.ebops):
             with QuantizerConfigScope(place='all'):
-                for i in range(len(self.nodes) - 1):
-                    is_last = (i == len(self.nodes) - 2)
-                    in_dim, out_dim = self.nodes[i], self.nodes[i + 1]
+                for i, out_dim in enumerate(self.nodes[1:]):
+                    is_first = (i == 0)
+                    is_last = (i == num_layers - 1)
 
-                    if not is_last:
-                        if i == 0 and self.input_layer_config:
-                            with QuantizerConfigScope(**self.input_layer_config, heterogeneous_axis=()):
-                                layers.append(QDense(out_dim, name=f"qdense_{i}", activation='relu'))
-                        else:
-                            layers.append(QDense(out_dim, name=f"qdense_{i}", activation='relu'))
-
+                    if is_last:
+                        activation = 'relu' if self.final_activation else None
+                        layers.append(make_qdense(out_dim, "qdense_out", activation, self.output_layer_config))
+                    else:
+                        config = self.input_layer_config if is_first else None
+                        layers.append(make_qdense(out_dim, f"qdense_{i}", 'relu', config))
                         if self.batchnorm:
                             layers.append(klayers.BatchNormalization(
                                 scale=self.affine, center=self.affine, name=f"bn_{i}"
                             ))
-                    else:
-                        activation = 'relu' if self.final_activation else None
-                        if self.output_layer_config:
-                            with QuantizerConfigScope(**self.output_layer_config, heterogeneous_axis=()):
-                                layers.append(QDense(out_dim, name="qdense_out", activation=activation))
-                        else:
-                            layers.append(QDense(out_dim, name="qdense_out", activation=activation))
 
         return layers
 

@@ -19,7 +19,7 @@ class FeaturesFromCkpt(nn.Module):
     def __init__(self, litmodule_cls: LightningModule, ckpt_path: str, attr: str):
         super().__init__()
 
-        lm = litmodule_cls.load_from_checkpoint(ckpt_path, map_location="cpu")
+        lm = litmodule_cls.load_from_checkpoint(ckpt_path, map_location="cpu", weights_only=False)
         features = getattr(lm, attr)
 
         for p in features.parameters():

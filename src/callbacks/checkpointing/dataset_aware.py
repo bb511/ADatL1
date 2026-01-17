@@ -122,7 +122,7 @@ class DatasetAwareModelCheckpoint(Callback):
     def _save_checkpoint(self, trainer, pl_module, filepath: Path):
         """Save a checkpoint with a custom key and metric value."""
         if trainer.is_global_zero:
-            trainer.save_checkpoint(filepath)
+            trainer.save_checkpoint(filepath, weights_only=False)
 
         # notify loggers
         if trainer.is_global_zero:

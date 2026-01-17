@@ -1,6 +1,8 @@
 from typing import Dict
 import torch
 import numpy as np
+import json
+from pathlib import Path
 
 from src.utils import pylogger
 from src.data.components.dataset import L1ADDataset
@@ -30,6 +32,18 @@ class DebugL1ADDataModule(L1ADDataModule):
             "test": np.random.default_rng(seed=self.hparams.seed + 1),
         }
 
+        # For compatibility with the real datamodule:
+        self.normalizer = self.hparams.data_normalizer
+        self.loader = self.hparams.data_awkward2torch
+
+        mlready_path = Path("./data/data_2024E/mlready/eminimal_pdefault_default/robust_axov4")  
+        with open(mlready_path / "object_feature_map.json", "r") as f:
+            obj_feat_map = json.load(f)
+        self.loader.object_feature_map = obj_feat_map
+
+        for obj in obj_feat_map.keys():
+            self.normalizer.import_norm_params(mlready_path / f"{obj}_norm_params.pkl", obj)
+            
     def prepare_data(self) -> None:
         pass
 
@@ -40,6 +54,7 @@ class DebugL1ADDataModule(L1ADDataModule):
         ntrain = self.ndata.get("train")
         return L1ADDataset(
             data=torch.randn(ntrain, 57, dtype=torch.float32),
+            mask=torch.ones(ntrain, 57, dtype=torch.bool),
             labels=torch.zeros(ntrain, dtype=torch.long),
             batch_size=self.batch_size,
             shuffler=None,
@@ -50,6 +65,7 @@ class DebugL1ADDataModule(L1ADDataModule):
         return {
             f"main_{stage}": L1ADDataset(
                 data=torch.randn(ndata, 57, dtype=torch.float32),
+                mask=torch.ones(ndata, 57, dtype=torch.bool),
                 labels=torch.zeros(ndata, dtype=torch.long),
                 batch_size=self.batch_size,
                 shuffler=self.shuffler,
@@ -59,6 +75,7 @@ class DebugL1ADDataModule(L1ADDataModule):
                     data=sign
                     * float(1 + isignal)
                     * torch.randn(ndata, 57, dtype=torch.float32),
+                    mask=torch.ones(ndata, 57, dtype=torch.bool),
                     labels=torch.full((ndata,), sign * (1 + isignal), dtype=torch.long),
                     batch_size=self.batch_size,
                     shuffler=self.shuffler,

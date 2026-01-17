@@ -110,32 +110,45 @@ class HGQMLP(keras.Model):
 
         self.net = self._construct_net()
 
+    @staticmethod
+    def make_qdense(out_dim, name, activation, config=None):
+        if config:
+            with QuantizerConfigScope(**config, heterogeneous_axis=()):
+                return QDense(out_dim, name=name, activation=activation)
+        return QDense(out_dim, name=name, activation=activation)
+
     def _construct_net(self):
         layers = []
         num_layers = len(self.nodes) - 1
-
-        def make_qdense(out_dim, name, activation, config=None):
-            if config:
-                with QuantizerConfigScope(**config, heterogeneous_axis=()):
-                    return QDense(out_dim, name=name, activation=activation)
-            return QDense(out_dim, name=name, activation=activation)
-
         with LayerConfigScope(enable_ebops=self.ebops):
             with QuantizerConfigScope(place='all'):
                 for i, out_dim in enumerate(self.nodes[1:]):
-                    is_first = (i == 0)
-                    is_last = (i == num_layers - 1)
-
-                    if is_last:
-                        activation = 'relu' if self.final_activation else None
-                        layers.append(make_qdense(out_dim, "qdense_out", activation, self.output_layer_config))
+                    if i == num_layers - 1:
+                        layers.append(
+                            self.make_qdense(
+                                out_dim=out_dim,
+                                name="qdense_out",
+                                activation='relu' if self.final_activation else None,
+                                config=self.output_layer_config,
+                            )
+                        )
                     else:
-                        config = self.input_layer_config if is_first else None
-                        layers.append(make_qdense(out_dim, f"qdense_{i}", 'relu', config))
+                        layers.append(
+                            self.make_qdense(
+                                out_dim=out_dim,
+                                name=f"qdense_{i}",
+                                activation='relu',
+                                config=self.input_layer_config if i == 0 else None,
+                            )
+                        )
                         if self.batchnorm:
-                            layers.append(klayers.BatchNormalization(
-                                scale=self.affine, center=self.affine, name=f"bn_{i}"
-                            ))
+                            layers.append(
+                                klayers.BatchNormalization(
+                                    scale=self.affine,
+                                    center=self.affine,
+                                    name=f"bn_{i}",
+                                )
+                            )
 
         return layers
 

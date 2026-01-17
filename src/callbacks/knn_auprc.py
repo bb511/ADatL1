@@ -145,7 +145,10 @@ class KNNAUPRC(Callback):
         average over them to get an anomaly score per sample.
         """
         z_query = torch.nn.functional.normalize(z_query, dim=1)
-        sim = z_query @ self.z_ref.T           # [Bq, Nref]
+        try:
+            sim = z_query @ self.z_ref.T           # [Bq, Nref]
+        except:
+            import ipdb; ipdb.set_trace()
         topk_sim, _ = torch.topk(sim, self.k, largest=True, dim=1)
         knn_dist = 1.0 - topk_sim
 

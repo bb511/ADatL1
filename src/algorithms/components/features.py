@@ -3,6 +3,7 @@ from pytorch_lightning import LightningModule
 import torch
 import torch.nn as nn
 
+from src.algorithms.vicreg import VICReg
 
 
 class FeaturesFromCkpt(nn.Module):
@@ -18,8 +19,9 @@ class FeaturesFromCkpt(nn.Module):
 
     def __init__(self, litmodule_cls: LightningModule, ckpt_path: str, attr: str):
         super().__init__()
-
+        litmodule_cls = VICReg
         lm = litmodule_cls.load_from_checkpoint(ckpt_path, map_location="cpu", weights_only=False)
+
         features = getattr(lm, attr)
 
         for p in features.parameters():

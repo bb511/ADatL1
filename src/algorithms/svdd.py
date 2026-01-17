@@ -66,9 +66,10 @@ class SVDD(L1ADLightningModule):
         total_loss = self.loss(distances=distances, z=z)
         return {
             "loss": total_loss.mean(),
-            "loss/total/full": total_loss.detach(),
-            "loss/svdd/mean": total_loss.mean(),
+            "loss/svdd/mean": total_loss.detach().mean(),
             "loss/distance/mean": distances.mean(),
+            # Used for callbacks:
+            "loss/total/full": total_loss.detach(),
         }
 
     def outlog(self, outdict: dict) -> dict:

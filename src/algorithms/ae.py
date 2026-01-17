@@ -43,7 +43,9 @@ class AE(L1ADLightningModule):
             # Used for backpropagation:
             "loss": reco_loss.mean(),
             # Used for logging:
-            "loss/reco/mean": reco_loss.mean(),
+            "loss/reco/mean": reco_loss.detach().mean(),
+            # Used for callbacks:
+            "loss/total/full": reco_loss.detach(),
         }
 
     def outlog(self, outdict: dict) -> dict:

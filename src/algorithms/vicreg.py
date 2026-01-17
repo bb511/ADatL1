@@ -160,6 +160,7 @@ class VICReg(L1ADLightningModule):
 
         loss_total += add_loss
 
+        import ipdb; ipdb.set_trace()
         return {
             "loss": loss_total,
             # Used for logging:
@@ -172,7 +173,9 @@ class VICReg(L1ADLightningModule):
             "z1/std": z1_std,
             "z2/std": z2_std,
             "vicreg_rep_data": self.model(x).detach(),
-            **outdict_diag
+            **outdict_diag,
+            # Used for callbacks:
+            "loss/total/full": loss_total.detach(),
         }
 
     def test_step(self, batch: torch.Tensor, batch_idx: int, dataloader_idx: int = 0):

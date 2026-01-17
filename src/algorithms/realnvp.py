@@ -188,7 +188,9 @@ class RealNVP(L1ADLightningModule):
 
         return {
             "loss": loss.mean(),
-            "loss/nll/mean": loss.mean(),
+            "loss/nll/mean": loss.detach().mean(),
+            # Used for callbacks:
+            "loss/total/full": loss.detach(),
         }
 
     def _filter_log_dict(self, outdict: dict) -> dict:

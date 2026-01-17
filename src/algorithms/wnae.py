@@ -5,7 +5,7 @@ import torch
 import torch.nn as nn
 
 from src.algorithms import L1ADLightningModule
-from src.models.mcmc import SampleBuffer
+from src.algorithms.components.mcmc import SampleBuffer
 
 
 class WNAE(L1ADLightningModule):

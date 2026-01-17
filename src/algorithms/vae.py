@@ -65,7 +65,8 @@ class VAE(L1ADLightningModule):
             z_mean=z_mean,
             z_log_var=z_log_var,
             target=self.features(x),
-            mask=m if self.mask else None,
+            mask=None,
+            # mask=m if self.mask else None,
             kl_scale=kl_current_scale
         )
         del x, z, z_mean, z_log_var

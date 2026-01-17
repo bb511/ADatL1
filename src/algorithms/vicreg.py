@@ -6,7 +6,7 @@ import torch
 import keras
 
 from src.algorithms import L1ADLightningModule
-from src.algorithms.components.mlp import MLP
+from src.models.components.mlp import MLP
 from src.algorithms.components.augmentation import FastFeatureBlur
 from src.algorithms.components.augmentation import FastObjectMask
 from src.algorithms.components.augmentation import FastLorentzRotation

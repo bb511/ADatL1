@@ -24,7 +24,6 @@ class DebugL1ADDataModule(L1ADDataModule):
             "GluGluHToGG_M-90",
             "GluGluHToTauTau_M-125",
         ]
-        self.batch_size = 100
         self.ndata = {"train": 100, "val": 100, "test": 100}
         self.shufflers = {
             "train": None,
@@ -56,7 +55,7 @@ class DebugL1ADDataModule(L1ADDataModule):
             data=torch.randn(ntrain, 57, dtype=torch.float32),
             mask=torch.ones(ntrain, 57, dtype=torch.bool),
             labels=torch.zeros(ntrain, dtype=torch.long),
-            batch_size=self.batch_size,
+            batch_size=self.hparams.batch_size,
             shuffler=None,
         )
 
@@ -67,7 +66,7 @@ class DebugL1ADDataModule(L1ADDataModule):
                 data=torch.randn(ndata, 57, dtype=torch.float32),
                 mask=torch.ones(ndata, 57, dtype=torch.bool),
                 labels=torch.zeros(ndata, dtype=torch.long),
-                batch_size=self.batch_size,
+                batch_size=self.hparams.batch_size,
                 shuffler=self.shuffler,
             ),
             **{
@@ -77,7 +76,7 @@ class DebugL1ADDataModule(L1ADDataModule):
                     * torch.randn(ndata, 57, dtype=torch.float32),
                     mask=torch.ones(ndata, 57, dtype=torch.bool),
                     labels=torch.full((ndata,), sign * (1 + isignal), dtype=torch.long),
-                    batch_size=self.batch_size,
+                    batch_size=self.hparams.batch_size,
                     shuffler=self.shuffler,
                 )
                 for sign, sims in zip([-1, 1], [self.bsim, self.ssim])

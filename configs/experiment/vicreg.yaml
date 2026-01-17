@@ -2,25 +2,24 @@
 
 defaults:
   - override /data: axov6
-  - override /algorithm: qvicreg
+  - override /algorithm: vicreg
   - override /callbacks: default
-  - override /trainer: cpu
+  - override /trainer: gpu
   - override /evaluator: default
   - override /evaluator_callbacks: default
   - override /logger: mlflow
 
 tags: ["axov6", "vicreg"]
 
-
 experiment_name: vicreg_training
 run_name: ${short_hash:${hydra:runtime.output_dir},12}
 
 seed: 12345
 
-algorithm:
-  # Start from set of weights.
-  ckpt: "/data/deodagiu/adl1t/checkpoints/vicreg_best_models/b5c47b12b988/last.ckpt"
-  diagnosis_metrics: false
+# algorithm:
+#   # Start from set of weights.
+#   ckpt: "/data/deodagiu/adl1t/checkpoints/vicreg_best_models/b5c47b12b988/last.ckpt"
+#   diagnosis_metrics: false
 
 trainer:
   gradient_clip_algorithm: norm
@@ -35,39 +34,45 @@ test: true
 callbacks:
   log_data_mlflow: null
   # Additional checkpoints for the final run (expensive).
-  knn_auprc:
-    _target_: src.callbacks.knn_auprc.KNNAUPRC
-    output_name: 'vicreg_rep_data'
-    reference_sample_size: 20_000
-    k: 10
-
-  max_knn_auprc_ckpt:
-    _target_: src.callbacks.model_checkpoint.SingleDatasetModelCheckpoint
-    dirpath: '${paths.checkpoints_dir}/${experiment_name}/${run_name}'
-    monitor: knn_auprc
-    criterion:
-      _target_: src.callbacks.checkpointing.criterion.Max
-      top_k: 1
-    skip_ds:
-      - main_val
-      - SingleNeutrino_E-10-gun
+  # knn_auprc:
+  #   _target_: src.callbacks.knn_auprc.KNNAUPRC
+  #   output_name: 'vicreg_rep_data'
+  #   reference_sample_size: 20_000
+  #   k: 10
+  #
+  # max_knn_auprc_ckpt:
+  #   _target_: src.callbacks.model_checkpoint.SingleDatasetModelCheckpoint
+  #   dirpath: '${paths.checkpoints_dir}/${experiment_name}/${run_name}'
+  #   monitor: knn_auprc
+  #   criterion:
+  #     _target_: src.callbacks.checkpointing.criterion.Max
+  #     top_k: 1
+  #   skip_ds:
+  #     - main_val
+  #     - SingleNeutrino_E-10-gun
 
 evaluator:
   ckpts:
     last: true
-    single:
-      knn_auprc: ['max']
+    # single:
+    #   knn_auprc: ['max']
 
 evaluator_callbacks:
   loss:
     _target_: src.evaluation.callbacks.loss.LossCallback
     loss_name: 'loss'
     log_raw_mlflow: false
+  # knn_auprc:
+  #   _target_: src.evaluation.callbacks.knn_auprc.KNNAUPRC
+  #   output_name: 'vicreg_rep_data'
+  #   reference_sample_size: 20_000
+  #   skip_ds: ['SingleNeutrino_E-10-gun']
+  #   k: 10
+  #   log_raw_mlflow: false
 
-  knn_auprc:
-    _target_: src.evaluation.callbacks.knn_auprc.KNNAUPRC
-    output_name: 'vicreg_rep_data'
-    reference_sample_size: 20_000
-    skip_ds: ['SingleNeutrino_E-10-gun']
-    k: 10
-    log_raw_mlflow: false
+logger:
+  wandb:
+    entity: viictorjimenezzz-personal
+    project: adatl1
+    group: ${experiment_name}
+    name: ${run_name}

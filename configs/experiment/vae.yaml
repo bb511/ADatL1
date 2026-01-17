@@ -12,7 +12,6 @@ defaults:
 seed: 123
 tags: ["axo_v6", "vae"]
 
-
 experiment_name: vae_training
 run_name: ${short_hash:${hydra:runtime.output_dir},12}
 

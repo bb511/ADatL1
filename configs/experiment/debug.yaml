@@ -10,8 +10,7 @@ defaults:
   - override /logger: mlflow
 
 seed: 123
-tags: ["axo_v6", "vae"]
-
+tags: ["axo_v6", "debug"]
 
 experiment_name: debug
 run_name: ${short_hash:${hydra:runtime.output_dir},12}
@@ -36,7 +35,6 @@ callbacks:
     metric_name: 'loss/reco/full'
     target_rates: [1]
 
-  # Checkpoints
   min_loss_total_ckpt: null
   stable_mse_ckpt:
     _target_: src.callbacks.model_checkpoint.SingleDatasetModelCheckpoint
@@ -96,19 +94,3 @@ evaluator_callbacks:
     _target_: src.evaluation.callbacks.loss.LossCallback
     loss_name: 'loss/reco/sqrt_q95'
     log_raw_mlflow: false
-  # reco:
-  #   _target_: src.evaluation.callbacks.reco.ReconstructionPlots
-  #   nbatches: 2
-  #   output_name: reconstructed_data
-  #   datamodule: true # callback needs original datamodule
-  #   ckpt_dataset: last
-  #   datasets: ['main_test', 'SingleNeutrino_E-10-gun']
-  #   log_raw_mlflow: false
-  # reco_ckpt_haa4b:
-  #   _target_: src.evaluation.callbacks.reco.ReconstructionPlots
-  #   nbatches: 2
-  #   output_name: reconstructed_data
-  #   datamodule: true # callback needs original datamodule
-  #   ckpt_dataset: haa-4b-ma15
-  #   datasets: ['main_test', 'SingleNeutrino_E-10-gun']
-  #   log_raw_mlflow: false

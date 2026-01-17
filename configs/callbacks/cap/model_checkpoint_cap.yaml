@@ -1,6 +1,6 @@
 model_checkpoint_cap_baseline:
   _target_: pytorch_lightning.callbacks.ModelCheckpoint
-  dirpath: '${paths.root_dir}/checkpoints/${experiment_name}/${run_name}/cap/loss_total_full_rate0.25/max'
+  dirpath: '${paths.root_dir}/checkpoints/${experiment_name}/${run_name}/cap/loss_total_full_rate0.25kHz/max'
   filename: ds=baseline__value={cap_val_baseline:.1f}__epoch={epoch}
   monitor: cap/val/baseline
   save_top_k: 1
@@ -10,7 +10,7 @@ model_checkpoint_cap_baseline:
 
 model_checkpoint_cap_background0:
   _target_: pytorch_lightning.callbacks.ModelCheckpoint
-  dirpath: '${paths.root_dir}/checkpoints/${experiment_name}/${run_name}/cap/loss_total_full_rate0.25/max'
+  dirpath: '${paths.root_dir}/checkpoints/${experiment_name}/${run_name}/cap/loss_total_full_rate0.25kHz/max'
   filename: ds=background0__value={cap_val_background0:.1f}__epoch={epoch}
   monitor: cap/val/background0
   save_top_k: 1
@@ -20,7 +20,7 @@ model_checkpoint_cap_background0:
 
 model_checkpoint_cap_background1:
   _target_: pytorch_lightning.callbacks.ModelCheckpoint
-  dirpath: '${paths.root_dir}/checkpoints/${experiment_name}/${run_name}/cap/loss_total_full_rate0.25/max'
+  dirpath: '${paths.root_dir}/checkpoints/${experiment_name}/${run_name}/cap/loss_total_full_rate0.25kHz/max'
   filename: ds=background1__value={cap_val_background1:.1f}__epoch={epoch}
   monitor: cap/val/background1
   save_top_k: 1

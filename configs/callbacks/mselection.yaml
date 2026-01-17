@@ -5,22 +5,22 @@ defaults:
   - metrics@anomaly_rate: anomaly_rate
 
   # SINGLE
-  - checkpointing@single_dataset_min: model_checkpoint_singledata
   - checkpointing@single_dataset_max: model_checkpoint_singledata
-  - checkpointing@single_dataset_last: model_checkpoint_singledata
+  - checkpointing@single_dataset_min: model_checkpoint_singledata
   - checkpointing@single_dataset_stable: model_checkpoint_singledata
+  - checkpointing@single_dataset_last: model_checkpoint_singledata
 
   # LOO
-  - checkpointing@loo_min: model_checkpoint_loo
   - checkpointing@loo_max: model_checkpoint_loo
-  - checkpointing@loo_last: model_checkpoint_loo
+  - checkpointing@loo_min: model_checkpoint_loo
   - checkpointing@loo_stable: model_checkpoint_loo
+  - checkpointing@loo_last: model_checkpoint_loo
 
   # LKO
-  - checkpointing@lko_min: model_checkpoint_lko
   - checkpointing@lko_max: model_checkpoint_lko
-  - checkpointing@lko_last: model_checkpoint_lko
+  - checkpointing@lko_min: model_checkpoint_lko
   - checkpointing@lko_stable: model_checkpoint_lko
+  - checkpointing@lko_last: model_checkpoint_lko
 
   # CAP:
   - cap@cap_callback: cap

@@ -102,7 +102,7 @@ class L1DataAwkward2Torch:
 
         numpy_array = np.empty((nevents, nconst, nfeats), dtype=np.float32)
         numpy_array = self._funnel_to_nparray(data, numpy_array)
-        paddy_array = np.empty((nevents, nconst, nfeats), dtype=np.bool)
+        paddy_array = np.empty((nevents, nconst, nfeats), dtype=bool)
         paddy_array = self._funnel_to_nparray(mask, paddy_array)
 
         return obj_name, feats, numpy_array, paddy_array

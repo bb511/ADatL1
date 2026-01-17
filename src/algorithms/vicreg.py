@@ -1,12 +1,8 @@
-from typing import Tuple, Dict, Union
-import os
-import json
-import pickle
+from typing import Tuple, Dict
 import copy
 import numpy as np
 
 import torch
-import torch.nn as nn
 import keras
 
 from src.algorithms import L1ADLightningModule
@@ -103,7 +99,7 @@ class VICReg(L1ADLightningModule):
             self._load_weights_from_lightning_ckpt(self.projector, state_dict, 'projector', False)
 
     def _setup_phi_lorentz_rotation(self) -> FastLorentzRotation:
-        """Sets up the lorents rotation on the phi feature of each object.
+        """Sets up the lorentz rotation on the phi feature of each object.
 
         First, get the indices of the phi values in the batch torch tensor.
         Then, get the l1 scales for the phi values, to turn them into real physical phi

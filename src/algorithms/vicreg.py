@@ -130,7 +130,7 @@ class VICReg(L1ADLightningModule):
         )
 
     def model_step(self, batch: Tuple[torch.Tensor]) -> Dict[str, torch.Tensor]:
-        x, m, _ = batch
+        x, _, _ = batch
         x = torch.flatten(x, start_dim=1)
 
         # Apply augmentations
@@ -160,7 +160,6 @@ class VICReg(L1ADLightningModule):
 
         loss_total += add_loss
 
-        import ipdb; ipdb.set_trace()
         return {
             "loss": loss_total,
             # Used for logging:
@@ -175,7 +174,7 @@ class VICReg(L1ADLightningModule):
             "vicreg_rep_data": self.model(x).detach(),
             **outdict_diag,
             # Used for callbacks:
-            "loss/total/full": loss_total.detach(),
+            "loss/total/full": loss_total.detach().expand(z1.shape[0]),
         }
 
     def test_step(self, batch: torch.Tensor, batch_idx: int, dataloader_idx: int = 0):

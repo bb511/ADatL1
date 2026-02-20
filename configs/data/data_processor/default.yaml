@@ -1,0 +1,22 @@
+# @package data.data_processor
+
+# How to process the extracted data specified in ~/configs/data/data_extractor.
+# This is the standard pre-processing applied in axol1tl, throughout its versions.
+
+
+_target_: src.data.components.processing.L1DataProcessor
+extracted_folder: ${data.data_extractor.cache_root_dir}/extracted/${data.data_extractor.name}
+
+# Remove events saturated in ET.
+event_filters:
+  ET: 'Et < 4095'
+
+# Mask objects with energies above certain saturation thresholds.
+object_filters:
+  muons: 'Et < 511'
+  egammas: 'Et < 511'
+  jets: 'Et < 511'
+  MET: 'Et < 4095'
+
+cache_root_dir: ${paths.data_dir}
+name: e${data.data_extractor.name}_pdefault

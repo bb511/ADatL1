@@ -1,0 +1,36 @@
+# @package data.data_extractor
+
+# Configuration of what features and objects to extract from the L1T parquet files.
+# Default configuration includes all objects and features available in the data atm.
+
+# Extracts the minimal objects/features to use in the anomaly detection pipeline.
+# This is what the initial versions of axol1tl are trained on.
+
+_target_: src.data.components.extraction.L1DataExtractor
+select_features:
+  muons: ['muonIEt', 'muonIPhi', 'muonIEta']
+  jets: ['jetIEt', 'jetIEta', 'jetIPhi']
+  egammas: ['egIEt', 'egIEta', 'egIPhi']
+  ET: ['Et']
+  MET: ['Et', 'phi']
+  HT: ['Et']
+  event_info: ['nPV_True']
+  seeds: ['L1bit']
+
+# Change the field names for easier access when processing.
+feat_name_map:
+  muons:
+    muonIEt: Et
+    muonIPhi: phi
+    muonIEta: eta
+  jets:
+    jetIEt: Et
+    jetIPhi: phi
+    jetIEta: eta
+  egammas:
+    egIEt: Et
+    egIPhi: phi
+    egIEta: eta
+
+cache_root_dir: ${paths.data_dir}
+name: minimal

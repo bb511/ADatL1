@@ -1,0 +1,46 @@
+# @package _global_
+
+defaults:
+  - _self_
+  - data: L1AD
+  - algorithm: ae
+  - trainer: default
+  - paths: default
+  - callbacks: default
+  - logger: null
+  - extras: default
+  - hydra: default
+
+  # Pass this from the script:
+  - experiment: null
+
+  # Override from experiment:
+  - override /callbacks: eval
+  - override /logger: none
+
+
+task_name: "eval" # for the logger
+
+# For the checkpoints:
+experiment_name: axov4
+run_name: test
+
+algorithm:
+  masking: null
+  features: null
+
+leave_k_out:
+  ds_keys_selected:
+    # @Patrick: you should modify this list
+    - GluGluHToBB_M-125
+    - GluGluHToGG_M-125
+    - GluGluHToGG_M-90
+    - GluGluHToTauTau_M-125
+    - GluGlutoHHto2B2WtoLNu2Q_kl-1p00_kt-1p00_c2-0p00
+
+  ds_keys_to_skip:
+    - main_train
+    - main_val
+    - main_test
+    - SingleNeutrino_E-10-gun
+    - SingleNeutrino_Pt-2To20-gun

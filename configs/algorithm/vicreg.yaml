@@ -1,0 +1,58 @@
+# @package algorithm
+
+_target_: src.algorithms.vicreg.VICReg
+
+seed: ${seed}
+diagnosis_metrics: false
+ckpt: ''
+
+feature_blur:
+  _target_: src.algorithms.components.augmentation.FastFeatureBlur
+  prob: 0.40
+  magnitude: 0.12
+  strength: 0.3
+
+object_mask:
+  _target_: src.algorithms.components.augmentation.FastObjectMask
+  prob: 0.02
+
+lorentz_rotation:
+  _target_: src.algorithms.components.augmentation.FastLorentzRotation
+  _partial_: true
+  prob: 0.3
+
+model:
+  _target_: src.algorithms.components.mlp.MLP
+  in_dim: 117
+  nodes: [64]
+  out_dim: 32
+
+projector:
+  _target_: src.algorithms.components.mlp.MLP
+  in_dim: ${algorithm.model.out_dim}
+  nodes: [256, 256]
+  out_dim: 128
+  batchnorm: true
+
+loss:
+  _target_: src.algorithms.losses.vicreg.VICRegLoss
+  inv_coef: 25
+  rvar_coef: 0.5
+  rcov_coef: 0.5
+
+optimizer:
+  _partial_: true
+  _target_: torch.optim.AdamW
+  lr: 0.0003
+  weight_decay: 1e-3
+  betas: [0.9, 0.99]
+  eps: 1e-8
+
+scheduler:
+  # here other attributes...
+  scheduler:
+    _target_: src.algorithms.schedulers.cdw.CosineWithWarmup
+    _partial_: true
+    warmup_ratio: 0.1
+    min_lr_ratio: 0.05
+    warmup_start_ratio: 1e-3

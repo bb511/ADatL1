@@ -1,0 +1,108 @@
+# @package _global_
+
+defaults:
+  - override /data: axov6
+  - override /algorithm: vicreg
+  - override /callbacks: default
+  - override /trainer: cpu
+  - override /evaluator: default
+  - override /evaluator_callbacks: default
+  - override /logger: mlflow
+
+tags: ["vicreg", "quantised"]
+
+
+experiment_name: qvicreg_training
+run_name: ${short_hash:${hydra:runtime.output_dir},12}
+
+seed: 12345
+
+algorithm:
+  # Start from set of floating point weights.
+  ckpt: ''
+  diagnosis_metrics: true
+  model:
+    _target_: src.algorithms.components.mlp.hgq_mlp
+    in_dim: 57
+    nodes: [29]
+    out_dim: 10
+    input_layer_config:
+      place: "datalane"
+      q_type: "kif"
+      i0: 6
+      f0: 8
+      trainable: false
+      ic:
+        _target_: hgq.constraints.Constant
+        value: 6
+      fc:
+        _target_: hgq.constraints.Constant
+        value: 8
+      overflow_mode: 'SAT'
+
+    output_layer_config:
+      place: 'all'
+      default_q_type: "kif"
+      i0: 6
+      f0: 8
+      trainable: false
+      ic:
+        _target_: hgq.constraints.Constant
+        value: 6
+      fc:
+        _target_: hgq.constraints.Constant
+        value: 8
+      overflow_mode: 'SAT'
+
+    ebops: true
+    final_activation: false
+
+trainer:
+  gradient_clip_algorithm: norm
+  gradient_clip_val: 1.0
+  min_epochs: 1
+  max_epochs: 30
+  limit_val_batches: 10
+  limit_test_batches: 10
+
+test: true
+
+callbacks:
+  log_data_mlflow: null
+  # Additional checkpoints for the final run (expensive).
+  knn_auprc:
+    _target_: src.callbacks.knn_auprc.KNNAUPRC
+    output_name: 'vicreg_rep_data'
+    reference_sample_size: 20_000
+    k: 10
+
+  max_knn_auprc_ckpt:
+    _target_: src.callbacks.model_checkpoint.SingleDatasetModelCheckpoint
+    dirpath: '${paths.checkpoints_dir}/${experiment_name}/${run_name}'
+    monitor: knn_auprc
+    criterion:
+      _target_: src.callbacks.checkpointing.criterion.Max
+      top_k: 1
+    skip_ds:
+      - main_val
+      - SingleNeutrino_E-10-gun
+
+evaluator:
+  ckpts:
+    last: true
+    single:
+      knn_auprc: ['max']
+
+evaluator_callbacks:
+  loss:
+    _target_: src.evaluation.callbacks.loss.LossCallback
+    loss_name: 'loss'
+    log_raw_mlflow: false
+
+  knn_auprc:
+    _target_: src.evaluation.callbacks.knn_auprc.KNNAUPRC
+    output_name: 'vicreg_rep_data'
+    reference_sample_size: 20_000
+    skip_ds: ['SingleNeutrino_E-10-gun']
+    k: 10
+    log_raw_mlflow: false

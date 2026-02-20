@@ -1,0 +1,13 @@
+_target_: src.models.components.masking.ParticleMasking
+
+object_feature_map_path: ${paths.data_dir}/mlready/${data.data_mlready.name}/${data.data_normalizer.name}/object_feature_map.json
+
+object_probs:
+  muons: 0.15
+  jets: 0.15
+  egammas: 0.15
+  MET: 0.05
+
+mask_value: 0.0
+
+training_only: true

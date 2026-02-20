@@ -1,0 +1,66 @@
+# @package _global_
+
+defaults:
+  - override /hydra/sweeper: optuna
+  - override /hydra/sweeper/sampler: motpe
+
+# choose metric which will be optimized by Optuna
+# make sure this is the correct name of some metric logged in lightning module!
+optimized_metric_config: 
+  callback:
+    name: AnomalyEfficiencyCallback
+    params:
+      target_rate: 0.25
+  direction: maximize
+  sec_metric:
+    callback:
+      name: LossCallback
+      params:
+        ckpt_ds: null # This will be filled in with the best ckpt of the main metric.
+        test_ds: main_test
+    direction: minimize
+
+# here we define Optuna hyperparameter search
+# it optimizes for value returned from function with @hydra.main decorator
+# docs: https://hydra.cc/docs/next/plugins/optuna_sweeper
+hydra:
+  mode: "MULTIRUN" # set hydra to multirun by default if this config is attached
+  sweeper:
+    _target_: hydra_plugins.hydra_optuna_sweeper.optuna_sweeper.OptunaSweeper
+
+    # storage URL to persist optimization results
+    # for example, you can use SQLite if you set 'sqlite:///example.db'
+    storage: sqlite:///optuna_logs/ae.db
+
+    # name of the study to persist optimization results
+    study_name: efficiency_vs_rmse_bs16k
+
+    # number of parallel workers
+    n_jobs: 1
+
+    # 'minimize' or 'maximize' the objective
+    direction: [maximize, minimize]
+
+    # total number of runs that will be executed
+    n_trials: 15
+
+    # choose Optuna hyperparameter sampler
+    # you can choose bayesian sampler (tpe), random search (without optimization), grid sampler, and others
+    # docs: https://optuna.readthedocs.io/en/stable/reference/samplers.html
+    sampler:
+      n_startup_trials: 3
+      consider_endpoints: true
+      n_ehvi_candidates: 256
+
+    # define hyperparameter search space. Assumes using torch.optim.AdamW
+    params:
+      algorithm.optimizer.lr: tag(log, interval(3e-5, 3e-3))
+      algorithm.loss.delta: choice(0.1, 0.3, 1.0, 3.0)
+      trainer.gradient_clip_val: choice(0.0, 0.5, 1.0, 2.0, 5.0)
+      algorithm.optimizer.betas: choice([0.9, 0.999], [0.9, 0.99])
+      algorithm.optimizer.weight_decay: choice(0.0, 1e-6, 1e-5, 1e-4, 1e-3)
+      algorithm.encoder.out_dim: choice(16, 24, 32, 48, 64, 96)
+      algorithm.encoder.nodes: choice([32], [48], [64], [32,32], [48,48], [64,32], [64, 64])
+      algorithm.input_noise_std: choice(0.0, 1e-4, 3e-4, 1e-3, 3e-3, 1e-2)
+
+      # data.batch_size: choice(4096, 8192, 16384)

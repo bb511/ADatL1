@@ -1,0 +1,5 @@
+_target_: src.losses.components.gradient.GradientPenaltyLoss
+scale: 1.0
+reduction: mean # "mean", "sum", "none"
+
+target_norm: 1.0

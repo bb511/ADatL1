@@ -1,0 +1,166 @@
+# @package _global_
+
+defaults:
+  - override /data: axov4
+  - override /algorithm: vae
+  - override /callbacks: ad_basics
+  - override /trainer: cpu
+  - override /evaluator: default
+  - override /evaluator_callbacks: ad_basics
+  - override /logger: mlflow
+
+seed: 123
+tags: ["axo_v4", "vae"]
+
+experiment_name: axov4
+run_name: ${short_hash:${hydra:runtime.output_dir},12}
+
+algorithm:
+  features: null
+  encoder:
+    _target_: src.models.encoder.VariationalEncoder
+    in_dim: 57
+    nodes: [28, 16]
+    out_dim: 8
+
+
+    init_weight:
+      _target_: src.utils.hydra.get_method
+      path: torch.nn.init.xavier_uniform_
+    init_bias:
+      _target_: src.utils.hydra.get_method
+      path: torch.nn.init.zeros_
+
+  decoder:
+    _target_: src.models.decoder.Decoder
+    in_dim: 8
+    nodes: [24, 32, 64, 128]
+    out_dim: 57
+
+    init_weight:
+      _target_: src.utils.hydra.get_method
+      path: torch.nn.init.xavier_uniform_
+    init_bias:
+      _target_: src.utils.hydra.get_method
+      path: torch.nn.init.zeros_
+    init_last_weight:
+      _target_: src.utils.hydra.get_method
+      path: torch.nn.init.uniform_
+      a: -0.05
+      b: 0.05
+    init_last_bias: null
+
+  loss:
+    _target_: src.losses.vae.AxoV4Loss
+    scale: 0.5736625791372814
+
+  optimizer:
+    _partial_: true
+    _target_: src.optimizers.lion.Lion
+    lr: 0.001
+    weight_decay: 0.0
+
+  scheduler:
+    scheduler:
+      _partial_: true
+      _target_: src.optimizers.cdrw.CDRW
+      lr0: ${algorithm.optimizer.lr}
+      s0: 32
+      t_mul: 2.0
+      m_mul: 0.65
+      alpha: 1e-6
+      warmup_epochs: 10
+
+
+trainer:
+  gradient_clip_algorithm: norm
+  gradient_clip_val: 1.0
+  min_epochs: 1
+  max_epochs: 20
+  limit_val_batches: 10
+  limit_test_batches: 10
+
+test: true
+
+callbacks:
+  log_data_mlflow: null
+  anomaly_rate:
+    metric_name: 'loss/reco/full'
+    target_rates: [0.25]
+
+  # Checkpoints
+  min_loss_total_ckpt: null
+  stable_mse_ckpt:
+    _target_: src.callbacks.model_checkpoint.SingleDatasetModelCheckpoint
+    dirpath: '${paths.checkpoints_dir}/${experiment_name}/${run_name}'
+    monitor: loss_rmse_q95
+    criterion:
+      _target_: src.callbacks.checkpointing.criterion.Stable
+      top_k: 1
+      threshold: 0.05
+      patience: 10
+    skip_ds:
+      - GluGluHTo2B_Par-MH-125
+      - GluGluHto2G_Par-MH-125
+      - GluGluHto2G_Par-MH-90
+      - GluGluHto2Tau_Par-MH-125
+      - GluGlutoHHto2B2WtoLNu2Q_Par-c2-0-kl-1-kt-1
+      - HHHto4B2Tau_Par-c3-0-d4-0
+      - HHHto6B_Par-c3-0-d4-0
+      - SUSYGluGluToBBHTo2B_Par-M-1200
+      - SUSYGluGluToBBHToBB_Par-M-120
+      - SUSYGluGluToBBHToBB_Par-M-350
+      - SUSYGluGluToBBHToBB_Par-M-600
+      - TTHTo2C_Par-MH-125
+      - TTHto2B_Par-MH-125
+      - VBFHTo2C_Par-MH-125
+      - VBFHto2B_Par-MH-125
+      - VBFHto2Tau_Par-MH-125
+      - WtoTauto3Mu
+      - ggH-suep-decay
+      - haa-4b-ma15
+      - SingleNeutrino_E-10-gun
+
+  max_rate_mse_ckpt:
+    _target_: src.callbacks.model_checkpoint.SingleDatasetModelCheckpoint
+    dirpath: '${paths.checkpoints_dir}/${experiment_name}/${run_name}'
+    monitor: loss_reco_full_rate0.25kHz
+    criterion:
+      _target_: src.callbacks.checkpointing.criterion.Max
+      top_k: 1
+    skip_ds:
+      - main_val
+      - SingleNeutrino_E-10-gun
+
+evaluator:
+  ckpts:
+    last: true
+    single:
+      loss_rmse_q95: ['stable']
+      loss_reco_full_rate0.25kHz: ['max']
+
+evaluator_callbacks:
+  anomaly_efficiency:
+    metric_name: 'loss/reco/full'
+    target_rates: [0.25]
+    log_raw_mlflow: false
+  loss:
+    _target_: src.evaluation.callbacks.loss.LossCallback
+    loss_name: 'loss/reco/sqrt_q95'
+    log_raw_mlflow: false
+  # reco:
+  #   _target_: src.evaluation.callbacks.reco.ReconstructionPlots
+  #   nbatches: 2
+  #   output_name: reconstructed_data
+  #   datamodule: true # callback needs original datamodule
+  #   ckpt_dataset: last
+  #   datasets: ['main_test', 'SingleNeutrino_E-10-gun']
+  #   log_raw_mlflow: false
+  # reco_ckpt_haa4b:
+  #   _target_: src.evaluation.callbacks.reco.ReconstructionPlots
+  #   nbatches: 2
+  #   output_name: reconstructed_data
+  #   datamodule: true # callback needs original datamodule
+  #   ckpt_dataset: haa-4b-ma15
+  #   datasets: ['main_test', 'SingleNeutrino_E-10-gun']
+  #   log_raw_mlflow: false

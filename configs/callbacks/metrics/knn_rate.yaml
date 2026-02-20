@@ -1,0 +1,9 @@
+# @package callbacks.metrics
+
+# The metric names need be specified like they are given by the model.
+_target_: src.callbacks.knn_rate.KNNRate
+output_name: "vicreg_rep_data"
+k: 10
+target_rates: [0.01, 0.1, 0.25, 0.5, 1]
+bc_rate: 28608.8064
+reference_sample_size: 10_000

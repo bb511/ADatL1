@@ -1,0 +1,6 @@
+# @package callbacks.metrics
+
+_target_: src.callbacks.rate.AnomalyRateCallback
+metric_name: "loss/total/full"
+target_rates: [0.01, 0.1, 0.25, 0.5, 1]
+bc_rate: 28608.8064

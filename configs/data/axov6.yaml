@@ -1,0 +1,38 @@
+# @package data
+
+# Data for training the axov6 model. It's 2025 data from eras E and G, processed in the
+# same way as for axov4 and axov5.
+
+defaults:
+  - /paths: data_2025E+G
+  - data_extractor: minimal
+  - data_processor: default
+  - data_normalizer: robust
+  - data_mlready: default
+  - data_awkward2torch: minimal
+  - l1_scales: default
+  - _self_
+
+_target_: src.data.L1AD_datamodule.L1ADDataModule
+
+# Fill in below with paths to folders that contain the raw data in h5 format.
+zerobias: ${paths.zerobias}
+signal: ${paths.signal}
+background: ${paths.background}
+
+# Get features to train on.
+# Select the kinematic features of each standard object.
+train_features:
+  muons: ['Et', 'eta', 'phi']
+  jets: ['Et', 'eta', 'phi']
+  egammas: ['Et', 'eta', 'phi']
+  MET: ['Et', 'phi']
+
+# The batch size of the data.
+batch_size: 16384
+
+# How many batches to split the validation data into. -1 means use batch_size
+max_val_batches: 10
+
+# Seed for shuffling the data, if any shuffling is happening.
+seed: ${seed}

@@ -1,0 +1,83 @@
+defaults:
+  - /model/encoder@encoder
+  - /model/decoder@decoder
+  
+  # Consider masking:
+  # - /model/masking@masking: multiplicity # "particle", "multiplicity", null
+
+  - _self_
+
+
+_target_: src.algorithms.wnae.WNAE
+
+
+masking: null
+
+
+features: null 
+
+
+# Specific arguments for WNAE:
+spherical: false
+clip: [0.0, 1.0]
+sampling: pcd # "cd", "pcd", "omi"
+initial_dist: gaussian # "gaussian", "uniform"
+replay: true
+replay_ratio: 0.95
+buffer_size: 10000
+
+
+sampler:
+  _target_: src.models.mcmc.LangevinSampler
+  n_steps: 50
+  step_size: 10.0
+  noise_scale: 0.05
+  temperature: 1.0
+  clip: ${algorithm.clip}
+  clip_grad: null
+  spherical: ${algorithm.spherical}
+  mh: false
+
+
+loss:
+  _target_: src.losses.components.MultiLoss
+
+  reduction: none
+
+  # Irrelevant but still for compatibility:
+  list_losses:
+    - reconstruction
+    - wasserstein
+    - nae
+
+  # The rest of the losses are imported directly from the defaults.
+  reconstruction:
+    # @Patrick: should this be the transformed one?
+    _target_: src.losses.components.reconstruction.ReconstructionLoss
+    scale: 1.0
+  wasserstein:
+    _target_: src.losses.wnae.WassersteinLoss
+    scale: 1.0
+  nae:
+    _target_: src.losses.wnae.NAE
+    scale: 1.0
+
+
+optimizer:
+  _partial_: true
+  _target_: src.optimizers.lion.Lion
+  lr: 0.001
+  weight_decay: 0.0
+
+
+scheduler:
+  # here other attributes...
+  scheduler:
+    _partial_: true
+    _target_: src.optimizers.cdrw.CDRW
+    lr0: ${algorithm.optimizer.lr} 
+    s0: 32
+    t_mul: 2.0
+    m_mul: 0.65
+    alpha: 1e-6
+    warmup_epochs: 10

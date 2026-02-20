@@ -1,0 +1,40 @@
+# Get the encoder and decoder configuration from model/ config directory to assemble
+# the auto encoder model.
+defaults:
+  - _self_
+
+_target_: src.algorithms.ae.AE
+features: null 
+
+mask: true
+input_noise_std: 0.0001
+
+encoder:
+  _target_: src.algorithms.components.encoder.Encoder
+  in_dim: 117
+  nodes: [64]
+  out_dim: 64
+
+decoder:
+  _target_: src.algorithms.components.decoder.Decoder
+  in_dim: ${algorithm.encoder.out_dim}
+  nodes: ${reverse:${algorithm.encoder.nodes}} # nodes of the encoder, but in reverse
+  out_dim: ${algorithm.encoder.in_dim}
+
+loss:
+  _target_: src.algorithms.losses.ae.HuberAELoss
+  delta: 3.0
+  reduction: none
+
+mse:
+  _target_: src.algorithms.losses.components.reconstruction.MSEReconstructionLoss
+  reduction: none
+
+optimizer:
+  _partial_: true
+  _target_: torch.optim.AdamW
+  lr: 0.0013029941778430407
+  weight_decay: 0.001
+  betas: [0.9, 0.999]
+  eps: 1e-8
+

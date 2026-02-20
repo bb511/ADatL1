@@ -1,0 +1,153 @@
+# @package _global_
+
+defaults:
+  - override /data: basis
+  - override /algorithm: ae
+  - override /callbacks: ad_basics
+  - override /trainer: cpu
+  - override /evaluator: default
+  - override /evaluator_callbacks: ad_basics
+  - override /logger: mlflow
+
+seed: 123
+tags: ["ae"]
+
+experiment_name: ae_training
+run_name: ${short_hash:${hydra:runtime.output_dir},12}
+
+data:
+  batch_size: 16384
+  max_val_batches: 10
+
+trainer:
+  gradient_clip_algorithm: norm
+  gradient_clip_val: 0.0
+  min_epochs: 1
+  max_epochs: 200
+
+test: true
+
+algorithm:
+  # The basis data processing returns 117 features.
+  encoder:
+    in_dim: 117
+
+callbacks:
+  log_data_mlflow: null
+  anomaly_rate:
+    metric_name: 'loss/mse/full'
+    target_rates: [0.25]
+
+  # Checkpoints
+  min_loss_total_ckpt: null # remove the checkpoint at the minium loss
+
+  stable_mse_ckpt:
+    _target_: src.callbacks.model_checkpoint.SingleDatasetModelCheckpoint
+    dirpath: '${paths.checkpoints_dir}/${experiment_name}/${run_name}'
+    monitor: loss_rmse_q95
+    criterion:
+      _target_: src.callbacks.checkpointing.criterion.Stable
+      top_k: 1
+      threshold: 0.05
+      patience: 10
+    ds:
+      - main_val
+
+  max_rate_mse_ckpt:
+    _target_: src.callbacks.model_checkpoint.SingleDatasetModelCheckpoint
+    dirpath: '${paths.checkpoints_dir}/${experiment_name}/${run_name}'
+    monitor: loss_mse_full_rate0.25kHz
+    criterion:
+      _target_: src.callbacks.checkpointing.criterion.Max
+      top_k: 1
+    ds:
+      - GluGluHTo2B_Par-MH-125
+      - GluGluHto2G_Par-MH-125
+      - GluGluHto2G_Par-MH-90
+      - GluGluHto2Tau_Par-MH-125
+      - GluGlutoHHto2B2WtoLNu2Q_Par-c2-0-kl-1-kt-1
+      - HHHto4B2Tau_Par-c3-0-d4-0
+      - HHHto6B_Par-c3-0-d4-0
+      - SUSYGluGluToBBHTo2B_Par-M-1200
+      - SUSYGluGluToBBHToBB_Par-M-120
+      - SUSYGluGluToBBHToBB_Par-M-350
+      - SUSYGluGluToBBHToBB_Par-M-600
+      - TTHTo2C_Par-MH-125
+      - TTHto2B_Par-MH-125
+      - VBFHTo2C_Par-MH-125
+      - VBFHto2B_Par-MH-125
+      - VBFHto2Tau_Par-MH-125
+      - WtoTauto3Mu
+      - ggH-suep-decay
+      - smj-case-A
+      - haa-4b-ma15
+
+evaluator:
+  ckpts:
+    last: true
+    single:
+      loss_rmse_q95: ['stable']
+      loss_mse_full_rate0.25kHz: ['max']
+
+evaluator_callbacks:
+  anomaly_efficiency:
+    metric_name: 'loss/mse/full'
+    target_rates: [0.25]
+    log_raw_mlflow: false
+    ds:
+      - GluGluHTo2B_Par-MH-125
+      - GluGluHto2G_Par-MH-125
+      - GluGluHto2G_Par-MH-90
+      - GluGluHto2Tau_Par-MH-125
+      - GluGlutoHHto2B2WtoLNu2Q_Par-c2-0-kl-1-kt-1
+      - HHHto4B2Tau_Par-c3-0-d4-0
+      - HHHto6B_Par-c3-0-d4-0
+      - SUSYGluGluToBBHTo2B_Par-M-1200
+      - SUSYGluGluToBBHToBB_Par-M-120
+      - SUSYGluGluToBBHToBB_Par-M-350
+      - SUSYGluGluToBBHToBB_Par-M-600
+      - TTHTo2C_Par-MH-125
+      - TTHto2B_Par-MH-125
+      - VBFHTo2C_Par-MH-125
+      - VBFHto2B_Par-MH-125
+      - VBFHto2Tau_Par-MH-125
+      - WtoTauto3Mu
+      - ggH-suep-decay
+      - smj-case-A
+      - haa-4b-ma15
+
+  loss:
+    _target_: src.evaluation.callbacks.loss.LossCallback
+    loss_name: 'loss/mse/sqrt_q95'
+    log_raw_mlflow: false
+    ds:
+      - main_test
+      - GluGluHTo2B_Par-MH-125
+      - GluGluHto2G_Par-MH-125
+      - GluGluHto2G_Par-MH-90
+      - GluGluHto2Tau_Par-MH-125
+      - GluGlutoHHto2B2WtoLNu2Q_Par-c2-0-kl-1-kt-1
+      - HHHto4B2Tau_Par-c3-0-d4-0
+      - HHHto6B_Par-c3-0-d4-0
+      - SUSYGluGluToBBHTo2B_Par-M-1200
+      - SUSYGluGluToBBHToBB_Par-M-120
+      - SUSYGluGluToBBHToBB_Par-M-350
+      - SUSYGluGluToBBHToBB_Par-M-600
+      - TTHTo2C_Par-MH-125
+      - TTHto2B_Par-MH-125
+      - VBFHTo2C_Par-MH-125
+      - VBFHto2B_Par-MH-125
+      - VBFHto2Tau_Par-MH-125
+      - WtoTauto3Mu
+      - ggH-suep-decay
+      - smj-case-A
+      - haa-4b-ma15
+
+  reco:
+    _target_: src.evaluation.callbacks.reco.ReconstructionPlots
+    nbatches: 2
+    output_name: reconstructed_data
+    datamodule: true # callback needs original datamodule
+    ckpt_dataset: last
+    datasets: ['main_test', 'SingleNeutrino_E-10-gun']
+    log_raw_mlflow: false

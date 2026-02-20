@@ -1,0 +1,159 @@
+# @package _global_
+
+defaults:
+  - override /data: axov4
+  - override /algorithm: vicreg
+  - override /callbacks: default
+  - override /trainer: cpu
+  - override /evaluator: default
+  - override /evaluator_callbacks: default
+  - override /logger: mlflow
+
+tags: ["axov5", "vicreg"]
+
+
+experiment_name: vicreg_axov5
+run_name: ${short_hash:${hydra:runtime.output_dir},12}
+
+seed: 12345
+
+algorithm:
+  feature_blur:
+    prob: 0.9004016520359364
+    magnitude: 0.92685112547458
+    strength: 0.749655944679925
+
+
+  object_mask:
+    prob: 0.5709886168264394
+
+  lorentz_rotation:
+    _partial_: true
+    prob: 0.5
+
+  model:
+    in_dim: 57
+    nodes: [29]
+    out_dim: 10
+    batchnorm: false
+
+  # To run a quantised model training, comment out the model entry above and uncomment
+  # what is below this comment.
+
+  # Quantised model parameters.
+  # model:
+  #   _target_: src.algorithms.components.mlp.hgq_mlp
+  #   in_dim: 57
+  #   nodes: [29]
+  #   out_dim: 10
+  #   input_layer_config:
+  #     place: "datalane"
+  #     q_type: "kif"
+  #     i0: 6
+  #     f0: 8
+  #     trainable: false
+  #     ic:
+  #       _target_: hgq.constraints.Constant
+  #       value: 6
+  #     fc:
+  #       _target_: hgq.constraints.Constant
+  #       value: 8
+  #     overflow_mode: 'SAT'
+
+  #   output_layer_config:
+  #     place: 'all'
+  #     default_q_type: "kif"
+  #     i0: 6
+  #     f0: 8
+  #     trainable: false
+  #     ic:
+  #       _target_: hgq.constraints.Constant
+  #       value: 6
+  #     fc:
+  #       _target_: hgq.constraints.Constant
+  #       value: 8
+  #     overflow_mode: 'SAT'
+
+  projector:
+    in_dim: 10
+    nodes: []
+    out_dim: 40
+    batchnorm: true
+
+  loss:
+    inv_coef: 50
+    rvar_coef: 1
+    rcov_coef: 0.02
+
+  optimizer:
+    _partial_: true
+    _target_: torch.optim.Adam
+    lr: 0.0001033146150433934
+    weight_decay: 0
+    betas: [0.9, 0.99]
+    eps: 1e-8
+
+  scheduler:
+    # here other attributes...
+    scheduler:
+      _target_: src.optimizers.cdrw.CDRW
+      _partial_: true
+      lr0: 0.0001033146150433934
+      s0: 32
+      t_mul: 2.0
+      m_mul: 0.5
+      alpha: 0.0
+      warmup_epochs: 10
+
+  diagnosis_metrics: true
+
+trainer:
+  gradient_clip_algorithm: norm
+  gradient_clip_val: 0.0
+  min_epochs: 1
+  max_epochs: 10
+  limit_val_batches: 10
+  limit_test_batches: 10
+
+test: true
+
+callbacks:
+  log_data_mlflow: null
+  # Additional checkpoints for the final run (expensive).
+  knn_auprc:
+    _target_: src.callbacks.knn_auprc.KNNAUPRC
+    output_name: 'vicreg_rep_data'
+    reference_sample_size: 20_000
+    k: 10
+
+  max_knn_auprc_ckpt:
+    _target_: src.callbacks.model_checkpoint.SingleDatasetModelCheckpoint
+    dirpath: '${paths.checkpoints_dir}/${experiment_name}/${run_name}'
+    monitor: knn_auprc
+    criterion:
+      _target_: src.callbacks.checkpointing.criterion.Max
+      top_k: 1
+    skip_ds:
+      - main_val
+      - SingleNeutrino_E-10-gun
+
+evaluator:
+  ckpts:
+    last: true
+    # single: null
+    single:
+      knn_auprc: ['max']
+
+evaluator_callbacks:
+  loss:
+    _target_: src.evaluation.callbacks.loss.LossCallback
+    loss_name: 'loss'
+    log_raw_mlflow: false
+
+  knn_auprc:
+    _target_: src.evaluation.callbacks.knn_auprc.KNNAUPRC
+    output_name: 'vicreg_rep_data'
+    reference_sample_size: 20_000
+    skip_ds: ['SingleNeutrino_E-10-gun']
+    k: 10
+    log_raw_mlflow: false

@@ -1,0 +1,6 @@
+_target_: src.losses.dipvae.DIPVAELoss
+scale: 1.0
+reduction: mean # "mean", "sum", "none"
+
+lambda_diag: 10.0
+lambda_offdiag: 5.0

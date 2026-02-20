@@ -1,0 +1,194 @@
+# @package _global_
+
+defaults:
+  - override /data: axov4
+  - override /algorithm: vae
+  - override /callbacks: ad_basics
+  - override /trainer: cpu
+  - override /evaluator: default
+  - override /evaluator_callbacks: ad_basics
+  - override /logger: mlflow
+
+seed: 123
+tags: ["axo_v5", "vicreg", "vae"]
+
+experiment_name: axov5
+run_name: ${short_hash:${hydra:runtime.output_dir},12}
+
+algorithm:
+  # The input to the VAE is a vicreg output.
+  features:
+    _target_: src.algorithms.components.features.FeaturesFromCkpt
+    ckpt_path: ???
+    attr: model
+    litmodule_cls:
+      _target_: hydra.utils.get_class
+      path: src.algorithms.vicreg.VICReg
+
+  encoder:
+    _target_: src.algorithms.components.encoder.VariationalEncoder
+    in_dim: 10
+    nodes: [9, 6]
+    out_dim: 4
+
+  decoder:
+    _target_: src.algorithms.components.decoder.Decoder
+    in_dim: ${algorithm.encoder.out_dim}
+    nodes: [6, 9]
+    out_dim: ${algorithm.encoder.in_dim}
+
+  # To run the quantised model, comment the above encoder and decoder entries and
+  # uncomment the below entries.
+
+  # Quantised model parameters.
+  # encoder:
+  #   _target_: src.algorithms.components.encoder.hgq_variational_encoder
+  #   in_dim: 10
+  #   nodes: [9, 6]
+  #   out_dim: 4
+  #   output_layer_config:
+  #     place: 'all'
+  #     default_q_type: "kif"
+  #     i0: 6
+  #     f0: 8
+  #     trainable: false
+  #     ic:
+  #       _target_: hgq.constraints.Constant
+  #       value: 6
+  #     fc:
+  #       _target_: hgq.constraints.Constant
+  #       value: 8
+  #     overflow_mode: 'SAT'
+  #   ebops: true
+
+  # decoder:
+  #   _target_: src.algorithms.components.decoder.hgq_decoder
+  #   in_dim: ${algorithm.encoder.out_dim}
+  #   nodes: [6, 9]
+  #   out_dim: ${algorithm.encoder.in_dim}
+  #   output_layer_config:
+  #     place: 'all'
+  #     default_q_type: "kif"
+  #     i0: 6
+  #     f0: 8
+  #     trainable: false
+  #     ic:
+  #       _target_: hgq.constraints.Constant
+  #       value: 6
+  #     fc:
+  #       _target_: hgq.constraints.Constant
+  #       value: 8
+  #     overflow_mode: 'SAT'
+  #   ebops: true
+
+  kl_warmup_frac: 0.0
+  loss:
+    kl_scale: 1
+
+  scheduler:
+    scheduler:
+      _partial_: true
+      _target_: src.optimizers.cdrw.CDRW
+      lr0: ${algorithm.optimizer.lr}
+      s0: 32
+      t_mul: 2.0
+      m_mul: 0.65
+      alpha: 1e-6
+      warmup_epochs: 10
+
+  mask: false
+
+trainer:
+  gradient_clip_algorithm: norm
+  gradient_clip_val: 0.0
+  min_epochs: 1
+  max_epochs: 150
+  limit_val_batches: 10
+  limit_test_batches: 10
+
+test: true
+
+callbacks:
+  log_data_mlflow: null
+  anomaly_rate:
+    metric_name: 'loss/reco/full'
+    target_rates: [0.25]
+
+  # Checkpoints
+  min_loss_total_ckpt: null
+  stable_mse_ckpt:
+    _target_: src.callbacks.model_checkpoint.SingleDatasetModelCheckpoint
+    dirpath: '${paths.checkpoints_dir}/${experiment_name}/${run_name}'
+    monitor: loss_rmse_q95
+    criterion:
+      _target_: src.callbacks.checkpointing.criterion.Stable
+      top_k: 1
+      threshold: 0.05
+      patience: 10
+    skip_ds:
+      - GluGluHTo2B_Par-MH-125
+      - GluGluHto2G_Par-MH-125
+      - GluGluHto2G_Par-MH-90
+      - GluGluHto2Tau_Par-MH-125
+      - GluGlutoHHto2B2WtoLNu2Q_Par-c2-0-kl-1-kt-1
+      - HHHto4B2Tau_Par-c3-0-d4-0
+      - HHHto6B_Par-c3-0-d4-0
+      - SUSYGluGluToBBHTo2B_Par-M-1200
+      - SUSYGluGluToBBHToBB_Par-M-120
+      - SUSYGluGluToBBHToBB_Par-M-350
+      - SUSYGluGluToBBHToBB_Par-M-600
+      - TTHTo2C_Par-MH-125
+      - TTHto2B_Par-MH-125
+      - VBFHTo2C_Par-MH-125
+      - VBFHto2B_Par-MH-125
+      - VBFHto2Tau_Par-MH-125
+      - WtoTauto3Mu
+      - ggH-suep-decay
+      - haa-4b-ma15
+      - SingleNeutrino_E-10-gun
+
+  max_rate_mse_ckpt:
+    _target_: src.callbacks.model_checkpoint.SingleDatasetModelCheckpoint
+    dirpath: '${paths.checkpoints_dir}/${experiment_name}/${run_name}'
+    monitor: loss_reco_full_rate0.25kHz
+    criterion:
+      _target_: src.callbacks.checkpointing.criterion.Max
+      top_k: 1
+    skip_ds:
+      - main_val
+      - SingleNeutrino_E-10-gun
+
+evaluator:
+  ckpts:
+    last: true
+    single:
+      loss_rmse_q95: ['stable']
+      loss_reco_full_rate0.25kHz: ['max']
+
+evaluator_callbacks:
+  anomaly_efficiency:
+    metric_name: 'loss/reco/full'
+    target_rates: [0.01, 0.1, 0.25, 0.5, 1]
+    log_raw_mlflow: false
+
+  anomaly_efficiency_pure:
+    _target_: src.evaluation.callbacks.efficiency.AnomalyEfficiencyCallback
+    metric_name: 'loss/reco/full'
+    target_rates: [0.01, 0.1, 0.25, 0.5, 1]
+    bc_rate: 28608.8064
+    log_raw_mlflow: false
+    pure_thres: true
+
+  loss:
+    _target_: src.evaluation.callbacks.loss.LossCallback
+    loss_name: 'loss/reco/sqrt_q95'
+    log_raw_mlflow: false
+
+  reco:
+    _target_: src.evaluation.callbacks.reco.ReconstructionPlots
+    nbatches: 2
+    output_name: reconstructed_data
+    datamodule: true # callback needs original datamodule
+    ckpt_dataset: last
+    datasets: ['main_test', 'SingleNeutrino_E-10-gun']
+    log_raw_mlflow: false

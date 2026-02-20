@@ -1,0 +1,3 @@
+_target_: src.losses.components.reconstruction.CylPtPzReconstructionLoss
+scale: 1.0
+reduction: none # "mean", "sum", "none"

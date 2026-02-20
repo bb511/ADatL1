@@ -1,0 +1,9 @@
+_target_: src.losses.bvae.BetaVAELoss
+scale: 1.0
+reduction: mean # "mean", "sum", "none"
+
+beta: 4.0
+gamma: 1.0
+max_capacity: 25.0
+capacity_leadin: 100000
+distance: kl # "kl", "mmd"

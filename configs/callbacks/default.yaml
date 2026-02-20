@@ -1,0 +1,17 @@
+# @package callbacks
+
+defaults:
+  - util@model_summary: model_summary
+  - util@rich_progress_bar: rich_progress_bar
+  - util@log_data_mlflow: log_data_mlflow
+  - util@clear_ckpts: clear_ckpts
+  - checkpointing@last_epoch_ckpt: model_checkpoint
+  - _self_
+
+model_summary:
+  max_depth: -1
+
+last_epoch_ckpt:
+  dirpath: '${paths.checkpoints_dir}/${experiment_name}/${run_name}/'
+  filename: last
+  save_last: true

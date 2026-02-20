@@ -1,0 +1,22 @@
+# @package evaluator_callbacks.metrics
+
+_target_: src.evaluation.callbacks.cap.CAP
+metric_name: 'loss/total/full'
+dataset_1: ???
+dataset_2: ???
+log_raw_mlflow: true
+cap_metric_config:
+  beta0: 1.0
+  normalization_type: sigmoid
+  normalization_params: null
+  energy_type: baseline
+  energy_params: null
+  regularization_type: none
+  regularization_params: null
+  binary: True
+  lr: 0.01
+  n_epochs: 50
+  batch_size: 16384
+  normalize_gradients: False
+  process_group: null
+  dist_sync_fn: null

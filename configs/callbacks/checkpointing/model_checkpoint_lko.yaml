@@ -1,0 +1,30 @@
+_target_: src.callbacks.model_checkpoint.LeaveKOutModelCheckpoint
+dirpath: '${paths.root_dir}/checkpoints/${experiment_name}/${run_name}'
+ds:
+  - GluGluHTo2B_Par-MH-125
+  - GluGluHto2G_Par-MH-125
+  - GluGluHto2G_Par-MH-90
+  - GluGluHto2Tau_Par-MH-125
+  - GluGlutoHHto2B2WtoLNu2Q_Par-c2-0-kl-1-kt-1
+  - HHHto4B2Tau_Par-c3-0-d4-0
+  - HHHto6B_Par-c3-0-d4-0
+  - SUSYGluGluToBBHTo2B_Par-M-1200
+  - SUSYGluGluToBBHToBB_Par-M-120
+  - SUSYGluGluToBBHToBB_Par-M-350
+  - SUSYGluGluToBBHToBB_Par-M-600
+  - TTHTo2C_Par-MH-125
+  - TTHto2B_Par-MH-125
+  - VBFHTo2C_Par-MH-125
+  - VBFHto2B_Par-MH-125
+  - VBFHto2Tau_Par-MH-125
+  - WtoTauto3Mu
+  - ggH-suep-decay
+  - smj-case-A
+  - haa-4b-ma15
+
+selected_datasets:
+  - GluGluHToBB_M-125
+  - GluGluHToGG_M-125
+  - GluGluHToGG_M-90
+  - GluGluHToTauTau_M-125
+  - GluGlutoHHto2B2WtoLNu2Q_kl-1p00_kt-1p00_c2-0p00

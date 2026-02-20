@@ -1,0 +1,67 @@
+# @package _global_
+
+# example hyperparameter optimization of some experiment with Optuna:
+# python train.py -m hparams_search=mnist_optuna experiment=example
+
+defaults:
+  - override /hydra/sweeper: optuna
+  - override /hydra/sweeper/sampler: motpe
+
+# choose metric which will be optimized by Optuna
+# make sure this is the correct name of some metric logged in lightnin  g module!
+optimized_metric_config: 
+  callback:
+    name: AnomalyEfficiencyCallback
+    params:
+      target_rate: 0.25
+  direction: maximize
+  sec_metric:
+    callback:
+      name: LossCallback
+      params:
+        ckpt_ds: null # This will be filled in with the best ckpt of the main metric.
+        test_ds: main_test
+    direction: minimize
+
+# here we define Optuna hyperparameter search
+# it optimizes for value returned from function with @hydra.main decorator
+# docs: https://hydra.cc/docs/next/plugins/optuna_sweeper
+hydra:
+  mode: "MULTIRUN" # set hydra to multirun by default if this config is attached
+  sweeper:
+    _target_: hydra_plugins.hydra_optuna_sweeper.optuna_sweeper.OptunaSweeper
+
+    # storage URL to persist optimization results
+    # for example, you can use SQLite if you set 'sqlite:///example.db'
+    storage: sqlite:///optuna_logs/vae.db
+
+    # name of the study to persist optimization results
+    study_name: test
+
+    # number of parallel workers
+    n_jobs: 1
+
+    # 'minimize' or 'maximize' the objective
+    direction: [maximize, minimize]
+
+    # total number of runs that will be executed
+    n_trials: 40
+
+    # choose Optuna hyperparameter sampler
+    # you can choose bayesian sampler (tpe), random search (without optimization), grid sampler, and others
+    # docs: https://optuna.readthedocs.io/en/stable/reference/samplers.html
+    sampler:
+      n_startup_trials: 30
+      consider_endpoints: true
+      n_ehvi_candidates: 256
+
+    # define hyperparameter search space. Assumes using torch.optim.AdamW
+    params:
+      trainer.gradient_clip_val: choice(0.0, 0.5, 1.0, 2.0, 5.0)
+      algorithm.optimizer.betas: choice([0.9, 0.999], [0.9, 0.99], [0.95, 0.999], [0.95, 0.99])
+      algorithm.optimizer.weight_decay: tag(log, interval(1e-8, 1e-3))
+      algorithm.optimizer.eps: choice(1e-8, 1e-7)
+      algorithm.optimizer.lr: tag(log, interval(3e-5, 3e-3))
+      algorithm.loss.kl_scale: tag(log, interval(3e-5, 2e-3))
+      algorithm.kl_warmup_frac: choice(0.0, 0.05, 0.1, 0.2, 0.3)
+      algorithm.encoder.out_dim: choice(16, 24, 32, 48, 64, 96)

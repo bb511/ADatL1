@@ -1,0 +1,9 @@
+_target_: src.models.components.masking.MultiplicityMasking
+
+object_feature_map_path: ${paths.data_dir}/mlready/${data.data_mlready.name}/${data.data_normalizer.name}/object_feature_map.json
+
+percentile: 0.75
+
+mask_value: 0.0
+
+training_only: true

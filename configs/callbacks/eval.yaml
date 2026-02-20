@@ -1,0 +1,22 @@
+# @package callbacks
+
+defaults:
+  - default
+  - cap@cap_callback: cap
+  - _self_
+
+model_summary:
+  max_depth: -1
+
+cap_callback:
+  _target_: capmetric.callback.ApproximationCapacityCallback
+  data_pairs:
+    baseline:
+      - main_test # ZB_run381148-381149
+      - main_test
+    background0:
+      - main_test # ZB_run381148-381149
+      - SingleNeutrino_E-10-gun
+    background1:
+      - main_test # ZB_run381148-381149
+      - SingleNeutrino_Pt-2To20-gun

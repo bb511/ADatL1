@@ -1,0 +1,57 @@
+# @package data.data_extractor
+
+# Configuration of what features and objects to extract from the L1T data h5 files.
+
+_target_: src.data.components.extraction.L1DataExtractor
+# Default configuration includes all objects and features available in the data atm.
+select_features:
+  muons: [
+    'muonIPhiAtVtx', 'muonIEt', 'muonQual',
+    'muonIEtaAtVtx', 'muonChg', 'muonTfMuonIdx',
+    'muonIPhi', 'muonIEta', 'muonIEtUnconstrained'
+  ]
+  jets: ['jetIEt', 'jetIEta', 'jetIPhi', 'jetHwQual', 'jetRawEt']
+  egammas: ['egIEt', 'egIEta', 'egIPhi', 'egIso']
+  taus: ['tauIEt', 'tauIEta', 'tauIPhi', 'tauIso']
+  ET: ['Et', 'ETTEM']
+  HT: ['Et', 'tower_count']
+  MET: ['Et', 'phi']
+  MHT: ['Et', 'phi']
+  FET: ['Et', 'phi']
+  FHT: ['Et', 'phi']
+  cicada: ['CICADAScore']
+  event_info: 'none'
+  seeds: 'none'
+
+# Change the field names for easier access when processing.
+feat_name_map:
+  muons:
+    muonIEt: Et
+    muonIPhiAtVtx: phi_vtx
+    muonIEtaAtVtx: eta_vtx
+    muonIPhi: phi
+    muonIEta: eta
+    muonQual: quality
+    muonChg: charge
+    muonTfMuonIdx: idx
+    muonIEtUnconstrained: rawEt
+  jets:
+    jetIEt: Et
+    jetIPhi: phi
+    jetIEta: eta
+    jetHwQual: quality
+    jetRawEt: rawEt
+  egammas:
+    egIEt: Et
+    egIPhi: phi
+    egIEta: eta
+    egIso: iso
+  taus:
+    tauIEt: Et
+    tauIPhi: phi
+    tauIEta: eta
+    tauIso: iso
+
+
+cache_root_dir: ${paths.data_dir}
+name: default

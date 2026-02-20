@@ -4,13 +4,11 @@
 # Base: OS + Python + venv
 ############################
 FROM registry.cern.ch/ngt/lxplus-like:9 AS base
-
 USER root
 
 RUN dnf install -y python3.10 python3.10-pip python3.10-devel \
  && dnf clean all
 
-USER 1000
 
 ENV VIRTUAL_ENV=/venv \
     PATH=/venv/bin:$PATH \

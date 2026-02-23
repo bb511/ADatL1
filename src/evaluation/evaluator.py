@@ -243,6 +243,7 @@ class Evaluator:
         available_callbacks = {
             cb.__class__.__name__: cb for cb in self.evaluator.callbacks
         }
+        print(self.evaluator.callbacks)
         try:
             cb = available_callbacks[target_callback_name]
         except KeyError:

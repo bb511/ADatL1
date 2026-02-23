@@ -138,9 +138,10 @@ class VICReg(L1ADLightningModule):
         x1 = self.lorentz_rot["1"](self.obj_masks["1"](self.feat_blurs["1"](x1)))
         x2 = self.lorentz_rot["2"](self.obj_masks["2"](self.feat_blurs["2"](x2)))
 
-        # Get projections
-        z1 = self.projector(self.model(x1))
-        z2 = self.projector(self.model(x2))
+        h1 = self.model(x1)
+        h2 = self.model(x2)
+        z1 = self.projector(h1)
+        z2 = self.projector(h2)
         del x1, x2
 
         # Compute loss and return
@@ -156,7 +157,7 @@ class VICReg(L1ADLightningModule):
             z1_var_min = z1.var(dim=0).min()
             z1_var_median = z1.var(dim=0).median()
             z1_var_max = z1.var(dim=0).max()
-            outdict_diag = self._compute_diagnosis_metrics(z1, z2)
+            outdict_diag = self._compute_diagnosis_metrics(h1, h2)
 
         return {
             "loss": loss_total,
@@ -206,45 +207,46 @@ class VICReg(L1ADLightningModule):
             **diag_entries,
         }
 
-    def _compute_diagnosis_metrics(self, z1: torch.Tensor, z2: torch.Tensor):
+    def _compute_diagnosis_metrics(self, h1: torch.Tensor, h2: torch.Tensor):
         """Compute metrics to diagnose what the vicreg has learnt."""
         diag_outdict = {}
         if not self.diagnosis_metrics:
             return diag_outdict
 
-        z1_efr, z1_max_sv = self._effective_rank_svd(z1)
-        z2_efr, z2_max_sv = self._effective_rank_svd(z2)
-        rep_eff_rank = min(z1_efr, z2_efr)
-        max_sv = max(z1_max_sv, z2_max_sv)
-        diag_outdict.update({"diag_eff_rank": rep_eff_rank, "diag_max_sv": max_sv})
+        h1_efr, h1_max_ev = self._effective_rank_cov(h1)
+        h2_efr, h2_max_ev = self._effective_rank_cov(h2)
+        rep_eff_rank = min(h1_efr, h2_efr)
+        max_ev = max(h1_max_ev, h2_max_ev)
+        diag_outdict.update({"diag_eff_rank": rep_eff_rank, "diag_max_sv": max_ev})
 
-        z1_cos_similarity = self._average_pairwise_cosine(z1)
-        z2_cos_similarity = self._average_pairwise_cosine(z2)
-        avg_cos_sim = max(z1_cos_similarity, z2_cos_similarity)
+        h1_cos_similarity = self._average_pairwise_cosine(h1)
+        h2_cos_similarity = self._average_pairwise_cosine(h2)
+        avg_cos_sim = max(h1_cos_similarity, h2_cos_similarity)
         diag_outdict.update({"diag_avg_cos_sim": avg_cos_sim})
 
-        pair_cos = torch.nn.functional.cosine_similarity(z1, z2, dim=1).mean().item()
+        pair_cos = torch.nn.functional.cosine_similarity(h1, h2, dim=1).mean().item()
         diag_outdict.update({"diag_avg_pair_cos_sim": pair_cos})
 
         return diag_outdict
 
     @torch.no_grad()
-    def _effective_rank_svd(self, z, eps=1e-12):
+    def _effective_rank_cov(self, z: torch.Tensor, eps: float = 1e-12):
         zc = z - z.mean(dim=0, keepdim=True)
-        batch_size = zc.shape[0]
-        # singular values of [B, D] matrix
-        s = torch.linalg.svdvals(zc)  # length = min(B, D)
-        max_sv = (s[0] ** 2 / (batch_size - 1)).item()
+        B = zc.shape[0]
+        C = (zc.T @ zc) / (B - 1)
 
-        eigvals = (s**2).clamp_min(eps)
-
-        trace_sum = eigvals.sum()
-        trace_squared_sum = (eigvals**2).sum()
-
-        return (trace_sum**2 / trace_squared_sum).item(), max_sv
+        eigvals = torch.linalg.eigvalsh(C).clamp_min(eps)
+        trace = eigvals.sum()
+        trace2 = (eigvals ** 2).sum()
+        r_eff = (trace ** 2 / trace2).item()
+        max_ev = eigvals.max().item()
+        return r_eff, max_ev
 
     @torch.no_grad()
-    def _average_pairwise_cosine(self, z):
+    def _average_pairwise_cosine(self, z: torch.Tensor, max_points: int = 2048):
+        if z.shape[0] > max_points:
+            z = z[:max_points]
+
         z = z - z.mean(dim=0, keepdim=True)
         z = torch.nn.functional.normalize(z, dim=1)  # L2 norm
         sim = z @ z.T  # [B, B]

@@ -1,0 +1,142 @@
+# @package _global_
+
+defaults:
+  - override /data: basis
+  - override /algorithm: vicreg
+  - override /callbacks: default
+  - override /trainer: cpu
+  - override /evaluator: default
+  - override /evaluator_callbacks: default
+  - override /logger: mlflow
+
+tags: ["vicreg"]
+
+experiment_name: vicreg_training
+run_name: ${short_hash:${hydra:runtime.output_dir},12}
+
+seed: 12345
+
+data:
+  batch_size: 16384
+  max_val_batches: 10
+
+trainer:
+  gradient_clip_algorithm: norm
+  gradient_clip_val: 0.0
+  min_epochs: 1
+  max_epochs: 200
+
+test: true
+
+algorithm:
+  diagnosis_metrics: false
+  model:
+    in_dim: 117
+
+callbacks:
+  log_data_mlflow: null
+  # Additional checkpoints for the final run (expensive).
+  knn_rates:
+    _target_: src.callbacks.knn_rate.KNNRate
+    output_name: 'vicreg_rep_data'
+    reference_sample_size: 40_000
+    bkg_sample_size: 500_000
+    target_rates: [0.25]
+    bc_rate: 28608.8064
+    k: 50
+
+  max_knn_rate_ckpt:
+    _target_: src.callbacks.model_checkpoint.SingleDatasetModelCheckpoint
+    dirpath: '${paths.checkpoints_dir}/${experiment_name}/${run_name}'
+    monitor: knnradius_rate0.25kHz
+    criterion:
+      _target_: src.callbacks.checkpointing.criterion.Max
+      top_k: 1
+    ds:
+      - GluGluHTo2B_Par-MH-125
+      - GluGluHto2G_Par-MH-125
+      - GluGluHto2G_Par-MH-90
+      - GluGluHto2Tau_Par-MH-125
+      - GluGlutoHHto2B2WtoLNu2Q_Par-c2-0-kl-1-kt-1
+      - HHHto4B2Tau_Par-c3-0-d4-0
+      - HHHto6B_Par-c3-0-d4-0
+      - SUSYGluGluToBBHTo2B_Par-M-1200
+      - SUSYGluGluToBBHToBB_Par-M-120
+      - SUSYGluGluToBBHToBB_Par-M-350
+      - SUSYGluGluToBBHToBB_Par-M-600
+      - TTHTo2C_Par-MH-125
+      - TTHto2B_Par-MH-125
+      - VBFHTo2C_Par-MH-125
+      - VBFHto2B_Par-MH-125
+      - VBFHto2Tau_Par-MH-125
+      - WtoTauto3Mu
+      - ggH-suep-decay
+      - smj-case-A
+      - haa-4b-ma15
+
+evaluator:
+  ckpts:
+    last: true
+    single:
+      knnradius_rate0.25kHz: ['max']
+
+evaluator_callbacks:
+  loss:
+    _target_: src.evaluation.callbacks.loss.LossCallback
+    loss_name: 'loss'
+    log_raw_mlflow: false
+    ds:
+      - main_test
+      - GluGluHTo2B_Par-MH-125
+      - GluGluHto2G_Par-MH-125
+      - GluGluHto2G_Par-MH-90
+      - GluGluHto2Tau_Par-MH-125
+      - GluGlutoHHto2B2WtoLNu2Q_Par-c2-0-kl-1-kt-1
+      - HHHto4B2Tau_Par-c3-0-d4-0
+      - HHHto6B_Par-c3-0-d4-0
+      - SUSYGluGluToBBHTo2B_Par-M-1200
+      - SUSYGluGluToBBHToBB_Par-M-120
+      - SUSYGluGluToBBHToBB_Par-M-350
+      - SUSYGluGluToBBHToBB_Par-M-600
+      - TTHTo2C_Par-MH-125
+      - TTHto2B_Par-MH-125
+      - VBFHTo2C_Par-MH-125
+      - VBFHto2B_Par-MH-125
+      - VBFHto2Tau_Par-MH-125
+      - WtoTauto3Mu
+      - ggH-suep-decay
+      - smj-case-A
+      - haa-4b-ma15
+
+  knn_effs:
+    _target_: src.evaluation.callbacks.knn_effs.KNNEffs
+    output_name: 'vicreg_rep_data'
+    reference_sample_size: 40_000
+    bkg_sample_size: 500_000
+    bc_rate: 28608.8064
+    target_rates: [0.25]
+    ds:
+      - main_test
+      - GluGluHTo2B_Par-MH-125
+      - GluGluHto2G_Par-MH-125
+      - GluGluHto2G_Par-MH-90
+      - GluGluHto2Tau_Par-MH-125
+      - GluGlutoHHto2B2WtoLNu2Q_Par-c2-0-kl-1-kt-1
+      - HHHto4B2Tau_Par-c3-0-d4-0
+      - HHHto6B_Par-c3-0-d4-0
+      - SUSYGluGluToBBHTo2B_Par-M-1200
+      - SUSYGluGluToBBHToBB_Par-M-120
+      - SUSYGluGluToBBHToBB_Par-M-350
+      - SUSYGluGluToBBHToBB_Par-M-600
+      - TTHTo2C_Par-MH-125
+      - TTHto2B_Par-MH-125
+      - VBFHTo2C_Par-MH-125
+      - VBFHto2B_Par-MH-125
+      - VBFHto2Tau_Par-MH-125
+      - WtoTauto3Mu
+      - ggH-suep-decay
+      - smj-case-A
+      - haa-4b-ma15
+
+    k: 50
+    log_raw_mlflow: false

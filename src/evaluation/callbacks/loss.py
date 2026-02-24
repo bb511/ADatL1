@@ -23,13 +23,21 @@ class LossCallback(Callback):
         this callback to mlflow artifacts. Default is True. An html gallery of all the
         plots is made by default, so if this is set to false, one can still view the
         plots produced with this callback in the gallery.
+    :param name: String specifying the name of the callback for identification in
+        later methods that manipulate callbacks.
     """
-
-    def __init__(self, loss_name: str, ds: list[str], log_raw_mlflow: bool = True):
+    def __init__(
+        self,
+        loss_name: str,
+        ds: list[str],
+        log_raw_mlflow: bool = True,
+        name: str = 'loss'
+    ):
         self.device = None
         self.loss_name = loss_name
         self.ds = ds
         self.log_raw_mlflow = log_raw_mlflow
+        self.name = name
         self.loss_summary = defaultdict(dict)
 
     def on_test_epoch_start(self, trainer, pl_module):
@@ -49,10 +57,7 @@ class LossCallback(Callback):
         the mean loss over that batch.
         """
         dset_name = list(trainer.test_dataloaders.keys())[dataloader_idx]
-        if isinstance(outputs[self.loss_name], float):
-            batch_output = outputs[self.loss_name]
-        else:
-            batch_output = outputs[self.loss_name].detach()
+        batch_output = outputs[self.loss_name]
 
         self.dset_losses[dset_name].update(batch_output)
 
@@ -108,11 +113,18 @@ class LossCallback(Callback):
 
         Here it is the value of the self.loss_name at the given ckpt_ds which is
         evaluated at the give test_ds.
+        If the loss_summary dictionary only has 'last' as a key, then the criterion is
+        'last', i.e., only checkpoint on the last epoch. This is trated as a special
+        case and the ckpt_ds that is given to this method is returned, along with the
+        loss in the last epoch.
         """
+        if len(self.loss_summary) == 1 and 'last' in self.loss_summary:
+            return ckpt_ds, self.loss_summary['last'][test_ds]
+
         if not ckpt_ds in self.loss_summary.keys():
             raise ValueError(
-                f"Loss was not computed for {ckpt_ds} dataset. Check the configuration "
-                f"of the callback if this ds is included!"
+                f"Loss {self.loss_name} was not computed for {ckpt_ds} dataset. "
+                f"Check the configuration of the callback if this ds is included!"
             )
 
         optimized_loss = self.loss_summary[ckpt_ds][test_ds]

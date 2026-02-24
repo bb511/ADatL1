@@ -24,8 +24,9 @@ class CAP(Callback):
         this callback to mlflow artifacts. Default is True. An html gallery of all the
         plots is made by default, so if this is set to false, one can still view the
         plots produced with this callback in the gallery.
+    :param name: String specifying the name of the callback for identification in
+        later methods that manipulate callbacks.
     """
-
     def __init__(
         self,
         metric_name: str,
@@ -34,6 +35,7 @@ class CAP(Callback):
         pairing_type: str,
         cap_metric_config: dict,
         log_raw_mlflow: bool = True,
+        name: str = 'cap'
     ):
         super().__init__()
         self.device = None
@@ -43,6 +45,7 @@ class CAP(Callback):
         self.cap_metric_config = cap_metric_config
         self.pairing_fn = get_pairing_fn(pairing_type)
         self.log_raw_mlflow = log_raw_mlflow
+        self.name = name
         self.cap_summary = defaultdict(float)
 
     def on_test_start(self, trainer, pl_module):
@@ -83,8 +86,8 @@ class CAP(Callback):
         with torch.inference_mode(False):
             with torch.enable_grad():
                 # If capmetric needs gradients w.r.t. these tensors, they must require grad
-                ds1 = ds1_scores[:n].detach().clone().requires_grad_(True)
-                ds2 = ds2_scores[:n].detach().clone().requires_grad_(True)
+                ds1 = ds1_scores[:n].clone().requires_grad_(True)
+                ds2 = ds2_scores[:n].clone().requires_grad_(True)
                 self.capmetric.update(ds1, ds2)
 
     def on_test_epoch_end(self, trainer, pl_module):

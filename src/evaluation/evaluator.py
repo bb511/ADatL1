@@ -241,9 +241,9 @@ class Evaluator:
     def _get_optimized_callback(self, target_callback_name: str):
         """Get callback that returns optimized metric."""
         available_callbacks = {
-            cb.__class__.__name__: cb for cb in self.evaluator.callbacks
+            cb.name: cb for cb in self.evaluator.callbacks if hasattr(cb, "name")
         }
-        print(self.evaluator.callbacks)
+
         try:
             cb = available_callbacks[target_callback_name]
         except KeyError:
@@ -262,7 +262,9 @@ class Evaluator:
         target_callback_name = secondary_metric_config["callback"]["name"]
         cb = self._get_optimized_callback(target_callback_name)
 
-        target_callback_params["ckpt_ds"] = ckpt_ds
+        if target_callback_params["ckpt_ds"] is None:
+            target_callback_params["ckpt_ds"] = ckpt_ds
+
         _, metric_value = cb.get_optimized_metric(**target_callback_params)
         return crit_optim_direction, metric_value
 

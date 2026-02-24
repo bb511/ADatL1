@@ -35,8 +35,9 @@ class AnomalyEfficiencyCallback(Callback):
         this callback to mlflow artifacts. Default is True. An html gallery of all the
         plots is made by default, so if this is set to false, one can still view the
         plots produced with this callback in the gallery.
+    :param name: String specifying the name of the callback for identification in
+        later methods that manipulate callbacks.
     """
-
     def __init__(
         self,
         target_rates: list[int],
@@ -45,6 +46,7 @@ class AnomalyEfficiencyCallback(Callback):
         ds: list[str],
         pure_thres: bool = False,
         log_raw_mlflow: bool = True,
+        name: str = 'eff'
     ):
         super().__init__()
         self.device = None
@@ -54,6 +56,7 @@ class AnomalyEfficiencyCallback(Callback):
         self.pure_thres = pure_thres
         self.ds = set(ds)
         self.log_raw_mlflow = log_raw_mlflow
+        self.name = name
         self.eff_summary = defaultdict(lambda: defaultdict(float))
 
     def on_test_start(self, trainer, pl_module):
@@ -107,7 +110,7 @@ class AnomalyEfficiencyCallback(Callback):
         each metric across batches. The whole metric output distribution is needed to
         set a treshold that gives a certain rate.
         """
-        batch_output = outputs[self.metric_name].detach()
+        batch_output = outputs[self.metric_name]
         if self.pure_thres:
             batch_output = batch_output[~l1bit]
         self.maintest_score_data.append(batch_output)
@@ -179,13 +182,13 @@ class AnomalyEfficiencyCallback(Callback):
         """Compute batch rate of a signal dataset."""
         for target_rate in self.target_rates:
             rate_name = f"{self.dataset_name}/{target_rate}"
-            self.sig_rates[rate_name].update(outputs[self.metric_name].detach())
+            self.sig_rates[rate_name].update(outputs[self.metric_name])
 
     def _compute_bkg_batch_rate(self, outputs: dict):
         """Compute batch rate of a background data set."""
         for target_rate in self.target_rates:
             rate_name = f"{self.dataset_name}/{target_rate}"
-            self.bkg_rates[rate_name].update(outputs[self.metric_name].detach())
+            self.bkg_rates[rate_name].update(outputs[self.metric_name])
 
     def on_test_epoch_end(self, trainer, pl_module) -> None:
         """Log the anomaly rates computed on each of the data sets."""

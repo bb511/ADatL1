@@ -8,12 +8,12 @@ defaults:
 # make sure this is the correct name of some metric logged in lightning module!
 optimized_metric_config: 
   callback:
-    name: CAP
+    name: cap
     params: {}
   direction: minimize
   sec_metric:
     callback:
-      name: LossCallback
+      name: loss
       params:
         ckpt_ds: null # This will be filled in with the best ckpt of the main metric.
         test_ds: main_test
@@ -29,7 +29,7 @@ hydra:
 
     # storage URL to persist optimization results
     # for example, you can use SQLite if you set 'sqlite:///example.db'
-    storage: sqlite:///optuna_logs/ae.db
+    storage: sqlite:///logs/optuna/ae.db
 
     # name of the study to persist optimization results
     study_name: efficiency_vs_loss_bs16k

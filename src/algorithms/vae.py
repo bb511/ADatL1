@@ -1,7 +1,6 @@
 # Variational auto-encoder model implementation.
 from typing import Optional, Tuple, Dict
 
-import keras
 import numpy as np
 import torch
 from torch import nn

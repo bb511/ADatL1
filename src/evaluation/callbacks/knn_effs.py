@@ -32,8 +32,9 @@ class KNNEffs(Callback):
         this callback to mlflow artifacts. Default is True. An html gallery of all the
         plots is made by default, so if this is set to false, one can still view the
         plots produced with this callback in the gallery.
+    :param name: String specifying the name of the callback for identification in
+        later methods that manipulate callbacks.
     """
-
     def __init__(
         self,
         output_name: str,
@@ -44,6 +45,7 @@ class KNNEffs(Callback):
         reference_sample_size: int = 40_000,
         bkg_sample_size: int = 200_000,
         log_raw_mlflow: bool = True,
+        name: str = 'knn_eff'
     ):
         super().__init__()
         self.device = None
@@ -56,6 +58,7 @@ class KNNEffs(Callback):
         self.reference_sample_size = reference_sample_size
         self.bkg_sample_size = bkg_sample_size
         self.log_raw_mlflow = log_raw_mlflow
+        self.name = name
 
         self.n_bkg_scored = 0
 
@@ -98,7 +101,7 @@ class KNNEffs(Callback):
 
         _, _, _, labels = batch
         labels = self._check_labels(labels, self.dataset_name)
-        z = outputs[self.output_name].detach()
+        z = outputs[self.output_name]
 
         if self.dataset_name == "main_test":
             batch_size = labels.size(0)
@@ -361,7 +364,7 @@ class KNNEffs(Callback):
                 "except for main_test. Check this is the case."
             )
 
-        return (labels != 0).to(labels.dtype).detach()
+        return (labels != 0).to(labels.dtype)
 
     def _check_bkg_negatives(self):
         if self.n_bkg_scored == 0:

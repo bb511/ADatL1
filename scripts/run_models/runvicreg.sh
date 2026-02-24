@@ -38,6 +38,26 @@
 # HYPERPARAMETER SEARCHES.
 # =======================
 # vicreg hyperparameter search.
+# taskset -c 15-17 \
+# python3 src/train.py \
+#     -m \
+#     hydra/launcher=submitit_local \
+#     hydra.launcher.cpus_per_task=1 \
+#     hydra.launcher.gpus_per_node=4 \
+#     paths.raw_data_dir=/data/deodagiu/adl1t_data/parquet_files \
+#     experiment=vicreg \
+#     experiment_name=vicreg_search \
+#     evaluator.ckpts.single=null \
+#     logger=none \
+#     hparams_search=vicreg_optuna \
+#     hydra.sweeper.study_name=knneff_vs_loss_b16k \
+#     hydra.sweeper.n_trials=60 \
+#     hydra.sweeper.sampler.n_startup_trials=50 \
+#     trainer=gpu \
+#     trainer.max_epochs=50 \
+#     trainer.devices=[2]
+
+# vicreg agnostic hyperparameter search.
 taskset -c 15-17 \
 python3 src/train.py \
     -m \
@@ -45,12 +65,12 @@ python3 src/train.py \
     hydra.launcher.cpus_per_task=1 \
     hydra.launcher.gpus_per_node=4 \
     paths.raw_data_dir=/data/deodagiu/adl1t_data/parquet_files \
-    experiment=vicreg \
-    experiment_name=vicreg_search \
+    experiment=vicreg_agnostic \
+    experiment_name=vicreg_agnostic_search \
     evaluator.ckpts.single=null \
     logger=none \
-    hparams_search=vicreg_optuna \
-    hydra.sweeper.study_name=knneff_vs_loss_b16k \
+    hparams_search=vicreg_agnostic_optuna \
+    hydra.sweeper.study_name=effrank_vs_loss_b16k \
     hydra.sweeper.n_trials=60 \
     hydra.sweeper.sampler.n_startup_trials=50 \
     trainer=gpu \

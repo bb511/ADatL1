@@ -11,13 +11,13 @@ defaults:
 # make sure this is the correct name of some metric logged in lightnin  g module!
 optimized_metric_config: 
   callback:
-    name: AnomalyEfficiencyCallback
+    name: eff
     params:
       target_rate: 0.25
   direction: maximize
   sec_metric:
     callback:
-      name: LossCallback
+      name: loss
       params:
         ckpt_ds: null # This will be filled in with the best ckpt of the main metric.
         test_ds: main_test
@@ -33,7 +33,7 @@ hydra:
 
     # storage URL to persist optimization results
     # for example, you can use SQLite if you set 'sqlite:///example.db'
-    storage: sqlite:///optuna_logs/vae.db
+    storage: sqlite:///logs/optuna/vae.db
 
     # name of the study to persist optimization results
     study_name: test
@@ -57,11 +57,11 @@ hydra:
 
     # define hyperparameter search space. Assumes using torch.optim.AdamW
     params:
-      trainer.gradient_clip_val: choice(0.0, 0.5, 1.0, 2.0, 5.0)
+      trainer.gradient_clip_val: choice(0.0, 0.5, 1.0, 2.0)
+      algorithm.optimizer.lr: tag(log, interval(5e-5, 1e-3))
       algorithm.optimizer.betas: choice([0.9, 0.999], [0.9, 0.99], [0.95, 0.999], [0.95, 0.99])
-      algorithm.optimizer.weight_decay: tag(log, interval(1e-8, 1e-3))
-      algorithm.optimizer.eps: choice(1e-8, 1e-7)
-      algorithm.optimizer.lr: tag(log, interval(3e-5, 3e-3))
-      algorithm.loss.kl_scale: tag(log, interval(3e-5, 2e-3))
+      algorithm.optimizer.weight_decay: choice(0.0, 1e-6, 1e-5, 1e-4, 1e-3)
+      algorithm.loss.kl_scale: choice(3e-5, 1e-4, 3e-4, 1e-3, 2e-3)
       algorithm.kl_warmup_frac: choice(0.0, 0.05, 0.1, 0.2, 0.3)
+      algorithm.encoder.nodes: choice([32], [48], [64], [32,32], [48,48], [64,32], [64, 64])
       algorithm.encoder.out_dim: choice(16, 24, 32, 48, 64, 96)

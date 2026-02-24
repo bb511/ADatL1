@@ -129,10 +129,7 @@ class VICReg(L1ADLightningModule):
             normalizer=normalizer, phi_mask=phi_mask, l1_scale_phi=l1_scale_phi
         )
 
-    def model_step(self, batch: Tuple[torch.Tensor]) -> Dict[str, torch.Tensor]:
-        x, m, _, _ = batch
-        x = torch.flatten(x, start_dim=1)
-
+    def forward(self, x: torch.Tensor):
         # Apply augmentations
         x1, x2 = x.clone(), x.clone()
         x1 = self.lorentz_rot["1"](self.obj_masks["1"](self.feat_blurs["1"](x1)))
@@ -142,7 +139,14 @@ class VICReg(L1ADLightningModule):
         h2 = self.model(x2)
         z1 = self.projector(h1)
         z2 = self.projector(h2)
-        del x1, x2
+
+        return h1, h2, z1, z2
+
+    def model_step(self, batch: Tuple[torch.Tensor]) -> Dict[str, torch.Tensor]:
+        x, _, _, _ = batch
+        x = torch.flatten(x, start_dim=1)
+
+        h1, h2, z1, z2 = self.forward(x)
 
         # Compute loss and return
         loss_inv, loss_var, loss_cov, loss_total = self.loss(z1, z2)
@@ -160,32 +164,98 @@ class VICReg(L1ADLightningModule):
             outdict_diag = self._compute_diagnosis_metrics(h1, h2)
 
         return {
+            # Used for backprop:
             "loss": loss_total,
             # Used for logging:
+
+            # losses
             "loss/inv": loss_inv.detach(),
             "loss/var": loss_var.detach(),
             "loss/cov": loss_cov.detach(),
             "loss/inv/ratio": inv_ratio,
             "loss/var/ratio": var_ratio,
             "loss/cov/ratio": cov_ratio,
+
+            # Projector diagnosis:
             "z1/std": z1_std,
             "z2/std": z2_std,
             "z1/var_min": z1_var_min,
             "z2/var_median": z1_var_median,
             "z2/var_max": z1_var_max,
-            "vicreg_rep_data": self.model(x).detach(),
             **outdict_diag,
         }
+
+    def validation_step(
+        self, batch: torch.Tensor, batch_idx: int, dataloader_idx: int = 0
+    ):
+        x, _, _, _ = batch
+        x = torch.flatten(x, start_dim=1)
+
+        h1, h2, z1, z2 = self.forward(x)
+        h = self.model(x).detach()
+
+        # Compute loss and return
+        loss_inv, loss_var, loss_cov, loss_total = self.loss(z1, z2)
+        loss_total = self._add_hgq_loss(loss_total)
+
+        inv_ratio = (loss_inv / loss_total).item()
+        var_ratio = (loss_var / loss_total).item()
+        cov_ratio = (loss_cov / loss_total).item()
+        z1_std = torch.sqrt(z1.var(dim=0) + 1e-4).mean()
+        z2_std = torch.sqrt(z2.var(dim=0) + 1e-4).mean()
+        z1_var_min = z1.var(dim=0).min()
+        z1_var_median = z1.var(dim=0).median()
+        z1_var_max = z1.var(dim=0).max()
+        outdict_diag = self._compute_diagnosis_metrics(h1, h2)
+        h_efr = self._effective_rank_cov(h)
+
+        outdict = {
+            # Used for backprop:
+            "loss": loss_total,
+            # Used for logging:
+
+            # losses
+            "loss/inv": loss_inv.detach(),
+            "loss/var": loss_var.detach(),
+            "loss/cov": loss_cov.detach(),
+            "loss/inv/ratio": inv_ratio,
+            "loss/var/ratio": var_ratio,
+            "loss/cov/ratio": cov_ratio,
+
+            # Projector diagnosis:
+            "z1/std": z1_std,
+            "z2/std": z2_std,
+            "z1/var_min": z1_var_min,
+            "z2/var_median": z1_var_median,
+            "z2/var_max": z1_var_max,
+
+            # Backbone diagnosis:
+            "effective_rank": h_efr,
+            **outdict_diag,
+
+            # Used for callbacks:
+            "vicreg_rep_data": h,
+        }
+
+        self._log_dict(outdict, dataloader_idx=dataloader_idx)
+
+        return outdict
 
     def test_step(self, batch: torch.Tensor, batch_idx: int, dataloader_idx: int = 0):
         x, m, _, _ = batch
         x = torch.flatten(x, start_dim=1)
-        z = self.model(x)
 
-        loss_total = self.model_step(batch)["loss"]
+        h1, h2, z1, z2 = self.forward(x)
+        h = self.model(x).detach()
+
+        loss_inv, loss_var, loss_cov, loss_total = self.loss(z1, z2)
+        loss_total = self._add_hgq_loss(loss_total)
+
+        h_efr = self._effective_rank_cov(h)
         return {
             "loss": loss_total.detach(),
-            "vicreg_rep_data": z.detach(),
+            "vicreg_rep_data": h.detach(),
+            "effective_rank": h_efr,
         }
 
     def outlog(self, outdict: dict) -> dict:
@@ -217,7 +287,7 @@ class VICReg(L1ADLightningModule):
         h2_efr, h2_max_ev = self._effective_rank_cov(h2)
         rep_eff_rank = min(h1_efr, h2_efr)
         max_ev = max(h1_max_ev, h2_max_ev)
-        diag_outdict.update({"diag_eff_rank": rep_eff_rank, "diag_max_sv": max_ev})
+        diag_outdict.update({"diag_eff_rank": rep_eff_rank, "diag_max_ev": max_ev})
 
         h1_cos_similarity = self._average_pairwise_cosine(h1)
         h2_cos_similarity = self._average_pairwise_cosine(h2)
@@ -240,6 +310,7 @@ class VICReg(L1ADLightningModule):
         trace2 = (eigvals ** 2).sum()
         r_eff = (trace ** 2 / trace2).item()
         max_ev = eigvals.max().item()
+
         return r_eff, max_ev
 
     @torch.no_grad()

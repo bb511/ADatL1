@@ -6,3 +6,6 @@ enforce_tags: True
 
 # pretty print config tree at the start of the run using Rich library
 print_config: True
+
+# Set the matmul precision if you have tensor cores.
+matmul_precision: null

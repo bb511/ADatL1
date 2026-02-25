@@ -91,6 +91,8 @@ class Evaluator:
                 continue
 
             strat_subdir = self._get_subdir(run_folder, strategy_name)
+            if strat_subdir is None:
+                raise ValueError(f"{strategy_name} strategy not found in {run_folder}.")
             self._evaluate_strategy(strat_subdir, model, test_loader)
 
     def _evaluate_strategy(self, strategy_folder: Path, model, test_loader: dict):
@@ -107,6 +109,11 @@ class Evaluator:
 
         for metric_name in self.ckpts[self.strategy_name].keys():
             metric_subdir = self._get_subdir(strategy_folder, metric_name)
+            if metric_subdir is None:
+                raise ValueError(
+                    f"{metric_name} metric not found in {strategy_folder}. "
+                    f"Are you sure you're checkpointing on {metric_name}???"
+                )
             self._evaluate_metric(metric_subdir, model, test_loader)
 
         self.evaluator.strat_name = None
@@ -121,6 +128,7 @@ class Evaluator:
         self.metric_name = metric_folder.name
         self.evaluator.metric_name = self.metric_name
         log.info(Fore.CYAN + f"-> -> Evaluating metric '{self.metric_name}'")
+
         for criterion_name in self.ckpts[self.strategy_name][self.metric_name]:
             criterion_subdir = self._get_subdir(metric_folder, criterion_name)
             self._evaluate_criterion(criterion_subdir, model, test_loader)
@@ -188,7 +196,7 @@ class Evaluator:
         """Checks if a dir exists and returns it if true."""
         subdir = main_dir / subdir
         if not subdir.is_dir():
-            raise FileNotFoundError(f"Folder not found in {main_dir} for {subdir}.")
+            return None
 
         return subdir
 
@@ -262,10 +270,16 @@ class Evaluator:
         target_callback_name = secondary_metric_config["callback"]["name"]
         cb = self._get_optimized_callback(target_callback_name)
 
+        ckpt_was_none = False
         if target_callback_params["ckpt_ds"] is None:
             target_callback_params["ckpt_ds"] = ckpt_ds
+            ckpt_was_none = True
 
         _, metric_value = cb.get_optimized_metric(**target_callback_params)
+
+        if ckpt_was_none:
+            target_callback_params["ckpt_ds"] = None
+
         return crit_optim_direction, metric_value
 
     def _set_best_across_crit(self, value: float, *, direction: str):

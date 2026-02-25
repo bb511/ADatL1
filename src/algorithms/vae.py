@@ -105,6 +105,7 @@ class VAE(L1ADLightningModule):
             "loss/kl_raw/q999": kl_q999,
             "kl_scale": kl_current_scale,
             "loss/reco/sqrt_q95": rmse_q95,
+
             # Used for callbacks:
             "loss/total/full": total_loss.detach(),
             "loss/reco/full": reco_loss.detach(),

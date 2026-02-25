@@ -24,12 +24,13 @@ class AE(L1ADLightningModule):
         self.save_hyperparameters(
             ignore=["model", "features", "encoder", "decoder", "loss"]
         )
+        self.features = features if features is not None else nn.Identity()
+        self.features.eval()
+
         self.encoder, self.decoder = encoder, decoder
         self.mse = mse
         self.input_noise_std = input_noise_std
         self.mask = mask
-        self.features = features if features is not None else nn.Identity()
-        self.features.eval()
 
     def forward(self, x: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
         z = self.encoder(x)

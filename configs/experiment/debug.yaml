@@ -2,17 +2,17 @@
 
 defaults:
   - override /data: basis
-  - override /algorithm: vae
-  - override /callbacks: ad_basics
+  - override /algorithm: ae
+  - override /callbacks: default
   - override /trainer: cpu
   - override /evaluator: default
-  - override /evaluator_callbacks: ad_basics
+  - override /evaluator_callbacks: default
   - override /logger: mlflow
 
 seed: 123
-tags: ["vae"]
+tags: ["ae"]
 
-experiment_name: vae_training
+experiment_name: ae_training
 run_name: ${short_hash:${hydra:runtime.output_dir},12}
 
 data:
@@ -21,20 +21,24 @@ data:
 
 trainer:
   gradient_clip_algorithm: norm
-  gradient_clip_val: 1.0
+  gradient_clip_val: 0.0
   min_epochs: 1
-  max_epochs: 150
+  max_epochs: 200
 
 test: true
 
+algorithm:
+  # The basis data processing returns 117 features.
+  encoder:
+    in_dim: 117
+
 callbacks:
   log_data_mlflow: null
-  anomaly_rate:
-    metric_name: 'loss/kl_raw/full'
+  anomaly_eff:
+    _target_: src.callbacks.rate.AnomalyEfficiencyCallback
+    metric_name: 'loss/mse/full'
     target_rates: [0.25]
-
-  # Checkpoints
-  min_loss_total_ckpt: null
+    bc_rate: 28608.8064
 
   stable_mse_ckpt:
     _target_: src.callbacks.model_checkpoint.SingleDatasetModelCheckpoint
@@ -48,10 +52,10 @@ callbacks:
     ds:
       - main_val
 
-  max_rate_kl_ckpt:
+  max_rate_mse_ckpt:
     _target_: src.callbacks.model_checkpoint.SingleDatasetModelCheckpoint
     dirpath: '${paths.checkpoints_dir}/${experiment_name}/${run_name}'
-    monitor: loss_kl_raw_full_rate0.25kHz
+    monitor: eff__ascore_loss_mse_full__brate_0.25kHz
     criterion:
       _target_: src.callbacks.checkpointing.criterion.Max
       top_k: 1
@@ -77,18 +81,35 @@ callbacks:
       - smj-case-A
       - haa-4b-ma15
 
+  cvar25_ema_ckpt:
+    _target_: pytorch_lightning.callbacks.ModelCheckpoint
+    dirpath: '${paths.checkpoints_dir}/${experiment_name}/${run_name}/summary/cvar25_ema/max'
+    monitor: 'val/summary/eff_cvar25_ema'
+    filename: 'cvar25_ema'
+    save_last: false
+    save_top_k: 1
+    mode: "max"
+    auto_insert_metric_name: False
+    save_weights_only: False
+    every_n_epochs: 1
+    save_on_train_epoch_end: false
+
+
 evaluator:
   ckpts:
     last: true
+    summary:
+      cvar25: ['max']
     single:
       loss_rmse_q95: ['stable']
-      loss_kl_raw_full_rate0.25kHz: ['max']
+      eff__ascore_loss_mse_full__brate_0.25kHz: ['max']
 
 evaluator_callbacks:
   anomaly_efficiency:
-    metric_name: 'loss/kl_raw/full'
+    _target_: src.evaluation.callbacks.efficiency.AnomalyEfficiencyCallback
+    metric_name: 'loss/mse/full'
     target_rates: [0.25]
-    log_raw_mlflow: false
+    bc_rate: 28608.8064
     ds:
       - GluGluHTo2B_Par-MH-125
       - GluGluHto2G_Par-MH-125
@@ -110,11 +131,11 @@ evaluator_callbacks:
       - ggH-suep-decay
       - smj-case-A
       - haa-4b-ma15
+    log_raw_mlflow: false
 
   loss:
     _target_: src.evaluation.callbacks.loss.LossCallback
-    loss_name: 'loss/reco/sqrt_q95'
-    log_raw_mlflow: false
+    loss_name: 'loss/mse/sqrt_q95'
     ds:
       - main_test
       - GluGluHTo2B_Par-MH-125
@@ -137,6 +158,7 @@ evaluator_callbacks:
       - ggH-suep-decay
       - smj-case-A
       - haa-4b-ma15
+    log_raw_mlflow: false
 
   reco:
     _target_: src.evaluation.callbacks.reco.ReconstructionPlots

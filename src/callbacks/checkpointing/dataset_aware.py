@@ -23,7 +23,8 @@ log = pylogger.RankedLogger(__name__)
 class DatasetAwareModelCheckpoint(Callback):
     """ModelCheckpoint class to store dataset-specific checkpoints.
 
-    :param monitor: String name of the metric key in the metrics log dictionary.
+    :param monitor: String name of the metric key in the metrics log dictionary, this
+        is what comes after the dataset name.
     :param mode: Callable method that takes the value of the metric at one epoch and
         decides whether to create a checkpoint or not.
     :param dirpath: String to dir path where to save the checkpoints.
@@ -56,7 +57,7 @@ class DatasetAwareModelCheckpoint(Callback):
         if getattr(trainer, "sanity_checking", False):
             return
 
-        all_valid_datasets = set(getattr(trainer, "val_dataloaders").keys())
+        all_valid_datasets = set(trainer.val_dataloaders.keys())
         if not set(self.ds).issubset(all_valid_datasets):
             raise ValueError(
                 "Given ds to checkpoint on are not in the available ds:\n"
@@ -233,7 +234,7 @@ class DatasetAwareModelCheckpoint(Callback):
         if importlib.util.find_spec("keras") is None:
             return
 
-        import keras  # safe now
+        import keras
 
         keras_model_cls = getattr(keras, "Model", None)
         if keras_model_cls is None:

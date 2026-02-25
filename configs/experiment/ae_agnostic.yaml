@@ -3,10 +3,10 @@
 defaults:
   - override /data: basis
   - override /algorithm: ae
-  - override /callbacks: ad_basics
+  - override /callbacks: default
   - override /trainer: cpu
   - override /evaluator: default
-  - override /evaluator_callbacks: ad_basics
+  - override /evaluator_callbacks: default
   - override /logger: mlflow
 
 seed: 123
@@ -29,17 +29,16 @@ test: true
 
 callbacks:
   log_data_mlflow: null
-  anomaly_rate:
+  anomaly_eff:
+    _target_: src.callbacks.rate.AnomalyEfficiencyCallback
     metric_name: 'loss/mse/full'
     target_rates: [0.25]
-
-  # Checkpoints
-  min_loss_total_ckpt: null # remove the checkpoint at the minium loss
+    bc_rate: 28608.8064
 
   max_rate_mse_ckpt:
     _target_: src.callbacks.model_checkpoint.SingleDatasetModelCheckpoint
     dirpath: '${paths.checkpoints_dir}/${experiment_name}/${run_name}'
-    monitor: loss_mse_full_rate0.25kHz
+    monitor: brate_0.25kHz/loss_mse_full/eff
     criterion:
       _target_: src.callbacks.checkpointing.criterion.Max
       top_k: 1

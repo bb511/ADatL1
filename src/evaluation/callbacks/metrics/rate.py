@@ -29,6 +29,7 @@ class AnomalyRate(Metric):
         self.add_state(
             "nsamples", default=torch.tensor(0, dtype=torch.long), dist_reduce_fx="sum"
         )
+        self.add_state("threshold", default=torch.tensor(float("nan")))
 
     def set_threshold(self, bkg_score: torch.Tensor) -> None:
         """Get the score threshold for a certain rate to determine anomalies.
@@ -40,10 +41,20 @@ class AnomalyRate(Metric):
         """
         q = 1.0 - (self.target_rate / self.bc_rate)
         self.threshold = torch.quantile(bkg_score.float(), q).to(bkg_score.device)
+        self.threshold.copy_(thr)
+
+    def apply_threshold(self, threshold: float):
+        """Store external threshold."""
+        self.threshold.copy_(threshold)
 
     def update(self, anomaly_score: torch.Tensor) -> None:
         """The anomaly score can be defined in a number of ways. See model code."""
-        ntriggered = (anomaly_score.float() > self.threshold).sum()
+        if torch.isnan(self.threshold):
+            raise RuntimeError(
+                "Threshold has not been set. Call set_threshold() before update()."
+            )
+
+        ntriggered = (anomaly_score.float() >= self.threshold).sum()
         self.ntriggered += ntriggered
         self.nsamples += anomaly_score.numel()
 

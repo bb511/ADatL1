@@ -40,6 +40,12 @@ def extras(cfg: DictConfig) -> None:
         log.info("Printing config tree with Rich! <cfg.extras.print_config=True>")
         rich_utils.print_config_tree(cfg, resolve=True, save_to_file=True)
 
+    if cfg.extras.get('matmul_precision'):
+        log.info(
+            f"Setting matmul presision to <cfg.extras.matmul_precision="
+            f"{cfg.extras.get('matmul_precision')}>"
+        )
+        torch.set_float32_matmul_precision(cfg.extras.get('matmul_precision'))
 
 def task_wrapper(task_func: Callable) -> Callable:
     """Optional decorator that controls the failure behavior when executing the task function.

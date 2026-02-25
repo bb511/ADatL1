@@ -49,19 +49,19 @@ class KNNEffs(Callback):
     ):
         super().__init__()
         self.device = None
+        self.name = name
 
         self.output_name = output_name
         self.ds = ds
         self.k = k
         self.target_rates = target_rates
         self.bc_rate = bc_rate
+
         self.reference_sample_size = reference_sample_size
         self.bkg_sample_size = bkg_sample_size
-        self.log_raw_mlflow = log_raw_mlflow
-        self.name = name
-
         self.n_bkg_scored = 0
 
+        self.log_raw_mlflow = log_raw_mlflow
         self.knneffs_summary = defaultdict(lambda: defaultdict(float))
 
     def on_test_start(self, trainer, pl_module):
@@ -77,9 +77,9 @@ class KNNEffs(Callback):
 
     def on_test_epoch_start(self, trainer, pl_module):
         """Clear the results dictionaries."""
-        self.main_rate = {}
-        self.sig_rates = {}
-        self.bkg_rates = {}
+        self.main_rate = defaultdict(lambda: defaultdict(AnomalyRate))
+        self.sig_rates = defaultdict(lambda: defaultdict(AnomalyRate))
+        self.bkg_rates = defaultdict(lambda: defaultdict(AnomalyRate))
         self.maintest_score_data = []
         self.z_ref = []
 
@@ -189,15 +189,6 @@ class KNNEffs(Callback):
         max_metric_value = metric_across_ckpts[max_ckpt_ds]
         return max_ckpt_ds, max_metric_value
 
-    def _compute_eff(self, relevant_target_rate: float, rate_dict: dict):
-        """Compute the efficiency in given rate dictionary."""
-        rates = {
-            self._get_dsname(rate_name): val.compute("efficiency").item()
-            for rate_name, val in rate_dict.items()
-            if str(relevant_target_rate) in rate_name
-        }
-        return rates
-
     def _plot(self, data: dict, xlabel: str, plot_folder: Path, percent: bool = False):
         """Plot the efficiency per data set for the knn radius at target rate."""
         ylabel = " "
@@ -273,6 +264,24 @@ class KNNEffs(Callback):
 
         return score
 
+    def _accumulate_maintest_output(
+        self, outputs: dict, batch_idx: int, l1bit: torch.Tensor
+    ):
+        """Accummulates the specified metric data across batches.
+
+        Used if currently processing the main_test data set, accummulate the values of
+        each metric across batches. The whole metric output distribution is needed to
+        set a treshold that gives a certain rate.
+        """
+        batch_output = outputs[self.metric_name]
+        if self.pure_thres:
+            batch_output = batch_output[~l1bit]
+        self.maintest_score_data.append(batch_output)
+
+        if batch_idx == self.total_batches - 1:
+            self.maintest_score_data = torch.cat(self.maintest_score_data, dim=0)
+            self._compute_maintest_rate()
+
     def _compute_maintest_rate(self):
         """Computes the desired rates on the main test data set.
 
@@ -283,66 +292,35 @@ class KNNEffs(Callback):
             rate = AnomalyRate(target_rate, self.bc_rate).to(self.device)
             rate.set_threshold(self.maintest_score_data)
             rate.update(self.maintest_score_data)
-            self.main_rate.update({f"{self.dataset_name}/{target_rate}": rate})
+            self.main_rate[target_rate][self.dataset_name] = rate
 
     def _initialize_rate_metric(self, labels: torch.Tensor):
-        """Initialise the rate metric for signal or bkg data.
-
-        The anomaly rate metric object is initialised. Then, the threshold is computed
-        given the main_test metric distribution. This threshold is then used to compute
-        the rate on the other data sets differing from main_test.
-        """
-        if bool(torch.all(labels >= 1)):
-            self._initialize_sig_rate_metric()
-        elif bool(torch.all(labels <= -1)):
-            self._initialize_bkg_rate_metric()
-        else:
-            raise ValueError(
-                "The efficiency test callback requires that the labels of the signal "
-                "data are all >= 1 and labels of background data are all <= -1."
-            )
-
-    def _initialize_sig_rate_metric(self):
         """Initializes the rate metric for a sig dataset for each given target rate."""
         for target_rate in self.target_rates:
             rate = AnomalyRate(target_rate, self.bc_rate).to(self.device)
             rate.set_threshold(self.maintest_score_data)
-            self.sig_rates.update({f"{self.dataset_name}/{target_rate}": rate})
+            if torch.all(labels < 0):
+                self.bkg_rates[target_rate][self.dataset_name] = rate
+            if torch.all(labels > 0):
+                self.sig_rates[target_rate][self.dataset_name] = rate
 
-    def _initialize_bkg_rate_metric(self):
-        """Initializes the rate metric for a bkg dataset for each given target rate."""
-        for target_rate in self.target_rates:
-            rate = AnomalyRate(target_rate, self.bc_rate).to(self.device)
-            rate.set_threshold(self.maintest_score_data)
-            self.bkg_rates.update({f"{self.dataset_name}/{target_rate}": rate})
-
-    def _compute_batch_rate(self, scores: torch.Tensor, labels: torch.Tensor):
-        """Done after knowing the rate thresholds.
-
-        For all the other test data sets, except the main one, this calculates
-        which events pass the rate threshold for each batch and updates the total.
-        """
-        if bool(torch.all(labels >= 1)):
-            self._compute_sig_batch_rate(scores)
-        elif bool(torch.all(labels <= -1)):
-            self._compute_bkg_batch_rate(scores)
-        else:
-            raise ValueError(
-                "The efficiency test callback requires that the labels of the signal "
-                "data are all >= 1 and labels of background data are all <= -1."
-            )
-
-    def _compute_sig_batch_rate(self, scores: torch.Tensor):
-        """Compute batch rate of a signal dataset."""
-        for target_rate in self.target_rates:
-            rate_name = f"{self.dataset_name}/{target_rate}"
-            self.sig_rates[rate_name].update(scores)
-
-    def _compute_bkg_batch_rate(self, scores: torch.Tensor):
+    def _compute_batch_rate(self, outputs: dict, labels: torch.Tensor):
         """Compute batch rate of a background data set."""
-        for target_rate in self.target_rates:
-            rate_name = f"{self.dataset_name}/{target_rate}"
-            self.bkg_rates[rate_name].update(scores)
+        for tr in self.target_rates:
+            if torch.all(labels < 0):
+                self.bkg_rates[tr][self.dataset_name].update(outputs[self.metric_name])
+            if torch.all(labels > 0):
+                self.sig_rates[tr][self.dataset_name].update(outputs[self.metric_name])
+
+    def _compute_eff(self, rates: dict, target_rate: float):
+        """Compute the efficiency in given rate dictionary."""
+        effs = defaultdict(float)
+        clean_metric_name = self.metric_name.replace('/', '_')
+        for ds_name, rate in rates[target_rate].items():
+            logging_name = f"{ds_name}/knn_eff__ascore_{clean_metric_name}__brate_{target_rate}kHz"
+            effs[logging_name] = rate.compute('efficiency')
+
+        return effs
 
     def _check_labels(self, labels: torch.Tensor, dataset_name: str):
         """Checks if the labels are as expected depending on the data set.

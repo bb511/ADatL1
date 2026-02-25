@@ -17,7 +17,7 @@ def plot(data: dict, xlabel: str, save_dir: Path):
     dataset_names = list(data.keys())
     dataset_values = list(data.values())
 
-    fig, ax = plt.subplots(figsize=(8, 16), dpi=60)
+    fig, ax = plt.subplots(figsize=(8, 16), dpi=120)
 
     ax.barh(dataset_names, dataset_values)
     ax.set_xlabel(xlabel)
@@ -57,7 +57,7 @@ def plot_yright(
     else:
         dataset_yvals = [round(yval, 4) for yval in dataset_yvals]
 
-    fig, ax = plt.subplots(figsize=(8, 16), dpi=60)
+    fig, ax = plt.subplots(figsize=(8, 16), dpi=120)
 
     ax.barh(dataset_names, dataset_values)
     ax.set_xlabel(xlabel)

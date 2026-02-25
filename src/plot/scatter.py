@@ -14,7 +14,7 @@ def plot(data: dict, xlabel: str, ylabel: str, title: str, save_dir: Path):
     """
     plt.style.use(hep.style.CMS)
 
-    fig, ax = plt.subplots(figsize=(6, 6), dpi=60)
+    fig, ax = plt.subplots(figsize=(6, 6), dpi=120)
 
     x = list(data.keys())
     y = list(data.values())
@@ -48,7 +48,7 @@ def plot_connected(data: dict, xlabel: str, ylabel: str, title: str, save_dir: P
     """
     plt.style.use(hep.style.CMS)
 
-    fig, ax = plt.subplots(figsize=(6, 6), dpi=60)
+    fig, ax = plt.subplots(figsize=(6, 6), dpi=120)
 
     x = list(data.keys())
     y = list(data.values())

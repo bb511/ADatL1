@@ -105,6 +105,7 @@
 #     experiment_name=ae_agnostic_search \
 #     evaluator_callbacks.reco=null \
 #     callbacks.max_rate_mse_ckpt=null \
+#     evaluator.ckpts.loss_mse_full_rate0.25kHz=null \
 #     logger=none \
 #     hparams_search=ae_agnostic_optuna \
 #     hydra.sweeper.study_name=cap_vs_loss_bs16k_v3 \

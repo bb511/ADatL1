@@ -50,13 +50,15 @@ class AnomalyRateCallback(Callback):
     ):
         super().__init__()
         self.device = None
+        self.name = name
+
         self.target_rates = target_rates
         self.bc_rate = bc_rate
         self.metric_name = metric_name
         self.pure_thres = pure_thres
         self.ds = set(ds)
+
         self.log_raw_mlflow = log_raw_mlflow
-        self.name = name
         self.rate_summary = defaultdict(lambda: defaultdict(float))
 
     def on_test_start(self, trainer, pl_module):
@@ -71,9 +73,9 @@ class AnomalyRateCallback(Callback):
 
     def on_test_epoch_start(self, trainer, pl_module):
         """Clear the metrics dictionary at the start of the epoch."""
-        self.main_rate = {}
-        self.sig_rates = {}
-        self.bkg_rates = {}
+        self.main_rate = defaultdict(lambda: defaultdict(AnomalyRate))
+        self.sig_rates = defaultdict(lambda: defaultdict(AnomalyRate))
+        self.bkg_rates = defaultdict(lambda: defaultdict(AnomalyRate))
         self.maintest_score_data = []
 
     def on_test_batch_end(
@@ -101,95 +103,6 @@ class AnomalyRateCallback(Callback):
                 self._initialize_rate_metric(labels)
             self._compute_batch_rate(outputs, labels)
 
-    def _accumulate_maintest_output(
-        self, outputs: dict, batch_idx: int, l1bit: torch.Tensor
-    ):
-        """Accummulates the specified metric data across batches.
-
-        Used if currently processing the main_test data set, accummulate the values of
-        each metric across batches. The whole metric output distribution is needed to
-        set a treshold that gives a certain rate.
-        """
-        batch_output = outputs[self.metric_name]
-        if self.pure_thres:
-            batch_output = batch_output[~l1bit]
-        self.maintest_score_data.append(batch_output)
-
-        if batch_idx == self.total_batches - 1:
-            self.maintest_score_data = torch.cat(self.maintest_score_data, dim=0)
-            self._compute_maintest_rate()
-
-    def _compute_maintest_rate(self):
-        """Computes the desired rates on the main test data set.
-
-        This is a sanity check. The threshold computed on the maintest and applied to the
-        maintest data should return the rate for which this threshold was computed.
-        """
-        for target_rate in self.target_rates:
-            rate = AnomalyRate(target_rate, self.bc_rate).to(self.device)
-            rate.set_threshold(self.maintest_score_data)
-            rate.update(self.maintest_score_data)
-            self.main_rate.update({f"{self.dataset_name}/{target_rate}": rate})
-
-    def _initialize_rate_metric(self, labels: torch.Tensor):
-        """Initialise the rate metric for signal or bkg data.
-
-        The anomaly rate metric object is initialised. Then, the threshold is computed
-        given the main_test metric distribution. This threshold is then used to compute
-        the rate on the other data sets differing from main_test.
-        """
-        if bool(torch.all(labels >= 1)):
-            self._initialize_sig_rate_metric()
-        elif bool(torch.all(labels <= -1)):
-            self._initialize_bkg_rate_metric()
-        else:
-            raise ValueError(
-                "The rate test callback requires that the labels of the signal "
-                "data are all >= 1 and labels of background data are all <= -1."
-            )
-
-    def _initialize_sig_rate_metric(self):
-        """Initializes the rate metric for a sig dataset for each given target rate."""
-        for target_rate in self.target_rates:
-            rate = AnomalyRate(target_rate, self.bc_rate).to(self.device)
-            rate.set_threshold(self.maintest_score_data)
-            self.sig_rates.update({f"{self.dataset_name}/{target_rate}": rate})
-
-    def _initialize_bkg_rate_metric(self):
-        """Initializes the rate metric for a bkg dataset for each given target rate."""
-        for target_rate in self.target_rates:
-            rate = AnomalyRate(target_rate, self.bc_rate).to(self.device)
-            rate.set_threshold(self.maintest_score_data)
-            self.bkg_rates.update({f"{self.dataset_name}/{target_rate}": rate})
-
-    def _compute_batch_rate(self, outputs: dict, labels: torch.Tensor):
-        """Done after knowing the rate thresholds.
-
-        For all the other test data sets, except the main one, this calculates
-        which events pass the rate threshold for each batch and updates the total.
-        """
-        if bool(torch.all(labels >= 1)):
-            self._compute_sig_batch_rate(outputs)
-        elif bool(torch.all(labels <= -1)):
-            self._compute_bkg_batch_rate(outputs)
-        else:
-            raise ValueError(
-                "The rate test callback requires that the labels of the signal "
-                "data are all >= 1 and labels of background data are all <= -1."
-            )
-
-    def _compute_sig_batch_rate(self, outputs: dict):
-        """Compute batch rate of a signal dataset."""
-        for target_rate in self.target_rates:
-            rate_name = f"{self.dataset_name}/{target_rate}"
-            self.sig_rates[rate_name].update(outputs[self.metric_name])
-
-    def _compute_bkg_batch_rate(self, outputs: dict):
-        """Compute batch rate of a background data set."""
-        for target_rate in self.target_rates:
-            rate_name = f"{self.dataset_name}/{target_rate}"
-            self.bkg_rates[rate_name].update(outputs[self.metric_name])
-
     def on_test_epoch_end(self, trainer, pl_module) -> None:
         """Log the anomaly rates computed on each of the data sets."""
         rate_name = "rates_pure" if self.pure_thres else "rates"
@@ -200,9 +113,9 @@ class AnomalyRateCallback(Callback):
 
         for trate in self.target_rates:
             # Construct rate per data set for specific metric name and target rate.
-            sig_rates = self._compute_rate(trate, self.sig_rates)
-            bkg_rates = self._compute_rate(trate, self.bkg_rates)
-            main_rate = self._compute_rate(trate, self.main_rate)
+            sig_rates = self._compute_rate(self.sig_rates, trate)
+            bkg_rates = self._compute_rate(self.bkg_rates, trate)
+            main_rate = self._compute_rate(self.main_rate, trate)
             rates = sig_rates | bkg_rates | main_rate
 
             trate_name = f"{trate} kHz"
@@ -219,15 +132,6 @@ class AnomalyRateCallback(Callback):
             log_raw=self.log_raw_mlflow,
             gallery_name=f"{rate_name}_{self.metric_name.replace('/', '_')}",
         )
-
-    def _compute_rate(self, relevant_target_rate: float, rate_dict: dict):
-        """Compute the rate in given rate dictionary."""
-        rates = {
-            self._get_dsname(rate_name): val.compute("rate").item()
-            for rate_name, val in rate_dict.items()
-            if str(relevant_target_rate) in rate_name
-        }
-        return rates
 
     def plot_summary(self, trainer, root_folder: Path):
         """Plot the summary metrics accummulated in rate_summary and reset this attr."""
@@ -282,8 +186,8 @@ class AnomalyRateCallback(Callback):
         corresponding to the chosen tail level and compute their mean. This tail-average
         summarizes detection performance on the most challenging anomaly scenarios.
         """
-        sig_data = np.fromiter(sig_effs.values(), dtype=float)
-        bkg_data = np.fromiter(bkg_effs.values(), dtype=float)
+        sig_data = np.fromiter(sig_rates.values(), dtype=float)
+        bkg_data = np.fromiter(bkg_rates.values(), dtype=float)
 
         bkg_mean = bkg_data.mean() if bkg_data.size else 0.0
 
@@ -299,6 +203,64 @@ class AnomalyRateCallback(Callback):
 
         ckpt_ds = utils.misc.get_ckpt_ds_name(ckpt)
         self.rate_summary[trate][ckpt_ds] = summary_metric
+
+    def _compute_rate(self, rates: dict, target_rate: float):
+        """Compute the rate in given rate dictionary."""
+        computed_rates = defaultdict(float)
+        clean_metric_name = self.metric_name.replace('/', '_')
+        for ds_name, rate in computed_rates[target_rate].items():
+            logging_name = f"{ds_name}"
+            computed_rates[logging_name] = rate.compute('rate').item()
+
+        return computed_rates
+
+    def _accumulate_maintest_output(
+        self, outputs: dict, batch_idx: int, l1bit: torch.Tensor
+    ):
+        """Accummulates the specified metric data across batches.
+
+        Used if currently processing the main_test data set, accummulate the values of
+        each metric across batches. The whole metric output distribution is needed to
+        set a treshold that gives a certain rate.
+        """
+        batch_output = outputs[self.metric_name]
+        if self.pure_thres:
+            batch_output = batch_output[~l1bit]
+        self.maintest_score_data.append(batch_output)
+
+        if batch_idx == self.total_batches - 1:
+            self.maintest_score_data = torch.cat(self.maintest_score_data, dim=0)
+            self._compute_maintest_rate()
+
+    def _compute_maintest_rate(self):
+        """Computes the desired rates on the main test data set.
+
+        This is a sanity check. The threshold computed on the maintest and applied to the
+        maintest data should return the rate for which this threshold was computed.
+        """
+        for target_rate in self.target_rates:
+            rate = AnomalyRate(target_rate, self.bc_rate).to(self.device)
+            rate.set_threshold(self.maintest_score_data)
+            rate.update(self.maintest_score_data)
+            self.main_rate[target_rate][self.dataset_name] = rate
+
+    def _initialize_rate_metric(self, labels: torch.Tensor):
+        """Initializes the rate metric for a bkg dataset for each given target rate."""
+        for target_rate in self.target_rates:
+            rate = AnomalyRate(target_rate, self.bc_rate).to(self.device)
+            rate.set_threshold(self.maintest_score_data)
+            if torch.all(labels < 0):
+                self.bkg_rates[target_rate][self.dataset_name] = rate
+            if torch.all(labels > 0):
+                self.sig_rates[target_rate][self.dataset_name] = rate
+
+    def _compute_batch_rate(self, outputs: dict, labels: torch.Tensor):
+        """Compute batch rate of a background data set."""
+        for target_rate in self.target_rates:
+            if torch.all(labels < 0):
+                self.bkg_rates[tr][self.dataset_name].update(outputs[self.metric_name])
+            if torch.all(labels > 0):
+                self.sig_rates[tr][self.dataset_name].update(outputs[self.metric_name])
 
     def _cache_summary(self, cache_folder: Path):
         """Cache the summary metric dictionary."""

@@ -99,7 +99,7 @@ evaluator:
   ckpts:
     last: true
     summary:
-      cvar25: ['max']
+      cvar25_ema: ['max']
     single:
       loss_rmse_q95: ['stable']
       eff__ascore_loss_mse_full__brate_0.25kHz: ['max']

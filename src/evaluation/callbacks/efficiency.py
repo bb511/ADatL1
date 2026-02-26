@@ -159,7 +159,7 @@ class AnomalyEfficiencyCallback(Callback):
             trate = f"{target_rate} kHz"
             ascore = f"anomaly score: {self.metric_name}"
             xlabel = f"25% CVaR at threshold: {trate}\n{ascore}"
-            self._plot(smet, xlabel, plot_folder)
+            self._plot(smet, xlabel, plot_folder, True)
             xlabel = f"med eff at:{trate}\n{ascore}"
             self._plot(self.eff_med[target_rate], xlabel, plot_folder, True)
             xlabel = f"min eff at:{trate}\n{ascore}"

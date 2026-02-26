@@ -89,19 +89,18 @@ class AnomalyEfficiencyCallback(Callback):
     def on_validation_epoch_end(self, trainer, pl_module) -> None:
         """Log the anomaly rates computed on each of the data sets."""
         for target_rate in self.target_rates:
-            main_eff = self._compute_efficiencies(self.main_rate, target_rate)
+            main_rate = self.main_rate[target_rate]['main_val'].compute('rate').item()
             bkg_effs = self._compute_efficiencies(self.bkg_rates, target_rate)
             sig_effs = self._compute_efficiencies(self.sig_rates, target_rate)
             cvar25 = self._cvar_lower_tail(sig_effs.values(), alpha=0.25)
+            self._compute_cvar_ema(cvar25)
             min_sig_eff = min(list(sig_effs.values()))
             med_sig_eff = statistics.median(list(sig_effs.values()))
-            if self.cvar25_ema is None:
-                self.cvar25_ema = float(cvar25)
-            else:
-                self.cvar25_ema = self.beta * self.cvar25_ema + (1 - self.beta) * float(cvar25)
             threshold = self.main_rate[target_rate]['main_val'].threshold.item()
 
-            pl_module.log_dict(main_eff, **self.log_kwargs)
+            pl_module.log_dict(
+                {f"val/main_val/brate_{target_rate}kHz": main_rate}, **self.log_kwargs
+            )
             pl_module.log_dict(bkg_effs, **self.log_kwargs)
             pl_module.log_dict(sig_effs, **self.log_kwargs)
             pl_module.log_dict({"val/summary/eff_cvar25": cvar25}, **self.log_kwargs)
@@ -114,10 +113,13 @@ class AnomalyEfficiencyCallback(Callback):
                 {f"val/main_val/thr__brate_{target_rate}kHz": threshold}
             )
 
-
-            main_eff.clear()
-            sig_effs.clear()
-            bkg_effs.clear()
+    def _compute_cvar_ema(self, cvar25: float):
+        """Compute the cvar estimated moving average."""
+        if self.cvar25_ema is None:
+            self.cvar25_ema = float(cvar25)
+        else:
+            self.cvar25_ema = \
+                self.beta * self.cvar25_ema + (1 - self.beta) * float(cvar25)
 
     def _accumulate_mainval_output(self, outputs: dict, batch_idx: int, pl_module):
         """Accummulates the specified metric data across batches.

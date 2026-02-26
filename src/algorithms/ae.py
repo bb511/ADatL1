@@ -54,14 +54,14 @@ class AE(L1ADLightningModule):
         del x, z
 
         with torch.no_grad():
-            rmse_q95 = torch.quantile(torch.sqrt(mse), 0.95).item()
+            rmse_q99 = torch.quantile(torch.sqrt(mse), 0.99).item()
 
         return {
             # Used for backpropagation:
             "loss": reco_loss.mean(),
             # Used for logging:
             "loss/reco/mean": reco_loss.mean(),
-            "loss/mse/sqrt_q95": rmse_q95,
+            "loss/mse/sqrt_q99": rmse_q99,
             # Used for callbacks:
             "loss/reco/full": reco_loss.detach(),
             "loss/mse/full": mse.detach(),
@@ -73,5 +73,5 @@ class AE(L1ADLightningModule):
         return {
             "loss": outdict.get("loss"),
             "loss_reco": outdict.get("loss/reco/mean"),
-            "loss_rmse_q95": outdict.get("loss/mse/sqrt_q95"),
+            "loss_rmse_q99": outdict.get("loss/mse/sqrt_q99"),
         }

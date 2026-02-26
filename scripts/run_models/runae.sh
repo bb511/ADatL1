@@ -74,24 +74,26 @@
 #     trainer.devices=[0]
 
 # AE hyperparameter search.
-# taskset -c 3-5 \
-# python3 src/train.py \
-#     -m \
-#     hydra/launcher=submitit_local \
-#     hydra.launcher.cpus_per_task=1 \
-#     hydra.launcher.gpus_per_node=4 \
-#     paths.raw_data_dir=/data/deodagiu/adl1t_data/parquet_files \
-#     experiment=ae \
-#     experiment_name=ae_hparam_search_v2 \
-#     evaluator_callbacks.reco=null \
-#     logger=none \
-#     hparams_search=ae_optuna \
-#     hydra.sweeper.study_name=efficiency_vs_loss_bs16k \
-#     hydra.sweeper.n_trials=40 \
-#     hydra.sweeper.sampler.n_startup_trials=40 \
-#     trainer=gpu \
-#     trainer.max_epochs=50 \
-#     trainer.devices=[0]
+taskset -c 0-2 \
+python3 src/train.py \
+    -m \
+    hydra/launcher=submitit_local \
+    hydra.launcher.cpus_per_task=1 \
+    hydra.launcher.gpus_per_node=4 \
+    paths.raw_data_dir=/data/deodagiu/adl1t_data/parquet_files \
+    experiment=ae \
+    experiment_name=cvar_vs_rmse_search \
+    callbacks.max_rate_mse_ckpt=null \
+    evaluator_callbacks.reco=null \
+    logger=none \
+    hparams_search=ae_optuna \
+    hydra.sweeper.study_name=cvar_vs_rmse_b16k \
+    hydra.sweeper.n_trials=60 \
+    hydra.sweeper.sampler.n_startup_trials=40 \
+    trainer=gpu \
+    trainer.max_epochs=50 \
+    trainer.devices=[0]
+
 
 # AE agnostic hyperparameter search.
 # taskset -c 15-17 \
@@ -114,3 +116,39 @@
 #     trainer=gpu \
 #     trainer.max_epochs=50 \
 #     trainer.devices=[2]
+
+# AE agnostic only rmse.
+# taskset -c 15-17 \
+# python3 src/train.py \
+#     -m \
+#     hydra/launcher=submitit_local \
+#     hydra.launcher.cpus_per_task=1 \
+#     hydra.launcher.gpus_per_node=4 \
+#     paths.raw_data_dir=/data/deodagiu/adl1t_data/parquet_files \
+#     experiment=ae_agnostic \
+#     experiment_name=ae_agnostic_rmse_search \
+#     callbacks.max_rate_mse_ckpt=null \
+#     callbacks.cvar25_ema_ckpt=null \
+#     evaluator.ckpts.summary=null \
+#     evaluator_callbacks.cap_sn_zb=null \
+#     evaluator_callbacks.reco=null \
+#     logger=none \
+#     hparams_search=ae_agnostic_optuna \
+#     optimized_metric_config.sec_metric=null \
+#     optimized_metric_config.callback.name=rmse_q99 \
+#     +optimized_metric_config.callback.params.ckpt_ds=main_val \
+#     +optimized_metric_config.callback.params.test_ds=main_test \
+#     optimized_metric_config.direction=minimize \
+#     hydra/sweeper/sampler=tpe \
+#     hydra.sweeper.study_name=rmse_b16k \
+#     hydra.sweeper.n_trials=60 \
+#     hydra.sweeper.sampler.n_startup_trials=40 \
+#     hydra.sweeper.sampler.n_ei_candidates=48 \
+#     hydra.sweeper.sampler.consider_prior=true \
+#     hydra.sweeper.sampler.prior_weight=1.0 \
+#     +hydra.sweeper.sampler.gamma=0.2 \
+#     hydra.sweeper.direction=minimize \
+#     trainer=gpu \
+#     trainer.max_epochs=50 \
+#     trainer.devices=[2]
+

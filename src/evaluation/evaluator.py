@@ -232,7 +232,7 @@ class Evaluator:
         ckpt_ds, main_metric_value = cb.get_optimized_metric(**target_callback_params)
         optimized_metric = main_metric_value
 
-        if "sec_metric" in optimized_metric_config.keys():
+        if "sec_metric" in optimized_metric_config.keys() and not optimized_metric_config["sec_metric"] is None:
             sec_metric_direction, sec_metric_value = self._get_secondary_metric(
                 optimized_metric_config["sec_metric"], ckpt_ds
             )

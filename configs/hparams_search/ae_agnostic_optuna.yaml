@@ -4,8 +4,7 @@ defaults:
   - override /hydra/sweeper: optuna
   - override /hydra/sweeper/sampler: motpe
 
-# choose metric which will be optimized by Optuna
-# make sure this is the correct name of some metric logged in lightning module!
+# Optimize CAP + rmse_q95
 optimized_metric_config: 
   callback:
     name: cap
@@ -13,7 +12,7 @@ optimized_metric_config:
   direction: minimize
   sec_metric:
     callback:
-      name: loss
+      name: rmse_q99
       params:
         ckpt_ds: null # This will be filled in with the best ckpt of the main metric.
         test_ds: main_test
@@ -49,7 +48,7 @@ hydra:
     sampler:
       n_startup_trials: 3
       consider_endpoints: true
-      n_ehvi_candidates: 256
+      # n_ehvi_candidates: 256
 
     # define hyperparameter search space. Assumes using torch.optim.AdamW
     params:

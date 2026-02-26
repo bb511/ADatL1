@@ -7,10 +7,10 @@ python3 src/train.py \
     evaluator_callbacks.reco=null \
     paths.raw_data_dir=/data/deodagiu/adl1t_data/parquet_files \
     trainer=gpu \
-    trainer.max_epochs=1 \
-    +trainer.limit_train_batches=10 \
+    trainer.max_epochs=5 \
     trainer.devices=[0]
 
+    # +trainer.limit_train_batches=10 \
     # hparams_search=vae_optuna \
     # hydra.sweeper.study_name=test_v2 \
     # logger=none

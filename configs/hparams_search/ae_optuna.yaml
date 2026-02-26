@@ -14,7 +14,7 @@ optimized_metric_config:
   direction: maximize
   sec_metric:
     callback:
-      name: loss
+      name: rmse_q99
       params:
         ckpt_ds: null # This will be filled in with the best ckpt of the main metric.
         test_ds: main_test

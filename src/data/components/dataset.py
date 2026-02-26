@@ -50,7 +50,9 @@ class L1ADDataset(IterableDataset):
         n = self.n
 
         nb = 0
-        for s in starts.tolist():
+        for s in starts:
+            s = int(s)
+
             if self.max_batches is not None and nb >= self.max_batches:
                 break
 

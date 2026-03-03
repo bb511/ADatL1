@@ -59,7 +59,7 @@ hydra:
       trainer.gradient_clip_val: choice(0.0, 0.5, 1.0, 2.0, 5.0)
       algorithm.optimizer.betas: choice([0.9, 0.999], [0.9, 0.99])
       algorithm.optimizer.weight_decay: choice(0.0, 1e-6, 1e-5, 1e-4, 1e-3)
-      algorithm.encoder.out_dim: choice(16, 24, 32, 48, 64, 96)
+      algorithm.encoder.out_dim: choice(16, 24, 32, 48)
       algorithm.encoder.nodes: choice([32], [48], [64], [32,32], [48,48], [64,32], [64, 64])
       algorithm.input_noise_std: choice(0.0, 1e-4, 3e-4, 1e-3, 3e-3, 1e-2)
 

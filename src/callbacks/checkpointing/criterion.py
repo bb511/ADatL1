@@ -14,6 +14,7 @@ class Criterion(object):
     def __init__(self, top_k: int = 1):
         self._validate_topk(top_k)
         self.top_k_values = np.empty(top_k)
+        self.last_ranking_value = None
 
     def check(self, metric_value: float) -> bool:
         """Check if the metric value corresponding to epoch  passes criterion."""
@@ -38,19 +39,22 @@ class Min(Criterion):
 
     def check(self, metric_value: float) -> bool:
         # Get all top k values that are higher then the current value.
-        mask = self.top_k_values > metric_value
-
+        metric_value = float(metric_value)
         if not np.isfinite(metric_value):
+            self.last_ranking_value = None
             return False
 
-        # If there are any, replace the highest of them with current value.
-        if np.any(mask):
-            candidate_idxs = np.where(mask)[0]
-            replace_idx = candidate_idxs[np.argmax(self.top_k_values[candidate_idxs])]
-            self.top_k_values[replace_idx] = metric_value
-            return True
+        ranking_value = metric_value
+        self.last_ranking_value = ranking_value
 
-        return False
+        mask = self.top_k_values > ranking_value
+        if not np.any(mask):
+            return False
+
+        candidate_idxs = np.where(mask)[0]
+        replace_idx = candidate_idxs[np.argmax(self.top_k_values[candidate_idxs])]
+        self.top_k_values[replace_idx] = ranking_value
+        return True
 
 
 class Max(Criterion):
@@ -62,17 +66,22 @@ class Max(Criterion):
         self.name = "max"
 
     def check(self, metric_value: float) -> bool:
-        # Get all top k values that are lower then the current value.
-        mask = self.top_k_values < metric_value
+        metric_value = float(metric_value)
+        if not np.isfinite(metric_value):
+            self.last_ranking_value = None
+            return False
 
-        # If there are any, replace the lowest of them with current value.
-        if np.any(mask):
-            replace_idx = np.argmin(self.top_k_values * mask)
-            self.top_k_values[replace_idx] = metric_value
-            return True
+        ranking_value = metric_value
+        self.last_ranking_value = ranking_value
 
-        return False
+        mask = self.top_k_values < ranking_value
+        if not np.any(mask):
+            return False
 
+        candidate_idxs = np.where(mask)[0]
+        replace_idx = candidate_idxs[np.argmin(self.top_k_values[candidate_idxs])]
+        self.top_k_values[replace_idx] = ranking_value
+        return True
 
 class Stable(Criterion):
     """Save checkpoint for minimum k values of the metric, but only when stable.
@@ -90,6 +99,7 @@ class Stable(Criterion):
         super().__init__(top_k=top_k)
         self.top_k_values.fill(np.inf)
         self.name = "stable"
+        self.last_ranking_value = None
 
         self.threshold = float(threshold)
         self.patience = int(patience)
@@ -123,6 +133,7 @@ class Stable(Criterion):
         if np.any(mask):
             replace_idx = np.argmax(self.top_k_values * mask)
             self.top_k_values[replace_idx] = ranking_value
+            self.last_ranking_value = ranking_value
             return True
 
         return False
@@ -143,12 +154,19 @@ class Stable(Criterion):
 
 
 class Last(Criterion):
-    """Save the last value of the metric."""
+    """Save the last value of the metric.
+
+    Note: this criterion is meant to be handled specially by the checkpoint callback
+    (save at fit end). check() never requests a save.
+    """
 
     def __init__(self, top_k: int = 1):
-        self.top_k_values = np.empty(1)
+        super().__init__(top_k=1)
+        self.top_k_values.fill(np.nan)
         self.name = "last"
 
     def check(self, metric_value: float) -> bool:
+        metric_value = float(metric_value)
+        self.last_ranking_value = metric_value if np.isfinite(metric_value) else None
         self.top_k_values[0] = metric_value
         return False

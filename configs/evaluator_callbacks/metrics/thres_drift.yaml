@@ -3,4 +3,5 @@
 _target_: src.evaluation.callbacks.thres_drift.ThresholdDriftCallback
 loss_name: loss
 log_raw_mlflow: true
+bc_rate: 28608.8064
 name: thres_transfer

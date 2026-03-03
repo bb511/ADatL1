@@ -44,6 +44,7 @@ class ThresholdDriftCallback(Callback):
     def __init__(
         self,
         loss_name: str,
+        bc_rate: float = 28608.8064,
         log_raw_mlflow: bool = True,
         name: str = "thres_transfer",
     ):
@@ -51,6 +52,7 @@ class ThresholdDriftCallback(Callback):
         self.loss_name = loss_name
         self.log_raw_mlflow = log_raw_mlflow
         self.name = name
+        self.bc_rate = bc_rate
 
         self.transfer_summary = defaultdict(dict)
 
@@ -110,7 +112,9 @@ class ThresholdDriftCallback(Callback):
         for trate in self.target_rates:
             fp = int(self.exceed_counts[trate])
             p_hat = fp / float(N)
-            L = math.log((p_hat + eps) / (float(trate) + eps))
+
+            fpr = float(trate) / float(self.bc_rate)
+            L = math.log((p_hat + eps) / (float(fpr) + eps))
             drift_metric = abs(L)
 
             trate_name = f"{trate} kHz"

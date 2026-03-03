@@ -15,6 +15,7 @@ from pytorch_lightning import Callback, LightningDataModule, LightningModule, Tr
 from pytorch_lightning.loggers import Logger
 from omegaconf import OmegaConf, DictConfig
 from colorama import Fore, Back, Style
+from math import inf
 from hydra.core.hydra_config import HydraConfig
 
 import rootutils
@@ -131,6 +132,31 @@ def test(cfg: DictConfig, datamodule, algorithm, logger):
     return evaluator
 
 
+def _worst_for(direction: str) -> float:
+    return inf if direction == "minimize" else -inf
+
+
+def _get_directions(cfg):
+    # 1) Prefer your own config (always available)
+    if "optimized_metric_config" in cfg:
+        # multi-objective if sec_metric exists
+        main_dir = cfg.optimized_metric_config.main_metric.direction
+        if "sec_metric" in cfg.optimized_metric_config:
+            sec_dir = cfg.optimized_metric_config.sec_metric.direction
+            return [main_dir, sec_dir]
+        return [main_dir]
+
+    # 2) Fallback: hydra optuna sweeper (only in sweeps)
+    try:
+        hydra_cfg = HydraConfig.get()
+        dirs = getattr(hydra_cfg.sweeper, "direction", None)
+        if dirs is None:
+            return None
+        return list(dirs) if isinstance(dirs, (list, tuple)) else [dirs]
+    except Exception:
+        return None
+
+
 @hydra.main(version_base="1.3", config_path="../configs", config_name="train.yaml")
 def main(cfg: DictConfig) -> Optional[float]:
     """Main entry point for training.
@@ -160,9 +186,10 @@ def main(cfg: DictConfig) -> Optional[float]:
     def _worst_for(direction: str) -> float:
         return float("inf") if direction == "minimize" else -float("inf")
 
-    if metric_value is None or any(v is None for v in metric_value):
-        dirs = HydraConfig.get().sweeper.direction
-        return tuple(_worst_for(d) for d in dirs)
+    if metric_value is None or (isinstance(metric_value, (list, tuple)) and any(v is None for v in metric_value)):
+        dirs = _get_directions(cfg) or ["minimize"]
+        worst = tuple(_worst_for(d) for d in dirs)
+        return worst[0] if len(worst) == 1 else worst
 
     # return optimized metric
     return metric_value

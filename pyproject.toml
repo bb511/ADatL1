@@ -42,9 +42,6 @@ quant = [
     "hgq2 (>=0.1.5,<0.2.0)",
     "hls4ml @ git+https://github.com/fastmachinelearning/hls4ml.git",
 ]
-cap = [
-    "capmetric @ git+ssh://git@github.com/viictorjimenezzz/cap-metric.git@main",
-]
 
 [tool.pytest.ini_options]
 addopts = [

@@ -8,8 +8,8 @@ import numpy as np
 
 from pytorch_lightning.callbacks import Callback
 
-from capmetric.metric import ApproximationCapacity
-from capmetric.binary import get_pairing_fn
+from src.evaluation.callbacks.metrics.cap.metric import ApproximationCapacity
+from src.evaluation.callbacks.metrics.cap.binary import get_pairing_fn
 
 from src.evaluation.callbacks import utils
 from src.plot import horizontal_bar

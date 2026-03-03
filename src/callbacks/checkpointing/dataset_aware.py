@@ -113,10 +113,11 @@ class DatasetAwareModelCheckpoint(Callback):
         should_save = self.ds_criterion[dataset_name].check(metric_value)
 
         if should_save:
-            filepath = self._configure_filepath(trainer, dataset_name, metric_value)
+            metric_to_store = self.ds_criterion[dataset_name].last_ranking_value
+            filepath = self._configure_filepath(trainer, dataset_name, metric_to_store)
             self.checkpoints[dataset_name].append(
                 {
-                    "value": metric_value,
+                    "value": metric_to_store,
                     "epoch": trainer.current_epoch,
                     "fpath": filepath,
                 }

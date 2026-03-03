@@ -10,9 +10,9 @@ defaults:
   - override /logger: mlflow
 
 seed: 123
-tags: ["ae"]
+tags: ["ae", "agnostic", "cap"]
 
-experiment_name: ae_training
+experiment_name: ae_agnostic_training
 run_name: ${short_hash:${hydra:runtime.output_dir},12}
 
 data:
@@ -39,18 +39,6 @@ callbacks:
     metric_name: 'loss/mse/full'
     target_rates: [0.25]
     bc_rate: 28608.8064
-
-  stable_mse_ckpt:
-    _target_: src.callbacks.model_checkpoint.SingleDatasetModelCheckpoint
-    dirpath: '${paths.checkpoints_dir}/${experiment_name}/${run_name}'
-    monitor: loss_rmse_q95
-    criterion:
-      _target_: src.callbacks.checkpointing.criterion.Stable
-      top_k: 1
-      threshold: 0.05
-      patience: 10
-    ds:
-      - main_val
 
   max_rate_mse_ckpt:
     _target_: src.callbacks.model_checkpoint.SingleDatasetModelCheckpoint
@@ -81,6 +69,18 @@ callbacks:
       - smj-case-A
       - haa-4b-ma15
 
+  stable_mse_ckpt:
+    _target_: src.callbacks.model_checkpoint.SingleDatasetModelCheckpoint
+    dirpath: '${paths.checkpoints_dir}/${experiment_name}/${run_name}'
+    monitor: loss_mse_mean_top_vals
+    criterion:
+      _target_: src.callbacks.checkpointing.criterion.Stable
+      top_k: 1
+      threshold: 0.1
+      patience: 1
+    ds:
+      - main_val
+
   cvar25_ema_ckpt:
     _target_: pytorch_lightning.callbacks.ModelCheckpoint
     dirpath: '${paths.checkpoints_dir}/${experiment_name}/${run_name}/summary/cvar25_ema/max'
@@ -94,15 +94,14 @@ callbacks:
     every_n_epochs: 1
     save_on_train_epoch_end: false
 
-
 evaluator:
   ckpts:
     last: true
     summary:
       cvar25_ema: ['max']
     single:
-      loss_rmse_q95: ['stable']
-      eff__ascore_loss_mse_full__brate_0.25kHz: ['max']
+      loss_mse_mean_top_vals: ['stable']
+      # eff__ascore_loss_mse_full__brate_0.25kHz: ['max']
 
 evaluator_callbacks:
   anomaly_efficiency:
@@ -133,9 +132,33 @@ evaluator_callbacks:
       - haa-4b-ma15
     log_raw_mlflow: false
 
+  cap_sn_zb:
+    _target_: src.evaluation.callbacks.cap.CAP
+    metric_name: 'loss/mse/full'
+    dataset_1: main_test
+    dataset_2: SingleNeutrino_E-10-gun
+    log_raw_mlflow: false
+    pairing_type: cdf
+    cap_metric_config:
+      beta0: 1.0
+      normalization_type: sigmoid
+      normalization_params: null
+      energy_type: baseline
+      energy_params: null
+      regularization_type: none
+      regularization_params: null
+      binary: True
+      lr: 0.01
+      n_epochs: 50
+      batch_size: 16384
+      normalize_gradients: False
+      process_group: null
+      dist_sync_fn: null
+
   loss:
     _target_: src.evaluation.callbacks.loss.LossCallback
-    loss_name: 'loss/mse/sqrt_q95'
+    name: mse_mean_top_vals
+    loss_name: 'loss/mse/mean_top_vals'
     ds:
       - main_test
       - GluGluHTo2B_Par-MH-125
@@ -159,6 +182,12 @@ evaluator_callbacks:
       - smj-case-A
       - haa-4b-ma15
     log_raw_mlflow: false
+
+  thres_transfer:
+    _target_: src.evaluation.callbacks.thres_drift.ThresholdDriftCallback
+    loss_name: 'loss/mse/full'
+    log_raw_mlflow: false
+    name: thres_transfer
 
   reco:
     _target_: src.evaluation.callbacks.reco.ReconstructionPlots

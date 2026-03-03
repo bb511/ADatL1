@@ -4,19 +4,21 @@ defaults:
   - override /hydra/sweeper: optuna
   - override /hydra/sweeper/sampler: motpe
 
-# Optimize CAP + rmse_q95
-optimized_metric_config: 
-  callback:
-    name: cap
-    params: {}
-  direction: minimize
+# Optimize CAP + mse at operating threshold
+optimized_metric_config:
+  main_metric:
+    callback:
+      name: cap
+      params: {}
+    direction: minimize
   sec_metric:
     callback:
-      name: rmse_q99
+      name: mse_mean_top_vals
       params:
-        ckpt_ds: null # This will be filled in with the best ckpt of the main metric.
+        ckpt_name: null # This will be filled in with the best ckpt of the main metric.
         test_ds: main_test
     direction: minimize
+
 
 # here we define Optuna hyperparameter search
 # it optimizes for value returned from function with @hydra.main decorator
@@ -31,7 +33,7 @@ hydra:
     storage: sqlite:///logs/optuna/ae.db
 
     # name of the study to persist optimization results
-    study_name: efficiency_vs_loss_bs16k
+    study_name: cap_vs_mse_bs16k
 
     # number of parallel workers
     n_jobs: 1
@@ -48,7 +50,7 @@ hydra:
     sampler:
       n_startup_trials: 3
       consider_endpoints: true
-      # n_ehvi_candidates: 256
+      n_ehvi_candidates: 256
 
     # define hyperparameter search space. Assumes using torch.optim.AdamW
     params:

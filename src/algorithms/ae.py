@@ -18,6 +18,7 @@ class AE(L1ADLightningModule):
         mask: bool = True,
         features: Optional[nn.Module] = None,
         input_noise_std: float = 0.0,
+        operational_quantile: float = 0.9999912614,
         **kwargs,
     ):
         super().__init__(model=None, **kwargs)
@@ -31,6 +32,7 @@ class AE(L1ADLightningModule):
         self.mse = mse
         self.input_noise_std = input_noise_std
         self.mask = mask
+        self.operational_quantile = operational_quantile
 
     def forward(self, x: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
         z = self.encoder(x)
@@ -54,14 +56,20 @@ class AE(L1ADLightningModule):
         del x, z
 
         with torch.no_grad():
-            rmse_q99 = torch.quantile(torch.sqrt(mse), 0.99).item()
+            n = mse.numel()
+
+            # Number of extreme tail samples
+            k = max(10, int((1.0 - self.operational_quantile) * n))
+
+            topk_vals = torch.topk(mse, k).values
+            mean_top_vals = topk_vals.mean().item()
 
         return {
             # Used for backpropagation:
             "loss": reco_loss.mean(),
             # Used for logging:
             "loss/reco/mean": reco_loss.mean(),
-            "loss/mse/sqrt_q99": rmse_q99,
+            "loss/mse/mean_top_vals": mean_top_vals,
             # Used for callbacks:
             "loss/reco/full": reco_loss.detach(),
             "loss/mse/full": mse.detach(),
@@ -73,5 +81,5 @@ class AE(L1ADLightningModule):
         return {
             "loss": outdict.get("loss"),
             "loss_reco": outdict.get("loss/reco/mean"),
-            "loss_rmse_q99": outdict.get("loss/mse/sqrt_q99"),
+            "loss_mse_mean_top_vals": outdict.get("loss/mse/mean_top_vals"),
         }

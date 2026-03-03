@@ -227,7 +227,7 @@ def write_gallery_section(
     return html_section
 
 
-def generate_thumbnail(path: Path, max_size: int = 1024, quality: int = 30) -> str:
+def generate_thumbnail(path: Path, max_size: int = 1024, quality: int = 90) -> str:
     """Generate the thumbnail that goes into the gallery."""
     ext = path.suffix.lower()
     img = Image.open(path)

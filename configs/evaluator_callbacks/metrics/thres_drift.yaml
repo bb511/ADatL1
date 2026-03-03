@@ -1,0 +1,6 @@
+# @package evaluator_callbacks.metrics
+
+_target_: src.evaluation.callbacks.thres_drift.ThresholdDriftCallback
+loss_name: loss
+log_raw_mlflow: true
+name: thres_transfer

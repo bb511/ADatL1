@@ -5,35 +5,28 @@
 # =======================
 
 # Semi-supervised training.
-# taskset -c 6-8 \
+# taskset -c 9-11 \
 # python3 src/train.py \
 #     -m \
-#     hydra/launcher=submitit_local \
-#     hydra.launcher.cpus_per_task=1 \
-#     hydra.launcher.gpus_per_node=4 \
 #     paths.raw_data_dir=/data/deodagiu/adl1t_data/parquet_files \
 #     experiment=ae \
 #     experiment_name=ae_best_models \
-#     run_name=best_model_6 \
-#     algorithm.optimizer.lr=0.00037017129833297804 \
+#     run_name=trial_352 \
+#     algorithm.optimizer.lr=0.0008714400208882324 \
 #     algorithm.loss.delta=3.0 \
-#     trainer.gradient_clip_val=0.5 \
+#     trainer.gradient_clip_val=0.0 \
 #     algorithm.optimizer.betas='[0.9,0.999]' \
-#     algorithm.optimizer.weight_decay=0.0 \
-#     algorithm.encoder.out_dim=64 \
-#     algorithm.encoder.nodes='[64, 64]' \
-#     algorithm.input_noise_std=0.0001 \
+#     algorithm.optimizer.weight_decay=1e-06 \
+#     algorithm.encoder.out_dim=96 \
+#     algorithm.encoder.nodes='[64]' \
+#     algorithm.input_noise_std=0.001 \
 #     trainer=gpu \
-#     trainer.devices=[1]
+#     trainer.devices=[2]
 
 # Agnostic training.
 # taskset -c 15-17 \
 # python3 src/train.py \
 #     -m \
-#     hydra/launcher=submitit_local \
-#     hydra.launcher.cpus_per_task=1 \
-#     hydra.launcher.gpus_per_node=4 \
-#     hydra.launcher.timeout_min=10000 \
 #     paths.raw_data_dir=/data/deodagiu/adl1t_data/parquet_files \
 #     experiment=ae_agnostic \
 #     experiment_name=ae_agnostic_best_models \
@@ -49,29 +42,29 @@
 #     trainer=gpu \
 #     trainer.devices=[2]
 
-
-# HYPERPARAMETER SEARCHES.
-# =======================
-
-# AE batch size study.
+# Agnostic RMSE-threshold training.
 # taskset -c 0-2 \
 # python3 src/train.py \
 #     -m \
-#     hydra/launcher=submitit_local \
-#     hydra.launcher.cpus_per_task=1 \
-#     hydra.launcher.gpus_per_node=4 \
 #     paths.raw_data_dir=/data/deodagiu/adl1t_data/parquet_files \
-#     experiment=ae \
-#     experiment_name=ae_bs_study \
-#     evaluator_callbacks.reco=null \
-#     hparams_search=ae_optuna \
-#     hydra.sweeper.study_name=bs_study \
-#     hydra.sweeper.n_trials=8 \
-#     hydra.sweeper.sampler.n_startup_trials=15 \
+#     experiment=ae_agnostic \
+#     experiment_name=ae_agnostic_rmse \
+#     run_name=trial_260 \
+#     evaluator_callbacks.cap_sn_zb=null \
+#     algorithm.optimizer.lr=3.613509306601417e-05 \
+#     algorithm.loss.delta=3.0 \
+#     trainer.gradient_clip_val=5.0 \
+#     algorithm.optimizer.betas='[0.9, 0.999]' \
+#     algorithm.optimizer.weight_decay=1e-06 \
+#     algorithm.encoder.out_dim=96 \
+#     algorithm.encoder.nodes='[64]' \
+#     algorithm.input_noise_std=0.003 \
 #     trainer=gpu \
-#     +trainer.max_steps=30000 \
-#     trainer.max_epochs=-1 \
 #     trainer.devices=[0]
+
+
+# HYPERPARAMETER SEARCHES.
+# =======================
 
 # AE hyperparameter search.
 taskset -c 0-2 \
@@ -82,12 +75,15 @@ python3 src/train.py \
     hydra.launcher.gpus_per_node=4 \
     paths.raw_data_dir=/data/deodagiu/adl1t_data/parquet_files \
     experiment=ae \
-    experiment_name=cvar_vs_rmse_search \
+    experiment_name=ae_cvar_vs_rmse_search \
     callbacks.max_rate_mse_ckpt=null \
+    callbacks.stable_mse_ckpt=null \
+    evaluator.ckpts.last=false \
+    evaluator.ckpts.single=null \
     evaluator_callbacks.reco=null \
     logger=none \
     hparams_search=ae_optuna \
-    hydra.sweeper.study_name=cvar_vs_rmse_b16k \
+    hydra.sweeper.study_name=cvar25eff_vs_mse_b16k \
     hydra.sweeper.n_trials=60 \
     hydra.sweeper.sampler.n_startup_trials=40 \
     trainer=gpu \
@@ -95,8 +91,8 @@ python3 src/train.py \
     trainer.devices=[0]
 
 
-# AE agnostic hyperparameter search.
-# taskset -c 15-17 \
+# AE agnostic hyperparameter search - CAP vs MSE.
+# taskset -c 0-2 \
 # python3 src/train.py \
 #     -m \
 #     hydra/launcher=submitit_local \
@@ -104,21 +100,23 @@ python3 src/train.py \
 #     hydra.launcher.gpus_per_node=4 \
 #     paths.raw_data_dir=/data/deodagiu/adl1t_data/parquet_files \
 #     experiment=ae_agnostic \
-#     experiment_name=ae_agnostic_search \
-#     evaluator_callbacks.reco=null \
+#     experiment_name=ae_agnostic_cap_vs_mse_search \
 #     callbacks.max_rate_mse_ckpt=null \
-#     evaluator.ckpts.loss_mse_full_rate0.25kHz=null \
+#     callbacks.cvar25_ema_ckpt=null \
+#     evaluator.ckpts.summary=null \
+#     evaluator.ckpts.last=false \
+#     evaluator_callbacks.reco=null \
 #     logger=none \
 #     hparams_search=ae_agnostic_optuna \
-#     hydra.sweeper.study_name=cap_vs_loss_bs16k_v3 \
+#     hydra.sweeper.study_name=cap_vs_mse_b16k \
 #     hydra.sweeper.n_trials=60 \
 #     hydra.sweeper.sampler.n_startup_trials=40 \
 #     trainer=gpu \
-#     trainer.max_epochs=50 \
-#     trainer.devices=[2]
+#     trainer.max_epochs=1 \
+#     trainer.devices=[0]
 
-# AE agnostic only rmse.
-# taskset -c 15-17 \
+# AE agnostic MSE and threshold stability.
+# taskset -c 0-2 \
 # python3 src/train.py \
 #     -m \
 #     hydra/launcher=submitit_local \
@@ -126,7 +124,7 @@ python3 src/train.py \
 #     hydra.launcher.gpus_per_node=4 \
 #     paths.raw_data_dir=/data/deodagiu/adl1t_data/parquet_files \
 #     experiment=ae_agnostic \
-#     experiment_name=ae_agnostic_rmse_search \
+#     experiment_name=ae_agnostic_mse_vs_thres_search \
 #     callbacks.max_rate_mse_ckpt=null \
 #     callbacks.cvar25_ema_ckpt=null \
 #     evaluator.ckpts.summary=null \
@@ -134,21 +132,18 @@ python3 src/train.py \
 #     evaluator_callbacks.reco=null \
 #     logger=none \
 #     hparams_search=ae_agnostic_optuna \
-#     optimized_metric_config.sec_metric=null \
-#     optimized_metric_config.callback.name=rmse_q99 \
-#     +optimized_metric_config.callback.params.ckpt_ds=main_val \
-#     +optimized_metric_config.callback.params.test_ds=main_test \
-#     optimized_metric_config.direction=minimize \
-#     hydra/sweeper/sampler=tpe \
-#     hydra.sweeper.study_name=rmse_b16k \
+#     optimized_metric_config.main_metric.callback.name=mse_mean_top_vals \
+#     +optimized_metric_config.main_metric.callback.params.ckpt_name=main_val \
+#     +optimized_metric_config.main_metric.callback.params.test_ds=main_test \
+#     optimized_metric_config.main_metric.direction=minimize \
+#     optimized_metric_config.sec_metric.callback.name=thres_transfer \
+#     optimized_metric_config.sec_metric.callback.params.ckpt_name=null \
+#     +optimized_metric_config.sec_metric.callback.params.target_rate=0.25 \
+#     ~optimized_metric_config.sec_metric.callback.params.test_ds \
+#     optimized_metric_config.sec_metric.direction=minimize \
+#     hydra.sweeper.study_name=mse_vs_thres_b16k \
 #     hydra.sweeper.n_trials=60 \
 #     hydra.sweeper.sampler.n_startup_trials=40 \
-#     hydra.sweeper.sampler.n_ei_candidates=48 \
-#     hydra.sweeper.sampler.consider_prior=true \
-#     hydra.sweeper.sampler.prior_weight=1.0 \
-#     +hydra.sweeper.sampler.gamma=0.2 \
-#     hydra.sweeper.direction=minimize \
 #     trainer=gpu \
 #     trainer.max_epochs=50 \
-#     trainer.devices=[2]
-
+#     trainer.devices=[0]

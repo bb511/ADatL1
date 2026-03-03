@@ -43,7 +43,7 @@ callbacks:
   max_rate_mse_ckpt:
     _target_: src.callbacks.model_checkpoint.SingleDatasetModelCheckpoint
     dirpath: '${paths.checkpoints_dir}/${experiment_name}/${run_name}'
-    monitor: brate_0.25kHz/loss_mse_full/eff
+    monitor: eff__ascore_loss_mse_full__brate_0.25kHz
     criterion:
       _target_: src.callbacks.checkpointing.criterion.Max
       top_k: 1
@@ -72,7 +72,7 @@ callbacks:
   stable_mse_ckpt:
     _target_: src.callbacks.model_checkpoint.SingleDatasetModelCheckpoint
     dirpath: '${paths.checkpoints_dir}/${experiment_name}/${run_name}'
-    monitor: loss_rmse_q99
+    monitor: loss_mse_mean_top_vals
     criterion:
       _target_: src.callbacks.checkpointing.criterion.Stable
       top_k: 1
@@ -100,8 +100,8 @@ evaluator:
     summary:
       cvar25_ema: ['max']
     single:
-      loss_rmse_q99: ['stable']
-      # loss_mse_full_rate0.25kHz: ['max']
+      loss_mse_mean_top_vals: ['stable']
+      # eff__ascore_loss_mse_full__brate_0.25kHz: ['max']
 
 evaluator_callbacks:
   anomaly_efficiency:
@@ -157,8 +157,8 @@ evaluator_callbacks:
 
   loss:
     _target_: src.evaluation.callbacks.loss.LossCallback
-    name: rmse_q99
-    loss_name: 'loss/mse/sqrt_q99'
+    name: mse_mean_top_vals
+    loss_name: 'loss/mse/mean_top_vals'
     ds:
       - main_test
       - GluGluHTo2B_Par-MH-125
@@ -182,6 +182,12 @@ evaluator_callbacks:
       - smj-case-A
       - haa-4b-ma15
     log_raw_mlflow: false
+
+  thres_transfer:
+    _target_: src.evaluation.callbacks.thres_drift.ThresholdDriftCallback
+    loss_name: 'loss/mse/full'
+    log_raw_mlflow: false
+    name: thres_transfer
 
   reco:
     _target_: src.evaluation.callbacks.reco.ReconstructionPlots

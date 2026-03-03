@@ -2,8 +2,9 @@
 /trigger_models
 /qmodel_analysis
 
-# Ignore optuna
-/optuna_logs
+# Ignore notebook stuff
+notebooks/paretos
+
 
 # Ignore MAC stuff.
 .DS_Store

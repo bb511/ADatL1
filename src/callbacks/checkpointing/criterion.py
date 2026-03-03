@@ -2,6 +2,7 @@
 # that is being tracked.
 
 import numpy as np
+from collections import deque
 
 
 class Criterion(object):
@@ -39,9 +40,13 @@ class Min(Criterion):
         # Get all top k values that are higher then the current value.
         mask = self.top_k_values > metric_value
 
+        if not np.isfinite(metric_value):
+            return False
+
         # If there are any, replace the highest of them with current value.
         if np.any(mask):
-            replace_idx = np.argmax(self.top_k_values * mask)
+            candidate_idxs = np.where(mask)[0]
+            replace_idx = candidate_idxs[np.argmax(self.top_k_values[candidate_idxs])]
             self.top_k_values[replace_idx] = metric_value
             return True
 
@@ -70,12 +75,15 @@ class Max(Criterion):
 
 
 class Stable(Criterion):
-    """Save k most stable values of the metric.
+    """Save checkpoint for minimum k values of the metric, but only when stable.
 
-    :threshold: Float between 0 and 1, specifying the fraction up to which the metric
-        is allowed to vary between epochs to pass this criterion.
-    :patience: How many epochs to track the stability across, i.e., for how many epochs
-        should the metric stay within threshold.
+    Stability criterion over a sliding window of length `patience`:
+        (max(window) - min(window)) / mean(window) <= threshold
+
+    Args:
+        top_k: number of checkpoints to keep (best stable metric values).
+        threshold: fractional stability bound in (0, 1), e.g. 0.05 for 5%.
+        patience: window length (number of most recent epochs) for stability.
     """
 
     def __init__(self, top_k: int, threshold: float, patience: int):
@@ -83,65 +91,54 @@ class Stable(Criterion):
         self.top_k_values.fill(np.inf)
         self.name = "stable"
 
-        self.threshold = threshold
-        self.patience = patience
-        self.reference_value = None
-        self.accummulated_deviation = 0
-
-        self.epoch_counter = 1
+        self.threshold = float(threshold)
+        self.patience = int(patience)
 
         self._validate_threshold()
         self._validate_patience()
 
+        self._window = deque(maxlen=self.patience)
+
     def check(self, metric_value: float) -> bool:
-        if self.reference_value is None:
-            self.reference_value = metric_value
-            return True
+        metric_value = float(metric_value)
+        self._window.append(metric_value)
 
-        lower_bound = self.reference_value * (1 - self.threshold)
-        upper_bound = self.reference_value * (1 + self.threshold)
+        # Need a full window to assess stability
+        if len(self._window) < self.patience:
+            return False
 
-        if lower_bound <= metric_value <= upper_bound:
-            self.epoch_counter += 1
-            if self.epoch_counter == self.patience:
-                ckpt_made = self._update_topk(metric_value)
-                self._reset_count()
-                return ckpt_made
-        else:
-            self._reset_count()
+        w = np.asarray(self._window, dtype=np.float64)
+        mean_w = w.mean()
 
-        return False
+        if not np.isfinite(mean_w):
+            return False
 
-    def _reset_count(self):
-        """Reset the counting of stable epochs."""
-        self.epoch_counter = 1
-        self.reference_value = None
+        scale = max(np.max(np.abs(w)), 1e-12)
+        stability = (w.max() - w.min()) / scale
+        if stability > self.threshold:
+            return False
 
-    def _update_topk(self, metric_value: float) -> bool:
-        """Update the top_k values."""
-        idx = np.isinf(self.top_k_values).argmax()
-        if np.isinf(self.top_k_values).any():
-            self.top_k_values[idx] = metric_value
+        ranking_value = mean_w
+        mask = self.top_k_values > ranking_value
+        if np.any(mask):
+            replace_idx = np.argmax(self.top_k_values * mask)
+            self.top_k_values[replace_idx] = ranking_value
             return True
 
         return False
 
     def _validate_threshold(self):
-        """Check if the threshold given by user is between 0 and 1."""
-        below_zero = self.threshold <= 0
-        above_one = self.threshold >= 1
-        if below_zero or above_one:
+        if not (0.0 < self.threshold < 1.0):
             raise ValueError(
-                f"Threshold given in stability checkpoint callback needs to be "
-                + f"between 0 and 1. Given value is {self.threshold}"
+                "Threshold given in stability checkpoint callback needs to be "
+                f"between 0 and 1. Given value is {self.threshold}"
             )
 
     def _validate_patience(self):
-        """Check if the given patience is a positive integer."""
         if self.patience <= 0:
             raise ValueError(
-                f"Patience given in stability checkpoint callback needs to be a "
-                + f"number strictly larger than 0. Given value is {self.patience}."
+                "Patience given in stability checkpoint callback needs to be a "
+                f"number strictly larger than 0. Given value is {self.patience}."
             )
 
 

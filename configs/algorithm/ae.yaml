@@ -8,6 +8,7 @@ features: null
 
 mask: true
 input_noise_std: 0.0001
+operational_quantile: 0.9999912614 # equivalent to 250 Hz FPR threshold
 
 encoder:
   _target_: src.algorithms.components.encoder.Encoder

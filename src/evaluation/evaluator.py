@@ -224,63 +224,61 @@ class Evaluator:
         if optimized_metric_config is None:
             return
 
-        target_callback_params = optimized_metric_config["callback"]["params"]
-        crit_optim_direction = optimized_metric_config["direction"]
-        target_callback_name = optimized_metric_config["callback"]["name"]
-        cb = self._get_optimized_callback(target_callback_name)
+        main_cfg = optimized_metric_config['main_metric']
+        main_cb_name = main_cfg['callback']['name']
+        main_cb_params = main_cfg['callback']['params']
+        main_optim_dir = main_cfg['direction']
+        ckpt_name, main_metric = self._get_metric(main_cb_name, main_cb_params)
 
-        ckpt_ds, main_metric_value = cb.get_optimized_metric(**target_callback_params)
-        optimized_metric = main_metric_value
-
-        if "sec_metric" in optimized_metric_config.keys() and not optimized_metric_config["sec_metric"] is None:
-            sec_metric_direction, sec_metric_value = self._get_secondary_metric(
-                optimized_metric_config["sec_metric"], ckpt_ds
-            )
-            optimized_metric = [main_metric_value, sec_metric_value]
-            crit_optim_direction = [crit_optim_direction, sec_metric_direction]
-
-        if isinstance(optimized_metric, float):
-            self._set_best_across_crit(optimized_metric, direction=crit_optim_direction)
+        if main_metric is None:
+            log.warn("Main metric is None. Optimized HP metric not updated this strat.")
+            return
+        elif optimized_metric_config.get('sec_metric') is not None:
+            sec_cfg = optimized_metric_config['sec_metric']
+            sec_metric, sec_optim_dir = self._get_secondary_metric(sec_cfg, ckpt_name)
+            optimized_metrics = [main_metric, sec_metric]
+            optim_directions = [main_optim_dir, sec_optim_dir]
         else:
-            self._comp_best_across_crit(
-                optimized_metric, directions=crit_optim_direction
-            )
+            self._set_best_across_crit(main_metric, direction=main_optim_dir)
+            return
 
-    def _get_optimized_callback(self, target_callback_name: str):
-        """Get callback that returns optimized metric."""
+        if sec_metric is None:
+            log.warn("Sec metric is None. Optimized HP metric not updated this strat.")
+            return
+
+        self._comp_best_across_crit(optimized_metrics, directions=optim_directions)
+
+    def _get_metric(self, callback_name: str, callback_params: dict):
+        """Get callback corresponding to metric and optim direction."""
         available_callbacks = {
             cb.name: cb for cb in self.evaluator.callbacks if hasattr(cb, "name")
         }
 
         try:
-            cb = available_callbacks[target_callback_name]
+            cb = available_callbacks[callback_name]
         except KeyError:
-            raise ValueError(f"Callback {target_callback_name} not available.")
+            raise ValueError(f"Callback {callback_name} not available.")
 
-        return cb
+        ckpt_name, metric_value = cb.get_optimized_metric(**callback_params)
 
-    def _get_secondary_metric(self, secondary_metric_config: dict, ckpt_ds: str):
+        return ckpt_name, metric_value
+
+    def _get_secondary_metric(self, sec_cfg: dict, ckpt_name: str):
         """Get the secondary metric value.
 
         Evaluate this metric at the checkpoint that the main metric was evaluated,
-        specified by ckpt_ds.
+        specified by ckpt_name.
         """
-        target_callback_params = secondary_metric_config["callback"]["params"]
-        crit_optim_direction = secondary_metric_config["direction"]
-        target_callback_name = secondary_metric_config["callback"]["name"]
-        cb = self._get_optimized_callback(target_callback_name)
+        sec_cb_name = sec_cfg["callback"]["name"]
+        sec_cb_params = dict(sec_cfg["callback"].get("params", {}))
+        sec_optim_dir = sec_cfg["direction"]
 
-        ckpt_was_none = False
-        if target_callback_params["ckpt_ds"] is None:
-            target_callback_params["ckpt_ds"] = ckpt_ds
-            ckpt_was_none = True
+        # Fill ckpt_name from main callback if missing/None.
+        if sec_cb_params.get("ckpt_name") is None:
+            sec_cb_params["ckpt_name"] = ckpt_name
 
-        _, metric_value = cb.get_optimized_metric(**target_callback_params)
-
-        if ckpt_was_none:
-            target_callback_params["ckpt_ds"] = None
-
-        return crit_optim_direction, metric_value
+        _, sec_metric = self._get_metric(sec_cb_name, sec_cb_params)
+        return sec_metric, sec_optim_dir
 
     def _set_best_across_crit(self, value: float, *, direction: str):
         """Set the best optimized metric values across all ckpt criteria."""
@@ -301,31 +299,26 @@ class Evaluator:
         raise ValueError("Optimized metric direction must be 'maximize' or 'minimize'.")
 
     def _comp_best_across_crit(self, values: list[float], *, directions: list[str]):
-        """Set the best composite metric across ckpt criteria.
+        """Update best composite metric across checkpoint criteria.
 
         This is computing the relative change for the main metric and secondary metric.
-        This is computed differently depending on the direction that the particular
-        metric should be optimised in.
         If the sum of the relative changes is positive, i.e., a metric's improvement
         is larger than the other metric's worsening, then save this as the new best
         across checkpointing criteria.
         """
+        if any(v is None for v in values):
+            return
+
         if self.optimized_metric is None:
             self.optimized_metric = values
             return
 
-        relative_changes = []
-        for metric_idx, metric_value in enumerate(values):
-            direction = directions[metric_idx]
-            if direction == "maximize":
-                relative_change = metric_value - self.optimized_metric[metric_idx]
-            elif direction == "minimize":
-                relative_change = self.optimized_metric[metric_idx] - metric_value
+        rel_changes = [
+            ((v - b) if d == "maximize" else (b - v)) / max(abs(v), 1e-12)
+            for v, b, d in zip(values, self.optimized_metric, directions)
+        ]
 
-            relative_change = relative_change / metric_value
-            relative_changes.append(relative_change)
-
-        if sum(relative_changes) > 0:
+        if sum(rel_changes) > 0:
             self.optimized_metric = values
 
     def _make_criterion_summary_plots(self, plot_folder: Path):

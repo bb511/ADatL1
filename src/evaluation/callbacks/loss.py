@@ -10,6 +10,9 @@ from torchmetrics.aggregation import MeanMetric
 from src.evaluation.callbacks import utils
 from src.plot import horizontal_bar
 from src.plot import matrix
+from src.utils import pylogger
+
+log = pylogger.RankedLogger(__name__)
 
 
 class LossCallback(Callback):
@@ -108,27 +111,25 @@ class LossCallback(Callback):
     def clear_crit_summary(self):
         self.loss_summary.clear()
 
-    def get_optimized_metric(self, ckpt_ds: str, test_ds: str):
+    def get_optimized_metric(self, ckpt_name: str, test_ds: str):
         """Get one number that one should optimize on this callback.
 
-        Here it is the value of the self.loss_name at the given ckpt_ds which is
+        Here it is the value of the self.loss_name at the given ckpt_name which is
         evaluated at the give test_ds.
         If the loss_summary dictionary only has 'last' as a key, then the criterion is
         'last', i.e., only checkpoint on the last epoch. This is trated as a special
-        case and the ckpt_ds that is given to this method is returned, along with the
+        case and the ckpt_name that is given to this method is returned, along with the
         loss in the last epoch.
         """
-        if len(self.loss_summary) == 1 and 'last' in self.loss_summary:
-            return ckpt_ds, self.loss_summary['last'][test_ds]
-
-        if not ckpt_ds in self.loss_summary.keys():
-            raise ValueError(
-                f"Loss {self.loss_name} was not computed for {ckpt_ds} dataset. "
-                f"Check the configuration of the callback if this ds is included!"
+        if not ckpt_name in self.loss_summary.keys():
+            log.warn(
+                f"Checkpoint with name '{ckpt_name}' not found for this strategy. "
+                f"Available ckpt names: {list(self.loss_summary.keys())}"
             )
+            return ckpt_name, None
 
-        optimized_loss = self.loss_summary[ckpt_ds][test_ds]
-        return ckpt_ds, optimized_loss
+        optimized_loss = self.loss_summary[ckpt_name][test_ds]
+        return ckpt_name, optimized_loss
 
     def _cache_summary(self, cache_folder: Path):
         """Cache the summary metric dictionary."""

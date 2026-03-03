@@ -15,6 +15,7 @@ from pytorch_lightning import Callback, LightningDataModule, LightningModule, Tr
 from pytorch_lightning.loggers import Logger
 from omegaconf import OmegaConf, DictConfig
 from colorama import Fore, Back, Style
+from hydra.core.hydra_config import HydraConfig
 
 import rootutils
 
@@ -155,6 +156,13 @@ def main(cfg: DictConfig) -> Optional[float]:
     del object_dict
     del metric_dict
     gc.collect()
+
+    def _worst_for(direction: str) -> float:
+        return float("inf") if direction == "minimize" else -float("inf")
+
+    if metric_value is None or any(v is None for v in metric_value):
+        dirs = HydraConfig.get().sweeper.direction
+        return tuple(_worst_for(d) for d in dirs)
 
     # return optimized metric
     return metric_value

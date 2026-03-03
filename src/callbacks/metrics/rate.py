@@ -40,7 +40,9 @@ class AnomalyRate(Metric):
         :bkg_score: Torch tensor containing scores for background samples.
         """
         q = 1.0 - (self.target_rate / self.bc_rate)
-        thr = torch.quantile(bkg_score.float(), q).to(self.threshold.device)
+        thr = torch.quantile(
+            bkg_score.float(), q, interpolation='higher'
+        ).to(self.threshold.device)
         self.threshold.copy_(thr)
 
     def apply_threshold(self, threshold: float):
@@ -49,7 +51,7 @@ class AnomalyRate(Metric):
 
     def update(self, anomaly_score: torch.Tensor) -> None:
         """The anomaly score can be defined in a number of ways. See model code."""
-        if torch.isnan(self.threshold):
+        if torch.isnan(self.threshold).item():
             raise RuntimeError(
                 "Threshold has not been set. Call set_threshold() before update()."
             )

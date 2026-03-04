@@ -30,7 +30,8 @@ dependencies = [
     "hydra-submitit-launcher (>=1.2.0,<2.0.0)",
     "colorama (>=0.4.6,<0.5.0)",
     "mplhep>=0.4.1",
-    "sqlalchemy (<2.0)",
+    "sqlalchemy (<2)",
+    "optuna (==2.10.1)",
 ]
 
 [build-system]
@@ -69,3 +70,4 @@ exclude_lines = [
     "raise NotImplementedError()",
     "if __name__ == .__main__.:",
 ]
+

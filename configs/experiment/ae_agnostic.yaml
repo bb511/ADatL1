@@ -77,7 +77,7 @@ callbacks:
       _target_: src.callbacks.checkpointing.criterion.Stable
       top_k: 1
       threshold: 0.05
-      patience: 10
+      patience: 1
     ds:
       - main_val
 

@@ -197,28 +197,45 @@ class L1ADDataModule(LightningDataModule):
         )
 
     def teardown(self, stage: str | None = None) -> None:
-        # Drop references to large tensors/dicts so they become collectible
-        gc.collect()
+        # Drop references to large tensors so they become collectible
+        if stage in ("fit", None):
+            # free train/valid (+ aux valid)
+            self._main.pop("train", None)
+            self._main.pop("valid", None)
+            self._aux.get("valid", {}).clear()
 
-        # If CUDA is ever used in other experiments, this helps allocator reuse
+        if stage in ("test", None):
+            # free test (+ aux test)
+            self._main.pop("test", None)
+            self._aux.get("test", {}).clear()
+
+        gc.collect()
         if torch.cuda.is_available():
             torch.cuda.empty_cache()
+            torch.cuda.ipc_collect()
 
     def transfer_batch_to_device(self, batch, device, dataloader_idx):
         """Transfer custom dataset to gpu faster."""
-        if device.type == "cuda":
-            return tuple(t.to(device, non_blocking=True) for t in batch)
+        if device.type != "cuda":
+            return tuple(t.to(device) for t in batch)
 
-        return tuple(t.to(device) for t in batch)
+        out = []
+        for t in batch:
+            # Only pin CPU tensors; skip if already pinned
+            if isinstance(t, torch.Tensor) and t.device.type == "cpu" and not t.is_pinned():
+                t = t.pin_memory()
+            out.append(t.to(device, non_blocking=True))
+
+        return tuple(out)
 
     def _load_main_split(self, data_dir: Path, split: str, label: int) -> SplitTensors:
         """Load main data splits: train, val, and test of ZB data."""
         x, mask, l1bit = self.loader.load_folder(data_dir / split)
         y = torch.full((x.size(0),), label, dtype=torch.int64)
-        x = x.contiguous().pin_memory()
-        mask = mask.contiguous().pin_memory()
-        l1bit = l1bit.contiguous().pin_memory()
-        y = y.contiguous().pin_memory()
+        x = x.contiguous()
+        mask = mask.contiguous()
+        l1bit = l1bit.contiguous()
+        y = y.contiguous()
 
         return SplitTensors(x=x, mask=mask, l1bit=l1bit, y=y)
 
@@ -247,10 +264,10 @@ class L1ADDataModule(LightningDataModule):
 
             x, mask, l1bit = self.loader.load_folder(dataset_path / split)
             y = torch.full((x.size(0),), label, dtype=torch.int64)
-            x = x.contiguous().pin_memory()
-            mask = mask.contiguous().pin_memory()
-            l1bit = l1bit.contiguous().pin_memory()
-            y = y.contiguous().pin_memory()
+            x = x.contiguous()
+            mask = mask.contiguous()
+            l1bit = l1bit.contiguous()
+            y = y.contiguous()
             out[name] = SplitTensors(x=x, mask=mask, l1bit=l1bit, y=y)
 
         return out

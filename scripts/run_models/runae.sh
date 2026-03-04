@@ -142,9 +142,9 @@ python3 src/train.py \
     +optimized_metric_config.sec_metric.callback.params.target_rate=0.25 \
     ~optimized_metric_config.sec_metric.callback.params.test_ds \
     optimized_metric_config.sec_metric.direction=minimize \
-    hydra.sweeper.study_name=test_v9 \
+    hydra.sweeper.study_name=test_mse \
     hydra.sweeper.n_trials=60 \
     hydra.sweeper.sampler.n_startup_trials=40 \
     trainer=gpu \
-    trainer.max_epochs=50 \
+    trainer.max_epochs=2 \
     trainer.devices=[0]

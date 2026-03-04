@@ -116,7 +116,7 @@
 #     trainer.devices=[0]
 
 # AE agnostic MSE and threshold stability.
-taskset -c 0-2 \
+taskset -c 15-17 \
 python3 src/train.py \
     -m \
     hydra/launcher=submitit_local \
@@ -127,6 +127,7 @@ python3 src/train.py \
     experiment_name=ae_agnostic_mse_vs_thres_search \
     callbacks.max_rate_mse_ckpt=null \
     callbacks.cvar25_ema_ckpt=null \
+    evaluator.ckpts.last=false \
     evaluator.ckpts.summary=null \
     evaluator_callbacks.cap_sn_zb=null \
     evaluator_callbacks.reco=null \
@@ -141,7 +142,7 @@ python3 src/train.py \
     +optimized_metric_config.sec_metric.callback.params.target_rate=0.25 \
     ~optimized_metric_config.sec_metric.callback.params.test_ds \
     optimized_metric_config.sec_metric.direction=minimize \
-    hydra.sweeper.study_name=mse_vs_thres_b16k \
+    hydra.sweeper.study_name=test_v9 \
     hydra.sweeper.n_trials=60 \
     hydra.sweeper.sampler.n_startup_trials=40 \
     trainer=gpu \

@@ -49,6 +49,7 @@ class ReconstructionPlots(Callback):
         self.name = name
 
     def on_test_epoch_start(self, trainer, pl_module):
+        """Determine if this callback should run for current ckpt and initialise q."""
         self._active = self._should_run_for_current_ckpt(trainer)
 
         self._buffers = {}
@@ -60,6 +61,7 @@ class ReconstructionPlots(Callback):
     def on_test_batch_end(
         self, trainer, pl_module, outputs, batch, batch_idx, dataloader_idx=0
     ):
+        """Mask and stream the data to overlaid histograms."""
         if not self._active:
             return
 
@@ -82,6 +84,7 @@ class ReconstructionPlots(Callback):
             self._update_objects(trainer, dset_name, x, yhat, m)
 
     def on_test_epoch_end(self, trainer, pl_module):
+        """Plot the accummulated histograms for the relevant data sets."""
         if not self._active:
             return
 
@@ -122,13 +125,14 @@ class ReconstructionPlots(Callback):
             )
 
     def _warmup_n(self, trainer, dset_name):
+        """Get the number of batches to use in determining the range of the histogram."""
         if isinstance(self.warmup_batches, float):
             total = len(trainer.test_dataloaders[dset_name])
             return max(1, int(self.warmup_batches * total))
         return int(self.warmup_batches)
 
     def _update_hist_pair(self, trainer, dset_name, key, x1, x2):
-
+        """Update the overlaid histogram with a new batch of data."""
         self._buffers.setdefault(dset_name, {})
         self._edges.setdefault(dset_name, {})
         self._hist_input.setdefault(dset_name, {})
@@ -173,7 +177,7 @@ class ReconstructionPlots(Callback):
             self._hist_output[dset_name][key] += np.histogram(x2, bins=edges)[0]
 
     def _update_objects(self, trainer, dset_name, x, yhat, m):
-
+        """If the inputs are from object_feature_map, use that to label the hist."""
         for object_name, feature_map in self.object_feature_map.items():
             for feat_name, feat_idxs in feature_map.items():
 
@@ -194,7 +198,7 @@ class ReconstructionPlots(Callback):
                 )
 
     def _update_features(self, trainer, dset_name, x, yhat):
-
+        """If the inputs are some contrastive space, use that to label the hist."""
         for feat_idx in range(x.size(-1)):
 
             self._update_hist_pair(
@@ -206,7 +210,7 @@ class ReconstructionPlots(Callback):
             )
 
     def _should_run_for_current_ckpt(self, trainer):
-
+        """Determine whether this callback should run for the current ckpt."""
         strat = getattr(trainer, "strat_name", None)
         metric = getattr(trainer, "metric_name", None)
         crit = getattr(trainer, "criterion_name", None)

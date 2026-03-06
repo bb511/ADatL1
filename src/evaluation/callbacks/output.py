@@ -53,6 +53,11 @@ class HistogramOutputCallback(Callback):
         self._active = False
 
     def on_test_epoch_start(self, trainer, pl_module):
+        """Determine if this callback should be ran on the current checkpoint.
+
+        If yes, initialise required quantities, and then determine the number of warmup
+        batches to use when deducing the range of the histograms.
+        """
         self._active = self._should_run_for_current_ckpt(trainer)
         if not self._active:
             return
@@ -79,6 +84,7 @@ class HistogramOutputCallback(Callback):
     def on_test_batch_end(
         self, trainer, pl_module, outputs, batch, batch_idx, dataloader_idx=0
     ):
+        """Stream the selected output to a histogram."""
         if not self._active:
             return
 
@@ -116,6 +122,7 @@ class HistogramOutputCallback(Callback):
             self.hist[dset_name] += counts
 
     def on_test_epoch_end(self, trainer, pl_module):
+        """Plot the accummulated histogram for each relevant data set."""
         if not self._active:
             return
 
@@ -148,6 +155,7 @@ class HistogramOutputCallback(Callback):
         )
 
     def _should_run_for_current_ckpt(self, trainer) -> bool:
+        """Determine whether this callback should run for the current ckpt."""
         strat = getattr(trainer, "strat_name", None)
         metric = getattr(trainer, "metric_name", None)
         crit = getattr(trainer, "criterion_name", None)

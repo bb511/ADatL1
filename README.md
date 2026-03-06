@@ -15,14 +15,9 @@ Install the dependencies using poetry by running the following command in the pa
 poetry install --no-root
 ```
 
-To install the dependencies required by the approximation capacity package:
-```
-poetry install --with cap
-```
-
 To install the dependencies required by the quantisation packages:
 ```
-poetry install --with quant
+poetry install --with quant --no-root
 ```
 
 ## Setup without Poetry

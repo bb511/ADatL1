@@ -178,6 +178,7 @@ class L1ADDataModule(LightningDataModule):
             batch_size=self.batch_size_per_device,
             shuffler=self.shuffler,
         )
+        dataset = self._attach_object_feature_map(dataset)
         return DataLoader(
             dataset,
             batch_size=None,
@@ -302,6 +303,7 @@ class L1ADDataModule(LightningDataModule):
             batch_size=batch_size,
             max_batches=max_b,
         )
+        ds = self._attach_object_feature_map(ds)
         return DataLoader(
             ds, batch_size=None, shuffle=False, num_workers=0, persistent_workers=False
         )
@@ -402,3 +404,8 @@ class L1ADDataModule(LightningDataModule):
             )
 
         return out
+
+    def _attach_object_feature_map(self, ds: Dataset) -> Dataset:
+        if hasattr(self, "loader") and hasattr(self.loader, "object_feature_map"):
+            ds.object_feature_map = self.loader.object_feature_map
+        return ds

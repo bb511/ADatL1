@@ -61,6 +61,52 @@ def plot_1d(
     plt.close(fig)
 
 
+def plot_streamed(
+    counts1: np.ndarray,
+    counts2: np.ndarray,
+    edges: np.ndarray,
+    obj_name: str,
+    feat_name: str,
+    save_dir: Path,
+    label1: str = "data1",
+    label2: str = "data2",
+):
+    """Plots a 1d overlaid histogram.
+
+    The data is streamed into this histogram.
+    """
+    plt.style.use(hep.style.CMS)
+
+    fig, ax = plt.subplots()
+
+    counts1 = counts1 / max(counts1.sum(), 1)
+    counts2 = counts2 / max(counts2.sum(), 1)
+
+    hep.histplot(counts1, edges, ax=ax, label=label1, histtype="fill", color="C0", alpha=0.5)
+    hep.histplot(counts2, edges, ax=ax, label=label2, histtype="fill", color="C1", alpha=0.5)
+    ax.legend()
+
+    if check_feature_is_Et(feat_name):
+        ax.set_yscale("log")
+    else:
+        ax.ticklabel_format(
+            axis="y", style="sci", scilimits=(-2, 2), useMathText=True, useOffset=False
+        )
+
+    ax.set_title(obj_name)
+    ax.set_xlabel(feat_name)
+    ax.ticklabel_format(
+        axis="x", style="sci", scilimits=(-2, 2), useMathText=True, useOffset=False
+    )
+    ax.get_xaxis().get_offset_text().set_position((1.10, 1))
+    ax.get_yaxis().get_offset_text().set_position((-0.12, 1))
+
+    filename = sanitize_filename(f"{obj_name}_{feat_name}").replace(" ", "_")
+    fig.savefig(save_dir / f"{filename}.jpg", bbox_inches="tight")
+    fig.clear()
+    plt.close(fig)
+
+
 def check_feature_is_Et(feat_name: str):
     is_et = "Et" in feat_name or "EtUnconstrained" in feat_name or "ETTEM" in feat_name
     is_not_eta = not "Eta" in feat_name

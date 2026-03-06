@@ -111,7 +111,7 @@ class AnomalyEfficiencyCallback(Callback):
 
     def on_test_epoch_end(self, trainer, pl_module) -> None:
         """Log the anomaly rates computed on each of the data sets."""
-        eff_name = "effs_pure" if self.pure_thres else "effs"
+        eff_name = f"{self.name}_pure" if self.pure_thres else self.name
         ckpts_dir = Path(pl_module._ckpt_path).parent
         ckpt_name = Path(pl_module._ckpt_path).stem
         plot_folder = ckpts_dir / "plots" / ckpt_name / eff_name
@@ -141,12 +141,12 @@ class AnomalyEfficiencyCallback(Callback):
             eff_name,
             plot_folder,
             log_raw=self.log_raw_mlflow,
-            gallery_name=f"{eff_name}_{self.metric_name.replace('/', '_')}",
+            gallery_name=f"{eff_name}",
         )
 
     def plot_summary(self, trainer, root_folder: Path):
         """Plot the summary metrics accummulated in eff_summary and reset this attr."""
-        eff_name = "effs_pure" if self.pure_thres else "effs"
+        eff_name = f"{self.name}_pure" if self.pure_thres else self.name
         plot_folder = root_folder / "plots" / (eff_name + "_summary")
         plot_folder.mkdir(parents=True, exist_ok=True)
         self._cache_summary(plot_folder)
@@ -234,6 +234,7 @@ class AnomalyEfficiencyCallback(Callback):
         batch_output = outputs[self.metric_name]
         if self.pure_thres:
             batch_output = batch_output[~l1bit]
+
         self.maintest_score_data.append(batch_output)
 
         if batch_idx == self.total_batches - 1:

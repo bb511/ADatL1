@@ -71,7 +71,7 @@ class AE(L1ADLightningModule):
             "loss/reco/mean": reco_loss.mean(),
             "loss/mse/mean_top_vals": mean_top_vals,
             # Used for callbacks:
-            "loss/reco/full": reco_loss.detach(),
+            "loss/total/full": reco_loss.detach(),
             "loss/mse/full": mse.detach(),
             "reconstructed_data": reconstruction.detach(),
         }

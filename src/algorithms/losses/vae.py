@@ -25,10 +25,16 @@ class ClassicVAELoss(L1ADLoss):
         by computing the mean over the batch, or the sum.
     """
 
-    def __init__(self, scale: float = 1, kl_scale: float = 1, reduct: str = "none"):
+    def __init__(
+        self,
+        scale: float = 1,
+        reco_scale: float = 1,
+        kl_scale: float = 1,
+        reduct: str = "none"
+    ):
         super().__init__(scale=scale, reduction=reduct)
         self.kl_scale_final = float(kl_scale)
-        self.reco_loss = MSEReconstructionLoss(reduction=reduct)
+        self.reco_loss = MSEReconstructionLoss(scale=reco_scale, reduction=reduct)
         self.kl_loss = KLDivergenceLoss(scale=self.kl_scale_final, reduction=reduct)
 
     def forward(
@@ -53,19 +59,14 @@ class ClassicVAELoss(L1ADLoss):
 
 
 class AxoV4Loss(ClassicVAELoss):
-    """The conventional VAE loss, but the reconstruction is done in a special way.
+    """The conventional VAE loss, but the reconstruction is done in a special way."""
 
-    This assumes that the input is composed only of pT, eta, and phi features.
-    Moreover, it assumes that the phi feature of each object is every third element
-    in the torch Tensor that the loss function receives. Hence, THIS IS ONLY USABLE
-    WITH A VERY PARTICULAR TYPE OF DATA PROCESSING.
-    """
-
-    def __init__(self, scale: float = 1, kl_scale: float = 1, reduct: str = "none"):
+    def __init__(
+        self,
+        scale: float = 1,
+        reco_scale: float = 1,
+        kl_scale: float = 1,
+        reduct: str = "none"
+    ):
         super().__init__(scale=scale, kl_scale=kl_scale, reduct=reduct)
-        log.warn(
-            Fore.YELLOW
-            + "Using AxoV4Loss. Expecting that the mlready data config is axov4."
-            + "Moreover, expecting that the awkward2torch config is also axov4."
-        )
-        self.reco_loss = CylPtPzReconstructionLoss(reduction=reduct)
+        self.reco_loss = CylPtPzReconstructionLoss(scale=reco_scale, reduction=reduct)

@@ -6,3 +6,4 @@ dirpath: '${paths.checkpoints_dir}/${experiment_name}/${run_name}'
 monitor: ???
 criterion: ???
 ds: null
+weights_only: false

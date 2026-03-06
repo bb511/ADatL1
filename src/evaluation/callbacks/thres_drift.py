@@ -101,7 +101,7 @@ class ThresholdDriftCallback(Callback):
         """Compute the calibration drift on the main_test data set."""
         ckpt_name = Path(pl_module._ckpt_path).stem
         ckpts_dir = Path(pl_module._ckpt_path).parent
-        plot_folder = ckpts_dir / "plots" / ckpt_name / "threshold_transfer"
+        plot_folder = ckpts_dir / "plots" / ckpt_name / self.name
         plot_folder.mkdir(parents=True, exist_ok=True)
 
         N = int(self.total_counts)
@@ -128,10 +128,10 @@ class ThresholdDriftCallback(Callback):
         utils.mlflow.log_plots_to_mlflow(
             trainer,
             ckpt_name,
-            "thres_transfer",
+            self.name,
             plot_folder,
             log_raw=self.log_raw_mlflow,
-            gallery_name=f"thres_transfer_{self.loss_name.replace('/', '_')}",
+            gallery_name=f"{self.name}_{self.loss_name.replace('/', '_')}",
         )
 
     def _plot(self, data: dict, xlabel: str, plot_folder: Path, percent: bool = False):
@@ -175,7 +175,7 @@ class ThresholdDriftCallback(Callback):
         In this case, plot the calibration drift for each threhold target rate, for
         each checkpoint.
         """
-        plot_folder = root_folder / "plots" / "thres_transfer_summary"
+        plot_folder = root_folder / "plots" / f"{self.name}_summary"
         plot_folder.mkdir(parents=True, exist_ok=True)
         self._cache_summary(plot_folder)
 
@@ -189,7 +189,7 @@ class ThresholdDriftCallback(Callback):
             )
             self._plot(smet, xlabel, plot_folder, percent=False)
 
-        utils.mlflow.log_plots_to_mlflow(trainer, None, "thres_transfer", plot_folder)
+        utils.mlflow.log_plots_to_mlflow(trainer, None, self.name, plot_folder)
 
     def clear_crit_summary(self):
         self.transfer_summary.clear()

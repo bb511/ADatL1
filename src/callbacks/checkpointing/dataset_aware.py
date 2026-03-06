@@ -38,6 +38,7 @@ class DatasetAwareModelCheckpoint(Callback):
         criterion: Criterion,
         ds: list[str],
         dirpath: Optional[str] = "checkpoints",
+        weights_only: Optional[bool] = False,
     ):
         super().__init__()
         self.dirpath = Path(dirpath)
@@ -46,6 +47,7 @@ class DatasetAwareModelCheckpoint(Callback):
         self.topk = len(criterion.top_k_values)
         self.ds = ds
         self.save_last = self.criterion.name == "last"
+        self.weights_only = weights_only
 
         self.checkpoints = defaultdict(list)
         self.ds_criterion = None
@@ -128,7 +130,7 @@ class DatasetAwareModelCheckpoint(Callback):
     def _save_checkpoint(self, trainer, pl_module, filepath: Path):
         """Save a checkpoint with a custom key and metric value."""
         if trainer.is_global_zero:
-            trainer.save_checkpoint(filepath)
+            trainer.save_checkpoint(filepath, self.weights_only)
 
         # Save keras model separately if it is present.
         self._maybe_save_keras_models(pl_module, Path(filepath))

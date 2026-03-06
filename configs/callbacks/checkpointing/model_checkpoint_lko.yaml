@@ -1,5 +1,6 @@
 _target_: src.callbacks.model_checkpoint.LeaveKOutModelCheckpoint
 dirpath: '${paths.root_dir}/checkpoints/${experiment_name}/${run_name}'
+weights_only: false
 ds:
   - GluGluHTo2B_Par-MH-125
   - GluGluHto2G_Par-MH-125

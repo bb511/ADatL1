@@ -105,7 +105,7 @@ class AnomalyRateCallback(Callback):
 
     def on_test_epoch_end(self, trainer, pl_module) -> None:
         """Log the anomaly rates computed on each of the data sets."""
-        rate_name = "rates_pure" if self.pure_thres else "rates"
+        rate_name = f"{self.name}_pure" if self.pure_thres else self.name
         ckpts_dir = Path(pl_module._ckpt_path).parent
         ckpt_name = Path(pl_module._ckpt_path).stem
         plot_folder = ckpts_dir / "plots" / ckpt_name / rate_name
@@ -135,7 +135,7 @@ class AnomalyRateCallback(Callback):
 
     def plot_summary(self, trainer, root_folder: Path):
         """Plot the summary metrics accummulated in rate_summary and reset this attr."""
-        rate_name = "rates_pure" if self.pure_thres else "rates"
+        rate_name = f"{self.name}_pure" if self.pure_thres else self.name
         plot_folder = root_folder / "plots" / (rate_name + "_summary")
         plot_folder.mkdir(parents=True, exist_ok=True)
         self._cache_summary(plot_folder)

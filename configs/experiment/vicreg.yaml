@@ -33,6 +33,24 @@ algorithm:
   model:
     in_dim: 117
 
+  optimizer:
+    _partial_: true
+    _target_: torch.optim.AdamW
+    lr: 0.0013029941778430407
+    weight_decay: 0.001
+    betas: [0.9, 0.999]
+    eps: 1e-8
+
+  scheduler:
+    # here other attributes...
+    scheduler:
+      _target_: src.algorithms.schedulers.cdw.CosineWithWarmup
+      _partial_: true
+      warmup_ratio: 0.1
+      min_lr_ratio: 0.05
+      warmup_start_ratio: 1e-3
+
+
 callbacks:
   log_data_mlflow: null
   # Additional checkpoints for the final run (expensive).

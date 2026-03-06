@@ -5,13 +5,8 @@ python3 src/train.py \
     paths.raw_data_dir=/data/deodagiu/adl1t_data/parquet_files \
     experiment=debug \
     experiment_name=debug \
-    callbacks.max_rate_mse_ckpt=null \
-    callbacks.cvar25_ema_ckpt=null \
-    evaluator.ckpts.summary=null \
-    evaluator.ckpts.last=false \
-    evaluator_callbacks.reco=null \
     trainer=gpu \
-    trainer.max_epochs=50 \
+    trainer.max_epochs=1 \
     trainer.devices=[0]
 
     # hparams_search=ae_agnostic_optuna \
@@ -20,3 +15,34 @@ python3 src/train.py \
     # hydra/launcher=submitit_local \
     # hydra.launcher.cpus_per_task=1 \
     # hydra.launcher.gpus_per_node=4 \
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+

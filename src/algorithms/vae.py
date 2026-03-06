@@ -8,6 +8,7 @@ from torch import nn
 from src.algorithms import L1ADLightningModule
 from src.algorithms.schedulers.linear import LinearWarmup
 from src.algorithms.utils.weight_loader import load_weights
+from src.algorithms.utils.object_feature_map_loader import inject_object_feature_map
 from src.algorithms.components.encoder import VariationalEncoder
 from src.algorithms.components.decoder import Decoder
 from src.utils import pylogger
@@ -37,6 +38,7 @@ class VAE(L1ADLightningModule):
         features: Optional[nn.Module] = None,
         mask: bool = True,
         ckpt: str = "",
+        operational_quantile: float = 0.9999912614,
         **kwargs,
     ):
         super().__init__(model=None, **kwargs)
@@ -49,13 +51,10 @@ class VAE(L1ADLightningModule):
         self.features = features if features is not None else nn.Identity()
         self.features.eval()
         self.kl_warmup_frac = kl_warmup_frac
-
-    def forward(self, x: torch.Tensor) -> tuple[torch.Tensor, ...]:
-        z_mean, z_log_var, z = self.encoder(x)
-        reconstruction = self.decoder(z)
-        return z_mean, z_log_var, z, reconstruction
+        self.operational_quantile = operational_quantile
 
     def on_fit_start(self):
+        inject_object_feature_map(self)
         self.features.to(self.device)
         total_steps = int(self.trainer.estimated_stepping_batches)
         self._setup_kl_annealing(self.kl_warmup_frac, total_steps)
@@ -63,6 +62,14 @@ class VAE(L1ADLightningModule):
         # Load weights from checkpoint if a checkpoint was provided.
         if self.ckpt_path:
             self._load_checkpoint()
+
+    def on_test_start(self):
+        inject_object_feature_map(self)
+
+    def forward(self, x: torch.Tensor) -> tuple[torch.Tensor, ...]:
+        z_mean, z_log_var, z = self.encoder(x)
+        reconstruction = self.decoder(z)
+        return z_mean, z_log_var, z, reconstruction
 
     def model_step(self, batch: Tuple[torch.Tensor]) -> Dict[str, torch.Tensor]:
         x, m, _, _ = batch
@@ -80,7 +87,7 @@ class VAE(L1ADLightningModule):
             mask=m if self.mask else None,
             kl_scale=kl_current_scale,
         )
-        del x, z, z_mean, z_log_var
+        del x, z, z_log_var
         total_loss = self._add_hgq_loss(total_loss)
 
         # Diagnosis metrics.
@@ -89,8 +96,13 @@ class VAE(L1ADLightningModule):
             kl_q50, kl_q95, kl_q99, kl_q999 = torch.quantile(
                 kl_raw, kl_quantiles
             ).tolist()
-            rmse_quantile = torch.tensor(0.95, device=reco_loss.device)
-            rmse_q95 = torch.quantile(torch.sqrt(reco_loss), rmse_quantile).item()
+
+            # Number of extreme tail samples
+            n = reco_loss.numel()
+            k = max(10, int((1.0 - self.operational_quantile) * n))
+            topk_vals = torch.topk(reco_loss, k).values
+            mean_top_vals = topk_vals.mean().item()
+            z_mean_squared = torch.square(z_mean).sum(dim=1)
 
         return {
             # Used for backpropagation:
@@ -104,12 +116,13 @@ class VAE(L1ADLightningModule):
             "loss/kl_raw/q99": kl_q99,
             "loss/kl_raw/q999": kl_q999,
             "kl_scale": kl_current_scale,
-            "loss/reco/sqrt_q95": rmse_q95,
-
+            "loss/reco/mean_top_vals": mean_top_vals,
+            "loss/z_mean_squared": z_mean_squared.detach().mean(),
             # Used for callbacks:
             "loss/total/full": total_loss.detach(),
             "loss/reco/full": reco_loss.detach(),
             "loss/kl_raw/full": kl_raw.detach(),
+            "loss/z_mean_squared/full": z_mean_squared.detach(),
             "reconstructed_data": reconstruction.detach(),
         }
 
@@ -124,7 +137,8 @@ class VAE(L1ADLightningModule):
             "loss_kl_raw_q95": outdict.get("loss/kl_raw/q95"),
             "loss_kl_raw_q99": outdict.get("loss/kl_raw/q99"),
             "loss_kl_raw_q999": outdict.get("loss/kl_raw/q999"),
-            "loss_rmse_q95": outdict.get("loss/reco/sqrt_q95"),
+            "loss_reco_mean_top_vals": outdict.get("loss/reco/mean_top_vals"),
+            "z_mean_squared": outdict.get("loss/z_mean_squared"),
             "kl_scale": outdict.get("kl_scale"),
         }
 

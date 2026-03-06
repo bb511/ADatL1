@@ -1,8 +1,7 @@
-# Callback that computes the loss of a given checkpoint on all test data sets.
+# Callback that plots overlaid histograms of the input and reconstructed data.
 from pathlib import Path
-from collections import defaultdict
-import pickle
 
+import numpy as np
 import torch
 from pytorch_lightning.callbacks import Callback
 from pytorch_lightning import LightningDataModule
@@ -12,16 +11,19 @@ from src.plot import overlaid_hist
 
 
 class ReconstructionPlots(Callback):
-    """Plot the reconstructed data distributions overlaid with the input ones.
+    """Stream overlaid histograms of input vs reconstruction.
 
-    :param nbatches: Int of number of batches to plot.
-    :param output_name: String with the name of the key containing the output in the
-        output dictionary of the model.
-    :param datamodule: The datamodule that was used during the training of the model.
-    :param ckpt_dataset: String specifying the dataset name of the checkpoints that
-        this callback should be evaluated on.
-    :param datasets: List of strings with the dataset names that the checkpoint should
-        be evaluated on and the plots should be made for.
+    :param output_name: String specifying the key in the output dictionary of the
+        output you'd like to plot.
+    :param datasets: List of strings specifying the datasets that you'd like to make the
+        histogram for.
+    :param ckpts: Dictionary of the checkpoints that you'd like to plot the histograms
+        for.
+    :param warmup_batches: Int specifying the number of batches used to determine the
+        range of the histogram. If this is a float, it should be a float between 0 and
+        1, since then this is interpreted as the fraction of batches that should be used
+        for warmup.
+    :param name: String specifying the name of the callback and the name of the gallery.
     :param log_raw_mlflow: Boolean to decide whether to log the raw plots produced by
         this callback to mlflow artifacts. Default is True. An html gallery of all the
         plots is made by default, so if this is set to false, one can still view the
@@ -30,148 +32,199 @@ class ReconstructionPlots(Callback):
 
     def __init__(
         self,
-        nbatches: int,
+        warmup_batches: int | float,
         output_name: str,
         datamodule: LightningDataModule,
-        ckpt_dataset: str,
+        ckpts: dict,
         datasets: list[str] = [],
+        name: str = 'reco',
         log_raw_mlflow: bool = True,
     ):
-        self.nbatches = nbatches
+        self.warmup_batches = warmup_batches
         self.output_name = output_name
         self.log_raw_mlflow = log_raw_mlflow
-        self.ckpt_dataset = ckpt_dataset
         self.datasets = datasets
         self.object_feature_map = datamodule.loader.object_feature_map
+        self.ckpts = ckpts
+        self.name = name
 
     def on_test_epoch_start(self, trainer, pl_module):
-        """Initialise dictionary used to accummulate the initial data and output.
+        self._active = self._should_run_for_current_ckpt(trainer)
 
-        Additionally, get the name of the dataset that the checkpoint that is currently
-        evaluated was made on.
-        """
-        self.input_accumulator = []
-        self.output_accumulator = []
-        self.mask_accumulator = []
-        ckpt_name = Path(pl_module._ckpt_path).stem
-        self.ckpt_ds_name = utils.misc.get_ckpt_ds_name(ckpt_name)
+        self._buffers = {}
+        self._edges = {}
+        self._hist_input = {}
+        self._hist_output = {}
+        self._batch_counts = {}
 
     def on_test_batch_end(
         self, trainer, pl_module, outputs, batch, batch_idx, dataloader_idx=0
     ):
-        """Accumulate output for nbatches and then plot overlaid histogram."""
+        if not self._active:
+            return
+
         dset_name = list(trainer.test_dataloaders.keys())[dataloader_idx]
-        if self.ckpt_dataset != self.ckpt_ds_name:
-            return
-        if not dset_name in self.datasets:
-            return
-        if (batch_idx + 1) > self.nbatches:
+        if self.datasets and dset_name not in self.datasets:
             return
 
         x, m, _, _ = batch
         x = torch.flatten(x, start_dim=1)
+        m = torch.flatten(m, start_dim=1).bool()
+
         if hasattr(pl_module, "features"):
             x = pl_module.features(x)
 
-        m = torch.flatten(m, start_dim=1)
+        yhat = outputs[self.output_name]
 
-        if (batch_idx + 1) < self.nbatches:
-            self.input_accumulator.append(x)
-            self.mask_accumulator.append(m)
-            self.output_accumulator.append(outputs[self.output_name])
+        if hasattr(pl_module, "features") and not isinstance(pl_module.features, torch.nn.Identity):
+            self._update_features(trainer, dset_name, x, yhat)
         else:
-            self.input_accumulator.append(x)
-            self.mask_accumulator.append(m)
-            self.output_accumulator.append(outputs[self.output_name])
+            self._update_objects(trainer, dset_name, x, yhat, m)
 
-            self.input_accumulator = torch.cat(self.input_accumulator, dim=0)
-            self.output_accumulator = torch.cat(self.output_accumulator, dim=0)
-            self.mask_accumulator = torch.cat(self.mask_accumulator, dim=0)
+    def on_test_epoch_end(self, trainer, pl_module):
+        if not self._active:
+            return
 
-            if hasattr(pl_module, "features") and not isinstance(
-                pl_module.features, torch.nn.Identity
-            ):
-                self._on_dataset_end_features(trainer, pl_module, dset_name)
-            else:
-                self._on_dataset_end(trainer, pl_module, dset_name)
-
-            self.input_accumulator = []
-            self.mask_accumulator = []
-            self.output_accumulator = []
-
-    def _on_dataset_end(self, trainer, pl_module, dataset_name: str):
-        """Plot the overlaid histogram for each feature.
-
-        This is done when accummulation is completed for one data set.
-        """
         ckpts_dir = Path(pl_module._ckpt_path).parent
         ckpt_name = Path(pl_module._ckpt_path).stem
-        plot_folder = ckpts_dir / "plots" / ckpt_name / "recos" / dataset_name
-        plot_folder.mkdir(parents=True, exist_ok=True)
 
-        for object_name, feature_map in self.object_feature_map.items():
-            for feat_name, feat_idxs in feature_map.items():
-                input_feat = self.input_accumulator[:, feat_idxs]
-                output_feat = self.output_accumulator[:, feat_idxs]
+        for dset_name in self._edges:
+            plot_folder = ckpts_dir / "plots" / ckpt_name / self.name / dset_name
+            plot_folder.mkdir(parents=True, exist_ok=True)
 
-                mask_feat = self.mask_accumulator[:, feat_idxs]
-                input_feat = input_feat[mask_feat]
-                output_feat = output_feat[mask_feat]
+            for key, edges in self._edges[dset_name].items():
+                c1 = self._hist_input[dset_name].get(key)
+                c2 = self._hist_output[dset_name].get(key)
 
-                # Detach and move to CPU for plotting
-                input_feat = input_feat.detach().flatten().float().cpu().numpy()
-                output_feat = output_feat.detach().flatten().float().cpu().numpy()
-                overlaid_hist.plot_1d(
-                    x1=input_feat,
-                    x2=output_feat,
-                    obj_name=object_name,
+                if c1 is None or c2 is None:
+                    continue
+
+                obj_name, feat_name = key
+
+                overlaid_hist.plot_streamed(
+                    counts1=c1,
+                    counts2=c2,
+                    edges=edges,
+                    obj_name=obj_name,
                     feat_name=feat_name,
                     save_dir=plot_folder,
                     label1="input",
                     label2="reco",
                 )
 
-        utils.mlflow.log_plots_to_mlflow(
-            trainer,
-            ckpt_name,
-            "recos",
-            plot_folder,
-            log_raw=self.log_raw_mlflow,
-            gallery_name=f"{dataset_name}_reco",
-        )
-
-    def _on_dataset_end_features(self, trainer, pl_module, dataset_name: str):
-        """Plot the overlaid histogram for each feature.
-
-        This is done when accummulation is completed for one data set.
-        """
-        ckpts_dir = Path(pl_module._ckpt_path).parent
-        ckpt_name = Path(pl_module._ckpt_path).stem
-        plot_folder = ckpts_dir / "plots" / ckpt_name / "recos" / dataset_name
-        plot_folder.mkdir(parents=True, exist_ok=True)
-
-        for feat_idx in range(self.input_accumulator.size(-1)):
-            input_feat = self.input_accumulator[:, feat_idx]
-            output_feat = self.output_accumulator[:, feat_idx]
-
-            # Detach and move to CPU for plotting
-            input_feat = input_feat.detach().flatten().float().cpu().numpy()
-            output_feat = output_feat.detach().flatten().float().cpu().numpy()
-            overlaid_hist.plot_1d(
-                x1=input_feat,
-                x2=output_feat,
-                obj_name="noobject",
-                feat_name=f"feat_{feat_idx}",
-                save_dir=plot_folder,
-                label1="input",
-                label2="reco",
+            utils.mlflow.log_plots_to_mlflow(
+                trainer,
+                ckpt_name,
+                "recos",
+                plot_folder,
+                log_raw=self.log_raw_mlflow,
+                gallery_name=f"{dset_name}_reco",
             )
 
-        utils.mlflow.log_plots_to_mlflow(
-            trainer,
-            ckpt_name,
-            "recos",
-            plot_folder,
-            log_raw=self.log_raw_mlflow,
-            gallery_name=f"{dataset_name}_reco",
-        )
+    def _warmup_n(self, trainer, dset_name):
+        if isinstance(self.warmup_batches, float):
+            total = len(trainer.test_dataloaders[dset_name])
+            return max(1, int(self.warmup_batches * total))
+        return int(self.warmup_batches)
+
+    def _update_hist_pair(self, trainer, dset_name, key, x1, x2):
+
+        self._buffers.setdefault(dset_name, {})
+        self._edges.setdefault(dset_name, {})
+        self._hist_input.setdefault(dset_name, {})
+        self._hist_output.setdefault(dset_name, {})
+        self._batch_counts.setdefault(dset_name, {})
+
+        if key not in self._batch_counts[dset_name]:
+            self._batch_counts[dset_name][key] = 0
+
+        x1 = x1.detach().flatten().float().cpu().numpy()
+        x2 = x2.detach().flatten().float().cpu().numpy()
+
+        x1 = x1[np.isfinite(x1)]
+        x2 = x2[np.isfinite(x2)]
+
+        if key not in self._edges[dset_name]:
+
+            self._buffers[dset_name].setdefault(key, [])
+            self._buffers[dset_name][key].append(np.concatenate([x1, x2]))
+            self._batch_counts[dset_name][key] += 1
+
+            if self._batch_counts[dset_name][key] >= self._warmup_n(trainer, dset_name):
+
+                vals = np.concatenate(self._buffers[dset_name][key])
+                edges = np.histogram_bin_edges(vals, bins="doane")
+
+                self._edges[dset_name][key] = edges
+
+                c1 = np.histogram(x1, bins=edges)[0]
+                c2 = np.histogram(x2, bins=edges)[0]
+
+                self._hist_input[dset_name][key] = c1.astype(np.float64)
+                self._hist_output[dset_name][key] = c2.astype(np.float64)
+
+                self._buffers[dset_name][key] = []
+
+        else:
+
+            edges = self._edges[dset_name][key]
+
+            self._hist_input[dset_name][key] += np.histogram(x1, bins=edges)[0]
+            self._hist_output[dset_name][key] += np.histogram(x2, bins=edges)[0]
+
+    def _update_objects(self, trainer, dset_name, x, yhat, m):
+
+        for object_name, feature_map in self.object_feature_map.items():
+            for feat_name, feat_idxs in feature_map.items():
+
+                x_feat = x[:, feat_idxs]
+                y_feat = yhat[:, feat_idxs]
+
+                m_feat = m[:, feat_idxs]
+
+                x_feat = x_feat[m_feat]
+                y_feat = y_feat[m_feat]
+
+                self._update_hist_pair(
+                    trainer,
+                    dset_name,
+                    (object_name, feat_name),
+                    x_feat,
+                    y_feat,
+                )
+
+    def _update_features(self, trainer, dset_name, x, yhat):
+
+        for feat_idx in range(x.size(-1)):
+
+            self._update_hist_pair(
+                trainer,
+                dset_name,
+                ("noobject", f"feat_{feat_idx}"),
+                x[:, feat_idx],
+                yhat[:, feat_idx],
+            )
+
+    def _should_run_for_current_ckpt(self, trainer):
+
+        strat = getattr(trainer, "strat_name", None)
+        metric = getattr(trainer, "metric_name", None)
+        crit = getattr(trainer, "criterion_name", None)
+
+        if strat is None:
+            return False
+
+        if strat == "last":
+            return bool(self.ckpts.get("last", False))
+
+        strat_cfg = self.ckpts.get(strat, None)
+
+        if not isinstance(strat_cfg, dict) or metric is None or crit is None:
+            return False
+
+        allowed_criteria = strat_cfg.get(metric, None)
+
+        if not isinstance(allowed_criteria, (list, tuple)):
+            return False
+
+        return crit in allowed_criteria

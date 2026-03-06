@@ -3,10 +3,10 @@
 defaults:
   - override /data: basis
   - override /algorithm: vae
-  - override /callbacks: ad_basics
+  - override /callbacks: default
   - override /trainer: cpu
   - override /evaluator: default
-  - override /evaluator_callbacks: ad_basics
+  - override /evaluator_callbacks: default
   - override /logger: mlflow
 
 seed: 123
@@ -24,6 +24,19 @@ trainer:
   limit_test_batches: 10
 
 test: true
+
+algorithm:
+  encoder:
+    in_dim: 117
+
+  optimizer:
+    _partial_: true
+    _target_: torch.optim.AdamW
+    lr: 0.001
+    weight_decay: 0.0
+    betas: [0.9, 0.999]
+    eps: 1e-8
+
 
 callbacks:
   log_data_mlflow: null
@@ -98,6 +111,6 @@ evaluator_callbacks:
     nbatches: 2
     output_name: reconstructed_data
     datamodule: true # callback needs original datamodule
-    ckpt_dataset: last
+    ckpt_name: last
     datasets: ['main_test', 'SingleNeutrino_E-10-gun']
     log_raw_mlflow: false

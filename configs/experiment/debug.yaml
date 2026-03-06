@@ -1,8 +1,8 @@
 # @package _global_
 
 defaults:
-  - override /data: basis
-  - override /algorithm: ae
+  - override /data: axov4
+  - override /algorithm: vae
   - override /callbacks: default
   - override /trainer: cpu
   - override /evaluator: default
@@ -10,9 +10,9 @@ defaults:
   - override /logger: mlflow
 
 seed: 123
-tags: ["ae", "agnostic", "cap"]
+tags: ["axo_v4", "vae"]
 
-experiment_name: ae_agnostic_training
+experiment_name: axov4
 run_name: ${short_hash:${hydra:runtime.output_dir},12}
 
 data:
@@ -23,56 +23,118 @@ trainer:
   gradient_clip_algorithm: norm
   gradient_clip_val: 0.0
   min_epochs: 1
-  max_epochs: 200
+  max_epochs: 20
 
 test: true
 
 algorithm:
-  # The basis data processing returns 117 features.
+  features: null
   encoder:
-    in_dim: 117
+    in_dim: 57
+    nodes: [28, 16]
+    out_dim: 8
+
+    init_weight:
+      _target_: src.utils.hydra.get_method
+      path: torch.nn.init.xavier_uniform_
+    init_bias:
+      _target_: src.utils.hydra.get_method
+      path: torch.nn.init.zeros_
+
+  decoder:
+    nodes: [24, 32, 64, 128]
+
+    init_weight:
+      _target_: src.utils.hydra.get_method
+      path: torch.nn.init.xavier_uniform_
+    init_bias:
+      _target_: src.utils.hydra.get_method
+      path: torch.nn.init.zeros_
+    init_last_weight:
+      _target_: src.utils.hydra.get_method
+      path: torch.nn.init.uniform_
+      a: -0.05
+      b: 0.05
+    init_last_bias: null
+
+  kl_warmup_frac: 0.0
+  mask: false
+
+
+  loss:
+    _target_: src.algorithms.losses.vae.AxoV4Loss
+    reco_scale: 1.0
+    kl_scale: 0.5736625791372814
+
+  optimizer:
+    _partial_: true
+    _target_: src.algorithms.optimizers.lion.Lion
+    lr: 0.001
+    weight_decay: 0.0
+
+  scheduler:
+    scheduler:
+      _partial_: true
+      _target_: src.algorithms.schedulers.cdrw.CDRW
+      lr0: ${algorithm.optimizer.lr}
+      s0: 32
+      t_mul: 2.0
+      m_mul: 0.65
+      alpha: 1e-6
+      warmup_epochs: 10
 
 callbacks:
   log_data_mlflow: null
   anomaly_eff:
     _target_: src.callbacks.rate.AnomalyEfficiencyCallback
-    metric_name: 'loss/mse/full'
+    metric_name: 'loss/z_mean_squared/full'
     target_rates: [0.25]
     bc_rate: 28608.8064
 
-  max_rate_mse_ckpt:
+  max_rate_kl_ckpt:
     _target_: src.callbacks.model_checkpoint.SingleDatasetModelCheckpoint
     dirpath: '${paths.checkpoints_dir}/${experiment_name}/${run_name}'
-    monitor: eff__ascore_loss_mse_full__brate_0.25kHz
+    monitor: eff__ascore_loss_z_mean_squared_full__brate_0.25kHz
     criterion:
       _target_: src.callbacks.checkpointing.criterion.Max
       top_k: 1
     ds:
-      - GluGluHTo2B_Par-MH-125
-      - GluGluHto2G_Par-MH-125
-      - GluGluHto2G_Par-MH-90
-      - GluGluHto2Tau_Par-MH-125
-      - GluGlutoHHto2B2WtoLNu2Q_Par-c2-0-kl-1-kt-1
-      - HHHto4B2Tau_Par-c3-0-d4-0
-      - HHHto6B_Par-c3-0-d4-0
-      - SUSYGluGluToBBHTo2B_Par-M-1200
-      - SUSYGluGluToBBHToBB_Par-M-120
-      - SUSYGluGluToBBHToBB_Par-M-350
-      - SUSYGluGluToBBHToBB_Par-M-600
-      - TTHTo2C_Par-MH-125
-      - TTHto2B_Par-MH-125
-      - VBFHTo2C_Par-MH-125
-      - VBFHto2B_Par-MH-125
-      - VBFHto2Tau_Par-MH-125
-      - WtoTauto3Mu
-      - ggH-suep-decay
-      - smj-case-A
+      - GluGluHToBB_M-125
+      - GluGluHToGG_M-125
+      - GluGluHToGG_M-90
+      - GluGluHToTauTau_M-125
+      - GluGlutoHHto2B2WtoLNu2Q_kl-1p00_kt-1p00_c2-0p00
+      - HHHTo6B_c3_0_d4_0
+      - HHHto4B2Tau_c3-0_d4-0
+      - HTo2LongLivedTo4b_MH-1000_MFF-450_CTau-100000mm
+      - HTo2LongLivedTo4b_MH-1000_MFF-450_CTau-10000mm
+      - HTo2LongLivedTo4b_MH-125_MFF-12_CTau-900mm
+      - HTo2LongLivedTo4b_MH-125_MFF-25_CTau-1500mm
+      - HTo2LongLivedTo4b_MH-125_MFF-50_CTau-3000mm
+      - SMS-Higgsino_mN2-170_mC1-160_mN1-150_HT60
+      - SUSYGluGluToBBHToBB_NarrowWidth_M-1200
+      - SUSYGluGluToBBHToBB_NarrowWidth_M-600
+      - SUSYGluGluToBBHToBB_NarrowWidth_M-350
+      - SUSYGluGluToBBHToBB_NarrowWidth_M-120
+      - VBFHToCC_M-125
+      - VBFHToInvisible_M-125
+      - VBFHToTauTau_M125
+      - VBFHto2B_M-125
+      - WToTauTo3Mu
+      - WToTauToMuMuMu
+      - Wlnu
+      - ggXToJpsiJpsiTo2Mu2E_m7_pseudoscalar
+      - ggXToYYTo2Mu2E_m14_pseudoscalar
+      - ggXToYYTo2Mu2E_m18_pseudoscalar
+      - ggXToYYTo2Mu2E_m26_pseudoscalar
       - haa-4b-ma15
+      - ttHto2B_M-125
+      - ttHto2C_M-125
 
   stable_mse_ckpt:
     _target_: src.callbacks.model_checkpoint.SingleDatasetModelCheckpoint
     dirpath: '${paths.checkpoints_dir}/${experiment_name}/${run_name}'
-    monitor: loss_mse_mean_top_vals
+    monitor: loss_reco_mean_top_vals
     criterion:
       _target_: src.callbacks.checkpointing.criterion.Stable
       top_k: 1
@@ -100,100 +162,141 @@ evaluator:
     summary:
       cvar25_ema: ['max']
     single:
-      loss_mse_mean_top_vals: ['stable']
-      # eff__ascore_loss_mse_full__brate_0.25kHz: ['max']
+      loss_reco_mean_top_vals: ['stable']
+      eff__ascore_loss_z_mean_squared_full__brate_0.25kHz: ['max']
 
 evaluator_callbacks:
   anomaly_efficiency:
     _target_: src.evaluation.callbacks.efficiency.AnomalyEfficiencyCallback
-    metric_name: 'loss/mse/full'
+    name: eff_ascore_z_mean_squared
+    metric_name: 'loss/z_mean_squared/full'
     target_rates: [0.25]
     bc_rate: 28608.8064
     ds:
-      - GluGluHTo2B_Par-MH-125
-      - GluGluHto2G_Par-MH-125
-      - GluGluHto2G_Par-MH-90
-      - GluGluHto2Tau_Par-MH-125
-      - GluGlutoHHto2B2WtoLNu2Q_Par-c2-0-kl-1-kt-1
-      - HHHto4B2Tau_Par-c3-0-d4-0
-      - HHHto6B_Par-c3-0-d4-0
-      - SUSYGluGluToBBHTo2B_Par-M-1200
-      - SUSYGluGluToBBHToBB_Par-M-120
-      - SUSYGluGluToBBHToBB_Par-M-350
-      - SUSYGluGluToBBHToBB_Par-M-600
-      - TTHTo2C_Par-MH-125
-      - TTHto2B_Par-MH-125
-      - VBFHTo2C_Par-MH-125
-      - VBFHto2B_Par-MH-125
-      - VBFHto2Tau_Par-MH-125
-      - WtoTauto3Mu
-      - ggH-suep-decay
-      - smj-case-A
+      - GluGluHToBB_M-125
+      - GluGluHToGG_M-125
+      - GluGluHToGG_M-90
+      - GluGluHToTauTau_M-125
+      - GluGlutoHHto2B2WtoLNu2Q_kl-1p00_kt-1p00_c2-0p00
+      - HHHTo6B_c3_0_d4_0
+      - HHHto4B2Tau_c3-0_d4-0
+      - HTo2LongLivedTo4b_MH-1000_MFF-450_CTau-100000mm
+      - HTo2LongLivedTo4b_MH-1000_MFF-450_CTau-10000mm
+      - HTo2LongLivedTo4b_MH-125_MFF-12_CTau-900mm
+      - HTo2LongLivedTo4b_MH-125_MFF-25_CTau-1500mm
+      - HTo2LongLivedTo4b_MH-125_MFF-50_CTau-3000mm
+      - SMS-Higgsino_mN2-170_mC1-160_mN1-150_HT60
+      - SUSYGluGluToBBHToBB_NarrowWidth_M-1200
+      - SUSYGluGluToBBHToBB_NarrowWidth_M-600
+      - SUSYGluGluToBBHToBB_NarrowWidth_M-350
+      - SUSYGluGluToBBHToBB_NarrowWidth_M-120
+      - VBFHToCC_M-125
+      - VBFHToInvisible_M-125
+      - VBFHToTauTau_M125
+      - VBFHto2B_M-125
+      - WToTauTo3Mu
+      - WToTauToMuMuMu
+      - Wlnu
+      - ggXToJpsiJpsiTo2Mu2E_m7_pseudoscalar
+      - ggXToYYTo2Mu2E_m14_pseudoscalar
+      - ggXToYYTo2Mu2E_m18_pseudoscalar
+      - ggXToYYTo2Mu2E_m26_pseudoscalar
       - haa-4b-ma15
+      - ttHto2B_M-125
+      - ttHto2C_M-125
     log_raw_mlflow: false
-
-  cap_sn_zb:
-    _target_: src.evaluation.callbacks.cap.CAP
-    metric_name: 'loss/mse/full'
-    dataset_1: main_test
-    dataset_2: SingleNeutrino_E-10-gun
-    log_raw_mlflow: false
-    pairing_type: cdf
-    cap_metric_config:
-      beta0: 1.0
-      normalization_type: sigmoid
-      normalization_params: null
-      energy_type: baseline
-      energy_params: null
-      regularization_type: none
-      regularization_params: null
-      binary: True
-      lr: 0.01
-      n_epochs: 50
-      batch_size: 16384
-      normalize_gradients: False
-      process_group: null
-      dist_sync_fn: null
 
   loss:
     _target_: src.evaluation.callbacks.loss.LossCallback
     name: mse_mean_top_vals
-    loss_name: 'loss/mse/mean_top_vals'
+    loss_name: 'loss/reco/mean_top_vals'
     ds:
       - main_test
-      - GluGluHTo2B_Par-MH-125
-      - GluGluHto2G_Par-MH-125
-      - GluGluHto2G_Par-MH-90
-      - GluGluHto2Tau_Par-MH-125
-      - GluGlutoHHto2B2WtoLNu2Q_Par-c2-0-kl-1-kt-1
-      - HHHto4B2Tau_Par-c3-0-d4-0
-      - HHHto6B_Par-c3-0-d4-0
-      - SUSYGluGluToBBHTo2B_Par-M-1200
-      - SUSYGluGluToBBHToBB_Par-M-120
-      - SUSYGluGluToBBHToBB_Par-M-350
-      - SUSYGluGluToBBHToBB_Par-M-600
-      - TTHTo2C_Par-MH-125
-      - TTHto2B_Par-MH-125
-      - VBFHTo2C_Par-MH-125
-      - VBFHto2B_Par-MH-125
-      - VBFHto2Tau_Par-MH-125
-      - WtoTauto3Mu
-      - ggH-suep-decay
-      - smj-case-A
+      - GluGluHToBB_M-125
+      - GluGluHToGG_M-125
+      - GluGluHToGG_M-90
+      - GluGluHToTauTau_M-125
+      - GluGlutoHHto2B2WtoLNu2Q_kl-1p00_kt-1p00_c2-0p00
+      - HHHTo6B_c3_0_d4_0
+      - HHHto4B2Tau_c3-0_d4-0
+      - HTo2LongLivedTo4b_MH-1000_MFF-450_CTau-100000mm
+      - HTo2LongLivedTo4b_MH-1000_MFF-450_CTau-10000mm
+      - HTo2LongLivedTo4b_MH-125_MFF-12_CTau-900mm
+      - HTo2LongLivedTo4b_MH-125_MFF-25_CTau-1500mm
+      - HTo2LongLivedTo4b_MH-125_MFF-50_CTau-3000mm
+      - SMS-Higgsino_mN2-170_mC1-160_mN1-150_HT60
+      - SUSYGluGluToBBHToBB_NarrowWidth_M-1200
+      - SUSYGluGluToBBHToBB_NarrowWidth_M-600
+      - SUSYGluGluToBBHToBB_NarrowWidth_M-350
+      - SUSYGluGluToBBHToBB_NarrowWidth_M-120
+      - VBFHToCC_M-125
+      - VBFHToInvisible_M-125
+      - VBFHToTauTau_M125
+      - VBFHto2B_M-125
+      - WToTauTo3Mu
+      - WToTauToMuMuMu
+      - Wlnu
+      - ggXToJpsiJpsiTo2Mu2E_m7_pseudoscalar
+      - ggXToYYTo2Mu2E_m14_pseudoscalar
+      - ggXToYYTo2Mu2E_m18_pseudoscalar
+      - ggXToYYTo2Mu2E_m26_pseudoscalar
       - haa-4b-ma15
+      - ttHto2B_M-125
+      - ttHto2C_M-125
     log_raw_mlflow: false
-
-  thres_transfer:
-    _target_: src.evaluation.callbacks.thres_drift.ThresholdDriftCallback
-    loss_name: 'loss/mse/full'
-    log_raw_mlflow: false
-    name: thres_transfer
 
   reco:
     _target_: src.evaluation.callbacks.reco.ReconstructionPlots
-    nbatches: 2
+    warmup_batches: 0.2
     output_name: reconstructed_data
-    datamodule: true # callback needs original datamodule
-    ckpt_dataset: last
-    datasets: ['main_test', 'SingleNeutrino_E-10-gun']
+    datamodule: true
+    ckpts:
+      last: true
+    datasets:
+      - 'main_test'
+      - 'SingleNeutrino_E-10-gun'
+    name: 'reco'
+    log_raw_mlflow: false
+
+  ascore_plot:
+    _target_: src.evaluation.callbacks.output.HistogramOutputCallback
+    output_name: loss/z_mean_squared/full
+    ds:
+      - GluGluHToBB_M-125
+      - GluGluHToGG_M-125
+      - GluGluHToGG_M-90
+      - GluGluHToTauTau_M-125
+      - GluGlutoHHto2B2WtoLNu2Q_kl-1p00_kt-1p00_c2-0p00
+      - HHHTo6B_c3_0_d4_0
+      - HHHto4B2Tau_c3-0_d4-0
+      - HTo2LongLivedTo4b_MH-1000_MFF-450_CTau-100000mm
+      - HTo2LongLivedTo4b_MH-1000_MFF-450_CTau-10000mm
+      - HTo2LongLivedTo4b_MH-125_MFF-12_CTau-900mm
+      - HTo2LongLivedTo4b_MH-125_MFF-25_CTau-1500mm
+      - HTo2LongLivedTo4b_MH-125_MFF-50_CTau-3000mm
+      - SMS-Higgsino_mN2-170_mC1-160_mN1-150_HT60
+      - SUSYGluGluToBBHToBB_NarrowWidth_M-1200
+      - SUSYGluGluToBBHToBB_NarrowWidth_M-600
+      - SUSYGluGluToBBHToBB_NarrowWidth_M-350
+      - SUSYGluGluToBBHToBB_NarrowWidth_M-120
+      - VBFHToCC_M-125
+      - VBFHToInvisible_M-125
+      - VBFHToTauTau_M125
+      - VBFHto2B_M-125
+      - WToTauTo3Mu
+      - WToTauToMuMuMu
+      - Wlnu
+      - ggXToJpsiJpsiTo2Mu2E_m7_pseudoscalar
+      - ggXToYYTo2Mu2E_m14_pseudoscalar
+      - ggXToYYTo2Mu2E_m18_pseudoscalar
+      - ggXToYYTo2Mu2E_m26_pseudoscalar
+      - haa-4b-ma15
+      - ttHto2B_M-125
+      - ttHto2C_M-125
+    ckpts:
+      last: true
+    bins: 20
+    warmup_batches: 0.2
+    log: true
+    name: z_mean_squared_histograms
     log_raw_mlflow: false

@@ -23,25 +23,36 @@
 #     trainer.devices=[0]
 
 
+# AXOv4 training...
+taskset -c 18-20 \
+python3 src/train.py \
+    -m \
+    paths.raw_data_dir=/data/deodagiu/adl1t_data/parquet_files \
+    experiment=axov4 \
+    run_name=axov4_fp \
+    trainer=gpu \
+    trainer.devices=[0]
+
+
 # HYPERPARAMETER SEARCHES.
 # =======================
 # Normal VAE hyperparam search.
-taskset -c 0-2 \
-python3 src/train.py \
-    -m \
-    hydra/launcher=submitit_local \
-    hydra.launcher.cpus_per_task=1 \
-    hydra.launcher.gpus_per_node=4 \
-    paths.raw_data_dir=/data/deodagiu/adl1t_data/parquet_files \
-    experiment=vae \
-    experiment_name=vae_search \
-    callbacks.max_rate_mse_ckpt=null \
-    logger=none \
-    hparams_search=vae_optuna \
-    hydra.sweeper.study_name=efficiency_vs_rmse95_b16k \
-    trainer=gpu \
-    trainer.max_epochs=50 \
-    trainer.devices=[0]
+# taskset -c 0-2 \
+# python3 src/train.py \
+#     -m \
+#     hydra/launcher=submitit_local \
+#     hydra.launcher.cpus_per_task=1 \
+#     hydra.launcher.gpus_per_node=4 \
+#     paths.raw_data_dir=/data/deodagiu/adl1t_data/parquet_files \
+#     experiment=vae \
+#     experiment_name=vae_search \
+#     callbacks.max_rate_mse_ckpt=null \
+#     logger=none \
+#     hparams_search=vae_optuna \
+#     hydra.sweeper.study_name=efficiency_vs_rmse95_b16k \
+#     trainer=gpu \
+#     trainer.max_epochs=50 \
+#     trainer.devices=[0]
 
 # VICreg VAE hyperparameter search.
 # taskset -c 3-5 \

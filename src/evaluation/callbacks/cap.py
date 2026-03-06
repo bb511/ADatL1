@@ -115,7 +115,7 @@ class CAP(Callback):
 
     def plot_summary(self, trainer, root_folder: Path):
         """Plot the summary metrics accummulated in eff_summary and reset this attr."""
-        plot_folder = root_folder / "plots" / "cap_summary"
+        plot_folder = root_folder / "plots" / f"{self.name}_summary"
         plot_folder.mkdir(parents=True, exist_ok=True)
         self._cache_summary(plot_folder)
 

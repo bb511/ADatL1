@@ -27,11 +27,3 @@ loss:
 
 # Annealing of the KL scale scalar.
 kl_warmup_frac: 0.2
-
-optimizer:
-  _partial_: true
-  _target_: torch.optim.AdamW
-  lr: 0.001
-  weight_decay: 0.0
-  betas: [0.9, 0.999]
-  eps: 1e-8

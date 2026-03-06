@@ -40,19 +40,3 @@ loss:
   rvar_coef: 0.5
   rcov_coef: 0.5
 
-optimizer:
-  _partial_: true
-  _target_: torch.optim.AdamW
-  lr: 0.0003
-  weight_decay: 1e-3
-  betas: [0.9, 0.99]
-  eps: 1e-8
-
-scheduler:
-  # here other attributes...
-  scheduler:
-    _target_: src.algorithms.schedulers.cdw.CosineWithWarmup
-    _partial_: true
-    warmup_ratio: 0.1
-    min_lr_ratio: 0.05
-    warmup_start_ratio: 1e-3

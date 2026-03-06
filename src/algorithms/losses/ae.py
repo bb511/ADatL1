@@ -31,9 +31,7 @@ class HuberAELoss(L1ADLoss):
 
     def __init__(self, delta: float = 1.0, reduction: str = "none"):
         super().__init__(scale=None, reduction=reduction)
-        self.reconstruction_loss = HuberReconstructionLoss(
-            reduction=reduction, delta=delta
-        )
+        self.reco_loss = HuberReconstructionLoss(reduction=reduction, delta=delta)
 
     def forward(
         self,
@@ -42,6 +40,6 @@ class HuberAELoss(L1ADLoss):
         reco: torch.Tensor,
     ) -> torch.Tensor:
         # Get the reconstruction loss with the corersponding reduction applied.
-        reco_loss = self.reconstruction_loss(target, reco, mask)
+        reco_loss = self.reco_loss(target, reco, mask)
 
         return reco_loss

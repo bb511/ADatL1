@@ -38,6 +38,13 @@ from src.utils import task_wrapper
 
 log = RankedLogger(__name__, rank_zero_only=True)
 
+import warnings
+
+warnings.filterwarnings(
+    "ignore",
+    message=r".*LeafSpec.*TreeSpec.*is_leaf.*",
+    category=FutureWarning,
+)
 
 @task_wrapper
 def train(cfg: DictConfig) -> Tuple[Dict[str, Any], Dict[str, Any]]:

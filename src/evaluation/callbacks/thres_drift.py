@@ -131,7 +131,7 @@ class ThresholdDriftCallback(Callback):
             self.name,
             plot_folder,
             log_raw=self.log_raw_mlflow,
-            gallery_name=f"{self.name}_{self.loss_name.replace('/', '_')}",
+            gallery_name=f"{self.name}",
         )
 
     def _plot(self, data: dict, xlabel: str, plot_folder: Path, percent: bool = False):
@@ -184,7 +184,7 @@ class ThresholdDriftCallback(Callback):
 
             trate_name = f"{trate} kHz"
             xlabel = (
-                f"Calibration drift across checkpoints at threshold: {trate_name}\n"
+                f"calibration drift at threshold: {trate_name}\n"
                 f"log((p̂+ε)/(FPR+ε))"
             )
             self._plot(smet, xlabel, plot_folder, percent=False)

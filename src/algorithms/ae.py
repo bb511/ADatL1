@@ -18,7 +18,8 @@ class AE(L1ADLightningModule):
         mask: bool = True,
         features: Optional[nn.Module] = None,
         input_noise_std: float = 0.0,
-        operational_quantile: float = 0.9999912614,
+        operational_rate: float = 0.25,
+        bc_rate: float = 28608.8064,
         **kwargs,
     ):
         super().__init__(model=None, **kwargs)
@@ -32,7 +33,7 @@ class AE(L1ADLightningModule):
         self.mse = mse
         self.input_noise_std = input_noise_std
         self.mask = mask
-        self.operational_quantile = operational_quantile
+        self.operational_quantile = 1 - operational_rate / bc_rate
 
     def forward(self, x: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
         z = self.encoder(x)

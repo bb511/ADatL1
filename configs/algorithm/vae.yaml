@@ -5,14 +5,16 @@ defaults:
 _target_: src.algorithms.vae.VAE
 features: null
 
+operational_rate: 0.25 # nominal rate
+bc_rate: 28608.8064 # bunch crossing rate in kHz
+
 mask: true
 ckpt: ''
 
 encoder:
   _target_: src.algorithms.components.encoder.VariationalEncoder
   in_dim: 117
-  nodes: [64, 64]
-  out_dim: 48
+  nodes: [64, 32, 8]
 
 decoder:
   _target_: src.algorithms.components.decoder.Decoder

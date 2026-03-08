@@ -7,16 +7,12 @@ import torch.nn as nn
 from src.algorithms.components.mlp import MLP
 
 
-class Encoder(MLP):
-    """Simple vanilla encoder, i.e., just an MLP."""
+class Encoder(nn.Module):
+    """Simple vanilla encoder, i.e., just an MLP.
 
-    pass
-
-
-class VariationalEncoder(nn.Module):
-    """Simple variational encoder model.
-
-    :param nodes: List of ints, each int specifying the width of a layer.
+    :param in_dim: Integer for the input dimension to the encoder.
+    :param nodes: List of ints, each int specifying the width of a layer, includes the
+        output layer, i.e., the latent dimension.
     :param init_weight: Callable method to initialize the weights of the encoder nodes.
     :param init_bias: Callable method to initialize the biases of the encoder nodes.
     """
@@ -25,7 +21,6 @@ class VariationalEncoder(nn.Module):
         self,
         in_dim: int,
         nodes: list[int],
-        out_dim: int,
         init_weight: Optional[Callable] = None,
         init_bias: Optional[Callable] = None,
     ):
@@ -37,14 +32,47 @@ class VariationalEncoder(nn.Module):
             nodes=nodes[:-1],
             out_dim=nodes[-1],
             batchnorm=False,
+            final_activation=False,
+            init_weight=init_weight,
+            init_bias=init_bias,
+        )
+
+    def forward(self, x: torch.Tensor) -> tuple[torch.Tensor]:
+        return self.net(x)
+
+
+class VariationalEncoder(nn.Module):
+    """Simple variational encoder model.
+
+    :param in_dim: Integer for the input dimension to the encoder.
+    :param nodes: List of ints, each int specifying the width of a layer.
+    :param init_weight: Callable method to initialize the weights of the encoder nodes.
+    :param init_bias: Callable method to initialize the biases of the encoder nodes.
+    """
+
+    def __init__(
+        self,
+        in_dim: int,
+        nodes: list[int],
+        init_weight: Optional[Callable] = None,
+        init_bias: Optional[Callable] = None,
+    ):
+        super().__init__()
+
+        # The encoder will be a MLP up to the last layer
+        self.net = MLP(
+            in_dim=in_dim,
+            nodes=nodes[:-2],
+            out_dim=nodes[-2],
+            batchnorm=False,
             final_activation=True,
             init_weight=init_weight,
             init_bias=init_bias,
         )
 
         # Mean and log variance layers
-        self.z_mean = nn.Linear(nodes[-1], out_dim)
-        self.z_log_var = nn.Linear(nodes[-1], out_dim)
+        self.z_mean = nn.Linear(nodes[-2], nodes[-1])
+        self.z_log_var = nn.Linear(nodes[-2], nodes[-1])
 
         if init_weight:
             init_weight(self.z_mean.weight)

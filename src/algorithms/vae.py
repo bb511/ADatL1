@@ -38,7 +38,8 @@ class VAE(L1ADLightningModule):
         features: Optional[nn.Module] = None,
         mask: bool = True,
         ckpt: str = "",
-        operational_quantile: float = 0.9999912614,
+        operational_rate: float = 0.25,
+        bc_rate: float = 28608.8064,
         **kwargs,
     ):
         super().__init__(model=None, **kwargs)
@@ -51,7 +52,7 @@ class VAE(L1ADLightningModule):
         self.features = features if features is not None else nn.Identity()
         self.features.eval()
         self.kl_warmup_frac = kl_warmup_frac
-        self.operational_quantile = operational_quantile
+        self.operational_quantile = 1 - operational_rate / bc_rate
 
     def on_fit_start(self):
         inject_object_feature_map(self)

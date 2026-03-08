@@ -8,17 +8,17 @@ features: null
 
 mask: true
 input_noise_std: 0.0001
-operational_quantile: 0.9999912614 # equivalent to 250 Hz FPR threshold
+
+operational_rate: 0.25 # nominal rate
+bc_rate: 28608.8064 # bunch crossing rate in kHz
 
 encoder:
   _target_: src.algorithms.components.encoder.Encoder
   in_dim: 117
-  nodes: [64]
-  out_dim: 64
+  nodes: [64, 32, 8]
 
 decoder:
   _target_: src.algorithms.components.decoder.Decoder
-  in_dim: ${algorithm.encoder.out_dim}
   nodes: ${reverse:${algorithm.encoder.nodes}} # nodes of the encoder, but in reverse
   out_dim: ${algorithm.encoder.in_dim}
 

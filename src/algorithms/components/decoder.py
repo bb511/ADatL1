@@ -10,6 +10,7 @@ class Decoder(MLP):
     """Simple decoder model.
 
     :param nodes: List of ints, each int specifying the width of a layer.
+    :param out_dim: Int of dimensionality of the output, needs to be same as input.
     :param init_weight: Callable method to initialize the weights of the decoder nodes.
     :param init_bias: Callable method to initialize the biases of the decoder nodes.
     :param init_last_weight: Callable method to initialize the weights of the last layer.
@@ -19,7 +20,6 @@ class Decoder(MLP):
 
     def __init__(
         self,
-        in_dim: int,
         nodes: list[int],
         out_dim: int,
         init_weight: Optional[Callable] = None,
@@ -29,8 +29,8 @@ class Decoder(MLP):
         init_last_bias: Optional[Callable] = None,
     ) -> None:
         super().__init__(
-            in_dim,
-            nodes,
+            nodes[0],
+            nodes[1:],
             out_dim,
             batchnorm=batchnorm,
             init_weight=init_weight,

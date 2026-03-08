@@ -29,6 +29,7 @@ test: true
 
 algorithm:
   # The basis data processing returns 117 features.
+  operational_rate: 0.25
   encoder:
     in_dim: 117
 
@@ -177,9 +178,13 @@ evaluator_callbacks:
 
   reco:
     _target_: src.evaluation.callbacks.reco.ReconstructionPlots
-    nbatches: 2
+    warmup_batches: 0.2
     output_name: reconstructed_data
-    datamodule: true # callback needs original datamodule
-    ckpt_name: last
-    datasets: ['main_test', 'SingleNeutrino_E-10-gun']
+    datamodule: true
+    ckpts:
+      last: true
+    datasets:
+      - 'main_test'
+      - 'SingleNeutrino_E-10-gun'
+    name: 'reco'
     log_raw_mlflow: false

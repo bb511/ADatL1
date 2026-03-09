@@ -196,6 +196,7 @@ class ApproximationCapacity(Metric):
             num_workers=0,
             pin_memory=0,
         )
+
         # Optimization loop:
         best_beta = 0.0
         best_cap = -float("inf")

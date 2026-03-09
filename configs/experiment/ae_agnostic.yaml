@@ -87,7 +87,7 @@ callbacks:
       _target_: src.callbacks.checkpointing.criterion.Stable
       top_k: 1
       threshold: 0.05
-      patience: 1
+      patience: 10
     ds:
       - main_val
 
@@ -158,10 +158,10 @@ evaluator_callbacks:
       regularization_type: none
       regularization_params: null
       binary: True
-      lr: 0.001
-      n_epochs: 50
-      batch_size: 16384
-      normalize_gradients: False
+      lr: 0.01
+      n_epochs: 20
+      batch_size: 8192
+      normalize_gradients: True
       process_group: null
       dist_sync_fn: null
 

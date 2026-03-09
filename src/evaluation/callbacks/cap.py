@@ -106,7 +106,7 @@ class CAP(Callback):
         Here, it is the metric itself, but this is implemented to be consistent with
         the other evaluation callbacks.
         """
-        self.cap_summary[ckpt_ds] = abs(cap_metric_value)
+        self.cap_summary[ckpt_ds] = cap_metric_value
 
     def _plot(self, data: dict, xlabel: str, plot_folder: Path, percent: bool = False):
         """Plot the efficiency per data set for an anomaly metric at target rate."""

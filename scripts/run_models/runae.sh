@@ -107,11 +107,11 @@ python3 src/train.py \
     evaluator_callbacks.reco=null \
     logger=none \
     hparams_search=ae_agnostic_optuna \
-    hydra.sweeper.study_name=capMinmaxBaseline_vs_mse_b16k \
+    hydra.sweeper.study_name=capSigmoidFocal_vs_mse_b16k \
     hydra.sweeper.n_trials=100 \
     hydra.sweeper.sampler.n_startup_trials=40 \
     trainer=gpu \
-    trainer.max_epochs=100 \
+    trainer.max_epochs=50 \
     trainer.devices=[0]
 
 

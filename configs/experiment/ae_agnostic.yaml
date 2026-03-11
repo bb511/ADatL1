@@ -153,9 +153,8 @@ evaluator_callbacks:
       beta0: 1.0
       normalization_type: sigmoid
       normalization_params: null
-      energy_type: focal
-      energy_params:
-        gamma: 2.0
+      energy_type: baseline
+      energy_params: null
       regularization_type: none
       regularization_params: null
       binary: True

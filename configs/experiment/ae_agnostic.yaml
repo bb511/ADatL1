@@ -148,18 +148,18 @@ evaluator_callbacks:
     dataset_1: main_test
     dataset_2: SingleNeutrino_E-10-gun
     log_raw_mlflow: false
-    pairing_type: cdf
+    pairing_type: random
     cap_metric_config:
       beta0: 1.0
       normalization_type: sigmoid
       normalization_params: null
-      energy_type: exponential
+      energy_type: adaptive
       energy_params:
-        gamma: 2.0
+        scale: 0.5
       regularization_type: none
       regularization_params: null
       binary: True
-      lr: 0.003
+      lr: 0.01
       n_epochs: 20
       batch_size: 8192
       normalize_gradients: True

@@ -89,7 +89,7 @@ callbacks:
       threshold: 0.05
       patience: 10
     ds:
-      - main_val
+      - zerobias
 
   cvar25_ema_ckpt:
     _target_: pytorch_lightning.callbacks.ModelCheckpoint
@@ -145,21 +145,21 @@ evaluator_callbacks:
   cap_sn_zb:
     _target_: src.evaluation.callbacks.cap.CAP
     metric_name: 'loss/mse/full'
-    dataset_1: main_test
+    dataset_1: zerobias
     dataset_2: SingleNeutrino_E-10-gun
     log_raw_mlflow: false
-    pairing_type: absolute
+    pairing_type: cdf
     cap_metric_config:
       beta0: 1.0
       normalization_type: sigmoid
       normalization_params: null
-      energy_type: focal
+      energy_type: adaptive
       energy_params:
-        gamma: 2.0
+        scale: 0.25
       regularization_type: none
       regularization_params: null
       binary: True
-      lr: 0.003
+      lr: 0.01
       n_epochs: 20
       batch_size: 8192
       normalize_gradients: True
@@ -171,7 +171,7 @@ evaluator_callbacks:
     name: mse_mean_top_vals
     loss_name: 'loss/mse/mean_top_vals'
     ds:
-      - main_test
+      - zerobias
       - GluGluHTo2B_Par-MH-125
       - GluGluHto2G_Par-MH-125
       - GluGluHto2G_Par-MH-90
@@ -197,6 +197,10 @@ evaluator_callbacks:
   thres_transfer:
     _target_: src.evaluation.callbacks.thres_drift.ThresholdDriftCallback
     loss_name: 'loss/mse/full'
+    target_rates: [0.25]
+    bc_rate: 28608.8064
+    calibration_fraction: 0.5
+    split_seed: 12345
     log_raw_mlflow: false
     name: thres_transfer
 
@@ -208,7 +212,7 @@ evaluator_callbacks:
     ckpts:
       last: true
     datasets:
-      - 'main_test'
+      - 'zerobias'
       - 'SingleNeutrino_E-10-gun'
     name: 'reco'
     log_raw_mlflow: false

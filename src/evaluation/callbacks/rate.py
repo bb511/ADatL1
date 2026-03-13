@@ -65,37 +65,37 @@ class AnomalyRateCallback(Callback):
         """Do checks required for this callback to work."""
         self.device = pl_module.device
 
-        # Check if 'main_test' dataset is the first dataset in the test dictionary.
+        # Check if 'zerobias' dataset is the first dataset in the test dictionary.
         # This is required to compute the rate thresholds on the anomaly scores.
         first_test_dset_key = list(trainer.test_dataloaders.keys())[0]
-        if first_test_dset_key != "main_test":
-            raise ValueError("rate callback requires main_test first in the data dict!")
+        if first_test_dset_key != "zerobias":
+            raise ValueError("rate callback requires zerobias first in the data dict!")
 
     def on_test_epoch_start(self, trainer, pl_module):
         """Clear the metrics dictionary at the start of the epoch."""
         self.main_rate = defaultdict(lambda: defaultdict(AnomalyRate))
         self.sig_rates = defaultdict(lambda: defaultdict(AnomalyRate))
         self.bkg_rates = defaultdict(lambda: defaultdict(AnomalyRate))
-        self.maintest_score_data = []
+        self.zerobias_score_data = []
 
     def on_test_batch_end(
         self, trainer, pl_module, outputs, batch, batch_idx, dataloader_idx=0
     ):
         """Determine the rate for every given metric for every test data set.
 
-        First, the desired metrics are computed on the main_test data and accummulated
+        First, the desired metrics are computed on the zerobias data and accummulated
         across batches. The full metric distribution is used to set a threshold that
         will give a target rate or set of rates, specified by the user.
         These thresholds are then applied on all other data sets used for test
-        to determine, by using the threshold computed on main_test, what would the rate
+        to determine, by using the threshold computed on zerobias, what would the rate
         be on these other data sets.
         """
         self.dataset_name = list(trainer.test_dataloaders.keys())[dataloader_idx]
         self.total_batches = trainer.num_test_batches[dataloader_idx]
         _, _, l1bit, labels = batch
 
-        if self.dataset_name == "main_test":
-            self._accumulate_maintest_output(outputs, batch_idx, l1bit)
+        if self.dataset_name == "zerobias":
+            self._accumulate_zerobias_output(outputs, batch_idx, l1bit)
         else:
             if self.dataset_name not in self.ds:
                 return
@@ -108,7 +108,8 @@ class AnomalyRateCallback(Callback):
         rate_name = f"{self.name}_pure" if self.pure_thres else self.name
         ckpts_dir = Path(pl_module._ckpt_path).parent
         ckpt_name = Path(pl_module._ckpt_path).stem
-        plot_folder = ckpts_dir / "plots" / ckpt_name / rate_name
+        split = trainer.split
+        plot_folder = ckpts_dir / "plots" / split / ckpt_name / rate_name
         plot_folder.mkdir(parents=True, exist_ok=True)
 
         for trate in self.target_rates:
@@ -136,7 +137,8 @@ class AnomalyRateCallback(Callback):
     def plot_summary(self, trainer, root_folder: Path):
         """Plot the summary metrics accummulated in rate_summary and reset this attr."""
         rate_name = f"{self.name}_pure" if self.pure_thres else self.name
-        plot_folder = root_folder / "plots" / (rate_name + "_summary")
+        split = trainer.split
+        plot_folder = root_folder / "plots" / split / (rate_name + "_summary")
         plot_folder.mkdir(parents=True, exist_ok=True)
         self._cache_summary(plot_folder)
 
@@ -214,41 +216,41 @@ class AnomalyRateCallback(Callback):
 
         return computed_rates
 
-    def _accumulate_maintest_output(
+    def _accumulate_zerobias_output(
         self, outputs: dict, batch_idx: int, l1bit: torch.Tensor
     ):
         """Accummulates the specified metric data across batches.
 
-        Used if currently processing the main_test data set, accummulate the values of
+        Used if currently processing the zerobias data set, accummulate the values of
         each metric across batches. The whole metric output distribution is needed to
         set a treshold that gives a certain rate.
         """
         batch_output = outputs[self.metric_name]
         if self.pure_thres:
             batch_output = batch_output[~l1bit]
-        self.maintest_score_data.append(batch_output)
+        self.zerobias_score_data.append(batch_output)
 
         if batch_idx == self.total_batches - 1:
-            self.maintest_score_data = torch.cat(self.maintest_score_data, dim=0)
-            self._compute_maintest_rate()
+            self.zerobias_score_data = torch.cat(self.zerobias_score_data, dim=0)
+            self._compute_zerobias_rate()
 
-    def _compute_maintest_rate(self):
+    def _compute_zerobias_rate(self):
         """Computes the desired rates on the main test data set.
 
-        This is a sanity check. The threshold computed on the maintest and applied to the
-        maintest data should return the rate for which this threshold was computed.
+        This is a sanity check. The threshold computed on the zerobias and applied to the
+        zerobias data should return the rate for which this threshold was computed.
         """
         for target_rate in self.target_rates:
             rate = AnomalyRate(target_rate, self.bc_rate).to(self.device)
-            rate.set_threshold(self.maintest_score_data)
-            rate.update(self.maintest_score_data)
+            rate.set_threshold(self.zerobias_score_data)
+            rate.update(self.zerobias_score_data)
             self.main_rate[target_rate][self.dataset_name] = rate
 
     def _initialize_rate_metric(self, labels: torch.Tensor):
         """Initializes the rate metric for a bkg dataset for each given target rate."""
         for target_rate in self.target_rates:
             rate = AnomalyRate(target_rate, self.bc_rate).to(self.device)
-            rate.set_threshold(self.maintest_score_data)
+            rate.set_threshold(self.zerobias_score_data)
             if torch.all(labels < 0):
                 self.bkg_rates[target_rate][self.dataset_name] = rate
             if torch.all(labels > 0):

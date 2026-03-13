@@ -92,7 +92,8 @@ class ReconstructionPlots(Callback):
         ckpt_name = Path(pl_module._ckpt_path).stem
 
         for dset_name in self._edges:
-            plot_folder = ckpts_dir / "plots" / ckpt_name / self.name / dset_name
+            split = trainer.split
+            plot_folder = ckpts_dir / "plots" / split / ckpt_name / self.name / dset_name
             plot_folder.mkdir(parents=True, exist_ok=True)
 
             for key, edges in self._edges[dset_name].items():

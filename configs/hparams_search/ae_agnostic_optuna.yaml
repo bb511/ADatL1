@@ -16,7 +16,7 @@ optimized_metric_config:
       name: mse_mean_top_vals
       params:
         ckpt_name: null # This will be filled in with the best ckpt of the main metric.
-        test_ds: main_test
+        test_ds: zerobias
     direction: minimize
 
 

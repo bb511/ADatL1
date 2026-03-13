@@ -60,13 +60,21 @@ class Evaluator:
         )
 
         self.evaluator.object_feature_map_1d = None
+        self.evaluator.split = None
         self.evaluator.strat_name = None
         self.evaluator.metric_name = None
         self.evaluator.criterion_name = None
         self.optimized_metric = None
         self.evaluator.ckpt_path_name = None
 
-    def evaluate_run(self, run_folder: Path, model: LightningModule, test_loader: dict):
+    def evaluate_run(
+        self,
+        run_folder: Path,
+        model: LightningModule,
+        test_loader: dict,
+        split: str,
+        set_optimized_metric: bool = False
+    ):
         """Evaluates all checkpoints pertraining to a run.
 
         Checks the self.ckpts to evaluate only checkpoints that are specified there.
@@ -76,7 +84,15 @@ class Evaluator:
         :param model: LightningModule object pertaining to the model to evaulate.
         :param test_loader: The test data loaders. Can correspond to multiple test
             data sets.
+        :param split: String specifying which split of the data you are currently eval
+            on, either 'val', or 'test'.
+        :param set_optimized_metric: Bool whether to set the optimized metric during
+            the evaluation procedure or leave it. This is useful when evaluating on
+            validation, in which case this should be set to report to optuna. This
+            should not be set when evaluating on a test data set.
         """
+        self.set_optimized_metric = set_optimized_metric
+        self.evaluator.split = split
         if self._check_conditions():
             return
 
@@ -221,7 +237,7 @@ class Evaluator:
         Finally, it should contain a direction along which to pick from best checkpoints
         given by different criteria.
         """
-        if optimized_metric_config is None:
+        if optimized_metric_config is None or self.set_optimized_metric is False:
             return
 
         main_cfg = optimized_metric_config['main_metric']

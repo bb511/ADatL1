@@ -97,18 +97,35 @@ def train(cfg: DictConfig) -> Tuple[Dict[str, Any], Dict[str, Any]]:
 
     train_metrics = trainer.callback_metrics
 
-    # Evaluate the training.
+    # Get validation report, and also set hp optimisation values.
+    log.info(Fore.CYAN + "Instantiating evaluator...")
+    evaluator = _get_evaluator(cfg, datamodule, logger)
+    run_ckpts = Path(cfg.paths.checkpoints_dir) / cfg.experiment_name / cfg.run_name
+
+    log.info(Back.MAGENTA + 8 * "-" + "STARTING RUN VALIDATION" + 8 * "-")
+    datamodule.setup("validate")
+    val_loader = datamodule.val_dataloader()
+    evaluator.evaluate_run(run_ckpts, algorithm, val_loader, 'val', set_optimized_metric=True)
+    object_dict.update({"evaluator": evaluator})
+
+    # Evaluate once more on a held out test set for final performance.
     if cfg.get("test"):
-        log.info(Back.MAGENTA + 8 * "-" + "STARTING TESTING" + 8 * "-")
-        evaluator = test(cfg, datamodule, algorithm, logger)
+        log.info(Back.MAGENTA + 8 * "-" + "STARTING RUN TESTING" + 8 * "-")
+        datamodule.setup("test")
+        test_loader = datamodule.test_dataloader()
+        evaluator.evaluate_run(run_ckpts, algorithm, test_loader, 'test')
         object_dict.update({"evaluator": evaluator})
 
     metric_dict = {**train_metrics}
     return metric_dict, object_dict
 
 
-def test(cfg: DictConfig, datamodule, algorithm, logger):
-    """Evaluate the training."""
+def _worst_for(direction: str) -> float:
+    return inf if direction == "minimize" else -inf
+
+
+def _get_evaluator(cfg: DictConfig, datamodule, logger):
+    """Configure the evaluator object and return it."""
     if cfg.get("evaluator") is None:
         log.info(Back.YELLOW + "No evaluator config found... Skipping testing")
         return
@@ -131,16 +148,7 @@ def test(cfg: DictConfig, datamodule, algorithm, logger):
         optimized_metric_config=cfg.get("optimized_metric_config"),
     )
 
-    datamodule.setup("test")
-    test_loader = datamodule.test_dataloader()
-    run_ckpts = Path(cfg.paths.checkpoints_dir) / cfg.experiment_name / cfg.run_name
-
-    evaluator.evaluate_run(run_ckpts, algorithm, test_loader)
     return evaluator
-
-
-def _worst_for(direction: str) -> float:
-    return inf if direction == "minimize" else -inf
 
 
 def _get_directions(cfg):

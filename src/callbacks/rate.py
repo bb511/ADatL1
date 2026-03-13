@@ -48,39 +48,39 @@ class AnomalyEfficiencyCallback(Callback):
     def on_validation_start(self, trainer, pl_module):
         """Do checks required for this callback to work."""
 
-        # Check if 'main_val' dataset is the first dataset in the validation dictionary.
+        # Check if 'zerobias' dataset is the first dataset in the validation dictionary.
         # This is required to compute the rate thresholds on the anomaly scores.
         self.device = pl_module.device
 
         first_val_dset_key = list(trainer.val_dataloaders.keys())[0]
-        if first_val_dset_key != "main_val":
-            raise ValueError("Rate callback requires main_val first in the val dict!")
+        if first_val_dset_key != "zerobias":
+            raise ValueError("Rate callback requires zerobias first in the val dict!")
 
     def on_validation_epoch_start(self, trainer, pl_module):
         """Clear the metrics dictionary at the start of the epoch."""
         self.main_rate = defaultdict(lambda: defaultdict(AnomalyRate))
         self.sig_rates = defaultdict(lambda: defaultdict(AnomalyRate))
         self.bkg_rates = defaultdict(lambda: defaultdict(AnomalyRate))
-        self.mainval_score_data = []
+        self.zerobias_score_data = []
 
     def on_validation_batch_end(
         self, trainer, pl_module, outputs, batch, batch_idx, dataloader_idx=0
     ):
         """Determine the rate for every given metric for every validation data set.
 
-        First, the desired metrics are computed on the mainval_data and accummulated
+        First, the desired metrics are computed on the zerobias_data and accummulated
         across batches. The full metric distribution is used to set a threshold that
         will give a target rate or set of rates, specified by the user.
         These thresholds are then applied on all other data sets used for validation
-        to determine, by using the threshold computed on mainval, what would the rate
+        to determine, by using the threshold computed on zerobias, what would the rate
         be on these other data sets.
         """
         self.dataset_name = list(trainer.val_dataloaders.keys())[dataloader_idx]
         self.total_batches = trainer.num_val_batches[dataloader_idx]
         _, _, _, labels = batch
 
-        if self.dataset_name == "main_val":
-            self._accumulate_mainval_output(outputs, batch_idx, pl_module)
+        if self.dataset_name == "zerobias":
+            self._accumulate_zerobias_output(outputs, batch_idx, pl_module)
         else:
             if batch_idx == 0:
                 self._initialize_rate_metric(labels)
@@ -89,17 +89,17 @@ class AnomalyEfficiencyCallback(Callback):
     def on_validation_epoch_end(self, trainer, pl_module) -> None:
         """Log the anomaly rates computed on each of the data sets."""
         for target_rate in self.target_rates:
-            main_rate = self.main_rate[target_rate]['main_val'].compute('rate').item()
+            main_rate = self.main_rate[target_rate]['zerobias'].compute('rate').item()
             bkg_effs = self._compute_efficiencies(self.bkg_rates, target_rate)
             sig_effs = self._compute_efficiencies(self.sig_rates, target_rate)
             cvar25 = self._cvar_lower_tail(sig_effs.values(), alpha=0.25)
             self._compute_cvar_ema(cvar25)
             min_sig_eff = min(list(sig_effs.values()))
             med_sig_eff = statistics.median(list(sig_effs.values()))
-            threshold = self.main_rate[target_rate]['main_val'].threshold.item()
+            threshold = self.main_rate[target_rate]['zerobias'].threshold.item()
 
             pl_module.log_dict(
-                {f"val/main_val/brate_{target_rate}kHz": main_rate}, **self.log_kwargs
+                {f"val/zerobias/brate_{target_rate}kHz": main_rate}, **self.log_kwargs
             )
             pl_module.log_dict(bkg_effs, **self.log_kwargs)
             pl_module.log_dict(sig_effs, **self.log_kwargs)
@@ -110,7 +110,7 @@ class AnomalyEfficiencyCallback(Callback):
                 {"val/summary/eff_cvar25_ema": self.cvar25_ema}, **self.log_kwargs
             )
             pl_module.log_dict(
-                {f"val/main_val/thr__brate_{target_rate}kHz": threshold}
+                {f"val/zerobias/thr__brate_{target_rate}kHz": threshold}
             )
 
     def _compute_cvar_ema(self, cvar25: float):
@@ -121,32 +121,32 @@ class AnomalyEfficiencyCallback(Callback):
             self.cvar25_ema = \
                 self.beta * self.cvar25_ema + (1 - self.beta) * float(cvar25)
 
-    def _accumulate_mainval_output(self, outputs: dict, batch_idx: int, pl_module):
+    def _accumulate_zerobias_output(self, outputs: dict, batch_idx: int, pl_module):
         """Accummulates the specified metric data across batches.
 
-        Used if currently processing the main_val data set, accummulate the values of
+        Used if currently processing the zerobias data set, accummulate the values of
         each metric across batches. The whole metric output distribution is needed to
         set a treshold that gives a certain rate.
         """
         batch_output = outputs[self.metric_name]
         if batch_output.ndim == 0:
             batch_output = batch_output.unsqueeze(0)
-        self.mainval_score_data.append(batch_output)
+        self.zerobias_score_data.append(batch_output)
 
         if batch_idx == self.total_batches - 1:
-            self.mainval_score_data = torch.cat(self.mainval_score_data, dim=0)
-            self._compute_mainval_rate(pl_module)
+            self.zerobias_score_data = torch.cat(self.zerobias_score_data, dim=0)
+            self._compute_zerobias_rate(pl_module)
 
-    def _compute_mainval_rate(self, pl_module):
+    def _compute_zerobias_rate(self, pl_module):
         """Computes the desired rates on the main validation data set.
 
-        This is a sanity check. The threshold computed on the mainval and applied to the
-        mainval data should return the rate for which this threshold was computed.
+        This is a sanity check. The threshold computed on the zerobias and applied to the
+        zerobias data should return the rate for which this threshold was computed.
         """
         for target_rate in self.target_rates:
             rate = AnomalyRate(target_rate, self.bc_rate).to(self.device)
-            rate.set_threshold(self.mainval_score_data)
-            rate.update(self.mainval_score_data)
+            rate.set_threshold(self.zerobias_score_data)
+            rate.update(self.zerobias_score_data)
             thres = rate.threshold
             self._set_thres_on_module(pl_module, target_rate, thres)
 
@@ -156,12 +156,12 @@ class AnomalyEfficiencyCallback(Callback):
         """Initializes the rate metric for a dataset for each given target rate.
 
         The anomaly rate metric object is initialised. Then, the threshold is computed
-        given the main_val metric distribution. This threshold is then used to compute
-        the rate on the other data sets differing from main_val.
+        given the zerobias metric distribution. This threshold is then used to compute
+        the rate on the other data sets differing from zerobias.
         """
         for target_rate in self.target_rates:
             rate = AnomalyRate(target_rate, self.bc_rate).to(self.device)
-            rate.set_threshold(self.mainval_score_data)
+            rate.set_threshold(self.zerobias_score_data)
             if torch.all(labels < 0):
                 self.bkg_rates[target_rate][self.dataset_name] = rate
             if torch.all(labels > 0):

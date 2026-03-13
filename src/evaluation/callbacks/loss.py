@@ -68,7 +68,8 @@ class LossCallback(Callback):
         """Log the anomaly rates computed on each of the data sets."""
         ckpts_dir = Path(pl_module._ckpt_path).parent
         ckpt_name = Path(pl_module._ckpt_path).stem
-        plot_folder = ckpts_dir / "plots" / ckpt_name / self.name
+        split = trainer.split
+        plot_folder = ckpts_dir / "plots" / split / ckpt_name / self.name
         plot_folder.mkdir(parents=True, exist_ok=True)
 
         losses = {
@@ -101,7 +102,8 @@ class LossCallback(Callback):
 
     def plot_summary(self, trainer, root_folder: Path):
         """Plot the summary metrics accummulated in eff_summary and reset this attr."""
-        plot_folder = root_folder / "plots" / f"{self.name}_summary"
+        split = trainer.split
+        plot_folder = root_folder / "plots" / split / f"{self.name}_summary"
         plot_folder.mkdir(parents=True, exist_ok=True)
         self._cache_summary(plot_folder)
 

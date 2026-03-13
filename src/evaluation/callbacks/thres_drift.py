@@ -1,11 +1,9 @@
-# Callback that compute the threshold drift between validation and test.
+# Callback that computes an internal split-transfer threshold drift metric.
 import math
 import pickle
 from collections import defaultdict
 from pathlib import Path
-import re
 
-import numpy as np
 import torch
 from pytorch_lightning import Callback
 
@@ -17,112 +15,131 @@ log = pylogger.RankedLogger(__name__)
 
 
 class ThresholdDriftCallback(Callback):
-    """Compute calibration-transfer metric using val-calibrated thresholds stored as buffers.
+    """Compute a validation-style split-transfer drift metric from one dataset.
 
-    Discovers thresholds on the module with names:
-        thres_{target_rate}kHz
-    where target_rate uses '_' instead of '.'.
+    This callback collects all scores from the 'zerobias' dataloader, splits them
+    internally into:
+        - calibration subset
+        - evaluation subset
 
-    For each discovered target_rate (kHz), on selected dev-test datasets:
-        p_hat = P(mse >= T_val)
-        L = log((p_hat + eps) / (FPR + eps)), eps = 0.5 / N
-    Stores abs(L) by default for minimization.
+    Then, for each target rate:
+        1) compute a threshold on the calibration subset
+        2) apply that threshold on the evaluation subset
+        3) measure drift with:
 
-    :param loss_name: String containing the name of the loss in the output dictionary
-        where all loss values are stored (for each event).
-    :param ds: List of strings with data set names where to calculate the threshold
-        drift on.
-    :param log_raw_mlflow: Boolean to decide whether to log the raw plots produced by
-        this callback to mlflow artifacts. Default is True. An html gallery of all the
-        plots is made by default, so if this is set to false, one can still view the
-        plots produced with this callback in the gallery.
-    :param name: String specifying the name of the callback for identification in
-        later methods that manipulate callbacks.
+            L = log((p_hat + eps) / (FPR + eps))
+            drift = abs(L)
+
+    where:
+        - p_hat is the empirical exceedance rate on the evaluation subset
+        - FPR = target_rate / bc_rate
+        - eps = 0.5 / N_eval
+
+    This is appropriate as a validation-side proxy objective for HPO.
+
+    :param loss_name: Key in outputs dict containing per-event anomaly scores / losses.
+    :param target_rates: List of target background rates in kHz.
+    :param bc_rate: Bunch crossing rate in kHz.
+    :param calibration_fraction: Fraction of zerobias scores used for calibration.
+        The remainder is used for evaluation.
+    :param split_seed: Seed used for deterministic random splitting.
+    :param log_raw_mlflow: Whether to log raw plots to mlflow.
+    :param name: Callback identifier.
     """
 
-    _THRES_RE = re.compile(r"^thres_(?P<trate>.+)kHz$")
     def __init__(
         self,
         loss_name: str,
+        target_rates: list[float],
         bc_rate: float = 28608.8064,
+        calibration_fraction: float = 0.5,
+        split_seed: int = 12345,
         log_raw_mlflow: bool = True,
         name: str = "thres_transfer",
     ):
+        super().__init__()
         self.device = None
         self.loss_name = loss_name
+        self.target_rates = sorted(float(x) for x in target_rates)
+        self.bc_rate = float(bc_rate)
+        self.calibration_fraction = float(calibration_fraction)
+        self.split_seed = int(split_seed)
         self.log_raw_mlflow = log_raw_mlflow
         self.name = name
-        self.bc_rate = bc_rate
+
+        if not (0.0 < self.calibration_fraction < 1.0):
+            raise ValueError("calibration_fraction must be strictly between 0 and 1.")
 
         self.transfer_summary = defaultdict(dict)
-
-        self.target_rates = None
-        self.thresholds = None
 
     def on_test_epoch_start(self, trainer, pl_module):
         self.device = pl_module.device
 
         dset_names = list(trainer.test_dataloaders.keys())
-        if "main_test" not in dset_names:
+        if "zerobias" not in dset_names:
             raise ValueError(
-                f"{self.__class__.__name__} requires a test dataloader named 'main_test'. "
+                f"{self.__class__.__name__} requires a dataloader named 'zerobias'. "
                 f"Available test dataloaders: {dset_names}"
             )
 
-        # Discover thresholds + rates from buffers
-        self.thresholds = self._discover_thresholds(pl_module)
-        self.target_rates = sorted(self.thresholds.keys())
-
-        # Initialize counters ONLY for main_test
-        self.total_counts = 0
-        self.exceed_counts = {tr: 0 for tr in self.target_rates}
+        self.zerobias_scores = []
 
     def on_test_batch_end(
         self, trainer, pl_module, outputs, batch, batch_idx, dataloader_idx=0
     ):
-        """Count how many values exceed the val threshold on main_test at each rate."""
+        """Accumulate zerobias scores across the whole epoch."""
         dset_name = list(trainer.test_dataloaders.keys())[dataloader_idx]
-        if dset_name != "main_test":
+        if dset_name != "zerobias":
             return
 
         loss = outputs[self.loss_name]
         if loss.ndim == 0:
-            raise ValueError(f"outputs['{self.loss_name}'] is scalar. Need loss tensor.")
+            raise ValueError(f"outputs['{self.loss_name}'] is scalar. Need a tensor.")
 
-        loss = loss.detach().to(self.device).view(-1)
-        n = int(loss.numel())
-        self.total_counts += n
-
-        for tr in self.target_rates:
-            thr = self.thresholds[tr].view(-1)[0]
-            self.exceed_counts[tr] += int((loss >= thr).sum().item())
+        loss = loss.detach().view(-1).cpu()
+        self.zerobias_scores.append(loss)
 
     def on_test_epoch_end(self, trainer, pl_module) -> None:
-        """Compute the calibration drift on the main_test data set."""
+        """Compute split-transfer drift on zerobias."""
         ckpt_name = Path(pl_module._ckpt_path).stem
         ckpts_dir = Path(pl_module._ckpt_path).parent
-        plot_folder = ckpts_dir / "plots" / ckpt_name / self.name
+        split = getattr(trainer, "split", "test")
+        plot_folder = ckpts_dir / "plots" / split / ckpt_name / self.name
         plot_folder.mkdir(parents=True, exist_ok=True)
 
-        N = int(self.total_counts)
-        if N <= 0:
-            raise RuntimeError("No samples were processed for 'main_test'.")
+        if not self.zerobias_scores:
+            raise RuntimeError("No zerobias scores were collected.")
 
-        eps = 0.5 / float(N)
+        scores = torch.cat(self.zerobias_scores, dim=0).view(-1)
+        n_total = int(scores.numel())
+        if n_total < 2:
+            raise RuntimeError(
+                f"Need at least 2 zerobias scores to split, got {n_total}."
+            )
+
+        cal_scores, eval_scores = self._split_scores(scores)
+        n_eval = int(eval_scores.numel())
+        if n_eval <= 0:
+            raise RuntimeError("Evaluation split is empty after internal split.")
+
+        eps = 0.5 / float(n_eval)
+
         for trate in self.target_rates:
-            fp = int(self.exceed_counts[trate])
-            p_hat = fp / float(N)
-
             fpr = float(trate) / float(self.bc_rate)
-            L = math.log((p_hat + eps) / (float(fpr) + eps))
+            thr = self._compute_threshold(cal_scores, exceedance_prob=fpr)
+
+            fp = int((eval_scores >= thr).sum().item())
+            p_hat = fp / float(n_eval)
+
+            L = math.log((p_hat + eps) / (fpr + eps))
             drift_metric = abs(L)
 
             trate_name = f"{trate} kHz"
             xlabel = (
-                f"Calibration drift at threshold: {trate_name}\n"
+                f"Split-transfer drift at threshold: {trate_name}\n"
                 f"log((p̂+ε)/(FPR+ε))"
             )
-            self._plot({"main_test": drift_metric}, xlabel, plot_folder, percent=False)
+            self._plot({"zerobias": drift_metric}, xlabel, plot_folder, percent=False)
             self._store_summary(drift_metric, ckpt_name, trate)
 
         utils.mlflow.log_plots_to_mlflow(
@@ -134,27 +151,60 @@ class ThresholdDriftCallback(Callback):
             gallery_name=f"{self.name}",
         )
 
+    def _split_scores(self, scores: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
+        """Deterministically split scores into calibration and evaluation subsets."""
+        n = int(scores.numel())
+        n_cal = int(round(self.calibration_fraction * n))
+        n_cal = max(1, min(n - 1, n_cal))
+
+        gen = torch.Generator(device="cpu")
+        gen.manual_seed(self.split_seed)
+        perm = torch.randperm(n, generator=gen)
+
+        cal_idx = perm[:n_cal]
+        eval_idx = perm[n_cal:]
+
+        return scores[cal_idx], scores[eval_idx]
+
+    def _compute_threshold(
+        self, scores: torch.Tensor, exceedance_prob: float
+    ) -> torch.Tensor:
+        """Compute threshold so that P(score >= threshold) ~= exceedance_prob.
+
+        Uses an empirical order-statistics threshold on the calibration scores.
+        """
+        scores = scores.view(-1)
+        n = int(scores.numel())
+        if n == 0:
+            raise RuntimeError("Cannot compute threshold from an empty calibration set.")
+
+        if exceedance_prob <= 0.0:
+            return torch.tensor(float("inf"), device=scores.device, dtype=scores.dtype)
+
+        if exceedance_prob >= 1.0:
+            return scores.min()
+
+        sorted_scores, _ = torch.sort(scores)  # ascending
+        # Keep approximately exceedance_prob mass above threshold.
+        q = 1.0 - exceedance_prob
+        idx = int(math.ceil(q * n) - 1)
+        idx = max(0, min(n - 1, idx))
+        return sorted_scores[idx]
+
     def _plot(self, data: dict, xlabel: str, plot_folder: Path, percent: bool = False):
         ylabel = " "
         horizontal_bar.plot_yright(data, data, xlabel, ylabel, plot_folder, percent)
 
     def _store_summary(self, drift_metric: float, ckpt_name: str, trate: float):
-        """Store the summary metric for each checkpoint.
-
-        Here, it's just the value of the calibration drift for that checkpoint.
-        """
+        """Store one drift value per checkpoint dataset and target rate."""
         ckpt_ds = utils.misc.get_ckpt_ds_name(ckpt_name)
         self.transfer_summary[trate][ckpt_ds] = float(drift_metric)
 
     def get_optimized_metric(self, ckpt_name: str, target_rate: float):
-        """Get one number that one should optimize on this callback.
-
-        This is the value of the drift mteric for a certain bkg rate at a certain
-        checkpoint data set.
-        """
+        """Return the drift metric for one target rate at one checkpoint dataset."""
         if target_rate not in self.transfer_summary:
             log.warn(
-                f"Target rate {target_rate} not found."
+                f"Target rate {target_rate} not found. "
                 f"Available: {list(self.transfer_summary.keys())}"
             )
             return ckpt_name, None
@@ -170,21 +220,17 @@ class ThresholdDriftCallback(Callback):
         return ckpt_name, optimized_loss
 
     def plot_summary(self, trainer, root_folder: Path):
-        """Plot the summary metric.
-
-        In this case, plot the calibration drift for each threhold target rate, for
-        each checkpoint.
-        """
-        plot_folder = root_folder / "plots" / f"{self.name}_summary"
+        """Plot drift summary across checkpoints for each target rate."""
+        split = getattr(trainer, "split", "test")
+        plot_folder = root_folder / "plots" / split / f"{self.name}_summary"
         plot_folder.mkdir(parents=True, exist_ok=True)
         self._cache_summary(plot_folder)
 
         for trate in sorted(self.transfer_summary.keys()):
             smet = self.transfer_summary[trate]
-
             trate_name = f"{trate} kHz"
             xlabel = (
-                f"calibration drift at threshold: {trate_name}\n"
+                f"split-transfer drift at threshold: {trate_name}\n"
                 f"log((p̂+ε)/(FPR+ε))"
             )
             self._plot(smet, xlabel, plot_folder, percent=False)
@@ -198,33 +244,3 @@ class ThresholdDriftCallback(Callback):
         with open(cache_folder / "summary.pkl", "wb") as f:
             plain_dict = utils.misc.to_plain_dict(self.transfer_summary)
             pickle.dump(plain_dict, f, protocol=pickle.HIGHEST_PROTOCOL)
-
-    def _parse_target_rate_from_buffer_name(self, buf_name: str) -> float | None:
-        """Get the target rate associated with main_val.
-
-        Get the target rate from the name that is stored during the validation, when
-        the threshold is actually set.
-        """
-        m = ThresholdDriftCallback._THRES_RE.match(buf_name)
-        if not m:
-            return None
-        trate_str = m.group("trate").replace("_", ".")
-        try:
-            return float(trate_str)
-        except ValueError:
-            return None
-
-    def _discover_thresholds(self, pl_module) -> dict[float, torch.Tensor]:
-        """Discover what thresholds were set during the validation."""
-        thresholds = {}
-        for name, buf in pl_module.named_buffers():
-            tr = self._parse_target_rate_from_buffer_name(name)
-            if tr is None:
-                continue
-            thresholds[tr] = buf.detach().to(pl_module.device)
-        if not thresholds:
-            raise AttributeError(
-                "No threshold buffers found on module. Expected buffers named like "
-                "'thres_{target_rate}kHz' registered during validation."
-            )
-        return thresholds

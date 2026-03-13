@@ -46,7 +46,9 @@ class CAP(Callback):
         self.pairing_fn = get_pairing_fn(pairing_type)
         self.log_raw_mlflow = log_raw_mlflow
         self.name = name
+
         self.cap_summary = defaultdict(float)
+        self.rankcorr_summary = defaultdict(float)
 
     def on_test_start(self, trainer, pl_module):
         """Set the right device at start of testing."""
@@ -82,6 +84,9 @@ class CAP(Callback):
         ds2_scores = self.dataset_2_scores[idxs2]
 
         n = min(len(ds1_scores), len(ds2_scores))
+        ds1_scores = ds1_scores[:n]
+        ds2_scores = ds2_scores[:n]
+        self.rankcorr_value = self._spearman_corr(ds1_scores, ds2_scores)
 
         with torch.inference_mode(False):
             with torch.enable_grad():
@@ -95,18 +100,20 @@ class CAP(Callback):
         ckpts_dir = Path(pl_module._ckpt_path).parent
         ckpt_name = Path(pl_module._ckpt_path).stem
         self._compute_cap()
-
         cap_metric_value = self.capmetric.compute()
-        ckpt_ds = utils.misc.get_ckpt_ds_name(ckpt_name)
-        self._store_summary(cap_metric_value, ckpt_ds)
+        rankcorr_value = self.rankcorr_value
 
-    def _store_summary(self, cap_metric_value: float, ckpt_ds: str):
+        ckpt_ds = utils.misc.get_ckpt_ds_name(ckpt_name)
+        self._store_summary(cap_metric_value, rankcorr_value, ckpt_ds)
+
+    def _store_summary(self, cap_metric_value: float, rank_val: float, ckpt_ds: str):
         """Store the summary statistic for the cap for one checkpoint.
 
         Here, it is the metric itself, but this is implemented to be consistent with
         the other evaluation callbacks.
         """
         self.cap_summary[ckpt_ds] = cap_metric_value
+        self.rankcorr_summary[ckpt_ds] = rank_val
 
     def _plot(self, data: dict, xlabel: str, plot_folder: Path, percent: bool = False):
         """Plot the efficiency per data set for an anomaly metric at target rate."""
@@ -115,13 +122,16 @@ class CAP(Callback):
 
     def plot_summary(self, trainer, root_folder: Path):
         """Plot the summary metrics accummulated in eff_summary and reset this attr."""
-        plot_folder = root_folder / "plots" / f"{self.name}_summary"
+        split = trainer.split
+        plot_folder = root_folder / "plots" / split / f"{self.name}_summary"
         plot_folder.mkdir(parents=True, exist_ok=True)
         self._cache_summary(plot_folder)
 
         # Configure plot.
         xlabel = f"CAP({self.dataset_1_name},\n{self.dataset_2_name})"
         self._plot(self.cap_summary, xlabel, plot_folder)
+        xlabel = f"RankCorr({self.dataset_1_name},\n{self.dataset_2_name})"
+        self._plot(self.rankcorr_summary, xlabel, plot_folder)
 
         utils.mlflow.log_plots_to_mlflow(trainer, None, "cap", plot_folder)
 
@@ -143,3 +153,22 @@ class CAP(Callback):
         with open(cache_folder / "summary.pkl", "wb") as f:
             plain_dict = utils.misc.to_plain_dict(self.cap_summary)
             pickle.dump(plain_dict, f, protocol=pickle.HIGHEST_PROTOCOL)
+            plain_dict = utils.misc.to_plain_dict(self.rankcorr_summary)
+            pickle.dump(plain_dict, f, protocol=pickle.HIGHEST_PROTOCOL)
+
+    def _spearman_corr(self, x: torch.Tensor, y: torch.Tensor) -> float:
+        """Compute the spearman correlation between the anomaly scores."""
+        x = x.detach().flatten().cpu()
+        y = y.detach().flatten().cpu()
+
+        rx = torch.argsort(torch.argsort(x)).float()
+        ry = torch.argsort(torch.argsort(y)).float()
+
+        rx = rx - rx.mean()
+        ry = ry - ry.mean()
+
+        denom = torch.sqrt((rx ** 2).sum() * (ry ** 2).sum())
+        if denom < 1e-12:
+            return float("nan")
+
+        return ((rx * ry).sum() / denom).item()

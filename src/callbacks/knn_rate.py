@@ -53,12 +53,12 @@ class KNNRate(Callback):
         self.knnrate_summary = defaultdict(lambda: defaultdict(float))
 
     def on_validation_start(self, trainer, pl_module):
-        """Check if 'main_val' labeled dataloader is among the test dataloaders."""
+        """Check if 'zerobias' labeled dataloader is among the test dataloaders."""
         self.device = pl_module.device
 
         dset_names = list(trainer.val_dataloaders.keys())
         first_val_dset_key = list(trainer.val_dataloaders.keys())[0]
-        if first_val_dset_key != "main_val":
+        if first_val_dset_key != "zerobias":
             raise ValueError(
                 "KNN Rate callback requires main_val first in the val dict!"
             )

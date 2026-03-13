@@ -126,7 +126,8 @@ class KNNEffs(Callback):
         self._check_bkg_negatives()
         ckpts_dir = Path(pl_module._ckpt_path).parent
         ckpt_name = Path(pl_module._ckpt_path).stem
-        plot_folder = ckpts_dir / "plots" / ckpt_name / "knn_auprcs"
+        split = trainer.eval_split
+        plot_folder = ckpts_dir / "plots" / split / ckpt_name / "knn_auprcs"
         plot_folder.mkdir(parents=True, exist_ok=True)
 
         for trate in self.target_rates:
@@ -153,7 +154,8 @@ class KNNEffs(Callback):
 
     def plot_summary(self, trainer, root_folder: Path):
         """Plot the summary metrics accummulated in eff_summary and reset this attr."""
-        plot_folder = root_folder / "plots" / "knneffs_summary"
+        split = trainer.eval_split
+        plot_folder = root_folder / "plots" / split / "knneffs_summary"
         plot_folder.mkdir(parents=True, exist_ok=True)
         self._cache_summary(plot_folder)
 

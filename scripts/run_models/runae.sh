@@ -100,18 +100,18 @@ python3 src/train.py \
     hydra.launcher.gpus_per_node=4 \
     paths.raw_data_dir=/data/deodagiu/adl1t_data/parquet_files \
     experiment=ae_agnostic \
-    experiment_name=ae_agnostic_capSigmoidFocalAbs_vs_mse_search \
+    experiment_name=ae_agnostic_capSigmoidAdaptiveScale025_vs_mse_search \
     callbacks.max_rate_mse_ckpt=null \
     callbacks.cvar25_ema_ckpt=null \
     evaluator.ckpts.summary=null \
     evaluator_callbacks.reco=null \
     logger=none \
     hparams_search=ae_agnostic_optuna \
-    hydra.sweeper.study_name=capSigmoidFocalAbs_vs_mse_b16k \
+    hydra.sweeper.study_name=capSigmoidAdaptiveScale025_vs_mse_b16k \
     hydra.sweeper.n_trials=100 \
     hydra.sweeper.sampler.n_startup_trials=40 \
     trainer=gpu \
-    trainer.max_epochs=1 \
+    trainer.max_epochs=50 \
     trainer.devices=[0]
 
 

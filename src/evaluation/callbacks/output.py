@@ -129,7 +129,8 @@ class HistogramOutputCallback(Callback):
         ckpts_dir = Path(pl_module._ckpt_path).parent
         ckpt_name = Path(pl_module._ckpt_path).stem
 
-        plot_folder = ckpts_dir / "plots" / ckpt_name / self.name
+        split = trainer.split
+        plot_folder = ckpts_dir / "plots" / split / ckpt_name / self.name
         plot_folder.mkdir(parents=True, exist_ok=True)
 
         for dset_name in self.ds:

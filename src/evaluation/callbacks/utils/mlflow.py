@@ -260,6 +260,11 @@ def generate_thumbnail(path: Path, max_size: int = 1024, quality: int = 90) -> s
 def resolve_arti_dir(trainer, cb_name: str, ckpt_name: str = None):
     """Resolve the artifacts directory where the plots will be stored in mlflow."""
     arti_dir = Path()
+
+    split = getattr(trainer, "split", None)
+    if split:
+        arti_dir = arti_dir / split
+
     if trainer.strat_name:
         arti_dir = arti_dir / trainer.strat_name / cb_name
     if trainer.metric_name:

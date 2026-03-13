@@ -189,12 +189,12 @@ class L1ADDataModule(LightningDataModule):
 
     def val_dataloader(self):
         return self._make_eval_loaders(
-            main_key="valid", aux_key="valid", main_name="main_val"
+            main_key="valid", aux_key="valid", main_name="zerobias"
         )
 
     def test_dataloader(self):
         return self._make_eval_loaders(
-            main_key="test", aux_key="test", main_name="main_test"
+            main_key="test", aux_key="test", main_name="zerobias"
         )
 
     def teardown(self, stage: str | None = None) -> None:
@@ -377,7 +377,7 @@ class L1ADDataModule(LightningDataModule):
             )
 
         split_name = "valid" if stage == "val" else "test"
-        main_key = "main_val" if stage == "val" else "main_test"
+        main_key = "zerobias"
 
         # Main split (ensure it's first in the returned dict)
         main = self._load_main_split(data_dir, split_name, label=0, flag=flag)

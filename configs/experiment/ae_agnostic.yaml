@@ -155,7 +155,7 @@ evaluator_callbacks:
       normalization_params: null
       energy_type: adaptive
       energy_params:
-        scale: 0.25
+        scale: 1.0
       regularization_type: none
       regularization_params: null
       binary: True

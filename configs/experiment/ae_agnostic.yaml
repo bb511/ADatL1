@@ -150,7 +150,7 @@ evaluator_callbacks:
     log_raw_mlflow: false
     pairing_type: cdf
     cap_metric_config:
-      beta0: 0.1
+      beta0: 5.0
       normalization_type: sigmoid
       normalization_params: null
       energy_type: adaptive

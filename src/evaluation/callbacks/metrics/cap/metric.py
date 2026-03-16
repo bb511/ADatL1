@@ -1,3 +1,4 @@
+# Approximation Capacity implementation. Based on the work of Victor Jimenez.
 from typing import Optional, Any, Callable
 from tqdm import tqdm
 import gc

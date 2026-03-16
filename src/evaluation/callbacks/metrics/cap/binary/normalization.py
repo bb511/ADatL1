@@ -71,3 +71,62 @@ def softmax(
         tensor: Input tensor to normalize
     """
     return F.softmax(tensor, dim=-1)
+
+
+def rank(
+    tensor: Tensor,
+) -> Tensor:
+    """
+    Rank normalization: maps tensor values to [0, 1] using empirical CDF.
+
+    Rationale:
+        Robust to heavy-tailed distributions and extreme outliers.
+        Preserves ordering of anomaly scores while ensuring a uniform
+        distribution over [0, 1].
+
+    Args:
+        tensor: Input tensor to normalize
+
+    Returns:
+        Normalized tensor in [0, 1] range based on rank.
+    """
+    n = tensor.numel()
+
+    if n <= 1:
+        return torch.full_like(tensor, 0.5)
+
+    # Compute ranks
+    sorted_indices = torch.argsort(tensor)
+    ranks = torch.empty_like(sorted_indices, dtype=torch.float)
+    ranks[sorted_indices] = torch.arange(n, device=tensor.device, dtype=torch.float)
+
+    # Normalize ranks to [0, 1]
+    return ranks / (n - 1)
+
+
+def rank_mid(
+    tensor: Tensor,
+) -> Tensor:
+    """
+    Rank normalization using mid-ranks.
+
+    Rationale:
+        Same as rank normalization but avoids exact 0 and 1, which
+        can improve numerical stability in exponential kernels.
+
+    Args:
+        tensor: Input tensor to normalize
+
+    Returns:
+        Normalized tensor in (0, 1) based on empirical CDF.
+    """
+    n = tensor.numel()
+
+    if n <= 1:
+        return torch.full_like(tensor, 0.5)
+
+    sorted_indices = torch.argsort(tensor)
+    ranks = torch.empty_like(sorted_indices, dtype=torch.float)
+    ranks[sorted_indices] = torch.arange(n, device=tensor.device, dtype=torch.float)
+
+    return (ranks + 0.5) / n

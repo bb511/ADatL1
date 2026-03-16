@@ -44,7 +44,9 @@ def get_pairing_fn(
 from src.evaluation.callbacks.metrics.cap.binary.normalization import (
     minmax,
     sigmoid,
-    softmax
+    softmax,
+    rank,
+    rank_mid
 )
 
 def get_normalizer_fn(
@@ -74,6 +76,12 @@ def get_normalizer_fn(
 
     elif normalization_type == "softmax":
         normalizer_fn = softmax
+
+    elif normalization_type == "rank":
+        normalizer_fn = rank
+
+    elif normalization_type == "rank_mid":
+        normalizer_fn = rank_mid
 
     else:
         raise ValueError(f"Unknown normalization type: {normalization_type}")

@@ -151,7 +151,7 @@ evaluator_callbacks:
     pairing_type: cdf
     cap_metric_config:
       beta0: 1.0
-      normalization_type: rank_mid
+      normalization_type: rank
       normalization_params: null
       energy_type: adaptive
       energy_params:

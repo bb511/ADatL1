@@ -330,7 +330,7 @@ class Evaluator:
             return
 
         rel_changes = [
-            ((v - b) if d == "maximize" else (b - v)) / max(abs(v), 1e-12)
+            ((v - b) if d == "maximize" else (b - v)) / max(abs(b), 1e-12)
             for v, b, d in zip(values, self.optimized_metric, directions)
         ]
 

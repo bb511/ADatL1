@@ -95,6 +95,9 @@
 taskset -c 0-2 \
 python3 src/train.py \
     -m \
+    hydra/launcher=submitit_local \
+    hydra.launcher.cpus_per_task=1 \
+    hydra.launcher.gpus_per_node=4 \
     paths.raw_data_dir=/data/deodagiu/adl1t_data/parquet_files \
     experiment=ae_agnostic \
     experiment_name=ae_agnostic_capSigmoidAdaptiveRankmidNorm_vs_mse_search \
@@ -108,11 +111,8 @@ python3 src/train.py \
     hydra.sweeper.n_trials=100 \
     hydra.sweeper.sampler.n_startup_trials=40 \
     trainer=gpu \
-    trainer.max_epochs=1 \
+    trainer.max_epochs=50 \
     trainer.devices=[0]
-    # hydra/launcher=submitit_local \
-    # hydra.launcher.cpus_per_task=1 \
-    # hydra.launcher.gpus_per_node=4 \
 
 
 # AE agnostic MSE and threshold stability.

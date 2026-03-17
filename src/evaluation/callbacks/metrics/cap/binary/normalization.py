@@ -130,3 +130,41 @@ def rank_mid(
     ranks[sorted_indices] = torch.arange(n, device=tensor.device, dtype=torch.float)
 
     return (ranks + 0.5) / n
+
+
+def log_sigmoid(
+    tensor: Tensor,
+    center: Optional[float] = None,
+    scale: Optional[float] = None,
+    eps: Optional[float] = 1e-8
+) -> Tensor:
+    """
+    Log-sigmoid normalization: applies a log1p transform followed by sigmoid mapping.
+
+    Rationale:
+        Useful for positive, heavy-tailed anomaly scores such as reconstruction MSE.
+        The log1p transform compresses extreme tail values while preserving ordering,
+        and the sigmoid then maps the transformed scores smoothly into (0, 1).
+
+    Args:
+        tensor: Input tensor to normalize
+        center: Center point for sigmoid after log1p transform
+            (uses median of transformed tensor if None)
+        scale: Scale parameter after log1p transform
+            (uses std/4 of transformed tensor if None for reasonable steepness)
+        eps: Small value to ensure numerical stability for non-positive inputs
+
+    Returns:
+        Normalized tensor in (0, 1) range
+    """
+    # Ensure numerical stability if tensor contains very small negative values
+    transformed = torch.log1p(torch.clamp(tensor, min=-1.0 + eps))
+
+    if center is None:
+        center = transformed.median().item()
+    if scale is None:
+        scale = transformed.std().item() / 4.0
+        if scale < 1e-8:
+            scale = 1.0
+
+    return torch.sigmoid((transformed - center) / scale)

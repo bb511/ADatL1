@@ -20,3 +20,5 @@ cap_metric_config:
   normalize_gradients: False
   process_group: null
   dist_sync_fn: null
+
+name: 'cap'

@@ -87,7 +87,7 @@ callbacks:
       _target_: src.callbacks.checkpointing.criterion.Stable
       top_k: 1
       threshold: 0.05
-      patience: 10
+      patience: 1
     ds:
       - zerobias
 
@@ -151,7 +151,7 @@ evaluator_callbacks:
     pairing_type: cdf
     cap_metric_config:
       beta0: 1.0
-      normalization_type: log_sigmoid
+      normalization_type: sigmoid
       normalization_params: null
       energy_type: adaptive
       energy_params:
@@ -203,6 +203,15 @@ evaluator_callbacks:
     split_seed: 12345
     log_raw_mlflow: false
     name: thres_transfer
+
+  wasserstein:
+    _target_: src.evaluation.callbacks.wasserstein.Wasserstein
+    metric_name: 'loss/total/full'
+    dataset_1: zerobias
+    dataset_2: SingleNeutrino_E-10-gun
+    apply_log1p: true
+    log_raw_mlflow: false
+    name: wasserstein
 
   reco:
     _target_: src.evaluation.callbacks.reco.ReconstructionPlots

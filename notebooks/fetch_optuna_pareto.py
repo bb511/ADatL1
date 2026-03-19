@@ -40,6 +40,7 @@ def main():
     df["is_pareto"] = df["number"].isin(pareto_numbers)
 
     output_path = Path(args.output) if args.output else Path(f"{args.study_name}.csv")
+    output_path = "paretos" / output_path
     output_path.parent.mkdir(parents=True, exist_ok=True)
     df.to_csv(output_path, index=False)
 

@@ -87,7 +87,7 @@ callbacks:
       _target_: src.callbacks.checkpointing.criterion.Stable
       top_k: 1
       threshold: 0.05
-      patience: 1
+      patience: 10
     ds:
       - zerobias
 

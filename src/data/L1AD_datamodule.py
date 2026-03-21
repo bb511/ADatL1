@@ -201,12 +201,17 @@ class L1ADDataModule(LightningDataModule):
         # Drop references to large tensors so they become collectible
         if stage in ("fit", None):
             # free train/valid (+ aux valid)
+            self._train_loader = None
+            self._val_loaders = None
+
             self._main.pop("train", None)
             self._main.pop("valid", None)
             self._aux.get("valid", {}).clear()
 
         if stage in ("test", None):
             # free test (+ aux test)
+            self._test_loaders = None
+
             self._main.pop("test", None)
             self._aux.get("test", {}).clear()
 

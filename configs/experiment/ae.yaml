@@ -142,10 +142,38 @@ evaluator_callbacks:
       - haa-4b-ma15
     log_raw_mlflow: false
 
-  loss:
+  mse_operational_mean:
     _target_: src.evaluation.callbacks.loss.LossCallback
     name: mse_mean_top_vals
     loss_name: 'loss/mse/mean_top_vals'
+    ds:
+      - zerobias
+      - GluGluHTo2B_Par-MH-125
+      - GluGluHto2G_Par-MH-125
+      - GluGluHto2G_Par-MH-90
+      - GluGluHto2Tau_Par-MH-125
+      - GluGlutoHHto2B2WtoLNu2Q_Par-c2-0-kl-1-kt-1
+      - HHHto4B2Tau_Par-c3-0-d4-0
+      - HHHto6B_Par-c3-0-d4-0
+      - SUSYGluGluToBBHTo2B_Par-M-1200
+      - SUSYGluGluToBBHToBB_Par-M-120
+      - SUSYGluGluToBBHToBB_Par-M-350
+      - SUSYGluGluToBBHToBB_Par-M-600
+      - TTHTo2C_Par-MH-125
+      - TTHto2B_Par-MH-125
+      - VBFHTo2C_Par-MH-125
+      - VBFHto2B_Par-MH-125
+      - VBFHto2Tau_Par-MH-125
+      - WtoTauto3Mu
+      - ggH-suep-decay
+      - smj-case-A
+      - haa-4b-ma15
+    log_raw_mlflow: false
+
+  mse_loss_q99:
+    _target_: src.evaluation.callbacks.loss.LossCallback
+    name: mse_q99
+    loss_name: 'loss/mse/q99'
     ds:
       - zerobias
       - GluGluHTo2B_Par-MH-125

@@ -61,9 +61,10 @@ class AE(L1ADLightningModule):
 
             # Number of extreme tail samples
             k = max(10, int((1.0 - self.operational_quantile) * n))
-
             topk_vals = torch.topk(mse, k).values
             mean_top_vals = topk_vals.mean().item()
+
+            mse_q99 = torch.quantile(mse, 0.99).item()
 
         return {
             # Used for backpropagation:
@@ -71,6 +72,7 @@ class AE(L1ADLightningModule):
             # Used for logging:
             "loss/reco/mean": reco_loss.mean(),
             "loss/mse/mean_top_vals": mean_top_vals,
+            "loss/mse/q99": mse_q99,
             # Used for callbacks:
             "loss/total/full": reco_loss.detach(),
             "loss/mse/full": mse.detach(),

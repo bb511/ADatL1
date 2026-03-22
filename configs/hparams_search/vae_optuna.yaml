@@ -64,4 +64,3 @@ hydra:
       algorithm.loss.kl_scale: choice(3e-5, 1e-4, 3e-4, 1e-3, 2e-3)
       algorithm.kl_warmup_frac: choice(0.0, 0.05, 0.1, 0.2, 0.3)
       algorithm.encoder.nodes: choice([32], [48], [64], [32,32], [48,48], [64,32], [64, 64])
-      algorithm.encoder.out_dim: choice(16, 24, 32, 48, 64, 96)

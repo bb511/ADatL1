@@ -217,39 +217,39 @@
 
 
 # AE agnostic MSE and threshold stability.
-taskset -c 0-2 \
-python3 src/train.py \
-    -m \
-    hydra/launcher=submitit_local \
-    hydra.launcher.cpus_per_task=1 \
-    hydra.launcher.gpus_per_node=4 \
-    paths.raw_data_dir=/data/deodagiu/adl1t_data/parquet_files \
-    experiment=ae_agnostic \
-    experiment_name=ae_agnostic_mseq99_vs_thres_search \
-    callbacks.max_rate_mse_ckpt=null \
-    callbacks.cvar25_ema_ckpt=null \
-    evaluator.ckpts.last=true \
-    evaluator.ckpts.summary=null \
-    evaluator_callbacks.cap_sn_zb=null \
-    evaluator_callbacks.reco=null \
-    logger=none \
-    hparams_search=ae_agnostic_optuna \
-    optimized_metric_config.main_metric.callback.name=mse_q99 \
-    +optimized_metric_config.main_metric.callback.params.ckpt_name=last \
-    +optimized_metric_config.main_metric.callback.params.test_ds=zerobias \
-    optimized_metric_config.main_metric.direction=minimize \
-    optimized_metric_config.sec_metric.callback.name=thres_transfer \
-    optimized_metric_config.sec_metric.callback.params.ckpt_name=null \
-    +optimized_metric_config.sec_metric.callback.params.target_rate=0.25 \
-    ~optimized_metric_config.sec_metric.callback.params.test_ds \
-    optimized_metric_config.sec_metric.direction=minimize \
-    hydra.sweeper.study_name=mseq99_vs_drift_b16k \
-    hydra.sweeper.direction='[minimize, minimize]' \
-    hydra.sweeper.n_trials=100 \
-    hydra.sweeper.sampler.n_startup_trials=150 \
-    trainer=gpu \
-    trainer.max_epochs=50 \
-    trainer.devices=[0]
+# taskset -c 0-2 \
+# python3 src/train.py \
+#     -m \
+#     hydra/launcher=submitit_local \
+#     hydra.launcher.cpus_per_task=1 \
+#     hydra.launcher.gpus_per_node=4 \
+#     paths.raw_data_dir=/data/deodagiu/adl1t_data/parquet_files \
+#     experiment=ae_agnostic \
+#     experiment_name=ae_agnostic_mseq99_vs_thres_search \
+#     callbacks.max_rate_mse_ckpt=null \
+#     callbacks.cvar25_ema_ckpt=null \
+#     evaluator.ckpts.last=true \
+#     evaluator.ckpts.summary=null \
+#     evaluator_callbacks.cap_sn_zb=null \
+#     evaluator_callbacks.reco=null \
+#     logger=none \
+#     hparams_search=ae_agnostic_optuna \
+#     optimized_metric_config.main_metric.callback.name=mse_q99 \
+#     +optimized_metric_config.main_metric.callback.params.ckpt_name=last \
+#     +optimized_metric_config.main_metric.callback.params.test_ds=zerobias \
+#     optimized_metric_config.main_metric.direction=minimize \
+#     optimized_metric_config.sec_metric.callback.name=thres_transfer \
+#     optimized_metric_config.sec_metric.callback.params.ckpt_name=null \
+#     +optimized_metric_config.sec_metric.callback.params.target_rate=0.25 \
+#     ~optimized_metric_config.sec_metric.callback.params.test_ds \
+#     optimized_metric_config.sec_metric.direction=minimize \
+#     hydra.sweeper.study_name=mseq99_vs_drift_b16k \
+#     hydra.sweeper.direction='[minimize, minimize]' \
+#     hydra.sweeper.n_trials=100 \
+#     hydra.sweeper.sampler.n_startup_trials=150 \
+#     trainer=gpu \
+#     trainer.max_epochs=50 \
+#     trainer.devices=[0]
 
 
 # AE agnostic MSE and wasserstein distance search.
@@ -279,3 +279,32 @@ python3 src/train.py \
 #     trainer=gpu \
 #     trainer.max_epochs=50 \
 #     trainer.devices=[0]
+
+# AE agnostic MSE q99 and wasserstein distance search.
+taskset -c 0-2 \
+python3 src/train.py \
+    -m \
+    hydra/launcher=submitit_local \
+    hydra.launcher.cpus_per_task=1 \
+    hydra.launcher.gpus_per_node=4 \
+    paths.raw_data_dir=/data/deodagiu/adl1t_data/parquet_files \
+    experiment=ae_agnostic \
+    experiment_name=ae_agnostic_mse_vs_thres_search \
+    callbacks.max_rate_mse_ckpt=null \
+    callbacks.cvar25_ema_ckpt=null \
+    evaluator.ckpts.last=true \
+    evaluator.ckpts.summary=null \
+    evaluator_callbacks.cap_sn_zb=null \
+    evaluator_callbacks.reco=null \
+    logger=none \
+    hparams_search=ae_agnostic_optuna \
+    optimized_metric_config.main_metric.callback.name=wasserstein \
+    optimized_metric_config.main_metric.direction=minimize \
+    optimized_metric_config.sec_metric.callback.name=mse_q99 \
+    hydra.sweeper.study_name=wasserstein_vs_mseq99_b16k \
+    hydra.sweeper.direction='[minimize, minimize]' \
+    hydra.sweeper.n_trials=100 \
+    hydra.sweeper.sampler.n_startup_trials=150 \
+    trainer=gpu \
+    trainer.max_epochs=50 \
+    trainer.devices=[0]

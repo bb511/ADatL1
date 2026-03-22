@@ -12,15 +12,9 @@ mask: true
 ckpt: ''
 
 encoder:
-  _target_: src.algorithms.components.encoder.VariationalEncoder
+  _target_: src.algorithms.components.encoder.Encoder
   in_dim: 117
   nodes: [64, 32, 8]
-
-decoder:
-  _target_: src.algorithms.components.decoder.Decoder
-  in_dim: ${algorithm.encoder.out_dim}
-  nodes: ${reverse:${algorithm.encoder.nodes}}
-  out_dim: ${algorithm.encoder.in_dim}
 
 loss:
   _target_: src.algorithms.losses.vae.ClassicVAELoss

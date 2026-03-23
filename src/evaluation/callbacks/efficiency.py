@@ -31,6 +31,8 @@ class AnomalyEfficiencyCallback(Callback):
     :param pure_thres: Whether to set the threshold on the pure data sets, i.e.,
         the data that is not triggered by any L1 trigger algorithm.
     :param ds: List of strings containing data set names to compute the efficiencies on.
+    :param cvar_summary: The percentage of the *worst* efficiencies to mean over and
+        report as the summary metric for this callback.
     :param log_raw_mlflow: Boolean to decide whether to log the raw plots produced by
         this callback to mlflow artifacts. Default is True. An html gallery of all the
         plots is made by default, so if this is set to false, one can still view the
@@ -45,6 +47,7 @@ class AnomalyEfficiencyCallback(Callback):
         metric_name: str,
         ds: list[str],
         pure_thres: bool = False,
+        cvar_summary: float = 0.25,
         log_raw_mlflow: bool = True,
         name: str = 'eff'
     ):
@@ -57,6 +60,7 @@ class AnomalyEfficiencyCallback(Callback):
         self.metric_name = metric_name
         self.pure_thres = pure_thres
         self.ds = set(ds)
+        self.cvar_summary = cvar_summary
 
         self.log_raw_mlflow = log_raw_mlflow
         self.eff_summary = defaultdict(lambda: defaultdict(float))
@@ -211,7 +215,7 @@ class AnomalyEfficiencyCallback(Callback):
         bkg_data = np.fromiter(bkg_effs.values(), dtype=float)
         bkg_mean = bkg_data.mean() if bkg_data.size else 0.0
 
-        alpha = 0.25
+        alpha = self.cvar_summary
         if sig_data.size:
             k = max(1, int(np.ceil(alpha * sig_data.size)))
             worst = np.partition(sig_data, k - 1)[:k]

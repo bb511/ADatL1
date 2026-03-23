@@ -99,10 +99,11 @@ class VAE(L1ADLightningModule):
             ).tolist()
 
             # Number of extreme tail samples
-            n = reco_loss.numel()
+            n = kl_raw.numel()
             k = max(10, int((1.0 - self.operational_quantile) * n))
-            topk_vals = torch.topk(reco_loss, k).values
+            topk_vals = torch.topk(kl_raw, k).values
             mean_top_vals = topk_vals.mean().item()
+
             z_mean_squared = torch.square(z_mean).sum(dim=1)
 
         return {

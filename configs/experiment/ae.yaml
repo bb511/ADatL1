@@ -140,6 +140,7 @@ evaluator_callbacks:
       - ggH-suep-decay
       - smj-case-A
       - haa-4b-ma15
+    cvar_summary: 0.25
     log_raw_mlflow: false
 
   mse_operational_mean:

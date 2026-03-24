@@ -12,13 +12,18 @@ mask: true
 ckpt: ''
 
 encoder:
-  _target_: src.algorithms.components.encoder.Encoder
+  _target_: src.algorithms.components.encoder.VariationalEncoder
   in_dim: 117
   nodes: [64, 32, 8]
+  activation:
+    _target_: torch.nn.ReLU
+  clamp_zlogvar_range: [-20.0, 10.0]
 
 decoder:
   _target_: src.algorithms.components.decoder.Decoder
-  nodes: ${reverse:${algorithm.encoder.nodes}}
+  nodes: ${smaller_decoder:${algorithm.encoder.nodes}}
+  activation:
+    _target_: torch.nn.ReLU
   out_dim: ${algorithm.encoder.in_dim}
 
 loss:

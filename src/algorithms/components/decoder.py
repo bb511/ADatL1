@@ -2,6 +2,7 @@
 from typing import Optional, Callable
 
 import torch
+import torch.nn as nn
 
 from src.algorithms.components.mlp import MLP
 
@@ -11,6 +12,7 @@ class Decoder(MLP):
 
     :param nodes: List of ints, each int specifying the width of a layer.
     :param out_dim: Int of dimensionality of the output, needs to be same as input.
+    :param activation: Pytorch module that defines the activation function.
     :param init_weight: Callable method to initialize the weights of the decoder nodes.
     :param init_bias: Callable method to initialize the biases of the decoder nodes.
     :param init_last_weight: Callable method to initialize the weights of the last layer.
@@ -22,6 +24,7 @@ class Decoder(MLP):
         self,
         nodes: list[int],
         out_dim: int,
+        activation: nn.Module = nn.ReLU(),
         init_weight: Optional[Callable] = None,
         init_bias: Optional[Callable] = None,
         batchnorm: bool = False,
@@ -29,9 +32,10 @@ class Decoder(MLP):
         init_last_bias: Optional[Callable] = None,
     ) -> None:
         super().__init__(
-            nodes[0],
-            nodes[1:],
-            out_dim,
+            in_dim=nodes[0],
+            nodes=nodes[1:],
+            out_dim=out_dim,
+            activation=activation,
             batchnorm=batchnorm,
             init_weight=init_weight,
             init_bias=init_bias,

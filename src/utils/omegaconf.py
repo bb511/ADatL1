@@ -59,7 +59,39 @@ def register_resolvers():
     )
     OmegaConf.register_new_resolver("short_hash", short_hash, replace=True)
     OmegaConf.register_new_resolver("reverse", lambda xs: list(reversed(xs)))
+    OmegaConf.register_new_resolver("smaller_decoder", smaller_decoder)
+    OmegaConf.register_new_resolver(
+        "activation",
+        lambda name: {
+            "relu": nn.ReLU,
+            "gelu": nn.GELU,
+            "silu": nn.SiLU,
+        }[name],
+    )
 
 
 def short_hash(value: str, length: int = 12) -> str:
     return hashlib.sha1(value.encode("utf-8")).hexdigest()[:length]
+
+
+def smaller_decoder(nodes):
+    """Smaller VAE decoder method.
+
+    Rationale: for the VAE, you'd want to avoid an overly expressive decoder since you
+        want the latent space to encode useful information.
+    """
+    nodes = list(nodes)
+
+    # 1 hidden layer encoder: [h, z]
+    if len(nodes) == 2:
+        h, z = nodes
+        return [max(4, h // 2)]
+
+    # 2 hidden layer encoder: [h1, h2, z]
+    elif len(nodes) == 3:
+        h1, h2, z = nodes
+        return [h2]
+
+    else:
+        raise ValueError(f"Unsupported encoder structure: {nodes}")
+

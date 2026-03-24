@@ -11,11 +11,15 @@ log = pylogger.RankedLogger(__name__)
 
 
 class MLP(nn.Module):
-    """
-    Multi-layer perceptron.
+    """Multi-layer perceptron.
 
-    :param nodes: List of number of nodes composing each of the layers.
+    :param in_dim: Int of the input dimension.
+    :param nodes: List of ints number of nodes composing each of the layers.
+    :param out_dim: Int of the output dimension.
     :param batchnorm: Whether to use batch normalization after each layer or not.
+    :param affine: Bool whether the batchnorm is affine if used.
+    :param activation: Pytorch module that defines the activation function.
+    :param final_activation: Bool whether to attach an activation after the final layer.
     :param init_weight: Callable method to initialize the weights of the decoder nodes.
     :param init_bias: Callable method to initialize the biases of the decoder nodes.
     """
@@ -27,6 +31,7 @@ class MLP(nn.Module):
         out_dim: int,
         batchnorm: Optional[bool] = False,
         affine: bool = True,
+        activation: nn.Module = nn.ReLU(),
         final_activation: bool = False,
         init_weight: Optional[Callable] = None,
         init_bias: Optional[Callable] = None,
@@ -35,6 +40,7 @@ class MLP(nn.Module):
         self.in_dim = in_dim
         self.hidden_dims = nodes
         self.out_dim = out_dim
+        self.activation = activation
         self.final_activation = final_activation
 
         self.batchnorm = batchnorm
@@ -62,30 +68,30 @@ class MLP(nn.Module):
                 if self.batchnorm
                 else nn.Identity()
             )
-            layers.append(nn.ReLU())
+            layers.append(self.activation)
             current_dim = hidden_dim
 
         # Output layer
         layers.append(nn.Linear(current_dim, self.out_dim))
         if self.final_activation:
-            layers.append(nn.ReLU())
+            layers.append(self.activation)
 
         return nn.Sequential(*layers)
 
+    def _init_weight_wrapper(self, layer: nn.Module):
+        if isinstance(layer, nn.Linear):
+            return self.init_weight(layer.weight)
+        return None
+
     def _apply_weight_init(self):
+        """Initialise the weights with the given weight initialisation method."""
         if self.init_weight is not None:
             self.net.apply(self._init_weight_wrapper)
         if self.init_bias is not None:
             self.net.apply(self._init_bias_wrapper)
 
-    def _init_weight_wrapper(self, layer: nn.Module):
-        """Initialize the weights of each layer in a way dictated by a method."""
-        if isinstance(layer, nn.Linear):
-            return self.init_weight(layer.weight)
-        return None
-
     def _init_bias_wrapper(self, layer: nn.Module):
-        """Initialize the bias of each layer in a way dictated by a method."""
+        """Initialise the biases according to the given bias initialisation method."""
         if isinstance(layer, nn.Linear) and layer.bias is not None:
             return self.init_bias(layer.bias)
         return None

@@ -4,7 +4,7 @@
 
 # Ignore notebook stuff
 notebooks/paretos
-
+notebooks/effs
 
 # Ignore MAC stuff.
 .DS_Store

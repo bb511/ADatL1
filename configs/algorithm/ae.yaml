@@ -15,11 +15,15 @@ bc_rate: 28608.8064 # bunch crossing rate in kHz
 encoder:
   _target_: src.algorithms.components.encoder.Encoder
   in_dim: 117
+  activation:
+    _target_: torch.nn.ReLU
   nodes: [64, 32, 8]
 
 decoder:
   _target_: src.algorithms.components.decoder.Decoder
   nodes: ${reverse:${algorithm.encoder.nodes}} # nodes of the encoder, but in reverse
+  activation:
+    _target_: torch.nn.ReLU
   out_dim: ${algorithm.encoder.in_dim}
 
 loss:

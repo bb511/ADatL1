@@ -2,7 +2,7 @@
 
 defaults:
   - override /data: basis
-  - override /algorithm: vae
+  - override /algorithm: ae
   - override /callbacks: default
   - override /trainer: cpu
   - override /evaluator: default
@@ -10,59 +10,50 @@ defaults:
   - override /logger: mlflow
 
 seed: 123
-tags: ["vae"]
+tags: ["vae", "signal"]
 
 experiment_name: vae_training
 run_name: ${short_hash:${hydra:runtime.output_dir},12}
 
+data:
+  batch_size: 16384
+  max_val_batches: 10
+
 trainer:
   gradient_clip_algorithm: norm
-  gradient_clip_val: 1.0
+  gradient_clip_val: 0.0
   min_epochs: 1
-  max_epochs: 150
-  limit_val_batches: 10
-  limit_test_batches: 10
+  max_epochs: 200
 
 test: true
 
 algorithm:
+  # The basis data processing returns 117 features.
+  operational_rate: 0.25
   encoder:
     in_dim: 117
 
   optimizer:
     _partial_: true
     _target_: torch.optim.AdamW
-    lr: 0.001
-    weight_decay: 0.0
+    lr: 0.0013029941778430407
+    weight_decay: 0.001
     betas: [0.9, 0.999]
     eps: 1e-8
 
 
 callbacks:
   log_data_mlflow: null
-  anomaly_rate:
+  anomaly_eff:
+    _target_: src.callbacks.rate.AnomalyEfficiencyCallback
     metric_name: 'loss/kl_raw/full'
     target_rates: [0.25]
+    bc_rate: 28608.8064
 
-  # Checkpoints
-  min_loss_total_ckpt: null
-
-  stable_mse_ckpt:
+  max_rate_kl_ckpt:
     _target_: src.callbacks.model_checkpoint.SingleDatasetModelCheckpoint
     dirpath: '${paths.checkpoints_dir}/${experiment_name}/${run_name}'
-    monitor: loss_rmse_q95
-    criterion:
-      _target_: src.callbacks.checkpointing.criterion.Stable
-      top_k: 1
-      threshold: 0.05
-      patience: 10
-    ds:
-      - main_val
-
-  max_rate_mse_ckpt:
-    _target_: src.callbacks.model_checkpoint.SingleDatasetModelCheckpoint
-    dirpath: '${paths.checkpoints_dir}/${experiment_name}/${run_name}'
-    monitor: loss_reco_full_rate0.25kHz
+    monitor: eff__ascore_loss_kl_raw_full__brate_0.25kHz
     criterion:
       _target_: src.callbacks.checkpointing.criterion.Max
       top_k: 1
@@ -88,29 +79,145 @@ callbacks:
       - smj-case-A
       - haa-4b-ma15
 
+  stable_kl_ckpt:
+    _target_: src.callbacks.model_checkpoint.SingleDatasetModelCheckpoint
+    dirpath: '${paths.checkpoints_dir}/${experiment_name}/${run_name}'
+    monitor: loss_kl_raw_mean_top_vals
+    criterion:
+      _target_: src.callbacks.checkpointing.criterion.Stable
+      top_k: 1
+      threshold: 0.05
+      patience: 10
+    ds:
+      - zerobias
+
+  cvar25_ema_ckpt:
+    _target_: pytorch_lightning.callbacks.ModelCheckpoint
+    dirpath: '${paths.checkpoints_dir}/${experiment_name}/${run_name}/summary/cvar25_ema/max'
+    monitor: 'val/summary/eff_cvar25_ema'
+    filename: 'cvar25_ema'
+    save_last: false
+    save_top_k: 1
+    mode: "max"
+    auto_insert_metric_name: False
+    save_weights_only: False
+    every_n_epochs: 1
+    save_on_train_epoch_end: false
+
 evaluator:
   ckpts:
     last: true
+    summary:
+      cvar25_ema: ['max']
     single:
-      loss_rmse_q95: ['stable']
-      loss_kl_raw_full_rate0.25kHz: ['max']
+      loss_kl_mean_top_vals: ['stable']
+      eff__ascore_loss_kl_raw_full__brate_0.25kHz: ['max']
 
 evaluator_callbacks:
   anomaly_efficiency:
+    _target_: src.evaluation.callbacks.efficiency.AnomalyEfficiencyCallback
     metric_name: 'loss/kl_raw/full'
     target_rates: [0.25]
+    bc_rate: 28608.8064
+    ds:
+      - GluGluHTo2B_Par-MH-125
+      - GluGluHto2G_Par-MH-125
+      - GluGluHto2G_Par-MH-90
+      - GluGluHto2Tau_Par-MH-125
+      - GluGlutoHHto2B2WtoLNu2Q_Par-c2-0-kl-1-kt-1
+      - HHHto4B2Tau_Par-c3-0-d4-0
+      - HHHto6B_Par-c3-0-d4-0
+      - SUSYGluGluToBBHTo2B_Par-M-1200
+      - SUSYGluGluToBBHToBB_Par-M-120
+      - SUSYGluGluToBBHToBB_Par-M-350
+      - SUSYGluGluToBBHToBB_Par-M-600
+      - TTHTo2C_Par-MH-125
+      - TTHto2B_Par-MH-125
+      - VBFHTo2C_Par-MH-125
+      - VBFHto2B_Par-MH-125
+      - VBFHto2Tau_Par-MH-125
+      - WtoTauto3Mu
+      - ggH-suep-decay
+      - smj-case-A
+      - haa-4b-ma15
+    cvar_summary: 0.25
     log_raw_mlflow: false
 
-  loss:
+  kl_operational_mean:
     _target_: src.evaluation.callbacks.loss.LossCallback
-    loss_name: 'loss/kl_raw/sqrt_q95'
+    name: kl_mean_top_vals
+    loss_name: 'loss/kl_raw/mean_top_vals'
+    ds:
+      - zerobias
+      - GluGluHTo2B_Par-MH-125
+      - GluGluHto2G_Par-MH-125
+      - GluGluHto2G_Par-MH-90
+      - GluGluHto2Tau_Par-MH-125
+      - GluGlutoHHto2B2WtoLNu2Q_Par-c2-0-kl-1-kt-1
+      - HHHto4B2Tau_Par-c3-0-d4-0
+      - HHHto6B_Par-c3-0-d4-0
+      - SUSYGluGluToBBHTo2B_Par-M-1200
+      - SUSYGluGluToBBHToBB_Par-M-120
+      - SUSYGluGluToBBHToBB_Par-M-350
+      - SUSYGluGluToBBHToBB_Par-M-600
+      - TTHTo2C_Par-MH-125
+      - TTHto2B_Par-MH-125
+      - VBFHTo2C_Par-MH-125
+      - VBFHto2B_Par-MH-125
+      - VBFHto2Tau_Par-MH-125
+      - WtoTauto3Mu
+      - ggH-suep-decay
+      - smj-case-A
+      - haa-4b-ma15
     log_raw_mlflow: false
+
+  kl_loss_q99:
+    _target_: src.evaluation.callbacks.loss.LossCallback
+    name: kl_raw_q99
+    loss_name: 'loss/kl_raw/q99'
+    ds:
+      - zerobias
+      - GluGluHTo2B_Par-MH-125
+      - GluGluHto2G_Par-MH-125
+      - GluGluHto2G_Par-MH-90
+      - GluGluHto2Tau_Par-MH-125
+      - GluGlutoHHto2B2WtoLNu2Q_Par-c2-0-kl-1-kt-1
+      - HHHto4B2Tau_Par-c3-0-d4-0
+      - HHHto6B_Par-c3-0-d4-0
+      - SUSYGluGluToBBHTo2B_Par-M-1200
+      - SUSYGluGluToBBHToBB_Par-M-120
+      - SUSYGluGluToBBHToBB_Par-M-350
+      - SUSYGluGluToBBHToBB_Par-M-600
+      - TTHTo2C_Par-MH-125
+      - TTHto2B_Par-MH-125
+      - VBFHTo2C_Par-MH-125
+      - VBFHto2B_Par-MH-125
+      - VBFHto2Tau_Par-MH-125
+      - WtoTauto3Mu
+      - ggH-suep-decay
+      - smj-case-A
+      - haa-4b-ma15
+    log_raw_mlflow: false
+
+  thres_transfer:
+    _target_: src.evaluation.callbacks.thres_drift.ThresholdDriftCallback
+    loss_name: 'loss/kl_raw/full'
+    target_rates: [0.25]
+    bc_rate: 28608.8064
+    calibration_fraction: 0.5
+    split_seed: 12345
+    log_raw_mlflow: false
+    name: thres_transfer
 
   reco:
     _target_: src.evaluation.callbacks.reco.ReconstructionPlots
-    nbatches: 2
+    warmup_batches: 0.2
     output_name: reconstructed_data
-    datamodule: true # callback needs original datamodule
-    ckpt_name: last
-    datasets: ['main_test', 'SingleNeutrino_E-10-gun']
+    datamodule: true
+    ckpts:
+      last: true
+    datasets:
+      - 'zerobias'
+      - 'SingleNeutrino_E-10-gun'
+    name: 'reco'
     log_raw_mlflow: false

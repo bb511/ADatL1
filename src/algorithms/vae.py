@@ -118,7 +118,7 @@ class VAE(L1ADLightningModule):
             "loss/kl_raw/q99": kl_q99,
             "loss/kl_raw/q999": kl_q999,
             "kl_scale": kl_current_scale,
-            "loss/reco/mean_top_vals": mean_top_vals,
+            "loss/kl_raw/mean_top_vals": mean_top_vals,
             "loss/z_mean_squared": z_mean_squared.detach().mean(),
             # Used for callbacks:
             "loss/total/full": total_loss.detach(),
@@ -139,7 +139,7 @@ class VAE(L1ADLightningModule):
             "loss_kl_raw_q95": outdict.get("loss/kl_raw/q95"),
             "loss_kl_raw_q99": outdict.get("loss/kl_raw/q99"),
             "loss_kl_raw_q999": outdict.get("loss/kl_raw/q999"),
-            "loss_reco_mean_top_vals": outdict.get("loss/reco/mean_top_vals"),
+            "loss_kl_raw_mean_top_vals": outdict.get("loss/kl_raw/mean_top_vals"),
             "z_mean_squared": outdict.get("loss/z_mean_squared"),
             "kl_scale": outdict.get("kl_scale"),
         }

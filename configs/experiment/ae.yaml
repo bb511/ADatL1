@@ -12,7 +12,7 @@ defaults:
 seed: 123
 tags: ["ae", "signal"]
 
-experiment_name: ae_agnostic_training
+experiment_name: ae_training
 run_name: ${short_hash:${hydra:runtime.output_dir},12}
 
 data:

@@ -22,7 +22,7 @@ class Encoder(nn.Module):
         self,
         in_dim: int,
         nodes: list[int],
-        activation: nn.Module = nn.ReLU(),
+        activation: str = 'relu',
         init_weight: Optional[Callable] = None,
         init_bias: Optional[Callable] = None,
     ):
@@ -59,7 +59,7 @@ class VariationalEncoder(nn.Module):
         self,
         in_dim: int,
         nodes: list[int],
-        activation: nn.Module = nn.ReLU(),
+        activation: str = 'relu',
         init_weight: Optional[Callable] = None,
         init_bias: Optional[Callable] = None,
         clamp_zlogvar_range: tuple[float, float] = (-20.0, 10.0)

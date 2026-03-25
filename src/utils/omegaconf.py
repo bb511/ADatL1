@@ -82,16 +82,12 @@ def smaller_decoder(nodes):
     """
     nodes = list(nodes)
 
-    # 1 hidden layer encoder: [h, z]
+    # Encoder [h, z] -> Decoder [z, max(z, h//2)]
     if len(nodes) == 2:
         h, z = nodes
-        return [max(4, h // 2)]
+        return [z, max(z, h // 2)]
 
-    # 2 hidden layer encoder: [h1, h2, z]
-    elif len(nodes) == 3:
+    # Encoder [h1, h2, z] -> Decoder [z, h2]
+    if len(nodes) == 3:
         h1, h2, z = nodes
-        return [h2]
-
-    else:
-        raise ValueError(f"Unsupported encoder structure: {nodes}")
-
+        return [z, h2]

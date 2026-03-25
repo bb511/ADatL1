@@ -31,7 +31,7 @@ class MLP(nn.Module):
         out_dim: int,
         batchnorm: Optional[bool] = False,
         affine: bool = True,
-        activation: nn.Module = nn.ReLU(),
+        activation: str = 'relu',
         final_activation: bool = False,
         init_weight: Optional[Callable] = None,
         init_bias: Optional[Callable] = None,
@@ -40,7 +40,7 @@ class MLP(nn.Module):
         self.in_dim = in_dim
         self.hidden_dims = nodes
         self.out_dim = out_dim
-        self.activation = activation
+        self.activation = self._get_activation(activation)
         self.final_activation = final_activation
 
         self.batchnorm = batchnorm
@@ -53,6 +53,17 @@ class MLP(nn.Module):
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         return self.net(x)
+
+    def _get_activation(self, activation: str) -> nn.Module:
+        activation = activation.lower()
+        if activation == "relu":
+            return nn.ReLU()
+        if activation == "gelu":
+            return nn.GELU()
+        if activation == "silu":
+            return nn.SiLU()
+
+        raise ValueError(f"Unsupported activation: {activation}")
 
     def _construct_net(self):
         """Build the neural network."""

@@ -2,7 +2,7 @@
 
 defaults:
   - override /data: basis
-  - override /algorithm: ae
+  - override /algorithm: vae
   - override /callbacks: default
   - override /trainer: cpu
   - override /evaluator: default
@@ -110,7 +110,7 @@ evaluator:
     summary:
       cvar25_ema: ['max']
     single:
-      loss_kl_mean_top_vals: ['stable']
+      loss_kl_raw_mean_top_vals: ['stable']
       eff__ascore_loss_kl_raw_full__brate_0.25kHz: ['max']
 
 evaluator_callbacks:
@@ -145,7 +145,7 @@ evaluator_callbacks:
 
   kl_operational_mean:
     _target_: src.evaluation.callbacks.loss.LossCallback
-    name: kl_mean_top_vals
+    name: kl_raw_mean_top_vals
     loss_name: 'loss/kl_raw/mean_top_vals'
     ds:
       - zerobias

@@ -7,25 +7,23 @@ defaults:
   - override /hydra/sweeper: optuna
   - override /hydra/sweeper/sampler: motpe
 
-# choose metric which will be optimized by Optuna
-# make sure this is the correct name of some metric logged in lightnin  g module!
-optimized_metric_config: 
-  callback:
-    name: eff
-    params:
-      target_rate: 0.25
-  direction: maximize
+
+optimized_metric_config:
+  main_metric:
+    callback:
+      name: eff
+      params:
+        target_rate: 0.25
+    direction: maximize
   sec_metric:
     callback:
-      name: kl_mean_top_vals
+      name: kl_raw_mean_top_vals
       params:
-        ckpt_ds: null # This will be filled in with the best ckpt of the main metric.
-        test_ds: main_test
+        ckpt_name: null # This will be filled in with the best ckpt of the main metric.
+        test_ds: zerobias
     direction: minimize
 
-# here we define Optuna hyperparameter search
-# it optimizes for value returned from function with @hydra.main decorator
-# docs: https://hydra.cc/docs/next/plugins/optuna_sweeper
+
 hydra:
   mode: "MULTIRUN" # set hydra to multirun by default if this config is attached
   sweeper:
@@ -58,11 +56,11 @@ hydra:
     # define hyperparameter search space. Assumes using torch.optim.AdamW
     params:
       trainer.gradient_clip_val: choice(0.0, 0.5, 1.0, 2.0)
-      algorithm.encoder.clamp_zlogvar_range: choice((-20, 10), (-10, 6), (-8, 6), (-6, 4))
+      algorithm.encoder.clamp_zlogvar_range: choice([-20, 10], [-10, 6], [-8, 6], [-6, 4])
       algorithm.optimizer.lr: tag(log, interval(5e-5, 1e-3))
       algorithm.optimizer.betas: choice([0.9, 0.999], [0.9, 0.99])
       algorithm.optimizer.weight_decay: choice(0.0, 1e-6, 1e-5, 1e-4, 1e-3)
       algorithm.loss.kl_scale: choice(3e-5, 1e-4, 3e-4, 1e-3, 2e-3)
       algorithm.kl_warmup_frac: choice(0.0, 0.05, 0.1, 0.2, 0.3)
       algorithm.encoder.nodes: choice([16,4],[16,8],[24,4],[24,8],[32,8],[32,16],[24,8,4],[24,8,8],[32,16,4],[32,16,8],[48,16,8],[48,24,8],[32,16,16],[48,24,16],[64,32,16],[48,24,24],[64,32,24],[64,32,32])
-      algorithm.encoder.activation: choice({_target_: torch.nn.ReLU}, {_target_: torch.nn.GELU}, {_target_: torch.nn.SiLU})
+      algorithm.encoder.activation: choice(relu, gelu, silu)

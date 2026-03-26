@@ -180,27 +180,27 @@
 # ------------------------
 
 # VAE agnostic hyperparameter search - CAP vs kl.
-taskset -c 0-2 \
-python3 src/train.py \
-    -m \
-    paths.raw_data_dir=/data/deodagiu/adl1t_data/parquet_files \
-    experiment=vae_agnostic \
-    experiment_name=vae_agnostic_cap_vs_kl_search \
-    callbacks.max_rate_kl_ckpt=null \
-    callbacks.cvar25_ema_ckpt=null \
-    evaluator.ckpts.summary=null \
-    evaluator_callbacks.reco=null \
-    logger=none \
-    hparams_search=vae_agnostic_optuna \
-    hydra.sweeper.study_name=cap_vs_kl_b16k \
-    hydra.sweeper.n_trials=100 \
-    hydra.sweeper.sampler.n_startup_trials=150 \
-    trainer=gpu \
-    trainer.max_epochs=1 \
-    trainer.devices=[0]
-    # hydra/launcher=submitit_local \
-    # hydra.launcher.cpus_per_task=1 \
-    # hydra.launcher.gpus_per_node=4 \
+# taskset -c 0-2 \
+# python3 src/train.py \
+#     -m \
+#     hydra/launcher=submitit_local \
+#     hydra.launcher.cpus_per_task=1 \
+#     hydra.launcher.gpus_per_node=4 \
+#     paths.raw_data_dir=/data/deodagiu/adl1t_data/parquet_files \
+#     experiment=vae_agnostic \
+#     experiment_name=vae_agnostic_cap_vs_kl_search \
+#     callbacks.max_rate_kl_ckpt=null \
+#     callbacks.cvar25_ema_ckpt=null \
+#     evaluator.ckpts.summary=null \
+#     evaluator_callbacks.reco=null \
+#     logger=none \
+#     hparams_search=vae_agnostic_optuna \
+#     hydra.sweeper.study_name=cap_vs_kl_b16k \
+#     hydra.sweeper.n_trials=100 \
+#     hydra.sweeper.sampler.n_startup_trials=150 \
+#     trainer=gpu \
+#     trainer.max_epochs=50 \
+#     trainer.devices=[0]
 
 
 # AE agnostic hyperparameter search - CAP vs kl q99.
@@ -235,9 +235,6 @@ python3 src/train.py \
 taskset -c 0-2 \
 python3 src/train.py \
     -m \
-    hydra/launcher=submitit_local \
-    hydra.launcher.cpus_per_task=1 \
-    hydra.launcher.gpus_per_node=4 \
     paths.raw_data_dir=/data/deodagiu/adl1t_data/parquet_files \
     experiment=vae_agnostic \
     experiment_name=vae_agnostic_kl_vs_thres_search \
@@ -263,8 +260,11 @@ python3 src/train.py \
     hydra.sweeper.n_trials=100 \
     hydra.sweeper.sampler.n_startup_trials=150 \
     trainer=gpu \
-    trainer.max_epochs=50 \
+    trainer.max_epochs=1 \
     trainer.devices=[0]
+    # hydra/launcher=submitit_local \
+    # hydra.launcher.cpus_per_task=1 \
+    # hydra.launcher.gpus_per_node=4 \
 
 
 # AE agnostic kl and threshold stability.

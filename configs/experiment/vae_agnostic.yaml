@@ -110,7 +110,7 @@ evaluator:
     summary:
       cvar25_ema: ['max']
     single:
-      loss_kl_mean_top_vals: ['stable']
+      loss_kl_raw_mean_top_vals: ['stable']
       # eff__ascore_loss_kl_raw_full__brate_0.25kHz: ['max']
 
 evaluator_callbacks:
@@ -169,7 +169,7 @@ evaluator_callbacks:
 
   kl_operational_mean:
     _target_: src.evaluation.callbacks.loss.LossCallback
-    name: kl_mean_top_vals
+    name: kl_raw_mean_top_vals
     loss_name: 'loss/kl_raw/mean_top_vals'
     ds:
       - zerobias
@@ -235,7 +235,7 @@ evaluator_callbacks:
 
   wasserstein:
     _target_: src.evaluation.callbacks.wasserstein.Wasserstein
-    metric_name: 'loss/total/full'
+    metric_name: 'loss/kl_raw/full'
     dataset_1: zerobias
     dataset_2: SingleNeutrino_E-10-gun
     apply_log1p: true

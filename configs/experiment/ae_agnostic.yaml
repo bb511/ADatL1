@@ -235,7 +235,7 @@ evaluator_callbacks:
 
   wasserstein:
     _target_: src.evaluation.callbacks.wasserstein.Wasserstein
-    metric_name: 'loss/total/full'
+    metric_name: 'loss/mse/full'
     dataset_1: zerobias
     dataset_2: SingleNeutrino_E-10-gun
     apply_log1p: true

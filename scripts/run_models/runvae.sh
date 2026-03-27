@@ -128,6 +128,9 @@
 taskset -c 0-2 \
 python3 src/train.py \
     -m \
+    hydra/launcher=submitit_local \
+    hydra.launcher.cpus_per_task=1 \
+    hydra.launcher.gpus_per_node=4 \
     paths.raw_data_dir=/data/deodagiu/adl1t_data/parquet_files \
     experiment=vae \
     experiment_name=vae_cvar_vs_klq99_search \
@@ -143,11 +146,8 @@ python3 src/train.py \
     hydra.sweeper.n_trials=100 \
     hydra.sweeper.sampler.n_startup_trials=150 \
     trainer=gpu \
-    trainer.max_epochs=1 \
+    trainer.max_epochs=50 \
     trainer.devices=[0]
-    # hydra/launcher=submitit_local \
-    # hydra.launcher.cpus_per_task=1 \
-    # hydra.launcher.gpus_per_node=4 \
 
 
 # VAE hyperparameter search semi-supervised cvar 10%.

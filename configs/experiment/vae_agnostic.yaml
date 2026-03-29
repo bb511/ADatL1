@@ -197,7 +197,7 @@ evaluator_callbacks:
 
   kl_loss_q99:
     _target_: src.evaluation.callbacks.loss.LossCallback
-    name: kl_q99
+    name: kl_raw_q99
     loss_name: 'loss/kl_raw/q99'
     ds:
       - zerobias

@@ -42,18 +42,18 @@
 
 
 # Agnostic CAP training.
-# taskset -c 3-5 \
+# taskset -c 6-8 \
 # python3 src/train.py \
 #     -m \
 #     paths.raw_data_dir=/data/deodagiu/adl1t_data/parquet_files \
 #     experiment=ae_agnostic \
-#     run_name=cap_q99_trial_560 \
-#     algorithm.optimizer.lr=0.00027918701912919505 \
+#     run_name=cap_q99_trial_430 \
+#     algorithm.optimizer.lr=0.0005490035000565241 \
 #     algorithm.loss.delta=4.0 \
 #     trainer.gradient_clip_val=0.5 \
-#     algorithm.optimizer.betas='[0.9, 0.99]' \
-#     algorithm.optimizer.weight_decay=0.0001 \
-#     algorithm.encoder.nodes='[64, 32, 32]' \
+#     algorithm.optimizer.betas='[0.9, 0.999]' \
+#     algorithm.optimizer.weight_decay=1e-05 \
+#     algorithm.encoder.nodes='[48,24]' \
 #     algorithm.input_noise_std=0.003 \
 #     trainer=gpu \
 #     trainer.devices=[0]
@@ -103,28 +103,28 @@
 # ------------------------
 
 # AE hyperparameter search semi-supervised.
-# taskset -c 0-2 \
-# python3 src/train.py \
-#     -m \
-#     hydra/launcher=submitit_local \
-#     hydra.launcher.cpus_per_task=1 \
-#     hydra.launcher.gpus_per_node=4 \
-#     paths.raw_data_dir=/data/deodagiu/adl1t_data/parquet_files \
-#     experiment=ae \
-#     experiment_name=ae_cvar_vs_mse_search \
-#     callbacks.max_rate_mse_ckpt=null \
-#     callbacks.stable_mse_ckpt=null \
-#     evaluator.ckpts.last=false \
-#     evaluator.ckpts.single=null \
-#     evaluator_callbacks.reco=null \
-#     logger=none \
-#     hparams_search=ae_optuna \
-#     hydra.sweeper.study_name=cvar25eff_vs_mse_b16k \
-#     hydra.sweeper.n_trials=100 \
-#     hydra.sweeper.sampler.n_startup_trials=150 \
-#     trainer=gpu \
-#     trainer.max_epochs=50 \
-#     trainer.devices=[0]
+taskset -c 0-2 \
+python3 src/train.py \
+    -m \
+    hydra/launcher=submitit_local \
+    hydra.launcher.cpus_per_task=1 \
+    hydra.launcher.gpus_per_node=4 \
+    paths.raw_data_dir=/data/deodagiu/adl1t_data/parquet_files \
+    experiment=ae \
+    experiment_name=ae_cvar_vs_mse_search \
+    callbacks.max_rate_mse_ckpt=null \
+    callbacks.stable_mse_q99_ckpt=null \
+    evaluator_callbacks.mse_loss_q99=null \
+    evaluator_callbacks.thres_transfer=null \
+    evaluator_callbacks.reco=null \
+    logger=none \
+    hparams_search=ae_optuna \
+    hydra.sweeper.study_name=cvar25eff_vs_mse_b16k \
+    hydra.sweeper.n_trials=100 \
+    hydra.sweeper.sampler.n_startup_trials=150 \
+    trainer=gpu \
+    trainer.max_epochs=50 \
+    trainer.devices=[0]
 
 
 # AE hyperparameter search semi-supervised mse q99.

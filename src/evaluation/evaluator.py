@@ -333,8 +333,10 @@ class Evaluator:
             ((v - b) if d == "maximize" else (b - v)) / max(abs(b), 1e-12)
             for v, b, d in zip(values, self.optimized_metric, directions)
         ]
+        weights = [1.25, 1.0]   # slight preference for main metric
+        score = sum(w * rc for w, rc in zip(weights, rel_changes))
 
-        if sum(rel_changes) > 0:
+        if score > 0:
             self.optimized_metric = values
 
     def _make_criterion_summary_plots(self, plot_folder: Path):

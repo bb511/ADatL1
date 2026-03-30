@@ -79,10 +79,22 @@ callbacks:
       - smj-case-A
       - haa-4b-ma15
 
-  stable_mse_ckpt:
+  stable_mse_mean_top_ckpt:
     _target_: src.callbacks.model_checkpoint.SingleDatasetModelCheckpoint
     dirpath: '${paths.checkpoints_dir}/${experiment_name}/${run_name}'
     monitor: loss_mse_mean_top_vals
+    criterion:
+      _target_: src.callbacks.checkpointing.criterion.Stable
+      top_k: 1
+      threshold: 0.05
+      patience: 10
+    ds:
+      - zerobias
+
+  stable_mse_q99_ckpt:
+    _target_: src.callbacks.model_checkpoint.SingleDatasetModelCheckpoint
+    dirpath: '${paths.checkpoints_dir}/${experiment_name}/${run_name}'
+    monitor: loss_mse_q99
     criterion:
       _target_: src.callbacks.checkpointing.criterion.Stable
       top_k: 1
@@ -111,7 +123,9 @@ evaluator:
       cvar25_ema: ['max']
     single:
       loss_mse_mean_top_vals: ['stable']
-      eff__ascore_loss_mse_full__brate_0.25kHz: ['max']
+      # Enable evaluating these checkpoints if not doing a search.
+      # loss_mse_q99: ['stable']
+      # eff__ascore_loss_mse_full__brate_0.25kHz: ['max']
 
 evaluator_callbacks:
   anomaly_efficiency:

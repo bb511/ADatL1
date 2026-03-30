@@ -4,40 +4,63 @@
 # TRAINING.
 # =======================
 
-# Semi-supervised training.
+# Semi-supervised cvar25 training.
+# taskset -c 12-14 \
+# python3 src/train.py \
+#     -m \
+#     paths.raw_data_dir=/data/deodagiu/adl1t_data/parquet_files \
+#     experiment=vae \
+#     run_name=cvar25_q99_trial_339 \
+#     trainer.gradient_clip_val=0.5 \
+#     algorithm.encoder.clamp_zlogvar_range='[-6,4]' \
+#     algorithm.optimizer.lr=0.0002713322501269118 \
+#     algorithm.optimizer.betas='[0.9,0.999]' \
+#     algorithm.optimizer.weight_decay=0.001 \
+#     algorithm.loss.kl_scale=0.002 \
+#     algorithm.kl_warmup_frac=0.0 \
+#     algorithm.encoder.nodes='[64,32,24]' \
+#     algorithm.encoder.activation=silu \
+#     trainer=gpu \
+#     trainer.devices=[1]
+
+
+# Semi-supervised cvar10 training.
 # taskset -c 3-5 \
 # python3 src/train.py \
 #     -m \
 #     paths.raw_data_dir=/data/deodagiu/adl1t_data/parquet_files \
-#     experiment=ae \
-#     experiment_name=vae_semisup_models \
-#     run_name=trial_560 \
-#     algorithm.optimizer.lr=0.001135281648361112 \
-#     algorithm.loss.delta=3.0 \
-#     trainer.gradient_clip_val=0.5 \
-#     algorithm.optimizer.betas='[0.9,0.999]' \
-#     algorithm.optimizer.weight_decay=0.001 \
-#     algorithm.encoder.nodes='[64,32,32]' \
-#     algorithm.input_noise_std=0.0 \
+#     experiment=vae \
+#     run_name=cvar10_trial_339 \
+#     evaluator_callbacks.anomaly_efficiency.cvar_summary=0.10 \
+#     trainer.gradient_clip_val=0.0 \
+#     algorithm.encoder.clamp_zlogvar_range='[-10,6]' \
+#     algorithm.optimizer.lr=0.0007725899485830742 \
+#     algorithm.optimizer.betas='[0.9,0.99]' \
+#     algorithm.optimizer.weight_decay=1e-06 \
+#     algorithm.loss.kl_scale=0.002 \
+#     algorithm.kl_warmup_frac=0.0 \
+#     algorithm.encoder.nodes='[48,24,24]' \
+#     algorithm.encoder.activation=relu \
 #     trainer=gpu \
 #     trainer.devices=[0]
 
 
 # Agnostic training.
-# taskset -c 6-8 \
+# taskset -c 9-11 \
 # python3 src/train.py \
 #     -m \
 #     paths.raw_data_dir=/data/deodagiu/adl1t_data/parquet_files \
 #     experiment=vae_agnostic \
-#     experiment_name=vae_cap \
-#     run_name=trial_452 \
-#     algorithm.optimizer.lr=0.0017073088946215253 \
-#     algorithm.loss.delta=3.0 \
-#     trainer.gradient_clip_val=5.0 \
-#     algorithm.optimizer.betas='[0.9, 0.99]' \
-#     algorithm.optimizer.weight_decay=1e-06 \
-#     algorithm.encoder.nodes='[64, 32, 16]' \
-#     algorithm.input_noise_std=0.0 \
+#     run_name=cap_trial_180 \
+#     trainer.gradient_clip_val=0.0 \
+#     algorithm.encoder.clamp_zlogvar_range='[-8,6]' \
+#     algorithm.optimizer.lr=0.0003403153803133397 \
+#     algorithm.optimizer.betas='[0.9,0.99]' \
+#     algorithm.optimizer.weight_decay=0.0001 \
+#     algorithm.loss.kl_scale=0.002 \
+#     algorithm.kl_warmup_frac=0.3 \
+#     algorithm.encoder.nodes='[32,16,4]' \
+#     algorithm.encoder.activation=gelu \
 #     trainer=gpu \
 #     trainer.devices=[1]
 
@@ -48,37 +71,38 @@
 #     -m \
 #     paths.raw_data_dir=/data/deodagiu/adl1t_data/parquet_files \
 #     experiment=vae_agnostic \
-#     experiment_name=vae_stability \
-#     run_name=trial_339 \
-#     evaluator_callbacks.cap_sn_zb=null \
-#     algorithm.optimizer.lr=0.0018127512953324415 \
-#     algorithm.loss.delta=3.0 \
-#     trainer.gradient_clip_val=5.0 \
-#     algorithm.optimizer.betas='[0.9, 0.999]' \
+#     run_name=stability_trial_491 \
+#     trainer.gradient_clip_val=1.0 \
+#     algorithm.encoder.clamp_zlogvar_range='[-10,6]' \
+#     algorithm.optimizer.lr=0.00018077873064930474 \
+#     algorithm.optimizer.betas='[0.9,0.999]' \
 #     algorithm.optimizer.weight_decay=0.0001 \
-#     algorithm.encoder.nodes='[64,32,16]' \
-#     algorithm.input_noise_std=0.0 \
+#     algorithm.loss.kl_scale=0.002 \
+#     algorithm.kl_warmup_frac=0.2 \
+#     algorithm.encoder.nodes='[48,24,8]' \
+#     algorithm.encoder.activation=gelu \
 #     trainer=gpu \
-#     trainer.devices=[1]
+#     trainer.devices=[3]
 
 
 # Agnostic MSE-wasserstein training.
-# taskset -c 6-8 \
+# taskset -c 15-17 \
 # python3 src/train.py \
 #     -m \
 #     paths.raw_data_dir=/data/deodagiu/adl1t_data/parquet_files \
 #     experiment=vae_agnostic \
-#     experiment_name=vae_wasserstein \
-#     run_name=trial_105 \
-#     algorithm.optimizer.lr=0.00023624225721440126 \
-#     algorithm.loss.delta=3.0 \
-#     trainer.gradient_clip_val=0.5 \
-#     algorithm.optimizer.betas='[0.9, 0.99]' \
+#     run_name=wasserstein_q99_trial_572 \
+#     trainer.gradient_clip_val=1.0 \
+#     algorithm.encoder.clamp_zlogvar_range='[-10,6]' \
+#     algorithm.optimizer.lr=0.000657267315408614 \
+#     algorithm.optimizer.betas='[0.9,0.999]' \
 #     algorithm.optimizer.weight_decay=0.0001 \
-#     algorithm.encoder.nodes='[24,8,4]' \
-#     algorithm.input_noise_std=0.0001 \
+#     algorithm.loss.kl_scale=0.002 \
+#     algorithm.kl_warmup_frac=0.2 \
+#     algorithm.encoder.nodes='[16,4]' \
+#     algorithm.encoder.activation=gelu \
 #     trainer=gpu \
-#     trainer.devices=[2]
+#     trainer.devices=[0]
 
 
 # AXOv4 training...
@@ -150,29 +174,29 @@
 
 
 # VAE hyperparameter search semi-supervised cvar 10%.
-taskset -c 0-2 \
-python3 src/train.py \
-    -m \
-    hydra/launcher=submitit_local \
-    hydra.launcher.cpus_per_task=1 \
-    hydra.launcher.gpus_per_node=4 \
-    paths.raw_data_dir=/data/deodagiu/adl1t_data/parquet_files \
-    experiment=vae \
-    experiment_name=vae_cvar10_vs_kl_search \
-    callbacks.max_rate_kl_ckpt=null \
-    callbacks.stable_kl_ckpt=null \
-    evaluator.ckpts.last=false \
-    evaluator.ckpts.single=null \
-    evaluator_callbacks.reco=null \
-    evaluator_callbacks.anomaly_efficiency.cvar_summary=0.10 \
-    logger=none \
-    hparams_search=vae_optuna \
-    hydra.sweeper.study_name=cvar10eff_vs_kl_b16k \
-    hydra.sweeper.n_trials=100 \
-    hydra.sweeper.sampler.n_startup_trials=150 \
-    trainer=gpu \
-    trainer.max_epochs=50 \
-    trainer.devices=[0]
+# taskset -c 0-2 \
+# python3 src/train.py \
+#     -m \
+#     hydra/launcher=submitit_local \
+#     hydra.launcher.cpus_per_task=1 \
+#     hydra.launcher.gpus_per_node=4 \
+#     paths.raw_data_dir=/data/deodagiu/adl1t_data/parquet_files \
+#     experiment=vae \
+#     experiment_name=vae_cvar10_vs_kl_search \
+#     callbacks.max_rate_kl_ckpt=null \
+#     callbacks.stable_kl_ckpt=null \
+#     evaluator.ckpts.last=false \
+#     evaluator.ckpts.single=null \
+#     evaluator_callbacks.reco=null \
+#     evaluator_callbacks.anomaly_efficiency.cvar_summary=0.10 \
+#     logger=none \
+#     hparams_search=vae_optuna \
+#     hydra.sweeper.study_name=cvar10eff_vs_kl_b16k \
+#     hydra.sweeper.n_trials=100 \
+#     hydra.sweeper.sampler.n_startup_trials=150 \
+#     trainer=gpu \
+#     trainer.max_epochs=50 \
+#     trainer.devices=[0]
 
 
 # CAP Agnostic Searches

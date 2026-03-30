@@ -12,7 +12,7 @@ defaults:
 seed: 123
 tags: ["vae", "agnostic", "cap"]
 
-experiment_name: ae_agnostic_training
+experiment_name: vae_models
 run_name: ${short_hash:${hydra:runtime.output_dir},12}
 
 data:

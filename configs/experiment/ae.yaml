@@ -122,9 +122,9 @@ evaluator:
     summary:
       cvar25_ema: ['max']
     single:
-      loss_mse_mean_top_vals: ['stable']
+      loss_mse_q99: ['stable']
       # Enable evaluating these checkpoints if not doing a search.
-      # loss_mse_q99: ['stable']
+      # loss_mse_mean_top_vals: ['stable']
       # eff__ascore_loss_mse_full__brate_0.25kHz: ['max']
 
 evaluator_callbacks:

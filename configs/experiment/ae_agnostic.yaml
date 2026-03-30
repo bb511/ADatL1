@@ -12,7 +12,7 @@ defaults:
 seed: 123
 tags: ["ae", "agnostic", "cap"]
 
-experiment_name: ae_agnostic_training
+experiment_name: ae_models
 run_name: ${short_hash:${hydra:runtime.output_dir},12}
 
 data:
@@ -111,7 +111,7 @@ evaluator:
       cvar25_ema: ['max']
     single:
       loss_mse_mean_top_vals: ['stable']
-      # eff__ascore_loss_mse_full__brate_0.25kHz: ['max']
+      eff__ascore_loss_mse_full__brate_0.25kHz: ['max']
 
 evaluator_callbacks:
   anomaly_efficiency:

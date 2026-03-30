@@ -4,76 +4,93 @@
 # MODEL TRAINING
 # =======================
 
-# Semi-supervised training.
-# taskset -c 3-5 \
+# Semi-supervised cvar25 training.
+# taskset -c 15-17 \
 # python3 src/train.py \
 #     -m \
 #     paths.raw_data_dir=/data/deodagiu/adl1t_data/parquet_files \
 #     experiment=ae \
-#     experiment_name=ae_semisup_models \
-#     run_name=trial_560 \
-#     algorithm.optimizer.lr=0.001135281648361112 \
-#     algorithm.loss.delta=3.0 \
+#     run_name=cvar25_q99_trial_532 \
+#     algorithm.optimizer.lr=0.001713976189208681 \
+#     algorithm.loss.delta=5.0 \
 #     trainer.gradient_clip_val=0.5 \
 #     algorithm.optimizer.betas='[0.9,0.999]' \
 #     algorithm.optimizer.weight_decay=0.001 \
-#     algorithm.encoder.nodes='[64,32,32]' \
-#     algorithm.input_noise_std=0.0 \
+#     algorithm.encoder.nodes='[64,32,8]' \
+#     algorithm.input_noise_std=0.001 \
 #     trainer=gpu \
 #     trainer.devices=[0]
 
-# Agnostic training.
-# taskset -c 6-8 \
+
+# Semi-supervised cvar10 training.
+# taskset -c 0-2 \
+# python3 src/train.py \
+#     -m \
+#     paths.raw_data_dir=/data/deodagiu/adl1t_data/parquet_files \
+#     experiment=ae \
+#     run_name=cvar10_trial_561 \
+#     evaluator_callbacks.anomaly_efficiency.cvar_summary=0.10 \
+#     algorithm.optimizer.lr=0.0017124104726253574 \
+#     algorithm.loss.delta=10.0 \
+#     trainer.gradient_clip_val=1.0 \
+#     algorithm.optimizer.betas='[0.9,0.99]' \
+#     algorithm.optimizer.weight_decay=0.0001 \
+#     algorithm.encoder.nodes='[64,32,8]' \
+#     algorithm.input_noise_std=0.0003 \
+#     trainer=gpu \
+#     trainer.devices=[0]
+
+
+# Agnostic CAP training.
+# taskset -c 3-5 \
 # python3 src/train.py \
 #     -m \
 #     paths.raw_data_dir=/data/deodagiu/adl1t_data/parquet_files \
 #     experiment=ae_agnostic \
-#     experiment_name=ae_cap \
-#     run_name=trial_452 \
-#     algorithm.optimizer.lr=0.0017073088946215253 \
-#     algorithm.loss.delta=3.0 \
-#     trainer.gradient_clip_val=5.0 \
+#     run_name=cap_q99_trial_560 \
+#     algorithm.optimizer.lr=0.00027918701912919505 \
+#     algorithm.loss.delta=4.0 \
+#     trainer.gradient_clip_val=0.5 \
 #     algorithm.optimizer.betas='[0.9, 0.99]' \
-#     algorithm.optimizer.weight_decay=1e-06 \
-#     algorithm.encoder.nodes='[64, 32, 16]' \
+#     algorithm.optimizer.weight_decay=0.0001 \
+#     algorithm.encoder.nodes='[64, 32, 32]' \
+#     algorithm.input_noise_std=0.003 \
+#     trainer=gpu \
+#     trainer.devices=[0]
+
+
+# Agnostic stability training.
+# taskset -c 3-5 \
+# python3 src/train.py \
+#     -m \
+#     paths.raw_data_dir=/data/deodagiu/adl1t_data/parquet_files \
+#     experiment=ae_agnostic \
+#     run_name=stability_q99_trial_535 \
+#     algorithm.optimizer.lr=0.0027011957629331706 \
+#     algorithm.loss.delta=5.0 \
+#     trainer.gradient_clip_val=0.5 \
+#     algorithm.optimizer.betas='[0.9, 0.99]' \
+#     algorithm.optimizer.weight_decay=0.0 \
+#     algorithm.encoder.nodes='[64,32,32]' \
 #     algorithm.input_noise_std=0.0 \
 #     trainer=gpu \
 #     trainer.devices=[1]
 
-# Agnostic MSE-threshold training.
+
+# Agnostic MSE-wasserstein training.
 # taskset -c 9-11 \
 # python3 src/train.py \
 #     -m \
 #     paths.raw_data_dir=/data/deodagiu/adl1t_data/parquet_files \
 #     experiment=ae_agnostic \
-#     experiment_name=ae_stability \
-#     run_name=trial_339 \
-#     evaluator_callbacks.cap_sn_zb=null \
-#     algorithm.optimizer.lr=0.0018127512953324415 \
-#     algorithm.loss.delta=3.0 \
-#     trainer.gradient_clip_val=5.0 \
+#     run_name=wasserstein_q99_trial_487 \
+#     algorithm.optimizer.lr=0.000679024998102717 \
+#     algorithm.loss.delta=10.0 \
+#     trainer.gradient_clip_val=0.0 \
 #     algorithm.optimizer.betas='[0.9, 0.999]' \
 #     algorithm.optimizer.weight_decay=0.0001 \
-#     algorithm.encoder.nodes='[64,32,16]' \
-#     algorithm.input_noise_std=0.0 \
-#     trainer=gpu \
-#     trainer.devices=[1]
-
-# Agnostic MSE-wasserstein training.
-# taskset -c 6-8 \
-# python3 src/train.py \
-#     -m \
-#     paths.raw_data_dir=/data/deodagiu/adl1t_data/parquet_files \
-#     experiment=ae_agnostic \
-#     experiment_name=ae_wasserstein \
-#     run_name=trial_105 \
-#     algorithm.optimizer.lr=0.00023624225721440126 \
-#     algorithm.loss.delta=3.0 \
-#     trainer.gradient_clip_val=0.5 \
-#     algorithm.optimizer.betas='[0.9, 0.99]' \
-#     algorithm.optimizer.weight_decay=0.0001 \
-#     algorithm.encoder.nodes='[24,8,4]' \
-#     algorithm.input_noise_std=0.0001 \
+#     algorithm.encoder.nodes='[64,32,32]' \
+#     algorithm.input_noise_std=0.0003 \
 #     trainer=gpu \
 #     trainer.devices=[2]
 
@@ -137,29 +154,29 @@
 
 
 # AE hyperparameter search semi-supervised cvar 10%.
-taskset -c 0-2 \
-python3 src/train.py \
-    -m \
-    hydra/launcher=submitit_local \
-    hydra.launcher.cpus_per_task=1 \
-    hydra.launcher.gpus_per_node=4 \
-    paths.raw_data_dir=/data/deodagiu/adl1t_data/parquet_files \
-    experiment=ae \
-    experiment_name=ae_cvar10_vs_mse_search \
-    callbacks.max_rate_mse_ckpt=null \
-    callbacks.stable_mse_ckpt=null \
-    evaluator.ckpts.last=false \
-    evaluator.ckpts.single=null \
-    evaluator_callbacks.reco=null \
-    evaluator_callbacks.anomaly_efficiency.cvar_summary=0.10 \
-    logger=none \
-    hparams_search=ae_optuna \
-    hydra.sweeper.study_name=cvar10eff_vs_mse_b16k \
-    hydra.sweeper.n_trials=100 \
-    hydra.sweeper.sampler.n_startup_trials=150 \
-    trainer=gpu \
-    trainer.max_epochs=50 \
-    trainer.devices=[0]
+# taskset -c 0-2 \
+# python3 src/train.py \
+#     -m \
+#     hydra/launcher=submitit_local \
+#     hydra.launcher.cpus_per_task=1 \
+#     hydra.launcher.gpus_per_node=4 \
+#     paths.raw_data_dir=/data/deodagiu/adl1t_data/parquet_files \
+#     experiment=ae \
+#     experiment_name=ae_cvar10_vs_mse_search \
+#     callbacks.max_rate_mse_ckpt=null \
+#     callbacks.stable_mse_ckpt=null \
+#     evaluator.ckpts.last=false \
+#     evaluator.ckpts.single=null \
+#     evaluator_callbacks.reco=null \
+#     evaluator_callbacks.anomaly_efficiency.cvar_summary=0.10 \
+#     logger=none \
+#     hparams_search=ae_optuna \
+#     hydra.sweeper.study_name=cvar10eff_vs_mse_b16k \
+#     hydra.sweeper.n_trials=100 \
+#     hydra.sweeper.sampler.n_startup_trials=150 \
+#     trainer=gpu \
+#     trainer.max_epochs=50 \
+#     trainer.devices=[0]
 
 
 # CAP Agnostic Searches

@@ -64,9 +64,12 @@ class ThresholdDriftCallback(Callback):
             add_dataloader_idx=False
         )
 
-        self.drift_ema = defaultdict(float)
         if not (0.0 < self.calibration_fraction < 1.0):
             raise ValueError("calibration_fraction must be strictly between 0 and 1.")
+
+    def on_fit_start(self, trainer, pl_module):
+        """Instantiate useful quantities."""
+        self.drift_ema = defaultdict(float)
 
     def on_validation_epoch_start(self, trainer, pl_module):
         """Set the device and make sure the zerobias data is in the used data sets."""
@@ -126,10 +129,10 @@ class ThresholdDriftCallback(Callback):
             drift_metric = abs(L)
 
             trate_name = f"{trate}".replace(".", "_")
-            drift_ema = self._compute_drift_ema(trate_name, drift_metric)
+            self._compute_drift_ema(trate_name, drift_metric)
 
             pl_module.log_dict(
-                {f"val/summary/{trate_name}kHz_drift_ema": float(drift_metric)},
+                {f"val/summary/trate{trate_name}kHz_drift_ema": float(self.drift_ema[trate_name])},
                 **self.log_kwargs
             )
 

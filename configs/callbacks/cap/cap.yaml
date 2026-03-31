@@ -1,21 +1,11 @@
-# _target_: src.callbacks.cap.ValidationCAP
-_target_: capmetric.callback.ApproximationCapacityCallback
-output_name: loss/total/full
-log_every_n_epochs: 1
-pairing_type: cdf
-data_pairs:
-  baseline:
-    - main_val # ZB_run381148-381149
-    - main_val
-  background0:
-    - main_val # ZB_run381148-381149
-    - SingleNeutrino_E-10-gun
-  background1:
-    - main_val # ZB_run381148-381149
-    - SingleNeutrino_Pt-2To20-gun
+# @package evaluator_callbacks.metrics
 
-capmetric:
-  _target_: capmetric.ApproximationCapacity
+_target_: src.evaluation.callbacks.cap.CAP
+metric_name: 'loss/total/full'
+dataset_1: ???
+dataset_2: ???
+log_raw_mlflow: true
+cap_metric_config:
   beta0: 1.0
   normalization_type: sigmoid
   normalization_params: null
@@ -26,6 +16,9 @@ capmetric:
   binary: True
   lr: 0.01
   n_epochs: 50
-  batch_size: ${data.batch_size}
+  batch_size: 16384
+  normalize_gradients: False
   process_group: null
   dist_sync_fn: null
+
+name: 'cap'

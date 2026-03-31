@@ -10,7 +10,7 @@ defaults:
   - override /logger: mlflow
 
 seed: 123
-tags: ["ae", "agnostic", "cap"]
+tags: ["ae", "agnostic"]
 
 experiment_name: ae_models
 run_name: ${short_hash:${hydra:runtime.output_dir},12}
@@ -60,6 +60,14 @@ callbacks:
     split_seed: 12345
     beta: 0.9
 
+  wasserstein_dist:
+    _target_: src.callbacks.wasserstein.WassersteinCallback
+    metric_name: 'loss/mse/full'
+    dataset_1: zerobias
+    dataset_2: SingleNeutrino_E-10-gun
+    apply_log1p: false
+    beta: 0.9
+
   stable_mse_mean_top_ckpt:
     _target_: src.callbacks.model_checkpoint.SingleDatasetModelCheckpoint
     dirpath: '${paths.checkpoints_dir}/${experiment_name}/${run_name}'
@@ -86,9 +94,22 @@ callbacks:
 
   thres_drift_ema_ckpt:
     _target_: pytorch_lightning.callbacks.ModelCheckpoint
-    dirpath: '${paths.checkpoints_dir}/${experiment_name}/${run_name}/summary/0_25kHz_drift_ema/min'
-    monitor: 'val/summary/0_25kHz_drift_ema'
-    filename: '0_25kHz_drift_ema'
+    dirpath: '${paths.checkpoints_dir}/${experiment_name}/${run_name}/summary/trate0_25kHz_drift_ema/min'
+    monitor: 'val/summary/trate0_25kHz_drift_ema'
+    filename: 'trate0_25kHz_drift_ema'
+    save_last: false
+    save_top_k: 1
+    mode: "min"
+    auto_insert_metric_name: False
+    save_weights_only: False
+    every_n_epochs: 1
+    save_on_train_epoch_end: false
+
+  wasserstein_dist_ema_ckpt:
+    _target_: pytorch_lightning.callbacks.ModelCheckpoint
+    dirpath: '${paths.checkpoints_dir}/${experiment_name}/${run_name}/summary/w1dist_ema_zerobias_vs_SingleNeutrino_E-10-gun/min'
+    monitor: 'val/summary/w1dist_ema_zerobias_vs_SingleNeutrino_E-10-gun'
+    filename: 'w1dist_ema_zerobias_vs_SingleNeutrino_E-10-gun'
     save_last: false
     save_top_k: 1
     mode: "min"
@@ -102,7 +123,8 @@ evaluator:
   ckpts:
     last: true
     summary:
-      0_25kHz_drift_ema: ['min']
+      trate0_25kHz_drift_ema: ['min']
+      w1dist_ema_zerobias_vs_SingleNeutrino_E-10-gun: ['min']
     single:
       loss_mse_mean_top_vals: ['stable']
       loss_mse_q99: ['stable']

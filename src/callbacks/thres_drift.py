@@ -53,6 +53,7 @@ class ThresholdDriftCallback(Callback):
         self.bc_rate = float(bc_rate)
         self.calibration_fraction = float(calibration_fraction)
         self.split_seed = int(split_seed)
+        self.beta = beta
 
         self.log_kwargs = dict(
             prog_bar=False,
@@ -135,10 +136,10 @@ class ThresholdDriftCallback(Callback):
     def _compute_drift_ema(self, trate_name: str, drift: float):
         """Compute the cvar estimated moving average."""
         if self.drift_ema[trate_name] == 0.0:
-            self.drift_ema = float(drift)
+            self.drift_ema[trate_name] = float(drift)
         else:
-            self.drift_ema = \
-                self.beta * self.drift_ema + (1 - self.beta) * float(drift)
+            self.drift_ema[trate_name] = \
+                self.beta * self.drift_ema[trate_name] + (1 - self.beta) * float(drift)
 
     def _split_scores(self, scores: torch.Tensor):
         """Split the anoamly score in a seeded way."""

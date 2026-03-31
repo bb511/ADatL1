@@ -192,10 +192,10 @@ class AnomalyEfficiencyCallback(Callback):
             )
 
         metric_across_ckpts = self.eff_summary[target_rate]
-        max_ckpt_ds = max(metric_across_ckpts, key=metric_across_ckpts.get)
+        max_ckpt_name = max(metric_across_ckpts, key=metric_across_ckpts.get)
         # Scale the metric by 1000 since it is naturally very low.
-        max_metric_value = 1e3 * metric_across_ckpts[max_ckpt_ds]
-        return max_ckpt_ds, max_metric_value
+        max_metric_value = 1e3 * metric_across_ckpts[max_ckpt_name]
+        return max_ckpt_name, max_metric_value
 
     def _plot(self, data: dict, xlabel: str, plot_folder: Path, percent: bool = False):
         """Plot the efficiency per data set for an anomaly metric at target rate."""

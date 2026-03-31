@@ -50,36 +50,15 @@ callbacks:
     target_rates: [0.25]
     bc_rate: 28608.8064
 
-  max_rate_mse_ckpt:
-    _target_: src.callbacks.model_checkpoint.SingleDatasetModelCheckpoint
-    dirpath: '${paths.checkpoints_dir}/${experiment_name}/${run_name}'
-    monitor: eff__ascore_loss_mse_full__brate_0.25kHz
-    criterion:
-      _target_: src.callbacks.checkpointing.criterion.Max
-      top_k: 1
-    ds:
-      - GluGluHTo2B_Par-MH-125
-      - GluGluHto2G_Par-MH-125
-      - GluGluHto2G_Par-MH-90
-      - GluGluHto2Tau_Par-MH-125
-      - GluGlutoHHto2B2WtoLNu2Q_Par-c2-0-kl-1-kt-1
-      - HHHto4B2Tau_Par-c3-0-d4-0
-      - HHHto6B_Par-c3-0-d4-0
-      - SUSYGluGluToBBHTo2B_Par-M-1200
-      - SUSYGluGluToBBHToBB_Par-M-120
-      - SUSYGluGluToBBHToBB_Par-M-350
-      - SUSYGluGluToBBHToBB_Par-M-600
-      - TTHTo2C_Par-MH-125
-      - TTHto2B_Par-MH-125
-      - VBFHTo2C_Par-MH-125
-      - VBFHto2B_Par-MH-125
-      - VBFHto2Tau_Par-MH-125
-      - WtoTauto3Mu
-      - ggH-suep-decay
-      - smj-case-A
-      - haa-4b-ma15
+  thres_drift:
+    _target_: src.callbacks.thres_drift.ThresholdDriftCallback
+    loss_name: 'loss/mse/full'
+    target_rates: [0.25]
+    bc_rate: 28608.8064
+    calibration_fraction: 0.5
+    split_seed: 12345
 
-  stable_mse_ckpt:
+  stable_mse_mean_top_ckpt:
     _target_: src.callbacks.model_checkpoint.SingleDatasetModelCheckpoint
     dirpath: '${paths.checkpoints_dir}/${experiment_name}/${run_name}'
     monitor: loss_mse_mean_top_vals
@@ -91,27 +70,41 @@ callbacks:
     ds:
       - zerobias
 
-  cvar25_ema_ckpt:
+  stable_mse_q99_ckpt:
+    _target_: src.callbacks.model_checkpoint.SingleDatasetModelCheckpoint
+    dirpath: '${paths.checkpoints_dir}/${experiment_name}/${run_name}'
+    monitor: loss_mse_q99
+    criterion:
+      _target_: src.callbacks.checkpointing.criterion.Stable
+      top_k: 1
+      threshold: 0.05
+      patience: 10
+    ds:
+      - zerobias
+
+  thres_drift_ema_ckpt:
     _target_: pytorch_lightning.callbacks.ModelCheckpoint
-    dirpath: '${paths.checkpoints_dir}/${experiment_name}/${run_name}/summary/cvar25_ema/max'
-    monitor: 'val/summary/eff_cvar25_ema'
-    filename: 'cvar25_ema'
+    dirpath: '${paths.checkpoints_dir}/${experiment_name}/${run_name}/summary/0_25kHz_drift_ema/min'
+    monitor: 'val/summary/0_25kHz_drift_ema'
+    filename: '0_25kHz_drift_ema'
     save_last: false
     save_top_k: 1
-    mode: "max"
+    mode: "min"
     auto_insert_metric_name: False
     save_weights_only: False
     every_n_epochs: 1
     save_on_train_epoch_end: false
 
+
 evaluator:
   ckpts:
     last: true
     summary:
-      cvar25_ema: ['max']
+      0_25kHz_drift_ema: ['min']
     single:
       loss_mse_mean_top_vals: ['stable']
-      # eff__ascore_loss_mse_full__brate_0.25kHz: ['max']
+      loss_mse_q99: ['stable']
+
 
 evaluator_callbacks:
   anomaly_efficiency:
@@ -223,7 +216,7 @@ evaluator_callbacks:
       - haa-4b-ma15
     log_raw_mlflow: false
 
-  thres_transfer:
+  thres_drift:
     _target_: src.evaluation.callbacks.thres_drift.ThresholdDriftCallback
     loss_name: 'loss/mse/full'
     target_rates: [0.25]
@@ -231,7 +224,7 @@ evaluator_callbacks:
     calibration_fraction: 0.5
     split_seed: 12345
     log_raw_mlflow: false
-    name: thres_transfer
+    name: thres_drift
 
   wasserstein:
     _target_: src.evaluation.callbacks.wasserstein.Wasserstein

@@ -198,8 +198,9 @@ class AnomalyEfficiencyCallback(Callback):
         """Compute the efficiencies given a rate dictionary."""
         effs = defaultdict(float)
         clean_metric_name = self.metric_name.replace('/', '_')
+        trate_name = str(target_rate).replace('.', '_')
         for ds_name, rate in rates[target_rate].items():
-            logging_name = f"val/{ds_name}/eff__ascore_{clean_metric_name}__brate_{target_rate}kHz"
+            logging_name = f"val/{ds_name}/eff__ascore_{clean_metric_name}__brate_{trate_name}kHz"
             effs[logging_name] = rate.compute('efficiency')
 
         return effs

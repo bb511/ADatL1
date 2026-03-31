@@ -53,7 +53,7 @@ callbacks:
   max_rate_mse_ckpt:
     _target_: src.callbacks.model_checkpoint.SingleDatasetModelCheckpoint
     dirpath: '${paths.checkpoints_dir}/${experiment_name}/${run_name}'
-    monitor: eff__ascore_loss_mse_full__brate_0.25kHz
+    monitor: eff__ascore_loss_mse_full__brate_0_25kHz
     criterion:
       _target_: src.callbacks.checkpointing.criterion.Max
       top_k: 1
@@ -122,10 +122,9 @@ evaluator:
     summary:
       cvar25_ema: ['max']
     single:
+      loss_mse_mean_top_vals: ['stable']
       loss_mse_q99: ['stable']
-      # Enable evaluating these checkpoints if not doing a search.
-      # loss_mse_mean_top_vals: ['stable']
-      # eff__ascore_loss_mse_full__brate_0.25kHz: ['max']
+      eff__ascore_loss_mse_full__brate_0_25kHz: ['max']
 
 evaluator_callbacks:
   anomaly_efficiency:

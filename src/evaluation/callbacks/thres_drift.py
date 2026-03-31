@@ -200,24 +200,18 @@ class ThresholdDriftCallback(Callback):
         ckpt_ds = utils.misc.get_ckpt_ds_name(ckpt_name)
         self.transfer_summary[trate][ckpt_ds] = float(drift_metric)
 
-    def get_optimized_metric(self, ckpt_name: str, target_rate: float):
+    def get_optimized_metric(self, target_rate: float):
         """Return the drift metric for one target rate at one checkpoint dataset."""
-        if target_rate not in self.transfer_summary:
-            log.warn(
-                f"Target rate {target_rate} not found. "
-                f"Available: {list(self.transfer_summary.keys())}"
+        if not target_rate in list(self.transfer_summary.keys()):
+            raise ValueError(
+                f"Thres trans callback for metric {self.metric_name} did not calculate "
+                f"eff at target rate {target_rate}. Choose {self.transfer_summary.keys()}."
             )
-            return ckpt_name, None
 
-        if ckpt_name not in self.transfer_summary[target_rate]:
-            log.warn(
-                f"ckpt_name={ckpt_name} not found for target_rate={target_rate}. "
-                f"Available: {list(self.transfer_summary[target_rate].keys())}"
-            )
-            return ckpt_name, None
-
-        optimized_loss = self.transfer_summary[target_rate][ckpt_name]
-        return ckpt_name, optimized_loss
+        metric_across_ckpts = self.transfer_summary[target_rate]
+        min_ckpt_name = min(metric_across_ckpts, key=metric_across_ckpts.get)
+        min_metric_value = metric_across_ckpts[min_ckpt_name]
+        return min_ckpt_name, min_metric_value
 
     def plot_summary(self, trainer, root_folder: Path):
         """Plot drift summary across checkpoints for each target rate."""

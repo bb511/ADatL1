@@ -10,10 +10,10 @@
 NotebookFileLineBreakTest
 NotebookFileLineBreakTest
 NotebookDataPosition[       158,          7]
-NotebookDataLength[    181061,       4170]
+NotebookDataLength[    181058,       4170]
 NotebookOptionsPosition[    177335,       4109]
-NotebookOutlinePosition[    177793,       4128]
-CellTagsIndexPosition[    177750,       4125]
+NotebookOutlinePosition[    177790,       4128]
+CellTagsIndexPosition[    177747,       4125]
 WindowFrame->Normal*)
 
 (* Beginning of Notebook Content *)
@@ -4109,8 +4109,8 @@ Cell[BoxData["\<\"effs/vae_q99.jpeg\"\>"], "Output",
 },
 WindowToolbars->{},
 CellGrouping->Manual,
-WindowSize->{1800, 1021},
-WindowMargins->{{0, Automatic}, {-231, Automatic}},
+WindowSize->{2560, 1381},
+WindowMargins->{{0, Automatic}, {Automatic, 0}},
 ShowCellTags->True,
 FrontEndVersion->"14.1 for Mac OS X ARM (64-bit) (July 16, 2024)",
 StyleDefinitions->"Default.nb",

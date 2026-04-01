@@ -273,12 +273,14 @@
 #     experiment=ae_agnostic \
 #     experiment_name=ae_agnostic_drift_vs_mse_search \
 #     callbacks.anomaly_eff=null \
+#     callbacks.cap_sn_zb=null \
 #     callbacks.wasserstein_dist=null \
 #     callbacks.stable_mse_q99_ckpt=null \
 #     callbacks.wasserstein_dist_ema_ckpt=null \
+#     callbacks.cap_sn_zb_ema_ckpt=null \
 #     ~evaluator.ckpts.single.loss_mse_q99 \
 #     ~evaluator.ckpts.summary.w1dist_ema_zerobias_vs_SingleNeutrino_E-10-gun \
-#     ~evaluator.ckpts.summary.cap_ema_zerobias_vs_SingleNeutrino-E-10-gun \
+#     ~evaluator.ckpts.summary.cap_ema_zerobias_vs_SingleNeutrino_E-10-gun \
 #     evaluator_callbacks.anomaly_efficiency=null \
 #     evaluator_callbacks.mse_loss_q99=null \
 #     evaluator_callbacks.cap_sn_zb=null \
@@ -309,12 +311,14 @@ python3 src/train.py \
     experiment=ae_agnostic \
     experiment_name=ae_agnostic_drift_vs_mseq99_search \
     callbacks.anomaly_eff=null \
+    callbacks.cap_sn_zb=null \
     callbacks.wasserstein_dist=null \
     callbacks.stable_mse_mean_top_ckpt=null \
     callbacks.wasserstein_dist_ema_ckpt=null \
+    callbacks.cap_sn_zb_ema_ckpt=null \
     ~evaluator.ckpts.single.loss_mse_mean_top_vals \
     ~evaluator.ckpts.summary.w1dist_ema_zerobias_vs_SingleNeutrino_E-10-gun \
-    ~evaluator.ckpts.summary.cap_ema_zerobias_vs_SingleNeutrino-E-10-gun \
+    ~evaluator.ckpts.summary.cap_ema_zerobias_vs_SingleNeutrino_E-10-gun \
     evaluator_callbacks.anomaly_efficiency=null \
     evaluator_callbacks.mse_operational_mean=null \
     evaluator_callbacks.cap_sn_zb=null \
@@ -349,12 +353,14 @@ python3 src/train.py \
 #     experiment=ae_agnostic \
 #     experiment_name=ae_agnostic_wasserstein_vs_mse_search \
 #     callbacks.anomaly_eff=null \
+#     callbacks.cap_sn_zb=null \
 #     callbacks.thres_drift=null \
 #     callbacks.stable_mse_q99_ckpt=null \
 #     callbacks.thres_drift_ema_ckpt=null \
+#     callbacks.cap_sn_zb_ema_ckpt=null \
 #     ~evaluator.ckpts.single.loss_mse_q99 \
 #     ~evaluator.ckpts.summary.trate0_25kHz_drift_ema \
-#     ~evaluator.ckpts.summary.cap_ema_zerobias_vs_SingleNeutrino-E-10-gun \
+#     ~evaluator.ckpts.summary.cap_ema_zerobias_vs_SingleNeutrino_E-10-gun \
 #     evaluator_callbacks.anomaly_efficiency=null \
 #     evaluator_callbacks.mse_loss_q99=null \
 #     evaluator_callbacks.cap_sn_zb=null \
@@ -383,12 +389,14 @@ python3 src/train.py \
 #     experiment=ae_agnostic \
 #     experiment_name=ae_agnostic_wasserstein_vs_mseq99_search \
 #     callbacks.anomaly_eff=null \
+#     callbacks.cap_sn_zb=null \
 #     callbacks.thres_drift=null \
 #     callbacks.stable_mse_mean_top_ckpt=null \
 #     callbacks.thres_drift_ema_ckpt=null \
+#     callbacks.cap_sn_zb_ema_ckpt=null \
 #     ~evaluator.ckpts.single.loss_mse_mean_top_vals \
 #     ~evaluator.ckpts.summary.trate0_25kHz_drift_ema \
-#     ~evaluator.ckpts.summary.cap_ema_zerobias_vs_SingleNeutrino-E-10-gun \
+#     ~evaluator.ckpts.summary.cap_ema_zerobias_vs_SingleNeutrino_E-10-gun \
 #     evaluator_callbacks.anomaly_efficiency=null \
 #     evaluator_callbacks.mse_operational_mean=null \
 #     evaluator_callbacks.cap_sn_zb=null \

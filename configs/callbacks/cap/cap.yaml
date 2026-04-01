@@ -4,7 +4,6 @@ _target_: src.evaluation.callbacks.cap.CAP
 metric_name: 'loss/total/full'
 dataset_1: ???
 dataset_2: ???
-log_raw_mlflow: true
 cap_metric_config:
   beta0: 1.0
   normalization_type: sigmoid
@@ -20,5 +19,3 @@ cap_metric_config:
   normalize_gradients: False
   process_group: null
   dist_sync_fn: null
-
-name: 'cap'

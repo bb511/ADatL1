@@ -68,6 +68,29 @@ callbacks:
     apply_log1p: false
     beta: 0.9
 
+  cap_sn_zb:
+    _target_: src.callbacks.cap.CAPCallback
+    metric_name: 'loss/mse/full'
+    dataset_1: zerobias
+    dataset_2: SingleNeutrino_E-10-gun
+    pairing_type: cdf
+    cap_metric_config:
+      beta0: 1.0
+      normalization_type: sigmoid
+      normalization_params: null
+      energy_type: adaptive
+      energy_params:
+        scale: 0.5
+      regularization_type: none
+      regularization_params: null
+      binary: True
+      lr: 0.01
+      n_epochs: 20
+      batch_size: 8192
+      normalize_gradients: True
+      process_group: null
+      dist_sync_fn: null
+
   stable_mse_mean_top_ckpt:
     _target_: src.callbacks.model_checkpoint.SingleDatasetModelCheckpoint
     dirpath: '${paths.checkpoints_dir}/${experiment_name}/${run_name}'
@@ -118,6 +141,19 @@ callbacks:
     every_n_epochs: 1
     save_on_train_epoch_end: false
 
+  cap_sn_zb_ema_ckpt:
+    _target_: pytorch_lightning.callbacks.ModelCheckpoint
+    dirpath: '${paths.checkpoints_dir}/${experiment_name}/${run_name}/summary/cap_ema_zerobias_vs_SingleNeutrino_E-10-gun/max'
+    monitor: 'val/summary/cap_ema_zerobias_vs_SingleNeutrino_E-10-gun'
+    filename: 'cap_ema_zerobias_vs_SingleNeutrino_E-10-gun'
+    save_last: false
+    save_top_k: 1
+    mode: "max"
+    auto_insert_metric_name: False
+    save_weights_only: False
+    every_n_epochs: 1
+    save_on_train_epoch_end: false
+
 
 evaluator:
   ckpts:
@@ -125,6 +161,7 @@ evaluator:
     summary:
       trate0_25kHz_drift_ema: ['min']
       w1dist_ema_zerobias_vs_SingleNeutrino_E-10-gun: ['min']
+      cap_ema_zerobias_vs_SingleNeutrino_E-10-gun: ['max']
     single:
       loss_mse_mean_top_vals: ['stable']
       loss_mse_q99: ['stable']

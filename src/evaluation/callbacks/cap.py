@@ -16,10 +16,25 @@ from src.plot import horizontal_bar
 
 
 class CAP(Callback):
-    """Evaluate the approximation capacity on the selected test data sets.
+    """Compute a test approximation capacity metric between two datasets.
 
-    :param metric_name: String specifying the model metric to use as an anomaly score.
-    :param ds: List of strings with the names of the datasets to compute this on.
+    This callback collects all scores from two test dataloaders, pairs the
+    samples according to the selected pairing function, and computes:
+        - CAP metric
+        - Spearman rank correlation
+
+    The metric is computed on the paired score samples from:
+        - dataset_1
+        - dataset_2
+
+    This is appropriate as a validation-side proxy objective for HPO.
+
+    :param loss_name: Key in outputs dict containing per-event anomaly scores / losses.
+    :param dataset_1: Name of the first validation dataloader.
+    :param dataset_2: Name of the second validation dataloader.
+    :param pairing_type: Pairing scheme name passed to get_pairing_fn.
+    :param cap_metric_config: Keyword arguments used to instantiate
+        ApproximationCapacity.
     :param log_raw_mlflow: Boolean to decide whether to log the raw plots produced by
         this callback to mlflow artifacts. Default is True. An html gallery of all the
         plots is made by default, so if this is set to false, one can still view the
@@ -58,7 +73,7 @@ class CAP(Callback):
         """Initialise useful quantities."""
         self.dataset_1_scores = []
         self.dataset_2_scores = []
-        self.capmetric = ApproximationCapacity(**self.cap_metric_config)
+        self.capmetric = ApproximationCapacity(**self.cap_metric_config, device=self.device)
         self.capmetric.to(self.device)
 
     def on_test_batch_end(

@@ -8,8 +8,8 @@ from torch import Tensor, optim
 from torch.utils.data import TensorDataset, DataLoader
 from torchmetrics import Metric
 
-from src.evaluation.callbacks.metrics.cap.kernel import ApproximationCapacityKernel
-from src.evaluation.callbacks.metrics.cap.binary import (
+from src.callbacks.metrics.cap.kernel import ApproximationCapacityKernel
+from src.callbacks.metrics.cap.binary import (
     get_normalizer_fn as get_normalizer_fn_binary,
     get_energy_fn as get_energy_fn_binary,
     get_regularizer_fn as get_regularizer_fn_binary
@@ -207,9 +207,7 @@ class ApproximationCapacity(Metric):
         best_cap = -float("inf")
         self.epoch_logs = []
 
-        for _ in tqdm(
-            range(self.n_epochs), desc="CAP Optimization Progress", unit="epoch"
-        ):
+        for _ in range(self.n_epochs):
             kernel.reset()
 
             with torch.set_grad_enabled(True):

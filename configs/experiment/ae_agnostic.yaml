@@ -23,7 +23,7 @@ trainer:
   gradient_clip_algorithm: norm
   gradient_clip_val: 0.0
   min_epochs: 1
-  max_epochs: 200
+  max_epochs: 400
 
 test: true
 

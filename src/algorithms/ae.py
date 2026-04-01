@@ -64,6 +64,7 @@ class AE(L1ADLightningModule):
             topk_vals = torch.topk(mse, k).values
             mean_top_vals = topk_vals.mean().item()
 
+            # 99th quantile MSE
             mse_q99 = torch.quantile(mse, 0.99).item()
 
         return {
@@ -85,4 +86,5 @@ class AE(L1ADLightningModule):
             "loss": outdict.get("loss"),
             "loss_reco": outdict.get("loss/reco/mean"),
             "loss_mse_mean_top_vals": outdict.get("loss/mse/mean_top_vals"),
+            "loss_mse_q99": outdict.get("loss/mse/q99"),
         }

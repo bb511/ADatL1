@@ -187,41 +187,6 @@
 # ------------------------
 
 # AE agnostic hyperparameter search - CAP vs MSE.
-taskset -c 0-2 \
-python3 src/train.py \
-    -m \
-    hydra/launcher=submitit_local \
-    hydra.launcher.timeout_min=100 \
-    hydra.launcher.cpus_per_task=1 \
-    hydra.launcher.gpus_per_node=4 \
-    paths.raw_data_dir=/data/deodagiu/adl1t_data/parquet_files \
-    experiment=ae_agnostic \
-    experiment_name=ae_agnostic_cap_vs_mse_search \
-    callbacks.anomaly_eff=null \
-    callbacks.thres_drift=null \
-    callbacks.wasserstein_dist=null \
-    callbacks.stable_mse_q99_ckpt=null \
-    callbacks.thres_drift_ema_ckpt=null \
-    callbacks.wasserstein_dist_ema_ckpt=null \
-    ~evaluator.ckpts.single.loss_mse_q99 \
-    ~evaluator.ckpts.summary.trate0_25kHz_drift_ema \
-    ~evaluator.ckpts.summary.w1dist_ema_zerobias_vs_SingleNeutrino_E-10-gun \
-    evaluator_callbacks.anomaly_efficiency=null \
-    evaluator_callbacks.mse_loss_q99=null \
-    evaluator_callbacks.thres_drift=null \
-    evaluator_callbacks.wasserstein=null \
-    evaluator_callbacks.reco=null \
-    logger=none \
-    hparams_search=ae_agnostic_optuna \
-    hydra.sweeper.study_name=cap_vs_mse_b16k \
-    hydra.sweeper.n_trials=100 \
-    hydra.sweeper.sampler.n_startup_trials=150 \
-    trainer=gpu \
-    trainer.max_epochs=50 \
-    trainer.devices=[0]
-
-
-# AE agnostic hyperparameter search - CAP vs MSE q99.
 # taskset -c 0-2 \
 # python3 src/train.py \
 #     -m \
@@ -231,29 +196,65 @@ python3 src/train.py \
 #     hydra.launcher.gpus_per_node=4 \
 #     paths.raw_data_dir=/data/deodagiu/adl1t_data/parquet_files \
 #     experiment=ae_agnostic \
-#     experiment_name=ae_agnostic_cap_vs_mseq99_search \
+#     experiment_name=ae_agnostic_cap_vs_mse_search \
 #     callbacks.anomaly_eff=null \
 #     callbacks.thres_drift=null \
 #     callbacks.wasserstein_dist=null \
-#     callbacks.stable_mse_mean_top_ckpt=null \
+#     callbacks.stable_mse_q99_ckpt=null \
 #     callbacks.thres_drift_ema_ckpt=null \
 #     callbacks.wasserstein_dist_ema_ckpt=null \
-#     ~evaluator.ckpts.single.loss_mse_mean_top_vals \
+#     ~evaluator.ckpts.single.loss_mse_q99 \
 #     ~evaluator.ckpts.summary.trate0_25kHz_drift_ema \
 #     ~evaluator.ckpts.summary.w1dist_ema_zerobias_vs_SingleNeutrino_E-10-gun \
 #     evaluator_callbacks.anomaly_efficiency=null \
-#     evaluator_callbacks.mse_operational_mean=null \
+#     evaluator_callbacks.mse_loss_q99=null \
 #     evaluator_callbacks.thres_drift=null \
 #     evaluator_callbacks.wasserstein=null \
 #     evaluator_callbacks.reco=null \
 #     logger=none \
 #     hparams_search=ae_agnostic_optuna \
-#     hydra.sweeper.study_name=cap_vs_mseq99_b16k \
+#     hydra.sweeper.study_name=cap_vs_mse_b16k \
 #     hydra.sweeper.n_trials=100 \
 #     hydra.sweeper.sampler.n_startup_trials=150 \
 #     trainer=gpu \
 #     trainer.max_epochs=50 \
 #     trainer.devices=[0]
+
+
+# AE agnostic hyperparameter search - CAP vs MSE q99.
+taskset -c 0-2 \
+python3 src/train.py \
+    -m \
+    hydra/launcher=submitit_local \
+    hydra.launcher.timeout_min=100 \
+    hydra.launcher.cpus_per_task=1 \
+    hydra.launcher.gpus_per_node=4 \
+    paths.raw_data_dir=/data/deodagiu/adl1t_data/parquet_files \
+    experiment=ae_agnostic \
+    experiment_name=ae_agnostic_cap_vs_mseq99_search \
+    callbacks.anomaly_eff=null \
+    callbacks.thres_drift=null \
+    callbacks.wasserstein_dist=null \
+    callbacks.stable_mse_mean_top_ckpt=null \
+    callbacks.thres_drift_ema_ckpt=null \
+    callbacks.wasserstein_dist_ema_ckpt=null \
+    ~evaluator.ckpts.single.loss_mse_mean_top_vals \
+    ~evaluator.ckpts.summary.trate0_25kHz_drift_ema \
+    ~evaluator.ckpts.summary.w1dist_ema_zerobias_vs_SingleNeutrino_E-10-gun \
+    evaluator_callbacks.anomaly_efficiency=null \
+    evaluator_callbacks.mse_operational_mean=null \
+    evaluator_callbacks.thres_drift=null \
+    evaluator_callbacks.wasserstein=null \
+    evaluator_callbacks.reco=null \
+    logger=none \
+    hparams_search=ae_agnostic_optuna \
+    optimized_metric_config.sec_metric.callback.name=mse_q99 \
+    hydra.sweeper.study_name=cap_vs_mseq99_b16k \
+    hydra.sweeper.n_trials=100 \
+    hydra.sweeper.sampler.n_startup_trials=150 \
+    trainer=gpu \
+    trainer.max_epochs=50 \
+    trainer.devices=[0]
 
 
 # Stability Agnostic Searches

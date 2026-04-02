@@ -7,23 +7,6 @@ defaults:
   - override /hydra/sweeper: optuna
   - override /hydra/sweeper/sampler: motpe
 
-
-optimized_metric_config:
-  main_metric:
-    callback:
-      name: eff
-      params:
-        target_rate: 0.25
-    direction: maximize
-  sec_metric:
-    callback:
-      name: kl_raw_mean_top_vals
-      params:
-        ckpt_name: null # This will be filled in with the best ckpt of the main metric.
-        test_ds: zerobias
-    direction: minimize
-
-
 hydra:
   mode: "MULTIRUN" # set hydra to multirun by default if this config is attached
   sweeper:

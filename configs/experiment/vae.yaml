@@ -27,6 +27,23 @@ trainer:
 
 test: true
 
+# Metrics to report for each checkpoint.
+optimized_metric_config:
+  main_metric:
+    callback:
+      name: eff
+      params:
+        target_rate: 0.25
+    direction: maximize
+  sec_metric:
+    callback:
+      name: kl_raw_mean_top_vals
+      params:
+        ckpt_name: null # This will be filled in with the best ckpt of the main metric.
+        test_ds: zerobias
+    direction: minimize
+
+
 algorithm:
   # The basis data processing returns 117 features.
   operational_rate: 0.25
@@ -91,6 +108,18 @@ callbacks:
     ds:
       - zerobias
 
+  stable_kl_q99_ckpt:
+    _target_: src.callbacks.model_checkpoint.SingleDatasetModelCheckpoint
+    dirpath: '${paths.checkpoints_dir}/${experiment_name}/${run_name}'
+    monitor: loss_kl_raw_q99
+    criterion:
+      _target_: src.callbacks.checkpointing.criterion.Stable
+      top_k: 1
+      threshold: 0.05
+      patience: 10
+    ds:
+      - zerobias
+
   cvar25_ema_ckpt:
     _target_: pytorch_lightning.callbacks.ModelCheckpoint
     dirpath: '${paths.checkpoints_dir}/${experiment_name}/${run_name}/summary/cvar25_ema/max'
@@ -104,6 +133,7 @@ callbacks:
     every_n_epochs: 1
     save_on_train_epoch_end: false
 
+
 evaluator:
   ckpts:
     last: true
@@ -111,7 +141,9 @@ evaluator:
       cvar25_ema: ['max']
     single:
       loss_kl_raw_mean_top_vals: ['stable']
+      loss_kl_q99: ['stable']
       eff__ascore_loss_kl_raw_full__brate_0.25kHz: ['max']
+
 
 evaluator_callbacks:
   anomaly_efficiency:
@@ -208,6 +240,15 @@ evaluator_callbacks:
     split_seed: 12345
     log_raw_mlflow: false
     name: thres_transfer
+
+  wasserstein:
+    _target_: src.evaluation.callbacks.wasserstein.Wasserstein
+    metric_name: 'loss/kl_raw/full'
+    dataset_1: zerobias
+    dataset_2: SingleNeutrino_E-10-gun
+    apply_log1p: true
+    log_raw_mlflow: false
+    name: wasserstein
 
   reco:
     _target_: src.evaluation.callbacks.reco.ReconstructionPlots

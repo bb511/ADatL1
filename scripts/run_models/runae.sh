@@ -9,7 +9,8 @@
 # python3 src/train.py \
 #     paths.raw_data_dir=/data/deodagiu/adl1t_data/parquet_files \
 #     experiment=ae \
-#     run_name=cvar25_t520_low \
+#     run_name=cvar25_t520_test \
+#     ~evaluator.ckpts.single.eff__ascore_loss_mse_full__brate_0_25kHz \
 #     algorithm.optimizer.lr=0.0019789545082545034 \
 #     algorithm.loss.delta=10.0 \
 #     trainer.gradient_clip_val=5.0 \
@@ -17,6 +18,7 @@
 #     algorithm.optimizer.weight_decay=1e-06 \
 #     algorithm.encoder.nodes='[64,32,32]' \
 #     algorithm.input_noise_std=0.0 \
+#     trainer.max_epochs=1 \
 #     trainer=gpu \
 #     trainer.devices=[0]
 
@@ -119,6 +121,7 @@
 #     ~evaluator.ckpts.single.eff__ascore_loss_mse_full__brate_0_25kHz \
 #     evaluator_callbacks.mse_loss_q99=null \
 #     evaluator_callbacks.thres_transfer=null \
+#     evaluator_callbacks.wasserstein=null \
 #     evaluator_callbacks.reco=null \
 #     logger=none \
 #     hparams_search=ae_optuna \
@@ -146,6 +149,7 @@
 #     ~evaluator.ckpts.single.eff__ascore_loss_mse_full__brate_0_25kHz \
 #     evaluator_callbacks.mse_operational_mean=null \
 #     evaluator_callbacks.thres_transfer=null \
+#     evaluator_callbacks.wasserstein=null \
 #     evaluator_callbacks.reco=null \
 #     logger=none \
 #     hparams_search=ae_optuna \
@@ -174,6 +178,7 @@
 #     ~evaluator.ckpts.single.eff__ascore_loss_mse_full__brate_0_25kHz \
 #     evaluator_callbacks.mse_loss_q99=null \
 #     evaluator_callbacks.thres_transfer=null \
+#     evaluator_callbacks.wasserstein=null \
 #     evaluator_callbacks.reco=null \
 #     evaluator_callbacks.anomaly_efficiency.cvar_summary=0.10 \
 #     logger=none \
@@ -344,42 +349,6 @@
 # -----------------------------
 
 # AE agnostic MSE and wasserstein distance search.
-# taskset -c 0-2 \
-# python3 src/train.py \
-#     -m \
-#     hydra/launcher=submitit_local \
-#     hydra.launcher.cpus_per_task=1 \
-#     hydra.launcher.gpus_per_node=4 \
-#     paths.raw_data_dir=/data/deodagiu/adl1t_data/parquet_files \
-#     experiment=ae_agnostic \
-#     experiment_name=ae_agnostic_wasserstein_vs_mse_search \
-#     callbacks.anomaly_eff=null \
-#     callbacks.cap_sn_zb=null \
-#     callbacks.thres_drift=null \
-#     callbacks.stable_mse_q99_ckpt=null \
-#     callbacks.thres_drift_ema_ckpt=null \
-#     callbacks.cap_sn_zb_ema_ckpt=null \
-#     ~evaluator.ckpts.single.loss_mse_q99 \
-#     ~evaluator.ckpts.summary.trate0_25kHz_drift_ema \
-#     ~evaluator.ckpts.summary.cap_ema_zerobias_vs_SingleNeutrino_E-10-gun \
-#     evaluator_callbacks.anomaly_efficiency=null \
-#     evaluator_callbacks.mse_loss_q99=null \
-#     evaluator_callbacks.cap_sn_zb=null \
-#     evaluator_callbacks.thres_drift=null \
-#     evaluator_callbacks.reco=null \
-#     logger=none \
-#     hparams_search=ae_agnostic_optuna \
-#     optimized_metric_config.main_metric.callback.name=wasserstein \
-#     optimized_metric_config.main_metric.direction=minimize \
-#     hydra.sweeper.study_name=wasserstein_vs_mse_b16k \
-#     hydra.sweeper.direction='[minimize, minimize]' \
-#     hydra.sweeper.n_trials=100 \
-#     hydra.sweeper.sampler.n_startup_trials=150 \
-#     trainer=gpu \
-#     trainer.max_epochs=50 \
-#     trainer.devices=[0]
-
-# AE agnostic MSE q99 and wasserstein distance search.
 taskset -c 0-2 \
 python3 src/train.py \
     -m \
@@ -388,18 +357,18 @@ python3 src/train.py \
     hydra.launcher.gpus_per_node=4 \
     paths.raw_data_dir=/data/deodagiu/adl1t_data/parquet_files \
     experiment=ae_agnostic \
-    experiment_name=ae_agnostic_wasserstein_vs_mseq99_search \
+    experiment_name=ae_agnostic_wasserstein_vs_mse_search \
     callbacks.anomaly_eff=null \
     callbacks.cap_sn_zb=null \
     callbacks.thres_drift=null \
-    callbacks.stable_mse_mean_top_ckpt=null \
+    callbacks.stable_mse_q99_ckpt=null \
     callbacks.thres_drift_ema_ckpt=null \
     callbacks.cap_sn_zb_ema_ckpt=null \
-    ~evaluator.ckpts.single.loss_mse_mean_top_vals \
+    ~evaluator.ckpts.single.loss_mse_q99 \
     ~evaluator.ckpts.summary.trate0_25kHz_drift_ema \
     ~evaluator.ckpts.summary.cap_ema_zerobias_vs_SingleNeutrino_E-10-gun \
     evaluator_callbacks.anomaly_efficiency=null \
-    evaluator_callbacks.mse_operational_mean=null \
+    evaluator_callbacks.mse_loss_q99=null \
     evaluator_callbacks.cap_sn_zb=null \
     evaluator_callbacks.thres_drift=null \
     evaluator_callbacks.reco=null \
@@ -407,11 +376,47 @@ python3 src/train.py \
     hparams_search=ae_agnostic_optuna \
     optimized_metric_config.main_metric.callback.name=wasserstein \
     optimized_metric_config.main_metric.direction=minimize \
-    optimized_metric_config.sec_metric.callback.name=mse_q99 \
-    hydra.sweeper.study_name=wasserstein_vs_mseq99_b16k \
+    hydra.sweeper.study_name=wasserstein_vs_mse_b16k \
     hydra.sweeper.direction='[minimize, minimize]' \
     hydra.sweeper.n_trials=100 \
     hydra.sweeper.sampler.n_startup_trials=150 \
     trainer=gpu \
     trainer.max_epochs=50 \
     trainer.devices=[0]
+
+# AE agnostic MSE q99 and wasserstein distance search.
+# taskset -c 0-2 \
+# python3 src/train.py \
+#     -m \
+#     hydra/launcher=submitit_local \
+#     hydra.launcher.cpus_per_task=1 \
+#     hydra.launcher.gpus_per_node=4 \
+#     paths.raw_data_dir=/data/deodagiu/adl1t_data/parquet_files \
+#     experiment=ae_agnostic \
+#     experiment_name=ae_agnostic_wasserstein_vs_mseq99_search \
+#     callbacks.anomaly_eff=null \
+#     callbacks.cap_sn_zb=null \
+#     callbacks.thres_drift=null \
+#     callbacks.stable_mse_mean_top_ckpt=null \
+#     callbacks.thres_drift_ema_ckpt=null \
+#     callbacks.cap_sn_zb_ema_ckpt=null \
+#     ~evaluator.ckpts.single.loss_mse_mean_top_vals \
+#     ~evaluator.ckpts.summary.trate0_25kHz_drift_ema \
+#     ~evaluator.ckpts.summary.cap_ema_zerobias_vs_SingleNeutrino_E-10-gun \
+#     evaluator_callbacks.anomaly_efficiency=null \
+#     evaluator_callbacks.mse_operational_mean=null \
+#     evaluator_callbacks.cap_sn_zb=null \
+#     evaluator_callbacks.thres_drift=null \
+#     evaluator_callbacks.reco=null \
+#     logger=none \
+#     hparams_search=ae_agnostic_optuna \
+#     optimized_metric_config.main_metric.callback.name=wasserstein \
+#     optimized_metric_config.main_metric.direction=minimize \
+#     optimized_metric_config.sec_metric.callback.name=mse_q99 \
+#     hydra.sweeper.study_name=wasserstein_vs_mseq99_b16k \
+#     hydra.sweeper.direction='[minimize, minimize]' \
+#     hydra.sweeper.n_trials=100 \
+#     hydra.sweeper.sampler.n_startup_trials=150 \
+#     trainer=gpu \
+#     trainer.max_epochs=50 \
+#     trainer.devices=[0]

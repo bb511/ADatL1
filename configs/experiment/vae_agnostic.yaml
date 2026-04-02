@@ -27,6 +27,21 @@ trainer:
 
 test: true
 
+# Metrics to report for each checkpoint.
+optimized_metric_config:
+  main_metric:
+    callback:
+      name: cap
+      params: {}
+    direction: maximize
+  sec_metric:
+    callback:
+      name: kl_raw_mean_top_vals
+      params:
+        ckpt_name: null # This will be filled in with the best ckpt of the main metric.
+        test_ds: zerobias
+    direction: minimize
+
 algorithm:
   # The basis data processing returns 117 features.
   operational_rate: 0.25
@@ -40,7 +55,6 @@ algorithm:
     weight_decay: 0.001
     betas: [0.9, 0.999]
     eps: 1e-8
-
 
 callbacks:
   log_data_mlflow: null

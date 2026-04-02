@@ -27,6 +27,22 @@ trainer:
 
 test: true
 
+# Metrics to report for every checkpoint.
+optimized_metric_config:
+  main_metric:
+    callback:
+      name: eff
+      params:
+        target_rate: 0.25
+    direction: maximize
+  sec_metric:
+    callback:
+      name: mse_mean_top_vals
+      params:
+        ckpt_name: null # This will be filled in with the best ckpt of the main metric.
+        test_ds: zerobias
+    direction: minimize
+
 algorithm:
   # The basis data processing returns 117 features.
   operational_rate: 0.25
@@ -221,6 +237,15 @@ evaluator_callbacks:
     split_seed: 12345
     log_raw_mlflow: false
     name: thres_transfer
+
+  wasserstein:
+    _target_: src.evaluation.callbacks.wasserstein.Wasserstein
+    metric_name: 'loss/mse/full'
+    dataset_1: zerobias
+    dataset_2: SingleNeutrino_E-10-gun
+    apply_log1p: true
+    log_raw_mlflow: false
+    name: wasserstein
 
   reco:
     _target_: src.evaluation.callbacks.reco.ReconstructionPlots

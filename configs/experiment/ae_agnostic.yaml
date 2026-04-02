@@ -27,6 +27,21 @@ trainer:
 
 test: true
 
+# Metrics to report for each checkpoint.
+optimized_metric_config:
+  main_metric:
+    callback:
+      name: cap
+      params: {}
+    direction: maximize
+  sec_metric:
+    callback:
+      name: mse_mean_top_vals
+      params:
+        ckpt_name: null # This will be filled in with the best ckpt of the main metric.
+        test_ds: zerobias
+    direction: minimize
+
 algorithm:
   # The basis data processing returns 117 features.
   operational_rate: 0.25
@@ -65,7 +80,7 @@ callbacks:
     metric_name: 'loss/mse/full'
     dataset_1: zerobias
     dataset_2: SingleNeutrino_E-10-gun
-    apply_log1p: false
+    apply_log1p: true
     beta: 0.9
 
   cap_sn_zb:

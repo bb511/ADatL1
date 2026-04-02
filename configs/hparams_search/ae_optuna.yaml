@@ -4,22 +4,6 @@ defaults:
   - override /hydra/sweeper: optuna
   - override /hydra/sweeper/sampler: motpe
 
-# Optimize efficiency CVaR and MSE
-optimized_metric_config: 
-  main_metric:
-    callback:
-      name: eff
-      params:
-        target_rate: 0.25
-    direction: maximize
-  sec_metric:
-    callback:
-      name: mse_mean_top_vals
-      params:
-        ckpt_name: null # This will be filled in with the best ckpt of the main metric.
-        test_ds: zerobias
-    direction: minimize
-
 # here we define Optuna hyperparameter search
 # it optimizes for value returned from function with @hydra.main decorator
 # docs: https://hydra.cc/docs/next/plugins/optuna_sweeper
@@ -55,7 +39,6 @@ hydra:
     # define hyperparameter search space. Assumes using torch.optim.AdamW
     params:
       algorithm.optimizer.lr: tag(log, interval(3e-5, 3e-3))
-      # algorithm.loss.delta: choice(0.1, 0.3, 1.0, 3.0, 5.0, 7.0)
       algorithm.loss.delta: choice(3.0, 4.0, 5.0, 7.0, 10.0)
       trainer.gradient_clip_val: choice(0.0, 0.5, 1.0, 2.0, 5.0)
       algorithm.optimizer.betas: choice([0.9, 0.999], [0.9, 0.99])

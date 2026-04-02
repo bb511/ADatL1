@@ -65,6 +65,7 @@ class Evaluator:
         self.evaluator.metric_name = None
         self.evaluator.criterion_name = None
         self.optimized_metric = None
+        self.optimized_ckpt_name = None
         self.evaluator.ckpt_path_name = None
 
     def evaluate_run(
@@ -110,6 +111,12 @@ class Evaluator:
             if strat_subdir is None:
                 raise ValueError(f"{strategy_name} strategy not found in {run_folder}.")
             self._evaluate_strategy(strat_subdir, model, test_loader)
+
+        if self.set_optimized_metric and self.optimized_ckpt_name is not None:
+            logger = self.evaluator.logger
+            if logger is not None and hasattr(logger, "experiment") and hasattr(logger, "run_id"):
+                logger.experiment.set_tag(logger.run_id, "optimized_ckpt_name", self.optimized_ckpt_name)
+
 
     def _evaluate_strategy(self, strategy_folder: Path, model, test_loader: dict):
         """Evaluate all the checkpoints corresponding to a certain strategy.
@@ -255,14 +262,22 @@ class Evaluator:
             optimized_metrics = [main_metric, sec_metric]
             optim_directions = [main_optim_dir, sec_optim_dir]
         else:
-            self._set_best_across_crit(main_metric, direction=main_optim_dir)
+            self._set_best_across_crit(
+                main_metric,
+                ckpt_name=ckpt_name,
+                direction=main_optim_dir,
+            )
             return
 
         if sec_metric is None:
             log.warn("Sec metric is None. Optimized HP metric not updated this strat.")
             return
 
-        self._comp_best_across_crit(optimized_metrics, directions=optim_directions)
+        self._comp_best_across_crit(
+            optimized_metrics,
+            ckpt_name=ckpt_name,
+            directions=optim_directions,
+        )
 
     def _get_metric(self, callback_name: str, callback_params: dict):
         """Get callback corresponding to metric and optim direction."""
@@ -296,25 +311,34 @@ class Evaluator:
         _, sec_metric = self._get_metric(sec_cb_name, sec_cb_params)
         return sec_metric, sec_optim_dir
 
-    def _set_best_across_crit(self, value: float, *, direction: str):
+    def _set_best_across_crit(self, value: float, *, ckpt_name: str, direction: str):
         """Set the best optimized metric values across all ckpt criteria."""
         if self.optimized_metric is None:
             self.optimized_metric = value
+            self.optimized_ckpt_name = ckpt_name
             return
 
         if direction == "maximize":
             if value > self.optimized_metric:
                 self.optimized_metric = value
+                self.optimized_ckpt_name = ckpt_name
             return
 
         if direction == "minimize":
             if value < self.optimized_metric:
                 self.optimized_metric = value
+                self.optimized_ckpt_name = ckpt_name
             return
 
         raise ValueError("Optimized metric direction must be 'maximize' or 'minimize'.")
 
-    def _comp_best_across_crit(self, values: list[float], *, directions: list[str]):
+    def _comp_best_across_crit(
+        self,
+        values: list[float],
+        *,
+        ckpt_name: str,
+        directions: list[str]
+    ):
         """Update best composite metric across checkpoint criteria.
 
         This is computing the relative change for the main metric and secondary metric.
@@ -327,17 +351,22 @@ class Evaluator:
 
         if self.optimized_metric is None:
             self.optimized_metric = values
+            self.optimized_ckpt_name = ckpt_name
             return
 
         rel_changes = [
             ((v - b) if d == "maximize" else (b - v)) / max(abs(b), 1e-12)
             for v, b, d in zip(values, self.optimized_metric, directions)
         ]
-        weights = [1.25, 1.0]   # slight preference for main metric
+        weights = [1.25, 1.0]
         score = sum(w * rc for w, rc in zip(weights, rel_changes))
 
         if score > 0:
             self.optimized_metric = values
+            self.optimized_ckpt_name = ckpt_name
+
+    def get_optimized_ckpt_name(self):
+        return self.optimized_ckpt_name
 
     def _make_criterion_summary_plots(self, plot_folder: Path):
         """Make summary plots for each callback.

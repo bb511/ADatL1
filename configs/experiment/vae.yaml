@@ -142,7 +142,7 @@ evaluator:
     single:
       loss_kl_raw_mean_top_vals: ['stable']
       loss_kl_q99: ['stable']
-      eff__ascore_loss_kl_raw_full__brate_0.25kHz: ['max']
+      eff__ascore_loss_kl_raw_full__brate_0_25kHz: ['max']
 
 
 evaluator_callbacks:

@@ -5,22 +5,22 @@
 # =======================
 
 # Semi-supervised cvar25 training.
-taskset -c 6-8 \
-python3 src/train.py \
-    paths.raw_data_dir=/data/deodagiu/adl1t_data/parquet_files \
-    experiment=ae \
-    run_name=cvar25_t520_test \
-    ~evaluator.ckpts.single.eff__ascore_loss_mse_full__brate_0_25kHz \
-    algorithm.optimizer.lr=0.0019789545082545034 \
-    algorithm.loss.delta=10.0 \
-    trainer.gradient_clip_val=5.0 \
-    algorithm.optimizer.betas='[0.9,0.999]' \
-    algorithm.optimizer.weight_decay=1e-06 \
-    algorithm.encoder.nodes='[64,32,32]' \
-    algorithm.input_noise_std=0.0 \
-    trainer.max_epochs=1 \
-    trainer=gpu \
-    trainer.devices=[0]
+# taskset -c 6-8 \
+# python3 src/train.py \
+#     paths.raw_data_dir=/data/deodagiu/adl1t_data/parquet_files \
+#     experiment=ae \
+#     run_name=cvar25_t520_test \
+#     ~evaluator.ckpts.single.eff__ascore_loss_mse_full__brate_0_25kHz \
+#     algorithm.optimizer.lr=0.0019789545082545034 \
+#     algorithm.loss.delta=10.0 \
+#     trainer.gradient_clip_val=5.0 \
+#     algorithm.optimizer.betas='[0.9,0.999]' \
+#     algorithm.optimizer.weight_decay=1e-06 \
+#     algorithm.encoder.nodes='[64,32,32]' \
+#     algorithm.input_noise_std=0.0 \
+#     trainer.max_epochs=1 \
+#     trainer=gpu \
+#     trainer.devices=[0]
 
 
 # Semi-supervised cvar10 training.
@@ -99,7 +99,7 @@ python3 src/train.py \
 
 
 # HYPERPARAMETER SEARCHES.
-# =======================
+# =====================================================================================
 
 
 # Semi-Supervised Searches
@@ -117,8 +117,10 @@ python3 src/train.py \
 #     experiment_name=ae_cvar_vs_mse_search \
 #     callbacks.max_rate_mse_ckpt=null \
 #     callbacks.stable_mse_q99_ckpt=null \
+#     callbacks.cvar10_ema_ckpt=null \
 #     ~evaluator.ckpts.single.loss_mse_q99 \
 #     ~evaluator.ckpts.single.eff__ascore_loss_mse_full__brate_0_25kHz \
+#     ~evaluator.ckpts.summary.cvar10_ema \
 #     evaluator_callbacks.mse_loss_q99=null \
 #     evaluator_callbacks.thres_transfer=null \
 #     evaluator_callbacks.wasserstein=null \
@@ -145,8 +147,10 @@ python3 src/train.py \
 #     experiment_name=ae_cvar_vs_mseq99_search \
 #     callbacks.max_rate_mse_ckpt=null \
 #     callbacks.stable_mse_mean_top_ckpt=null \
+#     callbacks.cvar10_ema_ckpt=null \
 #     ~evaluator.ckpts.single.loss_mse_mean_top_vals \
 #     ~evaluator.ckpts.single.eff__ascore_loss_mse_full__brate_0_25kHz \
+#     ~evaluator.ckpts.summary.cvar10_ema \
 #     evaluator_callbacks.mse_operational_mean=null \
 #     evaluator_callbacks.thres_transfer=null \
 #     evaluator_callbacks.wasserstein=null \
@@ -163,32 +167,34 @@ python3 src/train.py \
 
 
 # AE hyperparameter search semi-supervised cvar 10%.
-# taskset -c 0-2 \
-# python3 src/train.py \
-#     -m \
-#     hydra/launcher=submitit_local \
-#     hydra.launcher.cpus_per_task=1 \
-#     hydra.launcher.gpus_per_node=4 \
-#     paths.raw_data_dir=/data/deodagiu/adl1t_data/parquet_files \
-#     experiment=ae \
-#     experiment_name=ae_cvar10_vs_mse_search \
-#     callbacks.max_rate_mse_ckpt=null \
-#     callbacks.stable_mse_q99_ckpt=null \
-#     ~evaluator.ckpts.single.loss_mse_q99 \
-#     ~evaluator.ckpts.single.eff__ascore_loss_mse_full__brate_0_25kHz \
-#     evaluator_callbacks.mse_loss_q99=null \
-#     evaluator_callbacks.thres_transfer=null \
-#     evaluator_callbacks.wasserstein=null \
-#     evaluator_callbacks.reco=null \
-#     evaluator_callbacks.anomaly_efficiency.cvar_summary=0.10 \
-#     logger=none \
-#     hparams_search=ae_optuna \
-#     hydra.sweeper.study_name=cvar10eff_vs_mse_b16k \
-#     hydra.sweeper.n_trials=100 \
-#     hydra.sweeper.sampler.n_startup_trials=150 \
-#     trainer=gpu \
-#     trainer.max_epochs=50 \
-#     trainer.devices=[0]
+taskset -c 0-2 \
+python3 src/train.py \
+    -m \
+    hydra/launcher=submitit_local \
+    hydra.launcher.cpus_per_task=1 \
+    hydra.launcher.gpus_per_node=4 \
+    paths.raw_data_dir=/data/deodagiu/adl1t_data/parquet_files \
+    experiment=ae \
+    experiment_name=ae_cvar10_vs_mse_search \
+    callbacks.max_rate_mse_ckpt=null \
+    callbacks.stable_mse_q99_ckpt=null \
+    callbacks.cvar25_ema_ckpt=null \
+    ~evaluator.ckpts.single.loss_mse_q99 \
+    ~evaluator.ckpts.single.eff__ascore_loss_mse_full__brate_0_25kHz \
+    ~evaluator.ckpts.summary.cvar25_ema \
+    evaluator_callbacks.mse_loss_q99=null \
+    evaluator_callbacks.thres_transfer=null \
+    evaluator_callbacks.wasserstein=null \
+    evaluator_callbacks.reco=null \
+    evaluator_callbacks.anomaly_efficiency.cvar_summary=0.10 \
+    logger=none \
+    hparams_search=ae_optuna \
+    hydra.sweeper.study_name=cvar10eff_vs_mse_b16k \
+    hydra.sweeper.n_trials=100 \
+    hydra.sweeper.sampler.n_startup_trials=150 \
+    trainer=gpu \
+    trainer.max_epochs=50 \
+    trainer.devices=[0]
 
 
 # CAP Agnostic Searches

@@ -44,6 +44,7 @@ class AnomalyEfficiencyCallback(Callback):
     def on_fit_start(self, trainer, pl_module):
         """Instantiate useful quantities."""
         self.cvar25_ema = None
+        self.cvar10_ema = None
 
     def on_validation_start(self, trainer, pl_module):
         """Do checks required for this callback to work."""
@@ -92,32 +93,48 @@ class AnomalyEfficiencyCallback(Callback):
             main_rate = self.main_rate[target_rate]["zerobias"].compute("rate").item()
             bkg_effs = self._compute_efficiencies(self.bkg_rates, target_rate)
             sig_effs = self._compute_efficiencies(self.sig_rates, target_rate)
-            cvar25 = self._cvar_lower_tail(sig_effs.values(), alpha=0.25)
-            self._compute_cvar_ema(cvar25)
-            min_sig_eff = min(list(sig_effs.values()))
-            med_sig_eff = statistics.median(list(sig_effs.values()))
-            threshold = self.main_rate[target_rate]["zerobias"].threshold.item()
-
             pl_module.log_dict(
                 {f"val/zerobias/brate_{target_rate}kHz": main_rate}, **self.log_kwargs
             )
             pl_module.log_dict(bkg_effs, **self.log_kwargs)
             pl_module.log_dict(sig_effs, **self.log_kwargs)
-            pl_module.log_dict({"val/summary/eff_cvar25": cvar25}, **self.log_kwargs)
-            pl_module.log_dict({"val/summary/eff_min": min_sig_eff}, **self.log_kwargs)
-            pl_module.log_dict({"val/summary/eff_med": med_sig_eff}, **self.log_kwargs)
-            pl_module.log_dict(
-                {"val/summary/eff_cvar25_ema": self.cvar25_ema}, **self.log_kwargs
-            )
-            pl_module.log_dict({f"val/zerobias/thr__brate_{target_rate}kHz": threshold})
 
-    def _compute_cvar_ema(self, cvar25: float):
-        """Compute the cvar estimated moving average."""
+            cvar25 = self._cvar_lower_tail(sig_effs.values(), alpha=0.25)
+            cvar10 = self._cvar_lower_tail(sig_effs.values(), alpha=0.10)
+            self._compute_cvar25_ema(cvar25)
+            self._compute_cvar10_ema(cvar10)
+
+            min_sig_eff = min(list(sig_effs.values()))
+            med_sig_eff = statistics.median(list(sig_effs.values()))
+            thres_zb = self.main_rate[target_rate]["zerobias"].threshold.item()
+
+            summaries = {
+                "val/summary/eff_cvar25": cvar25,
+                "val/summary/eff_cvar10": cvar10,
+                "val/summary/eff_min": min_sig_eff,
+                "val/summary/eff_med": med_sig_eff,
+                "val/summary/eff_cvar25_ema": self.cvar25_ema,
+                "val/summary/eff_cvar10_ema": self.cvar10_ema
+            }
+            pl_module.log_dict(summaries, **self.log_kwargs)
+            pl_module.log_dict({f"val/zerobias/thr__brate_{target_rate}kHz": thres_zb})
+
+    def _compute_cvar25_ema(self, cvar25: float):
+        """Compute the cvar25 exponential moving average."""
         if self.cvar25_ema is None:
             self.cvar25_ema = float(cvar25)
         else:
-            self.cvar25_ema = self.beta * self.cvar25_ema + (1 - self.beta) * float(
-                cvar25
+            self.cvar25_ema = (
+                self.beta * self.cvar25_ema + (1 - self.beta) * float(cvar25)
+            )
+
+    def _compute_cvar10_ema(self, cvar10: float):
+        """Compute the cvar10 exponential moving average."""
+        if self.cvar10_ema is None:
+            self.cvar10_ema = float(cvar10)
+        else:
+            self.cvar10_ema = (
+                self.beta * self.cvar10_ema + (1 - self.beta) * float(cvar10)
             )
 
     def _accumulate_zerobias_output(self, outputs: dict, batch_idx: int, pl_module):

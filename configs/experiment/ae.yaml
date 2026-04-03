@@ -65,6 +65,7 @@ callbacks:
     metric_name: 'loss/mse/full'
     target_rates: [0.25]
     bc_rate: 28608.8064
+    beta: 0.9
 
   max_rate_mse_ckpt:
     _target_: src.callbacks.model_checkpoint.SingleDatasetModelCheckpoint
@@ -132,11 +133,25 @@ callbacks:
     every_n_epochs: 1
     save_on_train_epoch_end: false
 
+  cvar10_ema_ckpt:
+    _target_: pytorch_lightning.callbacks.ModelCheckpoint
+    dirpath: '${paths.checkpoints_dir}/${experiment_name}/${run_name}/summary/cvar10_ema/max'
+    monitor: 'val/summary/eff_cvar10_ema'
+    filename: 'cvar10_ema'
+    save_last: false
+    save_top_k: 1
+    mode: "max"
+    auto_insert_metric_name: False
+    save_weights_only: False
+    every_n_epochs: 1
+    save_on_train_epoch_end: false
+
 evaluator:
   ckpts:
     last: true
     summary:
       cvar25_ema: ['max']
+      cvar10_ema: ['max']
     single:
       loss_mse_mean_top_vals: ['stable']
       loss_mse_q99: ['stable']

@@ -67,7 +67,7 @@ callbacks:
   thres_drift:
     _target_: src.callbacks.thres_drift.ThresholdDriftCallback
     loss_name: 'loss/kl_raw/full'
-    target_rates: [0.25]
+    target_rates: [0.25, 286.0]
     bc_rate: 28608.8064
     calibration_fraction: 0.5
     split_seed: 12345
@@ -141,6 +141,19 @@ callbacks:
     every_n_epochs: 1
     save_on_train_epoch_end: false
 
+  thres_drift_q99_ema_ckpt:
+    _target_: pytorch_lightning.callbacks.ModelCheckpoint
+    dirpath: '${paths.checkpoints_dir}/${experiment_name}/${run_name}/summary/trate286_0kHz_drift_ema/min'
+    monitor: 'val/summary/trate286_0kHz_drift_ema'
+    filename: 'trate286_0kHz_drift_ema'
+    save_last: false
+    save_top_k: 1
+    mode: "min"
+    auto_insert_metric_name: False
+    save_weights_only: False
+    every_n_epochs: 1
+    save_on_train_epoch_end: false
+
   wasserstein_dist_ema_ckpt:
     _target_: pytorch_lightning.callbacks.ModelCheckpoint
     dirpath: '${paths.checkpoints_dir}/${experiment_name}/${run_name}/summary/w1dist_ema_zerobias_vs_SingleNeutrino_E-10-gun/min'
@@ -173,6 +186,7 @@ evaluator:
     last: true
     summary:
       trate0_25kHz_drift_ema: ['min']
+      trate286_0kHz_drift_ema: ['min']
       w1dist_ema_zerobias_vs_SingleNeutrino_E-10-gun: ['min']
       cap_ema_zerobias_vs_SingleNeutrino_E-10-gun: ['max']
     single:
@@ -293,7 +307,7 @@ evaluator_callbacks:
   thres_drift:
     _target_: src.evaluation.callbacks.thres_drift.ThresholdDriftCallback
     loss_name: 'loss/kl_raw/full'
-    target_rates: [0.25]
+    target_rates: [0.25, 286.0]
     bc_rate: 28608.8064
     calibration_fraction: 0.5
     split_seed: 12345

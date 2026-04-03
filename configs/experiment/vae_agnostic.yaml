@@ -177,7 +177,7 @@ evaluator:
       cap_ema_zerobias_vs_SingleNeutrino_E-10-gun: ['max']
     single:
       loss_kl_raw_mean_top_vals: ['stable']
-      loss_kl_q99: ['stable']
+      loss_kl_raw_q99: ['stable']
 
 
 evaluator_callbacks:

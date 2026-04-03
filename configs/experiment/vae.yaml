@@ -155,7 +155,7 @@ evaluator:
       cvar10_ema: ['max']
     single:
       loss_kl_raw_mean_top_vals: ['stable']
-      loss_kl_q99: ['stable']
+      loss_kl_raw_q99: ['stable']
       eff__ascore_loss_kl_raw_full__brate_0_25kHz: ['max']
 
 

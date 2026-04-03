@@ -29,12 +29,13 @@ class LossCallback(Callback):
     :param name: String specifying the name of the callback for identification in
         later methods that manipulate callbacks.
     """
+
     def __init__(
         self,
         loss_name: str,
         ds: list[str],
         log_raw_mlflow: bool = True,
-        name: str = 'loss'
+        name: str = "loss",
     ):
         self.device = None
         self.loss_name = loss_name

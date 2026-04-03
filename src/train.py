@@ -46,6 +46,7 @@ warnings.filterwarnings(
     category=FutureWarning,
 )
 
+
 @task_wrapper
 def train(cfg: DictConfig) -> Tuple[Dict[str, Any], Dict[str, Any]]:
     """Trains the model. Can additionally evaluate on a testset, using best weights obtained during
@@ -105,7 +106,9 @@ def train(cfg: DictConfig) -> Tuple[Dict[str, Any], Dict[str, Any]]:
     log.info(Back.MAGENTA + 8 * "-" + "STARTING RUN VALIDATION" + 8 * "-")
     datamodule.setup("validate")
     val_loader = datamodule.val_dataloader()
-    evaluator.evaluate_run(run_ckpts, algorithm, val_loader, 'val', set_optimized_metric=True)
+    evaluator.evaluate_run(
+        run_ckpts, algorithm, val_loader, "val", set_optimized_metric=True
+    )
     object_dict.update({"evaluator": evaluator})
 
     # Evaluate once more on a held out test set for final performance.
@@ -113,7 +116,7 @@ def train(cfg: DictConfig) -> Tuple[Dict[str, Any], Dict[str, Any]]:
         log.info(Back.MAGENTA + 8 * "-" + "STARTING RUN TESTING" + 8 * "-")
         datamodule.setup("test")
         test_loader = datamodule.test_dataloader()
-        evaluator.evaluate_run(run_ckpts, algorithm, test_loader, 'test')
+        evaluator.evaluate_run(run_ckpts, algorithm, test_loader, "test")
         object_dict.update({"evaluator": evaluator})
 
     metric_dict = {**train_metrics}
@@ -201,7 +204,9 @@ def main(cfg: DictConfig) -> Optional[float]:
     def _worst_for(direction: str) -> float:
         return float("inf") if direction == "minimize" else -float("inf")
 
-    if metric_value is None or (isinstance(metric_value, (list, tuple)) and any(v is None for v in metric_value)):
+    if metric_value is None or (
+        isinstance(metric_value, (list, tuple)) and any(v is None for v in metric_value)
+    ):
         dirs = _get_directions(cfg) or ["minimize"]
         worst = tuple(_worst_for(d) for d in dirs)
         return worst[0] if len(worst) == 1 else worst

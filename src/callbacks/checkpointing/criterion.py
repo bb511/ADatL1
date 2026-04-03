@@ -83,6 +83,7 @@ class Max(Criterion):
         self.top_k_values[replace_idx] = ranking_value
         return True
 
+
 class Stable(Criterion):
     """Save checkpoint for minimum k values of the metric, but only when stable.
 

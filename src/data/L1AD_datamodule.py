@@ -228,7 +228,11 @@ class L1ADDataModule(LightningDataModule):
         out = []
         for t in batch:
             # Only pin CPU tensors; skip if already pinned
-            if isinstance(t, torch.Tensor) and t.device.type == "cpu" and not t.is_pinned():
+            if (
+                isinstance(t, torch.Tensor)
+                and t.device.type == "cpu"
+                and not t.is_pinned()
+            ):
                 t = t.pin_memory()
             out.append(t.to(device, non_blocking=True))
 

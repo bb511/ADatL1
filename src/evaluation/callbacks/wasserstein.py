@@ -101,7 +101,9 @@ class Wasserstein(Callback):
 
         return torch.mean(torch.abs(xq - yq)).item()
 
-    def _interp_quantiles(self, sorted_vals: torch.Tensor, q: torch.Tensor) -> torch.Tensor:
+    def _interp_quantiles(
+        self, sorted_vals: torch.Tensor, q: torch.Tensor
+    ) -> torch.Tensor:
         """Interpolate sorted samples at quantiles q in [0, 1]."""
         n = sorted_vals.numel()
         if n == 1:
@@ -156,4 +158,3 @@ class Wasserstein(Callback):
         with open(cache_folder / "summary.pkl", "wb") as f:
             plain_dict = utils.misc.to_plain_dict(self.wasserstein_summary)
             pickle.dump(plain_dict, f, protocol=pickle.HIGHEST_PROTOCOL)
-

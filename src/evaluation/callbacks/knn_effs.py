@@ -35,6 +35,7 @@ class KNNEffs(Callback):
     :param name: String specifying the name of the callback for identification in
         later methods that manipulate callbacks.
     """
+
     def __init__(
         self,
         output_name: str,
@@ -45,7 +46,7 @@ class KNNEffs(Callback):
         reference_sample_size: int = 40_000,
         bkg_sample_size: int = 200_000,
         log_raw_mlflow: bool = True,
-        name: str = 'knn_eff'
+        name: str = "knn_eff",
     ):
         super().__init__()
         self.device = None
@@ -96,7 +97,7 @@ class KNNEffs(Callback):
         Finally, compute BinaryAveragePrecision for all the signal data sets.
         """
         self.dataset_name = list(trainer.test_dataloaders.keys())[dataloader_idx]
-        if self.dataset_name != 'main_test' and not self.dataset_name in self.ds:
+        if self.dataset_name != "main_test" and not self.dataset_name in self.ds:
             return
 
         _, _, _, labels = batch
@@ -317,10 +318,12 @@ class KNNEffs(Callback):
     def _compute_eff(self, rates: dict, target_rate: float):
         """Compute the efficiency in given rate dictionary."""
         effs = defaultdict(float)
-        clean_metric_name = self.metric_name.replace('/', '_')
+        clean_metric_name = self.metric_name.replace("/", "_")
         for ds_name, rate in rates[target_rate].items():
-            logging_name = f"{ds_name}/knn_eff__ascore_{clean_metric_name}__brate_{target_rate}kHz"
-            effs[logging_name] = rate.compute('efficiency')
+            logging_name = (
+                f"{ds_name}/knn_eff__ascore_{clean_metric_name}__brate_{target_rate}kHz"
+            )
+            effs[logging_name] = rate.compute("efficiency")
 
         return effs
 
@@ -353,4 +356,3 @@ class KNNEffs(Callback):
                 f"reference_sample_size={self.reference_sample_size} may be too large "
                 f"for main_test."
             )
-

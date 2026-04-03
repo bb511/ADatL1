@@ -176,7 +176,9 @@ class ThresholdDriftCallback(Callback):
         scores = scores.view(-1)
         n = int(scores.numel())
         if n == 0:
-            raise RuntimeError("Cannot compute threshold from an empty calibration set.")
+            raise RuntimeError(
+                "Cannot compute threshold from an empty calibration set."
+            )
 
         if exceedance_prob <= 0.0:
             return torch.tensor(float("inf"), device=scores.device, dtype=scores.dtype)

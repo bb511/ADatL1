@@ -42,6 +42,7 @@ class CAP(Callback):
     :param name: String specifying the name of the callback for identification in
         later methods that manipulate callbacks.
     """
+
     def __init__(
         self,
         metric_name: str,
@@ -50,7 +51,7 @@ class CAP(Callback):
         pairing_type: str,
         cap_metric_config: dict,
         log_raw_mlflow: bool = True,
-        name: str = 'cap'
+        name: str = "cap",
     ):
         super().__init__()
         self.device = None
@@ -73,7 +74,9 @@ class CAP(Callback):
         """Initialise useful quantities."""
         self.dataset_1_scores = []
         self.dataset_2_scores = []
-        self.capmetric = ApproximationCapacity(**self.cap_metric_config, device=self.device)
+        self.capmetric = ApproximationCapacity(
+            **self.cap_metric_config, device=self.device
+        )
         self.capmetric.to(self.device)
 
     def on_test_batch_end(
@@ -182,7 +185,7 @@ class CAP(Callback):
         rx = rx - rx.mean()
         ry = ry - ry.mean()
 
-        denom = torch.sqrt((rx ** 2).sum() * (ry ** 2).sum())
+        denom = torch.sqrt((rx**2).sum() * (ry**2).sum())
         if denom < 1e-12:
             return float("nan")
 

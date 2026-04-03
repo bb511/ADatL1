@@ -38,6 +38,7 @@ class AnomalyRateCallback(Callback):
     :param name: String specifying the name of the callback for identification in
         later methods that manipulate callbacks.
     """
+
     def __init__(
         self,
         target_rates: list[int],
@@ -46,7 +47,7 @@ class AnomalyRateCallback(Callback):
         ds: list[str],
         pure_thres: bool = False,
         log_raw_mlflow: bool = True,
-        name: str = 'rate'
+        name: str = "rate",
     ):
         super().__init__()
         self.device = None
@@ -209,10 +210,10 @@ class AnomalyRateCallback(Callback):
     def _compute_rate(self, rates: dict, target_rate: float):
         """Compute the rate in given rate dictionary."""
         computed_rates = defaultdict(float)
-        clean_metric_name = self.metric_name.replace('/', '_')
+        clean_metric_name = self.metric_name.replace("/", "_")
         for ds_name, rate in computed_rates[target_rate].items():
             logging_name = f"{ds_name}"
-            computed_rates[logging_name] = rate.compute('rate').item()
+            computed_rates[logging_name] = rate.compute("rate").item()
 
         return computed_rates
 

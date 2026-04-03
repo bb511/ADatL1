@@ -42,7 +42,7 @@ def plot_streamed(
 
     ax.set_title(obj_name)
     ax.set_xlabel(feat_name)
-    ax.set_ylabel('counts')
+    ax.set_ylabel("counts")
 
     ax.ticklabel_format(
         axis="x", style="sci", scilimits=(-2, 2), useMathText=True, useOffset=False

@@ -7,15 +7,15 @@ class ApproximationCapacityKernel(nn.Module):
     """Computes the approximation capacity for a classification problem."""
 
     def __init__(
-            self,
-            beta0: float,
-            energy_fn: Callable,
-            normalize_gradients: Optional[bool] = False
-        ):  
+        self,
+        beta0: float,
+        energy_fn: Callable,
+        normalize_gradients: Optional[bool] = False,
+    ):
         super().__init__()
         self.energy_fn = energy_fn
         self.normalize_gradients = normalize_gradients
-        
+
         # Learnable parameters
         self.beta = torch.nn.Parameter(
             torch.tensor([beta0], dtype=torch.float), requires_grad=True
@@ -24,10 +24,7 @@ class ApproximationCapacityKernel(nn.Module):
         self.total_samples = 0
 
     def compute_mutual_information(
-        self,
-        prob1: Tensor,
-        prob2: Tensor,
-        beta: Optional[float] = None
+        self, prob1: Tensor, prob2: Tensor, beta: Optional[float] = None
     ) -> Tensor:
         """
         Compute mutual information for relaxed hypothesis space (factorized form).

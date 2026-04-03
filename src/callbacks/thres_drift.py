@@ -45,7 +45,7 @@ class ThresholdDriftCallback(Callback):
         bc_rate: float = 28608.8064,
         calibration_fraction: float = 0.5,
         split_seed: int = 12345,
-        beta: float = 0.9
+        beta: float = 0.9,
     ):
         super().__init__()
         self.loss_name = loss_name
@@ -61,7 +61,7 @@ class ThresholdDriftCallback(Callback):
             on_epoch=True,
             logger=True,
             sync_dist=True,
-            add_dataloader_idx=False
+            add_dataloader_idx=False,
         )
 
         if not (0.0 < self.calibration_fraction < 1.0):
@@ -132,8 +132,12 @@ class ThresholdDriftCallback(Callback):
             self._compute_drift_ema(trate_name, drift_metric)
 
             pl_module.log_dict(
-                {f"val/summary/trate{trate_name}kHz_drift_ema": float(self.drift_ema[trate_name])},
-                **self.log_kwargs
+                {
+                    f"val/summary/trate{trate_name}kHz_drift_ema": float(
+                        self.drift_ema[trate_name]
+                    )
+                },
+                **self.log_kwargs,
             )
 
     def _compute_drift_ema(self, trate_name: str, drift: float):
@@ -141,8 +145,9 @@ class ThresholdDriftCallback(Callback):
         if self.drift_ema[trate_name] == 0.0:
             self.drift_ema[trate_name] = float(drift)
         else:
-            self.drift_ema[trate_name] = \
-                self.beta * self.drift_ema[trate_name] + (1 - self.beta) * float(drift)
+            self.drift_ema[trate_name] = self.beta * self.drift_ema[trate_name] + (
+                1 - self.beta
+            ) * float(drift)
 
     def _split_scores(self, scores: torch.Tensor):
         """Split the anoamly score in a seeded way."""
@@ -168,7 +173,9 @@ class ThresholdDriftCallback(Callback):
         scores = scores.view(-1)
         n = int(scores.numel())
         if n == 0:
-            raise RuntimeError("Cannot compute threshold from an empty calibration set.")
+            raise RuntimeError(
+                "Cannot compute threshold from an empty calibration set."
+            )
 
         if exceedance_prob <= 0.0:
             return torch.tensor(float("inf"), device=scores.device, dtype=scores.dtype)

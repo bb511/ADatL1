@@ -24,7 +24,7 @@ class Decoder(MLP):
         self,
         nodes: list[int],
         out_dim: int,
-        activation: str = 'relu',
+        activation: str = "relu",
         init_weight: Optional[Callable] = None,
         init_bias: Optional[Callable] = None,
         batchnorm: bool = False,

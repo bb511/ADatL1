@@ -30,7 +30,7 @@ class ClassicVAELoss(L1ADLoss):
         scale: float = 1,
         reco_scale: float = 1,
         kl_scale: float = 1,
-        reduct: str = "none"
+        reduct: str = "none",
     ):
         super().__init__(scale=scale, reduction=reduct)
         self.kl_scale_final = float(kl_scale)
@@ -66,7 +66,7 @@ class AxoV4Loss(ClassicVAELoss):
         scale: float = 1,
         reco_scale: float = 1,
         kl_scale: float = 1,
-        reduct: str = "none"
+        reduct: str = "none",
     ):
         super().__init__(scale=scale, kl_scale=kl_scale, reduct=reduct)
         self.reco_loss = CylPtPzReconstructionLoss(scale=reco_scale, reduction=reduct)

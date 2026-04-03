@@ -35,7 +35,7 @@ class WassersteinCallback(Callback):
         dataset_1: str,
         dataset_2: str,
         apply_log1p: bool = True,
-        beta: float = 0.9
+        beta: float = 0.9,
     ):
         super().__init__()
         self.metric_name = metric_name
@@ -176,5 +176,6 @@ class WassersteinCallback(Callback):
         if self.w1dist_ema is None:
             self.w1dist_ema = float(w1dist)
         else:
-            self.w1dist_ema = \
-                self.beta * self.w1dist_ema + (1 - self.beta) * float(w1dist)
+            self.w1dist_ema = self.beta * self.w1dist_ema + (1 - self.beta) * float(
+                w1dist
+            )

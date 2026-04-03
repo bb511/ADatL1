@@ -40,6 +40,7 @@ class AnomalyEfficiencyCallback(Callback):
     :param name: String specifying the name of the callback for identification in
         later methods that manipulate callbacks.
     """
+
     def __init__(
         self,
         target_rates: list[int],
@@ -49,7 +50,7 @@ class AnomalyEfficiencyCallback(Callback):
         pure_thres: bool = False,
         cvar_summary: float = 0.25,
         log_raw_mlflow: bool = True,
-        name: str = 'eff'
+        name: str = "eff",
     ):
         super().__init__()
         self.device = None
@@ -72,8 +73,8 @@ class AnomalyEfficiencyCallback(Callback):
         self.device = pl_module.device
         self.thresholds = defaultdict(float)
         for target_rate in self.target_rates:
-            trate_name = f'{target_rate}'.replace(".", "_")
-            self.thresholds[target_rate] = getattr(pl_module, f'thres_{trate_name}kHz')
+            trate_name = f"{target_rate}".replace(".", "_")
+            self.thresholds[target_rate] = getattr(pl_module, f"thres_{trate_name}kHz")
 
         # Check if 'zerobias' dataset is the first dataset in the test dictionary.
         # This is required to compute the rate thresholds on the anomaly scores.
@@ -280,10 +281,10 @@ class AnomalyEfficiencyCallback(Callback):
     def _compute_eff(self, rates: dict, target_rate: float):
         """Compute the efficiency in given rate dictionary."""
         effs = defaultdict(float)
-        clean_metric_name = self.metric_name.replace('/', '_')
+        clean_metric_name = self.metric_name.replace("/", "_")
         for ds_name, rate in rates[target_rate].items():
             logging_name = f"{ds_name}"
-            effs[logging_name] = rate.compute('efficiency').item()
+            effs[logging_name] = rate.compute("efficiency").item()
 
         return effs
 

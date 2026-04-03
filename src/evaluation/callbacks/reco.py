@@ -37,7 +37,7 @@ class ReconstructionPlots(Callback):
         datamodule: LightningDataModule,
         ckpts: dict,
         datasets: list[str] = [],
-        name: str = 'reco',
+        name: str = "reco",
         log_raw_mlflow: bool = True,
     ):
         self.warmup_batches = warmup_batches
@@ -78,7 +78,9 @@ class ReconstructionPlots(Callback):
 
         yhat = outputs[self.output_name]
 
-        if hasattr(pl_module, "features") and not isinstance(pl_module.features, torch.nn.Identity):
+        if hasattr(pl_module, "features") and not isinstance(
+            pl_module.features, torch.nn.Identity
+        ):
             self._update_features(trainer, dset_name, x, yhat)
         else:
             self._update_objects(trainer, dset_name, x, yhat, m)
@@ -93,7 +95,9 @@ class ReconstructionPlots(Callback):
 
         for dset_name in self._edges:
             split = trainer.split
-            plot_folder = ckpts_dir / "plots" / split / ckpt_name / self.name / dset_name
+            plot_folder = (
+                ckpts_dir / "plots" / split / ckpt_name / self.name / dset_name
+            )
             plot_folder.mkdir(parents=True, exist_ok=True)
 
             for key, edges in self._edges[dset_name].items():

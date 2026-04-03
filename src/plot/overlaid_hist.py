@@ -82,8 +82,12 @@ def plot_streamed(
     counts1 = counts1 / max(counts1.sum(), 1)
     counts2 = counts2 / max(counts2.sum(), 1)
 
-    hep.histplot(counts1, edges, ax=ax, label=label1, histtype="fill", color="C0", alpha=0.5)
-    hep.histplot(counts2, edges, ax=ax, label=label2, histtype="fill", color="C1", alpha=0.5)
+    hep.histplot(
+        counts1, edges, ax=ax, label=label1, histtype="fill", color="C0", alpha=0.5
+    )
+    hep.histplot(
+        counts2, edges, ax=ax, label=label2, histtype="fill", color="C1", alpha=0.5
+    )
     ax.legend()
 
     if check_feature_is_Et(feat_name):

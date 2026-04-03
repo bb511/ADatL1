@@ -12,7 +12,7 @@ from src.evaluation.callbacks.metrics.cap.kernel import ApproximationCapacityKer
 from src.evaluation.callbacks.metrics.cap.binary import (
     get_normalizer_fn as get_normalizer_fn_binary,
     get_energy_fn as get_energy_fn_binary,
-    get_regularizer_fn as get_regularizer_fn_binary
+    get_regularizer_fn as get_regularizer_fn_binary,
 )
 
 
@@ -136,8 +136,7 @@ class ApproximationCapacity(Metric):
     def _get_normalizer_fn(self):
         if self.binary:
             normalizer_fn = get_normalizer_fn_binary(
-                self.normalization_type,
-                self.normalization_params
+                self.normalization_type, self.normalization_params
             )
         else:
             raise NotImplementedError("Non-binary support is not implemented yet.")
@@ -146,10 +145,7 @@ class ApproximationCapacity(Metric):
 
     def _get_energy_fn(self):
         if self.binary:
-            energy_fn = get_energy_fn_binary(
-                self.energy_type,
-                self.energy_params
-            )
+            energy_fn = get_energy_fn_binary(self.energy_type, self.energy_params)
         else:
             raise NotImplementedError("Non-binary support is not implemented yet.")
 
@@ -158,8 +154,7 @@ class ApproximationCapacity(Metric):
     def _get_regularizer_fn(self):
         if self.binary:
             regularizer_fn = get_regularizer_fn_binary(
-                self.regularization_type,
-                self.regularization_params
+                self.regularization_type, self.regularization_params
             )
         else:
             raise NotImplementedError("Non-binary support is not implemented yet.")
@@ -175,10 +170,12 @@ class ApproximationCapacity(Metric):
 
         # Add mean and std to the energy parameters
         combined = torch.cat([logits1, logits2], dim=0)
-        self.energy_params.update({
-            "mean": combined.mean().item(),
-            "std": combined.std().item(),
-        })
+        self.energy_params.update(
+            {
+                "mean": combined.mean().item(),
+                "std": combined.std().item(),
+            }
+        )
         del combined
 
         # Initialize kernel with updated energy function
@@ -224,10 +221,12 @@ class ApproximationCapacity(Metric):
 
             current_cap = kernel.cap.item()
             current_beta = kernel.beta.item()
-            self.epoch_logs.append({
-                "cap": current_cap,
-                "beta": current_beta,
-            })
+            self.epoch_logs.append(
+                {
+                    "cap": current_cap,
+                    "beta": current_beta,
+                }
+            )
 
             if current_cap > best_cap:
                 best_cap = current_cap

@@ -143,7 +143,7 @@ class HistogramOutputCallback(Callback):
                 obj_name=dset_name,
                 feat_name=self.output_name,
                 save_dir=plot_folder,
-                log=self.log
+                log=self.log,
             )
 
         utils.mlflow.log_plots_to_mlflow(

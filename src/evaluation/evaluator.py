@@ -74,7 +74,7 @@ class Evaluator:
         model: LightningModule,
         test_loader: dict,
         split: str,
-        set_optimized_metric: bool = False
+        set_optimized_metric: bool = False,
     ):
         """Evaluates all checkpoints pertraining to a run.
 
@@ -114,9 +114,14 @@ class Evaluator:
 
         if self.set_optimized_metric and self.optimized_ckpt_name is not None:
             logger = self.evaluator.logger
-            if logger is not None and hasattr(logger, "experiment") and hasattr(logger, "run_id"):
-                logger.experiment.set_tag(logger.run_id, "optimized_ckpt_name", self.optimized_ckpt_name)
-
+            if (
+                logger is not None
+                and hasattr(logger, "experiment")
+                and hasattr(logger, "run_id")
+            ):
+                logger.experiment.set_tag(
+                    logger.run_id, "optimized_ckpt_name", self.optimized_ckpt_name
+                )
 
     def _evaluate_strategy(self, strategy_folder: Path, model, test_loader: dict):
         """Evaluate all the checkpoints corresponding to a certain strategy.
@@ -247,17 +252,17 @@ class Evaluator:
         if optimized_metric_config is None or self.set_optimized_metric is False:
             return
 
-        main_cfg = optimized_metric_config['main_metric']
-        main_cb_name = main_cfg['callback']['name']
-        main_cb_params = main_cfg['callback']['params']
-        main_optim_dir = main_cfg['direction']
+        main_cfg = optimized_metric_config["main_metric"]
+        main_cb_name = main_cfg["callback"]["name"]
+        main_cb_params = main_cfg["callback"]["params"]
+        main_optim_dir = main_cfg["direction"]
         ckpt_name, main_metric = self._get_metric(main_cb_name, main_cb_params)
 
         if main_metric is None:
             log.warn("Main metric is None. Optimized HP metric not updated this strat.")
             return
-        elif optimized_metric_config.get('sec_metric') is not None:
-            sec_cfg = optimized_metric_config['sec_metric']
+        elif optimized_metric_config.get("sec_metric") is not None:
+            sec_cfg = optimized_metric_config["sec_metric"]
             sec_metric, sec_optim_dir = self._get_secondary_metric(sec_cfg, ckpt_name)
             optimized_metrics = [main_metric, sec_metric]
             optim_directions = [main_optim_dir, sec_optim_dir]
@@ -333,11 +338,7 @@ class Evaluator:
         raise ValueError("Optimized metric direction must be 'maximize' or 'minimize'.")
 
     def _comp_best_across_crit(
-        self,
-        values: list[float],
-        *,
-        ckpt_name: str,
-        directions: list[str]
+        self, values: list[float], *, ckpt_name: str, directions: list[str]
     ):
         """Update best composite metric across checkpoint criteria.
 

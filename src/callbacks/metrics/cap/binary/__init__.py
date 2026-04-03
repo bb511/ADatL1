@@ -7,22 +7,18 @@ from torch import Tensor
 __all__ = ["get_pairing_fn", "get_normalizer_fn", "get_energy_fn", "get_regularizer_fn"]
 
 
-from src.callbacks.metrics.cap.binary.pairing import (
-    random,
-    label,
-    absolute,
-    cdf
-)
+from src.callbacks.metrics.cap.binary.pairing import random, label, absolute, cdf
+
 
 def get_pairing_fn(
     pairing_type: str,
 ):
     """Get the regularization function based on type."""
 
-    if pairing_type == "none": # get the first elements
+    if pairing_type == "none":  # get the first elements
         return lambda tensor1, tensor2: (
             torch.arange(min(len(tensor1), len(tensor2))),
-            torch.arange(min(len(tensor1), len(tensor2)))
+            torch.arange(min(len(tensor1), len(tensor2))),
         )
 
     elif pairing_type == "random":
@@ -47,12 +43,12 @@ from src.callbacks.metrics.cap.binary.normalization import (
     log_sigmoid,
     softmax,
     rank,
-    rank_mid
+    rank_mid,
 )
 
+
 def get_normalizer_fn(
-    normalization_type: str,
-    normalization_params: Optional[dict] = None
+    normalization_type: str, normalization_params: Optional[dict] = None
 ):
     """Get the normalization function based on type."""
 
@@ -61,19 +57,13 @@ def get_normalizer_fn(
         return lambda x, y: (x, y)
 
     # Split or joint normalization:
-    mode = normalization_params.pop('mode', 'joint')
+    mode = normalization_params.pop("mode", "joint")
 
     if normalization_type == "minmax":
-        normalizer_fn = functools.partial(
-            minmax,
-            **normalization_params
-        )
+        normalizer_fn = functools.partial(minmax, **normalization_params)
 
     elif normalization_type == "sigmoid":
-        normalizer_fn = functools.partial(
-            sigmoid,
-            **normalization_params
-        )
+        normalizer_fn = functools.partial(sigmoid, **normalization_params)
 
     elif normalization_type == "softmax":
         normalizer_fn = softmax
@@ -91,24 +81,23 @@ def get_normalizer_fn(
         raise ValueError(f"Unknown normalization type: {normalization_type}")
 
     def _normalize(
-            tensor1: Tensor,
-            tensor2: Tensor,
-            normalizer_fn: Callable,
-            mode: Literal["split", "joint"] = "joint"
-        ) -> Tuple[Tensor, Tensor]:
+        tensor1: Tensor,
+        tensor2: Tensor,
+        normalizer_fn: Callable,
+        mode: Literal["split", "joint"] = "joint",
+    ) -> Tuple[Tensor, Tensor]:
 
         if mode == "joint":
             combined = torch.cat([tensor1, tensor2], dim=0)
             normalized_combined = normalizer_fn(combined)
-            return normalized_combined[:len(tensor1)], normalized_combined[len(tensor1):]
+            return (
+                normalized_combined[: len(tensor1)],
+                normalized_combined[len(tensor1) :],
+            )
 
         return normalizer_fn(tensor1), normalizer_fn(tensor2)
 
-    return functools.partial(
-        _normalize,
-        normalizer_fn=normalizer_fn,
-        mode=mode
-    )
+    return functools.partial(_normalize, normalizer_fn=normalizer_fn, mode=mode)
 
 
 from src.callbacks.metrics.cap.binary.energy import (
@@ -117,13 +106,11 @@ from src.callbacks.metrics.cap.binary.energy import (
     focal,
     contrastive,
     margin,
-    adaptive
+    adaptive,
 )
 
-def get_energy_fn(
-    energy_type: str,
-    energy_params: Optional[dict] = None
-):
+
+def get_energy_fn(energy_type: str, energy_params: Optional[dict] = None):
     """Get the regularization function based on type."""
     energy_params = energy_params or {}
 
@@ -131,34 +118,19 @@ def get_energy_fn(
         return baseline
 
     elif energy_type == "focal":
-        return functools.partial(
-            focal,
-            **energy_params
-        )
+        return functools.partial(focal, **energy_params)
 
     elif energy_type == "exponential":
-        return functools.partial(
-            exponential,
-            **energy_params
-        )
+        return functools.partial(exponential, **energy_params)
 
     elif energy_type == "margin":
-        return functools.partial(
-            margin,
-            **energy_params
-        )
+        return functools.partial(margin, **energy_params)
 
     elif energy_type == "contrastive":
-        return functools.partial(
-            contrastive,
-            **energy_params
-        )
+        return functools.partial(contrastive, **energy_params)
 
     elif energy_type == "adaptive":
-        return functools.partial(
-            adaptive,
-            **energy_params
-        )
+        return functools.partial(adaptive, **energy_params)
 
     else:
         raise ValueError(f"Unknown energy type: {energy_type}")
@@ -167,12 +139,12 @@ def get_energy_fn(
 from src.callbacks.metrics.cap.binary.regularization import (
     threshold,
     smooth,
-    percentile
+    percentile,
 )
 
+
 def get_regularizer_fn(
-    regularization_type: str,
-    regularization_params: Optional[dict] = None
+    regularization_type: str, regularization_params: Optional[dict] = None
 ):
     """Get the regularization function based on type."""
 
@@ -181,46 +153,22 @@ def get_regularizer_fn(
         return lambda x: x
 
     elif regularization_type == "threshold_max":
-        return functools.partial(
-            threshold,
-            **regularization_params,
-            mode="max"
-        )
+        return functools.partial(threshold, **regularization_params, mode="max")
 
     elif regularization_type == "threshold_mean":
-        return functools.partial(
-            threshold,
-            **regularization_params,
-            mode="mean"
-        )
+        return functools.partial(threshold, **regularization_params, mode="mean")
 
     elif regularization_type == "threshold_zero":
-        return functools.partial(
-            threshold,
-            **regularization_params,
-            mode="zero"
-        )
+        return functools.partial(threshold, **regularization_params, mode="zero")
 
     elif regularization_type == "smooth_sigmoid":
-        return functools.partial(
-            smooth,
-            **regularization_params,
-            mode="sigmoid"
-        )
+        return functools.partial(smooth, **regularization_params, mode="sigmoid")
 
     elif regularization_type == "smooth_exponential":
-        return functools.partial(
-            smooth,
-            **regularization_params,
-            mode="exponential"
-        )
+        return functools.partial(smooth, **regularization_params, mode="exponential")
 
     elif regularization_type == "smooth_linear":
-        return functools.partial(
-            smooth,
-            **regularization_params,
-            mode="linear"
-        )
+        return functools.partial(smooth, **regularization_params, mode="linear")
 
     elif regularization_type == "percentile":
         return functools.partial(

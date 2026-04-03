@@ -123,6 +123,62 @@
 # ------------------------
 
 # VAE hyperparameter search semi-supervised.
+# taskset -c 0-2 \
+# python3 src/train.py \
+#     -m \
+#     hydra/launcher=submitit_local \
+#     hydra.launcher.cpus_per_task=1 \
+#     hydra.launcher.gpus_per_node=4 \
+#     paths.raw_data_dir=/data/deodagiu/adl1t_data/parquet_files \
+#     experiment=vae \
+#     experiment_name=vae_cvar25_vs_kl_search \
+#     callbacks.max_rate_kl_ckpt=null \
+#     callbacks.stable_kl_q99_ckpt=null \
+#     ~evaluator.ckpts.single.loss_kl_q99 \
+#     ~evaluator.ckpts.single.eff__ascore_loss_kl_raw_full__brate_0_25kHz \
+#     evaluator_callbacks.kl_loss_q99=null \
+#     evaluator_callbacks.thres_transfer=null \
+#     evaluator_callbacks.wasserstein=null \
+#     evaluator_callbacks.reco=null \
+#     logger=none \
+#     hparams_search=vae_optuna \
+#     hydra.sweeper.study_name=cvar25eff_vs_kl_b16k \
+#     hydra.sweeper.n_trials=100 \
+#     hydra.sweeper.sampler.n_startup_trials=150 \
+#     trainer=gpu \
+#     trainer.max_epochs=50 \
+#     trainer.devices=[0]
+
+
+# VAE hyperparameter search semi-supervised kl q99.
+# taskset -c 0-2 \
+# python3 src/train.py \
+#     -m \
+#     hydra/launcher=submitit_local \
+#     hydra.launcher.cpus_per_task=1 \
+#     hydra.launcher.gpus_per_node=4 \
+#     paths.raw_data_dir=/data/deodagiu/adl1t_data/parquet_files \
+#     experiment=vae \
+#     experiment_name=vae_cvar25_vs_klq99_search \
+#     callbacks.max_rate_kl_ckpt=null \
+#     callbacks.stable_kl_ckpt=null \
+#     ~evaluator.ckpts.single.loss_kl_raw_mean_top_vals \
+#     ~evaluator.ckpts.single.eff__ascore_loss_kl_raw_full__brate_0_25kHz \
+#     evaluator_callbacks.kl_operational_mean=null \
+#     evaluator_callbacks.thres_transfer=null \
+#     evaluator_callbacks.wasserstein=null \
+#     evaluator_callbacks.reco=null \
+#     logger=none \
+#     hparams_search=vae_optuna \
+#     hydra.sweeper.study_name=cvar25eff_vs_klq99_b16k \
+#     hydra.sweeper.n_trials=100 \
+#     hydra.sweeper.sampler.n_startup_trials=150 \
+#     trainer=gpu \
+#     trainer.max_epochs=50 \
+#     trainer.devices=[0]
+
+
+# VAE hyperparameter search semi-supervised cvar 10%.
 taskset -c 0-2 \
 python3 src/train.py \
     -m \
@@ -131,7 +187,7 @@ python3 src/train.py \
     hydra.launcher.gpus_per_node=4 \
     paths.raw_data_dir=/data/deodagiu/adl1t_data/parquet_files \
     experiment=vae \
-    experiment_name=vae_cvar25_vs_kl_search \
+    experiment_name=vae_cvar10_vs_kl_search \
     callbacks.max_rate_kl_ckpt=null \
     callbacks.stable_kl_q99_ckpt=null \
     ~evaluator.ckpts.single.loss_kl_q99 \
@@ -148,58 +204,6 @@ python3 src/train.py \
     trainer=gpu \
     trainer.max_epochs=50 \
     trainer.devices=[0]
-
-
-# VAE hyperparameter search semi-supervised kl q99.
-# taskset -c 0-2 \
-# python3 src/train.py \
-#     -m \
-#     hydra/launcher=submitit_local \
-#     hydra.launcher.cpus_per_task=1 \
-#     hydra.launcher.gpus_per_node=4 \
-#     paths.raw_data_dir=/data/deodagiu/adl1t_data/parquet_files \
-#     experiment=vae \
-#     experiment_name=vae_cvar_vs_klq99_search \
-#     callbacks.max_rate_kl_ckpt=null \
-#     callbacks.stable_kl_ckpt=null \
-#     evaluator.ckpts.last=false \
-#     evaluator.ckpts.single=null \
-#     evaluator_callbacks.reco=null \
-#     logger=none \
-#     hparams_search=vae_optuna \
-#     optimized_metric_config.sec_metric.callback.name=kl_raw_q99 \
-#     hydra.sweeper.study_name=cvar25eff_vs_klq99_b16k \
-#     hydra.sweeper.n_trials=100 \
-#     hydra.sweeper.sampler.n_startup_trials=150 \
-#     trainer=gpu \
-#     trainer.max_epochs=50 \
-#     trainer.devices=[0]
-
-
-# VAE hyperparameter search semi-supervised cvar 10%.
-# taskset -c 0-2 \
-# python3 src/train.py \
-#     -m \
-#     hydra/launcher=submitit_local \
-#     hydra.launcher.cpus_per_task=1 \
-#     hydra.launcher.gpus_per_node=4 \
-#     paths.raw_data_dir=/data/deodagiu/adl1t_data/parquet_files \
-#     experiment=vae \
-#     experiment_name=vae_cvar10_vs_kl_search \
-#     callbacks.max_rate_kl_ckpt=null \
-#     callbacks.stable_kl_ckpt=null \
-#     evaluator.ckpts.last=false \
-#     evaluator.ckpts.single=null \
-#     evaluator_callbacks.reco=null \
-#     evaluator_callbacks.anomaly_efficiency.cvar_summary=0.10 \
-#     logger=none \
-#     hparams_search=vae_optuna \
-#     hydra.sweeper.study_name=cvar10eff_vs_kl_b16k \
-#     hydra.sweeper.n_trials=100 \
-#     hydra.sweeper.sampler.n_startup_trials=150 \
-#     trainer=gpu \
-#     trainer.max_epochs=50 \
-#     trainer.devices=[0]
 
 
 # CAP Agnostic Searches

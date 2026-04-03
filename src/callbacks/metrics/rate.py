@@ -40,9 +40,9 @@ class AnomalyRate(Metric):
         :bkg_score: Torch tensor containing scores for background samples.
         """
         q = 1.0 - (self.target_rate / self.bc_rate)
-        thr = torch.quantile(
-            bkg_score.float(), q, interpolation='higher'
-        ).to(self.threshold.device)
+        thr = torch.quantile(bkg_score.float(), q, interpolation="higher").to(
+            self.threshold.device
+        )
         self.threshold.copy_(thr)
 
     def apply_threshold(self, threshold: float):

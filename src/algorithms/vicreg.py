@@ -167,7 +167,6 @@ class VICReg(L1ADLightningModule):
             # Used for backprop:
             "loss": loss_total,
             # Used for logging:
-
             # losses
             "loss/inv": loss_inv.detach(),
             "loss/var": loss_var.detach(),
@@ -175,7 +174,6 @@ class VICReg(L1ADLightningModule):
             "loss/inv/ratio": inv_ratio,
             "loss/var/ratio": var_ratio,
             "loss/cov/ratio": cov_ratio,
-
             # Projector diagnosis:
             "z1/std": z1_std,
             "z2/std": z2_std,
@@ -213,7 +211,6 @@ class VICReg(L1ADLightningModule):
             # Used for backprop:
             "loss": loss_total,
             # Used for logging:
-
             # losses
             "loss/inv": loss_inv.detach(),
             "loss/var": loss_var.detach(),
@@ -221,18 +218,15 @@ class VICReg(L1ADLightningModule):
             "loss/inv/ratio": inv_ratio,
             "loss/var/ratio": var_ratio,
             "loss/cov/ratio": cov_ratio,
-
             # Projector diagnosis:
             "z1/std": z1_std,
             "z2/std": z2_std,
             "z1/var_min": z1_var_min,
             "z2/var_median": z1_var_median,
             "z2/var_max": z1_var_max,
-
             # Backbone diagnosis:
             "effective_rank": h_efr,
             **outdict_diag,
-
             # Used for callbacks:
             "vicreg_rep_data": h,
         }
@@ -307,8 +301,8 @@ class VICReg(L1ADLightningModule):
 
         eigvals = torch.linalg.eigvalsh(C).clamp_min(eps)
         trace = eigvals.sum()
-        trace2 = (eigvals ** 2).sum()
-        r_eff = (trace ** 2 / trace2).item()
+        trace2 = (eigvals**2).sum()
+        r_eff = (trace**2 / trace2).item()
         max_ev = eigvals.max().item()
 
         return r_eff, max_ev

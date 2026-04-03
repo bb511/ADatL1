@@ -35,7 +35,7 @@ class CAPCallback(Callback):
         dataset_2: str,
         pairing_type: str,
         cap_metric_config: dict,
-        beta: float = 0.9
+        beta: float = 0.9,
     ):
         super().__init__()
         self.device = None
@@ -78,7 +78,9 @@ class CAPCallback(Callback):
         self.dataset_1_scores = []
         self.dataset_2_scores = []
 
-        self.capmetric = ApproximationCapacity(**self.cap_metric_config, device=self.device)
+        self.capmetric = ApproximationCapacity(
+            **self.cap_metric_config, device=self.device
+        )
         self.capmetric.to(self.device)
 
     def on_validation_batch_end(
@@ -170,7 +172,7 @@ class CAPCallback(Callback):
         rx = rx - rx.mean()
         ry = ry - ry.mean()
 
-        denom = torch.sqrt((rx ** 2).sum() * (ry ** 2).sum())
+        denom = torch.sqrt((rx**2).sum() * (ry**2).sum())
         if denom < 1e-12:
             return float("nan")
 
@@ -181,5 +183,4 @@ class CAPCallback(Callback):
         if self.cap_ema is None:
             self.cap_ema = float(cap)
         else:
-            self.cap_ema = \
-                self.beta * self.cap_ema + (1 - self.beta) * float(cap)
+            self.cap_ema = self.beta * self.cap_ema + (1 - self.beta) * float(cap)

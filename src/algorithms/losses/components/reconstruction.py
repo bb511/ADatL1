@@ -86,6 +86,7 @@ class CylPtPzReconstructionLoss(MSEReconstructionLoss):
     """
 
     name: str = "cylreco"
+
     def __init__(
         self, scale: float = 1.0, reduction: Literal["none", "mean", "sum"] = "none"
     ):

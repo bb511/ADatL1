@@ -38,7 +38,7 @@ class AnomalyEfficiencyCallback(Callback):
             on_epoch=True,
             logger=True,
             sync_dist=True,
-            add_dataloader_idx=False
+            add_dataloader_idx=False,
         )
 
     def on_fit_start(self, trainer, pl_module):
@@ -89,14 +89,14 @@ class AnomalyEfficiencyCallback(Callback):
     def on_validation_epoch_end(self, trainer, pl_module) -> None:
         """Log the anomaly rates computed on each of the data sets."""
         for target_rate in self.target_rates:
-            main_rate = self.main_rate[target_rate]['zerobias'].compute('rate').item()
+            main_rate = self.main_rate[target_rate]["zerobias"].compute("rate").item()
             bkg_effs = self._compute_efficiencies(self.bkg_rates, target_rate)
             sig_effs = self._compute_efficiencies(self.sig_rates, target_rate)
             cvar25 = self._cvar_lower_tail(sig_effs.values(), alpha=0.25)
             self._compute_cvar_ema(cvar25)
             min_sig_eff = min(list(sig_effs.values()))
             med_sig_eff = statistics.median(list(sig_effs.values()))
-            threshold = self.main_rate[target_rate]['zerobias'].threshold.item()
+            threshold = self.main_rate[target_rate]["zerobias"].threshold.item()
 
             pl_module.log_dict(
                 {f"val/zerobias/brate_{target_rate}kHz": main_rate}, **self.log_kwargs
@@ -109,17 +109,16 @@ class AnomalyEfficiencyCallback(Callback):
             pl_module.log_dict(
                 {"val/summary/eff_cvar25_ema": self.cvar25_ema}, **self.log_kwargs
             )
-            pl_module.log_dict(
-                {f"val/zerobias/thr__brate_{target_rate}kHz": threshold}
-            )
+            pl_module.log_dict({f"val/zerobias/thr__brate_{target_rate}kHz": threshold})
 
     def _compute_cvar_ema(self, cvar25: float):
         """Compute the cvar estimated moving average."""
         if self.cvar25_ema is None:
             self.cvar25_ema = float(cvar25)
         else:
-            self.cvar25_ema = \
-                self.beta * self.cvar25_ema + (1 - self.beta) * float(cvar25)
+            self.cvar25_ema = self.beta * self.cvar25_ema + (1 - self.beta) * float(
+                cvar25
+            )
 
     def _accumulate_zerobias_output(self, outputs: dict, batch_idx: int, pl_module):
         """Accummulates the specified metric data across batches.
@@ -197,11 +196,13 @@ class AnomalyEfficiencyCallback(Callback):
     def _compute_efficiencies(self, rates: dict, target_rate: float):
         """Compute the efficiencies given a rate dictionary."""
         effs = defaultdict(float)
-        clean_metric_name = self.metric_name.replace('/', '_')
-        trate_name = str(target_rate).replace('.', '_')
+        clean_metric_name = self.metric_name.replace("/", "_")
+        trate_name = str(target_rate).replace(".", "_")
         for ds_name, rate in rates[target_rate].items():
-            logging_name = f"val/{ds_name}/eff__ascore_{clean_metric_name}__brate_{trate_name}kHz"
-            effs[logging_name] = rate.compute('efficiency')
+            logging_name = (
+                f"val/{ds_name}/eff__ascore_{clean_metric_name}__brate_{trate_name}kHz"
+            )
+            effs[logging_name] = rate.compute("efficiency")
 
         return effs
 

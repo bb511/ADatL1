@@ -31,7 +31,7 @@ class MLP(nn.Module):
         out_dim: int,
         batchnorm: Optional[bool] = False,
         affine: bool = True,
-        activation: str = 'relu',
+        activation: str = "relu",
         final_activation: bool = False,
         init_weight: Optional[Callable] = None,
         init_bias: Optional[Callable] = None,

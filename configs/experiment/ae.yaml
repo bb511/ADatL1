@@ -243,7 +243,7 @@ evaluator_callbacks:
       - haa-4b-ma15
     log_raw_mlflow: false
 
-  thres_transfer:
+  thres_drift:
     _target_: src.evaluation.callbacks.thres_drift.ThresholdDriftCallback
     loss_name: 'loss/mse/full'
     target_rates: [0.25]
@@ -251,7 +251,7 @@ evaluator_callbacks:
     calibration_fraction: 0.5
     split_seed: 12345
     log_raw_mlflow: false
-    name: thres_transfer
+    name: thres_drift
 
   wasserstein:
     _target_: src.evaluation.callbacks.wasserstein.Wasserstein

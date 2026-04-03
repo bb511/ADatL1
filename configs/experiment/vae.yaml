@@ -133,12 +133,26 @@ callbacks:
     every_n_epochs: 1
     save_on_train_epoch_end: false
 
+  cvar10_ema_ckpt:
+    _target_: pytorch_lightning.callbacks.ModelCheckpoint
+    dirpath: '${paths.checkpoints_dir}/${experiment_name}/${run_name}/summary/cvar10_ema/max'
+    monitor: 'val/summary/eff_cvar10_ema'
+    filename: 'cvar10_ema'
+    save_last: false
+    save_top_k: 1
+    mode: "max"
+    auto_insert_metric_name: False
+    save_weights_only: False
+    every_n_epochs: 1
+    save_on_train_epoch_end: false
+
 
 evaluator:
   ckpts:
     last: true
     summary:
       cvar25_ema: ['max']
+      cvar10_ema: ['max']
     single:
       loss_kl_raw_mean_top_vals: ['stable']
       loss_kl_q99: ['stable']
@@ -231,7 +245,7 @@ evaluator_callbacks:
       - haa-4b-ma15
     log_raw_mlflow: false
 
-  thres_transfer:
+  thres_drift:
     _target_: src.evaluation.callbacks.thres_drift.ThresholdDriftCallback
     loss_name: 'loss/kl_raw/full'
     target_rates: [0.25]
@@ -239,7 +253,7 @@ evaluator_callbacks:
     calibration_fraction: 0.5
     split_seed: 12345
     log_raw_mlflow: false
-    name: thres_transfer
+    name: thres_drift
 
   wasserstein:
     _target_: src.evaluation.callbacks.wasserstein.Wasserstein

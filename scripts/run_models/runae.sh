@@ -226,7 +226,7 @@ python3 src/train.py \
 #     evaluator_callbacks.wasserstein=null \
 #     evaluator_callbacks.reco=null \
 #     logger=none \
-#     hparams_search=ae_agnostic_optuna \
+#     hparams_search=ae_optuna \
 #     hydra.sweeper.study_name=cap_vs_mse_b16k \
 #     hydra.sweeper.n_trials=100 \
 #     hydra.sweeper.sampler.n_startup_trials=150 \
@@ -261,7 +261,7 @@ python3 src/train.py \
 #     evaluator_callbacks.wasserstein=null \
 #     evaluator_callbacks.reco=null \
 #     logger=none \
-#     hparams_search=ae_agnostic_optuna \
+#     hparams_search=ae_optuna \
 #     optimized_metric_config.sec_metric.callback.name=mse_q99 \
 #     hydra.sweeper.study_name=cap_vs_mseq99_b16k \
 #     hydra.sweeper.n_trials=100 \
@@ -299,7 +299,7 @@ python3 src/train.py \
 #     evaluator_callbacks.wasserstein=null \
 #     evaluator_callbacks.reco=null \
 #     logger=none \
-#     hparams_search=ae_agnostic_optuna \
+#     hparams_search=ae_optuna \
 #     optimized_metric_config.main_metric.callback.name=thres_drift \
 #     +optimized_metric_config.main_metric.callback.params.target_rate=0.25 \
 #     optimized_metric_config.main_metric.direction=minimize \
@@ -337,7 +337,7 @@ python3 src/train.py \
 #     evaluator_callbacks.wasserstein=null \
 #     evaluator_callbacks.reco=null \
 #     logger=none \
-#     hparams_search=ae_agnostic_optuna \
+#     hparams_search=ae_optuna \
 #     optimized_metric_config.main_metric.callback.name=thres_drift \
 #     +optimized_metric_config.main_metric.callback.params.target_rate=0.25 \
 #     optimized_metric_config.main_metric.direction=minimize \
@@ -379,7 +379,7 @@ python3 src/train.py \
 #     evaluator_callbacks.thres_drift=null \
 #     evaluator_callbacks.reco=null \
 #     logger=none \
-#     hparams_search=ae_agnostic_optuna \
+#     hparams_search=ae_optuna \
 #     optimized_metric_config.main_metric.callback.name=wasserstein \
 #     optimized_metric_config.main_metric.direction=minimize \
 #     hydra.sweeper.study_name=wasserstein_vs_mse_b16k \
@@ -415,7 +415,7 @@ python3 src/train.py \
 #     evaluator_callbacks.thres_drift=null \
 #     evaluator_callbacks.reco=null \
 #     logger=none \
-#     hparams_search=ae_agnostic_optuna \
+#     hparams_search=ae_optuna \
 #     optimized_metric_config.main_metric.callback.name=wasserstein \
 #     optimized_metric_config.main_metric.direction=minimize \
 #     optimized_metric_config.sec_metric.callback.name=mse_q99 \

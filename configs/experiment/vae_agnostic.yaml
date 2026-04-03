@@ -64,34 +64,45 @@ callbacks:
     target_rates: [0.25]
     bc_rate: 28608.8064
 
-  max_rate_kl_ckpt:
-    _target_: src.callbacks.model_checkpoint.SingleDatasetModelCheckpoint
-    dirpath: '${paths.checkpoints_dir}/${experiment_name}/${run_name}'
-    monitor: eff__ascore_loss_kl_raw_full__brate_0.25kHz
-    criterion:
-      _target_: src.callbacks.checkpointing.criterion.Max
-      top_k: 1
-    ds:
-      - GluGluHTo2B_Par-MH-125
-      - GluGluHto2G_Par-MH-125
-      - GluGluHto2G_Par-MH-90
-      - GluGluHto2Tau_Par-MH-125
-      - GluGlutoHHto2B2WtoLNu2Q_Par-c2-0-kl-1-kt-1
-      - HHHto4B2Tau_Par-c3-0-d4-0
-      - HHHto6B_Par-c3-0-d4-0
-      - SUSYGluGluToBBHTo2B_Par-M-1200
-      - SUSYGluGluToBBHToBB_Par-M-120
-      - SUSYGluGluToBBHToBB_Par-M-350
-      - SUSYGluGluToBBHToBB_Par-M-600
-      - TTHTo2C_Par-MH-125
-      - TTHto2B_Par-MH-125
-      - VBFHTo2C_Par-MH-125
-      - VBFHto2B_Par-MH-125
-      - VBFHto2Tau_Par-MH-125
-      - WtoTauto3Mu
-      - ggH-suep-decay
-      - smj-case-A
-      - haa-4b-ma15
+  thres_drift:
+    _target_: src.callbacks.thres_drift.ThresholdDriftCallback
+    loss_name: 'loss/kl_raw/full'
+    target_rates: [0.25]
+    bc_rate: 28608.8064
+    calibration_fraction: 0.5
+    split_seed: 12345
+    beta: 0.9
+
+  wasserstein_dist:
+    _target_: src.callbacks.wasserstein.WassersteinCallback
+    metric_name: 'loss/kl_raw/full'
+    dataset_1: zerobias
+    dataset_2: SingleNeutrino_E-10-gun
+    apply_log1p: true
+    beta: 0.9
+
+  cap_sn_zb:
+    _target_: src.callbacks.cap.CAPCallback
+    metric_name: 'loss/kl_raw/full'
+    dataset_1: zerobias
+    dataset_2: SingleNeutrino_E-10-gun
+    pairing_type: cdf
+    cap_metric_config:
+      beta0: 1.0
+      normalization_type: sigmoid
+      normalization_params: null
+      energy_type: adaptive
+      energy_params:
+        scale: 0.5
+      regularization_type: none
+      regularization_params: null
+      binary: True
+      lr: 0.01
+      n_epochs: 20
+      batch_size: 8192
+      normalize_gradients: True
+      process_group: null
+      dist_sync_fn: null
 
   stable_kl_ckpt:
     _target_: src.callbacks.model_checkpoint.SingleDatasetModelCheckpoint
@@ -105,11 +116,49 @@ callbacks:
     ds:
       - zerobias
 
-  cvar25_ema_ckpt:
+  stable_kl_q99_ckpt:
+    _target_: src.callbacks.model_checkpoint.SingleDatasetModelCheckpoint
+    dirpath: '${paths.checkpoints_dir}/${experiment_name}/${run_name}'
+    monitor: loss_kl_raw_q99
+    criterion:
+      _target_: src.callbacks.checkpointing.criterion.Stable
+      top_k: 1
+      threshold: 0.05
+      patience: 10
+    ds:
+      - zerobias
+
+  thres_drift_ema_ckpt:
     _target_: pytorch_lightning.callbacks.ModelCheckpoint
-    dirpath: '${paths.checkpoints_dir}/${experiment_name}/${run_name}/summary/cvar25_ema/max'
-    monitor: 'val/summary/eff_cvar25_ema'
-    filename: 'cvar25_ema'
+    dirpath: '${paths.checkpoints_dir}/${experiment_name}/${run_name}/summary/trate0_25kHz_drift_ema/min'
+    monitor: 'val/summary/trate0_25kHz_drift_ema'
+    filename: 'trate0_25kHz_drift_ema'
+    save_last: false
+    save_top_k: 1
+    mode: "min"
+    auto_insert_metric_name: False
+    save_weights_only: False
+    every_n_epochs: 1
+    save_on_train_epoch_end: false
+
+  wasserstein_dist_ema_ckpt:
+    _target_: pytorch_lightning.callbacks.ModelCheckpoint
+    dirpath: '${paths.checkpoints_dir}/${experiment_name}/${run_name}/summary/w1dist_ema_zerobias_vs_SingleNeutrino_E-10-gun/min'
+    monitor: 'val/summary/w1dist_ema_zerobias_vs_SingleNeutrino_E-10-gun'
+    filename: 'w1dist_ema_zerobias_vs_SingleNeutrino_E-10-gun'
+    save_last: false
+    save_top_k: 1
+    mode: "min"
+    auto_insert_metric_name: False
+    save_weights_only: False
+    every_n_epochs: 1
+    save_on_train_epoch_end: false
+
+  cap_sn_zb_ema_ckpt:
+    _target_: pytorch_lightning.callbacks.ModelCheckpoint
+    dirpath: '${paths.checkpoints_dir}/${experiment_name}/${run_name}/summary/cap_ema_zerobias_vs_SingleNeutrino_E-10-gun/max'
+    monitor: 'val/summary/cap_ema_zerobias_vs_SingleNeutrino_E-10-gun'
+    filename: 'cap_ema_zerobias_vs_SingleNeutrino_E-10-gun'
     save_last: false
     save_top_k: 1
     mode: "max"
@@ -118,14 +167,18 @@ callbacks:
     every_n_epochs: 1
     save_on_train_epoch_end: false
 
+
 evaluator:
   ckpts:
     last: true
     summary:
-      cvar25_ema: ['max']
+      trate0_25kHz_drift_ema: ['min']
+      w1dist_ema_zerobias_vs_SingleNeutrino_E-10-gun: ['min']
+      cap_ema_zerobias_vs_SingleNeutrino_E-10-gun: ['max']
     single:
       loss_kl_raw_mean_top_vals: ['stable']
-      # eff__ascore_loss_kl_raw_full__brate_0.25kHz: ['max']
+      loss_kl_q99: ['stable']
+
 
 evaluator_callbacks:
   anomaly_efficiency:
@@ -237,7 +290,7 @@ evaluator_callbacks:
       - haa-4b-ma15
     log_raw_mlflow: false
 
-  thres_transfer:
+  thres_drift:
     _target_: src.evaluation.callbacks.thres_drift.ThresholdDriftCallback
     loss_name: 'loss/kl_raw/full'
     target_rates: [0.25]
@@ -245,7 +298,7 @@ evaluator_callbacks:
     calibration_fraction: 0.5
     split_seed: 12345
     log_raw_mlflow: false
-    name: thres_transfer
+    name: thres_drift
 
   wasserstein:
     _target_: src.evaluation.callbacks.wasserstein.Wasserstein

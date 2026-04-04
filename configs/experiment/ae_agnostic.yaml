@@ -188,7 +188,7 @@ evaluator:
     last: true
     summary:
       trate0_25kHz_drift_ema: ['min']
-      # trate286_0kHz_drift_ema: ['min']
+      trate286_0kHz_drift_ema: ['min']
       w1dist_ema_zerobias_vs_SingleNeutrino_E-10-gun: ['min']
       cap_ema_zerobias_vs_SingleNeutrino_E-10-gun: ['max']
     single:

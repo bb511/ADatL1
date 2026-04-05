@@ -12,6 +12,10 @@ from src.evaluation.callbacks.metrics.rate import AnomalyRate
 from src.evaluation.callbacks import utils
 from src.plot import horizontal_bar
 
+from src.utils import pylogger
+
+log = pylogger.RankedLogger(__name__)
+
 
 class AnomalyEfficiencyCallback(Callback):
     """Calculates the fraction of anomalies detected given a bkg rate.
@@ -71,10 +75,7 @@ class AnomalyEfficiencyCallback(Callback):
     def on_test_start(self, trainer, pl_module):
         """Do checks required for this callback to work."""
         self.device = pl_module.device
-        self.thresholds = defaultdict(float)
-        for target_rate in self.target_rates:
-            trate_name = f"{target_rate}".replace(".", "_")
-            self.thresholds[target_rate] = getattr(pl_module, f"thres_{trate_name}kHz")
+        self.thresholds = self._get_thres(pl_module)
 
         # Check if 'zerobias' dataset is the first dataset in the test dictionary.
         # This is required to compute the rate thresholds on the anomaly scores.
@@ -293,3 +294,22 @@ class AnomalyEfficiencyCallback(Callback):
         with open(cache_folder / "summary.pkl", "wb") as f:
             plain_dict = utils.misc.to_plain_dict(self.eff_summary)
             pickle.dump(plain_dict, f, protocol=pickle.HIGHEST_PROTOCOL)
+
+    def _get_thres(self, pl_module):
+        """Check if thresholds for the target rates were set at validation time."""
+        thresholds = defaultdict(float)
+        for target_rate in self.target_rates:
+            trate_name = f"{target_rate}".replace(".", "_")
+            thres = getattr(pl_module, f"thres_{trate_name}kHz", None)
+            if thres is None:
+                log.warn(
+                    f"No threshold was set for {trate_name} rate at validation time. "
+                    f"Skipping efficiency computation for this threshold..."
+                    f"If you want this thres, compute it at val time in the anomaly "
+                    f"efficiency callback."
+                )
+                self.target_rates.remove(target_rate)
+            else:
+                thresholds[target_rate] = thres
+
+        return thresholds

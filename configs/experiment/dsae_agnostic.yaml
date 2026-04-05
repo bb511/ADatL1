@@ -2,7 +2,7 @@
 
 defaults:
   - override /data: basis
-  - override /algorithm: vae
+  - override /algorithm: dsae
   - override /callbacks: default
   - override /trainer: cpu
   - override /evaluator: default
@@ -10,9 +10,9 @@ defaults:
   - override /logger: mlflow
 
 seed: 123
-tags: ["vae", "agnostic", "cap"]
+tags: ["dsae", "agnostic"]
 
-experiment_name: vae_models
+experiment_name: ae_models
 run_name: ${short_hash:${hydra:runtime.output_dir},12}
 
 data:
@@ -23,7 +23,7 @@ trainer:
   gradient_clip_algorithm: norm
   gradient_clip_val: 0.0
   min_epochs: 1
-  max_epochs: 200
+  max_epochs: 400
 
 test: true
 
@@ -36,7 +36,7 @@ optimized_metric_config:
     direction: maximize
   sec_metric:
     callback:
-      name: kl_raw_mean_top_vals
+      name: mse_mean_top_vals
       params:
         ckpt_name: null # This will be filled in with the best ckpt of the main metric.
         test_ds: zerobias
@@ -46,7 +46,12 @@ algorithm:
   # The basis data processing returns 117 features.
   operational_rate: 0.25
   encoder:
-    in_dim: 117
+    object_dims:
+      FET: 3
+      egammas: 3
+      jets: 3
+      muons: 3
+      taus: 3
 
   optimizer:
     _partial_: true
@@ -56,17 +61,19 @@ algorithm:
     betas: [0.9, 0.999]
     eps: 1e-8
 
+
 callbacks:
   log_data_mlflow: null
   anomaly_eff:
     _target_: src.callbacks.rate.AnomalyEfficiencyCallback
-    metric_name: 'loss/kl_raw/full'
+    metric_name: 'loss/mse/full'
     target_rates: [0.25]
     bc_rate: 28608.8064
+    beta: 0.9
 
   thres_drift:
     _target_: src.callbacks.thres_drift.ThresholdDriftCallback
-    loss_name: 'loss/kl_raw/full'
+    loss_name: 'loss/mse/full'
     target_rates: [0.25, 286.0]
     bc_rate: 28608.8064
     calibration_fraction: 0.5
@@ -75,7 +82,7 @@ callbacks:
 
   wasserstein_dist:
     _target_: src.callbacks.wasserstein.WassersteinCallback
-    metric_name: 'loss/kl_raw/full'
+    metric_name: 'loss/mse/full'
     dataset_1: zerobias
     dataset_2: SingleNeutrino_E-10-gun
     apply_log1p: true
@@ -83,7 +90,7 @@ callbacks:
 
   cap_sn_zb:
     _target_: src.callbacks.cap.CAPCallback
-    metric_name: 'loss/kl_raw/full'
+    metric_name: 'loss/mse/full'
     dataset_1: zerobias
     dataset_2: SingleNeutrino_E-10-gun
     pairing_type: cdf
@@ -104,10 +111,10 @@ callbacks:
       process_group: null
       dist_sync_fn: null
 
-  stable_kl_ckpt:
+  stable_mse_mean_top_ckpt:
     _target_: src.callbacks.model_checkpoint.SingleDatasetModelCheckpoint
     dirpath: '${paths.checkpoints_dir}/${experiment_name}/${run_name}'
-    monitor: loss_kl_raw_mean_top_vals
+    monitor: loss_mse_mean_top_vals
     criterion:
       _target_: src.callbacks.checkpointing.criterion.Stable
       top_k: 1
@@ -116,10 +123,10 @@ callbacks:
     ds:
       - zerobias
 
-  stable_kl_q99_ckpt:
+  stable_mse_q99_ckpt:
     _target_: src.callbacks.model_checkpoint.SingleDatasetModelCheckpoint
     dirpath: '${paths.checkpoints_dir}/${experiment_name}/${run_name}'
-    monitor: loss_kl_raw_q99
+    monitor: loss_mse_q99
     criterion:
       _target_: src.callbacks.checkpointing.criterion.Stable
       top_k: 1
@@ -190,14 +197,14 @@ evaluator:
       w1dist_ema_zerobias_vs_SingleNeutrino_E-10-gun: ['min']
       cap_ema_zerobias_vs_SingleNeutrino_E-10-gun: ['max']
     single:
-      loss_kl_raw_mean_top_vals: ['stable']
-      loss_kl_raw_q99: ['stable']
+      loss_mse_mean_top_vals: ['stable']
+      loss_mse_q99: ['stable']
 
 
 evaluator_callbacks:
   anomaly_efficiency:
     _target_: src.evaluation.callbacks.efficiency.AnomalyEfficiencyCallback
-    metric_name: 'loss/kl_raw/full'
+    metric_name: 'loss/mse/full'
     target_rates: [0.25]
     bc_rate: 28608.8064
     ds:
@@ -226,7 +233,7 @@ evaluator_callbacks:
 
   cap_sn_zb:
     _target_: src.evaluation.callbacks.cap.CAP
-    metric_name: 'loss/kl_raw/full'
+    metric_name: 'loss/mse/full'
     dataset_1: zerobias
     dataset_2: SingleNeutrino_E-10-gun
     log_raw_mlflow: false
@@ -248,10 +255,10 @@ evaluator_callbacks:
       process_group: null
       dist_sync_fn: null
 
-  kl_operational_mean:
+  mse_operational_mean:
     _target_: src.evaluation.callbacks.loss.LossCallback
-    name: kl_raw_mean_top_vals
-    loss_name: 'loss/kl_raw/mean_top_vals'
+    name: mse_mean_top_vals
+    loss_name: 'loss/mse/mean_top_vals'
     ds:
       - zerobias
       - GluGluHTo2B_Par-MH-125
@@ -276,10 +283,10 @@ evaluator_callbacks:
       - haa-4b-ma15
     log_raw_mlflow: false
 
-  kl_loss_q99:
+  mse_loss_q99:
     _target_: src.evaluation.callbacks.loss.LossCallback
-    name: kl_raw_q99
-    loss_name: 'loss/kl_raw/q99'
+    name: mse_q99
+    loss_name: 'loss/mse/q99'
     ds:
       - zerobias
       - GluGluHTo2B_Par-MH-125
@@ -306,7 +313,7 @@ evaluator_callbacks:
 
   thres_drift:
     _target_: src.evaluation.callbacks.thres_drift.ThresholdDriftCallback
-    loss_name: 'loss/kl_raw/full'
+    loss_name: 'loss/mse/full'
     target_rates: [0.25, 286.0]
     bc_rate: 28608.8064
     calibration_fraction: 0.5
@@ -316,7 +323,7 @@ evaluator_callbacks:
 
   wasserstein:
     _target_: src.evaluation.callbacks.wasserstein.Wasserstein
-    metric_name: 'loss/kl_raw/full'
+    metric_name: 'loss/mse/full'
     dataset_1: zerobias
     dataset_2: SingleNeutrino_E-10-gun
     apply_log1p: true

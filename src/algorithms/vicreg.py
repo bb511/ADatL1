@@ -12,8 +12,11 @@ from src.algorithms.components.augmentation import FastFeatureBlur
 from src.algorithms.components.augmentation import FastObjectMask
 from src.algorithms.components.augmentation import FastLorentzRotation
 from src.algorithms.utils.weight_loader import load_weights
+from src.utils import pylogger
 
+log = pylogger.RankedLogger(__name__)
 
+# LEGACY - WIP to MAKE IT MODERN.
 class VICReg(L1ADLightningModule):
     """VICreg deep learning algorithm.
 
@@ -53,6 +56,7 @@ class VICReg(L1ADLightningModule):
                 "lorentz_rotation",
             ]
         )
+        raise ValueError("VICReg is legacy for now! WIP to make it modern.")
         self.seed = seed
         self.diagnosis_metrics = diagnosis_metrics
         self.ckpt_path = ckpt

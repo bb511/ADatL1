@@ -34,7 +34,6 @@ class ReconstructionPlots(Callback):
         self,
         warmup_batches: int | float,
         output_name: str,
-        datamodule: LightningDataModule,
         ckpts: dict,
         datasets: list[str] = [],
         name: str = "reco",
@@ -44,13 +43,21 @@ class ReconstructionPlots(Callback):
         self.output_name = output_name
         self.log_raw_mlflow = log_raw_mlflow
         self.datasets = datasets
-        self.object_feature_map = datamodule.loader.object_feature_map
         self.ckpts = ckpts
         self.name = name
 
     def on_test_epoch_start(self, trainer, pl_module):
         """Determine if this callback should run for current ckpt and initialise q."""
         self._active = self._should_run_for_current_ckpt(trainer)
+        self.object_feature_map = pl_module.object_feature_map
+
+        object_feature_map = getattr(self, "object_feature_map", None)
+        if object_feature_map is None:
+            raise RuntimeError(
+                "object_feature_map not found on module. "
+                "Make sure inject_object_feature_map(self) called in on_test_start. "
+                "This needs to happen in the current L1ADLightningModule you are using."
+            )
 
         self._buffers = {}
         self._edges = {}

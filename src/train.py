@@ -31,7 +31,6 @@ from src.utils import RankedLogger
 from src.utils import extras
 from src.utils import get_metric_value
 from src.utils import instantiate_callbacks
-from src.utils import instantiate_eval_callbacks
 from src.utils import instantiate_loggers
 from src.utils import log_hyperparameters
 from src.utils import task_wrapper
@@ -142,7 +141,7 @@ def _get_evaluator(cfg: DictConfig, datamodule, logger):
     evaluator_cfg = OmegaConf.create(merged_dict)
 
     log.info("Instantiating evaluator callbacks...")
-    callbacks = instantiate_eval_callbacks(cfg.get("evaluator_callbacks"), datamodule)
+    callbacks = instantiate_callbacks(cfg.get("evaluator_callbacks"))
     log.info(f"Instantiating evaluator <{evaluator_cfg._target_}>")
     evaluator = hydra.utils.instantiate(
         evaluator_cfg,

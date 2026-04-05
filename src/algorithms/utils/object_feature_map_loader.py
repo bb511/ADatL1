@@ -57,6 +57,9 @@ def inject_object_feature_map(pl_module) -> None:
     if ofm is None:
         raise RuntimeError("Could not find object_feature_map.")
 
+    # Save directly on the module for anything else that needs it.
+    pl_module.object_feature_map = ofm
+
     reco = getattr(getattr(pl_module, "loss", None), "reco_loss", None)
     if reco is not None and hasattr(reco, "set_object_feature_map"):
         reco.set_object_feature_map(ofm)

@@ -70,7 +70,7 @@ callbacks:
   max_rate_kl_ckpt:
     _target_: src.callbacks.model_checkpoint.SingleDatasetModelCheckpoint
     dirpath: '${paths.checkpoints_dir}/${experiment_name}/${run_name}'
-    monitor: eff__ascore_loss_kl_raw_full__brate_0.25kHz
+    monitor: eff__ascore_loss_kl_raw_full__brate_0_25kHz
     criterion:
       _target_: src.callbacks.checkpointing.criterion.Max
       top_k: 1
@@ -268,7 +268,6 @@ evaluator_callbacks:
     _target_: src.evaluation.callbacks.reco.ReconstructionPlots
     warmup_batches: 0.2
     output_name: reconstructed_data
-    datamodule: true
     ckpts:
       last: true
     datasets:

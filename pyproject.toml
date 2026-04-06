@@ -34,9 +34,21 @@ dependencies = [
     "optuna (==2.10.1)",
 ]
 
+[tool.poetry.dependencies]
+torch = { version = "==2.*", source = "pytorch-cu128" }
+torchvision = { version = "==0.*", source = "pytorch-cu128" }
+torchaudio = { version = "==2.*", source = "pytorch-cu128" }
+
+[[tool.poetry.source]]
+name = "pytorch-cu128"
+url = "https://download.pytorch.org/whl/cu128"
+priority = "explicit"
+
+
 [build-system]
 requires = ["poetry-core>=2.0.0,<3.0.0"]
 build-backend = "poetry.core.masonry.api"
+
 
 [project.optional-dependencies]
 quant = [
@@ -44,6 +56,7 @@ quant = [
     "hgq2 (>=0.1.5,<0.2.0)",
     "hls4ml @ git+https://github.com/fastmachinelearning/hls4ml.git",
 ]
+
 
 [tool.pytest.ini_options]
 addopts = [
@@ -62,6 +75,7 @@ markers = [
 ]
 minversion = "6.0"
 testpaths = "tests/"
+
 
 [tool.coverage.report]
 exclude_lines = [

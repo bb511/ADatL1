@@ -36,4 +36,3 @@ The mentioned repository requires access to L1TNtuple data.
 
 See the `scripts` directory for scripts used to run different parts of this repo.
 For example, to train a simple AE
-

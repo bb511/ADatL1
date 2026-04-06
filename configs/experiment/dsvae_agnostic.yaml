@@ -1,0 +1,341 @@
+# @package _global_
+
+defaults:
+  - override /data: basis
+  - override /algorithm: dsvae
+  - override /callbacks: default
+  - override /trainer: cpu
+  - override /evaluator: default
+  - override /evaluator_callbacks: default
+  - override /logger: mlflow
+
+seed: 123
+tags: ["vae", "agnostic", "cap"]
+
+experiment_name: vae_models
+run_name: ${short_hash:${hydra:runtime.output_dir},12}
+
+data:
+  batch_size: 16384
+  max_val_batches: 10
+
+trainer:
+  gradient_clip_algorithm: norm
+  gradient_clip_val: 0.0
+  min_epochs: 1
+  max_epochs: 200
+
+test: true
+
+# Metrics to report for each checkpoint.
+optimized_metric_config:
+  main_metric:
+    callback:
+      name: cap
+      params: {}
+    direction: maximize
+  sec_metric:
+    callback:
+      name: kl_raw_mean_top_vals
+      params:
+        ckpt_name: null # This will be filled in with the best ckpt of the main metric.
+        test_ds: zerobias
+    direction: minimize
+
+algorithm:
+  # The basis data processing returns 117 features.
+  operational_rate: 0.25
+  encoder:
+    object_dims:
+      FET: 3
+      egammas: 3
+      jets: 3
+      muons: 3
+      taus: 3
+
+  optimizer:
+    _partial_: true
+    _target_: torch.optim.AdamW
+    lr: 0.0013029941778430407
+    weight_decay: 0.001
+    betas: [0.9, 0.999]
+    eps: 1e-8
+
+callbacks:
+  log_data_mlflow: null
+  anomaly_eff:
+    _target_: src.callbacks.rate.AnomalyEfficiencyCallback
+    metric_name: 'loss/kl_raw/full'
+    target_rates: [0.25]
+    bc_rate: 28608.8064
+
+  thres_drift:
+    _target_: src.callbacks.thres_drift.ThresholdDriftCallback
+    loss_name: 'loss/kl_raw/full'
+    target_rates: [0.25, 286.0]
+    bc_rate: 28608.8064
+    calibration_fraction: 0.5
+    split_seed: 12345
+    beta: 0.9
+
+  wasserstein_dist:
+    _target_: src.callbacks.wasserstein.WassersteinCallback
+    metric_name: 'loss/kl_raw/full'
+    dataset_1: zerobias
+    dataset_2: SingleNeutrino_E-10-gun
+    apply_log1p: true
+    beta: 0.9
+
+  cap_sn_zb:
+    _target_: src.callbacks.cap.CAPCallback
+    metric_name: 'loss/kl_raw/full'
+    dataset_1: zerobias
+    dataset_2: SingleNeutrino_E-10-gun
+    pairing_type: cdf
+    cap_metric_config:
+      beta0: 1.0
+      normalization_type: sigmoid
+      normalization_params: null
+      energy_type: adaptive
+      energy_params:
+        scale: 0.5
+      regularization_type: none
+      regularization_params: null
+      binary: True
+      lr: 0.01
+      n_epochs: 20
+      batch_size: 8192
+      normalize_gradients: True
+      process_group: null
+      dist_sync_fn: null
+
+  stable_kl_ckpt:
+    _target_: src.callbacks.model_checkpoint.SingleDatasetModelCheckpoint
+    dirpath: '${paths.checkpoints_dir}/${experiment_name}/${run_name}'
+    monitor: loss_kl_raw_mean_top_vals
+    criterion:
+      _target_: src.callbacks.checkpointing.criterion.Stable
+      top_k: 1
+      threshold: 0.05
+      patience: 10
+    ds:
+      - zerobias
+
+  stable_kl_q99_ckpt:
+    _target_: src.callbacks.model_checkpoint.SingleDatasetModelCheckpoint
+    dirpath: '${paths.checkpoints_dir}/${experiment_name}/${run_name}'
+    monitor: loss_kl_raw_q99
+    criterion:
+      _target_: src.callbacks.checkpointing.criterion.Stable
+      top_k: 1
+      threshold: 0.05
+      patience: 10
+    ds:
+      - zerobias
+
+  thres_drift_ema_ckpt:
+    _target_: pytorch_lightning.callbacks.ModelCheckpoint
+    dirpath: '${paths.checkpoints_dir}/${experiment_name}/${run_name}/summary/trate0_25kHz_drift_ema/min'
+    monitor: 'val/summary/trate0_25kHz_drift_ema'
+    filename: 'trate0_25kHz_drift_ema'
+    save_last: false
+    save_top_k: 1
+    mode: "min"
+    auto_insert_metric_name: False
+    save_weights_only: False
+    every_n_epochs: 1
+    save_on_train_epoch_end: false
+
+  thres_drift_q99_ema_ckpt:
+    _target_: pytorch_lightning.callbacks.ModelCheckpoint
+    dirpath: '${paths.checkpoints_dir}/${experiment_name}/${run_name}/summary/trate286_0kHz_drift_ema/min'
+    monitor: 'val/summary/trate286_0kHz_drift_ema'
+    filename: 'trate286_0kHz_drift_ema'
+    save_last: false
+    save_top_k: 1
+    mode: "min"
+    auto_insert_metric_name: False
+    save_weights_only: False
+    every_n_epochs: 1
+    save_on_train_epoch_end: false
+
+  wasserstein_dist_ema_ckpt:
+    _target_: pytorch_lightning.callbacks.ModelCheckpoint
+    dirpath: '${paths.checkpoints_dir}/${experiment_name}/${run_name}/summary/w1dist_ema_zerobias_vs_SingleNeutrino_E-10-gun/min'
+    monitor: 'val/summary/w1dist_ema_zerobias_vs_SingleNeutrino_E-10-gun'
+    filename: 'w1dist_ema_zerobias_vs_SingleNeutrino_E-10-gun'
+    save_last: false
+    save_top_k: 1
+    mode: "min"
+    auto_insert_metric_name: False
+    save_weights_only: False
+    every_n_epochs: 1
+    save_on_train_epoch_end: false
+
+  cap_sn_zb_ema_ckpt:
+    _target_: pytorch_lightning.callbacks.ModelCheckpoint
+    dirpath: '${paths.checkpoints_dir}/${experiment_name}/${run_name}/summary/cap_ema_zerobias_vs_SingleNeutrino_E-10-gun/max'
+    monitor: 'val/summary/cap_ema_zerobias_vs_SingleNeutrino_E-10-gun'
+    filename: 'cap_ema_zerobias_vs_SingleNeutrino_E-10-gun'
+    save_last: false
+    save_top_k: 1
+    mode: "max"
+    auto_insert_metric_name: False
+    save_weights_only: False
+    every_n_epochs: 1
+    save_on_train_epoch_end: false
+
+
+evaluator:
+  ckpts:
+    last: true
+    summary:
+      trate0_25kHz_drift_ema: ['min']
+      trate286_0kHz_drift_ema: ['min']
+      w1dist_ema_zerobias_vs_SingleNeutrino_E-10-gun: ['min']
+      cap_ema_zerobias_vs_SingleNeutrino_E-10-gun: ['max']
+    single:
+      loss_kl_raw_mean_top_vals: ['stable']
+      loss_kl_raw_q99: ['stable']
+
+
+evaluator_callbacks:
+  anomaly_efficiency:
+    _target_: src.evaluation.callbacks.efficiency.AnomalyEfficiencyCallback
+    metric_name: 'loss/kl_raw/full'
+    target_rates: [0.25]
+    bc_rate: 28608.8064
+    ds:
+      - GluGluHTo2B_Par-MH-125
+      - GluGluHto2G_Par-MH-125
+      - GluGluHto2G_Par-MH-90
+      - GluGluHto2Tau_Par-MH-125
+      - GluGlutoHHto2B2WtoLNu2Q_Par-c2-0-kl-1-kt-1
+      - HHHto4B2Tau_Par-c3-0-d4-0
+      - HHHto6B_Par-c3-0-d4-0
+      - SUSYGluGluToBBHTo2B_Par-M-1200
+      - SUSYGluGluToBBHToBB_Par-M-120
+      - SUSYGluGluToBBHToBB_Par-M-350
+      - SUSYGluGluToBBHToBB_Par-M-600
+      - TTHTo2C_Par-MH-125
+      - TTHto2B_Par-MH-125
+      - VBFHTo2C_Par-MH-125
+      - VBFHto2B_Par-MH-125
+      - VBFHto2Tau_Par-MH-125
+      - WtoTauto3Mu
+      - ggH-suep-decay
+      - smj-case-A
+      - haa-4b-ma15
+    cvar_summary: 0.25
+    log_raw_mlflow: false
+
+  cap_sn_zb:
+    _target_: src.evaluation.callbacks.cap.CAP
+    metric_name: 'loss/kl_raw/full'
+    dataset_1: zerobias
+    dataset_2: SingleNeutrino_E-10-gun
+    log_raw_mlflow: false
+    pairing_type: cdf
+    cap_metric_config:
+      beta0: 1.0
+      normalization_type: sigmoid
+      normalization_params: null
+      energy_type: adaptive
+      energy_params:
+        scale: 0.5
+      regularization_type: none
+      regularization_params: null
+      binary: True
+      lr: 0.01
+      n_epochs: 20
+      batch_size: 8192
+      normalize_gradients: True
+      process_group: null
+      dist_sync_fn: null
+
+  kl_operational_mean:
+    _target_: src.evaluation.callbacks.loss.LossCallback
+    name: kl_raw_mean_top_vals
+    loss_name: 'loss/kl_raw/mean_top_vals'
+    ds:
+      - zerobias
+      - GluGluHTo2B_Par-MH-125
+      - GluGluHto2G_Par-MH-125
+      - GluGluHto2G_Par-MH-90
+      - GluGluHto2Tau_Par-MH-125
+      - GluGlutoHHto2B2WtoLNu2Q_Par-c2-0-kl-1-kt-1
+      - HHHto4B2Tau_Par-c3-0-d4-0
+      - HHHto6B_Par-c3-0-d4-0
+      - SUSYGluGluToBBHTo2B_Par-M-1200
+      - SUSYGluGluToBBHToBB_Par-M-120
+      - SUSYGluGluToBBHToBB_Par-M-350
+      - SUSYGluGluToBBHToBB_Par-M-600
+      - TTHTo2C_Par-MH-125
+      - TTHto2B_Par-MH-125
+      - VBFHTo2C_Par-MH-125
+      - VBFHto2B_Par-MH-125
+      - VBFHto2Tau_Par-MH-125
+      - WtoTauto3Mu
+      - ggH-suep-decay
+      - smj-case-A
+      - haa-4b-ma15
+    log_raw_mlflow: false
+
+  kl_loss_q99:
+    _target_: src.evaluation.callbacks.loss.LossCallback
+    name: kl_raw_q99
+    loss_name: 'loss/kl_raw/q99'
+    ds:
+      - zerobias
+      - GluGluHTo2B_Par-MH-125
+      - GluGluHto2G_Par-MH-125
+      - GluGluHto2G_Par-MH-90
+      - GluGluHto2Tau_Par-MH-125
+      - GluGlutoHHto2B2WtoLNu2Q_Par-c2-0-kl-1-kt-1
+      - HHHto4B2Tau_Par-c3-0-d4-0
+      - HHHto6B_Par-c3-0-d4-0
+      - SUSYGluGluToBBHTo2B_Par-M-1200
+      - SUSYGluGluToBBHToBB_Par-M-120
+      - SUSYGluGluToBBHToBB_Par-M-350
+      - SUSYGluGluToBBHToBB_Par-M-600
+      - TTHTo2C_Par-MH-125
+      - TTHto2B_Par-MH-125
+      - VBFHTo2C_Par-MH-125
+      - VBFHto2B_Par-MH-125
+      - VBFHto2Tau_Par-MH-125
+      - WtoTauto3Mu
+      - ggH-suep-decay
+      - smj-case-A
+      - haa-4b-ma15
+    log_raw_mlflow: false
+
+  thres_drift:
+    _target_: src.evaluation.callbacks.thres_drift.ThresholdDriftCallback
+    loss_name: 'loss/kl_raw/full'
+    target_rates: [0.25, 286.0]
+    bc_rate: 28608.8064
+    calibration_fraction: 0.5
+    split_seed: 12345
+    log_raw_mlflow: false
+    name: thres_drift
+
+  wasserstein:
+    _target_: src.evaluation.callbacks.wasserstein.Wasserstein
+    metric_name: 'loss/kl_raw/full'
+    dataset_1: zerobias
+    dataset_2: SingleNeutrino_E-10-gun
+    apply_log1p: true
+    log_raw_mlflow: false
+    name: wasserstein
+
+  reco:
+    _target_: src.evaluation.callbacks.reco.ReconstructionPlots
+    warmup_batches: 0.2
+    output_name: reconstructed_data
+    ckpts:
+      last: true
+    datasets:
+      - 'zerobias'
+      - 'SingleNeutrino_E-10-gun'
+    name: 'reco'
+    log_raw_mlflow: false

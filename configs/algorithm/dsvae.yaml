@@ -1,0 +1,47 @@
+defaults:
+  - _self_
+
+_target_: src.algorithms.dsvae.DeepSetsVAE
+features: null
+
+mask: true
+ckpt: ''
+
+operational_rate: 0.25 # nominal rate
+bc_rate: 28608.8064 # bunch crossing rate in kHz
+
+encoder:
+  _target_: src.algorithms.components.encoder.DeepSetsVariationalEncoder
+
+  object_dims:
+    FET: 3
+    egammas: 3
+    jets: 3
+    muons: 3
+    taus: 3
+
+  object_phi_nodes:
+    FET: [8]
+    egammas: [16, 8]
+    jets: [16, 8]
+    muons: [8]
+    taus: [16, 8]
+
+  rho_nodes: [32, 16]
+  activation: relu
+  pooling: sum
+  add_counts: false
+  clamp_zlogvar_range: [-10.0, 6.0]
+
+decoder:
+  _target_: src.algorithms.components.decoder.Decoder
+  nodes: ${smaller_decoder:${algorithm.encoder.rho_nodes}}
+  activation: relu
+  out_dim: 117
+
+loss:
+  _target_: src.algorithms.losses.vae.ClassicVAELoss
+  scale: 1
+  kl_scale: 0.001
+
+kl_warmup_frac: 0.2

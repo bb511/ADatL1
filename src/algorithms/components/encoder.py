@@ -187,17 +187,17 @@ class DeepSetsEncoder(nn.Module):
             init_bias=init_bias,
         )
 
-    def forward(
+    def encode_event(
         self,
         x_by_type: dict[str, torch.Tensor],
         m_by_type: dict[str, torch.Tensor],
     ) -> torch.Tensor:
-        """Encode a batch of events into a global event representation."""
+        """Encode an event into a global event representation."""
         pooled_parts = []
 
         for obj_name in self.object_types:
-            x = x_by_type[obj_name]  # [B, N_obj, F_obj]
-            m = m_by_type[obj_name]  # [B, N_obj]
+            x = x_by_type[obj_name]
+            m = m_by_type[obj_name]
 
             bsz, n_obj, feat_dim = x.shape
             x_flat = x.reshape(bsz * n_obj, feat_dim)
@@ -208,7 +208,6 @@ class DeepSetsEncoder(nn.Module):
             h = h * m_float
 
             pooled = self._pool(h, m_float)
-
             pooled_parts.append(pooled)
 
             if self.add_counts:
@@ -217,6 +216,15 @@ class DeepSetsEncoder(nn.Module):
 
         event_repr = torch.cat(pooled_parts, dim=1)
         return self.rho(event_repr)
+
+
+    def forward(
+        self,
+        x_by_type: dict[str, torch.Tensor],
+        m_by_type: dict[str, torch.Tensor],
+    ) -> torch.Tensor:
+        """Encode a batch of events into a global event representation."""
+        return self.encode_event(x_by_type, m_by_type)
 
     def _pool(self, h: torch.Tensor, m_float: torch.Tensor):
         """Pool the output of the phi networks."""
@@ -234,3 +242,69 @@ class DeepSetsEncoder(nn.Module):
             pooled = torch.cat([h_sum, h_max], dim=1)
 
         return pooled
+
+class DeepSetsVariationalEncoder(DeepSetsEncoder):
+    """Per-type DeepSets variational encoder.
+
+    The final dimension of rho_nodes is taken to be the latent dimension.
+
+    :param clamp_zlogvar_range: Tuple of two floats defining the range of the z_log_var
+        value produced by the variational encoder.
+    """
+
+    def __init__(
+        self,
+        object_dims: dict[str, int],
+        object_phi_nodes: dict[str, list[int]],
+        rho_nodes: list[int],
+        activation: str = "relu",
+        pooling: str = "mean",
+        add_counts: bool = False,
+        init_weight: Optional[Callable] = None,
+        init_bias: Optional[Callable] = None,
+        clamp_zlogvar_range: tuple[float, float] = (-10.0, 6.0),
+    ):
+        super().__init__(
+            object_dims=object_dims,
+            object_phi_nodes=object_phi_nodes,
+            rho_nodes=rho_nodes,
+            activation=activation,
+            pooling=pooling,
+            add_counts=add_counts,
+            init_weight=init_weight,
+            init_bias=init_bias,
+        )
+
+        latent_dim = rho_nodes[-1]
+        self.z_mean = nn.Linear(latent_dim, latent_dim)
+        self.z_log_var = nn.Linear(latent_dim, latent_dim)
+        self.clamp_zlogvar_range = clamp_zlogvar_range
+
+        if init_weight is not None:
+            init_weight(self.z_mean.weight)
+            init_weight(self.z_log_var.weight)
+        if init_bias is not None:
+            if self.z_mean.bias is not None:
+                init_bias(self.z_mean.bias)
+            if self.z_log_var.bias is not None:
+                init_bias(self.z_log_var.bias)
+
+    def forward(
+        self,
+        x_by_type: dict[str, torch.Tensor],
+        m_by_type: dict[str, torch.Tensor],
+    ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+        event_repr = self.encode_event(x_by_type, m_by_type)
+
+        z_mean = self.z_mean(event_repr)
+        z_log_var = self.z_log_var(event_repr)
+        z_log_var = z_log_var.clamp(*self.clamp_zlogvar_range)
+
+        z = self.sample(z_mean, z_log_var)
+        return z_mean, z_log_var, z
+
+    def sample(self, z_mean: torch.Tensor, z_log_var: torch.Tensor) -> torch.Tensor:
+        """Performs reparametrization trick."""
+        std = torch.exp(0.5 * z_log_var)
+        epsilon = torch.randn_like(std)
+        return z_mean + std * epsilon

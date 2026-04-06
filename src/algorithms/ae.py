@@ -5,8 +5,8 @@ import torch
 from torch import nn
 
 import torch.nn.functional as F
-from pytorch_lightning.utilities.memory import garbage_collection_cuda
 from src.algorithms import L1ADLightningModule
+from src.algorithms.utils.object_feature_map_loader import inject_object_feature_map
 
 
 class AE(L1ADLightningModule):
@@ -34,6 +34,12 @@ class AE(L1ADLightningModule):
         self.input_noise_std = input_noise_std
         self.mask = mask
         self.operational_quantile = 1 - operational_rate / bc_rate
+
+    def on_fit_start(self):
+        inject_object_feature_map(self)
+
+    def on_test_start(self):
+        inject_object_feature_map(self)
 
     def forward(self, x: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
         z = self.encoder(x)

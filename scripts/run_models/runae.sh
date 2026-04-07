@@ -139,7 +139,7 @@
 
 # AE hyperparameter search semi-supervised.
 # taskset -c 0-2 \
-/opt/venv/bin/python3 src/train.py \
+python3 src/train.py \
     -m \
     hydra/launcher=submitit_slurm_clariden \
     paths.raw_data_dir=/iopsstor/scratch/cscs/podagiu/adl1t_data/parquet_files \

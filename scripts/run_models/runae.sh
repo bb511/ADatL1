@@ -5,32 +5,26 @@
 # =======================
 
 # Semi-supervised cvar25 training.
-taskset -c 3-5 \
-python3 src/train.py \
-    hydra/launcher=submitit_local \
-    hydra.launcher.cpus_per_task=1 \
-    hydra.launcher.gpus_per_node=4 \
-    paths.raw_data_dir=/data/deodagiu/adl1t_data/parquet_files \
-    experiment=ae \
-    experiment_name=ae_models_q99 \
-    run_name=cvar25_t594_low \
-    algorithm.optimizer.lr=0.001457369500608365 \
-    algorithm.loss.delta=7.0 \
-    trainer.gradient_clip_val=0.5 \
-    algorithm.optimizer.betas='[0.9,0.999]' \
-    algorithm.optimizer.weight_decay=0.0 \
-    algorithm.encoder.nodes='[64,32,32]' \
-    algorithm.input_noise_std=0.001 \
-    trainer=gpu \
-    trainer.devices=[0]
+# taskset -c 3-5 \
+# python3 src/train.py \
+#     paths.raw_data_dir=/data/deodagiu/adl1t_data/parquet_files \
+#     experiment=ae \
+#     experiment_name=ae_models_q99 \
+#     run_name=cvar25_t594_low \
+#     algorithm.optimizer.lr=0.001457369500608365 \
+#     algorithm.loss.delta=7.0 \
+#     trainer.gradient_clip_val=0.5 \
+#     algorithm.optimizer.betas='[0.9,0.999]' \
+#     algorithm.optimizer.weight_decay=0.0 \
+#     algorithm.encoder.nodes='[64,32,32]' \
+#     algorithm.input_noise_std=0.001 \
+#     trainer=gpu \
+#     trainer.devices=[0]
 
 
 # Semi-supervised cvar10 training.
 # taskset -c 3-5 \
 # python3 src/train.py \
-#     hydra/launcher=submitit_local \
-#     hydra.launcher.cpus_per_task=1 \
-#     hydra.launcher.gpus_per_node=4 \
 #     paths.raw_data_dir=/data/deodagiu/adl1t_data/parquet_files \
 #     experiment=ae \
 #     run_name=cvar10_trial_339 \
@@ -49,9 +43,6 @@ python3 src/train.py \
 # CAP training.
 # taskset -c 9-11 \
 # python3 src/train.py \
-#     hydra/launcher=submitit_local \
-#     hydra.launcher.cpus_per_task=1 \
-#     hydra.launcher.gpus_per_node=4 \
 #     paths.raw_data_dir=/data/deodagiu/adl1t_data/parquet_files \
 #     experiment=ae_agnostic \
 #     experiment_name=ae_models_q99 \
@@ -82,9 +73,6 @@ python3 src/train.py \
 # Agnostic stability training.
 # taskset -c 3-5 \
 # python3 src/train.py \
-#     hydra/launcher=submitit_local \
-#     hydra.launcher.cpus_per_task=1 \
-#     hydra.launcher.gpus_per_node=4 \
 #     paths.raw_data_dir=/data/deodagiu/adl1t_data/parquet_files \
 #     experiment=ae_agnostic \
 #     experiment_name=ae_models_q99 \
@@ -115,9 +103,6 @@ python3 src/train.py \
 # Agnostic KL-wasserstein training.
 # taskset -c 12-14 \
 # python3 src/train.py \
-#     hydra/launcher=submitit_local \
-#     hydra.launcher.cpus_per_task=1 \
-#     hydra.launcher.gpus_per_node=4 \
 #     paths.raw_data_dir=/data/deodagiu/adl1t_data/parquet_files \
 #     experiment=ae_agnostic \
 #     experiment_name=ae_models_q99 \
@@ -154,32 +139,33 @@ python3 src/train.py \
 
 # AE hyperparameter search semi-supervised.
 # taskset -c 0-2 \
-# python3 src/train.py \
-#     -m \
-#     hydra/launcher=submitit_local \
-#     hydra.launcher.cpus_per_task=1 \
-#     hydra.launcher.gpus_per_node=4 \
-#     paths.raw_data_dir=/data/deodagiu/adl1t_data/parquet_files \
-#     experiment=ae \
-#     experiment_name=ae_cvar_vs_mse_search \
-#     callbacks.max_rate_mse_ckpt=null \
-#     callbacks.stable_mse_q99_ckpt=null \
-#     callbacks.cvar10_ema_ckpt=null \
-#     ~evaluator.ckpts.single.loss_mse_q99 \
-#     ~evaluator.ckpts.single.eff__ascore_loss_mse_full__brate_0_25kHz \
-#     ~evaluator.ckpts.summary.cvar10_ema \
-#     evaluator_callbacks.mse_loss_q99=null \
-#     evaluator_callbacks.thres_drift=null \
-#     evaluator_callbacks.wasserstein=null \
-#     evaluator_callbacks.reco=null \
-#     logger=none \
-#     hparams_search=ae_optuna \
-#     hydra.sweeper.study_name=cvar25eff_vs_mse_b16k \
-#     hydra.sweeper.n_trials=100 \
-#     hydra.sweeper.sampler.n_startup_trials=150 \
-#     trainer=gpu \
-#     trainer.max_epochs=50 \
-#     trainer.devices=[0]
+/opt/venv/bin/python3 src/train.py \
+    -m \
+    hydra/launcher=submitit_slurm_clariden \
+    paths.raw_data_dir=/iopsstor/scratch/cscs/podagiu/adl1t_data/parquet_files \
+    experiment=ae \
+    experiment_name=ae_cvar_vs_mse_search \
+    callbacks.max_rate_mse_ckpt=null \
+    callbacks.stable_mse_q99_ckpt=null \
+    callbacks.cvar10_ema_ckpt=null \
+    ~evaluator.ckpts.single.loss_mse_q99 \
+    ~evaluator.ckpts.single.eff__ascore_loss_mse_full__brate_0_25kHz \
+    ~evaluator.ckpts.summary.cvar10_ema \
+    evaluator_callbacks.mse_loss_q99=null \
+    evaluator_callbacks.thres_drift=null \
+    evaluator_callbacks.wasserstein=null \
+    evaluator_callbacks.reco=null \
+    logger=none \
+    hparams_search=ae_optuna \
+    hydra.sweeper.study_name=cvar25eff_vs_mse_b16k \
+    hydra.sweeper.n_trials=1 \
+    hydra.sweeper.sampler.n_startup_trials=1 \
+    trainer=gpu \
+    trainer.max_epochs=1 \
+    trainer.devices=[0]
+    # hydra/launcher=submitit_local \
+    # hydra.launcher.cpus_per_task=1 \
+    # hydra.launcher.gpus_per_node=4 \
 
 
 # AE hyperparameter search semi-supervised mse q99.

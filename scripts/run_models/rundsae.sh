@@ -7,9 +7,6 @@
 # Semi-supervised cvar25 training.
 # taskset -c 0-2 \
 # python3 src/train.py \
-#     hydra/launcher=submitit_local \
-#     hydra.launcher.cpus_per_task=1 \
-#     hydra.launcher.gpus_per_node=4 \
 #     paths.raw_data_dir=/data/deodagiu/adl1t_data/parquet_files \
 #     experiment=dsae \
 #     run_name=cvar25_t457_high \
@@ -31,9 +28,6 @@
 # Semi-supervised cvar10 training.
 # taskset -c 3-5 \
 # python3 src/train.py \
-#     hydra/launcher=submitit_local \
-#     hydra.launcher.cpus_per_task=1 \
-#     hydra.launcher.gpus_per_node=4 \
 #     paths.raw_data_dir=/data/deodagiu/adl1t_data/parquet_files \
 #     experiment=dsae \
 #     run_name=cvar10_trial_339 \
@@ -57,9 +51,6 @@
 # CAP training.
 # taskset -c 3-5 \
 # python3 src/train.py \
-#     hydra/launcher=submitit_local \
-#     hydra.launcher.cpus_per_task=1 \
-#     hydra.launcher.gpus_per_node=4 \
 #     paths.raw_data_dir=/data/deodagiu/adl1t_data/parquet_files \
 #     experiment=dsae_agnostic \
 #     run_name=cap_t200_high \
@@ -91,9 +82,6 @@
 # Agnostic stability training.
 # taskset -c 6-8 \
 # python3 src/train.py \
-#     hydra/launcher=submitit_local \
-#     hydra.launcher.cpus_per_task=1 \
-#     hydra.launcher.gpus_per_node=4 \
 #     paths.raw_data_dir=/data/deodagiu/adl1t_data/parquet_files \
 #     experiment=dsae_agnostic \
 #     run_name=stability_t565_high \
@@ -126,9 +114,6 @@
 # Agnostic KL-wasserstein training.
 # taskset -c 9-11 \
 # python3 src/train.py \
-#     hydra/launcher=submitit_local \
-#     hydra.launcher.cpus_per_task=1 \
-#     hydra.launcher.gpus_per_node=4 \
 #     paths.raw_data_dir=/data/deodagiu/adl1t_data/parquet_files \
 #     experiment=dsae_agnostic \
 #     run_name=wasserstein_t433_high \

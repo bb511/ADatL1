@@ -12,7 +12,7 @@ defaults:
 seed: 123
 tags: ["dsae", "agnostic"]
 
-experiment_name: ae_models
+experiment_name: dsae_models
 run_name: ${short_hash:${hydra:runtime.output_dir},12}
 
 data:
@@ -23,7 +23,7 @@ trainer:
   gradient_clip_algorithm: norm
   gradient_clip_val: 0.0
   min_epochs: 1
-  max_epochs: 400
+  max_epochs: 200
 
 test: true
 

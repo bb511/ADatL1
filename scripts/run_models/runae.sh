@@ -5,24 +5,24 @@
 # =======================
 
 # Semi-supervised cvar25 training.
-# taskset -c 3-5 \
-# python3 src/train.py \
-#     hydra/launcher=submitit_local \
-#     hydra.launcher.cpus_per_task=1 \
-#     hydra.launcher.gpus_per_node=4 \
-#     paths.raw_data_dir=/data/deodagiu/adl1t_data/parquet_files \
-#     experiment=ae \
-#     experiment_name=ae_models_q99 \
-#     run_name=cvar25_t594_low \
-#     algorithm.optimizer.lr=0.001457369500608365 \
-#     algorithm.loss.delta=7.0 \
-#     trainer.gradient_clip_val=0.5 \
-#     algorithm.optimizer.betas='[0.9,0.999]' \
-#     algorithm.optimizer.weight_decay=0.0 \
-#     algorithm.encoder.nodes='[64,32,32]' \
-#     algorithm.input_noise_std=0.001 \
-#     trainer=gpu \
-#     trainer.devices=[0]
+taskset -c 3-5 \
+python3 src/train.py \
+    hydra/launcher=submitit_local \
+    hydra.launcher.cpus_per_task=1 \
+    hydra.launcher.gpus_per_node=4 \
+    paths.raw_data_dir=/data/deodagiu/adl1t_data/parquet_files \
+    experiment=ae \
+    experiment_name=ae_models_q99 \
+    run_name=cvar25_t594_low \
+    algorithm.optimizer.lr=0.001457369500608365 \
+    algorithm.loss.delta=7.0 \
+    trainer.gradient_clip_val=0.5 \
+    algorithm.optimizer.betas='[0.9,0.999]' \
+    algorithm.optimizer.weight_decay=0.0 \
+    algorithm.encoder.nodes='[64,32,32]' \
+    algorithm.input_noise_std=0.001 \
+    trainer=gpu \
+    trainer.devices=[0]
 
 
 # Semi-supervised cvar10 training.
@@ -113,34 +113,34 @@
 
 
 # Agnostic KL-wasserstein training.
-taskset -c 12-14 \
-python3 src/train.py \
-    hydra/launcher=submitit_local \
-    hydra.launcher.cpus_per_task=1 \
-    hydra.launcher.gpus_per_node=4 \
-    paths.raw_data_dir=/data/deodagiu/adl1t_data/parquet_files \
-    experiment=ae_agnostic \
-    experiment_name=ae_models_q99 \
-    run_name=wasserstein_t585_medium \
-    callbacks.thres_drift=null \
-    callbacks.cap_sn_zb=null \
-    callbacks.thres_drift_ema_ckpt=null \
-    callbacks.cap_sn_zb_ema_ckpt=null \
-    callbacks.thres_drift_q99_ema_ckpt=null \
-    callbacks.stable_mse_mean_top_ckpt=null \
-    ~evaluator.ckpts.single.loss_mse_mean_top_vals \
-    ~evaluator.ckpts.summary.trate286_0kHz_drift_ema \
-    ~evaluator.ckpts.summary.trate0_25kHz_drift_ema \
-    ~evaluator.ckpts.summary.cap_ema_zerobias_vs_SingleNeutrino_E-10-gun \
-    algorithm.optimizer.lr=0.00047124714609726086 \
-    algorithm.loss.delta=5.0 \
-    trainer.gradient_clip_val=0.5 \
-    algorithm.optimizer.betas='[0.9,0.99]' \
-    algorithm.optimizer.weight_decay=0.0 \
-    algorithm.encoder.nodes='[64,32,32]' \
-    algorithm.input_noise_std=0.001 \
-    trainer=gpu \
-    trainer.devices=[3]
+# taskset -c 12-14 \
+# python3 src/train.py \
+#     hydra/launcher=submitit_local \
+#     hydra.launcher.cpus_per_task=1 \
+#     hydra.launcher.gpus_per_node=4 \
+#     paths.raw_data_dir=/data/deodagiu/adl1t_data/parquet_files \
+#     experiment=ae_agnostic \
+#     experiment_name=ae_models_q99 \
+#     run_name=wasserstein_t585_medium \
+#     callbacks.thres_drift=null \
+#     callbacks.cap_sn_zb=null \
+#     callbacks.thres_drift_ema_ckpt=null \
+#     callbacks.cap_sn_zb_ema_ckpt=null \
+#     callbacks.thres_drift_q99_ema_ckpt=null \
+#     callbacks.stable_mse_mean_top_ckpt=null \
+#     ~evaluator.ckpts.single.loss_mse_mean_top_vals \
+#     ~evaluator.ckpts.summary.trate286_0kHz_drift_ema \
+#     ~evaluator.ckpts.summary.trate0_25kHz_drift_ema \
+#     ~evaluator.ckpts.summary.cap_ema_zerobias_vs_SingleNeutrino_E-10-gun \
+#     algorithm.optimizer.lr=0.00047124714609726086 \
+#     algorithm.loss.delta=5.0 \
+#     trainer.gradient_clip_val=0.5 \
+#     algorithm.optimizer.betas='[0.9,0.99]' \
+#     algorithm.optimizer.weight_decay=0.0 \
+#     algorithm.encoder.nodes='[64,32,32]' \
+#     algorithm.input_noise_std=0.001 \
+#     trainer=gpu \
+#     trainer.devices=[3]
 #     ~evaluator.ckpts.single.loss_mse_q99 \
 #     callbacks.stable_mse_q99_ckpt=null \
 

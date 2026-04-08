@@ -1,4 +1,4 @@
-# VAE running commands.
+# DS VAE running commands.
 # ========================================================================
 
 # TRAINING.
@@ -145,7 +145,7 @@
 #     hydra.launcher.gpus_per_node=4 \
 #     paths.raw_data_dir=/data/deodagiu/adl1t_data/parquet_files \
 #     experiment=dsvae \
-#     experiment_name=vae_cvar25_vs_kl_search \
+#     experiment_name=dsvae_cvar25_vs_kl_search \
 #     callbacks.max_rate_kl_ckpt=null \
 #     callbacks.stable_kl_q99_ckpt=null \
 #     callbacks.cvar10_ema_ckpt=null \
@@ -206,7 +206,7 @@
 #     hydra.launcher.gpus_per_node=4 \
 #     paths.raw_data_dir=/data/deodagiu/adl1t_data/parquet_files \
 #     experiment=dsvae \
-#     experiment_name=vae_cvar10_vs_kl_search \
+#     experiment_name=dsvae_cvar10_vs_kl_search \
 #     callbacks.max_rate_kl_ckpt=null \
 #     callbacks.stable_kl_q99_ckpt=null \
 #     callbacks.cvar25_ema_ckpt=null \
@@ -276,7 +276,7 @@
 #     hydra.launcher.gpus_per_node=4 \
 #     paths.raw_data_dir=/data/deodagiu/adl1t_data/parquet_files \
 #     experiment=dsvae_agnostic \
-#     experiment_name=vae_agnostic_cap_vs_klq99_search \
+#     experiment_name=dsvae_agnostic_cap_vs_klq99_search \
 #     callbacks.anomaly_eff=null \
 #     callbacks.wasserstein_dist=null \
 #     callbacks.thres_drift=null \
@@ -317,7 +317,7 @@
 #     hydra.launcher.gpus_per_node=4 \
 #     paths.raw_data_dir=/data/deodagiu/adl1t_data/parquet_files \
 #     experiment=dsvae_agnostic \
-#     experiment_name=vae_agnostic_drift_vs_kl_search \
+#     experiment_name=dsvae_agnostic_drift_vs_kl_search \
 #     callbacks.anomaly_eff=null \
 #     callbacks.wasserstein_dist=null \
 #     callbacks.cap_sn_zb=null \
@@ -357,7 +357,7 @@
 #     hydra.launcher.gpus_per_node=4 \
 #     paths.raw_data_dir=/data/deodagiu/adl1t_data/parquet_files \
 #     experiment=dsvae_agnostic \
-#     experiment_name=vae_agnostic_drift_vs_klq99_search \
+#     experiment_name=dsvae_agnostic_drift_vs_klq99_search \
 #     callbacks.anomaly_eff=null \
 #     callbacks.wasserstein_dist=null \
 #     callbacks.cap_sn_zb=null \
@@ -401,7 +401,7 @@ python3 src/train.py \
     hydra.launcher.gpus_per_node=4 \
     paths.raw_data_dir=/data/deodagiu/adl1t_data/parquet_files \
     experiment=dsvae_agnostic \
-    experiment_name=vae_agnostic_wasserstein_vs_kl_search \
+    experiment_name=dsvae_agnostic_wasserstein_vs_kl_search \
     callbacks.anomaly_eff=null \
     callbacks.thres_drift=null \
     callbacks.cap_sn_zb=null \
@@ -439,7 +439,7 @@ python3 src/train.py \
 #     hydra.launcher.gpus_per_node=4 \
 #     paths.raw_data_dir=/data/deodagiu/adl1t_data/parquet_files \
 #     experiment=dsvae_agnostic \
-#     experiment_name=vae_agnostic_drift_vs_klq99_search \
+#     experiment_name=dsvae_agnostic_drift_vs_klq99_search \
 #     callbacks.anomaly_eff=null \
 #     callbacks.thres_drift=null \
 #     callbacks.cap_sn_zb=null \

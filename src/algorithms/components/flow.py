@@ -5,7 +5,7 @@ import torch
 import torch.nn as nn
 
 
-class LatentCouplingLayer(nn.Module):
+class CouplingLayer(nn.Module):
     """Affine coupling layer for dense latent vectors.
 
     This is a standard RealNVP-style coupling layer operating on a dense vector.
@@ -114,7 +114,7 @@ class LatentCouplingLayer(nn.Module):
         return x, log_det
 
 
-class LatentRealNVP(nn.Module):
+class RealNVP(nn.Module):
     """RealNVP operating on a dense latent vector.
 
     This flow models the distribution of latent representations produced by the
@@ -126,6 +126,7 @@ class LatentRealNVP(nn.Module):
     :param hidden_dim: Int with the number of nodes in the MLP.
     :param n_hidden_layers: Int with the number of hidden layers in the MLP.
     :param activation: String with the activation to use in the MLP.
+    :param scale_clamp: Float for the scale of the noise added to data.
     :param scale_clamp: Float with the clamp factor, for numerical stability.
     """
 
@@ -150,7 +151,7 @@ class LatentRealNVP(nn.Module):
             # Alternate which coordinates are masked / transformed in each layer.
             mask = self._make_alternating_mask(input_dim, flip=bool(i % 2))
             self.flows.append(
-                LatentCouplingLayer(
+                CouplingLayer(
                     input_dim=input_dim,
                     hidden_dim=hidden_dim,
                     mask=mask,

@@ -11,7 +11,7 @@ hydra:
 
     # storage URL to persist optimization results
     # for example, you can use SQLite if you set 'sqlite:///example.db'
-    storage: sqlite:///logs/optuna/dsvae.db
+    storage: sqlite:///logs/optuna/realnvp.db
 
     # name of the study to persist optimization results
     study_name: test
@@ -35,19 +35,14 @@ hydra:
 
     # define hyperparameter search space. Assumes using torch.optim.AdamW
     params:
+      algorithm.optimizer.lr: tag(log, interval(3e-5, 3e-3))
       trainer.gradient_clip_val: choice(0.0, 0.5, 1.0, 2.0)
-      algorithm.encoder.clamp_zlogvar_range: choice([-20,10], [-10,6], [-8,6], [-6,4])
-
-      algorithm.optimizer.lr: tag(log, interval(5e-5, 1e-3))
       algorithm.optimizer.betas: choice([0.9, 0.999], [0.9, 0.99])
       algorithm.optimizer.weight_decay: choice(0.0, 1e-6, 1e-5, 1e-4, 1e-3)
 
-      algorithm.loss.kl_scale: choice(3e-5, 1e-4, 3e-4, 1e-3, 2e-3)
-      algorithm.kl_warmup_frac: choice(0.0, 0.05, 0.1, 0.2, 0.3)
-
-      algorithm.encoder.activation: choice(relu, gelu)
-      algorithm.encoder.pooling: choice(mean, sum, sum_max)
-      algorithm.encoder.add_counts: choice(true, false)
-
-      algorithm.encoder.object_phi_nodes: "choice({FET:[8],egammas:[16,8],jets:[16,8],muons:[8],taus:[16,8]},{FET:[8],egammas:[16,16],jets:[16,16],muons:[8,8],taus:[16,16]},{FET:[8],egammas:[24,8],jets:[24,8],muons:[8],taus:[24,8]},{FET:[8],egammas:[24,16],jets:[24,16],muons:[8,8],taus:[24,16]},{FET:[8],egammas:[32,16],jets:[32,16],muons:[8,8],taus:[32,16]})"
-      algorithm.encoder.rho_nodes: choice([16,8],[24,8],[24,16],[32,8],[32,16],[32,24],[48,16],[48,24],[32,16,8],[32,16,16],[48,24,8],[48,24,16],[64,32,16],[64,32,24])
+      algorithm.flow.n_flows: choice(4, 6, 8)
+      algorithm.flow.hidden_dim: choice(24, 32, 48, 64)
+      algorithm.flow.n_hidden_layers: choice(1, 2)
+      algorithm.flow.activation: choice(relu, gelu)
+      algorithm.flow.noise_scale: choice(0.0, 1e-4, 1e-3, 1e-2)
+      algorithm.flow.scale_clamp: choice(3.0, 5.0)

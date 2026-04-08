@@ -1,54 +1,26 @@
-_target_: src.algorithms.svdd.SVDD
+# Template Deep SVDD configuration.
+defaults:
+  - _self_
 
-
-masking: null
-
-
+_target_: src.algorithms.svdd.DeepSVDD
 features: null
+ckpt: ''
 
+operational_rate: 0.25 # nominal rate
+bc_rate: 28608.8064 # bunch crossing rate in kHz
 
 encoder:
-  _target_: src.models.encoder.Encoder
+  _target_: src.algorithms.components.encoder.Encoder
+  in_dim: 117
+  nodes: [64, 32, 16]
+  activation: relu
 
-  nodes: [57, 28, 16, 8]
-  
-  batchnorm: false
-  
-  init_weight:
-    _target_: src.utils.hydra.get_method
-    path: torch.nn.init.xavier_uniform_
-    
-  init_bias:
-    _target_: src.utils.hydra.get_method
-    path: torch.nn.init.zeros_
-
-
-center_init_method: mean # "mean", "zeros"
-
+center_init_method: mean
 
 loss:
-  _target_: src.losses.svdd.SVDDLoss
+  _target_: src.algorithms.losses.svdd.SVDDLoss
+  scale: 1.0
   nu: 0.1
-  reduction: none
   weight_decay: 1e-6
   soft_boundary: false
-  
-
-optimizer:
-  _partial_: true
-  _target_: torch.optim.Adam
-  lr: 0.001
-  weight_decay: 1e-6
-
-
-# scheduler:
-#   # here other attributes...
-
-#   scheduler:
-#     _partial_: true
-#     _target_: torch.optim.lr_scheduler.ReduceLROnPlateau
-#     mode: min
-#     factor: 0.5
-#     patience: 10
-#     min_lr: 1e-6
-#   monitor: "train/loss_svdd"
+  reduction: none

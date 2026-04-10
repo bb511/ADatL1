@@ -137,32 +137,32 @@
 # ------------------------
 
 # svdd hyperparameter search semi-supervised.
-taskset -c 0-2 \
-python3 src/train.py \
-    -m \
-    hydra/launcher=submitit_local \
-    hydra.launcher.cpus_per_task=1 \
-    hydra.launcher.gpus_per_node=4 \
-    paths.raw_data_dir=/data/deodagiu/adl1t_data/parquet_files \
-    experiment=svdd \
-    experiment_name=svdd_cvar25_vs_logp_search \
-    callbacks.max_rate_distance_ckpt=null \
-    callbacks.stable_distance_q99_ckpt=null \
-    callbacks.cvar10_ema_ckpt=null \
-    ~evaluator.ckpts.summary.cvar10_ema \
-    ~evaluator.ckpts.single.loss_distance_q99 \
-    ~evaluator.ckpts.single.eff__ascore_loss_distance_full__brate_0_25kHz \
-    evaluator_callbacks.distance_loss_q99=null \
-    evaluator_callbacks.thres_drift=null \
-    evaluator_callbacks.wasserstein=null \
-    logger=none \
-    hparams_search=svdd_optuna \
-    hydra.sweeper.study_name=cvar25eff_vs_logp_b16k \
-    hydra.sweeper.n_trials=150 \
-    hydra.sweeper.sampler.n_startup_trials=150 \
-    trainer=gpu \
-    trainer.max_epochs=50 \
-    trainer.devices=[1]
+# taskset -c 0-2 \
+# python3 src/train.py \
+#     -m \
+#     hydra/launcher=submitit_local \
+#     hydra.launcher.cpus_per_task=1 \
+#     hydra.launcher.gpus_per_node=4 \
+#     paths.raw_data_dir=/data/deodagiu/adl1t_data/parquet_files \
+#     experiment=svdd \
+#     experiment_name=svdd_cvar25_vs_logp_search \
+#     callbacks.max_rate_distance_ckpt=null \
+#     callbacks.stable_distance_q99_ckpt=null \
+#     callbacks.cvar10_ema_ckpt=null \
+#     ~evaluator.ckpts.summary.cvar10_ema \
+#     ~evaluator.ckpts.single.loss_distance_q99 \
+#     ~evaluator.ckpts.single.eff__ascore_loss_distance_full__brate_0_25kHz \
+#     evaluator_callbacks.distance_loss_q99=null \
+#     evaluator_callbacks.thres_drift=null \
+#     evaluator_callbacks.wasserstein=null \
+#     logger=none \
+#     hparams_search=svdd_optuna \
+#     hydra.sweeper.study_name=cvar25eff_vs_logp_b16k \
+#     hydra.sweeper.n_trials=150 \
+#     hydra.sweeper.sampler.n_startup_trials=150 \
+#     trainer=gpu \
+#     trainer.max_epochs=50 \
+#     trainer.devices=[1]
 
 
 # svdd hyperparameter search semi-supervised distance q99.
@@ -304,42 +304,42 @@ python3 src/train.py \
 # ---------------------------
 
 # svdd agnostic distance and threshold stability.
-# taskset -c 0-2 \
-# python3 src/train.py \
-#     -m \
-#     hydra/launcher=submitit_local \
-#     hydra.launcher.cpus_per_task=1 \
-#     hydra.launcher.gpus_per_node=4 \
-#     paths.raw_data_dir=/data/deodagiu/adl1t_data/parquet_files \
-#     experiment=svdd_agnostic \
-#     experiment_name=svdd_agnostic_drift_vs_logp_search \
-#     callbacks.anomaly_eff=null \
-#     callbacks.wasserstein_dist=null \
-#     callbacks.cap_sn_zb=null \
-#     callbacks.stable_distance_q99_ckpt=null \
-#     callbacks.wasserstein_dist_ema_ckpt=null \
-#     callbacks.cap_sn_zb_ema_ckpt=null \
-#     callbacks.thres_drift_q99_ema_ckpt=null \
-#     ~evaluator.ckpts.summary.trate286_0kHz_drift_ema \
-#     ~evaluator.ckpts.single.loss_distance_q99 \
-#     ~evaluator.ckpts.summary.w1dist_ema_zerobias_vs_SingleNeutrino_E-10-gun \
-#     ~evaluator.ckpts.summary.cap_ema_zerobias_vs_SingleNeutrino_E-10-gun \
-#     evaluator_callbacks.anomaly_efficiency=null \
-#     evaluator_callbacks.distance_loss_q99=null \
-#     evaluator_callbacks.cap_sn_zb=null \
-#     evaluator_callbacks.wasserstein=null \
-#     logger=none \
-#     hparams_search=svdd_optuna \
-#     optimized_metric_config.main_metric.callback.name=thres_drift \
-#     +optimized_metric_config.main_metric.callback.params.target_rate=0.25 \
-#     optimized_metric_config.main_metric.direction=minimize \
-#     hydra.sweeper.study_name=drift_vs_logp_b16k \
-#     hydra.sweeper.direction='[minimize, minimize]' \
-#     hydra.sweeper.n_trials=150 \
-#     hydra.sweeper.sampler.n_startup_trials=150 \
-#     trainer=gpu \
-#     trainer.max_epochs=50 \
-#     trainer.devices=[0]
+taskset -c 0-2 \
+python3 src/train.py \
+    -m \
+    hydra/launcher=submitit_local \
+    hydra.launcher.cpus_per_task=1 \
+    hydra.launcher.gpus_per_node=4 \
+    paths.raw_data_dir=/data/deodagiu/adl1t_data/parquet_files \
+    experiment=svdd_agnostic \
+    experiment_name=svdd_agnostic_drift_vs_logp_search \
+    callbacks.anomaly_eff=null \
+    callbacks.wasserstein_dist=null \
+    callbacks.cap_sn_zb=null \
+    callbacks.stable_distance_q99_ckpt=null \
+    callbacks.wasserstein_dist_ema_ckpt=null \
+    callbacks.cap_sn_zb_ema_ckpt=null \
+    callbacks.thres_drift_q99_ema_ckpt=null \
+    ~evaluator.ckpts.summary.trate286_0kHz_drift_ema \
+    ~evaluator.ckpts.single.loss_distance_q99 \
+    ~evaluator.ckpts.summary.w1dist_ema_zerobias_vs_SingleNeutrino_E-10-gun \
+    ~evaluator.ckpts.summary.cap_ema_zerobias_vs_SingleNeutrino_E-10-gun \
+    evaluator_callbacks.anomaly_efficiency=null \
+    evaluator_callbacks.distance_loss_q99=null \
+    evaluator_callbacks.cap_sn_zb=null \
+    evaluator_callbacks.wasserstein=null \
+    logger=none \
+    hparams_search=svdd_optuna \
+    optimized_metric_config.main_metric.callback.name=thres_drift \
+    +optimized_metric_config.main_metric.callback.params.target_rate=0.25 \
+    optimized_metric_config.main_metric.direction=minimize \
+    hydra.sweeper.study_name=drift_vs_logp_b16k \
+    hydra.sweeper.direction='[minimize, minimize]' \
+    hydra.sweeper.n_trials=150 \
+    hydra.sweeper.sampler.n_startup_trials=150 \
+    trainer=gpu \
+    trainer.max_epochs=50 \
+    trainer.devices=[0]
 
 
 # svdd agnostic distance and threshold stability.

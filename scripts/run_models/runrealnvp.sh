@@ -389,6 +389,9 @@
 taskset -c 0-2 \
 python3 src/train.py \
     -m \
+    hydra/launcher=submitit_local \
+    hydra.launcher.cpus_per_task=1 \
+    hydra.launcher.gpus_per_node=4 \
     paths.raw_data_dir=/data/deodagiu/adl1t_data/parquet_files \
     experiment=realnvp_agnostic \
     experiment_name=realnvp_agnostic_wasserstein_vs_logp_search \
@@ -418,9 +421,6 @@ python3 src/train.py \
     trainer=gpu \
     trainer.max_epochs=1 \
     trainer.devices=[0]
-    # hydra/launcher=submitit_local \
-    # hydra.launcher.cpus_per_task=1 \
-    # hydra.launcher.gpus_per_node=4 \
 
 
 # RealNVP agnostic nll q99 and wasserstein distance search.

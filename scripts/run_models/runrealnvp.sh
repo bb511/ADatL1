@@ -386,41 +386,41 @@
 # -----------------------------
 
 # RealNVP agnostic nll and wasserstein distance search.
-taskset -c 0-2 \
-python3 src/train.py \
-    -m \
-    hydra/launcher=submitit_local \
-    hydra.launcher.cpus_per_task=1 \
-    hydra.launcher.gpus_per_node=4 \
-    paths.raw_data_dir=/data/deodagiu/adl1t_data/parquet_files \
-    experiment=realnvp_agnostic \
-    experiment_name=realnvp_agnostic_wasserstein_vs_logp_search \
-    callbacks.anomaly_eff=null \
-    callbacks.thres_drift=null \
-    callbacks.cap_sn_zb=null \
-    callbacks.stable_nll_q99_ckpt=null \
-    callbacks.thres_drift_ema_ckpt=null \
-    callbacks.cap_sn_zb_ema_ckpt=null \
-    callbacks.thres_drift_q99_ema_ckpt=null \
-    ~evaluator.ckpts.summary.trate286_0kHz_drift_ema \
-    ~evaluator.ckpts.single.loss_nll_q99 \
-    ~evaluator.ckpts.summary.trate0_25kHz_drift_ema \
-    ~evaluator.ckpts.summary.cap_ema_zerobias_vs_SingleNeutrino_E-10-gun \
-    evaluator_callbacks.anomaly_efficiency=null \
-    evaluator_callbacks.nll_loss_q99=null \
-    evaluator_callbacks.cap_sn_zb=null \
-    evaluator_callbacks.thres_drift=null \
-    logger=none \
-    hparams_search=realnvp_optuna \
-    optimized_metric_config.main_metric.callback.name=wasserstein \
-    optimized_metric_config.main_metric.direction=minimize \
-    hydra.sweeper.study_name=wasserstein_vs_logp_b16k \
-    hydra.sweeper.direction='[minimize, minimize]' \
-    hydra.sweeper.n_trials=150 \
-    hydra.sweeper.sampler.n_startup_trials=150 \
-    trainer=gpu \
-    trainer.max_epochs=1 \
-    trainer.devices=[0]
+# taskset -c 0-2 \
+# python3 src/train.py \
+#     -m \
+#     hydra/launcher=submitit_local \
+#     hydra.launcher.cpus_per_task=1 \
+#     hydra.launcher.gpus_per_node=4 \
+#     paths.raw_data_dir=/data/deodagiu/adl1t_data/parquet_files \
+#     experiment=realnvp_agnostic \
+#     experiment_name=realnvp_agnostic_wasserstein_vs_logp_search \
+#     callbacks.anomaly_eff=null \
+#     callbacks.thres_drift=null \
+#     callbacks.cap_sn_zb=null \
+#     callbacks.stable_nll_q99_ckpt=null \
+#     callbacks.thres_drift_ema_ckpt=null \
+#     callbacks.cap_sn_zb_ema_ckpt=null \
+#     callbacks.thres_drift_q99_ema_ckpt=null \
+#     ~evaluator.ckpts.summary.trate286_0kHz_drift_ema \
+#     ~evaluator.ckpts.single.loss_nll_q99 \
+#     ~evaluator.ckpts.summary.trate0_25kHz_drift_ema \
+#     ~evaluator.ckpts.summary.cap_ema_zerobias_vs_SingleNeutrino_E-10-gun \
+#     evaluator_callbacks.anomaly_efficiency=null \
+#     evaluator_callbacks.nll_loss_q99=null \
+#     evaluator_callbacks.cap_sn_zb=null \
+#     evaluator_callbacks.thres_drift=null \
+#     logger=none \
+#     hparams_search=realnvp_optuna \
+#     optimized_metric_config.main_metric.callback.name=wasserstein \
+#     optimized_metric_config.main_metric.direction=minimize \
+#     hydra.sweeper.study_name=wasserstein_vs_logp_b16k \
+#     hydra.sweeper.direction='[minimize, minimize]' \
+#     hydra.sweeper.n_trials=150 \
+#     hydra.sweeper.sampler.n_startup_trials=150 \
+#     trainer=gpu \
+#     trainer.max_epochs=1 \
+#     trainer.devices=[0]
 
 
 # RealNVP agnostic nll q99 and wasserstein distance search.

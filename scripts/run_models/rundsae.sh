@@ -5,24 +5,24 @@
 # =======================
 
 # Semi-supervised cvar25 training.
-# taskset -c 0-2 \
+# taskset -c 9-11 \
 # python3 src/train.py \
 #     paths.raw_data_dir=/data/deodagiu/adl1t_data/parquet_files \
 #     experiment=dsae \
-#     run_name=cvar25_t457_high \
-#     algorithm.optimizer.lr=0.002081733354631208 \
+#     run_name=cvar25_t599_low \
+#     algorithm.optimizer.lr=0.0021320360922839053 \
 #     algorithm.loss.delta=10.0 \
-#     trainer.gradient_clip_val=5.0 \
-#     algorithm.optimizer.betas='[0.9,0.999]' \
+#     trainer.gradient_clip_val=0.5 \
+#     algorithm.optimizer.betas='[0.9,0.99]' \
 #     algorithm.optimizer.weight_decay=0.001 \
-#     algorithm.input_noise_std=0.003 \
+#     algorithm.input_noise_std=0.001 \
 #     algorithm.encoder.activation=gelu \
 #     algorithm.encoder.pooling=sum_max \
-#     algorithm.encoder.add_counts=true \
-#     algorithm.encoder.object_phi_nodes='{FET:[8],egammas:[16,8],jets:[16,8],muons:[8],taus:[16,8]}' \
+#     algorithm.encoder.add_counts=false \
+#     algorithm.encoder.object_phi_nodes='{FET:[8],egammas:[24,8],jets:[24,8],muons:[8],taus:[24,8]}' \
 #     algorithm.encoder.rho_nodes='[48,16]' \
 #     trainer=gpu \
-#     trainer.devices=[0]
+#     trainer.devices=[2]
 
 
 # Semi-supervised cvar10 training.
@@ -49,11 +49,11 @@
 
 
 # CAP training.
-# taskset -c 3-5 \
+# taskset -c 12-14 \
 # python3 src/train.py \
 #     paths.raw_data_dir=/data/deodagiu/adl1t_data/parquet_files \
 #     experiment=dsae_agnostic \
-#     run_name=cap_t200_high \
+#     run_name=cap_t570_high \
 #     callbacks.wasserstein_dist=null \
 #     callbacks.thres_drift=null \
 #     callbacks.stable_mse_q99_ckpt=null \
@@ -64,23 +64,23 @@
 #     ~evaluator.ckpts.summary.trate0_25kHz_drift_ema \
 #     ~evaluator.ckpts.single.loss_mse_q99 \
 #     ~evaluator.ckpts.summary.w1dist_ema_zerobias_vs_SingleNeutrino_E-10-gun \
-#     algorithm.optimizer.lr=0.002767913212195896 \
+#     algorithm.optimizer.lr=0.0028585937890006803 \
 #     algorithm.loss.delta=7.0 \
-#     trainer.gradient_clip_val=2.0 \
+#     trainer.gradient_clip_val=0.0 \
 #     algorithm.optimizer.betas='[0.9,0.99]' \
 #     algorithm.optimizer.weight_decay=0.0001 \
-#     algorithm.input_noise_std=0.001 \
+#     algorithm.input_noise_std=0.01 \
 #     algorithm.encoder.activation=gelu \
 #     algorithm.encoder.pooling=sum_max \
-#     algorithm.encoder.add_counts=true \
-#     algorithm.encoder.object_phi_nodes='{FET:[8],egammas:[32,8],jets:[32,16],muons:[8, 8],taus:[32,16]}' \
+#     algorithm.encoder.add_counts=false \
+#     algorithm.encoder.object_phi_nodes='{FET:[8],egammas:[32,16],jets:[32,16],muons:[8,8],taus:[32,16]}' \
 #     algorithm.encoder.rho_nodes='[48,16]' \
 #     trainer=gpu \
-#     trainer.devices=[1]
+#     trainer.devices=[0]
 
 
 # Agnostic stability training.
-# taskset -c 6-8 \
+# taskset -c 12-14 \
 # python3 src/train.py \
 #     paths.raw_data_dir=/data/deodagiu/adl1t_data/parquet_files \
 #     experiment=dsae_agnostic \
@@ -112,11 +112,11 @@
 
 
 # Agnostic KL-wasserstein training.
-# taskset -c 9-11 \
+# taskset -c 12-14 \
 # python3 src/train.py \
 #     paths.raw_data_dir=/data/deodagiu/adl1t_data/parquet_files \
 #     experiment=dsae_agnostic \
-#     run_name=wasserstein_t433_high \
+#     run_name=wasserstein_t383_high \
 #     callbacks.thres_drift=null \
 #     callbacks.cap_sn_zb=null \
 #     callbacks.stable_mse_q99_ckpt=null \
@@ -127,14 +127,14 @@
 #     ~evaluator.ckpts.single.loss_mse_q99 \
 #     ~evaluator.ckpts.summary.trate0_25kHz_drift_ema \
 #     ~evaluator.ckpts.summary.cap_ema_zerobias_vs_SingleNeutrino_E-10-gun \
-#     algorithm.optimizer.lr=0.0013409767254587224 \
+#     algorithm.optimizer.lr=0.0012119364214017788 \
 #     algorithm.loss.delta=4.0 \
 #     trainer.gradient_clip_val=5.0 \
 #     algorithm.optimizer.betas='[0.9,0.99]' \
 #     algorithm.optimizer.weight_decay=1e-05 \
 #     algorithm.input_noise_std=0.01 \
 #     algorithm.encoder.activation=gelu \
-#     algorithm.encoder.pooling=sum_max \
+#     algorithm.encoder.pooling=mean \
 #     algorithm.encoder.add_counts=false \
 #     algorithm.encoder.object_phi_nodes='{FET:[8],egammas:[24,8],jets:[24,8],muons:[8],taus:[24,8]}' \
 #     algorithm.encoder.rho_nodes='[48,24]' \

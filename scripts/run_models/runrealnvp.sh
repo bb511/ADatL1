@@ -137,32 +137,32 @@
 # ------------------------
 
 # RealNVP hyperparameter search semi-supervised.
-# taskset -c 0-2 \
-# python3 src/train.py \
-#     -m \
-#     hydra/launcher=submitit_local \
-#     hydra.launcher.cpus_per_task=1 \
-#     hydra.launcher.gpus_per_node=4 \
-#     paths.raw_data_dir=/data/deodagiu/adl1t_data/parquet_files \
-#     experiment=realnvp \
-#     experiment_name=realnvp_cvar25_vs_logp_search \
-#     callbacks.max_rate_nll_ckpt=null \
-#     callbacks.stable_nll_q99_ckpt=null \
-#     callbacks.cvar10_ema_ckpt=null \
-#     ~evaluator.ckpts.summary.cvar10_ema \
-#     ~evaluator.ckpts.single.loss_nll_q99 \
-#     ~evaluator.ckpts.single.eff__ascore_loss_nll_full__brate_0_25kHz \
-#     evaluator_callbacks.nll_loss_q99=null \
-#     evaluator_callbacks.thres_drift=null \
-#     evaluator_callbacks.wasserstein=null \
-#     logger=none \
-#     hparams_search=realnvp_optuna \
-#     hydra.sweeper.study_name=cvar25eff_vs_logp_b16k \
-#     hydra.sweeper.n_trials=150 \
-#     hydra.sweeper.sampler.n_startup_trials=150 \
-#     trainer=gpu \
-#     trainer.max_epochs=50 \
-#     trainer.devices=[0]
+taskset -c 0-2 \
+python3 src/train.py \
+    -m \
+    hydra/launcher=submitit_local \
+    hydra.launcher.cpus_per_task=1 \
+    hydra.launcher.gpus_per_node=4 \
+    paths.raw_data_dir=/data/deodagiu/adl1t_data/parquet_files \
+    experiment=realnvp \
+    experiment_name=realnvp_cvar25_vs_logp_search \
+    callbacks.max_rate_nll_ckpt=null \
+    callbacks.stable_nll_q99_ckpt=null \
+    callbacks.cvar10_ema_ckpt=null \
+    ~evaluator.ckpts.summary.cvar10_ema \
+    ~evaluator.ckpts.single.loss_nll_q99 \
+    ~evaluator.ckpts.single.eff__ascore_loss_nll_full__brate_0_25kHz \
+    evaluator_callbacks.nll_loss_q99=null \
+    evaluator_callbacks.thres_drift=null \
+    evaluator_callbacks.wasserstein=null \
+    logger=none \
+    hparams_search=realnvp_optuna \
+    hydra.sweeper.study_name=cvar25eff_vs_logp_b16k \
+    hydra.sweeper.n_trials=150 \
+    hydra.sweeper.sampler.n_startup_trials=150 \
+    trainer=gpu \
+    trainer.max_epochs=50 \
+    trainer.devices=[0]
 
 
 # RealNVP hyperparameter search semi-supervised nll q99.

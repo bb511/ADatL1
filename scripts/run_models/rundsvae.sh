@@ -47,35 +47,35 @@
 
 
 # CAP training.
-taskset -c 6-8 \
-python3 src/train.py \
-    paths.raw_data_dir=/data/deodagiu/adl1t_data/parquet_files \
-    experiment=dsvae_agnostic \
-    run_name=cap_t371_high \
-    callbacks.wasserstein_dist=null \
-    callbacks.thres_drift=null \
-    callbacks.stable_kl_q99_ckpt=null \
-    callbacks.wasserstein_dist_ema_ckpt=null \
-    callbacks.thres_drift_ema_ckpt=null \
-    callbacks.thres_drift_q99_ema_ckpt=null \
-    ~evaluator.ckpts.summary.trate286_0kHz_drift_ema \
-    ~evaluator.ckpts.summary.trate0_25kHz_drift_ema \
-    ~evaluator.ckpts.single.loss_kl_raw_q99 \
-    ~evaluator.ckpts.summary.w1dist_ema_zerobias_vs_SingleNeutrino_E-10-gun \
-    trainer.gradient_clip_val=2.0 \
-    algorithm.encoder.clamp_zlogvar_range=[-10,6] \
-    algorithm.optimizer.lr=5.000071499679068e-05 \
-    algorithm.optimizer.betas='[0.9,0.99]' \
-    algorithm.optimizer.weight_decay=0.0001 \
-    algorithm.loss.kl_scale=0.0001 \
-    algorithm.kl_warmup_frac=0.05 \
-    algorithm.encoder.activation=gelu \
-    algorithm.encoder.pooling=sum \
-    algorithm.encoder.add_counts=True \
-    algorithm.encoder.object_phi_nodes='{FET:[8],egammas:[24,8],jets:[24,8],muons:[8],taus:[24,8]}' \
-    algorithm.encoder.rho_nodes='[48,24]' \
-    trainer=gpu \
-    trainer.devices=[2]
+# taskset -c 6-8 \
+# python3 src/train.py \
+#     paths.raw_data_dir=/data/deodagiu/adl1t_data/parquet_files \
+#     experiment=dsvae_agnostic \
+#     run_name=cap_t371_high \
+#     callbacks.wasserstein_dist=null \
+#     callbacks.thres_drift=null \
+#     callbacks.stable_kl_q99_ckpt=null \
+#     callbacks.wasserstein_dist_ema_ckpt=null \
+#     callbacks.thres_drift_ema_ckpt=null \
+#     callbacks.thres_drift_q99_ema_ckpt=null \
+#     ~evaluator.ckpts.summary.trate286_0kHz_drift_ema \
+#     ~evaluator.ckpts.summary.trate0_25kHz_drift_ema \
+#     ~evaluator.ckpts.single.loss_kl_raw_q99 \
+#     ~evaluator.ckpts.summary.w1dist_ema_zerobias_vs_SingleNeutrino_E-10-gun \
+#     trainer.gradient_clip_val=2.0 \
+#     algorithm.encoder.clamp_zlogvar_range=[-10,6] \
+#     algorithm.optimizer.lr=5.000071499679068e-05 \
+#     algorithm.optimizer.betas='[0.9,0.99]' \
+#     algorithm.optimizer.weight_decay=0.0001 \
+#     algorithm.loss.kl_scale=0.0001 \
+#     algorithm.kl_warmup_frac=0.05 \
+#     algorithm.encoder.activation=gelu \
+#     algorithm.encoder.pooling=sum \
+#     algorithm.encoder.add_counts=True \
+#     algorithm.encoder.object_phi_nodes='{FET:[8],egammas:[24,8],jets:[24,8],muons:[8],taus:[24,8]}' \
+#     algorithm.encoder.rho_nodes='[48,24]' \
+#     trainer=gpu \
+#     trainer.devices=[2]
 
 
 # Agnostic stability training.
@@ -179,34 +179,34 @@ python3 src/train.py \
 
 
 # DS VAE hyperparameter search semi-supervised kl q99.
-# taskset -c 18-20 \
-# python3 src/train.py \
-#     -m \
-#     hydra/launcher=submitit_local \
-#     hydra.launcher.cpus_per_task=1 \
-#     hydra.launcher.gpus_per_node=4 \
-#     paths.raw_data_dir=/data/deodagiu/adl1t_data/parquet_files \
-#     experiment=dsvae \
-#     experiment_name=dsvae_cvar25_vs_klq99_search \
-#     callbacks.max_rate_kl_ckpt=null \
-#     callbacks.stable_kl_ckpt=null \
-#     callbacks.cvar10_ema_ckpt=null \
-#     ~evaluator.ckpts.summary.cvar10_ema \
-#     ~evaluator.ckpts.single.loss_kl_raw_mean_top_vals \
-#     ~evaluator.ckpts.single.eff__ascore_loss_kl_raw_full__brate_0_25kHz \
-#     evaluator_callbacks.kl_operational_mean=null \
-#     evaluator_callbacks.thres_drift=null \
-#     evaluator_callbacks.wasserstein=null \
-#     evaluator_callbacks.reco=null \
-#     logger=none \
-#     hparams_search=dsvae_optuna \
-#     optimized_metric_config.sec_metric.callback.name=kl_raw_q99 \
-#     hydra.sweeper.study_name=cvar25eff_vs_klq99_b16k \
-#     hydra.sweeper.n_trials=150 \
-#     hydra.sweeper.sampler.n_startup_trials=150 \
-#     trainer=gpu \
-#     trainer.max_epochs=50 \
-#     trainer.devices=[0]
+taskset -c 0-2 \
+python3 src/train.py \
+    -m \
+    hydra/launcher=submitit_local \
+    hydra.launcher.cpus_per_task=1 \
+    hydra.launcher.gpus_per_node=4 \
+    paths.raw_data_dir=/data/deodagiu/adl1t_data/parquet_files \
+    experiment=dsvae \
+    experiment_name=dsvae_cvar25_vs_klq99_search \
+    callbacks.max_rate_kl_ckpt=null \
+    callbacks.stable_kl_ckpt=null \
+    callbacks.cvar10_ema_ckpt=null \
+    ~evaluator.ckpts.summary.cvar10_ema \
+    ~evaluator.ckpts.single.loss_kl_raw_mean_top_vals \
+    ~evaluator.ckpts.single.eff__ascore_loss_kl_raw_full__brate_0_25kHz \
+    evaluator_callbacks.kl_operational_mean=null \
+    evaluator_callbacks.thres_drift=null \
+    evaluator_callbacks.wasserstein=null \
+    evaluator_callbacks.reco=null \
+    logger=none \
+    hparams_search=dsvae_optuna \
+    optimized_metric_config.sec_metric.callback.name=kl_raw_q99 \
+    hydra.sweeper.study_name=cvar25eff_vs_klq99_b16k \
+    hydra.sweeper.n_trials=150 \
+    hydra.sweeper.sampler.n_startup_trials=150 \
+    trainer=gpu \
+    trainer.max_epochs=50 \
+    trainer.devices=[0]
 
 
 # DS VAE hyperparameter search semi-supervised cvar 10%.

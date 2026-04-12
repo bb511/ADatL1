@@ -9,18 +9,19 @@
 # python3 src/train.py \
 #     paths.raw_data_dir=/data/deodagiu/adl1t_data/parquet_files \
 #     experiment=realnvp \
-#     run_name=cvar25_t513_high \
+#     run_name=cvar25_t477_low \
+#     algorithm.optimizer.lr=0.0013780717614807188 \
 #     trainer.gradient_clip_val=0.0 \
-#     algorithm.encoder.clamp_zlogvar_range='[-20,10]' \
-#     algorithm.optimizer.lr=0.0009593961598492453 \
-#     algorithm.optimizer.betas='[0.9,0.999]' \
-#     algorithm.optimizer.weight_decay=1e-06 \
-#     algorithm.loss.nll_scale=0.002 \
-#     algorithm.nll_warmup_frac=0.0 \
-#     algorithm.encoder.nodes='[48,24,8]' \
-#     algorithm.encoder.activation=gelu \
+#     algorithm.optimizer.betas=[0.9,0.999] \
+#     algorithm.optimizer.weight_decay=1e-05 \
+#     algorithm.flow.n_flows=6 \
+#     algorithm.flow.hidden_dim=48 \
+#     algorithm.flow.n_hidden_layers=1 \
+#     algorithm.flow.activation=gelu \
+#     algorithm.flow.noise_scale=0.01 \
+#     algorithm.flow.scale_clamp=3.0 \
 #     trainer=gpu \
-#     trainer.devices=[0]
+#     trainer.devices=[1]
 
 
 # Semi-supervised cvar10 training.
@@ -48,7 +49,7 @@
 # python3 src/train.py \
 #     paths.raw_data_dir=/data/deodagiu/adl1t_data/parquet_files \
 #     experiment=realnvp_agnostic \
-#     run_name=cap_t156_low \
+#     run_name=cap_t285_low \
 #     callbacks.wasserstein_dist=null \
 #     callbacks.thres_drift=null \
 #     callbacks.stable_nll_q99_ckpt=null \
@@ -59,25 +60,26 @@
 #     ~evaluator.ckpts.summary.trate0_25kHz_drift_ema \
 #     ~evaluator.ckpts.single.loss_nll_q99 \
 #     ~evaluator.ckpts.summary.w1dist_ema_zerobias_vs_SingleNeutrino_E-10-gun \
-#     trainer.gradient_clip_val=2.0 \
-#     algorithm.encoder.clamp_zlogvar_range='[-20,10]' \
-#     algorithm.optimizer.lr=7.822713922010138e-05 \
-#     algorithm.optimizer.betas='[0.9,0.99]' \
-#     algorithm.optimizer.weight_decay=1e-05 \
-#     algorithm.loss.nll_scale=0.002 \
-#     algorithm.nll_warmup_frac=0.05 \
-#     algorithm.encoder.nodes='[16,4]' \
-#     algorithm.encoder.activation=relu \
+#     algorithm.optimizer.lr=0.0010490934267674517 \
+#     trainer.gradient_clip_val=0.5 \
+#     algorithm.optimizer.betas=[0.9,0.999] \
+#     algorithm.optimizer.weight_decay=0.001 \
+#     algorithm.flow.n_flows=8 \
+#     algorithm.flow.hidden_dim=48 \
+#     algorithm.flow.n_hidden_layers=2 \
+#     algorithm.flow.activation=relu \
+#     algorithm.flow.noise_scale=0.01 \
+#     algorithm.flow.scale_clamp=3.0 \
 #     trainer=gpu \
 #     trainer.devices=[2]
 
 
 # Agnostic stability training.
-# taskset -c 18-20 \
+# taskset -c 15-17 \
 # python3 src/train.py \
 #     paths.raw_data_dir=/data/deodagiu/adl1t_data/parquet_files \
 #     experiment=realnvp_agnostic \
-#     run_name=stability_t491_high \
+#     run_name=stability_t505_high \
 #     callbacks.wasserstein_dist=null \
 #     callbacks.cap_sn_zb=null \
 #     callbacks.stable_nll_q99_ckpt=null \
@@ -88,21 +90,22 @@
 #     ~evaluator.ckpts.single.loss_nll_q99 \
 #     ~evaluator.ckpts.summary.w1dist_ema_zerobias_vs_SingleNeutrino_E-10-gun \
 #     ~evaluator.ckpts.summary.cap_ema_zerobias_vs_SingleNeutrino_E-10-gun \
+#     algorithm.optimizer.lr=0.0010542663916098317 \
 #     trainer.gradient_clip_val=2.0 \
-#     algorithm.encoder.clamp_zlogvar_range='[-10,6]' \
-#     algorithm.optimizer.lr=0.0008423594125278336 \
-#     algorithm.optimizer.betas='[0.9,0.99]' \
-#     algorithm.optimizer.weight_decay=0.0 \
-#     algorithm.loss.nll_scale=0.002 \
-#     algorithm.nll_warmup_frac=0.0 \
-#     algorithm.encoder.nodes='[48,16,8]' \
-#     algorithm.encoder.activation=gelu \
+#     algorithm.optimizer.betas=[0.9,0.999] \
+#     algorithm.optimizer.weight_decay=0.001 \
+#     algorithm.flow.n_flows=6 \
+#     algorithm.flow.hidden_dim=64 \
+#     algorithm.flow.n_hidden_layers=2 \
+#     algorithm.flow.activation=gelu \
+#     algorithm.flow.noise_scale=0.01 \
+#     algorithm.flow.scale_clamp=3.0 \
 #     trainer=gpu \
-#     trainer.devices=[1]
+#     trainer.devices=[2]
 
 
 # Agnostic nll-wasserstein training.
-# taskset -c 3-5 \
+# taskset -c 0-2 \
 # python3 src/train.py \
 #     paths.raw_data_dir=/data/deodagiu/adl1t_data/parquet_files \
 #     experiment=realnvp_agnostic \
@@ -117,17 +120,18 @@
 #     ~evaluator.ckpts.single.loss_nll_q99 \
 #     ~evaluator.ckpts.summary.trate0_25kHz_drift_ema \
 #     ~evaluator.ckpts.summary.cap_ema_zerobias_vs_SingleNeutrino_E-10-gun \
-#     trainer.gradient_clip_val=0.5 \
-#     algorithm.encoder.clamp_zlogvar_range='[-6,4]' \
-#     algorithm.optimizer.lr=6.005882209363415e-05 \
-#     algorithm.optimizer.betas='[0.9,0.99]' \
-#     algorithm.optimizer.weight_decay=0.0 \
-#     algorithm.loss.nll_scale=0.002 \
-#     algorithm.nll_warmup_frac=0.2 \
-#     algorithm.encoder.nodes='[24,8,4]' \
-#     algorithm.encoder.activation=relu \
+#     algorithm.optimizer.lr=0.0018419982523953588 \
+#     trainer.gradient_clip_val=2.0 \
+#     algorithm.optimizer.betas=[0.9,0.999] \
+#     algorithm.optimizer.weight_decay=0.0001 \
+#     algorithm.flow.n_flows=8 \
+#     algorithm.flow.hidden_dim=64 \
+#     algorithm.flow.n_hidden_layers=2 \
+#     algorithm.flow.activation=relu \
+#     algorithm.flow.noise_scale=0.01 \
+#     algorithm.flow.scale_clamp=5.0 \
 #     trainer=gpu \
-#     trainer.devices=[1]
+#     trainer.devices=[0]
 
 
 # HYPERPARAMETER SEARCHES.

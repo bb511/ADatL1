@@ -181,34 +181,34 @@
 
 
 # AE hyperparameter search semi-supervised mse q99.
-# taskset -c 0-2 \
-# python3 src/train.py \
-#     -m \
-#     hydra/launcher=submitit_local \
-#     hydra.launcher.cpus_per_task=1 \
-#     hydra.launcher.gpus_per_node=4 \
-#     paths.raw_data_dir=/data/deodagiu/adl1t_data/parquet_files \
-#     experiment=dsae \
-#     experiment_name=dsae_cvar_vs_mseq99_search \
-#     callbacks.max_rate_mse_ckpt=null \
-#     callbacks.stable_mse_mean_top_ckpt=null \
-#     callbacks.cvar10_ema_ckpt=null \
-#     ~evaluator.ckpts.single.loss_mse_mean_top_vals \
-#     ~evaluator.ckpts.single.eff__ascore_loss_mse_full__brate_0_25kHz \
-#     ~evaluator.ckpts.summary.cvar10_ema \
-#     evaluator_callbacks.mse_operational_mean=null \
-#     evaluator_callbacks.thres_drift=null \
-#     evaluator_callbacks.wasserstein=null \
-#     evaluator_callbacks.reco=null \
-#     logger=none \
-#     hparams_search=dsae_optuna \
-#     optimized_metric_config.sec_metric.callback.name=mse_q99 \
-#     hydra.sweeper.study_name=cvar25eff_vs_mseq99_b16k \
-#     hydra.sweeper.n_trials=100 \
-#     hydra.sweeper.sampler.n_startup_trials=150 \
-#     trainer=gpu \
-#     trainer.max_epochs=50 \
-#     trainer.devices=[0]
+taskset -c 0-2 \
+python3 src/train.py \
+    -m \
+    hydra/launcher=submitit_local \
+    hydra.launcher.cpus_per_task=1 \
+    hydra.launcher.gpus_per_node=4 \
+    paths.raw_data_dir=/data/deodagiu/adl1t_data/parquet_files \
+    experiment=dsae \
+    experiment_name=dsae_cvar_vs_mseq99_search \
+    callbacks.max_rate_mse_ckpt=null \
+    callbacks.stable_mse_mean_top_ckpt=null \
+    callbacks.cvar10_ema_ckpt=null \
+    ~evaluator.ckpts.single.loss_mse_mean_top_vals \
+    ~evaluator.ckpts.single.eff__ascore_loss_mse_full__brate_0_25kHz \
+    ~evaluator.ckpts.summary.cvar10_ema \
+    evaluator_callbacks.mse_operational_mean=null \
+    evaluator_callbacks.thres_drift=null \
+    evaluator_callbacks.wasserstein=null \
+    evaluator_callbacks.reco=null \
+    logger=none \
+    hparams_search=dsae_optuna \
+    optimized_metric_config.sec_metric.callback.name=mse_q99 \
+    hydra.sweeper.study_name=cvar25eff_vs_mseq99_b16k \
+    hydra.sweeper.n_trials=100 \
+    hydra.sweeper.sampler.n_startup_trials=150 \
+    trainer=gpu \
+    trainer.max_epochs=50 \
+    trainer.devices=[0]
 
 
 # AE hyperparameter search semi-supervised cvar 10%.

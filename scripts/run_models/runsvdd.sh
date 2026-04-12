@@ -5,19 +5,20 @@
 # =======================
 
 # Semi-supervised cvar25 training.
-# taskset -c 6-8 \
+# taskset -c 3-5 \
 # python3 src/train.py \
 #     paths.raw_data_dir=/data/deodagiu/adl1t_data/parquet_files \
 #     experiment=svdd \
-#     run_name=cvar25_t513_high \
+#     run_name=cvar25_t739_mid \
+#     algorithm.optimizer.lr=0.0025808010156689754 \
 #     trainer.gradient_clip_val=0.0 \
-#     algorithm.encoder.clamp_zlogvar_range='[-20,10]' \
-#     algorithm.optimizer.lr=0.0009593961598492453 \
-#     algorithm.optimizer.betas='[0.9,0.999]' \
-#     algorithm.optimizer.weight_decay=1e-06 \
-#     algorithm.loss.distance_scale=0.002 \
-#     algorithm.distance_warmup_frac=0.0 \
-#     algorithm.encoder.nodes='[48,24,8]' \
+#     algorithm.optimizer.betas=[0.9,0.99] \
+#     algorithm.optimizer.weight_decay=0.001 \
+#     algorithm.loss.weight_decay=1e-7 \
+#     algorithm.loss.soft_boundary=False \
+#     algorithm.loss.nu=0.01 \
+#     algorithm.center_init_method=mean \
+#     algorithm.encoder.nodes=[48,24,8] \
 #     algorithm.encoder.activation=gelu \
 #     trainer=gpu \
 #     trainer.devices=[0]
@@ -44,11 +45,11 @@
 
 
 # CAP training.
-# taskset -c 12-14 \
+# taskset -c 9-11 \
 # python3 src/train.py \
 #     paths.raw_data_dir=/data/deodagiu/adl1t_data/parquet_files \
 #     experiment=svdd_agnostic \
-#     run_name=cap_t156_low \
+#     run_name=cap_t176_high \
 #     callbacks.wasserstein_dist=null \
 #     callbacks.thres_drift=null \
 #     callbacks.stable_distance_q99_ckpt=null \
@@ -59,25 +60,26 @@
 #     ~evaluator.ckpts.summary.trate0_25kHz_drift_ema \
 #     ~evaluator.ckpts.single.loss_distance_q99 \
 #     ~evaluator.ckpts.summary.w1dist_ema_zerobias_vs_SingleNeutrino_E-10-gun \
+#     algorithm.optimizer.lr=0.001359990012421445 \
 #     trainer.gradient_clip_val=2.0 \
-#     algorithm.encoder.clamp_zlogvar_range='[-20,10]' \
-#     algorithm.optimizer.lr=7.822713922010138e-05 \
-#     algorithm.optimizer.betas='[0.9,0.99]' \
+#     algorithm.optimizer.betas=[0.9,0.999] \
 #     algorithm.optimizer.weight_decay=1e-05 \
-#     algorithm.loss.distance_scale=0.002 \
-#     algorithm.distance_warmup_frac=0.05 \
-#     algorithm.encoder.nodes='[16,4]' \
-#     algorithm.encoder.activation=relu \
+#     algorithm.loss.weight_decay=1e-07 \
+#     algorithm.loss.soft_boundary=False \
+#     algorithm.loss.nu=0.05 \
+#     algorithm.center_init_method=mean \
+#     algorithm.encoder.nodes=[48,16] \
+#     algorithm.encoder.activation=gelu \
 #     trainer=gpu \
-#     trainer.devices=[2]
+#     trainer.devices=[1]
 
 
 # Agnostic stability training.
-# taskset -c 18-20 \
+# taskset -c 12-14 \
 # python3 src/train.py \
 #     paths.raw_data_dir=/data/deodagiu/adl1t_data/parquet_files \
 #     experiment=svdd_agnostic \
-#     run_name=stability_t491_high \
+#     run_name=stability_t419_high \
 #     callbacks.wasserstein_dist=null \
 #     callbacks.cap_sn_zb=null \
 #     callbacks.stable_distance_q99_ckpt=null \
@@ -88,21 +90,22 @@
 #     ~evaluator.ckpts.single.loss_distance_q99 \
 #     ~evaluator.ckpts.summary.w1dist_ema_zerobias_vs_SingleNeutrino_E-10-gun \
 #     ~evaluator.ckpts.summary.cap_ema_zerobias_vs_SingleNeutrino_E-10-gun \
+#     algorithm.optimizer.lr=0.0009833375412439862 \
 #     trainer.gradient_clip_val=2.0 \
-#     algorithm.encoder.clamp_zlogvar_range='[-10,6]' \
-#     algorithm.optimizer.lr=0.0008423594125278336 \
-#     algorithm.optimizer.betas='[0.9,0.99]' \
-#     algorithm.optimizer.weight_decay=0.0 \
-#     algorithm.loss.distance_scale=0.002 \
-#     algorithm.distance_warmup_frac=0.0 \
-#     algorithm.encoder.nodes='[48,16,8]' \
-#     algorithm.encoder.activation=gelu \
+#     algorithm.optimizer.betas=[0.9,0.999] \
+#     algorithm.optimizer.weight_decay=0.001 \
+#     algorithm.loss.weight_decay=1e-05 \
+#     algorithm.loss.soft_boundary=True \
+#     algorithm.loss.nu=0.1 \
+#     algorithm.center_init_method=mean \
+#     algorithm.encoder.nodes=[32,16,8] \
+#     algorithm.encoder.activation=relu \
 #     trainer=gpu \
 #     trainer.devices=[1]
 
 
 # Agnostic distance-wasserstein training.
-# taskset -c 3-5 \
+# taskset -c 15-17 \
 # python3 src/train.py \
 #     paths.raw_data_dir=/data/deodagiu/adl1t_data/parquet_files \
 #     experiment=svdd_agnostic \
@@ -117,15 +120,16 @@
 #     ~evaluator.ckpts.single.loss_distance_q99 \
 #     ~evaluator.ckpts.summary.trate0_25kHz_drift_ema \
 #     ~evaluator.ckpts.summary.cap_ema_zerobias_vs_SingleNeutrino_E-10-gun \
+#     algorithm.optimizer.lr=0.001983105654764409 \
 #     trainer.gradient_clip_val=0.5 \
-#     algorithm.encoder.clamp_zlogvar_range='[-6,4]' \
-#     algorithm.optimizer.lr=6.005882209363415e-05 \
-#     algorithm.optimizer.betas='[0.9,0.99]' \
-#     algorithm.optimizer.weight_decay=0.0 \
-#     algorithm.loss.distance_scale=0.002 \
-#     algorithm.distance_warmup_frac=0.2 \
-#     algorithm.encoder.nodes='[24,8,4]' \
-#     algorithm.encoder.activation=relu \
+#     algorithm.optimizer.betas=[0.9,0.99] \
+#     algorithm.optimizer.weight_decay=0.0001 \
+#     algorithm.loss.weight_decay=1e-06 \
+#     algorithm.loss.soft_boundary=True \
+#     algorithm.loss.nu=0.1 \
+#     algorithm.center_init_method=mean \
+#     algorithm.encoder.nodes=[16,8] \
+#     algorithm.encoder.activation=gelu \
 #     trainer=gpu \
 #     trainer.devices=[1]
 
@@ -145,7 +149,7 @@
 #     hydra.launcher.gpus_per_node=4 \
 #     paths.raw_data_dir=/data/deodagiu/adl1t_data/parquet_files \
 #     experiment=svdd \
-#     experiment_name=svdd_cvar25_vs_logp_search \
+#     experiment_name=svdd_cvar25_vs_dist_search \
 #     callbacks.max_rate_distance_ckpt=null \
 #     callbacks.stable_distance_q99_ckpt=null \
 #     callbacks.cvar10_ema_ckpt=null \
@@ -157,7 +161,7 @@
 #     evaluator_callbacks.wasserstein=null \
 #     logger=none \
 #     hparams_search=svdd_optuna \
-#     hydra.sweeper.study_name=cvar25eff_vs_logp_b16k \
+#     hydra.sweeper.study_name=cvar25eff_vs_dist_b16k \
 #     hydra.sweeper.n_trials=100 \
 #     hydra.sweeper.sampler.n_startup_trials=150 \
 #     trainer=gpu \
@@ -174,7 +178,7 @@
 #     hydra.launcher.gpus_per_node=4 \
 #     paths.raw_data_dir=/data/deodagiu/adl1t_data/parquet_files \
 #     experiment=svdd \
-#     experiment_name=svdd_cvar25_vs_logpq99_search \
+#     experiment_name=svdd_cvar25_vs_distq99_search \
 #     callbacks.max_rate_distance_ckpt=null \
 #     callbacks.stable_distance_ckpt=null \
 #     callbacks.cvar10_ema_ckpt=null \
@@ -187,7 +191,7 @@
 #     logger=none \
 #     hparams_search=svdd_optuna \
 #     optimized_metric_config.sec_metric.callback.name=distance_q99 \
-#     hydra.sweeper.study_name=cvar25eff_vs_logpq99_b16k \
+#     hydra.sweeper.study_name=cvar25eff_vs_distq99_b16k \
 #     hydra.sweeper.n_trials=100 \
 #     hydra.sweeper.sampler.n_startup_trials=150 \
 #     trainer=gpu \
@@ -204,7 +208,7 @@
 #     hydra.launcher.gpus_per_node=4 \
 #     paths.raw_data_dir=/data/deodagiu/adl1t_data/parquet_files \
 #     experiment=svdd \
-#     experiment_name=svdd_cvar10_vs_logp_search \
+#     experiment_name=svdd_cvar10_vs_dist_search \
 #     callbacks.max_rate_distance_ckpt=null \
 #     callbacks.stable_distance_q99_ckpt=null \
 #     callbacks.cvar25_ema_ckpt=null \
@@ -217,7 +221,7 @@
 #     evaluator_callbacks.anomaly_efficiency.cvar_summary=0.10 \
 #     logger=none \
 #     hparams_search=svdd_optuna \
-#     hydra.sweeper.study_name=cvar10eff_vs_logp_b16k \
+#     hydra.sweeper.study_name=cvar10eff_vs_dist_b16k \
 #     hydra.sweeper.n_trials=100 \
 #     hydra.sweeper.sampler.n_startup_trials=150 \
 #     trainer=gpu \
@@ -237,7 +241,7 @@
 #     hydra.launcher.gpus_per_node=4 \
 #     paths.raw_data_dir=/data/deodagiu/adl1t_data/parquet_files \
 #     experiment=svdd_agnostic \
-#     experiment_name=svdd_agnostic_cap_vs_logp_search \
+#     experiment_name=svdd_agnostic_cap_vs_dist_search \
 #     callbacks.anomaly_eff=null \
 #     callbacks.wasserstein_dist=null \
 #     callbacks.thres_drift=null \
@@ -255,7 +259,7 @@
 #     evaluator_callbacks.wasserstein=null \
 #     logger=none \
 #     hparams_search=svdd_optuna \
-#     hydra.sweeper.study_name=cap_vs_logp_b16k \
+#     hydra.sweeper.study_name=cap_vs_dist_b16k \
 #     hydra.sweeper.n_trials=150 \
 #     hydra.sweeper.sampler.n_startup_trials=150 \
 #     trainer=gpu \
@@ -272,7 +276,7 @@
 #     hydra.launcher.gpus_per_node=4 \
 #     paths.raw_data_dir=/data/deodagiu/adl1t_data/parquet_files \
 #     experiment=svdd_agnostic \
-#     experiment_name=svdd_agnostic_cap_vs_logpq99_search \
+#     experiment_name=svdd_agnostic_cap_vs_distq99_search \
 #     callbacks.anomaly_eff=null \
 #     callbacks.wasserstein_dist=null \
 #     callbacks.thres_drift=null \
@@ -292,7 +296,7 @@
 #     logger=none \
 #     hparams_search=svdd_optuna \
 #     optimized_metric_config.sec_metric.callback.name=distance_q99 \
-#     hydra.sweeper.study_name=cap_vs_logpq99_b16k \
+#     hydra.sweeper.study_name=cap_vs_distq99_b16k \
 #     hydra.sweeper.n_trials=100 \
 #     hydra.sweeper.sampler.n_startup_trials=150 \
 #     trainer=gpu \
@@ -312,7 +316,7 @@
 #     hydra.launcher.gpus_per_node=4 \
 #     paths.raw_data_dir=/data/deodagiu/adl1t_data/parquet_files \
 #     experiment=svdd_agnostic \
-#     experiment_name=svdd_agnostic_drift_vs_logp_search \
+#     experiment_name=svdd_agnostic_drift_vs_dist_search \
 #     callbacks.anomaly_eff=null \
 #     callbacks.wasserstein_dist=null \
 #     callbacks.cap_sn_zb=null \
@@ -333,7 +337,7 @@
 #     optimized_metric_config.main_metric.callback.name=thres_drift \
 #     +optimized_metric_config.main_metric.callback.params.target_rate=0.25 \
 #     optimized_metric_config.main_metric.direction=minimize \
-#     hydra.sweeper.study_name=drift_vs_logp_b16k \
+#     hydra.sweeper.study_name=drift_vs_dist_b16k \
 #     hydra.sweeper.direction='[minimize, minimize]' \
 #     hydra.sweeper.n_trials=100 \
 #     hydra.sweeper.sampler.n_startup_trials=150 \
@@ -351,7 +355,7 @@
 #     hydra.launcher.gpus_per_node=4 \
 #     paths.raw_data_dir=/data/deodagiu/adl1t_data/parquet_files \
 #     experiment=svdd_agnostic \
-#     experiment_name=svdd_agnostic_drift_vs_logpq99_search \
+#     experiment_name=svdd_agnostic_drift_vs_distq99_search \
 #     callbacks.anomaly_eff=null \
 #     callbacks.wasserstein_dist=null \
 #     callbacks.cap_sn_zb=null \
@@ -373,7 +377,7 @@
 #     +optimized_metric_config.main_metric.callback.params.target_rate=286.0 \
 #     optimized_metric_config.main_metric.direction=minimize \
 #     optimized_metric_config.sec_metric.callback.name=distance_q99 \
-#     hydra.sweeper.study_name=drift_vs_logpq99_b16k \
+#     hydra.sweeper.study_name=drift_vs_distq99_b16k \
 #     hydra.sweeper.direction='[minimize, minimize]' \
 #     hydra.sweeper.n_trials=100 \
 #     hydra.sweeper.sampler.n_startup_trials=150 \
@@ -386,41 +390,41 @@
 # -----------------------------
 
 # svdd agnostic distance and wasserstein distance search.
-taskset -c 0-2 \
-python3 src/train.py \
-    -m \
-    hydra/launcher=submitit_local \
-    hydra.launcher.cpus_per_task=1 \
-    hydra.launcher.gpus_per_node=4 \
-    paths.raw_data_dir=/data/deodagiu/adl1t_data/parquet_files \
-    experiment=svdd_agnostic \
-    experiment_name=svdd_agnostic_wasserstein_vs_logp_search \
-    callbacks.anomaly_eff=null \
-    callbacks.thres_drift=null \
-    callbacks.cap_sn_zb=null \
-    callbacks.stable_distance_q99_ckpt=null \
-    callbacks.thres_drift_ema_ckpt=null \
-    callbacks.cap_sn_zb_ema_ckpt=null \
-    callbacks.thres_drift_q99_ema_ckpt=null \
-    ~evaluator.ckpts.summary.trate286_0kHz_drift_ema \
-    ~evaluator.ckpts.single.loss_distance_q99 \
-    ~evaluator.ckpts.summary.trate0_25kHz_drift_ema \
-    ~evaluator.ckpts.summary.cap_ema_zerobias_vs_SingleNeutrino_E-10-gun \
-    evaluator_callbacks.anomaly_efficiency=null \
-    evaluator_callbacks.distance_loss_q99=null \
-    evaluator_callbacks.cap_sn_zb=null \
-    evaluator_callbacks.thres_drift=null \
-    logger=none \
-    hparams_search=svdd_optuna \
-    optimized_metric_config.main_metric.callback.name=wasserstein \
-    optimized_metric_config.main_metric.direction=minimize \
-    hydra.sweeper.study_name=wasserstein_vs_logp_b16k \
-    hydra.sweeper.direction='[minimize, minimize]' \
-    hydra.sweeper.n_trials=100 \
-    hydra.sweeper.sampler.n_startup_trials=150 \
-    trainer=gpu \
-    trainer.max_epochs=50 \
-    trainer.devices=[0]
+# taskset -c 0-2 \
+# python3 src/train.py \
+#     -m \
+#     hydra/launcher=submitit_local \
+#     hydra.launcher.cpus_per_task=1 \
+#     hydra.launcher.gpus_per_node=4 \
+#     paths.raw_data_dir=/data/deodagiu/adl1t_data/parquet_files \
+#     experiment=svdd_agnostic \
+#     experiment_name=svdd_agnostic_wasserstein_vs_dist_search \
+#     callbacks.anomaly_eff=null \
+#     callbacks.thres_drift=null \
+#     callbacks.cap_sn_zb=null \
+#     callbacks.stable_distance_q99_ckpt=null \
+#     callbacks.thres_drift_ema_ckpt=null \
+#     callbacks.cap_sn_zb_ema_ckpt=null \
+#     callbacks.thres_drift_q99_ema_ckpt=null \
+#     ~evaluator.ckpts.summary.trate286_0kHz_drift_ema \
+#     ~evaluator.ckpts.single.loss_distance_q99 \
+#     ~evaluator.ckpts.summary.trate0_25kHz_drift_ema \
+#     ~evaluator.ckpts.summary.cap_ema_zerobias_vs_SingleNeutrino_E-10-gun \
+#     evaluator_callbacks.anomaly_efficiency=null \
+#     evaluator_callbacks.distance_loss_q99=null \
+#     evaluator_callbacks.cap_sn_zb=null \
+#     evaluator_callbacks.thres_drift=null \
+#     logger=none \
+#     hparams_search=svdd_optuna \
+#     optimized_metric_config.main_metric.callback.name=wasserstein \
+#     optimized_metric_config.main_metric.direction=minimize \
+#     hydra.sweeper.study_name=wasserstein_vs_dist_b16k \
+#     hydra.sweeper.direction='[minimize, minimize]' \
+#     hydra.sweeper.n_trials=100 \
+#     hydra.sweeper.sampler.n_startup_trials=150 \
+#     trainer=gpu \
+#     trainer.max_epochs=50 \
+#     trainer.devices=[0]
 
 # svdd agnostic distance q99 and wasserstein distance search.
 # taskset -c 18-20 \
@@ -431,7 +435,7 @@ python3 src/train.py \
 #     hydra.launcher.gpus_per_node=4 \
 #     paths.raw_data_dir=/data/deodagiu/adl1t_data/parquet_files \
 #     experiment=svdd_agnostic \
-#     experiment_name=svdd_agnostic_drift_vs_logpq99_search \
+#     experiment_name=svdd_agnostic_drift_vs_distq99_search \
 #     callbacks.anomaly_eff=null \
 #     callbacks.thres_drift=null \
 #     callbacks.cap_sn_zb=null \
@@ -452,7 +456,7 @@ python3 src/train.py \
 #     optimized_metric_config.main_metric.callback.name=wasserstein \
 #     optimized_metric_config.main_metric.direction=minimize \
 #     optimized_metric_config.sec_metric.callback.name=distance_q99 \
-#     hydra.sweeper.study_name=wasserstein_vs_logpq99_b16k \
+#     hydra.sweeper.study_name=wasserstein_vs_distq99_b16k \
 #     hydra.sweeper.direction='[minimize, minimize]' \
 #     hydra.sweeper.n_trials=100 \
 #     hydra.sweeper.sampler.n_startup_trials=150 \

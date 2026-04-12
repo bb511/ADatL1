@@ -47,35 +47,35 @@
 
 
 # CAP training.
-# taskset -c 3-5 \
-# python3 src/train.py \
-#     paths.raw_data_dir=/data/deodagiu/adl1t_data/parquet_files \
-#     experiment=dsvae_agnostic \
-#     run_name=cap_t156_low \
-#     callbacks.wasserstein_dist=null \
-#     callbacks.thres_drift=null \
-#     callbacks.stable_kl_q99_ckpt=null \
-#     callbacks.wasserstein_dist_ema_ckpt=null \
-#     callbacks.thres_drift_ema_ckpt=null \
-#     callbacks.thres_drift_q99_ema_ckpt=null \
-#     ~evaluator.ckpts.summary.trate286_0kHz_drift_ema \
-#     ~evaluator.ckpts.summary.trate0_25kHz_drift_ema \
-#     ~evaluator.ckpts.single.loss_kl_raw_q99 \
-#     ~evaluator.ckpts.summary.w1dist_ema_zerobias_vs_SingleNeutrino_E-10-gun \
-#     trainer.gradient_clip_val=0.0 \
-#     algorithm.encoder.clamp_zlogvar_range=[-8,6] \
-#     algorithm.optimizer.lr=9.520279159583741e-05 \
-#     algorithm.optimizer.betas='[0.9,0.99]' \
-#     algorithm.optimizer.weight_decay=0.001 \
-#     algorithm.loss.kl_scale=0.002 \
-#     algorithm.kl_warmup_frac=0.3 \
-#     algorithm.encoder.activation=relu \
-#     algorithm.encoder.pooling=sum_max \
-#     algorithm.encoder.add_counts=True \
-#     algorithm.encoder.object_phi_nodes='{FET:[8],egammas:[16,16],jets:[16,16],muons:[8,8],taus:[16,16]}' \
-#     algorithm.encoder.rho_nodes='[24,8]' \
-#     trainer=gpu \
-#     trainer.devices=[1]
+taskset -c 6-8 \
+python3 src/train.py \
+    paths.raw_data_dir=/data/deodagiu/adl1t_data/parquet_files \
+    experiment=dsvae_agnostic \
+    run_name=cap_t371_high \
+    callbacks.wasserstein_dist=null \
+    callbacks.thres_drift=null \
+    callbacks.stable_kl_q99_ckpt=null \
+    callbacks.wasserstein_dist_ema_ckpt=null \
+    callbacks.thres_drift_ema_ckpt=null \
+    callbacks.thres_drift_q99_ema_ckpt=null \
+    ~evaluator.ckpts.summary.trate286_0kHz_drift_ema \
+    ~evaluator.ckpts.summary.trate0_25kHz_drift_ema \
+    ~evaluator.ckpts.single.loss_kl_raw_q99 \
+    ~evaluator.ckpts.summary.w1dist_ema_zerobias_vs_SingleNeutrino_E-10-gun \
+    trainer.gradient_clip_val=2.0 \
+    algorithm.encoder.clamp_zlogvar_range=[-10,6] \
+    algorithm.optimizer.lr=5.000071499679068e-05 \
+    algorithm.optimizer.betas='[0.9,0.99]' \
+    algorithm.optimizer.weight_decay=0.0001 \
+    algorithm.loss.kl_scale=0.0001 \
+    algorithm.kl_warmup_frac=0.05 \
+    algorithm.encoder.activation=gelu \
+    algorithm.encoder.pooling=sum \
+    algorithm.encoder.add_counts=True \
+    algorithm.encoder.object_phi_nodes='{FET:[8],egammas:[24,8],jets:[24,8],muons:[8],taus:[24,8]}' \
+    algorithm.encoder.rho_nodes='[48,24]' \
+    trainer=gpu \
+    trainer.devices=[2]
 
 
 # Agnostic stability training.

@@ -146,7 +146,7 @@ callbacks:
     every_n_epochs: 1
     save_on_train_epoch_end: false
 
-evaluator:
+evaluation:
   ckpts:
     last: true
     summary:
@@ -157,7 +157,7 @@ evaluator:
       loss_mse_q99: ['stable']
       eff__ascore_loss_mse_full__brate_0_25kHz: ['max']
 
-evaluator_callbacks:
+evaluation/callbacks:
   anomaly_efficiency:
     _target_: src.evaluation.callbacks.efficiency.AnomalyEfficiencyCallback
     metric_name: 'loss/mse/full'
@@ -190,7 +190,7 @@ evaluator_callbacks:
   mse_operational_mean:
     _target_: src.evaluation.callbacks.output.OutputCallback
     name: mse_mean_top_vals
-    loss_name: 'loss/mse/mean_top_vals'
+    output_name: 'loss/mse/mean_top_vals'
     ds:
       - normal
       - GluGluHTo2B_Par-MH-125
@@ -218,7 +218,7 @@ evaluator_callbacks:
   mse_loss_q99:
     _target_: src.evaluation.callbacks.output.OutputCallback
     name: mse_q99
-    loss_name: 'loss/mse/q99'
+    output_name: 'loss/mse/q99'
     ds:
       - normal
       - GluGluHTo2B_Par-MH-125
@@ -245,7 +245,7 @@ evaluator_callbacks:
 
   thres_drift:
     _target_: src.evaluation.callbacks.thres_drift.ThresholdDriftCallback
-    loss_name: 'loss/mse/full'
+    output_name: 'loss/mse/full'
     target_rates: [0.25]
     bc_rate: 28608.8064
     calibration_fraction: 0.5

@@ -37,7 +37,7 @@ class ThresholdDriftCallback(Callback):
 
     This is appropriate as a validation-side proxy objective for HPO.
 
-    :param loss_name: Key in outputs dict containing per-event anomaly scores / losses.
+    :param output_name: Key in outputs dict containing per-event anomaly scores / losses.
     :param target_rates: List of target background rates in kHz.
     :param bc_rate: Bunch crossing rate in kHz.
     :param calibration_fraction: Fraction of normal scores used for calibration.
@@ -49,7 +49,7 @@ class ThresholdDriftCallback(Callback):
 
     def __init__(
         self,
-        loss_name: str,
+        output_name: str,
         target_rates: list[float],
         bc_rate: float = 28608.8064,
         calibration_fraction: float = 0.5,
@@ -59,7 +59,7 @@ class ThresholdDriftCallback(Callback):
     ):
         super().__init__()
         self.device = None
-        self.loss_name = loss_name
+        self.output_name = output_name
         self.target_rates = sorted(float(x) for x in target_rates)
         self.bc_rate = float(bc_rate)
         self.calibration_fraction = float(calibration_fraction)
@@ -92,9 +92,9 @@ class ThresholdDriftCallback(Callback):
         if dset_name != "normal":
             return
 
-        loss = outputs[self.loss_name]
+        loss = outputs[self.output_name]
         if loss.ndim == 0:
-            raise ValueError(f"outputs['{self.loss_name}'] is scalar. Need a tensor.")
+            raise ValueError(f"outputs['{self.output_name}'] is scalar. Need a tensor.")
 
         loss = loss.detach().view(-1).cpu()
         self.normal_scores.append(loss)

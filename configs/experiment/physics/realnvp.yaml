@@ -191,7 +191,7 @@ evaluator_callbacks:
   nll_operational_mean:
     _target_: src.evaluation.callbacks.output.OutputCallback
     name: nll_mean_top_vals
-    loss_name: 'loss/nll/mean_top_vals'
+    output_name: 'loss/nll/mean_top_vals'
     ds:
       - normal
       - GluGluHTo2B_Par-MH-125
@@ -219,7 +219,7 @@ evaluator_callbacks:
   nll_loss_q99:
     _target_: src.evaluation.callbacks.output.OutputCallback
     name: nll_q99
-    loss_name: 'loss/nll/q99'
+    output_name: 'loss/nll/q99'
     ds:
       - normal
       - GluGluHTo2B_Par-MH-125
@@ -246,7 +246,7 @@ evaluator_callbacks:
 
   thres_drift:
     _target_: src.evaluation.callbacks.thres_drift.ThresholdDriftCallback
-    loss_name: 'loss/nll/full'
+    output_name: 'loss/nll/full'
     target_rates: [0.25]
     bc_rate: 28608.8064
     calibration_fraction: 0.5

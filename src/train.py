@@ -141,7 +141,7 @@ def _get_evaluator(cfg: DictConfig, datamodule, logger):
     evaluator_cfg = OmegaConf.create(merged_dict)
 
     log.info("Instantiating evaluator callbacks...")
-    callbacks = instantiate_callbacks(cfg.get("evaluator_callbacks"))
+    callbacks = instantiate_callbacks(cfg.get("evaluation/callbacks"))
     log.info(f"Instantiating evaluator <{evaluator_cfg._target_}>")
     evaluator = hydra.utils.instantiate(
         evaluator_cfg,

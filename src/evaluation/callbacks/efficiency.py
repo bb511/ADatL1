@@ -11,6 +11,7 @@ from pytorch_lightning import Trainer
 from src.evaluation.callbacks.metrics.rate import AnomalyRate
 from src.evaluation.callbacks import utils
 from src.plot import horizontal_bar
+from src.callbacks.utils.data import unpack_batch
 
 from src.utils import pylogger
 
@@ -77,37 +78,39 @@ class AnomalyEfficiencyCallback(Callback):
         self.device = pl_module.device
         self.thresholds = self._get_thres(pl_module)
 
-        # Check if 'zerobias' dataset is the first dataset in the test dictionary.
+        # Check if 'normal' dataset is the first dataset in the test dictionary.
         # This is required to compute the rate thresholds on the anomaly scores.
         first_test_dset_key = list(trainer.test_dataloaders.keys())[0]
-        if first_test_dset_key != "zerobias":
-            raise ValueError("Eff callback requires zerobias first in the data dict!")
+        if first_test_dset_key != "normal":
+            raise ValueError("Eff callback needs normal data first in the data dict!")
 
     def on_test_epoch_start(self, trainer, pl_module):
         """Clear the metrics dictionary at the start of the epoch."""
         self.main_rate = defaultdict(lambda: defaultdict(AnomalyRate))
         self.sig_rates = defaultdict(lambda: defaultdict(AnomalyRate))
         self.bkg_rates = defaultdict(lambda: defaultdict(AnomalyRate))
-        self.zerobias_score_data = []
+        self.normal_score_data = []
 
     def on_test_batch_end(
         self, trainer, pl_module, outputs, batch, batch_idx, dataloader_idx=0
     ):
         """Determine the rate for every given metric for every test data set.
 
-        First, the desired metrics are computed on the zerobias data and accummulated
+        First, the desired metrics are computed on the normal data and accummulated
         across batches. The full metric distribution is used to set a threshold that
         will give a target rate or set of rates, specified by the user.
         These thresholds are then applied on all other data sets used for test
-        to determine, by using the threshold computed on zerobias, what would the rate
+        to determine, by using the threshold computed on normal, what would the rate
         be on these other data sets.
         """
         self.dataset_name = list(trainer.test_dataloaders.keys())[dataloader_idx]
         self.total_batches = trainer.num_test_batches[dataloader_idx]
-        _, _, l1bit, labels = batch
+        b = unpack_batch(batch)
+        l1bit = b.l1bit
+        labels = b.y
 
-        if self.dataset_name == "zerobias":
-            self._accumulate_zerobias_output(outputs, batch_idx, l1bit)
+        if self.dataset_name == "normal":
+            self._accumulate_normal_output(outputs, batch_idx, l1bit)
         else:
             if self.dataset_name not in self.ds:
                 return
@@ -230,12 +233,12 @@ class AnomalyEfficiencyCallback(Callback):
         ckpt_ds = utils.misc.get_ckpt_ds_name(ckpt)
         self.eff_summary[trate][ckpt_ds] = summary_metric
 
-    def _accumulate_zerobias_output(
+    def _accumulate_normal_output(
         self, outputs: dict, batch_idx: int, l1bit: torch.Tensor
     ):
         """Accummulates the specified metric data across batches.
 
-        Used if currently processing the zerobias data set, accummulate the values of
+        Used if currently processing the normal data set, accummulate the values of
         each metric across batches. The whole metric output distribution is needed to
         set a treshold that gives a certain rate.
         """
@@ -243,22 +246,22 @@ class AnomalyEfficiencyCallback(Callback):
         if self.pure_thres:
             batch_output = batch_output[~l1bit]
 
-        self.zerobias_score_data.append(batch_output)
+        self.normal_score_data.append(batch_output)
 
         if batch_idx == self.total_batches - 1:
-            self.zerobias_score_data = torch.cat(self.zerobias_score_data, dim=0)
-            self._compute_zerobias_rate()
+            self.normal_score_data = torch.cat(self.normal_score_data, dim=0)
+            self._compute_normal_rate()
 
-    def _compute_zerobias_rate(self):
+    def _compute_normal_rate(self):
         """Computes the desired rates on the main test data set.
 
-        This is a sanity check. The threshold computed on the zerobias and applied to the
-        zerobias data should return the rate for which this threshold was computed.
+        This is a sanity check. The threshold computed on the normal and applied to the
+        normal data should return the rate for which this threshold was computed.
         """
         for target_rate in self.target_rates:
             rate = AnomalyRate(target_rate, self.bc_rate).to(self.device)
             rate.apply_threshold(self.thresholds[target_rate])
-            rate.update(self.zerobias_score_data)
+            rate.update(self.normal_score_data)
             self.main_rate[target_rate][self.dataset_name] = rate
 
     def _initialize_rate_metric(self, labels: torch.Tensor):

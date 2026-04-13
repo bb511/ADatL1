@@ -1,0 +1,6 @@
+# @package evaluation.callbacks.main
+
+_target_: src.evaluation.callbacks.output.OutputCallback
+output_name: 'loss'
+log_raw_mlflow: true
+ds: ???

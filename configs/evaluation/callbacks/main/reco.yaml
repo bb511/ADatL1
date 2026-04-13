@@ -1,0 +1,11 @@
+# @package evaluation.callbacks.main
+
+_target_: src.evaluation.callbacks.reco.ReconstructionPlots
+warmup_batches: 0.2
+output_name: reconstructed_data
+datamodule: true
+ckpts:
+  last: true
+datasets: ['main_test']
+log_raw_mlflow: true
+name: 'reco'

@@ -8,6 +8,7 @@ from pytorch_lightning import LightningDataModule
 
 from src.evaluation.callbacks import utils
 from src.plot import overlaid_hist
+from src.callbacks.utils.data import unpack_batch
 
 
 class ReconstructionPlots(Callback):
@@ -76,7 +77,10 @@ class ReconstructionPlots(Callback):
         if self.datasets and dset_name not in self.datasets:
             return
 
-        x, m, _, _ = batch
+        b = unpack_batch(batch)
+        x = b.x
+        m = b.mask
+
         x = torch.flatten(x, start_dim=1)
         m = torch.flatten(m, start_dim=1).bool()
 

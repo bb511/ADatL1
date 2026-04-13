@@ -15,7 +15,7 @@ from src.plot import horizontal_bar
 class KNNEffs(Callback):
     """Runs a kNN algorithm on the outputs of the network and computes rate.
 
-    Expects that there is a main_test dataloader that contains zero-bias data. This
+    Expects that there is a normal dataloader that contains zero-bias data. This
     dataloader is used to compute the fake positives in the precision.
     The other dataloaders are either signal or background simulation.
 
@@ -66,13 +66,13 @@ class KNNEffs(Callback):
         self.knneffs_summary = defaultdict(lambda: defaultdict(float))
 
     def on_test_start(self, trainer, pl_module):
-        """Check if 'main_test' labeled dataloader is among the test dataloaders."""
+        """Check if 'normal' labeled dataloader is among the test dataloaders."""
         self.device = pl_module.device
 
         first_test_dset_key = list(trainer.test_dataloaders.keys())[0]
-        if first_test_dset_key != "main_test":
+        if first_test_dset_key != "normal":
             raise ValueError(
-                "KNN callback needs main_test data set to be the first "
+                "KNN callback needs normal data set to be the first "
                 "in the data dictionary!"
             )
 
@@ -97,14 +97,14 @@ class KNNEffs(Callback):
         Finally, compute BinaryAveragePrecision for all the signal data sets.
         """
         self.dataset_name = list(trainer.test_dataloaders.keys())[dataloader_idx]
-        if self.dataset_name != "main_test" and not self.dataset_name in self.ds:
+        if self.dataset_name != "normal" and not self.dataset_name in self.ds:
             return
 
         _, _, _, labels = batch
         labels = self._check_labels(labels, self.dataset_name)
         z = outputs[self.output_name]
 
-        if self.dataset_name == "main_test":
+        if self.dataset_name == "normal":
             batch_size = labels.size(0)
             nsamples = (batch_idx + 1) * batch_size
             if nsamples <= self.reference_sample_size:
@@ -272,7 +272,7 @@ class KNNEffs(Callback):
     ):
         """Accummulates the specified metric data across batches.
 
-        Used if currently processing the main_test data set, accummulate the values of
+        Used if currently processing the normal data set, accummulate the values of
         each metric across batches. The whole metric output distribution is needed to
         set a treshold that gives a certain rate.
         """
@@ -330,21 +330,21 @@ class KNNEffs(Callback):
     def _check_labels(self, labels: torch.Tensor, dataset_name: str):
         """Checks if the labels are as expected depending on the data set.
 
-        The labels of the main_test data set are supposed to all be 0s.
+        The labels of the normal data set are supposed to all be 0s.
         The labels of any of the other data sets, if they are not 1, are converted to
         be all 1s. All other data sets are treated as signals.
         """
-        if dataset_name == "main_test":
+        if dataset_name == "normal":
             if torch.count_nonzero(labels) > 0:
                 raise ValueError(
-                    "KNN_AUPRC callback needs 'main_test' loader labels to all be 0s."
+                    "KNN_AUPRC callback needs 'normal' loader labels to all be 0s."
                 )
             return labels
 
         if (labels == 0).any():
             raise ValueError(
                 "KNN_AUPRC callback needs all labels to be not 0 for the other data "
-                "except for main_test. Check this is the case."
+                "except for normal. Check this is the case."
             )
 
         return (labels != 0).to(labels.dtype)
@@ -354,5 +354,5 @@ class KNNEffs(Callback):
             raise ValueError(
                 f"No background negatives were scored. "
                 f"reference_sample_size={self.reference_sample_size} may be too large "
-                f"for main_test."
+                f"for normal."
             )

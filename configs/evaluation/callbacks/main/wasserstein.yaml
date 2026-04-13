@@ -1,0 +1,9 @@
+# @package evaluation.callbacks.main
+
+_target_: src.evaluation.callbacks.wasserstein.Wasserstein
+metric_name: 'loss/total/full'
+dataset_1: ???
+dataset_2: ???
+log_raw_mlflow: true
+apply_log1p: false
+name: "wasserstein"

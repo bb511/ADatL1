@@ -6,10 +6,9 @@ import pickle
 import torch
 import numpy as np
 from pytorch_lightning.callbacks import Callback
-from src.callbacks.metrics.rate import AnomalyRate
 
-from src.evaluation.callbacks import utils
-from src.plot import horizontal_bar
+from src.callbacks.metrics.rate import AnomalyRate
+from src.callbacks.utils.data import unpack_batch
 
 
 class KNNRate(Callback):
@@ -53,12 +52,12 @@ class KNNRate(Callback):
         self.knnrate_summary = defaultdict(lambda: defaultdict(float))
 
     def on_validation_start(self, trainer, pl_module):
-        """Check if 'zerobias' labeled dataloader is among the test dataloaders."""
+        """Check if 'normal' labeled dataloader is among the test dataloaders."""
         self.device = pl_module.device
 
         dset_names = list(trainer.val_dataloaders.keys())
         first_val_dset_key = list(trainer.val_dataloaders.keys())[0]
-        if first_val_dset_key != "zerobias":
+        if first_val_dset_key != "normal":
             raise ValueError(
                 "KNN Rate callback requires main_val first in the val dict!"
             )
@@ -83,7 +82,9 @@ class KNNRate(Callback):
         """
         self.dataset_name = list(trainer.val_dataloaders.keys())[dataloader_idx]
 
-        _, _, _, labels = batch
+        b = unpack_batch(batch)
+        labels = b.y
+
         labels = self._check_labels(labels, self.dataset_name)
         z = outputs[self.output_name].detach()
 

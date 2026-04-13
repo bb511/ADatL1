@@ -12,8 +12,10 @@ from src.data.components.normalization import L1DataNormalizer
 from src.plot import scatter
 import matplotlib.pyplot as plt
 from pathvalidate import sanitize_filename
+from src.callbacks.utils.data import unpack_batch
 
 
+# WIP to add access to datamodule.
 class BkgRatePileup(Callback):
     """Plots the correlation between the background data sets rate and the pileup.
 
@@ -36,7 +38,6 @@ class BkgRatePileup(Callback):
         target_rates: list[int],
         bc_rate: int,
         metric_name: str,
-        datamodule: LightningDataModule,
         log_raw_mlflow: bool = True,
     ):
         super().__init__()
@@ -51,18 +52,18 @@ class BkgRatePileup(Callback):
         """Do checks required for this callback to work."""
         self.device = pl_module.device
 
-        # Check if 'main_test' dataset is the first dataset in the test dictionary.
+        # Check if 'normal' dataset is the first dataset in the test dictionary.
         # This is required to compute the rate thresholds on the anomaly scores.
         first_test_dset_key = list(trainer.test_dataloaders.keys())[0]
         self.device = pl_module.device
-        if first_test_dset_key != "main_test":
-            raise ValueError("PU callback requires main_test first in the data dict!")
+        if first_test_dset_key != "normal":
+            raise ValueError("PU callback requires normal first in the data dict!")
 
     def _get_pileup_data(self, datamodule: LightningDataModule):
         """Get the pileup data for each test data set.
 
         Get the nPV_True feature of the event_info object, put it in the subfolder of
-        the data in 'callbacks_pileup' and don't normalize it.
+        the data in 'callbacks_pileup' and don't normalime it.
         """
         extra_feats = {"event_info": ["nPV_True"]}
         flag = "callbacks_pileup"
@@ -85,7 +86,7 @@ class BkgRatePileup(Callback):
     ):
         """Determine the rate for every given metric for the simulated bkg data.
 
-        First, the desired metrics are computed on the main_test data and accummulated
+        First, the desired metrics are computed on the normal data and accummulated
         across batches. The full metric distribution is used to set a threshold that
         will give a target rate or set of rates, specified by the user.
         These thresholds are then applied on the bkg simulation data sets, i.e., the
@@ -94,13 +95,14 @@ class BkgRatePileup(Callback):
         """
         self.dataset_name = list(trainer.test_dataloaders.keys())[dataloader_idx]
         self.total_batches = trainer.num_test_batches[dataloader_idx]
-        _, _, _, labels = batch
+        b = batch
+        labels = b.y
 
-        if self.dataset_name == "main_test" and batch_idx < self.total_batches / 2:
+        if self.dataset_name == "normal" and batch_idx < self.total_batches / 2:
             self._accumulate_maintest_output(outputs, batch_idx)
-        elif (labels < 0).all().item() or self.dataset_name == "main_test":
-            if self.dataset_name == "main_test":
-                self.dataset_name = "main_test_heldout"
+        elif (labels < 0).all().item() or self.dataset_name == "normal":
+            if self.dataset_name == "normal":
+                self.dataset_name = "normal_heldout"
                 self._compute_batch_rate(outputs, batch_idx)
                 self._accumulate_mtheldout_output(outputs, batch_idx)
                 return
@@ -111,14 +113,14 @@ class BkgRatePileup(Callback):
     def _accumulate_maintest_output(self, outputs: dict, batch_idx: int):
         """Accummulates the specified metric data across batches.
 
-        Used if currently processing the main_test data set, accummulate the values of
+        Used if currently processing the normal data set, accummulate the values of
         each metric across batches. The whole metric output distribution is needed to
         set a treshold that gives a certain rate.
         """
         batch_output = outputs[self.metric_name]
         self.maintest_score_data.append(batch_output)
 
-        pu_ds = self.pu_per_ds["main_test"]
+        pu_ds = self.pu_per_ds["normal"]
         pu = self._get_pu_batch(pu_ds, batch_idx)
         pu = pu.round().int().to(self.device).view(-1)
         self.maintest_pu_data.append(pu)
@@ -131,7 +133,7 @@ class BkgRatePileup(Callback):
     def _accumulate_singlenetr_output(self, outputs: dict, batch_idx: int):
         """Accummulates the specified metric data across batches.
 
-        Used if currently processing the main_test data set, accummulate the values of
+        Used if currently processing the normal data set, accummulate the values of
         each metric across batches. The whole metric output distribution is needed to
         set a treshold that gives a certain rate.
         """
@@ -143,7 +145,7 @@ class BkgRatePileup(Callback):
 
     def _accumulate_mtheldout_output(self, outputs: dict, batch_idx: int):
         """Accummulates the specified metric data across batches.
-        Used if currently processing the main_test data set, accummulate the values of
+        Used if currently processing the normal data set, accummulate the values of
         each metric across batches. The whole metric output distribution is needed to
         set a treshold that gives a certain rate.
         """
@@ -186,8 +188,8 @@ class BkgRatePileup(Callback):
         For all the other test data sets, except the main one, this calculates
         which events pass the rate threshold for each batch and updates the total.
         """
-        if self.dataset_name == "main_test_heldout":
-            pu_ds = self.pu_per_ds["main_test"]
+        if self.dataset_name == "normal_heldout":
+            pu_ds = self.pu_per_ds["normal"]
         else:
             pu_ds = self.pu_per_ds[self.dataset_name]
         pus = self._get_pu_batch(pu_ds, batch_idx)
@@ -212,8 +214,8 @@ class BkgRatePileup(Callback):
         """Initialize the rate metric for a certain target rate and pu.
 
         The anomaly rate metric object is initialised. Then, the threshold is computed
-        given the main_test metric distribution. This threshold is then used to compute
-        the rate on the other data sets differing from main_test.
+        given the normal metric distribution. This threshold is then used to compute
+        the rate on the other data sets differing from normal.
         """
         rate = AnomalyRate(target_rate, self.bc_rate).to(self.device)
         rate.set_threshold(self.maintest_score_data)
@@ -257,7 +259,7 @@ class BkgRatePileup(Callback):
     ):
         """Compute the rates in the pileup_rates dictionary."""
         threshold = pu_rates[list(pu_rates.keys())[0]].threshold
-        if "main_test" == dataset_name:
+        if "normal" == dataset_name:
             self._plot_score(
                 self.maintest_score_data,
                 dataset_name,
@@ -265,7 +267,7 @@ class BkgRatePileup(Callback):
                 target_rate,
                 plot_folder,
             )
-        elif "main_test_heldout" == dataset_name:
+        elif "normal_heldout" == dataset_name:
             self._plot_score(
                 self.maintest_heldout_score_data,
                 dataset_name,

@@ -9,7 +9,7 @@ from pytorch_lightning import Callback
 class ThresholdDriftCallback(Callback):
     """Compute a validation-style split-transfer drift metric from one dataset.
 
-    This callback collects all scores from the 'zerobias' dataloader, splits them
+    This callback collects all scores from the 'normal' dataloader, splits them
     internally into:
         - calibration subset
         - evaluation subset
@@ -32,7 +32,7 @@ class ThresholdDriftCallback(Callback):
     :param loss_name: Key in outputs dict containing per-event anomaly scores / losses.
     :param target_rates: List of target background rates in kHz.
     :param bc_rate: Bunch crossing rate in kHz.
-    :param calibration_fraction: Fraction of zerobias scores used for calibration.
+    :param calibration_fraction: Fraction of normal scores used for calibration.
         The remainder is used for evaluation.
     :param split_seed: Seed used for deterministic random splitting.
     :beta: Float that sets parameter of EMA metrics compute here.
@@ -72,24 +72,24 @@ class ThresholdDriftCallback(Callback):
         self.drift_ema = defaultdict(float)
 
     def on_validation_epoch_start(self, trainer, pl_module):
-        """Set the device and make sure the zerobias data is in the used data sets."""
+        """Set the device and make sure the normal data is in the used data sets."""
         self.device = pl_module.device
 
         dset_names = list(trainer.val_dataloaders.keys())
-        if "zerobias" not in dset_names:
+        if "normal" not in dset_names:
             raise ValueError(
-                f"{self.__class__.__name__} requires a dataloader named 'zerobias'. "
+                f"{self.__class__.__name__} requires a dataloader named 'normal'. "
                 f"Available validation dataloaders: {dset_names}"
             )
 
-        self.zerobias_scores = []
+        self.normal_scores = []
 
     def on_validation_batch_end(
         self, trainer, pl_module, outputs, batch, batch_idx, dataloader_idx=0
     ):
-        """Split the zerobias validation data set and aggregate anomaly scores."""
+        """Split the normal validation data set and aggregate anomaly scores."""
         dset_name = list(trainer.val_dataloaders.keys())[dataloader_idx]
-        if dset_name != "zerobias":
+        if dset_name != "normal":
             return
 
         loss = outputs[self.loss_name]
@@ -97,18 +97,18 @@ class ThresholdDriftCallback(Callback):
             raise ValueError(f"outputs['{self.loss_name}'] is scalar. Need a tensor.")
 
         loss = loss.detach().view(-1)
-        self.zerobias_scores.append(loss)
+        self.normal_scores.append(loss)
 
     def on_validation_epoch_end(self, trainer, pl_module):
         """Compute and log the threshold drift metric across the two data sets."""
-        if not self.zerobias_scores:
-            raise RuntimeError("No zerobias validation scores were collected.")
+        if not self.normal_scores:
+            raise RuntimeError("No normal validation scores were collected.")
 
-        scores = torch.cat(self.zerobias_scores, dim=0).view(-1)
+        scores = torch.cat(self.normal_scores, dim=0).view(-1)
         n_total = int(scores.numel())
         if n_total < 2:
             raise RuntimeError(
-                f"Need at least 2 zerobias scores to split, got {n_total}."
+                f"Need at least 2 normal scores to split, got {n_total}."
             )
 
         cal_scores, eval_scores = self._split_scores(scores)

@@ -17,7 +17,7 @@ log = pylogger.RankedLogger(__name__)
 class ThresholdDriftCallback(Callback):
     """Compute a validation-style split-transfer drift metric from one dataset.
 
-    This callback collects all scores from the 'zerobias' dataloader, splits them
+    This callback collects all scores from the 'normal' dataloader, splits them
     internally into:
         - calibration subset
         - evaluation subset
@@ -40,7 +40,7 @@ class ThresholdDriftCallback(Callback):
     :param loss_name: Key in outputs dict containing per-event anomaly scores / losses.
     :param target_rates: List of target background rates in kHz.
     :param bc_rate: Bunch crossing rate in kHz.
-    :param calibration_fraction: Fraction of zerobias scores used for calibration.
+    :param calibration_fraction: Fraction of normal scores used for calibration.
         The remainder is used for evaluation.
     :param split_seed: Seed used for deterministic random splitting.
     :param log_raw_mlflow: Whether to log raw plots to mlflow.
@@ -76,20 +76,20 @@ class ThresholdDriftCallback(Callback):
         self.device = pl_module.device
 
         dset_names = list(trainer.test_dataloaders.keys())
-        if "zerobias" not in dset_names:
+        if "normal" not in dset_names:
             raise ValueError(
-                f"{self.__class__.__name__} requires a dataloader named 'zerobias'. "
+                f"{self.__class__.__name__} requires a dataloader named 'normal'. "
                 f"Available test dataloaders: {dset_names}"
             )
 
-        self.zerobias_scores = []
+        self.normal_scores = []
 
     def on_test_batch_end(
         self, trainer, pl_module, outputs, batch, batch_idx, dataloader_idx=0
     ):
-        """Accumulate zerobias scores across the whole epoch."""
+        """Accumulate normal scores across the whole epoch."""
         dset_name = list(trainer.test_dataloaders.keys())[dataloader_idx]
-        if dset_name != "zerobias":
+        if dset_name != "normal":
             return
 
         loss = outputs[self.loss_name]
@@ -97,24 +97,24 @@ class ThresholdDriftCallback(Callback):
             raise ValueError(f"outputs['{self.loss_name}'] is scalar. Need a tensor.")
 
         loss = loss.detach().view(-1).cpu()
-        self.zerobias_scores.append(loss)
+        self.normal_scores.append(loss)
 
     def on_test_epoch_end(self, trainer, pl_module) -> None:
-        """Compute split-transfer drift on zerobias."""
+        """Compute split-transfer drift on normal."""
         ckpt_name = Path(pl_module._ckpt_path).stem
         ckpts_dir = Path(pl_module._ckpt_path).parent
         split = getattr(trainer, "split", "test")
         plot_folder = ckpts_dir / "plots" / split / ckpt_name / self.name
         plot_folder.mkdir(parents=True, exist_ok=True)
 
-        if not self.zerobias_scores:
-            raise RuntimeError("No zerobias scores were collected.")
+        if not self.normal_scores:
+            raise RuntimeError("No normal scores were collected.")
 
-        scores = torch.cat(self.zerobias_scores, dim=0).view(-1)
+        scores = torch.cat(self.normal_scores, dim=0).view(-1)
         n_total = int(scores.numel())
         if n_total < 2:
             raise RuntimeError(
-                f"Need at least 2 zerobias scores to split, got {n_total}."
+                f"Need at least 2 normal scores to split, got {n_total}."
             )
 
         cal_scores, eval_scores = self._split_scores(scores)
@@ -139,7 +139,7 @@ class ThresholdDriftCallback(Callback):
                 f"Split-transfer drift at threshold: {trate_name}\n"
                 f"log((p̂+ε)/(FPR+ε))"
             )
-            self._plot({"zerobias": drift_metric}, xlabel, plot_folder, percent=False)
+            self._plot({"normal": drift_metric}, xlabel, plot_folder, percent=False)
             self._store_summary(drift_metric, ckpt_name, trate)
 
         utils.mlflow.log_plots_to_mlflow(

@@ -62,7 +62,7 @@
 #     ~evaluator.ckpts.single.loss_kl_raw_mean_top_vals \
 #     ~evaluator.ckpts.summary.trate286_0kHz_drift_ema \
 #     ~evaluator.ckpts.summary.trate0_25kHz_drift_ema \
-#     ~evaluator.ckpts.summary.w1dist_ema_zerobias_vs_SingleNeutrino_E-10-gun \
+#     ~evaluator.ckpts.summary.w1dist_ema_normal_vs_SingleNeutrino_E-10-gun \
 #     trainer.gradient_clip_val=0.0 \
 #     algorithm.encoder.clamp_zlogvar_range='[-20,10]' \
 #     algorithm.optimizer.lr=0.0003257255014602454 \
@@ -93,8 +93,8 @@
 #     callbacks.stable_kl_ckpt=null \
 #     ~evaluator.ckpts.single.loss_kl_raw_mean_top_vals \
 #     ~evaluator.ckpts.summary.trate286_0kHz_drift_ema \
-#     ~evaluator.ckpts.summary.w1dist_ema_zerobias_vs_SingleNeutrino_E-10-gun \
-#     ~evaluator.ckpts.summary.cap_ema_zerobias_vs_SingleNeutrino_E-10-gun \
+#     ~evaluator.ckpts.summary.w1dist_ema_normal_vs_SingleNeutrino_E-10-gun \
+#     ~evaluator.ckpts.summary.cap_ema_normal_vs_SingleNeutrino_E-10-gun \
 #     trainer.gradient_clip_val=2.0 \
 #     algorithm.encoder.clamp_zlogvar_range='[-6,4]' \
 #     algorithm.optimizer.lr=5.0003969774639385e-05 \
@@ -126,7 +126,7 @@
 #     ~evaluator.ckpts.single.loss_kl_raw_mean_top_vals \
 #     ~evaluator.ckpts.summary.trate286_0kHz_drift_ema \
 #     ~evaluator.ckpts.summary.trate0_25kHz_drift_ema \
-#     ~evaluator.ckpts.summary.cap_ema_zerobias_vs_SingleNeutrino_E-10-gun \
+#     ~evaluator.ckpts.summary.cap_ema_normal_vs_SingleNeutrino_E-10-gun \
 #     trainer.gradient_clip_val=0.5 \
 #     algorithm.encoder.clamp_zlogvar_range='[-20,10]' \
 #     algorithm.optimizer.lr=6.040999153331964e-05 \
@@ -273,7 +273,7 @@
 #     ~evaluator.ckpts.summary.trate286_0kHz_drift_ema \
 #     ~evaluator.ckpts.summary.trate0_25kHz_drift_ema \
 #     ~evaluator.ckpts.single.loss_kl_raw_q99 \
-#     ~evaluator.ckpts.summary.w1dist_ema_zerobias_vs_SingleNeutrino_E-10-gun \
+#     ~evaluator.ckpts.summary.w1dist_ema_normal_vs_SingleNeutrino_E-10-gun \
 #     evaluator_callbacks.anomaly_efficiency=null \
 #     evaluator_callbacks.kl_loss_q99=null \
 #     evaluator_callbacks.thres_drift=null \
@@ -309,8 +309,8 @@
 #     ~evaluator.ckpts.summary.trate0_25kHz_drift_ema \
 #     ~evaluator.ckpts.summary.trate286_0kHz_drift_ema \
 #     ~evaluator.ckpts.single.loss_kl_raw_mean_top_vals \
-#     ~evaluator.ckpts.summary.w1dist_ema_zerobias_vs_SingleNeutrino_E-10-gun \
-#     ~evaluator.ckpts.summary.cap_ema_zerobias_vs_SingleNeutrino_E-10-gun \
+#     ~evaluator.ckpts.summary.w1dist_ema_normal_vs_SingleNeutrino_E-10-gun \
+#     ~evaluator.ckpts.summary.cap_ema_normal_vs_SingleNeutrino_E-10-gun \
 #     evaluator_callbacks.anomaly_efficiency=null \
 #     evaluator_callbacks.kl_operational_mean=null \
 #     evaluator_callbacks.thres_drift=null \
@@ -349,8 +349,8 @@
 #     callbacks.thres_drift_q99_ema_ckpt=null \
 #     ~evaluator.ckpts.summary.trate286_0kHz_drift_ema \
 #     ~evaluator.ckpts.single.loss_kl_raw_q99 \
-#     ~evaluator.ckpts.summary.w1dist_ema_zerobias_vs_SingleNeutrino_E-10-gun \
-#     ~evaluator.ckpts.summary.cap_ema_zerobias_vs_SingleNeutrino_E-10-gun \
+#     ~evaluator.ckpts.summary.w1dist_ema_normal_vs_SingleNeutrino_E-10-gun \
+#     ~evaluator.ckpts.summary.cap_ema_normal_vs_SingleNeutrino_E-10-gun \
 #     evaluator_callbacks.anomaly_efficiency=null \
 #     evaluator_callbacks.kl_loss_q99=null \
 #     evaluator_callbacks.cap_sn_zb=null \
@@ -389,8 +389,8 @@
 #     callbacks.thres_drift_ema_ckpt=null \
 #     ~evaluator.ckpts.summary.trate0_25kHz_drift_ema \
 #     ~evaluator.ckpts.single.loss_kl_raw_mean_top_vals \
-#     ~evaluator.ckpts.summary.w1dist_ema_zerobias_vs_SingleNeutrino_E-10-gun \
-#     ~evaluator.ckpts.summary.cap_ema_zerobias_vs_SingleNeutrino_E-10-gun \
+#     ~evaluator.ckpts.summary.w1dist_ema_normal_vs_SingleNeutrino_E-10-gun \
+#     ~evaluator.ckpts.summary.cap_ema_normal_vs_SingleNeutrino_E-10-gun \
 #     evaluator_callbacks.anomaly_efficiency=null \
 #     evaluator_callbacks.kl_operational_mean=null \
 #     evaluator_callbacks.cap_sn_zb=null \
@@ -434,7 +434,7 @@
 #     ~evaluator.ckpts.summary.trate286_0kHz_drift_ema \
 #     ~evaluator.ckpts.single.loss_kl_raw_q99 \
 #     ~evaluator.ckpts.summary.trate0_25kHz_drift_ema \
-#     ~evaluator.ckpts.summary.cap_ema_zerobias_vs_SingleNeutrino_E-10-gun \
+#     ~evaluator.ckpts.summary.cap_ema_normal_vs_SingleNeutrino_E-10-gun \
 #     evaluator_callbacks.anomaly_efficiency=null \
 #     evaluator_callbacks.kl_loss_q99=null \
 #     evaluator_callbacks.cap_sn_zb=null \
@@ -472,7 +472,7 @@
 #     ~evaluator.ckpts.single.loss_kl_raw_mean_top_vals \
 #     ~evaluator.ckpts.summary.trate286_0kHz_drift_ema \
 #     ~evaluator.ckpts.summary.trate0_25kHz_drift_ema \
-#     ~evaluator.ckpts.summary.cap_ema_zerobias_vs_SingleNeutrino_E-10-gun \
+#     ~evaluator.ckpts.summary.cap_ema_normal_vs_SingleNeutrino_E-10-gun \
 #     evaluator_callbacks.anomaly_efficiency=null \
 #     evaluator_callbacks.kl_operational_mean=null \
 #     evaluator_callbacks.cap_sn_zb=null \

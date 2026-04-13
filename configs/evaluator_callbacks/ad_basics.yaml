@@ -1,6 +1,0 @@
-# @package evaluator_callbacks
-
-defaults:
-  - default
-  - metrics@anomaly_efficiency: anomaly_efficiency
-  - _self_

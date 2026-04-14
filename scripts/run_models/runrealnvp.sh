@@ -53,29 +53,29 @@
 # ------------------------------------------------------------------------
 # CAP training
 # ------------------------------------------------------------------------
-# taskset -c 0-2 \
+# taskset -c 9-11 \
 # python3 src/train.py \
 #     paths.raw_data_dir=/data/deodagiu/adl1t_data/parquet_files \
 #     experiment=physics/realnvp_agnostic \
-#     run_name=cap_t100_high \
+#     run_name=cap_t390_low \
 #     callbacks.wasserstein_dist=null \
 #     callbacks.thres_drift=null \
 #     callbacks.wasserstein_dist_ema_ckpt=null \
 #     callbacks.thres_drift_ema_ckpt=null \
 #     ~evaluation.evaluator.ckpts.summary.operational_drift_ema \
 #     ~evaluation.evaluator.ckpts.summary.w1dist_ema_normal_vs_SingleNeutrino_E-10-gun \
-#     algorithm.optimizer.lr=0.0013780717614807188 \
-#     trainer.gradient_clip_val=0.0 \
+#     algorithm.optimizer.lr=0.0009363977078958039 \
+#     trainer.gradient_clip_val=2.0 \
 #     algorithm.optimizer.betas=[0.9,0.999] \
-#     algorithm.optimizer.weight_decay=1e-05 \
-#     algorithm.flow.n_flows=6 \
+#     algorithm.optimizer.weight_decay=0.001 \
+#     algorithm.flow.n_flows=8 \
 #     algorithm.flow.hidden_dim=48 \
-#     algorithm.flow.n_hidden_layers=1 \
-#     algorithm.flow.activation=gelu \
+#     algorithm.flow.n_hidden_layers=2 \
+#     algorithm.flow.activation=relu \
 #     algorithm.flow.noise_scale=0.01 \
 #     algorithm.flow.scale_clamp=3.0 \
 #     trainer=gpu \
-#     trainer.devices=[2]
+#     trainer.devices=[0]
 
 # ------------------------------------------------------------------------
 # Stability training
@@ -139,29 +139,31 @@
 # ------------------------------------------------------------------------
 # Semi-supervised cvar25 training
 # ------------------------------------------------------------------------
-# taskset -c 0-2 \
-# python3 src/train.py \
-#     -m \
-#     hydra/launcher=submitit_local \
-#     hydra.launcher.cpus_per_task=1 \
-#     hydra.launcher.gpus_per_node=4 \
-#     paths.raw_data_dir=/data/deodagiu/adl1t_data/parquet_files \
-#     experiment=physics/realnvp \
-#     experiment_name=realnvp_cvar25_vs_kl_search \
-#     callbacks.max_rate_ckpt=null \
-#     callbacks.cvar10_ema_ckpt=null \
-#     ~evaluation.evaluator.ckpts.single.eff__ascore_full__brate_0_25kHz \
-#     ~evaluation.evaluator.ckpts.summary.cvar10_ema \
-#     evaluation.callbacks.thres_drift=null \
-#     evaluation.callbacks.wasserstein=null \
-#     logger=none \
-#     hparams_search=realnvp_optuna \
-#     hydra.sweeper.study_name=cvar25eff_vs_kl \
-#     hydra.sweeper.n_trials=100 \
-#     hydra.sweeper.sampler.n_startup_trials=150 \
-#     trainer=gpu \
-#     trainer.max_epochs=50 \
-#     trainer.devices=[0]
+taskset -c 0-2 \
+python3 src/train.py \
+    -m \
+    hydra/launcher=submitit_local \
+    hydra.launcher.cpus_per_task=1 \
+    hydra.launcher.gpus_per_node=4 \
+    paths.raw_data_dir=/data/deodagiu/adl1t_data/parquet_files \
+    experiment=physics/realnvp \
+    experiment_name=realnvp_cvar25_vs_klq99_search \
+    algorithm.target_rate=0.01 \
+    algorithm.base_rate=null \
+    callbacks.max_rate_ckpt=null \
+    callbacks.cvar10_ema_ckpt=null \
+    ~evaluation.evaluator.ckpts.single.eff__ascore_full__brate_0_25kHz \
+    ~evaluation.evaluator.ckpts.summary.cvar10_ema \
+    evaluation.callbacks.thres_drift=null \
+    evaluation.callbacks.wasserstein=null \
+    logger=none \
+    hparams_search=realnvp_optuna \
+    hydra.sweeper.study_name=cvar25eff_vs_klq99 \
+    hydra.sweeper.n_trials=150 \
+    hydra.sweeper.sampler.n_startup_trials=150 \
+    trainer=gpu \
+    trainer.max_epochs=50 \
+    trainer.devices=[0]
 
 # ------------------------------------------------------------------------
 # Semi-supervised cvar10 training
@@ -185,7 +187,7 @@
 #     logger=none \
 #     hparams_search=realnvp_optuna \
 #     hydra.sweeper.study_name=cvar10eff_vs_kl \
-#     hydra.sweeper.n_trials=100 \
+#     hydra.sweeper.n_trials=150 \
 #     hydra.sweeper.sampler.n_startup_trials=150 \
 #     trainer=gpu \
 #     trainer.max_epochs=50 \
@@ -217,7 +219,7 @@
 #     logger=none \
 #     hparams_search=realnvp_optuna \
 #     hydra.sweeper.study_name=cap_vs_kl \
-#     hydra.sweeper.n_trials=100 \
+#     hydra.sweeper.n_trials=150 \
 #     hydra.sweeper.sampler.n_startup_trials=150 \
 #     trainer=gpu \
 #     trainer.max_epochs=50 \
@@ -251,7 +253,7 @@
 #     optimized_metric_config.main_metric.direction=minimize \
 #     hydra.sweeper.study_name=drift_vs_kl \
 #     hydra.sweeper.direction='[minimize, minimize]' \
-#     hydra.sweeper.n_trials=100 \
+#     hydra.sweeper.n_trials=150 \
 #     hydra.sweeper.sampler.n_startup_trials=150 \
 #     trainer=gpu \
 #     trainer.max_epochs=50 \
@@ -285,7 +287,7 @@
 #     optimized_metric_config.main_metric.direction=minimize \
 #     hydra.sweeper.study_name=wasserstein_vs_kl \
 #     hydra.sweeper.direction='[minimize, minimize]' \
-#     hydra.sweeper.n_trials=100 \
+#     hydra.sweeper.n_trials=150 \
 #     hydra.sweeper.sampler.n_startup_trials=150 \
 #     trainer=gpu \
 #     trainer.max_epochs=50 \

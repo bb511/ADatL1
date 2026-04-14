@@ -1,25 +1,27 @@
 import torch
-import numpy as np
 from torchmetrics import Metric
 
 
 class AnomalyRate(Metric):
-    """Counts the number of anomalies at a given background rate.
+    """Counts exceedances above a threshold at a target false positive rate.
 
-    At the end, this can compute either the rate of anomalies or the anomaly detection
-    efficiency for the given data.
+    This metric can operate in two modes:
 
-    :target_rate: Float specifying the target rate of anomalies in kHz.
-    :bc_rate: Float containing the bunch crossing rate in kHz. This is the
-        revolution frequency of the LHC times the number of proton bunches in the
-        LHC tunnel, which gives the total rate of events that are processed by
-        the L1 trigger.
+    - If `base_rate` is provided, `target_rate` is interpreted as a physical rate
+      and converted to an FPR via `target_rate / base_rate`.
+    - If `base_rate` is `None`, `target_rate` is interpreted directly as an FPR.
+
+    `compute("rate")` returns:
+    - the physical rate if `base_rate` is provided
+    - the empirical exceedance probability otherwise
+
+    `compute("efficiency")` always returns the empirical exceedance fraction.
     """
 
-    def __init__(self, target_rate: float, bc_rate: float):
+    def __init__(self, target_rate: float, base_rate: float | None):
         super().__init__()
-        self.target_rate = target_rate
-        self.bc_rate = bc_rate
+        self.target_rate = float(target_rate)
+        self.base_rate = None if base_rate is None else float(base_rate)
 
         self.add_state(
             "ntriggered",
@@ -27,43 +29,71 @@ class AnomalyRate(Metric):
             dist_reduce_fx="sum",
         )
         self.add_state(
-            "nsamples", default=torch.tensor(0, dtype=torch.long), dist_reduce_fx="sum"
+            "nsamples",
+            default=torch.tensor(0, dtype=torch.long),
+            dist_reduce_fx="sum",
         )
         self.add_state("threshold", default=torch.tensor(float("nan")))
 
+    def _compute_target_fpr(self) -> float:
+        """Compute the target false positive rate."""
+        if self.base_rate is None:
+            fpr = self.target_rate
+        else:
+            if self.base_rate <= 0:
+                raise ValueError("base_rate must be positive.")
+            fpr = self.target_rate / self.base_rate
+
+        if not (0.0 < fpr < 1.0):
+            raise ValueError(f"Computed FPR must be in (0, 1), got {fpr}.")
+
+        return fpr
+
     def set_threshold(self, bkg_score: torch.Tensor) -> None:
-        """Get the score threshold for a certain rate to determine anomalies.
-
-        Set a threshold for which you will achieve a certain rate of background events,
-        i.e., set the threshold at a particular FPR.
-
-        :bkg_score: Torch tensor containing scores for background samples.
-        """
-        q = 1.0 - (self.target_rate / self.bc_rate)
-        thr = torch.quantile(bkg_score.float(), q, interpolation="higher").to(
-            self.threshold.device
-        )
+        """Set threshold corresponding to the target FPR."""
+        fpr = self._compute_target_fpr()
+        q = 1.0 - fpr
+        thr = torch.quantile(
+            bkg_score.float(),
+            q,
+            interpolation="higher",
+        ).to(self.threshold.device)
         self.threshold.copy_(thr)
 
-    def apply_threshold(self, threshold: float):
-        """Store external threshold."""
+    def apply_threshold(self, threshold: torch.Tensor | float) -> None:
+        """Store an externally computed threshold."""
+        threshold = torch.as_tensor(
+            threshold,
+            device=self.threshold.device,
+            dtype=self.threshold.dtype,
+        )
         self.threshold.copy_(threshold)
 
     def update(self, anomaly_score: torch.Tensor) -> None:
-        """The anomaly score can be defined in a number of ways. See model code."""
+        """Update exceedance counts from anomaly scores."""
         if torch.isnan(self.threshold).item():
             raise RuntimeError(
                 "Threshold has not been set. Call set_threshold() before update()."
             )
 
-        ntriggered = (anomaly_score.float() >= self.threshold).sum()
+        anomaly_score = anomaly_score.float().view(-1)
+        ntriggered = (anomaly_score >= self.threshold).sum()
         self.ntriggered += ntriggered
         self.nsamples += anomaly_score.numel()
 
     def compute(self, quantity: str) -> torch.Tensor:
+        """Compute either rate or efficiency."""
+        if self.nsamples == 0:
+            raise RuntimeError("Cannot compute metric with zero samples.")
+
+        efficiency = self.ntriggered.float() / self.nsamples
+
+        if quantity == "efficiency":
+            return efficiency
+
         if quantity == "rate":
-            return self.ntriggered.float() * self.bc_rate / self.nsamples
-        elif quantity == "efficiency":
-            return self.ntriggered.float() / self.nsamples
-        else:
-            raise ValueError(f"{quantity} is not a valid quantity to compute!")
+            if self.base_rate is None:
+                return efficiency
+            return efficiency * self.base_rate
+
+        raise ValueError(f"{quantity} is not a valid quantity to compute!")

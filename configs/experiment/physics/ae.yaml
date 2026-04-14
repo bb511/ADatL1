@@ -27,13 +27,12 @@ trainer:
 
 test: true
 
-# Metrics to report for every checkpoint.
+# Metrics to report to optuna for every checkpoint.
 optimized_metric_config:
   main_metric:
     callback:
       name: eff
-      params:
-        target_rate: 0.25
+      params: {}
     direction: maximize
   sec_metric:
     callback:
@@ -42,7 +41,6 @@ optimized_metric_config:
         ckpt_name: null # This will be filled in with the best ckpt of the main metric.
         test_ds: normal
     direction: minimize
-
 
 algorithm:
   # What rate is the AD algorithm supposed to work at, in kHz.
@@ -60,14 +58,11 @@ algorithm:
     betas: [0.9, 0.999]
     eps: 1e-8
 
-
 callbacks:
   log_data_mlflow: null
   anomaly_eff:
     _target_: src.callbacks.efficiency.AnomalyEfficiencyCallback
     output_name: 'ascore/full'
-    target_rates: [0.25]
-    base_rate: 28608.8064
     beta: 0.9
 
   max_rate_ckpt:
@@ -114,7 +109,7 @@ callbacks:
   cvar25_ema_ckpt:
     _target_: pytorch_lightning.callbacks.ModelCheckpoint
     dirpath: '${paths.checkpoints_dir}/${experiment_name}/${run_name}/summary/cvar25_ema/max'
-    monitor: 'val/summary/eff_cvar25_ema'
+    monitor: 'val/summary/eff_cvar25_ema_operational'
     filename: 'cvar25_ema'
     save_last: false
     save_top_k: 1
@@ -127,7 +122,7 @@ callbacks:
   cvar10_ema_ckpt:
     _target_: pytorch_lightning.callbacks.ModelCheckpoint
     dirpath: '${paths.checkpoints_dir}/${experiment_name}/${run_name}/summary/cvar10_ema/max'
-    monitor: 'val/summary/eff_cvar10_ema'
+    monitor: 'val/summary/eff_cvar10_ema_operational'
     filename: 'cvar10_ema'
     save_last: false
     save_top_k: 1
@@ -138,100 +133,97 @@ callbacks:
     save_on_train_epoch_end: false
 
 evaluation:
-  ckpts:
-    last: true
-    summary:
-      cvar25_ema: ['max']
-      cvar10_ema: ['max']
-    single:
-      ascore_operational: ['stable']
-      eff__ascore_full__brate_0_25kHz: ['max']
-
-evaluation/callbacks:
-  anomaly_efficiency:
-    _target_: src.evaluation.callbacks.efficiency.AnomalyEfficiencyCallback
-    output_name: 'ascore/full'
-    target_rates: [0.25, 286.0]
-    base_rate: 28608.8064
-    ds:
-      - GluGluHTo2B_Par-MH-125
-      - GluGluHto2G_Par-MH-125
-      - GluGluHto2G_Par-MH-90
-      - GluGluHto2Tau_Par-MH-125
-      - GluGlutoHHto2B2WtoLNu2Q_Par-c2-0-kl-1-kt-1
-      - HHHto4B2Tau_Par-c3-0-d4-0
-      - HHHto6B_Par-c3-0-d4-0
-      - SUSYGluGluToBBHTo2B_Par-M-1200
-      - SUSYGluGluToBBHToBB_Par-M-120
-      - SUSYGluGluToBBHToBB_Par-M-350
-      - SUSYGluGluToBBHToBB_Par-M-600
-      - TTHTo2C_Par-MH-125
-      - TTHto2B_Par-MH-125
-      - VBFHTo2C_Par-MH-125
-      - VBFHto2B_Par-MH-125
-      - VBFHto2Tau_Par-MH-125
-      - WtoTauto3Mu
-      - ggH-suep-decay
-      - smj-case-A
-      - haa-4b-ma15
-    cvar_summary: 0.25
-    log_raw_mlflow: false
-
-  ascore_operational:
-    _target_: src.evaluation.callbacks.output.OutputCallback
-    name: ascore_operational
-    output_name: 'ascore/operational'
-    ds:
-      - normal
-      - GluGluHTo2B_Par-MH-125
-      - GluGluHto2G_Par-MH-125
-      - GluGluHto2G_Par-MH-90
-      - GluGluHto2Tau_Par-MH-125
-      - GluGlutoHHto2B2WtoLNu2Q_Par-c2-0-kl-1-kt-1
-      - HHHto4B2Tau_Par-c3-0-d4-0
-      - HHHto6B_Par-c3-0-d4-0
-      - SUSYGluGluToBBHTo2B_Par-M-1200
-      - SUSYGluGluToBBHToBB_Par-M-120
-      - SUSYGluGluToBBHToBB_Par-M-350
-      - SUSYGluGluToBBHToBB_Par-M-600
-      - TTHTo2C_Par-MH-125
-      - TTHto2B_Par-MH-125
-      - VBFHTo2C_Par-MH-125
-      - VBFHto2B_Par-MH-125
-      - VBFHto2Tau_Par-MH-125
-      - WtoTauto3Mu
-      - ggH-suep-decay
-      - smj-case-A
-      - haa-4b-ma15
-    log_raw_mlflow: false
-
-  thres_drift:
-    _target_: src.evaluation.callbacks.thres_drift.ThresholdDriftCallback
-    output_name: 'ascore/full'
-    target_rates: []
-    base_rate: 28608.8064
-    calibration_fraction: 0.5
-    split_seed: 12345
-    log_raw_mlflow: false
-    name: thres_drift
-
-  wasserstein:
-    _target_: src.evaluation.callbacks.wasserstein.Wasserstein
-    output_name: 'ascore/full'
-    dataset_1: normal
-    dataset_2: SingleNeutrino_E-10-gun
-    apply_log1p: true
-    log_raw_mlflow: false
-    name: wasserstein
-
-  reco:
-    _target_: src.evaluation.callbacks.reco.ReconstructionPlots
-    warmup_batches: 0.2
-    output_name: reconstructed_data
+  evaluator:
     ckpts:
       last: true
-    datasets:
-      - 'normal'
-      - 'SingleNeutrino_E-10-gun'
-    name: 'reco'
-    log_raw_mlflow: false
+      summary:
+        cvar25_ema: ['max']
+        cvar10_ema: ['max']
+      single:
+        ascore_operational: ['stable']
+        eff__ascore_full__brate_0_25kHz: ['max']
+
+  callbacks:
+    anomaly_efficiency:
+      _target_: src.evaluation.callbacks.efficiency.AnomalyEfficiencyCallback
+      output_name: 'ascore/full'
+      ds:
+        - GluGluHTo2B_Par-MH-125
+        - GluGluHto2G_Par-MH-125
+        - GluGluHto2G_Par-MH-90
+        - GluGluHto2Tau_Par-MH-125
+        - GluGlutoHHto2B2WtoLNu2Q_Par-c2-0-kl-1-kt-1
+        - HHHto4B2Tau_Par-c3-0-d4-0
+        - HHHto6B_Par-c3-0-d4-0
+        - SUSYGluGluToBBHTo2B_Par-M-1200
+        - SUSYGluGluToBBHToBB_Par-M-120
+        - SUSYGluGluToBBHToBB_Par-M-350
+        - SUSYGluGluToBBHToBB_Par-M-600
+        - TTHTo2C_Par-MH-125
+        - TTHto2B_Par-MH-125
+        - VBFHTo2C_Par-MH-125
+        - VBFHto2B_Par-MH-125
+        - VBFHto2Tau_Par-MH-125
+        - WtoTauto3Mu
+        - ggH-suep-decay
+        - smj-case-A
+        - haa-4b-ma15
+      cvar_summary: 0.25
+      log_raw_mlflow: false
+
+    ascore_operational:
+      _target_: src.evaluation.callbacks.output.OutputCallback
+      name: ascore_operational
+      output_name: 'ascore/operational'
+      ds:
+        - normal
+        - GluGluHTo2B_Par-MH-125
+        - GluGluHto2G_Par-MH-125
+        - GluGluHto2G_Par-MH-90
+        - GluGluHto2Tau_Par-MH-125
+        - GluGlutoHHto2B2WtoLNu2Q_Par-c2-0-kl-1-kt-1
+        - HHHto4B2Tau_Par-c3-0-d4-0
+        - HHHto6B_Par-c3-0-d4-0
+        - SUSYGluGluToBBHTo2B_Par-M-1200
+        - SUSYGluGluToBBHToBB_Par-M-120
+        - SUSYGluGluToBBHToBB_Par-M-350
+        - SUSYGluGluToBBHToBB_Par-M-600
+        - TTHTo2C_Par-MH-125
+        - TTHto2B_Par-MH-125
+        - VBFHTo2C_Par-MH-125
+        - VBFHto2B_Par-MH-125
+        - VBFHto2Tau_Par-MH-125
+        - WtoTauto3Mu
+        - ggH-suep-decay
+        - smj-case-A
+        - haa-4b-ma15
+      log_raw_mlflow: false
+
+    thres_drift:
+      _target_: src.evaluation.callbacks.thres_drift.ThresholdDriftCallback
+      output_name: 'ascore/full'
+      calibration_fraction: 0.5
+      split_seed: 12345
+      log_raw_mlflow: false
+      name: thres_drift
+
+    wasserstein:
+      _target_: src.evaluation.callbacks.wasserstein.Wasserstein
+      output_name: 'ascore/full'
+      dataset_1: normal
+      dataset_2: SingleNeutrino_E-10-gun
+      apply_log1p: true
+      log_raw_mlflow: false
+      name: wasserstein
+
+    reco:
+      _target_: src.evaluation.callbacks.reco.ReconstructionPlots
+      warmup_batches: 0.2
+      output_name: reconstructed_data
+      ckpts:
+        last: true
+      datasets:
+        - 'normal'
+        - 'SingleNeutrino_E-10-gun'
+      name: 'reco'
+      log_raw_mlflow: false

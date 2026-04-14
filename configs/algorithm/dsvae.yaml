@@ -39,3 +39,4 @@ decoder:
   out_dim: 117
 
 kl_warmup_frac: 0.2
+kl_scale: 1.0

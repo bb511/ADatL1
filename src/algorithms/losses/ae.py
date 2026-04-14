@@ -2,7 +2,7 @@
 from typing import Literal
 import torch
 
-from src.algorithms.losses.components import L1ADLoss
+from src.algorithms.losses.components import ADLoss
 from src.algorithms.losses.components.reconstruction import MSEReconstructionLoss
 from src.algorithms.losses.components.reconstruction import HuberReconstructionLoss
 

@@ -6,7 +6,6 @@ import pickle
 import torch
 import numpy as np
 from pytorch_lightning.callbacks import Callback
-from pytorch_lightning import Trainer
 
 from src.evaluation.callbacks.metrics.rate import AnomalyRate
 from src.evaluation.callbacks import utils
@@ -19,39 +18,29 @@ log = pylogger.RankedLogger(__name__)
 
 
 class AnomalyEfficiencyCallback(Callback):
-    """Calculates the fraction of anomalies detected given a bkg rate.
+    """Calculates the fraction of anomalies detected at one or more target rates.
 
-    The checkpoints given to this callback can be saved on metrics different than
-    the ones that his callback is instantiated with. For example, you can evaluate
-    a model checkpointed on the minimum of the total loss by using the KL div as the
-    anomaly score, rather than the total loss, in this callback.
+    The module target rate is always included and treated as the operational rate.
+    Additional target rates may be passed through the callback config.
 
-    :param target_rate: Float specifying the target rate of bkg data.
-    :param bc_rate: Float containing the bunch crossing rate in kHz. This is the
-        revolution frequency of the LHC times the number of proton bunches in the
-        LHC tunnel, which gives the total efficiency of events that are processed by
-        the L1 trigger.
-    :param materic_name: String speicfying the model metric to use as anomaly score.
-        Needs to be in the outdict returned by the model.
-    :param pure_thres: Whether to set the threshold on the pure data sets, i.e.,
-        the data that is not triggered by any L1 trigger algorithm.
-    :param ds: List of strings containing data set names to compute the efficiencies on.
-    :param cvar_summary: The percentage of the *worst* efficiencies to mean over and
-        report as the summary metric for this callback.
-    :param log_raw_mlflow: Boolean to decide whether to log the raw plots produced by
-        this callback to mlflow artifacts. Default is True. An html gallery of all the
-        plots is made by default, so if this is set to false, one can still view the
-        plots produced with this callback in the gallery.
-    :param name: String specifying the name of the callback for identification in
-        later methods that manipulate callbacks.
+    :param target_rates: Optional extra target rates to evaluate in addition to the
+        module target rate.
+    :param base_rate: Optional override for the module base rate. If None, the module
+        base_rate is used.
+    :param output_name: Name of the output dict entry used as anomaly score.
+    :param pure_thres: Whether to threshold only on events with l1bit == False.
+    :param ds: List of dataset names to compute efficiencies on.
+    :param cvar_summary: Fraction of worst efficiencies to average in the summary.
+    :param log_raw_mlflow: Whether to log raw plots to mlflow.
+    :param name: Identifier used in plot folders and summaries.
     """
 
     def __init__(
         self,
-        target_rates: list[int],
-        bc_rate: float,
-        metric_name: str,
+        output_name: str,
         ds: list[str],
+        target_rates: list[float] | None = None,
+        base_rate: float | None = None,
         pure_thres: bool = False,
         cvar_summary: float = 0.25,
         log_raw_mlflow: bool = True,
@@ -61,11 +50,13 @@ class AnomalyEfficiencyCallback(Callback):
         self.device = None
         self.name = name
 
-        self.target_rates = target_rates
-        self.bc_rate = bc_rate
-        self.metric_name = metric_name
-        self.pure_thres = pure_thres
+        self.output_name = output_name
         self.ds = set(ds)
+        self.target_rates = (
+            None if target_rates is None else [float(x) for x in target_rates]
+        )
+        self.base_rate = base_rate
+        self.pure_thres = pure_thres
         self.cvar_summary = cvar_summary
 
         self.log_raw_mlflow = log_raw_mlflow
@@ -74,12 +65,16 @@ class AnomalyEfficiencyCallback(Callback):
         self.eff_med = defaultdict(lambda: defaultdict(float))
 
     def on_test_start(self, trainer, pl_module):
-        """Do checks required for this callback to work."""
+        """Resolve target/base rates and verify expected dataloaders are present."""
         self.device = pl_module.device
+        (
+            self.target_rates_resolved,
+            self.operational_rate,
+            self.base_rate_resolved,
+        ) = self._resolve_rate_config(pl_module)
+
         self.thresholds = self._get_thres(pl_module)
 
-        # Check if 'normal' dataset is the first dataset in the test dictionary.
-        # This is required to compute the rate thresholds on the anomaly scores.
         first_test_dset_key = list(trainer.test_dataloaders.keys())[0]
         if first_test_dset_key != "normal":
             raise ValueError("Eff callback needs normal data first in the data dict!")
@@ -94,17 +89,10 @@ class AnomalyEfficiencyCallback(Callback):
     def on_test_batch_end(
         self, trainer, pl_module, outputs, batch, batch_idx, dataloader_idx=0
     ):
-        """Determine the rate for every given metric for every test data set.
-
-        First, the desired metrics are computed on the normal data and accummulated
-        across batches. The full metric distribution is used to set a threshold that
-        will give a target rate or set of rates, specified by the user.
-        These thresholds are then applied on all other data sets used for test
-        to determine, by using the threshold computed on normal, what would the rate
-        be on these other data sets.
-        """
+        """Determine rates for every requested target rate on every test dataset."""
         self.dataset_name = list(trainer.test_dataloaders.keys())[dataloader_idx]
         self.total_batches = trainer.num_test_batches[dataloader_idx]
+
         b = unpack_batch(batch)
         l1bit = b.l1bit
         labels = b.y
@@ -119,7 +107,7 @@ class AnomalyEfficiencyCallback(Callback):
             self._compute_batch_rate(outputs, labels)
 
     def on_test_epoch_end(self, trainer, pl_module) -> None:
-        """Log the anomaly rates computed on each of the data sets."""
+        """Log the anomaly rates computed on each of the datasets."""
         eff_name = f"{self.name}_pure" if self.pure_thres else self.name
         ckpts_dir = Path(pl_module._ckpt_path).parent
         ckpt_name = Path(pl_module._ckpt_path).stem
@@ -127,8 +115,7 @@ class AnomalyEfficiencyCallback(Callback):
         plot_folder = ckpts_dir / "plots" / split / ckpt_name / eff_name
         plot_folder.mkdir(parents=True, exist_ok=True)
 
-        for trate in self.target_rates:
-            # Construct eff per data set for specific metric name and target rate.
+        for trate in self.target_rates_resolved:
             main_eff = self._compute_eff(self.main_rate, trate)
             sig_effs = self._compute_eff(self.sig_rates, trate)
             bkg_effs = self._compute_eff(self.bkg_rates, trate)
@@ -136,12 +123,16 @@ class AnomalyEfficiencyCallback(Callback):
 
             ckpt_ds = utils.misc.get_ckpt_ds_name(ckpt_name)
             sig_data = np.fromiter(sig_effs.values(), dtype=float)
-            self.eff_med[trate][ckpt_ds] = np.median(sig_data)
-            self.eff_min[trate][ckpt_ds] = min(sig_data)
+            if sig_data.size:
+                self.eff_med[trate][ckpt_ds] = float(np.median(sig_data))
+                self.eff_min[trate][ckpt_ds] = float(np.min(sig_data))
+            else:
+                self.eff_med[trate][ckpt_ds] = 0.0
+                self.eff_min[trate][ckpt_ds] = 0.0
 
-            trate_name = f"{trate} kHz"
-            ascore = f"anomaly score: {self.metric_name}"
-            xlabel = f"efficiency at threshold: {trate_name}\n{ascore}"
+            trate_label = self._target_label(trate)
+            ascore = f"anomaly score: {self.output_name}"
+            xlabel = f"efficiency at threshold: {trate_label}\n{ascore}"
             self._plot(effs, xlabel, plot_folder, percent=True)
             self._store_summary(sig_effs, bkg_effs, ckpt_name, trate)
 
@@ -155,7 +146,7 @@ class AnomalyEfficiencyCallback(Callback):
         )
 
     def plot_summary(self, trainer, root_folder: Path):
-        """Plot the summary metrics accummulated in eff_summary and reset this attr."""
+        """Plot summary metrics accumulated across checkpoints and reset state."""
         eff_name = f"{self.name}_pure" if self.pure_thres else self.name
         split = trainer.split
         plot_folder = root_folder / "plots" / split / (eff_name + "_summary")
@@ -163,17 +154,17 @@ class AnomalyEfficiencyCallback(Callback):
         self._cache_summary(plot_folder)
 
         for target_rate in self.eff_summary.keys():
-            # Get the summary metric per checkpoint.
             smet = self.eff_summary[target_rate]
+            trate_label = self._target_label(target_rate)
+            ascore = f"anomaly score: {self.output_name}"
 
-            # Configure plot.
-            trate = f"{target_rate} kHz"
-            ascore = f"anomaly score: {self.metric_name}"
-            xlabel = f"25% CVaR at threshold: {trate}\n{ascore}"
+            xlabel = f"25% CVaR at threshold: {trate_label}\n{ascore}"
             self._plot(smet, xlabel, plot_folder, True)
-            xlabel = f"med eff at:{trate}\n{ascore}"
+
+            xlabel = f"med eff at: {trate_label}\n{ascore}"
             self._plot(self.eff_med[target_rate], xlabel, plot_folder, True)
-            xlabel = f"min eff at:{trate}\n{ascore}"
+
+            xlabel = f"min eff at: {trate_label}\n{ascore}"
             self._plot(self.eff_min[target_rate], xlabel, plot_folder, True)
 
         utils.mlflow.log_plots_to_mlflow(trainer, None, eff_name, plot_folder)
@@ -183,39 +174,32 @@ class AnomalyEfficiencyCallback(Callback):
         self.eff_med.clear()
         self.eff_min.clear()
 
-    def get_optimized_metric(self, target_rate: float):
-        """Get one number that one should optimize on this callback.
+    def get_optimized_metric(self, target_rate: float | None = None):
+        """Return the best summary metric across checkpoints for one target rate.
 
-        Here, it's the maximum of the summary metric across checkpoints corresponding
-        to a certain checkpointing criterion. See how the summary metric is defined in
-        self._store_summary.
+        If target_rate is None, the operational rate is used.
         """
-        if not target_rate in list(self.eff_summary.keys()):
+        if target_rate is None:
+            target_rate = self.operational_rate
+
+        if target_rate not in self.eff_summary:
             raise ValueError(
-                f"Efficiency callback for metric {self.metric_name} did not calculate "
-                f"eff at target rate {target_rate}. Choose {self.eff_summary.keys()}."
+                f"Efficiency callback for metric {self.output_name} did not calculate "
+                f"eff at target rate {target_rate}. Choose {list(self.eff_summary.keys())}."
             )
 
         metric_across_ckpts = self.eff_summary[target_rate]
         max_ckpt_name = max(metric_across_ckpts, key=metric_across_ckpts.get)
-        # Scale the metric by 1000 since it is naturally very low.
         max_metric_value = 1e3 * metric_across_ckpts[max_ckpt_name]
         return max_ckpt_name, max_metric_value
 
     def _plot(self, data: dict, xlabel: str, plot_folder: Path, percent: bool = False):
-        """Plot the efficiency per data set for an anomaly metric at target rate."""
+        """Plot the efficiency per dataset for an anomaly metric at target rate."""
         ylabel = " "
         horizontal_bar.plot_yright(data, data, xlabel, ylabel, plot_folder, percent)
 
     def _store_summary(self, sig_effs: dict, bkg_effs: dict, ckpt: str, trate: float):
-        """Store the summary statistic for the efficiency for one checkpoint.
-
-        We compute the CVaR robustness metric by collecting the TPR values across all
-        simulated anomaly types and averaging the worst fraction of them (e.g., the
-        lowest 25%). Concretely, we select the smallest subset of TPR values
-        corresponding to the chosen tail level and compute their mean. This tail-average
-        summarizes detection performance on the most challenging anomaly datasets.
-        """
+        """Store the summary statistic for one checkpoint and one target rate."""
         sig_data = np.fromiter(sig_effs.values(), dtype=float)
         bkg_data = np.fromiter(bkg_effs.values(), dtype=float)
         bkg_mean = bkg_data.mean() if bkg_data.size else 0.0
@@ -231,19 +215,21 @@ class AnomalyEfficiencyCallback(Callback):
         summary_metric = sig_cvar - bkg_mean
 
         ckpt_ds = utils.misc.get_ckpt_ds_name(ckpt)
-        self.eff_summary[trate][ckpt_ds] = summary_metric
+        self.eff_summary[trate][ckpt_ds] = float(summary_metric)
 
     def _accumulate_normal_output(
-        self, outputs: dict, batch_idx: int, l1bit: torch.Tensor
+        self, outputs: dict, batch_idx: int, l1bit: torch.Tensor | None
     ):
-        """Accummulates the specified metric data across batches.
+        """Accumulate the main normal score distribution across batches."""
+        batch_output = outputs[self.output_name]
+        if batch_output.ndim == 0:
+            batch_output = batch_output.unsqueeze(0)
 
-        Used if currently processing the normal data set, accummulate the values of
-        each metric across batches. The whole metric output distribution is needed to
-        set a treshold that gives a certain rate.
-        """
-        batch_output = outputs[self.metric_name]
         if self.pure_thres:
+            if l1bit is None:
+                raise ValueError(
+                    "pure_thres=True requires l1bit to be present in the batch."
+                )
             batch_output = batch_output[~l1bit]
 
         self.normal_score_data.append(batch_output)
@@ -253,21 +239,17 @@ class AnomalyEfficiencyCallback(Callback):
             self._compute_normal_rate()
 
     def _compute_normal_rate(self):
-        """Computes the desired rates on the main test data set.
-
-        This is a sanity check. The threshold computed on the normal and applied to the
-        normal data should return the rate for which this threshold was computed.
-        """
-        for target_rate in self.target_rates:
-            rate = AnomalyRate(target_rate, self.bc_rate).to(self.device)
+        """Compute the requested rates on the normal test dataset."""
+        for target_rate in self.target_rates_resolved:
+            rate = AnomalyRate(target_rate, self.base_rate_resolved).to(self.device)
             rate.apply_threshold(self.thresholds[target_rate])
             rate.update(self.normal_score_data)
             self.main_rate[target_rate][self.dataset_name] = rate
 
     def _initialize_rate_metric(self, labels: torch.Tensor):
-        """Initializes the rate metric for a sig dataset for each given target rate."""
-        for target_rate in self.target_rates:
-            rate = AnomalyRate(target_rate, self.bc_rate).to(self.device)
+        """Initialize the rate metric for a signal/background dataset."""
+        for target_rate in self.target_rates_resolved:
+            rate = AnomalyRate(target_rate, self.base_rate_resolved).to(self.device)
             rate.apply_threshold(self.thresholds[target_rate])
             if torch.all(labels < 0):
                 self.bkg_rates[target_rate][self.dataset_name] = rate
@@ -275,21 +257,18 @@ class AnomalyEfficiencyCallback(Callback):
                 self.sig_rates[target_rate][self.dataset_name] = rate
 
     def _compute_batch_rate(self, outputs: dict, labels: torch.Tensor):
-        """Compute batch rate of a background data set."""
-        for tr in self.target_rates:
+        """Update the thresholded rate for one batch."""
+        for tr in self.target_rates_resolved:
             if torch.all(labels < 0):
-                self.bkg_rates[tr][self.dataset_name].update(outputs[self.metric_name])
+                self.bkg_rates[tr][self.dataset_name].update(outputs[self.output_name])
             if torch.all(labels > 0):
-                self.sig_rates[tr][self.dataset_name].update(outputs[self.metric_name])
+                self.sig_rates[tr][self.dataset_name].update(outputs[self.output_name])
 
     def _compute_eff(self, rates: dict, target_rate: float):
-        """Compute the efficiency in given rate dictionary."""
+        """Compute efficiencies from a given rate dictionary."""
         effs = defaultdict(float)
-        clean_metric_name = self.metric_name.replace("/", "_")
         for ds_name, rate in rates[target_rate].items():
-            logging_name = f"{ds_name}"
-            effs[logging_name] = rate.compute("efficiency").item()
-
+            effs[ds_name] = rate.compute("efficiency").item()
         return effs
 
     def _cache_summary(self, cache_folder: Path):
@@ -299,20 +278,56 @@ class AnomalyEfficiencyCallback(Callback):
             pickle.dump(plain_dict, f, protocol=pickle.HIGHEST_PROTOCOL)
 
     def _get_thres(self, pl_module):
-        """Check if thresholds for the target rates were set at validation time."""
+        """Load thresholds that were stored on the module at validation time."""
         thresholds = defaultdict(float)
-        for target_rate in self.target_rates:
-            trate_name = f"{target_rate}".replace(".", "_")
+        valid_rates = []
+
+        for target_rate in self.target_rates_resolved:
+            trate_name = str(target_rate).replace(".", "_")
             thres = getattr(pl_module, f"thres_{trate_name}kHz", None)
             if thres is None:
                 log.warn(
-                    f"No threshold was set for {trate_name} rate at validation time. "
-                    f"Skipping efficiency computation for this threshold..."
-                    f"If you want this thres, compute it at val time in the anomaly "
-                    f"efficiency callback."
+                    f"No threshold was set for target rate {trate_name}. "
+                    "Skipping efficiency computation for this threshold."
                 )
-                self.target_rates.remove(target_rate)
-            else:
-                thresholds[target_rate] = thres
+                continue
 
+            thresholds[target_rate] = thres
+            valid_rates.append(target_rate)
+
+        self.target_rates_resolved = valid_rates
         return thresholds
+
+    def _resolve_rate_config(
+        self, pl_module
+    ) -> tuple[list[float], float, float | None]:
+        """Resolve target rates and base rate from module + callback config."""
+        module_target = getattr(pl_module.hparams, "target_rate", None)
+        module_base = getattr(pl_module.hparams, "base_rate", None)
+
+        if module_target is None:
+            raise ValueError(
+                "pl_module.hparams.target_rate must be defined for AnomalyEfficiencyCallback."
+            )
+
+        rates = [float(module_target)]
+        if self.target_rates is not None:
+            rates.extend(float(r) for r in self.target_rates)
+
+        seen = set()
+        resolved_rates = []
+        for r in rates:
+            if r not in seen:
+                seen.add(r)
+                resolved_rates.append(r)
+
+        base_rate = self.base_rate if self.base_rate is not None else module_base
+        return resolved_rates, float(module_target), base_rate
+
+    def _is_operational(self, target_rate: float) -> bool:
+        return abs(target_rate - self.operational_rate) < 1e-12
+
+    def _target_label(self, target_rate: float) -> str:
+        if self._is_operational(target_rate):
+            return "operational"
+        return str(target_rate)

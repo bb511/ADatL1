@@ -5,11 +5,6 @@ defaults:
 _target_: src.algorithms.ae.AE
 features: null 
 
-input_noise_std: 0.0001
-
-target_rate: 0.25 # nominal rate
-base_rate: 28608.8064 # bunch crossing rate in kHz
-
 encoder:
   _target_: src.algorithms.components.encoder.Encoder
   in_dim: 117
@@ -23,3 +18,7 @@ decoder:
   out_dim: ${algorithm.encoder.in_dim}
 
 delta: 3.0
+input_noise_std: 0.0001
+
+target_rate: 0.25 # nominal rate
+base_rate: 28608.8064 # bunch crossing rate in kHz

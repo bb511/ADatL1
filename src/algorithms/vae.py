@@ -35,6 +35,7 @@ class VAE(ADLightningModule):
         encoder: nn.Module,
         decoder: nn.Module,
         kl_warmup_frac: float = 0.0,
+        kl_scale: float = 1.0,
         features: Optional[nn.Module] = None,
         ckpt: str = "",
         target_rate: float = 0.25,
@@ -53,7 +54,7 @@ class VAE(ADLightningModule):
         self.features.eval()
         self.kl_warmup_frac = kl_warmup_frac
 
-        self.loss = ClassicVAELoss(reduction="none")
+        self.loss = ClassicVAELoss(kl_scale=kl_scale, reduction="none")
 
     def on_fit_start(self):
         inject_object_feature_map(self)

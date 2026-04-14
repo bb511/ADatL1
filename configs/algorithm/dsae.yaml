@@ -4,8 +4,6 @@ defaults:
 _target_: src.algorithms.dsae.DeepSetsAE
 features: null
 
-input_noise_std: 0.0001
-
 target_rate: 0.25 # nominal rate
 base_rate: 28608.8064 # bunch crossing rate in kHz
 
@@ -36,3 +34,7 @@ decoder:
   nodes: ${reverse:${algorithm.encoder.rho_nodes}}
   activation: relu
   out_dim: 117
+
+
+input_noise_std: 0.0001
+delta: 1.0

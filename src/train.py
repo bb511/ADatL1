@@ -128,20 +128,21 @@ def _worst_for(direction: str) -> float:
 
 def _get_evaluator(cfg: DictConfig, datamodule, logger):
     """Configure the evaluator object and return it."""
-    if cfg.get("evaluator") is None:
-        log.info(Back.YELLOW + "No evaluator config found... Skipping testing")
+    if cfg.get("evaluation") is None:
+        log.info(Back.YELLOW + "No evaluation config found... Skipping testing")
         return
 
-    # Merge the trainer configuration with the evaluator. This is done since the
+    eval_config = cfg.get("evaluation")
+    # Merge the trainer configuration with the evaluation. This is done since the
     # Evaluator object is basically a wrapper around a trainer with extra steps.
     trainer_config = OmegaConf.to_container(cfg.trainer, resolve=True)
-    evaluator_config = OmegaConf.to_container(cfg.evaluator, resolve=True)
+    evaluator_config = OmegaConf.to_container(eval_config.evaluator, resolve=True)
 
     merged_dict = {**trainer_config, **evaluator_config}
     evaluator_cfg = OmegaConf.create(merged_dict)
 
     log.info("Instantiating evaluator callbacks...")
-    callbacks = instantiate_callbacks(cfg.get("evaluation/callbacks"))
+    callbacks = instantiate_callbacks(eval_config.get("callbacks"))
     log.info(f"Instantiating evaluator <{evaluator_cfg._target_}>")
     evaluator = hydra.utils.instantiate(
         evaluator_cfg,

@@ -1,5 +1,5 @@
 # ========================================================================
-# RealNVP RUNNING COMMANDS
+# SVDD RUNNING COMMANDS
 # ========================================================================
 
 
@@ -13,16 +13,15 @@
 # taskset -c 0-2 \
 # python3 src/train.py \
 #     paths.raw_data_dir=/data/deodagiu/adl1t_data/parquet_files \
-#     experiment=physics/realnvp \
-#     experiment_name=debug \
-#     run_name=test \
+#     experiment=physics/svdd \
+#     run_name=cvar25_t100_high \
 #     algorithm.optimizer.lr=0.0025808010156689754 \
 #     trainer.gradient_clip_val=0.0 \
 #     algorithm.optimizer.betas=[0.9,0.99] \
 #     algorithm.optimizer.weight_decay=0.001 \
-#     algorithm.loss.weight_decay=1e-7 \
-#     algorithm.loss.soft_boundary=False \
-#     algorithm.loss.nu=0.01 \
+#     algorithm.weight_decay=1e-7 \
+#     algorithm.soft_boundary=False \
+#     algorithm.nu=0.01 \
 #     algorithm.center_init_method=mean \
 #     algorithm.encoder.nodes=[48,24,8] \
 #     algorithm.encoder.activation=gelu \
@@ -35,17 +34,16 @@
 # taskset -c 3-5 \
 # python3 src/train.py \
 #     paths.raw_data_dir=/data/deodagiu/adl1t_data/parquet_files \
-#     experiment=physics/realnvp \
-#     experiment_name=debug \
-#     run_name=test \
+#     experiment=physics/svdd \
+#     run_name=cvar10_t100_high \
 #     evaluation.callbacks.anomaly_efficiency.cvar_summary=0.10 \
 #     algorithm.optimizer.lr=0.0025808010156689754 \
 #     trainer.gradient_clip_val=0.0 \
 #     algorithm.optimizer.betas=[0.9,0.99] \
 #     algorithm.optimizer.weight_decay=0.001 \
-#     algorithm.loss.weight_decay=1e-7 \
-#     algorithm.loss.soft_boundary=False \
-#     algorithm.loss.nu=0.01 \
+#     algorithm.weight_decay=1e-7 \
+#     algorithm.soft_boundary=False \
+#     algorithm.nu=0.01 \
 #     algorithm.center_init_method=mean \
 #     algorithm.encoder.nodes=[48,24,8] \
 #     algorithm.encoder.activation=gelu \
@@ -58,9 +56,8 @@
 # taskset -c 0-2 \
 # python3 src/train.py \
 #     paths.raw_data_dir=/data/deodagiu/adl1t_data/parquet_files \
-#     experiment=physics/realnvp_agnostic \
-#     experiment_name=debug \
-#     run_name=test \
+#     experiment=physics/svdd_agnostic \
+#     run_name=cap_t100_high \
 #     callbacks.wasserstein_dist=null \
 #     callbacks.thres_drift=null \
 #     callbacks.wasserstein_dist_ema_ckpt=null \
@@ -71,9 +68,9 @@
 #     trainer.gradient_clip_val=0.0 \
 #     algorithm.optimizer.betas=[0.9,0.99] \
 #     algorithm.optimizer.weight_decay=0.001 \
-#     algorithm.loss.weight_decay=1e-7 \
-#     algorithm.loss.soft_boundary=False \
-#     algorithm.loss.nu=0.01 \
+#     algorithm.weight_decay=1e-7 \
+#     algorithm.soft_boundary=False \
+#     algorithm.nu=0.01 \
 #     algorithm.center_init_method=mean \
 #     algorithm.encoder.nodes=[48,24,8] \
 #     algorithm.encoder.activation=gelu \
@@ -86,9 +83,8 @@
 # taskset -c 3-5 \
 # python3 src/train.py \
 #     paths.raw_data_dir=/data/deodagiu/adl1t_data/parquet_files \
-#     experiment=physics/realnvp_agnostic \
-#     experiment_name=debug \
-#     run_name=test \
+#     experiment=physics/svdd_agnostic \
+#     run_name=stable_t100_high \
 #     callbacks.wasserstein_dist=null \
 #     callbacks.cap_sn_zb=null \
 #     callbacks.wasserstein_dist_ema_ckpt=null \
@@ -99,9 +95,9 @@
 #     trainer.gradient_clip_val=0.0 \
 #     algorithm.optimizer.betas=[0.9,0.99] \
 #     algorithm.optimizer.weight_decay=0.001 \
-#     algorithm.loss.weight_decay=1e-7 \
-#     algorithm.loss.soft_boundary=False \
-#     algorithm.loss.nu=0.01 \
+#     algorithm.weight_decay=1e-7 \
+#     algorithm.soft_boundary=False \
+#     algorithm.nu=0.01 \
 #     algorithm.center_init_method=mean \
 #     algorithm.encoder.nodes=[48,24,8] \
 #     algorithm.encoder.activation=gelu \
@@ -114,9 +110,8 @@
 # taskset -c 9-11 \
 # python3 src/train.py \
 #     paths.raw_data_dir=/data/deodagiu/adl1t_data/parquet_files \
-#     experiment=physics/realnvp_agnostic \
-#     experiment_name=debug \
-#     run_name=test \
+#     experiment=physics/svdd_agnostic \
+#     run_name=wasserstein_t100_high \
 #     callbacks.thres_drift=null \
 #     callbacks.cap_sn_zb=null \
 #     callbacks.thres_drift_ema_ckpt=null \
@@ -127,9 +122,9 @@
 #     trainer.gradient_clip_val=0.0 \
 #     algorithm.optimizer.betas=[0.9,0.99] \
 #     algorithm.optimizer.weight_decay=0.001 \
-#     algorithm.loss.weight_decay=1e-7 \
-#     algorithm.loss.soft_boundary=False \
-#     algorithm.loss.nu=0.01 \
+#     algorithm.weight_decay=1e-7 \
+#     algorithm.soft_boundary=False \
+#     algorithm.nu=0.01 \
 #     algorithm.center_init_method=mean \
 #     algorithm.encoder.nodes=[48,24,8] \
 #     algorithm.encoder.activation=gelu \
@@ -151,17 +146,16 @@
 #     hydra.launcher.cpus_per_task=1 \
 #     hydra.launcher.gpus_per_node=4 \
 #     paths.raw_data_dir=/data/deodagiu/adl1t_data/parquet_files \
-#     experiment=physics/realnvp \
-#     experiment_name=realnvp_cvar25_vs_kl_search \
+#     experiment=physics/svdd \
+#     experiment_name=svdd_cvar25_vs_kl_search \
 #     callbacks.max_rate_ckpt=null \
 #     callbacks.cvar10_ema_ckpt=null \
 #     ~evaluation.evaluator.ckpts.single.eff__ascore_full__brate_0_25kHz \
 #     ~evaluation.evaluator.ckpts.summary.cvar10_ema \
 #     evaluation.callbacks.thres_drift=null \
 #     evaluation.callbacks.wasserstein=null \
-#     evaluation.callbacks.reco=null \
 #     logger=none \
-#     hparams_search=realnvp_optuna \
+#     hparams_search=svdd_optuna \
 #     hydra.sweeper.study_name=cvar25eff_vs_kl \
 #     hydra.sweeper.n_trials=100 \
 #     hydra.sweeper.sampler.n_startup_trials=150 \
@@ -179,18 +173,17 @@
 #     hydra.launcher.cpus_per_task=1 \
 #     hydra.launcher.gpus_per_node=4 \
 #     paths.raw_data_dir=/data/deodagiu/adl1t_data/parquet_files \
-#     experiment=physics/realnvp \
-#     experiment_name=realnvp_cvar10_vs_kl_search \
+#     experiment=physics/svdd \
+#     experiment_name=svdd_cvar10_vs_kl_search \
 #     callbacks.max_rate_ckpt=null \
 #     callbacks.cvar25_ema_ckpt=null \
 #     ~evaluation.evaluator.ckpts.single.eff__ascore_full__brate_0_25kHz \
 #     ~evaluation.evaluator.ckpts.summary.cvar25_ema \
 #     evaluation.callbacks.thres_drift=null \
 #     evaluation.callbacks.wasserstein=null \
-#     evaluation.callbacks.reco=null \
 #     evaluation.callbacks.anomaly_efficiency.cvar_summary=0.10 \
 #     logger=none \
-#     hparams_search=realnvp_optuna \
+#     hparams_search=svdd_optuna \
 #     hydra.sweeper.study_name=cvar10eff_vs_kl \
 #     hydra.sweeper.n_trials=100 \
 #     hydra.sweeper.sampler.n_startup_trials=150 \
@@ -208,8 +201,8 @@
 #     hydra.launcher.cpus_per_task=1 \
 #     hydra.launcher.gpus_per_node=4 \
 #     paths.raw_data_dir=/data/deodagiu/adl1t_data/parquet_files \
-#     experiment=physics/realnvp_agnostic \
-#     experiment_name=realnvp_agnostic_cap_vs_kl_search \
+#     experiment=physics/svdd_agnostic \
+#     experiment_name=svdd_agnostic_cap_vs_kl_search \
 #     callbacks.anomaly_eff=null \
 #     callbacks.wasserstein_dist=null \
 #     callbacks.thres_drift=null \
@@ -220,9 +213,8 @@
 #     evaluation.callbacks.anomaly_efficiency=null \
 #     evaluation.callbacks.thres_drift=null \
 #     evaluation.callbacks.wasserstein=null \
-#     evaluation.callbacks.reco=null \
 #     logger=none \
-#     hparams_search=realnvp_optuna \
+#     hparams_search=svdd_optuna \
 #     hydra.sweeper.study_name=cap_vs_kl \
 #     hydra.sweeper.n_trials=100 \
 #     hydra.sweeper.sampler.n_startup_trials=150 \
@@ -240,8 +232,8 @@
 #     hydra.launcher.cpus_per_task=1 \
 #     hydra.launcher.gpus_per_node=4 \
 #     paths.raw_data_dir=/data/deodagiu/adl1t_data/parquet_files \
-#     experiment=physics/realnvp_agnostic \
-#     experiment_name=realnvp_agnostic_drift_vs_kl_search \
+#     experiment=physics/svdd_agnostic \
+#     experiment_name=svdd_agnostic_drift_vs_kl_search \
 #     callbacks.anomaly_eff=null \
 #     callbacks.wasserstein_dist=null \
 #     callbacks.cap_sn_zb=null \
@@ -252,9 +244,8 @@
 #     evaluation.callbacks.anomaly_efficiency=null \
 #     evaluation.callbacks.cap_sn_zb=null \
 #     evaluation.callbacks.wasserstein=null \
-#     evaluation.callbacks.reco=null \
 #     logger=none \
-#     hparams_search=realnvp_optuna \
+#     hparams_search=svdd_optuna \
 #     optimized_metric_config.main_metric.callback.name=thres_drift \
 #     optimized_metric_config.main_metric.direction=minimize \
 #     hydra.sweeper.study_name=drift_vs_kl \
@@ -275,8 +266,8 @@
 #     hydra.launcher.cpus_per_task=1 \
 #     hydra.launcher.gpus_per_node=4 \
 #     paths.raw_data_dir=/data/deodagiu/adl1t_data/parquet_files \
-#     experiment=physics/realnvp_agnostic \
-#     experiment_name=realnvp_agnostic_wasserstein_vs_kl_search \
+#     experiment=physics/svdd_agnostic \
+#     experiment_name=svdd_agnostic_wasserstein_vs_kl_search \
 #     callbacks.anomaly_eff=null \
 #     callbacks.thres_drift=null \
 #     callbacks.cap_sn_zb=null \
@@ -287,9 +278,8 @@
 #     evaluation.callbacks.anomaly_efficiency=null \
 #     evaluation.callbacks.cap_sn_zb=null \
 #     evaluation.callbacks.thres_drift=null \
-#     evaluation.callbacks.reco=null \
 #     logger=none \
-#     hparams_search=realnvp_optuna \
+#     hparams_search=svdd_optuna \
 #     optimized_metric_config.main_metric.callback.name=wasserstein \
 #     optimized_metric_config.main_metric.direction=minimize \
 #     hydra.sweeper.study_name=wasserstein_vs_kl \

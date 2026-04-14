@@ -13,8 +13,7 @@
 # python3 src/train.py \
 #     paths.raw_data_dir=/data/deodagiu/adl1t_data/parquet_files \
 #     experiment=physics/dsae \
-#     experiment_name=debug \
-#     run_name=test \
+#     run_name=cvar25_t100_high \
 #     algorithm.optimizer.lr=0.002081733354631208 \
 #     algorithm.delta=10.0 \
 #     trainer.gradient_clip_val=5.0 \
@@ -26,7 +25,6 @@
 #     algorithm.encoder.add_counts=true \
 #     algorithm.encoder.object_phi_nodes='{FET:[8],egammas:[16,8],jets:[16,8],muons:[8],taus:[16,8]}' \
 #     algorithm.encoder.rho_nodes='[48,16]' \
-#     trainer.max_epochs=1 \
 #     trainer=gpu \
 #     trainer.devices=[0]
 
@@ -37,8 +35,7 @@
 # python3 src/train.py \
 #     paths.raw_data_dir=/data/deodagiu/adl1t_data/parquet_files \
 #     experiment=physics/dsae \
-#     experiment_name=debug \
-#     run_name=test \
+#     run_name=cvar10_t100_high \
 #     evaluation.callbacks.anomaly_efficiency.cvar_summary=0.10 \
 #     algorithm.optimizer.lr=0.002081733354631208 \
 #     algorithm.delta=10.0 \
@@ -51,7 +48,6 @@
 #     algorithm.encoder.add_counts=true \
 #     algorithm.encoder.object_phi_nodes='{FET:[8],egammas:[16,8],jets:[16,8],muons:[8],taus:[16,8]}' \
 #     algorithm.encoder.rho_nodes='[48,16]' \
-#     trainer.max_epochs=1 \
 #     trainer=gpu \
 #     trainer.devices=[0]
 
@@ -62,32 +58,30 @@
 # ------------------------------------------------------------------------
 # CAP training
 # ------------------------------------------------------------------------
-taskset -c 0-2 \
-python3 src/train.py \
-    paths.raw_data_dir=/data/deodagiu/adl1t_data/parquet_files \
-    experiment=physics/dsae_agnostic \
-    experiment_name=debug \
-    run_name=test \
-    callbacks.wasserstein_dist=null \
-    callbacks.thres_drift=null \
-    callbacks.wasserstein_dist_ema_ckpt=null \
-    callbacks.thres_drift_ema_ckpt=null \
-    ~evaluation.evaluator.ckpts.summary.operational_drift_ema \
-    ~evaluation.evaluator.ckpts.summary.w1dist_ema_normal_vs_SingleNeutrino_E-10-gun \
-    algorithm.optimizer.lr=0.002081733354631208 \
-    algorithm.delta=10.0 \
-    trainer.gradient_clip_val=5.0 \
-    algorithm.optimizer.betas='[0.9,0.999]' \
-    algorithm.optimizer.weight_decay=0.001 \
-    algorithm.input_noise_std=0.003 \
-    algorithm.encoder.activation=gelu \
-    algorithm.encoder.pooling=sum_max \
-    algorithm.encoder.add_counts=true \
-    algorithm.encoder.object_phi_nodes='{FET:[8],egammas:[16,8],jets:[16,8],muons:[8],taus:[16,8]}' \
-    algorithm.encoder.rho_nodes='[48,16]' \
-    trainer.max_epochs=1 \
-    trainer=gpu \
-    trainer.devices=[0]
+# taskset -c 0-2 \
+# python3 src/train.py \
+#     paths.raw_data_dir=/data/deodagiu/adl1t_data/parquet_files \
+#     experiment=physics/dsae_agnostic \
+#     run_name=cap_t100_high \
+#     callbacks.wasserstein_dist=null \
+#     callbacks.thres_drift=null \
+#     callbacks.wasserstein_dist_ema_ckpt=null \
+#     callbacks.thres_drift_ema_ckpt=null \
+#     ~evaluation.evaluator.ckpts.summary.operational_drift_ema \
+#     ~evaluation.evaluator.ckpts.summary.w1dist_ema_normal_vs_SingleNeutrino_E-10-gun \
+#     algorithm.optimizer.lr=0.002081733354631208 \
+#     algorithm.delta=10.0 \
+#     trainer.gradient_clip_val=5.0 \
+#     algorithm.optimizer.betas='[0.9,0.999]' \
+#     algorithm.optimizer.weight_decay=0.001 \
+#     algorithm.input_noise_std=0.003 \
+#     algorithm.encoder.activation=gelu \
+#     algorithm.encoder.pooling=sum_max \
+#     algorithm.encoder.add_counts=true \
+#     algorithm.encoder.object_phi_nodes='{FET:[8],egammas:[16,8],jets:[16,8],muons:[8],taus:[16,8]}' \
+#     algorithm.encoder.rho_nodes='[48,16]' \
+#     trainer=gpu \
+#     trainer.devices=[0]
 
 # ------------------------------------------------------------------------
 # Stability training
@@ -96,8 +90,7 @@ python3 src/train.py \
 # python3 src/train.py \
 #     paths.raw_data_dir=/data/deodagiu/adl1t_data/parquet_files \
 #     experiment=physics/dsae_agnostic \
-#     experiment_name=debug \
-#     run_name=test \
+#     run_name=stability_t100_high \
 #     callbacks.wasserstein_dist=null \
 #     callbacks.cap_sn_zb=null \
 #     callbacks.wasserstein_dist_ema_ckpt=null \
@@ -115,7 +108,6 @@ python3 src/train.py \
 #     algorithm.encoder.add_counts=true \
 #     algorithm.encoder.object_phi_nodes='{FET:[8],egammas:[16,8],jets:[16,8],muons:[8],taus:[16,8]}' \
 #     algorithm.encoder.rho_nodes='[48,16]' \
-#     trainer.max_epochs=1 \
 #     trainer=gpu \
 #     trainer.devices=[0]
 
@@ -126,8 +118,7 @@ python3 src/train.py \
 # python3 src/train.py \
 #     paths.raw_data_dir=/data/deodagiu/adl1t_data/parquet_files \
 #     experiment=physics/dsae_agnostic \
-#     experiment_name=debug \
-#     run_name=test \
+#     run_name=wasserstein_t100_high \
 #     callbacks.thres_drift=null \
 #     callbacks.cap_sn_zb=null \
 #     callbacks.thres_drift_ema_ckpt=null \
@@ -145,7 +136,6 @@ python3 src/train.py \
 #     algorithm.encoder.add_counts=true \
 #     algorithm.encoder.object_phi_nodes='{FET:[8],egammas:[16,8],jets:[16,8],muons:[8],taus:[16,8]}' \
 #     algorithm.encoder.rho_nodes='[48,16]' \
-#     trainer.max_epochs=1 \
 #     trainer=gpu \
 #     trainer.devices=[0]
 
@@ -156,7 +146,6 @@ python3 src/train.py \
 # ------------------------------------------------------------------------
 # Semi-supervised search (cvar25)
 # ------------------------------------------------------------------------
-# AE hyperparameter search semi-supervised.
 # taskset -c 0-2 \
 # python3 src/train.py \
 #     -m \
@@ -214,7 +203,6 @@ python3 src/train.py \
 # ------------------------------------------------------------------------
 # CAP search
 # ------------------------------------------------------------------------
-# AE agnostic hyperparameter search - CAP vs MSE.
 # taskset -c 0-2 \
 # python3 src/train.py \
 #     -m \
@@ -279,7 +267,6 @@ python3 src/train.py \
 #     trainer=gpu \
 #     trainer.max_epochs=50 \
 #     trainer.devices=[0]
-
 
 # ------------------------------------------------------------------------
 # Wasserstein search

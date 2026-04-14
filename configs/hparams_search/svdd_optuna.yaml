@@ -40,9 +40,9 @@ hydra:
       algorithm.optimizer.betas: choice([0.9, 0.999], [0.9, 0.99])
       algorithm.optimizer.weight_decay: choice(0.0, 1e-6, 1e-5, 1e-4, 1e-3)
 
-      algorithm.loss.weight_decay: choice(0.0, 1e-8, 1e-7, 1e-6, 1e-5)
-      algorithm.loss.soft_boundary: choice(false, true)
-      algorithm.loss.nu: choice(0.01, 0.05, 0.1, 0.2)
+      algorithm.weight_decay: choice(0.0, 1e-8, 1e-7, 1e-6, 1e-5)
+      algorithm.soft_boundary: choice(false, true)
+      algorithm.nu: choice(0.01, 0.05, 0.1, 0.2)
 
       algorithm.center_init_method: choice(mean, zeros)
 

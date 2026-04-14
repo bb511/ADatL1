@@ -200,6 +200,7 @@
 #     -m \
 #     hydra/launcher=submitit_local \
 #     hydra.launcher.cpus_per_task=1 \
+#     hydra.launcher.timeout_min=200 \
 #     hydra.launcher.gpus_per_node=4 \
 #     paths.raw_data_dir=/data/deodagiu/adl1t_data/parquet_files \
 #     experiment=physics/vae_agnostic \

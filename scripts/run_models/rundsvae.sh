@@ -20,7 +20,7 @@
 #     algorithm.optimizer.lr=0.00011979051144559894 \
 #     algorithm.optimizer.betas='[0.9,0.999]' \
 #     algorithm.optimizer.weight_decay=0.0 \
-#     algorithm.loss.kl_scale=0.001 \
+#     algorithm.kl_scale=0.001 \
 #     algorithm.kl_warmup_frac=0.1 \
 #     algorithm.encoder.activation=relu \
 #     algorithm.encoder.pooling=sum \
@@ -45,7 +45,7 @@
 #     algorithm.optimizer.lr=0.00011979051144559894 \
 #     algorithm.optimizer.betas='[0.9,0.999]' \
 #     algorithm.optimizer.weight_decay=0.0 \
-#     algorithm.loss.kl_scale=0.001 \
+#     algorithm.kl_scale=0.001 \
 #     algorithm.kl_warmup_frac=0.1 \
 #     algorithm.encoder.activation=relu \
 #     algorithm.encoder.pooling=sum \
@@ -75,7 +75,7 @@
 #     algorithm.optimizer.lr=0.00011979051144559894 \
 #     algorithm.optimizer.betas='[0.9,0.999]' \
 #     algorithm.optimizer.weight_decay=0.0 \
-#     algorithm.loss.kl_scale=0.001 \
+#     algorithm.kl_scale=0.001 \
 #     algorithm.kl_warmup_frac=0.1 \
 #     algorithm.encoder.activation=relu \
 #     algorithm.encoder.pooling=sum \
@@ -105,7 +105,7 @@
 #     algorithm.optimizer.lr=0.00011979051144559894 \
 #     algorithm.optimizer.betas='[0.9,0.999]' \
 #     algorithm.optimizer.weight_decay=0.0 \
-#     algorithm.loss.kl_scale=0.001 \
+#     algorithm.kl_scale=0.001 \
 #     algorithm.kl_warmup_frac=0.1 \
 #     algorithm.encoder.activation=relu \
 #     algorithm.encoder.pooling=sum \
@@ -135,7 +135,7 @@
 #     algorithm.optimizer.lr=0.00011979051144559894 \
 #     algorithm.optimizer.betas='[0.9,0.999]' \
 #     algorithm.optimizer.weight_decay=0.0 \
-#     algorithm.loss.kl_scale=0.001 \
+#     algorithm.kl_scale=0.001 \
 #     algorithm.kl_warmup_frac=0.1 \
 #     algorithm.encoder.activation=relu \
 #     algorithm.encoder.pooling=sum \
@@ -215,6 +215,7 @@
 #     -m \
 #     hydra/launcher=submitit_local \
 #     hydra.launcher.cpus_per_task=1 \
+#     hydra.launcher.timeout_min=200 \
 #     hydra.launcher.gpus_per_node=4 \
 #     paths.raw_data_dir=/data/deodagiu/adl1t_data/parquet_files \
 #     experiment=physics/dsvae_agnostic \

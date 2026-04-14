@@ -27,18 +27,6 @@ trainer:
 
 test: true
 
-algorithm:
-  target_rate: 0.25
-  base_rate: 28608.8064
-
-  optimizer:
-    _partial_: true
-    _target_: torch.optim.AdamW
-    lr: 0.0013029941778430407
-    weight_decay: 0.001
-    betas: [0.9, 0.999]
-    eps: 1e-8
-
 # Metrics to report to optuna for every checkpoint.
 optimized_metric_config:
   main_metric:
@@ -53,6 +41,21 @@ optimized_metric_config:
         ckpt_name: null
         test_ds: normal
     direction: minimize
+
+algorithm:
+  target_rate: 0.25
+  base_rate: 28608.8064
+  # The basis data processing returns 117 features.
+  encoder:
+    in_dim: 117
+
+  optimizer:
+    _partial_: true
+    _target_: torch.optim.AdamW
+    lr: 0.0013029941778430407
+    weight_decay: 0.001
+    betas: [0.9, 0.999]
+    eps: 1e-8
 
 callbacks:
   log_data_mlflow: null

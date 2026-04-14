@@ -2,10 +2,10 @@ from typing import Literal
 import torch
 import torch.nn.functional as F
 
-from src.algorithms.losses.components import L1ADLoss
+from src.algorithms.losses.components import ADLoss
 
 
-class MSEReconstructionLoss(L1ADLoss):
+class MSEReconstructionLoss(ADLoss):
     """Reconstruction loss.
 
     For padded data, pass mask to only include real features into the reconstruction.
@@ -14,14 +14,9 @@ class MSEReconstructionLoss(L1ADLoss):
     :param reduction: String of the reduction method to apply to the batch of samples
         given to this loss.
     """
+    name: str = "mse_reco"
 
-    name: str = "reco"
-
-    def __init__(
-        self,
-        scale: float = 1.0,
-        reduction: Literal["none", "mean", "sum"] = "none",
-    ):
+    def __init__(self, scale: float = 1.0, reduction: str = "none"):
         super().__init__(scale=scale, reduction=reduction)
 
     def forward(
@@ -40,7 +35,7 @@ class MSEReconstructionLoss(L1ADLoss):
         return self.scale * self.reduce(mse_per_observation)
 
 
-class HuberReconstructionLoss(L1ADLoss):
+class HuberReconstructionLoss(ADLoss):
     """The SmoothL1 loss.
 
     For padded data, pass mask to only include real features into the reconstruction.
@@ -49,15 +44,9 @@ class HuberReconstructionLoss(L1ADLoss):
     :param reduction: String of the reduction method to apply to the batch of samples
         given to this loss.
     """
+    name: str = "huber_reco"
 
-    name: str = "reco"
-
-    def __init__(
-        self,
-        scale: float = 1.0,
-        delta: float = 1.0,
-        reduction: Literal["none", "mean", "sum"] = "none",
-    ):
+    def __init__(self, scale: float = 1.0, delta: float = 1.0, reduction: str = "none"):
         super().__init__(scale=scale, reduction=reduction)
         self.delta = delta
 
@@ -84,12 +73,9 @@ class CylPtPzReconstructionLoss(MSEReconstructionLoss):
     cylindrical coordinates. This is because for axov4, the training would not converge
     otherwise. This trick should not be used in the future.
     """
-
     name: str = "cylreco"
 
-    def __init__(
-        self, scale: float = 1.0, reduction: Literal["none", "mean", "sum"] = "none"
-    ):
+    def __init__(self, scale: float = 1.0, reduction: str = "none"):
         super().__init__(scale=scale, reduction=reduction)
         self.pt_idxs = None
         self.eta_idxs = None

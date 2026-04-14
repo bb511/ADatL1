@@ -1,7 +1,7 @@
 # @package callbacks.main
 
 _target_: src.callbacks.wasserstein.WassersteinCallback
-metric_name: 'loss/total/full'
+output_name: 'loss/total/full'
 dataset_1: ???
 dataset_2: ???
 apply_log1p: false

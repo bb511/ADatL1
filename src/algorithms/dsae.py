@@ -4,61 +4,68 @@ from typing import Optional
 import torch
 from torch import nn
 
-from src.algorithms import L1ADLightningModule
+from src.algorithms import ADLightningModule
+from src.algorithms.losses.ae import HuberAELoss
+from src.algorithms.losses.components.reconstruction import MSEReconstructionLoss
 from src.algorithms.utils.object_feature_map_loader import inject_object_feature_map
+from src.data.utils import unpack_batch
 
 
-class DeepSetsAE(L1ADLightningModule):
+class DeepSetsAE(ADLightningModule):
     """DeepSets per-type auto-encoder for anomaly detection.
 
     This model uses a per-type DeepSets encoder to build an event-level representation,
-    and a standard decoder to reconstruct the flattened input. The anomaly score is the
-    masked MSE.
+    and a standard decoder to reconstruct the flattened input.
 
     :param encoder: Per-type DeepSets encoder module.
     :param decoder: Decoder module mapping the event representation back to the
         flattened input space.
-    :param mse: Module computing the per-sample MSE anomaly score.
-    :param mask: Bool whether to mask padded entries in the reconstruction loss.
     :param features: Optional feature module to apply to the flattened input before the
         DeepSets split. Usually left as identity for object-wise inputs.
     :param input_noise_std: Standard deviation of Gaussian input noise used during
         training only.
-    :param operational_rate: Float operational trigger rate.
-    :param bc_rate: Float bunch crossing rate used to derive the operational quantile.
+    :param delta: Huber loss parameter controlling the L1/L2 transition.
+    :param target_rate: Target background rate or FPR.
+    :param base_rate: Base rate used to convert target_rate into an FPR. If None,
+        target_rate is interpreted directly as an FPR.
     """
 
     def __init__(
         self,
         encoder: nn.Module,
         decoder: nn.Module,
-        mse: nn.Module,
-        mask: bool = True,
-        features: Optional[nn.Module] = None,
         input_noise_std: float = 0.0,
-        operational_rate: float = 0.25,
-        bc_rate: float = 28608.8064,
+        delta: float = 3.0,
+        features: Optional[nn.Module] = None,
+        target_rate: float = 0.25,
+        base_rate: float | None = None,
         **kwargs,
     ):
         super().__init__(model=None, **kwargs)
         self.save_hyperparameters(
-            ignore=["model", "features", "encoder", "decoder", "loss"]
+            ignore=["model", "features", "encoder", "decoder"]
         )
+
         self.features = features if features is not None else nn.Identity()
         self.features.eval()
 
         self.encoder = encoder
         self.decoder = decoder
-        self.mse = mse
         self.input_noise_std = input_noise_std
-        self.mask = mask
-        self.operational_quantile = 1 - operational_rate / bc_rate
+
+        # Hard-coded algorithm definition.
+        self.loss = HuberAELoss(delta=delta, reduction="none")
+        self.ascore = MSEReconstructionLoss(reduction="none")
 
     def on_fit_start(self):
         inject_object_feature_map(self)
 
     def on_test_start(self):
         inject_object_feature_map(self)
+
+    @property
+    def target_fpr(self) -> float:
+        return self.compute_target_fpr()
 
     def forward(
         self,
@@ -70,44 +77,59 @@ class DeepSetsAE(L1ADLightningModule):
         return z, reconstruction
 
     def model_step(self, batch: torch.Tensor) -> dict[str, torch.Tensor]:
-        x, m, _, _ = batch
-        x_flat = torch.flatten(x, start_dim=1)
-        m_flat = torch.flatten(m, start_dim=1).float()
+        b = unpack_batch(batch)
+
+        x_flat = torch.flatten(b.x, start_dim=1)
+
+        m_flat = b.mask
+        if m_flat is not None:
+            m_flat = torch.flatten(m_flat, start_dim=1).float()
 
         x_input = x_flat
         if self.training and self.input_noise_std > 0.0:
             noise = torch.randn_like(x_flat) * self.input_noise_std
-            noise = noise * m_flat
+            if m_flat is not None:
+                noise = noise * m_flat
             x_input = x_flat + noise
+
+        x_input = self.features(x_input)
 
         x_by_type, m_by_type = self._split_by_type_from_flat(x_input, m_flat)
 
         z, reconstruction = self.forward(x_by_type, m_by_type)
-        reco_loss = self.loss(reco=reconstruction, target=x_flat, mask=m_flat)
-        mse = self.mse(x_flat, reconstruction, m_flat)
+        loss = self.loss(reco=reconstruction, target=x_flat, mask=m_flat)
+        ascore = self.ascore(x_flat, reconstruction, m_flat)
+
+        if ascore.ndim != 1:
+            raise ValueError(
+                f"Expected per-event ascores, got {tuple(ascore.shape)}."
+            )
+
         del x_flat, z
 
         with torch.no_grad():
-            n = mse.numel()
+            n = ascore.numel()
+            k = max(1, int(self.target_fpr * n))
 
-            # Number of extreme tail samples
-            k = max(10, int((1.0 - self.operational_quantile) * n))
-            topk_vals = torch.topk(mse, k).values
-            mean_top_vals = topk_vals.mean().item()
+            if k < 10:
+                k_eff = min(max(10, k), n)
+                operational_ascore = torch.topk(ascore, k_eff).values.mean().item()
+            else:
+                operational_ascore = torch.quantile(
+                    ascore, 1.0 - self.target_fpr
+                ).item()
 
-            # 99th quantile MSE
-            mse_q99 = torch.quantile(mse, 0.99).item()
+        loss_mean = loss.mean()
 
         return {
             # Used for backpropagation:
-            "loss": reco_loss.mean(),
+            "loss": loss_mean,
             # Used for logging:
-            "loss/reco/mean": reco_loss.mean(),
-            "loss/mse/mean_top_vals": mean_top_vals,
-            "loss/mse/q99": mse_q99,
+            "loss/mean": loss_mean,
+            "ascore/operational": operational_ascore,
             # Used for callbacks:
-            "loss/total/full": reco_loss.detach(),
-            "loss/mse/full": mse.detach(),
+            "loss/full": loss.detach(),
+            "ascore/full": ascore.detach(),
             "reconstructed_data": reconstruction.detach(),
         }
 
@@ -115,30 +137,26 @@ class DeepSetsAE(L1ADLightningModule):
         """The values of the loss that are logged."""
         return {
             "loss": outdict.get("loss"),
-            "loss_reco": outdict.get("loss/reco/mean"),
-            "loss_mse_mean_top_vals": outdict.get("loss/mse/mean_top_vals"),
-            "loss_mse_q99": outdict.get("loss/mse/q99"),
+            "loss_reco": outdict.get("loss/mean"),
+            "ascore_operational": outdict.get("ascore/operational"),
         }
 
     def _split_by_type_from_flat(
         self,
         x_flat: torch.Tensor,
-        m_flat: torch.Tensor,
+        m_flat: torch.Tensor | None,
     ) -> tuple[dict[str, torch.Tensor], dict[str, torch.Tensor]]:
-        """Build per-type tensors from flattened inputs using object_feature_map.
-
-        This method expects flattened input, such that it corresponds to the
-        object_feature_map dictionary that is saved on the data side. It then returns
-        a dictionary with the data categorised by type, e.g., into muons, jets, etc...
-        """
+        """Build per-type tensors from flattened inputs using object_feature_map."""
         object_feature_map = getattr(self, "object_feature_map", None)
         if object_feature_map is None:
             raise RuntimeError(
                 "object_feature_map not found on module. "
                 "Make sure inject_object_feature_map(self) was called in "
-                "on_fit_start/on_test_start. This needs to happen in the current "
-                "L1ADLightningModule you are using."
+                "on_fit_start/on_test_start."
             )
+
+        if m_flat is None:
+            m_flat = torch.ones_like(x_flat, dtype=x_flat.dtype, device=x_flat.device)
 
         x_by_type = {}
         m_by_type = {}
@@ -159,7 +177,9 @@ class DeepSetsAE(L1ADLightningModule):
             obj_masks = []
 
             for obj_idx in range(n_obj):
-                this_obj_feat_idx = [feat_indices[f_idx][obj_idx] for f_idx in range(n_feat)]
+                this_obj_feat_idx = [
+                    feat_indices[f_idx][obj_idx] for f_idx in range(n_feat)
+                ]
                 idx_tensor = torch.tensor(
                     this_obj_feat_idx, device=x_flat.device, dtype=torch.long
                 )

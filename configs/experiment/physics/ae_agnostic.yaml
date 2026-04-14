@@ -36,15 +36,17 @@ optimized_metric_config:
     direction: maximize
   sec_metric:
     callback:
-      name: mse_mean_top_vals
+      name: ascore_operational
       params:
         ckpt_name: null # This will be filled in with the best ckpt of the main metric.
         test_ds: normal
     direction: minimize
 
 algorithm:
+  # What rate is the AD algorithm supposed to work at, in kHz.
+  target_rate: 0.25
+  base_rate: 28608.8064
   # The basis data processing returns 117 features.
-  operational_rate: 0.25
   encoder:
     in_dim: 117
 
@@ -61,23 +63,23 @@ callbacks:
   log_data_mlflow: null
   anomaly_eff:
     _target_: src.callbacks.efficiency.AnomalyEfficiencyCallback
-    metric_name: 'loss/mse/full'
+    output_name: 'ascore/full'
     target_rates: [0.25]
     bc_rate: 28608.8064
     beta: 0.9
 
   thres_drift:
     _target_: src.callbacks.thres_drift.ThresholdDriftCallback
-    output_name: 'loss/mse/full'
+    output_name: 'ascore/full'
     target_rates: [0.25, 286.0]
-    bc_rate: 28608.8064
+    base_rate: 28608.8064
     calibration_fraction: 0.5
     split_seed: 12345
     beta: 0.9
 
   wasserstein_dist:
     _target_: src.callbacks.wasserstein.WassersteinCallback
-    metric_name: 'loss/mse/full'
+    output_name: 'ascore/full'
     dataset_1: normal
     dataset_2: SingleNeutrino_E-10-gun
     apply_log1p: true
@@ -85,7 +87,7 @@ callbacks:
 
   cap_sn_zb:
     _target_: src.callbacks.cap.CAPCallback
-    metric_name: 'loss/mse/full'
+    output_name: 'ascore/full'
     dataset_1: normal
     dataset_2: SingleNeutrino_E-10-gun
     pairing_type: cdf
@@ -106,22 +108,10 @@ callbacks:
       process_group: null
       dist_sync_fn: null
 
-  stable_mse_mean_top_ckpt:
+  stable_ascore_operational_ckpt:
     _target_: src.callbacks.model_checkpoint.SingleDatasetModelCheckpoint
     dirpath: '${paths.checkpoints_dir}/${experiment_name}/${run_name}'
-    monitor: loss_mse_mean_top_vals
-    criterion:
-      _target_: src.callbacks.checkpointing.criterion.Stable
-      top_k: 1
-      threshold: 0.05
-      patience: 10
-    ds:
-      - normal
-
-  stable_mse_q99_ckpt:
-    _target_: src.callbacks.model_checkpoint.SingleDatasetModelCheckpoint
-    dirpath: '${paths.checkpoints_dir}/${experiment_name}/${run_name}'
-    monitor: loss_mse_q99
+    monitor: ascore_operational
     criterion:
       _target_: src.callbacks.checkpointing.criterion.Stable
       top_k: 1
@@ -132,22 +122,9 @@ callbacks:
 
   thres_drift_ema_ckpt:
     _target_: pytorch_lightning.callbacks.ModelCheckpoint
-    dirpath: '${paths.checkpoints_dir}/${experiment_name}/${run_name}/summary/trate0_25kHz_drift_ema/min'
+    dirpath: '${paths.checkpoints_dir}/${experiment_name}/${run_name}/summary/operational_drift_ema/min'
     monitor: 'val/summary/trate0_25kHz_drift_ema'
     filename: 'trate0_25kHz_drift_ema'
-    save_last: false
-    save_top_k: 1
-    mode: "min"
-    auto_insert_metric_name: False
-    save_weights_only: False
-    every_n_epochs: 1
-    save_on_train_epoch_end: false
-
-  thres_drift_q99_ema_ckpt:
-    _target_: pytorch_lightning.callbacks.ModelCheckpoint
-    dirpath: '${paths.checkpoints_dir}/${experiment_name}/${run_name}/summary/trate286_0kHz_drift_ema/min'
-    monitor: 'val/summary/trate286_0kHz_drift_ema'
-    filename: 'trate286_0kHz_drift_ema'
     save_last: false
     save_top_k: 1
     mode: "min"
@@ -187,19 +164,17 @@ evaluator:
   ckpts:
     last: true
     summary:
-      trate0_25kHz_drift_ema: ['min']
-      trate286_0kHz_drift_ema: ['min']
+      operational_drift_ema: ['min']
       w1dist_ema_normal_vs_SingleNeutrino_E-10-gun: ['min']
       cap_ema_normal_vs_SingleNeutrino_E-10-gun: ['max']
     single:
-      loss_mse_mean_top_vals: ['stable']
-      loss_mse_q99: ['stable']
+      ascore_operational: ['stable']
 
 
 evaluator_callbacks:
   anomaly_efficiency:
     _target_: src.evaluation.callbacks.efficiency.AnomalyEfficiencyCallback
-    metric_name: 'loss/mse/full'
+    output_name: 'ascore/full'
     target_rates: [0.25]
     bc_rate: 28608.8064
     ds:
@@ -228,7 +203,7 @@ evaluator_callbacks:
 
   cap_sn_zb:
     _target_: src.evaluation.callbacks.cap.CAP
-    metric_name: 'loss/mse/full'
+    output_name: 'ascore/full'
     dataset_1: normal
     dataset_2: SingleNeutrino_E-10-gun
     log_raw_mlflow: false
@@ -250,38 +225,10 @@ evaluator_callbacks:
       process_group: null
       dist_sync_fn: null
 
-  mse_operational_mean:
+  ascore_operational:
     _target_: src.evaluation.callbacks.output.OutputCallback
-    name: mse_mean_top_vals
-    output_name: 'loss/mse/mean_top_vals'
-    ds:
-      - normal
-      - GluGluHTo2B_Par-MH-125
-      - GluGluHto2G_Par-MH-125
-      - GluGluHto2G_Par-MH-90
-      - GluGluHto2Tau_Par-MH-125
-      - GluGlutoHHto2B2WtoLNu2Q_Par-c2-0-kl-1-kt-1
-      - HHHto4B2Tau_Par-c3-0-d4-0
-      - HHHto6B_Par-c3-0-d4-0
-      - SUSYGluGluToBBHTo2B_Par-M-1200
-      - SUSYGluGluToBBHToBB_Par-M-120
-      - SUSYGluGluToBBHToBB_Par-M-350
-      - SUSYGluGluToBBHToBB_Par-M-600
-      - TTHTo2C_Par-MH-125
-      - TTHto2B_Par-MH-125
-      - VBFHTo2C_Par-MH-125
-      - VBFHto2B_Par-MH-125
-      - VBFHto2Tau_Par-MH-125
-      - WtoTauto3Mu
-      - ggH-suep-decay
-      - smj-case-A
-      - haa-4b-ma15
-    log_raw_mlflow: false
-
-  mse_loss_q99:
-    _target_: src.evaluation.callbacks.output.OutputCallback
-    name: mse_q99
-    output_name: 'loss/mse/q99'
+    name: ascore_operational
+    output_name: 'ascore/operational'
     ds:
       - normal
       - GluGluHTo2B_Par-MH-125
@@ -308,7 +255,7 @@ evaluator_callbacks:
 
   thres_drift:
     _target_: src.evaluation.callbacks.thres_drift.ThresholdDriftCallback
-    output_name: 'loss/mse/full'
+    output_name: 'ascore/full'
     target_rates: [0.25, 286.0]
     bc_rate: 28608.8064
     calibration_fraction: 0.5
@@ -318,7 +265,7 @@ evaluator_callbacks:
 
   wasserstein:
     _target_: src.evaluation.callbacks.wasserstein.Wasserstein
-    metric_name: 'loss/mse/full'
+    output_name: 'ascore/full'
     dataset_1: normal
     dataset_2: SingleNeutrino_E-10-gun
     apply_log1p: true

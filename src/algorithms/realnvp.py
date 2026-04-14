@@ -1,15 +1,13 @@
-from typing import Optional, Tuple, Dict
+from typing import Optional
 
 import torch
 from torch import nn
 
-from src.algorithms import L1ADLightningModule
-from src.utils import pylogger
-
-log = pylogger.RankedLogger(__name__)
+from src.algorithms import ADLightningModule
+from src.data.utils import unpack_batch
 
 
-class RealNVP(L1ADLightningModule):
+class RealNVP(ADLightningModule):
     """RealNVP on flattened input data.
 
     The anomaly score is the negative log-likelihood (NLL) under the flow.
@@ -17,8 +15,9 @@ class RealNVP(L1ADLightningModule):
     :param flow: RealNVP module operating on flattened inputs.
     :param features: Optional feature module applied before the flow.
     :param ckpt: Optional checkpoint path for restarting training.
-    :param operational_rate: Float operational trigger rate.
-    :param bc_rate: Float bunch crossing rate used to derive the operational quantile.
+    :param target_rate: Target background rate or FPR.
+    :param base_rate: Base rate used to convert target_rate into an FPR. If None,
+        target_rate is interpreted directly as an FPR.
     """
 
     def __init__(
@@ -26,24 +25,19 @@ class RealNVP(L1ADLightningModule):
         flow: nn.Module,
         features: Optional[nn.Module] = None,
         ckpt: str = "",
-        operational_rate: float = 0.25,
-        bc_rate: float = 28608.8064,
+        target_rate: float = 0.25,
+        base_rate: float | None = None,
         **kwargs,
     ):
         super().__init__(model=None, **kwargs)
-
-        # Save non-heavy hyperparameters. Avoid serializing full modules here.
         self.save_hyperparameters(
-            ignore=["model", "features", "flow", "loss"]
+            ignore=["model", "features", "flow"]
         )
 
         self.flow = flow
-
         self.features = features if features is not None else nn.Identity()
         self.features.eval()
-
         self.ckpt_path = ckpt
-        self.operational_quantile = 1 - operational_rate / bc_rate
 
     def on_fit_start(self):
         """Move features to device and optionally load checkpoint."""
@@ -52,65 +46,67 @@ class RealNVP(L1ADLightningModule):
         if self.ckpt_path:
             self._load_checkpoint()
 
+    @property
+    def target_fpr(self) -> float:
+        return self.compute_target_fpr()
+
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         """Run the flow and return the log-probability of the input."""
-        log_prob = self.flow.log_prob(x)
-        return log_prob
-
-    def model_step(self, batch: Tuple[torch.Tensor]) -> Dict[str, torch.Tensor]:
-        """Shared train/val/test step.
-
-        The input is flattened, optionally transformed by a feature module,
-        and then scored by the flow.
-        """
-        x, _, _, _ = batch
-
-        x = torch.flatten(x, start_dim=1)
         x = self.features(x)
+        return self.flow.log_prob(x)
 
-        # Flow anomaly score: negative log-likelihood.
+    def model_step(self, batch: torch.Tensor) -> dict[str, torch.Tensor]:
+        """Shared train/val/test step."""
+        b = unpack_batch(batch)
+        x = torch.flatten(b.x, start_dim=1)
+
         log_prob = self.forward(x)
-        nll = -log_prob
+        ascore = -log_prob
+
+        if ascore.ndim != 1:
+            raise ValueError(
+                f"Expected per-event ascores, got {tuple(ascore.shape)}."
+            )
 
         with torch.no_grad():
-            # Number of per-sample NLL values in the batch.
-            n = nll.numel()
+            n = ascore.numel()
+            k = max(1, int(self.target_fpr * n))
 
-            # Number of extreme-tail samples used for the operational proxy.
-            k = max(10, int((1.0 - self.operational_quantile) * n))
+            if k < 10:
+                k_eff = min(max(10, k), n)
+                operational_ascore = torch.topk(ascore, k_eff).values.mean().item()
+            else:
+                operational_ascore = torch.quantile(
+                    ascore, 1.0 - self.target_fpr
+                ).item()
 
-            topk_vals = torch.topk(nll, k).values
-            mean_top_vals = topk_vals.mean().item()
-
-            nll_q50, nll_q95, nll_q99, nll_q999 = torch.quantile(
-                nll,
-                torch.tensor([0.5, 0.95, 0.99, 0.999], device=nll.device),
+            q50, q99 = torch.quantile(
+                ascore, torch.tensor([0.5, 0.99], device=ascore.device)
             ).tolist()
+
+        loss_mean = ascore.mean()
 
         return {
             # Used for backpropagation:
-            "loss": nll.mean(),
+            "loss": loss_mean,
             # Used for logging:
-            "loss/nll/mean": nll.mean(),
-            "loss/nll/median": nll_q50,
-            "loss/nll/q95": nll_q95,
-            "loss/nll/q99": nll_q99,
-            "loss/nll/q999": nll_q999,
-            "loss/nll/mean_top_vals": mean_top_vals,
+            "loss/mean": loss_mean,
+            "ascore/operational": operational_ascore,
+            "ascore/q50": q50,
+            "ascore/q99": q99,
             # Used for callbacks:
-            "loss/nll/full": nll.detach(),
+            "loss/full": ascore.detach(),
+            "ascore/full": ascore.detach(),
         }
 
     def outlog(self, outdict: dict) -> dict:
         """Values logged in the standard training loop."""
         return {
             "loss": outdict.get("loss"),
-            "loss_nll": outdict.get("loss/nll/mean"),
-            "loss_nll_median": outdict.get("loss/nll/median"),
-            "loss_nll_q95": outdict.get("loss/nll/q95"),
-            "loss_nll_q99": outdict.get("loss/nll/q99"),
-            "loss_nll_q999": outdict.get("loss/nll/q999"),
-            "loss_nll_mean_top_vals": outdict.get("loss/nll/mean_top_vals"),
+            "loss_mean": outdict.get("loss/mean"),
+            "ascore_operational": outdict.get("ascore/operational"),
+            "ascore_q50": outdict.get("ascore/q50"),
+            "ascore_q99": outdict.get("ascore/q99"),
         }
 
     def _load_checkpoint(self):

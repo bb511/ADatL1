@@ -11,7 +11,7 @@ from pytorch_lightning import Trainer
 from src.evaluation.callbacks.metrics.rate import AnomalyRate
 from src.evaluation.callbacks import utils
 from src.plot import horizontal_bar
-from src.callbacks.utils.data import unpack_batch
+from src.data.utils import unpack_batch
 
 from src.utils import pylogger
 

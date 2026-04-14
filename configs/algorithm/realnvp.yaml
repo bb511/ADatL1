@@ -5,8 +5,8 @@ _target_: src.algorithms.realnvp.RealNVP
 features: null
 ckpt: ''
 
-operational_rate: 0.25 # nominal rate
-bc_rate: 28608.8064 # bunch crossing rate in kHz
+target_rate: 0.25 # nominal rate
+base_rate: 28608.8064 # bunch crossing rate in kHz
 
 flow:
   _target_: src.algorithms.components.flow.RealNVP

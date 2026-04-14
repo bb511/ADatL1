@@ -1,10 +1,10 @@
 from typing import Literal
 import torch
 
-from src.algorithms.losses.components import L1ADLoss
+from src.algorithms.losses.components import ADLoss
 
 
-class SVDDLoss(L1ADLoss):
+class SVDDLoss(ADLoss):
     """Loss function for Deep SVDD.
 
     :param scale: Global scaling factor applied to the loss.

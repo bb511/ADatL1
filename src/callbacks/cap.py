@@ -19,7 +19,7 @@ class CAPCallback(Callback):
 
     This is appropriate as a validation-side proxy objective for HPO.
 
-    :param loss_name: Key in outputs dict containing per-event anomaly scores / losses.
+    :param output_name: Key in outputs dict containing per-event anomaly scores / losses.
     :param dataset_1: Name of the first validation dataloader.
     :param dataset_2: Name of the second validation dataloader.
     :param pairing_type: Pairing scheme name passed to get_pairing_fn.
@@ -30,7 +30,7 @@ class CAPCallback(Callback):
 
     def __init__(
         self,
-        metric_name: str,
+        output_name: str,
         dataset_1: str,
         dataset_2: str,
         pairing_type: str,
@@ -39,7 +39,7 @@ class CAPCallback(Callback):
     ):
         super().__init__()
         self.device = None
-        self.metric_name = metric_name
+        self.output_name = output_name
         self.dataset_1_name = dataset_1
         self.dataset_2_name = dataset_2
         self.cap_metric_config = cap_metric_config
@@ -91,9 +91,9 @@ class CAPCallback(Callback):
         if dset_name not in (self.dataset_1_name, self.dataset_2_name):
             return
 
-        loss = outputs[self.metric_name]
+        loss = outputs[self.output_name]
         if loss.ndim == 0:
-            raise ValueError(f"outputs['{self.metric_name}'] is scalar. Need a tensor.")
+            raise ValueError(f"outputs['{self.output_name}'] is scalar. Need a tensor.")
 
         loss = loss.detach().view(-1)
 

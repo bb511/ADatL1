@@ -10,60 +10,32 @@ from pytorch_lightning.core.optimizer import LightningOptimizer
 from pytorch_lightning.utilities.memory import garbage_collection_cuda
 
 
-class L1ADLightningModule(LightningModule):
+class ADLightningModule(LightningModule):
     """Base class for AD@L1 LightningModules."""
 
     def __init__(
         self,
         model: nn.Module = None,
-        loss: nn.Module = None,
         optimizer: optim.Optimizer = None,
         scheduler: Optional[DictConfig] = None,
-        masking: Optional[nn.Module] = None,
         save_hyperparameters: bool = False,
     ):
         super().__init__()
         self.save_hyperparameters(ignore=["model", "loss"])
 
-        self.loss = loss
         self.model = model
-        self.masking = masking if masking is not None else nn.Identity()
-
         self._log_sum = {}
         self._log_nsteps = {}
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         """Override with the forward pass."""
-        return self.model(self.masking(x))
+        return self.model(x)
 
-    def model_step(self, batch: tuple[torch.Tensor]) -> dict[str, torch.Tensor]:
-        """Template model step during training. Override for each model."""
-        x, y = batch
-        z = self.forward(x)
-        loss = self.loss(z=z, y=y)
-
-        del z, x, y
-
-        return {"loss": loss}
-
-    def _log_dict(self, outdict: dict, dataloader_idx: int):
-        """Compile the dictionary with loss/metric values to log during training."""
-        outdict = self.outlog(outdict)
-        if dataloader_idx not in self._log_sum:
-            self._log_sum[dataloader_idx] = {}
-            self._log_nsteps[dataloader_idx] = 0
-
-        for mname, mvalue in outdict.items():
-            if isinstance(mvalue, (int, float)):
-                self._log_sum[dataloader_idx][mname] = self._log_sum[
-                    dataloader_idx
-                ].get(mname, 0.0) + float(mvalue)
-            elif torch.is_tensor(mvalue) and mvalue.ndim == 0:
-                self._log_sum[dataloader_idx][mname] = self._log_sum[
-                    dataloader_idx
-                ].get(mname, 0.0) + float(mvalue.detach())
-
-        self._log_nsteps[dataloader_idx] += 1
+    def model_step(self, batch) -> dict[str, torch.Tensor]:
+        """Run one model step. Must be implemented by subclasses."""
+        raise NotImplementedError(
+            f"{self.__class__.__name__} must implement `model_step`."
+        )
 
     def training_step(self, batch: torch.Tensor, batch_idx: int):
         outdict = self.model_step(batch)
@@ -80,29 +52,6 @@ class L1ADLightningModule(LightningModule):
     def test_step(self, batch: torch.Tensor, batch_idx: int, dataloader_idx: int = 0):
         outdict = self.model_step(batch)
         return outdict
-
-    def _log_on_epoch_end(self, stage: str, dataloader_idx: int = 0):
-        nsteps = max(self._log_nsteps[dataloader_idx], 1)
-        logs = self._log_sum[dataloader_idx]
-        if stage == "train":
-            logs = {f"train/{k}": v / nsteps for k, v in logs.items()}
-        else:
-            datasets = list(getattr(self.trainer, f"{stage}_dataloaders").keys())
-            dataset_name = datasets[dataloader_idx]
-            logs = {f"{stage}/{dataset_name}/{k}": v / nsteps for k, v in logs.items()}
-
-        self.log_dict(
-            logs,
-            on_step=False,
-            on_epoch=True,
-            logger=True,
-            prog_bar=False,
-            sync_dist=False,  # set True only for a few key metrics if needed
-            add_dataloader_idx=False,
-        )
-
-        self._log_sum[dataloader_idx] = {}
-        self._log_nsteps[dataloader_idx] = 0
 
     def on_train_batch_end(self, outputs, batch, batch_idx):
         """Log metrics and clean up memory.
@@ -138,6 +87,7 @@ class L1ADLightningModule(LightningModule):
         return outdict
 
     def configure_optimizers(self) -> dict:
+        """Configure the optimiser that goes with the pl_module."""
         optimizer = LightningOptimizer(self.hparams.optimizer(params=self.parameters()))
 
         if self.hparams.scheduler:
@@ -146,7 +96,51 @@ class L1ADLightningModule(LightningModule):
 
         return {"optimizer": optimizer}
 
+    def _log_dict(self, outdict: dict, dataloader_idx: int):
+        """Compile the dictionary with loss/metric values to log during training."""
+        outdict = self.outlog(outdict)
+        if dataloader_idx not in self._log_sum:
+            self._log_sum[dataloader_idx] = {}
+            self._log_nsteps[dataloader_idx] = 0
+
+        for mname, mvalue in outdict.items():
+            if isinstance(mvalue, (int, float)):
+                self._log_sum[dataloader_idx][mname] = self._log_sum[
+                    dataloader_idx
+                ].get(mname, 0.0) + float(mvalue)
+            elif torch.is_tensor(mvalue) and mvalue.ndim == 0:
+                self._log_sum[dataloader_idx][mname] = self._log_sum[
+                    dataloader_idx
+                ].get(mname, 0.0) + float(mvalue.detach())
+
+        self._log_nsteps[dataloader_idx] += 1
+
+    def _log_on_epoch_end(self, stage: str, dataloader_idx: int = 0):
+        """Log metrics at the end of the epoch instead of every step (default)."""
+        nsteps = max(self._log_nsteps[dataloader_idx], 1)
+        logs = self._log_sum[dataloader_idx]
+        if stage == "train":
+            logs = {f"train/{k}": v / nsteps for k, v in logs.items()}
+        else:
+            datasets = list(getattr(self.trainer, f"{stage}_dataloaders").keys())
+            dataset_name = datasets[dataloader_idx]
+            logs = {f"{stage}/{dataset_name}/{k}": v / nsteps for k, v in logs.items()}
+
+        self.log_dict(
+            logs,
+            on_step=False,
+            on_epoch=True,
+            logger=True,
+            prog_bar=False,
+            sync_dist=False,  # set True only for a few key metrics if needed
+            add_dataloader_idx=False,
+        )
+
+        self._log_sum[dataloader_idx] = {}
+        self._log_nsteps[dataloader_idx] = 0
+
     def _set_up_scheduler(self, optimizer: optim.Optimizer) -> dict:
+        """Configure a scheduler for the optimiser, that can be used for lr etc..."""
         scheduler_fn = self.hparams.scheduler.scheduler
         param_names = inspect.signature(scheduler_fn).parameters
         kwargs = {}
@@ -160,3 +154,36 @@ class L1ADLightningModule(LightningModule):
         scheduler_dict.update({"scheduler": scheduler})
 
         return scheduler_dict
+
+    def compute_target_fpr(self) -> float:
+        """Compute the target false positive rate (FPR).
+
+        Uses `self.hparams.target_rate` and `self.hparams.base_rate`.
+
+        If `base_rate` is provided, interpret `target_rate` as a physical rate
+        and convert it to a probability. Otherwise, interpret `target_rate`
+        directly as an FPR.
+
+        Returns:
+            fpr: Target false positive rate in (0, 1).
+        """
+        target_rate = getattr(self.hparams, "target_rate", None)
+        base_rate = getattr(self.hparams, "base_rate", None)
+
+        if target_rate is None:
+            raise ValueError("target_rate must be defined in hparams.")
+
+        if base_rate is None:
+            fpr = float(target_rate)
+        else:
+            if base_rate <= 0:
+                raise ValueError("base_rate must be positive.")
+            fpr = float(target_rate) / float(base_rate)
+
+        if not (0.0 < fpr < 1.0):
+            raise ValueError(f"Computed FPR must be in (0,1), got {fpr}")
+
+        return fpr
+
+    def compute_threshold_quantile(self) -> float:
+        return 1.0 - self.compute_target_fpr()

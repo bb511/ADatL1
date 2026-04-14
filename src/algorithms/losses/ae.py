@@ -7,9 +7,8 @@ from src.algorithms.losses.components.reconstruction import MSEReconstructionLos
 from src.algorithms.losses.components.reconstruction import HuberReconstructionLoss
 
 
-class ClassicAELoss(L1ADLoss):
+class ClassicAELoss(ADLoss):
     """The classic AE loss, i.e., reconstruction loss between input and output."""
-
     def __init__(self, reduction: str = "none"):
         super().__init__(scale=None, reduction=reduction)
         self.reconstruction_loss = MSEReconstructionLoss(reduction=reduction)
@@ -17,8 +16,8 @@ class ClassicAELoss(L1ADLoss):
     def forward(
         self,
         target: torch.Tensor,
-        mask: torch.Tensor | None,
         reco: torch.Tensor,
+        mask: torch.Tensor | None,
     ) -> torch.Tensor:
         # Get the reconstruction loss with the corersponding reduction applied.
         reco_loss = self.reconstruction_loss(target, reco, mask)
@@ -26,9 +25,8 @@ class ClassicAELoss(L1ADLoss):
         return reco_loss
 
 
-class HuberAELoss(L1ADLoss):
+class HuberAELoss(ADLoss):
     """The classic AE loss, i.e., reconstruction loss between input and output."""
-
     def __init__(self, delta: float = 1.0, reduction: str = "none"):
         super().__init__(scale=None, reduction=reduction)
         self.reco_loss = HuberReconstructionLoss(reduction=reduction, delta=delta)
@@ -36,8 +34,8 @@ class HuberAELoss(L1ADLoss):
     def forward(
         self,
         target: torch.Tensor,
-        mask: torch.Tensor | None,
         reco: torch.Tensor,
+        mask: torch.Tensor | None,
     ) -> torch.Tensor:
         # Get the reconstruction loss with the corersponding reduction applied.
         reco_loss = self.reco_loss(target, reco, mask)

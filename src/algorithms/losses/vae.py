@@ -1,18 +1,13 @@
 # Variational AE loss function.
 import torch
 
-from src.algorithms.losses.components import L1ADLoss
+from src.algorithms.losses.components import ADLoss
 from src.algorithms.losses.components.reconstruction import MSEReconstructionLoss
 from src.algorithms.losses.components.reconstruction import CylPtPzReconstructionLoss
 from src.algorithms.losses.components.kl import KLDivergenceLoss
 
-from src.utils import pylogger
-from colorama import Fore, Back, Style
 
-log = pylogger.RankedLogger(__name__)
-
-
-class ClassicVAELoss(L1ADLoss):
+class ClassicVAELoss(ADLoss):
     """The conventional variational AE loss.
 
         L = MSE + scale*KL_div
@@ -20,35 +15,35 @@ class ClassicVAELoss(L1ADLoss):
     :param scale: Float to scale the total loss with.
     :param kl_scale: Float to scale the kl_scale with. IF kl_scale is set dynamically
         then this parameter is the final kl_scale that should be reached.
-    :param reduct: String denoting the type of reduction used on the loss function. The
-        separate loss functions return loss values per event. This is then aggregated
-        by computing the mean over the batch, or the sum.
+    :param reduciont: String denoting the type of reduction used on the loss function.
+        The separate loss functions return loss values per event. This is then
+        aggregated by computing the mean over the batch, or the sum.
     """
 
     def __init__(
         self,
-        scale: float = 1,
-        reco_scale: float = 1,
-        kl_scale: float = 1,
-        reduct: str = "none",
+        scale: float = 1.0,
+        reco_scale: float = 1.0,
+        kl_scale: float = 1.0,
+        reduction: str = "none",
     ):
-        super().__init__(scale=scale, reduction=reduct)
+        super().__init__(scale=scale, reduction=reduction)
         self.kl_scale_final = float(kl_scale)
-        self.reco_loss = MSEReconstructionLoss(scale=reco_scale, reduction=reduct)
-        self.kl_loss = KLDivergenceLoss(scale=self.kl_scale_final, reduction=reduct)
+        self.reco_loss = MSEReconstructionLoss(scale=reco_scale, reduction=reduction)
+        self.kl_loss = KLDivergenceLoss(scale=self.kl_scale_final, reduction=reduction)
 
     def forward(
         self,
         target: torch.Tensor,
-        mask: torch.Tensor | None,
         reconstruction: torch.Tensor,
+        mask: torch.Tensor | None,
         z_mean: torch.Tensor,
         z_log_var: torch.Tensor,
         kl_scale: float | None = None,
-    ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+    ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
         # The kl_scale argument allows for dynamically setting the kl_scale during
         # the training of the VAE.
-        if not kl_scale is None:
+        if kl_scale is not None:
             self.kl_loss.set_scale(float(kl_scale))
 
         reco_loss = self.reco_loss(target, reconstruction, mask)
@@ -63,10 +58,10 @@ class AxoV4Loss(ClassicVAELoss):
 
     def __init__(
         self,
-        scale: float = 1,
-        reco_scale: float = 1,
-        kl_scale: float = 1,
-        reduct: str = "none",
+        scale: float = 1.0,
+        reco_scale: float = 1.0,
+        kl_scale: float = 1.0,
+        reduction: str = "none",
     ):
-        super().__init__(scale=scale, kl_scale=kl_scale, reduct=reduct)
-        self.reco_loss = CylPtPzReconstructionLoss(scale=reco_scale, reduction=reduct)
+        super().__init__(scale=scale, kl_scale=kl_scale, reduction=reduction)
+        self.reco_loss = CylPtPzReconstructionLoss(scale=reco_scale, reduction=reduciton)

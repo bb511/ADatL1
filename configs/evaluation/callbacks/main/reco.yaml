@@ -1,8 +1,8 @@
 # @package evaluation.callbacks.main
 
 _target_: src.evaluation.callbacks.reco.ReconstructionPlots
-warmup_batches: 0.2
 output_name: reconstructed_data
+warmup_batches: 0.2
 datamodule: true
 ckpts:
   last: true

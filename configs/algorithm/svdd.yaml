@@ -6,8 +6,8 @@ _target_: src.algorithms.svdd.DeepSVDD
 features: null
 ckpt: ''
 
-operational_rate: 0.25 # nominal rate
-bc_rate: 28608.8064 # bunch crossing rate in kHz
+target_rate: 0.25 # nominal rate
+base_rate: 28608.8064 # bunch crossing rate in kHz
 
 encoder:
   _target_: src.algorithms.components.encoder.Encoder
@@ -17,10 +17,6 @@ encoder:
 
 center_init_method: mean
 
-loss:
-  _target_: src.algorithms.losses.svdd.SVDDLoss
-  scale: 1.0
-  nu: 0.1
-  weight_decay: 1e-6
-  soft_boundary: false
-  reduction: none
+nu: 0.1
+weight_decay: 1e-6
+soft_boundary: False

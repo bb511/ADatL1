@@ -17,18 +17,17 @@ class Wasserstein(Callback):
     it does not use pairing and compares the marginal score distributions
     directly.
 
-    Args:
-        metric_name: Name of the model output metric used as anomaly score.
-        dataset_1: Name of the first dataset.
-        dataset_2: Name of the second dataset.
-        apply_log1p: Whether to apply log1p transform before distance computation.
-        log_raw_mlflow: Whether to log raw plots to mlflow.
-        name: Callback name.
+    :param output_name: Name of the model output metric used as anomaly score.
+    :param dataset_1: Name of the first dataset.
+    :param dataset_2: Name of the second dataset.
+    :param apply_log1p: Whether to apply log1p transform before distance computation.
+    :param log_raw_mlflow: Whether to log raw plots to mlflow.
+    :param name: Callback name.
     """
 
     def __init__(
         self,
-        metric_name: str,
+        output_name: str,
         dataset_1: str,
         dataset_2: str,
         apply_log1p: bool = True,
@@ -36,7 +35,7 @@ class Wasserstein(Callback):
         name: str = "wasserstein",
     ):
         super().__init__()
-        self.metric_name = metric_name
+        self.output_name = output_name
         self.dataset_1_name = dataset_1
         self.dataset_2_name = dataset_2
         self.apply_log1p = apply_log1p
@@ -56,9 +55,9 @@ class Wasserstein(Callback):
         """Cache scores for the designated datasets."""
         dataset_name = list(trainer.test_dataloaders.keys())[dataloader_idx]
         if dataset_name == self.dataset_1_name:
-            self.dataset_1_scores.append(outputs[self.metric_name])
+            self.dataset_1_scores.append(outputs[self.output_name])
         if dataset_name == self.dataset_2_name:
-            self.dataset_2_scores.append(outputs[self.metric_name])
+            self.dataset_2_scores.append(outputs[self.output_name])
 
     def _compute_wasserstein(self) -> float:
         """Compute the 1D Wasserstein distance between the two datasets."""

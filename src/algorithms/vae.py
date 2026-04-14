@@ -1,33 +1,33 @@
 # Variational auto-encoder model implementation.
-from typing import Optional, Tuple, Dict
+from typing import Optional
 
-import numpy as np
 import torch
 from torch import nn
 
-from src.algorithms import L1ADLightningModule
+from src.algorithms import ADLightningModule
+from src.algorithms.losses.vae import ClassicVAELoss
 from src.algorithms.schedulers.linear import LinearWarmup
 from src.algorithms.utils.weight_loader import load_weights
 from src.algorithms.utils.object_feature_map_loader import inject_object_feature_map
 from src.algorithms.components.encoder import VariationalEncoder
 from src.algorithms.components.decoder import Decoder
+from src.data.utils import unpack_batch
 from src.utils import pylogger
 
 log = pylogger.RankedLogger(__name__)
 
 
-class VAE(L1ADLightningModule):
-    """Variational autoencoder architecture.
+class VAE(ADLightningModule):
+    """Variational autoencoder module.
 
     :param encoder: The encoder nn module.
     :param decoder: The decoder nn module.
-    :param kl_warmup_frac: Float specifying the fraction of the total epochs to warmp
-        up the KL scaling factor over.
-    :param features: An nn module to apply to the data and give a space for the vae
-        to act on, e.g., vicreg.
-    :param mask: Boolean determining whether one should mask input features, i.e., mask
-        where the padded values are in the mse loss.
-    :param ckpt: String with path to checkpoint to restart the training from.
+    :param kl_warmup_frac: Fraction of total steps used to warm up the KL scale.
+    :param features: Optional nn module applied to the flattened input.
+    :param ckpt: Optional checkpoint path to resume weights from.
+    :param target_rate: Target background rate or FPR.
+    :param base_rate: Base rate used to convert target_rate into an FPR.
+        If None, target_rate is interpreted directly as an FPR.
     """
 
     def __init__(
@@ -36,130 +36,157 @@ class VAE(L1ADLightningModule):
         decoder: nn.Module,
         kl_warmup_frac: float = 0.0,
         features: Optional[nn.Module] = None,
-        mask: bool = True,
         ckpt: str = "",
-        operational_rate: float = 0.25,
-        bc_rate: float = 28608.8064,
+        target_rate: float = 0.25,
+        base_rate: float | None = None,
         **kwargs,
     ):
         super().__init__(model=None, **kwargs)
         self.save_hyperparameters(
-            ignore=["model", "features", "encoder", "decoder", "loss"]
+            ignore=["model", "features", "encoder", "decoder"]
         )
+
         self.ckpt_path = ckpt
-        self.mask = mask
-        self.encoder, self.decoder = encoder, decoder
+        self.encoder = encoder
+        self.decoder = decoder
         self.features = features if features is not None else nn.Identity()
         self.features.eval()
         self.kl_warmup_frac = kl_warmup_frac
-        self.operational_quantile = 1 - operational_rate / bc_rate
+
+        self.loss = ClassicVAELoss(reduction="none")
 
     def on_fit_start(self):
         inject_object_feature_map(self)
         self.features.to(self.device)
+
         total_steps = int(self.trainer.estimated_stepping_batches)
         self._setup_kl_annealing(self.kl_warmup_frac, total_steps)
 
-        # Load weights from checkpoint if a checkpoint was provided.
         if self.ckpt_path:
             self._load_checkpoint()
 
     def on_test_start(self):
         inject_object_feature_map(self)
 
+    @property
+    def target_fpr(self) -> float:
+        return self.compute_target_fpr()
+
     def forward(self, x: torch.Tensor) -> tuple[torch.Tensor, ...]:
+        x = self.features(x)
         z_mean, z_log_var, z = self.encoder(x)
         reconstruction = self.decoder(z)
         return z_mean, z_log_var, z, reconstruction
 
-    def model_step(self, batch: Tuple[torch.Tensor]) -> Dict[str, torch.Tensor]:
-        x, m, _, _ = batch
-        x = torch.flatten(x, start_dim=1)
-        m = torch.flatten(m, start_dim=1).float()
-        x = self.features(x)
+    def model_step(self, batch: torch.Tensor) -> dict[str, torch.Tensor]:
+        b = unpack_batch(batch)
+
+        x = torch.flatten(b.x, start_dim=1)
+        m = b.mask
+        if m is not None:
+            m = torch.flatten(m, start_dim=1).float()
+
         z_mean, z_log_var, z, reconstruction = self.forward(x)
 
         kl_current_scale = self.kl_scale(int(self.global_step))
-        reco_loss, kl_raw, kl_scaled, total_loss = self.loss(
+        reco_loss, kl_raw, kl_scaled, loss = self.loss(
             reconstruction=reconstruction,
             z_mean=z_mean,
             z_log_var=z_log_var,
             target=x,
-            mask=m if self.mask else None,
+            mask=m,
             kl_scale=kl_current_scale,
         )
-        del x, z, z_log_var
-        total_loss = self._add_hgq_loss(total_loss)
 
-        # Diagnosis metrics.
+        # The operational anomaly score is hard-configured to the raw KL.
+        ascore = kl_raw
+        if ascore.ndim != 1:
+            raise ValueError(
+                f"Expected per-event ascores, got {tuple(ascore.shape)}."
+            )
+
+        loss = self._add_hgq_loss(loss)
+
         with torch.no_grad():
-            kl_quantiles = torch.tensor([0.5, 0.95, 0.99, 0.999], device=kl_raw.device)
-            kl_q50, kl_q95, kl_q99, kl_q999 = torch.quantile(
-                kl_raw, kl_quantiles
+            n = ascore.numel()
+            k = max(1, int(self.target_fpr * n))
+
+            if k < 10:
+                k_eff = min(max(10, k), n)
+                operational_ascore = torch.topk(ascore, k_eff).values.mean().item()
+            else:
+                operational_ascore = torch.quantile(
+                    ascore, 1.0 - self.target_fpr
+                ).item()
+
+            q50, q99 = torch.quantile(
+                ascore, torch.tensor([0.5, 0.99], device=ascore.device)
             ).tolist()
 
-            # Number of extreme tail samples
-            n = kl_raw.numel()
-            k = max(10, int((1.0 - self.operational_quantile) * n))
-            topk_vals = torch.topk(kl_raw, k).values
-            mean_top_vals = topk_vals.mean().item()
-
             z_mean_squared = torch.square(z_mean).sum(dim=1)
+            z_mean_squared_mean = z_mean_squared.mean().item()
+
+        del x, z, z_log_var
+
+        loss_mean = loss.mean()
+        reco_loss_mean = reco_loss.mean()
+        kl_scaled_mean = kl_scaled.mean()
+        kl_raw_mean = kl_raw.mean()
 
         return {
             # Used for backpropagation:
-            "loss": total_loss.mean(),
+            "loss": loss_mean,
             # Used for logging:
-            "loss/reco/mean": reco_loss.detach().mean(),
-            "loss/kl_scaled/mean": kl_scaled.detach().mean(),
-            "loss/kl_raw/mean": kl_raw.detach().mean(),
-            "loss/kl_raw/median": kl_q50,
-            "loss/kl_raw/q95": kl_q95,
-            "loss/kl_raw/q99": kl_q99,
-            "loss/kl_raw/q999": kl_q999,
+            "loss/mean": loss_mean,
+            "loss/reco/mean": reco_loss_mean,
+            "loss/kl_scaled/mean": kl_scaled_mean,
+            "loss/kl_raw/mean": kl_raw_mean,
+            "ascore/operational": operational_ascore,
+            "ascore/q50": q50,
+            "ascore/q99": q99,
+            "z_mean_squared": z_mean_squared_mean,
             "kl_scale": kl_current_scale,
-            "loss/kl_raw/mean_top_vals": mean_top_vals,
-            "loss/z_mean_squared": z_mean_squared.detach().mean(),
             # Used for callbacks:
-            "loss/total/full": total_loss.detach(),
+            "loss/full": loss.detach(),
             "loss/reco/full": reco_loss.detach(),
             "loss/kl_raw/full": kl_raw.detach(),
-            "loss/z_mean_squared/full": z_mean_squared.detach(),
+            "ascore/full": ascore.detach(),
+            "z_mean_squared/full": z_mean_squared.detach(),
             "reconstructed_data": reconstruction.detach(),
         }
 
     def outlog(self, outdict: dict) -> dict:
-        """Override with the values you want to log."""
         return {
             "loss": outdict.get("loss"),
+            "loss_mean": outdict.get("loss/mean"),
             "loss_reco": outdict.get("loss/reco/mean"),
-            "loss_kl_raw": outdict.get("loss/kl_raw/mean"),
             "loss_kl_scaled": outdict.get("loss/kl_scaled/mean"),
-            "loss_kl_median": outdict.get("loss/kl_raw/median"),
-            "loss_kl_raw_q95": outdict.get("loss/kl_raw/q95"),
-            "loss_kl_raw_q99": outdict.get("loss/kl_raw/q99"),
-            "loss_kl_raw_q999": outdict.get("loss/kl_raw/q999"),
-            "loss_kl_raw_mean_top_vals": outdict.get("loss/kl_raw/mean_top_vals"),
-            "z_mean_squared": outdict.get("loss/z_mean_squared"),
+            "loss_kl_raw": outdict.get("loss/kl_raw/mean"),
+            "ascore_operational": outdict.get("ascore/operational"),
+            "ascore_q50": outdict.get("ascore/q50"),
+            "ascore_q99": outdict.get("ascore/q99"),
+            "z_mean_squared": outdict.get("z_mean_squared"),
             "kl_scale": outdict.get("kl_scale"),
         }
 
     def _setup_kl_annealing(self, kl_warmup_frac: float, total_steps: int):
-        """Sets up the kl annealing if the given loss is compatible with it."""
+        """Set up KL annealing if supported by the loss."""
         if hasattr(self.loss, "kl_scale_final"):
             fin_scale = float(self.loss.kl_scale_final)
         elif kl_warmup_frac > 0:
             log.warn(
-                f"Given kl_warmup_frac > 0 but given loss {type(self.loss).__name__} "
+                f"Given kl_warmup_frac > 0 but loss {type(self.loss).__name__} "
                 "does not have attribute 'kl_scale_final'. "
-                "Annealing of the kl_scale is disabled."
+                "Annealing of the KL scale is disabled."
             )
             fin_scale = 1.0
         else:
-            log.warn(f"kl_warmup_frac={kl_warmup_frac} <= 0. Annealing disabled.")
+            fin_scale = 1.0
 
         self.kl_scale = LinearWarmup(
-            final_value=fin_scale, warmup_frac=kl_warmup_frac, total_steps=total_steps
+            final_value=fin_scale,
+            warmup_frac=kl_warmup_frac,
+            total_steps=total_steps,
         )
 
     def _load_checkpoint(self):
@@ -178,14 +205,15 @@ class VAE(L1ADLightningModule):
         load_weights(enc_mlp, state_dict, "encoder", False)
         load_weights(dec_mlp, state_dict, "decoder", False)
 
-    def _add_hgq_loss(self, total_loss):
+    def _add_hgq_loss(self, loss: torch.Tensor) -> torch.Tensor:
         """Add additional HGQ losses if they exist."""
         add_loss = 0.0
+
         if hasattr(self.encoder, "losses") and len(self.encoder.losses) > 0:
             add_loss = add_loss + torch.stack([l for l in self.encoder.losses]).sum()
+
         if hasattr(self.decoder, "losses") and len(self.decoder.losses) > 0:
             add_loss = add_loss + torch.stack([l for l in self.decoder.losses]).sum()
 
-        total_loss = total_loss + add_loss
+        return loss + add_loss
 
-        return total_loss

@@ -15,33 +15,27 @@ log = pylogger.RankedLogger(__name__)
 
 
 class ThresholdDriftCallback(Callback):
-    """Compute a validation-style split-transfer drift metric from one dataset.
+    """Compute a split-transfer threshold drift metric from the normal dataset.
 
-    This callback collects all scores from the 'normal' dataloader, splits them
-    internally into:
-        - calibration subset
-        - evaluation subset
+    This callback collects anomaly scores from the 'normal' dataloader, splits them
+    internally into calibration and evaluation subsets, and for each target rate:
+        1) computes a threshold on the calibration subset,
+        2) applies that threshold on the evaluation subset,
+        3) measures drift via
 
-    Then, for each target rate:
-        1) compute a threshold on the calibration subset
-        2) apply that threshold on the evaluation subset
-        3) measure drift with:
+            L = log((p_hat + eps) / (FPR + eps)),
+            drift = abs(L),
 
-            L = log((p_hat + eps) / (FPR + eps))
-            drift = abs(L)
+    where p_hat is the empirical exceedance rate on the evaluation subset,
+    FPR is obtained from target_rate and base_rate, and eps = 0.5 / N_eval.
 
-    where:
-        - p_hat is the empirical exceedance rate on the evaluation subset
-        - FPR = target_rate / bc_rate
-        - eps = 0.5 / N_eval
+    The module target rate is always included and is treated as the operational rate.
+    Additional target rates may be passed through the callback config.
 
-    This is appropriate as a validation-side proxy objective for HPO.
-
-    :param output_name: Key in outputs dict containing per-event anomaly scores / losses.
-    :param target_rates: List of target background rates in kHz.
-    :param bc_rate: Bunch crossing rate in kHz.
+    :param output_name: Key in outputs dict containing per-event anomaly scores.
+    :param target_rates: Optional extra target rates to evaluate.
+    :param base_rate: Optional override for the module base rate.
     :param calibration_fraction: Fraction of normal scores used for calibration.
-        The remainder is used for evaluation.
     :param split_seed: Seed used for deterministic random splitting.
     :param log_raw_mlflow: Whether to log raw plots to mlflow.
     :param name: Callback identifier.
@@ -50,8 +44,8 @@ class ThresholdDriftCallback(Callback):
     def __init__(
         self,
         output_name: str,
-        target_rates: list[float],
-        bc_rate: float = 28608.8064,
+        target_rates: list[float] | None = None,
+        base_rate: float | None = None,
         calibration_fraction: float = 0.5,
         split_seed: int = 12345,
         log_raw_mlflow: bool = True,
@@ -60,8 +54,10 @@ class ThresholdDriftCallback(Callback):
         super().__init__()
         self.device = None
         self.output_name = output_name
-        self.target_rates = sorted(float(x) for x in target_rates)
-        self.bc_rate = float(bc_rate)
+        self.target_rates = (
+            None if target_rates is None else sorted(float(x) for x in target_rates)
+        )
+        self.base_rate = base_rate
         self.calibration_fraction = float(calibration_fraction)
         self.split_seed = int(split_seed)
         self.log_raw_mlflow = log_raw_mlflow
@@ -74,6 +70,11 @@ class ThresholdDriftCallback(Callback):
 
     def on_test_epoch_start(self, trainer, pl_module):
         self.device = pl_module.device
+        (
+            self.target_rates_resolved,
+            self.operational_rate,
+            self.base_rate_resolved,
+        ) = self._resolve_rate_config(pl_module)
 
         dset_names = list(trainer.test_dataloaders.keys())
         if "normal" not in dset_names:
@@ -92,12 +93,11 @@ class ThresholdDriftCallback(Callback):
         if dset_name != "normal":
             return
 
-        loss = outputs[self.output_name]
-        if loss.ndim == 0:
+        score = outputs[self.output_name]
+        if score.ndim == 0:
             raise ValueError(f"outputs['{self.output_name}'] is scalar. Need a tensor.")
 
-        loss = loss.detach().view(-1).cpu()
-        self.normal_scores.append(loss)
+        self.normal_scores.append(score.detach().view(-1).cpu())
 
     def on_test_epoch_end(self, trainer, pl_module) -> None:
         """Compute split-transfer drift on normal."""
@@ -124,23 +124,28 @@ class ThresholdDriftCallback(Callback):
 
         eps = 0.5 / float(n_eval)
 
-        for trate in self.target_rates:
-            fpr = float(trate) / float(self.bc_rate)
+        for trate in self.target_rates_resolved:
+            fpr = self._compute_target_fpr(trate)
             thr = self._compute_threshold(cal_scores, exceedance_prob=fpr)
 
             fp = int((eval_scores >= thr).sum().item())
             p_hat = fp / float(n_eval)
 
-            L = math.log((p_hat + eps) / (fpr + eps))
-            drift_metric = abs(L)
+            drift_metric = abs(math.log((p_hat + eps) / (fpr + eps)))
 
-            trate_name = f"{trate} kHz"
+            if self._is_operational(trate):
+                trate_key = "operational"
+                display_name = "operational"
+            else:
+                trate_key = self._target_key(trate)
+                display_name = str(trate)
+
             xlabel = (
-                f"Split-transfer drift at threshold: {trate_name}\n"
+                f"Split-transfer drift at threshold: {display_name}\n"
                 f"log((p̂+ε)/(FPR+ε))"
             )
             self._plot({"normal": drift_metric}, xlabel, plot_folder, percent=False)
-            self._store_summary(drift_metric, ckpt_name, trate)
+            self._store_summary(drift_metric, ckpt_name, trate_key)
 
         utils.mlflow.log_plots_to_mlflow(
             trainer,
@@ -150,6 +155,52 @@ class ThresholdDriftCallback(Callback):
             log_raw=self.log_raw_mlflow,
             gallery_name=f"{self.name}",
         )
+
+    def _resolve_rate_config(
+        self, pl_module
+    ) -> tuple[list[float], float, float | None]:
+        """Resolve target rates and base rate from module + callback config."""
+        module_target = getattr(pl_module.hparams, "target_rate", None)
+        module_base = getattr(pl_module.hparams, "base_rate", None)
+
+        if module_target is None:
+            raise ValueError(
+                "pl_module.hparams.target_rate must be defined for ThresholdDriftCallback."
+            )
+
+        rates = [float(module_target)]
+        if self.target_rates is not None:
+            rates.extend(float(r) for r in self.target_rates)
+
+        seen = set()
+        resolved_rates = []
+        for r in rates:
+            if r not in seen:
+                seen.add(r)
+                resolved_rates.append(r)
+
+        base_rate = self.base_rate if self.base_rate is not None else module_base
+        return resolved_rates, float(module_target), base_rate
+
+    def _compute_target_fpr(self, target_rate: float) -> float:
+        """Convert target rate into an exceedance probability."""
+        if self.base_rate_resolved is None:
+            fpr = float(target_rate)
+        else:
+            if self.base_rate_resolved <= 0:
+                raise ValueError("base_rate must be positive.")
+            fpr = float(target_rate) / float(self.base_rate_resolved)
+
+        if not (0.0 < fpr < 1.0):
+            raise ValueError(f"Computed FPR must be in (0,1), got {fpr}")
+
+        return fpr
+
+    def _is_operational(self, target_rate: float) -> bool:
+        return abs(target_rate - self.operational_rate) < 1e-12
+
+    def _target_key(self, target_rate: float) -> str:
+        return f"trate{str(target_rate).replace('.', '_')}kHz"
 
     def _split_scores(self, scores: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
         """Deterministically split scores into calibration and evaluation subsets."""
@@ -169,10 +220,7 @@ class ThresholdDriftCallback(Callback):
     def _compute_threshold(
         self, scores: torch.Tensor, exceedance_prob: float
     ) -> torch.Tensor:
-        """Compute threshold so that P(score >= threshold) ~= exceedance_prob.
-
-        Uses an empirical order-statistics threshold on the calibration scores.
-        """
+        """Compute threshold so that P(score >= threshold) ~= exceedance_prob."""
         scores = scores.view(-1)
         n = int(scores.numel())
         if n == 0:
@@ -187,7 +235,6 @@ class ThresholdDriftCallback(Callback):
             return scores.min()
 
         sorted_scores, _ = torch.sort(scores)  # ascending
-        # Keep approximately exceedance_prob mass above threshold.
         q = 1.0 - exceedance_prob
         idx = int(math.ceil(q * n) - 1)
         idx = max(0, min(n - 1, idx))
@@ -197,20 +244,30 @@ class ThresholdDriftCallback(Callback):
         ylabel = " "
         horizontal_bar.plot_yright(data, data, xlabel, ylabel, plot_folder, percent)
 
-    def _store_summary(self, drift_metric: float, ckpt_name: str, trate: float):
-        """Store one drift value per checkpoint dataset and target rate."""
+    def _store_summary(self, drift_metric: float, ckpt_name: str, trate_key: str):
+        """Store one drift value per checkpoint dataset and target key."""
         ckpt_ds = utils.misc.get_ckpt_ds_name(ckpt_name)
-        self.transfer_summary[trate][ckpt_ds] = float(drift_metric)
+        self.transfer_summary[trate_key][ckpt_ds] = float(drift_metric)
 
-    def get_optimized_metric(self, target_rate: float):
-        """Return the drift metric for one target rate at one checkpoint dataset."""
-        if not target_rate in list(self.transfer_summary.keys()):
+    def get_optimized_metric(self, target_rate: float | None = None):
+        """Return the drift metric for one target rate at one checkpoint dataset.
+
+        If target_rate is None, the operational target rate is used.
+        """
+        if target_rate is None:
+            trate_key = "operational"
+        elif self._is_operational(target_rate):
+            trate_key = "operational"
+        else:
+            trate_key = self._target_key(target_rate)
+
+        if trate_key not in self.transfer_summary:
             raise ValueError(
-                f"Thres trans callback for metric {self.metric_name} did not calculate "
-                f"eff at target rate {target_rate}. Choose {self.transfer_summary.keys()}."
+                f"Threshold drift callback did not calculate drift for {trate_key}. "
+                f"Choose from {self.transfer_summary.keys()}."
             )
 
-        metric_across_ckpts = self.transfer_summary[target_rate]
+        metric_across_ckpts = self.transfer_summary[trate_key]
         min_ckpt_name = min(metric_across_ckpts, key=metric_across_ckpts.get)
         min_metric_value = metric_across_ckpts[min_ckpt_name]
         return min_ckpt_name, min_metric_value
@@ -222,11 +279,16 @@ class ThresholdDriftCallback(Callback):
         plot_folder.mkdir(parents=True, exist_ok=True)
         self._cache_summary(plot_folder)
 
-        for trate in sorted(self.transfer_summary.keys()):
-            smet = self.transfer_summary[trate]
-            trate_name = f"{trate} kHz"
+        for trate_key in sorted(self.transfer_summary.keys()):
+            smet = self.transfer_summary[trate_key]
+
+            if trate_key == "operational":
+                display_name = "operational"
+            else:
+                display_name = trate_key.replace("trate", "").replace("kHz", "")
+
             xlabel = (
-                f"split-transfer drift at threshold: {trate_name}\n"
+                f"split-transfer drift at threshold: {display_name}\n"
                 f"log((p̂+ε)/(FPR+ε))"
             )
             self._plot(smet, xlabel, plot_folder, percent=False)

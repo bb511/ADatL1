@@ -4,11 +4,10 @@ defaults:
 _target_: src.algorithms.dsae.DeepSetsAE
 features: null
 
-mask: true
 input_noise_std: 0.0001
 
-operational_rate: 0.25 # nominal rate
-bc_rate: 28608.8064 # bunch crossing rate in kHz
+target_rate: 0.25 # nominal rate
+base_rate: 28608.8064 # bunch crossing rate in kHz
 
 encoder:
   _target_: src.algorithms.components.encoder.DeepSetsEncoder
@@ -37,12 +36,3 @@ decoder:
   nodes: ${reverse:${algorithm.encoder.rho_nodes}}
   activation: relu
   out_dim: 117
-
-loss:
-  _target_: src.algorithms.losses.ae.HuberAELoss
-  delta: 3.0
-  reduction: none
-
-mse:
-  _target_: src.algorithms.losses.components.reconstruction.MSEReconstructionLoss
-  reduction: none

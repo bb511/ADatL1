@@ -3,9 +3,8 @@ import torch
 import torch.nn as nn
 
 
-class L1ADLoss(nn.Module):
-    """
-    Base class for all loss functions.
+class ADLoss(nn.Module):
+    """Base class for all loss functions.
 
     :param scale: Scaling factor for the loss.
     :param reduction: Reduction method to apply to the loss.

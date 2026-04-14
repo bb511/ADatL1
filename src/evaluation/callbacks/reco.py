@@ -8,7 +8,7 @@ from pytorch_lightning import LightningDataModule
 
 from src.evaluation.callbacks import utils
 from src.plot import overlaid_hist
-from src.callbacks.utils.data import unpack_batch
+from src.data.utils import unpack_batch
 
 
 class ReconstructionPlots(Callback):

@@ -29,7 +29,7 @@ class CAP(Callback):
 
     This is appropriate as a validation-side proxy objective for HPO.
 
-    :param loss_name: Key in outputs dict containing per-event anomaly scores / losses.
+    :param output_name: Key in outputs dict containing per-event anomaly scores / losses.
     :param dataset_1: Name of the first validation dataloader.
     :param dataset_2: Name of the second validation dataloader.
     :param pairing_type: Pairing scheme name passed to get_pairing_fn.
@@ -45,7 +45,7 @@ class CAP(Callback):
 
     def __init__(
         self,
-        metric_name: str,
+        output_name: str,
         dataset_1: str,
         dataset_2: str,
         pairing_type: str,
@@ -55,7 +55,7 @@ class CAP(Callback):
     ):
         super().__init__()
         self.device = None
-        self.metric_name = metric_name
+        self.output_name = output_name
         self.dataset_1_name = dataset_1
         self.dataset_2_name = dataset_2
         self.cap_metric_config = cap_metric_config
@@ -89,9 +89,9 @@ class CAP(Callback):
         """
         self.dataset_name = list(trainer.test_dataloaders.keys())[dataloader_idx]
         if self.dataset_name == self.dataset_1_name:
-            self.dataset_1_scores.append(outputs[self.metric_name])
+            self.dataset_1_scores.append(outputs[self.output_name])
         if self.dataset_name == self.dataset_2_name:
-            self.dataset_2_scores.append(outputs[self.metric_name])
+            self.dataset_2_scores.append(outputs[self.output_name])
 
     def _compute_cap(self):
         """Compute the cap metric between the two given data sets."""

@@ -4,22 +4,37 @@ from typing import Optional
 import torch
 from torch import nn
 
-import torch.nn.functional as F
-from src.algorithms import L1ADLightningModule
+from src.algorithms import ADLightningModule
+from src.algorithms.losses.ae import HuberAELoss
+from src.algorithms.losses.components.reconstruction import MSEReconstructionLoss
 from src.algorithms.utils.object_feature_map_loader import inject_object_feature_map
+from src.data.utils import unpack_batch
 
 
-class AE(L1ADLightningModule):
+class AE(ADLightningModule):
+    """Autoencoder module.
+
+    :param encoder: PyTorch module of the encoder.
+    :param decoder: PyTorch module of the decoder.
+    :param features: Optional PyTorch module to apply to the data before feeding it
+        to the autoencoder.
+    :param input_noise_std: Float specifying how much noise to add to the feature
+        distributions before feeding them to the AE.
+    :param delta: Float defining how close the loss is to L1 or L2, i.e., how much
+        importance is given to tail examples. Parameter in the HuberLoss.
+    :param target_rate: Float of the target background rate or FPR for the AE.
+    :param base_rate: Float of the base rate, used to compute FPR given a target rate.
+        If this is 'None', then target_rate is taken as the FPR directly.
+    """
     def __init__(
         self,
         encoder: nn.Module,
         decoder: nn.Module,
-        mse: nn.Module,
-        mask: bool = True,
-        features: Optional[nn.Module] = None,
-        input_noise_std: float = 0.0,
-        operational_rate: float = 0.25,
-        bc_rate: float = 28608.8064,
+        input_noise_std: Optional[float] = 0.0,
+        delta: float = 3.0,
+        features: nn.Modul = None,
+        target_rate: float = 0.25,
+        base_rate: float | None = None,
         **kwargs,
     ):
         super().__init__(model=None, **kwargs)
@@ -30,10 +45,9 @@ class AE(L1ADLightningModule):
         self.features.eval()
 
         self.encoder, self.decoder = encoder, decoder
-        self.mse = mse
         self.input_noise_std = input_noise_std
-        self.mask = mask
-        self.operational_quantile = 1 - operational_rate / bc_rate
+        self.loss = HuberAELoss(delta=delta, reduction='none')
+        self.ascore = MSEReconstructionLoss(reduction='none')
 
     def on_fit_start(self):
         inject_object_feature_map(self)
@@ -41,48 +55,61 @@ class AE(L1ADLightningModule):
     def on_test_start(self):
         inject_object_feature_map(self)
 
+    @property
+    def target_fpr(self) -> float:
+        return self.compute_target_fpr()
+
     def forward(self, x: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
+        x = self.features(x)
         z = self.encoder(x)
         reconstruction = self.decoder(z)
         return z, reconstruction
 
     def model_step(self, batch: torch.Tensor) -> torch.Tensor:
-        x, m, _, _ = batch
-        x = torch.flatten(x, start_dim=1)
-        m = torch.flatten(m, start_dim=1).float()
+        b = unpack_batch(batch)
+        x = torch.flatten(b.x, start_dim=1)
+
+        m = b.mask
+        if m is not None:
+            m = torch.flatten(m, start_dim=1).float()
 
         x_noisy = x
         if self.training and self.input_noise_std > 0.0:
             noise = torch.randn_like(x) * self.input_noise_std
-            noise = noise * m
+            if m is not None:
+                noise = noise * m
+
             x_noisy = x + noise
 
         z, reconstruction = self.forward(x_noisy)
-        reco_loss = self.loss(reco=reconstruction, target=x, mask=m)
-        mse = self.mse(x, reconstruction, m)
+        loss = self.loss(reco=reconstruction, target=x, mask=m)
+        # The anomaly score is expected to be a distribution over events.
+        ascore = self.ascore(x, reconstruction, m)
+        if ascore.ndim != 1:
+            raise ValueError(f"Expected per-event ascores, got {tuple(ascore.shape)}.")
+
         del x, z
 
         with torch.no_grad():
-            n = mse.numel()
+            n = ascore.numel()
+            k = max(1, int(self.target_fpr * n))
 
-            # Number of extreme tail samples
-            k = max(10, int((1.0 - self.operational_quantile) * n))
-            topk_vals = torch.topk(mse, k).values
-            mean_top_vals = topk_vals.mean().item()
-
-            # 99th quantile MSE
-            mse_q99 = torch.quantile(mse, 0.99).item()
+            # If the operational tail is too small, use a top-k average for stability.
+            if k < 10:
+                k_eff = min(max(10, k), n)
+                operational_ascore = torch.topk(ascore, k_eff).values.mean().item()
+            else:
+                operational_ascore = torch.quantile(ascore, 1.0 - self.target_fpr).item()
 
         return {
             # Used for backpropagation:
-            "loss": reco_loss.mean(),
+            "loss": loss.mean(),
             # Used for logging:
-            "loss/reco/mean": reco_loss.mean(),
-            "loss/mse/mean_top_vals": mean_top_vals,
-            "loss/mse/q99": mse_q99,
+            "loss/mean": loss.mean(),
+            "ascore/operational": operational_ascore,
             # Used for callbacks:
-            "loss/total/full": reco_loss.detach(),
-            "loss/mse/full": mse.detach(),
+            "loss/full": loss.detach(),
+            "ascore/full": ascore.detach(),
             "reconstructed_data": reconstruction.detach(),
         }
 
@@ -90,7 +117,6 @@ class AE(L1ADLightningModule):
         """The values of the loss that are logged."""
         return {
             "loss": outdict.get("loss"),
-            "loss_reco": outdict.get("loss/reco/mean"),
-            "loss_mse_mean_top_vals": outdict.get("loss/mse/mean_top_vals"),
-            "loss_mse_q99": outdict.get("loss/mse/q99"),
+            "loss_mean": outdict.get("loss/mean"),
+            "ascore_operational": outdict.get("ascore/operational"),
         }

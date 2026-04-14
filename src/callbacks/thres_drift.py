@@ -24,14 +24,14 @@ class ThresholdDriftCallback(Callback):
 
     where:
         - p_hat is the empirical exceedance rate on the evaluation subset
-        - FPR = target_rate / bc_rate
+        - FPR = target_rate / base_rate
         - eps = 0.5 / N_eval
 
     This is appropriate as a validation-side proxy objective for HPO.
 
     :param output_name: Key in outputs dict containing per-event anomaly scores / losses.
     :param target_rates: List of target background rates in kHz.
-    :param bc_rate: Bunch crossing rate in kHz.
+    :param base_rate: Bunch crossing rate in kHz.
     :param calibration_fraction: Fraction of normal scores used for calibration.
         The remainder is used for evaluation.
     :param split_seed: Seed used for deterministic random splitting.
@@ -41,16 +41,17 @@ class ThresholdDriftCallback(Callback):
     def __init__(
         self,
         output_name: str,
-        target_rates: list[float],
-        bc_rate: float = 28608.8064,
+        target_rates: list[float] | None = None,
+        base_rate: float | None = None,
         calibration_fraction: float = 0.5,
         split_seed: int = 12345,
         beta: float = 0.9,
     ):
         super().__init__()
         self.output_name = output_name
-        self.target_rates = sorted(float(x) for x in target_rates)
-        self.bc_rate = float(bc_rate)
+        self.target_rates = None if target_rates is None else sorted(float(x) for x in target_rates)
+        self.base_rate = base_rate
+
         self.calibration_fraction = float(calibration_fraction)
         self.split_seed = int(split_seed)
         self.beta = beta
@@ -74,6 +75,7 @@ class ThresholdDriftCallback(Callback):
     def on_validation_epoch_start(self, trainer, pl_module):
         """Set the device and make sure the normal data is in the used data sets."""
         self.device = pl_module.device
+        self.target_rates, self.base_rate = self._resolve_rate_config(pl_module)
 
         dset_names = list(trainer.val_dataloaders.keys())
         if "normal" not in dset_names:
@@ -104,12 +106,12 @@ class ThresholdDriftCallback(Callback):
         if not self.normal_scores:
             raise RuntimeError("No normal validation scores were collected.")
 
+        module_target = float(pl_module.hparams.target_rate)
+
         scores = torch.cat(self.normal_scores, dim=0).view(-1)
         n_total = int(scores.numel())
         if n_total < 2:
-            raise RuntimeError(
-                f"Need at least 2 normal scores to split, got {n_total}."
-            )
+            raise RuntimeError(f"Need >=2 normal scores to split, got {n_total}.")
 
         cal_scores, eval_scores = self._split_scores(scores)
         n_eval = int(eval_scores.numel())
@@ -119,7 +121,7 @@ class ThresholdDriftCallback(Callback):
         eps = 0.5 / float(n_eval)
 
         for trate in self.target_rates:
-            fpr = float(trate) / float(self.bc_rate)
+            fpr = self._compute_target_fpr(trate)
             thr = self._compute_threshold(cal_scores, exceedance_prob=fpr)
 
             fp = int((eval_scores >= thr).sum().item())
@@ -131,12 +133,14 @@ class ThresholdDriftCallback(Callback):
             trate_name = f"{trate}".replace(".", "_")
             self._compute_drift_ema(trate_name, drift_metric)
 
+            is_operational = abs(trate - module_target) < 1e-12
+            if is_operational:
+                key = "val/summary/operational_drift_ema"
+            else:
+                key = f"val/summary/trate{trate_name}kHz_drift_ema"
+
             pl_module.log_dict(
-                {
-                    f"val/summary/trate{trate_name}kHz_drift_ema": float(
-                        self.drift_ema[trate_name]
-                    )
-                },
+                {key: float(self.drift_ema[trate_name])},
                 **self.log_kwargs,
             )
 
@@ -188,3 +192,41 @@ class ThresholdDriftCallback(Callback):
         idx = int(math.ceil(q * n) - 1)
         idx = max(0, min(n - 1, idx))
         return sorted_scores[idx]
+
+    def _resolve_rate_config(self, pl_module) -> tuple[list[float], float | None]:
+        """Resolve target rates and base rate from module + callback config."""
+        module_target = getattr(pl_module.hparams, "target_rate", None)
+        module_base = getattr(pl_module.hparams, "base_rate", None)
+
+        if module_target is None:
+            raise ValueError(
+                "pl_module.hparams.target_rate must be defined for ThresholdDriftCallback."
+            )
+
+        rates = [float(module_target)]
+        if self.target_rates is not None:
+            rates.extend(float(r) for r in self.target_rates)
+
+        seen = set()
+        resolved_rates = []
+        for r in rates:
+            if r not in seen:
+                seen.add(r)
+                resolved_rates.append(r)
+
+        base_rate = self.base_rate if self.base_rate is not None else module_base
+        return resolved_rates, base_rate
+
+    def _compute_target_fpr(self, target_rate: float) -> float:
+        """Convert target rate into an exceedance probability."""
+        if self.base_rate is None:
+            fpr = float(target_rate)
+        else:
+            if self.base_rate <= 0:
+                raise ValueError("base_rate must be positive.")
+            fpr = float(target_rate) / float(self.base_rate)
+
+        if not (0.0 < fpr < 1.0):
+            raise ValueError(f"Computed FPR must be in (0,1), got {fpr}")
+
+        return fpr

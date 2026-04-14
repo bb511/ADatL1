@@ -1,12 +1,11 @@
 from typing import Literal
 import torch
 
-from src.algorithms.losses.components import L1ADLoss
+from src.algorithms.losses.components import ADLoss
 
 
-class KLDivergenceLoss(L1ADLoss):
-    """
-    Kullback-Leibler divergence loss for VAE.
+class KLDivergenceLoss(ADLoss):
+    """Kullback-Leibler divergence loss for VAE.
 
     :param scale: Scaling factor for the loss.
     :param reduction: Reduction method to apply to the loss ("none", "mean", "sum").
@@ -14,9 +13,7 @@ class KLDivergenceLoss(L1ADLoss):
 
     name: str = "kl"
 
-    def __init__(
-        self, scale: float = 1.0, reduction: Literal["none", "mean", "sum"] = "none"
-    ):
+    def __init__(self, scale: float = 1.0, reduction: str = "none"):
         super().__init__(scale=scale, reduction=reduction)
 
     def set_scale(self, scale: float):

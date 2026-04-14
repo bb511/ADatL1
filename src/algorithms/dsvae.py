@@ -1,29 +1,31 @@
 # DeepSets per-type variational auto-encoder implementation.
-from typing import Optional, Tuple, Dict
+from typing import Optional
 
 import torch
 from torch import nn
 
-from src.algorithms import L1ADLightningModule
+from src.algorithms import ADLightningModule
+from src.algorithms.losses.vae import ClassicVAELoss
 from src.algorithms.schedulers.linear import LinearWarmup
 from src.algorithms.utils.object_feature_map_loader import inject_object_feature_map
-from src.utils import pylogger
-
-log = pylogger.RankedLogger(__name__)
+from src.data.utils import unpack_batch
 
 
-class DeepSetsVAE(L1ADLightningModule):
-    """DeepSets variational autoencoder architecture.
+class DeepSetsVAE(ADLightningModule):
+    """DeepSets variational autoencoder module.
 
-    Same structure and logging as the flat VAE, but using a DeepSets encoder.
-    The anomaly score is the raw KL divergence.
+    Same structure and logging convention as the flat VAE, but using a DeepSets encoder.
+    The operational anomaly score is hard-configured to the raw KL divergence.
 
     :param encoder: DeepSets variational encoder nn module.
     :param decoder: Decoder nn module.
     :param kl_warmup_frac: Fraction of total steps used to warm up KL scaling.
     :param features: Optional feature module applied before the DeepSets split.
-    :param mask: Bool whether to mask padded input features in reconstruction loss.
-    :param ckpt: Path to checkpoint to restart training from.
+    :param mask: Whether to mask padded input features in reconstruction loss.
+    :param ckpt: Optional checkpoint path to resume training from.
+    :param target_rate: Target background rate or FPR.
+    :param base_rate: Base rate used to convert target_rate into an FPR. If None,
+        target_rate is interpreted directly as an FPR.
     """
 
     def __init__(
@@ -32,15 +34,14 @@ class DeepSetsVAE(L1ADLightningModule):
         decoder: nn.Module,
         kl_warmup_frac: float = 0.0,
         features: Optional[nn.Module] = None,
-        mask: bool = True,
         ckpt: str = "",
-        operational_rate: float = 0.25,
-        bc_rate: float = 28608.8064,
+        target_rate: float = 0.25,
+        base_rate: float | None = None,
         **kwargs,
     ):
         super().__init__(model=None, **kwargs)
         self.save_hyperparameters(
-            ignore=["model", "features", "encoder", "decoder", "loss"]
+            ignore=["model", "features", "encoder", "decoder"]
         )
 
         self.encoder = encoder
@@ -49,11 +50,10 @@ class DeepSetsVAE(L1ADLightningModule):
         self.features.eval()
 
         self.kl_warmup_frac = kl_warmup_frac
-        self.mask = mask
         self.ckpt_path = ckpt
-        self.object_feature_map = None
 
-        self.operational_quantile = 1 - operational_rate / bc_rate
+        # Hard-coded algorithm definition.
+        self.loss = ClassicVAELoss(reduction="none")
 
     def on_fit_start(self):
         inject_object_feature_map(self)
@@ -68,106 +68,127 @@ class DeepSetsVAE(L1ADLightningModule):
     def on_test_start(self):
         inject_object_feature_map(self)
 
+    @property
+    def target_fpr(self) -> float:
+        return self.compute_target_fpr()
+
     def forward(
         self,
         x_by_type: dict[str, torch.Tensor],
         m_by_type: dict[str, torch.Tensor],
     ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
+        x_by_type = {k: self.features(v) for k, v in x_by_type.items()}
         z_mean, z_log_var, z = self.encoder(x_by_type, m_by_type)
         reconstruction = self.decoder(z)
         return z_mean, z_log_var, z, reconstruction
 
-    def model_step(self, batch: Tuple[torch.Tensor]) -> Dict[str, torch.Tensor]:
-        x, m, _, _ = batch
+    def model_step(self, batch: torch.Tensor) -> dict[str, torch.Tensor]:
+        b = unpack_batch(batch)
 
-        x_flat = torch.flatten(x, start_dim=1)
-        m_flat = torch.flatten(m, start_dim=1).float()
-        x_flat = self.features(x_flat)
+        x_flat = torch.flatten(b.x, start_dim=1)
 
-        # Split flat → per-type tensors
+        m_flat = b.mask
+        if m_flat is not None:
+            m_flat = torch.flatten(m_flat, start_dim=1).float()
+
         x_by_type, m_by_type = self._split_by_type_from_flat(x_flat, m_flat)
 
         z_mean, z_log_var, z, reconstruction = self.forward(x_by_type, m_by_type)
 
         kl_current_scale = self.kl_scale(int(self.global_step))
-        reco_loss, kl_raw, kl_scaled, total_loss = self.loss(
+        reco_loss, kl_raw, kl_scaled, loss = self.loss(
+            target=x_flat,
             reconstruction=reconstruction,
+            mask=m_flat,
             z_mean=z_mean,
             z_log_var=z_log_var,
-            target=x_flat,
-            mask=m_flat if self.mask else None,
             kl_scale=kl_current_scale,
         )
 
-        del z
-        total_loss = self._add_hgq_loss(total_loss)
+        # The anomaly score is expected to be a distribution over events.
+        ascore = kl_raw
+        if ascore.ndim != 1:
+            raise ValueError(
+                f"Expected per-event ascores, got {tuple(ascore.shape)}."
+            )
 
-        # Diagnostics
+        loss = self._add_hgq_loss(loss)
+
         with torch.no_grad():
-            kl_quantiles = torch.tensor([0.5, 0.95, 0.99, 0.999], device=kl_raw.device)
-            kl_q50, kl_q95, kl_q99, kl_q999 = torch.quantile(
-                kl_raw, kl_quantiles
+            n = ascore.numel()
+            k = max(1, int(self.target_fpr * n))
+
+            # If the operational tail is too small, use a top-k average for stability.
+            if k < 10:
+                k_eff = min(max(10, k), n)
+                operational_ascore = torch.topk(ascore, k_eff).values.mean().item()
+            else:
+                operational_ascore = torch.quantile(
+                    ascore, 1.0 - self.target_fpr
+                ).item()
+
+            q50, q99 = torch.quantile(
+                ascore, torch.tensor([0.5, 0.99], device=ascore.device)
             ).tolist()
 
-            # Extreme tail KL (operational)
-            n = kl_raw.numel()
-            k = max(10, int((1.0 - self.operational_quantile) * n))
-            topk_vals = torch.topk(kl_raw, k).values
-            mean_top_vals = topk_vals.mean().item()
-
             z_mean_squared = torch.square(z_mean).sum(dim=1)
+            z_mean_squared_mean = z_mean_squared.mean().item()
+
+        del x_flat, z
+
+        loss_mean = loss.mean()
+        reco_loss_mean = reco_loss.mean()
+        kl_scaled_mean = kl_scaled.mean()
+        kl_raw_mean = kl_raw.mean()
 
         return {
-            # Backprop
-            "loss": total_loss.mean(),
-            # Logging
-            "loss/reco/mean": reco_loss.detach().mean(),
-            "loss/kl_scaled/mean": kl_scaled.detach().mean(),
-            "loss/kl_raw/mean": kl_raw.detach().mean(),
-            "loss/kl_raw/median": kl_q50,
-            "loss/kl_raw/q95": kl_q95,
-            "loss/kl_raw/q99": kl_q99,
-            "loss/kl_raw/q999": kl_q999,
-            "loss/kl_raw/mean_top_vals": mean_top_vals,
-            "loss/z_mean_squared": z_mean_squared.detach().mean(),
+            # Used for backpropagation:
+            "loss": loss_mean,
+            # Used for logging:
+            "loss/mean": loss_mean,
+            "loss/reco/mean": reco_loss_mean,
+            "loss/kl_scaled/mean": kl_scaled_mean,
+            "loss/kl_raw/mean": kl_raw_mean,
+            "ascore/operational": operational_ascore,
+            "ascore/q50": q50,
+            "ascore/q99": q99,
+            "z_mean_squared": z_mean_squared_mean,
             "kl_scale": kl_current_scale,
-            # Callbacks
-            "loss/total/full": total_loss.detach(),
+            # Used for callbacks:
+            "loss/full": loss.detach(),
             "loss/reco/full": reco_loss.detach(),
             "loss/kl_raw/full": kl_raw.detach(),
-            "loss/z_mean_squared/full": z_mean_squared.detach(),
+            "ascore/full": ascore.detach(),
+            "z_mean_squared/full": z_mean_squared.detach(),
             "reconstructed_data": reconstruction.detach(),
         }
 
     def outlog(self, outdict: dict) -> dict:
         return {
             "loss": outdict.get("loss"),
+            "loss_mean": outdict.get("loss/mean"),
             "loss_reco": outdict.get("loss/reco/mean"),
-            "loss_kl_raw": outdict.get("loss/kl_raw/mean"),
             "loss_kl_scaled": outdict.get("loss/kl_scaled/mean"),
-            "loss_kl_median": outdict.get("loss/kl_raw/median"),
-            "loss_kl_raw_q95": outdict.get("loss/kl_raw/q95"),
-            "loss_kl_raw_q99": outdict.get("loss/kl_raw/q99"),
-            "loss_kl_raw_q999": outdict.get("loss/kl_raw/q999"),
-            "loss_kl_raw_mean_top_vals": outdict.get("loss/kl_raw/mean_top_vals"),
-            "z_mean_squared": outdict.get("loss/z_mean_squared"),
+            "loss_kl_raw": outdict.get("loss/kl_raw/mean"),
+            "ascore_operational": outdict.get("ascore/operational"),
+            "ascore_q50": outdict.get("ascore/q50"),
+            "ascore_q99": outdict.get("ascore/q99"),
+            "z_mean_squared": outdict.get("z_mean_squared"),
             "kl_scale": outdict.get("kl_scale"),
         }
 
     def _split_by_type_from_flat(
         self,
         x_flat: torch.Tensor,
-        m_flat: torch.Tensor,
+        m_flat: torch.Tensor | None,
     ) -> tuple[dict[str, torch.Tensor], dict[str, torch.Tensor]]:
-        """Build per-type tensors from flattened inputs using object_feature_map.
-
-        This method expects flattened input, such that it corresponds to the
-        object_feature_map dictionary that is saved on the data side. It then returns
-        a dictionary with the data categorised by type, e.g., into muons, jets, etc...
-        """
+        """Build per-type tensors from flattened inputs using object_feature_map."""
         object_feature_map = getattr(self, "object_feature_map", None)
         if object_feature_map is None:
             raise RuntimeError("object_feature_map not found on module.")
+
+        if m_flat is None:
+            m_flat = torch.ones_like(x_flat, dtype=x_flat.dtype, device=x_flat.device)
 
         x_by_type = {}
         m_by_type = {}
@@ -178,6 +199,11 @@ class DeepSetsVAE(L1ADLightningModule):
 
             n_obj = len(feat_indices[0])
             n_feat = len(feat_indices)
+
+            if not all(len(idxs) == n_obj for idxs in feat_indices):
+                raise ValueError(
+                    f"Feature map for '{obj_name}' has inconsistent object counts."
+                )
 
             obj_features = []
             obj_masks = []
@@ -202,6 +228,7 @@ class DeepSetsVAE(L1ADLightningModule):
         return x_by_type, m_by_type
 
     def _setup_kl_annealing(self, kl_warmup_frac: float, total_steps: int):
+        """Set up KL annealing if supported by the loss."""
         if hasattr(self.loss, "kl_scale_final"):
             fin_scale = float(self.loss.kl_scale_final)
         else:
@@ -218,12 +245,11 @@ class DeepSetsVAE(L1ADLightningModule):
         state_dict = ckpt["state_dict"]
         self.load_state_dict(state_dict, strict=False)
 
-    def _add_hgq_loss(self, total_loss):
+    def _add_hgq_loss(self, loss: torch.Tensor) -> torch.Tensor:
         add_loss = 0.0
         if hasattr(self.encoder, "losses") and len(self.encoder.losses) > 0:
             add_loss = add_loss + torch.stack([l for l in self.encoder.losses]).sum()
         if hasattr(self.decoder, "losses") and len(self.decoder.losses) > 0:
             add_loss = add_loss + torch.stack([l for l in self.decoder.losses]).sum()
 
-        total_loss = total_loss + add_loss
-        return total_loss
+        return loss + add_loss

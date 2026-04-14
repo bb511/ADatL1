@@ -5,10 +5,9 @@ defaults:
 _target_: src.algorithms.vae.VAE
 features: null
 
-operational_rate: 0.25 # nominal rate
-bc_rate: 28608.8064 # bunch crossing rate in kHz
+target_rate: 0.25 # nominal rate
+base_rate: 28608.8064 # bunch crossing rate in kHz
 
-mask: true
 ckpt: ''
 
 encoder:
@@ -23,11 +22,6 @@ decoder:
   nodes: ${smaller_decoder:${algorithm.encoder.nodes}}
   activation: relu
   out_dim: ${algorithm.encoder.in_dim}
-
-loss:
-  _target_: src.algorithms.losses.vae.ClassicVAELoss
-  scale: 1
-  kl_scale: 0.001
 
 # Annealing of the KL scale scalar.
 kl_warmup_frac: 0.2

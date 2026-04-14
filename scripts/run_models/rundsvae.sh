@@ -181,31 +181,31 @@
 # ------------------------------------------------------------------------
 # Semi-supervised cvar10 training
 # ------------------------------------------------------------------------
-# taskset -c 0-2 \
-# python3 src/train.py \
-#     -m \
-#     hydra/launcher=submitit_local \
-#     hydra.launcher.cpus_per_task=1 \
-#     hydra.launcher.gpus_per_node=4 \
-#     paths.raw_data_dir=/data/deodagiu/adl1t_data/parquet_files \
-#     experiment=physics/dsvae \
-#     experiment_name=vae_cvar10_vs_kl_search \
-#     callbacks.max_rate_ckpt=null \
-#     callbacks.cvar25_ema_ckpt=null \
-#     ~evaluation.evaluator.ckpts.single.eff__ascore_full__brate_0_25kHz \
-#     ~evaluation.evaluator.ckpts.summary.cvar25_ema \
-#     evaluation.callbacks.thres_drift=null \
-#     evaluation.callbacks.wasserstein=null \
-#     evaluation.callbacks.reco=null \
-#     evaluation.callbacks.anomaly_efficiency.cvar_summary=0.10 \
-#     logger=none \
-#     hparams_search=dsvae_optuna \
-#     hydra.sweeper.study_name=cvar10eff_vs_kl \
-#     hydra.sweeper.n_trials=150 \
-#     hydra.sweeper.sampler.n_startup_trials=150 \
-#     trainer=gpu \
-#     trainer.max_epochs=50 \
-#     trainer.devices=[0]
+taskset -c 0-2 \
+python3 src/train.py \
+    -m \
+    hydra/launcher=submitit_local \
+    hydra.launcher.cpus_per_task=1 \
+    hydra.launcher.gpus_per_node=4 \
+    paths.raw_data_dir=/data/deodagiu/adl1t_data/parquet_files \
+    experiment=physics/dsvae \
+    experiment_name=vae_cvar10_vs_kl_search \
+    callbacks.max_rate_ckpt=null \
+    callbacks.cvar25_ema_ckpt=null \
+    ~evaluation.evaluator.ckpts.single.eff__ascore_full__brate_0_25kHz \
+    ~evaluation.evaluator.ckpts.summary.cvar25_ema \
+    evaluation.callbacks.thres_drift=null \
+    evaluation.callbacks.wasserstein=null \
+    evaluation.callbacks.reco=null \
+    evaluation.callbacks.anomaly_efficiency.cvar_summary=0.10 \
+    logger=none \
+    hparams_search=dsvae_optuna \
+    hydra.sweeper.study_name=cvar10eff_vs_kl \
+    hydra.sweeper.n_trials=150 \
+    hydra.sweeper.sampler.n_startup_trials=150 \
+    trainer=gpu \
+    trainer.max_epochs=50 \
+    trainer.devices=[0]
 
 # ------------------------------------------------------------------------
 # CAP training
@@ -280,36 +280,36 @@
 # ------------------------------------------------------------------------
 # Wasserstein training
 # ------------------------------------------------------------------------
-taskset -c 0-2 \
-python3 src/train.py \
-    -m \
-    hydra/launcher=submitit_local \
-    hydra.launcher.cpus_per_task=1 \
-    hydra.launcher.gpus_per_node=4 \
-    paths.raw_data_dir=/data/deodagiu/adl1t_data/parquet_files \
-    experiment=physics/dsvae_agnostic \
-    experiment_name=dsvae_agnostic_wasserstein_vs_klq99_search \
-    algorithm.target_rate=0.01 \
-    algorithm.base_rate=null \
-    callbacks.anomaly_eff=null \
-    callbacks.thres_drift=null \
-    callbacks.cap_sn_zb=null \
-    callbacks.thres_drift_ema_ckpt=null \
-    callbacks.cap_sn_zb_ema_ckpt=null \
-    ~evaluation.evaluator.ckpts.summary.operational_drift_ema \
-    ~evaluation.evaluator.ckpts.summary.cap_ema_normal_vs_SingleNeutrino_E-10-gun \
-    evaluation.callbacks.anomaly_efficiency=null \
-    evaluation.callbacks.cap_sn_zb=null \
-    evaluation.callbacks.thres_drift=null \
-    evaluation.callbacks.reco=null \
-    logger=none \
-    hparams_search=dsvae_optuna \
-    optimized_metric_config.main_metric.callback.name=wasserstein \
-    optimized_metric_config.main_metric.direction=minimize \
-    hydra.sweeper.study_name=wasserstein_vs_klq99 \
-    hydra.sweeper.direction='[minimize, minimize]' \
-    hydra.sweeper.n_trials=150 \
-    hydra.sweeper.sampler.n_startup_trials=150 \
-    trainer=gpu \
-    trainer.max_epochs=50 \
-    trainer.devices=[0]
+# taskset -c 0-2 \
+# python3 src/train.py \
+#     -m \
+#     hydra/launcher=submitit_local \
+#     hydra.launcher.cpus_per_task=1 \
+#     hydra.launcher.gpus_per_node=4 \
+#     paths.raw_data_dir=/data/deodagiu/adl1t_data/parquet_files \
+#     experiment=physics/dsvae_agnostic \
+#     experiment_name=dsvae_agnostic_wasserstein_vs_klq99_search \
+#     algorithm.target_rate=0.01 \
+#     algorithm.base_rate=null \
+#     callbacks.anomaly_eff=null \
+#     callbacks.thres_drift=null \
+#     callbacks.cap_sn_zb=null \
+#     callbacks.thres_drift_ema_ckpt=null \
+#     callbacks.cap_sn_zb_ema_ckpt=null \
+#     ~evaluation.evaluator.ckpts.summary.operational_drift_ema \
+#     ~evaluation.evaluator.ckpts.summary.cap_ema_normal_vs_SingleNeutrino_E-10-gun \
+#     evaluation.callbacks.anomaly_efficiency=null \
+#     evaluation.callbacks.cap_sn_zb=null \
+#     evaluation.callbacks.thres_drift=null \
+#     evaluation.callbacks.reco=null \
+#     logger=none \
+#     hparams_search=dsvae_optuna \
+#     optimized_metric_config.main_metric.callback.name=wasserstein \
+#     optimized_metric_config.main_metric.direction=minimize \
+#     hydra.sweeper.study_name=wasserstein_vs_klq99 \
+#     hydra.sweeper.direction='[minimize, minimize]' \
+#     hydra.sweeper.n_trials=150 \
+#     hydra.sweeper.sampler.n_startup_trials=150 \
+#     trainer=gpu \
+#     trainer.max_epochs=50 \
+#     trainer.devices=[0]

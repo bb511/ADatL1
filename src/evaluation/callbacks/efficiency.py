@@ -283,8 +283,14 @@ class AnomalyEfficiencyCallback(Callback):
         valid_rates = []
 
         for target_rate in self.target_rates_resolved:
-            trate_name = str(target_rate).replace(".", "_")
-            thres = getattr(pl_module, f"thres_{trate_name}kHz", None)
+            # --- NEW: operational handling ---
+            if self._is_operational(target_rate):
+                thres = getattr(pl_module, "thres_operational", None)
+                trate_name = "operational"
+            else:
+                trate_name = str(target_rate).replace(".", "_")
+                thres = getattr(pl_module, f"thres_{trate_name}kHz", None)
+
             if thres is None:
                 log.warn(
                     f"No threshold was set for target rate {trate_name}. "

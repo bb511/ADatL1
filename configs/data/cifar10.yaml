@@ -1,0 +1,21 @@
+# @package data
+
+defaults:
+  - _self_
+
+_target_: src.data.CIFAR10_datamodule.CIFAR10DataModule
+
+data_dir: ${paths.base_data_dir}/cifar10
+
+# Class 0 = normal, all others = anomalies
+normal_classes: [0]
+signal_classes: [1, 2, 3, 4, 5, 6, 7, 8, 9]
+background_classes: []
+
+batch_size: 256
+max_val_batches: -1
+normalize: True
+val_fraction: 0.2
+reference_fraction: 0.5
+num_workers: 0
+seed: ${seed}

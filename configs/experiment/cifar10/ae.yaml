@@ -1,8 +1,8 @@
 # @package _global_
 
 defaults:
-  - override /data: basis
-  - override /algorithm: realnvp
+  - override /data: cifar10
+  - override /algorithm: image_ae
   - override /callbacks: default
   - override /trainer: cpu
   - override /evaluation: default
@@ -10,14 +10,14 @@ defaults:
   - override /logger: mlflow
 
 seed: 123
-tags: ["realnvp", "signal"]
+tags: ["ae", "cifar10", "signal"]
 
-experiment_name: realnvp_models
+experiment_name: cifar10_ae_models
 run_name: ${short_hash:${hydra:runtime.output_dir},12}
 
 data:
-  batch_size: 16384
-  max_val_batches: 10
+  batch_size: 256
+  max_val_batches: -1
 
 trainer:
   gradient_clip_algorithm: norm
@@ -43,15 +43,18 @@ optimized_metric_config:
     direction: minimize
 
 algorithm:
-  # What rate is the AD algorithm supposed to work at, in kHz.
-  target_rate: 0.25
-  base_rate: 28608.8064
+  target_rate: 0.01
+  base_rate: null
+
+  encoder:
+    in_channels: 3
+    input_size: [32, 32]
 
   optimizer:
     _partial_: true
     _target_: torch.optim.AdamW
-    lr: 0.0013029941778430407
-    weight_decay: 0.001
+    lr: 1.0e-3
+    weight_decay: 1.0e-4
     betas: [0.9, 0.999]
     eps: 1e-8
 
@@ -71,26 +74,15 @@ callbacks:
       _target_: src.callbacks.checkpointing.criterion.Max
       top_k: 1
     ds:
-      - GluGluHTo2B_Par-MH-125
-      - GluGluHto2G_Par-MH-125
-      - GluGluHto2G_Par-MH-90
-      - GluGluHto2Tau_Par-MH-125
-      - GluGlutoHHto2B2WtoLNu2Q_Par-c2-0-kl-1-kt-1
-      - HHHto4B2Tau_Par-c3-0-d4-0
-      - HHHto6B_Par-c3-0-d4-0
-      - SUSYGluGluToBBHTo2B_Par-M-1200
-      - SUSYGluGluToBBHToBB_Par-M-120
-      - SUSYGluGluToBBHToBB_Par-M-350
-      - SUSYGluGluToBBHToBB_Par-M-600
-      - TTHTo2C_Par-MH-125
-      - TTHto2B_Par-MH-125
-      - VBFHTo2C_Par-MH-125
-      - VBFHto2B_Par-MH-125
-      - VBFHto2Tau_Par-MH-125
-      - WtoTauto3Mu
-      - ggH-suep-decay
-      - smj-case-A
-      - haa-4b-ma15
+      - '1'
+      - '2'
+      - '3'
+      - '4'
+      - '5'
+      - '6'
+      - '7'
+      - '8'
+      - '9'
 
   stable_ascore_operational_ckpt:
     _target_: src.callbacks.model_checkpoint.SingleDatasetModelCheckpoint
@@ -146,26 +138,15 @@ evaluation:
       _target_: src.evaluation.callbacks.efficiency.AnomalyEfficiencyCallback
       output_name: 'ascore/full'
       ds:
-        - GluGluHTo2B_Par-MH-125
-        - GluGluHto2G_Par-MH-125
-        - GluGluHto2G_Par-MH-90
-        - GluGluHto2Tau_Par-MH-125
-        - GluGlutoHHto2B2WtoLNu2Q_Par-c2-0-kl-1-kt-1
-        - HHHto4B2Tau_Par-c3-0-d4-0
-        - HHHto6B_Par-c3-0-d4-0
-        - SUSYGluGluToBBHTo2B_Par-M-1200
-        - SUSYGluGluToBBHToBB_Par-M-120
-        - SUSYGluGluToBBHToBB_Par-M-350
-        - SUSYGluGluToBBHToBB_Par-M-600
-        - TTHTo2C_Par-MH-125
-        - TTHto2B_Par-MH-125
-        - VBFHTo2C_Par-MH-125
-        - VBFHto2B_Par-MH-125
-        - VBFHto2Tau_Par-MH-125
-        - WtoTauto3Mu
-        - ggH-suep-decay
-        - smj-case-A
-        - haa-4b-ma15
+        - '1'
+        - '2'
+        - '3'
+        - '4'
+        - '5'
+        - '6'
+        - '7'
+        - '8'
+        - '9'
       cvar_summary: 0.25
       log_raw_mlflow: false
 
@@ -175,26 +156,15 @@ evaluation:
       output_name: 'ascore/operational'
       ds:
         - normal
-        - GluGluHTo2B_Par-MH-125
-        - GluGluHto2G_Par-MH-125
-        - GluGluHto2G_Par-MH-90
-        - GluGluHto2Tau_Par-MH-125
-        - GluGlutoHHto2B2WtoLNu2Q_Par-c2-0-kl-1-kt-1
-        - HHHto4B2Tau_Par-c3-0-d4-0
-        - HHHto6B_Par-c3-0-d4-0
-        - SUSYGluGluToBBHTo2B_Par-M-1200
-        - SUSYGluGluToBBHToBB_Par-M-120
-        - SUSYGluGluToBBHToBB_Par-M-350
-        - SUSYGluGluToBBHToBB_Par-M-600
-        - TTHTo2C_Par-MH-125
-        - TTHto2B_Par-MH-125
-        - VBFHTo2C_Par-MH-125
-        - VBFHto2B_Par-MH-125
-        - VBFHto2Tau_Par-MH-125
-        - WtoTauto3Mu
-        - ggH-suep-decay
-        - smj-case-A
-        - haa-4b-ma15
+        - '1'
+        - '2'
+        - '3'
+        - '4'
+        - '5'
+        - '6'
+        - '7'
+        - '8'
+        - '9'
       log_raw_mlflow: false
 
     thres_drift:
@@ -209,7 +179,19 @@ evaluation:
       _target_: src.evaluation.callbacks.wasserstein.Wasserstein
       output_name: 'ascore/full'
       dataset_1: normal
-      dataset_2: SingleNeutrino_E-10-gun
+      dataset_2: '1'
       apply_log1p: true
       log_raw_mlflow: false
       name: wasserstein
+
+    reco:
+      _target_: src.evaluation.callbacks.reco.ReconstructionPlots
+      warmup_batches: 0.2
+      output_name: reconstructed_data
+      ckpts:
+        last: true
+      datasets:
+        - normal
+        - '1'
+      name: reco
+      log_raw_mlflow: false

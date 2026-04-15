@@ -1,0 +1,31 @@
+# Template image AE configuration.
+defaults:
+  - _self_
+
+_target_: src.algorithms.image_ae.ImageAE
+features: null
+
+encoder:
+  _target_: src.algorithms.components.encoder.ImageEncoder
+  in_channels: 3
+  input_size: [32, 32]
+  nodes: [32, 64, 128]
+  strides: [2, 2]
+  activation: relu
+  batchnorm: false
+
+decoder:
+  _target_: src.algorithms.components.decoder.ImageDecoder
+  nodes: ${reverse:${algorithm.encoder.nodes}}
+  out_channels: ${algorithm.encoder.in_channels}
+  input_size: ${algorithm.encoder.input_size}
+  strides: ${reverse:${algorithm.encoder.strides}}
+  activation: relu
+  batchnorm: false
+  final_activation: null
+
+delta: 1.0
+input_noise_std: 0.0
+
+target_rate: 0.01
+base_rate: null

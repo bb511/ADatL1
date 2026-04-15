@@ -1,5 +1,5 @@
 # ========================================================================
-# DeepSets AE RUNNING COMMANDS (CLEAN / AE-ALIGNED)
+# AE RUNNING COMMANDS
 # ========================================================================
 
 
@@ -12,19 +12,16 @@
 # taskset -c 0-2 \
 # python3 src/train.py \
 #     paths.raw_data_dir=/data/deodagiu/adl1t_data/parquet_files \
-#     experiment=physics/dsae \
-#     run_name=cvar25_t100_high \
-#     algorithm.optimizer.lr=0.002081733354631208 \
-#     algorithm.delta=10.0 \
-#     trainer.gradient_clip_val=5.0 \
+#     experiment=cifar10/ae \
+#     run_name=cvar25_t339_high \
+#     algorithm.optimizer.lr=0.001457369500608365 \
+#     algorithm.delta=7.0 \
+#     trainer.gradient_clip_val=0.5 \
 #     algorithm.optimizer.betas='[0.9,0.999]' \
-#     algorithm.optimizer.weight_decay=0.001 \
-#     algorithm.input_noise_std=0.003 \
-#     algorithm.encoder.activation=gelu \
-#     algorithm.encoder.pooling=sum_max \
-#     algorithm.encoder.add_counts=true \
-#     algorithm.encoder.object_phi_nodes='{FET:[8],egammas:[16,8],jets:[16,8],muons:[8],taus:[16,8]}' \
-#     algorithm.encoder.rho_nodes='[48,16]' \
+#     algorithm.optimizer.weight_decay=0.0 \
+#     algorithm.encoder.nodes='[64,32,32]' \
+#     algorithm.input_noise_std=0.001 \
+#     trainer.max_epochs=1 \
 #     trainer=gpu \
 #     trainer.devices=[0]
 
@@ -34,20 +31,16 @@
 # taskset -c 0-2 \
 # python3 src/train.py \
 #     paths.raw_data_dir=/data/deodagiu/adl1t_data/parquet_files \
-#     experiment=physics/dsae \
-#     run_name=cvar10_t100_high \
+#     experiment=cifar10/ae \
+#     run_name=cvar10_t339_high \
 #     evaluation.callbacks.anomaly_efficiency.cvar_summary=0.10 \
-#     algorithm.optimizer.lr=0.002081733354631208 \
+#     algorithm.optimizer.lr=0.0019789545082545034 \
 #     algorithm.delta=10.0 \
 #     trainer.gradient_clip_val=5.0 \
 #     algorithm.optimizer.betas='[0.9,0.999]' \
-#     algorithm.optimizer.weight_decay=0.001 \
-#     algorithm.input_noise_std=0.003 \
-#     algorithm.encoder.activation=gelu \
-#     algorithm.encoder.pooling=sum_max \
-#     algorithm.encoder.add_counts=true \
-#     algorithm.encoder.object_phi_nodes='{FET:[8],egammas:[16,8],jets:[16,8],muons:[8],taus:[16,8]}' \
-#     algorithm.encoder.rho_nodes='[48,16]' \
+#     algorithm.optimizer.weight_decay=1e-06 \
+#     algorithm.encoder.nodes='[64,32,32]' \
+#     algorithm.input_noise_std=0.0 \
 #     trainer=gpu \
 #     trainer.devices=[0]
 
@@ -61,25 +54,21 @@
 # taskset -c 0-2 \
 # python3 src/train.py \
 #     paths.raw_data_dir=/data/deodagiu/adl1t_data/parquet_files \
-#     experiment=physics/dsae_agnostic \
-#     run_name=cap_t100_high \
+#     experiment=cifar10/ae_agnostic \
+#     run_name=cap_t240_high \
 #     callbacks.wasserstein_dist=null \
 #     callbacks.thres_drift=null \
 #     callbacks.wasserstein_dist_ema_ckpt=null \
 #     callbacks.thres_drift_ema_ckpt=null \
 #     ~evaluation.evaluator.ckpts.summary.operational_drift_ema \
-#     ~evaluation.evaluator.ckpts.summary.w1dist_ema_normal_vs_SingleNeutrino_E-10-gun \
-#     algorithm.optimizer.lr=0.002081733354631208 \
+#     ~evaluation.evaluator.ckpts.summary.w1dist_ema_normal_vs_reference_normal \
+#     algorithm.optimizer.lr=0.0027927024120831816 \
 #     algorithm.delta=10.0 \
-#     trainer.gradient_clip_val=5.0 \
+#     trainer.gradient_clip_val=2.0 \
 #     algorithm.optimizer.betas='[0.9,0.999]' \
-#     algorithm.optimizer.weight_decay=0.001 \
-#     algorithm.input_noise_std=0.003 \
-#     algorithm.encoder.activation=gelu \
-#     algorithm.encoder.pooling=sum_max \
-#     algorithm.encoder.add_counts=true \
-#     algorithm.encoder.object_phi_nodes='{FET:[8],egammas:[16,8],jets:[16,8],muons:[8],taus:[16,8]}' \
-#     algorithm.encoder.rho_nodes='[48,16]' \
+#     algorithm.optimizer.weight_decay=0.0 \
+#     algorithm.encoder.nodes='[64,32,16]' \
+#     algorithm.input_noise_std=0.01 \
 #     trainer=gpu \
 #     trainer.devices=[0]
 
@@ -89,25 +78,21 @@
 # taskset -c 0-2 \
 # python3 src/train.py \
 #     paths.raw_data_dir=/data/deodagiu/adl1t_data/parquet_files \
-#     experiment=physics/dsae_agnostic \
-#     run_name=stability_t100_high \
+#     experiment=cifar10/ae_agnostic \
+#     run_name=stability_t390_high \
 #     callbacks.wasserstein_dist=null \
 #     callbacks.cap_sn_zb=null \
 #     callbacks.wasserstein_dist_ema_ckpt=null \
 #     callbacks.cap_sn_zb_ema_ckpt=null \
-#     ~evaluation.evaluator.ckpts.summary.w1dist_ema_normal_vs_SingleNeutrino_E-10-gun \
-#     ~evaluation.evaluator.ckpts.summary.cap_ema_normal_vs_SingleNeutrino_E-10-gun \
-#     algorithm.optimizer.lr=0.002081733354631208 \
+#     ~evaluation.evaluator.ckpts.summary.w1dist_ema_normal_vs_reference_normal \
+#     ~evaluation.evaluator.ckpts.summary.cap_ema_normal_vs_reference_normal \
+#     algorithm.optimizer.lr=0.000814981343573229 \
 #     algorithm.delta=10.0 \
-#     trainer.gradient_clip_val=5.0 \
-#     algorithm.optimizer.betas='[0.9,0.999]' \
-#     algorithm.optimizer.weight_decay=0.001 \
-#     algorithm.input_noise_std=0.003 \
-#     algorithm.encoder.activation=gelu \
-#     algorithm.encoder.pooling=sum_max \
-#     algorithm.encoder.add_counts=true \
-#     algorithm.encoder.object_phi_nodes='{FET:[8],egammas:[16,8],jets:[16,8],muons:[8],taus:[16,8]}' \
-#     algorithm.encoder.rho_nodes='[48,16]' \
+#     trainer.gradient_clip_val=1.0 \
+#     algorithm.optimizer.betas='[0.9,0.99]' \
+#     algorithm.optimizer.weight_decay=1e-05 \
+#     algorithm.encoder.nodes='[64,32,32]' \
+#     algorithm.input_noise_std=0.0003 \
 #     trainer=gpu \
 #     trainer.devices=[0]
 
@@ -117,25 +102,21 @@
 # taskset -c 0-2 \
 # python3 src/train.py \
 #     paths.raw_data_dir=/data/deodagiu/adl1t_data/parquet_files \
-#     experiment=physics/dsae_agnostic \
-#     run_name=wasserstein_t100_high \
+#     experiment=cifar10/ae_agnostic \
+#     run_name=wasserstein_t390_high \
 #     callbacks.thres_drift=null \
 #     callbacks.cap_sn_zb=null \
 #     callbacks.thres_drift_ema_ckpt=null \
 #     callbacks.cap_sn_zb_ema_ckpt=null \
 #     ~evaluation.evaluator.ckpts.summary.operational_drift_ema \
-#     ~evaluation.evaluator.ckpts.summary.cap_ema_normal_vs_SingleNeutrino_E-10-gun \
-#     algorithm.optimizer.lr=0.002081733354631208 \
-#     algorithm.delta=10.0 \
-#     trainer.gradient_clip_val=5.0 \
-#     algorithm.optimizer.betas='[0.9,0.999]' \
-#     algorithm.optimizer.weight_decay=0.001 \
-#     algorithm.input_noise_std=0.003 \
-#     algorithm.encoder.activation=gelu \
-#     algorithm.encoder.pooling=sum_max \
-#     algorithm.encoder.add_counts=true \
-#     algorithm.encoder.object_phi_nodes='{FET:[8],egammas:[16,8],jets:[16,8],muons:[8],taus:[16,8]}' \
-#     algorithm.encoder.rho_nodes='[48,16]' \
+#     ~evaluation.evaluator.ckpts.summary.cap_ema_normal_vs_reference_normal \
+#     algorithm.optimizer.lr=0.00047124714609726086 \
+#     algorithm.delta=5.0 \
+#     trainer.gradient_clip_val=0.5 \
+#     algorithm.optimizer.betas='[0.9,0.99]' \
+#     algorithm.optimizer.weight_decay=0.0 \
+#     algorithm.encoder.nodes='[64,32,32]' \
+#     algorithm.input_noise_std=0.001 \
 #     trainer=gpu \
 #     trainer.devices=[0]
 
@@ -146,30 +127,26 @@
 # ------------------------------------------------------------------------
 # Semi-supervised search (cvar25)
 # ------------------------------------------------------------------------
-# taskset -c 0-2 \
-# python3 src/train.py \
-#     -m \
-#     hydra/launcher=submitit_local \
-#     hydra.launcher.cpus_per_task=1 \
-#     hydra.launcher.gpus_per_node=4 \
-#     paths.raw_data_dir=/data/deodagiu/adl1t_data/parquet_files \
-#     experiment=physics/dsae \
-#     experiment_name=dsae_cvar25_vs_mse_search \
-#     callbacks.max_rate_ckpt=null \
-#     callbacks.cvar10_ema_ckpt=null \
-#     ~evaluation.evaluator.ckpts.single.eff__ascore_full__brate_0_25kHz \
-#     ~evaluation.evaluator.ckpts.summary.cvar10_ema \
-#     evaluation.callbacks.thres_drift=null \
-#     evaluation.callbacks.wasserstein=null \
-#     evaluation.callbacks.reco=null \
-#     logger=none \
-#     hparams_search=dsae_optuna \
-#     hydra.sweeper.study_name=cvar25eff_vs_mse \
-#     hydra.sweeper.n_trials=100 \
-#     hydra.sweeper.sampler.n_startup_trials=150 \
-#     trainer=gpu \
-#     trainer.max_epochs=50 \
-#     trainer.devices=[0]
+python3 src/train.py \
+    -m \
+    hydra/launcher=submitit_slurm_clariden \
+    experiment=cifar10/ae \
+    experiment_name=ae_cvar25_vs_mse_search \
+    callbacks.max_rate_ckpt=null \
+    callbacks.cvar10_ema_ckpt=null \
+    ~evaluation.evaluator.ckpts.single.eff__ascore_full__brate_operational \
+    ~evaluation.evaluator.ckpts.summary.cvar10_ema \
+    evaluation.callbacks.thres_drift=null \
+    evaluation.callbacks.wasserstein=null \
+    evaluation.callbacks.reco=null \
+    logger=none \
+    hparams_search=imageae_optuna \
+    hydra.sweeper.study_name=cvar25eff_vs_mse \
+    hydra.sweeper.n_trials=100 \
+    hydra.sweeper.sampler.n_startup_trials=150 \
+    trainer=gpu \
+    trainer.max_epochs=1 \
+    trainer.devices=[0]
 
 # ------------------------------------------------------------------------
 # Semi-supervised search (cvar10)
@@ -181,18 +158,18 @@
 #     hydra.launcher.cpus_per_task=1 \
 #     hydra.launcher.gpus_per_node=4 \
 #     paths.raw_data_dir=/data/deodagiu/adl1t_data/parquet_files \
-#     experiment=physics/dsae \
-#     experiment_name=dsae_cvar10_vs_mse_search \
+#     experiment=cifar10/ae \
+#     experiment_name=ae_cvar10_vs_mse_search \
 #     callbacks.max_rate_ckpt=null \
 #     callbacks.cvar25_ema_ckpt=null \
-#     ~evaluation.evaluator.ckpts.single.eff__ascore_full__brate_0_25kHz \
+#     ~evaluation.evaluator.ckpts.single.eff__ascore_full__brate_operational \
 #     ~evaluation.evaluator.ckpts.summary.cvar25_ema \
 #     evaluation.callbacks.thres_drift=null \
 #     evaluation.callbacks.wasserstein=null \
 #     evaluation.callbacks.reco=null \
 #     evaluation.callbacks.anomaly_efficiency.cvar_summary=0.10 \
 #     logger=none \
-#     hparams_search=dsae_optuna \
+#     hparams_search=imageae_optuna \
 #     hydra.sweeper.study_name=cvar10eff_vs_mse \
 #     hydra.sweeper.n_trials=100 \
 #     hydra.sweeper.sampler.n_startup_trials=150 \
@@ -203,6 +180,7 @@
 # ------------------------------------------------------------------------
 # CAP search
 # ------------------------------------------------------------------------
+# AE agnostic hyperparameter search - CAP vs MSE.
 # taskset -c 0-2 \
 # python3 src/train.py \
 #     -m \
@@ -211,21 +189,21 @@
 #     hydra.launcher.cpus_per_task=1 \
 #     hydra.launcher.gpus_per_node=4 \
 #     paths.raw_data_dir=/data/deodagiu/adl1t_data/parquet_files \
-#     experiment=physics/dsae_agnostic \
-#     experiment_name=dsae_agnostic_cap_vs_mse_search \
+#     experiment=cifar10/ae_agnostic \
+#     experiment_name=ae_agnostic_cap_vs_mse_search \
 #     callbacks.anomaly_eff=null \
 #     callbacks.thres_drift=null \
 #     callbacks.wasserstein_dist=null \
 #     callbacks.thres_drift_ema_ckpt=null \
 #     callbacks.wasserstein_dist_ema_ckpt=null \
 #     ~evaluation.evaluator.ckpts.summary.operational_drift_ema \
-#     ~evaluation.evaluator.ckpts.summary.w1dist_ema_normal_vs_SingleNeutrino_E-10-gun \
+#     ~evaluation.evaluator.ckpts.summary.w1dist_ema_normal_vs_reference_normal \
 #     evaluation.callbacks.anomaly_efficiency=null \
 #     evaluation.callbacks.thres_drift=null \
 #     evaluation.callbacks.wasserstein=null \
 #     evaluation.callbacks.reco=null \
 #     logger=none \
-#     hparams_search=dsae_optuna \
+#     hparams_search=imageae_optuna \
 #     hydra.sweeper.study_name=cap_vs_mse \
 #     hydra.sweeper.n_trials=100 \
 #     hydra.sweeper.sampler.n_startup_trials=150 \
@@ -243,21 +221,21 @@
 #     hydra.launcher.cpus_per_task=1 \
 #     hydra.launcher.gpus_per_node=4 \
 #     paths.raw_data_dir=/data/deodagiu/adl1t_data/parquet_files \
-#     experiment=physics/dsae_agnostic \
-#     experiment_name=dsae_agnostic_drift_vs_mse_search \
+#     experiment=cifar10/ae_agnostic \
+#     experiment_name=ae_agnostic_drift_vs_mse_search \
 #     callbacks.anomaly_eff=null \
 #     callbacks.cap_sn_zb=null \
 #     callbacks.wasserstein_dist=null \
 #     callbacks.wasserstein_dist_ema_ckpt=null \
 #     callbacks.cap_sn_zb_ema_ckpt=null \
-#     ~evaluation.evaluator.ckpts.summary.w1dist_ema_normal_vs_SingleNeutrino_E-10-gun \
-#     ~evaluation.evaluator.ckpts.summary.cap_ema_normal_vs_SingleNeutrino_E-10-gun \
+#     ~evaluation.evaluator.ckpts.summary.w1dist_ema_normal_vs_reference_normal \
+#     ~evaluation.evaluator.ckpts.summary.cap_ema_normal_vs_reference_normal \
 #     evaluation.callbacks.anomaly_efficiency=null \
 #     evaluation.callbacks.cap_sn_zb=null \
 #     evaluation.callbacks.wasserstein=null \
 #     evaluation.callbacks.reco=null \
 #     logger=none \
-#     hparams_search=dsae_optuna \
+#     hparams_search=imageae_optuna \
 #     optimized_metric_config.main_metric.callback.name=thres_drift \
 #     optimized_metric_config.main_metric.direction=minimize \
 #     hydra.sweeper.study_name=drift_vs_mse \
@@ -267,6 +245,7 @@
 #     trainer=gpu \
 #     trainer.max_epochs=50 \
 #     trainer.devices=[0]
+
 
 # ------------------------------------------------------------------------
 # Wasserstein search
@@ -278,21 +257,21 @@
 #     hydra.launcher.cpus_per_task=1 \
 #     hydra.launcher.gpus_per_node=4 \
 #     paths.raw_data_dir=/data/deodagiu/adl1t_data/parquet_files \
-#     experiment=physics/dsae_agnostic \
-#     experiment_name=dsae_agnostic_wasserstein_vs_mse_search \
+#     experiment=cifar10/ae_agnostic \
+#     experiment_name=ae_agnostic_wasserstein_vs_mse_search \
 #     callbacks.anomaly_eff=null \
 #     callbacks.cap_sn_zb=null \
 #     callbacks.thres_drift=null \
 #     callbacks.thres_drift_ema_ckpt=null \
 #     callbacks.cap_sn_zb_ema_ckpt=null \
 #     ~evaluation.evaluator.ckpts.summary.operational_drift_ema \
-#     ~evaluation.evaluator.ckpts.summary.cap_ema_normal_vs_SingleNeutrino_E-10-gun \
+#     ~evaluation.evaluator.ckpts.summary.cap_ema_normal_vs_reference_normal \
 #     evaluation.callbacks.anomaly_efficiency=null \
 #     evaluation.callbacks.cap_sn_zb=null \
 #     evaluation.callbacks.thres_drift=null \
 #     evaluation.callbacks.reco=null \
 #     logger=none \
-#     hparams_search=dsae_optuna \
+#     hparams_search=imageae_optuna \
 #     optimized_metric_config.main_metric.callback.name=wasserstein \
 #     optimized_metric_config.main_metric.direction=minimize \
 #     hydra.sweeper.study_name=wasserstein_vs_mse \

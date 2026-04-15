@@ -73,7 +73,7 @@ callbacks:
   max_rate_ckpt:
     _target_: src.callbacks.model_checkpoint.SingleDatasetModelCheckpoint
     dirpath: '${paths.checkpoints_dir}/${experiment_name}/${run_name}'
-    monitor: eff__ascore_full__brate_0_25kHz
+    monitor: eff__ascore_full__brate_operational
     criterion:
       _target_: src.callbacks.checkpointing.criterion.Max
       top_k: 1
@@ -146,7 +146,7 @@ evaluation:
         cvar10_ema: ['max']
       single:
         ascore_operational: ['stable']
-        eff__ascore_full__brate_0_25kHz: ['max']
+        eff__ascore_full__brate_operational: ['max']
 
   callbacks:
     anomaly_efficiency:

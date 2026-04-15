@@ -5,6 +5,7 @@ import torch
 import torch.nn as nn
 
 from src.algorithms.components.mlp import MLP
+from src.algorithms.components.mlp import ImageMLP
 
 
 class Encoder(nn.Module):
@@ -308,3 +309,79 @@ class DeepSetsVariationalEncoder(DeepSetsEncoder):
         std = torch.exp(0.5 * z_log_var)
         epsilon = torch.randn_like(std)
         return z_mean + std * epsilon
+
+
+class ImageEncoder(nn.Module):
+    """Simple convolutional encoder.
+
+    :param in_channels: Number of image input channels.
+    :param nodes: List of ints specifying the hidden channel widths and the output
+        latent dimension. The last entry is the latent dimension.
+    :param input_size: Spatial input size as (height, width).
+    :param strides: List of strides for the convolutional hidden layers.
+    :param activation: Activation function name.
+    :param init_weight: Callable method to initialize the weights.
+    :param init_bias: Callable method to initialize the biases.
+    :param batchnorm: Whether to use batch normalization or not.
+    """
+
+    def __init__(
+        self,
+        in_channels: int,
+        nodes: list[int],
+        input_size: tuple[int, int] = (32, 32),
+        strides: Optional[list[int]] = None,
+        activation: str = "relu",
+        init_weight: Optional[Callable] = None,
+        init_bias: Optional[Callable] = None,
+        batchnorm: bool = False,
+    ):
+        super().__init__()
+
+        if len(nodes) < 1:
+            raise ValueError("nodes must contain at least one entry.")
+
+        conv_nodes = nodes[:-1]
+        latent_dim = nodes[-1]
+
+        if len(conv_nodes) == 0:
+            raise ValueError(
+                "ImageEncoder requires at least one convolutional hidden layer before "
+                "the latent dimension."
+            )
+
+        if strides is None:
+            strides = [1] * len(conv_nodes)
+        if len(strides) != len(conv_nodes):
+            raise ValueError("strides must have length len(nodes) - 1.")
+
+        self.net = ImageMLP(
+            in_channels=in_channels,
+            nodes=conv_nodes,
+            strides=strides,
+            transpose=False,
+            batchnorm=batchnorm,
+            activation=activation,
+            final_activation=True,
+            init_weight=init_weight,
+            init_bias=init_bias,
+        )
+
+        h, w = input_size
+        for s in strides:
+            h = (h + s - 1) // s
+            w = (w + s - 1) // s
+
+        self.feature_shape = (conv_nodes[-1], h, w)
+        self.feature_dim = conv_nodes[-1] * h * w
+
+        self.proj = nn.Linear(self.feature_dim, latent_dim)
+        if init_weight is not None:
+            init_weight(self.proj.weight)
+        if init_bias is not None and self.proj.bias is not None:
+            init_bias(self.proj.bias)
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        x = self.net(x)
+        x = torch.flatten(x, start_dim=1)
+        return self.proj(x)

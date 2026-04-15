@@ -5,7 +5,6 @@ import statistics
 
 import torch
 from pytorch_lightning.callbacks import Callback
-from pytorch_lightning import LightningDataModule
 
 from src.callbacks.metrics.rate import AnomalyRate
 from src.data.utils import unpack_batch
@@ -26,12 +25,14 @@ class AnomalyEfficiencyCallback(Callback):
         output_name: str,
         target_rates: list[int] | None = None,
         base_rate: float | None = None,
-        beta: float = 0.9
+        beta: float = 0.9,
     ):
         super().__init__()
         self.device = None
         self.output_name = output_name
-        self.target_rates = None if target_rates is None else sorted(float(x) for x in target_rates)
+        self.target_rates = (
+            None if target_rates is None else sorted(float(x) for x in target_rates)
+        )
         self.base_rate = base_rate
         self.beta = beta
 
@@ -48,13 +49,13 @@ class AnomalyEfficiencyCallback(Callback):
         """Instantiate useful quantities."""
         self.cvar25_ema = {}
         self.cvar10_ema = {}
+        self.module_target_rate = None
 
     def on_validation_start(self, trainer, pl_module):
         """Do checks required for this callback to work."""
-
         self.device = pl_module.device
-        self.target_rates, self.base_rate = \
-            self._resolve_rate_config(pl_module)
+        self.target_rates, self.base_rate = self._resolve_rate_config(pl_module)
+        self.module_target_rate = float(getattr(pl_module.hparams, "target_rate"))
 
         # Check if 'normal' dataset is the first dataset in the validation dictionary.
         # This is required to compute the rate thresholds on the anomaly scores.
@@ -95,13 +96,16 @@ class AnomalyEfficiencyCallback(Callback):
 
     def on_validation_epoch_end(self, trainer, pl_module) -> None:
         """Log the anomaly rates computed on each of the data sets."""
-        module_target = getattr(pl_module.hparams, "target_rate", None)
         for target_rate in self.target_rates:
+            rate_suffix = self._rate_log_suffix(target_rate)
+
             main_rate = self.main_rate[target_rate]["normal"].compute("rate").item()
             bkg_effs = self._compute_efficiencies(self.bkg_rates, target_rate)
             sig_effs = self._compute_efficiencies(self.sig_rates, target_rate)
+
             pl_module.log_dict(
-                {f"val/normal/brate_{target_rate}kHz": main_rate}, **self.log_kwargs
+                {f"val/normal/brate_{rate_suffix}": main_rate},
+                **self.log_kwargs,
             )
             pl_module.log_dict(bkg_effs, **self.log_kwargs)
             pl_module.log_dict(sig_effs, **self.log_kwargs)
@@ -115,11 +119,7 @@ class AnomalyEfficiencyCallback(Callback):
             med_sig_eff = statistics.median(list(sig_effs.values()))
             thres_zb = self.main_rate[target_rate]["normal"].threshold.item()
 
-            is_operational = abs(target_rate - module_target) < 1e-12
-            if is_operational:
-                trate_name = 'operational'
-            else:
-                trate_name = str(target_rate).replace(".", "_")
+            trate_name = self._rate_summary_name(target_rate)
 
             summaries = {
                 f"val/summary/eff_cvar25_{trate_name}": cvar25,
@@ -130,7 +130,10 @@ class AnomalyEfficiencyCallback(Callback):
                 f"val/summary/eff_cvar10_ema_{trate_name}": self.cvar10_ema[target_rate],
             }
             pl_module.log_dict(summaries, **self.log_kwargs)
-            pl_module.log_dict({f"val/normal/thr__brate_{trate_name}kHz": thres_zb})
+            pl_module.log_dict(
+                {f"val/normal/thr__brate_{rate_suffix}": thres_zb},
+                **self.log_kwargs,
+            )
 
     def _compute_cvar25_ema(self, target_rate: float, value: float):
         if target_rate not in self.cvar25_ema:
@@ -179,7 +182,6 @@ class AnomalyEfficiencyCallback(Callback):
             rate.update(self.normal_score_data)
             thres = rate.threshold
             self._set_thres_on_module(pl_module, target_rate, thres)
-
             self.main_rate[target_rate][self.dataset_name] = rate
 
     def _initialize_rate_metric(self, labels: torch.Tensor):
@@ -228,14 +230,33 @@ class AnomalyEfficiencyCallback(Callback):
         """Compute the efficiencies given a rate dictionary."""
         effs = defaultdict(float)
         clean_output_name = self.output_name.replace("/", "_")
-        trate_name = str(target_rate).replace(".", "_")
+        rate_suffix = self._rate_log_suffix(target_rate)
+
         for ds_name, rate in rates[target_rate].items():
             logging_name = (
-                f"val/{ds_name}/eff__{clean_output_name}__brate_{trate_name}kHz"
+                f"val/{ds_name}/eff__{clean_output_name}__brate_{rate_suffix}"
             )
             effs[logging_name] = rate.compute("efficiency")
 
         return effs
+
+    def _rate_summary_name(self, target_rate: float) -> str:
+        """Name used in summary metrics."""
+        if self._is_operational_rate(target_rate):
+            return "operational"
+        return str(target_rate).replace(".", "_")
+
+    def _rate_log_suffix(self, target_rate: float) -> str:
+        """Name used in brate/threshold/eff log keys."""
+        if self._is_operational_rate(target_rate):
+            return "operational"
+        return f"{target_rate}kHz".replace(".", "_")
+
+    def _is_operational_rate(self, target_rate: float) -> bool:
+        return (
+            self.module_target_rate is not None
+            and abs(float(target_rate) - float(self.module_target_rate)) < 1e-12
+        )
 
     def _get_dsname(self, rate_name: str):
         """Retrieves the data set name from string specifying rate name."""
@@ -244,8 +265,11 @@ class AnomalyEfficiencyCallback(Callback):
 
     def _set_thres_on_module(self, pl_module, target_rate: float, thres: torch.Tensor):
         """Pass the threshold to the module so it ends up in the checkpoint."""
-        target_rate = f"{target_rate}".replace(".", "_")
-        name = f"thres_{target_rate}kHz"
+        if self._is_operational_rate(target_rate):
+            name = "thres_operational"
+        else:
+            trate_name = f"{target_rate}".replace(".", "_")
+            name = f"thres_{trate_name}kHz"
 
         if name not in dict(pl_module.named_buffers()):
             pl_module.register_buffer(name, thres.detach().clone(), persistent=True)
@@ -255,13 +279,13 @@ class AnomalyEfficiencyCallback(Callback):
 
     def _resolve_rate_config(self, pl_module) -> tuple[list[float], float | None]:
         """Resolve target rates and base rate from module + callback config."""
-
         module_target = getattr(pl_module.hparams, "target_rate", None)
         module_base = getattr(pl_module.hparams, "base_rate", None)
 
         if module_target is None:
             raise ValueError(
-                "pl_module.hparams.target_rate must be defined for AnomalyEfficiencyCallback."
+                "pl_module.hparams.target_rate must be defined for "
+                "AnomalyEfficiencyCallback."
             )
 
         # Always include module target

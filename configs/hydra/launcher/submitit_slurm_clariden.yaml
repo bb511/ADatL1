@@ -5,10 +5,10 @@ defaults:
 submitit_folder: ${hydra.sweep.dir}/.submitit/%j
 
 account: a0166
-partition: debug
 qos: null
 
-timeout_min: 10
+partition: normal
+timeout_min: 60
 cpus_per_task: 3
 gpus_per_node: 1
 tasks_per_node: 1

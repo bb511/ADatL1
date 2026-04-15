@@ -11,7 +11,6 @@
 # ------------------------------------------------------------------------
 # taskset -c 0-2 \
 # python3 src/train.py \
-#     paths.raw_data_dir=/data/deodagiu/adl1t_data/parquet_files \
 #     experiment=cifar10/ae \
 #     run_name=cvar25_t339_high \
 #     algorithm.optimizer.lr=0.001457369500608365 \
@@ -30,7 +29,6 @@
 # ------------------------------------------------------------------------
 # taskset -c 0-2 \
 # python3 src/train.py \
-#     paths.raw_data_dir=/data/deodagiu/adl1t_data/parquet_files \
 #     experiment=cifar10/ae \
 #     run_name=cvar10_t339_high \
 #     evaluation.callbacks.anomaly_efficiency.cvar_summary=0.10 \
@@ -53,7 +51,6 @@
 # ------------------------------------------------------------------------
 # taskset -c 0-2 \
 # python3 src/train.py \
-#     paths.raw_data_dir=/data/deodagiu/adl1t_data/parquet_files \
 #     experiment=cifar10/ae_agnostic \
 #     run_name=cap_t240_high \
 #     callbacks.wasserstein_dist=null \
@@ -77,7 +74,6 @@
 # ------------------------------------------------------------------------
 # taskset -c 0-2 \
 # python3 src/train.py \
-#     paths.raw_data_dir=/data/deodagiu/adl1t_data/parquet_files \
 #     experiment=cifar10/ae_agnostic \
 #     run_name=stability_t390_high \
 #     callbacks.wasserstein_dist=null \
@@ -101,7 +97,6 @@
 # ------------------------------------------------------------------------
 # taskset -c 0-2 \
 # python3 src/train.py \
-#     paths.raw_data_dir=/data/deodagiu/adl1t_data/parquet_files \
 #     experiment=cifar10/ae_agnostic \
 #     run_name=wasserstein_t390_high \
 #     callbacks.thres_drift=null \
@@ -145,7 +140,7 @@ python3 src/train.py \
     hydra.sweeper.n_trials=100 \
     hydra.sweeper.sampler.n_startup_trials=150 \
     trainer=gpu \
-    trainer.max_epochs=1 \
+    trainer.max_epochs=50 \
     trainer.devices=[0]
 
 # ------------------------------------------------------------------------
@@ -154,10 +149,7 @@ python3 src/train.py \
 # taskset -c 0-2 \
 # python3 src/train.py \
 #     -m \
-#     hydra/launcher=submitit_local \
-#     hydra.launcher.cpus_per_task=1 \
-#     hydra.launcher.gpus_per_node=4 \
-#     paths.raw_data_dir=/data/deodagiu/adl1t_data/parquet_files \
+#     hydra/launcher=submitit_slurm_clariden \
 #     experiment=cifar10/ae \
 #     experiment_name=ae_cvar10_vs_mse_search \
 #     callbacks.max_rate_ckpt=null \
@@ -184,11 +176,7 @@ python3 src/train.py \
 # taskset -c 0-2 \
 # python3 src/train.py \
 #     -m \
-#     hydra/launcher=submitit_local \
-#     hydra.launcher.timeout_min=200 \
-#     hydra.launcher.cpus_per_task=1 \
-#     hydra.launcher.gpus_per_node=4 \
-#     paths.raw_data_dir=/data/deodagiu/adl1t_data/parquet_files \
+#     hydra/launcher=submitit_slurm_clariden \
 #     experiment=cifar10/ae_agnostic \
 #     experiment_name=ae_agnostic_cap_vs_mse_search \
 #     callbacks.anomaly_eff=null \
@@ -217,10 +205,7 @@ python3 src/train.py \
 # taskset -c 0-2 \
 # python3 src/train.py \
 #     -m \
-#     hydra/launcher=submitit_local \
-#     hydra.launcher.cpus_per_task=1 \
-#     hydra.launcher.gpus_per_node=4 \
-#     paths.raw_data_dir=/data/deodagiu/adl1t_data/parquet_files \
+#     hydra/launcher=submitit_slurm_clariden \
 #     experiment=cifar10/ae_agnostic \
 #     experiment_name=ae_agnostic_drift_vs_mse_search \
 #     callbacks.anomaly_eff=null \
@@ -253,10 +238,7 @@ python3 src/train.py \
 # taskset -c 0-2 \
 # python3 src/train.py \
 #     -m \
-#     hydra/launcher=submitit_local \
-#     hydra.launcher.cpus_per_task=1 \
-#     hydra.launcher.gpus_per_node=4 \
-#     paths.raw_data_dir=/data/deodagiu/adl1t_data/parquet_files \
+#     hydra/launcher=submitit_slurm_clariden \
 #     experiment=cifar10/ae_agnostic \
 #     experiment_name=ae_agnostic_wasserstein_vs_mse_search \
 #     callbacks.anomaly_eff=null \

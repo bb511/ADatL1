@@ -161,7 +161,7 @@
 #     hydra.launcher.gpus_per_node=4 \
 #     paths.raw_data_dir=/data/deodagiu/adl1t_data/parquet_files \
 #     experiment=physics/dsvae \
-#     experiment_name=vae_cvar25_vs_kl_search \
+#     experiment_name=dsvae_cvar25_vs_kl_search \
 #     callbacks.max_rate_ckpt=null \
 #     callbacks.cvar10_ema_ckpt=null \
 #     ~evaluation.evaluator.ckpts.single.eff__ascore_full__brate_operational \
@@ -189,7 +189,7 @@
 #     hydra.launcher.gpus_per_node=4 \
 #     paths.raw_data_dir=/data/deodagiu/adl1t_data/parquet_files \
 #     experiment=physics/dsvae \
-#     experiment_name=vae_cvar10_vs_kl_search \
+#     experiment_name=dsvae_cvar10_vs_kl_search \
 #     callbacks.max_rate_ckpt=null \
 #     callbacks.cvar25_ema_ckpt=null \
 #     ~evaluation.evaluator.ckpts.single.eff__ascore_full__brate_operational \

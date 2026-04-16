@@ -275,6 +275,7 @@ python3 src/train.py \
     paths.raw_data_dir=/data/deodagiu/adl1t_data/parquet_files \
     experiment=physics/realnvp_agnostic \
     experiment_name=realnvp_agnostic_wasserstein_vs_logpq99_search \
+    algorithm.target_rate=0.01 \
     algorithm.base_rate=null \
     callbacks.anomaly_eff=null \
     callbacks.anomaly_eff=null \

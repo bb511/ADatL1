@@ -122,53 +122,53 @@
 # ------------------------------------------------------------------------
 # Semi-supervised search (cvar25)
 # ------------------------------------------------------------------------
-python3 src/train.py \
-    -m \
-    hydra/launcher=submitit_slurm_clariden \
-    hydra.sweeper.n_jobs=6 \
-    experiment=cifar10/vae \
-    experiment_name=cifar10_vae_cvar25_vs_kl_search \
-    callbacks.max_rate_ckpt=null \
-    callbacks.cvar10_ema_ckpt=null \
-    ~evaluation.evaluator.ckpts.single.eff__ascore_full__brate_operational \
-    ~evaluation.evaluator.ckpts.summary.cvar10_ema \
-    evaluation.callbacks.thres_drift=null \
-    evaluation.callbacks.wasserstein=null \
-    evaluation.callbacks.reco=null \
-    logger=none \
-    hparams_search=imagevae_optuna \
-    hydra.sweeper.study_name=cvar25eff_vs_kl \
-    hydra.sweeper.n_trials=600 \
-    hydra.sweeper.sampler.n_startup_trials=150 \
-    trainer=gpu \
-    trainer.max_epochs=50 \
-    trainer.devices=[0]
-
-# ------------------------------------------------------------------------
-# Semi-supervised search (cvar10)
-# ------------------------------------------------------------------------
 # python3 src/train.py \
 #     -m \
 #     hydra/launcher=submitit_slurm_clariden \
 #     hydra.sweeper.n_jobs=6 \
 #     experiment=cifar10/vae \
-#     experiment_name=cifar10_vae_cvar10_vs_kl_search \
+#     experiment_name=cifar10_vae_cvar25_vs_kl_search \
 #     callbacks.max_rate_ckpt=null \
-#     callbacks.cvar25_ema_ckpt=null \
+#     callbacks.cvar10_ema_ckpt=null \
 #     ~evaluation.evaluator.ckpts.single.eff__ascore_full__brate_operational \
-#     ~evaluation.evaluator.ckpts.summary.cvar25_ema \
+#     ~evaluation.evaluator.ckpts.summary.cvar10_ema \
 #     evaluation.callbacks.thres_drift=null \
 #     evaluation.callbacks.wasserstein=null \
 #     evaluation.callbacks.reco=null \
-#     evaluation.callbacks.anomaly_efficiency.cvar_summary=0.10 \
 #     logger=none \
 #     hparams_search=imagevae_optuna \
-#     hydra.sweeper.study_name=cvar10eff_vs_kl \
-#     hydra.sweeper.n_trials=100 \
+#     hydra.sweeper.study_name=cvar25eff_vs_kl \
+#     hydra.sweeper.n_trials=600 \
 #     hydra.sweeper.sampler.n_startup_trials=150 \
 #     trainer=gpu \
 #     trainer.max_epochs=50 \
 #     trainer.devices=[0]
+
+# ------------------------------------------------------------------------
+# Semi-supervised search (cvar10)
+# ------------------------------------------------------------------------
+python3 src/train.py \
+    -m \
+    hydra/launcher=submitit_slurm_clariden \
+    hydra.sweeper.n_jobs=6 \
+    experiment=cifar10/vae \
+    experiment_name=cifar10_vae_cvar10_vs_kl_search \
+    callbacks.max_rate_ckpt=null \
+    callbacks.cvar25_ema_ckpt=null \
+    ~evaluation.evaluator.ckpts.single.eff__ascore_full__brate_operational \
+    ~evaluation.evaluator.ckpts.summary.cvar25_ema \
+    evaluation.callbacks.thres_drift=null \
+    evaluation.callbacks.wasserstein=null \
+    evaluation.callbacks.reco=null \
+    evaluation.callbacks.anomaly_efficiency.cvar_summary=0.10 \
+    logger=none \
+    hparams_search=imagevae_optuna \
+    hydra.sweeper.study_name=cvar10eff_vs_kl \
+    hydra.sweeper.n_trials=100 \
+    hydra.sweeper.sampler.n_startup_trials=150 \
+    trainer=gpu \
+    trainer.max_epochs=50 \
+    trainer.devices=[0]
 
 # ------------------------------------------------------------------------
 # CAP search

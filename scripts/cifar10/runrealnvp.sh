@@ -11,7 +11,7 @@
 # ------------------------------------------------------------------------
 # taskset -c 0-2 \
 # python3 src/train.py \
-#     experiment=cifar10/vae \
+#     experiment=cifar10/realnvp \
 #     run_name=cvar25_t339_high \
 #     algorithm.optimizer.lr=0.001457369500608365 \
 #     algorithm.delta=7.0 \
@@ -29,7 +29,7 @@
 # ------------------------------------------------------------------------
 # taskset -c 0-2 \
 # python3 src/train.py \
-#     experiment=cifar10/vae \
+#     experiment=cifar10/realnvp \
 #     run_name=cvar10_t339_high \
 #     evaluation.callbacks.anomaly_efficiency.cvar_summary=0.10 \
 #     algorithm.optimizer.lr=0.0019789545082545034 \
@@ -51,7 +51,7 @@
 # ------------------------------------------------------------------------
 # taskset -c 0-2 \
 # python3 src/train.py \
-#     experiment=cifar10/vae_agnostic \
+#     experiment=cifar10/realnvp_agnostic \
 #     run_name=cap_t240_high \
 #     callbacks.wasserstein_dist=null \
 #     callbacks.thres_drift=null \
@@ -74,7 +74,7 @@
 # ------------------------------------------------------------------------
 # taskset -c 0-2 \
 # python3 src/train.py \
-#     experiment=cifar10/vae_agnostic \
+#     experiment=cifar10/realnvp_agnostic \
 #     run_name=stability_t390_high \
 #     callbacks.wasserstein_dist=null \
 #     callbacks.cap_sn_zb=null \
@@ -97,7 +97,7 @@
 # ------------------------------------------------------------------------
 # taskset -c 0-2 \
 # python3 src/train.py \
-#     experiment=cifar10/vae_agnostic \
+#     experiment=cifar10/realnvp_agnostic \
 #     run_name=wasserstein_t390_high \
 #     callbacks.thres_drift=null \
 #     callbacks.cap_sn_zb=null \
@@ -122,27 +122,26 @@
 # ------------------------------------------------------------------------
 # Semi-supervised search (cvar25)
 # ------------------------------------------------------------------------
-# python3 src/train.py \
-#     -m \
-#     hydra/launcher=submitit_slurm_clariden \
-#     hydra.sweeper.n_jobs=6 \
-#     experiment=cifar10/vae \
-#     experiment_name=cifar10_vae_cvar25_vs_kl_search \
-#     callbacks.max_rate_ckpt=null \
-#     callbacks.cvar10_ema_ckpt=null \
-#     ~evaluation.evaluator.ckpts.single.eff__ascore_full__brate_operational \
-#     ~evaluation.evaluator.ckpts.summary.cvar10_ema \
-#     evaluation.callbacks.thres_drift=null \
-#     evaluation.callbacks.wasserstein=null \
-#     evaluation.callbacks.reco=null \
-#     logger=none \
-#     hparams_search=imagevae_optuna \
-#     hydra.sweeper.study_name=cvar25eff_vs_kl \
-#     hydra.sweeper.n_trials=600 \
-#     hydra.sweeper.sampler.n_startup_trials=150 \
-#     trainer=gpu \
-#     trainer.max_epochs=50 \
-#     trainer.devices=[0]
+python3 src/train.py \
+    -m \
+    hydra/launcher=submitit_slurm_clariden \
+    hydra.sweeper.n_jobs=6 \
+    experiment=cifar10/realnvp \
+    experiment_name=cifar10_realnvp_cvar25_vs_logp_search \
+    callbacks.max_rate_ckpt=null \
+    callbacks.cvar10_ema_ckpt=null \
+    ~evaluation.evaluator.ckpts.single.eff__ascore_full__brate_operational \
+    ~evaluation.evaluator.ckpts.summary.cvar10_ema \
+    evaluation.callbacks.thres_drift=null \
+    evaluation.callbacks.wasserstein=null \
+    logger=none \
+    hparams_search=imagerealnvp_optuna \
+    hydra.sweeper.study_name=cvar25eff_vs_logp \
+    hydra.sweeper.n_trials=600 \
+    hydra.sweeper.sampler.n_startup_trials=150 \
+    trainer=gpu \
+    trainer.max_epochs=50 \
+    trainer.devices=[0]
 
 # ------------------------------------------------------------------------
 # Semi-supervised search (cvar10)
@@ -151,19 +150,18 @@
 #     -m \
 #     hydra/launcher=submitit_slurm_clariden \
 #     hydra.sweeper.n_jobs=6 \
-#     experiment=cifar10/vae \
-#     experiment_name=cifar10_vae_cvar10_vs_kl_search \
+#     experiment=cifar10/realnvp \
+#     experiment_name=cifar10_realnvp_cvar10_vs_logp_search \
 #     callbacks.max_rate_ckpt=null \
 #     callbacks.cvar25_ema_ckpt=null \
 #     ~evaluation.evaluator.ckpts.single.eff__ascore_full__brate_operational \
 #     ~evaluation.evaluator.ckpts.summary.cvar25_ema \
 #     evaluation.callbacks.thres_drift=null \
 #     evaluation.callbacks.wasserstein=null \
-#     evaluation.callbacks.reco=null \
 #     evaluation.callbacks.anomaly_efficiency.cvar_summary=0.10 \
 #     logger=none \
-#     hparams_search=imagevae_optuna \
-#     hydra.sweeper.study_name=cvar10eff_vs_kl \
+#     hparams_search=imagerealnvp_optuna \
+#     hydra.sweeper.study_name=cvar10eff_vs_logp \
 #     hydra.sweeper.n_trials=100 \
 #     hydra.sweeper.sampler.n_startup_trials=150 \
 #     trainer=gpu \
@@ -177,8 +175,8 @@
 #     -m \
 #     hydra/launcher=submitit_slurm_clariden \
 #     hydra.sweeper.n_jobs=6 \
-#     experiment=cifar10/vae_agnostic \
-#     experiment_name=cifar10_vae_agnostic_cap_vs_kl_search \
+#     experiment=cifar10/realnvp_agnostic \
+#     experiment_name=cifar10_realnvp_agnostic_cap_vs_logp_search \
 #     callbacks.anomaly_eff=null \
 #     callbacks.thres_drift=null \
 #     callbacks.wasserstein_dist=null \
@@ -189,10 +187,9 @@
 #     evaluation.callbacks.anomaly_efficiency=null \
 #     evaluation.callbacks.thres_drift=null \
 #     evaluation.callbacks.wasserstein=null \
-#     evaluation.callbacks.reco=null \
 #     logger=none \
-#     hparams_search=imagevae_optuna \
-#     hydra.sweeper.study_name=cap_vs_kl \
+#     hparams_search=imagerealnvp_optuna \
+#     hydra.sweeper.study_name=cap_vs_logp \
 #     hydra.sweeper.n_trials=600 \
 #     hydra.sweeper.sampler.n_startup_trials=150 \
 #     trainer=gpu \
@@ -206,8 +203,8 @@
 #     -m \
 #     hydra/launcher=submitit_slurm_clariden \
 #     hydra.sweeper.n_jobs=6 \
-#     experiment=cifar10/vae_agnostic \
-#     experiment_name=cifar10_vae_agnostic_drift_vs_kl_search \
+#     experiment=cifar10/realnvp_agnostic \
+#     experiment_name=cifar10_realnvp_agnostic_drift_vs_logp_search \
 #     callbacks.anomaly_eff=null \
 #     callbacks.cap_sn_zb=null \
 #     callbacks.wasserstein_dist=null \
@@ -218,19 +215,17 @@
 #     evaluation.callbacks.anomaly_efficiency=null \
 #     evaluation.callbacks.cap_sn_zb=null \
 #     evaluation.callbacks.wasserstein=null \
-#     evaluation.callbacks.reco=null \
 #     logger=none \
-#     hparams_search=imagevae_optuna \
+#     hparams_search=imagerealnvp_optuna \
 #     optimized_metric_config.main_metric.callback.name=thres_drift \
 #     optimized_metric_config.main_metric.direction=minimize \
-#     hydra.sweeper.study_name=drift_vs_kl \
+#     hydra.sweeper.study_name=drift_vs_logp \
 #     hydra.sweeper.direction='[minimize, minimize]' \
 #     hydra.sweeper.n_trials=600 \
 #     hydra.sweeper.sampler.n_startup_trials=150 \
 #     trainer=gpu \
 #     trainer.max_epochs=50 \
 #     trainer.devices=[0]
-
 
 # ------------------------------------------------------------------------
 # Wasserstein search
@@ -239,8 +234,8 @@
 #     -m \
 #     hydra/launcher=submitit_slurm_clariden \
 #     hydra.sweeper.n_jobs=6 \
-#     experiment=cifar10/vae_agnostic \
-#     experiment_name=cifar10_vae_agnostic_wasserstein_vs_kl_search \
+#     experiment=cifar10/realnvp_agnostic \
+#     experiment_name=cifar10_realnvp_agnostic_wasserstein_vs_logp_search \
 #     callbacks.anomaly_eff=null \
 #     callbacks.cap_sn_zb=null \
 #     callbacks.thres_drift=null \
@@ -251,12 +246,11 @@
 #     evaluation.callbacks.anomaly_efficiency=null \
 #     evaluation.callbacks.cap_sn_zb=null \
 #     evaluation.callbacks.thres_drift=null \
-#     evaluation.callbacks.reco=null \
 #     logger=none \
-#     hparams_search=imagevae_optuna \
+#     hparams_search=imagerealnvp_optuna \
 #     optimized_metric_config.main_metric.callback.name=wasserstein \
 #     optimized_metric_config.main_metric.direction=minimize \
-#     hydra.sweeper.study_name=wasserstein_vs_kl \
+#     hydra.sweeper.study_name=wasserstein_vs_logp \
 #     hydra.sweeper.direction='[minimize, minimize]' \
 #     hydra.sweeper.n_trials=600 \
 #     hydra.sweeper.sampler.n_startup_trials=150 \

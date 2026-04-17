@@ -2,7 +2,7 @@
 
 defaults:
   - override /data: cifar10
-  - override /algorithm: image_ae
+  - override /algorithm: image_vae
   - override /callbacks: default
   - override /trainer: cpu
   - override /evaluation: default
@@ -10,9 +10,9 @@ defaults:
   - override /logger: mlflow
 
 seed: 123
-tags: ["ae", "cifar10", "signal"]
+tags: ["vae", "cifar10", "signal"]
 
-experiment_name: cifar10_ae_models
+experiment_name: cifar10_vae_models
 run_name: ${short_hash:${hydra:runtime.output_dir},12}
 
 data:

@@ -17,7 +17,7 @@ hydra:
     storage: sqlite:///logs/optuna/cifar10/vae.db
 
     # name of the study to persist optimization results
-    study_name: cvar25eff_vs_mse_b16k
+    study_name: cvar25eff_vs_mse
 
     # number of parallel workers
     n_jobs: 1
@@ -39,12 +39,16 @@ hydra:
     # define hyperparameter search space. Assumes using torch.optim.AdamW
     params:
       trainer.gradient_clip_val: choice(0.0, 0.5, 1.0, 2.0)
-      algorithm.delta: choice(0.5, 1.0, 2.0, 3.0, 5.0)
-      algorithm.input_noise_std: choice(0.0, 0.01, 0.03, 0.05, 0.1)
-      algorithm.encoder.nodes: choice([16, 32, 64],[16, 32, 128],[16, 64, 128],[32, 64, 128],[32, 64, 256],[32, 128, 256],[64, 128, 256])
 
+      algorithm.encoder.clamp_zlogvar_range: choice([-20, 10],[-10, 6],[-8, 6],[-6, 4])
+      algorithm.optimizer.lr: tag(log, interval(5e-5, 1e-3))
+      algorithm.optimizer.betas: choice([0.9, 0.999], [0.9, 0.99])
+      algorithm.optimizer.weight_decay: choice(0.0, 1e-6, 1e-5, 1e-4, 1e-3)
+
+      algorithm.kl_scale: choice(3e-5, 1e-4, 3e-4, 1e-3, 2e-3)
+      algorithm.kl_warmup_frac: choice(0.0, 0.05, 0.1, 0.2, 0.3)
+
+      algorithm.encoder.nodes: choice([16, 32, 64, 16],[16, 32, 64, 32],[24, 48, 96, 32],[32, 64, 128, 32],[32, 64, 128, 64],[32, 64, 256, 64],[48, 96, 192, 64],[64, 128, 256, 64],[64, 128, 256, 128])
       algorithm.encoder.strides: choice([2, 2],[2, 1],[1, 2])
       algorithm.encoder.activation: choice(relu, gelu, silu)
-      algorithm.optimizer.lr: tag(log, interval(1e-4, 3e-3))
-      algorithm.optimizer.betas: choice([0.9, 0.999], [0.9, 0.99])
-      algorithm.optimizer.weight_decay: choice(0.0, 1e-5, 1e-4, 5e-4, 1e-3)
+      algorithm.encoder.batchnorm: choice(true, false)

@@ -13,12 +13,12 @@ encoder:
 
 decoder:
   _target_: src.algorithms.components.decoder.ImageDecoder
-  nodes: ${reverse:${algorithm.encoder.nodes}}
+  nodes: ${smaller_image_decoder:${algorithm.encoder.nodes}}
   out_channels: ${algorithm.encoder.in_channels}
   input_size: ${algorithm.encoder.input_size}
   strides: ${reverse:${algorithm.encoder.strides}}
-  activation: relu
-  batchnorm: false
+  activation: ${algorithm.encoder.activation}
+  batchnorm: ${algorithm.encoder.batchnorm}
   final_activation: null
 
 kl_warmup_frac: 0.0

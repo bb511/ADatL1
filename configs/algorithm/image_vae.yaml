@@ -1,0 +1,28 @@
+_target_: src.algorithms.image_vae.ImageVAE
+features: null
+
+encoder:
+  _target_: src.algorithms.components.encoder.ImageVariationalEncoder
+  in_channels: 3
+  input_size: [32, 32]
+  nodes: [32, 64, 128, 64]
+  strides: [2, 2]
+  activation: relu
+  batchnorm: false
+  clamp_zlogvar_range: [-20.0, 10.0]
+
+decoder:
+  _target_: src.algorithms.components.decoder.ImageDecoder
+  nodes: ${reverse:${algorithm.encoder.nodes}}
+  out_channels: ${algorithm.encoder.in_channels}
+  input_size: ${algorithm.encoder.input_size}
+  strides: ${reverse:${algorithm.encoder.strides}}
+  activation: relu
+  batchnorm: false
+  final_activation: null
+
+kl_warmup_frac: 0.0
+kl_scale: 1.0
+
+target_rate: 0.01
+base_rate: null

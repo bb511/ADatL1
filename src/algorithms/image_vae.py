@@ -1,4 +1,4 @@
-# Variational auto-encoder model implementation.
+# Variational auto-encoder model implementation for images.
 from typing import Optional
 
 import torch
@@ -8,23 +8,20 @@ from src.algorithms import ADLightningModule
 from src.algorithms.losses.vae import ClassicVAELoss
 from src.algorithms.schedulers.linear import LinearWarmup
 from src.algorithms.utils.weight_loader import load_weights
-from src.algorithms.utils.object_feature_map_loader import inject_object_feature_map
-from src.algorithms.components.encoder import VariationalEncoder
-from src.algorithms.components.decoder import Decoder
 from src.data.utils import unpack_batch
 from src.utils import pylogger
 
 log = pylogger.RankedLogger(__name__)
 
 
-class VAE(ADLightningModule):
-    """Variational autoencoder module.
+class ImageVAE(ADLightningModule):
+    """Variational autoencoder module for image data.
 
-    :param encoder: The encoder nn module.
-    :param decoder: The decoder nn module.
+    :param encoder: The variational image encoder nn module.
+    :param decoder: The image decoder nn module.
     :param kl_warmup_frac: Fraction of total steps used to warm up the KL scale.
     :param kl_scale: Float pertaining to the scaling factor before the KL divergence.
-    :param features: Optional nn module applied to the flattened input.
+    :param features: Optional nn module applied to the image input.
     :param ckpt: Optional checkpoint path to resume weights from.
     :param target_rate: Target background rate or FPR.
     :param base_rate: Base rate used to convert target_rate into an FPR.
@@ -58,7 +55,6 @@ class VAE(ADLightningModule):
         self.loss = ClassicVAELoss(kl_scale=kl_scale, reduction="none")
 
     def on_fit_start(self):
-        inject_object_feature_map(self)
         self.features.to(self.device)
 
         total_steps = int(self.trainer.estimated_stepping_batches)
@@ -66,9 +62,6 @@ class VAE(ADLightningModule):
 
         if self.ckpt_path:
             self._load_checkpoint()
-
-    def on_test_start(self):
-        inject_object_feature_map(self)
 
     @property
     def target_fpr(self) -> float:
@@ -83,10 +76,10 @@ class VAE(ADLightningModule):
     def model_step(self, batch: torch.Tensor) -> dict[str, torch.Tensor]:
         b = unpack_batch(batch)
 
-        x = torch.flatten(b.x, start_dim=1)
+        x = b.x
         m = b.mask
         if m is not None:
-            m = torch.flatten(m, start_dim=1).float()
+            m = m.float()
 
         z_mean, z_log_var, z, reconstruction = self.forward(x)
 
@@ -128,7 +121,7 @@ class VAE(ADLightningModule):
             z_mean_squared = torch.square(z_mean).sum(dim=1)
             z_mean_squared_mean = z_mean_squared.mean().item()
 
-        del x, z, z_log_var
+        del z, z_log_var
 
         loss_mean = loss.mean()
         reco_loss_mean = reco_loss.mean()
@@ -196,16 +189,22 @@ class VAE(ADLightningModule):
         ckpt = torch.load(self.ckpt_path, map_location="cpu", weights_only=False)
         state_dict = ckpt["state_dict"]
 
-        is_lightning_encoder = isinstance(self.encoder, VariationalEncoder)
-        is_lightning_decoder = isinstance(self.decoder, Decoder)
-        if is_lightning_encoder and is_lightning_decoder:
+        # For image models, the standard case is that encoder/decoder are directly
+        # registered Lightning submodules and can be loaded strictly.
+        try:
             self.load_state_dict(state_dict, strict=True)
             return
+        except RuntimeError:
+            pass
 
-        enc_mlp = self.encoder.get_layer("enc_mlp")
-        dec_mlp = self.decoder.get_layer("dec_mlp")
-        load_weights(enc_mlp, state_dict, "encoder", False)
-        load_weights(dec_mlp, state_dict, "decoder", False)
+        # Fallback to partial loading if the image encoder/decoder expose layer getters.
+        if hasattr(self.encoder, "get_layer"):
+            enc_net = self.encoder.get_layer("enc_mlp")
+            load_weights(enc_net, state_dict, "encoder", False)
+
+        if hasattr(self.decoder, "get_layer"):
+            dec_net = self.decoder.get_layer("dec_mlp")
+            load_weights(dec_net, state_dict, "decoder", False)
 
     def _add_hgq_loss(self, loss: torch.Tensor) -> torch.Tensor:
         """Add additional HGQ losses if they exist."""
@@ -218,4 +217,4 @@ class VAE(ADLightningModule):
             add_loss = add_loss + torch.stack([l for l in self.decoder.losses]).sum()
 
         return loss + add_loss
-
+        

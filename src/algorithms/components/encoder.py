@@ -385,3 +385,116 @@ class ImageEncoder(nn.Module):
         x = self.net(x)
         x = torch.flatten(x, start_dim=1)
         return self.proj(x)
+
+
+class ImageVariationalEncoder(nn.Module):
+    """Simple variational image encoder model.
+
+    :param in_channels: Number of input image channels.
+    :param input_size: Spatial input size as (height, width).
+    :param nodes: List of ints specifying the encoder widths.
+        The convention is:
+          - nodes[:-2]: convolutional hidden channel widths
+          - nodes[-2]: hidden projection width before latent heads
+          - nodes[-1]: latent dimension
+    :param strides: List of strides for the convolutional body. Must have length
+        len(nodes) - 2.
+    :param activation: Activation function name.
+    :param init_weight: Callable method to initialize the encoder weights.
+    :param init_bias: Callable method to initialize the encoder biases.
+    :param batchnorm: Whether to use batch normalization or not.
+    :param clamp_zlogvar_range: Tuple defining the range of the z_log_var values.
+    """
+
+    def __init__(
+        self,
+        in_channels: int,
+        input_size: tuple[int, int] | list[int] = (32, 32),
+        nodes: list[int] | None = None,
+        strides: Optional[list[int]] = None,
+        activation: str = "relu",
+        init_weight: Optional[Callable] = None,
+        init_bias: Optional[Callable] = None,
+        batchnorm: bool = False,
+        clamp_zlogvar_range: tuple[float, float] = (-20.0, 10.0),
+    ):
+        super().__init__()
+
+        if nodes is None or len(nodes) < 3:
+            raise ValueError(
+                "nodes must contain at least three entries: "
+                "[conv..., hidden_dim, latent_dim]."
+            )
+
+        conv_nodes = list(nodes[:-2])
+        hidden_dim = int(nodes[-2])
+        latent_dim = int(nodes[-1])
+
+        if len(conv_nodes) < 1:
+            raise ValueError(
+                "ImageVariationalEncoder requires at least one convolutional layer."
+            )
+
+        if strides is None:
+            strides = [1] * len(conv_nodes)
+        if len(strides) != len(conv_nodes):
+            raise ValueError("strides must have length len(nodes) - 2.")
+
+        self.input_size = tuple(int(x) for x in input_size)
+        self.conv_nodes = conv_nodes
+        self.hidden_dim = hidden_dim
+        self.latent_dim = latent_dim
+        self.clamp_zlogvar_range = clamp_zlogvar_range
+
+        self.net = ImageMLP(
+            in_channels=in_channels,
+            nodes=conv_nodes,
+            strides=strides,
+            transpose=False,
+            batchnorm=batchnorm,
+            activation=activation,
+            final_activation=True,
+            init_weight=init_weight,
+            init_bias=init_bias,
+        )
+
+        h, w = self.input_size
+        for s in strides:
+            h = (h + s - 1) // s
+            w = (w + s - 1) // s
+
+        self.feature_shape = (conv_nodes[-1], h, w)
+        self.feature_dim = conv_nodes[-1] * h * w
+
+        self.proj = nn.Linear(self.feature_dim, hidden_dim)
+        self.z_mean = nn.Linear(hidden_dim, latent_dim)
+        self.z_log_var = nn.Linear(hidden_dim, latent_dim)
+
+        if init_weight is not None:
+            init_weight(self.proj.weight)
+            init_weight(self.z_mean.weight)
+            init_weight(self.z_log_var.weight)
+
+        if init_bias is not None:
+            if self.proj.bias is not None:
+                init_bias(self.proj.bias)
+            if self.z_mean.bias is not None:
+                init_bias(self.z_mean.bias)
+            if self.z_log_var.bias is not None:
+                init_bias(self.z_log_var.bias)
+
+    def forward(self, x: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+        x = self.net(x)
+        x = torch.flatten(x, start_dim=1)
+        x = self.proj(x)
+
+        z_mean = self.z_mean(x)
+        z_log_var = self.z_log_var(x).clamp(*self.clamp_zlogvar_range)
+        z = self.sample(z_mean, z_log_var)
+        return z_mean, z_log_var, z
+
+    def sample(self, z_mean: torch.Tensor, z_log_var: torch.Tensor) -> torch.Tensor:
+        """Perform the reparameterization trick."""
+        std = torch.exp(0.5 * z_log_var)
+        epsilon = torch.randn_like(std)
+        return z_mean + std * epsilon

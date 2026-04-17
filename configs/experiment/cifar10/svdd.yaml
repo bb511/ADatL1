@@ -2,7 +2,7 @@
 
 defaults:
   - override /data: cifar10
-  - override /algorithm: image_realnvp
+  - override /algorithm: image_svdd
   - override /callbacks: default
   - override /trainer: cpu
   - override /evaluation: default
@@ -10,9 +10,9 @@ defaults:
   - override /logger: mlflow
 
 seed: 123
-tags: ["realnvp", "cifar10", "agnostic", "cap"]
+tags: ["deepsvdd", "cifar10", "signal"]
 
-experiment_name: cifar10_realnvp_models
+experiment_name: cifar10_deepsvdd_models
 run_name: ${short_hash:${hydra:runtime.output_dir},12}
 
 data:
@@ -27,10 +27,11 @@ trainer:
 
 test: true
 
+# Metrics to report to optuna for every checkpoint.
 optimized_metric_config:
   main_metric:
     callback:
-      name: cap
+      name: eff
       params: {}
     direction: maximize
   sec_metric:
@@ -45,8 +46,9 @@ algorithm:
   target_rate: 0.01
   base_rate: null
 
-  flow:
-    input_dim: 3072
+  encoder:
+    in_channels: 3
+    input_size: [32, 32]
 
   optimizer:
     _partial_: true
@@ -64,43 +66,23 @@ callbacks:
     output_name: 'ascore/full'
     beta: 0.9
 
-  thres_drift:
-    _target_: src.callbacks.thres_drift.ThresholdDriftCallback
-    output_name: 'ascore/full'
-    calibration_fraction: 0.5
-    split_seed: 12345
-    beta: 0.9
-
-  wasserstein_dist:
-    _target_: src.callbacks.wasserstein.WassersteinCallback
-    output_name: 'ascore/full'
-    dataset_1: normal
-    dataset_2: reference_normal
-    apply_log1p: true
-    beta: 0.9
-
-  cap_sn_zb:
-    _target_: src.callbacks.cap.CAPCallback
-    output_name: 'ascore/full'
-    dataset_1: normal
-    dataset_2: reference_normal
-    pairing_type: cdf
-    cap_metric_config:
-      beta0: 1.0
-      normalization_type: sigmoid
-      normalization_params: null
-      energy_type: adaptive
-      energy_params:
-        scale: 0.5
-      regularization_type: none
-      regularization_params: null
-      binary: True
-      lr: 0.01
-      n_epochs: 20
-      batch_size: 8192
-      normalize_gradients: True
-      process_group: null
-      dist_sync_fn: null
+  max_rate_ckpt:
+    _target_: src.callbacks.model_checkpoint.SingleDatasetModelCheckpoint
+    dirpath: '${paths.checkpoints_dir}/${experiment_name}/${run_name}'
+    monitor: eff__ascore_full__brate_operational
+    criterion:
+      _target_: src.callbacks.checkpointing.criterion.Max
+      top_k: 1
+    ds:
+      - '1'
+      - '2'
+      - '3'
+      - '4'
+      - '5'
+      - '6'
+      - '7'
+      - '8'
+      - '9'
 
   stable_ascore_operational_ckpt:
     _target_: src.callbacks.model_checkpoint.SingleDatasetModelCheckpoint
@@ -114,37 +96,24 @@ callbacks:
     ds:
       - normal
 
-  thres_drift_ema_ckpt:
+  cvar25_ema_ckpt:
     _target_: pytorch_lightning.callbacks.ModelCheckpoint
-    dirpath: '${paths.checkpoints_dir}/${experiment_name}/${run_name}/summary/operational_drift_ema/min'
-    monitor: 'val/summary/operational_drift_ema'
-    filename: 'operational_drift_ema'
+    dirpath: '${paths.checkpoints_dir}/${experiment_name}/${run_name}/summary/cvar25_ema/max'
+    monitor: 'val/summary/eff_cvar25_ema_operational'
+    filename: 'cvar25_ema'
     save_last: false
     save_top_k: 1
-    mode: "min"
+    mode: "max"
     auto_insert_metric_name: False
     save_weights_only: False
     every_n_epochs: 1
     save_on_train_epoch_end: false
 
-  wasserstein_dist_ema_ckpt:
+  cvar10_ema_ckpt:
     _target_: pytorch_lightning.callbacks.ModelCheckpoint
-    dirpath: '${paths.checkpoints_dir}/${experiment_name}/${run_name}/summary/w1dist_ema_normal_vs_reference_normal/min'
-    monitor: 'val/summary/w1dist_ema_normal_vs_reference_normal'
-    filename: 'w1dist_ema_normal_vs_reference_normal'
-    save_last: false
-    save_top_k: 1
-    mode: "min"
-    auto_insert_metric_name: False
-    save_weights_only: False
-    every_n_epochs: 1
-    save_on_train_epoch_end: false
-
-  cap_sn_zb_ema_ckpt:
-    _target_: pytorch_lightning.callbacks.ModelCheckpoint
-    dirpath: '${paths.checkpoints_dir}/${experiment_name}/${run_name}/summary/cap_ema_normal_vs_reference_normal/max'
-    monitor: 'val/summary/cap_ema_normal_vs_reference_normal'
-    filename: 'cap_ema_normal_vs_reference_normal'
+    dirpath: '${paths.checkpoints_dir}/${experiment_name}/${run_name}/summary/cvar10_ema/max'
+    monitor: 'val/summary/eff_cvar10_ema_operational'
+    filename: 'cvar10_ema'
     save_last: false
     save_top_k: 1
     mode: "max"
@@ -158,11 +127,11 @@ evaluation:
     ckpts:
       last: true
       summary:
-        operational_drift_ema: ['min']
-        w1dist_ema_normal_vs_reference_normal: ['min']
-        cap_ema_normal_vs_reference_normal: ['max']
+        cvar25_ema: ['max']
+        cvar10_ema: ['max']
       single:
         ascore_operational: ['stable']
+        eff__ascore_full__brate_operational: ['max']
 
   callbacks:
     anomaly_efficiency:
@@ -180,30 +149,6 @@ evaluation:
         - '9'
       cvar_summary: 0.25
       log_raw_mlflow: false
-
-    cap_sn_zb:
-      _target_: src.evaluation.callbacks.cap.CAP
-      output_name: 'ascore/full'
-      dataset_1: normal
-      dataset_2: reference_normal
-      log_raw_mlflow: false
-      pairing_type: cdf
-      cap_metric_config:
-        beta0: 1.0
-        normalization_type: sigmoid
-        normalization_params: null
-        energy_type: adaptive
-        energy_params:
-          scale: 0.5
-        regularization_type: none
-        regularization_params: null
-        binary: True
-        lr: 0.01
-        n_epochs: 20
-        batch_size: 8192
-        normalize_gradients: True
-        process_group: null
-        dist_sync_fn: null
 
     ascore_operational:
       _target_: src.evaluation.callbacks.output.OutputCallback

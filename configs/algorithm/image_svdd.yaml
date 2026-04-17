@@ -1,0 +1,25 @@
+# Template Deep SVDD configuration.
+defaults:
+  - _self_
+
+_target_: src.algorithms.image_svdd.ImageDeepSVDD
+features: null
+ckpt: ''
+
+target_rate: 0.01
+base_rate: null
+
+encoder:
+  _target_: src.algorithms.components.encoder.ImageEncoder
+  in_channels: 3
+  input_size: [32, 32]
+  nodes: [32, 64, 128]
+  strides: [2, 2]
+  activation: relu
+  batchnorm: false
+
+center_init_method: mean
+
+nu: 0.1
+weight_decay: 1e-6
+soft_boundary: false

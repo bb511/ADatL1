@@ -2,7 +2,7 @@
 
 defaults:
   - override /data: cifar10
-  - override /algorithm: image_realnvp
+  - override /algorithm: image_svdd
   - override /callbacks: default
   - override /trainer: cpu
   - override /evaluation: default
@@ -10,9 +10,9 @@ defaults:
   - override /logger: mlflow
 
 seed: 123
-tags: ["realnvp", "cifar10", "agnostic", "cap"]
+tags: ["deepsvdd", "cifar10", "agnostic"]
 
-experiment_name: cifar10_realnvp_models
+experiment_name: cifar10_deepsvdd_models
 run_name: ${short_hash:${hydra:runtime.output_dir},12}
 
 data:
@@ -27,6 +27,7 @@ trainer:
 
 test: true
 
+# Metrics to report for each checkpoint.
 optimized_metric_config:
   main_metric:
     callback:
@@ -45,8 +46,9 @@ algorithm:
   target_rate: 0.01
   base_rate: null
 
-  flow:
-    input_dim: 3072
+  encoder:
+    in_channels: 3
+    input_size: [32, 32]
 
   optimizer:
     _partial_: true

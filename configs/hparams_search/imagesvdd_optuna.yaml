@@ -1,0 +1,56 @@
+# @package _global_
+
+defaults:
+  - override /hydra/sweeper: optuna
+  - override /hydra/sweeper/sampler: motpe
+
+# here we define Optuna hyperparameter search
+# it optimizes for value returned from function with @hydra.main decorator
+# docs: https://hydra.cc/docs/next/plugins/optuna_sweeper
+hydra:
+  mode: "MULTIRUN" # set hydra to multirun by default if this config is attached
+  sweeper:
+    _target_: hydra_plugins.hydra_optuna_sweeper.optuna_sweeper.OptunaSweeper
+
+    # storage URL to persist optimization results
+    # for example, you can use SQLite if you set 'sqlite:///example.db'
+    storage: sqlite:///logs/optuna/cifar10/svdd.db
+
+    # name of the study to persist optimization results
+    study_name: cvar25eff_vs_mse
+
+    # number of parallel workers
+    n_jobs: 1
+
+    # 'minimize' or 'maximize' the objective
+    direction: [maximize, minimize]
+
+    # total number of runs that will be executed
+    n_trials: 15
+
+    # choose Optuna hyperparameter sampler
+    # you can choose bayesian sampler (tpe), random search (without optimization), grid sampler, and others
+    # docs: https://optuna.readthedocs.io/en/stable/reference/samplers.html
+    sampler:
+      n_startup_trials: 3
+      consider_endpoints: true
+      n_ehvi_candidates: 256
+
+    # define hyperparameter search space. Assumes using torch.optim.AdamW
+    params:
+      algorithm.optimizer.lr: tag(log, interval(3e-5, 3e-3))
+      trainer.gradient_clip_val: choice(0.0, 0.5, 1.0, 2.0)
+      algorithm.optimizer.betas: choice([0.9, 0.999], [0.9, 0.99])
+      algorithm.optimizer.weight_decay: choice(0.0, 1e-6, 1e-5, 1e-4, 1e-3)
+
+      algorithm.weight_decay: choice(0.0, 1e-8, 1e-7, 1e-6, 1e-5)
+      algorithm.soft_boundary: choice(false, true)
+      algorithm.nu: choice(0.01, 0.05, 0.1, 0.2)
+
+      algorithm.center_init_method: choice(mean, zeros)
+
+      algorithm.encoder.nodes: choice([16, 32, 64],[16, 32, 128],[16, 64, 128],[32, 64, 128],[32, 64, 256],[32, 128, 256],[64, 128, 256])
+
+      algorithm.encoder.strides: choice([2, 2], [2, 1], [1, 2])
+      algorithm.encoder.activation: choice(relu, gelu, silu)
+      algorithm.encoder.batchnorm: choice(false, true)

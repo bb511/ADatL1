@@ -122,27 +122,27 @@
 # ------------------------------------------------------------------------
 # Semi-supervised search (cvar25)
 # ------------------------------------------------------------------------
-python3 src/train.py \
-    -m \
-    hydra/launcher=submitit_slurm_clariden \
-    hydra.sweeper.n_jobs=6 \
-    experiment=cifar10/vae \
-    experiment_name=cifar10_vae_cvar25_vs_kl_search \
-    callbacks.max_rate_ckpt=null \
-    callbacks.cvar10_ema_ckpt=null \
-    ~evaluation.evaluator.ckpts.single.eff__ascore_full__brate_operational \
-    ~evaluation.evaluator.ckpts.summary.cvar10_ema \
-    evaluation.callbacks.thres_drift=null \
-    evaluation.callbacks.wasserstein=null \
-    evaluation.callbacks.reco=null \
-    logger=none \
-    hparams_search=imagevae_optuna \
-    hydra.sweeper.study_name=cvar25eff_vs_kl \
-    hydra.sweeper.n_trials=600 \
-    hydra.sweeper.sampler.n_startup_trials=150 \
-    trainer=gpu \
-    trainer.max_epochs=50 \
-    trainer.devices=[0]
+# python3 src/train.py \
+#     -m \
+#     hydra/launcher=submitit_slurm_clariden \
+#     hydra.sweeper.n_jobs=6 \
+#     experiment=cifar10/vae \
+#     experiment_name=cifar10_vae_cvar25_vs_kl_search \
+#     callbacks.max_rate_ckpt=null \
+#     callbacks.cvar10_ema_ckpt=null \
+#     ~evaluation.evaluator.ckpts.single.eff__ascore_full__brate_operational \
+#     ~evaluation.evaluator.ckpts.summary.cvar10_ema \
+#     evaluation.callbacks.thres_drift=null \
+#     evaluation.callbacks.wasserstein=null \
+#     evaluation.callbacks.reco=null \
+#     logger=none \
+#     hparams_search=imagevae_optuna \
+#     hydra.sweeper.study_name=cvar25eff_vs_kl \
+#     hydra.sweeper.n_trials=600 \
+#     hydra.sweeper.sampler.n_startup_trials=150 \
+#     trainer=gpu \
+#     trainer.max_epochs=50 \
+#     trainer.devices=[0]
 
 # ------------------------------------------------------------------------
 # Semi-supervised search (cvar10)
@@ -173,31 +173,31 @@ python3 src/train.py \
 # ------------------------------------------------------------------------
 # CAP search
 # ------------------------------------------------------------------------
-# python3 src/train.py \
-#     -m \
-#     hydra/launcher=submitit_slurm_clariden \
-#     hydra.sweeper.n_jobs=6 \
-#     experiment=cifar10/vae_agnostic \
-#     experiment_name=cifar10_vae_agnostic_cap_vs_kl_search \
-#     callbacks.anomaly_eff=null \
-#     callbacks.thres_drift=null \
-#     callbacks.wasserstein_dist=null \
-#     callbacks.thres_drift_ema_ckpt=null \
-#     callbacks.wasserstein_dist_ema_ckpt=null \
-#     ~evaluation.evaluator.ckpts.summary.operational_drift_ema \
-#     ~evaluation.evaluator.ckpts.summary.w1dist_ema_normal_vs_reference_normal \
-#     evaluation.callbacks.anomaly_efficiency=null \
-#     evaluation.callbacks.thres_drift=null \
-#     evaluation.callbacks.wasserstein=null \
-#     evaluation.callbacks.reco=null \
-#     logger=none \
-#     hparams_search=imagevae_optuna \
-#     hydra.sweeper.study_name=cap_vs_kl \
-#     hydra.sweeper.n_trials=600 \
-#     hydra.sweeper.sampler.n_startup_trials=150 \
-#     trainer=gpu \
-#     trainer.max_epochs=50 \
-#     trainer.devices=[0]
+python3 src/train.py \
+    -m \
+    hydra/launcher=submitit_slurm_clariden \
+    hydra.sweeper.n_jobs=6 \
+    experiment=cifar10/vae_agnostic \
+    experiment_name=cifar10_vae_agnostic_cap_vs_kl_search \
+    callbacks.anomaly_eff=null \
+    callbacks.thres_drift=null \
+    callbacks.wasserstein_dist=null \
+    callbacks.thres_drift_ema_ckpt=null \
+    callbacks.wasserstein_dist_ema_ckpt=null \
+    ~evaluation.evaluator.ckpts.summary.operational_drift_ema \
+    ~evaluation.evaluator.ckpts.summary.w1dist_ema_normal_vs_reference_normal \
+    evaluation.callbacks.anomaly_efficiency=null \
+    evaluation.callbacks.thres_drift=null \
+    evaluation.callbacks.wasserstein=null \
+    evaluation.callbacks.reco=null \
+    logger=none \
+    hparams_search=imagevae_optuna \
+    hydra.sweeper.study_name=cap_vs_kl \
+    hydra.sweeper.n_trials=600 \
+    hydra.sweeper.sampler.n_startup_trials=150 \
+    trainer=gpu \
+    trainer.max_epochs=50 \
+    trainer.devices=[0]
 
 # ------------------------------------------------------------------------
 # Stability search

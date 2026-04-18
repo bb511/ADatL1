@@ -21,7 +21,7 @@ dependencies = [
     "pre-commit (==3.*)",
     "pytest (==7.*)",
     "ipdb (>=0.13.13,<0.14.0)",
-    "mlflow (==3.1.0)",
+    "mlflow (>=3.2)",
     "hydra-optuna-sweeper (>=1.2.0,<2.0.0)",
     "hydra-colorlog>=1.2.0,<2.0.0",
     "rootutils (>=1.0.7,<2.0.0)",
@@ -32,6 +32,9 @@ dependencies = [
     "mplhep>=0.4.1",
     "sqlalchemy (<2)",
     "optuna (==2.10.1)",
+    "pyarrow (>=21,<23)",
+    "datasets (>=4.8.4,<5.0.0)",
+    "huggingface-hub (>=1.11.0,<2.0.0)",
 ]
 
 [tool.poetry.dependencies]

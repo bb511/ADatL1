@@ -1,0 +1,30 @@
+# @package data
+
+defaults:
+  - _self_
+
+_target_: src.data.RobustAD_datamodule.RobustADDataModule
+
+# Root directory where the dataset will be downloaded / stored
+data_dir: ${paths.base_data_dir}/robustad
+
+# Which subset to use: pcb | metal_parts | piled_bags
+subset: pcb
+
+# Optional resize (set null to keep original resolution)
+image_size: [32, 32]
+
+# Training / evaluation
+batch_size: 256
+max_val_batches: -1
+
+# Splitting of source-domain normal (train split)
+val_fraction: 0.1
+test_fraction: 0.1
+
+# Normalization
+normalize: True
+
+# DataLoader
+num_workers: 0
+seed: ${seed}

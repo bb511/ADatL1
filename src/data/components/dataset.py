@@ -127,3 +127,66 @@ class CIFARADDataset(IterableDataset):
 
             yield x, y
             nb += 1
+
+
+class RobustADDataset(IterableDataset):
+    """Custom Dataset for loading RobustAD tensors already in memory."""
+
+    def __init__(
+        self,
+        data: torch.Tensor,
+        labels: torch.Tensor,
+        mask: torch.Tensor | None,
+        batch_size: int,
+        max_batches: int | None = None,
+        shuffler: torch.Generator | None = None,
+    ):
+        assert labels.shape[0] == data.shape[0]
+        if mask is not None:
+            assert mask.shape[0] == data.shape[0]
+
+        self.data = data
+        self.labels = labels
+        self.mask = mask
+        self.batch_size = batch_size
+        self.shuffler = shuffler
+
+        self.max_batches = max_batches
+        self.n = data.shape[0]
+        self.num_batches = (self.n + self.batch_size - 1) // self.batch_size
+        self.starts = torch.arange(self.num_batches, dtype=torch.int64) * self.batch_size
+
+    def __len__(self):
+        if self.max_batches is None or self.max_batches == -1:
+            return self.num_batches
+        return min(self.num_batches, int(self.max_batches))
+
+    def __iter__(self):
+        if self.shuffler is not None:
+            order = torch.randperm(self.num_batches, generator=self.shuffler)
+            starts = self.starts[order]
+        else:
+            starts = self.starts
+
+        bs = self.batch_size
+        n = self.n
+
+        nb = 0
+        for s in starts:
+            s = int(s)
+
+            if self.max_batches is not None and self.max_batches != -1 and nb >= self.max_batches:
+                break
+
+            e = min(s + bs, n)
+
+            x = self.data[s:e]
+            y = self.labels[s:e]
+
+            if self.mask is None:
+                yield x, y
+            else:
+                m = self.mask[s:e]
+                yield x, m, y
+
+            nb += 1

@@ -77,7 +77,6 @@ class CIFARADDataset(IterableDataset):
     only (x, y). This is intended to work with `unpack_batch`, which supports
     2-tuples and sets mask/l1bit to None.
     """
-
     def __init__(
         self,
         data: torch.Tensor,
@@ -131,7 +130,6 @@ class CIFARADDataset(IterableDataset):
 
 class RobustADDataset(IterableDataset):
     """Custom Dataset for loading RobustAD tensors already in memory."""
-
     def __init__(
         self,
         data: torch.Tensor,

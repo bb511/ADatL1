@@ -4,10 +4,10 @@ import gc
 
 import torch
 from PIL import Image
-from pytorch_lightning import LightningDataModule
-from torch.utils.data import DataLoader, TensorDataset, random_split
 from datasets import load_dataset
 from huggingface_hub import snapshot_download
+from pytorch_lightning import LightningDataModule
+from torch.utils.data import DataLoader, TensorDataset, random_split
 
 from src.utils import pylogger
 from colorama import Fore, Back
@@ -24,7 +24,7 @@ class SplitTensors:
 
 
 class RobustADDataModule(LightningDataModule):
-    """Lightning DataModule for RobustAD anomaly detection experiments.
+        """Lightning DataModule for RobustAD anomaly detection experiments.
 
     This module mirrors the structure of the CIFAR10 and physics datamodules:
     the main normal split is stored separately, while auxiliary evaluation splits
@@ -61,13 +61,13 @@ class RobustADDataModule(LightningDataModule):
     :param stats_file: Filename used to cache normalization statistics.
     """
 
-    SPLIT_MAP = {
-        "pcb": ["test0", "test1", "test2", "test3", "test4", "test5"],
-        "piled_bags": ["test0", "test1", "test2", "test3", "test4", "test5"],
-        "metal_parts": ["test0", "test1", "test2", "test3", "test4", "test5", "test6"],
+    SHIFT_MAP = {
+        "pcb": [f"test{i}" for i in range(6)],
+        "piled_bags": [f"test{i}" for i in range(6)],
+        "metal_parts": [f"test{i}" for i in range(7)],
     }
 
-    DATA_DIR_MAP = {
+    DIR_MAP = {
         "pcb": "PCB",
         "metal_parts": "MetalParts",
         "piled_bags": "PiledBags",
@@ -89,514 +89,252 @@ class RobustADDataModule(LightningDataModule):
     ) -> None:
         super().__init__()
         self.save_hyperparameters(logger=False)
-
-        self._main: dict[str, SplitTensors] = {}
-        self._aux: dict[str, dict[str, SplitTensors]] = {"valid": {}, "test": {}}
+        self._main = {}
+        self._aux = {"valid": {}, "test": {}}
         self.shuffler = torch.Generator().manual_seed(seed)
-        self.max_val_batches = max_val_batches
+        self.mean, self.std = None, None
+        self._validate_init()
 
-        self.mean: torch.Tensor | None = None
-        self.std: torch.Tensor | None = None
-
-        subset = str(subset).lower()
-        if subset not in self.SPLIT_MAP:
-            raise ValueError(
-                f"Unknown subset '{subset}'. Expected one of {list(self.SPLIT_MAP.keys())}."
-            )
-
-        if not (0.0 < val_fraction < 1.0):
-            raise ValueError("val_fraction must be strictly between 0 and 1.")
-        if not (0.0 < test_fraction < 1.0):
-            raise ValueError("test_fraction must be strictly between 0 and 1.")
-        if val_fraction + test_fraction >= 1.0:
+    def _validate_init(self) -> None:
+        subset = str(self.hparams.subset).lower()
+        if subset not in self.SHIFT_MAP:
+            raise ValueError(f"Unknown subset '{subset}'.")
+        if not (0.0 < self.hparams.val_fraction < 1.0):
+            raise ValueError("val_fraction must be in (0, 1).")
+        if not (0.0 < self.hparams.test_fraction < 1.0):
+            raise ValueError("test_fraction must be in (0, 1).")
+        if self.hparams.val_fraction + self.hparams.test_fraction >= 1.0:
             raise ValueError("val_fraction + test_fraction must be < 1.")
 
     def prepare_data(self) -> None:
-        """Ensure the requested RobustAD subset is available locally.
-
-        If the subset directory is missing, download the dataset snapshot from
-        Hugging Face into ``data_dir``.
-        """
-        subset_dir = self._subset_dir()
-        if subset_dir.exists():
-            log.info(Back.GREEN + f"Found RobustAD subset at {subset_dir}")
+        if self._subset_dir().exists():
             return
-
-        root_dir = Path(self.hparams.data_dir)
-        root_dir.mkdir(parents=True, exist_ok=True)
-
-        log.info(
-            Back.GREEN
-            + f"RobustAD subset not found at {subset_dir}. Downloading to {root_dir}..."
-        )
-
+        Path(self.hparams.data_dir).mkdir(parents=True, exist_ok=True)
+        log.info(Back.GREEN + f"Downloading RobustAD to {self.hparams.data_dir}...")
         snapshot_download(
             repo_id="AmazonScience/RobustAD",
             repo_type="dataset",
-            local_dir=str(root_dir),
+            local_dir=str(self.hparams.data_dir),
             local_dir_use_symlinks=False,
         )
 
-        if not subset_dir.exists():
-            raise FileNotFoundError(
-                f"Downloaded RobustAD, but expected subset directory still not found: {subset_dir}"
-            )
-
-        log.info(Back.GREEN + f"Finished downloading RobustAD subset to {subset_dir}")
-
     def setup(self, stage: str = None) -> None:
-        """Load RobustAD into memory and prepare train/val/test splits."""
         self._set_batch_size()
-
-        if self.hparams.normalize and (self.mean is None or self.std is None):
+        if self.hparams.normalize and self.mean is None:
             self._load_or_compute_stats()
-
-        source_train = self._load_split("train")
-
+        source_train = self._load_split("train", apply_normalize=self.hparams.normalize)
         if stage in (None, "fit", "validate"):
             self._setup_fit_validate(source_train)
-
         if stage in (None, "test"):
             self._setup_test(source_train)
-
         if stage == "predict":
-            raise ValueError("The predict dataloader is not implemented yet.")
-
+            raise ValueError("Predict dataloader is not implemented.")
         self._data_summary(stage)
 
     def train_dataloader(self):
-        """Create and return the training dataloader."""
-        split = self._main["train"]
-        dataset = RobustADDataset(
-            split.x,
-            split.y,
-            mask=split.mask,
-            batch_size=self.batch_size_per_device,
-            shuffler=self.shuffler,
-        )
-        return DataLoader(
-            dataset,
-            batch_size=None,
-            shuffle=False,
-            num_workers=self.hparams.num_workers,
-            persistent_workers=False,
-            pin_memory=torch.cuda.is_available(),
-        )
+        return self._loader(self._main["train"], shuffle=True)
 
     def val_dataloader(self):
-        """Return validation dataloaders with normal first and aux datasets after."""
-        return self._make_eval_loaders("valid", "valid", "normal")
+        return self._make_eval_loaders("valid")
 
     def test_dataloader(self):
-        """Return test dataloaders with normal first and aux datasets after."""
-        return self._make_eval_loaders("test", "test", "normal")
+        return self._make_eval_loaders("test")
 
     def teardown(self, stage: str | None = None) -> None:
-        """Release cached tensors."""
         if stage in ("fit", None):
             self._main.pop("train", None)
             self._main.pop("valid", None)
-            self._aux.get("valid", {}).clear()
-
+            self._aux["valid"].clear()
         if stage in ("test", None):
             self._main.pop("test", None)
-            self._aux.get("test", {}).clear()
-
+            self._aux["test"].clear()
         gc.collect()
         if torch.cuda.is_available():
             torch.cuda.empty_cache()
             torch.cuda.ipc_collect()
 
     def transfer_batch_to_device(self, batch, device, dataloader_idx):
-        """Transfer RobustAD batches to device.
+        return tuple(self._move_tensor(t, device) for t in batch)
 
-        Supports:
-          - (x, y)
-          - (x, mask, y)
-        """
-        if isinstance(batch, (tuple, list)) and len(batch) == 2:
-            x, y = batch
-            if device.type != "cuda":
-                return x.to(device), y.to(device)
-
-            if x.device.type == "cpu" and not x.is_pinned():
-                x = x.pin_memory()
-            if y.device.type == "cpu" and not y.is_pinned():
-                y = y.pin_memory()
-            return x.to(device, non_blocking=True), y.to(device, non_blocking=True)
-
-        if isinstance(batch, (tuple, list)) and len(batch) == 3:
-            x, mask, y = batch
-            if device.type != "cuda":
-                return x.to(device), mask.to(device), y.to(device)
-
-            if x.device.type == "cpu" and not x.is_pinned():
-                x = x.pin_memory()
-            if mask.device.type == "cpu" and not mask.is_pinned():
-                mask = mask.pin_memory()
-            if y.device.type == "cpu" and not y.is_pinned():
-                y = y.pin_memory()
-            return (
-                x.to(device, non_blocking=True),
-                mask.to(device, non_blocking=True),
-                y.to(device, non_blocking=True),
-            )
-
-        raise ValueError(f"Unsupported batch format: {type(batch)}")
+    def _move_tensor(self, t: torch.Tensor, device):
+        if device.type != "cuda":
+            return t.to(device)
+        if t.device.type == "cpu" and not t.is_pinned():
+            t = t.pin_memory()
+        return t.to(device, non_blocking=True)
 
     def _subset_dir(self) -> Path:
         root = Path(self.hparams.data_dir)
-        subset_name = self.DATA_DIR_MAP[self.hparams.subset]
+        name = self.DIR_MAP[self.hparams.subset]
+        return root / name if (root / name).exists() else root / "data" / name
 
-        direct = root / subset_name
-        if direct.exists():
-            return direct
-
-        nested = root / "data" / subset_name
-        if nested.exists():
-            return nested
-
-        return direct
+    def _split_dir(self, split_name: str) -> Path:
+        stem = f"{self.hparams.subset}_data_dir_{split_name}"
+        return self._subset_dir() / stem
 
     def _stats_path(self) -> Path:
-        if self.hparams.stats_file is not None:
-            return self._subset_dir() / self.hparams.stats_file
-        return self._subset_dir() / f"{self.hparams.subset}_normal_stats.pt"
+        name = self.hparams.stats_file or f"{self.hparams.subset}_normal_stats.pt"
+        return self._subset_dir() / name
 
     def _load_or_compute_stats(self) -> None:
-        """Load cached normalization stats or compute them from source normal train."""
-        stats_path = self._stats_path()
-
-        if stats_path.exists():
-            stats = torch.load(stats_path, map_location="cpu")
-            self.mean = stats["mean"].float()
-            self.std = stats["std"].float()
-            log.info(f"Loaded RobustAD normalization stats from {stats_path}")
+        path = self._stats_path()
+        if path.exists():
+            stats = torch.load(path, map_location="cpu")
+            self.mean, self.std = stats["mean"].float(), stats["std"].float()
             return
+        source = self._load_split("train", apply_normalize=False)
+        self.mean = source.x.mean(dim=(0, 2, 3))
+        self.std = source.x.std(dim=(0, 2, 3)).clamp_min(1e-8)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        torch.save({"mean": self.mean, "std": self.std}, path)
 
-        source_train = self._load_split("train", apply_normalize=False)
-        if not torch.all(source_train.y == 0):
-            raise RuntimeError("Source train split is expected to contain only normal data.")
-
-        x = source_train.x
-        self.mean = x.mean(dim=(0, 2, 3))
-        self.std = x.std(dim=(0, 2, 3)).clamp_min(1e-8)
-
-        stats_path.parent.mkdir(parents=True, exist_ok=True)
-        torch.save({"mean": self.mean, "std": self.std}, stats_path)
-        log.info(f"Saved RobustAD normalization stats to {stats_path}")
-
-    def _setup_fit_validate(self, source_train: SplitTensors) -> None:
-        """Prepare train and validation splits from source-domain normal train data."""
-        n_total = source_train.x.size(0)
-        n_valid = max(2, int(round(self.hparams.val_fraction * n_total)))
-        n_test = max(2, int(round(self.hparams.test_fraction * n_total)))
-        n_train = n_total - n_valid - n_test
-        if n_train <= 0:
-            raise RuntimeError("Validation/test split too large; no training data remains.")
-
-        full_normal = TensorDataset(source_train.x, source_train.y)
-        train_subset, valid_subset, test_subset = random_split(
-            full_normal,
-            [n_train, n_valid, n_test],
-            generator=torch.Generator().manual_seed(self.hparams.seed),
-        )
-
-        if "train" not in self._main:
-            x_train, y_train = self._tensor_dataset_to_tensors(train_subset)
-            self._main["train"] = SplitTensors(
-                x=x_train.contiguous(),
-                y=y_train.contiguous(),
-                mask=None,
-            )
-
-        if "valid" not in self._main or not self._aux["valid"]:
-            x_valid, y_valid = self._tensor_dataset_to_tensors(valid_subset)
-            self._main["valid"] = SplitTensors(
-                x=x_valid.contiguous(),
-                y=y_valid.contiguous(),
-                mask=None,
-            )
+    def _setup_fit_validate(self, source: SplitTensors) -> None:
+        train_ds, valid_ds, test_ds = self._split_source_normal(source)
+        self._main.setdefault("train", train_ds)
+        self._main.setdefault("valid", valid_ds)
+        self._main.setdefault("test", test_ds)
+        if not self._aux["valid"]:
             self._aux["valid"] = self._build_shift_aux()
 
+    def _setup_test(self, source: SplitTensors) -> None:
         if "test" not in self._main:
-            x_test, y_test = self._tensor_dataset_to_tensors(test_subset)
-            self._main["test"] = SplitTensors(
-                x=x_test.contiguous(),
-                y=y_test.contiguous(),
-                mask=None,
-            )
-
-    def _setup_test(self, source_train: SplitTensors) -> None:
-        """Prepare held-out main normal test split and target-domain aux sets."""
-        if "test" not in self._main:
-            n_total = source_train.x.size(0)
-            n_valid = max(2, int(round(self.hparams.val_fraction * n_total)))
-            n_test = max(2, int(round(self.hparams.test_fraction * n_total)))
-            n_train = n_total - n_valid - n_test
-            if n_train <= 0:
-                raise RuntimeError("Validation/test split too large; no training data remains.")
-
-            full_normal = TensorDataset(source_train.x, source_train.y)
-            _, _, test_subset = random_split(
-                full_normal,
-                [n_train, n_valid, n_test],
-                generator=torch.Generator().manual_seed(self.hparams.seed),
-            )
-            x_test, y_test = self._tensor_dataset_to_tensors(test_subset)
-            self._main["test"] = SplitTensors(
-                x=x_test.contiguous(),
-                y=y_test.contiguous(),
-                mask=None,
-            )
-
+            _, _, test_ds = self._split_source_normal(source)
+            self._main["test"] = test_ds
         if not self._aux["test"]:
             self._aux["test"] = self._build_shift_aux()
 
+    def _split_source_normal(self, source: SplitTensors):
+        n = source.x.size(0)
+        nv = max(2, round(self.hparams.val_fraction * n))
+        nt = max(2, round(self.hparams.test_fraction * n))
+        nt = min(nt, n - nv - 1)
+        ds = TensorDataset(source.x, source.y)
+        parts = random_split(ds, [n - nv - nt, nv, nt], generator=self.shuffler)
+        return tuple(self._tensor_subset_to_split(p) for p in parts)
+
+    def _tensor_subset_to_split(self, subset) -> SplitTensors:
+        xs, ys = zip(*subset)
+        return SplitTensors(x=torch.stack(xs).contiguous(), y=torch.stack(ys).contiguous())
+
     def _build_shift_aux(self) -> dict[str, SplitTensors]:
-        """Build auxiliary target-domain datasets.
-
-        Produces:
-          - shifted_normal_k
-          - shifted_anomaly_k
-          - shifted_normal_all
-        """
-        out: dict[str, SplitTensors] = {}
-        shifted_normals: list[SplitTensors] = []
-
-        neg_label = 0
-        pos_label = 0
-
-        for shift_idx, split_name in enumerate(self.SPLIT_MAP[self.hparams.subset]):
-            split = self._load_split(split_name)
-
-            normal_mask = split.y == 0
-            anomaly_mask = split.y == 1
-
-            if normal_mask.any():
-                neg_label -= 1
-                sn = SplitTensors(
-                    x=split.x[normal_mask].contiguous(),
-                    y=torch.full(
-                        (int(normal_mask.sum().item()),),
-                        neg_label,
-                        dtype=torch.int64,
-                    ),
-                    mask=split.mask[normal_mask].contiguous() if split.mask is not None else None,
-                )
-                out[f"shifted_normal_{shift_idx}"] = sn
-                shifted_normals.append(sn)
-
-            if anomaly_mask.any():
-                pos_label += 1
-                sa = SplitTensors(
-                    x=split.x[anomaly_mask].contiguous(),
-                    y=torch.full(
-                        (int(anomaly_mask.sum().item()),),
-                        pos_label,
-                        dtype=torch.int64,
-                    ),
-                    mask=split.mask[anomaly_mask].contiguous() if split.mask is not None else None,
-                )
-                out[f"shifted_anomaly_{shift_idx}"] = sa
-
-        if shifted_normals:
-            out["shifted_normal_all"] = self._concat_splits_balanced(shifted_normals)
-
+        out, shifted = {}, []
+        neg, pos = 0, 0
+        for i, split_name in enumerate(self.SHIFT_MAP[self.hparams.subset]):
+            split = self._load_split(split_name, apply_normalize=self.hparams.normalize)
+            nmask, amask = split.y == 0, split.y == 1
+            if nmask.any():
+                neg -= 1
+                sn = self._masked_split(split, nmask, neg)
+                out[f"shifted_normal_{i}"] = sn
+                shifted.append(sn)
+            if amask.any():
+                pos += 1
+                out[f"shifted_anomaly_{i}"] = self._masked_split(split, amask, pos)
+        if shifted:
+            out["shifted_normal_all"] = self._concat_balanced(shifted)
         return out
 
-    def _concat_splits_balanced(self, splits: list[SplitTensors]) -> SplitTensors:
-        """Concatenate shifted-normal splits with equal-size balancing."""
-        min_n = min(s.x.size(0) for s in splits)
-        xs = []
-        ys = []
-        masks = []
-        gen = torch.Generator().manual_seed(self.hparams.seed)
+    def _masked_split(self, split: SplitTensors, mask: torch.Tensor, label: int) -> SplitTensors:
+        x = split.x[mask].contiguous()
+        y = torch.full((x.size(0),), label, dtype=torch.int64)
+        m = split.mask[mask].contiguous() if split.mask is not None else None
+        return SplitTensors(x=x, y=y, mask=m)
 
-        for s in splits:
-            perm = torch.randperm(s.x.size(0), generator=gen)[:min_n]
-            xs.append(s.x[perm])
-            ys.append(s.y[perm])
-            if s.mask is not None:
-                masks.append(s.mask[perm])
+    def _concat_balanced(self, splits: list[SplitTensors]) -> SplitTensors:
+        n = min(s.x.size(0) for s in splits)
+        idxs = [torch.randperm(s.x.size(0), generator=self.shuffler)[:n] for s in splits]
+        xs = [s.x[i] for s, i in zip(splits, idxs)]
+        ys = [s.y[i] for s, i in zip(splits, idxs)]
+        ms = [s.mask[i] for s, i in zip(splits, idxs) if s.mask is not None]
+        mask = torch.cat(ms).contiguous() if len(ms) == len(splits) else None
+        return SplitTensors(x=torch.cat(xs).contiguous(), y=torch.cat(ys).contiguous(), mask=mask)
 
-        x = torch.cat(xs, dim=0).contiguous()
-        y = torch.cat(ys, dim=0).contiguous()
-        mask = torch.cat(masks, dim=0).contiguous() if len(masks) == len(splits) else None
-
-        return SplitTensors(x=x, y=y, mask=mask)
-
-    def _load_split(
-        self,
-        split_name: str,
-        apply_normalize: bool = True,
-    ) -> SplitTensors:
-        """Load one RobustAD split from disk using Hugging Face datasets."""
-        subset_dir = self._subset_dir()
-
-        if split_name == "train":
-            data_glob = str(subset_dir / f"{self.hparams.subset}_data_dir_train" / "*")
-        else:
-            data_glob = str(subset_dir / f"{self.hparams.subset}_data_dir_{split_name}" / "*")
-
-        ds = load_dataset("imagefolder", data_files={split_name: data_glob})[split_name]
-
-        xs = []
-        ys = []
-        masks = []
-
-        has_any_mask = False
-
-        for sample in ds:
-            img = sample["image"]
-            if not isinstance(img, Image.Image):
-                img = Image.open(img).convert("RGB")
-            else:
-                img = img.convert("RGB")
-
-            x = self._pil_to_tensor(img)
-
-            if self.hparams.normalize and apply_normalize:
-                if self.mean is None or self.std is None:
-                    raise RuntimeError("Normalization requested but mean/std were not set.")
-                x = (x - self.mean[:, None, None]) / self.std[:, None, None]
-
-            xs.append(x)
-            ys.append(int(sample["label"]))
-
-            mask_obj = sample.get("mask", None)
-            if mask_obj is not None:
-                has_any_mask = True
-                if not isinstance(mask_obj, Image.Image):
-                    mask_obj = Image.open(mask_obj)
-                mask = self._mask_to_tensor(mask_obj)
-                masks.append(mask)
-            else:
-                masks.append(None)
-
-        x = torch.stack(xs, dim=0)
-        y = torch.as_tensor(ys, dtype=torch.int64)
-
-        mask_tensor = None
-        if has_any_mask:
-            mask_tensor = torch.stack(
-                [
-                    m if m is not None else torch.zeros((1, x.shape[-2], x.shape[-1]), dtype=torch.float32)
-                    for m in masks
-                ],
-                dim=0,
-            )
-
+    def _load_split(self, split_name: str, apply_normalize: bool = True) -> SplitTensors:
+        ds = load_dataset("imagefolder", data_dir=str(self._split_dir(split_name)), split="train")
+        rows = [self._row_to_tensors(r, apply_normalize) for r in ds]
+        xs, ys, ms = zip(*rows)
+        mask = torch.stack(ms).contiguous() if any(m is not None for m in ms) else None
+        if mask is None:
+            return SplitTensors(x=torch.stack(xs).contiguous(), y=torch.tensor(ys, dtype=torch.int64))
+        filled = [m if m is not None else torch.zeros_like(next(mm for mm in ms if mm is not None)) for m in ms]
         return SplitTensors(
-            x=x.contiguous(),
-            y=y.contiguous(),
-            mask=mask_tensor.contiguous() if mask_tensor is not None else None,
+            x=torch.stack(xs).contiguous(),
+            y=torch.tensor(ys, dtype=torch.int64),
+            mask=torch.stack(filled).contiguous(),
         )
 
-    def _pil_to_tensor(self, img: Image.Image) -> torch.Tensor:
-        """Convert PIL image to CHW float tensor in [0, 1], with optional resize."""
+    def _row_to_tensors(self, row, apply_normalize: bool):
+        x = self._to_image_tensor(row["image"])
+        x = self._normalize(x, apply_normalize)
+        y = int(row["label"])
+        m = self._to_mask_tensor(row["mask"]) if "mask" in row and row["mask"] is not None else None
+        return x, y, m
+
+    def _to_image_tensor(self, img) -> torch.Tensor:
+        img = img if isinstance(img, Image.Image) else Image.open(img)
+        img = img.convert("RGB")
         if self.hparams.image_size is not None:
-            h, w = int(self.hparams.image_size[0]), int(self.hparams.image_size[1])
+            h, w = map(int, self.hparams.image_size)
             img = img.resize((w, h), Image.BILINEAR)
-
         x = torch.as_tensor(torch.ByteTensor(torch.ByteStorage.from_buffer(img.tobytes())))
-        x = x.view(img.size[1], img.size[0], len(img.getbands())).permute(2, 0, 1).float() / 255.0
-        return x
+        return x.view(img.size[1], img.size[0], 3).permute(2, 0, 1).float() / 255.0
 
-    def _mask_to_tensor(self, mask: Image.Image) -> torch.Tensor:
-        """Convert optional PIL mask to 1xHxW float tensor."""
+    def _to_mask_tensor(self, mask) -> torch.Tensor:
+        mask = mask if isinstance(mask, Image.Image) else Image.open(mask)
         mask = mask.convert("L")
         if self.hparams.image_size is not None:
-            h, w = int(self.hparams.image_size[0]), int(self.hparams.image_size[1])
+            h, w = map(int, self.hparams.image_size)
             mask = mask.resize((w, h), Image.NEAREST)
-
         m = torch.as_tensor(torch.ByteTensor(torch.ByteStorage.from_buffer(mask.tobytes())))
         m = m.view(mask.size[1], mask.size[0]).unsqueeze(0).float() / 255.0
         return (m > 0.5).float()
 
-    def _make_eval_loaders(
-        self,
-        main_key: str,
-        aux_key: str,
-        main_name: str,
-    ) -> dict[str, DataLoader]:
-        """Construct evaluation dataloaders with normal first, then auxiliary sets."""
-        main = self._main[main_key]
-        loaders: dict[str, DataLoader] = {}
+    def _normalize(self, x: torch.Tensor, apply: bool) -> torch.Tensor:
+        if not (self.hparams.normalize and apply):
+            return x
+        if self.mean is None or self.std is None:
+            raise RuntimeError("Normalization requested but stats are not set.")
+        return (x - self.mean[:, None, None]) / self.std[:, None, None]
 
-        loaders[main_name] = self._to_loader(main, batch_size=self.batch_size_per_device)
-
-        for name, split in self._aux.get(aux_key, {}).items():
-            loaders[name] = self._to_loader(
-                split,
-                batch_size=self.batch_size_per_device,
-                max_b=self.max_val_batches,
-            )
-
+    def _make_eval_loaders(self, key: str) -> dict[str, DataLoader]:
+        loaders = {"normal": self._loader(self._main[key], shuffle=False)}
+        for name, split in self._aux[key].items():
+            loaders[name] = self._loader(split, shuffle=False, max_b=self.max_val_batches)
         return loaders
 
-    def _to_loader(
-        self,
-        split: SplitTensors,
-        batch_size: int,
-        max_b: int = None,
-    ) -> DataLoader:
-        """Transform a split into an iterable DataLoader."""
+    def _loader(self, split: SplitTensors, shuffle: bool, max_b: int | None = None) -> DataLoader:
         ds = RobustADDataset(
-            split.x,
-            split.y,
-            mask=split.mask,
-            batch_size=batch_size,
-            max_batches=max_b,
+            split.x, split.y, mask=split.mask, batch_size=self.batch_size_per_device,
+            max_batches=max_b, shuffler=self.shuffler if shuffle else None,
         )
         return DataLoader(
-            ds,
-            batch_size=None,
-            shuffle=False,
-            num_workers=self.hparams.num_workers,
-            persistent_workers=False,
-            pin_memory=torch.cuda.is_available(),
+            ds, batch_size=None, shuffle=False, num_workers=self.hparams.num_workers,
+            persistent_workers=False, pin_memory=torch.cuda.is_available(),
         )
 
-    def _tensor_dataset_to_tensors(self, subset) -> tuple[torch.Tensor, torch.Tensor]:
-        """Convert a TensorDataset subset into two stacked tensors."""
-        xs = []
-        ys = []
-        for x, y in subset:
-            xs.append(x)
-            ys.append(y)
-        return torch.stack(xs, dim=0), torch.stack(ys, dim=0)
-
-    def _set_batch_size(self):
-        """Set the batch size per device if multiple devices are available."""
+    def _set_batch_size(self) -> None:
         if self.trainer is None:
             self.batch_size_per_device = self.hparams.batch_size
             return
-
-        world_size = self.trainer.world_size
-        if self.hparams.batch_size % world_size != 0:
-            raise RuntimeError(
-                f"Batch size ({self.hparams.batch_size}) not divisible by the num of "
-                f"devices ({world_size})."
-            )
-        self.batch_size_per_device = self.hparams.batch_size // world_size
+        ws = self.trainer.world_size
+        if self.hparams.batch_size % ws != 0:
+            raise RuntimeError(f"Batch size {self.hparams.batch_size} not divisible by {ws}.")
+        self.batch_size_per_device = self.hparams.batch_size // ws
 
     def _data_summary(self, stage: str | None) -> None:
-        """Print a summary of the currently loaded data."""
         log.info(Fore.MAGENTA + "-" * 5 + " Data Summary " + "-" * 5)
-
-        def show_split(title: str, key: str, aux_key: str | None = None):
-            log.info(Fore.GREEN + title)
-            if key in self._main:
-                log.info(f"normal: {tuple(self._main[key].x.shape)}")
-            if aux_key:
-                for name, split in self._aux.get(aux_key, {}).items():
-                    log.info(f"{name}: {tuple(split.x.shape)}")
-
         if stage in (None, "fit"):
-            show_split("Training data:", "train")
-            show_split("Validation data:", "valid", "valid")
+            self._log_split("Training data:", "train")
+            self._log_split("Validation data:", "valid", aux_key="valid")
         elif stage == "validate":
-            show_split("Validation data:", "valid", "valid")
+            self._log_split("Validation data:", "valid", aux_key="valid")
         elif stage == "test":
-            show_split("Test data:", "test", "test")
+            self._log_split("Test data:", "test", aux_key="test")
+
+    def _log_split(self, title: str, key: str, aux_key: str | None = None) -> None:
+        log.info(Fore.GREEN + title)
+        if key in self._main:
+            log.info(f"normal: {tuple(self._main[key].x.shape)}")
+        if aux_key is not None:
+            for name, split in self._aux[aux_key].items():
+                log.info(f"{name}: {tuple(split.x.shape)}")

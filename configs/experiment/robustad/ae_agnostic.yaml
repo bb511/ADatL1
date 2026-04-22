@@ -1,0 +1,255 @@
+# @package _global_
+
+defaults:
+  - override /data: robustad
+  - override /algorithm: image_ae
+  - override /callbacks: default
+  - override /trainer: cpu
+  - override /evaluation: default
+  - override /evaluation/callbacks: default
+  - override /logger: mlflow
+
+seed: 123
+tags: ["ae", "robustad", "agnostic"]
+
+experiment_name: robustad_ae_models
+run_name: ${short_hash:${hydra:runtime.output_dir},12}
+
+data:
+  batch_size: 16
+  max_val_batches: -1
+
+trainer:
+  gradient_clip_algorithm: norm
+  gradient_clip_val: 0.0
+  min_epochs: 1
+  max_epochs: 200
+
+test: true
+
+# Metrics to report for each checkpoint.
+optimized_metric_config:
+  main_metric:
+    callback:
+      name: cap
+      params: {}
+    direction: maximize
+  sec_metric:
+    callback:
+      name: ascore_operational
+      params:
+        ckpt_name: null
+        test_ds: normal
+    direction: minimize
+
+algorithm:
+  target_rate: 0.01
+  base_rate: null
+
+  encoder:
+    in_channels: 3
+    input_size: ${data.image_size}
+
+  optimizer:
+    _partial_: true
+    _target_: torch.optim.AdamW
+    lr: 1.0e-3
+    weight_decay: 1.0e-4
+    betas: [0.9, 0.999]
+    eps: 1e-8
+
+callbacks:
+  log_data_mlflow: null
+
+  anomaly_eff:
+    _target_: src.callbacks.efficiency.AnomalyEfficiencyCallback
+    output_name: 'ascore/full'
+    beta: 0.9
+
+  thres_drift:
+    _target_: src.callbacks.thres_drift.ThresholdDriftCallback
+    output_name: 'ascore/full'
+    calibration_fraction: 0.5
+    split_seed: 12345
+    beta: 0.9
+
+  wasserstein_dist:
+    _target_: src.callbacks.wasserstein.WassersteinCallback
+    output_name: 'ascore/full'
+    dataset_1: normal
+    dataset_2: shifted_normal_all
+    apply_log1p: true
+    beta: 0.9
+
+  cap_sn_zb:
+    _target_: src.callbacks.cap.CAPCallback
+    output_name: 'ascore/full'
+    dataset_1: normal
+    dataset_2: shifted_normal_all
+    pairing_type: cdf
+    cap_metric_config:
+      beta0: 1.0
+      normalization_type: sigmoid
+      normalization_params: null
+      energy_type: adaptive
+      energy_params:
+        scale: 0.5
+      regularization_type: none
+      regularization_params: null
+      binary: True
+      lr: 0.01
+      n_epochs: 40
+      batch_size: 128
+      normalize_gradients: True
+      process_group: null
+      dist_sync_fn: null
+
+  stable_ascore_operational_ckpt:
+    _target_: src.callbacks.model_checkpoint.SingleDatasetModelCheckpoint
+    dirpath: '${paths.checkpoints_dir}/${experiment_name}/${run_name}'
+    monitor: ascore_operational
+    criterion:
+      _target_: src.callbacks.checkpointing.criterion.Stable
+      top_k: 1
+      threshold: 0.05
+      patience: 10
+    ds:
+      - normal
+
+  thres_drift_ema_ckpt:
+    _target_: pytorch_lightning.callbacks.ModelCheckpoint
+    dirpath: '${paths.checkpoints_dir}/${experiment_name}/${run_name}/summary/operational_drift_ema/min'
+    monitor: 'val/summary/operational_drift_ema'
+    filename: 'operational_drift_ema'
+    save_last: false
+    save_top_k: 1
+    mode: "min"
+    auto_insert_metric_name: False
+    save_weights_only: False
+    every_n_epochs: 1
+    save_on_train_epoch_end: false
+
+  wasserstein_dist_ema_ckpt:
+    _target_: pytorch_lightning.callbacks.ModelCheckpoint
+    dirpath: '${paths.checkpoints_dir}/${experiment_name}/${run_name}/summary/w1dist_ema_normal_vs_shifted_normal_all/min'
+    monitor: 'val/summary/w1dist_ema_normal_vs_shifted_normal_all'
+    filename: 'w1dist_ema_normal_vs_shifted_normal_all'
+    save_last: false
+    save_top_k: 1
+    mode: "min"
+    auto_insert_metric_name: False
+    save_weights_only: False
+    every_n_epochs: 1
+    save_on_train_epoch_end: false
+
+  cap_sn_zb_ema_ckpt:
+    _target_: pytorch_lightning.callbacks.ModelCheckpoint
+    dirpath: '${paths.checkpoints_dir}/${experiment_name}/${run_name}/summary/cap_ema_normal_vs_shifted_normal_all/max'
+    monitor: 'val/summary/cap_ema_normal_vs_shifted_normal_all'
+    filename: 'cap_ema_normal_vs_shifted_normal_all'
+    save_last: false
+    save_top_k: 1
+    mode: "max"
+    auto_insert_metric_name: False
+    save_weights_only: False
+    every_n_epochs: 1
+    save_on_train_epoch_end: false
+
+evaluation:
+  evaluator:
+    ckpts:
+      last: true
+      summary:
+        operational_drift_ema: ['min']
+        w1dist_ema_normal_vs_shifted_normal_all: ['min']
+        cap_ema_normal_vs_shifted_normal_all: ['max']
+      single:
+        ascore_operational: ['stable']
+
+  callbacks:
+    anomaly_efficiency:
+      _target_: src.evaluation.callbacks.efficiency.AnomalyEfficiencyCallback
+      output_name: 'ascore/full'
+      ds:
+        - shifted_anomaly_0
+        - shifted_anomaly_1
+        - shifted_anomaly_2
+        - shifted_anomaly_3
+        - shifted_anomaly_4
+        - shifted_anomaly_5
+      cvar_summary: 0.25
+      log_raw_mlflow: false
+
+    cap_sn_zb:
+      _target_: src.evaluation.callbacks.cap.CAP
+      output_name: 'ascore/full'
+      dataset_1: normal
+      dataset_2: shifted_normal_all
+      log_raw_mlflow: false
+      pairing_type: cdf
+      cap_metric_config:
+        beta0: 1.0
+        normalization_type: sigmoid
+        normalization_params: null
+        energy_type: adaptive
+        energy_params:
+          scale: 0.5
+        regularization_type: none
+        regularization_params: null
+        binary: True
+        lr: 0.01
+        n_epochs: 40
+        batch_size: 128
+        normalize_gradients: True
+        process_group: null
+        dist_sync_fn: null
+
+    ascore_operational:
+      _target_: src.evaluation.callbacks.output.OutputCallback
+      name: ascore_operational
+      output_name: 'ascore/operational'
+      ds:
+        - normal
+        - shifted_normal_all
+        - shifted_normal_0
+        - shifted_normal_1
+        - shifted_normal_2
+        - shifted_normal_3
+        - shifted_normal_4
+        - shifted_normal_5
+        - shifted_anomaly_0
+        - shifted_anomaly_1
+        - shifted_anomaly_2
+        - shifted_anomaly_3
+        - shifted_anomaly_4
+        - shifted_anomaly_5
+      log_raw_mlflow: false
+
+    thres_drift:
+      _target_: src.evaluation.callbacks.thres_drift.ThresholdDriftCallback
+      output_name: 'ascore/full'
+      calibration_fraction: 0.5
+      split_seed: 12345
+      log_raw_mlflow: false
+      name: thres_drift
+
+    wasserstein:
+      _target_: src.evaluation.callbacks.wasserstein.Wasserstein
+      output_name: 'ascore/full'
+      dataset_1: normal
+      dataset_2: shifted_normal_all
+      apply_log1p: true
+      log_raw_mlflow: false
+      name: wasserstein
+
+    reco:
+      _target_: src.evaluation.callbacks.reco.ReconstructionPlots
+      warmup_batches: 0.2
+      output_name: reconstructed_data
+      ckpts:
+        last: true
+      datasets:
+        - normal
+        - shifted_normal_all
+      name: reco
+      log_raw_mlflow: false

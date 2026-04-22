@@ -11,7 +11,7 @@ data_dir: ${paths.base_data_dir}/robustad
 subset: pcb
 
 # Resize (optional). CIFAR-style experiments typically use 32x32
-image_size: [32, 32]
+image_size: [256,256]
 
 batch_size: 256
 max_val_batches: -1
@@ -19,7 +19,7 @@ max_val_batches: -1
 normalize: True
 
 # Splits of source-domain normal (train split)
-val_fraction: 0.2
+val_fraction: 0.1
 test_fraction: 0.1
 
 num_workers: 0

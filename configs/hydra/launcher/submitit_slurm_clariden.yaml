@@ -9,11 +9,11 @@ qos: null
 
 partition: normal
 timeout_min: 60
-cpus_per_task: 3
+cpus_per_task: 6
 gpus_per_node: 1
 tasks_per_node: 1
 nodes: 1
-mem_gb: null
+mem_gb: 64
 
 array_parallelism: 96
 

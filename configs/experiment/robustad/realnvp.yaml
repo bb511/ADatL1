@@ -1,0 +1,159 @@
+# @package _global_
+
+defaults:
+  - override /data: robustad
+  - override /algorithm: image_realnvp
+  - override /callbacks: default
+  - override /trainer: cpu
+  - override /evaluation: default
+  - override /evaluation/callbacks: default
+  - override /logger: mlflow
+
+seed: 123
+tags: ["realnvp", "robustad", "signal"]
+
+experiment_name: robustad_realnvp_models
+run_name: ${short_hash:${hydra:runtime.output_dir},12}
+
+data:
+  subset: pcb
+  batch_size: 16
+  max_val_batches: -1
+  image_size: [32, 32]   # IMPORTANT
+
+trainer:
+  gradient_clip_algorithm: norm
+  gradient_clip_val: 0.0
+  min_epochs: 1
+  max_epochs: 200
+
+test: true
+
+optimized_metric_config:
+  main_metric:
+    callback:
+      name: eff
+      params: {}
+    direction: maximize
+  sec_metric:
+    callback:
+      name: ascore_operational
+      params:
+        ckpt_name: null
+        test_ds: normal
+    direction: minimize
+
+algorithm:
+  target_rate: 0.01
+  base_rate: null
+
+  flow:
+    input_dim: 3072   # 3 * 32 * 32
+
+  optimizer:
+    _partial_: true
+    _target_: torch.optim.AdamW
+    lr: 1.0e-3
+    weight_decay: 1.0e-4
+    betas: [0.9, 0.999]
+    eps: 1e-8
+
+callbacks:
+  log_data_mlflow: null
+
+  anomaly_eff:
+    _target_: src.callbacks.efficiency.AnomalyEfficiencyCallback
+    output_name: 'ascore/full'
+    beta: 0.9
+
+  max_rate_ckpt:
+    _target_: src.callbacks.model_checkpoint.SingleDatasetModelCheckpoint
+    dirpath: '${paths.checkpoints_dir}/${experiment_name}/${run_name}'
+    monitor: eff__ascore_full__brate_operational
+    criterion:
+      _target_: src.callbacks.checkpointing.criterion.Max
+      top_k: 1
+    ds:
+      - shifted_anomaly_0
+      - shifted_anomaly_1
+      - shifted_anomaly_2
+      - shifted_anomaly_3
+      - shifted_anomaly_4
+      - shifted_anomaly_5
+
+  stable_ascore_operational_ckpt:
+    _target_: src.callbacks.model_checkpoint.SingleDatasetModelCheckpoint
+    dirpath: '${paths.checkpoints_dir}/${experiment_name}/${run_name}'
+    monitor: ascore_operational
+    criterion:
+      _target_: src.callbacks.checkpointing.criterion.Stable
+      top_k: 1
+      threshold: 0.05
+      patience: 10
+    ds:
+      - normal
+
+  cvar25_ema_ckpt:
+    _target_: pytorch_lightning.callbacks.ModelCheckpoint
+    dirpath: '${paths.checkpoints_dir}/${experiment_name}/${run_name}/summary/cvar25_ema/max'
+    monitor: 'val/summary/eff_cvar25_ema_operational'
+    filename: 'cvar25_ema'
+    save_top_k: 1
+    mode: "max"
+
+  cvar10_ema_ckpt:
+    _target_: pytorch_lightning.callbacks.ModelCheckpoint
+    dirpath: '${paths.checkpoints_dir}/${experiment_name}/${run_name}/summary/cvar10_ema/max'
+    monitor: 'val/summary/eff_cvar10_ema_operational'
+    filename: 'cvar10_ema'
+    save_top_k: 1
+    mode: "max"
+
+evaluation:
+  evaluator:
+    ckpts:
+      last: true
+      summary:
+        cvar25_ema: ['max']
+        cvar10_ema: ['max']
+      single:
+        ascore_operational: ['stable']
+        eff__ascore_full__brate_operational: ['max']
+
+  callbacks:
+    anomaly_efficiency:
+      _target_: src.evaluation.callbacks.efficiency.AnomalyEfficiencyCallback
+      output_name: 'ascore/full'
+      ds:
+        - shifted_anomaly_0
+        - shifted_anomaly_1
+        - shifted_anomaly_2
+        - shifted_anomaly_3
+        - shifted_anomaly_4
+        - shifted_anomaly_5
+      cvar_summary: 0.25
+
+    ascore_operational:
+      _target_: src.evaluation.callbacks.output.OutputCallback
+      name: ascore_operational
+      output_name: 'ascore/operational'
+      ds:
+        - normal
+        - shifted_normal_all
+        - shifted_anomaly_0
+        - shifted_anomaly_1
+        - shifted_anomaly_2
+        - shifted_anomaly_3
+        - shifted_anomaly_4
+        - shifted_anomaly_5
+
+    thres_drift:
+      _target_: src.evaluation.callbacks.thres_drift.ThresholdDriftCallback
+      output_name: 'ascore/full'
+
+    wasserstein:
+      _target_: src.evaluation.callbacks.wasserstein.Wasserstein
+      output_name: 'ascore/full'
+      dataset_1: normal
+      dataset_2: shifted_normal_all
+      apply_log1p: true

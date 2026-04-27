@@ -14,7 +14,7 @@ hydra:
     storage: sqlite:///logs/optuna/realnvp.db
 
     # name of the study to persist optimization results
-    study_name: test
+    study_name: cvar25_vs_logp
 
     # number of parallel workers
     n_jobs: 1

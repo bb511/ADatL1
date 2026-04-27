@@ -14,7 +14,8 @@ hydra:
 
     # storage URL to persist optimization results
     # for example, you can use SQLite if you set 'sqlite:///example.db'
-    storage: sqlite:///logs/optuna/cifar10/ae.db
+    # storage: sqlite:///logs/optuna/cifar10/ae.db
+    storage: sqlite:///logs/optuna/robustad/ae.db
 
     # name of the study to persist optimization results
     study_name: cvar25eff_vs_mse_b16k
@@ -38,13 +39,29 @@ hydra:
 
     # define hyperparameter search space. Assumes using torch.optim.AdamW
     params:
-      trainer.gradient_clip_val: choice(0.0, 0.5, 1.0, 2.0)
-      algorithm.delta: choice(0.5, 1.0, 2.0, 3.0, 5.0)
-      algorithm.input_noise_std: choice(0.0, 0.01, 0.03, 0.05, 0.1)
-      algorithm.encoder.nodes: choice([16, 32, 64],[16, 32, 128],[16, 64, 128],[32, 64, 128],[32, 64, 256],[32, 128, 256],[64, 128, 256])
+      trainer.gradient_clip_val: choice(0.0, 0.5, 1.0)
 
-      algorithm.encoder.strides: choice([2, 2],[2, 1],[1, 2])
+      algorithm.delta: choice(0.5, 1.0, 2.0, 3.0)
+      algorithm.input_noise_std: choice(0.0, 0.005, 0.01, 0.03)
+
+      algorithm.encoder.nodes: choice([16, 32, 64], [32, 64, 128], [32, 64, 128, 256])
+      algorithm.encoder.strides: choice([2, 2], [2, 2, 2])
       algorithm.encoder.activation: choice(relu, gelu, silu)
-      algorithm.optimizer.lr: tag(log, interval(1e-4, 3e-3))
+      algorithm.encoder.batchnorm: choice(false, true)
+
+      algorithm.optimizer.lr: tag(log, interval(3e-5, 1e-3))
       algorithm.optimizer.betas: choice([0.9, 0.999], [0.9, 0.99])
-      algorithm.optimizer.weight_decay: choice(0.0, 1e-5, 1e-4, 5e-4, 1e-3)
+      algorithm.optimizer.weight_decay: choice(0.0, 1e-5, 1e-4, 1e-3)
+
+# CIFAR search space.
+    # params:
+    #   trainer.gradient_clip_val: choice(0.0, 0.5, 1.0, 2.0)
+    #   algorithm.delta: choice(0.5, 1.0, 2.0, 3.0, 5.0)
+    #   algorithm.input_noise_std: choice(0.0, 0.01, 0.03, 0.05, 0.1)
+    #   algorithm.encoder.nodes: choice([16, 32, 64],[16, 32, 128],[16, 64, 128],[32, 64, 128],[32, 64, 256],[32, 128, 256],[64, 128, 256])
+
+    #   algorithm.encoder.strides: choice([2, 2],[2, 1],[1, 2])
+    #   algorithm.encoder.activation: choice(relu, gelu, silu)
+    #   algorithm.optimizer.lr: tag(log, interval(1e-4, 3e-3))
+    #   algorithm.optimizer.betas: choice([0.9, 0.999], [0.9, 0.99])
+    #   algorithm.optimizer.weight_decay: choice(0.0, 1e-5, 1e-4, 5e-4, 1e-3)

@@ -17,7 +17,7 @@ hydra:
     storage: sqlite:///logs/optuna/physics/ae.db
 
     # name of the study to persist optimization results
-    study_name: cvar25eff_vs_mse_b16k
+    study_name: cvar25eff_vs_mse
 
     # number of parallel workers
     n_jobs: 1

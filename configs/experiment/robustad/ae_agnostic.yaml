@@ -16,6 +16,7 @@ experiment_name: robustad_ae_models
 run_name: ${short_hash:${hydra:runtime.output_dir},12}
 
 data:
+  subset: pcb
   batch_size: 16
   max_val_batches: -1
 

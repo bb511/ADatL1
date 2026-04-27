@@ -44,8 +44,8 @@ hydra:
       algorithm.delta: choice(0.5, 1.0, 2.0, 3.0)
       algorithm.input_noise_std: choice(0.0, 0.005, 0.01, 0.03)
 
-      algorithm.encoder.nodes: choice([16, 32, 64], [32, 64, 128], [32, 64, 128, 256])
-      algorithm.encoder.strides: choice([2, 2], [2, 2, 2])
+      algorithm.encoder.nodes: choice([16, 32, 64],[16, 32, 128],[16, 64, 128],[32, 64, 128],[32, 64, 256],[32, 128, 256],[64, 128, 256])
+      algorithm.encoder.strides: choice([2, 2])
       algorithm.encoder.activation: choice(relu, gelu, silu)
       algorithm.encoder.batchnorm: choice(false, true)
 

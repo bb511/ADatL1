@@ -10,8 +10,8 @@ data_dir: ${paths.base_data_dir}/robustad
 # One of: pcb, metal_parts, piled_bags
 subset: pcb
 
-# Resize (optional). CIFAR-style experiments typically use 32x32
-image_size: [256,256]
+# CIFAR-style experiments typically use 32x32
+image_size: [64,64]
 
 batch_size: 256
 max_val_batches: -1

@@ -50,8 +50,8 @@ hydra:
 
       algorithm.center_init_method: choice(mean, zeros)
 
-      algorithm.encoder.nodes: choice([16, 32, 64],[16, 32, 128],[16, 64, 128],[32, 64, 128],[32, 64, 256],[32, 128, 256],[64, 128, 256])
-      algorithm.encoder.strides: choice([2, 2])
+      algorithm.encoder.nodes: choice([8, 16, 32, 64],[16, 32, 64, 64],[16, 32, 64, 128],[16, 32, 128, 128],[24, 48, 96, 96],[24, 48, 96, 128],[32, 64, 128, 128],[32, 64, 128, 256],[48, 96, 192, 192])
+      algorithm.encoder.strides: choice([2, 2, 2], [2, 2, 1], [2, 1, 2])
       algorithm.encoder.activation: choice(relu, gelu, silu)
       algorithm.encoder.batchnorm: choice(false, true)
 

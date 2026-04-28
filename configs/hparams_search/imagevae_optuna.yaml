@@ -50,8 +50,8 @@ hydra:
       algorithm.kl_scale: choice(1e-5, 3e-5, 1e-4, 3e-4, 1e-3)
       algorithm.kl_warmup_frac: choice(0.0, 0.1, 0.2, 0.3)
 
-      algorithm.encoder.nodes: choice([16, 32, 64, 16],[16, 32, 64, 32],[24, 48, 96, 32],[32, 64, 128, 32],[32, 64, 128, 64],[32, 64, 256, 64],[48, 96, 192, 64],[64, 128, 256, 64],[64, 128, 256, 128])
-      algorithm.encoder.strides: choice([2, 2])
+      algorithm.encoder.nodes: choice([8, 16, 32, 64],[16, 32, 64, 64],[16, 32, 64, 128],[16, 32, 128, 128],[24, 48, 96, 96],[24, 48, 96, 128],[32, 64, 128, 128],[32, 64, 128, 256],[48, 96, 192, 192])
+      algorithm.encoder.strides: choice([2, 2, 2], [2, 2, 1], [2, 1, 2])
       algorithm.encoder.activation: choice(relu, gelu, silu)
       algorithm.encoder.batchnorm: choice(false, true)
 

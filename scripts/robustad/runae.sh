@@ -184,10 +184,6 @@
 taskset -c 0-2 \
 python3 src/train.py \
     -m \
-    hydra/launcher=submitit_local \
-    hydra.launcher.timeout_min=200 \
-    hydra.launcher.cpus_per_task=1 \
-    hydra.launcher.gpus_per_node=4 \
     hydra.sweeper.storage='sqlite:///logs/optuna/robustad/ae.db' \
     experiment=robustad/ae_agnostic \
     experiment_name=robustad_ae_agnostic_cap_vs_mse_search \
@@ -208,8 +204,12 @@ python3 src/train.py \
     hydra.sweeper.n_trials=100 \
     hydra.sweeper.sampler.n_startup_trials=150 \
     trainer=gpu \
-    trainer.max_epochs=50 \
+    trainer.max_epochs=1 \
     trainer.devices=[0]
+    # hydra/launcher=submitit_local \
+    # hydra.launcher.timeout_min=200 \
+    # hydra.launcher.cpus_per_task=1 \
+    # hydra.launcher.gpus_per_node=4 \
 
 # ------------------------------------------------------------------------
 # Stability search

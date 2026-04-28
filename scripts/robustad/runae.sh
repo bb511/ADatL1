@@ -125,6 +125,10 @@
 taskset -c 0-2 \
 python3 src/train.py \
     -m \
+    hydra/launcher=submitit_local \
+    hydra.launcher.timeout_min=200 \
+    hydra.launcher.cpus_per_task=1 \
+    hydra.launcher.gpus_per_node=4 \
     hydra.sweeper.storage='sqlite:///logs/optuna/robustad/ae.db' \
     experiment=robustad/ae \
     experiment_name=robustad_ae_cvar25_vs_mse_search \
@@ -138,15 +142,11 @@ python3 src/train.py \
     logger=none \
     hparams_search=imageae_optuna \
     hydra.sweeper.study_name=cvar25eff_vs_mse \
-    hydra.sweeper.n_trials=600 \
+    hydra.sweeper.n_trials=100 \
     hydra.sweeper.sampler.n_startup_trials=150 \
     trainer=gpu \
-    trainer.max_epochs=1 \
+    trainer.max_epochs=50 \
     trainer.devices=[0]
-    # hydra/launcher=submitit_local \
-    # hydra.launcher.timeout_min=200 \
-    # hydra.launcher.cpus_per_task=1 \
-    # hydra.launcher.gpus_per_node=4 \
 
 # ------------------------------------------------------------------------
 # Semi-supervised search (cvar10)
@@ -205,7 +205,7 @@ python3 src/train.py \
 #     logger=none \
 #     hparams_search=imageae_optuna \
 #     hydra.sweeper.study_name=cap_vs_mse \
-#     hydra.sweeper.n_trials=600 \
+#     hydra.sweeper.n_trials=100 \
 #     hydra.sweeper.sampler.n_startup_trials=150 \
 #     trainer=gpu \
 #     trainer.max_epochs=50 \
@@ -241,7 +241,7 @@ python3 src/train.py \
 #     optimized_metric_config.main_metric.direction=minimize \
 #     hydra.sweeper.study_name=drift_vs_mse \
 #     hydra.sweeper.direction='[minimize, minimize]' \
-#     hydra.sweeper.n_trials=600 \
+#     hydra.sweeper.n_trials=100 \
 #     hydra.sweeper.sampler.n_startup_trials=150 \
 #     trainer=gpu \
 #     trainer.max_epochs=50 \
@@ -278,7 +278,7 @@ python3 src/train.py \
 #     optimized_metric_config.main_metric.direction=minimize \
 #     hydra.sweeper.study_name=wasserstein_vs_mse \
 #     hydra.sweeper.direction='[minimize, minimize]' \
-#     hydra.sweeper.n_trials=600 \
+#     hydra.sweeper.n_trials=100 \
 #     hydra.sweeper.sampler.n_startup_trials=150 \
 #     trainer=gpu \
 #     trainer.max_epochs=50 \

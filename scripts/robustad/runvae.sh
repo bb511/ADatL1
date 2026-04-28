@@ -142,7 +142,7 @@ python3 src/train.py \
     logger=none \
     hparams_search=imagevae_optuna \
     hydra.sweeper.study_name=cvar25eff_vs_kl \
-    hydra.sweeper.n_trials=600 \
+    hydra.sweeper.n_trials=100 \
     hydra.sweeper.sampler.n_startup_trials=150 \
     trainer=gpu \
     trainer.max_epochs=50 \
@@ -205,7 +205,7 @@ python3 src/train.py \
 #     logger=none \
 #     hparams_search=imagevae_optuna \
 #     hydra.sweeper.study_name=cap_vs_kl \
-#     hydra.sweeper.n_trials=600 \
+#     hydra.sweeper.n_trials=100 \
 #     hydra.sweeper.sampler.n_startup_trials=150 \
 #     trainer=gpu \
 #     trainer.max_epochs=50 \
@@ -241,7 +241,7 @@ python3 src/train.py \
 #     optimized_metric_config.main_metric.direction=minimize \
 #     hydra.sweeper.study_name=drift_vs_kl \
 #     hydra.sweeper.direction='[minimize, minimize]' \
-#     hydra.sweeper.n_trials=600 \
+#     hydra.sweeper.n_trials=100 \
 #     hydra.sweeper.sampler.n_startup_trials=150 \
 #     trainer=gpu \
 #     trainer.max_epochs=50 \
@@ -278,7 +278,7 @@ python3 src/train.py \
 #     optimized_metric_config.main_metric.direction=minimize \
 #     hydra.sweeper.study_name=wasserstein_vs_kl \
 #     hydra.sweeper.direction='[minimize, minimize]' \
-#     hydra.sweeper.n_trials=600 \
+#     hydra.sweeper.n_trials=100 \
 #     hydra.sweeper.sampler.n_startup_trials=150 \
 #     trainer=gpu \
 #     trainer.max_epochs=50 \

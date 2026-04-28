@@ -122,35 +122,41 @@
 # ------------------------------------------------------------------------
 # Semi-supervised search (cvar25)
 # ------------------------------------------------------------------------
-python3 src/train.py \
-    -m \
-    hydra/launcher=submitit_slurm_clariden \
-    hydra.sweeper.n_jobs=6 \
-    hydra.sweeper.storage='sqlite:///logs/optuna/robustad/realnvp.db' \
-    experiment=robustad/realnvp \
-    experiment_name=robustad_realnvp_cvar25_vs_logp_search \
-    callbacks.max_rate_ckpt=null \
-    callbacks.cvar10_ema_ckpt=null \
-    ~evaluation.evaluator.ckpts.single.eff__ascore_full__brate_operational \
-    ~evaluation.evaluator.ckpts.summary.cvar10_ema \
-    evaluation.callbacks.thres_drift=null \
-    evaluation.callbacks.wasserstein=null \
-    logger=none \
-    hparams_search=imagerealnvp_optuna \
-    hydra.sweeper.study_name=cvar25eff_vs_logp \
-    hydra.sweeper.n_trials=600 \
-    hydra.sweeper.sampler.n_startup_trials=150 \
-    trainer=gpu \
-    trainer.max_epochs=50 \
-    trainer.devices=[0]
+# taskset -c 0-2 \
+# python3 src/train.py \
+#     -m \
+#     hydra/launcher=submitit_local \
+#     hydra.launcher.timeout_min=200 \
+#     hydra.launcher.cpus_per_task=1 \
+#     hydra.launcher.gpus_per_node=4 \
+#     hydra.sweeper.storage='sqlite:///logs/optuna/robustad/realnvp.db' \
+#     experiment=robustad/realnvp \
+#     experiment_name=robustad_realnvp_cvar25_vs_logp_search \
+#     callbacks.max_rate_ckpt=null \
+#     callbacks.cvar10_ema_ckpt=null \
+#     ~evaluation.evaluator.ckpts.single.eff__ascore_full__brate_operational \
+#     ~evaluation.evaluator.ckpts.summary.cvar10_ema \
+#     evaluation.callbacks.thres_drift=null \
+#     evaluation.callbacks.wasserstein=null \
+#     logger=none \
+#     hparams_search=imagerealnvp_optuna \
+#     hydra.sweeper.study_name=cvar25eff_vs_logp \
+#     hydra.sweeper.n_trials=100 \
+#     hydra.sweeper.sampler.n_startup_trials=150 \
+#     trainer=gpu \
+#     trainer.max_epochs=50 \
+#     trainer.devices=[0]
 
 # ------------------------------------------------------------------------
 # Semi-supervised search (cvar10)
 # ------------------------------------------------------------------------
+# taskset -c 0-2 \
 # python3 src/train.py \
 #     -m \
-#     hydra/launcher=submitit_slurm_clariden \
-#     hydra.sweeper.n_jobs=6 \
+#     hydra/launcher=submitit_local \
+#     hydra.launcher.timeout_min=200 \
+#     hydra.launcher.cpus_per_task=1 \
+#     hydra.launcher.gpus_per_node=4 \
 #     hydra.sweeper.storage='sqlite:///logs/optuna/robustad/realnvp.db' \
 #     experiment=robustad/realnvp \
 #     experiment_name=robustad_realnvp_cvar10_vs_logp_search \
@@ -173,10 +179,13 @@ python3 src/train.py \
 # ------------------------------------------------------------------------
 # CAP search
 # ------------------------------------------------------------------------
+# taskset -c 0-2 \
 # python3 src/train.py \
 #     -m \
-#     hydra/launcher=submitit_slurm_clariden \
-#     hydra.sweeper.n_jobs=6 \
+#     hydra/launcher=submitit_local \
+#     hydra.launcher.timeout_min=200 \
+#     hydra.launcher.cpus_per_task=1 \
+#     hydra.launcher.gpus_per_node=4 \
 #     hydra.sweeper.storage='sqlite:///logs/optuna/robustad/realnvp.db' \
 #     experiment=robustad/realnvp_agnostic \
 #     experiment_name=robustad_realnvp_agnostic_cap_vs_logp_search \
@@ -193,7 +202,7 @@ python3 src/train.py \
 #     logger=none \
 #     hparams_search=imagerealnvp_optuna \
 #     hydra.sweeper.study_name=cap_vs_logp \
-#     hydra.sweeper.n_trials=600 \
+#     hydra.sweeper.n_trials=100 \
 #     hydra.sweeper.sampler.n_startup_trials=150 \
 #     trainer=gpu \
 #     trainer.max_epochs=50 \
@@ -202,10 +211,13 @@ python3 src/train.py \
 # ------------------------------------------------------------------------
 # Stability search
 # ------------------------------------------------------------------------
+# taskset -c 0-2 \
 # python3 src/train.py \
 #     -m \
-#     hydra/launcher=submitit_slurm_clariden \
-#     hydra.sweeper.n_jobs=6 \
+#     hydra/launcher=submitit_local \
+#     hydra.launcher.timeout_min=200 \
+#     hydra.launcher.cpus_per_task=1 \
+#     hydra.launcher.gpus_per_node=4 \
 #     hydra.sweeper.storage='sqlite:///logs/optuna/robustad/realnvp.db' \
 #     experiment=robustad/realnvp_agnostic \
 #     experiment_name=robustad_realnvp_agnostic_drift_vs_logp_search \
@@ -225,7 +237,7 @@ python3 src/train.py \
 #     optimized_metric_config.main_metric.direction=minimize \
 #     hydra.sweeper.study_name=drift_vs_logp \
 #     hydra.sweeper.direction='[minimize, minimize]' \
-#     hydra.sweeper.n_trials=600 \
+#     hydra.sweeper.n_trials=100 \
 #     hydra.sweeper.sampler.n_startup_trials=150 \
 #     trainer=gpu \
 #     trainer.max_epochs=50 \
@@ -235,10 +247,13 @@ python3 src/train.py \
 # ------------------------------------------------------------------------
 # Wasserstein search
 # ------------------------------------------------------------------------
+# taskset -c 0-2 \
 # python3 src/train.py \
 #     -m \
-#     hydra/launcher=submitit_slurm_clariden \
-#     hydra.sweeper.n_jobs=6 \
+#     hydra/launcher=submitit_local \
+#     hydra.launcher.timeout_min=200 \
+#     hydra.launcher.cpus_per_task=1 \
+#     hydra.launcher.gpus_per_node=4 \
 #     hydra.sweeper.storage='sqlite:///logs/optuna/robustad/realnvp.db' \
 #     experiment=robustad/realnvp_agnostic \
 #     experiment_name=robustad_realnvp_agnostic_wasserstein_vs_logp_search \
@@ -258,7 +273,7 @@ python3 src/train.py \
 #     optimized_metric_config.main_metric.direction=minimize \
 #     hydra.sweeper.study_name=wasserstein_vs_logp \
 #     hydra.sweeper.direction='[minimize, minimize]' \
-#     hydra.sweeper.n_trials=600 \
+#     hydra.sweeper.n_trials=100 \
 #     hydra.sweeper.sampler.n_startup_trials=150 \
 #     trainer=gpu \
 #     trainer.max_epochs=50 \

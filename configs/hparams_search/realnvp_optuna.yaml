@@ -11,7 +11,7 @@ hydra:
 
     # storage URL to persist optimization results
     # for example, you can use SQLite if you set 'sqlite:///example.db'
-    storage: sqlite:///logs/optuna/realnvp.db
+    storage: sqlite:///logs/optuna/physics/realnvp.db
 
     # name of the study to persist optimization results
     study_name: cvar25_vs_logp

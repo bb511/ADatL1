@@ -122,36 +122,42 @@
 # ------------------------------------------------------------------------
 # Semi-supervised search (cvar25)
 # ------------------------------------------------------------------------
-# python3 src/train.py \
-#     -m \
-#     hydra/launcher=submitit_slurm_clariden \
-#     hydra.sweeper.n_jobs=6 \
-#     hydra.sweeper.storage='sqlite:///logs/optuna/robustad/ae.db' \
-#     experiment=robustad/ae \
-#     experiment_name=robustad_ae_cvar25_vs_mse_search \
-#     callbacks.max_rate_ckpt=null \
-#     callbacks.cvar10_ema_ckpt=null \
-#     ~evaluation.evaluator.ckpts.single.eff__ascore_full__brate_operational \
-#     ~evaluation.evaluator.ckpts.summary.cvar10_ema \
-#     evaluation.callbacks.thres_drift=null \
-#     evaluation.callbacks.wasserstein=null \
-#     evaluation.callbacks.reco=null \
-#     logger=none \
-#     hparams_search=imageae_optuna \
-#     hydra.sweeper.study_name=cvar25eff_vs_mse \
-#     hydra.sweeper.n_trials=600 \
-#     hydra.sweeper.sampler.n_startup_trials=150 \
-#     trainer=gpu \
-#     trainer.max_epochs=50 \
-#     trainer.devices=[0]
+taskset -c 0-2 \
+python3 src/train.py \
+    -m \
+    hydra.sweeper.storage='sqlite:///logs/optuna/robustad/ae.db' \
+    experiment=robustad/ae \
+    experiment_name=robustad_ae_cvar25_vs_mse_search \
+    callbacks.max_rate_ckpt=null \
+    callbacks.cvar10_ema_ckpt=null \
+    ~evaluation.evaluator.ckpts.single.eff__ascore_full__brate_operational \
+    ~evaluation.evaluator.ckpts.summary.cvar10_ema \
+    evaluation.callbacks.thres_drift=null \
+    evaluation.callbacks.wasserstein=null \
+    evaluation.callbacks.reco=null \
+    logger=none \
+    hparams_search=imageae_optuna \
+    hydra.sweeper.study_name=cvar25eff_vs_mse \
+    hydra.sweeper.n_trials=600 \
+    hydra.sweeper.sampler.n_startup_trials=150 \
+    trainer=gpu \
+    trainer.max_epochs=1 \
+    trainer.devices=[0]
+    # hydra/launcher=submitit_local \
+    # hydra.launcher.timeout_min=200 \
+    # hydra.launcher.cpus_per_task=1 \
+    # hydra.launcher.gpus_per_node=4 \
 
 # ------------------------------------------------------------------------
 # Semi-supervised search (cvar10)
 # ------------------------------------------------------------------------
+# taskset -c 0-2 \
 # python3 src/train.py \
 #     -m \
-#     hydra/launcher=submitit_slurm_clariden \
-#     hydra.sweeper.n_jobs=6 \
+#     hydra/launcher=submitit_local \
+#     hydra.launcher.timeout_min=200 \
+#     hydra.launcher.cpus_per_task=1 \
+#     hydra.launcher.gpus_per_node=4 \
 #     hydra.sweeper.storage='sqlite:///logs/optuna/robustad/ae.db' \
 #     experiment=robustad/ae \
 #     experiment_name=robustad_ae_cvar10_vs_mse_search \
@@ -175,10 +181,13 @@
 # ------------------------------------------------------------------------
 # CAP search
 # ------------------------------------------------------------------------
+# taskset -c 0-2 \
 # python3 src/train.py \
 #     -m \
-#     hydra/launcher=submitit_slurm_clariden \
-#     hydra.sweeper.n_jobs=6 \
+#     hydra/launcher=submitit_local \
+#     hydra.launcher.timeout_min=200 \
+#     hydra.launcher.cpus_per_task=1 \
+#     hydra.launcher.gpus_per_node=4 \
 #     hydra.sweeper.storage='sqlite:///logs/optuna/robustad/ae.db' \
 #     experiment=robustad/ae_agnostic \
 #     experiment_name=robustad_ae_agnostic_cap_vs_mse_search \
@@ -205,10 +214,13 @@
 # ------------------------------------------------------------------------
 # Stability search
 # ------------------------------------------------------------------------
+# taskset -c 0-2 \
 # python3 src/train.py \
 #     -m \
-#     hydra/launcher=submitit_slurm_clariden \
-#     hydra.sweeper.n_jobs=6 \
+#     hydra/launcher=submitit_local \
+#     hydra.launcher.timeout_min=200 \
+#     hydra.launcher.cpus_per_task=1 \
+#     hydra.launcher.gpus_per_node=4 \
 #     hydra.sweeper.storage='sqlite:///logs/optuna/robustad/ae.db' \
 #     experiment=robustad/ae_agnostic \
 #     experiment_name=robustad_ae_agnostic_drift_vs_mse_search \
@@ -239,10 +251,13 @@
 # ------------------------------------------------------------------------
 # Wasserstein search
 # ------------------------------------------------------------------------
+# taskset -c 0-2 \
 # python3 src/train.py \
 #     -m \
-#     hydra/launcher=submitit_slurm_clariden \
-#     hydra.sweeper.n_jobs=6 \
+#     hydra/launcher=submitit_local \
+#     hydra.launcher.timeout_min=200 \
+#     hydra.launcher.cpus_per_task=1 \
+#     hydra.launcher.gpus_per_node=4 \
 #     hydra.sweeper.storage='sqlite:///logs/optuna/robustad/ae.db' \
 #     experiment=robustad/ae_agnostic \
 #     experiment_name=robustad_ae_agnostic_wasserstein_vs_mse_search \

@@ -139,31 +139,31 @@
 # ------------------------------------------------------------------------
 # Semi-supervised cvar25 training
 # ------------------------------------------------------------------------
-# taskset -c 0-2 \
-# python3 src/train.py \
-#     -m \
-#     hydra/launcher=submitit_local \
-#     hydra.launcher.cpus_per_task=1 \
-#     hydra.launcher.gpus_per_node=4 \
-#     paths.raw_data_dir=/data/deodagiu/adl1t_data/parquet_files \
-#     experiment=physics/realnvp \
-#     experiment_name=realnvp_cvar25_vs_logpq99_search \
-#     algorithm.target_rate=0.01 \
-#     algorithm.base_rate=null \
-#     callbacks.max_rate_ckpt=null \
-#     callbacks.cvar10_ema_ckpt=null \
-#     ~evaluation.evaluator.ckpts.single.eff__ascore_full__brate_operational \
-#     ~evaluation.evaluator.ckpts.summary.cvar10_ema \
-#     evaluation.callbacks.thres_drift=null \
-#     evaluation.callbacks.wasserstein=null \
-#     logger=none \
-#     hparams_search=realnvp_optuna \
-#     hydra.sweeper.study_name=cvar25eff_vs_logpq99 \
-#     hydra.sweeper.n_trials=150 \
-#     hydra.sweeper.sampler.n_startup_trials=150 \
-#     trainer=gpu \
-#     trainer.max_epochs=50 \
-#     trainer.devices=[0]
+taskset -c 0-2 \
+python3 src/train.py \
+    -m \
+    hydra/launcher=submitit_local \
+    hydra.launcher.cpus_per_task=1 \
+    hydra.launcher.gpus_per_node=4 \
+    paths.raw_data_dir=/data/deodagiu/adl1t_data/parquet_files \
+    experiment=physics/realnvp \
+    experiment_name=realnvp_cvar25_vs_logpq99_search \
+    algorithm.target_rate=0.01 \
+    algorithm.base_rate=null \
+    callbacks.max_rate_ckpt=null \
+    callbacks.cvar10_ema_ckpt=null \
+    ~evaluation.evaluator.ckpts.single.eff__ascore_full__brate_operational \
+    ~evaluation.evaluator.ckpts.summary.cvar10_ema \
+    evaluation.callbacks.thres_drift=null \
+    evaluation.callbacks.wasserstein=null \
+    logger=none \
+    hparams_search=realnvp_optuna \
+    hydra.sweeper.study_name=cvar25eff_vs_logpq99 \
+    hydra.sweeper.n_trials=150 \
+    hydra.sweeper.sampler.n_startup_trials=150 \
+    trainer=gpu \
+    trainer.max_epochs=50 \
+    trainer.devices=[0]
 
 # ------------------------------------------------------------------------
 # Semi-supervised cvar10 training

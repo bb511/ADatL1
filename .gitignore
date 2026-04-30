@@ -5,6 +5,8 @@
 # Ignore notebook stuff
 notebooks/paretos
 notebooks/effs
+notebooks/effs_cifar10
+notebooks/effs_robustad
 
 # Ignore MAC stuff.
 .DS_Store

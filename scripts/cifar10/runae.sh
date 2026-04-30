@@ -12,15 +12,16 @@
 # taskset -c 0-2 \
 # python3 src/train.py \
 #     experiment=cifar10/ae \
-#     run_name=cvar25_t339_high \
-#     algorithm.optimizer.lr=0.001457369500608365 \
-#     algorithm.delta=7.0 \
+#     run_name=cvar25_t592_high \
 #     trainer.gradient_clip_val=0.5 \
-#     algorithm.optimizer.betas='[0.9,0.999]' \
-#     algorithm.optimizer.weight_decay=0.0 \
-#     algorithm.encoder.nodes='[64,32,32]' \
-#     algorithm.input_noise_std=0.001 \
-#     trainer.max_epochs=1 \
+#     algorithm.delta=5.0 \
+#     algorithm.input_noise_std=0.05 \
+#     algorithm.encoder.nodes=[64,128,256] \
+#     algorithm.encoder.strides=[1,2] \
+#     algorithm.encoder.activation=silu \
+#     algorithm.optimizer.lr=0.0017368497078662237 \
+#     algorithm.optimizer.betas=[0.9,0.99] \
+#     algorithm.optimizer.weight_decay=0.0005 \
 #     trainer=gpu \
 #     trainer.devices=[0]
 
@@ -59,59 +60,65 @@
 #     callbacks.thres_drift_ema_ckpt=null \
 #     ~evaluation.evaluator.ckpts.summary.operational_drift_ema \
 #     ~evaluation.evaluator.ckpts.summary.w1dist_ema_normal_vs_reference_normal \
-#     algorithm.optimizer.lr=0.0027927024120831816 \
-#     algorithm.delta=10.0 \
-#     trainer.gradient_clip_val=2.0 \
-#     algorithm.optimizer.betas='[0.9,0.999]' \
-#     algorithm.optimizer.weight_decay=0.0 \
-#     algorithm.encoder.nodes='[64,32,16]' \
-#     algorithm.input_noise_std=0.01 \
+#     trainer.gradient_clip_val=1.0 \
+#     algorithm.delta=3.0 \
+#     algorithm.input_noise_std=0.0 \
+#     algorithm.encoder.nodes=[32,64,128] \
+#     algorithm.encoder.strides=[2,1] \
+#     algorithm.encoder.activation=gelu \
+#     algorithm.optimizer.lr=0.0028555698070213114 \
+#     algorithm.optimizer.betas=[0.9,0.99] \
+#     algorithm.optimizer.weight_decay=0.0001 \
 #     trainer=gpu \
 #     trainer.devices=[0]
 
 # ------------------------------------------------------------------------
 # Stability training
 # ------------------------------------------------------------------------
-# taskset -c 0-2 \
+# taskset -c 6-8 \
 # python3 src/train.py \
 #     experiment=cifar10/ae_agnostic \
-#     run_name=stability_t390_high \
+#     run_name=stability_t241_high \
 #     callbacks.wasserstein_dist=null \
 #     callbacks.cap_sn_zb=null \
 #     callbacks.wasserstein_dist_ema_ckpt=null \
 #     callbacks.cap_sn_zb_ema_ckpt=null \
 #     ~evaluation.evaluator.ckpts.summary.w1dist_ema_normal_vs_reference_normal \
 #     ~evaluation.evaluator.ckpts.summary.cap_ema_normal_vs_reference_normal \
-#     algorithm.optimizer.lr=0.000814981343573229 \
-#     algorithm.delta=10.0 \
 #     trainer.gradient_clip_val=1.0 \
-#     algorithm.optimizer.betas='[0.9,0.99]' \
-#     algorithm.optimizer.weight_decay=1e-05 \
-#     algorithm.encoder.nodes='[64,32,32]' \
-#     algorithm.input_noise_std=0.0003 \
+#     algorithm.delta=1.0 \
+#     algorithm.input_noise_std=0.05 \
+#     algorithm.encoder.nodes=[64,128,256] \
+#     algorithm.encoder.strides=[2,2] \
+#     algorithm.encoder.activation=silu \
+#     algorithm.optimizer.lr=0.0008065877157877547 \
+#     algorithm.optimizer.betas=[0.9,0.99] \
+#     algorithm.optimizer.weight_decay=0.0005 \
 #     trainer=gpu \
 #     trainer.devices=[0]
 
 # ------------------------------------------------------------------------
 # Wasserstein training
 # ------------------------------------------------------------------------
-# taskset -c 0-2 \
+# taskset -c 9-11 \
 # python3 src/train.py \
 #     experiment=cifar10/ae_agnostic \
-#     run_name=wasserstein_t390_high \
+#     run_name=wasserstein_t279_high \
 #     callbacks.thres_drift=null \
 #     callbacks.cap_sn_zb=null \
 #     callbacks.thres_drift_ema_ckpt=null \
 #     callbacks.cap_sn_zb_ema_ckpt=null \
 #     ~evaluation.evaluator.ckpts.summary.operational_drift_ema \
 #     ~evaluation.evaluator.ckpts.summary.cap_ema_normal_vs_reference_normal \
-#     algorithm.optimizer.lr=0.00047124714609726086 \
-#     algorithm.delta=5.0 \
 #     trainer.gradient_clip_val=0.5 \
-#     algorithm.optimizer.betas='[0.9,0.99]' \
-#     algorithm.optimizer.weight_decay=0.0 \
-#     algorithm.encoder.nodes='[64,32,32]' \
-#     algorithm.input_noise_std=0.001 \
+#     algorithm.delta=5.0 \
+#     algorithm.input_noise_std=0.03 \
+#     algorithm.encoder.nodes=[64,128,256] \
+#     algorithm.encoder.strides=[2,2] \
+#     algorithm.encoder.activation=silu \
+#     algorithm.optimizer.lr=0.002250553692978696 \
+#     algorithm.optimizer.betas=[0.9,0.999] \
+#     algorithm.optimizer.weight_decay=1e-05 \
 #     trainer=gpu \
 #     trainer.devices=[0]
 

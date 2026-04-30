@@ -9,20 +9,24 @@
 # ------------------------------------------------------------------------
 # Semi-supervised cvar25 training
 # ------------------------------------------------------------------------
-# taskset -c 0-2 \
+# taskset -c 36-38 \
 # python3 src/train.py \
 #     experiment=cifar10/svdd \
-#     run_name=cvar25_t339_high \
-#     algorithm.optimizer.lr=0.001457369500608365 \
-#     algorithm.delta=7.0 \
-#     trainer.gradient_clip_val=0.5 \
-#     algorithm.optimizer.betas='[0.9,0.999]' \
-#     algorithm.optimizer.weight_decay=0.0 \
-#     algorithm.encoder.nodes='[64,32,32]' \
-#     algorithm.input_noise_std=0.001 \
-#     trainer.max_epochs=1 \
+#     run_name=cvar25_t324_high \
+#     algorithm.optimizer.lr=0.002487596640834986 \
+#     trainer.gradient_clip_val=1.0 \
+#     algorithm.optimizer.betas=[0.9,0.999] \
+#     algorithm.optimizer.weight_decay=1e-06 \
+#     algorithm.weight_decay=1e-07 \
+#     algorithm.soft_boundary=True \
+#     algorithm.nu=0.01 \
+#     algorithm.center_init_method=zeros \
+#     algorithm.encoder.nodes=[64,128,256] \
+#     algorithm.encoder.strides=[2,2] \
+#     algorithm.encoder.activation=relu \
+#     algorithm.encoder.batchnorm=False \
 #     trainer=gpu \
-#     trainer.devices=[0]
+#     trainer.devices=[2]
 
 # ------------------------------------------------------------------------
 # Semi-supervised cvar10 training
@@ -40,7 +44,7 @@
 #     algorithm.encoder.nodes='[64,32,32]' \
 #     algorithm.input_noise_std=0.0 \
 #     trainer=gpu \
-#     trainer.devices=[0]
+#     trainer.devices=[2]
 
 
 # ========================================================================
@@ -49,7 +53,7 @@
 # ------------------------------------------------------------------------
 # CAP training
 # ------------------------------------------------------------------------
-# taskset -c 0-2 \
+# taskset -c 40-42 \
 # python3 src/train.py \
 #     experiment=cifar10/svdd_agnostic \
 #     run_name=cap_t240_high \
@@ -59,20 +63,25 @@
 #     callbacks.thres_drift_ema_ckpt=null \
 #     ~evaluation.evaluator.ckpts.summary.operational_drift_ema \
 #     ~evaluation.evaluator.ckpts.summary.w1dist_ema_normal_vs_reference_normal \
-#     algorithm.optimizer.lr=0.0027927024120831816 \
-#     algorithm.delta=10.0 \
-#     trainer.gradient_clip_val=2.0 \
-#     algorithm.optimizer.betas='[0.9,0.999]' \
-#     algorithm.optimizer.weight_decay=0.0 \
-#     algorithm.encoder.nodes='[64,32,16]' \
-#     algorithm.input_noise_std=0.01 \
+#     algorithm.optimizer.lr=0.001938086961586347 \
+#     trainer.gradient_clip_val=1.0 \
+#     algorithm.optimizer.betas=[0.9,0.99] \
+#     algorithm.optimizer.weight_decay=0.0001 \
+#     algorithm.weight_decay=1e-06 \
+#     algorithm.soft_boundary=True \
+#     algorithm.nu=0.2 \
+#     algorithm.center_init_method=zeros \
+#     algorithm.encoder.nodes=[16,32,64] \
+#     algorithm.encoder.strides=[2,1] \
+#     algorithm.encoder.activation=silu \
+#     algorithm.encoder.batchnorm=False \
 #     trainer=gpu \
-#     trainer.devices=[0]
+#     trainer.devices=[2]
 
 # ------------------------------------------------------------------------
 # Stability training
 # ------------------------------------------------------------------------
-# taskset -c 0-2 \
+# taskset -c 43-45 \
 # python3 src/train.py \
 #     experiment=cifar10/svdd_agnostic \
 #     run_name=stability_t390_high \
@@ -82,20 +91,25 @@
 #     callbacks.cap_sn_zb_ema_ckpt=null \
 #     ~evaluation.evaluator.ckpts.summary.w1dist_ema_normal_vs_reference_normal \
 #     ~evaluation.evaluator.ckpts.summary.cap_ema_normal_vs_reference_normal \
-#     algorithm.optimizer.lr=0.000814981343573229 \
-#     algorithm.delta=10.0 \
-#     trainer.gradient_clip_val=1.0 \
-#     algorithm.optimizer.betas='[0.9,0.99]' \
-#     algorithm.optimizer.weight_decay=1e-05 \
-#     algorithm.encoder.nodes='[64,32,32]' \
-#     algorithm.input_noise_std=0.0003 \
+#     algorithm.optimizer.lr=0.0029638593347981854 \
+#     trainer.gradient_clip_val=2.0 \
+#     algorithm.optimizer.betas=[0.9,0.999] \
+#     algorithm.optimizer.weight_decay=0.0001 \
+#     algorithm.weight_decay=1e-08 \
+#     algorithm.soft_boundary=True \
+#     algorithm.nu=0.01 \
+#     algorithm.center_init_method=zeros \
+#     algorithm.encoder.nodes=[16,64,128] \
+#     algorithm.encoder.strides=[2,1] \
+#     algorithm.encoder.activation=relu \
+#     algorithm.encoder.batchnorm=True \
 #     trainer=gpu \
-#     trainer.devices=[0]
+#     trainer.devices=[2]
 
 # ------------------------------------------------------------------------
 # Wasserstein training
 # ------------------------------------------------------------------------
-# taskset -c 0-2 \
+# taskset -c 46-48 \
 # python3 src/train.py \
 #     experiment=cifar10/svdd_agnostic \
 #     run_name=wasserstein_t390_high \
@@ -105,15 +119,20 @@
 #     callbacks.cap_sn_zb_ema_ckpt=null \
 #     ~evaluation.evaluator.ckpts.summary.operational_drift_ema \
 #     ~evaluation.evaluator.ckpts.summary.cap_ema_normal_vs_reference_normal \
-#     algorithm.optimizer.lr=0.00047124714609726086 \
-#     algorithm.delta=5.0 \
+#     algorithm.optimizer.lr=0.002998149016072265 \
 #     trainer.gradient_clip_val=0.5 \
-#     algorithm.optimizer.betas='[0.9,0.99]' \
-#     algorithm.optimizer.weight_decay=0.0 \
-#     algorithm.encoder.nodes='[64,32,32]' \
-#     algorithm.input_noise_std=0.001 \
+#     algorithm.optimizer.betas=[0.9,0.99] \
+#     algorithm.optimizer.weight_decay=0.001 \
+#     algorithm.weight_decay=0.0 \
+#     algorithm.soft_boundary=True \
+#     algorithm.nu=0.05 \
+#     algorithm.center_init_method=zeros \
+#     algorithm.encoder.nodes=[32,64,128] \
+#     algorithm.encoder.strides=[2,1] \
+#     algorithm.encoder.activation=relu \
+#     algorithm.encoder.batchnorm=True \
 #     trainer=gpu \
-#     trainer.devices=[0]
+#     trainer.devices=[2]
 
 
 # ========================================================================

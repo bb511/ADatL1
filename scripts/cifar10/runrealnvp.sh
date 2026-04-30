@@ -9,20 +9,22 @@
 # ------------------------------------------------------------------------
 # Semi-supervised cvar25 training
 # ------------------------------------------------------------------------
-# taskset -c 0-2 \
+# taskset -c 24-26 \
 # python3 src/train.py \
 #     experiment=cifar10/realnvp \
 #     run_name=cvar25_t339_high \
-#     algorithm.optimizer.lr=0.001457369500608365 \
-#     algorithm.delta=7.0 \
-#     trainer.gradient_clip_val=0.5 \
-#     algorithm.optimizer.betas='[0.9,0.999]' \
-#     algorithm.optimizer.weight_decay=0.0 \
-#     algorithm.encoder.nodes='[64,32,32]' \
-#     algorithm.input_noise_std=0.001 \
-#     trainer.max_epochs=1 \
+#     algorithm.optimizer.lr=0.0010115191329924005 \
+#     trainer.gradient_clip_val=1.0 \
+#     algorithm.optimizer.betas=[0.9,0.999] \
+#     algorithm.optimizer.weight_decay=0.001 \
+#     algorithm.flow.n_flows=8 \
+#     algorithm.flow.hidden_dim=768 \
+#     algorithm.flow.n_hidden_layers=2 \
+#     algorithm.flow.activation=silu \
+#     algorithm.flow.noise_scale=0.01 \
+#     algorithm.flow.scale_clamp=3.0 \
 #     trainer=gpu \
-#     trainer.devices=[0]
+#     trainer.devices=[1]
 
 # ------------------------------------------------------------------------
 # Semi-supervised cvar10 training
@@ -30,7 +32,7 @@
 # taskset -c 0-2 \
 # python3 src/train.py \
 #     experiment=cifar10/realnvp \
-#     run_name=cvar10_t339_high \
+#     run_name=cvar10_t535_high \
 #     evaluation.callbacks.anomaly_efficiency.cvar_summary=0.10 \
 #     algorithm.optimizer.lr=0.0019789545082545034 \
 #     algorithm.delta=10.0 \
@@ -40,7 +42,7 @@
 #     algorithm.encoder.nodes='[64,32,32]' \
 #     algorithm.input_noise_std=0.0 \
 #     trainer=gpu \
-#     trainer.devices=[0]
+#     trainer.devices=[1]
 
 
 # ========================================================================
@@ -49,71 +51,80 @@
 # ------------------------------------------------------------------------
 # CAP training
 # ------------------------------------------------------------------------
-# taskset -c 0-2 \
+# taskset -c 27-29 \
 # python3 src/train.py \
 #     experiment=cifar10/realnvp_agnostic \
-#     run_name=cap_t240_high \
+#     run_name=cap_t211_high \
 #     callbacks.wasserstein_dist=null \
 #     callbacks.thres_drift=null \
 #     callbacks.wasserstein_dist_ema_ckpt=null \
 #     callbacks.thres_drift_ema_ckpt=null \
 #     ~evaluation.evaluator.ckpts.summary.operational_drift_ema \
 #     ~evaluation.evaluator.ckpts.summary.w1dist_ema_normal_vs_reference_normal \
-#     algorithm.optimizer.lr=0.0027927024120831816 \
-#     algorithm.delta=10.0 \
-#     trainer.gradient_clip_val=2.0 \
-#     algorithm.optimizer.betas='[0.9,0.999]' \
-#     algorithm.optimizer.weight_decay=0.0 \
-#     algorithm.encoder.nodes='[64,32,16]' \
-#     algorithm.input_noise_std=0.01 \
+#     algorithm.optimizer.lr=0.00014437689046359488 \
+#     trainer.gradient_clip_val=0.5 \
+#     algorithm.optimizer.betas=[0.9,0.999] \
+#     algorithm.optimizer.weight_decay=0.001 \
+#     algorithm.flow.n_flows=8 \
+#     algorithm.flow.hidden_dim=512 \
+#     algorithm.flow.n_hidden_layers=1 \
+#     algorithm.flow.activation=gelu \
+#     algorithm.flow.noise_scale=0.001 \
+#     algorithm.flow.scale_clamp=3.0 \
 #     trainer=gpu \
-#     trainer.devices=[0]
+#     trainer.devices=[1]
 
 # ------------------------------------------------------------------------
 # Stability training
 # ------------------------------------------------------------------------
-# taskset -c 0-2 \
+# taskset -c 30-32 \
 # python3 src/train.py \
 #     experiment=cifar10/realnvp_agnostic \
-#     run_name=stability_t390_high \
+#     run_name=stability_t104_high \
 #     callbacks.wasserstein_dist=null \
 #     callbacks.cap_sn_zb=null \
 #     callbacks.wasserstein_dist_ema_ckpt=null \
 #     callbacks.cap_sn_zb_ema_ckpt=null \
 #     ~evaluation.evaluator.ckpts.summary.w1dist_ema_normal_vs_reference_normal \
 #     ~evaluation.evaluator.ckpts.summary.cap_ema_normal_vs_reference_normal \
-#     algorithm.optimizer.lr=0.000814981343573229 \
-#     algorithm.delta=10.0 \
-#     trainer.gradient_clip_val=1.0 \
-#     algorithm.optimizer.betas='[0.9,0.99]' \
-#     algorithm.optimizer.weight_decay=1e-05 \
-#     algorithm.encoder.nodes='[64,32,32]' \
-#     algorithm.input_noise_std=0.0003 \
+#     algorithm.optimizer.lr=0.000359807400273336 \
+#     trainer.gradient_clip_val=2.0 \
+#     algorithm.optimizer.betas=[0.9,0.99] \
+#     algorithm.optimizer.weight_decay=0.001 \
+#     algorithm.flow.n_flows=8 \
+#     algorithm.flow.hidden_dim=768 \
+#     algorithm.flow.n_hidden_layers=2 \
+#     algorithm.flow.activation=silu \
+#     algorithm.flow.noise_scale=0.001 \
+#     algorithm.flow.scale_clamp=3.0 \
 #     trainer=gpu \
-#     trainer.devices=[0]
+#     trainer.devices=[1]
 
 # ------------------------------------------------------------------------
 # Wasserstein training
 # ------------------------------------------------------------------------
-# taskset -c 0-2 \
+# taskset -c 33-35 \
 # python3 src/train.py \
 #     experiment=cifar10/realnvp_agnostic \
-#     run_name=wasserstein_t390_high \
+#     run_name=wasserstein_t475_high \
 #     callbacks.thres_drift=null \
 #     callbacks.cap_sn_zb=null \
 #     callbacks.thres_drift_ema_ckpt=null \
 #     callbacks.cap_sn_zb_ema_ckpt=null \
 #     ~evaluation.evaluator.ckpts.summary.operational_drift_ema \
 #     ~evaluation.evaluator.ckpts.summary.cap_ema_normal_vs_reference_normal \
-#     algorithm.optimizer.lr=0.00047124714609726086 \
-#     algorithm.delta=5.0 \
+#     algorithm.optimizer.lr=0.0008371472615602258 \
 #     trainer.gradient_clip_val=0.5 \
-#     algorithm.optimizer.betas='[0.9,0.99]' \
-#     algorithm.optimizer.weight_decay=0.0 \
-#     algorithm.encoder.nodes='[64,32,32]' \
-#     algorithm.input_noise_std=0.001 \
+#     algorithm.optimizer.betas=[0.9,0.999] \
+#     algorithm.optimizer.weight_decay=0.0001 \
+#     algorithm.flow.n_flows=8 \
+#     algorithm.flow.hidden_dim=512 \
+#     algorithm.flow.n_hidden_layers=2 \
+#     algorithm.flow.activation=silu \
+#     algorithm.flow.noise_scale=0.0 \
+#     algorithm.flow.scale_clamp=3.0 \
 #     trainer=gpu \
-#     trainer.devices=[0]
+#     trainer.devices=[1]
 
 
 # ========================================================================

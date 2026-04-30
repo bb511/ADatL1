@@ -9,18 +9,21 @@
 # ------------------------------------------------------------------------
 # Semi-supervised cvar25 training
 # ------------------------------------------------------------------------
-# taskset -c 0-2 \
+# taskset -c 12-14 \
 # python3 src/train.py \
 #     experiment=cifar10/vae \
-#     run_name=cvar25_t339_high \
-#     algorithm.optimizer.lr=0.001457369500608365 \
-#     algorithm.delta=7.0 \
+#     run_name=cvar25_t568_high \
 #     trainer.gradient_clip_val=0.5 \
-#     algorithm.optimizer.betas='[0.9,0.999]' \
-#     algorithm.optimizer.weight_decay=0.0 \
-#     algorithm.encoder.nodes='[64,32,32]' \
-#     algorithm.input_noise_std=0.001 \
-#     trainer.max_epochs=1 \
+#     algorithm.encoder.clamp_zlogvar_range=[-6,4] \
+#     algorithm.optimizer.lr=0.0009568361127419486 \
+#     algorithm.optimizer.betas=[0.9,0.999] \
+#     algorithm.optimizer.weight_decay=0.001 \
+#     algorithm.kl_scale=0.002 \
+#     algorithm.kl_warmup_frac=0.0 \
+#     algorithm.encoder.nodes=[48,96,192,64] \
+#     algorithm.encoder.strides=[2,1] \
+#     algorithm.encoder.activation=silu \
+#     algorithm.encoder.batchnorm=False \
 #     trainer=gpu \
 #     trainer.devices=[0]
 
@@ -49,53 +52,61 @@
 # ------------------------------------------------------------------------
 # CAP training
 # ------------------------------------------------------------------------
-# taskset -c 0-2 \
+# taskset -c 15-17 \
 # python3 src/train.py \
 #     experiment=cifar10/vae_agnostic \
-#     run_name=cap_t240_high \
+#     run_name=cap_t520_high \
 #     callbacks.wasserstein_dist=null \
 #     callbacks.thres_drift=null \
 #     callbacks.wasserstein_dist_ema_ckpt=null \
 #     callbacks.thres_drift_ema_ckpt=null \
 #     ~evaluation.evaluator.ckpts.summary.operational_drift_ema \
 #     ~evaluation.evaluator.ckpts.summary.w1dist_ema_normal_vs_reference_normal \
-#     algorithm.optimizer.lr=0.0027927024120831816 \
-#     algorithm.delta=10.0 \
-#     trainer.gradient_clip_val=2.0 \
-#     algorithm.optimizer.betas='[0.9,0.999]' \
+#     trainer.gradient_clip_val=0.5 \
+#     algorithm.encoder.clamp_zlogvar_range=[-6,4] \
+#     algorithm.optimizer.lr=0.00012155116550631143 \
+#     algorithm.optimizer.betas=[0.9,0.99] \
 #     algorithm.optimizer.weight_decay=0.0 \
-#     algorithm.encoder.nodes='[64,32,16]' \
-#     algorithm.input_noise_std=0.01 \
+#     algorithm.kl_scale=0.002 \
+#     algorithm.kl_warmup_frac=0.2 \
+#     algorithm.encoder.nodes=[16,32,64,16] \
+#     algorithm.encoder.strides=[1,2] \
+#     algorithm.encoder.activation=relu \
+#     algorithm.encoder.batchnorm=False \
 #     trainer=gpu \
 #     trainer.devices=[0]
 
 # ------------------------------------------------------------------------
 # Stability training
 # ------------------------------------------------------------------------
-# taskset -c 0-2 \
+# taskset -c 18-20 \
 # python3 src/train.py \
 #     experiment=cifar10/vae_agnostic \
-#     run_name=stability_t390_high \
+#     run_name=stability_t587_high \
 #     callbacks.wasserstein_dist=null \
 #     callbacks.cap_sn_zb=null \
 #     callbacks.wasserstein_dist_ema_ckpt=null \
 #     callbacks.cap_sn_zb_ema_ckpt=null \
 #     ~evaluation.evaluator.ckpts.summary.w1dist_ema_normal_vs_reference_normal \
 #     ~evaluation.evaluator.ckpts.summary.cap_ema_normal_vs_reference_normal \
-#     algorithm.optimizer.lr=0.000814981343573229 \
-#     algorithm.delta=10.0 \
-#     trainer.gradient_clip_val=1.0 \
-#     algorithm.optimizer.betas='[0.9,0.99]' \
+#     trainer.gradient_clip_val=2.0 \
+#     algorithm.encoder.clamp_zlogvar_range=[-10,6] \
+#     algorithm.optimizer.lr=5.0005417147756347e-05 \
+#     algorithm.optimizer.betas=[0.9,0.99] \
 #     algorithm.optimizer.weight_decay=1e-05 \
-#     algorithm.encoder.nodes='[64,32,32]' \
-#     algorithm.input_noise_std=0.0003 \
+#     algorithm.kl_scale=0.0001 \
+#     algorithm.kl_warmup_frac=0.2 \
+#     algorithm.encoder.nodes=[16,32,64,32] \
+#     algorithm.encoder.strides=[2,1] \
+#     algorithm.encoder.activation=relu \
+#     algorithm.encoder.batchnorm=False \
 #     trainer=gpu \
 #     trainer.devices=[0]
 
 # ------------------------------------------------------------------------
 # Wasserstein training
 # ------------------------------------------------------------------------
-# taskset -c 0-2 \
+# taskset -c 21-23 \
 # python3 src/train.py \
 #     experiment=cifar10/vae_agnostic \
 #     run_name=wasserstein_t390_high \
@@ -105,13 +116,17 @@
 #     callbacks.cap_sn_zb_ema_ckpt=null \
 #     ~evaluation.evaluator.ckpts.summary.operational_drift_ema \
 #     ~evaluation.evaluator.ckpts.summary.cap_ema_normal_vs_reference_normal \
-#     algorithm.optimizer.lr=0.00047124714609726086 \
-#     algorithm.delta=5.0 \
 #     trainer.gradient_clip_val=0.5 \
-#     algorithm.optimizer.betas='[0.9,0.99]' \
-#     algorithm.optimizer.weight_decay=0.0 \
-#     algorithm.encoder.nodes='[64,32,32]' \
-#     algorithm.input_noise_std=0.001 \
+#     algorithm.encoder.clamp_zlogvar_range=[-10,6] \
+#     algorithm.optimizer.lr=0.0001892559752409742 \
+#     algorithm.optimizer.betas=[0.9,0.999] \
+#     algorithm.optimizer.weight_decay=1e-05 \
+#     algorithm.kl_scale=0.002 \
+#     algorithm.kl_warmup_frac=0.0 \
+#     algorithm.encoder.nodes=[24,48,96,32] \
+#     algorithm.encoder.strides=[2,2] \
+#     algorithm.encoder.activation=gelu \
+#     algorithm.encoder.batchnorm=False \
 #     trainer=gpu \
 #     trainer.devices=[0]
 

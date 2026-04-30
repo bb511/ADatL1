@@ -9,20 +9,24 @@
 # ------------------------------------------------------------------------
 # Semi-supervised cvar25 training
 # ------------------------------------------------------------------------
-# taskset -c 0-2 \
-# python3 src/train.py \
-#     experiment=robustad/vae \
-#     run_name=cvar25_t339_high \
-#     algorithm.optimizer.lr=0.001457369500608365 \
-#     algorithm.delta=7.0 \
-#     trainer.gradient_clip_val=0.5 \
-#     algorithm.optimizer.betas='[0.9,0.999]' \
-#     algorithm.optimizer.weight_decay=0.0 \
-#     algorithm.encoder.nodes='[64,32,32]' \
-#     algorithm.input_noise_std=0.001 \
-#     trainer.max_epochs=1 \
-#     trainer=gpu \
-#     trainer.devices=[0]
+taskset -c 0-2 \
+python3 src/train.py \
+    experiment=robustad/vae \
+    run_name=cvar25_t568_high \
+    trainer.gradient_clip_val=0.5 \
+    algorithm.encoder.clamp_zlogvar_range=[-6,4] \
+    algorithm.optimizer.lr=0.0009568361127419486 \
+    algorithm.optimizer.betas=[0.9,0.999] \
+    algorithm.optimizer.weight_decay=0.001 \
+    algorithm.kl_scale=0.002 \
+    algorithm.kl_warmup_frac=0.0 \
+    algorithm.encoder.nodes=[48,96,192,64] \
+    algorithm.encoder.strides=[2,1] \
+    algorithm.encoder.activation=silu \
+    algorithm.encoder.batchnorm=False \
+    trainer.max_epochs=1 \
+    trainer=gpu \
+    trainer.devices=[0]
 
 # ------------------------------------------------------------------------
 # Semi-supervised cvar10 training

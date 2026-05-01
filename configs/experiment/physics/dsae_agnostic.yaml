@@ -12,7 +12,7 @@ defaults:
 seed: 123
 tags: ["dsae", "agnostic"]
 
-experiment_name: dsae_models
+experiment_name: physics_dsae_models
 run_name: ${short_hash:${hydra:runtime.output_dir},12}
 
 data:

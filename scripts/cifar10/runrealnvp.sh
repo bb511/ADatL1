@@ -12,7 +12,7 @@
 # taskset -c 24-26 \
 # python3 src/train.py \
 #     experiment=cifar10/realnvp \
-#     run_name=cvar25_t339_high \
+#     run_name=cvar25_t339 \
 #     algorithm.optimizer.lr=0.0010115191329924005 \
 #     trainer.gradient_clip_val=1.0 \
 #     algorithm.optimizer.betas=[0.9,0.999] \
@@ -26,25 +26,6 @@
 #     trainer=gpu \
 #     trainer.devices=[1]
 
-# ------------------------------------------------------------------------
-# Semi-supervised cvar10 training
-# ------------------------------------------------------------------------
-# taskset -c 0-2 \
-# python3 src/train.py \
-#     experiment=cifar10/realnvp \
-#     run_name=cvar10_t535_high \
-#     evaluation.callbacks.anomaly_efficiency.cvar_summary=0.10 \
-#     algorithm.optimizer.lr=0.0019789545082545034 \
-#     algorithm.delta=10.0 \
-#     trainer.gradient_clip_val=5.0 \
-#     algorithm.optimizer.betas='[0.9,0.999]' \
-#     algorithm.optimizer.weight_decay=1e-06 \
-#     algorithm.encoder.nodes='[64,32,32]' \
-#     algorithm.input_noise_std=0.0 \
-#     trainer=gpu \
-#     trainer.devices=[1]
-
-
 # ========================================================================
 # AGNOSTIC TRAINING
 # ========================================================================
@@ -54,7 +35,7 @@
 # taskset -c 27-29 \
 # python3 src/train.py \
 #     experiment=cifar10/realnvp_agnostic \
-#     run_name=cap_t211_high \
+#     run_name=cap_t211 \
 #     callbacks.wasserstein_dist=null \
 #     callbacks.thres_drift=null \
 #     callbacks.wasserstein_dist_ema_ckpt=null \
@@ -80,7 +61,7 @@
 # taskset -c 30-32 \
 # python3 src/train.py \
 #     experiment=cifar10/realnvp_agnostic \
-#     run_name=stability_t104_high \
+#     run_name=stability_t104 \
 #     callbacks.wasserstein_dist=null \
 #     callbacks.cap_sn_zb=null \
 #     callbacks.wasserstein_dist_ema_ckpt=null \
@@ -106,7 +87,7 @@
 # taskset -c 33-35 \
 # python3 src/train.py \
 #     experiment=cifar10/realnvp_agnostic \
-#     run_name=wasserstein_t475_high \
+#     run_name=wasserstein_t475 \
 #     callbacks.thres_drift=null \
 #     callbacks.cap_sn_zb=null \
 #     callbacks.thres_drift_ema_ckpt=null \
@@ -149,31 +130,6 @@
 #     hparams_search=imagerealnvp_optuna \
 #     hydra.sweeper.study_name=cvar25eff_vs_logp \
 #     hydra.sweeper.n_trials=600 \
-#     hydra.sweeper.sampler.n_startup_trials=150 \
-#     trainer=gpu \
-#     trainer.max_epochs=50 \
-#     trainer.devices=[0]
-
-# ------------------------------------------------------------------------
-# Semi-supervised search (cvar10)
-# ------------------------------------------------------------------------
-# python3 src/train.py \
-#     -m \
-#     hydra/launcher=submitit_slurm_clariden \
-#     hydra.sweeper.n_jobs=6 \
-#     experiment=cifar10/realnvp \
-#     experiment_name=cifar10_realnvp_cvar10_vs_logp_search \
-#     callbacks.max_rate_ckpt=null \
-#     callbacks.cvar25_ema_ckpt=null \
-#     ~evaluation.evaluator.ckpts.single.eff__ascore_full__brate_operational \
-#     ~evaluation.evaluator.ckpts.summary.cvar25_ema \
-#     evaluation.callbacks.thres_drift=null \
-#     evaluation.callbacks.wasserstein=null \
-#     evaluation.callbacks.anomaly_efficiency.cvar_summary=0.10 \
-#     logger=none \
-#     hparams_search=imagerealnvp_optuna \
-#     hydra.sweeper.study_name=cvar10eff_vs_logp \
-#     hydra.sweeper.n_trials=100 \
 #     hydra.sweeper.sampler.n_startup_trials=150 \
 #     trainer=gpu \
 #     trainer.max_epochs=50 \

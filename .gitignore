@@ -7,6 +7,7 @@ notebooks/paretos
 notebooks/effs
 notebooks/effs_cifar10
 notebooks/effs_robustad
+notebooks/exported_metrics
 
 # Ignore MAC stuff.
 .DS_Store

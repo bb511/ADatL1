@@ -1,21 +1,24 @@
 # ========================================================================
 # RealNVP RUNNING COMMANDS
 # ========================================================================
+# These are the running commands for the 250 Hz background rate study.
+# To switch to q99 studies, add the following lines to each of the commands below:
+#     algorithm.target_rate=0.01 \
+#     algorithm.base_rate=null \
 
 
 # ========================================================================
 # TRAINING
 # ========================================================================
-
 # ------------------------------------------------------------------------
 # Semi-supervised cvar25 training
 # ------------------------------------------------------------------------
-# taskset -c 0-2 \
+# taskset -c 48-50 \
 # python3 src/train.py \
 #     paths.raw_data_dir=/data/deodagiu/adl1t_data/parquet_files \
 #     experiment=physics/realnvp \
-#     run_name=cvar25_t100_high \
-#     algorithm.optimizer.lr=0.0013780717614807188 \
+#     run_name=cvar25_t523 \
+#     algorithm.optimizer.lr=0.0012971125344674336 \
 #     trainer.gradient_clip_val=0.0 \
 #     algorithm.optimizer.betas=[0.9,0.999] \
 #     algorithm.optimizer.weight_decay=1e-05 \
@@ -35,7 +38,7 @@
 # python3 src/train.py \
 #     paths.raw_data_dir=/data/deodagiu/adl1t_data/parquet_files \
 #     experiment=physics/realnvp \
-#     run_name=cvar10_t100_high \
+#     run_name=cvar10_t100 \
 #     evaluation.callbacks.anomaly_efficiency.cvar_summary=0.10 \
 #     algorithm.optimizer.lr=0.0013780717614807188 \
 #     trainer.gradient_clip_val=0.0 \
@@ -50,14 +53,17 @@
 #     trainer=gpu \
 #     trainer.devices=[0]
 
+# ========================================================================
+# AGNOSTIC TRAINING
+# ========================================================================
 # ------------------------------------------------------------------------
 # CAP training
 # ------------------------------------------------------------------------
-# taskset -c 3-5 \
+# taskset -c 51-53 \
 # python3 src/train.py \
 #     paths.raw_data_dir=/data/deodagiu/adl1t_data/parquet_files \
 #     experiment=physics/realnvp_agnostic \
-#     run_name=cap_t376_low \
+#     run_name=cap_t376 \
 #     callbacks.wasserstein_dist=null \
 #     callbacks.thres_drift=null \
 #     callbacks.wasserstein_dist_ema_ckpt=null \
@@ -75,29 +81,29 @@
 #     algorithm.flow.noise_scale=0.01 \
 #     algorithm.flow.scale_clamp=3.0 \
 #     trainer=gpu \
-#     trainer.devices=[0]
+#     trainer.devices=[1]
 
 # ------------------------------------------------------------------------
 # Stability training
 # ------------------------------------------------------------------------
-# taskset -c 3-5 \
+# taskset -c 54-56 \
 # python3 src/train.py \
 #     paths.raw_data_dir=/data/deodagiu/adl1t_data/parquet_files \
 #     experiment=physics/realnvp_agnostic \
-#     run_name=stability_t100_high \
+#     run_name=stability_t505 \
 #     callbacks.wasserstein_dist=null \
 #     callbacks.cap_sn_zb=null \
 #     callbacks.wasserstein_dist_ema_ckpt=null \
 #     callbacks.cap_sn_zb_ema_ckpt=null \
 #     ~evaluation.evaluator.ckpts.summary.w1dist_ema_normal_vs_SingleNeutrino_E-10-gun \
 #     ~evaluation.evaluator.ckpts.summary.cap_ema_normal_vs_SingleNeutrino_E-10-gun \
-#     algorithm.optimizer.lr=0.0013780717614807188 \
-#     trainer.gradient_clip_val=0.0 \
+#     algorithm.optimizer.lr=0.0010542663916098317 \
+#     trainer.gradient_clip_val=2.0 \
 #     algorithm.optimizer.betas=[0.9,0.999] \
-#     algorithm.optimizer.weight_decay=1e-05 \
+#     algorithm.optimizer.weight_decay=0.001 \
 #     algorithm.flow.n_flows=6 \
-#     algorithm.flow.hidden_dim=48 \
-#     algorithm.flow.n_hidden_layers=1 \
+#     algorithm.flow.hidden_dim=64 \
+#     algorithm.flow.n_hidden_layers=2 \
 #     algorithm.flow.activation=gelu \
 #     algorithm.flow.noise_scale=0.01 \
 #     algorithm.flow.scale_clamp=3.0 \
@@ -107,27 +113,27 @@
 # ------------------------------------------------------------------------
 # Wasserstein training
 # ------------------------------------------------------------------------
-# taskset -c 9-11 \
+# taskset -c 57-59 \
 # python3 src/train.py \
 #     paths.raw_data_dir=/data/deodagiu/adl1t_data/parquet_files \
 #     experiment=physics/realnvp_agnostic \
-#     run_name=wasserstein_t100_high \
+#     run_name=wasserstein_t383 \
 #     callbacks.thres_drift=null \
 #     callbacks.cap_sn_zb=null \
 #     callbacks.thres_drift_ema_ckpt=null \
 #     callbacks.cap_sn_zb_ema_ckpt=null \
 #     ~evaluation.evaluator.ckpts.summary.operational_drift_ema \
 #     ~evaluation.evaluator.ckpts.summary.cap_ema_normal_vs_SingleNeutrino_E-10-gun \
-#     algorithm.optimizer.lr=0.0013780717614807188 \
-#     trainer.gradient_clip_val=0.0 \
+#     algorithm.optimizer.lr=0.0016390004227671991 \
+#     trainer.gradient_clip_val=2.0 \
 #     algorithm.optimizer.betas=[0.9,0.999] \
 #     algorithm.optimizer.weight_decay=1e-05 \
-#     algorithm.flow.n_flows=6 \
-#     algorithm.flow.hidden_dim=48 \
-#     algorithm.flow.n_hidden_layers=1 \
-#     algorithm.flow.activation=gelu \
+#     algorithm.flow.n_flows=8 \
+#     algorithm.flow.hidden_dim=64 \
+#     algorithm.flow.n_hidden_layers=2 \
+#     algorithm.flow.activation=relu \
 #     algorithm.flow.noise_scale=0.01 \
-#     algorithm.flow.scale_clamp=3.0 \
+#     algorithm.flow.scale_clamp=5.0 \
 #     trainer=gpu \
 #     trainer.devices=[3]
 
@@ -148,8 +154,6 @@
 #     paths.raw_data_dir=/data/deodagiu/adl1t_data/parquet_files \
 #     experiment=physics/realnvp \
 #     experiment_name=realnvp_cvar25_vs_logpq99_search \
-#     algorithm.target_rate=0.01 \
-#     algorithm.base_rate=null \
 #     callbacks.max_rate_ckpt=null \
 #     callbacks.cvar10_ema_ckpt=null \
 #     ~evaluation.evaluator.ckpts.single.eff__ascore_full__brate_operational \
@@ -206,8 +210,6 @@
 #     paths.raw_data_dir=/data/deodagiu/adl1t_data/parquet_files \
 #     experiment=physics/realnvp_agnostic \
 #     experiment_name=realnvp_agnostic_cap_vs_logpq99_search \
-#     algorithm.target_rate=0.01 \
-#     algorithm.base_rate=null \
 #     callbacks.anomaly_eff=null \
 #     callbacks.wasserstein_dist=null \
 #     callbacks.thres_drift=null \
@@ -239,8 +241,6 @@
 #     paths.raw_data_dir=/data/deodagiu/adl1t_data/parquet_files \
 #     experiment=physics/realnvp_agnostic \
 #     experiment_name=realnvp_agnostic_drift_vs_logpq99_search \
-#     algorithm.target_rate=0.01 \
-#     algorithm.base_rate=null \
 #     callbacks.anomaly_eff=null \
 #     callbacks.wasserstein_dist=null \
 #     callbacks.cap_sn_zb=null \
@@ -275,8 +275,6 @@
 #     paths.raw_data_dir=/data/deodagiu/adl1t_data/parquet_files \
 #     experiment=physics/realnvp_agnostic \
 #     experiment_name=realnvp_agnostic_wasserstein_vs_logpq99_search \
-#     algorithm.target_rate=0.01 \
-#     algorithm.base_rate=null \
 #     callbacks.anomaly_eff=null \
 #     callbacks.anomaly_eff=null \
 #     callbacks.thres_drift=null \

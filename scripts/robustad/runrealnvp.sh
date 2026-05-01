@@ -9,7 +9,7 @@
 # ------------------------------------------------------------------------
 # Semi-supervised cvar25 training
 # ------------------------------------------------------------------------
-# taskset -c 0-2 \
+# taskset -c 24-26 \
 # python3 src/train.py \
 #     experiment=robustad/realnvp \
 #     run_name=cvar25_t339_high \
@@ -24,32 +24,13 @@
 #     trainer=gpu \
 #     trainer.devices=[0]
 
-# ------------------------------------------------------------------------
-# Semi-supervised cvar10 training
-# ------------------------------------------------------------------------
-# taskset -c 0-2 \
-# python3 src/train.py \
-#     experiment=robustad/realnvp \
-#     run_name=cvar10_t339_high \
-#     evaluation.callbacks.anomaly_efficiency.cvar_summary=0.10 \
-#     algorithm.optimizer.lr=0.0019789545082545034 \
-#     algorithm.delta=10.0 \
-#     trainer.gradient_clip_val=5.0 \
-#     algorithm.optimizer.betas='[0.9,0.999]' \
-#     algorithm.optimizer.weight_decay=1e-06 \
-#     algorithm.encoder.nodes='[64,32,32]' \
-#     algorithm.input_noise_std=0.0 \
-#     trainer=gpu \
-#     trainer.devices=[0]
-
-
 # ========================================================================
 # AGNOSTIC TRAINING
 # ========================================================================
 # ------------------------------------------------------------------------
 # CAP training
 # ------------------------------------------------------------------------
-# taskset -c 0-2 \
+# taskset -c 27-29 \
 # python3 src/train.py \
 #     experiment=robustad/realnvp_agnostic \
 #     run_name=cap_t240_high \
@@ -66,13 +47,14 @@
 #     algorithm.optimizer.weight_decay=0.0 \
 #     algorithm.encoder.nodes='[64,32,16]' \
 #     algorithm.input_noise_std=0.01 \
+#     trainer.max_epochs=1 \
 #     trainer=gpu \
-#     trainer.devices=[0]
+#     trainer.devices=[1]
 
 # ------------------------------------------------------------------------
 # Stability training
 # ------------------------------------------------------------------------
-# taskset -c 0-2 \
+# taskset -c 30-32 \
 # python3 src/train.py \
 #     experiment=robustad/realnvp_agnostic \
 #     run_name=stability_t390_high \
@@ -90,12 +72,12 @@
 #     algorithm.encoder.nodes='[64,32,32]' \
 #     algorithm.input_noise_std=0.0003 \
 #     trainer=gpu \
-#     trainer.devices=[0]
+#     trainer.devices=[2]
 
 # ------------------------------------------------------------------------
 # Wasserstein training
 # ------------------------------------------------------------------------
-# taskset -c 0-2 \
+# taskset -c 33-35 \
 # python3 src/train.py \
 #     experiment=robustad/realnvp_agnostic \
 #     run_name=wasserstein_t390_high \
@@ -113,7 +95,7 @@
 #     algorithm.encoder.nodes='[64,32,32]' \
 #     algorithm.input_noise_std=0.001 \
 #     trainer=gpu \
-#     trainer.devices=[0]
+#     trainer.devices=[3]
 
 
 # ========================================================================
@@ -141,35 +123,6 @@
 #     logger=none \
 #     hparams_search=imagerealnvp_optuna \
 #     hydra.sweeper.study_name=cvar25eff_vs_logp \
-#     hydra.sweeper.n_trials=100 \
-#     hydra.sweeper.sampler.n_startup_trials=150 \
-#     trainer=gpu \
-#     trainer.max_epochs=50 \
-#     trainer.devices=[0]
-
-# ------------------------------------------------------------------------
-# Semi-supervised search (cvar10)
-# ------------------------------------------------------------------------
-# taskset -c 0-2 \
-# python3 src/train.py \
-#     -m \
-#     hydra/launcher=submitit_local \
-#     hydra.launcher.timeout_min=200 \
-#     hydra.launcher.cpus_per_task=1 \
-#     hydra.launcher.gpus_per_node=4 \
-#     hydra.sweeper.storage='sqlite:///logs/optuna/robustad/realnvp.db' \
-#     experiment=robustad/realnvp \
-#     experiment_name=robustad_realnvp_cvar10_vs_logp_search \
-#     callbacks.max_rate_ckpt=null \
-#     callbacks.cvar25_ema_ckpt=null \
-#     ~evaluation.evaluator.ckpts.single.eff__ascore_full__brate_operational \
-#     ~evaluation.evaluator.ckpts.summary.cvar25_ema \
-#     evaluation.callbacks.thres_drift=null \
-#     evaluation.callbacks.wasserstein=null \
-#     evaluation.callbacks.anomaly_efficiency.cvar_summary=0.10 \
-#     logger=none \
-#     hparams_search=imagerealnvp_optuna \
-#     hydra.sweeper.study_name=cvar10eff_vs_logp \
 #     hydra.sweeper.n_trials=100 \
 #     hydra.sweeper.sampler.n_startup_trials=150 \
 #     trainer=gpu \
@@ -247,34 +200,34 @@
 # ------------------------------------------------------------------------
 # Wasserstein search
 # ------------------------------------------------------------------------
-taskset -c 0-2 \
-python3 src/train.py \
-    -m \
-    hydra/launcher=submitit_local \
-    hydra.launcher.timeout_min=200 \
-    hydra.launcher.cpus_per_task=1 \
-    hydra.launcher.gpus_per_node=4 \
-    hydra.sweeper.storage='sqlite:///logs/optuna/robustad/realnvp.db' \
-    experiment=robustad/realnvp_agnostic \
-    experiment_name=robustad_realnvp_agnostic_wasserstein_vs_logp_search \
-    callbacks.anomaly_eff=null \
-    callbacks.cap_sn_zb=null \
-    callbacks.thres_drift=null \
-    callbacks.thres_drift_ema_ckpt=null \
-    callbacks.cap_sn_zb_ema_ckpt=null \
-    ~evaluation.evaluator.ckpts.summary.operational_drift_ema \
-    ~evaluation.evaluator.ckpts.summary.cap_ema_normal_vs_shifted_normal_all \
-    evaluation.callbacks.anomaly_efficiency=null \
-    evaluation.callbacks.cap_sn_zb=null \
-    evaluation.callbacks.thres_drift=null \
-    logger=none \
-    hparams_search=imagerealnvp_optuna \
-    optimized_metric_config.main_metric.callback.name=wasserstein \
-    optimized_metric_config.main_metric.direction=minimize \
-    hydra.sweeper.study_name=wasserstein_vs_logp \
-    hydra.sweeper.direction='[minimize, minimize]' \
-    hydra.sweeper.n_trials=100 \
-    hydra.sweeper.sampler.n_startup_trials=150 \
-    trainer=gpu \
-    trainer.max_epochs=50 \
-    trainer.devices=[0]
+# taskset -c 0-2 \
+# python3 src/train.py \
+#     -m \
+#     hydra/launcher=submitit_local \
+#     hydra.launcher.timeout_min=200 \
+#     hydra.launcher.cpus_per_task=1 \
+#     hydra.launcher.gpus_per_node=4 \
+#     hydra.sweeper.storage='sqlite:///logs/optuna/robustad/realnvp.db' \
+#     experiment=robustad/realnvp_agnostic \
+#     experiment_name=robustad_realnvp_agnostic_wasserstein_vs_logp_search \
+#     callbacks.anomaly_eff=null \
+#     callbacks.cap_sn_zb=null \
+#     callbacks.thres_drift=null \
+#     callbacks.thres_drift_ema_ckpt=null \
+#     callbacks.cap_sn_zb_ema_ckpt=null \
+#     ~evaluation.evaluator.ckpts.summary.operational_drift_ema \
+#     ~evaluation.evaluator.ckpts.summary.cap_ema_normal_vs_shifted_normal_all \
+#     evaluation.callbacks.anomaly_efficiency=null \
+#     evaluation.callbacks.cap_sn_zb=null \
+#     evaluation.callbacks.thres_drift=null \
+#     logger=none \
+#     hparams_search=imagerealnvp_optuna \
+#     optimized_metric_config.main_metric.callback.name=wasserstein \
+#     optimized_metric_config.main_metric.direction=minimize \
+#     hydra.sweeper.study_name=wasserstein_vs_logp \
+#     hydra.sweeper.direction='[minimize, minimize]' \
+#     hydra.sweeper.n_trials=100 \
+#     hydra.sweeper.sampler.n_startup_trials=150 \
+#     trainer=gpu \
+#     trainer.max_epochs=50 \
+#     trainer.devices=[0]

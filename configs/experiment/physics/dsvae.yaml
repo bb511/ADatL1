@@ -12,7 +12,7 @@ defaults:
 seed: 123
 tags: ["dsvae", "signal"]
 
-experiment_name: dsvae_models
+experiment_name: physics_dsvae_models
 run_name: ${short_hash:${hydra:runtime.output_dir},12}
 
 data:

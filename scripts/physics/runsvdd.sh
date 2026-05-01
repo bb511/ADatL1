@@ -1,12 +1,14 @@
 # ========================================================================
 # SVDD RUNNING COMMANDS
 # ========================================================================
-
+# These are the running commands for the 250 Hz background rate study.
+# To switch to q99 studies, add the following lines to each of the commands below:
+#     algorithm.target_rate=0.01 \
+#     algorithm.base_rate=null \
 
 # ========================================================================
 # TRAINING
 # ========================================================================
-
 # ------------------------------------------------------------------------
 # Semi-supervised cvar25 training
 # ------------------------------------------------------------------------
@@ -14,7 +16,7 @@
 # python3 src/train.py \
 #     paths.raw_data_dir=/data/deodagiu/adl1t_data/parquet_files \
 #     experiment=physics/svdd \
-#     run_name=cvar25_t100_high \
+#     run_name=cvar25_t739 \
 #     algorithm.optimizer.lr=0.0025808010156689754 \
 #     trainer.gradient_clip_val=0.0 \
 #     algorithm.optimizer.betas=[0.9,0.99] \
@@ -35,7 +37,7 @@
 # python3 src/train.py \
 #     paths.raw_data_dir=/data/deodagiu/adl1t_data/parquet_files \
 #     experiment=physics/svdd \
-#     run_name=cvar10_t100_high \
+#     run_name=cvar10_t100 \
 #     evaluation.callbacks.anomaly_efficiency.cvar_summary=0.10 \
 #     algorithm.optimizer.lr=0.0025808010156689754 \
 #     trainer.gradient_clip_val=0.0 \
@@ -50,57 +52,60 @@
 #     trainer=gpu \
 #     trainer.devices=[0]
 
+# ========================================================================
+# AGNOSTIC TRAINING
+# ========================================================================
 # ------------------------------------------------------------------------
 # CAP training
 # ------------------------------------------------------------------------
-# taskset -c 0-2 \
+# taskset -c 3-5 \
 # python3 src/train.py \
 #     paths.raw_data_dir=/data/deodagiu/adl1t_data/parquet_files \
 #     experiment=physics/svdd_agnostic \
-#     run_name=cap_t573_high \
+#     run_name=cap_t536 \
 #     callbacks.wasserstein_dist=null \
 #     callbacks.thres_drift=null \
 #     callbacks.wasserstein_dist_ema_ckpt=null \
 #     callbacks.thres_drift_ema_ckpt=null \
 #     ~evaluation.evaluator.ckpts.summary.operational_drift_ema \
 #     ~evaluation.evaluator.ckpts.summary.w1dist_ema_normal_vs_SingleNeutrino_E-10-gun \
-#     algorithm.optimizer.lr=0.0021443044608126962 \
+#     algorithm.optimizer.lr=0.0016271866440343411 \
 #     trainer.gradient_clip_val=2.0 \
 #     algorithm.optimizer.betas=[0.9,0.999] \
 #     algorithm.optimizer.weight_decay=1e-05 \
-#     algorithm.weight_decay=1e-8 \
+#     algorithm.weight_decay=1e-07 \
 #     algorithm.soft_boundary=False \
 #     algorithm.nu=0.05 \
 #     algorithm.center_init_method=mean \
 #     algorithm.encoder.nodes=[32,16] \
 #     algorithm.encoder.activation=gelu \
 #     trainer=gpu \
-#     trainer.devices=[2]
+#     trainer.devices=[1]
 
 # ------------------------------------------------------------------------
 # Stability training
 # ------------------------------------------------------------------------
-# taskset -c 3-5 \
+# taskset -c 6-8 \
 # python3 src/train.py \
 #     paths.raw_data_dir=/data/deodagiu/adl1t_data/parquet_files \
 #     experiment=physics/svdd_agnostic \
-#     run_name=stable_t100_high \
+#     run_name=stable_t419 \
 #     callbacks.wasserstein_dist=null \
 #     callbacks.cap_sn_zb=null \
 #     callbacks.wasserstein_dist_ema_ckpt=null \
 #     callbacks.cap_sn_zb_ema_ckpt=null \
 #     ~evaluation.evaluator.ckpts.summary.w1dist_ema_normal_vs_SingleNeutrino_E-10-gun \
 #     ~evaluation.evaluator.ckpts.summary.cap_ema_normal_vs_SingleNeutrino_E-10-gun \
-#     algorithm.optimizer.lr=0.0025808010156689754 \
-#     trainer.gradient_clip_val=0.0 \
-#     algorithm.optimizer.betas=[0.9,0.99] \
+#     algorithm.optimizer.lr=0.0009833375412439862 \
+#     trainer.gradient_clip_val=2.0 \
+#     algorithm.optimizer.betas=[0.9,0.999] \
 #     algorithm.optimizer.weight_decay=0.001 \
-#     algorithm.weight_decay=1e-7 \
-#     algorithm.soft_boundary=False \
-#     algorithm.nu=0.01 \
+#     algorithm.weight_decay=1e-05 \
+#     algorithm.soft_boundary=True \
+#     algorithm.nu=0.1 \
 #     algorithm.center_init_method=mean \
-#     algorithm.encoder.nodes=[48,24,8] \
-#     algorithm.encoder.activation=gelu \
+#     algorithm.encoder.nodes=[32,16,8] \
+#     algorithm.encoder.activation=relu \
 #     trainer=gpu \
 #     trainer.devices=[2]
 
@@ -111,22 +116,22 @@
 # python3 src/train.py \
 #     paths.raw_data_dir=/data/deodagiu/adl1t_data/parquet_files \
 #     experiment=physics/svdd_agnostic \
-#     run_name=wasserstein_t100_high \
+#     run_name=wasserstein_t545 \
 #     callbacks.thres_drift=null \
 #     callbacks.cap_sn_zb=null \
 #     callbacks.thres_drift_ema_ckpt=null \
 #     callbacks.cap_sn_zb_ema_ckpt=null \
 #     ~evaluation.evaluator.ckpts.summary.operational_drift_ema \
 #     ~evaluation.evaluator.ckpts.summary.cap_ema_normal_vs_SingleNeutrino_E-10-gun \
-#     algorithm.optimizer.lr=0.0025808010156689754 \
-#     trainer.gradient_clip_val=0.0 \
+#     algorithm.optimizer.lr=0.001983105654764409 \
+#     trainer.gradient_clip_val=0.5 \
 #     algorithm.optimizer.betas=[0.9,0.99] \
-#     algorithm.optimizer.weight_decay=0.001 \
-#     algorithm.weight_decay=1e-7 \
-#     algorithm.soft_boundary=False \
-#     algorithm.nu=0.01 \
+#     algorithm.optimizer.weight_decay=0.0001 \
+#     algorithm.weight_decay=1e-06 \
+#     algorithm.soft_boundary=True \
+#     algorithm.nu=0.1 \
 #     algorithm.center_init_method=mean \
-#     algorithm.encoder.nodes=[48,24,8] \
+#     algorithm.encoder.nodes=[16,8] \
 #     algorithm.encoder.activation=gelu \
 #     trainer=gpu \
 #     trainer.devices=[3]
@@ -148,8 +153,6 @@
 #     paths.raw_data_dir=/data/deodagiu/adl1t_data/parquet_files \
 #     experiment=physics/svdd \
 #     experiment_name=svdd_cvar25_vs_distq99_search \
-#     algorithm.target_rate=0.01 \
-#     algorithm.base_rate=null \
 #     callbacks.max_rate_ckpt=null \
 #     callbacks.cvar10_ema_ckpt=null \
 #     ~evaluation.evaluator.ckpts.single.eff__ascore_full__brate_operational \
@@ -205,8 +208,6 @@
 #     paths.raw_data_dir=/data/deodagiu/adl1t_data/parquet_files \
 #     experiment=physics/svdd_agnostic \
 #     experiment_name=svdd_agnostic_cap_vs_distq99_search \
-#     algorithm.target_rate=0.01 \
-#     algorithm.base_rate=null \
 #     callbacks.anomaly_eff=null \
 #     callbacks.wasserstein_dist=null \
 #     callbacks.thres_drift=null \
@@ -238,8 +239,6 @@
 #     paths.raw_data_dir=/data/deodagiu/adl1t_data/parquet_files \
 #     experiment=physics/svdd_agnostic \
 #     experiment_name=svdd_agnostic_drift_vs_distq99_search \
-#     algorithm.target_rate=0.01 \
-#     algorithm.base_rate=null \
 #     callbacks.anomaly_eff=null \
 #     callbacks.wasserstein_dist=null \
 #     callbacks.cap_sn_zb=null \
@@ -274,8 +273,6 @@
 #     paths.raw_data_dir=/data/deodagiu/adl1t_data/parquet_files \
 #     experiment=physics/svdd_agnostic \
 #     experiment_name=svdd_agnostic_wasserstein_vs_distq99_search \
-#     algorithm.target_rate=0.01 \
-#     algorithm.base_rate=null \
 #     callbacks.anomaly_eff=null \
 #     callbacks.thres_drift=null \
 #     callbacks.cap_sn_zb=null \

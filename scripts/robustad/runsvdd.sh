@@ -12,36 +12,22 @@
 # taskset -c 36-38 \
 # python3 src/train.py \
 #     experiment=robustad/svdd \
-#     run_name=cvar25_t339_high \
-#     algorithm.optimizer.lr=0.001457369500608365 \
-#     algorithm.delta=7.0 \
+#     run_name=cvar25_t339 \
+#     algorithm.optimizer.lr=0.0008931169751749622 \
 #     trainer.gradient_clip_val=0.5 \
-#     algorithm.optimizer.betas='[0.9,0.999]' \
+#     algorithm.optimizer.betas=[0.9,0.999] \
 #     algorithm.optimizer.weight_decay=0.0 \
-#     algorithm.encoder.nodes='[64,32,32]' \
-#     algorithm.input_noise_std=0.001 \
-#     trainer.max_epochs=50 \
+#     algorithm.weight_decay=1e-05 \
+#     algorithm.soft_boundary=True \
+#     algorithm.nu=0.2 \
+#     algorithm.center_init_method=mean \
+#     algorithm.encoder.nodes=[8,16,32] \
+#     algorithm.encoder.strides=[2,2] \
+#     algorithm.encoder.activation=silu \
+#     algorithm.encoder.batchnorm=False \
+#     trainer.max_epochs=1 \
 #     trainer=gpu \
-#     trainer.devices=[2]
-
-# ------------------------------------------------------------------------
-# Semi-supervised cvar10 training
-# ------------------------------------------------------------------------
-# taskset -c 0-2 \
-# python3 src/train.py \
-#     experiment=robustad/svdd \
-#     run_name=cvar10_t339_high \
-#     evaluation.callbacks.anomaly_efficiency.cvar_summary=0.10 \
-#     algorithm.optimizer.lr=0.0019789545082545034 \
-#     algorithm.delta=10.0 \
-#     trainer.gradient_clip_val=5.0 \
-#     algorithm.optimizer.betas='[0.9,0.999]' \
-#     algorithm.optimizer.weight_decay=1e-06 \
-#     algorithm.encoder.nodes='[64,32,32]' \
-#     algorithm.input_noise_std=0.0 \
-#     trainer=gpu \
-#     trainer.devices=[2]
-
+#     trainer.devices=[0]
 
 # ========================================================================
 # AGNOSTIC TRAINING
@@ -52,22 +38,28 @@
 # taskset -c 39-41 \
 # python3 src/train.py \
 #     experiment=robustad/svdd_agnostic \
-#     run_name=cap_t240_high \
+#     run_name=cap_t240 \
 #     callbacks.wasserstein_dist=null \
 #     callbacks.thres_drift=null \
 #     callbacks.wasserstein_dist_ema_ckpt=null \
 #     callbacks.thres_drift_ema_ckpt=null \
 #     ~evaluation.evaluator.ckpts.summary.operational_drift_ema \
-#     ~evaluation.evaluator.ckpts.summary.w1dist_ema_normal_vs_reference_normal \
-#     algorithm.optimizer.lr=0.0027927024120831816 \
-#     algorithm.delta=10.0 \
-#     trainer.gradient_clip_val=2.0 \
-#     algorithm.optimizer.betas='[0.9,0.999]' \
+#     ~evaluation.evaluator.ckpts.summary.w1dist_ema_normal_vs_shifted_normal_all \
+#     algorithm.optimizer.lr=0.0009585626245761539 \
+#     trainer.gradient_clip_val=1.0 \
+#     algorithm.optimizer.betas=[0.9,0.99] \
 #     algorithm.optimizer.weight_decay=0.0 \
-#     algorithm.encoder.nodes='[64,32,16]' \
-#     algorithm.input_noise_std=0.01 \
+#     algorithm.weight_decay=0.0 \
+#     algorithm.soft_boundary=True \
+#     algorithm.nu=0.05 \
+#     algorithm.center_init_method=mean \
+#     algorithm.encoder.nodes=[32,64,128] \
+#     algorithm.encoder.strides=[2,2] \
+#     algorithm.encoder.activation=relu \
+#     algorithm.encoder.batchnorm=False \
+#     trainer.max_epochs=1 \
 #     trainer=gpu \
-#     trainer.devices=[2]
+#     trainer.devices=[1]
 
 # ------------------------------------------------------------------------
 # Stability training
@@ -75,20 +67,25 @@
 # taskset -c 42-44 \
 # python3 src/train.py \
 #     experiment=robustad/svdd_agnostic \
-#     run_name=stability_t390_high \
+#     run_name=stability_t525 \
 #     callbacks.wasserstein_dist=null \
 #     callbacks.cap_sn_zb=null \
 #     callbacks.wasserstein_dist_ema_ckpt=null \
 #     callbacks.cap_sn_zb_ema_ckpt=null \
-#     ~evaluation.evaluator.ckpts.summary.w1dist_ema_normal_vs_reference_normal \
-#     ~evaluation.evaluator.ckpts.summary.cap_ema_normal_vs_reference_normal \
-#     algorithm.optimizer.lr=0.000814981343573229 \
-#     algorithm.delta=10.0 \
-#     trainer.gradient_clip_val=1.0 \
-#     algorithm.optimizer.betas='[0.9,0.99]' \
-#     algorithm.optimizer.weight_decay=1e-05 \
-#     algorithm.encoder.nodes='[64,32,32]' \
-#     algorithm.input_noise_std=0.0003 \
+#     ~evaluation.evaluator.ckpts.summary.w1dist_ema_normal_vs_shifted_normal_all \
+#     ~evaluation.evaluator.ckpts.summary.cap_ema_normal_vs_shifted_normal_all \
+#     algorithm.optimizer.lr=0.0006495587687856368 \
+#     trainer.gradient_clip_val=0.5 \
+#     algorithm.optimizer.betas=[0.9,0.999] \
+#     algorithm.optimizer.weight_decay=0.0 \
+#     algorithm.weight_decay=0.0 \
+#     algorithm.soft_boundary=True \
+#     algorithm.nu=0.1 \
+#     algorithm.center_init_method=zeros \
+#     algorithm.encoder.nodes=[8,16,32] \
+#     algorithm.encoder.strides=[2,2] \
+#     algorithm.encoder.activation=silu \
+#     algorithm.encoder.batchnorm=False \
 #     trainer=gpu \
 #     trainer.devices=[2]
 
@@ -98,22 +95,27 @@
 # taskset -c 45-47 \
 # python3 src/train.py \
 #     experiment=robustad/svdd_agnostic \
-#     run_name=wasserstein_t390_high \
+#     run_name=wasserstein_t581 \
 #     callbacks.thres_drift=null \
 #     callbacks.cap_sn_zb=null \
 #     callbacks.thres_drift_ema_ckpt=null \
 #     callbacks.cap_sn_zb_ema_ckpt=null \
 #     ~evaluation.evaluator.ckpts.summary.operational_drift_ema \
-#     ~evaluation.evaluator.ckpts.summary.cap_ema_normal_vs_reference_normal \
-#     algorithm.optimizer.lr=0.00047124714609726086 \
-#     algorithm.delta=5.0 \
+#     ~evaluation.evaluator.ckpts.summary.cap_ema_normal_vs_shifted_normal_all \
+#     algorithm.optimizer.lr=0.0006079271679609457 \
 #     trainer.gradient_clip_val=0.5 \
-#     algorithm.optimizer.betas='[0.9,0.99]' \
-#     algorithm.optimizer.weight_decay=0.0 \
-#     algorithm.encoder.nodes='[64,32,32]' \
-#     algorithm.input_noise_std=0.001 \
+#     algorithm.optimizer.betas=[0.9,0.999] \
+#     algorithm.optimizer.weight_decay=1e-05 \
+#     algorithm.weight_decay=1e-07 \
+#     algorithm.soft_boundary=True \
+#     algorithm.nu=0.1 \
+#     algorithm.center_init_method=zeros \
+#     algorithm.encoder.nodes=[8,16,32] \
+#     algorithm.encoder.strides=[2,2] \
+#     algorithm.encoder.activation=silu \
+#     algorithm.encoder.batchnorm=False \
 #     trainer=gpu \
-#     trainer.devices=[2]
+#     trainer.devices=[3]
 
 
 # ========================================================================
@@ -141,35 +143,6 @@
 #     logger=none \
 #     hparams_search=imagesvdd_optuna \
 #     hydra.sweeper.study_name=cvar25eff_vs_dist \
-#     hydra.sweeper.n_trials=100 \
-#     hydra.sweeper.sampler.n_startup_trials=150 \
-#     trainer=gpu \
-#     trainer.max_epochs=50 \
-#     trainer.devices=[0]
-
-# ------------------------------------------------------------------------
-# Semi-supervised search (cvar10)
-# ------------------------------------------------------------------------
-# taskset -c 0-2 \
-# python3 src/train.py \
-#     -m \
-#     hydra/launcher=submitit_local \
-#     hydra.launcher.timeout_min=200 \
-#     hydra.launcher.cpus_per_task=1 \
-#     hydra.launcher.gpus_per_node=4 \
-#     hydra.sweeper.storage='sqlite:///logs/optuna/robustad/svdd.db' \
-#     experiment=robustad/svdd \
-#     experiment_name=robustad_svdd_cvar10_vs_dist_search \
-#     callbacks.max_rate_ckpt=null \
-#     callbacks.cvar25_ema_ckpt=null \
-#     ~evaluation.evaluator.ckpts.single.eff__ascore_full__brate_operational \
-#     ~evaluation.evaluator.ckpts.summary.cvar25_ema \
-#     evaluation.callbacks.thres_drift=null \
-#     evaluation.callbacks.wasserstein=null \
-#     evaluation.callbacks.anomaly_efficiency.cvar_summary=0.10 \
-#     logger=none \
-#     hparams_search=imagesvdd_optuna \
-#     hydra.sweeper.study_name=cvar10eff_vs_dist \
 #     hydra.sweeper.n_trials=100 \
 #     hydra.sweeper.sampler.n_startup_trials=150 \
 #     trainer=gpu \

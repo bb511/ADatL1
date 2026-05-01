@@ -2,6 +2,10 @@
 # VAE RUNNING COMMANDS
 # ========================================================================
 
+# These are the running commands for the 250 Hz background rate study.
+# To switch to q99 studies, add the following lines to each of the commands below:
+#     algorithm.target_rate=0.01 \
+#     algorithm.base_rate=null \
 
 # ========================================================================
 # TRAINING
@@ -9,21 +13,20 @@
 # ------------------------------------------------------------------------
 # Semi-supervised cvar25 training
 # ------------------------------------------------------------------------
-# taskset -c 0-2 \
+# taskset -c 12-14 \
 # python3 src/train.py \
 #     paths.raw_data_dir=/data/deodagiu/adl1t_data/parquet_files \
 #     experiment=physics/vae \
-#     run_name=cvar25_t100_high \
-#     trainer.gradient_clip_val=2.0 \
-#     algorithm.encoder.clamp_zlogvar_range='[-10,6]' \
+#     run_name=cvar25_t345 \
+#     trainer.gradient_clip_val=0.5 \
+#     algorithm.encoder.clamp_zlogvar_range='[-20,10]' \
 #     algorithm.optimizer.lr=5.236233832409967e-05 \
-#     algorithm.optimizer.betas='[0.9,0.99]' \
-#     algorithm.optimizer.weight_decay=0.0001 \
+#     algorithm.optimizer.betas='[0.9,0.999]' \
+#     algorithm.optimizer.weight_decay=0.0 \
 #     algorithm.kl_scale=0.002 \
-#     algorithm.kl_warmup_frac=0.1 \
-#     algorithm.encoder.nodes='[48,16,8]' \
-#     algorithm.encoder.activation=silu \
-#     trainer.max_epochs=1 \
+#     algorithm.kl_warmup_frac=0.0 \
+#     algorithm.encoder.nodes='[32,16,16]' \
+#     algorithm.encoder.activation=gelu \
 #     trainer=gpu \
 #     trainer.devices=[0]
 
@@ -34,7 +37,7 @@
 # python3 src/train.py \
 #     paths.raw_data_dir=/data/deodagiu/adl1t_data/parquet_files \
 #     experiment=physics/vae \
-#     run_name=cvar10_t100_high \
+#     run_name=cvar10_t100 \
 #     evaluation.callbacks.anomaly_efficiency.cvar_summary=0.10 \
 #     trainer.gradient_clip_val=0.0 \
 #     algorithm.encoder.clamp_zlogvar_range='[-10,6]' \
@@ -45,45 +48,43 @@
 #     algorithm.kl_warmup_frac=0.0 \
 #     algorithm.encoder.nodes='[48,24,24]' \
 #     algorithm.encoder.activation=relu \
-#     trainer.max_epochs=1 \
 #     trainer=gpu \
 #     trainer.devices=[0]
 
 # ------------------------------------------------------------------------
 # CAP training
 # ------------------------------------------------------------------------
-# taskset -c 0-2 \
+# taskset -c 15-17 \
 # python3 src/train.py \
 #     paths.raw_data_dir=/data/deodagiu/adl1t_data/parquet_files \
 #     experiment=physics/vae_agnostic \
-#     run_name=cap_t100_high \
+#     run_name=cap_t179 \
 #     callbacks.wasserstein_dist=null \
 #     callbacks.thres_drift=null \
 #     callbacks.wasserstein_dist_ema_ckpt=null \
 #     callbacks.thres_drift_ema_ckpt=null \
 #     ~evaluation.evaluator.ckpts.summary.operational_drift_ema \
 #     ~evaluation.evaluator.ckpts.summary.w1dist_ema_normal_vs_SingleNeutrino_E-10-gun \
-#     trainer.gradient_clip_val=0.0 \
+#     trainer.gradient_clip_val=2.0 \
 #     algorithm.encoder.clamp_zlogvar_range='[-20,10]' \
-#     algorithm.optimizer.lr=0.0003257255014602454 \
+#     algorithm.optimizer.lr=6.358827890772183e-05 \
 #     algorithm.optimizer.betas='[0.9,0.99]' \
-#     algorithm.optimizer.weight_decay=0.001 \
+#     algorithm.optimizer.weight_decay=1e-05 \
 #     algorithm.kl_scale=0.002 \
 #     algorithm.kl_warmup_frac=0.05 \
-#     algorithm.encoder.nodes='[32,16,4]' \
-#     algorithm.encoder.activation=relu \
-#     trainer.max_epochs=1 \
+#     algorithm.encoder.nodes='[32,16,16]' \
+#     algorithm.encoder.activation=silu \
 #     trainer=gpu \
-#     trainer.devices=[2]
+#     trainer.devices=[1]
 
 # ------------------------------------------------------------------------
 # Stability training
 # ------------------------------------------------------------------------
-# taskset -c 0-2 \
+# taskset -c 18-20 \
 # python3 src/train.py \
 #     paths.raw_data_dir=/data/deodagiu/adl1t_data/parquet_files \
 #     experiment=physics/vae_agnostic \
-#     run_name=stability_t100_high \
+#     run_name=stability_t529 \
 #     callbacks.wasserstein_dist=null \
 #     callbacks.cap_sn_zb=null \
 #     callbacks.wasserstein_dist_ema_ckpt=null \
@@ -91,26 +92,25 @@
 #     ~evaluation.evaluator.ckpts.summary.w1dist_ema_normal_vs_SingleNeutrino_E-10-gun \
 #     ~evaluation.evaluator.ckpts.summary.cap_ema_normal_vs_SingleNeutrino_E-10-gun \
 #     trainer.gradient_clip_val=2.0 \
-#     algorithm.encoder.clamp_zlogvar_range='[-6,4]' \
-#     algorithm.optimizer.lr=5.0003969774639385e-05 \
+#     algorithm.encoder.clamp_zlogvar_range='[-10,6]' \
+#     algorithm.optimizer.lr=0.0008437643709861688 \
 #     algorithm.optimizer.betas='[0.9,0.99]' \
-#     algorithm.optimizer.weight_decay=1e-06 \
-#     algorithm.kl_scale=0.001 \
-#     algorithm.kl_warmup_frac=0.2 \
-#     algorithm.encoder.nodes='[24,8,4]' \
-#     algorithm.encoder.activation=silu \
-#     trainer.max_epochs=1 \
+#     algorithm.optimizer.weight_decay=0.0 \
+#     algorithm.kl_scale=0.002 \
+#     algorithm.kl_warmup_frac=0.0 \
+#     algorithm.encoder.nodes='[48,16,8]' \
+#     algorithm.encoder.activation=gelu \
 #     trainer=gpu \
 #     trainer.devices=[2]
 
 # ------------------------------------------------------------------------
 # Wasserstein training
 # ------------------------------------------------------------------------
-# taskset -c 0-2 \
+# taskset -c 21-23 \
 # python3 src/train.py \
 #     paths.raw_data_dir=/data/deodagiu/adl1t_data/parquet_files \
 #     experiment=physics/vae_agnostic \
-#     run_name=wasserstein_t100_high \
+#     run_name=wasserstein_t539 \
 #     callbacks.thres_drift=null \
 #     callbacks.cap_sn_zb=null \
 #     callbacks.thres_drift_ema_ckpt=null \
@@ -118,15 +118,14 @@
 #     ~evaluation.evaluator.ckpts.summary.operational_drift_ema \
 #     ~evaluation.evaluator.ckpts.summary.cap_ema_normal_vs_SingleNeutrino_E-10-gun \
 #     trainer.gradient_clip_val=0.5 \
-#     algorithm.encoder.clamp_zlogvar_range='[-20,10]' \
-#     algorithm.optimizer.lr=6.040999153331964e-05 \
+#     algorithm.encoder.clamp_zlogvar_range='[-6,4]' \
+#     algorithm.optimizer.lr=6.005882209363415e-05 \
 #     algorithm.optimizer.betas='[0.9,0.99]' \
-#     algorithm.optimizer.weight_decay=1e-06 \
-#     algorithm.kl_scale=0.0003 \
+#     algorithm.optimizer.weight_decay=0.0 \
+#     algorithm.kl_scale=0.002 \
 #     algorithm.kl_warmup_frac=0.2 \
 #     algorithm.encoder.nodes='[24,8,4]' \
 #     algorithm.encoder.activation=relu \
-#     trainer.max_epochs=1 \
 #     trainer=gpu \
 #     trainer.devices=[3]
 

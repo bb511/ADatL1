@@ -12,15 +12,17 @@
 # taskset -c 24-26 \
 # python3 src/train.py \
 #     experiment=robustad/realnvp \
-#     run_name=cvar25_t339_high \
-#     algorithm.optimizer.lr=0.001457369500608365 \
-#     algorithm.delta=7.0 \
-#     trainer.gradient_clip_val=0.5 \
-#     algorithm.optimizer.betas='[0.9,0.999]' \
+#     run_name=cvar25_t333 \
+#     algorithm.optimizer.lr=0.0005803855298399076 \
+#     trainer.gradient_clip_val=0.0 \
+#     algorithm.optimizer.betas=[0.9,0.999] \
 #     algorithm.optimizer.weight_decay=0.0 \
-#     algorithm.encoder.nodes='[64,32,32]' \
-#     algorithm.input_noise_std=0.001 \
-#     trainer.max_epochs=1 \
+#     algorithm.flow.n_flows=6 \
+#     algorithm.flow.hidden_dim=384 \
+#     algorithm.flow.n_hidden_layers=2 \
+#     algorithm.flow.activation=silu \
+#     algorithm.flow.noise_scale=0.001 \
+#     algorithm.flow.scale_clamp=3.0 \
 #     trainer=gpu \
 #     trainer.devices=[0]
 
@@ -33,21 +35,23 @@
 # taskset -c 27-29 \
 # python3 src/train.py \
 #     experiment=robustad/realnvp_agnostic \
-#     run_name=cap_t240_high \
+#     run_name=cap_t240 \
 #     callbacks.wasserstein_dist=null \
 #     callbacks.thres_drift=null \
 #     callbacks.wasserstein_dist_ema_ckpt=null \
 #     callbacks.thres_drift_ema_ckpt=null \
 #     ~evaluation.evaluator.ckpts.summary.operational_drift_ema \
-#     ~evaluation.evaluator.ckpts.summary.w1dist_ema_normal_vs_reference_normal \
-#     algorithm.optimizer.lr=0.0027927024120831816 \
-#     algorithm.delta=10.0 \
-#     trainer.gradient_clip_val=2.0 \
-#     algorithm.optimizer.betas='[0.9,0.999]' \
-#     algorithm.optimizer.weight_decay=0.0 \
-#     algorithm.encoder.nodes='[64,32,16]' \
-#     algorithm.input_noise_std=0.01 \
-#     trainer.max_epochs=1 \
+#     ~evaluation.evaluator.ckpts.summary.w1dist_ema_normal_vs_shifted_normal_all \
+#     algorithm.optimizer.lr=0.0009974062369047898 \
+#     trainer.gradient_clip_val=0.0 \
+#     algorithm.optimizer.betas=[0.9,0.99] \
+#     algorithm.optimizer.weight_decay=0.0001 \
+#     algorithm.flow.n_flows=4 \
+#     algorithm.flow.hidden_dim=512 \
+#     algorithm.flow.n_hidden_layers=2 \
+#     algorithm.flow.activation=gelu \
+#     algorithm.flow.noise_scale=0.01 \
+#     algorithm.flow.scale_clamp=3.0 \
 #     trainer=gpu \
 #     trainer.devices=[1]
 
@@ -57,20 +61,23 @@
 # taskset -c 30-32 \
 # python3 src/train.py \
 #     experiment=robustad/realnvp_agnostic \
-#     run_name=stability_t390_high \
+#     run_name=stability_t390 \
 #     callbacks.wasserstein_dist=null \
 #     callbacks.cap_sn_zb=null \
 #     callbacks.wasserstein_dist_ema_ckpt=null \
 #     callbacks.cap_sn_zb_ema_ckpt=null \
-#     ~evaluation.evaluator.ckpts.summary.w1dist_ema_normal_vs_reference_normal \
-#     ~evaluation.evaluator.ckpts.summary.cap_ema_normal_vs_reference_normal \
-#     algorithm.optimizer.lr=0.000814981343573229 \
-#     algorithm.delta=10.0 \
-#     trainer.gradient_clip_val=1.0 \
-#     algorithm.optimizer.betas='[0.9,0.99]' \
-#     algorithm.optimizer.weight_decay=1e-05 \
-#     algorithm.encoder.nodes='[64,32,32]' \
-#     algorithm.input_noise_std=0.0003 \
+#     ~evaluation.evaluator.ckpts.summary.w1dist_ema_normal_vs_shifted_normal_all \
+#     ~evaluation.evaluator.ckpts.summary.cap_ema_normal_vs_shifted_normal_all \
+#     algorithm.optimizer.lr=0.0005363051745828947 \
+#     trainer.gradient_clip_val=0.5 \
+#     algorithm.optimizer.betas=[0.9,0.99] \
+#     algorithm.optimizer.weight_decay=0.0 \
+#     algorithm.flow.n_flows=6 \
+#     algorithm.flow.hidden_dim=512 \
+#     algorithm.flow.n_hidden_layers=2 \
+#     algorithm.flow.activation=gelu \
+#     algorithm.flow.noise_scale=0.001 \
+#     algorithm.flow.scale_clamp=5.0 \
 #     trainer=gpu \
 #     trainer.devices=[2]
 
@@ -80,20 +87,23 @@
 # taskset -c 33-35 \
 # python3 src/train.py \
 #     experiment=robustad/realnvp_agnostic \
-#     run_name=wasserstein_t390_high \
+#     run_name=wasserstein_t390 \
 #     callbacks.thres_drift=null \
 #     callbacks.cap_sn_zb=null \
 #     callbacks.thres_drift_ema_ckpt=null \
 #     callbacks.cap_sn_zb_ema_ckpt=null \
 #     ~evaluation.evaluator.ckpts.summary.operational_drift_ema \
-#     ~evaluation.evaluator.ckpts.summary.cap_ema_normal_vs_reference_normal \
-#     algorithm.optimizer.lr=0.00047124714609726086 \
-#     algorithm.delta=5.0 \
-#     trainer.gradient_clip_val=0.5 \
-#     algorithm.optimizer.betas='[0.9,0.99]' \
+#     ~evaluation.evaluator.ckpts.summary.cap_ema_normal_vs_shifted_normal_all \
+#     algorithm.optimizer.lr=0.0004475901389689921 \
+#     trainer.gradient_clip_val=0.0 \
+#     algorithm.optimizer.betas=[0.9,0.999] \
 #     algorithm.optimizer.weight_decay=0.0 \
-#     algorithm.encoder.nodes='[64,32,32]' \
-#     algorithm.input_noise_std=0.001 \
+#     algorithm.flow.n_flows=4 \
+#     algorithm.flow.hidden_dim=512 \
+#     algorithm.flow.n_hidden_layers=2 \
+#     algorithm.flow.activation=gelu \
+#     algorithm.flow.noise_scale=0.0001 \
+#     algorithm.flow.scale_clamp=5.0 \
 #     trainer=gpu \
 #     trainer.devices=[3]
 
@@ -164,37 +174,37 @@
 # ------------------------------------------------------------------------
 # Stability search
 # ------------------------------------------------------------------------
-taskset -c 0-2 \
-python3 src/train.py \
-    -m \
-    hydra/launcher=submitit_local \
-    hydra.launcher.timeout_min=200 \
-    hydra.launcher.cpus_per_task=1 \
-    hydra.launcher.gpus_per_node=4 \
-    hydra.sweeper.storage='sqlite:///logs/optuna/robustad/realnvp.db' \
-    experiment=robustad/realnvp_agnostic \
-    experiment_name=robustad_realnvp_agnostic_drift_vs_logp_search \
-    callbacks.anomaly_eff=null \
-    callbacks.cap_sn_zb=null \
-    callbacks.wasserstein_dist=null \
-    callbacks.wasserstein_dist_ema_ckpt=null \
-    callbacks.cap_sn_zb_ema_ckpt=null \
-    ~evaluation.evaluator.ckpts.summary.w1dist_ema_normal_vs_shifted_normal_all \
-    ~evaluation.evaluator.ckpts.summary.cap_ema_normal_vs_shifted_normal_all \
-    evaluation.callbacks.anomaly_efficiency=null \
-    evaluation.callbacks.cap_sn_zb=null \
-    evaluation.callbacks.wasserstein=null \
-    logger=none \
-    hparams_search=imagerealnvp_optuna \
-    optimized_metric_config.main_metric.callback.name=thres_drift \
-    optimized_metric_config.main_metric.direction=minimize \
-    hydra.sweeper.study_name=drift_vs_logp \
-    hydra.sweeper.direction='[minimize, minimize]' \
-    hydra.sweeper.n_trials=100 \
-    hydra.sweeper.sampler.n_startup_trials=150 \
-    trainer=gpu \
-    trainer.max_epochs=50 \
-    trainer.devices=[0]
+# taskset -c 0-2 \
+# python3 src/train.py \
+#     -m \
+#     hydra/launcher=submitit_local \
+#     hydra.launcher.timeout_min=200 \
+#     hydra.launcher.cpus_per_task=1 \
+#     hydra.launcher.gpus_per_node=4 \
+#     hydra.sweeper.storage='sqlite:///logs/optuna/robustad/realnvp.db' \
+#     experiment=robustad/realnvp_agnostic \
+#     experiment_name=robustad_realnvp_agnostic_drift_vs_logp_search \
+#     callbacks.anomaly_eff=null \
+#     callbacks.cap_sn_zb=null \
+#     callbacks.wasserstein_dist=null \
+#     callbacks.wasserstein_dist_ema_ckpt=null \
+#     callbacks.cap_sn_zb_ema_ckpt=null \
+#     ~evaluation.evaluator.ckpts.summary.w1dist_ema_normal_vs_shifted_normal_all \
+#     ~evaluation.evaluator.ckpts.summary.cap_ema_normal_vs_shifted_normal_all \
+#     evaluation.callbacks.anomaly_efficiency=null \
+#     evaluation.callbacks.cap_sn_zb=null \
+#     evaluation.callbacks.wasserstein=null \
+#     logger=none \
+#     hparams_search=imagerealnvp_optuna \
+#     optimized_metric_config.main_metric.callback.name=thres_drift \
+#     optimized_metric_config.main_metric.direction=minimize \
+#     hydra.sweeper.study_name=drift_vs_logp \
+#     hydra.sweeper.direction='[minimize, minimize]' \
+#     hydra.sweeper.n_trials=100 \
+#     hydra.sweeper.sampler.n_startup_trials=150 \
+#     trainer=gpu \
+#     trainer.max_epochs=50 \
+#     trainer.devices=[0]
 
 
 # ------------------------------------------------------------------------

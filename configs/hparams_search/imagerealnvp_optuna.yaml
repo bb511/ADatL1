@@ -36,35 +36,35 @@ hydra:
     # for example, you can use SQLite if you set 'sqlite:///example.db'
 
     # SWITCH THIS BETWEEN ROBUSTAD AND CIFAR10
-    storage: sqlite:///logs/optuna/cifar10/realnvp.db
-    # storage: sqlite:///logs/optuna/robustad/realnvp.db
+    # storage: sqlite:///logs/optuna/cifar10/realnvp.db
+    storage: sqlite:///logs/optuna/robustad/realnvp.db
 
     # define hyperparameter search space. Assumes using torch.optim.AdamW
 
     # RobustAD space
-    # params:
-    #   algorithm.optimizer.lr: tag(log, interval(3e-5, 1e-3))
-    #   trainer.gradient_clip_val: choice(0.0, 0.5, 1.0, 2.0)
-    #   algorithm.optimizer.betas: choice([0.9, 0.999], [0.9, 0.99])
-    #   algorithm.optimizer.weight_decay: choice(0.0, 1e-6, 1e-5, 1e-4)
-
-    #   algorithm.flow.n_flows: choice(4, 6)
-    #   algorithm.flow.hidden_dim: choice(128, 256, 384, 512)
-    #   algorithm.flow.n_hidden_layers: choice(1, 2)
-    #   algorithm.flow.activation: choice(relu, gelu, silu)
-    #   algorithm.flow.noise_scale: choice(0.0, 1e-4, 1e-3, 1e-2)
-    #   algorithm.flow.scale_clamp: choice(3.0, 5.0)
-
-    # CIFAR10 space
     params:
-      algorithm.optimizer.lr: tag(log, interval(3e-5, 3e-3))
+      algorithm.optimizer.lr: tag(log, interval(3e-5, 1e-3))
       trainer.gradient_clip_val: choice(0.0, 0.5, 1.0, 2.0)
       algorithm.optimizer.betas: choice([0.9, 0.999], [0.9, 0.99])
-      algorithm.optimizer.weight_decay: choice(0.0, 1e-6, 1e-5, 1e-4, 1e-3)
+      algorithm.optimizer.weight_decay: choice(0.0, 1e-6, 1e-5, 1e-4)
 
-      algorithm.flow.n_flows: choice(4, 6, 8)
-      algorithm.flow.hidden_dim: choice(256, 384, 512, 768)
+      algorithm.flow.n_flows: choice(4, 6)
+      algorithm.flow.hidden_dim: choice(128, 256, 384, 512)
       algorithm.flow.n_hidden_layers: choice(1, 2)
       algorithm.flow.activation: choice(relu, gelu, silu)
       algorithm.flow.noise_scale: choice(0.0, 1e-4, 1e-3, 1e-2)
       algorithm.flow.scale_clamp: choice(3.0, 5.0)
+
+    # CIFAR10 space
+    # params:
+    #   algorithm.optimizer.lr: tag(log, interval(3e-5, 3e-3))
+    #   trainer.gradient_clip_val: choice(0.0, 0.5, 1.0, 2.0)
+    #   algorithm.optimizer.betas: choice([0.9, 0.999], [0.9, 0.99])
+    #   algorithm.optimizer.weight_decay: choice(0.0, 1e-6, 1e-5, 1e-4, 1e-3)
+
+    #   algorithm.flow.n_flows: choice(4, 6, 8)
+    #   algorithm.flow.hidden_dim: choice(256, 384, 512, 768)
+    #   algorithm.flow.n_hidden_layers: choice(1, 2)
+    #   algorithm.flow.activation: choice(relu, gelu, silu)
+    #   algorithm.flow.noise_scale: choice(0.0, 1e-4, 1e-3, 1e-2)
+    #   algorithm.flow.scale_clamp: choice(3.0, 5.0)

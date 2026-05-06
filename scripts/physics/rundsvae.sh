@@ -2,9 +2,6 @@
 # DeepSets VAE RUNNING COMMANDS
 # ========================================================================
 # These are the running commands for the 250 Hz background rate study.
-# To switch to q99 studies, add the following lines to each of the commands below:
-#     algorithm.target_rate=0.01 \
-#     algorithm.base_rate=null \
 
 # ========================================================================
 # TRAINING
@@ -16,6 +13,7 @@
 # python3 src/train.py \
 #     paths.raw_data_dir=/data/deodagiu/adl1t_data/parquet_files \
 #     experiment=physics/dsvae \
+#     experiment_name=physics_dsvae_models_q99 \
 #     run_name=cvar25_t372 \
 #     trainer.gradient_clip_val=2.0 \
 #     algorithm.encoder.clamp_zlogvar_range=[-6,4] \
@@ -39,6 +37,7 @@
 # python3 src/train.py \
 #     paths.raw_data_dir=/data/deodagiu/adl1t_data/parquet_files \
 #     experiment=physics/dsvae \
+#     experiment_name=physics_dsvae_models_q99 \
 #     run_name=cvar10_t100 \
 #     evaluation.callbacks.anomaly_efficiency.cvar_summary=0.10 \
 #     trainer.gradient_clip_val=2.0 \
@@ -67,6 +66,7 @@
 # python3 src/train.py \
 #     paths.raw_data_dir=/data/deodagiu/adl1t_data/parquet_files \
 #     experiment=physics/dsvae_agnostic \
+#     experiment_name=physics_dsvae_models_q99 \
 #     run_name=cap_t324 \
 #     callbacks.wasserstein_dist=null \
 #     callbacks.thres_drift=null \
@@ -96,6 +96,7 @@
 # python3 src/train.py \
 #     paths.raw_data_dir=/data/deodagiu/adl1t_data/parquet_files \
 #     experiment=physics/dsvae_agnostic \
+#     experiment_name=physics_dsvae_models_q99 \
 #     run_name=stability_t445 \
 #     callbacks.wasserstein_dist=null \
 #     callbacks.cap_sn_zb=null \
@@ -125,6 +126,7 @@
 # python3 src/train.py \
 #     paths.raw_data_dir=/data/deodagiu/adl1t_data/parquet_files \
 #     experiment=physics/dsvae_agnostic \
+#     experiment_name=physics_dsvae_models_q99 \
 #     run_name=wasserstein_t503 \
 #     callbacks.thres_drift=null \
 #     callbacks.cap_sn_zb=null \

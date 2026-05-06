@@ -116,8 +116,11 @@
 # ------------------------------------------------------------------------
 # python3 src/train.py \
 #     -m \
-#     hydra/launcher=submitit_slurm_clariden \
-#     hydra.sweeper.n_jobs=6 \
+#     hydra/launcher=submitit_local \
+#     hydra.launcher.timeout_min=200 \
+#     hydra.launcher.cpus_per_task=1 \
+#     hydra.launcher.gpus_per_node=4 \
+#     hydra.sweeper.storage='sqlite:///logs/optuna/cifar10/realnvp.db' \
 #     experiment=cifar10/realnvp \
 #     experiment_name=cifar10_realnvp_cvar25_vs_logp_search \
 #     callbacks.max_rate_ckpt=null \
@@ -140,8 +143,11 @@
 # ------------------------------------------------------------------------
 # python3 src/train.py \
 #     -m \
-#     hydra/launcher=submitit_slurm_clariden \
-#     hydra.sweeper.n_jobs=6 \
+#     hydra/launcher=submitit_local \
+#     hydra.launcher.timeout_min=200 \
+#     hydra.launcher.cpus_per_task=1 \
+#     hydra.launcher.gpus_per_node=4 \
+#     hydra.sweeper.storage='sqlite:///logs/optuna/cifar10/realnvp.db' \
 #     experiment=cifar10/realnvp_agnostic \
 #     experiment_name=cifar10_realnvp_agnostic_cap_vs_logp_search \
 #     callbacks.anomaly_eff=null \
@@ -168,7 +174,11 @@
 # ------------------------------------------------------------------------
 # python3 src/train.py \
 #     -m \
-#     hydra/launcher=submitit_slurm_clariden \
+#     hydra/launcher=submitit_local \
+#     hydra.launcher.timeout_min=200 \
+#     hydra.launcher.cpus_per_task=1 \
+#     hydra.launcher.gpus_per_node=4 \
+#     hydra.sweeper.storage='sqlite:///logs/optuna/cifar10/realnvp.db' \
 #     hydra.sweeper.n_jobs=10 \
 #     experiment=cifar10/realnvp_agnostic \
 #     experiment_name=cifar10_realnvp_agnostic_drift_vs_logp_search \
@@ -199,8 +209,11 @@
 # ------------------------------------------------------------------------
 # python3 src/train.py \
 #     -m \
-#     hydra/launcher=submitit_slurm_clariden \
-#     hydra.sweeper.n_jobs=6 \
+#     hydra/launcher=submitit_local \
+#     hydra.launcher.timeout_min=200 \
+#     hydra.launcher.cpus_per_task=1 \
+#     hydra.launcher.gpus_per_node=4 \
+#     hydra.sweeper.storage='sqlite:///logs/optuna/cifar10/realnvp.db' \
 #     experiment=cifar10/realnvp_agnostic \
 #     experiment_name=cifar10_realnvp_agnostic_wasserstein_vs_logp_search \
 #     callbacks.anomaly_eff=null \

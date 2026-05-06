@@ -12,11 +12,6 @@ hydra:
   sweeper:
     _target_: hydra_plugins.hydra_optuna_sweeper.optuna_sweeper.OptunaSweeper
 
-    # storage URL to persist optimization results
-    # for example, you can use SQLite if you set 'sqlite:///example.db'
-    # storage: sqlite:///logs/optuna/cifar10/vae.db
-    storage: sqlite:///logs/optuna/robustad/vae.db
-
     # name of the study to persist optimization results
     study_name: cvar25eff_vs_kl
 
@@ -37,7 +32,15 @@ hydra:
       consider_endpoints: true
       n_ehvi_candidates: 256
 
+    # storage URL to persist optimization results
+    # for example, you can use SQLite if you set 'sqlite:///example.db'
+
+    # SWITCH THIS BETWEEN ROBUSTAD AND CIFAR10
+    # storage: sqlite:///logs/optuna/cifar10/vae.db
+    storage: sqlite:///logs/optuna/robustad/vae.db
+
     # define hyperparameter search space. Assumes using torch.optim.AdamW
+    # RobustAD space
     params:
       trainer.gradient_clip_val: choice(0.0, 0.5, 1.0)
 
@@ -56,7 +59,7 @@ hydra:
       algorithm.encoder.activation: choice(relu, gelu, silu)
       algorithm.encoder.batchnorm: choice(false, true)
 
-# CIFAR10 space
+    # CIFAR10 space
     # params:
     #   trainer.gradient_clip_val: choice(0.0, 0.5, 1.0, 2.0)
 

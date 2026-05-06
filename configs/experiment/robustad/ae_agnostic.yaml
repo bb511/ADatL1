@@ -242,16 +242,3 @@ evaluation:
       apply_log1p: true
       log_raw_mlflow: false
       name: wasserstein
-
-    # Currently depends on object-feature map. WIP.
-    # reco:
-    #   _target_: src.evaluation.callbacks.reco.ReconstructionPlots
-    #   warmup_batches: 0.2
-    #   output_name: reconstructed_data
-    #   ckpts:
-    #     last: true
-    #   datasets:
-    #     - normal
-    #     - shifted_normal_all
-    #   name: reco
-    #   log_raw_mlflow: false

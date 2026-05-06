@@ -1,11 +1,8 @@
 # ========================================================================
 # VAE RUNNING COMMANDS
 # ========================================================================
-
 # These are the running commands for the 250 Hz background rate study.
-# To switch to q99 studies, add the following lines to each of the commands below:
-#     algorithm.target_rate=0.01 \
-#     algorithm.base_rate=null \
+
 
 # ========================================================================
 # TRAINING

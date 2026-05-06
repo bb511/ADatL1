@@ -12,7 +12,7 @@ defaults:
 seed: 123
 tags: ["realnvp", "agnostic", "cap"]
 
-experiment_name: realnvp_models
+experiment_name: physics_realnvp_models
 run_name: ${short_hash:${hydra:runtime.output_dir},12}
 
 data:

@@ -120,8 +120,11 @@
 # ------------------------------------------------------------------------
 # python3 src/train.py \
 #     -m \
-#     hydra/launcher=submitit_slurm_clariden \
-#     hydra.sweeper.n_jobs=6 \
+#     hydra/launcher=submitit_local \
+#     hydra.launcher.timeout_min=200 \
+#     hydra.launcher.cpus_per_task=1 \
+#     hydra.launcher.gpus_per_node=4 \
+#     hydra.sweeper.storage='sqlite:///logs/optuna/cifar10/vae.db' \
 #     experiment=cifar10/vae \
 #     experiment_name=cifar10_vae_cvar25_vs_kl_search \
 #     callbacks.max_rate_ckpt=null \
@@ -145,8 +148,11 @@
 # ------------------------------------------------------------------------
 # python3 src/train.py \
 #     -m \
-#     hydra/launcher=submitit_slurm_clariden \
-#     hydra.sweeper.n_jobs=6 \
+#     hydra/launcher=submitit_local \
+#     hydra.launcher.timeout_min=200 \
+#     hydra.launcher.cpus_per_task=1 \
+#     hydra.launcher.gpus_per_node=4 \
+#     hydra.sweeper.storage='sqlite:///logs/optuna/cifar10/vae.db' \
 #     experiment=cifar10/vae_agnostic \
 #     experiment_name=cifar10_vae_agnostic_cap_vs_kl_search \
 #     callbacks.anomaly_eff=null \
@@ -174,8 +180,11 @@
 # ------------------------------------------------------------------------
 # python3 src/train.py \
 #     -m \
-#     hydra/launcher=submitit_slurm_clariden \
-#     hydra.sweeper.n_jobs=6 \
+#     hydra/launcher=submitit_local \
+#     hydra.launcher.timeout_min=200 \
+#     hydra.launcher.cpus_per_task=1 \
+#     hydra.launcher.gpus_per_node=4 \
+#     hydra.sweeper.storage='sqlite:///logs/optuna/cifar10/vae.db' \
 #     experiment=cifar10/vae_agnostic \
 #     experiment_name=cifar10_vae_agnostic_drift_vs_kl_search \
 #     callbacks.anomaly_eff=null \
@@ -207,8 +216,11 @@
 # ------------------------------------------------------------------------
 # python3 src/train.py \
 #     -m \
-#     hydra/launcher=submitit_slurm_clariden \
-#     hydra.sweeper.n_jobs=6 \
+#     hydra/launcher=submitit_local \
+#     hydra.launcher.timeout_min=200 \
+#     hydra.launcher.cpus_per_task=1 \
+#     hydra.launcher.gpus_per_node=4 \
+#     hydra.sweeper.storage='sqlite:///logs/optuna/cifar10/vae.db' \
 #     experiment=cifar10/vae_agnostic \
 #     experiment_name=cifar10_vae_agnostic_wasserstein_vs_kl_search \
 #     callbacks.anomaly_eff=null \

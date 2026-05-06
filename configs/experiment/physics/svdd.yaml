@@ -12,7 +12,7 @@ defaults:
 seed: 123
 tags: ["deepsvdd", "signal"]
 
-experiment_name: deepsvdd_models
+experiment_name: physics_deepsvdd_models
 run_name: ${short_hash:${hydra:runtime.output_dir},12}
 
 data:

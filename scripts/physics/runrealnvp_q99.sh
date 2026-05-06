@@ -1,6 +1,7 @@
 # ========================================================================
-# SVDD RUNNING COMMANDS
+# RealNVP RUNNING COMMANDS
 # ========================================================================
+# These are the running commands for the q99 background rate study.
 
 
 # ========================================================================
@@ -9,22 +10,25 @@
 # ------------------------------------------------------------------------
 # Semi-supervised cvar25 training
 # ------------------------------------------------------------------------
-# taskset -c 36-38 \
+# taskset -c 48-50 \
 # python3 src/train.py \
-#     experiment=cifar10/svdd \
-#     run_name=cvar25_t284 \
-#     algorithm.optimizer.lr=0.002347325794742755 \
-#     trainer.gradient_clip_val=0.5 \
-#     algorithm.optimizer.betas=[0.9,0.999] \
+#     paths.raw_data_dir=/data/deodagiu/adl1t_data/parquet_files \
+#     experiment=physics/realnvp \
+#     experiment_name=physics_realnvp_models_q99
+#     run_name=cvar25_t466 \
+#     algorithm.target_rate=0.01 \
+#     algorithm.base_rate=null \
+#     algorithm.optimizer.lr=3.7803380868254345e-05 \
+#     trainer.gradient_clip_val=0.0 \
+#     algorithm.optimizer.betas=[0.9,0.99] \
 #     algorithm.optimizer.weight_decay=1e-06 \
-#     algorithm.weight_decay=1e-05 \
-#     algorithm.soft_boundary=True \
-#     algorithm.nu=0.1 \
-#     algorithm.center_init_method=zeros \
-#     algorithm.encoder.nodes=[64,128,256] \
-#     algorithm.encoder.strides=[2,2] \
-#     algorithm.encoder.activation=gelu \
-#     algorithm.encoder.batchnorm=false \
+#     algorithm.flow.n_flows=8 \
+#     algorithm.flow.hidden_dim=48 \
+#     algorithm.flow.n_hidden_layers=2 \
+#     algorithm.flow.activation=gelu \
+#     algorithm.flow.noise_scale=0.0 \
+#     algorithm.flow.scale_clamp=5.0 \
+#     trainer.max_epochs=1 \
 #     trainer=gpu \
 #     trainer.devices=[0]
 
@@ -34,103 +38,113 @@
 # ------------------------------------------------------------------------
 # CAP training
 # ------------------------------------------------------------------------
-# taskset -c 40-42 \
+# taskset -c 51-53 \
 # python3 src/train.py \
-#     experiment=cifar10/svdd_agnostic \
-#     run_name=cap_t599 \
+#     paths.raw_data_dir=/data/deodagiu/adl1t_data/parquet_files \
+#     experiment=physics/realnvp_agnostic \
+#     experiment_name=physics_realnvp_models_q99
+#     run_name=cap_t200 \
+#     algorithm.target_rate=0.01 \
+#     algorithm.base_rate=null \
 #     callbacks.wasserstein_dist=null \
 #     callbacks.thres_drift=null \
 #     callbacks.wasserstein_dist_ema_ckpt=null \
 #     callbacks.thres_drift_ema_ckpt=null \
 #     ~evaluation.evaluator.ckpts.summary.operational_drift_ema \
-#     ~evaluation.evaluator.ckpts.summary.w1dist_ema_normal_vs_reference_normal \
-#     algorithm.optimizer.lr=0.0006990798503902553 \
-#     trainer.gradient_clip_val=1.0 \
-#     algorithm.optimizer.betas=[0.9,0.99] \
-#     algorithm.optimizer.weight_decay=0.0001 \
-#     algorithm.weight_decay=1e-06 \
-#     algorithm.soft_boundary=false \
-#     algorithm.nu=0.01 \
-#     algorithm.center_init_method=zeros \
-#     algorithm.encoder.nodes=[16,32,64] \
-#     algorithm.encoder.strides=[2,2] \
-#     algorithm.encoder.activation=silu \
-#     algorithm.encoder.batchnorm=false \
+#     ~evaluation.evaluator.ckpts.summary.w1dist_ema_normal_vs_SingleNeutrino_E-10-gun \
+#     algorithm.optimizer.lr=0.0008856132495375707 \
+#     trainer.gradient_clip_val=0.5 \
+#     algorithm.optimizer.betas=[0.9,0.999] \
+#     algorithm.optimizer.weight_decay=1e-06 \
+#     algorithm.flow.n_flows=8 \
+#     algorithm.flow.hidden_dim=64 \
+#     algorithm.flow.n_hidden_layers=2 \
+#     algorithm.flow.activation=relu \
+#     algorithm.flow.noise_scale=0.0001 \
+#     algorithm.flow.scale_clamp=5.0 \
+#     trainer.max_epochs=1 \
 #     trainer=gpu \
 #     trainer.devices=[1]
 
 # ------------------------------------------------------------------------
 # Stability training
 # ------------------------------------------------------------------------
-# taskset -c 43-45 \
+# taskset -c 54-56 \
 # python3 src/train.py \
-#     experiment=cifar10/svdd_agnostic \
-#     run_name=stability_t191 \
+#     paths.raw_data_dir=/data/deodagiu/adl1t_data/parquet_files \
+#     experiment=physics/realnvp_agnostic \
+#     experiment_name=physics_realnvp_models_q99
+#     run_name=stability_t595 \
+#     algorithm.target_rate=0.01 \
+#     algorithm.base_rate=null \
 #     callbacks.wasserstein_dist=null \
 #     callbacks.cap_sn_zb=null \
 #     callbacks.wasserstein_dist_ema_ckpt=null \
 #     callbacks.cap_sn_zb_ema_ckpt=null \
-#     ~evaluation.evaluator.ckpts.summary.w1dist_ema_normal_vs_reference_normal \
-#     ~evaluation.evaluator.ckpts.summary.cap_ema_normal_vs_reference_normal \
-#     algorithm.optimizer.lr=0.0029638593347981854 \
-#     trainer.gradient_clip_val=2.0 \
-#     algorithm.optimizer.betas=[0.9,0.999] \
-#     algorithm.optimizer.weight_decay=0.0001 \
-#     algorithm.weight_decay=1e-08 \
-#     algorithm.soft_boundary=true \
-#     algorithm.nu=0.01 \
-#     algorithm.center_init_method=zeros \
-#     algorithm.encoder.nodes=[16,64,128] \
-#     algorithm.encoder.strides=[2,1] \
-#     algorithm.encoder.activation=relu \
-#     algorithm.encoder.batchnorm=true \
+#     ~evaluation.evaluator.ckpts.summary.w1dist_ema_normal_vs_SingleNeutrino_E-10-gun \
+#     ~evaluation.evaluator.ckpts.summary.cap_ema_normal_vs_SingleNeutrino_E-10-gun \
+#     algorithm.optimizer.lr=0.0008426900182503831 \
+#     trainer.gradient_clip_val=0.5 \
+#     algorithm.optimizer.betas=[0.9,0.99] \
+#     algorithm.optimizer.weight_decay=1e-05 \
+#     algorithm.flow.n_flows=8 \
+#     algorithm.flow.hidden_dim=48 \
+#     algorithm.flow.n_hidden_layers=2 \
+#     algorithm.flow.activation=relu \
+#     algorithm.flow.noise_scale=0.0001 \
+#     algorithm.flow.scale_clamp=5.0 \
 #     trainer=gpu \
 #     trainer.devices=[2]
 
 # ------------------------------------------------------------------------
 # Wasserstein training
 # ------------------------------------------------------------------------
-# taskset -c 46-48 \
+# taskset -c 57-59 \
 # python3 src/train.py \
-#     experiment=cifar10/svdd_agnostic \
-#     run_name=wasserstein_t266 \
+#     paths.raw_data_dir=/data/deodagiu/adl1t_data/parquet_files \
+#     experiment=physics/realnvp_agnostic \
+#     experiment_name=physics_realnvp_models_q99
+#     run_name=wasserstein_t580 \
+#     algorithm.target_rate=0.01 \
+#     algorithm.base_rate=null \
 #     callbacks.thres_drift=null \
 #     callbacks.cap_sn_zb=null \
 #     callbacks.thres_drift_ema_ckpt=null \
 #     callbacks.cap_sn_zb_ema_ckpt=null \
 #     ~evaluation.evaluator.ckpts.summary.operational_drift_ema \
-#     ~evaluation.evaluator.ckpts.summary.cap_ema_normal_vs_reference_normal \
-#     algorithm.optimizer.lr=0.0026915777942867008 \
+#     ~evaluation.evaluator.ckpts.summary.cap_ema_normal_vs_SingleNeutrino_E-10-gun \
+#     algorithm.optimizer.lr=0.0007229552409929307 \
 #     trainer.gradient_clip_val=0.5 \
 #     algorithm.optimizer.betas=[0.9,0.99] \
-#     algorithm.optimizer.weight_decay=0.001 \
-#     algorithm.weight_decay=0.0 \
-#     algorithm.soft_boundary=true \
-#     algorithm.nu=0.05 \
-#     algorithm.center_init_method=zeros \
-#     algorithm.encoder.nodes=[32,64,128] \
-#     algorithm.encoder.strides=[2,1] \
-#     algorithm.encoder.activation=relu \
-#     algorithm.encoder.batchnorm=true \
+#     algorithm.optimizer.weight_decay=0.0001 \
+#     algorithm.flow.n_flows=8 \
+#     algorithm.flow.hidden_dim=64 \
+#     algorithm.flow.n_hidden_layers=2 \
+#     algorithm.flow.activation=relu \
+#     algorithm.flow.noise_scale=0.0001 \
+#     algorithm.flow.scale_clamp=5.0 \
 #     trainer=gpu \
 #     trainer.devices=[3]
 
 
+
 # ========================================================================
-# HYPERPARAMETER SEARCH
-# ========================================================================
+# HYPERPARAMETER SEARCHES
+# =========================================================================
 # ------------------------------------------------------------------------
-# Semi-supervised search (cvar25)
+# Semi-supervised cvar25 training
 # ------------------------------------------------------------------------
+# taskset -c 0-2 \
 # python3 src/train.py \
 #     -m \
 #     hydra/launcher=submitit_local \
-#     hydra.launcher.timeout_min=200 \
 #     hydra.launcher.cpus_per_task=1 \
 #     hydra.launcher.gpus_per_node=4 \
-#     hydra.sweeper.storage='sqlite:///logs/optuna/cifar10/svdd.db' \
-#     experiment=cifar10/svdd \
-#     experiment_name=cifar10_svdd_cvar25_vs_dist_search \
+#     paths.raw_data_dir=/data/deodagiu/adl1t_data/parquet_files \
+#     experiment=physics/realnvp \
+#     experiment_name=realnvp_cvar25_vs_logpq99_search \
+#     algorithm.target_rate=0.01 \
+#     algorithm.base_rate=null \
 #     callbacks.max_rate_ckpt=null \
 #     callbacks.cvar10_ema_ckpt=null \
 #     ~evaluation.evaluator.ckpts.single.eff__ascore_full__brate_operational \
@@ -138,108 +152,116 @@
 #     evaluation.callbacks.thres_drift=null \
 #     evaluation.callbacks.wasserstein=null \
 #     logger=none \
-#     hparams_search=imagesvdd_optuna \
-#     hydra.sweeper.study_name=cvar25eff_vs_dist \
-#     hydra.sweeper.n_trials=600 \
+#     hparams_search=realnvp_optuna \
+#     hydra.sweeper.study_name=cvar25eff_vs_logpq99 \
+#     hydra.sweeper.n_trials=150 \
 #     hydra.sweeper.sampler.n_startup_trials=150 \
 #     trainer=gpu \
 #     trainer.max_epochs=50 \
 #     trainer.devices=[0]
 
 # ------------------------------------------------------------------------
-# CAP search
+# CAP training
 # ------------------------------------------------------------------------
+# taskset -c 0-2 \
 # python3 src/train.py \
 #     -m \
 #     hydra/launcher=submitit_local \
-#     hydra.launcher.timeout_min=200 \
 #     hydra.launcher.cpus_per_task=1 \
+#     hydra.launcher.timeout_min=200 \
 #     hydra.launcher.gpus_per_node=4 \
-#     hydra.sweeper.storage='sqlite:///logs/optuna/cifar10/svdd.db' \
-#     experiment=cifar10/svdd_agnostic \
-#     experiment_name=cifar10_svdd_agnostic_cap_vs_dist_search \
+#     paths.raw_data_dir=/data/deodagiu/adl1t_data/parquet_files \
+#     experiment=physics/realnvp_agnostic \
+#     experiment_name=realnvp_agnostic_cap_vs_logpq99_search \
+#     algorithm.target_rate=0.01 \
+#     algorithm.base_rate=null \
 #     callbacks.anomaly_eff=null \
-#     callbacks.thres_drift=null \
 #     callbacks.wasserstein_dist=null \
-#     callbacks.thres_drift_ema_ckpt=null \
+#     callbacks.thres_drift=null \
 #     callbacks.wasserstein_dist_ema_ckpt=null \
+#     callbacks.thres_drift_ema_ckpt=null \
 #     ~evaluation.evaluator.ckpts.summary.operational_drift_ema \
-#     ~evaluation.evaluator.ckpts.summary.w1dist_ema_normal_vs_reference_normal \
+#     ~evaluation.evaluator.ckpts.summary.w1dist_ema_normal_vs_SingleNeutrino_E-10-gun \
 #     evaluation.callbacks.anomaly_efficiency=null \
 #     evaluation.callbacks.thres_drift=null \
 #     evaluation.callbacks.wasserstein=null \
 #     logger=none \
-#     hparams_search=imagesvdd_optuna \
-#     hydra.sweeper.study_name=cap_vs_dist \
-#     hydra.sweeper.n_trials=600 \
+#     hparams_search=realnvp_optuna \
+#     hydra.sweeper.study_name=cap_vs_logpq99 \
+#     hydra.sweeper.n_trials=150 \
 #     hydra.sweeper.sampler.n_startup_trials=150 \
 #     trainer=gpu \
 #     trainer.max_epochs=50 \
 #     trainer.devices=[0]
 
 # ------------------------------------------------------------------------
-# Stability search
+# Stability training
 # ------------------------------------------------------------------------
+# taskset -c 0-2 \
 # python3 src/train.py \
 #     -m \
 #     hydra/launcher=submitit_local \
-#     hydra.launcher.timeout_min=200 \
 #     hydra.launcher.cpus_per_task=1 \
 #     hydra.launcher.gpus_per_node=4 \
-#     hydra.sweeper.storage='sqlite:///logs/optuna/cifar10/svdd.db' \
-#     experiment=cifar10/svdd_agnostic \
-#     experiment_name=cifar10_svdd_agnostic_drift_vs_dist_search \
+#     paths.raw_data_dir=/data/deodagiu/adl1t_data/parquet_files \
+#     experiment=physics/realnvp_agnostic \
+#     experiment_name=realnvp_agnostic_drift_vs_logpq99_search \
+#     algorithm.target_rate=0.01 \
+#     algorithm.base_rate=null \
 #     callbacks.anomaly_eff=null \
-#     callbacks.cap_sn_zb=null \
 #     callbacks.wasserstein_dist=null \
+#     callbacks.cap_sn_zb=null \
 #     callbacks.wasserstein_dist_ema_ckpt=null \
 #     callbacks.cap_sn_zb_ema_ckpt=null \
-#     ~evaluation.evaluator.ckpts.summary.w1dist_ema_normal_vs_reference_normal \
-#     ~evaluation.evaluator.ckpts.summary.cap_ema_normal_vs_reference_normal \
+#     ~evaluation.evaluator.ckpts.summary.w1dist_ema_normal_vs_SingleNeutrino_E-10-gun \
+#     ~evaluation.evaluator.ckpts.summary.cap_ema_normal_vs_SingleNeutrino_E-10-gun \
 #     evaluation.callbacks.anomaly_efficiency=null \
 #     evaluation.callbacks.cap_sn_zb=null \
 #     evaluation.callbacks.wasserstein=null \
 #     logger=none \
-#     hparams_search=imagesvdd_optuna \
+#     hparams_search=realnvp_optuna \
 #     optimized_metric_config.main_metric.callback.name=thres_drift \
 #     optimized_metric_config.main_metric.direction=minimize \
-#     hydra.sweeper.study_name=drift_vs_dist \
+#     hydra.sweeper.study_name=drift_vs_logpq99 \
 #     hydra.sweeper.direction='[minimize, minimize]' \
-#     hydra.sweeper.n_trials=400 \
+#     hydra.sweeper.n_trials=150 \
 #     hydra.sweeper.sampler.n_startup_trials=150 \
 #     trainer=gpu \
 #     trainer.max_epochs=50 \
 #     trainer.devices=[0]
 
 # ------------------------------------------------------------------------
-# Wasserstein search
+# Wasserstein training
 # ------------------------------------------------------------------------
+# taskset -c 0-2 \
 # python3 src/train.py \
 #     -m \
 #     hydra/launcher=submitit_local \
-#     hydra.launcher.timeout_min=200 \
 #     hydra.launcher.cpus_per_task=1 \
 #     hydra.launcher.gpus_per_node=4 \
-#     hydra.sweeper.storage='sqlite:///logs/optuna/cifar10/svdd.db' \
-#     experiment=cifar10/svdd_agnostic \
-#     experiment_name=cifar10_svdd_agnostic_wasserstein_vs_dist_search \
+#     paths.raw_data_dir=/data/deodagiu/adl1t_data/parquet_files \
+#     experiment=physics/realnvp_agnostic \
+#     experiment_name=realnvp_agnostic_wasserstein_vs_logpq99_search \
+#     algorithm.target_rate=0.01 \
+#     algorithm.base_rate=null \
 #     callbacks.anomaly_eff=null \
-#     callbacks.cap_sn_zb=null \
+#     callbacks.anomaly_eff=null \
 #     callbacks.thres_drift=null \
+#     callbacks.cap_sn_zb=null \
 #     callbacks.thres_drift_ema_ckpt=null \
 #     callbacks.cap_sn_zb_ema_ckpt=null \
 #     ~evaluation.evaluator.ckpts.summary.operational_drift_ema \
-#     ~evaluation.evaluator.ckpts.summary.cap_ema_normal_vs_reference_normal \
+#     ~evaluation.evaluator.ckpts.summary.cap_ema_normal_vs_SingleNeutrino_E-10-gun \
 #     evaluation.callbacks.anomaly_efficiency=null \
 #     evaluation.callbacks.cap_sn_zb=null \
 #     evaluation.callbacks.thres_drift=null \
 #     logger=none \
-#     hparams_search=imagesvdd_optuna \
+#     hparams_search=realnvp_optuna \
 #     optimized_metric_config.main_metric.callback.name=wasserstein \
 #     optimized_metric_config.main_metric.direction=minimize \
-#     hydra.sweeper.study_name=wasserstein_vs_dist \
+#     hydra.sweeper.study_name=wasserstein_vs_logpq99 \
 #     hydra.sweeper.direction='[minimize, minimize]' \
-#     hydra.sweeper.n_trials=600 \
+#     hydra.sweeper.n_trials=150 \
 #     hydra.sweeper.sampler.n_startup_trials=150 \
 #     trainer=gpu \
 #     trainer.max_epochs=50 \

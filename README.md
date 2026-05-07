@@ -28,10 +28,10 @@ pip install -r requirements.txt
 
 ## Data
 
-This repository runs on data produced by [this code](https://github.com/cdfpzmvpvg/info_ad_data).
-The mentioned repository requires access to L1TNtuple data.
+The LHC L1 AD data runs on data produced by [this code](https://github.com/cdfpzmvpvg/info_ad_data).
+For the LHC L1 AD dataset, you must download the data [here](https://cernbox.cern.ch/s/dRnVAa3ZDHWl2bs), unzip it, and then point to it by configuring `paths.raw_data_dir` in the running scripts.
 
 ## Usage
 
-See the `scripts` directory for scripts used to run different parts of this repo.
-For example, to train a simple AE
+See the `scripts` directory for scripts used to run the experiments described in the paper.
+The experiments are already configured with the hyperparameter values described for the mdoels shown in the paper.

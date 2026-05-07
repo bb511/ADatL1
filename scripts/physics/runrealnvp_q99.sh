@@ -14,7 +14,7 @@
 # python3 src/train.py \
 #     paths.raw_data_dir=/data/deodagiu/adl1t_data/parquet_files \
 #     experiment=physics/realnvp \
-#     experiment_name=physics_realnvp_models_q99
+#     experiment_name=physics_realnvp_models_q99 \
 #     run_name=cvar25_t466 \
 #     algorithm.target_rate=0.01 \
 #     algorithm.base_rate=null \
@@ -28,7 +28,6 @@
 #     algorithm.flow.activation=gelu \
 #     algorithm.flow.noise_scale=0.0 \
 #     algorithm.flow.scale_clamp=5.0 \
-#     trainer.max_epochs=1 \
 #     trainer=gpu \
 #     trainer.devices=[0]
 
@@ -42,7 +41,7 @@
 # python3 src/train.py \
 #     paths.raw_data_dir=/data/deodagiu/adl1t_data/parquet_files \
 #     experiment=physics/realnvp_agnostic \
-#     experiment_name=physics_realnvp_models_q99
+#     experiment_name=physics_realnvp_models_q99 \
 #     run_name=cap_t200 \
 #     algorithm.target_rate=0.01 \
 #     algorithm.base_rate=null \
@@ -62,7 +61,6 @@
 #     algorithm.flow.activation=relu \
 #     algorithm.flow.noise_scale=0.0001 \
 #     algorithm.flow.scale_clamp=5.0 \
-#     trainer.max_epochs=1 \
 #     trainer=gpu \
 #     trainer.devices=[1]
 
@@ -73,7 +71,7 @@
 # python3 src/train.py \
 #     paths.raw_data_dir=/data/deodagiu/adl1t_data/parquet_files \
 #     experiment=physics/realnvp_agnostic \
-#     experiment_name=physics_realnvp_models_q99
+#     experiment_name=physics_realnvp_models_q99 \
 #     run_name=stability_t595 \
 #     algorithm.target_rate=0.01 \
 #     algorithm.base_rate=null \
@@ -103,7 +101,7 @@
 # python3 src/train.py \
 #     paths.raw_data_dir=/data/deodagiu/adl1t_data/parquet_files \
 #     experiment=physics/realnvp_agnostic \
-#     experiment_name=physics_realnvp_models_q99
+#     experiment_name=physics_realnvp_models_q99 \
 #     run_name=wasserstein_t580 \
 #     algorithm.target_rate=0.01 \
 #     algorithm.base_rate=null \

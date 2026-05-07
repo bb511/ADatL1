@@ -13,11 +13,11 @@
 # python3 src/train.py \
 #     paths.raw_data_dir=/data/deodagiu/adl1t_data/parquet_files \
 #     experiment=physics/svdd \
-#     run_name=cvar25_t499 \
+#     run_name=cvar25_t465 \
 #     experiment_name=physics_deepsvdd_models_q99 \
 #     algorithm.target_rate=0.01 \
 #     algorithm.base_rate=null \
-#     algorithm.optimizer.lr=0.001063628124165606 \
+#     algorithm.optimizer.lr=0.0011493007715406593 \
 #     trainer.gradient_clip_val=0.0 \
 #     algorithm.optimizer.betas=[0.9,0.999] \
 #     algorithm.optimizer.weight_decay=0.0001 \
@@ -25,9 +25,8 @@
 #     algorithm.soft_boundary=true \
 #     algorithm.nu=0.2 \
 #     algorithm.center_init_method=mean \
-#     algorithm.encoder.nodes=[24,8,4] \
+#     algorithm.encoder.nodes=[16,8] \
 #     algorithm.encoder.activation=relu \
-#     trainer.max_epochs=1 \
 #     trainer=gpu \
 #     trainer.devices=[0]
 
@@ -61,7 +60,6 @@
 #     algorithm.center_init_method=zeros \
 #     algorithm.encoder.nodes=[48,24,24] \
 #     algorithm.encoder.activation=gelu \
-#     trainer.max_epochs=1 \
 #     trainer=gpu \
 #     trainer.devices=[1]
 
@@ -98,7 +96,7 @@
 # ------------------------------------------------------------------------
 # Wasserstein training
 # ------------------------------------------------------------------------
-# taskset -c 9-11 \
+# taskset -c 12-14 \
 # python3 src/train.py \
 #     paths.raw_data_dir=/data/deodagiu/adl1t_data/parquet_files \
 #     experiment=physics/svdd_agnostic \

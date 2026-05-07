@@ -9,7 +9,7 @@
 # ------------------------------------------------------------------------
 # Semi-supervised cvar25 training
 # ------------------------------------------------------------------------
-# taskset -c 36-38 \
+# taskset -c 39-41 \
 # python3 src/train.py \
 #     experiment=cifar10/svdd \
 #     run_name=cvar25_t284 \
@@ -34,7 +34,7 @@
 # ------------------------------------------------------------------------
 # CAP training
 # ------------------------------------------------------------------------
-# taskset -c 40-42 \
+# taskset -c 42-44 \
 # python3 src/train.py \
 #     experiment=cifar10/svdd_agnostic \
 #     run_name=cap_t599 \
@@ -62,7 +62,7 @@
 # ------------------------------------------------------------------------
 # Stability training
 # ------------------------------------------------------------------------
-# taskset -c 43-45 \
+# taskset -c 45-47 \
 # python3 src/train.py \
 #     experiment=cifar10/svdd_agnostic \
 #     run_name=stability_t191 \
@@ -90,7 +90,7 @@
 # ------------------------------------------------------------------------
 # Wasserstein training
 # ------------------------------------------------------------------------
-# taskset -c 46-48 \
+# taskset -c 48-50 \
 # python3 src/train.py \
 #     experiment=cifar10/svdd_agnostic \
 #     run_name=wasserstein_t266 \

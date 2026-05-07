@@ -9,7 +9,7 @@
 # ------------------------------------------------------------------------
 # Semi-supervised cvar25 training
 # ------------------------------------------------------------------------
-# taskset -c 12-14 \
+# taskset -c 49-51 \
 # python3 src/train.py \
 #     experiment=robustad/vae \
 #     run_name=cvar25_t62 \
@@ -33,7 +33,7 @@
 # ------------------------------------------------------------------------
 # CAP training
 # ------------------------------------------------------------------------
-# taskset -c 15-17 \
+# taskset -c 52-54 \
 # python3 src/train.py \
 #     experiment=robustad/vae_agnostic \
 #     run_name=cap_t402 \
@@ -54,14 +54,13 @@
 #     algorithm.encoder.strides=[2] \
 #     algorithm.encoder.activation=relu \
 #     algorithm.encoder.batchnorm=False \
-#     trainer.max_epochs=1 \
 #     trainer=gpu \
 #     trainer.devices=[1]
 
 # ------------------------------------------------------------------------
 # Stability training
 # ------------------------------------------------------------------------
-# taskset -c 18-20 \
+# taskset -c 55-57 \
 # python3 src/train.py \
 #     experiment=robustad/vae_agnostic \
 #     run_name=stability_t389 \
@@ -88,7 +87,7 @@
 # ------------------------------------------------------------------------
 # Wasserstein training
 # ------------------------------------------------------------------------
-# taskset -c 21-23 \
+# taskset -c 58-60 \
 # python3 src/train.py \
 #     experiment=robustad/vae_agnostic \
 #     run_name=wasserstein_t587 \

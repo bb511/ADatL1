@@ -9,7 +9,7 @@
 # ------------------------------------------------------------------------
 # Semi-supervised cvar25 training
 # ------------------------------------------------------------------------
-# taskset -c 0-2 \
+# taskset -c 15-17 \
 # python3 src/train.py \
 #     experiment=robustad/ae \
 #     run_name=cvar25_t526 \
@@ -33,7 +33,7 @@
 # ------------------------------------------------------------------------
 # CAP training
 # ------------------------------------------------------------------------
-# taskset -c 3-5 \
+# taskset -c 18-20 \
 # python3 src/train.py \
 #     experiment=robustad/ae_agnostic \
 #     run_name=cap_t350 \
@@ -59,7 +59,7 @@
 # ------------------------------------------------------------------------
 # Stability training
 # ------------------------------------------------------------------------
-# taskset -c 6-8 \
+# taskset -c 21-23 \
 # python3 src/train.py \
 #     experiment=robustad/ae_agnostic \
 #     run_name=stability_t568 \
@@ -86,7 +86,7 @@
 # ------------------------------------------------------------------------
 # Wasserstein training
 # ------------------------------------------------------------------------
-# taskset -c 9-11 \
+# taskset -c 24-26 \
 # python3 src/train.py \
 #     experiment=robustad/ae_agnostic \
 #     run_name=wasserstein_t299 \

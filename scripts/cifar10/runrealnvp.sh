@@ -24,7 +24,7 @@
 #     algorithm.flow.noise_scale=0.01 \
 #     algorithm.flow.scale_clamp=3.0 \
 #     trainer=gpu \
-#     trainer.devices=[1]
+#     trainer.devices=[0]
 
 # ========================================================================
 # AGNOSTIC TRAINING
@@ -79,7 +79,7 @@
 #     algorithm.flow.noise_scale=0.001 \
 #     algorithm.flow.scale_clamp=3.0 \
 #     trainer=gpu \
-#     trainer.devices=[1]
+#     trainer.devices=[2]
 
 # ------------------------------------------------------------------------
 # Wasserstein training
@@ -105,7 +105,7 @@
 #     algorithm.flow.noise_scale=0.0 \
 #     algorithm.flow.scale_clamp=3.0 \
 #     trainer=gpu \
-#     trainer.devices=[1]
+#     trainer.devices=[3]
 
 
 # ========================================================================

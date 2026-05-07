@@ -308,3 +308,9 @@ class HistogramOutputCallback(Callback):
             return False
 
         return crit in allowed_criteria
+
+    def get_optimized_metric(self, ckpt_name: str, test_ds: str):
+        raise NotImplementedError(
+            "Callback 'HistogramOutputCallback' does not have the get_optimized_metric "
+            "method implemented, hence cannot return something to optuna."
+        )

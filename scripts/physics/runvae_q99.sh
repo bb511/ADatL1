@@ -33,7 +33,7 @@
 # ------------------------------------------------------------------------
 # CAP training
 # ------------------------------------------------------------------------
-# taskset -c 15-17 \
+# taskset -c 6-8 \
 # python3 src/train.py \
 #     paths.raw_data_dir=/data/deodagiu/adl1t_data/parquet_files \
 #     experiment=physics/vae_agnostic \
@@ -95,8 +95,8 @@
 # python3 src/train.py \
 #     paths.raw_data_dir=/data/deodagiu/adl1t_data/parquet_files \
 #     experiment=physics/vae_agnostic \
-#     experiment_name=physics_vae_models_q99 \\
-#     run_name=wasserstein_t504
+#     experiment_name=physics_vae_models_q99 \
+#     run_name=wasserstein_t504 \
 #     algorithm.target_rate=0.01 \
 #     algorithm.base_rate=null \
 #     callbacks.thres_drift=null \

@@ -157,3 +157,17 @@ evaluation:
       dataset_1: normal
       dataset_2: shifted_normal_all
       apply_log1p: true
+
+    anomaly_auprc:
+      _target_: src.evaluation.callbacks.auprc.AnomalyAUPRCCallback
+      output_name: 'ascore/full'
+      ds:
+        - shifted_anomaly_0
+        - shifted_anomaly_1
+        - shifted_anomaly_2
+        - shifted_anomaly_3
+        - shifted_anomaly_4
+        - shifted_anomaly_5
+      pure_normal: false
+      log_raw_mlflow: false
+      name: auprc

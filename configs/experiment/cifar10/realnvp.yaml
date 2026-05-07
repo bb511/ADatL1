@@ -182,3 +182,20 @@ evaluation:
       apply_log1p: true
       log_raw_mlflow: false
       name: wasserstein
+
+    anomaly_auprc:
+      _target_: src.evaluation.callbacks.auprc.AnomalyAUPRCCallback
+      output_name: 'ascore/full'
+      ds:
+        - '1'
+        - '2'
+        - '3'
+        - '4'
+        - '5'
+        - '6'
+        - '7'
+        - '8'
+        - '9'
+      pure_normal: false
+      log_raw_mlflow: false
+      name: auprc

@@ -9,7 +9,7 @@
 # ------------------------------------------------------------------------
 # Semi-supervised cvar25 training
 # ------------------------------------------------------------------------
-# taskset -c 36-38 \
+# taskset -c 48-50 \
 # python3 src/train.py \
 #     experiment=robustad/svdd \
 #     run_name=cvar25_t339 \
@@ -25,7 +25,6 @@
 #     algorithm.encoder.strides=[2,2] \
 #     algorithm.encoder.activation=silu \
 #     algorithm.encoder.batchnorm=False \
-#     trainer.max_epochs=1 \
 #     trainer=gpu \
 #     trainer.devices=[0]
 
@@ -57,7 +56,6 @@
 #     algorithm.encoder.strides=[2,2] \
 #     algorithm.encoder.activation=relu \
 #     algorithm.encoder.batchnorm=False \
-#     trainer.max_epochs=1 \
 #     trainer=gpu \
 #     trainer.devices=[1]
 

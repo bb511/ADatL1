@@ -1,5 +1,5 @@
 # Lightning data module for loading parquet data produced with:
-# https://github.com/bb511/adl1t_datamaker
+# https://github.com/cdfpzmvpvg/info_ad_data
 from dataclasses import dataclass
 from pathlib import Path
 import gc
@@ -58,9 +58,6 @@ class L1ADDataModule(LightningDataModule):
         seed: int = 42,
     ) -> None:
         """Prepare the L1 data for using it to train and validate ML models.
-
-        The files processed by this class originate from samples produced with
-        https://gitlab.cern.ch/cms-l1-ad/l1tntuple-maker/-/tree/new_h5generation
 
         :param zerobias: Dictionary of paths to the zerobias data.
         :param signals: Dictionary of paths to simulation data of possible anomalies.

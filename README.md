@@ -1,4 +1,3 @@
-[![Email Badge](https://img.shields.io/badge/blah-podagiu%40ethz.ch-blue?style=flat-square&logo=minutemailer&logoColor=white&label=%20&labelColor=grey)](mailto:podagiu@ethz.ch)
 [![Python: version](https://img.shields.io/badge/python-3.10-blue?style=flat-square&logo=python)](https://www.python.org/downloads/)
 [![Code style: black](https://img.shields.io/badge/code%20style-black-black?style=flat-square&logo=black)](https://github.com/psf/black)
 
@@ -29,7 +28,7 @@ pip install -r requirements.txt
 
 ## Data
 
-This repository runs on data produced by [this code](https://github.com/bb511/adl1t_datamaker).
+This repository runs on data produced by [this code](https://github.com/cdfpzmvpvg/info_ad_data).
 The mentioned repository requires access to L1TNtuple data.
 
 ## Usage

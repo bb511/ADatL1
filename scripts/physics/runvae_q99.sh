@@ -12,7 +12,7 @@
 # ------------------------------------------------------------------------
 # taskset -c 12-14 \
 # python3 src/train.py \
-#     paths.raw_data_dir=/data/deodagiu/adl1t_data/parquet_files \
+#     paths.raw_data_dir=/path/to/adl1t_data \
 #     experiment=physics/vae \
 #     experiment_name=physics_vae_models_q99 \
 #     run_name=cvar25_t275 \
@@ -35,7 +35,7 @@
 # ------------------------------------------------------------------------
 # taskset -c 6-8 \
 # python3 src/train.py \
-#     paths.raw_data_dir=/data/deodagiu/adl1t_data/parquet_files \
+#     paths.raw_data_dir=/path/to/adl1t_data \
 #     experiment=physics/vae_agnostic \
 #     experiment_name=physics_vae_models_q99 \
 #     run_name=cap_t577 \
@@ -64,7 +64,7 @@
 # ------------------------------------------------------------------------
 # taskset -c 18-20 \
 # python3 src/train.py \
-#     paths.raw_data_dir=/data/deodagiu/adl1t_data/parquet_files \
+#     paths.raw_data_dir=/path/to/adl1t_data \
 #     experiment=physics/vae_agnostic \
 #     experiment_name=physics_vae_models_q99 \
 #     run_name=stability_t567 \
@@ -93,7 +93,7 @@
 # ------------------------------------------------------------------------
 # taskset -c 21-23 \
 # python3 src/train.py \
-#     paths.raw_data_dir=/data/deodagiu/adl1t_data/parquet_files \
+#     paths.raw_data_dir=/path/to/adl1t_data \
 #     experiment=physics/vae_agnostic \
 #     experiment_name=physics_vae_models_q99 \
 #     run_name=wasserstein_t504 \
@@ -131,7 +131,7 @@
 #     hydra/launcher=submitit_local \
 #     hydra.launcher.cpus_per_task=1 \
 #     hydra.launcher.gpus_per_node=4 \
-#     paths.raw_data_dir=/data/deodagiu/adl1t_data/parquet_files \
+#     paths.raw_data_dir=/path/to/adl1t_data \
 #     experiment=physics/vae \
 #     experiment_name=vae_cvar25_vs_kl_search \
 #     algorithm.target_rate=0.01 \
@@ -162,7 +162,7 @@
 #     hydra.launcher.cpus_per_task=1 \
 #     hydra.launcher.timeout_min=200 \
 #     hydra.launcher.gpus_per_node=4 \
-#     paths.raw_data_dir=/data/deodagiu/adl1t_data/parquet_files \
+#     paths.raw_data_dir=/path/to/adl1t_data \
 #     experiment=physics/vae_agnostic \
 #     experiment_name=vae_agnostic_cap_vs_kl_search \
 #     algorithm.target_rate=0.01 \
@@ -196,7 +196,7 @@
 #     hydra/launcher=submitit_local \
 #     hydra.launcher.cpus_per_task=1 \
 #     hydra.launcher.gpus_per_node=4 \
-#     paths.raw_data_dir=/data/deodagiu/adl1t_data/parquet_files \
+#     paths.raw_data_dir=/path/to/adl1t_data \
 #     experiment=physics/vae_agnostic \
 #     experiment_name=vae_agnostic_drift_vs_kl_search \
 #     algorithm.target_rate=0.01 \
@@ -233,7 +233,7 @@
 #     hydra/launcher=submitit_local \
 #     hydra.launcher.cpus_per_task=1 \
 #     hydra.launcher.gpus_per_node=4 \
-#     paths.raw_data_dir=/data/deodagiu/adl1t_data/parquet_files \
+#     paths.raw_data_dir=/path/to/adl1t_data \
 #     experiment=physics/vae_agnostic \
 #     experiment_name=vae_agnostic_wasserstein_vs_kl_search \
 #     algorithm.target_rate=0.01 \

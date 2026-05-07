@@ -9,27 +9,27 @@
 # ------------------------------------------------------------------------
 # Semi-supervised cvar25 training
 # ------------------------------------------------------------------------
-# taskset -c 0-2 \
-# python3 src/train.py \
-#     paths.raw_data_dir=/data/deodagiu/adl1t_data/parquet_files \
-#     experiment=physics/ae \
-#     run_name=cvar25_t169 \
-#     algorithm.optimizer.lr=0.0019859329798336714 \
-#     algorithm.delta=10.0 \
-#     trainer.gradient_clip_val=5.0 \
-#     algorithm.optimizer.betas='[0.9,0.999]' \
-#     algorithm.optimizer.weight_decay=1e-06 \
-#     algorithm.encoder.nodes='[64,32,8]' \
-#     algorithm.input_noise_std=0.0 \
-#     trainer=gpu \
-#     trainer.devices=[0]
+taskset -c 0-2 \
+python3 src/train.py \
+    paths.raw_data_dir=/path/to/adl1t_data/parquet_files \
+    experiment=physics/ae \
+    run_name=cvar25_t169 \
+    algorithm.optimizer.lr=0.0019859329798336714 \
+    algorithm.delta=10.0 \
+    trainer.gradient_clip_val=5.0 \
+    algorithm.optimizer.betas='[0.9,0.999]' \
+    algorithm.optimizer.weight_decay=1e-06 \
+    algorithm.encoder.nodes='[64,32,8]' \
+    algorithm.input_noise_std=0.0 \
+    trainer=gpu \
+    trainer.devices=[0]
 
 # ------------------------------------------------------------------------
 # Semi-supervised cvar10 training
 # ------------------------------------------------------------------------
 # taskset -c 0-2 \
 # python3 src/train.py \
-#     paths.raw_data_dir=/data/deodagiu/adl1t_data/parquet_files \
+#     paths.raw_data_dir=/path/to/adl1t_data/parquet_files \
 #     experiment=physics/ae \
 #     run_name=cvar10_t339 \
 #     evaluation.callbacks.anomaly_efficiency.cvar_summary=0.10 \
@@ -51,7 +51,7 @@
 # ------------------------------------------------------------------------
 # taskset -c 3-5 \
 # python3 src/train.py \
-#     paths.raw_data_dir=/data/deodagiu/adl1t_data/parquet_files \
+#     paths.raw_data_dir=/path/to/adl1t_data/parquet_files \
 #     experiment=physics/ae_agnostic \
 #     run_name=cap_t175 \
 #     callbacks.wasserstein_dist=null \
@@ -75,7 +75,7 @@
 # ------------------------------------------------------------------------
 # taskset -c 6-8 \
 # python3 src/train.py \
-#     paths.raw_data_dir=/data/deodagiu/adl1t_data/parquet_files \
+#     paths.raw_data_dir=/path/to/adl1t_data/parquet_files \
 #     experiment=physics/ae_agnostic \
 #     run_name=stability_t564 \
 #     callbacks.wasserstein_dist=null \
@@ -99,7 +99,7 @@
 # ------------------------------------------------------------------------
 # taskset -c 9-11 \
 # python3 src/train.py \
-#     paths.raw_data_dir=/data/deodagiu/adl1t_data/parquet_files \
+#     paths.raw_data_dir=/path/to/adl1t_data/parquet_files \
 #     experiment=physics/ae_agnostic \
 #     run_name=wasserstein_t584 \
 #     callbacks.thres_drift=null \
@@ -131,7 +131,7 @@
 #     hydra/launcher=submitit_local \
 #     hydra.launcher.cpus_per_task=1 \
 #     hydra.launcher.gpus_per_node=4 \
-#     paths.raw_data_dir=/data/deodagiu/adl1t_data/parquet_files \
+#     paths.raw_data_dir=/path/to/adl1t_data/parquet_files \
 #     experiment=physics/ae \
 #     experiment_name=ae_cvar25_vs_mse_search \
 #     callbacks.max_rate_ckpt=null \
@@ -159,7 +159,7 @@
 #     hydra/launcher=submitit_local \
 #     hydra.launcher.cpus_per_task=1 \
 #     hydra.launcher.gpus_per_node=4 \
-#     paths.raw_data_dir=/data/deodagiu/adl1t_data/parquet_files \
+#     paths.raw_data_dir=/path/to/adl1t_data/parquet_files \
 #     experiment=physics/ae \
 #     experiment_name=ae_cvar10_vs_mse_search \
 #     callbacks.max_rate_ckpt=null \
@@ -190,7 +190,7 @@
 #     hydra.launcher.timeout_min=200 \
 #     hydra.launcher.cpus_per_task=1 \
 #     hydra.launcher.gpus_per_node=4 \
-#     paths.raw_data_dir=/data/deodagiu/adl1t_data/parquet_files \
+#     paths.raw_data_dir=/path/to/adl1t_data/parquet_files \
 #     experiment=physics/ae_agnostic \
 #     experiment_name=ae_agnostic_cap_vs_mse_search \
 #     callbacks.anomaly_eff=null \
@@ -222,7 +222,7 @@
 #     hydra/launcher=submitit_local \
 #     hydra.launcher.cpus_per_task=1 \
 #     hydra.launcher.gpus_per_node=4 \
-#     paths.raw_data_dir=/data/deodagiu/adl1t_data/parquet_files \
+#     paths.raw_data_dir=/path/to/adl1t_data/parquet_files \
 #     experiment=physics/ae_agnostic \
 #     experiment_name=ae_agnostic_drift_vs_mse_search \
 #     callbacks.anomaly_eff=null \
@@ -258,7 +258,7 @@
 #     hydra/launcher=submitit_local \
 #     hydra.launcher.cpus_per_task=1 \
 #     hydra.launcher.gpus_per_node=4 \
-#     paths.raw_data_dir=/data/deodagiu/adl1t_data/parquet_files \
+#     paths.raw_data_dir=/path/to/adl1t_data/parquet_files \
 #     experiment=physics/ae_agnostic \
 #     experiment_name=ae_agnostic_wasserstein_vs_mse_search \
 #     callbacks.anomaly_eff=null \

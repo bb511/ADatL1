@@ -65,7 +65,6 @@ class L1DataAwkward2Torch:
             return data, mask, l1bit
 
         l1bit = ak.from_parquet(l1bit_path)
-        # l1bit = ak.to_numpy(l1bit["L1bit"])
         l1bit = ak.to_numpy(ak.flatten(l1bit["L1bit"]))
         l1bit = torch.from_numpy(l1bit)
         self._cache_l1bit(l1bit)

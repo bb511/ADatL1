@@ -1,16 +1,16 @@
 [project]
 name = "adl1t"
 version = "1.0"
-description = "Anomaly detection at the level 1 CMS trigger."
+description = "Code corresponding to the Informative Model Validation for Anomaly Detection paper."
 authors = [
-    {name = "Anonymous Author",email = "anonym@anonym.gmail.com"},
+    {name = "Patrick Odagiu",email = "podagiu@ethz.ch"},
 ]
 license = {text = "MIT"}
 readme = "README.md"
 
 requires-python = ">=3.10"
 dependencies = [
-    "adl1t-datamaker @ git+https://github.com/cdfpzmvpvg/info_ad_data.git@main",
+    "adl1t-datamaker @ git+https://github.com/bb511/adl1t_datamaker.git@main",
     "torch (==2.*)",
     "torchvision (==0.*)",
     "pytorch-lightning (==2.*)",

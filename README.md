@@ -1,3 +1,4 @@
+[![Email Badge](https://img.shields.io/badge/blah-podagiu%40ethz.ch-blue?style=flat-square&logo=minutemailer&logoColor=white&label=%20&labelColor=grey)](mailto:podagiu@ethz.ch)
 [![Python: version](https://img.shields.io/badge/python-3.10-blue?style=flat-square&logo=python)](https://www.python.org/downloads/)
 [![Code style: black](https://img.shields.io/badge/code%20style-black-black?style=flat-square&logo=black)](https://github.com/psf/black)
 
@@ -28,7 +29,7 @@ pip install -r requirements.txt
 
 ## Data
 
-The LHC L1 AD data runs on data produced by [this code](https://github.com/cdfpzmvpvg/info_ad_data).
+The LHC L1 AD data runs on data produced by [this code](https://github.com/bb511/adl1t_datamaker).
 For the LHC L1 AD dataset, you must download the data [here](https://cernbox.cern.ch/s/dRnVAa3ZDHWl2bs), unzip it, and then point to it by configuring `paths.raw_data_dir` in the running scripts.
 
 ## Usage

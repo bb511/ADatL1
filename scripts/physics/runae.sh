@@ -9,7 +9,7 @@
 # ------------------------------------------------------------------------
 # Semi-supervised cvar25 training
 # ------------------------------------------------------------------------
-taskset -c 0-2 \
+# taskset -c 0-2 \
 python3 src/train.py \
     paths.raw_data_dir=/path/to/adl1t_data/parquet_files \
     experiment=physics/ae \
@@ -21,6 +21,7 @@ python3 src/train.py \
     algorithm.optimizer.weight_decay=1e-06 \
     algorithm.encoder.nodes='[64,32,8]' \
     algorithm.input_noise_std=0.0 \
+    trainer.max_epochs=2 \
     trainer=gpu \
     trainer.devices=[0]
 

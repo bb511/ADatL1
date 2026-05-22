@@ -5,6 +5,9 @@ import gc
 
 import os
 
+from dotenv import load_dotenv
+
+load_dotenv()
 os.environ["KERAS_BACKEND"] = "torch"
 
 import hydra
@@ -100,6 +103,11 @@ def train(cfg: DictConfig) -> Tuple[Dict[str, Any], Dict[str, Any]]:
     # Get validation report, and also set hp optimisation values.
     log.info(Fore.CYAN + "Instantiating evaluator...")
     evaluator = _get_evaluator(cfg, datamodule, logger)
+
+    if evaluator is None:
+        object_dict.update({"evaluator": None})
+        return {**train_metrics}, object_dict
+
     run_ckpts = Path(cfg.paths.checkpoints_dir) / cfg.experiment_name / cfg.run_name
 
     log.info(Back.MAGENTA + 8 * "-" + "STARTING RUN VALIDATION" + 8 * "-")

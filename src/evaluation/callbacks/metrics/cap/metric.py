@@ -163,7 +163,7 @@ class ApproximationCapacity(Metric):
 
     def update(self, logits1: Tensor, logits2: Tensor, **kwargs):
         """Optimize beta parameter over multiple epochs."""
-        self.reset()
+        self.cap.zero_()
 
         # Normalize the logits
         logits1, logits2 = self.normalizer_fn(logits1, logits2)

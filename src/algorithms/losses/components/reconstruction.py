@@ -5,7 +5,7 @@ import torch.nn.functional as F
 from src.algorithms.losses.components import ADLoss
 
 
-class MSEReconstructionLoss(ADLoss):
+class ReconstructionLoss(ADLoss):
     """Reconstruction loss.
 
     For padded data, pass mask to only include real features into the reconstruction.
@@ -14,14 +14,23 @@ class MSEReconstructionLoss(ADLoss):
     :param reduction: String of the reduction method to apply to the batch of samples
         given to this loss.
     """
-    name: str = "mse_reco"
+    name: str = "reco"
 
     def __init__(self, scale: float = 1.0, reduction: str = "none"):
         super().__init__(scale=scale, reduction=reduction)
 
     def forward(
-        self, target: torch.Tensor, reco: torch.Tensor, mask: torch.Tensor | None = None
+        self,
+        target: torch.Tensor,
+        reco: torch.Tensor | None = None,
+        mask: torch.Tensor | None = None,
+        reconstruction: torch.Tensor | None = None,
     ) -> torch.Tensor:
+        if reco is None:
+            reco = reconstruction
+        if reco is None:
+            raise ValueError("Either 'reco' or 'reconstruction' must be provided.")
+
         mse = F.mse_loss(target, reco, reduction="none")
         mse_flat = mse.view(mse.shape[0], -1)
 
@@ -33,6 +42,12 @@ class MSEReconstructionLoss(ADLoss):
             mse_per_observation = (mse_flat * mask_flat).sum(dim=1) / nreal_feats
 
         return self.scale * self.reduce(mse_per_observation)
+
+
+class MSEReconstructionLoss(ReconstructionLoss):
+    """Compatibility alias for MSE reconstruction loss."""
+
+    name: str = "mse_reco"
 
 
 class HuberReconstructionLoss(ADLoss):
@@ -51,8 +66,17 @@ class HuberReconstructionLoss(ADLoss):
         self.delta = delta
 
     def forward(
-        self, target: torch.Tensor, reco: torch.Tensor, mask: torch.Tensor | None = None
+        self,
+        target: torch.Tensor,
+        reco: torch.Tensor | None = None,
+        mask: torch.Tensor | None = None,
+        reconstruction: torch.Tensor | None = None,
     ) -> torch.Tensor:
+        if reco is None:
+            reco = reconstruction
+        if reco is None:
+            raise ValueError("Either 'reco' or 'reconstruction' must be provided.")
+
         huber = F.smooth_l1_loss(target, reco, reduction="none", beta=self.delta)
         huber_flat = huber.view(huber.shape[0], -1)
 
@@ -66,7 +90,7 @@ class HuberReconstructionLoss(ADLoss):
         return self.scale * self.reduce(huber_per_observation)
 
 
-class CylPtPzReconstructionLoss(MSEReconstructionLoss):
+class CylPtPzReconstructionLoss(ReconstructionLoss):
     """Convert the pT, eta, phi input into pT, pz and compute loss there.
 
     Although the initial space is not in cylindrical coordinates, the reco is done in
@@ -102,9 +126,14 @@ class CylPtPzReconstructionLoss(MSEReconstructionLoss):
     def forward(
         self,
         target: torch.Tensor,
-        reco: torch.Tensor,
+        reco: torch.Tensor | None = None,
         mask: torch.Tensor | None = None,
+        reconstruction: torch.Tensor | None = None,
     ) -> torch.Tensor:
+        if reco is None:
+            reco = reconstruction
+        if reco is None:
+            raise ValueError("Either 'reco' or 'reconstruction' must be provided.")
 
         if self.pt_idxs is None:
             raise RuntimeError("object_feature_map not set.")

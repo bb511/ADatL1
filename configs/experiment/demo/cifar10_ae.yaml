@@ -1,0 +1,53 @@
+# @package _global_
+
+defaults:
+  - override /data: cifar10
+  - override /algorithm: image_ae
+  - override /callbacks: null
+  - override /trainer: cpu
+  - override /evaluation: null
+  - override /evaluation/callbacks: null
+  - override /logger: none
+
+seed: 123
+tags: ["demo", "cifar10", "ae"]
+
+experiment_name: demo
+run_name: cifar10_ae
+
+data:
+  batch_size: 32
+  max_val_batches: 1
+  num_workers: 0
+
+trainer:
+  min_epochs: 1
+  max_epochs: 1
+  limit_train_batches: 2
+  limit_val_batches: 1
+  limit_test_batches: 0
+  enable_checkpointing: false
+  enable_model_summary: false
+  enable_progress_bar: false
+
+test: false
+
+extras:
+  enforce_tags: false
+  print_config: false
+
+algorithm:
+  target_rate: 0.01
+  base_rate: null
+  input_noise_std: 0.0
+  delta: 1.0
+  encoder:
+    nodes: [16, 32, 16]
+    strides: [2, 2]
+  optimizer:
+    _partial_: true
+    _target_: torch.optim.AdamW
+    lr: 1.0e-3
+    weight_decay: 1.0e-4
+    betas: [0.9, 0.999]
+    eps: 1.0e-8

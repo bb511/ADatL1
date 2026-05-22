@@ -309,8 +309,11 @@ class Evaluator:
         sec_cb_params = dict(sec_cfg["callback"].get("params", {}))
         sec_optim_dir = sec_cfg["direction"]
 
-        # Fill ckpt_name from main callback if missing/None.
-        if sec_cb_params.get("ckpt_name") is None:
+        # Fill the checkpoint identifier expected by the secondary callback.
+        if "ckpt_ds" in sec_cb_params:
+            if sec_cb_params["ckpt_ds"] is None:
+                sec_cb_params["ckpt_ds"] = ckpt_name
+        elif sec_cb_params.get("ckpt_name") is None:
             sec_cb_params["ckpt_name"] = ckpt_name
 
         _, sec_metric = self._get_metric(sec_cb_name, sec_cb_params)

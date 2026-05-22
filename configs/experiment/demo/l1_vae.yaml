@@ -1,0 +1,33 @@
+# @package _global_
+
+defaults:
+  - override /data: synthetic_l1
+  - override /algorithm: axov5_vae
+  - override /callbacks: null
+  - override /trainer: cpu
+  - override /evaluation: null
+  - override /evaluation/callbacks: null
+  - override /logger: none
+
+seed: 123
+tags: ["demo", "l1", "vae"]
+
+experiment_name: demo
+run_name: l1_vae
+
+trainer:
+  min_epochs: 1
+  max_epochs: 1
+  limit_train_batches: 2
+  limit_val_batches: 1
+  limit_test_batches: 0
+  enable_checkpointing: false
+  enable_model_summary: false
+  enable_progress_bar: false
+
+test: false
+
+extras:
+  enforce_tags: false
+  print_config: false
+

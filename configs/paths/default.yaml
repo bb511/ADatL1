@@ -1,13 +1,13 @@
 # path to root directory
 # this requires PROJECT_ROOT environment variable to exist
 # you can replace it with "." if you want the root to be the current working directory
-root_dir: ${oc.env:PROJECT_ROOT}
+root_dir: ${oc.env:PROJECT_ROOT,.}
 
 # path to data directory
-base_data_dir: ${paths.root_dir}/data
+base_data_dir: ${oc.env:DATA_DIR,${paths.root_dir}/data}
 
 # path to logging directory
-log_dir: ${paths.root_dir}/logs/
+log_dir: ${oc.env:LOG_DIR,${paths.root_dir}/logs}
 
 # path to output directory, created dynamically by hydra
 # path generation pattern is specified in `configs/hydra/default.yaml`
@@ -15,10 +15,10 @@ log_dir: ${paths.root_dir}/logs/
 output_dir: ${hydra:runtime.output_dir}
 
 # path to checkpoints directory
-checkpoints_dir: ${paths.root_dir}/checkpoints/
+checkpoints_dir: ${oc.env:CHECKPOINT_DIR,${paths.root_dir}/checkpoints}
 
 # path to working directory
 work_dir: ${hydra:runtime.cwd}
 
 # path to the raw data
-raw_data_dir: ???
+raw_data_dir: ${oc.env:RAW_DATA_DIR,${paths.base_data_dir}/raw}

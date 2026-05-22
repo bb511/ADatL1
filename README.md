@@ -6,33 +6,54 @@
 
 ## Setup
 
-This repository uses [poetry](https://python-poetry.org/) for package management.
-We recommend setting this up using poetry.
-However, if you do not want to use poetry, skip to [here](#setup-without-poetry).
+This repository uses [uv](https://docs.astral.sh/uv/) for package management.
 
-Install the dependencies using poetry by running the following command in the parent directory of the repository:
-```
-poetry install --no-root
-```
+Create the local environment and install the development dependencies:
 
-To install the dependencies required by the quantisation packages:
 ```
-poetry install --with quant --no-root
+uv sync --group dev
 ```
 
-## Setup without Poetry
+To include the optional quantisation stack:
 
-To install the dependencies using `pip`, use
 ```
-pip install -r requirements.txt
+uv sync --group dev --extra quant
+```
+
+The repository reads local paths from `.env`. A default local file has been
+generated for this checkout; regenerate it with:
+
+```
+bash scripts/setup.sh
 ```
 
 ## Data
 
 The LHC L1 AD data runs on data produced by [this code](https://github.com/bb511/adl1t_datamaker).
-For the LHC L1 AD dataset, you must download the data [here](https://cernbox.cern.ch/s/dRnVAa3ZDHWl2bs), unzip it, and then point to it by configuring `paths.raw_data_dir` in the running scripts.
+For the LHC L1 AD dataset, you must download the data [here](https://cernbox.cern.ch/s/dRnVAa3ZDHWl2bs), unzip it, and then point `RAW_DATA_DIR` in `.env` or `paths.raw_data_dir` in Hydra at that directory.
+
+CIFAR-10 is the lightweight demo dataset and is downloaded automatically under
+`data/cifar10` by the CIFAR datamodule.
 
 ## Usage
 
-See the `scripts` directory for scripts used to run the experiments described in the paper.
-The experiments are already configured with the hyperparameter values described for the mdoels shown in the paper.
+Run the short smoke training:
+
+```
+uv run python src/train.py experiment=demo/cifar10_ae
+uv run python src/train.py experiment=demo/l1_vae
+uv run python src/train.py experiment=demo/l1_vicreg
+uv run python src/train.py experiment=demo/l1_wnae
+uv run python src/train.py experiment=demo/l1_rvae
+```
+
+Run a configured experiment:
+
+```
+uv run python src/train.py experiment=cifar10/ae
+uv run python src/train.py experiment=physics/ae paths.raw_data_dir=/path/to/adl1t_data/parquet_files
+```
+
+See the `scripts` directory for the experiment commands used for the paper. The
+experiments are configured with the hyperparameter values described for the models
+shown in the paper.

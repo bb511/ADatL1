@@ -2,7 +2,7 @@
 import torch
 
 from src.algorithms.losses.components import ADLoss
-from src.algorithms.losses.components.reconstruction import MSEReconstructionLoss
+from src.algorithms.losses.components.reconstruction import ReconstructionLoss
 from src.algorithms.losses.components.reconstruction import CylPtPzReconstructionLoss
 from src.algorithms.losses.components.kl import KLDivergenceLoss
 
@@ -25,11 +25,13 @@ class ClassicVAELoss(ADLoss):
         scale: float = 1.0,
         reco_scale: float = 1.0,
         kl_scale: float = 1.0,
+        reduct: str | None = None,
         reduction: str = "none",
     ):
+        reduction = reduct if reduct is not None else reduction
         super().__init__(scale=scale, reduction=reduction)
         self.kl_scale_final = float(kl_scale)
-        self.reco_loss = MSEReconstructionLoss(scale=reco_scale, reduction=reduction)
+        self.reco_loss = ReconstructionLoss(scale=reco_scale, reduction=reduction)
         self.kl_loss = KLDivergenceLoss(scale=self.kl_scale_final, reduction=reduction)
 
     def forward(
@@ -61,7 +63,17 @@ class AxoV4Loss(ClassicVAELoss):
         scale: float = 1.0,
         reco_scale: float = 1.0,
         kl_scale: float = 1.0,
+        reduct: str | None = None,
         reduction: str = "none",
     ):
-        super().__init__(scale=scale, kl_scale=kl_scale, reduction=reduction)
-        self.reco_loss = CylPtPzReconstructionLoss(scale=reco_scale, reduction=reduciton)
+        super().__init__(
+            scale=scale,
+            reco_scale=reco_scale,
+            kl_scale=kl_scale,
+            reduct=reduct,
+            reduction=reduction,
+        )
+        self.reco_loss = CylPtPzReconstructionLoss(
+            scale=reco_scale,
+            reduction=self.reduction,
+        )

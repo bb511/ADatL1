@@ -1,0 +1,7 @@
+# @package evaluation.callbacks.main
+
+_target_: src.evaluation.callbacks.loss.LossCallback
+name: loss
+loss_name: loss/full
+skip_ds: []
+log_raw_mlflow: true

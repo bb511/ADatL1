@@ -1,43 +1,56 @@
-# Quantised decoder models implemented with HGQv2.
-import keras
-from keras import layers
-from hgq.layers import QDense
-from hgq.config import QuantizerConfigScope, LayerConfigScope
+"""HGQ/Keras decoder components for quantized VAE-style models."""
 
-from src.algorithms.components.mlp import hgq_mlp
+try:
+    import keras
+    from hgq.layers import QDense
+    from hgq.config import QuantizerConfigScope, LayerConfigScope
+except ImportError:  # pragma: no cover - exercised when quant extra is absent
+    class _MissingKerasModel:
+        pass
+
+    class _MissingKeras:
+        Model = _MissingKerasModel
+        Sequential = None
+
+    keras = _MissingKeras()
+    QDense = None
+    QuantizerConfigScope = None
+    LayerConfigScope = None
+
+from src.algorithms.components.qmlp import HGQMLP, require_hgq
 
 
-def hgq_decoder(
-    in_dim: int,
-    nodes: list[int],
-    out_dim: int,
-    input_layer_config: dict = None,
-    output_layer_config: dict = None,
-    ebops: bool = False,
-    name: str = "hgq_decoder",
-):
-    """Simple dncoder in HGQv2.
+class HGQDecoder(keras.Model):
+    """Decoder implemented with HGQv2 ``QDense`` layers."""
 
-    :param in_dim: Int specifying input dimension.
-    :param nodes: List of ints, each int specifying the width of a layer.
-    :param out_dim: Int specifying output dimension.
-    :param init_weight: Callable method to initialize the weights of the encoder nodes.
-    :param init_bias: Callable method to initialize the biases of the encoder nodes.
-    """
-    z_in = keras.Input(shape=(in_dim,), name="z")
+    def __init__(
+        self,
+        nodes: list[int],
+        input_layer_config: dict | None = None,
+        output_layer_config: dict | None = None,
+        ebops: bool = False,
+        **kwargs,
+    ):
+        require_hgq()
+        super().__init__(**kwargs)
+        self.nodes = nodes
+        self.input_layer_config = input_layer_config
+        self.output_layer_config = output_layer_config or {}
+        self.ebops = ebops
 
-    mlp_model = hgq_mlp(
-        in_dim=in_dim,
-        nodes=nodes[:-1],
-        out_dim=nodes[-1],
-        input_layer_config=input_layer_config,
-        final_activation=True,
-        name="dec_mlp",
-    )
-    h = mlp_model(z_in)
+        mlp = HGQMLP(
+            nodes=nodes[:-1],
+            input_layer_config=self.input_layer_config,
+            final_activation=True,
+            ebops=self.ebops,
+            name="dec_mlp",
+        )
 
-    with LayerConfigScope(enable_ebops=False):
-        with QuantizerConfigScope(**output_layer_config):
-            x = QDense(out_dim, name="dec_qdense_out")(h)
+        with LayerConfigScope(enable_ebops=self.ebops):
+            with QuantizerConfigScope(**self.output_layer_config):
+                output_layer = QDense(nodes[-1], name="qdense_out")
 
-    return keras.Model(inputs=z_in, outputs=x, name=name)
+        self.net = keras.Sequential([mlp, output_layer], name="net")
+
+    def call(self, z):
+        return self.net(z)

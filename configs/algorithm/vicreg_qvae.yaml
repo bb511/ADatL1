@@ -1,0 +1,62 @@
+# Quantised VAE trained on top of vicreg output.
+defaults:
+  - _self_
+
+_target_: src.algorithms.vae.VAE
+features:
+  _target_: src.algorithms.components.features.FeaturesFromCkpt
+  ckpt_path: ???
+  attr: model
+  litmodule_cls:
+    _target_: hydra.utils.get_class
+    path: src.algorithms.vicreg.VICReg
+
+mask: false
+kl_warmup_frac: 0.2
+
+encoder:
+  _target_: src.algorithms.components.qencoder.HGQVariationalEncoder
+  nodes: [10, 9, 6, 4]
+  output_layer_config:
+    place: 'all'
+    q_type: "kif"
+    i0: 5
+    f0: 3
+    trainable: false
+    ic:
+      _target_: hgq.constraints.Constant
+      value: 5
+    fc:
+      _target_: hgq.constraints.Constant
+      value: 3
+  ebops: true
+
+decoder:
+  _target_: src.algorithms.components.qdecoder.HGQDecoder
+  nodes: [4, 6, 9, 10]
+  output_layer_config:
+    place: 'all'
+    q_type: "kif"
+    i0: 5
+    f0: 3
+    trainable: false
+    ic:
+      _target_: hgq.constraints.Constant
+      value: 5
+    fc:
+      _target_: hgq.constraints.Constant
+      value: 3
+  ebops: true
+
+loss:
+  _target_: src.algorithms.losses.vae.ClassicVAELoss
+  scale: 1
+  kl_scale: 0.001
+
+optimizer:
+  _partial_: true
+  _target_: torch.optim.AdamW
+  lr: 0.001
+  weight_decay: 0.0
+  betas: [0.9, 0.999]
+  eps: 1e-8

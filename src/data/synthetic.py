@@ -1,4 +1,5 @@
 from dataclasses import dataclass
+from typing import Literal
 
 import torch
 from pytorch_lightning import LightningDataModule
@@ -107,7 +108,17 @@ class _SyntheticLoader:
 
 
 class SyntheticL1ADDataModule(LightningDataModule):
-    """Tiny in-memory L1-like datamodule for smoke tests and demos."""
+    """In-memory L1-like datamodule for smoke tests and controlled studies.
+
+    The default ``shifted`` generator preserves the historical smoke-test behavior:
+    each dataset is a Gaussian cloud with a label-dependent global mean shift.
+
+    The ``gaussian_subspace`` generator is intended for paper-grade synthetic
+    anomaly-detection studies. Normal and reference samples are Gaussian typical
+    domains, while anomalies are a controlled mean shift in one identifiable
+    feature. This yields closed-form score distributions for linear/projection
+    anomaly scores while keeping the same dataloader contract as the L1 data.
+    """
 
     def __init__(
         self,
@@ -119,9 +130,16 @@ class SyntheticL1ADDataModule(LightningDataModule):
         max_val_batches: int | None = None,
         seed: int = 123,
         paper_aliases: bool = False,
+        generator: Literal["shifted", "gaussian_subspace"] = "shifted",
+        noise_std: float = 1.0,
+        reference_shift: float = 0.0,
+        reference_shift_dim: int = 1,
+        anomaly_shift: float = 4.0,
+        anomaly_dim: int = 0,
     ):
         super().__init__()
         self.save_hyperparameters(logger=False)
+        self._validate_generator_config()
         self.loader = _SyntheticLoader(n_features)
         self.normalizer = _IdentityNormalizer(n_features)
         self.l1_scales = {
@@ -134,29 +152,45 @@ class SyntheticL1ADDataModule(LightningDataModule):
 
     def setup(self, stage: str | None = None) -> None:
         n_features = self.hparams.n_features
-        gen = torch.Generator().manual_seed(self.hparams.seed)
 
         if stage in (None, "fit"):
-            self.train_split = self._make_split(self.hparams.n_train, n_features, 0, gen)
-            self.val_normal = self._make_split(self.hparams.n_val, n_features, 0, gen)
-            self.val_reference = self._make_split(
-                self.hparams.n_val, n_features, -1, gen
+            self.train_split = self._make_split(
+                self.hparams.n_train, n_features, 0, self._split_generator(0)
             )
-            self.val_signal = self._make_split(self.hparams.n_val, n_features, 1, gen)
+            self.val_normal = self._make_split(
+                self.hparams.n_val, n_features, 0, self._split_generator(1)
+            )
+            self.val_reference = self._make_split(
+                self.hparams.n_val, n_features, -1, self._split_generator(2)
+            )
+            self.val_signal = self._make_split(
+                self.hparams.n_val, n_features, 1, self._split_generator(3)
+            )
 
         if stage in (None, "validate"):
-            self.val_normal = self._make_split(self.hparams.n_val, n_features, 0, gen)
-            self.val_reference = self._make_split(
-                self.hparams.n_val, n_features, -1, gen
+            self.val_normal = self._make_split(
+                self.hparams.n_val, n_features, 0, self._split_generator(1)
             )
-            self.val_signal = self._make_split(self.hparams.n_val, n_features, 1, gen)
+            self.val_reference = self._make_split(
+                self.hparams.n_val, n_features, -1, self._split_generator(2)
+            )
+            self.val_signal = self._make_split(
+                self.hparams.n_val, n_features, 1, self._split_generator(3)
+            )
 
         if stage in (None, "test"):
-            self.test_normal = self._make_split(self.hparams.n_test, n_features, 0, gen)
-            self.test_reference = self._make_split(
-                self.hparams.n_test, n_features, -1, gen
+            self.test_normal = self._make_split(
+                self.hparams.n_test, n_features, 0, self._split_generator(4)
             )
-            self.test_signal = self._make_split(self.hparams.n_test, n_features, 1, gen)
+            self.test_reference = self._make_split(
+                self.hparams.n_test, n_features, -1, self._split_generator(5)
+            )
+            self.test_signal = self._make_split(
+                self.hparams.n_test, n_features, 1, self._split_generator(6)
+            )
+
+    def _split_generator(self, offset: int) -> torch.Generator:
+        return torch.Generator().manual_seed(int(self.hparams.seed) + int(offset))
 
     def train_dataloader(self):
         return self._loader(self.train_split, shuffler=self.shuffler)
@@ -192,6 +226,14 @@ class SyntheticL1ADDataModule(LightningDataModule):
     def _make_split(
         self, n_samples: int, n_features: int, label: int, gen: torch.Generator
     ) -> _Split:
+        if self.hparams.generator == "gaussian_subspace":
+            return self._make_gaussian_subspace_split(
+                n_samples=n_samples,
+                n_features=n_features,
+                label=label,
+                gen=gen,
+            )
+
         if label == 0:
             shift = 0.0
         elif label < 0:
@@ -203,6 +245,44 @@ class SyntheticL1ADDataModule(LightningDataModule):
         l1bit = torch.zeros(n_samples, dtype=torch.bool)
         y = torch.full((n_samples,), label, dtype=torch.long)
         return _Split(x=x.float(), mask=mask, l1bit=l1bit, y=y)
+
+    def _make_gaussian_subspace_split(
+        self, n_samples: int, n_features: int, label: int, gen: torch.Generator
+    ) -> _Split:
+        x = torch.randn(n_samples, n_features, generator=gen) * float(
+            self.hparams.noise_std
+        )
+
+        if label < 0:
+            shift = float(self.hparams.reference_shift)
+            if shift != 0.0:
+                x[:, int(self.hparams.reference_shift_dim)] += shift
+        elif label > 0:
+            x[:, int(self.hparams.anomaly_dim)] += float(self.hparams.anomaly_shift)
+
+        mask = torch.ones(n_samples, n_features, dtype=torch.bool)
+        l1bit = torch.zeros(n_samples, dtype=torch.bool)
+        y = torch.full((n_samples,), label, dtype=torch.long)
+        return _Split(x=x.float(), mask=mask, l1bit=l1bit, y=y)
+
+    def _validate_generator_config(self) -> None:
+        generator = self.hparams.generator
+        if generator not in {"shifted", "gaussian_subspace"}:
+            raise ValueError(
+                "SyntheticL1ADDataModule generator must be one of "
+                f"'shifted' or 'gaussian_subspace', got {generator!r}."
+            )
+
+        if float(self.hparams.noise_std) <= 0.0:
+            raise ValueError("noise_std must be positive.")
+
+        n_features = int(self.hparams.n_features)
+        for name in ("reference_shift_dim", "anomaly_dim"):
+            dim = int(getattr(self.hparams, name))
+            if dim < 0 or dim >= n_features:
+                raise ValueError(
+                    f"{name}={dim} is outside the feature range [0, {n_features})."
+                )
 
     def _loader(self, split: _Split, shuffler: torch.Generator | None = None):
         ds = L1ADDataset(

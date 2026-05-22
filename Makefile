@@ -36,10 +36,10 @@ train: ## Train the model
 	uv run python src/train.py
 
 train-demo: ## Run a short CIFAR-10 AE smoke training
-	uv run python src/train.py experiment=demo/cifar10_ae
+	uv run python tests/train.py experiment=demo/cifar10_ae
 
 train-l1-demos: ## Run short synthetic L1 smoke trainings
-	uv run python src/train.py experiment=demo/l1_vae
-	uv run python src/train.py experiment=demo/l1_vicreg
-	uv run python src/train.py experiment=demo/l1_wnae
-	uv run python src/train.py experiment=demo/l1_rvae
+	uv run python tests/train.py experiment=demo/l1_vae
+	uv run python tests/train.py experiment=demo/l1_vicreg
+	uv run python tests/train.py experiment=demo/l1_wnae
+	uv run python tests/train.py experiment=demo/l1_rvae

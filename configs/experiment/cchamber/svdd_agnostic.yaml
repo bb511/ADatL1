@@ -1,0 +1,16 @@
+# @package _global_
+
+defaults:
+  - /experiment/cchamber/base_agnostic
+  - override /algorithm: svdd
+
+tags: ["causal_chamber", "svdd", "agnostic"]
+
+algorithm:
+  target_rate: 0.01
+  base_rate: null
+  encoder:
+    in_dim: 11
+    nodes: [32, 16, 8]
+  nu: 0.1
+  soft_boundary: false

@@ -167,6 +167,7 @@ POT, optional HGQ/Keras quantization, and private `capmetric`.
 | `configs/experiment/physics` | Main L1 trigger experiments for AE/VAE/SVDD/RealNVP/DeepSets. | Signal-aware variants optimize efficiency; agnostic variants optimize CAP/drift/Wasserstein. |
 | `configs/experiment/cifar10` | Image benchmark experiments. | Checks CAP/model-selection behavior outside L1 data. |
 | `configs/experiment/robustad` | Shifted-domain image anomaly benchmark. | Useful for CAP under source-normal vs shifted-normal comparison. |
+| `scripts/generation.py` | Typed script generator for paper sweeps/retrains/evaluation. | Uses `ExperimentSpecification` to record Optuna-tuned params, fixed overrides, strategy overrides, sweeper overrides, disabled callbacks, seeds, and reporting factors in generated manifests. |
 
 ### Verified Demo Commands
 

@@ -21,8 +21,9 @@ Important `.env` variables:
 
 ## Common Commands
 
-- `uv run python src/train.py experiment=demo/cifar10_ae`
-- `KERAS_BACKEND=torch uv run python src/train.py experiment=demo/l1_vae algorithm=qvae`
+- `uv run python tests/train.py experiment=demo/cifar10_ae`
+- `uv run python tests/train.py experiment=demo/cchamber_ae`
+- `KERAS_BACKEND=torch uv run python tests/train.py experiment=demo/l1_vae algorithm=qvae`
 - `make train-demo`
 - `uv run pytest -k "not slow"`
 - `uv run pre-commit run -a`
@@ -32,9 +33,10 @@ Important `.env` variables:
 
 - `src/train.py`: main Hydra entry point and training/evaluation orchestration.
 - `configs/train.yaml`: base composition. Defaults to CIFAR-10 + `image_ae`.
-- `configs/data`: datamodule configs for L1 AD, CIFAR-10, and RobustAD.
+- `configs/data`: datamodule configs for L1 AD, CIFAR-10, RobustAD, and Causal Chamber.
 - `configs/algorithm`: model configs. Use `algorithm`, not the old `model` key.
-- `configs/experiment`: paper/demo experiment overrides.
+- `configs/experiment`: paper experiment overrides.
+- `tests/configs/experiment/demo`: smoke-test/demo experiment overrides.
 - `src/data`: Lightning datamodules and L1 preprocessing components.
 - `src/algorithms`: Lightning modules, model components, losses, optimizers, schedulers.
 - `src/evaluation`: post-training evaluator and evaluation callbacks.
@@ -46,6 +48,8 @@ Important `.env` variables:
   `checkpoints/`, and `.env` are ignored.
 - Use the CIFAR-10 demo for smoke tests; it downloads automatically under
   `data/cifar10`.
+- Causal Chamber demos download `lt_interventions_standard_v1` automatically under
+  `data/causal_chamber` and should be run through `tests/train.py`.
 - L1 experiments require external raw data. Point `RAW_DATA_DIR` or
   `paths.raw_data_dir` at the unpacked files before running physics configs.
 - For quick CLI training/debug runs, use `logger=none`, `trainer=cpu`, small

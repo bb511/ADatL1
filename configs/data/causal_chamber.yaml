@@ -1,0 +1,91 @@
+# @package data
+
+defaults:
+  - _self_
+
+_target_: src.data.CausalChamber_datamodule.CausalChamberDataModule
+
+data_dir: ${paths.base_data_dir}/causal_chamber
+dataset_name: lt_interventions_standard_v1
+url: https://causalchamber.s3.eu-central-1.amazonaws.com/downloadables/lt_interventions_standard_v1.zip
+md5sum: 476664d024f88e8b7640998bb5e9ee33
+
+# Default is intentionally readout-only to avoid leaking direct intervention knobs.
+# Alternatives: readouts, all_numeric_no_meta, custom.
+feature_set: readouts
+feature_columns: null
+
+batch_size: 512
+max_val_batches: -1
+num_workers: 0
+
+train_fraction: 0.6
+val_fraction: 0.2
+reference_fraction: 0.5
+signal_val_fraction: 0.6
+
+normalize: true
+robust_quantiles: [0.05, 0.95]
+clip_value: 10.0
+
+seed: ${seed}
+
+signal_experiments:
+  - uniform_blue_mid
+  - uniform_blue_strong
+  - uniform_diode_ir_1_mid
+  - uniform_diode_ir_1_strong
+  - uniform_diode_ir_2_mid
+  - uniform_diode_ir_2_strong
+  - uniform_diode_ir_3_mid
+  - uniform_diode_ir_3_strong
+  - uniform_diode_vis_1_mid
+  - uniform_diode_vis_2_mid
+  - uniform_diode_vis_3_mid
+  - uniform_green_mid
+  - uniform_green_strong
+  - uniform_l_11_mid
+  - uniform_l_12_mid
+  - uniform_l_21_mid
+  - uniform_l_22_mid
+  - uniform_l_31_mid
+  - uniform_l_32_mid
+  - uniform_osr_angle_1_mid
+  - uniform_osr_angle_1_strong
+  - uniform_osr_angle_1_weak
+  - uniform_osr_angle_2_mid
+  - uniform_osr_angle_2_strong
+  - uniform_osr_angle_2_weak
+  - uniform_osr_c_mid
+  - uniform_osr_c_strong
+  - uniform_osr_c_weak
+  - uniform_pol_1_mid
+  - uniform_pol_1_strong
+  - uniform_pol_2_mid
+  - uniform_pol_2_strong
+  - uniform_red_mid
+  - uniform_red_strong
+  - uniform_t_ir_1_mid
+  - uniform_t_ir_1_strong
+  - uniform_t_ir_1_weak
+  - uniform_t_ir_2_mid
+  - uniform_t_ir_2_strong
+  - uniform_t_ir_2_weak
+  - uniform_t_ir_3_mid
+  - uniform_t_ir_3_strong
+  - uniform_t_ir_3_weak
+  - uniform_t_vis_1_mid
+  - uniform_t_vis_1_strong
+  - uniform_t_vis_1_weak
+  - uniform_t_vis_2_mid
+  - uniform_t_vis_2_strong
+  - uniform_t_vis_2_weak
+  - uniform_t_vis_3_mid
+  - uniform_t_vis_3_strong
+  - uniform_t_vis_3_weak
+  - uniform_v_angle_1_mid
+  - uniform_v_angle_1_strong
+  - uniform_v_angle_2_mid
+  - uniform_v_angle_2_strong
+  - uniform_v_c_mid
+  - uniform_v_c_strong

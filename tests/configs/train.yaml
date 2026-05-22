@@ -1,0 +1,45 @@
+# @package _global_
+
+# Test/demo primary configuration. It keeps smoke-test experiment configs under
+# tests while reusing the production config groups from the repository.
+defaults:
+  - _self_
+  - data: cifar10
+  - algorithm: image_ae
+  - callbacks: default
+  - trainer: default
+  - evaluation: null
+  - evaluation/callbacks: null
+  - paths: default
+  - extras: default
+  - hydra: default
+  - logger: none
+  - experiment: null
+  - hparams_search: null
+  - optional local: default
+  - debug: null
+
+hydra:
+  searchpath:
+    - pkg://configs
+
+task_name: "train"
+tags: ["dev"]
+
+experiment_name: dev
+run_name: default
+
+train: True
+test: True
+ckpt_path: null
+seed: 123
+
+algorithm:
+  optimizer:
+    _partial_: true
+    _target_: torch.optim.AdamW
+    lr: 1.0e-3
+    weight_decay: 1.0e-4
+    betas: [0.9, 0.999]
+    eps: 1.0e-8
+  scheduler: null

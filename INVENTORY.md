@@ -27,6 +27,7 @@ POT, optional HGQ/Keras quantization, and private `capmetric`.
 | `L1ADDataModule` | Physics/L1 trigger data from raw inputs to ML-ready tensors. | `train_features`, `data_extractor`, `data_processor`, `data_normalizer`, `data_mlready`, `data_awkward2torch.nconst`, `batch_size`, `max_val_batches`. | Training uses zero-bias normal data. Auxiliary validation/test loaders contain signals and simulated backgrounds. |
 | `CIFAR10DataModule` | Small image anomaly benchmark. | `normal_classes`, `signal_classes`, `background_classes`, `val_fraction`, `reference_fraction`, `normalize`, `stats_file`. | Normalization statistics are computed on normal-class training data only. Default: class `0` normal, classes `1..9` anomalies. |
 | `RobustADDataModule` | Shifted image anomaly benchmark from `AmazonScience/RobustAD`. | `subset`, `image_size`, `val_fraction`, `test_fraction`, `normalize`. | Supports `pcb`, `metal_parts`, `piled_bags`; exposes shifted normal and shifted anomaly loaders. Useful for CAP under distribution shift. |
+| `CausalChamberDataModule` | Controlled low-dimensional light-tunnel intervention benchmark. | `dataset_name=lt_interventions_standard_v1`, `feature_set`, `signal_experiments`, split fractions, robust normalization, `max_val_batches`. | Trains only on `uniform_reference`; exposes disjoint `normal`/`reference_normal` splits for agnostic CAP/W1 and `uniform_*` interventions as labeled anomalies. |
 | `SyntheticL1ADDataModule` | In-memory L1-like smoke-test data. | `n_features`, `n_train`, `n_val`, `n_test`, `batch_size`, `seed`, `paper_aliases`. | `paper_aliases=true` exposes paper L1 dataset names over synthetic tensors. Not a physics benchmark. |
 | `SyntheticImageADDataModule` | In-memory image smoke-test data. | `image_size`, `n_train`, `n_val`, `n_test`, `shifted_domains`, `n_cifar_signals`. | Exposes CIFAR-style `reference_normal`/`1..9` and RobustAD-style `shifted_normal_all`/`shifted_anomaly_*` loaders. |
 
@@ -39,6 +40,7 @@ POT, optional HGQ/Keras quantization, and private `capmetric`.
 | `data=axov5` | Same data contract as AXO-v4. | Separate card so AXO-v5 models can vary independently of data preparation. |
 | `data=axov6` | 2025 E+G data with AXO-style objects. | Robust normalizer on newer eras; used for era-transfer checks. |
 | `data=basis` | 117-feature current physics basis. | Adds taus and replaces MET with FET; uses `minimal_tau_fet`, `default_tau_FET`, `extended_taus`. |
+| `data=causal_chamber` | 11-feature Causal Chamber readout vector. | Downloads/checksums `lt_interventions_standard_v1`; default `feature_set=readouts`; full `uniform_*` intervention list configured as anomaly datasets. |
 
 ## Algorithms
 
@@ -163,21 +165,26 @@ POT, optional HGQ/Keras quantization, and private `capmetric`.
 
 | Group | Scope | Key Selection Logic |
 |---|---|---|
-| `configs/experiment/demo` | Short CPU smoke runs for CIFAR and synthetic L1. | No checkpointing/evaluator; verifies config and training loops. |
+| `tests/configs/experiment/demo` | Short CPU smoke runs for CIFAR, synthetic L1, and Causal Chamber. | No checkpointing/evaluator; verifies config and training loops. |
 | `configs/experiment/physics` | Main L1 trigger experiments for AE/VAE/SVDD/RealNVP/DeepSets. | Signal-aware variants optimize efficiency; agnostic variants optimize CAP/drift/Wasserstein. |
+| `configs/experiment/cchamber` | Controlled Causal Chamber intervention experiments. | Agnostic variants optimize normal-vs-reference CAP, threshold drift, and Wasserstein while reporting intervention efficiency/AUPRC. |
 | `configs/experiment/cifar10` | Image benchmark experiments. | Checks CAP/model-selection behavior outside L1 data. |
 | `configs/experiment/robustad` | Shifted-domain image anomaly benchmark. | Useful for CAP under source-normal vs shifted-normal comparison. |
 
 ### Verified Demo Commands
 
 ```bash
-uv run python src/train.py experiment=demo/cifar10_ae
-uv run python src/train.py experiment=demo/l1_vae
-uv run python src/train.py experiment=demo/l1_vicreg
-uv run python src/train.py experiment=demo/l1_wnae
-uv run python src/train.py experiment=demo/l1_rvae
-KERAS_BACKEND=torch uv run python src/train.py experiment=demo/l1_vae algorithm=qvae
-KERAS_BACKEND=torch uv run python src/train.py experiment=demo/l1_vicreg algorithm=qvicreg
+uv run python tests/train.py experiment=demo/cifar10_ae
+uv run python tests/train.py experiment=demo/l1_vae
+uv run python tests/train.py experiment=demo/l1_vicreg
+uv run python tests/train.py experiment=demo/l1_wnae
+uv run python tests/train.py experiment=demo/l1_rvae
+uv run python tests/train.py experiment=demo/cchamber_ae
+uv run python tests/train.py experiment=demo/cchamber_vae
+uv run python tests/train.py experiment=demo/cchamber_svdd
+uv run python tests/train.py experiment=demo/cchamber_realnvp
+KERAS_BACKEND=torch uv run python tests/train.py experiment=demo/l1_vae algorithm=qvae
+KERAS_BACKEND=torch uv run python tests/train.py experiment=demo/l1_vicreg algorithm=qvicreg
 ```
 
 ## Runtime And Dependencies
@@ -200,4 +207,5 @@ KERAS_BACKEND=torch uv run python src/train.py experiment=demo/l1_vicreg algorit
 | `vicreg_qvae` | Same as `vicreg_vae`, plus quantization dependencies. |
 | `qvae`, `qvicreg` | Install/use `quant` extra and run with `KERAS_BACKEND=torch`. |
 | CAP templates | Supply `dataset_1`, `dataset_2`, and `pairing_type`. |
+| Causal Chamber experiments | Public download is automatic; network access is needed for the first run unless `data/causal_chamber/lt_interventions_standard_v1` already exists. |
 | Synthetic L1 demos | Smoke tests only; not physics performance evidence. |

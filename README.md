@@ -65,6 +65,15 @@ uv run python src/train.py experiment=cchamber/ae_agnostic
 uv run python src/train.py experiment=physics/ae paths.raw_data_dir=/path/to/adl1t_data/parquet_files
 ```
 
-See the `scripts` directory for the experiment commands used for the paper. The
-experiments are configured with the hyperparameter values described for the models
-shown in the paper.
+Generate reproducible paper launch scripts:
+
+```
+uv run python scripts/generation.py list --dataset physics --model ae --strategy cap
+uv run python scripts/generation.py generate --name physics_ae_cap --stage sweep
+```
+
+The generator writes shell scripts plus `manifest.json` and `manifest.md` under
+`scripts/generated/<experiment>/`. The manifests record the Optuna-tuned
+parameters from `configs/hparams_search`, fixed Hydra overrides, validation
+strategy overrides, Optuna sweeper overrides, and reporting factors such as seeds
+or benchmark domains.

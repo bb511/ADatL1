@@ -1,6 +1,7 @@
 import torch
 
 from src.data.CIFAR10_datamodule import CIFAR10DataModule
+from src.data.synthetic import SyntheticL1ADDataModule
 
 
 def test_cifar10_datamodule_smoke() -> None:
@@ -28,3 +29,37 @@ def test_cifar10_datamodule_smoke() -> None:
 
     val_loaders = dm.val_dataloader()
     assert list(val_loaders) == ["normal", "1", "reference_normal"]
+
+
+def test_gaussian_subspace_synthetic_l1_datamodule() -> None:
+    """Verify the controlled Gaussian-subspace generator exposes L1 loaders."""
+    dm = SyntheticL1ADDataModule(
+        n_features=4,
+        n_train=64,
+        n_val=512,
+        n_test=512,
+        batch_size=128,
+        seed=123,
+        generator="gaussian_subspace",
+        reference_shift=1.5,
+        reference_shift_dim=1,
+        anomaly_shift=4.0,
+        anomaly_dim=0,
+    )
+
+    dm.setup("test")
+    loaders = dm.test_dataloader()
+    assert list(loaders) == ["normal", "reference_normal", "synthetic_signal"]
+
+    x_normal, mask, l1bit, y_normal = next(iter(loaders["normal"]))
+    x_reference, _, _, y_reference = next(iter(loaders["reference_normal"]))
+    x_signal, _, _, y_signal = next(iter(loaders["synthetic_signal"]))
+
+    assert x_normal.shape == (128, 4)
+    assert mask.dtype == torch.bool
+    assert l1bit.dtype == torch.bool
+    assert torch.all(y_normal == 0)
+    assert torch.all(y_reference == -1)
+    assert torch.all(y_signal == 1)
+    assert x_reference[:, 1].mean() > x_normal[:, 1].mean() + 0.75
+    assert x_signal[:, 0].mean() > x_normal[:, 0].mean() + 2.5

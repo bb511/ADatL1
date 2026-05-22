@@ -65,6 +65,12 @@ uv run python src/train.py experiment=cchamber/ae_agnostic
 uv run python src/train.py experiment=physics/ae paths.raw_data_dir=/path/to/adl1t_data/parquet_files
 ```
 
+Run the controlled Gaussian-subspace synthetic study:
+
+```
+uv run python src/synthetic.py --output-dir results/synthetic_gaussian
+```
+
 Generate reproducible paper launch scripts:
 
 ```

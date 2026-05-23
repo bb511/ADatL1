@@ -1,0 +1,627 @@
+\documentclass[11pt]{article}
+
+\usepackage[margin=1in]{geometry}
+\usepackage{amsmath,amssymb,amsthm,mathtools,bm}
+\usepackage{microtype}
+\usepackage{hyperref}
+
+\hypersetup{colorlinks=true,linkcolor=blue,citecolor=blue,urlcolor=blue}
+
+\newtheorem{assumption}{Assumption}
+\newtheorem{theorem}{Theorem}
+\newtheorem{corollary}{Corollary}
+\newtheorem{proposition}{Proposition}
+\newtheorem{lemma}{Lemma}
+\newtheorem{definition}{Definition}
+\newtheorem{remark}{Remark}
+
+\newcommand{\E}{\mathbb{E}}
+\newcommand{\Pbb}{\mathbb{P}}
+\newcommand{\R}{\mathbb{R}}
+\newcommand{\cL}{\mathcal{L}}
+\newcommand{\cC}{\mathcal{C}}
+\newcommand{\cG}{\mathcal{G}}
+\newcommand{\Normal}{\mathcal{N}}
+\newcommand{\TPR}{\operatorname{TPR}}
+\newcommand{\FPR}{\operatorname{FPR}}
+\newcommand{\Corr}{\operatorname{Corr}}
+\newcommand{\argmax}{\operatorname*{arg\,max}}
+\newcommand{\argmin}{\operatorname*{arg\,min}}
+\DeclareMathOperator{\sech}{sech}
+
+\title{Theoretical Justification}
+\author{}
+\date{}
+
+\begin{document}
+\maketitle
+
+Signal-agnostic model validation relies exclusively on background data. Since no unsupervised method can guarantee optimal future anomaly detection for arbitrary anomalies, a necessary assumption is that future anomalies must be deviations along a latent direction that is learnable from typical data. This assumption can be formalized as a monotone likelihood-ratio condition.
+
+\begin{assumption}[Latent likelihood-ratio recoverability]
+\label{ass:lrr}
+Let \(P_0\) denote the typical distribution and \(P_1\) a future anomaly distribution. There exists a scalar latent coordinate
+\[
+    Z=T(X)
+\]
+and a nondecreasing function \(h\) such that
+\[
+    \frac{dP_1}{dP_0}(x)=h(T(x)).
+\]
+Thus larger values of \(Z\) are more anomalous in the Neyman--Pearson sense. In addition, the two typical validation domains are treated as noisy samples of the same latent structure: conditioned on \(Z\), they differ only in the randomness entailed by the sampling process.
+\end{assumption}
+
+Assumption~\ref{ass:lrr} formalizes the standard anomaly-detection premise: a good model learns a coordinate of typicality, and anomalies are detected as departures along that coordinate. Then, the goal of a model validation criterion is not to discover arbitrary unseen anomalies, but to select, among trained candidate detectors, the score that recovers this latent anomaly-relevant coordinate most reliably.
+
+We will show that CAP selects models that best recover this coordinate because of its ability to navigate the bias-variance tradeoff that this assumption entails. In contrast to other unsupervised stability criteria, CAP favors the most informative anomaly assignments that remain stable under sampling randomness in typical data.
+
+\section{CAP as a reliability selector for learned scores}
+
+In our setting, trained anomaly detectors already map inputs to scalar scores.
+We therefore formulate a closed-form version of Assumption~\ref{ass:lrr}
+directly at the score level, modelling each detector as a noisy measurement of
+a latent anomaly-relevant coordinate.
+
+\begin{assumption}[Gaussian latent signal--noise channel]
+\label{ass:channel}
+Let \(\widetilde S_\phi\) denote an anomaly score produced
+by a candidate detector \(\phi\), assuming that larger values are
+more anomalous. Under typical data, the two validation samples satisfy
+\[
+    \widetilde S_\phi^{(d)}
+    =
+    b_\phi
+    +
+    a_\phi Z
+    +
+    \sigma_\phi \varepsilon_\phi^{(d)},
+    \qquad d\in\{1,2\},
+\]
+where
+\[
+    Z,\varepsilon_\phi^{(1)},\varepsilon_\phi^{(2)}
+    \stackrel{\mathrm{ind}}{\sim}\Normal(0,1),
+    \qquad
+    a_\phi\ge 0,
+    \qquad
+    \sigma_\phi\ge 0,
+    \qquad
+    a_\phi^2+\sigma_\phi^2>0 .
+\]
+
+The coefficient \(a_\phi\) measures the sensitivity of the score to the anomaly-relevant coordinate \(Z\), while \(\sigma_\phi \varepsilon_\phi^{(d)}\) encapsulates the remaining statistical variation that is not predictive of the anomaly direction. The standardized scores are:
+
+\[
+    S_\phi^{(d)}
+    =
+    \frac{\widetilde S_\phi^{(d)}-b_\phi}
+    {\sqrt{a_\phi^2+\sigma_\phi^2}} .
+\]
+Hence
+\[
+    S_\phi^{(d)}
+    =
+    \sqrt{\rho_\phi}\,Z
+    +
+    \sqrt{1-\rho_\phi}\,\varepsilon_\phi^{(d)},
+    \qquad d\in\{1,2\},
+\]
+where \(\rho_\phi\) is the fraction of typical score variance explained by \(Z\).
+\[
+    \rho_\phi
+    =
+    \frac{a_\phi^2}{a_\phi^2+\sigma_\phi^2} = \Corr\!\left(S_\phi^{(1)},S_\phi^{(2)}\right)
+    \in[0,1].
+\]
+
+As per our initial assumption, future anomalies are positive shifts of the same latent coordinate:
+\[
+    Z\mid Y=1\sim\Normal(\delta,1),
+    \qquad
+    \delta>0,
+\]
+while the nuisance variables \(\varepsilon_\phi^{(d)}\) retain their typical-data
+law. Consequently, after the same typical-data normalisation,
+\[
+    S_\phi\mid Y=0\sim\Normal(0,1),
+    \qquad
+    S_\phi\mid Y=1\sim\Normal(\delta\sqrt{\rho_\phi},1).
+\]
+\end{assumption}
+
+The parameter \(\rho_\phi\) is the reliability of the learned anomaly score.
+A detector has large \(\rho_\phi\) only when a large fraction of its typical
+score variance is explained by the anomaly-relevant coordinate \(Z\). A detector
+with \(a_\phi=0\) can have a perfectly stable marginal null histogram after
+normalization, but it is uninformative for future anomalies and has
+\(\rho_\phi=0\). Therefore, \(\rho_\phi\) formalises the part of score
+variation that is both reproducible across validation views and aligned with
+the anomaly direction.
+
+
+We will show that CAP's objective is monotone with respect to this parameter, whereas marginal stability criteria can be insensitive to it. For a binary Gibbs posterior, let
+\[
+    q_\beta(s)=\sigma(\beta s)=\frac{1}{1+e^{-\beta s}},
+    \qquad
+    m_\beta(s)=2q_\beta(s)-1=\tanh\!\left(\frac{\beta s}{2}\right).
+\]
+The approximation capacity kernel for a pair \((s_1,s_2)\) is
+\[
+    \log\{q_\beta(s_1)q_\beta(s_2)+[1-q_\beta(s_1)][1-q_\beta(s_2)]\}
+    =
+    -\log 2+
+    \log\{1+m_\beta(s_1)m_\beta(s_2)\}.
+\]
+Since the constant \(-\log 2\) is irrelevant for model selection, let \(L_\phi\) be the optimization objective
+\[
+    L_\phi(\beta)
+    =
+    \E\log\{1+m_\beta(S_\phi^{(1)})m_\beta(S_\phi^{(2)})\}
+\]
+and \(L_\phi^\star\) denote the CAP lift:
+\[
+    L_\phi^\star
+    =
+    \sup_{\beta\in[0,B]} L_\phi(\beta),
+    \qquad B>0.
+\]
+
+\begin{lemma}[CAP is monotone in paired Gaussian reliability]
+\label{lem:price}
+Let \((U,V)\) be standard bivariate Gaussian with correlation \(\rho\in[0,1)\). For every \(\beta>0\),
+\[
+    C_\beta(\rho)
+    =
+    \E_\rho\log\{1+m_\beta(U)m_\beta(V)\}
+\]
+is strictly increasing in \(\rho\). Consequently, \(\sup_{\beta\in[0,B]} C_\beta(\rho)\) is strictly increasing in \(\rho\) on \([0,1]\).
+\end{lemma}
+
+\begin{proof}
+Let
+\[
+    H_\beta(u,v)=\log\{1+m_\beta(u)m_\beta(v)\}.
+\]
+Price's theorem gives
+\[
+    \frac{d}{d\rho}\E_\rho H_\beta(U,V)
+    =
+    \E_\rho\left[\frac{\partial^2 H_\beta}{\partial u\,\partial v}(U,V)\right].
+\]
+Since \(m_\beta'(t)=(\beta/2)\sech^2(\beta t/2)>0\),
+\[
+    \frac{\partial^2 H_\beta}{\partial u\,\partial v}(u,v)
+    =
+    \frac{m_\beta'(u)m_\beta'(v)}{
+        \{1+m_\beta(u)m_\beta(v)\}^2
+    }
+    >0.
+\]
+Therefore \(C_\beta(\rho)\) is strictly increasing for every fixed \(\beta>0\). The optimized objective is increasing as a supremum of increasing functions. It is strict because for \(\rho>0\), a small-\(\beta\) expansion gives
+\[
+    C_\beta(\rho)=\frac{\beta^2}{4}\rho+O(\beta^4),
+\]
+so the maximizing \(\beta\) is nonzero whenever \(\rho>0\); applying the fixed-\(\beta\) strict monotonicity at such a maximizer gives strict increase. The case \(\rho=1\) follows by continuity.
+\end{proof}
+
+\begin{theorem}[Representation-conditional CAP optimality]
+\label{thm:score}
+Under Assumption~\ref{ass:channel}, for every false-positive rate \(\alpha\in(0,1)\),
+\[
+    \TPR_\phi(\alpha)
+    =
+    \Phi\!\left(
+        \delta\sqrt{\rho_\phi}-\Phi^{-1}(1-\alpha)
+    \right).
+\]
+Hence \(\TPR_\phi(\alpha)\) is strictly increasing in \(\rho_\phi\). Moreover, the optimized CAP lift \(L_\phi^\star\) is strictly increasing in the same \(\rho_\phi\). Therefore, for any candidate family \(\Phi\),
+\[
+    \argmax_{\phi\in\Phi} L_\phi^\star
+    =
+    \argmax_{\phi\in\Phi} \rho_\phi
+    =
+    \argmax_{\phi\in\Phi} \TPR_\phi(\alpha),
+\]
+with equality of maximizer sets. In particular, a CAP-selected score has maximal TPR at every fixed FPR among the candidate scores satisfying the model.
+\end{theorem}
+
+\begin{proof}
+Under typical data, \(S_\phi\sim\Normal(0,1)\). The FPR-\(\alpha\) threshold is therefore
+\[
+    \tau_\alpha=\Phi^{-1}(1-\alpha).
+\]
+Under anomalies,
+\[
+    S_\phi\mid Y=1
+    =
+    \sqrt{\rho_\phi}\,Z_1 + \sqrt{1-\rho_\phi}\,\varepsilon,
+    \qquad Z_1\sim\Normal(\delta,1),
+\]
+so
+\[
+    S_\phi\mid Y=1\sim\Normal(\delta\sqrt{\rho_\phi},1).
+\]
+Thus
+\[
+\begin{aligned}
+    \TPR_\phi(\alpha)
+    &=\Pbb(S_\phi\ge \tau_\alpha\mid Y=1)  \\
+    &=1-\Phi\!\left(\Phi^{-1}(1-\alpha)-\delta\sqrt{\rho_\phi}\right) \\
+    &=\Phi\!\left(\delta\sqrt{\rho_\phi}-\Phi^{-1}(1-\alpha)\right).
+\end{aligned}
+\]
+This is strictly increasing in \(\rho_\phi\). On the other hand, \((S_\phi^{(1)},S_\phi^{(2)})\) is a standard bivariate Gaussian pair with correlation \(\rho_\phi\). Lemma~\ref{lem:price} implies that \(L_\phi^\star\) is strictly increasing in \(\rho_\phi\), so the three maximization problems have the same solutions.
+\end{proof}
+
+\section{Why marginal stability baselines cannot give the same guarantee}
+
+Theorem~\ref{thm:score} shows that TPR is controlled by the reliability
+\(\rho_\phi\), which is a property of the joint validation law: it measures how
+much of the score is reproducibly driven by the anomaly-relevant coordinate.
+Marginal stability criteria only compare validation score histograms.
+
+\begin{definition}[Marginal stability criteria]
+\label{def:marginal-stability}
+Let
+\[
+    F_{\phi,d}(t)=\Pbb(S_\phi^{(d)}\le t),
+    \qquad d\in\{1,2\},
+\]
+be the population CDFs of the score produced by detector \(\phi\) on two
+typical validation domains. A validation criterion is
+\emph{marginal stability} if there exists a functional \(\Psi\) such that
+\[
+    M(\phi)=\Psi(F_{\phi,1},F_{\phi,2}).
+\]
+Equivalently, if two detectors have the same two marginal score laws, then
+the criterion assigns them the same value, regardless of their paired
+dependence or anomaly-detection power.
+\end{definition}
+
+The Wasserstein and threshold drift baselines are marginal stability criteria, as
+their population forms are, respectively,
+\[
+    M_{W_1}(\phi)
+    =
+    W_1\!\left(
+        \cL(S_\phi^{(1)}),
+        \cL(S_\phi^{(2)})
+    \right)
+    =
+    \int_0^1
+    \left|
+        F_{\phi,1}^{-1}(u)-F_{\phi,2}^{-1}(u)
+    \right|du,
+\]
+and, for target FPR \(\alpha\in(0,1)\),
+\[
+    M_{\mathrm{thr},\alpha}(\phi)
+    =
+    \left|
+        \Pbb\!\left(
+            S_\phi^{(2)}\ge F_{\phi,1}^{-1}(1-\alpha)
+        \right)-\alpha
+    \right|
+    =
+    \left|
+        1-F_{\phi,2}\!\left(F_{\phi,1}^{-1}(1-\alpha)\right)-\alpha
+    \right|,
+\]
+assuming continuity to avoid quantile ties. In contrast, CAP does not belong to
+this family because its population objective depends on the joint law of
+\((S_\phi^{(1)},S_\phi^{(2)})\).
+
+Marginal stability can measure the amount of domain shift between \(F_1\) and \(F_2\),
+but it cannot determine whether the score variation responsible for anomaly
+detection is reliable. This motivates the following non-identifiability result.
+
+\begin{theorem}[Non-identifiability of TPR from marginal stability]
+\label{thm:marginal-nonidentifiability}
+Let \(M\) be a marginal stability criterion. Fix
+\(\alpha\in(0,1)\), \(\delta>0\), and two reliability levels
+\[
+    0\le \rho_{\phi_-}<\rho_{\phi_+}\le 1.
+\]
+Let \(F_1,F_2\) be any continuous, strictly increasing validation score CDFs
+with finite first moments, and let
+\[
+    T_d(u)=F_d^{-1}(\Phi(u)),
+    \qquad d\in\{1,2\},
+\]
+be the monotone Gaussian maps to the target
+marginal distributions. Then there exist two candidate detectors \(\phi_-\) and
+\(\phi_+\) such that their validation score marginals are identical across
+candidates,
+\[
+    F_{\phi_+,1}=F_{\phi_-,1}=F_1,
+    \qquad
+    F_{\phi_+,2}=F_{\phi_-,2}=F_2,
+\]
+but their latent reliabilities are \(\rho_{\phi_+}\) and
+\(\rho_{\phi_-}\). Hence every marginal stability criterion ties the two
+candidates,
+\[
+    M(\phi_+)=M(\phi_-),
+\]
+while their TPRs are strictly ordered:
+\[
+    \TPR_{\phi_+}(\alpha)>\TPR_{\phi_-}(\alpha).
+\]
+Thus marginal score stability does not identify the TPR-optimal candidate.
+\end{theorem}
+
+\begin{proof}
+For each \(\rho\in[0,1]\), let
+\[
+    G_\rho^{(d)}
+    =
+    \sqrt{\rho}\,Z
+    +
+    \sqrt{1-\rho}\,\varepsilon^{(d)},
+    \qquad d\in\{1,2\},
+\]
+where \(Z,\varepsilon^{(1)},\varepsilon^{(2)}\) are independent standard
+Gaussian variables. Then
+\((G_\rho^{(1)},G_\rho^{(2)})\) is a standard bivariate Gaussian pair with
+correlation \(\rho\). Define validation scores by the monotone marginal
+calibrations
+\[
+    S_\rho^{(d)}=T_d(G_\rho^{(d)})
+    =
+    F_d^{-1}(\Phi(G_\rho^{(d)})).
+\]
+By the probability integral transform, \(S_\rho^{(d)}\sim F_d\) for every
+\(\rho\). Instantiate \(\phi_-\) with \(\rho=\rho_{\phi_-}\) and
+\(\phi_+\) with \(\rho=\rho_{\phi_+}\). The two candidates have the same
+marginal validation laws \(F_1,F_2\), so any marginal stability criterion
+gives them the same value.
+
+Since \(T_1\) is strictly increasing, thresholding \(S_\rho=T_1(G_\rho)\) at
+FPR \(\alpha\) is equivalent to thresholding \(G_\rho\) at
+\(\Phi^{-1}(1-\alpha)\). Under anomalies,
+\(G_\rho\mid Y=1\sim\Normal(\delta\sqrt{\rho},1)\), so
+\(\TPR_\rho(\alpha)\) is strictly increasing in \(\rho\). Therefore
+\(\TPR_{\phi_+}(\alpha)>\TPR_{\phi_-}(\alpha)\).
+\end{proof}
+
+\begin{corollary}[Marginal stability can prefer the lower-power detector]
+\label{cor:marginal-misranking}
+Let \(\alpha\in(0,1)\), \(\delta>0\), \(\eta>0\), and candidates \(\phi_-\), \(\phi_+\) with \(0\le \rho_{\phi_-}<\rho_{\phi_+}\le 1\) so that \(\TPR_{\phi_+}(\alpha)>\TPR_{\phi_-}(\alpha)\). Let validation marginals be partially shifted
+\[
+    F_{\phi_-,1}=F_{\phi_-,2}=\Phi,
+    \qquad
+    F_{\phi_+,1}=\Phi,
+    \qquad
+    F_{\phi_+,2}(t)=\Phi(t-\eta).
+\]
+Then, \(\phi_-\) has perfect marginal stability, while \(\phi_+\) has a
+location shift of magnitude \(\eta\) between validation domains. Consequently,
+any marginal-stability discrepancy that is minimized by equal marginals and
+increases under this location shift prefers \(\phi_-\) when smaller values are
+selected. In particular, for Wasserstein distance,
+\[
+    M_{W_1}(\phi_-)
+    =
+    W_1(\Normal(0,1),\Normal(0,1))
+    =
+    0,
+\]
+whereas
+\[
+    M_{W_1}(\phi_+)
+    =
+    W_1(\Normal(0,1),\Normal(\eta,1))
+    =
+    \eta.
+\]
+Similarly, for threshold drift,
+\[
+    M_{\mathrm{thr},\alpha}(\phi_-)=0,
+    \qquad
+    M_{\mathrm{thr},\alpha}(\phi_+)
+    =
+    1-\Phi\!\left(\Phi^{-1}(1-\alpha)-\eta\right)-\alpha
+    >
+    0.
+\]
+\end{corollary}
+
+\begin{proof}
+Candidate \(\phi_-\) has identical validation marginals, so
+both Wasserstein and threshold drift are zero. For \(\phi_+\), the two
+validation marginals are \(\Normal(0,1)\) and \(\Normal(\eta,1)\). For Wasserstein,
+\[
+    W_1(\Normal(0,1),\Normal(\eta,1))=\eta.
+\]
+The threshold calibrated on the first domain is
+\(\Phi^{-1}(1-\alpha)\). Under the second domain,
+\[
+    \Pbb(S_{\phi_+}^{(2)}\ge \Phi^{-1}(1-\alpha))
+    =
+    1-\Phi\!\left(\Phi^{-1}(1-\alpha)-\eta\right)
+    >
+    \alpha.
+\]
+\end{proof}
+
+\section{Gaussian linear anomaly model}
+
+We now instantiate the score-level result in a Gaussian mean-shift model where
+the anomaly direction is analytically known. This case makes the metric
+contrast explicit: CAP selects the likelihood-ratio direction when that
+direction is the reproducible direction of the validation channel, while
+marginal stability metrics cannot guarantee the same selection from score
+histograms alone.
+
+\begin{corollary}[Gaussian linear anomaly model]
+\label{cor:linear}
+Let
+\[
+    P_0=\Normal(0,\Sigma),
+    \qquad
+    P_1=\Normal(\mu,\Sigma),
+    \qquad
+    \Sigma\succ 0,
+    \quad \mu\ne 0.
+\]
+Consider normalized linear scores
+\[
+    S_w(x)=w^\top x,
+    \qquad
+    w^\top\Sigma w=1,
+    \qquad
+    w^\top\mu\ge 0.
+\]
+The likelihood-ratio anomaly direction is
+\[
+    w_\star
+    =
+    \frac{\Sigma^{-1}\mu}{\sqrt{\mu^\top\Sigma^{-1}\mu}}.
+\]
+Let the two typical views satisfy
+\[
+    \begin{pmatrix}X^{(1)}\\X^{(2)}\end{pmatrix}
+    \sim
+    \Normal\!\left(
+        0,
+        \begin{pmatrix}
+            \Sigma & \Gamma \\
+            \Gamma^\top & \Sigma
+        \end{pmatrix}
+    \right),
+\]
+and write \(\Gamma_s=(\Gamma+\Gamma^\top)/2\). Assume that the anomaly
+direction is also the unique most reproducible direction of the typical
+two-view channel:
+\[
+    w_\star
+    =
+    \argmax_{w^\top\Sigma w=1,\, w^\top\mu\ge 0} w^\top\Gamma_s w.
+\]
+Then, for every \(\alpha\in(0,1)\),
+\[
+    \argmax_{w^\top\Sigma w=1,\,w^\top\mu\ge 0}
+    L_w^\star
+    =
+    \{w_\star\}
+    =
+    \argmax_{w^\top\Sigma w=1,\,w^\top\mu\ge 0}
+    \TPR_w(\alpha).
+\]
+However, any marginal stability criterion can only use the score marginals
+\((F_{w,1},F_{w,2})\). Therefore, by
+Theorem~\ref{thm:marginal-nonidentifiability}, such a criterion cannot
+uniformly identify \(w_\star\): if a lower-power direction has the same score
+marginals as \(w_\star\), the criterion must tie them, and if that direction
+has smaller marginal drift, the criterion may prefer it.
+\end{corollary}
+
+\begin{proof}
+For the Gaussian mean-shift model,
+\[
+    \log\frac{dP_1}{dP_0}(x)
+    =
+    \mu^\top\Sigma^{-1}x
+    -
+    \frac{1}{2}\mu^\top\Sigma^{-1}\mu,
+\]
+so the likelihood-ratio anomaly direction is \(\Sigma^{-1}\mu\). After
+normalizing by \(w^\top\Sigma w=1\), this gives \(w_\star\).
+
+For any normalized \(w\), under \(P_0\),
+\[
+    S_w(X)\sim\Normal(0,1),
+\]
+and under \(P_1\),
+\[
+    S_w(X)\sim\Normal(w^\top\mu,1).
+\]
+Therefore
+\[
+    \TPR_w(\alpha)
+    =
+    1-\Phi\!\left(\Phi^{-1}(1-\alpha)-w^\top\mu\right).
+\]
+Maximizing TPR is equivalent to maximizing \(w^\top\mu\) subject to
+\(w^\top\Sigma w=1\). By Cauchy--Schwarz in the \(\Sigma\)-inner product,
+\[
+    w^\top\mu
+    =
+    \langle \Sigma^{1/2}w,\Sigma^{-1/2}\mu\rangle
+    \le
+    \sqrt{w^\top\Sigma w}\sqrt{\mu^\top\Sigma^{-1}\mu}
+    =
+    \sqrt{\mu^\top\Sigma^{-1}\mu},
+\]
+with equality only at \(w=w_\star\).
+
+For CAP, define
+\[
+    Y_1=w^\top X^{(1)},
+    \qquad
+    Y_2=w^\top X^{(2)}.
+\]
+Then \((Y_1,Y_2)\) is a standard bivariate Gaussian pair with correlation
+\[
+    \rho(w)=\Corr(Y_1,Y_2)=w^\top\Gamma_s w,
+\]
+because \(w^\top\Sigma w=1\). Lemma~\ref{lem:price} implies that optimized CAP
+is maximized by maximizing \(\rho(w)\). By the assumed alignment of
+\(\Gamma_s\), the unique maximizer is \(w_\star\). The marginal-stability
+claim is exactly the non-identifiability statement of
+Theorem~\ref{thm:marginal-nonidentifiability} applied to the score marginals
+of linear directions.
+\end{proof}
+
+For a concrete calculation, take \(\Sigma=I\), \(\mu=m w_\star\) with
+\(\|w_\star\|=1\), and suppose the two validation domains have a benign
+location shift along \(w_\star\):
+\[
+    X^{(1)}\sim\Normal(0,I),
+    \qquad
+    X^{(2)}\sim\Normal(\eta w_\star,I),
+    \qquad
+    \eta>0.
+\]
+For any admissible unit-norm direction \(w\) with \(w^\top\mu\ge 0\), write
+\[
+    c(w)=w^\top w_\star\in[0,1].
+\]
+Then
+\[
+    w^\top X^{(1)}\sim\Normal(0,1),
+    \qquad
+    w^\top X^{(2)}\sim\Normal(\eta c(w),1).
+\]
+The anomaly power is
+\[
+    \TPR_w(\alpha)
+    =
+    \Phi\!\left(m c(w)-\Phi^{-1}(1-\alpha)\right),
+\]
+so \(w_\star\) is optimal because \(c(w_\star)=1\). But the marginal stability
+baselines are minimized away from \(w_\star\). Specifically,
+\[
+    M_{W_1}(w)=\eta c(w),
+\]
+and
+\[
+    M_{\mathrm{thr},\alpha}(w)
+    =
+    1-\Phi\!\left(\Phi^{-1}(1-\alpha)-\eta c(w)\right)-\alpha,
+\]
+which are both strictly increasing in \(c(w)\) on \([0,1]\). Hence, when the
+dimension is at least two, every direction in the region
+\[
+    \mathcal R_\epsilon
+    =
+    \{w:\|w\|=1,\ 0\le c(w)\le 1-\epsilon\},
+    \qquad
+    \epsilon\in(0,1),
+\]
+has lower Wasserstein and threshold drift than \(w_\star\), even though every
+such direction has strictly lower TPR than \(w_\star\). This is the concrete
+Gaussian case in which marginal stability prefers a region of lower-power
+scores over the true anomaly direction.
+
+\end{document}

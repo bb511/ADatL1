@@ -187,76 +187,138 @@ dependence that defines \(\rho_\phi^R\).
 
 \subsection{CAP monotonicity}
 
-For a binary Gibbs posterior, let
+For a binary CAP energy \(E(p,y)\), let \(p=\nu(s)\in(0,1)\) denote the
+normalized score and define the energy contrast
 \[
-    q_\beta(s)=\sigma(\beta s)=\frac{1}{1+e^{-\beta s}},
-    \qquad
-    m_\beta(s)=2q_\beta(s)-1=\tanh\!\left(\frac{\beta s}{2}\right).
+    \Delta_E(s)
+    =
+    E(\nu(s),0)-E(\nu(s),1).
 \]
+The binary Gibbs posterior induced by this energy is
+\[
+\begin{aligned}
+    q_{\beta,E}(s)
+    &=
+    \frac{\exp\{-\beta E(\nu(s),1)\}}
+    {\exp\{-\beta E(\nu(s),0)\}+\exp\{-\beta E(\nu(s),1)\}}
+    =
+    \sigma(\beta\Delta_E(s)),\\
+    m_{\beta,E}(s)
+    &=
+    2q_{\beta,E}(s)-1
+    =
+    \tanh\!\left(\frac{\beta\Delta_E(s)}{2}\right).
+\end{aligned}
+\]
+For the baseline energy \(E(p,y)=y(1-p)+(1-y)p\) and the score normalization
+\(\nu(s)=(s+1)/2\), this reduces to the special case
+\(q_{\beta,E}(s)=\sigma(\beta s)\).
+
+\begin{assumption}[Monotone binary CAP energy]
+\label{ass:monotone-energy}
+The score normalization \(\nu\) and binary energy \(E\) are such that
+\(\Delta_E\) is continuously differentiable, nondecreasing, and nonconstant
+under Gaussian measure:
+\[
+    \Pbb\!\left(\Delta_E'(G)>0\right)>0,
+    \qquad G\sim\Normal(0,1).
+\]
+Moreover, the derivatives required below are integrable. Piecewise-smooth
+energies such as the adaptive ReLU energy satisfy the same argument by a
+standard smoothing approximation, provided their energy contrast is monotone in
+the score.
+\end{assumption}
+
 The approximation capacity kernel for a pair \((s_1,s_2)\) is
 \[
-    \log\{q_\beta(s_1)q_\beta(s_2)+[1-q_\beta(s_1)][1-q_\beta(s_2)]\}
+    \log\{q_{\beta,E}(s_1)q_{\beta,E}(s_2)
+    +[1-q_{\beta,E}(s_1)][1-q_{\beta,E}(s_2)]\}
     =
     -\log 2+
-    \log\{1+m_\beta(s_1)m_\beta(s_2)\}.
+    \log\{1+m_{\beta,E}(s_1)m_{\beta,E}(s_2)\}.
 \]
 Since the constant \(-\log 2\) is irrelevant for model selection, let \(L_\phi\) be the optimization objective
 \[
     L_\phi(\beta)
     =
-    \E\log\{1+m_\beta(S_\phi^{(1)})m_\beta(S_\phi^{(2)})\}
+    \E\log\{1+m_{\beta,E}(S_\phi^{(1)})
+    m_{\beta,E}(S_\phi^{(2)})\}
 \]
 and \(L_\phi^\star\) denote the CAP lift:
 \[
     L_\phi^\star
     =
-    \sup_{\beta\in[0,B]} L_\phi(\beta),
-    \qquad B>0.
+    \sup_{\beta\in[\beta_{\min},B]} L_\phi(\beta),
+    \qquad 0<\beta_{\min}\le B.
 \]
+Including \(\beta=0\) gives the uninformative constant posterior; it does not
+change the selection whenever the optimized CAP value is attained at positive
+temperature.
 
 \begin{lemma}[CAP is monotone in paired Gaussian reliability]
 \label{lem:price}
 Let \((U,V)\) be standard bivariate Gaussian with correlation \(\rho\in[0,1)\). For every \(\beta>0\),
 \[
-    C_\beta(\rho)
+    C_{\beta,E}(\rho)
     =
-    \E_\rho\log\{1+m_\beta(U)m_\beta(V)\}
+    \E_\rho\log\{1+m_{\beta,E}(U)m_{\beta,E}(V)\}
 \]
-is strictly increasing in \(\rho\). Consequently, \(\sup_{\beta\in[0,B]} C_\beta(\rho)\) is strictly increasing in \(\rho\) on \([0,1]\).
+is strictly increasing in \(\rho\) under
+Assumption~\ref{ass:monotone-energy}. Consequently,
+\(\sup_{\beta\in[\beta_{\min},B]} C_{\beta,E}(\rho)\) is strictly increasing
+in \(\rho\) on \([0,1]\).
 \end{lemma}
 
 \begin{proof}
 Let
 \[
-    H_\beta(u,v)=\log\{1+m_\beta(u)m_\beta(v)\}.
+    H_{\beta,E}(u,v)=\log\{1+m_{\beta,E}(u)m_{\beta,E}(v)\}.
 \]
 Price's theorem gives
 \[
-    \frac{d}{d\rho}\E_\rho H_\beta(U,V)
+    \frac{d}{d\rho}\E_\rho H_{\beta,E}(U,V)
     =
-    \E_\rho\left[\frac{\partial^2 H_\beta}{\partial u\,\partial v}(U,V)\right].
+    \E_\rho\left[\frac{\partial^2 H_{\beta,E}}{\partial u\,\partial v}(U,V)\right].
 \]
-Since \(m_\beta'(t)=(\beta/2)\sech^2(\beta t/2)>0\),
+Since
 \[
-    \frac{\partial^2 H_\beta}{\partial u\,\partial v}(u,v)
+    m_{\beta,E}'(t)
     =
-    \frac{m_\beta'(u)m_\beta'(v)}{
-        \{1+m_\beta(u)m_\beta(v)\}^2
+    \frac{\beta}{2}\Delta_E'(t)
+    \sech^2\!\left(\frac{\beta\Delta_E(t)}{2}\right)
+    \ge 0
+\]
+and this derivative is positive on a set of nonzero Gaussian measure,
+\[
+    \frac{\partial^2 H_{\beta,E}}{\partial u\,\partial v}(u,v)
+    =
+    \frac{m_{\beta,E}'(u)m_{\beta,E}'(v)}{
+        \{1+m_{\beta,E}(u)m_{\beta,E}(v)\}^2
     }
-    >0.
+    \ge0,
 \]
-Therefore \(C_\beta(\rho)\) is strictly increasing for every fixed \(\beta>0\). The optimized objective is increasing as a supremum of increasing functions. It is strict because for \(\rho>0\), a small-\(\beta\) expansion gives
+with strict positivity after expectation because the bivariate Gaussian density
+is positive on every product set of positive Lebesgue measure. Therefore
+\(C_{\beta,E}(\rho)\) is strictly increasing for every fixed \(\beta>0\).
+For the optimized objective, fix \(\rho_1<\rho_2\) and let
+\(\beta_1\in[\beta_{\min},B]\) maximize \(C_{\beta,E}(\rho_1)\). Then
 \[
-    C_\beta(\rho)=\frac{\beta^2}{4}\rho+O(\beta^4),
+    \sup_{\beta\in[\beta_{\min},B]} C_{\beta,E}(\rho_2)
+    \ge
+    C_{\beta_1,E}(\rho_2)
+    >
+    C_{\beta_1,E}(\rho_1)
+    =
+    \sup_{\beta\in[\beta_{\min},B]} C_{\beta,E}(\rho_1).
 \]
-so the maximizing \(\beta\) is nonzero whenever \(\rho>0\); applying the fixed-\(\beta\) strict monotonicity at such a maximizer gives strict increase. The case \(\rho=1\) follows by continuity.
+The case \(\rho=1\) follows by continuity.
 \end{proof}
 
 \begin{theorem}[CAP is monotone in reproducible reliability]
 \label{thm:score}
-Under Assumption~\ref{ass:channel}, the optimized CAP lift \(L_\phi^\star\)
-is strictly increasing in \(\rho_\phi^R\). Therefore, for any candidate family
-\(\mathcal A\),
+Under Assumptions~\ref{ass:channel} and~\ref{ass:monotone-energy}, the
+optimized CAP lift \(L_\phi^\star\) is strictly increasing in
+\(\rho_\phi^R\). Therefore, for any candidate family \(\mathcal A\),
 \[
     \argmax_{\phi\in\mathcal A} L_\phi^\star
     =
@@ -780,5 +842,179 @@ least two, every direction in
 has lower Wasserstein and threshold drift than \(w_\star\), even though every
 such direction has strictly lower TPR than \(w_\star\). Thus marginal stability
 prefers lower-power scores over the true anomaly direction.
+
+\section{Finite-sample CAP selection}
+
+The practical validation procedure chooses among a finite set of trained candidates
+using finitely many paired validation samples and a finite numerical search over
+inverse temperatures. The remaining question is whether the empirical CAP estimate reliably identifies the
+population CAP maximizer within the searched candidate family. The following
+result gives the corresponding uniform concentration guarantee.
+
+\begin{theorem}[Uniform finite-sample CAP concentration]
+\label{thm:finite-sample-cap}
+Let \(\mathcal A\) be a finite set of candidate detectors and let
+\(\mathcal B=\{\beta_1,\ldots,\beta_K\}\subset[\beta_{\min},B]\) be the finite
+temperature grid used to evaluate CAP. For each \(\phi\in\mathcal A\), let
+\((S_{\phi,i}^{(1)},S_{\phi,i}^{(2)})_{i=1}^n\) be i.i.d. validation score
+pairs from the population paired law of \(\phi\). Define
+\[
+\ell_{\phi,\beta}(s_1,s_2)
+=
+\log\{q_{\beta,E}(s_1)q_{\beta,E}(s_2)
++[1-q_{\beta,E}(s_1)][1-q_{\beta,E}(s_2)]\}.
+\]
+Assume the normalized score-energy contrast is bounded on the validation
+support so that, for all \(\phi\in\mathcal A\), \(\beta\in\mathcal B\), and
+validation pairs,
+\[
+    \ell_{\min}\le \ell_{\phi,\beta}(S_\phi^{(1)},S_\phi^{(2)})
+    \le \ell_{\max},
+    \qquad
+    R_\ell=\ell_{\max}-\ell_{\min}<\infty .
+\]
+Let
+\[
+    \widehat L_\phi(\beta)
+    =
+    \frac1n\sum_{i=1}^n
+    \ell_{\phi,\beta}(S_{\phi,i}^{(1)},S_{\phi,i}^{(2)}),
+    \qquad
+    L_\phi(\beta)=\E\,\ell_{\phi,\beta}(S_\phi^{(1)},S_\phi^{(2)}),
+\]
+and define the grid-optimized objectives
+\[
+    \widehat L_{\phi,\mathcal B}^{\star}
+    =
+    \max_{\beta\in\mathcal B}\widehat L_\phi(\beta),
+    \qquad
+    L_{\phi,\mathcal B}^{\star}
+    =
+    \max_{\beta\in\mathcal B}L_\phi(\beta).
+\]
+Then, with probability at least \(1-\delta\),
+\[
+    \max_{\phi\in\mathcal A}
+    \left|
+        \widehat L_{\phi,\mathcal B}^{\star}
+        -
+        L_{\phi,\mathcal B}^{\star}
+    \right|
+    \le
+    R_\ell
+    \sqrt{
+        \frac{\log(2|\mathcal A|K/\delta)}{2n}
+    }.
+\]
+Consequently, if
+\(\widehat\phi\in\argmax_{\phi\in\mathcal A}
+\widehat L_{\phi,\mathcal B}^{\star}\), then
+\[
+    L_{\widehat\phi,\mathcal B}^{\star}
+    \ge
+    \max_{\phi\in\mathcal A}L_{\phi,\mathcal B}^{\star}
+    -
+    2R_\ell
+    \sqrt{
+        \frac{\log(2|\mathcal A|K/\delta)}{2n}
+    }.
+\]
+If the population grid-CAP maximizer is unique and its gap over the
+second-best candidate exceeds twice the displayed deviation bound, then the
+empirical CAP maximizer equals the population grid-CAP maximizer.
+\end{theorem}
+
+\begin{proof}
+For fixed \((\phi,\beta)\), Hoeffding's inequality gives
+\[
+    \Pbb\!\left(
+        |\widehat L_\phi(\beta)-L_\phi(\beta)|>t
+    \right)
+    \le
+    2\exp\!\left(-\frac{2nt^2}{R_\ell^2}\right).
+\]
+A union bound over the \(|\mathcal A|K\) candidate-temperature pairs gives,
+with probability at least \(1-\delta\),
+\[
+    \max_{\phi\in\mathcal A,\beta\in\mathcal B}
+    |\widehat L_\phi(\beta)-L_\phi(\beta)|
+    \le
+    R_\ell
+    \sqrt{
+        \frac{\log(2|\mathcal A|K/\delta)}{2n}
+    }
+    \equiv \epsilon_n .
+\]
+Taking maxima over \(\beta\) is 1-Lipschitz with respect to the sup norm, so
+\[
+    \left|
+        \max_{\beta\in\mathcal B}\widehat L_\phi(\beta)
+        -
+        \max_{\beta\in\mathcal B}L_\phi(\beta)
+    \right|
+    \le \epsilon_n
+\]
+simultaneously for every \(\phi\). This proves the first display. If
+\(\widehat\phi\) maximizes the empirical grid objective and
+\(\phi^\star\) maximizes the population grid objective, then
+\[
+    L_{\widehat\phi,\mathcal B}^{\star}
+    \ge
+    \widehat L_{\widehat\phi,\mathcal B}^{\star}-\epsilon_n
+    \ge
+    \widehat L_{\phi^\star,\mathcal B}^{\star}-\epsilon_n
+    \ge
+    L_{\phi^\star,\mathcal B}^{\star}-2\epsilon_n .
+\]
+The exact-selection statement follows by comparing this inequality with the
+population gap.
+\end{proof}
+
+Writing
+\[
+    \epsilon_n
+    =
+    R_\ell
+    \sqrt{
+        \frac{\log(2|\mathcal A|K/\delta)}{2n}
+    },
+\]
+Theorem~\ref{thm:finite-sample-cap} separates estimation error from the
+population alignment question. Empirical CAP selection is a statistically
+consistent proxy for population CAP selection over a fixed search set, and the cost of searching many candidates and
+temperatures enters only through \(\log(|\mathcal A|K)\). If two candidates have
+a population CAP gap smaller than \(2\epsilon_n\), finite validation noise can
+change their empirical ordering. If the population gap is larger than
+\(2\epsilon_n\), the empirical maximizer recovers the population maximizer with
+probability at least \(1-\delta\).
+
+\begin{remark}
+In practice, CAP optimizes \(\beta\) over a compact
+continuous interval \([\beta_{\min},B]\), rather than over a fixed grid. The
+same guarantee extends by a standard covering argument. If
+\(\ell_{\phi,\beta}\) is uniformly \(L_\beta\)-Lipschitz in \(\beta\), choose
+an \(\eta\)-net \(\mathcal B_\eta\) of \([\beta_{\min},B]\), with
+\(|\mathcal B_\eta|\le \lceil(B-\beta_{\min})/\eta\rceil+1\). Applying the
+theorem on \(\mathcal B_\eta\) gives, uniformly over the continuous interval,
+an additional approximation error at most \(2L_\beta\eta\):
+\[
+    \sup_{\phi\in\mathcal A}
+    \left|
+        \sup_{\beta\in[\beta_{\min},B]}\widehat L_\phi(\beta)
+        -
+        \sup_{\beta\in[\beta_{\min},B]}L_\phi(\beta)
+    \right|
+    \le
+    R_\ell
+    \sqrt{
+        \frac{\log(2|\mathcal A||\mathcal B_\eta|/\delta)}{2n}
+    }
+    +
+    2L_\beta\eta .
+\]
+Thus continuous optimization changes the result only by the discretization
+term \(2L_\beta\eta\), which can be made arbitrarily small on compact
+temperature intervals.
+\end{remark}
 
 \end{document}

@@ -1,9 +1,10 @@
 # Analytical Experiments for Section 3
 
-This appendix note documents the synthetic experiments used to validate the
-Section 3 claims in `theory.tex`. The experiments are deliberately analytical:
-the relevant score laws, CAP objective, Wasserstein distance, threshold drift,
-and fixed-FPR power all have population formulas.
+This note documents the controlled experiments used to illustrate the theory in
+`theory.tex`. The goal is deliberately narrow: instantiate the Gaussian
+score-channel and linear stable-nuisance model, compute the quantities that the
+theory discusses, and compare finite-sample estimates with the available
+population formulas.
 
 Run:
 
@@ -11,16 +12,12 @@ Run:
 uv run python src/analytical.py --output-dir figures/section3
 ```
 
-The run writes CSV tables, figures, and
-`figures/section3/metadata.json`. The directory was regenerated from scratch
-after the update to the stable-nuisance theory.
+The script writes CSV files, figures, and `metadata.json` under
+`figures/section3`.
 
-## Formulation
+## Model
 
-### Score Channel
-
-For each candidate detector, Section 3 models the standardized score on two
-typical validation views as
+The score-channel model is
 
 ```math
 S_\phi^{(d)}
@@ -33,9 +30,8 @@ S_\phi^{(d)}
   \qquad d\in\{1,2\}.
 ```
 
-`Z` is the anomaly-relevant latent coordinate. `U_phi` is stable nuisance:
-it is reproducible across validation views, but future anomalies do not shift
-it. The two key reliabilities are
+`Z` is the anomaly-relevant coordinate. `U_phi` is reproducible nuisance:
+future anomalies do not shift it. The two reliabilities are
 
 ```math
 \rho_\phi^Z
@@ -47,36 +43,10 @@ it. The two key reliabilities are
   \frac{a_\phi^2+b_\phi^2}{a_\phi^2+b_\phi^2+\sigma_\phi^2}.
 ```
 
-`\rho_Z` is anomaly-aligned reliability. It controls power:
+The theory says fixed-FPR power is monotone in `rho_Z`, while CAP is monotone in
+the paired reproducible reliability `rho_R`.
 
-```math
-\operatorname{TPR}_\phi(\alpha)
-  =
-  \Phi\!\left(
-    \delta\sqrt{\rho_\phi^Z}
-    -
-    \Phi^{-1}(1-\alpha)
-  \right).
-```
-
-`\rho_R` is total reproducible reliability. It is the paired score correlation
-between validation views and controls CAP. The anomaly alignment of the
-reproducible component is
-
-```math
-\pi_\phi
-  =
-  \frac{\rho_\phi^Z}{\rho_\phi^R}
-  =
-  \frac{a_\phi^2}{a_\phi^2+b_\phi^2},
-```
-
-when `rho_R > 0`. CAP is guaranteed to select a high-power detector only when
-maximizing `rho_R` also maximizes `rho_Z`.
-
-### Linear Gaussian Model
-
-The feature-level experiment instantiates the theorem with
+The feature-level experiment uses
 
 ```math
 X^{(d)}
@@ -88,20 +58,20 @@ X^{(d)}
   \xi^{(d)},
 ```
 
-where the typical marginal covariance of each view is the identity. Future
-anomalies shift only `Z`, so the observed anomaly mean is
+with unit marginal covariance for each validation view. Future anomalies shift
+only `Z`, so the anomaly mean is
 
 ```math
 \delta\sqrt{\lambda_Z}\,e_0.
 ```
 
-For the linear sweep
+For
 
 ```math
 w(\theta)=\cos(\theta)e_0+\sin(\theta)e_1,
 ```
 
-the population quantities are
+the population reliabilities are
 
 ```math
 \rho_Z(w)=\lambda_Z\cos^2\theta,
@@ -111,19 +81,7 @@ the population quantities are
 \rho_R(w)=\rho_Z(w)+\rho_U(w).
 ```
 
-Thus
-
-```math
-\operatorname{TPR}_w(\alpha)
-  =
-  \Phi\!\left(
-    \delta\sqrt{\rho_Z(w)}
-    -
-    \Phi^{-1}(1-\alpha)
-  \right),
-```
-
-while CAP is monotone in `rho_R(w)`. The default run uses
+The default run uses
 
 ```text
 d = 6
@@ -133,25 +91,31 @@ lambda_Z = 0.90
 lambda_U = 0.12
 n_pairs = 60000
 n_test = 150000
+n_match_features = 8
+match_noise = 0.05
 seed = 123
 ```
 
 Because `lambda_Z > lambda_U`, the anomaly direction `w* = e0` maximizes both
 `rho_Z` and `rho_R`.
 
-![Feature-space geometry](figures/section3/feature_space_geometry.png)
-
-### Empirical CAP
+## CAP Computation
 
 Empirical CAP is computed with the repository
-`ApproximationCapacityKernel`, not with a hand-written replacement. To match
-the theorem's binary Gibbs posterior, the script passes
+`ApproximationCapacityKernel`. The experiment uses the baseline binary energy
+from the theory,
+
+```math
+E(p,y)=y(1-p)+(1-y)p.
+```
+
+To recover the theorem's special posterior, the script passes
 
 ```math
 p = \frac{s+1}{2}
 ```
 
-to the baseline-energy kernel. This gives
+to the baseline-energy kernel. Then
 
 ```math
 q_\beta(y=1\mid p)
@@ -174,7 +138,7 @@ The raw kernel value is
   \right).
 ```
 
-The reported CAP is the lifted objective
+The reported CAP lift is
 
 ```math
 \widehat L^\star
@@ -183,51 +147,32 @@ The reported CAP is the lifted objective
   \{\widehat C_\beta+\log 2\}.
 ```
 
-The CSVs store both `cap_raw_empirical` and `cap_empirical`, so the identity
-`cap_empirical = cap_raw_empirical + log(2)` is directly auditable.
+Population CAP is deterministic Gauss-Hermite quadrature of the same
+baseline-energy objective.
 
-CAP uses the row-wise pairing from the two-view validation generator. The row
-order itself is exchangeable, but the pairing is not discarded: pair `i` in
-view 1 is evaluated with pair `i` in view 2.
+## Pairing
 
-### Marginal Criteria
-
-Wasserstein distance and threshold drift compare only the two score marginals.
-In the unshifted linear model, every unit-norm linear score has standard normal
-marginals in both views, so population W1 and threshold drift are zero for all
-directions, even when `rho_R` differs.
-
-For the benign marginal-shift experiment,
+The empirical feature-level CAP uses static nearest-neighbor pairing in a
+model-independent matching descriptor. Each synthetic object has an observed
+descriptor
 
 ```math
-X^{(1)}\sim \mathcal N(0,I),
-\qquad
-X^{(2)}\sim \mathcal N(\eta e_0,I),
+M^{(d)} = M + \tau \zeta^{(d)},
 ```
 
-the linear sweep has
+with `tau = match_noise`. CAP pairs each object in validation view 1 to its
+nearest neighbor in validation view 2 using this descriptor, then evaluates the
+candidate scores on those pairs. The descriptor is not a candidate score and is
+not changed across directions or epochs.
 
-```math
-W_1(w)=\eta\cos\theta,
-```
+In the default run, the NN recovery rate is about `0.9999`, so empirical CAP is
+effectively computed on the intended paired validation channel. This is the
+controlled analogue of using a fixed reference representation or metadata-based
+matching in real data.
 
-and
+## Experiment 1: Score-Channel Reliability
 
-```math
-M_{\mathrm{thr},\alpha}(w)
-  =
-  1-\Phi(\Phi^{-1}(1-\alpha)-\eta\cos\theta)-\alpha.
-```
-
-These marginal diagnostics correctly measure validation-domain score shift,
-but smaller shift is not the same objective as higher anomaly power.
-
-## Experiment 1: Reliability Channel
-
-### Setup
-
-This score-level experiment removes nuisance by setting
-`rho = rho_Z = rho_R`. For each reliability value,
+This experiment removes nuisance by setting `rho = rho_Z = rho_R`:
 
 ```math
 S^{(d)}
@@ -237,18 +182,13 @@ S^{(d)}
   \sqrt{1-\rho}\,\varepsilon^{(d)}.
 ```
 
-Anomaly scores are sampled from
+Anomaly scores follow
 
 ```math
-S\mid Y=1\sim \mathcal N(\delta\sqrt{\rho},1).
+S\mid Y=1\sim\mathcal N(\delta\sqrt{\rho},1).
 ```
 
-We measure empirical CAP with the approximation-capacity kernel, population CAP
-by Gauss-Hermite quadrature, empirical TPR, and population TPR.
-
-### Results
-
-| rho | CAP empirical | CAP population | TPR empirical | TPR population |
+| rho | cap_empirical | cap_theory | tpr_empirical | tpr_theory |
 | ---: | ---: | ---: | ---: | ---: |
 | 0.0000 | 0.0000 | 0.0000 | 0.0009 | 0.0010 |
 | 0.2587 | 0.0321 | 0.0319 | 0.0904 | 0.0951 |
@@ -258,215 +198,186 @@ by Gauss-Hermite quadrature, empirical TPR, and population TPR.
 
 ![CAP and TPR reliability experiment](figures/section3/theory_cap_tpr_vs_reliability.png)
 
-### Conclusions
-
-- CAP is monotone in paired reliability.
-- TPR is monotone in the same reliability when there is no nuisance.
-- Empirical kernel CAP tracks the population quadrature curve.
+This validates the basic theorem: CAP increases with paired reliability, and
+when there is no nuisance, the same parameter controls TPR.
 
 ## Experiment 2: Linear Stable-Nuisance Sweep
 
-### Setup
+This experiment rotates the score direction from the anomaly coordinate to the
+stable nuisance coordinate. CAP is evaluated on NN-paired typical validation
+views. TPR is evaluated against shifted anomalies.
 
-This is the direct linear-Gaussian Section 3 experiment. We rotate from the
-anomaly direction to a stable nuisance direction:
-
-```math
-w(\theta)=\cos(\theta)e_0+\sin(\theta)e_1.
-```
-
-For each direction, we measure CAP on paired typical validation views, TPR
-against shifted anomalies, and marginal W1/threshold drift on typical score
-histograms. This tests the sufficient condition `lambda_Z > lambda_U`: nuisance
-can be stable, but it is not stable enough to maximize `rho_R`.
-
-### Results
-
-| angle | c(w) | rho_Z | rho_U | rho_R | CAP emp. | CAP pop. | TPR emp. | TPR pop. | W1 emp. | W1 pop. | drift emp. | drift pop. |
-| ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
-| 0.0000 | 1.0000 | 0.9000 | 0.0000 | 0.9000 | 0.4158 | 0.4171 | 0.5895 | 0.5910 | 0.0041 | 0.0000 | 0.0001 | 0.0000 |
-| 30.3750 | 0.8627 | 0.6699 | 0.0307 | 0.7006 | 0.2292 | 0.2286 | 0.4072 | 0.4107 | 0.0064 | 0.0000 | 0.0002 | 0.0000 |
-| 59.6250 | 0.5057 | 0.2301 | 0.0893 | 0.3194 | 0.0472 | 0.0481 | 0.0794 | 0.0791 | 0.0069 | 0.0000 | 0.0000 | 0.0000 |
-| 90.0000 | 0.0000 | 0.0000 | 0.1200 | 0.1200 | 0.0066 | 0.0071 | 0.0009 | 0.0010 | 0.0057 | 0.0000 | 0.0000 | 0.0000 |
+| angle_deg | cos_to_anomaly | rho_z | rho_u | rho_r | nn_pair_accuracy | cap_empirical | cap_theory | tpr_empirical | tpr_theory | wasserstein_empirical | wasserstein_theory | threshold_drift_empirical | threshold_drift_theory |
+| ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| 0.0000 | 1.0000 | 0.9000 | 0.0000 | 0.9000 | 0.9999 | 0.4158 | 0.4171 | 0.5897 | 0.5910 | 0.0041 | 0.0000 | 0.0001 | 0.0000 |
+| 30.3750 | 0.8627 | 0.6699 | 0.0307 | 0.7006 | 0.9999 | 0.2292 | 0.2286 | 0.4089 | 0.4107 | 0.0064 | 0.0000 | 0.0002 | 0.0000 |
+| 59.6250 | 0.5057 | 0.2301 | 0.0893 | 0.3194 | 0.9999 | 0.0472 | 0.0481 | 0.0790 | 0.0791 | 0.0069 | 0.0000 | 0.0000 | 0.0000 |
+| 90.0000 | 0.0000 | 0.0000 | 0.1200 | 0.1200 | 0.9999 | 0.0066 | 0.0071 | 0.0010 | 0.0010 | 0.0057 | 0.0000 | 0.0000 | 0.0000 |
 
 ![Linear direction sweep](figures/section3/linear_direction_sweep.png)
 
 ![Population metric landscape](figures/section3/population_metric_landscape.png)
 
-### Conclusions
+The anomaly direction maximizes `rho_Z`, hence TPR. Since `lambda_Z >
+lambda_U`, it also maximizes `rho_R`, hence CAP. Marginal W1 and threshold drift
+are zero in population because every unit-norm linear score has standard normal
+marginals in both unshifted validation views.
 
-- `w*` maximizes `rho_Z`, so it maximizes TPR.
-- Since `lambda_Z > lambda_U`, `w*` also maximizes `rho_R`, so CAP selects it.
-- The orthogonal nuisance direction has nonzero reproducibility, but not enough
-  to beat the anomaly direction.
-- Population W1 and threshold drift are zero for every unshifted direction
-  because the two score marginals are identical; empirical values are finite
-  validation-sample noise.
+## Experiment 3: Alignment Stress Test
 
-## Experiment 3: Score Distributions
-
-### Setup
-
-This experiment visualizes the laws behind the power formulas. It compares the
-oracle linear score, an orthogonal linear score, and residual-style scores.
-For residual scores
-
-```math
-S_R(X)=\sum_{j\in R}X_j^2,
-```
-
-the null law is central chi-square. If the residual set contains the anomaly
-coordinate, the anomaly law is noncentral chi-square with
-
-```math
-\mathrm{nc}=\delta^2\lambda_Z.
-```
-
-If the residual excludes the anomaly coordinate, the noncentrality is zero.
-
-### Results
-
-![Linear score distributions](figures/section3/score_distributions.png)
-
-![Score-family distributions](figures/section3/score_family_distributions.png)
-
-### Conclusions
-
-- The oracle linear score shifts by `delta sqrt(lambda_Z)`.
-- The orthogonal linear score does not shift under anomalies.
-- Residual scores have power only when their residual subspace includes the
-  anomaly coordinate.
-- The chi-square controls verify the non-linear score behavior independently of
-  the linear theorem.
-
-## Experiment 4: Diverse Score Families
-
-### Setup
-
-This experiment evaluates linear, residual, radial, wrong-orientation, and
-collapsed scores. The goal is to show that the conclusions are not caused by a
-single hand-picked linear candidate.
-
-For linear scores, the table reports `rho_Z`, `rho_U`, `rho_R`, and
-`pi = rho_Z/rho_R`. For non-linear residual scores those linear reliability
-columns are not defined, but their null/anomaly laws are still analytic.
-
-### Results
-
-| score | rho_Z | rho_U | rho_R | pi | CAP | TPR pop. | TPR emp. | shifted W1 emp. | shifted W1 pop. | drift emp. | drift pop. |
-| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
-| linear_oracle_w_star | 0.900000 | 0.000000 | 0.900000 | 1.000000 | 0.415708 | 0.591016 | 0.590113 | 0.997588 | 1.000000 | 0.015733 | 0.017298 |
-| linear_mixed_45deg | 0.450000 | 0.060000 | 0.510000 | 0.882353 | 0.121271 | 0.228934 | 0.223307 | 0.707833 | 0.707107 | 0.006817 | 0.007583 |
-| linear_noise_dim | 0.000000 | 0.120000 | 0.120000 | 0.000000 | 0.007398 | 0.001000 | 0.001040 | 0.010249 | 0.000000 | 0.000033 | 0.000000 |
-| linear_negative_oracle | 0.900000 | 0.000000 | 0.900000 | 1.000000 | 0.415708 | 7.25e-11 | 0.000000 | 0.997588 | 1.000000 | 0.000967 | 0.000978 |
-| residual_oracle_r1 | NA | NA | NA | NA | 0.337630 | 0.511913 | 0.512867 | 0.719967 | 0.706995 | 0.008533 | 0.010004 |
-| residual_mixed_r2 | NA | NA | NA | NA | 0.079145 | 0.400405 | 0.405160 | 0.517946 | 0.499939 | 0.005767 | 0.005852 |
-| radial_all | NA | NA | NA | NA | 0.010259 | 0.215634 | 0.228413 | 0.298619 | 0.288656 | 0.002317 | 0.002388 |
-| residual_noise_r1 | NA | NA | NA | NA | 0.000019 | 0.001000 | 0.001007 | 0.013019 | 0.000000 | 0.000183 | 0.000000 |
-| residual_without_anomaly | NA | NA | NA | NA | 0.000090 | 0.001000 | 0.001060 | 0.006143 | 0.000000 | 0.000033 | 0.000000 |
-| constant_collapse | NA | NA | NA | NA | 0.000000 | NA | NA | 0.000000 | 0.000000 | 0.999000 | NA |
-
-![Score-family comparison](figures/section3/score_family_comparison.png)
-
-### Conclusions
-
-- Oracle and mixed linear scores follow their `rho_Z` and `rho_R` values.
-- The noise coordinate has reproducible nuisance variation but no anomaly
-  alignment, so its TPR stays at the FPR target.
-- The negative oracle has high CAP but nearly zero TPR because it violates the
-  required score orientation.
-- Residual and radial scores behave according to their chi-square laws.
-- The collapsed score is a degenerate control, not a useful validation score.
-
-## Experiment 5: Benign Marginal-Shift Trap
-
-### Setup
-
-The validation domains are shifted along the true anomaly direction:
-
-```math
-X^{(1)}\sim\mathcal N(0,I),
-\qquad
-X^{(2)}\sim\mathcal N(\eta e_0,I),
-\qquad
-\eta=1.
-```
-
-We evaluate TPR, W1, and threshold drift over the same linear direction sweep.
-This isolates what marginal criteria are measuring: they prefer scores whose
-validation histograms move less, even when those scores have lower anomaly
-power.
-
-### Results
-
-| c(w) | TPR emp. | TPR pop. | W1 emp. | W1 pop. | threshold drift emp. | threshold drift pop. |
-| ---: | ---: | ---: | ---: | ---: | ---: | ---: |
-| 1.000000 | 0.589233 | 0.591016 | 0.989093 | 1.000000 | 0.014883 | 0.017298 |
-| 0.747508 | 0.271047 | 0.271523 | 0.738055 | 0.747508 | 0.006633 | 0.008572 |
-| 0.505657 | 0.077740 | 0.079085 | 0.498458 | 0.505657 | 0.003767 | 0.003875 |
-| 0.252492 | 0.011813 | 0.012166 | 0.247867 | 0.252492 | 0.000617 | 0.001272 |
-| 0.000000 | 0.001033 | 0.001000 | 0.004509 | 0.000000 | 0.000167 | 0.000000 |
-
-![Marginal shift trap](figures/section3/marginal_shift_trap.png)
-
-### Conclusions
-
-- TPR is maximized at `c(w)=1`.
-- W1 and threshold drift are minimized near `c(w)=0`.
-- The marginal diagnostics correctly detect less validation shift, but that
-  selection would choose an almost powerless anomaly score.
-
-## Experiment 6: Alignment Stress Test
-
-### Setup
-
-This population-only test compares two covariance regimes:
+The theorem requires the most reproducible direction to also be
+anomaly-aligned. This population-only stress test compares:
 
 - aligned: `lambda_Z = 0.90`, `lambda_U = 0.12`;
 - nuisance-dominated: `lambda_Z = 0.12`, `lambda_U = 0.90`.
 
-The second case violates the sufficient condition
-`lambda_Z > ||Gamma_U||_op`. It creates a reliable direction that is not the
-anomaly direction.
-
-### Results
-
-| case | CAP argmax | rho_Z at CAP argmax | rho_R at CAP argmax | TPR argmax | rho_Z at TPR argmax | rho_R at TPR argmax |
+| case | CAP argmax | rho_Z at CAP | rho_R at CAP | TPR argmax | rho_Z at TPR | rho_R at TPR |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: |
 | aligned | 0.0000 | 0.9000 | 0.9000 | 0.0000 | 0.9000 | 0.9000 |
 | nuisance-dominated | 90.0000 | 0.0000 | 0.9000 | 0.0000 | 0.1200 | 0.1200 |
 
 ![Alignment assumption check](figures/section3/alignment_assumption_check.png)
 
-### Conclusions
+This is the key limitation made explicit: CAP selects the most reproducible
+score. If stable nuisance dominates reproducibility, CAP selects nuisance and
+does not maximize TPR.
 
-- In the aligned regime, CAP and TPR agree at `w*`.
-- In the nuisance-dominated regime, CAP selects the stable nuisance direction
-  because it maximizes `rho_R`.
-- TPR still selects `w*`, because it depends on `rho_Z`.
-- This is the empirical counterpart of the theory's alignment condition.
+The same transition is clearer when sweeping the ratio
+`\lambda_U/\lambda_Z`. Here `lambda_Z = 0.45` is fixed and `lambda_U` is varied.
+The vertical threshold is the equality point `lambda_U = lambda_Z`.
 
-## Reproducibility Checklist
+| lambda_U/lambda_Z | selected | angle min | angle max | CAP max | CAP at w* | CAP at nuisance | TPR selected min | TPR optimal |
+| ---: | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| 0.2410 | anomaly | 0.0000 | 0.0000 | 0.0937 | 0.0937 | 0.0058 | 0.2289 | 0.2289 |
+| 0.7411 | anomaly | 0.0000 | 0.0000 | 0.0937 | 0.0937 | 0.0524 | 0.2289 | 0.2289 |
+| 1.0000 | tie | 0.0000 | 90.0000 | 0.0937 | 0.0937 | 0.0937 | 0.0010 | 0.2289 |
+| 1.2527 | nuisance | 90.0000 | 90.0000 | 0.1462 | 0.0937 | 0.1462 | 0.0010 | 0.2289 |
+| 2.0000 | nuisance | 90.0000 | 90.0000 | 0.4171 | 0.0937 | 0.4171 | 0.0010 | 0.2289 |
+
+![Alignment ratio sweep](figures/section3/alignment_ratio_sweep.png)
+
+Below the threshold, the maximum CAP value is attained at the anomaly direction.
+At equality, CAP is flat across the two-dimensional span and cannot identify the
+anomaly direction. Above the threshold, the maximum CAP value is attained at the
+nuisance direction; the CAP-selected TPR collapses to the target FPR even though
+the population CAP value increases.
+
+## Experiment 4: CAP Versus Marginal Stability Under Benign Shift
+
+This is the main counterexample to marginal stability. The two validation
+domains are still paired through the same latent Gaussian structure, but the
+second domain has a benign offset along the anomaly coordinate:
+
+```math
+X^{(1)}
+  =
+  \sqrt{\lambda_Z} Z e_0
+  +
+  \sqrt{\lambda_U} U e_1
+  +
+  \xi^{(1)},
+\qquad
+X^{(2)}
+  =
+  \sqrt{\lambda_Z} Z e_0
+  +
+  \sqrt{\lambda_U} U e_1
+  +
+  \eta e_0
+  +
+  \xi^{(2)},
+\qquad
+\eta=1.
+```
+
+For `w(theta)`, the paired reliability remains
+`\rho_R(w)=\lambda_Z\cos^2\theta+\lambda_U\sin^2\theta`, so CAP is maximized
+at the anomaly direction because `lambda_Z > lambda_U`. The marginal baselines
+see only the score offset `eta cos(theta)`, so W1 and threshold drift are
+minimized by the orthogonal direction, which has no anomaly power.
+
+| angle_deg | cos_to_anomaly | cap_empirical | cap_theory | tpr_empirical | tpr_theory | wasserstein_empirical | wasserstein_theory | threshold_drift_empirical | threshold_drift_theory |
+| ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| 0.000000 | 1.000000 | 0.164204 | 0.165945 | 0.590893 | 0.591016 | 1.000750 | 1.000000 | 0.017683 | 0.017298 |
+| 30.375000 | 0.862734 | 0.119611 | 0.120705 | 0.409927 | 0.410750 | 0.860849 | 0.862734 | 0.013150 | 0.011957 |
+| 60.750000 | 0.488621 | 0.034888 | 0.035698 | 0.071173 | 0.071077 | 0.484617 | 0.488621 | 0.004333 | 0.003639 |
+| 90.000000 | 0.000000 | 0.006858 | 0.007059 | 0.000873 | 0.001000 | 0.007747 | 0.000000 | 0.000067 | 0.000000 |
+
+| criterion | angle_deg | cos_to_anomaly | cap_theory | tpr_theory | wasserstein_theory | threshold_drift_theory |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| max CAP | 0.000000 | 1.000000 | 0.165945 | 0.591016 | 1.000000 | 0.017298 |
+| max TPR | 0.000000 | 1.000000 | 0.165945 | 0.591016 | 1.000000 | 0.017298 |
+| min W1 | 90.000000 | 0.000000 | 0.007059 | 0.001000 | 0.000000 | 0.000000 |
+| min threshold drift | 90.000000 | 0.000000 | 0.007059 | 0.001000 | 0.000000 | 0.000000 |
+
+![Marginal shift trap](figures/section3/marginal_shift_trap.png)
+
+The conclusion is sharp: CAP and TPR select `w*`, while minimizing W1 or
+threshold drift selects the orthogonal direction. The marginal criteria are not
+wrong about marginal stability; they are measuring the wrong property for
+signal-agnostic anomaly validation in this paired setting.
+
+The same comparison can be repeated for every benign shift direction
+
+```math
+\eta\{\cos(\psi)e_0+\sin(\psi)e_1\},
+\qquad
+\psi\in[0,\pi/2].
+```
+
+For each shift angle `psi`, the experiment records only the selected score
+angle. CAP selects the maximizer of the population paired objective. W1 and
+threshold drift are stability criteria, so they select the minimizer. In this
+default model, evaluating the population CAP objective over all score angles
+selects the anomaly direction for every shift angle,
+
+```math
+\theta_{\mathrm{CAP}}
+  \in
+  \arg\max_\theta L_{\mathrm{CAP}}(\theta;\psi)
+  =
+  \{0\},
+```
+
+matching the maximizer of the paired reliability
+`\rho_R(\theta)`. In contrast, the marginal score shift is
+
+```math
+\eta\cos(\theta-\psi).
+```
+
+Thus the marginal selectors choose the score direction farthest from the shift,
+not the direction with anomaly power.
+
+| shift angle | shift Z | shift U | CAP selected | W1 selected | threshold selected |
+| ---: | ---: | ---: | ---: | ---: | ---: |
+| 0.0000 | 1.0000 | 0.0000 | 0.0000 | 90.0000 | 90.0000 |
+| 30.3750 | 0.8627 | 0.5057 | 0.0000 | 90.0000 | 90.0000 |
+| 45.0000 | 0.7071 | 0.7071 | 0.0000 | 0.0000--90.0000 | 0.0000--90.0000 |
+| 59.6250 | 0.5057 | 0.8627 | 0.0000 | 0.0000 | 0.0000 |
+| 90.0000 | 0.0000 | 1.0000 | 0.0000 | 0.0000 | 0.0000 |
+
+![Marginal shift selector sweep](figures/section3/marginal_shift_selector_sweep.png)
+
+## Reproducibility Notes
 
 - All randomness uses `numpy.random.default_rng(seed)`.
 - All defaults are CLI arguments in `src/analytical.py`.
-- The script does not tune values after seeing outputs; it samples, computes
-  metrics, and writes population formulas next to empirical estimates.
-- Empirical CAP is computed through `ApproximationCapacityKernel`.
-- Population CAP is deterministic Gauss-Hermite quadrature on the same beta
-  grid.
-- CSVs store `cap_raw_empirical` and `cap_empirical`, making the `+log(2)`
-  lift checkable.
-- W1 and threshold drift plots include empirical and population values.
-- Residual scores use central and noncentral chi-square formulas.
+- Empirical CAP uses the repository `ApproximationCapacityKernel`.
+- Empirical feature-level CAP uses static NN pairing in the matching descriptor.
+- Population CAP uses deterministic Gauss-Hermite quadrature for the same
+  baseline-energy objective.
+- CSVs store both `cap_raw_empirical` and `cap_empirical`, so the `+log(2)` lift
+  is auditable.
 
-## Overall Conclusions
+## Overall Conclusion
 
-- CAP is a measure of paired reproducible reliability `rho_R`.
-- Fixed-FPR anomaly power is controlled by anomaly-aligned reliability `rho_Z`.
-- CAP works for anomaly validation when the most reproducible directions are
-  also the most anomaly-aligned directions.
-- Stable nuisance is allowed, but it must not dominate total reproducible
-  reliability.
-- Marginal W1 and threshold drift cannot identify paired reliability from score
-  histograms alone, and under benign shifts they can prefer lower-power scores.
+The experiment supports the precise theory claim:
+
+- CAP measures paired reproducible reliability `rho_R`;
+- fixed-FPR anomaly power is controlled by anomaly-aligned reliability `rho_Z`;
+- CAP is useful for signal-agnostic validation when the most reproducible score
+  directions are also anomaly-aligned;
+- stable nuisance is allowed, but it must not dominate;
+- marginal histogram stability is not enough to identify paired reliability or
+  anomaly power.

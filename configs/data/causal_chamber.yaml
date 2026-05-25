@@ -15,6 +15,12 @@ md5sum: 476664d024f88e8b7640998bb5e9ee33
 feature_set: readouts
 feature_columns: null
 
+# Validation/test normal and reference_normal are real, disjoint rows from
+# uniform_reference. They are matched in control/metadata space and emitted with
+# aligned pair_id/order, so CAP should use pairing_type=none for this dataset.
+pairing_strategy: metadata_nearest
+pairing_columns: null
+
 batch_size: 512
 max_val_batches: -1
 num_workers: 0

@@ -26,6 +26,7 @@ class AE(ADLightningModule):
     :param base_rate: Float of the base rate, used to compute FPR given a target rate.
         If this is 'None', then target_rate is taken as the FPR directly.
     """
+
     def __init__(
         self,
         encoder: nn.Module,
@@ -38,16 +39,14 @@ class AE(ADLightningModule):
         **kwargs,
     ):
         super().__init__(model=None, **kwargs)
-        self.save_hyperparameters(
-            ignore=["model", "features", "encoder", "decoder", "loss"]
-        )
+        self.save_hyperparameters(ignore=["model", "features", "encoder", "decoder", "loss"])
         self.features = features if features is not None else nn.Identity()
         self.features.eval()
 
         self.encoder, self.decoder = encoder, decoder
         self.input_noise_std = input_noise_std
-        self.loss = HuberAELoss(delta=delta, reduction='none')
-        self.ascore = MSEReconstructionLoss(reduction='none')
+        self.loss = HuberAELoss(delta=delta, reduction="none")
+        self.ascore = MSEReconstructionLoss(reduction="none")
 
     def on_fit_start(self):
         inject_object_feature_map(self)
@@ -64,6 +63,20 @@ class AE(ADLightningModule):
         z = self.encoder(x)
         reconstruction = self.decoder(z)
         return z, reconstruction
+
+    def encode_flat(
+        self,
+        x_flat: torch.Tensor,
+        m_flat: torch.Tensor | None = None,
+    ) -> torch.Tensor:
+        del m_flat
+        x_flat = self.features(x_flat)
+        return self.encoder(x_flat)
+
+    def encode_batch(self, batch) -> torch.Tensor:
+        b = unpack_batch(batch)
+        x = torch.flatten(b.x, start_dim=1)
+        return self.encode_flat(x)
 
     def model_step(self, batch: torch.Tensor) -> torch.Tensor:
         b = unpack_batch(batch)

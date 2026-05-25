@@ -12,14 +12,16 @@ from src.data.CausalChamber_datamodule import (
 
 def _write_experiment(path: Path, n_rows: int, offset: float) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
-    header = list(META_COLUMNS) + list(READOUT_FEATURES)
+    control_features = ["red", "green"]
+    header = list(META_COLUMNS) + control_features + list(READOUT_FEATURES)
     with path.open("w", newline="") as f:
         writer = csv.writer(f)
         writer.writerow(header)
         for idx in range(n_rows):
             meta = [float(idx), "standard", float(idx), offset, 1.0]
+            controls = [offset + idx, offset + n_rows - idx]
             features = [offset + idx + j / 10.0 for j in range(len(READOUT_FEATURES))]
-            writer.writerow(meta + features)
+            writer.writerow(meta + controls + features)
 
 
 def test_causal_chamber_datamodule_splits_and_labels(tmp_path: Path) -> None:
@@ -43,7 +45,11 @@ def test_causal_chamber_datamodule_splits_and_labels(tmp_path: Path) -> None:
     dm.prepare_data()
     dm.setup("fit")
 
-    x, mask, l1bit, y = next(iter(dm.train_dataloader()))
+    batch = next(iter(dm.train_dataloader()))
+    x = batch["x"]
+    mask = batch["mask"]
+    l1bit = batch["l1bit"]
+    y = batch["y"]
     assert x.shape == (4, len(READOUT_FEATURES))
     assert mask.shape == x.shape
     assert mask.dtype == torch.bool
@@ -59,10 +65,19 @@ def test_causal_chamber_datamodule_splits_and_labels(tmp_path: Path) -> None:
         "uniform_green_mid",
     ]
 
-    _, _, _, y_ref = next(iter(val_loaders["reference_normal"]))
-    _, _, _, y_red = next(iter(val_loaders["uniform_red_mid"]))
+    normal = next(iter(val_loaders["normal"]))
+    reference = next(iter(val_loaders["reference_normal"]))
+    red = next(iter(val_loaders["uniform_red_mid"]))
+    y_ref = reference["y"]
+    y_red = red["y"]
     assert torch.all(y_ref < 0)
     assert torch.all(y_red > 0)
+    assert torch.equal(normal["pair_id"], reference["pair_id"])
+    assert dm.contract["pairing"]["cap_pairing_type"] == "none"
+    assert dm.contract["model_features"] == list(READOUT_FEATURES)
+    assert dm.contract["pairing_features"] == ["red", "green"]
+    assert "red" in dm.contract["excluded_columns"]
+    assert not torch.equal(normal["sample_id"], reference["sample_id"])
 
     dm.setup("test")
     test_loaders = dm.test_dataloader()

@@ -1,0 +1,16 @@
+# @package _global_
+
+defaults:
+  - /experiment/cchamber/base_agnostic
+  - override /algorithm: ae
+
+tags: ["causal_chamber", "ae", "agnostic"]
+
+algorithm:
+  target_rate: 0.01
+  base_rate: null
+  input_noise_std: 0.0
+  delta: 1.0
+  encoder:
+    in_dim: 11
+    nodes: [32, 16, 4]

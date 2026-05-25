@@ -9,12 +9,12 @@ defaults:
 
 # choose metric which will be optimized by Optuna
 # make sure this is the correct name of some metric logged in lightning module!
-optimized_metric_config: 
-  callback:
-    name: knn_eff
-    params:
-      target_rate: 0.25
-  direction: maximize
+optimized_metric_config:
+  main_metric:
+    callback:
+      name: knn_eff
+      params: {}
+    direction: maximize
   sec_metric:
     callback:
       name: loss

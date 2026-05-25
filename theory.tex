@@ -1,0 +1,1020 @@
+\documentclass[11pt]{article}
+
+\usepackage[margin=1in]{geometry}
+\usepackage{amsmath,amssymb,amsthm,mathtools,bm}
+\usepackage{microtype}
+\usepackage{hyperref}
+
+\hypersetup{colorlinks=true,linkcolor=blue,citecolor=blue,urlcolor=blue}
+
+\newtheorem{assumption}{Assumption}
+\newtheorem{theorem}{Theorem}
+\newtheorem{corollary}{Corollary}
+\newtheorem{proposition}{Proposition}
+\newtheorem{lemma}{Lemma}
+\newtheorem{definition}{Definition}
+\newtheorem{remark}{Remark}
+
+\newcommand{\E}{\mathbb{E}}
+\newcommand{\Pbb}{\mathbb{P}}
+\newcommand{\R}{\mathbb{R}}
+\newcommand{\cL}{\mathcal{L}}
+\newcommand{\cC}{\mathcal{C}}
+\newcommand{\cG}{\mathcal{G}}
+\newcommand{\Normal}{\mathcal{N}}
+\newcommand{\TPR}{\operatorname{TPR}}
+\newcommand{\FPR}{\operatorname{FPR}}
+\newcommand{\Corr}{\operatorname{Corr}}
+\newcommand{\argmax}{\operatorname*{arg\,max}}
+\newcommand{\argmin}{\operatorname*{arg\,min}}
+\DeclareMathOperator{\sech}{sech}
+
+\title{Theoretical Justification}
+\author{}
+\date{}
+
+\begin{document}
+\maketitle
+
+Signal-agnostic model validation relies exclusively on background data. Since no unsupervised method can guarantee optimal future anomaly detection for arbitrary anomalies, a necessary assumption is that future anomalies must be deviations along a latent direction that is learnable from typical data. This assumption can be formalized as a monotone likelihood-ratio condition.
+
+\section{Assumptions}
+
+\begin{assumption}[Latent likelihood-ratio recoverability]
+\label{ass:lrr}
+Let \(P_0\) denote the typical distribution and \(P_1\) a future anomaly distribution. There exists a scalar latent coordinate
+\[
+    Z=T(X)
+\]
+and a nondecreasing function \(h\) such that
+\[
+    \frac{dP_1}{dP_0}(x)=h(T(x)).
+\]
+Thus larger values of \(Z\) are more anomalous in the Neyman--Pearson sense. In addition, the two typical validation domains are treated as noisy samples of the same latent structure: conditioned on \(Z\), they differ only in the randomness entailed by the sampling process.
+\end{assumption}
+
+Assumption~\ref{ass:lrr} formalizes the standard anomaly-detection premise: a good model learns a coordinate of typicality, and anomalies are detected as departures along that coordinate. Then, the goal of a model validation criterion is not to discover arbitrary unseen anomalies, but to select, among trained candidate detectors, the score that recovers this latent anomaly-relevant coordinate most reliably.
+
+In our setting, trained anomaly detectors already map inputs to scalar scores.
+We therefore formulate a closed-form version of Assumption~\ref{ass:lrr}
+directly at the score level, modelling each detector as a noisy measurement of
+a latent anomaly-relevant coordinate, possibly together with stable nuisance
+structure.
+
+\begin{assumption}[Gaussian score channel with stable nuisance]
+\label{ass:channel}
+Let \(\widetilde S_\phi\) denote an anomaly score produced
+by a candidate detector \(\phi\), assuming that larger values are
+more anomalous. Under typical data, the two validation samples satisfy
+\[
+    \widetilde S_\phi^{(d)}
+    =
+    c_\phi
+    +
+    a_\phi Z
+    +
+    b_\phi U_\phi
+    +
+    \sigma_\phi \varepsilon_\phi^{(d)},
+    \qquad d\in\{1,2\},
+\]
+where
+\[
+    Z,U_\phi,\varepsilon_\phi^{(1)},\varepsilon_\phi^{(2)}
+    \stackrel{\mathrm{ind}}{\sim}\Normal(0,1),
+    \qquad
+    a_\phi\ge 0,
+    \qquad
+    b_\phi\in\R,
+    \qquad
+    \sigma_\phi\ge 0,
+    \qquad
+    a_\phi^2+b_\phi^2+\sigma_\phi^2>0 .
+\]
+
+The coefficient \(a_\phi\) measures sensitivity to the anomaly-relevant
+coordinate \(Z\). The coefficient \(b_\phi\) measures sensitivity to a
+reproducible nuisance coordinate \(U_\phi\) that is stable across validation
+views but is not anomaly-relevant. The term
+\(\sigma_\phi \varepsilon_\phi^{(d)}\) captures view-specific noise. The
+standardized scores are:
+
+\[
+    S_\phi^{(d)}
+    =
+    \frac{\widetilde S_\phi^{(d)}-c_\phi}
+    {\sqrt{a_\phi^2+b_\phi^2+\sigma_\phi^2}} .
+\]
+Let
+\[
+    \rho_{\phi}^{Z}
+    =
+    \frac{a_\phi^2}{a_\phi^2+b_\phi^2+\sigma_\phi^2},
+    \qquad
+    \rho_{\phi}^{R}
+    =
+    \frac{a_\phi^2+b_\phi^2}{a_\phi^2+b_\phi^2+\sigma_\phi^2}.
+\]
+Here \(\rho_{\phi}^{Z}\) is the anomaly-aligned fraction of score variance,
+while
+\[
+    \rho_{\phi}^{R}
+    =
+    \Corr(S_\phi^{(1)},S_\phi^{(2)})
+\]
+is the total reproducible fraction of score variance.
+
+As per our initial assumption, future anomalies are positive shifts of the same latent coordinate:
+\[
+    Z\mid Y=1\sim\Normal(\delta,1),
+    \qquad
+    \delta>0,
+\]
+while \(U_\phi\) and \(\varepsilon_\phi^{(d)}\) retain their typical-data laws.
+Consequently, after the same typical-data normalisation,
+\[
+    S_\phi\mid Y=0\sim\Normal(0,1),
+    \qquad
+    S_\phi\mid Y=1\sim\Normal(\delta\sqrt{\rho_\phi^Z},1).
+\]
+\end{assumption}
+
+Assumption~\ref{ass:channel} separates anomaly-aligned reliability
+\(\rho_\phi^Z\) from total reproducible reliability \(\rho_\phi^R\). The two
+coincide only when the stable nuisance component is absent; that is, when \(b_\phi=0\). A detector that is
+useful for anomaly detection should place reproducible score variation on
+\(Z\), increasing \(a_\phi\), rather than on nuisance structure \(U_\phi\),
+reducing \(b_\phi\). A detector can therefore look reproducible on typical data
+while still being poorly aligned with future anomalies if its reproducible
+variation is dominated by \(U_\phi\).
+
+\begin{lemma}[TPR is controlled by anomaly-aligned reliability]
+\label{lem:tpr-rhoz}
+Under Assumption~\ref{ass:channel}, for every false-positive rate
+\(\alpha\in(0,1)\),
+\[
+    \TPR_\phi(\alpha)
+    =
+    \Phi\!\left(
+        \delta\sqrt{\rho_\phi^Z}-\Phi^{-1}(1-\alpha)
+    \right).
+\]
+Hence \(\TPR_\phi(\alpha)\) is strictly increasing in
+\(\rho_\phi^Z\).
+\end{lemma}
+
+\begin{proof}
+Under typical data, \(S_\phi\sim\Normal(0,1)\), so the FPR-\(\alpha\)
+threshold is \(\Phi^{-1}(1-\alpha)\). Under anomalies,
+\[
+    S_\phi\mid Y=1
+    \sim
+    \Normal(\delta\sqrt{\rho_\phi^Z},1).
+\]
+The stated expression follows by evaluating the anomaly exceedance probability
+at that threshold.
+\end{proof}
+
+\section{Reproducible reliability and marginal non-identifiability}
+
+We now compare how CAP and marginal stability criteria behave with respect to
+the reliability parameters in Assumption~\ref{ass:channel}. CAP is evaluated on
+paired validation scores, so its population objective can vary with the total
+reproducible reliability \(\rho_\phi^R\). Wasserstein distance and threshold
+drift only compare the two validation score histograms. They can measure
+marginal score drift between validation domains, but they discard the paired
+dependence that defines \(\rho_\phi^R\).
+
+\subsection{CAP monotonicity}
+
+For a binary CAP energy \(E(p,y)\), let \(p=\nu(s)\in(0,1)\) denote the
+normalized score and define the energy contrast
+\[
+    \Delta_E(s)
+    =
+    E(\nu(s),0)-E(\nu(s),1).
+\]
+The binary Gibbs posterior induced by this energy is
+\[
+\begin{aligned}
+    q_{\beta,E}(s)
+    &=
+    \frac{\exp\{-\beta E(\nu(s),1)\}}
+    {\exp\{-\beta E(\nu(s),0)\}+\exp\{-\beta E(\nu(s),1)\}}
+    =
+    \sigma(\beta\Delta_E(s)),\\
+    m_{\beta,E}(s)
+    &=
+    2q_{\beta,E}(s)-1
+    =
+    \tanh\!\left(\frac{\beta\Delta_E(s)}{2}\right).
+\end{aligned}
+\]
+For the baseline energy \(E(p,y)=y(1-p)+(1-y)p\) and the score normalization
+\(\nu(s)=(s+1)/2\), this reduces to the special case
+\(q_{\beta,E}(s)=\sigma(\beta s)\).
+
+\begin{assumption}[Monotone binary CAP energy]
+\label{ass:monotone-energy}
+The score normalization \(\nu\) and binary energy \(E\) are such that
+\(\Delta_E\) is continuously differentiable, nondecreasing, and nonconstant
+under Gaussian measure:
+\[
+    \Pbb\!\left(\Delta_E'(G)>0\right)>0,
+    \qquad G\sim\Normal(0,1).
+\]
+Moreover, the derivatives required below are integrable. Piecewise-smooth
+energies such as the adaptive ReLU energy satisfy the same argument by a
+standard smoothing approximation, provided their energy contrast is monotone in
+the score.
+\end{assumption}
+
+The approximation capacity kernel for a pair \((s_1,s_2)\) is
+\[
+    \log\{q_{\beta,E}(s_1)q_{\beta,E}(s_2)
+    +[1-q_{\beta,E}(s_1)][1-q_{\beta,E}(s_2)]\}
+    =
+    -\log 2+
+    \log\{1+m_{\beta,E}(s_1)m_{\beta,E}(s_2)\}.
+\]
+Since the constant \(-\log 2\) is irrelevant for model selection, let \(L_\phi\) be the optimization objective
+\[
+    L_\phi(\beta)
+    =
+    \E\log\{1+m_{\beta,E}(S_\phi^{(1)})
+    m_{\beta,E}(S_\phi^{(2)})\}
+\]
+and \(L_\phi^\star\) denote the CAP lift:
+\[
+    L_\phi^\star
+    =
+    \sup_{\beta\in[\beta_{\min},B]} L_\phi(\beta),
+    \qquad 0<\beta_{\min}\le B.
+\]
+Including \(\beta=0\) gives the uninformative constant posterior; it does not
+change the selection whenever the optimized CAP value is attained at positive
+temperature.
+
+\begin{lemma}[CAP is monotone in paired Gaussian reliability]
+\label{lem:price}
+Let \((U,V)\) be standard bivariate Gaussian with correlation \(\rho\in[0,1)\). For every \(\beta>0\),
+\[
+    C_{\beta,E}(\rho)
+    =
+    \E_\rho\log\{1+m_{\beta,E}(U)m_{\beta,E}(V)\}
+\]
+is strictly increasing in \(\rho\) under
+Assumption~\ref{ass:monotone-energy}. Consequently,
+\(\sup_{\beta\in[\beta_{\min},B]} C_{\beta,E}(\rho)\) is strictly increasing
+in \(\rho\) on \([0,1]\).
+\end{lemma}
+
+\begin{proof}
+Let
+\[
+    H_{\beta,E}(u,v)=\log\{1+m_{\beta,E}(u)m_{\beta,E}(v)\}.
+\]
+Price's theorem gives
+\[
+    \frac{d}{d\rho}\E_\rho H_{\beta,E}(U,V)
+    =
+    \E_\rho\left[\frac{\partial^2 H_{\beta,E}}{\partial u\,\partial v}(U,V)\right].
+\]
+Since
+\[
+    m_{\beta,E}'(t)
+    =
+    \frac{\beta}{2}\Delta_E'(t)
+    \sech^2\!\left(\frac{\beta\Delta_E(t)}{2}\right)
+    \ge 0
+\]
+and this derivative is positive on a set of nonzero Gaussian measure,
+\[
+    \frac{\partial^2 H_{\beta,E}}{\partial u\,\partial v}(u,v)
+    =
+    \frac{m_{\beta,E}'(u)m_{\beta,E}'(v)}{
+        \{1+m_{\beta,E}(u)m_{\beta,E}(v)\}^2
+    }
+    \ge0,
+\]
+with strict positivity after expectation because the bivariate Gaussian density
+is positive on every product set of positive Lebesgue measure. Therefore
+\(C_{\beta,E}(\rho)\) is strictly increasing for every fixed \(\beta>0\).
+For the optimized objective, fix \(\rho_1<\rho_2\) and let
+\(\beta_1\in[\beta_{\min},B]\) maximize \(C_{\beta,E}(\rho_1)\). Then
+\[
+    \sup_{\beta\in[\beta_{\min},B]} C_{\beta,E}(\rho_2)
+    \ge
+    C_{\beta_1,E}(\rho_2)
+    >
+    C_{\beta_1,E}(\rho_1)
+    =
+    \sup_{\beta\in[\beta_{\min},B]} C_{\beta,E}(\rho_1).
+\]
+The case \(\rho=1\) follows by continuity.
+\end{proof}
+
+\begin{theorem}[CAP is monotone in reproducible reliability]
+\label{thm:score}
+Under Assumptions~\ref{ass:channel} and~\ref{ass:monotone-energy}, the
+optimized CAP lift \(L_\phi^\star\) is strictly increasing in
+\(\rho_\phi^R\). Therefore, for any candidate family \(\mathcal A\),
+\[
+    \argmax_{\phi\in\mathcal A} L_\phi^\star
+    =
+    \argmax_{\phi\in\mathcal A} \rho_\phi^R,
+\]
+with equality of maximizer sets.
+\end{theorem}
+
+\begin{proof}
+Under Assumption~\ref{ass:channel}, \((S_\phi^{(1)},S_\phi^{(2)})\) is a
+standard bivariate Gaussian pair with correlation \(\rho_\phi^R\). Therefore
+\[
+    L_\phi^\star
+    =
+    \sup_{\beta\in[0,B]} C_\beta(\rho_\phi^R).
+\]
+Lemma~\ref{lem:price} implies that this quantity is strictly increasing in
+\(\rho_\phi^R\).
+\end{proof}
+
+\begin{corollary}[CAP--TPR alignment with stable nuisance]
+\label{cor:cap-tpr-alignment}
+Under Assumption~\ref{ass:channel}, let \(\mathcal A\) be a candidate family
+and define the anomaly alignment of the reproducible component by
+\[
+    \pi_\phi
+    =
+    \begin{cases}
+    \dfrac{a_\phi^2}{a_\phi^2+b_\phi^2},
+        & a_\phi^2+b_\phi^2>0,\\[1.2ex]
+    0,  & a_\phi^2+b_\phi^2=0.
+    \end{cases}
+\]
+Then
+\[
+    \rho_\phi^Z=\pi_\phi\rho_\phi^R.
+\]
+Let
+\[
+    \mathcal A_R^\star
+    =
+    \argmax_{\phi\in\mathcal A}\rho_\phi^R .
+\]
+Every CAP maximizer is TPR-optimal at every false-positive rate
+\(\alpha\in(0,1)\) if and only if
+\[
+    \forall \phi^\star\in\mathcal A_R^\star,\ \forall \psi\in\mathcal A,
+    \qquad
+    \pi_{\phi^\star}\rho_{\phi^\star}^R
+    \ge
+    \pi_\psi\rho_\psi^R .
+    \tag{A}
+    \label{eq:alignment-condition}
+\]
+Equivalently, every maximizer of total reproducible reliability must also
+maximize the anomaly-aligned reliability \(\rho_\phi^Z\). A simple sufficient condition for~\eqref{eq:alignment-condition} is monotone
+alignment:
+\[
+    \rho_\phi^R\ge \rho_\psi^R
+    \quad\Longrightarrow\quad
+    \pi_\phi\ge \pi_\psi
+    \qquad
+    \forall\phi,\psi\in\mathcal A.
+    \tag{B}
+    \label{eq:monotone-alignment}
+\]
+In coefficient form, this states that more reproducible detectors must not have a
+larger stable-nuisance ratio,
+\[
+    \frac{b_\phi^2}{a_\phi^2}
+    \le
+    \frac{b_\psi^2}{a_\psi^2},
+\]
+with the convention that the ratio is \(+\infty\) when \(a_\phi=0\) and
+\(b_\phi\ne0\).
+\end{corollary}
+
+\begin{proof}
+The identity \(\rho_\phi^Z=\pi_\phi\rho_\phi^R\) follows directly from the
+definitions. Theorem~\ref{thm:score} shows that CAP maximizes
+\(\rho_\phi^R\), and Lemma~\ref{lem:tpr-rhoz} shows that TPR is strictly increasing
+in \(\rho_\phi^Z\). Therefore, every CAP maximizer is TPR-optimal if and only if
+every \(\rho_\phi^R\)-maximizer also maximizes
+\(\rho_\phi^Z=\pi_\phi\rho_\phi^R\), which is exactly
+\eqref{eq:alignment-condition}. Finally,
+\eqref{eq:monotone-alignment} implies \eqref{eq:alignment-condition} because a
+maximizer of \(\rho_\phi^R\) also has maximal \(\pi_\phi\), and hence maximal
+product \(\pi_\phi\rho_\phi^R\).
+\end{proof}
+
+Corollary~\ref{cor:cap-tpr-alignment} should be read as an alignment condition,
+not as an assumption that nuisance is absent. CAP rewards reproducible score
+variation. In the score channel, reproducible variation has an anomaly-relevant
+part, \(a_\phi Z\), and a stable nuisance part, \(b_\phi U_\phi\). The ratio
+\[
+    \frac{b_\phi^2}{a_\phi^2}
+\]
+measures how much stable nuisance signal the score contains relative to true
+anomaly signal. Thus, the sufficient condition says that a detector with larger
+reproducible reliability should not become more stable for the wrong reason. Its
+reproducible variation should be at least as anomaly-aligned.
+
+The alignment condition follows the contract between training and validation: training must produce scores whose reproducible
+variation is intended to encode typicality, and CAP then selects the candidate in which that learned structure is most reproducible rather than merely
+lowest-loss. If the condition fails,
+CAP can still select a highly reproducible score, but that score may be
+reproducible because it has learned stable nuisance structure. In a perfect
+detector, all reproducible variation is anomaly-relevant (i.e. \(b_\phi=0\)) and CAP is automatically aligned with TPR.
+
+\subsection{Marginal stability non-identifiability}
+
+We showed that CAP is aligned with \(\rho_\phi^R\), and derived conditions under
+which this alignment also implies alignment with \(\rho_\phi^Z\) and thus with TPR.
+In this section we will show that marginal stability criteria cannot satisfy this requirement
+altogether, as \(\rho_\phi^R\) is a property of the joint distribution of the two validation scores,
+whereas marginal stability criteria only depend on the marginal score distributions \(F_{\phi,1}\) and \(F_{\phi,2}\).
+
+\begin{definition}[Marginal stability criteria]
+\label{def:marginal-stability}
+Let
+\[
+    F_{\phi,d}(t)=\Pbb(S_\phi^{(d)}\le t),
+    \qquad d\in\{1,2\},
+\]
+be the population CDFs of the score produced by detector \(\phi\) on two
+typical validation domains. A validation criterion is
+\emph{marginal stability} if there exists a functional \(\Psi\) such that
+\[
+    M(\phi)=\Psi(F_{\phi,1},F_{\phi,2}).
+\]
+Equivalently, if two detectors have the same two marginal score laws, then
+the criterion assigns them the same value, regardless of their paired
+dependence or anomaly-detection power.
+\end{definition}
+
+The Wasserstein and threshold drift baselines are marginal stability criteria, as
+their population forms are, respectively,
+\[
+    M_{W_1}(\phi)
+    =
+    W_1\!\left(
+        \cL(S_\phi^{(1)}),
+        \cL(S_\phi^{(2)})
+    \right)
+    =
+    \int_0^1
+    \left|
+        F_{\phi,1}^{-1}(u)-F_{\phi,2}^{-1}(u)
+    \right|du,
+\]
+and, for target FPR \(\alpha\in(0,1)\),
+\[
+    M_{\mathrm{thr},\alpha}(\phi)
+    =
+    \left|
+        \Pbb\!\left(
+            S_\phi^{(2)}\ge F_{\phi,1}^{-1}(1-\alpha)
+        \right)-\alpha
+    \right|
+    =
+    \left|
+        1-F_{\phi,2}\!\left(F_{\phi,1}^{-1}(1-\alpha)\right)-\alpha
+    \right|,
+\]
+assuming continuity to avoid quantile ties. In contrast, CAP does not belong to
+this family because its population objective depends on the joint law of
+\((S_\phi^{(1)},S_\phi^{(2)})\).
+
+Marginal stability can measure the amount of domain shift between \(F_1\) and
+\(F_2\), but it cannot identify the paired reproducible reliability
+\(\rho_\phi^R\). This is the non-identifiability obstruction.
+
+\begin{theorem}[Non-identifiability of reproducible reliability from marginal stability]
+\label{thm:marginal-nonidentifiability}
+Let \(M\) be a marginal stability criterion. Fix
+\(\alpha\in(0,1)\), a validation shift \(\eta\in\R\), and two reproducible
+reliability levels
+\[
+    0\le \rho_{\phi_-}^R<\rho_{\phi_+}^R\le 1.
+\]
+There exist two candidate detectors \(\phi_-\) and \(\phi_+\) whose validation
+score marginals are identical across candidates,
+\[
+    F_{\phi_+,1}=F_{\phi_-,1}=\Phi,
+    \qquad
+    F_{\phi_+,2}=F_{\phi_-,2},
+    \qquad
+    F_{\phi_+,2}(t)=\Phi(t-\eta),
+\]
+but whose paired reproducible reliabilities are \(\rho_{\phi_+}^R\) and
+\(\rho_{\phi_-}^R\). Hence every marginal stability criterion ties the two
+candidates,
+\[
+    M(\phi_+)=M(\phi_-),
+\]
+even though their reproducible reliabilities are different. In particular,
+\[
+    M_{W_1}(\phi_+)=M_{W_1}(\phi_-)=|\eta|,
+\]
+and
+\[
+    M_{\mathrm{thr},\alpha}(\phi_+)
+    =
+    M_{\mathrm{thr},\alpha}(\phi_-)
+    =
+    \left|
+        1-\Phi\!\left(\Phi^{-1}(1-\alpha)-\eta\right)-\alpha
+    \right|.
+\]
+When \(\eta=0\), the common marginal stability value is perfect. When
+\(\eta\ne0\), the common value is nonzero. In both cases, marginal stability is
+non-discriminative over \(\rho_\phi^R\). In the calibrated subcase \(\eta=0\),
+if
+\[
+    \pi_{\phi_+}\rho_{\phi_+}^R
+    >
+    \pi_{\phi_-}\rho_{\phi_-}^R,
+\]
+then Corollary~\ref{cor:cap-tpr-alignment} implies that CAP and TPR rank
+\(\phi_+\) above \(\phi_-\), whereas every marginal stability criterion ties
+the two.
+\end{theorem}
+
+\begin{proof}
+For each \(\rho\in[0,1]\), let
+\[
+    G_\rho^{(d)}
+    =
+    \sqrt{\rho}\,Z
+    +
+    \sqrt{1-\rho}\,\varepsilon^{(d)},
+    \qquad d\in\{1,2\},
+\]
+where \(Z,\varepsilon^{(1)},\varepsilon^{(2)}\) are independent standard
+Gaussian variables. Then
+\((G_\rho^{(1)},G_\rho^{(2)})\) is a standard bivariate Gaussian pair with
+correlation \(\rho\). Define validation scores by
+\[
+    S_\rho^{(1)}=G_\rho^{(1)},
+    \qquad
+    S_\rho^{(2)}=\eta+G_\rho^{(2)}.
+\]
+Then \(S_\rho^{(1)}\sim\Normal(0,1)\),
+\(S_\rho^{(2)}\sim\Normal(\eta,1)\), and
+\(\Corr(S_\rho^{(1)},S_\rho^{(2)})=\rho\) for every
+\(\rho\). Instantiate \(\phi_-\) with \(\rho=\rho_{\phi_-}^R\) and
+\(\phi_+\) with \(\rho=\rho_{\phi_+}^R\). The two candidates have the same
+marginal validation laws, so any marginal stability criterion gives them the
+same value.
+
+For Wasserstein distance, the two candidate values are both
+\[
+    W_1(\Normal(0,1),\Normal(\eta,1))=|\eta|.
+\]
+For threshold drift, the threshold calibrated on the first validation domain is
+\(\Phi^{-1}(1-\alpha)\). Under the second validation domain, the exceedance
+probability is
+\[
+    1-\Phi\!\left(\Phi^{-1}(1-\alpha)-\eta\right),
+\]
+which gives the displayed common threshold-drift value. Finally, in the
+calibrated subcase \(\eta=0\), the displayed strict inequality is the two-model
+form of \(\rho_{\phi_+}^Z>\rho_{\phi_-}^Z\). Since
+\(\rho_{\phi_+}^R>\rho_{\phi_-}^R\), Theorem~\ref{thm:score} ranks
+\(\phi_+\) above \(\phi_-\), and Lemma~\ref{lem:tpr-rhoz} gives the same TPR
+ordering.
+\end{proof}
+
+The same obstruction also explains their unreliability as ranking metrics. If
+\(\phi_-\) has identical validation marginals and \(\phi_+\) has a location
+shift \(F_{\phi_+,1}=\Phi\), \(F_{\phi_+,2}(t)=\Phi(t-\eta)\) with
+\(\eta>0\), then smaller-is-better marginal stability criteria prefer
+\(\phi_-\). In particular,
+\[
+    M_{W_1}(\phi_-)=0<M_{W_1}(\phi_+)=\eta,
+    \qquad
+    M_{\mathrm{thr},\alpha}(\phi_-)=0
+    <
+    M_{\mathrm{thr},\alpha}(\phi_+),
+\]
+even if \(\rho_{\phi_-}^R<\rho_{\phi_+}^R\). When additionally
+\(\pi_{\phi_+}\rho_{\phi_+}^R>\pi_{\phi_-}\rho_{\phi_-}^R\), this means
+preferring the lower-TPR detector.
+
+\section{Gaussian linear anomaly model}
+
+We will now illustrate the previous findings with a Gaussian linear anomaly model
+that has an analytical solution. The model
+contains an anomaly-relevant latent coordinate, a stable nuisance subspace,
+and sample-specific noise.
+
+\begin{definition}[Gaussian linear model with stable nuisance]
+\label{def:linear-gaussian}
+Let \(w_\star\in\R^p\) be a unit vector and let
+\(\lambda_Z\in(0,1]\). Let \(\Gamma_U\succeq0\) be a nuisance covariance
+satisfying
+\[
+    \Gamma_U w_\star=0,
+    \qquad
+    \lambda_Z w_\star w_\star^\top+\Gamma_U\preceq I.
+\]
+Choose \(B\) such that \(BB^\top=\Gamma_U\). Under typical data, let the two
+validation views be
+\[
+    X^{(d)}
+    =
+    \sqrt{\lambda_Z}\,Z w_\star
+    +
+    B U
+    +
+    \xi^{(d)},
+    \qquad d\in\{1,2\},
+\]
+where \(Z\sim\Normal(0,1)\), \(U\sim\Normal(0,I)\), and
+\[
+    \xi^{(d)}
+    \stackrel{\mathrm{ind}}{\sim}
+    \Normal(0,I-\lambda_Z w_\star w_\star^\top-\Gamma_U)
+\]
+are mutually independent. Future anomalies shift only the anomaly-relevant
+coordinate:
+\[
+    Z\mid Y=1\sim\Normal(\delta,1),
+    \qquad \delta>0,
+\]
+while \(U\) and \(\xi^{(d)}\) keep their typical-data laws.
+\end{definition}
+
+\begin{corollary}[CAP recovery of the likelihood-ratio direction]
+\label{cor:linear}
+In the Gaussian linear model of Definition~\ref{def:linear-gaussian}, consider
+unit-norm linear scores
+\[
+    S_w^{(d)}=w^\top X^{(d)},
+    \qquad
+    \|w\|=1,
+    \qquad
+    w^\top w_\star\ge0.
+\]
+For each \(w\), we can define
+\[
+    a_w^2=\lambda_Z(w^\top w_\star)^2,
+    \qquad
+    b_w^2=w^\top\Gamma_U w,
+    \qquad
+    \sigma_w^2=1-a_w^2-b_w^2,
+\]
+which aligns the expression of \(S_w^{(d)}\) in terms of Assumption~\ref{ass:channel}, with
+\[
+    \rho_w^Z=a_w^2,
+    \qquad
+    \rho_w^R=a_w^2+b_w^2
+    =
+    w^\top
+    (\lambda_Z w_\star w_\star^\top+\Gamma_U)
+    w .
+\]
+The likelihood-ratio anomaly direction is \(w_\star\), and it is the unique
+maximizer of \(\TPR_w(\alpha)\) for every \(\alpha\in(0,1)\). On any candidate
+family \(\mathcal W\), CAP maximizers are TPR-optimal within
+\(\mathcal W\) whenever
+\[
+    \argmax_{w\in\mathcal W}\{a_w^2+b_w^2\}
+    \subseteq
+    \argmax_{w\in\mathcal W} a_w^2.
+\]
+This is the linear-Gaussian form of the alignment condition in
+Corollary~\ref{cor:cap-tpr-alignment}: a score may contain stable nuisance
+power \(b_w^2\), but nuisance power must not make a less anomaly-aligned
+direction maximize total reproducible reliability. In particular, over all unit-norm scores with \(w^\top w_\star\ge0\), this
+condition is implied by the covariance condition
+\[
+    \lambda_Z>\|\Gamma_U\|_{\mathrm{op}}.
+\]
+Under this sufficient condition, \(w_\star\) is the unique CAP maximizer:
+\[
+    \argmax_{\|w\|=1,\,w^\top w_\star\ge0}
+    L_w^\star
+    =
+    \{w_\star\}
+    =
+    \argmax_{\|w\|=1,\,w^\top w_\star\ge0}
+    \TPR_w(\alpha).
+\]
+\end{corollary}
+
+\begin{proof}
+For any unit \(w\), the typical marginal covariance of \(X^{(d)}\) is \(I\), so
+\(S_w^{(d)}\sim\Normal(0,1)\). Moreover,
+\[
+    S_w^{(d)}
+    =
+    \sqrt{\lambda_Z}(w^\top w_\star) Z
+    +
+    w^\top B U
+    +
+    w^\top \xi^{(d)}.
+\]
+The nuisance term \(w^\top B U\) is a scalar Gaussian with variance
+\(w^\top\Gamma_Uw=b_w^2\), and the view-specific term has variance
+\(\sigma_w^2\). Thus the linear score has exactly the score-channel form with
+coefficients \(a_w,b_w,\sigma_w\). Therefore
+\[
+    \rho_w^Z=a_w^2,
+    \qquad
+    \rho_w^R=a_w^2+b_w^2.
+\]
+
+Under anomalies, the marginal distribution of \(X\) is
+\[
+    \Normal(\delta\sqrt{\lambda_Z}\,w_\star,I).
+\]
+The likelihood ratio is therefore
+\[
+    \log\frac{dP_1}{dP_0}(x)
+    =
+    \delta\sqrt{\lambda_Z}\,w_\star^\top x
+    -
+    \frac{\delta^2\lambda_Z}{2},
+\]
+so the likelihood-ratio direction is \(w_\star\). By
+Lemma~\ref{lem:tpr-rhoz},
+\[
+    \TPR_w(\alpha)
+    =
+    \Phi\!\left(
+        \delta\sqrt{\lambda_Z}(w^\top w_\star)
+        -
+        \Phi^{-1}(1-\alpha)
+    \right),
+\]
+which is uniquely maximized by \(w=w_\star\) under the sign constraint
+\(w^\top w_\star\ge0\). The candidate-family statement follows directly from
+Corollary~\ref{cor:cap-tpr-alignment}, because CAP maximizes
+\(\rho_w^R=a_w^2+b_w^2\), while TPR is strictly increasing in
+\(\rho_w^Z=a_w^2\).
+
+Let
+\[
+    \lambda_U=\|\Gamma_U\|_{\mathrm{op}}.
+\]
+Since \(\Gamma_Uw_\star=0\),
+\[
+    w^\top\Gamma_Uw
+    \le
+    \lambda_U\{1-(w^\top w_\star)^2\}.
+\]
+Hence, if \(\lambda_Z>\lambda_U\),
+\[
+\begin{aligned}
+    \rho_w^R
+    &=
+    \lambda_Z(w^\top w_\star)^2
+    +
+    w^\top\Gamma_Uw  \\
+    &\le
+    \lambda_U
+    +
+    (\lambda_Z-\lambda_U)(w^\top w_\star)^2
+    \le
+    \lambda_Z,
+\end{aligned}
+\]
+with equality only when \(w=w_\star\). Thus \(w_\star\) is the unique maximizer
+of \(\rho_w^R\), and Theorem~\ref{thm:score} makes it the unique CAP maximizer.
+\end{proof}
+
+The condition \(\lambda_Z>\|\Gamma_U\|_{\mathrm{op}}\) is the covariance form of
+the nuisance-ratio condition. A direction \(w\) can have \(b_w^2>0\), but it
+cannot be selected by CAP unless its total reproducible power
+\(a_w^2+b_w^2\) exceeds that of the anomaly direction. The condition prevents
+this by requiring every stable nuisance direction to be less reproducible than
+\(w_\star\).
+
+Marginal stability behaves differently because it only sees score histograms. In
+the calibrated version of the above model, unit-norm scores behave as standard gaussians.
+Therefore Wasserstein distance and threshold drift are zero for every
+direction \(w\), including directions with \(w^\top w_\star=0\) and hence lower
+TPR. They do not identify the reproducible covariance that lets CAP select
+\(w_\star\).
+
+The same point appears geometrically in the location-shift construction of
+Theorem~\ref{thm:marginal-nonidentifiability}. If
+\(P_0=\Normal(0,I)\), \(P_1=\Normal(\delta w_\star,I)\), and the second
+validation domain has a benign location shift along the anomaly direction,
+\[
+    X^{(1)}\sim\Normal(0,I),
+    \qquad
+    X^{(2)}\sim\Normal(\eta w_\star,I),
+    \qquad
+    \eta>0.
+\]
+For any unit-norm direction \(w\) with \(w^\top w_\star\ge0\), write
+\[
+    c(w)=w^\top w_\star\in[0,1].
+\]
+Then
+\[
+    \TPR_w(\alpha)
+    =
+    \Phi\!\left(\delta c(w)-\Phi^{-1}(1-\alpha)\right),
+    \qquad
+    M_{W_1}(w)=\eta c(w),
+\]
+and
+\[
+    M_{\mathrm{thr},\alpha}(w)
+    =
+    1-\Phi\!\left(\Phi^{-1}(1-\alpha)-\eta c(w)\right)-\alpha,
+\]
+so both marginal stability baselines are strictly increasing in \(c(w)\), while
+TPR is also strictly increasing in \(c(w)\). Hence, when the dimension is at
+least two, every direction in
+\[
+    \mathcal R_\epsilon
+    =
+    \{w:\|w\|=1,\ 0\le c(w)\le 1-\epsilon\},
+    \qquad
+    \epsilon\in(0,1),
+\]
+has lower Wasserstein and threshold drift than \(w_\star\), even though every
+such direction has strictly lower TPR than \(w_\star\). Thus marginal stability
+prefers lower-power scores over the true anomaly direction.
+
+\section{Finite-sample CAP selection}
+
+The practical validation procedure chooses among a finite set of trained candidates
+using finitely many paired validation samples and a finite numerical search over
+inverse temperatures. The remaining question is whether the empirical CAP estimate reliably identifies the
+population CAP maximizer within the searched candidate family. The following
+result gives the corresponding uniform concentration guarantee.
+
+\begin{theorem}[Uniform finite-sample CAP concentration]
+\label{thm:finite-sample-cap}
+Let \(\mathcal A\) be a finite set of candidate detectors and let
+\(\mathcal B=\{\beta_1,\ldots,\beta_K\}\subset[\beta_{\min},B]\) be the finite
+temperature grid used to evaluate CAP. For each \(\phi\in\mathcal A\), let
+\((S_{\phi,i}^{(1)},S_{\phi,i}^{(2)})_{i=1}^n\) be i.i.d. validation score
+pairs from the population paired law of \(\phi\). Define
+\[
+\ell_{\phi,\beta}(s_1,s_2)
+=
+\log\{q_{\beta,E}(s_1)q_{\beta,E}(s_2)
++[1-q_{\beta,E}(s_1)][1-q_{\beta,E}(s_2)]\}.
+\]
+Assume the normalized score-energy contrast is bounded on the validation
+support so that, for all \(\phi\in\mathcal A\), \(\beta\in\mathcal B\), and
+validation pairs,
+\[
+    \ell_{\min}\le \ell_{\phi,\beta}(S_\phi^{(1)},S_\phi^{(2)})
+    \le \ell_{\max},
+    \qquad
+    R_\ell=\ell_{\max}-\ell_{\min}<\infty .
+\]
+Let
+\[
+    \widehat L_\phi(\beta)
+    =
+    \frac1n\sum_{i=1}^n
+    \ell_{\phi,\beta}(S_{\phi,i}^{(1)},S_{\phi,i}^{(2)}),
+    \qquad
+    L_\phi(\beta)=\E\,\ell_{\phi,\beta}(S_\phi^{(1)},S_\phi^{(2)}),
+\]
+and define the grid-optimized objectives
+\[
+    \widehat L_{\phi,\mathcal B}^{\star}
+    =
+    \max_{\beta\in\mathcal B}\widehat L_\phi(\beta),
+    \qquad
+    L_{\phi,\mathcal B}^{\star}
+    =
+    \max_{\beta\in\mathcal B}L_\phi(\beta).
+\]
+Then, with probability at least \(1-\delta\),
+\[
+    \max_{\phi\in\mathcal A}
+    \left|
+        \widehat L_{\phi,\mathcal B}^{\star}
+        -
+        L_{\phi,\mathcal B}^{\star}
+    \right|
+    \le
+    R_\ell
+    \sqrt{
+        \frac{\log(2|\mathcal A|K/\delta)}{2n}
+    }.
+\]
+Consequently, if
+\(\widehat\phi\in\argmax_{\phi\in\mathcal A}
+\widehat L_{\phi,\mathcal B}^{\star}\), then
+\[
+    L_{\widehat\phi,\mathcal B}^{\star}
+    \ge
+    \max_{\phi\in\mathcal A}L_{\phi,\mathcal B}^{\star}
+    -
+    2R_\ell
+    \sqrt{
+        \frac{\log(2|\mathcal A|K/\delta)}{2n}
+    }.
+\]
+If the population grid-CAP maximizer is unique and its gap over the
+second-best candidate exceeds twice the displayed deviation bound, then the
+empirical CAP maximizer equals the population grid-CAP maximizer.
+\end{theorem}
+
+\begin{proof}
+For fixed \((\phi,\beta)\), Hoeffding's inequality gives
+\[
+    \Pbb\!\left(
+        |\widehat L_\phi(\beta)-L_\phi(\beta)|>t
+    \right)
+    \le
+    2\exp\!\left(-\frac{2nt^2}{R_\ell^2}\right).
+\]
+A union bound over the \(|\mathcal A|K\) candidate-temperature pairs gives,
+with probability at least \(1-\delta\),
+\[
+    \max_{\phi\in\mathcal A,\beta\in\mathcal B}
+    |\widehat L_\phi(\beta)-L_\phi(\beta)|
+    \le
+    R_\ell
+    \sqrt{
+        \frac{\log(2|\mathcal A|K/\delta)}{2n}
+    }
+    \equiv \epsilon_n .
+\]
+Taking maxima over \(\beta\) is 1-Lipschitz with respect to the sup norm, so
+\[
+    \left|
+        \max_{\beta\in\mathcal B}\widehat L_\phi(\beta)
+        -
+        \max_{\beta\in\mathcal B}L_\phi(\beta)
+    \right|
+    \le \epsilon_n
+\]
+simultaneously for every \(\phi\). This proves the first display. If
+\(\widehat\phi\) maximizes the empirical grid objective and
+\(\phi^\star\) maximizes the population grid objective, then
+\[
+    L_{\widehat\phi,\mathcal B}^{\star}
+    \ge
+    \widehat L_{\widehat\phi,\mathcal B}^{\star}-\epsilon_n
+    \ge
+    \widehat L_{\phi^\star,\mathcal B}^{\star}-\epsilon_n
+    \ge
+    L_{\phi^\star,\mathcal B}^{\star}-2\epsilon_n .
+\]
+The exact-selection statement follows by comparing this inequality with the
+population gap.
+\end{proof}
+
+Writing
+\[
+    \epsilon_n
+    =
+    R_\ell
+    \sqrt{
+        \frac{\log(2|\mathcal A|K/\delta)}{2n}
+    },
+\]
+Theorem~\ref{thm:finite-sample-cap} separates estimation error from the
+population alignment question. Empirical CAP selection is a statistically
+consistent proxy for population CAP selection over a fixed search set, and the cost of searching many candidates and
+temperatures enters only through \(\log(|\mathcal A|K)\). If two candidates have
+a population CAP gap smaller than \(2\epsilon_n\), finite validation noise can
+change their empirical ordering. If the population gap is larger than
+\(2\epsilon_n\), the empirical maximizer recovers the population maximizer with
+probability at least \(1-\delta\).
+
+\begin{remark}
+In practice, CAP optimizes \(\beta\) over a compact
+continuous interval \([\beta_{\min},B]\), rather than over a fixed grid. The
+same guarantee extends by a standard covering argument. If
+\(\ell_{\phi,\beta}\) is uniformly \(L_\beta\)-Lipschitz in \(\beta\), choose
+an \(\eta\)-net \(\mathcal B_\eta\) of \([\beta_{\min},B]\), with
+\(|\mathcal B_\eta|\le \lceil(B-\beta_{\min})/\eta\rceil+1\). Applying the
+theorem on \(\mathcal B_\eta\) gives, uniformly over the continuous interval,
+an additional approximation error at most \(2L_\beta\eta\):
+\[
+    \sup_{\phi\in\mathcal A}
+    \left|
+        \sup_{\beta\in[\beta_{\min},B]}\widehat L_\phi(\beta)
+        -
+        \sup_{\beta\in[\beta_{\min},B]}L_\phi(\beta)
+    \right|
+    \le
+    R_\ell
+    \sqrt{
+        \frac{\log(2|\mathcal A||\mathcal B_\eta|/\delta)}{2n}
+    }
+    +
+    2L_\beta\eta .
+\]
+Thus continuous optimization changes the result only by the discretization
+term \(2L_\beta\eta\), which can be made arbitrarily small on compact
+temperature intervals.
+\end{remark}
+
+\end{document}

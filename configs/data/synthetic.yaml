@@ -1,0 +1,18 @@
+# @package data
+
+_target_: src.data.synthetic.SyntheticL1ADDataModule
+n_features: 8
+n_train: 200000
+n_val: 100000
+n_test: 100000
+batch_size: 8192
+max_val_batches: null
+seed: ${seed}
+paper_aliases: false
+
+generator: gaussian_subspace
+noise_std: 1.0
+reference_shift: 0.0
+reference_shift_dim: 1
+anomaly_shift: 4.0
+anomaly_dim: 0

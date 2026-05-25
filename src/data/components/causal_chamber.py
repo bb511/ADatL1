@@ -8,12 +8,14 @@ import pandas as pd
 import torch
 from torch.utils.data import IterableDataset
 
+from src.utils.pairing.utils import one_to_one_nearest_pairs
+
 META_COLUMNS = (
     "timestamp",
     "config",
     "counter",
     "flag",
-    "intervention"
+    "intervention",
 )
 READOUT_FEATURES = (
     "current",
@@ -525,41 +527,39 @@ class CausalChamberDataBuilder:
         normal_pool = base_indices[order[:n_pairs]]
         reference_pool = base_indices[order[n_pairs : 2 * n_pairs]]
 
-        if table.pairing.size(1) == 0 or self.pairing_strategy == "random":
-            return normal_pool, reference_pool, torch.full((n_pairs,), float("nan"))
-        if self.pairing_strategy != "nearest":
-            raise ValueError("pairing_strategy must be one of: nearest, random.")
+        strategy = (
+            "metadata_nearest" if self.pairing_strategy == "nearest" else self.pairing_strategy
+        )
+        if strategy == "random":
+            ref_order = torch.randperm(reference_pool.numel(), generator=gen)
+            return (
+                normal_pool,
+                reference_pool[ref_order],
+                torch.full((n_pairs,), float("nan")),
+            )
+        if table.pairing.size(1) == 0:
+            raise ValueError(
+                "metadata_nearest pairing requires at least one pairing column. "
+                "Set pairing_columns or use pairing_strategy=random."
+            )
+        if strategy != "metadata_nearest":
+            raise ValueError("pairing_strategy must be one of: nearest, metadata_nearest, random.")
 
-        x1 = table.pairing[normal_pool]
-        x2 = table.pairing[reference_pool]
+        x1 = table.pairing[normal_pool].float()
+        x2 = table.pairing[reference_pool].float()
         combined = torch.cat([x1, x2], dim=0)
         center = combined.mean(dim=0)
         scale = combined.std(dim=0).clamp_min(1.0e-6)
-        dists = torch.cdist((x1 - center) / scale, (x2 - center) / scale)
-
-        flat_order = torch.argsort(dists.flatten())
-        used_1 = torch.zeros(n_pairs, dtype=torch.bool)
-        used_2 = torch.zeros(n_pairs, dtype=torch.bool)
-        matched_1 = []
-        matched_2 = []
-        matched_dist = []
-        for flat_idx in flat_order.tolist():
-            i = flat_idx // n_pairs
-            j = flat_idx % n_pairs
-            if used_1[i] or used_2[j]:
-                continue
-            used_1[i] = True
-            used_2[j] = True
-            matched_1.append(normal_pool[i])
-            matched_2.append(reference_pool[j])
-            matched_dist.append(dists[i, j])
-            if len(matched_1) == n_pairs:
-                break
+        pairs = one_to_one_nearest_pairs(
+            (x1 - center) / scale,
+            (x2 - center) / scale,
+            k=None,
+        )
 
         return (
-            torch.stack(matched_1).long(),
-            torch.stack(matched_2).long(),
-            torch.stack(matched_dist).float(),
+            normal_pool[pairs.idx_1].long(),
+            reference_pool[pairs.idx_2].long(),
+            pairs.distance.sqrt().float(),
         )
 
     def _store_pairing_diagnostics(self, split_name: str, pair_distance: torch.Tensor) -> None:
@@ -567,6 +567,8 @@ class CausalChamberDataBuilder:
             self._pairing_diagnostics = {}
         finite = pair_distance[torch.isfinite(pair_distance)]
         self._pairing_diagnostics[split_name] = {
+            "strategy": self.pairing_strategy,
+            "source": "metadata" if self.pairing_strategy != "random" else "random",
             "n_pairs": int(pair_distance.numel()),
             "mean_distance": None if finite.numel() == 0 else float(finite.mean()),
             "median_distance": None if finite.numel() == 0 else float(finite.median()),
@@ -584,7 +586,7 @@ class CausalChamberDataBuilder:
         raise ValueError(f"Unsupported split '{split_name}'.")
 
     def _signal_names(self) -> list[str]:
-        if self.signal_experiments:
+        if self.signal_experiments is not None:
             return list(self.signal_experiments)
         return sorted(
             p.stem for p in self.dataset_dir.glob("*.csv") if p.stem != "uniform_reference"

@@ -308,6 +308,8 @@ class CausalChamberDataModule(LightningDataModule):
             raise ValueError("reference_fraction must be in (0, 1].")
         if not (0.0 < self.hparams.signal_val_fraction < 1.0):
             raise ValueError("signal_val_fraction must be in (0, 1).")
+        if self.hparams.pairing_strategy not in {"nearest", "metadata_nearest", "random"}:
+            raise ValueError("pairing_strategy must be one of: nearest, metadata_nearest, random.")
 
     @staticmethod
     def _check_md5(path: Path, expected: str | None) -> None:

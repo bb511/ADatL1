@@ -1,0 +1,64 @@
+# @package algorithm
+
+_target_: src.algorithms.jetclr.JetCLR
+
+seed: ${seed}
+diagnosis_metrics: true
+ckpt: ""
+
+feature_blur:
+  _target_: src.algorithms.components.augmentation.FastFeatureBlur
+  prob: 0.25
+  magnitude: 0.10
+  strength: 0.35
+
+object_mask:
+  _target_: src.algorithms.components.augmentation.FastObjectMask
+  prob: 0.02
+
+lorentz_rotation:
+  _target_: src.algorithms.components.augmentation.FastLorentzRotation
+  _partial_: true
+  prob: 0.30
+
+model:
+  _target_: src.algorithms.components.jet_encoder.ObjectTransformerEncoder
+  feature_names: [Et, eta, phi]
+  object_types: [FET, MET, egammas, jets, muons, taus]
+  feature_dim: 3
+  d_model: 64
+  out_dim: 64
+  n_heads: 4
+  n_layers: 2
+  dim_feedforward: 256
+  dropout: 0.0
+  activation: gelu
+  pooling: cls
+
+projector:
+  _target_: src.algorithms.components.mlp.MLP
+  in_dim: ${algorithm.model.out_dim}
+  nodes: [256, 256]
+  out_dim: 64
+  batchnorm: true
+  activation: gelu
+
+loss:
+  _target_: src.algorithms.losses.contrastive.NTXentLoss
+  temperature: 0.10
+
+optimizer:
+  _partial_: true
+  _target_: torch.optim.AdamW
+  lr: 0.0003
+  weight_decay: 0.0001
+  betas: [0.9, 0.99]
+  eps: 1e-8
+
+scheduler:
+  scheduler:
+    _target_: src.algorithms.schedulers.cdw.CosineWithWarmup
+    _partial_: true
+    warmup_ratio: 0.05
+    min_lr_ratio: 0.05
+    warmup_start_ratio: 1e-3

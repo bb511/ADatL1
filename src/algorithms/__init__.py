@@ -16,27 +16,20 @@ class ADLightningModule(LightningModule):
     def __init__(
         self,
         model: nn.Module = None,
-        loss: nn.Module = None,
         optimizer: optim.Optimizer = None,
         scheduler: Optional[DictConfig] = None,
-        masking: Optional[nn.Module] = None,
         save_hyperparameters: bool = False,
     ):
         super().__init__()
-        self.save_hyperparameters(
-            {"optimizer": optimizer, "scheduler": scheduler},
-            logger=False,
-        )
+        self.save_hyperparameters(ignore=["model", "loss"])
 
         self.model = model
-        self.loss = loss
-        self.masking = masking if masking is not None else nn.Identity()
         self._log_sum = {}
         self._log_nsteps = {}
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         """Override with the forward pass."""
-        return self.model(self.masking(x))
+        return self.model(x)
 
     def model_step(self, batch) -> dict[str, torch.Tensor]:
         """Run one model step. Must be implemented by subclasses."""
@@ -194,6 +187,3 @@ class ADLightningModule(LightningModule):
 
     def compute_threshold_quantile(self) -> float:
         return 1.0 - self.compute_target_fpr()
-
-
-L1ADLightningModule = ADLightningModule

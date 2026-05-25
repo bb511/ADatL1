@@ -14,32 +14,17 @@ clean-logs: ## Clean logs
 	rm -rf logs/**
 
 format: ## Run pre-commit hooks
-	uv run pre-commit run -a
+	pre-commit run -a
 
 sync: ## Merge changes from main branch to your current branch
 	git pull
 	git pull origin main
 
-uv-sync: ## Install/update the uv environment
-	uv sync --group dev
-
-uv-lock: ## Refresh the uv lockfile
-	uv lock
-
 test: ## Run not slow tests
-	uv run pytest -k "not slow"
+	pytest -k "not slow"
 
 test-full: ## Run all tests
-	uv run pytest
+	pytest
 
 train: ## Train the model
-	uv run python src/train.py
-
-train-demo: ## Run a short CIFAR-10 AE smoke training
-	uv run python tests/train.py experiment=demo/cifar10_ae
-
-train-l1-demos: ## Run short synthetic L1 smoke trainings
-	uv run python tests/train.py experiment=demo/l1_vae
-	uv run python tests/train.py experiment=demo/l1_vicreg
-	uv run python tests/train.py experiment=demo/l1_wnae
-	uv run python tests/train.py experiment=demo/l1_rvae
+	python src/train.py

@@ -1,25 +1,24 @@
 # Approximation Capacity implementation. Based on the work of Victor Jimenez.
+from typing import Optional, Any, Callable
+from tqdm import tqdm
 import gc
-from typing import Any, Callable, Optional
 
 import torch
 from torch import Tensor, optim
-from torch.utils.data import DataLoader, TensorDataset
+from torch.utils.data import TensorDataset, DataLoader
 from torchmetrics import Metric
-from tqdm import tqdm
 
-from src.callbacks.metrics.cap.binary import get_energy_fn as get_energy_fn_binary
+from src.callbacks.metrics.cap.kernel import ApproximationCapacityKernel
 from src.callbacks.metrics.cap.binary import (
     get_normalizer_fn as get_normalizer_fn_binary,
-)
-from src.callbacks.metrics.cap.binary import (
+    get_energy_fn as get_energy_fn_binary,
     get_regularizer_fn as get_regularizer_fn_binary,
 )
-from src.callbacks.metrics.cap.kernel import ApproximationCapacityKernel
 
 
 class ApproximationCapacity(Metric):
-    """Approximation Capacity (CAP) Metric for classification tasks.
+    """
+    Approximation Capacity (CAP) Metric for classification tasks.
 
     The metric maximizes the mutual information between two sets of classification
     scores (e.g. log-probabilities, reconstruction losses, ...) parametrizing their
@@ -164,7 +163,7 @@ class ApproximationCapacity(Metric):
 
     def update(self, logits1: Tensor, logits2: Tensor, **kwargs):
         """Optimize beta parameter over multiple epochs."""
-        self._reset_cap_state()
+        self.reset()
 
         # Normalize the logits
         logits1, logits2 = self.normalizer_fn(logits1, logits2)
@@ -239,9 +238,7 @@ class ApproximationCapacity(Metric):
                 batch_logits2 = batch[1].to(self.dev, non_blocking=use_pin_memory)
                 _ = kernel.evaluate(batch_logits1, batch_logits2, beta=best_beta)
 
-            self.cap = (
-                kernel.capacity.detach().clone().to(device=self.cap.device, dtype=self.cap.dtype)
-            )
+            self.cap.fill_(kernel.capacity.item())
 
         kernel.to("cpu")
         del kernel
@@ -249,8 +246,3 @@ class ApproximationCapacity(Metric):
     def compute(self) -> Tensor:
         """Return the computed CAP value."""
         return self.cap.item()
-
-    def _reset_cap_state(self) -> None:
-        """Reset CAP state with a fresh tensor compatible with Lightning inference mode."""
-        with torch.inference_mode(False):
-            self.cap = torch.zeros((), device=self.cap.device, dtype=self.cap.dtype)

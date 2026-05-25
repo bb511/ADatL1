@@ -7,78 +7,58 @@ authors = [
 ]
 license = {text = "MIT"}
 readme = "README.md"
-requires-python = ">=3.10,<3.12"
+
+requires-python = ">=3.10"
 dependencies = [
-    "adl1t-datamaker @ git+https://github.com/bb511/adl1t_datamaker.git@e8debb2f10bbc1dcf1813ce5b20decffc9950514",
-    "awkward>=2.8,<3",
-    "capmetric @ git+ssh://git@github.com/viictorjimenezzz/cap-metric.git@main",
-    "colorama>=0.4.6,<0.5",
-    "datasets>=4.8.4,<5",
-    "fastparquet>=2024.11",
-    "h5py>=3.10",
-    "huggingface-hub>=1.1,<2",
-    "hydra-colorlog>=1.2,<2",
-    "hydra-core>=1.3,<2",
-    "hydra-optuna-sweeper>=1.2,<2",
-    "hydra-submitit-launcher>=1.2,<2",
-    "matplotlib>=3.8,<4",
-    "mlflow>=3.2,<4",
+    "adl1t-datamaker @ git+https://github.com/bb511/adl1t_datamaker.git@master",
+    "torch (==2.*)",
+    "torchvision (==0.*)",
+    "pytorch-lightning (==2.*)",
+    "torchmetrics (==1.*)",
+    "hydra-core (==1.*)",
+    "rich (==13.*)",
+    "pre-commit (==3.*)",
+    "pytest (==7.*)",
+    "ipdb (>=0.13.13,<0.14.0)",
+    "mlflow (>=3.2)",
+    "hydra-optuna-sweeper (>=1.2.0,<2.0.0)",
+    "hydra-colorlog>=1.2.0,<2.0.0",
+    "rootutils (>=1.0.7,<2.0.0)",
+    "numexpr (>=2.14.1,<3.0.0)",
+    "pathvalidate (>=3.3.1,<4.0.0)",
+    "hydra-submitit-launcher (>=1.2.0,<2.0.0)",
+    "colorama (>=0.4.6,<0.5.0)",
     "mplhep>=0.4.1",
-    "numexpr>=2.10,<3",
-    "numpy>=2.0,<3",
-    "optuna==2.10.1",
-    "pandas>=2.2,<3",
-    "pathvalidate>=3.3,<4",
-    "pillow>=10",
-    "POT>=0.9,<1",
-    "pyarrow>=21,<23",
-    "python-dotenv>=1.0,<2",
-    "pytorch-lightning>=2.4,<3",
-    "pyyaml>=6,<7",
-    "rich>=13,<14",
-    "rootutils>=1.0.7,<2",
-    "scikit-learn>=1.5,<2",
-    "scipy>=1.14,<2",
-    "sqlalchemy<2",
-    "torch>=2,<3",
-    "torchmetrics>=1,<2",
-    "torchvision>=0.20,<1",
-    "tqdm>=4.66,<5",
-    "uproot>=5,<6",
+    "sqlalchemy (<2)",
+    "optuna (==2.10.1)",
+    "pyarrow (>=21,<23)",
+    "datasets (>=4.8.4,<5.0.0)",
+    "huggingface-hub (>=1.11.0,<2.0.0)",
 ]
 
-[project.scripts]
-train = "src.train:main"
+[tool.poetry.dependencies]
+torch = { version = "==2.*", source = "pytorch-cu128" }
+torchvision = { version = "==0.*", source = "pytorch-cu128" }
+torchaudio = { version = "==2.*", source = "pytorch-cu128" }
+
+[[tool.poetry.source]]
+name = "pytorch-cu128"
+url = "https://download.pytorch.org/whl/cu128"
+priority = "explicit"
+
 
 [build-system]
-requires = ["setuptools>=68", "wheel"]
-build-backend = "setuptools.build_meta"
+requires = ["poetry-core>=2.0.0,<3.0.0"]
+build-backend = "poetry.core.masonry.api"
+
 
 [project.optional-dependencies]
 quant = [
-    "keras<3.13",
-    "hgq2>=0.1.5,<0.2",
-    "hls4ml @ git+https://github.com/fastmachinelearning/hls4ml.git@a3064d50d9edff806964520015bbb96085ba10d4",
-]
-wandb = [
-    "wandb>=0.17,<1",
+    "keras (<3.13)",
+    "hgq2 (>=0.1.5,<0.2.0)",
+    "hls4ml @ git+https://github.com/fastmachinelearning/hls4ml.git",
 ]
 
-[dependency-groups]
-dev = [
-    "ipdb>=0.13.13,<0.14",
-    "packaging>=24",
-    "pre-commit>=3,<4",
-    "pytest>=7,<8",
-    "setuptools>=68",
-]
-
-[tool.setuptools.packages.find]
-where = ["."]
-include = ["src*", "configs*"]
-
-[tool.setuptools.package-data]
-configs = ["**/*.yaml"]
 
 [tool.pytest.ini_options]
 addopts = [
@@ -106,3 +86,4 @@ exclude_lines = [
     "raise NotImplementedError()",
     "if __name__ == .__main__.:",
 ]
+

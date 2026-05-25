@@ -43,7 +43,7 @@ optimized_metric_config:
     direction: minimize
 
 algorithm:
-  target_rate: 0.1
+  target_rate: 0.01
   base_rate: null
 
   encoder:

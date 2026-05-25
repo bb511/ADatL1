@@ -43,8 +43,8 @@ def adatl1_wandb(
 
     api = wandb.Api(timeout=100)
     config_filters = [
-        {"config.algorithm.loss.alpha": alpha} if alpha is not None else {},
-        {"config.algorithm.optimizer.lr": lr} if lr is not None else {},
+        {"config.model.loss.alpha": alpha} if alpha != None else {},
+        {"config.model.optimizer.lr": lr} if lr != None else {},
     ]
     runs = api.runs(
         "viictorjimenezzz-personal/adatl1",
@@ -108,7 +108,7 @@ def adatl1_wandb(
         )
 
         # Model config
-        model_config = config.get("algorithm", config.get("model", {}))
+        model_config = config.get("model", {})
         loss_cfg = model_config.get("loss", {})
         data["model/loss/_target_"].append(loss_cfg.get("_target_"))
         data["model/loss/alpha"].append(loss_cfg.get("alpha"))

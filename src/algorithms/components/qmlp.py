@@ -1,106 +1,53 @@
-"""HGQ/Keras MLP components used by quantized L1AD models."""
+# Make a quantised MLP using HGQ2.
+import keras
+from keras import layers
 
-try:
-    import keras
-    from keras import layers as klayers
-    from hgq.layers import QDense
-    from hgq.config import LayerConfigScope, QuantizerConfigScope
-except ImportError:  # pragma: no cover - exercised when quant extra is absent
-    class _MissingKerasModel:
-        pass
-
-    class _MissingKeras:
-        Model = _MissingKerasModel
-
-    keras = _MissingKeras()
-    klayers = None
-    QDense = None
-    LayerConfigScope = None
-    QuantizerConfigScope = None
+from hgq.layers import QDense
+from hgq.config import LayerConfigScope, QuantizerConfigScope
+from hgq.constraints import Constant
 
 
-def require_hgq() -> None:
-    if QDense is None:
-        raise ImportError(
-            "HGQ models require the quant extra. Install with "
-            "`uv sync --extra quant --group dev`."
-        )
+def hgq_mlp(
+    in_dim: int,
+    nodes: list[int],
+    out_dim: int,
+    input_layer_config: dict = None,
+    output_layer_config: dict = None,
+    ebops: bool = False,
+    final_activation: bool = False,
+    name: str = "hgq_mlp",
+):
+    """Multi-layer perceptron in HGQv2.
 
-
-class HGQMLP(keras.Model):
-    """Multi-layer perceptron implemented with HGQv2 ``QDense`` layers.
-
-    ``nodes`` includes input and output dimensions, matching the quantized configs.
+    :param in_dim: Int for initial dimension.
+    :param nodes: List of number of nodes composing each of the layers.
+    :param out_dim: Int for output dimension.
+    :param init_weight: Callable method to initialize the weights of the decoder nodes.
+    :param init_bias: Callable method to initialize the biases of the decoder nodes.
     """
+    inputs = keras.Input(shape=(in_dim,), name="input")
+    x = inputs
+    with LayerConfigScope(enable_ebops=ebops):
+        for i, hidden_dim in enumerate(nodes):
+            if i == 0 and input_layer_config:
+                with QuantizerConfigScope(**input_layer_config, heterogeneous_axis=()):
+                    x = QDense(hidden_dim, name="qdense_0", activation="relu")(x)
+            else:
+                x = QDense(hidden_dim, name=f"qdense_{i}", activation="relu")(x)
 
-    def __init__(
-        self,
-        nodes: list[int],
-        batchnorm: bool = False,
-        affine: bool = True,
-        final_activation: bool = False,
-        input_layer_config: dict | None = None,
-        output_layer_config: dict | None = None,
-        ebops: bool = False,
-        **kwargs,
-    ):
-        require_hgq()
-        super().__init__(**kwargs)
-        self.nodes = nodes
-        self.batchnorm = batchnorm
-        self.affine = affine
-        self.final_activation = final_activation
-        self.input_layer_config = input_layer_config
-        self.output_layer_config = output_layer_config
-        self.ebops = ebops
+    if output_layer_config:
+        with QuantizerConfigScope(**output_layer_config, heterogeneous_axis=()):
+            if final_activation:
+                outputs = QDense(out_dim, name="qdense_out", activation="relu")(x)
+            else:
+                outputs = QDense(out_dim, name="qdense_out")(x)
+    else:
+        if final_activation:
+            outputs = QDense(out_dim, name="qdense_out", activation="relu")(x)
+        else:
+            outputs = QDense(out_dim, name="qdense_out")(x)
 
-        self.net = self._construct_net()
+    model = keras.Model(inputs=inputs, outputs=outputs, name=name)
+    print(model.summary())
 
-    @staticmethod
-    def make_qdense(out_dim: int, name: str, activation: str | None, config=None):
-        if config:
-            with QuantizerConfigScope(**config, heterogeneous_axis=()):
-                return QDense(out_dim, name=name, activation=activation)
-        return QDense(out_dim, name=name, activation=activation)
-
-    def _construct_net(self):
-        layers = []
-        num_layers = len(self.nodes) - 1
-        with LayerConfigScope(enable_ebops=self.ebops):
-            with QuantizerConfigScope(place="all"):
-                for i, out_dim in enumerate(self.nodes[1:]):
-                    is_last = i == num_layers - 1
-                    if is_last:
-                        layers.append(
-                            self.make_qdense(
-                                out_dim=out_dim,
-                                name="qdense_out",
-                                activation="relu" if self.final_activation else None,
-                                config=self.output_layer_config,
-                            )
-                        )
-                        continue
-
-                    layers.append(
-                        self.make_qdense(
-                            out_dim=out_dim,
-                            name=f"qdense_{i}",
-                            activation="relu",
-                            config=self.input_layer_config if i == 0 else None,
-                        )
-                    )
-                    if self.batchnorm:
-                        layers.append(
-                            klayers.BatchNormalization(
-                                scale=self.affine,
-                                center=self.affine,
-                                name=f"bn_{i}",
-                            )
-                        )
-
-        return layers
-
-    def call(self, x):
-        for layer in self.net:
-            x = layer(x)
-        return x
+    return model

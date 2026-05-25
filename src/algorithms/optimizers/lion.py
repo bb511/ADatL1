@@ -20,9 +20,7 @@ from torch.optim.optimizer import Optimizer
 class Lion(Optimizer):
     r"""Implements Lion algorithm."""
 
-    def __init__(
-        self, params, lr=1e-4, betas=(0.9, 0.99), weight_decay=0.0, **kwargs
-    ):
+    def __init__(self, params, lr=1e-4, betas=(0.9, 0.99), weight_decay=0.0):
         """Initialize the hyperparameters.
 
         Args:

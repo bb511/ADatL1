@@ -35,7 +35,6 @@ class CAPCallback(Callback):
         dataset_2: str,
         pairing_type: str,
         cap_metric_config: dict,
-        pairing_index_path: str | None = None,
         beta: float = 0.9,
     ):
         super().__init__()
@@ -44,11 +43,7 @@ class CAPCallback(Callback):
         self.dataset_1_name = dataset_1
         self.dataset_2_name = dataset_2
         self.cap_metric_config = cap_metric_config
-        self.pairing_type = pairing_type
-        self.pairing_index_path = pairing_index_path
-        self.pairing_fn = (
-            None if pairing_type == "precomputed" else get_pairing_fn(pairing_type)
-        )
+        self.pairing_fn = get_pairing_fn(pairing_type)
         self.beta = beta
 
         self.log_kwargs = dict(
@@ -138,7 +133,7 @@ class CAPCallback(Callback):
         dataset_1_scores = torch.cat(self.dataset_1_scores, dim=0).view(-1)
         dataset_2_scores = torch.cat(self.dataset_2_scores, dim=0).view(-1)
 
-        idxs1, idxs2 = self._pair_indices(dataset_1_scores, dataset_2_scores)
+        idxs1, idxs2 = self.pairing_fn(dataset_1_scores, dataset_2_scores)
         ds1_scores = dataset_1_scores[idxs1]
         ds2_scores = dataset_2_scores[idxs2]
 
@@ -162,24 +157,6 @@ class CAPCallback(Callback):
             cap_value = cap_value.detach().item()
 
         return float(cap_value), float(rankcorr_value)
-
-    def _pair_indices(self, dataset_1_scores: torch.Tensor, dataset_2_scores: torch.Tensor):
-        if self.pairing_type != "precomputed":
-            return self.pairing_fn(dataset_1_scores, dataset_2_scores)
-
-        if not self.pairing_index_path:
-            raise ValueError("pairing_index_path is required for precomputed CAP pairing.")
-
-        table = torch.load(self.pairing_index_path, map_location="cpu", weights_only=False)
-        idxs1 = table.get("idx_1", table.get("idx1"))
-        idxs2 = table.get("idx_2", table.get("idx2"))
-        if idxs1 is None or idxs2 is None:
-            raise ValueError("Pair table must contain idx_1 and idx_2 tensors.")
-
-        idxs1 = idxs1.long().to(dataset_1_scores.device)
-        idxs2 = idxs2.long().to(dataset_2_scores.device)
-        valid = (idxs1 < len(dataset_1_scores)) & (idxs2 < len(dataset_2_scores))
-        return idxs1[valid], idxs2[valid]
 
     def _spearman_corr(self, x: torch.Tensor, y: torch.Tensor) -> float:
         """Compute the Spearman correlation between paired anomaly scores."""

@@ -37,7 +37,7 @@ def test_hydra_sweep(tmp_path: Path) -> None:
         startfile,
         "-m",
         "hydra.sweep.dir=" + str(tmp_path),
-        "algorithm.optimizer.lr=0.005,0.01",
+        "model.optimizer.lr=0.005,0.01",
         "++trainer.fast_dev_run=true",
     ] + overrides
 
@@ -60,7 +60,7 @@ def test_hydra_sweep_ddp_sim(tmp_path: Path) -> None:
         "+trainer.limit_train_batches=0.01",
         "+trainer.limit_val_batches=0.1",
         "+trainer.limit_test_batches=0.1",
-        "algorithm.optimizer.lr=0.005,0.01,0.02",
+        "model.optimizer.lr=0.005,0.01,0.02",
     ] + overrides
     run_sh_command(command)
 
@@ -75,7 +75,7 @@ def test_optuna_sweep(tmp_path: Path) -> None:
     command = [
         startfile,
         "-m",
-        "hparams_search=imageae_optuna",
+        "hparams_search=mnist_optuna",
         "hydra.sweep.dir=" + str(tmp_path),
         "hydra.sweeper.n_trials=10",
         "hydra.sweeper.sampler.n_startup_trials=5",
@@ -94,7 +94,7 @@ def test_optuna_sweep_ddp_sim_wandb(tmp_path: Path) -> None:
     command = [
         startfile,
         "-m",
-        "hparams_search=imageae_optuna",
+        "hparams_search=mnist_optuna",
         "hydra.sweep.dir=" + str(tmp_path),
         "hydra.sweeper.n_trials=5",
         "trainer=ddp_sim",

@@ -1,6 +1,0 @@
-# @package evaluation.callbacks.main
-
-_target_: src.evaluation.callbacks.roc.ROCs
-name: roc
-metric_name: ascore/full
-log_raw_mlflow: true

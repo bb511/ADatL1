@@ -1,9 +1,0 @@
-# @package evaluation.callbacks.main
-
-_target_: src.evaluation.callbacks.knn_auprc.KNNAUPRC
-name: knn_eff
-output_name: vicreg_rep_data
-k: 10
-reference_sample_size: 10000
-skip_ds: []
-log_raw_mlflow: true

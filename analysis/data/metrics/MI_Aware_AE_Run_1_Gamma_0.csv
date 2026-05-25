@@ -1,0 +1,9 @@
+metric_name,value
+ascore_operational,2.1897106170654297
+latent_entropy,0.34347376227378845
+latent_mean_prob,0.5973246097564697
+latent_std_prob,0.4078315198421478
+loss,0.003594253910705447
+loss_mean,0.003594253910705447
+loss_mi,0.0
+loss_reconstruction,0.003594253910705447

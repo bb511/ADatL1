@@ -21,7 +21,6 @@ from typing import Any, Mapping, Sequence
 
 import yaml
 
-
 REPO_ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_OUTPUT_DIR = REPO_ROOT / "scripts" / "generated"
 TRAIN_ENTRYPOINT = "src/train.py"
@@ -31,6 +30,7 @@ class Dataset(str, Enum):
     PHYSICS = "physics"
     CIFAR10 = "cifar10"
     ROBUSTAD = "robustad"
+    CCHAMBER = "cchamber"
 
 
 class Model(str, Enum):
@@ -46,6 +46,9 @@ class Strategy(str, Enum):
     SEMI_CVAR25 = "semi_cvar25"
     SEMI_CVAR10 = "semi_cvar10"
     CAP = "cap"
+    CAP_METADATA_NEAREST = "cap_metadata_nearest"
+    CAP_ENCODER_NEAREST = "cap_encoder_nearest"
+    CAP_RANDOM = "cap_random"
     DRIFT = "drift"
     WASSERSTEIN = "wasserstein"
 
@@ -108,9 +111,7 @@ class ExperimentSpecification:
     strategy_overrides: tuple[str, ...] = ()
     sweeper_overrides: tuple[str, ...] = ()
     disabled_overrides: tuple[str, ...] = ()
-    factors: Mapping[str, tuple[str, ...] | tuple[int, ...]] = field(
-        default_factory=dict
-    )
+    factors: Mapping[str, tuple[str, ...] | tuple[int, ...]] = field(default_factory=dict)
     notes: tuple[str, ...] = ()
 
     def validate(self) -> None:
@@ -121,23 +122,17 @@ class ExperimentSpecification:
         if self.sweep_epochs <= 0:
             raise ValueError(f"{self.name}: sweep_epochs must be positive.")
         if self.retrain_epochs < self.sweep_epochs:
-            raise ValueError(
-                f"{self.name}: retrain_epochs must be >= sweep_epochs."
-            )
+            raise ValueError(f"{self.name}: retrain_epochs must be >= sweep_epochs.")
         if not self.seeds:
             raise ValueError(f"{self.name}: at least one seed must be provided.")
         if self.model in {Model.DSAE, Model.DSVAE} and self.dataset != Dataset.PHYSICS:
             raise ValueError(f"{self.name}: {self.model.value} is physics-only.")
-        if self.strategy in AGNOSTIC_STRATEGIES and not self.experiment.endswith(
-            "_agnostic"
-        ):
-            raise ValueError(
-                f"{self.name}: agnostic strategy requires an *_agnostic experiment."
-            )
+        if self.strategy in CCHAMBER_CAP_PAIRING_STRATEGIES and self.dataset != Dataset.CCHAMBER:
+            raise ValueError(f"{self.name}: {self.strategy.value} is Causal Chamber-only.")
+        if self.strategy in AGNOSTIC_STRATEGIES and not self.experiment.endswith("_agnostic"):
+            raise ValueError(f"{self.name}: agnostic strategy requires an *_agnostic experiment.")
         if self.strategy in SEMI_STRATEGIES and self.experiment.endswith("_agnostic"):
-            raise ValueError(
-                f"{self.name}: semi-supervised strategy must not use *_agnostic."
-            )
+            raise ValueError(f"{self.name}: semi-supervised strategy must not use *_agnostic.")
 
     @property
     def tuned_param_source(self) -> str:
@@ -165,9 +160,21 @@ MODEL_CONFIG = {
         Model.SVDD: ("svdd", "imagesvdd_optuna", "dist"),
         Model.REALNVP: ("realnvp", "imagerealnvp_optuna", "logp"),
     },
+    Dataset.CCHAMBER: {
+        Model.AE: ("ae", "ae_optuna", "mse"),
+        Model.VAE: ("vae", "vae_optuna", "kl"),
+        Model.SVDD: ("svdd", "svdd_optuna", "dist"),
+        Model.REALNVP: ("realnvp", "realnvp_optuna", "logp"),
+    },
 }
 
-AGNOSTIC_STRATEGIES = {Strategy.CAP, Strategy.DRIFT, Strategy.WASSERSTEIN}
+CCHAMBER_CAP_PAIRING_STRATEGIES = {
+    Strategy.CAP_METADATA_NEAREST,
+    Strategy.CAP_ENCODER_NEAREST,
+    Strategy.CAP_RANDOM,
+}
+CAP_STRATEGIES = {Strategy.CAP, *CCHAMBER_CAP_PAIRING_STRATEGIES}
+AGNOSTIC_STRATEGIES = CAP_STRATEGIES | {Strategy.DRIFT, Strategy.WASSERSTEIN}
 SEMI_STRATEGIES = {Strategy.SEMI_CVAR25, Strategy.SEMI_CVAR10}
 DEFAULT_PAPER_STRATEGIES = (
     Strategy.SEMI_CVAR25,
@@ -185,11 +192,10 @@ def build_paper_experiments(
     include_cvar10: bool = True,
 ) -> dict[str, ExperimentSpecification]:
     """Build the default paper experiment matrix."""
-    strategies = ALL_STRATEGIES if include_cvar10 else DEFAULT_PAPER_STRATEGIES
     specs: dict[str, ExperimentSpecification] = {}
     for dataset, model_cfg in MODEL_CONFIG.items():
         for model in model_cfg:
-            for strategy in strategies:
+            for strategy in strategies_for(dataset, include_cvar10=include_cvar10):
                 spec = make_experiment_specification(
                     dataset=dataset,
                     model=model,
@@ -199,6 +205,19 @@ def build_paper_experiments(
                 )
                 specs[spec.name] = spec
     return specs
+
+
+def strategies_for(dataset: Dataset, *, include_cvar10: bool) -> tuple[Strategy, ...]:
+    """Return strategies supported by a dataset family in the paper matrix."""
+    if dataset == Dataset.CCHAMBER:
+        return (
+            Strategy.CAP_METADATA_NEAREST,
+            Strategy.CAP_ENCODER_NEAREST,
+            Strategy.CAP_RANDOM,
+            Strategy.DRIFT,
+            Strategy.WASSERSTEIN,
+        )
+    return ALL_STRATEGIES if include_cvar10 else DEFAULT_PAPER_STRATEGIES
 
 
 def make_experiment_specification(
@@ -222,7 +241,7 @@ def make_experiment_specification(
     if strategy in SEMI_STRATEGIES:
         objective = "cvar25eff" if strategy == Strategy.SEMI_CVAR25 else "cvar10eff"
         direction = "maximize"
-    elif strategy == Strategy.CAP:
+    elif strategy in CAP_STRATEGIES:
         objective = "cap"
         direction = "maximize"
     elif strategy == Strategy.DRIFT:
@@ -283,6 +302,14 @@ def fixed_overrides_for(dataset: Dataset) -> tuple[str, ...]:
             "algorithm.target_rate=0.1",
             "algorithm.base_rate=null",
         )
+    if dataset == Dataset.CCHAMBER:
+        return (
+            "data=causal_chamber",
+            "data.batch_size=512",
+            "data.max_val_batches=-1",
+            "algorithm.target_rate=0.01",
+            "algorithm.base_rate=null",
+        )
     raise ValueError(f"Unknown dataset: {dataset}")
 
 
@@ -293,6 +320,8 @@ def reference_dataset_for(dataset: Dataset) -> str:
         return "reference_normal"
     if dataset == Dataset.ROBUSTAD:
         return "shifted_normal_all"
+    if dataset == Dataset.CCHAMBER:
+        return "reference_normal"
     raise ValueError(f"Unknown dataset: {dataset}")
 
 
@@ -316,6 +345,12 @@ def factors_for(dataset: Dataset) -> dict[str, tuple[str, ...]]:
             "validation_domains": ("normal", reference_dataset_for(dataset)),
             "reported_over": ("shifted_anomaly_domain", "seed"),
         }
+    if dataset == Dataset.CCHAMBER:
+        return {
+            "validation_domains": ("normal", reference_dataset_for(dataset)),
+            "reported_over": ("intervention_dataset", "seed"),
+            "cap_pairing": ("metadata_nearest", "encoder_nearest", "random"),
+        }
     raise ValueError(f"Unknown dataset: {dataset}")
 
 
@@ -327,6 +362,27 @@ def notes_for(dataset: Dataset, strategy: Strategy) -> tuple[str, ...]:
             "spaces and commented CIFAR-10 alternatives; this script records the "
             "active Hydra search config and applies dataset-specific storage overrides."
         )
+    if dataset == Dataset.CCHAMBER:
+        if strategy == Strategy.CAP_METADATA_NEAREST:
+            notes.append(
+                "CAP uses real normal/reference_normal rows ordered by datamodule "
+                "metadata-nearest matching; callback pairing_type=none consumes that order."
+            )
+        elif strategy == Strategy.CAP_RANDOM:
+            notes.append(
+                "CAP uses real normal/reference_normal rows ordered by deterministic "
+                "random datamodule pairing; callback pairing_type=none consumes that order."
+            )
+        elif strategy == Strategy.CAP_ENCODER_NEAREST:
+            notes.append(
+                "CAP uses frozen-encoder fixed pair tables via pairing_type=precomputed. "
+                "Set CCHAMBER_VALID_PAIR_TABLE and CCHAMBER_TEST_PAIR_TABLE before running."
+            )
+        else:
+            notes.append(
+                "Causal Chamber validation uses real paired normal/reference_normal rows "
+                "constructed by the datamodule."
+            )
     if strategy == Strategy.SEMI_CVAR10:
         notes.append("Semi-supervised CVaR10 is an appendix/sensitivity strategy.")
     return tuple(notes)
@@ -337,11 +393,26 @@ def strategy_overrides_for(strategy: Strategy) -> tuple[str, ...]:
         return ()
     if strategy == Strategy.SEMI_CVAR10:
         return ("evaluation.callbacks.anomaly_efficiency.cvar_summary=0.10",)
-    if strategy == Strategy.CAP:
-        return (
+    if strategy in CAP_STRATEGIES:
+        overrides = [
             "optimized_metric_config.main_metric.callback.name=cap",
             "optimized_metric_config.main_metric.direction=maximize",
-        )
+        ]
+        if strategy == Strategy.CAP_METADATA_NEAREST:
+            overrides.append("data.pairing_strategy=metadata_nearest")
+        elif strategy == Strategy.CAP_RANDOM:
+            overrides.append("data.pairing_strategy=random")
+        elif strategy == Strategy.CAP_ENCODER_NEAREST:
+            overrides.extend(
+                [
+                    "data.pairing_strategy=random",
+                    "callbacks.cap_ref.pairing_type=precomputed",
+                    "callbacks.cap_ref.pairing_index_path=$CCHAMBER_VALID_PAIR_TABLE",
+                    "evaluation.callbacks.cap_ref.pairing_type=precomputed",
+                    "evaluation.callbacks.cap_ref.pairing_index_path=$CCHAMBER_TEST_PAIR_TABLE",
+                ]
+            )
+        return tuple(overrides)
     if strategy == Strategy.DRIFT:
         return (
             "optimized_metric_config.main_metric.callback.name=thres_drift",
@@ -366,6 +437,11 @@ def sweeper_overrides_for(strategy: Strategy, secondary: str) -> tuple[str, ...]
             f"hydra.sweeper.study_name=cvar10eff_vs_{secondary}",
             "hydra.sweeper.direction=[maximize,minimize]",
         )
+    if strategy in CCHAMBER_CAP_PAIRING_STRATEGIES:
+        return (
+            f"hydra.sweeper.study_name={strategy.value}_vs_{secondary}",
+            "hydra.sweeper.direction=[maximize,minimize]",
+        )
     if strategy == Strategy.CAP:
         return (
             f"hydra.sweeper.study_name=cap_vs_{secondary}",
@@ -388,9 +464,9 @@ def disabled_overrides_for(dataset: Dataset, strategy: Strategy) -> tuple[str, .
     ref = reference_dataset_for(dataset)
     cap_key = f"cap_ema_normal_vs_{ref}"
     w1_key = f"w1dist_ema_normal_vs_{ref}"
-    reco_override = (
-        ("evaluation.callbacks.reco=null",) if dataset == Dataset.PHYSICS else ()
-    )
+    cap_callback_key = "cap_ref" if dataset == Dataset.CCHAMBER else "cap_sn_zb"
+    cap_ckpt_key = "cap_ref_ema_ckpt" if dataset == Dataset.CCHAMBER else "cap_sn_zb_ema_ckpt"
+    reco_override = ("evaluation.callbacks.reco=null",) if dataset == Dataset.PHYSICS else ()
 
     if strategy == Strategy.SEMI_CVAR25:
         return (
@@ -412,7 +488,7 @@ def disabled_overrides_for(dataset: Dataset, strategy: Strategy) -> tuple[str, .
             "evaluation.callbacks.wasserstein=null",
             *reco_override,
         )
-    if strategy == Strategy.CAP:
+    if strategy in CAP_STRATEGIES:
         return (
             "callbacks.anomaly_eff=null",
             "callbacks.thres_drift=null",
@@ -429,28 +505,28 @@ def disabled_overrides_for(dataset: Dataset, strategy: Strategy) -> tuple[str, .
     if strategy == Strategy.DRIFT:
         return (
             "callbacks.anomaly_eff=null",
-            "callbacks.cap_sn_zb=null",
+            f"callbacks.{cap_callback_key}=null",
             "callbacks.wasserstein_dist=null",
             "callbacks.wasserstein_dist_ema_ckpt=null",
-            "callbacks.cap_sn_zb_ema_ckpt=null",
+            f"callbacks.{cap_ckpt_key}=null",
             f"~evaluation.evaluator.ckpts.summary.{w1_key}",
             f"~evaluation.evaluator.ckpts.summary.{cap_key}",
             "evaluation.callbacks.anomaly_efficiency=null",
-            "evaluation.callbacks.cap_sn_zb=null",
+            f"evaluation.callbacks.{cap_callback_key}=null",
             "evaluation.callbacks.wasserstein=null",
             *reco_override,
         )
     if strategy == Strategy.WASSERSTEIN:
         return (
             "callbacks.anomaly_eff=null",
-            "callbacks.cap_sn_zb=null",
+            f"callbacks.{cap_callback_key}=null",
             "callbacks.thres_drift=null",
             "callbacks.thres_drift_ema_ckpt=null",
-            "callbacks.cap_sn_zb_ema_ckpt=null",
+            f"callbacks.{cap_ckpt_key}=null",
             "~evaluation.evaluator.ckpts.summary.operational_drift_ema",
             f"~evaluation.evaluator.ckpts.summary.{cap_key}",
             "evaluation.callbacks.anomaly_efficiency=null",
-            "evaluation.callbacks.cap_sn_zb=null",
+            f"evaluation.callbacks.{cap_callback_key}=null",
             "evaluation.callbacks.thres_drift=null",
             *reco_override,
         )
@@ -464,11 +540,7 @@ def infer_tuned_params(hparams_search: str) -> tuple[str, ...]:
         raise FileNotFoundError(f"Missing hparams_search config: {fpath}")
     with fpath.open("r", encoding="utf-8") as handle:
         cfg = yaml.safe_load(handle) or {}
-    params = (
-        cfg.get("hydra", {})
-        .get("sweeper", {})
-        .get("params", {})
-    )
+    params = cfg.get("hydra", {}).get("sweeper", {}).get("params", {})
     if not isinstance(params, Mapping):
         raise ValueError(f"{fpath}: hydra.sweeper.params must be a mapping.")
     return tuple(str(k) for k in params.keys())
@@ -616,11 +688,7 @@ def generate_scripts(
         spec_dir = output_dir / spec.name
         spec_dir.mkdir(parents=True, exist_ok=True)
 
-        stages = (
-            [Stage.SWEEP, Stage.RETRAIN, Stage.EVALUATE]
-            if stage == Stage.ALL
-            else [stage]
-        )
+        stages = [Stage.SWEEP, Stage.RETRAIN, Stage.EVALUATE] if stage == Stage.ALL else [stage]
         generated_commands: dict[str, list[str]] = {}
         for requested_stage in stages:
             if requested_stage == Stage.SWEEP:
@@ -701,7 +769,7 @@ def retrain_commands_for(
             "# Provide --selected-overrides with a JSON list of selected trial overrides.",
             "# Expected format:",
             "# [",
-            "#   {\"run_name\": \"cap_trial_001\", \"seed\": 123, \"overrides\": [\"algorithm.optimizer.lr=0.001\"]}",
+            '#   {"run_name": "cap_trial_001", "seed": 123, "overrides": ["algorithm.optimizer.lr=0.001"]}',
             "# ]",
         ]
 
@@ -735,7 +803,7 @@ def evaluate_commands_for(
             "# Provide --ckpt-manifest with a JSON list of checkpoints to evaluate.",
             "# Expected format:",
             "# [",
-            "#   {\"run_name\": \"cap_eval_001\", \"seed\": 123, \"ckpt_path\": \"/path/to/model.ckpt\"}",
+            '#   {"run_name": "cap_eval_001", "seed": 123, "ckpt_path": "/path/to/model.ckpt"}',
             "# ]",
         ]
 
@@ -807,6 +875,17 @@ def write_script(path: Path, commands: Sequence[str], spec: ExperimentSpecificat
             ]
         )
     else:
+        required_env = required_env_vars_for(spec)
+        if required_env:
+            header.extend(
+                [
+                    *[
+                        f': "${{{name}:?Set {name} before running {spec.name}}}"'
+                        for name in required_env
+                    ],
+                    "",
+                ]
+            )
         header.append("")
 
     body = []
@@ -816,6 +895,20 @@ def write_script(path: Path, commands: Sequence[str], spec: ExperimentSpecificat
     path.write_text("\n".join(header + body), encoding="utf-8")
     path.chmod(0o755)
     return path
+
+
+def required_env_vars_for(spec: ExperimentSpecification) -> tuple[str, ...]:
+    overrides = [
+        *spec.fixed_overrides,
+        *spec.strategy_overrides,
+        *spec.sweeper_overrides,
+        *spec.disabled_overrides,
+    ]
+    required = []
+    for name in ("CCHAMBER_VALID_PAIR_TABLE", "CCHAMBER_TEST_PAIR_TABLE"):
+        if any(f"${name}" in override or f"${{{name}}}" in override for override in overrides):
+            required.append(name)
+    return tuple(required)
 
 
 def build_manifest(
@@ -852,13 +945,16 @@ def serialize_spec(spec: ExperimentSpecification) -> dict[str, Any]:
 def git_metadata() -> dict[str, Any]:
     commit = run_git(["rev-parse", "HEAD"])
     short = run_git(["rev-parse", "--short", "HEAD"])
-    dirty = subprocess.run(
-        ["git", "diff", "--quiet"],
-        cwd=REPO_ROOT,
-        check=False,
-        stdout=subprocess.DEVNULL,
-        stderr=subprocess.DEVNULL,
-    ).returncode != 0
+    dirty = (
+        subprocess.run(
+            ["git", "diff", "--quiet"],
+            cwd=REPO_ROOT,
+            check=False,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+        ).returncode
+        != 0
+    )
     untracked = run_git(["ls-files", "--others", "--exclude-standard"]).splitlines()
     return {
         "commit": commit or None,
@@ -933,9 +1029,7 @@ def write_manifest_md(path: Path, manifest: Mapping[str, Any]) -> None:
 
 
 def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
-    parser = argparse.ArgumentParser(
-        description="Generate reproducible paper experiment scripts."
-    )
+    parser = argparse.ArgumentParser(description="Generate reproducible paper experiment scripts.")
     subparsers = parser.add_subparsers(dest="command", required=True)
 
     list_parser = subparsers.add_parser("list", help="List known experiments.")

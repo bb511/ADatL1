@@ -68,7 +68,7 @@ callbacks:
     output_name: 'ascore/full'
     dataset_1: normal
     dataset_2: reference_normal
-    pairing_type: cdf
+    pairing_type: none
     cap_metric_config:
       beta0: 1.0
       normalization_type: sigmoid
@@ -162,7 +162,7 @@ evaluation:
       dataset_1: normal
       dataset_2: reference_normal
       log_raw_mlflow: false
-      pairing_type: cdf
+      pairing_type: none
       cap_metric_config:
         beta0: 1.0
         normalization_type: sigmoid

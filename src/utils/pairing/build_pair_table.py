@@ -11,20 +11,37 @@ from src.utils.pairing.utils import (
     collect_closure_representations,
     collect_representations,
     mutual_nearest_pairs,
+    one_to_one_nearest_pairs,
     pair_table_dict,
 )
 
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Build a frozen-encoder pair table.")
-    parser.add_argument("--ckpt", required=True, help="JetCLR checkpoint path.")
+    parser.add_argument("--ckpt", required=True, help="Frozen encoder checkpoint path.")
     parser.add_argument("--config-dir", default="configs")
     parser.add_argument("--config-name", default="train")
     parser.add_argument("--stage", default="validate", choices=["validate", "test"])
     parser.add_argument("--dataset-1", default="normal")
     parser.add_argument("--dataset-2", default="reference_normal")
     parser.add_argument("--out", required=True)
-    parser.add_argument("--k", type=int, default=20)
+    parser.add_argument(
+        "--k",
+        type=int,
+        default=20,
+        help="Top-k neighbors to search. For one_to_one_nearest, k<=0 grows k until coverage saturates.",
+    )
+    parser.add_argument(
+        "--pairing-mode",
+        default="mutual_nearest",
+        choices=["mutual_nearest", "one_to_one_nearest"],
+        help="Nearest-neighbor matching rule used to turn embeddings into fixed pairs.",
+    )
+    parser.add_argument(
+        "--no-normalize",
+        action="store_true",
+        help="Do not L2-normalize embeddings before one_to_one_nearest matching.",
+    )
     parser.add_argument("--max-events", type=int, default=None)
     parser.add_argument("--caliper", type=float, default=None)
     parser.add_argument("--caliper-quantile", type=float, default=0.95)
@@ -44,7 +61,9 @@ def main() -> None:
         stage=args.stage,
         device=args.device,
     )
-    loaders = datamodule.val_dataloader() if args.stage == "validate" else datamodule.test_dataloader()
+    loaders = (
+        datamodule.val_dataloader() if args.stage == "validate" else datamodule.test_dataloader()
+    )
 
     if args.dataset_1 not in loaders or args.dataset_2 not in loaders:
         raise ValueError(
@@ -63,7 +82,7 @@ def main() -> None:
     metadata = {}
     if args.no_caliper:
         caliper = None
-    elif caliper is None:
+    elif caliper is None and hasattr(model, "augment_pair"):
         c1, c2 = collect_closure_representations(
             model, loaders[args.dataset_1], args.device, max_events=args.max_events
         )
@@ -78,11 +97,30 @@ def main() -> None:
             args.caliper_quantile,
         ).item()
         metadata.update(close)
+    elif caliper is None:
+        caliper = None
+        metadata["caliper_reason"] = "disabled: encoder has no augment_pair method"
 
-    pairs = mutual_nearest_pairs(z1, z2, k=args.k, caliper=caliper)
+    k_arg = None if args.pairing_mode == "one_to_one_nearest" and args.k <= 0 else args.k
+    if args.pairing_mode == "mutual_nearest":
+        if args.k <= 0:
+            raise ValueError("--k must be positive for mutual_nearest pairing.")
+        pairs = mutual_nearest_pairs(z1, z2, k=args.k, caliper=caliper)
+    else:
+        pairs = one_to_one_nearest_pairs(
+            z1,
+            z2,
+            k=k_arg,
+            caliper=caliper,
+            normalize=not args.no_normalize,
+        )
     metadata.update(
         {
-            "k": args.k,
+            "pairing_mode": args.pairing_mode,
+            "normalized": bool(
+                args.pairing_mode == "one_to_one_nearest" and not args.no_normalize
+            ),
+            "k": k_arg,
             "caliper": None if caliper is None else float(caliper),
             "max_events": args.max_events,
             "n_dataset_1": int(z1.shape[0]),

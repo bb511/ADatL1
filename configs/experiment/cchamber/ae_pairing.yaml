@@ -1,0 +1,38 @@
+# @package _global_
+
+defaults:
+  - override /data: causal_chamber
+  - override /algorithm: ae
+  - override /callbacks: default
+  - override /trainer: cpu
+  - override /evaluation: null
+  - override /evaluation/callbacks: null
+  - override /logger: mlflow
+
+seed: 123
+tags: ["causal_chamber", "ae", "encoder"]
+
+experiment_name: cchamber_ae_encoder
+run_name: ${short_hash:${hydra:runtime.output_dir},12}
+
+data:
+  batch_size: 512
+  max_val_batches: 2
+  signal_experiments: []
+
+algorithm:
+  target_rate: 0.01
+  base_rate: null
+  input_noise_std: 0.001
+  delta: 1.0
+  encoder:
+    in_dim: 11
+    nodes: [128, 64, 16]
+
+trainer:
+  gradient_clip_algorithm: norm
+  gradient_clip_val: 1.0
+  min_epochs: 1
+  max_epochs: 100
+
+test: false

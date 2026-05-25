@@ -1,0 +1,95 @@
+# @package _global_
+
+defaults:
+  - override /data: synthetic
+  - override /algorithm: jetclr
+  - override /callbacks: default
+  - override /trainer: cpu
+  - override /evaluation: default
+  - override /evaluation/callbacks: null
+  - override /logger: none
+
+seed: 123
+tags: ["demo", "l1", "jetclr", "pairing"]
+
+experiment_name: demo
+run_name: l1_jetclr
+
+data:
+  n_features: 57
+  n_train: 256
+  n_val: 96
+  n_test: 96
+  batch_size: 32
+  max_val_batches: null
+  paper_aliases: false
+  generator: gaussian_subspace
+  reference_shift: 0.10
+
+algorithm:
+  model:
+    d_model: 32
+    out_dim: 32
+    n_heads: 4
+    n_layers: 1
+    dim_feedforward: 96
+  projector:
+    in_dim: 32
+    nodes: [64]
+    out_dim: 32
+  loss:
+    temperature: 0.2
+  feature_blur:
+    prob: 0.20
+    magnitude: 0.05
+    strength: 0.25
+  object_mask:
+    prob: 0.01
+  lorentz_rotation:
+    prob: 0.0
+
+trainer:
+  min_epochs: 1
+  max_epochs: 2
+  limit_train_batches: 4
+  limit_val_batches: 2
+  limit_test_batches: 3
+  enable_model_summary: false
+  enable_progress_bar: false
+  gradient_clip_algorithm: norm
+  gradient_clip_val: 1.0
+
+callbacks:
+  model_summary: null
+  rich_progress_bar: null
+  log_data_mlflow: null
+
+test: false
+
+optimized_metric_config:
+  main_metric:
+    callback:
+      name: pairing_diagnostics
+      params: {}
+    direction: maximize
+
+evaluation:
+  evaluator:
+    ckpts:
+      last: true
+  callbacks:
+    pairing_diagnostics:
+      _target_: src.evaluation.callbacks.pairing_diagnostics.PairingDiagnostics
+      output_name: pairing_rep_data
+      view1_name: pairing_view1_data
+      view2_name: pairing_view2_data
+      dataset_1: normal
+      dataset_2: reference_normal
+      closure_dataset: normal
+      k: 10
+      caliper_quantile: null
+      name: pairing_diagnostics
+
+extras:
+  enforce_tags: false
+  print_config: false

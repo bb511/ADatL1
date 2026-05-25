@@ -193,3 +193,6 @@ outputs
 .aim
 
 # Data Analysis Tools
+*.csv
+*.tsv
+*.xlsx

@@ -9,11 +9,13 @@ def test_default_paper_registry_fits_current_experiment_matrix() -> None:
 
     assert hasattr(generation, "ExperimentSpecification")
     assert not hasattr(generation, "StudySpec")
-    assert len(specs) == 56
+    assert len(specs) == 68
     assert "physics_dsae_cap" in specs
     assert "cifar10_dsae_cap" not in specs
     assert specs["physics_ae_cap"].experiment == "physics/ae_agnostic"
     assert specs["physics_ae_semi_cvar25"].experiment == "physics/ae"
+    assert specs["cchamber_ae_cap"].experiment == "cchamber/ae_paired_agnostic"
+    assert "cchamber_ae_semi_cvar25" not in specs
 
 
 def test_sweep_manifest_separates_tuned_params_from_fixed_factors() -> None:
@@ -39,8 +41,7 @@ def test_sweep_manifest_separates_tuned_params_from_fixed_factors() -> None:
     assert "algorithm.optimizer.lr" in manifest["tuned_params"]
     assert "data.batch_size=16384" in manifest["fixed_overrides"]
     assert (
-        "optimized_metric_config.main_metric.callback.name=cap"
-        in manifest["strategy_overrides"]
+        "optimized_metric_config.main_metric.callback.name=cap" in manifest["strategy_overrides"]
     )
     assert "hydra.sweeper.study_name=cap_vs_mse" in manifest["sweeper_overrides"]
     assert manifest["factors"]["reported_over"] == ["signal_dataset", "seed"]
@@ -52,6 +53,30 @@ def test_sweep_manifest_separates_tuned_params_from_fixed_factors() -> None:
     assert "optimized_metric_config.main_metric.callback.name=cap" in command
     assert 'paths.raw_data_dir="${RAW_DATA_DIR}"' in command
     assert "'~evaluation.evaluator.ckpts.summary.operational_drift_ema'" in command
+
+
+def test_generation_registry_includes_paired_causal_chamber() -> None:
+    specs = generation.build_paper_experiments(
+        n_trials=1,
+        seeds=(123,),
+        include_cvar10=True,
+    )
+
+    spec = specs["cchamber_ae_cap"]
+    assert spec.dataset == generation.Dataset.CCHAMBER
+    assert spec.strategy == generation.Strategy.CAP
+    assert spec.experiment == "cchamber/ae_paired_agnostic"
+    assert spec.hparams_search == "ae_optuna"
+    assert "data.pairing_strategy=nearest" in spec.fixed_overrides
+
+    cchamber_strategies = {
+        item.strategy for item in specs.values() if item.dataset == generation.Dataset.CCHAMBER
+    }
+    assert cchamber_strategies == {
+        generation.Strategy.CAP,
+        generation.Strategy.DRIFT,
+        generation.Strategy.WASSERSTEIN,
+    }
 
 
 def test_generate_scripts_writes_executable_script_and_manifest(tmp_path) -> None:

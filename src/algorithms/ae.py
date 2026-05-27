@@ -5,7 +5,7 @@ import torch
 from torch import nn
 
 from src.algorithms import ADLightningModule
-from src.algorithms.losses.ae import HuberAELoss
+from src.algorithms.losses.ae import HuberAELoss, PileupMIAELoss
 from src.algorithms.losses.components.reconstruction import MSEReconstructionLoss
 from src.algorithms.utils.object_feature_map_loader import inject_object_feature_map
 from src.data.utils import unpack_batch
@@ -47,6 +47,7 @@ class AE(ADLightningModule):
         self.encoder, self.decoder = encoder, decoder
         self.input_noise_std = input_noise_std
         self.loss = HuberAELoss(delta=delta, reduction='none')
+        self.mi_loss = PileupMIAELoss(gamma=1.0, delta=delta, mi_reduction='sum', reduction='none')
         self.ascore = MSEReconstructionLoss(reduction='none')
 
     def on_fit_start(self):

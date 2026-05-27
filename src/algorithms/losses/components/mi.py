@@ -1,52 +1,157 @@
+"""Mutual-information loss for Bernoulli bottleneck autoencoders.
+
+Ported from the Keras / TensorFlow implementation of
+``mutual_information_bernoulli_loss``.
+
+The loss estimates the mutual information I(L; S) between the latent
+Bernoulli activations L and a sensitive / class attribute S via:
+
+    I(L; S) = H(L) − Σ_v  p(S=v) · H(L | S=v)
+
+where H is the binary entropy of Bernoulli random variables whose
+parameter θ is estimated as the sample mean of the activation
+probabilities.
+
+In the *unsupervised* variant used by ``MIAwareAE`` there is no
+explicit sensitive attribute.  Instead the loss is called on the
+bottleneck probabilities directly and only the marginal entropy
+H(L) is returned (equivalent to γ · H(L) acting as a capacity
+regulariser).
+"""
+
 from __future__ import annotations
 
 import torch
-from torch import nn
+
+from src.algorithms.losses.components import ADLoss
 
 
-class BernoulliBottleneckMILoss(nn.Module):
-    """Batch estimate of I(X; Z) for Bernoulli latent units.
+# ──────────────────────────────────────────────────────────────────────
+# Helpers
+# ──────────────────────────────────────────────────────────────────────
 
-    The encoder output is converted to Bernoulli probabilities p(z_i=1|x).
-    We estimate:
+_LOG2 = torch.log(torch.tensor(2.0)).item()  # ln(2)
+_EPS = 1e-20  # numerical guard for log
 
-        I(X; Z) = H(Z) - H(Z | X)
 
-    under a factorized Bernoulli approximation.
+def _log2(x: torch.Tensor) -> torch.Tensor:
+    """Numerically safe base-2 logarithm."""
+    return torch.log(x + _EPS) / _LOG2
+
+
+def binary_entropy(probs: torch.Tensor) -> torch.Tensor:
+    """Element-wise binary (Bernoulli) entropy in bits.
+
+    H(p) = −(1−p) log₂(1−p) − p log₂(p)
+
+    :param probs: Tensor of Bernoulli probabilities in [0, 1].
+    :returns: Tensor of the same shape with per-element entropy.
+    """
+    return -(1 - probs) * _log2(1 - probs) - probs * _log2(probs)
+
+
+# ──────────────────────────────────────────────────────────────────────
+# Unsupervised MI loss (marginal entropy only)
+# ──────────────────────────────────────────────────────────────────────
+
+class BernoulliBottleneckMILoss(ADLoss):
+    """Marginal binary entropy of the bottleneck activations.
+
+    When used without a sensitive attribute this reduces to
+
+        loss = Σ_j  H_Bernoulli( mean_i(p_{i,j}) )
+
+    i.e. the sum (or mean, depending on *reduction*) of per-neuron
+    entropies computed from the batch-averaged activation probability.
+    Maximising this encourages the bottleneck to use its full capacity.
     """
 
-    def __init__(self, reduction: str = "mean", eps: float = 1e-6) -> None:
-        super().__init__()
+    name: str = "mi"
 
-        if reduction not in {"mean", "sum"}:
-            raise ValueError(f"reduction must be 'mean' or 'sum', got {reduction}")
+    def __init__(
+        self,
+        scale: float = 1.0,
+        reduction: str = "sum",
+    ) -> None:
+        super().__init__(scale=scale, reduction=reduction)
 
-        self.reduction = reduction
-        self.eps = eps
-
-    def binary_entropy(self, p: torch.Tensor) -> torch.Tensor:
-        p = p.clamp(self.eps, 1.0 - self.eps)
-        return -(p * torch.log2(p) + (1.0 - p) * torch.log2(1.0 - p))
+    # Expose the helper so callers (e.g. MIAwareAE) can compute
+    # per-element entropy for logging without re-implementing it.
+    @staticmethod
+    def binary_entropy(probs: torch.Tensor) -> torch.Tensor:
+        return binary_entropy(probs)
 
     def forward(self, probs: torch.Tensor) -> torch.Tensor:
-        if probs.ndim < 2:
-            raise ValueError(
-                f"Expected probs with shape (batch, latent_dim, ...), got {tuple(probs.shape)}."
-            )
+        """Compute marginal entropy of Bernoulli bottleneck activations.
 
-        probs = torch.flatten(probs, start_dim=1)
+        :param probs: (B, D) Bernoulli probabilities from the bottleneck.
+        :returns: Scalar loss (sum or mean over latent dimensions).
+        """
+        # θ_j = E_i[p_{i,j}]  — batch-mean per latent dimension.
+        theta = probs.mean(dim=0)  # (D,)
 
-        # Marginal entropy H(Z)
-        marginal_probs = probs.mean(dim=0)
-        h_z = self.binary_entropy(marginal_probs)
+        # Per-neuron entropy in bits.
+        h = binary_entropy(theta)  # (D,)
 
-        # Conditional entropy H(Z | X)
-        h_z_given_x = self.binary_entropy(probs).mean(dim=0)
+        return self.scale * self.reduce(h)
 
-        mi_per_unit = torch.clamp(h_z - h_z_given_x, min=0.0)
 
-        # if self.reduction == "sum":
-        #     return mi_per_unit.sum()
+# ──────────────────────────────────────────────────────────────────────
+# Supervised MI loss (conditional entropy subtracted)
+# ──────────────────────────────────────────────────────────────────────
 
-        # return mi_per_unit.mean()
-        return mi_per_unit.sum()
+class SupervisedBernoulliMILoss(ADLoss):
+    """Mutual information I(L; S) between latent activations and a
+    discrete sensitive attribute, estimated via Bernoulli entropy.
+
+    This is the direct PyTorch port of the original Keras
+    ``mutual_information_bernoulli_loss``.
+
+    I(L; S) = H(L) − Σ_v  p(S=v) · H(L | S=v)
+    """
+
+    name: str = "supervised_mi"
+
+    def __init__(
+        self,
+        scale: float = 1.0,
+        reduction: str = "sum",
+    ) -> None:
+        super().__init__(scale=scale, reduction=reduction)
+
+    def forward(
+        self,
+        probs: torch.Tensor,
+        sensitive: torch.Tensor,
+    ) -> torch.Tensor:
+        """Compute MI between bottleneck probs and a sensitive attribute.
+
+        :param probs: (B, D) Bernoulli activation probabilities.
+        :param sensitive: (B,) or (B, 1) integer-valued sensitive attribute.
+        :returns: Scalar MI estimate.
+        """
+        probs = probs.double()
+        sensitive = sensitive.view(-1).long()
+
+        # ── H(L) ────────────────────────────────────────────────────
+        theta_all = probs.mean(dim=0)
+        h_total = binary_entropy(theta_all).sum()  # scalar
+
+        # ── H(L | S=v) for each unique value v ─────────────────────
+        unique_vals = sensitive.unique()
+        weighted_cond = probs.new_tensor(0.0, dtype=torch.float64)
+
+        for v in unique_vals:
+            mask = sensitive == v
+            probs_v = probs[mask]                        # (n_v, D)
+            theta_v = probs_v.mean(dim=0)                # (D,)
+            h_v = binary_entropy(theta_v).sum()          # scalar
+            frac = probs_v.shape[0] / probs.shape[0]     # p(S=v)
+            weighted_cond = weighted_cond + frac * h_v
+
+        mi = h_total - weighted_cond
+
+        # Hotfix: clamp NaN (can occur when a class has 0 samples).
+        mi = torch.where(torch.isnan(mi), mi.new_tensor(0.0), mi)
+
+        return self.scale * mi.float()

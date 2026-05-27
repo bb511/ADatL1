@@ -30,7 +30,7 @@ class MIAwareAE(ADLightningModule):
         use_bernoulli_bottleneck: bool = True,
         bottleneck_temperature: float = 1.0,
         deterministic_eval: bool = True,
-        mi_reduction: str = "mean",
+        mi_reduction: str = "sum",
         **kwargs: Any,
     ) -> None:
         super().__init__(model=None, **kwargs)

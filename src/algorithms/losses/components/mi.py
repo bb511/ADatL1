@@ -45,7 +45,8 @@ class BernoulliBottleneckMILoss(nn.Module):
 
         mi_per_unit = torch.clamp(h_z - h_z_given_x, min=0.0)
 
-        if self.reduction == "sum":
-            return mi_per_unit.sum()
+        # if self.reduction == "sum":
+        #     return mi_per_unit.sum()
 
-        return mi_per_unit.mean()
+        # return mi_per_unit.mean()
+        return mi_per_unit.sum()

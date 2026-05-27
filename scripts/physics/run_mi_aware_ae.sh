@@ -1,7 +1,7 @@
 python3 src/train.py \
     paths.raw_data_dir=../../03_Data/adl1t_data/parquet_files \
     experiment=physics/mi_aware_ae \
-    run_name="MI_Aware_AE_Run_1_Gamma_5e-06" \
+    run_name="MI_Aware_AE_Run_2_Gamma_5e-06_sum" \
     algorithm.optimizer.lr=0.0019859329798336714 \
     algorithm.delta=10.0 \
     trainer.gradient_clip_val=5.0 \

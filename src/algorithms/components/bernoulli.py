@@ -14,12 +14,9 @@ class BernoulliQuantizedBottleneck(nn.Module):
         gradients flow through the probabilities.
     """
 
-    def __init__(
-        self,
-        temperature: float = 1.0,
-        deterministic_eval: bool = True,
-        eps: float = 1e-6,
-    ) -> None:
+    def __init__(self, temperature: float = 1.0, deterministic_eval: bool = True,
+        eps: float = 1e-6,) -> None:
+        
         super().__init__()
 
         if temperature <= 0.0:

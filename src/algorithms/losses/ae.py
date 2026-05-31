@@ -3,10 +3,10 @@ from typing import Literal
 import torch
 
 from src.algorithms.losses.components import ADLoss
-from src.algorithms.losses.components.mi import BernoulliBottleneckMILoss
+from src.algorithms.losses.components.bernoulli_mi import BernoulliMILoss
 from src.algorithms.losses.components.reconstruction import MSEReconstructionLoss
 from src.algorithms.losses.components.reconstruction import HuberReconstructionLoss
-
+from src.algorithms.losses.components.bernoulli_mi import BernoulliMILoss
 
 class ClassicAELoss(ADLoss):
     """The classic AE loss, i.e., reconstruction loss between input and output."""
@@ -52,29 +52,9 @@ class PileupMIAELoss(HuberAELoss):
     ``src.algorithms.losses.components.mi``).
     """
 
-    def __init__(
-        self,
-        gamma: float = 1.0,
-        delta: float = 1.0,
-        mi_reduction: str = "sum",
-        reduction: str = "none",
-    ):
-        super().__init__(delta=delta, reduction=reduction)
-        self.gamma = gamma
-        self.mi_loss = BernoulliBottleneckMILoss(reduction=mi_reduction)
+    def __init__(self, mi_reduction: str = "sum", mi_temperature: float = 6.0) -> None:
+        super().__init__()
+        self.mi_loss = BernoulliMILoss(temperature=mi_temperature, reduction=mi_reduction)
 
-    def forward(
-        self,
-        target: torch.Tensor,
-        reco: torch.Tensor,
-        mask: torch.Tensor | None,
-        probs: torch.Tensor | None = None,
-    ) -> torch.Tensor:
-        reco_loss = super().forward(target, reco, mask)
-
-        if probs is not None and self.gamma != 0.0:
-            mi = self.mi_loss(probs)
-        else:
-            mi = reco_loss.new_tensor(0.0)
-
-        return self.gamma * mi
+    def forward(self, latent: torch.Tensor, sensitive: torch.Tensor) -> torch.Tensor:
+        return self.mi_loss(latent=latent,sensitive=sensitive,)

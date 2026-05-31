@@ -1,9 +1,10 @@
 # @package callbacks.main
 
-_target_: src.evaluation.callbacks.cap.CAP
-output_name: 'loss/total/full'
+_target_: src.callbacks.cap.CAPCallback
+output_name: 'ascore/full'
 dataset_1: ???
 dataset_2: ???
+pairing_type: cdf
 cap_metric_config:
   beta0: 1.0
   normalization_type: sigmoid

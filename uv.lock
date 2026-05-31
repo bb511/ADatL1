@@ -22,7 +22,6 @@ source = { editable = "." }
 dependencies = [
     { name = "adl1t-datamaker" },
     { name = "awkward" },
-    { name = "capmetric" },
     { name = "colorama" },
     { name = "datasets" },
     { name = "fastparquet" },
@@ -84,7 +83,6 @@ dev = [
 requires-dist = [
     { name = "adl1t-datamaker", git = "https://github.com/bb511/adl1t_datamaker.git?rev=e8debb2f10bbc1dcf1813ce5b20decffc9950514" },
     { name = "awkward", specifier = ">=2.8,<3" },
-    { name = "capmetric", git = "ssh://git@github.com/viictorjimenezzz/cap-metric.git?rev=main" },
     { name = "colorama", specifier = ">=0.4.6,<0.5" },
     { name = "datasets", specifier = ">=4.8.4,<5" },
     { name = "fastparquet", specifier = ">=2024.11" },
@@ -388,16 +386,6 @@ source = { registry = "https://pypi.org/simple" }
 sdist = { url = "https://files.pythonhosted.org/packages/f4/8b/0d3945a13955303b81272f759a0331e54c5c793da455e6f5706b89d2639c/cachetools-7.1.4.tar.gz", hash = "sha256:437f55a4e0c1b01a4f3077cc470e6991d47430970e36fbcb77e2be0df4fc1cd6", size = 40085, upload-time = "2026-05-21T22:40:43.376Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/8c/7b/1fc1c09cc0756cf25861a3be10565915953876da48bb228fb9a672b20a42/cachetools-7.1.4-py3-none-any.whl", hash = "sha256:323dc4127934744db5b54eb4924482d7edafbf9554e820d1531c2e08c0e4ef54", size = 16761, upload-time = "2026-05-21T22:40:41.845Z" },
-]
-
-[[package]]
-name = "capmetric"
-version = "1.0.0"
-source = { git = "ssh://git@github.com/viictorjimenezzz/cap-metric.git?rev=main#28e2c71ed0cd7b440d4912d636e62518203b2db0" }
-dependencies = [
-    { name = "torch" },
-    { name = "torchmetrics" },
-    { name = "tqdm" },
 ]
 
 [[package]]

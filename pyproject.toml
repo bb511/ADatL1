@@ -11,7 +11,6 @@ requires-python = ">=3.10,<3.12"
 dependencies = [
     "adl1t-datamaker @ git+https://github.com/bb511/adl1t_datamaker.git@e8debb2f10bbc1dcf1813ce5b20decffc9950514",
     "awkward>=2.8,<3",
-    "capmetric @ git+ssh://git@github.com/viictorjimenezzz/cap-metric.git@main",
     "colorama>=0.4.6,<0.5",
     "datasets>=4.8.4,<5",
     "fastparquet>=2024.11",

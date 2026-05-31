@@ -13,7 +13,7 @@
 python3 src/train.py \
     paths.raw_data_dir=../../03_Data/adl1t_data/parquet_files \
     experiment=physics/ae \
-    run_name=cvar25_t169 \
+    run_name="Bernoulli_MI_AE_Gamma_0.1_Run_1" \
     algorithm.optimizer.lr=0.0019859329798336714 \
     algorithm.delta=10.0 \
     trainer.gradient_clip_val=5.0 \
@@ -21,7 +21,9 @@ python3 src/train.py \
     algorithm.optimizer.weight_decay=1e-06 \
     algorithm.encoder.nodes='[64,32,8]' \
     algorithm.input_noise_std=0.0 \
-    trainer.max_epochs=100 \
+    algorithm.gamma=0.1 \
+    algorithm.reduction=sum \
+    trainer.max_epochs=50 \
     trainer=gpu \
     trainer.devices=[0]
 

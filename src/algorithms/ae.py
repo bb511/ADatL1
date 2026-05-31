@@ -35,6 +35,8 @@ class AE(ADLightningModule):
         features: nn.Module = None,
         target_rate: float = 0.25,
         base_rate: float | None = None,
+        mi_temperature: float = 6.0,
+        mi_gamma: float = 1.0,
         **kwargs,
     ):
         super().__init__(model=None, **kwargs)
@@ -46,9 +48,9 @@ class AE(ADLightningModule):
 
         self.encoder, self.decoder = encoder, decoder
         self.input_noise_std = input_noise_std
-        self.loss = HuberAELoss(delta=delta, reduction='none')
-        self.mi_loss = PileupMIAELoss(gamma=1.0, delta=delta, mi_reduction='sum', reduction='none')
-        self.ascore = MSEReconstructionLoss(reduction='none')
+        self.reco_loss = HuberAELoss(delta=delta, reduction="none")
+        self.mi_loss = PileupMIAELoss(mi_reduction="sum", mi_temperature=mi_temperature)
+        self.mi_gamma = mi_gamma
 
     def on_fit_start(self):
         inject_object_feature_map(self)
@@ -83,7 +85,13 @@ class AE(ADLightningModule):
             x_noisy = x + noise
 
         z, reconstruction = self.forward(x_noisy)
-        loss = self.loss(reco=reconstruction, target=x, mask=m)
+        reco_loss = self.reco_loss(target=x, reco=reconstruction,mask=m)
+
+        #TODO: Implement the proper pileup
+        pileup = torch.ones_like(x[:, 0:1])
+        mi_loss = self.mi_loss(latent=z, sensitive=pileup)
+
+        total_loss = reco_loss.mean() + self.mi_gamma * mi_loss
         # The anomaly score is expected to be a distribution over events.
         ascore = self.ascore(x, reconstruction, m)
         if ascore.ndim != 1:
@@ -104,12 +112,17 @@ class AE(ADLightningModule):
 
         return {
             # Used for backpropagation:
-            "loss": loss.mean(),
+            "loss": total_loss,
+
             # Used for logging:
-            "loss/mean": loss.mean(),
+            "loss/mean": total_loss.detach(),
+            "loss/reco": reco_loss.mean().detach(),
+            "loss/mi": mi_loss.detach(),
             "ascore/operational": operational_ascore,
+
             # Used for callbacks:
-            "loss/full": loss.detach(),
+            # Keep this event-level and reconstruction-only.
+            "loss/full": reco_loss.detach(),
             "ascore/full": ascore.detach(),
             "reconstructed_data": reconstruction.detach(),
         }
@@ -119,5 +132,7 @@ class AE(ADLightningModule):
         return {
             "loss": outdict.get("loss"),
             "loss_mean": outdict.get("loss/mean"),
+            "loss_reco": outdict.get("loss/reco"),
+            "loss_mi": outdict.get("loss/mi"),
             "ascore_operational": outdict.get("ascore/operational"),
         }

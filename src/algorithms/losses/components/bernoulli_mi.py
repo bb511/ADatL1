@@ -33,8 +33,8 @@ class BernoulliMILoss(torch.nn.Module):
 
         probs = self._bernoulli_probs(latent)
 
-        h_marginal = self._h_bernoulli_from_probs(probs)
-        h_conditional = probs.new_zeros(())
+        h_marginal = self._h_bernoulli_from_probs(probs) # Σ_r H(L_r)
+        h_conditional = probs.new_zeros(()) # Σ_s p(S=s) Σ_r H(L_r | S=s)
 
         batch_size = probs.shape[0]
         for value in torch.unique(sensitive):
@@ -64,6 +64,7 @@ class BernoulliMILoss(torch.nn.Module):
         return torch.log(x) / torch.log(x.new_tensor(2.0))
 
     def _h_bernoulli_from_probs(self, probs: torch.Tensor) -> torch.Tensor:
-        theta = probs.mean(dim=0).clamp(self.eps, 1.0 - self.eps)
-        entropy_per_unit = -((1.0 - theta) * self._log2(1.0 - theta) + theta * self._log2(theta))
+        theta = probs.mean(dim=0).clamp(self.eps, 1.0 - self.eps) 
+
+        entropy_per_unit = -(1.0-theta) * self._log2(1.0 - theta) - theta * self._log2(theta)
         return entropy_per_unit.sum()

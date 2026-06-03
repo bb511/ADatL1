@@ -14,11 +14,11 @@
 python3 src/train.py \
     paths.raw_data_dir=../../03_Data/adl1t_data/parquet_files \
     experiment=physics/ae \
-    run_name="Bernoulli_MI_AE_Gamma_0.2_Run_1" \
+    run_name="Bernoulli_MI_AE_Gamma_1.0_Run_1" \
     logger=mlflow \
     algorithm.optimizer.lr=0.0019859329798336714 \
     algorithm.delta=10.0 \
-    algorithm.mi_gamma=0.2 \
+    algorithm.mi_gamma=1.0 \
     algorithm.mi_temperature=6.0 \
     trainer.gradient_clip_val=5.0 \
     algorithm.optimizer.betas='[0.9,0.999]' \

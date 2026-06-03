@@ -36,10 +36,17 @@ class AE(ADLightningModule):
         target_rate: float = 0.25,
         base_rate: float | None = None,
         mi_temperature: float = 6.0,
-        mi_gamma: float = 1.0,
+        mi_gamma: float = 0.1,
+        mi_reduction: str = "sum",
         **kwargs,
     ):
-        super().__init__(model=None, **kwargs)
+        # Only forward keys expected by ADLightningModule.__init__.
+        # Extract parent kwargs and avoid accidentally passing algorithm-specific keys
+        # (e.g., legacy `gamma`, `mi_reduction`, etc.). This prevents TypeErrors
+        # during Hydra instantiation when the full algorithm config is provided.
+        parent_keys = {"optimizer", "scheduler", "save_hyperparameters"}
+        parent_kwargs = {k: kwargs.pop(k) for k in list(kwargs.keys()) if k in parent_keys}
+        super().__init__(model=None, **parent_kwargs)
         self.save_hyperparameters(
             ignore=["model", "features", "encoder", "decoder", "loss"]
         )
@@ -48,9 +55,12 @@ class AE(ADLightningModule):
 
         self.encoder, self.decoder = encoder, decoder
         self.input_noise_std = input_noise_std
-        self.reco_loss = HuberAELoss(delta=delta, reduction="none")
-        self.mi_loss = PileupMIAELoss(mi_reduction="sum", mi_temperature=mi_temperature)
-        self.mi_gamma = mi_gamma
+        self.reco_loss = HuberAELoss(delta=delta, scale=1.0, reduction="none")
+        self.ascore_loss = MSEReconstructionLoss(scale=1.0, reduction="none")
+        self.mi_loss = PileupMIAELoss(mi_temperature=mi_temperature, mi_reduction=mi_reduction)
+        self.mi_gamma = float(mi_gamma)
+        self._warned_no_denorm_for_mi = False
+        self._energy_feature_indices: list[int] | None = None
 
     def on_fit_start(self):
         inject_object_feature_map(self)
@@ -67,6 +77,107 @@ class AE(ADLightningModule):
         z = self.encoder(x)
         reconstruction = self.decoder(z)
         return z, reconstruction
+
+    def ascore(self, x: torch.Tensor, reconstruction: torch.Tensor, mask: torch.Tensor | None = None) -> torch.Tensor:
+        """Compute per-event anomaly score: reconstruction error per observation."""
+        # Rely on the configured reconstruction loss to produce a per-sample score.
+        return self.ascore_loss(target=x, reco=reconstruction, mask=mask)
+
+    def _energy_feature_names(self) -> tuple[str, ...]:
+        # Feature names seen in L1 object maps usually use Et-like naming.
+        return ("et", "pt", "energy")
+
+    def _is_energy_feature(self, feature_name: str) -> bool:
+        name = feature_name.lower()
+        if "eta" in name or "phi" in name:
+            return False
+        return any(key in name for key in self._energy_feature_names())
+
+    def _get_energy_feature_indices(self) -> list[int]:
+        if self._energy_feature_indices is not None:
+            return self._energy_feature_indices
+
+        ofm = getattr(self, "object_feature_map", None)
+        if not isinstance(ofm, dict):
+            self._energy_feature_indices = []
+            return self._energy_feature_indices
+
+        idxs: list[int] = []
+        for _, feature_map in ofm.items():
+            for feature_name, feature_idxs in feature_map.items():
+                if self._is_energy_feature(feature_name):
+                    idxs.extend(int(i) for i in feature_idxs)
+
+        # Keep deterministic ordering and remove duplicates.
+        self._energy_feature_indices = sorted(set(idxs))
+        return self._energy_feature_indices
+
+    def _get_denormalized_x_for_mi(self, x: torch.Tensor) -> torch.Tensor:
+        """Return a physical-scale copy of x when the datamodule normalizer is available.
+
+        The autoencoder receives normalized inputs. Computing a physics control
+        variable such as total event energy on normalized features is usually wrong,
+        especially for padded entries, because a denormalized padded value can become
+        non-zero after applying the shift. Therefore this method tries to use the
+        datamodule's normalizer and falls back to the normalized tensor only when no
+        normalizer is attached.
+        """
+        trainer = getattr(self, "trainer", None)
+        datamodule = getattr(trainer, "datamodule", None) if trainer is not None else None
+        normalizer = getattr(datamodule, "normalizer", None) if datamodule is not None else None
+        ofm = getattr(self, "object_feature_map", None)
+
+        if normalizer is None or ofm is None or not hasattr(normalizer, "denorm_1d_tensor"):
+            if not self._warned_no_denorm_for_mi:
+                print(
+                    "Warning: computing MI energy control variable from normalized x "
+                    "because no datamodule normalizer was available."
+                )
+                self._warned_no_denorm_for_mi = True
+            return x.detach()
+
+        x_phys = x.detach().clone()
+        if getattr(normalizer, "scale_tensor", None) is None or getattr(normalizer, "shift_tensor", None) is None:
+            normalizer.setup_1d_denorm(ofm)
+        return normalizer.denorm_1d_tensor(x_phys)
+
+    def _compute_total_energy(self, x: torch.Tensor, mask: torch.Tensor | None) -> torch.Tensor:
+        idxs = self._get_energy_feature_indices()
+        x_for_energy = self._get_denormalized_x_for_mi(x)
+
+        if idxs:
+            idx_tensor = torch.as_tensor(idxs, device=x.device, dtype=torch.long)
+            energy_terms = x_for_energy.index_select(dim=1, index=idx_tensor)
+            if mask is not None:
+                energy_mask = mask.index_select(dim=1, index=idx_tensor).to(dtype=energy_terms.dtype)
+                energy_terms = energy_terms * energy_mask
+            return energy_terms.sum(dim=1)
+
+        # Conservative fallback: keep the old behavior, but only if no object map is available.
+        if x_for_energy.size(1) >= 3:
+            return x_for_energy[:, :3].sum(dim=1)
+        return x_for_energy[:, 0]
+
+    def _bin_sensitive_by_batch_quantiles(self, sensitive_value: torch.Tensor, num_bins: int = 5) -> torch.Tensor:
+        """Discretize a continuous control variable for the Bernoulli MI estimator.
+
+        The original MI loss expects a discrete S. Batch quantiles are a pragmatic
+        local discretization; for production studies, prefer fixed thresholds computed
+        once on the training set so the meaning of each bin is stable across batches.
+        """
+        sensitive_value = sensitive_value.detach().flatten()
+        if sensitive_value.numel() < num_bins:
+            return torch.zeros_like(sensitive_value, dtype=torch.long).unsqueeze(1)
+
+        q = torch.linspace(
+            0.0,
+            1.0,
+            steps=num_bins + 1,
+            device=sensitive_value.device,
+            dtype=sensitive_value.dtype,
+        )[1:-1]
+        thresholds = torch.quantile(sensitive_value, q).contiguous()
+        return torch.bucketize(sensitive_value, thresholds).unsqueeze(1).long()
 
     def model_step(self, batch: torch.Tensor) -> torch.Tensor:
         b = unpack_batch(batch)
@@ -85,15 +196,23 @@ class AE(ADLightningModule):
             x_noisy = x + noise
 
         z, reconstruction = self.forward(x_noisy)
-        reco_loss = self.reco_loss(target=x, reco=reconstruction,mask=m)
+        reco_loss = self.reco_loss(target=x, reco=reconstruction, mask=m)
 
-        #TODO: Implement the proper pileup
-        pileup = torch.ones_like(x[:, 0:1])
+        total_energy = self._compute_total_energy(x=x, mask=m)
+        pileup = self._bin_sensitive_by_batch_quantiles(total_energy, num_bins=5)
+
         mi_loss = self.mi_loss(latent=z, sensitive=pileup)
 
         total_loss = reco_loss.mean() + self.mi_gamma * mi_loss
         # The anomaly score is expected to be a distribution over events.
-        ascore = self.ascore(x, reconstruction, m)
+        # Allow subclasses to override `ascore`; otherwise fall back to
+        # the reconstruction loss per observation for robustness.
+        ascore_fn = getattr(self, "ascore", None)
+        if callable(ascore_fn):
+            ascore = ascore_fn(x, reconstruction, m)
+        else:
+            ascore = reco_loss
+
         if ascore.ndim != 1:
             raise ValueError(f"Expected per-event ascores, got {tuple(ascore.shape)}.")
 

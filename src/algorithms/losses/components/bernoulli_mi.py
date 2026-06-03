@@ -1,14 +1,18 @@
+from __future__ import annotations
+
 import torch
+from torch import nn
 
 class BernoulliMILoss(torch.nn.Module):
 
     def __init__(self, temperature: float = 6.0, use_quantized_sigmoid: bool = False,
-        bits_bernoulli_sigmoid: int = 8, eps: float = 1e-20) -> None:
+        bits_bernoulli_sigmoid: int = 8, eps: float = 1e-12, input_is_logits: bool = True) -> None:
         super().__init__()
-        self.temperature = temperature
-        self.use_quantized_sigmoid = use_quantized_sigmoid
-        self.bits_bernoulli_sigmoid = bits_bernoulli_sigmoid
-        self.eps = eps
+        self.temperature = float(temperature)
+        self.use_quantized_sigmoid = bool(use_quantized_sigmoid)
+        self.bits_bernoulli_sigmoid = int(bits_bernoulli_sigmoid)
+        self.eps = float(eps)
+        self.input_is_logits = bool(input_is_logits)
 
         if self.use_quantized_sigmoid:
             raise NotImplementedError(
@@ -16,70 +20,50 @@ class BernoulliMILoss(torch.nn.Module):
             )
 
     def forward(self, latent: torch.Tensor, sensitive: torch.Tensor) -> torch.Tensor:
-        latent = latent.to(dtype=torch.float64)
+        if latent.ndim < 2:
+            raise ValueError(f"Expected latent shape [batch, latent_dim, ...], got {tuple(latent.shape)}")
 
-        if sensitive.dim() > 1:
-            sensitive = sensitive[:, 0]
+        latent = torch.flatten(latent, start_dim=1).float()
+        sensitive = sensitive.reshape(-1).to(device=latent.device, dtype=torch.long)
 
-        sensitive = sensitive.to(device=latent.device, dtype=torch.long)
+        if sensitive.numel() != latent.shape[0]:
+            raise ValueError(
+                f"Sensitive variable length ({sensitive.numel()}) must match batch size ({latent.shape[0]})."
+            )
 
-        H_L_n = self.get_h_bernoulli(latent)
+        probs = self._bernoulli_probs(latent)
 
-        conditional_entropy = torch.zeros(
-            (), device=latent.device, dtype=torch.float64
-        )
+        h_marginal = self._h_bernoulli_from_probs(probs)
+        h_conditional = probs.new_zeros(())
 
-        unique_sensitive = torch.unique(sensitive)
+        batch_size = probs.shape[0]
+        for value in torch.unique(sensitive):
+            mask = sensitive == value
+            probs_value = probs[mask]
+            weight = probs_value.shape[0] / batch_size
+            h_conditional = h_conditional + weight * self._h_bernoulli_from_probs(probs_value)
 
-        for value in unique_sensitive:
-            H_L_n_si, norm_si = self.compute_for_value(value, latent, sensitive)
-            conditional_entropy = conditional_entropy + norm_si * H_L_n_si
+        mi = h_marginal - h_conditional
+        mi = torch.nan_to_num(mi, nan=0.0, posinf=0.0, neginf=0.0)
 
-        MI = H_L_n - conditional_entropy
-        MI = torch.nan_to_num(MI, nan=0.0, posinf=0.0, neginf=0.0)
-
-        return MI.to(dtype=torch.float32)
+        # MI is theoretically non-negative. Small negative values can occur from
+        # finite precision and should not create an incentive during minimisation.
+        return mi.clamp_min(0.0)
 
 
  # ----------------------------------------
  # Helpers
-    def get_theta(self, x: torch.Tensor) -> torch.Tensor:
-        std = 1.0
-        return torch.sigmoid(self.temperature * x / std)
-
-    def log2(self, x: torch.Tensor) -> torch.Tensor:
-        numerator = torch.log(x + self.eps)
-        denominator = torch.log(
-            torch.tensor(2.0, device=x.device, dtype=x.dtype)
-        )
-        return numerator / denominator
-    
-    def get_h_bernoulli(self, tensor: torch.Tensor) -> torch.Tensor:
-        theta = torch.mean(self.get_theta(tensor), dim=0)
-
-        entropy_per_unit = (-(1.0 - theta) * self.log2(1.0 - theta) - theta * self.log2(theta))
-
-        return torch.sum(entropy_per_unit)
-    
-    def compute_for_value(self, value: torch.Tensor, latent: torch.Tensor, sensitive: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
-        mask = sensitive == value
-        latent_i = latent[mask]
-
-        if latent_i.numel() == 0:
-            H_L_n_si = torch.zeros(
-                (), device=latent.device, dtype=torch.float64
-            )
+    def _bernoulli_probs(self, latent: torch.Tensor) -> torch.Tensor:
+        if self.input_is_logits:
+            probs = torch.sigmoid(self.temperature * latent)
         else:
-            H_L_n_si = self.get_h_bernoulli(latent_i)
+            probs = latent
+        return probs.clamp(self.eps, 1.0 - self.eps)
 
-        count_i = torch.tensor(
-            latent_i.shape[0], device=latent.device, dtype=torch.float64
-        )
+    def _log2(self, x: torch.Tensor) -> torch.Tensor:
+        return torch.log(x) / torch.log(x.new_tensor(2.0))
 
-        batch_size = torch.tensor(
-            latent.shape[0], device=latent.device, dtype=torch.float64
-        )
-
-        norm_si = count_i / batch_size
-
-        return H_L_n_si, norm_si
+    def _h_bernoulli_from_probs(self, probs: torch.Tensor) -> torch.Tensor:
+        theta = probs.mean(dim=0).clamp(self.eps, 1.0 - self.eps)
+        entropy_per_unit = -((1.0 - theta) * self._log2(1.0 - theta) + theta * self._log2(theta))
+        return entropy_per_unit.sum()

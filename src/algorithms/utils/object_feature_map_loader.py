@@ -1,6 +1,8 @@
 # Load object_feature_map if required/available.
 
 from typing import Any
+from pathlib import Path
+import json
 
 
 def _first_dataloader(dls):
@@ -52,8 +54,35 @@ def maybe_get_object_feature_map(pl_module) -> Any | None:
 
 
 def inject_object_feature_map(pl_module) -> None:
-    """Inject the object_feature_map into the lightning module."""
+    """Inject the object_feature_map into the lightning module.
+
+    If no mapping is attached to the trainer/datamodule/dataloaders, try to
+    locate a local `object_feature_map.json` in the workspace (preferably under
+    an `mlready`/`data` folder) and load it as a fallback.
+    """
     ofm = maybe_get_object_feature_map(pl_module)
+
+    # Fallback: search workspace for a cached object_feature_map.json
+    if ofm is None:
+        try:
+            cwd = Path.cwd()
+            candidates = list(cwd.rglob("object_feature_map.json"))
+            found = None
+            # prefer files under mlready or data directories
+            for p in candidates:
+                sp = str(p)
+                if "mlready" in sp or ("/data/" in sp or "\\data\\" in sp):
+                    found = p
+                    break
+            if found is None and candidates:
+                found = candidates[0]
+
+            if found is not None:
+                with open(found, "r") as f:
+                    ofm = json.load(f)
+        except Exception:
+            ofm = None
+
     if ofm is None:
         raise RuntimeError("Could not find object_feature_map.")
 

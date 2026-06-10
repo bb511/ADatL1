@@ -42,19 +42,29 @@ class HuberAELoss(ADLoss):
         return reco_loss
 
 class PileupMIAELoss(ADLoss):
-    """Huber reconstruction loss combined with a Bernoulli MI regulariser.
+    """BinaryMI-style mutual-information regulariser for the AE.
 
-    total = reco_loss + γ · MI_loss
+    Historical name:
+        This class is still called `PileupMIAELoss` because the active AE code
+        already imports it under that name.
 
-    The MI term is computed via :class:`BernoulliBottleneckMILoss` (see
-    ``src.algorithms.losses.components.mi``).
+    MS1 behavior:
+        It computes only the Bernoulli mutual-information term
+
+            MI(T; S) = H(T) - H(T | S)
+
+        where T is the AE latent representation and S is a discrete sensitive
+        variable.
+
+    Important:
+        This class does not compute reconstruction loss.
+        Reconstruction loss is computed separately in AE.model_step.
     """
 
-    def __init__(self, mi_temperature: float = 6.0, mi_reduction: str = "sum") -> None:
-        super().__init__(scale=1.0, reduction="sum")
-        # BernoulliMILoss does not accept a `reduction` parameter anymore; only
-        # provide the temperature. Keep `mi_reduction` for API compatibility.
-        self.mi_loss = BernoulliMILoss(temperature=mi_temperature, input_is_logits=True)
+    def __init__(self, mi_temperature: float = 6.0, input_is_logits: bool = True) -> None:
+        super().__init__(scale=1.0, reduction="none")
+
+        self.mi_loss = BernoulliMILoss(temperature=mi_temperature, input_is_logits=input_is_logits)
 
     def forward(self, latent: torch.Tensor, sensitive: torch.Tensor) -> torch.Tensor:
         return self.mi_loss(latent=latent,sensitive=sensitive,)

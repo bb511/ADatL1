@@ -131,6 +131,27 @@ class AE(ADLightningModule):
 
         total_loss = reco_loss.mean() + gamma_mi_loss
 
+        with torch.no_grad():
+            z_detached = z.detach()
+            probs = torch.sigmoid(self.mi_loss.mi_loss.temperature * z_detached)
+
+            reco_loss_mean = reco_loss.mean().detach()
+            mi_loss_detached = mi_loss.detach()
+            gamma_mi_loss_detached = gamma_mi_loss.detach()
+
+            mi_to_reco_ratio = gamma_mi_loss_detached / reco_loss_mean.clamp_min(1e-12)
+
+            latent_mean = z_detached.mean()
+            latent_std = z_detached.std(unbiased=False)
+
+            prob_mean = probs.mean()
+            prob_std = probs.std(unbiased=False)
+            prob_min = probs.min()
+            prob_max = probs.max()
+
+            prob_saturation_low = (probs < 0.01).float().mean()
+            prob_saturation_high = (probs > 0.99).float().mean()
+
         # The anomaly score is expected to be a distribution over events.
         # Allow subclasses to override `ascore`; otherwise fall back to
         # the reconstruction loss per observation for robustness.
@@ -166,12 +187,6 @@ class AE(ADLightningModule):
                 "loss/mi": mi_loss.detach(),
                 "loss/gamma_mi": gamma_mi_loss.detach(),
 
-                # Explicit MS1 aliases:
-                "total_loss": total_loss.detach(),
-                "reco_loss": reco_loss.mean().detach(),
-                "mi_loss": mi_loss.detach(),
-                "gamma_mi_loss": gamma_mi_loss.detach(),
-
                 # Binner diagnostics:
                 "sensitive/bin_min": sensitive.min().float().detach(),
                 "sensitive/bin_max": sensitive.max().float().detach(),
@@ -195,12 +210,6 @@ class AE(ADLightningModule):
             "loss_reco": outdict.get("loss/reco"),
             "loss_mi": outdict.get("loss/mi"),
             "loss_gamma_mi": outdict.get("loss/gamma_mi"),
-
-            # Explicit MS1 aliases:
-            "total_loss": outdict.get("total_loss"),
-            "reco_loss": outdict.get("reco_loss"),
-            "mi_loss": outdict.get("mi_loss"),
-            "gamma_mi_loss": outdict.get("gamma_mi_loss"),
 
             # Sensitive-bin diagnostics:
             "sensitive_bin_min": outdict.get("sensitive/bin_min"),

@@ -28,3 +28,9 @@ base_rate: 28608.8064 # bunch crossing rate in kHz
 mi_gamma: 0.1
 mi_temperature: 6.0
 mi_reduction: sum
+
+# MS1 BinaryMI sensitive-variable binning
+mi_sensitive_variable: FET.Et
+mi_sensitive_num_bins: 10
+mi_sensitive_reduction: first
+mi_sensitive_use_denormalized: true

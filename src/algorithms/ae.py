@@ -9,6 +9,7 @@ from src.algorithms.losses.ae import HuberAELoss, PileupMIAELoss
 from src.algorithms.losses.components.reconstruction import MSEReconstructionLoss
 from src.algorithms.utils.object_feature_map_loader import inject_object_feature_map
 from src.data.utils import unpack_batch
+from src.data.sensitive_binning import FixedQuantileSensitiveBinner
 
 
 class AE(ADLightningModule):
@@ -37,7 +38,10 @@ class AE(ADLightningModule):
         base_rate: float | None = None,
         mi_temperature: float = 6.0,
         mi_gamma: float = 0.1,
-        mi_reduction: str = "sum",
+        mi_sensitive_variable: str = "FET.Et",
+        mi_sensitive_num_bins: int = 10,
+        mi_sensitive_reduction: str = "First",
+        mi_sensitive_use_denormalization: bool = True,
         **kwargs,
     ):
         # Only forward keys expected by ADLightningModule.__init__.
@@ -58,14 +62,15 @@ class AE(ADLightningModule):
 
         self.reco_loss = HuberAELoss(delta=delta, scale=1.0, reduction="none")
         self.ascore_loss = MSEReconstructionLoss(scale=1.0, reduction="none")
+
         self.mi_loss = PileupMIAELoss(mi_temperature=mi_temperature, input_is_logits=True)
         self.mi_gamma = float(mi_gamma)
-
-        self._warned_no_denorm_for_mi = False
-        self._energy_feature_indices: list[int] | None = None
+        self.sensitive_binner = FixedQuantileSensitiveBinner(variable=mi_sensitive_variable, num_bins=mi_sensitive_num_bins, 
+                                                             reduction=mi_sensitive_reduction, use_denormalized=mi_sensitive_use_denormalization)
 
     def on_fit_start(self):
         inject_object_feature_map(self)
+        self._fit_sensitive_binner()
 
     def on_test_start(self):
         inject_object_feature_map(self)
@@ -89,99 +94,19 @@ class AE(ADLightningModule):
         # Feature names seen in L1 object maps usually use Et-like naming.
         return ("et", "pt", "energy")
 
-    def _is_energy_feature(self, feature_name: str) -> bool:
-        name = feature_name.lower()
-        if "eta" in name or "phi" in name:
-            return False
         return any(key in name for key in self._energy_feature_names())
 
-    def _get_energy_feature_indices(self) -> list[int]:
-        if self._energy_feature_indices is not None:
-            return self._energy_feature_indices
-
-        ofm = getattr(self, "object_feature_map", None)
-        if not isinstance(ofm, dict):
-            self._energy_feature_indices = []
-            return self._energy_feature_indices
-
-        idxs: list[int] = []
-        for _, feature_map in ofm.items():
-            for feature_name, feature_idxs in feature_map.items():
-                if self._is_energy_feature(feature_name):
-                    idxs.extend(int(i) for i in feature_idxs)
-
-        # Keep deterministic ordering and remove duplicates.
-        self._energy_feature_indices = sorted(set(idxs))
-        return self._energy_feature_indices
-
-    def _get_denormalized_x_for_mi(self, x: torch.Tensor) -> torch.Tensor:
-        """Return a physical-scale copy of x when the datamodule normalizer is available.
-
-        The autoencoder receives normalized inputs. Computing a physics control
-        variable such as total event energy on normalized features is usually wrong,
-        especially for padded entries, because a denormalized padded value can become
-        non-zero after applying the shift. Therefore this method tries to use the
-        datamodule's normalizer and falls back to the normalized tensor only when no
-        normalizer is attached.
-        """
-        trainer = getattr(self, "trainer", None)
-        datamodule = getattr(trainer, "datamodule", None) if trainer is not None else None
-        normalizer = getattr(datamodule, "normalizer", None) if datamodule is not None else None
-        ofm = getattr(self, "object_feature_map", None)
-
-        if normalizer is None or ofm is None or not hasattr(normalizer, "denorm_1d_tensor"):
-            if not self._warned_no_denorm_for_mi:
-                print(
-                    "Warning: computing MI energy control variable from normalized x "
-                    "because no datamodule normalizer was available."
-                )
-                self._warned_no_denorm_for_mi = True
-            return x.detach()
-
-        x_phys = x.detach().clone()
-        if getattr(normalizer, "scale_tensor", None) is None or getattr(normalizer, "shift_tensor", None) is None:
-            normalizer.setup_1d_denorm(ofm)
-        return normalizer.denorm_1d_tensor(x_phys)
-
-    def _compute_total_energy(self, x: torch.Tensor, mask: torch.Tensor | None) -> torch.Tensor:
-        idxs = self._get_energy_feature_indices()
-        x_for_energy = self._get_denormalized_x_for_mi(x)
-
-        if idxs:
-            idx_tensor = torch.as_tensor(idxs, device=x.device, dtype=torch.long)
-            energy_terms = x_for_energy.index_select(dim=1, index=idx_tensor)
-            if mask is not None:
-                energy_mask = mask.index_select(dim=1, index=idx_tensor).to(dtype=energy_terms.dtype)
-                energy_terms = energy_terms * energy_mask
-            return energy_terms.sum(dim=1)
-
-        # Conservative fallback: keep the old behavior, but only if no object map is available.
-        if x_for_energy.size(1) >= 3:
-            return x_for_energy[:, :3].sum(dim=1)
-        return x_for_energy[:, 0]
-
-    def _bin_sensitive_by_batch_quantiles(self, sensitive_value: torch.Tensor, num_bins: int = 5) -> torch.Tensor:
-        """Discretize a continuous control variable for the Bernoulli MI estimator.
-
-        The original MI loss expects a discrete S. Batch quantiles are a pragmatic
-        local discretization; for production studies, prefer fixed thresholds computed
-        once on the training set so the meaning of each bin is stable across batches.
-        """
-        sensitive_value = sensitive_value.detach().flatten()
-        if sensitive_value.numel() < num_bins:
-            return torch.zeros_like(sensitive_value, dtype=torch.long).unsqueeze(1)
-
-        q = torch.linspace(
-            0.0,
-            1.0,
-            steps=num_bins + 1,
-            device=sensitive_value.device,
-            dtype=sensitive_value.dtype,
-        )[1:-1]
-        thresholds = torch.quantile(sensitive_value, q).contiguous()
-        return torch.bucketize(sensitive_value, thresholds).unsqueeze(1).long()
 
     def model_step(self, batch: torch.Tensor) -> torch.Tensor:
+
+        #TODO: Delete this if statement
+        if self.global_step < 3:
+            unique, counts = torch.unique(sensitive.detach().cpu(), return_counts=True)
+            print(
+                f"[MI] step={self.global_step} sensitive bins: "
+                f"{dict(zip(unique.tolist(), counts.tolist()))}"
+            )
+
         b = unpack_batch(batch)
         x = torch.flatten(b.x, start_dim=1)
 
@@ -200,9 +125,7 @@ class AE(ADLightningModule):
         z, reconstruction = self.forward(x_noisy)
         reco_loss = self.reco_loss(target=x, reco=reconstruction, mask=m)
 
-        total_energy = self._compute_total_energy(x=x, mask=m)
-        sensitive = self._bin_sensitive_by_batch_quantiles(total_energy, num_bins=5)
-
+        sensitive = self._compute_sensitive_bins(x=x, mask = mask)
         mi_loss = self.mi_loss(latent=z, sensitive=sensitive)
 
         total_loss = reco_loss.mean() + self.mi_gamma * mi_loss
@@ -258,3 +181,47 @@ class AE(ADLightningModule):
             "loss_mi": outdict.get("loss/mi"),
             "ascore_operational": outdict.get("ascore/operational"),
         }
+    
+    def _fit_sensitive_binner(self) -> None:
+        """Compute fixed sensitive-variable bin edges from the full training split."""
+        if self.sensitive_binner.is_fitted:
+            return
+
+        trainer = getattr(self, "trainer", None)
+        datamodule = getattr(trainer, "datamodule", None) if trainer is not None else None
+
+        if datamodule is None:
+            raise RuntimeError(
+                "Cannot fit sensitive binner because trainer.datamodule is missing."
+            )
+
+        train_splits = getattr(datamodule, "_main", None)
+        if not isinstance(train_splits, dict) or "train" not in train_splits:
+            raise RuntimeError(
+                "Cannot fit sensitive binner because datamodule._main['train'] is missing. "
+                "The binner must be fitted after datamodule.setup('fit')."
+            )
+
+        train_split = train_splits["train"]
+
+        normalizer = getattr(datamodule, "normalizer", None)
+
+        edges = self.sensitive_binner.fit(
+            x=train_split.x,
+            mask=train_split.mask,
+            object_feature_map=self.object_feature_map,
+            normalizer=normalizer,
+        )
+
+        print(
+            f"[MI] Fixed sensitive bins for {self.sensitive_binner.variable}: "
+            f"{edges.tolist()}"
+        )
+
+    def _compute_sensitive_bins(self, x: torch.Tensor, mask: torch.Tensor | None) -> torch.Tensor:
+        """Compute batch sensitive labels from fixed precomputed bin edges."""
+        trainer = getattr(self, "trainer", None)
+        datamodule = getattr(trainer, "datamodule", None) if trainer is not None else None
+        normalizer = getattr(datamodule, "normalizer", None) if datamodule is not None else None
+
+        return self.sensitive_binner.transform(x=x, mask=mask, object_feature_map=self.object_feature_map, normalizer=normalizer)

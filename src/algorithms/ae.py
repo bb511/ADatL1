@@ -41,7 +41,7 @@ class AE(ADLightningModule):
         mi_sensitive_variable: str = "FET.Et",
         mi_sensitive_num_bins: int = 10,
         mi_sensitive_reduction: str = "First",
-        mi_sensitive_use_denormalization: bool = True,
+        mi_sensitive_use_denormalization: bool = False,
         **kwargs,
     ):
         # Only forward keys expected by ADLightningModule.__init__.
@@ -99,14 +99,6 @@ class AE(ADLightningModule):
 
     def model_step(self, batch: torch.Tensor) -> torch.Tensor:
 
-        #TODO: Delete this if statement
-        if self.global_step < 3:
-            unique, counts = torch.unique(sensitive.detach().cpu(), return_counts=True)
-            print(
-                f"[MI] step={self.global_step} sensitive bins: "
-                f"{dict(zip(unique.tolist(), counts.tolist()))}"
-            )
-
         b = unpack_batch(batch)
         x = torch.flatten(b.x, start_dim=1)
 
@@ -125,10 +117,19 @@ class AE(ADLightningModule):
         z, reconstruction = self.forward(x_noisy)
         reco_loss = self.reco_loss(target=x, reco=reconstruction, mask=m)
 
-        sensitive = self._compute_sensitive_bins(x=x, mask = mask)
-        mi_loss = self.mi_loss(latent=z, sensitive=sensitive)
+        sensitive = self._compute_sensitive_bins(x=x, mask=m)
 
-        total_loss = reco_loss.mean() + self.mi_gamma * mi_loss
+        if self.training and self.global_step < 3:
+            unique, counts = torch.unique(sensitive.detach().cpu(), return_counts=True)
+            print(
+                f"[MI] step={self.global_step} sensitive bins: "
+                f"{dict(zip(unique.tolist(), counts.tolist()))}"
+            )
+
+        mi_loss = self.mi_loss(latent=z, sensitive=sensitive)
+        gamma_mi_loss = self.mi_gamma * mi_loss
+
+        total_loss = reco_loss.mean() + gamma_mi_loss
 
         # The anomaly score is expected to be a distribution over events.
         # Allow subclasses to override `ascore`; otherwise fall back to
@@ -155,30 +156,58 @@ class AE(ADLightningModule):
             else:
                 operational_ascore = torch.quantile(ascore, 1.0 - self.target_fpr).item()
 
-        return {
-            # Used for backpropagation:
-            "loss": total_loss,
+            return {
+                # Used for backpropagation:
+                "loss": total_loss,
 
-            # Used for logging:
-            "loss/mean": total_loss.detach(),
-            "loss/reco": reco_loss.mean().detach(),
-            "loss/mi": mi_loss.detach(),
-            "ascore/operational": operational_ascore,
+                # Existing project-style scalar losses:
+                "loss/mean": total_loss.detach(),
+                "loss/reco": reco_loss.mean().detach(),
+                "loss/mi": mi_loss.detach(),
+                "loss/gamma_mi": gamma_mi_loss.detach(),
 
-            # Used for callbacks:
-            # Keep this event-level and reconstruction-only.
-            "loss/full": reco_loss.detach(),
-            "ascore/full": ascore.detach(),
-            "reconstructed_data": reconstruction.detach(),
-        }
+                # Explicit MS1 aliases:
+                "total_loss": total_loss.detach(),
+                "reco_loss": reco_loss.mean().detach(),
+                "mi_loss": mi_loss.detach(),
+                "gamma_mi_loss": gamma_mi_loss.detach(),
+
+                # Binner diagnostics:
+                "sensitive/bin_min": sensitive.min().float().detach(),
+                "sensitive/bin_max": sensitive.max().float().detach(),
+                "sensitive/bin_mean": sensitive.float().mean().detach(),
+
+                # Anomaly score logging:
+                "ascore/operational": operational_ascore,
+
+                # Used for callbacks:
+                # Keep this event-level and reconstruction-only.
+                "loss/full": reco_loss.detach(),
+                "ascore/full": ascore.detach(),
+                "reconstructed_data": reconstruction.detach(),
+            }
 
     def outlog(self, outdict: dict) -> dict:
-        """The values of the loss that are logged."""
+        """Values logged by ADLightningModule at epoch end."""
         return {
             "loss": outdict.get("loss"),
             "loss_mean": outdict.get("loss/mean"),
             "loss_reco": outdict.get("loss/reco"),
             "loss_mi": outdict.get("loss/mi"),
+            "loss_gamma_mi": outdict.get("loss/gamma_mi"),
+
+            # Explicit MS1 aliases:
+            "total_loss": outdict.get("total_loss"),
+            "reco_loss": outdict.get("reco_loss"),
+            "mi_loss": outdict.get("mi_loss"),
+            "gamma_mi_loss": outdict.get("gamma_mi_loss"),
+
+            # Sensitive-bin diagnostics:
+            "sensitive_bin_min": outdict.get("sensitive/bin_min"),
+            "sensitive_bin_max": outdict.get("sensitive/bin_max"),
+            "sensitive_bin_mean": outdict.get("sensitive/bin_mean"),
+
+            # Existing anomaly-score logging:
             "ascore_operational": outdict.get("ascore/operational"),
         }
     
@@ -213,10 +242,21 @@ class AE(ADLightningModule):
             normalizer=normalizer,
         )
 
+        stats = self.sensitive_binner.fit_stats
+
+        print(f"[MI] Fixed sensitive variable: {self.sensitive_binner.variable}")
+        print(f"[MI] Requested bins: {stats['num_bins_requested']}")
+        print(f"[MI] Effective bins: {stats['num_bins_effective']}")
+        print(f"[MI] Values used: {stats['num_values']}")
         print(
-            f"[MI] Fixed sensitive bins for {self.sensitive_binner.variable}: "
-            f"{edges.tolist()}"
+            "[MI] Value stats: "
+            f"min={stats['min']:.6g}, "
+            f"max={stats['max']:.6g}, "
+            f"mean={stats['mean']:.6g}, "
+            f"std={stats['std']:.6g}"
         )
+        print(f"[MI] Bin edges: {stats['edges']}")
+        print(f"[MI] Bin counts: {stats['counts']}")
 
     def _compute_sensitive_bins(self, x: torch.Tensor, mask: torch.Tensor | None) -> torch.Tensor:
         """Compute batch sensitive labels from fixed precomputed bin edges."""

@@ -55,10 +55,12 @@ class AE(ADLightningModule):
 
         self.encoder, self.decoder = encoder, decoder
         self.input_noise_std = input_noise_std
+
         self.reco_loss = HuberAELoss(delta=delta, scale=1.0, reduction="none")
         self.ascore_loss = MSEReconstructionLoss(scale=1.0, reduction="none")
-        self.mi_loss = PileupMIAELoss(mi_temperature=mi_temperature, mi_reduction=mi_reduction)
+        self.mi_loss = PileupMIAELoss(mi_temperature=mi_temperature, input_is_logits=True)
         self.mi_gamma = float(mi_gamma)
+
         self._warned_no_denorm_for_mi = False
         self._energy_feature_indices: list[int] | None = None
 
@@ -199,11 +201,12 @@ class AE(ADLightningModule):
         reco_loss = self.reco_loss(target=x, reco=reconstruction, mask=m)
 
         total_energy = self._compute_total_energy(x=x, mask=m)
-        pileup = self._bin_sensitive_by_batch_quantiles(total_energy, num_bins=5)
+        sensitive = self._bin_sensitive_by_batch_quantiles(total_energy, num_bins=5)
 
-        mi_loss = self.mi_loss(latent=z, sensitive=pileup)
+        mi_loss = self.mi_loss(latent=z, sensitive=sensitive)
 
         total_loss = reco_loss.mean() + self.mi_gamma * mi_loss
+
         # The anomaly score is expected to be a distribution over events.
         # Allow subclasses to override `ascore`; otherwise fall back to
         # the reconstruction loss per observation for robustness.

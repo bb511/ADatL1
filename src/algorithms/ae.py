@@ -90,13 +90,6 @@ class AE(ADLightningModule):
         # Rely on the configured reconstruction loss to produce a per-sample score.
         return self.ascore_loss(target=x, reco=reconstruction, mask=mask)
 
-    def _energy_feature_names(self) -> tuple[str, ...]:
-        # Feature names seen in L1 object maps usually use Et-like naming.
-        return ("et", "pt", "energy")
-
-        return any(key in name for key in self._energy_feature_names())
-
-
     def model_step(self, batch: torch.Tensor) -> torch.Tensor:
 
         b = unpack_batch(batch)
@@ -127,6 +120,10 @@ class AE(ADLightningModule):
             )
 
         mi_loss = self.mi_loss(latent=z, sensitive=sensitive)
+        with torch.no_grad():
+            perm = torch.randperm(sensitive.shape[0], device=sensitive.device)
+            sensitive_perm = sensitive[perm]
+            mi_loss_permuted = self.mi_loss(latent=z.detach(), sensitive=sensitive_perm)
         gamma_mi_loss = self.mi_gamma * mi_loss
 
         total_loss = reco_loss.mean() + gamma_mi_loss
@@ -200,6 +197,20 @@ class AE(ADLightningModule):
                 "loss/full": reco_loss.detach(),
                 "ascore/full": ascore.detach(),
                 "reconstructed_data": reconstruction.detach(),
+
+                "loss/mi_to_reco_ratio": mi_to_reco_ratio,
+
+                "latent/mean": latent_mean,
+                "latent/std": latent_std,
+
+                "bernoulli_prob/mean": prob_mean,
+                "bernoulli_prob/std": prob_std,
+                "bernoulli_prob/min": prob_min,
+                "bernoulli_prob/max": prob_max,
+                "bernoulli_prob/saturation_low": prob_saturation_low,
+                "bernoulli_prob/saturation_high": prob_saturation_high,
+                "loss/mi_permuted": mi_loss_permuted.detach(),
+                "loss/mi_minus_permuted": (mi_loss.detach() - mi_loss_permuted.detach()),
             }
 
     def outlog(self, outdict: dict) -> dict:
@@ -218,6 +229,20 @@ class AE(ADLightningModule):
 
             # Existing anomaly-score logging:
             "ascore_operational": outdict.get("ascore/operational"),
+
+            "loss_mi_to_reco_ratio": outdict.get("loss/mi_to_reco_ratio"),
+
+            "latent_mean": outdict.get("latent/mean"),
+            "latent_std": outdict.get("latent/std"),
+
+            "bernoulli_prob_mean": outdict.get("bernoulli_prob/mean"),
+            "bernoulli_prob_std": outdict.get("bernoulli_prob/std"),
+            "bernoulli_prob_min": outdict.get("bernoulli_prob/min"),
+            "bernoulli_prob_max": outdict.get("bernoulli_prob/max"),
+            "bernoulli_prob_saturation_low": outdict.get("bernoulli_prob/saturation_low"),
+            "bernoulli_prob_saturation_high": outdict.get("bernoulli_prob/saturation_high"),
+            "loss_mi_permuted": outdict.get("loss/mi_permuted"),
+            "loss_mi_minus_permuted": outdict.get("loss/mi_minus_permuted"),
         }
     
     def _fit_sensitive_binner(self) -> None:

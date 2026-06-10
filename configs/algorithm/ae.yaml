@@ -33,4 +33,4 @@ mi_reduction: sum
 mi_sensitive_variable: FET.Et
 mi_sensitive_num_bins: 10
 mi_sensitive_reduction: first
-mi_sensitive_use_denormalized: false
+mi_sensitive_use_denormalization: false

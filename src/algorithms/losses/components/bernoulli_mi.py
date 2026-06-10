@@ -16,26 +16,12 @@ class BernoulliMILoss(torch.nn.Module):
     estimating the Bernoulli entropy from the batch mean probability.
     """
 
-    def __init__(
-        self,
-        temperature: float = 6.0,
-        use_quantized_sigmoid: bool = False,
-        bits_bernoulli_sigmoid: int = 8,
-        eps: float = 1e-20,
-        input_is_logits: bool = True,
+    def __init__(self, temperature: float = 6.0, eps: float = 1e-20, input_is_logits: bool = True,
     ) -> None:
         super().__init__()
         self.temperature = float(temperature)
-        self.use_quantized_sigmoid = bool(use_quantized_sigmoid)
-        self.bits_bernoulli_sigmoid = int(bits_bernoulli_sigmoid)
         self.eps = float(eps)
         self.input_is_logits = bool(input_is_logits)
-
-        if self.use_quantized_sigmoid:
-            raise NotImplementedError(
-                "HepInfo's quantized_sigmoid path depends on qkeras stochastic "
-                "rounding and is not implemented in this PyTorch translation."
-            )
 
     def forward(self, latent: torch.Tensor, sensitive: torch.Tensor) -> torch.Tensor:
         if latent.ndim < 2:
@@ -44,7 +30,8 @@ class BernoulliMILoss(torch.nn.Module):
             )
 
         # HepInfo casts y_pred to float64 before applying the sigmoid/entropy path.
-        latent = torch.flatten(latent, start_dim=1).to(dtype=torch.float32)
+        original_dtype = latent.dtype
+        latent = torch.flatten(latent, start_dim=1).to(dtype=torch.float64)
         sensitive = self._prepare_sensitive(sensitive=sensitive, batch_size=latent.shape[0], device=latent.device)
 
         h_marginal = self._h_bernoulli(latent)
@@ -52,7 +39,8 @@ class BernoulliMILoss(torch.nn.Module):
 
         batch_size = latent.shape[0]
         for value in torch.unique(sensitive):
-            latent_value = latent[sensitive == value]
+            mask = (sensitive == value)
+            latent_value = latent[mask]
             h_value = self._h_bernoulli(latent_value)
             weight = latent.new_tensor(latent_value.shape[0] / batch_size)
             h_conditional = h_conditional + weight * h_value
@@ -60,15 +48,10 @@ class BernoulliMILoss(torch.nn.Module):
         mi = h_marginal - h_conditional
 
         # HepInfo only replaces NaN by zero; it does not clamp MI to be positive.
-        mi = torch.where(torch.isnan(mi), mi.new_tensor(0.0), mi)
-        return mi.to(dtype=torch.float32)
+        mi = torch.nan_to_num(mi, nan=0.0, posinf=0.0, neginf=0.0)
+        return mi.to(dtype=original_dtype)
 
-    def _prepare_sensitive(
-        self,
-        sensitive: torch.Tensor,
-        batch_size: int,
-        device: torch.device,
-    ) -> torch.Tensor:
+    def _prepare_sensitive(self, sensitive: torch.Tensor, batch_size: int, device: torch.device) -> torch.Tensor:
         """Match HepInfo's handling of y_true.
 
         HepInfo uses the full 1-D tensor when y_true is rank 1.  When y_true is
@@ -79,10 +62,16 @@ class BernoulliMILoss(torch.nn.Module):
 
         if sensitive.ndim == 1:
             sensitive_flat = sensitive
-        else:
+        elif sensitive.ndim == 2 and sensitive.shape[1] == 1:
             sensitive_flat = sensitive[:, 0]
+        else:
+            raise ValueError(
+                "For MS1, sensitive must have shapt [batch] or [batch, 1]."
+                f"Got {tuple(sensitive.shape)}."
+            )
 
-        sensitive_flat = sensitive_flat.reshape(-1).to(device=device, dtype=torch.long)
+        sensitive_flat = sensitive_flat.detach().reshape(-1).to(device=device, dtype=torch.long)
+        
         if sensitive_flat.numel() != batch_size:
             raise ValueError(
                 f"Sensitive variable length ({sensitive_flat.numel()}) must match "

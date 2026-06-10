@@ -20,7 +20,8 @@ class BernoulliMILoss(torch.nn.Module):
     ) -> None:
         super().__init__()
         self.temperature = float(temperature)
-        self.eps = float(eps)
+        #TODO: should be self.eps = float(eps), which does not run on Mac silicon.
+        self.eps = max(eps, torch.finfo(torch.float32).eps)
         self.input_is_logits = bool(input_is_logits)
 
     def forward(self, latent: torch.Tensor, sensitive: torch.Tensor) -> torch.Tensor:
@@ -30,8 +31,9 @@ class BernoulliMILoss(torch.nn.Module):
             )
 
         # HepInfo casts y_pred to float64 before applying the sigmoid/entropy path.
+        #TODO: should run in torch.float64, which is not supported on mac silicon.
         original_dtype = latent.dtype
-        latent = torch.flatten(latent, start_dim=1).to(dtype=torch.float64)
+        latent = torch.flatten(latent, start_dim=1).to(dtype=torch.float32)
         sensitive = self._prepare_sensitive(sensitive=sensitive, batch_size=latent.shape[0], device=latent.device)
 
         h_marginal = self._h_bernoulli(latent)
@@ -71,7 +73,7 @@ class BernoulliMILoss(torch.nn.Module):
             )
 
         sensitive_flat = sensitive_flat.detach().reshape(-1).to(device=device, dtype=torch.long)
-        
+
         if sensitive_flat.numel() != batch_size:
             raise ValueError(
                 f"Sensitive variable length ({sensitive_flat.numel()}) must match "

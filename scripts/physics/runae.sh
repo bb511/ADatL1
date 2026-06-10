@@ -25,7 +25,7 @@ python3 src/train.py \
     algorithm.optimizer.weight_decay=1e-06 \
     algorithm.encoder.nodes='[64,32,8]' \
     algorithm.input_noise_std=0.0 \
-    trainer.max_epochs=30 \
+    trainer.max_epochs=3 \
     trainer=gpu \
     trainer.devices='[0]'
 

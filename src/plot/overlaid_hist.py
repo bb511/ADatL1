@@ -54,6 +54,8 @@ def plot_1d(
     ax.get_xaxis().get_offset_text().set_position((1.10, 1))
     ax.get_yaxis().get_offset_text().set_position((-0.12, 1))
 
+    save_dir.mkdir(parents=True, exist_ok=True)
+
     filename = sanitize_filename(f"{obj_name}_{feat_name}")
     filename = filename.replace(" ", "_")
     fig.savefig(save_dir / f"{filename}.jpg", bbox_inches="tight")
@@ -104,6 +106,8 @@ def plot_streamed(
     )
     ax.get_xaxis().get_offset_text().set_position((1.10, 1))
     ax.get_yaxis().get_offset_text().set_position((-0.12, 1))
+
+    save_dir.mkdir(parents=True, exist_ok=True)
 
     filename = sanitize_filename(f"{obj_name}_{feat_name}").replace(" ", "_")
     fig.savefig(save_dir / f"{filename}.jpg", bbox_inches="tight")

@@ -185,9 +185,9 @@ class AE(ADLightningModule):
                 "loss/gamma_mi": gamma_mi_loss.detach(),
 
                 # Binner diagnostics:
-                "sensitive/bin_min": sensitive.min().float().detach(),
-                "sensitive/bin_max": sensitive.max().float().detach(),
-                "sensitive/bin_mean": sensitive.float().mean().detach(),
+                # "sensitive/bin_min": sensitive.min().float().detach(),
+                # "sensitive/bin_max": sensitive.max().float().detach(),
+                # "sensitive/bin_mean": sensitive.float().mean().detach(),
 
                 # Anomaly score logging:
                 "ascore/operational": operational_ascore,
@@ -200,17 +200,17 @@ class AE(ADLightningModule):
 
                 "loss/mi_to_reco_ratio": mi_to_reco_ratio,
 
-                "latent/mean": latent_mean,
-                "latent/std": latent_std,
+                # "latent/mean": latent_mean,
+                # "latent/std": latent_std,
 
-                "bernoulli_prob/mean": prob_mean,
-                "bernoulli_prob/std": prob_std,
-                "bernoulli_prob/min": prob_min,
-                "bernoulli_prob/max": prob_max,
-                "bernoulli_prob/saturation_low": prob_saturation_low,
-                "bernoulli_prob/saturation_high": prob_saturation_high,
-                "loss/mi_permuted": mi_loss_permuted.detach(),
-                "loss/mi_minus_permuted": (mi_loss.detach() - mi_loss_permuted.detach()),
+                # "bernoulli_prob/mean": prob_mean,
+                # "bernoulli_prob/std": prob_std,
+                # "bernoulli_prob/min": prob_min,
+                # "bernoulli_prob/max": prob_max,
+                # "bernoulli_prob/saturation_low": prob_saturation_low,
+                # "bernoulli_prob/saturation_high": prob_saturation_high,
+                # "loss/mi_permuted": mi_loss_permuted.detach(),
+                # "loss/mi_minus_permuted": (mi_loss.detach() - mi_loss_permuted.detach()),
             }
 
     def outlog(self, outdict: dict) -> dict:
@@ -223,26 +223,26 @@ class AE(ADLightningModule):
             "loss_gamma_mi": outdict.get("loss/gamma_mi"),
 
             # Sensitive-bin diagnostics:
-            "sensitive_bin_min": outdict.get("sensitive/bin_min"),
-            "sensitive_bin_max": outdict.get("sensitive/bin_max"),
-            "sensitive_bin_mean": outdict.get("sensitive/bin_mean"),
+            # "sensitive_bin_min": outdict.get("sensitive/bin_min"),
+            # "sensitive_bin_max": outdict.get("sensitive/bin_max"),
+            # "sensitive_bin_mean": outdict.get("sensitive/bin_mean"),
 
             # Existing anomaly-score logging:
             "ascore_operational": outdict.get("ascore/operational"),
 
             "loss_mi_to_reco_ratio": outdict.get("loss/mi_to_reco_ratio"),
 
-            "latent_mean": outdict.get("latent/mean"),
-            "latent_std": outdict.get("latent/std"),
+            # "latent_mean": outdict.get("latent/mean"),
+            # "latent_std": outdict.get("latent/std"),
 
-            "bernoulli_prob_mean": outdict.get("bernoulli_prob/mean"),
-            "bernoulli_prob_std": outdict.get("bernoulli_prob/std"),
-            "bernoulli_prob_min": outdict.get("bernoulli_prob/min"),
-            "bernoulli_prob_max": outdict.get("bernoulli_prob/max"),
-            "bernoulli_prob_saturation_low": outdict.get("bernoulli_prob/saturation_low"),
-            "bernoulli_prob_saturation_high": outdict.get("bernoulli_prob/saturation_high"),
-            "loss_mi_permuted": outdict.get("loss/mi_permuted"),
-            "loss_mi_minus_permuted": outdict.get("loss/mi_minus_permuted"),
+            # "bernoulli_prob_mean": outdict.get("bernoulli_prob/mean"),
+            # "bernoulli_prob_std": outdict.get("bernoulli_prob/std"),
+            # "bernoulli_prob_min": outdict.get("bernoulli_prob/min"),
+            # "bernoulli_prob_max": outdict.get("bernoulli_prob/max"),
+            # "bernoulli_prob_saturation_low": outdict.get("bernoulli_prob/saturation_low"),
+            # "bernoulli_prob_saturation_high": outdict.get("bernoulli_prob/saturation_high"),
+            # "loss_mi_permuted": outdict.get("loss/mi_permuted"),
+            # "loss_mi_minus_permuted": outdict.get("loss/mi_minus_permuted"),
         }
     
     def _fit_sensitive_binner(self) -> None:

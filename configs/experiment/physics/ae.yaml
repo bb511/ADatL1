@@ -227,3 +227,26 @@ evaluation:
         - 'SingleNeutrino_E-10-gun'
       name: 'reco'
       log_raw_mlflow: false
+
+    correlation_matrix:
+      _target_: src.evaluation.callbacks.correlation_matrix.CorrelationMatrixCallback
+      variables:
+        - muons.Et
+        - jets.Et
+        - egammas.Et
+        - taus.Et
+        - FET.Et
+      datasets:
+        - normal
+      output_name: reconstructed_data
+      ckpts:
+        last: true
+      aggregate: sum
+      correlation_methods:
+        - pearson
+      include_input: true
+      include_reconstruction: true
+      include_residual: false
+      max_events: null
+      name: correlation_matrix
+      log_raw_mlflow: false

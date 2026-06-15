@@ -31,6 +31,6 @@ mi_reduction: sum
 
 # MS1 BinaryMI sensitive-variable binning
 mi_sensitive_variable: FET.Et
-mi_sensitive_num_bins: 10
+mi_sensitive_num_bins: 50
 mi_sensitive_reduction: first
 mi_sensitive_use_denormalization: false

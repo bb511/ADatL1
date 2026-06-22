@@ -1,5 +1,10 @@
 # Vanilla auto-encoder model implementations
 from typing import Optional
+import os
+import sys
+from pathlib import Path
+
+import numpy as np
 
 import torch
 from torch import nn
@@ -10,6 +15,219 @@ from src.algorithms.losses.components.reconstruction import MSEReconstructionLos
 from src.algorithms.utils.object_feature_map_loader import inject_object_feature_map
 from src.data.utils import unpack_batch
 from src.data.sensitive_binning import FixedQuantileSensitiveBinner
+
+_HEPINFO_TF = None
+_HEPINFO_MI_LOSS = None
+
+
+def _get_hepinfo_tf_mi_loss():
+    """Import and cache the original hepinfo TensorFlow/Keras MI loss.
+
+    This is intentionally fail-fast because this branch is for verification.
+    """
+    global _HEPINFO_TF, _HEPINFO_MI_LOSS
+
+    if _HEPINFO_TF is not None and _HEPINFO_MI_LOSS is not None:
+        return _HEPINFO_TF, _HEPINFO_MI_LOSS
+
+    # Keras 3 selects its backend at import time. ADatL1/src/train.py currently
+    # sets KERAS_BACKEND="torch", which is wrong for the original hepinfo loss.
+    # Therefore, force TensorFlow before importing tensorflow/keras/hepinfo.
+    if "keras" in sys.modules:
+        import keras
+
+        backend = None
+        if hasattr(keras, "config") and hasattr(keras.config, "backend"):
+            backend = keras.config.backend()
+
+        if backend != "tensorflow":
+            raise RuntimeError(
+                "Keras is already imported with backend "
+                f"{backend!r}. The hepinfo verification loss requires "
+                "KERAS_BACKEND='tensorflow' before the first keras import."
+            )
+    else:
+        os.environ["KERAS_BACKEND"] = "tensorflow"
+
+    repo = os.environ.get("HEPINFO_REPO")
+    if repo is None:
+        raise RuntimeError(
+            "HEPINFO_REPO is not set. Set it to the hepinfo repository root, "
+            "i.e. the directory that contains the inner 'hepinfo/' package."
+        )
+
+    repo_path = Path(repo).expanduser().resolve()
+    if not repo_path.is_dir():
+        raise RuntimeError(f"HEPINFO_REPO does not exist or is not a directory: {repo_path}")
+
+    if not (repo_path / "hepinfo").is_dir():
+        raise RuntimeError(
+            f"HEPINFO_REPO must point to the repo root containing 'hepinfo/'. "
+            f"Got: {repo_path}"
+        )
+
+    if str(repo_path) not in sys.path:
+        sys.path.insert(0, str(repo_path))
+
+    try:
+        import tensorflow as tf
+    except Exception as exc:
+        raise RuntimeError("Failed to import TensorFlow for hepinfo MI verification.") from exc
+
+    # Keep TensorFlow on CPU if a TF GPU backend is visible. This does not move
+    # the PyTorch model; it only affects TensorFlow.
+    try:
+        gpus = tf.config.list_physical_devices("GPU")
+        if gpus:
+            tf.config.set_visible_devices([], "GPU")
+    except Exception as exc:
+        raise RuntimeError("Failed to force TensorFlow CPU-only execution.") from exc
+
+    try:
+        from hepinfo.util import MILoss
+    except Exception as exc:
+        raise RuntimeError(
+            "Failed to import hepinfo.util.MILoss. "
+            "For this verification branch, BinaryMI.py is intentionally not imported."
+        ) from exc
+
+    try:
+        mi_loss = MILoss(use_quantized_sigmoid=False, bits_bernoulli_sigmoid=8)
+    except Exception as exc:
+        raise RuntimeError("Failed to construct hepinfo.util.MILoss.") from exc
+
+    _HEPINFO_TF = tf
+    _HEPINFO_MI_LOSS = mi_loss
+    return _HEPINFO_TF, _HEPINFO_MI_LOSS
+
+def _hepinfo_tf_mi_loss_value(
+    latent: torch.Tensor,
+    sensitive: torch.Tensor,
+) -> torch.Tensor:
+    """Compute original hepinfo MI loss value inside ADatL1.
+
+    This is verification-only. It deliberately detaches from PyTorch autograd.
+    """
+    if not torch.is_tensor(latent):
+        raise TypeError(f"latent must be a torch.Tensor, got {type(latent)}")
+
+    if not torch.is_tensor(sensitive):
+        raise TypeError(f"sensitive must be a torch.Tensor, got {type(sensitive)}")
+
+    if not torch.is_floating_point(latent):
+        raise TypeError(f"latent must be floating point, got dtype={latent.dtype}")
+
+    if latent.ndim < 2:
+        raise ValueError(f"Expected latent shape [batch, latent_dim, ...], got {tuple(latent.shape)}")
+
+    batch_size = latent.shape[0]
+
+    if sensitive.ndim == 2:
+        if sensitive.shape[1] != 1:
+            raise ValueError(
+                "For hepinfo MI verification, sensitive must have shape [batch] "
+                f"or [batch, 1]. Got {tuple(sensitive.shape)}"
+            )
+        sensitive_1d = sensitive[:, 0]
+    elif sensitive.ndim == 1:
+        sensitive_1d = sensitive
+    else:
+        raise ValueError(
+            "For hepinfo MI verification, sensitive must have shape [batch] "
+            f"or [batch, 1]. Got {tuple(sensitive.shape)}"
+        )
+
+    if sensitive_1d.shape[0] != batch_size:
+        raise ValueError(
+            f"Sensitive batch size {sensitive_1d.shape[0]} does not match "
+            f"latent batch size {batch_size}."
+        )
+
+    allowed_sensitive_dtypes = {
+        torch.int8,
+        torch.int16,
+        torch.int32,
+        torch.int64,
+        torch.uint8,
+    }
+    if sensitive_1d.dtype not in allowed_sensitive_dtypes:
+        raise TypeError(
+            "sensitive must contain integer bin labels before calling hepinfo MI. "
+            f"Got dtype={sensitive_1d.dtype}. Do not pass raw continuous FET.Et here; "
+            "pass the FixedQuantileSensitiveBinner output."
+        )
+
+    tf, hepinfo_mi_loss = _get_hepinfo_tf_mi_loss()
+
+    # Verification-only bridge:
+    # - detach: remove PyTorch autograd history
+    # - cpu: TensorFlow CPU execution
+    # - numpy: cross-framework transfer
+    # - float32/int32: stable boundary dtypes
+    latent_np = (
+        torch.flatten(latent.detach(), start_dim=1)
+        .to(dtype=torch.float32)
+        .cpu()
+        .contiguous()
+        .numpy()
+    )
+
+    sensitive_np = (
+        sensitive_1d.detach()
+        .to(dtype=torch.int32)
+        .cpu()
+        .contiguous()
+        .numpy()
+    )
+
+    if latent_np.ndim != 2:
+        raise RuntimeError(f"Expected latent_np to be rank 2, got shape={latent_np.shape}")
+
+    if sensitive_np.ndim != 1:
+        raise RuntimeError(f"Expected sensitive_np to be rank 1, got shape={sensitive_np.shape}")
+
+    if latent_np.shape[0] != sensitive_np.shape[0]:
+        raise RuntimeError(
+            f"latent_np batch {latent_np.shape[0]} != sensitive_np batch {sensitive_np.shape[0]}"
+        )
+
+    if latent_np.dtype != np.float32:
+        raise RuntimeError(f"latent_np must be float32, got {latent_np.dtype}")
+
+    if sensitive_np.dtype != np.int32:
+        raise RuntimeError(f"sensitive_np must be int32, got {sensitive_np.dtype}")
+
+    try:
+        latent_tf = tf.convert_to_tensor(latent_np, dtype=tf.float32)
+        sensitive_tf = tf.convert_to_tensor(sensitive_np, dtype=tf.int32)
+    except Exception as exc:
+        raise RuntimeError("Failed to convert PyTorch tensors to TensorFlow tensors.") from exc
+
+    try:
+        # Use .call(...) to directly execute hepinfo's original MILoss.call body.
+        # Avoid relying on Keras Loss.__call__ reduction semantics.
+        mi_tf = hepinfo_mi_loss.call(sensitive_tf, latent_tf)
+        mi_tf = tf.convert_to_tensor(mi_tf)
+    except Exception as exc:
+        raise RuntimeError("Original hepinfo MI loss call failed.") from exc
+
+    try:
+        mi_np = np.asarray(mi_tf.numpy(), dtype=np.float32)
+    except Exception as exc:
+        raise RuntimeError("Failed to convert TensorFlow MI result to NumPy.") from exc
+
+    if mi_np.size != 1:
+        raise RuntimeError(f"Expected scalar MI result, got shape={mi_np.shape}, size={mi_np.size}")
+
+    mi_value = float(mi_np.reshape(-1)[0])
+
+    if not np.isfinite(mi_value):
+        raise RuntimeError(f"hepinfo MI returned NaN/Inf: {mi_value}")
+
+    try:
+        return latent.new_tensor(mi_value, dtype=latent.dtype)
+    except Exception as exc:
+        raise RuntimeError("Failed to convert TensorFlow MI scalar back to PyTorch tensor.") from exc
 
 
 class AE(ADLightningModule):
@@ -112,20 +330,14 @@ class AE(ADLightningModule):
 
         sensitive = self._compute_sensitive_bins(x=x, mask=m)
 
-        if self.training and self.global_step < 3:
-            unique, counts = torch.unique(sensitive.detach().cpu(), return_counts=True)
-            print(
-                f"[MI] step={self.global_step} sensitive bins: "
-                f"{dict(zip(unique.tolist(), counts.tolist()))}"
-            )
+        mi_loss = _hepinfo_tf_mi_loss_value(latent=z, sensitive=sensitive)
 
-        mi_loss = self.mi_loss(latent=z, sensitive=sensitive)
         with torch.no_grad():
             perm = torch.randperm(sensitive.shape[0], device=sensitive.device)
             sensitive_perm = sensitive[perm]
             mi_loss_permuted = self.mi_loss(latent=z.detach(), sensitive=sensitive_perm)
-        gamma_mi_loss = self.mi_gamma * mi_loss
 
+        gamma_mi_loss = self.mi_gamma * mi_loss
         total_loss = reco_loss.mean() + gamma_mi_loss
 
         with torch.no_grad():
@@ -175,42 +387,20 @@ class AE(ADLightningModule):
                 operational_ascore = torch.quantile(ascore, 1.0 - self.target_fpr).item()
 
             return {
-                # Used for backpropagation:
                 "loss": total_loss,
 
-                # Existing project-style scalar losses:
                 "loss/mean": total_loss.detach(),
                 "loss/reco": reco_loss.mean().detach(),
+
+                # Existing MI log should remain the actual training MI.
                 "loss/mi": mi_loss.detach(),
                 "loss/gamma_mi": gamma_mi_loss.detach(),
 
-                # Binner diagnostics:
-                # "sensitive/bin_min": sensitive.min().float().detach(),
-                # "sensitive/bin_max": sensitive.max().float().detach(),
-                # "sensitive/bin_mean": sensitive.float().mean().detach(),
-
-                # Anomaly score logging:
                 "ascore/operational": operational_ascore,
-
-                # Used for callbacks:
-                # Keep this event-level and reconstruction-only.
                 "loss/full": reco_loss.detach(),
                 "ascore/full": ascore.detach(),
                 "reconstructed_data": reconstruction.detach(),
-
                 "loss/mi_to_reco_ratio": mi_to_reco_ratio,
-
-                # "latent/mean": latent_mean,
-                # "latent/std": latent_std,
-
-                # "bernoulli_prob/mean": prob_mean,
-                # "bernoulli_prob/std": prob_std,
-                # "bernoulli_prob/min": prob_min,
-                # "bernoulli_prob/max": prob_max,
-                # "bernoulli_prob/saturation_low": prob_saturation_low,
-                # "bernoulli_prob/saturation_high": prob_saturation_high,
-                # "loss/mi_permuted": mi_loss_permuted.detach(),
-                # "loss/mi_minus_permuted": (mi_loss.detach() - mi_loss_permuted.detach()),
             }
 
     def outlog(self, outdict: dict) -> dict:
@@ -229,8 +419,6 @@ class AE(ADLightningModule):
 
             # Existing anomaly-score logging:
             "ascore_operational": outdict.get("ascore/operational"),
-
-            "loss_mi_to_reco_ratio": outdict.get("loss/mi_to_reco_ratio"),
 
             # "latent_mean": outdict.get("latent/mean"),
             # "latent_std": outdict.get("latent/std"),

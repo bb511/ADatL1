@@ -14,7 +14,7 @@
 python3 src/train.py \
     paths.raw_data_dir=../../03_Data/adl1t_data/parquet_files \
     experiment=physics/ae \
-    run_name="MI_egammas_Et_Bins_50_Gamma_1_Run_1" \
+    run_name="MI_FET_Et_Bins_50_Gamma_1_tensorflow_Run_2" \
     logger=mlflow \
     algorithm.optimizer.lr=0.0019859329798336714 \
     algorithm.delta=1.0 \

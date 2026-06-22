@@ -5,7 +5,7 @@ import gc
 
 import os
 
-os.environ["KERAS_BACKEND"] = "torch"
+os.environ.setdefault("KERAS_BACKEND", "torch")
 
 import hydra
 import pytorch_lightning as pl

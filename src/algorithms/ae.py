@@ -260,6 +260,7 @@ class AE(ADLightningModule):
         mi_sensitive_num_bins: int = 10,
         mi_sensitive_reduction: str = "First",
         mi_sensitive_use_denormalization: bool = False,
+        forbid_sensitive_variable_in_input: bool =  True,
         **kwargs,
     ):
         # Only forward keys expected by ADLightningModule.__init__.
@@ -283,15 +284,18 @@ class AE(ADLightningModule):
 
         self.mi_loss = PileupMIAELoss(mi_temperature=mi_temperature, input_is_logits=True)
         self.mi_gamma = float(mi_gamma)
+        self.forbid_sensitive_variable_in_input = forbid_sensitive_variable_in_input
         self.sensitive_binner = FixedQuantileSensitiveBinner(variable=mi_sensitive_variable, num_bins=mi_sensitive_num_bins, 
                                                              reduction=mi_sensitive_reduction, use_denormalized=mi_sensitive_use_denormalization)
 
     def on_fit_start(self):
         inject_object_feature_map(self)
+        self._assert_sensitive_not_in_model_input()
         self._fit_sensitive_binner()
 
     def on_test_start(self):
         inject_object_feature_map(self)
+        self._assert_sensitive_not_in_model_input()
 
     @property
     def target_fpr(self) -> float:
@@ -317,6 +321,42 @@ class AE(ADLightningModule):
         if m is not None:
             m = torch.flatten(m, start_dim=1).float()
 
+        control_required = (
+            getattr(self, "control_object_feature_map", None) is not None
+            and getattr(self, "object_feature_map", None) is not None
+            and self.control_object_feature_map != self.object_feature_map
+        )
+
+        if b.control_x is None:
+            if control_required:
+                raise RuntimeError(
+                    "Batch does not contain control_x, but control_object_feature_map "
+                    "differs from object_feature_map. The MI sensitive variable cannot be "
+                    "extracted safely. Check that L1ADDataset.__iter__ yields "
+                    "(x, mask, l1bit, y, control_x, control_mask) when control_data is set."
+                )
+
+            control_x = b.x
+            control_mask = b.mask
+        else:
+            control_x = b.control_x
+            control_mask = b.control_mask
+
+        expected_control_dim = self._num_flat_features_from_map(
+            getattr(self, "control_object_feature_map", None)
+        )
+
+        if expected_control_dim is not None:
+            actual_control_dim = torch.flatten(control_x, start_dim=1).shape[1]
+
+            if actual_control_dim != expected_control_dim:
+                raise RuntimeError(
+                    "control_x does not match control_object_feature_map. "
+                    f"Expected {expected_control_dim} flattened features from the control map, "
+                    f"but got {actual_control_dim}. This usually means the MI target is being "
+                    "read from the model-input tensor instead of the full/control tensor."
+                )
+
         x_noisy = x
         if self.training and self.input_noise_std > 0.0:
             noise = torch.randn_like(x) * self.input_noise_std
@@ -328,7 +368,63 @@ class AE(ADLightningModule):
         z, reconstruction = self.forward(x_noisy)
         reco_loss = self.reco_loss(target=x, reco=reconstruction, mask=m)
 
-        sensitive = self._compute_sensitive_bins(x=x, mask=m)
+        # Sanity check / debug trace, only used once
+        #TODO: Delete
+        if self.training and self.global_step < 3:
+            x_flat = torch.flatten(b.x, start_dim=1)
+            control_flat = torch.flatten(control_x, start_dim=1)
+
+            print("[DEBUG][AE] model input shape:", tuple(x_flat.shape))
+            print("[DEBUG][AE] control_x shape:", tuple(control_flat.shape))
+            print("[DEBUG][AE] b.control_x is None:", b.control_x is None)
+
+            print(
+                "[DEBUG][AE] FET.Et in model map:",
+                "FET" in self.object_feature_map
+                and "Et" in self.object_feature_map.get("FET", {}),
+            )
+            print(
+                "[DEBUG][AE] FET.Et in control map:",
+                "FET" in self.control_object_feature_map
+                and "Et" in self.control_object_feature_map.get("FET", {}),
+            )
+
+            fet_values = self.sensitive_binner.extract_values(
+                x=control_x,
+                mask=control_mask,
+                object_feature_map=self.control_object_feature_map,
+                normalizer=None,
+            )
+
+            finite = torch.isfinite(fet_values)
+            print("[DEBUG][AE] FET.Et values shape:", tuple(fet_values.shape))
+            print("[DEBUG][AE] FET.Et finite:", int(finite.sum()), "/", fet_values.numel())
+            print("[DEBUG][AE] FET.Et NaNs:", int(torch.isnan(fet_values).sum()))
+            print("[DEBUG][AE] FET.Et infs:", int(torch.isinf(fet_values).sum()))
+
+            if finite.any():
+                vals = fet_values[finite]
+                print("[DEBUG][AE] FET.Et min:", float(vals.min()))
+                print("[DEBUG][AE] FET.Et max:", float(vals.max()))
+                print("[DEBUG][AE] FET.Et mean:", float(vals.mean()))
+                print("[DEBUG][AE] FET.Et std:", float(vals.std(unbiased=False)))
+                print("[DEBUG][AE] FET.Et unique first 4096:", int(torch.unique(vals[:4096]).numel()))
+
+        sensitive = self._compute_sensitive_bins(x=control_x, mask=control_mask)
+
+        # Sanity check / debug trace, only used once
+        #TODO: Delete
+        if self.training and self.global_step < 3:
+            unique, counts = torch.unique(sensitive.detach().cpu(), return_counts=True)
+            print("[DEBUG][AE] sensitive bin counts:", dict(zip(unique.tolist(), counts.tolist())))
+
+        if self.training and self.global_step < 3:
+            unique, counts = torch.unique(sensitive.detach().cpu(), return_counts=True)
+            print(
+                f"[MI] step={self.global_step} sensitive bins: "
+                f"{dict(zip(unique.tolist(), counts.tolist()))}"
+            )
+
 
         mi_loss = _hepinfo_tf_mi_loss_value(latent=z, sensitive=sensitive)
 
@@ -345,21 +441,9 @@ class AE(ADLightningModule):
             probs = torch.sigmoid(self.mi_loss.mi_loss.temperature * z_detached)
 
             reco_loss_mean = reco_loss.mean().detach()
-            mi_loss_detached = mi_loss.detach()
             gamma_mi_loss_detached = gamma_mi_loss.detach()
 
             mi_to_reco_ratio = gamma_mi_loss_detached / reco_loss_mean.clamp_min(1e-12)
-
-            latent_mean = z_detached.mean()
-            latent_std = z_detached.std(unbiased=False)
-
-            prob_mean = probs.mean()
-            prob_std = probs.std(unbiased=False)
-            prob_min = probs.min()
-            prob_max = probs.max()
-
-            prob_saturation_low = (probs < 0.01).float().mean()
-            prob_saturation_high = (probs > 0.99).float().mean()
 
         # The anomaly score is expected to be a distribution over events.
         # Allow subclasses to override `ascore`; otherwise fall back to
@@ -458,9 +542,13 @@ class AE(ADLightningModule):
         normalizer = getattr(datamodule, "normalizer", None)
 
         edges = self.sensitive_binner.fit(
-            x=train_split.x,
-            mask=train_split.mask,
-            object_feature_map=self.object_feature_map,
+            x=train_split.control_x if train_split.control_x is not None else train_split.x,
+            mask=(
+                train_split.control_mask
+                if train_split.control_mask is not None
+                else train_split.mask
+            ),
+            object_feature_map=self.control_object_feature_map,
             normalizer=normalizer,
         )
 
@@ -484,6 +572,59 @@ class AE(ADLightningModule):
         """Compute batch sensitive labels from fixed precomputed bin edges."""
         trainer = getattr(self, "trainer", None)
         datamodule = getattr(trainer, "datamodule", None) if trainer is not None else None
-        normalizer = getattr(datamodule, "normalizer", None) if datamodule is not None else None
+        normalizer = (
+            getattr(datamodule, "normalizer", None)
+            if datamodule is not None
+            else None
+        )
 
-        return self.sensitive_binner.transform(x=x, mask=mask, object_feature_map=self.object_feature_map, normalizer=normalizer)
+        return self.sensitive_binner.transform(
+            x=x,
+            mask=mask,
+            object_feature_map=self.control_object_feature_map,
+            normalizer=normalizer,
+        )
+
+    def _assert_sensitive_not_in_model_input(self) -> None:
+        """Fail fast if the MI target leaks into the AE input feature map."""
+        if not self.forbid_sensitive_variable_in_input:
+            return
+
+        object_feature_map = getattr(self, "object_feature_map", None)
+
+        if object_feature_map is None:
+            return
+        
+        object_name, feature_name = self.sensitive_binner.variable.split(".", maxsplit=1)
+
+        for obj_key, feature_map in object_feature_map.items():
+            if str(obj_key).lower() != object_name.lower():
+                continue
+
+            for feat_key in feature_map.keys():
+                if str(feat_key).lower() == feature_name.lower():
+                    raise RuntimeError(
+                        f"Sensitive MI variable {self.sensitive_binner.variable!r} is "
+                        "still present in pl_module.object_feature_map, which is the "
+                        "anomaly-detector input map. Configure "
+                        "data.model_input_exclude_features to remove it from the model "
+                        "input while keeping it in control_object_feature_map."
+                    )
+                
+    @staticmethod
+    def _num_flat_features_from_map(object_feature_map: dict | None) -> int | None:
+        if object_feature_map is None:
+            return None
+
+        indices = [
+            int(idx)
+            for feature_map in object_feature_map.values()
+            for idxs in feature_map.values()
+            for idx in idxs
+        ]
+
+        if not indices:
+            return None
+
+        return max(indices) + 1
+

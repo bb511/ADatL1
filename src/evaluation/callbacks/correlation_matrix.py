@@ -88,6 +88,11 @@ class CorrelationMatrixCallback(Callback):
             return
 
         self.object_feature_map = getattr(pl_module, "object_feature_map", None)
+        self.control_object_feature_map = getattr(
+            pl_module,
+            "control_object_feature_map",
+            self.object_feature_map,
+        )
         if self.object_feature_map is None:
             raise RuntimeError(
                 "object_feature_map not found on module. "
@@ -103,6 +108,18 @@ class CorrelationMatrixCallback(Callback):
             )
 
         self._resolved_variables = self._resolve_variables()
+        if self.include_residual:
+            control_only = [
+                item["label"]
+                for item in self._resolved_variables
+                if item["model_indices"] is None
+            ]
+
+            if control_only:
+                raise RuntimeError(
+                    "Cannot compute residuals for variables that are not reconstructed: "
+                    f"{control_only}. Disable include_residual or remove them."
+                )
         self._buffers = {}
         self._event_counts = {}
 
@@ -121,6 +138,30 @@ class CorrelationMatrixCallback(Callback):
         x = torch.flatten(b.x, start_dim=1)
         mask = None if b.mask is None else torch.flatten(b.mask, start_dim=1).bool()
 
+        # Control tensor: this is the full raw/control tensor.
+        # It should still contain FET.Et, so correlation_matrix can still use FET.Et.
+        needs_control_x = any(
+            item["model_indices"] is None for item in self._resolved_variables
+        )
+
+        if b.control_x is None and needs_control_x:
+            raise RuntimeError(
+                "CorrelationMatrixCallback needs control_x for at least one control-only "
+                "variable, but the batch does not contain control_x. Check that "
+                "L1ADDataset.__iter__ yields the 6-tuple "
+                "(x, mask, l1bit, y, control_x, control_mask)."
+            )
+
+        control_x = b.control_x if b.control_x is not None else b.x
+        control_mask = b.control_mask if b.control_mask is not None else b.mask
+
+        control_x = torch.flatten(control_x, start_dim=1)
+        control_mask = (
+            None
+            if control_mask is None
+            else torch.flatten(control_mask, start_dim=1).bool()
+        )
+
         n_keep = self._num_events_to_keep(dset_name, x.size(0))
         if n_keep <= 0:
             return
@@ -128,9 +169,18 @@ class CorrelationMatrixCallback(Callback):
         x = x[:n_keep]
         mask = None if mask is None else mask[:n_keep]
 
+        control_x = control_x[:n_keep]
+        control_mask = None if control_mask is None else control_mask[:n_keep]
+
         input_table = None
         if self.include_input or self.include_residual:
-            input_table = self._make_variable_table(x, mask)
+            input_table = self._make_variable_table(
+                model_x=x,
+                model_mask=mask,
+                control_x=control_x,
+                control_mask=control_mask,
+                space_name="input",
+            )
 
         if self.include_input:
             self._append_table(dset_name, "input", input_table)
@@ -144,7 +194,13 @@ class CorrelationMatrixCallback(Callback):
                 )
             yhat = outputs[self.output_name]
             yhat = torch.flatten(yhat, start_dim=1)[:n_keep]
-            reco_table = self._make_variable_table(yhat, mask)
+            reco_table = self._make_variable_table(
+                model_x=yhat,
+                model_mask=mask,
+                control_x=control_x,
+                control_mask=control_mask,
+                space_name="reconstruction",
+            )
 
         if self.include_reconstruction:
             self._append_table(dset_name, "reconstruction", reco_table)
@@ -208,50 +264,115 @@ class CorrelationMatrixCallback(Callback):
                 gallery_name=f"{dset_name}_{self.name}",
             )
 
-    def _resolve_variables(self) -> list[tuple[str, str, str, list[int]]]:
-        """Resolve configured variable labels to object_feature_map indices."""
+    def _resolve_variables(self) -> list[dict]:
+        """Resolve labels against model-input and full/control feature maps."""
         resolved = []
         available = {
             f"{obj}.{feat}"
-            for obj, feature_map in self.object_feature_map.items()
+            for feature_map_source in (
+                self.object_feature_map,
+                self.control_object_feature_map,
+            )
+            for obj, feature_map in feature_map_source.items()
             for feat in feature_map.keys()
         }
 
         for variable in self.variables:
-            if "." not in variable:
-                raise ValueError(
-                    f"Variable {variable!r} must have format '<object>.<feature>'."
-                )
+            model_resolved = self._resolve_variable_in_map(
+                variable,
+                self.object_feature_map,
+            )
 
-            object_key, feature_name = variable.split(".", 1)
+            control_resolved = self._resolve_variable_in_map(
+                variable,
+                self.control_object_feature_map,
+            )
 
-            if object_key not in self.object_feature_map:
+            if model_resolved is None and control_resolved is None:
                 raise KeyError(
-                    f"Object {object_key!r} is not in object_feature_map. "
-                    f"Available variables: {sorted(available)}"
+                    f"Variable {variable!r} is not available in the model-input or "
+                    f"control feature maps. Available variables: {sorted(available)}"
                 )
 
-            feature_map = self.object_feature_map[object_key]
-            if feature_name not in feature_map:
-                raise KeyError(
-                    f"Feature {feature_name!r} is not available for object "
-                    f"{object_key!r}. Available features: {sorted(feature_map.keys())}"
-                )
+            reference = model_resolved or control_resolved
 
             resolved.append(
-                (variable, object_key, feature_name, list(feature_map[feature_name]))
+                {
+                    "label": variable,
+                    "object_key": reference[0],
+                    "feature_name": reference[1],
+                    "model_indices": None if model_resolved is None else model_resolved[2],
+                    "control_indices": (
+                        None if control_resolved is None else control_resolved[2]
+                    ),
+                }
             )
 
         return resolved
+    
+    def _resolve_variable_in_map(
+        self,
+        variable: str,
+        object_feature_map: dict,
+    ) -> tuple[str, str, list[int]] | None:
+        if "." not in variable:
+            raise ValueError(
+                f"Variable {variable!r} must have format '<object>.<feature>'."
+            )
+
+        requested_object, requested_feature = variable.split(".", 1)
+
+        object_key = None
+        for candidate in object_feature_map.keys():
+            if str(candidate).lower() == requested_object.lower():
+                object_key = candidate
+                break
+
+        if object_key is None:
+            return None
+
+        feature_map = object_feature_map[object_key]
+
+        feature_key = None
+        for candidate in feature_map.keys():
+            if str(candidate).lower() == requested_feature.lower():
+                feature_key = candidate
+                break
+
+        if feature_key is None:
+            return None
+
+        return object_key, feature_key, list(feature_map[feature_key])
 
     def _make_variable_table(
-        self, x: torch.Tensor, mask: torch.Tensor | None
+        self,
+        model_x: torch.Tensor,
+        model_mask: torch.Tensor | None,
+        control_x: torch.Tensor,
+        control_mask: torch.Tensor | None,
+        space_name: str
     ) -> dict[str, np.ndarray]:
         """Extract and aggregate selected variables from one flattened batch."""
-        return {
-            label: self._aggregate_feature(x, mask, indices).detach().cpu().numpy()
-            for label, _, _, indices in self._resolved_variables
-        }
+        table = {}
+
+        for item in self._resolved_variables:
+            indices = item["model_indices"]
+            x = model_x
+            mask = model_mask
+
+            if indices is None:
+                indices = item["control_indices"]
+                x = control_x
+                mask = control_mask
+
+            if indices is None:
+                raise RuntimeError(f"Could not resolve indices for {item['label']!r}.")
+
+            table[item["label"]] = (
+                self._aggregate_feature(x, mask, indices).detach().cpu().numpy()
+            )
+
+        return table
 
     def _aggregate_feature(
         self, x: torch.Tensor, mask: torch.Tensor | None, indices: list[int]
@@ -309,7 +430,8 @@ class CorrelationMatrixCallback(Callback):
     def _to_dataframe(self, tables: list[dict[str, np.ndarray]]) -> pd.DataFrame:
         """Concatenate batch dictionaries into the table saved to disk."""
         columns = {}
-        for label, _, _, _ in self._resolved_variables:
+        for item in self._resolved_variables:
+            label = item["label"]
             columns[label] = np.concatenate([table[label] for table in tables], axis=0)
         return pd.DataFrame(columns)
 
@@ -321,10 +443,20 @@ class CorrelationMatrixCallback(Callback):
             f"max_events: {self.max_events}",
             "variables:",
         ]
-        for label, object_key, feature_name, indices in self._resolved_variables:
+        for item in self._resolved_variables:
+            model_indices = item["model_indices"]
+            control_indices = item["control_indices"]
+
+            if model_indices is None:
+                source = "control only; not reconstructed"
+                shown_indices = control_indices
+            else:
+                source = "model input/reconstruction"
+                shown_indices = model_indices
             lines.append(
-                f"  {label} -> object_feature_map[{object_key!r}][{feature_name!r}] "
-                f"= {indices}"
+                f"  {item['label']} -> {source}; "
+                f"object={item['object_key']!r}, feature={item['feature_name']!r}, "
+                f"indices={shown_indices}, control_indices={control_indices}"
             )
         (plot_folder / "metadata.txt").write_text("\n".join(lines) + "\n")
 

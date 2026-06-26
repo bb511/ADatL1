@@ -38,6 +38,8 @@ class SplitTensors:
     mask: torch.Tensor
     l1bit: torch.Tensor
     y: torch.Tensor
+    control_x: torch.Tensor | None = None
+    control_mask: torch.Tensor | None = None
 
 
 class L1ADDataModule(LightningDataModule):
@@ -56,6 +58,7 @@ class L1ADDataModule(LightningDataModule):
         batch_size: int = 16384,
         max_val_batches: int = -1,
         seed: int = 42,
+        model_input_exclude_features: list[str] | None = None,
     ) -> None:
         """Prepare the L1 data for using it to train and validate ML models.
 
@@ -91,6 +94,15 @@ class L1ADDataModule(LightningDataModule):
         self._aux: dict[str, dict[str, SplitTensors]] = {"valid": {}, "test": {}}
         self.shuffler = torch.Generator().manual_seed(seed)
         self.max_val_batches = max_val_batches
+        self.model_input_exclude_features = list(model_input_exclude_features or [])
+
+        # `control_object_feature_map` describes the full tensor loaded from the
+        # mlready cache. `object_feature_map` describes the model-input tensor after
+        # any configured exclusions have been removed and indices re-numbered.
+        self.object_feature_map: dict[str, dict[str, list[int]]] | None = None
+        self.control_object_feature_map: dict[str, dict[str, list[int]]] | None = None
+        self._model_keep_indices: list[int] | None = None
+        self._model_excluded_indices: set[int] = set()
 
     def prepare_data(self) -> None:
         """Get zero bias data and the simulated MC signal data."""
@@ -174,6 +186,8 @@ class L1ADDataModule(LightningDataModule):
             split.y.float(),
             batch_size=self.batch_size_per_device,
             shuffler=self.shuffler,
+            control_data=split.control_x,
+            control_mask=split.control_mask,
         )
         dataset = self._attach_object_feature_map(dataset)
         return DataLoader(
@@ -235,18 +249,40 @@ class L1ADDataModule(LightningDataModule):
 
         return tuple(out)
 
-    def _load_main_split(self, data_dir: Path, split: str, label: int) -> SplitTensors:
+    def _load_main_split(
+        self, data_dir: Path, split: str, label: int, flag: str | None = None
+    ) -> SplitTensors:
         """Load main data splits: train, val, and test of ZB data."""
-        x, mask, l1bit = self.loader.load_folder(data_dir / split)
+        control_x, control_mask, l1bit = self.loader.load_folder(data_dir / split)
+        self._configure_feature_views(self.loader.object_feature_map)
+
+        x, mask = self._build_model_input_view(control_x, control_mask)
+
         y = torch.full((x.size(0),), label, dtype=torch.int64)
         x = x.contiguous()
         mask = mask.contiguous()
         l1bit = l1bit.contiguous()
         y = y.contiguous()
 
-        return SplitTensors(x=x, mask=mask, l1bit=l1bit, y=y)
+        if self._model_excluded_indices:
+            control_x = control_x.contiguous()
+            control_mask = control_mask.contiguous()
+        else:
+            control_x = None
+            control_mask = None
 
-    def _load_aux_split(self, data_dir: Path, split: str) -> dict[str, SplitTensors]:
+        return SplitTensors(
+            x=x,
+            mask=mask,
+            l1bit=l1bit,
+            y=y,
+            control_x=control_x,
+            control_mask=control_mask,
+        )
+
+    def _load_aux_split(
+        self, data_dir: Path, split: str, flag: str | None = None
+    ) -> dict[str, SplitTensors]:
         """Load a split of auxiliary data, either val or test.
 
         The auxiliary data is not used at training time, since it consists of
@@ -269,13 +305,31 @@ class L1ADDataModule(LightningDataModule):
                 label_signal += 1
                 label = label_signal
 
-            x, mask, l1bit = self.loader.load_folder(dataset_path / split)
+            control_x, control_mask, l1bit = self.loader.load_folder(dataset_path / split)
+            self._configure_feature_views(self.loader.object_feature_map)
+
+            x, mask = self._build_model_input_view(control_x, control_mask)
+
             y = torch.full((x.size(0),), label, dtype=torch.int64)
             x = x.contiguous()
             mask = mask.contiguous()
             l1bit = l1bit.contiguous()
             y = y.contiguous()
-            out[name] = SplitTensors(x=x, mask=mask, l1bit=l1bit, y=y)
+            if self._model_excluded_indices:
+                control_x = control_x.contiguous()
+                control_mask = control_mask.contiguous()
+            else:
+                control_x = None
+                control_mask = None
+
+            out[name] = SplitTensors(
+                x=x,
+                mask=mask,
+                l1bit=l1bit,
+                y=y,
+                control_x=control_x,
+                control_mask=control_mask,
+            )
 
         return out
 
@@ -308,6 +362,8 @@ class L1ADDataModule(LightningDataModule):
             split.y,
             batch_size=batch_size,
             max_batches=max_b,
+            control_data=split.control_x,
+            control_mask=split.control_mask,
         )
         ds = self._attach_object_feature_map(ds)
         return DataLoader(
@@ -335,10 +391,15 @@ class L1ADDataModule(LightningDataModule):
         def show_split(title: str, key: str, aux_key: str | None = None):
             log.info(Fore.GREEN + title)
             if key in self._main:
-                log.info(f"Zero bias: {tuple(self._main[key].x.shape)}")
+                split = self._main[key]
+                log.info(f"Zero bias model input: {tuple(split.x.shape)}")
+                if split.control_x is not None:
+                    log.info(f"Zero bias control tensor: {tuple(split.control_x.shape)}")
             if aux_key:
                 for name, split in self._aux.get(aux_key, {}).items():
-                    log.info(f"{name}: {tuple(split.x.shape)}")
+                    log.info(f"{name} model input: {tuple(split.x.shape)}")
+                    if split.control_x is not None:
+                        log.info(f"{name} control tensor: {tuple(split.control_x.shape)}")
 
         if stage in (None, "fit"):
             show_split("Training data:", "train")
@@ -347,6 +408,203 @@ class L1ADDataModule(LightningDataModule):
             show_split("Validation data:", "valid", "valid")
         elif stage == "test":
             show_split("Test data:", "test", "test")
+
+    def _configure_feature_views(self, raw_object_feature_map: dict) -> None:
+        """Create model-input and control feature maps from the raw cached layout."""
+        raw_map = self._normalise_feature_map(raw_object_feature_map)
+
+        if self.control_object_feature_map is not None:
+            if raw_map != self.control_object_feature_map:
+                raise RuntimeError(
+                    "Loaded splits do not share the same object_feature_map layout. "
+                    "Cannot safely apply model-input feature exclusions."
+                )
+            return
+
+        self.control_object_feature_map = raw_map
+        n_features = self._num_flat_features(raw_map)
+
+        excluded = self._resolve_feature_indices(
+            raw_map,
+            self.model_input_exclude_features,
+        )
+
+        self._model_excluded_indices = set(excluded)
+        self._model_keep_indices = [
+            idx for idx in range(n_features) if idx not in self._model_excluded_indices
+        ]
+
+        self.object_feature_map = self._reindex_feature_map(raw_map, excluded)
+        self._assert_excluded_features_absent()
+
+        if excluded:
+            log.info(
+                Back.GREEN
+                + "Model-input feature exclusion active: "
+                + f"removed {self.model_input_exclude_features} at raw indices {excluded}. "
+                + f"Model input has {len(self._model_keep_indices)} features; "
+                + f"control tensor keeps {n_features} features."
+            )
+
+
+    def _build_model_input_view(
+        self,
+        x: torch.Tensor,
+        mask: torch.Tensor,
+    ) -> tuple[torch.Tensor, torch.Tensor]:
+        """Return the anomaly-detector input view while keeping raw/control data intact."""
+        if self._model_keep_indices is None:
+            raise RuntimeError("Feature views are not configured yet.")
+
+        if not self._model_excluded_indices:
+            return x, mask
+
+        keep = torch.as_tensor(
+            self._model_keep_indices,
+            device=x.device,
+            dtype=torch.long,
+        )
+
+        x_flat = torch.flatten(x, start_dim=1)
+        mask_flat = torch.flatten(mask, start_dim=1)
+
+        return (
+            x_flat.index_select(dim=1, index=keep),
+            mask_flat.index_select(dim=1, index=keep),
+        )
+
+
+    def _normalise_feature_map(
+        self,
+        object_feature_map: dict,
+    ) -> dict[str, dict[str, list[int]]]:
+        return {
+            str(obj): {
+                str(feat): [int(idx) for idx in indices]
+                for feat, indices in feature_map.items()
+            }
+            for obj, feature_map in object_feature_map.items()
+        }
+
+
+    def _num_flat_features(self, object_feature_map: dict) -> int:
+        all_indices = [
+            int(idx)
+            for feature_map in object_feature_map.values()
+            for indices in feature_map.values()
+            for idx in indices
+        ]
+
+        if not all_indices:
+            raise RuntimeError("object_feature_map does not contain any feature indices.")
+
+        return max(all_indices) + 1
+
+
+    def _resolve_feature_indices(
+        self,
+        object_feature_map: dict,
+        feature_refs: list[str],
+    ) -> list[int]:
+        excluded: list[int] = []
+
+        for feature_ref in feature_refs:
+            if "." not in feature_ref:
+                raise ValueError(
+                    "model_input_exclude_features entries must have format "
+                    f"'<object>.<feature>', got {feature_ref!r}."
+                )
+
+            object_name, feature_name = feature_ref.split(".", maxsplit=1)
+
+            object_key = self._find_case_insensitive_key(
+                object_feature_map,
+                object_name,
+                "object",
+            )
+
+            feature_map = object_feature_map[object_key]
+
+            feature_key = self._find_case_insensitive_key(
+                feature_map,
+                feature_name,
+                f"feature for object {object_key!r}",
+            )
+
+            excluded.extend(int(idx) for idx in feature_map[feature_key])
+
+        return sorted(set(excluded))
+
+
+    def _reindex_feature_map(
+        self,
+        object_feature_map: dict,
+        excluded_indices: list[int],
+    ) -> dict[str, dict[str, list[int]]]:
+        excluded = set(excluded_indices)
+        n_features = self._num_flat_features(object_feature_map)
+
+        old_to_new = {
+            old_idx: new_idx
+            for new_idx, old_idx in enumerate(
+                idx for idx in range(n_features) if idx not in excluded
+            )
+        }
+
+        reindexed: dict[str, dict[str, list[int]]] = {}
+
+        for object_name, feature_map in object_feature_map.items():
+            kept_features: dict[str, list[int]] = {}
+
+            for feature_name, indices in feature_map.items():
+                kept = [
+                    old_to_new[int(idx)]
+                    for idx in indices
+                    if int(idx) in old_to_new
+                ]
+
+                if kept:
+                    kept_features[feature_name] = kept
+
+            if kept_features:
+                reindexed[object_name] = kept_features
+
+        return reindexed
+
+
+    def _assert_excluded_features_absent(self) -> None:
+        if not self.model_input_exclude_features:
+            return
+
+        try:
+            leaked = self._resolve_feature_indices(
+                self.object_feature_map,
+                self.model_input_exclude_features,
+            )
+        except KeyError:
+            leaked = []
+
+        if leaked:
+            raise RuntimeError(
+                "Configured control-only features are still present in the model input: "
+                f"{self.model_input_exclude_features}. Reindexed positions: {leaked}."
+            )
+
+
+    def _find_case_insensitive_key(
+        self,
+        mapping: dict,
+        requested_key: str,
+        kind: str,
+    ) -> str:
+        for key in mapping.keys():
+            if str(key).lower() == requested_key.lower():
+                return key
+
+        raise KeyError(
+            f"Could not find {kind} {requested_key!r}. "
+            f"Available keys: {list(mapping.keys())}"
+        )
 
     def get_extra(
         self, normalizer: L1DataNormalizer, extra_feats: dict, stage: str, flag: str
@@ -368,14 +626,18 @@ class L1ADDataModule(LightningDataModule):
 
         if stage == "train":
             split = self._load_main_split(data_dir, "train", label=0, flag=flag)
-            return L1ADDataset(
+            dataset = L1ADDataset(
                 split.x,
                 split.mask,
                 split.l1bit,
                 split.y,
                 batch_size=self.batch_size_per_device,
                 shuffler=self.shuffler,
+                control_data=split.control_x,
+                control_mask=split.control_mask,
             )
+
+            return self._attach_object_feature_map(dataset)
 
         if stage not in {"val", "test"}:
             raise ValueError(
@@ -385,33 +647,47 @@ class L1ADDataModule(LightningDataModule):
         split_name = "valid" if stage == "val" else "test"
         main_key = "normal"
 
-        # Main split (ensure it's first in the returned dict)
+        # Main split. Keep this first in the returned dict.
         main = self._load_main_split(data_dir, split_name, label=0, flag=flag)
 
+        main_dataset = L1ADDataset(
+            main.x,
+            main.mask,
+            main.l1bit,
+            main.y,
+            batch_size=self.batch_size_per_device,
+            control_data=main.control_x,
+            control_mask=main.control_mask,
+        )
+
         out: dict[str, L1ADDataset] = {
-            main_key: L1ADDataset(
-                main.x,
-                main.mask,
-                main.l1bit,
-                main.y,
-                batch_size=self.batch_size_per_device,
-            )
+            main_key: self._attach_object_feature_map(main_dataset)
         }
 
-        # Aux splits
+        # Aux signal/background splits
         aux = self._load_aux_split(data_dir, split_name, flag=flag)
         for name, split in aux.items():
-            out[name] = L1ADDataset(
+            dataset = L1ADDataset(
                 split.x,
                 split.mask,
                 split.l1bit,
                 split.y,
                 batch_size=self.batch_size_per_device,
+
+                control_data=split.control_x,
+                control_mask=split.control_mask,
             )
+
+            out[name] = self._attach_object_feature_map(dataset)
 
         return out
 
     def _attach_object_feature_map(self, ds: Dataset) -> Dataset:
-        if hasattr(self, "loader") and hasattr(self.loader, "object_feature_map"):
+        if self.object_feature_map is not None:
+            ds.object_feature_map = self.object_feature_map
+        elif hasattr(self, "loader") and hasattr(self.loader, "object_feature_map"):
             ds.object_feature_map = self.loader.object_feature_map
+
+        if self.control_object_feature_map is not None:
+            ds.control_object_feature_map = self.control_object_feature_map
         return ds

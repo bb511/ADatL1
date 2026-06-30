@@ -29,6 +29,14 @@ mi_gamma: 0.1
 mi_temperature: 6.0
 mi_reduction: sum
 
+# HepInfo BernoulliSampling layer used between encoder logits and decoder input.
+mi_bernoulli_num_samples: 10
+mi_bernoulli_std: 1.0
+mi_bernoulli_threshold: 0.5
+mi_use_quantized_sigmoid: false
+mi_bits_bernoulli_sigmoid: 8
+mi_use_float64_entropy: true
+
 # MS1 BinaryMI sensitive-variable binning
 mi_sensitive_variable: FET.Et
 mi_sensitive_num_bins: 50

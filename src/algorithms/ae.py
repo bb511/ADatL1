@@ -10,6 +10,7 @@ from src.algorithms.losses.components.reconstruction import MSEReconstructionLos
 from src.algorithms.utils.object_feature_map_loader import inject_object_feature_map
 from src.data.utils import unpack_batch
 from src.data.sensitive_binning import FixedQuantileSensitiveBinner
+from src.algorithms.components.bernoulli import BernoulliSampling
 
 
 class AE(ADLightningModule):
@@ -38,6 +39,12 @@ class AE(ADLightningModule):
         base_rate: float | None = None,
         mi_temperature: float = 6.0,
         mi_gamma: float = 0.1,
+        mi_bernoulli_num_samples: int = 10,
+        mi_bernoulli_std: float = 1.0,
+        mi_bernoulli_threshold: float = 0.5,
+        mi_use_quantized_sigmoid: bool = False,
+        mi_bits_bernoulli_sigmoid: int = 8,
+        mi_use_float64_entropy: bool = True,
         mi_sensitive_variable: str = "FET.Et",
         mi_sensitive_num_bins: int = 10,
         mi_sensitive_reduction: str = "First",
@@ -64,7 +71,24 @@ class AE(ADLightningModule):
         self.reco_loss = HuberAELoss(delta=delta, scale=1.0, reduction="none")
         self.ascore_loss = MSEReconstructionLoss(scale=1.0, reduction="none")
 
-        self.mi_loss = PileupMIAELoss(mi_temperature=mi_temperature, input_is_logits=True)
+        # HepInfo Bernoulli latent bottleneck. The decoder consumes the
+        # straight-through Bernoulli sample, while the MI estimator below is
+        # computed on the pre-sampling logits z.
+        self.bernoulli = BernoulliSampling(
+            num_samples=mi_bernoulli_num_samples,
+            std=mi_bernoulli_std,
+            threshold=mi_bernoulli_threshold,
+            temperature=mi_temperature,
+            use_quantized=mi_use_quantized_sigmoid,
+            bits_bernoulli_sigmoid=mi_bits_bernoulli_sigmoid,
+        )
+
+        self.mi_loss = PileupMIAELoss(
+            mi_temperature=mi_temperature,
+            input_is_logits=True,
+            use_float64=mi_use_float64_entropy,
+        )
+
         self.mi_gamma = float(mi_gamma)
         self.forbid_sensitive_variable_in_input = forbid_sensitive_variable_in_input
         self.sensitive_binner = FixedQuantileSensitiveBinner(variable=mi_sensitive_variable, num_bins=mi_sensitive_num_bins, 
@@ -86,8 +110,17 @@ class AE(ADLightningModule):
 
     def forward(self, x: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
         x = self.features(x)
+
+        # Pre-Bernoulli latent logits / activations.
+        # This is the tensor used for the MI estimator, matching hepinfo.
         z = self.encoder(x)
-        reconstruction = self.decoder(z)
+
+        # Straight-through Bernoulli bottleneck.
+        # This is the tensor consumed by the decoder, matching hepinfo MiVAE.
+        z_sample = self.bernoulli(z)
+
+        reconstruction = self.decoder(z_sample)
+
         return z, reconstruction
 
     def ascore(self, x: torch.Tensor, reconstruction: torch.Tensor, mask: torch.Tensor | None = None) -> torch.Tensor:
@@ -220,7 +253,7 @@ class AE(ADLightningModule):
 
         with torch.no_grad():
             z_detached = z.detach()
-            probs = torch.sigmoid(self.mi_loss.mi_loss.temperature * z_detached)
+            probs = self.bernoulli.probabilities(z_detached)
 
             reco_loss_mean = reco_loss.mean().detach()
             gamma_mi_loss_detached = gamma_mi_loss.detach()

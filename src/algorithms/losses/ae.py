@@ -54,6 +54,8 @@ class PileupMIAELoss(ADLoss):
         input_is_logits: bool = True,
         eps: float = 1e-20,
         use_float64: bool = True,
+        use_quantized_sigmoid: bool = False,
+        bits_bernoulli_sigmoid: int = 8,
     ) -> None:
         super().__init__(scale=1.0, reduction="none")
 
@@ -62,6 +64,8 @@ class PileupMIAELoss(ADLoss):
             eps=eps,
             input_is_logits=input_is_logits,
             use_float64=use_float64,
+            use_quantized_sigmoid=use_quantized_sigmoid,
+            bits_bernoulli_sigmoid=bits_bernoulli_sigmoid,
         )
 
     def forward(self, latent: torch.Tensor, sensitive: torch.Tensor) -> torch.Tensor:

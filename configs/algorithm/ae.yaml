@@ -27,7 +27,6 @@ base_rate: 28608.8064 # bunch crossing rate in kHz
 # Bernoulli MI AE
 mi_gamma: 0.1
 mi_temperature: 6.0
-mi_reduction: sum
 
 # HepInfo BernoulliSampling layer used between encoder logits and decoder input.
 mi_bernoulli_num_samples: 10

@@ -262,6 +262,19 @@ class AE(ADLightningModule):
 
             mi_to_reco_ratio = gamma_mi_loss_detached / reco_loss_mean.clamp_min(1e-12)
 
+            latent_mean = z_detached.mean()
+            latent_std = z_detached.std(unbiased=False)
+            latent_abs_mean = z_detached.abs().mean()
+            latent_abs_max = z_detached.abs().max()
+
+            prob_mean = probs.mean()
+            prob_std = probs.std(unbiased=False)
+            prob_min = probs.min()
+            prob_max = probs.max()
+
+            prob_saturation_low = (probs <= 1e-3).float().mean()
+            prob_saturation_high = (probs >= 1.0 - 1e-3).float().mean()
+
         # The anomaly score is expected to be a distribution over events.
         # Allow subclasses to override `ascore`; otherwise fall back to
         # the reconstruction loss per observation for robustness.
@@ -313,17 +326,19 @@ class AE(ADLightningModule):
 
                 "loss/mi_to_reco_ratio": mi_to_reco_ratio,
 
-                # "latent/mean": latent_mean,
-                # "latent/std": latent_std,
+                "latent/mean": latent_mean,
+                "latent/std": latent_std,
+                "latent/abs_mean": latent_abs_mean,
+                "latent/abs_max": latent_abs_max,
 
-                # "bernoulli_prob/mean": prob_mean,
-                # "bernoulli_prob/std": prob_std,
-                # "bernoulli_prob/min": prob_min,
-                # "bernoulli_prob/max": prob_max,
-                # "bernoulli_prob/saturation_low": prob_saturation_low,
-                # "bernoulli_prob/saturation_high": prob_saturation_high,
-                # "loss/mi_permuted": mi_loss_permuted.detach(),
-                # "loss/mi_minus_permuted": (mi_loss.detach() - mi_loss_permuted.detach()),
+                "bernoulli_prob/mean": prob_mean,
+                "bernoulli_prob/std": prob_std,
+                "bernoulli_prob/min": prob_min,
+                "bernoulli_prob/max": prob_max,
+                "bernoulli_prob/saturation_low": prob_saturation_low,
+                "bernoulli_prob/saturation_high": prob_saturation_high,
+                "loss/mi_permuted": mi_loss_permuted.detach(),
+                "loss/mi_minus_permuted": mi_loss.detach() - mi_loss_permuted.detach(),
             }
 
     def outlog(self, outdict: dict) -> dict:
@@ -345,17 +360,19 @@ class AE(ADLightningModule):
 
             "loss_mi_to_reco_ratio": outdict.get("loss/mi_to_reco_ratio"),
 
-            # "latent_mean": outdict.get("latent/mean"),
-            # "latent_std": outdict.get("latent/std"),
+            "latent_mean": outdict.get("latent/mean"),
+            "latent_std": outdict.get("latent/std"),
+            "latent_abs_mean": outdict.get("latent/abs_mean"),
+            "latent_abs_max": outdict.get("latent/abs_max"),
 
-            # "bernoulli_prob_mean": outdict.get("bernoulli_prob/mean"),
-            # "bernoulli_prob_std": outdict.get("bernoulli_prob/std"),
-            # "bernoulli_prob_min": outdict.get("bernoulli_prob/min"),
-            # "bernoulli_prob_max": outdict.get("bernoulli_prob/max"),
-            # "bernoulli_prob_saturation_low": outdict.get("bernoulli_prob/saturation_low"),
-            # "bernoulli_prob_saturation_high": outdict.get("bernoulli_prob/saturation_high"),
-            # "loss_mi_permuted": outdict.get("loss/mi_permuted"),
-            # "loss_mi_minus_permuted": outdict.get("loss/mi_minus_permuted"),
+            "bernoulli_prob_mean": outdict.get("bernoulli_prob/mean"),
+            "bernoulli_prob_std": outdict.get("bernoulli_prob/std"),
+            "bernoulli_prob_min": outdict.get("bernoulli_prob/min"),
+            "bernoulli_prob_max": outdict.get("bernoulli_prob/max"),
+            "bernoulli_prob_saturation_low": outdict.get("bernoulli_prob/saturation_low"),
+            "bernoulli_prob_saturation_high": outdict.get("bernoulli_prob/saturation_high"),
+            "loss_mi_permuted": outdict.get("loss/mi_permuted"),
+            "loss_mi_minus_permuted": outdict.get("loss/mi_minus_permuted"),
         }
     
     def _fit_sensitive_binner(self) -> None:

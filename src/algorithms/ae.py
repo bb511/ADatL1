@@ -87,6 +87,8 @@ class AE(ADLightningModule):
             mi_temperature=mi_temperature,
             input_is_logits=True,
             use_float64=mi_use_float64_entropy,
+            use_quantized_sigmoid=mi_use_quantized_sigmoid,
+            bits_bernoulli_sigmoid=mi_bits_bernoulli_sigmoid,
         )
 
         self.mi_gamma = float(mi_gamma)

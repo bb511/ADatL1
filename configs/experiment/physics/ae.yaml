@@ -236,11 +236,16 @@ evaluation:
     correlation_matrix:
       _target_: src.evaluation.callbacks.correlation_matrix.CorrelationMatrixCallback
       variables:
-        - muons.Et
-        - jets.Et
-        - egammas.Et
+        - FET.phi
+        - egammas.phi
+        - jets.phi
+        - muons.phi
         - taus.Et
+        - taus.phi
         - FET.Et
+        - egammas.Et
+        - jets.Et
+        - muons.Et
       datasets:
         - normal
       output_name: reconstructed_data

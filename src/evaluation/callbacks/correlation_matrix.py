@@ -57,11 +57,16 @@ class CorrelationMatrixCallback(Callback):
     ):
         super().__init__()
         self.variables = variables or [
-            "muons.Et",
-            "jets.Et",
-            "egammas.Et",
+            "FET.phi",
+            "egammas.phi",
+            "jets.phi",
+            "muons.phi",
             "taus.Et",
+            "taus.phi",
             "FET.Et",
+            "egammas.Et",
+            "jets.Et",
+            "muons.Et",
         ]
         self.datasets = datasets or []
         self.output_name = output_name

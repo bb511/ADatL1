@@ -14,11 +14,11 @@
 python3 src/train.py \
     paths.raw_data_dir=../../03_Data/adl1t_data/parquet_files \
     experiment=physics/ae \
-    run_name="Bernoulli-MI_No_FET_Et_Bins_50_Gamma_0.1_Run_2" \
+    run_name="Bernoulli-MI_No_FET_Et_Bins_50__No_Gamma_Run_2" \
     logger=mlflow \
     algorithm.optimizer.lr=0.0019859329798336714 \
     algorithm.delta=1.0 \
-    algorithm.mi_gamma=0.1 \
+    algorithm.mi_gamma=0.0 \
     algorithm.mi_temperature=6.0 \
     trainer.gradient_clip_val=5.0 \
     algorithm.optimizer.betas='[0.9,0.999]' \

@@ -33,11 +33,10 @@ class DataLoader:
     def load(self) -> pd.Series:
         df = pd.read_csv(self.path)
 
-        if self.metric not in df.columns:
-            available = ", ".join(map(str, df.columns))
+        if df.shape[1] < 2:
             raise ValueError(
-                f"Metric '{self.metric}' not found in {self.path}. "
-                f"Available columns are: {available}"
+                f"Expected at least two columns in {self.path}, "
+                f"but found {df.shape[1]} column(s)."
             )
 
-        return df
+        return df.iloc[:, 1]

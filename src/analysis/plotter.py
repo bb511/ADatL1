@@ -19,19 +19,24 @@ class Plotter():
         self.minimum: float = float("inf")
         self.maximum: float = float("-inf")
         self.epochs: int = 0
+        print(f"Initialized Plotter with {len(self.metrics)} metric(s).")
 
     def add_metric(self, path: str | Path, metric: str, label: str | None = None) -> None:
         self.metrics.append(MetricSpecs(path=path, metric=metric, label=label))
+        print(f"Added metric '{metric}' from {path}.")
 
     def set_epoch(self, epochs: int) -> None:
         self.epochs = epochs
+        print(f"Set expected epochs to {epochs}.")
 
     def plot(self, title: str, ylable: str) -> None:
         if not self.metrics:
             raise ValueError("Cannot plot without metrics.")
         
+        print(f"Creating plot '{title}' with {len(self.metrics)} metric(s).")
         self._find_max()
         self._find_min()
+        print(f"Global normalization range: min={self.minimum}, max={self.maximum}.")
 
 
         runs_normalized = [
@@ -49,6 +54,7 @@ class Plotter():
                     f"Expected {self.epochs} epochs for '{name}', "
                     f"but found {len(values)} values."
                 )
+            print(f"Plotting '{name}' with {len(values)} values.")
             plt.plot(epochs, values, label=name)
 
 
@@ -62,7 +68,9 @@ class Plotter():
         save_dir.mkdir(parents=True, exist_ok=True)
 
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        plt.savefig(save_dir / f"{title}_{timestamp}.png")
+        save_path = save_dir / f"{title}_{timestamp}.png"
+        plt.savefig(save_path)
+        print(f"Saved plot to {save_path}.")
 
 
 
@@ -91,6 +99,7 @@ class Plotter():
                 self.minimum = metric_min
 
     def _load_metric_values(self, path: str | Path, metric: str) -> pd.Series:
+        print(f"Loading metric '{metric}' from {path}.")
         data = DataLoader(path=path, metric=metric).load()
         return pd.to_numeric(data.squeeze(), errors="raise")
     

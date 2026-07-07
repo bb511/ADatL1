@@ -35,15 +35,15 @@ class Plotter():
 
 
         runs_normalized = [
-            (self.metrics.label, ((self._load_metric_values(path=metric.metric, metric=metric.metric) - self.minimum) / (self.maximum - self.minimum)))
+            (metric.label, ((self._load_metric_values(path=metric.path, metric=metric.metric) - self.minimum) / (self.maximum - self.minimum)))
             for metric in self.metrics
         ]
 
         plt.figure(figsize=(10,4))
 
-        epochs = range(1, len(self.epochs) + 1)
+        epochs = range(1, self.epochs + 1)
 
-        for name, values in runs_normalized.items():
+        for name, values in runs_normalized:
             if len(values) != self.epochs:
                 raise ValueError(
                     f"Expected {self.epochs} epochs for '{name}', "
@@ -57,8 +57,13 @@ class Plotter():
         plt.ylabel(ylable)
         plt.ylim(0, 1)
         plt.legend()
+        repo_root = Path(__file__).resolve().parents[2]
+        save_dir = repo_root / "logs" / "plots"
+        save_dir.mkdir(parents=True, exist_ok=True)
+
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        plt.savefig(save_dir / f"{title}_{timestamp}.png")
         plt.show()
-        plt.savefig(f"../../logs/data/{title}_{datetime.now()}.png")
 
 
 
@@ -81,7 +86,7 @@ class Plotter():
         for metric in self.metrics:
         
             x = self._load_metric_values(path=metric.path, metric=metric.metric)
-            metric_min = x.max()
+            metric_min = x.min()
             
             if  metric_min < self.minimum:
                 self.minimum = metric_min
@@ -91,8 +96,9 @@ class Plotter():
         return pd.to_numeric(data.squeeze(), errors="raise")
     
 if __name__ == "__main__":
-
-    plotter = Plotter([MetricSpecs("data.csv", "metric", "test")])
+    data_path = Path(__file__).resolve().parent / "data.csv"
+    print(f"data path: {data_path}")
+    plotter = Plotter([MetricSpecs(data_path, "loss", "test")])
     # plotter.add_metric("data.csv", "metric", "test")
     plotter.set_epoch(10)
     plotter.plot("TestPlot", "TestData")

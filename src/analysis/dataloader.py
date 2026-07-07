@@ -30,7 +30,7 @@ class DataLoader:
                 f"Unknown metric '{self.metric}'. Allowed metrics are: {allowed}"
             )
 
-    def load(self) -> pd.DataFrame:
+    def load(self) -> pd.Series:
         df = pd.read_csv(self.path)
 
         if self.metric not in df.columns:

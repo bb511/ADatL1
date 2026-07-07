@@ -63,7 +63,6 @@ class Plotter():
 
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
         plt.savefig(save_dir / f"{title}_{timestamp}.png")
-        plt.show()
 
 
 
@@ -95,10 +94,3 @@ class Plotter():
         data = DataLoader(path=path, metric=metric).load()
         return pd.to_numeric(data.squeeze(), errors="raise")
     
-if __name__ == "__main__":
-    data_path = Path(__file__).resolve().parent / "data.csv"
-    print(f"data path: {data_path}")
-    plotter = Plotter([MetricSpecs(data_path, "loss", "test")])
-    # plotter.add_metric("data.csv", "metric", "test")
-    plotter.set_epoch(10)
-    plotter.plot("TestPlot", "TestData")

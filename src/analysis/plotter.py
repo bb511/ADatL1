@@ -39,10 +39,12 @@ class Plotter():
         print(f"Global normalization range: min={self.minimum}, max={self.maximum}.")
 
 
-        runs_normalized = [
-            (metric.label, ((self._load_metric_values(path=metric.path, metric=metric.metric) - self.minimum) / (self.maximum - self.minimum)))
-            for metric in self.metrics
-        ]
+        runs_normalized = []
+
+        for metric in self.metrics:
+            values = self._load_metric_values(path=metric.path, metric=metric.metric)
+            normalized = (values - values.min()) / (values.max() - values.min())
+            runs_normalized.append((metric.label, normalized))
 
         plt.figure(figsize=(10,4))
 
@@ -55,7 +57,11 @@ class Plotter():
                     f"but found {len(values)} values."
                 )
             print(f"Plotting '{name}' with {len(values)} values.")
-            plt.plot(epochs, values, label=name)
+
+            if "Loss_reco: Gamma = 0.0 Run 2" in name:
+                plt.plot(epochs, values, label=name, marker="*")
+            else:
+                plt.plot(epochs, values, label=name)
 
 
         plt.title(title)

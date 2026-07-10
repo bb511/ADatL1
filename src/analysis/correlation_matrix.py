@@ -14,6 +14,20 @@ except ImportError:
     from .checkpointloader import CheckpointLoader
 
 
+REPO_ROOT = Path(__file__).resolve().parents[2]
+DEFAULT_MATRIX_DIR = (
+    REPO_ROOT
+    / "checkpoints"
+    / "physics_ae_models"
+    / "Bernoulli-MI_No_FET_Et_Bins_50_Gamma_0.1_Run_3"
+    / "plots"
+    / "test"
+    / "last"
+    / "correlation_matrix"
+    / "normal"
+)
+
+
 @dataclass(frozen=True)
 class CorrelationMatrixSpecs:
     input_path: str | Path
@@ -95,8 +109,7 @@ class CorrelationMatrixPlotter:
         if input_parent.exists():
             return input_parent
 
-        repo_root = Path(__file__).resolve().parents[2]
-        return repo_root / "logs" / "plots"
+        return REPO_ROOT / "logs" / "plots"
 
     def _plot_heatmap(self, corr: pd.DataFrame, save_path: Path, title: str) -> None:
         try:
@@ -278,6 +291,7 @@ def _parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--matrix-dir",
         type=Path,
+        default=DEFAULT_MATRIX_DIR,
         help="Folder containing input/reconstruction correlation matrix CSV files.",
     )
     parser.add_argument("--input-csv", type=Path, help="Input correlation matrix CSV.")
@@ -296,21 +310,19 @@ def _parse_args() -> argparse.Namespace:
 def main() -> None:
     args = _parse_args()
 
-    if args.matrix_dir is None and (
-        args.input_csv is None or args.reconstruction_csv is None
-    ):
-        raise ValueError(
-            "Pass either --matrix-dir or both --input-csv and --reconstruction-csv."
-        )
-
-    if args.matrix_dir is not None:
+    if args.input_csv is None and args.reconstruction_csv is None:
         input_path, reconstruction_path = _build_default_paths(
             args.matrix_dir,
             args.method,
         )
-    else:
+    elif args.input_csv is not None and args.reconstruction_csv is not None:
         input_path = args.input_csv
         reconstruction_path = args.reconstruction_csv
+    else:
+        raise ValueError(
+            "Pass both --input-csv and --reconstruction-csv, or neither to use "
+            "--matrix-dir."
+        )
 
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     output_stem = args.output_stem or f"abs_correlation_delta_{args.method}_{timestamp}"

@@ -3,6 +3,20 @@
 # ========================================================================
 # These are the running commands for the 250 Hz background rate study.
 
+set -euo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+REPO_ROOT="$(cd "${SCRIPT_DIR}/../.." && pwd)"
+export PROJECT_ROOT="${PROJECT_ROOT:-${REPO_ROOT}}"
+
+PYTHON_BIN="${PYTHON_BIN:-python3}"
+RUN_NAME="Bernoulli-MI_No_FET_Et_Bins_20_Gamma_0.1_Run_1"
+EXPERIMENT_NAME="physics_ae_models"
+CORRELATION_MATRIX_DIR="${PROJECT_ROOT}/checkpoints/${EXPERIMENT_NAME}/${RUN_NAME}/plots/test/last/correlation_matrix/normal"
+DELTA_CORRELATION_OUTPUT_STEM="abs_reconstruction_minus_input_pearson_correlation_matrix"
+
+cd "${REPO_ROOT}"
+
 # ========================================================================
 # TRAINING
 # ========================================================================
@@ -11,10 +25,10 @@
 # ------------------------------------------------------------------------
 # taskset -c 0-2 \
 
-python3 src/train.py \
+"${PYTHON_BIN}" src/train.py \
     paths.raw_data_dir=../../03_Data/adl1t_data/parquet_files \
     experiment=physics/ae \
-    run_name="Bernoulli-MI_No_FET_Et_Bins_20_Gamma_0.1_Run_1" \
+    run_name="${RUN_NAME}" \
     logger=mlflow \
     algorithm.optimizer.lr=0.0019859329798336714 \
     algorithm.delta=1.0 \
@@ -28,6 +42,12 @@ python3 src/train.py \
     trainer.max_epochs=50 \
     trainer=gpu \
     trainer.devices='[0]'
+
+echo "Calculating delta correlation matrix in ${CORRELATION_MATRIX_DIR}"
+"${PYTHON_BIN}" src/analysis/correlation_matrix.py \
+    --matrix-dir "${CORRELATION_MATRIX_DIR}" \
+    --output-stem "${DELTA_CORRELATION_OUTPUT_STEM}" \
+    --title "Absolute correlation change: ${RUN_NAME}"
 
 # ------------------------------------------------------------------------
 # Semi-supervised cvar10 training

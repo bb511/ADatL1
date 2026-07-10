@@ -3,10 +3,12 @@ import pandas as pd
 
 
 class CheckpointLoader:
-    def __init__(self, path: str | Path) -> None:
+    def __init__(self, path: str | Path, metric: str | None = None) -> None:
         self.path = Path(path)
+        self.metric = metric
         print(
             f"Initialized CheckpointLoader with path={self.path}, "
+            f"metric={self.metric!r}."
         )
 
         if not self.path.exists():
@@ -45,6 +47,13 @@ class CheckpointLoader:
 
     def load_matrix(self) -> pd.DataFrame:
         return self.load()
+
+    def load_table(self) -> pd.DataFrame:
+        csv_path = self._csv_path()
+        print(f"Loading CSV table from {csv_path}.")
+        df = pd.read_csv(csv_path)
+        print(f"Loaded CSV table with shape {df.shape}.")
+        return df
 
     def _csv_path(self) -> Path:
         if self.path.is_file():

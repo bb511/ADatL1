@@ -33,8 +33,9 @@ def plot(
     n_rows, n_cols = mat.shape
 
     cell_size = 0.6  # inches per cell (tune if desired)
-    fig_w = max(6, n_cols * cell_size)
-    fig_h = max(6, n_rows * cell_size)
+    fig_size_max = 6
+    fig_w = max(fig_size_max, n_cols * cell_size)
+    fig_h = max(fig_size_max, n_rows * cell_size)
 
     fig, ax = plt.subplots(figsize=(fig_w, fig_h), dpi=120)
     im = ax.imshow(mat, aspect="auto", cmap=cmap)
@@ -44,6 +45,7 @@ def plot(
     ax.set_yticks(range(len(rows)))
     ax.set_xticklabels([str(c) for c in cols], rotation=90)
     ax.set_yticklabels([str(r) for r in rows])
+    ax.set_title(value_name, pad=20)
 
     ax.set_xticks(np.arange(-0.5, n_cols, 1), minor=True)
     ax.set_yticks(np.arange(-0.5, n_rows, 1), minor=True)
@@ -77,8 +79,7 @@ def plot(
             )
 
     # colorbar
-    cbar = fig.colorbar(im, ax=ax)
-    cbar.set_label(f"{value_name}")
+    fig.colorbar(im, ax=ax)
 
     filename = sanitize_filename(f"{value_name}")
     filename = filename.replace(" ", "_")

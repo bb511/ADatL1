@@ -6,11 +6,9 @@ import pandas as pd
 import torch
 from pytorch_lightning.callbacks import Callback
 
-import matplotlib.pyplot as plt
-import mplhep as hep
-
 from src.data.utils import unpack_batch
 from src.evaluation.callbacks import utils
+from src.plot import matrix
 
 
 class CorrelationMatrixCallback(Callback):
@@ -259,11 +257,16 @@ class CorrelationMatrixCallback(Callback):
                     corr_path = plot_folder / f"{space_name}_{method}_correlation_matrix.csv"
                     corr.to_csv(corr_path)
 
-                    self._plot_heatmap(
-                        corr=corr,
-                        save_path=plot_folder
-                        / f"{space_name}_{method}_correlation_matrix.png",
-                        title=f"{space_name} {method} correlation: {dset_name}",
+                    matrix.plot(
+                        data=corr.to_dict(orient="index"),
+                        value_name=(
+                            f"{space_name} {method} correlation: {dset_name}"
+                        ),
+                        save_dir=plot_folder,
+                        cmap="coolwarm",
+                        vmin=-1.0,
+                        vmax=1.0,
+                        filename=f"{space_name}_{method}_correlation_matrix.png",
                     )
 
                     self._write_fet_summary(
@@ -498,41 +501,6 @@ class CorrelationMatrixCallback(Callback):
             if obj == "FET" and feat == "Et":
                 return label
         return None
-
-    def _plot_heatmap(self, corr: pd.DataFrame, save_path: Path, title: str):
-        """Plot one correlation matrix as a PNG heatmap."""
-        plt.style.use(hep.style.CMS)
-
-        labels = list(corr.columns)
-        mat = corr.to_numpy(dtype=float)
-        n = len(labels)
-        fig_size = max(6, 0.9 * n)
-        fig, ax = plt.subplots(figsize=(fig_size, fig_size), dpi=140)
-
-        im = ax.imshow(mat, vmin=-1.0, vmax=1.0, cmap="coolwarm")
-        ax.set_xticks(range(n))
-        ax.set_yticks(range(n))
-        ax.set_xticklabels(labels, rotation=45, ha="right")
-        ax.set_yticklabels(labels)
-        ax.set_title(title)
-
-        for i in range(n):
-            for j in range(n):
-                value = mat[i, j]
-                if np.isnan(value):
-                    text = "nan"
-                    color = "black"
-                else:
-                    text = f"{value:.2f}"
-                    color = "white" if abs(value) > 0.55 else "black"
-                ax.text(j, i, text, ha="center", va="center", color=color, fontsize=10)
-
-        cbar = fig.colorbar(im, ax=ax)
-        cbar.set_label("correlation")
-        fig.tight_layout()
-        fig.savefig(save_path, bbox_inches="tight")
-        fig.clear()
-        plt.close(fig)
 
     def _should_run_for_current_ckpt(self, trainer):
         """Determine whether this callback should run for the current checkpoint."""

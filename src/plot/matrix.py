@@ -14,6 +14,9 @@ def plot(
     value_name: str,
     save_dir: Path,
     cmap: str | colors.Colormap = "viridis",
+    vmin: float | None = None,
+    vmax: float | None = None,
+    filename: str | None = None,
 ):
     """Plot the data as a labelled matrix.
 
@@ -23,6 +26,9 @@ def plot(
 
     ``cmap`` accepts a Matplotlib colormap name or object. For example, use
     ``"coolwarm"`` for a diverging red-blue color scheme.
+
+    ``vmin`` and ``vmax`` optionally fix the color scale. ``filename`` overrides the
+    default filename derived from ``value_name`` and may select a format by extension.
     """
     plt.style.use(hep.style.CMS)
 
@@ -38,7 +44,7 @@ def plot(
     fig_h = max(fig_size_max, n_rows * cell_size)
 
     fig, ax = plt.subplots(figsize=(fig_w, fig_h), dpi=120)
-    im = ax.imshow(mat, aspect="auto", cmap=cmap)
+    im = ax.imshow(mat, aspect="auto", cmap=cmap, vmin=vmin, vmax=vmax)
 
     # axis labels
     ax.set_xticks(range(len(cols)))
@@ -81,9 +87,10 @@ def plot(
     # colorbar
     fig.colorbar(im, ax=ax)
 
-    filename = sanitize_filename(f"{value_name}")
-    filename = filename.replace(" ", "_")
-    fig.savefig(save_dir / f"{filename}.jpg", bbox_inches="tight")
+    if filename is None:
+        filename = sanitize_filename(f"{value_name}")
+        filename = f"{filename.replace(' ', '_')}.jpg"
+    fig.savefig(save_dir / filename, bbox_inches="tight")
     fig.clear()
     plt.close(fig)
 
@@ -130,6 +137,9 @@ if __name__ == "__main__":
         value_name="Manual correlation matrix coolwarm",
         save_dir=output_dir,
         cmap="coolwarm",
+        vmin=-1.0,
+        vmax=1.0,
+        filename="Manual_correlation_matrix_coolwarm.jpg",
     )
 
     expected_paths = [

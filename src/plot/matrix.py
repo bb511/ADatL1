@@ -9,12 +9,20 @@ import matplotlib.colors as colors
 import mplhep as hep
 
 
-def plot(data: dict[dict], value_name: str, save_dir: Path):
-    """Plots the data as an xy scatter plot.
+def plot(
+    data: dict[dict],
+    value_name: str,
+    save_dir: Path,
+    cmap: str | colors.Colormap = "viridis",
+):
+    """Plot the data as a labelled matrix.
 
     Expects a dictionary where each key corresponds to a row, i.e., another dictionary.
     Each key of the latter dictionary corresponds to a column entry for that row.
     The column labels are expected to be the same for each row.
+
+    ``cmap`` accepts a Matplotlib colormap name or object. For example, use
+    ``"coolwarm"`` for a diverging red-blue color scheme.
     """
     plt.style.use(hep.style.CMS)
 
@@ -29,7 +37,7 @@ def plot(data: dict[dict], value_name: str, save_dir: Path):
     fig_h = max(6, n_rows * cell_size)
 
     fig, ax = plt.subplots(figsize=(fig_w, fig_h), dpi=120)
-    im = ax.imshow(mat, aspect="auto", cmap="viridis")
+    im = ax.imshow(mat, aspect="auto", cmap=cmap)
 
     # axis labels
     ax.set_xticks(range(len(cols)))
@@ -53,7 +61,9 @@ def plot(data: dict[dict], value_name: str, save_dir: Path):
             if np.isnan(val):
                 continue
 
-            txt_color = "white" if norm(val) < 0.6 else "black"
+            red, green, blue, _ = im.cmap(norm(val))
+            luminance = 0.2126 * red + 0.7152 * green + 0.0722 * blue
+            txt_color = "black" if luminance > 0.5 else "white"
 
             ax.text(
                 j,
@@ -83,7 +93,7 @@ if __name__ == "__main__":
             "FET.Et": 1.0,
             "jets.Et": 0.72,
             "muons.Et": -0.18,
-            "taus.Et": np.nan,
+            "taus.Et": -1,
         },
         "jets.Et": {
             "FET.Et": 0.72,
@@ -98,7 +108,7 @@ if __name__ == "__main__":
             "taus.Et": -0.27,
         },
         "taus.Et": {
-            "FET.Et": np.nan,
+            "FET.Et": -1,
             "jets.Et": 0.44,
             "muons.Et": -0.27,
             "taus.Et": 1.0,
@@ -109,9 +119,22 @@ if __name__ == "__main__":
     output_dir = repo_root / "logs" / "plots" / "matrix_manual_test"
     output_dir.mkdir(parents=True, exist_ok=True)
 
-    value_name = "Manual correlation matrix"
-    plot(sample_data, value_name=value_name, save_dir=output_dir)
+    plot(
+        sample_data,
+        value_name="Manual correlation matrix",
+        save_dir=output_dir,
+    )
+    plot(
+        sample_data,
+        value_name="Manual correlation matrix coolwarm",
+        save_dir=output_dir,
+        cmap="coolwarm",
+    )
 
-    output_path = output_dir / "Manual_correlation_matrix.jpg"
-    assert output_path.is_file(), f"Expected matrix plot at {output_path}"
-    print(f"Manual matrix test passed. Plot saved to {output_path}")
+    expected_paths = [
+        output_dir / "Manual_correlation_matrix.jpg",
+        output_dir / "Manual_correlation_matrix_coolwarm.jpg",
+    ]
+    for output_path in expected_paths:
+        assert output_path.is_file(), f"Expected matrix plot at {output_path}"
+    print(f"Manual matrix tests passed. Plots saved to {output_dir}")

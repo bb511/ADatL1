@@ -2,7 +2,7 @@ import pandas as pd
 import matplotlib.pyplot as plt
 from dataclasses import dataclass
 from pathlib import Path
-from dataloader import DataLoader
+from src.analysis.dataloader import DataLoader
 from datetime import datetime
 
 @dataclass(frozen=True)
@@ -108,3 +108,34 @@ class Plotter():
         print(f"Loading metric '{metric}' from {path}.")
         data = DataLoader(path=path, metric=metric).load()
         return pd.to_numeric(data.squeeze(), errors="raise")
+
+
+if __name__ == "__main__":
+    repo_root = Path(__file__).resolve().parents[2]
+    fixture_dir = repo_root / "logs" / "plots" / "lossplotter_manual_test"
+
+    sample_runs = {
+        "run_a": [1.0, 0.82, 0.69, 0.61, 0.56],
+        "run_b": [1.1, 0.91, 0.77, 0.66, 0.60],
+    }
+    for run_name, values in sample_runs.items():
+        metric_path = fixture_dir / run_name / "metrics" / "train" / "loss_reco"
+        metric_path.parent.mkdir(parents=True, exist_ok=True)
+        metric_lines = [f"{index} {value} {index}" for index, value in enumerate(values)]
+        metric_path.write_text("\n".join(metric_lines) + "\n", encoding="utf-8")
+
+    plotter = Plotter()
+    plotter.add_metric(fixture_dir / "run_a", "loss_reco", "Run A")
+    plotter.add_metric(fixture_dir / "run_b", "loss_reco", "Run B")
+    plotter.set_epoch(5)
+
+    title = "Manual normalized loss"
+    plotter.plot(title, "Normalized loss")
+    plt.close("all")
+
+    output_dir = repo_root / "logs" / "plots"
+    output_paths = list(output_dir.glob(f"{title}_*.png"))
+    assert output_paths, f"Expected normalized-loss plot in {output_dir}"
+    assert plotter.minimum == min(min(values) for values in sample_runs.values())
+    assert plotter.maximum == max(max(values) for values in sample_runs.values())
+    print(f"Manual loss-plotter test passed. Plot saved to {max(output_paths)}")

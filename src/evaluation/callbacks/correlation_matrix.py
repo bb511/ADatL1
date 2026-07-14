@@ -61,12 +61,17 @@ class CorrelationMatrixCallback(Callback):
             "egammas.phi",
             "jets.phi",
             "muons.phi",
-            "taus.Et",
             "taus.phi",
             "FET.Et",
             "egammas.Et",
             "jets.Et",
             "muons.Et",
+            "taus.Et",
+            "FET.eta",
+            "egammas.eta",
+            "jets.eta",
+            "muons.eta",
+            "taus.eta",
         ]
         self.datasets = datasets or []
         self.output_name = output_name

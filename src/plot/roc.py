@@ -2,6 +2,7 @@
 from pathlib import Path
 from pathvalidate import sanitize_filename
 
+import numpy as np
 import matplotlib.pyplot as plt
 import mplhep as hep
 
@@ -33,3 +34,23 @@ def plot(roc: dict, auroc: dict, metric: str, save_dir: Path):
         fig.savefig(save_dir / f"{filename}.jpg", bbox_inches="tight")
         fig.clear()
         plt.close(fig)
+
+
+if __name__ == "__main__":
+    repo_root = Path(__file__).resolve().parents[2]
+    output_dir = repo_root / "logs" / "plots" / "roc_manual_test"
+    output_dir.mkdir(parents=True, exist_ok=True)
+
+    sample_fpr = np.array([0.0, 0.02, 0.08, 0.2, 0.45, 1.0])
+    sample_tpr = np.array([0.0, 0.35, 0.62, 0.81, 0.94, 1.0])
+    sample_thresholds = np.linspace(1.0, 0.0, len(sample_fpr))
+    plot(
+        roc={"signal": (sample_fpr, sample_tpr, sample_thresholds)},
+        auroc={"signal": 0.87},
+        metric="loss_reco",
+        save_dir=output_dir,
+    )
+
+    output_path = output_dir / "signal_loss_reco.jpg"
+    assert output_path.is_file(), f"Expected ROC plot at {output_path}"
+    print(f"Manual ROC test passed. Plot saved to {output_path}")

@@ -79,3 +79,38 @@ def plot_yright(
     fig.savefig(save_dir / f"{filename}.jpg", bbox_inches="tight")
     fig.clear()
     plt.close(fig)
+
+
+if __name__ == "__main__":
+    repo_root = Path(__file__).resolve().parents[2]
+    output_dir = repo_root / "logs" / "plots" / "horizontal_bar_manual_test"
+    output_dir.mkdir(parents=True, exist_ok=True)
+
+    sample_counts = {
+        "normal": 0.84,
+        "signal_A": 0.61,
+        "signal_B": 0.43,
+    }
+    sample_efficiencies = {
+        "normal": 0.98,
+        "signal_A": 0.76,
+        "signal_B": 0.52,
+    }
+
+    plot(sample_counts, xlabel="Event count", save_dir=output_dir)
+    plot_yright(
+        sample_counts,
+        sample_efficiencies,
+        xlabel="Selected event count",
+        ylabel="Efficiency",
+        save_dir=output_dir,
+        percent=True,
+    )
+
+    expected_paths = [
+        output_dir / "Event_count.jpg",
+        output_dir / "Selected_event_count.jpg",
+    ]
+    for output_path in expected_paths:
+        assert output_path.is_file(), f"Expected horizontal bar plot at {output_path}"
+    print(f"Manual horizontal-bar tests passed. Plots saved to {output_dir}")

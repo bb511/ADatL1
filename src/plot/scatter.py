@@ -67,3 +67,33 @@ def plot_connected(data: dict, xlabel: str, ylabel: str, title: str, save_dir: P
     fig.savefig(save_dir / f"{filename}.jpg", bbox_inches="tight")
     fig.clear()
     plt.close(fig)
+
+
+if __name__ == "__main__":
+    repo_root = Path(__file__).resolve().parents[2]
+    output_dir = repo_root / "logs" / "plots" / "scatter_manual_test"
+    output_dir.mkdir(parents=True, exist_ok=True)
+
+    sample_data = {1: 0.91, 2: 0.74, 3: 0.63, 4: 0.58, 5: 0.55}
+    plot(
+        sample_data,
+        xlabel="Epoch",
+        ylabel="Loss",
+        title="Manual scatter",
+        save_dir=output_dir,
+    )
+    plot_connected(
+        sample_data,
+        xlabel="Epoch",
+        ylabel="Loss",
+        title="Manual connected scatter",
+        save_dir=output_dir,
+    )
+
+    expected_paths = [
+        output_dir / "Manual_scatter_Epoch_Loss.jpg",
+        output_dir / "Manual_connected_scatter_Epoch_Loss.jpg",
+    ]
+    for output_path in expected_paths:
+        assert output_path.is_file(), f"Expected scatter plot at {output_path}"
+    print(f"Manual scatter tests passed. Plots saved to {output_dir}")

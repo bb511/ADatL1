@@ -240,12 +240,17 @@ evaluation:
         - egammas.phi
         - jets.phi
         - muons.phi
-        - taus.Et
         - taus.phi
+        - FET.eta
+        - egammas.eta
+        - jets.eta
+        - muons.eta
+        - taus.eta
         - FET.Et
         - egammas.Et
         - jets.Et
         - muons.Et
+        - taus.Et
       datasets:
         - normal
       output_name: reconstructed_data

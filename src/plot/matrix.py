@@ -75,3 +75,43 @@ def plot(data: dict[dict], value_name: str, save_dir: Path):
     fig.savefig(save_dir / f"{filename}.jpg", bbox_inches="tight")
     fig.clear()
     plt.close(fig)
+
+
+if __name__ == "__main__":
+    sample_data = {
+        "FET.Et": {
+            "FET.Et": 1.0,
+            "jets.Et": 0.72,
+            "muons.Et": -0.18,
+            "taus.Et": np.nan,
+        },
+        "jets.Et": {
+            "FET.Et": 0.72,
+            "jets.Et": 1.0,
+            "muons.Et": 0.31,
+            "taus.Et": 0.44,
+        },
+        "muons.Et": {
+            "FET.Et": -0.18,
+            "jets.Et": 0.31,
+            "muons.Et": 1.0,
+            "taus.Et": -0.27,
+        },
+        "taus.Et": {
+            "FET.Et": np.nan,
+            "jets.Et": 0.44,
+            "muons.Et": -0.27,
+            "taus.Et": 1.0,
+        },
+    }
+
+    repo_root = Path(__file__).resolve().parents[2]
+    output_dir = repo_root / "logs" / "plots" / "matrix_manual_test"
+    output_dir.mkdir(parents=True, exist_ok=True)
+
+    value_name = "Manual correlation matrix"
+    plot(sample_data, value_name=value_name, save_dir=output_dir)
+
+    output_path = output_dir / "Manual_correlation_matrix.jpg"
+    assert output_path.is_file(), f"Expected matrix plot at {output_path}"
+    print(f"Manual matrix test passed. Plot saved to {output_path}")

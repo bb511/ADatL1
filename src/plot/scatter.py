@@ -106,7 +106,7 @@ def plot_lines(
 
     ax.set_xlabel(xlabel)
     ax.set_ylabel(ylabel)
-    ax.set_title(title)
+    ax.set_title(title, pad=20)
     ax.legend()
 
     if filename is None:
@@ -152,8 +152,8 @@ if __name__ == "__main__":
         title="Manual loss lines",
         save_dir=output_dir,
         colors={
-            "Loss_mi": "royalblue",
-            "Loss_reco": "firebrick",
+            "Loss_mi": "blue",
+            "Loss_reco": "red",
             "Loss_total": "darkgray",
         },
         filename="manual_loss_lines.png",

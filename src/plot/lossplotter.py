@@ -6,8 +6,8 @@ from src.analysis.dataloader import DataLoader
 from datetime import datetime
 
 LOSS_COLORS = {
-    "Loss_reco": "firebrick",
-    "Loss_mi": "royalblue",
+    "Loss_reco": "red",
+    "Loss_mi": "blue",
     "Loss_total": "darkgray",
 }
 

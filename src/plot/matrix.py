@@ -73,7 +73,7 @@ def plot(
 
     # Heuristic: scale font size with the grid size
     fontsize = max(6, min(12, int(180 / max(n_rows, n_cols))))
-    fmt = "{:.1f}"
+    fmt = "{:.2f}"
 
     norm = im.norm
     for i in range(n_rows):

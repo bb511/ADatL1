@@ -18,6 +18,7 @@ def plot(
     vmin: float | None = None,
     vmax: float | None = None,
     filename: str | None = None,
+    figure_scale: float = 1.0,
 ):
     """Plot the data as a labelled matrix.
 
@@ -30,7 +31,11 @@ def plot(
 
     ``vmin`` and ``vmax`` optionally fix the color scale. ``filename`` overrides the
     default filename derived from ``value_name`` and may select a format by extension.
+    ``figure_scale`` scales the complete figure, including the matrix cells.
     """
+    if figure_scale <= 0:
+        raise ValueError(f"figure_scale must be greater than zero, got {figure_scale}.")
+
     plt.style.use(hep.style.CMS)
 
     rows = list(data.keys())
@@ -41,8 +46,8 @@ def plot(
 
     cell_size = 0.72  # 20% larger than the previous 0.6-inch cells
     fig_size_max = 9.6
-    fig_w = max(fig_size_max, n_cols * cell_size)
-    fig_h = max(fig_size_max, n_rows * cell_size)
+    fig_w = max(fig_size_max, n_cols * cell_size) * figure_scale
+    fig_h = max(fig_size_max, n_rows * cell_size) * figure_scale
 
     fig, ax = plt.subplots(figsize=(fig_w, fig_h), dpi=120)
     im = ax.imshow(mat, aspect="auto", cmap=cmap, vmin=vmin, vmax=vmax)

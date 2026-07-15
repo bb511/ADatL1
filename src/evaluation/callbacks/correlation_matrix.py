@@ -243,7 +243,7 @@ class CorrelationMatrixCallback(Callback):
             )
             plot_folder.mkdir(parents=True, exist_ok=True)
             self._write_metadata(plot_folder, dset_name)
-            correlations = {}
+            correlations: dict[tuple[str, str], pd.DataFrame] = {}
 
             for space_name, tables in space_buffers.items():
                 df = self._to_dataframe(tables)
@@ -256,8 +256,6 @@ class CorrelationMatrixCallback(Callback):
                 for method in self.correlation_methods:
                     corr = clean_df.corr(method=method)
                     correlations[(space_name, method)] = corr
-                    corr_path = plot_folder / f"{space_name}_{method}_correlation_matrix.csv"
-                    corr.to_csv(corr_path)
 
                     method_name = method.capitalize()
                     title = {
@@ -270,14 +268,11 @@ class CorrelationMatrixCallback(Callback):
                         f"{method_name} correlation matrix: {space_name}",
                     )
 
-                    matrix.plot(
-                        data=corr.to_dict(orient="index"),
-                        value_name=title,
-                        save_dir=plot_folder,
-                        cmap="coolwarm",
-                        vmin=-1.0,
-                        vmax=1.0,
-                        filename=f"{space_name}_{method}_correlation_matrix.png",
+                    self._write_correlation_matrix_variants(
+                        corr=corr,
+                        plot_folder=plot_folder,
+                        stem=f"{space_name}_{method}_correlation_matrix",
+                        title=title,
                     )
 
                     self._write_fet_summary(
@@ -296,20 +291,16 @@ class CorrelationMatrixCallback(Callback):
                 change_stem = (
                     f"abs_reconstruction_minus_input_{method}_correlation_matrix"
                 )
-                correlation_change.to_csv(plot_folder / f"{change_stem}.csv")
 
                 method_name = method.capitalize()
-                matrix.plot(
-                    data=correlation_change.to_dict(orient="index"),
-                    value_name=(
+                self._write_correlation_matrix_variants(
+                    corr=correlation_change,
+                    plot_folder=plot_folder,
+                    stem=change_stem,
+                    title=(
                         f"Change in {method_name} correlation: "
                         "|corr_after| - |corr_before|"
                     ),
-                    save_dir=plot_folder,
-                    cmap="coolwarm",
-                    vmin=-1.0,
-                    vmax=1.0,
-                    filename=f"{change_stem}.png",
                 )
 
             utils.mlflow.log_plots_to_mlflow(
@@ -518,6 +509,40 @@ class CorrelationMatrixCallback(Callback):
                 f"indices={shown_indices}, control_indices={control_indices}"
             )
         (plot_folder / "metadata.txt").write_text("\n".join(lines) + "\n")
+
+    def _write_correlation_matrix_variants(
+        self,
+        corr: pd.DataFrame,
+        plot_folder: Path,
+        stem: str,
+        title: str,
+    ) -> None:
+        """Save full-variable and ``*.Et``-only CSV and PNG correlation matrices."""
+        variants = [("", corr, 1.0)]
+
+        et_labels = [label for label in corr.columns if str(label).endswith(".Et")]
+        if not et_labels:
+            raise RuntimeError(
+                "Cannot create the required *.Et-only correlation matrix because "
+                "the configured correlation variables contain no labels ending in '.Et'."
+            )
+
+        et_corr = corr.loc[et_labels, et_labels]
+        variants.append(("_et_only", et_corr, 0.6))
+
+        for suffix, variant, figure_scale in variants:
+            variant_stem = f"{stem}{suffix}"
+            variant.to_csv(plot_folder / f"{variant_stem}.csv")
+            matrix.plot(
+                data=variant.to_dict(orient="index"),
+                value_name=title,
+                save_dir=plot_folder,
+                cmap="coolwarm",
+                vmin=-1.0,
+                vmax=1.0,
+                filename=f"{variant_stem}.png",
+                figure_scale=figure_scale,
+            )
 
     def _write_fet_summary(self, corr: pd.DataFrame, save_path: Path):
         """Save correlations of all selected variables with FET.Et."""

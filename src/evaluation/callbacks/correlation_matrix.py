@@ -229,7 +229,7 @@ class CorrelationMatrixCallback(Callback):
         self._event_counts[dset_name] = self._event_counts.get(dset_name, 0) + n_keep
 
     def on_test_epoch_end(self, trainer, pl_module):
-        """Write tables, correlation matrices, FET summaries, and heatmaps."""
+        """Write tables, correlation matrices, correlation changes, and heatmaps."""
         if not self._active:
             return
 
@@ -243,6 +243,7 @@ class CorrelationMatrixCallback(Callback):
             )
             plot_folder.mkdir(parents=True, exist_ok=True)
             self._write_metadata(plot_folder, dset_name)
+            correlations = {}
 
             for space_name, tables in space_buffers.items():
                 df = self._to_dataframe(tables)
@@ -254,14 +255,24 @@ class CorrelationMatrixCallback(Callback):
 
                 for method in self.correlation_methods:
                     corr = clean_df.corr(method=method)
+                    correlations[(space_name, method)] = corr
                     corr_path = plot_folder / f"{space_name}_{method}_correlation_matrix.csv"
                     corr.to_csv(corr_path)
 
+                    method_name = method.capitalize()
+                    title = {
+                        "input": f"{method_name} correlation matrix before training",
+                        "reconstruction": (
+                            f"{method_name} correlation matrix after training"
+                        ),
+                    }.get(
+                        space_name,
+                        f"{method_name} correlation matrix: {space_name}",
+                    )
+
                     matrix.plot(
                         data=corr.to_dict(orient="index"),
-                        value_name=(
-                            f"{space_name} {method} correlation: {dset_name}"
-                        ),
+                        value_name=title,
                         save_dir=plot_folder,
                         cmap="coolwarm",
                         vmin=-1.0,
@@ -274,6 +285,32 @@ class CorrelationMatrixCallback(Callback):
                         save_path=plot_folder
                         / f"{space_name}_{method}_correlation_with_FET_Et.csv",
                     )
+
+            for method in self.correlation_methods:
+                corr_before = correlations.get(("input", method))
+                corr_after = correlations.get(("reconstruction", method))
+                if corr_before is None or corr_after is None:
+                    continue
+
+                correlation_change = corr_after.abs() - corr_before.abs()
+                change_stem = (
+                    f"abs_reconstruction_minus_input_{method}_correlation_matrix"
+                )
+                correlation_change.to_csv(plot_folder / f"{change_stem}.csv")
+
+                method_name = method.capitalize()
+                matrix.plot(
+                    data=correlation_change.to_dict(orient="index"),
+                    value_name=(
+                        f"Change in {method_name} correlation: "
+                        "|corr_after| - |corr_before|"
+                    ),
+                    save_dir=plot_folder,
+                    cmap="coolwarm",
+                    vmin=-1.0,
+                    vmax=1.0,
+                    filename=f"{change_stem}.png",
+                )
 
             utils.mlflow.log_plots_to_mlflow(
                 trainer,

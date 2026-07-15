@@ -7,6 +7,7 @@ import numpy as np
 import matplotlib.pyplot as plt
 import matplotlib.colors as colors
 import mplhep as hep
+from mpl_toolkits.axes_grid1 import make_axes_locatable
 
 
 def plot(
@@ -38,8 +39,8 @@ def plot(
     mat = np.array([[data[r][c] for c in cols] for r in rows], dtype=float)
     n_rows, n_cols = mat.shape
 
-    cell_size = 0.6  # inches per cell (tune if desired)
-    fig_size_max = 6
+    cell_size = 0.72  # 20% larger than the previous 0.6-inch cells
+    fig_size_max = 9.6
     fig_w = max(fig_size_max, n_cols * cell_size)
     fig_h = max(fig_size_max, n_rows * cell_size)
 
@@ -47,16 +48,23 @@ def plot(
     im = ax.imshow(mat, aspect="auto", cmap=cmap, vmin=vmin, vmax=vmax)
 
     # axis labels
+    label_fontsize = max(8, min(14, int(180 / max(n_rows, n_cols))))
     ax.set_xticks(range(len(cols)))
     ax.set_yticks(range(len(rows)))
-    ax.set_xticklabels([str(c) for c in cols], rotation=90)
-    ax.set_yticklabels([str(r) for r in rows])
+    ax.set_xticklabels(
+        [str(c) for c in cols], rotation=90, fontsize=label_fontsize
+    )
+    ax.set_yticklabels([str(r) for r in rows], fontsize=label_fontsize)
     ax.set_title(value_name, pad=20)
-
-    ax.set_xticks(np.arange(-0.5, n_cols, 1), minor=True)
-    ax.set_yticks(np.arange(-0.5, n_rows, 1), minor=True)
-    ax.grid(which="minor", color="black", linestyle="-", linewidth=0.5)
-    ax.tick_params(which="minor", bottom=False, left=False)
+    ax.tick_params(
+        axis="both",
+        which="both",
+        length=0,
+        top=False,
+        right=False,
+        bottom=False,
+        left=False,
+    )
 
     # Heuristic: scale font size with the grid size
     fontsize = max(6, min(12, int(180 / max(n_rows, n_cols))))
@@ -67,16 +75,18 @@ def plot(
         for j in range(n_cols):
             val = mat[i, j]
             if np.isnan(val):
-                continue
-
-            red, green, blue, _ = im.cmap(norm(val))
-            luminance = 0.2126 * red + 0.7152 * green + 0.0722 * blue
-            txt_color = "black" if luminance > 0.5 else "white"
+                text = "NaN"
+                txt_color = "black"
+            else:
+                text = fmt.format(val)
+                red, green, blue, _ = im.cmap(norm(val))
+                luminance = 0.2126 * red + 0.7152 * green + 0.0722 * blue
+                txt_color = "black" if luminance > 0.5 else "white"
 
             ax.text(
                 j,
                 i,
-                fmt.format(val),
+                text,
                 ha="center",
                 va="center",
                 fontsize=fontsize,
@@ -85,7 +95,11 @@ def plot(
             )
 
     # colorbar
-    fig.colorbar(im, ax=ax)
+    divider = make_axes_locatable(ax)
+    colorbar_ax = divider.append_axes("right", size="5%", pad=0.15)
+    colorbar = fig.colorbar(im, cax=colorbar_ax)
+    colorbar.ax.minorticks_off()
+    colorbar.ax.tick_params(which="both", length=0)
 
     if filename is None:
         filename = sanitize_filename(f"{value_name}")
@@ -93,6 +107,16 @@ def plot(
     fig.savefig(save_dir / filename, bbox_inches="tight")
     fig.clear()
     plt.close(fig)
+
+
+
+
+
+
+
+
+
+
 
 
 if __name__ == "__main__":

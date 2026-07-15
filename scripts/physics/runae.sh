@@ -14,7 +14,7 @@
 python3 src/train.py \
     paths.raw_data_dir=../../03_Data/adl1t_data/parquet_files \
     experiment=physics/ae \
-    run_name="Bernoulli-MI_No_FET_Et_Bins_50_Gamma_0.1_Run_9" \
+    run_name="Bernoulli-MI_No_FET_Et_Bins_50_Gamma_0.1_Run_12" \
     logger=mlflow \
     algorithm.optimizer.lr=0.0019859329798336714 \
     algorithm.delta=1.0 \
@@ -25,7 +25,7 @@ python3 src/train.py \
     algorithm.optimizer.weight_decay=1e-06 \
     algorithm.encoder.nodes='[64,32,8]' \
     algorithm.input_noise_std=0.0 \
-    trainer.max_epochs=1 \
+    trainer.max_epochs=3 \
     trainer=gpu \
     trainer.devices='[0]'
 

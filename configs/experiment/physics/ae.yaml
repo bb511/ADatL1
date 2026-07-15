@@ -65,6 +65,12 @@ algorithm:
 
 callbacks:
   log_data_mlflow: null
+  losses:
+    _target_: src.evaluation.callbacks.losses.LossesCallback
+    gamma: ${algorithm.mi_gamma}
+    name: losses
+    log_raw_mlflow: true
+
   anomaly_eff:
     _target_: src.callbacks.efficiency.AnomalyEfficiencyCallback
     output_name: 'ascore/full'

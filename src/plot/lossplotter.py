@@ -5,6 +5,13 @@ from pathlib import Path
 from src.analysis.dataloader import DataLoader
 from datetime import datetime
 
+LOSS_COLORS = {
+    "Loss_reco": "firebrick",
+    "Loss_mi": "royalblue",
+    "Loss_total": "darkgray",
+}
+
+
 @dataclass(frozen=True)
 class MetricSpecs:
     path: str | Path
@@ -36,7 +43,6 @@ class Plotter():
         print(f"Creating plot '{title}' with {len(self.metrics)} metric(s).")
         self._find_max()
         self._find_min()
-        print(f"Global normalization range: min={self.minimum}, max={self.maximum}.")
 
 
         runs_normalized = []
@@ -56,12 +62,16 @@ class Plotter():
                     f"Expected {self.epochs} epochs for '{name}', "
                     f"but found {len(values)} values."
                 )
-            print(f"Plotting '{name}' with {len(values)} values.")
 
-            if "Loss_reco: Gamma = 0.0 Run 2" in name:
-                plt.plot(epochs, values, label=name, marker="*")
-            else:
-                plt.plot(epochs, values, label=name)
+            color = next(
+                (
+                    loss_color
+                    for loss_name, loss_color in LOSS_COLORS.items()
+                    if loss_name in name
+                ),
+                None,
+            )
+            plt.plot(epochs, values, color=color, label=name)
 
 
         plt.title(title)

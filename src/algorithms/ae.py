@@ -248,32 +248,13 @@ class AE(ADLightningModule):
         with torch.no_grad():
             perm = torch.randperm(sensitive.shape[0], device=sensitive.device)
             sensitive_perm = sensitive[perm]
-            mi_loss_permuted = self.mi_loss(latent=z.detach(), sensitive=sensitive_perm)
         gamma_mi_loss = self.mi_gamma * mi_loss
 
         total_loss = reco_loss.mean() + gamma_mi_loss
 
         with torch.no_grad():
-            z_detached = z.detach()
-            probs = self.bernoulli.probabilities(z_detached)
 
             reco_loss_mean = reco_loss.mean().detach()
-            # gamma_mi_loss_detached = gamma_mi_loss.detach()
-
-            # mi_to_reco_ratio = gamma_mi_loss_detached / reco_loss_mean.clamp_min(1e-12)
-
-            latent_mean = z_detached.mean()
-            latent_std = z_detached.std(unbiased=False)
-            # latent_abs_mean = z_detached.abs().mean()
-            # latent_abs_max = z_detached.abs().max()
-
-            prob_mean = probs.mean()
-            prob_std = probs.std(unbiased=False)
-            # prob_min = probs.min()
-            # prob_max = probs.max()
-
-            # prob_saturation_low = (probs <= 1e-3).float().mean()
-            # prob_saturation_high = (probs >= 1.0 - 1e-3).float().mean()
 
         # The anomaly score is expected to be a distribution over events.
         # Allow subclasses to override `ascore`; otherwise fall back to
@@ -308,12 +289,6 @@ class AE(ADLightningModule):
                 "loss/mean": total_loss.detach(),
                 "loss/reco": reco_loss.mean().detach(),
                 "loss/mi": mi_loss.detach(),
-                # "loss/gamma_mi": gamma_mi_loss.detach(),
-
-                # Binner diagnostics:
-                # "sensitive/bin_min": sensitive.min().float().detach(),
-                # "sensitive/bin_max": sensitive.max().float().detach(),
-                # "sensitive/bin_mean": sensitive.float().mean().detach(),
 
                 # Anomaly score logging:
                 "ascore/operational": operational_ascore,
@@ -323,22 +298,6 @@ class AE(ADLightningModule):
                 "loss/full": reco_loss.detach(),
                 "ascore/full": ascore.detach(),
                 "reconstructed_data": reconstruction.detach(),
-
-                # "loss/mi_to_reco_ratio": mi_to_reco_ratio,
-
-                "latent/mean": latent_mean,
-                "latent/std": latent_std,
-                # "latent/abs_mean": latent_abs_mean,
-                # "latent/abs_max": latent_abs_max,
-
-                "bernoulli_prob/mean": prob_mean,
-                "bernoulli_prob/std": prob_std,
-                # "bernoulli_prob/min": prob_min,
-                # "bernoulli_prob/max": prob_max,
-                # "bernoulli_prob/saturation_low": prob_saturation_low,
-                # "bernoulli_prob/saturation_high": prob_saturation_high,
-                # "loss/mi_permuted": mi_loss_permuted.detach(),
-                # "loss/mi_minus_permuted": mi_loss.detach() - mi_loss_permuted.detach(),
             }
 
     def outlog(self, outdict: dict) -> dict:
@@ -348,31 +307,9 @@ class AE(ADLightningModule):
             "loss_mean": outdict.get("loss/mean"),
             "loss_reco": outdict.get("loss/reco"),
             "loss_mi": outdict.get("loss/mi"),
-            # "loss_gamma_mi": outdict.get("loss/gamma_mi"),
-
-            # Sensitive-bin diagnostics:
-            # "sensitive_bin_min": outdict.get("sensitive/bin_min"),
-            # "sensitive_bin_max": outdict.get("sensitive/bin_max"),
-            # "sensitive_bin_mean": outdict.get("sensitive/bin_mean"),
 
             # Existing anomaly-score logging:
             "ascore_operational": outdict.get("ascore/operational"),
-
-            # "loss_mi_to_reco_ratio": outdict.get("loss/mi_to_reco_ratio"),
-
-            "latent_mean": outdict.get("latent/mean"),
-            "latent_std": outdict.get("latent/std"),
-            # "latent_abs_mean": outdict.get("latent/abs_mean"),
-            # "latent_abs_max": outdict.get("latent/abs_max"),
-
-            "bernoulli_prob_mean": outdict.get("bernoulli_prob/mean"),
-            "bernoulli_prob_std": outdict.get("bernoulli_prob/std"),
-            # "bernoulli_prob_min": outdict.get("bernoulli_prob/min"),
-            # "bernoulli_prob_max": outdict.get("bernoulli_prob/max"),
-            # "bernoulli_prob_saturation_low": outdict.get("bernoulli_prob/saturation_low"),
-            # "bernoulli_prob_saturation_high": outdict.get("bernoulli_prob/saturation_high"),
-            # "loss_mi_permuted": outdict.get("loss/mi_permuted"),
-            # "loss_mi_minus_permuted": outdict.get("loss/mi_minus_permuted"),
         }
     
     def _fit_sensitive_binner(self) -> None:

@@ -13,14 +13,15 @@ log = pylogger.RankedLogger(__name__, rank_zero_only=True)
 
 
 class LossesCallback(Callback):
-    """Plot normalized MI, reconstruction, and total training losses together.
+    """Plot MI, reconstruction, and total training losses together.
 
     At the end of training, the callback reads ``train/loss_mi``,
     ``train/loss_reco``, and ``train/loss`` from the active MLflow run. Each history
-    is normalized independently to [0, 1], plotted as a line without point markers,
-    saved as a PNG in the run's checkpoint plot folder, and logged as an MLflow run
-    artifact. ``train/loss`` is labelled ``Loss_total`` in the figure because it is
-    the total objective used for backpropagation.
+    is plotted independently normalized to [0, 1]. A second figure shows the original
+    reconstruction and total losses together with the gamma-weighted MI contribution,
+    ``gamma * loss_mi``. The line-only figures are saved as PNGs in the run's
+    checkpoint plot folder and logged as MLflow run artifacts. ``train/loss`` is
+    labelled ``Loss_total`` because it is the total objective used for backpropagation.
 
     :param include_loss_mi: Include the mutual-information loss.
     :param include_loss_reco: Include the reconstruction loss.
@@ -66,7 +67,12 @@ class LossesCallback(Callback):
             )
             return
 
-        histories = {}
+        gamma = self._resolve_gamma(pl_module)
+        gamma_title = f"{gamma:g}"
+        raw_histories = {}
+        normalized_histories = {}
+        raw_colors = {}
+        normalized_colors = {}
         for metric_name, label, enabled in self._configured_metrics():
             if not enabled:
                 continue
@@ -83,30 +89,47 @@ class LossesCallback(Callback):
 
             values = self._history_values(metric_history)
             normalized = self._normalize(values)
-            histories[label] = {
+            raw_label = "Loss_mi * gamma" if metric_name == "loss_mi" else label
+            raw_values = values * gamma if metric_name == "loss_mi" else values
+            raw_histories[raw_label] = {
+                epoch: float(value) for epoch, value in enumerate(raw_values, start=1)
+            }
+            normalized_histories[label] = {
                 epoch: float(value)
                 for epoch, value in enumerate(normalized, start=1)
             }
+            raw_colors[raw_label] = LOSS_COLORS[label]
+            normalized_colors[label] = LOSS_COLORS[label]
 
-        gamma = self._resolve_gamma(pl_module)
-        title = f"Normalized training losses (gamma = {gamma})"
         plot_folder = self._resolve_plot_folder(trainer)
-        plot_path = scatter.plot_lines(
-            data=histories,
-            xlabel="Epoch",
-            ylabel="Normalized loss",
-            title=title,
-            save_dir=plot_folder,
-            colors={label: LOSS_COLORS[label] for label in histories},
-            filename="training_losses.png",
-        )
+        plot_paths = [
+            scatter.plot_lines(
+                data=normalized_histories,
+                xlabel="Epoch",
+                ylabel="Normalized loss",
+                title=f"Normalized training losses (gamma = {gamma_title})",
+                save_dir=plot_folder,
+                colors=normalized_colors,
+                filename="training_losses.png",
+            ),
+            scatter.plot_lines(
+                data=raw_histories,
+                xlabel="Epoch",
+                ylabel="Loss",
+                title=f"Unnormalized training losses (gamma = {gamma_title})",
+                save_dir=plot_folder,
+                colors=raw_colors,
+                filename="training_losses_unnormalized.png",
+            ),
+        ]
 
         if self.log_raw_mlflow:
-            mlflow_logger.experiment.log_artifact(
-                run_id=mlflow_logger.run_id,
-                local_path=str(plot_path),
-                artifact_path=self.name,
-            )
+            for plot_path in plot_paths:
+                mlflow_logger.experiment.log_artifact(
+                    run_id=mlflow_logger.run_id,
+                    local_path=str(plot_path),
+                    artifact_path=self.name,
+                )
 
     def _configured_metrics(self) -> tuple[tuple[str, str, bool], ...]:
         """Map stored MLflow metric names to the labels shown in the plot."""
@@ -136,16 +159,19 @@ class LossesCallback(Callback):
             return np.zeros_like(values)
         return (values - minimum) / span
 
-    def _resolve_gamma(self, pl_module) -> str:
-        """Resolve and format gamma for the plot title."""
+    def _resolve_gamma(self, pl_module) -> float:
+        """Resolve gamma for the weighted MI curve and plot titles."""
         gamma = self.gamma
         if gamma is None:
             gamma = getattr(pl_module, "mi_gamma", None)
         if gamma is None:
             gamma = getattr(getattr(pl_module, "hparams", None), "mi_gamma", None)
         if gamma is None:
-            return "unknown"
-        return f"{float(gamma):g}"
+            raise RuntimeError(
+                "LossesCallback could not resolve gamma from its configuration or "
+                "the Lightning module."
+            )
+        return float(gamma)
 
     def _resolve_plot_folder(self, trainer) -> Path:
         """Place the plot under the current run's checkpoint plot directory."""

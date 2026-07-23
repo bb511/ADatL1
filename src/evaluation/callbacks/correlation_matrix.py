@@ -254,7 +254,10 @@ class CorrelationMatrixCallback(Callback):
                     continue
 
                 for method in self.correlation_methods:
-                    corr = clean_df.corr(method=method)
+                    corr = self._exclude_nan_variables(clean_df.corr(method=method))
+                    if corr.empty:
+                        continue
+
                     correlations[(space_name, method)] = corr
 
                     method_name = method.capitalize()
@@ -287,7 +290,18 @@ class CorrelationMatrixCallback(Callback):
                 if corr_before is None or corr_after is None:
                     continue
 
-                correlation_change = corr_after.abs() - corr_before.abs()
+                common_labels = [
+                    label for label in corr_before.index if label in corr_after.index
+                ]
+                if not common_labels:
+                    continue
+
+                correlation_change = corr_after.loc[common_labels, common_labels].abs()
+                correlation_change -= corr_before.loc[common_labels, common_labels].abs()
+                correlation_change = self._exclude_nan_variables(correlation_change)
+                if correlation_change.empty:
+                    continue
+
                 change_stem = (
                     f"abs_reconstruction_minus_input_{method}_correlation_matrix"
                 )
@@ -483,6 +497,18 @@ class CorrelationMatrixCallback(Callback):
             label = item["label"]
             columns[label] = np.concatenate([table[label] for table in tables], axis=0)
         return pd.DataFrame(columns)
+
+    @staticmethod
+    def _exclude_nan_variables(corr: pd.DataFrame) -> pd.DataFrame:
+        """Remove variables that would leave NaN values in a correlation matrix."""
+        corr = corr.replace([np.inf, -np.inf], np.nan)
+
+        while corr.isna().to_numpy().any():
+            nan_counts = corr.isna().sum(axis=0) + corr.isna().sum(axis=1)
+            label = nan_counts.idxmax()
+            corr = corr.drop(index=label, columns=label)
+
+        return corr
 
     def _write_metadata(self, plot_folder: Path, dset_name: str):
         """Write a small text file documenting how the table was produced."""

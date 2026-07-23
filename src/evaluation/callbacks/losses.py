@@ -18,10 +18,11 @@ class LossesCallback(Callback):
     At the end of training, the callback reads ``train/loss_mi``,
     ``train/loss_reco``, and ``train/loss`` from the active MLflow run. Each history
     is plotted independently normalized to [0, 1]. A second figure shows the original
-    reconstruction and total losses together with the gamma-weighted MI contribution,
-    ``gamma * loss_mi``. The line-only figures are saved as PNGs in the run's
-    checkpoint plot folder and logged as MLflow run artifacts. ``train/loss`` is
-    labelled ``Loss_total`` because it is the total objective used for backpropagation.
+    reconstruction loss and the gamma-weighted MI contribution, ``gamma * loss_mi``,
+    on the left y-axis, with total loss on a separate right y-axis. The line-only
+    figures are saved as PNGs in the run's checkpoint plot folder and logged as
+    MLflow run artifacts. ``train/loss`` is labelled ``Loss_total`` because it is the
+    total objective used for backpropagation.
 
     :param include_loss_mi: Include the mutual-information loss.
     :param include_loss_reco: Include the reconstruction loss.
@@ -102,6 +103,16 @@ class LossesCallback(Callback):
             normalized_colors[label] = LOSS_COLORS[label]
 
         plot_folder = self._resolve_plot_folder(trainer)
+        raw_component_histories = {
+            label: history
+            for label, history in raw_histories.items()
+            if label != "Loss_total"
+        }
+        raw_total_history = {
+            label: history
+            for label, history in raw_histories.items()
+            if label == "Loss_total"
+        }
         plot_paths = [
             scatter.plot_lines(
                 data=normalized_histories,
@@ -111,15 +122,19 @@ class LossesCallback(Callback):
                 save_dir=plot_folder,
                 colors=normalized_colors,
                 filename="training_losses.png",
+                alphas={"Loss_total": 0.8},
             ),
             scatter.plot_lines(
-                data=raw_histories,
+                data=raw_component_histories,
                 xlabel="Epoch",
-                ylabel="Loss",
+                ylabel="Loss_mi * gamma & Loss_reco",
                 title=f"Unnormalized training losses (gamma = {gamma_title})",
                 save_dir=plot_folder,
                 colors=raw_colors,
                 filename="training_losses_unnormalized.png",
+                right_axis_data=raw_total_history,
+                right_ylabel="Loss_total",
+                alphas={"Loss_total": 0.8},
             ),
         ]
 

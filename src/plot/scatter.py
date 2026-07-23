@@ -77,37 +77,59 @@ def plot_lines(
     save_dir: Path,
     colors: dict[str, str] | None = None,
     filename: str | None = None,
+    right_axis_data: dict[str, dict[int, float]] | None = None,
+    right_ylabel: str | None = None,
+    alphas: dict[str, float] | None = None,
 ) -> Path:
     """Plot multiple labelled series as lines without point markers.
 
     ``data`` maps each legend label to an ``x: y`` mapping. ``colors`` optionally
-    maps those same labels to Matplotlib colors. The plot is saved as a PNG and the
+    maps those same labels to Matplotlib colors. ``right_axis_data`` optionally maps
+    lines to a secondary y-axis, labelled with ``right_ylabel``. ``alphas``
+    optionally maps labels to line opacities. The plot is saved as a PNG and the
     resulting path is returned to the caller.
     """
-    if not data:
+    if not data and not right_axis_data:
         raise ValueError("Cannot plot an empty collection of lines.")
+    if right_axis_data and right_ylabel is None:
+        raise ValueError("A right y-axis label is required for secondary-axis data.")
 
     plt.style.use(hep.style.CMS)
     save_dir = Path(save_dir)
     save_dir.mkdir(parents=True, exist_ok=True)
 
     fig, ax = plt.subplots(figsize=(10, 4), dpi=120)
-    for label, values in data.items():
-        if not values:
-            raise ValueError(f"Cannot plot empty data for {label!r}.")
 
-        ax.plot(
-            list(values.keys()),
-            list(values.values()),
-            color=None if colors is None else colors.get(label),
-            label=label,
-            linewidth=1.8,
-        )
+    def plot_series(axis, series: dict[str, dict[int, float]]) -> None:
+        for label, values in series.items():
+            if not values:
+                raise ValueError(f"Cannot plot empty data for {label!r}.")
+
+            axis.plot(
+                list(values.keys()),
+                list(values.values()),
+                color=None if colors is None else colors.get(label),
+                label=label,
+                linewidth=1.8,
+                alpha=1.0 if alphas is None else alphas.get(label, 1.0),
+            )
+
+    plot_series(ax, data)
+    right_ax = None
+    if right_axis_data:
+        right_ax = ax.twinx()
+        plot_series(right_ax, right_axis_data)
 
     ax.set_xlabel(xlabel)
     ax.set_ylabel(ylabel)
     ax.set_title(title, pad=20)
-    ax.legend()
+    if right_ax is None:
+        ax.legend()
+    else:
+        right_ax.set_ylabel(right_ylabel)
+        left_handles, left_labels = ax.get_legend_handles_labels()
+        right_handles, right_labels = right_ax.get_legend_handles_labels()
+        ax.legend(left_handles + right_handles, left_labels + right_labels)
 
     if filename is None:
         filename = sanitize_filename(title).replace(" ", "_")

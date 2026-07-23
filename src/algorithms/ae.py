@@ -139,41 +139,7 @@ class AE(ADLightningModule):
         if m is not None:
             m = torch.flatten(m, start_dim=1).float()
 
-        control_required = (
-            getattr(self, "control_object_feature_map", None) is not None
-            and getattr(self, "object_feature_map", None) is not None
-            and self.control_object_feature_map != self.object_feature_map
-        )
-
-        if b.control_x is None:
-            if control_required:
-                raise RuntimeError(
-                    "Batch does not contain control_x, but control_object_feature_map "
-                    "differs from object_feature_map. The MI sensitive variable cannot be "
-                    "extracted safely. Check that L1ADDataset.__iter__ yields "
-                    "(x, mask, l1bit, y, control_x, control_mask) when control_data is set."
-                )
-
-            control_x = b.x
-            control_mask = b.mask
-        else:
-            control_x = b.control_x
-            control_mask = b.control_mask
-
-        expected_control_dim = self._num_flat_features_from_map(
-            getattr(self, "control_object_feature_map", None)
-        )
-
-        if expected_control_dim is not None:
-            actual_control_dim = torch.flatten(control_x, start_dim=1).shape[1]
-
-            if actual_control_dim != expected_control_dim:
-                raise RuntimeError(
-                    "control_x does not match control_object_feature_map. "
-                    f"Expected {expected_control_dim} flattened features from the control map, "
-                    f"but got {actual_control_dim}. This usually means the MI target is being "
-                    "read from the model-input tensor instead of the full/control tensor."
-                )
+        control_x, control_mask = self._get_sensitive_inputs(b)
 
 
         x_noisy = x
@@ -187,62 +153,7 @@ class AE(ADLightningModule):
         z, reconstruction = self.forward(x_noisy)
         reco_loss = self.reco_loss(target=x, reco=reconstruction, mask=m)
 
-        # Sanity check / debug trace, only used once
-        #TODO: Delete
-        if self.training and self.global_step < 3:
-            x_flat = torch.flatten(b.x, start_dim=1)
-            control_flat = torch.flatten(control_x, start_dim=1)
-
-            print("[DEBUG][AE] model input shape:", tuple(x_flat.shape))
-            print("[DEBUG][AE] control_x shape:", tuple(control_flat.shape))
-            print("[DEBUG][AE] b.control_x is None:", b.control_x is None)
-
-            print(
-                "[DEBUG][AE] FET.Et in model map:",
-                "FET" in self.object_feature_map
-                and "Et" in self.object_feature_map.get("FET", {}),
-            )
-            print(
-                "[DEBUG][AE] FET.Et in control map:",
-                "FET" in self.control_object_feature_map
-                and "Et" in self.control_object_feature_map.get("FET", {}),
-            )
-
-            fet_values = self.sensitive_binner.extract_values(
-                x=control_x,
-                mask=control_mask,
-                object_feature_map=self.control_object_feature_map,
-                normalizer=None,
-            )
-
-            finite = torch.isfinite(fet_values)
-            print("[DEBUG][AE] FET.Et values shape:", tuple(fet_values.shape))
-            print("[DEBUG][AE] FET.Et finite:", int(finite.sum()), "/", fet_values.numel())
-            print("[DEBUG][AE] FET.Et NaNs:", int(torch.isnan(fet_values).sum()))
-            print("[DEBUG][AE] FET.Et infs:", int(torch.isinf(fet_values).sum()))
-
-            if finite.any():
-                vals = fet_values[finite]
-                print("[DEBUG][AE] FET.Et min:", float(vals.min()))
-                print("[DEBUG][AE] FET.Et max:", float(vals.max()))
-                print("[DEBUG][AE] FET.Et mean:", float(vals.mean()))
-                print("[DEBUG][AE] FET.Et std:", float(vals.std(unbiased=False)))
-                print("[DEBUG][AE] FET.Et unique first 4096:", int(torch.unique(vals[:4096]).numel()))
-
         sensitive = self._compute_sensitive_bins(x=control_x, mask=control_mask)
-
-        # Sanity check / debug trace, only used once
-        #TODO: Delete
-        if self.training and self.global_step < 3:
-            unique, counts = torch.unique(sensitive.detach().cpu(), return_counts=True)
-            print("[DEBUG][AE] sensitive bin counts:", dict(zip(unique.tolist(), counts.tolist())))
-
-        if self.training and self.global_step < 3:
-            unique, counts = torch.unique(sensitive.detach().cpu(), return_counts=True)
-            print(
-                f"[MI] step={self.global_step} sensitive bins: "
-                f"{dict(zip(unique.tolist(), counts.tolist()))}"
-            )
 
         mi_loss = self.mi_loss(latent=z, sensitive=sensitive)
         with torch.no_grad():
@@ -383,6 +294,65 @@ class AE(ADLightningModule):
             object_feature_map=self.control_object_feature_map,
             normalizer=normalizer,
         )
+
+    def extract_sensitive_values(self, batch) -> torch.Tensor:
+        """Extract the MI-sensitive values from a training batch before binning."""
+        batch_view = unpack_batch(batch)
+        control_x, control_mask = self._get_sensitive_inputs(batch_view)
+        trainer = getattr(self, "trainer", None)
+        datamodule = getattr(trainer, "datamodule", None) if trainer is not None else None
+        normalizer = (
+            getattr(datamodule, "normalizer", None)
+            if datamodule is not None
+            else None
+        )
+
+        return self.sensitive_binner.extract_values(
+            x=control_x,
+            mask=control_mask,
+            object_feature_map=self.control_object_feature_map,
+            normalizer=normalizer,
+        )
+
+    def _get_sensitive_inputs(self, batch_view):
+        """Select and validate the same control tensor used by the MI loss."""
+        control_required = (
+            getattr(self, "control_object_feature_map", None) is not None
+            and getattr(self, "object_feature_map", None) is not None
+            and self.control_object_feature_map != self.object_feature_map
+        )
+
+        if batch_view.control_x is None:
+            if control_required:
+                raise RuntimeError(
+                    "Batch does not contain control_x, but control_object_feature_map "
+                    "differs from object_feature_map. The MI sensitive variable cannot be "
+                    "extracted safely. Check that L1ADDataset.__iter__ yields "
+                    "(x, mask, l1bit, y, control_x, control_mask) when control_data is set."
+                )
+
+            control_x = batch_view.x
+            control_mask = batch_view.mask
+        else:
+            control_x = batch_view.control_x
+            control_mask = batch_view.control_mask
+
+        expected_control_dim = self._num_flat_features_from_map(
+            getattr(self, "control_object_feature_map", None)
+        )
+
+        if expected_control_dim is not None:
+            actual_control_dim = torch.flatten(control_x, start_dim=1).shape[1]
+
+            if actual_control_dim != expected_control_dim:
+                raise RuntimeError(
+                    "control_x does not match control_object_feature_map. "
+                    f"Expected {expected_control_dim} flattened features from the control map, "
+                    f"but got {actual_control_dim}. This usually means the MI target is being "
+                    "read from the model-input tensor instead of the full/control tensor."
+                )
+
+        return control_x, control_mask
 
     def _assert_sensitive_not_in_model_input(self) -> None:
         """Fail fast if the MI target leaks into the AE input feature map."""

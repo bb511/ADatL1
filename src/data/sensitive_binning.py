@@ -140,6 +140,16 @@ class FixedQuantileSensitiveBinner:
             mask=mask,
         )
 
+        return self.transform_values(values)
+
+    def transform_values(self, values: torch.Tensor) -> torch.Tensor:
+        """Convert already extracted sensitive values using the fixed bin edges."""
+        if self.bin_edges is None:
+            raise RuntimeError(
+                f"FixedQuantileSensitiveBinner for {self.variable!r} is not fitted. "
+                "Call fit(...) once on the training split before training."
+            )
+
         edges = self.bin_edges.to(device=values.device, dtype=values.dtype)
         labels = torch.bucketize(values.detach().flatten(), edges)
 

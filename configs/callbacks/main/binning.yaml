@@ -1,0 +1,7 @@
+# @package callbacks.main
+
+_target_: src.callbacks.binning.BinningDiagnosticsCallback
+enabled: true
+epochs: [0]
+batch_indices: [0, 100, 400, 764]
+output_subdir: mi_diagnostics

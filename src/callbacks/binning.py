@@ -1,12 +1,15 @@
 """Lightweight training diagnostics for fixed MI-sensitive binning."""
 
+import shutil
 from collections.abc import Sequence
 from pathlib import Path
 
 import numpy as np
 import torch
 from pytorch_lightning import Callback
+from pytorch_lightning.loggers import MLFlowLogger
 
+from src.callbacks.utils import mlflow_plot_gallery
 from src.plot.histogram import (
     plot_categorical_bin_counts,
     plot_minibatch_scalar_histogram,
@@ -22,6 +25,9 @@ class BinningDiagnosticsCallback(Callback):
         epochs: Sequence[int] = (0,),
         batch_indices: Sequence[int] = (0, 100, 400, 764),
         output_subdir: str = "mi_diagnostics",
+        checkpoint_root_dir: str | Path | None = None,
+        log_to_mlflow: bool = False,
+        mlflow_artifact_path: str | None = None,
     ) -> None:
         super().__init__()
         self.enabled = bool(enabled)
@@ -36,6 +42,15 @@ class BinningDiagnosticsCallback(Callback):
                 "output_subdir must be a relative path within the run output."
             )
         self.output_subdir = subdir
+        self.checkpoint_root_dir = (
+            Path(checkpoint_root_dir) if checkpoint_root_dir is not None else None
+        )
+        self.log_to_mlflow = bool(log_to_mlflow)
+        self.mlflow_artifact_path = (
+            mlflow_artifact_path
+            if mlflow_artifact_path is not None
+            else self.output_subdir.as_posix()
+        )
 
         self._unique_counts: list[int] = []
         self._nominal_batch_size: int | None = None
@@ -104,7 +119,7 @@ class BinningDiagnosticsCallback(Callback):
             f"n{minibatch_size:06d}.png"
         )
 
-        plot_categorical_bin_counts(
+        output_path = plot_categorical_bin_counts(
             observed_counts,
             self._output_dir(trainer) / filename,
             title=title,
@@ -113,6 +128,7 @@ class BinningDiagnosticsCallback(Callback):
             xlabel="Bin ID",
             ylabel="Number of events in minibatch",
         )
+        self._publish_plot(trainer, output_path)
 
     def on_train_epoch_end(self, trainer, pl_module) -> None:
         """Render the per-minibatch raw-value-diversity distribution."""
@@ -137,7 +153,7 @@ class BinningDiagnosticsCallback(Callback):
             f"batches{num_minibatches:06d}_nominal_n{nominal_batch_size:06d}.png"
         )
 
-        plot_minibatch_scalar_histogram(
+        output_path = plot_minibatch_scalar_histogram(
             self._unique_counts,
             self._output_dir(trainer) / filename,
             title=title,
@@ -147,6 +163,8 @@ class BinningDiagnosticsCallback(Callback):
             ),
             ylabel="Number of minibatches",
         )
+        self._publish_plot(trainer, output_path)
+        self._log_mlflow_gallery(trainer)
         self._unique_counts = []
 
     def _is_scheduled_epoch(self, trainer) -> bool:
@@ -158,6 +176,66 @@ class BinningDiagnosticsCallback(Callback):
 
     def _output_dir(self, trainer) -> Path:
         return Path(trainer.default_root_dir) / self.output_subdir
+
+    def _checkpoint_output_dir(self) -> Path | None:
+        if self.checkpoint_root_dir is None:
+            return None
+        return self.checkpoint_root_dir / self.output_subdir
+
+    def _publish_plot(self, trainer, output_path: Path) -> None:
+        """Copy a plot to checkpoints and upload it as an MLflow artifact."""
+        artifact_source = output_path
+        checkpoint_output_dir = self._checkpoint_output_dir()
+        if checkpoint_output_dir is not None:
+            checkpoint_output_dir.mkdir(parents=True, exist_ok=True)
+            artifact_source = checkpoint_output_dir / output_path.name
+            if output_path.resolve() != artifact_source.resolve():
+                shutil.copy2(output_path, artifact_source)
+
+        if not self.log_to_mlflow:
+            return
+
+        mlflow_logger = self._get_mlflow_logger(trainer)
+        if mlflow_logger is None:
+            return
+
+        mlflow_logger.experiment.log_artifact(
+            run_id=mlflow_logger.run_id,
+            local_path=str(artifact_source),
+            artifact_path=self.mlflow_artifact_path,
+        )
+
+    def _log_mlflow_gallery(self, trainer) -> None:
+        """Upload an HTML gallery containing all diagnostics generated so far."""
+        if not self.log_to_mlflow:
+            return
+
+        mlflow_logger = self._get_mlflow_logger(trainer)
+        if mlflow_logger is None:
+            return
+
+        plot_dir = self._checkpoint_output_dir() or self._output_dir(trainer)
+        html_gallery = mlflow_plot_gallery.build_html(
+            plot_dir,
+            title="MI Binning Diagnostics",
+        )
+        mlflow_logger.experiment.log_text(
+            run_id=mlflow_logger.run_id,
+            text=html_gallery,
+            artifact_file=str(Path(self.mlflow_artifact_path) / "index.html"),
+        )
+
+    @staticmethod
+    def _get_mlflow_logger(trainer) -> MLFlowLogger | None:
+        logger = getattr(trainer, "logger", None)
+        if isinstance(logger, MLFlowLogger):
+            return logger
+
+        for candidate in getattr(trainer, "loggers", []) or []:
+            if isinstance(candidate, MLFlowLogger):
+                return candidate
+
+        return None
 
     @staticmethod
     def _get_nominal_batch_size(trainer) -> int | None:

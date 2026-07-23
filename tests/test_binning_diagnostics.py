@@ -161,6 +161,73 @@ def test_callback_is_inactive_outside_its_schedule(tmp_path: Path) -> None:
     assert not (tmp_path / "mi_diagnostics").exists()
 
 
+def test_callback_copies_plots_to_checkpoints_and_logs_mlflow(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    class _Experiment:
+        def __init__(self) -> None:
+            self.artifacts = []
+            self.texts = []
+
+        def log_artifact(self, **kwargs) -> None:
+            self.artifacts.append(kwargs)
+
+        def log_text(self, **kwargs) -> None:
+            self.texts.append(kwargs)
+
+    experiment = _Experiment()
+    mlflow_logger = SimpleNamespace(run_id="run-123", experiment=experiment)
+    checkpoint_root = tmp_path / "checkpoints" / "physics_ae_models" / "run-123"
+    callback = BinningDiagnosticsCallback(
+        enabled=True,
+        epochs=[0],
+        batch_indices=[0],
+        checkpoint_root_dir=checkpoint_root,
+        log_to_mlflow=True,
+        mlflow_artifact_path="mi_diagnostics",
+    )
+    monkeypatch.setattr(
+        callback,
+        "_get_mlflow_logger",
+        lambda trainer: mlflow_logger,
+    )
+    trainer = _trainer(tmp_path)
+    module = _DiagnosticModule()
+
+    callback.on_train_epoch_start(trainer, module)
+    callback.on_train_batch_end(
+        trainer,
+        module,
+        outputs=None,
+        batch={"values": torch.tensor([0.2, 0.2, 2.5, 2.5, 2.5])},
+        batch_idx=0,
+    )
+    callback.on_train_epoch_end(trainer, module)
+
+    run_plots = sorted((tmp_path / "mi_diagnostics").glob("*.png"))
+    checkpoint_plots = sorted(
+        (checkpoint_root / "mi_diagnostics").glob("*.png")
+    )
+    assert len(run_plots) == len(checkpoint_plots) == 2
+    assert [path.name for path in run_plots] == [
+        path.name for path in checkpoint_plots
+    ]
+
+    assert len(experiment.artifacts) == 2
+    assert all(
+        Path(call["local_path"]).parent == checkpoint_root / "mi_diagnostics"
+        for call in experiment.artifacts
+    )
+    assert all(
+        call["artifact_path"] == "mi_diagnostics"
+        for call in experiment.artifacts
+    )
+    assert experiment.texts[0]["artifact_file"] == "mi_diagnostics/index.html"
+    assert "MI Binning Diagnostics" in experiment.texts[0]["text"]
+    assert "data:image/png;base64," in experiment.texts[0]["text"]
+
+
 def test_transform_values_matches_existing_transform_path() -> None:
     binner = FixedQuantileSensitiveBinner(variable="FET.Et", num_bins=3)
     binner.bin_edges = torch.tensor([1.0, 2.0])
@@ -175,11 +242,18 @@ def test_transform_values_matches_existing_transform_path() -> None:
     )
 
 
-def test_physics_ae_enables_binning_diagnostics_only_for_that_experiment() -> None:
+def test_physics_ae_enables_binning_diagnostics_only_for_that_experiment(
+    monkeypatch,
+) -> None:
+    monkeypatch.setenv("PROJECT_ROOT", str(Path(__file__).resolve().parents[1]))
+
     with initialize(version_base="1.3", config_path="../configs"):
         physics_ae = compose(
             config_name="train.yaml",
-            overrides=["experiment=physics/ae"],
+            overrides=[
+                "experiment=physics/ae",
+                "run_name=diagnostics-test",
+            ],
         )
         default = compose(
             config_name="train.yaml",
@@ -188,8 +262,13 @@ def test_physics_ae_enables_binning_diagnostics_only_for_that_experiment() -> No
 
     assert physics_ae.callbacks.binning.enabled is True
     assert list(physics_ae.callbacks.binning.epochs) == [0]
-    assert list(physics_ae.callbacks.binning.batch_indices) == [0, 100, 400]
+    assert list(physics_ae.callbacks.binning.batch_indices) == [0, 100, 400, 764]
     assert physics_ae.callbacks.binning.output_subdir == "mi_diagnostics"
+    checkpoint_root = Path(physics_ae.callbacks.binning.checkpoint_root_dir)
+    assert checkpoint_root.parent.name == "physics_ae_models"
+    assert checkpoint_root.name == "diagnostics-test"
+    assert physics_ae.callbacks.binning.log_to_mlflow is True
+    assert physics_ae.callbacks.binning.mlflow_artifact_path == "mi_diagnostics"
     assert isinstance(
         instantiate(physics_ae.callbacks.binning),
         BinningDiagnosticsCallback,

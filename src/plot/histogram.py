@@ -1,4 +1,5 @@
 # Histogram and categorical count plotting helpers.
+import csv
 from collections.abc import Mapping, Sequence
 from pathlib import Path
 
@@ -308,6 +309,41 @@ def plot_histogram_counts(
             fig.savefig(output_path, bbox_inches="tight")
         finally:
             plt.close(fig)
+
+    return output_path
+
+
+def save_plot_data_csv(
+    columns: Mapping[str, Sequence[object] | np.ndarray],
+    save_path: Path | str,
+) -> Path:
+    """Save equal-length columns containing the numerical data behind a plot."""
+    if not columns:
+        raise ValueError("columns must contain at least one named data column.")
+
+    arrays: dict[str, np.ndarray] = {}
+    expected_length: int | None = None
+    for name, values in columns.items():
+        array = np.asarray(values)
+        if array.ndim != 1:
+            raise ValueError(f"CSV column {name!r} must be one-dimensional.")
+        if expected_length is None:
+            expected_length = int(array.size)
+            if expected_length == 0:
+                raise ValueError("CSV data columns must not be empty.")
+        elif array.size != expected_length:
+            raise ValueError("All CSV data columns must have the same length.")
+        arrays[str(name)] = array
+
+    output_path = Path(save_path)
+    if output_path.suffix.lower() != ".csv":
+        raise ValueError(f"Plot data output must be a CSV file. Got {output_path}.")
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+
+    with output_path.open("w", encoding="utf-8", newline="") as csv_file:
+        writer = csv.writer(csv_file)
+        writer.writerow(arrays.keys())
+        writer.writerows(zip(*(array.tolist() for array in arrays.values())))
 
     return output_path
 

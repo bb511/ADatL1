@@ -1,3 +1,4 @@
+import csv
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -39,9 +40,10 @@ class _DiagnosticModule:
         return batch["values"]
 
 
-def _trainer(tmp_path: Path, epoch: int = 0):
+def _trainer(tmp_path: Path, epoch: int = 0, max_epochs: int = 3):
     return SimpleNamespace(
         current_epoch=epoch,
+        max_epochs=max_epochs,
         global_step=7,
         default_root_dir=tmp_path,
         is_global_zero=True,
@@ -192,17 +194,21 @@ def test_callback_collects_every_batch_and_plots_selected_batches(
 
     def capture_occupancy(counts, save_path, **kwargs):
         occupancy_calls.append((np.asarray(counts), Path(save_path), kwargs))
+        return Path(save_path)
 
     def capture_histogram(values, save_path, **kwargs):
         histogram_calls.append((list(values), Path(save_path), kwargs))
+        return Path(save_path)
 
     def capture_bin_widths(widths, save_path, **kwargs):
         bin_width_calls.append((np.asarray(widths), Path(save_path), kwargs))
+        return Path(save_path)
 
     def capture_raw_histogram(counts, edges, save_path, **kwargs):
         raw_histogram_calls.append(
             (np.asarray(counts), np.asarray(edges), Path(save_path), kwargs)
         )
+        return Path(save_path)
 
     monkeypatch.setattr(
         binning_callback_module,
@@ -273,12 +279,12 @@ def test_callback_collects_every_batch_and_plots_selected_batches(
         "Effective bins": 3,
         "Minibatch size": 5,
     }
-    assert occupancy_path.name == "mi_bin_occupancy_batch_0.png"
-    assert occupancy_path.parent == tmp_path / "mi_diagnostics"
+    assert occupancy_path.name == "mi_bin_occupancy_batch_0_epoch0000.png"
+    assert occupancy_path.parent == tmp_path / "mi_diagnostics" / "epoch_0000"
 
     unique_per_bin, unique_path, unique_kwargs = occupancy_calls[1]
     np.testing.assert_array_equal(unique_per_bin, [1, 0, 1])
-    assert unique_path.name == "mi_bin_unique_values_batch_0.png"
+    assert unique_path.name == "mi_bin_unique_values_batch_0_epoch0000.png"
     assert (
         unique_kwargs["title"]
         == "Unique FET.Et values per MI bin: batch = 0"
@@ -299,7 +305,7 @@ def test_callback_collects_every_batch_and_plots_selected_batches(
     assert raw_counts.shape == (50,)
     assert raw_edges.shape == (51,)
     assert raw_counts.sum() == 5
-    assert raw_path.name == "raw_fet_et_histogram_batch_0.png"
+    assert raw_path.name == "raw_fet_et_histogram_batch_0_epoch0000.png"
     assert raw_kwargs["title"] == "Raw FET.Et distribution: batch = 0"
     assert raw_kwargs["xlabel"] == "Raw FET.Et value"
     assert raw_kwargs["metadata"]["Finite values"] == 5
@@ -317,6 +323,21 @@ def test_callback_collects_every_batch_and_plots_selected_batches(
     assert histogram_kwargs["ylabel"] == "Number of unique FET.Et values"
     assert "epoch0000_batches000002_nominal_n000005" in histogram_path.name
     assert callback._unique_counts == []
+
+    data_dir = tmp_path / "mi_diagnostics" / "data" / "epoch_0000"
+    csv_paths = sorted(data_dir.glob("*.csv"))
+    assert len(csv_paths) == 5
+    occupancy_csv = (
+        data_dir / "mi_bin_occupancy_batch_0_epoch0000.csv"
+    )
+    with occupancy_csv.open(encoding="utf-8", newline="") as csv_file:
+        rows = list(csv.DictReader(csv_file))
+    assert [int(row["bin_id"]) for row in rows] == [0, 1, 2]
+    assert [int(row["observed_count"]) for row in rows] == [2, 0, 3]
+    np.testing.assert_allclose(
+        [float(row["expected_count"]) for row in rows],
+        [2.5, 1.5, 1.0],
+    )
 
 
 def test_callback_is_inactive_outside_its_schedule(tmp_path: Path) -> None:
@@ -340,6 +361,24 @@ def test_callback_is_inactive_outside_its_schedule(tmp_path: Path) -> None:
 
     assert module.extraction_calls == 0
     assert not (tmp_path / "mi_diagnostics").exists()
+
+
+def test_callback_schedules_first_and_configured_last_epoch(tmp_path: Path) -> None:
+    callback = BinningDiagnosticsCallback(
+        enabled=True,
+        epochs=[0],
+        include_last_epoch=True,
+    )
+
+    assert callback._is_scheduled_epoch(
+        _trainer(tmp_path, epoch=0, max_epochs=4)
+    )
+    assert not callback._is_scheduled_epoch(
+        _trainer(tmp_path, epoch=1, max_epochs=4)
+    )
+    assert callback._is_scheduled_epoch(
+        _trainer(tmp_path, epoch=3, max_epochs=4)
+    )
 
 
 def test_callback_saves_plots_in_checkpoint_tree_and_logs_mlflow(
@@ -387,20 +426,32 @@ def test_callback_saves_plots_in_checkpoint_tree_and_logs_mlflow(
     callback.on_train_epoch_end(trainer, module)
 
     run_plots = sorted(
-        (checkpoint_root / "plots" / "mi_diagnostics").glob("*.png")
+        (checkpoint_root / "plots" / "mi_diagnostics").rglob("*.png")
     )
     assert len(run_plots) == 5
+    run_data = sorted(
+        (checkpoint_root / "plots" / "mi_diagnostics" / "data").rglob("*.csv")
+    )
+    assert len(run_data) == 5
 
-    assert len(experiment.artifacts) == 5
-    assert all(
-        Path(call["local_path"]).parent
-        == checkpoint_root / "plots" / "mi_diagnostics"
-        for call in experiment.artifacts
-    )
-    assert all(
-        call["artifact_path"] == "mi_diagnostics"
-        for call in experiment.artifacts
-    )
+    assert len(experiment.artifacts) == 10
+    artifact_parents = {
+        Path(call["local_path"]).parent for call in experiment.artifacts
+    }
+    assert artifact_parents == {
+        checkpoint_root / "plots" / "mi_diagnostics" / "epoch_0000",
+        checkpoint_root
+        / "plots"
+        / "mi_diagnostics"
+        / "data"
+        / "epoch_0000",
+    }
+    assert {
+        call["artifact_path"] for call in experiment.artifacts
+    } == {
+        "mi_diagnostics/epoch_0000",
+        "mi_diagnostics/data/epoch_0000",
+    }
     assert experiment.texts[0]["artifact_file"] == "mi_diagnostics/index.html"
     assert "MI Binning Diagnostics" in experiment.texts[0]["text"]
     assert "data:image/png;base64," in experiment.texts[0]["text"]
@@ -440,6 +491,7 @@ def test_physics_ae_enables_binning_diagnostics_only_for_that_experiment(
 
     assert physics_ae.callbacks.binning.enabled is True
     assert list(physics_ae.callbacks.binning.epochs) == [0]
+    assert physics_ae.callbacks.binning.include_last_epoch is True
     assert list(physics_ae.callbacks.binning.batch_indices) == [0, 100, 400, 764]
     assert physics_ae.callbacks.binning.raw_histogram_bins == 50
     output_root = Path(physics_ae.callbacks.binning.output_root_dir)

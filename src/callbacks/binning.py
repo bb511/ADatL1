@@ -15,6 +15,7 @@ from src.plot.histogram import (
     plot_fixed_bin_widths,
     plot_histogram_counts,
     plot_minibatch_scalar_histogram,
+    save_plot_data_csv,
 )
 
 
@@ -25,6 +26,7 @@ class BinningDiagnosticsCallback(Callback):
         self,
         enabled: bool = False,
         epochs: Sequence[int] = (0,),
+        include_last_epoch: bool = False,
         batch_indices: Sequence[int] = (0, 100, 400, 764),
         output_root_dir: str | Path | None = None,
         output_subdir: str = "mi_diagnostics",
@@ -36,6 +38,7 @@ class BinningDiagnosticsCallback(Callback):
         super().__init__()
         self.enabled = bool(enabled)
         self.epochs = frozenset(self._validate_indices(epochs, "epochs"))
+        self.include_last_epoch = bool(include_last_epoch)
         self.batch_indices = frozenset(
             self._validate_indices(batch_indices, "batch_indices")
         )
@@ -78,13 +81,24 @@ class BinningDiagnosticsCallback(Callback):
 
         epoch = int(trainer.current_epoch)
         bin_widths = self._fixed_bin_widths(binner)
+        filename = f"mi_bin_widths_epoch{epoch:04d}.png"
         output_path = plot_fixed_bin_widths(
             bin_widths,
-            self._output_dir(trainer) / f"mi_bin_widths_epoch{epoch:04d}.png",
+            self._output_dir(trainer) / filename,
             title=f"Fixed MI bin widths: epoch = {epoch}",
             ylabel=f"Bin width Δ{binner.variable}",
         )
-        self._publish_plot(trainer, output_path)
+        self._publish_artifact(trainer, output_path)
+
+        csv_path = save_plot_data_csv(
+            {
+                "epoch": np.full(bin_widths.size, epoch),
+                "bin_id": np.arange(bin_widths.size),
+                "bin_width": bin_widths,
+            },
+            self._data_dir(trainer) / Path(filename).with_suffix(".csv"),
+        )
+        self._publish_artifact(trainer, csv_path)
 
     def on_train_batch_end(
         self,
@@ -153,7 +167,10 @@ class BinningDiagnosticsCallback(Callback):
             "Effective bins": num_effective_bins,
             "Minibatch size": minibatch_size,
         }
-        filename = f"mi_bin_occupancy_batch_{int(batch_idx)}.png"
+        filename = (
+            f"mi_bin_occupancy_batch_{int(batch_idx)}_"
+            f"epoch{epoch:04d}.png"
+        )
 
         output_path = plot_categorical_bin_counts(
             observed_counts,
@@ -165,13 +182,29 @@ class BinningDiagnosticsCallback(Callback):
             ylabel="Number of events in minibatch",
             metadata=metadata,
         )
-        self._publish_plot(trainer, output_path)
+        self._publish_artifact(trainer, output_path)
+
+        occupancy_csv_path = save_plot_data_csv(
+            {
+                "epoch": np.full(num_effective_bins, epoch),
+                "batch_index": np.full(num_effective_bins, int(batch_idx)),
+                "global_step": np.full(num_effective_bins, global_step),
+                "bin_id": np.arange(num_effective_bins),
+                "observed_count": observed_counts,
+                "expected_count": expected_counts,
+            },
+            self._data_dir(trainer) / Path(filename).with_suffix(".csv"),
+        )
+        self._publish_artifact(trainer, occupancy_csv_path)
 
         variable = binner.variable
+        unique_filename = (
+            f"mi_bin_unique_values_batch_{int(batch_idx)}_"
+            f"epoch{epoch:04d}.png"
+        )
         unique_output_path = plot_categorical_bin_counts(
             unique_counts_per_bin,
-            self._output_dir(trainer)
-            / f"mi_bin_unique_values_batch_{int(batch_idx)}.png",
+            self._output_dir(trainer) / unique_filename,
             title=(
                 f"Unique {variable} values per MI bin: "
                 f"batch = {int(batch_idx)}"
@@ -184,13 +217,28 @@ class BinningDiagnosticsCallback(Callback):
             annotate_clipped_values=True,
             integer_y_ticks=True,
         )
-        self._publish_plot(trainer, unique_output_path)
+        self._publish_artifact(trainer, unique_output_path)
 
+        unique_csv_path = save_plot_data_csv(
+            {
+                "epoch": np.full(num_effective_bins, epoch),
+                "batch_index": np.full(num_effective_bins, int(batch_idx)),
+                "global_step": np.full(num_effective_bins, global_step),
+                "bin_id": np.arange(num_effective_bins),
+                "unique_finite_value_count": unique_counts_per_bin,
+            },
+            self._data_dir(trainer) / Path(unique_filename).with_suffix(".csv"),
+        )
+        self._publish_artifact(trainer, unique_csv_path)
+
+        raw_filename = (
+            f"raw_fet_et_histogram_batch_{int(batch_idx)}_"
+            f"epoch{epoch:04d}.png"
+        )
         raw_output_path = plot_histogram_counts(
             raw_histogram_counts,
             raw_histogram_edges,
-            self._output_dir(trainer)
-            / f"raw_fet_et_histogram_batch_{int(batch_idx)}.png",
+            self._output_dir(trainer) / raw_filename,
             title=f"Raw {variable} distribution: batch = {int(batch_idx)}",
             xlabel=f"Raw {variable} value",
             ylabel="Number of events",
@@ -204,7 +252,44 @@ class BinningDiagnosticsCallback(Callback):
                 "Std": raw_histogram_stats["std"],
             },
         )
-        self._publish_plot(trainer, raw_output_path)
+        self._publish_artifact(trainer, raw_output_path)
+
+        num_histogram_bins = raw_histogram_counts.size
+        raw_csv_path = save_plot_data_csv(
+            {
+                "epoch": np.full(num_histogram_bins, epoch),
+                "batch_index": np.full(
+                    num_histogram_bins,
+                    int(batch_idx),
+                ),
+                "global_step": np.full(num_histogram_bins, global_step),
+                "bin_left": raw_histogram_edges[:-1],
+                "bin_right": raw_histogram_edges[1:],
+                "count": raw_histogram_counts,
+                "finite_values": np.full(
+                    num_histogram_bins,
+                    raw_histogram_stats["finite_values"],
+                ),
+                "min": np.full(
+                    num_histogram_bins,
+                    raw_histogram_stats["min"],
+                ),
+                "max": np.full(
+                    num_histogram_bins,
+                    raw_histogram_stats["max"],
+                ),
+                "mean": np.full(
+                    num_histogram_bins,
+                    raw_histogram_stats["mean"],
+                ),
+                "std": np.full(
+                    num_histogram_bins,
+                    raw_histogram_stats["std"],
+                ),
+            },
+            self._data_dir(trainer) / Path(raw_filename).with_suffix(".csv"),
+        )
+        self._publish_artifact(trainer, raw_csv_path)
 
     def on_train_epoch_end(self, trainer, pl_module) -> None:
         """Render the per-minibatch raw-value-diversity distribution."""
@@ -233,35 +318,74 @@ class BinningDiagnosticsCallback(Callback):
             xlabel="Minibatch number",
             ylabel=f"Number of unique {variable} values",
         )
-        self._publish_plot(trainer, output_path)
+        self._publish_artifact(trainer, output_path)
+
+        diversity_csv_path = save_plot_data_csv(
+            {
+                "epoch": np.full(num_minibatches, epoch),
+                "minibatch_index": np.arange(num_minibatches),
+                "unique_finite_value_count": np.asarray(self._unique_counts),
+                "num_minibatches": np.full(num_minibatches, num_minibatches),
+                "nominal_minibatch_size": np.full(
+                    num_minibatches,
+                    nominal_batch_size,
+                ),
+            },
+            self._data_dir(trainer) / Path(filename).with_suffix(".csv"),
+        )
+        self._publish_artifact(trainer, diversity_csv_path)
         self._log_mlflow_gallery(trainer)
         self._unique_counts = []
 
     def _is_scheduled_epoch(self, trainer) -> bool:
-        return self.enabled and int(trainer.current_epoch) in self.epochs
+        if not self.enabled:
+            return False
+
+        epoch = int(trainer.current_epoch)
+        if epoch in self.epochs:
+            return True
+        if not self.include_last_epoch:
+            return False
+
+        max_epochs = getattr(trainer, "max_epochs", None)
+        if max_epochs is None:
+            return False
+        max_epochs = int(max_epochs)
+        return max_epochs > 0 and epoch == max_epochs - 1
 
     @staticmethod
     def _is_global_zero(trainer) -> bool:
         return bool(getattr(trainer, "is_global_zero", True))
 
     def _output_dir(self, trainer) -> Path:
+        return self._output_root(trainer) / self._epoch_subdir(trainer)
+
+    def _data_dir(self, trainer) -> Path:
+        return self._output_root(trainer) / "data" / self._epoch_subdir(trainer)
+
+    def _output_root(self, trainer) -> Path:
         output_root = self.output_root_dir
         if output_root is None:
             output_root = Path(trainer.default_root_dir)
         return output_root / self.output_subdir
 
-    def _checkpoint_output_dir(self) -> Path | None:
+    def _checkpoint_output_root(self) -> Path | None:
         if self.checkpoint_root_dir is None:
             return None
         return self.checkpoint_root_dir / self.output_subdir
 
-    def _publish_plot(self, trainer, output_path: Path) -> None:
-        """Copy a plot to checkpoints and upload it as an MLflow artifact."""
+    @staticmethod
+    def _epoch_subdir(trainer) -> Path:
+        return Path(f"epoch_{int(trainer.current_epoch):04d}")
+
+    def _publish_artifact(self, trainer, output_path: Path) -> None:
+        """Copy a diagnostic artifact to checkpoints and upload it to MLflow."""
+        relative_path = output_path.relative_to(self._output_root(trainer))
         artifact_source = output_path
-        checkpoint_output_dir = self._checkpoint_output_dir()
-        if checkpoint_output_dir is not None:
-            checkpoint_output_dir.mkdir(parents=True, exist_ok=True)
-            artifact_source = checkpoint_output_dir / output_path.name
+        checkpoint_output_root = self._checkpoint_output_root()
+        if checkpoint_output_root is not None:
+            artifact_source = checkpoint_output_root / relative_path
+            artifact_source.parent.mkdir(parents=True, exist_ok=True)
             if output_path.resolve() != artifact_source.resolve():
                 shutil.copy2(output_path, artifact_source)
 
@@ -275,7 +399,9 @@ class BinningDiagnosticsCallback(Callback):
         mlflow_logger.experiment.log_artifact(
             run_id=mlflow_logger.run_id,
             local_path=str(artifact_source),
-            artifact_path=self.mlflow_artifact_path,
+            artifact_path=str(
+                Path(self.mlflow_artifact_path) / relative_path.parent
+            ),
         )
 
     def _log_mlflow_gallery(self, trainer) -> None:
@@ -287,7 +413,7 @@ class BinningDiagnosticsCallback(Callback):
         if mlflow_logger is None:
             return
 
-        plot_dir = self._checkpoint_output_dir() or self._output_dir(trainer)
+        plot_dir = self._checkpoint_output_root() or self._output_root(trainer)
         html_gallery = mlflow_plot_gallery.build_html(
             plot_dir,
             title="MI Binning Diagnostics",

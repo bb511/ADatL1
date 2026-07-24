@@ -14,7 +14,7 @@
 python3 src/train.py \
     paths.raw_data_dir=../../03_Data/adl1t_data/parquet_files \
     experiment=physics/ae \
-    run_name="Bernoulli-MI_No_FET_Et_Gamma_0.1_Run_23" \
+    run_name="Bernoulli-MI_No_FET_Et_Gamma_0.1_Run_24" \
     logger=mlflow \
     algorithm.optimizer.lr=0.0019859329798336714 \
     algorithm.delta=1.0 \

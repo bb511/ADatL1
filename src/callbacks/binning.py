@@ -100,6 +100,9 @@ class BinningDiagnosticsCallback(Callback):
         )
         self._publish_artifact(trainer, csv_path)
 
+        if epoch == 0:
+            self._plot_full_training_distribution(trainer, binner)
+
     def on_train_batch_end(
         self,
         trainer,
@@ -449,6 +452,64 @@ class BinningDiagnosticsCallback(Callback):
         hparams = getattr(datamodule, "hparams", None)
         configured = getattr(hparams, "batch_size", None)
         return int(configured) if configured is not None else None
+
+    def _plot_full_training_distribution(self, trainer, binner) -> None:
+        """Render the fitted full-training raw-value histogram once at epoch 0."""
+        stats = binner.fit_stats
+        counts = np.asarray(stats.get("raw_histogram_counts", []), dtype=float)
+        edges = np.asarray(stats.get("raw_histogram_edges", []), dtype=float)
+        if counts.ndim != 1 or counts.size == 0:
+            raise RuntimeError(
+                "fit_stats must contain non-empty 'raw_histogram_counts'."
+            )
+        if edges.shape != (counts.size + 1,):
+            raise RuntimeError(
+                "fit_stats['raw_histogram_edges'] must contain one more "
+                "value than 'raw_histogram_counts'."
+            )
+
+        epoch = int(trainer.current_epoch)
+        variable = binner.variable
+        filename = f"full_fet_et_histogram_epoch{epoch:04d}.png"
+        metadata = {
+            "Epoch": epoch,
+            "Training values": int(stats["num_values"]),
+            "Histogram bins": int(counts.size),
+            "Min": f"{float(stats['min']):.6g}",
+            "Max": f"{float(stats['max']):.6g}",
+            "Mean": f"{float(stats['mean']):.6g}",
+            "Std": f"{float(stats['std']):.6g}",
+        }
+        output_path = plot_histogram_counts(
+            counts,
+            edges,
+            self._output_dir(trainer) / filename,
+            title=f"Full training {variable} distribution",
+            xlabel=f"Raw {variable} value",
+            ylabel="Number of training events",
+            metadata=metadata,
+        )
+        self._publish_artifact(trainer, output_path)
+
+        num_histogram_bins = counts.size
+        csv_path = save_plot_data_csv(
+            {
+                "epoch": np.full(num_histogram_bins, epoch),
+                "bin_left": edges[:-1],
+                "bin_right": edges[1:],
+                "count": counts,
+                "training_values": np.full(
+                    num_histogram_bins,
+                    metadata["Training values"],
+                ),
+                "min": np.full(num_histogram_bins, metadata["Min"]),
+                "max": np.full(num_histogram_bins, metadata["Max"]),
+                "mean": np.full(num_histogram_bins, metadata["Mean"]),
+                "std": np.full(num_histogram_bins, metadata["Std"]),
+            },
+            self._data_dir(trainer) / Path(filename).with_suffix(".csv"),
+        )
+        self._publish_artifact(trainer, csv_path)
 
     @staticmethod
     def _validate_fitted_binner(pl_module):

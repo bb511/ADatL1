@@ -32,6 +32,12 @@ class _DiagnosticModule:
             "counts": [50, 30, 20],
             "min": 0.0,
             "max": 4.0,
+            "mean": 1.8,
+            "std": 1.4,
+            "num_values": 100,
+            "raw_histogram_bins": 3,
+            "raw_histogram_counts": [50, 30, 20],
+            "raw_histogram_edges": [0.0, 1.0, 2.0, 4.0],
         }
         self.extraction_calls = 0
 
@@ -300,8 +306,15 @@ def test_callback_collects_every_batch_and_plots_selected_batches(
     assert unique_kwargs["annotate_clipped_values"] is True
     assert unique_kwargs["integer_y_ticks"] is True
 
-    assert len(raw_histogram_calls) == 1
-    raw_counts, raw_edges, raw_path, raw_kwargs = raw_histogram_calls[0]
+    assert len(raw_histogram_calls) == 2
+    full_counts, full_edges, full_path, full_kwargs = raw_histogram_calls[0]
+    np.testing.assert_array_equal(full_counts, [50, 30, 20])
+    np.testing.assert_array_equal(full_edges, [0.0, 1.0, 2.0, 4.0])
+    assert full_path.name == "full_fet_et_histogram_epoch0000.png"
+    assert full_kwargs["title"] == "Full training FET.Et distribution"
+    assert full_kwargs["metadata"]["Training values"] == 100
+
+    raw_counts, raw_edges, raw_path, raw_kwargs = raw_histogram_calls[1]
     assert raw_counts.shape == (50,)
     assert raw_edges.shape == (51,)
     assert raw_counts.sum() == 5
@@ -326,7 +339,7 @@ def test_callback_collects_every_batch_and_plots_selected_batches(
 
     data_dir = tmp_path / "mi_diagnostics" / "data" / "epoch_0000"
     csv_paths = sorted(data_dir.glob("*.csv"))
-    assert len(csv_paths) == 5
+    assert len(csv_paths) == 6
     occupancy_csv = (
         data_dir / "mi_bin_occupancy_batch_0_epoch0000.csv"
     )
@@ -428,13 +441,13 @@ def test_callback_saves_plots_in_checkpoint_tree_and_logs_mlflow(
     run_plots = sorted(
         (checkpoint_root / "plots" / "mi_diagnostics").rglob("*.png")
     )
-    assert len(run_plots) == 5
+    assert len(run_plots) == 6
     run_data = sorted(
         (checkpoint_root / "plots" / "mi_diagnostics" / "data").rglob("*.csv")
     )
-    assert len(run_data) == 5
+    assert len(run_data) == 6
 
-    assert len(experiment.artifacts) == 10
+    assert len(experiment.artifacts) == 12
     artifact_parents = {
         Path(call["local_path"]).parent for call in experiment.artifacts
     }
@@ -469,6 +482,28 @@ def test_transform_values_matches_existing_transform_path() -> None:
         binner.transform_values(values),
         binner.transform(x=x, object_feature_map=feature_map),
     )
+
+
+def test_binner_fit_stores_full_training_histogram() -> None:
+    binner = FixedQuantileSensitiveBinner(
+        variable="FET.Et",
+        num_bins=3,
+        diagnostic_histogram_bins=4,
+    )
+    values = torch.tensor([[0.0], [1.0], [2.0], [3.0], [4.0]])
+
+    binner.fit(
+        x=values,
+        object_feature_map={"FET": {"Et": [0]}},
+    )
+
+    histogram_counts = binner.fit_stats["raw_histogram_counts"]
+    histogram_edges = binner.fit_stats["raw_histogram_edges"]
+    assert len(histogram_counts) == 4
+    assert len(histogram_edges) == 5
+    assert sum(histogram_counts) == 5
+    assert histogram_edges[0] == 0.0
+    assert histogram_edges[-1] == 4.0
 
 
 def test_physics_ae_enables_binning_diagnostics_only_for_that_experiment(

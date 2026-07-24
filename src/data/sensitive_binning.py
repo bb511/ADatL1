@@ -24,6 +24,7 @@ class FixedQuantileSensitiveBinner:
     num_bins: int = 10
     reduction: str = "first"
     use_denormalized: bool = False
+    diagnostic_histogram_bins: int = 50
 
     def __post_init__(self) -> None:
         if "." not in self.variable:
@@ -34,6 +35,11 @@ class FixedQuantileSensitiveBinner:
 
         if self.num_bins < 2:
             raise ValueError(f"num_bins must be at least 2. Got {self.num_bins}.")
+        if self.diagnostic_histogram_bins < 1:
+            raise ValueError(
+                "diagnostic_histogram_bins must be at least 1. "
+                f"Got {self.diagnostic_histogram_bins}."
+            )
 
         self.reduction = self.reduction.lower()
 
@@ -46,7 +52,10 @@ class FixedQuantileSensitiveBinner:
 
         self.object_name, self.feature_name = self.variable.split(".", maxsplit=1)
         self.bin_edges: torch.Tensor | None = None
-        self.fit_stats: dict[str, float | int | list[float]] = {}
+        self.fit_stats: dict[
+            str,
+            float | int | list[float] | list[int],
+        ] = {}
 
     @property
     def is_fitted(self) -> bool:
@@ -100,17 +109,45 @@ class FixedQuantileSensitiveBinner:
 
         labels = torch.bucketize(values_for_quantile, self.bin_edges)
         counts = torch.bincount(labels, minlength=self.bin_edges.numel() + 1)
+        value_min = float(values_for_quantile.min().item())
+        value_max = float(values_for_quantile.max().item())
+        histogram_min = value_min
+        histogram_max = value_max
+        if histogram_min == histogram_max:
+            half_width = max(abs(histogram_min) * 1e-3, 1e-6)
+            histogram_min -= half_width
+            histogram_max += half_width
+
+        raw_histogram_counts = torch.histc(
+            values_for_quantile,
+            bins=self.diagnostic_histogram_bins,
+            min=histogram_min,
+            max=histogram_max,
+        )
+        raw_histogram_edges = torch.linspace(
+            histogram_min,
+            histogram_max,
+            steps=self.diagnostic_histogram_bins + 1,
+            dtype=values_for_quantile.dtype,
+        )
 
         self.fit_stats = {
             "num_values": int(values_for_quantile.numel()),
             "num_bins_requested": int(self.num_bins),
             "num_bins_effective": int(self.bin_edges.numel() + 1),
-            "min": float(values_for_quantile.min().item()),
-            "max": float(values_for_quantile.max().item()),
+            "min": value_min,
+            "max": value_max,
             "mean": float(values_for_quantile.mean().item()),
             "std": float(values_for_quantile.std(unbiased=False).item()),
             "edges": [float(v) for v in self.bin_edges.tolist()],
             "counts": [int(v) for v in counts.tolist()],
+            "raw_histogram_bins": int(self.diagnostic_histogram_bins),
+            "raw_histogram_counts": [
+                int(v) for v in raw_histogram_counts.tolist()
+            ],
+            "raw_histogram_edges": [
+                float(v) for v in raw_histogram_edges.tolist()
+            ],
         }
 
         return self.bin_edges

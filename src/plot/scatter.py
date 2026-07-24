@@ -80,14 +80,16 @@ def plot_lines(
     right_axis_data: dict[str, dict[int, float]] | None = None,
     right_ylabel: str | None = None,
     alphas: dict[str, float] | None = None,
+    ylabel_fontsize: float | None = None,
 ) -> Path:
     """Plot multiple labelled series as lines without point markers.
 
     ``data`` maps each legend label to an ``x: y`` mapping. ``colors`` optionally
     maps those same labels to Matplotlib colors. ``right_axis_data`` optionally maps
     lines to a secondary y-axis, labelled with ``right_ylabel``. ``alphas``
-    optionally maps labels to line opacities. The plot is saved as a PNG and the
-    resulting path is returned to the caller.
+    optionally maps labels to line opacities. ``ylabel_fontsize`` can override the
+    left-axis title size for plots with long labels. The plot is saved as a PNG and
+    the resulting path is returned to the caller.
     """
     if not data and not right_axis_data:
         raise ValueError("Cannot plot an empty collection of lines.")
@@ -121,7 +123,10 @@ def plot_lines(
         plot_series(right_ax, right_axis_data)
 
     ax.set_xlabel(xlabel)
-    ax.set_ylabel(ylabel)
+    if ylabel_fontsize is None:
+        ax.set_ylabel(ylabel)
+    else:
+        ax.set_ylabel(ylabel, fontsize=ylabel_fontsize)
     ax.set_title(title, pad=20)
     if right_ax is None:
         ax.legend()

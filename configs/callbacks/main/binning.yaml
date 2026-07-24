@@ -4,7 +4,7 @@ _target_: src.callbacks.binning.BinningDiagnosticsCallback
 enabled: true
 epochs: [0]
 batch_indices: [0, 100, 400, 764]
+output_root_dir: '${paths.checkpoints_dir}/${experiment_name}/${run_name}/plots'
 output_subdir: mi_diagnostics
-checkpoint_root_dir: '${paths.checkpoints_dir}/${experiment_name}/${run_name}'
 log_to_mlflow: true
 mlflow_artifact_path: mi_diagnostics

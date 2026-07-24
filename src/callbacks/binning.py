@@ -24,6 +24,7 @@ class BinningDiagnosticsCallback(Callback):
         enabled: bool = False,
         epochs: Sequence[int] = (0,),
         batch_indices: Sequence[int] = (0, 100, 400, 764),
+        output_root_dir: str | Path | None = None,
         output_subdir: str = "mi_diagnostics",
         checkpoint_root_dir: str | Path | None = None,
         log_to_mlflow: bool = False,
@@ -39,8 +40,11 @@ class BinningDiagnosticsCallback(Callback):
         subdir = Path(output_subdir)
         if subdir.is_absolute() or ".." in subdir.parts:
             raise ValueError(
-                "output_subdir must be a relative path within the run output."
+                "output_subdir must be a relative path within the output root."
             )
+        self.output_root_dir = (
+            Path(output_root_dir) if output_root_dir is not None else None
+        )
         self.output_subdir = subdir
         self.checkpoint_root_dir = (
             Path(checkpoint_root_dir) if checkpoint_root_dir is not None else None
@@ -107,17 +111,14 @@ class BinningDiagnosticsCallback(Callback):
         expected_counts = fit_counts / fit_total * minibatch_size
         epoch = int(trainer.current_epoch)
         global_step = int(trainer.global_step)
-        title = (
-            "Fixed MI bin occupancy | "
-            f"epoch={epoch}, batch={int(batch_idx)}, step={global_step}, "
-            f"effective bins={num_effective_bins}, "
-            f"minibatch size={minibatch_size}"
-        )
-        filename = (
-            f"bin_occupancy_epoch{epoch:04d}_batch{int(batch_idx):06d}_"
-            f"step{global_step:09d}_bins{num_effective_bins:04d}_"
-            f"n{minibatch_size:06d}.png"
-        )
+        title = f"MI bin occupancy: batch = {int(batch_idx)}"
+        metadata = {
+            "Epoch": epoch,
+            "Global step": global_step,
+            "Effective bins": num_effective_bins,
+            "Minibatch size": minibatch_size,
+        }
+        filename = f"mi_bin_occupancy_batch_{int(batch_idx)}.png"
 
         output_path = plot_categorical_bin_counts(
             observed_counts,
@@ -127,6 +128,7 @@ class BinningDiagnosticsCallback(Callback):
             expected_label="Expected from full training-set proportions",
             xlabel="Bin ID",
             ylabel="Number of events in minibatch",
+            metadata=metadata,
         )
         self._publish_plot(trainer, output_path)
 
@@ -143,11 +145,8 @@ class BinningDiagnosticsCallback(Callback):
         if nominal_batch_size is None:
             nominal_batch_size = 0
 
-        title = (
-            f"Finite raw {pl_module.sensitive_binner.variable} diversity | "
-            f"epoch={epoch}, minibatches={num_minibatches}, "
-            f"nominal minibatch size={nominal_batch_size}"
-        )
+        variable = pl_module.sensitive_binner.variable
+        title = f"Raw {variable} diversity: epoch {epoch}"
         filename = (
             f"raw_value_diversity_epoch{epoch:04d}_"
             f"batches{num_minibatches:06d}_nominal_n{nominal_batch_size:06d}.png"
@@ -157,11 +156,8 @@ class BinningDiagnosticsCallback(Callback):
             self._unique_counts,
             self._output_dir(trainer) / filename,
             title=title,
-            xlabel=(
-                f"Number of unique finite raw "
-                f"{pl_module.sensitive_binner.variable} values per minibatch"
-            ),
-            ylabel="Number of minibatches",
+            xlabel="Minibatch number",
+            ylabel=f"Number of unique {variable} values",
         )
         self._publish_plot(trainer, output_path)
         self._log_mlflow_gallery(trainer)
@@ -175,7 +171,10 @@ class BinningDiagnosticsCallback(Callback):
         return bool(getattr(trainer, "is_global_zero", True))
 
     def _output_dir(self, trainer) -> Path:
-        return Path(trainer.default_root_dir) / self.output_subdir
+        output_root = self.output_root_dir
+        if output_root is None:
+            output_root = Path(trainer.default_root_dir)
+        return output_root / self.output_subdir
 
     def _checkpoint_output_dir(self) -> Path | None:
         if self.checkpoint_root_dir is None:

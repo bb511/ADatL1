@@ -1,5 +1,5 @@
 # Histogram and categorical count plotting helpers.
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from pathlib import Path
 
 import matplotlib
@@ -21,6 +21,7 @@ def plot_categorical_bin_counts(
     expected_label: str = "Expected from full training-set proportions",
     xlabel: str = "Bin ID",
     ylabel: str = "Number of events in minibatch",
+    metadata: Mapping[str, object] | None = None,
 ) -> Path:
     """Save observed categorical counts and an optional expected-count reference."""
     observed = np.asarray(counts)
@@ -47,7 +48,8 @@ def plot_categorical_bin_counts(
     bin_ids = np.arange(observed.size)
 
     with plt.style.context(hep.style.CMS):
-        fig, ax = plt.subplots()
+        fig, ax = plt.subplots(figsize=(16, 7))
+        fig.subplots_adjust(left=0.10, right=0.71, bottom=0.16, top=0.88)
         try:
             ax.bar(
                 bin_ids,
@@ -68,12 +70,38 @@ def plot_categorical_bin_counts(
                 )
 
             ax.set_title(title)
-            ax.set_xlabel(xlabel)
-            ax.set_ylabel(ylabel)
-            ax.set_xticks(bin_ids)
+            ax.set_xlabel(xlabel, fontsize=20, loc="center", labelpad=14)
+            ax.set_ylabel(ylabel, fontsize=20, loc="center", labelpad=14)
+            major_ticks = np.arange(0, observed.size, 5)
+            ax.set_xticks(major_ticks)
+            ax.set_xticks(bin_ids, minor=True)
             ax.set_xlim(-0.6, observed.size - 0.4)
-            ax.set_ylim(bottom=0)
-            ax.legend()
+            ax.tick_params(axis="x", labelsize=14, pad=8)
+
+            maxima = [float(observed.max())]
+            if expected is not None:
+                maxima.append(float(expected.max()))
+            y_max = max(max(maxima) * 1.22, 1.0)
+            ax.set_ylim(0, y_max)
+
+            if metadata:
+                rows = [[str(label), str(value)] for label, value in metadata.items()]
+                table = ax.table(
+                    cellText=rows,
+                    cellLoc="left",
+                    bbox=[1.04, 0.54, 0.50, 0.34],
+                )
+                table.auto_set_font_size(False)
+                table.set_fontsize(10)
+                for row_idx in range(len(rows)):
+                    table[(row_idx, 0)].set_text_props(weight="bold")
+
+            ax.legend(
+                loc="upper left",
+                bbox_to_anchor=(1.03, 0.42),
+                borderaxespad=0,
+                fontsize=10,
+            )
             fig.savefig(output_path, bbox_inches="tight")
         finally:
             plt.close(fig)
@@ -86,11 +114,10 @@ def plot_minibatch_scalar_histogram(
     save_path: Path | str,
     *,
     title: str,
-    xlabel: str,
-    ylabel: str = "Number of minibatches",
-    bins: str | int | Sequence[float] = "auto",
+    xlabel: str = "Minibatch number",
+    ylabel: str = "Number of unique FET.Et values",
 ) -> Path:
-    """Save a histogram for one scalar collected from each minibatch."""
+    """Plot one collected scalar per minibatch as contiguous histogram bars."""
     scalar_values = np.asarray(values)
     if scalar_values.ndim != 1 or scalar_values.size == 0:
         raise ValueError("values must be a non-empty one-dimensional array.")
@@ -99,21 +126,35 @@ def plot_minibatch_scalar_histogram(
 
     output_path = _png_output_path(save_path)
     output_path.parent.mkdir(parents=True, exist_ok=True)
+    minibatch_ids = np.arange(scalar_values.size)
 
     with plt.style.context(hep.style.CMS):
-        fig, ax = plt.subplots()
+        fig, ax = plt.subplots(figsize=(12, 7))
+        fig.subplots_adjust(left=0.13, right=0.96, bottom=0.16, top=0.88)
         try:
-            ax.hist(
+            ax.bar(
+                minibatch_ids,
                 scalar_values,
-                bins=bins,
                 color="C0",
-                alpha=0.75,
-                edgecolor="black",
+                width=1.0,
+                alpha=0.8,
+                linewidth=0,
             )
             ax.set_title(title)
-            ax.set_xlabel(xlabel)
-            ax.set_ylabel(ylabel)
-            ax.set_ylim(bottom=0)
+            ax.set_xlabel(xlabel, fontsize=20, loc="center", labelpad=14)
+            ax.set_ylabel(ylabel, fontsize=20, loc="center", labelpad=14)
+            ax.set_xlim(
+                -0.5,
+                max(float(scalar_values.size - 1) + 0.5, 0.5),
+            )
+            value_min = float(scalar_values.min())
+            value_max = float(scalar_values.max())
+            y_buffer = max((value_max - value_min) * 0.08, 1.0)
+            ax.set_ylim(
+                max(0.0, value_min - y_buffer),
+                value_max + y_buffer,
+            )
+            ax.grid(axis="both", alpha=0.25)
             fig.savefig(output_path, bbox_inches="tight")
         finally:
             plt.close(fig)

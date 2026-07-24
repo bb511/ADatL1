@@ -135,6 +135,7 @@ class LossesCallback(Callback):
                 right_axis_data=raw_total_history,
                 right_ylabel="Loss_total",
                 alphas={"Loss_total": 0.8},
+                ylabel_fontsize=14,
             ),
         ]
 

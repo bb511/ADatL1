@@ -6,6 +6,7 @@ import numpy as np
 import torch
 from hydra import compose, initialize
 from hydra.utils import instantiate
+from matplotlib.figure import Figure
 
 import src.callbacks.binning as binning_callback_module
 from src.callbacks.binning import BinningDiagnosticsCallback
@@ -44,25 +45,69 @@ def _trainer(tmp_path: Path, epoch: int = 0):
     )
 
 
-def test_plotting_helpers_save_png_and_close_figures(tmp_path: Path) -> None:
+def test_plotting_helpers_save_png_and_close_figures(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
     initial_figures = tuple(plt.get_fignums())
+    captured_figures = []
+    original_savefig = Figure.savefig
+
+    def capture_figure(figure, *args, **kwargs):
+        captured_figures.append(figure)
+        return original_savefig(figure, *args, **kwargs)
+
+    monkeypatch.setattr(Figure, "savefig", capture_figure)
 
     occupancy_path = plot_categorical_bin_counts(
-        counts=[4, 0, 2],
-        expected_counts=[2.0, 2.0, 2.0],
+        counts=[4, 0, 2, 3, 5, 1, 4, 2, 3, 1, 4, 2],
+        expected_counts=[2.0] * 12,
         save_path=tmp_path / "occupancy.png",
-        title="Occupancy",
+        title="MI bin occupancy: batch = 100",
+        metadata={
+            "Epoch": 0,
+            "Global step": 100,
+            "Effective bins": 12,
+            "Minibatch size": 31,
+        },
     )
     diversity_path = plot_minibatch_scalar_histogram(
         values=[3, 4, 4, 5],
         save_path=tmp_path / "diversity.png",
-        title="Diversity",
-        xlabel="Unique finite values",
+        title="Raw FET.Et diversity: epoch 0",
     )
 
     assert occupancy_path.read_bytes().startswith(b"\x89PNG\r\n\x1a\n")
     assert diversity_path.read_bytes().startswith(b"\x89PNG\r\n\x1a\n")
     assert tuple(plt.get_fignums()) == initial_figures
+
+    occupancy_axis = captured_figures[0].axes[0]
+    assert occupancy_axis.get_title() == "MI bin occupancy: batch = 100"
+    assert occupancy_axis.xaxis.label.get_position()[0] == 0.5
+    assert occupancy_axis.yaxis.label.get_position()[1] == 0.5
+    assert len(occupancy_axis.tables) == 1
+    np.testing.assert_array_equal(occupancy_axis.get_xticks(), [0, 5, 10])
+    assert occupancy_axis.get_ylim()[1] >= 5.0 * 1.22
+
+    diversity_axis = captured_figures[1].axes[0]
+    bar_centers = [
+        patch.get_x() + patch.get_width() / 2
+        for patch in diversity_axis.patches
+    ]
+    bar_heights = [patch.get_height() for patch in diversity_axis.patches]
+    np.testing.assert_array_equal(
+        bar_centers,
+        [0, 1, 2, 3],
+    )
+    np.testing.assert_array_equal(
+        bar_heights,
+        [3, 4, 4, 5],
+    )
+    assert diversity_axis.get_xlabel() == "Minibatch number"
+    assert diversity_axis.get_ylabel() == "Number of unique FET.Et values"
+    assert diversity_axis.xaxis.label.get_position()[0] == 0.5
+    assert diversity_axis.yaxis.label.get_position()[1] == 0.5
+    np.testing.assert_allclose(diversity_axis.get_ylim(), [2.0, 6.0])
 
 
 def test_callback_collects_every_batch_and_plots_selected_batches(
@@ -123,17 +168,22 @@ def test_callback_collects_every_batch_and_plots_selected_batches(
         occupancy_kwargs["expected_counts"],
         [2.5, 1.5, 1.0],
     )
-    assert "epoch0000_batch000000_step000000007_bins0003_n000005" in (
-        occupancy_path.name
-    )
+    assert occupancy_kwargs["title"] == "MI bin occupancy: batch = 0"
+    assert occupancy_kwargs["metadata"] == {
+        "Epoch": 0,
+        "Global step": 7,
+        "Effective bins": 3,
+        "Minibatch size": 5,
+    }
+    assert occupancy_path.name == "mi_bin_occupancy_batch_0.png"
     assert occupancy_path.parent == tmp_path / "mi_diagnostics"
 
     assert len(histogram_calls) == 1
     unique_counts, histogram_path, histogram_kwargs = histogram_calls[0]
     assert unique_counts == [2, 1]
-    assert "epoch=0, minibatches=2, nominal minibatch size=5" in (
-        histogram_kwargs["title"]
-    )
+    assert histogram_kwargs["title"] == "Raw FET.Et diversity: epoch 0"
+    assert histogram_kwargs["xlabel"] == "Minibatch number"
+    assert histogram_kwargs["ylabel"] == "Number of unique FET.Et values"
     assert "epoch0000_batches000002_nominal_n000005" in histogram_path.name
     assert callback._unique_counts == []
 
@@ -161,7 +211,7 @@ def test_callback_is_inactive_outside_its_schedule(tmp_path: Path) -> None:
     assert not (tmp_path / "mi_diagnostics").exists()
 
 
-def test_callback_copies_plots_to_checkpoints_and_logs_mlflow(
+def test_callback_saves_plots_in_checkpoint_tree_and_logs_mlflow(
     tmp_path: Path,
     monkeypatch,
 ) -> None:
@@ -183,7 +233,7 @@ def test_callback_copies_plots_to_checkpoints_and_logs_mlflow(
         enabled=True,
         epochs=[0],
         batch_indices=[0],
-        checkpoint_root_dir=checkpoint_root,
+        output_root_dir=checkpoint_root / "plots",
         log_to_mlflow=True,
         mlflow_artifact_path="mi_diagnostics",
     )
@@ -205,18 +255,15 @@ def test_callback_copies_plots_to_checkpoints_and_logs_mlflow(
     )
     callback.on_train_epoch_end(trainer, module)
 
-    run_plots = sorted((tmp_path / "mi_diagnostics").glob("*.png"))
-    checkpoint_plots = sorted(
-        (checkpoint_root / "mi_diagnostics").glob("*.png")
+    run_plots = sorted(
+        (checkpoint_root / "plots" / "mi_diagnostics").glob("*.png")
     )
-    assert len(run_plots) == len(checkpoint_plots) == 2
-    assert [path.name for path in run_plots] == [
-        path.name for path in checkpoint_plots
-    ]
+    assert len(run_plots) == 2
 
     assert len(experiment.artifacts) == 2
     assert all(
-        Path(call["local_path"]).parent == checkpoint_root / "mi_diagnostics"
+        Path(call["local_path"]).parent
+        == checkpoint_root / "plots" / "mi_diagnostics"
         for call in experiment.artifacts
     )
     assert all(
@@ -263,10 +310,12 @@ def test_physics_ae_enables_binning_diagnostics_only_for_that_experiment(
     assert physics_ae.callbacks.binning.enabled is True
     assert list(physics_ae.callbacks.binning.epochs) == [0]
     assert list(physics_ae.callbacks.binning.batch_indices) == [0, 100, 400, 764]
+    output_root = Path(physics_ae.callbacks.binning.output_root_dir)
+    assert output_root.name == "plots"
+    assert output_root.parent.name == "diagnostics-test"
+    assert output_root.parent.parent.name == "physics_ae_models"
     assert physics_ae.callbacks.binning.output_subdir == "mi_diagnostics"
-    checkpoint_root = Path(physics_ae.callbacks.binning.checkpoint_root_dir)
-    assert checkpoint_root.parent.name == "physics_ae_models"
-    assert checkpoint_root.name == "diagnostics-test"
+    assert physics_ae.callbacks.binning.get("checkpoint_root_dir") is None
     assert physics_ae.callbacks.binning.log_to_mlflow is True
     assert physics_ae.callbacks.binning.mlflow_artifact_path == "mi_diagnostics"
     assert isinstance(

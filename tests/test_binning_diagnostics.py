@@ -129,6 +129,37 @@ def test_plotting_helpers_save_png_and_close_figures(
     np.testing.assert_allclose(diversity_axis.get_ylim(), [2.0, 6.0])
 
 
+def test_categorical_counts_can_cap_and_annotate_clipped_values(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    captured_figures = []
+    original_savefig = Figure.savefig
+
+    def capture_figure(figure, *args, **kwargs):
+        captured_figures.append(figure)
+        return original_savefig(figure, *args, **kwargs)
+
+    monkeypatch.setattr(Figure, "savefig", capture_figure)
+
+    output_path = plot_categorical_bin_counts(
+        counts=[2, 24, 5],
+        save_path=tmp_path / "capped.png",
+        title="Unique FET.Et values per MI bin: batch = 0",
+        y_axis_max=20,
+        annotate_clipped_values=True,
+        integer_y_ticks=True,
+    )
+
+    assert output_path.is_file()
+    axis = captured_figures[0].axes[0]
+    np.testing.assert_allclose(axis.get_ylim(), [0, 20])
+    assert [text.get_text() for text in axis.texts] == ["24"]
+    assert axis.texts[0].get_position() == (1, 19.2)
+    assert axis.texts[0].get_color() == "black"
+    assert np.all(np.mod(axis.get_yticks(), 1) == 0)
+
+
 def test_callback_collects_every_batch_and_plots_selected_batches(
     tmp_path: Path,
     monkeypatch,
@@ -227,6 +258,9 @@ def test_callback_collects_every_batch_and_plots_selected_batches(
     assert "expected_counts" not in unique_kwargs
     assert unique_kwargs["ylabel"] == "Number of unique FET.Et values"
     assert unique_kwargs["metadata"] == occupancy_kwargs["metadata"]
+    assert unique_kwargs["y_axis_max"] == 20
+    assert unique_kwargs["annotate_clipped_values"] is True
+    assert unique_kwargs["integer_y_ticks"] is True
 
     assert len(histogram_calls) == 1
     unique_counts, histogram_path, histogram_kwargs = histogram_calls[0]

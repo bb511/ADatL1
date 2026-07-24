@@ -9,6 +9,7 @@ matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 import mplhep as hep
 import numpy as np
+from matplotlib.ticker import MaxNLocator
 from pathvalidate import sanitize_filename
 
 
@@ -23,6 +24,9 @@ def plot_categorical_bin_counts(
     xlabel: str = "Bin ID",
     ylabel: str = "Number of events in minibatch",
     metadata: Mapping[str, object] | None = None,
+    y_axis_max: float | None = None,
+    annotate_clipped_values: bool = False,
+    integer_y_ticks: bool = False,
 ) -> Path:
     """Save observed categorical counts and an optional expected-count reference."""
     observed = np.asarray(counts)
@@ -43,6 +47,10 @@ def plot_categorical_bin_counts(
             raise ValueError(
                 "expected_counts must contain finite, non-negative values."
             )
+    if y_axis_max is not None:
+        y_axis_max = float(y_axis_max)
+        if not np.isfinite(y_axis_max) or y_axis_max <= 0:
+            raise ValueError("y_axis_max must be finite and greater than zero.")
 
     output_path = _png_output_path(save_path)
     output_path.parent.mkdir(parents=True, exist_ok=True)
@@ -79,11 +87,31 @@ def plot_categorical_bin_counts(
             ax.set_xlim(-0.6, observed.size - 0.4)
             ax.tick_params(axis="x", labelsize=14, pad=8)
 
-            maxima = [float(observed.max())]
-            if expected is not None:
-                maxima.append(float(expected.max()))
-            y_max = max(max(maxima) * 1.22, 1.0)
-            ax.set_ylim(0, y_max)
+            if y_axis_max is None:
+                maxima = [float(observed.max())]
+                if expected is not None:
+                    maxima.append(float(expected.max()))
+                y_max = max(max(maxima) * 1.22, 1.0)
+                ax.set_ylim(0, y_max)
+            else:
+                ax.set_ylim(0, y_axis_max)
+                if annotate_clipped_values:
+                    for bin_id, count in enumerate(observed):
+                        if float(count) <= y_axis_max:
+                            continue
+                        ax.text(
+                            bin_id,
+                            y_axis_max * 0.96,
+                            f"{float(count):g}",
+                            ha="center",
+                            va="top",
+                            color="black",
+                            fontsize=10,
+                            fontweight="bold",
+                            zorder=4,
+                        )
+            if integer_y_ticks:
+                ax.yaxis.set_major_locator(MaxNLocator(integer=True))
 
             if metadata:
                 rows = [[str(label), str(value)] for label, value in metadata.items()]

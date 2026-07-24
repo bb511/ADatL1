@@ -169,6 +169,9 @@ class BinningDiagnosticsCallback(Callback):
             xlabel="Bin ID",
             ylabel=f"Number of unique {variable} values",
             metadata=metadata,
+            y_axis_max=20,
+            annotate_clipped_values=True,
+            integer_y_ticks=True,
         )
         self._publish_plot(trainer, unique_output_path)
 

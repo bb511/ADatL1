@@ -13,6 +13,7 @@ from src.callbacks.binning import BinningDiagnosticsCallback
 from src.data.sensitive_binning import FixedQuantileSensitiveBinner
 from src.plot.histogram import (
     plot_categorical_bin_counts,
+    plot_fixed_bin_widths,
     plot_minibatch_scalar_histogram,
 )
 
@@ -27,6 +28,8 @@ class _DiagnosticModule:
         self.sensitive_binner.fit_stats = {
             "num_bins_effective": 3,
             "counts": [50, 30, 20],
+            "min": 0.0,
+            "max": 4.0,
         }
         self.extraction_calls = 0
 
@@ -71,6 +74,11 @@ def test_plotting_helpers_save_png_and_close_figures(
             "Minibatch size": 31,
         },
     )
+    bin_widths_path = plot_fixed_bin_widths(
+        widths=[0.25, 0.5, 1.0],
+        save_path=tmp_path / "bin_widths.png",
+        title="Fixed MI bin widths: epoch = 0",
+    )
     diversity_path = plot_minibatch_scalar_histogram(
         values=[3, 4, 4, 5],
         save_path=tmp_path / "diversity.png",
@@ -78,6 +86,7 @@ def test_plotting_helpers_save_png_and_close_figures(
     )
 
     assert occupancy_path.read_bytes().startswith(b"\x89PNG\r\n\x1a\n")
+    assert bin_widths_path.read_bytes().startswith(b"\x89PNG\r\n\x1a\n")
     assert diversity_path.read_bytes().startswith(b"\x89PNG\r\n\x1a\n")
     assert tuple(plt.get_fignums()) == initial_figures
 
@@ -89,7 +98,17 @@ def test_plotting_helpers_save_png_and_close_figures(
     np.testing.assert_array_equal(occupancy_axis.get_xticks(), [0, 5, 10])
     assert occupancy_axis.get_ylim()[1] >= 5.0 * 1.22
 
-    diversity_axis = captured_figures[1].axes[0]
+    bin_widths_axis = captured_figures[1].axes[0]
+    assert bin_widths_axis.get_title() == "Fixed MI bin widths: epoch = 0"
+    assert bin_widths_axis.get_xlabel() == "Bin ID"
+    assert bin_widths_axis.get_ylabel() == "Bin width ΔFET.Et"
+    np.testing.assert_array_equal(bin_widths_axis.get_xticks(), [0])
+    np.testing.assert_allclose(
+        bin_widths_axis.patches[0].get_data().values,
+        [0.25, 0.5, 1.0],
+    )
+
+    diversity_axis = captured_figures[2].axes[0]
     bar_centers = [
         patch.get_x() + patch.get_width() / 2
         for patch in diversity_axis.patches
@@ -115,6 +134,7 @@ def test_callback_collects_every_batch_and_plots_selected_batches(
     monkeypatch,
 ) -> None:
     occupancy_calls = []
+    bin_width_calls = []
     histogram_calls = []
 
     def capture_occupancy(counts, save_path, **kwargs):
@@ -122,6 +142,9 @@ def test_callback_collects_every_batch_and_plots_selected_batches(
 
     def capture_histogram(values, save_path, **kwargs):
         histogram_calls.append((list(values), Path(save_path), kwargs))
+
+    def capture_bin_widths(widths, save_path, **kwargs):
+        bin_width_calls.append((np.asarray(widths), Path(save_path), kwargs))
 
     monkeypatch.setattr(
         binning_callback_module,
@@ -132,6 +155,11 @@ def test_callback_collects_every_batch_and_plots_selected_batches(
         binning_callback_module,
         "plot_minibatch_scalar_histogram",
         capture_histogram,
+    )
+    monkeypatch.setattr(
+        binning_callback_module,
+        "plot_fixed_bin_widths",
+        capture_bin_widths,
     )
 
     callback = BinningDiagnosticsCallback(
@@ -161,6 +189,13 @@ def test_callback_collects_every_batch_and_plots_selected_batches(
     callback.on_train_epoch_end(trainer, module)
 
     assert module.extraction_calls == 2
+    assert len(bin_width_calls) == 1
+    fitted_widths, bin_width_path, bin_width_kwargs = bin_width_calls[0]
+    np.testing.assert_array_equal(fitted_widths, [1.0, 1.0, 2.0])
+    assert bin_width_path.name == "mi_bin_widths_epoch0000.png"
+    assert bin_width_kwargs["title"] == "Fixed MI bin widths: epoch = 0"
+    assert bin_width_kwargs["ylabel"] == "Bin width ΔFET.Et"
+
     assert len(occupancy_calls) == 1
     observed, occupancy_path, occupancy_kwargs = occupancy_calls[0]
     np.testing.assert_array_equal(observed, [2, 0, 3])
@@ -258,9 +293,9 @@ def test_callback_saves_plots_in_checkpoint_tree_and_logs_mlflow(
     run_plots = sorted(
         (checkpoint_root / "plots" / "mi_diagnostics").glob("*.png")
     )
-    assert len(run_plots) == 2
+    assert len(run_plots) == 3
 
-    assert len(experiment.artifacts) == 2
+    assert len(experiment.artifacts) == 3
     assert all(
         Path(call["local_path"]).parent
         == checkpoint_root / "plots" / "mi_diagnostics"

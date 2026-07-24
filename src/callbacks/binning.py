@@ -12,6 +12,7 @@ from pytorch_lightning.loggers import MLFlowLogger
 from src.callbacks.utils import mlflow_plot_gallery
 from src.plot.histogram import (
     plot_categorical_bin_counts,
+    plot_fixed_bin_widths,
     plot_minibatch_scalar_histogram,
 )
 
@@ -67,8 +68,18 @@ class BinningDiagnosticsCallback(Callback):
         if not self._is_scheduled_epoch(trainer) or not self._is_global_zero(trainer):
             return
 
-        self._validate_fitted_binner(pl_module)
+        binner, _, _ = self._validate_fitted_binner(pl_module)
         self._nominal_batch_size = self._get_nominal_batch_size(trainer)
+
+        epoch = int(trainer.current_epoch)
+        bin_widths = self._fixed_bin_widths(binner)
+        output_path = plot_fixed_bin_widths(
+            bin_widths,
+            self._output_dir(trainer) / f"mi_bin_widths_epoch{epoch:04d}.png",
+            title=f"Fixed MI bin widths: epoch = {epoch}",
+            ylabel=f"Bin width Δ{binner.variable}",
+        )
+        self._publish_plot(trainer, output_path)
 
     def on_train_batch_end(
         self,
@@ -289,3 +300,28 @@ class BinningDiagnosticsCallback(Callback):
         if any(value < 0 for value in indices):
             raise ValueError(f"{name} must contain only non-negative integers.")
         return indices
+
+    @staticmethod
+    def _fixed_bin_widths(binner) -> np.ndarray:
+        """Return finite bin widths bounded by the fitted training range."""
+        stats = binner.fit_stats
+        try:
+            fitted_min = float(stats["min"])
+            fitted_max = float(stats["max"])
+        except (KeyError, TypeError, ValueError) as error:
+            raise RuntimeError(
+                "fit_stats must contain finite 'min' and 'max' values "
+                "to plot fixed MI bin widths."
+            ) from error
+
+        internal_edges = binner.bin_edges.detach().cpu().numpy().astype(float)
+        boundaries = np.concatenate(
+            ([fitted_min], internal_edges, [fitted_max])
+        )
+        widths = np.diff(boundaries)
+        if not np.all(np.isfinite(widths)) or np.any(widths < 0):
+            raise RuntimeError(
+                "Fitted training bounds and fixed bin edges must be finite "
+                "and monotonically increasing."
+            )
+        return widths

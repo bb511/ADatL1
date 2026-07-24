@@ -162,6 +162,54 @@ def plot_minibatch_scalar_histogram(
     return output_path
 
 
+def plot_fixed_bin_widths(
+    widths: Sequence[int | float] | np.ndarray,
+    save_path: Path | str,
+    *,
+    title: str,
+    xlabel: str = "Bin ID",
+    ylabel: str = "Bin width ΔFET.Et",
+) -> Path:
+    """Plot the numerical width covered by every fitted fixed MI bin."""
+    bin_widths = np.asarray(widths, dtype=float)
+    if bin_widths.ndim != 1 or bin_widths.size == 0:
+        raise ValueError("widths must be a non-empty one-dimensional array.")
+    if not np.all(np.isfinite(bin_widths)) or np.any(bin_widths < 0):
+        raise ValueError("widths must contain finite, non-negative values.")
+
+    output_path = _png_output_path(save_path)
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    bin_ids = np.arange(bin_widths.size)
+    histogram_edges = np.arange(bin_widths.size + 1) - 0.5
+
+    with plt.style.context(hep.style.CMS):
+        fig, ax = plt.subplots(figsize=(16, 7))
+        fig.subplots_adjust(left=0.11, right=0.96, bottom=0.16, top=0.88)
+        try:
+            ax.stairs(
+                bin_widths,
+                histogram_edges,
+                fill=True,
+                color="C0",
+                alpha=0.8,
+                linewidth=1.5,
+            )
+            ax.set_title(title)
+            ax.set_xlabel(xlabel, fontsize=20, loc="center", labelpad=14)
+            ax.set_ylabel(ylabel, fontsize=20, loc="center", labelpad=14)
+            ax.set_xticks(np.arange(0, bin_widths.size, 5))
+            ax.set_xticks(bin_ids, minor=True)
+            ax.set_xlim(-0.5, bin_widths.size - 0.5)
+            ax.set_ylim(0, max(float(bin_widths.max()) * 1.08, 1e-12))
+            ax.tick_params(axis="x", labelsize=14, pad=8)
+            ax.grid(axis="y", alpha=0.25)
+            fig.savefig(output_path, bbox_inches="tight")
+        finally:
+            plt.close(fig)
+
+    return output_path
+
+
 def _png_output_path(save_path: Path | str) -> Path:
     output_path = Path(save_path)
     if output_path.suffix.lower() != ".png":

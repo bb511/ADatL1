@@ -17,6 +17,7 @@ def plot_categorical_bin_counts(
     save_path: Path | str,
     *,
     title: str,
+    observed_label: str = "Observed minibatch counts",
     expected_counts: Sequence[float] | np.ndarray | None = None,
     expected_label: str = "Expected from full training-set proportions",
     xlabel: str = "Bin ID",
@@ -56,7 +57,7 @@ def plot_categorical_bin_counts(
                 observed,
                 color="C0",
                 alpha=0.75,
-                label="Observed minibatch counts",
+                label=observed_label,
             )
             if expected is not None:
                 ax.plot(

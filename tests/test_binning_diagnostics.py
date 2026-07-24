@@ -196,7 +196,7 @@ def test_callback_collects_every_batch_and_plots_selected_batches(
     assert bin_width_kwargs["title"] == "Fixed MI bin widths: epoch = 0"
     assert bin_width_kwargs["ylabel"] == "Bin width ΔFET.Et"
 
-    assert len(occupancy_calls) == 1
+    assert len(occupancy_calls) == 2
     observed, occupancy_path, occupancy_kwargs = occupancy_calls[0]
     np.testing.assert_array_equal(observed, [2, 0, 3])
     np.testing.assert_allclose(
@@ -212,6 +212,21 @@ def test_callback_collects_every_batch_and_plots_selected_batches(
     }
     assert occupancy_path.name == "mi_bin_occupancy_batch_0.png"
     assert occupancy_path.parent == tmp_path / "mi_diagnostics"
+
+    unique_per_bin, unique_path, unique_kwargs = occupancy_calls[1]
+    np.testing.assert_array_equal(unique_per_bin, [1, 0, 1])
+    assert unique_path.name == "mi_bin_unique_values_batch_0.png"
+    assert (
+        unique_kwargs["title"]
+        == "Unique FET.Et values per MI bin: batch = 0"
+    )
+    assert (
+        unique_kwargs["observed_label"]
+        == "Unique finite FET.Et values in minibatch"
+    )
+    assert "expected_counts" not in unique_kwargs
+    assert unique_kwargs["ylabel"] == "Number of unique FET.Et values"
+    assert unique_kwargs["metadata"] == occupancy_kwargs["metadata"]
 
     assert len(histogram_calls) == 1
     unique_counts, histogram_path, histogram_kwargs = histogram_calls[0]
@@ -293,9 +308,9 @@ def test_callback_saves_plots_in_checkpoint_tree_and_logs_mlflow(
     run_plots = sorted(
         (checkpoint_root / "plots" / "mi_diagnostics").glob("*.png")
     )
-    assert len(run_plots) == 3
+    assert len(run_plots) == 4
 
-    assert len(experiment.artifacts) == 3
+    assert len(experiment.artifacts) == 4
     assert all(
         Path(call["local_path"]).parent
         == checkpoint_root / "plots" / "mi_diagnostics"

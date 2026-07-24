@@ -118,6 +118,19 @@ class BinningDiagnosticsCallback(Callback):
             minibatch_size = int(bin_ids.numel())
             observed_counts = observed.cpu().numpy()
 
+            unique_values = torch.unique(finite_values)
+            unique_bin_ids = binner.transform_values(unique_values).flatten()
+            unique_counts = torch.bincount(
+                unique_bin_ids,
+                minlength=num_effective_bins,
+            )
+            if unique_counts.numel() != num_effective_bins:
+                raise RuntimeError(
+                    "Unique sensitive values exceeded the fitted "
+                    "effective-bin range."
+                )
+            unique_counts_per_bin = unique_counts.cpu().numpy()
+
         fit_total = float(fit_counts.sum())
         expected_counts = fit_counts / fit_total * minibatch_size
         epoch = int(trainer.current_epoch)
@@ -142,6 +155,22 @@ class BinningDiagnosticsCallback(Callback):
             metadata=metadata,
         )
         self._publish_plot(trainer, output_path)
+
+        variable = binner.variable
+        unique_output_path = plot_categorical_bin_counts(
+            unique_counts_per_bin,
+            self._output_dir(trainer)
+            / f"mi_bin_unique_values_batch_{int(batch_idx)}.png",
+            title=(
+                f"Unique {variable} values per MI bin: "
+                f"batch = {int(batch_idx)}"
+            ),
+            observed_label=f"Unique finite {variable} values in minibatch",
+            xlabel="Bin ID",
+            ylabel=f"Number of unique {variable} values",
+            metadata=metadata,
+        )
+        self._publish_plot(trainer, unique_output_path)
 
     def on_train_epoch_end(self, trainer, pl_module) -> None:
         """Render the per-minibatch raw-value-diversity distribution."""

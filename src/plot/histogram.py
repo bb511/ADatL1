@@ -239,6 +239,79 @@ def plot_fixed_bin_widths(
     return output_path
 
 
+def plot_histogram_counts(
+    counts: Sequence[int | float] | np.ndarray,
+    edges: Sequence[int | float] | np.ndarray,
+    save_path: Path | str,
+    *,
+    title: str,
+    xlabel: str,
+    ylabel: str = "Number of events",
+    metadata: Mapping[str, object] | None = None,
+) -> Path:
+    """Plot precomputed, unnormalized continuous-histogram counts."""
+    histogram_counts = np.asarray(counts)
+    histogram_edges = np.asarray(edges, dtype=float)
+    if histogram_counts.ndim != 1 or histogram_counts.size == 0:
+        raise ValueError("counts must be a non-empty one-dimensional array.")
+    if histogram_edges.shape != (histogram_counts.size + 1,):
+        raise ValueError("edges must contain exactly one more value than counts.")
+    if (
+        not np.all(np.isfinite(histogram_counts))
+        or np.any(histogram_counts < 0)
+    ):
+        raise ValueError("counts must contain finite, non-negative values.")
+    if (
+        not np.all(np.isfinite(histogram_edges))
+        or np.any(np.diff(histogram_edges) <= 0)
+    ):
+        raise ValueError("edges must be finite and strictly increasing.")
+
+    output_path = _png_output_path(save_path)
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+
+    with plt.style.context(hep.style.CMS):
+        fig, ax = plt.subplots(figsize=(14, 7))
+        fig.subplots_adjust(left=0.11, right=0.76, bottom=0.16, top=0.88)
+        try:
+            ax.stairs(
+                histogram_counts,
+                histogram_edges,
+                fill=True,
+                color="C0",
+                alpha=0.8,
+                linewidth=1.5,
+            )
+            ax.set_title(title)
+            ax.set_xlabel(xlabel, fontsize=20, loc="center", labelpad=14)
+            ax.set_ylabel(ylabel, fontsize=20, loc="center", labelpad=14)
+            ax.set_xlim(histogram_edges[0], histogram_edges[-1])
+            ax.set_ylim(
+                0,
+                max(float(histogram_counts.max()) * 1.12, 1.0),
+            )
+            ax.yaxis.set_major_locator(MaxNLocator(integer=True))
+            ax.grid(axis="y", alpha=0.25)
+
+            if metadata:
+                rows = [[str(label), str(value)] for label, value in metadata.items()]
+                table = ax.table(
+                    cellText=rows,
+                    cellLoc="left",
+                    bbox=[1.04, 0.36, 0.48, 0.52],
+                )
+                table.auto_set_font_size(False)
+                table.set_fontsize(10)
+                for row_idx in range(len(rows)):
+                    table[(row_idx, 0)].set_text_props(weight="bold")
+
+            fig.savefig(output_path, bbox_inches="tight")
+        finally:
+            plt.close(fig)
+
+    return output_path
+
+
 def _png_output_path(save_path: Path | str) -> Path:
     output_path = Path(save_path)
     if output_path.suffix.lower() != ".png":

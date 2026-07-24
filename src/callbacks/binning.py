@@ -13,6 +13,7 @@ from src.callbacks.utils import mlflow_plot_gallery
 from src.plot.histogram import (
     plot_categorical_bin_counts,
     plot_fixed_bin_widths,
+    plot_histogram_counts,
     plot_minibatch_scalar_histogram,
 )
 
@@ -30,6 +31,7 @@ class BinningDiagnosticsCallback(Callback):
         checkpoint_root_dir: str | Path | None = None,
         log_to_mlflow: bool = False,
         mlflow_artifact_path: str | None = None,
+        raw_histogram_bins: int = 50,
     ) -> None:
         super().__init__()
         self.enabled = bool(enabled)
@@ -51,6 +53,9 @@ class BinningDiagnosticsCallback(Callback):
             Path(checkpoint_root_dir) if checkpoint_root_dir is not None else None
         )
         self.log_to_mlflow = bool(log_to_mlflow)
+        self.raw_histogram_bins = int(raw_histogram_bins)
+        if self.raw_histogram_bins < 1:
+            raise ValueError("raw_histogram_bins must be at least 1.")
         self.mlflow_artifact_path = (
             mlflow_artifact_path
             if mlflow_artifact_path is not None
@@ -131,6 +136,12 @@ class BinningDiagnosticsCallback(Callback):
                 )
             unique_counts_per_bin = unique_counts.cpu().numpy()
 
+            (
+                raw_histogram_counts,
+                raw_histogram_edges,
+                raw_histogram_stats,
+            ) = self._raw_histogram(finite_values)
+
         fit_total = float(fit_counts.sum())
         expected_counts = fit_counts / fit_total * minibatch_size
         epoch = int(trainer.current_epoch)
@@ -174,6 +185,26 @@ class BinningDiagnosticsCallback(Callback):
             integer_y_ticks=True,
         )
         self._publish_plot(trainer, unique_output_path)
+
+        raw_output_path = plot_histogram_counts(
+            raw_histogram_counts,
+            raw_histogram_edges,
+            self._output_dir(trainer)
+            / f"raw_fet_et_histogram_batch_{int(batch_idx)}.png",
+            title=f"Raw {variable} distribution: batch = {int(batch_idx)}",
+            xlabel=f"Raw {variable} value",
+            ylabel="Number of events",
+            metadata={
+                **metadata,
+                "Finite values": raw_histogram_stats["finite_values"],
+                "Histogram bins": self.raw_histogram_bins,
+                "Min": raw_histogram_stats["min"],
+                "Max": raw_histogram_stats["max"],
+                "Mean": raw_histogram_stats["mean"],
+                "Std": raw_histogram_stats["std"],
+            },
+        )
+        self._publish_plot(trainer, raw_output_path)
 
     def on_train_epoch_end(self, trainer, pl_module) -> None:
         """Render the per-minibatch raw-value-diversity distribution."""
@@ -357,3 +388,61 @@ class BinningDiagnosticsCallback(Callback):
                 "and monotonically increasing."
             )
         return widths
+
+    def _raw_histogram(
+        self,
+        finite_values: torch.Tensor,
+    ) -> tuple[np.ndarray, np.ndarray, dict[str, int | str]]:
+        """Compute raw-value histogram counts on-device and return small arrays."""
+        if finite_values.numel() == 0:
+            stats: dict[str, int | str] = {
+                "finite_values": 0,
+                "min": "n/a",
+                "max": "n/a",
+                "mean": "n/a",
+                "std": "n/a",
+            }
+            counts = torch.zeros(
+                self.raw_histogram_bins,
+                device=finite_values.device,
+                dtype=torch.float32,
+            )
+            edges = torch.linspace(
+                0.0,
+                1.0,
+                steps=self.raw_histogram_bins + 1,
+                device=finite_values.device,
+            )
+        else:
+            histogram_values = finite_values.float()
+            value_min = float(histogram_values.min().item())
+            value_max = float(histogram_values.max().item())
+            stats = {
+                "finite_values": int(histogram_values.numel()),
+                "min": f"{value_min:.6g}",
+                "max": f"{value_max:.6g}",
+                "mean": f"{float(histogram_values.mean().item()):.6g}",
+                "std": (
+                    f"{float(histogram_values.std(unbiased=False).item()):.6g}"
+                ),
+            }
+            if value_min == value_max:
+                half_width = max(abs(value_min) * 1e-3, 1e-6)
+                value_min -= half_width
+                value_max += half_width
+
+            counts = torch.histc(
+                histogram_values,
+                bins=self.raw_histogram_bins,
+                min=value_min,
+                max=value_max,
+            )
+            edges = torch.linspace(
+                value_min,
+                value_max,
+                steps=self.raw_histogram_bins + 1,
+                device=finite_values.device,
+                dtype=histogram_values.dtype,
+            )
+
+        return counts.cpu().numpy(), edges.cpu().numpy(), stats

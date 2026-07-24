@@ -14,6 +14,7 @@ from src.data.sensitive_binning import FixedQuantileSensitiveBinner
 from src.plot.histogram import (
     plot_categorical_bin_counts,
     plot_fixed_bin_widths,
+    plot_histogram_counts,
     plot_minibatch_scalar_histogram,
 )
 
@@ -79,6 +80,13 @@ def test_plotting_helpers_save_png_and_close_figures(
         save_path=tmp_path / "bin_widths.png",
         title="Fixed MI bin widths: epoch = 0",
     )
+    raw_histogram_path = plot_histogram_counts(
+        counts=[2, 3],
+        edges=[0.0, 1.0, 2.0],
+        save_path=tmp_path / "raw_histogram.png",
+        title="Raw FET.Et distribution: batch = 0",
+        xlabel="Raw FET.Et value",
+    )
     diversity_path = plot_minibatch_scalar_histogram(
         values=[3, 4, 4, 5],
         save_path=tmp_path / "diversity.png",
@@ -87,6 +95,7 @@ def test_plotting_helpers_save_png_and_close_figures(
 
     assert occupancy_path.read_bytes().startswith(b"\x89PNG\r\n\x1a\n")
     assert bin_widths_path.read_bytes().startswith(b"\x89PNG\r\n\x1a\n")
+    assert raw_histogram_path.read_bytes().startswith(b"\x89PNG\r\n\x1a\n")
     assert diversity_path.read_bytes().startswith(b"\x89PNG\r\n\x1a\n")
     assert tuple(plt.get_fignums()) == initial_figures
 
@@ -108,7 +117,19 @@ def test_plotting_helpers_save_png_and_close_figures(
         [0.25, 0.5, 1.0],
     )
 
-    diversity_axis = captured_figures[2].axes[0]
+    raw_histogram_axis = captured_figures[2].axes[0]
+    assert (
+        raw_histogram_axis.get_title()
+        == "Raw FET.Et distribution: batch = 0"
+    )
+    assert raw_histogram_axis.get_xlabel() == "Raw FET.Et value"
+    assert raw_histogram_axis.get_ylabel() == "Number of events"
+    np.testing.assert_allclose(
+        raw_histogram_axis.patches[0].get_data().values,
+        [2, 3],
+    )
+
+    diversity_axis = captured_figures[3].axes[0]
     bar_centers = [
         patch.get_x() + patch.get_width() / 2
         for patch in diversity_axis.patches
@@ -167,6 +188,7 @@ def test_callback_collects_every_batch_and_plots_selected_batches(
     occupancy_calls = []
     bin_width_calls = []
     histogram_calls = []
+    raw_histogram_calls = []
 
     def capture_occupancy(counts, save_path, **kwargs):
         occupancy_calls.append((np.asarray(counts), Path(save_path), kwargs))
@@ -176,6 +198,11 @@ def test_callback_collects_every_batch_and_plots_selected_batches(
 
     def capture_bin_widths(widths, save_path, **kwargs):
         bin_width_calls.append((np.asarray(widths), Path(save_path), kwargs))
+
+    def capture_raw_histogram(counts, edges, save_path, **kwargs):
+        raw_histogram_calls.append(
+            (np.asarray(counts), np.asarray(edges), Path(save_path), kwargs)
+        )
 
     monkeypatch.setattr(
         binning_callback_module,
@@ -191,6 +218,11 @@ def test_callback_collects_every_batch_and_plots_selected_batches(
         binning_callback_module,
         "plot_fixed_bin_widths",
         capture_bin_widths,
+    )
+    monkeypatch.setattr(
+        binning_callback_module,
+        "plot_histogram_counts",
+        capture_raw_histogram,
     )
 
     callback = BinningDiagnosticsCallback(
@@ -261,6 +293,21 @@ def test_callback_collects_every_batch_and_plots_selected_batches(
     assert unique_kwargs["y_axis_max"] == 20
     assert unique_kwargs["annotate_clipped_values"] is True
     assert unique_kwargs["integer_y_ticks"] is True
+
+    assert len(raw_histogram_calls) == 1
+    raw_counts, raw_edges, raw_path, raw_kwargs = raw_histogram_calls[0]
+    assert raw_counts.shape == (50,)
+    assert raw_edges.shape == (51,)
+    assert raw_counts.sum() == 5
+    assert raw_path.name == "raw_fet_et_histogram_batch_0.png"
+    assert raw_kwargs["title"] == "Raw FET.Et distribution: batch = 0"
+    assert raw_kwargs["xlabel"] == "Raw FET.Et value"
+    assert raw_kwargs["metadata"]["Finite values"] == 5
+    assert raw_kwargs["metadata"]["Histogram bins"] == 50
+    assert float(raw_kwargs["metadata"]["Min"]) == 0.2
+    assert float(raw_kwargs["metadata"]["Max"]) == 2.5
+    assert float(raw_kwargs["metadata"]["Mean"]) == 1.58
+    assert float(raw_kwargs["metadata"]["Std"]) == 1.12677
 
     assert len(histogram_calls) == 1
     unique_counts, histogram_path, histogram_kwargs = histogram_calls[0]
@@ -342,9 +389,9 @@ def test_callback_saves_plots_in_checkpoint_tree_and_logs_mlflow(
     run_plots = sorted(
         (checkpoint_root / "plots" / "mi_diagnostics").glob("*.png")
     )
-    assert len(run_plots) == 4
+    assert len(run_plots) == 5
 
-    assert len(experiment.artifacts) == 4
+    assert len(experiment.artifacts) == 5
     assert all(
         Path(call["local_path"]).parent
         == checkpoint_root / "plots" / "mi_diagnostics"
@@ -394,6 +441,7 @@ def test_physics_ae_enables_binning_diagnostics_only_for_that_experiment(
     assert physics_ae.callbacks.binning.enabled is True
     assert list(physics_ae.callbacks.binning.epochs) == [0]
     assert list(physics_ae.callbacks.binning.batch_indices) == [0, 100, 400, 764]
+    assert physics_ae.callbacks.binning.raw_histogram_bins == 50
     output_root = Path(physics_ae.callbacks.binning.output_root_dir)
     assert output_root.name == "plots"
     assert output_root.parent.name == "diagnostics-test"

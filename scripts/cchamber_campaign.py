@@ -25,6 +25,10 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Mapping, Sequence
 
+REPO_ROOT = Path(__file__).resolve().parents[1]
+if str(REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT))
+
 import mlflow
 import numpy as np
 import pandas as pd
@@ -39,7 +43,6 @@ from scripts.paper_pipeline import _selected_checkpoint_path, aggregate_results
 from src.data.components.causal_chamber import parse_intervention_name
 from src.utils.pairing.table import load_pair_table
 
-REPO_ROOT = Path(__file__).resolve().parents[1]
 load_dotenv(REPO_ROOT / ".env")
 
 MODELS = ("ae", "vae", "svdd", "realnvp")

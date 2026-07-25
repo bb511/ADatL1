@@ -14,6 +14,9 @@ The following updates supersede the working-tree snapshot later in this file:
   `/iopsstor/scratch/cscs/vjimenez/adatl1/deployments/cchamber_20260725_e8d35a2`
   at commit `e8d35a25410148457fb4e080096cb9e80bba1c2a`; exact-deployment
   compilation and 33 combined threshold/candidate-audit tests passed.
+- That exact deployment also passed the synthetic cloud gate: Python 3.10,
+  frozen uv lock, clean Git, writable scratch paths, all 76 paper configurations,
+  all 76 generated Slurm scripts, and the L1-shaped synthetic data contract.
 - The worktree was clean immediately after `7207044`.
 - The threshold-safe command path is code-ready, but inventory/canary execution
   remains intentionally gated until search selection and all 200 retrains exist.

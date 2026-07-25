@@ -414,11 +414,13 @@ def test_generated_slurm_workflow_is_resource_exact_and_syntax_valid(tmp_path) -
         assert "#SBATCH --partition=normal" in packed
         assert "#SBATCH --gpus-per-node=4" in packed
         assert "#SBATCH --ntasks-per-node=4" in packed
+        assert "#SBATCH --cpus-per-task=72" in packed
         assert "#SBATCH --mem=440G" in packed
         assert "#SBATCH --time=04:00:00" in packed
-        assert "#SBATCH --array=0-49" in packed
-        assert "--gpus-per-node=1 --mem=110G" in packed
+        assert "#SBATCH --array=0-49%16" in packed
+        assert "--cpus-per-task=72 --gpus-per-node=1 --mem=110G" in packed
     assert "#SBATCH --partition=debug" in debug
+    assert "#SBATCH --cpus-per-task=72" in debug
     assert "#SBATCH --array=0-3" in debug
     assert "indices=(0 50 100 150)" in debug
     assert 'dependency="afterok:${calibration_job}"' in workflow

@@ -291,6 +291,8 @@ def _artifact_classification(path: Path) -> str:
         or "process_measurement" in name
         or "system_group" in name
         or "pairing_robustness" in name
+        or "background_acceptance" in name
+        or "candidate_rank" in name
         or "family_seed_summary" in name
         or "target_seed_summary" in name
     ):
@@ -1338,6 +1340,7 @@ def _optional_status(
         "pairing_proxy_sensitivity",
         "background_acceptance_diagnostics",
         "candidate_audit_results",
+        "candidate_audit_provenance",
     ):
         if name not in records:
             statuses[name] = {
@@ -1353,6 +1356,194 @@ def _optional_status(
             "sha256": _sha256(path),
         }
     return statuses, resolved
+
+
+def _background_acceptance_outputs(
+    path: Path,
+    plan: Mapping[str, Any],
+) -> tuple[pd.DataFrame, pd.DataFrame]:
+    """Validate and summarize one operating-point estimate per reporting seed."""
+    required = {
+        "model",
+        "strategy",
+        "seed",
+        "manifest_index",
+        "test_normal_count",
+        "triggered_count",
+        "achieved_test_normal_acceptance",
+        "target_fpr",
+        "achieved_minus_target_fpr",
+        "wilson_95_ci_low",
+        "wilson_95_ci_high",
+    }
+    frame = pd.read_csv(path)
+    missing = required - set(frame.columns)
+    if missing:
+        raise ValueError(
+            "Background diagnostics are missing columns: " + ", ".join(sorted(missing))
+        )
+    frame = frame.loc[:, sorted(required)].copy()
+    for column in ("model", "strategy"):
+        frame[column] = frame[column].astype(str)
+    for column in ("seed", "manifest_index", "test_normal_count", "triggered_count"):
+        frame[column] = pd.to_numeric(frame[column], errors="raise").astype(int)
+    numeric = sorted(
+        required
+        - {
+            "model",
+            "strategy",
+            "seed",
+            "manifest_index",
+            "test_normal_count",
+            "triggered_count",
+        }
+    )
+    for column in numeric:
+        frame[column] = pd.to_numeric(frame[column], errors="raise").astype(float)
+    if not np.isfinite(frame[numeric].to_numpy()).all():
+        raise ValueError("Background diagnostics contain non-finite values.")
+    keys = ["model", "strategy", "seed"]
+    expected = pd.MultiIndex.from_product(
+        [
+            list(map(str, plan["models"])),
+            list(map(str, plan["strategies"])),
+            list(map(int, plan["reporting_seeds"])),
+        ],
+        names=keys,
+    )
+    observed = pd.MultiIndex.from_frame(frame[keys])
+    if (
+        frame.duplicated(keys).any()
+        or len(expected.difference(observed))
+        or len(observed.difference(expected))
+        or frame["manifest_index"].duplicated().any()
+    ):
+        raise ValueError("Background diagnostics do not have exact model/strategy/seed coverage.")
+    if not (
+        (frame["test_normal_count"] > 0)
+        & (frame["triggered_count"] >= 0)
+        & (frame["triggered_count"] <= frame["test_normal_count"])
+        & frame["achieved_test_normal_acceptance"].between(0.0, 1.0)
+        & frame["target_fpr"].between(0.0, 1.0)
+        & frame["wilson_95_ci_low"].between(0.0, 1.0)
+        & frame["wilson_95_ci_high"].between(0.0, 1.0)
+    ).all():
+        raise ValueError("Background diagnostic counts or probabilities are invalid.")
+    achieved = frame["triggered_count"] / frame["test_normal_count"]
+    if (
+        not np.allclose(achieved, frame["achieved_test_normal_acceptance"], atol=1e-12)
+        or not np.allclose(
+            frame["achieved_test_normal_acceptance"] - frame["target_fpr"],
+            frame["achieved_minus_target_fpr"],
+            atol=1e-12,
+        )
+        or not (frame["wilson_95_ci_low"] <= frame["achieved_test_normal_acceptance"]).all()
+        or not (frame["achieved_test_normal_acceptance"] <= frame["wilson_95_ci_high"]).all()
+    ):
+        raise ValueError("Background diagnostic arithmetic or intervals are inconsistent.")
+
+    rows = []
+    for (model, strategy), group in frame.groupby(["model", "strategy"], sort=False):
+        interval = _mean_interval(group["achieved_test_normal_acceptance"])
+        rows.append(
+            {
+                "model": model,
+                "strategy": strategy,
+                "target_fpr": float(group["target_fpr"].iloc[0]),
+                "mean_acceptance": interval["mean"],
+                "std_across_seeds": interval["std"],
+                "ci_low": interval["ci_low"],
+                "ci_high": interval["ci_high"],
+                "mean_minus_target_fpr": float(group["achieved_minus_target_fpr"].mean()),
+                "max_abs_minus_target_fpr": float(group["achieved_minus_target_fpr"].abs().max()),
+                "n_reporting_seeds": interval["n_seeds"],
+                "total_test_normal_events": int(group["test_normal_count"].sum()),
+                "event_pooling_for_inference": False,
+            }
+        )
+    return frame.sort_values(keys, kind="stable"), pd.DataFrame(rows)
+
+
+def _candidate_rank_outputs(
+    results_path: Path,
+    provenance_path: Path,
+    plan: Mapping[str, Any],
+) -> pd.DataFrame:
+    """Authenticate and validate the prespecified candidate-rank association table."""
+    provenance = _read_json(provenance_path)
+    outputs = provenance.get("outputs")
+    if (
+        int(provenance.get("schema_version", -1)) != 1
+        or not isinstance(outputs, dict)
+        or outputs.get(results_path.name) != _sha256(results_path)
+        or int(provenance.get("n_permutations", -1)) != 10_000
+        or int(provenance.get("n_bootstrap_requested", -1)) != 10_000
+    ):
+        raise ValueError("Candidate-rank provenance is incomplete or inconsistent.")
+    frame = pd.read_csv(results_path, dtype={"model": str, "strategy": str, "metric": str})
+    required = {
+        "metric",
+        "model",
+        "strategy",
+        "spearman_rho",
+        "spearman_permutation_p",
+        "spearman_holm_p",
+        "kendall_tau_b",
+        "top_k",
+        "top_k_overlap",
+        "top_k_enrichment",
+        "top_k_oracle_regret",
+        "proxy_best_regret",
+        "bootstrap_spearman_ci_low",
+        "bootstrap_spearman_ci_high",
+        "n_permutations",
+        "n_bootstrap_requested",
+        "n_bootstrap_effective",
+        "n_bootstrap_effective_paired",
+        "holm_family_size",
+    }
+    missing = required - set(frame.columns)
+    if missing:
+        raise ValueError(
+            "Candidate-rank results are missing columns: " + ", ".join(sorted(missing))
+        )
+    keys = ["metric", "model", "strategy"]
+    expected = pd.MultiIndex.from_product(
+        [
+            list(map(str, plan["metrics"])),
+            list(map(str, plan["models"])),
+            list(map(str, plan["strategies"])),
+        ],
+        names=keys,
+    )
+    observed = pd.MultiIndex.from_frame(frame[keys])
+    if (
+        frame.duplicated(keys).any()
+        or len(expected.difference(observed))
+        or len(observed.difference(expected))
+    ):
+        raise ValueError(
+            "Candidate-rank results do not have exact metric/model/strategy coverage."
+        )
+    numeric = sorted(required - set(keys))
+    for column in numeric:
+        frame[column] = pd.to_numeric(frame[column], errors="raise")
+    if not np.isfinite(frame[numeric].to_numpy()).all():
+        raise ValueError("Candidate-rank results contain non-finite values.")
+    if (
+        not frame["spearman_rho"].between(-1.0, 1.0).all()
+        or not frame["kendall_tau_b"].between(-1.0, 1.0).all()
+        or not frame["spearman_permutation_p"].between(0.0, 1.0).all()
+        or not frame["spearman_holm_p"].between(0.0, 1.0).all()
+        or not (frame["holm_family_size"] == 20).all()
+        or not (frame["n_permutations"] == 10_000).all()
+        or not (frame["n_bootstrap_requested"] == 10_000).all()
+        or not (frame["n_bootstrap_effective"] > 0).all()
+        or not (frame["n_bootstrap_effective_paired"] > 0).all()
+        or not (frame["bootstrap_spearman_ci_low"] <= frame["bootstrap_spearman_ci_high"]).all()
+    ):
+        raise ValueError("Candidate-rank statistics violate their frozen contracts.")
+    return frame.sort_values(keys, kind="stable").reset_index(drop=True)
 
 
 def _write_report(
@@ -1500,6 +1691,52 @@ def analyze(
             "reason": "candidate_metrics and pairing_proxy_sensitivity are both required",
         }
 
+    if "background_acceptance_diagnostics" in optional_paths:
+        background_seed, background_summary = _background_acceptance_outputs(
+            optional_paths["background_acceptance_diagnostics"],
+            plan,
+        )
+        statuses["background_acceptance_analysis"] = {
+            "status": "completed",
+            "replicate_unit": "reporting seed",
+            "event_pooling_for_inference": False,
+        }
+        for name, table in (
+            ("background_acceptance_by_seed.csv", background_seed),
+            ("background_acceptance_summary.csv", background_summary),
+        ):
+            path = output_dir / name
+            table.to_csv(path, index=False)
+            outputs.append(path)
+    else:
+        statuses["background_acceptance_analysis"] = {
+            "status": "pending",
+            "reason": "background_acceptance_diagnostics is required",
+        }
+
+    if {
+        "candidate_audit_results",
+        "candidate_audit_provenance",
+    }.issubset(optional_paths):
+        candidate_rank = _candidate_rank_outputs(
+            optional_paths["candidate_audit_results"],
+            optional_paths["candidate_audit_provenance"],
+            plan,
+        )
+        statuses["candidate_rank_analysis"] = {
+            "status": "completed",
+            "holm_family": "20 model/strategy tests within each metric",
+            "candidate_panel_outcome_blind": True,
+        }
+        path = output_dir / "candidate_rank_associations.csv"
+        candidate_rank.to_csv(path, index=False)
+        outputs.append(path)
+    else:
+        statuses["candidate_rank_analysis"] = {
+            "status": "pending",
+            "reason": ("candidate_audit_results and candidate_audit_provenance are both required"),
+        }
+
     forest = output_dir / "confirmatory_contrast_forest.png"
     _plot_forest(contrasts, forest)
     outputs.append(forest)
@@ -1540,7 +1777,7 @@ def analyze(
             "campaign_id": campaign["campaign_id"],
             "inputs": {
                 name: {"path": str(path), "sha256": _sha256(path)}
-                for name, path in input_paths.items()
+                for name, path in {**input_paths, **optional_paths}.items()
             },
             "integrity_manifest": {
                 "path": str(integrity_manifest.expanduser().resolve()),

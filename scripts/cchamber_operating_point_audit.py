@@ -874,15 +874,17 @@ def _write_slurm_scripts(inventory_path: Path, output_root: Path) -> None:
             "#!/usr/bin/env bash\n"
             "#SBATCH --account=a0166\n#SBATCH --partition=normal\n"
             "#SBATCH --nodes=1\n#SBATCH --ntasks-per-node=4\n"
+            "#SBATCH --cpus-per-task=72\n"
             "#SBATCH --gpus-per-node=4\n#SBATCH --mem=440G\n"
-            "#SBATCH --time=04:00:00\n#SBATCH --array=0-49\n"
+            "#SBATCH --time=04:00:00\n#SBATCH --array=0-49%16\n"
             f"#SBATCH --job-name=cch-threshold-{stage}\n"
             + common
             + threshold
             + "pids=()\n"
             + "for slot in 0 1 2 3; do\n"
             + "  index=$((SLURM_ARRAY_TASK_ID * 4 + slot))\n"
-            + "  srun --exclusive --nodes=1 --ntasks=1 --gpus-per-node=1 --mem=110G "
+            + "  srun --exclusive --nodes=1 --ntasks=1 --cpus-per-task=72 "
+            + "--gpus-per-node=1 --mem=110G "
             + '"${UV[@]}" scripts/cchamber_operating_point_audit.py '
             + f'{command} --inventory "$INVENTORY" '
             + '--inventory-sha256 "$INVENTORY_SHA256" '
@@ -897,13 +899,15 @@ def _write_slurm_scripts(inventory_path: Path, output_root: Path) -> None:
     debug = (
         "#!/usr/bin/env bash\n"
         "#SBATCH --account=a0166\n#SBATCH --partition=debug\n"
-        "#SBATCH --nodes=1\n#SBATCH --ntasks=1\n#SBATCH --gpus-per-node=1\n"
+        "#SBATCH --nodes=1\n#SBATCH --ntasks=1\n#SBATCH --cpus-per-task=72\n"
+        "#SBATCH --gpus-per-node=1\n"
         "#SBATCH --mem=110G\n#SBATCH --time=00:30:00\n"
         "#SBATCH --array=0-3\n#SBATCH --job-name=cch-threshold-canary\n"
         + common
         + "indices=(0 50 100 150)\n"
         + 'index="${indices[$SLURM_ARRAY_TASK_ID]}"\n'
-        + 'srun --nodes=1 --ntasks=1 --gpus-per-node=1 --mem=110G "${UV[@]}" '
+        + "srun --nodes=1 --ntasks=1 --cpus-per-task=72 "
+        + '--gpus-per-node=1 --mem=110G "${UV[@]}" '
         + "scripts/cchamber_operating_point_audit.py calibrate-index "
         + '--inventory "$INVENTORY" --inventory-sha256 "$INVENTORY_SHA256" '
         + '--output-root "$OUTPUT_ROOT" --manifest-index "$index"\n'

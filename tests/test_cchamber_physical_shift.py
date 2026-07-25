@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import json
+import subprocess  # nosec B404
+import sys
 from pathlib import Path
 
 import numpy as np
@@ -8,7 +10,7 @@ import pandas as pd
 import pytest
 import torch
 
-from scripts import cchamber_physical_shift
+from scripts import cchamber_physical_shift, cchamber_physical_shift_slurm
 
 INTERVENTIONS = [
     "uniform_t_measure_mid",
@@ -82,6 +84,7 @@ def _synthetic_bundle(tmp_path: Path) -> dict[str, Path | np.ndarray]:
         "reporting_seeds": [1001, 1002],
         "data_seed": 7,
         "pool_sha256": {"ae": "pool-ae"},
+        "repository": str((tmp_path / "deployment").resolve()),
     }
     campaign_path = campaign_root / "campaign.json"
     _write_json(campaign_path, campaign)
@@ -111,7 +114,7 @@ def _synthetic_bundle(tmp_path: Path) -> dict[str, Path | np.ndarray]:
             },
         ],
     }
-    catalog_path = tmp_path / "physical_catalog.json"
+    catalog_path = campaign_root / "design" / cchamber_physical_shift_slurm.CATALOG_NAME
     _write_json(catalog_path, catalog)
     plan = {
         "schema_version": 1,
@@ -160,8 +163,32 @@ def _synthetic_bundle(tmp_path: Path) -> dict[str, Path | np.ndarray]:
             "prohibited": ["selection revision"],
         },
     }
-    plan_path = tmp_path / "physical_shift_plan.json"
+    plan_path = campaign_root / "design" / cchamber_physical_shift_slurm.PLAN_NAME
     _write_json(plan_path, plan)
+    freeze_path = campaign_root / "design" / cchamber_physical_shift_slurm.FREEZE_NAME
+    _write_json(
+        freeze_path,
+        {
+            "schema_version": 1,
+            "campaign_id": campaign["campaign_id"],
+            "campaign_git_commit": campaign["git_commit"],
+            "intervention_outcomes_inspected_before_freeze": False,
+            "files": {
+                "campaign": {
+                    "path": "../campaign.json",
+                    "sha256": campaign_hash,
+                },
+                "physical_intervention_catalog": {
+                    "path": catalog_path.name,
+                    "sha256": cchamber_physical_shift._sha256(catalog_path),
+                },
+                "physical_shift_estimand": {
+                    "path": plan_path.name,
+                    "sha256": cchamber_physical_shift._sha256(plan_path),
+                },
+            },
+        },
+    )
 
     selection = campaign_root / "selection"
     selection.mkdir(parents=True)
@@ -222,6 +249,12 @@ def _synthetic_bundle(tmp_path: Path) -> dict[str, Path | np.ndarray]:
         "catalog": catalog_path,
         "selection": selection_provenance,
         "selection_hash": cchamber_physical_shift._sha256(selection_provenance),
+        "freeze": freeze_path,
+        "freeze_hash": cchamber_physical_shift._sha256(freeze_path),
+        "deployment": tmp_path / "deployment",
+        "slurm_script": tmp_path / "slurm" / "physical-shift.sbatch",
+        "slurm_logs": tmp_path / "slurm" / "logs",
+        "scratch_root": tmp_path,
         "output": tmp_path / "physical-output",
         "output_second": tmp_path / "physical-output-second",
         "reference": reference,
@@ -453,3 +486,122 @@ def test_refuses_campaign_internal_output_and_estimators_match_definitions(
             np.ones((3, 1)),
             np.array([[1.0], [2.0], [3.0]]),
         )
+
+
+def test_slurm_wrapper_is_pinned_cpu_only_and_shell_valid(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Generation authenticates light inputs and leaves all data work to Slurm."""
+    bundle = _synthetic_bundle(tmp_path)
+    bundle["deployment"].mkdir()
+    monkeypatch.setattr(
+        cchamber_physical_shift_slurm,
+        "_require_campaign_deployment",
+        lambda campaign: bundle["deployment"].resolve(),
+    )
+    monkeypatch.setattr(
+        cchamber_physical_shift_slurm,
+        "_require_analysis_deployment",
+        lambda repository, commit: (bundle["deployment"].resolve(), "a" * 64),
+    )
+    # A generator must not open or authenticate intervention outcomes on the login node.
+    campaign = json.loads(bundle["campaign"].read_text())
+    intervention = next(
+        Path(record["path"])
+        for record in campaign["dataset_files"]
+        if Path(record["path"]).stem != "uniform_reference"
+    )
+    intervention.write_text("sealed outcome remains unread by generator\n", encoding="utf-8")
+
+    script = cchamber_physical_shift_slurm.generate_slurm(
+        campaign_root=bundle["campaign_root"],
+        freeze_manifest_sha256=bundle["freeze_hash"],
+        selection_provenance_sha256=bundle["selection_hash"],
+        output_dir=bundle["output"],
+        script_output=bundle["slurm_script"],
+        slurm_log_dir=bundle["slurm_logs"],
+        scratch_root=bundle["scratch_root"],
+        analysis_repository=bundle["deployment"],
+        analysis_commit="a" * 40,
+        uv=Path(sys.executable),
+    )
+
+    text = script.read_text(encoding="utf-8")
+    assert "#SBATCH --account=a0166" in text
+    assert "#SBATCH --partition=normal" in text
+    assert "#SBATCH --time=04:00:00" in text
+    assert "#SBATCH --cpus-per-task=72" in text
+    assert "#SBATCH --mem=120G" in text
+    assert "#SBATCH --gpus" not in text
+    assert "run --frozen --no-sync python scripts/cchamber_physical_shift.py" in text
+    assert 'sha256sum "$FREEZE"' in text
+    assert 'sha256sum "$SELECTION"' in text
+    assert not bundle["output"].exists()
+    subprocess.run(["bash", "-n", str(script)], check=True)  # nosec B603 B607
+
+
+def test_slurm_wrapper_rejects_unfrozen_or_internal_execution_paths(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """No job script is emitted for changed design or campaign-internal outputs."""
+    bundle = _synthetic_bundle(tmp_path)
+    bundle["deployment"].mkdir()
+    monkeypatch.setattr(
+        cchamber_physical_shift_slurm,
+        "_require_campaign_deployment",
+        lambda campaign: bundle["deployment"].resolve(),
+    )
+    monkeypatch.setattr(
+        cchamber_physical_shift_slurm,
+        "_require_analysis_deployment",
+        lambda repository, commit: (bundle["deployment"].resolve(), "a" * 64),
+    )
+    common = {
+        "campaign_root": bundle["campaign_root"],
+        "freeze_manifest_sha256": bundle["freeze_hash"],
+        "selection_provenance_sha256": bundle["selection_hash"],
+        "script_output": bundle["slurm_script"],
+        "slurm_log_dir": bundle["slurm_logs"],
+        "scratch_root": bundle["scratch_root"],
+        "analysis_repository": bundle["deployment"],
+        "analysis_commit": "a" * 40,
+        "uv": Path(sys.executable),
+    }
+    changed = json.loads(bundle["plan"].read_text())
+    changed["joint_shift"]["finite_sample_rule"] = "changed after freeze"
+    _write_json(bundle["plan"], changed)
+    with pytest.raises(ValueError, match="failed SHA-256 authentication"):
+        cchamber_physical_shift_slurm.generate_slurm(
+            output_dir=bundle["output"],
+            **common,
+        )
+    assert not bundle["slurm_script"].exists()
+
+    internal = _synthetic_bundle(tmp_path / "internal")
+    internal["deployment"].mkdir()
+    monkeypatch.setattr(
+        cchamber_physical_shift_slurm,
+        "_require_campaign_deployment",
+        lambda campaign: internal["deployment"].resolve(),
+    )
+    monkeypatch.setattr(
+        cchamber_physical_shift_slurm,
+        "_require_analysis_deployment",
+        lambda repository, commit: (internal["deployment"].resolve(), "a" * 64),
+    )
+    with pytest.raises(ValueError, match="outside the immutable campaign root"):
+        cchamber_physical_shift_slurm.generate_slurm(
+            campaign_root=internal["campaign_root"],
+            freeze_manifest_sha256=internal["freeze_hash"],
+            selection_provenance_sha256=internal["selection_hash"],
+            output_dir=internal["campaign_root"] / "physical-output",
+            script_output=internal["slurm_script"],
+            slurm_log_dir=internal["slurm_logs"],
+            scratch_root=internal["scratch_root"],
+            analysis_repository=internal["deployment"],
+            analysis_commit="a" * 40,
+            uv=Path(sys.executable),
+        )
+    assert not internal["slurm_script"].exists()

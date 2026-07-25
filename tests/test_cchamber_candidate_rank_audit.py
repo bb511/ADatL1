@@ -638,18 +638,69 @@ def test_canary_gate_rejects_fingerprint_divergence(tmp_path) -> None:
 
 
 def test_generated_slurm_scripts_are_packed_and_resource_exact(tmp_path) -> None:
-    """Generated production and debug launchers should match Clariden resources."""
+    """Generated GPU and CPU launchers should match bounded Clariden resources."""
     audit._write_slurm_scripts(tmp_path)
-    train = (tmp_path / "slurm" / "train_packed.sh").read_text(encoding="utf-8")
-    evaluate = (tmp_path / "slurm" / "evaluate_packed.sh").read_text(encoding="utf-8")
-    canary = (tmp_path / "slurm" / "debug_fingerprint_canary.sh").read_text(encoding="utf-8")
-    for script in (train, evaluate, canary):
+    scripts = tmp_path / "slurm"
+    train = (scripts / "train_packed.sh").read_text(encoding="utf-8")
+    evaluate = (scripts / "evaluate_packed.sh").read_text(encoding="utf-8")
+    canary = (scripts / "debug_fingerprint_canary.sh").read_text(encoding="utf-8")
+    timing = (scripts / "production_timing_canary.sh").read_text(encoding="utf-8")
+    freeze = (scripts / "freeze_checkpoints.sh").read_text(encoding="utf-8")
+    collect = (scripts / "collect.sh").read_text(encoding="utf-8")
+    analyze = (scripts / "analyze.sh").read_text(encoding="utf-8")
+    for script in (train, evaluate, canary, timing, freeze, collect, analyze):
         assert "#SBATCH --account=a0166" in script
+    for script in (train, evaluate, canary, timing):
         assert "--gpus-per-node=1 --mem=110G" in script
     assert "#SBATCH --partition=normal" in train
-    assert "#SBATCH --array=0-47" in train
+    assert "#SBATCH --array=0-47%16" in train
+    assert "#SBATCH --cpus-per-task=72" in train
+    assert "#SBATCH --time=04:00:00" in train
+    assert "--cpus-per-task=72 --gpus-per-node=1 --mem=110G" in train
+    assert "#SBATCH --array=0-47%16" in evaluate
+    assert "#SBATCH --cpus-per-task=72" in evaluate
+    assert "#SBATCH --time=04:00:00" in evaluate
     assert "SLURM_ARRAY_TASK_ID * 4 + slot" in train
     assert "--checkpoint-manifest-sha256" in evaluate
     assert "#SBATCH --partition=debug" in canary
-    for path in (tmp_path / "slurm").glob("*.sh"):
+    assert "#SBATCH --cpus-per-task=72" in canary
+    assert "run-train" in timing
+    assert "--trajectory-index 0" in timing
+    assert "#SBATCH --time=04:00:00" in timing
+    assert "freeze-checkpoints" in freeze
+    assert "#SBATCH --time=02:00:00" in freeze
+    assert "candidate_rank_audit.py collect" in collect
+    assert "#SBATCH --time=02:00:00" in collect
+    assert "candidate_rank_audit.py analyze" in analyze
+    assert "--n-permutations 10000 --n-bootstrap 10000" in analyze
+    assert "#SBATCH --time=04:00:00" in analyze
+    assert {path.name for path in scripts.glob("*.sh")} == {
+        "debug_fingerprint_canary.sh",
+        "production_timing_canary.sh",
+        "train_packed.sh",
+        "freeze_checkpoints.sh",
+        "evaluate_packed.sh",
+        "collect.sh",
+        "analyze.sh",
+        "submit_workflow.sh",
+    }
+    for path in scripts.glob("*.sh"):
         subprocess.run(["bash", "-n", str(path)], check=True)  # nosec B603 B607
+
+
+def test_generated_slurm_workflow_has_exact_afterok_chain(tmp_path) -> None:
+    """No heavy candidate-rank stage may race or execute on the login node."""
+    audit._write_slurm_scripts(tmp_path)
+    workflow = (tmp_path / "slurm" / "submit_workflow.sh").read_text(encoding="utf-8")
+    expected_dependencies = (
+        'timing_job=$(sbatch --parsable --dependency="afterok:${canary_job}"',
+        'training_job=$(sbatch --parsable --dependency="afterok:${timing_job}"',
+        'freeze_job=$(sbatch --parsable --dependency="afterok:${training_job}"',
+        'evaluation_job=$(sbatch --parsable --dependency="afterok:${freeze_job}"',
+        'collect_job=$(sbatch --parsable --dependency="afterok:${evaluation_job}"',
+        'analysis_job=$(sbatch --parsable --dependency="afterok:${collect_job}"',
+    )
+    positions = [workflow.index(fragment) for fragment in expected_dependencies]
+    assert positions == sorted(positions)
+    assert workflow.count("sbatch --parsable") == 7
+    assert "candidate_rank_audit.py" not in workflow

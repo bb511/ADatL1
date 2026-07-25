@@ -377,6 +377,115 @@ def test_analysis_rejects_hash_mismatch_before_creating_output(tmp_path) -> None
     assert not bundle["output"].exists()
 
 
+def test_analysis_integrates_background_and_candidate_rank_audits(tmp_path) -> None:
+    """Optional operating-point and rank audits become validated analysis tables."""
+    bundle = _frozen_bundle(tmp_path)
+    diagnostics_path = tmp_path / "threshold-sidecar" / "seed_level_operating_point.csv"
+    diagnostics_path.parent.mkdir()
+    diagnostics_rows = []
+    manifest_index = 0
+    for model in MODELS:
+        for strategy in STRATEGIES:
+            for seed_index, seed in enumerate(SEEDS):
+                triggered = 9 + seed_index
+                achieved = triggered / 1_000
+                diagnostics_rows.append(
+                    {
+                        "model": model,
+                        "strategy": strategy,
+                        "seed": seed,
+                        "manifest_index": manifest_index,
+                        "test_normal_count": 1_000,
+                        "triggered_count": triggered,
+                        "achieved_test_normal_acceptance": achieved,
+                        "target_fpr": 0.01,
+                        "achieved_minus_target_fpr": achieved - 0.01,
+                        "wilson_95_ci_low": max(0.0, achieved - 0.005),
+                        "wilson_95_ci_high": min(1.0, achieved + 0.005),
+                    }
+                )
+                manifest_index += 1
+    pd.DataFrame(diagnostics_rows).to_csv(diagnostics_path, index=False)
+
+    rank_path = tmp_path / "candidate-audit" / "analysis" / "rank_associations.csv"
+    rank_path.parent.mkdir(parents=True)
+    rank_rows = []
+    for metric in METRICS:
+        for model in MODELS:
+            for strategy in STRATEGIES:
+                rank_rows.append(
+                    {
+                        "metric": metric,
+                        "model": model,
+                        "strategy": strategy,
+                        "spearman_rho": 0.4,
+                        "spearman_permutation_p": 0.02,
+                        "spearman_holm_p": 0.4,
+                        "kendall_tau_b": 0.3,
+                        "top_k": 4,
+                        "top_k_overlap": 2,
+                        "top_k_enrichment": 0.05,
+                        "top_k_oracle_regret": 0.01,
+                        "proxy_best_regret": 0.02,
+                        "bootstrap_spearman_ci_low": 0.1,
+                        "bootstrap_spearman_ci_high": 0.7,
+                        "n_permutations": 10_000,
+                        "n_bootstrap_requested": 10_000,
+                        "n_bootstrap_effective": 9_900,
+                        "n_bootstrap_effective_paired": 9_800,
+                        "holm_family_size": 20,
+                    }
+                )
+    pd.DataFrame(rank_rows).to_csv(rank_path, index=False)
+    rank_provenance = rank_path.with_name("rank_analysis_provenance.json")
+    _write_json(
+        rank_provenance,
+        {
+            "schema_version": 1,
+            "n_permutations": 10_000,
+            "n_bootstrap_requested": 10_000,
+            "outputs": {rank_path.name: cchamber_paper_analysis._sha256(rank_path)},
+        },
+    )
+
+    integrity = json.loads(bundle["integrity"].read_text())
+    integrity["optional_artifacts"].update(
+        {
+            "background_acceptance_diagnostics": {
+                "path": str(diagnostics_path),
+                "sha256": cchamber_paper_analysis._sha256(diagnostics_path),
+            },
+            "candidate_audit_results": {
+                "path": str(rank_path),
+                "sha256": cchamber_paper_analysis._sha256(rank_path),
+            },
+            "candidate_audit_provenance": {
+                "path": str(rank_provenance),
+                "sha256": cchamber_paper_analysis._sha256(rank_provenance),
+            },
+        }
+    )
+    _write_json(bundle["integrity"], integrity)
+
+    cchamber_paper_analysis.analyze(
+        bundle["campaign_root"],
+        bundle["plan"],
+        bundle["taxonomy"],
+        bundle["integrity"],
+        bundle["output"],
+    )
+    background = pd.read_csv(bundle["output"] / "background_acceptance_summary.csv")
+    assert len(background) == len(MODELS) * len(STRATEGIES)
+    assert not background["event_pooling_for_inference"].any()
+    rank = pd.read_csv(bundle["output"] / "candidate_rank_associations.csv")
+    assert len(rank) == len(METRICS) * len(MODELS) * len(STRATEGIES)
+    status = json.loads((bundle["output"] / "component_status.json").read_text())
+    assert status["components"]["background_acceptance_analysis"]["status"] == "completed"
+    assert status["components"]["candidate_rank_analysis"]["status"] == "completed"
+    provenance = json.loads((bundle["output"] / "analysis_provenance.json").read_text())
+    assert "candidate_audit_provenance" in provenance["inputs"]
+
+
 def test_analysis_rejects_incomplete_result_coverage(tmp_path) -> None:
     """Missing factorial coverage is rejected even when its hash is updated."""
     bundle = _frozen_bundle(tmp_path)

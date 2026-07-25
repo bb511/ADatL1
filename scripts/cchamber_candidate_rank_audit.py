@@ -569,7 +569,7 @@ def design(
 
 
 def _write_slurm_scripts(root: Path) -> None:
-    """Write packed production and one-GPU debug canary launch scripts."""
+    """Write guarded canary, production, freeze, collection, and analysis jobs."""
     uv = shutil.which("uv")
     if uv is None:
         raise FileNotFoundError("uv is required to generate launch scripts.")
@@ -598,15 +598,18 @@ def _write_slurm_scripts(root: Path) -> None:
             "#!/usr/bin/env bash\n"
             "#SBATCH --account=a0166\n#SBATCH --partition=normal\n"
             "#SBATCH --nodes=1\n#SBATCH --ntasks-per-node=4\n"
+            "#SBATCH --cpus-per-task=72\n"
             "#SBATCH --gpus-per-node=4\n#SBATCH --mem=440G\n"
-            "#SBATCH --array=0-47\n"
+            "#SBATCH --time=04:00:00\n"
+            "#SBATCH --array=0-47%16\n"
             f"#SBATCH --job-name=cch-rank-{stage}\n"
             + common
             + freeze
             + "pids=()\n"
             + "for slot in 0 1 2 3; do\n"
             + "  index=$((SLURM_ARRAY_TASK_ID * 4 + slot))\n"
-            + "  srun --exclusive --nodes=1 --ntasks=1 --gpus-per-node=1 --mem=110G "
+            + "  srun --exclusive --nodes=1 --ntasks=1 --cpus-per-task=72 "
+            + "--gpus-per-node=1 --mem=110G "
             + '"${UV[@]}" scripts/cchamber_candidate_rank_audit.py '
             + f'run-{stage} --root "$AUDIT_ROOT" --audit-sha256 "$AUDIT_SHA256" '
             + freeze_arg
@@ -624,15 +627,103 @@ def _write_slurm_scripts(root: Path) -> None:
     canary = (
         "#!/usr/bin/env bash\n"
         "#SBATCH --account=a0166\n#SBATCH --partition=debug\n"
-        "#SBATCH --nodes=1\n#SBATCH --ntasks=1\n"
+        "#SBATCH --nodes=1\n#SBATCH --ntasks=1\n#SBATCH --cpus-per-task=72\n"
         "#SBATCH --gpus-per-node=1\n#SBATCH --mem=110G\n"
         "#SBATCH --time=00:30:00\n#SBATCH --job-name=cch-rank-canary\n"
         + common
-        + 'srun --nodes=1 --ntasks=1 --gpus-per-node=1 --mem=110G "${UV[@]}" '
+        + "srun --nodes=1 --ntasks=1 --cpus-per-task=72 "
+        + '--gpus-per-node=1 --mem=110G "${UV[@]}" '
         + "scripts/cchamber_candidate_rank_audit.py run-canary "
         + '--root "$AUDIT_ROOT" --audit-sha256 "$AUDIT_SHA256" --trajectory-index 0\n'
     )
     (scripts / "debug_fingerprint_canary.sh").write_text(canary, encoding="utf-8")
+
+    timing_canary = (
+        "#!/usr/bin/env bash\n"
+        "#SBATCH --account=a0166\n#SBATCH --partition=normal\n"
+        "#SBATCH --nodes=1\n#SBATCH --ntasks=1\n#SBATCH --cpus-per-task=72\n"
+        "#SBATCH --gpus-per-node=1\n#SBATCH --mem=110G\n"
+        "#SBATCH --time=04:00:00\n#SBATCH --job-name=cch-rank-timing\n"
+        + common
+        + "srun --nodes=1 --ntasks=1 --cpus-per-task=72 "
+        + '--gpus-per-node=1 --mem=110G "${UV[@]}" '
+        + "scripts/cchamber_candidate_rank_audit.py run-train "
+        + '--root "$AUDIT_ROOT" --audit-sha256 "$AUDIT_SHA256" --trajectory-index 0\n'
+    )
+    (scripts / "production_timing_canary.sh").write_text(timing_canary, encoding="utf-8")
+
+    freeze = (
+        "#!/usr/bin/env bash\n"
+        "#SBATCH --account=a0166\n#SBATCH --partition=normal\n"
+        "#SBATCH --nodes=1\n#SBATCH --ntasks=1\n#SBATCH --cpus-per-task=4\n"
+        "#SBATCH --mem=32G\n#SBATCH --time=02:00:00\n"
+        "#SBATCH --job-name=cch-rank-freeze\n"
+        + common
+        + 'srun --nodes=1 --ntasks=1 --cpus-per-task=4 "${UV[@]}" '
+        + "scripts/cchamber_candidate_rank_audit.py freeze-checkpoints "
+        + '--root "$AUDIT_ROOT" --audit-sha256 "$AUDIT_SHA256"\n'
+    )
+    (scripts / "freeze_checkpoints.sh").write_text(freeze, encoding="utf-8")
+
+    checkpoint_manifest = (
+        'CHECKPOINT_MANIFEST="$AUDIT_ROOT/checkpoint_manifest.json"\n'
+        'test -f "$CHECKPOINT_MANIFEST"\n'
+        "CHECKPOINT_SHA256=$(sha256sum \"$CHECKPOINT_MANIFEST\" | awk '{print $1}')\n"
+    )
+    collect = (
+        "#!/usr/bin/env bash\n"
+        "#SBATCH --account=a0166\n#SBATCH --partition=normal\n"
+        "#SBATCH --nodes=1\n#SBATCH --ntasks=1\n#SBATCH --cpus-per-task=4\n"
+        "#SBATCH --mem=64G\n#SBATCH --time=02:00:00\n"
+        "#SBATCH --job-name=cch-rank-collect\n"
+        + common
+        + checkpoint_manifest
+        + 'srun --nodes=1 --ntasks=1 --cpus-per-task=4 "${UV[@]}" '
+        + "scripts/cchamber_candidate_rank_audit.py collect "
+        + '--root "$AUDIT_ROOT" --audit-sha256 "$AUDIT_SHA256" '
+        + '--checkpoint-manifest-sha256 "$CHECKPOINT_SHA256"\n'
+    )
+    (scripts / "collect.sh").write_text(collect, encoding="utf-8")
+
+    analyze = (
+        "#!/usr/bin/env bash\n"
+        "#SBATCH --account=a0166\n#SBATCH --partition=normal\n"
+        "#SBATCH --nodes=1\n#SBATCH --ntasks=1\n#SBATCH --cpus-per-task=72\n"
+        "#SBATCH --mem=110G\n#SBATCH --time=04:00:00\n"
+        "#SBATCH --job-name=cch-rank-analyze\n"
+        + common
+        + checkpoint_manifest
+        + 'srun --nodes=1 --ntasks=1 --cpus-per-task=72 "${UV[@]}" '
+        + "scripts/cchamber_candidate_rank_audit.py analyze "
+        + '--root "$AUDIT_ROOT" --audit-sha256 "$AUDIT_SHA256" '
+        + '--checkpoint-manifest-sha256 "$CHECKPOINT_SHA256" '
+        + "--n-permutations 10000 --n-bootstrap 10000\n"
+    )
+    (scripts / "analyze.sh").write_text(analyze, encoding="utf-8")
+
+    workflow = (
+        "#!/usr/bin/env bash\n"
+        "set -euo pipefail\n"
+        'SCRIPT_DIR=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)\n'
+        'canary_job=$(sbatch --parsable "$SCRIPT_DIR/debug_fingerprint_canary.sh")\n'
+        'timing_job=$(sbatch --parsable --dependency="afterok:${canary_job}" '
+        '"$SCRIPT_DIR/production_timing_canary.sh")\n'
+        'training_job=$(sbatch --parsable --dependency="afterok:${timing_job}" '
+        '"$SCRIPT_DIR/train_packed.sh")\n'
+        'freeze_job=$(sbatch --parsable --dependency="afterok:${training_job}" '
+        '"$SCRIPT_DIR/freeze_checkpoints.sh")\n'
+        'evaluation_job=$(sbatch --parsable --dependency="afterok:${freeze_job}" '
+        '"$SCRIPT_DIR/evaluate_packed.sh")\n'
+        'collect_job=$(sbatch --parsable --dependency="afterok:${evaluation_job}" '
+        '"$SCRIPT_DIR/collect.sh")\n'
+        'analysis_job=$(sbatch --parsable --dependency="afterok:${collect_job}" '
+        '"$SCRIPT_DIR/analyze.sh")\n'
+        'printf "canary=%s\\ntiming=%s\\ntraining=%s\\nfreeze=%s\\n" '
+        '"$canary_job" "$timing_job" "$training_job" "$freeze_job"\n'
+        'printf "evaluation=%s\\ncollect=%s\\nanalysis=%s\\n" '
+        '"$evaluation_job" "$collect_job" "$analysis_job"\n'
+    )
+    (scripts / "submit_workflow.sh").write_text(workflow, encoding="utf-8")
     for path in scripts.glob("*.sh"):
         path.chmod(0o750)
 

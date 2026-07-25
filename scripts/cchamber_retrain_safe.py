@@ -97,6 +97,8 @@ def _build_overrides(
             "callbacks.clear_ckpts=null",
             "callbacks.last_epoch_ckpt=null",
             "callbacks.stable_ascore_operational_ckpt=null",
+            "evaluation.evaluator.ckpts.last=false",
+            "~evaluation.evaluator.ckpts.single.ascore_operational",
             "evaluation.callbacks.anomaly_auprc=null",
             "extras.print_config=false",
         ]

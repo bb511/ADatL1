@@ -44,4 +44,4 @@ def test_safe_retrain_disables_legacy_evaluation(monkeypatch, tmp_path: Path) ->
     assert cfg.evaluation.callbacks.anomaly_auprc is None
     assert cfg.evaluation.callbacks.cap_ref is not None
     assert cfg.evaluation.evaluator.ckpts.last is False
-    assert "ascore_operational" not in cfg.evaluation.evaluator.ckpts.single
+    assert "single" not in cfg.evaluation.evaluator.ckpts

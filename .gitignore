@@ -190,5 +190,9 @@ outputs
 # Untrack SLURM outputs:
 *.out
 
+# Stray files from mistyped CLI continuations.
+/--host
+/--port
+
 # Aim logging
 .aim

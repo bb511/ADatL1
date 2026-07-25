@@ -1,0 +1,56 @@
+# @package _global_
+
+# Local, data-free smoke test of the Causal Chamber experiment workflow. The callback
+# and checkpoint structure intentionally follows cchamber/base_agnostic; only
+# workload sizes and logging are reduced.
+defaults:
+  - /experiment/cchamber/base_agnostic
+  - override /data: synthetic
+  - override /logger: none
+  - _self_
+
+seed: 123
+tags: ["synthetic", "smoke"]
+
+experiment_name: synthetic_smoke
+
+data:
+  n_features: 8
+  n_train: 4096
+  n_val: 2048
+  n_test: 2048
+  batch_size: 512
+  max_val_batches: null
+  generator: gaussian_subspace
+  noise_std: 1.0
+  paired_reliability: 0.8
+  reference_shift: 0.15
+  reference_shift_dim: 1
+  anomaly_shift: 3.0
+  anomaly_dim: 0
+
+trainer:
+  min_epochs: 1
+  max_epochs: 3
+  log_every_n_steps: 1
+  enable_model_summary: false
+  enable_progress_bar: false
+
+callbacks:
+  model_summary: null
+  rich_progress_bar: null
+  cap_ref:
+    cap_metric_config:
+      n_epochs: 5
+
+evaluation:
+  callbacks:
+    model_summary: null
+    rich_progress_bar: null
+    cap_ref:
+      cap_metric_config:
+        n_epochs: 5
+
+extras:
+  enforce_tags: false
+  print_config: false

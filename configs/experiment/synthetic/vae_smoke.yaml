@@ -1,0 +1,54 @@
+# @package _global_
+
+defaults:
+  - override /data: synthetic
+  - override /algorithm: vae
+  - override /callbacks: default
+  - override /trainer: cpu
+  - override /evaluation: null
+  - override /evaluation/callbacks: null
+  - override /logger: mlflow
+  - _self_
+
+seed: 123
+tags: ["synthetic", "vae", "smoke"]
+
+experiment_name: synthetic
+run_name: vae_smoke
+
+data:
+  n_features: 8
+  n_train: 4096
+  n_val: 2048
+  n_test: 2048
+  batch_size: 512
+  max_val_batches: null
+  paper_aliases: false
+  generator: gaussian_subspace
+  noise_std: 1.0
+  reference_shift: 0.0
+  anomaly_shift: 4.0
+
+algorithm:
+  encoder:
+    in_dim: ${data.n_features}
+
+trainer:
+  min_epochs: 1
+  max_epochs: 2
+  limit_train_batches: 4
+  limit_val_batches: 2
+  limit_test_batches: 0
+  log_every_n_steps: 1
+  enable_model_summary: false
+  enable_progress_bar: true
+
+callbacks:
+  model_summary: null
+  log_data_mlflow: null
+
+test: false
+
+extras:
+  enforce_tags: false
+  print_config: false

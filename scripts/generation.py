@@ -407,9 +407,9 @@ def strategy_overrides_for(strategy: Strategy) -> tuple[str, ...]:
                 [
                     "data.pairing_strategy=random",
                     "callbacks.cap_ref.pairing_type=precomputed",
-                    "callbacks.cap_ref.pairing_index_path=$CCHAMBER_VALID_PAIR_TABLE",
+                    "+callbacks.cap_ref.pairing_index_path=$CCHAMBER_VALID_PAIR_TABLE",
                     "evaluation.callbacks.cap_ref.pairing_type=precomputed",
-                    "evaluation.callbacks.cap_ref.pairing_index_path=$CCHAMBER_TEST_PAIR_TABLE",
+                    "+evaluation.callbacks.cap_ref.pairing_index_path=$CCHAMBER_VALID_PAIR_TABLE",
                 ]
             )
         return tuple(overrides)
@@ -466,7 +466,9 @@ def disabled_overrides_for(dataset: Dataset, strategy: Strategy) -> tuple[str, .
     w1_key = f"w1dist_ema_normal_vs_{ref}"
     cap_callback_key = "cap_ref" if dataset == Dataset.CCHAMBER else "cap_sn_zb"
     cap_ckpt_key = "cap_ref_ema_ckpt" if dataset == Dataset.CCHAMBER else "cap_sn_zb_ema_ckpt"
-    reco_override = ("evaluation.callbacks.reco=null",) if dataset == Dataset.PHYSICS else ()
+    # Some physics algorithms define the reconstruction evaluator and others do
+    # not. ``++`` makes the generated override valid in both cases.
+    reco_override = ("++evaluation.callbacks.reco=null",) if dataset == Dataset.PHYSICS else ()
 
     if strategy == Strategy.SEMI_CVAR25:
         return (
@@ -633,15 +635,16 @@ def build_evaluate_overrides(
     trainer: str,
     devices: str,
     ckpt_path: str,
-    run_name: str,
 ) -> list[str]:
+    run_dir = checkpoint_run_dir(spec, Path(ckpt_path))
     overrides = [
         f"experiment={spec.experiment}",
-        f"experiment_name={spec.name}_evaluate",
-        f"run_name={run_name}",
+        f"paths.checkpoints_dir={run_dir.parent.parent}",
+        f"experiment_name={run_dir.parent.name}",
+        f"run_name={run_dir.name}",
         "train=false",
         "test=true",
-        f"ckpt_path={ckpt_path}",
+        "evaluation.evaluator.ckpts.last=false",
         f"seed={seed}",
         f"trainer={trainer}",
         f"trainer.devices={devices}",
@@ -650,7 +653,23 @@ def build_evaluate_overrides(
         overrides.append('paths.raw_data_dir="${RAW_DATA_DIR}"')
     overrides.extend(spec.fixed_overrides)
     overrides.extend(spec.strategy_overrides)
+    if spec.strategy == Strategy.CAP_ENCODER_NEAREST:
+        overrides.append(
+            "+evaluation.callbacks.cap_ref.pairing_test_index_path=$CCHAMBER_TEST_PAIR_TABLE"
+        )
+    overrides.extend(spec.disabled_overrides)
     return overrides
+
+
+def checkpoint_run_dir(spec: ExperimentSpecification, ckpt_path: Path) -> Path:
+    """Resolve the retrained run folder consumed by ``Evaluator.evaluate_run``."""
+    expected_parent = f"{spec.name}_retrain"
+    for candidate in ckpt_path.resolve().parents:
+        if candidate.parent.name == expected_parent:
+            return candidate
+    raise ValueError(
+        f"{ckpt_path} is not inside an {expected_parent}/<run_name> checkpoint folder."
+    )
 
 
 def storage_override_for(spec: ExperimentSpecification) -> str:
@@ -773,7 +792,7 @@ def retrain_commands_for(
             "# ]",
         ]
 
-    selections = load_json_list(selected_overrides_file)
+    selections = items_for_spec(load_json_list(selected_overrides_file), spec)
     commands = []
     for i, item in enumerate(selections):
         overrides = tuple(str(x) for x in item.get("overrides", []))
@@ -807,11 +826,10 @@ def evaluate_commands_for(
             "# ]",
         ]
 
-    checkpoints = load_json_list(ckpt_manifest_file)
+    checkpoints = items_for_spec(load_json_list(ckpt_manifest_file), spec)
     commands = []
-    for i, item in enumerate(checkpoints):
+    for item in checkpoints:
         seed = int(item.get("seed", spec.seeds[0]))
-        run_name = str(item.get("run_name", f"eval_{i:03d}"))
         ckpt_path = str(item["ckpt_path"])
         overrides = build_evaluate_overrides(
             spec,
@@ -819,7 +837,6 @@ def evaluate_commands_for(
             trainer=trainer,
             devices=devices,
             ckpt_path=ckpt_path,
-            run_name=run_name,
         )
         commands.append(render_train_command(overrides, multirun=False))
     return commands
@@ -833,6 +850,27 @@ def load_json_list(path: Path) -> list[dict[str, Any]]:
     if not all(isinstance(item, Mapping) for item in data):
         raise ValueError(f"{path} must contain a list of objects.")
     return [dict(item) for item in data]
+
+
+def items_for_spec(
+    items: Sequence[Mapping[str, Any]],
+    spec: ExperimentSpecification,
+) -> list[dict[str, Any]]:
+    """Filter a shared retrain/evaluation manifest for one experiment spec.
+
+    Manifests without ``spec_name`` retain the original single-spec behavior.  Once
+    any item declares ``spec_name``, all items must declare it so that a global paper
+    manifest cannot silently apply hyperparameters or checkpoints to the wrong model.
+    """
+    tagged = ["spec_name" in item for item in items]
+    if any(tagged) and not all(tagged):
+        raise ValueError("Either every manifest item or no manifest item must set spec_name.")
+    if not any(tagged):
+        return [dict(item) for item in items]
+    selected = [dict(item) for item in items if str(item["spec_name"]) == spec.name]
+    if not selected:
+        raise ValueError(f"Manifest contains no items for experiment spec {spec.name}.")
+    return selected
 
 
 def render_train_command(overrides: Sequence[str], *, multirun: bool) -> str:
@@ -865,22 +903,43 @@ def write_script(path: Path, commands: Sequence[str], spec: ExperimentSpecificat
         f"# Model: {spec.model.value}",
         f"# Strategy: {spec.strategy.value}",
         "",
-        f"cd {shlex.quote(str(REPO_ROOT))}",
+        'SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"',
+        'REPO_ROOT="${PROJECT_ROOT:-}"',
+        'if [[ -z "$REPO_ROOT" ]]; then',
+        '    candidate="$SCRIPT_DIR"',
+        '    while [[ "$candidate" != "/" ]]; do',
+        '        if [[ -f "$candidate/.project-root" && -f "$candidate/pyproject.toml" ]]; then',
+        '            REPO_ROOT="$candidate"',
+        "            break",
+        "        fi",
+        '        candidate="$(dirname -- "$candidate")"',
+        "    done",
+        "fi",
+        ': "${REPO_ROOT:?Set PROJECT_ROOT or place this script inside the adatl1 repository}"',
+        'cd "$REPO_ROOT"',
+        'command -v uv >/dev/null 2>&1 || { echo "uv is required but was not found" >&2; exit 1; }',
+        'test -f .python-version || { echo "Not inside the adatl1 repository: $REPO_ROOT" >&2; exit 1; }',
+        "",
     ]
     if spec.dataset == Dataset.PHYSICS:
         header.extend(
             [
-                'RAW_DATA_DIR="${RAW_DATA_DIR:-/path/to/adl1t_data/parquet_files}"',
+                f': "${{RAW_DATA_DIR:?Set RAW_DATA_DIR before running {spec.name}}}"',
+                'test -d "$RAW_DATA_DIR" || { echo "RAW_DATA_DIR is not a directory: $RAW_DATA_DIR" >&2; exit 1; }',
                 "",
             ]
         )
     else:
-        required_env = required_env_vars_for(spec)
+        required_env = required_env_vars_for(spec, commands)
         if required_env:
             header.extend(
                 [
                     *[
                         f': "${{{name}:?Set {name} before running {spec.name}}}"'
+                        for name in required_env
+                    ],
+                    *[
+                        f'test -f "${{{name}}}" || {{ echo "{name} is not a file: ${{{name}}}" >&2; exit 1; }}'
                         for name in required_env
                     ],
                     "",
@@ -892,21 +951,30 @@ def write_script(path: Path, commands: Sequence[str], spec: ExperimentSpecificat
     for idx, command in enumerate(commands, start=1):
         body.extend([f"# Command {idx}", command, ""])
 
+    path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text("\n".join(header + body), encoding="utf-8")
     path.chmod(0o755)
     return path
 
 
-def required_env_vars_for(spec: ExperimentSpecification) -> tuple[str, ...]:
+def required_env_vars_for(
+    spec: ExperimentSpecification,
+    commands: Sequence[str] = (),
+) -> tuple[str, ...]:
     overrides = [
         *spec.fixed_overrides,
         *spec.strategy_overrides,
         *spec.sweeper_overrides,
         *spec.disabled_overrides,
     ]
+    command_text = "\n".join(commands)
     required = []
     for name in ("CCHAMBER_VALID_PAIR_TABLE", "CCHAMBER_TEST_PAIR_TABLE"):
-        if any(f"${name}" in override or f"${{{name}}}" in override for override in overrides):
+        if (
+            any(f"${name}" in override or f"${{{name}}}" in override for override in overrides)
+            or f"${name}" in command_text
+            or f"${{{name}}}" in command_text
+        ):
             required.append(name)
     return tuple(required)
 

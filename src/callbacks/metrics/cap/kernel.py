@@ -1,4 +1,5 @@
-from typing import Optional, Callable
+from typing import Callable, Optional
+
 import torch
 from torch import Tensor, nn
 
@@ -24,44 +25,65 @@ class ApproximationCapacityKernel(nn.Module):
         self.total_samples = 0
 
     def compute_mutual_information(
-        self, prob1: Tensor, prob2: Tensor, beta: Optional[float] = None
+        self, prob1: Tensor, prob2: Tensor, beta: Optional[float | Tensor] = None
     ) -> Tensor:
-        """
-        Compute mutual information for relaxed hypothesis space (factorized form).
-        This is the original implementation but with different energy functions.
+        """Compute the factorized log partition-function ratio.
+
+        The log-space form is algebraically equivalent to explicit exponentiation, but remains
+        finite for large energies or inverse temperatures.
         """
         beta = self.beta if beta is None else beta
         dev = self.beta.device
+        prob1 = prob1.to(dev)
+        prob2 = prob2.to(dev)
+        beta = torch.as_tensor(beta, device=dev, dtype=prob1.dtype)
 
         # Compute energy:
         n = len(prob1)
-        ones = torch.ones(n, dtype=torch.int8, device=dev)
-        e1_0 = self.energy_fn(prob1.to(dev), 0 * ones)
-        e1_1 = self.energy_fn(prob1.to(dev), ones)
-        e2_0 = self.energy_fn(prob2.to(dev), 0 * ones)
-        e2_1 = self.energy_fn(prob2.to(dev), ones)
+        ones = torch.ones(n, dtype=prob1.dtype, device=dev)
+        zeros = torch.zeros_like(ones)
+        e1_0 = self.energy_fn(prob1, zeros)
+        e1_1 = self.energy_fn(prob1, ones)
+        e2_0 = self.energy_fn(prob2, zeros)
+        e2_1 = self.energy_fn(prob2, ones)
 
         # Factorized mutual information computation
-        num = torch.log(
-            torch.exp(-beta * (e1_0 + e2_0)) + torch.exp(-beta * (e1_1 + e2_1))
+        log_joint = torch.logsumexp(
+            torch.stack(
+                (-beta * (e1_0 + e2_0), -beta * (e1_1 + e2_1)),
+                dim=0,
+            ),
+            dim=0,
         )
-        den = torch.log(
-            (torch.exp(-beta * e1_0) + torch.exp(-beta * e1_1))
-            * (torch.exp(-beta * e2_0) + torch.exp(-beta * e2_1))
+        log_marginal_1 = torch.logsumexp(
+            torch.stack((-beta * e1_0, -beta * e1_1), dim=0),
+            dim=0,
         )
-        mi = torch.sum(num - den, dim=0)
-        return mi
+        log_marginal_2 = torch.logsumexp(
+            torch.stack((-beta * e2_0, -beta * e2_1), dim=0),
+            dim=0,
+        )
+        # Sum samples while preserving optional trailing candidate dimensions.
+        return torch.sum(
+            log_joint - log_marginal_1 - log_marginal_2,
+            dim=0,
+        )
 
     def forward(self, loss1: Tensor, loss2: Tensor):
-        """Forward pass with gradient computation. Used during optimization (unnormalized)."""
-        self.beta.data.clamp_(min=0.0)
+        """Forward pass with gradient computation.
+
+        Used during optimization (unnormalized).
+        """
         with torch.set_grad_enabled(True):
             cap = self.compute_mutual_information(loss1, loss2)
             self.cap = self.cap + cap.detach().to(self.cap.device)
             return cap if not self.normalize_gradients else cap / len(loss1)
 
-    def evaluate(self, loss1: Tensor, loss2: Tensor, beta: float):
-        """Evaluation without gradient computation. Tracks total_samples for normalization."""
+    def evaluate(self, loss1: Tensor, loss2: Tensor, beta: float | Tensor):
+        """Evaluation without gradient computation.
+
+        Tracks total_samples for normalization.
+        """
         with torch.set_grad_enabled(False):
             cap = self.compute_mutual_information(loss1, loss2, beta=beta)
             self.cap = self.cap + cap.cpu()
@@ -82,5 +104,8 @@ class ApproximationCapacityKernel(nn.Module):
 
     @property
     def module(self):
-        """Returns the kernel itself. It helps the kernel be accessed in both DDP and non-DDP mode."""
+        """Returns the kernel itself.
+
+        It helps the kernel be accessed in both DDP and non-DDP mode.
+        """
         return self

@@ -1,15 +1,23 @@
-from omegaconf import OmegaConf
-import torch
+import hashlib
 import re
 
-import hashlib
+import torch
+from omegaconf import OmegaConf
+from torch import nn
 
 
 def register_resolvers():
+    """OmegaConf resolvers allow us to perform operations in the .yaml configuration files.
+
+    Since these are needed for all my scripts, I will load all of them everywhere using this
+    function.
     """
-    OmegaConf resolvers allow us to perform operations in the .yaml configuration files. Since these are
-    needed for all my scripts, I will load all of them everywhere using this function.
-    """
+    # ``src.train`` registers these at import time. Utilities and tests may call
+    # this function again in the same process, so use the first resolver as the
+    # marker for the complete repository resolver set.
+    if OmegaConf.has_resolver("eval"):
+        return
+
     OmegaConf.register_new_resolver(
         "eval", eval
     )  # general: parse a str expression and evaluate it
@@ -53,9 +61,7 @@ def register_resolvers():
     OmegaConf.register_new_resolver(
         "scan_dirname",
         lambda scan_dictionary: "scan_"
-        + "_".join(
-            f"{skey}={svalue}" for skey, svalue in sorted(scan_dictionary.items())
-        ),
+        + "_".join(f"{skey}={svalue}" for skey, svalue in sorted(scan_dictionary.items())),
     )
     OmegaConf.register_new_resolver("short_hash", short_hash, replace=True)
     OmegaConf.register_new_resolver("reverse", lambda xs: list(reversed(xs)))

@@ -4,13 +4,12 @@ import os
 from pathlib import Path
 
 import hydra
+import rootutils
 import torch
 from dotenv import load_dotenv
 from hydra import compose, initialize_config_dir
 from hydra.core.global_hydra import GlobalHydra
 from omegaconf import DictConfig
-
-import rootutils
 
 rootutils.setup_root(__file__, indicator=".project-root", pythonpath=True)
 
@@ -47,6 +46,13 @@ def load_encoder_run(
 ):
     load_dotenv()
     os.environ.setdefault("KERAS_BACKEND", "torch")
+    if stage not in {"validate", "test"}:
+        raise ValueError("stage must be 'validate' or 'test'.")
+    checkpoint = Path(ckpt_path).expanduser().resolve()
+    if not checkpoint.is_file():
+        raise FileNotFoundError(f"Encoder checkpoint does not exist: {checkpoint}")
+    if str(device).startswith("cuda") and not torch.cuda.is_available():
+        raise RuntimeError(f"CUDA device requested but CUDA is unavailable: {device}")
 
     cfg = compose_config(config_dir=config_dir, config_name=config_name, overrides=overrides)
     datamodule = hydra.utils.instantiate(cfg.data)
@@ -54,7 +60,10 @@ def load_encoder_run(
     datamodule.setup(stage)
 
     model = hydra.utils.instantiate(cfg.algorithm)
-    state = torch.load(ckpt_path, map_location="cpu", weights_only=False)["state_dict"]
+    payload = torch.load(checkpoint, map_location="cpu", weights_only=False)
+    if not isinstance(payload, dict) or "state_dict" not in payload:
+        raise ValueError(f"Checkpoint does not contain a Lightning state_dict: {checkpoint}")
+    state = payload["state_dict"]
     model.load_state_dict(state, strict=True)
     if hasattr(model, "setup_pairing"):
         model.setup_pairing(datamodule, setup_lorentz=True)

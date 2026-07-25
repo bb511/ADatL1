@@ -1,16 +1,15 @@
+import pickle
 from collections import defaultdict
 from pathlib import Path
-import pickle
 
-import torch
 import numpy as np
+import torch
 from pytorch_lightning.callbacks import Callback
 from torchmetrics.classification import BinaryAveragePrecision
 
+from src.data.utils import unpack_batch
 from src.evaluation.callbacks import utils
 from src.plot import horizontal_bar
-from src.data.utils import unpack_batch
-
 from src.utils import pylogger
 
 log = pylogger.RankedLogger(__name__)
@@ -19,8 +18,8 @@ log = pylogger.RankedLogger(__name__)
 class AnomalyAUPRCCallback(Callback):
     """Calculates the AUPRC for each signal dataset against normal data.
 
-    Normal events are treated as class 0 and signal events as class 1.
-    The anomaly score is expected to increase with anomalousness.
+    Normal events are treated as class 0 and signal events as class 1. The anomaly score is
+    expected to increase with anomalousness.
 
     :param output_name: Name of the output dict entry used as anomaly score.
     :param ds: List of dataset names to compute AUPRC on.
@@ -63,9 +62,7 @@ class AnomalyAUPRCCallback(Callback):
         self.normal_score_data = []
         self.sig_score_data = defaultdict(list)
 
-    def on_test_batch_end(
-        self, trainer, pl_module, outputs, batch, batch_idx, dataloader_idx=0
-    ):
+    def on_test_batch_end(self, trainer, pl_module, outputs, batch, batch_idx, dataloader_idx=0):
         """Accumulate normal and signal scores for AUPRC computation."""
         dataset_name = list(trainer.test_dataloaders.keys())[dataloader_idx]
 
@@ -107,6 +104,18 @@ class AnomalyAUPRCCallback(Callback):
         plot_folder.mkdir(parents=True, exist_ok=True)
 
         auprcs = self._compute_auprcs()
+        utils.misc.write_metric_values(
+            plot_folder / "values.csv",
+            [
+                {
+                    "checkpoint": ckpt_name,
+                    "intervention": intervention,
+                    "metric": "auprc",
+                    "value": value,
+                }
+                for intervention, value in sorted(auprcs.items())
+            ],
+        )
 
         ckpt_ds = utils.misc.get_ckpt_ds_name(ckpt_name)
         auprc_data = np.fromiter(auprcs.values(), dtype=float)
@@ -171,15 +180,11 @@ class AnomalyAUPRCCallback(Callback):
         max_metric_value = self.auprc_summary[max_ckpt_name]
         return max_ckpt_name, max_metric_value
 
-    def _accumulate_normal_output(
-        self, batch_output: torch.Tensor, l1bit: torch.Tensor | None
-    ):
+    def _accumulate_normal_output(self, batch_output: torch.Tensor, l1bit: torch.Tensor | None):
         """Accumulate the normal score distribution across batches."""
         if self.pure_normal:
             if l1bit is None:
-                raise ValueError(
-                    "pure_normal=True requires l1bit to be present in the batch."
-                )
+                raise ValueError("pure_normal=True requires l1bit to be present in the batch.")
             batch_output = batch_output[~l1bit]
 
         self.normal_score_data.append(batch_output)
@@ -202,9 +207,7 @@ class AnomalyAUPRCCallback(Callback):
 
         return auprcs
 
-    def _average_precision(
-        self, normal_scores: torch.Tensor, sig_scores: torch.Tensor
-    ) -> float:
+    def _average_precision(self, normal_scores: torch.Tensor, sig_scores: torch.Tensor) -> float:
         """Compute binary average precision with normal=0 and signal=1."""
         preds = torch.cat([normal_scores, sig_scores], dim=0).float().cpu()
         target = torch.cat(

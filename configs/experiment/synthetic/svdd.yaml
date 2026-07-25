@@ -1,0 +1,18 @@
+# @package _global_
+
+defaults:
+  - /experiment/synthetic/base
+  - override /algorithm: svdd
+  - _self_
+
+tags: ["synthetic", "smoke", "svdd"]
+run_name: svdd_seed${seed}
+
+algorithm:
+  target_rate: 0.01
+  base_rate: null
+  encoder:
+    in_dim: ${data.n_features}
+    nodes: [32, 16, 8]
+  nu: 0.1
+  soft_boundary: false

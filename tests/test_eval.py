@@ -1,6 +1,9 @@
+import csv
+
 from hydra.core.hydra_config import HydraConfig
 from omegaconf import DictConfig, open_dict
 
+from src.evaluation.callbacks.utils.misc import write_metric_values
 from src.train import train
 
 
@@ -17,3 +20,28 @@ def test_train_skips_evaluator_when_unconfigured(cfg_train: DictConfig) -> None:
     _, objects = train(cfg_train)
 
     assert objects["evaluator"] is None
+
+
+def test_metric_values_use_the_pipeline_raw_csv_contract(tmp_path) -> None:
+    path = tmp_path / "values.csv"
+    write_metric_values(
+        path,
+        [
+            {
+                "checkpoint": "last",
+                "intervention": "synthetic_signal",
+                "metric": "auprc",
+                "value": 0.75,
+            }
+        ],
+    )
+
+    with path.open(newline="", encoding="utf-8") as handle:
+        assert list(csv.DictReader(handle)) == [
+            {
+                "checkpoint": "last",
+                "intervention": "synthetic_signal",
+                "metric": "auprc",
+                "value": "0.75",
+            }
+        ]

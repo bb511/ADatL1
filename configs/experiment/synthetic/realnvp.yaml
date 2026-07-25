@@ -1,0 +1,18 @@
+# @package _global_
+
+defaults:
+  - /experiment/synthetic/base
+  - override /algorithm: realnvp
+  - _self_
+
+tags: ["synthetic", "smoke", "realnvp"]
+run_name: realnvp_seed${seed}
+
+algorithm:
+  target_rate: 0.01
+  base_rate: null
+  flow:
+    input_dim: ${data.n_features}
+    n_flows: 4
+    hidden_dim: 32
+    n_hidden_layers: 2

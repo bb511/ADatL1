@@ -1,8 +1,10 @@
 import torch
 from pytorch_lightning import Callback
 
-from src.callbacks.metrics.cap.metric import ApproximationCapacity
 from src.callbacks.metrics.cap.binary import get_pairing_fn
+from src.callbacks.metrics.cap.metric import ApproximationCapacity
+from src.data.utils import unpack_batch
+from src.utils.pairing.table import load_pair_table, sha256_tensor
 
 
 class CAPCallback(Callback):
@@ -46,9 +48,9 @@ class CAPCallback(Callback):
         self.cap_metric_config = cap_metric_config
         self.pairing_type = pairing_type
         self.pairing_index_path = pairing_index_path
-        self.pairing_fn = (
-            None if pairing_type == "precomputed" else get_pairing_fn(pairing_type)
-        )
+        self.dataset_1_inputs = []
+        self.dataset_2_inputs = []
+        self.pairing_fn = None if pairing_type == "precomputed" else get_pairing_fn(pairing_type)
         self.beta = beta
 
         self.log_kwargs = dict(
@@ -82,10 +84,10 @@ class CAPCallback(Callback):
 
         self.dataset_1_scores = []
         self.dataset_2_scores = []
+        self.dataset_1_inputs = []
+        self.dataset_2_inputs = []
 
-        self.capmetric = ApproximationCapacity(
-            **self.cap_metric_config, device=self.device
-        )
+        self.capmetric = ApproximationCapacity(**self.cap_metric_config, device=self.device)
         self.capmetric.to(self.device)
 
     def on_validation_batch_end(
@@ -101,23 +103,27 @@ class CAPCallback(Callback):
             raise ValueError(f"outputs['{self.output_name}'] is scalar. Need a tensor.")
 
         loss = loss.detach().view(-1)
+        inputs = torch.flatten(unpack_batch(batch).x, start_dim=1).detach().cpu()
+        if inputs.shape[0] != loss.shape[0]:
+            raise ValueError(
+                f"CAP received {loss.shape[0]} scores but {inputs.shape[0]} input rows "
+                f"for dataset {dset_name!r}."
+            )
 
         if dset_name == self.dataset_1_name:
             self.dataset_1_scores.append(loss)
+            self.dataset_1_inputs.append(inputs)
 
         if dset_name == self.dataset_2_name:
             self.dataset_2_scores.append(loss)
+            self.dataset_2_inputs.append(inputs)
 
     def on_validation_epoch_end(self, trainer, pl_module):
         """Compute and log CAP and rank-correlation across the two data sets."""
         if not self.dataset_1_scores:
-            raise RuntimeError(
-                f"No validation scores were collected for '{self.dataset_1_name}'."
-            )
+            raise RuntimeError(f"No validation scores were collected for '{self.dataset_1_name}'.")
         if not self.dataset_2_scores:
-            raise RuntimeError(
-                f"No validation scores were collected for '{self.dataset_2_name}'."
-            )
+            raise RuntimeError(f"No validation scores were collected for '{self.dataset_2_name}'.")
 
         cap_value, rankcorr_value = self._compute_cap()
 
@@ -170,16 +176,25 @@ class CAPCallback(Callback):
         if not self.pairing_index_path:
             raise ValueError("pairing_index_path is required for precomputed CAP pairing.")
 
-        table = torch.load(self.pairing_index_path, map_location="cpu", weights_only=False)
-        idxs1 = table.get("idx_1", table.get("idx1"))
-        idxs2 = table.get("idx_2", table.get("idx2"))
-        if idxs1 is None or idxs2 is None:
-            raise ValueError("Pair table must contain idx_1 and idx_2 tensors.")
-
+        table = load_pair_table(
+            self.pairing_index_path,
+            expected_dataset_1=self.dataset_1_name,
+            expected_dataset_2=self.dataset_2_name,
+            expected_split="validate",
+            n_dataset_1=len(dataset_1_scores),
+            n_dataset_2=len(dataset_2_scores),
+            source_1_sha256=sha256_tensor(torch.cat(self.dataset_1_inputs, dim=0))
+            if self.dataset_1_inputs
+            else None,
+            source_2_sha256=sha256_tensor(torch.cat(self.dataset_2_inputs, dim=0))
+            if self.dataset_2_inputs
+            else None,
+        )
+        idxs1 = table["idx_1"]
+        idxs2 = table["idx_2"]
         idxs1 = idxs1.long().to(dataset_1_scores.device)
         idxs2 = idxs2.long().to(dataset_2_scores.device)
-        valid = (idxs1 < len(dataset_1_scores)) & (idxs2 < len(dataset_2_scores))
-        return idxs1[valid], idxs2[valid]
+        return idxs1, idxs2
 
     def _spearman_corr(self, x: torch.Tensor, y: torch.Tensor) -> float:
         """Compute the Spearman correlation between paired anomaly scores."""

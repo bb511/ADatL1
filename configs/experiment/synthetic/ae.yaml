@@ -1,0 +1,18 @@
+# @package _global_
+
+defaults:
+  - /experiment/synthetic/base
+  - override /algorithm: ae
+  - _self_
+
+tags: ["synthetic", "smoke", "ae"]
+run_name: ae_seed${seed}
+
+algorithm:
+  target_rate: 0.01
+  base_rate: null
+  input_noise_std: 0.0
+  delta: 1.0
+  encoder:
+    in_dim: ${data.n_features}
+    nodes: [32, 16, 4]

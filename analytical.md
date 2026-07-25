@@ -9,11 +9,24 @@ population formulas.
 Run:
 
 ```bash
-uv run python src/analytical.py --output-dir figures/section3
+make analytical
 ```
 
 The script writes CSV files, figures, and `metadata.json` under
-`figures/section3`.
+`figures/section3`. The equivalent explicit command is:
+
+```bash
+uv run python src/analytical.py --profile paper --output-dir figures/section3
+```
+
+For a quick end-to-end check using the same code paths and artifact schema:
+
+```bash
+make analytical-smoke
+```
+
+The smoke profile reduces only the Monte Carlo and grid sizes. It is a pipeline
+check, not a source of paper numbers.
 
 ## Model
 
@@ -359,16 +372,49 @@ not the direction with anomaly power.
 
 ![Marginal shift selector sweep](figures/section3/marginal_shift_selector_sweep.png)
 
+## Experiment 5: Score-Family Controls
+
+The theorem is a statement about normalized, correctly oriented linear scores.
+The script therefore evaluates a compact set of controls that distinguish the
+theorem's scope from behavior that is useful to inspect but is not covered by
+the theorem.
+
+| control | role | interpretation |
+| --- | --- | --- |
+| `linear_oracle_w_star` | in scope | anomaly-aligned likelihood-ratio direction |
+| `linear_mixed_45deg` | in scope | shares capacity between signal and stable nuisance |
+| `linear_noise_dim` | boundary | reproducible nuisance with no anomaly shift |
+| `linear_negative_oracle` | outside scope | correct coordinate with reversed anomaly orientation |
+| `residual_oracle_r1` | nonlinear control | squared residual containing the anomaly coordinate |
+| `residual_mixed_r2` / `radial_all` | nonlinear controls | increasingly diffuse residual energies |
+| `residual_noise_r1` / `residual_without_anomaly` | nonlinear nulls | residuals that exclude the anomaly coordinate |
+| `constant_collapse` | degenerate control | verifies that a collapsed score has no useful CAP lift |
+
+All nonconstant scores are standardized by their analytical null mean and
+variance before CAP is evaluated. TPR uses the appropriate Gaussian or
+noncentral-chi-square population threshold. This keeps the comparison
+auditable without implying that the linear reliability theorem extends to
+residual energies. The complete numerical table is
+`score_family_summary.csv`; `theorem_scope` identifies the interpretation of
+every row.
+
+![Score-family comparison](figures/section3/score_family_comparison.png)
+
+![Score-family distributions](figures/section3/score_family_distributions.png)
+
 ## Reproducibility Notes
 
 - All randomness uses `numpy.random.default_rng(seed)`.
-- All defaults are CLI arguments in `src/analytical.py`.
+- The `paper` and `smoke` profiles are recorded in `metadata.json`; every
+  profile default remains individually overridable from the CLI.
 - Empirical CAP uses the repository `ApproximationCapacityKernel`.
 - Empirical feature-level CAP uses static NN pairing in the matching descriptor.
 - Population CAP uses deterministic Gauss-Hermite quadrature for the same
   baseline-energy objective.
 - CSVs store both `cap_raw_empirical` and `cap_empirical`, so the `+log(2)` lift
   is auditable.
+- `metadata.json` records the full resolved configuration and the expected
+  artifact inventory.
 
 ## Overall Conclusion
 

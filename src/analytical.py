@@ -26,8 +26,9 @@ from __future__ import annotations
 
 import argparse
 import json
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, replace
 from pathlib import Path
+from typing import Sequence
 
 import matplotlib
 
@@ -48,6 +49,7 @@ from src.evaluation.callbacks.metrics.cap.kernel import ApproximationCapacityKer
 
 @dataclass(frozen=True)
 class ExperimentConfig:
+    profile: str
     output_dir: Path
     n_features: int
     n_pairs: int
@@ -82,33 +84,110 @@ class ScoreCandidate:
     dims: tuple[int, ...] = ()
 
 
-def parse_args() -> ExperimentConfig:
+PAPER_DEFAULTS = {
+    "n_features": 6,
+    "n_pairs": 60_000,
+    "n_test": 150_000,
+    "n_channel_pairs": 60_000,
+    "seed": 123,
+    "fpr": 1e-3,
+    "anomaly_shift": 3.5,
+    "lambda_z": 0.90,
+    "lambda_u": 0.12,
+    "benign_shift": 1.0,
+    "n_match_features": 8,
+    "match_noise": 0.05,
+    "ratio_sweep_lambda_z": 0.45,
+    "ratio_min": 0.05,
+    "ratio_max": 2.0,
+    "n_ratios": 81,
+    "n_angles": 81,
+    "n_rhos": 31,
+    "beta_max": 8.0,
+    "n_betas": 81,
+    "quadrature_order": 45,
+}
+
+SMOKE_DEFAULTS = {
+    **PAPER_DEFAULTS,
+    "n_pairs": 800,
+    "n_test": 4_000,
+    "n_channel_pairs": 1_200,
+    "n_match_features": 4,
+    "n_ratios": 9,
+    "n_angles": 9,
+    "n_rhos": 7,
+    "n_betas": 17,
+    "quadrature_order": 21,
+}
+
+ARTIFACT_FILENAMES = (
+    "channel_reliability.csv",
+    "linear_direction_sweep.csv",
+    "marginal_shift_trap.csv",
+    "marginal_shift_selector_sweep.csv",
+    "score_family_summary.csv",
+    "alignment_assumption_check.csv",
+    "alignment_ratio_sweep.csv",
+    "score_distribution_summary.csv",
+    "theory_cap_tpr_vs_reliability.png",
+    "score_pair_scatter.png",
+    "feature_space_geometry.png",
+    "population_metric_landscape.png",
+    "linear_direction_sweep.png",
+    "cap_vs_tpr.png",
+    "marginal_shift_trap.png",
+    "marginal_shift_selector_sweep.png",
+    "score_distributions.png",
+    "score_family_comparison.png",
+    "score_family_distributions.png",
+    "alignment_assumption_check.png",
+    "alignment_ratio_sweep.png",
+)
+
+
+def parse_args(argv: Sequence[str] | None = None) -> ExperimentConfig:
+    profile_parser = argparse.ArgumentParser(add_help=False)
+    profile_parser.add_argument("--profile", choices=("paper", "smoke"), default="paper")
+    profile_args, _ = profile_parser.parse_known_args(argv)
+    defaults = PAPER_DEFAULTS if profile_args.profile == "paper" else SMOKE_DEFAULTS
+
     parser = argparse.ArgumentParser(
         description="Run Section 3 Gaussian linear CAP synthetic experiments."
     )
+    parser.add_argument(
+        "--profile",
+        choices=("paper", "smoke"),
+        default=profile_args.profile,
+        help="Use publication-scale or fast CI/smoke defaults.",
+    )
     parser.add_argument("--output-dir", type=Path, default=Path("figures/section3"))
-    parser.add_argument("--n-features", type=int, default=6)
-    parser.add_argument("--n-pairs", type=int, default=60_000)
-    parser.add_argument("--n-test", type=int, default=150_000)
-    parser.add_argument("--n-channel-pairs", type=int, default=60_000)
-    parser.add_argument("--seed", type=int, default=123)
-    parser.add_argument("--fpr", type=float, default=1e-3)
-    parser.add_argument("--anomaly-shift", type=float, default=3.5)
-    parser.add_argument("--lambda-z", dest="lambda_z", type=float, default=0.90)
-    parser.add_argument("--lambda-u", dest="lambda_u", type=float, default=0.12)
-    parser.add_argument("--benign-shift", type=float, default=1.0)
-    parser.add_argument("--n-match-features", type=int, default=8)
-    parser.add_argument("--match-noise", type=float, default=0.05)
-    parser.add_argument("--ratio-sweep-lambda-z", type=float, default=0.45)
-    parser.add_argument("--ratio-min", type=float, default=0.05)
-    parser.add_argument("--ratio-max", type=float, default=2.0)
-    parser.add_argument("--n-ratios", type=int, default=81)
-    parser.add_argument("--n-angles", type=int, default=81)
-    parser.add_argument("--n-rhos", type=int, default=31)
-    parser.add_argument("--beta-max", type=float, default=8.0)
-    parser.add_argument("--n-betas", type=int, default=81)
-    parser.add_argument("--quadrature-order", type=int, default=45)
-    args = parser.parse_args()
+    parser.add_argument("--n-features", type=int, default=defaults["n_features"])
+    parser.add_argument("--n-pairs", type=int, default=defaults["n_pairs"])
+    parser.add_argument("--n-test", type=int, default=defaults["n_test"])
+    parser.add_argument("--n-channel-pairs", type=int, default=defaults["n_channel_pairs"])
+    parser.add_argument("--seed", type=int, default=defaults["seed"])
+    parser.add_argument("--fpr", type=float, default=defaults["fpr"])
+    parser.add_argument("--anomaly-shift", type=float, default=defaults["anomaly_shift"])
+    parser.add_argument("--lambda-z", dest="lambda_z", type=float, default=defaults["lambda_z"])
+    parser.add_argument("--lambda-u", dest="lambda_u", type=float, default=defaults["lambda_u"])
+    parser.add_argument("--benign-shift", type=float, default=defaults["benign_shift"])
+    parser.add_argument("--n-match-features", type=int, default=defaults["n_match_features"])
+    parser.add_argument("--match-noise", type=float, default=defaults["match_noise"])
+    parser.add_argument(
+        "--ratio-sweep-lambda-z",
+        type=float,
+        default=defaults["ratio_sweep_lambda_z"],
+    )
+    parser.add_argument("--ratio-min", type=float, default=defaults["ratio_min"])
+    parser.add_argument("--ratio-max", type=float, default=defaults["ratio_max"])
+    parser.add_argument("--n-ratios", type=int, default=defaults["n_ratios"])
+    parser.add_argument("--n-angles", type=int, default=defaults["n_angles"])
+    parser.add_argument("--n-rhos", type=int, default=defaults["n_rhos"])
+    parser.add_argument("--beta-max", type=float, default=defaults["beta_max"])
+    parser.add_argument("--n-betas", type=int, default=defaults["n_betas"])
+    parser.add_argument("--quadrature-order", type=int, default=defaults["quadrature_order"])
+    args = parser.parse_args(argv)
 
     if args.n_features < 2:
         raise ValueError("n_features must be at least 2.")
@@ -273,10 +352,10 @@ def sample_correlated_typical_views(
 ) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
     """Sample typical views and an independent descriptor for NN pairing.
 
-    The score features follow the Gaussian stable-nuisance model. The matching
-    descriptors are fixed, model-independent observed covariates: both views
-    share a latent descriptor with small measurement noise. This lets empirical
-    CAP use nearest-neighbor pairing without using the candidate score itself.
+    The score features follow the Gaussian stable-nuisance model. The matching descriptors are
+    fixed, model-independent observed covariates: both views share a latent descriptor with small
+    measurement noise. This lets empirical CAP use nearest-neighbor pairing without using the
+    candidate score itself.
     """
     correlations = validation_correlations(config)
     shared = rng.normal(size=(config.n_pairs, config.n_features)) * np.sqrt(correlations)
@@ -330,16 +409,10 @@ def sample_shifted_validation_domains(
     shift_angle_rad: float = 0.0,
 ) -> tuple[np.ndarray, np.ndarray]:
     correlations = validation_correlations(config)
-    shared = rng.normal(size=(config.n_pairs, config.n_features)) * np.sqrt(
-        correlations
-    )
+    shared = rng.normal(size=(config.n_pairs, config.n_features)) * np.sqrt(correlations)
     noise_scale = np.sqrt(1.0 - correlations)
-    view_1 = (
-        shared + rng.normal(size=(config.n_pairs, config.n_features)) * noise_scale
-    )
-    view_2 = (
-        shared + rng.normal(size=(config.n_pairs, config.n_features)) * noise_scale
-    )
+    view_1 = shared + rng.normal(size=(config.n_pairs, config.n_features)) * noise_scale
+    view_2 = shared + rng.normal(size=(config.n_pairs, config.n_features)) * noise_scale
     view_2 += shift_vector(config, shift_angle_rad)[None, :]
     return view_1, view_2
 
@@ -355,9 +428,7 @@ def score_candidate(
     x: np.ndarray, candidate: ScoreCandidate, config: ExperimentConfig
 ) -> np.ndarray:
     if candidate.family == "linear":
-        return np.einsum(
-            "nd,d->n", x, candidate_weights(candidate, config), optimize=True
-        )
+        return np.einsum("nd,d->n", x, candidate_weights(candidate, config), optimize=True)
     if candidate.family == "residual":
         if not candidate.dims:
             return np.zeros(x.shape[0], dtype=np.float64)
@@ -404,9 +475,7 @@ def candidate_population_threshold_tpr(
     if candidate.family == "residual":
         dof = len(candidate.dims)
         threshold = float(chi2.isf(alpha, df=dof))
-        noncentrality = float(
-            delta**2 * config.lambda_z if 0 in candidate.dims else 0.0
-        )
+        noncentrality = float(delta**2 * config.lambda_z if 0 in candidate.dims else 0.0)
         tpr = float(ncx2.sf(threshold, df=dof, nc=noncentrality))
         return threshold, tpr
 
@@ -449,9 +518,7 @@ def candidate_shifted_marginal_theory(
     raise ValueError(f"Unknown score family {candidate.family!r}.")
 
 
-def candidate_linear_reliability(
-    candidate: ScoreCandidate, config: ExperimentConfig
-) -> float:
+def candidate_linear_reliability(candidate: ScoreCandidate, config: ExperimentConfig) -> float:
     if candidate.family != "linear":
         return float("nan")
     weights = candidate_weights(candidate, config)
@@ -486,10 +553,9 @@ def cap_lift_for_score_matrix(
 ) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
     """Empirical CAP lift using the repository ApproximationCapacity kernel.
 
-    The theory uses q_beta(s)=sigmoid(beta*s). The binary baseline energy in the
-    CAP kernel gives q_beta(p)=sigmoid(beta*(2p-1)), so we pass p=(s+1)/2.
-    The kernel returns log((1 + m1*m2)/2); adding log(2) gives the lift plotted
-    in the theory figures.
+    The theory uses q_beta(s)=sigmoid(beta*s). The binary baseline energy in the CAP kernel gives
+    q_beta(p)=sigmoid(beta*(2p-1)), so we pass p=(s+1)/2. The kernel returns log((1 + m1*m2)/2);
+    adding log(2) gives the lift plotted in the theory figures.
     """
     best = np.full(scores_1.shape[1], -np.inf, dtype=np.float64)
     best_raw = np.full(scores_1.shape[1], -np.inf, dtype=np.float64)
@@ -560,9 +626,7 @@ def cap_lift_quadrature(
             value = 0.0
         else:
             mprod = np.tanh(0.5 * beta * u) * np.tanh(0.5 * beta * v)
-            value = float(
-                np.sum(normal_weights * np.log1p(np.clip(mprod, -1.0 + 1e-14, None)))
-            )
+            value = float(np.sum(normal_weights * np.log1p(np.clip(mprod, -1.0 + 1e-14, None))))
         if value > best:
             best = value
             best_beta = float(beta)
@@ -579,9 +643,7 @@ def cap_lift_shift_grid(
     nodes, weights = hermgauss(quadrature_order)
     u = np.sqrt(2.0) * nodes[None, None, :, None]
     e = np.sqrt(2.0) * nodes[None, None, None, :]
-    normal_weights = (
-        (weights[:, None] * weights[None, :]) / np.pi
-    )[None, None, :, :]
+    normal_weights = ((weights[:, None] * weights[None, :]) / np.pi)[None, None, :, :]
 
     rho = np.clip(rhos, 0.0, 0.999999)[None, :, None, None]
     mean = means_2[:, :, None, None]
@@ -611,9 +673,7 @@ def wasserstein_1d_columns(scores_1: np.ndarray, scores_2: np.ndarray) -> np.nda
     return np.mean(np.abs(sorted_1 - sorted_2), axis=0)
 
 
-def threshold_drift_columns(
-    scores_1: np.ndarray, scores_2: np.ndarray, fpr: float
-) -> np.ndarray:
+def threshold_drift_columns(scores_1: np.ndarray, scores_2: np.ndarray, fpr: float) -> np.ndarray:
     thresholds = np.quantile(scores_1, 1.0 - fpr, axis=0, method="higher")
     observed = np.mean(scores_2 >= thresholds[None, :], axis=0)
     return np.abs(observed - fpr)
@@ -652,13 +712,9 @@ def run_channel_reliability_experiment(
         threshold = float(np.quantile(normal_scores, 1.0 - config.fpr, method="higher"))
         tpr = float(np.mean(anomaly_scores >= threshold))
         cap_emp, cap_raw_emp, beta_emp = cap_lift_single(scores_1, scores_2, betas)
-        cap_theory, beta_theory = cap_lift_quadrature(
-            rho, betas, config.quadrature_order
-        )
+        cap_theory, beta_theory = cap_lift_quadrature(rho, betas, config.quadrature_order)
 
-        score_threshold = np.quantile(
-            scores_1, 1.0 - config.fpr, method="higher"
-        )
+        score_threshold = np.quantile(scores_1, 1.0 - config.fpr, method="higher")
         score_drift = abs(np.mean(scores_2 >= score_threshold) - config.fpr)
 
         rows.append(
@@ -701,18 +757,10 @@ def run_linear_direction_experiment(
     normal_scores = project_many(normal, weights)
     anomaly_scores = project_many(anomaly, weights)
 
-    cap_emp, cap_raw_emp, beta_emp = cap_lift_for_score_matrix(
-        scores_1, cap_scores_2, betas
-    )
-    thresholds, tpr_emp = tpr_at_fpr_columns(
-        normal_scores, anomaly_scores, config.fpr
-    )
-    empirical_thresholds = np.quantile(
-        normal_scores, 1.0 - config.fpr, axis=0, method="higher"
-    )
-    empirical_threshold_tpr = np.mean(
-        anomaly_scores >= empirical_thresholds[None, :], axis=0
-    )
+    cap_emp, cap_raw_emp, beta_emp = cap_lift_for_score_matrix(scores_1, cap_scores_2, betas)
+    thresholds, tpr_emp = tpr_at_fpr_columns(normal_scores, anomaly_scores, config.fpr)
+    empirical_thresholds = np.quantile(normal_scores, 1.0 - config.fpr, axis=0, method="higher")
+    empirical_threshold_tpr = np.mean(anomaly_scores >= empirical_thresholds[None, :], axis=0)
     w1_emp = wasserstein_1d_columns(scores_1, scores_2)
     drift_emp = threshold_drift_columns(scores_1, scores_2, config.fpr)
 
@@ -739,9 +787,7 @@ def run_linear_direction_experiment(
     out["tpr_empirical"] = tpr_emp
     out["threshold_quantile_empirical"] = empirical_thresholds
     out["tpr_quantile_empirical"] = empirical_threshold_tpr
-    out["tpr_theory"] = norm.sf(
-        tau - config.anomaly_shift * np.sqrt(out["rho_z"].to_numpy())
-    )
+    out["tpr_theory"] = norm.sf(tau - config.anomaly_shift * np.sqrt(out["rho_z"].to_numpy()))
     return out
 
 
@@ -771,18 +817,10 @@ def run_marginal_shift_experiment(
     normal_scores = project_many(normal, weights)
     anomaly_scores = project_many(anomaly, weights)
 
-    cap_emp, cap_raw_emp, beta_emp = cap_lift_for_score_matrix(
-        scores_1, cap_scores_2, betas
-    )
-    thresholds, tpr_emp = tpr_at_fpr_columns(
-        normal_scores, anomaly_scores, config.fpr
-    )
-    empirical_thresholds = np.quantile(
-        normal_scores, 1.0 - config.fpr, axis=0, method="higher"
-    )
-    empirical_threshold_tpr = np.mean(
-        anomaly_scores >= empirical_thresholds[None, :], axis=0
-    )
+    cap_emp, cap_raw_emp, beta_emp = cap_lift_for_score_matrix(scores_1, cap_scores_2, betas)
+    thresholds, tpr_emp = tpr_at_fpr_columns(normal_scores, anomaly_scores, config.fpr)
+    empirical_thresholds = np.quantile(normal_scores, 1.0 - config.fpr, axis=0, method="higher")
+    empirical_threshold_tpr = np.mean(anomaly_scores >= empirical_thresholds[None, :], axis=0)
     w1_emp = wasserstein_1d_columns(scores_1, scores_2)
     drift_emp = threshold_drift_columns(scores_1, scores_2, config.fpr)
 
@@ -790,9 +828,7 @@ def run_marginal_shift_experiment(
     score_shift = score_shift_for_angles(score_angles, 0.0, config)
     cap_theory = []
     beta_theory = []
-    for rho, mu_2 in zip(
-        curve["rho_r"].to_numpy(), score_shift, strict=True
-    ):
+    for rho, mu_2 in zip(curve["rho_r"].to_numpy(), score_shift, strict=True):
         cap, beta = cap_lift_quadrature(
             rho,
             betas,
@@ -814,18 +850,13 @@ def run_marginal_shift_experiment(
     out["wasserstein_empirical"] = w1_emp
     out["wasserstein_theory"] = np.abs(score_shift)
     out["threshold_drift_empirical"] = drift_emp
-    out["threshold_drift_theory"] = np.abs(
-        norm.sf(tau - score_shift) - config.fpr
-    )
+    out["threshold_drift_theory"] = np.abs(norm.sf(tau - score_shift) - config.fpr)
     out["threshold_empirical"] = thresholds
     out["tpr_empirical"] = tpr_emp
     out["threshold_quantile_empirical"] = empirical_thresholds
     out["tpr_quantile_empirical"] = empirical_threshold_tpr
     out["tpr_theory"] = norm.sf(
-        tau
-        - config.anomaly_shift
-        * np.sqrt(config.lambda_z)
-        * curve["cos_to_anomaly"].to_numpy()
+        tau - config.anomaly_shift * np.sqrt(config.lambda_z) * curve["cos_to_anomaly"].to_numpy()
     )
     return out
 
@@ -846,13 +877,11 @@ def selected_angle_range(
     return float(np.min(selected_angles)), float(np.max(selected_angles)), best
 
 
-def run_marginal_shift_selector_sweep(
-    config: ExperimentConfig, betas: np.ndarray
-) -> pd.DataFrame:
+def run_marginal_shift_selector_sweep(config: ExperimentConfig, betas: np.ndarray) -> pd.DataFrame:
     """Population selectors as the benign validation shift rotates.
 
-    CAP selects by maximizing the population paired CAP objective.
-    Marginal stability baselines select by minimizing their population drift.
+    CAP selects by maximizing the population paired CAP objective. Marginal stability baselines
+    select by minimizing their population drift.
     """
     curve = projection_directions(config)
     score_angles = curve["angle_rad"].to_numpy()
@@ -860,18 +889,14 @@ def run_marginal_shift_selector_sweep(
     shift_angles = score_angles
     tau = norm.isf(config.fpr)
 
-    shift_means = config.benign_shift * np.cos(
-        shift_angles[:, None] - score_angles[None, :]
-    )
+    shift_means = config.benign_shift * np.cos(shift_angles[:, None] - score_angles[None, :])
     cap_grid, beta_grid = cap_lift_shift_grid(
         curve["rho_r"].to_numpy(),
         shift_means,
         betas,
         config.quadrature_order,
     )
-    tpr_values = norm.sf(
-        tau - config.anomaly_shift * np.sqrt(curve["rho_z"].to_numpy())
-    )
+    tpr_values = norm.sf(tau - config.anomaly_shift * np.sqrt(curve["rho_z"].to_numpy()))
 
     rows = []
     for shift_idx, shift_angle in enumerate(shift_angles):
@@ -882,18 +907,14 @@ def run_marginal_shift_selector_sweep(
         cap_min, cap_max, cap_best = selected_angle_range(
             cap_grid[shift_idx], score_angles_deg, maximize=True
         )
-        w1_min, w1_max, w1_best = selected_angle_range(
-            w1_values, score_angles_deg, maximize=False
-        )
+        w1_min, w1_max, w1_best = selected_angle_range(w1_values, score_angles_deg, maximize=False)
         drift_min, drift_max, drift_best = selected_angle_range(
             drift_values, score_angles_deg, maximize=False
         )
 
         cap_selected = (score_angles_deg >= cap_min) & (score_angles_deg <= cap_max)
         w1_selected = (score_angles_deg >= w1_min) & (score_angles_deg <= w1_max)
-        drift_selected = (
-            (score_angles_deg >= drift_min) & (score_angles_deg <= drift_max)
-        )
+        drift_selected = (score_angles_deg >= drift_min) & (score_angles_deg <= drift_max)
 
         rows.append(
             {
@@ -917,12 +938,8 @@ def run_marginal_shift_selector_sweep(
                 "threshold_selected_angle_min_deg": drift_min,
                 "threshold_selected_angle_max_deg": drift_max,
                 "threshold_selected_value": drift_best,
-                "threshold_selected_tpr_min": float(
-                    np.min(tpr_values[drift_selected])
-                ),
-                "threshold_selected_tpr_max": float(
-                    np.max(tpr_values[drift_selected])
-                ),
+                "threshold_selected_tpr_min": float(np.min(tpr_values[drift_selected])),
+                "threshold_selected_tpr_max": float(np.max(tpr_values[drift_selected])),
                 "tpr_optimal_angle_deg": 0.0,
                 "tpr_optimal": float(tpr_values[0]),
             }
@@ -957,20 +974,12 @@ def run_score_family_experiment(
         view_1 = standardize_candidate_scores(view_1_raw, candidate, config)
         view_2 = standardize_candidate_scores(view_2_raw, candidate, config)
         view_2_cap = standardize_candidate_scores(view_2_cap_raw, candidate, config)
-        shift_1_scores = standardize_candidate_scores(
-            shift_1_raw, candidate, config
-        )
-        shift_2_scores = standardize_candidate_scores(
-            shift_2_raw, candidate, config
-        )
+        shift_1_scores = standardize_candidate_scores(shift_1_raw, candidate, config)
+        shift_2_scores = standardize_candidate_scores(shift_2_raw, candidate, config)
 
         cap_emp, cap_raw_emp, beta_emp = cap_lift_single(view_1, view_2_cap, betas)
-        pop_threshold, pop_tpr = candidate_population_threshold_tpr(
-            candidate, config
-        )
-        emp_threshold, emp_tpr = tpr_with_empirical_threshold(
-            normal_raw, anomaly_raw, config.fpr
-        )
+        pop_threshold, pop_tpr = candidate_population_threshold_tpr(candidate, config)
+        emp_threshold, emp_tpr = tpr_with_empirical_threshold(normal_raw, anomaly_raw, config.fpr)
 
         if np.isnan(pop_threshold):
             pop_threshold_tpr = float("nan")
@@ -990,9 +999,7 @@ def run_score_family_experiment(
                 "linear_rho_u": rho_u,
                 "linear_rho_r": rho_r,
                 "linear_alignment_pi": alignment_pi,
-                "linear_reliability_rho": candidate_linear_reliability(
-                    candidate, config
-                ),
+                "linear_reliability_rho": candidate_linear_reliability(candidate, config),
                 "cap_empirical": cap_emp,
                 "cap_raw_empirical": cap_raw_emp,
                 "best_beta_empirical": beta_emp,
@@ -1003,15 +1010,11 @@ def run_score_family_experiment(
                 ),
                 "unshifted_wasserstein_theory": 0.0,
                 "unshifted_threshold_drift_empirical": float(
-                    threshold_drift_columns(
-                        view_1[:, None], view_2[:, None], config.fpr
-                    )[0]
+                    threshold_drift_columns(view_1[:, None], view_2[:, None], config.fpr)[0]
                 ),
                 "unshifted_threshold_drift_theory": 0.0,
                 "shifted_wasserstein_empirical": float(
-                    np.mean(
-                        np.abs(np.sort(shift_1_scores) - np.sort(shift_2_scores))
-                    )
+                    np.mean(np.abs(np.sort(shift_1_scores) - np.sort(shift_2_scores)))
                 ),
                 "shifted_wasserstein_theory": shifted_w1_theory,
                 "shifted_threshold_drift_empirical": float(
@@ -1052,9 +1055,7 @@ def run_alignment_assumption_experiment(
             rho_u = lambda_u_case * s**2
             rho_r = rho_z + rho_u
             alignment_pi = rho_z / rho_r if rho_r > 0.0 else 0.0
-            cap, beta = cap_lift_quadrature(
-                rho_r, betas, config.quadrature_order
-            )
+            cap, beta = cap_lift_quadrature(rho_r, betas, config.quadrature_order)
             rows.append(
                 {
                     "case": case,
@@ -1068,23 +1069,19 @@ def run_alignment_assumption_experiment(
                     "rho": rho_r,
                     "cap_theory": cap,
                     "best_beta_theory": beta,
-                    "tpr_theory": float(
-                        norm.sf(tau - config.anomaly_shift * np.sqrt(rho_z))
-                    ),
+                    "tpr_theory": float(norm.sf(tau - config.anomaly_shift * np.sqrt(rho_z))),
                 }
             )
 
     return pd.DataFrame(rows)
 
 
-def run_alignment_ratio_sweep(
-    config: ExperimentConfig, betas: np.ndarray
-) -> pd.DataFrame:
+def run_alignment_ratio_sweep(config: ExperimentConfig, betas: np.ndarray) -> pd.DataFrame:
     """Sweep the nuisance-to-signal reproducibility ratio.
 
-    The signal reliability is fixed and the nuisance reliability varies. The
-    transition occurs at lambda_U / lambda_Z = 1, where every direction in the
-    two-dimensional span has the same total reproducible reliability.
+    The signal reliability is fixed and the nuisance reliability varies. The transition occurs at
+    lambda_U / lambda_Z = 1, where every direction in the two-dimensional span has the same total
+    reproducible reliability.
     """
     tau = norm.isf(config.fpr)
     angles = np.linspace(0.0, 0.5 * np.pi, config.n_angles, dtype=np.float64)
@@ -1233,30 +1230,7 @@ def plot_channel_reliability(df: pd.DataFrame, config: ExperimentConfig, output_
 def plot_score_pair_scatter(config: ExperimentConfig, output_dir: Path) -> None:
     rng = np.random.default_rng(config.seed + 101)
     n = min(5_000, config.n_pairs)
-    local_config = ExperimentConfig(
-        output_dir=config.output_dir,
-        n_features=config.n_features,
-        n_pairs=n,
-        n_test=config.n_test,
-        n_channel_pairs=config.n_channel_pairs,
-        seed=config.seed,
-        fpr=config.fpr,
-        anomaly_shift=config.anomaly_shift,
-        lambda_z=config.lambda_z,
-        lambda_u=config.lambda_u,
-        benign_shift=config.benign_shift,
-        n_match_features=config.n_match_features,
-        match_noise=config.match_noise,
-        ratio_sweep_lambda_z=config.ratio_sweep_lambda_z,
-        ratio_min=config.ratio_min,
-        ratio_max=config.ratio_max,
-        n_ratios=config.n_ratios,
-        n_angles=config.n_angles,
-        n_rhos=config.n_rhos,
-        beta_max=config.beta_max,
-        n_betas=config.n_betas,
-        quadrature_order=config.quadrature_order,
-    )
+    local_config = replace(config, n_pairs=n)
     x1, x2, match_1, match_2 = sample_correlated_typical_views(rng, local_config)
     pair_idx, _ = nearest_neighbor_pair_indices(match_1, match_2)
 
@@ -1271,9 +1245,7 @@ def plot_score_pair_scatter(config: ExperimentConfig, output_dir: Path) -> None:
         score_1 = np.einsum("nd,d->n", x1, w, optimize=True)
         score_2 = np.einsum("nd,d->n", x2, w, optimize=True)[pair_idx]
         ax.scatter(score_1, score_2, s=5, alpha=0.22, color="#4c78a8", linewidths=0)
-        ax.set_title(
-            f"{title}\nNN-paired corr={np.corrcoef(score_1, score_2)[0, 1]:.2f}"
-        )
+        ax.set_title(f"{title}\nNN-paired corr={np.corrcoef(score_1, score_2)[0, 1]:.2f}")
         ax.set_xlabel("validation view 1 score")
         ax.axhline(0.0, color="0.75", lw=0.8)
         ax.axvline(0.0, color="0.75", lw=0.8)
@@ -1390,9 +1362,7 @@ def plot_cap_vs_tpr(df: pd.DataFrame, output_dir: Path) -> None:
     plt.close(fig)
 
 
-def plot_marginal_shift_trap(
-    df: pd.DataFrame, config: ExperimentConfig, output_dir: Path
-) -> None:
+def plot_marginal_shift_trap(df: pd.DataFrame, config: ExperimentConfig, output_dir: Path) -> None:
     x = df["angle_deg"]
     fig, axes = plt.subplots(2, 2, figsize=(12.0, 8.0), sharex=True)
 
@@ -1562,9 +1532,7 @@ def plot_score_distributions(
     ]:
         s0 = normal[:, col]
         s1 = anomaly[:, col]
-        ax.hist(
-            s0, bins=bins, density=True, alpha=0.42, color="#4c78a8", label="normal"
-        )
+        ax.hist(s0, bins=bins, density=True, alpha=0.42, color="#4c78a8", label="normal")
         ax.hist(
             s1,
             bins=bins,
@@ -1687,8 +1655,7 @@ def plot_feature_space_geometry(config: ExperimentConfig, output_dir: Path) -> N
     ax.text(
         0.03,
         0.97,
-        f"corr(x0 views) = {config.lambda_z:.2f}\n"
-        f"corr(x1 views) = {config.lambda_u:.2f}",
+        f"corr(x0 views) = {config.lambda_z:.2f}\n" f"corr(x1 views) = {config.lambda_u:.2f}",
         transform=ax.transAxes,
         ha="left",
         va="top",
@@ -1848,9 +1815,7 @@ def plot_score_family_comparison(
     plt.close(fig)
 
 
-def plot_score_family_distributions(
-    config: ExperimentConfig, output_dir: Path
-) -> None:
+def plot_score_family_distributions(config: ExperimentConfig, output_dir: Path) -> None:
     rng = np.random.default_rng(config.seed + 303)
     n = min(config.n_test, 150_000)
     normal, anomaly = sample_test_sets(rng, config)
@@ -1885,9 +1850,7 @@ def plot_score_family_distributions(
         else:
             dof = len(candidate.dims)
             noncentrality = (
-                config.anomaly_shift**2 * config.lambda_z
-                if 0 in candidate.dims
-                else 0.0
+                config.anomaly_shift**2 * config.lambda_z if 0 in candidate.dims else 0.0
             )
             ax.plot(grid, chi2.pdf(grid, df=dof), color="#1f77b4", lw=1.7)
             ax.plot(
@@ -1914,9 +1877,7 @@ def plot_score_family_distributions(
     plt.close(fig)
 
 
-def plot_alignment_assumption_check(
-    df: pd.DataFrame, output_dir: Path
-) -> None:
+def plot_alignment_assumption_check(df: pd.DataFrame, output_dir: Path) -> None:
     fig, axes = plt.subplots(1, 2, figsize=(11.5, 4.3), sharey=False)
 
     for ax, case in zip(axes, ["aligned", "nuisance-dominated"], strict=True):
@@ -1945,25 +1906,30 @@ def plot_alignment_ratio_sweep(
     fig, axes = plt.subplots(1, 3, figsize=(15.0, 4.4))
     x = df["lambda_ratio_u_over_z"]
 
-    axes[0].fill_between(
-        x,
-        df["cap_selected_angle_min_deg"],
-        df["cap_selected_angle_max_deg"],
-        color="#1f77b4",
-        alpha=0.18,
-        label="CAP-selected set",
+    anomaly_selected = df["selected_type"] == "anomaly"
+    nuisance_selected = df["selected_type"] == "nuisance"
+    tie_selected = df["selected_type"] == "tie"
+    axes[0].scatter(
+        x[anomaly_selected],
+        df.loc[anomaly_selected, "cap_selected_angle_min_deg"],
+        color="#2ca02c",
+        s=18,
+        label="anomaly selected",
     )
-    axes[0].plot(
-        x,
-        df["cap_selected_angle_min_deg"],
-        color="#1f77b4",
-        lw=2.0,
+    axes[0].scatter(
+        x[nuisance_selected],
+        df.loc[nuisance_selected, "cap_selected_angle_min_deg"],
+        color="#9467bd",
+        s=18,
+        label="nuisance selected",
     )
-    axes[0].plot(
-        x,
-        df["cap_selected_angle_max_deg"],
+    axes[0].vlines(
+        x[tie_selected],
+        df.loc[tie_selected, "cap_selected_angle_min_deg"],
+        df.loc[tie_selected, "cap_selected_angle_max_deg"],
         color="#1f77b4",
-        lw=2.0,
+        lw=3.0,
+        label="all angles tied",
     )
     axes[0].axhline(0.0, color="#2ca02c", lw=1.2, ls=":", label="anomaly direction")
     axes[0].axhline(90.0, color="#9467bd", lw=1.2, ls=":", label="nuisance direction")
@@ -1997,19 +1963,21 @@ def plot_alignment_ratio_sweep(
     axes[1].set_title("The larger reproducible eigenvalue sets CAP")
     axes[1].legend(fontsize=8)
 
-    axes[2].fill_between(
+    axes[2].scatter(
         x,
         df["cap_selected_tpr_min"],
-        df["cap_selected_tpr_max"],
         color="#d62728",
-        alpha=0.20,
-        label="CAP-selected TPR range",
+        s=18,
+        label="CAP-selected TPR",
     )
-    axes[2].plot(
-        x,
-        df["cap_selected_tpr_min"],
+    axes[2].vlines(
+        x[tie_selected],
+        df.loc[tie_selected, "cap_selected_tpr_min"],
+        df.loc[tie_selected, "cap_selected_tpr_max"],
         color="#d62728",
-        lw=2.0,
+        lw=3.0,
+        alpha=0.65,
+        label="TPR range at tie",
     )
     axes[2].plot(
         x,
@@ -2048,29 +2016,7 @@ def plot_alignment_ratio_sweep(
 def write_metadata(config: ExperimentConfig, output_dir: Path) -> None:
     metadata = asdict(config)
     metadata["output_dir"] = str(config.output_dir)
-    metadata["artifacts"] = [
-        "channel_reliability.csv",
-        "linear_direction_sweep.csv",
-        "marginal_shift_trap.csv",
-        "marginal_shift_selector_sweep.csv",
-        "score_family_summary.csv",
-        "alignment_assumption_check.csv",
-        "alignment_ratio_sweep.csv",
-        "score_distribution_summary.csv",
-        "theory_cap_tpr_vs_reliability.png",
-        "score_pair_scatter.png",
-        "feature_space_geometry.png",
-        "population_metric_landscape.png",
-        "linear_direction_sweep.png",
-        "cap_vs_tpr.png",
-        "marginal_shift_trap.png",
-        "marginal_shift_selector_sweep.png",
-        "score_distributions.png",
-        "score_family_comparison.png",
-        "score_family_distributions.png",
-        "alignment_assumption_check.png",
-        "alignment_ratio_sweep.png",
-    ]
+    metadata["artifacts"] = list(ARTIFACT_FILENAMES)
     with (output_dir / "metadata.json").open("w") as f:
         json.dump(metadata, f, indent=2)
 
@@ -2166,9 +2112,7 @@ def print_key_results(
     ratio_points = np.asarray([0.25, 0.75, 1.0, 1.25, 2.0])
     ratio_rows = []
     for point in ratio_points:
-        idx = int(
-            np.argmin(np.abs(ratio_sweep["lambda_ratio_u_over_z"].to_numpy() - point))
-        )
+        idx = int(np.argmin(np.abs(ratio_sweep["lambda_ratio_u_over_z"].to_numpy() - point)))
         row = ratio_sweep.iloc[idx]
         ratio_rows.append(
             {
@@ -2193,9 +2137,7 @@ def print_key_results(
                     "cap_empirical": marginal_w_star["cap_empirical"],
                     "tpr_empirical": marginal_w_star["tpr_empirical"],
                     "w1_empirical": marginal_w_star["wasserstein_empirical"],
-                    "threshold_drift_empirical": marginal_w_star[
-                        "threshold_drift_empirical"
-                    ],
+                    "threshold_drift_empirical": marginal_w_star["threshold_drift_empirical"],
                 },
                 {
                     "candidate": "orthogonal",
@@ -2203,9 +2145,7 @@ def print_key_results(
                     "cap_empirical": marginal_orthogonal["cap_empirical"],
                     "tpr_empirical": marginal_orthogonal["tpr_empirical"],
                     "w1_empirical": marginal_orthogonal["wasserstein_empirical"],
-                    "threshold_drift_empirical": marginal_orthogonal[
-                        "threshold_drift_empirical"
-                    ],
+                    "threshold_drift_empirical": marginal_orthogonal["threshold_drift_empirical"],
                 },
             ]
         ).to_string(index=False)
@@ -2215,9 +2155,7 @@ def print_key_results(
     selector_points = np.asarray([0.0, 30.0, 45.0, 60.0, 90.0])
     selector_rows = []
     for point in selector_points:
-        idx = int(
-            np.argmin(np.abs(marginal_selector["shift_angle_deg"].to_numpy() - point))
-        )
+        idx = int(np.argmin(np.abs(marginal_selector["shift_angle_deg"].to_numpy() - point)))
         row = marginal_selector.iloc[idx]
         selector_rows.append(
             {
@@ -2252,13 +2190,9 @@ def main() -> None:
     channel.to_csv(config.output_dir / "channel_reliability.csv", index=False)
     direction.to_csv(config.output_dir / "linear_direction_sweep.csv", index=False)
     marginal.to_csv(config.output_dir / "marginal_shift_trap.csv", index=False)
-    marginal_selector.to_csv(
-        config.output_dir / "marginal_shift_selector_sweep.csv", index=False
-    )
+    marginal_selector.to_csv(config.output_dir / "marginal_shift_selector_sweep.csv", index=False)
     score_family.to_csv(config.output_dir / "score_family_summary.csv", index=False)
-    alignment.to_csv(
-        config.output_dir / "alignment_assumption_check.csv", index=False
-    )
+    alignment.to_csv(config.output_dir / "alignment_assumption_check.csv", index=False)
     ratio_sweep.to_csv(config.output_dir / "alignment_ratio_sweep.csv", index=False)
 
     plot_channel_reliability(channel, config, config.output_dir)

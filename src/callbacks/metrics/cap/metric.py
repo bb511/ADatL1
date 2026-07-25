@@ -1,12 +1,10 @@
 # Approximation Capacity implementation. Based on the work of Victor Jimenez.
-import gc
 from typing import Any, Callable, Optional
 
 import torch
 from torch import Tensor, optim
 from torch.utils.data import DataLoader, TensorDataset
 from torchmetrics import Metric
-from tqdm import tqdm
 
 from src.callbacks.metrics.cap.binary import get_energy_fn as get_energy_fn_binary
 from src.callbacks.metrics.cap.binary import (
@@ -105,6 +103,10 @@ class ApproximationCapacity(Metric):
         self.beta0 = beta0
         if self.beta0 < 0.0:
             raise ValueError("'beta' must be non-negative.")
+        if n_epochs < 0:
+            raise ValueError("'n_epochs' must be non-negative.")
+        if batch_size <= 0:
+            raise ValueError("'batch_size' must be positive.")
 
         super().__init__(
             dist_sync_on_step=False,
@@ -166,15 +168,29 @@ class ApproximationCapacity(Metric):
         """Optimize beta parameter over multiple epochs."""
         self._reset_cap_state()
 
+        logits1 = logits1.reshape(-1)
+        logits2 = logits2.reshape(-1)
+        if logits1.numel() == 0:
+            raise ValueError("CAP requires at least one score pair.")
+        if logits1.numel() != logits2.numel():
+            raise ValueError(
+                "CAP inputs must contain the same number of paired scores, "
+                f"got {logits1.numel()} and {logits2.numel()}."
+            )
+        if not torch.isfinite(logits1).all() or not torch.isfinite(logits2).all():
+            raise ValueError("CAP inputs must contain only finite scores.")
+
         # Normalize the logits
         logits1, logits2 = self.normalizer_fn(logits1, logits2)
+        if not torch.isfinite(logits1).all() or not torch.isfinite(logits2).all():
+            raise ValueError("CAP normalization produced non-finite scores.")
 
         # Add mean and std to the energy parameters
         combined = torch.cat([logits1, logits2], dim=0)
         self.energy_params.update(
             {
                 "mean": combined.mean().item(),
-                "std": combined.std().item(),
+                "std": combined.std(unbiased=False).item(),
             }
         )
         del combined
@@ -195,14 +211,16 @@ class ApproximationCapacity(Metric):
         dataloader = DataLoader(
             TensorDataset(logits1, logits2),
             batch_size=self.batch_size,
-            shuffle=True,
+            shuffle=False,
             num_workers=0,
             pin_memory=use_pin_memory,
             drop_last=False,
         )
 
         best_beta = kernel.beta.clone().detach()
-        best_cap = -float("inf")
+        best_cap = self._evaluate_kernel(
+            kernel, dataloader, beta=best_beta, use_pin_memory=use_pin_memory
+        )
         self.epoch_logs = []
 
         for _ in range(self.n_epochs):
@@ -217,8 +235,15 @@ class ApproximationCapacity(Metric):
                     loss = -kernel(batch_logits1, batch_logits2)
                     loss.backward()
                     optimizer.step()
+                    with torch.no_grad():
+                        kernel.beta.clamp_(min=0.0)
 
-            current_cap = kernel.cap.item()
+            current_cap = self._evaluate_kernel(
+                kernel,
+                dataloader,
+                beta=kernel.beta.detach(),
+                use_pin_memory=use_pin_memory,
+            )
             current_beta = kernel.beta.item()
             self.epoch_logs.append(
                 {
@@ -232,19 +257,29 @@ class ApproximationCapacity(Metric):
                 best_beta = kernel.beta.clone().detach()
 
         # Final evaluation with the best beta
-        with torch.no_grad():
-            kernel.reset()
-            for batch in dataloader:
-                batch_logits1 = batch[0].to(self.dev, non_blocking=use_pin_memory)
-                batch_logits2 = batch[1].to(self.dev, non_blocking=use_pin_memory)
-                _ = kernel.evaluate(batch_logits1, batch_logits2, beta=best_beta)
-
-            self.cap = (
-                kernel.capacity.detach().clone().to(device=self.cap.device, dtype=self.cap.dtype)
-            )
+        self._evaluate_kernel(kernel, dataloader, beta=best_beta, use_pin_memory=use_pin_memory)
+        self.cap = (
+            kernel.capacity.detach().clone().to(device=self.cap.device, dtype=self.cap.dtype)
+        )
 
         kernel.to("cpu")
         del kernel
+
+    def _evaluate_kernel(
+        self,
+        kernel: ApproximationCapacityKernel,
+        dataloader: DataLoader,
+        beta: Tensor,
+        use_pin_memory: bool,
+    ) -> float:
+        """Evaluate one fixed beta over all pairs in deterministic order."""
+        with torch.no_grad():
+            kernel.reset()
+            for batch_logits1, batch_logits2 in dataloader:
+                batch_logits1 = batch_logits1.to(self.dev, non_blocking=use_pin_memory)
+                batch_logits2 = batch_logits2.to(self.dev, non_blocking=use_pin_memory)
+                kernel.evaluate(batch_logits1, batch_logits2, beta=beta)
+        return float(kernel.capacity.item())
 
     def compute(self) -> Tensor:
         """Return the computed CAP value."""

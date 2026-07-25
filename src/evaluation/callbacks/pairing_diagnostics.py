@@ -2,13 +2,13 @@ from __future__ import annotations
 
 from collections import defaultdict
 from pathlib import Path
-import json
 
 import torch
 from pytorch_lightning.callbacks import Callback
 
 from src.data.utils import unpack_batch
 from src.evaluation.callbacks import utils as eval_utils
+from src.utils.pairing.table import atomic_json_dump
 from src.utils.pairing.utils import (
     closure_metrics,
     mutual_nearest_pairs,
@@ -39,9 +39,11 @@ class PairingDiagnostics(Callback):
         self.dataset_2 = dataset_2
         self.closure_dataset = closure_dataset or dataset_1
         self.k = int(k)
-        self.caliper_quantile = (
-            None if caliper_quantile is None else float(caliper_quantile)
-        )
+        if self.k <= 0:
+            raise ValueError("PairingDiagnostics k must be positive.")
+        self.caliper_quantile = None if caliper_quantile is None else float(caliper_quantile)
+        if self.caliper_quantile is not None and not 0.0 <= self.caliper_quantile <= 1.0:
+            raise ValueError("PairingDiagnostics caliper_quantile must be between 0 and 1.")
         self.name = name
         self.summary = defaultdict(float)
         self.last_metrics = {}
@@ -63,10 +65,21 @@ class PairingDiagnostics(Callback):
         x = torch.flatten(b.x, start_dim=1).detach().cpu()
 
         if dset_name in self.reps:
+            if self.output_name not in outputs:
+                raise KeyError(
+                    f"Pairing diagnostics output {self.output_name!r} is missing for "
+                    f"dataset {dset_name!r}. Available outputs: {sorted(outputs)}"
+                )
             self.reps[dset_name].append(outputs[self.output_name].detach().cpu())
             self.raw[dset_name].append(x)
 
         if dset_name == self.closure_dataset:
+            missing = [name for name in (self.view1_name, self.view2_name) if name not in outputs]
+            if missing:
+                raise KeyError(
+                    f"Pairing closure outputs are missing {missing}. "
+                    f"Available outputs: {sorted(outputs)}"
+                )
             self.closure_1.append(outputs[self.view1_name].detach().cpu())
             self.closure_2.append(outputs[self.view2_name].detach().cpu())
 
@@ -78,10 +91,21 @@ class PairingDiagnostics(Callback):
 
         root = self._artifact_dir(trainer, ckpt_name)
         root.mkdir(parents=True, exist_ok=True)
-        with (root / "pairing_diagnostics.json").open("w") as f:
-            json.dump(metrics, f, indent=2, sort_keys=True)
+        atomic_json_dump(metrics, root / "pairing_diagnostics.json", overwrite=True)
 
     def _compute_metrics(self) -> dict[str, float]:
+        missing = [
+            name
+            for name, values in (
+                (self.dataset_1, self.reps.get(self.dataset_1, [])),
+                (self.dataset_2, self.reps.get(self.dataset_2, [])),
+                (f"{self.closure_dataset}:view1", self.closure_1),
+                (f"{self.closure_dataset}:view2", self.closure_2),
+            )
+            if not values
+        ]
+        if missing:
+            raise RuntimeError(f"Pairing diagnostics collected no outputs for: {missing}")
         z1 = torch.cat(self.reps[self.dataset_1], dim=0)
         z2 = torch.cat(self.reps[self.dataset_2], dim=0)
         x1 = torch.cat(self.raw[self.dataset_1], dim=0)
@@ -102,6 +126,11 @@ class PairingDiagnostics(Callback):
                 self.caliper_quantile,
             ).item()
         pairs = mutual_nearest_pairs(z1, z2, k=self.k, caliper=caliper)
+        if not pairs.idx_1.numel():
+            raise RuntimeError(
+                "Pairing diagnostics produced no mutual-nearest pairs. "
+                "Inspect the encoder or caliper before continuing."
+            )
 
         smd_before = standardized_mean_differences(x1, x2)
         smd_after = standardized_mean_differences(x1, x2, pairs.idx_1, pairs.idx_2)
@@ -109,9 +138,7 @@ class PairingDiagnostics(Callback):
         mean_smd_after = smd_after.mean().item() if smd_after.numel() else float("inf")
 
         selection_score = (
-            close.get("closure_recall_at_10", 0.0)
-            * coverage
-            / (1.0 + max(mean_smd_after, 0.0))
+            close.get("closure_recall_at_10", 0.0) * coverage / (1.0 + max(mean_smd_after, 0.0))
         )
 
         return {
@@ -125,17 +152,13 @@ class PairingDiagnostics(Callback):
             "pair_distance_p95": torch.quantile(pairs.distance, 0.95).item()
             if pairs.distance.numel()
             else float("nan"),
-            "smd_before_mean": smd_before.mean().item()
-            if smd_before.numel()
-            else float("nan"),
-            "smd_before_max": smd_before.max().item()
-            if smd_before.numel()
-            else float("nan"),
+            "smd_before_mean": smd_before.mean().item() if smd_before.numel() else float("nan"),
+            "smd_before_max": smd_before.max().item() if smd_before.numel() else float("nan"),
             "smd_after_mean": mean_smd_after,
-            "smd_after_max": smd_after.max().item()
-            if smd_after.numel()
-            else float("nan"),
+            "smd_after_max": smd_after.max().item() if smd_after.numel() else float("nan"),
             "selection_score": float(selection_score),
+            "n_dataset_1": int(z1.shape[0]),
+            "n_dataset_2": int(z2.shape[0]),
         }
 
     def get_optimized_metric(self, ckpt_name: str | None = None):

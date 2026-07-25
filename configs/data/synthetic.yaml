@@ -9,9 +9,12 @@ batch_size: 8192
 max_val_batches: null
 seed: ${seed}
 paper_aliases: false
+signal_experiments:
+  - synthetic_signal
 
 generator: gaussian_subspace
 noise_std: 1.0
+paired_reliability: 0.0
 reference_shift: 0.0
 reference_shift_dim: 1
 anomaly_shift: 4.0

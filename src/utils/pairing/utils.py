@@ -7,6 +7,7 @@ import torch
 import torch.nn.functional as F
 
 from src.data.utils import unpack_batch
+from src.utils.pairing.table import PAIR_TABLE_SCHEMA_VERSION
 
 
 @dataclass
@@ -46,6 +47,8 @@ def collect_representations(
         if max_events is not None and sum(t.shape[0] for t in reps) >= max_events:
             break
 
+    if not reps:
+        raise ValueError("Cannot collect representations from an empty dataloader.")
     rep = torch.cat(reps, dim=0)
     x = torch.cat(xs, dim=0)
     y = torch.cat(ys, dim=0)
@@ -77,6 +80,8 @@ def collect_closure_representations(
         if max_events is not None and sum(t.shape[0] for t in reps1) >= max_events:
             break
 
+    if not reps1:
+        raise ValueError("Cannot collect closure representations from an empty dataloader.")
     z1 = torch.cat(reps1, dim=0)
     z2 = torch.cat(reps2, dim=0)
     if max_events is not None:
@@ -90,6 +95,9 @@ def closure_metrics(
     z2: torch.Tensor,
     ks: tuple[int, ...] = (1, 10),
 ) -> dict[str, float]:
+    _validate_embedding_pair(z1, z2, require_equal_rows=True)
+    if not ks or any(int(k) <= 0 for k in ks):
+        raise ValueError("Closure recall values k must be positive.")
     z1 = F.normalize(z1.float(), dim=1)
     z2 = F.normalize(z2.float(), dim=1)
     sim = z1 @ z2.T
@@ -115,6 +123,11 @@ def mutual_nearest_pairs(
     k: int = 20,
     caliper: float | None = None,
 ) -> PairingResult:
+    _validate_embedding_pair(z1, z2)
+    if int(k) <= 0:
+        raise ValueError("k must be positive for mutual-nearest pairing.")
+    if caliper is not None and (not torch.isfinite(torch.tensor(caliper)) or caliper < 0):
+        raise ValueError("caliper must be finite and non-negative.")
     z1 = F.normalize(z1.float(), dim=1)
     z2 = F.normalize(z2.float(), dim=1)
     k12 = min(int(k), z2.shape[0])
@@ -179,6 +192,11 @@ def one_to_one_nearest_pairs(
     when the experiment needs broad coverage, e.g. metadata-nearest controls.
     """
 
+    _validate_embedding_pair(z1, z2)
+    if k is not None and int(k) <= 0:
+        raise ValueError("k must be positive or None for one-to-one pairing.")
+    if caliper is not None and (not torch.isfinite(torch.tensor(caliper)) or caliper < 0):
+        raise ValueError("caliper must be finite and non-negative.")
     z1 = z1.float()
     z2 = z2.float()
     if normalize:
@@ -339,6 +357,7 @@ def pair_table_dict(
     metadata: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     return {
+        "schema_version": PAIR_TABLE_SCHEMA_VERSION,
         "idx_1": pairs.idx_1,
         "idx_2": pairs.idx_2,
         "distance": pairs.distance,
@@ -350,6 +369,26 @@ def pair_table_dict(
         "encoder_ckpt": encoder_ckpt,
         "metadata": metadata or {},
     }
+
+
+def _validate_embedding_pair(
+    z1: torch.Tensor,
+    z2: torch.Tensor,
+    *,
+    require_equal_rows: bool = False,
+) -> None:
+    if not torch.is_tensor(z1) or not torch.is_tensor(z2):
+        raise TypeError("Pairing inputs must be torch tensors.")
+    if z1.ndim != 2 or z2.ndim != 2:
+        raise ValueError("Pairing inputs must be two-dimensional embedding matrices.")
+    if z1.shape[0] == 0 or z2.shape[0] == 0:
+        raise ValueError("Pairing inputs must contain at least one embedding.")
+    if z1.shape[1] != z2.shape[1]:
+        raise ValueError("Pairing inputs must have the same embedding dimension.")
+    if require_equal_rows and z1.shape[0] != z2.shape[0]:
+        raise ValueError("Closure views must contain the same number of embeddings.")
+    if not torch.isfinite(z1).all() or not torch.isfinite(z2).all():
+        raise ValueError("Pairing inputs must contain only finite embeddings.")
 
 
 def _batch_to_device(batch, device):

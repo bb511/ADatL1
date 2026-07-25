@@ -1,0 +1,18 @@
+# @package _global_
+
+defaults:
+  - /experiment/synthetic/base
+  - override /algorithm: vae
+  - _self_
+
+tags: ["synthetic", "smoke", "vae"]
+run_name: vae_seed${seed}
+
+algorithm:
+  target_rate: 0.01
+  base_rate: null
+  kl_warmup_frac: 0.1
+  kl_scale: 0.1
+  encoder:
+    in_dim: ${data.n_features}
+    nodes: [32, 16, 4]

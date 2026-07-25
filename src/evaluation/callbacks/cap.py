@@ -1,18 +1,18 @@
 # Compute the approximation capacity metric.
+import pickle
 from collections import defaultdict
 from pathlib import Path
-import pickle
 
-import torch
 import numpy as np
-
+import torch
 from pytorch_lightning.callbacks import Callback
 
-from src.evaluation.callbacks.metrics.cap.metric import ApproximationCapacity
-from src.evaluation.callbacks.metrics.cap.binary import get_pairing_fn
-
+from src.data.utils import unpack_batch
 from src.evaluation.callbacks import utils
+from src.evaluation.callbacks.metrics.cap.binary import get_pairing_fn
+from src.evaluation.callbacks.metrics.cap.metric import ApproximationCapacity
 from src.plot import horizontal_bar
+from src.utils.pairing.table import load_pair_table, sha256_tensor
 
 
 class CAP(Callback):
@@ -51,6 +51,7 @@ class CAP(Callback):
         pairing_type: str,
         cap_metric_config: dict,
         pairing_index_path: str | None = None,
+        pairing_test_index_path: str | None = None,
         log_raw_mlflow: bool = True,
         name: str = "cap",
     ):
@@ -62,9 +63,11 @@ class CAP(Callback):
         self.cap_metric_config = cap_metric_config
         self.pairing_type = pairing_type
         self.pairing_index_path = pairing_index_path
-        self.pairing_fn = (
-            None if pairing_type == "precomputed" else get_pairing_fn(pairing_type)
-        )
+        self.pairing_test_index_path = pairing_test_index_path
+        self.pair_table_split = None
+        self.dataset_1_inputs = []
+        self.dataset_2_inputs = []
+        self.pairing_fn = None if pairing_type == "precomputed" else get_pairing_fn(pairing_type)
         self.log_raw_mlflow = log_raw_mlflow
         self.name = name
 
@@ -77,29 +80,44 @@ class CAP(Callback):
 
     def on_test_epoch_start(self, trainer, pl_module):
         """Initialise useful quantities."""
+        split = getattr(trainer, "split", None)
+        self.pair_table_split = "validate" if split in {"val", "validate"} else split
         self.dataset_1_scores = []
         self.dataset_2_scores = []
-        self.capmetric = ApproximationCapacity(
-            **self.cap_metric_config, device=self.device
-        )
+        self.dataset_1_inputs = []
+        self.dataset_2_inputs = []
+        self.capmetric = ApproximationCapacity(**self.cap_metric_config, device=self.device)
         self.capmetric.to(self.device)
 
-    def on_test_batch_end(
-        self, trainer, pl_module, outputs, batch, batch_idx, dataloader_idx=0
-    ):
+    def on_test_batch_end(self, trainer, pl_module, outputs, batch, batch_idx, dataloader_idx=0):
         """Cache the data to compute approximation capacity on.
 
         The two data sets need to be paired and going through two data sets at once in not
         compatible with the lightning workflow, and hence we cache the whole data sets here.
         """
         self.dataset_name = list(trainer.test_dataloaders.keys())[dataloader_idx]
+        if self.dataset_name not in (self.dataset_1_name, self.dataset_2_name):
+            return
+        inputs = torch.flatten(unpack_batch(batch).x, start_dim=1).detach().cpu()
+        scores = outputs[self.output_name]
+        if inputs.shape[0] != scores.reshape(-1).shape[0]:
+            raise ValueError(
+                f"CAP received {scores.reshape(-1).shape[0]} scores but "
+                f"{inputs.shape[0]} input rows for dataset {self.dataset_name!r}."
+            )
         if self.dataset_name == self.dataset_1_name:
             self.dataset_1_scores.append(outputs[self.output_name])
+            self.dataset_1_inputs.append(inputs)
         if self.dataset_name == self.dataset_2_name:
             self.dataset_2_scores.append(outputs[self.output_name])
+            self.dataset_2_inputs.append(inputs)
 
     def _compute_cap(self):
         """Compute the cap metric between the two given data sets."""
+        if not self.dataset_1_scores:
+            raise RuntimeError(f"No evaluation scores were collected for '{self.dataset_1_name}'.")
+        if not self.dataset_2_scores:
+            raise RuntimeError(f"No evaluation scores were collected for '{self.dataset_2_name}'.")
         self.dataset_1_scores = torch.cat(self.dataset_1_scores, dim=0)
         self.dataset_2_scores = torch.cat(self.dataset_2_scores, dim=0)
         idxs1, idxs2 = self._pair_indices(self.dataset_1_scores, self.dataset_2_scores)
@@ -107,6 +125,8 @@ class CAP(Callback):
         ds2_scores = self.dataset_2_scores[idxs2]
 
         n = min(len(ds1_scores), len(ds2_scores))
+        if n <= 0:
+            raise RuntimeError("No paired evaluation samples available for CAP.")
         ds1_scores = ds1_scores[:n]
         ds2_scores = ds2_scores[:n]
         self.rankcorr_value = self._spearman_corr(ds1_scores, ds2_scores)
@@ -122,19 +142,33 @@ class CAP(Callback):
         if self.pairing_type != "precomputed":
             return self.pairing_fn(dataset_1_scores, dataset_2_scores)
 
-        if not self.pairing_index_path:
+        pairing_index_path = (
+            self.pairing_test_index_path
+            if self.pair_table_split == "test" and self.pairing_test_index_path
+            else self.pairing_index_path
+        )
+        if not pairing_index_path:
             raise ValueError("pairing_index_path is required for precomputed CAP pairing.")
 
-        table = torch.load(self.pairing_index_path, map_location="cpu", weights_only=False)
-        idxs1 = table.get("idx_1", table.get("idx1"))
-        idxs2 = table.get("idx_2", table.get("idx2"))
-        if idxs1 is None or idxs2 is None:
-            raise ValueError("Pair table must contain idx_1 and idx_2 tensors.")
-
+        table = load_pair_table(
+            pairing_index_path,
+            expected_dataset_1=self.dataset_1_name,
+            expected_dataset_2=self.dataset_2_name,
+            expected_split=self.pair_table_split,
+            n_dataset_1=len(dataset_1_scores),
+            n_dataset_2=len(dataset_2_scores),
+            source_1_sha256=sha256_tensor(torch.cat(self.dataset_1_inputs, dim=0))
+            if self.dataset_1_inputs
+            else None,
+            source_2_sha256=sha256_tensor(torch.cat(self.dataset_2_inputs, dim=0))
+            if self.dataset_2_inputs
+            else None,
+        )
+        idxs1 = table["idx_1"]
+        idxs2 = table["idx_2"]
         idxs1 = idxs1.long().to(dataset_1_scores.device)
         idxs2 = idxs2.long().to(dataset_2_scores.device)
-        valid = (idxs1 < len(dataset_1_scores)) & (idxs2 < len(dataset_2_scores))
-        return idxs1[valid], idxs2[valid]
+        return idxs1, idxs2
 
     def on_test_epoch_end(self, trainer, pl_module):
         """Compute the CAP metric on the designated dataset."""
@@ -150,8 +184,8 @@ class CAP(Callback):
     def _store_summary(self, cap_metric_value: float, rank_val: float, ckpt_ds: str):
         """Store the summary statistic for the cap for one checkpoint.
 
-        Here, it is the metric itself, but this is implemented to be consistent with
-        the other evaluation callbacks.
+        Here, it is the metric itself, but this is implemented to be consistent with the other
+        evaluation callbacks.
         """
         self.cap_summary[ckpt_ds] = cap_metric_value
         self.rankcorr_summary[ckpt_ds] = rank_val
@@ -179,8 +213,8 @@ class CAP(Callback):
     def get_optimized_metric(self):
         """Get one number that one should optimize on this callback.
 
-        Here, it's the maximum of the summary metric across checkpoints corresponding
-        to a certain checkpointing criterion.
+        Here, it's the maximum of the summary metric across checkpoints corresponding to a certain
+        checkpointing criterion.
         """
         max_ckpt_ds = max(self.cap_summary, key=self.cap_summary.get)
         max_metric_value = self.cap_summary[max_ckpt_ds]

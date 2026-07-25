@@ -6,6 +6,12 @@ from pathlib import Path
 import torch
 
 from src.utils.pairing.io import load_encoder_run
+from src.utils.pairing.table import (
+    atomic_torch_save,
+    sha256_file,
+    sha256_tensor,
+    validate_pair_table,
+)
 from src.utils.pairing.utils import (
     closure_metrics,
     collect_closure_representations,
@@ -47,12 +53,23 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--caliper-quantile", type=float, default=0.95)
     parser.add_argument("--no-caliper", action="store_true")
     parser.add_argument("--device", default="cpu")
+    parser.add_argument(
+        "--overwrite",
+        action="store_true",
+        help="Explicitly replace an existing output artifact.",
+    )
     parser.add_argument("overrides", nargs="*")
     return parser.parse_args()
 
 
 def main() -> None:
     args = parse_args()
+    if args.max_events is not None and args.max_events <= 0:
+        raise ValueError("--max-events must be positive.")
+    if not 0.0 <= args.caliper_quantile <= 1.0:
+        raise ValueError("--caliper-quantile must be between 0 and 1.")
+    if args.no_caliper and args.caliper is not None:
+        raise ValueError("--no-caliper and --caliper are mutually exclusive.")
     cfg, datamodule, model = load_encoder_run(
         args.ckpt,
         config_dir=args.config_dir,
@@ -71,10 +88,10 @@ def main() -> None:
             f"available loaders {list(loaders)}."
         )
 
-    z1, _, _ = collect_representations(
+    z1, x1, _ = collect_representations(
         model, loaders[args.dataset_1], args.device, max_events=args.max_events
     )
-    z2, _, _ = collect_representations(
+    z2, x2, _ = collect_representations(
         model, loaders[args.dataset_2], args.device, max_events=args.max_events
     )
 
@@ -127,22 +144,27 @@ def main() -> None:
             "n_dataset_2": int(z2.shape[0]),
             "n_pairs": int(pairs.idx_1.numel()),
             "coverage": float(pairs.idx_1.numel() / max(min(z1.shape[0], z2.shape[0]), 1)),
+            "encoder_checkpoint_sha256": sha256_file(args.ckpt),
+            "source_1_sha256": sha256_tensor(x1),
+            "source_2_sha256": sha256_tensor(x2),
+            "config_name": args.config_name,
+            "config_overrides": list(args.overrides),
+            "data_seed": int(cfg.data.seed),
+            "embedding_dim": int(z1.shape[1]),
         }
     )
 
     out = Path(args.out)
-    out.parent.mkdir(parents=True, exist_ok=True)
-    torch.save(
-        pair_table_dict(
-            pairs,
-            dataset_1=args.dataset_1,
-            dataset_2=args.dataset_2,
-            split=args.stage,
-            encoder_ckpt=str(Path(args.ckpt).resolve()),
-            metadata=metadata,
-        ),
-        out,
+    table = pair_table_dict(
+        pairs,
+        dataset_1=args.dataset_1,
+        dataset_2=args.dataset_2,
+        split=args.stage,
+        encoder_ckpt=str(Path(args.ckpt).resolve()),
+        metadata=metadata,
     )
+    validate_pair_table(table)
+    atomic_torch_save(table, out, overwrite=args.overwrite)
     print(f"Saved {pairs.idx_1.numel()} pairs to {out}")
     print(metadata)
 

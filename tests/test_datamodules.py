@@ -63,3 +63,32 @@ def test_gaussian_subspace_synthetic_l1_datamodule() -> None:
     assert torch.all(y_signal == 1)
     assert x_reference[:, 1].mean() > x_normal[:, 1].mean() + 0.75
     assert x_signal[:, 0].mean() > x_normal[:, 0].mean() + 2.5
+
+
+def test_gaussian_subspace_supports_score_independent_paired_views() -> None:
+    dm = SyntheticL1ADDataModule(
+        n_features=3,
+        n_train=64,
+        n_val=4096,
+        n_test=4096,
+        batch_size=4096,
+        seed=123,
+        generator="gaussian_subspace",
+        paired_reliability=0.8,
+    )
+
+    dm.setup("validate")
+    loaders = dm.val_dataloader()
+    x_normal = next(iter(loaders["normal"]))[0]
+    x_reference = next(iter(loaders["reference_normal"]))[0]
+
+    correlations = [
+        torch.corrcoef(torch.stack([x_normal[:, idx], x_reference[:, idx]]))[0, 1]
+        for idx in range(x_normal.shape[1])
+    ]
+    torch.testing.assert_close(
+        torch.tensor(correlations).mean(),
+        torch.tensor(0.8),
+        atol=0.04,
+        rtol=0.0,
+    )

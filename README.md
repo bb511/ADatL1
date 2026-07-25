@@ -65,10 +65,42 @@ uv run python src/train.py experiment=cchamber/ae_agnostic
 uv run python src/train.py experiment=physics/ae paths.raw_data_dir=/path/to/adl1t_data/parquet_files
 ```
 
-Run the controlled Gaussian-subspace synthetic study:
+Run the publication-scale controlled Gaussian-subspace analytical study:
 
 ```
-uv run python src/synthetic.py --output-dir results/synthetic_gaussian
+make analytical
+```
+
+Run its fast end-to-end pipeline check:
+
+```
+make analytical-smoke
+```
+
+Run the complete data-free smoke suite:
+
+```
+make smoke
+```
+
+This runs the analytical artifact smoke, the four-model/three-seed
+checkpoint-and-reporting smoke, the controlled frozen-encoder pairing smoke, and
+a real-public-CSV Causal Chamber pairing producer/consumer smoke. Causal Chamber
+is downloaded automatically if needed. The results are ignored artifacts under
+`results/`. These are structural tests, not paper results.
+
+Run the two model-oriented smokes separately with:
+
+```bash
+make model-smoke
+make pairing-smoke
+make cchamber-pairing-smoke
+```
+
+To run only one synthetic anomaly model and seed:
+
+```
+uv run python scripts/synthetic/smoke.py --models ae --seeds 123
 ```
 
 Generate reproducible paper launch scripts:
@@ -83,3 +115,27 @@ The generator writes shell scripts plus `manifest.json` and `manifest.md` under
 parameters from `configs/hparams_search`, fixed Hydra overrides, validation
 strategy overrides, Optuna sweeper overrides, and reporting factors such as seeds
 or benchmark domains.
+
+Before generating expensive jobs, validate all 76 core sweep compositions and
+generated shell scripts:
+
+```bash
+make preflight-local
+```
+
+The strict cloud gate additionally requires a clean commit, real physics parquet
+directories, and versioned validation/test Causal Chamber pair tables:
+
+```bash
+export CCHAMBER_VALID_PAIR_TABLE=/shared/pairs/valid_ae_pairs.pt
+export CCHAMBER_TEST_PAIR_TABLE=/shared/pairs/test_ae_pairs.pt
+make preflight-cloud
+```
+
+See `DEPLOYMENT.md` for the exact handoff and for checks that still must happen on
+the target cluster.
+
+After sweeps, `scripts/paper_pipeline.py` validates label-free selection,
+resolves retrained checkpoints, collects evaluator `values.csv` files, and
+generates seed-aware tables, plots, provenance, and a Markdown report. See
+`EXPERIMENT_STATUS.md` for the current evidence and exact remaining cluster work.

@@ -7,7 +7,6 @@ from torch.utils.data import DataLoader
 
 from src.data.components.dataset import CIFARADDataset, L1ADDataset
 
-
 PHYSICS_SIGNAL_NAMES = (
     "GluGluHTo2B_Par-MH-125",
     "GluGluHto2G_Par-MH-125",
@@ -130,8 +129,10 @@ class SyntheticL1ADDataModule(LightningDataModule):
         max_val_batches: int | None = None,
         seed: int = 123,
         paper_aliases: bool = False,
+        signal_experiments: tuple[str, ...] = ("synthetic_signal",),
         generator: Literal["shifted", "gaussian_subspace"] = "shifted",
         noise_std: float = 1.0,
+        paired_reliability: float = 0.0,
         reference_shift: float = 0.0,
         reference_shift_dim: int = 1,
         anomaly_shift: float = 4.0,
@@ -142,9 +143,7 @@ class SyntheticL1ADDataModule(LightningDataModule):
         self._validate_generator_config()
         self.loader = _SyntheticLoader(n_features)
         self.normalizer = _IdentityNormalizer(n_features)
-        self.l1_scales = {
-            obj: {"phi": 1.0} for obj in self.loader.object_feature_map.keys()
-        }
+        self.l1_scales = {obj: {"phi": 1.0} for obj in self.loader.object_feature_map.keys()}
         self.shuffler = torch.Generator().manual_seed(seed)
 
     def prepare_data(self) -> None:
@@ -157,33 +156,24 @@ class SyntheticL1ADDataModule(LightningDataModule):
             self.train_split = self._make_split(
                 self.hparams.n_train, n_features, 0, self._split_generator(0)
             )
-            self.val_normal = self._make_split(
-                self.hparams.n_val, n_features, 0, self._split_generator(1)
-            )
-            self.val_reference = self._make_split(
-                self.hparams.n_val, n_features, -1, self._split_generator(2)
+            self.val_normal, self.val_reference = self._make_typical_pair(
+                self.hparams.n_val, n_features, offset=1
             )
             self.val_signal = self._make_split(
                 self.hparams.n_val, n_features, 1, self._split_generator(3)
             )
 
         if stage in (None, "validate"):
-            self.val_normal = self._make_split(
-                self.hparams.n_val, n_features, 0, self._split_generator(1)
-            )
-            self.val_reference = self._make_split(
-                self.hparams.n_val, n_features, -1, self._split_generator(2)
+            self.val_normal, self.val_reference = self._make_typical_pair(
+                self.hparams.n_val, n_features, offset=1
             )
             self.val_signal = self._make_split(
                 self.hparams.n_val, n_features, 1, self._split_generator(3)
             )
 
         if stage in (None, "test"):
-            self.test_normal = self._make_split(
-                self.hparams.n_test, n_features, 0, self._split_generator(4)
-            )
-            self.test_reference = self._make_split(
-                self.hparams.n_test, n_features, -1, self._split_generator(5)
+            self.test_normal, self.test_reference = self._make_typical_pair(
+                self.hparams.n_test, n_features, offset=4
             )
             self.test_signal = self._make_split(
                 self.hparams.n_test, n_features, 1, self._split_generator(6)
@@ -191,6 +181,38 @@ class SyntheticL1ADDataModule(LightningDataModule):
 
     def _split_generator(self, offset: int) -> torch.Generator:
         return torch.Generator().manual_seed(int(self.hparams.seed) + int(offset))
+
+    def _make_typical_pair(
+        self, n_samples: int, n_features: int, *, offset: int
+    ) -> tuple[_Split, _Split]:
+        """Create aligned typical views for paired validation metrics.
+
+        ``paired_reliability=0`` preserves the historical independent-domain
+        behavior. Positive values create two standard-normal marginal views with
+        the requested cross-view correlation while keeping pairing independent of
+        any anomaly-model score.
+        """
+        rho = float(self.hparams.paired_reliability)
+        if self.hparams.generator != "gaussian_subspace" or rho == 0.0:
+            return (
+                self._make_split(n_samples, n_features, 0, self._split_generator(offset)),
+                self._make_split(n_samples, n_features, -1, self._split_generator(offset + 1)),
+            )
+
+        shared = torch.randn(n_samples, n_features, generator=self._split_generator(offset))
+        eps_1 = torch.randn(n_samples, n_features, generator=self._split_generator(offset + 1))
+        eps_2 = torch.randn(n_samples, n_features, generator=self._split_generator(offset + 2))
+        shared_scale = rho**0.5
+        noise_scale = (1.0 - rho) ** 0.5
+        marginal_scale = float(self.hparams.noise_std)
+        x_1 = marginal_scale * (shared_scale * shared + noise_scale * eps_1)
+        x_2 = marginal_scale * (shared_scale * shared + noise_scale * eps_2)
+
+        shift = float(self.hparams.reference_shift)
+        if shift != 0.0:
+            x_2[:, int(self.hparams.reference_shift_dim)] += shift
+
+        return self._split_from_x(x_1, label=0), self._split_from_x(x_2, label=-1)
 
     def train_dataloader(self):
         return self._loader(self.train_split, shuffler=self.shuffler)
@@ -249,9 +271,7 @@ class SyntheticL1ADDataModule(LightningDataModule):
     def _make_gaussian_subspace_split(
         self, n_samples: int, n_features: int, label: int, gen: torch.Generator
     ) -> _Split:
-        x = torch.randn(n_samples, n_features, generator=gen) * float(
-            self.hparams.noise_std
-        )
+        x = torch.randn(n_samples, n_features, generator=gen) * float(self.hparams.noise_std)
 
         if label < 0:
             shift = float(self.hparams.reference_shift)
@@ -265,6 +285,16 @@ class SyntheticL1ADDataModule(LightningDataModule):
         y = torch.full((n_samples,), label, dtype=torch.long)
         return _Split(x=x.float(), mask=mask, l1bit=l1bit, y=y)
 
+    @staticmethod
+    def _split_from_x(x: torch.Tensor, *, label: int) -> _Split:
+        n_samples, n_features = x.shape
+        return _Split(
+            x=x.float().contiguous(),
+            mask=torch.ones(n_samples, n_features, dtype=torch.bool),
+            l1bit=torch.zeros(n_samples, dtype=torch.bool),
+            y=torch.full((n_samples,), label, dtype=torch.long),
+        )
+
     def _validate_generator_config(self) -> None:
         generator = self.hparams.generator
         if generator not in {"shifted", "gaussian_subspace"}:
@@ -276,13 +306,15 @@ class SyntheticL1ADDataModule(LightningDataModule):
         if float(self.hparams.noise_std) <= 0.0:
             raise ValueError("noise_std must be positive.")
 
+        paired_reliability = float(self.hparams.paired_reliability)
+        if not 0.0 <= paired_reliability < 1.0:
+            raise ValueError("paired_reliability must lie in [0, 1).")
+
         n_features = int(self.hparams.n_features)
         for name in ("reference_shift_dim", "anomaly_dim"):
             dim = int(getattr(self.hparams, name))
             if dim < 0 or dim >= n_features:
-                raise ValueError(
-                    f"{name}={dim} is outside the feature range [0, {n_features})."
-                )
+                raise ValueError(f"{name}={dim} is outside the feature range [0, {n_features}).")
 
     def _loader(self, split: _Split, shuffler: torch.Generator | None = None):
         ds = L1ADDataset(
@@ -368,9 +400,7 @@ class SyntheticImageADDataModule(LightningDataModule):
         self.val_reference = self._make_split(self.hparams.n_val, 0, 0.10, gen)
         self.val_cifar_signals = self._make_cifar_signals(self.hparams.n_val, gen)
         self.val_shifted_normals = self._make_shifted_normals(self.hparams.n_val, gen)
-        self.val_shifted_anomalies = self._make_shifted_anomalies(
-            self.hparams.n_val, gen
-        )
+        self.val_shifted_anomalies = self._make_shifted_anomalies(self.hparams.n_val, gen)
         self.val_shifted_normal_all = self._concat(self.val_shifted_normals)
 
     def _setup_test(self, gen: torch.Generator):
@@ -378,9 +408,7 @@ class SyntheticImageADDataModule(LightningDataModule):
         self.test_reference = self._make_split(self.hparams.n_test, 0, 0.10, gen)
         self.test_cifar_signals = self._make_cifar_signals(self.hparams.n_test, gen)
         self.test_shifted_normals = self._make_shifted_normals(self.hparams.n_test, gen)
-        self.test_shifted_anomalies = self._make_shifted_anomalies(
-            self.hparams.n_test, gen
-        )
+        self.test_shifted_anomalies = self._make_shifted_anomalies(self.hparams.n_test, gen)
         self.test_shifted_normal_all = self._concat(self.test_shifted_normals)
 
     def _make_cifar_signals(self, n_samples: int, gen: torch.Generator):
@@ -404,10 +432,8 @@ class SyntheticImageADDataModule(LightningDataModule):
     def _make_split(
         self, n_samples: int, label: int, shift: float, gen: torch.Generator
     ) -> _ImageSplit:
-        h, w = [int(v) for v in self.hparams.image_size]
-        x = 0.25 * torch.randn(
-            n_samples, self.hparams.channels, h, w, generator=gen
-        )
+        h, w = (int(v) for v in self.hparams.image_size)
+        x = 0.25 * torch.randn(n_samples, self.hparams.channels, h, w, generator=gen)
         x = x + shift
 
         if label > 0:

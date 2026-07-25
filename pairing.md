@@ -30,7 +30,7 @@ bash scripts/setup.sh
 Make sure `.env` or your cluster job exports the usual paths:
 
 ```bash
-PROJECT_ROOT=/path/to/codex-adatl1-pairing
+PROJECT_ROOT=/path/to/adatl1
 DATA_DIR=/path/to/data
 RAW_DATA_DIR=/path/to/raw_l1_inputs
 LOG_DIR=/path/to/logs
@@ -44,29 +44,36 @@ demo commands below.
 
 ## Smoke Test
 
-Before using cluster time, verify the full path on synthetic data:
+Before using cluster time, verify the full producer/consumer path on controlled
+data:
 
 ```bash
-uv run python tests/train.py experiment=demo/l1_jetclr logger=none
+make pairing-smoke
 ```
 
-Then stress-test the saved demo checkpoint:
+This trains the JetCLR demo, runs deterministic stress diagnostics, builds
+different validation and test tables, and consumes those exact tables through
+training-time CAP plus evaluator validation and test. Expected artifacts:
+
+- `results/pairing-smoke/summary.json`
+- `results/pairing-smoke/stress/stress_metrics.json`
+- `results/pairing-smoke/valid_pairs.pt`
+- `results/pairing-smoke/test_pairs.pt`
+
+The smoke deliberately uses the same 57-feature event representation, split
+sizes, ordering, callbacks, and evaluator API on both sides of the pair-table
+handoff. It does not claim that the synthetic pairs have physics meaning.
+
+Also run the public-data canary:
 
 ```bash
-uv run python -m src.utils.pairing.stress_test_encoder \
-  --ckpt checkpoints/demo/l1_jetclr/last.ckpt \
-  --out-dir outputs/demo_l1_jetclr_stress \
-  --stage validate \
-  --dataset-1 normal \
-  --dataset-2 reference_normal \
-  --no-caliper \
-  experiment=demo/l1_jetclr logger=none
+make cchamber-pairing-smoke
 ```
 
-Expected artifacts:
-
-- `outputs/demo_l1_jetclr_stress/stress_metrics.json`
-- `outputs/demo_l1_jetclr_stress/pair_table.pt`
+This trains the actual 11-readout Causal Chamber pairing AE, creates 1,000
+one-to-one validation pairs and 1,000 separate test pairs from the real CSVs, and
+consumes them through a real AE anomaly run with the `uniform_red_mid`
+intervention.
 
 ## Train One Physics Encoder
 
@@ -128,10 +135,13 @@ uv run python src/train.py \
 For seed sensitivity, rerun the best region with several seeds:
 
 ```bash
-uv run python src/train.py experiment=physics/jetclr_pairing seed=101
-uv run python src/train.py experiment=physics/jetclr_pairing seed=102
-uv run python src/train.py experiment=physics/jetclr_pairing seed=103
+uv run python src/train.py experiment=physics/jetclr_pairing seed=101 data.seed=123
+uv run python src/train.py experiment=physics/jetclr_pairing seed=102 data.seed=123
+uv run python src/train.py experiment=physics/jetclr_pairing seed=103 data.seed=123
 ```
+
+Keep `data.seed` fixed while varying the model seed. Otherwise the pair-table
+comparison confounds encoder sensitivity with different source events.
 
 ## What To Inspect
 
@@ -201,6 +211,8 @@ Inspect:
 - `mean_overlap_min`
 
 These quantify encoder-seed sensitivity of the actual pair table.
+The comparison tool intentionally rejects tables from different splits, datasets,
+source sizes, source fingerprints, or data seeds.
 
 ## Generate Final Pair Tables
 
@@ -238,12 +250,15 @@ Use `--max-events N` if you need to build a smaller table for quick debugging.
 The pair table contains:
 
 ```text
-idx_1, idx_2, distance, rank_1_to_2, rank_2_to_1,
+schema_version, idx_1, idx_2, distance, rank_1_to_2, rank_2_to_1,
 dataset_1, dataset_2, split, encoder_ckpt, metadata
 ```
 
-Keep these pair tables as experiment artifacts. CAP results should always record the
-exact pair-table path and encoder checkpoint.
+Metadata includes SHA-256 fingerprints of the encoder checkpoint and both ordered
+source tensors. Loading rejects stale schemas, duplicate/out-of-range pairs,
+wrong dataset names or splits, size mismatches, and different source content.
+Writers refuse to overwrite an existing artifact unless `--overwrite` is supplied.
+Keep these pair tables as experiment artifacts.
 
 ## Use Pair Tables In CAP
 
@@ -278,7 +293,8 @@ callbacks:
       dist_sync_fn: null
 ```
 
-Evaluation callback uses the same keys:
+Evaluation must receive both tables because one evaluator run performs validation
+and then test:
 
 ```yaml
 evaluation:
@@ -289,9 +305,13 @@ evaluation:
       dataset_1: normal
       dataset_2: SingleNeutrino_E-10-gun
       pairing_type: precomputed
-      pairing_index_path: /path/to/pair_tables/test_normal_vs_singleneutrino.pt
+      pairing_index_path: /path/to/pair_tables/valid_normal_vs_singleneutrino.pt
+      pairing_test_index_path: /path/to/pair_tables/test_normal_vs_singleneutrino.pt
       cap_metric_config: ${callbacks.cap_sn_zb.cap_metric_config}
 ```
+
+Using the test table as `pairing_index_path` is data leakage during evaluator
+validation and is now prevented by split validation.
 
 ## Final Checklist
 
@@ -304,4 +324,4 @@ Before using a pairing encoder in the paper:
 5. final validation/test pair tables generated,
 6. CAP configs use `pairing_type: precomputed`,
 7. paper tables report both CAP results and pairing diagnostics.
-
+8. `make preflight-cloud` passes from a clean commit on the target environment.

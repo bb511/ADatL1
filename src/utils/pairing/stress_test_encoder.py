@@ -1,13 +1,19 @@
 from __future__ import annotations
 
 import argparse
-import json
 from pathlib import Path
 
 import torch
 import torch.nn.functional as F
 
 from src.utils.pairing.io import load_encoder_run
+from src.utils.pairing.table import (
+    atomic_json_dump,
+    atomic_torch_save,
+    sha256_file,
+    sha256_tensor,
+    validate_pair_table,
+)
 from src.utils.pairing.utils import (
     closure_metrics,
     collect_closure_representations,
@@ -32,13 +38,25 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--caliper-quantile", type=float, default=0.95)
     parser.add_argument("--no-caliper", action="store_true")
     parser.add_argument("--device", default="cpu")
+    parser.add_argument("--random-seed", type=int, default=12345)
+    parser.add_argument(
+        "--overwrite",
+        action="store_true",
+        help="Explicitly replace existing stress-test artifacts.",
+    )
     parser.add_argument("overrides", nargs="*")
     return parser.parse_args()
 
 
 def main() -> None:
     args = parse_args()
-    _, datamodule, model = load_encoder_run(
+    if args.k <= 0:
+        raise ValueError("--k must be positive.")
+    if args.max_events is not None and args.max_events <= 0:
+        raise ValueError("--max-events must be positive.")
+    if not 0.0 <= args.caliper_quantile <= 1.0:
+        raise ValueError("--caliper-quantile must be between 0 and 1.")
+    cfg, datamodule, model = load_encoder_run(
         args.ckpt,
         config_dir=args.config_dir,
         config_name=args.config_name,
@@ -46,7 +64,9 @@ def main() -> None:
         stage=args.stage,
         device=args.device,
     )
-    loaders = datamodule.val_dataloader() if args.stage == "validate" else datamodule.test_dataloader()
+    loaders = (
+        datamodule.val_dataloader() if args.stage == "validate" else datamodule.test_dataloader()
+    )
     for name in (args.dataset_1, args.dataset_2):
         if name not in loaders:
             raise ValueError(f"Dataset '{name}' not available. Found {list(loaders)}.")
@@ -74,7 +94,8 @@ def main() -> None:
 
     smd_before = standardized_mean_differences(x1, x2)
     smd_after = standardized_mean_differences(x1, x2, pairs.idx_1, pairs.idx_2)
-    random_idx2 = torch.randperm(x2.shape[0])[: min(x1.shape[0], x2.shape[0])]
+    generator = torch.Generator().manual_seed(args.random_seed)
+    random_idx2 = torch.randperm(x2.shape[0], generator=generator)[: min(x1.shape[0], x2.shape[0])]
     random_idx1 = torch.arange(random_idx2.shape[0])
     smd_random = standardized_mean_differences(x1, x2, random_idx1, random_idx2)
 
@@ -97,26 +118,51 @@ def main() -> None:
         "smd_random_max": smd_random.max().item() if smd_random.numel() else float("nan"),
         "smd_after_mean": smd_after.mean().item() if smd_after.numel() else float("nan"),
         "smd_after_max": smd_after.max().item() if smd_after.numel() else float("nan"),
+        "random_seed": args.random_seed,
     }
+    if not pairs.idx_1.numel():
+        raise RuntimeError("Stress test produced no pairs; refusing to write unusable artifacts.")
+    if not all(
+        torch.isfinite(torch.tensor(value))
+        for value in metrics.values()
+        if isinstance(value, float)
+    ):
+        raise RuntimeError("Stress test produced non-finite metrics.")
 
     out_dir = Path(args.out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
-    with (out_dir / "stress_metrics.json").open("w") as f:
-        json.dump(metrics, f, indent=2, sort_keys=True)
-
-    torch.save(
-        pair_table_dict(
-            pairs,
-            dataset_1=args.dataset_1,
-            dataset_2=args.dataset_2,
-            split=args.stage,
-            encoder_ckpt=str(Path(args.ckpt).resolve()),
-            metadata=metrics,
-        ),
+    table_metadata = {
+        **metrics,
+        "n_pairs": int(pairs.idx_1.numel()),
+        "encoder_checkpoint_sha256": sha256_file(args.ckpt),
+        "source_1_sha256": sha256_tensor(x1),
+        "source_2_sha256": sha256_tensor(x2),
+        "config_name": args.config_name,
+        "config_overrides": list(args.overrides),
+        "data_seed": int(cfg.data.seed),
+        "embedding_dim": int(z1.shape[1]),
+    }
+    table = pair_table_dict(
+        pairs,
+        dataset_1=args.dataset_1,
+        dataset_2=args.dataset_2,
+        split=args.stage,
+        encoder_ckpt=str(Path(args.ckpt).resolve()),
+        metadata=table_metadata,
+    )
+    validate_pair_table(table)
+    atomic_json_dump(
+        metrics,
+        out_dir / "stress_metrics.json",
+        overwrite=args.overwrite,
+    )
+    atomic_torch_save(
+        table,
         out_dir / "pair_table.pt",
+        overwrite=args.overwrite,
     )
 
-    print(json.dumps(metrics, indent=2, sort_keys=True))
+    print(__import__("json").dumps(metrics, indent=2, sort_keys=True, allow_nan=False))
     print(f"Saved stress artifacts to {out_dir}")
 
 

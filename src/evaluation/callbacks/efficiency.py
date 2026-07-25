@@ -1,7 +1,11 @@
 # Callback that computes the anomaly efficiency.
-import pickle
+import csv
+import json
+import pickle  # nosec B403
 from collections import defaultdict
 from pathlib import Path
+from tempfile import NamedTemporaryFile
+from typing import Any, Mapping
 
 import numpy as np
 import torch
@@ -32,6 +36,12 @@ class AnomalyEfficiencyCallback(Callback):
     :param cvar_summary: Fraction of worst efficiencies to average in the summary.
     :param log_raw_mlflow: Whether to log raw plots to mlflow.
     :param name: Identifier used in plot folders and summaries.
+    :param operating_point_diagnostics_path: Optional sidecar CSV destination for
+        validation-threshold/test-normal diagnostics.
+    :param operating_point_context: Exact provenance fields copied into the sidecar row.
+    :param operating_point_only: Skip all plots and the intervention-level ``values.csv``.
+    :param operating_point_threshold_source: Provenance label for the restored or
+        externally calibrated operational threshold.
     """
 
     def __init__(
@@ -44,6 +54,10 @@ class AnomalyEfficiencyCallback(Callback):
         cvar_summary: float = 0.25,
         log_raw_mlflow: bool = True,
         name: str = "eff",
+        operating_point_diagnostics_path: str | Path | None = None,
+        operating_point_context: Mapping[str, Any] | None = None,
+        operating_point_only: bool = False,
+        operating_point_threshold_source: str = "checkpoint_validation:thres_operational",
     ):
         super().__init__()
         self.device = None
@@ -57,6 +71,20 @@ class AnomalyEfficiencyCallback(Callback):
         self.cvar_summary = cvar_summary
 
         self.log_raw_mlflow = log_raw_mlflow
+        self.operating_point_diagnostics_path = (
+            None
+            if operating_point_diagnostics_path is None
+            else Path(operating_point_diagnostics_path)
+        )
+        self.operating_point_context = dict(operating_point_context or {})
+        self.operating_point_only = bool(operating_point_only)
+        self.operating_point_threshold_source = str(operating_point_threshold_source)
+        if not self.operating_point_threshold_source:
+            raise ValueError("operating_point_threshold_source must not be empty.")
+        if self.operating_point_only and self.operating_point_diagnostics_path is None:
+            raise ValueError(
+                "operating_point_only=True requires operating_point_diagnostics_path."
+            )
         self.eff_summary = defaultdict(lambda: defaultdict(float))
         self.eff_min = defaultdict(lambda: defaultdict(float))
         self.eff_med = defaultdict(lambda: defaultdict(float))
@@ -75,6 +103,10 @@ class AnomalyEfficiencyCallback(Callback):
         first_test_dset_key = list(trainer.test_dataloaders.keys())[0]
         if first_test_dset_key != "normal":
             raise ValueError("Eff callback needs normal data first in the data dict!")
+        if self.operating_point_only and set(trainer.test_dataloaders) != {"normal"}:
+            raise ValueError(
+                "operating_point_only=True requires exactly the test.normal dataloader."
+            )
 
     def on_test_epoch_start(self, trainer, pl_module):
         """Clear the metrics dictionary at the start of the epoch."""
@@ -103,6 +135,11 @@ class AnomalyEfficiencyCallback(Callback):
 
     def on_test_epoch_end(self, trainer, pl_module) -> None:
         """Log the anomaly rates computed on each of the datasets."""
+        if self.operating_point_diagnostics_path is not None:
+            self._write_operating_point_diagnostics(pl_module)
+        if self.operating_point_only:
+            return
+
         eff_name = f"{self.name}_pure" if self.pure_thres else self.name
         ckpts_dir = Path(pl_module._ckpt_path).parent
         ckpt_name = Path(pl_module._ckpt_path).stem
@@ -338,3 +375,85 @@ class AnomalyEfficiencyCallback(Callback):
         if self._is_operational(target_rate):
             return "operational"
         return str(target_rate)
+
+    def _write_operating_point_diagnostics(self, pl_module) -> None:
+        """Write one provenance-rich, test-normal operating-point row.
+
+        This is deliberately separate from the intervention-level ``values.csv``
+        output contract.  The operational threshold is supplied by checkpoint
+        restoration or a validation-only calibration; it is never fit on test data.
+        """
+        if self.base_rate_resolved is not None:
+            raise ValueError(
+                "Operating-point diagnostics currently require a direct false-positive rate "
+                "(base_rate=None)."
+            )
+        if abs(self.operational_rate - 0.01) > 1e-12:
+            raise ValueError(
+                "Operating-point diagnostics require target false-positive rate=0.01, got "
+                f"{self.operational_rate}."
+            )
+        if set(self.main_rate[self.operational_rate]) != {"normal"}:
+            raise ValueError("Operating-point diagnostics require exactly the test.normal stream.")
+
+        rate = self.main_rate[self.operational_rate]["normal"]
+        n_test_normal = int(rate.nsamples.detach().cpu().item())
+        n_triggered = int(rate.ntriggered.detach().cpu().item())
+        if n_test_normal <= 0:
+            raise ValueError("Operating-point diagnostics received no test-normal samples.")
+        score = torch.as_tensor(self.normal_score_data)
+        n_finite = int(torch.isfinite(score).sum().detach().cpu().item())
+        if n_finite != n_test_normal:
+            raise ValueError(
+                "Operating-point diagnostics require finite test-normal scores; "
+                f"found {n_finite}/{n_test_normal}."
+            )
+
+        checkpoint = Path(pl_module._ckpt_path).resolve()
+        threshold = float(rate.threshold.detach().cpu().item())
+        if not np.isfinite(threshold):
+            raise ValueError("Operational threshold is not finite.")
+        row: dict[str, Any] = {
+            "checkpoint": str(checkpoint),
+            "checkpoint_stem": checkpoint.stem,
+            "threshold_source": self.operating_point_threshold_source,
+            "validation_derived_threshold": threshold,
+            "target_fpr": 0.01,
+            "test_normal_count": n_test_normal,
+            "test_normal_finite_count": n_finite,
+            "triggered_count": n_triggered,
+            "achieved_test_normal_acceptance": n_triggered / n_test_normal,
+            "nominal_test_normal_acceptance": 0.01,
+            "finite_sample_granularity": 1.0 / n_test_normal,
+            "nearest_attainable_test_normal_acceptance": (
+                round(0.01 * n_test_normal) / n_test_normal
+            ),
+        }
+        for key, value in sorted(self.operating_point_context.items()):
+            if key in row:
+                raise ValueError(f"Operating-point context collides with field {key!r}.")
+            if isinstance(value, (dict, list, tuple)):
+                row[key] = json.dumps(
+                    value, sort_keys=True, separators=(",", ":"), allow_nan=False
+                )
+            elif value is None or isinstance(value, (str, int, float, bool)):
+                row[key] = value
+            else:
+                raise TypeError(f"Operating-point context field {key!r} is not CSV-serializable.")
+
+        output = self.operating_point_diagnostics_path
+        output.parent.mkdir(parents=True, exist_ok=True)
+        with NamedTemporaryFile(
+            mode="w",
+            encoding="utf-8",
+            newline="",
+            dir=output.parent,
+            prefix=f".{output.name}.",
+            suffix=".tmp",
+            delete=False,
+        ) as handle:
+            writer = csv.DictWriter(handle, fieldnames=list(row))
+            writer.writeheader()
+            writer.writerow(row)
+            temporary = Path(handle.name)
+        temporary.replace(output)

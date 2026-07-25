@@ -62,6 +62,11 @@ ZERO_VARIANCE_RULE = (
     "Report null only when both groups are identical constants; otherwise "
     "signed infinity is invalid and must raise."
 )
+ZERO_VARIANCE_AMENDMENT = (
+    "When either group has zero variance, report the raw mean difference and "
+    "mark Hedges g and the log-SD ratio undefined; never replace infinity with "
+    "a finite value."
+)
 DESCENDANT_ESTIMAND = (
     "Within intervention, compare absolute location and scale effects on "
     "graph-expected descendants against non-descendant readouts."
@@ -647,8 +652,8 @@ def _hedges_correction(n_reference: int, n_intervention: int) -> float:
 def _readout_effects(
     reference: np.ndarray,
     intervention: np.ndarray,
-) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
-    """Return Hedges g, log-SD ratio, and identical-constant indicators."""
+) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
+    """Return standardized effects and both zero-variance indicators."""
     n_reference, n_intervention = len(reference), len(intervention)
     reference_mean = reference.mean(axis=0, dtype=np.float64)
     intervention_mean = intervention.mean(axis=0, dtype=np.float64)
@@ -657,19 +662,14 @@ def _readout_effects(
     identical_constant = (
         (reference_sd == 0.0) & (intervention_sd == 0.0) & (reference_mean == intervention_mean)
     )
-    invalid_constant = ((reference_sd == 0.0) | (intervention_sd == 0.0)) & ~identical_constant
-    if invalid_constant.any():
-        names = [READOUT_FEATURES[index] for index in np.flatnonzero(invalid_constant)]
-        raise ValueError(
-            "Readout SD ratio would be infinite for non-identical constants: " + ", ".join(names)
-        )
+    undefined_constant = ((reference_sd == 0.0) | (intervention_sd == 0.0)) & ~identical_constant
     pooled_variance = (
         (n_reference - 1) * reference_sd**2 + (n_intervention - 1) * intervention_sd**2
     ) / (n_reference + n_intervention - 2)
     pooled_sd = np.sqrt(pooled_variance)
     hedges = np.full(reference.shape[1], np.nan, dtype=np.float64)
     log_sd = np.full(reference.shape[1], np.nan, dtype=np.float64)
-    valid = ~identical_constant
+    valid = ~(identical_constant | undefined_constant)
     hedges[valid] = (
         _hedges_correction(n_reference, n_intervention)
         * (intervention_mean[valid] - reference_mean[valid])
@@ -678,7 +678,7 @@ def _readout_effects(
     log_sd[valid] = np.log(intervention_sd[valid] / reference_sd[valid])
     if not np.isfinite(hedges[valid]).all() or not np.isfinite(log_sd[valid]).all():
         raise ValueError("Non-finite readout effect encountered.")
-    return hedges, log_sd, identical_constant
+    return hedges, log_sd, identical_constant, undefined_constant
 
 
 def _bootstrap_effects(
@@ -870,7 +870,12 @@ def _compute_characterization(
             }
         )
 
-        hedges, log_sd, identical_constant = _readout_effects(reference, signal)
+        reference_mean = reference.mean(axis=0, dtype=np.float64)
+        signal_mean = signal.mean(axis=0, dtype=np.float64)
+        hedges, log_sd, identical_constant, undefined_constant = _readout_effects(
+            reference,
+            signal,
+        )
         hedges_bootstrap, log_sd_bootstrap = _bootstrap_effects(
             reference,
             signal,
@@ -879,7 +884,7 @@ def _compute_characterization(
         )
         descendants = set(record["expected_readout_descendants"])
         for index, readout in enumerate(READOUT_FEATURES):
-            if identical_constant[index]:
+            if identical_constant[index] or undefined_constant[index]:
                 hedges_low = hedges_high = None
                 log_low = log_high = None
                 hedges_finite = log_finite = 0
@@ -912,6 +917,9 @@ def _compute_characterization(
                     "readout": readout,
                     "readout_order": index,
                     "expected_descendant": readout in descendants,
+                    "reference_mean": float(reference_mean[index]),
+                    "intervention_mean": float(signal_mean[index]),
+                    "mean_difference": float(signal_mean[index] - reference_mean[index]),
                     "hedges_g": hedges_value,
                     "hedges_g_bootstrap_ci95_low": hedges_low,
                     "hedges_g_bootstrap_ci95_high": hedges_high,
@@ -921,6 +929,7 @@ def _compute_characterization(
                     "log_sd_ratio_bootstrap_ci95_high": log_high,
                     "log_sd_ratio_bootstrap_finite_repetitions": log_finite,
                     "identical_constant_null": bool(identical_constant[index]),
+                    "undefined_zero_variance_effect": bool(undefined_constant[index]),
                     "bootstrap_seed": seed,
                     "bootstrap_repetitions": repetitions,
                 }
@@ -942,6 +951,9 @@ def _compute_characterization(
             "intervention_order": int(metadata["intervention_order"]),
             "n_expected_descendants": len(descendants),
             "n_non_descendants": len(non_descendants),
+            "n_undefined_zero_variance_effects": int(
+                group["undefined_zero_variance_effect"].sum()
+            ),
         }
         for column in ("hedges_g", "log_sd_ratio"):
             descendant_values = descendants[column].abs().dropna()
@@ -1161,6 +1173,14 @@ def analyze(
                 },
                 "readout_location": plan["readout_effects"]["location"],
                 "readout_scale": plan["readout_effects"]["scale"],
+                "zero_variance_protocol_amendment": {
+                    "trigger": (
+                        "Observed non-identical zero-variance readouts made the frozen "
+                        "standardized estimands mathematically undefined."
+                    ),
+                    "policy": ZERO_VARIANCE_AMENDMENT,
+                    "selection_impact": "none; analysis ran only after selection was frozen",
+                },
                 "bootstrap": {
                     "repetitions": repetitions,
                     "base_seed": bootstrap_seed,

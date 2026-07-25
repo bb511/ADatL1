@@ -465,7 +465,7 @@ def test_refuses_campaign_internal_output_and_estimators_match_definitions(
         ii,
         ri,
     ) == pytest.approx(expected_energy)
-    hedges, log_sd, identical = cchamber_physical_shift._readout_effects(
+    hedges, log_sd, identical, undefined = cchamber_physical_shift._readout_effects(
         reference,
         intervention,
     )
@@ -473,19 +473,28 @@ def test_refuses_campaign_internal_output_and_estimators_match_definitions(
     assert hedges.item() == pytest.approx(correction * 2.0)
     assert log_sd.item() == pytest.approx(0.0)
     assert not identical.item()
+    assert not undefined.item()
 
-    null_hedges, null_log_sd, null_identical = cchamber_physical_shift._readout_effects(
+    (
+        null_hedges,
+        null_log_sd,
+        null_identical,
+        null_undefined,
+    ) = cchamber_physical_shift._readout_effects(
         np.ones((3, 1)),
         np.ones((3, 1)),
     )
     assert np.isnan(null_hedges.item())
     assert np.isnan(null_log_sd.item())
     assert null_identical.item()
-    with pytest.raises(ValueError, match="would be infinite"):
-        cchamber_physical_shift._readout_effects(
-            np.ones((3, 1)),
-            np.array([[1.0], [2.0], [3.0]]),
-        )
+    assert not null_undefined.item()
+    undefined_hedges, undefined_log_sd, _, undefined = cchamber_physical_shift._readout_effects(
+        np.ones((3, 1)),
+        np.array([[1.0], [2.0], [3.0]]),
+    )
+    assert np.isnan(undefined_hedges.item())
+    assert np.isnan(undefined_log_sd.item())
+    assert undefined.item()
 
 
 def test_slurm_wrapper_is_pinned_cpu_only_and_shell_valid(

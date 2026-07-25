@@ -1,0 +1,14 @@
+# @package _global_
+
+defaults:
+  - /experiment/cchamber/candidate_rank_audit_base
+  - override /algorithm: ae
+
+algorithm:
+  target_rate: 0.01
+  base_rate: null
+  input_noise_std: 0.0
+  delta: 1.0
+  encoder:
+    in_dim: 11
+    nodes: [32, 16, 4]

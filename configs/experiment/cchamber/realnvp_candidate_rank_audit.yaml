@@ -1,0 +1,14 @@
+# @package _global_
+
+defaults:
+  - /experiment/cchamber/candidate_rank_audit_base
+  - override /algorithm: realnvp
+
+algorithm:
+  target_rate: 0.01
+  base_rate: null
+  flow:
+    input_dim: 11
+    n_flows: 6
+    hidden_dim: 32
+    n_hidden_layers: 2

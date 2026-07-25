@@ -1,0 +1,12 @@
+# @package _global_
+
+defaults:
+  - /experiment/cchamber/candidate_rank_audit_base
+  - override /algorithm: svdd
+
+algorithm:
+  target_rate: 0.01
+  base_rate: null
+  encoder:
+    in_dim: 11
+    nodes: [32, 16, 8]

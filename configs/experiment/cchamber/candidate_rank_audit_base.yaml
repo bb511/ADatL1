@@ -1,0 +1,82 @@
+# @package _global_
+
+defaults:
+  - /experiment/cchamber/search_base
+
+# Frozen secondary rank-audit trajectory. All five label-free checkpoint branches
+# observe one optimizer/model/RNG trajectory. Intervention and test data remain sealed.
+tags: ["causal_chamber", "candidate_rank_audit", "label_free"]
+
+train: true
+test: false
+evaluation: null
+
+callbacks:
+  # Sensitivity variants are outside the frozen five-branch audit contract.
+  cap_random_seed_271829: null
+  cap_random_seed_271830: null
+  cap_random_seed_271831: null
+  cap_random_seed_271832: null
+  cap_encoder_seed_456: null
+  cap_encoder_seed_789: null
+  cap_encoder_seed_101112: null
+  cap_encoder_seed_131415: null
+
+  # Persist the validation-derived 1% threshold in every branch checkpoint.
+  anomaly_eff:
+    _target_: src.callbacks.efficiency.AnomalyEfficiencyCallback
+    output_name: "ascore/full"
+    beta: 0.9
+
+  audit_ckpt_cap_metadata_nearest: &audit_ckpt
+    _target_: pytorch_lightning.callbacks.ModelCheckpoint
+    dirpath: "${paths.checkpoints_dir}/${experiment_name}/${run_name}/branches/cap_metadata_nearest"
+    monitor: "val/summary/cap_metadata_nearest_ema_normal_vs_reference_normal"
+    filename: cap_metadata_nearest
+    save_last: false
+    save_top_k: 1
+    mode: max
+    auto_insert_metric_name: false
+    save_weights_only: false
+    every_n_epochs: 1
+    save_on_train_epoch_end: false
+
+  audit_ckpt_cap_encoder_nearest:
+    <<: *audit_ckpt
+    dirpath: "${paths.checkpoints_dir}/${experiment_name}/${run_name}/branches/cap_encoder_nearest"
+    monitor: "val/summary/cap_encoder_nearest_ema_normal_vs_reference_normal"
+    filename: cap_encoder_nearest
+
+  audit_ckpt_cap_random:
+    <<: *audit_ckpt
+    dirpath: "${paths.checkpoints_dir}/${experiment_name}/${run_name}/branches/cap_random"
+    monitor: "val/summary/cap_random_ema_normal_vs_reference_normal"
+    filename: cap_random
+
+  audit_ckpt_drift:
+    <<: *audit_ckpt
+    dirpath: "${paths.checkpoints_dir}/${experiment_name}/${run_name}/branches/drift"
+    monitor: "val/summary/operational_drift_ema"
+    filename: drift
+    mode: min
+
+  audit_ckpt_wasserstein:
+    <<: *audit_ckpt
+    dirpath: "${paths.checkpoints_dir}/${experiment_name}/${run_name}/branches/wasserstein"
+    monitor: "val/summary/w1dist_ema_normal_vs_reference_normal"
+    filename: wasserstein
+    mode: min
+
+  audit_checkpoint_manifest:
+    _target_: src.callbacks.audit.CheckpointBranchManifest
+    output_path: ${oc.env:CCHAMBER_AUDIT_CHECKPOINT_MANIFEST}
+    expected_monitors:
+      cap_metadata_nearest: "val/summary/cap_metadata_nearest_ema_normal_vs_reference_normal"
+      cap_encoder_nearest: "val/summary/cap_encoder_nearest_ema_normal_vs_reference_normal"
+      cap_random: "val/summary/cap_random_ema_normal_vs_reference_normal"
+      drift: "val/summary/operational_drift_ema"
+      wasserstein: "val/summary/w1dist_ema_normal_vs_reference_normal"
+
+  audit_trajectory_fingerprint:
+    _target_: src.callbacks.audit.TrajectoryFingerprint
+    output_path: ${oc.env:CCHAMBER_AUDIT_TRAJECTORY_FINGERPRINT}

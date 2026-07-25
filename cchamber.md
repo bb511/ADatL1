@@ -265,8 +265,17 @@ strategy-specific Optuna studies. Its frozen design is:
 - five pairing-encoder seeds, with seed 123 prespecified as primary and the
   others used only for pairing-stability analysis;
 - all 58 interventions sealed during search and retraining, then evaluated once
-  at the final checkpoint stage for both AUPRC and anomaly efficiency at the
-  operational 1% background-rate target.
+  at the final checkpoint stage for both AUPRC and secondary anomaly efficiency
+  at the prespecified 1% false-positive rate (\(q=0.99\)).
+
+The 1% target is the direct sample-level background acceptance
+(\(q=0.99\), with no physical base rate) used for the paper's statistically
+stable small-benchmark setting. It is not the main LHC L1 operating point:
+the main L1 study reports efficiency at 250 Hz, while \(q=0.99\) appears only
+as a looser L1 sensitivity study in Appendix D of
+`28031_Informative_Model_Valida.pdf`. Causal Chamber results may therefore be
+described as an L1-like fixed-background-budget experiment, but not as a
+measurement at the physical L1 trigger rate.
 
 This is 1,300 search fits and 200 final retrains. Clariden allocates a complete
 four-GPU node even for a one-GPU request, so generated campaign scripts pack four

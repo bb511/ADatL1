@@ -182,9 +182,9 @@ def _result_rows():
     for strategy, offset in (("cap_random", 0.0), ("cap_encoder_nearest", 0.1)):
         for seed, seed_offset in ((1, 0.0), (2, 0.2), (3, 0.1)):
             for intervention, base, family, strength in (
-                ("red_low", 0.4, "red", 0.2),
-                ("red_high", 0.8, "red", 0.8),
-                ("blue_mid", 0.6, "blue", 0.5),
+                ("red_low", 0.4, "red", "weak"),
+                ("red_high", 0.8, "red", "strong"),
+                ("blue_mid", 0.6, "blue", "mid"),
             ):
                 rows.append(
                     {

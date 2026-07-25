@@ -52,6 +52,7 @@ class CAP(Callback):
         cap_metric_config: dict,
         pairing_index_path: str | None = None,
         pairing_test_index_path: str | None = None,
+        pairing_seed: int | None = None,
         log_raw_mlflow: bool = True,
         name: str = "cap",
     ):
@@ -64,6 +65,7 @@ class CAP(Callback):
         self.pairing_type = pairing_type
         self.pairing_index_path = pairing_index_path
         self.pairing_test_index_path = pairing_test_index_path
+        self.pairing_seed = None if pairing_seed is None else int(pairing_seed)
         self.pair_table_split = None
         self.dataset_1_inputs = []
         self.dataset_2_inputs = []
@@ -140,6 +142,18 @@ class CAP(Callback):
 
     def _pair_indices(self, dataset_1_scores: torch.Tensor, dataset_2_scores: torch.Tensor):
         if self.pairing_type != "precomputed":
+            if self.pairing_type == "random" and self.pairing_seed is not None:
+                n = min(len(dataset_1_scores), len(dataset_2_scores))
+                generator = torch.Generator(device=dataset_2_scores.device)
+                generator.manual_seed(self.pairing_seed)
+                return (
+                    torch.arange(n, device=dataset_1_scores.device),
+                    torch.randperm(
+                        len(dataset_2_scores),
+                        generator=generator,
+                        device=dataset_2_scores.device,
+                    )[:n],
+                )
             return self.pairing_fn(dataset_1_scores, dataset_2_scores)
 
         pairing_index_path = (

@@ -9,7 +9,7 @@ multi-seed result.
 | Area | Implementation | Evidence currently available | What is still required |
 | --- | --- | --- | --- |
 | Analytical (`analytical.md`) | Implemented and locally smoke-tested, with `paper` and `smoke` profiles and a declared artifact inventory | The smoke profile generates 21 declared artifacts plus metadata; regression tests cover theory transitions and controls | Run the `paper` profile once in the final environment and freeze the resulting bundle |
-| Causal Chamber (`cchamber.md`) | Implemented and locally smoke-tested for AE, VAE, SVDD, RealNVP; metadata, random, and frozen-encoder pairing paths exist | All 20 paper configs compose; all four model demos and a production-shaped AE training/evaluation run pass on the public Causal Chamber CSVs | Run the shared candidate pool, at least three retraining seeds, all real interventions, and final aggregation |
+| Causal Chamber (`cchamber.md`) | A sealed-label production campaign now generates one shared 64-point Sobol pool plus baseline per detector, records all five primary proxies and pairing-seed sensitivities on each trajectory, logs every stage to MLflow, fixes the data split across model seeds, and packs four fits per Clariden node | All 20 paper endpoints compose; all four model demos and the real public-data pairing canary pass | Run the five-encoder pairing gate, four-model stress calibration, 1,300 search fits, 200 ten-seed retrains, 200 final evaluations, and complete 23,200-row two-metric aggregation |
 | Pairing (`pairing.md`) | Implemented with a versioned, fingerprinted table contract and distinct validation/test consumption | Controlled smoke: 77 validation/80 test pairs. Real Causal Chamber canary: 1,000 validation/1,000 test pairs, training CAP, evaluator validation/test, and one real intervention | Build and audit final Causal Chamber and physics tables across encoder seeds; report coverage, balance, distances, and overlap |
 | Physics L1 | Config/generation/evaluation implementation is present; the 57-feature synthetic datamodule supplies the same normal/reference/signal loader contract for infrastructure validation | Synthetic checkpoints are smoke/debug artifacts only and do not validate external parquet loading or physics distributions | Replace the synthetic source with `RAW_DATA_DIR`, pass the strict real-data preflight, run the generated matrix, and aggregate multi-seed intervention results |
 | CIFAR-10 | Config/generation implementation is present | Demo training works and downloads automatically | Run all intended normal-class conditions and reporting seeds |
@@ -44,20 +44,20 @@ handoff but says nothing about which criterion wins on real data.
 
 ## Cluster Workflow
 
-1. Generate and run sweeps with `scripts/generation.py`.
-2. Export a long-form candidate table with the exact columns documented in
-   `cchamber.md`. Reuse the same candidate IDs across compared label-free
-   strategies.
-3. Run `paper_pipeline.py select`. It rejects downstream/oracle strategies,
-   inconsistent parameters, duplicate rows, and non-shared candidate pools.
-4. Generate retraining scripts from `retrain_manifest.json` and run at least three
-   paired seeds.
-5. Resolve the selected strategy checkpoints, generate final evaluation scripts,
-   and evaluate every intervention.
-6. Create a collection manifest pointing at callback `values.csv` files.
-7. Run `collect` and `aggregate`. The output includes normalized long-form data,
-   seed summaries, intervention summaries, paired strategy differences,
-   deterministic bootstrap intervals, figures, a report, and SHA-256 provenance.
+1. Create a clean, immutable Causal Chamber campaign with
+   `scripts/cchamber_campaign.py design`.
+2. Run its packed pairing job and inspect all five encoder tables before allowing
+   search to consume the prespecified primary table.
+3. Run the packed four-model debug calibration and verify MLflow metrics,
+   fingerprints, runtime, memory, and file counts.
+4. Run the shared 65-candidate search. Collecting candidate metrics refuses any
+   missing model/candidate/seed/proxy result.
+5. Select by mean development-seed rank, then run all 200 fixed-configuration
+   retrains across ten reporting seeds.
+6. Evaluate the exact fingerprinted checkpoints on all 58 interventions.
+7. Collect and aggregate only after the exact 4 × 5 × 10 × 58 × 2-metric coverage contract
+   passes. Archive MLflow metadata, numeric CSVs, pair tables, plots, report, and
+   SHA-256 provenance.
 
 ## Next Actions, In Order
 

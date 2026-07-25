@@ -1,0 +1,16 @@
+# @package _global_
+
+defaults:
+  - /experiment/cchamber/search_base
+  - override /algorithm: realnvp
+
+tags: ["causal_chamber", "realnvp", "label_free_search"]
+
+algorithm:
+  target_rate: 0.01
+  base_rate: null
+  flow:
+    input_dim: 11
+    n_flows: 6
+    hidden_dim: 32
+    n_hidden_layers: 2

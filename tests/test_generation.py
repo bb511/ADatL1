@@ -71,8 +71,13 @@ def test_generation_registry_includes_paired_causal_chamber() -> None:
     assert spec.hparams_search == "ae_optuna"
     assert "data.pairing_strategy=metadata_nearest" in spec.strategy_overrides
 
+    random_spec = specs["cchamber_ae_cap_random"]
+    assert "data.pairing_strategy=metadata_nearest" in random_spec.strategy_overrides
+    assert "callbacks.cap_ref.pairing_type=random" in random_spec.strategy_overrides
+    assert "+callbacks.cap_ref.pairing_seed=271828" in random_spec.strategy_overrides
+
     encoder_spec = specs["cchamber_ae_cap_encoder_nearest"]
-    assert "data.pairing_strategy=random" in encoder_spec.strategy_overrides
+    assert "data.pairing_strategy=metadata_nearest" in encoder_spec.strategy_overrides
     assert "callbacks.cap_ref.pairing_type=precomputed" in encoder_spec.strategy_overrides
     assert (
         "+callbacks.cap_ref.pairing_index_path=$CCHAMBER_VALID_PAIR_TABLE"
@@ -157,6 +162,9 @@ def test_encoder_pairing_sweep_uses_validation_pair_table(tmp_path) -> None:
     assert "callbacks.cap_ref.pairing_type=precomputed" in script
     assert "+callbacks.cap_ref.pairing_index_path=$CCHAMBER_VALID_PAIR_TABLE" in script
     assert "+evaluation.callbacks.cap_ref.pairing_index_path=$CCHAMBER_VALID_PAIR_TABLE" in script
+    assert "logger=mlflow" in script
+    assert "test=false" in script
+    assert "data.signal_experiments=[]" in script
 
 
 def test_all_causal_chamber_paper_specs_compose() -> None:

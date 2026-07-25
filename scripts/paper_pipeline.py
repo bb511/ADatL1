@@ -553,13 +553,10 @@ def aggregate_results(
     frame["seed"] = pd.to_numeric(frame["seed"], errors="raise").astype(int)
     string_columns = ["dataset", "model", "strategy", "intervention", "metric"]
     string_columns.extend(
-        column for column in ("pairing", "intervention_family") if column in frame
+        column for column in ("pairing", "intervention_family", "strength") if column in frame
     )
     for column in string_columns:
         frame[column] = frame[column].astype(str)
-    if "strength" in frame:
-        frame["strength"] = pd.to_numeric(frame["strength"], errors="raise")
-
     duplicate_key = [
         "dataset",
         "model",

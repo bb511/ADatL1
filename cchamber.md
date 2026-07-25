@@ -84,7 +84,7 @@ uv run python -m src.utils.pairing.build_pair_table \
   --k 0 \
   --no-caliper \
   experiment=cchamber/ae_pairing \
-  data.pairing_strategy=random \
+  data.pairing_strategy=metadata_nearest \
   data.max_val_batches=-1 \
   'data.signal_experiments=[]'
 ```
@@ -100,14 +100,17 @@ uv run python -m src.utils.pairing.build_pair_table \
   --k 0 \
   --no-caliper \
   experiment=cchamber/ae_pairing \
-  data.pairing_strategy=random \
+  data.pairing_strategy=metadata_nearest \
   data.max_val_batches=-1 \
   'data.signal_experiments=[]'
 ```
 
 `--k 0` lets the one-to-one matcher expand the FAISS/torch neighbor search until
-coverage saturates. `data.pairing_strategy=random` prevents the metadata pairing
-from leaking into the encoder-pair table construction.
+coverage saturates. The campaign deliberately constructs all three CAP conditions
+from the same canonical metadata-ordered source pools. The encoder table builder
+then rematches every row from scratch in latent space: it does not consume pair IDs
+or metadata distances. This keeps source-tensor fingerprints directly comparable
+without making the encoder assignment depend on metadata matching.
 
 Pair-table files are versioned and tied to the encoder checkpoint, split, ordered
 source tensors, source sizes, dataset names, and data seed with SHA-256
@@ -244,6 +247,58 @@ manifest has columns `path,dataset,model,strategy,seed` and optional `pairing`;
 `path` points to an evaluator callback `values.csv`. Selection rejects downstream
 metrics and mismatched candidate pools. Aggregation rejects incomplete paired
 seed/intervention coverage.
+
+## Production Campaign
+
+The paper campaign uses `scripts/cchamber_campaign.py`, not independent
+strategy-specific Optuna studies. Its frozen design is:
+
+- 64 scrambled Sobol configurations per detector plus the separately labelled
+  checked-in baseline;
+- AE, VAE, SVDD, and RealNVP;
+- five development model seeds with one fixed data split seed;
+- all five label-free criteria recorded from the same training trajectory;
+- five prespecified random-pairing seeds and five independently trained encoder
+  pair tables recorded on every trajectory for pairing-proxy sensitivity;
+- one candidate per detector/criterion selected by mean within-seed rank;
+- ten independent reporting model seeds per selected configuration;
+- five pairing-encoder seeds, with seed 123 prespecified as primary and the
+  others used only for pairing-stability analysis;
+- all 58 interventions sealed during search and retraining, then evaluated once
+  at the final checkpoint stage for both AUPRC and anomaly efficiency at the
+  operational 1% background-rate target.
+
+This is 1,300 search fits and 200 final retrains. Clariden allocates a complete
+four-GPU node even for a one-GPU request, so generated campaign scripts pack four
+independent fits per node. Every fit uses MLflow and carries the campaign, commit,
+candidate-pool, seed, checkpoint, and pair-table fingerprints needed to reproduce
+the handoff.
+
+Create the immutable design only from a clean deployment worktree:
+
+```bash
+uv run --frozen --no-sync python scripts/cchamber_campaign.py design \
+  --root "$CAMPAIGN_ROOT" \
+  --campaign-id "$CAMPAIGN_ID" \
+  --n-candidates 65
+```
+
+The resulting `slurm/` folder contains separate pairing, calibration, search,
+retrain, and final-evaluation launchers. Gates are sequential: pairing tables
+must pass the cross-seed audit before calibration; the MLflow calibration must
+pass before the array search; candidate collection and selection must be
+complete before retraining; and final aggregation refuses anything other than
+the complete 4 × 5 × 10 × 58 × 2-metric result contract.
+
+The primary inferential estimand is the intervention-weighted mean AUPRC within
+each of ten paired reporting seeds. Metadata-nearest and encoder-nearest are
+tested separately for superiority over random pairing with exact paired sign-flip
+tests and Holm correction. Metadata-nearest versus encoder-nearest equivalence is
+prespecified at an absolute AUPRC margin of 0.02 using paired TOST with Holm
+correction across detector families. Equal-family weighting, intervention family,
+target, strength, and family-by-strength summaries are reported as complementary
+descriptive analyses. Conclusions remain conditional on the fixed public dataset
+split and the prespecified Sobol candidate pool.
 
 ## Smoke Tests
 

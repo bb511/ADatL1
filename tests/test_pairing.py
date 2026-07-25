@@ -144,6 +144,25 @@ def test_training_cap_rejects_pair_table_for_different_source_size(tmp_path: Pat
         callback._pair_indices(torch.ones(4), torch.ones(3))
 
 
+def test_training_cap_seeded_random_pairing_is_stable() -> None:
+    callback = CAPCallback(
+        output_name="ascore/full",
+        dataset_1="normal",
+        dataset_2="reference_normal",
+        pairing_type="random",
+        pairing_seed=271828,
+        metric_name="cap_random",
+        cap_metric_config={},
+    )
+
+    first = callback._pair_indices(torch.ones(10), torch.ones(10))
+    second = callback._pair_indices(torch.ones(10), torch.ones(10))
+
+    torch.testing.assert_close(first[0], torch.arange(10))
+    torch.testing.assert_close(first[1], second[1])
+    assert torch.unique(first[1]).numel() == 10
+
+
 def test_evaluation_cap_uses_distinct_validation_and_test_tables(tmp_path: Path) -> None:
     valid_path = tmp_path / "valid.pt"
     test_path = tmp_path / "test.pt"
@@ -174,3 +193,20 @@ def test_evaluation_cap_uses_distinct_validation_and_test_tables(tmp_path: Path)
 
     torch.testing.assert_close(valid_indices[0].cpu(), torch.tensor([0, 1]))
     torch.testing.assert_close(test_indices[0].cpu(), torch.tensor([1, 2]))
+
+
+def test_evaluation_cap_seeded_random_pairing_is_stable() -> None:
+    callback = EvaluationCAP(
+        output_name="ascore/full",
+        dataset_1="normal",
+        dataset_2="reference_normal",
+        pairing_type="random",
+        pairing_seed=271828,
+        cap_metric_config={},
+    )
+
+    first = callback._pair_indices(torch.ones(10), torch.ones(10))
+    second = callback._pair_indices(torch.ones(10), torch.ones(10))
+
+    torch.testing.assert_close(first[0], torch.arange(10))
+    torch.testing.assert_close(first[1], second[1])

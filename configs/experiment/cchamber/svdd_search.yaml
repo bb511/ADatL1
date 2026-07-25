@@ -1,0 +1,14 @@
+# @package _global_
+
+defaults:
+  - /experiment/cchamber/search_base
+  - override /algorithm: svdd
+
+tags: ["causal_chamber", "svdd", "label_free_search"]
+
+algorithm:
+  target_rate: 0.01
+  base_rate: null
+  encoder:
+    in_dim: 11
+    nodes: [32, 16, 8]

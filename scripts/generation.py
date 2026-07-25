@@ -305,6 +305,7 @@ def fixed_overrides_for(dataset: Dataset) -> tuple[str, ...]:
     if dataset == Dataset.CCHAMBER:
         return (
             "data=causal_chamber",
+            "data.seed=314159",
             "data.batch_size=512",
             "data.max_val_batches=-1",
             "algorithm.target_rate=0.01",
@@ -370,8 +371,8 @@ def notes_for(dataset: Dataset, strategy: Strategy) -> tuple[str, ...]:
             )
         elif strategy == Strategy.CAP_RANDOM:
             notes.append(
-                "CAP uses real normal/reference_normal rows ordered by deterministic "
-                "random datamodule pairing; callback pairing_type=none consumes that order."
+                "CAP uses the canonical real normal/reference_normal pools with a "
+                "fixed seeded random callback permutation."
             )
         elif strategy == Strategy.CAP_ENCODER_NEAREST:
             notes.append(
@@ -401,11 +402,19 @@ def strategy_overrides_for(strategy: Strategy) -> tuple[str, ...]:
         if strategy == Strategy.CAP_METADATA_NEAREST:
             overrides.append("data.pairing_strategy=metadata_nearest")
         elif strategy == Strategy.CAP_RANDOM:
-            overrides.append("data.pairing_strategy=random")
+            overrides.extend(
+                [
+                    "data.pairing_strategy=metadata_nearest",
+                    "callbacks.cap_ref.pairing_type=random",
+                    "+callbacks.cap_ref.pairing_seed=271828",
+                    "evaluation.callbacks.cap_ref.pairing_type=random",
+                    "+evaluation.callbacks.cap_ref.pairing_seed=271828",
+                ]
+            )
         elif strategy == Strategy.CAP_ENCODER_NEAREST:
             overrides.extend(
                 [
-                    "data.pairing_strategy=random",
+                    "data.pairing_strategy=metadata_nearest",
                     "callbacks.cap_ref.pairing_type=precomputed",
                     "+callbacks.cap_ref.pairing_index_path=$CCHAMBER_VALID_PAIR_TABLE",
                     "evaluation.callbacks.cap_ref.pairing_type=precomputed",
@@ -576,13 +585,15 @@ def build_sweep_overrides(
         f"hydra.sweeper.n_trials={spec.n_trials}",
         f"trainer.max_epochs={spec.sweep_epochs}",
         f"seed={seed}",
-        "logger=none",
+        "logger=mlflow",
         f"trainer={trainer}",
         f"trainer.devices={devices}",
         storage_override_for(spec),
     ]
     if spec.dataset == Dataset.PHYSICS:
         overrides.append('paths.raw_data_dir="${RAW_DATA_DIR}"')
+    if spec.dataset == Dataset.CCHAMBER:
+        overrides.extend(("test=false", "data.signal_experiments=[]"))
     if launcher != Launcher.NONE:
         overrides.extend(
             [
@@ -621,6 +632,8 @@ def build_retrain_overrides(
     ]
     if spec.dataset == Dataset.PHYSICS:
         overrides.append('paths.raw_data_dir="${RAW_DATA_DIR}"')
+    if spec.dataset == Dataset.CCHAMBER:
+        overrides.extend(("test=false", "data.signal_experiments=[]"))
     overrides.extend(spec.fixed_overrides)
     overrides.extend(spec.strategy_overrides)
     overrides.extend(spec.disabled_overrides)

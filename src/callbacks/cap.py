@@ -38,6 +38,8 @@ class CAPCallback(Callback):
         pairing_type: str,
         cap_metric_config: dict,
         pairing_index_path: str | None = None,
+        metric_name: str = "cap",
+        pairing_seed: int | None = None,
         beta: float = 0.9,
     ):
         super().__init__()
@@ -48,6 +50,10 @@ class CAPCallback(Callback):
         self.cap_metric_config = cap_metric_config
         self.pairing_type = pairing_type
         self.pairing_index_path = pairing_index_path
+        self.metric_name = str(metric_name)
+        self.pairing_seed = None if pairing_seed is None else int(pairing_seed)
+        if not self.metric_name or "/" in self.metric_name:
+            raise ValueError("metric_name must be a non-empty MLflow-safe metric component.")
         self.dataset_1_inputs = []
         self.dataset_2_inputs = []
         self.pairing_fn = None if pairing_type == "precomputed" else get_pairing_fn(pairing_type)
@@ -133,8 +139,8 @@ class CAPCallback(Callback):
 
         pl_module.log_dict(
             {
-                f"val/summary/cap_ema_{ds1}_vs_{ds2}": self.cap_ema,
-                f"val/summary/rankcorr_{ds1}_vs_{ds2}": float(rankcorr_value),
+                f"val/summary/{self.metric_name}_ema_{ds1}_vs_{ds2}": self.cap_ema,
+                f"val/summary/rankcorr_{self.metric_name}_{ds1}_vs_{ds2}": float(rankcorr_value),
             },
             **self.log_kwargs,
         )
@@ -171,6 +177,18 @@ class CAPCallback(Callback):
 
     def _pair_indices(self, dataset_1_scores: torch.Tensor, dataset_2_scores: torch.Tensor):
         if self.pairing_type != "precomputed":
+            if self.pairing_type == "random" and self.pairing_seed is not None:
+                n = min(len(dataset_1_scores), len(dataset_2_scores))
+                generator = torch.Generator(device=dataset_2_scores.device)
+                generator.manual_seed(self.pairing_seed)
+                return (
+                    torch.arange(n, device=dataset_1_scores.device),
+                    torch.randperm(
+                        len(dataset_2_scores),
+                        generator=generator,
+                        device=dataset_2_scores.device,
+                    )[:n],
+                )
             return self.pairing_fn(dataset_1_scores, dataset_2_scores)
 
         if not self.pairing_index_path:

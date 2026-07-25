@@ -859,6 +859,7 @@ def run_pairing_encoder(root: Path, encoder_seed: int) -> None:
         f"hydra.run.dir={root / 'hydra' / 'pairing' / f'seed_{seed}' / attempt}",
         f"logger.mlflow.experiment_name={experiment_name}",
         f"logger.mlflow.tags={tag_override}",
+        "callbacks.log_data_mlflow=null",
         "extras.print_config=false",
         "trainer.min_epochs=100",
         "trainer.max_epochs=100",

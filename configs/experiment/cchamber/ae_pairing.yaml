@@ -35,4 +35,9 @@ trainer:
   min_epochs: 1
   max_epochs: 100
 
+callbacks:
+  # The generic callback expects the L1 ``data_mlready`` cache hierarchy,
+  # which the public CSV datamodule intentionally does not have.
+  log_data_mlflow: null
+
 test: false

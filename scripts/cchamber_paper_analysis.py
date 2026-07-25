@@ -48,6 +48,10 @@ Each contrast must name a ``family`` used for Holm adjustment::
 The taxonomy is a CSV with one row per intervention and columns
 ``intervention,intervention_target,strength,semantic_family,system_group``.
 ``system_group`` must be either ``process`` or ``measurement``.
+The deployed design may derive this CSV from its frozen target-level JSON, but this
+executor requires the derived CSV itself to be integrity-pinned.  Physical displays use
+``system_group,semantic_family,intervention_target,strength`` order, with process before
+measurement and weak before mid before strong.
 """
 
 from __future__ import annotations
@@ -84,6 +88,10 @@ REQUIRED_TAXONOMY_COLUMNS = {
     "system_group",
 }
 REQUIRED_INPUTS = ("campaign", "results", "analysis_plan", "taxonomy")
+EXPECTED_MODELS = ("ae", "vae", "svdd", "realnvp")
+TARGET_COLUMNS = ("system_group", "semantic_family", "intervention_target")
+STRENGTH_ORDER = ("weak", "mid", "strong")
+EQUIVALENCE_MARGIN_AUPRC = 0.02
 PRIMARY_CLASSIFICATION = "confirmatory"
 COMPLEMENTARY_CLASSIFICATION = "complementary_prespecified"
 EXPLORATORY_CLASSIFICATION = "exploratory_outcome_selected"
@@ -180,6 +188,13 @@ def _validate_plan(plan: Mapping[str, Any], campaign: Mapping[str, Any]) -> None
         plan_values = _validate_sequence(name, plan.get(name))
         if list(plan_values) != list(campaign_values):
             raise ValueError(f"Analysis plan {name} does not exactly match campaign.json.")
+    if tuple(map(str, plan["models"])) != EXPECTED_MODELS:
+        raise ValueError(
+            "Analysis plan models must be ['ae', 'vae', 'svdd', 'realnvp'] "
+            "for the prespecified four-model Holm family."
+        )
+    if len(plan["reporting_seeds"]) < 2:
+        raise ValueError("At least two paired reporting seeds are required for inference.")
     metrics = [str(value) for value in _validate_sequence("metrics", plan.get("metrics"))]
     if metrics != ["auprc", "efficiency_operational"]:
         raise ValueError(
@@ -188,7 +203,7 @@ def _validate_plan(plan: Mapping[str, Any], campaign: Mapping[str, Any]) -> None
     strength_order = [
         str(value) for value in _validate_sequence("strength_order", plan.get("strength_order"))
     ]
-    if strength_order != ["weak", "mid", "strong"]:
+    if strength_order != list(STRENGTH_ORDER):
         raise ValueError("strength_order must be ['weak', 'mid', 'strong'].")
 
     contrasts = plan.get("contrasts")
@@ -248,7 +263,22 @@ def _validate_taxonomy(
         raise ValueError("Taxonomy must contain both process and measurement system groups.")
     if (taxonomy == "").any().any():
         raise ValueError("Taxonomy fields must be non-empty.")
-    return taxonomy
+    taxonomy["_system_order"] = taxonomy["system_group"].map({"process": 0, "measurement": 1})
+    taxonomy["_strength_order"] = taxonomy["strength"].map(
+        {name: index for index, name in enumerate(STRENGTH_ORDER)}
+    )
+    taxonomy = taxonomy.sort_values(
+        [
+            "_system_order",
+            "semantic_family",
+            "intervention_target",
+            "_strength_order",
+            "intervention",
+        ],
+        kind="stable",
+    ).reset_index(drop=True)
+    taxonomy["taxonomy_order"] = np.arange(len(taxonomy), dtype=int)
+    return taxonomy.drop(columns=["_system_order", "_strength_order"])
 
 
 def _artifact_classification(path: Path) -> str:
@@ -261,6 +291,8 @@ def _artifact_classification(path: Path) -> str:
         or "process_measurement" in name
         or "system_group" in name
         or "pairing_robustness" in name
+        or "family_seed_summary" in name
+        or "target_seed_summary" in name
     ):
         return COMPLEMENTARY_CLASSIFICATION
     if name == "component_status.json":
@@ -442,6 +474,25 @@ def _seed_first_summary(frame: pd.DataFrame) -> tuple[pd.DataFrame, pd.DataFrame
     return seed, pd.DataFrame(rows)
 
 
+def _equal_unit_seed_summaries(frame: pd.DataFrame) -> dict[str, pd.DataFrame]:
+    """Build seed-first summaries giving each family or target equal weight."""
+    keys = ["model", "strategy", "seed", "metric"]
+    family_seed = (
+        frame.groupby([*keys, "system_group", "semantic_family"], sort=True)["value"]
+        .mean()
+        .reset_index()
+    )
+    equal_family_seed = family_seed.groupby(keys, sort=True)["value"].mean().reset_index()
+    target_seed = frame.groupby([*keys, *TARGET_COLUMNS], sort=True)["value"].mean().reset_index()
+    equal_target_seed = target_seed.groupby(keys, sort=True)["value"].mean().reset_index()
+    return {
+        "family_seed_summary.csv": family_seed,
+        "equal_family_seed_summary.csv": equal_family_seed,
+        "target_seed_summary.csv": target_seed,
+        "equal_target_seed_summary.csv": equal_target_seed,
+    }
+
+
 def _apply_holm(
     frame: pd.DataFrame,
     groups: Sequence[str],
@@ -513,6 +564,81 @@ def _contrast_rows(
     return result
 
 
+def _metadata_encoder_equivalence(
+    seed_summary: pd.DataFrame,
+    plan: Mapping[str, Any],
+) -> pd.DataFrame:
+    """Run the prespecified paired AUPRC TOST with four-model Holm control."""
+    auprc = seed_summary[seed_summary["metric"] == "auprc"]
+    expected_seeds = list(map(int, plan["reporting_seeds"]))
+    rows: list[dict[str, Any]] = []
+    for model in plan["models"]:
+        pivot = auprc[auprc["model"] == model].pivot(
+            index="seed",
+            columns="strategy",
+            values="value",
+        )
+        if list(pivot.index) != expected_seeds:
+            raise ValueError(f"Seed pairing failed for {model}/auprc equivalence.")
+        differences = (pivot["cap_metadata_nearest"] - pivot["cap_encoder_nearest"]).to_numpy(
+            dtype=float
+        )
+        n_seeds = len(differences)
+        mean = float(differences.mean())
+        std = float(differences.std(ddof=1))
+        standard_error = std / math.sqrt(n_seeds)
+        if standard_error == 0.0:
+            p_lower = 0.0 if mean > -EQUIVALENCE_MARGIN_AUPRC else 1.0
+            p_upper = 0.0 if mean < EQUIVALENCE_MARGIN_AUPRC else 1.0
+            ci_low = ci_high = mean
+        else:
+            degrees_freedom = n_seeds - 1
+            p_lower = float(
+                stats.t.sf(
+                    (mean + EQUIVALENCE_MARGIN_AUPRC) / standard_error,
+                    degrees_freedom,
+                )
+            )
+            p_upper = float(
+                stats.t.cdf(
+                    (mean - EQUIVALENCE_MARGIN_AUPRC) / standard_error,
+                    degrees_freedom,
+                )
+            )
+            critical = float(stats.t.ppf(0.95, degrees_freedom))
+            ci_low = mean - critical * standard_error
+            ci_high = mean + critical * standard_error
+        rows.append(
+            {
+                "model": str(model),
+                "metric": "auprc",
+                "test_family": "metadata_encoder_equivalence_four_models",
+                "strategy_left": "cap_metadata_nearest",
+                "strategy_right": "cap_encoder_nearest",
+                "difference": "metadata_minus_encoder",
+                "equivalence_margin": EQUIVALENCE_MARGIN_AUPRC,
+                "mean_difference": mean,
+                "std_difference": std,
+                "ci90_unadjusted_low": ci_low,
+                "ci90_unadjusted_high": ci_high,
+                "ci_level": 0.90,
+                "ci_multiplicity_adjustment": "none",
+                "p_tost_lower_unadjusted": p_lower,
+                "p_tost_upper_unadjusted": p_upper,
+                "p_tost_unadjusted": max(p_lower, p_upper),
+                "equivalent_tost_unadjusted_0.05": max(p_lower, p_upper) < 0.05,
+                "n_paired_seeds": n_seeds,
+            }
+        )
+    result = pd.DataFrame(rows)
+    if len(result) != len(EXPECTED_MODELS):
+        raise ValueError("The equivalence Holm family must contain exactly four models.")
+    result["p_tost_holm_four_models"] = _holm_adjust(result["p_tost_unadjusted"])
+    result["equivalent_tost_holm_0.05"] = result["p_tost_holm_four_models"] < 0.05
+    result["holm_family_size"] = len(EXPECTED_MODELS)
+    return result
+
+
 def _strength_outputs(
     frame: pd.DataFrame,
     strength_order: Sequence[str],
@@ -524,7 +650,7 @@ def _strength_outputs(
                 "model",
                 "strategy",
                 "metric",
-                "intervention_target",
+                *TARGET_COLUMNS,
                 "strength",
                 "seed",
             ],
@@ -535,7 +661,7 @@ def _strength_outputs(
     )
     summary_rows = []
     for keys, group in target_seed.groupby(
-        ["model", "strategy", "metric", "intervention_target", "strength"],
+        ["model", "strategy", "metric", *TARGET_COLUMNS, "strength"],
         sort=True,
     ):
         summary_rows.append(
@@ -543,15 +669,17 @@ def _strength_outputs(
                 "model": keys[0],
                 "strategy": keys[1],
                 "metric": keys[2],
-                "intervention_target": keys[3],
-                "strength": keys[4],
+                "system_group": keys[3],
+                "semantic_family": keys[4],
+                "intervention_target": keys[5],
+                "strength": keys[6],
                 **_mean_interval(group["value"]),
             }
         )
     contrast_rows = []
     rank = {name: index for index, name in enumerate(strength_order)}
     for keys, group in target_seed.groupby(
-        ["model", "strategy", "metric", "intervention_target"],
+        ["model", "strategy", "metric", *TARGET_COLUMNS],
         sort=True,
     ):
         pivot = group.pivot(index="seed", columns="strength", values="value")
@@ -567,7 +695,9 @@ def _strength_outputs(
                         "model": keys[0],
                         "strategy": keys[1],
                         "metric": keys[2],
-                        "intervention_target": keys[3],
+                        "system_group": keys[3],
+                        "semantic_family": keys[4],
+                        "intervention_target": keys[5],
                         "higher_strength": higher,
                         "lower_strength": lower,
                         "mean_difference": float(differences.mean()),
@@ -590,6 +720,96 @@ def _strength_outputs(
             p_columns=["p_signflip", "p_sign"],
         )
     return target_seed, pd.DataFrame(summary_rows), contrasts
+
+
+def _strength_panel_outputs(
+    target_seed: pd.DataFrame,
+) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
+    """Select composition-stable target sets and average targets within seed."""
+    target_strengths = (
+        target_seed.loc[:, [*TARGET_COLUMNS, "strength"]]
+        .drop_duplicates()
+        .groupby(list(TARGET_COLUMNS), sort=True)["strength"]
+        .agg(lambda values: frozenset(map(str, values)))
+        .reset_index(name="available_strengths")
+    )
+    complete = frozenset(STRENGTH_ORDER)
+    mid_strong = frozenset(("mid", "strong"))
+    if int((target_strengths["available_strengths"] == complete).sum()) != 9:
+        raise ValueError(
+            "Frozen taxonomy must contain exactly nine complete weak/mid/strong targets."
+        )
+    eligibility_rows = []
+    for record in target_strengths.to_dict("records"):
+        values = record["available_strengths"]
+        panels = []
+        if values == complete:
+            panels.append("complete_weak_mid_strong")
+        if mid_strong.issubset(values):
+            panels.append("mid_strong_all")
+        if not panels:
+            panels.append("excluded_incomplete")
+        for panel in panels:
+            eligibility_rows.append(
+                {
+                    **{column: record[column] for column in TARGET_COLUMNS},
+                    "available_strengths": ",".join(
+                        strength for strength in STRENGTH_ORDER if strength in values
+                    ),
+                    "panel": panel,
+                }
+            )
+    eligibility = pd.DataFrame(eligibility_rows)
+    if not (eligibility["panel"] == "mid_strong_all").any():
+        raise ValueError("Frozen taxonomy must contain targets with both mid and strong levels.")
+
+    included = eligibility[
+        eligibility["panel"].isin(["complete_weak_mid_strong", "mid_strong_all"])
+    ].drop(columns="available_strengths")
+    panel_targets = target_seed.merge(
+        included,
+        on=list(TARGET_COLUMNS),
+        how="inner",
+        validate="many_to_many",
+    )
+    panel_targets = panel_targets[
+        (panel_targets["panel"] != "mid_strong_all")
+        | panel_targets["strength"].isin(["mid", "strong"])
+    ]
+    grouping = ["model", "strategy", "metric", "seed", "panel", "strength"]
+    panel_seed = (
+        panel_targets.groupby(grouping, sort=True)["value"]
+        .agg(value="mean", n_targets="size")
+        .reset_index()
+    )
+    expected_counts = included.groupby("panel", sort=True).size().rename("expected_targets")
+    panel_seed = panel_seed.merge(
+        expected_counts,
+        on="panel",
+        how="left",
+        validate="many_to_one",
+    )
+    if not (panel_seed["n_targets"] == panel_seed["expected_targets"]).all():
+        raise ValueError("Strength panels do not have fixed target composition within seed.")
+    panel_seed = panel_seed.drop(columns="expected_targets")
+
+    rows = []
+    for keys, group in panel_seed.groupby(
+        ["model", "strategy", "metric", "panel", "strength"],
+        sort=True,
+    ):
+        rows.append(
+            {
+                "model": keys[0],
+                "strategy": keys[1],
+                "metric": keys[2],
+                "panel": keys[3],
+                "strength": keys[4],
+                "n_targets": int(group["n_targets"].iloc[0]),
+                **_mean_interval(group["value"]),
+            }
+        )
+    return eligibility, panel_seed, pd.DataFrame(rows)
 
 
 def _system_group_outputs(frame: pd.DataFrame) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
@@ -638,6 +858,82 @@ def _system_group_outputs(frame: pd.DataFrame) -> tuple[pd.DataFrame, pd.DataFra
             }
         )
     return seed, pd.DataFrame(summary_rows), pd.DataFrame(contrast_rows)
+
+
+def _intervention_contrast_outputs(
+    frame: pd.DataFrame,
+    plan: Mapping[str, Any],
+) -> tuple[pd.DataFrame, pd.DataFrame]:
+    """Compute seed-paired CAP-minus-baseline values in frozen taxonomy order."""
+    identity = [
+        "model",
+        "metric",
+        "seed",
+        "intervention",
+        *TARGET_COLUMNS,
+        "strength",
+        "taxonomy_order",
+    ]
+    pivot = frame.pivot(index=identity, columns="strategy", values="value").reset_index()
+    seed_frames = []
+    for contrast in plan["contrasts"]:
+        table = pivot.loc[:, identity].copy()
+        table["contrast_id"] = str(contrast["id"])
+        table["strategy_left"] = str(contrast["left"])
+        table["strategy_right"] = str(contrast["right"])
+        table["value"] = (pivot[str(contrast["left"])] - pivot[str(contrast["right"])]).to_numpy(
+            dtype=float
+        )
+        seed_frames.append(table)
+    seed = pd.concat(seed_frames, ignore_index=True)
+
+    summary_keys = [
+        "model",
+        "metric",
+        "intervention",
+        *TARGET_COLUMNS,
+        "strength",
+        "taxonomy_order",
+        "contrast_id",
+        "strategy_left",
+        "strategy_right",
+    ]
+    rows = []
+    for keys, group in seed.groupby(summary_keys, sort=False):
+        interval = _mean_interval(group["value"])
+        mean_difference = interval.pop("mean")
+        rows.append(
+            {name: value for name, value in zip(summary_keys, keys)}
+            | {"mean_difference": mean_difference}
+            | interval
+        )
+    summary = pd.DataFrame(rows)
+    model_rank = {name: index for index, name in enumerate(plan["models"])}
+    metric_rank = {name: index for index, name in enumerate(plan["metrics"])}
+    contrast_rank = {
+        str(contrast["id"]): index for index, contrast in enumerate(plan["contrasts"])
+    }
+    for table in (seed, summary):
+        table["_model_order"] = table["model"].map(model_rank)
+        table["_metric_order"] = table["metric"].map(metric_rank)
+        table["_contrast_order"] = table["contrast_id"].map(contrast_rank)
+        table.sort_values(
+            [
+                "_metric_order",
+                "_model_order",
+                "taxonomy_order",
+                "_contrast_order",
+                *(["seed"] if "seed" in table.columns else []),
+            ],
+            kind="stable",
+            inplace=True,
+        )
+        table.drop(
+            columns=["_model_order", "_metric_order", "_contrast_order"],
+            inplace=True,
+        )
+        table.reset_index(drop=True, inplace=True)
+    return seed, summary
 
 
 def _top_fraction(values: pd.Series, fraction: float = 0.2) -> set[str]:
@@ -745,6 +1041,98 @@ def _plot_forest(contrasts: pd.DataFrame, path: Path) -> None:
     plt.close(figure)
 
 
+def _plot_intervention_heatmaps(
+    summary: pd.DataFrame,
+    taxonomy: pd.DataFrame,
+    plan: Mapping[str, Any],
+    path: Path,
+) -> None:
+    """Plot intervention-level CAP contrasts in frozen physical taxonomy order."""
+    ordered_taxonomy = taxonomy.sort_values("taxonomy_order", kind="stable")
+    intervention_order = ordered_taxonomy["intervention"].tolist()
+    contrast_order = [str(contrast["id"]) for contrast in plan["contrasts"]]
+    maximum = max(float(summary["mean_difference"].abs().max()), 1.0e-6)
+    figure, axes = plt.subplots(
+        len(plan["metrics"]),
+        len(plan["models"]),
+        figsize=(4.2 * len(plan["models"]), max(12.0, 0.15 * len(taxonomy) * 2)),
+        squeeze=False,
+        sharex=True,
+        sharey=True,
+    )
+    image = None
+    group_columns = ["system_group", "semantic_family", "intervention_target"]
+    group_keys = ordered_taxonomy[group_columns].apply(tuple, axis=1).tolist()
+    boundaries = [
+        index - 0.5
+        for index in range(1, len(group_keys))
+        if group_keys[index] != group_keys[index - 1]
+    ]
+    for row, metric in enumerate(plan["metrics"]):
+        for column, model in enumerate(plan["models"]):
+            axis = axes[row, column]
+            selected = summary[(summary["metric"] == metric) & (summary["model"] == model)]
+            matrix = (
+                selected.pivot(
+                    index="intervention",
+                    columns="contrast_id",
+                    values="mean_difference",
+                )
+                .reindex(index=intervention_order, columns=contrast_order)
+                .to_numpy(dtype=float)
+            )
+            if not np.isfinite(matrix).all():
+                raise ValueError(f"Incomplete intervention heatmap for {model}/{metric}.")
+            image = axis.imshow(
+                matrix,
+                aspect="auto",
+                cmap="coolwarm",
+                vmin=-maximum,
+                vmax=maximum,
+            )
+            for boundary in boundaries:
+                axis.axhline(boundary, color="black", linewidth=0.25, alpha=0.5)
+            axis.set_title(f"{model} · {metric}")
+            axis.set_xticks(
+                np.arange(len(contrast_order)),
+                contrast_order,
+                rotation=45,
+                ha="right",
+            )
+            if column == 0:
+                axis.set_yticks(
+                    np.arange(len(intervention_order)),
+                    intervention_order,
+                    fontsize=6,
+                )
+            else:
+                axis.tick_params(labelleft=False)
+    if image is None:
+        raise ValueError("No intervention contrasts are available for plotting.")
+    figure.colorbar(
+        image,
+        ax=axes.ravel().tolist(),
+        fraction=0.015,
+        pad=0.01,
+        label="CAP − baseline, seed-first mean",
+    )
+    figure.suptitle(
+        "Prespecified intervention-level CAP contrasts "
+        "(process → measurement; family, target, weak → strong)",
+        fontweight="bold",
+    )
+    figure.subplots_adjust(
+        left=0.16,
+        right=0.94,
+        bottom=0.12,
+        top=0.95,
+        hspace=0.12,
+        wspace=0.08,
+    )
+    figure.savefig(path, dpi=180, bbox_inches="tight")
+    plt.close(figure)
+
+
 def _plot_ordered_heatmaps(
     seed_summary: pd.DataFrame,
     plan: Mapping[str, Any],
@@ -793,43 +1181,64 @@ def _plot_ordered_heatmaps(
 
 
 def _plot_strength_panels(
-    target_seed: pd.DataFrame,
+    panel_summary: pd.DataFrame,
     plan: Mapping[str, Any],
     output_dir: Path,
 ) -> list[Path]:
-    """Plot complementary seed-first strength summaries."""
+    """Plot composition-stable within-target strength trajectories."""
     paths = []
-    order = list(map(str, plan["strength_order"]))
+    panels = (
+        ("complete_weak_mid_strong", list(STRENGTH_ORDER)),
+        ("mid_strong_all", ["mid", "strong"]),
+    )
     for metric in plan["metrics"]:
-        selected = target_seed[target_seed["metric"] == metric]
+        selected = panel_summary[panel_summary["metric"] == metric]
         figure, axes = plt.subplots(
-            1,
+            len(panels),
             len(plan["models"]),
-            figsize=(4.1 * len(plan["models"]), 4.0),
+            figsize=(4.1 * len(plan["models"]), 7.5),
             squeeze=False,
-            sharey=True,
+            sharey="row",
         )
-        for axis, model in zip(axes[0], plan["models"]):
-            model_frame = selected[selected["model"] == model]
-            descriptive = (
-                model_frame.groupby(["strategy", "strength", "seed"], sort=True)["value"]
-                .mean()
-                .reset_index()
-            )
-            summary = (
-                descriptive.groupby(["strategy", "strength"], sort=True)["value"]
-                .mean()
-                .unstack("strength")
-                .reindex(columns=order)
-            )
-            for strategy, row in summary.iterrows():
-                axis.plot(order, row.to_numpy(dtype=float), marker="o", label=strategy)
-            axis.set_title(str(model))
-            axis.grid(axis="y", alpha=0.25)
-            axis.set_xlabel("Intervention strength")
-        axes[0, 0].set_ylabel(metric)
+        for panel_row, (panel, strength_order) in enumerate(panels):
+            for model_column, model in enumerate(plan["models"]):
+                axis = axes[panel_row, model_column]
+                model_frame = selected[(selected["model"] == model) & (selected["panel"] == panel)]
+                if model_frame.empty:
+                    raise ValueError(f"No strength-panel data for {model}/{metric}/{panel}.")
+                n_targets = int(model_frame["n_targets"].iloc[0])
+                for strategy in plan["strategies"]:
+                    trajectory = (
+                        model_frame[model_frame["strategy"] == strategy]
+                        .set_index("strength")["mean"]
+                        .reindex(strength_order)
+                    )
+                    if trajectory.isna().any():
+                        raise ValueError(
+                            f"Incomplete within-target trajectory for "
+                            f"{model}/{metric}/{panel}/{strategy}."
+                        )
+                    axis.plot(
+                        strength_order,
+                        trajectory.to_numpy(dtype=float),
+                        marker="o",
+                        label=strategy,
+                    )
+                label = (
+                    "complete weak/mid/strong"
+                    if panel == "complete_weak_mid_strong"
+                    else "all mid/strong-complete"
+                )
+                axis.set_title(f"{model} · {label} · {n_targets} targets")
+                axis.grid(axis="y", alpha=0.25)
+                axis.set_xlabel("Intervention strength")
+                if model_column == 0:
+                    axis.set_ylabel(metric)
         axes[0, -1].legend(fontsize=7, loc="best")
-        figure.suptitle(f"COMPLEMENTARY strength summary (seed first, target averaged) · {metric}")
+        figure.suptitle(
+            f"COMPLEMENTARY within-target strength trajectories "
+            f"(equal target weight within seed) · {metric}"
+        )
         figure.tight_layout()
         path = output_dir / f"complementary_{metric}_strength_panels.png"
         figure.savefig(path, dpi=180, bbox_inches="tight")
@@ -876,6 +1285,7 @@ def _write_report(
     path: Path,
     campaign: Mapping[str, Any],
     contrasts: pd.DataFrame,
+    equivalence: pd.DataFrame,
     statuses: Mapping[str, Any],
 ) -> None:
     """Write a concise report with inferential and pending-component boundaries."""
@@ -893,6 +1303,12 @@ def _write_report(
             "The confirmatory table uses exact paired sign-flip tests with Holm correction. "
             "Exact paired sign tests are reported as a robustness sensitivity."
         ),
+        (
+            "Metadata-versus-encoder AUPRC equivalence uses paired reporting seeds, "
+            f"TOST at ±{EQUIVALENCE_MARGIN_AUPRC:.2f}, and Holm decisions across "
+            f"{len(equivalence)} models. Its 90% confidence intervals are unadjusted "
+            "and labeled as such."
+        ),
         "",
         "## Component status",
         "",
@@ -907,6 +1323,14 @@ def _write_report(
             "## Interpretation boundaries",
             "",
             "- Outcome-ordered strategy-difference heatmaps are explicitly exploratory.",
+            (
+                "- The main intervention heatmap follows frozen physical taxonomy order; "
+                "it is not outcome ordered."
+            ),
+            (
+                "- Strength panels use fixed within-target compositions and equal target "
+                "weight within reporting seed."
+            ),
             "- Strength and process-versus-measurement summaries are complementary.",
             "- No background-acceptance or candidate-audit conclusion is inferred from absence.",
             "",
@@ -924,7 +1348,7 @@ def analyze(
 ) -> list[Path]:
     """Validate frozen inputs and write the standalone paper-analysis bundle."""
     campaign_root = campaign_root.expanduser().resolve()
-    campaign, plan, _, results, integrity, input_paths = _verify_inputs(
+    campaign, plan, taxonomy, results, integrity, input_paths = _verify_inputs(
         campaign_root,
         analysis_plan,
         taxonomy_path,
@@ -934,24 +1358,40 @@ def analyze(
     output_dir = _prepare_output_dir(output_dir, campaign_root)
 
     seed_summary, summary = _seed_first_summary(results)
+    equal_unit_tables = _equal_unit_seed_summaries(results)
     contrasts = _contrast_rows(seed_summary, plan)
+    equivalence = _metadata_encoder_equivalence(seed_summary, plan)
     target_seed, target_summary, strength_contrasts = _strength_outputs(
         results,
         plan["strength_order"],
     )
+    strength_eligibility, strength_panel_seed, strength_panel_summary = _strength_panel_outputs(
+        target_seed
+    )
     system_seed, system_summary, system_contrasts = _system_group_outputs(results)
+    intervention_seed, intervention_summary = _intervention_contrast_outputs(
+        results,
+        plan,
+    )
 
     outputs: list[Path] = []
     tables = {
         "seed_first_summary.csv": seed_summary,
         "strategy_summary.csv": summary,
         "prespecified_strategy_contrasts.csv": contrasts,
+        "prespecified_metadata_encoder_equivalence.csv": equivalence,
+        **equal_unit_tables,
         "target_strength_seed_summary.csv": target_seed,
         "target_strength_summary.csv": target_summary,
         "within_target_strength_contrasts.csv": strength_contrasts,
+        "strength_target_eligibility.csv": strength_eligibility,
+        "strength_panel_equal_target_seed_summary.csv": strength_panel_seed,
+        "strength_panel_summary.csv": strength_panel_summary,
         "system_group_seed_summary.csv": system_seed,
         "process_measurement_summary.csv": system_summary,
         "process_measurement_contrasts.csv": system_contrasts,
+        "intervention_cap_baseline_seed_contrasts.csv": intervention_seed,
+        "intervention_cap_baseline_summary.csv": intervention_summary,
     }
     for name, table in tables.items():
         path = output_dir / name
@@ -989,8 +1429,16 @@ def analyze(
     forest = output_dir / "confirmatory_contrast_forest.png"
     _plot_forest(contrasts, forest)
     outputs.append(forest)
+    intervention_heatmap = output_dir / "prespecified_intervention_cap_minus_baseline_heatmaps.png"
+    _plot_intervention_heatmaps(
+        intervention_summary,
+        taxonomy,
+        plan,
+        intervention_heatmap,
+    )
+    outputs.append(intervention_heatmap)
     outputs.extend(_plot_ordered_heatmaps(seed_summary, plan, output_dir))
-    outputs.extend(_plot_strength_panels(target_seed, plan, output_dir))
+    outputs.extend(_plot_strength_panels(strength_panel_summary, plan, output_dir))
 
     status_path = output_dir / "component_status.json"
     _atomic_json(status_path, {"schema_version": 1, "components": statuses})
@@ -1007,7 +1455,7 @@ def analyze(
     outputs.append(catalog)
 
     report = output_dir / "report.md"
-    _write_report(report, campaign, contrasts, statuses)
+    _write_report(report, campaign, contrasts, equivalence, statuses)
     outputs.append(report)
 
     provenance = output_dir / "analysis_provenance.json"
@@ -1029,6 +1477,27 @@ def analyze(
                 "intervention_aggregation": "arithmetic mean within seed before inference",
                 "multiplicity": "Holm within metric and prespecified contrast family",
                 "sign_sensitivity": "exact paired sign test excluding zero differences",
+                "equivalence": {
+                    "metric": "auprc",
+                    "strategies": [
+                        "cap_metadata_nearest",
+                        "cap_encoder_nearest",
+                    ],
+                    "margin": EQUIVALENCE_MARGIN_AUPRC,
+                    "test": "paired TOST",
+                    "holm_family": "four detector models",
+                    "confidence_interval": "90% unadjusted",
+                },
+                "intervention_heatmap_order": [
+                    "system_group",
+                    "semantic_family",
+                    "intervention_target",
+                    "strength",
+                ],
+                "strength_panels": (
+                    "fixed complete and all-mid/strong target sets; "
+                    "equal target weight within reporting seed"
+                ),
                 "outcome_ordered_views": "exploratory",
             },
             "outputs": {path.name: _sha256(path) for path in outputs},

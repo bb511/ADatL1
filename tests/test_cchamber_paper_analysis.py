@@ -6,10 +6,11 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 import pytest
+from scipy import stats
 
 from scripts import cchamber_paper_analysis
 
-MODELS = ["ae"]
+MODELS = ["ae", "vae", "svdd", "realnvp"]
 STRATEGIES = [
     "cap_metadata_nearest",
     "cap_encoder_nearest",
@@ -18,14 +19,37 @@ STRATEGIES = [
     "wasserstein",
 ]
 SEEDS = [1001, 1002, 1003, 1004]
-INTERVENTIONS = [
-    "uniform_red_weak",
-    "uniform_red_mid",
-    "uniform_red_strong",
-    "uniform_t_ir_1_weak",
-    "uniform_t_ir_1_mid",
-    "uniform_t_ir_1_strong",
+FULL_TARGETS = [
+    ("process", "flow", "flow_0"),
+    ("process", "flow", "flow_1"),
+    ("process", "flow", "flow_2"),
+    ("process", "temperature", "temperature_0"),
+    ("process", "temperature", "temperature_1"),
+    ("measurement", "color", "blue"),
+    ("measurement", "color", "green"),
+    ("measurement", "color", "red"),
+    ("measurement", "pressure", "pressure_0"),
 ]
+MID_STRONG_TARGETS = [
+    ("process", "speed", "speed_0"),
+    ("measurement", "color", "yellow"),
+]
+TARGETS = [
+    *(target + (("weak", "mid", "strong"),) for target in FULL_TARGETS),
+    *(target + (("mid", "strong"),) for target in MID_STRONG_TARGETS),
+]
+TAXONOMY_ROWS = [
+    {
+        "intervention": f"{target}_{strength}",
+        "intervention_target": target,
+        "strength": strength,
+        "semantic_family": family,
+        "system_group": system,
+    }
+    for system, family, target, strengths in TARGETS
+    for strength in strengths
+]
+INTERVENTIONS = [row["intervention"] for row in TAXONOMY_ROWS]
 METRICS = ["auprc", "efficiency_operational"]
 
 
@@ -76,37 +100,30 @@ def _frozen_bundle(tmp_path: Path, *, with_pairing: bool = True) -> dict[str, Pa
     plan_path = tmp_path / "analysis_plan.json"
     _write_json(plan_path, plan)
 
-    taxonomy_rows = []
-    for intervention in INTERVENTIONS:
-        color = intervention.startswith("uniform_red")
-        taxonomy_rows.append(
-            {
-                "intervention": intervention,
-                "intervention_target": "red" if color else "t_ir_1",
-                "strength": intervention.rsplit("_", 1)[-1],
-                "semantic_family": "color" if color else "temperature",
-                "system_group": "measurement" if color else "process",
-            }
-        )
     taxonomy_path = tmp_path / "taxonomy.csv"
-    pd.DataFrame(taxonomy_rows).to_csv(taxonomy_path, index=False)
+    pd.DataFrame(reversed(TAXONOMY_ROWS)).to_csv(taxonomy_path, index=False)
 
     strategy_effect = {
         "cap_metadata_nearest": 0.30,
-        "cap_encoder_nearest": 0.25,
+        "cap_encoder_nearest": 0.295,
         "cap_random": 0.05,
         "drift": 0.00,
         "wasserstein": -0.05,
     }
     strength_effect = {"weak": 0.00, "mid": 0.04, "strong": 0.08}
+    taxonomy_by_intervention = {row["intervention"]: row for row in TAXONOMY_ROWS}
+    target_effect = {
+        target: index * 0.002 for index, (_, _, target) in enumerate(FULL_TARGETS)
+    } | {target: 0.15 for _, _, target in MID_STRONG_TARGETS}
     result_rows = []
-    for model in MODELS:
+    for model_index, model in enumerate(MODELS):
         for strategy in STRATEGIES:
             for seed_index, seed in enumerate(SEEDS):
                 for intervention in INTERVENTIONS:
-                    strength = intervention.rsplit("_", 1)[-1]
+                    taxonomy = taxonomy_by_intervention[intervention]
+                    strength = taxonomy["strength"]
                     for metric in METRICS:
-                        metric_base = 0.25 if metric == "auprc" else 0.35
+                        metric_base = 0.20 if metric == "auprc" else 0.30
                         result_rows.append(
                             {
                                 "model": model,
@@ -118,7 +135,9 @@ def _frozen_bundle(tmp_path: Path, *, with_pairing: bool = True) -> dict[str, Pa
                                     metric_base
                                     + strategy_effect[strategy]
                                     + strength_effect[strength]
+                                    + target_effect[taxonomy["intervention_target"]]
                                     + seed_index * 0.002
+                                    + model_index * 0.001
                                 ),
                             }
                         )
@@ -227,6 +246,28 @@ def test_analysis_is_seed_first_hash_pinned_and_marks_pending_components(tmp_pat
     assert (contrasts["mean_difference"] > 0).all()
     assert {"p_signflip_holm", "p_sign_holm"}.issubset(contrasts.columns)
 
+    equivalence = pd.read_csv(bundle["output"] / "prespecified_metadata_encoder_equivalence.csv")
+    assert equivalence["model"].tolist() == MODELS
+    assert set(equivalence["holm_family_size"]) == {4}
+    assert set(equivalence["equivalence_margin"]) == {0.02}
+    assert set(equivalence["ci_multiplicity_adjustment"]) == {"none"}
+    assert np.allclose(equivalence["mean_difference"], 0.005)
+    assert equivalence["equivalent_tost_holm_0.05"].all()
+
+    equal_family = pd.read_csv(bundle["output"] / "equal_family_seed_summary.csv")
+    equal_target = pd.read_csv(bundle["output"] / "equal_target_seed_summary.csv")
+    expected_seed_rows = len(MODELS) * len(STRATEGIES) * len(SEEDS) * len(METRICS)
+    assert len(equal_family) == expected_seed_rows
+    assert len(equal_target) == expected_seed_rows
+    equal_target_value = equal_target[
+        (equal_target["model"] == "ae")
+        & (equal_target["strategy"] == "cap_metadata_nearest")
+        & (equal_target["metric"] == "auprc")
+        & (equal_target["seed"] == 1001)
+    ]["value"].item()
+    expected_equal_target = 0.5 + (9 * 0.048 + 2 * 0.21) / 11
+    assert equal_target_value == pytest.approx(expected_equal_target)
+
     strength = pd.read_csv(bundle["output"] / "within_target_strength_contrasts.csv")
     assert set(zip(strength["higher_strength"], strength["lower_strength"])) == {
         ("mid", "weak"),
@@ -234,6 +275,45 @@ def test_analysis_is_seed_first_hash_pinned_and_marks_pending_components(tmp_pat
         ("strong", "mid"),
     }
     assert (strength["mean_difference"] > 0).all()
+
+    eligibility = pd.read_csv(bundle["output"] / "strength_target_eligibility.csv")
+    assert eligibility["panel"].value_counts().to_dict() == {
+        "mid_strong_all": 11,
+        "complete_weak_mid_strong": 9,
+    }
+    panel_seed = pd.read_csv(bundle["output"] / "strength_panel_equal_target_seed_summary.csv")
+    assert set(panel_seed.loc[panel_seed["panel"] == "complete_weak_mid_strong", "n_targets"]) == {
+        9
+    }
+    assert set(panel_seed.loc[panel_seed["panel"] == "mid_strong_all", "n_targets"]) == {11}
+    complete_value = panel_seed[
+        (panel_seed["model"] == "ae")
+        & (panel_seed["strategy"] == "cap_metadata_nearest")
+        & (panel_seed["metric"] == "auprc")
+        & (panel_seed["seed"] == 1001)
+        & (panel_seed["panel"] == "complete_weak_mid_strong")
+        & (panel_seed["strength"] == "weak")
+    ]["value"].item()
+    complete_mid_value = panel_seed[
+        (panel_seed["model"] == "ae")
+        & (panel_seed["strategy"] == "cap_metadata_nearest")
+        & (panel_seed["metric"] == "auprc")
+        & (panel_seed["seed"] == 1001)
+        & (panel_seed["panel"] == "complete_weak_mid_strong")
+        & (panel_seed["strength"] == "mid")
+    ]["value"].item()
+    mid_strong_value = panel_seed[
+        (panel_seed["model"] == "ae")
+        & (panel_seed["strategy"] == "cap_metadata_nearest")
+        & (panel_seed["metric"] == "auprc")
+        & (panel_seed["seed"] == 1001)
+        & (panel_seed["panel"] == "mid_strong_all")
+        & (panel_seed["strength"] == "mid")
+    ]["value"].item()
+    assert complete_value == pytest.approx(0.508)
+    assert complete_mid_value == pytest.approx(0.548)
+    assert complete_mid_value - complete_value == pytest.approx(0.04)
+    assert mid_strong_value == pytest.approx((9 * 0.548 + 2 * 0.69) / 11)
 
     systems = pd.read_csv(bundle["output"] / "process_measurement_summary.csv")
     assert set(systems["system_group"]) == {"process", "measurement"}
@@ -250,7 +330,33 @@ def test_analysis_is_seed_first_hash_pinned_and_marks_pending_components(tmp_pat
     exploratory = catalog[catalog["artifact"].str.startswith("exploratory_")]
     assert not exploratory.empty
     assert set(exploratory["classification"]) == {"exploratory_outcome_selected"}
+    main_heatmap = "prespecified_intervention_cap_minus_baseline_heatmaps.png"
+    assert catalog.loc[catalog["artifact"] == main_heatmap, "classification"].item() != (
+        "exploratory_outcome_selected"
+    )
+    intervention_summary = pd.read_csv(bundle["output"] / "intervention_cap_baseline_summary.csv")
+    physical_order = (
+        intervention_summary[["taxonomy_order", "intervention"]]
+        .drop_duplicates()
+        .sort_values("taxonomy_order")["intervention"]
+        .tolist()
+    )
+    expected_physical_order = [
+        row["intervention"]
+        for row in sorted(
+            TAXONOMY_ROWS,
+            key=lambda row: (
+                {"process": 0, "measurement": 1}[row["system_group"]],
+                row["semantic_family"],
+                row["intervention_target"],
+                {"weak": 0, "mid": 1, "strong": 2}[row["strength"]],
+                row["intervention"],
+            ),
+        )
+    ]
+    assert physical_order == expected_physical_order
     assert (bundle["output"] / "confirmatory_contrast_forest.png").stat().st_size > 0
+    assert (bundle["output"] / main_heatmap).stat().st_size > 0
     assert (bundle["output"] / "analysis_provenance.json").is_file()
 
 
@@ -315,4 +421,60 @@ def test_exact_paired_tests_and_holm() -> None:
     assert sign_p == pytest.approx(0.5)
     assert cchamber_paper_analysis._holm_adjust([0.01, 0.04, 0.03]) == pytest.approx(
         [0.03, 0.06, 0.06]
+    )
+
+    differences = {
+        "ae": np.array([0.000, 0.005, 0.010, 0.015]),
+        "vae": np.array([0.002, 0.004, 0.006, 0.008]),
+        "svdd": np.array([0.010, 0.012, 0.014, 0.016]),
+        "realnvp": np.array([-0.010, -0.012, -0.014, -0.016]),
+    }
+    rows = []
+    for model, model_differences in differences.items():
+        for seed, difference in zip(SEEDS, model_differences):
+            rows.extend(
+                [
+                    {
+                        "model": model,
+                        "strategy": "cap_metadata_nearest",
+                        "seed": seed,
+                        "metric": "auprc",
+                        "value": 0.5 + difference,
+                    },
+                    {
+                        "model": model,
+                        "strategy": "cap_encoder_nearest",
+                        "seed": seed,
+                        "metric": "auprc",
+                        "value": 0.5,
+                    },
+                ]
+            )
+    equivalence = cchamber_paper_analysis._metadata_encoder_equivalence(
+        pd.DataFrame(rows),
+        {"models": MODELS, "reporting_seeds": SEEDS},
+    )
+    ae = equivalence[equivalence["model"] == "ae"].iloc[0]
+    ae_differences = differences["ae"]
+    standard_error = ae_differences.std(ddof=1) / np.sqrt(len(SEEDS))
+    critical = stats.t.ppf(0.95, len(SEEDS) - 1)
+    expected_p = max(
+        stats.t.sf(
+            (ae_differences.mean() + 0.02) / standard_error,
+            len(SEEDS) - 1,
+        ),
+        stats.t.cdf(
+            (ae_differences.mean() - 0.02) / standard_error,
+            len(SEEDS) - 1,
+        ),
+    )
+    assert ae["p_tost_unadjusted"] == pytest.approx(expected_p)
+    assert ae["ci90_unadjusted_low"] == pytest.approx(
+        ae_differences.mean() - critical * standard_error
+    )
+    assert ae["ci90_unadjusted_high"] == pytest.approx(
+        ae_differences.mean() + critical * standard_error
+    )
+    assert equivalence["p_tost_holm_four_models"].tolist() == pytest.approx(
+        cchamber_paper_analysis._holm_adjust(equivalence["p_tost_unadjusted"])
     )

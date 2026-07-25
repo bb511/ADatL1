@@ -1,7 +1,7 @@
 # Callback that computes the anomaly rate during training.
-from collections import defaultdict
 import math
 import statistics
+from collections import defaultdict
 
 import torch
 from pytorch_lightning.callbacks import Callback
@@ -14,10 +14,9 @@ class AnomalyEfficiencyCallback(Callback):
     """Calculates the fraction of anomalies detected given a certain bkg rate.
 
     :target_rate: Float specifying the target rate of bkg.
-    :param base_rate: Optional override for the module base rate. If None, the module
-        base_rate is used.
-    :materic_name: Which model metric to use as the anomaly score to calculate rate on.
-    :beta: Float that sets parameter of EMA metrics compute here.
+    :param base_rate: Optional override for the module base rate. If None, the module base_rate is
+        used. :materic_name: Which model metric to use as the anomaly score to calculate rate on.
+        :beta: Float that sets parameter of EMA metrics compute here.
     """
 
     def __init__(
@@ -75,12 +74,11 @@ class AnomalyEfficiencyCallback(Callback):
     ):
         """Determine the rate for every given metric for every validation data set.
 
-        First, the desired metrics are computed on the normal_data and accummulated
-        across batches. The full metric distribution is used to set a threshold that
-        will give a target rate or set of rates, specified by the user.
-        These thresholds are then applied on all other data sets used for validation
-        to determine, by using the threshold computed on normal, what would the rate
-        be on these other data sets.
+        First, the desired metrics are computed on the normal_data and accummulated across batches.
+        The full metric distribution is used to set a threshold that will give a target rate or set
+        of rates, specified by the user. These thresholds are then applied on all other data sets
+        used for validation to determine, by using the threshold computed on normal, what would the
+        rate be on these other data sets.
         """
         self.dataset_name = list(trainer.val_dataloaders.keys())[dataloader_idx]
         self.total_batches = trainer.num_val_batches[dataloader_idx]
@@ -110,26 +108,26 @@ class AnomalyEfficiencyCallback(Callback):
             pl_module.log_dict(bkg_effs, **self.log_kwargs)
             pl_module.log_dict(sig_effs, **self.log_kwargs)
 
-            cvar25 = self._cvar_lower_tail(sig_effs.values(), alpha=0.25)
-            cvar10 = self._cvar_lower_tail(sig_effs.values(), alpha=0.10)
-            self._compute_cvar25_ema(target_rate, cvar25)
-            self._compute_cvar10_ema(target_rate, cvar10)
-
-            min_sig_eff = min(list(sig_effs.values()))
-            med_sig_eff = statistics.median(list(sig_effs.values()))
             thres_zb = self.main_rate[target_rate]["normal"].threshold.item()
 
-            trate_name = self._rate_summary_name(target_rate)
+            if sig_effs:
+                cvar25 = self._cvar_lower_tail(sig_effs.values(), alpha=0.25)
+                cvar10 = self._cvar_lower_tail(sig_effs.values(), alpha=0.10)
+                self._compute_cvar25_ema(target_rate, cvar25)
+                self._compute_cvar10_ema(target_rate, cvar10)
 
-            summaries = {
-                f"val/summary/eff_cvar25_{trate_name}": cvar25,
-                f"val/summary/eff_cvar10_{trate_name}": cvar10,
-                f"val/summary/eff_min_{trate_name}": min_sig_eff,
-                f"val/summary/eff_med_{trate_name}": med_sig_eff,
-                f"val/summary/eff_cvar25_ema_{trate_name}": self.cvar25_ema[target_rate],
-                f"val/summary/eff_cvar10_ema_{trate_name}": self.cvar10_ema[target_rate],
-            }
-            pl_module.log_dict(summaries, **self.log_kwargs)
+                min_sig_eff = min(sig_effs.values())
+                med_sig_eff = statistics.median(sig_effs.values())
+                trate_name = self._rate_summary_name(target_rate)
+                summaries = {
+                    f"val/summary/eff_cvar25_{trate_name}": cvar25,
+                    f"val/summary/eff_cvar10_{trate_name}": cvar10,
+                    f"val/summary/eff_min_{trate_name}": min_sig_eff,
+                    f"val/summary/eff_med_{trate_name}": med_sig_eff,
+                    f"val/summary/eff_cvar25_ema_{trate_name}": self.cvar25_ema[target_rate],
+                    f"val/summary/eff_cvar10_ema_{trate_name}": self.cvar10_ema[target_rate],
+                }
+                pl_module.log_dict(summaries, **self.log_kwargs)
             pl_module.log_dict(
                 {f"val/normal/thr__brate_{rate_suffix}": thres_zb},
                 **self.log_kwargs,
@@ -139,27 +137,25 @@ class AnomalyEfficiencyCallback(Callback):
         if target_rate not in self.cvar25_ema:
             self.cvar25_ema[target_rate] = float(value)
         else:
-            self.cvar25_ema[target_rate] = (
-                self.beta * self.cvar25_ema[target_rate]
-                + (1 - self.beta) * float(value)
-            )
+            self.cvar25_ema[target_rate] = self.beta * self.cvar25_ema[target_rate] + (
+                1 - self.beta
+            ) * float(value)
 
     def _compute_cvar10_ema(self, target_rate: float, value: float):
         """Compute the cvar10 exponential moving average."""
         if target_rate not in self.cvar10_ema:
             self.cvar10_ema[target_rate] = float(value)
         else:
-            self.cvar10_ema[target_rate] = (
-                self.beta * self.cvar10_ema[target_rate]
-                + (1 - self.beta) * float(value)
-            )
+            self.cvar10_ema[target_rate] = self.beta * self.cvar10_ema[target_rate] + (
+                1 - self.beta
+            ) * float(value)
 
     def _accumulate_normal_output(self, outputs: dict, batch_idx: int, pl_module):
         """Accummulates the specified metric data across batches.
 
-        Used if currently processing the normal data set, accummulate the values of
-        each metric across batches. The whole metric output distribution is needed to
-        set a treshold that gives a certain rate.
+        Used if currently processing the normal data set, accummulate the values of each metric
+        across batches. The whole metric output distribution is needed to set a threshold that
+        gives a certain rate.
         """
         batch_output = outputs[self.output_name]
         if batch_output.ndim == 0:
@@ -173,8 +169,8 @@ class AnomalyEfficiencyCallback(Callback):
     def _compute_normal_rate(self, pl_module):
         """Computes the desired rates on the main validation data set.
 
-        This is a sanity check. The threshold computed on the normal and applied to the
-        normal data should return the rate for which this threshold was computed.
+        This is a sanity check. The threshold computed on the normal and applied to the normal data
+        should return the rate for which this threshold was computed.
         """
         for target_rate in self.target_rates:
             rate = AnomalyRate(target_rate, self.base_rate).to(self.device)
@@ -187,9 +183,9 @@ class AnomalyEfficiencyCallback(Callback):
     def _initialize_rate_metric(self, labels: torch.Tensor):
         """Initializes the rate metric for a dataset for each given target rate.
 
-        The anomaly rate metric object is initialised. Then, the threshold is computed
-        given the normal metric distribution. This threshold is then used to compute
-        the rate on the other data sets differing from normal.
+        The anomaly rate metric object is initialised. Then, the threshold is computed given the
+        normal metric distribution. This threshold is then used to compute the rate on the other
+        data sets differing from normal.
         """
         for target_rate in self.target_rates:
             rate = AnomalyRate(target_rate, self.base_rate).to(self.device)
@@ -202,8 +198,8 @@ class AnomalyEfficiencyCallback(Callback):
     def _compute_batch_rate(self, outputs: dict, labels: torch.Tensor):
         """Done after knowing the rate thresholds.
 
-        For all the other validation data sets, except the main one, this calculates
-        which events pass the rate threshold for each batch and updates the total.
+        For all the other validation data sets, except the main one, this calculates which events
+        pass the rate threshold for each batch and updates the total.
         """
         for tr in self.target_rates:
             if torch.all(labels < 0):
@@ -233,9 +229,7 @@ class AnomalyEfficiencyCallback(Callback):
         rate_suffix = self._rate_log_suffix(target_rate)
 
         for ds_name, rate in rates[target_rate].items():
-            logging_name = (
-                f"val/{ds_name}/eff__{clean_output_name}__brate_{rate_suffix}"
-            )
+            logging_name = f"val/{ds_name}/eff__{clean_output_name}__brate_{rate_suffix}"
             effs[logging_name] = rate.compute("efficiency")
 
         return effs
@@ -284,8 +278,7 @@ class AnomalyEfficiencyCallback(Callback):
 
         if module_target is None:
             raise ValueError(
-                "pl_module.hparams.target_rate must be defined for "
-                "AnomalyEfficiencyCallback."
+                "pl_module.hparams.target_rate must be defined for " "AnomalyEfficiencyCallback."
             )
 
         # Always include module target

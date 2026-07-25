@@ -3,6 +3,7 @@ from __future__ import annotations
 import csv
 import json
 import subprocess  # nosec B404
+from collections import defaultdict
 from copy import deepcopy
 from itertools import product
 from pathlib import Path
@@ -16,6 +17,7 @@ from pytorch_lightning.callbacks import ModelCheckpoint
 
 from scripts import cchamber_candidate_rank_audit as audit
 from src.callbacks.audit import CheckpointBranchManifest, TrajectoryFingerprint
+from src.callbacks.efficiency import AnomalyEfficiencyCallback
 from src.utils.pairing.io import compose_config
 
 
@@ -42,6 +44,42 @@ def test_all_candidate_rank_configs_compose_with_five_branches(monkeypatch) -> N
         assert cfg.data.signal_experiments == []
         assert cfg.test is False
         assert cfg.evaluation is None
+
+
+def test_training_efficiency_callback_supports_normal_only_validation() -> None:
+    """Background-only audit training must still log its frozen threshold."""
+
+    class Rate:
+        threshold = torch.tensor(1.25)
+
+        @staticmethod
+        def compute(name):
+            assert name == "rate"
+            return torch.tensor(0.01)
+
+    class Module:
+        def __init__(self):
+            self.logged = []
+
+        def log_dict(self, values, **kwargs):
+            self.logged.append((dict(values), kwargs))
+
+    callback = AnomalyEfficiencyCallback(output_name="ascore/full")
+    callback.target_rates = [0.01]
+    callback.module_target_rate = 0.01
+    callback.main_rate = {0.01: {"normal": Rate()}}
+    callback.bkg_rates = defaultdict(dict)
+    callback.sig_rates = defaultdict(dict)
+    callback.cvar25_ema = {}
+    callback.cvar10_ema = {}
+    module = Module()
+
+    callback.on_validation_epoch_end(None, module)
+
+    logged = {name: value for values, _ in module.logged for name, value in values.items()}
+    assert logged["val/normal/brate_operational"] == pytest.approx(0.01)
+    assert logged["val/normal/thr__brate_operational"] == pytest.approx(1.25)
+    assert not any(name.startswith("val/summary/eff_") for name in logged)
 
 
 def test_candidate_parameters_refuse_missing_or_replaced_panel_candidates() -> None:

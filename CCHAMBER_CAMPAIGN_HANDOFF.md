@@ -2,6 +2,20 @@
 
 Last updated: 2026-07-25 21:52 CEST on `clariden-ln004`.
 
+## Post-Handoff Updates
+
+The following updates supersede the working-tree snapshot later in this file:
+
+- `c4f675a`: provenance-safe candidate-rank audit committed after independent
+  review, 20 focused/regression tests, and all hooks.
+- `7207044`: threshold-safe MLflow/Slurm evaluation committed after three review
+  rounds, 24 focused/adversarial tests, and all hooks.
+- The worktree was clean immediately after `7207044`.
+- The threshold-safe command path is code-ready, but inventory/canary execution
+  remains intentionally gated until search selection and all 200 retrains exist.
+- At 2026-07-25 22:26 CEST, the main search had at least 315/1,300 markers, eight
+  running tasks, and zero retry markers. Always refresh this live count.
+
 This file is the durable handoff for the active, real Causal Chamber paper
 campaign. Do not reduce this work to a smoke test. The objective is to complete
 the full experiment, collect the sealed intervention results, investigate them,

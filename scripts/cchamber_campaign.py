@@ -631,7 +631,7 @@ def _write_slurm_scripts(
         seeds=({" ".join(map(str, PAIR_ENCODER_SEEDS))})
         pids=()
         for seed in "${{seeds[@]:0:4}}"; do
-            srun --exclusive --ntasks=1 --cpus-per-task=72 --gpus-per-task=1 \
+            srun --exclusive --ntasks=1 --cpus-per-task=72 --gpus-per-node=1 --mem=110G \
                 "${{UV[@]}}" scripts/cchamber_campaign.py run-pairing-encoder \
                 --root "$CAMPAIGN_ROOT" --encoder-seed "$seed" &
             pids+=("$!")
@@ -641,7 +641,7 @@ def _write_slurm_scripts(
             wait "$pid" || status=1
         done
         test "$status" -eq 0
-        srun --exclusive --ntasks=1 --cpus-per-task=72 --gpus-per-task=1 \
+        srun --exclusive --ntasks=1 --cpus-per-task=72 --gpus-per-node=1 --mem=110G \
             "${{UV[@]}}" scripts/cchamber_campaign.py run-pairing-encoder \
             --root "$CAMPAIGN_ROOT" --encoder-seed "${{seeds[4]}}"
         "${{UV[@]}}" scripts/cchamber_campaign.py collect-pairing \
@@ -683,7 +683,7 @@ def _write_slurm_scripts(
         )
         pids=()
         for model in ae vae svdd realnvp; do
-            srun --exclusive --ntasks=1 --cpus-per-task=72 --gpus-per-task=1 \
+            srun --exclusive --ntasks=1 --cpus-per-task=72 --gpus-per-node=1 --mem=110G \
                 "${{UV[@]}}" scripts/cchamber_campaign.py run-candidate \
                 --root "$CAMPAIGN_ROOT" --model "$model" \
                 --candidate-id "${{stress[$model]}}" \
@@ -728,7 +728,7 @@ def _write_slurm_scripts(
         printf -v candidate_id '%03d' "$SLURM_ARRAY_TASK_ID"
         pids=()
         for model in ae vae svdd realnvp; do
-            srun --exclusive --ntasks=1 --cpus-per-task=72 --gpus-per-task=1 \
+            srun --exclusive --ntasks=1 --cpus-per-task=72 --gpus-per-node=1 --mem=110G \
                 "${UV[@]}" scripts/cchamber_campaign.py run-candidate \
                 --root "$CAMPAIGN_ROOT" --model "$model" \
                 --candidate-id "$candidate_id" --pair-table "$PAIR_TABLE" &
@@ -777,7 +777,7 @@ def _write_slurm_scripts(
                 if (( index >= {count} )); then
                     continue
                 fi
-                srun --exclusive --ntasks=1 --cpus-per-task=72 --gpus-per-task=1 \
+                srun --exclusive --ntasks=1 --cpus-per-task=72 --gpus-per-node=1 --mem=110G \
                     "${{UV[@]}}" scripts/cchamber_campaign.py run-{stage} \
                     --root "$CAMPAIGN_ROOT" --index "$index" &
                 pids+=("$!")

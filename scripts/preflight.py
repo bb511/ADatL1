@@ -14,6 +14,7 @@ from typing import Any, Sequence
 from dotenv import load_dotenv
 from hydra import compose, initialize_config_dir
 from hydra.core.global_hydra import GlobalHydra
+from hydra.utils import instantiate
 
 REPOSITORY_ROOT = Path(__file__).resolve().parents[1]
 if str(REPOSITORY_ROOT) not in sys.path:
@@ -39,6 +40,16 @@ RUNTIME_PATH_VARS = (
 def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--profile", choices=("local", "cloud"), default="local")
+    parser.add_argument(
+        "--data-mode",
+        choices=("real", "synthetic"),
+        default="real",
+        help=(
+            "Select deployment inputs. 'real' enforces raw L1 parquet data and "
+            "frozen Causal Chamber pair tables; 'synthetic' validates the in-memory "
+            "L1-compatible data contract instead."
+        ),
+    )
     parser.add_argument(
         "--require-physics-data",
         action="store_true",
@@ -120,7 +131,8 @@ def main(argv: Sequence[str] | None = None) -> int:
         errors=shell_errors,
     )
 
-    if args.valid_pair_table or args.test_pair_table or args.profile == "cloud":
+    require_pair_tables = args.profile == "cloud" and args.data_mode == "real"
+    if args.valid_pair_table or args.test_pair_table or require_pair_tables:
         if not (args.valid_pair_table and args.test_pair_table):
             _check(
                 checks,
@@ -131,7 +143,10 @@ def main(argv: Sequence[str] | None = None) -> int:
         else:
             _check_pair_tables(checks, args.valid_pair_table, args.test_pair_table)
 
-    if args.require_physics_data or args.profile == "cloud":
+    require_physics_data = args.require_physics_data or (
+        args.profile == "cloud" and args.data_mode == "real"
+    )
+    if require_physics_data:
         physics_errors = validate_physics_data()
         _check(
             checks,
@@ -140,11 +155,21 @@ def main(argv: Sequence[str] | None = None) -> int:
             "all configured raw-data directories contain parquet files",
             errors=physics_errors,
         )
+    elif args.profile == "cloud" and args.data_mode == "synthetic":
+        synthetic_errors = validate_synthetic_data()
+        _check(
+            checks,
+            "synthetic_l1_data",
+            not synthetic_errors,
+            "in-memory data satisfies the L1 normal/reference/signal contract",
+            errors=synthetic_errors,
+        )
 
     passed = all(check["status"] in {"passed", "warning"} for check in checks)
     report = {
         "status": "passed" if passed else "failed",
         "profile": args.profile,
+        "data_mode": args.data_mode,
         "repository_root": str(REPOSITORY_ROOT),
         "checks": checks,
     }
@@ -255,6 +280,65 @@ def validate_physics_data() -> list[str]:
                 errors.append(f"{group}.{name}: missing directory {path}")
             elif not any(path.rglob("*.parquet")):
                 errors.append(f"{group}.{name}: no parquet files under {path}")
+    return errors
+
+
+def validate_synthetic_data() -> list[str]:
+    """Instantiate a bounded data-free sample and verify the L1 loader contract."""
+    errors = []
+    GlobalHydra.instance().clear()
+    register_resolvers()
+    try:
+        with initialize_config_dir(
+            config_dir=str(REPOSITORY_ROOT / "configs"),
+            version_base="1.3",
+        ):
+            cfg = compose(
+                config_name="train",
+                overrides=[
+                    "data=synthetic",
+                    "data.n_features=57",
+                    "data.n_train=32",
+                    "data.n_val=16",
+                    "data.n_test=16",
+                    "data.batch_size=8",
+                    "data.paper_aliases=true",
+                ],
+            )
+
+        expected_target = "src.data.synthetic.SyntheticL1ADDataModule"
+        if cfg.data.get("_target_") != expected_target:
+            errors.append(
+                f"data target is {cfg.data.get('_target_')!r}, expected {expected_target!r}"
+            )
+
+        datamodule = instantiate(cfg.data)
+        datamodule.setup()
+        expected_base = {"normal", "reference_normal", "synthetic_signal"}
+        for stage, loaders in (
+            ("validate", datamodule.val_dataloader()),
+            ("test", datamodule.test_dataloader()),
+        ):
+            missing = expected_base - set(loaders)
+            if missing:
+                errors.append(f"{stage} loaders are missing: {sorted(missing)}")
+                continue
+            for name in sorted(expected_base):
+                batch = next(iter(loaders[name]))
+                features = batch[0]
+                if features.ndim != 2 or features.shape[1] != 57:
+                    errors.append(
+                        f"{stage}.{name} has feature shape {tuple(features.shape)}, "
+                        "expected [batch, 57]"
+                    )
+
+        physics_aliases = getattr(datamodule, "val_dataloader")()
+        if "SingleNeutrino_E-10-gun" not in physics_aliases:
+            errors.append("paper-compatible reference alias is missing")
+    except Exception as exc:
+        errors.append(f"{type(exc).__name__}: {exc}")
+    finally:
+        GlobalHydra.instance().clear()
     return errors
 
 

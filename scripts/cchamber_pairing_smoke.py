@@ -33,6 +33,13 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
         default=REPOSITORY_ROOT / "results" / "cchamber-pairing-smoke",
     )
     parser.add_argument(
+        "--checkpoints-dir",
+        type=Path,
+        default=REPOSITORY_ROOT / "checkpoints",
+    )
+    parser.add_argument("--trainer", choices=("cpu", "gpu"), default="cpu")
+    parser.add_argument("--device", choices=("cpu", "cuda"), default="cpu")
+    parser.add_argument(
         "--skip-encoder-training",
         action="store_true",
         help="Reuse checkpoints/cchamber_pairing_smoke/encoder/last.ckpt.",
@@ -43,16 +50,17 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
 def main(argv: Sequence[str] | None = None) -> int:
     args = parse_args(argv)
     output_dir = args.output_dir.expanduser().resolve()
+    checkpoints_dir = args.checkpoints_dir.expanduser().resolve()
     output_dir.mkdir(parents=True, exist_ok=True)
-    checkpoint = (
-        REPOSITORY_ROOT / "checkpoints" / "cchamber_pairing_smoke" / "encoder" / "last.ckpt"
-    )
+    checkpoint = checkpoints_dir / "cchamber_pairing_smoke" / "encoder" / "last.ckpt"
 
     if not args.skip_encoder_training:
         _run(
             sys.executable,
             "src/train.py",
             "experiment=cchamber/ae_pairing",
+            f"trainer={args.trainer}",
+            f"paths.checkpoints_dir={checkpoints_dir}",
             "seed=123",
             "experiment_name=cchamber_pairing_smoke",
             "run_name=encoder",
@@ -96,6 +104,8 @@ def main(argv: Sequence[str] | None = None) -> int:
             "--k",
             "0",
             "--no-caliper",
+            "--device",
+            args.device,
             "--overwrite",
             *table_overrides,
         )
@@ -104,6 +114,8 @@ def main(argv: Sequence[str] | None = None) -> int:
         sys.executable,
         "src/train.py",
         "experiment=cchamber/ae_agnostic",
+        f"trainer={args.trainer}",
+        f"paths.checkpoints_dir={checkpoints_dir}",
         "seed=123",
         "experiment_name=cchamber_pairing_smoke",
         "run_name=consumer",
@@ -155,9 +167,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             "test_pairs": int(test["idx_1"].numel()),
             "validation_table_sha256": sha256_file(valid_table),
             "test_table_sha256": sha256_file(test_table),
-            "consumer_run": str(
-                REPOSITORY_ROOT / "checkpoints" / "cchamber_pairing_smoke" / "consumer"
-            ),
+            "consumer_run": str(checkpoints_dir / "cchamber_pairing_smoke" / "consumer"),
         },
         output_dir / "summary.json",
         overwrite=True,

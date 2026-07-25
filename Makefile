@@ -7,8 +7,9 @@ MLFLOW_PORT ?= 5000
 ANALYTICAL_OUTPUT_DIR ?= figures/section3
 ANALYTICAL_SMOKE_OUTPUT_DIR ?= results/analytical-smoke
 PREFLIGHT_LAUNCHER ?= submitit_slurm_clariden
+PREFLIGHT_DATA_MODE ?= real
 
-.PHONY: help clean format uv-sync uv-lock test test-full train train-demo train-synthetic smoke model-smoke pairing-smoke cchamber-pairing-smoke preflight-local preflight-cloud analytical analytical-smoke mlflow
+.PHONY: help clean format uv-sync uv-lock test test-full train train-demo train-synthetic smoke model-smoke pairing-smoke cchamber-pairing-smoke preflight-local preflight-cloud preflight-cloud-synthetic analytical analytical-smoke mlflow
 
 help:  ## Show help
 	@grep -E '^[.a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*?## "}; {printf "\033[36m%-30s\033[0m %s\n", $$1, $$2}'
@@ -60,7 +61,10 @@ preflight-local: ## Validate all core experiment configs and generated shell scr
 	$(UV) run python scripts/preflight.py --profile local
 
 preflight-cloud: ## Enforce data, pair-table, git, config, and shell deployment gates
-	$(UV) run python scripts/preflight.py --profile cloud --launcher $(PREFLIGHT_LAUNCHER)
+	$(UV) run python scripts/preflight.py --profile cloud --data-mode $(PREFLIGHT_DATA_MODE) --launcher $(PREFLIGHT_LAUNCHER)
+
+preflight-cloud-synthetic: ## Enforce cloud gates using the data-free L1-compatible datamodule
+	$(UV) run python scripts/preflight.py --profile cloud --data-mode synthetic --launcher $(PREFLIGHT_LAUNCHER)
 
 analytical: ## Generate the publication-scale Section 3 analytical artifacts
 	$(UV) run python src/analytical.py --profile paper --output-dir $(ANALYTICAL_OUTPUT_DIR)

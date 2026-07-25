@@ -34,6 +34,13 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
         default=REPOSITORY_ROOT / "results" / "pairing-smoke",
     )
     parser.add_argument(
+        "--checkpoints-dir",
+        type=Path,
+        default=REPOSITORY_ROOT / "checkpoints",
+    )
+    parser.add_argument("--trainer", choices=("cpu", "gpu"), default="cpu")
+    parser.add_argument("--device", choices=("cpu", "cuda"), default="cpu")
+    parser.add_argument(
         "--skip-encoder-training",
         action="store_true",
         help="Reuse checkpoints/demo/l1_jetclr/last.ckpt.",
@@ -44,14 +51,17 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
 def main(argv: Sequence[str] | None = None) -> int:
     args = parse_args(argv)
     output_dir = args.output_dir.expanduser().resolve()
+    checkpoints_dir = args.checkpoints_dir.expanduser().resolve()
     output_dir.mkdir(parents=True, exist_ok=True)
-    checkpoint = REPOSITORY_ROOT / "checkpoints" / "demo" / "l1_jetclr" / "last.ckpt"
+    checkpoint = checkpoints_dir / "demo" / "l1_jetclr" / "last.ckpt"
 
     if not args.skip_encoder_training:
         _run(
             sys.executable,
             "tests/train.py",
             "experiment=demo/l1_jetclr",
+            f"trainer={args.trainer}",
+            f"paths.checkpoints_dir={checkpoints_dir}",
             "logger=none",
         )
     if not checkpoint.is_file():
@@ -74,6 +84,8 @@ def main(argv: Sequence[str] | None = None) -> int:
         "--dataset-2",
         "reference_normal",
         "--no-caliper",
+        "--device",
+        args.device,
         "--overwrite",
         *common_overrides,
     )
@@ -100,6 +112,8 @@ def main(argv: Sequence[str] | None = None) -> int:
             "--k",
             "10",
             "--no-caliper",
+            "--device",
+            args.device,
             "--overwrite",
             *common_overrides,
         )
@@ -108,6 +122,8 @@ def main(argv: Sequence[str] | None = None) -> int:
         sys.executable,
         "tests/train.py",
         "experiment=synthetic/ae",
+        f"trainer={args.trainer}",
+        f"paths.checkpoints_dir={checkpoints_dir}",
         "seed=123",
         "experiment_name=pairing_smoke",
         "run_name=ae_precomputed",
@@ -159,9 +175,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         "test_pairs": int(test["idx_1"].numel()),
         "validation_table_sha256": sha256_file(valid_table),
         "test_table_sha256": sha256_file(test_table),
-        "cap_consumer_run": str(
-            REPOSITORY_ROOT / "checkpoints" / "pairing_smoke" / "ae_precomputed"
-        ),
+        "cap_consumer_run": str(checkpoints_dir / "pairing_smoke" / "ae_precomputed"),
     }
     summary_path = atomic_json_dump(
         summary,

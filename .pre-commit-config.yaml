@@ -57,6 +57,7 @@ repos:
     rev: 1.5.0 # or master if you're bold
     hooks:
       - id: interrogate
+        additional_dependencies: ["setuptools<81"]
         args:
           [
             --verbose,
@@ -87,6 +88,7 @@ repos:
     rev: "1.7.5"
     hooks:
       - id: bandit
+        additional_dependencies: [pbr]
         args: ["-s", "B101"]
 
   # yaml formatting
@@ -123,10 +125,14 @@ repos:
     rev: 1.6.3
     hooks:
       - id: nbqa-black
+        additional_dependencies: ["setuptools<81", "black==23.1.0"]
         args: ["--line-length=99"]
       - id: nbqa-isort
+        additional_dependencies: ["setuptools<81", "isort==5.12.0"]
         args: ["--profile=black"]
       - id: nbqa-flake8
+        additional_dependencies:
+          ["setuptools<81", "flake8==6.0.0", "flake8-rst-docstrings==0.3.0"]
         args:
           [
             "--extend-ignore=E203,E402,E501,F401,F841",

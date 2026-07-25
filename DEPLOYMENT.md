@@ -15,6 +15,17 @@ Edit the generated `.env` so `PROJECT_ROOT`, `DATA_DIR`, `RAW_DATA_DIR`, `LOG_DI
 `OUTPUT_DIR`, and `CHECKPOINT_DIR` point to durable cluster storage. Set
 `WANDB_MODE=offline` or `online` explicitly.
 
+On Clariden, after an IOPS scratch cleanup, recreate the native ARM64 environment
+with:
+
+```bash
+bash scripts/clariden/bootstrap.sh
+```
+
+The bootstrap refuses non-ARM hosts and non-symlink `.venv` replacements. It
+installs the locked Python 3.10 development environment and uv cache under the
+project's IOPS scratch root.
+
 ## 2. Run local structural gates
 
 ```bash
@@ -64,16 +75,49 @@ The cloud profile requires:
 
 The machine-readable report is written to `results/preflight.json`.
 
-## 5. Run one target-environment canary
+If the external L1 parquet data is not yet available, run the explicitly
+data-free deployment gate instead:
 
-Generate one low-cost experiment with the target launcher, submit it, and verify
-the GPU, CUDA build, scheduler account/partition, shared filesystem, checkpoint,
-logger, and evaluator outputs. Local tests cannot prove those external services.
-Only after that canary succeeds should the full sweep matrix be submitted.
+```bash
+make preflight-cloud-synthetic
+```
+
+This preserves every environment, Git, configuration, generated-script, and
+launcher check, but replaces the raw-data and frozen-table requirements with an
+instantiated 57-feature `SyntheticL1ADDataModule` contract check. It verifies
+normal, reference-normal, anomaly, and paper-compatible loader aliases. This mode
+is suitable for infrastructure canaries only; it is not evidence that the
+real-data gate or physics study is complete. `make preflight-cloud` continues to
+default to strict real-data mode.
+
+## 5. Run target-environment canaries
+
+Submit bounded debug-partition jobs and verify the GPU, CUDA build, scheduler
+account/partition, shared filesystem, checkpoint, logger, pairing, CAP, and
+evaluator outputs. Keep each job's outputs and checkpoints in a job-specific
+scratch directory. Local tests cannot prove those external services. Only after
+the canaries succeed should the full sweep matrix be submitted.
+
+On Clariden, the two reviewed canary jobs are:
+
+```bash
+mkdir -p /iopsstor/scratch/cscs/vjimenez/adatl1/logs/slurm
+sbatch scripts/clariden/canary_synthetic.sbatch
+sbatch scripts/clariden/canary_cchamber.sbatch
+```
+
+The first job covers the analytical smoke profile, a 57-feature L1-shaped VAE,
+the model/checkpoint/CAP/evaluator workflow, and controlled frozen-table pairing.
+The second independently covers the public Causal Chamber download, pairing AE,
+separate 1,000-pair validation/test tables, CAP consumption, and the
+`uniform_red_mid` intervention. Both use account `a0166`, the `debug` partition,
+one GPU, a 90-minute limit, offline logging, and job-specific scratch artifacts.
 
 ## 6. Evidence boundary
 
-A green smoke/preflight means the implementation and deployment inputs are
-structurally ready. It does not establish the scientific result. Full-data sweeps,
-shared candidate replay, at least three paired retraining seeds, every required
-intervention/domain, final evaluation, and paired aggregation remain mandatory.
+A green smoke/preflight means the implementation and selected deployment inputs
+are structurally ready. A green synthetic preflight says nothing about external
+L1 data availability. Neither mode establishes the scientific result. Full-data
+sweeps, shared candidate replay, at least three paired retraining seeds, every
+required intervention/domain, final evaluation, and paired aggregation remain
+mandatory.

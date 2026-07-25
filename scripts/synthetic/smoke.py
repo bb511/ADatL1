@@ -48,13 +48,15 @@ def _seeds(value: str) -> tuple[int, ...]:
         raise argparse.ArgumentTypeError("Seeds must be integers.") from exc
 
 
-def train_one(model: str, seed: int) -> None:
+def train_one(model: str, seed: int, *, trainer: str, checkpoints_dir: Path) -> None:
     """Run a bounded but structurally complete smoke training job."""
     command = [
         sys.executable,
         "tests/train.py",
         f"experiment=synthetic/{model}",
         f"seed={seed}",
+        f"trainer={trainer}",
+        f"paths.checkpoints_dir={checkpoints_dir}",
         "trainer.max_epochs=3",
         "+trainer.limit_train_batches=2",
         "+trainer.limit_val_batches=2",
@@ -103,6 +105,7 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     )
     parser.add_argument("--models", type=_csv_items, default=MODELS)
     parser.add_argument("--seeds", type=_seeds, default=(123, 456, 789))
+    parser.add_argument("--trainer", choices=("cpu", "gpu"), default="cpu")
     parser.add_argument(
         "--checkpoints-dir",
         type=Path,
@@ -133,7 +136,12 @@ def main(argv: Sequence[str] | None = None) -> int:
     if not args.skip_training:
         for model in args.models:
             for seed in args.seeds:
-                train_one(model, seed)
+                train_one(
+                    model,
+                    seed,
+                    trainer=args.trainer,
+                    checkpoints_dir=checkpoints_dir,
+                )
 
     output_dir.mkdir(parents=True, exist_ok=True)
     manifest_path = output_dir / "callback_manifest.csv"

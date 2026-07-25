@@ -30,3 +30,12 @@ def test_preflight_generated_shells_pass_bash_parser() -> None:
     )
 
     assert errors == []
+
+
+def test_preflight_synthetic_data_satisfies_l1_contract() -> None:
+    assert preflight.validate_synthetic_data() == []
+
+
+def test_preflight_data_mode_defaults_to_real() -> None:
+    assert preflight.parse_args([]).data_mode == "real"
+    assert preflight.parse_args(["--data-mode", "synthetic"]).data_mode == "synthetic"

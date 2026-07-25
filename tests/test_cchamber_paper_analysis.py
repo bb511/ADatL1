@@ -396,6 +396,31 @@ def test_analysis_rejects_incomplete_result_coverage(tmp_path) -> None:
         )
 
 
+def test_threshold_safe_results_require_sidecar_integrity_chain(tmp_path) -> None:
+    """Threshold provenance columns require pinned manifest and collection records."""
+    bundle = _frozen_bundle(tmp_path)
+    results = pd.read_csv(bundle["results"])
+    results["manifest_index"] = 0
+    results["checkpoint_sha256"] = "checkpoint"
+    results["threshold_manifest_sha256"] = "threshold-manifest"
+    results["threshold_artifact"] = "/frozen/thresholds/000.json"
+    results["threshold_artifact_sha256"] = "threshold-artifact"
+    results["threshold_bytes_sha256"] = "threshold-bytes"
+    results.to_csv(bundle["results"], index=False)
+    integrity = json.loads(bundle["integrity"].read_text())
+    integrity["files"]["results"]["sha256"] = cchamber_paper_analysis._sha256(bundle["results"])
+    _write_json(bundle["integrity"], integrity)
+
+    with pytest.raises(ValueError, match="require integrity entries"):
+        cchamber_paper_analysis.analyze(
+            bundle["campaign_root"],
+            bundle["plan"],
+            bundle["taxonomy"],
+            bundle["integrity"],
+            bundle["output"],
+        )
+
+
 def test_analysis_refuses_to_write_inside_campaign_root(tmp_path) -> None:
     """Analysis never writes into the immutable campaign tree."""
     bundle = _frozen_bundle(tmp_path, with_pairing=False)

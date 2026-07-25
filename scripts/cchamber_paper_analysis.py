@@ -384,7 +384,81 @@ def _verify_inputs(
         pd.read_csv(paths["taxonomy"]),
         plan["interventions"],
     )
-    results = _validate_results(pd.read_csv(paths["results"]), plan, taxonomy)
+    raw_results = pd.read_csv(paths["results"])
+    threshold_columns = {
+        "manifest_index",
+        "checkpoint_sha256",
+        "threshold_manifest_sha256",
+        "threshold_artifact",
+        "threshold_artifact_sha256",
+        "threshold_bytes_sha256",
+    }
+    present_threshold_columns = threshold_columns & set(raw_results.columns)
+    if present_threshold_columns and present_threshold_columns != threshold_columns:
+        missing_threshold = threshold_columns - set(raw_results.columns)
+        raise ValueError(
+            "Threshold-safe results omit provenance columns: "
+            + ", ".join(sorted(missing_threshold))
+        )
+    if present_threshold_columns:
+        required_sidecar = {"threshold_manifest", "threshold_safe_provenance"}
+        missing_sidecar = required_sidecar - set(files)
+        if missing_sidecar:
+            raise ValueError(
+                "Threshold-safe results require integrity entries: "
+                + ", ".join(sorted(missing_sidecar))
+            )
+        for name in sorted(required_sidecar):
+            paths[name] = _resolve_input(campaign_root, files[name], name)
+        threshold_manifest_sha = _sha256(paths["threshold_manifest"])
+        if set(raw_results["threshold_manifest_sha256"].astype(str)) != {threshold_manifest_sha}:
+            raise ValueError("Result rows do not reference the pinned threshold manifest.")
+        sidecar = _read_json(paths["threshold_safe_provenance"])
+        if (
+            sidecar.get("threshold_manifest_sha256") != threshold_manifest_sha
+            or sidecar.get("results_sha256") != _sha256(paths["results"])
+            or int(sidecar.get("expected_records", -1)) != 200
+            or int(sidecar.get("expected_result_rows", -1)) != 23_200
+            or len(raw_results) != 23_200
+        ):
+            raise ValueError("Threshold-safe result provenance chain is inconsistent.")
+        threshold_manifest = _read_json(paths["threshold_manifest"])
+        threshold_records = threshold_manifest.get("records")
+        if (
+            int(threshold_manifest.get("expected_records", -1)) != 200
+            or not isinstance(threshold_records, list)
+            or len(threshold_records) != 200
+            or set(raw_results["manifest_index"].astype(int)) != set(range(200))
+            or not (raw_results.groupby("manifest_index", sort=False).size() == 116).all()
+        ):
+            raise ValueError("Threshold-safe manifest/result index coverage is not exact.")
+        manifest_frame = pd.DataFrame(threshold_records)
+        required_manifest_columns = {
+            "manifest_index",
+            "threshold_artifact",
+            "threshold_artifact_sha256",
+            "checkpoint_sha256",
+            "threshold_bytes_sha256",
+        }
+        if (
+            not required_manifest_columns.issubset(manifest_frame.columns)
+            or manifest_frame["manifest_index"].duplicated().any()
+        ):
+            raise ValueError("Threshold manifest records are not uniquely joinable.")
+        row_identity = (
+            raw_results.loc[:, sorted(required_manifest_columns)]
+            .drop_duplicates()
+            .sort_values("manifest_index")
+            .reset_index(drop=True)
+        )
+        manifest_identity = (
+            manifest_frame.loc[:, sorted(required_manifest_columns)]
+            .sort_values("manifest_index")
+            .reset_index(drop=True)
+        )
+        if not row_identity.equals(manifest_identity):
+            raise ValueError("Every result index must exactly join its threshold manifest record.")
+    results = _validate_results(raw_results, plan, taxonomy)
     return campaign, plan, taxonomy, results, integrity, paths
 
 

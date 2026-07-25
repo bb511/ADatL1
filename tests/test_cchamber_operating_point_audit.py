@@ -3,6 +3,7 @@ from __future__ import annotations
 import csv
 import hashlib
 import json
+import subprocess  # nosec B404
 from itertools import product
 from pathlib import Path
 from types import SimpleNamespace
@@ -13,8 +14,20 @@ import torch
 from scripts import cchamber_operating_point_audit as audit
 from src.evaluation.callbacks.efficiency import AnomalyEfficiencyCallback
 
+_REAL_REQUIRE_FINISHED_RUN = audit._require_finished_run
+
+
+@pytest.fixture(autouse=True)
+def _stable_audit_deployment(monkeypatch):
+    """Keep synthetic inventories on one clean, finished audit deployment."""
+    monkeypatch.setattr(
+        audit, "_audit_revision", lambda: ("synthetic-audit-commit", "research/main")
+    )
+    monkeypatch.setattr(audit, "_require_finished_run", lambda *args, **kwargs: None)
+
 
 def _write_json(path: Path, value) -> None:
+    """Write one compact synthetic JSON fixture."""
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(value, sort_keys=True), encoding="utf-8")
 
@@ -47,6 +60,7 @@ def _synthetic_campaign(tmp_path: Path) -> tuple[Path, str]:
         "models": list(audit.MODELS),
         "strategies": list(audit.STRATEGIES),
         "reporting_seeds": seeds,
+        "interventions": [f"intervention_{index:02d}" for index in range(58)],
         "dataset_files": dataset_files,
         "dataset_tree_sha256": hashlib.sha256(
             audit._canonical_json(dataset_files).encode("utf-8")
@@ -55,13 +69,28 @@ def _synthetic_campaign(tmp_path: Path) -> tuple[Path, str]:
     campaign_path = root / "campaign.json"
     _write_json(campaign_path, campaign)
 
+    selection = root / "selection"
+    selection.mkdir(parents=True)
+    candidate_metrics = selection / "candidate_metrics.csv"
+    candidate_metrics.write_text(
+        "model,strategy,candidate_id,seed,value,params_json\n" 'ae,cap_random,000,101,1.0,"{}"\n',
+        encoding="utf-8",
+    )
+    selected_trials = selection / "selected_trials.csv"
+    selected_trials.write_text(
+        "model,strategy,candidate_id\nae,cap_random,000\n", encoding="utf-8"
+    )
+
     manifest = []
     for index, (model, strategy, seed) in enumerate(
         product(audit.MODELS, audit.STRATEGIES, seeds)
     ):
         checkpoint = root / "checkpoints" / f"{index:03d}.ckpt"
         checkpoint.parent.mkdir(parents=True, exist_ok=True)
-        checkpoint.write_bytes(f"synthetic-checkpoint-{index}".encode())
+        torch.save(
+            {"state_dict": {"weight": torch.tensor(float(index))}},
+            checkpoint,
+        )
         item = {
             "model": model,
             "strategy": strategy,
@@ -80,16 +109,119 @@ def _synthetic_campaign(tmp_path: Path) -> tuple[Path, str]:
                 "manifest_index": index,
                 "checkpoint": str(checkpoint.resolve()),
                 "checkpoint_sha256": audit._sha256(checkpoint),
-                "valid_pair_table_sha256": "valid-pairs",
-                "test_pair_table_sha256": "test-pairs",
+                "valid_pair_table_sha256": "pending",
+                "test_pair_table_sha256": "pending",
                 "mlflow_run_id": f"training-{index}",
             },
         )
-    _write_json(root / "selection" / "retrain_manifest.json", manifest)
+    retrain_manifest = selection / "retrain_manifest.json"
+    _write_json(retrain_manifest, manifest)
+    _write_json(
+        selection / "candidate_metrics_provenance.json",
+        {
+            "campaign": str(campaign_path.resolve()),
+            "campaign_sha256": audit._sha256(campaign_path),
+            "candidate_metrics": str(candidate_metrics.resolve()),
+            "candidate_metrics_sha256": audit._sha256(candidate_metrics),
+        },
+    )
+    _write_json(
+        selection / "selection_provenance.json",
+        {
+            "candidate_metrics": str(candidate_metrics.resolve()),
+            "candidate_metrics_sha256": audit._sha256(candidate_metrics),
+            "selected_trials_sha256": audit._sha256(selected_trials),
+            "retrain_manifest_sha256": audit._sha256(retrain_manifest),
+            "n_selected": 20,
+            "n_retrains": 200,
+            "development_seeds": list(audit.DEVELOPMENT_SEEDS),
+            "intervention_labels_used": False,
+        },
+    )
+
+    pairing = root / "pairing"
+    encoder = pairing / "seed_123" / "encoder.ckpt"
+    encoder.parent.mkdir(parents=True)
+    encoder.write_bytes(b"encoder")
+    source_1 = torch.arange(11_000, dtype=torch.float32).reshape(1_000, 11)
+    source_2 = source_1 + 1
+    encoder_sha = audit._sha256(encoder)
+
+    def pair_table(path: Path, split: str) -> str:
+        table = {
+            "schema_version": 1,
+            "dataset_1": "normal",
+            "dataset_2": "reference_normal",
+            "split": split,
+            "encoder_ckpt": str(encoder),
+            "idx_1": torch.arange(1_000),
+            "idx_2": torch.arange(1_000),
+            "distance": torch.zeros(1_000),
+            "rank_1_to_2": torch.zeros(1_000, dtype=torch.long),
+            "rank_2_to_1": torch.zeros(1_000, dtype=torch.long),
+            "metadata": {
+                "n_dataset_1": 1_000,
+                "n_dataset_2": 1_000,
+                "n_pairs": 1_000,
+                "encoder_checkpoint_sha256": encoder_sha,
+                "source_1_sha256": audit.sha256_tensor(source_1),
+                "source_2_sha256": audit.sha256_tensor(source_2),
+            },
+        }
+        path.parent.mkdir(parents=True, exist_ok=True)
+        torch.save(table, path)
+        return audit._sha256(path)
+
+    valid_table = pairing / "seed_123" / "validate_pairs.pt"
+    test_table = pairing / "seed_123" / "test_pairs.pt"
+    valid_sha = pair_table(valid_table, "validate")
+    test_sha = pair_table(test_table, "test")
+    primary = {
+        "campaign_id": campaign["campaign_id"],
+        "git_commit": audit.CAMPAIGN_TRAINING_COMMIT,
+        "data_seed": 314159,
+        "encoder_seed": 123,
+        "encoder_checkpoint": str(encoder.resolve()),
+        "encoder_checkpoint_sha256": encoder_sha,
+        "validation_table": str(valid_table.resolve()),
+        "validation_table_sha256": valid_sha,
+        "test_table": str(test_table.resolve()),
+        "test_table_sha256": test_sha,
+    }
+    _write_json(
+        pairing / "comparison" / "pairing_manifest.json",
+        {
+            "campaign_id": campaign["campaign_id"],
+            "primary_encoder_seed": 123,
+            "primary_validation_table": str(valid_table.resolve()),
+            "primary_validation_table_sha256": valid_sha,
+            "primary_test_table": str(test_table.resolve()),
+            "primary_test_table_sha256": test_sha,
+            "encoder_runs": [
+                primary,
+                *[
+                    {
+                        "campaign_id": campaign["campaign_id"],
+                        "git_commit": audit.CAMPAIGN_TRAINING_COMMIT,
+                        "data_seed": 314159,
+                        "encoder_seed": seed,
+                    }
+                    for seed in (456, 789, 101112, 131415)
+                ],
+            ],
+        },
+    )
+    for index in range(200):
+        marker_path = root / "retrain_results" / f"{index:03d}.json"
+        marker = json.loads(marker_path.read_text(encoding="utf-8"))
+        marker["valid_pair_table_sha256"] = valid_sha
+        marker["test_pair_table_sha256"] = test_sha
+        _write_json(marker_path, marker)
     return root, audit._sha256(campaign_path)
 
 
 def test_operating_point_callback_writes_sidecar_without_values_contract(tmp_path) -> None:
+    """Operating-only mode must emit diagnostics without plot/value artifacts."""
     checkpoint = tmp_path / "immutable" / "chosen.ckpt"
     checkpoint.parent.mkdir()
     checkpoint.write_bytes(b"checkpoint")
@@ -168,18 +300,22 @@ def test_validation_threshold_callback_uses_higher_quantile() -> None:
     callback.on_validation_batch_end(
         trainer,
         module,
-        {"ascore/full": torch.arange(100, dtype=torch.float32)},
-        batch=None,
+        {"ascore/full": torch.arange(1_000, dtype=torch.float32)},
+        batch={
+            "x": torch.arange(11_000, dtype=torch.float32).reshape(1_000, 11),
+            "sample_id": torch.arange(1_000),
+        },
         batch_idx=0,
     )
     callback.on_validation_epoch_end(trainer, module)
 
-    assert callback.validation_normal_count == 100
-    assert module.thres_operational.item() == pytest.approx(99.0)
+    assert callback.validation_normal_count == 1_000
+    assert module.thres_operational.item() == pytest.approx(990.0)
     assert "thres_operational" in dict(module.named_buffers())
 
 
 def test_inventory_pins_all_200_marker_and_checkpoint_hashes(tmp_path) -> None:
+    """Inventory must pin the complete retrain and checkpoint Cartesian set."""
     campaign_root, campaign_hash = _synthetic_campaign(tmp_path)
     inventory_path = tmp_path / "audit-inputs.json"
 
@@ -202,6 +338,7 @@ def test_inventory_pins_all_200_marker_and_checkpoint_hashes(tmp_path) -> None:
 
 
 def test_collect_requires_and_combines_exact_200_diagnostics(tmp_path) -> None:
+    """Legacy diagnostic collection remains exact for backward verification."""
     campaign_root, campaign_hash = _synthetic_campaign(tmp_path)
     inventory_path = tmp_path / "audit-inputs.json"
     inventory = audit.build_inventory(campaign_root, campaign_hash, inventory_path)
@@ -260,3 +397,112 @@ def test_collect_requires_and_combines_exact_200_diagnostics(tmp_path) -> None:
     (output_root / "records" / "199.json").unlink()
     with pytest.raises(FileNotFoundError):
         audit.collect(inventory_path, inventory_hash, output_root)
+
+
+def test_generated_slurm_workflow_is_resource_exact_and_syntax_valid(tmp_path) -> None:
+    """Launchers must pack 200 tasks and freeze before any evaluation."""
+    campaign_root, campaign_hash = _synthetic_campaign(tmp_path)
+    inventory_path = tmp_path / "sidecar" / "inventory.json"
+    audit.build_inventory(campaign_root, campaign_hash, inventory_path)
+    scripts = inventory_path.parent / "slurm"
+    calibrate = (scripts / "calibrate_packed.sh").read_text(encoding="utf-8")
+    evaluate = (scripts / "evaluate_packed.sh").read_text(encoding="utf-8")
+    debug = (scripts / "debug_four_models.sh").read_text(encoding="utf-8")
+    workflow = (scripts / "submit_workflow.sh").read_text(encoding="utf-8")
+    for packed in (calibrate, evaluate):
+        assert "#SBATCH --account=a0166" in packed
+        assert "#SBATCH --partition=normal" in packed
+        assert "#SBATCH --gpus-per-node=4" in packed
+        assert "#SBATCH --ntasks-per-node=4" in packed
+        assert "#SBATCH --mem=440G" in packed
+        assert "#SBATCH --time=04:00:00" in packed
+        assert "#SBATCH --array=0-49" in packed
+        assert "--gpus-per-node=1 --mem=110G" in packed
+    assert "#SBATCH --partition=debug" in debug
+    assert "#SBATCH --array=0-3" in debug
+    assert "indices=(0 50 100 150)" in debug
+    assert 'dependency="afterok:${calibration_job}"' in workflow
+    assert 'dependency="afterok:${freeze_job}"' in workflow
+    assert 'dependency="afterok:${evaluation_job}"' in workflow
+    for path in scripts.glob("*.sh"):
+        subprocess.run(["bash", "-n", str(path)], check=True)  # nosec B603 B607
+
+
+def test_gpu_execution_guard_requires_slurm_and_cuda(monkeypatch) -> None:
+    """GPU stages must never execute directly on a login node."""
+    monkeypatch.delenv("SLURM_JOB_ID", raising=False)
+    with pytest.raises(RuntimeError, match="inside Slurm"):
+        audit._require_slurm_gpu("gpu")
+    audit._require_slurm_gpu("cpu")
+
+
+def test_inventory_authentication_rejects_selection_and_pairing_tampering(tmp_path) -> None:
+    """Label-use, seed-set, and pairing-source provenance are authenticated."""
+    campaign_root, campaign_hash = _synthetic_campaign(tmp_path)
+    selection_path = campaign_root / "selection" / "selection_provenance.json"
+    selection = json.loads(selection_path.read_text(encoding="utf-8"))
+    selection["intervention_labels_used"] = True
+    _write_json(selection_path, selection)
+    with pytest.raises(ValueError, match="Selection provenance chain"):
+        audit._validate_selection_inventory(campaign_root, campaign_hash)
+
+    selection["intervention_labels_used"] = False
+    _write_json(selection_path, selection)
+    campaign = json.loads((campaign_root / "campaign.json").read_text(encoding="utf-8"))
+    pairing_path = campaign_root / "pairing" / "comparison" / "pairing_manifest.json"
+    pairing = json.loads(pairing_path.read_text(encoding="utf-8"))
+    pairing["encoder_runs"].append(dict(pairing["encoder_runs"][-1]))
+    _write_json(pairing_path, pairing)
+    with pytest.raises(ValueError, match="primary seed-123 contract"):
+        audit._validate_pairing_inventory(campaign_root, campaign)
+
+    pairing["encoder_runs"].pop()
+    pairing["encoder_runs"][0]["data_seed"] = 7
+    _write_json(pairing_path, pairing)
+    with pytest.raises(ValueError, match="campaign/commit/data-seed"):
+        audit._validate_pairing_inventory(campaign_root, campaign)
+
+
+def test_deployment_and_finished_mlflow_resume_are_exact(monkeypatch) -> None:
+    """Execution requires the frozen revision and a FINISHED exactly tagged run."""
+    inventory = {
+        "audit_code_commit": "frozen-commit",
+        "audit_code_branch": "research/main",
+    }
+    monkeypatch.setattr(audit, "_audit_revision", lambda: ("other-commit", "research/main"))
+    with pytest.raises(RuntimeError, match="differs from the frozen"):
+        audit._require_deployment(inventory)
+
+    run = SimpleNamespace(
+        info=SimpleNamespace(status="RUNNING"),
+        data=SimpleNamespace(tags={"stage": "threshold_calibration"}),
+    )
+
+    class Client:
+        """Minimal MLflow resume client."""
+
+        def __init__(self, tracking_uri):
+            assert tracking_uri == "file:/frozen/mlruns"
+
+        def get_run(self, run_id):
+            assert run_id == "run-1"
+            return run
+
+    monkeypatch.setattr(audit, "MlflowClient", Client)
+    with pytest.raises(ValueError, match="not FINISHED"):
+        _REAL_REQUIRE_FINISHED_RUN(
+            "file:/frozen/mlruns", "run-1", {"stage": "threshold_calibration"}
+        )
+    run.info.status = "FINISHED"
+    with pytest.raises(ValueError, match="tag mismatch"):
+        _REAL_REQUIRE_FINISHED_RUN(
+            "file:/frozen/mlruns", "run-1", {"stage": "threshold_evaluation"}
+        )
+
+
+def test_wilson_interval_is_seed_level_and_finite() -> None:
+    """The 10/1000 seed-level false-positive estimate has a valid Wilson interval."""
+    low, high = audit._wilson_interval(10, 1_000)
+    assert 0.0 < low < 0.01 < high < 1.0
+    with pytest.raises(ValueError, match="positive trials"):
+        audit._wilson_interval(0, 0)

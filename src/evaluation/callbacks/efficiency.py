@@ -1,7 +1,9 @@
 # Callback that computes the anomaly efficiency.
 import csv
+import hashlib
 import json
 import pickle  # nosec B403
+import struct
 from collections import defaultdict
 from pathlib import Path
 from tempfile import NamedTemporaryFile
@@ -58,6 +60,10 @@ class AnomalyEfficiencyCallback(Callback):
         operating_point_context: Mapping[str, Any] | None = None,
         operating_point_only: bool = False,
         operating_point_threshold_source: str = "checkpoint_validation:thres_operational",
+        operating_point_threshold_artifact: str | Path | None = None,
+        operating_point_threshold_artifact_sha256: str | None = None,
+        operating_point_threshold_bytes_sha256: str | None = None,
+        operating_point_require_supplied_threshold: bool = False,
     ):
         super().__init__()
         self.device = None
@@ -79,11 +85,38 @@ class AnomalyEfficiencyCallback(Callback):
         self.operating_point_context = dict(operating_point_context or {})
         self.operating_point_only = bool(operating_point_only)
         self.operating_point_threshold_source = str(operating_point_threshold_source)
+        self.operating_point_threshold_artifact = (
+            None
+            if operating_point_threshold_artifact is None
+            else Path(operating_point_threshold_artifact).resolve()
+        )
+        self.operating_point_threshold_artifact_sha256 = (
+            None
+            if operating_point_threshold_artifact_sha256 is None
+            else str(operating_point_threshold_artifact_sha256)
+        )
+        self.operating_point_threshold_bytes_sha256 = (
+            None
+            if operating_point_threshold_bytes_sha256 is None
+            else str(operating_point_threshold_bytes_sha256)
+        )
+        self.operating_point_require_supplied_threshold = bool(
+            operating_point_require_supplied_threshold
+        )
         if not self.operating_point_threshold_source:
             raise ValueError("operating_point_threshold_source must not be empty.")
         if self.operating_point_only and self.operating_point_diagnostics_path is None:
             raise ValueError(
                 "operating_point_only=True requires operating_point_diagnostics_path."
+            )
+        if self.operating_point_require_supplied_threshold and (
+            self.operating_point_threshold_artifact is None
+            or self.operating_point_threshold_artifact_sha256 is None
+            or self.operating_point_threshold_bytes_sha256 is None
+        ):
+            raise ValueError(
+                "A required supplied threshold needs artifact path, artifact SHA-256, "
+                "and float32-byte SHA-256."
             )
         self.eff_summary = defaultdict(lambda: defaultdict(float))
         self.eff_min = defaultdict(lambda: defaultdict(float))
@@ -99,6 +132,34 @@ class AnomalyEfficiencyCallback(Callback):
         ) = self._resolve_rate_config(pl_module)
 
         self.thresholds = self._get_thres(pl_module)
+        if self.operating_point_require_supplied_threshold:
+            artifact_bytes = self.operating_point_threshold_artifact.read_bytes()
+            if (
+                hashlib.sha256(artifact_bytes).hexdigest()
+                != self.operating_point_threshold_artifact_sha256
+            ):
+                raise ValueError("Supplied threshold artifact SHA-256 differs.")
+            artifact = json.loads(artifact_bytes)
+            identity = artifact.get("threshold_float32")
+            if not isinstance(identity, dict):
+                raise ValueError("Supplied threshold artifact has no float32 identity.")
+            raw = bytes.fromhex(str(identity.get("little_endian_hex", "")))
+            if (
+                len(raw) != 4
+                or hashlib.sha256(raw).hexdigest() != self.operating_point_threshold_bytes_sha256
+                or identity.get("bytes_sha256") != self.operating_point_threshold_bytes_sha256
+            ):
+                raise ValueError("Supplied threshold artifact byte identity differs.")
+            artifact_value = struct.unpack("<f", raw)[0]
+            if float(identity.get("value")) != artifact_value:
+                raise ValueError("Supplied threshold artifact value differs from its bytes.")
+            threshold = self.thresholds.get(self.operational_rate)
+            if threshold is None:
+                raise ValueError("The supplied operational threshold is missing.")
+            raw = struct.pack("<f", float(torch.as_tensor(threshold).float().item()))
+            observed = hashlib.sha256(raw).hexdigest()
+            if observed != self.operating_point_threshold_bytes_sha256:
+                raise ValueError("Operational threshold bytes differ from the supplied artifact.")
 
         first_test_dset_key = list(trainer.test_dataloaders.keys())[0]
         if first_test_dset_key != "normal":
@@ -214,6 +275,7 @@ class AnomalyEfficiencyCallback(Callback):
         utils.mlflow.log_plots_to_mlflow(trainer, None, eff_name, plot_folder)
 
     def clear_crit_summary(self):
+        """Clear accumulated checkpoint-level efficiency summaries."""
         self.eff_summary.clear()
         self.eff_med.clear()
         self.eff_min.clear()
@@ -369,9 +431,11 @@ class AnomalyEfficiencyCallback(Callback):
         return resolved_rates, float(module_target), base_rate
 
     def _is_operational(self, target_rate: float) -> bool:
+        """Return whether a target rate is the module operational rate."""
         return abs(target_rate - self.operational_rate) < 1e-12
 
     def _target_label(self, target_rate: float) -> str:
+        """Return the stable output label for one target rate."""
         if self._is_operational(target_rate):
             return "operational"
         return str(target_rate)
@@ -429,6 +493,10 @@ class AnomalyEfficiencyCallback(Callback):
                 round(0.01 * n_test_normal) / n_test_normal
             ),
         }
+        if self.operating_point_threshold_artifact is not None:
+            row["threshold_artifact"] = str(self.operating_point_threshold_artifact)
+            row["threshold_artifact_sha256"] = self.operating_point_threshold_artifact_sha256
+            row["threshold_bytes_sha256"] = self.operating_point_threshold_bytes_sha256
         for key, value in sorted(self.operating_point_context.items()):
             if key in row:
                 raise ValueError(f"Operating-point context collides with field {key!r}.")

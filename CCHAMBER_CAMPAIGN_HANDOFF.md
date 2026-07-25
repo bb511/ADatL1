@@ -10,6 +10,10 @@ The following updates supersede the working-tree snapshot later in this file:
   review, 20 focused/regression tests, and all hooks.
 - `7207044`: threshold-safe MLflow/Slurm evaluation committed after three review
   rounds, 24 focused/adversarial tests, and all hooks.
+- Immutable sidecar deployment:
+  `/iopsstor/scratch/cscs/vjimenez/adatl1/deployments/cchamber_20260725_e8d35a2`
+  at commit `e8d35a25410148457fb4e080096cb9e80bba1c2a`; exact-deployment
+  compilation and 33 combined threshold/candidate-audit tests passed.
 - The worktree was clean immediately after `7207044`.
 - The threshold-safe command path is code-ready, but inventory/canary execution
   remains intentionally gated until search selection and all 200 retrains exist.

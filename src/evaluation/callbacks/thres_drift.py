@@ -124,6 +124,7 @@ class ThresholdDriftCallback(Callback):
 
         eps = 0.5 / float(n_eval)
 
+        metrics = {}
         for trate in self.target_rates_resolved:
             fpr = self._compute_target_fpr(trate)
             thr = self._compute_threshold(cal_scores, exceedance_prob=fpr)
@@ -146,7 +147,11 @@ class ThresholdDriftCallback(Callback):
             )
             self._plot({"normal": drift_metric}, xlabel, plot_folder, percent=False)
             self._store_summary(drift_metric, ckpt_name, trate_key)
+            metrics[f"drift_{trate_key}"] = drift_metric
 
+        utils.mlflow.log_metrics_to_mlflow(
+            trainer, metrics, ckpt_name=ckpt_name, cb_name=self.name
+        )
         utils.mlflow.log_plots_to_mlflow(
             trainer,
             ckpt_name,

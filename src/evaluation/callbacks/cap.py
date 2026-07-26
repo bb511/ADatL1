@@ -123,6 +123,12 @@ class CAP(Callback):
 
         ckpt_ds = utils.misc.get_ckpt_ds_name(ckpt_name)
         self._store_summary(cap_metric_value, rankcorr_value, ckpt_ds)
+        utils.mlflow.log_metrics_to_mlflow(
+            trainer,
+            {"cap": self.cap_summary[ckpt_ds], "rankcorr": self.rankcorr_summary[ckpt_ds]},
+            ckpt_name=ckpt_name,
+            cb_name=self.name,
+        )
 
     def _store_summary(self, cap_metric_value: float, rank_val: float, ckpt_ds: str):
         """Store the summary statistic for the cap for one checkpoint.

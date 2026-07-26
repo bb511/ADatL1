@@ -121,6 +121,12 @@ class Wasserstein(Callback):
         wasserstein_value = self._compute_wasserstein()
         ckpt_ds = utils.misc.get_ckpt_ds_name(ckpt_name)
         self._store_summary(wasserstein_value, ckpt_ds)
+        utils.mlflow.log_metrics_to_mlflow(
+            trainer,
+            {"w1dist": self.wasserstein_summary[ckpt_ds]},
+            ckpt_name=ckpt_name,
+            cb_name=self.name,
+        )
 
     def _store_summary(self, wasserstein_value: float, ckpt_ds: str):
         """Store Wasserstein summary for one checkpoint."""

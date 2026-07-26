@@ -6,8 +6,10 @@
 # notebooks/paretos/physics/ -- regenerate rather than edit by hand.
 #
 # Run from the repository root. All commands are commented out -- uncomment
-# the points you want to run. Device / taskset assignments cycle over the
-# four GPUs.
+# the points you want to run locally (taskset pinning, GPUs cycling 0-3).
+# To run the WHOLE file on clariden instead, use the single submit command
+# at the bottom: it sends every point above to slurm, one job each, via
+# scripts/submit_pareto.sh (submitit launcher).
 
 # ========================================================================
 # CVAR25 TRAINING  (study: cvar25eff_vs_mse_b16k, 7 Pareto points)
@@ -15,21 +17,21 @@
 # ------------------------------------------------------------------------
 # trial 169: cvar25eff=1.8793, mse=0.21281  << ORIGINAL PICK | BEST cvar25eff
 # ------------------------------------------------------------------------
-taskset -c 0-2 \
-python3 src/train.py \
-    paths.raw_data_dir=/data/deodagiu/adl1t_data/parquet_files \
-    experiment=physics/ae \
-    experiment_name=physics_ae_pareto \
-    run_name=cvar25_t169 \
-    algorithm.encoder.nodes='[64,32,8]' \
-    algorithm.input_noise_std=0.0 \
-    algorithm.delta=10.0 \
-    algorithm.optimizer.betas='[0.9,0.999]' \
-    algorithm.optimizer.lr=0.0019859329798336714 \
-    algorithm.optimizer.weight_decay=1e-06 \
-    trainer.gradient_clip_val=5.0 \
-    trainer=gpu \
-    trainer.devices=[0]
+# taskset -c 0-2 \
+# python3 src/train.py \
+#     paths.raw_data_dir=/path/to/adl1t_data/parquet_files \
+#     experiment=physics/ae \
+#     experiment_name=physics_ae_pareto \
+#     run_name=cvar25_t169 \
+#     algorithm.encoder.nodes='[64,32,8]' \
+#     algorithm.input_noise_std=0.0 \
+#     algorithm.delta=10.0 \
+#     algorithm.optimizer.betas='[0.9,0.999]' \
+#     algorithm.optimizer.lr=0.0019859329798336714 \
+#     algorithm.optimizer.weight_decay=1e-06 \
+#     trainer.gradient_clip_val=5.0 \
+#     trainer=gpu \
+#     trainer.devices=[0]
 
 # ------------------------------------------------------------------------
 # trial 239: cvar25eff=1.577, mse=0.20467  << KNEE
@@ -896,3 +898,11 @@ python3 src/train.py \
 #     trainer.gradient_clip_val=0.5 \
 #     trainer=gpu \
 #     trainer.devices=[0]
+
+# ========================================================================
+# SUBMIT EVERYTHING ABOVE TO CLARIDEN  (one slurm job per command)
+# ========================================================================
+# Set paths.raw_data_dir to the data location on clariden; any extra
+# hydra overrides appended here are added to every job.
+# bash scripts/submit_pareto.sh scripts/physics/runae_pareto.sh \
+#     paths.raw_data_dir=/path/to/adl1t_data/parquet_files

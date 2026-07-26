@@ -6,8 +6,10 @@
 # notebooks/paretos/robustad/ -- regenerate rather than edit by hand.
 #
 # Run from the repository root. All commands are commented out -- uncomment
-# the points you want to run. Device / taskset assignments cycle over the
-# four GPUs.
+# the points you want to run locally (taskset pinning, GPUs cycling 0-3).
+# To run the WHOLE file on clariden instead, use the single submit command
+# at the bottom: it sends every point above to slurm, one job each, via
+# scripts/submit_pareto.sh (submitit launcher).
 
 # ========================================================================
 # CVAR25 TRAINING  (study: cvar25eff_vs_dist, 1 Pareto points)
@@ -1232,3 +1234,11 @@
 #     trainer.gradient_clip_val=0.5 \
 #     trainer=gpu \
 #     trainer.devices=[1]
+
+# ========================================================================
+# SUBMIT EVERYTHING ABOVE TO CLARIDEN  (one slurm job per command)
+# ========================================================================
+# Set paths.raw_data_dir to the data location on clariden; any extra
+# hydra overrides appended here are added to every job.
+# bash scripts/submit_pareto.sh scripts/robustad/runsvdd_pareto.sh \
+#     paths.raw_data_dir=/path/to/adl1t_data/parquet_files

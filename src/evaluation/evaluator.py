@@ -18,6 +18,7 @@ from src.utils import pylogger
 log = pylogger.RankedLogger(__name__)
 
 from src.utils.checkpoints import is_valid_ckpt
+from src.evaluation.callbacks.utils import mlflow as eval_mlflow
 
 
 class Evaluator:
@@ -122,6 +123,16 @@ class Evaluator:
                 logger.experiment.set_tag(
                     logger.run_id, "optimized_ckpt_name", self.optimized_ckpt_name
                 )
+            # Log the exact (main, sec) pair reported to Optuna as metrics, so
+            # retrained runs are directly comparable to the search-time
+            # objective values.
+            vals = self.optimized_metric
+            pair = list(vals) if isinstance(vals, (list, tuple)) else [vals]
+            eval_mlflow.log_metrics_to_mlflow(
+                self.evaluator,
+                dict(zip(["optimized_main", "optimized_sec"], pair)),
+                cb_name="optimized",
+            )
 
     def _evaluate_strategy(self, strategy_folder: Path, model, test_loader: dict):
         """Evaluate all the checkpoints corresponding to a certain strategy.

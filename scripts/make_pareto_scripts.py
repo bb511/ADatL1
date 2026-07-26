@@ -29,8 +29,12 @@ always retained; the section header records the full front size and the
 subsampling, and every point remains in the CSVs.
 
 Layout follows the original run scripts: every command is written out in full
-and commented; uncomment the points you want to run. Device / ``taskset`` core
-assignments cycle over the four GPUs like in the original scripts.
+and commented (``taskset`` pinning, GPU devices cycling 0-3); uncomment the
+points you want to run locally. Each file additionally ends with a single
+commented submit command that sends every point of the file to slurm on
+clariden -- one job per point -- via ``scripts/submit_pareto.sh`` (submitit
+launcher; it strips the taskset/device pinning and prepends ``-m
+hydra/launcher=submitit_slurm_clariden``).
 
 Usage (from anywhere; paths are anchored to the repo root)::
 
@@ -342,21 +346,19 @@ def select_around_knee(
     return sorted(window)
 
 
-def command_lines(
+def _command_body(
     domain: str,
     model: str,
     strategy: dict,
     tier: str,
     row: dict,
-    device: int,
 ) -> list[str]:
-    """Build the override lines of one training command (without comments)."""
+    """The override tokens shared by both launch variants of one command."""
     dom = DOMAINS[domain]
     exp = f"{domain}/{model}_agnostic" if strategy["agnostic"] else f"{domain}/{model}"
     exp_name = f"{domain}_{model}_pareto" if tier == "250" else f"{domain}_{model}_q99_pareto"
     run_name = f"{strategy['prefix']}_t{row['number']}"
 
-    lines = [f"taskset -c {3 * device}-{3 * device + 2} \\", "python3 src/train.py \\"]
     body = list(dom["fixed"])
     body += [f"experiment={exp}", f"experiment_name={exp_name}", f"run_name={run_name}"]
     if tier == "q99":
@@ -373,9 +375,33 @@ def command_lines(
         if col.startswith("params_") and row[col] != "":
             key = PARAM_REMAP.get(col[len("params_"):], col[len("params_"):])
             body.append(f"{key}={quote(row[col])}")
+    return body
+
+
+def _join(lines: list[str], body: list[str]) -> list[str]:
+    return lines + [f"    {tok} \\" for tok in body[:-1]] + [f"    {body[-1]}"]
+
+
+def command_lines(
+    domain: str,
+    model: str,
+    strategy: dict,
+    tier: str,
+    row: dict,
+    device: int,
+) -> list[str]:
+    """Local run variant (olqti): taskset pinning + cycling GPU devices.
+
+    For slurm submission on clariden, the submit command at the bottom of each
+    generated file feeds these same blocks through scripts/submit_pareto.sh,
+    which swaps the taskset/device pinning for the submitit launcher.
+    """
+    body = _command_body(domain, model, strategy, tier, row)
     body += ["trainer=gpu", f"trainer.devices=[{device}]"]
-    lines += [f"    {tok} \\" for tok in body[:-1]] + [f"    {body[-1]}"]
-    return lines
+    return _join(
+        [f"taskset -c {3 * device}-{3 * device + 2} \\", "python3 src/train.py \\"],
+        body,
+    )
 
 
 def pick_note(trial: int, status: str) -> str | None:
@@ -408,8 +434,10 @@ def generate_file(
         f"# notebooks/paretos/{domain}/ -- regenerate rather than edit by hand.",
         "#",
         "# Run from the repository root. All commands are commented out -- uncomment",
-        "# the points you want to run. Device / taskset assignments cycle over the",
-        "# four GPUs.",
+        "# the points you want to run locally (taskset pinning, GPUs cycling 0-3).",
+        "# To run the WHOLE file on clariden instead, use the single submit command",
+        "# at the bottom: it sends every point above to slurm, one job each, via",
+        "# scripts/submit_pareto.sh (submitit launcher).",
         "",
     ]
     n_cmds = 0
@@ -512,6 +540,18 @@ def generate_file(
             out += [f"# {l}" for l in cmd]
             out.append("")
             n_cmds += 1
+
+    rel = f"scripts/{domain}/{out_path.name}"
+    out += [
+        BANNER,
+        "# SUBMIT EVERYTHING ABOVE TO CLARIDEN  (one slurm job per command)",
+        BANNER,
+        "# Set paths.raw_data_dir to the data location on clariden; any extra",
+        "# hydra overrides appended here are added to every job.",
+        f"# bash scripts/submit_pareto.sh {rel} \\",
+        "#     paths.raw_data_dir=/path/to/adl1t_data/parquet_files",
+        "",
+    ]
 
     out_path.write_text("\n".join(out).rstrip("\n") + "\n")
     return n_cmds, len(studies)

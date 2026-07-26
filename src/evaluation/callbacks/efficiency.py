@@ -115,6 +115,7 @@ class AnomalyEfficiencyCallback(Callback):
         plot_folder = ckpts_dir / "plots" / split / ckpt_name / eff_name
         plot_folder.mkdir(parents=True, exist_ok=True)
 
+        metrics = {}
         for trate in self.target_rates_resolved:
             main_eff = self._compute_eff(self.main_rate, trate)
             sig_effs = self._compute_eff(self.sig_rates, trate)
@@ -135,7 +136,13 @@ class AnomalyEfficiencyCallback(Callback):
             xlabel = f"efficiency at threshold: {trate_label}\n{ascore}"
             self._plot(effs, xlabel, plot_folder, percent=True)
             self._store_summary(sig_effs, bkg_effs, ckpt_name, trate)
+            metrics[f"eff_{trate_label}"] = self.eff_summary[trate][ckpt_ds]
+            metrics[f"eff_med_{trate_label}"] = self.eff_med[trate][ckpt_ds]
+            metrics[f"eff_min_{trate_label}"] = self.eff_min[trate][ckpt_ds]
 
+        utils.mlflow.log_metrics_to_mlflow(
+            trainer, metrics, ckpt_name=ckpt_name, cb_name=eff_name
+        )
         utils.mlflow.log_plots_to_mlflow(
             trainer,
             ckpt_name,

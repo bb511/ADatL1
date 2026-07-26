@@ -2,6 +2,8 @@
 from pathlib import Path
 import base64
 import html
+import math
+import re
 from contextlib import redirect_stdout
 from io import StringIO
 
@@ -277,3 +279,57 @@ def resolve_arti_dir(trainer, cb_name: str, ckpt_name: str = None):
         return arti_dir
 
     return arti_dir / ckpt_name
+
+
+_ILLEGAL_METRIC_KEY_CHARS = re.compile(r"[^A-Za-z0-9_.\-/ ]")
+_MAX_METRIC_KEY_LEN = 250
+
+
+def log_metrics_to_mlflow(
+    trainer,
+    metrics: dict,
+    ckpt_name: str = None,
+    cb_name: str = None,
+):
+    """Log per-checkpoint evaluation summary scalars as MLflow metrics.
+
+    Keys are namespaced as 'eval/<split>/<strat>/<cb>/<metric>/<criterion>/
+    <ckpt_ds>/<scalar>', mirroring the artifact layout of resolve_arti_dir
+    (None segments are skipped). Each key holds exactly one value per run, so
+    no step is logged and mlflow.search_runs exposes it as a plain column.
+
+    No-ops when no MLflow logger is attached. Never raises: a failure to log
+    one value emits a warning and continues.
+
+    :param trainer: The evaluation trainer, which carries the split/strategy/
+        metric/criterion context attributes set by the Evaluator.
+    :param metrics: Mapping from scalar name to value. Values may be python
+        floats or 0-dim tensors; None and non-finite values are skipped.
+    :param ckpt_name: Stem of the evaluated checkpoint file; reduced to its
+        dataset name for the key, like the artifact directories.
+    :param cb_name: Name of the callback logging the metrics.
+    """
+    mlflow_logger = get_mlflow_logger(trainer)
+    if mlflow_logger is None:
+        return
+
+    from src.evaluation.callbacks.utils.misc import get_ckpt_ds_name
+
+    ckpt_ds = get_ckpt_ds_name(ckpt_name) if ckpt_name is not None else None
+    prefix = Path("eval") / resolve_arti_dir(trainer, cb_name, ckpt_ds)
+
+    for scalar_name, value in metrics.items():
+        try:
+            if value is None:
+                continue
+            if hasattr(value, "item"):
+                value = value.item()
+            value = float(value)
+            if not math.isfinite(value):
+                log.warn(f"Skipping non-finite eval metric '{scalar_name}'.")
+                continue
+            key = _ILLEGAL_METRIC_KEY_CHARS.sub("_", (prefix / scalar_name).as_posix())
+            key = key[:_MAX_METRIC_KEY_LEN]
+            mlflow_logger.experiment.log_metric(mlflow_logger.run_id, key, value)
+        except Exception as exc:
+            log.warn(f"Failed to log eval metric '{scalar_name}' to mlflow: {exc}")

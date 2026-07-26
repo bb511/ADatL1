@@ -83,6 +83,9 @@ class OutputCallback(Callback):
         ylabel = " "
         horizontal_bar.plot_yright(losses, losses, xlabel, ylabel, plot_folder)
         self._store_summary(losses, ckpt_name)
+        utils.mlflow.log_metrics_to_mlflow(
+            trainer, losses, ckpt_name=ckpt_name, cb_name=self.name
+        )
 
         utils.mlflow.log_plots_to_mlflow(
             trainer,

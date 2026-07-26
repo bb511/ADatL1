@@ -1,18 +1,16 @@
 #!/usr/bin/env python3
 """Empirical Causal Chamber illustration of marginal non-identifiability.
 
-The experiment reuses the outcome-blind candidate-rank audit panel and its
-sealed intervention evaluations.  For one fixed checkpoint branch, it extracts
-each candidate detector's anomaly scores on independent validation and test
-normal pairs.  Within every candidate and view, scores are monotonically
-calibrated to the same empirical normal-quantile grid.  Consequently,
-Wasserstein distance and threshold drift are identical for every candidate,
-while CAP can still use the paired copula.
+The experiment reuses the outcome-blind candidate-rank audit panel and its sealed intervention
+evaluations.  For one fixed checkpoint branch, it extracts each candidate detector's anomaly scores
+on independent validation and test normal pairs.  Within every candidate and view, scores are
+monotonically calibrated to the same empirical normal-quantile grid.  Consequently, Wasserstein
+distance and threshold drift are identical for every candidate, while CAP can still use the paired
+copula.
 
-The calibration preserves anomaly-score ordering, so the previously sealed
-intervention AUPRC values remain valid.  The analysis asks whether the
-normal-only CAP ordering reproduces on held-out normal pairs and whether it
-orders detection power for real process/actuator interventions and
+The calibration preserves anomaly-score ordering, so the previously sealed intervention AUPRC
+values remain valid.  The analysis asks whether the normal-only CAP ordering reproduces on held-out
+normal pairs and whether it orders detection power for real process/actuator interventions and
 measurement-chain interventions.
 """
 
@@ -52,9 +50,6 @@ SEED = 271828
 BETAS = np.linspace(0.0, 8.0, 81)
 FPR = 0.01
 BRANCH = "cap_metadata_nearest"
-PRESENTATION_MODELS = ("svdd", "vae", "realnvp")
-MODEL_LABELS = {"ae": "AE", "vae": "VAE", "svdd": "SVDD", "realnvp": "RealNVP"}
-MODEL_COLORS = {"svdd": "#D55E00", "vae": "#CC79A7", "realnvp": "#0072B2"}
 GROUP_COLORS = {"process_or_actuator": "#0072B2", "measurement_chain": "#E69F00"}
 CONFIRMATORY_STRATEGIES = (
     "cap_metadata_nearest",
@@ -743,51 +738,11 @@ def _plot(
     confirmatory: pd.DataFrame,
     output: Path,
 ) -> None:
-    """Create the information-dense theorem-bridge figure."""
-    del contrasts
-    figure, axes = plt.subplots(2, 2, figsize=(12.8, 9.2), constrained_layout=True)
-    axes = axes.ravel()
+    """Create the physical-results-only theorem-bridge figure."""
+    del score_metrics, associations, contrasts
+    figure, axes = plt.subplots(1, 2, figsize=(12.8, 5.0), constrained_layout=True)
 
     ax = axes[0]
-    realnvp = score_metrics[score_metrics["model"] == "realnvp"].copy()
-    ordered = realnvp.groupby("candidate_id")["validation_cap"].mean().sort_values().index.tolist()
-    means = realnvp.groupby("candidate_id").mean(numeric_only=True).loc[ordered]
-    x = np.arange(len(ordered))
-    cap_scaled = (means["validation_cap"] - means["validation_cap"].min()) / max(
-        means["validation_cap"].max() - means["validation_cap"].min(),
-        1.0e-15,
-    )
-    ax.plot(x, cap_scaled, "o-", color="#0072B2", label="CAP (paired)")
-    ax.plot(x, np.zeros_like(x), "s-", color="#E69F00", label="Threshold drift")
-    ax.plot(x, np.zeros_like(x), "^-", color="#009E73", label="Wasserstein")
-    ax.set_xticks(x[::3], [ordered[index] for index in x[::3]], rotation=45)
-    ax.set_xlabel("RealNVP candidate ID (ordered by CAP)")
-    ax.set_ylabel("Within-criterion range (0–1)")
-    ax.set_title("A. Equal marginals: only CAP identifies")
-    ax.legend(frameon=False, fontsize=9)
-    ax.grid(alpha=0.2)
-
-    ax = axes[1]
-    for model in PRESENTATION_MODELS:
-        subset = score_metrics[score_metrics["model"] == model]
-        ax.scatter(
-            subset["validation_cap"],
-            subset["test_cap"],
-            s=25,
-            alpha=0.70,
-            color=MODEL_COLORS[model],
-            label=MODEL_LABELS[model],
-        )
-    low = min(score_metrics["validation_cap"].min(), score_metrics["test_cap"].min())
-    high = max(score_metrics["validation_cap"].max(), score_metrics["test_cap"].max())
-    ax.plot([low, high], [low, high], linestyle="--", color="#777777", linewidth=1)
-    ax.set_xlabel("Validation CAP after marginal matching")
-    ax.set_ylabel("Held-out normal-pair CAP")
-    ax.set_title("B. Paired dependence reproduces")
-    ax.legend(frameon=False, fontsize=9)
-    ax.grid(alpha=0.2)
-
-    ax = axes[2]
     real_candidates = candidate[candidate["model"] == "realnvp"].sort_values(
         "validation_cap_mean_rank"
     )
@@ -795,13 +750,9 @@ def _plot(
         ("process_or_actuator", "process_auprc", "o"),
         ("measurement_chain", "measurement_auprc", "s"),
     ):
-        row = associations[
-            (associations["model"] == "realnvp")
-            & (associations["physical_class"] == physical_class)
-        ].iloc[0]
         label = (
             "Process shifts" if physical_class == "process_or_actuator" else "Measurement shifts"
-        ) + f" ($\\rho$={row['spearman_rho']:.2f})"
+        )
         ax.scatter(
             real_candidates["validation_cap_mean_rank"],
             real_candidates[column],
@@ -811,24 +762,13 @@ def _plot(
             alpha=0.85,
             label=label,
         )
-        fit = stats.theilslopes(
-            real_candidates[column],
-            real_candidates["validation_cap_mean_rank"],
-        )
-        grid = np.linspace(0.0, 1.0, 100)
-        ax.plot(
-            grid,
-            fit.intercept + fit.slope * grid,
-            color=GROUP_COLORS[physical_class],
-            linewidth=1.5,
-        )
     ax.set_xlabel("Normal-only CAP rank (mean across seeds)")
     ax.set_ylabel("Mean sealed test AUPRC")
-    ax.set_title("C. Real physical interventions")
+    ax.set_title("A. Real physical interventions")
     ax.legend(frameon=False, fontsize=9)
     ax.grid(alpha=0.2)
 
-    ax = axes[3]
+    ax = axes[1]
     x = np.arange(len(CONFIRMATORY_STRATEGIES))
     width = 0.36
     for offset, physical_class in ((-0.5, "process_or_actuator"), (0.5, "measurement_chain")):
@@ -860,13 +800,13 @@ def _plot(
         )
     ax.set_xticks(x, [STRATEGY_LABELS[strategy] for strategy in CONFIRMATORY_STRATEGIES])
     ax.set_ylabel("Mean test AUPRC")
-    ax.set_title("D. Independent full RealNVP campaign")
+    ax.set_title("B. Independent full RealNVP campaign")
     ax.set_ylim(0.35, 0.85)
     ax.legend(frameon=False, fontsize=9)
     ax.grid(axis="y", alpha=0.2)
 
     figure.suptitle(
-        "Causal Chamber theorem bridge: matched marginals, paired reliability, physical power",
+        "Causal Chamber theorem bridge: paired reliability and physical power",
         fontsize=14,
     )
     figure.savefig(output, dpi=220)

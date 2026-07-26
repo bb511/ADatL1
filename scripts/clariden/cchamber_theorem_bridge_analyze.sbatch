@@ -18,7 +18,7 @@ readonly AUDIT_ROOT="${SCRATCH_ROOT}/audits/cchamber_real_20260725_63b941a_candi
 readonly BRIDGE_ROOT="${SCRATCH_ROOT}/audits/cchamber_theorem_bridge_20260726"
 readonly TARGET_CATALOG="${SCRATCH_ROOT}/campaigns/cchamber_real_20260725_63b941a/design/physical_intervention_catalog_v1.json"
 readonly CONFIRMATORY_RESULTS="${SCRATCH_ROOT}/audits/cchamber_real_20260725_63b941a_threshold_d1a3017/results/threshold_safe_results.csv"
-readonly OUTPUT_DIR="${BRIDGE_ROOT}/analysis_v2"
+readonly OUTPUT_DIR="${BRIDGE_ROOT}/analysis_v3"
 readonly UV_BIN="${SCRATCH_ROOT}/tools/uv-0.11.32/uv"
 
 export UV_PROJECT_ENVIRONMENT="${SCRATCH_ROOT}/.venv-clariden"

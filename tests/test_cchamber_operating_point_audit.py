@@ -15,6 +15,7 @@ from scripts import cchamber_operating_point_audit as audit
 from src.evaluation.callbacks.efficiency import AnomalyEfficiencyCallback
 
 _REAL_REQUIRE_FINISHED_RUN = audit._require_finished_run
+_REAL_AUDIT_REVISION = audit._audit_revision
 
 
 @pytest.fixture(autouse=True)
@@ -30,6 +31,18 @@ def _write_json(path: Path, value) -> None:
     """Write one compact synthetic JSON fixture."""
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(value, sort_keys=True), encoding="utf-8")
+
+
+def test_detached_deployment_has_explicit_revision_identity(monkeypatch) -> None:
+    """Immutable detached worktrees freeze a non-empty checkout-mode identity."""
+    responses = {
+        ("status", "--porcelain"): "",
+        ("rev-parse", "HEAD"): "audit-commit",
+        ("branch", "--show-current"): "",
+    }
+    monkeypatch.setattr(audit, "_git", lambda *args: responses[args])
+    monkeypatch.setattr(audit, "_audit_revision", _REAL_AUDIT_REVISION)
+    assert audit._audit_revision() == ("audit-commit", "DETACHED")
 
 
 def _synthetic_campaign(tmp_path: Path) -> tuple[Path, str]:

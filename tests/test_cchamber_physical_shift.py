@@ -45,6 +45,24 @@ def _artifact_record(path: Path) -> dict[str, object]:
     }
 
 
+def test_degenerate_effect_bootstrap_reports_undefined_interval() -> None:
+    """Finite effect point estimates survive a degenerate descriptive bootstrap."""
+    values = np.array([np.nan] * 11 + [0.5] * 39)
+    low, high, finite, undefined = cchamber_physical_shift._optional_percentile_interval(
+        values, 50
+    )
+    assert (low, high, finite, undefined) == (None, None, 39, True)
+
+    values[10] = 0.5
+    low, high, finite, undefined = cchamber_physical_shift._optional_percentile_interval(
+        values, 50
+    )
+    assert low == pytest.approx(0.5)
+    assert high == pytest.approx(0.5)
+    assert finite == 40
+    assert undefined is False
+
+
 def _synthetic_bundle(tmp_path: Path) -> dict[str, Path | np.ndarray]:
     """Build a frozen synthetic campaign, design, selection, and dataset."""
     campaign_root = tmp_path / "campaign"

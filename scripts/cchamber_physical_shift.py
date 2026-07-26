@@ -67,6 +67,12 @@ ZERO_VARIANCE_AMENDMENT = (
     "mark Hedges g and the log-SD ratio undefined; never replace infinity with "
     "a finite value."
 )
+BOOTSTRAP_CI_AMENDMENT = (
+    "When a finite point estimate has fewer than 80% finite deterministic "
+    "bootstrap replicates because a resample is degenerate, retain the point "
+    "estimate, report the finite replicate count, and mark its interval "
+    "undefined; never fabricate or clip interval bounds."
+)
 DESCENDANT_ESTIMAND = (
     "Within intervention, compare absolute location and scale effects on "
     "graph-expected descendants against non-descendant readouts."
@@ -728,6 +734,20 @@ def _percentile_interval(values: np.ndarray, repetitions: int) -> tuple[float, f
     return float(low), float(high), int(len(finite))
 
 
+def _optional_percentile_interval(
+    values: np.ndarray,
+    repetitions: int,
+) -> tuple[float | None, float | None, int, bool]:
+    """Return a descriptive CI, explicitly undefined after bootstrap degeneracy."""
+    finite = np.asarray(values, dtype=np.float64)
+    finite = finite[np.isfinite(finite)]
+    finite_count = int(len(finite))
+    if finite_count < max(2, math.ceil(0.8 * repetitions)):
+        return None, None, finite_count, True
+    low, high = np.quantile(finite, CI_QUANTILES)
+    return float(low), float(high), finite_count, False
+
+
 def _ordered_interventions(
     campaign: Mapping[str, Any],
     catalog: Mapping[str, Any],
@@ -888,13 +908,24 @@ def _compute_characterization(
                 hedges_low = hedges_high = None
                 log_low = log_high = None
                 hedges_finite = log_finite = 0
+                hedges_ci_undefined = log_ci_undefined = True
                 hedges_value = log_value = None
             else:
-                hedges_low, hedges_high, hedges_finite = _percentile_interval(
+                (
+                    hedges_low,
+                    hedges_high,
+                    hedges_finite,
+                    hedges_ci_undefined,
+                ) = _optional_percentile_interval(
                     hedges_bootstrap[:, index],
                     repetitions,
                 )
-                log_low, log_high, log_finite = _percentile_interval(
+                (
+                    log_low,
+                    log_high,
+                    log_finite,
+                    log_ci_undefined,
+                ) = _optional_percentile_interval(
                     log_sd_bootstrap[:, index],
                     repetitions,
                 )
@@ -924,10 +955,12 @@ def _compute_characterization(
                     "hedges_g_bootstrap_ci95_low": hedges_low,
                     "hedges_g_bootstrap_ci95_high": hedges_high,
                     "hedges_g_bootstrap_finite_repetitions": hedges_finite,
+                    "hedges_g_bootstrap_ci_undefined": hedges_ci_undefined,
                     "log_sd_ratio": log_value,
                     "log_sd_ratio_bootstrap_ci95_low": log_low,
                     "log_sd_ratio_bootstrap_ci95_high": log_high,
                     "log_sd_ratio_bootstrap_finite_repetitions": log_finite,
+                    "log_sd_ratio_bootstrap_ci_undefined": log_ci_undefined,
                     "identical_constant_null": bool(identical_constant[index]),
                     "undefined_zero_variance_effect": bool(undefined_constant[index]),
                     "bootstrap_seed": seed,
@@ -1179,6 +1212,14 @@ def analyze(
                         "standardized estimands mathematically undefined."
                     ),
                     "policy": ZERO_VARIANCE_AMENDMENT,
+                    "selection_impact": "none; analysis ran only after selection was frozen",
+                },
+                "bootstrap_degeneracy_protocol_amendment": {
+                    "trigger": (
+                        "Some finite readout point estimates had fewer than 80% finite "
+                        "bootstrap replicates because resampled groups had zero variance."
+                    ),
+                    "policy": BOOTSTRAP_CI_AMENDMENT,
                     "selection_impact": "none; analysis ran only after selection was frozen",
                 },
                 "bootstrap": {

@@ -224,7 +224,10 @@ def _audit_revision() -> tuple[str, str]:
     dirty = _git("status", "--porcelain")
     if dirty:
         raise RuntimeError("Operating-point execution requires a clean deployment worktree.")
-    return _git("rev-parse", "HEAD"), _git("branch", "--show-current")
+    branch = _git("branch", "--show-current")
+    # Immutable Slurm deployments are intentionally detached worktrees.  Preserve
+    # that checkout mode explicitly instead of freezing an invalid empty branch.
+    return _git("rev-parse", "HEAD"), branch or "DETACHED"
 
 
 def _require_deployment(inventory: Mapping[str, Any]) -> tuple[str, str]:

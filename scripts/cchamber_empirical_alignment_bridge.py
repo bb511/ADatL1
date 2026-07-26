@@ -5,11 +5,11 @@ truncation, and intervention-driven representation choices.  It:
 
 1. applies only training-normal affine scaling and full-rank whitening;
 2. removes only dimensions that are degenerate under a frozen normal-only rule;
-3. freezes one linear CAP direction using metadata-matched validation-normal
-   pairs, with an internal fit/selection split;
-4. tests fixed-magnitude angular shifts on held-out real normal backgrounds; and
-5. evaluates alignment against a held-out supervised linear reference for every
-   real intervention.
+3. selects linear anomaly-score directions with CAP, tail drift, and
+   Wasserstein from one shared normal-only candidate bank;
+4. tests fixed-magnitude angular shifts around each selected direction on
+   held-out real normal backgrounds; and
+5. compares all three selectors against every real intervention.
 
 The semi-synthetic component tests whether the analytical alignment mechanism
 survives the real non-Gaussian background.  The all-intervention component asks
@@ -57,6 +57,19 @@ SYNTHETIC_SHIFT_NORM = 3.0
 SYNTHETIC_ANGLES = np.linspace(0.0, 90.0, 19)
 FPR = 0.01
 N_RESAMPLES = 10_000
+DIRECTION_CANDIDATES = 2_048
+DRIFT_SPLITS = 32
+SELECTORS = ("cap", "drift", "wasserstein")
+SELECTOR_LABELS = {
+    "cap": "CAP",
+    "drift": "Tail drift",
+    "wasserstein": "Wasserstein",
+}
+SELECTOR_COLORS = {
+    "cap": "#0072B2",
+    "drift": "#E69F00",
+    "wasserstein": "#009E73",
+}
 
 
 def _sha256(path: Path) -> str:
@@ -363,6 +376,158 @@ def optimize_cap_direction(
     return direction, candidates, summary
 
 
+def select_normal_score_directions(
+    train_normal: np.ndarray,
+    validation_1: np.ndarray,
+    validation_2: np.ndarray,
+    test_1: np.ndarray,
+    test_2: np.ndarray,
+    *,
+    seed: int = SEED,
+    n_candidates: int = DIRECTION_CANDIDATES,
+    n_drift_splits: int = DRIFT_SPLITS,
+) -> tuple[dict[str, np.ndarray], pd.DataFrame, dict[str, Any]]:
+    """Select linear anomaly-score directions with three normal-only criteria.
+
+    Every candidate score is the absolute deviation of a linear projection from its training-normal
+    median. CAP maximizes paired-score dependence, tail drift minimizes the repository callback's
+    1%-tail transfer loss averaged over frozen calibration/evaluation splits, and Wasserstein
+    minimizes the log-score W1 distance between the two normal validation views.
+    """
+    arrays = tuple(
+        np.asarray(values, dtype=float)
+        for values in (train_normal, validation_1, validation_2, test_1, test_2)
+    )
+    train_normal, validation_1, validation_2, test_1, test_2 = arrays
+    dimensions = {values.shape[1] for values in arrays}
+    if len(dimensions) != 1 or any(values.ndim != 2 for values in arrays):
+        raise ValueError("Direction-selection arrays must be compatible matrices.")
+    if len(validation_1) != len(validation_2) or len(test_1) != len(test_2):
+        raise ValueError("Normal view pairs must have equal row counts.")
+    if n_candidates < 32 or n_drift_splits < 1:
+        raise ValueError("Direction-selection bank or drift replication is too small.")
+
+    rng = np.random.default_rng(seed + 700)
+    directions = rng.normal(size=(int(n_candidates), train_normal.shape[1]))
+    directions /= np.linalg.norm(directions, axis=1, keepdims=True)
+    for direction in directions:
+        largest = int(np.argmax(np.abs(direction)))
+        if direction[largest] < 0:
+            direction *= -1
+
+    train_projection = train_normal @ directions.T
+    projection_center = np.median(train_projection, axis=0)
+
+    def score(values: np.ndarray) -> np.ndarray:
+        return np.abs(values @ directions.T - projection_center)
+
+    train_scores = np.abs(train_projection - projection_center)
+    validation_scores_1 = score(validation_1)
+    validation_scores_2 = score(validation_2)
+    score_center = np.median(train_scores, axis=0)
+    score_scale = np.quantile(train_scores, 0.95, axis=0) - np.quantile(
+        train_scores,
+        0.05,
+        axis=0,
+    )
+    score_scale = np.maximum(score_scale, 1.0e-12)
+    cap_scores_1 = (validation_scores_1 - score_center) / score_scale
+    cap_scores_2 = (validation_scores_2 - score_center) / score_scale
+    cap, _, cap_beta = cap_lift_for_score_matrix(
+        cap_scores_1,
+        cap_scores_2,
+        BETAS,
+    )
+
+    drift_repetitions = []
+    n_calibration = len(validation_scores_1) // 2
+    n_evaluation = len(validation_scores_1) - n_calibration
+    epsilon = 0.5 / float(n_evaluation)
+    for split in range(int(n_drift_splits)):
+        order = np.random.default_rng(12_345 + split).permutation(len(validation_scores_1))
+        calibration = validation_scores_1[order[:n_calibration]]
+        evaluation = validation_scores_1[order[n_calibration:]]
+        threshold = np.quantile(
+            calibration,
+            1.0 - FPR,
+            axis=0,
+            method="higher",
+        )
+        exceedance = np.mean(evaluation >= threshold, axis=0)
+        drift_repetitions.append(np.abs(np.log((exceedance + epsilon) / (FPR + epsilon))))
+    drift = np.mean(np.stack(drift_repetitions), axis=0)
+
+    wasserstein = np.mean(
+        np.abs(
+            np.sort(np.log1p(validation_scores_1), axis=0)
+            - np.sort(np.log1p(validation_scores_2), axis=0)
+        ),
+        axis=0,
+    )
+    selected_indices = {
+        "cap": int(np.argmax(cap)),
+        "drift": int(np.argmin(drift)),
+        "wasserstein": int(np.argmin(wasserstein)),
+    }
+    selected = {selector: directions[index].copy() for selector, index in selected_indices.items()}
+
+    candidates = pd.DataFrame(
+        {
+            "candidate_index": np.arange(n_candidates),
+            "cap": cap,
+            "cap_beta": cap_beta,
+            "tail_drift": drift,
+            "wasserstein": wasserstein,
+            **{
+                f"selected_by_{selector}": np.arange(n_candidates) == index
+                for selector, index in selected_indices.items()
+            },
+        }
+    )
+    test_scores_1 = score(test_1)
+    test_scores_2 = score(test_2)
+    test_cap_scores_1 = (test_scores_1 - score_center) / score_scale
+    test_cap_scores_2 = (test_scores_2 - score_center) / score_scale
+    test_cap, _, test_cap_beta = cap_lift_for_score_matrix(
+        test_cap_scores_1[:, list(selected_indices.values())],
+        test_cap_scores_2[:, list(selected_indices.values())],
+        BETAS,
+    )
+    summary = {
+        "candidate_family": ("shared deterministic bank of two-sided linear projection scores"),
+        "n_candidates": int(n_candidates),
+        "n_drift_splits": int(n_drift_splits),
+        "drift_definition": ("mean absolute log 1%-tail transfer error over frozen half-splits"),
+        "wasserstein_definition": ("W1 distance between log1p normal-score distributions"),
+        "selected": {},
+        "intervention_labels_used": False,
+    }
+    ordered_selectors = list(selected_indices)
+    for position, selector in enumerate(ordered_selectors):
+        index = selected_indices[selector]
+        summary["selected"][selector] = {
+            "candidate_index": index,
+            "validation_cap": float(cap[index]),
+            "validation_cap_beta": float(cap_beta[index]),
+            "validation_tail_drift": float(drift[index]),
+            "validation_wasserstein": float(wasserstein[index]),
+            "test_cap": float(test_cap[position]),
+            "test_cap_beta": float(test_cap_beta[position]),
+            "test_paired_spearman": float(
+                stats.spearmanr(
+                    test_scores_1[:, index],
+                    test_scores_2[:, index],
+                ).statistic
+            ),
+        }
+    summary["absolute_direction_cosines"] = {
+        f"{left}_vs_{right}": float(abs(selected[left] @ selected[right]))
+        for left_index, left in enumerate(SELECTORS)
+        for right in SELECTORS[left_index + 1 :]
+    }
+    return selected, candidates, summary
+
+
 def _orthogonal_basis(direction: np.ndarray) -> np.ndarray:
     """Return a deterministic orthonormal basis perpendicular to one direction."""
     direction = np.asarray(direction, dtype=float)
@@ -415,7 +580,7 @@ def _score_metrics(
 
 
 def synthetic_alignment_sweep(
-    cap_direction: np.ndarray,
+    selected_direction: np.ndarray,
     validation_normal: np.ndarray,
     test_normal: np.ndarray,
     signal_background: np.ndarray,
@@ -427,21 +592,23 @@ def synthetic_alignment_sweep(
     """Inject fixed-norm angular shifts into held-out real normal backgrounds."""
     if shift_norm <= 0 or len(signal_background) == 0:
         raise ValueError("Synthetic shift design is invalid.")
-    cap_direction = np.asarray(cap_direction, dtype=float)
-    cap_direction /= np.linalg.norm(cap_direction)
-    basis = _orthogonal_basis(cap_direction)
+    selected_direction = np.asarray(selected_direction, dtype=float)
+    selected_direction /= np.linalg.norm(selected_direction)
+    basis = _orthogonal_basis(selected_direction)
     rows = []
     for basis_index, orthogonal in enumerate(basis):
         for angle in np.asarray(angles, dtype=float):
             radians = math.radians(float(angle))
-            shift_direction = math.cos(radians) * cap_direction + math.sin(radians) * orthogonal
+            shift_direction = (
+                math.cos(radians) * selected_direction + math.sin(radians) * orthogonal
+            )
             shift_direction /= np.linalg.norm(shift_direction)
             signal = signal_background + float(shift_norm) * shift_direction
-            cap = _score_metrics(
+            selected = _score_metrics(
                 test_normal,
                 signal,
                 validation_normal,
-                cap_direction,
+                selected_direction,
                 two_sided=True,
                 fpr=fpr,
             )
@@ -457,11 +624,11 @@ def synthetic_alignment_sweep(
                 {
                     "orthogonal_basis_index": basis_index,
                     "angle_degrees": float(angle),
-                    "absolute_alignment": float(abs(np.dot(cap_direction, shift_direction))),
+                    "absolute_alignment": float(abs(np.dot(selected_direction, shift_direction))),
                     "shift_norm": float(shift_norm),
-                    "cap_auprc": cap["auprc"],
+                    "selected_auprc": selected["auprc"],
                     "oracle_auprc": oracle["auprc"],
-                    "cap_efficiency": cap["efficiency"],
+                    "selected_efficiency": selected["efficiency"],
                     "oracle_efficiency": oracle["efficiency"],
                 }
             )
@@ -474,11 +641,11 @@ def real_intervention_alignment(
     keep: np.ndarray,
     location: np.ndarray,
     whitening: np.ndarray,
-    cap_direction: np.ndarray,
+    selected_directions: dict[str, np.ndarray],
     *,
     fpr: float = FPR,
 ) -> pd.DataFrame:
-    """Evaluate the frozen CAP direction and a held-out supervised linear reference."""
+    """Evaluate every normal-only selector against all real interventions."""
     validation_normal = _transform(
         builder.main["valid"].x.numpy(),
         keep,
@@ -498,8 +665,10 @@ def real_intervention_alignment(
         whitening,
     )
     baseline_auprc = 400.0 / 1_400.0
-    cap_direction = np.asarray(cap_direction, dtype=float)
-    cap_direction /= np.linalg.norm(cap_direction)
+    directions = {}
+    for selector in SELECTORS:
+        direction = np.asarray(selected_directions[selector], dtype=float)
+        directions[selector] = direction / np.linalg.norm(direction)
     rows = []
     for name in intervention_names:
         signal_validation = _transform(
@@ -530,14 +699,6 @@ def real_intervention_alignment(
         ).fit(train_x, train_y)
         oracle_direction = classifier.coef_.reshape(-1).astype(float)
         oracle_direction /= np.linalg.norm(oracle_direction)
-        cap = _score_metrics(
-            test_normal,
-            signal_test,
-            validation_normal,
-            cap_direction,
-            two_sided=True,
-            fpr=fpr,
-        )
         oracle = _score_metrics(
             test_normal,
             signal_test,
@@ -552,40 +713,54 @@ def real_intervention_alignment(
         test_shift_norm = float(np.linalg.norm(test_shift))
         info = parse_intervention_name(name)
         oracle_lift = oracle["auprc"] - baseline_auprc
-        recovered_lift = (
-            (cap["auprc"] - baseline_auprc) / oracle_lift if oracle_lift > 0.05 else math.nan
-        )
-        efficiency_fraction = (
-            cap["efficiency"] / oracle["efficiency"] if oracle["efficiency"] >= 0.10 else math.nan
-        )
-        rows.append(
-            {
-                "intervention": name,
-                "target": info["target"],
-                "family": info["family"],
-                "strength": info["strength"],
-                "n_validation_signal": int(len(signal_validation)),
-                "n_test_signal": int(len(signal_test)),
-                "validation_mean_shift_norm": validation_shift_norm,
-                "test_mean_shift_norm": test_shift_norm,
-                "cap_validation_mean_shift_absolute_alignment": float(
-                    abs(np.dot(cap_direction, validation_shift))
-                    / max(validation_shift_norm, 1.0e-15)
-                ),
-                "cap_linear_reference_absolute_alignment": float(
-                    abs(np.dot(cap_direction, oracle_direction))
-                ),
-                "cap_auprc": cap["auprc"],
-                "linear_reference_auprc": oracle["auprc"],
-                "auprc_baseline": baseline_auprc,
-                "auprc_recovered_lift_fraction": recovered_lift,
-                "cap_efficiency": cap["efficiency"],
-                "linear_reference_efficiency": oracle["efficiency"],
-                "efficiency_recovered_fraction": efficiency_fraction,
-            }
-        )
+        for selector, direction in directions.items():
+            selected = _score_metrics(
+                test_normal,
+                signal_test,
+                validation_normal,
+                direction,
+                two_sided=True,
+                fpr=fpr,
+            )
+            recovered_lift = (
+                (selected["auprc"] - baseline_auprc) / oracle_lift
+                if oracle_lift > 0.05
+                else math.nan
+            )
+            efficiency_fraction = (
+                selected["efficiency"] / oracle["efficiency"]
+                if oracle["efficiency"] >= 0.10
+                else math.nan
+            )
+            rows.append(
+                {
+                    "selector": selector,
+                    "intervention": name,
+                    "target": info["target"],
+                    "family": info["family"],
+                    "strength": info["strength"],
+                    "n_validation_signal": int(len(signal_validation)),
+                    "n_test_signal": int(len(signal_test)),
+                    "validation_mean_shift_norm": validation_shift_norm,
+                    "test_mean_shift_norm": test_shift_norm,
+                    "validation_mean_shift_absolute_alignment": float(
+                        abs(np.dot(direction, validation_shift))
+                        / max(validation_shift_norm, 1.0e-15)
+                    ),
+                    "linear_reference_absolute_alignment": float(
+                        abs(np.dot(direction, oracle_direction))
+                    ),
+                    "selected_auprc": selected["auprc"],
+                    "linear_reference_auprc": oracle["auprc"],
+                    "auprc_baseline": baseline_auprc,
+                    "auprc_recovered_lift_fraction": recovered_lift,
+                    "selected_efficiency": selected["efficiency"],
+                    "linear_reference_efficiency": oracle["efficiency"],
+                    "efficiency_recovered_fraction": efficiency_fraction,
+                }
+            )
     frame = pd.DataFrame(rows)
-    if len(frame) != 58 or frame["intervention"].duplicated().any():
+    if len(frame) != 58 * len(SELECTORS) or frame.duplicated(["selector", "intervention"]).any():
         raise ValueError("Real-intervention alignment table is incomplete.")
     return frame
 
@@ -654,94 +829,116 @@ def _plot_bridge(
     associations: dict[str, dict[str, Any]],
     output: Path,
 ) -> None:
-    """Plot synthetic angular stress tests and all-intervention alignment."""
-    figure, axes = plt.subplots(
-        2,
-        2,
-        figsize=(13.0, 10.0),
-        layout="constrained",
-    )
-    primary_synthetic, secondary_synthetic, primary_real, secondary_real = axes.ravel()
-    grouped = synthetic.groupby("angle_degrees", sort=True)
+    """Plot the requested six-panel stress test and combined AUPRC result."""
+    figure = plt.figure(figsize=(14.0, 13.0), layout="constrained")
+    grid = figure.add_gridspec(3, 3, height_ratios=(1.0, 1.0, 1.25))
     angles = np.asarray(sorted(synthetic["angle_degrees"].unique()), dtype=float)
-    for axis, cap_column, oracle_column, ylabel in (
-        (primary_synthetic, "cap_auprc", "oracle_auprc", "AUPRC"),
-        (
-            secondary_synthetic,
-            "cap_efficiency",
-            "oracle_efficiency",
-            "Efficiency at 1% FPR",
-        ),
-    ):
-        cap_mean = grouped[cap_column].mean().reindex(angles).to_numpy()
-        cap_low = grouped[cap_column].quantile(0.025).reindex(angles).to_numpy()
-        cap_high = grouped[cap_column].quantile(0.975).reindex(angles).to_numpy()
-        oracle_mean = grouped[oracle_column].mean().reindex(angles).to_numpy()
-        oracle_low = grouped[oracle_column].quantile(0.025).reindex(angles).to_numpy()
-        oracle_high = grouped[oracle_column].quantile(0.975).reindex(angles).to_numpy()
-        axis.plot(angles, cap_mean, color="#0072B2", label="frozen CAP direction")
-        axis.fill_between(angles, cap_low, cap_high, color="#0072B2", alpha=0.18)
-        axis.plot(angles, oracle_mean, color="#D55E00", label="known shift direction")
-        axis.fill_between(angles, oracle_low, oracle_high, color="#D55E00", alpha=0.15)
-        axis.set_xlabel("Shift angle from CAP direction (degrees)")
-        axis.set_ylabel(ylabel)
-        axis.set_xlim(0, 90)
-        axis.grid(alpha=0.2)
-    primary_synthetic.set_title("Fixed-norm shifts on held-out real backgrounds")
-    secondary_synthetic.set_title("Operating-point alignment stress test")
-    primary_synthetic.legend(fontsize=8)
+    for column, selector in enumerate(SELECTORS):
+        selector_rows = synthetic[synthetic["selector"] == selector]
+        grouped = selector_rows.groupby("angle_degrees", sort=True)
+        for row, selected_column, oracle_column, ylabel in (
+            (0, "selected_auprc", "oracle_auprc", "AUPRC"),
+            (
+                1,
+                "selected_efficiency",
+                "oracle_efficiency",
+                "Efficiency at 1% FPR",
+            ),
+        ):
+            axis = figure.add_subplot(grid[row, column])
+            selected_mean = grouped[selected_column].mean().reindex(angles).to_numpy()
+            selected_low = grouped[selected_column].quantile(0.025).reindex(angles).to_numpy()
+            selected_high = grouped[selected_column].quantile(0.975).reindex(angles).to_numpy()
+            oracle_mean = grouped[oracle_column].mean().reindex(angles).to_numpy()
+            oracle_low = grouped[oracle_column].quantile(0.025).reindex(angles).to_numpy()
+            oracle_high = grouped[oracle_column].quantile(0.975).reindex(angles).to_numpy()
+            color = SELECTOR_COLORS[selector]
+            axis.plot(
+                angles,
+                selected_mean,
+                color=color,
+                label=f"{SELECTOR_LABELS[selector]}-selected score",
+            )
+            axis.fill_between(
+                angles,
+                selected_low,
+                selected_high,
+                color=color,
+                alpha=0.18,
+            )
+            axis.plot(
+                angles,
+                oracle_mean,
+                color="#333333",
+                linestyle="--",
+                label="known shift direction",
+            )
+            axis.fill_between(
+                angles,
+                oracle_low,
+                oracle_high,
+                color="#777777",
+                alpha=0.10,
+            )
+            axis.set_xlabel(f"Shift angle from {SELECTOR_LABELS[selector]} score (degrees)")
+            if column == 0:
+                axis.set_ylabel(ylabel)
+            axis.set_ylim((0.24, 1.01) if row == 0 else (-0.02, 0.86))
+            axis.set_xlim(0, 90)
+            axis.grid(alpha=0.2)
+            if row == 0:
+                axis.set_title(SELECTOR_LABELS[selector])
+            if row == 0 and column == 0:
+                axis.legend(fontsize=8)
 
-    scatter_specs = (
-        (
-            primary_real,
-            "auprc_recovered_lift_fraction",
-            "Recovered attainable AUPRC lift",
-        ),
-        (
-            secondary_real,
-            "efficiency_recovered_fraction",
-            "Recovered oracle efficiency",
-        ),
-    )
-    for axis, outcome, ylabel in scatter_specs:
-        selected = real[np.isfinite(real[outcome])].copy()
-        axis.scatter(
-            selected["cap_validation_mean_shift_absolute_alignment"],
-            selected[outcome],
-            color="#0072B2",
-            s=34,
-            alpha=0.78,
+    combined = figure.add_subplot(grid[2, :])
+    for selector in SELECTORS:
+        selected = real[
+            (real["selector"] == selector) & np.isfinite(real["selected_auprc"])
+        ].copy()
+        summary = associations[selector]
+        combined.scatter(
+            selected["validation_mean_shift_absolute_alignment"],
+            selected["selected_auprc"],
+            color=SELECTOR_COLORS[selector],
+            s=36,
+            alpha=0.72,
             edgecolor="white",
             linewidth=0.4,
-        )
-        summary = associations[outcome]
-        axis.text(
-            0.03,
-            0.97,
-            (
+            label=(
+                f"{SELECTOR_LABELS[selector]}: "
                 f"ρ={summary['spearman_rho']:+.2f}, "
-                f"p={summary['one_sided_permutation_p']:.3g}\n"
-                f"target-bootstrap 95% CI "
-                f"[{summary['cluster_bootstrap_ci_low']:+.2f}, "
+                f"95% CI [{summary['cluster_bootstrap_ci_low']:+.2f}, "
                 f"{summary['cluster_bootstrap_ci_high']:+.2f}]"
             ),
-            transform=axis.transAxes,
-            va="top",
-            fontsize=8,
-            bbox={"facecolor": "white", "alpha": 0.8, "edgecolor": "none"},
         )
-        axis.axhline(0, color="#777777", linewidth=0.7)
-        axis.set_xlim(0, 1)
-        axis.set_xlabel("Absolute alignment: CAP vs validation mean shift")
-        axis.set_ylabel(ylabel)
-        axis.grid(alpha=0.2)
-    primary_real.set_title("All real interventions: primary endpoint")
-    secondary_real.set_title("All real interventions: secondary endpoint")
+    baseline_auprc = float(real["auprc_baseline"].iloc[0])
+    combined.axhline(
+        baseline_auprc,
+        color="#777777",
+        linewidth=0.8,
+        linestyle=":",
+    )
+    combined.text(
+        0.99,
+        baseline_auprc + 0.01,
+        f"random AUPRC = {baseline_auprc:.3f}",
+        ha="right",
+        color="#555555",
+        fontsize=8,
+    )
+    combined.set_xlim(0, 1)
+    combined.set_ylim(0.22, 1.02)
+    combined.set_xlabel("Absolute alignment: selected score vs validation mean shift")
+    combined.set_ylabel("Test AUPRC")
+    combined.set_title("All real interventions: AUPRC alignment")
+    combined.grid(alpha=0.2)
+    combined.legend(fontsize=9, loc="upper left")
     figure.suptitle(
-        "Causal Chamber empirical alignment bridge: affine full-readout geometry",
+        "Causal Chamber normal-only selector alignment bridge",
         fontsize=16,
     )
-    figure.savefig(output, dpi=220, bbox_inches="tight")
+    figure.savefig(output, dpi=220)
     plt.close(figure)
 
 
@@ -781,6 +978,12 @@ def run(
     )
     normalized_train = builder.main["train"].x.numpy()
     location, whitening, geometry = fit_whitening(normalized_train, keep)
+    transformed_train = _transform(
+        normalized_train,
+        keep,
+        location,
+        whitening,
+    )
 
     def transform_dataset(dataset: Any) -> np.ndarray:
         return _transform(dataset.x.numpy(), keep, location, whitening)
@@ -789,7 +992,8 @@ def run(
     validation_2 = transform_dataset(builder.aux["valid"]["reference_normal"])
     test_1 = transform_dataset(builder.main["test"])
     test_2 = transform_dataset(builder.aux["test"]["reference_normal"])
-    cap_direction, candidates, cap_summary = optimize_cap_direction(
+    selected_directions, candidates, selection_summary = select_normal_score_directions(
+        transformed_train,
         validation_1,
         validation_2,
         test_1,
@@ -800,16 +1004,25 @@ def run(
     weights = pd.DataFrame(
         {
             "feature": retained_features,
-            "whitened_direction_weight": cap_direction,
+            **{
+                f"{selector}_whitened_direction_weight": selected_directions[selector]
+                for selector in SELECTORS
+            },
         }
     )
 
     signal_background = test_2[:400]
-    synthetic = synthetic_alignment_sweep(
-        cap_direction,
-        validation_1,
-        test_1,
-        signal_background,
+    synthetic = pd.concat(
+        [
+            synthetic_alignment_sweep(
+                selected_directions[selector],
+                validation_1,
+                test_1,
+                signal_background,
+            ).assign(selector=selector)
+            for selector in SELECTORS
+        ],
+        ignore_index=True,
     )
     real = real_intervention_alignment(
         builder,
@@ -817,38 +1030,34 @@ def run(
         keep,
         location,
         whitening,
-        cap_direction,
+        selected_directions,
     )
     primary_associations = {
-        outcome: association_summary(
-            real,
-            "cap_validation_mean_shift_absolute_alignment",
-            outcome,
+        selector: association_summary(
+            real[real["selector"] == selector],
+            "validation_mean_shift_absolute_alignment",
+            "selected_auprc",
             seed=seed + index + 100,
             n_resamples=n_resamples,
         )
-        for index, outcome in enumerate(
-            ("auprc_recovered_lift_fraction", "efficiency_recovered_fraction")
-        )
+        for index, selector in enumerate(SELECTORS)
     }
     linear_reference_sensitivity = {
-        outcome: association_summary(
-            real,
-            "cap_linear_reference_absolute_alignment",
-            outcome,
+        selector: association_summary(
+            real[real["selector"] == selector],
+            "linear_reference_absolute_alignment",
+            "selected_auprc",
             seed=seed + index + 200,
             n_resamples=n_resamples,
         )
-        for index, outcome in enumerate(
-            ("auprc_recovered_lift_fraction", "efficiency_recovered_fraction")
-        )
+        for index, selector in enumerate(SELECTORS)
     }
 
     outputs: list[Path] = []
     for filename, table in (
         ("feature_audit.csv", audit),
-        ("cap_direction_candidates.csv", candidates),
-        ("cap_direction_weights.csv", weights),
+        ("direction_candidates.csv", candidates),
+        ("selected_direction_weights.csv", weights),
         ("synthetic_alignment_sweep.csv", synthetic),
         ("real_intervention_alignment.csv", real),
     ):
@@ -856,15 +1065,28 @@ def run(
         table.to_csv(path, index=False)
         outputs.append(path)
 
-    synthetic_grouped = synthetic.groupby("angle_degrees", sort=True)
-    aligned = synthetic_grouped.get_group(float(SYNTHETIC_ANGLES[0]))
-    orthogonal = synthetic_grouped.get_group(float(SYNTHETIC_ANGLES[-1]))
+    semi_synthetic = {}
+    for selector in SELECTORS:
+        selector_synthetic = synthetic[synthetic["selector"] == selector]
+        selector_grouped = selector_synthetic.groupby("angle_degrees", sort=True)
+        aligned = selector_grouped.get_group(float(SYNTHETIC_ANGLES[0]))
+        orthogonal = selector_grouped.get_group(float(SYNTHETIC_ANGLES[-1]))
+        semi_synthetic[selector] = {
+            "aligned_mean_selected_auprc": float(aligned["selected_auprc"].mean()),
+            "orthogonal_mean_selected_auprc": float(orthogonal["selected_auprc"].mean()),
+            "aligned_mean_selected_efficiency": float(aligned["selected_efficiency"].mean()),
+            "orthogonal_mean_selected_efficiency": float(orthogonal["selected_efficiency"].mean()),
+            "aligned_mean_oracle_auprc": float(aligned["oracle_auprc"].mean()),
+            "orthogonal_mean_oracle_auprc": float(orthogonal["oracle_auprc"].mean()),
+            "aligned_mean_oracle_efficiency": float(aligned["oracle_efficiency"].mean()),
+            "orthogonal_mean_oracle_efficiency": float(orthogonal["oracle_efficiency"].mean()),
+        }
     summary = {
-        "schema_version": 1,
+        "schema_version": 2,
         "classification": "post_confirmatory_empirical_alignment_bridge",
         "scientific_question": (
-            "Does CAP's alignment intuition survive a real non-Gaussian "
-            "background and describe all real chamber interventions?"
+            "How do CAP, tail-drift, and Wasserstein normal-only selectors "
+            "inherit alignment boundaries on Causal Chamber?"
         ),
         "seed": seed,
         "feature_geometry": {
@@ -872,20 +1094,17 @@ def run(
             "retained_features": retained_features,
             "discarded_features": audit.loc[~audit["retained"], "feature"].tolist(),
         },
-        "cap_direction": cap_summary,
+        "normal_only_direction_selection": selection_summary,
         "semi_synthetic": {
             "shift_norm": SYNTHETIC_SHIFT_NORM,
-            "n_orthogonal_directions": int(synthetic["orthogonal_basis_index"].nunique()),
+            "n_orthogonal_directions_per_selector": int(
+                synthetic["orthogonal_basis_index"].nunique()
+            ),
             "n_angles": int(synthetic["angle_degrees"].nunique()),
-            "aligned_mean_cap_auprc": float(aligned["cap_auprc"].mean()),
-            "orthogonal_mean_cap_auprc": float(orthogonal["cap_auprc"].mean()),
-            "aligned_mean_cap_efficiency": float(aligned["cap_efficiency"].mean()),
-            "orthogonal_mean_cap_efficiency": float(orthogonal["cap_efficiency"].mean()),
-            "aligned_mean_oracle_auprc": float(aligned["oracle_auprc"].mean()),
-            "orthogonal_mean_oracle_auprc": float(orthogonal["oracle_auprc"].mean()),
+            "selectors": semi_synthetic,
         },
         "all_real_interventions": {
-            "n_interventions": int(len(real)),
+            "n_interventions": int(real["intervention"].nunique()),
             "primary_validation_mean_shift_associations": primary_associations,
             "linear_reference_alignment_sensitivity": linear_reference_sensitivity,
         },

@@ -70,6 +70,37 @@ def test_cap_direction_recovers_non_gaussian_paired_reliability() -> None:
     assert summary["test_paired_spearman"] > 0.9
 
 
+def test_shared_candidate_bank_applies_all_three_normal_only_selectors() -> None:
+    """CAP, drift, and Wasserstein select exactly one score from one bank."""
+    rng = np.random.default_rng(321)
+
+    def paired(n_rows: int) -> tuple[np.ndarray, np.ndarray]:
+        shared = rng.laplace(size=n_rows)
+        return (
+            np.column_stack([shared + 0.1 * rng.normal(size=n_rows), rng.standard_t(4, n_rows)]),
+            np.column_stack([shared + 0.1 * rng.normal(size=n_rows), rng.standard_t(4, n_rows)]),
+        )
+
+    train = rng.standard_t(4, size=(400, 2))
+    validation_1, validation_2 = paired(200)
+    test_1, test_2 = paired(200)
+    directions, candidates, summary = bridge.select_normal_score_directions(
+        train,
+        validation_1,
+        validation_2,
+        test_1,
+        test_2,
+        seed=321,
+        n_candidates=128,
+        n_drift_splits=4,
+    )
+
+    assert set(directions) == set(bridge.SELECTORS)
+    assert set(summary["selected"]) == set(bridge.SELECTORS)
+    assert all(candidates[f"selected_by_{selector}"].sum() == 1 for selector in bridge.SELECTORS)
+    assert abs(directions["cap"][0]) > 0.8
+
+
 def test_fixed_norm_alignment_sweep_separates_aligned_and_orthogonal() -> None:
     """A frozen direction detects aligned but not orthogonal fixed-norm shifts."""
     rng = np.random.default_rng(456)
@@ -88,6 +119,6 @@ def test_fixed_norm_alignment_sweep_separates_aligned_and_orthogonal() -> None:
     aligned = sweep[sweep["angle_degrees"] == 0.0]
     orthogonal = sweep[sweep["angle_degrees"] == 90.0]
 
-    assert aligned["cap_auprc"].mean() > orthogonal["cap_auprc"].mean() + 0.4
-    assert aligned["cap_efficiency"].mean() > orthogonal["cap_efficiency"].mean() + 0.10
-    assert orthogonal["oracle_auprc"].mean() > orthogonal["cap_auprc"].mean() + 0.4
+    assert aligned["selected_auprc"].mean() > orthogonal["selected_auprc"].mean() + 0.4
+    assert aligned["selected_efficiency"].mean() > orthogonal["selected_efficiency"].mean() + 0.10
+    assert orthogonal["oracle_auprc"].mean() > orthogonal["selected_auprc"].mean() + 0.4

@@ -125,7 +125,37 @@ def _load_audit_inputs(
     checkpoint_path = audit_root / "checkpoint_manifest.json"
     audit_sha = _sha256(audit_path)
     checkpoint_sha = _sha256(checkpoint_path)
-    audit, trajectories = audit_tools._load_audit(audit_root, audit_sha)
+    audit = _load_json(audit_path)
+    if (
+        audit.get("campaign_id") != "cchamber_real_20260725_63b941a"
+        or audit.get("outcome_blind_at_design") is not True
+        or int(audit.get("expected_trajectories", -1)) != audit_tools.EXPECTED_TRAJECTORIES
+        or int(audit.get("expected_checkpoints", -1)) != audit_tools.EXPECTED_CHECKPOINTS
+        or int(audit.get("expected_rows", -1)) != audit_tools.EXPECTED_ROWS
+    ):
+        raise ValueError("Frozen candidate-audit identity or coverage changed.")
+    authenticated_inputs = (
+        ("campaign_manifest", "campaign_manifest_sha256"),
+        ("candidate_metrics", "candidate_metrics_sha256"),
+        ("candidate_metrics_provenance", "candidate_metrics_provenance_sha256"),
+        ("encoder_validation_pair_table", "encoder_validation_pair_table_sha256"),
+        ("execution_contract", "execution_contract_sha256"),
+        ("pairing_manifest", "pairing_manifest_sha256"),
+        ("panel", "panel_sha256"),
+        ("trajectory_manifest", "trajectory_manifest_sha256"),
+    )
+    for path_key, hash_key in authenticated_inputs:
+        path = Path(audit[path_key])
+        if _sha256(path) != audit[hash_key]:
+            raise ValueError(f"Frozen audit input hash mismatch: {path}")
+    trajectories = _load_json(Path(audit["trajectory_manifest"]))
+    if (
+        not isinstance(trajectories, list)
+        or len(trajectories) != audit_tools.EXPECTED_TRAJECTORIES
+        or [int(row["trajectory_index"]) for row in trajectories]
+        != list(range(audit_tools.EXPECTED_TRAJECTORIES))
+    ):
+        raise ValueError("Frozen trajectory manifest coverage or ordering changed.")
     checkpoint_manifest = _load_json(checkpoint_path)
     if (
         checkpoint_manifest.get("audit_sha256") != audit_sha

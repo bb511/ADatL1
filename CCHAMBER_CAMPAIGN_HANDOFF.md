@@ -1,6 +1,58 @@
 # Causal Chamber Production Campaign Handoff
 
-Last updated: 2026-07-25 21:52 CEST on `clariden-ln004`.
+Last updated: 2026-07-26 on Clariden.
+
+## Live Clariden Update — 2026-07-26
+
+This section supersedes the older execution snapshot below.
+
+- Search job `2898701` completed all 65 tasks: exactly 1,300 authenticated
+  200-epoch trajectories, 1,300 unique FINISHED MLflow runs, and 16,900 finite
+  metric histories.
+- Selection completed with 20 winners and an exact 200-row retrain manifest.
+  Intervention labels were not used. The retrain-manifest SHA-256 is
+  `5768cdb818d1163827c398d98337213fbad0d84936f9507e0dfde8474d892f55`.
+- Safe retraining completed all 200 model/strategy/reporting-seed identities.
+  Every marker authenticates the frozen training commit `63b941a`, its selected
+  checkpoint hash, and a unique FINISHED MLflow run.
+- Outcome-independent physical characterization completed all 58 interventions,
+  638 readout effects, and 58 expected-descendant summaries under
+  `audits/cchamber_real_20260725_63b941a_physical_shift_6cd53fe`.
+  Zero-variance and bootstrap-degenerate standardized effects are explicitly
+  marked undefined; no infinity was clipped or replaced by a finite value.
+- The final sidecar deployment is
+  `/iopsstor/scratch/cscs/vjimenez/adatl1/deployments/cchamber_20260726_d1a3017`
+  at commit `d1a30173fe8250fa3a681f393aaa4645d894862b`.
+- Threshold calibration passed one real GH200 canary for each of AE, VAE, Deep
+  SVDD, and RealNVP. Production jobs calibration `2901192`, freeze `2901209`,
+  evaluation `2901210`, and collection `2901211` all completed with exit code
+  zero. The threshold root contains exactly 200 validation-derived thresholds
+  and 23,200 finite, uniquely keyed result rows.
+- The replacement candidate-rank workflow—canary `2901177`, timing `2901178`,
+  training `2901179`, freeze `2901180`, evaluation `2901181`, collection
+  `2901182`, and analysis `2901183`—completed with exit code zero. It contains
+  192 shared trajectories, 960 frozen checkpoint branches, 111,360 sealed
+  outcome rows, and 10,000-permutation/10,000-bootstrap rank inference.
+- Five candidate-rank MLflow experiments were created sequentially before the
+  production array to prevent filesystem-store experiment-creation races.
+- Frozen paper analysis job `2901407` completed on the debug partition as a CPU
+  job. Its bundle authenticated the threshold, selection, candidate-rank, and
+  background-acceptance chains before producing seed-first inference.
+- Final information-dense report:
+  `/iopsstor/scratch/cscs/vjimenez/adatl1/reports/cchamber_real_20260726_d1a3017/FINAL_REPORT.md`.
+  It uses three main figures: architecture/criterion performance,
+  candidate-rank validity, and physical-shift/detectability/CAP-gain synthesis.
+- Primary conclusion: CAP is strongly supported for RealNVP, partially and
+  endpoint-dependently supported for AE/VAE, and contradicted for SVDD. Do not
+  replace this architecture-specific conclusion with a universal CAP claim.
+- The post-confirmatory linear-Gaussian bridge is complete under
+  `reports/cchamber_real_20260726_d1a3017/gaussian_bridge_final`. It rejects a
+  full 11-readout Gaussian model and retains only an explicitly approximate
+  two-PC optical subspace. `uniform_red_mid` is nearly aligned with the CAP
+  direction and reaches AUPRC `.974` versus oracle `.976`; the matched-strength
+  near-orthogonal `uniform_blue_mid` reaches only `.536` versus oracle `.977`.
+  This is a mechanistic alignment stress test, not a confirmatory result, and it
+  does not revise the completed campaign.
 
 ## Post-Handoff Updates
 

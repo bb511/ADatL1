@@ -689,7 +689,7 @@ def intervention_contrasts(
 def confirmatory_system_group_performance(
     path: Path,
     catalog: Mapping[str, Mapping[str, Any]],
-) -> tuple[pd.DataFrame, pd.DataFrame, str]:
+) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame, str]:
     """Summarize the independent ten-seed RealNVP campaign by physical class."""
     path = path.expanduser().resolve()
     frame = pd.read_csv(path)
@@ -744,7 +744,27 @@ def confirmatory_system_group_performance(
     )
     if len(summary) != 8 or set(summary["n_reporting_seeds"]) != {10}:
         raise ValueError("Confirmatory physical-class summary lacks exact 4x2x10 coverage.")
-    return summary, intervention_summary, _sha256(path)
+    overall_seed_first = (
+        selected.groupby(["strategy", "seed"], sort=True)["value"]
+        .mean()
+        .rename("seed_mean_auprc")
+        .reset_index()
+    )
+    overall_summary = (
+        overall_seed_first.groupby("strategy", sort=True)["seed_mean_auprc"]
+        .agg(["mean", "std", "count"])
+        .reset_index()
+        .rename(
+            columns={
+                "mean": "mean_auprc",
+                "std": "seed_sd",
+                "count": "n_reporting_seeds",
+            }
+        )
+    )
+    if len(overall_summary) != 4 or set(overall_summary["n_reporting_seeds"]) != {10}:
+        raise ValueError("Confirmatory overall summary lacks exact 4x10 coverage.")
+    return summary, intervention_summary, overall_summary, _sha256(path)
 
 
 def _plot(
@@ -754,10 +774,11 @@ def _plot(
     contrasts: pd.DataFrame,
     confirmatory: pd.DataFrame,
     confirmatory_interventions: pd.DataFrame,
+    confirmatory_overall: pd.DataFrame,
     output: Path,
 ) -> None:
     """Create the physical-results-only theorem-bridge figure."""
-    del score_metrics, candidate, associations, contrasts
+    del score_metrics, candidate, associations, contrasts, confirmatory
     figure, axes = plt.subplots(
         1,
         2,
@@ -768,15 +789,11 @@ def _plot(
 
     ax = axes[0]
     displayed_strategies = ("cap_metadata_nearest", "drift", "wasserstein")
-    physical_class_order = {"process_or_actuator": 0, "measurement_chain": 1}
     intervention_order = (
-        confirmatory_interventions.assign(
-            _physical_class_order=confirmatory_interventions["physical_class"].map(
-                physical_class_order
-            )
-        )
-        .sort_values(["_physical_class_order", "target", "intervention"])["intervention"]
-        .drop_duplicates()
+        confirmatory_interventions[
+            confirmatory_interventions["strategy"] == "cap_metadata_nearest"
+        ]
+        .sort_values(["mean_auprc", "intervention"], ascending=[True, True])["intervention"]
         .tolist()
     )
     if len(intervention_order) != 58:
@@ -799,37 +816,6 @@ def _plot(
             alpha=0.85,
             label=STRATEGY_LABELS[strategy].replace("\n", " "),
         )
-    intervention_classes = (
-        confirmatory_interventions.drop_duplicates("intervention")
-        .set_index("intervention")
-        .loc[intervention_order, "physical_class"]
-    )
-    process_count = int((intervention_classes == "process_or_actuator").sum())
-    ax.axvspan(-0.5, process_count - 0.5, color="#0072B2", alpha=0.045, zorder=0)
-    ax.axvspan(
-        process_count - 0.5,
-        len(intervention_order) - 0.5,
-        color="#777777",
-        alpha=0.045,
-        zorder=0,
-    )
-    ax.axvline(process_count - 0.5, color="#777777", linewidth=0.8)
-    ax.text(
-        (process_count - 1) / 2,
-        1.025,
-        "Process/actuator shifts",
-        ha="center",
-        va="center",
-        fontsize=9,
-    )
-    ax.text(
-        (process_count + len(intervention_order) - 1) / 2,
-        1.025,
-        "Measurement-chain shifts",
-        ha="center",
-        va="center",
-        fontsize=9,
-    )
     ax.set_xticks(
         plot_x,
         [
@@ -839,48 +825,35 @@ def _plot(
         rotation=90,
         fontsize=5.5,
     )
-    ax.set_xlabel("Physical intervention")
+    ax.set_xlabel("Physical intervention (ordered by CAP AUPRC)")
     ax.set_ylabel("Intervention AUPRC (mean across 10 seeds)")
     ax.set_title("A. Criterion comparison for every physical intervention")
-    ax.set_ylim(0.25, 1.045)
+    ax.set_ylim(0.25, 1.01)
     ax.legend(frameon=False, fontsize=8, ncol=3, loc="lower left")
     ax.grid(axis="y", alpha=0.2)
 
     ax = axes[1]
     x = np.arange(len(CONFIRMATORY_STRATEGIES))
-    width = 0.36
-    for offset, physical_class in ((-0.5, "process_or_actuator"), (0.5, "measurement_chain")):
-        subset = confirmatory.set_index(["strategy", "physical_class"])
-        means = [
-            float(subset.loc[(strategy, physical_class), "mean_auprc"])
-            for strategy in CONFIRMATORY_STRATEGIES
-        ]
-        errors = [
-            float(subset.loc[(strategy, physical_class), "seed_sd"]) / math.sqrt(10.0)
-            for strategy in CONFIRMATORY_STRATEGIES
-        ]
-        ax.bar(
-            x + offset * width,
-            means,
-            width,
-            yerr=errors,
-            capsize=3,
-            color=[STRATEGY_COLORS[strategy] for strategy in CONFIRMATORY_STRATEGIES],
-            alpha=0.70 if physical_class == "process_or_actuator" else 1.0,
-            hatch="//" if physical_class == "process_or_actuator" else None,
-            edgecolor="#333333",
-            linewidth=0.5,
-            label=(
-                "Process/actuator shifts"
-                if physical_class == "process_or_actuator"
-                else "Measurement-chain shifts"
-            ),
-        )
+    subset = confirmatory_overall.set_index("strategy")
+    means = [float(subset.loc[strategy, "mean_auprc"]) for strategy in CONFIRMATORY_STRATEGIES]
+    errors = [
+        float(subset.loc[strategy, "seed_sd"]) / math.sqrt(10.0)
+        for strategy in CONFIRMATORY_STRATEGIES
+    ]
+    ax.bar(
+        x,
+        means,
+        0.66,
+        yerr=errors,
+        capsize=3,
+        color=[STRATEGY_COLORS[strategy] for strategy in CONFIRMATORY_STRATEGIES],
+        edgecolor="#333333",
+        linewidth=0.5,
+    )
     ax.set_xticks(x, [STRATEGY_LABELS[strategy] for strategy in CONFIRMATORY_STRATEGIES])
     ax.set_ylabel("Mean test AUPRC")
-    ax.set_title("B. Independent full RealNVP campaign")
+    ax.set_title("B. Full RealNVP campaign: all interventions")
     ax.set_ylim(0.35, 0.85)
-    ax.legend(frameon=False, fontsize=9)
     ax.grid(axis="y", alpha=0.2)
 
     figure.suptitle(
@@ -917,6 +890,7 @@ def analyze(
     (
         confirmatory,
         confirmatory_interventions,
+        confirmatory_overall,
         confirmatory_sha,
     ) = confirmatory_system_group_performance(
         confirmatory_results,
@@ -934,6 +908,7 @@ def analyze(
             "confirmatory_realnvp_intervention_performance.csv",
             confirmatory_interventions,
         ),
+        ("confirmatory_realnvp_all_intervention_performance.csv", confirmatory_overall),
     )
     for name, frame in tables:
         path = output_dir / name
@@ -948,6 +923,7 @@ def analyze(
         contrasts,
         confirmatory,
         confirmatory_interventions,
+        confirmatory_overall,
         figure,
     )
     outputs.append(figure)
@@ -1018,6 +994,7 @@ def analyze(
             "classification": (
                 "prespecified ten-seed campaign; physical-class split is descriptive"
             ),
+            "all_intervention_performance": confirmatory_overall.to_dict(orient="records"),
             "system_group_performance": confirmatory.to_dict(orient="records"),
         },
         "claim_boundary": (

@@ -689,7 +689,7 @@ def intervention_contrasts(
 def confirmatory_system_group_performance(
     path: Path,
     catalog: Mapping[str, Mapping[str, Any]],
-) -> tuple[pd.DataFrame, str]:
+) -> tuple[pd.DataFrame, pd.DataFrame, str]:
     """Summarize the independent ten-seed RealNVP campaign by physical class."""
     path = path.expanduser().resolve()
     frame = pd.read_csv(path)
@@ -707,6 +707,23 @@ def confirmatory_system_group_performance(
     )
     if selected["physical_class"].isna().any():
         raise ValueError("Confirmatory interventions are absent from the physical catalog.")
+    intervention_summary = (
+        selected.groupby(
+            ["strategy", "intervention", "target", "physical_class"],
+            sort=True,
+        )["value"]
+        .agg(["mean", "std", "count"])
+        .reset_index()
+        .rename(
+            columns={
+                "mean": "mean_auprc",
+                "std": "seed_sd",
+                "count": "n_reporting_seeds",
+            }
+        )
+    )
+    if len(intervention_summary) != 232 or set(intervention_summary["n_reporting_seeds"]) != {10}:
+        raise ValueError("Confirmatory intervention summary lacks exact 4x58x10 coverage.")
     seed_first = (
         selected.groupby(["strategy", "physical_class", "seed"], sort=True)["value"]
         .mean()
@@ -727,7 +744,7 @@ def confirmatory_system_group_performance(
     )
     if len(summary) != 8 or set(summary["n_reporting_seeds"]) != {10}:
         raise ValueError("Confirmatory physical-class summary lacks exact 4x2x10 coverage.")
-    return summary, _sha256(path)
+    return summary, intervention_summary, _sha256(path)
 
 
 def _plot(
@@ -736,37 +753,46 @@ def _plot(
     associations: pd.DataFrame,
     contrasts: pd.DataFrame,
     confirmatory: pd.DataFrame,
+    confirmatory_interventions: pd.DataFrame,
     output: Path,
 ) -> None:
     """Create the physical-results-only theorem-bridge figure."""
-    del score_metrics, associations, contrasts
+    del score_metrics, candidate, associations, contrasts
     figure, axes = plt.subplots(1, 2, figsize=(12.8, 5.0), constrained_layout=True)
 
     ax = axes[0]
-    real_candidates = candidate[candidate["model"] == "realnvp"].sort_values(
-        "validation_cap_mean_rank"
+    displayed_strategies = ("cap_metadata_nearest", "drift", "wasserstein")
+    jitter_rng = np.random.default_rng(SEED)
+    for strategy_index, strategy in enumerate(displayed_strategies):
+        for physical_class, marker, label in (
+            ("process_or_actuator", "o", "Process/actuator shifts"),
+            ("measurement_chain", "s", "Measurement-chain shifts"),
+        ):
+            subset = confirmatory_interventions[
+                (confirmatory_interventions["strategy"] == strategy)
+                & (confirmatory_interventions["physical_class"] == physical_class)
+            ]
+            jitter = jitter_rng.uniform(-0.16, 0.16, len(subset))
+            ax.scatter(
+                strategy_index + jitter,
+                subset["mean_auprc"],
+                color=STRATEGY_COLORS[strategy],
+                edgecolor="#333333",
+                linewidth=0.35,
+                marker=marker,
+                s=22,
+                alpha=0.68,
+                label=label if strategy_index == 0 else None,
+            )
+    ax.set_xticks(
+        np.arange(len(displayed_strategies)),
+        [STRATEGY_LABELS[strategy] for strategy in displayed_strategies],
     )
-    for physical_class, column, marker in (
-        ("process_or_actuator", "process_auprc", "o"),
-        ("measurement_chain", "measurement_auprc", "s"),
-    ):
-        label = (
-            "Process shifts" if physical_class == "process_or_actuator" else "Measurement shifts"
-        )
-        ax.scatter(
-            real_candidates["validation_cap_mean_rank"],
-            real_candidates[column],
-            color=GROUP_COLORS[physical_class],
-            marker=marker,
-            s=50,
-            alpha=0.85,
-            label=label,
-        )
-    ax.set_xlabel("Normal-only CAP rank (mean across seeds)")
-    ax.set_ylabel("Mean sealed test AUPRC")
-    ax.set_title("A. Real physical interventions")
+    ax.set_ylabel("Intervention AUPRC (mean across 10 seeds)")
+    ax.set_title("A. Raw performance on all 58 physical interventions")
+    ax.set_ylim(0.25, 1.01)
     ax.legend(frameon=False, fontsize=9)
-    ax.grid(alpha=0.2)
+    ax.grid(axis="y", alpha=0.2)
 
     ax = axes[1]
     x = np.arange(len(CONFIRMATORY_STRATEGIES))
@@ -836,7 +862,11 @@ def analyze(
     ranked, candidate = candidate_summary(score_metrics, outcomes)
     associations = association_table(candidate)
     contrasts = intervention_contrasts(score_metrics, outcomes)
-    confirmatory, confirmatory_sha = confirmatory_system_group_performance(
+    (
+        confirmatory,
+        confirmatory_interventions,
+        confirmatory_sha,
+    ) = confirmatory_system_group_performance(
         confirmatory_results,
         catalog,
     )
@@ -848,6 +878,10 @@ def analyze(
         ("matched_marginal_associations.csv", associations),
         ("physical_intervention_cap_quartile_contrasts.csv", contrasts),
         ("confirmatory_realnvp_system_group_performance.csv", confirmatory),
+        (
+            "confirmatory_realnvp_intervention_performance.csv",
+            confirmatory_interventions,
+        ),
     )
     for name, frame in tables:
         path = output_dir / name
@@ -855,7 +889,15 @@ def analyze(
         outputs.append(path)
 
     figure = output_dir / "cchamber_theorem_bridge.png"
-    _plot(score_metrics, candidate, associations, contrasts, confirmatory, figure)
+    _plot(
+        score_metrics,
+        candidate,
+        associations,
+        contrasts,
+        confirmatory,
+        confirmatory_interventions,
+        figure,
+    )
     outputs.append(figure)
 
     validation_test = {}

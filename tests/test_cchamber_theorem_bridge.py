@@ -42,6 +42,16 @@ def test_matched_marginal_metrics_leave_only_paired_cap_discriminative() -> None
     assert high["paired_spearman"] > 0.95
 
 
+def test_common_quantile_calibration_handles_rare_atoms_without_reordering() -> None:
+    """The distributional transform only randomizes observations tied exactly."""
+    scores = np.asarray([0.0, 1.0, 1.0, 2.0] * 30)
+    calibrated = bridge.common_quantile_calibration(scores, tie_seed=7)
+
+    assert np.max(calibrated[scores == 0.0]) < np.min(calibrated[scores == 1.0])
+    assert np.max(calibrated[scores == 1.0]) < np.min(calibrated[scores == 2.0])
+    assert np.unique(calibrated).size == len(scores)
+
+
 def test_candidate_summary_uses_seed_first_cap_ranks() -> None:
     """Candidate aggregation keeps model seeds paired before averaging."""
     score_rows = []

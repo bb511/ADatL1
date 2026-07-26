@@ -329,14 +329,17 @@ def extract_scores(
     return npz_path, marker_path
 
 
-def common_quantile_calibration(scores: np.ndarray) -> np.ndarray:
-    """Map distinct scores monotonically to one common normal-quantile grid."""
+def common_quantile_calibration(
+    scores: np.ndarray,
+    *,
+    tie_seed: int = SEED,
+) -> np.ndarray:
+    """Map scores to one grid, using a deterministic distributional transform for ties."""
     scores = np.asarray(scores, dtype=np.float64).reshape(-1)
     if not np.isfinite(scores).all() or len(scores) < 100:
         raise ValueError("Score calibration requires a finite nontrivial vector.")
-    if np.unique(scores).size != len(scores):
-        raise ValueError("Exact marginal calibration requires distinct continuous scores.")
-    order = np.argsort(scores, kind="mergesort")
+    tie_breaker = np.random.default_rng(int(tie_seed)).random(len(scores))
+    order = np.lexsort((tie_breaker, scores))
     quantiles = stats.norm.ppf((np.arange(len(scores), dtype=float) + 0.5) / len(scores))
     calibrated = np.empty_like(scores)
     calibrated[order] = quantiles
@@ -352,8 +355,9 @@ def matched_marginal_metrics(
     permutation_seed: int | None = None,
 ) -> dict[str, float]:
     """Return CAP and the two marginal criteria after exact calibration."""
-    first = common_quantile_calibration(scores_1)
-    second = common_quantile_calibration(scores_2)
+    seed = SEED if permutation_seed is None else int(permutation_seed)
+    first = common_quantile_calibration(scores_1, tie_seed=seed + 1)
+    second = common_quantile_calibration(scores_2, tie_seed=seed + 2)
     cap, _, beta = cap_lift_for_score_matrix(first[:, None], second[:, None], betas)
     wasserstein = float(np.mean(np.abs(np.sort(first) - np.sort(second))))
     threshold = float(np.quantile(first, 1.0 - fpr, method="higher"))
@@ -367,6 +371,8 @@ def matched_marginal_metrics(
         "threshold_drift": drift,
         "tail_exceedance": exceedance,
         "paired_spearman": paired_spearman,
+        "n_ties_view_1": int(len(scores_1) - np.unique(scores_1).size),
+        "n_ties_view_2": int(len(scores_2) - np.unique(scores_2).size),
     }
     if permutation_seed is not None:
         rng = np.random.default_rng(int(permutation_seed))
@@ -828,9 +834,23 @@ def analyze(
         ),
         "theorem_instantiation": {
             "calibration": (
-                "candidate- and view-specific monotone empirical normal-quantile calibration"
+                "candidate- and view-specific empirical normal-quantile calibration; exact "
+                "floating-point ties use an independent deterministic randomized "
+                "probability-integral transform"
             ),
             "ordering_preserved": True,
+            "maximum_ties_in_one_1000_score_view": int(
+                score_metrics[
+                    [
+                        "validation_n_ties_view_1",
+                        "validation_n_ties_view_2",
+                        "test_n_ties_view_1",
+                        "test_n_ties_view_2",
+                    ]
+                ]
+                .to_numpy()
+                .max()
+            ),
             "validation_wasserstein_unique_values": sorted(
                 map(float, score_metrics["validation_wasserstein"].unique())
             ),

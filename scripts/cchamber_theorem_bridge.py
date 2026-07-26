@@ -56,6 +56,24 @@ PRESENTATION_MODELS = ("svdd", "vae", "realnvp")
 MODEL_LABELS = {"ae": "AE", "vae": "VAE", "svdd": "SVDD", "realnvp": "RealNVP"}
 MODEL_COLORS = {"svdd": "#D55E00", "vae": "#CC79A7", "realnvp": "#0072B2"}
 GROUP_COLORS = {"process_or_actuator": "#0072B2", "measurement_chain": "#E69F00"}
+CONFIRMATORY_STRATEGIES = (
+    "cap_metadata_nearest",
+    "cap_encoder_nearest",
+    "drift",
+    "wasserstein",
+)
+STRATEGY_LABELS = {
+    "cap_metadata_nearest": "CAP\n(metadata)",
+    "cap_encoder_nearest": "CAP\n(encoder)",
+    "drift": "Drift",
+    "wasserstein": "Wasserstein",
+}
+STRATEGY_COLORS = {
+    "cap_metadata_nearest": "#0072B2",
+    "cap_encoder_nearest": "#56B4E9",
+    "drift": "#E69F00",
+    "wasserstein": "#009E73",
+}
 
 
 def _sha256(path: Path) -> str:
@@ -673,16 +691,62 @@ def intervention_contrasts(
     return summary
 
 
+def confirmatory_system_group_performance(
+    path: Path,
+    catalog: Mapping[str, Mapping[str, Any]],
+) -> tuple[pd.DataFrame, str]:
+    """Summarize the independent ten-seed RealNVP campaign by physical class."""
+    path = path.expanduser().resolve()
+    frame = pd.read_csv(path)
+    identity = ["model", "strategy", "seed", "intervention", "metric"]
+    if len(frame) != 23_200 or frame.duplicated(identity).any():
+        raise ValueError("Confirmatory result table lacks exact 23,200-row coverage.")
+    selected = frame[
+        (frame["model"] == "realnvp")
+        & (frame["metric"] == "auprc")
+        & (frame["strategy"].isin(CONFIRMATORY_STRATEGIES))
+    ].copy()
+    selected["target"] = selected["intervention"].map(_intervention_target)
+    selected["physical_class"] = selected["target"].map(
+        {target: record["physical_class"] for target, record in catalog.items()}
+    )
+    if selected["physical_class"].isna().any():
+        raise ValueError("Confirmatory interventions are absent from the physical catalog.")
+    seed_first = (
+        selected.groupby(["strategy", "physical_class", "seed"], sort=True)["value"]
+        .mean()
+        .rename("seed_mean_auprc")
+        .reset_index()
+    )
+    summary = (
+        seed_first.groupby(["strategy", "physical_class"], sort=True)["seed_mean_auprc"]
+        .agg(["mean", "std", "count"])
+        .reset_index()
+        .rename(
+            columns={
+                "mean": "mean_auprc",
+                "std": "seed_sd",
+                "count": "n_reporting_seeds",
+            }
+        )
+    )
+    if len(summary) != 8 or set(summary["n_reporting_seeds"]) != {10}:
+        raise ValueError("Confirmatory physical-class summary lacks exact 4x2x10 coverage.")
+    return summary, _sha256(path)
+
+
 def _plot(
     score_metrics: pd.DataFrame,
     candidate: pd.DataFrame,
     associations: pd.DataFrame,
     contrasts: pd.DataFrame,
+    confirmatory: pd.DataFrame,
     output: Path,
 ) -> None:
     """Create the information-dense theorem-bridge figure."""
     del contrasts
-    figure, axes = plt.subplots(1, 3, figsize=(15.6, 4.8), constrained_layout=True)
+    figure, axes = plt.subplots(2, 2, figsize=(12.8, 9.2), constrained_layout=True)
+    axes = axes.ravel()
 
     ax = axes[0]
     realnvp = score_metrics[score_metrics["model"] == "realnvp"].copy()
@@ -764,6 +828,43 @@ def _plot(
     ax.legend(frameon=False, fontsize=9)
     ax.grid(alpha=0.2)
 
+    ax = axes[3]
+    x = np.arange(len(CONFIRMATORY_STRATEGIES))
+    width = 0.36
+    for offset, physical_class in ((-0.5, "process_or_actuator"), (0.5, "measurement_chain")):
+        subset = confirmatory.set_index(["strategy", "physical_class"])
+        means = [
+            float(subset.loc[(strategy, physical_class), "mean_auprc"])
+            for strategy in CONFIRMATORY_STRATEGIES
+        ]
+        errors = [
+            float(subset.loc[(strategy, physical_class), "seed_sd"]) / math.sqrt(10.0)
+            for strategy in CONFIRMATORY_STRATEGIES
+        ]
+        ax.bar(
+            x + offset * width,
+            means,
+            width,
+            yerr=errors,
+            capsize=3,
+            color=[STRATEGY_COLORS[strategy] for strategy in CONFIRMATORY_STRATEGIES],
+            alpha=0.70 if physical_class == "process_or_actuator" else 1.0,
+            hatch="//" if physical_class == "process_or_actuator" else None,
+            edgecolor="#333333",
+            linewidth=0.5,
+            label=(
+                "Process/actuator shifts"
+                if physical_class == "process_or_actuator"
+                else "Measurement-chain shifts"
+            ),
+        )
+    ax.set_xticks(x, [STRATEGY_LABELS[strategy] for strategy in CONFIRMATORY_STRATEGIES])
+    ax.set_ylabel("Mean test AUPRC")
+    ax.set_title("D. Independent full RealNVP campaign")
+    ax.set_ylim(0.35, 0.85)
+    ax.legend(frameon=False, fontsize=9)
+    ax.grid(axis="y", alpha=0.2)
+
     figure.suptitle(
         "Causal Chamber theorem bridge: matched marginals, paired reliability, physical power",
         fontsize=14,
@@ -776,6 +877,7 @@ def analyze(
     audit_root: Path,
     scores_root: Path,
     target_catalog: Path,
+    confirmatory_results: Path,
     output_dir: Path,
 ) -> list[Path]:
     """Analyze all score artifacts and create the theorem bridge."""
@@ -794,6 +896,10 @@ def analyze(
     ranked, candidate = candidate_summary(score_metrics, outcomes)
     associations = association_table(candidate)
     contrasts = intervention_contrasts(score_metrics, outcomes)
+    confirmatory, confirmatory_sha = confirmatory_system_group_performance(
+        confirmatory_results,
+        catalog,
+    )
 
     outputs = []
     tables = (
@@ -801,6 +907,7 @@ def analyze(
         ("matched_marginal_candidate_summary.csv", candidate),
         ("matched_marginal_associations.csv", associations),
         ("physical_intervention_cap_quartile_contrasts.csv", contrasts),
+        ("confirmatory_realnvp_system_group_performance.csv", confirmatory),
     )
     for name, frame in tables:
         path = output_dir / name
@@ -808,7 +915,7 @@ def analyze(
         outputs.append(path)
 
     figure = output_dir / "cchamber_theorem_bridge.png"
-    _plot(score_metrics, candidate, associations, contrasts, figure)
+    _plot(score_metrics, candidate, associations, contrasts, confirmatory, figure)
     outputs.append(figure)
 
     validation_test = {}
@@ -873,6 +980,12 @@ def analyze(
             "random_pair_negative_control": pairing_control,
         },
         "physical_intervention_associations": associations.to_dict(orient="records"),
+        "independent_confirmatory_realnvp": {
+            "classification": (
+                "prespecified ten-seed campaign; physical-class split is descriptive"
+            ),
+            "system_group_performance": confirmatory.to_dict(orient="records"),
+        },
         "claim_boundary": (
             "Marginal matching demonstrates non-identifiability, not universal CAP superiority. "
             "Physical power additionally requires the theorem's alignment condition; architectures "
@@ -894,6 +1007,8 @@ def analyze(
         "checkpoint_manifest_sha256": _sha256(audit_root / "checkpoint_manifest.json"),
         "physical_catalog": str(target_catalog.expanduser().resolve()),
         "physical_catalog_sha256": catalog_sha,
+        "confirmatory_results": str(confirmatory_results.expanduser().resolve()),
+        "confirmatory_results_sha256": confirmatory_sha,
         "score_artifact_manifest_sha256": hashlib.sha256(
             _canonical_json(
                 [
@@ -932,6 +1047,7 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     analysis.add_argument("--audit-root", type=Path, required=True)
     analysis.add_argument("--scores-root", type=Path, required=True)
     analysis.add_argument("--target-catalog", type=Path, required=True)
+    analysis.add_argument("--confirmatory-results", type=Path, required=True)
     analysis.add_argument("--output-dir", type=Path, required=True)
     return parser.parse_args(argv)
 
@@ -947,6 +1063,7 @@ def main(argv: Sequence[str] | None = None) -> None:
             args.audit_root,
             args.scores_root,
             args.target_catalog,
+            args.confirmatory_results,
             args.output_dir,
         ):
             print(path)

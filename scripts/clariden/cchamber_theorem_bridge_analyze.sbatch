@@ -17,7 +17,8 @@ readonly SCRATCH_ROOT=/iopsstor/scratch/cscs/vjimenez/adatl1
 readonly AUDIT_ROOT="${SCRATCH_ROOT}/audits/cchamber_real_20260725_63b941a_candidate_rank_d1a3017"
 readonly BRIDGE_ROOT="${SCRATCH_ROOT}/audits/cchamber_theorem_bridge_20260726"
 readonly TARGET_CATALOG="${SCRATCH_ROOT}/campaigns/cchamber_real_20260725_63b941a/design/physical_intervention_catalog_v1.json"
-readonly OUTPUT_DIR="${BRIDGE_ROOT}/analysis"
+readonly CONFIRMATORY_RESULTS="${SCRATCH_ROOT}/audits/cchamber_real_20260725_63b941a_threshold_d1a3017/results/threshold_safe_results.csv"
+readonly OUTPUT_DIR="${BRIDGE_ROOT}/analysis_v2"
 readonly UV_BIN="${SCRATCH_ROOT}/tools/uv-0.11.32/uv"
 
 export UV_PROJECT_ENVIRONMENT="${SCRATCH_ROOT}/.venv-clariden"
@@ -31,4 +32,5 @@ cd "${REPOSITORY_ROOT}"
   --audit-root "${AUDIT_ROOT}" \
   --scores-root "${BRIDGE_ROOT}/scores" \
   --target-catalog "${TARGET_CATALOG}" \
+  --confirmatory-results "${CONFIRMATORY_RESULTS}" \
   --output-dir "${OUTPUT_DIR}"

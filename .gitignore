@@ -12,6 +12,9 @@ notebooks/exported_metrics
 # Ignore MAC stuff.
 .DS_Store
 
+# Ignore claude instructions
+CLAUDE.md
+
 # Ignore sublime text editor configuration.
 .sublime
 sftp-config.json

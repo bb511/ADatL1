@@ -27,6 +27,7 @@ matplotlib.use("Agg")
 import matplotlib.pyplot as plt  # noqa: E402
 
 MODELS = ("ae", "vae", "svdd", "realnvp")
+PRESENTATION_MODELS = ("svdd", "vae", "realnvp")
 STRATEGIES = (
     "cap_metadata_nearest",
     "cap_encoder_nearest",
@@ -303,14 +304,14 @@ def physical_associations(
 def _plot_architecture_overview(strategy: pd.DataFrame, output: Path) -> None:
     """Plot selected performance and seed-level intervals for every architecture."""
     figure, axes = plt.subplots(1, 2, figsize=(13.5, 5.0), sharex=True)
-    x = np.arange(len(MODELS), dtype=float)
+    x = np.arange(len(PRESENTATION_MODELS), dtype=float)
     offsets = np.linspace(-0.24, 0.24, len(STRATEGIES))
     for axis, metric in zip(axes, METRICS):
         for offset, method in zip(offsets, STRATEGIES):
             selected = (
                 strategy[(strategy["metric"] == metric) & (strategy["strategy"] == method)]
                 .set_index("model")
-                .reindex(MODELS)
+                .reindex(PRESENTATION_MODELS)
             )
             mean = selected["mean"].to_numpy(dtype=float)
             low = mean - selected["ci_low"].to_numpy(dtype=float)
@@ -325,7 +326,7 @@ def _plot_architecture_overview(strategy: pd.DataFrame, output: Path) -> None:
                 color=STRATEGY_COLORS[method],
                 label=STRATEGY_LABELS[method],
             )
-        axis.set_xticks(x, [MODEL_LABELS[model] for model in MODELS])
+        axis.set_xticks(x, [MODEL_LABELS[model] for model in PRESENTATION_MODELS])
         axis.set_ylabel("Mean AUPRC" if metric == "auprc" else "Efficiency at frozen 1% FPR")
         axis.set_title(
             "Primary: intervention-weighted AUPRC"
@@ -355,13 +356,13 @@ def _plot_rank_heatmap(rank: pd.DataFrame, output: Path) -> None:
     for axis, metric in zip(axes, METRICS):
         selected = rank[rank["metric"] == metric]
         rho = selected.pivot(index="model", columns="strategy", values="spearman_rho").reindex(
-            index=MODELS, columns=STRATEGIES
+            index=PRESENTATION_MODELS, columns=STRATEGIES
         )
         adjusted = selected.pivot(
             index="model", columns="strategy", values="spearman_holm_p"
-        ).reindex(index=MODELS, columns=STRATEGIES)
+        ).reindex(index=PRESENTATION_MODELS, columns=STRATEGIES)
         image = axis.imshow(rho.to_numpy(), cmap="coolwarm", vmin=-1, vmax=1, aspect="auto")
-        for row in range(len(MODELS)):
+        for row in range(len(PRESENTATION_MODELS)):
             for column in range(len(STRATEGIES)):
                 value = rho.iloc[row, column]
                 marker = "*" if adjusted.iloc[row, column] < 0.05 else ""
@@ -380,7 +381,10 @@ def _plot_rank_heatmap(rank: pd.DataFrame, output: Path) -> None:
             rotation=35,
             ha="right",
         )
-        axis.set_yticks(np.arange(len(MODELS)), [MODEL_LABELS[name] for name in MODELS])
+        axis.set_yticks(
+            np.arange(len(PRESENTATION_MODELS)),
+            [MODEL_LABELS[name] for name in PRESENTATION_MODELS],
+        )
         axis.set_title("AUPRC" if metric == "auprc" else "Efficiency at 1% FPR")
     color_axis = figure.add_axes((0.925, 0.22, 0.016, 0.58))
     figure.colorbar(image, cax=color_axis, label="Candidate-rank Spearman ρ")

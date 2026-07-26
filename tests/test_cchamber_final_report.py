@@ -8,6 +8,13 @@ import pytest
 from scripts import cchamber_final_report
 
 
+def test_presentation_model_order_excludes_ae() -> None:
+    """The first two presentation figures use the frozen requested model order."""
+    assert cchamber_final_report.PRESENTATION_MODELS == ("svdd", "vae", "realnvp")
+    assert "ae" not in cchamber_final_report.PRESENTATION_MODELS
+    assert "ae" in cchamber_final_report.MODELS
+
+
 def _inputs() -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
     """Return a monotonic three-strength synthetic report bundle."""
     rows = []

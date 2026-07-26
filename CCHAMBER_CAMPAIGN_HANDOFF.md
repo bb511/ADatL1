@@ -40,8 +40,10 @@ This section supersedes the older execution snapshot below.
   background-acceptance chains before producing seed-first inference.
 - Final information-dense report:
   `/users/vjimenez/adatl1/results/reports/cchamber_real_20260726_d1a3017/FINAL_REPORT.md`.
-  It uses three main figures: architecture/criterion performance,
-  candidate-rank validity, and physical-shift/detectability/CAP-gain synthesis.
+  Its active confirmatory presentation uses two main figures:
+  architecture/criterion performance and candidate-rank validity. The former
+  physical-shift synthesis is retained only in the versioned artifact archive
+  and is not part of the active report.
 - Primary conclusion: CAP is strongly supported for RealNVP, partially and
   endpoint-dependently supported for AE/VAE, and contradicted for SVDD. Do not
   replace this architecture-specific conclusion with a universal CAP claim.

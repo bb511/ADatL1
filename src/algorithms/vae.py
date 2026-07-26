@@ -1,17 +1,17 @@
 # Variational auto-encoder model implementation.
-from typing import Optional
 from contextlib import nullcontext
+from typing import Optional
 
 import torch
 from torch import nn
 
 from src.algorithms import ADLightningModule
+from src.algorithms.components.decoder import Decoder
+from src.algorithms.components.encoder import VariationalEncoder
 from src.algorithms.losses.vae import ClassicVAELoss
 from src.algorithms.schedulers.linear import LinearWarmup
-from src.algorithms.utils.weight_loader import load_weights
 from src.algorithms.utils.object_feature_map_loader import inject_object_feature_map
-from src.algorithms.components.encoder import VariationalEncoder
-from src.algorithms.components.decoder import Decoder
+from src.algorithms.utils.weight_loader import load_weights
 from src.data.utils import unpack_batch
 from src.utils import pylogger
 
@@ -28,8 +28,8 @@ class VAE(ADLightningModule):
     :param features: Optional nn module applied to the flattened input.
     :param ckpt: Optional checkpoint path to resume weights from.
     :param target_rate: Target background rate or FPR.
-    :param base_rate: Base rate used to convert target_rate into an FPR.
-        If None, target_rate is interpreted directly as an FPR.
+    :param base_rate: Base rate used to convert target_rate into an FPR. If None, target_rate is
+        interpreted directly as an FPR.
     """
 
     def __init__(
@@ -60,12 +60,17 @@ class VAE(ADLightningModule):
         self.use_mask = bool(mask)
         self.kl_warmup_frac = kl_warmup_frac
 
-        self.loss = loss if loss is not None else ClassicVAELoss(
-            kl_scale=kl_scale, reduction="none"
+        self.loss = (
+            loss if loss is not None else ClassicVAELoss(kl_scale=kl_scale, reduction="none")
         )
+        # Validation/test-only sidecars do not call ``on_fit_start``.  Initialize
+        # inference at the final KL scale; fitting replaces this with the
+        # configured step-aware warmup below.
+        self._setup_kl_annealing(0.0, total_steps=1)
         self._maybe_build_keras_modules()
 
     def on_fit_start(self):
+        """Initialize feature injection and step-aware KL annealing for fitting."""
         inject_object_feature_map(self)
         self.features.to(self.device)
 
@@ -76,13 +81,16 @@ class VAE(ADLightningModule):
             self._load_checkpoint()
 
     def on_test_start(self):
+        """Inject the configured object-feature mapping before test inference."""
         inject_object_feature_map(self)
 
     @property
     def target_fpr(self) -> float:
+        """Return the configured target false-positive probability."""
         return self.compute_target_fpr()
 
     def forward(self, x: torch.Tensor) -> tuple[torch.Tensor, ...]:
+        """Encode, sample, and reconstruct one input batch."""
         x = self.features(x)
         with self._keras_device_scope(x.device):
             z_mean, z_log_var, z = self.encoder(x)
@@ -90,6 +98,7 @@ class VAE(ADLightningModule):
         return z_mean, z_log_var, z, reconstruction
 
     def model_step(self, batch: torch.Tensor) -> dict[str, torch.Tensor]:
+        """Compute VAE losses, anomaly scores, and diagnostic quantities."""
         b = unpack_batch(batch)
 
         x = torch.flatten(b.x, start_dim=1)
@@ -112,9 +121,7 @@ class VAE(ADLightningModule):
         # The operational anomaly score is hard-configured to the raw KL.
         ascore = kl_raw
         if ascore.ndim != 1:
-            raise ValueError(
-                f"Expected per-event ascores, got {tuple(ascore.shape)}."
-            )
+            raise ValueError(f"Expected per-event ascores, got {tuple(ascore.shape)}.")
 
         loss = self._add_hgq_loss(loss)
 
@@ -126,9 +133,7 @@ class VAE(ADLightningModule):
                 k_eff = min(max(10, k), n)
                 operational_ascore = torch.topk(ascore, k_eff).values.mean().item()
             else:
-                operational_ascore = torch.quantile(
-                    ascore, 1.0 - self.target_fpr
-                ).item()
+                operational_ascore = torch.quantile(ascore, 1.0 - self.target_fpr).item()
 
             q50, q99 = torch.quantile(
                 ascore, torch.tensor([0.5, 0.99], device=ascore.device)
@@ -167,6 +172,7 @@ class VAE(ADLightningModule):
         }
 
     def outlog(self, outdict: dict) -> dict:
+        """Select scalar training and validation quantities for logging."""
         return {
             "loss": outdict.get("loss"),
             "loss_mean": outdict.get("loss/mean"),
@@ -221,19 +227,26 @@ class VAE(ADLightningModule):
         add_loss = loss.new_tensor(0.0)
 
         if hasattr(self.encoder, "losses") and len(self.encoder.losses) > 0:
-            add_loss = add_loss + torch.stack(
-                [self._to_loss_device(l, loss) for l in self.encoder.losses]
-            ).sum()
+            add_loss = (
+                add_loss
+                + torch.stack(
+                    [self._to_loss_device(value, loss) for value in self.encoder.losses]
+                ).sum()
+            )
 
         if hasattr(self.decoder, "losses") and len(self.decoder.losses) > 0:
-            add_loss = add_loss + torch.stack(
-                [self._to_loss_device(l, loss) for l in self.decoder.losses]
-            ).sum()
+            add_loss = (
+                add_loss
+                + torch.stack(
+                    [self._to_loss_device(value, loss) for value in self.decoder.losses]
+                ).sum()
+            )
 
         return loss + add_loss
 
     @staticmethod
     def _to_loss_device(value, reference: torch.Tensor) -> torch.Tensor:
+        """Move or construct one auxiliary loss on the reference tensor device."""
         if torch.is_tensor(value):
             return value.to(device=reference.device, dtype=reference.dtype)
         return reference.new_tensor(value)
@@ -263,6 +276,7 @@ class VAE(ADLightningModule):
             self.decoder(z)
 
     def _keras_device_scope(self, device: torch.device):
+        """Return a Keras torch-backend device scope when available."""
         if not hasattr(self.encoder, "trainable_variables"):
             return nullcontext()
         try:
@@ -325,9 +339,7 @@ class RVAE(VAE):
                 k_eff = min(max(10, k), n)
                 operational_ascore = torch.topk(ascore, k_eff).values.mean().item()
             else:
-                operational_ascore = torch.quantile(
-                    ascore, 1.0 - self.target_fpr
-                ).item()
+                operational_ascore = torch.quantile(ascore, 1.0 - self.target_fpr).item()
 
             q50, q99 = torch.quantile(
                 ascore, torch.tensor([0.5, 0.99], device=ascore.device)

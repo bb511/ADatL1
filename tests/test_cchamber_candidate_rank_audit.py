@@ -16,6 +16,7 @@ import torch
 from pytorch_lightning.callbacks import ModelCheckpoint
 
 from scripts import cchamber_candidate_rank_audit as audit
+from src.algorithms.vae import VAE
 from src.callbacks.audit import CheckpointBranchManifest, TrajectoryFingerprint
 from src.callbacks.efficiency import AnomalyEfficiencyCallback
 from src.utils.pairing.io import compose_config
@@ -44,6 +45,16 @@ def test_all_candidate_rank_configs_compose_with_five_branches(monkeypatch) -> N
         assert cfg.data.signal_experiments == []
         assert cfg.test is False
         assert cfg.evaluation is None
+
+
+def test_vae_has_final_kl_scale_before_fit_for_sealed_evaluation() -> None:
+    """A test-only VAE must not depend on the fit-start lifecycle hook."""
+    model = VAE(
+        encoder=torch.nn.Identity(),
+        decoder=torch.nn.Identity(),
+        kl_scale=0.125,
+    )
+    assert model.kl_scale(0) == pytest.approx(0.125)
 
 
 def test_training_efficiency_callback_supports_normal_only_validation() -> None:

@@ -409,6 +409,25 @@ def _class_rho(frame: pd.DataFrame, y: str, group: str) -> float:
     return float(stats.spearmanr(selected["biased_energy_distance"], selected[y]).statistic)
 
 
+def _add_presentation_contrasts(pivot: pd.DataFrame) -> pd.DataFrame:
+    """Add the three strategy contrasts shown in the physical synthesis."""
+    required = {
+        "cap_metadata_nearest",
+        "cap_encoder_nearest",
+        "cap_random",
+        "drift",
+        "wasserstein",
+    }
+    missing = sorted(required - set(pivot.columns))
+    if missing:
+        raise ValueError(f"Physical synthesis misses strategies {missing}.")
+    output = pivot.copy()
+    output["metadata_minus_random"] = output["cap_metadata_nearest"] - output["cap_random"]
+    output["encoder_minus_drift"] = output["cap_encoder_nearest"] - output["drift"]
+    output["encoder_minus_wasserstein"] = output["cap_encoder_nearest"] - output["wasserstein"]
+    return output
+
+
 def _plot_physical_synthesis(
     intervention: pd.DataFrame,
     output: Path,
@@ -425,11 +444,11 @@ def _plot_physical_synthesis(
         "biased_energy_distance",
     ]
     pivot = auprc.pivot(index=index, columns="strategy", values="mean_performance").reset_index()
-    pivot["metadata_minus_random"] = pivot["cap_metadata_nearest"] - pivot["cap_random"]
+    pivot = _add_presentation_contrasts(pivot)
     figure, axes = plt.subplots(
-        2,
+        4,
         len(MODELS),
-        figsize=(15.5, 7.6),
+        figsize=(15.5, 13.2),
         sharex="col",
         sharey="row",
     )
@@ -440,7 +459,9 @@ def _plot_physical_synthesis(
     for column, model in enumerate(MODELS):
         selected = pivot[pivot["model"] == model]
         top = axes[0, column]
-        bottom = axes[1, column]
+        metadata_random = axes[1, column]
+        encoder_drift = axes[2, column]
+        encoder_wasserstein = axes[3, column]
         for group, (color, marker, label) in class_style.items():
             group_rows = selected[selected["system_group"] == group]
             top.scatter(
@@ -461,9 +482,25 @@ def _plot_physical_synthesis(
                 s=24,
                 alpha=0.55,
             )
-            bottom.scatter(
+            metadata_random.scatter(
                 group_rows["biased_energy_distance"],
                 group_rows["metadata_minus_random"],
+                c=color,
+                marker=marker,
+                s=24,
+                alpha=0.8,
+            )
+            encoder_drift.scatter(
+                group_rows["biased_energy_distance"],
+                group_rows["encoder_minus_drift"],
+                c=color,
+                marker=marker,
+                s=24,
+                alpha=0.8,
+            )
+            encoder_wasserstein.scatter(
+                group_rows["biased_energy_distance"],
+                group_rows["encoder_minus_wasserstein"],
                 c=color,
                 marker=marker,
                 s=24,
@@ -480,29 +517,32 @@ def _plot_physical_synthesis(
             fontsize=8,
             bbox={"facecolor": "white", "alpha": 0.75, "edgecolor": "none"},
         )
-        bottom.axhline(0, color="black", linewidth=0.8)
-        top.set_xscale("log")
-        bottom.set_xscale("log")
+        for contrast_axis in (metadata_random, encoder_drift, encoder_wasserstein):
+            contrast_axis.axhline(0, color="black", linewidth=0.8)
+        for axis in (top, metadata_random, encoder_drift, encoder_wasserstein):
+            axis.set_xscale("log")
+            axis.grid(alpha=0.18)
         top.set_ylim(0, 1.02)
         top.set_title(MODEL_LABELS[model])
-        top.grid(alpha=0.18)
-        bottom.grid(alpha=0.18)
-        bottom.set_xlabel("Physical shift (energy distance, log scale)")
+        encoder_wasserstein.set_xlabel("Physical shift (energy distance, log scale)")
         if column == 0:
             top.set_ylabel("AUPRC")
-            bottom.set_ylabel("Metadata CAP − random-pair CAP")
+            metadata_random.set_ylabel("Metadata CAP − random-pair CAP")
+            encoder_drift.set_ylabel("Encoder CAP − marginal drift")
+            encoder_wasserstein.set_ylabel("Encoder CAP − Wasserstein")
     handles, labels = axes[0, 0].get_legend_handles_labels()
     figure.legend(handles, labels, loc="lower center", ncol=2, frameon=False)
     figure.text(
         0.5,
-        0.485,
+        0.045,
         "Filled: metadata CAP; open: random-pair CAP. "
-        "Correlations are descriptive within system group; no pooled causal regression.",
+        "All contrasts are AUPRC differences. Correlations are descriptive "
+        "within system group; no pooled causal regression.",
         ha="center",
         fontsize=9,
     )
     figure.suptitle("Controlled physical shift, anomaly detectability, and CAP selection gain")
-    figure.tight_layout(rect=(0, 0.06, 1, 0.95), h_pad=2.5)
+    figure.tight_layout(rect=(0, 0.07, 1, 0.97), h_pad=1.7)
     figure.savefig(output, dpi=220, bbox_inches="tight")
     plt.close(figure)
 

@@ -15,6 +15,24 @@ def test_presentation_model_order_excludes_ae() -> None:
     assert "ae" in cchamber_final_report.MODELS
 
 
+def test_physical_presentation_contrasts_use_requested_strategies() -> None:
+    """Physical synthesis contrasts preserve the requested numerator and baseline."""
+    pivot = pd.DataFrame(
+        {
+            "cap_metadata_nearest": [0.8],
+            "cap_encoder_nearest": [0.7],
+            "cap_random": [0.5],
+            "drift": [0.4],
+            "wasserstein": [0.6],
+        }
+    )
+    result = cchamber_final_report._add_presentation_contrasts(pivot)
+
+    assert result["metadata_minus_random"].item() == pytest.approx(0.3)
+    assert result["encoder_minus_drift"].item() == pytest.approx(0.3)
+    assert result["encoder_minus_wasserstein"].item() == pytest.approx(0.1)
+
+
 def _inputs() -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
     """Return a monotonic three-strength synthetic report bundle."""
     rows = []

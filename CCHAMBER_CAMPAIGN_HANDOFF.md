@@ -39,20 +39,20 @@ This section supersedes the older execution snapshot below.
   job. Its bundle authenticated the threshold, selection, candidate-rank, and
   background-acceptance chains before producing seed-first inference.
 - Final information-dense report:
-  `/iopsstor/scratch/cscs/vjimenez/adatl1/reports/cchamber_real_20260726_d1a3017/FINAL_REPORT.md`.
+  `/users/vjimenez/adatl1/results/reports/cchamber_real_20260726_d1a3017/FINAL_REPORT.md`.
   It uses three main figures: architecture/criterion performance,
   candidate-rank validity, and physical-shift/detectability/CAP-gain synthesis.
 - Primary conclusion: CAP is strongly supported for RealNVP, partially and
   endpoint-dependently supported for AE/VAE, and contradicted for SVDD. Do not
   replace this architecture-specific conclusion with a universal CAP claim.
 - The post-confirmatory linear-Gaussian bridge is complete under
-  `reports/cchamber_real_20260726_d1a3017/gaussian_bridge_final`. It rejects a
-  full 11-readout Gaussian model and retains only an explicitly approximate
-  two-PC optical subspace. `uniform_red_mid` is nearly aligned with the CAP
-  direction and reaches AUPRC `.974` versus oracle `.976`; the matched-strength
-  near-orthogonal `uniform_blue_mid` reaches only `.536` versus oracle `.977`.
-  This is a mechanistic alignment stress test, not a confirmatory result, and it
-  does not revise the completed campaign.
+  `results/reports/cchamber_real_20260726_d1a3017/gaussian_bridge_final`. It
+  rejects a full 11-readout Gaussian model and retains only an explicitly
+  approximate two-PC optical subspace. `uniform_red_mid` is nearly aligned with
+  the CAP direction and reaches AUPRC `.974` versus oracle `.976`; the
+  matched-strength near-orthogonal `uniform_blue_mid` reaches only `.536`
+  versus oracle `.977`. This is a mechanistic alignment stress test, not a
+  confirmatory result, and it does not revise the completed campaign.
 
 ## Post-Handoff Updates
 

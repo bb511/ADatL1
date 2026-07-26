@@ -48,16 +48,18 @@ This section supersedes the older execution snapshot below.
   endpoint-dependently supported for AE/VAE, and contradicted for SVDD. Do not
   replace this architecture-specific conclusion with a universal CAP claim.
 - The retired Gaussianized two-intervention bridge has been replaced by the
-  post-confirmatory empirical alignment study at commit `999d531` under
+  post-confirmatory empirical alignment study, expanded at commit `1340368`
+  under
   `results/reports/cchamber_real_20260726_d1a3017/empirical_alignment_bridge_final`.
   It uses ten full-rank affine-whitened readouts with no Gaussianization or PCA.
-  On held-out real backgrounds, fixed-norm CAP AUPRC falls from `.940` when
-  aligned to `.270` when orthogonal while the direction-aware detector remains
-  at `.932`. Across all 58 physical interventions, validation-estimated
-  alignment predicts recovered test AUPRC lift (`rho=.693`, target-cluster 95%
-  CI `[.405,.868]`) and 1%-FPR efficiency (`rho=.615`, CI `[.224,.869]`). This
-  supports the alignment mechanism but is not a third confirmatory result and
-  does not assert the Gaussian theorem.
+  CAP, tail drift, and Wasserstein select distinct scores from the same 2,048
+  normal-only linear candidates. All three suffer a controlled angular failure;
+  across all 58 interventions, alignment predicts raw test AUPRC for CAP
+  (`rho=.566`, target-cluster 95% CI `[.243,.744]`), drift (`.444`,
+  `[.075,.705]`), and Wasserstein (`.588`, `[.266,.806]`). Wasserstein has the
+  highest bridge mean AUPRC (`.555` versus `.427/.436`). This shows that
+  alignment is the transferable mechanism, not a CAP-exclusive advantage. It
+  remains post-confirmatory and does not revise the architecture-level campaign.
 
 ## Post-Handoff Updates
 

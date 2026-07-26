@@ -47,14 +47,17 @@ This section supersedes the older execution snapshot below.
 - Primary conclusion: CAP is strongly supported for RealNVP, partially and
   endpoint-dependently supported for AE/VAE, and contradicted for SVDD. Do not
   replace this architecture-specific conclusion with a universal CAP claim.
-- The post-confirmatory linear-Gaussian bridge is complete under
-  `results/reports/cchamber_real_20260726_d1a3017/gaussian_bridge_final`. It
-  rejects a full 11-readout Gaussian model and retains only an explicitly
-  approximate two-PC optical subspace. `uniform_red_mid` is nearly aligned with
-  the CAP direction and reaches AUPRC `.974` versus oracle `.976`; the
-  matched-strength near-orthogonal `uniform_blue_mid` reaches only `.536`
-  versus oracle `.977`. This is a mechanistic alignment stress test, not a
-  confirmatory result, and it does not revise the completed campaign.
+- The retired Gaussianized two-intervention bridge has been replaced by the
+  post-confirmatory empirical alignment study at commit `999d531` under
+  `results/reports/cchamber_real_20260726_d1a3017/empirical_alignment_bridge_final`.
+  It uses ten full-rank affine-whitened readouts with no Gaussianization or PCA.
+  On held-out real backgrounds, fixed-norm CAP AUPRC falls from `.940` when
+  aligned to `.270` when orthogonal while the direction-aware detector remains
+  at `.932`. Across all 58 physical interventions, validation-estimated
+  alignment predicts recovered test AUPRC lift (`rho=.693`, target-cluster 95%
+  CI `[.405,.868]`) and 1%-FPR efficiency (`rho=.615`, CI `[.224,.869]`). This
+  supports the alignment mechanism but is not a third confirmatory result and
+  does not assert the Gaussian theorem.
 
 ## Post-Handoff Updates
 

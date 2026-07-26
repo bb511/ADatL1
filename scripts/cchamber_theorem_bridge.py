@@ -758,40 +758,92 @@ def _plot(
 ) -> None:
     """Create the physical-results-only theorem-bridge figure."""
     del score_metrics, candidate, associations, contrasts
-    figure, axes = plt.subplots(1, 2, figsize=(12.8, 5.0), constrained_layout=True)
+    figure, axes = plt.subplots(
+        1,
+        2,
+        figsize=(18.0, 6.4),
+        gridspec_kw={"width_ratios": (2.4, 1.0)},
+        constrained_layout=True,
+    )
 
     ax = axes[0]
     displayed_strategies = ("cap_metadata_nearest", "drift", "wasserstein")
-    jitter_rng = np.random.default_rng(SEED)
-    for strategy_index, strategy in enumerate(displayed_strategies):
-        for physical_class, marker, label in (
-            ("process_or_actuator", "o", "Process/actuator shifts"),
-            ("measurement_chain", "s", "Measurement-chain shifts"),
-        ):
-            subset = confirmatory_interventions[
-                (confirmatory_interventions["strategy"] == strategy)
-                & (confirmatory_interventions["physical_class"] == physical_class)
-            ]
-            jitter = jitter_rng.uniform(-0.16, 0.16, len(subset))
-            ax.scatter(
-                strategy_index + jitter,
-                subset["mean_auprc"],
-                color=STRATEGY_COLORS[strategy],
-                edgecolor="#333333",
-                linewidth=0.35,
-                marker=marker,
-                s=22,
-                alpha=0.68,
-                label=label if strategy_index == 0 else None,
+    physical_class_order = {"process_or_actuator": 0, "measurement_chain": 1}
+    intervention_order = (
+        confirmatory_interventions.assign(
+            _physical_class_order=confirmatory_interventions["physical_class"].map(
+                physical_class_order
             )
-    ax.set_xticks(
-        np.arange(len(displayed_strategies)),
-        [STRATEGY_LABELS[strategy] for strategy in displayed_strategies],
+        )
+        .sort_values(["_physical_class_order", "target", "intervention"])["intervention"]
+        .drop_duplicates()
+        .tolist()
     )
+    if len(intervention_order) != 58:
+        raise ValueError("Physical plot requires exactly 58 interventions.")
+    plot_x = np.arange(len(intervention_order))
+    for strategy, offset in zip(displayed_strategies, (-0.22, 0.0, 0.22), strict=True):
+        subset = (
+            confirmatory_interventions[confirmatory_interventions["strategy"] == strategy]
+            .set_index("intervention")
+            .loc[intervention_order]
+        )
+        ax.scatter(
+            plot_x + offset,
+            subset["mean_auprc"],
+            color=STRATEGY_COLORS[strategy],
+            edgecolor="#333333",
+            linewidth=0.25,
+            marker="o",
+            s=18,
+            alpha=0.85,
+            label=STRATEGY_LABELS[strategy].replace("\n", " "),
+        )
+    intervention_classes = (
+        confirmatory_interventions.drop_duplicates("intervention")
+        .set_index("intervention")
+        .loc[intervention_order, "physical_class"]
+    )
+    process_count = int((intervention_classes == "process_or_actuator").sum())
+    ax.axvspan(-0.5, process_count - 0.5, color="#0072B2", alpha=0.045, zorder=0)
+    ax.axvspan(
+        process_count - 0.5,
+        len(intervention_order) - 0.5,
+        color="#777777",
+        alpha=0.045,
+        zorder=0,
+    )
+    ax.axvline(process_count - 0.5, color="#777777", linewidth=0.8)
+    ax.text(
+        (process_count - 1) / 2,
+        1.025,
+        "Process/actuator shifts",
+        ha="center",
+        va="center",
+        fontsize=9,
+    )
+    ax.text(
+        (process_count + len(intervention_order) - 1) / 2,
+        1.025,
+        "Measurement-chain shifts",
+        ha="center",
+        va="center",
+        fontsize=9,
+    )
+    ax.set_xticks(
+        plot_x,
+        [
+            intervention.removeprefix("uniform_").replace("_", " ")
+            for intervention in intervention_order
+        ],
+        rotation=90,
+        fontsize=5.5,
+    )
+    ax.set_xlabel("Physical intervention")
     ax.set_ylabel("Intervention AUPRC (mean across 10 seeds)")
-    ax.set_title("A. Raw performance on all 58 physical interventions")
-    ax.set_ylim(0.25, 1.01)
-    ax.legend(frameon=False, fontsize=9)
+    ax.set_title("A. Criterion comparison for every physical intervention")
+    ax.set_ylim(0.25, 1.045)
+    ax.legend(frameon=False, fontsize=8, ncol=3, loc="lower left")
     ax.grid(axis="y", alpha=0.2)
 
     ax = axes[1]

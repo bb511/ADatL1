@@ -344,7 +344,7 @@ def _plot_architecture_overview(strategy: pd.DataFrame, output: Path) -> None:
 
 
 def _plot_rank_heatmap(rank: pd.DataFrame, output: Path) -> None:
-    """Plot candidate-rank validity with multiplicity-adjusted markers."""
+    """Plot candidate-rank validity."""
     figure, axes = plt.subplots(1, 2, figsize=(12.5, 4.4), sharey=True)
     short_labels = (
         "CAP metadata",
@@ -358,18 +358,14 @@ def _plot_rank_heatmap(rank: pd.DataFrame, output: Path) -> None:
         rho = selected.pivot(index="model", columns="strategy", values="spearman_rho").reindex(
             index=PRESENTATION_MODELS, columns=STRATEGIES
         )
-        adjusted = selected.pivot(
-            index="model", columns="strategy", values="spearman_holm_p"
-        ).reindex(index=PRESENTATION_MODELS, columns=STRATEGIES)
         image = axis.imshow(rho.to_numpy(), cmap="coolwarm", vmin=-1, vmax=1, aspect="auto")
         for row in range(len(PRESENTATION_MODELS)):
             for column in range(len(STRATEGIES)):
                 value = rho.iloc[row, column]
-                marker = "*" if adjusted.iloc[row, column] < 0.05 else ""
                 axis.text(
                     column,
                     row,
-                    f"{value:+.2f}{marker}",
+                    f"{value:+.2f}",
                     ha="center",
                     va="center",
                     fontsize=9,
@@ -389,14 +385,7 @@ def _plot_rank_heatmap(rank: pd.DataFrame, output: Path) -> None:
     color_axis = figure.add_axes((0.925, 0.22, 0.016, 0.58))
     figure.colorbar(image, cax=color_axis, label="Candidate-rank Spearman ρ")
     figure.suptitle("Does the label-free criterion rank sealed candidate performance?")
-    figure.text(
-        0.5,
-        0.01,
-        "* Holm-adjusted p < 0.05 within the frozen 20-test metric family",
-        ha="center",
-        fontsize=9,
-    )
-    figure.subplots_adjust(left=0.08, right=0.90, bottom=0.26, top=0.84, wspace=0.08)
+    figure.subplots_adjust(left=0.08, right=0.90, bottom=0.22, top=0.84, wspace=0.08)
     figure.savefig(output, dpi=220, bbox_inches="tight")
     plt.close(figure)
 

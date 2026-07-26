@@ -1,13 +1,12 @@
-from typing import Optional
 import inspect
+from typing import Optional
 
 import torch
-from torch import nn, optim
-
-from omegaconf import OmegaConf, DictConfig
+from omegaconf import DictConfig, OmegaConf
 from pytorch_lightning import LightningModule
 from pytorch_lightning.core.optimizer import LightningOptimizer
 from pytorch_lightning.utilities.memory import garbage_collection_cuda
+from torch import nn, optim
 
 
 class ADLightningModule(LightningModule):
@@ -39,19 +38,18 @@ class ADLightningModule(LightningModule):
         return self.model(self.masking(x))
 
     def model_step(self, batch) -> dict[str, torch.Tensor]:
-        """Run one model step. Must be implemented by subclasses."""
-        raise NotImplementedError(
-            f"{self.__class__.__name__} must implement `model_step`."
-        )
+        """Run one model step.
+
+        Must be implemented by subclasses.
+        """
+        raise NotImplementedError(f"{self.__class__.__name__} must implement `model_step`.")
 
     def training_step(self, batch: torch.Tensor, batch_idx: int):
         outdict = self.model_step(batch)
         self._log_dict(outdict, dataloader_idx=0)
         return outdict
 
-    def validation_step(
-        self, batch: torch.Tensor, batch_idx: int, dataloader_idx: int = 0
-    ):
+    def validation_step(self, batch: torch.Tensor, batch_idx: int, dataloader_idx: int = 0):
         outdict = self.model_step(batch)
         self._log_dict(outdict, dataloader_idx=dataloader_idx)
         return outdict
@@ -63,15 +61,15 @@ class ADLightningModule(LightningModule):
     def on_train_batch_end(self, outputs, batch, batch_idx):
         """Log metrics and clean up memory.
 
-        For some reason on_train_epoch_end executes after on_validation_epoch_end
-        so I have to do this hack to do things right at the end of the training.
+        For some reason on_train_epoch_end executes after on_validation_epoch_end so I have to do
+        this hack to do things right at the end of the training.
         """
         is_last = (batch_idx + 1) == self.trainer.num_training_batches
         if is_last:
             self._log_on_epoch_end("train")
             garbage_collection_cuda()
 
-    def on_validation_batch_end(self, outputs, batch, batch_idx, dataloader_idx):
+    def on_validation_batch_end(self, outputs, batch, batch_idx, dataloader_idx=0):
         """Log quantities at the end of the last validation epoch."""
         is_last = (batch_idx + 1) == self.trainer.num_val_batches[dataloader_idx]
         if is_last:
@@ -112,13 +110,13 @@ class ADLightningModule(LightningModule):
 
         for mname, mvalue in outdict.items():
             if isinstance(mvalue, (int, float)):
-                self._log_sum[dataloader_idx][mname] = self._log_sum[
-                    dataloader_idx
-                ].get(mname, 0.0) + float(mvalue)
+                self._log_sum[dataloader_idx][mname] = self._log_sum[dataloader_idx].get(
+                    mname, 0.0
+                ) + float(mvalue)
             elif torch.is_tensor(mvalue) and mvalue.ndim == 0:
-                self._log_sum[dataloader_idx][mname] = self._log_sum[
-                    dataloader_idx
-                ].get(mname, 0.0) + float(mvalue.detach())
+                self._log_sum[dataloader_idx][mname] = self._log_sum[dataloader_idx].get(
+                    mname, 0.0
+                ) + float(mvalue.detach())
 
         self._log_nsteps[dataloader_idx] += 1
 

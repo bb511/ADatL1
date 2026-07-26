@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import csv
 import hashlib
+import inspect
 import json
 import subprocess  # nosec B404
 from itertools import product
@@ -12,6 +13,7 @@ import pytest
 import torch
 
 from scripts import cchamber_operating_point_audit as audit
+from src.algorithms import ADLightningModule
 from src.evaluation.callbacks.efficiency import AnomalyEfficiencyCallback
 
 _REAL_REQUIRE_FINISHED_RUN = audit._require_finished_run
@@ -43,6 +45,14 @@ def test_detached_deployment_has_explicit_revision_identity(monkeypatch) -> None
     monkeypatch.setattr(audit, "_git", lambda *args: responses[args])
     monkeypatch.setattr(audit, "_audit_revision", _REAL_AUDIT_REVISION)
     assert audit._audit_revision() == ("audit-commit", "DETACHED")
+
+
+def test_algorithm_validation_hook_supports_sealed_single_loader() -> None:
+    """Lightning may omit the loader index for a single calibration loader."""
+    parameter = inspect.signature(ADLightningModule.on_validation_batch_end).parameters[
+        "dataloader_idx"
+    ]
+    assert parameter.default == 0
 
 
 def _synthetic_campaign(tmp_path: Path) -> tuple[Path, str]:

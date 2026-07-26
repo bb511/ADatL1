@@ -1,0 +1,23 @@
+# Categorical Diffusion Time Estimation for vector inputs.
+defaults:
+  - _self_
+
+_target_: src.algorithms.dte.DTE
+features: null
+
+predictor:
+  _target_: src.algorithms.components.dte.DTEPredictor
+  in_dim: 117
+  hidden_dims: [256, 512, 256]
+  out_dim: ${algorithm.n_bins}
+  dropout: 0.5
+  activation: relu
+
+# Paper-faithful categorical DTE settings.
+n_steps: 300
+n_bins: 7
+beta_start: 0.0
+beta_end: 0.01
+
+target_rate: 0.25
+base_rate: 28608.8064

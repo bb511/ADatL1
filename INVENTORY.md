@@ -166,7 +166,7 @@ POT, optional HGQ/Keras quantization, and private `capmetric`.
 | Group | Scope | Key Selection Logic |
 |---|---|---|
 | `tests/configs/experiment/demo` | Short CPU smoke runs for CIFAR, synthetic L1, and Causal Chamber. | No checkpointing/evaluator; verifies config and training loops. |
-| `configs/experiment/physics` | Main L1 trigger experiments for AE/VAE/SVDD/RealNVP/DeepSets. | Signal-aware variants optimize efficiency; agnostic variants optimize CAP/drift/Wasserstein. |
+| `configs/experiment/physics` | Main L1 trigger experiments for AE/VAE/SVDD/RealNVP/DTE/DeepSets. | Signal-aware variants optimize efficiency; agnostic variants optimize CAP/drift/Wasserstein. |
 | `configs/experiment/cchamber` | Controlled Causal Chamber intervention experiments. | Agnostic variants optimize normal-vs-reference CAP, threshold drift, and Wasserstein while reporting intervention efficiency/AUPRC. |
 | `configs/experiment/cifar10` | Image benchmark experiments. | Checks CAP/model-selection behavior outside L1 data. |
 | `configs/experiment/robustad` | Shifted-domain image anomaly benchmark. | Useful for CAP under source-normal vs shifted-normal comparison. |

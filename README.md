@@ -63,7 +63,12 @@ Run a configured experiment:
 uv run python src/train.py experiment=cifar10/ae
 uv run python src/train.py experiment=cchamber/ae_agnostic
 uv run python src/train.py experiment=physics/ae paths.raw_data_dir=/path/to/adl1t_data/parquet_files
+uv run python src/train.py experiment=physics/dte_agnostic paths.raw_data_dir=/path/to/adl1t_data/parquet_files
 ```
+
+The DTE experiment uses feature-wise standardization fitted only on nominal
+training data. Its Optuna search is available with
+`hparams_search=dte_optuna`.
 
 Run the publication-scale controlled Gaussian-subspace analytical study:
 
@@ -83,7 +88,7 @@ Run the complete data-free smoke suite:
 make smoke
 ```
 
-This runs the analytical artifact smoke, the four-model/three-seed
+This runs the analytical artifact smoke, the five-model/three-seed
 checkpoint-and-reporting smoke, the controlled frozen-encoder pairing smoke, and
 a real-public-CSV Causal Chamber pairing producer/consumer smoke. Causal Chamber
 is downloaded automatically if needed. The results are ignored artifacts under
@@ -100,7 +105,7 @@ make cchamber-pairing-smoke
 To run only one synthetic anomaly model and seed:
 
 ```
-uv run python scripts/synthetic/smoke.py --models ae --seeds 123
+uv run python scripts/synthetic/smoke.py --models dte --seeds 123
 ```
 
 Generate reproducible paper launch scripts:

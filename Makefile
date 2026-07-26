@@ -48,7 +48,7 @@ train-synthetic: ## Run the logged synthetic VAE smoke experiment
 
 smoke: analytical-smoke model-smoke pairing-smoke cchamber-pairing-smoke ## Run the complete smoke suite
 
-model-smoke: ## Smoke-test checkpoints/reporting on four models and three seeds
+model-smoke: ## Smoke-test checkpoints/reporting on five models and three seeds
 	$(UV) run python scripts/synthetic/smoke.py
 
 pairing-smoke: ## Smoke-test encoder pairing, fixed tables, and CAP consumption

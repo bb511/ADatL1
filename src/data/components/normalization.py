@@ -1,14 +1,15 @@
-from pathlib import Path
-from dataclasses import dataclass
-
-import numpy as np
-import awkward as ak
 import pickle
-from colorama import Fore, Back, Style
-from pytorch_lightning import loggers
+from dataclasses import dataclass
+from pathlib import Path
+
+import awkward as ak
+import numpy as np
 import torch
+from colorama import Back, Fore, Style
+from pytorch_lightning import loggers
 
 from src.utils import pylogger
+
 from . import plots
 
 log = pylogger.RankedLogger(__name__)
@@ -83,8 +84,8 @@ class L1DataNormalizer:
     def _robust_fit(self, data: ak.Array, percentiles: list):
         """Determines the parameters for robust normalisation.
 
-        Namely, it determines the interquantile (iqr) range and the median of the data
-        for each feature distribution separately.
+        Namely, it determines the interquantile (iqr) range and the median of the data for each
+        feature distribution separately.
         """
         self.norm_params[self.obj_name] = {}
         for feat in ak.fields(data):
@@ -95,6 +96,34 @@ class L1DataNormalizer:
             scale = qhigh - qlow
             scale = scale if scale != 0 else 1e-12
             self.norm_params[self.obj_name][feat] = {"shift": median, "scale": scale}
+
+    def _standard(self, data: ak.Array, obj_name: str) -> ak.Array:
+        """Apply train-split mean and standard-deviation normalization."""
+        result = data
+        params = self.norm_params[obj_name]
+        for feature in ak.fields(data):
+            normalized = data[feature] - params[feature]["shift"]
+            normalized = normalized / params[feature]["scale"]
+            result = ak.with_field(result, normalized, where=feature)
+        return result
+
+    def _standard_fit(self, data: ak.Array):
+        """Fit feature-wise standard scaling on active training objects only."""
+        self.norm_params[self.obj_name] = {}
+        for feat in ak.fields(data):
+            feature_data = ak.to_numpy(ak.flatten(data[feat]))
+            mean = float(np.mean(feature_data))
+            scale = float(np.std(feature_data))
+            if not np.isfinite(mean) or not np.isfinite(scale):
+                raise ValueError(
+                    f"Non-finite standard normalization parameters for " f"{self.obj_name}/{feat}."
+                )
+            if scale <= 0.0:
+                scale = 1e-12
+            self.norm_params[self.obj_name][feat] = {
+                "shift": mean,
+                "scale": scale,
+            }
 
     def _robust_axov4_fit(self, data: ak.Array, percentiles: list, scale: list):
         """Determines the parameters for the special kind of robust norm in axov4.

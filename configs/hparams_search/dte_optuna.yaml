@@ -1,0 +1,24 @@
+# @package _global_
+
+defaults:
+  - override /hydra/sweeper: optuna
+  - override /hydra/sweeper/sampler: motpe
+
+hydra:
+  mode: MULTIRUN
+  sweeper:
+    _target_: hydra_plugins.hydra_optuna_sweeper.optuna_sweeper.OptunaSweeper
+    storage: sqlite:///logs/optuna/physics/dte.db
+    study_name: cap_vs_ascore
+    n_jobs: 1
+    direction: [maximize, minimize]
+    n_trials: 20
+    sampler:
+      n_startup_trials: 5
+      consider_endpoints: true
+      n_ehvi_candidates: 256
+    params:
+      trainer.gradient_clip_val: choice(0.0, 0.5, 1.0, 2.0)
+      algorithm.predictor.hidden_dims: choice([128,256,128], [256,512,256], [256,512,512,256])
+      algorithm.optimizer.lr: tag(log, interval(3e-5, 3e-3))
+      algorithm.optimizer.weight_decay: choice(0.0, 1e-6, 1e-5, 1e-4, 5e-4, 1e-3)

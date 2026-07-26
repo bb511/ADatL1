@@ -1,0 +1,30 @@
+# @package _global_
+
+# Reuse the established L1 validation/evaluation pipeline while replacing the
+# detector and its train-only preprocessing recipe.
+defaults:
+  - /experiment/physics/ae_agnostic
+  - override /algorithm: dte
+  - override /data/data_normalizer: standard
+  - _self_
+
+tags: ["dte", "agnostic"]
+experiment_name: physics_dte_models
+
+algorithm:
+  # Remove the AE-specific block inherited with the shared physics pipeline.
+  encoder: null
+  predictor:
+    in_dim: 117
+  optimizer:
+    _partial_: true
+    _target_: torch.optim.AdamW
+    lr: 1.0e-4
+    weight_decay: 5.0e-4
+    betas: [0.9, 0.999]
+    eps: 1.0e-8
+
+# DTE has no reconstruction output.
+evaluation:
+  callbacks:
+    reco: null

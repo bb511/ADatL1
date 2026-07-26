@@ -1,0 +1,5 @@
+# @package data.data_normalizer
+
+_target_: src.data.components.normalization.L1DataNormalizer
+name: standard
+hyperparams: null

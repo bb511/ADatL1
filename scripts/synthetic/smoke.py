@@ -17,7 +17,7 @@ if str(REPOSITORY_ROOT) not in sys.path:
 
 from scripts import paper_pipeline  # noqa: E402
 
-MODELS = ("ae", "vae", "svdd", "realnvp")
+MODELS = ("ae", "vae", "svdd", "realnvp", "dte")
 CHECKPOINT_RESULTS = {
     "last": Path("plots/test/last/auprc/values.csv"),
     "drift": Path(
@@ -99,7 +99,7 @@ def build_collect_manifest(
 def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description=(
-            "Train synthetic AE/VAE/SVDD/RealNVP jobs, collect callback CSVs, "
+            "Train synthetic AE/VAE/SVDD/RealNVP/DTE jobs, collect callback CSVs, "
             "and smoke-test seed-aware aggregation tables and plots."
         )
     )

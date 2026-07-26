@@ -1,0 +1,28 @@
+# @package _global_
+
+defaults:
+  - /experiment/synthetic/base
+  - override /algorithm: dte
+  - _self_
+
+tags: ["synthetic", "smoke", "dte"]
+run_name: dte_seed${seed}
+
+algorithm:
+  target_rate: 0.01
+  base_rate: null
+  predictor:
+    in_dim: ${data.n_features}
+    hidden_dims: [32, 64, 32]
+    dropout: 0.1
+  n_steps: 60
+  n_bins: 6
+  beta_start: 0.0
+  beta_end: 0.05
+  optimizer:
+    _partial_: true
+    _target_: torch.optim.AdamW
+    lr: 1.0e-3
+    weight_decay: 1.0e-4
+    betas: [0.9, 0.999]
+    eps: 1.0e-8

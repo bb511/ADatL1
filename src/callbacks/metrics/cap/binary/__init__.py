@@ -1,13 +1,19 @@
-from typing import Optional, Callable, Tuple, Literal
 import functools
+from typing import Callable, Literal, Optional, Tuple
+
 import torch
 from torch import Tensor
-
 
 __all__ = ["get_pairing_fn", "get_normalizer_fn", "get_energy_fn", "get_regularizer_fn"]
 
 
-from src.callbacks.metrics.cap.binary.pairing import random, label, absolute, cdf
+from src.callbacks.metrics.cap.binary.pairing import (
+    absolute,
+    cdf,
+    label,
+    mapping,
+    random,
+)
 
 
 def get_pairing_fn(
@@ -38,18 +44,16 @@ def get_pairing_fn(
 
 
 from src.callbacks.metrics.cap.binary.normalization import (
-    minmax,
-    sigmoid,
     log_sigmoid,
-    softmax,
+    minmax,
     rank,
     rank_mid,
+    sigmoid,
+    softmax,
 )
 
 
-def get_normalizer_fn(
-    normalization_type: str, normalization_params: Optional[dict] = None
-):
+def get_normalizer_fn(normalization_type: str, normalization_params: Optional[dict] = None):
     """Get the normalization function based on type."""
 
     normalization_params = normalization_params or {}
@@ -86,7 +90,6 @@ def get_normalizer_fn(
         normalizer_fn: Callable,
         mode: Literal["split", "joint"] = "joint",
     ) -> Tuple[Tensor, Tensor]:
-
         if mode == "joint":
             combined = torch.cat([tensor1, tensor2], dim=0)
             normalized_combined = normalizer_fn(combined)
@@ -101,12 +104,12 @@ def get_normalizer_fn(
 
 
 from src.callbacks.metrics.cap.binary.energy import (
+    adaptive,
     baseline,
+    contrastive,
     exponential,
     focal,
-    contrastive,
     margin,
-    adaptive,
 )
 
 
@@ -137,15 +140,13 @@ def get_energy_fn(energy_type: str, energy_params: Optional[dict] = None):
 
 
 from src.callbacks.metrics.cap.binary.regularization import (
-    threshold,
-    smooth,
     percentile,
+    smooth,
+    threshold,
 )
 
 
-def get_regularizer_fn(
-    regularization_type: str, regularization_params: Optional[dict] = None
-):
+def get_regularizer_fn(regularization_type: str, regularization_params: Optional[dict] = None):
     """Get the regularization function based on type."""
 
     regularization_params = regularization_params or {}

@@ -1,16 +1,28 @@
 from typing import Tuple
+
 import torch
 from torch import Tensor
 
 
 def _get_small_large(tensor1: Tensor, tensor2: Tensor) -> Tuple[Tensor, Tensor]:
-    """
-    Helper function to return tensors in (small, large) order.
-    """
+    """Helper function to return tensors in (small, large) order."""
     if len(tensor1) <= len(tensor2):
         return tensor1, tensor2, False
     else:
         return tensor2, tensor1, True
+
+
+def mapping(tensor1: Tensor, tensor2: Tensor, pairing: Tensor) -> Tuple[Tensor, Tensor]:
+    """Use a precomputed map from ``tensor1`` rows to ``tensor2`` rows.
+
+    ``pairing[j]`` is the index of the row in ``tensor1`` paired with row ``j``
+    of ``tensor2``. Equivalently, ``tensor1[pairing]`` is aligned row-for-row
+    with ``tensor2``. The tensor values are not inspected and no pairing is
+    calculated at runtime.
+    """
+    tensor1_indices = pairing.to(device=tensor1.device, dtype=torch.long)
+    tensor2_indices = torch.arange(len(tensor2), device=tensor2.device)
+    return tensor1_indices, tensor2_indices
 
 
 def random(tensor1: Tensor, tensor2: Tensor) -> Tuple[Tensor, Tensor]:
@@ -105,9 +117,7 @@ def absolute(tensor1: Tensor, tensor2: Tensor) -> Tuple[Tensor, Tensor]:
     return large_indices, small_indices
 
 
-def cdf(
-    tensor1: torch.Tensor, tensor2: torch.Tensor
-) -> Tuple[torch.Tensor, torch.Tensor]:
+def cdf(tensor1: torch.Tensor, tensor2: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor]:
     """
     Empirical CDF pairing: matches samples based on their percentile ranks.
 
@@ -126,8 +136,7 @@ def cdf(
 
     # Map each rank in small tensor to corresponding rank in large tensor
     large_ranks = torch.round(
-        (torch.arange(small_size, dtype=torch.float) / (small_size - 1))
-        * (large_size - 1)
+        (torch.arange(small_size, dtype=torch.float) / (small_size - 1)) * (large_size - 1)
     ).long()
 
     # Handle edge case for single element

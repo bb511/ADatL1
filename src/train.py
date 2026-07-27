@@ -94,6 +94,8 @@ def train(cfg: DictConfig) -> Tuple[Dict[str, Any], Dict[str, Any]]:
     if cfg.get("train"):
         log.info("Starting training!")
         trainer.fit(model=algorithm, datamodule=datamodule)
+    else:
+        datamodule.prepare_data()
 
     train_metrics = trainer.callback_metrics
 

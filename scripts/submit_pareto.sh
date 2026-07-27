@@ -50,15 +50,21 @@ if [ "$n_total" -eq 0 ]; then
 fi
 echo "Submitting $n_total jobs from $file"
 
-logdir="logs/submit/$(basename "$file" .sh)"
+# Prefix with the domain directory: physics/cifar10/robustad share file stems,
+# and a bare stem makes concurrent submissions clobber each other's logs.
+stem="$(basename "$(dirname "$file")")_$(basename "$file" .sh)"
+logdir="logs/submit/$stem"
 [ "$dry" -eq 1 ] || mkdir -p "$logdir"
+sweep_ts=$(date +%Y-%m-%d_%H-%M-%S)
 
 i=0
 extract_cmds "$file" | while IFS= read -r cmd; do
     i=$((i + 1))
     # Each slurm job sees a single GPU.
     cmd=$(printf "%s" "$cmd" | sed -E "s/trainer\.devices=\[[0-9]+\]/trainer.devices=[0]/")
-    launcher="-m hydra/launcher=submitit_slurm_clariden hydra.launcher.timeout_min=$TIMEOUT_MIN"
+    # Unique sweep dir per job: hydra's default second-resolution timestamp
+    # collides when several drivers start simultaneously, merging job outputs.
+    launcher="-m hydra/launcher=submitit_slurm_clariden hydra.launcher.timeout_min=$TIMEOUT_MIN hydra.sweep.dir=logs/train/multiruns/${sweep_ts}_${stem}_j$i"
     full="python3 src/train.py $launcher$cmd $extra"
     if [ "$dry" -eq 1 ]; then
         echo "[$i/$n_total] $full"

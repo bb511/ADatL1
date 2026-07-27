@@ -139,6 +139,8 @@ class AnomalyEfficiencyCallback(Callback):
             metrics[f"eff_{trate_label}"] = self.eff_summary[trate][ckpt_ds]
             metrics[f"eff_med_{trate_label}"] = self.eff_med[trate][ckpt_ds]
             metrics[f"eff_min_{trate_label}"] = self.eff_min[trate][ckpt_ds]
+            for ds_name, ds_eff in effs.items():
+                metrics[f"eff_{trate_label}_{ds_name}"] = ds_eff
 
         utils.mlflow.log_metrics_to_mlflow(
             trainer, metrics, ckpt_name=ckpt_name, cb_name=eff_name

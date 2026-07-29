@@ -69,6 +69,50 @@ class ApproximationCapacityKernel(nn.Module):
             dim=0,
         )
 
+    def compute_log_components(
+        self, prob1: Tensor, prob2: Tensor, beta: Optional[float | Tensor] = None
+    ) -> tuple[Tensor, Tensor]:
+        """Return the summed log-cosine and log-norm CAP components.
+
+        For each paired observation, CAP is the log inner product of the two
+        induced posterior vectors. This decomposes exactly into their log cosine
+        similarity and the sum of their log L2 norms.
+        """
+        beta = self.beta if beta is None else beta
+        dev = self.beta.device
+        prob1 = prob1.to(dev)
+        prob2 = prob2.to(dev)
+        beta = torch.as_tensor(beta, device=dev, dtype=prob1.dtype)
+
+        n = len(prob1)
+        ones = torch.ones(n, dtype=prob1.dtype, device=dev)
+        zeros = torch.zeros_like(ones)
+
+        log_weights_1 = torch.stack(
+            (
+                -beta * self.energy_fn(prob1, zeros),
+                -beta * self.energy_fn(prob1, ones),
+            ),
+            dim=0,
+        )
+        log_weights_2 = torch.stack(
+            (
+                -beta * self.energy_fn(prob2, zeros),
+                -beta * self.energy_fn(prob2, ones),
+            ),
+            dim=0,
+        )
+        log_posterior_1 = log_weights_1 - torch.logsumexp(log_weights_1, dim=0, keepdim=True)
+        log_posterior_2 = log_weights_2 - torch.logsumexp(log_weights_2, dim=0, keepdim=True)
+
+        log_overlap = torch.logsumexp(log_posterior_1 + log_posterior_2, dim=0)
+        log_norm_1 = 0.5 * torch.logsumexp(2.0 * log_posterior_1, dim=0)
+        log_norm_2 = 0.5 * torch.logsumexp(2.0 * log_posterior_2, dim=0)
+
+        log_cosine = log_overlap - log_norm_1 - log_norm_2
+        log_norm = log_norm_1 + log_norm_2
+        return torch.sum(log_cosine, dim=0), torch.sum(log_norm, dim=0)
+
     def forward(self, loss1: Tensor, loss2: Tensor):
         """Forward pass with gradient computation.
 

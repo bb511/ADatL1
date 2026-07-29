@@ -257,9 +257,17 @@ class ApproximationCapacity(Metric):
                 best_beta = kernel.beta.clone().detach()
 
         # Final evaluation with the best beta
-        self._evaluate_kernel(kernel, dataloader, beta=best_beta, use_pin_memory=use_pin_memory)
-        self.cap = (
-            kernel.capacity.detach().clone().to(device=self.cap.device, dtype=self.cap.dtype)
+        self.selected_beta = float(best_beta.item())
+        final_value = self._compute_final_value(
+            kernel,
+            dataloader,
+            beta=best_beta,
+            use_pin_memory=use_pin_memory,
+        )
+        self.cap = torch.as_tensor(
+            final_value,
+            device=self.cap.device,
+            dtype=self.cap.dtype,
         )
 
         kernel.to("cpu")
@@ -281,6 +289,21 @@ class ApproximationCapacity(Metric):
                 kernel.evaluate(batch_logits1, batch_logits2, beta=beta)
         return float(kernel.capacity.item())
 
+    def _compute_final_value(
+        self,
+        kernel: ApproximationCapacityKernel,
+        dataloader: DataLoader,
+        beta: Tensor,
+        use_pin_memory: bool,
+    ) -> float:
+        """Evaluate the metric reported at CAP's selected inverse temperature."""
+        return self._evaluate_kernel(
+            kernel,
+            dataloader,
+            beta=beta,
+            use_pin_memory=use_pin_memory,
+        )
+
     def compute(self) -> Tensor:
         """Return the computed CAP value."""
         return self.cap.item()
@@ -289,3 +312,41 @@ class ApproximationCapacity(Metric):
         """Reset CAP state with a fresh tensor compatible with Lightning inference mode."""
         with torch.inference_mode(False):
             self.cap = torch.zeros((), device=self.cap.device, dtype=self.cap.dtype)
+
+
+class PosteriorConsistency(ApproximationCapacity):
+    """Log posterior cosine similarity at CAP's selected temperature.
+
+    The constructor intentionally matches ``ApproximationCapacity``. CAP's
+    complete objective is used only to select the inverse temperature; the value
+    returned by this metric removes the additive posterior log-norm component.
+    This avoids the degenerate standalone optimization in which beta=0 makes
+    every posterior uniform and every model tie.
+    """
+
+    def _compute_final_value(
+        self,
+        kernel: ApproximationCapacityKernel,
+        dataloader: DataLoader,
+        beta: Tensor,
+        use_pin_memory: bool,
+    ) -> float:
+        consistency_sum = None
+        total_samples = 0
+        with torch.no_grad():
+            for batch_logits1, batch_logits2 in dataloader:
+                batch_logits1 = batch_logits1.to(self.dev, non_blocking=use_pin_memory)
+                batch_logits2 = batch_logits2.to(self.dev, non_blocking=use_pin_memory)
+                consistency, _ = kernel.compute_log_components(
+                    batch_logits1,
+                    batch_logits2,
+                    beta=beta,
+                )
+                consistency_sum = (
+                    consistency if consistency_sum is None else consistency_sum + consistency
+                )
+                total_samples += len(batch_logits1)
+
+        if consistency_sum is None or total_samples == 0:
+            raise RuntimeError("Posterior consistency requires at least one score pair.")
+        return float((consistency_sum / total_samples).item())

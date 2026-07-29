@@ -43,6 +43,8 @@ class CAP(Callback):
         later methods that manipulate callbacks.
     """
 
+    metric_cls = ApproximationCapacity
+
     def __init__(
         self,
         output_name: str,
@@ -88,7 +90,7 @@ class CAP(Callback):
         self.dataset_2_scores = []
         self.dataset_1_inputs = []
         self.dataset_2_inputs = []
-        self.capmetric = ApproximationCapacity(**self.cap_metric_config, device=self.device)
+        self.capmetric = self.metric_cls(**self.cap_metric_config, device=self.device)
         self.capmetric.to(self.device)
 
     def on_test_batch_end(self, trainer, pl_module, outputs, batch, batch_idx, dataloader_idx=0):

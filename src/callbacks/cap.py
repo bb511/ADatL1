@@ -30,6 +30,8 @@ class CAPCallback(Callback):
     :beta: Float that sets parameter of EMA metrics compute here.
     """
 
+    metric_cls = ApproximationCapacity
+
     def __init__(
         self,
         output_name: str,
@@ -93,7 +95,7 @@ class CAPCallback(Callback):
         self.dataset_1_inputs = []
         self.dataset_2_inputs = []
 
-        self.capmetric = ApproximationCapacity(**self.cap_metric_config, device=self.device)
+        self.capmetric = self.metric_cls(**self.cap_metric_config, device=self.device)
         self.capmetric.to(self.device)
 
     def on_validation_batch_end(

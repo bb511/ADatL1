@@ -8,53 +8,51 @@
 # ========================================================================
 # Training on the NGT cluster
 # ========================================================================
+# set -euo pipefail
 
+# : "${PROJECT_ROOT:=/shared/adatl1}"
+# : "${RAW_DATA_DIR:=${PROJECT_ROOT}/raw/parquet_files}"
+# : "${RUN_NAME:?Set RUN_NAME, for example: ae-gamma-0.1-bins-50}"
+# : "${MAX_EPOCHS:=50}"
+# : "${MI_GAMMA:=0.1}"
+# : "${MI_NUM_BINS:=50}"
+# : "${MPLCONFIGDIR:=/scratch/adatl1/matplotlib}"
 
-set -euo pipefail
+# [[ "$RUN_NAME" =~ ^[A-Za-z0-9][A-Za-z0-9._-]*$ ]] || {
+#   echo "RUN_NAME may contain only letters, numbers, dots, underscores, and hyphens."
+#   exit 2
+# }
+# [[ "$MAX_EPOCHS" =~ ^[1-9][0-9]*$ ]] || {
+#   echo "MAX_EPOCHS must be a positive integer."
+#   exit 2
+# }
+# [[ "$MI_NUM_BINS" =~ ^[1-9][0-9]*$ ]] && (( MI_NUM_BINS >= 2 )) || {
+#   echo "MI_NUM_BINS must be an integer of at least 2."
+#   exit 2
+# }
 
-: "${PROJECT_ROOT:=/shared/adatl1}"
-: "${RAW_DATA_DIR:=${PROJECT_ROOT}/raw/parquet_files}"
-: "${RUN_NAME:?Set RUN_NAME, for example: ae-gamma-0.1-bins-50}"
-: "${MAX_EPOCHS:=50}"
-: "${MI_GAMMA:=0.1}"
-: "${MI_NUM_BINS:=50}"
-: "${MPLCONFIGDIR:=/scratch/adatl1/matplotlib}"
+# export PROJECT_ROOT MPLCONFIGDIR
+# mkdir -p "$MPLCONFIGDIR"
+# cd /workspace
 
-[[ "$RUN_NAME" =~ ^[A-Za-z0-9][A-Za-z0-9._-]*$ ]] || {
-  echo "RUN_NAME may contain only letters, numbers, dots, underscores, and hyphens."
-  exit 2
-}
-[[ "$MAX_EPOCHS" =~ ^[1-9][0-9]*$ ]] || {
-  echo "MAX_EPOCHS must be a positive integer."
-  exit 2
-}
-[[ "$MI_NUM_BINS" =~ ^[1-9][0-9]*$ ]] && (( MI_NUM_BINS >= 2 )) || {
-  echo "MI_NUM_BINS must be an integer of at least 2."
-  exit 2
-}
-
-export PROJECT_ROOT MPLCONFIGDIR
-mkdir -p "$MPLCONFIGDIR"
-cd /workspace
-
-exec python3 src/train.py \
-  paths.raw_data_dir="$RAW_DATA_DIR" \
-  experiment=physics/ae \
-  run_name="$RUN_NAME" \
-  logger=mlflow \
-  algorithm.optimizer.lr=0.0019859329798336714 \
-  algorithm.delta=1.0 \
-  algorithm.mi_gamma="$MI_GAMMA" \
-  algorithm.mi_temperature=6.0 \
-  algorithm.mi_sensitive_num_bins="$MI_NUM_BINS" \
-  trainer.gradient_clip_val=5.0 \
-  algorithm.optimizer.betas='[0.9,0.999]' \
-  algorithm.optimizer.weight_decay=1e-06 \
-  algorithm.encoder.nodes='[64,32,8]' \
-  algorithm.input_noise_std=0.0 \
-  trainer.max_epochs="$MAX_EPOCHS" \
-  trainer=gpu \
-  trainer.devices='[0]'
+# exec python3 src/train.py \
+#   paths.raw_data_dir="$RAW_DATA_DIR" \
+#   experiment=physics/ae \
+#   run_name="$RUN_NAME" \
+#   logger=mlflow \
+#   algorithm.optimizer.lr=0.0019859329798336714 \
+#   algorithm.delta=1.0 \
+#   algorithm.mi_gamma="$MI_GAMMA" \
+#   algorithm.mi_temperature=6.0 \
+#   algorithm.mi_sensitive_num_bins="$MI_NUM_BINS" \
+#   trainer.gradient_clip_val=5.0 \
+#   algorithm.optimizer.betas='[0.9,0.999]' \
+#   algorithm.optimizer.weight_decay=1e-06 \
+#   algorithm.encoder.nodes='[64,32,8]' \
+#   algorithm.input_noise_std=0.0 \
+#   trainer.max_epochs="$MAX_EPOCHS" \
+#   trainer=gpu \
+#   trainer.devices='[0]'
 
 
 
@@ -66,23 +64,23 @@ exec python3 src/train.py \
 # ------------------------------------------------------------------------
 # taskset -c 0-2 \
 
-# python3 src/train.py \
-#     paths.raw_data_dir=../../03_Data/adl1t_data/parquet_files \
-#     experiment=physics/ae \
-#     run_name="Bernoulli-MI_No_FET_Et_Gamma_0.1_Run_24" \
-#     logger=mlflow \
-#     algorithm.optimizer.lr=0.0019859329798336714 \
-#     algorithm.delta=1.0 \
-#     algorithm.mi_gamma=0.1 \
-#     algorithm.mi_temperature=6.0 \
-#     trainer.gradient_clip_val=5.0 \
-#     algorithm.optimizer.betas='[0.9,0.999]' \
-#     algorithm.optimizer.weight_decay=1e-06 \
-#     algorithm.encoder.nodes='[64,32,8]' \
-#     algorithm.input_noise_std=0.0 \
-#     trainer.max_epochs=2 \
-#     trainer=gpu \
-#     trainer.devices='[0]'
+python3 src/train.py \
+    paths.raw_data_dir=../../03_Data/adl1t_data/parquet_files \
+    experiment=physics/ae \
+    run_name="Bernoulli-MI_No_FET_Et_Run_1" \
+    logger=mlflow \
+    algorithm.optimizer.lr=0.0019859329798336714 \
+    algorithm.delta=1.0 \
+    algorithm.mi_gamma=0.1 \
+    algorithm.mi_temperature=6.0 \
+    trainer.gradient_clip_val=5.0 \
+    algorithm.optimizer.betas='[0.9,0.999]' \
+    algorithm.optimizer.weight_decay=1e-06 \
+    algorithm.encoder.nodes='[64,32,8]' \
+    algorithm.input_noise_std=0.0 \
+    trainer.max_epochs=100 \
+    trainer=gpu \
+    trainer.devices='[0]'
 
 # ------------------------------------------------------------------------
 # Semi-supervised cvar10 training

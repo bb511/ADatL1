@@ -8,51 +8,58 @@
 # ========================================================================
 # Training on the NGT cluster
 # ========================================================================
-# set -euo pipefail
+set -euo pipefail
 
-# : "${PROJECT_ROOT:=/shared/adatl1}"
-# : "${RAW_DATA_DIR:=${PROJECT_ROOT}/raw/parquet_files}"
-# : "${RUN_NAME:?Set RUN_NAME, for example: ae-gamma-0.1-bins-50}"
-# : "${MAX_EPOCHS:=50}"
-# : "${MI_GAMMA:=0.1}"
-# : "${MI_NUM_BINS:=50}"
-# : "${MPLCONFIGDIR:=/scratch/adatl1/matplotlib}"
+: "${PROJECT_ROOT:=/shared/adatl1}"
+: "${RAW_DATA_DIR:=${PROJECT_ROOT}/raw/parquet_files}"
+: "${RUN_NAME:?Set RUN_NAME, for example: Bernoulli_MI_No_FET_Run_01}"
+: "${MAX_EPOCHS:=100}"
+: "${MI_GAMMA:=0.1}"
+: "${MI_NUM_BINS:=50}"
+: "${MPLCONFIGDIR:=/scratch/adatl1/matplotlib}"
 
-# [[ "$RUN_NAME" =~ ^[A-Za-z0-9][A-Za-z0-9._-]*$ ]] || {
-#   echo "RUN_NAME may contain only letters, numbers, dots, underscores, and hyphens."
-#   exit 2
-# }
-# [[ "$MAX_EPOCHS" =~ ^[1-9][0-9]*$ ]] || {
-#   echo "MAX_EPOCHS must be a positive integer."
-#   exit 2
-# }
-# [[ "$MI_NUM_BINS" =~ ^[1-9][0-9]*$ ]] && (( MI_NUM_BINS >= 2 )) || {
-#   echo "MI_NUM_BINS must be an integer of at least 2."
-#   exit 2
-# }
+[[ "$RUN_NAME" =~ ^[A-Za-z0-9][A-Za-z0-9._-]*$ ]] || {
+  echo "Invalid RUN_NAME."
+  exit 2
+}
+[[ "$MAX_EPOCHS" =~ ^[1-9][0-9]*$ ]] || {
+  echo "MAX_EPOCHS must be a positive integer."
+  exit 2
+}
+[[ "$MI_NUM_BINS" =~ ^[1-9][0-9]*$ ]] && (( MI_NUM_BINS >= 2 )) || {
+  echo "MI_NUM_BINS must be an integer of at least 2."
+  exit 2
+}
 
-# export PROJECT_ROOT MPLCONFIGDIR
-# mkdir -p "$MPLCONFIGDIR"
-# cd /workspace
+for dir in extracted processed mlready; do
+  test -d "${PROJECT_ROOT}/data/data_2025E+G/${dir}" || {
+    echo "Missing staged data directory: ${PROJECT_ROOT}/data/data_2025E+G/${dir}"
+    exit 1
+  }
+done
 
-# exec python3 src/train.py \
-#   paths.raw_data_dir="$RAW_DATA_DIR" \
-#   experiment=physics/ae \
-#   run_name="$RUN_NAME" \
-#   logger=mlflow \
-#   algorithm.optimizer.lr=0.0019859329798336714 \
-#   algorithm.delta=1.0 \
-#   algorithm.mi_gamma="$MI_GAMMA" \
-#   algorithm.mi_temperature=6.0 \
-#   algorithm.mi_sensitive_num_bins="$MI_NUM_BINS" \
-#   trainer.gradient_clip_val=5.0 \
-#   algorithm.optimizer.betas='[0.9,0.999]' \
-#   algorithm.optimizer.weight_decay=1e-06 \
-#   algorithm.encoder.nodes='[64,32,8]' \
-#   algorithm.input_noise_std=0.0 \
-#   trainer.max_epochs="$MAX_EPOCHS" \
-#   trainer=gpu \
-#   trainer.devices='[0]'
+export PROJECT_ROOT MPLCONFIGDIR
+mkdir -p "$MPLCONFIGDIR"
+cd /workspace
+
+exec python3 src/train.py \
+  paths.raw_data_dir="$RAW_DATA_DIR" \
+  experiment=physics/ae \
+  run_name="$RUN_NAME" \
+  logger=mlflow \
+  algorithm.optimizer.lr=0.0019859329798336714 \
+  algorithm.delta=1.0 \
+  algorithm.mi_gamma="$MI_GAMMA" \
+  algorithm.mi_temperature=6.0 \
+  algorithm.mi_sensitive_num_bins="$MI_NUM_BINS" \
+  trainer.gradient_clip_val=5.0 \
+  algorithm.optimizer.betas='[0.9,0.999]' \
+  algorithm.optimizer.weight_decay=1e-06 \
+  algorithm.encoder.nodes='[64,32,8]' \
+  algorithm.input_noise_std=0.0 \
+  trainer.max_epochs="$MAX_EPOCHS" \
+  trainer=gpu \
+  trainer.devices='[0]'
 
 
 

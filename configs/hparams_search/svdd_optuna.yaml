@@ -33,19 +33,11 @@ hydra:
       consider_endpoints: true
       n_ehvi_candidates: 256
 
-    # define hyperparameter search space. Assumes using torch.optim.AdamW
+    # Bias-free one-class Deep SVDD search space.
     params:
       algorithm.optimizer.lr: tag(log, interval(3e-5, 3e-3))
       trainer.gradient_clip_val: choice(0.0, 0.5, 1.0, 2.0)
       algorithm.optimizer.betas: choice([0.9, 0.999], [0.9, 0.99])
-      algorithm.optimizer.weight_decay: choice(0.0, 1e-6, 1e-5, 1e-4, 1e-3)
-
-      algorithm.weight_decay: choice(0.0, 1e-8, 1e-7, 1e-6, 1e-5)
-      algorithm.soft_boundary: choice(false, true)
-      algorithm.nu: choice(0.01, 0.05, 0.1, 0.2)
-
-      algorithm.center_init_method: choice(mean, zeros)
+      algorithm.network_weight_decay: choice(0.0, 1e-8, 1e-7, 1e-6, 1e-5)
 
       algorithm.encoder.nodes: choice([16,8],[24,8],[24,16],[32,8],[32,16],[32,24],[48,8],[48,16],[48,24],[24,8,4],[24,8,8],[32,16,8],[32,16,16],[48,24,8],[48,24,16],[48,24,24],[64,32,8],[64,32,16],[64,32,24],[64,32,32])
-
-      algorithm.encoder.activation: choice(relu, gelu)

@@ -1,0 +1,39 @@
+apiVersion: batch/v1
+kind: Job
+metadata:
+  generateName: adl1t-git-check-
+spec:
+  backoffLimit: 0
+  template:
+    spec:
+      restartPolicy: Never
+      containers:
+        - name: checkout
+          image: registry.cern.ch/adl1t/adl1t_lab@sha256:931d40d59a8640151bdc484720513935179bb04bebe53fe105d4877dfff351f2
+          imagePullPolicy: IfNotPresent
+          command: ["bash", "-lc"]
+          args:
+            - |
+              set -euo pipefail
+              export GIT_TERMINAL_PROMPT=0
+
+              git --version
+              git clone --branch dev/leon-hepinfo3 \
+                https://github.com/bb511/ADatL1.git \
+                /tmp/ADatL1
+
+              cd /tmp/ADatL1
+              git checkout --detach 53a0e1778a44b01afb07b60f0d2fa88882eac76a
+
+              test "$(git rev-parse HEAD)" = "53a0e1778a44b01afb07b60f0d2fa88882eac76a"
+              test -f src/train.py
+              test -f scripts/physics/runae.sh
+
+              echo "Git checkout verified."
+          resources:
+            requests:
+              cpu: "1"
+              memory: 1Gi
+            limits:
+              cpu: "2"
+              memory: 2Gi

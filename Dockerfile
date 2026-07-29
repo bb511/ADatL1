@@ -12,7 +12,7 @@ ENV PIP_DISABLE_PIP_VERSION_CHECK=1 \
     POETRY_NO_INTERACTION=1 \
     POETRY_VIRTUALENVS_CREATE=false \
     VIRTUAL_ENV=/opt/venv \
-    PATH=/opt/venv/bin:{PATH}
+    PATH=/opt/venv/bin:$PATH
 
 RUN apt-get update \
     && apt-get install -y --no-install-recommends git ca-certificates openssh-client \
@@ -32,7 +32,7 @@ RUN --mount=type=cache,target=/root/.cache/pip \
 FROM ${PYTHON_IMAGE} AS runtime
 
 ENV VIRTUAL_ENV=/opt/venv \
-    PATH=/opt/venv/bin:${PATH} \
+    PATH=/opt/venv/bin:$PATH \
     PYTHONUNBUFFERED=1
 
 RUN apt-get update \

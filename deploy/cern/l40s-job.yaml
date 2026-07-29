@@ -1,0 +1,44 @@
+apiVersion: batch/v1
+kind: Job
+metadata:
+  generateName: bernoulli-mi-no-fet-
+  labels:
+    app.kubernetes.io/name: bernoulli-mi-no-fet
+spec:
+  backoffLimit: 0
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: bernoulli-mi-no-fet
+    spec:
+      restartPolicy: Never
+      terminationGracePeriodSeconds: 120
+      nodeSelector:
+        nvidia.com/gpu.product: NVIDIA-L40S
+      containers:
+        - name: train
+          image: registry.cern.ch/adl1t/adl1t_lab/bernoulli_mi_ae/bernoulli-mi-no-fet:1.0.0-g03fc44898fe7
+          imagePullPolicy: Always
+          env:
+            - name: PROJECT_ROOT
+              value: /shared/adatl1
+            - name: RAW_DATA_DIR
+              value: /shared/adatl1/raw/parquet_files
+            - name: MPLCONFIGDIR
+              value: /scratch/adatl1/matplotlib
+            - name: RUN_NAME
+              value: Bernoulli_MI_No_FET_Run_01
+            - name: MAX_EPOCHS
+              value: "100"
+            - name: MI_GAMMA
+              value: "0.1"
+            - name: MI_NUM_BINS
+              value: "50"
+          resources:
+            requests:
+              cpu: "16"
+              memory: 96Gi
+            limits:
+              cpu: "16"
+              memory: 96Gi
+              nvidia.com/gpu: "1"

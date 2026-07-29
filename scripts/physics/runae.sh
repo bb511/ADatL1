@@ -11,6 +11,7 @@
 set -euo pipefail
 
 : "${PROJECT_ROOT:=/shared/adatl1}"
+: "${CODE_DIR:=/tmp/ADatL1}"
 : "${RAW_DATA_DIR:=${PROJECT_ROOT}/raw/parquet_files}"
 : "${RUN_NAME:?Set RUN_NAME, for example: Bernoulli_MI_No_FET_Run_01}"
 : "${MAX_EPOCHS:=100}"
@@ -40,7 +41,12 @@ done
 
 export PROJECT_ROOT MPLCONFIGDIR
 mkdir -p "$MPLCONFIGDIR"
-cd /workspace
+
+test -d "${CODE_DIR}/src" || {
+  echo "Missing source directory: ${CODE_DIR}/src"
+  exit 1
+}
+cd "$CODE_DIR"
 
 exec python3 src/train.py \
   paths.raw_data_dir="$RAW_DATA_DIR" \
@@ -71,23 +77,23 @@ exec python3 src/train.py \
 # ------------------------------------------------------------------------
 # taskset -c 0-2 \
 
-python3 src/train.py \
-    paths.raw_data_dir=../../03_Data/adl1t_data/parquet_files \
-    experiment=physics/ae \
-    run_name="Bernoulli-MI_No_FET_Et_Run_1" \
-    logger=mlflow \
-    algorithm.optimizer.lr=0.0019859329798336714 \
-    algorithm.delta=1.0 \
-    algorithm.mi_gamma=0.1 \
-    algorithm.mi_temperature=6.0 \
-    trainer.gradient_clip_val=5.0 \
-    algorithm.optimizer.betas='[0.9,0.999]' \
-    algorithm.optimizer.weight_decay=1e-06 \
-    algorithm.encoder.nodes='[64,32,8]' \
-    algorithm.input_noise_std=0.0 \
-    trainer.max_epochs=100 \
-    trainer=gpu \
-    trainer.devices='[0]'
+# python3 src/train.py \
+#     paths.raw_data_dir=../../03_Data/adl1t_data/parquet_files \
+#     experiment=physics/ae \
+#     run_name="Bernoulli-MI_No_FET_Et_Run_1" \
+#     logger=mlflow \
+#     algorithm.optimizer.lr=0.0019859329798336714 \
+#     algorithm.delta=1.0 \
+#     algorithm.mi_gamma=0.1 \
+#     algorithm.mi_temperature=6.0 \
+#     trainer.gradient_clip_val=5.0 \
+#     algorithm.optimizer.betas='[0.9,0.999]' \
+#     algorithm.optimizer.weight_decay=1e-06 \
+#     algorithm.encoder.nodes='[64,32,8]' \
+#     algorithm.input_noise_std=0.0 \
+#     trainer.max_epochs=100 \
+#     trainer=gpu \
+#     trainer.devices='[0]'
 
 # ------------------------------------------------------------------------
 # Semi-supervised cvar10 training

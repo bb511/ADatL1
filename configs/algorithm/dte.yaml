@@ -1,0 +1,27 @@
+# Template categorical Diffusion Time Estimation configuration.
+defaults:
+  - _self_
+
+_target_: src.algorithms.dte.DTE
+features: null
+
+target_rate: 0.25 # nominal rate
+base_rate: 28608.8064 # bunch crossing rate in kHz
+
+predictor:
+  _target_: src.algorithms.components.dte.DTEPredictor
+  in_dim: 117
+  hidden_dims: [256, 512, 256]
+  # The predictor emits one logit per ordered diffusion-time bin.
+  out_dim: ${algorithm.n_bins}
+  dropout: 0.5
+  activation: relu
+
+# Paper-faithful categorical DTE settings. n_steps and n_bins are fixed rather
+# than searched: the anomaly score is the expected bin index, so its scale is
+# proportional to n_bins, and the bin->noise ladder depends only on the product
+# beta_end * n_steps.
+n_steps: 300
+n_bins: 7
+beta_start: 0.0
+beta_end: 0.01

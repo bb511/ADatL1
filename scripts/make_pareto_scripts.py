@@ -64,19 +64,19 @@ PARAM_REMAP = {
 
 DOMAINS = {
     "physics": {
-        "models": ["ae", "vae", "dsae", "dsvae", "svdd", "realnvp"],
+        "models": ["ae", "vae", "dsae", "dsvae", "svdd", "realnvp", "dte"],
         "ref_ds": "SingleNeutrino_E-10-gun",
         "fixed": ["paths.raw_data_dir=/path/to/adl1t_data/parquet_files"],
         "fixed_per_model": {},
     },
     "cifar10": {
-        "models": ["ae", "vae", "svdd", "realnvp"],
+        "models": ["ae", "vae", "svdd", "realnvp", "dte"],
         "ref_ds": "reference_normal",
         "fixed": [],
         "fixed_per_model": {},
     },
     "robustad": {
-        "models": ["ae", "vae", "svdd", "realnvp"],
+        "models": ["ae", "vae", "svdd", "realnvp", "dte"],
         "ref_ds": "shifted_normal_all",
         "fixed": [],
         "fixed_per_model": {"ae": ["data.image_size=[128,128]"]},

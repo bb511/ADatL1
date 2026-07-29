@@ -1,0 +1,60 @@
+# @package _global_
+
+defaults:
+  - override /hydra/sweeper: optuna
+  - override /hydra/sweeper/sampler: motpe
+
+# here we define Optuna hyperparameter search
+# it optimizes for value returned from function with @hydra.main decorator
+# docs: https://hydra.cc/docs/next/plugins/optuna_sweeper
+hydra:
+  mode: "MULTIRUN" # set hydra to multirun by default if this config is attached
+  sweeper:
+    _target_: hydra_plugins.hydra_optuna_sweeper.optuna_sweeper.OptunaSweeper
+
+    # storage URL to persist optimization results
+    # for example, you can use SQLite if you set 'sqlite:///example.db'
+    storage: sqlite:///logs/optuna/physics/dte.db
+
+    # name of the study to persist optimization results
+    study_name: cvar25eff_vs_ascore
+
+    # number of parallel workers
+    n_jobs: 1
+
+    # 'minimize' or 'maximize' the objective
+    direction: [maximize, minimize]
+
+    # total number of runs that will be executed
+    n_trials: 40
+
+    # choose Optuna hyperparameter sampler
+    # you can choose bayesian sampler (tpe), random search (without optimization), grid sampler, and others
+    # docs: https://optuna.readthedocs.io/en/stable/reference/samplers.html
+    sampler:
+      n_startup_trials: 30
+      consider_endpoints: true
+      n_ehvi_candidates: 256
+
+    # define hyperparameter search space. Assumes using torch.optim.AdamW
+    #
+    # n_steps, n_bins and beta_start are deliberately NOT searched:
+    #   - the anomaly score is the expected bin index, so its scale grows with
+    #     n_bins while the second objective (ascore_operational) is minimised;
+    #     searching it would collapse the front onto the smallest n_bins;
+    #   - the bin->noise ladder depends only on the product beta_end * n_steps,
+    #     so searching both wastes the sampler's budget on a flat direction, and
+    #     n_steps sets the shape of persistent buffers loaded with strict=True;
+    #   - beta_start > beta_end raises in DTE.__init__, and optuna cannot
+    #     express that constraint, so invalid draws would become crashed trials.
+    params:
+      algorithm.optimizer.lr: tag(log, interval(3e-5, 3e-3))
+      trainer.gradient_clip_val: choice(0.0, 0.5, 1.0, 2.0)
+      algorithm.optimizer.betas: choice([0.9, 0.999], [0.9, 0.99])
+      algorithm.optimizer.weight_decay: choice(0.0, 1e-6, 1e-5, 1e-4, 1e-3)
+
+      algorithm.beta_end: tag(log, interval(1e-3, 1e-1))
+
+      algorithm.predictor.hidden_dims: choice([32,16], [64,32], [64,32,16], [128,64], [128,64,32], [256,128], [256,512,256], [256,512,512,256])
+      algorithm.predictor.dropout: choice(0.0, 0.1, 0.25, 0.5)
+      algorithm.predictor.activation: choice(relu, gelu, silu)

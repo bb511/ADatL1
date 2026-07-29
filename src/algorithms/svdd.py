@@ -99,7 +99,7 @@ class DeepSVDD(ADLightningModule):
 
         z = self.forward(x)
 
-        if not self.center_initialized:
+        if not self.center_initialized and self.center is None:
             with torch.no_grad():
                 self._init_center(z)
 

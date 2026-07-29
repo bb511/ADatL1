@@ -68,6 +68,10 @@ class DeepSetsVAE(ADLightningModule):
 
     def on_test_start(self):
         inject_object_feature_map(self)
+        if not hasattr(self, "kl_scale"):
+            # Eval-only runs (train=false) skip on_fit_start; at step 0 the
+            # warmup value does not depend on total_steps.
+            self._setup_kl_annealing(self.kl_warmup_frac, 1)
 
     @property
     def target_fpr(self) -> float:

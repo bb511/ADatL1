@@ -1,0 +1,76 @@
+# @package _global_
+
+defaults:
+  - override /hydra/sweeper: optuna
+  - override /hydra/sweeper/sampler: motpe
+
+# here we define Optuna hyperparameter search
+# it optimizes for value returned from function with @hydra.main decorator
+# docs: https://hydra.cc/docs/next/plugins/optuna_sweeper
+hydra:
+  mode: "MULTIRUN" # set hydra to multirun by default if this config is attached
+  sweeper:
+    _target_: hydra_plugins.hydra_optuna_sweeper.optuna_sweeper.OptunaSweeper
+
+    # name of the study to persist optimization results
+    study_name: cvar25eff_vs_ascore
+
+    # number of parallel workers
+    n_jobs: 1
+
+    # 'minimize' or 'maximize' the objective
+    direction: [maximize, minimize]
+
+    # total number of runs that will be executed
+    n_trials: 15
+
+    # choose Optuna hyperparameter sampler
+    # you can choose bayesian sampler (tpe), random search (without optimization), grid sampler, and others
+    # docs: https://optuna.readthedocs.io/en/stable/reference/samplers.html
+    sampler:
+      n_startup_trials: 3
+      consider_endpoints: true
+      n_ehvi_candidates: 256
+
+    # storage URL to persist optimization results
+    # for example, you can use SQLite if you set 'sqlite:///example.db'
+
+    # SWITCH THIS BETWEEN ROBUSTAD AND CIFAR10
+    # storage: sqlite:///logs/optuna/cifar10/dte.db
+    storage: sqlite:///logs/optuna/robustad/dte.db
+
+    # define hyperparameter search space. Assumes using torch.optim.AdamW
+    #
+    # n_steps, n_bins and beta_start are deliberately NOT searched -- see the
+    # comment in dte_optuna.yaml for why.
+    #
+    # RobustAD space
+    params:
+      algorithm.optimizer.lr: tag(log, interval(3e-5, 1e-3))
+      trainer.gradient_clip_val: choice(0.0, 0.5, 1.0)
+      algorithm.optimizer.betas: choice([0.9, 0.999], [0.9, 0.99])
+      algorithm.optimizer.weight_decay: choice(0.0, 1e-6, 1e-5, 1e-4)
+
+      algorithm.beta_end: tag(log, interval(1e-3, 1e-1))
+
+      algorithm.predictor.nodes: choice([8, 16, 32], [16, 32, 64], [32, 64, 128])
+      algorithm.predictor.strides: choice([2, 2])
+      algorithm.predictor.dropout: choice(0.0, 0.1, 0.25, 0.5)
+      algorithm.predictor.activation: choice(relu, gelu, silu)
+      algorithm.predictor.batchnorm: choice(false, true)
+
+    # CIFAR10 space
+    # params:
+    #   algorithm.optimizer.lr: tag(log, interval(3e-5, 3e-3))
+    #   trainer.gradient_clip_val: choice(0.0, 0.5, 1.0, 2.0)
+    #   algorithm.optimizer.betas: choice([0.9, 0.999], [0.9, 0.99])
+    #   algorithm.optimizer.weight_decay: choice(0.0, 1e-6, 1e-5, 1e-4, 1e-3)
+
+    #   algorithm.beta_end: tag(log, interval(1e-3, 1e-1))
+
+    #   algorithm.predictor.nodes: choice([16, 32, 64],[16, 32, 128],[16, 64, 128],[32, 64, 128],[32, 64, 256],[32, 128, 256],[64, 128, 256])
+
+    #   algorithm.predictor.strides: choice([2, 2], [2, 1], [1, 2])
+    #   algorithm.predictor.dropout: choice(0.0, 0.1, 0.25, 0.5)
+    #   algorithm.predictor.activation: choice(relu, gelu, silu)
+    #   algorithm.predictor.batchnorm: choice(false, true)

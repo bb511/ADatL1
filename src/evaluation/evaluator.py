@@ -216,11 +216,11 @@ class Evaluator:
         state_dict = torch.load(ckpt_path, weights_only=False, map_location="cpu")[
             "state_dict"
         ]
-        # Threshold buffers are registered on the module by the training-time
-        # efficiency callback; an eval-only model (train=false) lacks them.
+        # Module-level states registered during training (threshold buffers,
+        # the SVDD center) are absent from an eval-only model (train=false).
         model_keys = set(model.state_dict())
         for key, value in state_dict.items():
-            if key.startswith("thres_") and key not in model_keys:
+            if key not in model_keys and "." not in key and torch.is_tensor(value):
                 model.register_buffer(key, value.clone(), persistent=True)
         model.load_state_dict(state_dict, strict=True)
         model._ckpt_path = ckpt_path

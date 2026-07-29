@@ -1,0 +1,54 @@
+apiVersion: v1
+kind: Pod
+metadata:
+  name: adatl1-stage-data
+  labels:
+    home: "eos"
+    mount-eos: "true"
+spec:
+  restartPolicy: Never
+  terminationGracePeriodSeconds: 60
+  nodeSelector:
+    node/type: HIGHFREQUENCY-3.8-4c
+  containers:
+    - name: data-stage
+      image: registry.cern.ch/ngt/lxplus-like:9
+      imagePullPolicy: IfNotPresent
+      command: ["/usr/bin/tini", "--", "bash", "-lc"]
+      args:
+        - |
+          set -euo pipefail
+
+          src="/eos/user/l/lbehrens/adl1t-stage/data/data_2025E+G"
+          dst="/shared/adatl1/data/data_2025E+G"
+
+          for dir in extracted processed mlready; do
+            test -d "${src}/${dir}" || {
+              echo "Missing required EOS directory: ${src}/${dir}"
+              exit 1
+            }
+          done
+
+          command -v rsync >/dev/null || {
+            echo "rsync is not available in this image"
+            exit 127
+          }
+
+          mkdir -p \
+            "${dst}" \
+            /shared/adatl1/checkpoints \
+            /shared/adatl1/logs \
+            /shared/adatl1/outputs
+
+          rsync -aH --human-readable --info=progress2 "${src}/" "${dst}/"
+
+          echo "EOS-to-shared copy completed."
+          du -sh "${dst}"
+          find "${dst}" -mindepth 1 -maxdepth 1 -type d -print | sort
+      resources:
+        requests:
+          cpu: "1"
+          memory: 2Gi
+        limits:
+          cpu: "4"
+          memory: 8Gi

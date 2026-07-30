@@ -15,6 +15,7 @@
 #   data/robustad                                                      ~18G
 set -eu
 
+taskset -c 0-2 \
 python3 src/train.py \
     experiment=robustad/dte \
     experiment_name=dte_default \

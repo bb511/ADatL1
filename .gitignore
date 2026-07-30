@@ -8,6 +8,7 @@ notebooks/effs
 notebooks/effs_cifar10
 notebooks/effs_robustad
 notebooks/exported_metrics
+notebooks/run_times
 
 # Ignore MAC stuff.
 .DS_Store

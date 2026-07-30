@@ -29,7 +29,7 @@
 #     evaluation.callbacks.wasserstein=null \
 #     evaluation.callbacks.reco=null \
 #     logger=none \
-#     hparams_search=ae_optuna \
+#     hparams_search=physics/ae_optuna \
 #     hydra.sweeper.study_name=cvar25eff_vs_mse \
 #     hydra.sweeper.n_trials=100 \
 #     hydra.sweeper.sampler.n_startup_trials=150 \
@@ -69,7 +69,7 @@
 #     evaluation.callbacks.consistency_sn_zb=null \
 #     evaluation.callbacks.reco=null \
 #     logger=none \
-#     hparams_search=ae_optuna \
+#     hparams_search=physics/ae_optuna \
 #     hydra.sweeper.study_name=cap_vs_mse \
 #     hydra.sweeper.n_trials=100 \
 #     hydra.sweeper.sampler.n_startup_trials=150 \
@@ -107,7 +107,7 @@
 #     evaluation.callbacks.consistency_sn_zb=null \
 #     evaluation.callbacks.reco=null \
 #     logger=none \
-#     hparams_search=ae_optuna \
+#     hparams_search=physics/ae_optuna \
 #     optimized_metric_config.main_metric.callback.name=thres_drift \
 #     optimized_metric_config.main_metric.direction=minimize \
 #     hydra.sweeper.study_name=drift_vs_mse \
@@ -149,7 +149,7 @@
 #     evaluation.callbacks.consistency_sn_zb=null \
 #     evaluation.callbacks.reco=null \
 #     logger=none \
-#     hparams_search=ae_optuna \
+#     hparams_search=physics/ae_optuna \
 #     optimized_metric_config.main_metric.callback.name=wasserstein \
 #     optimized_metric_config.main_metric.direction=minimize \
 #     hydra.sweeper.study_name=wasserstein_vs_mse \
@@ -193,7 +193,7 @@
 #     evaluation.callbacks.cap_sn_zb=null \
 #     evaluation.callbacks.reco=null \
 #     logger=none \
-#     hparams_search=ae_optuna \
+#     hparams_search=physics/ae_optuna \
 #     optimized_metric_config.main_metric.callback.name=consistency \
 #     hydra.sweeper.study_name=consistency_vs_mseq99_b16k \
 #     hydra.sweeper.n_trials=100 \

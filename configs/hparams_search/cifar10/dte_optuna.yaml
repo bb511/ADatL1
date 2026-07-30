@@ -34,46 +34,25 @@ hydra:
 
     # storage URL to persist optimization results
     # for example, you can use SQLite if you set 'sqlite:///example.db'
-
-    # SWITCH THIS BETWEEN ROBUSTAD AND CIFAR10
-    # storage: sqlite:///logs/optuna/cifar10/dte.db
-    storage: sqlite:///logs/optuna/robustad/dte.db
+    storage: sqlite:///logs/optuna/cifar10/dte.db
 
     # define hyperparameter search space. Assumes using torch.optim.AdamW
     #
-    # n_bins IS searched; n_steps and beta_start are not -- see the comment in
-    # dte_optuna.yaml for why, and for why searching n_bins is only sound because
-    # ImageDTE normalises the anomaly score by n_bins-1.
-    #
-    # RobustAD space
+    # CIFAR-10 space. n_bins IS searched; n_steps and beta_start are not -- see
+    # the comment in physics/dte_optuna.yaml for why, and for why searching
+    # n_bins is only sound because ImageDTE normalises the anomaly score by
+    # n_bins-1.
     params:
-      algorithm.optimizer.lr: tag(log, interval(3e-5, 1e-3))
-      trainer.gradient_clip_val: choice(0.0, 0.5, 1.0)
+      algorithm.optimizer.lr: tag(log, interval(3e-5, 3e-3))
+      trainer.gradient_clip_val: choice(0.0, 0.5, 1.0, 2.0)
       algorithm.optimizer.betas: choice([0.9, 0.999], [0.9, 0.99])
-      algorithm.optimizer.weight_decay: choice(0.0, 1e-6, 1e-5, 1e-4)
+      algorithm.optimizer.weight_decay: choice(0.0, 1e-6, 1e-5, 1e-4, 1e-3)
 
       algorithm.beta_end: tag(log, interval(1e-3, 1e-1))
       algorithm.n_bins: choice(5, 7, 10, 15, 20, 30)
 
-      algorithm.predictor.nodes: choice([8, 16, 32], [16, 32, 64], [32, 64, 128])
-      algorithm.predictor.strides: choice([2, 2])
+      algorithm.predictor.nodes: choice([16, 32, 64],[16, 32, 128],[16, 64, 128],[32, 64, 128],[32, 64, 256],[32, 128, 256],[64, 128, 256])
+      algorithm.predictor.strides: choice([2, 2], [2, 1], [1, 2])
       algorithm.predictor.dropout: choice(0.0, 0.1, 0.25, 0.5)
       algorithm.predictor.activation: choice(relu, gelu, silu)
       algorithm.predictor.batchnorm: choice(false, true)
-
-    # CIFAR10 space
-    # params:
-    #   algorithm.optimizer.lr: tag(log, interval(3e-5, 3e-3))
-    #   trainer.gradient_clip_val: choice(0.0, 0.5, 1.0, 2.0)
-    #   algorithm.optimizer.betas: choice([0.9, 0.999], [0.9, 0.99])
-    #   algorithm.optimizer.weight_decay: choice(0.0, 1e-6, 1e-5, 1e-4, 1e-3)
-
-    #   algorithm.beta_end: tag(log, interval(1e-3, 1e-1))
-    #   algorithm.n_bins: choice(5, 7, 10, 15, 20, 30)
-
-    #   algorithm.predictor.nodes: choice([16, 32, 64],[16, 32, 128],[16, 64, 128],[32, 64, 128],[32, 64, 256],[32, 128, 256],[64, 128, 256])
-
-    #   algorithm.predictor.strides: choice([2, 2], [2, 1], [1, 2])
-    #   algorithm.predictor.dropout: choice(0.0, 0.1, 0.25, 0.5)
-    #   algorithm.predictor.activation: choice(relu, gelu, silu)
-    #   algorithm.predictor.batchnorm: choice(false, true)

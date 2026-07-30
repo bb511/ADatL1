@@ -9,10 +9,9 @@
 # Build it on olqti with rundte_pareto.sh in this directory and copy the trees
 # listed there.
 #
-# FOR CIFAR-10, ALSO EDIT configs/hparams_search/imagedte_optuna.yaml: it ships
-# with the RobustAD `params` block live and the CIFAR-10 one commented out. The
-# storage override below selects the right database either way, so a forgotten
-# switch silently searches the wrong space into the right study.
+# The search space is configs/hparams_search/robustad/dte_optuna.yaml and holds
+# the RobustAD ranges only -- nothing to edit before launching. Its CIFAR-10
+# counterpart is a separate file under configs/hparams_search/cifar10/.
 
 
 # ========================================================================
@@ -36,7 +35,7 @@
 #     evaluation.callbacks.thres_drift=null \
 #     evaluation.callbacks.wasserstein=null \
 #     logger=none \
-#     hparams_search=imagedte_optuna \
+#     hparams_search=robustad/dte_optuna \
 #     hydra.sweeper.study_name=cvar25eff_vs_ascore \
 #     hydra.sweeper.n_trials=600 \
 #     hydra.sweeper.sampler.n_startup_trials=150 \
@@ -69,7 +68,7 @@
 #     evaluation.callbacks.thres_drift=null \
 #     evaluation.callbacks.wasserstein=null \
 #     logger=none \
-#     hparams_search=imagedte_optuna \
+#     hparams_search=robustad/dte_optuna \
 #     hydra.sweeper.study_name=cap_vs_ascore \
 #     hydra.sweeper.n_trials=600 \
 #     hydra.sweeper.sampler.n_startup_trials=150 \
@@ -102,7 +101,7 @@
 #     evaluation.callbacks.cap_sn_zb=null \
 #     evaluation.callbacks.wasserstein=null \
 #     logger=none \
-#     hparams_search=imagedte_optuna \
+#     hparams_search=robustad/dte_optuna \
 #     optimized_metric_config.main_metric.callback.name=thres_drift \
 #     optimized_metric_config.main_metric.direction=minimize \
 #     hydra.sweeper.study_name=drift_vs_ascore \
@@ -139,7 +138,7 @@
 #     evaluation.callbacks.cap_sn_zb=null \
 #     evaluation.callbacks.thres_drift=null \
 #     logger=none \
-#     hparams_search=imagedte_optuna \
+#     hparams_search=robustad/dte_optuna \
 #     optimized_metric_config.main_metric.callback.name=wasserstein \
 #     optimized_metric_config.main_metric.direction=minimize \
 #     hydra.sweeper.study_name=wasserstein_vs_ascore \
@@ -177,7 +176,7 @@
 #     evaluation.callbacks.thres_drift=null \
 #     evaluation.callbacks.wasserstein=null \
 #     logger=none \
-#     hparams_search=imagedte_optuna \
+#     hparams_search=robustad/dte_optuna \
 #     optimized_metric_config.main_metric.callback.name=consistency \
 #     hydra.sweeper.study_name=consistency_vs_ascore \
 #     hydra.sweeper.n_trials=600 \

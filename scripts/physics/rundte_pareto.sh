@@ -33,6 +33,7 @@
 # and does not need to travel.
 set -eu
 
+taskset -c 0-2 \
 python3 src/train.py \
     experiment=physics/dte \
     paths.raw_data_dir=/data/deodagiu/adl1t_data/parquet_files \

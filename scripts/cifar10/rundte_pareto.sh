@@ -14,6 +14,7 @@
 #   data/cifar10                                                       ~341M
 set -eu
 
+taskset -c 0-2 \
 python3 src/train.py \
     experiment=cifar10/dte \
     experiment_name=dte_default \

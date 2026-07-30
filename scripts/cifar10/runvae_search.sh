@@ -26,7 +26,6 @@
 #     ~evaluation.evaluator.ckpts.summary.cvar10_ema \
 #     evaluation.callbacks.thres_drift=null \
 #     evaluation.callbacks.wasserstein=null \
-#     evaluation.callbacks.reco=null \
 #     logger=none \
 #     hparams_search=cifar10/vae_optuna \
 #     hydra.sweeper.study_name=cvar25eff_vs_kl \
@@ -61,7 +60,6 @@
 #     evaluation.callbacks.thres_drift=null \
 #     evaluation.callbacks.wasserstein=null \
 #     evaluation.callbacks.consistency_sn_zb=null \
-#     evaluation.callbacks.reco=null \
 #     logger=none \
 #     hparams_search=cifar10/vae_optuna \
 #     hydra.sweeper.study_name=cap_vs_kl \
@@ -96,7 +94,6 @@
 #     evaluation.callbacks.cap_sn_zb=null \
 #     evaluation.callbacks.wasserstein=null \
 #     evaluation.callbacks.consistency_sn_zb=null \
-#     evaluation.callbacks.reco=null \
 #     logger=none \
 #     hparams_search=cifar10/vae_optuna \
 #     optimized_metric_config.main_metric.callback.name=thres_drift \
@@ -135,7 +132,6 @@
 #     evaluation.callbacks.cap_sn_zb=null \
 #     evaluation.callbacks.thres_drift=null \
 #     evaluation.callbacks.consistency_sn_zb=null \
-#     evaluation.callbacks.reco=null \
 #     logger=none \
 #     hparams_search=cifar10/vae_optuna \
 #     optimized_metric_config.main_metric.callback.name=wasserstein \
@@ -175,7 +171,6 @@
 #     evaluation.callbacks.thres_drift=null \
 #     evaluation.callbacks.wasserstein=null \
 #     evaluation.callbacks.cap_sn_zb=null \
-#     evaluation.callbacks.reco=null \
 #     logger=none \
 #     hparams_search=cifar10/vae_optuna \
 #     optimized_metric_config.main_metric.callback.name=consistency \

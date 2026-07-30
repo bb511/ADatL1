@@ -31,6 +31,7 @@ class MLP(nn.Module):
         out_dim: int,
         batchnorm: Optional[bool] = False,
         affine: bool = True,
+        bias: bool = True,
         activation: str = "relu",
         final_activation: bool = False,
         init_weight: Optional[Callable] = None,
@@ -45,6 +46,7 @@ class MLP(nn.Module):
 
         self.batchnorm = batchnorm
         self.affine = affine
+        self.bias = bias
         self.init_weight = init_weight
         self.init_bias = init_bias
 
@@ -73,7 +75,7 @@ class MLP(nn.Module):
 
         # Hidden layers
         for hidden_dim in self.hidden_dims:
-            layers.append(nn.Linear(current_dim, hidden_dim))
+            layers.append(nn.Linear(current_dim, hidden_dim, bias=self.bias))
             layers.append(
                 nn.BatchNorm1d(hidden_dim, affine=self.affine)
                 if self.batchnorm
@@ -83,7 +85,7 @@ class MLP(nn.Module):
             current_dim = hidden_dim
 
         # Output layer
-        layers.append(nn.Linear(current_dim, self.out_dim))
+        layers.append(nn.Linear(current_dim, self.out_dim, bias=self.bias))
         if self.final_activation:
             layers.append(self.activation)
 
@@ -133,6 +135,7 @@ class ImageMLP(nn.Module):
         transpose: bool = False,
         batchnorm: bool = False,
         affine: bool = True,
+        bias: bool = True,
         activation: str = "relu",
         final_activation: bool = False,
         init_weight: Optional[Callable] = None,
@@ -152,6 +155,7 @@ class ImageMLP(nn.Module):
         self.transpose = transpose
         self.batchnorm = batchnorm
         self.affine = affine
+        self.bias = bias
         self.activation = self._get_activation(activation)
         self.final_activation = final_activation
         self.init_weight = init_weight
@@ -186,6 +190,7 @@ class ImageMLP(nn.Module):
                 kernel_size=self.kernel_size,
                 stride=stride,
                 padding=self.kernel_size // 2,
+                bias=self.bias,
             )
 
         return nn.ConvTranspose2d(
@@ -195,6 +200,7 @@ class ImageMLP(nn.Module):
             stride=stride,
             padding=self.kernel_size // 2,
             output_padding=stride - 1 if stride > 1 else 0,
+            bias=self.bias,
         )
 
     def _construct_net(self):

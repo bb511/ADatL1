@@ -1,6 +1,9 @@
 # ========================================================================
 # VAE HYPERPARAMETER SEARCH COMMANDS
 # ========================================================================
+#
+# One driver per strategy: hydra.sweeper.n_jobs=6 runs six trials at a time as
+# slurm jobs, so the whole 600-trial study completes in a single invocation.
 
 
 # ========================================================================
@@ -11,10 +14,9 @@
 # ------------------------------------------------------------------------
 # python3 src/train.py \
 #     -m \
-#     hydra/launcher=submitit_local \
+#     hydra/launcher=submitit_slurm_clariden \
 #     hydra.launcher.timeout_min=200 \
-#     hydra.launcher.cpus_per_task=1 \
-#     hydra.launcher.gpus_per_node=4 \
+#     hydra.sweeper.n_jobs=6 \
 #     hydra.sweeper.storage='sqlite:///logs/optuna/cifar10/vae.db' \
 #     experiment=cifar10/vae \
 #     experiment_name=cifar10_vae_cvar25_vs_kl_search \
@@ -39,10 +41,9 @@
 # ------------------------------------------------------------------------
 # python3 src/train.py \
 #     -m \
-#     hydra/launcher=submitit_local \
+#     hydra/launcher=submitit_slurm_clariden \
 #     hydra.launcher.timeout_min=200 \
-#     hydra.launcher.cpus_per_task=1 \
-#     hydra.launcher.gpus_per_node=4 \
+#     hydra.sweeper.n_jobs=6 \
 #     hydra.sweeper.storage='sqlite:///logs/optuna/cifar10/vae.db' \
 #     experiment=cifar10/vae_agnostic \
 #     experiment_name=cifar10_vae_agnostic_cap_vs_kl_search \
@@ -75,10 +76,9 @@
 # ------------------------------------------------------------------------
 # python3 src/train.py \
 #     -m \
-#     hydra/launcher=submitit_local \
+#     hydra/launcher=submitit_slurm_clariden \
 #     hydra.launcher.timeout_min=200 \
-#     hydra.launcher.cpus_per_task=1 \
-#     hydra.launcher.gpus_per_node=4 \
+#     hydra.sweeper.n_jobs=6 \
 #     hydra.sweeper.storage='sqlite:///logs/optuna/cifar10/vae.db' \
 #     experiment=cifar10/vae_agnostic \
 #     experiment_name=cifar10_vae_agnostic_drift_vs_kl_search \
@@ -115,10 +115,9 @@
 # ------------------------------------------------------------------------
 # python3 src/train.py \
 #     -m \
-#     hydra/launcher=submitit_local \
+#     hydra/launcher=submitit_slurm_clariden \
 #     hydra.launcher.timeout_min=200 \
-#     hydra.launcher.cpus_per_task=1 \
-#     hydra.launcher.gpus_per_node=4 \
+#     hydra.sweeper.n_jobs=6 \
 #     hydra.sweeper.storage='sqlite:///logs/optuna/cifar10/vae.db' \
 #     experiment=cifar10/vae_agnostic \
 #     experiment_name=cifar10_vae_agnostic_wasserstein_vs_kl_search \
@@ -156,10 +155,9 @@
 # i.e. CAP with the informative (posterior-norm) component removed.
 # python3 src/train.py \
 #     -m \
-#     hydra/launcher=submitit_local \
+#     hydra/launcher=submitit_slurm_clariden \
 #     hydra.launcher.timeout_min=200 \
-#     hydra.launcher.cpus_per_task=1 \
-#     hydra.launcher.gpus_per_node=4 \
+#     hydra.sweeper.n_jobs=6 \
 #     hydra.sweeper.storage='sqlite:///logs/optuna/cifar10/vae.db' \
 #     experiment=cifar10/vae_agnostic \
 #     experiment_name=cifar10_vae_agnostic_consistency_vs_kl_search \

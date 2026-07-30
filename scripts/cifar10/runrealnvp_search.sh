@@ -1,6 +1,9 @@
 # ========================================================================
 # RealNVP HYPERPARAMETER SEARCH COMMANDS
 # ========================================================================
+#
+# One driver per strategy: hydra.sweeper.n_jobs=6 runs six trials at a time as
+# slurm jobs, so the whole 600-trial study completes in a single invocation.
 
 
 # ========================================================================
@@ -11,10 +14,9 @@
 # ------------------------------------------------------------------------
 # python3 src/train.py \
 #     -m \
-#     hydra/launcher=submitit_local \
+#     hydra/launcher=submitit_slurm_clariden \
 #     hydra.launcher.timeout_min=200 \
-#     hydra.launcher.cpus_per_task=1 \
-#     hydra.launcher.gpus_per_node=4 \
+#     hydra.sweeper.n_jobs=6 \
 #     hydra.sweeper.storage='sqlite:///logs/optuna/cifar10/realnvp.db' \
 #     experiment=cifar10/realnvp \
 #     experiment_name=cifar10_realnvp_cvar25_vs_logp_search \
@@ -38,10 +40,9 @@
 # ------------------------------------------------------------------------
 # python3 src/train.py \
 #     -m \
-#     hydra/launcher=submitit_local \
+#     hydra/launcher=submitit_slurm_clariden \
 #     hydra.launcher.timeout_min=200 \
-#     hydra.launcher.cpus_per_task=1 \
-#     hydra.launcher.gpus_per_node=4 \
+#     hydra.sweeper.n_jobs=6 \
 #     hydra.sweeper.storage='sqlite:///logs/optuna/cifar10/realnvp.db' \
 #     experiment=cifar10/realnvp_agnostic \
 #     experiment_name=cifar10_realnvp_agnostic_cap_vs_logp_search \
@@ -73,12 +74,10 @@
 # ------------------------------------------------------------------------
 # python3 src/train.py \
 #     -m \
-#     hydra/launcher=submitit_local \
+#     hydra/launcher=submitit_slurm_clariden \
 #     hydra.launcher.timeout_min=200 \
-#     hydra.launcher.cpus_per_task=1 \
-#     hydra.launcher.gpus_per_node=4 \
+#     hydra.sweeper.n_jobs=6 \
 #     hydra.sweeper.storage='sqlite:///logs/optuna/cifar10/realnvp.db' \
-#     hydra.sweeper.n_jobs=10 \
 #     experiment=cifar10/realnvp_agnostic \
 #     experiment_name=cifar10_realnvp_agnostic_drift_vs_logp_search \
 #     callbacks.anomaly_eff=null \
@@ -112,10 +111,9 @@
 # ------------------------------------------------------------------------
 # python3 src/train.py \
 #     -m \
-#     hydra/launcher=submitit_local \
+#     hydra/launcher=submitit_slurm_clariden \
 #     hydra.launcher.timeout_min=200 \
-#     hydra.launcher.cpus_per_task=1 \
-#     hydra.launcher.gpus_per_node=4 \
+#     hydra.sweeper.n_jobs=6 \
 #     hydra.sweeper.storage='sqlite:///logs/optuna/cifar10/realnvp.db' \
 #     experiment=cifar10/realnvp_agnostic \
 #     experiment_name=cifar10_realnvp_agnostic_wasserstein_vs_logp_search \
@@ -152,10 +150,9 @@
 # i.e. CAP with the informative (posterior-norm) component removed.
 # python3 src/train.py \
 #     -m \
-#     hydra/launcher=submitit_local \
+#     hydra/launcher=submitit_slurm_clariden \
 #     hydra.launcher.timeout_min=200 \
-#     hydra.launcher.cpus_per_task=1 \
-#     hydra.launcher.gpus_per_node=4 \
+#     hydra.sweeper.n_jobs=6 \
 #     hydra.sweeper.storage='sqlite:///logs/optuna/cifar10/realnvp.db' \
 #     experiment=cifar10/realnvp_agnostic \
 #     experiment_name=cifar10_realnvp_agnostic_consistency_vs_logp_search \

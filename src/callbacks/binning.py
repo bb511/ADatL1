@@ -601,7 +601,7 @@ class BinningDiagnosticsCallback(Callback):
                 device=finite_values.device,
             )
         else:
-            histogram_values = finite_values.float()
+            histogram_values = finite_values.detach().float().cpu()
             value_min = float(histogram_values.min().item())
             value_max = float(histogram_values.max().item())
             stats = {

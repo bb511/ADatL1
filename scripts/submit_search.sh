@@ -75,6 +75,22 @@ extract_cmds() {
 
 field() { printf "%s" "$1" | grep -oE "$2=[^ ]+" | head -1 | cut -d= -f2- ; }
 
+# Optuna storage a driver will use: an explicit hydra.sweeper.storage override
+# if the block carries one (cifar10/robustad), else the value in the
+# hparams_search config it selects (physics).
+storage_of() {
+    local s hp
+    s=$(printf "%s" "$1" | grep -oE "hydra\.sweeper\.storage='[^']+'" | head -1 | sed "s/.*='//;s/'\$//")
+    if [ -z "$s" ]; then
+        hp=$(field "$1" 'hparams_search')
+        if [ -n "$hp" ] && [ -f "configs/hparams_search/${hp}.yaml" ]; then
+            s=$(grep -oE "^[[:space:]]*storage:[[:space:]]*\S+" "configs/hparams_search/${hp}.yaml" |
+                head -1 | awk '{print $2}')
+        fi
+    fi
+    printf "%s" "$s"
+}
+
 n_total=$(extract_cmds "$file" | wc -l | tr -d " ")
 [ "$n_total" -eq 0 ] && { echo "No search commands found in $file" >&2; exit 1; }
 
@@ -118,6 +134,27 @@ sweep_ts=$(date +%Y-%m-%d_%H-%M-%S)
 [ "$dry" -eq 1 ] || mkdir -p "$logdir"
 
 command -v sbatch >/dev/null 2>&1 || echo "warning: sbatch not on PATH - are you on clariden?" >&2
+
+# Create each sqlite study database, serially, before any driver starts.
+# Drivers launched together against a not-yet-existing file all run optuna's
+# alembic bootstrap at once and lose the race -- observed as
+# 'UNIQUE constraint failed: alembic_version.version_num' and 'database is
+# locked', which kills the driver seconds in. Doing it once here removes it.
+# Idempotent: on an existing database this only opens and closes it.
+if [ "$dry" -eq 0 ]; then
+    extract_cmds "$file" | while IFS= read -r c; do storage_of "$c"; echo; done |
+        sort -u | grep -v '^$' | while IFS= read -r url; do
+        case "$url" in
+            sqlite:///*)
+                path=${url#sqlite:///}
+                if [ ! -f "$path" ]; then
+                    mkdir -p "$(dirname "$path")"
+                    echo "initialising study database: $path"
+                    python3 -c 'import optuna,sys; optuna.storages.RDBStorage(sys.argv[1])' "$url"
+                fi ;;
+        esac
+    done
+fi
 
 i=0
 n_sub=0
@@ -169,9 +206,15 @@ while IFS= read -r cmd; do
         continue
     fi
     echo "[$i/$n_total] starting driver: $study"
-    nohup bash -c "$full" > "$logdir/${i}_${study}.log" 2>&1 &
+    # Keep the previous log: relaunching a driver that died is the main reason
+    # to re-run this script, and truncating would destroy the evidence of why.
+    log="$logdir/${i}_${study}.log"
+    if [ -f "$log" ]; then mv "$log" "$log.$(date +%Y%m%d-%H%M%S)"; fi
+    nohup bash -c "$full" > "$log" 2>&1 &
     n_sub=$((n_sub + 1))
-    sleep 2
+    # Drivers sharing one sqlite file still contend while creating their study
+    # rows; stagger them rather than starting six in the same second.
+    sleep 5
 done <<EOF
 $(extract_cmds "$file")
 EOF

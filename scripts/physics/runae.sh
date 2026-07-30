@@ -17,6 +17,7 @@ set -euo pipefail
 : "${MAX_EPOCHS:=100}"
 : "${MI_GAMMA:=0.1}"
 : "${MI_NUM_BINS:=50}"
+: "${DATA_WORKERS:=3}"
 : "${MPLCONFIGDIR:=/scratch/adatl1/matplotlib}"
 
 [[ "$RUN_NAME" =~ ^[A-Za-z0-9][A-Za-z0-9._-]*$ ]] || {
@@ -31,6 +32,10 @@ set -euo pipefail
   echo "MI_NUM_BINS must be an integer of at least 2."
   exit 2
 }
+[[ "$DATA_WORKERS" =~ ^[1-9][0-9]*$ ]] || {
+  echo "DATA_WORKERS must be a positive integer."
+  exit 2
+}
 
 for dir in extracted processed mlready; do
   test -d "${PROJECT_ROOT}/data/data_2025E+G/${dir}" || {
@@ -40,6 +45,11 @@ for dir in extracted processed mlready; do
 done
 
 export PROJECT_ROOT MPLCONFIGDIR
+export NUMEXPR_MAX_THREADS="$DATA_WORKERS"
+export NUMEXPR_NUM_THREADS="$DATA_WORKERS"
+export OMP_NUM_THREADS="$DATA_WORKERS"
+export MKL_NUM_THREADS="$DATA_WORKERS"
+export OPENBLAS_NUM_THREADS="$DATA_WORKERS"
 mkdir -p "$MPLCONFIGDIR"
 
 test -d "${CODE_DIR}/src" || {
@@ -49,6 +59,7 @@ test -d "${CODE_DIR}/src" || {
 cd "$CODE_DIR"
 
 exec python3 src/train.py \
+  paths.root_dir="$PROJECT_ROOT" \
   paths.raw_data_dir="$RAW_DATA_DIR" \
   experiment=physics/ae \
   run_name="$RUN_NAME" \
@@ -63,6 +74,7 @@ exec python3 src/train.py \
   algorithm.optimizer.weight_decay=1e-06 \
   algorithm.encoder.nodes='[64,32,8]' \
   algorithm.input_noise_std=0.0 \
+  data.data_awkward2torch.workers="$DATA_WORKERS" \
   trainer.max_epochs="$MAX_EPOCHS" \
   trainer=gpu \
   trainer.devices='[0]'

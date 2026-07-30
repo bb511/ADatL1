@@ -1,78 +1,21 @@
-apiVersion: batch/v1
-kind: Job
+apiVersion: v1
+kind: Pod
 metadata:
-  generateName: bernoulli-mi-no-fet-
-  labels:
-    app.kubernetes.io/name: bernoulli-mi-no-fet
+  name: adl1t-l40s-session
 spec:
-  backoffLimit: 0
-  template:
-    metadata:
-      labels:
-        app.kubernetes.io/name: bernoulli-mi-no-fet
-    spec:
-      restartPolicy: Never
-      terminationGracePeriodSeconds: 120
-      nodeSelector:
-        nvidia.com/gpu.product: NVIDIA-L40S
-      containers:
-        - name: train
-          image: registry.cern.ch/adl1t/adl1t_lab@sha256:931d40d59a8640151bdc484720513935179bb04bebe53fe105d4877dfff351f2
-          imagePullPolicy: IfNotPresent
-          command: ["bash", "-lc"]
-          args:
-            - |
-              set -euo pipefail
-              export GIT_TERMINAL_PROMPT=0
-
-              git clone --branch "${ADATL1_BRANCH}" \
-                https://github.com/bb511/ADatL1.git \
-                "$CODE_DIR"
-              cd "$CODE_DIR"
-              git checkout --detach "${ADATL1_COMMIT}"
-
-              test "$(git rev-parse HEAD)" = "${ADATL1_COMMIT}"
-              test -f src/train.py
-              test -f scripts/physics/runae.sh
-
-              python3 - <<'PY'
-              import torch
-              print(f"torch={torch.__version__}")
-              print(f"compiled CUDA={torch.version.cuda}")
-              print(f"cuda available={torch.cuda.is_available()}")
-              print(f"GPU count={torch.cuda.device_count()}")
-              assert torch.cuda.is_available()
-              assert torch.cuda.device_count() == 1
-              print(f"GPU={torch.cuda.get_device_name(0)}")
-              PY
-
-              exec bash "$CODE_DIR/scripts/physics/runae.sh"
-          env:
-            - name: CODE_DIR
-              value: /tmp/ADatL1
-            - name: ADATL1_BRANCH
-              value: dev/leon-hepinfo3
-            - name: ADATL1_COMMIT
-              value: 10017bd62aaa75e61f8d1f177d61e78caa2e50b3
-            - name: PROJECT_ROOT
-              value: /shared/adatl1
-            - name: RAW_DATA_DIR
-              value: /shared/adatl1/raw/parquet_files
-            - name: MPLCONFIGDIR
-              value: /scratch/adatl1/matplotlib
-            - name: RUN_NAME
-              value: Bernoulli_MI_No_FET_Run_01
-            - name: MAX_EPOCHS
-              value: "100"
-            - name: MI_GAMMA
-              value: "0.1"
-            - name: MI_NUM_BINS
-              value: "50"
-          resources:
-            requests:
-              cpu: "16"
-              memory: 96Gi
-            limits:
-              cpu: "16"
-              memory: 96Gi
-              nvidia.com/gpu: "1"
+  containers:
+    - name: container
+      image: registry.cern.ch/adl1t/adl1t_lab:dev
+      imagePullPolicy: Always
+      command: ["sleep", "infinity"]
+      resources:
+        requests:
+          cpu: "3"
+          memory: "16Gi"
+          nvidia.com/gpu: "1"
+        limits:
+          cpu: "3"
+          memory: "32Gi"
+          nvidia.com/gpu: "1"
+  nodeSelector:
+    nvidia.com/gpu.product: NVIDIA-L40S

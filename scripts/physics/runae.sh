@@ -18,6 +18,7 @@ set -euo pipefail
 : "${MI_GAMMA:=0.1}"
 : "${MI_NUM_BINS:=50}"
 : "${DATA_WORKERS:=3}"
+: "${CKPT_PATH:=}"
 : "${MPLCONFIGDIR:=/scratch/adatl1/matplotlib}"
 
 [[ "$RUN_NAME" =~ ^[A-Za-z0-9][A-Za-z0-9._-]*$ ]] || {
@@ -36,6 +37,10 @@ set -euo pipefail
   echo "DATA_WORKERS must be a positive integer."
   exit 2
 }
+if [[ -n "$CKPT_PATH" && ! -f "$CKPT_PATH" ]]; then
+  echo "Checkpoint not found: $CKPT_PATH"
+  exit 2
+fi
 
 for dir in extracted processed mlready; do
   test -d "${PROJECT_ROOT}/data/data_2025E+G/${dir}" || {
@@ -58,6 +63,16 @@ test -d "${CODE_DIR}/src" || {
 }
 cd "$CODE_DIR"
 
+resume_args=()
+if [[ -n "$CKPT_PATH" ]]; then
+  echo "Resuming training from: $CKPT_PATH"
+  # Keep prior checkpoints and plots when resuming the same run.
+  resume_args=(
+    "ckpt_path=$CKPT_PATH"
+    "callbacks.clear_ckpts=null"
+  )
+fi
+
 exec python3 src/train.py \
   paths.root_dir="$PROJECT_ROOT" \
   paths.raw_data_dir="$RAW_DATA_DIR" \
@@ -77,7 +92,8 @@ exec python3 src/train.py \
   data.data_awkward2torch.workers="$DATA_WORKERS" \
   trainer.max_epochs="$MAX_EPOCHS" \
   trainer=gpu \
-  trainer.devices='[0]'
+  trainer.devices='[0]' \
+  "${resume_args[@]}"
 
 
 

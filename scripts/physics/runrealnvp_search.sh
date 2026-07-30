@@ -18,7 +18,7 @@
 #     hydra.launcher.gpus_per_node=4 \
 #     paths.raw_data_dir=/path/to/adl1t_data/parquet_files \
 #     experiment=physics/realnvp \
-#     experiment_name=realnvp_cvar25_vs_logpq99_search \
+#     experiment_name=realnvp_cvar25_vs_logp_search \
 #     callbacks.max_rate_ckpt=null \
 #     callbacks.cvar10_ema_ckpt=null \
 #     ~evaluation.evaluator.ckpts.single.eff__ascore_full__brate_operational \
@@ -27,7 +27,7 @@
 #     evaluation.callbacks.wasserstein=null \
 #     logger=none \
 #     hparams_search=physics/realnvp_optuna \
-#     hydra.sweeper.study_name=cvar25eff_vs_logpq99 \
+#     hydra.sweeper.study_name=cvar25eff_vs_logp \
 #     hydra.sweeper.n_trials=150 \
 #     hydra.sweeper.sampler.n_startup_trials=150 \
 #     trainer=gpu \
@@ -74,7 +74,7 @@
 #     hydra.launcher.gpus_per_node=4 \
 #     paths.raw_data_dir=/path/to/adl1t_data/parquet_files \
 #     experiment=physics/realnvp_agnostic \
-#     experiment_name=realnvp_agnostic_cap_vs_logpq99_search \
+#     experiment_name=realnvp_agnostic_cap_vs_logp_search \
 #     callbacks.anomaly_eff=null \
 #     callbacks.wasserstein_dist=null \
 #     callbacks.thres_drift=null \
@@ -88,9 +88,10 @@
 #     evaluation.callbacks.anomaly_efficiency=null \
 #     evaluation.callbacks.thres_drift=null \
 #     evaluation.callbacks.wasserstein=null \
+#     evaluation.callbacks.consistency_sn_zb=null \
 #     logger=none \
 #     hparams_search=physics/realnvp_optuna \
-#     hydra.sweeper.study_name=cap_vs_logpq99 \
+#     hydra.sweeper.study_name=cap_vs_logp \
 #     hydra.sweeper.n_trials=150 \
 #     hydra.sweeper.sampler.n_startup_trials=150 \
 #     trainer=gpu \
@@ -108,7 +109,7 @@
 #     hydra.launcher.gpus_per_node=4 \
 #     paths.raw_data_dir=/path/to/adl1t_data/parquet_files \
 #     experiment=physics/realnvp_agnostic \
-#     experiment_name=realnvp_agnostic_drift_vs_logpq99_search \
+#     experiment_name=realnvp_agnostic_drift_vs_logp_search \
 #     callbacks.anomaly_eff=null \
 #     callbacks.wasserstein_dist=null \
 #     callbacks.cap_sn_zb=null \
@@ -122,11 +123,12 @@
 #     evaluation.callbacks.anomaly_efficiency=null \
 #     evaluation.callbacks.cap_sn_zb=null \
 #     evaluation.callbacks.wasserstein=null \
+#     evaluation.callbacks.consistency_sn_zb=null \
 #     logger=none \
 #     hparams_search=physics/realnvp_optuna \
 #     optimized_metric_config.main_metric.callback.name=thres_drift \
 #     optimized_metric_config.main_metric.direction=minimize \
-#     hydra.sweeper.study_name=drift_vs_logpq99 \
+#     hydra.sweeper.study_name=drift_vs_logp \
 #     hydra.sweeper.direction='[minimize, minimize]' \
 #     hydra.sweeper.n_trials=150 \
 #     hydra.sweeper.sampler.n_startup_trials=150 \
@@ -145,7 +147,7 @@
 #     hydra.launcher.gpus_per_node=4 \
 #     paths.raw_data_dir=/path/to/adl1t_data/parquet_files \
 #     experiment=physics/realnvp_agnostic \
-#     experiment_name=realnvp_agnostic_wasserstein_vs_logpq99_search \
+#     experiment_name=realnvp_agnostic_wasserstein_vs_logp_search \
 #     callbacks.anomaly_eff=null \
 #     callbacks.anomaly_eff=null \
 #     callbacks.thres_drift=null \
@@ -160,11 +162,12 @@
 #     evaluation.callbacks.anomaly_efficiency=null \
 #     evaluation.callbacks.cap_sn_zb=null \
 #     evaluation.callbacks.thres_drift=null \
+#     evaluation.callbacks.consistency_sn_zb=null \
 #     logger=none \
 #     hparams_search=physics/realnvp_optuna \
 #     optimized_metric_config.main_metric.callback.name=wasserstein \
 #     optimized_metric_config.main_metric.direction=minimize \
-#     hydra.sweeper.study_name=wasserstein_vs_logpq99 \
+#     hydra.sweeper.study_name=wasserstein_vs_logp \
 #     hydra.sweeper.direction='[minimize, minimize]' \
 #     hydra.sweeper.n_trials=150 \
 #     hydra.sweeper.sampler.n_startup_trials=150 \
@@ -200,6 +203,7 @@
 #     evaluation.callbacks.anomaly_efficiency=null \
 #     evaluation.callbacks.thres_drift=null \
 #     evaluation.callbacks.wasserstein=null \
+#     evaluation.callbacks.cap_sn_zb=null \
 #     logger=none \
 #     hparams_search=physics/realnvp_optuna \
 #     optimized_metric_config.main_metric.callback.name=consistency \

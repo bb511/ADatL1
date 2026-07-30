@@ -2,6 +2,12 @@
 # SVDD HYPERPARAMETER SEARCH COMMANDS
 # ========================================================================
 # These are the running commands for the 250 Hz background rate study.
+#
+# One driver per strategy: hydra.sweeper.n_jobs=6 runs six trials at a time as
+# slurm jobs, so the whole 600-trial study completes in a single invocation.
+# The clariden launcher defaults to timeout_min=60, far too short for physics,
+# hence the explicit 720 -- which is exactly the `normal` partition cap, so a
+# trial that needs longer is killed rather than requeued.
 
 
 # ========================================================================
@@ -10,15 +16,14 @@
 # ------------------------------------------------------------------------
 # Semi-supervised cvar25 training
 # ------------------------------------------------------------------------
-# taskset -c 0-2 \
 # python3 src/train.py \
 #     -m \
-#     hydra/launcher=submitit_local \
-#     hydra.launcher.cpus_per_task=1 \
-#     hydra.launcher.gpus_per_node=4 \
+#     hydra/launcher=submitit_slurm_clariden \
+#     hydra.launcher.timeout_min=720 \
+#     hydra.sweeper.n_jobs=6 \
 #     paths.raw_data_dir=/path/to/adl1t_data/parquet_files \
 #     experiment=physics/svdd \
-#     experiment_name=svdd_cvar25_vs_distq99_search \
+#     experiment_name=svdd_cvar25_vs_dist_search \
 #     callbacks.max_rate_ckpt=null \
 #     callbacks.cvar10_ema_ckpt=null \
 #     ~evaluation.evaluator.ckpts.single.eff__ascore_full__brate_operational \
@@ -27,8 +32,8 @@
 #     evaluation.callbacks.wasserstein=null \
 #     logger=none \
 #     hparams_search=physics/svdd_optuna \
-#     hydra.sweeper.study_name=cvar25eff_vs_distq99 \
-#     hydra.sweeper.n_trials=100 \
+#     hydra.sweeper.study_name=cvar25eff_vs_dist \
+#     hydra.sweeper.n_trials=600 \
 #     hydra.sweeper.sampler.n_startup_trials=150 \
 #     trainer=gpu \
 #     trainer.max_epochs=50 \
@@ -37,12 +42,11 @@
 # ------------------------------------------------------------------------
 # Semi-supervised cvar10 training
 # ------------------------------------------------------------------------
-# taskset -c 0-2 \
 # python3 src/train.py \
 #     -m \
-#     hydra/launcher=submitit_local \
-#     hydra.launcher.cpus_per_task=1 \
-#     hydra.launcher.gpus_per_node=4 \
+#     hydra/launcher=submitit_slurm_clariden \
+#     hydra.launcher.timeout_min=720 \
+#     hydra.sweeper.n_jobs=6 \
 #     paths.raw_data_dir=/path/to/adl1t_data/parquet_files \
 #     experiment=physics/svdd \
 #     experiment_name=svdd_cvar10_vs_dist_search \
@@ -56,7 +60,7 @@
 #     logger=none \
 #     hparams_search=physics/svdd_optuna \
 #     hydra.sweeper.study_name=cvar10eff_vs_dist \
-#     hydra.sweeper.n_trials=100 \
+#     hydra.sweeper.n_trials=600 \
 #     hydra.sweeper.sampler.n_startup_trials=150 \
 #     trainer=gpu \
 #     trainer.max_epochs=50 \
@@ -65,15 +69,14 @@
 # ------------------------------------------------------------------------
 # CAP training
 # ------------------------------------------------------------------------
-# taskset -c 0-2 \
 # python3 src/train.py \
 #     -m \
-#     hydra/launcher=submitit_local \
-#     hydra.launcher.cpus_per_task=1 \
-#     hydra.launcher.gpus_per_node=4 \
+#     hydra/launcher=submitit_slurm_clariden \
+#     hydra.launcher.timeout_min=720 \
+#     hydra.sweeper.n_jobs=6 \
 #     paths.raw_data_dir=/path/to/adl1t_data/parquet_files \
 #     experiment=physics/svdd_agnostic \
-#     experiment_name=svdd_agnostic_cap_vs_distq99_search \
+#     experiment_name=svdd_agnostic_cap_vs_dist_search \
 #     callbacks.anomaly_eff=null \
 #     callbacks.wasserstein_dist=null \
 #     callbacks.thres_drift=null \
@@ -87,10 +90,11 @@
 #     evaluation.callbacks.anomaly_efficiency=null \
 #     evaluation.callbacks.thres_drift=null \
 #     evaluation.callbacks.wasserstein=null \
+#     evaluation.callbacks.consistency_sn_zb=null \
 #     logger=none \
 #     hparams_search=physics/svdd_optuna \
-#     hydra.sweeper.study_name=cap_vs_distq99 \
-#     hydra.sweeper.n_trials=100 \
+#     hydra.sweeper.study_name=cap_vs_dist \
+#     hydra.sweeper.n_trials=600 \
 #     hydra.sweeper.sampler.n_startup_trials=150 \
 #     trainer=gpu \
 #     trainer.max_epochs=50 \
@@ -99,15 +103,14 @@
 # ------------------------------------------------------------------------
 # Stability training
 # ------------------------------------------------------------------------
-# taskset -c 0-2 \
 # python3 src/train.py \
 #     -m \
-#     hydra/launcher=submitit_local \
-#     hydra.launcher.cpus_per_task=1 \
-#     hydra.launcher.gpus_per_node=4 \
+#     hydra/launcher=submitit_slurm_clariden \
+#     hydra.launcher.timeout_min=720 \
+#     hydra.sweeper.n_jobs=6 \
 #     paths.raw_data_dir=/path/to/adl1t_data/parquet_files \
 #     experiment=physics/svdd_agnostic \
-#     experiment_name=svdd_agnostic_drift_vs_distq99_search \
+#     experiment_name=svdd_agnostic_drift_vs_dist_search \
 #     callbacks.anomaly_eff=null \
 #     callbacks.wasserstein_dist=null \
 #     callbacks.cap_sn_zb=null \
@@ -121,13 +124,14 @@
 #     evaluation.callbacks.anomaly_efficiency=null \
 #     evaluation.callbacks.cap_sn_zb=null \
 #     evaluation.callbacks.wasserstein=null \
+#     evaluation.callbacks.consistency_sn_zb=null \
 #     logger=none \
 #     hparams_search=physics/svdd_optuna \
 #     optimized_metric_config.main_metric.callback.name=thres_drift \
 #     optimized_metric_config.main_metric.direction=minimize \
-#     hydra.sweeper.study_name=drift_vs_distq99 \
+#     hydra.sweeper.study_name=drift_vs_dist \
 #     hydra.sweeper.direction='[minimize, minimize]' \
-#     hydra.sweeper.n_trials=100 \
+#     hydra.sweeper.n_trials=600 \
 #     hydra.sweeper.sampler.n_startup_trials=150 \
 #     trainer=gpu \
 #     trainer.max_epochs=50 \
@@ -136,15 +140,14 @@
 # ------------------------------------------------------------------------
 # Wasserstein training
 # ------------------------------------------------------------------------
-# taskset -c 0-2 \
 # python3 src/train.py \
 #     -m \
-#     hydra/launcher=submitit_local \
-#     hydra.launcher.cpus_per_task=1 \
-#     hydra.launcher.gpus_per_node=4 \
+#     hydra/launcher=submitit_slurm_clariden \
+#     hydra.launcher.timeout_min=720 \
+#     hydra.sweeper.n_jobs=6 \
 #     paths.raw_data_dir=/path/to/adl1t_data/parquet_files \
 #     experiment=physics/svdd_agnostic \
-#     experiment_name=svdd_agnostic_wasserstein_vs_distq99_search \
+#     experiment_name=svdd_agnostic_wasserstein_vs_dist_search \
 #     callbacks.anomaly_eff=null \
 #     callbacks.thres_drift=null \
 #     callbacks.cap_sn_zb=null \
@@ -158,13 +161,14 @@
 #     evaluation.callbacks.anomaly_efficiency=null \
 #     evaluation.callbacks.cap_sn_zb=null \
 #     evaluation.callbacks.thres_drift=null \
+#     evaluation.callbacks.consistency_sn_zb=null \
 #     logger=none \
 #     hparams_search=physics/svdd_optuna \
 #     optimized_metric_config.main_metric.callback.name=wasserstein \
 #     optimized_metric_config.main_metric.direction=minimize \
-#     hydra.sweeper.study_name=wasserstein_vs_distq99 \
+#     hydra.sweeper.study_name=wasserstein_vs_dist \
 #     hydra.sweeper.direction='[minimize, minimize]' \
-#     hydra.sweeper.n_trials=100 \
+#     hydra.sweeper.n_trials=600 \
 #     hydra.sweeper.sampler.n_startup_trials=150 \
 #     trainer=gpu \
 #     trainer.max_epochs=50 \
@@ -175,12 +179,11 @@
 # ------------------------------------------------------------------------
 # Consistency-only CAP: the beta-free limit of CAP's posterior log-cosine,
 # i.e. CAP with the informative (posterior-norm) component removed.
-# taskset -c 0-2 \
 # python3 src/train.py \
 #     -m \
-#     hydra/launcher=submitit_local \
-#     hydra.launcher.cpus_per_task=1 \
-#     hydra.launcher.gpus_per_node=4 \
+#     hydra/launcher=submitit_slurm_clariden \
+#     hydra.launcher.timeout_min=720 \
+#     hydra.sweeper.n_jobs=6 \
 #     paths.raw_data_dir=/path/to/adl1t_data/parquet_files \
 #     experiment=physics/svdd_agnostic \
 #     experiment_name=svdd_agnostic_consistency_vs_dist_search \
@@ -197,11 +200,12 @@
 #     evaluation.callbacks.anomaly_efficiency=null \
 #     evaluation.callbacks.thres_drift=null \
 #     evaluation.callbacks.wasserstein=null \
+#     evaluation.callbacks.cap_sn_zb=null \
 #     logger=none \
 #     hparams_search=physics/svdd_optuna \
 #     optimized_metric_config.main_metric.callback.name=consistency \
 #     hydra.sweeper.study_name=consistency_vs_dist \
-#     hydra.sweeper.n_trials=100 \
+#     hydra.sweeper.n_trials=600 \
 #     hydra.sweeper.sampler.n_startup_trials=150 \
 #     trainer=gpu \
 #     trainer.max_epochs=50 \

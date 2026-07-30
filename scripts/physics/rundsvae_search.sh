@@ -112,7 +112,7 @@
 #     hydra.launcher.gpus_per_node=4 \
 #     paths.raw_data_dir=/path/to/adl1t_data/parquet_files \
 #     experiment=physics/dsvae_agnostic \
-#     experiment_name=dsvae_agnostic_drift_vs_klq99_search \
+#     experiment_name=dsvae_agnostic_drift_vs_kl_search \
 #     callbacks.anomaly_eff=null \
 #     callbacks.wasserstein_dist=null \
 #     callbacks.cap_sn_zb=null \
@@ -132,7 +132,7 @@
 #     hparams_search=physics/dsvae_optuna \
 #     optimized_metric_config.main_metric.callback.name=thres_drift \
 #     optimized_metric_config.main_metric.direction=minimize \
-#     hydra.sweeper.study_name=drift_vs_klq99 \
+#     hydra.sweeper.study_name=drift_vs_kl \
 #     hydra.sweeper.direction='[minimize, minimize]' \
 #     hydra.sweeper.n_trials=150 \
 #     hydra.sweeper.sampler.n_startup_trials=150 \
@@ -151,7 +151,7 @@
 #     hydra.launcher.gpus_per_node=4 \
 #     paths.raw_data_dir=/path/to/adl1t_data/parquet_files \
 #     experiment=physics/dsvae_agnostic \
-#     experiment_name=dsvae_agnostic_wasserstein_vs_klq99_search \
+#     experiment_name=dsvae_agnostic_wasserstein_vs_kl_search \
 #     callbacks.anomaly_eff=null \
 #     callbacks.thres_drift=null \
 #     callbacks.cap_sn_zb=null \
@@ -171,7 +171,7 @@
 #     hparams_search=physics/dsvae_optuna \
 #     optimized_metric_config.main_metric.callback.name=wasserstein \
 #     optimized_metric_config.main_metric.direction=minimize \
-#     hydra.sweeper.study_name=wasserstein_vs_klq99 \
+#     hydra.sweeper.study_name=wasserstein_vs_kl \
 #     hydra.sweeper.direction='[minimize, minimize]' \
 #     hydra.sweeper.n_trials=150 \
 #     hydra.sweeper.sampler.n_startup_trials=150 \

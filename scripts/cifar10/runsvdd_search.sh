@@ -1,6 +1,9 @@
 # ========================================================================
 # SVDD HYPERPARAMETER SEARCH COMMANDS
 # ========================================================================
+#
+# One driver per strategy: hydra.sweeper.n_jobs=6 runs six trials at a time as
+# slurm jobs, so the whole study completes in a single invocation.
 
 
 # ========================================================================
@@ -11,10 +14,9 @@
 # ------------------------------------------------------------------------
 # python3 src/train.py \
 #     -m \
-#     hydra/launcher=submitit_local \
+#     hydra/launcher=submitit_slurm_clariden \
 #     hydra.launcher.timeout_min=200 \
-#     hydra.launcher.cpus_per_task=1 \
-#     hydra.launcher.gpus_per_node=4 \
+#     hydra.sweeper.n_jobs=6 \
 #     hydra.sweeper.storage='sqlite:///logs/optuna/cifar10/svdd.db' \
 #     experiment=cifar10/svdd \
 #     experiment_name=cifar10_svdd_cvar25_vs_dist_search \
@@ -38,10 +40,9 @@
 # ------------------------------------------------------------------------
 # python3 src/train.py \
 #     -m \
-#     hydra/launcher=submitit_local \
+#     hydra/launcher=submitit_slurm_clariden \
 #     hydra.launcher.timeout_min=200 \
-#     hydra.launcher.cpus_per_task=1 \
-#     hydra.launcher.gpus_per_node=4 \
+#     hydra.sweeper.n_jobs=6 \
 #     hydra.sweeper.storage='sqlite:///logs/optuna/cifar10/svdd.db' \
 #     experiment=cifar10/svdd_agnostic \
 #     experiment_name=cifar10_svdd_agnostic_cap_vs_dist_search \
@@ -58,6 +59,7 @@
 #     evaluation.callbacks.anomaly_efficiency=null \
 #     evaluation.callbacks.thres_drift=null \
 #     evaluation.callbacks.wasserstein=null \
+#     evaluation.callbacks.consistency_sn_zb=null \
 #     logger=none \
 #     hparams_search=cifar10/svdd_optuna \
 #     hydra.sweeper.study_name=cap_vs_dist \
@@ -72,10 +74,9 @@
 # ------------------------------------------------------------------------
 # python3 src/train.py \
 #     -m \
-#     hydra/launcher=submitit_local \
+#     hydra/launcher=submitit_slurm_clariden \
 #     hydra.launcher.timeout_min=200 \
-#     hydra.launcher.cpus_per_task=1 \
-#     hydra.launcher.gpus_per_node=4 \
+#     hydra.sweeper.n_jobs=6 \
 #     hydra.sweeper.storage='sqlite:///logs/optuna/cifar10/svdd.db' \
 #     experiment=cifar10/svdd_agnostic \
 #     experiment_name=cifar10_svdd_agnostic_drift_vs_dist_search \
@@ -92,6 +93,7 @@
 #     evaluation.callbacks.anomaly_efficiency=null \
 #     evaluation.callbacks.cap_sn_zb=null \
 #     evaluation.callbacks.wasserstein=null \
+#     evaluation.callbacks.consistency_sn_zb=null \
 #     logger=none \
 #     hparams_search=cifar10/svdd_optuna \
 #     optimized_metric_config.main_metric.callback.name=thres_drift \
@@ -109,10 +111,9 @@
 # ------------------------------------------------------------------------
 # python3 src/train.py \
 #     -m \
-#     hydra/launcher=submitit_local \
+#     hydra/launcher=submitit_slurm_clariden \
 #     hydra.launcher.timeout_min=200 \
-#     hydra.launcher.cpus_per_task=1 \
-#     hydra.launcher.gpus_per_node=4 \
+#     hydra.sweeper.n_jobs=6 \
 #     hydra.sweeper.storage='sqlite:///logs/optuna/cifar10/svdd.db' \
 #     experiment=cifar10/svdd_agnostic \
 #     experiment_name=cifar10_svdd_agnostic_wasserstein_vs_dist_search \
@@ -129,6 +130,7 @@
 #     evaluation.callbacks.anomaly_efficiency=null \
 #     evaluation.callbacks.cap_sn_zb=null \
 #     evaluation.callbacks.thres_drift=null \
+#     evaluation.callbacks.consistency_sn_zb=null \
 #     logger=none \
 #     hparams_search=cifar10/svdd_optuna \
 #     optimized_metric_config.main_metric.callback.name=wasserstein \
@@ -148,10 +150,9 @@
 # i.e. CAP with the informative (posterior-norm) component removed.
 # python3 src/train.py \
 #     -m \
-#     hydra/launcher=submitit_local \
+#     hydra/launcher=submitit_slurm_clariden \
 #     hydra.launcher.timeout_min=200 \
-#     hydra.launcher.cpus_per_task=1 \
-#     hydra.launcher.gpus_per_node=4 \
+#     hydra.sweeper.n_jobs=6 \
 #     hydra.sweeper.storage='sqlite:///logs/optuna/cifar10/svdd.db' \
 #     experiment=cifar10/svdd_agnostic \
 #     experiment_name=cifar10_svdd_agnostic_consistency_vs_dist_search \
@@ -168,6 +169,7 @@
 #     evaluation.callbacks.anomaly_efficiency=null \
 #     evaluation.callbacks.thres_drift=null \
 #     evaluation.callbacks.wasserstein=null \
+#     evaluation.callbacks.cap_sn_zb=null \
 #     logger=none \
 #     hparams_search=cifar10/svdd_optuna \
 #     optimized_metric_config.main_metric.callback.name=consistency \

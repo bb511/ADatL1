@@ -18,7 +18,7 @@
 #     hydra.launcher.gpus_per_node=4 \
 #     paths.raw_data_dir=/path/to/adl1t_data \
 #     experiment=physics/dsvae \
-#     experiment_name=dsvae_cvar25_vs_kl_search \
+#     experiment_name=dsvae_cvar25_vs_klq99_search \
 #     algorithm.target_rate=0.01 \
 #     algorithm.base_rate=null \
 #     callbacks.max_rate_ckpt=null \
@@ -30,7 +30,7 @@
 #     evaluation.callbacks.reco=null \
 #     logger=none \
 #     hparams_search=physics/dsvae_optuna \
-#     hydra.sweeper.study_name=cvar25eff_vs_kl \
+#     hydra.sweeper.study_name=cvar25eff_vs_klq99 \
 #     hydra.sweeper.n_trials=150 \
 #     hydra.sweeper.sampler.n_startup_trials=150 \
 #     trainer=gpu \
@@ -49,7 +49,7 @@
 #     hydra.launcher.gpus_per_node=4 \
 #     paths.raw_data_dir=/path/to/adl1t_data \
 #     experiment=physics/dsvae_agnostic \
-#     experiment_name=dsvae_agnostic_cap_vs_kl_search \
+#     experiment_name=dsvae_agnostic_cap_vs_klq99_search \
 #     algorithm.target_rate=0.01 \
 #     algorithm.base_rate=null \
 #     callbacks.anomaly_eff=null \
@@ -69,7 +69,7 @@
 #     evaluation.callbacks.reco=null \
 #     logger=none \
 #     hparams_search=physics/dsvae_optuna \
-#     hydra.sweeper.study_name=cap_vs_kl \
+#     hydra.sweeper.study_name=cap_vs_klq99 \
 #     hydra.sweeper.n_trials=150 \
 #     hydra.sweeper.sampler.n_startup_trials=150 \
 #     trainer=gpu \

@@ -18,7 +18,7 @@
 #     hydra.launcher.gpus_per_node=4 \
 #     paths.raw_data_dir=/path/to/adl1t_data/parquet_files \
 #     experiment=physics/dsae \
-#     experiment_name=dsae_cvar25_vs_mse_search \
+#     experiment_name=dsae_cvar25_vs_mseq99_search \
 #     algorithm.target_rate=0.01 \
 #     algorithm.base_rate=null \
 #     callbacks.max_rate_ckpt=null \
@@ -30,7 +30,7 @@
 #     evaluation.callbacks.reco=null \
 #     logger=none \
 #     hparams_search=physics/dsae_optuna \
-#     hydra.sweeper.study_name=cvar25eff_vs_mse \
+#     hydra.sweeper.study_name=cvar25eff_vs_mseq99 \
 #     hydra.sweeper.n_trials=100 \
 #     hydra.sweeper.sampler.n_startup_trials=150 \
 #     trainer=gpu \
@@ -49,7 +49,7 @@
 #     hydra.launcher.gpus_per_node=4 \
 #     paths.raw_data_dir=/path/to/adl1t_data/parquet_files \
 #     experiment=physics/dsae_agnostic \
-#     experiment_name=dsae_agnostic_cap_vs_mse_search \
+#     experiment_name=dsae_agnostic_cap_vs_mseq99_search \
 #     algorithm.target_rate=0.01 \
 #     algorithm.base_rate=null \
 #     callbacks.anomaly_eff=null \
@@ -69,7 +69,7 @@
 #     evaluation.callbacks.reco=null \
 #     logger=none \
 #     hparams_search=physics/dsae_optuna \
-#     hydra.sweeper.study_name=cap_vs_mse \
+#     hydra.sweeper.study_name=cap_vs_mseq99 \
 #     hydra.sweeper.n_trials=100 \
 #     hydra.sweeper.sampler.n_startup_trials=150 \
 #     trainer=gpu \
@@ -87,7 +87,7 @@
 #     hydra.launcher.gpus_per_node=4 \
 #     paths.raw_data_dir=/path/to/adl1t_data/parquet_files \
 #     experiment=physics/dsae_agnostic \
-#     experiment_name=dsae_agnostic_drift_vs_mse_search \
+#     experiment_name=dsae_agnostic_drift_vs_mseq99_search \
 #     algorithm.target_rate=0.01 \
 #     algorithm.base_rate=null \
 #     callbacks.anomaly_eff=null \
@@ -109,7 +109,7 @@
 #     hparams_search=physics/dsae_optuna \
 #     optimized_metric_config.main_metric.callback.name=thres_drift \
 #     optimized_metric_config.main_metric.direction=minimize \
-#     hydra.sweeper.study_name=drift_vs_mse \
+#     hydra.sweeper.study_name=drift_vs_mseq99 \
 #     hydra.sweeper.direction='[minimize, minimize]' \
 #     hydra.sweeper.n_trials=100 \
 #     hydra.sweeper.sampler.n_startup_trials=150 \
@@ -128,7 +128,7 @@
 #     hydra.launcher.gpus_per_node=4 \
 #     paths.raw_data_dir=/path/to/adl1t_data/parquet_files \
 #     experiment=physics/dsae_agnostic \
-#     experiment_name=dsae_agnostic_wasserstein_vs_mse_search \
+#     experiment_name=dsae_agnostic_wasserstein_vs_mseq99_search \
 #     algorithm.target_rate=0.01 \
 #     algorithm.base_rate=null \
 #     callbacks.anomaly_eff=null \
@@ -150,7 +150,7 @@
 #     hparams_search=physics/dsae_optuna \
 #     optimized_metric_config.main_metric.callback.name=wasserstein \
 #     optimized_metric_config.main_metric.direction=minimize \
-#     hydra.sweeper.study_name=wasserstein_vs_mse \
+#     hydra.sweeper.study_name=wasserstein_vs_mseq99 \
 #     hydra.sweeper.direction='[minimize, minimize]' \
 #     hydra.sweeper.n_trials=100 \
 #     hydra.sweeper.sampler.n_startup_trials=150 \

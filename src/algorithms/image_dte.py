@@ -15,7 +15,8 @@ class ImageDTE(ADLightningModule):
 
     Training adds a sampled amount of Gaussian noise to nominal observations and
     predicts its ordered time bin. Evaluation is clean and deterministic: the
-    anomaly score is the expected predicted bin from one predictor pass.
+    anomaly score is the expected predicted bin, normalised onto ``[0, 1]`` so that
+    it means the same thing for every ``n_bins``.
 
     The implementation follows the additive corruption used by the DTE training
     algorithm, ``x_t = x_0 + sqrt(1 - alpha_bar_t) * epsilon``. It deliberately
@@ -25,7 +26,14 @@ class ImageDTE(ADLightningModule):
     ``[batch, channels, height, width]`` layout throughout, so the corruption is
     applied in image space and the predictor is convolutional. The corruption is
     the same operation either way -- additive i.i.d. Gaussian noise is layout
-    agnostic -- so the anomaly-score contract is unchanged.
+    agnostic -- so the anomaly-score contract is unchanged. Keep the two classes in
+    step: any fix here belongs there too.
+
+    As in :class:`src.algorithms.dte.DTE`, ``beta_start`` defaults to 0 so the
+    uncorrupted image is a sample the predictor sees during training, and the
+    predictor emits raw logits so the softmax is applied exactly once. The reference
+    implementation (vicliv/DTE) softmaxes inside the model and then hands the result
+    to ``nn.CrossEntropyLoss``, applying it twice; do not copy that.
     """
 
     def __init__(
@@ -63,12 +71,10 @@ class ImageDTE(ADLightningModule):
         if predictor_out is not None and int(predictor_out) != int(n_bins):
             raise ValueError(f"predictor out_dim={predictor_out} does not match n_bins={n_bins}.")
 
-        self.save_hyperparameters(
-            ignore=["model", "predictor", "features", "loss"],
-            logger=False,
-        )
+        self.save_hyperparameters(ignore=["model", "predictor", "features", "loss"])
         self.predictor = predictor
         self.features = features if features is not None else nn.Identity()
+        self.features.eval()
 
         betas = torch.linspace(float(beta_start), float(beta_end), int(n_steps))
         alpha_bar = torch.cumprod(1.0 - betas, dim=0)
@@ -76,10 +82,18 @@ class ImageDTE(ADLightningModule):
         self.register_buffer("betas", betas)
         self.register_buffer("alpha_bar", alpha_bar)
         self.register_buffer("noise_scales", noise_scales)
+        # Normalised bin ladder: the score is the expected position along it, so it
+        # lands in [0, 1] whatever n_bins is. Without this the score would scale with
+        # n_bins, and the searched objective that minimises it would simply prefer the
+        # smallest n_bins on offer.
         self.register_buffer(
             "bin_values",
-            torch.arange(int(n_bins), dtype=torch.float32),
+            torch.arange(int(n_bins), dtype=torch.float32) / max(int(n_bins) - 1, 1),
         )
+
+    def on_fit_start(self):
+        """Move the optional frozen feature extractor to the training device."""
+        self.features.to(self.device)
 
     @property
     def target_fpr(self) -> float:
@@ -141,7 +155,7 @@ class ImageDTE(ADLightningModule):
         return x + scale * noise
 
     def anomaly_score(self, logits: torch.Tensor) -> torch.Tensor:
-        """Return the expected ordered diffusion-time bin."""
+        """Return the expected diffusion-time bin, normalised onto ``[0, 1]``."""
         self._validate_logits(logits, logits.shape[0])
         probabilities = torch.softmax(logits, dim=1)
         return probabilities @ self.bin_values.to(dtype=probabilities.dtype)
@@ -169,12 +183,15 @@ class ImageDTE(ADLightningModule):
         targets = self.time_to_bin(timesteps)
         loss_full = F.cross_entropy(noisy_logits, targets, reduction="none")
 
-        clean_logits = self.forward(x)
-        ascore = self.anomaly_score(clean_logits)
-        if ascore.ndim != 1:
-            raise ValueError(f"Expected per-event ascores, got {tuple(ascore.shape)}.")
-
+        # The score is read off a clean pass, so it must not carry the corruption drawn
+        # for the loss, nor the dropout that is active while training.
+        was_training = self.predictor.training
+        self.predictor.eval()
         with torch.no_grad():
+            ascore = self.anomaly_score(self.forward(x))
+            if ascore.ndim != 1:
+                raise ValueError(f"Expected per-event ascores, got {tuple(ascore.shape)}.")
+
             n = ascore.numel()
             k = max(1, int(self.target_fpr * n))
             if k < 10:
@@ -186,19 +203,27 @@ class ImageDTE(ADLightningModule):
                 ascore,
                 torch.tensor([0.5, 0.99], device=ascore.device),
             ).tolist()
+            mult_corr = self._multiplicity_correlation(ascore, mask)
+        if was_training:
+            self.predictor.train()
 
         loss = loss_full.mean()
-        return {
+        outdict = {
+            # Used for backpropagation:
             "loss": loss,
+            # Used for logging:
             "loss/mean": loss.detach(),
             "ascore/operational": operational_ascore,
             "ascore/q50": q50,
             "ascore/q99": q99,
+            # Used for callbacks:
             "loss/full": loss_full.detach(),
-            "ascore/full": ascore.detach(),
-            "dte/timestep": timesteps.detach(),
-            "dte/bin": targets.detach(),
+            "ascore/full": ascore,
         }
+        if mult_corr is not None:
+            outdict["ascore/mult_corr"] = mult_corr
+
+        return outdict
 
     def outlog(self, outdict: dict) -> dict:
         return {
@@ -207,7 +232,30 @@ class ImageDTE(ADLightningModule):
             "ascore_operational": outdict.get("ascore/operational"),
             "ascore_q50": outdict.get("ascore/q50"),
             "ascore_q99": outdict.get("ascore/q99"),
+            "ascore_mult_corr": outdict.get("ascore/mult_corr"),
         }
+
+    @staticmethod
+    def _multiplicity_correlation(
+        ascore: torch.Tensor, mask: torch.Tensor | None
+    ) -> float | None:
+        """Correlate the score with how many pixels an event actually populates.
+
+        The image datamodules carry no mask, so this is normally inert; it exists so the
+        two DTE classes stay in step. Returns None when there is no mask, leaving the key
+        absent from the logs.
+        """
+        if mask is None:
+            return None
+
+        n_active = torch.flatten(mask, start_dim=1).sum(dim=1).to(ascore.dtype)
+        centred_score = ascore - ascore.mean()
+        centred_count = n_active - n_active.mean()
+        denominator = centred_score.norm() * centred_count.norm()
+        if denominator <= 0:
+            return 0.0
+
+        return float(torch.dot(centred_score, centred_count) / denominator)
 
     def _validate_logits(self, logits: torch.Tensor, batch_size: int) -> None:
         expected = (int(batch_size), int(self.hparams.n_bins))
@@ -216,5 +264,3 @@ class ImageDTE(ADLightningModule):
                 f"ImageDTE predictor must return logits with shape {expected}, "
                 f"got {tuple(logits.shape)}."
             )
-        if not torch.isfinite(logits).all():
-            raise ValueError("ImageDTE predictor returned non-finite logits.")

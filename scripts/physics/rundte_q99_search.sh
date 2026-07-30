@@ -2,6 +2,17 @@
 # DTE HYPERPARAMETER SEARCH COMMANDS
 # ========================================================================
 # These are the running commands for the q99 background rate study.
+#
+# One driver per strategy: hydra.sweeper.n_jobs=6 runs six trials at a time as
+# slurm jobs, so the whole 600-trial study completes in a single invocation.
+#
+# BEFORE THE FIRST LAUNCH the processed data must already exist on clariden.
+# configs/experiment/physics/dte*.yaml override /data/data_normalizer to
+# `standard`, which has its own cache tree that nothing else in the repo builds.
+# Build it on olqti with scripts/physics/rundte_pareto.sh and copy the trees
+# listed there; six drivers starting against a missing cache race on the same
+# directory and leave partial parquet behind. Then run one trial
+# (hydra.sweeper.n_trials=1) to confirm 720 minutes is enough.
 
 
 # ========================================================================
@@ -10,12 +21,11 @@
 # ------------------------------------------------------------------------
 # Semi-supervised cvar25 training
 # ------------------------------------------------------------------------
-# taskset -c 0-2 \
 # python3 src/train.py \
 #     -m \
-#     hydra/launcher=submitit_local \
-#     hydra.launcher.cpus_per_task=1 \
-#     hydra.launcher.gpus_per_node=4 \
+#     hydra/launcher=submitit_slurm_clariden \
+#     hydra.launcher.timeout_min=720 \
+#     hydra.sweeper.n_jobs=6 \
 #     paths.raw_data_dir=/path/to/adl1t_data/parquet_files \
 #     experiment=physics/dte \
 #     experiment_name=dte_cvar25_vs_ascoreq99_search \
@@ -30,7 +40,7 @@
 #     logger=none \
 #     hparams_search=dte_optuna \
 #     hydra.sweeper.study_name=cvar25eff_vs_ascoreq99 \
-#     hydra.sweeper.n_trials=100 \
+#     hydra.sweeper.n_trials=600 \
 #     hydra.sweeper.sampler.n_startup_trials=150 \
 #     trainer=gpu \
 #     trainer.max_epochs=50 \
@@ -39,12 +49,11 @@
 # ------------------------------------------------------------------------
 # CAP training
 # ------------------------------------------------------------------------
-# taskset -c 0-2 \
 # python3 src/train.py \
 #     -m \
-#     hydra/launcher=submitit_local \
-#     hydra.launcher.cpus_per_task=1 \
-#     hydra.launcher.gpus_per_node=4 \
+#     hydra/launcher=submitit_slurm_clariden \
+#     hydra.launcher.timeout_min=720 \
+#     hydra.sweeper.n_jobs=6 \
 #     paths.raw_data_dir=/path/to/adl1t_data/parquet_files \
 #     experiment=physics/dte_agnostic \
 #     experiment_name=dte_agnostic_cap_vs_ascoreq99_search \
@@ -66,7 +75,7 @@
 #     logger=none \
 #     hparams_search=dte_optuna \
 #     hydra.sweeper.study_name=cap_vs_ascoreq99 \
-#     hydra.sweeper.n_trials=100 \
+#     hydra.sweeper.n_trials=600 \
 #     hydra.sweeper.sampler.n_startup_trials=150 \
 #     trainer=gpu \
 #     trainer.max_epochs=50 \
@@ -75,12 +84,11 @@
 # ------------------------------------------------------------------------
 # Stability training
 # ------------------------------------------------------------------------
-# taskset -c 0-2 \
 # python3 src/train.py \
 #     -m \
-#     hydra/launcher=submitit_local \
-#     hydra.launcher.cpus_per_task=1 \
-#     hydra.launcher.gpus_per_node=4 \
+#     hydra/launcher=submitit_slurm_clariden \
+#     hydra.launcher.timeout_min=720 \
+#     hydra.sweeper.n_jobs=6 \
 #     paths.raw_data_dir=/path/to/adl1t_data/parquet_files \
 #     experiment=physics/dte_agnostic \
 #     experiment_name=dte_agnostic_drift_vs_ascoreq99_search \
@@ -105,7 +113,7 @@
 #     optimized_metric_config.main_metric.direction=minimize \
 #     hydra.sweeper.study_name=drift_vs_ascoreq99 \
 #     hydra.sweeper.direction='[minimize, minimize]' \
-#     hydra.sweeper.n_trials=100 \
+#     hydra.sweeper.n_trials=600 \
 #     hydra.sweeper.sampler.n_startup_trials=150 \
 #     trainer=gpu \
 #     trainer.max_epochs=50 \
@@ -114,12 +122,11 @@
 # ------------------------------------------------------------------------
 # Wasserstein training
 # ------------------------------------------------------------------------
-# taskset -c 0-2 \
 # python3 src/train.py \
 #     -m \
-#     hydra/launcher=submitit_local \
-#     hydra.launcher.cpus_per_task=1 \
-#     hydra.launcher.gpus_per_node=4 \
+#     hydra/launcher=submitit_slurm_clariden \
+#     hydra.launcher.timeout_min=720 \
+#     hydra.sweeper.n_jobs=6 \
 #     paths.raw_data_dir=/path/to/adl1t_data/parquet_files \
 #     experiment=physics/dte_agnostic \
 #     experiment_name=dte_agnostic_wasserstein_vs_ascoreq99_search \
@@ -144,7 +151,7 @@
 #     optimized_metric_config.main_metric.direction=minimize \
 #     hydra.sweeper.study_name=wasserstein_vs_ascoreq99 \
 #     hydra.sweeper.direction='[minimize, minimize]' \
-#     hydra.sweeper.n_trials=100 \
+#     hydra.sweeper.n_trials=600 \
 #     hydra.sweeper.sampler.n_startup_trials=150 \
 #     trainer=gpu \
 #     trainer.max_epochs=50 \
@@ -155,12 +162,11 @@
 # ------------------------------------------------------------------------
 # Consistency-only CAP: the beta-free limit of CAP's posterior log-cosine,
 # i.e. CAP with the informative (posterior-norm) component removed.
-# taskset -c 0-2 \
 # python3 src/train.py \
 #     -m \
-#     hydra/launcher=submitit_local \
-#     hydra.launcher.cpus_per_task=1 \
-#     hydra.launcher.gpus_per_node=4 \
+#     hydra/launcher=submitit_slurm_clariden \
+#     hydra.launcher.timeout_min=720 \
+#     hydra.sweeper.n_jobs=6 \
 #     paths.raw_data_dir=/path/to/adl1t_data/parquet_files \
 #     experiment=physics/dte_agnostic \
 #     experiment_name=dte_agnostic_consistency_vs_ascoreq99_search \
@@ -183,7 +189,7 @@
 #     hparams_search=dte_optuna \
 #     optimized_metric_config.main_metric.callback.name=consistency \
 #     hydra.sweeper.study_name=consistency_vs_ascoreq99 \
-#     hydra.sweeper.n_trials=100 \
+#     hydra.sweeper.n_trials=600 \
 #     hydra.sweeper.sampler.n_startup_trials=150 \
 #     trainer=gpu \
 #     trainer.max_epochs=50 \

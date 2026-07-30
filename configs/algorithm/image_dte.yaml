@@ -20,10 +20,9 @@ predictor:
   activation: relu
   batchnorm: false
 
-# Paper-faithful categorical DTE settings. n_steps and n_bins are fixed rather
-# than searched: the anomaly score is the expected bin index, so its scale is
-# proportional to n_bins, and the bin->noise ladder depends only on the product
-# beta_end * n_steps.
+# Categorical DTE settings. n_bins is searched (see imagedte_optuna.yaml); n_steps
+# and beta_start are not, because the bin->noise ladder depends only on the product
+# beta_end * n_steps and beta_start > beta_end is a constructor error.
 n_steps: 300
 n_bins: 7
 beta_start: 0.0

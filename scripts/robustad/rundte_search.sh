@@ -1,6 +1,18 @@
 # ========================================================================
 # DTE HYPERPARAMETER SEARCH COMMANDS
 # ========================================================================
+#
+# One driver per strategy: hydra.sweeper.n_jobs=6 runs six trials at a time as
+# slurm jobs, so the whole study completes in a single invocation.
+#
+# BEFORE THE FIRST LAUNCH the processed data must already exist on clariden.
+# Build it on olqti with rundte_pareto.sh in this directory and copy the trees
+# listed there.
+#
+# FOR CIFAR-10, ALSO EDIT configs/hparams_search/imagedte_optuna.yaml: it ships
+# with the RobustAD `params` block live and the CIFAR-10 one commented out. The
+# storage override below selects the right database either way, so a forgotten
+# switch silently searches the wrong space into the right study.
 
 
 # ========================================================================
@@ -9,13 +21,11 @@
 # ------------------------------------------------------------------------
 # Semi-supervised search (cvar25)
 # ------------------------------------------------------------------------
-# taskset -c 0-2 \
 # python3 src/train.py \
 #     -m \
-#     hydra/launcher=submitit_local \
-#     hydra.launcher.timeout_min=200 \
-#     hydra.launcher.cpus_per_task=1 \
-#     hydra.launcher.gpus_per_node=4 \
+#     hydra/launcher=submitit_slurm_clariden \
+#     hydra.launcher.timeout_min=240 \
+#     hydra.sweeper.n_jobs=6 \
 #     hydra.sweeper.storage='sqlite:///logs/optuna/robustad/dte.db' \
 #     experiment=robustad/dte \
 #     experiment_name=robustad_dte_cvar25_vs_ascore_search \
@@ -28,7 +38,7 @@
 #     logger=none \
 #     hparams_search=imagedte_optuna \
 #     hydra.sweeper.study_name=cvar25eff_vs_ascore \
-#     hydra.sweeper.n_trials=100 \
+#     hydra.sweeper.n_trials=600 \
 #     hydra.sweeper.sampler.n_startup_trials=150 \
 #     trainer=gpu \
 #     trainer.max_epochs=50 \
@@ -37,13 +47,11 @@
 # ------------------------------------------------------------------------
 # CAP search
 # ------------------------------------------------------------------------
-# taskset -c 0-2 \
 # python3 src/train.py \
 #     -m \
-#     hydra/launcher=submitit_local \
-#     hydra.launcher.timeout_min=200 \
-#     hydra.launcher.cpus_per_task=1 \
-#     hydra.launcher.gpus_per_node=4 \
+#     hydra/launcher=submitit_slurm_clariden \
+#     hydra.launcher.timeout_min=240 \
+#     hydra.sweeper.n_jobs=6 \
 #     hydra.sweeper.storage='sqlite:///logs/optuna/robustad/dte.db' \
 #     experiment=robustad/dte_agnostic \
 #     experiment_name=robustad_dte_agnostic_cap_vs_ascore_search \
@@ -63,7 +71,7 @@
 #     logger=none \
 #     hparams_search=imagedte_optuna \
 #     hydra.sweeper.study_name=cap_vs_ascore \
-#     hydra.sweeper.n_trials=100 \
+#     hydra.sweeper.n_trials=600 \
 #     hydra.sweeper.sampler.n_startup_trials=150 \
 #     trainer=gpu \
 #     trainer.max_epochs=50 \
@@ -72,13 +80,11 @@
 # ------------------------------------------------------------------------
 # Stability search
 # ------------------------------------------------------------------------
-# taskset -c 0-2 \
 # python3 src/train.py \
 #     -m \
-#     hydra/launcher=submitit_local \
-#     hydra.launcher.timeout_min=200 \
-#     hydra.launcher.cpus_per_task=1 \
-#     hydra.launcher.gpus_per_node=4 \
+#     hydra/launcher=submitit_slurm_clariden \
+#     hydra.launcher.timeout_min=240 \
+#     hydra.sweeper.n_jobs=6 \
 #     hydra.sweeper.storage='sqlite:///logs/optuna/robustad/dte.db' \
 #     experiment=robustad/dte_agnostic \
 #     experiment_name=robustad_dte_agnostic_drift_vs_ascore_search \
@@ -101,7 +107,7 @@
 #     optimized_metric_config.main_metric.direction=minimize \
 #     hydra.sweeper.study_name=drift_vs_ascore \
 #     hydra.sweeper.direction='[minimize, minimize]' \
-#     hydra.sweeper.n_trials=100 \
+#     hydra.sweeper.n_trials=600 \
 #     hydra.sweeper.sampler.n_startup_trials=150 \
 #     trainer=gpu \
 #     trainer.max_epochs=50 \
@@ -111,13 +117,11 @@
 # ------------------------------------------------------------------------
 # Wasserstein search
 # ------------------------------------------------------------------------
-# taskset -c 0-2 \
 # python3 src/train.py \
 #     -m \
-#     hydra/launcher=submitit_local \
-#     hydra.launcher.timeout_min=200 \
-#     hydra.launcher.cpus_per_task=1 \
-#     hydra.launcher.gpus_per_node=4 \
+#     hydra/launcher=submitit_slurm_clariden \
+#     hydra.launcher.timeout_min=240 \
+#     hydra.sweeper.n_jobs=6 \
 #     hydra.sweeper.storage='sqlite:///logs/optuna/robustad/dte.db' \
 #     experiment=robustad/dte_agnostic \
 #     experiment_name=robustad_dte_agnostic_wasserstein_vs_ascore_search \
@@ -140,7 +144,7 @@
 #     optimized_metric_config.main_metric.direction=minimize \
 #     hydra.sweeper.study_name=wasserstein_vs_ascore \
 #     hydra.sweeper.direction='[minimize, minimize]' \
-#     hydra.sweeper.n_trials=100 \
+#     hydra.sweeper.n_trials=600 \
 #     hydra.sweeper.sampler.n_startup_trials=150 \
 #     trainer=gpu \
 #     trainer.max_epochs=50 \
@@ -151,13 +155,11 @@
 # ------------------------------------------------------------------------
 # Consistency-only CAP: the beta-free limit of CAP's posterior log-cosine,
 # i.e. CAP with the informative (posterior-norm) component removed.
-# taskset -c 0-2 \
 # python3 src/train.py \
 #     -m \
-#     hydra/launcher=submitit_local \
-#     hydra.launcher.timeout_min=200 \
-#     hydra.launcher.cpus_per_task=1 \
-#     hydra.launcher.gpus_per_node=4 \
+#     hydra/launcher=submitit_slurm_clariden \
+#     hydra.launcher.timeout_min=240 \
+#     hydra.sweeper.n_jobs=6 \
 #     hydra.sweeper.storage='sqlite:///logs/optuna/robustad/dte.db' \
 #     experiment=robustad/dte_agnostic \
 #     experiment_name=robustad_dte_agnostic_consistency_vs_ascore_search \
@@ -178,7 +180,7 @@
 #     hparams_search=imagedte_optuna \
 #     optimized_metric_config.main_metric.callback.name=consistency \
 #     hydra.sweeper.study_name=consistency_vs_ascore \
-#     hydra.sweeper.n_trials=100 \
+#     hydra.sweeper.n_trials=600 \
 #     hydra.sweeper.sampler.n_startup_trials=150 \
 #     trainer=gpu \
 #     trainer.max_epochs=50 \

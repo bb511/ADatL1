@@ -38,15 +38,25 @@ hydra:
 
     # define hyperparameter search space. Assumes using torch.optim.AdamW
     #
-    # n_steps, n_bins and beta_start are deliberately NOT searched:
-    #   - the anomaly score is the expected bin index, so its scale grows with
-    #     n_bins while the second objective (ascore_operational) is minimised;
-    #     searching it would collapse the front onto the smallest n_bins;
+    # n_bins IS searched. It sets how finely the predictor can resolve the noise
+    # level: at n_steps=300 and beta_end=0.01, bin 0 spans noise sigma up to 0.17
+    # of each standardised feature's own std at n_bins=7, but only 0.06 at
+    # n_bins=20 -- and the low-noise end is where a mildly anomalous event sits.
+    # This is only sound because DTE normalises the score by n_bins-1, so it lands
+    # in [0, 1] for every n_bins. Without that normalisation the score would scale
+    # with n_bins while the second objective (ascore_operational) is minimised, and
+    # the front would collapse onto the smallest n_bins on offer.
+    #
+    # n_steps and beta_start are deliberately NOT searched:
     #   - the bin->noise ladder depends only on the product beta_end * n_steps,
     #     so searching both wastes the sampler's budget on a flat direction, and
     #     n_steps sets the shape of persistent buffers loaded with strict=True;
     #   - beta_start > beta_end raises in DTE.__init__, and optuna cannot
     #     express that constraint, so invalid draws would become crashed trials.
+    #
+    # hidden_dims stops well below the paper's [256, 512, 256]: every other model
+    # in this comparison is sized for L1 trigger deployment, so DTE is held at
+    # comparable capacity rather than allowed to win on parameter count.
     params:
       algorithm.optimizer.lr: tag(log, interval(3e-5, 3e-3))
       trainer.gradient_clip_val: choice(0.0, 0.5, 1.0, 2.0)
@@ -54,7 +64,8 @@ hydra:
       algorithm.optimizer.weight_decay: choice(0.0, 1e-6, 1e-5, 1e-4, 1e-3)
 
       algorithm.beta_end: tag(log, interval(1e-3, 1e-1))
+      algorithm.n_bins: choice(5, 7, 10, 15, 20, 30)
 
-      algorithm.predictor.hidden_dims: choice([32,16], [64,32], [64,32,16], [128,64], [128,64,32], [256,128], [256,512,256], [256,512,512,256])
+      algorithm.predictor.hidden_dims: choice([32,16], [64,32], [64,32,16], [64,32,32], [128,64], [128,64,32])
       algorithm.predictor.dropout: choice(0.0, 0.1, 0.25, 0.5)
       algorithm.predictor.activation: choice(relu, gelu, silu)

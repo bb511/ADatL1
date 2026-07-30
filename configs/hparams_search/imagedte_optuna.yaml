@@ -41,8 +41,9 @@ hydra:
 
     # define hyperparameter search space. Assumes using torch.optim.AdamW
     #
-    # n_steps, n_bins and beta_start are deliberately NOT searched -- see the
-    # comment in dte_optuna.yaml for why.
+    # n_bins IS searched; n_steps and beta_start are not -- see the comment in
+    # dte_optuna.yaml for why, and for why searching n_bins is only sound because
+    # ImageDTE normalises the anomaly score by n_bins-1.
     #
     # RobustAD space
     params:
@@ -52,6 +53,7 @@ hydra:
       algorithm.optimizer.weight_decay: choice(0.0, 1e-6, 1e-5, 1e-4)
 
       algorithm.beta_end: tag(log, interval(1e-3, 1e-1))
+      algorithm.n_bins: choice(5, 7, 10, 15, 20, 30)
 
       algorithm.predictor.nodes: choice([8, 16, 32], [16, 32, 64], [32, 64, 128])
       algorithm.predictor.strides: choice([2, 2])
@@ -67,6 +69,7 @@ hydra:
     #   algorithm.optimizer.weight_decay: choice(0.0, 1e-6, 1e-5, 1e-4, 1e-3)
 
     #   algorithm.beta_end: tag(log, interval(1e-3, 1e-1))
+    #   algorithm.n_bins: choice(5, 7, 10, 15, 20, 30)
 
     #   algorithm.predictor.nodes: choice([16, 32, 64],[16, 32, 128],[16, 64, 128],[32, 64, 128],[32, 64, 256],[32, 128, 256],[64, 128, 256])
 

@@ -1,6 +1,18 @@
 # ========================================================================
 # DTE HYPERPARAMETER SEARCH COMMANDS
 # ========================================================================
+#
+# One driver per strategy: hydra.sweeper.n_jobs=6 runs six trials at a time as
+# slurm jobs, so the whole study completes in a single invocation.
+#
+# BEFORE THE FIRST LAUNCH the processed data must already exist on clariden.
+# Build it on olqti with rundte_pareto.sh in this directory and copy the trees
+# listed there.
+#
+# FOR CIFAR-10, ALSO EDIT configs/hparams_search/imagedte_optuna.yaml: it ships
+# with the RobustAD `params` block live and the CIFAR-10 one commented out. The
+# storage override below selects the right database either way, so a forgotten
+# switch silently searches the wrong space into the right study.
 
 
 # ========================================================================
@@ -11,10 +23,9 @@
 # ------------------------------------------------------------------------
 # python3 src/train.py \
 #     -m \
-#     hydra/launcher=submitit_local \
-#     hydra.launcher.timeout_min=200 \
-#     hydra.launcher.cpus_per_task=1 \
-#     hydra.launcher.gpus_per_node=4 \
+#     hydra/launcher=submitit_slurm_clariden \
+#     hydra.launcher.timeout_min=240 \
+#     hydra.sweeper.n_jobs=6 \
 #     hydra.sweeper.storage='sqlite:///logs/optuna/cifar10/dte.db' \
 #     experiment=cifar10/dte \
 #     experiment_name=cifar10_dte_cvar25_vs_ascore_search \
@@ -38,10 +49,9 @@
 # ------------------------------------------------------------------------
 # python3 src/train.py \
 #     -m \
-#     hydra/launcher=submitit_local \
-#     hydra.launcher.timeout_min=200 \
-#     hydra.launcher.cpus_per_task=1 \
-#     hydra.launcher.gpus_per_node=4 \
+#     hydra/launcher=submitit_slurm_clariden \
+#     hydra.launcher.timeout_min=240 \
+#     hydra.sweeper.n_jobs=6 \
 #     hydra.sweeper.storage='sqlite:///logs/optuna/cifar10/dte.db' \
 #     experiment=cifar10/dte_agnostic \
 #     experiment_name=cifar10_dte_agnostic_cap_vs_ascore_search \
@@ -72,10 +82,9 @@
 # ------------------------------------------------------------------------
 # python3 src/train.py \
 #     -m \
-#     hydra/launcher=submitit_local \
-#     hydra.launcher.timeout_min=200 \
-#     hydra.launcher.cpus_per_task=1 \
-#     hydra.launcher.gpus_per_node=4 \
+#     hydra/launcher=submitit_slurm_clariden \
+#     hydra.launcher.timeout_min=240 \
+#     hydra.sweeper.n_jobs=6 \
 #     hydra.sweeper.storage='sqlite:///logs/optuna/cifar10/dte.db' \
 #     experiment=cifar10/dte_agnostic \
 #     experiment_name=cifar10_dte_agnostic_drift_vs_ascore_search \
@@ -109,10 +118,9 @@
 # ------------------------------------------------------------------------
 # python3 src/train.py \
 #     -m \
-#     hydra/launcher=submitit_local \
-#     hydra.launcher.timeout_min=200 \
-#     hydra.launcher.cpus_per_task=1 \
-#     hydra.launcher.gpus_per_node=4 \
+#     hydra/launcher=submitit_slurm_clariden \
+#     hydra.launcher.timeout_min=240 \
+#     hydra.sweeper.n_jobs=6 \
 #     hydra.sweeper.storage='sqlite:///logs/optuna/cifar10/dte.db' \
 #     experiment=cifar10/dte_agnostic \
 #     experiment_name=cifar10_dte_agnostic_wasserstein_vs_ascore_search \
@@ -148,10 +156,9 @@
 # i.e. CAP with the informative (posterior-norm) component removed.
 # python3 src/train.py \
 #     -m \
-#     hydra/launcher=submitit_local \
-#     hydra.launcher.timeout_min=200 \
-#     hydra.launcher.cpus_per_task=1 \
-#     hydra.launcher.gpus_per_node=4 \
+#     hydra/launcher=submitit_slurm_clariden \
+#     hydra.launcher.timeout_min=240 \
+#     hydra.sweeper.n_jobs=6 \
 #     hydra.sweeper.storage='sqlite:///logs/optuna/cifar10/dte.db' \
 #     experiment=cifar10/dte_agnostic \
 #     experiment_name=cifar10_dte_agnostic_consistency_vs_ascore_search \

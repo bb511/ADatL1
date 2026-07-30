@@ -52,6 +52,7 @@ STRATEGY_MONITORS = {
     "cvar25": ("val/summary/eff_cvar25_ema", "max"),
     "cvar10": ("val/summary/eff_cvar10_ema", "max"),
     "cap": ("val/summary/cap_ema_", "max"),
+    "consistency": ("val/summary/consistency_ema_", "max"),
     "stability": ("val/summary/", "min_drift"),  # *_drift_ema, min
     "wasserstein": ("val/summary/w1dist_ema_", "min"),
 }

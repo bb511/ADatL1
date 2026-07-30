@@ -104,6 +104,32 @@ callbacks:
       process_group: null
       dist_sync_fn: null
 
+  consistency_sn_zb:
+    _target_: src.callbacks.consistency.PosteriorConsistencyCallback
+    output_name: 'ascore/full'
+    dataset_1: normal
+    dataset_2: reference_normal
+    pairing_type: cdf
+    cap_metric_config:
+      # beta0/lr/n_epochs/batch_size/normalize_gradients are unused by the
+      # beta-free consistency metric; the block is kept identical to the CAP
+      # one so both strategies share the same normalisation/energy front-end.
+      beta0: 1.0
+      normalization_type: sigmoid
+      normalization_params: null
+      energy_type: adaptive
+      energy_params:
+        scale: 0.5
+      regularization_type: none
+      regularization_params: null
+      binary: True
+      lr: 0.01
+      n_epochs: 20
+      batch_size: 8192
+      normalize_gradients: True
+      process_group: null
+      dist_sync_fn: null
+
   stable_ascore_operational_ckpt:
     _target_: src.callbacks.model_checkpoint.SingleDatasetModelCheckpoint
     dirpath: '${paths.checkpoints_dir}/${experiment_name}/${run_name}'
@@ -155,6 +181,19 @@ callbacks:
     every_n_epochs: 1
     save_on_train_epoch_end: false
 
+  consistency_sn_zb_ema_ckpt:
+    _target_: pytorch_lightning.callbacks.ModelCheckpoint
+    dirpath: '${paths.checkpoints_dir}/${experiment_name}/${run_name}/summary/consistency_ema_normal_vs_reference_normal/max'
+    monitor: 'val/summary/consistency_ema_normal_vs_reference_normal'
+    filename: 'consistency_ema_normal_vs_reference_normal'
+    save_last: false
+    save_top_k: 1
+    mode: "max"
+    auto_insert_metric_name: False
+    save_weights_only: False
+    every_n_epochs: 1
+    save_on_train_epoch_end: false
+
 evaluation:
   evaluator:
     ckpts:
@@ -163,6 +202,7 @@ evaluation:
         operational_drift_ema: ['min']
         w1dist_ema_normal_vs_reference_normal: ['min']
         cap_ema_normal_vs_reference_normal: ['max']
+        consistency_ema_normal_vs_reference_normal: ['max']
       single:
         ascore_operational: ['stable']
 
@@ -191,6 +231,34 @@ evaluation:
       log_raw_mlflow: false
       pairing_type: cdf
       cap_metric_config:
+        beta0: 1.0
+        normalization_type: sigmoid
+        normalization_params: null
+        energy_type: adaptive
+        energy_params:
+          scale: 0.5
+        regularization_type: none
+        regularization_params: null
+        binary: True
+        lr: 0.01
+        n_epochs: 20
+        batch_size: 8192
+        normalize_gradients: True
+        process_group: null
+        dist_sync_fn: null
+
+    consistency_sn_zb:
+      _target_: src.evaluation.callbacks.consistency.PosteriorConsistency
+      name: consistency
+      output_name: 'ascore/full'
+      dataset_1: normal
+      dataset_2: reference_normal
+      log_raw_mlflow: false
+      pairing_type: cdf
+      cap_metric_config:
+        # beta0/lr/n_epochs/batch_size/normalize_gradients are unused by the
+        # beta-free consistency metric; the block is kept identical to the CAP
+        # one so both strategies share the same normalisation/energy front-end.
         beta0: 1.0
         normalization_type: sigmoid
         normalization_params: null

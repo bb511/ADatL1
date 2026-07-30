@@ -1,0 +1,28 @@
+# @package callbacks.main
+
+_target_: src.callbacks.consistency.PosteriorConsistencyCallback
+output_name: 'ascore/full'
+dataset_1: ???
+dataset_2: ???
+pairing_type: cdf
+beta: 0.9
+cap_metric_config:
+  # Front-end shared with CAP so the two strategies stay comparable. beta0, lr,
+  # n_epochs, batch_size and normalize_gradients are accepted for drop-in
+  # compatibility with the CAP config and are unused by the beta-free
+  # consistency metric, which runs no inner optimisation.
+  beta0: 1.0
+  normalization_type: sigmoid
+  normalization_params: null
+  energy_type: adaptive
+  energy_params:
+    scale: 0.5
+  regularization_type: none
+  regularization_params: null
+  binary: True
+  lr: 0.01
+  n_epochs: 20
+  batch_size: 8192
+  normalize_gradients: True
+  process_group: null
+  dist_sync_fn: null

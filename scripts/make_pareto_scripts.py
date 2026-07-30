@@ -98,29 +98,80 @@ STRATEGIES = {
         "title": "CAP",
         "prefix": "cap",
         "agnostic": True,
-        "nulls": ["wasserstein_dist", "thres_drift", "wasserstein_dist_ema_ckpt", "thres_drift_ema_ckpt"],
-        "evals": ["operational_drift_ema", "w1dist_ema_normal_vs_<REF>"],
+        "nulls": [
+            "wasserstein_dist",
+            "thres_drift",
+            "consistency_sn_zb",
+            "wasserstein_dist_ema_ckpt",
+            "thres_drift_ema_ckpt",
+            "consistency_sn_zb_ema_ckpt",
+        ],
+        "evals": [
+            "operational_drift_ema",
+            "w1dist_ema_normal_vs_<REF>",
+            "consistency_ema_normal_vs_<REF>",
+        ],
+    },
+    "consistency": {
+        "title": "CONSISTENCY",
+        "prefix": "consistency",
+        "agnostic": True,
+        "nulls": [
+            "wasserstein_dist",
+            "thres_drift",
+            "cap_sn_zb",
+            "wasserstein_dist_ema_ckpt",
+            "thres_drift_ema_ckpt",
+            "cap_sn_zb_ema_ckpt",
+        ],
+        "evals": [
+            "operational_drift_ema",
+            "w1dist_ema_normal_vs_<REF>",
+            "cap_ema_normal_vs_<REF>",
+        ],
     },
     "drift": {
         "title": "STABILITY",
         "prefix": "stability",
         "agnostic": True,
-        "nulls": ["wasserstein_dist", "cap_sn_zb", "wasserstein_dist_ema_ckpt", "cap_sn_zb_ema_ckpt"],
-        "evals": ["w1dist_ema_normal_vs_<REF>", "cap_ema_normal_vs_<REF>"],
+        "nulls": [
+            "wasserstein_dist",
+            "cap_sn_zb",
+            "consistency_sn_zb",
+            "wasserstein_dist_ema_ckpt",
+            "cap_sn_zb_ema_ckpt",
+            "consistency_sn_zb_ema_ckpt",
+        ],
+        "evals": [
+            "w1dist_ema_normal_vs_<REF>",
+            "cap_ema_normal_vs_<REF>",
+            "consistency_ema_normal_vs_<REF>",
+        ],
     },
     "wasserstein": {
         "title": "WASSERSTEIN",
         "prefix": "wasserstein",
         "agnostic": True,
-        "nulls": ["thres_drift", "cap_sn_zb", "thres_drift_ema_ckpt", "cap_sn_zb_ema_ckpt"],
-        "evals": ["operational_drift_ema", "cap_ema_normal_vs_<REF>"],
+        "nulls": [
+            "thres_drift",
+            "cap_sn_zb",
+            "consistency_sn_zb",
+            "thres_drift_ema_ckpt",
+            "cap_sn_zb_ema_ckpt",
+            "consistency_sn_zb_ema_ckpt",
+        ],
+        "evals": [
+            "operational_drift_ema",
+            "cap_ema_normal_vs_<REF>",
+            "consistency_ema_normal_vs_<REF>",
+        ],
     },
 }
-STRATEGY_ORDER = ["cvar25eff", "cvar10eff", "cap", "drift", "wasserstein"]
+STRATEGY_ORDER = ["cvar25eff", "cvar10eff", "cap", "consistency", "drift", "wasserstein"]
 
 # The first objective is maximised for these strategies (minimised otherwise);
 # the second objective (reconstruction/kl/logp/dist) is always minimised.
-MAXIMIZE_OBJ0 = {"cvar25eff", "cvar10eff", "cap"}
+MAXIMIZE_OBJ0 = {"cvar25eff", "cvar10eff", "cap", "consistency"}
 
 # Trial picked in the original run scripts per (domain, model, tier, strategy),
 # with how it relates to the current study dbs:

@@ -19,15 +19,16 @@ class CAP(Callback):
     """Compute a test approximation capacity metric between two datasets.
 
     This callback collects all scores from two test dataloaders, pairs the
-    samples according to the selected pairing function, and computes:
-        - CAP metric
-        - Spearman rank correlation
-
-    The metric is computed on the paired score samples from:
+    samples according to the selected pairing function, and computes the CAP
+    metric on the paired score samples from:
         - dataset_1
         - dataset_2
 
     This is appropriate as a validation-side proxy objective for HPO.
+
+    Subclasses select a different metric by overriding `metric_cls`, and a
+    different plot label by overriding `metric_label`; see
+    src.evaluation.callbacks.consistency.PosteriorConsistency.
 
     :param output_name: Key in outputs dict containing per-event anomaly scores / losses.
     :param dataset_1: Name of the first validation dataloader.
@@ -42,6 +43,9 @@ class CAP(Callback):
     :param name: String specifying the name of the callback for identification in
         later methods that manipulate callbacks.
     """
+
+    metric_cls = ApproximationCapacity
+    metric_label = "CAP"
 
     def __init__(
         self,
@@ -64,7 +68,6 @@ class CAP(Callback):
         self.name = name
 
         self.cap_summary = defaultdict(float)
-        self.rankcorr_summary = defaultdict(float)
 
     def on_test_start(self, trainer, pl_module):
         """Set the right device at start of testing."""
@@ -74,7 +77,7 @@ class CAP(Callback):
         """Initialise useful quantities."""
         self.dataset_1_scores = []
         self.dataset_2_scores = []
-        self.capmetric = ApproximationCapacity(
+        self.capmetric = self.metric_cls(
             **self.cap_metric_config, device=self.device
         )
         self.capmetric.to(self.device)
@@ -104,7 +107,6 @@ class CAP(Callback):
         n = min(len(ds1_scores), len(ds2_scores))
         ds1_scores = ds1_scores[:n]
         ds2_scores = ds2_scores[:n]
-        self.rankcorr_value = self._spearman_corr(ds1_scores, ds2_scores)
 
         with torch.inference_mode(False):
             with torch.enable_grad():
@@ -115,29 +117,26 @@ class CAP(Callback):
 
     def on_test_epoch_end(self, trainer, pl_module):
         """Compute the CAP metric on the designated dataset."""
-        ckpts_dir = Path(pl_module._ckpt_path).parent
         ckpt_name = Path(pl_module._ckpt_path).stem
         self._compute_cap()
         cap_metric_value = self.capmetric.compute()
-        rankcorr_value = self.rankcorr_value
 
         ckpt_ds = utils.misc.get_ckpt_ds_name(ckpt_name)
-        self._store_summary(cap_metric_value, rankcorr_value, ckpt_ds)
+        self._store_summary(cap_metric_value, ckpt_ds)
         utils.mlflow.log_metrics_to_mlflow(
             trainer,
-            {"cap": self.cap_summary[ckpt_ds], "rankcorr": self.rankcorr_summary[ckpt_ds]},
+            {self.name: self.cap_summary[ckpt_ds]},
             ckpt_name=ckpt_name,
             cb_name=self.name,
         )
 
-    def _store_summary(self, cap_metric_value: float, rank_val: float, ckpt_ds: str):
+    def _store_summary(self, cap_metric_value: float, ckpt_ds: str):
         """Store the summary statistic for the cap for one checkpoint.
 
         Here, it is the metric itself, but this is implemented to be consistent with
         the other evaluation callbacks.
         """
         self.cap_summary[ckpt_ds] = cap_metric_value
-        self.rankcorr_summary[ckpt_ds] = rank_val
 
     def _plot(self, data: dict, xlabel: str, plot_folder: Path, percent: bool = False):
         """Plot the efficiency per data set for an anomaly metric at target rate."""
@@ -152,12 +151,10 @@ class CAP(Callback):
         self._cache_summary(plot_folder)
 
         # Configure plot.
-        xlabel = f"CAP({self.dataset_1_name},\n{self.dataset_2_name})"
+        xlabel = f"{self.metric_label}({self.dataset_1_name},\n{self.dataset_2_name})"
         self._plot(self.cap_summary, xlabel, plot_folder)
-        xlabel = f"RankCorr({self.dataset_1_name},\n{self.dataset_2_name})"
-        self._plot(self.rankcorr_summary, xlabel, plot_folder)
 
-        utils.mlflow.log_plots_to_mlflow(trainer, None, "cap", plot_folder)
+        utils.mlflow.log_plots_to_mlflow(trainer, None, self.name, plot_folder)
 
     def get_optimized_metric(self):
         """Get one number that one should optimize on this callback.
@@ -177,22 +174,3 @@ class CAP(Callback):
         with open(cache_folder / "summary.pkl", "wb") as f:
             plain_dict = utils.misc.to_plain_dict(self.cap_summary)
             pickle.dump(plain_dict, f, protocol=pickle.HIGHEST_PROTOCOL)
-            plain_dict = utils.misc.to_plain_dict(self.rankcorr_summary)
-            pickle.dump(plain_dict, f, protocol=pickle.HIGHEST_PROTOCOL)
-
-    def _spearman_corr(self, x: torch.Tensor, y: torch.Tensor) -> float:
-        """Compute the spearman correlation between the anomaly scores."""
-        x = x.detach().flatten().cpu()
-        y = y.detach().flatten().cpu()
-
-        rx = torch.argsort(torch.argsort(x)).float()
-        ry = torch.argsort(torch.argsort(y)).float()
-
-        rx = rx - rx.mean()
-        ry = ry - ry.mean()
-
-        denom = torch.sqrt((rx**2).sum() * (ry**2).sum())
-        if denom < 1e-12:
-            return float("nan")
-
-        return ((rx * ry).sum() / denom).item()

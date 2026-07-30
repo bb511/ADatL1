@@ -246,3 +246,72 @@ class ApproximationCapacity(Metric):
     def compute(self) -> Tensor:
         """Return the computed CAP value."""
         return self.cap.item()
+
+
+class PosteriorConsistency(ApproximationCapacity):
+    """Consistency-only CAP: the beta-free limit of CAP's posterior log-cosine.
+
+    CAP is, per paired sample, the log overlap of the two-state Gibbs posteriors
+    `p_k = softmax(-beta * E_k(.))` induced by the two score sets. Normalising
+    that inner product splits it exactly into a consistency and a confidence
+    term,
+
+        CAP_i = log <p1, p2> = log cos(p1, p2) + log|p1| + log|p2|,
+
+    where the norm term depends only on how peaked each posterior is and is
+    blind to whether the two agree. That is the informative half. The log-cosine
+    is the consistency half, but it cannot serve as an objective on its own: it
+    is identically zero at beta = 0, so any beta chosen to maximise it collapses
+    onto the uninformative solution where every model ties at zero.
+
+    Expanding around beta = 0 removes the ambiguity. Writing
+    `D_k = E_k(1) - E_k(0)` for the per-sample energy gap,
+
+        log cos(p1, p2) = -(beta**2 / 8) * sum_i (D1_i - D2_i)**2 + O(beta**4),
+
+    so beta enters only through a common prefactor and drops out of any ranking
+    of models. This metric reports that beta-free limit, up to that constant,
+
+        consistency = -mean_i (D1_i - D2_i)**2,
+
+    which is <= 0, is maximised (zero only when the two paired score sets induce
+    identical energy gaps), and requires no inner optimisation at all.
+
+    The normalisation and energy front-end is inherited from CAP unchanged, so
+    the same `cap_metric_config` block can be reused verbatim. The `beta0`,
+    `lr`, `n_epochs`, `batch_size` and `normalize_gradients` entries of that
+    config are accepted for drop-in compatibility and have no effect here.
+    """
+
+    def update(self, logits1: Tensor, logits2: Tensor, **kwargs):
+        """Compute the beta-free consistency limit over the paired scores."""
+        self.reset()
+
+        with torch.no_grad():
+            # Normalize the logits, exactly as CAP does.
+            logits1, logits2 = self.normalizer_fn(logits1, logits2)
+
+            # Add mean and std to the energy parameters
+            combined = torch.cat([logits1, logits2], dim=0)
+            self.energy_params.update(
+                {
+                    "mean": combined.mean().item(),
+                    "std": combined.std().item(),
+                }
+            )
+            del combined
+
+            # Per-sample energy gaps D_k = E_k(1) - E_k(0). The labels must be
+            # float here: they are combined with the (float) scores inside every
+            # energy function.
+            energy_fn = self._get_energy_fn()
+            ones = torch.ones_like(logits1)
+            zeros = torch.zeros_like(logits1)
+            gap1 = energy_fn(logits1, ones) - energy_fn(logits1, zeros)
+            gap2 = energy_fn(logits2, ones) - energy_fn(logits2, zeros)
+
+            self.cap.fill_((-torch.mean((gap1 - gap2) ** 2)).item())
+
+    def compute(self) -> Tensor:
+        """Return the computed consistency value."""
+        return self.cap.item()

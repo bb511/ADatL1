@@ -9,15 +9,16 @@ class CAPCallback(Callback):
     """Compute a validation approximation capacity metric between two datasets.
 
     This callback collects all scores from two validation dataloaders, pairs the
-    samples according to the selected pairing function, and computes:
-        - CAP metric
-        - Spearman rank correlation
-
-    The metric is computed on the paired score samples from:
+    samples according to the selected pairing function, and computes the CAP
+    metric on the paired score samples from:
         - dataset_1
         - dataset_2
 
     This is appropriate as a validation-side proxy objective for HPO.
+
+    Subclasses select a different metric by overriding `metric_cls`, and a
+    different logged key by overriding `metric_key`; see
+    src.callbacks.consistency.PosteriorConsistencyCallback.
 
     :param output_name: Key in outputs dict containing per-event anomaly scores / losses.
     :param dataset_1: Name of the first validation dataloader.
@@ -27,6 +28,9 @@ class CAPCallback(Callback):
         ApproximationCapacity.
     :beta: Float that sets parameter of EMA metrics compute here.
     """
+
+    metric_cls = ApproximationCapacity
+    metric_key = "cap"
 
     def __init__(
         self,
@@ -78,7 +82,7 @@ class CAPCallback(Callback):
         self.dataset_1_scores = []
         self.dataset_2_scores = []
 
-        self.capmetric = ApproximationCapacity(
+        self.capmetric = self.metric_cls(
             **self.cap_metric_config, device=self.device
         )
         self.capmetric.to(self.device)
@@ -104,7 +108,7 @@ class CAPCallback(Callback):
             self.dataset_2_scores.append(loss)
 
     def on_validation_epoch_end(self, trainer, pl_module):
-        """Compute and log CAP and rank-correlation across the two data sets."""
+        """Compute and log the metric across the two data sets."""
         if not self.dataset_1_scores:
             raise RuntimeError(
                 f"No validation scores were collected for '{self.dataset_1_name}'."
@@ -114,7 +118,7 @@ class CAPCallback(Callback):
                 f"No validation scores were collected for '{self.dataset_2_name}'."
             )
 
-        cap_value, rankcorr_value = self._compute_cap()
+        cap_value = self._compute_cap()
 
         ds1 = self.dataset_1_name.replace("/", "_")
         ds2 = self.dataset_2_name.replace("/", "_")
@@ -122,14 +126,13 @@ class CAPCallback(Callback):
 
         pl_module.log_dict(
             {
-                f"val/summary/cap_ema_{ds1}_vs_{ds2}": self.cap_ema,
-                f"val/summary/rankcorr_{ds1}_vs_{ds2}": float(rankcorr_value),
+                f"val/summary/{self.metric_key}_ema_{ds1}_vs_{ds2}": self.cap_ema,
             },
             **self.log_kwargs,
         )
 
     def _compute_cap(self):
-        """Compute CAP and Spearman rank correlation between the two data sets."""
+        """Compute the metric between the two data sets."""
         dataset_1_scores = torch.cat(self.dataset_1_scores, dim=0).view(-1)
         dataset_2_scores = torch.cat(self.dataset_2_scores, dim=0).view(-1)
 
@@ -144,8 +147,6 @@ class CAPCallback(Callback):
         ds1_scores = ds1_scores[:n]
         ds2_scores = ds2_scores[:n]
 
-        rankcorr_value = self._spearman_corr(ds1_scores, ds2_scores)
-
         with torch.inference_mode(False):
             with torch.enable_grad():
                 ds1 = ds1_scores.clone().requires_grad_(True)
@@ -156,27 +157,7 @@ class CAPCallback(Callback):
         if isinstance(cap_value, torch.Tensor):
             cap_value = cap_value.detach().item()
 
-        return float(cap_value), float(rankcorr_value)
-
-    def _spearman_corr(self, x: torch.Tensor, y: torch.Tensor) -> float:
-        """Compute the Spearman correlation between paired anomaly scores."""
-        x = x.detach().view(-1).cpu()
-        y = y.detach().view(-1).cpu()
-
-        if x.numel() == 0 or y.numel() == 0:
-            raise RuntimeError("Cannot compute Spearman correlation on empty tensors.")
-
-        rx = torch.argsort(torch.argsort(x)).float()
-        ry = torch.argsort(torch.argsort(y)).float()
-
-        rx = rx - rx.mean()
-        ry = ry - ry.mean()
-
-        denom = torch.sqrt((rx**2).sum() * (ry**2).sum())
-        if denom < 1e-12:
-            return float("nan")
-
-        return ((rx * ry).sum() / denom).item()
+        return float(cap_value)
 
     def _compute_cap_ema(self, cap: float):
         """Compute the cvar estimated moving average."""

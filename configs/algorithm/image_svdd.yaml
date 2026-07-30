@@ -4,7 +4,7 @@ defaults:
 
 _target_: src.algorithms.image_svdd.ImageDeepSVDD
 features: null
-ckpt: ''
+ckpt: ""
 
 target_rate: 0.01
 base_rate: null
@@ -17,9 +17,21 @@ encoder:
   strides: [2, 2]
   activation: relu
   batchnorm: false
+  bias: false
 
 center_init_method: mean
+center_eps: 0.1
+center_max_batches: null
 
+objective: one_class
 nu: 0.1
-weight_decay: 1e-6
-soft_boundary: false
+network_weight_decay: 1e-6
+radius_warmup_epochs: 10
+
+optimizer:
+  _partial_: true
+  _target_: torch.optim.Adam
+  lr: 1.0e-3
+  weight_decay: 0.0
+  betas: [0.9, 0.999]
+  eps: 1.0e-8

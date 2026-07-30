@@ -24,6 +24,9 @@ class Encoder(nn.Module):
         in_dim: int,
         nodes: list[int],
         activation: str = "relu",
+        bias: bool = True,
+        batchnorm: bool = False,
+        affine: bool = True,
         init_weight: Optional[Callable] = None,
         init_bias: Optional[Callable] = None,
     ):
@@ -33,7 +36,9 @@ class Encoder(nn.Module):
             in_dim=in_dim,
             nodes=nodes[:-1],
             out_dim=nodes[-1],
-            batchnorm=False,
+            batchnorm=batchnorm,
+            affine=affine,
+            bias=bias,
             activation=activation,
             final_activation=False,
             init_weight=init_weight,
@@ -218,7 +223,6 @@ class DeepSetsEncoder(nn.Module):
         event_repr = torch.cat(pooled_parts, dim=1)
         return self.rho(event_repr)
 
-
     def forward(
         self,
         x_by_type: dict[str, torch.Tensor],
@@ -243,6 +247,7 @@ class DeepSetsEncoder(nn.Module):
             pooled = torch.cat([h_sum, h_max], dim=1)
 
         return pooled
+
 
 class DeepSetsVariationalEncoder(DeepSetsEncoder):
     """Per-type DeepSets variational encoder.
@@ -335,6 +340,8 @@ class ImageEncoder(nn.Module):
         init_weight: Optional[Callable] = None,
         init_bias: Optional[Callable] = None,
         batchnorm: bool = False,
+        affine: bool = True,
+        bias: bool = True,
     ):
         super().__init__()
 
@@ -361,6 +368,8 @@ class ImageEncoder(nn.Module):
             strides=strides,
             transpose=False,
             batchnorm=batchnorm,
+            affine=affine,
+            bias=bias,
             activation=activation,
             final_activation=True,
             init_weight=init_weight,
@@ -375,7 +384,7 @@ class ImageEncoder(nn.Module):
         self.feature_shape = (conv_nodes[-1], h, w)
         self.feature_dim = conv_nodes[-1] * h * w
 
-        self.proj = nn.Linear(self.feature_dim, latent_dim)
+        self.proj = nn.Linear(self.feature_dim, latent_dim, bias=bias)
         if init_weight is not None:
             init_weight(self.proj.weight)
         if init_bias is not None and self.proj.bias is not None:

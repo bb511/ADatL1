@@ -155,18 +155,66 @@ class ADLightningModule(LightningModule):
 
         return scheduler_dict
 
+    def _split_by_type_from_flat(
+        self,
+        x_flat: torch.Tensor,
+        m_flat: torch.Tensor | None,
+    ) -> tuple[dict[str, torch.Tensor], dict[str, torch.Tensor]]:
+        """Build per-type tensors from flattened inputs using object_feature_map."""
+        object_feature_map = getattr(self, "object_feature_map", None)
+        if object_feature_map is None:
+            raise RuntimeError(
+                "object_feature_map not found on module. "
+                "Make sure inject_object_feature_map(self) was called in "
+                "on_fit_start/on_test_start."
+            )
+
+        if m_flat is None:
+            m_flat = torch.ones_like(x_flat, dtype=x_flat.dtype, device=x_flat.device)
+
+        x_by_type = {}
+        m_by_type = {}
+
+        for obj_name, feature_map in object_feature_map.items():
+            feat_names = list(feature_map.keys())
+            feat_indices = [feature_map[feat_name] for feat_name in feat_names]
+
+            n_obj = len(feat_indices[0])
+            n_feat = len(feat_indices)
+
+            if not all(len(idxs) == n_obj for idxs in feat_indices):
+                raise ValueError(
+                    f"Feature map for '{obj_name}' has inconsistent object counts."
+                )
+
+            obj_features = []
+            obj_masks = []
+
+            for obj_idx in range(n_obj):
+                this_obj_feat_idx = [
+                    feat_indices[f_idx][obj_idx] for f_idx in range(n_feat)
+                ]
+                idx_tensor = torch.tensor(
+                    this_obj_feat_idx, device=x_flat.device, dtype=torch.long
+                )
+
+                x_obj = torch.index_select(x_flat, dim=1, index=idx_tensor)
+                m_obj = torch.index_select(m_flat, dim=1, index=idx_tensor)
+
+                obj_features.append(x_obj)
+                obj_masks.append(m_obj.all(dim=1))
+
+            x_by_type[obj_name] = torch.stack(obj_features, dim=1)
+            m_by_type[obj_name] = torch.stack(obj_masks, dim=1)
+
+        return x_by_type, m_by_type
+
+    @property
+    def target_fpr(self) -> float:
+        return self.compute_target_fpr()
+
     def compute_target_fpr(self) -> float:
-        """Compute the target false positive rate (FPR).
-
-        Uses `self.hparams.target_rate` and `self.hparams.base_rate`.
-
-        If `base_rate` is provided, interpret `target_rate` as a physical rate
-        and convert it to a probability. Otherwise, interpret `target_rate`
-        directly as an FPR.
-
-        Returns:
-            fpr: Target false positive rate in (0, 1).
-        """
+        """Target FPR: target_rate/base_rate if base_rate is set, else target_rate."""
         target_rate = getattr(self.hparams, "target_rate", None)
         base_rate = getattr(self.hparams, "base_rate", None)
 
@@ -187,3 +235,24 @@ class ADLightningModule(LightningModule):
 
     def compute_threshold_quantile(self) -> float:
         return 1.0 - self.compute_target_fpr()
+
+    def compute_operational_ascore(self, ascore: torch.Tensor) -> float:
+        """Anomaly score at the operational point, i.e. at the target FPR.
+
+        A single quantile is too noisy when the operational tail holds fewer than 10
+        events, so below that the top-k mean is used instead.
+        """
+        n = ascore.numel()
+        k = max(1, int(self.target_fpr * n))
+        if k < 10:
+            k_eff = min(max(10, k), n)
+            return torch.topk(ascore, k_eff).values.mean().item()
+
+        return torch.quantile(ascore, 1.0 - self.target_fpr).item()
+
+    def compute_score_quantiles(self, ascore: torch.Tensor) -> tuple[float, float]:
+        """Median and 99th percentile of the anomaly score distribution."""
+        quantiles = torch.tensor([0.5, 0.99], device=ascore.device)
+        q50, q99 = torch.quantile(ascore, quantiles).tolist()
+
+        return q50, q99

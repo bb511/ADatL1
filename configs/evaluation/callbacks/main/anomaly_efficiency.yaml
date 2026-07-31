@@ -1,5 +1,6 @@
 # @package evaluation.callbacks.main
 
+# Reference only: not selected by any defaults list.
 # The metric names need be specified like they are given by the model.
 _target_: src.evaluation.callbacks.efficiency.AnomalyEfficiencyCallback
 output_name: "loss/total/full"

@@ -1,7 +1,7 @@
 #!/bin/bash
 
 # Create folders
-folders=("data" "logs" "outputs" "results")
+folders=("data" "logs" "outputs" "results" "checkpoints")
 
 for folder in "${folders[@]}"; do
     if [ ! -d "$folder" ]; then
@@ -22,6 +22,7 @@ RES_DIR="." # set to the desired location
 DATA_DIR="\${RES_DIR}/data"
 LOG_DIR="\${RES_DIR}/logs"
 OUTPUT_DIR="\${RES_DIR}/outputs"
+CHECKPOINT_DIR="\${RES_DIR}/checkpoints"
 EOL
 
 echo ".env file created successfully at $PWD/$env_file"

@@ -1,17 +1,16 @@
 # Lightning data module for loading parquet data produced with:
-# https://github.com/cdfpzmvpvg/info_ad_data
+# https://github.com/bb511/adl1t_datamaker
 from dataclasses import dataclass
 from pathlib import Path
 import gc
 import warnings
 
 import torch
-import numpy as np
 from pytorch_lightning import LightningDataModule
 from torch.utils.data import Dataset, DataLoader
 
 from src.utils import pylogger
-from colorama import Fore, Back, Style
+from colorama import Fore, Back
 from src.data.components.dataset import L1ADDataset
 from src.data.components.normalization import L1DataNormalizer
 
@@ -59,25 +58,19 @@ class L1ADDataModule(LightningDataModule):
     ) -> None:
         """Prepare the L1 data for using it to train and validate ML models.
 
-        :param zerobias: Dictionary of paths to the zerobias data.
-        :param signals: Dictionary of paths to simulation data of possible anomalies.
-        :param background: Dictionary of paths to simulation of data that is guaranteed
-            to not contain any anomalies.
-        :param data_extractor: Class that extracts the data from the given h5 files.
-        :param data_processor: Class that processes the extracted data.
-        :param data_normalizer: Class that normalizes the processed data.
-        :param data_mlready: Class formats the data to be ready for ML pipeline.
-        :param data_awkward2np: Class that converts the data from jagged awkward arrays
-            to fixed size numpy arrays to give to the torch dataloader.
-        :param train_features: Dictionary where keys are strings of the objects that
-            point to list of features to be used during
-        :param l1_scales: Dictionary of the scales that the l1 trigger applies to
-            all features that could be in the data set.
-        :param batch_size: Integer specifying the batch size of the data.
-        :param max_val_batches: Integer specifying how many batches to use for the val
-            data sets.
-        :param seed: Integer specifying the seed with which to shuffle the training
-            data when constructing the data set.
+        The five data_* components form the pipeline, run in that order by
+        prepare_data(): extract -> process -> normalize + split -> awkward to torch.
+
+        :param zerobias: {name: path} of real zero bias data, the training set.
+        :param signal: {name: path} of simulated anomalies, validation only.
+        :param background: {name: path} of simulation guaranteed anomaly-free.
+        :param train_features: {object: [features]} to train on, e.g. muons: [Et, eta].
+        :param l1_scales: Hardware-to-physical unit factors, kept for the pure-rate
+            calculation. That is not implemented yet, so nothing applies them today and
+            the tensors stay in integer hardware units.
+        :param max_val_batches: Batches to keep per auxiliary val/test set. -1 keeps all.
+        :param seed: Seeds the training batch order only. The train/valid/test split is
+            seeded separately by data_mlready.
         """
 
         super().__init__()
@@ -89,7 +82,10 @@ class L1ADDataModule(LightningDataModule):
 
         self._main: dict[str, SplitTensors] = {}
         self._aux: dict[str, dict[str, SplitTensors]] = {"valid": {}, "test": {}}
-        self.shuffler = torch.Generator().manual_seed(seed)
+        # seed=None means 'do not seed', matching train.py's `if cfg.get("seed")`.
+        self.shuffler = torch.Generator()
+        if seed is not None:
+            self.shuffler.manual_seed(seed)
         self.max_val_batches = max_val_batches
 
     def prepare_data(self) -> None:
@@ -198,17 +194,12 @@ class L1ADDataModule(LightningDataModule):
         # Drop references to large tensors so they become collectible
         if stage in ("fit", None):
             # free train/valid (+ aux valid)
-            self._train_loader = None
-            self._val_loaders = None
-
             self._main.pop("train", None)
             self._main.pop("valid", None)
             self._aux.get("valid", {}).clear()
 
         if stage in ("test", None):
             # free test (+ aux test)
-            self._test_loaders = None
-
             self._main.pop("test", None)
             self._aux.get("test", {}).clear()
 
@@ -347,69 +338,6 @@ class L1ADDataModule(LightningDataModule):
             show_split("Validation data:", "valid", "valid")
         elif stage == "test":
             show_split("Test data:", "test", "test")
-
-    def get_extra(
-        self, normalizer: L1DataNormalizer, extra_feats: dict, stage: str, flag: str
-    ):
-        """Hook for callbacks to get additional data.
-
-        The data provided through this hook should not be already included in the
-        training data. Otherwise, no point in calling this hook.
-
-        :param normalizer: Normalizer object for the additional data.
-        :param extra_feats: Dictionary containing the object and the features to be
-            extracted from that object.
-        :param flag: String specifying subdirectory to put the extra feature parquet
-            files in so they don't get mixed up at training time.
-        """
-        log.info(Back.GREEN + f"Extracting additional features: {extra_feats}...")
-        self.hparams.data_mlready.prepare(normalizer, extra_feats, flag)
-        data_dir: Path = self.hparams.data_mlready.cache_folder
-
-        if stage == "train":
-            split = self._load_main_split(data_dir, "train", label=0, flag=flag)
-            return L1ADDataset(
-                split.x,
-                split.mask,
-                split.l1bit,
-                split.y,
-                batch_size=self.batch_size_per_device,
-                shuffler=self.shuffler,
-            )
-
-        if stage not in {"val", "test"}:
-            raise ValueError(
-                f"Unknown stage '{stage}'. Expected one of: 'train', 'val', 'test'."
-            )
-
-        split_name = "valid" if stage == "val" else "test"
-        main_key = "normal"
-
-        # Main split (ensure it's first in the returned dict)
-        main = self._load_main_split(data_dir, split_name, label=0, flag=flag)
-
-        out: dict[str, L1ADDataset] = {
-            main_key: L1ADDataset(
-                main.x,
-                main.mask,
-                main.l1bit,
-                main.y,
-                batch_size=self.batch_size_per_device,
-            )
-        }
-
-        # Aux splits
-        aux = self._load_aux_split(data_dir, split_name, flag=flag)
-        for name, split in aux.items():
-            out[name] = L1ADDataset(
-                split.x,
-                split.mask,
-                split.l1bit,
-                split.y,
-                batch_size=self.batch_size_per_device,
-            )
-
-        return out
 
     def _attach_object_feature_map(self, ds: Dataset) -> Dataset:
         if hasattr(self, "loader") and hasattr(self.loader, "object_feature_map"):

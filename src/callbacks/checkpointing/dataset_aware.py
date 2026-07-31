@@ -73,6 +73,9 @@ class DatasetAwareModelCheckpoint(Callback):
 
     def on_validation_epoch_end(self, trainer, pl_module):
         """Get the metric at that epoch and decide whether to set a checkpoint there."""
+        if getattr(trainer, "sanity_checking", False) or self.ds_criterion is None:
+            return
+
         ds_metrics = {}
         for ds_name in self.ds:
             ds_metrics[ds_name] = self._get_metric(trainer.callback_metrics, ds_name)
@@ -221,6 +224,8 @@ class DatasetAwareModelCheckpoint(Callback):
                         f"No checkpoints made for  {self.criterion.__dict__} "
                         f"on dataset {dataset_name}."
                     )
+                    continue
+                if k >= len(self.checkpoints[dataset_name]):
                     continue
                 epochs[dataset_name] = self.checkpoints[dataset_name][k]["epoch"]
                 values[dataset_name] = self.checkpoints[dataset_name][k]["value"]

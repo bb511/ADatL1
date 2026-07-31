@@ -20,8 +20,6 @@ from tests.helpers.package_available import (
     _MLFLOW_AVAILABLE,
     _NEPTUNE_AVAILABLE,
     _SH_AVAILABLE,
-    _TPU_AVAILABLE,
-    _WANDB_AVAILABLE,
 )
 
 
@@ -48,10 +46,8 @@ class RunIf:
         min_python: Optional[str] = None,
         skip_windows: bool = False,
         sh: bool = False,
-        tpu: bool = False,
         fairscale: bool = False,
         deepspeed: bool = False,
-        wandb: bool = False,
         neptune: bool = False,
         comet: bool = False,
         mlflow: bool = False,
@@ -64,11 +60,9 @@ class RunIf:
         :param max_torch: Maximum pytorch version to run test.
         :param min_python: Minimum python version required to run test.
         :param skip_windows: Skip test for Windows platform.
-        :param tpu: If TPU is available.
         :param sh: If `sh` module is required to run the test.
         :param fairscale: If `fairscale` module is required to run the test.
         :param deepspeed: If `deepspeed` module is required to run the test.
-        :param wandb: If `wandb` module is required to run the test.
         :param neptune: If `neptune` module is required to run the test.
         :param comet: If `comet` module is required to run the test.
         :param mlflow: If `mlflow` module is required to run the test.
@@ -100,10 +94,6 @@ class RunIf:
             conditions.append(_IS_WINDOWS)
             reasons.append("does not run on Windows")
 
-        if tpu:
-            conditions.append(not _TPU_AVAILABLE)
-            reasons.append("TPU")
-
         if sh:
             conditions.append(not _SH_AVAILABLE)
             reasons.append("sh")
@@ -115,10 +105,6 @@ class RunIf:
         if deepspeed:
             conditions.append(not _DEEPSPEED_AVAILABLE)
             reasons.append("deepspeed")
-
-        if wandb:
-            conditions.append(not _WANDB_AVAILABLE)
-            reasons.append("wandb")
 
         if neptune:
             conditions.append(not _NEPTUNE_AVAILABLE)

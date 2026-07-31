@@ -14,18 +14,13 @@ class CDRW(_LRScheduler):
         warmup_epochs: int = 10,
         last_epoch: int = -1,
     ):
-        """
-        Cosine decay with restarts and linear warmup scheduler
+        """Cosine decay with restarts and linear warmup scheduler.
 
-        Args:
-            optimizer (Optimizer): Wrapped optimizer
-            lr0 (float): Initial learning rate
-            s0 (int): Number of steps for the first decay
-            t_mul (float, optional): Multiplier for decay steps. Defaults to 2.0.
-            m_mul (float, optional): Multiplier for maximum learning rate. Defaults to 1.0.
-            alpha (float, optional): Minimum learning rate value. Defaults to 0.0.
-            warmup_epochs (int, optional): Number of warmup epochs. Defaults to 10.
-            last_epoch (int, optional): The index of last epoch. Defaults to -1.
+        :param lr0: Initial learning rate.
+        :param s0: Number of steps for the first decay.
+        :param t_mul: Multiplier for the decay steps of each successive cycle.
+        :param m_mul: Multiplier for the maximum learning rate of each successive cycle.
+        :param alpha: Minimum learning rate value.
         """
         self.base_lr0 = lr0
         self.lr0 = lr0

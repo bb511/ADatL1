@@ -63,10 +63,6 @@ class DeepSetsAE(ADLightningModule):
     def on_test_start(self):
         inject_object_feature_map(self)
 
-    @property
-    def target_fpr(self) -> float:
-        return self.compute_target_fpr()
-
     def forward(
         self,
         x_by_type: dict[str, torch.Tensor],
@@ -108,16 +104,7 @@ class DeepSetsAE(ADLightningModule):
         del x_flat, z
 
         with torch.no_grad():
-            n = ascore.numel()
-            k = max(1, int(self.target_fpr * n))
-
-            if k < 10:
-                k_eff = min(max(10, k), n)
-                operational_ascore = torch.topk(ascore, k_eff).values.mean().item()
-            else:
-                operational_ascore = torch.quantile(
-                    ascore, 1.0 - self.target_fpr
-                ).item()
+            operational_ascore = self.compute_operational_ascore(ascore)
 
         loss_mean = loss.mean()
 
@@ -140,57 +127,3 @@ class DeepSetsAE(ADLightningModule):
             "loss_reco": outdict.get("loss/mean"),
             "ascore_operational": outdict.get("ascore/operational"),
         }
-
-    def _split_by_type_from_flat(
-        self,
-        x_flat: torch.Tensor,
-        m_flat: torch.Tensor | None,
-    ) -> tuple[dict[str, torch.Tensor], dict[str, torch.Tensor]]:
-        """Build per-type tensors from flattened inputs using object_feature_map."""
-        object_feature_map = getattr(self, "object_feature_map", None)
-        if object_feature_map is None:
-            raise RuntimeError(
-                "object_feature_map not found on module. "
-                "Make sure inject_object_feature_map(self) was called in "
-                "on_fit_start/on_test_start."
-            )
-
-        if m_flat is None:
-            m_flat = torch.ones_like(x_flat, dtype=x_flat.dtype, device=x_flat.device)
-
-        x_by_type = {}
-        m_by_type = {}
-
-        for obj_name, feature_map in object_feature_map.items():
-            feat_names = list(feature_map.keys())
-            feat_indices = [feature_map[feat_name] for feat_name in feat_names]
-
-            n_obj = len(feat_indices[0])
-            n_feat = len(feat_indices)
-
-            if not all(len(idxs) == n_obj for idxs in feat_indices):
-                raise ValueError(
-                    f"Feature map for '{obj_name}' has inconsistent object counts."
-                )
-
-            obj_features = []
-            obj_masks = []
-
-            for obj_idx in range(n_obj):
-                this_obj_feat_idx = [
-                    feat_indices[f_idx][obj_idx] for f_idx in range(n_feat)
-                ]
-                idx_tensor = torch.tensor(
-                    this_obj_feat_idx, device=x_flat.device, dtype=torch.long
-                )
-
-                x_obj = torch.index_select(x_flat, dim=1, index=idx_tensor)
-                m_obj = torch.index_select(m_flat, dim=1, index=idx_tensor)
-
-                obj_features.append(x_obj)
-                obj_masks.append(m_obj.all(dim=1))
-
-            x_by_type[obj_name] = torch.stack(obj_features, dim=1)
-            m_by_type[obj_name] = torch.stack(obj_masks, dim=1)
-
-        return x_by_type, m_by_type

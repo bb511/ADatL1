@@ -79,8 +79,3 @@ class ApproximationCapacityKernel(nn.Module):
         if self.total_samples == 0:
             return self.cap
         return self.cap / self.total_samples
-
-    @property
-    def module(self):
-        """Returns the kernel itself. It helps the kernel be accessed in both DDP and non-DDP mode."""
-        return self

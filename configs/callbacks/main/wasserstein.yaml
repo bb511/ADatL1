@@ -1,5 +1,6 @@
 # @package callbacks.main
 
+# Reference only: not selected by any defaults list.
 _target_: src.callbacks.wasserstein.WassersteinCallback
 output_name: 'loss/total/full'
 dataset_1: ???

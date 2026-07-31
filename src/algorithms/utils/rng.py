@@ -3,11 +3,7 @@ import torch
 
 
 class RandomNumberGenerator:
-    """Random number generator implementation.
-
-    Used primarly in the augmentation.py script to seed the augmenter layers in
-    different ways, such that two samples are not augmented in the same way.
-    """
+    """Seeded per-device torch.Generator holder."""
 
     def __init__(self):
         self._seed: int | None = None

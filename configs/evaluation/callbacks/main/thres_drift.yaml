@@ -1,5 +1,6 @@
 # @package evaluation.callbacks.main
 
+# Reference only: not selected by any defaults list.
 _target_: src.evaluation.callbacks.thres_drift.ThresholdDriftCallback
 output_name: loss
 target_rates: [0.25]

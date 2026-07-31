@@ -95,7 +95,10 @@ class RobustADDataModule(LightningDataModule):
         self.save_hyperparameters(logger=False)
         self._main = {}
         self._aux = {"valid": {}, "test": {}}
-        self.shuffler = torch.Generator().manual_seed(seed)
+        # seed=None means 'do not seed', matching train.py's `if cfg.get("seed")`.
+        self.shuffler = torch.Generator()
+        if seed is not None:
+            self.shuffler.manual_seed(seed)
         self.mean, self.std = None, None
         self._validate_init()
 
@@ -225,6 +228,17 @@ class RobustADDataModule(LightningDataModule):
         if not self._aux["test"]:
             self._aux["test"] = self._build_shift_aux()
 
+    def _split_generator(self) -> torch.Generator:
+        """Fresh generator for the splits, deliberately not self.shuffler.
+
+        The training dataloader advances self.shuffler once per epoch, so drawing the
+        splits from it makes setup() return a different partition every time it runs.
+        train.py calls setup("validate") after fit, so the second partition's validation
+        set would overlap the first partition's training set.
+        """
+        seed = self.hparams.seed if self.hparams.seed is not None else 42
+        return torch.Generator().manual_seed(seed)
+
     def _split_source_normal(self, source: SplitTensors):
         """Split source normal into train, valid, and test subsets."""
         n = source.x.size(0)
@@ -232,7 +246,7 @@ class RobustADDataModule(LightningDataModule):
         nt = max(2, round(self.hparams.test_fraction * n))
         nt = min(nt, n - nv - 1)
         ds = TensorDataset(source.x, source.y)
-        parts = random_split(ds, [n - nv - nt, nv, nt], generator=self.shuffler)
+        parts = random_split(ds, [n - nv - nt, nv, nt], generator=self._split_generator())
         return tuple(self._tensor_subset_to_split(p) for p in parts)
 
     def _tensor_subset_to_split(self, subset) -> SplitTensors:
@@ -272,7 +286,8 @@ class RobustADDataModule(LightningDataModule):
     def _concat_balanced(self, splits: list[SplitTensors]) -> SplitTensors:
         """Merge shifted-normal splits with equal contribution from each domain."""
         n = min(s.x.size(0) for s in splits)
-        idxs = [torch.randperm(s.x.size(0), generator=self.shuffler)[:n] for s in splits]
+        gen = self._split_generator()
+        idxs = [torch.randperm(s.x.size(0), generator=gen)[:n] for s in splits]
         xs = [s.x[i] for s, i in zip(splits, idxs)]
         ys = [s.y[i] for s, i in zip(splits, idxs)]
         return SplitTensors(

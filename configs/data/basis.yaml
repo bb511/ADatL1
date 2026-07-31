@@ -15,7 +15,7 @@ defaults:
 
 _target_: src.data.L1AD_datamodule.L1ADDataModule
 
-# Fill in below with paths to folders that contain the raw data in h5 format.
+# Fill in below with paths to folders that contain the raw parquet data.
 zerobias: ${paths.zerobias}
 signal: ${paths.signal}
 background: ${paths.background}
@@ -32,7 +32,7 @@ train_features:
 # The batch size of the data.
 batch_size: 16384
 
-# How many batches to split the validation data into. -1 means use batch_size
+# How many batches to split the validation data into. -1 means use the full dataset
 max_val_batches: 10
 
 # Seed for shuffling the data, if any shuffling is happening.

@@ -74,10 +74,6 @@ class VAE(ADLightningModule):
             # warmup value does not depend on total_steps.
             self._setup_kl_annealing(self.kl_warmup_frac, 1)
 
-    @property
-    def target_fpr(self) -> float:
-        return self.compute_target_fpr()
-
     def forward(self, x: torch.Tensor) -> tuple[torch.Tensor, ...]:
         x = self.features(x)
         z_mean, z_log_var, z = self.encoder(x)
@@ -114,20 +110,9 @@ class VAE(ADLightningModule):
         loss = self._add_hgq_loss(loss)
 
         with torch.no_grad():
-            n = ascore.numel()
-            k = max(1, int(self.target_fpr * n))
+            operational_ascore = self.compute_operational_ascore(ascore)
 
-            if k < 10:
-                k_eff = min(max(10, k), n)
-                operational_ascore = torch.topk(ascore, k_eff).values.mean().item()
-            else:
-                operational_ascore = torch.quantile(
-                    ascore, 1.0 - self.target_fpr
-                ).item()
-
-            q50, q99 = torch.quantile(
-                ascore, torch.tensor([0.5, 0.99], device=ascore.device)
-            ).tolist()
+            q50, q99 = self.compute_score_quantiles(ascore)
 
             z_mean_squared = torch.square(z_mean).sum(dim=1)
             z_mean_squared_mean = z_mean_squared.mean().item()

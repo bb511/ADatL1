@@ -13,11 +13,11 @@ from src.data.utils import unpack_batch
 class AnomalyEfficiencyCallback(Callback):
     """Calculates the fraction of anomalies detected given a certain bkg rate.
 
-    :target_rate: Float specifying the target rate of bkg.
-    :param base_rate: Optional override for the module base rate. If None, the module
-        base_rate is used.
-    :materic_name: Which model metric to use as the anomaly score to calculate rate on.
-    :beta: Float that sets parameter of EMA metrics compute here.
+    :param output_name: Model output to use as the anomaly score, e.g. 'ascore/full'.
+    :param target_rates: Background rates in kHz to evaluate at. Defaults to the
+        module's own target_rate.
+    :param base_rate: Overrides the module base_rate when set.
+    :param beta: Decay of the EMA summaries computed here.
     """
 
     def __init__(
@@ -47,8 +47,7 @@ class AnomalyEfficiencyCallback(Callback):
 
     def on_fit_start(self, trainer, pl_module):
         """Instantiate useful quantities."""
-        self.cvar25_ema = {}
-        self.cvar10_ema = {}
+        self.cvar_ema = defaultdict(dict)
         self.module_target_rate = None
 
     def on_validation_start(self, trainer, pl_module):
@@ -112,8 +111,8 @@ class AnomalyEfficiencyCallback(Callback):
 
             cvar25 = self._cvar_lower_tail(sig_effs.values(), alpha=0.25)
             cvar10 = self._cvar_lower_tail(sig_effs.values(), alpha=0.10)
-            self._compute_cvar25_ema(target_rate, cvar25)
-            self._compute_cvar10_ema(target_rate, cvar10)
+            self._update_cvar_ema(0.25, target_rate, cvar25)
+            self._update_cvar_ema(0.10, target_rate, cvar10)
 
             min_sig_eff = min(list(sig_effs.values()))
             med_sig_eff = statistics.median(list(sig_effs.values()))
@@ -126,8 +125,12 @@ class AnomalyEfficiencyCallback(Callback):
                 f"val/summary/eff_cvar10_{trate_name}": cvar10,
                 f"val/summary/eff_min_{trate_name}": min_sig_eff,
                 f"val/summary/eff_med_{trate_name}": med_sig_eff,
-                f"val/summary/eff_cvar25_ema_{trate_name}": self.cvar25_ema[target_rate],
-                f"val/summary/eff_cvar10_ema_{trate_name}": self.cvar10_ema[target_rate],
+                f"val/summary/eff_cvar25_ema_{trate_name}": self.cvar_ema[0.25][
+                    target_rate
+                ],
+                f"val/summary/eff_cvar10_ema_{trate_name}": self.cvar_ema[0.10][
+                    target_rate
+                ],
             }
             pl_module.log_dict(summaries, **self.log_kwargs)
             pl_module.log_dict(
@@ -135,23 +138,17 @@ class AnomalyEfficiencyCallback(Callback):
                 **self.log_kwargs,
             )
 
-    def _compute_cvar25_ema(self, target_rate: float, value: float):
-        if target_rate not in self.cvar25_ema:
-            self.cvar25_ema[target_rate] = float(value)
-        else:
-            self.cvar25_ema[target_rate] = (
-                self.beta * self.cvar25_ema[target_rate]
-                + (1 - self.beta) * float(value)
-            )
+    def _update_cvar_ema(self, alpha: float, target_rate: float, value: float):
+        """Update the exponential moving average of the cvar at a given tail level.
 
-    def _compute_cvar10_ema(self, target_rate: float, value: float):
-        """Compute the cvar10 exponential moving average."""
-        if target_rate not in self.cvar10_ema:
-            self.cvar10_ema[target_rate] = float(value)
+        :param alpha: Tail fraction of the cvar the average is kept for.
+        """
+        ema = self.cvar_ema[alpha]
+        if target_rate not in ema:
+            ema[target_rate] = float(value)
         else:
-            self.cvar10_ema[target_rate] = (
-                self.beta * self.cvar10_ema[target_rate]
-                + (1 - self.beta) * float(value)
+            ema[target_rate] = (
+                self.beta * ema[target_rate] + (1 - self.beta) * float(value)
             )
 
     def _accumulate_normal_output(self, outputs: dict, batch_idx: int, pl_module):
@@ -257,11 +254,6 @@ class AnomalyEfficiencyCallback(Callback):
             self.module_target_rate is not None
             and abs(float(target_rate) - float(self.module_target_rate)) < 1e-12
         )
-
-    def _get_dsname(self, rate_name: str):
-        """Retrieves the data set name from string specifying rate name."""
-        dataset_name = rate_name.split("/")[0]
-        return dataset_name
 
     def _set_thres_on_module(self, pl_module, target_rate: float, thres: torch.Tensor):
         """Pass the threshold to the module so it ends up in the checkpoint."""

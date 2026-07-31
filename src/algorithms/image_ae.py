@@ -56,10 +56,6 @@ class ImageAE(ADLightningModule):
         self.loss = HuberAELoss(delta=delta, reduction="none")
         self.ascore = MSEReconstructionLoss(reduction="none")
 
-    @property
-    def target_fpr(self) -> float:
-        return self.compute_target_fpr()
-
     def forward(self, x: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
         """Run the encoder-decoder on image tensors."""
         x = self.features(x)
@@ -94,17 +90,7 @@ class ImageAE(ADLightningModule):
         del z
 
         with torch.no_grad():
-            n = ascore.numel()
-            k = max(1, int(self.target_fpr * n))
-
-            # If the operational tail is too small, use a top-k average for stability.
-            if k < 10:
-                k_eff = min(max(10, k), n)
-                operational_ascore = torch.topk(ascore, k_eff).values.mean().item()
-            else:
-                operational_ascore = torch.quantile(
-                    ascore, 1.0 - self.target_fpr
-                ).item()
+            operational_ascore = self.compute_operational_ascore(ascore)
 
         return {
             # Used for backpropagation:

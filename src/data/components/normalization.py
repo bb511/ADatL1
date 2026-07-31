@@ -4,12 +4,10 @@ from dataclasses import dataclass
 import numpy as np
 import awkward as ak
 import pickle
-from colorama import Fore, Back, Style
-from pytorch_lightning import loggers
+from colorama import Fore
 import torch
 
 from src.utils import pylogger
-from . import plots
 
 log = pylogger.RankedLogger(__name__)
 
@@ -69,8 +67,8 @@ class L1DataNormalizer:
         for feat in ak.fields(data):
             self.norm_params[self.obj_name][feat] = {"shift": 0, "scale": 1}
 
-    def _robust(self, data: ak.Array, obj_name: str) -> ak.Array:
-        """Robust normalization, i.e., shift by median and divide by IQ range."""
+    def _affine(self, data: ak.Array, obj_name: str) -> ak.Array:
+        """Shift and scale each feature by its previously fitted norm params."""
         result = data
         params = self.norm_params[obj_name]
         for feature in ak.fields(data):
@@ -79,6 +77,10 @@ class L1DataNormalizer:
             result = ak.with_field(result, normed_feature, where=feature)
 
         return result
+
+    def _robust(self, data: ak.Array, obj_name: str) -> ak.Array:
+        """Robust normalization, i.e., shift by median and divide by IQ range."""
+        return self._affine(data, obj_name)
 
     def _robust_fit(self, data: ak.Array, percentiles: list):
         """Determines the parameters for robust normalisation.
@@ -98,13 +100,7 @@ class L1DataNormalizer:
 
     def _standard(self, data: ak.Array, obj_name: str) -> ak.Array:
         """Apply train-split mean and standard-deviation normalization."""
-        result = data
-        params = self.norm_params[obj_name]
-        for feature in ak.fields(data):
-            normalized = data[feature] - params[feature]["shift"]
-            normalized = normalized / params[feature]["scale"]
-            result = ak.with_field(result, normalized, where=feature)
-        return result
+        return self._affine(data, obj_name)
 
     def _standard_fit(self, data: ak.Array):
         """Fit feature-wise standard scaling on active training objects only."""
@@ -149,14 +145,7 @@ class L1DataNormalizer:
 
     def _robust_axov4(self, data: ak.Array, obj_name: str):
         """Similar to robust normaliztion, applied to the training of axov4 and v5."""
-        result = data
-        params = self.norm_params[obj_name]
-        for feature in ak.fields(data):
-            normed_feature = data[feature] - params[feature]["shift"]
-            normed_feature = normed_feature / params[feature]["scale"]
-            result = ak.with_field(result, normed_feature, where=feature)
-
-        return result
+        return self._affine(data, obj_name)
 
     def import_norm_params(self, norm_filepath: Path, obj_name: str):
         """Import normalization parameters from a pkl file."""
@@ -198,9 +187,6 @@ class L1DataNormalizer:
                 feat_norm_params = obj_norm_params.get(feat, {})
                 self.scale_tensor[idxs] = float(feat_norm_params.get("scale", 1.0))
                 self.shift_tensor[idxs] = float(feat_norm_params.get("shift", 0.0))
-
-        self.scale_tensor = self.scale_tensor
-        self.shift_tensor = self.shift_tensor
 
     def _get_1d_tensor_length(self):
         """Get 1D tensor length corresponding to object feature map."""

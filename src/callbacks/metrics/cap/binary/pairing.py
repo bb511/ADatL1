@@ -40,7 +40,7 @@ def label(
     controlling for label-based differences in loss distributions.
     """
     small_tensor, large_tensor, swapped = _get_small_large(tensor1, tensor2)
-    small_labels, large_labels = _get_small_large(labels1, labels2)
+    small_labels, large_labels, _ = _get_small_large(labels1, labels2)
 
     small_indices_list = []
     large_indices_list = []

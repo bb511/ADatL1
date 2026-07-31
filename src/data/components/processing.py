@@ -1,13 +1,11 @@
 # Processes the data.
-from collections.abc import Callable, Iterator
 from dataclasses import dataclass
 from pathlib import Path
 import functools
 import operator
 
 import awkward as ak
-import pyarrow.parquet as parquet
-from colorama import Fore, Back, Style
+from colorama import Fore
 
 from src.utils import pylogger
 from . import plots
@@ -27,8 +25,6 @@ class L1DataProcessor:
     def process(self, data_category: str):
         """Applies processing to the data and caches the processed data.
 
-        :param dataset: Dictionary with keys corresponding to the name of the processed
-            data set and values corresponding to the path to the raw data.
         :param data_category: String specifying the kind of data that is being extracted
             e.g., 'zerobias', 'background', or 'signal'.
         """
@@ -130,7 +126,7 @@ class L1DataProcessor:
             raise ValueError(Fore.RED + f"No files found in {masks_folder}.")
 
         intersection = functools.reduce(operator.and_, masks)
-        ak.to_parquet(intersection, self.event_masks_folder / "intersection.parquet")
+        ak.to_parquet(intersection, masks_folder / "intersection.parquet")
 
     def _cache(self, extracted_dataset: Path):
         """Processes the data and caches it.

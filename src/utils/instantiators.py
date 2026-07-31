@@ -1,10 +1,9 @@
 from typing import List
 
 import hydra
-from pytorch_lightning import Callback, LightningDataModule
+from pytorch_lightning import Callback
 from pytorch_lightning.loggers import Logger
 from omegaconf import DictConfig
-import logging
 
 from src.utils import pylogger
 

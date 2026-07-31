@@ -5,17 +5,11 @@ from pathvalidate import sanitize_filename
 import numpy as np
 
 import matplotlib.pyplot as plt
-import matplotlib.colors as colors
 import mplhep as hep
 
 
 def plot(data: dict[dict], value_name: str, save_dir: Path):
-    """Plots the data as an xy scatter plot.
-
-    Expects a dictionary where each key corresponds to a row, i.e., another dictionary.
-    Each key of the latter dictionary corresponds to a column entry for that row.
-    The column labels are expected to be the same for each row.
-    """
+    """Plots a nested dict as a heatmap; outer keys are rows, inner keys columns."""
     plt.style.use(hep.style.CMS)
 
     rows = list(data.keys())

@@ -46,10 +46,6 @@ class RealNVP(ADLightningModule):
         if self.ckpt_path:
             self._load_checkpoint()
 
-    @property
-    def target_fpr(self) -> float:
-        return self.compute_target_fpr()
-
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         """Run the flow and return the log-probability of the input."""
         x = self.features(x)
@@ -69,20 +65,9 @@ class RealNVP(ADLightningModule):
             )
 
         with torch.no_grad():
-            n = ascore.numel()
-            k = max(1, int(self.target_fpr * n))
+            operational_ascore = self.compute_operational_ascore(ascore)
 
-            if k < 10:
-                k_eff = min(max(10, k), n)
-                operational_ascore = torch.topk(ascore, k_eff).values.mean().item()
-            else:
-                operational_ascore = torch.quantile(
-                    ascore, 1.0 - self.target_fpr
-                ).item()
-
-            q50, q99 = torch.quantile(
-                ascore, torch.tensor([0.5, 0.99], device=ascore.device)
-            ).tolist()
+            q50, q99 = self.compute_score_quantiles(ascore)
 
         loss_mean = ascore.mean()
 

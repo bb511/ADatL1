@@ -6,7 +6,7 @@
 #     experiment=physics/ae \
 #     experiment_name=debug \
 #     algorithm.optimizer.lr=0.001457369500608365 \
-#     algorithm.loss.delta=7.0 \
+#     algorithm.delta=7.0 \
 #     trainer.gradient_clip_val=0.5 \
 #     algorithm.optimizer.betas='[0.9,0.999]' \
 #     algorithm.optimizer.weight_decay=0.0 \

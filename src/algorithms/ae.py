@@ -55,10 +55,6 @@ class AE(ADLightningModule):
     def on_test_start(self):
         inject_object_feature_map(self)
 
-    @property
-    def target_fpr(self) -> float:
-        return self.compute_target_fpr()
-
     def forward(self, x: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
         x = self.features(x)
         z = self.encoder(x)
@@ -91,15 +87,7 @@ class AE(ADLightningModule):
         del x, z
 
         with torch.no_grad():
-            n = ascore.numel()
-            k = max(1, int(self.target_fpr * n))
-
-            # If the operational tail is too small, use a top-k average for stability.
-            if k < 10:
-                k_eff = min(max(10, k), n)
-                operational_ascore = torch.topk(ascore, k_eff).values.mean().item()
-            else:
-                operational_ascore = torch.quantile(ascore, 1.0 - self.target_fpr).item()
+            operational_ascore = self.compute_operational_ascore(ascore)
 
         return {
             # Used for backpropagation:

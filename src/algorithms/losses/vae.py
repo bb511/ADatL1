@@ -63,5 +63,7 @@ class AxoV4Loss(ClassicVAELoss):
         kl_scale: float = 1.0,
         reduction: str = "none",
     ):
-        super().__init__(scale=scale, kl_scale=kl_scale, reduction=reduction)
-        self.reco_loss = CylPtPzReconstructionLoss(scale=reco_scale, reduction=reduciton)
+        super().__init__(
+            scale=scale, reco_scale=reco_scale, kl_scale=kl_scale, reduction=reduction
+        )
+        self.reco_loss = CylPtPzReconstructionLoss(scale=reco_scale, reduction=reduction)

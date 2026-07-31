@@ -20,6 +20,8 @@ log = pylogger.RankedLogger(__name__)
 from src.utils.checkpoints import is_valid_ckpt
 from src.evaluation.callbacks.utils import mlflow as eval_mlflow
 
+MAIN_METRIC_WEIGHT = 1.25
+
 
 class Evaluator:
     """Thin wrapper around pl.Trainer that performs the evaluation of a model.
@@ -170,6 +172,10 @@ class Evaluator:
 
         for criterion_name in self.ckpts[self.strategy_name][self.metric_name]:
             criterion_subdir = self._get_subdir(metric_folder, criterion_name)
+            if criterion_subdir is None:
+                raise ValueError(
+                    f"{criterion_name} criterion not found in {metric_folder}."
+                )
             self._evaluate_criterion(criterion_subdir, model, test_loader)
 
         self.evaluator.metric_name = None
@@ -362,7 +368,8 @@ class Evaluator:
         This is computing the relative change for the main metric and secondary metric.
         If the sum of the relative changes is positive, i.e., a metric's improvement
         is larger than the other metric's worsening, then save this as the new best
-        across checkpointing criteria.
+        across checkpointing criteria. The main metric is weighted 25% above the
+        secondary one in this sum.
         """
         if any(v is None for v in values):
             return
@@ -376,7 +383,7 @@ class Evaluator:
             ((v - b) if d == "maximize" else (b - v)) / max(abs(b), 1e-12)
             for v, b, d in zip(values, self.optimized_metric, directions)
         ]
-        weights = [1.25, 1.0]
+        weights = [MAIN_METRIC_WEIGHT, 1.0]
         score = sum(w * rc for w, rc in zip(weights, rel_changes))
 
         if score > 0:

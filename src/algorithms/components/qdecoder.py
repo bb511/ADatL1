@@ -4,7 +4,7 @@ from keras import layers
 from hgq.layers import QDense
 from hgq.config import QuantizerConfigScope, LayerConfigScope
 
-from src.algorithms.components.mlp import hgq_mlp
+from src.algorithms.components.qmlp import hgq_mlp
 
 
 def hgq_decoder(

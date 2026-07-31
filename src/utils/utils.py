@@ -1,9 +1,8 @@
 import warnings
-from importlib.util import find_spec
 from typing import Any, Callable, Dict, Optional, Tuple
 
+import torch
 from omegaconf import DictConfig
-from omegaconf import OmegaConf
 
 from src.utils import pylogger, rich_utils
 
@@ -49,26 +48,7 @@ def extras(cfg: DictConfig) -> None:
 
 
 def task_wrapper(task_func: Callable) -> Callable:
-    """Optional decorator that controls the failure behavior when executing the task function.
-
-    This wrapper can be used to:
-        - make sure loggers are closed even if the task function raises an exception (prevents multirun failure)
-        - save the exception to a `.log` file
-        - mark the run as failed with a dedicated file in the `logs/` folder (so we can find and rerun it later)
-        - etc. (adjust depending on your needs)
-
-    Example:
-    ```
-    @utils.task_wrapper
-    def train(cfg: DictConfig) -> Tuple[Dict[str, Any], Dict[str, Any]]:
-        ...
-        return metric_dict, object_dict
-    ```
-
-    :param task_func: The task function to be wrapped.
-
-    :return: The wrapped task function.
-    """
+    """Decorator that logs the traceback if the task fails, then re-raises."""
 
     def wrap(cfg: DictConfig) -> Tuple[Dict[str, Any], Dict[str, Any]]:
         # execute the task
@@ -89,14 +69,6 @@ def task_wrapper(task_func: Callable) -> Callable:
         finally:
             # display output dir path in terminal
             log.info(f"Output dir: {cfg.paths.output_dir}")
-
-            # always close wandb run (even if exception occurs so multirun won't fail)
-            if find_spec("wandb"):  # check if wandb is installed
-                import wandb
-
-                if wandb.run:
-                    log.info("Closing wandb!")
-                    wandb.finish()
 
         return metric_dict, object_dict
 

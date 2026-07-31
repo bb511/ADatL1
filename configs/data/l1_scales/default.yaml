@@ -1,6 +1,9 @@
 # @package data.l1_scales
 
-# L1 trigger scales of all the features.
+# L1 trigger scales of all the features, i.e. hardware units to GeV/rad/eta.
+# Kept for the pure-rate calculation, which needs physical units. That calculation is
+# not implemented yet, so nothing applies these today and the tensors the models see
+# stay in integer hardware units.
 
 muons:
   Et: 0.5

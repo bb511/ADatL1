@@ -36,47 +36,6 @@ class ApproximationCapacity(Metric):
     - Regularization: Enforces constraints on the hypothesis space to implicitly
         delimit a feasible clustering assignments. For instance, by limiting
         the number of observations assigned to a specific cluster.
-
-    Args:
-        beta0: Initial inverse temperature parameter for Gibbs distribution.
-        normalization_type: Method to normalize reconstruction losses to [0,1].
-            Options: "minmax", "quantile", "sigmoid" (default: "minmax")
-        normalization_params: Parameters for normalization method.
-        energy_type: Energy function for Gibbs distribution over anomaly assignments.
-            Options: "baseline", "focal", "exponential", "margin", "contrastive", "adaptive"
-        energy_params: Parameters for energy function.
-        regularization_type: Method to enforce anomaly count constraints.
-            Options: "none", "threshold_max", "threshold_mean", "threshold_zero",
-        regularization_params: Parameters for regularization method.
-        binary: Whether to use binary (anomaly/normal) or multi-class classification.
-            Currently only binary=True is supported (default: True)
-        lr: Learning rate for beta parameter optimization during metric computation (default: 0.01)
-        n_epochs: Number of optimization epochs for beta parameter learning (default: 5)
-        batch_size: Batch size for processing reconstruction loss pairs (default: 64)
-        process_group: Process group for distributed training (DDP support)
-        dist_sync_fn: Function to synchronize metric state across processes
-
-    Torchmetrics Arguments:
-        is_differentiable: False (metric computation is not differentiable)
-        higher_is_better: True (higher CAP indicates better anomaly detection)
-        full_state_update: False (uses incremental state updates)
-
-    Usage Example:
-        ```python
-        # Basic usage with default baseline energy
-        cap_metric = ApproximationCapacityMetric()
-
-        # Advanced usage with contrastive energy and constraints
-        cap_metric = ApproximationCapacityMetric(
-            energy_type="contrastive",
-            energy_params={"center": 0.75},
-            regularization_type="threshold_max",
-            regularization_params={"maxcount": 50}
-        )
-
-        # Compute CAP score
-        cap_score = cap_metric(loss_batch1, loss_batch2)
-        ```
     """
 
     is_differentiable = True
@@ -202,7 +161,6 @@ class ApproximationCapacity(Metric):
 
         best_beta = kernel.beta.clone().detach()
         best_cap = -float("inf")
-        self.epoch_logs = []
 
         for _ in tqdm(
             range(self.n_epochs), desc="CAP Optimization Progress", unit="epoch"
@@ -220,13 +178,6 @@ class ApproximationCapacity(Metric):
                     optimizer.step()
 
             current_cap = kernel.cap.item()
-            current_beta = kernel.beta.item()
-            self.epoch_logs.append(
-                {
-                    "cap": current_cap,
-                    "beta": current_beta,
-                }
-            )
 
             if current_cap > best_cap:
                 best_cap = current_cap

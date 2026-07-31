@@ -4,7 +4,6 @@ from pathlib import Path
 import numpy as np
 import torch
 from pytorch_lightning.callbacks import Callback
-from pytorch_lightning import LightningDataModule
 
 from src.evaluation.callbacks import utils
 from src.plot import overlaid_hist
@@ -50,10 +49,12 @@ class ReconstructionPlots(Callback):
     def on_test_epoch_start(self, trainer, pl_module):
         """Determine if this callback should run for current ckpt and initialise q."""
         self._active = self._should_run_for_current_ckpt(trainer)
-        self.object_feature_map = pl_module.object_feature_map
+        if not self._active:
+            return
 
-        object_feature_map = getattr(self, "object_feature_map", None)
-        if object_feature_map is None:
+        self.object_feature_map = getattr(pl_module, "object_feature_map", None)
+
+        if self.object_feature_map is None:
             raise RuntimeError(
                 "object_feature_map not found on module. "
                 "Make sure inject_object_feature_map(self) called in on_test_start. "

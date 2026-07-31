@@ -1,6 +1,4 @@
 import torch
-import numpy as np
-import math
 from torch.utils.data import IterableDataset
 
 
@@ -8,6 +6,8 @@ class L1ADDataset(IterableDataset):
     """Custom Dataset for loading anomaly detection numpy data.
 
     The data is assumed to be already loaded in memory.
+    The shuffler permutes the batch order only; batch membership is fixed at
+    construction.
     """
 
     def __init__(
@@ -35,7 +35,7 @@ class L1ADDataset(IterableDataset):
         )
 
     def __len__(self):
-        if self.max_batches is None:
+        if self.max_batches is None or self.max_batches < 0:
             return self.num_batches
         return min(self.num_batches, int(self.max_batches))
 
@@ -53,7 +53,7 @@ class L1ADDataset(IterableDataset):
         for s in starts:
             s = int(s)
 
-            if self.max_batches is not None and nb >= self.max_batches:
+            if self.max_batches is not None and self.max_batches >= 0 and nb >= self.max_batches:
                 break
 
             e = s + bs
@@ -76,6 +76,8 @@ class CIFARADDataset(IterableDataset):
     The dataset yields batches directly, in the style of L1ADDataset, but returns
     only (x, y). This is intended to work with `unpack_batch`, which supports
     2-tuples and sets mask/l1bit to None.
+    The shuffler permutes the batch order only; batch membership is fixed at
+    construction.
     """
     def __init__(
         self,
@@ -129,7 +131,11 @@ class CIFARADDataset(IterableDataset):
 
 
 class RobustADDataset(IterableDataset):
-    """Custom Dataset for loading RobustAD tensors already in memory."""
+    """Custom Dataset for loading RobustAD tensors already in memory.
+
+    The shuffler permutes the batch order only; batch membership is fixed at
+    construction.
+    """
     def __init__(
         self,
         data: torch.Tensor,

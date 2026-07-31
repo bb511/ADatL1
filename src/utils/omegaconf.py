@@ -1,15 +1,11 @@
 from omegaconf import OmegaConf
 import torch
-import re
 
 import hashlib
 
 
 def register_resolvers():
-    """
-    OmegaConf resolvers allow us to perform operations in the .yaml configuration files. Since these are
-    needed for all my scripts, I will load all of them everywhere using this function.
-    """
+    """Register the resolvers the .yaml configs call, e.g. ${short_hash:...}."""
     OmegaConf.register_new_resolver(
         "eval", eval
     )  # general: parse a str expression and evaluate it
@@ -61,14 +57,6 @@ def register_resolvers():
     OmegaConf.register_new_resolver("reverse", lambda xs: list(reversed(xs)))
     OmegaConf.register_new_resolver("smaller_decoder", smaller_decoder)
     OmegaConf.register_new_resolver("smaller_image_decoder", smaller_image_decoder)
-    OmegaConf.register_new_resolver(
-        "activation",
-        lambda name: {
-            "relu": nn.ReLU,
-            "gelu": nn.GELU,
-            "silu": nn.SiLU,
-        }[name],
-    )
 
 
 def short_hash(value: str, length: int = 12) -> str:
@@ -92,6 +80,8 @@ def smaller_decoder(nodes):
     if len(nodes) == 3:
         h1, h2, z = nodes
         return [z, h2]
+
+    raise ValueError(f"smaller_decoder expects 2 or 3 encoder nodes, got {nodes}")
 
 
 def smaller_image_decoder(nodes):

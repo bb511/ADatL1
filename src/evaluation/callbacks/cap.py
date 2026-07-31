@@ -111,8 +111,8 @@ class CAP(Callback):
         with torch.inference_mode(False):
             with torch.enable_grad():
                 # If capmetric needs gradients w.r.t. these tensors, they must require grad
-                ds1 = ds1_scores[:n].clone().requires_grad_(True)
-                ds2 = ds2_scores[:n].clone().requires_grad_(True)
+                ds1 = ds1_scores.clone().requires_grad_(True)
+                ds2 = ds2_scores.clone().requires_grad_(True)
                 self.capmetric.update(ds1, ds2)
 
     def on_test_epoch_end(self, trainer, pl_module):

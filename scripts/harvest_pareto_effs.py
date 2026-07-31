@@ -105,6 +105,9 @@ def harvest_experiment(client, exp, bkg_re, outdir):
         if EFF_KEY_RE.match(k)
     })
     sig_ds = [d for d in all_ds if not bkg_re.search(d)]
+    if not sig_ds:
+        print(f"  warn: every dataset matches the background regex "
+              f"{bkg_re.pattern!r}, mean_sig_eff will be empty")
 
     rows = []
     for run_name, run in sorted(by_name.items()):
@@ -228,7 +231,7 @@ def main():
     )
     parser.add_argument(
         "--bkg-regex",
-        default="normal|SingleNeutrino|ZB_|reference|shifted",
+        default="normal|SingleNeutrino|ZB_|reference|shifted_normal",
         help="Datasets matching this regex are excluded from mean_sig_eff.",
     )
     parser.add_argument(

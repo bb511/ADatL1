@@ -1,16 +1,12 @@
 # Log data set metadata to artifacts in mlflow.
-from pathlib import Path
-
-import optuna
-import torch
 from pytorch_lightning.callbacks import Callback
 from pytorch_lightning.loggers import MLFlowLogger, Logger
-from pytorch_lightning import Trainer, LightningModule, LightningDataModule
+from pytorch_lightning import Trainer, LightningModule
 
 from .utils import mlflow_plot_gallery
 
 from src.utils import pylogger
-from colorama import Fore, Back, Style
+from colorama import Fore
 
 log = pylogger.RankedLogger(__name__)
 

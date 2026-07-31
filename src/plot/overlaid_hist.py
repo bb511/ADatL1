@@ -7,6 +7,7 @@ import matplotlib.pyplot as plt
 import mplhep as hep
 
 
+# Currently unused; kept for interactive/notebook plotting.
 def plot_1d(
     x1: np.ndarray,
     x2: np.ndarray,
@@ -112,7 +113,4 @@ def plot_streamed(
 
 
 def check_feature_is_Et(feat_name: str):
-    is_et = "Et" in feat_name or "EtUnconstrained" in feat_name or "ETTEM" in feat_name
-    is_not_eta = not "Eta" in feat_name
-
-    return is_et and is_not_eta
+    return ("Et" in feat_name or "ETTEM" in feat_name) and "Eta" not in feat_name

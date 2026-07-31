@@ -1,12 +1,8 @@
 # Different ways of doing model checkpointing.
-from typing import Optional
-from pathlib import Path
 import os
 import yaml
-import shutil
 
 import copy
-from pytorch_lightning.callbacks import Callback
 
 from src.callbacks.checkpointing.dataset_aware import DatasetAwareModelCheckpoint
 
@@ -84,7 +80,7 @@ class LeaveKOutModelCheckpoint(DatasetAwareModelCheckpoint):
         self.save_top_k(trainer, pl_module, "left_out_ds", left_out_sum)
 
         fpath = self.dirpath / "selected_ds.yaml"
-        if not os.path.exists(fpath):
+        if os.path.exists(fpath):
             return
 
         with open(fpath, "w", encoding="utf-8") as file:

@@ -16,6 +16,7 @@ fi
 # Read requirements file line-by-line, ignoring comments and empty lines
 echo -e "\nReading requirements from ${REQUIREMENTS_FILE}...\n"
 failed_packages=()
+pip_opts=()
 
 while IFS= read -r package || [ -n "$package" ]; do
     # Skip empty lines and comments
@@ -23,10 +24,18 @@ while IFS= read -r package || [ -n "$package" ]; do
         continue
     fi
 
+    # Collect pip options (e.g. --extra-index-url) and pass them to every install
+    if [[ "$package" == -* ]]; then
+        # shellcheck disable=SC2206
+        pip_opts+=($package)
+        echo -e "Using pip option: ${package}"
+        continue
+    fi
+
     echo -e "Installing package: ${package}..."
 
     # Attempt to install the package
-    python -m pip install "$package"
+    python -m pip install "${pip_opts[@]}" "$package"
     if [ $? -eq 0 ]; then
         echo -e "${GREEN}Successfully installed: ${package}${NC}"
     else

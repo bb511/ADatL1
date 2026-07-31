@@ -239,7 +239,7 @@ class HistogramOutputCallback(Callback):
             self.buffer[dset_name].append(x)
             self.batch_count[dset_name] += 1
 
-            if self.batch_count[dset_name] >= self.warmup_batches:
+            if self.batch_count[dset_name] >= self._warmup_batches[dset_name]:
                 vals = np.concatenate(self.buffer[dset_name])
                 vals = vals[np.isfinite(vals)]
                 if vals.size == 0:

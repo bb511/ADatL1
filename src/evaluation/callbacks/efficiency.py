@@ -199,6 +199,7 @@ class AnomalyEfficiencyCallback(Callback):
 
         metric_across_ckpts = self.eff_summary[target_rate]
         max_ckpt_name = max(metric_across_ckpts, key=metric_across_ckpts.get)
+        # Scaled by 1e3 for Optuna resolution; summary.pkl stores the unscaled value.
         max_metric_value = 1e3 * metric_across_ckpts[max_ckpt_name]
         return max_ckpt_name, max_metric_value
 

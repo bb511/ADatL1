@@ -1,5 +1,6 @@
 # @package evaluation.callbacks.main
 
+# Reference only: not selected by any defaults list.
 _target_: src.evaluation.callbacks.consistency.PosteriorConsistency
 output_name: 'ascore/full'
 dataset_1: ???

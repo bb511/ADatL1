@@ -31,9 +31,6 @@ RUN python -m venv /opt/venv \
 WORKDIR /deps
 COPY pyproject.toml poetry.lock* /deps/
 
-# If your lockfile expects CUDA wheels from the PyTorch index, uncomment and set appropriately:
-# ENV PIP_EXTRA_INDEX_URL=https://download.pytorch.org/whl/cu121
-
 RUN --mount=type=cache,target=/root/.cache/pip \
     --mount=type=cache,target=/root/.cache/pypoetry \
     poetry install --no-ansi --no-root

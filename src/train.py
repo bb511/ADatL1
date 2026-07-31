@@ -10,11 +10,10 @@ os.environ["KERAS_BACKEND"] = "torch"
 import hydra
 import pytorch_lightning as pl
 
-import torch
 from pytorch_lightning import Callback, LightningDataModule, LightningModule, Trainer
 from pytorch_lightning.loggers import Logger
 from omegaconf import OmegaConf, DictConfig
-from colorama import Fore, Back, Style
+from colorama import Fore, Back
 from math import inf
 from hydra.core.hydra_config import HydraConfig
 
@@ -29,7 +28,6 @@ register_resolvers()
 
 from src.utils import RankedLogger
 from src.utils import extras
-from src.utils import get_metric_value
 from src.utils import instantiate_callbacks
 from src.utils import instantiate_loggers
 from src.utils import log_hyperparameters
@@ -104,21 +102,21 @@ def train(cfg: DictConfig) -> Tuple[Dict[str, Any], Dict[str, Any]]:
     evaluator = _get_evaluator(cfg, datamodule, logger)
     run_ckpts = Path(cfg.paths.checkpoints_dir) / cfg.experiment_name / cfg.run_name
 
-    log.info(Back.MAGENTA + 8 * "-" + "STARTING RUN VALIDATION" + 8 * "-")
-    datamodule.setup("validate")
-    val_loader = datamodule.val_dataloader()
-    evaluator.evaluate_run(
-        run_ckpts, algorithm, val_loader, "val", set_optimized_metric=True
-    )
-    object_dict.update({"evaluator": evaluator})
-
-    # Evaluate once more on a held out test set for final performance.
-    if cfg.get("test"):
-        log.info(Back.MAGENTA + 8 * "-" + "STARTING RUN TESTING" + 8 * "-")
-        datamodule.setup("test")
-        test_loader = datamodule.test_dataloader()
-        evaluator.evaluate_run(run_ckpts, algorithm, test_loader, "test")
+    if evaluator is not None:
+        log.info(Back.MAGENTA + 8 * "-" + "STARTING RUN VALIDATION" + 8 * "-")
+        datamodule.setup("validate")
+        val_loader = datamodule.val_dataloader()
+        evaluator.evaluate_run(
+            run_ckpts, algorithm, val_loader, "val", set_optimized_metric=True
+        )
         object_dict.update({"evaluator": evaluator})
+
+        # Evaluate once more on a held out test set for final performance.
+        if cfg.get("test"):
+            log.info(Back.MAGENTA + 8 * "-" + "STARTING RUN TESTING" + 8 * "-")
+            datamodule.setup("test")
+            test_loader = datamodule.test_dataloader()
+            evaluator.evaluate_run(run_ckpts, algorithm, test_loader, "test")
 
     metric_dict = {**train_metrics}
     return metric_dict, object_dict
@@ -157,7 +155,7 @@ def _get_evaluator(cfg: DictConfig, datamodule, logger):
 
 
 def _get_directions(cfg):
-    # 1) Prefer your own config (always available)
+    # 1) Our own config: present in any composable run, so 2) below is a dead fallback.
     if "optimized_metric_config" in cfg:
         # multi-objective if sec_metric exists
         main_dir = cfg.optimized_metric_config.main_metric.direction
@@ -192,9 +190,6 @@ def main(cfg: DictConfig) -> Optional[float]:
     metric_dict, object_dict = train(cfg)
 
     # safely retrieve metric value for hydra-based hyperparameter optimization
-    # metric_value = get_metric_value(
-    # metric_dict=metric_dict, metric_name=cfg.get("optimized_metric")
-    # )
     evaluator = object_dict.get("evaluator", None)
     metric_value = evaluator.optimized_metric if evaluator else None
 
@@ -203,9 +198,8 @@ def main(cfg: DictConfig) -> Optional[float]:
     del metric_dict
     gc.collect()
 
-    def _worst_for(direction: str) -> float:
-        return float("inf") if direction == "minimize" else -float("inf")
-
+    # A missing metric reports the worst value per direction, so optuna records the
+    # trial instead of aborting; the order must match `hydra.sweeper.direction`.
     if metric_value is None or (
         isinstance(metric_value, (list, tuple)) and any(v is None for v in metric_value)
     ):

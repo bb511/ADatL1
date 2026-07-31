@@ -95,10 +95,6 @@ class DTE(ADLightningModule):
         """Move the optional frozen feature extractor to the training device."""
         self.features.to(self.device)
 
-    @property
-    def target_fpr(self) -> float:
-        return self.compute_target_fpr()
-
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         x = self.features(x)
         logits = self.predictor(x)
@@ -195,17 +191,8 @@ class DTE(ADLightningModule):
             if ascore.ndim != 1:
                 raise ValueError(f"Expected per-event ascores, got {tuple(ascore.shape)}.")
 
-            n = ascore.numel()
-            k = max(1, int(self.target_fpr * n))
-            if k < 10:
-                k_eff = min(max(10, k), n)
-                operational_ascore = torch.topk(ascore, k_eff).values.mean().item()
-            else:
-                operational_ascore = torch.quantile(ascore, 1.0 - self.target_fpr).item()
-            q50, q99 = torch.quantile(
-                ascore,
-                torch.tensor([0.5, 0.99], device=ascore.device),
-            ).tolist()
+            operational_ascore = self.compute_operational_ascore(ascore)
+            q50, q99 = self.compute_score_quantiles(ascore)
             mult_corr = self._multiplicity_correlation(ascore, mask)
         if was_training:
             self.predictor.train()

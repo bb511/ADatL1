@@ -1,5 +1,6 @@
 # @package callbacks.main
 
+# Reference only: not selected by any defaults list.
 _target_: src.callbacks.consistency.PosteriorConsistencyCallback
 output_name: 'ascore/full'
 dataset_1: ???

@@ -8,6 +8,12 @@ from omegaconf import DictConfig, open_dict
 from src.train import train
 from tests.helpers.run_if import RunIf
 
+# These run the real training loop, so they need the L1AD parquet data on disk.
+pytestmark = pytest.mark.skipif(
+    "ADL1T_RAW_DATA_DIR" not in os.environ,
+    reason="Set ADL1T_RAW_DATA_DIR to the parquet data to run the training tests.",
+)
+
 
 def test_train_fast_dev_run(cfg_train: DictConfig) -> None:
     """Run for 1 train, val and test step.

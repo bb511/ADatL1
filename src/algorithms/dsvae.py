@@ -20,7 +20,8 @@ class DeepSetsVAE(ADLightningModule):
     :param encoder: DeepSets variational encoder nn module.
     :param decoder: Decoder nn module.
     :param kl_warmup_frac: Fraction of total steps used to warm up KL scaling.
-    :param features: Optional feature module applied before the DeepSets split.
+    :param features: Optional feature module applied to each object type after the
+        DeepSets split.
     :param mask: Whether to mask padded input features in reconstruction loss.
     :param ckpt: Optional checkpoint path to resume training from.
     :param target_rate: Target background rate or FPR.
@@ -73,10 +74,6 @@ class DeepSetsVAE(ADLightningModule):
             # warmup value does not depend on total_steps.
             self._setup_kl_annealing(self.kl_warmup_frac, 1)
 
-    @property
-    def target_fpr(self) -> float:
-        return self.compute_target_fpr()
-
     def forward(
         self,
         x_by_type: dict[str, torch.Tensor],
@@ -120,21 +117,9 @@ class DeepSetsVAE(ADLightningModule):
         loss = self._add_hgq_loss(loss)
 
         with torch.no_grad():
-            n = ascore.numel()
-            k = max(1, int(self.target_fpr * n))
+            operational_ascore = self.compute_operational_ascore(ascore)
 
-            # If the operational tail is too small, use a top-k average for stability.
-            if k < 10:
-                k_eff = min(max(10, k), n)
-                operational_ascore = torch.topk(ascore, k_eff).values.mean().item()
-            else:
-                operational_ascore = torch.quantile(
-                    ascore, 1.0 - self.target_fpr
-                ).item()
-
-            q50, q99 = torch.quantile(
-                ascore, torch.tensor([0.5, 0.99], device=ascore.device)
-            ).tolist()
+            q50, q99 = self.compute_score_quantiles(ascore)
 
             z_mean_squared = torch.square(z_mean).sum(dim=1)
             z_mean_squared_mean = z_mean_squared.mean().item()
@@ -181,56 +166,6 @@ class DeepSetsVAE(ADLightningModule):
             "z_mean_squared": outdict.get("z_mean_squared"),
             "kl_scale": outdict.get("kl_scale"),
         }
-
-    def _split_by_type_from_flat(
-        self,
-        x_flat: torch.Tensor,
-        m_flat: torch.Tensor | None,
-    ) -> tuple[dict[str, torch.Tensor], dict[str, torch.Tensor]]:
-        """Build per-type tensors from flattened inputs using object_feature_map."""
-        object_feature_map = getattr(self, "object_feature_map", None)
-        if object_feature_map is None:
-            raise RuntimeError("object_feature_map not found on module.")
-
-        if m_flat is None:
-            m_flat = torch.ones_like(x_flat, dtype=x_flat.dtype, device=x_flat.device)
-
-        x_by_type = {}
-        m_by_type = {}
-
-        for obj_name, feature_map in object_feature_map.items():
-            feat_names = list(feature_map.keys())
-            feat_indices = [feature_map[feat_name] for feat_name in feat_names]
-
-            n_obj = len(feat_indices[0])
-            n_feat = len(feat_indices)
-
-            if not all(len(idxs) == n_obj for idxs in feat_indices):
-                raise ValueError(
-                    f"Feature map for '{obj_name}' has inconsistent object counts."
-                )
-
-            obj_features = []
-            obj_masks = []
-
-            for obj_idx in range(n_obj):
-                this_obj_feat_idx = [
-                    feat_indices[f_idx][obj_idx] for f_idx in range(n_feat)
-                ]
-                idx_tensor = torch.tensor(
-                    this_obj_feat_idx, device=x_flat.device, dtype=torch.long
-                )
-
-                x_obj = torch.index_select(x_flat, dim=1, index=idx_tensor)
-                m_obj = torch.index_select(m_flat, dim=1, index=idx_tensor)
-
-                obj_features.append(x_obj)
-                obj_masks.append(m_obj.all(dim=1))
-
-            x_by_type[obj_name] = torch.stack(obj_features, dim=1)
-            m_by_type[obj_name] = torch.stack(obj_masks, dim=1)
-
-        return x_by_type, m_by_type
 
     def _setup_kl_annealing(self, kl_warmup_frac: float, total_steps: int):
         """Set up KL annealing if supported by the loss."""

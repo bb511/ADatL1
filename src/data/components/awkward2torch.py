@@ -10,9 +10,7 @@ import torch
 import numpy as np
 import awkward as ak
 import pickle
-from colorama import Fore, Back, Style
 
-from .normalization import L1DataNormalizer
 from src.utils import pylogger
 
 log = pylogger.RankedLogger(__name__)
@@ -27,7 +25,9 @@ class L1DataAwkward2Torch:
     def __post_init__(self):
         self.object_feature_map = None
 
-    def load_folder(self, folder_path: Path) -> torch.Tensor:
+    def load_folder(
+        self, folder_path: Path
+    ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
         """Loads folder of parquet files containing awkward arrays to a numpy array.
 
         To this end, the data is made uniform, i.e., each object contains the same
@@ -62,6 +62,7 @@ class L1DataAwkward2Torch:
         if not l1bit_path.is_file():
             l1bit = torch.ones(data.size(0), dtype=torch.bool, device=data.device)
             log.warn(f"L1bit not found in {folder_path}.")
+            self._cache_l1bit(l1bit)
             return data, mask, l1bit
 
         l1bit = ak.from_parquet(l1bit_path)
@@ -87,16 +88,13 @@ class L1DataAwkward2Torch:
             return True
         return False
 
-    def _process_folder(self, folder_path: Path) -> tuple[str, np.ndarray, list[str]]:
+    def _process_folder(
+        self, folder_path: Path
+    ) -> list[tuple[str, list[str], np.ndarray, np.ndarray]]:
         """Process an entire folder of parquet files.
 
         The given folder path is expected to contain multiple parquet files, where each
         parquet file stores data corresponding to an object, e.g., egammas.
-
-        Returns a tuple containing at each entry:
-            - the name of the processed object
-            - a list of the features corresponding to that object
-            - the processed object data in a numpy array
         """
         workers = min(self.workers, (os.cpu_count() or 4))
         obj_file_paths = self._get_parquet_fpaths(folder_path)
@@ -105,7 +103,9 @@ class L1DataAwkward2Torch:
 
         return processed_folder
 
-    def _process_object(self, data_path: Path) -> np.ndarray:
+    def _process_object(
+        self, data_path: Path
+    ) -> tuple[str, list[str], np.ndarray, np.ndarray]:
         """Process one parquet file corresponding to an object from the data set."""
         obj_name = data_path.stem
         nconst = self.nconst.get(obj_name)
@@ -129,7 +129,7 @@ class L1DataAwkward2Torch:
 
     def _pad(
         self, data: ak.Array, nconst: int, padder: Union[float, ak.Record]
-    ) -> tuple[ak.Array, int]:
+    ) -> tuple[ak.Array, ak.Array, int]:
         """Pads the jagged arrays such that they are rectangular for each object."""
         if nconst is None:
             nconst = max(int(ak.max(ak.num(data[f]), initial=0)) for f in data.fields)

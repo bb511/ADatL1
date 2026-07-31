@@ -6,7 +6,7 @@ import re
 
 import rootutils
 
-ROOTDIR = rootutils.setup_root(__file__, indicator=".project-root", pythonpath=True)
+rootutils.setup_root(__file__, indicator=".project-root", pythonpath=True)
 
 _FILENAME_RE = re.compile(
     r"^ds=(?P<dataset>.+?)__value=(?P<metric_value>.+?)__epoch=(?P<epoch>\d+)\.ckpt$"
@@ -87,7 +87,7 @@ def _iterate_checkpoints(
 ) -> Iterator[Dict[str, Union[str, Path]]]:
     """
     Internal helper used by find_scan_checkpoints.
-    If no filters are provided, behavior is identical to calling _iter_ckpt_files(dirpath).
+    If no filters are provided, behavior is identical to calling _find_ckpt_files(dirpath).
     """
     exclude_prefix = exclude_prefix or []
     list_prefix = include_prefix or list(PREFIXES)
@@ -124,12 +124,11 @@ def find_checkpoints(
     :param dirpath: Base directory containing experiment subdirectories.
     :param experiment_name: Name given to the experiment.
     :param run_name: Name given to the run.
-    :param filter_groups: Optional callable to filter <prefix> subdirectories.
-    :param filter_checkpoint: Optional callable to filter checkpoint files (by absolute path string).
     :param by_combination: Instead of retrieving just the set of checkpoints, retrieve the set of hparams.
 
     # Filters:
     :param include_prefix: List prefixes to include. If None, all PREFIXES will be included.
+    :param exclude_prefix: List of prefixes to exclude. If None, none will be excluded.
     :param include_ds: List of dset_key to include. If None, all will be included.
     :param exclude_ds: List of dset_key to exclude. If None, all will be included.
     """

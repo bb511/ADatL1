@@ -43,9 +43,6 @@ class CIFAR10DataModule(LightningDataModule):
     Standard image normalization is computed from the training split of the normal
     classes only, then applied to all splits.
 
-    :param data_dir: Path where CIFAR-10 will be downloaded/stored.
-    :param normal_classes: List of CIFAR-10 class indices to be treated as normal.
-    :param signal_classes: List of class indices treated as anomalies.
     :param background_classes: Optional list of class indices treated as auxiliary
         background datasets.
     :param batch_size: Global batch size. It is divided across devices if using DDP.
@@ -55,10 +52,6 @@ class CIFAR10DataModule(LightningDataModule):
     :param reference_fraction: Fraction of normal validation/test data reserved for the
         auxiliary ``reference_normal`` split. The remainder becomes the main
         ``normal`` split.
-    :param seed: Random seed used for splitting and shuffling.
-    :param num_workers: Number of DataLoader workers.
-    :param normalize: Whether to apply standard normalization.
-    :param stats_file: Filename used to cache normalization statistics.
     """
 
     def __init__(
@@ -81,7 +74,10 @@ class CIFAR10DataModule(LightningDataModule):
 
         self._main: dict[str, SplitTensors] = {}
         self._aux: dict[str, dict[str, SplitTensors]] = {"valid": {}, "test": {}}
-        self.shuffler = torch.Generator().manual_seed(seed)
+        # seed=None means 'do not seed', matching train.py's `if cfg.get("seed")`.
+        self.shuffler = torch.Generator()
+        if seed is not None:
+            self.shuffler.manual_seed(seed)
         self.max_val_batches = max_val_batches
 
         self.mean: torch.Tensor | None = None
@@ -233,6 +229,15 @@ class CIFAR10DataModule(LightningDataModule):
         log.info(f"CIFAR10 normalization mean: {self.mean.tolist()}")
         log.info(f"CIFAR10 normalization std: {self.std.tolist()}")
 
+    def _split_generator(self) -> torch.Generator:
+        """Fresh generator for the splits, deliberately not self.shuffler.
+
+        Keeps the partition identical across repeated setup() calls; self.shuffler is
+        advanced once per epoch by the training dataloader.
+        """
+        seed = self.hparams.seed if self.hparams.seed is not None else 42
+        return torch.Generator().manual_seed(seed)
+
     def _setup_fit_validate(self, train_ds: CIFAR10) -> None:
         """Prepare train and validation splits from the CIFAR train set."""
         normal_indices = self._get_class_indices(
@@ -250,7 +255,7 @@ class CIFAR10DataModule(LightningDataModule):
         train_subset, valid_subset = random_split(
             full_normal,
             [n_train, n_valid],
-            generator=torch.Generator().manual_seed(self.hparams.seed),
+            generator=self._split_generator(),
         )
 
         if "train" not in self._main:
@@ -305,7 +310,7 @@ class CIFAR10DataModule(LightningDataModule):
         n_ref = max(1, int(round(self.hparams.reference_fraction * n)))
         n_ref = min(n_ref, n - 1)
 
-        gen = torch.Generator().manual_seed(self.hparams.seed)
+        gen = self._split_generator()
         perm = torch.randperm(n, generator=gen)
 
         ref_idx = perm[:n_ref]

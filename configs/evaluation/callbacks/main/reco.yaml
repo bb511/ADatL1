@@ -1,9 +1,9 @@
 # @package evaluation.callbacks.main
 
+# Reference only: not selected by any defaults list.
 _target_: src.evaluation.callbacks.reco.ReconstructionPlots
 output_name: reconstructed_data
 warmup_batches: 0.2
-datamodule: true
 ckpts:
   last: true
 datasets: ['main_test']

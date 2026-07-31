@@ -1,5 +1,7 @@
 # @package evaluation.callbacks.main
 
+# Reference only: not selected by any defaults list.
+# References src.evaluation.callbacks.pu.BkgRatePileup, which is not implemented.
 # The metric names need be specified like they are given by the model.
 _target_: src.evaluation.callbacks.pu.BkgRatePileup
 output_name: "loss/total/full"

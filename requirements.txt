@@ -1,6 +1,6 @@
 --extra-index-url https://download.pytorch.org/whl/cu128
 
-adl1t-datamaker @ git+https://github.com/cdfpzmvpvg/info_ad_data.git@15545e5b615805f20386413bb84d47f004c30da9 ; python_version >= "3.10"
+adl1t-datamaker @ git+https://github.com/bb511/adl1t_datamaker.git@e8debb2f10bbc1dcf1813ce5b20decffc9950514 ; python_version >= "3.10"
 aiohappyeyeballs==2.6.1 ; python_version >= "3.10"
 aiohttp==3.13.3 ; python_version >= "3.10"
 aiosignal==1.4.0 ; python_version >= "3.10"

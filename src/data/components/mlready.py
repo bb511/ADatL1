@@ -46,6 +46,9 @@ class L1DataMLReady:
         self.processed_datapath = Path(self.processed_datapath)
         self.mlready_dir = Path(self.cache_root_dir) / "mlready"
         self.cache_folder = self.mlready_dir / self.name
+        # The split does not depend on the normalizer, so it is frozen one level above it
+        # and shared by every normalizer variant.
+        self.splits_dir = self.cache_folder / "splits"
         self.cache_folder /= normalizer.name
         self.flag = flag
 
@@ -58,6 +61,33 @@ class L1DataMLReady:
 
         self._prepare_maindata()
         self._prepare_auxdata()
+
+    def _frozen_split(self, name: str, drawn: tuple) -> tuple:
+        """Return the split stored under splits/<name>.npz, writing it on first use.
+
+        The caller always draws from self.rng before calling, even when a frozen split
+        exists, so the random stream advances identically whether or not the cache is
+        populated. Without that, deleting one .npz would silently change every split
+        drawn after it.
+        """
+        self.splits_dir.mkdir(parents=True, exist_ok=True)
+        cache_file = self.splits_dir / f"{name}.npz"
+
+        if cache_file.is_file():
+            with np.load(cache_file) as frozen:
+                loaded = tuple(frozen[f"i{k}"] for k in ("train", "valid", "test")[-len(drawn):])
+            if sum(len(i) for i in loaded) != sum(len(i) for i in drawn):
+                raise ValueError(
+                    f"Frozen split {cache_file} covers {sum(len(i) for i in loaded)} events "
+                    f"but the processed data has {sum(len(i) for i in drawn)}."
+                )
+            return loaded
+
+        keys = ("train", "valid", "test")[-len(drawn):]
+        np.savez(cache_file, **{f"i{k}": i for k, i in zip(keys, drawn)})
+        log.info(Fore.GREEN + f"Froze the {name} split at: {cache_file}")
+
+        return drawn
 
     def _unify_schema(self):
         """Each object should have the same features for easier casting to numpy."""
@@ -133,7 +163,7 @@ class L1DataMLReady:
         ivalid = permutation[ntrain:nvalid]
         itest = permutation[nvalid:]
 
-        return itrain, ivalid, itest
+        return self._frozen_split("zerobias", (itrain, ivalid, itest))
 
     def _cache_train_data(self, obj_data, obj_name: str, idxs: list):
         """Get the training data split, normalize it, and then cache it."""
@@ -290,7 +320,7 @@ class L1DataMLReady:
         ivalid = permutation[:nvalid]
         itest = permutation[nvalid:]
 
-        return ivalid, itest
+        return self._frozen_split(f"aux__{dataset_path.stem}", (ivalid, itest))
 
     def _cache_aux_valid(self, obj_data, cache_dir: Path, obj_name: str, idxs: list):
         """Normalize and cache the validation split of an aux dataset."""

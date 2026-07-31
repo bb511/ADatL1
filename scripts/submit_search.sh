@@ -135,6 +135,18 @@ sweep_ts=$(date +%Y-%m-%d_%H-%M-%S)
 
 command -v sbatch >/dev/null 2>&1 || echo "warning: sbatch not on PATH - are you on clariden?" >&2
 
+# Preflight: the drivers are nohup'd, so an unimportable dependency shows up only
+# as a 141-byte log per driver and nothing ever reaches slurm. Forgetting to
+# activate the env once cost 24 silent failures, so check it here instead.
+# Override with PYTHON=/path/to/env/bin/python3 to skip activation entirely.
+PYTHON=${PYTHON:-python3}
+if ! "$PYTHON" -c 'import hydra, optuna' >/dev/null 2>&1; then
+    echo "error: '$PYTHON' cannot import hydra/optuna - the adl1t env is not active." >&2
+    echo "       conda activate /users/podagiu/.conda/envs/adl1t" >&2
+    echo "       (or re-run with PYTHON=/users/podagiu/.conda/envs/adl1t/bin/python3)" >&2
+    exit 1
+fi
+
 # Create each sqlite study database, serially, before any driver starts.
 # Drivers launched together against a not-yet-existing file all run optuna's
 # alembic bootstrap at once and lose the race -- observed as
@@ -155,7 +167,7 @@ if [ "$dry" -eq 0 ]; then
                 if [ ! -f "$path" ]; then
                     mkdir -p "$(dirname "$path")"
                     echo "initialising study database: $path"
-                    python3 -c 'import optuna,sys; optuna.storages.RDBStorage(sys.argv[1])' "$url"
+                    "$PYTHON" -c 'import optuna,sys; optuna.storages.RDBStorage(sys.argv[1])' "$url"
                 fi ;;
         esac
     done
@@ -196,7 +208,7 @@ while IFS= read -r cmd; do
     # collides when several drivers start together, merging their outputs (and
     # the clariden launcher nests submitit_folder under hydra.sweep.dir).
     sweep=" hydra.sweep.dir=logs/train/multiruns/${sweep_ts}_${stem}_j$i"
-    full="python3 src/train.py$cmd$sweep${extra:+ $extra}"
+    full="$PYTHON src/train.py$cmd$sweep${extra:+ $extra}"
 
     case "$full" in
         *"/path/to/"*)

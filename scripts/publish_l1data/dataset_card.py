@@ -8,17 +8,21 @@ import json
 import sys
 from pathlib import Path
 
-LICENCE = """Creative Commons Attribution 4.0 International (CC BY 4.0)
+LICENCE = """CC0 1.0 Universal Public Domain Dedication
 
-You are free to share and adapt this material for any purpose, including
-commercially, provided you give appropriate credit, link to the licence, and
-indicate if changes were made.
+The person who associated a work with this deed has dedicated the work to the
+public domain by waiving all rights to the work worldwide under copyright law,
+including all related and neighbouring rights, to the extent allowed by law.
 
-Licence deed:  https://creativecommons.org/licenses/by/4.0/
-Legal code:    https://creativecommons.org/licenses/by/4.0/legalcode
+You can copy, modify, distribute and use the work, even commercially, without
+asking permission.
 
-Attribution details will be completed on publication of the accompanying data
-descriptor. Until then, cite this record by its DOI.
+Deed:        https://creativecommons.org/publicdomain/zero/1.0/
+Legal code:  https://creativecommons.org/publicdomain/zero/1.0/legalcode
+
+Attribution is not legally required. It is still requested as a scholarly
+courtesy: cite this record by its DOI, and the accompanying data descriptor once
+it is published.
 """
 
 CARD = """# L1 trigger anomaly-detection dataset
@@ -42,6 +46,11 @@ adl1t-l1ad-v1/
   metadata/
   README.md  LICENSE
 ```
+
+The record holds that tree as three archives -- `train.tar`, `valid.tar`, `test.tar` --
+each unpacking into the layout above, so you can take only the split you need. Zero bias
+is the only source of training data; the simulated samples appear in `valid.tar` and
+`test.tar`. Everything else in the record is loose and readable without downloading.
 
 One directory per object collection, each holding sharded parquet. All objects of a
 split have the same number of rows in the same order, so row *i* of `jets/` and row *i*
@@ -81,6 +90,15 @@ configuration.
 | egammas | `egIEt`, `egIEta`, `egIPhi` | `Et`, `eta`, `phi` |
 | taus | `tauIEt`, `tauIEta`, `tauIPhi` | `Et`, `eta`, `phi` |
 
+Only those three per object are renamed. Everything else keeps its ntuple name --
+`muonQual`, `muonChg`, `muonIEtaAtVtx`, `egIso`, `jetHwQual`, `jetRawEt`, `tauIso` and
+so on -- so a mixture of renamed and original names is expected and intended.
+
+Two encoding notes. Every column is a variable-length list per event, including the
+single-valued ones: `run`, `lumi`, `event`, `bx`, `orbit`, `time`, `nPV_True` and the
+`ET`/`HT`/`MET`/`MHT`/`FET`/`FHT` sums arrive as length-1 lists. And `cica` is absent
+from some samples, so check before reading it.
+
 **2. Saturation cuts.** These are hardware counter limits, not physics selections.
 
 | kind | cut | effect |
@@ -104,9 +122,10 @@ marks the real constituents.
 `adl1t_l1ad.py` in this record does all four:
 
 ```python
+from glob import glob
 import adl1t_l1ad as l1
 
-objects = l1.read_split("adl1t-l1ad-v1/zerobias/{zb_first}/train")
+objects = l1.read_splits(glob("adl1t-l1ad-v1/zerobias/*/train"))   # both runs
 norms = l1.load_norm_params("metadata/norm_params_robust.json")
 x, mask = l1.to_model_tensor(objects, norms)       # (N, 39, 3)
 ```
@@ -128,6 +147,12 @@ after applying the event cut reproduces its input row for row. `event_info` carr
 extra columns: `split`, so a file separated from its directory is still self-describing,
 and `order`, the position in that ordering (`-1` for events the study's cut removed).
 
+**A split can span several directories.** The two zero-bias runs were permuted together,
+so their training rows interleave: `order` counts across the whole split, not within one
+run. To rebuild the study's exact order, concatenate the directories and sort by `order`
+-- `l1.read_splits([...])` does this. Concatenating them run after run gives the right
+rows in the wrong order.
+
 ## Notes for comparison
 
 If you are comparing against the accompanying study: it evaluated each simulated sample
@@ -142,7 +167,8 @@ Values are the Level-1 trigger's own reconstructed objects, not offline reconstr
 
 ## Licence
 
-CC BY 4.0. See `LICENSE`.
+CC0 1.0 -- public domain dedication, no restrictions on reuse. See `LICENSE`. Citation
+by DOI is requested as a courtesy, not required.
 """
 
 

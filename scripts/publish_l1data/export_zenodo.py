@@ -18,6 +18,8 @@ import pyarrow.parquet as pq
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import anonymise
 
+# Target size of a written shard, measured on disk. Parquet is snappy-compressed,
+# so this is several times smaller than the in-memory table it came from.
 SHARD_BYTES = 500 * 1024**2
 TAKE_CHUNK = 1_000_000
 
@@ -73,7 +75,7 @@ def write_split(
     """Take rows from a consolidated object file and write them as sharded parquet."""
     out_dir.mkdir(parents=True, exist_ok=True)
     dataset = pds.dataset(source, format="parquet")
-    writer, shard_idx, in_shard, written = None, 0, 0, 0
+    writer, shard_idx, shard_path, written = None, 0, None, 0
 
     for start in range(0, len(rows), TAKE_CHUNK):
         chunk = rows[start : start + TAKE_CHUNK]
@@ -86,15 +88,13 @@ def write_split(
             # are flat, so dropping it loses nothing.
             table = table.replace_schema_metadata(None)
         if writer is None:
-            writer = pq.ParquetWriter(
-                out_dir / f"{shard_idx:05d}.parquet", table.schema, compression="snappy"
-            )
+            shard_path = out_dir / f"{shard_idx:05d}.parquet"
+            writer = pq.ParquetWriter(shard_path, table.schema, compression="snappy")
         writer.write_table(table)
-        in_shard += table.nbytes
         written += table.num_rows
-        if in_shard >= SHARD_BYTES:
+        if shard_path.stat().st_size >= SHARD_BYTES:
             writer.close()
-            shard_idx, in_shard, writer = shard_idx + 1, 0, None
+            shard_idx, writer = shard_idx + 1, None
 
     if writer is not None:
         writer.close()
@@ -139,6 +139,11 @@ def main() -> int:
     parser.add_argument("--work", type=Path, help="consolidation scratch (default <out>/_work)")
     parser.add_argument("--only", nargs="*", help="restrict to these dataset names")
     parser.add_argument("--tar", action="store_true", help="also pack the finished tree")
+    parser.add_argument(
+        "--pack-only",
+        action="store_true",
+        help="skip the export and just pack an already-written tree",
+    )
     args = parser.parse_args()
 
     work = args.work or args.out / "_work"
@@ -148,6 +153,10 @@ def main() -> int:
 
     index = json.loads((args.out / "_splitmap" / "index.json").read_text())
     tree = args.out / "adl1t-l1ad-v1"
+    if args.pack_only:
+        _pack(tree, args.out / "payload")
+        return 0
+
     for split_map in maps:
         category, name = split_map.stem.split("__", 1)
         if args.only and name not in args.only:
@@ -158,20 +167,56 @@ def main() -> int:
 
     anonymise.prune_stray(tree)
     if args.tar:
-        _pack(tree, args.out / "tarballs")
+        _pack(tree, args.out / "payload")
 
     return 0
 
 
-def _pack(tree: Path, tar_dir: Path) -> None:
-    """One anonymised tarball per top-level dataset directory."""
-    tar_dir.mkdir(parents=True, exist_ok=True)
+def _pack(tree: Path, payload: Path) -> None:
+    """Assemble exactly what gets uploaded, in one directory.
+
+    Zenodo allows 100 files per record, so the ~700 parquet are packed one tarball per
+    dataset and the bulky split indices into a single archive. The small metadata files
+    and the card stay loose, so they can be read from the record page without
+    downloading anything.
+    """
+    payload.mkdir(parents=True, exist_ok=True)
+
+    # One archive per split, so a user who only wants the training data downloads only
+    # that. Each spans every dataset, since the simulated samples contribute to valid
+    # and test while zero bias is the only source of train.
+    members = {}
     for category in sorted(p for p in tree.iterdir() if p.is_dir()):
         for dataset in sorted(p for p in category.iterdir() if p.is_dir()):
-            member = str(dataset.relative_to(tree))
-            out_path = tar_dir / f"{member.replace('/', '__')}.tar"
-            subprocess.run(anonymise.tar_cmd(tree, member, out_path), check=True)
-            print(f"  packed {out_path.name}")
+            for split_dir in sorted(p for p in dataset.iterdir() if p.is_dir()):
+                members.setdefault(split_dir.name, []).append(
+                    str(split_dir.relative_to(tree))
+                )
+
+    for split in ("train", "valid", "test"):
+        if split not in members:
+            continue
+        out_path = payload / f"{split}.tar"
+        subprocess.run(anonymise.tar_cmd(tree, sorted(members[split]), out_path), check=True)
+        size = out_path.stat().st_size / 1024**3
+        print(f"  packed {out_path.name} ({len(members[split])} datasets, {size:.1f} GB)")
+
+    metadata = tree.parent / "metadata"
+    if (metadata / "split_indices").is_dir():
+        subprocess.run(
+            anonymise.tar_cmd(metadata, "split_indices", payload / "split_indices.tar"),
+            check=True,
+        )
+        print("  packed split_indices.tar")
+
+    for loose in sorted(metadata.glob("*")):
+        if loose.is_file():
+            (payload / loose.name).write_bytes(loose.read_bytes())
+    for card in ("README.md", "LICENSE"):
+        if (tree / card).is_file():
+            (payload / card).write_bytes((tree / card).read_bytes())
+
+    print(f"  payload is {len(list(payload.iterdir()))} files")
 
 
 if __name__ == "__main__":

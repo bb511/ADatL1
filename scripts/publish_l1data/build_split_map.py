@@ -58,10 +58,10 @@ def _assign(mask: np.ndarray, per_split_local: dict) -> tuple:
     split_of = np.empty(n_raw, dtype="U5")
     order = np.full(n_raw, -1, dtype=np.int64)
 
-    for name, local in per_split_local.items():
+    for name, (local, positions) in per_split_local.items():
         raw_rows = keep[local]
         split_of[raw_rows] = name
-        order[raw_rows] = np.arange(len(local), dtype=np.int64)
+        order[raw_rows] = positions
 
     # nearest preceding kept row; rows before the first kept one borrow from it
     last_kept = np.where(mask, np.arange(n_raw), -1)
@@ -112,10 +112,14 @@ def build(raw_data_dir: Path, out_dir: Path) -> dict:
             processed_dir = processed_root / category / name
             mask = _keep_mask(processed_dir)
             n_proc = int(mask.sum())
-            local = {
-                key: idx[(idx >= offset) & (idx < offset + n_proc)] - offset
-                for key, idx in frozen[name if category != "zerobias" else "shared"].items()
-            }
+            # `order` has to be the position across the WHOLE split, not within this
+            # dataset: the two zero-bias runs are permuted together, so their training
+            # rows interleave. Numbering each run from zero would make the two files
+            # impossible to recombine in the pipeline's order.
+            local = {}
+            for key, idx in frozen[name if category != "zerobias" else "shared"].items():
+                selected = (idx >= offset) & (idx < offset + n_proc)
+                local[key] = (idx[selected] - offset, np.flatnonzero(selected))
             split_of, order = _assign(mask, local)
             np.savez(map_dir / f"{category}__{name}.npz", split=split_of, order=order)
             raw_dirs[name] = {"category": category, "raw_dir": str(raw_dir)}
@@ -141,6 +145,7 @@ def build(raw_data_dir: Path, out_dir: Path) -> dict:
     (out_dir / "metadata").mkdir(parents=True, exist_ok=True)
     _export_norm_params(Path(mlready.cache_root_dir) / "mlready" / mlready.name, out_dir)
     _export_scales(cfg, out_dir)
+    _export_split_indices(splits_dir, out_dir)
     (out_dir / "metadata" / "split_summary.json").write_text(
         json.dumps(summary, indent=2, sort_keys=True) + "\n"
     )
@@ -177,6 +182,19 @@ def _export_norm_params(mlready_dir: Path, out_dir: Path) -> None:
             (out_dir / "metadata" / "object_feature_map.json").write_text(
                 feature_map.read_text()
             )
+
+
+def _export_split_indices(splits_dir: Path, out_dir: Path) -> None:
+    """Ship the frozen index arrays as provenance.
+
+    Nothing in the deposition needs them -- the directory a row sits in is the split.
+    They are here so someone holding the unsplit source can re-derive the same
+    partition and check it.
+    """
+    target = out_dir / "metadata" / "split_indices"
+    target.mkdir(parents=True, exist_ok=True)
+    for frozen in sorted(splits_dir.glob("*.npz")):
+        (target / frozen.name).write_bytes(frozen.read_bytes())
 
 
 def _export_scales(cfg, out_dir: Path) -> None:

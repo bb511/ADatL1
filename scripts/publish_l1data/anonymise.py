@@ -38,11 +38,15 @@ STRAY_GLOBS = [".DS_Store", "._*", ".AppleDouble", "Thumbs.db"]
 SOURCE_DATE = "UTC 2026-01-01"
 
 
-def tar_cmd(export_root: Path, member: str, out_path: Path) -> list[str]:
+def tar_cmd(export_root: Path, members, out_path: Path) -> list[str]:
     """GNU tar invocation that records no owner, no timestamp and no absolute path.
 
-    :param export_root: Directory to run tar from; member is relative to it.
+    :param export_root: Directory to run tar from; members are relative to it.
+    :param members: One path, or several to pack into the same archive.
     """
+    if isinstance(members, (str, Path)):
+        members = [members]
+
     return [
         "tar",
         "--sort=name",
@@ -59,7 +63,7 @@ def tar_cmd(export_root: Path, member: str, out_path: Path) -> list[str]:
         str(export_root),
         "-cf",
         str(out_path),
-        member,
+        *[str(m) for m in members],
     ]
 
 

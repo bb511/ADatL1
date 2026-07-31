@@ -59,6 +59,29 @@ def read_split(split_dir) -> dict:
     }
 
 
+def read_splits(split_dirs) -> dict:
+    """Read several directories that make up one split, in the study's row order.
+
+    The two zero-bias runs were permuted together, so their training rows interleave.
+    `order` is the position across the whole split, which makes the pieces recombinable:
+    concatenate, then sort by it. Rows the event cut removed carry -1 and go last.
+
+    Use this whenever a split spans more than one directory; for a single directory it
+    is equivalent to :func:`read_split`.
+    """
+    parts = [read_split(d) for d in split_dirs]
+    objects = {
+        name: ak.concatenate([part[name] for part in parts]) for name in parts[0]
+    }
+
+    order = ak.to_numpy(objects["event_info"]["order"])
+    seen = np.flatnonzero(order >= 0)
+    seen = seen[np.argsort(order[seen], kind="stable")]
+    row_order = np.concatenate([seen, np.flatnonzero(order < 0)])
+
+    return {name: array[row_order] for name, array in objects.items()}
+
+
 def load_norm_params(path) -> dict:
     """Load the shift/scale the normalizer fitted on the training split."""
     return json.loads(Path(path).read_text())

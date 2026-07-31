@@ -50,7 +50,7 @@ records the conversion factors to physical units.
 
 ## Licence
 
-The code is MIT (see `LICENSE`). The dataset is released separately under CC-BY-4.0.
+The code is MIT (see `LICENSE`). The dataset is released separately under CC0 1.0.
 
 ## Usage
 

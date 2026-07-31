@@ -31,7 +31,7 @@ hydra:
 
     # storage URL to persist optimization results
     # for example, you can use SQLite if you set 'sqlite:///example.db'
-    storage: sqlite:///logs/optuna/vicreg.db
+    storage: sqlite:///logs/optuna/vicreg.db?timeout=600
 
     # name of the study to persist optimization results
     study_name: knneff_vs_loss_b16k

@@ -147,6 +147,11 @@ if [ "$dry" -eq 0 ]; then
         case "$url" in
             sqlite:///*)
                 path=${url#sqlite:///}
+                # The URLs carry a '?timeout=60' busy timeout (sqlite raises
+                # 'database is locked' immediately without one, which kills the
+                # driver). SQLAlchemy strips the query itself; this check needs
+                # the bare path or it would never find an existing database.
+                path=${path%%\?*}
                 if [ ! -f "$path" ]; then
                     mkdir -p "$(dirname "$path")"
                     echo "initialising study database: $path"

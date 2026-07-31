@@ -34,7 +34,7 @@ hydra:
 
     # storage URL to persist optimization results
     # for example, you can use SQLite if you set 'sqlite:///example.db'
-    storage: sqlite:///logs/optuna/cifar10/svdd.db
+    storage: sqlite:///logs/optuna/cifar10/svdd.db?timeout=600
 
     # Bias-free one-class Deep SVDD search space.
     # CIFAR-10 space

@@ -17,7 +17,6 @@
 #     hydra/launcher=submitit_slurm_clariden \
 #     hydra.launcher.timeout_min=200 \
 #     hydra.sweeper.n_jobs=6 \
-#     hydra.sweeper.storage='sqlite:///logs/optuna/robustad/vae.db' \
 #     experiment=robustad/vae \
 #     experiment_name=robustad_vae_cvar25_vs_kl_search \
 #     callbacks.max_rate_ckpt=null \
@@ -43,7 +42,6 @@
 #     hydra/launcher=submitit_slurm_clariden \
 #     hydra.launcher.timeout_min=200 \
 #     hydra.sweeper.n_jobs=6 \
-#     hydra.sweeper.storage='sqlite:///logs/optuna/robustad/vae.db' \
 #     experiment=robustad/vae_agnostic \
 #     experiment_name=robustad_vae_agnostic_cap_vs_kl_search \
 #     callbacks.anomaly_eff=null \
@@ -77,7 +75,6 @@
 #     hydra/launcher=submitit_slurm_clariden \
 #     hydra.launcher.timeout_min=200 \
 #     hydra.sweeper.n_jobs=6 \
-#     hydra.sweeper.storage='sqlite:///logs/optuna/robustad/vae.db' \
 #     experiment=robustad/vae_agnostic \
 #     experiment_name=robustad_vae_agnostic_drift_vs_kl_search \
 #     callbacks.anomaly_eff=null \
@@ -115,7 +112,6 @@
 #     hydra/launcher=submitit_slurm_clariden \
 #     hydra.launcher.timeout_min=200 \
 #     hydra.sweeper.n_jobs=6 \
-#     hydra.sweeper.storage='sqlite:///logs/optuna/robustad/vae.db' \
 #     experiment=robustad/vae_agnostic \
 #     experiment_name=robustad_vae_agnostic_wasserstein_vs_kl_search \
 #     callbacks.anomaly_eff=null \
@@ -154,7 +150,6 @@
 #     hydra/launcher=submitit_slurm_clariden \
 #     hydra.launcher.timeout_min=200 \
 #     hydra.sweeper.n_jobs=6 \
-#     hydra.sweeper.storage='sqlite:///logs/optuna/robustad/vae.db' \
 #     experiment=robustad/vae_agnostic \
 #     experiment_name=robustad_vae_agnostic_consistency_vs_kl_search \
 #     callbacks.anomaly_eff=null \

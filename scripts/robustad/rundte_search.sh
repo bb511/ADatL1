@@ -25,7 +25,6 @@
 #     hydra/launcher=submitit_slurm_clariden \
 #     hydra.launcher.timeout_min=240 \
 #     hydra.sweeper.n_jobs=6 \
-#     hydra.sweeper.storage='sqlite:///logs/optuna/robustad/dte.db' \
 #     experiment=robustad/dte \
 #     experiment_name=robustad_dte_cvar25_vs_ascore_search \
 #     callbacks.max_rate_ckpt=null \
@@ -51,7 +50,6 @@
 #     hydra/launcher=submitit_slurm_clariden \
 #     hydra.launcher.timeout_min=240 \
 #     hydra.sweeper.n_jobs=6 \
-#     hydra.sweeper.storage='sqlite:///logs/optuna/robustad/dte.db' \
 #     experiment=robustad/dte_agnostic \
 #     experiment_name=robustad_dte_agnostic_cap_vs_ascore_search \
 #     callbacks.anomaly_eff=null \
@@ -85,7 +83,6 @@
 #     hydra/launcher=submitit_slurm_clariden \
 #     hydra.launcher.timeout_min=240 \
 #     hydra.sweeper.n_jobs=6 \
-#     hydra.sweeper.storage='sqlite:///logs/optuna/robustad/dte.db' \
 #     experiment=robustad/dte_agnostic \
 #     experiment_name=robustad_dte_agnostic_drift_vs_ascore_search \
 #     callbacks.anomaly_eff=null \
@@ -123,7 +120,6 @@
 #     hydra/launcher=submitit_slurm_clariden \
 #     hydra.launcher.timeout_min=240 \
 #     hydra.sweeper.n_jobs=6 \
-#     hydra.sweeper.storage='sqlite:///logs/optuna/robustad/dte.db' \
 #     experiment=robustad/dte_agnostic \
 #     experiment_name=robustad_dte_agnostic_wasserstein_vs_ascore_search \
 #     callbacks.anomaly_eff=null \
@@ -162,7 +158,6 @@
 #     hydra/launcher=submitit_slurm_clariden \
 #     hydra.launcher.timeout_min=240 \
 #     hydra.sweeper.n_jobs=6 \
-#     hydra.sweeper.storage='sqlite:///logs/optuna/robustad/dte.db' \
 #     experiment=robustad/dte_agnostic \
 #     experiment_name=robustad_dte_agnostic_consistency_vs_ascore_search \
 #     callbacks.anomaly_eff=null \

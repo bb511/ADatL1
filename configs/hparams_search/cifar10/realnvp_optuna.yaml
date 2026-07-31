@@ -34,7 +34,7 @@ hydra:
 
     # storage URL to persist optimization results
     # for example, you can use SQLite if you set 'sqlite:///example.db'
-    storage: sqlite:///logs/optuna/cifar10/realnvp.db
+    storage: sqlite:///logs/optuna/cifar10/realnvp.db?timeout=600
 
     # define hyperparameter search space. Assumes using torch.optim.AdamW
     # CIFAR-10 space

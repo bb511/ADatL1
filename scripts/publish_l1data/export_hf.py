@@ -24,7 +24,7 @@ import anonymise
 SHARD_BYTES = 500 * 1024**2
 # Collections joined into the main table. `seeds` is a third of the volume on its own,
 # so it gets its own config and travels separately.
-MAIN_OBJECTS = ["ET", "FET", "FHT", "HT", "MET", "MHT", "cica", "egammas", "jets", "muons", "taus"]
+MAIN_OBJECTS = ["ET", "FET", "FHT", "HT", "MET", "MHT", "egammas", "jets", "muons", "taus"]
 
 
 def joined_table(split_dir: Path, dataset: str, label: int) -> pa.Table:

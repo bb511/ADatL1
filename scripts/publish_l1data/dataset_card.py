@@ -56,8 +56,8 @@ One directory per object collection, each holding sharded parquet. All objects o
 split have the same number of rows in the same order, so row *i* of `jets/` and row *i*
 of `muons/` are the same event.
 
-Objects: `ET`, `FET`, `FHT`, `HT`, `MET`, `MHT`, `cica`, `egammas`, `event_info`,
-`jets`, `muons`, `seeds`, `taus`. Not every sample has every object.
+Objects: `ET`, `FET`, `FHT`, `HT`, `MET`, `MHT`, `egammas`, `event_info`, `jets`,
+`muons`, `seeds`, `taus`.
 
 `seeds/` is the full ~190-bit L1 trigger menu decision per event and is about a third of
 the total volume; skip it if you only want kinematics.
@@ -96,8 +96,7 @@ so on -- so a mixture of renamed and original names is expected and intended.
 
 Two encoding notes. Every column is a variable-length list per event, including the
 single-valued ones: `run`, `lumi`, `event`, `bx`, `orbit`, `time`, `nPV_True` and the
-`ET`/`HT`/`MET`/`MHT`/`FET`/`FHT` sums arrive as length-1 lists. And `cica` is absent
-from some samples, so check before reading it.
+`ET`/`HT`/`MET`/`MHT`/`FET`/`FHT` sums arrive as length-1 lists.
 
 **2. Saturation cuts.** These are hardware counter limits, not physics selections.
 

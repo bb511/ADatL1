@@ -9,8 +9,12 @@ import sys
 import tarfile
 from pathlib import Path
 
-# Everything the deposition must never contain. Matched case-insensitively.
+# Everything the deposition must never contain. Matched case-insensitively. Mostly
+# identity, plus CICADA: that is another anomaly trigger's output, not detector input,
+# and is deliberately excluded from this release.
 BLOCKLIST = [
+    "CICADAScore",
+    "cicada",
     "deodagiu",
     "podagiu",
     "olqti",
@@ -65,6 +69,23 @@ def tar_cmd(export_root: Path, members, out_path: Path) -> list[str]:
         str(out_path),
         *[str(m) for m in members],
     ]
+
+
+def drop_excluded_columns(table):
+    """Remove the CICADA trigger bits from a table.
+
+    The L1 menu carries L1_CICADA_* decisions at several working points. Those are
+    another anomaly trigger's output rather than detector input, so they are excluded
+    from this release along with the CICADA score itself.
+    """
+    keep = [n for n in table.schema.names if "cicada" not in n.lower()]
+    if len(keep) == len(table.schema.names):
+        return table
+
+    # The inherited awkward metadata still lists the dropped fields by name, so it has
+    # to go with them -- otherwise the column data is gone but the footer still says
+    # CICADA. These tables are flat, so nothing is lost by dropping it.
+    return table.select(keep).replace_schema_metadata(None)
 
 
 def prune_stray(root: Path) -> list[Path]:

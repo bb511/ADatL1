@@ -24,10 +24,15 @@ SHARD_BYTES = 500 * 1024**2
 TAKE_CHUNK = 1_000_000
 
 
+# PLOTS is the datamaker's own histograms. `cica` is the CICADA score -- the output of a
+# different anomaly trigger, not detector input -- so it is deliberately not published.
+SKIP_OBJECTS = {"PLOTS", "cica"}
+
+
 def raw_objects(dataset_dir: Path) -> list[str]:
-    """Object collections present for this dataset, ignoring the plot directory."""
+    """Object collections to publish for this dataset."""
     return sorted(
-        p.name for p in dataset_dir.iterdir() if p.is_dir() and p.name != "PLOTS"
+        p.name for p in dataset_dir.iterdir() if p.is_dir() and p.name not in SKIP_OBJECTS
     )
 
 
@@ -79,7 +84,7 @@ def write_split(
 
     for start in range(0, len(rows), TAKE_CHUNK):
         chunk = rows[start : start + TAKE_CHUNK]
-        table = dataset.take(pa.array(chunk))
+        table = anonymise.drop_excluded_columns(dataset.take(pa.array(chunk)))
         if extra:
             for column, values in extra.items():
                 table = table.append_column(column, pa.array(values[start : start + len(chunk)]))

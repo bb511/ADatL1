@@ -129,14 +129,15 @@ def build(raw_data_dir: Path, out_dir: Path) -> dict:
                 "events_passing_filter": n_proc,
                 "counts": {k: int((split_of == k).sum()) for k in set(split_of)},
                 "objects": sorted(
-                    p.name for p in raw_dir.iterdir() if p.is_dir() and p.name != "PLOTS"
+                    p.name for p in raw_dir.iterdir()
+                    if p.is_dir() and p.name not in ("PLOTS", "cica")
                 ),
             }
             offset += n_proc if category == "zerobias" else 0
 
-    scrubbed = anonymise.scrub_resolved_config(
-        json.loads(json.dumps(_to_container(cfg.data))), str(raw_data_dir)
-    )
+    resolved = json.loads(json.dumps(_to_container(cfg.data)))
+    resolved.get("l1_scales", {}).pop("cicada", None)
+    scrubbed = anonymise.scrub_resolved_config(resolved, str(raw_data_dir))
     blob = json.dumps(scrubbed, sort_keys=True).encode()
     summary["config_sha256"] = hashlib.sha256(blob).hexdigest()
 
@@ -204,9 +205,8 @@ def _export_scales(cfg, out_dir: Path) -> None:
         "# GeV, radians and pseudorapidity. The published data is NOT scaled -- these\n"
         "# are provided so you can convert, and are what a pure-rate calculation needs.\n"
     )
-    (out_dir / "metadata" / "l1_scales.yaml").write_text(
-        header + _to_yaml(_to_container(cfg.data.l1_scales))
-    )
+    scales = {k: v for k, v in _to_container(cfg.data.l1_scales).items() if k != "cicada"}
+    (out_dir / "metadata" / "l1_scales.yaml").write_text(header + _to_yaml(scales))
 
 
 def _load_frozen(splits_dir: Path, category: str, names: dict) -> dict:

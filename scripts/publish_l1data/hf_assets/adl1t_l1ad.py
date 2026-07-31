@@ -6,15 +6,14 @@ produces the (N, 39, 3) float32 array its models consume.
 
     import adl1t_l1ad as l1
 
-    objects = l1.read_split("adl1t-l1ad-v1/zerobias/EphZB_2025E_run396102/train")
-    norms = l1.load_norm_params("metadata/norm_params_robust.json")
-    x, mask = l1.to_model_tensor(objects, norms)     # (N, 39, 3), flatten for (N, 117)
+    train = l1.read_splits(glob("adl1t-l1ad-v1/zerobias/*/train"))
+    norms = l1.fit_norm_params(train)
+    x, mask = l1.to_model_tensor(train, norms)       # (N, 39, 3), flatten for (N, 117)
 
 Pass ``apply_cuts=False`` to keep the saturated events and objects the paper dropped,
 or call ``apply_saturation_cuts`` yourself with different thresholds.
 """
 
-import json
 from pathlib import Path
 
 import awkward as ak
@@ -82,9 +81,28 @@ def read_splits(split_dirs) -> dict:
     return {name: array[row_order] for name, array in objects.items()}
 
 
-def load_norm_params(path) -> dict:
-    """Load the shift/scale the normalizer fitted on the training split."""
-    return json.loads(Path(path).read_text())
+def fit_norm_params(objects: dict) -> dict:
+    """Fit the robust normalisation the study used. Fit on the TRAINING split only.
+
+    Median and 5-95 interquantile range per object and feature, over real constituents
+    only. To normalise valid or test, fit here on train and pass the result through --
+    refitting on the split you are evaluating would leak.
+    """
+    objects = apply_saturation_cuts(rename_fields(objects))
+    params = {}
+    for name, features in TRAIN_FEATURES.items():
+        if name not in objects:
+            continue
+        params[name] = {}
+        for feature in features:
+            flat = ak.to_numpy(ak.flatten(objects[name][feature]))
+            low, high = np.quantile(flat, [0.05, 0.95])
+            params[name][feature] = {
+                "shift": float(np.median(flat)),
+                "scale": float(high - low) or 1e-12,
+            }
+
+    return params
 
 
 def rename_fields(objects: dict) -> dict:

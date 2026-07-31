@@ -180,10 +180,10 @@ def main() -> int:
 def _pack(tree: Path, payload: Path) -> None:
     """Assemble exactly what gets uploaded, in one directory.
 
-    Zenodo allows 100 files per record, so the ~700 parquet are packed one tarball per
-    dataset and the bulky split indices into a single archive. The small metadata files
-    and the card stay loose, so they can be read from the record page without
-    downloading anything.
+    One archive per split plus the card. Everything the pipeline derives -- the
+    normalisation constants, the feature-index map, the split indices -- is left out:
+    it is all recomputable from the published splits, and shipping it invites someone
+    to apply this study's fitted constants to their own partition.
     """
     payload.mkdir(parents=True, exist_ok=True)
 
@@ -206,17 +206,6 @@ def _pack(tree: Path, payload: Path) -> None:
         size = out_path.stat().st_size / 1024**3
         print(f"  packed {out_path.name} ({len(members[split])} datasets, {size:.1f} GB)")
 
-    metadata = tree.parent / "metadata"
-    if (metadata / "split_indices").is_dir():
-        subprocess.run(
-            anonymise.tar_cmd(metadata, "split_indices", payload / "split_indices.tar"),
-            check=True,
-        )
-        print("  packed split_indices.tar")
-
-    for loose in sorted(metadata.glob("*")):
-        if loose.is_file():
-            (payload / loose.name).write_bytes(loose.read_bytes())
     for card in ("README.md", "LICENSE"):
         if (tree / card).is_file():
             (payload / card).write_bytes((tree / card).read_bytes())

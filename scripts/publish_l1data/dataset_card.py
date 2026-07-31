@@ -43,7 +43,6 @@ adl1t-l1ad-v1/
   zerobias/<run>/{{train,valid,test}}/<object>/*.parquet
   signal/<sample>/{{valid,test}}/<object>/*.parquet
   background/<sample>/{{valid,test}}/<object>/*.parquet
-  metadata/
   README.md  LICENSE
 ```
 
@@ -73,13 +72,11 @@ split 60/40 between `valid` and `test`.
 
 The split was drawn once with NumPy's PCG64 generator seeded with **{seed}**, over the
 events passing the event cut below, with the two zero-bias runs concatenated in the
-order `{zb_order}`. `metadata/split_indices/` carries the raw index arrays if you want
-to audit it.
+order `{zb_order}`.
 
 ## Reproducing the study's preprocessing
 
-Four steps, in this order. `metadata/data_config_resolved.yaml` records the exact
-configuration.
+Four steps, in this order.
 
 **1. Rename.** The files carry the original ntuple field names. The study renames them:
 
@@ -110,9 +107,11 @@ The event cut removes {dropped:,} of {total_raw:,} zero-bias events ({dropped_pc
 Those events **are published**; they carry `order = -1` in `event_info` and sit at the
 end of their split.
 
-**3. Normalise.** Median and interquartile range fitted on the training split only.
-`metadata/norm_params_robust.json` holds the shift and scale used by the study;
-`norm_params_standard.json` is a mean/standard-deviation alternative.
+**3. Normalise.** Per object and feature, subtract the median and divide by the 5-95
+interquantile range, both **fitted on the training split only** and over real (unpadded)
+constituents. The constants are not shipped because they are exactly recomputable from
+the training split here -- `adl1t_l1ad.fit_norm_params` does it. Fit on train, then apply
+those same constants to valid and test; refitting per split would leak.
 
 **4. Pad to a fixed shape.** Keep {nconst}, padding with zeros, which gives
 `(N, 39, 3)` -- flatten for the 117 features the models take. A companion boolean mask
@@ -125,7 +124,7 @@ from glob import glob
 import adl1t_l1ad as l1
 
 objects = l1.read_splits(glob("adl1t-l1ad-v1/zerobias/*/train"))   # both runs
-norms = l1.load_norm_params("metadata/norm_params_robust.json")
+norms = l1.fit_norm_params(objects)                                # fit on train
 x, mask = l1.to_model_tensor(objects, norms)       # (N, 39, 3)
 ```
 
@@ -134,10 +133,21 @@ own thresholds.
 
 ## Units
 
-Values are **integer hardware units**, as the trigger produces them. Nothing in the
-files is scaled. `metadata/l1_scales.yaml` gives the conversion factors -- transverse
-energy is 0.5 GeV per unit, jet/e-gamma/tau azimuth 0.043633231299858 rad, muon azimuth
-0.010908307824965 rad, muon pseudorapidity 0.010875.
+Values are **integer hardware units**, as the trigger produces them. Nothing in the files
+is scaled. Multiply by these to get GeV, radians and pseudorapidity:
+
+| object | Et | eta | phi |
+|---|---|---|---|
+| muons | 0.5 GeV | 0.010875 | 0.010908307824965 rad |
+| jets | 0.5 GeV | 0.5 | 0.043633231299858 rad |
+| egammas | 0.5 GeV | 0.5 | 0.043633231299858 rad |
+| taus | 0.5 GeV | 0.5 | 0.043633231299858 rad |
+| ET, HT | 0.5 GeV | -- | -- |
+| MET, MHT, FET, FHT | 0.5 GeV | -- | 0.043633231299858 rad |
+
+`muonIEtaAtVtx` and `muonIPhiAtVtx` use the same scales as muon eta and phi. Quality,
+charge, isolation, index and tower-count fields are already integers and unscaled, as are
+every `event_info` field and every `seeds` bit.
 
 ## Reading the row order
 

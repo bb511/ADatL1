@@ -138,75 +138,41 @@ def build(raw_data_dir: Path, out_dir: Path) -> dict:
     resolved = json.loads(json.dumps(_to_container(cfg.data)))
     resolved.get("l1_scales", {}).pop("cicada", None)
     scrubbed = anonymise.scrub_resolved_config(resolved, str(raw_data_dir))
-    blob = json.dumps(scrubbed, sort_keys=True).encode()
-    summary["config_sha256"] = hashlib.sha256(blob).hexdigest()
+    summary["config_sha256"] = hashlib.sha256(
+        json.dumps(scrubbed, sort_keys=True).encode()
+    ).hexdigest()
 
     (map_dir / "index.json").write_text(json.dumps(raw_dirs, indent=2) + "\n")
 
     (out_dir / "metadata").mkdir(parents=True, exist_ok=True)
-    _export_norm_params(Path(mlready.cache_root_dir) / "mlready" / mlready.name, out_dir)
-    _export_scales(cfg, out_dir)
-    _export_split_indices(splits_dir, out_dir)
+    _write_scales_notes(cfg, out_dir)
     (out_dir / "metadata" / "split_summary.json").write_text(
         json.dumps(summary, indent=2, sort_keys=True) + "\n"
     )
-    (out_dir / "metadata" / "data_config_resolved.yaml").write_text(
-        _to_yaml(scrubbed)
-    )
-
     return summary
 
 
-def _export_norm_params(mlready_dir: Path, out_dir: Path) -> None:
-    """Convert the pickled shift/scale into JSON the deposition can ship.
+def _write_scales_notes(cfg, out_dir: Path) -> None:
+    """Write the hardware-to-physical scale factors as drafting notes.
 
-    One file per normalizer variant that was fitted, so `robust` (the paper's) and
-    `standard` (which the dte model uses) both travel with the data.
+    Not part of the upload -- the card carries the scales a reader needs. This is the
+    full per-field table, for writing the data descriptor from.
     """
-    import pickle
-
-    for variant in sorted(p for p in mlready_dir.iterdir() if p.is_dir()):
-        params = {}
-        for pkl in sorted(variant.glob("*_norm_params.pkl")):
-            obj = pkl.name.removesuffix("_norm_params.pkl")
-            params[obj] = {
-                feat: {k: float(v) for k, v in values.items()}
-                for feat, values in pickle.loads(pkl.read_bytes()).items()
-            }
-        if not params:
-            continue
-        target = out_dir / "metadata" / f"norm_params_{variant.name}.json"
-        target.write_text(json.dumps(params, indent=2, sort_keys=True) + "\n")
-
-        feature_map = variant / "object_feature_map.json"
-        if feature_map.is_file():
-            (out_dir / "metadata" / "object_feature_map.json").write_text(
-                feature_map.read_text()
-            )
-
-
-def _export_split_indices(splits_dir: Path, out_dir: Path) -> None:
-    """Ship the frozen index arrays as provenance.
-
-    Nothing in the deposition needs them -- the directory a row sits in is the split.
-    They are here so someone holding the unsplit source can re-derive the same
-    partition and check it.
-    """
-    target = out_dir / "metadata" / "split_indices"
-    target.mkdir(parents=True, exist_ok=True)
-    for frozen in sorted(splits_dir.glob("*.npz")):
-        (target / frozen.name).write_bytes(frozen.read_bytes())
-
-
-def _export_scales(cfg, out_dir: Path) -> None:
-    """Ship the hardware-to-physical scale factors as reference values."""
-    header = (
-        "# L1 trigger scales: multiply the integer hardware values by these to get\n"
-        "# GeV, radians and pseudorapidity. The published data is NOT scaled -- these\n"
-        "# are provided so you can convert, and are what a pure-rate calculation needs.\n"
-    )
     scales = {k: v for k, v in _to_container(cfg.data.l1_scales).items() if k != "cicada"}
-    (out_dir / "metadata" / "l1_scales.yaml").write_text(header + _to_yaml(scales))
+    lines = [
+        "# L1 trigger scale factors",
+        "",
+        "Multiply the published integer values by these to get GeV, radians and",
+        "pseudorapidity. The published data is NOT scaled. Fields with a factor of 1 are",
+        "already integers (quality, charge, isolation, indices, event_info, seed bits).",
+        "",
+        "| object | field | factor |",
+        "|---|---|---|",
+    ]
+    for obj in sorted(scales):
+        for field, factor in scales[obj].items():
+            lines.append(f"| {obj} | {field} | {factor} |")
+    (out_dir / "scale_factors.md").write_text("\n".join(lines) + "\n")
 
 
 def _load_frozen(splits_dir: Path, category: str, names: dict) -> dict:

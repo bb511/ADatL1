@@ -150,7 +150,9 @@ class EmbeddingAnomalyMetrics(Callback):
             self.reference.append(embedding[:needed].cpu())
             embedding = embedding[needed:]
         if sum(chunk.shape[0] for chunk in self.reference) >= self.reference_size:
-            self.reference = F.normalize(torch.cat(self.reference)[: self.reference_size], dim=1)
+            self.reference = F.normalize(
+                torch.cat(self.reference)[: self.reference_size].float(), dim=1
+            )
         return embedding
 
     def _remaining(self, values: list[torch.Tensor]) -> int:
@@ -161,7 +163,9 @@ class EmbeddingAnomalyMetrics(Callback):
         if not isinstance(self.reference, torch.Tensor):
             raise RuntimeError("Embedding anomaly reference must be collected before queries.")
         query = F.normalize(embedding.float(), dim=1)
-        reference = self.reference.to(query.device, non_blocking=True)
+        reference = self.reference.to(
+            device=query.device, dtype=query.dtype, non_blocking=True
+        )
         k = min(self.k, reference.shape[0])
         similarities = query @ reference.T
         return 1.0 - torch.topk(similarities, k=k, dim=1).values.mean(dim=1)

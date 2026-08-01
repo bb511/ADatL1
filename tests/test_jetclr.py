@@ -591,3 +591,15 @@ def test_embedding_anomaly_knn_scores_separated_queries() -> None:
     anomaly_score = callback._score(torch.tensor([[0.0, 1.0], [0.0, -1.0]]))
 
     assert anomaly_score.min() > normal_score.max()
+
+
+def test_embedding_anomaly_knn_promotes_mixed_precision_reference() -> None:
+    callback = EmbeddingAnomalyMetrics(reference_size=2, max_query_events=2, k=1)
+    callback.reference = torch.nn.functional.normalize(
+        torch.tensor([[1.0, 0.0], [0.0, 1.0]], dtype=torch.bfloat16), dim=1
+    )
+
+    scores = callback._score(torch.tensor([[1.0, 0.0]], dtype=torch.float32))
+
+    assert scores.dtype == torch.float32
+    assert scores.item() == pytest.approx(0.0)

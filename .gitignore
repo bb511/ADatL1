@@ -196,3 +196,10 @@ outputs
 
 # Aim logging
 .aim
+
+# Notebook shared library -- un-ignore from the packaging lib/ rule above.
+!notebooks/lib/
+!notebooks/lib/**
+
+# Local archive of superseded notebook data (kept out of git).
+notebooks/archive/

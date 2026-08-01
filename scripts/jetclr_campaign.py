@@ -70,6 +70,20 @@ STAGE3_SOURCE_SUMMARY_CSV_SHA256 = (
 STAGE3_SOURCE_ROOT = DEFAULT_CAMPAIGN_BASE / STAGE3_SOURCE_CAMPAIGN
 STAGE3_SOURCE_SUMMARY = STAGE3_SOURCE_ROOT / "stage2" / "summary.json"
 STAGE3_SOURCE_SUMMARY_CSV = STAGE3_SOURCE_ROOT / "stage2" / "summary.csv"
+STAGE4_SEED = 123
+STAGE4_N_CANDIDATES = 12
+STAGE4_SOURCE_CAMPAIGN = "jetclr_20260801_ebd6dd0"
+STAGE4_SOURCE_SUMMARY_SHA256 = "5425fd75220750fcea277498d1bdb99f10268a3af90387a81a249d15ad13f8d7"
+STAGE4_SOURCE_SUMMARY_CSV_SHA256 = (
+    "feac47f5f02397d5cde14701dacdff90c6b3df1bee66d1aae598ed4cefeccbc4"
+)
+STAGE4_SOURCE_ROOT = DEFAULT_CAMPAIGN_BASE / STAGE4_SOURCE_CAMPAIGN
+STAGE4_SOURCE_SUMMARY = STAGE4_SOURCE_ROOT / "stage3" / "summary.json"
+STAGE4_SOURCE_SUMMARY_CSV = STAGE4_SOURCE_ROOT / "stage3" / "summary.csv"
+STAGE4_SOURCE_ARCHITECTURES = (
+    (10, "layers2", "0ef568e754d5530bd517b55ecbd6d0b19aa9c84f38bff1dfcc5b80a827b73856"),
+    (9, "official_projector", "c19d089c7261c9c2055fbc218fb44333b7e99bd9020937a3282cbe5f2de50d67"),
+)
 
 
 def _stage1_base_overrides() -> dict[str, Any]:
@@ -430,6 +444,63 @@ def stage3_specs() -> list[dict[str, Any]]:
         specs.append({**identity, "spec_sha256": _value_sha256(identity)})
     if len(specs) != STAGE3_N_CANDIDATES:
         raise AssertionError("Stage-3 design must contain exactly 12 candidates.")
+    return specs
+
+
+def stage4_specs() -> list[dict[str, Any]]:
+    """Return the two frozen architectures crossed with six VICReg recipes."""
+    stage3 = stage3_specs()
+    weights = ((0.0, 0.0), (0.1, 0.0), (0.5, 0.0), (1.0, 0.0), (0.5, 0.005), (0.5, 0.02))
+    specs = []
+    for source_id, source_name, source_sha256 in STAGE4_SOURCE_ARCHITECTURES:
+        source = stage3[source_id]
+        if source["name"] != source_name or source["spec_sha256"] != source_sha256:
+            raise RuntimeError("Frozen Stage-3 architecture identity changed.")
+        for variance_weight, covariance_weight in weights:
+            regularization = {
+                "algorithm.encoder_variance_weight": variance_weight,
+                "algorithm.encoder_covariance_weight": covariance_weight,
+            }
+            params = {**source["params"], **regularization}
+            overrides = []
+            for key, value in params.items():
+                prefix = (
+                    "+"
+                    if key
+                    in {
+                        "algorithm.model.norm_first",
+                        "algorithm.model.post_pool_norm",
+                    }
+                    else ""
+                )
+                overrides.append(f"{prefix}{key}={_hydra_scalar(value)}")
+            candidate_id = len(specs)
+            identity = {
+                "candidate_id": candidate_id,
+                "name": (
+                    f"{source_name}_var{_hydra_scalar(variance_weight)}"
+                    f"_cov{_hydra_scalar(covariance_weight)}"
+                ),
+                "kind": "encoder_vicreg_ablation",
+                "seed": STAGE4_SEED,
+                "full_epochs": 1,
+                "source_campaign_id": STAGE4_SOURCE_CAMPAIGN,
+                "source_candidate_id": source_id,
+                "source_candidate_name": source_name,
+                "source_candidate_spec_sha256": source_sha256,
+                "rationale": (
+                    "Encoder-side VICReg ablation with every Stage-3 optimization and "
+                    "architecture parameter frozen."
+                ),
+                "is_architecture_control": variance_weight == 0.0 and covariance_weight == 0.0,
+                "frozen_stage3_params": source["params"],
+                "regularization_params": regularization,
+                "params": params,
+                "overrides": overrides,
+            }
+            specs.append({**identity, "spec_sha256": _value_sha256(identity)})
+    if len(specs) != STAGE4_N_CANDIDATES:
+        raise AssertionError("Stage-4 design must contain exactly 12 candidates.")
     return specs
 
 
@@ -895,6 +966,27 @@ def _write_stage3_launchers(root: Path, manifest: Mapping[str, Any]) -> dict[str
     return destinations
 
 
+def _write_stage4_launchers(root: Path, manifest: Mapping[str, Any]) -> dict[str, Path]:
+    """Write the Stage-4 three-node packed array and dependent collector."""
+    templates = _write_stage3_launchers(root, manifest)
+    destinations = {
+        "stage4": root / "slurm" / "stage4.sbatch",
+        "collector": root / "slurm" / "stage4_collect.sbatch",
+        "submitter": root / "slurm" / "submit_stage4.sh",
+    }
+    source_by_role = {
+        "stage4": templates["stage3"],
+        "collector": templates["collector"],
+        "submitter": templates["submitter"],
+    }
+    for role, destination in destinations.items():
+        text = source_by_role[role].read_text(encoding="utf-8")
+        text = text.replace("stage3", "stage4").replace("jetclr-s3", "jetclr-s4")
+        destination.write_text(text, encoding="utf-8")
+        destination.chmod(0o755)
+    return destinations
+
+
 def initialize(
     root: Path,
     deployment: Path,
@@ -936,6 +1028,20 @@ def initialize(
         or source_candidate["params"] != _stage3_primary_params()
     ):
         raise RuntimeError("Frozen Stage-2 primary candidate identity changed.")
+    if _sha256(STAGE4_SOURCE_SUMMARY) != STAGE4_SOURCE_SUMMARY_SHA256:
+        raise RuntimeError("Frozen Stage-3 source summary fingerprint changed.")
+    if _sha256(STAGE4_SOURCE_SUMMARY_CSV) != STAGE4_SOURCE_SUMMARY_CSV_SHA256:
+        raise RuntimeError("Frozen Stage-3 source metric table fingerprint changed.")
+    source_stage3 = json.loads((STAGE4_SOURCE_ROOT / "campaign.json").read_text(encoding="utf-8"))
+    for source_id, source_name, source_sha256 in STAGE4_SOURCE_ARCHITECTURES:
+        source_architecture = source_stage3["stage3"]["candidates"][source_id]
+        if (
+            source_architecture["candidate_id"] != source_id
+            or source_architecture["name"] != source_name
+            or source_architecture["spec_sha256"] != source_sha256
+            or source_architecture["params"] != stage3_specs()[source_id]["params"]
+        ):
+            raise RuntimeError("Frozen Stage-3 promoted architecture identity changed.")
 
     deployment.parent.mkdir(parents=True, exist_ok=True)
     git = shutil.which("git")
@@ -956,10 +1062,12 @@ def initialize(
     stage1 = stage1_specs()
     stage2 = stage2_specs()
     stage3 = stage3_specs()
+    stage4 = stage4_specs()
     _atomic_json(root / "design" / "canary_trials.json", specs)
     _atomic_json(root / "design" / "stage1_candidates.json", stage1)
     _atomic_json(root / "design" / "stage2_candidates.json", stage2)
     _atomic_json(root / "design" / "stage3_candidates.json", stage3)
+    _atomic_json(root / "design" / "stage4_candidates.json", stage4)
     manifest = {
         "schema_version": 1,
         "campaign_id": campaign_id,
@@ -1015,6 +1123,25 @@ def initialize(
             "candidates": stage3,
             "design_sha256": _value_sha256(stage3),
         },
+        "stage4": {
+            "seed": STAGE4_SEED,
+            "full_epochs": 1,
+            "source_campaign_id": STAGE4_SOURCE_CAMPAIGN,
+            "source_summary": str(STAGE4_SOURCE_SUMMARY),
+            "source_summary_sha256": STAGE4_SOURCE_SUMMARY_SHA256,
+            "source_summary_csv": str(STAGE4_SOURCE_SUMMARY_CSV),
+            "source_summary_csv_sha256": STAGE4_SOURCE_SUMMARY_CSV_SHA256,
+            "source_architectures": [
+                {
+                    "candidate_id": candidate_id,
+                    "name": name,
+                    "spec_sha256": spec_sha256,
+                }
+                for candidate_id, name, spec_sha256 in STAGE4_SOURCE_ARCHITECTURES
+            ],
+            "candidates": stage4,
+            "design_sha256": _value_sha256(stage4),
+        },
     }
     manifest["manifest_payload_sha256"] = _value_sha256(manifest)
     _atomic_json(root / "campaign.json", manifest)
@@ -1022,6 +1149,7 @@ def initialize(
     _write_stage1_launchers(root, manifest)
     _write_stage2_launchers(root, manifest)
     _write_stage3_launchers(root, manifest)
+    _write_stage4_launchers(root, manifest)
     return launcher
 
 
@@ -1391,9 +1519,49 @@ def run_stage1(root: Path, candidate_id: int) -> Path:
     return result_path
 
 
+def _validate_stage4_training_metrics(
+    training: Mapping[str, float], spec: Mapping[str, Any], metrics_path: Path
+) -> None:
+    """Require finite, internally consistent Stage-4 loss decomposition metrics."""
+    names = (
+        "train/loss_mean",
+        "train/loss_ntxent",
+        "train/loss_encoder_variance",
+        "train/loss_encoder_covariance",
+        "train/loss_encoder_variance_weighted",
+        "train/loss_encoder_covariance_weighted",
+    )
+    missing = [name for name in names if name not in training]
+    if missing:
+        raise RuntimeError(f"Stage-4 training metrics are missing {missing}: {metrics_path}")
+    values = {name: float(training[name]) for name in names}
+    if any(value < 0.0 for value in values.values()):
+        raise ValueError(f"Stage-4 loss decomposition must be non-negative: {metrics_path}")
+    variance_weight = float(spec["regularization_params"]["algorithm.encoder_variance_weight"])
+    covariance_weight = float(spec["regularization_params"]["algorithm.encoder_covariance_weight"])
+    expected = {
+        "train/loss_encoder_variance_weighted": (
+            variance_weight * values["train/loss_encoder_variance"]
+        ),
+        "train/loss_encoder_covariance_weighted": (
+            covariance_weight * values["train/loss_encoder_covariance"]
+        ),
+        "train/loss_mean": (
+            values["train/loss_ntxent"]
+            + values["train/loss_encoder_variance_weighted"]
+            + values["train/loss_encoder_covariance_weighted"]
+        ),
+    }
+    for name, expected_value in expected.items():
+        if not math.isclose(values[name], expected_value, rel_tol=1e-5, abs_tol=1e-6):
+            raise ValueError(
+                f"Stage-4 loss decomposition is inconsistent for {name}: {metrics_path}"
+            )
+
+
 def _run_full_epoch_stage(root: Path, candidate_id: int, stage: str) -> Path:
-    """Run one authenticated full-epoch candidate for Stage 2 or Stage 3."""
-    if stage not in {"stage2", "stage3"}:
+    """Run one authenticated full-epoch candidate for Stage 2, 3, or 4."""
+    if stage not in {"stage2", "stage3", "stage4"}:
         raise ValueError(f"Unsupported full-epoch stage: {stage}")
     root = root.resolve()
     manifest = _load_campaign(root)
@@ -1479,6 +1647,8 @@ def _run_full_epoch_stage(root: Path, candidate_id: int, stage: str) -> Path:
 
     metrics_csv = _single_artifact(trial_root / "output", "metrics.csv")
     training = _last_finite_metrics(metrics_csv)
+    if stage == "stage4":
+        _validate_stage4_training_metrics(training, spec, metrics_csv)
     pairing_path = _single_artifact(trial_root / "output", "pairing_diagnostics.json")
     required_pairing = [
         "selection_score",
@@ -1495,7 +1665,7 @@ def _run_full_epoch_stage(root: Path, candidate_id: int, stage: str) -> Path:
         "occupancy_smd_before_mean",
         "occupancy_smd_after_mean",
     ]
-    if stage == "stage3":
+    if stage in {"stage3", "stage4"}:
         required_pairing.extend(
             [
                 "projector_embedding_finite_fraction",
@@ -1510,7 +1680,7 @@ def _run_full_epoch_stage(root: Path, candidate_id: int, stage: str) -> Path:
         pairing.get("collapse_failures"), list
     ):
         raise ValueError(f"Pairing collapse gate is malformed: {pairing_path}")
-    if stage == "stage3" and (
+    if stage in {"stage3", "stage4"} and (
         not isinstance(pairing.get("projector_collapse_pass"), bool)
         or not isinstance(pairing.get("projector_collapse_failures"), list)
     ):
@@ -1525,12 +1695,16 @@ def _run_full_epoch_stage(root: Path, candidate_id: int, stage: str) -> Path:
     for name in ("macro_median_auroc", "macro_mean_auroc", "worst_quartile_mean_auroc"):
         if not 0.0 <= float(anomaly[name]) <= 1.0:
             raise ValueError(f"AUROC {name!r} is outside [0, 1]: {anomaly_path}")
+    if stage == "stage4" and not _valid_anomaly_aurocs(anomaly):
+        raise ValueError(f"Stage-4 per-dataset AUROCs are malformed: {anomaly_path}")
 
     artifacts = {
         "training_csv": metrics_csv,
         "pairing_json": pairing_path,
         "anomaly_json": anomaly_path,
     }
+    if stage == "stage4":
+        artifacts["last_checkpoint"] = _single_artifact(trial_root, "last.ckpt")
     result = {
         "schema_version": 1,
         "campaign_id": manifest["campaign_id"],
@@ -1570,6 +1744,11 @@ def run_stage2(root: Path, candidate_id: int) -> Path:
 def run_stage3(root: Path, candidate_id: int) -> Path:
     """Run one pure-NTXent Stage-3 architecture for one complete epoch."""
     return _run_full_epoch_stage(root, candidate_id, "stage3")
+
+
+def run_stage4(root: Path, candidate_id: int) -> Path:
+    """Run one Stage-4 encoder-regularization ablation for one complete epoch."""
+    return _run_full_epoch_stage(root, candidate_id, "stage4")
 
 
 def collect(root: Path) -> Path:
@@ -2004,6 +2183,234 @@ def collect_stage3(root: Path) -> Path:
     return output
 
 
+def _valid_anomaly_aurocs(anomaly: Mapping[str, Any]) -> bool:
+    """Return whether every aggregate and per-dataset AUROC is finite and bounded."""
+    aggregate_names = ("macro_median_auroc", "macro_mean_auroc", "worst_quartile_mean_auroc")
+    values = [anomaly.get(name) for name in aggregate_names]
+    per_dataset = anomaly.get("per_dataset")
+    if not isinstance(per_dataset, dict) or not per_dataset:
+        return False
+    values.extend(
+        metrics.get("auroc") if isinstance(metrics, Mapping) else None
+        for metrics in per_dataset.values()
+    )
+    return all(
+        not isinstance(value, bool)
+        and isinstance(value, (int, float))
+        and math.isfinite(float(value))
+        and 0.0 <= float(value) <= 1.0
+        for value in values
+    )
+
+
+def collect_stage4(root: Path) -> Path:
+    """Authenticate Stage-4 ablations and report paired deltas plus a Pareto set."""
+    root = root.resolve()
+    manifest = _load_campaign(root)
+    rows: list[dict[str, Any]] = []
+    missing = []
+    for spec in manifest["stage4"]["candidates"]:
+        result_path = root / "stage4" / f"candidate_{spec['candidate_id']:03d}" / "result.json"
+        if not result_path.is_file():
+            missing.append(str(result_path))
+            continue
+        result = json.loads(result_path.read_text(encoding="utf-8"))
+        digest = result.pop("result_payload_sha256", None)
+        if digest is None or _value_sha256(result) != digest:
+            raise ValueError(f"Stage-4 result fingerprint mismatch: {result_path}")
+        if (
+            result.get("campaign_id") != manifest["campaign_id"]
+            or result.get("git_commit") != manifest["git"]["commit"]
+            or result.get("candidate_id") != spec["candidate_id"]
+            or result.get("spec_sha256") != spec["spec_sha256"]
+            or result.get("source_campaign_id") != STAGE4_SOURCE_CAMPAIGN
+            or result.get("source_candidate_id") != spec["source_candidate_id"]
+            or result.get("source_candidate_spec_sha256") != spec["source_candidate_spec_sha256"]
+        ):
+            raise ValueError(f"Stage-4 result identity mismatch: {result_path}")
+        expected_artifacts = {"training_csv", "pairing_json", "anomaly_json", "last_checkpoint"}
+        if set(result.get("artifacts", {})) != expected_artifacts:
+            raise ValueError(f"Stage-4 result artifact inventory mismatch: {result_path}")
+        for artifact in result["artifacts"].values():
+            path = Path(artifact["path"])
+            if not path.is_file() or _sha256(path) != artifact["sha256"]:
+                raise ValueError(f"Stage-4 artifact mismatch: {path}")
+        checkpoint = Path(result["artifacts"]["last_checkpoint"]["path"])
+        if checkpoint.name != "last.ckpt":
+            raise ValueError(f"Stage-4 handoff checkpoint must be last.ckpt: {checkpoint}")
+
+        training = result["training_metrics"]
+        _validate_stage4_training_metrics(
+            training, spec, Path(result["artifacts"]["training_csv"]["path"])
+        )
+        pairing = result["pairing_metrics"]
+        anomaly = result["anomaly_metrics"]
+        encoder_pass = bool(pairing["collapse_pass"])
+        projector_pass = bool(pairing["projector_collapse_pass"])
+        encoder_finite = float(pairing["embedding_finite_fraction"]) == 1.0
+        projector_finite = float(pairing["projector_embedding_finite_fraction"]) == 1.0
+        auroc_valid = _valid_anomaly_aurocs(anomaly)
+        mnn_nonzero = float(pairing["mnn_coverage"]) > 0.0
+        improvement = _balance_improvement(pairing)
+        weighted_regularization = float(training["train/loss_encoder_variance_weighted"]) + float(
+            training["train/loss_encoder_covariance_weighted"]
+        )
+        total_loss = float(training["train/loss_mean"])
+        regularized_fraction = weighted_regularization / total_loss if total_loss > 0.0 else None
+        rows.append(
+            {
+                "candidate_id": spec["candidate_id"],
+                "name": spec["name"],
+                "source_architecture_id": spec["source_candidate_id"],
+                "source_architecture_name": spec["source_candidate_name"],
+                "is_architecture_control": spec["is_architecture_control"],
+                "seed": spec["seed"],
+                "variance_weight": spec["regularization_params"][
+                    "algorithm.encoder_variance_weight"
+                ],
+                "covariance_weight": spec["regularization_params"][
+                    "algorithm.encoder_covariance_weight"
+                ],
+                "scientific_eligible": (
+                    encoder_pass
+                    and projector_pass
+                    and encoder_finite
+                    and projector_finite
+                    and mnn_nonzero
+                    and auroc_valid
+                ),
+                "encoder_collapse_pass": encoder_pass,
+                "encoder_collapse_failures": ";".join(pairing["collapse_failures"]),
+                "projector_collapse_pass": projector_pass,
+                "projector_collapse_failures": ";".join(pairing["projector_collapse_failures"]),
+                "encoder_finite": encoder_finite,
+                "projector_finite": projector_finite,
+                "mnn_nonzero": mnn_nonzero,
+                "auroc_valid": auroc_valid,
+                "balance_pass": _balance_improves(pairing),
+                "balance_improvement": improvement,
+                "encoder_effective_rank": pairing["embedding_effective_rank"],
+                "encoder_participation_rank": pairing["embedding_participation_rank"],
+                "encoder_active_fraction": pairing["embedding_active_fraction"],
+                "encoder_top_pc_fraction": pairing["embedding_top_pc_fraction"],
+                "projector_effective_rank": pairing["projector_embedding_effective_rank"],
+                "projector_participation_rank": pairing["projector_embedding_participation_rank"],
+                "projector_active_fraction": pairing["projector_embedding_active_fraction"],
+                "projector_top_pc_fraction": pairing["projector_embedding_top_pc_fraction"],
+                "raw_selection_score": pairing["raw_selection_score"],
+                "gated_selection_score": pairing["selection_score"],
+                "closure_recall_at_10": pairing["closure_recall_at_10"],
+                "mnn_coverage": pairing["mnn_coverage"],
+                "value_smd_before_mean": pairing["value_smd_before_mean"],
+                "value_smd_after_mean": pairing["value_smd_after_mean"],
+                "occupancy_smd_before_mean": pairing["occupancy_smd_before_mean"],
+                "occupancy_smd_after_mean": pairing["occupancy_smd_after_mean"],
+                "macro_median_auroc": anomaly["macro_median_auroc"],
+                "macro_mean_auroc": anomaly["macro_mean_auroc"],
+                "worst_quartile_mean_auroc": anomaly["worst_quartile_mean_auroc"],
+                "train_loss": total_loss,
+                "train_loss_ntxent": training["train/loss_ntxent"],
+                "train_loss_encoder_variance": training["train/loss_encoder_variance"],
+                "train_loss_encoder_covariance": training["train/loss_encoder_covariance"],
+                "train_loss_encoder_variance_weighted": training[
+                    "train/loss_encoder_variance_weighted"
+                ],
+                "train_loss_encoder_covariance_weighted": training[
+                    "train/loss_encoder_covariance_weighted"
+                ],
+                "regularized_objective_fraction": regularized_fraction,
+                "regularization_dominates_objective": (
+                    regularized_fraction is not None and regularized_fraction > 0.5
+                ),
+                "params_json": _canonical_json(spec["params"]),
+                "spec_sha256": spec["spec_sha256"],
+                "checkpoint_path": str(checkpoint),
+                "checkpoint_sha256": result["artifacts"]["last_checkpoint"]["sha256"],
+                "result_path": str(result_path),
+            }
+        )
+    if missing:
+        raise FileNotFoundError(
+            f"Stage 4 is incomplete: {len(missing)} results missing; first is {missing[0]}"
+        )
+
+    controls = {
+        int(row["source_architecture_id"]): row
+        for row in rows
+        if bool(row["is_architecture_control"])
+    }
+    if set(controls) != {item[0] for item in STAGE4_SOURCE_ARCHITECTURES}:
+        raise ValueError("Stage-4 design must contain one zero-weight control per architecture.")
+    objectives = (
+        "encoder_effective_rank",
+        "raw_selection_score",
+        "worst_quartile_mean_auroc",
+        "balance_improvement",
+    )
+    for row in rows:
+        control = controls[int(row["source_architecture_id"])]
+        row["control_candidate_id"] = control["candidate_id"]
+        for objective in objectives:
+            value = row[objective]
+            control_value = control[objective]
+            row[f"delta_vs_control_{objective}"] = (
+                None
+                if value is None or control_value is None
+                else float(value) - float(control_value)
+            )
+
+    pareto_rows = [
+        row
+        for row in rows
+        if bool(row["scientific_eligible"])
+        and all(row[objective] is not None for objective in objectives)
+    ]
+    front = _pareto_front(pareto_rows, objectives) if pareto_rows else set()
+    for row in rows:
+        row["pareto_nondominated"] = row["candidate_id"] in front
+    rows.sort(key=lambda row: int(row["candidate_id"]))
+    table = root / "stage4" / "summary.csv"
+    _atomic_csv(table, rows)
+    eligible_ids = [int(row["candidate_id"]) for row in rows if row["scientific_eligible"]]
+    balance_ids = [int(row["candidate_id"]) for row in rows if row["balance_pass"]]
+    dominated_ids = [
+        int(row["candidate_id"]) for row in rows if row["regularization_dominates_objective"]
+    ]
+    missing_balance = [
+        int(row["candidate_id"]) for row in rows if row["balance_improvement"] is None
+    ]
+    summary = {
+        "schema_version": 1,
+        "campaign_id": manifest["campaign_id"],
+        "status": "complete" if eligible_ids else "complete_no_scientifically_eligible_candidates",
+        "n_candidates": len(rows),
+        "n_scientifically_eligible": len(eligible_ids),
+        "scientifically_eligible_candidate_ids": eligible_ids,
+        "scientific_eligibility": (
+            "finite encoder/projector, both collapse gates, nonzero MNN coverage, valid AUROC"
+        ),
+        "balance_is_scientific_eligibility_gate": False,
+        "n_balance_pass": len(balance_ids),
+        "balance_pass_candidate_ids": balance_ids,
+        "architecture_control_candidate_ids": {
+            str(source_id): int(control["candidate_id"])
+            for source_id, control in sorted(controls.items())
+        },
+        "regularization_dominates_objective_candidate_ids": dominated_ids,
+        "regularization_domination_threshold": 0.5,
+        "pareto_objectives": list(objectives),
+        "pareto_candidate_ids": sorted(front),
+        "pareto_excluded_missing_balance_candidate_ids": missing_balance,
+        "selection_policy": "No scalar winner is selected; preserve the validation Pareto set.",
+        "summary_csv": str(table),
+        "summary_csv_sha256": _sha256(table),
+    }
+    output = root / "stage4" / "summary.json"
+    _atomic_json(output, summary)
+    print(output)
+    return output
+
+
 def status(root: Path) -> dict[str, Any]:
     """Report trial completion state without mutating the campaign."""
     root = root.resolve()
@@ -2058,6 +2465,19 @@ def status(root: Path) -> dict[str, Any]:
         stage3_trials.append(
             {"candidate_id": spec["candidate_id"], "name": spec["name"], "state": state}
         )
+    stage4_trials = []
+    for spec in manifest.get("stage4", {}).get("candidates", []):
+        trial_root = root / "stage4" / f"candidate_{spec['candidate_id']:03d}"
+        state = (
+            "complete"
+            if (trial_root / "result.json").is_file()
+            else "failed"
+            if (trial_root / "failure.json").is_file()
+            else "pending"
+        )
+        stage4_trials.append(
+            {"candidate_id": spec["candidate_id"], "name": spec["name"], "state": state}
+        )
     value = {
         "campaign_id": manifest["campaign_id"],
         "complete": all(item["state"] == "complete" for item in trials),
@@ -2086,6 +2506,13 @@ def status(root: Path) -> dict[str, Any]:
             "n_complete": sum(item["state"] == "complete" for item in stage3_trials),
             "n_total": len(stage3_trials),
             "trials": stage3_trials,
+        },
+        "stage4": {
+            "complete": bool(stage4_trials)
+            and all(item["state"] == "complete" for item in stage4_trials),
+            "n_complete": sum(item["state"] == "complete" for item in stage4_trials),
+            "n_total": len(stage4_trials),
+            "trials": stage4_trials,
         },
     }
     print(json.dumps(value, indent=2, sort_keys=True))
@@ -2134,6 +2561,13 @@ def main() -> None:
     collect_stage3_parser.add_argument("--root", type=Path, required=True)
     stage3_status_parser = subparsers.add_parser("stage3-status")
     stage3_status_parser.add_argument("--root", type=Path, required=True)
+    stage4_parser = subparsers.add_parser("run-stage4")
+    stage4_parser.add_argument("--root", type=Path, required=True)
+    stage4_parser.add_argument("--candidate-id", type=int, required=True)
+    collect_stage4_parser = subparsers.add_parser("collect-stage4")
+    collect_stage4_parser.add_argument("--root", type=Path, required=True)
+    stage4_status_parser = subparsers.add_parser("stage4-status")
+    stage4_status_parser.add_argument("--root", type=Path, required=True)
     args = parser.parse_args()
 
     if args.command == "init":
@@ -2175,6 +2609,12 @@ def main() -> None:
     elif args.command == "collect-stage3":
         collect_stage3(args.root)
     elif args.command == "stage3-status":
+        status(args.root)
+    elif args.command == "run-stage4":
+        run_stage4(args.root, args.candidate_id)
+    elif args.command == "collect-stage4":
+        collect_stage4(args.root)
+    elif args.command == "stage4-status":
         status(args.root)
     elif args.command == "status":
         status(args.root)

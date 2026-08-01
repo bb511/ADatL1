@@ -6,6 +6,7 @@ from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
+from hydra import compose, initialize_config_dir
 
 from scripts import jetclr_campaign
 
@@ -48,12 +49,30 @@ def _anomaly_metrics(value: float = 0.8) -> dict:
     }
 
 
+def _stage4_training_metrics(variance_weight: float, covariance_weight: float) -> dict:
+    """Return an internally consistent Stage-4 training-loss decomposition."""
+    ntxent = 2.0
+    variance = 0.4 if variance_weight else 0.0
+    covariance = 0.2 if covariance_weight else 0.0
+    variance_weighted = variance_weight * variance
+    covariance_weighted = covariance_weight * covariance
+    return {
+        "train/loss_mean": ntxent + variance_weighted + covariance_weighted,
+        "train/loss_ntxent": ntxent,
+        "train/loss_encoder_variance": variance,
+        "train/loss_encoder_covariance": covariance,
+        "train/loss_encoder_variance_weighted": variance_weighted,
+        "train/loss_encoder_covariance_weighted": covariance_weighted,
+    }
+
+
 def _write_manifest(root: Path) -> dict:
     """Write a minimal authenticated campaign manifest for unit tests."""
     specs = jetclr_campaign.canary_specs()
     stage1 = jetclr_campaign.stage1_specs()
     stage2 = jetclr_campaign.stage2_specs()
     stage3 = jetclr_campaign.stage3_specs()
+    stage4 = jetclr_campaign.stage4_specs()
     manifest = {
         "schema_version": 1,
         "campaign_id": "jetclr_test_deadbeef",
@@ -91,10 +110,82 @@ def _write_manifest(root: Path) -> dict:
             "candidates": stage3,
             "design_sha256": jetclr_campaign._value_sha256(stage3),
         },
+        "stage4": {
+            "seed": jetclr_campaign.STAGE4_SEED,
+            "full_epochs": 1,
+            "source_campaign_id": jetclr_campaign.STAGE4_SOURCE_CAMPAIGN,
+            "source_summary_sha256": jetclr_campaign.STAGE4_SOURCE_SUMMARY_SHA256,
+            "source_summary_csv_sha256": jetclr_campaign.STAGE4_SOURCE_SUMMARY_CSV_SHA256,
+            "candidates": stage4,
+            "design_sha256": jetclr_campaign._value_sha256(stage4),
+        },
     }
     manifest["manifest_payload_sha256"] = jetclr_campaign._value_sha256(manifest)
     jetclr_campaign._atomic_json(root / "campaign.json", manifest)
     return manifest
+
+
+def _write_stage4_results(root: Path, manifest: dict) -> list[Path]:
+    """Write twelve authenticated synthetic Stage-4 result bundles."""
+    checkpoints = []
+    for spec in manifest["stage4"]["candidates"]:
+        candidate_id = spec["candidate_id"]
+        trial_root = root / "stage4" / f"candidate_{candidate_id:03d}"
+        trial_root.mkdir(parents=True)
+        metrics = trial_root / "metrics.csv"
+        variance_weight = spec["regularization_params"]["algorithm.encoder_variance_weight"]
+        covariance_weight = spec["regularization_params"]["algorithm.encoder_covariance_weight"]
+        training = _stage4_training_metrics(variance_weight, covariance_weight)
+        metrics.write_text(
+            ",".join(training) + "\n" + ",".join(str(value) for value in training.values()) + "\n",
+            encoding="utf-8",
+        )
+        pairing_path = trial_root / "pairing_diagnostics.json"
+        pairing = _pairing_metrics()
+        pairing["embedding_effective_rank"] += candidate_id
+        pairing["raw_selection_score"] += candidate_id / 100.0
+        if candidate_id == 2:
+            pairing["mnn_coverage"] = 0.0
+        if candidate_id == 3:
+            pairing["value_smd_after_mean"] = 0.5
+        pairing_path.write_text(json.dumps(pairing), encoding="utf-8")
+        anomaly_path = trial_root / "embedding_anomaly.json"
+        anomaly = _anomaly_metrics(0.7 + candidate_id / 100.0)
+        anomaly_path.write_text(json.dumps(anomaly), encoding="utf-8")
+        checkpoint = trial_root / "last.ckpt"
+        checkpoint.write_bytes(f"checkpoint {candidate_id}".encode())
+        checkpoints.append(checkpoint)
+        artifacts = {
+            "training_csv": {"path": str(metrics), "sha256": jetclr_campaign._sha256(metrics)},
+            "pairing_json": {
+                "path": str(pairing_path),
+                "sha256": jetclr_campaign._sha256(pairing_path),
+            },
+            "anomaly_json": {
+                "path": str(anomaly_path),
+                "sha256": jetclr_campaign._sha256(anomaly_path),
+            },
+            "last_checkpoint": {
+                "path": str(checkpoint),
+                "sha256": jetclr_campaign._sha256(checkpoint),
+            },
+        }
+        result = {
+            "campaign_id": manifest["campaign_id"],
+            "git_commit": manifest["git"]["commit"],
+            "candidate_id": candidate_id,
+            "spec_sha256": spec["spec_sha256"],
+            "source_campaign_id": jetclr_campaign.STAGE4_SOURCE_CAMPAIGN,
+            "source_candidate_id": spec["source_candidate_id"],
+            "source_candidate_spec_sha256": spec["source_candidate_spec_sha256"],
+            "artifacts": artifacts,
+            "training_metrics": training,
+            "pairing_metrics": pairing,
+            "anomaly_metrics": anomaly,
+        }
+        result["result_payload_sha256"] = jetclr_campaign._value_sha256(result)
+        jetclr_campaign._atomic_json(trial_root / "result.json", result)
+    return checkpoints
 
 
 def test_canary_specs_are_deterministic_and_cover_four_distinct_recipes() -> None:
@@ -315,6 +406,140 @@ def test_run_stage3_full_epoch_authenticates_projector_diagnostics(
     assert "+algorithm.model.post_pool_norm=true" in observed["command"]
     assert not any("algorithm.projector.in_dim=" in value for value in observed["command"])
     assert result["pairing_metrics"]["projector_collapse_pass"] is True
+
+
+def test_stage4_specs_freeze_two_sources_and_cross_exact_regularization_grid() -> None:
+    """Stage 4 must retain both promoted identities and include one control per architecture."""
+    specs = jetclr_campaign.stage4_specs()
+
+    assert specs == jetclr_campaign.stage4_specs()
+    assert len(specs) == 12
+    assert [item["candidate_id"] for item in specs] == list(range(12))
+    assert {item["seed"] for item in specs} == {123}
+    assert [item["source_candidate_id"] for item in specs] == [10] * 6 + [9] * 6
+    assert [item["source_candidate_name"] for item in specs] == ["layers2"] * 6 + [
+        "official_projector"
+    ] * 6
+    assert {item["source_candidate_spec_sha256"] for item in specs[:6]} == {
+        "0ef568e754d5530bd517b55ecbd6d0b19aa9c84f38bff1dfcc5b80a827b73856"
+    }
+    assert {item["source_candidate_spec_sha256"] for item in specs[6:]} == {
+        "c19d089c7261c9c2055fbc218fb44333b7e99bd9020937a3282cbe5f2de50d67"
+    }
+    expected_weights = [(0.0, 0.0), (0.1, 0.0), (0.5, 0.0), (1.0, 0.0), (0.5, 0.005), (0.5, 0.02)]
+    for block in (specs[:6], specs[6:]):
+        assert [
+            (
+                item["regularization_params"]["algorithm.encoder_variance_weight"],
+                item["regularization_params"]["algorithm.encoder_covariance_weight"],
+            )
+            for item in block
+        ] == expected_weights
+        assert [item["is_architecture_control"] for item in block] == [
+            True,
+            False,
+            False,
+            False,
+            False,
+            False,
+        ]
+        assert all(
+            {
+                key: value
+                for key, value in item["params"].items()
+                if key not in item["regularization_params"]
+            }
+            == item["frozen_stage3_params"]
+            for item in block
+        )
+
+
+def test_stage4_exact_candidate_overrides_compose() -> None:
+    """Every frozen Stage-4 command-line design must compose through Hydra."""
+    config_dir = Path(jetclr_campaign.__file__).resolve().parents[1] / "configs"
+    with initialize_config_dir(config_dir=str(config_dir), version_base="1.3"):
+        for spec in jetclr_campaign.stage4_specs():
+            config = compose(
+                config_name="train",
+                overrides=["experiment=physics/jetclr_pairing", "trainer=gpu", *spec["overrides"]],
+            )
+            assert config.seed == 123
+            assert config.algorithm.model.n_layers in {2, 4}
+            assert (
+                config.algorithm.encoder_variance_weight
+                == spec["regularization_params"]["algorithm.encoder_variance_weight"]
+            )
+            assert (
+                config.algorithm.encoder_covariance_weight
+                == spec["regularization_params"]["algorithm.encoder_covariance_weight"]
+            )
+
+
+def test_stage4_launchers_pack_twelve_trials_and_chain_collector(tmp_path: Path) -> None:
+    """Stage 4 must pack four trials per node and collect only after all nodes succeed."""
+    manifest = _write_manifest(tmp_path)
+    launchers = jetclr_campaign._write_stage4_launchers(tmp_path, manifest)
+    stage4 = launchers["stage4"].read_text(encoding="utf-8")
+    collector = launchers["collector"].read_text(encoding="utf-8")
+    submitter = launchers["submitter"].read_text(encoding="utf-8")
+
+    assert "#SBATCH --array=0-2%3" in stage4
+    assert "base=$((SLURM_ARRAY_TASK_ID * 4))" in stage4
+    assert "run-stage4" in stage4
+    assert "collect-stage4" in collector
+    assert 'dependency="afterok:$stage4_job"' in submitter
+
+
+def test_run_stage4_requires_loss_decomposition_and_authenticates_last_checkpoint(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Stage 4 must persist all losses and the canonical final encoder checkpoint."""
+    manifest = _write_manifest(tmp_path)
+    monkeypatch.setattr(jetclr_campaign, "_assert_runtime", lambda _: tmp_path)
+    observed = {}
+
+    def fake_run(command, **kwargs):
+        observed["command"] = command
+        spec = manifest["stage4"]["candidates"][0]
+        output = tmp_path / "stage4" / "candidate_000" / "output"
+        metrics = output / "csv" / "version_0" / "metrics.csv"
+        metrics.parent.mkdir(parents=True)
+        training = _stage4_training_metrics(0.0, 0.0)
+        metrics.write_text(
+            ",".join(training) + "\n" + ",".join(str(value) for value in training.values()) + "\n",
+            encoding="utf-8",
+        )
+        pairing = output / "metrics" / "pairing_diagnostics" / "last"
+        pairing.mkdir(parents=True)
+        (pairing / "pairing_diagnostics.json").write_text(
+            json.dumps(_pairing_metrics()), encoding="utf-8"
+        )
+        anomaly = output / "metrics" / "embedding_anomaly" / "last"
+        anomaly.mkdir(parents=True)
+        (anomaly / "embedding_anomaly.json").write_text(
+            json.dumps(_anomaly_metrics()), encoding="utf-8"
+        )
+        checkpoint_dir = (
+            tmp_path / "stage4" / "candidate_000" / "checkpoints" / "experiment" / "candidate_000"
+        )
+        checkpoint_dir.mkdir(parents=True)
+        (checkpoint_dir / "last.ckpt").write_bytes(b"canonical checkpoint")
+        (checkpoint_dir / "last-v1.ckpt").write_bytes(b"duplicate checkpoint")
+        assert spec["is_architecture_control"] is True
+        return SimpleNamespace(returncode=0)
+
+    monkeypatch.setattr(jetclr_campaign.subprocess, "run", fake_run)
+    result_path = jetclr_campaign.run_stage4(tmp_path, 0)
+    result = json.loads(result_path.read_text(encoding="utf-8"))
+
+    assert not any("limit_train_batches" in value for value in observed["command"])
+    assert "test=false" in observed["command"]
+    assert "algorithm.encoder_variance_weight=0" in observed["command"]
+    assert result["training_metrics"]["train/loss_ntxent"] == 2.0
+    assert Path(result["artifacts"]["last_checkpoint"]["path"]).name == "last.ckpt"
+    assert result["artifacts"]["last_checkpoint"]["sha256"] == jetclr_campaign._sha256(
+        Path(result["artifacts"]["last_checkpoint"]["path"])
+    )
 
 
 def test_run_stage1_composes_bounded_training_and_validates_artifacts(
@@ -650,3 +875,40 @@ def test_collect_stage3_reports_projector_gates_and_four_objective_pareto(
     assert rows[0]["encoder_collapse_pass"] == "False"
     assert rows[0]["projector_collapse_pass"] == "False"
     assert float(rows[0]["projector_effective_rank"]) == 20.0
+
+
+def test_collect_stage4_reports_controls_hard_gates_deltas_and_pareto(tmp_path: Path) -> None:
+    """Stage-4 collection must separate eligibility, balance, controls, and Pareto utility."""
+    manifest = _write_manifest(tmp_path)
+    _write_stage4_results(tmp_path, manifest)
+
+    output = jetclr_campaign.collect_stage4(tmp_path)
+    summary = json.loads(output.read_text(encoding="utf-8"))
+    with Path(summary["summary_csv"]).open(encoding="utf-8", newline="") as handle:
+        rows = list(csv.DictReader(handle))
+
+    assert summary["status"] == "complete"
+    assert summary["n_scientifically_eligible"] == 11
+    assert 2 not in summary["scientifically_eligible_candidate_ids"]
+    assert 3 in summary["scientifically_eligible_candidate_ids"]
+    assert summary["balance_is_scientific_eligibility_gate"] is False
+    assert summary["architecture_control_candidate_ids"] == {"9": 6, "10": 0}
+    assert len(summary["pareto_objectives"]) == 4
+    assert "best_candidate_id" not in summary
+    assert "No scalar winner" in summary["selection_policy"]
+    assert rows[0]["is_architecture_control"] == "True"
+    assert float(rows[1]["delta_vs_control_encoder_effective_rank"]) == 1.0
+    assert rows[2]["mnn_nonzero"] == "False"
+    assert rows[3]["balance_pass"] == "False"
+    assert rows[3]["scientific_eligible"] == "True"
+    assert Path(rows[0]["checkpoint_path"]).name == "last.ckpt"
+
+
+def test_collect_stage4_rejects_tampered_handoff_checkpoint(tmp_path: Path) -> None:
+    """The collector must fail closed when a final encoder checkpoint changes."""
+    manifest = _write_manifest(tmp_path)
+    checkpoints = _write_stage4_results(tmp_path, manifest)
+    checkpoints[0].write_bytes(b"tampered")
+
+    with pytest.raises(ValueError, match="Stage-4 artifact mismatch"):
+        jetclr_campaign.collect_stage4(tmp_path)

@@ -35,6 +35,17 @@ class _IdentityNormalizer:
         return x
 
 
+class _CountingProjector(nn.Module):
+    def __init__(self) -> None:
+        super().__init__()
+        self.linear = nn.Linear(3, 3, bias=False)
+        self.calls = 0
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        self.calls += 1
+        return self.linear(x)
+
+
 def _feature_map() -> dict:
     return {
         "FET": {"Et": [0], "eta": [1], "phi": [2]},
@@ -82,6 +93,89 @@ def test_encoder_is_invariant_to_same_type_object_permutations() -> None:
     permuted[:, 6:9] = x[:, 3:6]
 
     torch.testing.assert_close(encoder(x, mask), encoder(permuted, mask))
+
+
+def test_sum_pooling_is_permutation_invariant_and_has_expected_shape() -> None:
+    torch.manual_seed(8)
+    encoder = ObjectTransformerEncoder(
+        object_types=["FET", "jets"],
+        d_model=8,
+        out_dim=6,
+        n_heads=2,
+        n_layers=1,
+        dim_feedforward=16,
+        dropout=0.0,
+        pooling="sum",
+    ).eval()
+    encoder.set_object_feature_map(_feature_map())
+    x = torch.randn(3, 9)
+    mask = torch.ones_like(x)
+    permuted = x.clone()
+    permuted[:, 3:6] = x[:, 6:9]
+    permuted[:, 6:9] = x[:, 3:6]
+
+    output = encoder(x, mask)
+
+    assert output.shape == (3, 6)
+    torch.testing.assert_close(output, encoder(permuted, mask))
+
+
+@pytest.mark.parametrize("pooling", ["mean", "sum"])
+def test_non_cls_pooling_excludes_masked_objects(pooling: str) -> None:
+    torch.manual_seed(9)
+    encoder = ObjectTransformerEncoder(
+        object_types=["FET", "jets"],
+        d_model=8,
+        out_dim=8,
+        n_heads=2,
+        n_layers=1,
+        dim_feedforward=16,
+        dropout=0.0,
+        pooling=pooling,
+    ).eval()
+    encoder.set_object_feature_map(_feature_map())
+    x = torch.randn(2, 9)
+    mask = torch.ones_like(x)
+    mask[:, 6:9] = 0
+    changed_padding = x.clone()
+    changed_padding[:, 6:9] = 1e6
+
+    torch.testing.assert_close(encoder(x, mask), encoder(changed_padding, mask))
+
+
+def test_encoder_fidelity_options_preserve_current_defaults() -> None:
+    encoder = ObjectTransformerEncoder(d_model=8, out_dim=8, n_heads=2, n_layers=1)
+
+    assert encoder.pooling == "cls"
+    assert encoder.encoder.layers[0].norm_first is True
+    assert isinstance(encoder.norm, nn.LayerNorm)
+    assert encoder.cls_token.shape == (1, 1, 8)
+
+    post_norm_encoder = ObjectTransformerEncoder(
+        d_model=8,
+        out_dim=8,
+        n_heads=2,
+        n_layers=1,
+        pooling="sum",
+        norm_first=False,
+        post_pool_norm=False,
+    )
+    assert post_norm_encoder.encoder.layers[0].norm_first is False
+    assert isinstance(post_norm_encoder.norm, nn.Identity)
+    assert post_norm_encoder.cls_token.shape == (1, 1, 8)
+
+
+@pytest.mark.parametrize(
+    ("kwargs", "error"),
+    [
+        ({"pooling": "max"}, ValueError),
+        ({"norm_first": 1}, TypeError),
+        ({"post_pool_norm": 0}, TypeError),
+    ],
+)
+def test_encoder_rejects_invalid_fidelity_options(kwargs: dict, error: type[Exception]) -> None:
+    with pytest.raises(error):
+        ObjectTransformerEncoder(d_model=8, n_heads=2, **kwargs)
 
 
 def test_object_dropout_removes_whole_objects_and_protects_fet() -> None:
@@ -158,6 +252,32 @@ def test_jetclr_cosine_scheduler_runs_each_optimizer_step() -> None:
 
     assert config.scheduler.interval == "step"
     assert config.scheduler.frequency == 1
+
+
+def test_clean_projector_output_is_evaluation_only() -> None:
+    projector = _CountingProjector()
+    module = JetCLR(
+        model=nn.Linear(4, 3, bias=False),
+        projector=projector,
+        loss=NTXentLoss(temperature=0.1, gather_distributed=False),
+        optimizer=None,
+        diagnosis_metrics=False,
+    )
+    x = torch.randn(8, 4)
+    batch = (x, torch.ones_like(x), torch.zeros(8), torch.zeros(8))
+
+    module.train()
+    train_outputs = module.model_step(batch)
+
+    assert projector.calls == 2
+    assert "jetclr_clean_proj_data" not in train_outputs
+
+    module.eval()
+    eval_outputs = module.model_step(batch)
+
+    assert projector.calls == 5
+    expected = projector.linear(module.model(x))
+    torch.testing.assert_close(eval_outputs["jetclr_clean_proj_data"], expected)
 
 
 def test_detector_smearing_sanitizes_energy_and_wraps_phi() -> None:
@@ -276,6 +396,7 @@ def test_pairing_diagnostics_records_zero_pairs_as_ineligible() -> None:
     callback.raw_mask = {"normal": [mask], "reference_normal": [mask.clone()]}
     callback.closure_1 = [z1]
     callback.closure_2 = [z1.clone()]
+    callback.projector_reps = [torch.randn(4, 8)]
 
     metrics = callback._compute_metrics()
 
@@ -286,7 +407,30 @@ def test_pairing_diagnostics_records_zero_pairs_as_ineligible() -> None:
     assert metrics["collapse_pass"] is False
     assert "no_mutual_nearest_pairs" in metrics["collapse_failures"]
     assert metrics["pair_distance_mean"] is None
+    assert "projector_embedding_effective_rank" in metrics
+    assert "projector_collapse_pass" in metrics
+    assert metrics["projector_collapse_min_effective_rank"] == 6.0
     json.dumps(metrics, allow_nan=False)
+
+
+def test_pairing_diagnostics_fails_clearly_when_projector_output_is_missing() -> None:
+    callback = PairingDiagnostics(max_events_per_dataset=4)
+    callback.on_test_epoch_start(None, None)
+    trainer = SimpleNamespace(test_dataloaders={"normal": object()})
+    batch = (
+        torch.randn(4, 3),
+        torch.ones(4, 3),
+        torch.zeros(4),
+        torch.zeros(4),
+    )
+    outputs = {
+        "pairing_rep_data": torch.randn(4, 8),
+        "pairing_view1_data": torch.randn(4, 8),
+        "pairing_view2_data": torch.randn(4, 8),
+    }
+
+    with pytest.raises(KeyError, match="jetclr_clean_proj_data.*missing"):
+        callback.on_test_batch_end(trainer, None, outputs, batch, 0)
 
 
 def test_masked_smd_ignores_padding_values() -> None:

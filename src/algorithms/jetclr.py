@@ -181,7 +181,7 @@ class JetCLR(L1ADLightningModule):
         with torch.no_grad():
             diag = self._diagnostics(h1, h2, z1, z2)
 
-        return {
+        outputs = {
             "loss": loss,
             "loss/mean": loss.detach(),
             "pairing_rep_data": h.detach(),
@@ -192,6 +192,13 @@ class JetCLR(L1ADLightningModule):
             "loss/total/full": loss.detach().expand(h.shape[0]),
             **diag,
         }
+        # The clean projector representation is an evaluation diagnostic.  Keeping
+        # this branch out of training avoids a third projector pass and leaves the
+        # contrastive loss graph exactly unchanged.
+        if not self.training:
+            with torch.no_grad():
+                outputs["jetclr_clean_proj_data"] = self.projector(h).detach()
+        return outputs
 
     def outlog(self, outdict: dict) -> dict:
         diag_entries = {k: v for k, v in outdict.items() if k.startswith("diag_")}

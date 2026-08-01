@@ -36,10 +36,16 @@ class ObjectTransformerEncoder(nn.Module):
         dropout: float = 0.0,
         activation: str = "gelu",
         pooling: str = "cls",
+        norm_first: bool = True,
+        post_pool_norm: bool = True,
     ):
         super().__init__()
-        if pooling not in {"cls", "mean"}:
-            raise ValueError("pooling must be one of 'cls' or 'mean'.")
+        if pooling not in {"cls", "mean", "sum"}:
+            raise ValueError("pooling must be one of 'cls', 'mean', or 'sum'.")
+        if not isinstance(norm_first, bool):
+            raise TypeError("norm_first must be a bool.")
+        if not isinstance(post_pool_norm, bool):
+            raise TypeError("post_pool_norm must be a bool.")
         if d_model % n_heads != 0:
             raise ValueError("d_model must be divisible by n_heads.")
 
@@ -62,10 +68,10 @@ class ObjectTransformerEncoder(nn.Module):
             dropout=dropout,
             activation=activation,
             batch_first=True,
-            norm_first=True,
+            norm_first=norm_first,
         )
         self.encoder = nn.TransformerEncoder(layer, num_layers=n_layers)
-        self.norm = nn.LayerNorm(self.d_model)
+        self.norm = nn.LayerNorm(self.d_model) if post_pool_norm else nn.Identity()
         self.output = (
             nn.Identity()
             if self.out_dim == self.d_model
@@ -91,18 +97,27 @@ class ObjectTransformerEncoder(nn.Module):
         h = self.feature_proj(token_x) + self.type_embedding(token_type)
 
         bsz = x_flat.shape[0]
-        cls = self.cls_token.expand(bsz, -1, -1)
-        h = torch.cat([cls, h], dim=1)
-
-        cls_mask = torch.zeros(bsz, 1, dtype=torch.bool, device=x_flat.device)
-        padding_mask = torch.cat([cls_mask, ~token_mask], dim=1)
-
-        h = self.encoder(h, src_key_padding_mask=padding_mask)
         if self.pooling == "cls":
+            cls = self.cls_token.expand(bsz, -1, -1)
+            h = torch.cat([cls, h], dim=1)
+            cls_mask = torch.zeros(bsz, 1, dtype=torch.bool, device=x_flat.device)
+            padding_mask = torch.cat([cls_mask, ~token_mask], dim=1)
+            h = self.encoder(h, src_key_padding_mask=padding_mask)
             pooled = h[:, 0]
         else:
+            padding_mask = ~token_mask
+            # Transformer attention cannot handle a row in which every key is
+            # masked. Unmasking one query is harmless because masked tokens are
+            # excluded again by the pooling operation below.
+            all_padding = padding_mask.all(dim=1)
+            if all_padding.any():
+                padding_mask = padding_mask.clone()
+                padding_mask[all_padding, 0] = False
+            h = self.encoder(h, src_key_padding_mask=padding_mask)
             valid = token_mask.unsqueeze(-1).float()
-            pooled = (h[:, 1:] * valid).sum(dim=1) / valid.sum(dim=1).clamp_min(1.0)
+            pooled = (h * valid).sum(dim=1)
+            if self.pooling == "mean":
+                pooled = pooled / valid.sum(dim=1).clamp_min(1.0)
 
         return self.output(self.norm(pooled))
 

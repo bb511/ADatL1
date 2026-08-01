@@ -22,6 +22,7 @@ class PairingDiagnostics(Callback):
     def __init__(
         self,
         output_name: str = "pairing_rep_data",
+        projector_output_name: str | None = "jetclr_clean_proj_data",
         view1_name: str = "pairing_view1_data",
         view2_name: str = "pairing_view2_data",
         dataset_1: str = "normal",
@@ -39,6 +40,7 @@ class PairingDiagnostics(Callback):
     ):
         super().__init__()
         self.output_name = output_name
+        self.projector_output_name = projector_output_name
         self.view1_name = view1_name
         self.view2_name = view2_name
         self.dataset_1 = dataset_1
@@ -78,6 +80,7 @@ class PairingDiagnostics(Callback):
         self.raw_mask = {self.dataset_1: [], self.dataset_2: []}
         self.closure_1 = []
         self.closure_2 = []
+        self.projector_reps = []
 
     def on_test_batch_end(
         self, trainer, pl_module, outputs, batch, batch_idx, dataloader_idx: int = 0
@@ -101,6 +104,19 @@ class PairingDiagnostics(Callback):
                 self.reps[dset_name].append(outputs[self.output_name][:remaining].detach().cpu())
                 self.raw[dset_name].append(x[:remaining])
                 self.raw_mask[dset_name].append(mask[:remaining])
+
+        if dset_name == self.dataset_1 and self.projector_output_name is not None:
+            if self.projector_output_name not in outputs:
+                raise KeyError(
+                    "Pairing projector diagnostic output "
+                    f"{self.projector_output_name!r} is missing for dataset "
+                    f"{dset_name!r}. Available outputs: {sorted(outputs)}"
+                )
+            remaining = self._remaining(self.projector_reps)
+            if remaining > 0:
+                self.projector_reps.append(
+                    outputs[self.projector_output_name][:remaining].detach().cpu()
+                )
 
         if dset_name == self.closure_dataset:
             missing = [name for name in (self.view1_name, self.view2_name) if name not in outputs]
@@ -137,6 +153,11 @@ class PairingDiagnostics(Callback):
         ]
         if missing:
             raise RuntimeError(f"Pairing diagnostics collected no outputs for: {missing}")
+        if self.projector_output_name is not None and not self.projector_reps:
+            raise RuntimeError(
+                "Pairing diagnostics collected no projector outputs for "
+                f"{self.dataset_1!r} from {self.projector_output_name!r}."
+            )
         z1 = torch.cat(self.reps[self.dataset_1], dim=0)
         z2 = torch.cat(self.reps[self.dataset_2], dim=0)
         x1 = torch.cat(self.raw[self.dataset_1], dim=0)
@@ -170,6 +191,19 @@ class PairingDiagnostics(Callback):
             min_participation_rank=self.min_participation_rank,
             max_top_pc_fraction=self.max_top_pc_fraction,
         )
+        projector_embedding = {}
+        if self.projector_output_name is not None:
+            projector = torch.cat(self.projector_reps, dim=0)
+            projector_embedding = {
+                f"projector_{key}": value
+                for key, value in self._embedding_statistics(
+                    projector,
+                    min_active_fraction=self.min_active_fraction,
+                    min_effective_rank=self.min_effective_rank,
+                    min_participation_rank=self.min_participation_rank,
+                    max_top_pc_fraction=self.max_top_pc_fraction,
+                ).items()
+            }
 
         if pairs.idx_1.numel():
             smd_after = standardized_mean_differences(x1, x2, pairs.idx_1, pairs.idx_2)
@@ -229,6 +263,7 @@ class PairingDiagnostics(Callback):
             "n_dataset_1": int(z1.shape[0]),
             "n_dataset_2": int(z2.shape[0]),
             **embedding,
+            **projector_embedding,
         }
 
     def _remaining(self, values: list[torch.Tensor]) -> int:
@@ -237,9 +272,9 @@ class PairingDiagnostics(Callback):
         return max(self.max_events_per_dataset - sum(value.shape[0] for value in values), 0)
 
     @staticmethod
-    def _finite_mean(values: torch.Tensor) -> float:
+    def _finite_mean(values: torch.Tensor) -> float | None:
         finite = values[torch.isfinite(values)]
-        return finite.mean().item() if finite.numel() else float("nan")
+        return finite.mean().item() if finite.numel() else None
 
     @staticmethod
     def _masked_value_smd(
@@ -272,7 +307,7 @@ class PairingDiagnostics(Callback):
         min_effective_rank: float = 6.0,
         min_participation_rank: float = 4.5,
         max_top_pc_fraction: float = 0.5,
-    ) -> dict[str, float | bool | list[str]]:
+    ) -> dict[str, float | bool | list[str] | None]:
         z = z.float()
         finite_fraction = torch.isfinite(z).float().mean().item()
         safe = torch.nan_to_num(z)
@@ -307,7 +342,7 @@ class PairingDiagnostics(Callback):
         sample = torch.nn.functional.normalize(safe[: min(2048, safe.shape[0])], dim=1)
         cosine = sample @ sample.T
         offdiag = ~torch.eye(sample.shape[0], dtype=torch.bool)
-        mean_offdiag_cosine = cosine[offdiag].mean().item() if offdiag.any() else float("nan")
+        mean_offdiag_cosine = cosine[offdiag].mean().item() if offdiag.any() else None
         return {
             "embedding_finite_fraction": finite_fraction,
             "embedding_mean_feature_std": std.mean().item(),

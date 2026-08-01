@@ -13,6 +13,7 @@ from scripts import jetclr_campaign
 
 _STAGE7_SPECS = jetclr_campaign.stage7_specs()
 _STAGE8_SPECS = jetclr_campaign.stage8_specs()
+_STAGE9_SPECS, _STAGE9_CANONICAL = jetclr_campaign._stage9_source_design()
 
 
 def _pairing_metrics(collapse_pass: bool = True) -> dict:
@@ -53,6 +54,20 @@ def _anomaly_metrics(value: float = 0.8) -> dict:
     }
 
 
+def _stage9_anomaly_metrics(value: float = 0.8, n_signal: int = 10_000) -> dict:
+    """Return a bounded held-out metric artifact without reading the sealed split."""
+    metrics = _anomaly_metrics(value)
+    metrics.update({"macro_median_auprc": 0.4, "n_normal": 32_768})
+    metrics["per_dataset"]["signal"].update(
+        {
+            "n_signal": n_signal,
+            "tpr_at_fpr_0.01": 0.2,
+            "tpr_at_fpr_0.001": 0.05,
+        }
+    )
+    return metrics
+
+
 def _stage4_training_metrics(variance_weight: float, covariance_weight: float) -> dict:
     """Return an internally consistent Stage-4 training-loss decomposition."""
     ntxent = 2.0
@@ -81,11 +96,12 @@ def _write_manifest(root: Path) -> dict:
     stage6 = jetclr_campaign.stage6_specs()
     stage7 = _STAGE7_SPECS
     stage8 = _STAGE8_SPECS
+    stage9 = _STAGE9_SPECS
     manifest = {
         "schema_version": 1,
         "campaign_id": "jetclr_test_deadbeef",
         "git": {"commit": "deadbeef", "branch": "test", "source": "/source"},
-        "deployment": {"path": "/deployment", "commit": "deadbeef"},
+        "deployment": {"path": str(root), "commit": "deadbeef"},
         "config": {"tree_sha256": "config"},
         "data": {"root": "/data", "tree_sha256": "data"},
         "environment": {"uv": "/uv", "venv": "/venv"},
@@ -163,6 +179,16 @@ def _write_manifest(root: Path) -> dict:
             "source_campaign_id": jetclr_campaign.STAGE8_SOURCE_CAMPAIGN,
             "candidates": stage8,
             "design_sha256": jetclr_campaign._value_sha256(stage8),
+        },
+        "stage9": {
+            "train": False,
+            "test": True,
+            "frozen_recipe": "layers2_var0.5_cov0.005",
+            "completed_epoch": jetclr_campaign.STAGE8_SELECTED_COMPLETED_EPOCH,
+            "scheduler_total_steps": jetclr_campaign.STAGE8_SCHEDULER_TOTAL_STEPS,
+            "canonical_checkpoint": _STAGE9_CANONICAL,
+            "candidates": stage9,
+            "design_sha256": jetclr_campaign._value_sha256(stage9),
         },
     }
     manifest["manifest_payload_sha256"] = jetclr_campaign._value_sha256(manifest)
@@ -1492,3 +1518,140 @@ def test_collect_stage8_promotes_on_five_fresh_pairs_and_reports_eight_hybrids(
         jetclr_campaign._sha256(Path(summary["hybrid_eight_seed_csv"]))
         == summary["hybrid_eight_seed_csv_sha256"]
     )
+
+
+def test_stage9_freezes_canonical_recipe_and_packs_two_nodes(tmp_path: Path) -> None:
+    """Stage 9 must preregister the canonical encoder before test access."""
+    specs = _STAGE9_SPECS
+    canonical = _STAGE9_CANONICAL
+    assert len(specs) == 8
+    assert [spec["seed"] for spec in specs] == list(jetclr_campaign.STAGE9_SEEDS)
+    assert len({spec["source_checkpoint_sha256"] for spec in specs}) == 8
+    assert all(spec["source_recipe_name"] == "layers2_var0.5_cov0.005" for spec in specs)
+    assert all(spec["completed_epoch"] == 1 for spec in specs)
+    assert canonical["selection_frozen_before_test"] is True
+    assert canonical["seed"] == 456
+    assert canonical["checkpoint_sha256"] == (
+        "8ce02d89201f130b5c97526ab95ae68badb295928da2f10768b0ea40e9993ecf"
+    )
+
+    config_dir = Path(jetclr_campaign.__file__).resolve().parents[1] / "configs"
+    with initialize_config_dir(config_dir=str(config_dir), version_base="1.3"):
+        config = compose(
+            config_name="train",
+            overrides=[
+                "experiment=physics/jetclr_pairing",
+                "trainer=gpu",
+                "train=false",
+                "test=true",
+                *specs[0]["overrides"],
+            ],
+        )
+    assert config.algorithm.model.n_layers == 2
+    assert config.algorithm.encoder_variance_weight == 0.5
+    assert config.algorithm.encoder_covariance_weight == 0.005
+    assert config.algorithm.scheduler.total_steps == 24_480
+
+    manifest = _write_manifest(tmp_path)
+    launchers = jetclr_campaign._write_stage9_launchers(tmp_path, manifest)
+    stage9 = launchers["stage9"].read_text(encoding="utf-8")
+    collector = launchers["collector"].read_text(encoding="utf-8")
+    submitter = launchers["submitter"].read_text(encoding="utf-8")
+    assert "#SBATCH --array=0-1%2" in stage9
+    assert "#SBATCH --gpus-per-node=4" in stage9
+    assert "run-stage9" in stage9
+    assert "collect-stage9" in collector
+    assert 'dependency="afterok:$stage9_job"' in submitter
+
+
+def test_stage9_run_and_collect_authenticate_one_shot_test_outputs(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Eight frozen checkpoints are tested once and aggregated without reselection."""
+    manifest = _write_manifest(tmp_path)
+    entrypoint = tmp_path / "src" / "train.py"
+    entrypoint.parent.mkdir(parents=True)
+    entrypoint.write_text("# synthetic entrypoint\n", encoding="utf-8")
+    monkeypatch.setattr(jetclr_campaign, "_assert_runtime", lambda _: tmp_path)
+    observed_commands = []
+
+    def fake_run(command, **kwargs):
+        observed_commands.append(command)
+        output_arg = next(value for value in command if value.startswith("paths.output_dir="))
+        output = Path(output_arg.split("=", 1)[1])
+        candidate_id = int(output.parents[0].name.removeprefix("candidate_"))
+        pairing_dir = output / "metrics" / "pairing_diagnostics" / "last"
+        anomaly_dir = output / "metrics" / "embedding_anomaly" / "last"
+        pairing_dir.mkdir(parents=True)
+        anomaly_dir.mkdir(parents=True)
+        pairing = _pairing_metrics()
+        pairing.update(
+            {
+                "n_dataset_1": 32_768,
+                "n_dataset_2": 32_768,
+                "embedding_effective_rank": 15.0 + candidate_id,
+            }
+        )
+        anomaly = _stage9_anomaly_metrics(0.80 + 0.001 * candidate_id)
+        (pairing_dir / "pairing_diagnostics.json").write_text(
+            json.dumps(pairing), encoding="utf-8"
+        )
+        (anomaly_dir / "embedding_anomaly.json").write_text(json.dumps(anomaly), encoding="utf-8")
+        return SimpleNamespace(returncode=0)
+
+    monkeypatch.setattr(jetclr_campaign.subprocess, "run", fake_run)
+    for candidate_id in range(8):
+        jetclr_campaign.run_stage9(tmp_path, candidate_id)
+    # Idempotent result authentication must not run the sealed evaluation again.
+    jetclr_campaign.run_stage9(tmp_path, 0)
+    assert len(observed_commands) == 8
+    assert all(
+        "train=false" in command and "test=true" in command for command in observed_commands
+    )
+    assert all("data.max_val_batches=4" in command for command in observed_commands)
+    assert all("data.max_normal_eval_batches=8" in command for command in observed_commands)
+    assert all("callbacks.last_epoch_ckpt=null" in command for command in observed_commands)
+    assert all(
+        "evaluation.callbacks.embedding_anomaly.reference_size=32768" in command
+        and "evaluation.callbacks.embedding_anomaly.max_query_events=32768" in command
+        for command in observed_commands
+    )
+
+    output = jetclr_campaign.collect_stage9(tmp_path)
+    summary = json.loads(output.read_text(encoding="utf-8"))
+    assert summary["test_accessed"] is True
+    assert summary["n_frozen_checkpoints"] == 8
+    assert summary["canonical_checkpoint"]["seed"] == 456
+    assert summary["canonical_selection_frozen_before_test"] is True
+    assert summary["post_test_selection_performed"] is False
+    assert "did not alter" in summary["no_post_test_selection_statement"]
+    assert summary["aggregate_test_metrics"]["test_macro_mean_auroc"]["n"] == 8
+    assert len(summary["result_payload_hashes_by_seed"]) == 8
+    for artifact in summary["artifacts"].values():
+        path = Path(artifact["path"])
+        assert jetclr_campaign._sha256(path) == artifact["sha256"]
+
+
+def test_stage9_failed_test_launch_cannot_be_repeated(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """An access sentinel must fail closed if a sealed-test process is interrupted."""
+    _write_manifest(tmp_path)
+    monkeypatch.setattr(jetclr_campaign, "_assert_runtime", lambda _: tmp_path)
+    launches = 0
+
+    def fake_run(command, **kwargs):
+        nonlocal launches
+        launches += 1
+        return SimpleNamespace(returncode=9)
+
+    monkeypatch.setattr(jetclr_campaign.subprocess, "run", fake_run)
+    with pytest.raises(
+        jetclr_campaign.subprocess.CalledProcessError, match="returned non-zero exit status 9"
+    ):
+        jetclr_campaign.run_stage9(tmp_path, 0)
+    access = tmp_path / "stage9" / "candidate_000" / "test_access.json"
+    assert access.is_file()
+    with pytest.raises(RuntimeError, match="Refusing to repeat"):
+        jetclr_campaign.run_stage9(tmp_path, 0)
+    assert launches == 1

@@ -173,6 +173,30 @@ STAGE8_SOURCE_CONFIGS = (
         "6aa762be009195995513b85cc3c437d831aedbdf0e24459ddb323fe0df564cf7",
     ),
 )
+STAGE9_N_CANDIDATES = 8
+STAGE9_SOURCE_CAMPAIGN = "jetclr_20260801_4a130b4"
+STAGE9_SOURCE_ROOT = DEFAULT_CAMPAIGN_BASE / STAGE9_SOURCE_CAMPAIGN
+STAGE9_SOURCE_SUMMARY = STAGE9_SOURCE_ROOT / "stage8" / "summary.json"
+STAGE9_SOURCE_SUMMARY_SHA256 = "084d49d1e867b2ac697ff488871d99baa08488cf2fb1a5e8ffc468fc2d68641f"
+STAGE9_SOURCE_SUMMARY_CSV = STAGE9_SOURCE_ROOT / "stage8" / "summary.csv"
+STAGE9_SOURCE_SUMMARY_CSV_SHA256 = (
+    "a2103e3c8f4242dbfc7a776e497f8acb93eb09f2235359c9a39d237bfef6e791"
+)
+STAGE9_SOURCE_PAIRED_CSV = STAGE9_SOURCE_ROOT / "stage8" / "paired_deltas.csv"
+STAGE9_SOURCE_PAIRED_CSV_SHA256 = (
+    "80801eeaa2770df7543584aa09d3f18cff5af8e62028e0dc1372f9d8cc8059d2"
+)
+STAGE9_SOURCE_HYBRID_CSV = STAGE9_SOURCE_ROOT / "stage8" / "hybrid_eight_seed.csv"
+STAGE9_SOURCE_HYBRID_CSV_SHA256 = (
+    "1ab9ad102332743ce50380db36ab8da7552e81c3fe5c48a6922859b790d03f1e"
+)
+STAGE9_SEEDS = (42, 123, 456, 1337, 2027, 4242, 31415, 271828)
+STAGE9_CANONICAL_SEED = 456
+STAGE9_CANONICAL_CHECKPOINT_SHA256 = (
+    "8ce02d89201f130b5c97526ab95ae68badb295928da2f10768b0ea40e9993ecf"
+)
+STAGE9_EVENTS = 32_768
+STAGE9_BATCH_SIZE = 8192
 
 
 def _stage1_base_overrides() -> dict[str, Any]:
@@ -758,6 +782,148 @@ def stage8_specs() -> list[dict[str, Any]]:
     return specs
 
 
+def _stage9_source_design() -> tuple[list[dict[str, Any]], dict[str, Any]]:
+    """Authenticate the promoted eight-seed population and freeze test identities."""
+    source_files = (
+        (STAGE9_SOURCE_SUMMARY, STAGE9_SOURCE_SUMMARY_SHA256),
+        (STAGE9_SOURCE_SUMMARY_CSV, STAGE9_SOURCE_SUMMARY_CSV_SHA256),
+        (STAGE9_SOURCE_PAIRED_CSV, STAGE9_SOURCE_PAIRED_CSV_SHA256),
+        (STAGE9_SOURCE_HYBRID_CSV, STAGE9_SOURCE_HYBRID_CSV_SHA256),
+    )
+    for path, digest in source_files:
+        if not path.is_file() or _sha256(path) != digest:
+            raise ValueError(f"Stage-9 source artifact fingerprint mismatch: {path}")
+
+    summary = json.loads(STAGE9_SOURCE_SUMMARY.read_text(encoding="utf-8"))
+    if (
+        summary.get("status") != "complete"
+        or summary.get("test_accessed") is not False
+        or summary.get("fresh_confirmation", {}).get("promotion") is not True
+        or summary.get("eight_seed_hybrid_summary", {}).get("all_scientifically_eligible")
+        is not True
+        or summary.get("hybrid_eight_seed_csv_sha256") != STAGE9_SOURCE_HYBRID_CSV_SHA256
+    ):
+        raise ValueError("Stage-9 requires the promoted, test-sealed Stage-8 population.")
+
+    source_manifest = _load_campaign(STAGE9_SOURCE_ROOT)
+    hybrid_specs = [
+        spec
+        for spec in source_manifest["stage8"]["candidates"]
+        if not spec["is_architecture_control"]
+    ]
+    if len(hybrid_specs) != len(STAGE8_SEEDS):
+        raise ValueError("Stage-9 frozen recipe requires all five Stage-8 hybrid specs.")
+    frozen = hybrid_specs[0]
+    if frozen.get("source_architecture_name") != "layers2" or frozen.get(
+        "regularization_params"
+    ) != {
+        "algorithm.encoder_variance_weight": 0.5,
+        "algorithm.encoder_covariance_weight": 0.005,
+    }:
+        raise ValueError("Stage-9 source is not the frozen layers2 hybrid recipe.")
+    if any(
+        spec["params"] != frozen["params"] or spec["overrides"] != frozen["overrides"]
+        for spec in hybrid_specs
+    ):
+        raise ValueError("Stage-9 hybrid recipe changed across Stage-8 seeds.")
+
+    with STAGE9_SOURCE_HYBRID_CSV.open(encoding="utf-8", newline="") as handle:
+        rows = list(csv.DictReader(handle))
+    if len(rows) != STAGE9_N_CANDIDATES:
+        raise ValueError("Stage-9 requires exactly eight frozen hybrid checkpoints.")
+    if sorted(int(row["seed"]) for row in rows) != list(STAGE9_SEEDS):
+        raise ValueError("Stage-9 source seed population changed.")
+
+    specs = []
+    for row in sorted(rows, key=lambda item: int(item["seed"])):
+        seed = int(row["seed"])
+        if (
+            row["architecture_name"] != "layers2"
+            or row["is_architecture_control"] != "False"
+            or row["scientifically_eligible"] != "True"
+        ):
+            raise ValueError(
+                f"Stage-9 source checkpoint is scientifically ineligible: seed {seed}"
+            )
+        result_path = Path(row["result_path"])
+        result = json.loads(result_path.read_text(encoding="utf-8"))
+        result_digest = result.pop("result_payload_sha256", None)
+        if (
+            result_digest != row["result_payload_sha256"]
+            or _value_sha256(result) != result_digest
+            or int(result.get("seed", seed)) != seed
+        ):
+            raise ValueError(f"Stage-9 source result fingerprint mismatch: {result_path}")
+        source_artifacts = result.get("artifacts", {})
+        if not source_artifacts:
+            raise ValueError(f"Stage-9 source result has no artifact inventory: {result_path}")
+        for artifact in source_artifacts.values():
+            artifact_path = Path(artifact["path"])
+            if not artifact_path.is_file() or _sha256(artifact_path) != artifact["sha256"]:
+                raise ValueError(f"Stage-9 source result artifact mismatch: {artifact_path}")
+        checkpoint_path = Path(row["checkpoint_path"])
+        if not checkpoint_path.is_file() or _sha256(checkpoint_path) != row["checkpoint_sha256"]:
+            raise ValueError(f"Stage-9 source checkpoint mismatch: {checkpoint_path}")
+        candidate_id = len(specs)
+        identity = {
+            "candidate_id": candidate_id,
+            "kind": "sealed_test_evaluation",
+            "name": f"layers2_hybrid_seed{seed}",
+            "seed": seed,
+            "source_campaign_id": STAGE9_SOURCE_CAMPAIGN,
+            "source_result_path": str(result_path),
+            "source_result_payload_sha256": result_digest,
+            "source_result_artifacts": source_artifacts,
+            "source_checkpoint_path": str(checkpoint_path),
+            "source_checkpoint_sha256": row["checkpoint_sha256"],
+            "source_validation_worst_quartile_mean_auroc": float(row["worst_quartile_mean_auroc"]),
+            "source_validation_row_sha256": _value_sha256(row),
+            "source_architecture_name": "layers2",
+            "source_recipe_name": "layers2_var0.5_cov0.005",
+            "completed_epoch": STAGE8_SELECTED_COMPLETED_EPOCH,
+            "scheduler_total_steps": STAGE8_SCHEDULER_TOTAL_STEPS,
+            "params": frozen["params"],
+            "overrides": frozen["overrides"],
+        }
+        specs.append({**identity, "spec_sha256": _value_sha256(identity)})
+
+    median_validation = statistics.median(
+        spec["source_validation_worst_quartile_mean_auroc"] for spec in specs
+    )
+    canonical = min(
+        specs,
+        key=lambda spec: (
+            abs(spec["source_validation_worst_quartile_mean_auroc"] - median_validation),
+            spec["seed"],
+        ),
+    )
+    if (
+        canonical["seed"] != STAGE9_CANONICAL_SEED
+        or canonical["source_checkpoint_sha256"] != STAGE9_CANONICAL_CHECKPOINT_SHA256
+    ):
+        raise ValueError("Stage-9 preregistered canonical checkpoint identity changed.")
+    canonical_record = {
+        "selection_frozen_before_test": True,
+        "selection_metric": "validation/worst_quartile_mean_auroc",
+        "selection_rule": (
+            "closest to the eight-seed validation median; ties choose the lower seed"
+        ),
+        "validation_median": median_validation,
+        "seed": canonical["seed"],
+        "checkpoint_path": canonical["source_checkpoint_path"],
+        "checkpoint_sha256": canonical["source_checkpoint_sha256"],
+        "candidate_id": canonical["candidate_id"],
+    }
+    canonical_record["record_sha256"] = _value_sha256(canonical_record)
+    return specs, canonical_record
+
+
+def stage9_specs() -> list[dict[str, Any]]:
+    """Return eight immutable, exactly-once sealed-test evaluation specs."""
+    specs, _ = _stage9_source_design()
+    return specs
+
+
 def _canonical_json(value: Any) -> str:
     """Serialize a value into the canonical representation used for identities."""
     return json.dumps(value, sort_keys=True, separators=(",", ":"), allow_nan=False)
@@ -1340,6 +1506,29 @@ def _write_stage8_launchers(root: Path, manifest: Mapping[str, Any]) -> dict[str
     return destinations
 
 
+def _write_stage9_launchers(root: Path, manifest: Mapping[str, Any]) -> dict[str, Path]:
+    """Write the two-node/eight-GPU sealed-test array and dependent collector."""
+    templates = _write_stage6_launchers(root, manifest)
+    destinations = {
+        "stage9": root / "slurm" / "stage9.sbatch",
+        "collector": root / "slurm" / "stage9_collect.sbatch",
+        "submitter": root / "slurm" / "submit_stage9.sh",
+    }
+    source_by_role = {
+        "stage9": templates["stage6"],
+        "collector": templates["collector"],
+        "submitter": templates["submitter"],
+    }
+    for role, destination in destinations.items():
+        text = source_by_role[role].read_text(encoding="utf-8")
+        text = text.replace("stage6", "stage9").replace("jetclr-s6", "jetclr-s9")
+        text = text.replace("#SBATCH --array=0-2%3", "#SBATCH --array=0-1%2")
+        text = text.replace("#SBATCH --time=12:00:00", "#SBATCH --time=02:00:00")
+        destination.write_text(text, encoding="utf-8")
+        destination.chmod(0o755)
+    return destinations
+
+
 def initialize(
     root: Path,
     deployment: Path,
@@ -1443,6 +1632,7 @@ def initialize(
         or stage7_summary.get("epoch8_to16", {}).get("extension_to_epoch32") is not False
     ):
         raise RuntimeError("Stage-8 horizon does not match the frozen Stage-7 decision.")
+    stage9, stage9_canonical = _stage9_source_design()
 
     deployment.parent.mkdir(parents=True, exist_ok=True)
     git = shutil.which("git")
@@ -1477,6 +1667,8 @@ def initialize(
     _atomic_json(root / "design" / "stage6_candidates.json", stage6)
     _atomic_json(root / "design" / "stage7_candidates.json", stage7)
     _atomic_json(root / "design" / "stage8_candidates.json", stage8)
+    _atomic_json(root / "design" / "stage9_candidates.json", stage9)
+    _atomic_json(root / "design" / "stage9_canonical_checkpoint.json", stage9_canonical)
     manifest = {
         "schema_version": 1,
         "campaign_id": campaign_id,
@@ -1617,6 +1809,33 @@ def initialize(
             "candidates": stage8,
             "design_sha256": _value_sha256(stage8),
         },
+        "stage9": {
+            "train": False,
+            "test": True,
+            "test_accessed_at_initialization": False,
+            "evaluation_policy": "one frozen evaluation per seed; no post-test selection",
+            "events_per_pairing_dataset": STAGE9_EVENTS,
+            "anomaly_reference_events": STAGE9_EVENTS,
+            "anomaly_query_events": STAGE9_EVENTS,
+            "batch_size": STAGE9_BATCH_SIZE,
+            "source_campaign_id": STAGE9_SOURCE_CAMPAIGN,
+            "source_summary": str(STAGE9_SOURCE_SUMMARY),
+            "source_summary_sha256": STAGE9_SOURCE_SUMMARY_SHA256,
+            "source_summary_csv": str(STAGE9_SOURCE_SUMMARY_CSV),
+            "source_summary_csv_sha256": STAGE9_SOURCE_SUMMARY_CSV_SHA256,
+            "source_paired_csv": str(STAGE9_SOURCE_PAIRED_CSV),
+            "source_paired_csv_sha256": STAGE9_SOURCE_PAIRED_CSV_SHA256,
+            "source_hybrid_csv": str(STAGE9_SOURCE_HYBRID_CSV),
+            "source_hybrid_csv_sha256": STAGE9_SOURCE_HYBRID_CSV_SHA256,
+            "source_promotion": True,
+            "source_all_scientifically_eligible": True,
+            "frozen_recipe": "layers2_var0.5_cov0.005",
+            "completed_epoch": STAGE8_SELECTED_COMPLETED_EPOCH,
+            "scheduler_total_steps": STAGE8_SCHEDULER_TOTAL_STEPS,
+            "canonical_checkpoint": stage9_canonical,
+            "candidates": stage9,
+            "design_sha256": _value_sha256(stage9),
+        },
     }
     manifest["manifest_payload_sha256"] = _value_sha256(manifest)
     _atomic_json(root / "campaign.json", manifest)
@@ -1629,6 +1848,7 @@ def initialize(
     _write_stage6_launchers(root, manifest)
     _write_stage7_launchers(root, manifest)
     _write_stage8_launchers(root, manifest)
+    _write_stage9_launchers(root, manifest)
     return launcher
 
 
@@ -2445,6 +2665,245 @@ def run_stage7(root: Path, candidate_id: int) -> Path:
         "source_checkpoint_sha256": spec["source_checkpoint_sha256"],
         "alias_checkpoint_path": str(alias_checkpoint),
         "command": command,
+        "artifacts": {
+            name: {"path": str(path), "sha256": _sha256(path)} for name, path in artifacts.items()
+        },
+        "pairing_metrics": pairing,
+        "anomaly_metrics": anomaly,
+    }
+    result["result_payload_sha256"] = _value_sha256(result)
+    _atomic_json(result_path, result)
+    print(result_path)
+    return result_path
+
+
+def run_stage9(root: Path, candidate_id: int) -> Path:
+    """Evaluate one frozen encoder exactly once on the sealed held-out test split."""
+    root = root.resolve()
+    manifest = _load_campaign(root)
+    deployment = _assert_runtime(manifest)
+    specs = manifest["stage9"]["candidates"]
+    if candidate_id < 0 or candidate_id >= len(specs):
+        raise ValueError(f"candidate-id must be between 0 and {len(specs) - 1}.")
+    spec = specs[candidate_id]
+    trial_root = root / "stage9" / f"candidate_{candidate_id:03d}"
+    result_path = trial_root / "result.json"
+    access_path = trial_root / "test_access.json"
+    if result_path.is_file():
+        result = json.loads(result_path.read_text(encoding="utf-8"))
+        digest = result.pop("result_payload_sha256", None)
+        if (
+            digest is None
+            or _value_sha256(result) != digest
+            or result.get("spec_sha256") != spec["spec_sha256"]
+            or result.get("test_accessed") is not True
+        ):
+            raise ValueError(f"Existing Stage-9 result fingerprint mismatch: {result_path}")
+        access_record = result.get("test_access_record", {})
+        if (
+            Path(access_record.get("path", "")) != access_path
+            or not access_path.is_file()
+            or _sha256(access_path) != access_record.get("sha256")
+        ):
+            raise ValueError(f"Existing Stage-9 access record mismatch: {access_path}")
+        print(result_path)
+        return result_path
+    if access_path.exists() or (trial_root / "failure.json").exists():
+        raise RuntimeError(
+            f"Refusing to repeat an incomplete sealed-test evaluation: {trial_root}"
+        )
+
+    source_result_path = Path(spec["source_result_path"])
+    source_result = json.loads(source_result_path.read_text(encoding="utf-8"))
+    source_digest = source_result.pop("result_payload_sha256", None)
+    if (
+        source_digest != spec["source_result_payload_sha256"]
+        or _value_sha256(source_result) != source_digest
+        or source_result.get("artifacts") != spec["source_result_artifacts"]
+    ):
+        raise ValueError(f"Stage-9 source result changed: {source_result_path}")
+    for artifact in spec["source_result_artifacts"].values():
+        artifact_path = Path(artifact["path"])
+        if not artifact_path.is_file() or _sha256(artifact_path) != artifact["sha256"]:
+            raise ValueError(f"Stage-9 source artifact changed: {artifact_path}")
+    source_checkpoint = Path(spec["source_checkpoint_path"])
+    if (
+        not source_checkpoint.is_file()
+        or _sha256(source_checkpoint) != spec["source_checkpoint_sha256"]
+    ):
+        raise ValueError(f"Stage-9 source checkpoint changed: {source_checkpoint}")
+
+    alias = trial_root / "checkpoint_alias" / "frozen"
+    alias.mkdir(parents=True, exist_ok=True)
+    alias_checkpoint = alias / "last.ckpt"
+    if not alias_checkpoint.exists():
+        alias_checkpoint.symlink_to(source_checkpoint)
+    if (
+        not alias_checkpoint.is_symlink()
+        or _sha256(alias_checkpoint) != spec["source_checkpoint_sha256"]
+    ):
+        raise ValueError(f"Stage-9 checkpoint alias mismatch: {alias_checkpoint}")
+
+    command = [
+        sys.executable,
+        "src/train.py",
+        "experiment=physics/jetclr_pairing",
+        "trainer=gpu",
+        "trainer.devices=[0]",
+        "train=false",
+        "test=true",
+        "+trainer.limit_val_batches=0",
+        "+trainer.enable_progress_bar=false",
+        "+trainer.enable_model_summary=false",
+        "callbacks.clear_ckpts=null",
+        "callbacks.last_epoch_ckpt=null",
+        "callbacks.rich_progress_bar=null",
+        "callbacks.model_summary=null",
+        "callbacks.log_data_mlflow=null",
+        "logger=csv",
+        f"seed={spec['seed']}",
+        f"data.batch_size={STAGE9_BATCH_SIZE}",
+        "data.max_val_batches=4",
+        # The normal loader supplies disjoint 32k reference and 32k query samples.
+        "data.max_normal_eval_batches=8",
+        f"evaluation.callbacks.pairing_diagnostics.max_events_per_dataset={STAGE9_EVENTS}",
+        f"evaluation.callbacks.embedding_anomaly.reference_size={STAGE9_EVENTS}",
+        f"evaluation.callbacks.embedding_anomaly.max_query_events={STAGE9_EVENTS}",
+        "experiment_name=checkpoint_alias",
+        "run_name=frozen",
+        f"paths.log_dir={root / 'logs'}",
+        f"paths.output_dir={trial_root / 'output'}",
+        f"paths.checkpoints_dir={trial_root}",
+        f"hydra.run.dir={trial_root / 'hydra'}",
+        "extras.print_config=false",
+        "extras.enforce_tags=false",
+        *spec["overrides"],
+    ]
+    environment = os.environ.copy()
+    environment.update(
+        {
+            "PROJECT_ROOT": str(deployment),
+            "DATA_DIR": manifest["data"]["root"],
+            "LOG_DIR": str(root / "logs"),
+            "OUTPUT_DIR": str(root / "outputs"),
+            "CHECKPOINT_DIR": str(root / "checkpoints"),
+            "WANDB_MODE": "offline",
+            "HYDRA_FULL_ERROR": "1",
+        }
+    )
+    (trial_root / "output").mkdir(parents=True)
+    started = datetime.now(timezone.utc)
+    _atomic_json(
+        access_path,
+        {
+            "schema_version": 1,
+            "campaign_id": manifest["campaign_id"],
+            "candidate_id": candidate_id,
+            "spec_sha256": spec["spec_sha256"],
+            "seed": spec["seed"],
+            "source_checkpoint_sha256": spec["source_checkpoint_sha256"],
+            "command_sha256": _value_sha256(command),
+            "test_accessed": True,
+            "access_started_at": started.isoformat(),
+            "policy": "at most one sealed-test process launch for this frozen checkpoint",
+        },
+    )
+    completed = subprocess.run(command, cwd=deployment, env=environment, check=False)  # nosec B603
+    if completed.returncode:
+        _atomic_json(
+            trial_root / "failure.json",
+            {
+                "schema_version": 1,
+                "campaign_id": manifest["campaign_id"],
+                "candidate_id": candidate_id,
+                "spec_sha256": spec["spec_sha256"],
+                "returncode": completed.returncode,
+                "test_accessed": True,
+                "slurm_job_id": os.environ.get("SLURM_JOB_ID", "local"),
+            },
+        )
+        raise subprocess.CalledProcessError(completed.returncode, command)
+    finished = datetime.now(timezone.utc)
+    if (
+        not alias_checkpoint.is_symlink()
+        or _sha256(alias_checkpoint) != spec["source_checkpoint_sha256"]
+    ):
+        raise ValueError("Stage-9 evaluation modified its checkpoint alias.")
+    checkpoint_paths = list(trial_root.rglob("*.ckpt"))
+    if checkpoint_paths != [alias_checkpoint]:
+        raise ValueError(f"Stage-9 wrote an unexpected checkpoint: {checkpoint_paths}")
+
+    pairing_path = _single_artifact(trial_root / "output", "pairing_diagnostics.json")
+    anomaly_path = _single_artifact(trial_root / "output", "embedding_anomaly.json")
+    pairing = _metric_json(
+        pairing_path,
+        (
+            "raw_selection_score",
+            "mnn_coverage",
+            "embedding_finite_fraction",
+            "embedding_effective_rank",
+            "embedding_participation_rank",
+            "embedding_top_pc_fraction",
+            "projector_embedding_finite_fraction",
+            "projector_embedding_effective_rank",
+            "n_dataset_1",
+            "n_dataset_2",
+        ),
+    )
+    anomaly = _metric_json(
+        anomaly_path,
+        (
+            "macro_mean_auroc",
+            "macro_median_auroc",
+            "worst_quartile_mean_auroc",
+            "n_normal",
+        ),
+    )
+    if (
+        int(pairing["n_dataset_1"]) != STAGE9_EVENTS
+        or int(pairing["n_dataset_2"]) != STAGE9_EVENTS
+        or int(anomaly["n_normal"]) != STAGE9_EVENTS
+        or not _valid_anomaly_aurocs(anomaly)
+        or any(
+            not 0 < int(metrics.get("n_signal", -1)) <= STAGE9_EVENTS
+            for metrics in anomaly.get("per_dataset", {}).values()
+        )
+    ):
+        raise ValueError("Stage-9 test artifacts do not contain the preregistered event counts.")
+    artifacts = {"pairing_json": pairing_path, "anomaly_json": anomaly_path}
+    entrypoint = deployment / "src" / "train.py"
+    result = {
+        "schema_version": 1,
+        "campaign_id": manifest["campaign_id"],
+        "git_commit": manifest["git"]["commit"],
+        "candidate_id": candidate_id,
+        "spec_sha256": spec["spec_sha256"],
+        "seed": spec["seed"],
+        "source_campaign_id": spec["source_campaign_id"],
+        "source_result_path": str(source_result_path),
+        "source_result_payload_sha256": source_digest,
+        "source_checkpoint_path": str(source_checkpoint),
+        "source_checkpoint_sha256": spec["source_checkpoint_sha256"],
+        "alias_checkpoint_path": str(alias_checkpoint),
+        "command": command,
+        "command_sha256": _value_sha256(command),
+        "test_accessed": True,
+        "evaluation_started_at": started.isoformat(),
+        "evaluation_finished_at": finished.isoformat(),
+        "output_provenance": {
+            "train": False,
+            "test": True,
+            "evaluation_order": ["validation", "test"],
+            "final_callback_artifact_split": "test",
+            "contract": (
+                "src/train.py runs held-out test after validation; callback artifacts use "
+                "atomic overwrite, so artifacts collected after process exit are test outputs"
+            ),
+            "entrypoint_path": str(entrypoint),
+            "entrypoint_sha256": _sha256(entrypoint),
+        },
+        "test_access_record": {"path": str(access_path), "sha256": _sha256(access_path)},
+        "checkpoint_writes_disabled": True,
         "artifacts": {
             name: {"path": str(path), "sha256": _sha256(path)} for name, path in artifacts.items()
         },
@@ -4130,6 +4589,253 @@ def collect_stage8(root: Path) -> Path:
     return output
 
 
+def _stage9_summary_stats(values: Sequence[float]) -> dict[str, float | int]:
+    """Summarize one test metric across the complete frozen eight-seed population."""
+    if len(values) != STAGE9_N_CANDIDATES or not all(math.isfinite(value) for value in values):
+        raise ValueError("Stage-9 aggregate statistics require eight finite values.")
+    return {
+        "n": len(values),
+        "mean": statistics.mean(values),
+        "median": statistics.median(values),
+        "standard_deviation": statistics.stdev(values),
+        "minimum": min(values),
+        "maximum": max(values),
+    }
+
+
+def collect_stage9(root: Path) -> Path:
+    """Aggregate the one-shot test report without making any post-test selection."""
+    root = root.resolve()
+    manifest = _load_campaign(root)
+    stage9 = manifest["stage9"]
+    canonical = dict(stage9["canonical_checkpoint"])
+    canonical_digest = canonical.pop("record_sha256", None)
+    if (
+        canonical_digest is None
+        or _value_sha256(canonical) != canonical_digest
+        or canonical["seed"] != STAGE9_CANONICAL_SEED
+        or canonical["checkpoint_sha256"] != STAGE9_CANONICAL_CHECKPOINT_SHA256
+        or canonical["selection_frozen_before_test"] is not True
+    ):
+        raise ValueError("Stage-9 canonical checkpoint record changed after test unsealing.")
+    canonical["record_sha256"] = canonical_digest
+
+    per_seed_rows = []
+    per_dataset_rows = []
+    result_hashes = {}
+    seen_checkpoints = set()
+    expected_entrypoint_sha = _sha256(Path(manifest["deployment"]["path"]) / "src" / "train.py")
+    for spec in stage9["candidates"]:
+        result_path = root / "stage9" / f"candidate_{spec['candidate_id']:03d}" / "result.json"
+        if not result_path.is_file():
+            raise FileNotFoundError(result_path)
+        result = json.loads(result_path.read_text(encoding="utf-8"))
+        result_digest = result.pop("result_payload_sha256", None)
+        if result_digest is None or _value_sha256(result) != result_digest:
+            raise ValueError(f"Stage-9 result fingerprint mismatch: {result_path}")
+        if (
+            result.get("campaign_id") != manifest["campaign_id"]
+            or result.get("git_commit") != manifest["git"]["commit"]
+            or result.get("candidate_id") != spec["candidate_id"]
+            or result.get("spec_sha256") != spec["spec_sha256"]
+            or result.get("seed") != spec["seed"]
+            or result.get("source_checkpoint_sha256") != spec["source_checkpoint_sha256"]
+            or result.get("source_result_payload_sha256") != spec["source_result_payload_sha256"]
+            or result.get("test_accessed") is not True
+            or result.get("checkpoint_writes_disabled") is not True
+        ):
+            raise ValueError(f"Stage-9 result identity mismatch: {result_path}")
+        command = result.get("command", [])
+        required_arguments = {
+            "train=false",
+            "test=true",
+            f"data.batch_size={STAGE9_BATCH_SIZE}",
+            "data.max_val_batches=4",
+            "data.max_normal_eval_batches=8",
+            f"evaluation.callbacks.pairing_diagnostics.max_events_per_dataset={STAGE9_EVENTS}",
+            f"evaluation.callbacks.embedding_anomaly.reference_size={STAGE9_EVENTS}",
+            f"evaluation.callbacks.embedding_anomaly.max_query_events={STAGE9_EVENTS}",
+            "callbacks.clear_ckpts=null",
+            "callbacks.last_epoch_ckpt=null",
+        }
+        provenance = result.get("output_provenance", {})
+        access_record = result.get("test_access_record", {})
+        access_path = Path(access_record.get("path", ""))
+        if (
+            not required_arguments.issubset(command)
+            or command.count("test=true") != 1
+            or command.count("train=false") != 1
+            or _value_sha256(command) != result.get("command_sha256")
+            or provenance.get("final_callback_artifact_split") != "test"
+            or provenance.get("evaluation_order") != ["validation", "test"]
+            or provenance.get("entrypoint_sha256") != expected_entrypoint_sha
+            or not access_path.is_file()
+            or _sha256(access_path) != access_record.get("sha256")
+        ):
+            raise ValueError(f"Stage-9 test command provenance mismatch: {result_path}")
+        checkpoint_sha = result["source_checkpoint_sha256"]
+        if checkpoint_sha in seen_checkpoints:
+            raise ValueError("Stage-9 evaluated a frozen checkpoint more than once.")
+        seen_checkpoints.add(checkpoint_sha)
+        checkpoint_path = Path(result["source_checkpoint_path"])
+        if not checkpoint_path.is_file() or _sha256(checkpoint_path) != checkpoint_sha:
+            raise ValueError(f"Stage-9 checkpoint fingerprint mismatch: {checkpoint_path}")
+        if set(result.get("artifacts", {})) != {"pairing_json", "anomaly_json"}:
+            raise ValueError(f"Stage-9 result artifact inventory mismatch: {result_path}")
+        for artifact in result["artifacts"].values():
+            artifact_path = Path(artifact["path"])
+            if not artifact_path.is_file() or _sha256(artifact_path) != artifact["sha256"]:
+                raise ValueError(f"Stage-9 result artifact mismatch: {artifact_path}")
+
+        pairing = result["pairing_metrics"]
+        anomaly = result["anomaly_metrics"]
+        if (
+            int(pairing["n_dataset_1"]) != STAGE9_EVENTS
+            or int(pairing["n_dataset_2"]) != STAGE9_EVENTS
+            or int(anomaly["n_normal"]) != STAGE9_EVENTS
+            or not _valid_anomaly_aurocs(anomaly)
+        ):
+            raise ValueError(f"Stage-9 result event/metric validation failed: {result_path}")
+        row = {
+            "candidate_id": spec["candidate_id"],
+            "seed": spec["seed"],
+            "is_preregistered_canonical": spec["seed"] == canonical["seed"],
+            "source_checkpoint_path": str(checkpoint_path),
+            "source_checkpoint_sha256": checkpoint_sha,
+            "result_path": str(result_path),
+            "result_payload_sha256": result_digest,
+            "test_pairing_n_dataset_1": pairing["n_dataset_1"],
+            "test_pairing_n_dataset_2": pairing["n_dataset_2"],
+            "test_anomaly_n_normal": anomaly["n_normal"],
+            "test_encoder_effective_rank": pairing["embedding_effective_rank"],
+            "test_encoder_participation_rank": pairing["embedding_participation_rank"],
+            "test_encoder_top_pc_fraction": pairing["embedding_top_pc_fraction"],
+            "test_projector_effective_rank": pairing["projector_embedding_effective_rank"],
+            "test_raw_selection_score": pairing["raw_selection_score"],
+            "test_macro_mean_auroc": anomaly["macro_mean_auroc"],
+            "test_macro_median_auroc": anomaly["macro_median_auroc"],
+            "test_worst_quartile_mean_auroc": anomaly["worst_quartile_mean_auroc"],
+            "test_macro_median_auprc": anomaly["macro_median_auprc"],
+        }
+        per_seed_rows.append(row)
+        for dataset, metrics in sorted(anomaly["per_dataset"].items()):
+            if not 0 < int(metrics.get("n_signal", -1)) <= STAGE9_EVENTS:
+                raise ValueError(f"Stage-9 signal event count changed for {dataset}.")
+            per_dataset_rows.append(
+                {
+                    "candidate_id": spec["candidate_id"],
+                    "seed": spec["seed"],
+                    "dataset": dataset,
+                    "n_signal": metrics["n_signal"],
+                    "auroc": metrics["auroc"],
+                    "auprc": metrics["auprc"],
+                    "tpr_at_fpr_0.01": metrics["tpr_at_fpr_0.01"],
+                    "tpr_at_fpr_0.001": metrics["tpr_at_fpr_0.001"],
+                }
+            )
+        result_hashes[str(spec["seed"])] = result_digest
+
+    if len(per_seed_rows) != STAGE9_N_CANDIDATES or seen_checkpoints != {
+        spec["source_checkpoint_sha256"] for spec in stage9["candidates"]
+    }:
+        raise ValueError("Stage-9 one-shot evaluation population is incomplete.")
+    dataset_names = sorted({row["dataset"] for row in per_dataset_rows})
+    if any(
+        len([row for row in per_dataset_rows if row["dataset"] == dataset]) != STAGE9_N_CANDIDATES
+        for dataset in dataset_names
+    ):
+        raise ValueError("Stage-9 per-dataset test population is incomplete.")
+
+    overall_metric_columns = (
+        "test_encoder_effective_rank",
+        "test_encoder_participation_rank",
+        "test_encoder_top_pc_fraction",
+        "test_projector_effective_rank",
+        "test_raw_selection_score",
+        "test_macro_mean_auroc",
+        "test_macro_median_auroc",
+        "test_worst_quartile_mean_auroc",
+        "test_macro_median_auprc",
+    )
+    aggregate_metrics = {
+        name: _stage9_summary_stats([float(row[name]) for row in per_seed_rows])
+        for name in overall_metric_columns
+    }
+    aggregate_rows = []
+    for metric, values in aggregate_metrics.items():
+        aggregate_rows.append({"scope": "overall", "dataset": "", "metric": metric, **values})
+    per_dataset_aggregates = {}
+    for dataset in dataset_names:
+        dataset_rows = [row for row in per_dataset_rows if row["dataset"] == dataset]
+        per_dataset_aggregates[dataset] = {}
+        for metric in ("auroc", "auprc", "tpr_at_fpr_0.01", "tpr_at_fpr_0.001"):
+            values = _stage9_summary_stats([float(row[metric]) for row in dataset_rows])
+            per_dataset_aggregates[dataset][metric] = values
+            aggregate_rows.append(
+                {"scope": "dataset", "dataset": dataset, "metric": metric, **values}
+            )
+
+    per_seed_rows.sort(key=lambda row: int(row["seed"]))
+    per_dataset_rows.sort(key=lambda row: (str(row["dataset"]), int(row["seed"])))
+    per_seed_table = root / "stage9" / "per_seed_test.csv"
+    per_dataset_table = root / "stage9" / "per_dataset_test.csv"
+    aggregate_table = root / "stage9" / "aggregate_test.csv"
+    _atomic_csv(per_seed_table, per_seed_rows)
+    _atomic_csv(per_dataset_table, per_dataset_rows)
+    _atomic_csv(aggregate_table, aggregate_rows)
+    summary = {
+        "schema_version": 1,
+        "campaign_id": manifest["campaign_id"],
+        "status": "complete",
+        "test_accessed": True,
+        "test_access_policy": "each of eight frozen checkpoints evaluated exactly once",
+        "frozen_recipe": stage9["frozen_recipe"],
+        "completed_epoch": stage9["completed_epoch"],
+        "scheduler_total_steps": stage9["scheduler_total_steps"],
+        "n_frozen_checkpoints": len(per_seed_rows),
+        "seeds": [int(row["seed"]) for row in per_seed_rows],
+        "event_counts": {
+            "pairing_per_dataset": STAGE9_EVENTS,
+            "anomaly_reference": STAGE9_EVENTS,
+            "anomaly_query_cap_per_dataset": STAGE9_EVENTS,
+        },
+        "canonical_checkpoint": canonical,
+        "canonical_selection_frozen_before_test": True,
+        "post_test_selection_performed": False,
+        "no_post_test_selection_statement": (
+            "Test metrics are reported only; they did not alter the recipe, epoch, seed, "
+            "canonical checkpoint, or any selection decision."
+        ),
+        "aggregate_test_metrics": aggregate_metrics,
+        "per_dataset_aggregate_test_metrics": per_dataset_aggregates,
+        "source_artifact_hashes": {
+            "summary_json": STAGE9_SOURCE_SUMMARY_SHA256,
+            "summary_csv": STAGE9_SOURCE_SUMMARY_CSV_SHA256,
+            "paired_deltas_csv": STAGE9_SOURCE_PAIRED_CSV_SHA256,
+            "hybrid_eight_seed_csv": STAGE9_SOURCE_HYBRID_CSV_SHA256,
+        },
+        "result_payload_hashes_by_seed": result_hashes,
+        "artifacts": {
+            "per_seed_test_csv": {
+                "path": str(per_seed_table),
+                "sha256": _sha256(per_seed_table),
+            },
+            "per_dataset_test_csv": {
+                "path": str(per_dataset_table),
+                "sha256": _sha256(per_dataset_table),
+            },
+            "aggregate_test_csv": {
+                "path": str(aggregate_table),
+                "sha256": _sha256(aggregate_table),
+            },
+        },
+    }
+    output = root / "stage9" / "summary.json"
+    _atomic_json(output, summary)
+    print(output)
+    return output
+
+
 def status(root: Path) -> dict[str, Any]:
     """Report trial completion state without mutating the campaign."""
     root = root.resolve()
@@ -4249,6 +4955,21 @@ def status(root: Path) -> dict[str, Any]:
         stage8_trials.append(
             {"candidate_id": spec["candidate_id"], "name": spec["name"], "state": state}
         )
+    stage9_trials = []
+    for spec in manifest.get("stage9", {}).get("candidates", []):
+        trial_root = root / "stage9" / f"candidate_{spec['candidate_id']:03d}"
+        state = (
+            "complete"
+            if (trial_root / "result.json").is_file()
+            else "accessed_incomplete"
+            if (trial_root / "test_access.json").is_file()
+            else "failed"
+            if (trial_root / "failure.json").is_file()
+            else "pending"
+        )
+        stage9_trials.append(
+            {"candidate_id": spec["candidate_id"], "name": spec["name"], "state": state}
+        )
     value = {
         "campaign_id": manifest["campaign_id"],
         "complete": all(item["state"] == "complete" for item in trials),
@@ -4312,6 +5033,16 @@ def status(root: Path) -> dict[str, Any]:
             "n_complete": sum(item["state"] == "complete" for item in stage8_trials),
             "n_total": len(stage8_trials),
             "trials": stage8_trials,
+        },
+        "stage9": {
+            "complete": bool(stage9_trials)
+            and all(item["state"] == "complete" for item in stage9_trials),
+            "n_complete": sum(item["state"] == "complete" for item in stage9_trials),
+            "n_total": len(stage9_trials),
+            "test_accessed": any(
+                item["state"] in {"complete", "accessed_incomplete"} for item in stage9_trials
+            ),
+            "trials": stage9_trials,
         },
     }
     print(json.dumps(value, indent=2, sort_keys=True))
@@ -4395,6 +5126,13 @@ def main() -> None:
     collect_stage8_parser.add_argument("--root", type=Path, required=True)
     stage8_status_parser = subparsers.add_parser("stage8-status")
     stage8_status_parser.add_argument("--root", type=Path, required=True)
+    stage9_parser = subparsers.add_parser("run-stage9")
+    stage9_parser.add_argument("--root", type=Path, required=True)
+    stage9_parser.add_argument("--candidate-id", type=int, required=True)
+    collect_stage9_parser = subparsers.add_parser("collect-stage9")
+    collect_stage9_parser.add_argument("--root", type=Path, required=True)
+    stage9_status_parser = subparsers.add_parser("stage9-status")
+    stage9_status_parser.add_argument("--root", type=Path, required=True)
     args = parser.parse_args()
 
     if args.command == "init":
@@ -4466,6 +5204,12 @@ def main() -> None:
     elif args.command == "collect-stage8":
         collect_stage8(args.root)
     elif args.command == "stage8-status":
+        status(args.root)
+    elif args.command == "run-stage9":
+        run_stage9(args.root, args.candidate_id)
+    elif args.command == "collect-stage9":
+        collect_stage9(args.root)
+    elif args.command == "stage9-status":
         status(args.root)
     elif args.command == "status":
         status(args.root)

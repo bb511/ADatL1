@@ -1422,7 +1422,7 @@
 #     trainer.devices=[1]
 
 # ========================================================================
-# CONSISTENCY TRAINING  (study: consistency_vs_kl_b16k, 14 Pareto points, trimmed to 11 around the knee (endpoints kept))
+# CONSISTENCY TRAINING  (study: consistency_vs_kl_b16k, 16 Pareto points, trimmed to 12 around the knee (endpoints kept))
 # ========================================================================
 # ------------------------------------------------------------------------
 # trial 131: consistency=-0.00019748, kl=37.302
@@ -1786,6 +1786,39 @@
 #     trainer.gradient_clip_val=0.0 \
 #     trainer=gpu \
 #     trainer.devices=[2]
+
+# ------------------------------------------------------------------------
+# trial 742: consistency=-5.1868e-05, kl=198.6
+# ------------------------------------------------------------------------
+# taskset -c 9-11 \
+# python3 src/train.py \
+#     paths.raw_data_dir=/path/to/adl1t_data/parquet_files \
+#     experiment=physics/dsvae_agnostic \
+#     experiment_name=physics_dsvae_pareto \
+#     run_name=consistency_t742 \
+#     callbacks.wasserstein_dist=null \
+#     callbacks.thres_drift=null \
+#     callbacks.cap_sn_zb=null \
+#     callbacks.wasserstein_dist_ema_ckpt=null \
+#     callbacks.thres_drift_ema_ckpt=null \
+#     callbacks.cap_sn_zb_ema_ckpt=null \
+#     ~evaluation.evaluator.ckpts.summary.operational_drift_ema \
+#     ~evaluation.evaluator.ckpts.summary.w1dist_ema_normal_vs_SingleNeutrino_E-10-gun \
+#     ~evaluation.evaluator.ckpts.summary.cap_ema_normal_vs_SingleNeutrino_E-10-gun \
+#     algorithm.encoder.activation=gelu \
+#     algorithm.encoder.add_counts=True \
+#     algorithm.encoder.clamp_zlogvar_range='[-20,10]' \
+#     algorithm.encoder.object_phi_nodes='{FET:[8],egammas:[32,16],jets:[32,16],muons:[8,8],taus:[32,16]}' \
+#     algorithm.encoder.pooling=sum_max \
+#     algorithm.encoder.rho_nodes='[32,16,16]' \
+#     algorithm.kl_scale=0.0003 \
+#     algorithm.kl_warmup_frac=0.05 \
+#     algorithm.optimizer.betas='[0.9,0.99]' \
+#     algorithm.optimizer.lr=0.0004189709509241736 \
+#     algorithm.optimizer.weight_decay=0.001 \
+#     trainer.gradient_clip_val=0.0 \
+#     trainer=gpu \
+#     trainer.devices=[3]
 
 # ========================================================================
 # STABILITY TRAINING  (study: drift_vs_kl_b16k, 2 Pareto points)

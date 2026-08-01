@@ -108,7 +108,9 @@ def insertion_point(lines: list[str], title: str) -> int:
     raise SystemExit("no sections found in target")
 
 
-def splice(generated: Path, target: Path, title: str, dry: bool) -> tuple[bool, str]:
+def splice(
+    generated: Path, target: Path, title: str, dry: bool, replace: bool = False
+) -> tuple[bool, str]:
     gen_lines = generated.read_text().splitlines()
     tgt_lines = target.read_text().splitlines()
 
@@ -120,27 +122,50 @@ def splice(generated: Path, target: Path, title: str, dry: bool) -> tuple[bool, 
     _, gs, ge = gen_secs[0]
     block = gen_lines[gs:ge]
 
-    if any(t == title for t, _, _ in sections(tgt_lines)):
+    # `base_lines` is the target with any pre-existing section of this title
+    # excised. Without --replace an existing section is left alone: re-running
+    # the generator after more trials land would otherwise silently duplicate a
+    # strategy's points.
+    existing = [s for s in sections(tgt_lines) if s[0] == title]
+    if existing and not replace:
         return False, "target already has a %s section - skipped" % title
+    if len(existing) > 1:
+        return False, "target has %d %s sections - refusing" % (len(existing), title)
+    if existing:
+        _, ts, te = existing[0]
+        old_block = tgt_lines[ts:te]
+        base_lines = tgt_lines[:ts] + tgt_lines[te:]
+    else:
+        old_block = []
+        base_lines = tgt_lines
 
-    at = insertion_point(tgt_lines, title)
-    new_lines = tgt_lines[:at] + block + tgt_lines[at:]
+    at = insertion_point(base_lines, title)
+    new_lines = base_lines[:at] + block + base_lines[at:]
 
-    # Purely-additive check: strip the inserted span back out and require an
-    # exact match with what was there before.
-    if new_lines[:at] + new_lines[at + len(block) :] != tgt_lines:
+    # Strip the inserted span back out and require an exact match with the
+    # target minus its old section. This is what proves that nothing outside
+    # this one section moved, whether inserting or replacing.
+    if new_lines[:at] + new_lines[at + len(block) :] != base_lines:
         return False, "ABORT: splice would alter existing content"
 
     n_cmds = sum(1 for l in block if l.startswith("# python3 src/train.py"))
+    old_cmds = sum(1 for l in old_block if l.startswith("# python3 src/train.py"))
     before = sum(1 for l in tgt_lines if l.startswith("# python3 src/train.py"))
     after = sum(1 for l in new_lines if l.startswith("# python3 src/train.py"))
-    if after != before + n_cmds:
-        return False, "ABORT: command count %d != %d + %d" % (after, before, n_cmds)
+    if after != before - old_cmds + n_cmds:
+        return False, "ABORT: command count %d != %d - %d + %d" % (
+            after,
+            before,
+            old_cmds,
+            n_cmds,
+        )
 
     if not dry:
         target.write_text("\n".join(new_lines).rstrip("\n") + "\n")
-    return True, "%d commands inserted at line %d (was %d, now %d)" % (
+    verb = "replaced" if old_block else "inserted"
+    return True, "%d commands %s at line %d (was %d, now %d)" % (
         n_cmds,
+        verb,
         at + 1,
         before,
         after,
@@ -155,6 +180,10 @@ def main() -> int:
                     help="section title to move (default: CONSISTENCY)")
     ap.add_argument("--exclude", action="append", default=[],
                     help="glob of generated filenames to skip (repeatable)")
+    ap.add_argument("--replace", action="store_true",
+                    help="replace an existing section of this title instead of "
+                         "skipping the file (use after re-fetching fronts from "
+                         "a study that gained trials)")
     ap.add_argument("--dry-run", action="store_true")
     args = ap.parse_args()
 
@@ -180,7 +209,8 @@ def main() -> int:
             print("%-42s SKIP (no target: %s)" % (rel, target))
             skipped += 1
             continue
-        good, msg = splice(gen, target, args.strategy_title, args.dry_run)
+        good, msg = splice(gen, target, args.strategy_title, args.dry_run,
+                           replace=args.replace)
         print("%-42s %s %s" % (rel, "OK  " if good else "FAIL", msg))
         if good:
             ok += 1

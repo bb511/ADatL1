@@ -553,6 +553,8 @@ def design(root: Path, campaign_id: str, n_candidates: int) -> None:
             "encoder_bias": False,
             "encoder_batchnorm": False,
             "encoder_trainable_during_svdd": True,
+            "reporting_seed_controls_training_order": True,
+            "data_split_seed_remains_fixed": True,
             "objective": "one_class",
             "center_init_method": "mean",
         },
@@ -1251,6 +1253,7 @@ def run_candidate(
                     f"algorithm.pretrained_encoder_ckpt={pretrained_encoder}",
                     "algorithm.pretrained_encoder_strict=true",
                     "algorithm.enforce_architecture_constraints=true",
+                    f"data.train_seed={int(seed)}",
                 ]
             )
         environment = os.environ.copy()
@@ -1759,6 +1762,7 @@ def run_retrain(root: Path, index: int) -> None:
                 f"algorithm.pretrained_encoder_ckpt={pretrained_encoder}",
                 "algorithm.pretrained_encoder_strict=true",
                 "algorithm.enforce_architecture_constraints=true",
+                f"data.train_seed={seed}",
             ]
         )
     overrides = generation.build_retrain_overrides(

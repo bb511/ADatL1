@@ -58,6 +58,7 @@ class CausalChamberDataModule(LightningDataModule):
         robust_quantiles: list[float] | tuple[float, float] = (0.05, 0.95),
         clip_value: float | None = 10.0,
         seed: int = 123,
+        train_seed: int | None = None,
         num_workers: int = 0,
     ):
         super().__init__()
@@ -71,7 +72,10 @@ class CausalChamberDataModule(LightningDataModule):
         self.loader: _CausalChamberLoader | None = None
         self.feature_names: list[str] | None = None
         self.contract: dict | None = None
-        self.shuffler = torch.Generator().manual_seed(seed)
+        # Keep the split seed and optimization-order seed independent. This is
+        # essential for fine-tuning from one common pretrained initialization.
+        self.train_seed = int(seed if train_seed is None else train_seed)
+        self.shuffler = torch.Generator().manual_seed(self.train_seed)
 
         self._validate_config()
 

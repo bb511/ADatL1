@@ -24,6 +24,20 @@ def _write_experiment(path: Path, n_rows: int, offset: float) -> None:
             writer.writerow(meta + controls + features)
 
 
+def test_train_seed_is_independent_from_split_seed(tmp_path: Path) -> None:
+    common = {"data_dir": str(tmp_path), "seed": 314159}
+    first = CausalChamberDataModule(**common, train_seed=1001)
+    repeat = CausalChamberDataModule(**common, train_seed=1001)
+    second = CausalChamberDataModule(**common, train_seed=1002)
+    fallback = CausalChamberDataModule(**common)
+
+    first_order = torch.randperm(64, generator=first.shuffler)
+    assert torch.equal(first_order, torch.randperm(64, generator=repeat.shuffler))
+    assert not torch.equal(first_order, torch.randperm(64, generator=second.shuffler))
+    assert fallback.train_seed == 314159
+    assert first.hparams.seed == second.hparams.seed == 314159
+
+
 def test_causal_chamber_datamodule_splits_and_labels(tmp_path: Path) -> None:
     dataset_dir = tmp_path / "lt_interventions_standard_v1"
     _write_experiment(dataset_dir / "uniform_reference.csv", n_rows=40, offset=0.0)

@@ -267,11 +267,13 @@ strategy-specific Optuna studies. Its frozen design is:
   checked-in baseline;
 - AE, VAE, SVDD, and RealNVP;
 - five development model seeds with one fixed data split seed;
-- all five label-free criteria recorded from the same training trajectory;
+- all six label-free criteria recorded from the same training trajectory;
 - five prespecified random-pairing seeds and five independently trained encoder
   pair tables recorded on every trajectory for pairing-proxy sensitivity;
 - one candidate per detector/criterion selected by mean within-seed rank;
-- ten independent reporting model seeds per selected configuration;
+- ten independent reporting model seeds per selected configuration; SVDD keeps
+  the pretrained initialization and data split fixed while the reporting seed
+  controls the fine-tuning minibatch order;
 - five pairing-encoder seeds, with seed 123 prespecified as primary and the
   others used only for pairing-stability analysis;
 - all 58 interventions sealed during search and retraining, then evaluated once
@@ -287,7 +289,7 @@ as a looser L1 sensitivity study in Appendix D of
 described as an L1-like fixed-background-budget experiment, but not as a
 measurement at the physical L1 trigger rate.
 
-This is 1,300 search fits and 200 final retrains. Clariden allocates a complete
+This is 1,300 search fits and 240 final retrains. Clariden allocates a complete
 four-GPU node even for a one-GPU request, so generated campaign scripts pack four
 independent fits per node. Every fit uses MLflow and carries the campaign, commit,
 candidate-pool, seed, checkpoint, and pair-table fingerprints needed to reproduce

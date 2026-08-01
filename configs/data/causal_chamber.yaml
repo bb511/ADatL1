@@ -35,6 +35,9 @@ robust_quantiles: [0.05, 0.95]
 clip_value: 10.0
 
 seed: ${seed}
+# Optional independent seed for pre-batched training order. Campaign SVDD runs
+# vary this while preserving the fixed split above.
+train_seed: null
 
 signal_experiments:
   - uniform_blue_mid

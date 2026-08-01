@@ -966,6 +966,7 @@ def _training_command(
                 f"algorithm.pretrained_encoder_ckpt={audit['primary_pair_encoder_checkpoint']}",
                 "algorithm.pretrained_encoder_strict=true",
                 "algorithm.enforce_architecture_constraints=true",
+                f"data.train_seed={int(trajectory['reporting_seed'])}",
             ]
         )
     if epochs < 200:

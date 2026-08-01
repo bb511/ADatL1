@@ -23,6 +23,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Mapping, Sequence
 
+from scipy.stats import qmc
+
 REPO_ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_DATA_DIR = Path("/iopsstor/scratch/cscs/podagiu/data")
 DEFAULT_CAMPAIGN_BASE = Path("/iopsstor/scratch/cscs/vjimenez/jetclr/campaigns")
@@ -43,6 +45,123 @@ DATA_FILES = tuple(
     for split in ("train", "valid")
     for name in ("torch_cache.pt", "torch_mask.pt", "torch_l1bit.pt")
 )
+STAGE1_SEED = 123
+STAGE1_N_CANDIDATES = 48
+STAGE1_TRAIN_BATCHES = 256
+
+
+def _stage1_base_overrides() -> dict[str, Any]:
+    """Return the production augmentation and optimizer anchor."""
+    return {
+        "data.batch_size": 2048,
+        "trainer.gradient_clip_val": 0.1,
+        "algorithm.optimizer.lr": 3e-4,
+        "algorithm.optimizer.weight_decay": 1e-4,
+        "algorithm.loss.temperature": 0.1,
+        "algorithm.detector_smearing.prob": 0.8,
+        "algorithm.detector_smearing.strength": 0.5,
+        "algorithm.object_mask.prob": 0.8,
+        "algorithm.object_mask.object_prob": 0.05,
+        "algorithm.lorentz_rotation.prob": 0.5,
+    }
+
+
+def _hydra_scalar(value: Any) -> str:
+    """Render a scalar as a stable Hydra command-line value."""
+    if value is None:
+        return "null"
+    if isinstance(value, float):
+        return f"{value:.10g}"
+    return str(value).lower() if isinstance(value, bool) else str(value)
+
+
+def stage1_specs() -> list[dict[str, Any]]:
+    """Return eight anchor ablations and forty deterministic Sobol candidates."""
+    base = _stage1_base_overrides()
+    anchors: list[tuple[str, dict[str, Any]]] = [
+        ("production", {}),
+        ("no_smearing", {"algorithm.detector_smearing": None}),
+        ("no_object_dropout", {"algorithm.object_mask": None}),
+        ("no_rotation", {"algorithm.lorentz_rotation": None}),
+        (
+            "no_augmentation",
+            {
+                "algorithm.detector_smearing": None,
+                "algorithm.object_mask": None,
+                "algorithm.lorentz_rotation": None,
+            },
+        ),
+        (
+            "weak_augmentation",
+            {
+                "algorithm.detector_smearing.prob": 0.4,
+                "algorithm.detector_smearing.strength": 0.25,
+                "algorithm.object_mask.prob": 0.4,
+                "algorithm.object_mask.object_prob": 0.025,
+                "algorithm.lorentz_rotation.prob": 0.25,
+            },
+        ),
+        (
+            "strong_augmentation",
+            {
+                "algorithm.detector_smearing.prob": 1.0,
+                "algorithm.detector_smearing.strength": 1.0,
+                "algorithm.object_mask.prob": 1.0,
+                "algorithm.object_mask.object_prob": 0.1,
+                "algorithm.lorentz_rotation.prob": 1.0,
+            },
+        ),
+        (
+            "large_batch_low_temperature",
+            {"data.batch_size": 4096, "algorithm.loss.temperature": 0.05},
+        ),
+    ]
+    candidates: list[tuple[str, str, dict[str, Any]]] = []
+    for name, changes in anchors:
+        params = dict(base)
+        params.update(changes)
+        candidates.append((name, "anchor", params))
+
+    unit = qmc.Sobol(d=10, scramble=True, seed=STAGE1_SEED).random_base2(m=6)[:40]
+    batches = (2048, 4096, 8192)
+    clips = (0.05, 0.1, 0.5)
+    weights = (1e-6, 1e-5, 1e-4, 3e-4)
+    temperatures = (0.05, 0.1, 0.2)
+
+    def choice(values: Sequence[Any], coordinate: float) -> Any:
+        return values[min(int(coordinate * len(values)), len(values) - 1)]
+
+    for index, row in enumerate(unit):
+        params = {
+            "data.batch_size": choice(batches, row[0]),
+            "trainer.gradient_clip_val": choice(clips, row[1]),
+            "algorithm.optimizer.lr": 10 ** (-4.30103 + row[2] * 1.30103),
+            "algorithm.optimizer.weight_decay": choice(weights, row[3]),
+            "algorithm.loss.temperature": choice(temperatures, row[4]),
+            "algorithm.detector_smearing.prob": 0.2 + 0.8 * row[5],
+            "algorithm.detector_smearing.strength": 0.1 + 1.4 * row[6],
+            "algorithm.object_mask.prob": 0.2 + 0.8 * row[7],
+            "algorithm.object_mask.object_prob": 0.15 * row[8],
+            "algorithm.lorentz_rotation.prob": row[9],
+        }
+        candidates.append((f"sobol_{index:02d}", "sobol", params))
+
+    specs = []
+    for candidate_id, (name, kind, params) in enumerate(candidates):
+        overrides = [f"{key}={_hydra_scalar(value)}" for key, value in params.items()]
+        identity = {
+            "candidate_id": candidate_id,
+            "name": name,
+            "kind": kind,
+            "seed": STAGE1_SEED,
+            "train_batches": STAGE1_TRAIN_BATCHES,
+            "params": params,
+            "overrides": overrides,
+        }
+        specs.append({**identity, "spec_sha256": _value_sha256(identity)})
+    if len(specs) != STAGE1_N_CANDIDATES:
+        raise AssertionError("Stage-1 design must contain exactly 48 candidates.")
+    return specs
 
 
 def _canonical_json(value: Any) -> str:
@@ -264,6 +383,117 @@ def _write_launcher(root: Path, manifest: Mapping[str, Any]) -> Path:
     return launcher
 
 
+def _write_stage1_launchers(root: Path, manifest: Mapping[str, Any]) -> dict[str, Path]:
+    """Write the packed Stage-1 array, CPU collector, and dependency submitter."""
+    deployment = manifest["deployment"]["path"]
+    uv = manifest["environment"]["uv"]
+    data_dir = manifest["data"]["root"]
+    common = textwrap.dedent(
+        f"""\
+        set -euo pipefail
+        readonly REPO={deployment}
+        readonly CAMPAIGN_ROOT={root}
+        readonly UV={uv}
+        export PROJECT_ROOT="$REPO"
+        export DATA_DIR={data_dir}
+        export RAW_DATA_DIR={data_dir}/raw
+        export LOG_DIR="$CAMPAIGN_ROOT/logs"
+        export OUTPUT_DIR="$CAMPAIGN_ROOT/outputs"
+        export CHECKPOINT_DIR="$CAMPAIGN_ROOT/checkpoints"
+        export WANDB_MODE=offline
+        export HYDRA_FULL_ERROR=1
+        export UV_PROJECT_ENVIRONMENT={manifest['environment']['venv']}
+        cd "$REPO"
+        test "$(git rev-parse HEAD)" = "{manifest['git']['commit']}"
+        test -z "$(git status --porcelain)"
+        """
+    )
+    stage1 = root / "slurm" / "stage1.sbatch"
+    stage1_text = textwrap.dedent(
+        f"""\
+        #!/usr/bin/env bash
+        #SBATCH --job-name=jetclr-s1-{manifest['campaign_id'][-12:]}
+        #SBATCH --account=a0166
+        #SBATCH --partition=normal
+        #SBATCH --time=12:00:00
+        #SBATCH --nodes=1
+        #SBATCH --ntasks=4
+        #SBATCH --cpus-per-task=72
+        #SBATCH --gpus-per-node=4
+        #SBATCH --mem=450G
+        #SBATCH --array=0-11%4
+        #SBATCH --output={root}/slurm/%x-%A_%a.out
+        #SBATCH --error={root}/slurm/%x-%A_%a.err
+
+        """
+    )
+    stage1_text += common
+    stage1_text += textwrap.dedent(
+        """
+        base=$((SLURM_ARRAY_TASK_ID * 4))
+        pids=()
+        for offset in 0 1 2 3; do
+            candidate_id=$((base + offset))
+            srun --exclusive --ntasks=1 --cpus-per-task=72 --gpus-per-node=1 --mem=110G \
+                "$UV" run --frozen --no-sync python scripts/jetclr_campaign.py run-stage1 \
+                --root "$CAMPAIGN_ROOT" --candidate-id "$candidate_id" &
+            pids+=("$!")
+        done
+        status=0
+        for pid in "${pids[@]}"; do
+            wait "$pid" || status=1
+        done
+        exit "$status"
+        """
+    )
+    stage1.parent.mkdir(parents=True, exist_ok=True)
+    stage1.write_text(stage1_text, encoding="utf-8")
+    stage1.chmod(0o755)
+
+    collector = root / "slurm" / "stage1_collect.sbatch"
+    collector_text = textwrap.dedent(
+        f"""\
+        #!/usr/bin/env bash
+        #SBATCH --job-name=jetclr-s1-collect-{manifest['campaign_id'][-8:]}
+        #SBATCH --account=a0166
+        #SBATCH --partition=normal
+        #SBATCH --time=00:30:00
+        #SBATCH --nodes=1
+        #SBATCH --ntasks=1
+        #SBATCH --cpus-per-task=4
+        #SBATCH --mem=16G
+        #SBATCH --output={root}/slurm/%x-%j.out
+        #SBATCH --error={root}/slurm/%x-%j.err
+
+        """
+    )
+    collector_text += common
+    collector_text += (
+        '"$UV" run --frozen --no-sync python scripts/jetclr_campaign.py collect-stage1 '
+        '--root "$CAMPAIGN_ROOT"\n'
+    )
+    collector.write_text(collector_text, encoding="utf-8")
+    collector.chmod(0o755)
+
+    submitter = root / "slurm" / "submit_stage1.sh"
+    submitter.write_text(
+        textwrap.dedent(
+            f"""\
+            #!/usr/bin/env bash
+            set -euo pipefail
+            readonly SCRIPT_DIR={root}/slurm
+            stage1_job=$(sbatch --parsable "$SCRIPT_DIR/stage1.sbatch")
+            collector_job=$(sbatch --parsable --dependency="afterok:$stage1_job" \
+                "$SCRIPT_DIR/stage1_collect.sbatch")
+            printf 'stage1=%s collector=%s\\n' "$stage1_job" "$collector_job"
+            """
+        ),
+        encoding="utf-8",
+    )
+    submitter.chmod(0o755)
+    return {"stage1": stage1, "collector": collector, "submitter": submitter}
+
+
 def initialize(
     root: Path,
     deployment: Path,
@@ -306,7 +536,9 @@ def initialize(
 
     root.mkdir(parents=True)
     specs = canary_specs()
+    stage1 = stage1_specs()
     _atomic_json(root / "design" / "canary_trials.json", specs)
+    _atomic_json(root / "design" / "stage1_candidates.json", stage1)
     manifest = {
         "schema_version": 1,
         "campaign_id": campaign_id,
@@ -330,10 +562,18 @@ def initialize(
         },
         "environment": environment,
         "canary": {"trials": specs, "design_sha256": _value_sha256(specs)},
+        "stage1": {
+            "seed": STAGE1_SEED,
+            "train_batches": STAGE1_TRAIN_BATCHES,
+            "candidates": stage1,
+            "design_sha256": _value_sha256(stage1),
+        },
     }
     manifest["manifest_payload_sha256"] = _value_sha256(manifest)
     _atomic_json(root / "campaign.json", manifest)
-    return _write_launcher(root, manifest)
+    launcher = _write_launcher(root, manifest)
+    _write_stage1_launchers(root, manifest)
+    return launcher
 
 
 def _load_campaign(root: Path) -> dict[str, Any]:
@@ -395,6 +635,30 @@ def _last_finite_metrics(path: Path) -> dict[str, float]:
     if "train/loss_mean" not in metrics:
         raise RuntimeError(f"Canary produced no finite train/loss_mean in {path}.")
     return metrics
+
+
+def _metric_json(path: Path, required: Sequence[str]) -> dict[str, Any]:
+    """Load a metric artifact and require its selection fields to be finite."""
+    value = json.loads(path.read_text(encoding="utf-8"))
+    if not isinstance(value, dict):
+        raise ValueError(f"Metric artifact must contain an object: {path}")
+    for name in required:
+        if name not in value:
+            raise ValueError(f"Metric artifact {path} is missing {name!r}.")
+        metric = value[name]
+        if isinstance(metric, bool) or not isinstance(metric, (int, float)):
+            raise ValueError(f"Metric {name!r} in {path} must be numeric.")
+        if not math.isfinite(float(metric)):
+            raise ValueError(f"Metric {name!r} in {path} must be finite.")
+    return value
+
+
+def _single_artifact(root: Path, name: str) -> Path:
+    """Resolve exactly one named evaluator artifact below a trial output."""
+    paths = sorted(root.rglob(name))
+    if len(paths) != 1:
+        raise RuntimeError(f"Expected one {name} below {root}, found {paths}.")
+    return paths[0]
 
 
 def run_trial(root: Path, trial_id: int) -> Path:
@@ -498,6 +762,154 @@ def run_trial(root: Path, trial_id: int) -> Path:
     return result_path
 
 
+def run_stage1(root: Path, candidate_id: int) -> Path:
+    """Run one fixed Stage-1 candidate and authenticate its three metric artifacts."""
+    root = root.resolve()
+    manifest = _load_campaign(root)
+    deployment = _assert_runtime(manifest)
+    specs = manifest["stage1"]["candidates"]
+    if candidate_id < 0 or candidate_id >= len(specs):
+        raise ValueError(f"candidate-id must be between 0 and {len(specs) - 1}.")
+    spec = specs[candidate_id]
+    trial_root = root / "stage1" / f"candidate_{candidate_id:03d}"
+    result_path = trial_root / "result.json"
+    if result_path.is_file():
+        result = json.loads(result_path.read_text(encoding="utf-8"))
+        digest = result.pop("result_payload_sha256", None)
+        if digest is None or _value_sha256(result) != digest:
+            raise ValueError(f"Existing Stage-1 result fingerprint mismatch: {result_path}")
+        if result.get("spec_sha256") != spec["spec_sha256"]:
+            raise ValueError(f"Existing Stage-1 result identity mismatch: {result_path}")
+        print(result_path)
+        return result_path
+
+    command = [
+        sys.executable,
+        "src/train.py",
+        "experiment=physics/jetclr_pairing",
+        "trainer=gpu",
+        "trainer.devices=[0]",
+        "trainer.min_epochs=1",
+        "trainer.max_epochs=1",
+        f"+trainer.limit_train_batches={manifest['stage1']['train_batches']}",
+        "+trainer.limit_val_batches=0",
+        "+trainer.enable_progress_bar=false",
+        "+trainer.enable_model_summary=false",
+        "callbacks.rich_progress_bar=null",
+        "callbacks.model_summary=null",
+        "callbacks.log_data_mlflow=null",
+        "logger=csv",
+        "test=false",
+        f"seed={manifest['stage1']['seed']}",
+        "data.max_val_batches=4",
+        "data.max_normal_eval_batches=8",
+        "evaluation.callbacks.pairing_diagnostics.max_events_per_dataset=8192",
+        "evaluation.callbacks.embedding_anomaly.reference_size=8192",
+        "evaluation.callbacks.embedding_anomaly.max_query_events=8192",
+        f"experiment_name=jetclr_stage1_{manifest['campaign_id']}",
+        f"run_name=candidate_{candidate_id:03d}",
+        f"paths.log_dir={root / 'logs'}",
+        f"paths.output_dir={trial_root / 'output'}",
+        f"paths.checkpoints_dir={trial_root / 'checkpoints'}",
+        f"hydra.run.dir={trial_root / 'hydra'}",
+        "extras.print_config=false",
+        "extras.enforce_tags=false",
+        *spec["overrides"],
+    ]
+    environment = os.environ.copy()
+    environment.update(
+        {
+            "PROJECT_ROOT": str(deployment),
+            "DATA_DIR": manifest["data"]["root"],
+            "LOG_DIR": str(root / "logs"),
+            "OUTPUT_DIR": str(root / "outputs"),
+            "CHECKPOINT_DIR": str(root / "checkpoints"),
+            "WANDB_MODE": "offline",
+            "HYDRA_FULL_ERROR": "1",
+        }
+    )
+    (trial_root / "output").mkdir(parents=True, exist_ok=True)
+    started = datetime.now(timezone.utc)
+    completed = subprocess.run(  # nosec B603 - fixed campaign argv without a shell
+        command, cwd=deployment, env=environment, check=False
+    )
+    if completed.returncode:
+        _atomic_json(
+            trial_root / "failure.json",
+            {
+                "schema_version": 1,
+                "campaign_id": manifest["campaign_id"],
+                "candidate_id": candidate_id,
+                "spec_sha256": spec["spec_sha256"],
+                "returncode": completed.returncode,
+                "slurm_job_id": os.environ.get("SLURM_JOB_ID", "local"),
+            },
+        )
+        raise subprocess.CalledProcessError(completed.returncode, command)
+
+    metrics_csv = _single_artifact(trial_root / "output", "metrics.csv")
+    training = _last_finite_metrics(metrics_csv)
+    pairing_path = _single_artifact(trial_root / "output", "pairing_diagnostics.json")
+    pairing = _metric_json(
+        pairing_path,
+        (
+            "selection_score",
+            "closure_recall_at_10",
+            "mnn_coverage",
+            "embedding_finite_fraction",
+            "embedding_active_fraction",
+            "embedding_effective_rank",
+            "embedding_participation_rank",
+            "embedding_top_pc_fraction",
+        ),
+    )
+    if not isinstance(pairing.get("collapse_pass"), bool) or not isinstance(
+        pairing.get("collapse_failures"), list
+    ):
+        raise ValueError(f"Pairing collapse gate is malformed: {pairing_path}")
+    anomaly_path = _single_artifact(trial_root / "output", "embedding_anomaly.json")
+    anomaly = _metric_json(
+        anomaly_path,
+        ("macro_median_auroc", "macro_mean_auroc", "worst_quartile_mean_auroc"),
+    )
+    if not isinstance(anomaly.get("per_dataset"), dict) or not anomaly["per_dataset"]:
+        raise ValueError(f"Embedding anomaly per-dataset metrics are missing: {anomaly_path}")
+    for name in ("macro_median_auroc", "macro_mean_auroc", "worst_quartile_mean_auroc"):
+        if not 0.0 <= float(anomaly[name]) <= 1.0:
+            raise ValueError(f"AUROC {name!r} is outside [0, 1]: {anomaly_path}")
+
+    artifacts = {
+        "training_csv": metrics_csv,
+        "pairing_json": pairing_path,
+        "anomaly_json": anomaly_path,
+    }
+    result = {
+        "schema_version": 1,
+        "campaign_id": manifest["campaign_id"],
+        "git_commit": manifest["git"]["commit"],
+        "candidate_id": candidate_id,
+        "name": spec["name"],
+        "kind": spec["kind"],
+        "seed": spec["seed"],
+        "spec_sha256": spec["spec_sha256"],
+        "params": spec["params"],
+        "command": command,
+        "started_at": started.isoformat(),
+        "completed_at": datetime.now(timezone.utc).isoformat(),
+        "slurm_job_id": os.environ.get("SLURM_JOB_ID", "local"),
+        "artifacts": {
+            name: {"path": str(path), "sha256": _sha256(path)} for name, path in artifacts.items()
+        },
+        "training_metrics": training,
+        "pairing_metrics": pairing,
+        "anomaly_metrics": anomaly,
+    }
+    result["result_payload_sha256"] = _value_sha256(result)
+    _atomic_json(result_path, result)
+    print(result_path)
+    return result_path
+
+
 def collect(root: Path) -> Path:
     """Validate all four trial artifacts and write an atomic canary summary."""
     root = root.resolve()
@@ -547,6 +959,107 @@ def collect(root: Path) -> Path:
     return output
 
 
+def collect_stage1(root: Path) -> Path:
+    """Authenticate all Stage-1 results and rank collapse-safe candidates."""
+    root = root.resolve()
+    manifest = _load_campaign(root)
+    rows: list[dict[str, Any]] = []
+    missing = []
+    for spec in manifest["stage1"]["candidates"]:
+        result_path = root / "stage1" / f"candidate_{spec['candidate_id']:03d}" / "result.json"
+        if not result_path.is_file():
+            missing.append(str(result_path))
+            continue
+        result = json.loads(result_path.read_text(encoding="utf-8"))
+        digest = result.pop("result_payload_sha256", None)
+        if digest is None or _value_sha256(result) != digest:
+            raise ValueError(f"Stage-1 result fingerprint mismatch: {result_path}")
+        if (
+            result.get("campaign_id") != manifest["campaign_id"]
+            or result.get("git_commit") != manifest["git"]["commit"]
+            or result.get("candidate_id") != spec["candidate_id"]
+            or result.get("spec_sha256") != spec["spec_sha256"]
+        ):
+            raise ValueError(f"Stage-1 result identity mismatch: {result_path}")
+        for artifact in result["artifacts"].values():
+            path = Path(artifact["path"])
+            if not path.is_file() or _sha256(path) != artifact["sha256"]:
+                raise ValueError(f"Stage-1 artifact mismatch: {path}")
+        pairing = result["pairing_metrics"]
+        anomaly = result["anomaly_metrics"]
+        collapse_pass = bool(pairing["collapse_pass"])
+        finite_pass = float(pairing["embedding_finite_fraction"]) == 1.0
+        eligible = collapse_pass and finite_pass
+        rows.append(
+            {
+                "candidate_id": spec["candidate_id"],
+                "name": spec["name"],
+                "kind": spec["kind"],
+                "seed": spec["seed"],
+                "eligible": eligible,
+                "collapse_pass": collapse_pass,
+                "collapse_failures": ";".join(pairing["collapse_failures"]),
+                "embedding_finite_fraction": pairing["embedding_finite_fraction"],
+                "embedding_active_fraction": pairing["embedding_active_fraction"],
+                "embedding_effective_rank": pairing["embedding_effective_rank"],
+                "embedding_participation_rank": pairing["embedding_participation_rank"],
+                "embedding_top_pc_fraction": pairing["embedding_top_pc_fraction"],
+                "pairing_selection_score": pairing["selection_score"],
+                "closure_recall_at_10": pairing["closure_recall_at_10"],
+                "mnn_coverage": pairing["mnn_coverage"],
+                "macro_median_auroc": anomaly["macro_median_auroc"],
+                "macro_mean_auroc": anomaly["macro_mean_auroc"],
+                "worst_quartile_mean_auroc": anomaly["worst_quartile_mean_auroc"],
+                "train_loss": result["training_metrics"]["train/loss_mean"],
+                "params_json": _canonical_json(spec["params"]),
+                "spec_sha256": spec["spec_sha256"],
+                "result_path": str(result_path),
+            }
+        )
+    if missing:
+        raise FileNotFoundError(
+            f"Stage 1 is incomplete: {len(missing)} results missing; first is {missing[0]}"
+        )
+    if not any(row["eligible"] for row in rows):
+        raise RuntimeError("Every Stage-1 candidate failed the embedding collapse gates.")
+    rows.sort(
+        key=lambda row: (
+            bool(row["eligible"]),
+            float(row["worst_quartile_mean_auroc"]),
+            float(row["macro_median_auroc"]),
+            float(row["pairing_selection_score"]),
+        ),
+        reverse=True,
+    )
+    for rank, row in enumerate(rows, start=1):
+        row["rank"] = rank
+    table = root / "stage1" / "summary.csv"
+    _atomic_csv(table, rows)
+    eligible = [row for row in rows if row["eligible"]]
+    summary = {
+        "schema_version": 1,
+        "campaign_id": manifest["campaign_id"],
+        "status": "complete",
+        "n_candidates": len(rows),
+        "n_collapse_pass": sum(bool(row["collapse_pass"]) for row in rows),
+        "n_eligible": len(eligible),
+        "ranking": [
+            "collapse_gate",
+            "worst_quartile_mean_auroc",
+            "macro_median_auroc",
+            "pairing_selection_score",
+        ],
+        "best_candidate_id": eligible[0]["candidate_id"],
+        "best_candidate_spec_sha256": eligible[0]["spec_sha256"],
+        "summary_csv": str(table),
+        "summary_csv_sha256": _sha256(table),
+    }
+    output = root / "stage1" / "summary.json"
+    _atomic_json(output, summary)
+    print(output)
+    return output
+
+
 def status(root: Path) -> dict[str, Any]:
     """Report trial completion state without mutating the campaign."""
     root = root.resolve()
@@ -562,10 +1075,34 @@ def status(root: Path) -> dict[str, Any]:
             else "pending"
         )
         trials.append({"trial_id": spec["trial_id"], "name": spec["name"], "state": state})
+    stage1_trials = []
+    for spec in manifest.get("stage1", {}).get("candidates", []):
+        trial_root = root / "stage1" / f"candidate_{spec['candidate_id']:03d}"
+        state = (
+            "complete"
+            if (trial_root / "result.json").is_file()
+            else "failed"
+            if (trial_root / "failure.json").is_file()
+            else "pending"
+        )
+        stage1_trials.append(
+            {"candidate_id": spec["candidate_id"], "name": spec["name"], "state": state}
+        )
     value = {
         "campaign_id": manifest["campaign_id"],
         "complete": all(item["state"] == "complete" for item in trials),
         "trials": trials,
+        "canary": {
+            "complete": all(item["state"] == "complete" for item in trials),
+            "trials": trials,
+        },
+        "stage1": {
+            "complete": bool(stage1_trials)
+            and all(item["state"] == "complete" for item in stage1_trials),
+            "n_complete": sum(item["state"] == "complete" for item in stage1_trials),
+            "n_total": len(stage1_trials),
+            "trials": stage1_trials,
+        },
     }
     print(json.dumps(value, indent=2, sort_keys=True))
     return value
@@ -592,6 +1129,13 @@ def main() -> None:
     collect_parser.add_argument("--root", type=Path, required=True)
     status_parser = subparsers.add_parser("status")
     status_parser.add_argument("--root", type=Path, required=True)
+    stage1_parser = subparsers.add_parser("run-stage1")
+    stage1_parser.add_argument("--root", type=Path, required=True)
+    stage1_parser.add_argument("--candidate-id", type=int, required=True)
+    collect_stage1_parser = subparsers.add_parser("collect-stage1")
+    collect_stage1_parser.add_argument("--root", type=Path, required=True)
+    stage1_status_parser = subparsers.add_parser("stage1-status")
+    stage1_status_parser.add_argument("--root", type=Path, required=True)
     args = parser.parse_args()
 
     if args.command == "init":
@@ -616,6 +1160,12 @@ def main() -> None:
         run_trial(args.root, args.trial_id)
     elif args.command == "collect":
         collect(args.root)
+    elif args.command == "run-stage1":
+        run_stage1(args.root, args.candidate_id)
+    elif args.command == "collect-stage1":
+        collect_stage1(args.root)
+    elif args.command == "stage1-status":
+        status(args.root)
     elif args.command == "status":
         status(args.root)
 

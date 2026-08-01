@@ -70,6 +70,7 @@ class JetCLR(L1ADLightningModule):
 
     def on_test_start(self):
         self._setup_model_feature_map_from_trainer()
+        self._reset_augmentation_rng(self.seed + 100_000)
 
     def setup_pairing(self, datamodule=None, setup_lorentz: bool = True) -> None:
         """Prepare object maps and augmentations outside the Lightning loop."""
@@ -216,6 +217,21 @@ class JetCLR(L1ADLightningModule):
         if hasattr(aug2, "rng"):
             aug2.rng.set_seed(self.seed + 1)
         return {"1": aug1, "2": aug2}
+
+    def _reset_augmentation_rng(self, seed: int) -> None:
+        """Reset evaluation views independently of training history and batch size."""
+        offset = 0
+        for pair in (
+            self.feat_blurs,
+            self.detector_smears,
+            self.obj_masks,
+            self.lorentz_rot,
+        ):
+            for key in ("1", "2"):
+                augmenter = pair[key]
+                if hasattr(augmenter, "rng"):
+                    augmenter.rng.set_seed(int(seed) + offset)
+                offset += 1
 
     def _make_detector_smearing_pair(
         self,

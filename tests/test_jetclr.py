@@ -1,14 +1,19 @@
 from __future__ import annotations
 
+from types import SimpleNamespace
+
 import pytest
 import torch
+from torch import nn
 
 from src.algorithms.components.augmentation import (
     FastDetectorSmearing,
+    FastFeatureBlur,
     FastLorentzRotation,
     FastObjectDropout,
 )
 from src.algorithms.components.jet_encoder import ObjectTransformerEncoder
+from src.algorithms.jetclr import JetCLR
 from src.algorithms.losses import contrastive as contrastive_module
 from src.algorithms.losses.contrastive import NTXentLoss
 from src.evaluation.callbacks.embedding_anomaly import EmbeddingAnomalyMetrics
@@ -118,6 +123,31 @@ def test_detector_smearing_respects_padding_and_seed() -> None:
     torch.testing.assert_close(first_mask, mask)
     assert torch.count_nonzero(first[:, :3]) > 0
     assert torch.count_nonzero(first[:, -1]) == 0
+
+
+def test_evaluation_augmentation_reset_is_independent_of_rng_history() -> None:
+    blur_pair = nn.ModuleDict(
+        {
+            "1": FastFeatureBlur(prob=1.0, magnitude=1.0, strength=0.5),
+            "2": FastFeatureBlur(prob=1.0, magnitude=1.0, strength=0.5),
+        }
+    )
+    module = SimpleNamespace(
+        feat_blurs=blur_pair,
+        detector_smears=nn.ModuleDict({"1": nn.Identity(), "2": nn.Identity()}),
+        obj_masks=nn.ModuleDict({"1": nn.Identity(), "2": nn.Identity()}),
+        lorentz_rot=nn.ModuleDict({"1": nn.Identity(), "2": nn.Identity()}),
+    )
+    x = torch.zeros(8, 4)
+
+    JetCLR._reset_augmentation_rng(module, 101)
+    expected = blur_pair["1"](x)
+    blur_pair["1"](x)
+    blur_pair["1"](x)
+    JetCLR._reset_augmentation_rng(module, 101)
+    actual = blur_pair["1"](x)
+
+    torch.testing.assert_close(actual, expected)
 
 
 def test_detector_smearing_sanitizes_energy_and_wraps_phi() -> None:

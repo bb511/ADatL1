@@ -28,6 +28,13 @@ def _pairing_metrics(collapse_pass: bool = True) -> dict:
         "occupancy_smd_after_mean": 0.1,
         "collapse_pass": collapse_pass,
         "collapse_failures": [] if collapse_pass else ["low_effective_rank"],
+        "projector_embedding_finite_fraction": 1.0,
+        "projector_embedding_active_fraction": 0.9,
+        "projector_embedding_effective_rank": 20.0,
+        "projector_embedding_participation_rank": 18.0,
+        "projector_embedding_top_pc_fraction": 0.15,
+        "projector_collapse_pass": collapse_pass,
+        "projector_collapse_failures": [] if collapse_pass else ["low_effective_rank"],
     }
 
 
@@ -46,6 +53,7 @@ def _write_manifest(root: Path) -> dict:
     specs = jetclr_campaign.canary_specs()
     stage1 = jetclr_campaign.stage1_specs()
     stage2 = jetclr_campaign.stage2_specs()
+    stage3 = jetclr_campaign.stage3_specs()
     manifest = {
         "schema_version": 1,
         "campaign_id": "jetclr_test_deadbeef",
@@ -72,6 +80,16 @@ def _write_manifest(root: Path) -> dict:
             "source_summary_csv_sha256": jetclr_campaign.STAGE2_SOURCE_SUMMARY_CSV_SHA256,
             "candidates": stage2,
             "design_sha256": jetclr_campaign._value_sha256(stage2),
+        },
+        "stage3": {
+            "seed": jetclr_campaign.STAGE3_SEED,
+            "full_epochs": 1,
+            "source_campaign_id": jetclr_campaign.STAGE3_SOURCE_CAMPAIGN,
+            "source_candidate_id": jetclr_campaign.STAGE3_SOURCE_CANDIDATE_ID,
+            "source_candidate_spec_sha256": jetclr_campaign.STAGE3_SOURCE_SPEC_SHA256,
+            "frozen_primary_params": jetclr_campaign._stage3_primary_params(),
+            "candidates": stage3,
+            "design_sha256": jetclr_campaign._value_sha256(stage3),
         },
     }
     manifest["manifest_payload_sha256"] = jetclr_campaign._value_sha256(manifest)
@@ -220,6 +238,83 @@ def test_run_stage2_uses_one_full_epoch_without_train_batch_limit(
     assert "evaluation.callbacks.pairing_diagnostics.max_events_per_dataset=8192" in command
     assert result["source_campaign_id"] == jetclr_campaign.STAGE2_SOURCE_CAMPAIGN
     assert result["source_candidate_id"] == jetclr_campaign.STAGE2_PROMOTED_IDS[0]
+
+
+def test_stage3_specs_freeze_primary_and_cover_requested_architectures() -> None:
+    """Stage 3 must vary only architecture over the exact Stage-2 primary recipe."""
+    specs = jetclr_campaign.stage3_specs()
+
+    assert specs == jetclr_campaign.stage3_specs()
+    assert len(specs) == 12
+    assert {item["seed"] for item in specs} == {123}
+    assert all(
+        item["frozen_primary_params"] == specs[0]["frozen_primary_params"] for item in specs
+    )
+    assert specs[0]["name"] == "current_exact"
+    assert specs[1]["architecture_params"]["algorithm.model.pooling"] == "sum"
+    assert specs[2]["architecture_params"]["algorithm.model.post_pool_norm"] is False
+    assert specs[3]["architecture_params"]["algorithm.model.norm_first"] is False
+    assert specs[6]["architecture_params"]["algorithm.model.d_model"] == 512
+    assert specs[7]["architecture_params"]["algorithm.model.out_dim"] == 64
+    assert specs[8]["architecture_params"]["algorithm.projector.nodes"] == [256]
+    assert specs[9]["architecture_params"]["algorithm.projector.batchnorm"] is False
+    assert specs[10]["architecture_params"]["algorithm.model.n_layers"] == 2
+    assert specs[11]["architecture_params"]["algorithm.model.n_layers"] == 6
+    assert all("algorithm.projector.in_dim" not in item["params"] for item in specs)
+    assert {item["source_candidate_spec_sha256"] for item in specs} == {
+        jetclr_campaign.STAGE3_SOURCE_SPEC_SHA256
+    }
+
+
+def test_stage3_launchers_pack_twelve_trials_and_chain_collector(tmp_path: Path) -> None:
+    """Stage 3 should reuse the reviewed three-node four-GPU packing contract."""
+    manifest = _write_manifest(tmp_path)
+    launchers = jetclr_campaign._write_stage3_launchers(tmp_path, manifest)
+    stage3 = launchers["stage3"].read_text(encoding="utf-8")
+    collector = launchers["collector"].read_text(encoding="utf-8")
+    submitter = launchers["submitter"].read_text(encoding="utf-8")
+
+    assert "#SBATCH --array=0-2%3" in stage3
+    assert "run-stage3" in stage3
+    assert "collect-stage3" in collector
+    assert 'dependency="afterok:$stage3_job"' in submitter
+
+
+def test_run_stage3_full_epoch_authenticates_projector_diagnostics(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Stage 3 must omit train limits and require encoder plus projector diagnostics."""
+    _write_manifest(tmp_path)
+    monkeypatch.setattr(jetclr_campaign, "_assert_runtime", lambda _: tmp_path)
+    observed = {}
+
+    def fake_run(command, **kwargs):
+        observed["command"] = command
+        output = tmp_path / "stage3" / "candidate_000" / "output"
+        metrics = output / "csv" / "version_0" / "metrics.csv"
+        metrics.parent.mkdir(parents=True)
+        metrics.write_text("train/loss_mean\n2.5\n", encoding="utf-8")
+        pairing = output / "metrics" / "pairing_diagnostics" / "last"
+        pairing.mkdir(parents=True)
+        (pairing / "pairing_diagnostics.json").write_text(
+            json.dumps(_pairing_metrics()), encoding="utf-8"
+        )
+        anomaly = output / "metrics" / "embedding_anomaly" / "last"
+        anomaly.mkdir(parents=True)
+        (anomaly / "embedding_anomaly.json").write_text(
+            json.dumps(_anomaly_metrics()), encoding="utf-8"
+        )
+        return SimpleNamespace(returncode=0)
+
+    monkeypatch.setattr(jetclr_campaign.subprocess, "run", fake_run)
+    result_path = jetclr_campaign.run_stage3(tmp_path, 0)
+    result = json.loads(result_path.read_text(encoding="utf-8"))
+
+    assert not any("limit_train_batches" in value for value in observed["command"])
+    assert "+algorithm.model.norm_first=true" in observed["command"]
+    assert "+algorithm.model.post_pool_norm=true" in observed["command"]
+    assert not any("algorithm.projector.in_dim=" in value for value in observed["command"])
+    assert result["pairing_metrics"]["projector_collapse_pass"] is True
 
 
 def test_run_stage1_composes_bounded_training_and_validates_artifacts(
@@ -481,3 +576,77 @@ def test_collect_stage2_preserves_all_failed_gates_and_reports_pareto(tmp_path: 
     assert rows[0]["balance_pass"] == "True"
     assert rows[1]["balance_pass"] == "False"
     assert rows[2]["balance_pass"] == "False"
+
+
+def test_collect_stage3_reports_projector_gates_and_four_objective_pareto(
+    tmp_path: Path,
+) -> None:
+    """Stage-3 collection must retain failed gates and avoid scalar selection."""
+    manifest = _write_manifest(tmp_path)
+    for spec in manifest["stage3"]["candidates"]:
+        trial_root = tmp_path / "stage3" / f"candidate_{spec['candidate_id']:03d}"
+        trial_root.mkdir(parents=True)
+        metrics = trial_root / "metrics.csv"
+        pairing_path = trial_root / "pairing_diagnostics.json"
+        anomaly_path = trial_root / "embedding_anomaly.json"
+        metrics.write_text("train/loss_mean\n2.0\n", encoding="utf-8")
+        pairing = _pairing_metrics(collapse_pass=False)
+        pairing["projector_collapse_pass"] = False
+        pairing["projector_collapse_failures"] = ["low_effective_rank"]
+        if spec["candidate_id"] == 0:
+            pairing["embedding_effective_rank"] = 50.0
+            pairing["raw_selection_score"] = 0.4
+        elif spec["candidate_id"] == 1:
+            pairing["embedding_effective_rank"] = 40.0
+            pairing["raw_selection_score"] = 0.6
+            pairing["value_smd_after_mean"] = 0.39
+            pairing["occupancy_smd_after_mean"] = 0.19
+        else:
+            pairing["embedding_effective_rank"] = 20.0
+            pairing["raw_selection_score"] = 0.2
+        anomaly = _anomaly_metrics(0.8 if spec["candidate_id"] == 1 else 0.7)
+        pairing_path.write_text(json.dumps(pairing), encoding="utf-8")
+        anomaly_path.write_text(json.dumps(anomaly), encoding="utf-8")
+        artifacts = {
+            "training_csv": {
+                "path": str(metrics),
+                "sha256": jetclr_campaign._sha256(metrics),
+            },
+            "pairing_json": {
+                "path": str(pairing_path),
+                "sha256": jetclr_campaign._sha256(pairing_path),
+            },
+            "anomaly_json": {
+                "path": str(anomaly_path),
+                "sha256": jetclr_campaign._sha256(anomaly_path),
+            },
+        }
+        result = {
+            "campaign_id": manifest["campaign_id"],
+            "git_commit": manifest["git"]["commit"],
+            "candidate_id": spec["candidate_id"],
+            "spec_sha256": spec["spec_sha256"],
+            "source_campaign_id": jetclr_campaign.STAGE3_SOURCE_CAMPAIGN,
+            "source_candidate_id": jetclr_campaign.STAGE3_SOURCE_CANDIDATE_ID,
+            "source_candidate_spec_sha256": jetclr_campaign.STAGE3_SOURCE_SPEC_SHA256,
+            "artifacts": artifacts,
+            "training_metrics": {"train/loss_mean": 2.0},
+            "pairing_metrics": pairing,
+            "anomaly_metrics": anomaly,
+        }
+        result["result_payload_sha256"] = jetclr_campaign._value_sha256(result)
+        jetclr_campaign._atomic_json(trial_root / "result.json", result)
+
+    output = jetclr_campaign.collect_stage3(tmp_path)
+    summary = json.loads(output.read_text(encoding="utf-8"))
+    with Path(summary["summary_csv"]).open(encoding="utf-8", newline="") as handle:
+        rows = list(csv.DictReader(handle))
+
+    assert summary["status"] == "complete_no_collapse_eligible_candidates"
+    assert summary["n_collapse_eligible"] == 0
+    assert set(summary["pareto_candidate_ids"]) == {0, 1}
+    assert len(summary["pareto_objectives"]) == 4
+    assert "best_candidate_id" not in summary
+    assert rows[0]["encoder_collapse_pass"] == "False"
+    assert rows[0]["projector_collapse_pass"] == "False"
+    assert float(rows[0]["projector_effective_rank"]) == 20.0

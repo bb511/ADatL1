@@ -58,6 +58,18 @@ STAGE2_SOURCE_SUMMARY_CSV_SHA256 = (
 STAGE2_SOURCE_SUMMARY = DEFAULT_CAMPAIGN_BASE / STAGE2_SOURCE_CAMPAIGN / "stage1" / "summary.json"
 STAGE2_SOURCE_SUMMARY_CSV = STAGE2_SOURCE_SUMMARY.with_name("summary.csv")
 STAGE2_PROMOTED_IDS = (43, 3, 37, 11, 34, 27, 39)
+STAGE3_SEED = 123
+STAGE3_N_CANDIDATES = 12
+STAGE3_SOURCE_CAMPAIGN = "jetclr_20260801_eeb36cf"
+STAGE3_SOURCE_CANDIDATE_ID = 10
+STAGE3_SOURCE_SPEC_SHA256 = "5c6a470270f148595bdb48def2494f80366703b4d3cdb430c54c1f9fd952e0b5"
+STAGE3_SOURCE_SUMMARY_SHA256 = "6981e4bae97aea82d902694f40a575ead9eadf11a30a2bf7f2b792a573691e8b"
+STAGE3_SOURCE_SUMMARY_CSV_SHA256 = (
+    "aecf84a462176850b84a1054c6d8f9e0de6f73882fae7e6d0fa87c0f41deb201"
+)
+STAGE3_SOURCE_ROOT = DEFAULT_CAMPAIGN_BASE / STAGE3_SOURCE_CAMPAIGN
+STAGE3_SOURCE_SUMMARY = STAGE3_SOURCE_ROOT / "stage2" / "summary.json"
+STAGE3_SOURCE_SUMMARY_CSV = STAGE3_SOURCE_ROOT / "stage2" / "summary.csv"
 
 
 def _stage1_base_overrides() -> dict[str, Any]:
@@ -82,6 +94,8 @@ def _hydra_scalar(value: Any) -> str:
         return "null"
     if isinstance(value, float):
         return f"{value:.10g}"
+    if isinstance(value, (list, tuple)):
+        return json.dumps(value, separators=(",", ":"))
     return str(value).lower() if isinstance(value, bool) else str(value)
 
 
@@ -292,6 +306,130 @@ def stage2_specs() -> list[dict[str, Any]]:
         specs.append({**identity, "spec_sha256": _value_sha256(identity)})
     if len(specs) != STAGE2_N_CANDIDATES:
         raise AssertionError("Stage-2 design must contain exactly 12 candidates.")
+    return specs
+
+
+def _stage3_primary_params() -> dict[str, Any]:
+    """Return the exact Stage-2 candidate-10 optimization recipe."""
+    return {
+        "data.batch_size": 8192,
+        "trainer.gradient_clip_val": 0.1,
+        "algorithm.optimizer.lr": 2e-4,
+        "algorithm.optimizer.weight_decay": 1e-4,
+        "algorithm.loss.temperature": 0.1,
+        "algorithm.detector_smearing.prob": 0.5,
+        "algorithm.detector_smearing.strength": 0.3,
+        "algorithm.object_mask.prob": 0.5,
+        "algorithm.object_mask.object_prob": 0.025,
+        "algorithm.lorentz_rotation.prob": 0.0,
+    }
+
+
+def stage3_specs() -> list[dict[str, Any]]:
+    """Return twelve pure-NTXent architecture variants on one frozen recipe."""
+    encoder = {
+        "algorithm.model.d_model": 128,
+        "algorithm.model.out_dim": 128,
+        "algorithm.model.n_heads": 8,
+        "algorithm.model.n_layers": 4,
+        "algorithm.model.dim_feedforward": 512,
+        "algorithm.model.pooling": "cls",
+        "algorithm.model.norm_first": True,
+        "algorithm.model.post_pool_norm": True,
+    }
+    projector = {
+        "algorithm.projector.nodes": [256, 256],
+        "algorithm.projector.out_dim": 128,
+        "algorithm.projector.batchnorm": True,
+        "algorithm.projector.activation": "gelu",
+    }
+    variants = [
+        ("current_exact", {}),
+        ("sum_prenorm_postpoolnorm", {"algorithm.model.pooling": "sum"}),
+        (
+            "sum_prenorm_no_postpoolnorm",
+            {"algorithm.model.pooling": "sum", "algorithm.model.post_pool_norm": False},
+        ),
+        (
+            "official_sum_postnorm",
+            {
+                "algorithm.model.pooling": "sum",
+                "algorithm.model.norm_first": False,
+                "algorithm.model.post_pool_norm": False,
+            },
+        ),
+        (
+            "width256_out128",
+            {
+                "algorithm.model.d_model": 256,
+                "algorithm.model.out_dim": 128,
+                "algorithm.model.dim_feedforward": 1024,
+            },
+        ),
+        (
+            "width256_out256",
+            {
+                "algorithm.model.d_model": 256,
+                "algorithm.model.out_dim": 256,
+                "algorithm.model.dim_feedforward": 1024,
+            },
+        ),
+        (
+            "width512_out256",
+            {
+                "algorithm.model.d_model": 512,
+                "algorithm.model.out_dim": 256,
+                "algorithm.model.dim_feedforward": 2048,
+            },
+        ),
+        ("out64", {"algorithm.model.out_dim": 64}),
+        ("projector_two_linear", {"algorithm.projector.nodes": [256]}),
+        (
+            "official_projector",
+            {
+                "algorithm.projector.nodes": [256],
+                "algorithm.projector.batchnorm": False,
+                "algorithm.projector.activation": "relu",
+            },
+        ),
+        ("layers2", {"algorithm.model.n_layers": 2}),
+        ("layers6", {"algorithm.model.n_layers": 6}),
+    ]
+    specs = []
+    frozen = _stage3_primary_params()
+    for candidate_id, (name, changes) in enumerate(variants):
+        architecture = {**encoder, **projector, **changes}
+        params = {**frozen, **architecture}
+        overrides = []
+        for key, value in params.items():
+            prefix = (
+                "+"
+                if key
+                in {
+                    "algorithm.model.norm_first",
+                    "algorithm.model.post_pool_norm",
+                }
+                else ""
+            )
+            overrides.append(f"{prefix}{key}={_hydra_scalar(value)}")
+        identity = {
+            "candidate_id": candidate_id,
+            "name": name,
+            "kind": "pure_ntxent_architecture",
+            "seed": STAGE3_SEED,
+            "full_epochs": 1,
+            "source_campaign_id": STAGE3_SOURCE_CAMPAIGN,
+            "source_candidate_id": STAGE3_SOURCE_CANDIDATE_ID,
+            "source_candidate_spec_sha256": STAGE3_SOURCE_SPEC_SHA256,
+            "rationale": "Architecture-only variant with Stage-2 optimization recipe frozen.",
+            "frozen_primary_params": frozen,
+            "architecture_params": architecture,
+            "params": params,
+            "overrides": overrides,
+        }
+        specs.append({**identity, "spec_sha256": _value_sha256(identity)})
+    if len(specs) != STAGE3_N_CANDIDATES:
+        raise AssertionError("Stage-3 design must contain exactly 12 candidates.")
     return specs
 
 
@@ -736,6 +874,27 @@ def _write_stage2_launchers(root: Path, manifest: Mapping[str, Any]) -> dict[str
     return {"stage2": stage2, "collector": collector, "submitter": submitter}
 
 
+def _write_stage3_launchers(root: Path, manifest: Mapping[str, Any]) -> dict[str, Path]:
+    """Write the Stage-3 packed array and collector from the identical Stage-2 layout."""
+    templates = _write_stage2_launchers(root, manifest)
+    destinations = {
+        "stage3": root / "slurm" / "stage3.sbatch",
+        "collector": root / "slurm" / "stage3_collect.sbatch",
+        "submitter": root / "slurm" / "submit_stage3.sh",
+    }
+    source_by_role = {
+        "stage3": templates["stage2"],
+        "collector": templates["collector"],
+        "submitter": templates["submitter"],
+    }
+    for role, destination in destinations.items():
+        text = source_by_role[role].read_text(encoding="utf-8")
+        text = text.replace("stage2", "stage3").replace("jetclr-s2", "jetclr-s3")
+        destination.write_text(text, encoding="utf-8")
+        destination.chmod(0o755)
+    return destinations
+
+
 def initialize(
     root: Path,
     deployment: Path,
@@ -765,6 +924,18 @@ def initialize(
         raise RuntimeError("Frozen Stage-1 source summary fingerprint changed.")
     if _sha256(STAGE2_SOURCE_SUMMARY_CSV) != STAGE2_SOURCE_SUMMARY_CSV_SHA256:
         raise RuntimeError("Frozen Stage-1 source metric table fingerprint changed.")
+    if _sha256(STAGE3_SOURCE_SUMMARY) != STAGE3_SOURCE_SUMMARY_SHA256:
+        raise RuntimeError("Frozen Stage-2 source summary fingerprint changed.")
+    if _sha256(STAGE3_SOURCE_SUMMARY_CSV) != STAGE3_SOURCE_SUMMARY_CSV_SHA256:
+        raise RuntimeError("Frozen Stage-2 source metric table fingerprint changed.")
+    source_stage2 = json.loads((STAGE3_SOURCE_ROOT / "campaign.json").read_text(encoding="utf-8"))
+    source_candidate = source_stage2["stage2"]["candidates"][STAGE3_SOURCE_CANDIDATE_ID]
+    if (
+        source_candidate["candidate_id"] != STAGE3_SOURCE_CANDIDATE_ID
+        or source_candidate["spec_sha256"] != STAGE3_SOURCE_SPEC_SHA256
+        or source_candidate["params"] != _stage3_primary_params()
+    ):
+        raise RuntimeError("Frozen Stage-2 primary candidate identity changed.")
 
     deployment.parent.mkdir(parents=True, exist_ok=True)
     git = shutil.which("git")
@@ -784,9 +955,11 @@ def initialize(
     specs = canary_specs()
     stage1 = stage1_specs()
     stage2 = stage2_specs()
+    stage3 = stage3_specs()
     _atomic_json(root / "design" / "canary_trials.json", specs)
     _atomic_json(root / "design" / "stage1_candidates.json", stage1)
     _atomic_json(root / "design" / "stage2_candidates.json", stage2)
+    _atomic_json(root / "design" / "stage3_candidates.json", stage3)
     manifest = {
         "schema_version": 1,
         "campaign_id": campaign_id,
@@ -828,12 +1001,27 @@ def initialize(
             "candidates": stage2,
             "design_sha256": _value_sha256(stage2),
         },
+        "stage3": {
+            "seed": STAGE3_SEED,
+            "full_epochs": 1,
+            "source_campaign_id": STAGE3_SOURCE_CAMPAIGN,
+            "source_candidate_id": STAGE3_SOURCE_CANDIDATE_ID,
+            "source_candidate_spec_sha256": STAGE3_SOURCE_SPEC_SHA256,
+            "source_summary": str(STAGE3_SOURCE_SUMMARY),
+            "source_summary_sha256": STAGE3_SOURCE_SUMMARY_SHA256,
+            "source_summary_csv": str(STAGE3_SOURCE_SUMMARY_CSV),
+            "source_summary_csv_sha256": STAGE3_SOURCE_SUMMARY_CSV_SHA256,
+            "frozen_primary_params": _stage3_primary_params(),
+            "candidates": stage3,
+            "design_sha256": _value_sha256(stage3),
+        },
     }
     manifest["manifest_payload_sha256"] = _value_sha256(manifest)
     _atomic_json(root / "campaign.json", manifest)
     launcher = _write_launcher(root, manifest)
     _write_stage1_launchers(root, manifest)
     _write_stage2_launchers(root, manifest)
+    _write_stage3_launchers(root, manifest)
     return launcher
 
 
@@ -1203,24 +1391,26 @@ def run_stage1(root: Path, candidate_id: int) -> Path:
     return result_path
 
 
-def run_stage2(root: Path, candidate_id: int) -> Path:
-    """Run one Stage-2 candidate for one complete epoch and authenticate outputs."""
+def _run_full_epoch_stage(root: Path, candidate_id: int, stage: str) -> Path:
+    """Run one authenticated full-epoch candidate for Stage 2 or Stage 3."""
+    if stage not in {"stage2", "stage3"}:
+        raise ValueError(f"Unsupported full-epoch stage: {stage}")
     root = root.resolve()
     manifest = _load_campaign(root)
     deployment = _assert_runtime(manifest)
-    specs = manifest["stage2"]["candidates"]
+    specs = manifest[stage]["candidates"]
     if candidate_id < 0 or candidate_id >= len(specs):
         raise ValueError(f"candidate-id must be between 0 and {len(specs) - 1}.")
     spec = specs[candidate_id]
-    trial_root = root / "stage2" / f"candidate_{candidate_id:03d}"
+    trial_root = root / stage / f"candidate_{candidate_id:03d}"
     result_path = trial_root / "result.json"
     if result_path.is_file():
         result = json.loads(result_path.read_text(encoding="utf-8"))
         digest = result.pop("result_payload_sha256", None)
         if digest is None or _value_sha256(result) != digest:
-            raise ValueError(f"Existing Stage-2 result fingerprint mismatch: {result_path}")
+            raise ValueError(f"Existing {stage} result fingerprint mismatch: {result_path}")
         if result.get("spec_sha256") != spec["spec_sha256"]:
-            raise ValueError(f"Existing Stage-2 result identity mismatch: {result_path}")
+            raise ValueError(f"Existing {stage} result identity mismatch: {result_path}")
         print(result_path)
         return result_path
 
@@ -1240,13 +1430,13 @@ def run_stage2(root: Path, candidate_id: int) -> Path:
         "callbacks.log_data_mlflow=null",
         "logger=csv",
         "test=false",
-        f"seed={manifest['stage2']['seed']}",
+        f"seed={manifest[stage]['seed']}",
         "data.max_val_batches=4",
         "data.max_normal_eval_batches=8",
         "evaluation.callbacks.pairing_diagnostics.max_events_per_dataset=8192",
         "evaluation.callbacks.embedding_anomaly.reference_size=8192",
         "evaluation.callbacks.embedding_anomaly.max_query_events=8192",
-        f"experiment_name=jetclr_stage2_{manifest['campaign_id']}",
+        f"experiment_name=jetclr_{stage}_{manifest['campaign_id']}",
         f"run_name=candidate_{candidate_id:03d}",
         f"paths.log_dir={root / 'logs'}",
         f"paths.output_dir={trial_root / 'output'}",
@@ -1290,28 +1480,41 @@ def run_stage2(root: Path, candidate_id: int) -> Path:
     metrics_csv = _single_artifact(trial_root / "output", "metrics.csv")
     training = _last_finite_metrics(metrics_csv)
     pairing_path = _single_artifact(trial_root / "output", "pairing_diagnostics.json")
-    pairing = _metric_json(
-        pairing_path,
-        (
-            "selection_score",
-            "raw_selection_score",
-            "closure_recall_at_10",
-            "mnn_coverage",
-            "embedding_finite_fraction",
-            "embedding_active_fraction",
-            "embedding_effective_rank",
-            "embedding_participation_rank",
-            "embedding_top_pc_fraction",
-            "value_smd_before_mean",
-            "value_smd_after_mean",
-            "occupancy_smd_before_mean",
-            "occupancy_smd_after_mean",
-        ),
-    )
+    required_pairing = [
+        "selection_score",
+        "raw_selection_score",
+        "closure_recall_at_10",
+        "mnn_coverage",
+        "embedding_finite_fraction",
+        "embedding_active_fraction",
+        "embedding_effective_rank",
+        "embedding_participation_rank",
+        "embedding_top_pc_fraction",
+        "value_smd_before_mean",
+        "value_smd_after_mean",
+        "occupancy_smd_before_mean",
+        "occupancy_smd_after_mean",
+    ]
+    if stage == "stage3":
+        required_pairing.extend(
+            [
+                "projector_embedding_finite_fraction",
+                "projector_embedding_active_fraction",
+                "projector_embedding_effective_rank",
+                "projector_embedding_participation_rank",
+                "projector_embedding_top_pc_fraction",
+            ]
+        )
+    pairing = _metric_json(pairing_path, required_pairing)
     if not isinstance(pairing.get("collapse_pass"), bool) or not isinstance(
         pairing.get("collapse_failures"), list
     ):
         raise ValueError(f"Pairing collapse gate is malformed: {pairing_path}")
+    if stage == "stage3" and (
+        not isinstance(pairing.get("projector_collapse_pass"), bool)
+        or not isinstance(pairing.get("projector_collapse_failures"), list)
+    ):
+        raise ValueError(f"Projector collapse gate is malformed: {pairing_path}")
     anomaly_path = _single_artifact(trial_root / "output", "embedding_anomaly.json")
     anomaly = _metric_json(
         anomaly_path,
@@ -1357,6 +1560,16 @@ def run_stage2(root: Path, candidate_id: int) -> Path:
     _atomic_json(result_path, result)
     print(result_path)
     return result_path
+
+
+def run_stage2(root: Path, candidate_id: int) -> Path:
+    """Run one Stage-2 candidate for one complete epoch and authenticate outputs."""
+    return _run_full_epoch_stage(root, candidate_id, "stage2")
+
+
+def run_stage3(root: Path, candidate_id: int) -> Path:
+    """Run one pure-NTXent Stage-3 architecture for one complete epoch."""
+    return _run_full_epoch_stage(root, candidate_id, "stage3")
 
 
 def collect(root: Path) -> Path:
@@ -1547,6 +1760,26 @@ def _balance_improves(pairing: Mapping[str, Any]) -> bool:
     return value_after <= value_before and occupancy_after <= occupancy_before
 
 
+def _balance_improvement(pairing: Mapping[str, Any]) -> float | None:
+    """Return combined value/occupancy SMD improvement when all terms exist."""
+    names = (
+        "value_smd_before_mean",
+        "value_smd_after_mean",
+        "occupancy_smd_before_mean",
+        "occupancy_smd_after_mean",
+    )
+    values = [pairing.get(name) for name in names]
+    if any(
+        isinstance(value, bool)
+        or not isinstance(value, (int, float))
+        or not math.isfinite(float(value))
+        for value in values
+    ):
+        return None
+    value_before, value_after, occupancy_before, occupancy_after = map(float, values)
+    return (value_before - value_after) + (occupancy_before - occupancy_after)
+
+
 def collect_stage2(root: Path) -> Path:
     """Authenticate Stage-2 results and report gates plus a three-objective Pareto set."""
     root = root.resolve()
@@ -1652,6 +1885,125 @@ def collect_stage2(root: Path) -> Path:
     return output
 
 
+def collect_stage3(root: Path) -> Path:
+    """Report encoder/projector gates and the Stage-3 four-objective Pareto set."""
+    root = root.resolve()
+    manifest = _load_campaign(root)
+    rows: list[dict[str, Any]] = []
+    missing = []
+    for spec in manifest["stage3"]["candidates"]:
+        result_path = root / "stage3" / f"candidate_{spec['candidate_id']:03d}" / "result.json"
+        if not result_path.is_file():
+            missing.append(str(result_path))
+            continue
+        result = json.loads(result_path.read_text(encoding="utf-8"))
+        digest = result.pop("result_payload_sha256", None)
+        if digest is None or _value_sha256(result) != digest:
+            raise ValueError(f"Stage-3 result fingerprint mismatch: {result_path}")
+        if (
+            result.get("campaign_id") != manifest["campaign_id"]
+            or result.get("git_commit") != manifest["git"]["commit"]
+            or result.get("candidate_id") != spec["candidate_id"]
+            or result.get("spec_sha256") != spec["spec_sha256"]
+            or result.get("source_campaign_id") != STAGE3_SOURCE_CAMPAIGN
+            or result.get("source_candidate_id") != STAGE3_SOURCE_CANDIDATE_ID
+            or result.get("source_candidate_spec_sha256") != STAGE3_SOURCE_SPEC_SHA256
+        ):
+            raise ValueError(f"Stage-3 result identity mismatch: {result_path}")
+        for artifact in result["artifacts"].values():
+            path = Path(artifact["path"])
+            if not path.is_file() or _sha256(path) != artifact["sha256"]:
+                raise ValueError(f"Stage-3 artifact mismatch: {path}")
+        pairing = result["pairing_metrics"]
+        anomaly = result["anomaly_metrics"]
+        encoder_pass = bool(pairing["collapse_pass"])
+        projector_pass = bool(pairing["projector_collapse_pass"])
+        encoder_finite = float(pairing["embedding_finite_fraction"]) == 1.0
+        projector_finite = float(pairing["projector_embedding_finite_fraction"]) == 1.0
+        improvement = _balance_improvement(pairing)
+        rows.append(
+            {
+                "candidate_id": spec["candidate_id"],
+                "name": spec["name"],
+                "seed": spec["seed"],
+                "encoder_collapse_pass": encoder_pass,
+                "encoder_collapse_failures": ";".join(pairing["collapse_failures"]),
+                "projector_collapse_pass": projector_pass,
+                "projector_collapse_failures": ";".join(pairing["projector_collapse_failures"]),
+                "collapse_eligible": (
+                    encoder_pass and projector_pass and encoder_finite and projector_finite
+                ),
+                "balance_pass": _balance_improves(pairing),
+                "balance_improvement": improvement,
+                "encoder_effective_rank": pairing["embedding_effective_rank"],
+                "encoder_participation_rank": pairing["embedding_participation_rank"],
+                "encoder_active_fraction": pairing["embedding_active_fraction"],
+                "encoder_top_pc_fraction": pairing["embedding_top_pc_fraction"],
+                "projector_effective_rank": pairing["projector_embedding_effective_rank"],
+                "projector_participation_rank": pairing["projector_embedding_participation_rank"],
+                "projector_active_fraction": pairing["projector_embedding_active_fraction"],
+                "projector_top_pc_fraction": pairing["projector_embedding_top_pc_fraction"],
+                "raw_selection_score": pairing["raw_selection_score"],
+                "gated_selection_score": pairing["selection_score"],
+                "closure_recall_at_10": pairing["closure_recall_at_10"],
+                "mnn_coverage": pairing["mnn_coverage"],
+                "value_smd_before_mean": pairing["value_smd_before_mean"],
+                "value_smd_after_mean": pairing["value_smd_after_mean"],
+                "occupancy_smd_before_mean": pairing["occupancy_smd_before_mean"],
+                "occupancy_smd_after_mean": pairing["occupancy_smd_after_mean"],
+                "macro_median_auroc": anomaly["macro_median_auroc"],
+                "macro_mean_auroc": anomaly["macro_mean_auroc"],
+                "worst_quartile_mean_auroc": anomaly["worst_quartile_mean_auroc"],
+                "train_loss": result["training_metrics"]["train/loss_mean"],
+                "architecture_json": _canonical_json(spec["architecture_params"]),
+                "spec_sha256": spec["spec_sha256"],
+                "result_path": str(result_path),
+            }
+        )
+    if missing:
+        raise FileNotFoundError(
+            f"Stage 3 is incomplete: {len(missing)} results missing; first is {missing[0]}"
+        )
+    objectives = (
+        "encoder_effective_rank",
+        "raw_selection_score",
+        "worst_quartile_mean_auroc",
+        "balance_improvement",
+    )
+    pareto_rows = [row for row in rows if row["balance_improvement"] is not None]
+    front = _pareto_front(pareto_rows, objectives) if pareto_rows else set()
+    for row in rows:
+        row["pareto_nondominated"] = row["candidate_id"] in front
+    rows.sort(key=lambda row: int(row["candidate_id"]))
+    table = root / "stage3" / "summary.csv"
+    _atomic_csv(table, rows)
+    eligible_ids = [int(row["candidate_id"]) for row in rows if row["collapse_eligible"]]
+    balance_ids = [int(row["candidate_id"]) for row in rows if row["balance_pass"]]
+    missing_balance = [
+        int(row["candidate_id"]) for row in rows if row["balance_improvement"] is None
+    ]
+    summary = {
+        "schema_version": 1,
+        "campaign_id": manifest["campaign_id"],
+        "status": "complete" if eligible_ids else "complete_no_collapse_eligible_candidates",
+        "n_candidates": len(rows),
+        "n_collapse_eligible": len(eligible_ids),
+        "collapse_eligible_candidate_ids": eligible_ids,
+        "n_balance_pass": len(balance_ids),
+        "balance_pass_candidate_ids": balance_ids,
+        "pareto_objectives": list(objectives),
+        "pareto_candidate_ids": sorted(front),
+        "pareto_excluded_missing_balance_candidate_ids": missing_balance,
+        "selection_policy": "No scalar winner is selected; preserve the validation Pareto set.",
+        "summary_csv": str(table),
+        "summary_csv_sha256": _sha256(table),
+    }
+    output = root / "stage3" / "summary.json"
+    _atomic_json(output, summary)
+    print(output)
+    return output
+
+
 def status(root: Path) -> dict[str, Any]:
     """Report trial completion state without mutating the campaign."""
     root = root.resolve()
@@ -1693,6 +2045,19 @@ def status(root: Path) -> dict[str, Any]:
         stage2_trials.append(
             {"candidate_id": spec["candidate_id"], "name": spec["name"], "state": state}
         )
+    stage3_trials = []
+    for spec in manifest.get("stage3", {}).get("candidates", []):
+        trial_root = root / "stage3" / f"candidate_{spec['candidate_id']:03d}"
+        state = (
+            "complete"
+            if (trial_root / "result.json").is_file()
+            else "failed"
+            if (trial_root / "failure.json").is_file()
+            else "pending"
+        )
+        stage3_trials.append(
+            {"candidate_id": spec["candidate_id"], "name": spec["name"], "state": state}
+        )
     value = {
         "campaign_id": manifest["campaign_id"],
         "complete": all(item["state"] == "complete" for item in trials),
@@ -1714,6 +2079,13 @@ def status(root: Path) -> dict[str, Any]:
             "n_complete": sum(item["state"] == "complete" for item in stage2_trials),
             "n_total": len(stage2_trials),
             "trials": stage2_trials,
+        },
+        "stage3": {
+            "complete": bool(stage3_trials)
+            and all(item["state"] == "complete" for item in stage3_trials),
+            "n_complete": sum(item["state"] == "complete" for item in stage3_trials),
+            "n_total": len(stage3_trials),
+            "trials": stage3_trials,
         },
     }
     print(json.dumps(value, indent=2, sort_keys=True))
@@ -1755,6 +2127,13 @@ def main() -> None:
     collect_stage2_parser.add_argument("--root", type=Path, required=True)
     stage2_status_parser = subparsers.add_parser("stage2-status")
     stage2_status_parser.add_argument("--root", type=Path, required=True)
+    stage3_parser = subparsers.add_parser("run-stage3")
+    stage3_parser.add_argument("--root", type=Path, required=True)
+    stage3_parser.add_argument("--candidate-id", type=int, required=True)
+    collect_stage3_parser = subparsers.add_parser("collect-stage3")
+    collect_stage3_parser.add_argument("--root", type=Path, required=True)
+    stage3_status_parser = subparsers.add_parser("stage3-status")
+    stage3_status_parser.add_argument("--root", type=Path, required=True)
     args = parser.parse_args()
 
     if args.command == "init":
@@ -1790,6 +2169,12 @@ def main() -> None:
     elif args.command == "collect-stage2":
         collect_stage2(args.root)
     elif args.command == "stage2-status":
+        status(args.root)
+    elif args.command == "run-stage3":
+        run_stage3(args.root, args.candidate_id)
+    elif args.command == "collect-stage3":
+        collect_stage3(args.root)
+    elif args.command == "stage3-status":
         status(args.root)
     elif args.command == "status":
         status(args.root)

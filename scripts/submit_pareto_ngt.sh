@@ -117,6 +117,30 @@ extract_cmds() {
     ' "$1"
 }
 
+# The pods are cgroup-restricted to a CPU subset that is neither 0-based nor
+# contiguous -- an L40s session reports '64-94,96-126,192-222,224-254', so a
+# naive 'taskset -c 0-2' dies with "failed to set affinity: Invalid argument"
+# and the job never starts. Expand the allowed list and hand out explicit CPU
+# ids instead of ranges, which also sidesteps the holes at 95 and 223.
+cpus_allowed() {
+    local list item start end c
+    list=$(grep Cpus_allowed_list /proc/self/status 2>/dev/null | awk '{print $2}')
+    if [ -z "$list" ]; then
+        # Not linux (e.g. a --dry-run on a laptop): fall back to 0..nproc-1.
+        c=$( (nproc 2>/dev/null) || echo 4 )
+        seq 0 $((c - 1))
+        return
+    fi
+    local IFS=','
+    for item in $list; do
+        case "$item" in
+            *-*) start=${item%%-*}; end=${item##*-}
+                 for ((c = start; c <= end; c++)); do echo "$c"; done ;;
+            *)   echo "$item" ;;
+        esac
+    done
+}
+
 # $1 = index, $2 = run_name. Explicit ifs rather than 'test && action': under
 # 'set -e' a bare failing && list aborts the script.
 selected() {
@@ -210,11 +234,29 @@ echo
 # Slot table. Slot s always runs on gpu_arr[s % n_gpus] and CPUs
 # [s*3, s*3+2], so a cap of 6 over 4 GPUs loads them 2/2/1/1.
 # ---------------------------------------------------------------------------
+ALLOWED=()
+while IFS= read -r c; do ALLOWED+=("$c"); done < <(cpus_allowed)
+n_allowed=${#ALLOWED[@]}
+need=$((slots * CPUS_PER_JOB))
+if [ "$n_allowed" -lt "$need" ]; then
+    if [ "$dry" -eq 1 ]; then
+        # A --dry-run on a laptop has no cgroup list; wrap so the table still prints.
+        echo "warning: only $n_allowed CPUs available, need $need - slot lists below wrap" >&2
+    else
+        echo "error: need $need CPUs for $slots slots but the cgroup allows only $n_allowed" >&2
+        exit 1
+    fi
+fi
+
 declare -a slot_pid slot_gpu slot_cpus
 for s in $(seq 0 $((slots - 1))); do
     slot_pid[$s]=0
     slot_gpu[$s]=${gpu_arr[$((s % n_gpus))]}
-    slot_cpus[$s]="$((s * CPUS_PER_JOB))-$((s * CPUS_PER_JOB + CPUS_PER_JOB - 1))"
+    cl=""
+    for k in $(seq 0 $((CPUS_PER_JOB - 1))); do
+        cl="$cl,${ALLOWED[$(((s * CPUS_PER_JOB + k) % n_allowed))]}"
+    done
+    slot_cpus[$s]="${cl#,}"
 done
 
 if [ "$dry" -eq 1 ]; then

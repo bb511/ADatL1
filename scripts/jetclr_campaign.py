@@ -427,6 +427,9 @@ def run_trial(root: Path, trial_id: int) -> Path:
         "+trainer.limit_val_batches=1",
         "+trainer.enable_progress_bar=false",
         "+trainer.enable_model_summary=false",
+        "callbacks.rich_progress_bar=null",
+        "callbacks.model_summary=null",
+        "callbacks.log_data_mlflow=null",
         "logger=csv",
         "evaluation.callbacks=null",
         "test=false",
@@ -437,6 +440,7 @@ def run_trial(root: Path, trial_id: int) -> Path:
         f"paths.output_dir={trial_root / 'output'}",
         f"paths.checkpoints_dir={trial_root / 'checkpoints'}",
         f"hydra.run.dir={trial_root / 'hydra'}",
+        "extras.enforce_tags=false",
         "extras.print_config=false",
         *spec["overrides"],
     ]
@@ -453,6 +457,7 @@ def run_trial(root: Path, trial_id: int) -> Path:
         }
     )
     trial_root.mkdir(parents=True, exist_ok=True)
+    (trial_root / "output").mkdir(parents=True, exist_ok=True)
     started = datetime.now(timezone.utc)
     completed = subprocess.run(  # nosec B603 - argv is fixed campaign configuration
         command, cwd=deployment, env=environment, check=False

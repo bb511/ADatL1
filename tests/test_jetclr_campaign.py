@@ -49,6 +49,8 @@ def test_canary_disables_evaluation_callbacks_without_deleting_config_group() ->
 
     assert '"evaluation.callbacks=null"' in source
     assert '"evaluation=null"' not in source
+    assert '"extras.enforce_tags=false"' in source
+    assert '"callbacks.rich_progress_bar=null"' in source
 
 
 def test_campaign_manifest_detects_tampering(tmp_path: Path) -> None:

@@ -3,8 +3,10 @@ from __future__ import annotations
 import copy
 
 import torch
+import torch.distributed as dist
 import torch.nn.functional as F
 from torch import nn
+from torch.distributed.nn.functional import all_gather as differentiable_all_gather
 
 from src.algorithms import L1ADLightningModule
 from src.algorithms.components.augmentation import (
@@ -28,6 +30,8 @@ class JetCLR(L1ADLightningModule):
         object_mask: FastObjectMask | None = None,
         detector_smearing: FastDetectorSmearing | None = None,
         lorentz_rotation: FastLorentzRotation | None = None,
+        encoder_variance_weight: float = 0.0,
+        encoder_covariance_weight: float = 0.0,
         seed: int = 42,
         diagnosis_metrics: bool = True,
         ckpt: str = "",
@@ -51,6 +55,15 @@ class JetCLR(L1ADLightningModule):
         self.object_mask = object_mask
         self.detector_smearing = detector_smearing
         self.lorentz_rotation = lorentz_rotation
+        self.encoder_variance_weight = float(encoder_variance_weight)
+        self.encoder_covariance_weight = float(encoder_covariance_weight)
+        if self.encoder_variance_weight < 0.0 or self.encoder_covariance_weight < 0.0:
+            raise ValueError("Encoder VICReg weights must be non-negative.")
+        if self.encoder_covariance_weight > 0.0 and self.encoder_variance_weight == 0.0:
+            raise ValueError(
+                "encoder_covariance_weight requires a positive encoder_variance_weight "
+                "to prevent a collapsed covariance-only solution."
+            )
         self.seed = int(seed)
         self.diagnosis_metrics = diagnosis_metrics
         self.ckpt_path = ckpt
@@ -176,7 +189,17 @@ class JetCLR(L1ADLightningModule):
 
         z1 = self.projector(h1)
         z2 = self.projector(h2)
-        loss = self.loss(z1, z2)
+        ntxent_loss = self.loss(z1, z2)
+        encoder_variance = ntxent_loss.new_zeros(())
+        encoder_covariance = ntxent_loss.new_zeros(())
+        loss = ntxent_loss
+        if self.encoder_variance_weight > 0.0 or self.encoder_covariance_weight > 0.0:
+            encoder_variance, encoder_covariance = self._encoder_vicreg_terms(h1, h2)
+            loss = (
+                ntxent_loss
+                + self.encoder_variance_weight * encoder_variance
+                + self.encoder_covariance_weight * encoder_covariance
+            )
 
         with torch.no_grad():
             diag = self._diagnostics(h1, h2, z1, z2)
@@ -184,6 +207,15 @@ class JetCLR(L1ADLightningModule):
         outputs = {
             "loss": loss,
             "loss/mean": loss.detach(),
+            "loss/ntxent": ntxent_loss.detach(),
+            "loss/encoder_variance": encoder_variance.detach(),
+            "loss/encoder_covariance": encoder_covariance.detach(),
+            "loss/encoder_variance_weighted": (
+                self.encoder_variance_weight * encoder_variance.detach()
+            ),
+            "loss/encoder_covariance_weighted": (
+                self.encoder_covariance_weight * encoder_covariance.detach()
+            ),
             "pairing_rep_data": h.detach(),
             "pairing_view1_data": h1.detach(),
             "pairing_view2_data": h2.detach(),
@@ -205,8 +237,61 @@ class JetCLR(L1ADLightningModule):
         return {
             "loss": outdict.get("loss"),
             "loss_mean": outdict.get("loss/mean"),
+            "loss_ntxent": outdict.get("loss/ntxent"),
+            "loss_encoder_variance": outdict.get("loss/encoder_variance"),
+            "loss_encoder_covariance": outdict.get("loss/encoder_covariance"),
+            "loss_encoder_variance_weighted": outdict.get("loss/encoder_variance_weighted"),
+            "loss_encoder_covariance_weighted": outdict.get("loss/encoder_covariance_weighted"),
             **diag_entries,
         }
+
+    def _encoder_vicreg_terms(
+        self,
+        h1: torch.Tensor,
+        h2: torch.Tensor,
+    ) -> tuple[torch.Tensor, torch.Tensor]:
+        """Return VICReg variance and covariance terms over the global batch."""
+        global_h1 = self._gather_encoder_representation(h1)
+        global_h2 = self._gather_encoder_representation(h2)
+        if global_h1.shape[0] < 2:
+            raise ValueError("Encoder VICReg regularization needs at least two global samples.")
+
+        variance = 0.5 * (self._variance_penalty(global_h1) + self._variance_penalty(global_h2))
+        covariance = global_h1.new_zeros(())
+        if self.encoder_covariance_weight > 0.0:
+            covariance = self._covariance_penalty(global_h1) + self._covariance_penalty(global_h2)
+        return variance, covariance
+
+    @staticmethod
+    def _variance_penalty(h: torch.Tensor, eps: float = 1e-4) -> torch.Tensor:
+        std = torch.sqrt(h.var(dim=0, unbiased=True) + eps)
+        return F.relu(1.0 - std).mean()
+
+    @staticmethod
+    def _covariance_penalty(h: torch.Tensor) -> torch.Tensor:
+        n_samples, n_features = h.shape
+        centered = h - h.mean(dim=0, keepdim=True)
+        covariance = centered.T @ centered / (n_samples - 1)
+        off_diagonal = covariance.flatten()[:-1].view(n_features - 1, n_features + 1)[:, 1:]
+        return off_diagonal.square().sum() / n_features
+
+    @staticmethod
+    def _gather_encoder_representation(h: torch.Tensor) -> torch.Tensor:
+        """Differentiably gather equal-sized DDP batches for global VICReg statistics."""
+        if not dist.is_available() or not dist.is_initialized():
+            return h
+
+        world_size = dist.get_world_size()
+        sizes = [torch.zeros((), dtype=torch.long, device=h.device) for _ in range(world_size)]
+        local_size = torch.tensor(h.shape[0], dtype=torch.long, device=h.device)
+        dist.all_gather(sizes, local_size)
+        observed_sizes = [int(size.item()) for size in sizes]
+        if any(size != h.shape[0] for size in observed_sizes):
+            raise RuntimeError(
+                "Distributed encoder VICReg requires equal per-rank batch sizes; "
+                f"received {observed_sizes}. Use drop_last=True or a fixed-size iterable batcher."
+            )
+        return torch.cat(differentiable_all_gather(h), dim=0)
 
     def _setup_model_feature_map_from_trainer(self) -> None:
         object_feature_map = maybe_get_object_feature_map(self)

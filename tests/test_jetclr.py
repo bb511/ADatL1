@@ -9,6 +9,7 @@ import torch
 from omegaconf import OmegaConf
 from torch import nn
 
+from src.algorithms import jetclr as jetclr_module
 from src.algorithms.components.augmentation import (
     FastDetectorSmearing,
     FastFeatureBlur,
@@ -44,6 +45,11 @@ class _CountingProjector(nn.Module):
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         self.calls += 1
         return self.linear(x)
+
+
+class _ZeroContrastiveLoss(nn.Module):
+    def forward(self, z1: torch.Tensor, z2: torch.Tensor) -> torch.Tensor:
+        return 0.0 * (z1.sum() + z2.sum())
 
 
 def _feature_map() -> dict:
@@ -252,6 +258,138 @@ def test_jetclr_cosine_scheduler_runs_each_optimizer_step() -> None:
 
     assert config.scheduler.interval == "step"
     assert config.scheduler.frequency == 1
+    assert config.encoder_variance_weight == 0.0
+    assert config.encoder_covariance_weight == 0.0
+
+
+def test_default_jetclr_loss_is_exact_ntxent_without_vicreg_work(monkeypatch) -> None:
+    module = JetCLR(
+        model=nn.Linear(4, 3, bias=False),
+        projector=nn.Linear(3, 3, bias=False),
+        loss=NTXentLoss(temperature=0.1, gather_distributed=False),
+        optimizer=None,
+        diagnosis_metrics=False,
+    )
+
+    def unexpected_vicreg(*args) -> None:
+        raise AssertionError("default JetCLR must not compute VICReg statistics")
+
+    monkeypatch.setattr(module, "_encoder_vicreg_terms", unexpected_vicreg)
+    x = torch.randn(8, 4)
+    outputs = module.model_step((x, torch.ones_like(x), torch.zeros(8), torch.zeros(8)))
+
+    assert torch.equal(outputs["loss"].detach(), outputs["loss/ntxent"])
+    assert outputs["loss/encoder_variance"] == 0.0
+    assert outputs["loss/encoder_covariance"] == 0.0
+
+
+def test_encoder_vicreg_penalizes_collapsed_representations_more() -> None:
+    module = JetCLR(
+        model=nn.Identity(),
+        projector=nn.Identity(),
+        loss=_ZeroContrastiveLoss(),
+        optimizer=None,
+        diagnosis_metrics=False,
+        encoder_variance_weight=1.0,
+    )
+    generator = torch.Generator().manual_seed(31)
+    healthy = torch.randn(4096, 8, generator=generator)
+    collapsed = torch.zeros_like(healthy)
+
+    healthy_variance, _ = module._encoder_vicreg_terms(healthy, healthy)
+    collapsed_variance, _ = module._encoder_vicreg_terms(collapsed, collapsed)
+
+    assert collapsed_variance > healthy_variance
+    assert collapsed_variance > 0.9
+
+
+def test_encoder_vicreg_covariance_is_normalized_by_dimension() -> None:
+    correlated = torch.tensor([[1.0, 1.0], [-1.0, -1.0]])
+
+    penalty = JetCLR._covariance_penalty(correlated)
+
+    # Unbiased covariance has two off-diagonal entries equal to two:
+    # (2^2 + 2^2) / feature_dim = 4.
+    assert penalty == pytest.approx(4.0)
+
+
+def test_encoder_vicreg_gradients_reach_encoder() -> None:
+    encoder = nn.Linear(4, 3, bias=False)
+    module = JetCLR(
+        model=encoder,
+        projector=nn.Linear(3, 3, bias=False),
+        loss=_ZeroContrastiveLoss(),
+        optimizer=None,
+        diagnosis_metrics=False,
+        encoder_variance_weight=1.0,
+        encoder_covariance_weight=0.1,
+    )
+    x = 0.1 * torch.randn(32, 4)
+
+    outputs = module.model_step((x, torch.ones_like(x), torch.zeros(32), torch.zeros(32)))
+    outputs["loss"].backward()
+
+    assert encoder.weight.grad is not None
+    assert encoder.weight.grad.abs().sum() > 0.0
+    assert outputs["loss/encoder_covariance"] >= 0.0
+
+
+@pytest.mark.parametrize(
+    "kwargs",
+    [
+        {"encoder_variance_weight": -1.0},
+        {"encoder_covariance_weight": -1.0},
+        {"encoder_variance_weight": 0.0, "encoder_covariance_weight": 1.0},
+    ],
+)
+def test_encoder_vicreg_rejects_invalid_weights(kwargs: dict) -> None:
+    with pytest.raises(ValueError):
+        JetCLR(
+            model=nn.Identity(),
+            projector=nn.Identity(),
+            loss=_ZeroContrastiveLoss(),
+            optimizer=None,
+            **kwargs,
+        )
+
+
+def test_encoder_vicreg_ddp_gather_is_differentiable(monkeypatch) -> None:
+    monkeypatch.setattr(jetclr_module.dist, "is_available", lambda: True)
+    monkeypatch.setattr(jetclr_module.dist, "is_initialized", lambda: True)
+    monkeypatch.setattr(jetclr_module.dist, "get_world_size", lambda: 2)
+
+    def equal_size_gather(outputs, value) -> None:
+        for output in outputs:
+            output.copy_(value)
+
+    monkeypatch.setattr(jetclr_module.dist, "all_gather", equal_size_gather)
+    monkeypatch.setattr(
+        jetclr_module,
+        "differentiable_all_gather",
+        lambda value: (value, value + 1.0),
+    )
+    local = torch.randn(4, 3, requires_grad=True)
+
+    gathered = JetCLR._gather_encoder_representation(local)
+    gathered.sum().backward()
+
+    assert gathered.shape == (8, 3)
+    assert local.grad is not None
+
+
+def test_encoder_vicreg_ddp_rejects_variable_batch_sizes(monkeypatch) -> None:
+    monkeypatch.setattr(jetclr_module.dist, "is_available", lambda: True)
+    monkeypatch.setattr(jetclr_module.dist, "is_initialized", lambda: True)
+    monkeypatch.setattr(jetclr_module.dist, "get_world_size", lambda: 2)
+
+    def variable_size_gather(outputs, value) -> None:
+        outputs[0].fill_(value.item())
+        outputs[1].fill_(value.item() + 1)
+
+    monkeypatch.setattr(jetclr_module.dist, "all_gather", variable_size_gather)
+
+    with pytest.raises(RuntimeError, match="equal per-rank batch sizes.*drop_last=True"):
+        JetCLR._gather_encoder_representation(torch.randn(4, 3))
 
 
 def test_clean_projector_output_is_evaluation_only() -> None:

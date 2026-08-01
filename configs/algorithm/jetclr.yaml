@@ -6,6 +6,10 @@ seed: ${seed}
 diagnosis_metrics: true
 sync_dist_metrics: true
 ckpt: ""
+# Optional encoder-side VICReg anti-collapse regularization. Zero preserves the
+# pure NT-Xent objective and skips global representation statistics entirely.
+encoder_variance_weight: 0.0
+encoder_covariance_weight: 0.0
 
 feature_blur: null
 

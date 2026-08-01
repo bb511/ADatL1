@@ -1330,8 +1330,14 @@ class _SealedMetricsCallback(pl.Callback):
                     torch.ones(signal.numel(), dtype=torch.long),
                 ]
             )
-            auprc = float(BinaryAveragePrecision()(prediction, target).item())
-            efficiency = float((signal >= self.threshold).float().mean().item())
+            # TorchMetrics can overshoot a probability metric by one float32 ULP
+            # (for example, 1.000000119).  Persist the mathematical [0, 1]
+            # quantity rather than rejecting an otherwise valid sealed result.
+            auprc = min(1.0, max(0.0, float(BinaryAveragePrecision()(prediction, target).item())))
+            efficiency = min(
+                1.0,
+                max(0.0, float((signal >= self.threshold).float().mean().item())),
+            )
             for metric, value in (
                 ("auprc", auprc),
                 ("efficiency_operational", efficiency),

@@ -6,11 +6,13 @@ from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
+import torch
 from hydra import compose, initialize_config_dir
 
 from scripts import jetclr_campaign
 
 _STAGE7_SPECS = jetclr_campaign.stage7_specs()
+_STAGE8_SPECS = jetclr_campaign.stage8_specs()
 
 
 def _pairing_metrics(collapse_pass: bool = True) -> dict:
@@ -78,6 +80,7 @@ def _write_manifest(root: Path) -> dict:
     stage5 = jetclr_campaign.stage5_specs()
     stage6 = jetclr_campaign.stage6_specs()
     stage7 = _STAGE7_SPECS
+    stage8 = _STAGE8_SPECS
     manifest = {
         "schema_version": 1,
         "campaign_id": "jetclr_test_deadbeef",
@@ -149,6 +152,17 @@ def _write_manifest(root: Path) -> dict:
             "source_campaign_id": jetclr_campaign.STAGE7_SOURCE_CAMPAIGN,
             "candidates": stage7,
             "design_sha256": jetclr_campaign._value_sha256(stage7),
+        },
+        "stage8": {
+            "train": True,
+            "test": False,
+            "seeds": list(jetclr_campaign.STAGE8_SEEDS),
+            "full_epochs": jetclr_campaign.STAGE8_EPOCHS,
+            "selected_completed_epoch": jetclr_campaign.STAGE8_SELECTED_COMPLETED_EPOCH,
+            "scheduler_total_steps": jetclr_campaign.STAGE8_SCHEDULER_TOTAL_STEPS,
+            "source_campaign_id": jetclr_campaign.STAGE8_SOURCE_CAMPAIGN,
+            "candidates": stage8,
+            "design_sha256": jetclr_campaign._value_sha256(stage8),
         },
     }
     manifest["manifest_payload_sha256"] = jetclr_campaign._value_sha256(manifest)
@@ -1289,3 +1303,192 @@ def test_collect_stage7_selects_global_one_se_epoch_and_reports_extension(tmp_pa
     assert "smallest epoch" in selection["rule"]
     assert len(summary["epoch8_to16"]["paired_improvements"]) == 6
     assert "architecture winner" in summary["selection_policy"]
+
+
+def test_stage8_frozen_design_composes_and_packs_ten_trials(tmp_path: Path) -> None:
+    """Stage 8 must pair five new seeds and preserve the 16-epoch LR horizon."""
+    specs = jetclr_campaign.stage8_specs()
+    assert len(specs) == 10
+    assert [spec["seed"] for spec in specs] == [
+        seed for seed in jetclr_campaign.STAGE8_SEEDS for _ in range(2)
+    ]
+    assert [spec["source_candidate_id"] for spec in specs] == [0, 4] * 5
+    assert [spec["is_architecture_control"] for spec in specs] == [True, False] * 5
+    assert not set(jetclr_campaign.STAGE8_SEEDS) & {123, 321, 777, 2027, 31415}
+    assert {spec["full_epochs"] for spec in specs} == {1}
+    assert {spec["scheduler_total_steps"] for spec in specs} == {24480}
+    assert all("+algorithm.scheduler.total_steps=24480" in spec["overrides"] for spec in specs)
+
+    config_dir = Path(jetclr_campaign.__file__).resolve().parents[1] / "configs"
+    with initialize_config_dir(config_dir=str(config_dir), version_base="1.3"):
+        config = compose(
+            config_name="train",
+            overrides=[
+                "experiment=physics/jetclr_pairing",
+                "trainer=gpu",
+                "trainer.min_epochs=1",
+                "trainer.max_epochs=1",
+                *specs[1]["overrides"],
+            ],
+        )
+    assert config.trainer.max_epochs == 1
+    assert config.algorithm.scheduler.total_steps == 24480
+    assert config.algorithm.model.n_layers == 2
+    assert config.algorithm.encoder_variance_weight == 0.5
+    assert config.algorithm.encoder_covariance_weight == 0.005
+
+    manifest = _write_manifest(tmp_path)
+    launchers = jetclr_campaign._write_stage8_launchers(tmp_path, manifest)
+    stage8 = launchers["stage8"].read_text(encoding="utf-8")
+    collector = launchers["collector"].read_text(encoding="utf-8")
+    submitter = launchers["submitter"].read_text(encoding="utf-8")
+    assert "#SBATCH --array=0-2%3" in stage8
+    assert "#SBATCH --time=02:00:00" in stage8
+    assert "candidate_id >= 10" in stage8
+    assert "run-stage8" in stage8
+    assert "collect-stage8" in collector
+    assert 'dependency="afterok:$stage8_job"' in submitter
+
+
+def test_run_stage8_authenticates_epoch1_scheduler_horizon(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The handoff checkpoint must prove one epoch on the 24,480-step schedule."""
+    manifest = _write_manifest(tmp_path)
+    monkeypatch.setattr(jetclr_campaign, "_assert_runtime", lambda _: tmp_path)
+    observed = {}
+
+    def fake_run(command, **kwargs):
+        observed["command"] = command
+        spec = manifest["stage8"]["candidates"][0]
+        output = tmp_path / "stage8" / "candidate_000" / "output"
+        metrics = output / "csv" / "version_0" / "metrics.csv"
+        metrics.parent.mkdir(parents=True)
+        training = _stage4_training_metrics(0.0, 0.0)
+        metrics.write_text(
+            ",".join(training) + "\n" + ",".join(str(value) for value in training.values()) + "\n",
+            encoding="utf-8",
+        )
+        pairing = output / "metrics" / "pairing_diagnostics" / "last"
+        anomaly = output / "metrics" / "embedding_anomaly" / "last"
+        pairing.mkdir(parents=True)
+        anomaly.mkdir(parents=True)
+        (pairing / "pairing_diagnostics.json").write_text(
+            json.dumps(_pairing_metrics()), encoding="utf-8"
+        )
+        (anomaly / "embedding_anomaly.json").write_text(
+            json.dumps(_anomaly_metrics()), encoding="utf-8"
+        )
+        checkpoint_dir = (
+            tmp_path / "stage8" / "candidate_000" / "checkpoints" / "experiment" / "candidate_000"
+        )
+        checkpoint_dir.mkdir(parents=True)
+        payload = {
+            "epoch": 0,
+            "global_step": 1530,
+            "lr_schedulers": [{"total_steps": 24480, "last_epoch": 1530, "warmup_steps": 1224}],
+        }
+        torch.save(payload, checkpoint_dir / "epoch-00.ckpt")
+        torch.save(payload, checkpoint_dir / "last.ckpt")
+        assert spec["is_architecture_control"] is True
+        return SimpleNamespace(returncode=0)
+
+    monkeypatch.setattr(jetclr_campaign.subprocess, "run", fake_run)
+    result_path = jetclr_campaign.run_stage8(tmp_path, 0)
+    result = json.loads(result_path.read_text(encoding="utf-8"))
+    command = observed["command"]
+    assert "trainer.min_epochs=1" in command
+    assert "trainer.max_epochs=1" in command
+    assert "+algorithm.scheduler.total_steps=24480" in command
+    assert "test=false" in command
+    assert result["scheduler_evidence"] == {
+        "completed_epoch": 1,
+        "global_step": 1530,
+        "last_epoch": 1530,
+        "total_steps": 24480,
+    }
+    checkpoint = result["artifacts"]["epoch1_checkpoint"]
+    assert Path(checkpoint["path"]).name == "epoch-00.ckpt"
+    assert checkpoint["sha256"] == jetclr_campaign._sha256(Path(checkpoint["path"]))
+
+
+def test_collect_stage8_promotes_on_five_fresh_pairs_and_reports_eight_hybrids(
+    tmp_path: Path,
+) -> None:
+    """Fresh pairs alone decide promotion; historical hybrids only expand reporting."""
+    manifest = _write_manifest(tmp_path)
+    for spec in manifest["stage8"]["candidates"]:
+        trial = tmp_path / "stage8" / f"candidate_{spec['candidate_id']:03d}"
+        trial.mkdir(parents=True)
+        weights = spec["regularization_params"]
+        training = _stage4_training_metrics(
+            weights["algorithm.encoder_variance_weight"],
+            weights["algorithm.encoder_covariance_weight"],
+        )
+        metrics = trial / "metrics.csv"
+        pairing_path = trial / "pairing_diagnostics.json"
+        anomaly_path = trial / "embedding_anomaly.json"
+        last_checkpoint = trial / "last.ckpt"
+        epoch1_checkpoint = trial / "epoch-00.ckpt"
+        metrics.write_text("metrics", encoding="utf-8")
+        pairing = _pairing_metrics()
+        anomaly = _anomaly_metrics()
+        if not spec["is_architecture_control"]:
+            pairing["embedding_effective_rank"] = 46.0
+            pairing["embedding_participation_rank"] = 40.25
+            pairing["embedding_top_pc_fraction"] = 0.065
+            pairing["raw_selection_score"] = 0.51
+            anomaly["macro_mean_auroc"] += 0.005
+            anomaly["macro_median_auroc"] += 0.005
+            anomaly["worst_quartile_mean_auroc"] += 0.005
+        pairing_path.write_text(json.dumps(pairing), encoding="utf-8")
+        anomaly_path.write_text(json.dumps(anomaly), encoding="utf-8")
+        last_checkpoint.write_bytes(f"last/{spec['candidate_id']}".encode())
+        epoch1_checkpoint.write_bytes(f"epoch1/{spec['candidate_id']}".encode())
+        artifacts = {
+            name: {"path": str(path), "sha256": jetclr_campaign._sha256(path)}
+            for name, path in {
+                "training_csv": metrics,
+                "pairing_json": pairing_path,
+                "anomaly_json": anomaly_path,
+                "last_checkpoint": last_checkpoint,
+                "epoch1_checkpoint": epoch1_checkpoint,
+            }.items()
+        }
+        result = {
+            "campaign_id": manifest["campaign_id"],
+            "git_commit": manifest["git"]["commit"],
+            "candidate_id": spec["candidate_id"],
+            "spec_sha256": spec["spec_sha256"],
+            "source_campaign_id": jetclr_campaign.STAGE8_SOURCE_CAMPAIGN,
+            "source_candidate_id": spec["source_candidate_id"],
+            "source_candidate_spec_sha256": spec["source_candidate_spec_sha256"],
+            "artifacts": artifacts,
+            "training_metrics": training,
+            "pairing_metrics": pairing,
+            "anomaly_metrics": anomaly,
+            "scheduler_evidence": {
+                "completed_epoch": 1,
+                "global_step": 1530,
+                "total_steps": 24480,
+                "last_epoch": 1530,
+            },
+        }
+        result["result_payload_sha256"] = jetclr_campaign._value_sha256(result)
+        jetclr_campaign._atomic_json(trial / "result.json", result)
+
+    output = jetclr_campaign.collect_stage8(tmp_path)
+    summary = json.loads(output.read_text(encoding="utf-8"))
+    confirmation = summary["fresh_confirmation"]
+    combined = summary["eight_seed_hybrid_summary"]
+    assert summary["test_accessed"] is False
+    assert confirmation["n_pairs"] == 5
+    assert confirmation["promotion"] is True
+    assert summary["promotion_policy"]["decision_population"].startswith("five fresh")
+    assert combined["n_original"] == 3
+    assert combined["n_fresh"] == 5
+    assert len(combined["seeds"]) == 8
+    assert (
+        jetclr_campaign._sha256(Path(summary["hybrid_eight_seed_csv"]))
+        == summary["hybrid_eight_seed_csv_sha256"]
+    )

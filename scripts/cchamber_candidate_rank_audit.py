@@ -351,7 +351,7 @@ def _validate_candidate_metrics_provenance(
     if (
         campaign.get("git_commit") != CAMPAIGN_COMMIT
         or tuple(campaign.get("models", ())) != MODELS
-        or tuple(campaign.get("strategies", ())) != STRATEGIES
+        or set(campaign.get("strategies", ())) != set(STRATEGIES)
         or tuple(map(int, campaign.get("development_seeds", ()))) != DEVELOPMENT_SEEDS
     ):
         raise ValueError("Candidate search model/strategy/development-seed design changed.")

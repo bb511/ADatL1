@@ -222,6 +222,7 @@ def test_candidate_provenance_authenticates_shared_survivor_pools(tmp_path) -> N
         provenance_path,
         pair_hash,
     ) = _synthetic_candidate_provenance(tmp_path)
+    campaign["strategies"] = list(reversed(campaign["strategies"]))
     frame = audit._validate_candidate_metrics_provenance(
         provenance_path,
         audit._sha256(provenance_path),

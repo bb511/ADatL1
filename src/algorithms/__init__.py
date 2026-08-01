@@ -158,14 +158,28 @@ class ADLightningModule(LightningModule):
         """Configure a scheduler for the optimiser, that can be used for lr etc..."""
         scheduler_fn = self.hparams.scheduler.scheduler
         param_names = inspect.signature(scheduler_fn).parameters
+        scheduler_dict = OmegaConf.to_container(self.hparams.scheduler, resolve=True)
+        total_steps_override = scheduler_dict.pop("total_steps", None)
         kwargs = {}
         if "total_steps" in param_names:
-            kwargs["total_steps"] = int(self.trainer.estimated_stepping_batches)
+            kwargs["total_steps"] = int(
+                total_steps_override
+                if total_steps_override is not None
+                else self.trainer.estimated_stepping_batches
+            )
         elif "T_max" in param_names:
-            kwargs["T_max"] = int(self.trainer.estimated_stepping_batches)
+            kwargs["T_max"] = int(
+                total_steps_override
+                if total_steps_override is not None
+                else self.trainer.estimated_stepping_batches
+            )
+        elif total_steps_override is not None:
+            raise ValueError(
+                "scheduler.total_steps was configured, but the scheduler accepts "
+                "neither total_steps nor T_max."
+            )
 
         scheduler = scheduler_fn(optimizer=optimizer, **kwargs)
-        scheduler_dict = OmegaConf.to_container(self.hparams.scheduler, resolve=True)
         scheduler_dict.update({"scheduler": scheduler})
 
         return scheduler_dict

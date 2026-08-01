@@ -1,0 +1,29 @@
+# @package _global_
+
+# Add this control to any physics experiment with: +pairing=physics
+physics_pairing:
+  artifact_dir: ${paths.root_dir}/results/physics-pairing-control/production
+
+  # Select exactly one deterministic pairing strategy.
+  strategy: physics_summary
+  # strategy: flat_physical
+  # strategy: typed_sliced_wasserstein
+
+  # Must equal data.batch_size * data.max_val_batches for the auxiliary sample.
+  events: 163840
+  # events: 81920  # JetCLR pairing runs use batch_size=8192 and 10 batches.
+
+  validation_table: ${physics_pairing.artifact_dir}/validate_${physics_pairing.strategy}_cap_n${physics_pairing.events}.pt
+  test_table: ${physics_pairing.artifact_dir}/test_${physics_pairing.strategy}_cap_n${physics_pairing.events}.pt
+
+callbacks:
+  cap_sn_zb:
+    pairing_type: precomputed
+    pairing_index_path: ${physics_pairing.validation_table}
+
+evaluation:
+  callbacks:
+    cap_sn_zb:
+      pairing_type: precomputed
+      pairing_index_path: ${physics_pairing.validation_table}
+      pairing_test_index_path: ${physics_pairing.test_table}

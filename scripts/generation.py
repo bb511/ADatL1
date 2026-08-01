@@ -49,6 +49,7 @@ class Strategy(str, Enum):
     CAP_METADATA_NEAREST = "cap_metadata_nearest"
     CAP_ENCODER_NEAREST = "cap_encoder_nearest"
     CAP_RANDOM = "cap_random"
+    CAP_CDF = "cap_cdf"
     DRIFT = "drift"
     WASSERSTEIN = "wasserstein"
 
@@ -172,6 +173,7 @@ CCHAMBER_CAP_PAIRING_STRATEGIES = {
     Strategy.CAP_METADATA_NEAREST,
     Strategy.CAP_ENCODER_NEAREST,
     Strategy.CAP_RANDOM,
+    Strategy.CAP_CDF,
 }
 CAP_STRATEGIES = {Strategy.CAP, *CCHAMBER_CAP_PAIRING_STRATEGIES}
 AGNOSTIC_STRATEGIES = CAP_STRATEGIES | {Strategy.DRIFT, Strategy.WASSERSTEIN}
@@ -214,6 +216,7 @@ def strategies_for(dataset: Dataset, *, include_cvar10: bool) -> tuple[Strategy,
             Strategy.CAP_METADATA_NEAREST,
             Strategy.CAP_ENCODER_NEAREST,
             Strategy.CAP_RANDOM,
+            Strategy.CAP_CDF,
             Strategy.DRIFT,
             Strategy.WASSERSTEIN,
         )
@@ -350,7 +353,7 @@ def factors_for(dataset: Dataset) -> dict[str, tuple[str, ...]]:
         return {
             "validation_domains": ("normal", reference_dataset_for(dataset)),
             "reported_over": ("intervention_dataset", "seed"),
-            "cap_pairing": ("metadata_nearest", "encoder_nearest", "random"),
+            "cap_pairing": ("metadata_nearest", "encoder_nearest", "random", "cdf"),
         }
     raise ValueError(f"Unknown dataset: {dataset}")
 
@@ -378,6 +381,11 @@ def notes_for(dataset: Dataset, strategy: Strategy) -> tuple[str, ...]:
             notes.append(
                 "CAP uses frozen-encoder fixed pair tables via pairing_type=precomputed. "
                 "Set CCHAMBER_VALID_PAIR_TABLE and CCHAMBER_TEST_PAIR_TABLE before running."
+            )
+        elif strategy == Strategy.CAP_CDF:
+            notes.append(
+                "CAP deterministically pairs the two normal score samples by corresponding "
+                "empirical-CDF rank at every validation epoch."
             )
         else:
             notes.append(
@@ -419,6 +427,14 @@ def strategy_overrides_for(strategy: Strategy) -> tuple[str, ...]:
                     "+callbacks.cap_ref.pairing_index_path=$CCHAMBER_VALID_PAIR_TABLE",
                     "evaluation.callbacks.cap_ref.pairing_type=precomputed",
                     "+evaluation.callbacks.cap_ref.pairing_index_path=$CCHAMBER_VALID_PAIR_TABLE",
+                ]
+            )
+        elif strategy == Strategy.CAP_CDF:
+            overrides.extend(
+                [
+                    "data.pairing_strategy=metadata_nearest",
+                    "callbacks.cap_ref.pairing_type=cdf",
+                    "evaluation.callbacks.cap_ref.pairing_type=cdf",
                 ]
             )
         return tuple(overrides)

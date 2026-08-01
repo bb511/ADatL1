@@ -53,6 +53,12 @@ callbacks:
     monitor: "val/summary/cap_random_ema_normal_vs_reference_normal"
     filename: cap_random
 
+  audit_ckpt_cap_cdf:
+    <<: *audit_ckpt
+    dirpath: "${paths.checkpoints_dir}/${experiment_name}/${run_name}/branches/cap_cdf"
+    monitor: "val/summary/cap_cdf_ema_normal_vs_reference_normal"
+    filename: cap_cdf
+
   audit_ckpt_drift:
     <<: *audit_ckpt
     dirpath: "${paths.checkpoints_dir}/${experiment_name}/${run_name}/branches/drift"
@@ -74,6 +80,7 @@ callbacks:
       cap_metadata_nearest: "val/summary/cap_metadata_nearest_ema_normal_vs_reference_normal"
       cap_encoder_nearest: "val/summary/cap_encoder_nearest_ema_normal_vs_reference_normal"
       cap_random: "val/summary/cap_random_ema_normal_vs_reference_normal"
+      cap_cdf: "val/summary/cap_cdf_ema_normal_vs_reference_normal"
       drift: "val/summary/operational_drift_ema"
       wasserstein: "val/summary/w1dist_ema_normal_vs_reference_normal"
 

@@ -52,6 +52,9 @@ Supported real-data pairing strategies:
 - `encoder_nearest`: train a larger AE on real `uniform_reference` training rows,
   freeze it, build fixed nearest-neighbor pair tables in AE latent space, and run
   CAP with `pairing_type=precomputed`.
+- `cdf`: pair the two validation score samples by deterministic empirical-CDF
+  rank. This assignment is recomputed from the current model scores and has no
+  pairing seed or learned pairing table.
 
 The intended paper comparison is:
 
@@ -124,13 +127,20 @@ Run these for each anomaly detector: AE, VAE, SVDD, RealNVP.
 ```text
 cchamber_<model>_cap_metadata_nearest
 cchamber_<model>_cap_encoder_nearest
+cchamber_<model>_cap_cdf
 cchamber_<model>_cap_random
 cchamber_<model>_drift
 cchamber_<model>_wasserstein
 ```
 
-The CAP triplet is the main Causal Chamber result. Drift and Wasserstein are
+The four CAP conditions are the main Causal Chamber result. Drift and Wasserstein are
 included as non-CAP validation baselines.
+
+For corrected SVDD runs, the seed-123 bias-free pairing AE uses encoder widths
+`[128, 64, 16]`. Its exact authenticated checkpoint initializes the identically
+shaped SVDD encoder strictly; the encoder remains trainable. SVDD then uses the
+one-class mean-center objective and tunes only optimizer learning rate/betas,
+gradient clipping, and network weight decay.
 
 ## Generating Runs
 

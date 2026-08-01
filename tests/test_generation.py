@@ -11,7 +11,7 @@ def test_default_paper_registry_fits_current_experiment_matrix() -> None:
 
     assert hasattr(generation, "ExperimentSpecification")
     assert not hasattr(generation, "StudySpec")
-    assert len(specs) == 76
+    assert len(specs) == 80
     assert "physics_dsae_cap" in specs
     assert "cifar10_dsae_cap" not in specs
     assert specs["physics_ae_cap"].experiment == "physics/ae_agnostic"
@@ -94,6 +94,7 @@ def test_generation_registry_includes_paired_causal_chamber() -> None:
     assert cchamber_strategies == {
         generation.Strategy.CAP_METADATA_NEAREST,
         generation.Strategy.CAP_ENCODER_NEAREST,
+        generation.Strategy.CAP_CDF,
         generation.Strategy.CAP_RANDOM,
         generation.Strategy.DRIFT,
         generation.Strategy.WASSERSTEIN,
@@ -199,7 +200,7 @@ def test_all_causal_chamber_paper_specs_compose() -> None:
                 ],
             )
 
-    assert len(specs) == 20
+    assert len(specs) == 24
 
 
 def test_shared_manifest_is_filtered_by_spec(tmp_path) -> None:

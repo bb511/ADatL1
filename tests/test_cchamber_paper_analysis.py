@@ -14,6 +14,7 @@ MODELS = ["ae", "vae", "svdd", "realnvp"]
 STRATEGIES = [
     "cap_metadata_nearest",
     "cap_encoder_nearest",
+    "cap_cdf",
     "cap_random",
     "drift",
     "wasserstein",
@@ -83,7 +84,7 @@ def _frozen_bundle(tmp_path: Path, *, with_pairing: bool = True) -> dict[str, Pa
             "right": right,
             "alternative": "greater",
         }
-        for left in ("cap_metadata_nearest", "cap_encoder_nearest")
+        for left in ("cap_metadata_nearest", "cap_encoder_nearest", "cap_cdf")
         for right in ("cap_random", "drift", "wasserstein")
     ]
     plan = {
@@ -106,6 +107,7 @@ def _frozen_bundle(tmp_path: Path, *, with_pairing: bool = True) -> dict[str, Pa
     strategy_effect = {
         "cap_metadata_nearest": 0.30,
         "cap_encoder_nearest": 0.295,
+        "cap_cdf": 0.29,
         "cap_random": 0.05,
         "drift": 0.00,
         "wasserstein": -0.05,
@@ -241,7 +243,7 @@ def test_analysis_is_seed_first_hash_pinned_and_marks_pending_components(tmp_pat
     assert set(seed_summary.groupby(["model", "strategy", "metric"]).size()) == {len(SEEDS)}
 
     contrasts = pd.read_csv(bundle["output"] / "prespecified_strategy_contrasts.csv")
-    assert len(contrasts) == len(MODELS) * len(METRICS) * 6
+    assert len(contrasts) == len(MODELS) * len(METRICS) * 9
     assert set(contrasts["n_seeds"]) == {len(SEEDS)}
     assert (contrasts["mean_difference"] > 0).all()
     assert {"p_signflip_holm", "p_sign_holm"}.issubset(contrasts.columns)
@@ -433,7 +435,7 @@ def test_analysis_integrates_background_and_candidate_rank_audits(tmp_path) -> N
                         "n_bootstrap_requested": 10_000,
                         "n_bootstrap_effective": 9_900,
                         "n_bootstrap_effective_paired": 9_800,
-                        "holm_family_size": 20,
+                        "holm_family_size": 24,
                     }
                 )
     pd.DataFrame(rank_rows).to_csv(rank_path, index=False)

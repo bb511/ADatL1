@@ -13,6 +13,7 @@ MODELS = ["ae", "vae", "svdd", "realnvp"]
 STRATEGIES = [
     "cap_metadata_nearest",
     "cap_encoder_nearest",
+    "cap_cdf",
     "cap_random",
     "drift",
     "wasserstein",
@@ -73,7 +74,7 @@ def _fixture(tmp_path: Path, *, with_rank: bool = False) -> dict[str, Path]:
                 "right": right,
                 "alternative": "greater",
             }
-            for left in ("cap_metadata_nearest", "cap_encoder_nearest")
+            for left in ("cap_metadata_nearest", "cap_encoder_nearest", "cap_cdf")
             for right in ("cap_random", "drift", "wasserstein")
         ],
     }
@@ -128,7 +129,7 @@ def _fixture(tmp_path: Path, *, with_rank: bool = False) -> dict[str, Path]:
             "test_or_intervention_data_loaded_before_freeze": False,
             "inventory": str(inventory_path.resolve()),
             "inventory_sha256": bundle._sha256(inventory_path),
-            "expected_records": 200,
+            "expected_records": 240,
             "records": threshold_records,
         },
     )
@@ -203,8 +204,8 @@ def _fixture(tmp_path: Path, *, with_rank: bool = False) -> dict[str, Path]:
             "results_sha256": bundle._sha256(results_path),
             "seed_level_summary": str(diagnostics_path.resolve()),
             "seed_level_summary_sha256": bundle._sha256(diagnostics_path),
-            "expected_records": 200,
-            "expected_result_rows": 23_200,
+            "expected_records": 240,
+            "expected_result_rows": 27_840,
         },
     )
 
@@ -285,7 +286,7 @@ def _fixture(tmp_path: Path, *, with_rank: bool = False) -> dict[str, Path]:
                     "spearman_rho": 0.2,
                     "spearman_permutation_p": 0.1,
                     "spearman_holm_p": 0.5,
-                    "holm_family_size": 20,
+                    "holm_family_size": 24,
                 }
                 for metric, model, strategy in product(METRICS, MODELS, STRATEGIES)
             ]
@@ -336,8 +337,8 @@ def test_builds_hash_pinned_manifest_and_cpu_debug_launcher(tmp_path) -> None:
         "metrics": METRICS,
         "outcome_values_summarized_or_compared_by_builder": False,
         "rank_analysis": "available",
-        "required_result_rows": 23_200,
-        "required_selected_checkpoints": 200,
+        "required_result_rows": 27_840,
+        "required_selected_checkpoints": 240,
     }
     assert set(manifest["files"]) == {
         "campaign",

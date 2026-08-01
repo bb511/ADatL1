@@ -50,6 +50,7 @@ STRATEGIES = (
     "cap_metadata_nearest",
     "cap_encoder_nearest",
     "cap_random",
+    "cap_cdf",
     "drift",
     "wasserstein",
 )
@@ -83,6 +84,10 @@ METRICS = {
     ),
     "cap_random": (
         "val/summary/cap_random_ema_normal_vs_reference_normal",
+        "maximize",
+    ),
+    "cap_cdf": (
+        "val/summary/cap_cdf_ema_normal_vs_reference_normal",
         "maximize",
     ),
     "drift": ("val/summary/operational_drift_ema", "minimize"),
@@ -163,22 +168,7 @@ SPACES: dict[str, dict[str, Sequence[Any] | LogRange]] = {
         "algorithm.optimizer.lr": LogRange(3e-5, 3e-3),
         "trainer.gradient_clip_val": (0.0, 0.5, 1.0, 2.0),
         "algorithm.optimizer.betas": ([0.9, 0.999], [0.9, 0.99]),
-        "algorithm.optimizer.weight_decay": (0.0, 1e-6, 1e-5, 1e-4, 1e-3),
-        "algorithm.weight_decay": (0.0, 1e-8, 1e-7, 1e-6, 1e-5),
-        "algorithm.soft_boundary": (False, True),
-        "algorithm.nu": (0.01, 0.05, 0.1, 0.2),
-        "algorithm.center_init_method": ("mean", "zeros"),
-        "algorithm.encoder.nodes": (
-            [16, 8],
-            [24, 8],
-            [32, 16],
-            [32, 16, 8],
-            [32, 16, 16],
-            [48, 24, 8],
-            [48, 24, 16],
-            [64, 32, 16],
-        ),
-        "algorithm.encoder.activation": ("relu", "gelu"),
+        "algorithm.network_weight_decay": (0.0, 1e-8, 1e-7, 1e-6, 1e-5),
     },
     "realnvp": {
         "algorithm.optimizer.lr": LogRange(3e-5, 3e-3),
@@ -219,13 +209,7 @@ BASELINES: dict[str, dict[str, Any]] = {
         "algorithm.optimizer.lr": 1e-3,
         "trainer.gradient_clip_val": 0.0,
         "algorithm.optimizer.betas": [0.9, 0.999],
-        "algorithm.optimizer.weight_decay": 1e-4,
-        "algorithm.weight_decay": 0.0,
-        "algorithm.soft_boundary": False,
-        "algorithm.nu": 0.1,
-        "algorithm.center_init_method": "mean",
-        "algorithm.encoder.nodes": [32, 16, 8],
-        "algorithm.encoder.activation": "relu",
+        "algorithm.network_weight_decay": 1e-6,
     },
     "realnvp": {
         "algorithm.optimizer.lr": 1e-3,
@@ -350,6 +334,21 @@ def _candidate_manifest(root: Path, model: str) -> list[dict[str, Any]]:
     return value
 
 
+def _primary_pairing_encoder(pairing_manifest: Mapping[str, Any]) -> tuple[Path, str]:
+    """Return and authenticate the prespecified bias-free SVDD initializer."""
+    primary_seed = int(pairing_manifest["primary_encoder_seed"])
+    summary = next(
+        record
+        for record in pairing_manifest["encoder_runs"]
+        if int(record["encoder_seed"]) == primary_seed
+    )
+    checkpoint = Path(str(summary["encoder_checkpoint"])).expanduser().resolve()
+    expected = str(summary["encoder_checkpoint_sha256"])
+    if not checkpoint.is_file() or _sha256(checkpoint) != expected:
+        raise ValueError("Primary pairing-encoder checkpoint fingerprint changed.")
+    return checkpoint, expected
+
+
 def _sample_pool(model: str, n_candidates: int) -> list[dict[str, Any]]:
     if n_candidates < 2:
         raise ValueError("n_candidates must be at least two.")
@@ -375,8 +374,6 @@ def _sample_pool(model: str, n_candidates: int) -> list[dict[str, Any]]:
                 index = min(int(float(coordinate) * len(domain)), len(domain) - 1)
                 value = domain[index]
             params[name] = value
-        if model == "svdd" and not params["algorithm.soft_boundary"]:
-            params["algorithm.nu"] = 0.1
         candidates.append(params)
         if len(candidates) == n_candidates:
             break
@@ -548,6 +545,17 @@ def design(root: Path, campaign_id: str, n_candidates: int) -> None:
         "tracking_uri": tracking_uri,
         "intervention_labels_sealed_during_search": True,
         "test_pairing_diagnostics_not_used_for_selection": True,
+        "svdd_pretraining": {
+            "enabled": True,
+            "source": "primary bias-free pairing AE encoder",
+            "encoder_seed": int(PAIR_ENCODER_SEEDS[0]),
+            "encoder_nodes": [128, 64, 16],
+            "encoder_bias": False,
+            "encoder_batchnorm": False,
+            "encoder_trainable_during_svdd": True,
+            "objective": "one_class",
+            "center_init_method": "mean",
+        },
         "sensitivity_design": {
             "random_pairing_seeds": [PAIRING_SEED, *RANDOM_SENSITIVITY_SEEDS],
             "encoder_seeds": list(PAIR_ENCODER_SEEDS),
@@ -563,6 +571,7 @@ def design(root: Path, campaign_id: str, n_candidates: int) -> None:
             "superiority_contrasts": [
                 ["cap_metadata_nearest", "cap_random"],
                 ["cap_encoder_nearest", "cap_random"],
+                ["cap_cdf", "cap_random"],
             ],
             "equivalence_contrast": [
                 "cap_metadata_nearest",
@@ -572,8 +581,73 @@ def design(root: Path, campaign_id: str, n_candidates: int) -> None:
         },
     }
     _atomic_json(root / "campaign.json", manifest)
+    _write_analysis_design(root, manifest)
     _write_slurm_scripts(root, campaign_id, n_candidates, stress_candidates)
     print(root / "campaign.json")
+
+
+def _write_analysis_design(root: Path, campaign: Mapping[str, Any]) -> None:
+    """Freeze the outcome-blind paper plan and intervention taxonomy."""
+    plan = {
+        "schema_version": 1,
+        "campaign_id": campaign["campaign_id"],
+        "models": list(campaign["models"]),
+        "strategies": list(campaign["strategies"]),
+        "reporting_seeds": list(campaign["reporting_seeds"]),
+        "interventions": list(campaign["interventions"]),
+        "metrics": ["auprc", "efficiency_operational"],
+        "strength_order": ["weak", "mid", "strong"],
+        "contrasts": [
+            {
+                "id": f"{left}_vs_{right}",
+                "family": "cap_vs_baselines",
+                "left": left,
+                "right": right,
+                "alternative": "greater",
+            }
+            for left in ("cap_metadata_nearest", "cap_encoder_nearest", "cap_cdf")
+            for right in ("cap_random", "drift", "wasserstein")
+        ],
+    }
+    _atomic_json(root / "design" / "paper_analysis_execution_plan_v1.json", plan)
+
+    family_by_prefix = {
+        "blue": ("color_led", "process"),
+        "green": ("color_led", "process"),
+        "red": ("color_led", "process"),
+        "l_": ("auxiliary_led", "process"),
+        "pol_": ("polarizer", "process"),
+        "diode_": ("photodiode_mode", "measurement"),
+        "osr_angle_": ("angle_adc", "measurement"),
+        "v_angle_": ("angle_adc", "measurement"),
+        "osr_c": ("current_adc", "measurement"),
+        "v_c": ("current_adc", "measurement"),
+        "t_": ("integration_time", "measurement"),
+    }
+    rows = []
+    for intervention in campaign["interventions"]:
+        body = str(intervention).removeprefix("uniform_")
+        target, strength = body.rsplit("_", 1)
+        matches = [
+            value for prefix, value in family_by_prefix.items() if target.startswith(prefix)
+        ]
+        if len(matches) != 1:
+            raise ValueError(f"No unique taxonomy rule for {intervention}.")
+        semantic_family, system_group = matches[0]
+        rows.append(
+            {
+                "intervention": intervention,
+                "intervention_target": target,
+                "strength": strength,
+                "semantic_family": semantic_family,
+                "system_group": system_group,
+            }
+        )
+    taxonomy = root / "design" / "paper_analysis_taxonomy_v1.csv"
+    with taxonomy.open("w", encoding="utf-8", newline="") as handle:
+        writer = csv.DictWriter(handle, fieldnames=list(rows[0]))
+        writer.writeheader()
+        writer.writerows(rows)
 
 
 def _write_slurm_scripts(
@@ -1091,6 +1165,7 @@ def run_candidate(
     pairing_manifest = json.loads(
         (root / "pairing" / "comparison" / "pairing_manifest.json").read_text(encoding="utf-8")
     )
+    pretrained_encoder, pretrained_encoder_sha256 = _primary_pairing_encoder(pairing_manifest)
     if _sha256(pair_table) != pairing_manifest["primary_validation_table_sha256"]:
         raise ValueError("Search pair table is not the prespecified primary validation table.")
     encoder_tables = {
@@ -1144,6 +1219,9 @@ def run_candidate(
             "git_commit": expected_commit,
             "candidate_pool_sha256": str(campaign["pool_sha256"][model]),
             "pair_table_sha256": _sha256(pair_table),
+            "pretrained_encoder_sha256": (
+                pretrained_encoder_sha256 if model == "svdd" else "not_applicable"
+            ),
             "slurm_job_id": os.environ.get("SLURM_JOB_ID", "none"),
             "slurm_array_task_id": os.environ.get("SLURM_ARRAY_TASK_ID", "none"),
         }
@@ -1167,6 +1245,14 @@ def run_candidate(
             "extras.print_config=false",
             *[f"{name}={_hydra_value(value)}" for name, value in record["params"].items()],
         ]
+        if model == "svdd":
+            command.extend(
+                [
+                    f"algorithm.pretrained_encoder_ckpt={pretrained_encoder}",
+                    "algorithm.pretrained_encoder_strict=true",
+                    "algorithm.enforce_architecture_constraints=true",
+                ]
+            )
         environment = os.environ.copy()
         environment["CCHAMBER_VALID_PAIR_TABLE"] = str(pair_table)
         for encoder_seed, table in encoder_tables.items():
@@ -1267,6 +1353,10 @@ def run_candidate(
             "git_commit": expected_commit,
             "pair_table": str(pair_table),
             "pair_table_sha256": _sha256(pair_table),
+            "pretrained_encoder_checkpoint": (
+                str(pretrained_encoder) if model == "svdd" else None
+            ),
+            "pretrained_encoder_sha256": (pretrained_encoder_sha256 if model == "svdd" else None),
             "encoder_validation_table_sha256_by_seed": {
                 str(seed): digest for seed, digest in encoder_table_hashes.items()
             },
@@ -1630,6 +1720,7 @@ def run_retrain(root: Path, index: int) -> None:
     pairing = json.loads(
         (root / "pairing" / "comparison" / "pairing_manifest.json").read_text(encoding="utf-8")
     )
+    pretrained_encoder, pretrained_encoder_sha256 = _primary_pairing_encoder(pairing)
     valid_table = Path(pairing["primary_validation_table"])
     test_table = Path(pairing["primary_test_table"])
     model = str(item["model"])
@@ -1662,6 +1753,14 @@ def run_retrain(root: Path, index: int) -> None:
     selected_overrides = [
         f"{name}={_hydra_value(value)}" for name, value in item["params"].items()
     ]
+    if model == "svdd":
+        selected_overrides.extend(
+            [
+                f"algorithm.pretrained_encoder_ckpt={pretrained_encoder}",
+                "algorithm.pretrained_encoder_strict=true",
+                "algorithm.enforce_architecture_constraints=true",
+            ]
+        )
     overrides = generation.build_retrain_overrides(
         spec,
         seed=seed,
@@ -1683,6 +1782,9 @@ def run_retrain(root: Path, index: int) -> None:
         "candidate_pool_sha256": item["pool_sha256"],
         "valid_pair_table_sha256": pairing["primary_validation_table_sha256"],
         "test_pair_table_sha256": pairing["primary_test_table_sha256"],
+        "pretrained_encoder_sha256": (
+            pretrained_encoder_sha256 if model == "svdd" else "not_applicable"
+        ),
         "slurm_job_id": os.environ.get("SLURM_JOB_ID", "none"),
         "manifest_index": int(index),
     }
@@ -1699,8 +1801,7 @@ def run_retrain(root: Path, index: int) -> None:
             "callbacks.clear_ckpts=null",
             "callbacks.last_epoch_ckpt=null",
             "callbacks.stable_ascore_operational_ckpt=null",
-            "evaluation.evaluator.ckpts.last=false",
-            "~evaluation.evaluator.ckpts.single.ascore_operational",
+            "skip_evaluation=true",
             "extras.print_config=false",
         ]
     )
@@ -1735,6 +1836,8 @@ def run_retrain(root: Path, index: int) -> None:
         "mlflow_status": run.info.status,
         "valid_pair_table_sha256": pairing["primary_validation_table_sha256"],
         "test_pair_table_sha256": pairing["primary_test_table_sha256"],
+        "pretrained_encoder_checkpoint": (str(pretrained_encoder) if model == "svdd" else None),
+        "pretrained_encoder_sha256": (pretrained_encoder_sha256 if model == "svdd" else None),
     }
     _atomic_json(result_path, result)
     client.log_artifact(run.info.run_id, str(result_path), artifact_path="campaign")
@@ -1952,7 +2055,7 @@ def _primary_inference(seed_summary: pd.DataFrame) -> pd.DataFrame:
             columns="strategy",
             values="value",
         )
-        for left in ("cap_metadata_nearest", "cap_encoder_nearest"):
+        for left in ("cap_metadata_nearest", "cap_encoder_nearest", "cap_cdf"):
             right = "cap_random"
             differences = (pivot[left] - pivot[right]).to_numpy(dtype=float)
             superiority.append(

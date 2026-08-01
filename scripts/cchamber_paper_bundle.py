@@ -191,9 +191,9 @@ def _validate_threshold_chain(
     seeds = list(map(int, campaign["reporting_seeds"]))
     expected_records = len(models) * len(strategies) * len(seeds)
     expected_rows = expected_records * len(campaign["interventions"]) * len(EXPECTED_METRICS)
-    if expected_records != 200 or expected_rows != 23_200:
+    if expected_records != 240 or expected_rows != 27_840:
         raise ValueError(
-            "Paper bundle requires the frozen 200-checkpoint/23,200-row campaign contract."
+            "Paper bundle requires the frozen 240-checkpoint/27,840-row campaign contract."
         )
 
     manifest, manifest_frame = _validate_threshold_manifest(
@@ -714,8 +714,8 @@ def build_bundle(
         "files": files,
         "optional_artifacts": optional_artifacts,
         "bundle_contract": {
-            "required_result_rows": 23_200,
-            "required_selected_checkpoints": 200,
+            "required_result_rows": 27_840,
+            "required_selected_checkpoints": 240,
             "metrics": list(EXPECTED_METRICS),
             "rank_analysis": "available" if rank_associations else "not_supplied",
             "outcome_values_summarized_or_compared_by_builder": False,

@@ -155,8 +155,8 @@ def _synthetic_campaign(tmp_path: Path) -> tuple[Path, str]:
             "candidate_metrics_sha256": audit._sha256(candidate_metrics),
             "selected_trials_sha256": audit._sha256(selected_trials),
             "retrain_manifest_sha256": audit._sha256(retrain_manifest),
-            "n_selected": 20,
-            "n_retrains": 200,
+            "n_selected": 24,
+            "n_retrains": 240,
             "development_seeds": list(audit.DEVELOPMENT_SEEDS),
             "intervention_labels_used": False,
         },
@@ -234,7 +234,7 @@ def _synthetic_campaign(tmp_path: Path) -> tuple[Path, str]:
             ],
         },
     )
-    for index in range(200):
+    for index in range(240):
         marker_path = root / "retrain_results" / f"{index:03d}.json"
         marker = json.loads(marker_path.read_text(encoding="utf-8"))
         marker["valid_pair_table_sha256"] = valid_sha
@@ -344,9 +344,9 @@ def test_inventory_pins_all_200_marker_and_checkpoint_hashes(tmp_path) -> None:
 
     inventory = audit.build_inventory(campaign_root, campaign_hash, inventory_path)
 
-    assert inventory["expected_records"] == 200
-    assert len(inventory["records"]) == 200
-    assert [row["manifest_index"] for row in inventory["records"]] == list(range(200))
+    assert inventory["expected_records"] == 240
+    assert len(inventory["records"]) == 240
+    assert [row["manifest_index"] for row in inventory["records"]] == list(range(240))
     assert {(row["model"], row["strategy"], row["seed"]) for row in inventory["records"]} == set(
         product(audit.MODELS, audit.STRATEGIES, range(1001, 1011))
     )
@@ -412,10 +412,10 @@ def test_collect_requires_and_combines_exact_200_diagnostics(tmp_path) -> None:
     combined, provenance = audit.collect(inventory_path, inventory_hash, output_root)
     with combined.open(encoding="utf-8", newline="") as handle:
         rows = list(csv.DictReader(handle))
-    assert len(rows) == 200
+    assert len(rows) == 240
     assert {row["campaign_training_commit"] for row in rows} == {audit.CAMPAIGN_TRAINING_COMMIT}
     assert {row["audit_code_commit"] for row in rows} == {"new-audit-code-commit"}
-    assert json.loads(provenance.read_text(encoding="utf-8"))["expected_records"] == 200
+    assert json.loads(provenance.read_text(encoding="utf-8"))["expected_records"] == 240
 
     (output_root / "records" / "199.json").unlink()
     with pytest.raises(FileNotFoundError):
@@ -423,7 +423,7 @@ def test_collect_requires_and_combines_exact_200_diagnostics(tmp_path) -> None:
 
 
 def test_generated_slurm_workflow_is_resource_exact_and_syntax_valid(tmp_path) -> None:
-    """Launchers must pack 200 tasks and freeze before any evaluation."""
+    """Launchers must pack 240 tasks and freeze before any evaluation."""
     campaign_root, campaign_hash = _synthetic_campaign(tmp_path)
     inventory_path = tmp_path / "sidecar" / "inventory.json"
     audit.build_inventory(campaign_root, campaign_hash, inventory_path)
@@ -440,12 +440,12 @@ def test_generated_slurm_workflow_is_resource_exact_and_syntax_valid(tmp_path) -
         assert "#SBATCH --cpus-per-task=72" in packed
         assert "#SBATCH --mem=440G" in packed
         assert "#SBATCH --time=04:00:00" in packed
-        assert "#SBATCH --array=0-49%16" in packed
+        assert "#SBATCH --array=0-59%16" in packed
         assert "--cpus-per-task=72 --gpus-per-node=1 --mem=110G" in packed
     assert "#SBATCH --partition=debug" in debug
     assert "#SBATCH --cpus-per-task=72" in debug
     assert "#SBATCH --array=0-3" in debug
-    assert "indices=(0 50 100 150)" in debug
+    assert "indices=(0 60 120 180)" in debug
     assert 'dependency="afterok:${calibration_job}"' in workflow
     assert 'dependency="afterok:${freeze_job}"' in workflow
     assert 'dependency="afterok:${evaluation_job}"' in workflow

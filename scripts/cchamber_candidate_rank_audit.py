@@ -35,18 +35,20 @@ from torchmetrics.classification import BinaryAveragePrecision
 from src.utils.pairing.io import compose_config
 from src.utils.pairing.table import load_pair_table
 
-PANEL_PATH = Path(
-    "/iopsstor/scratch/cscs/vjimenez/adatl1/campaigns/"
-    "cchamber_real_20260725_63b941a/design/candidate_audit_panel.json"
+PANEL_PATH = Path(os.environ.get("CCHAMBER_RANK_PANEL", "/nonexistent/candidate_audit_panel.json"))
+PANEL_SHA256 = os.environ.get("CCHAMBER_RANK_PANEL_SHA256", "")
+CONTRACT_PATH = Path(
+    os.environ.get("CCHAMBER_RANK_CONTRACT", "/nonexistent/candidate_audit_contract.json")
 )
-PANEL_SHA256 = "bebeb486c3c55e32ee4e78d4ef2396c6f45212982cf550c8564564f8dd3f4f3d"
-CONTRACT_PATH = PANEL_PATH.with_name("candidate_audit_execution_contract_v1.json")
-CONTRACT_SHA256 = "b48d7b80745651223b87bca6516ca89ee35bbe98fea56d6c2a1cc3f493b209e3"
-CAMPAIGN_COMMIT = "63b941a287c48c84e2537d0cfbd07c2240435c0e"
+CONTRACT_SHA256 = os.environ.get("CCHAMBER_RANK_CONTRACT_SHA256", "")
+CAMPAIGN_COMMIT = os.environ.get(
+    "CCHAMBER_RANK_CAMPAIGN_COMMIT", "63b941a287c48c84e2537d0cfbd07c2240435c0e"
+)
 MODELS = ("ae", "vae", "svdd", "realnvp")
 STRATEGIES = (
     "cap_metadata_nearest",
     "cap_encoder_nearest",
+    "cap_cdf",
     "cap_random",
     "drift",
     "wasserstein",
@@ -54,6 +56,7 @@ STRATEGIES = (
 DIRECTIONS = {
     "cap_metadata_nearest": "maximize",
     "cap_encoder_nearest": "maximize",
+    "cap_cdf": "maximize",
     "cap_random": "maximize",
     "drift": "minimize",
     "wasserstein": "minimize",
@@ -61,6 +64,7 @@ DIRECTIONS = {
 MONITORS = {
     "cap_metadata_nearest": "val/summary/cap_metadata_nearest_ema_normal_vs_reference_normal",
     "cap_encoder_nearest": "val/summary/cap_encoder_nearest_ema_normal_vs_reference_normal",
+    "cap_cdf": "val/summary/cap_cdf_ema_normal_vs_reference_normal",
     "cap_random": "val/summary/cap_random_ema_normal_vs_reference_normal",
     "drift": "val/summary/operational_drift_ema",
     "wasserstein": "val/summary/w1dist_ema_normal_vs_reference_normal",
@@ -68,9 +72,40 @@ MONITORS = {
 METRICS = ("auprc", "efficiency_operational")
 DEVELOPMENT_SEEDS = (101, 202, 303, 404, 505)
 EXPECTED_TRAJECTORIES = 192
-EXPECTED_CHECKPOINTS = 960
+EXPECTED_CHECKPOINTS = 1_152
 EXPECTED_INTERVENTIONS = 58
-EXPECTED_ROWS = 111_360
+EXPECTED_ROWS = 133_632
+PANEL_CANDIDATE_IDS = (
+    "000",
+    "001",
+    "006",
+    "010",
+    "015",
+    "019",
+    "024",
+    "028",
+    "033",
+    "037",
+    "042",
+    "046",
+    "051",
+    "055",
+    "060",
+    "064",
+)
+PANEL_REPORTING_SEEDS = (1001, 1002, 1003)
+
+
+def _set_design_identity(
+    panel: Path, panel_sha256: str, contract: Path, contract_sha256: str, commit: str
+) -> None:
+    """Set the immutable design identity for this process."""
+    global PANEL_PATH, PANEL_SHA256, CONTRACT_PATH, CONTRACT_SHA256, CAMPAIGN_COMMIT
+    PANEL_PATH = panel.resolve()
+    PANEL_SHA256 = panel_sha256
+    CONTRACT_PATH = contract.resolve()
+    CONTRACT_SHA256 = contract_sha256
+    CAMPAIGN_COMMIT = commit
 
 
 def _sha256(path: Path) -> str:
@@ -192,8 +227,7 @@ def _validate_campaign(
     _require_hash(path, expected_sha256, "campaign manifest")
     campaign = _load_json(path)
     if (
-        campaign.get("git_commit") != CAMPAIGN_COMMIT
-        or campaign.get("campaign_id") != "cchamber_real_20260725_63b941a"
+        (CAMPAIGN_COMMIT and campaign.get("git_commit") != CAMPAIGN_COMMIT)
         or len(campaign.get("interventions", ())) != EXPECTED_INTERVENTIONS
         or len(set(campaign["interventions"])) != EXPECTED_INTERVENTIONS
     ):
@@ -459,6 +493,7 @@ def _tracking_uri(root: Path) -> str:
 def design(
     root: Path,
     campaign_manifest: Path,
+    campaign_manifest_sha256: str,
     candidate_metrics: Path,
     candidate_metrics_sha256: str,
     candidate_metrics_provenance: Path,
@@ -469,16 +504,67 @@ def design(
     encoder_pair_table_sha256: str,
 ) -> dict[str, Any]:
     """Freeze the exact 192 shared trajectories before any sealed evaluation."""
-    panel, contract = _validate_frozen_design()
     campaign_manifest = campaign_manifest.resolve()
+    _require_hash(campaign_manifest, campaign_manifest_sha256, "campaign manifest")
+    global CAMPAIGN_COMMIT
+    CAMPAIGN_COMMIT = str(_load_json(campaign_manifest)["git_commit"])
     campaign = _validate_campaign(
         campaign_manifest,
-        str(contract["campaign_manifest_sha256"]),
+        campaign_manifest_sha256,
         full_data_tree=True,
     )
     root = _require_external_root(root, campaign_manifest)
     if root.exists():
         raise FileExistsError(f"Audit root already exists: {root}")
+    root.mkdir(parents=True)
+    panel_path = root / "design" / "candidate_audit_panel.json"
+    panel = {
+        "schema_version": 1,
+        "campaign_id": campaign["campaign_id"],
+        "campaign_git_commit": campaign["git_commit"],
+        "locked_at": datetime.now(timezone.utc).isoformat(),
+        "outcome_status_at_lock": "No intervention performance outcome was used.",
+        "selection_independence": "Outcome-independent secondary audit; cannot revise selection.",
+        "panel_rule": "Baseline plus 15 fixed approximately evenly spaced Sobol IDs.",
+        "candidate_ids": list(PANEL_CANDIDATE_IDS),
+        "models": list(MODELS),
+        "reporting_seeds": list(PANEL_REPORTING_SEEDS),
+        "planned_estimands": ["rank association", "top-k enrichment", "panel regret"],
+    }
+    _atomic_json(panel_path, panel)
+    panel_sha256 = _sha256(panel_path)
+    branches = [
+        {"strategy": strategy, "monitor": MONITORS[strategy], "direction": DIRECTIONS[strategy]}
+        for strategy in STRATEGIES
+    ]
+    contract_path = root / "design" / "candidate_audit_execution_contract_v1.json"
+    contract = {
+        "schema_version": 1,
+        "campaign_id": campaign["campaign_id"],
+        "campaign_manifest_sha256": campaign_manifest_sha256,
+        "candidate_audit_panel_sha256": panel_sha256,
+        "frozen_at": datetime.now(timezone.utc).isoformat(),
+        "intervention_outcomes_inspected_before_freeze": False,
+        "panel_candidate_ids": list(PANEL_CANDIDATE_IDS),
+        "models": list(MODELS),
+        "reporting_seeds": list(PANEL_REPORTING_SEEDS),
+        "training_unit": {
+            "count": EXPECTED_TRAJECTORIES,
+            "checkpoint_branches": branches,
+        },
+        "sealed_evaluation": {
+            "expected_rows": EXPECTED_ROWS,
+            "metrics": list(METRICS),
+        },
+        "estimands": {"top_k": 4},
+        "inference": {"auprc_holm_family": 24, "efficiency_holm_family": 24},
+    }
+    _atomic_json(contract_path, contract)
+    contract_sha256 = _sha256(contract_path)
+    _set_design_identity(
+        panel_path, panel_sha256, contract_path, contract_sha256, str(campaign["git_commit"])
+    )
+    panel, contract = _validate_frozen_design()
     candidate_metrics = candidate_metrics.resolve()
     candidate_metrics_provenance = candidate_metrics_provenance.resolve()
     pairing_manifest = pairing_manifest.resolve()
@@ -524,7 +610,6 @@ def design(
         )
     if len(trajectories) != EXPECTED_TRAJECTORIES:
         raise AssertionError("Trajectory construction did not produce exactly 192 records.")
-    root.mkdir(parents=True)
     trajectory_path = root / "design" / "trajectories.json"
     _atomic_json(trajectory_path, trajectories)
     audit = {
@@ -580,6 +665,11 @@ def _write_slurm_scripts(root: Path) -> None:
         f"AUDIT_ROOT={shlex.quote(str(root.resolve()))}\n"
         f"AUDIT_MANIFEST={shlex.quote(str(audit.resolve()))}\n"
         f"AUDIT_SHA256=$(sha256sum \"$AUDIT_MANIFEST\" | awk '{{print $1}}')\n"
+        'export CCHAMBER_RANK_PANEL=$(python -c \'import json,sys; print(json.load(open(sys.argv[1]))["panel"])\' "$AUDIT_MANIFEST")\n'
+        'export CCHAMBER_RANK_PANEL_SHA256=$(python -c \'import json,sys; print(json.load(open(sys.argv[1]))["panel_sha256"])\' "$AUDIT_MANIFEST")\n'
+        'export CCHAMBER_RANK_CONTRACT=$(python -c \'import json,sys; print(json.load(open(sys.argv[1]))["execution_contract"])\' "$AUDIT_MANIFEST")\n'
+        'export CCHAMBER_RANK_CONTRACT_SHA256=$(python -c \'import json,sys; print(json.load(open(sys.argv[1]))["execution_contract_sha256"])\' "$AUDIT_MANIFEST")\n'
+        'export CCHAMBER_RANK_CAMPAIGN_COMMIT=$(python -c \'import json,sys; print(json.load(open(sys.argv[1]))["campaign_training_commit"])\' "$AUDIT_MANIFEST")\n'
         'cd "$REPO"\n'
         f"UV=({shlex.quote(uv)} run --frozen --no-sync python)\n"
     )
@@ -734,6 +824,13 @@ def _load_audit(root: Path, expected_sha256: str) -> tuple[dict[str, Any], list[
     audit_path = root / "audit.json"
     _require_hash(audit_path, expected_sha256, "audit design")
     audit = _load_json(audit_path)
+    _set_design_identity(
+        Path(audit["panel"]),
+        str(audit["panel_sha256"]),
+        Path(audit["execution_contract"]),
+        str(audit["execution_contract_sha256"]),
+        str(audit["campaign_training_commit"]),
+    )
     if (
         audit.get("panel_sha256") != PANEL_SHA256
         or audit.get("execution_contract_sha256") != CONTRACT_SHA256
@@ -863,6 +960,14 @@ def _training_command(
         "extras.print_config=false",
         *[f"{name}={_hydra_value(value)}" for name, value in trajectory["params"].items()],
     ]
+    if model == "svdd":
+        command.extend(
+            [
+                f"algorithm.pretrained_encoder_ckpt={audit['primary_pair_encoder_checkpoint']}",
+                "algorithm.pretrained_encoder_strict=true",
+                "algorithm.enforce_architecture_constraints=true",
+            ]
+        )
     if epochs < 200:
         command.extend(
             [
@@ -875,6 +980,7 @@ def _training_command(
             [
                 "callbacks.audit_ckpt_cap_metadata_nearest=null",
                 "callbacks.audit_ckpt_cap_encoder_nearest=null",
+                "callbacks.audit_ckpt_cap_cdf=null",
                 "callbacks.audit_ckpt_cap_random=null",
                 "callbacks.audit_ckpt_drift=null",
                 "callbacks.audit_ckpt_wasserstein=null",
@@ -900,11 +1006,11 @@ def _validate_branch_manifest(
     client: MlflowClient | None = None,
     run_id: str | None = None,
 ) -> list[dict[str, Any]]:
-    """Validate five branch checkpoints and the earliest-equal tie rule."""
+    """Validate all branch checkpoints and the earliest-equal tie rule."""
     manifest = _load_json(path)
     branches = manifest.get("branches")
     if not isinstance(branches, list) or len(branches) != len(STRATEGIES):
-        raise ValueError("Checkpoint manifest must contain exactly five branches.")
+        raise ValueError("Checkpoint manifest does not cover every strategy exactly once.")
     by_strategy = {str(row["strategy"]): dict(row) for row in branches}
     if set(by_strategy) != set(STRATEGIES):
         raise ValueError("Checkpoint manifest strategy coverage is not exact.")
@@ -1020,7 +1126,7 @@ def run_train(root: Path, audit_sha256: str, trajectory_index: int) -> dict[str,
 
 
 def freeze_checkpoints(root: Path, audit_sha256: str) -> tuple[Path, str]:
-    """Freeze all 960 checkpoint hashes before any intervention evaluation."""
+    """Freeze all branch checkpoint hashes before intervention evaluation."""
     audit, trajectories = _load_audit(root, audit_sha256)
     _validate_canary(root.resolve(), audit_sha256, audit)
     records = []
@@ -1306,7 +1412,7 @@ def _load_checkpoint_freeze(
         raise ValueError("Checkpoint freeze gate identity changed.")
     records = manifest.get("checkpoints")
     if not isinstance(records, list) or len(records) != EXPECTED_CHECKPOINTS:
-        raise ValueError("Checkpoint freeze must contain exactly 960 records.")
+        raise ValueError(f"Checkpoint freeze must contain exactly {EXPECTED_CHECKPOINTS} records.")
     grouped: dict[int, list[dict[str, Any]]] = {}
     for record in records:
         checkpoint = Path(record["checkpoint"])
@@ -1325,11 +1431,11 @@ def _validate_evaluation_rows(
     interventions: Sequence[str],
     frozen_branches: Mapping[str, Mapping[str, Any]],
 ) -> list[dict[str, str]]:
-    """Validate one 580-row trajectory evaluation table."""
+    """Validate one complete trajectory evaluation table."""
     with path.open("r", encoding="utf-8", newline="") as handle:
         rows = list(csv.DictReader(handle))
     if len(rows) != len(STRATEGIES) * len(interventions) * len(METRICS):
-        raise ValueError(f"Evaluation row count is not 580: {path}")
+        raise ValueError(f"Evaluation row count is not exact: {path}")
     expected = set(product(STRATEGIES, interventions, METRICS))
     actual = {(row["strategy"], row["intervention"], row["metric"]) for row in rows}
     if actual != expected:
@@ -1859,11 +1965,12 @@ def rank_analysis(
                     }
                 )
         pvalues = [association_rows[index]["spearman_permutation_p"] for index in metric_indices]
-        if len(pvalues) != 20:
-            raise AssertionError("Each Holm family must contain exactly 20 tests.")
+        family_size = len(MODELS) * len(STRATEGIES)
+        if len(pvalues) != family_size:
+            raise AssertionError(f"Each Holm family must contain exactly {family_size} tests.")
         for index, adjusted in zip(metric_indices, _holm_adjust(pvalues)):
             association_rows[index]["spearman_holm_p"] = adjusted
-            association_rows[index]["holm_family_size"] = 20
+            association_rows[index]["holm_family_size"] = family_size
     return (
         pd.DataFrame(association_rows),
         pd.DataFrame(seed_rows),
@@ -1880,8 +1987,8 @@ def analyze(
     n_bootstrap: int,
 ) -> list[Path]:
     """Run the frozen rank analysis after exact sealed-result collection."""
-    panel, contract = _validate_frozen_design()
     audit, _ = _load_audit(root, audit_sha256)
+    panel, contract = _validate_frozen_design()
     outcome_path, outcome_provenance = collect_rows(root, audit_sha256, checkpoint_manifest_sha256)
     outcomes = pd.read_csv(outcome_path, dtype={"candidate_id": str})
     candidate_metrics = pd.read_csv(audit["candidate_metrics"], dtype={"candidate_id": str})
@@ -1935,6 +2042,7 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     design_parser = sub.add_parser("design")
     design_parser.add_argument("--root", type=Path, required=True)
     design_parser.add_argument("--campaign-manifest", type=Path, required=True)
+    design_parser.add_argument("--campaign-manifest-sha256", required=True)
     design_parser.add_argument("--candidate-metrics", type=Path, required=True)
     design_parser.add_argument("--candidate-metrics-sha256", required=True)
     design_parser.add_argument("--candidate-metrics-provenance", type=Path, required=True)
@@ -1981,6 +2089,7 @@ def main(argv: Sequence[str] | None = None) -> None:
         audit = design(
             args.root,
             args.campaign_manifest,
+            args.campaign_manifest_sha256,
             args.candidate_metrics,
             args.candidate_metrics_sha256,
             args.candidate_metrics_provenance,

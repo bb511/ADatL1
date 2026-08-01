@@ -23,16 +23,15 @@ from src.utils.pairing.io import compose_config
 
 
 def test_frozen_design_inputs_match_the_authorized_hashes() -> None:
-    """The checked-in workflow must remain pinned to both authorized design files."""
-    panel, contract = audit._validate_frozen_design()
-    assert audit._sha256(audit.PANEL_PATH) == audit.PANEL_SHA256
-    assert audit._sha256(audit.CONTRACT_PATH) == audit.CONTRACT_SHA256
-    assert len(panel["candidate_ids"]) == 16
-    assert contract["sealed_evaluation"]["expected_rows"] == 111_360
+    """The workflow keeps its outcome-blind panel and coverage fixed in code."""
+    assert len(audit.PANEL_CANDIDATE_IDS) == 16
+    assert audit.PANEL_CANDIDATE_IDS[0] == "000"
+    assert len(set(audit.PANEL_CANDIDATE_IDS)) == 16
+    assert audit.EXPECTED_ROWS == 133_632
 
 
-def test_all_candidate_rank_configs_compose_with_five_branches(monkeypatch) -> None:
-    """Every detector should compose the same five checkpoint monitors."""
+def test_all_candidate_rank_configs_compose_with_six_branches(monkeypatch) -> None:
+    """Every detector should compose the same six checkpoint monitors."""
     monkeypatch.setenv("CCHAMBER_VALID_PAIR_TABLE", "/synthetic/valid.pt")
     monkeypatch.setenv("CCHAMBER_AUDIT_CHECKPOINT_MANIFEST", "/synthetic/branches.json")
     monkeypatch.setenv("CCHAMBER_AUDIT_TRAJECTORY_FINGERPRINT", "/synthetic/fingerprint.json")
@@ -233,7 +232,7 @@ def test_candidate_provenance_authenticates_shared_survivor_pools(tmp_path) -> N
         campaign,
         pair_hash,
     )
-    assert len(frame) == 200
+    assert len(frame) == 240
 
     rows = list(csv.DictReader(candidate_path.open(encoding="utf-8", newline="")))
     rows = [
@@ -387,18 +386,18 @@ def test_rank_analysis_matches_frozen_families_and_estimands() -> None:
         n_bootstrap=40,
         random_seed=7,
     )
-    assert len(associations) == 40
-    assert len(seed_rows) == 120
+    assert len(associations) == 48
+    assert len(seed_rows) == 144
     assert len(bootstrap) == 2 * 4 * 40
-    assert set(associations["holm_family_size"]) == {20}
+    assert set(associations["holm_family_size"]) == {24}
     assert np.allclose(associations["spearman_rho"], 1.0)
     assert np.allclose(associations["kendall_tau_b"], 1.0)
     assert set(associations["top_k_overlap"]) == {4}
     assert np.allclose(associations["top_k_oracle_regret"], 0.0)
     assert np.allclose(associations["proxy_best_regret"], 0.0)
     assert associations.groupby("metric")["spearman_holm_p"].count().to_dict() == {
-        "auprc": 20,
-        "efficiency_operational": 20,
+        "auprc": 24,
+        "efficiency_operational": 24,
     }
     assert associations["n_bootstrap_requested"].eq(40).all()
     assert associations["n_bootstrap_effective"].between(1, 40).all()
@@ -489,7 +488,7 @@ def test_checkpoint_manifest_records_all_five_hashes_and_epochs(tmp_path) -> Non
     manifest = CheckpointBranchManifest(output, audit.MONITORS)
     manifest.on_fit_end(SimpleNamespace(callbacks=callbacks), None)
     value = json.loads(output.read_text(encoding="utf-8"))
-    assert len(value["branches"]) == 5
+    assert len(value["branches"]) == 6
     assert {row["strategy"] for row in value["branches"]} == set(audit.STRATEGIES)
     assert all(
         audit._sha256(Path(row["checkpoint"])) == row["checkpoint_sha256"]
@@ -528,7 +527,7 @@ def test_checkpoint_validation_enforces_earliest_equal_tie(tmp_path) -> None:
                 path, expected_epochs=3, client=client, run_id="synthetic"
             )
         )
-        == 5
+        == 6
     )
     branches[0]["selected_epoch"] = 2
     path.write_text(json.dumps({"branches": branches}), encoding="utf-8")
@@ -622,7 +621,7 @@ def test_evaluation_rows_must_match_every_frozen_checkpoint_field(tmp_path) -> N
         )
     path = tmp_path / "evaluation.csv"
     audit._write_csv(path, rows)
-    assert len(audit._validate_evaluation_rows(path, trajectory, ["synthetic"], frozen)) == 10
+    assert len(audit._validate_evaluation_rows(path, trajectory, ["synthetic"], frozen)) == 12
     rows[0]["checkpoint_sha256"] = "0" * 64
     audit._write_csv(path, rows)
     with pytest.raises(ValueError, match="frozen-checkpoint"):

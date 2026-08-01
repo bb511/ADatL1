@@ -211,7 +211,7 @@ def _validate_plan(plan: Mapping[str, Any], campaign: Mapping[str, Any]) -> None
         raise ValueError("Analysis plan must contain prespecified contrasts.")
     expected_pairs = {
         (cap, baseline)
-        for cap in ("cap_metadata_nearest", "cap_encoder_nearest")
+        for cap in ("cap_metadata_nearest", "cap_encoder_nearest", "cap_cdf")
         for baseline in ("cap_random", "drift", "wasserstein")
     }
     observed_pairs: set[tuple[str, str]] = set()
@@ -419,18 +419,18 @@ def _verify_inputs(
         if (
             sidecar.get("threshold_manifest_sha256") != threshold_manifest_sha
             or sidecar.get("results_sha256") != _sha256(paths["results"])
-            or int(sidecar.get("expected_records", -1)) != 200
-            or int(sidecar.get("expected_result_rows", -1)) != 23_200
-            or len(raw_results) != 23_200
+            or int(sidecar.get("expected_records", -1)) != 240
+            or int(sidecar.get("expected_result_rows", -1)) != 27_840
+            or len(raw_results) != 27_840
         ):
             raise ValueError("Threshold-safe result provenance chain is inconsistent.")
         threshold_manifest = _read_json(paths["threshold_manifest"])
         threshold_records = threshold_manifest.get("records")
         if (
-            int(threshold_manifest.get("expected_records", -1)) != 200
+            int(threshold_manifest.get("expected_records", -1)) != 240
             or not isinstance(threshold_records, list)
-            or len(threshold_records) != 200
-            or set(raw_results["manifest_index"].astype(int)) != set(range(200))
+            or len(threshold_records) != 240
+            or set(raw_results["manifest_index"].astype(int)) != set(range(240))
             or not (raw_results.groupby("manifest_index", sort=False).size() == 116).all()
         ):
             raise ValueError("Threshold-safe manifest/result index coverage is not exact.")
@@ -1535,7 +1535,7 @@ def _candidate_rank_outputs(
         or not frame["kendall_tau_b"].between(-1.0, 1.0).all()
         or not frame["spearman_permutation_p"].between(0.0, 1.0).all()
         or not frame["spearman_holm_p"].between(0.0, 1.0).all()
-        or not (frame["holm_family_size"] == 20).all()
+        or not (frame["holm_family_size"] == len(plan["models"]) * len(plan["strategies"])).all()
         or not (frame["n_permutations"] == 10_000).all()
         or not (frame["n_bootstrap_requested"] == 10_000).all()
         or not (frame["n_bootstrap_effective"] > 0).all()

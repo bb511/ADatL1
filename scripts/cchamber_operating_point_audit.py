@@ -3,7 +3,7 @@
 
 The sidecar authenticates every label-free campaign input, calibrates one
 immutable threshold per checkpoint using only ``validation.normal``, freezes all
-200 thresholds, then evaluates ``test.normal`` and all 58 interventions in one
+240 thresholds, then evaluates ``test.normal`` and all 58 interventions in one
 pass. It never invokes the legacy campaign evaluator or mutates a checkpoint.
 """
 
@@ -13,6 +13,7 @@ import argparse
 import csv
 import hashlib
 import json
+import math
 import os
 import shlex
 import shutil
@@ -43,12 +44,14 @@ from src.evaluation.callbacks.efficiency import AnomalyEfficiencyCallback
 from src.utils.pairing.io import compose_config
 from src.utils.pairing.table import load_pair_table, sha256_tensor
 
-CAMPAIGN_TRAINING_COMMIT = "63b941a287c48c84e2537d0cfbd07c2240435c0e"
 TARGET_FPR = 0.01
-EXPECTED_RECORDS = 200
+# Backward-compatible fixture identity; production validation derives the commit
+# from the authenticated campaign manifest rather than trusting this constant.
+CAMPAIGN_TRAINING_COMMIT = "63b941a287c48c84e2537d0cfbd07c2240435c0e"
+EXPECTED_RECORDS = 240
 EXPECTED_NORMAL_COUNT = 1_000
 EXPECTED_INTERVENTIONS = 58
-EXPECTED_RESULT_ROWS = 23_200
+EXPECTED_RESULT_ROWS = 27_840
 THRESHOLD_SCHEMA_VERSION = 1
 DEVELOPMENT_SEEDS = (101, 202, 303, 404, 505)
 PAIR_ENCODER_SEEDS = (123, 456, 789, 101112, 131415)
@@ -58,6 +61,7 @@ STRATEGIES = (
     "cap_metadata_nearest",
     "cap_encoder_nearest",
     "cap_random",
+    "cap_cdf",
     "drift",
     "wasserstein",
 )
@@ -253,7 +257,7 @@ def _require_slurm_gpu(accelerator: str) -> None:
 
 
 def _expected_identities(campaign: Mapping[str, Any]) -> set[tuple[str, str, int]]:
-    """Return the frozen 4-by-5-by-10 campaign identity set."""
+    """Return the frozen 4-by-6-by-10 campaign identity set."""
     models = tuple(map(str, campaign.get("models", ())))
     strategies = tuple(map(str, campaign.get("strategies", ())))
     seeds = tuple(int(value) for value in campaign.get("reporting_seeds", ()))
@@ -305,11 +309,9 @@ def _validate_campaign(
     """Validate the immutable campaign hash and scientific identity."""
     _require_hash(path, expected_sha256, "campaign")
     campaign = _load_json(path)
-    if campaign.get("git_commit") != CAMPAIGN_TRAINING_COMMIT:
-        raise ValueError(
-            "Operating-point audit only accepts the frozen campaign trained at "
-            f"{CAMPAIGN_TRAINING_COMMIT}."
-        )
+    commit = str(campaign.get("git_commit", ""))
+    if len(commit) != 40 or any(character not in "0123456789abcdef" for character in commit):
+        raise ValueError("Campaign does not pin a full lowercase Git commit.")
     if campaign.get("dataset") != "lt_interventions_standard_v1":
         raise ValueError("Unexpected Causal Chamber dataset identity.")
     if campaign.get("feature_set") != "readouts" or int(campaign.get("n_features", -1)) != 11:
@@ -423,7 +425,7 @@ def _validate_pairing_inventory(
     for row in encoder_runs:
         if (
             row.get("campaign_id") != campaign["campaign_id"]
-            or row.get("git_commit") != CAMPAIGN_TRAINING_COMMIT
+            or row.get("git_commit") != campaign["git_commit"]
             or int(row.get("data_seed", -1)) != 314159
         ):
             raise ValueError("Pairing encoder run campaign/commit/data-seed changed.")
@@ -517,7 +519,7 @@ def build_inventory(
     campaign_sha256: str,
     output: Path,
 ) -> dict[str, Any]:
-    """Freeze all 200 label-free source identities and hashes."""
+    """Freeze all 240 label-free source identities and hashes."""
     campaign_root = campaign_root.resolve()
     output = _require_external_output(output, campaign_root)
     audit_commit, audit_branch = _audit_revision()
@@ -549,7 +551,7 @@ def build_inventory(
         seen.add(identity)
         required = {
             "campaign_id": campaign["campaign_id"],
-            "git_commit": CAMPAIGN_TRAINING_COMMIT,
+            "git_commit": campaign["git_commit"],
             "manifest_index": index,
             "model": identity[0],
             "strategy": identity[1],
@@ -599,7 +601,7 @@ def build_inventory(
         "campaign": str(campaign_path.resolve()),
         "campaign_sha256": campaign_sha256,
         "campaign_id": campaign["campaign_id"],
-        "campaign_training_commit": CAMPAIGN_TRAINING_COMMIT,
+        "campaign_training_commit": campaign["git_commit"],
         "audit_code_commit": audit_commit,
         "audit_code_branch": audit_branch,
         "test_normal_source": str(normal_source),
@@ -629,14 +631,13 @@ def build_inventory(
 
 
 def load_inventory(path: Path, expected_sha256: str) -> dict[str, Any]:
-    """Load and fully validate a frozen 200-record audit inventory."""
+    """Load and fully validate a frozen 240-record audit inventory."""
     path = path.resolve()
     _require_hash(path, expected_sha256, "audit inventory")
     inventory = _load_json(path)
     if (
         inventory.get("schema_version") != 1
         or inventory.get("outcome_blind") is not True
-        or inventory.get("campaign_training_commit") != CAMPAIGN_TRAINING_COMMIT
         or not inventory.get("audit_code_commit")
         or not inventory.get("audit_code_branch")
         or int(inventory.get("expected_records", -1)) != EXPECTED_RECORDS
@@ -647,6 +648,8 @@ def load_inventory(path: Path, expected_sha256: str) -> dict[str, Any]:
         raise ValueError(f"Audit inventory must contain exactly {EXPECTED_RECORDS} records.")
     campaign_path = Path(str(inventory["campaign"]))
     campaign = _validate_campaign(campaign_path, str(inventory["campaign_sha256"]))
+    if inventory.get("campaign_training_commit") != campaign["git_commit"]:
+        raise ValueError("Inventory training commit differs from campaign.json.")
     normal_source, normal_source_sha256 = _validate_dataset_sources(campaign, full_tree=False)
     if (
         inventory.get("test_normal_source") != str(normal_source)
@@ -688,6 +691,7 @@ def _validate_source_record(record: Mapping[str, Any], campaign_id: str) -> None
     _require_hash(marker_path, str(record["retrain_marker_sha256"]), "retrain marker")
     marker = _load_json(marker_path)
     for key in (
+        "git_commit",
         "manifest_index",
         "model",
         "strategy",
@@ -699,10 +703,7 @@ def _validate_source_record(record: Mapping[str, Any], campaign_id: str) -> None
     ):
         if marker.get(key) != record.get(key):
             raise ValueError(f"Frozen retrain marker identity changed for field {key!r}.")
-    if (
-        marker.get("campaign_id") != campaign_id
-        or marker.get("git_commit") != CAMPAIGN_TRAINING_COMMIT
-    ):
+    if marker.get("campaign_id") != campaign_id:
         raise ValueError("Frozen retrain marker campaign identity changed.")
     _require_hash(Path(str(record["checkpoint"])), str(record["checkpoint_sha256"]), "checkpoint")
 
@@ -776,7 +777,7 @@ def _diagnostic_context(
         "strategy": record["strategy"],
         "seed": int(record["seed"]),
         "candidate_id": record["candidate_id"],
-        "campaign_training_commit": CAMPAIGN_TRAINING_COMMIT,
+        "campaign_training_commit": inventory["campaign_training_commit"],
         "audit_code_commit": audit_commit,
         "audit_code_branch": audit_branch,
         "campaign_path": inventory["campaign"],
@@ -858,6 +859,8 @@ def _write_slurm_scripts(inventory_path: Path, output_root: Path) -> None:
         f"UV=({shlex.quote(uv)} run --frozen --no-sync python)\n"
     )
 
+    n_array = math.ceil(EXPECTED_RECORDS / 4)
+
     def packed(stage: str) -> str:
         threshold = (
             'THRESHOLD_MANIFEST="$OUTPUT_ROOT/threshold_manifest.json"\n'
@@ -879,7 +882,7 @@ def _write_slurm_scripts(inventory_path: Path, output_root: Path) -> None:
             "#SBATCH --nodes=1\n#SBATCH --ntasks-per-node=4\n"
             "#SBATCH --cpus-per-task=72\n"
             "#SBATCH --gpus-per-node=4\n#SBATCH --mem=440G\n"
-            "#SBATCH --time=04:00:00\n#SBATCH --array=0-49%16\n"
+            f"#SBATCH --time=04:00:00\n#SBATCH --array=0-{n_array - 1}%16\n"
             f"#SBATCH --job-name=cch-threshold-{stage}\n"
             + common
             + threshold
@@ -907,7 +910,7 @@ def _write_slurm_scripts(inventory_path: Path, output_root: Path) -> None:
         "#SBATCH --mem=110G\n#SBATCH --time=00:30:00\n"
         "#SBATCH --array=0-3\n#SBATCH --job-name=cch-threshold-canary\n"
         + common
-        + "indices=(0 50 100 150)\n"
+        + "indices=(0 60 120 180)\n"
         + 'index="${indices[$SLURM_ARRAY_TASK_ID]}"\n'
         + "srun --nodes=1 --ntasks=1 --cpus-per-task=72 "
         + '--gpus-per-node=1 --mem=110G "${UV[@]}" '
@@ -983,7 +986,7 @@ def _run_tags(
         "strategy": str(record["strategy"]),
         "seed": str(record["seed"]),
         "candidate_id": str(record["candidate_id"]),
-        "campaign_training_commit": CAMPAIGN_TRAINING_COMMIT,
+        "campaign_training_commit": inventory["campaign_training_commit"],
         "audit_code_commit": str(inventory["audit_code_commit"]),
         "audit_code_branch": str(inventory["audit_code_branch"]),
         "inventory_sha256": inventory_sha256,
@@ -1066,7 +1069,7 @@ def run_index(
         "model": str(record["model"]),
         "strategy": str(record["strategy"]),
         "seed": str(record["seed"]),
-        "campaign_training_commit": CAMPAIGN_TRAINING_COMMIT,
+        "campaign_training_commit": inventory["campaign_training_commit"],
         "audit_code_commit": audit_commit,
         "checkpoint_sha256": str(record["checkpoint_sha256"]),
         "retrain_marker_sha256": str(record["retrain_marker_sha256"]),
@@ -1181,7 +1184,7 @@ def collect(
     inventory_sha256: str,
     output_root: Path,
 ) -> tuple[Path, Path]:
-    """Validate and combine exactly 200 immutable operating-point records."""
+    """Validate and combine exactly 240 immutable operating-point records."""
     inventory = load_inventory(inventory_path, inventory_sha256)
     campaign_root = Path(str(inventory["campaign"])).parent
     output_root = _require_external_output(output_root, campaign_root)
@@ -1195,7 +1198,7 @@ def collect(
             marker.get("manifest_index") != index
             or marker.get("retrain_marker_sha256") != record["retrain_marker_sha256"]
             or marker.get("checkpoint_sha256") != record["checkpoint_sha256"]
-            or marker.get("campaign_training_commit") != CAMPAIGN_TRAINING_COMMIT
+            or marker.get("campaign_training_commit") != inventory["campaign_training_commit"]
         ):
             raise ValueError(f"Audit record identity mismatch: {marker_path}")
         diagnostics = Path(str(marker["diagnostics_csv"]))
@@ -1264,7 +1267,7 @@ def collect(
     provenance = {
         "schema_version": 1,
         "outcome_blind": True,
-        "campaign_training_commit": CAMPAIGN_TRAINING_COMMIT,
+        "campaign_training_commit": inventory["campaign_training_commit"],
         "audit_code_commit": next(iter(audit_commits)),
         "audit_inventory": str(inventory_path.resolve()),
         "audit_inventory_sha256": inventory_sha256,
@@ -1731,7 +1734,7 @@ def freeze_threshold_manifest(
     inventory_sha256: str,
     output_root: Path,
 ) -> tuple[Path, str]:
-    """Freeze all 200 calibrated thresholds before any test stream is loaded."""
+    """Freeze all 240 calibrated thresholds before any test stream is loaded."""
     inventory = load_inventory(inventory_path, inventory_sha256)
     _require_deployment(inventory)
     campaign_root = Path(str(inventory["campaign"])).parent
@@ -1782,7 +1785,7 @@ def _load_threshold_manifest(
     inventory_sha256: str,
     inventory: Mapping[str, Any] | None = None,
 ) -> tuple[dict[str, Any], dict[int, dict[str, Any]]]:
-    """Validate the 200-threshold pre-test freeze gate."""
+    """Validate the 240-threshold pre-test freeze gate."""
     _require_hash(path, expected_sha256, "threshold manifest")
     manifest = _load_json(path)
     records = manifest.get("records")
@@ -2309,7 +2312,7 @@ def collect_threshold_safe(
     threshold_manifest_sha256: str,
     output_root: Path,
 ) -> tuple[Path, Path, Path, Path]:
-    """Collect exactly 200 diagnostics and 23,200 threshold-safe result rows."""
+    """Collect exactly 240 diagnostics and 27,840 threshold-safe result rows."""
     inventory = load_inventory(inventory_path, inventory_sha256)
     _require_deployment(inventory)
     campaign = _load_json(Path(inventory["campaign"]))
@@ -2452,7 +2455,7 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
     sub = parser.add_subparsers(dest="command", required=True)
 
-    inventory = sub.add_parser("inventory", help="Freeze all 200 source hashes.")
+    inventory = sub.add_parser("inventory", help="Freeze all 240 source hashes.")
     inventory.add_argument("--campaign-root", type=Path, required=True)
     inventory.add_argument("--campaign-sha256", required=True)
     inventory.add_argument("--output", type=Path, required=True)
@@ -2468,7 +2471,7 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     calibrate.add_argument("--devices", type=int, default=1)
 
     freeze = sub.add_parser(
-        "freeze-thresholds", help="Freeze all 200 thresholds before test evaluation."
+        "freeze-thresholds", help="Freeze all 240 thresholds before test evaluation."
     )
     freeze.add_argument("--inventory", type=Path, required=True)
     freeze.add_argument("--inventory-sha256", required=True)
@@ -2486,7 +2489,7 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     evaluate.add_argument("--accelerator", choices=("gpu", "cpu"), default="gpu")
     evaluate.add_argument("--devices", type=int, default=1)
 
-    collection = sub.add_parser("collect", help="Combine 200 diagnostics and 23,200 rows.")
+    collection = sub.add_parser("collect", help="Combine 240 diagnostics and 27,840 rows.")
     collection.add_argument("--inventory", type=Path, required=True)
     collection.add_argument("--inventory-sha256", required=True)
     collection.add_argument("--threshold-manifest", type=Path, required=True)

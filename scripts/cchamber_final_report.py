@@ -32,6 +32,7 @@ STRATEGIES = (
     "cap_metadata_nearest",
     "cap_encoder_nearest",
     "cap_random",
+    "cap_cdf",
     "drift",
     "wasserstein",
 )
@@ -41,6 +42,7 @@ STRATEGY_LABELS = {
     "cap_metadata_nearest": "CAP (metadata)",
     "cap_encoder_nearest": "CAP (encoder)",
     "cap_random": "CAP (random pairs)",
+    "cap_cdf": "CAP (CDF ranks)",
     "drift": "Marginal drift",
     "wasserstein": "Wasserstein",
 }
@@ -48,6 +50,7 @@ STRATEGY_COLORS = {
     "cap_metadata_nearest": "#0072B2",
     "cap_encoder_nearest": "#56B4E9",
     "cap_random": "#999999",
+    "cap_cdf": "#CC79A7",
     "drift": "#E69F00",
     "wasserstein": "#009E73",
 }
@@ -118,7 +121,7 @@ def _validate_inputs(
         strategy.loc[:, ["model", "strategy", "metric"]].itertuples(index=False, name=None)
     )
     if observed_strategy != expected_strategy or len(strategy) != len(expected_strategy):
-        raise ValueError("Strategy summary does not have exact 4x5x2 coverage.")
+        raise ValueError("Strategy summary does not have exact 4x6x2 coverage.")
     _finite(strategy, ["mean", "ci_low", "ci_high"], "strategy summary")
 
     rank = tables["rank"]
@@ -126,13 +129,13 @@ def _validate_inputs(
         rank.loc[:, ["model", "strategy", "metric"]].itertuples(index=False, name=None)
     )
     if observed_rank != expected_strategy or len(rank) != len(expected_strategy):
-        raise ValueError("Candidate-rank table does not have exact 4x5x2 coverage.")
+        raise ValueError("Candidate-rank table does not have exact 4x6x2 coverage.")
     _finite(rank, ["spearman_rho", "spearman_holm_p"], "candidate-rank table")
 
     results = tables["threshold_results"]
     identity = ["model", "strategy", "seed", "intervention", "metric"]
-    if len(results) != 23_200 or results.duplicated(identity).any():
-        raise ValueError("Threshold results do not have exact unique 23,200-row coverage.")
+    if len(results) != 27_840 or results.duplicated(identity).any():
+        raise ValueError("Threshold results do not have exact unique 27,840-row coverage.")
     if set(results["model"]) != set(MODELS) or set(results["strategy"]) != set(STRATEGIES):
         raise ValueError("Threshold result model/strategy identities do not match the report.")
     if set(results["metric"]) != set(METRICS):
@@ -336,7 +339,7 @@ def _plot_architecture_overview(strategy: pd.DataFrame, output: Path) -> None:
         axis.set_ylim(bottom=0)
         axis.grid(axis="y", alpha=0.25)
     handles, labels = axes[0].get_legend_handles_labels()
-    figure.legend(handles, labels, loc="lower center", ncol=5, frameon=False)
+    figure.legend(handles, labels, loc="lower center", ncol=6, frameon=False)
     figure.suptitle("Selected-checkpoint performance by architecture and label-free criterion")
     figure.tight_layout(rect=(0, 0.12, 1, 0.95))
     figure.savefig(output, dpi=220, bbox_inches="tight")
@@ -350,6 +353,7 @@ def _plot_rank_heatmap(rank: pd.DataFrame, output: Path) -> None:
         "CAP metadata",
         "CAP encoder",
         "CAP random",
+        "CAP CDF",
         "Marginal drift",
         "Wasserstein",
     )

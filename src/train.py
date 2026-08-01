@@ -1,27 +1,25 @@
 # Main training script.
-from typing import Any, Dict, List, Optional, Tuple
-from pathlib import Path
 import gc
-
 import os
+from pathlib import Path
+from typing import Any, Dict, List, Optional, Tuple
 
 from dotenv import load_dotenv
 
 load_dotenv()
 os.environ["KERAS_BACKEND"] = "torch"
 
+from math import inf
+
 import hydra
 import pytorch_lightning as pl
-
+import rootutils
 import torch
+from colorama import Back, Fore, Style
+from hydra.core.hydra_config import HydraConfig
+from omegaconf import DictConfig, OmegaConf
 from pytorch_lightning import Callback, LightningDataModule, LightningModule, Trainer
 from pytorch_lightning.loggers import Logger
-from omegaconf import OmegaConf, DictConfig
-from colorama import Fore, Back, Style
-from math import inf
-from hydra.core.hydra_config import HydraConfig
-
-import rootutils
 
 rootutils.setup_root(__file__, indicator=".project-root", pythonpath=True)
 
@@ -30,13 +28,15 @@ from src.utils.omegaconf import register_resolvers
 
 register_resolvers()
 
-from src.utils import RankedLogger
-from src.utils import extras
-from src.utils import get_metric_value
-from src.utils import instantiate_callbacks
-from src.utils import instantiate_loggers
-from src.utils import log_hyperparameters
-from src.utils import task_wrapper
+from src.utils import (
+    RankedLogger,
+    extras,
+    get_metric_value,
+    instantiate_callbacks,
+    instantiate_loggers,
+    log_hyperparameters,
+    task_wrapper,
+)
 
 log = RankedLogger(__name__, rank_zero_only=True)
 
@@ -77,9 +77,7 @@ def train(cfg: DictConfig) -> Tuple[Dict[str, Any], Dict[str, Any]]:
     logger: List[Logger] = instantiate_loggers(cfg.get("logger"))
 
     log.info(f"Instantiating trainer <{cfg.trainer._target_}>")
-    trainer: Trainer = hydra.utils.instantiate(
-        cfg.trainer, callbacks=callbacks, logger=logger
-    )
+    trainer: Trainer = hydra.utils.instantiate(cfg.trainer, callbacks=callbacks, logger=logger)
 
     object_dict = {
         "cfg": cfg,
@@ -113,9 +111,7 @@ def train(cfg: DictConfig) -> Tuple[Dict[str, Any], Dict[str, Any]]:
     log.info(Back.MAGENTA + 8 * "-" + "STARTING RUN VALIDATION" + 8 * "-")
     datamodule.setup("validate")
     val_loader = datamodule.val_dataloader()
-    evaluator.evaluate_run(
-        run_ckpts, algorithm, val_loader, "val", set_optimized_metric=True
-    )
+    evaluator.evaluate_run(run_ckpts, algorithm, val_loader, "val", set_optimized_metric=True)
     object_dict.update({"evaluator": evaluator})
 
     # Evaluate once more on a held out test set for final performance.
@@ -136,7 +132,7 @@ def _worst_for(direction: str) -> float:
 
 def _get_evaluator(cfg: DictConfig, datamodule, logger):
     """Configure the evaluator object and return it."""
-    if cfg.get("evaluation") is None:
+    if cfg.get("skip_evaluation") or cfg.get("evaluation") is None:
         log.info(Back.YELLOW + "No evaluation config found... Skipping testing")
         return
 

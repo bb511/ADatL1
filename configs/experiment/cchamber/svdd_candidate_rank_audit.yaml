@@ -9,4 +9,4 @@ algorithm:
   base_rate: null
   encoder:
     in_dim: 11
-    nodes: [32, 16, 8]
+    nodes: [128, 64, 16]

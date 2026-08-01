@@ -47,6 +47,9 @@ train: True
 # lightning chooses best weights based on the metric specified in checkpoint callback
 test: True
 
+# Skip post-fit evaluation while retaining training-time checkpoint callbacks.
+skip_evaluation: false
+
 # simply provide checkpoint path to resume training
 ckpt_path: null
 

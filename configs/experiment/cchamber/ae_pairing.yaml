@@ -28,6 +28,8 @@ algorithm:
   encoder:
     in_dim: 11
     nodes: [128, 64, 16]
+    bias: false
+    batchnorm: false
 
 trainer:
   gradient_clip_algorithm: norm

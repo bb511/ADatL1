@@ -352,8 +352,8 @@ def test_evaluation_mlflow_failure_never_publishes_and_retry_recovers(
     assert recovered["audit_mlflow_run_id"] == "evaluation-attempt-2"
 
 
-def test_threshold_freeze_requires_all_200_immutable_artifacts(tmp_path) -> None:
-    """The pre-test gate must authenticate all 200 threshold artifacts."""
+def test_threshold_freeze_requires_all_240_immutable_artifacts(tmp_path) -> None:
+    """The pre-test gate must authenticate all 240 threshold artifacts."""
     campaign_root, campaign_hash = _synthetic_campaign(tmp_path)
     inventory_path = tmp_path / "inventory.json"
     inventory = audit.build_inventory(campaign_root, campaign_hash, inventory_path)
@@ -372,7 +372,7 @@ def test_threshold_freeze_requires_all_200_immutable_artifacts(tmp_path) -> None
         manifest_path, manifest_hash, inventory_hash
     )
     assert manifest["test_or_intervention_data_loaded_before_freeze"] is False
-    assert len(records) == 200
+    assert len(records) == 240
 
     audit._threshold_artifact_path(output_root, 199).unlink()
     with pytest.raises(FileNotFoundError):
@@ -505,8 +505,8 @@ def test_evaluation_efficiency_can_require_exact_supplied_threshold(tmp_path) ->
         callback.on_test_start(trainer, module)
 
 
-def test_collection_requires_exact_200_by_58_by_2_coverage(tmp_path) -> None:
-    """Collection must require the exact 23,200-row Cartesian result table."""
+def test_collection_requires_exact_240_by_58_by_2_coverage(tmp_path) -> None:
+    """Collection must require the exact 27,840-row Cartesian result table."""
     campaign_root, campaign_hash = _synthetic_campaign(tmp_path)
     inventory_path = tmp_path / "inventory.json"
     inventory = audit.build_inventory(campaign_root, campaign_hash, inventory_path)
@@ -602,14 +602,14 @@ def test_collection_requires_exact_200_by_58_by_2_coverage(tmp_path) -> None:
         output_root,
     )
     with results.open(newline="", encoding="utf-8") as handle:
-        assert sum(1 for _ in csv.DictReader(handle)) == 23_200
+        assert sum(1 for _ in csv.DictReader(handle)) == 27_840
     with diagnostics.open(newline="", encoding="utf-8") as handle:
-        assert sum(1 for _ in csv.DictReader(handle)) == 200
+        assert sum(1 for _ in csv.DictReader(handle)) == 240
     with seed_summary.open(newline="", encoding="utf-8") as handle:
         seed_rows = list(csv.DictReader(handle))
-    assert len(seed_rows) == 200
+    assert len(seed_rows) == 240
     assert {float(row["achieved_minus_target_fpr"]) for row in seed_rows} == {0.0}
-    assert json.loads(provenance.read_text(encoding="utf-8"))["expected_result_rows"] == 23_200
+    assert json.loads(provenance.read_text(encoding="utf-8"))["expected_result_rows"] == 27_840
 
     marker = output_root / "evaluation" / "000.json"
     marker_bytes = marker.read_bytes()

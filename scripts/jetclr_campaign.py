@@ -15,6 +15,7 @@ import json
 import math
 import os
 import shutil
+import statistics
 import subprocess  # nosec B404 - commands are fixed argument vectors, never shell strings
 import sys
 import tempfile
@@ -127,6 +128,20 @@ STAGE6_SOURCE_SUMMARY_CSV_SHA256 = (
 STAGE6_SOURCE_PAIRED_CSV = STAGE6_SOURCE_ROOT / "stage5" / "paired_deltas.csv"
 STAGE6_SOURCE_PAIRED_CSV_SHA256 = (
     "f9885959e29fc3e5a12e4e7748bc0345e216d92ee885848652b02e280800dfaa"
+)
+STAGE7_MILESTONES = (1, 2, 4, 8, 16)
+STAGE7_N_CANDIDATES = 60
+STAGE7_SOURCE_CAMPAIGN = "jetclr_20260801_5b49e71"
+STAGE7_SOURCE_ROOT = DEFAULT_CAMPAIGN_BASE / STAGE7_SOURCE_CAMPAIGN
+STAGE7_SOURCE_SUMMARY = STAGE7_SOURCE_ROOT / "stage6" / "summary.json"
+STAGE7_SOURCE_SUMMARY_SHA256 = "0ed426f42e5c2b8c0fdac0bba0fb8778cdff24ccb9925a549f67bb124ea06f2e"
+STAGE7_SOURCE_SUMMARY_CSV = STAGE7_SOURCE_ROOT / "stage6" / "summary.csv"
+STAGE7_SOURCE_SUMMARY_CSV_SHA256 = (
+    "fe44d567577ff1ac61a0ca422627b5560f8fb3ac9492e18d974d21d2d5996e0e"
+)
+STAGE7_SOURCE_PAIRED_CSV = STAGE7_SOURCE_ROOT / "stage6" / "paired_epoch16.csv"
+STAGE7_SOURCE_PAIRED_CSV_SHA256 = (
+    "39cb58f5d23af8e6ab52f8fbd6780cfcfd3e6aeeec44ba58be38ea3396f3703f"
 )
 
 
@@ -613,6 +628,52 @@ def stage6_specs() -> list[dict[str, Any]]:
             specs.append({**identity, "spec_sha256": _value_sha256(identity)})
     if len(specs) != STAGE6_N_CANDIDATES:
         raise AssertionError("Stage-6 design must contain exactly twelve candidates.")
+    return specs
+
+
+def stage7_specs(source_root: Path = STAGE7_SOURCE_ROOT) -> list[dict[str, Any]]:
+    """Return 60 immutable checkpoint-evaluation specifications."""
+    source_manifest = _load_campaign(source_root)
+    specs = []
+    for source_spec in source_manifest["stage6"]["candidates"]:
+        result_path = (
+            source_root / "stage6" / f"candidate_{source_spec['candidate_id']:03d}" / "result.json"
+        )
+        result = json.loads(result_path.read_text(encoding="utf-8"))
+        result_digest = result.pop("result_payload_sha256", None)
+        if result_digest is None or _value_sha256(result) != result_digest:
+            raise ValueError(f"Stage-7 source result fingerprint mismatch: {result_path}")
+        if result.get("spec_sha256") != source_spec["spec_sha256"]:
+            raise ValueError(f"Stage-7 source result identity mismatch: {result_path}")
+        inventory = {int(item["completed_epoch"]): item for item in result["checkpoint_inventory"]}
+        for completed_epoch in STAGE7_MILESTONES:
+            checkpoint = inventory[completed_epoch]
+            checkpoint_path = Path(checkpoint["path"])
+            if not checkpoint_path.is_file() or _sha256(checkpoint_path) != checkpoint["sha256"]:
+                raise ValueError(f"Stage-7 source checkpoint mismatch: {checkpoint_path}")
+            candidate_id = len(specs)
+            identity = {
+                "candidate_id": candidate_id,
+                "kind": "milestone_evaluation",
+                "name": f"source_{source_spec['candidate_id']:03d}_epoch{completed_epoch:02d}",
+                "seed": source_spec["seed"],
+                "completed_epoch": completed_epoch,
+                "epoch_index": completed_epoch - 1,
+                "source_campaign_id": STAGE7_SOURCE_CAMPAIGN,
+                "source_candidate_id": source_spec["candidate_id"],
+                "source_candidate_spec_sha256": source_spec["spec_sha256"],
+                "source_result_path": str(result_path),
+                "source_result_payload_sha256": result_digest,
+                "source_checkpoint_path": str(checkpoint_path),
+                "source_checkpoint_sha256": checkpoint["sha256"],
+                "source_architecture_name": source_spec["source_architecture_name"],
+                "is_architecture_control": source_spec["is_architecture_control"],
+                "params": source_spec["params"],
+                "overrides": source_spec["overrides"],
+            }
+            specs.append({**identity, "spec_sha256": _value_sha256(identity)})
+    if len(specs) != STAGE7_N_CANDIDATES:
+        raise AssertionError("Stage-7 design must contain exactly sixty evaluations.")
     return specs
 
 
@@ -1142,6 +1203,29 @@ def _write_stage6_launchers(root: Path, manifest: Mapping[str, Any]) -> dict[str
     return destinations
 
 
+def _write_stage7_launchers(root: Path, manifest: Mapping[str, Any]) -> dict[str, Path]:
+    """Write the four-node-capped packed milestone evaluation array."""
+    templates = _write_stage6_launchers(root, manifest)
+    destinations = {
+        "stage7": root / "slurm" / "stage7.sbatch",
+        "collector": root / "slurm" / "stage7_collect.sbatch",
+        "submitter": root / "slurm" / "submit_stage7.sh",
+    }
+    source_by_role = {
+        "stage7": templates["stage6"],
+        "collector": templates["collector"],
+        "submitter": templates["submitter"],
+    }
+    for role, destination in destinations.items():
+        text = source_by_role[role].read_text(encoding="utf-8")
+        text = text.replace("stage6", "stage7").replace("jetclr-s6", "jetclr-s7")
+        text = text.replace("#SBATCH --array=0-2%3", "#SBATCH --array=0-14%4")
+        text = text.replace("#SBATCH --time=12:00:00", "#SBATCH --time=01:30:00")
+        destination.write_text(text, encoding="utf-8")
+        destination.chmod(0o755)
+    return destinations
+
+
 def initialize(
     root: Path,
     deployment: Path,
@@ -1223,6 +1307,13 @@ def initialize(
         for name in ("layers2", "official_projector")
     ):
         raise RuntimeError("Both Stage-5 architectures must be promoted before Stage 6.")
+    for path, digest in (
+        (STAGE7_SOURCE_SUMMARY, STAGE7_SOURCE_SUMMARY_SHA256),
+        (STAGE7_SOURCE_SUMMARY_CSV, STAGE7_SOURCE_SUMMARY_CSV_SHA256),
+        (STAGE7_SOURCE_PAIRED_CSV, STAGE7_SOURCE_PAIRED_CSV_SHA256),
+    ):
+        if _sha256(path) != digest:
+            raise RuntimeError("Frozen Stage-6 milestone source fingerprint changed.")
 
     deployment.parent.mkdir(parents=True, exist_ok=True)
     git = shutil.which("git")
@@ -1246,6 +1337,7 @@ def initialize(
     stage4 = stage4_specs()
     stage5 = stage5_specs()
     stage6 = stage6_specs()
+    stage7 = stage7_specs()
     _atomic_json(root / "design" / "canary_trials.json", specs)
     _atomic_json(root / "design" / "stage1_candidates.json", stage1)
     _atomic_json(root / "design" / "stage2_candidates.json", stage2)
@@ -1253,6 +1345,7 @@ def initialize(
     _atomic_json(root / "design" / "stage4_candidates.json", stage4)
     _atomic_json(root / "design" / "stage5_candidates.json", stage5)
     _atomic_json(root / "design" / "stage6_candidates.json", stage6)
+    _atomic_json(root / "design" / "stage7_candidates.json", stage7)
     manifest = {
         "schema_version": 1,
         "campaign_id": campaign_id,
@@ -1357,6 +1450,17 @@ def initialize(
             "candidates": stage6,
             "design_sha256": _value_sha256(stage6),
         },
+        "stage7": {
+            "train": False,
+            "test": False,
+            "milestone_epochs": list(STAGE7_MILESTONES),
+            "source_campaign_id": STAGE7_SOURCE_CAMPAIGN,
+            "source_summary_sha256": STAGE7_SOURCE_SUMMARY_SHA256,
+            "source_summary_csv_sha256": STAGE7_SOURCE_SUMMARY_CSV_SHA256,
+            "source_paired_csv_sha256": STAGE7_SOURCE_PAIRED_CSV_SHA256,
+            "candidates": stage7,
+            "design_sha256": _value_sha256(stage7),
+        },
     }
     manifest["manifest_payload_sha256"] = _value_sha256(manifest)
     _atomic_json(root / "campaign.json", manifest)
@@ -1367,6 +1471,7 @@ def initialize(
     _write_stage4_launchers(root, manifest)
     _write_stage5_launchers(root, manifest)
     _write_stage6_launchers(root, manifest)
+    _write_stage7_launchers(root, manifest)
     return launcher
 
 
@@ -2013,6 +2118,150 @@ def run_stage5(root: Path, candidate_id: int) -> Path:
 def run_stage6(root: Path, candidate_id: int) -> Path:
     """Run one configuration over the common 16-epoch scheduler horizon."""
     return _run_full_epoch_stage(root, candidate_id, "stage6")
+
+
+def run_stage7(root: Path, candidate_id: int) -> Path:
+    """Evaluate one exact Stage-6 checkpoint without fitting or touching test data."""
+    root = root.resolve()
+    manifest = _load_campaign(root)
+    deployment = _assert_runtime(manifest)
+    specs = manifest["stage7"]["candidates"]
+    if candidate_id < 0 or candidate_id >= len(specs):
+        raise ValueError(f"candidate-id must be between 0 and {len(specs) - 1}.")
+    spec = specs[candidate_id]
+    trial_root = root / "stage7" / f"candidate_{candidate_id:03d}"
+    result_path = trial_root / "result.json"
+    if result_path.is_file():
+        result = json.loads(result_path.read_text(encoding="utf-8"))
+        digest = result.pop("result_payload_sha256", None)
+        if digest is None or _value_sha256(result) != digest:
+            raise ValueError(f"Existing Stage-7 result fingerprint mismatch: {result_path}")
+        print(result_path)
+        return result_path
+
+    source_result_path = Path(spec["source_result_path"])
+    source_result = json.loads(source_result_path.read_text(encoding="utf-8"))
+    source_digest = source_result.pop("result_payload_sha256", None)
+    if (
+        source_digest != spec["source_result_payload_sha256"]
+        or _value_sha256(source_result) != source_digest
+    ):
+        raise ValueError(f"Stage-7 source result changed: {source_result_path}")
+    source_checkpoint = Path(spec["source_checkpoint_path"])
+    if (
+        not source_checkpoint.is_file()
+        or _sha256(source_checkpoint) != spec["source_checkpoint_sha256"]
+    ):
+        raise ValueError(f"Stage-7 source checkpoint changed: {source_checkpoint}")
+
+    alias = trial_root / "checkpoint_alias" / "milestone"
+    alias.mkdir(parents=True, exist_ok=True)
+    alias_checkpoint = alias / "last.ckpt"
+    if not alias_checkpoint.exists():
+        alias_checkpoint.symlink_to(source_checkpoint)
+    if _sha256(alias_checkpoint) != spec["source_checkpoint_sha256"]:
+        raise ValueError(f"Stage-7 alias checkpoint mismatch: {alias_checkpoint}")
+    command = [
+        sys.executable,
+        "src/train.py",
+        "experiment=physics/jetclr_pairing",
+        "trainer=gpu",
+        "trainer.devices=[0]",
+        "train=false",
+        "test=false",
+        "+trainer.limit_val_batches=0",
+        "+trainer.enable_progress_bar=false",
+        "+trainer.enable_model_summary=false",
+        "callbacks.clear_ckpts=null",
+        "callbacks.last_epoch_ckpt=null",
+        "callbacks.rich_progress_bar=null",
+        "callbacks.model_summary=null",
+        "callbacks.log_data_mlflow=null",
+        "logger=csv",
+        f"seed={spec['seed']}",
+        "data.max_val_batches=4",
+        "data.max_normal_eval_batches=8",
+        "evaluation.callbacks.pairing_diagnostics.max_events_per_dataset=8192",
+        "evaluation.callbacks.embedding_anomaly.reference_size=8192",
+        "evaluation.callbacks.embedding_anomaly.max_query_events=8192",
+        "experiment_name=checkpoint_alias",
+        "run_name=milestone",
+        f"paths.log_dir={root / 'logs'}",
+        f"paths.output_dir={trial_root / 'output'}",
+        f"paths.checkpoints_dir={trial_root}",
+        f"hydra.run.dir={trial_root / 'hydra'}",
+        "extras.print_config=false",
+        "extras.enforce_tags=false",
+        *spec["overrides"],
+    ]
+    environment = os.environ.copy()
+    environment.update(
+        {
+            "PROJECT_ROOT": str(deployment),
+            "DATA_DIR": manifest["data"]["root"],
+            "LOG_DIR": str(root / "logs"),
+            "OUTPUT_DIR": str(root / "outputs"),
+            "CHECKPOINT_DIR": str(root / "checkpoints"),
+            "WANDB_MODE": "offline",
+            "HYDRA_FULL_ERROR": "1",
+        }
+    )
+    (trial_root / "output").mkdir(parents=True)
+    completed = subprocess.run(command, cwd=deployment, env=environment, check=False)  # nosec B603
+    if completed.returncode:
+        raise subprocess.CalledProcessError(completed.returncode, command)
+    if (
+        not alias_checkpoint.is_symlink()
+        or _sha256(alias_checkpoint) != spec["source_checkpoint_sha256"]
+    ):
+        raise ValueError("Stage-7 evaluation modified its checkpoint alias.")
+    pairing_path = _single_artifact(trial_root / "output", "pairing_diagnostics.json")
+    anomaly_path = _single_artifact(trial_root / "output", "embedding_anomaly.json")
+    pairing = _metric_json(
+        pairing_path,
+        (
+            "raw_selection_score",
+            "mnn_coverage",
+            "embedding_finite_fraction",
+            "embedding_effective_rank",
+            "embedding_participation_rank",
+            "embedding_top_pc_fraction",
+            "projector_embedding_finite_fraction",
+            "projector_embedding_effective_rank",
+        ),
+    )
+    anomaly = _metric_json(
+        anomaly_path, ("macro_mean_auroc", "macro_median_auroc", "worst_quartile_mean_auroc")
+    )
+    if not _valid_anomaly_aurocs(anomaly):
+        raise ValueError(f"Stage-7 anomaly metrics are malformed: {anomaly_path}")
+    artifacts = {"pairing_json": pairing_path, "anomaly_json": anomaly_path}
+    result = {
+        "schema_version": 1,
+        "campaign_id": manifest["campaign_id"],
+        "git_commit": manifest["git"]["commit"],
+        "candidate_id": candidate_id,
+        "spec_sha256": spec["spec_sha256"],
+        "seed": spec["seed"],
+        "completed_epoch": spec["completed_epoch"],
+        "source_campaign_id": spec["source_campaign_id"],
+        "source_candidate_id": spec["source_candidate_id"],
+        "source_candidate_spec_sha256": spec["source_candidate_spec_sha256"],
+        "source_result_payload_sha256": source_digest,
+        "source_checkpoint_path": str(source_checkpoint),
+        "source_checkpoint_sha256": spec["source_checkpoint_sha256"],
+        "alias_checkpoint_path": str(alias_checkpoint),
+        "command": command,
+        "artifacts": {
+            name: {"path": str(path), "sha256": _sha256(path)} for name, path in artifacts.items()
+        },
+        "pairing_metrics": pairing,
+        "anomaly_metrics": anomaly,
+    }
+    result["result_payload_sha256"] = _value_sha256(result)
+    _atomic_json(result_path, result)
+    print(result_path)
+    return result_path
 
 
 def collect(root: Path) -> Path:
@@ -3101,6 +3350,236 @@ def collect_stage6(root: Path) -> Path:
     return output
 
 
+def collect_stage7(root: Path) -> Path:
+    """Aggregate milestone utility and select one global validation horizon."""
+    root = root.resolve()
+    manifest = _load_campaign(root)
+    rows = []
+    missing = []
+    for spec in manifest["stage7"]["candidates"]:
+        result_path = root / "stage7" / f"candidate_{spec['candidate_id']:03d}" / "result.json"
+        if not result_path.is_file():
+            missing.append(str(result_path))
+            continue
+        result = json.loads(result_path.read_text(encoding="utf-8"))
+        digest = result.pop("result_payload_sha256", None)
+        if digest is None or _value_sha256(result) != digest:
+            raise ValueError(f"Stage-7 result fingerprint mismatch: {result_path}")
+        if (
+            result.get("spec_sha256") != spec["spec_sha256"]
+            or result.get("source_result_payload_sha256") != spec["source_result_payload_sha256"]
+            or result.get("source_checkpoint_sha256") != spec["source_checkpoint_sha256"]
+        ):
+            raise ValueError(f"Stage-7 result identity mismatch: {result_path}")
+        source_checkpoint = Path(spec["source_checkpoint_path"])
+        if (
+            not source_checkpoint.is_file()
+            or _sha256(source_checkpoint) != spec["source_checkpoint_sha256"]
+        ):
+            raise ValueError(f"Stage-7 source checkpoint mismatch: {source_checkpoint}")
+        for artifact in result["artifacts"].values():
+            path = Path(artifact["path"])
+            if not path.is_file() or _sha256(path) != artifact["sha256"]:
+                raise ValueError(f"Stage-7 artifact mismatch: {path}")
+        pairing = result["pairing_metrics"]
+        anomaly = result["anomaly_metrics"]
+        rows.append(
+            {
+                "candidate_id": spec["candidate_id"],
+                "source_candidate_id": spec["source_candidate_id"],
+                "architecture_name": spec["source_architecture_name"],
+                "is_architecture_control": spec["is_architecture_control"],
+                "seed": spec["seed"],
+                "completed_epoch": spec["completed_epoch"],
+                "eligible": bool(pairing["collapse_pass"])
+                and bool(pairing["projector_collapse_pass"])
+                and float(pairing["embedding_finite_fraction"]) == 1.0
+                and float(pairing["projector_embedding_finite_fraction"]) == 1.0
+                and float(pairing["mnn_coverage"]) > 0.0
+                and _valid_anomaly_aurocs(anomaly),
+                "encoder_effective_rank": pairing["embedding_effective_rank"],
+                "encoder_participation_rank": pairing["embedding_participation_rank"],
+                "encoder_top_pc_fraction": pairing["embedding_top_pc_fraction"],
+                "raw_selection_score": pairing["raw_selection_score"],
+                "macro_mean_auroc": anomaly["macro_mean_auroc"],
+                "worst_quartile_mean_auroc": anomaly["worst_quartile_mean_auroc"],
+                "source_checkpoint_path": str(source_checkpoint),
+                "source_checkpoint_sha256": spec["source_checkpoint_sha256"],
+                "result_payload_sha256": digest,
+                "spec_sha256": spec["spec_sha256"],
+            }
+        )
+    if missing:
+        raise FileNotFoundError(
+            f"Stage 7 is incomplete: {len(missing)} results missing; first is {missing[0]}"
+        )
+
+    paired = []
+    for architecture in ("layers2", "official_projector"):
+        for epoch in STAGE7_MILESTONES:
+            for seed in STAGE6_SEEDS:
+                selected = [
+                    row
+                    for row in rows
+                    if row["architecture_name"] == architecture
+                    and row["completed_epoch"] == epoch
+                    and row["seed"] == seed
+                ]
+                controls = [row for row in selected if row["is_architecture_control"]]
+                hybrids = [row for row in selected if not row["is_architecture_control"]]
+                if len(controls) != 1 or len(hybrids) != 1:
+                    raise ValueError(
+                        f"Stage-7 matched pair missing: {architecture}/{epoch}/{seed}"
+                    )
+                control, hybrid = controls[0], hybrids[0]
+                item = {
+                    "architecture_name": architecture,
+                    "completed_epoch": epoch,
+                    "seed": seed,
+                    "both_eligible": control["eligible"] and hybrid["eligible"],
+                }
+                for metric in (
+                    "encoder_effective_rank",
+                    "encoder_participation_rank",
+                    "encoder_top_pc_fraction",
+                    "raw_selection_score",
+                    "macro_mean_auroc",
+                    "worst_quartile_mean_auroc",
+                ):
+                    item[f"{metric}_delta"] = float(hybrid[metric]) - float(control[metric])
+                paired.append(item)
+
+    aggregates = []
+    for architecture in ("layers2", "official_projector"):
+        for epoch in STAGE7_MILESTONES:
+            hybrid_rows = [
+                row
+                for row in rows
+                if row["architecture_name"] == architecture
+                and row["completed_epoch"] == epoch
+                and not row["is_architecture_control"]
+                and row["eligible"]
+            ]
+            values = [float(row["worst_quartile_mean_auroc"]) for row in hybrid_rows]
+            aggregates.append(
+                {
+                    "architecture_name": architecture,
+                    "completed_epoch": epoch,
+                    "n_eligible_hybrids": len(values),
+                    "median_worst_quartile_auroc": statistics.median(values) if values else None,
+                    "mean_worst_quartile_auroc": statistics.mean(values) if values else None,
+                    "se_worst_quartile_auroc": (
+                        statistics.stdev(values) / math.sqrt(len(values))
+                        if len(values) > 1
+                        else None
+                    ),
+                }
+            )
+
+    epoch_stats = []
+    for epoch in STAGE7_MILESTONES:
+        values = [
+            float(row["worst_quartile_mean_auroc"])
+            for row in rows
+            if row["completed_epoch"] == epoch
+            and not row["is_architecture_control"]
+            and row["eligible"]
+        ]
+        epoch_stats.append(
+            {
+                "completed_epoch": epoch,
+                "n_eligible_hybrids": len(values),
+                "median": statistics.median(values) if values else None,
+                "standard_deviation": statistics.stdev(values) if len(values) > 1 else None,
+                "standard_error": (
+                    statistics.stdev(values) / math.sqrt(len(values)) if len(values) > 1 else None
+                ),
+            }
+        )
+    expected_hybrids = 2 * len(STAGE6_SEEDS)
+    eligible_stats = [
+        item
+        for item in epoch_stats
+        if item["median"] is not None and int(item["n_eligible_hybrids"]) == expected_hybrids
+    ]
+    if not eligible_stats:
+        raise ValueError("No milestone has every hybrid seed scientifically eligible.")
+    best = max(eligible_stats, key=lambda item: float(item["median"]))
+    threshold = float(best["median"]) - float(best["standard_error"] or 0.0)
+    selected_epoch = min(
+        int(item["completed_epoch"])
+        for item in eligible_stats
+        if float(item["median"]) >= threshold
+    )
+
+    improvements = []
+    extension_pairs_eligible = True
+    for row16 in [
+        row for row in rows if row["completed_epoch"] == 16 and not row["is_architecture_control"]
+    ]:
+        row8 = next(
+            row
+            for row in rows
+            if row["completed_epoch"] == 8
+            and row["source_candidate_id"] == row16["source_candidate_id"]
+            and row["seed"] == row16["seed"]
+        )
+        extension_pairs_eligible = (
+            extension_pairs_eligible and bool(row8["eligible"]) and bool(row16["eligible"])
+        )
+        improvements.append(
+            float(row16["worst_quartile_mean_auroc"]) - float(row8["worst_quartile_mean_auroc"])
+        )
+    improvement_mean = statistics.mean(improvements)
+    improvement_sd = statistics.stdev(improvements)
+    improvement_se = improvement_sd / math.sqrt(len(improvements))
+    extension_to_32 = extension_pairs_eligible and improvement_mean > improvement_se
+
+    rows.sort(key=lambda row: int(row["candidate_id"]))
+    table = root / "stage7" / "summary.csv"
+    paired_table = root / "stage7" / "paired_deltas.csv"
+    aggregate_table = root / "stage7" / "architecture_epoch.csv"
+    _atomic_csv(table, rows)
+    _atomic_csv(paired_table, paired)
+    _atomic_csv(aggregate_table, aggregates)
+    summary = {
+        "schema_version": 1,
+        "campaign_id": manifest["campaign_id"],
+        "status": "complete",
+        "n_evaluations": len(rows),
+        "global_epoch_selection": {
+            "metric": "eligible hybrid worst_quartile_mean_auroc",
+            "epoch_statistics": epoch_stats,
+            "best_median_epoch": best["completed_epoch"],
+            "best_median": best["median"],
+            "best_epoch_standard_error": best["standard_error"],
+            "one_se_threshold": threshold,
+            "rule": "smallest epoch whose median is at least best median minus best-epoch SE",
+            "selected_epoch": selected_epoch,
+        },
+        "epoch8_to16": {
+            "paired_improvements": improvements,
+            "mean_improvement": improvement_mean,
+            "standard_deviation": improvement_sd,
+            "standard_error": improvement_se,
+            "all_epoch8_and16_hybrids_eligible": extension_pairs_eligible,
+            "extension_to_epoch32": extension_to_32,
+            "decision_rule": "extend iff mean paired improvement exceeds its standard error",
+        },
+        "selection_policy": "One global epoch is selected; no scalar architecture winner.",
+        "summary_csv": str(table),
+        "summary_csv_sha256": _sha256(table),
+        "paired_deltas_csv": str(paired_table),
+        "paired_deltas_csv_sha256": _sha256(paired_table),
+        "architecture_epoch_csv": str(aggregate_table),
+        "architecture_epoch_csv_sha256": _sha256(aggregate_table),
+    }
+    output = root / "stage7" / "summary.json"
+    _atomic_json(output, summary)
+    print(output)
+    return output
+
+
 def status(root: Path) -> dict[str, Any]:
     """Report trial completion state without mutating the campaign."""
     root = root.resolve()
@@ -3194,6 +3673,19 @@ def status(root: Path) -> dict[str, Any]:
         stage6_trials.append(
             {"candidate_id": spec["candidate_id"], "name": spec["name"], "state": state}
         )
+    stage7_trials = []
+    for spec in manifest.get("stage7", {}).get("candidates", []):
+        trial_root = root / "stage7" / f"candidate_{spec['candidate_id']:03d}"
+        state = (
+            "complete"
+            if (trial_root / "result.json").is_file()
+            else "failed"
+            if (trial_root / "failure.json").is_file()
+            else "pending"
+        )
+        stage7_trials.append(
+            {"candidate_id": spec["candidate_id"], "name": spec["name"], "state": state}
+        )
     value = {
         "campaign_id": manifest["campaign_id"],
         "complete": all(item["state"] == "complete" for item in trials),
@@ -3243,6 +3735,13 @@ def status(root: Path) -> dict[str, Any]:
             "n_complete": sum(item["state"] == "complete" for item in stage6_trials),
             "n_total": len(stage6_trials),
             "trials": stage6_trials,
+        },
+        "stage7": {
+            "complete": bool(stage7_trials)
+            and all(item["state"] == "complete" for item in stage7_trials),
+            "n_complete": sum(item["state"] == "complete" for item in stage7_trials),
+            "n_total": len(stage7_trials),
+            "trials": stage7_trials,
         },
     }
     print(json.dumps(value, indent=2, sort_keys=True))
@@ -3312,6 +3811,13 @@ def main() -> None:
     collect_stage6_parser.add_argument("--root", type=Path, required=True)
     stage6_status_parser = subparsers.add_parser("stage6-status")
     stage6_status_parser.add_argument("--root", type=Path, required=True)
+    stage7_parser = subparsers.add_parser("run-stage7")
+    stage7_parser.add_argument("--root", type=Path, required=True)
+    stage7_parser.add_argument("--candidate-id", type=int, required=True)
+    collect_stage7_parser = subparsers.add_parser("collect-stage7")
+    collect_stage7_parser.add_argument("--root", type=Path, required=True)
+    stage7_status_parser = subparsers.add_parser("stage7-status")
+    stage7_status_parser.add_argument("--root", type=Path, required=True)
     args = parser.parse_args()
 
     if args.command == "init":
@@ -3371,6 +3877,12 @@ def main() -> None:
     elif args.command == "collect-stage6":
         collect_stage6(args.root)
     elif args.command == "stage6-status":
+        status(args.root)
+    elif args.command == "run-stage7":
+        run_stage7(args.root, args.candidate_id)
+    elif args.command == "collect-stage7":
+        collect_stage7(args.root)
+    elif args.command == "stage7-status":
         status(args.root)
     elif args.command == "status":
         status(args.root)

@@ -10,6 +10,8 @@ from hydra import compose, initialize_config_dir
 
 from scripts import jetclr_campaign
 
+_STAGE7_SPECS = jetclr_campaign.stage7_specs()
+
 
 def _pairing_metrics(collapse_pass: bool = True) -> dict:
     """Return a complete synthetic pairing artifact."""
@@ -75,6 +77,7 @@ def _write_manifest(root: Path) -> dict:
     stage4 = jetclr_campaign.stage4_specs()
     stage5 = jetclr_campaign.stage5_specs()
     stage6 = jetclr_campaign.stage6_specs()
+    stage7 = _STAGE7_SPECS
     manifest = {
         "schema_version": 1,
         "campaign_id": "jetclr_test_deadbeef",
@@ -138,6 +141,14 @@ def _write_manifest(root: Path) -> dict:
             "source_promotions": {"layers2": True, "official_projector": True},
             "candidates": stage6,
             "design_sha256": jetclr_campaign._value_sha256(stage6),
+        },
+        "stage7": {
+            "train": False,
+            "test": False,
+            "milestone_epochs": list(jetclr_campaign.STAGE7_MILESTONES),
+            "source_campaign_id": jetclr_campaign.STAGE7_SOURCE_CAMPAIGN,
+            "candidates": stage7,
+            "design_sha256": jetclr_campaign._value_sha256(stage7),
         },
     }
     manifest["manifest_payload_sha256"] = jetclr_campaign._value_sha256(manifest)
@@ -1188,3 +1199,93 @@ def test_collect_stage6_authenticates_inventory_source_promotions_and_epoch16_pa
     assert summary["all_candidates_milestone_evaluation_ready"] is True
     assert summary["source_promotions"] == {"layers2": True, "official_projector": True}
     assert "winner" not in summary
+
+
+def test_stage7_design_launcher_and_no_training_eval(tmp_path: Path, monkeypatch) -> None:
+    """Stage 7 must pack 60 exact checkpoints and invoke validation without fitting."""
+    specs = _STAGE7_SPECS
+    assert len(specs) == 60
+    assert [item["completed_epoch"] for item in specs[:5]] == [1, 2, 4, 8, 16]
+    manifest = _write_manifest(tmp_path)
+    launchers = jetclr_campaign._write_stage7_launchers(tmp_path, manifest)
+    stage7 = launchers["stage7"].read_text(encoding="utf-8")
+    assert "#SBATCH --array=0-14%4" in stage7
+    assert "#SBATCH --time=01:30:00" in stage7
+    assert "run-stage7" in stage7
+    monkeypatch.setattr(jetclr_campaign, "_assert_runtime", lambda _: tmp_path)
+    observed = {}
+
+    def fake_run(command, **kwargs):
+        observed["command"] = command
+        output = tmp_path / "stage7" / "candidate_000" / "output"
+        pairing = output / "metrics" / "pairing_diagnostics" / "last"
+        anomaly = output / "metrics" / "embedding_anomaly" / "last"
+        pairing.mkdir(parents=True)
+        anomaly.mkdir(parents=True)
+        (pairing / "pairing_diagnostics.json").write_text(
+            json.dumps(_pairing_metrics()), encoding="utf-8"
+        )
+        (anomaly / "embedding_anomaly.json").write_text(
+            json.dumps(_anomaly_metrics()), encoding="utf-8"
+        )
+        return SimpleNamespace(returncode=0)
+
+    monkeypatch.setattr(jetclr_campaign.subprocess, "run", fake_run)
+    result = jetclr_campaign.run_stage7(tmp_path, 0)
+    command = observed["command"]
+    assert "train=false" in command
+    assert "test=false" in command
+    assert "callbacks.clear_ckpts=null" in command
+    assert "callbacks.last_epoch_ckpt=null" in command
+    assert not any("max_epochs" in value for value in command)
+    payload = json.loads(result.read_text(encoding="utf-8"))
+    assert payload["source_checkpoint_sha256"] == specs[0]["source_checkpoint_sha256"]
+
+
+def test_collect_stage7_selects_global_one_se_epoch_and_reports_extension(tmp_path: Path) -> None:
+    """The milestone collector must make an explicit global horizon calculation."""
+    manifest = _write_manifest(tmp_path)
+    for spec in manifest["stage7"]["candidates"]:
+        trial = tmp_path / "stage7" / f"candidate_{spec['candidate_id']:03d}"
+        trial.mkdir(parents=True)
+        pairing_path = trial / "pairing.json"
+        anomaly_path = trial / "anomaly.json"
+        pairing = _pairing_metrics()
+        epoch = spec["completed_epoch"]
+        value = 0.70 + 0.005 * min(epoch, 8)
+        if epoch == 16:
+            value += 0.001
+        if not spec["is_architecture_control"]:
+            value += 0.01
+        anomaly = _anomaly_metrics(value)
+        pairing_path.write_text(json.dumps(pairing), encoding="utf-8")
+        anomaly_path.write_text(json.dumps(anomaly), encoding="utf-8")
+        result = {
+            "spec_sha256": spec["spec_sha256"],
+            "source_result_payload_sha256": spec["source_result_payload_sha256"],
+            "source_checkpoint_sha256": spec["source_checkpoint_sha256"],
+            "artifacts": {
+                "pairing_json": {
+                    "path": str(pairing_path),
+                    "sha256": jetclr_campaign._sha256(pairing_path),
+                },
+                "anomaly_json": {
+                    "path": str(anomaly_path),
+                    "sha256": jetclr_campaign._sha256(anomaly_path),
+                },
+            },
+            "pairing_metrics": pairing,
+            "anomaly_metrics": anomaly,
+        }
+        result["result_payload_sha256"] = jetclr_campaign._value_sha256(result)
+        jetclr_campaign._atomic_json(trial / "result.json", result)
+
+    output = jetclr_campaign.collect_stage7(tmp_path)
+    summary = json.loads(output.read_text(encoding="utf-8"))
+    selection = summary["global_epoch_selection"]
+    assert summary["n_evaluations"] == 60
+    assert selection["selected_epoch"] in [8, 16]
+    assert selection["one_se_threshold"] <= selection["best_median"]
+    assert "smallest epoch" in selection["rule"]
+    assert len(summary["epoch8_to16"]["paired_improvements"]) == 6
+    assert "architecture winner" in summary["selection_policy"]

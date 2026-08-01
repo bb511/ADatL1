@@ -81,6 +81,7 @@ class ObjectTransformerEncoder(nn.Module):
         nn.init.trunc_normal_(self.cls_token, std=0.02)
 
     def set_object_feature_map(self, object_feature_map: dict) -> None:
+        """Set flattened feature indices for each object type."""
         self.object_feature_map = object_feature_map
 
     def forward(
@@ -88,6 +89,7 @@ class ObjectTransformerEncoder(nn.Module):
         x_flat: torch.Tensor,
         m_flat: torch.Tensor | None = None,
     ) -> torch.Tensor:
+        """Encode a batch of flattened L1 events into latent vectors."""
         if x_flat.ndim != 2:
             x_flat = torch.flatten(x_flat, start_dim=1)
         if m_flat is not None and m_flat.ndim != 2:
@@ -126,6 +128,7 @@ class ObjectTransformerEncoder(nn.Module):
         x_flat: torch.Tensor,
         m_flat: torch.Tensor | None,
     ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+        """Build object tokens, presence masks, and type indices."""
         if self.object_feature_map is None:
             return self._fallback_tokens(x_flat, m_flat)
 
@@ -142,6 +145,7 @@ class ObjectTransformerEncoder(nn.Module):
             for obj_idx in range(n_obj):
                 values = []
                 masks = []
+                energy_mask = None
                 for feat_name in self.feature_names[: self.feature_dim]:
                     idxs = feature_map.get(feat_name, [])
                     if obj_idx >= len(idxs):
@@ -151,16 +155,25 @@ class ObjectTransformerEncoder(nn.Module):
                     idx = int(idxs[obj_idx])
                     values.append(x_flat[:, idx])
                     if m_flat is not None:
-                        masks.append(m_flat[:, idx].bool())
+                        feature_mask = m_flat[:, idx].bool()
+                        masks.append(feature_mask)
+                        if feat_name == "Et":
+                            energy_mask = feature_mask
 
                 while len(values) < self.feature_dim:
                     values.append(torch.zeros(x_flat.shape[0], device=x_flat.device))
 
                 token_values.append(torch.stack(values, dim=1))
-                if masks:
-                    # Unified schemas pad unavailable features. FET, for example,
-                    # has valid Et and phi but no eta, so requiring every feature
-                    # would incorrectly mask every FET token.
+                if energy_mask is not None:
+                    # Some object types do not physically define every feature in the
+                    # unified schema.  In particular, FET has (Et, phi) but receives a
+                    # structurally empty eta column during preprocessing.  Et is the
+                    # authoritative object-presence mask, so that structural columns
+                    # neither remove a real token nor admit an otherwise empty token.
+                    token_masks.append(energy_mask)
+                elif masks:
+                    # Non-kinematic schemas may not have Et; for those, preserve the
+                    # fallback convention that any observed feature makes a token.
                     token_masks.append(torch.stack(masks, dim=1).any(dim=1))
                 else:
                     token_masks.append(
@@ -182,6 +195,7 @@ class ObjectTransformerEncoder(nn.Module):
         x_flat: torch.Tensor,
         m_flat: torch.Tensor | None,
     ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+        """Build fixed-width tokens when no object feature map is available."""
         bsz, n_features = x_flat.shape
         pad = (-n_features) % self.feature_dim
         if pad:
@@ -209,8 +223,10 @@ class ObjectTransformerEncoder(nn.Module):
 
     @staticmethod
     def _num_objects(feature_indices: Iterable) -> int:
+        """Return the largest object multiplicity represented in a feature map."""
         return max((len(v) for v in feature_indices), default=0)
 
 
 def safe_module_name(name: str) -> str:
+    """Replace characters that are unsafe in PyTorch module names."""
     return re.sub(r"[^0-9a-zA-Z_]", "_", name)

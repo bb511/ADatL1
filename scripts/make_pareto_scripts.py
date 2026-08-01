@@ -36,10 +36,17 @@ clariden -- one job per point -- via ``scripts/submit_pareto.sh`` (submitit
 launcher; it strips the taskset/device pinning and prepends ``-m
 hydra/launcher=submitit_slurm_clariden``).
 
+Strategies in ``ALWAYS_TRIM`` ignore ``TRIM_THRESHOLD`` and are always cut to the
+knee window (``consistency``, added after the original submission).
+
 Usage (from anywhere; paths are anchored to the repo root)::
 
     python scripts/make_pareto_scripts.py            # write all scripts
     python scripts/make_pareto_scripts.py --dry-run  # print summary only
+
+    # generate into a scratch tree from one strategy's CSVs, for splicing
+    python scripts/make_pareto_scripts.py \\
+        --paretos-dir /tmp/paretos_consistency --out-root /tmp/pareto_gen
 """
 from __future__ import annotations
 
@@ -306,6 +313,12 @@ N_GPUS = 4
 # window with both endpoints, BEST and ORIGINAL PICK always retained.
 TRIM_THRESHOLD = 30
 CAP_PER_FRONT = 10
+# Strategies that are always trimmed to the knee window, whatever their front
+# size. The four original strategies were retrained in full for the submission
+# and stay that way; consistency came afterwards and exists only to fill in a
+# fifth table column, so a knee window is the right amount of evidence -- its
+# fronts run to 58 points and every point is a 12 h job.
+ALWAYS_TRIM = {"consistency"}
 BANNER = "# " + 72 * "="
 SEP = "# " + 72 * "-"
 
@@ -513,7 +526,11 @@ def generate_file(
             None,
         )
         selected = select_around_knee(
-            values, maximize0, {best_i, pick_i}, CAP_PER_FRONT, TRIM_THRESHOLD
+            values,
+            maximize0,
+            {best_i, pick_i},
+            CAP_PER_FRONT,
+            CAP_PER_FRONT if obj0 in ALWAYS_TRIM else TRIM_THRESHOLD,
         )
         trimmed = (
             f", trimmed to {len(selected)} around the knee (endpoints kept)"
@@ -611,10 +628,32 @@ def generate_file(
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("--dry-run", action="store_true", help="Print summary only.")
+    parser.add_argument(
+        "--paretos-dir",
+        default=None,
+        help="Read the front CSVs from here instead of <repo>/notebooks/paretos. "
+        "Point it at a directory holding only one strategy's CSVs to generate "
+        "single-section files, which is what scripts/splice_pareto_section.py wants.",
+    )
+    parser.add_argument(
+        "--out-root",
+        default=None,
+        help="Write run<model>[_q99]_pareto.sh under <out-root>/<domain>/ instead of "
+        "<repo>/scripts/<domain>/. Use a scratch dir to generate without touching "
+        "the checked-in scripts.",
+    )
     args = parser.parse_args()
 
     repo = find_repo_root(Path(__file__).resolve().parent)
-    paretos = repo / "notebooks" / "paretos"
+    paretos = Path(args.paretos_dir).expanduser() if args.paretos_dir else repo / "notebooks" / "paretos"
+    out_root = Path(args.out_root).expanduser() if args.out_root else repo / "scripts"
+
+    def show(p: Path) -> str:
+        """Repo-relative when it is inside the repo, absolute otherwise."""
+        try:
+            return str(p.relative_to(repo))
+        except ValueError:
+            return str(p)
 
     total_cmds = 0
     for domain, dom in DOMAINS.items():
@@ -637,14 +676,15 @@ def main() -> None:
                     continue
                 studies.sort(key=lambda s: STRATEGY_ORDER.index(s[0].split("_vs_")[0]))
                 suffix = "_pareto.sh" if tier == "250" else "_q99_pareto.sh"
-                out_path = repo / "scripts" / domain / f"run{model}{suffix}"
+                out_path = out_root / domain / f"run{model}{suffix}"
                 if args.dry_run:
                     n = sum(len(load_front(p)) for _, p in studies)
-                    print(f"{out_path.relative_to(repo)}: {len(studies)} studies, {n} commands")
+                    print(f"{show(out_path)}: {len(studies)} studies, {n} commands")
                     total_cmds += n
                 else:
+                    out_path.parent.mkdir(parents=True, exist_ok=True)
                     n, ns = generate_file(domain, model, tier, studies, out_path)
-                    print(f"wrote {out_path.relative_to(repo)}: {ns} studies, {n} commands")
+                    print(f"wrote {show(out_path)}: {ns} studies, {n} commands")
                     total_cmds += n
     print(f"\ntotal training commands: {total_cmds}")
 

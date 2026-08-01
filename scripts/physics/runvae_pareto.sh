@@ -954,6 +954,339 @@
 #     trainer.devices=[0]
 
 # ========================================================================
+# CONSISTENCY TRAINING  (study: consistency_vs_kl_b16k, 16 Pareto points, trimmed to 11 around the knee (endpoints kept))
+# ========================================================================
+# ------------------------------------------------------------------------
+# trial 25: consistency=-0.00013618, kl=105.9
+# ------------------------------------------------------------------------
+# taskset -c 0-2 \
+# python3 src/train.py \
+#     paths.raw_data_dir=/path/to/adl1t_data/parquet_files \
+#     experiment=physics/vae_agnostic \
+#     experiment_name=physics_vae_pareto \
+#     run_name=consistency_t25 \
+#     callbacks.wasserstein_dist=null \
+#     callbacks.thres_drift=null \
+#     callbacks.cap_sn_zb=null \
+#     callbacks.wasserstein_dist_ema_ckpt=null \
+#     callbacks.thres_drift_ema_ckpt=null \
+#     callbacks.cap_sn_zb_ema_ckpt=null \
+#     ~evaluation.evaluator.ckpts.summary.operational_drift_ema \
+#     ~evaluation.evaluator.ckpts.summary.w1dist_ema_normal_vs_SingleNeutrino_E-10-gun \
+#     ~evaluation.evaluator.ckpts.summary.cap_ema_normal_vs_SingleNeutrino_E-10-gun \
+#     algorithm.encoder.activation=silu \
+#     algorithm.encoder.clamp_zlogvar_range='[-20,10]' \
+#     algorithm.encoder.nodes='[64,32,24]' \
+#     algorithm.kl_scale=0.001 \
+#     algorithm.kl_warmup_frac=0.05 \
+#     algorithm.optimizer.betas='[0.9,0.99]' \
+#     algorithm.optimizer.lr=0.00028557674128140036 \
+#     algorithm.optimizer.weight_decay=0.0001 \
+#     trainer.gradient_clip_val=0.0 \
+#     trainer=gpu \
+#     trainer.devices=[0]
+
+# ------------------------------------------------------------------------
+# trial 257: consistency=-0.0019674, kl=11.837
+# ------------------------------------------------------------------------
+# taskset -c 3-5 \
+# python3 src/train.py \
+#     paths.raw_data_dir=/path/to/adl1t_data/parquet_files \
+#     experiment=physics/vae_agnostic \
+#     experiment_name=physics_vae_pareto \
+#     run_name=consistency_t257 \
+#     callbacks.wasserstein_dist=null \
+#     callbacks.thres_drift=null \
+#     callbacks.cap_sn_zb=null \
+#     callbacks.wasserstein_dist_ema_ckpt=null \
+#     callbacks.thres_drift_ema_ckpt=null \
+#     callbacks.cap_sn_zb_ema_ckpt=null \
+#     ~evaluation.evaluator.ckpts.summary.operational_drift_ema \
+#     ~evaluation.evaluator.ckpts.summary.w1dist_ema_normal_vs_SingleNeutrino_E-10-gun \
+#     ~evaluation.evaluator.ckpts.summary.cap_ema_normal_vs_SingleNeutrino_E-10-gun \
+#     algorithm.encoder.activation=gelu \
+#     algorithm.encoder.clamp_zlogvar_range='[-20,10]' \
+#     algorithm.encoder.nodes='[32,16,16]' \
+#     algorithm.kl_scale=0.0003 \
+#     algorithm.kl_warmup_frac=0.05 \
+#     algorithm.optimizer.betas='[0.9,0.99]' \
+#     algorithm.optimizer.lr=6.872528714375437e-05 \
+#     algorithm.optimizer.weight_decay=1e-06 \
+#     trainer.gradient_clip_val=1.0 \
+#     trainer=gpu \
+#     trainer.devices=[1]
+
+# ------------------------------------------------------------------------
+# trial 291: consistency=-0.00023859, kl=44.363
+# ------------------------------------------------------------------------
+# taskset -c 6-8 \
+# python3 src/train.py \
+#     paths.raw_data_dir=/path/to/adl1t_data/parquet_files \
+#     experiment=physics/vae_agnostic \
+#     experiment_name=physics_vae_pareto \
+#     run_name=consistency_t291 \
+#     callbacks.wasserstein_dist=null \
+#     callbacks.thres_drift=null \
+#     callbacks.cap_sn_zb=null \
+#     callbacks.wasserstein_dist_ema_ckpt=null \
+#     callbacks.thres_drift_ema_ckpt=null \
+#     callbacks.cap_sn_zb_ema_ckpt=null \
+#     ~evaluation.evaluator.ckpts.summary.operational_drift_ema \
+#     ~evaluation.evaluator.ckpts.summary.w1dist_ema_normal_vs_SingleNeutrino_E-10-gun \
+#     ~evaluation.evaluator.ckpts.summary.cap_ema_normal_vs_SingleNeutrino_E-10-gun \
+#     algorithm.encoder.activation=silu \
+#     algorithm.encoder.clamp_zlogvar_range='[-6,4]' \
+#     algorithm.encoder.nodes='[64,32,32]' \
+#     algorithm.kl_scale=0.002 \
+#     algorithm.kl_warmup_frac=0.05 \
+#     algorithm.optimizer.betas='[0.9,0.99]' \
+#     algorithm.optimizer.lr=0.0004969444049582154 \
+#     algorithm.optimizer.weight_decay=0.0001 \
+#     trainer.gradient_clip_val=0.5 \
+#     trainer=gpu \
+#     trainer.devices=[2]
+
+# ------------------------------------------------------------------------
+# trial 301: consistency=-0.00022723, kl=45.539  << KNEE
+# ------------------------------------------------------------------------
+# taskset -c 9-11 \
+# python3 src/train.py \
+#     paths.raw_data_dir=/path/to/adl1t_data/parquet_files \
+#     experiment=physics/vae_agnostic \
+#     experiment_name=physics_vae_pareto \
+#     run_name=consistency_t301 \
+#     callbacks.wasserstein_dist=null \
+#     callbacks.thres_drift=null \
+#     callbacks.cap_sn_zb=null \
+#     callbacks.wasserstein_dist_ema_ckpt=null \
+#     callbacks.thres_drift_ema_ckpt=null \
+#     callbacks.cap_sn_zb_ema_ckpt=null \
+#     ~evaluation.evaluator.ckpts.summary.operational_drift_ema \
+#     ~evaluation.evaluator.ckpts.summary.w1dist_ema_normal_vs_SingleNeutrino_E-10-gun \
+#     ~evaluation.evaluator.ckpts.summary.cap_ema_normal_vs_SingleNeutrino_E-10-gun \
+#     algorithm.encoder.activation=silu \
+#     algorithm.encoder.clamp_zlogvar_range='[-6,4]' \
+#     algorithm.encoder.nodes='[64,32,32]' \
+#     algorithm.kl_scale=0.002 \
+#     algorithm.kl_warmup_frac=0.05 \
+#     algorithm.optimizer.betas='[0.9,0.99]' \
+#     algorithm.optimizer.lr=0.0004948183734967176 \
+#     algorithm.optimizer.weight_decay=0.0001 \
+#     trainer.gradient_clip_val=0.5 \
+#     trainer=gpu \
+#     trainer.devices=[3]
+
+# ------------------------------------------------------------------------
+# trial 302: consistency=-0.00025546, kl=44.288
+# ------------------------------------------------------------------------
+# taskset -c 0-2 \
+# python3 src/train.py \
+#     paths.raw_data_dir=/path/to/adl1t_data/parquet_files \
+#     experiment=physics/vae_agnostic \
+#     experiment_name=physics_vae_pareto \
+#     run_name=consistency_t302 \
+#     callbacks.wasserstein_dist=null \
+#     callbacks.thres_drift=null \
+#     callbacks.cap_sn_zb=null \
+#     callbacks.wasserstein_dist_ema_ckpt=null \
+#     callbacks.thres_drift_ema_ckpt=null \
+#     callbacks.cap_sn_zb_ema_ckpt=null \
+#     ~evaluation.evaluator.ckpts.summary.operational_drift_ema \
+#     ~evaluation.evaluator.ckpts.summary.w1dist_ema_normal_vs_SingleNeutrino_E-10-gun \
+#     ~evaluation.evaluator.ckpts.summary.cap_ema_normal_vs_SingleNeutrino_E-10-gun \
+#     algorithm.encoder.activation=silu \
+#     algorithm.encoder.clamp_zlogvar_range='[-6,4]' \
+#     algorithm.encoder.nodes='[64,32,32]' \
+#     algorithm.kl_scale=0.002 \
+#     algorithm.kl_warmup_frac=0.05 \
+#     algorithm.optimizer.betas='[0.9,0.99]' \
+#     algorithm.optimizer.lr=0.0004968474382471264 \
+#     algorithm.optimizer.weight_decay=0.0001 \
+#     trainer.gradient_clip_val=0.5 \
+#     trainer=gpu \
+#     trainer.devices=[0]
+
+# ------------------------------------------------------------------------
+# trial 314: consistency=-0.00013594, kl=119.82
+# ------------------------------------------------------------------------
+# taskset -c 3-5 \
+# python3 src/train.py \
+#     paths.raw_data_dir=/path/to/adl1t_data/parquet_files \
+#     experiment=physics/vae_agnostic \
+#     experiment_name=physics_vae_pareto \
+#     run_name=consistency_t314 \
+#     callbacks.wasserstein_dist=null \
+#     callbacks.thres_drift=null \
+#     callbacks.cap_sn_zb=null \
+#     callbacks.wasserstein_dist_ema_ckpt=null \
+#     callbacks.thres_drift_ema_ckpt=null \
+#     callbacks.cap_sn_zb_ema_ckpt=null \
+#     ~evaluation.evaluator.ckpts.summary.operational_drift_ema \
+#     ~evaluation.evaluator.ckpts.summary.w1dist_ema_normal_vs_SingleNeutrino_E-10-gun \
+#     ~evaluation.evaluator.ckpts.summary.cap_ema_normal_vs_SingleNeutrino_E-10-gun \
+#     algorithm.encoder.activation=silu \
+#     algorithm.encoder.clamp_zlogvar_range='[-20,10]' \
+#     algorithm.encoder.nodes='[32,8]' \
+#     algorithm.kl_scale=0.001 \
+#     algorithm.kl_warmup_frac=0.05 \
+#     algorithm.optimizer.betas='[0.9,0.99]' \
+#     algorithm.optimizer.lr=0.00019278114817169087 \
+#     algorithm.optimizer.weight_decay=0.0001 \
+#     trainer.gradient_clip_val=0.0 \
+#     trainer=gpu \
+#     trainer.devices=[1]
+
+# ------------------------------------------------------------------------
+# trial 564: consistency=-3.8833e-05, kl=384.69  << BEST consistency
+# ------------------------------------------------------------------------
+# taskset -c 6-8 \
+# python3 src/train.py \
+#     paths.raw_data_dir=/path/to/adl1t_data/parquet_files \
+#     experiment=physics/vae_agnostic \
+#     experiment_name=physics_vae_pareto \
+#     run_name=consistency_t564 \
+#     callbacks.wasserstein_dist=null \
+#     callbacks.thres_drift=null \
+#     callbacks.cap_sn_zb=null \
+#     callbacks.wasserstein_dist_ema_ckpt=null \
+#     callbacks.thres_drift_ema_ckpt=null \
+#     callbacks.cap_sn_zb_ema_ckpt=null \
+#     ~evaluation.evaluator.ckpts.summary.operational_drift_ema \
+#     ~evaluation.evaluator.ckpts.summary.w1dist_ema_normal_vs_SingleNeutrino_E-10-gun \
+#     ~evaluation.evaluator.ckpts.summary.cap_ema_normal_vs_SingleNeutrino_E-10-gun \
+#     algorithm.encoder.activation=silu \
+#     algorithm.encoder.clamp_zlogvar_range='[-20,10]' \
+#     algorithm.encoder.nodes='[32,16,16]' \
+#     algorithm.kl_scale=0.0001 \
+#     algorithm.kl_warmup_frac=0.2 \
+#     algorithm.optimizer.betas='[0.9,0.99]' \
+#     algorithm.optimizer.lr=0.00031745256087195486 \
+#     algorithm.optimizer.weight_decay=0.0001 \
+#     trainer.gradient_clip_val=0.5 \
+#     trainer=gpu \
+#     trainer.devices=[2]
+
+# ------------------------------------------------------------------------
+# trial 734: consistency=-0.00014523, kl=62.501
+# ------------------------------------------------------------------------
+# taskset -c 9-11 \
+# python3 src/train.py \
+#     paths.raw_data_dir=/path/to/adl1t_data/parquet_files \
+#     experiment=physics/vae_agnostic \
+#     experiment_name=physics_vae_pareto \
+#     run_name=consistency_t734 \
+#     callbacks.wasserstein_dist=null \
+#     callbacks.thres_drift=null \
+#     callbacks.cap_sn_zb=null \
+#     callbacks.wasserstein_dist_ema_ckpt=null \
+#     callbacks.thres_drift_ema_ckpt=null \
+#     callbacks.cap_sn_zb_ema_ckpt=null \
+#     ~evaluation.evaluator.ckpts.summary.operational_drift_ema \
+#     ~evaluation.evaluator.ckpts.summary.w1dist_ema_normal_vs_SingleNeutrino_E-10-gun \
+#     ~evaluation.evaluator.ckpts.summary.cap_ema_normal_vs_SingleNeutrino_E-10-gun \
+#     algorithm.encoder.activation=silu \
+#     algorithm.encoder.clamp_zlogvar_range='[-20,10]' \
+#     algorithm.encoder.nodes='[32,16,16]' \
+#     algorithm.kl_scale=0.002 \
+#     algorithm.kl_warmup_frac=0.1 \
+#     algorithm.optimizer.betas='[0.9,0.99]' \
+#     algorithm.optimizer.lr=0.0004916653625866366 \
+#     algorithm.optimizer.weight_decay=0.0001 \
+#     trainer.gradient_clip_val=0.5 \
+#     trainer=gpu \
+#     trainer.devices=[3]
+
+# ------------------------------------------------------------------------
+# trial 735: consistency=-0.00013936, kl=62.729
+# ------------------------------------------------------------------------
+# taskset -c 0-2 \
+# python3 src/train.py \
+#     paths.raw_data_dir=/path/to/adl1t_data/parquet_files \
+#     experiment=physics/vae_agnostic \
+#     experiment_name=physics_vae_pareto \
+#     run_name=consistency_t735 \
+#     callbacks.wasserstein_dist=null \
+#     callbacks.thres_drift=null \
+#     callbacks.cap_sn_zb=null \
+#     callbacks.wasserstein_dist_ema_ckpt=null \
+#     callbacks.thres_drift_ema_ckpt=null \
+#     callbacks.cap_sn_zb_ema_ckpt=null \
+#     ~evaluation.evaluator.ckpts.summary.operational_drift_ema \
+#     ~evaluation.evaluator.ckpts.summary.w1dist_ema_normal_vs_SingleNeutrino_E-10-gun \
+#     ~evaluation.evaluator.ckpts.summary.cap_ema_normal_vs_SingleNeutrino_E-10-gun \
+#     algorithm.encoder.activation=silu \
+#     algorithm.encoder.clamp_zlogvar_range='[-20,10]' \
+#     algorithm.encoder.nodes='[32,16,16]' \
+#     algorithm.kl_scale=0.002 \
+#     algorithm.kl_warmup_frac=0.1 \
+#     algorithm.optimizer.betas='[0.9,0.99]' \
+#     algorithm.optimizer.lr=0.000491623083734886 \
+#     algorithm.optimizer.weight_decay=0.0001 \
+#     trainer.gradient_clip_val=0.5 \
+#     trainer=gpu \
+#     trainer.devices=[0]
+
+# ------------------------------------------------------------------------
+# trial 738: consistency=-0.00020031, kl=59.305
+# ------------------------------------------------------------------------
+# taskset -c 3-5 \
+# python3 src/train.py \
+#     paths.raw_data_dir=/path/to/adl1t_data/parquet_files \
+#     experiment=physics/vae_agnostic \
+#     experiment_name=physics_vae_pareto \
+#     run_name=consistency_t738 \
+#     callbacks.wasserstein_dist=null \
+#     callbacks.thres_drift=null \
+#     callbacks.cap_sn_zb=null \
+#     callbacks.wasserstein_dist_ema_ckpt=null \
+#     callbacks.thres_drift_ema_ckpt=null \
+#     callbacks.cap_sn_zb_ema_ckpt=null \
+#     ~evaluation.evaluator.ckpts.summary.operational_drift_ema \
+#     ~evaluation.evaluator.ckpts.summary.w1dist_ema_normal_vs_SingleNeutrino_E-10-gun \
+#     ~evaluation.evaluator.ckpts.summary.cap_ema_normal_vs_SingleNeutrino_E-10-gun \
+#     algorithm.encoder.activation=silu \
+#     algorithm.encoder.clamp_zlogvar_range='[-20,10]' \
+#     algorithm.encoder.nodes='[32,16,16]' \
+#     algorithm.kl_scale=0.002 \
+#     algorithm.kl_warmup_frac=0.1 \
+#     algorithm.optimizer.betas='[0.9,0.99]' \
+#     algorithm.optimizer.lr=0.0004887254816703934 \
+#     algorithm.optimizer.weight_decay=0.0001 \
+#     trainer.gradient_clip_val=0.5 \
+#     trainer=gpu \
+#     trainer.devices=[1]
+
+# ------------------------------------------------------------------------
+# trial 739: consistency=-0.00015672, kl=62.332
+# ------------------------------------------------------------------------
+# taskset -c 6-8 \
+# python3 src/train.py \
+#     paths.raw_data_dir=/path/to/adl1t_data/parquet_files \
+#     experiment=physics/vae_agnostic \
+#     experiment_name=physics_vae_pareto \
+#     run_name=consistency_t739 \
+#     callbacks.wasserstein_dist=null \
+#     callbacks.thres_drift=null \
+#     callbacks.cap_sn_zb=null \
+#     callbacks.wasserstein_dist_ema_ckpt=null \
+#     callbacks.thres_drift_ema_ckpt=null \
+#     callbacks.cap_sn_zb_ema_ckpt=null \
+#     ~evaluation.evaluator.ckpts.summary.operational_drift_ema \
+#     ~evaluation.evaluator.ckpts.summary.w1dist_ema_normal_vs_SingleNeutrino_E-10-gun \
+#     ~evaluation.evaluator.ckpts.summary.cap_ema_normal_vs_SingleNeutrino_E-10-gun \
+#     algorithm.encoder.activation=silu \
+#     algorithm.encoder.clamp_zlogvar_range='[-20,10]' \
+#     algorithm.encoder.nodes='[32,16,16]' \
+#     algorithm.kl_scale=0.002 \
+#     algorithm.kl_warmup_frac=0.1 \
+#     algorithm.optimizer.betas='[0.9,0.99]' \
+#     algorithm.optimizer.lr=0.0004908355209949336 \
+#     algorithm.optimizer.weight_decay=0.0001 \
+#     trainer.gradient_clip_val=0.5 \
+#     trainer=gpu \
+#     trainer.devices=[2]
+
+# ========================================================================
 # STABILITY TRAINING  (study: drift_vs_kl_b16k, 3 Pareto points)
 # ========================================================================
 # ------------------------------------------------------------------------

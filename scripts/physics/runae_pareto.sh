@@ -419,6 +419,317 @@
 #     trainer.devices=[0]
 
 # ========================================================================
+# CONSISTENCY TRAINING  (study: consistency_vs_mse_b16k, 24 Pareto points, trimmed to 11 around the knee (endpoints kept))
+# ========================================================================
+# ------------------------------------------------------------------------
+# trial 0: consistency=-0.0017377, mse=9.6332
+# ------------------------------------------------------------------------
+# taskset -c 0-2 \
+# python3 src/train.py \
+#     paths.raw_data_dir=/path/to/adl1t_data/parquet_files \
+#     experiment=physics/ae_agnostic \
+#     experiment_name=physics_ae_pareto \
+#     run_name=consistency_t0 \
+#     callbacks.wasserstein_dist=null \
+#     callbacks.thres_drift=null \
+#     callbacks.cap_sn_zb=null \
+#     callbacks.wasserstein_dist_ema_ckpt=null \
+#     callbacks.thres_drift_ema_ckpt=null \
+#     callbacks.cap_sn_zb_ema_ckpt=null \
+#     ~evaluation.evaluator.ckpts.summary.operational_drift_ema \
+#     ~evaluation.evaluator.ckpts.summary.w1dist_ema_normal_vs_SingleNeutrino_E-10-gun \
+#     ~evaluation.evaluator.ckpts.summary.cap_ema_normal_vs_SingleNeutrino_E-10-gun \
+#     algorithm.delta=7.0 \
+#     algorithm.encoder.nodes='[24,8]' \
+#     algorithm.input_noise_std=0.0001 \
+#     algorithm.optimizer.betas='[0.9,0.99]' \
+#     algorithm.optimizer.lr=3.08248659263195e-05 \
+#     algorithm.optimizer.weight_decay=0.0 \
+#     trainer.gradient_clip_val=0.5 \
+#     trainer=gpu \
+#     trainer.devices=[0]
+
+# ------------------------------------------------------------------------
+# trial 9: consistency=-0.11511, mse=0.16273
+# ------------------------------------------------------------------------
+# taskset -c 3-5 \
+# python3 src/train.py \
+#     paths.raw_data_dir=/path/to/adl1t_data/parquet_files \
+#     experiment=physics/ae_agnostic \
+#     experiment_name=physics_ae_pareto \
+#     run_name=consistency_t9 \
+#     callbacks.wasserstein_dist=null \
+#     callbacks.thres_drift=null \
+#     callbacks.cap_sn_zb=null \
+#     callbacks.wasserstein_dist_ema_ckpt=null \
+#     callbacks.thres_drift_ema_ckpt=null \
+#     callbacks.cap_sn_zb_ema_ckpt=null \
+#     ~evaluation.evaluator.ckpts.summary.operational_drift_ema \
+#     ~evaluation.evaluator.ckpts.summary.w1dist_ema_normal_vs_SingleNeutrino_E-10-gun \
+#     ~evaluation.evaluator.ckpts.summary.cap_ema_normal_vs_SingleNeutrino_E-10-gun \
+#     algorithm.delta=10.0 \
+#     algorithm.encoder.nodes='[64,32,32]' \
+#     algorithm.input_noise_std=0.0003 \
+#     algorithm.optimizer.betas='[0.9,0.99]' \
+#     algorithm.optimizer.lr=0.0024582156921938063 \
+#     algorithm.optimizer.weight_decay=0.001 \
+#     trainer.gradient_clip_val=0.5 \
+#     trainer=gpu \
+#     trainer.devices=[1]
+
+# ------------------------------------------------------------------------
+# trial 115: consistency=-0.0016352, mse=9.7211  << BEST consistency
+# ------------------------------------------------------------------------
+# taskset -c 6-8 \
+# python3 src/train.py \
+#     paths.raw_data_dir=/path/to/adl1t_data/parquet_files \
+#     experiment=physics/ae_agnostic \
+#     experiment_name=physics_ae_pareto \
+#     run_name=consistency_t115 \
+#     callbacks.wasserstein_dist=null \
+#     callbacks.thres_drift=null \
+#     callbacks.cap_sn_zb=null \
+#     callbacks.wasserstein_dist_ema_ckpt=null \
+#     callbacks.thres_drift_ema_ckpt=null \
+#     callbacks.cap_sn_zb_ema_ckpt=null \
+#     ~evaluation.evaluator.ckpts.summary.operational_drift_ema \
+#     ~evaluation.evaluator.ckpts.summary.w1dist_ema_normal_vs_SingleNeutrino_E-10-gun \
+#     ~evaluation.evaluator.ckpts.summary.cap_ema_normal_vs_SingleNeutrino_E-10-gun \
+#     algorithm.delta=3.0 \
+#     algorithm.encoder.nodes='[16,8]' \
+#     algorithm.input_noise_std=0.01 \
+#     algorithm.optimizer.betas='[0.9,0.999]' \
+#     algorithm.optimizer.lr=3.0250136348255738e-05 \
+#     algorithm.optimizer.weight_decay=0.0001 \
+#     trainer.gradient_clip_val=1.0 \
+#     trainer=gpu \
+#     trainer.devices=[2]
+
+# ------------------------------------------------------------------------
+# trial 291: consistency=-0.013356, mse=0.3795  << KNEE
+# ------------------------------------------------------------------------
+# taskset -c 9-11 \
+# python3 src/train.py \
+#     paths.raw_data_dir=/path/to/adl1t_data/parquet_files \
+#     experiment=physics/ae_agnostic \
+#     experiment_name=physics_ae_pareto \
+#     run_name=consistency_t291 \
+#     callbacks.wasserstein_dist=null \
+#     callbacks.thres_drift=null \
+#     callbacks.cap_sn_zb=null \
+#     callbacks.wasserstein_dist_ema_ckpt=null \
+#     callbacks.thres_drift_ema_ckpt=null \
+#     callbacks.cap_sn_zb_ema_ckpt=null \
+#     ~evaluation.evaluator.ckpts.summary.operational_drift_ema \
+#     ~evaluation.evaluator.ckpts.summary.w1dist_ema_normal_vs_SingleNeutrino_E-10-gun \
+#     ~evaluation.evaluator.ckpts.summary.cap_ema_normal_vs_SingleNeutrino_E-10-gun \
+#     algorithm.delta=5.0 \
+#     algorithm.encoder.nodes='[48,8]' \
+#     algorithm.input_noise_std=0.0003 \
+#     algorithm.optimizer.betas='[0.9,0.99]' \
+#     algorithm.optimizer.lr=0.0001481817058928597 \
+#     algorithm.optimizer.weight_decay=1e-06 \
+#     trainer.gradient_clip_val=0.5 \
+#     trainer=gpu \
+#     trainer.devices=[3]
+
+# ------------------------------------------------------------------------
+# trial 293: consistency=-0.015234, mse=0.37159
+# ------------------------------------------------------------------------
+# taskset -c 0-2 \
+# python3 src/train.py \
+#     paths.raw_data_dir=/path/to/adl1t_data/parquet_files \
+#     experiment=physics/ae_agnostic \
+#     experiment_name=physics_ae_pareto \
+#     run_name=consistency_t293 \
+#     callbacks.wasserstein_dist=null \
+#     callbacks.thres_drift=null \
+#     callbacks.cap_sn_zb=null \
+#     callbacks.wasserstein_dist_ema_ckpt=null \
+#     callbacks.thres_drift_ema_ckpt=null \
+#     callbacks.cap_sn_zb_ema_ckpt=null \
+#     ~evaluation.evaluator.ckpts.summary.operational_drift_ema \
+#     ~evaluation.evaluator.ckpts.summary.w1dist_ema_normal_vs_SingleNeutrino_E-10-gun \
+#     ~evaluation.evaluator.ckpts.summary.cap_ema_normal_vs_SingleNeutrino_E-10-gun \
+#     algorithm.delta=5.0 \
+#     algorithm.encoder.nodes='[48,8]' \
+#     algorithm.input_noise_std=0.0003 \
+#     algorithm.optimizer.betas='[0.9,0.99]' \
+#     algorithm.optimizer.lr=0.00016709902416567275 \
+#     algorithm.optimizer.weight_decay=0.0 \
+#     trainer.gradient_clip_val=0.5 \
+#     trainer=gpu \
+#     trainer.devices=[0]
+
+# ------------------------------------------------------------------------
+# trial 295: consistency=-0.014609, mse=0.3746
+# ------------------------------------------------------------------------
+# taskset -c 3-5 \
+# python3 src/train.py \
+#     paths.raw_data_dir=/path/to/adl1t_data/parquet_files \
+#     experiment=physics/ae_agnostic \
+#     experiment_name=physics_ae_pareto \
+#     run_name=consistency_t295 \
+#     callbacks.wasserstein_dist=null \
+#     callbacks.thres_drift=null \
+#     callbacks.cap_sn_zb=null \
+#     callbacks.wasserstein_dist_ema_ckpt=null \
+#     callbacks.thres_drift_ema_ckpt=null \
+#     callbacks.cap_sn_zb_ema_ckpt=null \
+#     ~evaluation.evaluator.ckpts.summary.operational_drift_ema \
+#     ~evaluation.evaluator.ckpts.summary.w1dist_ema_normal_vs_SingleNeutrino_E-10-gun \
+#     ~evaluation.evaluator.ckpts.summary.cap_ema_normal_vs_SingleNeutrino_E-10-gun \
+#     algorithm.delta=5.0 \
+#     algorithm.encoder.nodes='[48,8]' \
+#     algorithm.input_noise_std=0.0003 \
+#     algorithm.optimizer.betas='[0.9,0.99]' \
+#     algorithm.optimizer.lr=0.0001673898484625272 \
+#     algorithm.optimizer.weight_decay=0.0 \
+#     trainer.gradient_clip_val=0.5 \
+#     trainer=gpu \
+#     trainer.devices=[1]
+
+# ------------------------------------------------------------------------
+# trial 296: consistency=-0.015403, mse=0.3693
+# ------------------------------------------------------------------------
+# taskset -c 6-8 \
+# python3 src/train.py \
+#     paths.raw_data_dir=/path/to/adl1t_data/parquet_files \
+#     experiment=physics/ae_agnostic \
+#     experiment_name=physics_ae_pareto \
+#     run_name=consistency_t296 \
+#     callbacks.wasserstein_dist=null \
+#     callbacks.thres_drift=null \
+#     callbacks.cap_sn_zb=null \
+#     callbacks.wasserstein_dist_ema_ckpt=null \
+#     callbacks.thres_drift_ema_ckpt=null \
+#     callbacks.cap_sn_zb_ema_ckpt=null \
+#     ~evaluation.evaluator.ckpts.summary.operational_drift_ema \
+#     ~evaluation.evaluator.ckpts.summary.w1dist_ema_normal_vs_SingleNeutrino_E-10-gun \
+#     ~evaluation.evaluator.ckpts.summary.cap_ema_normal_vs_SingleNeutrino_E-10-gun \
+#     algorithm.delta=5.0 \
+#     algorithm.encoder.nodes='[48,8]' \
+#     algorithm.input_noise_std=0.0003 \
+#     algorithm.optimizer.betas='[0.9,0.99]' \
+#     algorithm.optimizer.lr=0.00016686439783936653 \
+#     algorithm.optimizer.weight_decay=0.0 \
+#     trainer.gradient_clip_val=0.5 \
+#     trainer=gpu \
+#     trainer.devices=[2]
+
+# ------------------------------------------------------------------------
+# trial 304: consistency=-0.015002, mse=0.37191
+# ------------------------------------------------------------------------
+# taskset -c 9-11 \
+# python3 src/train.py \
+#     paths.raw_data_dir=/path/to/adl1t_data/parquet_files \
+#     experiment=physics/ae_agnostic \
+#     experiment_name=physics_ae_pareto \
+#     run_name=consistency_t304 \
+#     callbacks.wasserstein_dist=null \
+#     callbacks.thres_drift=null \
+#     callbacks.cap_sn_zb=null \
+#     callbacks.wasserstein_dist_ema_ckpt=null \
+#     callbacks.thres_drift_ema_ckpt=null \
+#     callbacks.cap_sn_zb_ema_ckpt=null \
+#     ~evaluation.evaluator.ckpts.summary.operational_drift_ema \
+#     ~evaluation.evaluator.ckpts.summary.w1dist_ema_normal_vs_SingleNeutrino_E-10-gun \
+#     ~evaluation.evaluator.ckpts.summary.cap_ema_normal_vs_SingleNeutrino_E-10-gun \
+#     algorithm.delta=5.0 \
+#     algorithm.encoder.nodes='[48,8]' \
+#     algorithm.input_noise_std=0.0001 \
+#     algorithm.optimizer.betas='[0.9,0.99]' \
+#     algorithm.optimizer.lr=0.00016706788397723816 \
+#     algorithm.optimizer.weight_decay=0.001 \
+#     trainer.gradient_clip_val=0.5 \
+#     trainer=gpu \
+#     trainer.devices=[3]
+
+# ------------------------------------------------------------------------
+# trial 327: consistency=-0.01863, mse=0.36925
+# ------------------------------------------------------------------------
+# taskset -c 0-2 \
+# python3 src/train.py \
+#     paths.raw_data_dir=/path/to/adl1t_data/parquet_files \
+#     experiment=physics/ae_agnostic \
+#     experiment_name=physics_ae_pareto \
+#     run_name=consistency_t327 \
+#     callbacks.wasserstein_dist=null \
+#     callbacks.thres_drift=null \
+#     callbacks.cap_sn_zb=null \
+#     callbacks.wasserstein_dist_ema_ckpt=null \
+#     callbacks.thres_drift_ema_ckpt=null \
+#     callbacks.cap_sn_zb_ema_ckpt=null \
+#     ~evaluation.evaluator.ckpts.summary.operational_drift_ema \
+#     ~evaluation.evaluator.ckpts.summary.w1dist_ema_normal_vs_SingleNeutrino_E-10-gun \
+#     ~evaluation.evaluator.ckpts.summary.cap_ema_normal_vs_SingleNeutrino_E-10-gun \
+#     algorithm.delta=5.0 \
+#     algorithm.encoder.nodes='[48,8]' \
+#     algorithm.input_noise_std=0.0001 \
+#     algorithm.optimizer.betas='[0.9,0.99]' \
+#     algorithm.optimizer.lr=0.00015287257699734625 \
+#     algorithm.optimizer.weight_decay=0.0 \
+#     trainer.gradient_clip_val=0.5 \
+#     trainer=gpu \
+#     trainer.devices=[0]
+
+# ------------------------------------------------------------------------
+# trial 328: consistency=-0.019278, mse=0.36818
+# ------------------------------------------------------------------------
+# taskset -c 3-5 \
+# python3 src/train.py \
+#     paths.raw_data_dir=/path/to/adl1t_data/parquet_files \
+#     experiment=physics/ae_agnostic \
+#     experiment_name=physics_ae_pareto \
+#     run_name=consistency_t328 \
+#     callbacks.wasserstein_dist=null \
+#     callbacks.thres_drift=null \
+#     callbacks.cap_sn_zb=null \
+#     callbacks.wasserstein_dist_ema_ckpt=null \
+#     callbacks.thres_drift_ema_ckpt=null \
+#     callbacks.cap_sn_zb_ema_ckpt=null \
+#     ~evaluation.evaluator.ckpts.summary.operational_drift_ema \
+#     ~evaluation.evaluator.ckpts.summary.w1dist_ema_normal_vs_SingleNeutrino_E-10-gun \
+#     ~evaluation.evaluator.ckpts.summary.cap_ema_normal_vs_SingleNeutrino_E-10-gun \
+#     algorithm.delta=5.0 \
+#     algorithm.encoder.nodes='[48,8]' \
+#     algorithm.input_noise_std=0.01 \
+#     algorithm.optimizer.betas='[0.9,0.99]' \
+#     algorithm.optimizer.lr=0.0001538959109358349 \
+#     algorithm.optimizer.weight_decay=1e-06 \
+#     trainer.gradient_clip_val=0.5 \
+#     trainer=gpu \
+#     trainer.devices=[1]
+
+# ------------------------------------------------------------------------
+# trial 492: consistency=-0.019206, mse=0.36872
+# ------------------------------------------------------------------------
+# taskset -c 6-8 \
+# python3 src/train.py \
+#     paths.raw_data_dir=/path/to/adl1t_data/parquet_files \
+#     experiment=physics/ae_agnostic \
+#     experiment_name=physics_ae_pareto \
+#     run_name=consistency_t492 \
+#     callbacks.wasserstein_dist=null \
+#     callbacks.thres_drift=null \
+#     callbacks.cap_sn_zb=null \
+#     callbacks.wasserstein_dist_ema_ckpt=null \
+#     callbacks.thres_drift_ema_ckpt=null \
+#     callbacks.cap_sn_zb_ema_ckpt=null \
+#     ~evaluation.evaluator.ckpts.summary.operational_drift_ema \
+#     ~evaluation.evaluator.ckpts.summary.w1dist_ema_normal_vs_SingleNeutrino_E-10-gun \
+#     ~evaluation.evaluator.ckpts.summary.cap_ema_normal_vs_SingleNeutrino_E-10-gun \
+#     algorithm.delta=5.0 \
+#     algorithm.encoder.nodes='[48,8]' \
+#     algorithm.input_noise_std=0.0003 \
+#     algorithm.optimizer.betas='[0.9,0.99]' \
+#     algorithm.optimizer.lr=0.0001516470729870883 \
+#     algorithm.optimizer.weight_decay=1e-06 \
+#     trainer.gradient_clip_val=0.5 \
+#     trainer=gpu \
+#     trainer.devices=[2]
+
+# ========================================================================
 # STABILITY TRAINING  (study: drift_vs_mse_b16k, 2 Pareto points)
 # ========================================================================
 # ------------------------------------------------------------------------

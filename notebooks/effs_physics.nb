@@ -57,17 +57,17 @@ Cell[BoxData[
 
 Cell[BoxData[{
  RowBox[{
-  RowBox[{"strategyOrder", "=", 
-   RowBox[{"{", 
+  RowBox[{"strategyOrder", "=",
+   RowBox[{"{",
     RowBox[{
-    "\"\<cvar25\>\"", ",", "\"\<stability\>\"", ",", "\"\<cap\>\"", ",", 
-     "\"\<wasserstein\>\""}], "}"}]}], ";"}], "\n", 
+    "\"\<cvar25\>\"", ",", "\"\<stability\>\"", ",", "\"\<cap\>\"", ",",
+     "\"\<wasserstein\>\"", ",", "\"\<consistency\>\""}], "}"}]}], ";"}], "\n",
  RowBox[{
-  RowBox[{"boxStrategyOrder", "=", 
-   RowBox[{"{", 
+  RowBox[{"boxStrategyOrder", "=",
+   RowBox[{"{",
     RowBox[{
-    "\"\<cvar25\>\"", ",", "\"\<stability\>\"", ",", "\"\<cap\>\"", ",", 
-     "\"\<wasserstein\>\""}], "}"}]}], ";"}], "\n", 
+    "\"\<cvar25\>\"", ",", "\"\<stability\>\"", ",", "\"\<cap\>\"", ",",
+     "\"\<wasserstein\>\"", ",", "\"\<consistency\>\""}], "}"}]}], ";"}], "\n",
  RowBox[{
   RowBox[{"strategyMaximizeQ", "=", 
    RowBox[{"<|", 
@@ -75,9 +75,10 @@ Cell[BoxData[{
      RowBox[{"\"\<cvar25\>\"", "->", "True"}], ",", 
      RowBox[{"\"\<cvar10\>\"", "->", "True"}], ",", 
      RowBox[{"\"\<cap\>\"", "->", "True"}], ",", 
-     RowBox[{"\"\<stability\>\"", "->", "False"}], ",", 
-     RowBox[{"\"\<wasserstein\>\"", "->", "False"}]}], "|>"}]}], 
-  ";"}], "\n", 
+     RowBox[{"\"\<stability\>\"", "->", "False"}], ",",
+     RowBox[{"\"\<wasserstein\>\"", "->", "False"}], ",",
+     RowBox[{"\"\<consistency\>\"", "->", "True"}]}], "|>"}]}],
+  ";"}], "\n",
  RowBox[{
   RowBox[{"strategyStudyObj", "=", 
    RowBox[{"<|", 
@@ -85,9 +86,10 @@ Cell[BoxData[{
      RowBox[{"\"\<cvar25\>\"", "->", "\"\<cvar25eff\>\""}], ",", 
      RowBox[{"\"\<cvar10\>\"", "->", "\"\<cvar10eff\>\""}], ",", 
      RowBox[{"\"\<cap\>\"", "->", "\"\<cap\>\""}], ",", 
-     RowBox[{"\"\<stability\>\"", "->", "\"\<drift\>\""}], ",", 
-     RowBox[{"\"\<wasserstein\>\"", "->", "\"\<wasserstein\>\""}]}], "|>"}]}],
-   ";"}], "\n", 
+     RowBox[{"\"\<stability\>\"", "->", "\"\<drift\>\""}], ",",
+     RowBox[{"\"\<wasserstein\>\"", "->", "\"\<wasserstein\>\""}], ",",
+     RowBox[{"\"\<consistency\>\"", "->", "\"\<consistency\>\""}]}], "|>"}]}],
+   ";"}], "\n",
  RowBox[{
   RowBox[{"strategyPretty", "=", 
    RowBox[{"<|", 
@@ -95,17 +97,19 @@ Cell[BoxData[{
      RowBox[{"\"\<cvar25\>\"", "->", "\"\<semi-supervised\>\""}], ",", 
      RowBox[{"\"\<cvar10\>\"", "->", "\"\<semi-sup (CVaR10)\>\""}], ",", 
      RowBox[{"\"\<cap\>\"", "->", "\"\<CAP\>\""}], ",", 
-     RowBox[{"\"\<stability\>\"", "->", "\"\<stable\>\""}], ",", 
-     RowBox[{"\"\<wasserstein\>\"", "->", "\"\<wasserstein\>\""}]}], "|>"}]}],
-   ";"}], "\n", 
+     RowBox[{"\"\<stability\>\"", "->", "\"\<stable\>\""}], ",",
+     RowBox[{"\"\<wasserstein\>\"", "->", "\"\<wasserstein\>\""}], ",",
+     RowBox[{"\"\<consistency\>\"", "->", "\"\<consistency\>\""}]}], "|>"}]}],
+   ";"}], "\n",
  RowBox[{
   RowBox[{"strategyBoxColors", "=", 
    RowBox[{"<|", 
     RowBox[{
      RowBox[{"\"\<cvar25\>\"", "->", "\"\<#3f90da\>\""}], ",", 
      RowBox[{"\"\<stability\>\"", "->", "\"\<#ffa90e\>\""}], ",", 
-     RowBox[{"\"\<cap\>\"", "->", "\"\<#bd1f01\>\""}], ",", 
-     RowBox[{"\"\<wasserstein\>\"", "->", "\"\<#832db6\>\""}]}], "|>"}]}], 
+     RowBox[{"\"\<cap\>\"", "->", "\"\<#bd1f01\>\""}], ",",
+     RowBox[{"\"\<wasserstein\>\"", "->", "\"\<#832db6\>\""}], ",",
+     RowBox[{"\"\<consistency\>\"", "->", "\"\<#94a4a2\>\""}]}], "|>"}]}],
   ";"}]}], "Input",
  CellChangeTimes->{{3.994166081116973*^9, 3.9941660848254023`*^9}},
  CellLabel->"In[3]:=",ExpressionUUID->"bbfe9ee9-357f-4a46-9653-cd1adc2bf862"],
@@ -215,11 +219,17 @@ Cell[BoxData[{
          RowBox[{"m", "===", "\"\<cvar10_ema/max\>\""}], ",", "\"\<cap\>\"", 
          ",", 
          RowBox[{
-          RowBox[{"StringStartsQ", "[", 
-           RowBox[{"m", ",", "\"\<cap_ema\>\""}], "]"}], "&&", 
-          RowBox[{"StringEndsQ", "[", 
-           RowBox[{"m", ",", "\"\</max\>\""}], "]"}]}], ",", 
-         "\"\<stability\>\"", ",", 
+          RowBox[{"StringStartsQ", "[",
+           RowBox[{"m", ",", "\"\<cap_ema\>\""}], "]"}], "&&",
+          RowBox[{"StringEndsQ", "[",
+           RowBox[{"m", ",", "\"\</max\>\""}], "]"}]}], ",",
+         "\"\<consistency\>\"", ",",
+         RowBox[{
+          RowBox[{"StringStartsQ", "[",
+           RowBox[{"m", ",", "\"\<consistency_ema\>\""}], "]"}], "&&",
+          RowBox[{"StringEndsQ", "[",
+           RowBox[{"m", ",", "\"\</max\>\""}], "]"}]}], ",",
+         "\"\<stability\>\"", ",",
          RowBox[{
           RowBox[{"StringContainsQ", "[", 
            RowBox[{"m", ",", "\"\<drift_ema\>\""}], "]"}], "&&", 
@@ -1844,7 +1854,8 @@ Cell["\<\
    strategies are zero-filled (the legacy collapsed-method convention). *)
 legacyStratKey = <|\"cvar25\" -> \"semisupervised\", \"stability\" -> \
 \"stable\",
-   \"cap\" -> \"CAP\", \"wasserstein\" -> \"wasserstein\"|>;
+   \"cap\" -> \"CAP\", \"wasserstein\" -> \"wasserstein\", \"consistency\" -> \
+\"consistency\"|>;
 toLegacyGroups[groups_Association] := Association @@ KeyValueMap[
    Function[{m, sub}, Module[
      {len = If[Length[sub] > 0, Length[First[Values[sub]]], 1]},

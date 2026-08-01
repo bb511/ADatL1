@@ -615,6 +615,321 @@
 #     trainer.devices=[2]
 
 # ========================================================================
+# CONSISTENCY TRAINING  (study: consistency_vs_dist, 18 Pareto points, trimmed to 12 around the knee (endpoints kept))
+# ========================================================================
+# ------------------------------------------------------------------------
+# trial 194: consistency=-0.0015591, dist=0.14684
+# ------------------------------------------------------------------------
+# taskset -c 0-2 \
+# python3 src/train.py \
+#     experiment=cifar10/svdd_agnostic \
+#     experiment_name=cifar10_svdd_pareto \
+#     run_name=consistency_t194 \
+#     callbacks.wasserstein_dist=null \
+#     callbacks.thres_drift=null \
+#     callbacks.cap_sn_zb=null \
+#     callbacks.wasserstein_dist_ema_ckpt=null \
+#     callbacks.thres_drift_ema_ckpt=null \
+#     callbacks.cap_sn_zb_ema_ckpt=null \
+#     ~evaluation.evaluator.ckpts.summary.operational_drift_ema \
+#     ~evaluation.evaluator.ckpts.summary.w1dist_ema_normal_vs_reference_normal \
+#     ~evaluation.evaluator.ckpts.summary.cap_ema_normal_vs_reference_normal \
+#     algorithm.encoder.nodes='[16,32,64]' \
+#     algorithm.encoder.strides='[2,2]' \
+#     algorithm.network_weight_decay=1e-08 \
+#     algorithm.optimizer.betas='[0.9,0.999]' \
+#     algorithm.optimizer.lr=0.0019227140631441985 \
+#     trainer.gradient_clip_val=0.0 \
+#     trainer=gpu \
+#     trainer.devices=[0]
+
+# ------------------------------------------------------------------------
+# trial 196: consistency=-0.00074179, dist=0.15397
+# ------------------------------------------------------------------------
+# taskset -c 3-5 \
+# python3 src/train.py \
+#     experiment=cifar10/svdd_agnostic \
+#     experiment_name=cifar10_svdd_pareto \
+#     run_name=consistency_t196 \
+#     callbacks.wasserstein_dist=null \
+#     callbacks.thres_drift=null \
+#     callbacks.cap_sn_zb=null \
+#     callbacks.wasserstein_dist_ema_ckpt=null \
+#     callbacks.thres_drift_ema_ckpt=null \
+#     callbacks.cap_sn_zb_ema_ckpt=null \
+#     ~evaluation.evaluator.ckpts.summary.operational_drift_ema \
+#     ~evaluation.evaluator.ckpts.summary.w1dist_ema_normal_vs_reference_normal \
+#     ~evaluation.evaluator.ckpts.summary.cap_ema_normal_vs_reference_normal \
+#     algorithm.encoder.nodes='[16,32,64]' \
+#     algorithm.encoder.strides='[2,2]' \
+#     algorithm.network_weight_decay=1e-08 \
+#     algorithm.optimizer.betas='[0.9,0.999]' \
+#     algorithm.optimizer.lr=0.0019390796911555157 \
+#     trainer.gradient_clip_val=0.0 \
+#     trainer=gpu \
+#     trainer.devices=[1]
+
+# ------------------------------------------------------------------------
+# trial 204: consistency=0, dist=2.8225  << BEST consistency
+# ------------------------------------------------------------------------
+# taskset -c 6-8 \
+# python3 src/train.py \
+#     experiment=cifar10/svdd_agnostic \
+#     experiment_name=cifar10_svdd_pareto \
+#     run_name=consistency_t204 \
+#     callbacks.wasserstein_dist=null \
+#     callbacks.thres_drift=null \
+#     callbacks.cap_sn_zb=null \
+#     callbacks.wasserstein_dist_ema_ckpt=null \
+#     callbacks.thres_drift_ema_ckpt=null \
+#     callbacks.cap_sn_zb_ema_ckpt=null \
+#     ~evaluation.evaluator.ckpts.summary.operational_drift_ema \
+#     ~evaluation.evaluator.ckpts.summary.w1dist_ema_normal_vs_reference_normal \
+#     ~evaluation.evaluator.ckpts.summary.cap_ema_normal_vs_reference_normal \
+#     algorithm.encoder.nodes='[64,128,256]' \
+#     algorithm.encoder.strides='[2,2]' \
+#     algorithm.network_weight_decay=1e-08 \
+#     algorithm.optimizer.betas='[0.9,0.999]' \
+#     algorithm.optimizer.lr=0.002013554347945066 \
+#     trainer.gradient_clip_val=0.0 \
+#     trainer=gpu \
+#     trainer.devices=[2]
+
+# ------------------------------------------------------------------------
+# trial 205: consistency=0, dist=2.8225
+# ------------------------------------------------------------------------
+# taskset -c 9-11 \
+# python3 src/train.py \
+#     experiment=cifar10/svdd_agnostic \
+#     experiment_name=cifar10_svdd_pareto \
+#     run_name=consistency_t205 \
+#     callbacks.wasserstein_dist=null \
+#     callbacks.thres_drift=null \
+#     callbacks.cap_sn_zb=null \
+#     callbacks.wasserstein_dist_ema_ckpt=null \
+#     callbacks.thres_drift_ema_ckpt=null \
+#     callbacks.cap_sn_zb_ema_ckpt=null \
+#     ~evaluation.evaluator.ckpts.summary.operational_drift_ema \
+#     ~evaluation.evaluator.ckpts.summary.w1dist_ema_normal_vs_reference_normal \
+#     ~evaluation.evaluator.ckpts.summary.cap_ema_normal_vs_reference_normal \
+#     algorithm.encoder.nodes='[64,128,256]' \
+#     algorithm.encoder.strides='[2,2]' \
+#     algorithm.network_weight_decay=1e-08 \
+#     algorithm.optimizer.betas='[0.9,0.999]' \
+#     algorithm.optimizer.lr=0.0020179502126558935 \
+#     trainer.gradient_clip_val=0.0 \
+#     trainer=gpu \
+#     trainer.devices=[3]
+
+# ------------------------------------------------------------------------
+# trial 206: consistency=0, dist=2.8225
+# ------------------------------------------------------------------------
+# taskset -c 0-2 \
+# python3 src/train.py \
+#     experiment=cifar10/svdd_agnostic \
+#     experiment_name=cifar10_svdd_pareto \
+#     run_name=consistency_t206 \
+#     callbacks.wasserstein_dist=null \
+#     callbacks.thres_drift=null \
+#     callbacks.cap_sn_zb=null \
+#     callbacks.wasserstein_dist_ema_ckpt=null \
+#     callbacks.thres_drift_ema_ckpt=null \
+#     callbacks.cap_sn_zb_ema_ckpt=null \
+#     ~evaluation.evaluator.ckpts.summary.operational_drift_ema \
+#     ~evaluation.evaluator.ckpts.summary.w1dist_ema_normal_vs_reference_normal \
+#     ~evaluation.evaluator.ckpts.summary.cap_ema_normal_vs_reference_normal \
+#     algorithm.encoder.nodes='[64,128,256]' \
+#     algorithm.encoder.strides='[2,2]' \
+#     algorithm.network_weight_decay=1e-08 \
+#     algorithm.optimizer.betas='[0.9,0.999]' \
+#     algorithm.optimizer.lr=0.0020038054084601377 \
+#     trainer.gradient_clip_val=0.0 \
+#     trainer=gpu \
+#     trainer.devices=[0]
+
+# ------------------------------------------------------------------------
+# trial 271: consistency=0, dist=2.8225
+# ------------------------------------------------------------------------
+# taskset -c 3-5 \
+# python3 src/train.py \
+#     experiment=cifar10/svdd_agnostic \
+#     experiment_name=cifar10_svdd_pareto \
+#     run_name=consistency_t271 \
+#     callbacks.wasserstein_dist=null \
+#     callbacks.thres_drift=null \
+#     callbacks.cap_sn_zb=null \
+#     callbacks.wasserstein_dist_ema_ckpt=null \
+#     callbacks.thres_drift_ema_ckpt=null \
+#     callbacks.cap_sn_zb_ema_ckpt=null \
+#     ~evaluation.evaluator.ckpts.summary.operational_drift_ema \
+#     ~evaluation.evaluator.ckpts.summary.w1dist_ema_normal_vs_reference_normal \
+#     ~evaluation.evaluator.ckpts.summary.cap_ema_normal_vs_reference_normal \
+#     algorithm.encoder.nodes='[64,128,256]' \
+#     algorithm.encoder.strides='[2,2]' \
+#     algorithm.network_weight_decay=1e-08 \
+#     algorithm.optimizer.betas='[0.9,0.999]' \
+#     algorithm.optimizer.lr=0.0024848665949166204 \
+#     trainer.gradient_clip_val=0.0 \
+#     trainer=gpu \
+#     trainer.devices=[1]
+
+# ------------------------------------------------------------------------
+# trial 305: consistency=-0.0018958, dist=0.14067
+# ------------------------------------------------------------------------
+# taskset -c 6-8 \
+# python3 src/train.py \
+#     experiment=cifar10/svdd_agnostic \
+#     experiment_name=cifar10_svdd_pareto \
+#     run_name=consistency_t305 \
+#     callbacks.wasserstein_dist=null \
+#     callbacks.thres_drift=null \
+#     callbacks.cap_sn_zb=null \
+#     callbacks.wasserstein_dist_ema_ckpt=null \
+#     callbacks.thres_drift_ema_ckpt=null \
+#     callbacks.cap_sn_zb_ema_ckpt=null \
+#     ~evaluation.evaluator.ckpts.summary.operational_drift_ema \
+#     ~evaluation.evaluator.ckpts.summary.w1dist_ema_normal_vs_reference_normal \
+#     ~evaluation.evaluator.ckpts.summary.cap_ema_normal_vs_reference_normal \
+#     algorithm.encoder.nodes='[16,32,64]' \
+#     algorithm.encoder.strides='[2,2]' \
+#     algorithm.network_weight_decay=1e-08 \
+#     algorithm.optimizer.betas='[0.9,0.999]' \
+#     algorithm.optimizer.lr=0.0021256942154330655 \
+#     trainer.gradient_clip_val=0.0 \
+#     trainer=gpu \
+#     trainer.devices=[2]
+
+# ------------------------------------------------------------------------
+# trial 482: consistency=-0.00058761, dist=0.2564
+# ------------------------------------------------------------------------
+# taskset -c 9-11 \
+# python3 src/train.py \
+#     experiment=cifar10/svdd_agnostic \
+#     experiment_name=cifar10_svdd_pareto \
+#     run_name=consistency_t482 \
+#     callbacks.wasserstein_dist=null \
+#     callbacks.thres_drift=null \
+#     callbacks.cap_sn_zb=null \
+#     callbacks.wasserstein_dist_ema_ckpt=null \
+#     callbacks.thres_drift_ema_ckpt=null \
+#     callbacks.cap_sn_zb_ema_ckpt=null \
+#     ~evaluation.evaluator.ckpts.summary.operational_drift_ema \
+#     ~evaluation.evaluator.ckpts.summary.w1dist_ema_normal_vs_reference_normal \
+#     ~evaluation.evaluator.ckpts.summary.cap_ema_normal_vs_reference_normal \
+#     algorithm.encoder.nodes='[16,32,64]' \
+#     algorithm.encoder.strides='[1,2]' \
+#     algorithm.network_weight_decay=1e-08 \
+#     algorithm.optimizer.betas='[0.9,0.999]' \
+#     algorithm.optimizer.lr=0.00032241502700420887 \
+#     trainer.gradient_clip_val=1.0 \
+#     trainer=gpu \
+#     trainer.devices=[3]
+
+# ------------------------------------------------------------------------
+# trial 511: consistency=-0.00080393, dist=0.15174
+# ------------------------------------------------------------------------
+# taskset -c 0-2 \
+# python3 src/train.py \
+#     experiment=cifar10/svdd_agnostic \
+#     experiment_name=cifar10_svdd_pareto \
+#     run_name=consistency_t511 \
+#     callbacks.wasserstein_dist=null \
+#     callbacks.thres_drift=null \
+#     callbacks.cap_sn_zb=null \
+#     callbacks.wasserstein_dist_ema_ckpt=null \
+#     callbacks.thres_drift_ema_ckpt=null \
+#     callbacks.cap_sn_zb_ema_ckpt=null \
+#     ~evaluation.evaluator.ckpts.summary.operational_drift_ema \
+#     ~evaluation.evaluator.ckpts.summary.w1dist_ema_normal_vs_reference_normal \
+#     ~evaluation.evaluator.ckpts.summary.cap_ema_normal_vs_reference_normal \
+#     algorithm.encoder.nodes='[16,32,64]' \
+#     algorithm.encoder.strides='[2,2]' \
+#     algorithm.network_weight_decay=1e-08 \
+#     algorithm.optimizer.betas='[0.9,0.999]' \
+#     algorithm.optimizer.lr=0.0019603938458025096 \
+#     trainer.gradient_clip_val=0.0 \
+#     trainer=gpu \
+#     trainer.devices=[0]
+
+# ------------------------------------------------------------------------
+# trial 565: consistency=-0.0006307, dist=0.15418  << KNEE
+# ------------------------------------------------------------------------
+# taskset -c 3-5 \
+# python3 src/train.py \
+#     experiment=cifar10/svdd_agnostic \
+#     experiment_name=cifar10_svdd_pareto \
+#     run_name=consistency_t565 \
+#     callbacks.wasserstein_dist=null \
+#     callbacks.thres_drift=null \
+#     callbacks.cap_sn_zb=null \
+#     callbacks.wasserstein_dist_ema_ckpt=null \
+#     callbacks.thres_drift_ema_ckpt=null \
+#     callbacks.cap_sn_zb_ema_ckpt=null \
+#     ~evaluation.evaluator.ckpts.summary.operational_drift_ema \
+#     ~evaluation.evaluator.ckpts.summary.w1dist_ema_normal_vs_reference_normal \
+#     ~evaluation.evaluator.ckpts.summary.cap_ema_normal_vs_reference_normal \
+#     algorithm.encoder.nodes='[16,32,64]' \
+#     algorithm.encoder.strides='[2,2]' \
+#     algorithm.network_weight_decay=1e-08 \
+#     algorithm.optimizer.betas='[0.9,0.999]' \
+#     algorithm.optimizer.lr=0.0020519973770592027 \
+#     trainer.gradient_clip_val=0.0 \
+#     trainer=gpu \
+#     trainer.devices=[1]
+
+# ------------------------------------------------------------------------
+# trial 592: consistency=-0.0039522, dist=0.13443
+# ------------------------------------------------------------------------
+# taskset -c 6-8 \
+# python3 src/train.py \
+#     experiment=cifar10/svdd_agnostic \
+#     experiment_name=cifar10_svdd_pareto \
+#     run_name=consistency_t592 \
+#     callbacks.wasserstein_dist=null \
+#     callbacks.thres_drift=null \
+#     callbacks.cap_sn_zb=null \
+#     callbacks.wasserstein_dist_ema_ckpt=null \
+#     callbacks.thres_drift_ema_ckpt=null \
+#     callbacks.cap_sn_zb_ema_ckpt=null \
+#     ~evaluation.evaluator.ckpts.summary.operational_drift_ema \
+#     ~evaluation.evaluator.ckpts.summary.w1dist_ema_normal_vs_reference_normal \
+#     ~evaluation.evaluator.ckpts.summary.cap_ema_normal_vs_reference_normal \
+#     algorithm.encoder.nodes='[16,32,64]' \
+#     algorithm.encoder.strides='[2,2]' \
+#     algorithm.network_weight_decay=1e-08 \
+#     algorithm.optimizer.betas='[0.9,0.999]' \
+#     algorithm.optimizer.lr=0.002186656311155761 \
+#     trainer.gradient_clip_val=0.0 \
+#     trainer=gpu \
+#     trainer.devices=[2]
+
+# ------------------------------------------------------------------------
+# trial 595: consistency=-0.0015535, dist=0.15003
+# ------------------------------------------------------------------------
+# taskset -c 9-11 \
+# python3 src/train.py \
+#     experiment=cifar10/svdd_agnostic \
+#     experiment_name=cifar10_svdd_pareto \
+#     run_name=consistency_t595 \
+#     callbacks.wasserstein_dist=null \
+#     callbacks.thres_drift=null \
+#     callbacks.cap_sn_zb=null \
+#     callbacks.wasserstein_dist_ema_ckpt=null \
+#     callbacks.thres_drift_ema_ckpt=null \
+#     callbacks.cap_sn_zb_ema_ckpt=null \
+#     ~evaluation.evaluator.ckpts.summary.operational_drift_ema \
+#     ~evaluation.evaluator.ckpts.summary.w1dist_ema_normal_vs_reference_normal \
+#     ~evaluation.evaluator.ckpts.summary.cap_ema_normal_vs_reference_normal \
+#     algorithm.encoder.nodes='[16,32,64]' \
+#     algorithm.encoder.strides='[2,2]' \
+#     algorithm.network_weight_decay=1e-08 \
+#     algorithm.optimizer.betas='[0.9,0.999]' \
+#     algorithm.optimizer.lr=0.002076037888830398 \
+#     trainer.gradient_clip_val=0.0 \
+#     trainer=gpu \
+#     trainer.devices=[3]
+
+# ========================================================================
 # STABILITY TRAINING  (study: drift_vs_dist, 1 Pareto points)
 # ========================================================================
 # ------------------------------------------------------------------------

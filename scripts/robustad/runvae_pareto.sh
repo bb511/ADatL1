@@ -618,6 +618,164 @@
 #     trainer.devices=[3]
 
 # ========================================================================
+# CONSISTENCY TRAINING  (study: consistency_vs_kl, 5 Pareto points)
+# ========================================================================
+# ------------------------------------------------------------------------
+# trial 59: consistency=-0.71038, kl=0.45457
+# ------------------------------------------------------------------------
+# taskset -c 0-2 \
+# python3 src/train.py \
+#     experiment=robustad/vae_agnostic \
+#     experiment_name=robustad_vae_pareto \
+#     run_name=consistency_t59 \
+#     callbacks.wasserstein_dist=null \
+#     callbacks.thres_drift=null \
+#     callbacks.cap_sn_zb=null \
+#     callbacks.wasserstein_dist_ema_ckpt=null \
+#     callbacks.thres_drift_ema_ckpt=null \
+#     callbacks.cap_sn_zb_ema_ckpt=null \
+#     ~evaluation.evaluator.ckpts.summary.operational_drift_ema \
+#     ~evaluation.evaluator.ckpts.summary.w1dist_ema_normal_vs_shifted_normal_all \
+#     ~evaluation.evaluator.ckpts.summary.cap_ema_normal_vs_shifted_normal_all \
+#     algorithm.encoder.activation=gelu \
+#     algorithm.encoder.batchnorm=False \
+#     algorithm.encoder.clamp_zlogvar_range='[-8,6]' \
+#     algorithm.encoder.nodes='[8,16,16]' \
+#     algorithm.encoder.strides='[2]' \
+#     algorithm.kl_scale=3e-05 \
+#     algorithm.kl_warmup_frac=0.0 \
+#     algorithm.optimizer.betas='[0.9,0.999]' \
+#     algorithm.optimizer.lr=3.336296531501544e-05 \
+#     algorithm.optimizer.weight_decay=1e-05 \
+#     trainer.gradient_clip_val=1.0 \
+#     trainer=gpu \
+#     trainer.devices=[0]
+
+# ------------------------------------------------------------------------
+# trial 83: consistency=-0.11778, kl=35.108  << BEST consistency
+# ------------------------------------------------------------------------
+# taskset -c 3-5 \
+# python3 src/train.py \
+#     experiment=robustad/vae_agnostic \
+#     experiment_name=robustad_vae_pareto \
+#     run_name=consistency_t83 \
+#     callbacks.wasserstein_dist=null \
+#     callbacks.thres_drift=null \
+#     callbacks.cap_sn_zb=null \
+#     callbacks.wasserstein_dist_ema_ckpt=null \
+#     callbacks.thres_drift_ema_ckpt=null \
+#     callbacks.cap_sn_zb_ema_ckpt=null \
+#     ~evaluation.evaluator.ckpts.summary.operational_drift_ema \
+#     ~evaluation.evaluator.ckpts.summary.w1dist_ema_normal_vs_shifted_normal_all \
+#     ~evaluation.evaluator.ckpts.summary.cap_ema_normal_vs_shifted_normal_all \
+#     algorithm.encoder.activation=relu \
+#     algorithm.encoder.batchnorm=True \
+#     algorithm.encoder.clamp_zlogvar_range='[-10,6]' \
+#     algorithm.encoder.nodes='[32,64,128]' \
+#     algorithm.encoder.strides='[2]' \
+#     algorithm.kl_scale=0.001 \
+#     algorithm.kl_warmup_frac=0.1 \
+#     algorithm.optimizer.betas='[0.9,0.99]' \
+#     algorithm.optimizer.lr=0.0006708807309551948 \
+#     algorithm.optimizer.weight_decay=0.001 \
+#     trainer.gradient_clip_val=0.5 \
+#     trainer=gpu \
+#     trainer.devices=[1]
+
+# ------------------------------------------------------------------------
+# trial 185: consistency=-0.14545, kl=0.84044  << KNEE
+# ------------------------------------------------------------------------
+# taskset -c 6-8 \
+# python3 src/train.py \
+#     experiment=robustad/vae_agnostic \
+#     experiment_name=robustad_vae_pareto \
+#     run_name=consistency_t185 \
+#     callbacks.wasserstein_dist=null \
+#     callbacks.thres_drift=null \
+#     callbacks.cap_sn_zb=null \
+#     callbacks.wasserstein_dist_ema_ckpt=null \
+#     callbacks.thres_drift_ema_ckpt=null \
+#     callbacks.cap_sn_zb_ema_ckpt=null \
+#     ~evaluation.evaluator.ckpts.summary.operational_drift_ema \
+#     ~evaluation.evaluator.ckpts.summary.w1dist_ema_normal_vs_shifted_normal_all \
+#     ~evaluation.evaluator.ckpts.summary.cap_ema_normal_vs_shifted_normal_all \
+#     algorithm.encoder.activation=gelu \
+#     algorithm.encoder.batchnorm=False \
+#     algorithm.encoder.clamp_zlogvar_range='[-10,6]' \
+#     algorithm.encoder.nodes='[8,16,32]' \
+#     algorithm.encoder.strides='[2]' \
+#     algorithm.kl_scale=0.0001 \
+#     algorithm.kl_warmup_frac=0.1 \
+#     algorithm.optimizer.betas='[0.9,0.99]' \
+#     algorithm.optimizer.lr=0.00010771616601426432 \
+#     algorithm.optimizer.weight_decay=1e-06 \
+#     trainer.gradient_clip_val=1.0 \
+#     trainer=gpu \
+#     trainer.devices=[2]
+
+# ------------------------------------------------------------------------
+# trial 208: consistency=-0.30374, kl=0.49458
+# ------------------------------------------------------------------------
+# taskset -c 9-11 \
+# python3 src/train.py \
+#     experiment=robustad/vae_agnostic \
+#     experiment_name=robustad_vae_pareto \
+#     run_name=consistency_t208 \
+#     callbacks.wasserstein_dist=null \
+#     callbacks.thres_drift=null \
+#     callbacks.cap_sn_zb=null \
+#     callbacks.wasserstein_dist_ema_ckpt=null \
+#     callbacks.thres_drift_ema_ckpt=null \
+#     callbacks.cap_sn_zb_ema_ckpt=null \
+#     ~evaluation.evaluator.ckpts.summary.operational_drift_ema \
+#     ~evaluation.evaluator.ckpts.summary.w1dist_ema_normal_vs_shifted_normal_all \
+#     ~evaluation.evaluator.ckpts.summary.cap_ema_normal_vs_shifted_normal_all \
+#     algorithm.encoder.activation=relu \
+#     algorithm.encoder.batchnorm=False \
+#     algorithm.encoder.clamp_zlogvar_range='[-10,6]' \
+#     algorithm.encoder.nodes='[8,16,16]' \
+#     algorithm.encoder.strides='[2]' \
+#     algorithm.kl_scale=0.0003 \
+#     algorithm.kl_warmup_frac=0.2 \
+#     algorithm.optimizer.betas='[0.9,0.999]' \
+#     algorithm.optimizer.lr=3.780415740177197e-05 \
+#     algorithm.optimizer.weight_decay=1e-05 \
+#     trainer.gradient_clip_val=1.0 \
+#     trainer=gpu \
+#     trainer.devices=[3]
+
+# ------------------------------------------------------------------------
+# trial 259: consistency=-0.14201, kl=22.626
+# ------------------------------------------------------------------------
+# taskset -c 0-2 \
+# python3 src/train.py \
+#     experiment=robustad/vae_agnostic \
+#     experiment_name=robustad_vae_pareto \
+#     run_name=consistency_t259 \
+#     callbacks.wasserstein_dist=null \
+#     callbacks.thres_drift=null \
+#     callbacks.cap_sn_zb=null \
+#     callbacks.wasserstein_dist_ema_ckpt=null \
+#     callbacks.thres_drift_ema_ckpt=null \
+#     callbacks.cap_sn_zb_ema_ckpt=null \
+#     ~evaluation.evaluator.ckpts.summary.operational_drift_ema \
+#     ~evaluation.evaluator.ckpts.summary.w1dist_ema_normal_vs_shifted_normal_all \
+#     ~evaluation.evaluator.ckpts.summary.cap_ema_normal_vs_shifted_normal_all \
+#     algorithm.encoder.activation=gelu \
+#     algorithm.encoder.batchnorm=True \
+#     algorithm.encoder.clamp_zlogvar_range='[-10,6]' \
+#     algorithm.encoder.nodes='[32,64,128]' \
+#     algorithm.encoder.strides='[2]' \
+#     algorithm.kl_scale=0.001 \
+#     algorithm.kl_warmup_frac=0.1 \
+#     algorithm.optimizer.betas='[0.9,0.99]' \
+#     algorithm.optimizer.lr=0.0007337808421568128 \
+#     algorithm.optimizer.weight_decay=0.001 \
+#     trainer.gradient_clip_val=0.5 \
+#     trainer=gpu \
+#     trainer.devices=[0]
+
+# ========================================================================
 # STABILITY TRAINING  (study: drift_vs_kl, 2 Pareto points)
 # ========================================================================
 # ------------------------------------------------------------------------

@@ -651,6 +651,339 @@
 #     trainer.devices=[1]
 
 # ========================================================================
+# CONSISTENCY TRAINING  (study: consistency_vs_logp, 28 Pareto points, trimmed to 11 around the knee (endpoints kept))
+# ========================================================================
+# ------------------------------------------------------------------------
+# trial 29: consistency=-0.00032771, logp=1.2701e+05
+# ------------------------------------------------------------------------
+# taskset -c 0-2 \
+# python3 src/train.py \
+#     experiment=cifar10/realnvp_agnostic \
+#     experiment_name=cifar10_realnvp_pareto \
+#     run_name=consistency_t29 \
+#     callbacks.wasserstein_dist=null \
+#     callbacks.thres_drift=null \
+#     callbacks.cap_sn_zb=null \
+#     callbacks.wasserstein_dist_ema_ckpt=null \
+#     callbacks.thres_drift_ema_ckpt=null \
+#     callbacks.cap_sn_zb_ema_ckpt=null \
+#     ~evaluation.evaluator.ckpts.summary.operational_drift_ema \
+#     ~evaluation.evaluator.ckpts.summary.w1dist_ema_normal_vs_reference_normal \
+#     ~evaluation.evaluator.ckpts.summary.cap_ema_normal_vs_reference_normal \
+#     algorithm.flow.activation=silu \
+#     algorithm.flow.hidden_dim=384 \
+#     algorithm.flow.n_flows=4 \
+#     algorithm.flow.n_hidden_layers=1 \
+#     algorithm.flow.noise_scale=0.0 \
+#     algorithm.flow.scale_clamp=5.0 \
+#     algorithm.optimizer.betas='[0.9,0.99]' \
+#     algorithm.optimizer.lr=0.0010495442683117516 \
+#     algorithm.optimizer.weight_decay=0.0001 \
+#     trainer.gradient_clip_val=2.0 \
+#     trainer=gpu \
+#     trainer.devices=[0]
+
+# ------------------------------------------------------------------------
+# trial 48: consistency=-0.0005224, logp=25900
+# ------------------------------------------------------------------------
+# taskset -c 3-5 \
+# python3 src/train.py \
+#     experiment=cifar10/realnvp_agnostic \
+#     experiment_name=cifar10_realnvp_pareto \
+#     run_name=consistency_t48 \
+#     callbacks.wasserstein_dist=null \
+#     callbacks.thres_drift=null \
+#     callbacks.cap_sn_zb=null \
+#     callbacks.wasserstein_dist_ema_ckpt=null \
+#     callbacks.thres_drift_ema_ckpt=null \
+#     callbacks.cap_sn_zb_ema_ckpt=null \
+#     ~evaluation.evaluator.ckpts.summary.operational_drift_ema \
+#     ~evaluation.evaluator.ckpts.summary.w1dist_ema_normal_vs_reference_normal \
+#     ~evaluation.evaluator.ckpts.summary.cap_ema_normal_vs_reference_normal \
+#     algorithm.flow.activation=relu \
+#     algorithm.flow.hidden_dim=256 \
+#     algorithm.flow.n_flows=6 \
+#     algorithm.flow.n_hidden_layers=1 \
+#     algorithm.flow.noise_scale=0.001 \
+#     algorithm.flow.scale_clamp=3.0 \
+#     algorithm.optimizer.betas='[0.9,0.999]' \
+#     algorithm.optimizer.lr=0.0024214203937496146 \
+#     algorithm.optimizer.weight_decay=1e-06 \
+#     trainer.gradient_clip_val=0.5 \
+#     trainer=gpu \
+#     trainer.devices=[1]
+
+# ------------------------------------------------------------------------
+# trial 167: consistency=-1.4232e-05, logp=3.7192e+08
+# ------------------------------------------------------------------------
+# taskset -c 6-8 \
+# python3 src/train.py \
+#     experiment=cifar10/realnvp_agnostic \
+#     experiment_name=cifar10_realnvp_pareto \
+#     run_name=consistency_t167 \
+#     callbacks.wasserstein_dist=null \
+#     callbacks.thres_drift=null \
+#     callbacks.cap_sn_zb=null \
+#     callbacks.wasserstein_dist_ema_ckpt=null \
+#     callbacks.thres_drift_ema_ckpt=null \
+#     callbacks.cap_sn_zb_ema_ckpt=null \
+#     ~evaluation.evaluator.ckpts.summary.operational_drift_ema \
+#     ~evaluation.evaluator.ckpts.summary.w1dist_ema_normal_vs_reference_normal \
+#     ~evaluation.evaluator.ckpts.summary.cap_ema_normal_vs_reference_normal \
+#     algorithm.flow.activation=silu \
+#     algorithm.flow.hidden_dim=256 \
+#     algorithm.flow.n_flows=6 \
+#     algorithm.flow.n_hidden_layers=1 \
+#     algorithm.flow.noise_scale=0.001 \
+#     algorithm.flow.scale_clamp=5.0 \
+#     algorithm.optimizer.betas='[0.9,0.999]' \
+#     algorithm.optimizer.lr=3.802293794485023e-05 \
+#     algorithm.optimizer.weight_decay=1e-05 \
+#     trainer.gradient_clip_val=2.0 \
+#     trainer=gpu \
+#     trainer.devices=[2]
+
+# ------------------------------------------------------------------------
+# trial 185: consistency=-1.5774e-05, logp=9.6855e+07
+# ------------------------------------------------------------------------
+# taskset -c 9-11 \
+# python3 src/train.py \
+#     experiment=cifar10/realnvp_agnostic \
+#     experiment_name=cifar10_realnvp_pareto \
+#     run_name=consistency_t185 \
+#     callbacks.wasserstein_dist=null \
+#     callbacks.thres_drift=null \
+#     callbacks.cap_sn_zb=null \
+#     callbacks.wasserstein_dist_ema_ckpt=null \
+#     callbacks.thres_drift_ema_ckpt=null \
+#     callbacks.cap_sn_zb_ema_ckpt=null \
+#     ~evaluation.evaluator.ckpts.summary.operational_drift_ema \
+#     ~evaluation.evaluator.ckpts.summary.w1dist_ema_normal_vs_reference_normal \
+#     ~evaluation.evaluator.ckpts.summary.cap_ema_normal_vs_reference_normal \
+#     algorithm.flow.activation=silu \
+#     algorithm.flow.hidden_dim=256 \
+#     algorithm.flow.n_flows=6 \
+#     algorithm.flow.n_hidden_layers=1 \
+#     algorithm.flow.noise_scale=0.001 \
+#     algorithm.flow.scale_clamp=5.0 \
+#     algorithm.optimizer.betas='[0.9,0.999]' \
+#     algorithm.optimizer.lr=4.454849449543037e-05 \
+#     algorithm.optimizer.weight_decay=1e-05 \
+#     trainer.gradient_clip_val=2.0 \
+#     trainer=gpu \
+#     trainer.devices=[3]
+
+# ------------------------------------------------------------------------
+# trial 246: consistency=0, logp=3.0943e+18  << BEST consistency
+# ------------------------------------------------------------------------
+# taskset -c 0-2 \
+# python3 src/train.py \
+#     experiment=cifar10/realnvp_agnostic \
+#     experiment_name=cifar10_realnvp_pareto \
+#     run_name=consistency_t246 \
+#     callbacks.wasserstein_dist=null \
+#     callbacks.thres_drift=null \
+#     callbacks.cap_sn_zb=null \
+#     callbacks.wasserstein_dist_ema_ckpt=null \
+#     callbacks.thres_drift_ema_ckpt=null \
+#     callbacks.cap_sn_zb_ema_ckpt=null \
+#     ~evaluation.evaluator.ckpts.summary.operational_drift_ema \
+#     ~evaluation.evaluator.ckpts.summary.w1dist_ema_normal_vs_reference_normal \
+#     ~evaluation.evaluator.ckpts.summary.cap_ema_normal_vs_reference_normal \
+#     algorithm.flow.activation=relu \
+#     algorithm.flow.hidden_dim=512 \
+#     algorithm.flow.n_flows=8 \
+#     algorithm.flow.n_hidden_layers=1 \
+#     algorithm.flow.noise_scale=0.0 \
+#     algorithm.flow.scale_clamp=5.0 \
+#     algorithm.optimizer.betas='[0.9,0.999]' \
+#     algorithm.optimizer.lr=0.00014968516727624284 \
+#     algorithm.optimizer.weight_decay=0.0 \
+#     trainer.gradient_clip_val=2.0 \
+#     trainer=gpu \
+#     trainer.devices=[0]
+
+# ------------------------------------------------------------------------
+# trial 254: consistency=-5.1155e-05, logp=1.0905e+07
+# ------------------------------------------------------------------------
+# taskset -c 3-5 \
+# python3 src/train.py \
+#     experiment=cifar10/realnvp_agnostic \
+#     experiment_name=cifar10_realnvp_pareto \
+#     run_name=consistency_t254 \
+#     callbacks.wasserstein_dist=null \
+#     callbacks.thres_drift=null \
+#     callbacks.cap_sn_zb=null \
+#     callbacks.wasserstein_dist_ema_ckpt=null \
+#     callbacks.thres_drift_ema_ckpt=null \
+#     callbacks.cap_sn_zb_ema_ckpt=null \
+#     ~evaluation.evaluator.ckpts.summary.operational_drift_ema \
+#     ~evaluation.evaluator.ckpts.summary.w1dist_ema_normal_vs_reference_normal \
+#     ~evaluation.evaluator.ckpts.summary.cap_ema_normal_vs_reference_normal \
+#     algorithm.flow.activation=relu \
+#     algorithm.flow.hidden_dim=512 \
+#     algorithm.flow.n_flows=8 \
+#     algorithm.flow.n_hidden_layers=1 \
+#     algorithm.flow.noise_scale=0.0 \
+#     algorithm.flow.scale_clamp=5.0 \
+#     algorithm.optimizer.betas='[0.9,0.999]' \
+#     algorithm.optimizer.lr=9.761402715276775e-05 \
+#     algorithm.optimizer.weight_decay=0.0 \
+#     trainer.gradient_clip_val=2.0 \
+#     trainer=gpu \
+#     trainer.devices=[1]
+
+# ------------------------------------------------------------------------
+# trial 289: consistency=-2.8113e-05, logp=1.7349e+07
+# ------------------------------------------------------------------------
+# taskset -c 6-8 \
+# python3 src/train.py \
+#     experiment=cifar10/realnvp_agnostic \
+#     experiment_name=cifar10_realnvp_pareto \
+#     run_name=consistency_t289 \
+#     callbacks.wasserstein_dist=null \
+#     callbacks.thres_drift=null \
+#     callbacks.cap_sn_zb=null \
+#     callbacks.wasserstein_dist_ema_ckpt=null \
+#     callbacks.thres_drift_ema_ckpt=null \
+#     callbacks.cap_sn_zb_ema_ckpt=null \
+#     ~evaluation.evaluator.ckpts.summary.operational_drift_ema \
+#     ~evaluation.evaluator.ckpts.summary.w1dist_ema_normal_vs_reference_normal \
+#     ~evaluation.evaluator.ckpts.summary.cap_ema_normal_vs_reference_normal \
+#     algorithm.flow.activation=relu \
+#     algorithm.flow.hidden_dim=384 \
+#     algorithm.flow.n_flows=6 \
+#     algorithm.flow.n_hidden_layers=1 \
+#     algorithm.flow.noise_scale=0.001 \
+#     algorithm.flow.scale_clamp=5.0 \
+#     algorithm.optimizer.betas='[0.9,0.99]' \
+#     algorithm.optimizer.lr=0.00011050081317738501 \
+#     algorithm.optimizer.weight_decay=0.0 \
+#     trainer.gradient_clip_val=2.0 \
+#     trainer=gpu \
+#     trainer.devices=[2]
+
+# ------------------------------------------------------------------------
+# trial 425: consistency=-0.050949, logp=3462.5
+# ------------------------------------------------------------------------
+# taskset -c 9-11 \
+# python3 src/train.py \
+#     experiment=cifar10/realnvp_agnostic \
+#     experiment_name=cifar10_realnvp_pareto \
+#     run_name=consistency_t425 \
+#     callbacks.wasserstein_dist=null \
+#     callbacks.thres_drift=null \
+#     callbacks.cap_sn_zb=null \
+#     callbacks.wasserstein_dist_ema_ckpt=null \
+#     callbacks.thres_drift_ema_ckpt=null \
+#     callbacks.cap_sn_zb_ema_ckpt=null \
+#     ~evaluation.evaluator.ckpts.summary.operational_drift_ema \
+#     ~evaluation.evaluator.ckpts.summary.w1dist_ema_normal_vs_reference_normal \
+#     ~evaluation.evaluator.ckpts.summary.cap_ema_normal_vs_reference_normal \
+#     algorithm.flow.activation=gelu \
+#     algorithm.flow.hidden_dim=512 \
+#     algorithm.flow.n_flows=8 \
+#     algorithm.flow.n_hidden_layers=1 \
+#     algorithm.flow.noise_scale=0.0 \
+#     algorithm.flow.scale_clamp=3.0 \
+#     algorithm.optimizer.betas='[0.9,0.999]' \
+#     algorithm.optimizer.lr=0.00015516279090188026 \
+#     algorithm.optimizer.weight_decay=1e-05 \
+#     trainer.gradient_clip_val=1.0 \
+#     trainer=gpu \
+#     trainer.devices=[3]
+
+# ------------------------------------------------------------------------
+# trial 453: consistency=-8.8994e-05, logp=2.5418e+06
+# ------------------------------------------------------------------------
+# taskset -c 0-2 \
+# python3 src/train.py \
+#     experiment=cifar10/realnvp_agnostic \
+#     experiment_name=cifar10_realnvp_pareto \
+#     run_name=consistency_t453 \
+#     callbacks.wasserstein_dist=null \
+#     callbacks.thres_drift=null \
+#     callbacks.cap_sn_zb=null \
+#     callbacks.wasserstein_dist_ema_ckpt=null \
+#     callbacks.thres_drift_ema_ckpt=null \
+#     callbacks.cap_sn_zb_ema_ckpt=null \
+#     ~evaluation.evaluator.ckpts.summary.operational_drift_ema \
+#     ~evaluation.evaluator.ckpts.summary.w1dist_ema_normal_vs_reference_normal \
+#     ~evaluation.evaluator.ckpts.summary.cap_ema_normal_vs_reference_normal \
+#     algorithm.flow.activation=silu \
+#     algorithm.flow.hidden_dim=768 \
+#     algorithm.flow.n_flows=6 \
+#     algorithm.flow.n_hidden_layers=1 \
+#     algorithm.flow.noise_scale=0.01 \
+#     algorithm.flow.scale_clamp=5.0 \
+#     algorithm.optimizer.betas='[0.9,0.999]' \
+#     algorithm.optimizer.lr=0.00014558646270757133 \
+#     algorithm.optimizer.weight_decay=0.0 \
+#     trainer.gradient_clip_val=2.0 \
+#     trainer=gpu \
+#     trainer.devices=[0]
+
+# ------------------------------------------------------------------------
+# trial 509: consistency=-0.00053939, logp=7116.4
+# ------------------------------------------------------------------------
+# taskset -c 3-5 \
+# python3 src/train.py \
+#     experiment=cifar10/realnvp_agnostic \
+#     experiment_name=cifar10_realnvp_pareto \
+#     run_name=consistency_t509 \
+#     callbacks.wasserstein_dist=null \
+#     callbacks.thres_drift=null \
+#     callbacks.cap_sn_zb=null \
+#     callbacks.wasserstein_dist_ema_ckpt=null \
+#     callbacks.thres_drift_ema_ckpt=null \
+#     callbacks.cap_sn_zb_ema_ckpt=null \
+#     ~evaluation.evaluator.ckpts.summary.operational_drift_ema \
+#     ~evaluation.evaluator.ckpts.summary.w1dist_ema_normal_vs_reference_normal \
+#     ~evaluation.evaluator.ckpts.summary.cap_ema_normal_vs_reference_normal \
+#     algorithm.flow.activation=relu \
+#     algorithm.flow.hidden_dim=768 \
+#     algorithm.flow.n_flows=6 \
+#     algorithm.flow.n_hidden_layers=1 \
+#     algorithm.flow.noise_scale=0.0 \
+#     algorithm.flow.scale_clamp=5.0 \
+#     algorithm.optimizer.betas='[0.9,0.999]' \
+#     algorithm.optimizer.lr=4.2895150183902615e-05 \
+#     algorithm.optimizer.weight_decay=0.0 \
+#     trainer.gradient_clip_val=2.0 \
+#     trainer=gpu \
+#     trainer.devices=[1]
+
+# ------------------------------------------------------------------------
+# trial 534: consistency=-3.0745e-06, logp=1.7589e+09  << KNEE
+# ------------------------------------------------------------------------
+# taskset -c 6-8 \
+# python3 src/train.py \
+#     experiment=cifar10/realnvp_agnostic \
+#     experiment_name=cifar10_realnvp_pareto \
+#     run_name=consistency_t534 \
+#     callbacks.wasserstein_dist=null \
+#     callbacks.thres_drift=null \
+#     callbacks.cap_sn_zb=null \
+#     callbacks.wasserstein_dist_ema_ckpt=null \
+#     callbacks.thres_drift_ema_ckpt=null \
+#     callbacks.cap_sn_zb_ema_ckpt=null \
+#     ~evaluation.evaluator.ckpts.summary.operational_drift_ema \
+#     ~evaluation.evaluator.ckpts.summary.w1dist_ema_normal_vs_reference_normal \
+#     ~evaluation.evaluator.ckpts.summary.cap_ema_normal_vs_reference_normal \
+#     algorithm.flow.activation=silu \
+#     algorithm.flow.hidden_dim=256 \
+#     algorithm.flow.n_flows=6 \
+#     algorithm.flow.n_hidden_layers=1 \
+#     algorithm.flow.noise_scale=0.001 \
+#     algorithm.flow.scale_clamp=5.0 \
+#     algorithm.optimizer.betas='[0.9,0.999]' \
+#     algorithm.optimizer.lr=3.9205317049335124e-05 \
+#     algorithm.optimizer.weight_decay=1e-05 \
+#     trainer.gradient_clip_val=2.0 \
+#     trainer=gpu \
+#     trainer.devices=[2]
+
+# ========================================================================
 # STABILITY TRAINING  (study: drift_vs_logp, 2 Pareto points)
 # ========================================================================
 # ------------------------------------------------------------------------

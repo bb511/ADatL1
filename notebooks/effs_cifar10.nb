@@ -33,22 +33,25 @@ paretoEffsDir = \"pareto_effs\";\
  CellLabel->"In[1]:=",ExpressionUUID->"4de1bf18-4b37-4779-b71c-27e8ff7f9cd4"],
 
 Cell["\<\
-strategyOrder = {\"cvar25\", \"stability\", \"cap\", \"wasserstein\"};
-boxStrategyOrder = {\"cvar25\", \"stability\", \"cap\", \"wasserstein\"};
+strategyOrder = {\"cvar25\", \"stability\", \"cap\", \"wasserstein\", \
+\"consistency\"};
+boxStrategyOrder = {\"cvar25\", \"stability\", \"cap\", \"wasserstein\", \
+\"consistency\"};
 strategyMaximizeQ = <|\"cvar25\" -> True, \"cvar10\" -> True, \"cap\" -> \
 True,
-   \"stability\" -> False, \"wasserstein\" -> False|>;
+   \"stability\" -> False, \"wasserstein\" -> False, \"consistency\" -> True|>;
 strategyStudyObj = <|\"cvar25\" -> \"cvar25eff\", \"cvar10\" -> \
 \"cvar10eff\",
    \"cap\" -> \"cap\", \"stability\" -> \"drift\", \"wasserstein\" -> \
-\"wasserstein\"|>;
+\"wasserstein\", \"consistency\" -> \"consistency\"|>;
 strategyPretty = <|\"cvar25\" -> \"semi-supervised\", \"cvar10\" -> \
 \"semi-sup (CVaR10)\",
    \"cap\" -> \"CAP\", \"stability\" -> \"stable\", \"wasserstein\" -> \
-\"wasserstein\"|>;
+\"wasserstein\", \"consistency\" -> \"consistency\"|>;
 strategyBoxColors = <|\"cvar25\" -> \"#3f90da\", \"stability\" -> \
 \"#ffa90e\",
-   \"cap\" -> \"#bd1f01\", \"wasserstein\" -> \"#832db6\"|>;\
+   \"cap\" -> \"#bd1f01\", \"wasserstein\" -> \"#832db6\", \"consistency\" -> \
+\"#94a4a2\"|>;\
 \>", "Input",
  CellLabel->"In[3]:=",ExpressionUUID->"8020bc11-8c5c-4550-bcc2-e2b5aaca6ad1"],
 
@@ -122,6 +125,8 @@ strategyContextQ[strat_String, ctx_String] :=
      \"cvar25\", m === \"cvar25_ema/max\",
      \"cvar10\", m === \"cvar10_ema/max\",
      \"cap\", StringStartsQ[m, \"cap_ema\"] && StringEndsQ[m, \"/max\"],
+     \"consistency\", StringStartsQ[m, \"consistency_ema\"] && StringEndsQ[m, \
+\"/max\"],
      \"stability\", StringContainsQ[m, \"drift_ema\"] && StringEndsQ[m, \
 \"/min\"],
      \"wasserstein\", StringContainsQ[m, \"w1dist_ema\"] && StringEndsQ[m, \
@@ -392,7 +397,8 @@ Cell["\<\
    strategies are zero-filled (the legacy collapsed-method convention). *)
 legacyStratKey = <|\"cvar25\" -> \"semisupervised\", \"stability\" -> \
 \"stable\",
-   \"cap\" -> \"CAP\", \"wasserstein\" -> \"wasserstein\"|>;
+   \"cap\" -> \"CAP\", \"wasserstein\" -> \"wasserstein\", \"consistency\" -> \
+\"consistency\"|>;
 toLegacyGroups[groups_Association] := Association @@ KeyValueMap[
    Function[{m, sub}, Module[
      {len = If[Length[sub] > 0, Length[First[Values[sub]]], 1]},

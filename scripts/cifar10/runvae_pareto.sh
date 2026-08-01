@@ -938,6 +938,381 @@
 #     trainer.devices=[0]
 
 # ========================================================================
+# CONSISTENCY TRAINING  (study: consistency_vs_kl, 58 Pareto points, trimmed to 12 around the knee (endpoints kept))
+# ========================================================================
+# ------------------------------------------------------------------------
+# trial 186: consistency=-0.00073699, kl=134.41
+# ------------------------------------------------------------------------
+# taskset -c 0-2 \
+# python3 src/train.py \
+#     experiment=cifar10/vae_agnostic \
+#     experiment_name=cifar10_vae_pareto \
+#     run_name=consistency_t186 \
+#     callbacks.wasserstein_dist=null \
+#     callbacks.thres_drift=null \
+#     callbacks.cap_sn_zb=null \
+#     callbacks.wasserstein_dist_ema_ckpt=null \
+#     callbacks.thres_drift_ema_ckpt=null \
+#     callbacks.cap_sn_zb_ema_ckpt=null \
+#     ~evaluation.evaluator.ckpts.summary.operational_drift_ema \
+#     ~evaluation.evaluator.ckpts.summary.w1dist_ema_normal_vs_reference_normal \
+#     ~evaluation.evaluator.ckpts.summary.cap_ema_normal_vs_reference_normal \
+#     algorithm.encoder.activation=gelu \
+#     algorithm.encoder.batchnorm=False \
+#     algorithm.encoder.clamp_zlogvar_range='[-10,6]' \
+#     algorithm.encoder.nodes='[16,32,64,16]' \
+#     algorithm.encoder.strides='[2,2]' \
+#     algorithm.kl_scale=0.0003 \
+#     algorithm.kl_warmup_frac=0.1 \
+#     algorithm.optimizer.betas='[0.9,0.99]' \
+#     algorithm.optimizer.lr=5.712513855947686e-05 \
+#     algorithm.optimizer.weight_decay=0.0001 \
+#     trainer.gradient_clip_val=1.0 \
+#     trainer=gpu \
+#     trainer.devices=[0]
+
+# ------------------------------------------------------------------------
+# trial 187: consistency=-0.00074495, kl=134.33  << KNEE
+# ------------------------------------------------------------------------
+# taskset -c 3-5 \
+# python3 src/train.py \
+#     experiment=cifar10/vae_agnostic \
+#     experiment_name=cifar10_vae_pareto \
+#     run_name=consistency_t187 \
+#     callbacks.wasserstein_dist=null \
+#     callbacks.thres_drift=null \
+#     callbacks.cap_sn_zb=null \
+#     callbacks.wasserstein_dist_ema_ckpt=null \
+#     callbacks.thres_drift_ema_ckpt=null \
+#     callbacks.cap_sn_zb_ema_ckpt=null \
+#     ~evaluation.evaluator.ckpts.summary.operational_drift_ema \
+#     ~evaluation.evaluator.ckpts.summary.w1dist_ema_normal_vs_reference_normal \
+#     ~evaluation.evaluator.ckpts.summary.cap_ema_normal_vs_reference_normal \
+#     algorithm.encoder.activation=gelu \
+#     algorithm.encoder.batchnorm=False \
+#     algorithm.encoder.clamp_zlogvar_range='[-10,6]' \
+#     algorithm.encoder.nodes='[16,32,64,16]' \
+#     algorithm.encoder.strides='[2,2]' \
+#     algorithm.kl_scale=0.0003 \
+#     algorithm.kl_warmup_frac=0.1 \
+#     algorithm.optimizer.betas='[0.9,0.99]' \
+#     algorithm.optimizer.lr=5.718620179487806e-05 \
+#     algorithm.optimizer.weight_decay=0.0001 \
+#     trainer.gradient_clip_val=1.0 \
+#     trainer=gpu \
+#     trainer.devices=[1]
+
+# ------------------------------------------------------------------------
+# trial 189: consistency=-0.00066886, kl=135.62
+# ------------------------------------------------------------------------
+# taskset -c 6-8 \
+# python3 src/train.py \
+#     experiment=cifar10/vae_agnostic \
+#     experiment_name=cifar10_vae_pareto \
+#     run_name=consistency_t189 \
+#     callbacks.wasserstein_dist=null \
+#     callbacks.thres_drift=null \
+#     callbacks.cap_sn_zb=null \
+#     callbacks.wasserstein_dist_ema_ckpt=null \
+#     callbacks.thres_drift_ema_ckpt=null \
+#     callbacks.cap_sn_zb_ema_ckpt=null \
+#     ~evaluation.evaluator.ckpts.summary.operational_drift_ema \
+#     ~evaluation.evaluator.ckpts.summary.w1dist_ema_normal_vs_reference_normal \
+#     ~evaluation.evaluator.ckpts.summary.cap_ema_normal_vs_reference_normal \
+#     algorithm.encoder.activation=gelu \
+#     algorithm.encoder.batchnorm=False \
+#     algorithm.encoder.clamp_zlogvar_range='[-10,6]' \
+#     algorithm.encoder.nodes='[16,32,64,16]' \
+#     algorithm.encoder.strides='[2,2]' \
+#     algorithm.kl_scale=0.0003 \
+#     algorithm.kl_warmup_frac=0.1 \
+#     algorithm.optimizer.betas='[0.9,0.99]' \
+#     algorithm.optimizer.lr=5.619319436412621e-05 \
+#     algorithm.optimizer.weight_decay=0.0001 \
+#     trainer.gradient_clip_val=1.0 \
+#     trainer=gpu \
+#     trainer.devices=[2]
+
+# ------------------------------------------------------------------------
+# trial 191: consistency=-0.00069571, kl=135.04
+# ------------------------------------------------------------------------
+# taskset -c 9-11 \
+# python3 src/train.py \
+#     experiment=cifar10/vae_agnostic \
+#     experiment_name=cifar10_vae_pareto \
+#     run_name=consistency_t191 \
+#     callbacks.wasserstein_dist=null \
+#     callbacks.thres_drift=null \
+#     callbacks.cap_sn_zb=null \
+#     callbacks.wasserstein_dist_ema_ckpt=null \
+#     callbacks.thres_drift_ema_ckpt=null \
+#     callbacks.cap_sn_zb_ema_ckpt=null \
+#     ~evaluation.evaluator.ckpts.summary.operational_drift_ema \
+#     ~evaluation.evaluator.ckpts.summary.w1dist_ema_normal_vs_reference_normal \
+#     ~evaluation.evaluator.ckpts.summary.cap_ema_normal_vs_reference_normal \
+#     algorithm.encoder.activation=gelu \
+#     algorithm.encoder.batchnorm=False \
+#     algorithm.encoder.clamp_zlogvar_range='[-10,6]' \
+#     algorithm.encoder.nodes='[16,32,64,16]' \
+#     algorithm.encoder.strides='[2,2]' \
+#     algorithm.kl_scale=0.0003 \
+#     algorithm.kl_warmup_frac=0.1 \
+#     algorithm.optimizer.betas='[0.9,0.99]' \
+#     algorithm.optimizer.lr=5.664379357171128e-05 \
+#     algorithm.optimizer.weight_decay=0.0001 \
+#     trainer.gradient_clip_val=1.0 \
+#     trainer=gpu \
+#     trainer.devices=[3]
+
+# ------------------------------------------------------------------------
+# trial 193: consistency=-0.00065365, kl=137
+# ------------------------------------------------------------------------
+# taskset -c 0-2 \
+# python3 src/train.py \
+#     experiment=cifar10/vae_agnostic \
+#     experiment_name=cifar10_vae_pareto \
+#     run_name=consistency_t193 \
+#     callbacks.wasserstein_dist=null \
+#     callbacks.thres_drift=null \
+#     callbacks.cap_sn_zb=null \
+#     callbacks.wasserstein_dist_ema_ckpt=null \
+#     callbacks.thres_drift_ema_ckpt=null \
+#     callbacks.cap_sn_zb_ema_ckpt=null \
+#     ~evaluation.evaluator.ckpts.summary.operational_drift_ema \
+#     ~evaluation.evaluator.ckpts.summary.w1dist_ema_normal_vs_reference_normal \
+#     ~evaluation.evaluator.ckpts.summary.cap_ema_normal_vs_reference_normal \
+#     algorithm.encoder.activation=gelu \
+#     algorithm.encoder.batchnorm=False \
+#     algorithm.encoder.clamp_zlogvar_range='[-10,6]' \
+#     algorithm.encoder.nodes='[16,32,64,16]' \
+#     algorithm.encoder.strides='[2,2]' \
+#     algorithm.kl_scale=0.0003 \
+#     algorithm.kl_warmup_frac=0.1 \
+#     algorithm.optimizer.betas='[0.9,0.99]' \
+#     algorithm.optimizer.lr=5.514390879401558e-05 \
+#     algorithm.optimizer.weight_decay=0.0001 \
+#     trainer.gradient_clip_val=1.0 \
+#     trainer=gpu \
+#     trainer.devices=[0]
+
+# ------------------------------------------------------------------------
+# trial 346: consistency=-0.00076454, kl=93.878
+# ------------------------------------------------------------------------
+# taskset -c 3-5 \
+# python3 src/train.py \
+#     experiment=cifar10/vae_agnostic \
+#     experiment_name=cifar10_vae_pareto \
+#     run_name=consistency_t346 \
+#     callbacks.wasserstein_dist=null \
+#     callbacks.thres_drift=null \
+#     callbacks.cap_sn_zb=null \
+#     callbacks.wasserstein_dist_ema_ckpt=null \
+#     callbacks.thres_drift_ema_ckpt=null \
+#     callbacks.cap_sn_zb_ema_ckpt=null \
+#     ~evaluation.evaluator.ckpts.summary.operational_drift_ema \
+#     ~evaluation.evaluator.ckpts.summary.w1dist_ema_normal_vs_reference_normal \
+#     ~evaluation.evaluator.ckpts.summary.cap_ema_normal_vs_reference_normal \
+#     algorithm.encoder.activation=silu \
+#     algorithm.encoder.batchnorm=True \
+#     algorithm.encoder.clamp_zlogvar_range='[-10,6]' \
+#     algorithm.encoder.nodes='[16,32,64,16]' \
+#     algorithm.encoder.strides='[2,2]' \
+#     algorithm.kl_scale=0.0003 \
+#     algorithm.kl_warmup_frac=0.2 \
+#     algorithm.optimizer.betas='[0.9,0.99]' \
+#     algorithm.optimizer.lr=9.4431621193615e-05 \
+#     algorithm.optimizer.weight_decay=0.001 \
+#     trainer.gradient_clip_val=0.0 \
+#     trainer=gpu \
+#     trainer.devices=[1]
+
+# ------------------------------------------------------------------------
+# trial 348: consistency=-0.00076321, kl=94.418
+# ------------------------------------------------------------------------
+# taskset -c 6-8 \
+# python3 src/train.py \
+#     experiment=cifar10/vae_agnostic \
+#     experiment_name=cifar10_vae_pareto \
+#     run_name=consistency_t348 \
+#     callbacks.wasserstein_dist=null \
+#     callbacks.thres_drift=null \
+#     callbacks.cap_sn_zb=null \
+#     callbacks.wasserstein_dist_ema_ckpt=null \
+#     callbacks.thres_drift_ema_ckpt=null \
+#     callbacks.cap_sn_zb_ema_ckpt=null \
+#     ~evaluation.evaluator.ckpts.summary.operational_drift_ema \
+#     ~evaluation.evaluator.ckpts.summary.w1dist_ema_normal_vs_reference_normal \
+#     ~evaluation.evaluator.ckpts.summary.cap_ema_normal_vs_reference_normal \
+#     algorithm.encoder.activation=silu \
+#     algorithm.encoder.batchnorm=True \
+#     algorithm.encoder.clamp_zlogvar_range='[-10,6]' \
+#     algorithm.encoder.nodes='[16,32,64,16]' \
+#     algorithm.encoder.strides='[2,2]' \
+#     algorithm.kl_scale=0.0003 \
+#     algorithm.kl_warmup_frac=0.2 \
+#     algorithm.optimizer.betas='[0.9,0.99]' \
+#     algorithm.optimizer.lr=9.452716430854302e-05 \
+#     algorithm.optimizer.weight_decay=0.0001 \
+#     trainer.gradient_clip_val=1.0 \
+#     trainer=gpu \
+#     trainer.devices=[2]
+
+# ------------------------------------------------------------------------
+# trial 349: consistency=-0.00076455, kl=93.451
+# ------------------------------------------------------------------------
+# taskset -c 9-11 \
+# python3 src/train.py \
+#     experiment=cifar10/vae_agnostic \
+#     experiment_name=cifar10_vae_pareto \
+#     run_name=consistency_t349 \
+#     callbacks.wasserstein_dist=null \
+#     callbacks.thres_drift=null \
+#     callbacks.cap_sn_zb=null \
+#     callbacks.wasserstein_dist_ema_ckpt=null \
+#     callbacks.thres_drift_ema_ckpt=null \
+#     callbacks.cap_sn_zb_ema_ckpt=null \
+#     ~evaluation.evaluator.ckpts.summary.operational_drift_ema \
+#     ~evaluation.evaluator.ckpts.summary.w1dist_ema_normal_vs_reference_normal \
+#     ~evaluation.evaluator.ckpts.summary.cap_ema_normal_vs_reference_normal \
+#     algorithm.encoder.activation=silu \
+#     algorithm.encoder.batchnorm=True \
+#     algorithm.encoder.clamp_zlogvar_range='[-10,6]' \
+#     algorithm.encoder.nodes='[16,32,64,16]' \
+#     algorithm.encoder.strides='[2,2]' \
+#     algorithm.kl_scale=0.0003 \
+#     algorithm.kl_warmup_frac=0.2 \
+#     algorithm.optimizer.betas='[0.9,0.99]' \
+#     algorithm.optimizer.lr=9.426413316394349e-05 \
+#     algorithm.optimizer.weight_decay=0.0001 \
+#     trainer.gradient_clip_val=1.0 \
+#     trainer=gpu \
+#     trainer.devices=[3]
+
+# ------------------------------------------------------------------------
+# trial 351: consistency=-0.00076307, kl=94.473
+# ------------------------------------------------------------------------
+# taskset -c 0-2 \
+# python3 src/train.py \
+#     experiment=cifar10/vae_agnostic \
+#     experiment_name=cifar10_vae_pareto \
+#     run_name=consistency_t351 \
+#     callbacks.wasserstein_dist=null \
+#     callbacks.thres_drift=null \
+#     callbacks.cap_sn_zb=null \
+#     callbacks.wasserstein_dist_ema_ckpt=null \
+#     callbacks.thres_drift_ema_ckpt=null \
+#     callbacks.cap_sn_zb_ema_ckpt=null \
+#     ~evaluation.evaluator.ckpts.summary.operational_drift_ema \
+#     ~evaluation.evaluator.ckpts.summary.w1dist_ema_normal_vs_reference_normal \
+#     ~evaluation.evaluator.ckpts.summary.cap_ema_normal_vs_reference_normal \
+#     algorithm.encoder.activation=silu \
+#     algorithm.encoder.batchnorm=True \
+#     algorithm.encoder.clamp_zlogvar_range='[-10,6]' \
+#     algorithm.encoder.nodes='[16,32,64,16]' \
+#     algorithm.encoder.strides='[2,2]' \
+#     algorithm.kl_scale=0.0003 \
+#     algorithm.kl_warmup_frac=0.2 \
+#     algorithm.optimizer.betas='[0.9,0.99]' \
+#     algorithm.optimizer.lr=9.454264939333974e-05 \
+#     algorithm.optimizer.weight_decay=0.0001 \
+#     trainer.gradient_clip_val=1.0 \
+#     trainer=gpu \
+#     trainer.devices=[0]
+
+# ------------------------------------------------------------------------
+# trial 352: consistency=-0.00076407, kl=93.9
+# ------------------------------------------------------------------------
+# taskset -c 3-5 \
+# python3 src/train.py \
+#     experiment=cifar10/vae_agnostic \
+#     experiment_name=cifar10_vae_pareto \
+#     run_name=consistency_t352 \
+#     callbacks.wasserstein_dist=null \
+#     callbacks.thres_drift=null \
+#     callbacks.cap_sn_zb=null \
+#     callbacks.wasserstein_dist_ema_ckpt=null \
+#     callbacks.thres_drift_ema_ckpt=null \
+#     callbacks.cap_sn_zb_ema_ckpt=null \
+#     ~evaluation.evaluator.ckpts.summary.operational_drift_ema \
+#     ~evaluation.evaluator.ckpts.summary.w1dist_ema_normal_vs_reference_normal \
+#     ~evaluation.evaluator.ckpts.summary.cap_ema_normal_vs_reference_normal \
+#     algorithm.encoder.activation=silu \
+#     algorithm.encoder.batchnorm=True \
+#     algorithm.encoder.clamp_zlogvar_range='[-10,6]' \
+#     algorithm.encoder.nodes='[16,32,64,16]' \
+#     algorithm.encoder.strides='[2,2]' \
+#     algorithm.kl_scale=0.0003 \
+#     algorithm.kl_warmup_frac=0.2 \
+#     algorithm.optimizer.betas='[0.9,0.99]' \
+#     algorithm.optimizer.lr=9.438611402186663e-05 \
+#     algorithm.optimizer.weight_decay=0.0001 \
+#     trainer.gradient_clip_val=1.0 \
+#     trainer=gpu \
+#     trainer.devices=[1]
+
+# ------------------------------------------------------------------------
+# trial 361: consistency=-0.001017, kl=0.88467
+# ------------------------------------------------------------------------
+# taskset -c 6-8 \
+# python3 src/train.py \
+#     experiment=cifar10/vae_agnostic \
+#     experiment_name=cifar10_vae_pareto \
+#     run_name=consistency_t361 \
+#     callbacks.wasserstein_dist=null \
+#     callbacks.thres_drift=null \
+#     callbacks.cap_sn_zb=null \
+#     callbacks.wasserstein_dist_ema_ckpt=null \
+#     callbacks.thres_drift_ema_ckpt=null \
+#     callbacks.cap_sn_zb_ema_ckpt=null \
+#     ~evaluation.evaluator.ckpts.summary.operational_drift_ema \
+#     ~evaluation.evaluator.ckpts.summary.w1dist_ema_normal_vs_reference_normal \
+#     ~evaluation.evaluator.ckpts.summary.cap_ema_normal_vs_reference_normal \
+#     algorithm.encoder.activation=silu \
+#     algorithm.encoder.batchnorm=False \
+#     algorithm.encoder.clamp_zlogvar_range='[-10,6]' \
+#     algorithm.encoder.nodes='[16,32,64,16]' \
+#     algorithm.encoder.strides='[2,2]' \
+#     algorithm.kl_scale=0.0003 \
+#     algorithm.kl_warmup_frac=0.1 \
+#     algorithm.optimizer.betas='[0.9,0.99]' \
+#     algorithm.optimizer.lr=7.979919422028704e-05 \
+#     algorithm.optimizer.weight_decay=0.0001 \
+#     trainer.gradient_clip_val=1.0 \
+#     trainer=gpu \
+#     trainer.devices=[2]
+
+# ------------------------------------------------------------------------
+# trial 379: consistency=-0.00032075, kl=145.27  << BEST consistency
+# ------------------------------------------------------------------------
+# taskset -c 9-11 \
+# python3 src/train.py \
+#     experiment=cifar10/vae_agnostic \
+#     experiment_name=cifar10_vae_pareto \
+#     run_name=consistency_t379 \
+#     callbacks.wasserstein_dist=null \
+#     callbacks.thres_drift=null \
+#     callbacks.cap_sn_zb=null \
+#     callbacks.wasserstein_dist_ema_ckpt=null \
+#     callbacks.thres_drift_ema_ckpt=null \
+#     callbacks.cap_sn_zb_ema_ckpt=null \
+#     ~evaluation.evaluator.ckpts.summary.operational_drift_ema \
+#     ~evaluation.evaluator.ckpts.summary.w1dist_ema_normal_vs_reference_normal \
+#     ~evaluation.evaluator.ckpts.summary.cap_ema_normal_vs_reference_normal \
+#     algorithm.encoder.activation=silu \
+#     algorithm.encoder.batchnorm=True \
+#     algorithm.encoder.clamp_zlogvar_range='[-10,6]' \
+#     algorithm.encoder.nodes='[16,32,64,16]' \
+#     algorithm.encoder.strides='[2,2]' \
+#     algorithm.kl_scale=0.0003 \
+#     algorithm.kl_warmup_frac=0.2 \
+#     algorithm.optimizer.betas='[0.9,0.99]' \
+#     algorithm.optimizer.lr=6.134779704920182e-05 \
+#     algorithm.optimizer.weight_decay=0.0001 \
+#     trainer.gradient_clip_val=1.0 \
+#     trainer=gpu \
+#     trainer.devices=[3]
+
+# ========================================================================
 # STABILITY TRAINING  (study: drift_vs_kl, 2 Pareto points)
 # ========================================================================
 # ------------------------------------------------------------------------

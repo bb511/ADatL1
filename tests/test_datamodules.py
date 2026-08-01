@@ -3,9 +3,8 @@ from unittest.mock import Mock
 
 import torch
 
-from src.data.L1AD_datamodule import L1ADDataModule, SplitTensors
 from src.data.CIFAR10_datamodule import CIFAR10DataModule
-from src.data.components.normalization import L1DataNormalizer
+from src.data.L1AD_datamodule import L1ADDataModule, SplitTensors
 from src.data.synthetic import SyntheticL1ADDataModule
 
 
@@ -36,16 +35,25 @@ def test_cifar10_datamodule_smoke() -> None:
     assert list(val_loaders) == ["normal", "1", "reference_normal"]
 
 
-def test_l1_validation_setup_resolves_cache_without_preparing_data(
-    tmp_path, monkeypatch
-) -> None:
+def test_l1_validation_setup_resolves_cache_without_preparing_data(tmp_path, monkeypatch) -> None:
     """Evaluation-only runs must load an existing deterministic mlready cache."""
     mlready = SimpleNamespace(
         cache_root_dir=str(tmp_path),
         name="aad_default",
         prepare=Mock(side_effect=AssertionError("preprocessing must not run")),
     )
-    normalizer = L1DataNormalizer(name="standard", hyperparams={})
+    expected = tmp_path / "mlready" / "aad_default" / "standard"
+    expected.mkdir(parents=True)
+    (expected / "FET_norm_params.pkl").touch()
+    normalizer = Mock(name="normalizer")
+    normalizer.name = "standard"
+    normalizer.norm_params = {}
+
+    def import_params(_path, object_name):
+        normalizer.norm_params[object_name] = {"Et": {"shift": 0.0, "scale": 1.0}}
+
+    normalizer.import_norm_params.side_effect = import_params
+    loader = SimpleNamespace(object_feature_map={"FET": {"Et": [0]}})
     datamodule = L1ADDataModule(
         zerobias={},
         signal={},
@@ -54,7 +62,7 @@ def test_l1_validation_setup_resolves_cache_without_preparing_data(
         data_processor=Mock(),
         data_normalizer=normalizer,
         data_mlready=mlready,
-        data_awkward2torch=Mock(),
+        data_awkward2torch=loader,
         train_features={},
         l1_scales={},
         batch_size=8,
@@ -72,10 +80,10 @@ def test_l1_validation_setup_resolves_cache_without_preparing_data(
 
     datamodule.setup("validate")
 
-    expected = tmp_path / "mlready" / "aad_default" / "standard"
     assert datamodule.main_cache_folder == expected
     load_main.assert_called_once_with(expected, "valid", label=0)
     load_aux.assert_called_once_with(expected, "valid")
+    normalizer.import_norm_params.assert_called_once_with(expected / "FET_norm_params.pkl", "FET")
     mlready.prepare.assert_not_called()
 
 

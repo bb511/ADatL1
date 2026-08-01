@@ -1,20 +1,20 @@
 # Lightning data module for loading parquet data produced with:
 # https://github.com/cdfpzmvpvg/info_ad_data
-from dataclasses import dataclass
-from pathlib import Path
 import gc
 import warnings
+from dataclasses import dataclass
+from pathlib import Path
 from typing import TYPE_CHECKING
 
-import torch
 import numpy as np
+import torch
+from colorama import Back, Fore, Style
 from pytorch_lightning import LightningDataModule
-from torch.utils.data import Dataset, DataLoader
+from torch.utils.data import DataLoader, Dataset
 
-from src.utils import pylogger
-from colorama import Fore, Back, Style
 from src.data.components.dataset import L1ADDataset
 from src.data.components.normalization import L1DataNormalizer
+from src.utils import pylogger
 
 if TYPE_CHECKING:
     from src.data.components.awkward2torch import L1DataAwkward2Torch
@@ -111,9 +111,7 @@ class L1ADDataModule(LightningDataModule):
         self._aux: dict[str, dict[str, SplitTensors]] = {"valid": {}, "test": {}}
         self.shuffler = torch.Generator().manual_seed(seed)
         self.max_val_batches = max_val_batches
-        self.max_normal_eval_batches = self._normal_eval_batch_cap(
-            max_normal_eval_batches
-        )
+        self.max_normal_eval_batches = self._normal_eval_batch_cap(max_normal_eval_batches)
 
     def prepare_data(self) -> None:
         """Get zero bias data and the simulated MC signal data."""
@@ -152,43 +150,44 @@ class L1ADDataModule(LightningDataModule):
         data_dir = self.main_cache_folder
 
         if stage in (None, "fit"):
-            self._main.setdefault(
-                "train", self._load_main_split(data_dir, "train", label=0)
-            )
-            self._main.setdefault(
-                "valid", self._load_main_split(data_dir, "valid", label=0)
-            )
-            self._aux["valid"] = self._aux["valid"] or self._load_aux_split(
-                data_dir, "valid"
-            )
+            self._main.setdefault("train", self._load_main_split(data_dir, "train", label=0))
+            self._main.setdefault("valid", self._load_main_split(data_dir, "valid", label=0))
+            self._aux["valid"] = self._aux["valid"] or self._load_aux_split(data_dir, "valid")
 
         if stage in (None, "validate"):
-            self._main.setdefault(
-                "valid", self._load_main_split(data_dir, "valid", label=0)
-            )
-            self._aux["valid"] = self._aux["valid"] or self._load_aux_split(
-                data_dir, "valid"
-            )
+            self._main.setdefault("valid", self._load_main_split(data_dir, "valid", label=0))
+            self._aux["valid"] = self._aux["valid"] or self._load_aux_split(data_dir, "valid")
 
         if stage in (None, "test"):
-            self._main.setdefault(
-                "test", self._load_main_split(data_dir, "test", label=0)
-            )
-            self._aux["test"] = self._aux["test"] or self._load_aux_split(
-                data_dir, "test"
-            )
+            self._main.setdefault("test", self._load_main_split(data_dir, "test", label=0))
+            self._aux["test"] = self._aux["test"] or self._load_aux_split(data_dir, "test")
 
         if stage == "predict":
             raise ValueError("The predict dataloader is not implemented yet.")
 
+        self._load_normalizer_params()
         self._data_summary(stage)
+
+    def _load_normalizer_params(self) -> None:
+        """Restore cached training-split normalization state for evaluation-only runs."""
+        object_feature_map = getattr(self.loader, "object_feature_map", None)
+        if not object_feature_map:
+            return
+        for object_name in object_feature_map:
+            if object_name in self.normalizer.norm_params:
+                continue
+            params_path = self.main_cache_folder / f"{object_name}_norm_params.pkl"
+            if not params_path.is_file():
+                raise FileNotFoundError(
+                    f"Missing cached normalization parameters for {object_name}: " f"{params_path}"
+                )
+            self.normalizer.import_norm_params(params_path, object_name)
 
     def train_dataloader(self) -> Dataset:
         """Create and return the training dataloader.
 
-        This dataloader is based on a custom dataset class from components/dataset.py,
-        which basically makes the loading of numpy arrays that are already in memory
-        a bit faster.
+        This dataloader is based on a custom dataset class from components/dataset.py, which
+        basically makes the loading of numpy arrays that are already in memory a bit faster.
         """
         split = self._main["train"]
         dataset = L1ADDataset(
@@ -209,14 +208,10 @@ class L1ADDataModule(LightningDataModule):
         )
 
     def val_dataloader(self):
-        return self._make_eval_loaders(
-            main_key="valid", aux_key="valid", main_name="normal"
-        )
+        return self._make_eval_loaders(main_key="valid", aux_key="valid", main_name="normal")
 
     def test_dataloader(self):
-        return self._make_eval_loaders(
-            main_key="test", aux_key="test", main_name="normal"
-        )
+        return self._make_eval_loaders(main_key="test", aux_key="test", main_name="normal")
 
     def teardown(self, stage: str | None = None) -> None:
         # Drop references to large tensors so they become collectible
@@ -249,11 +244,7 @@ class L1ADDataModule(LightningDataModule):
         out = []
         for t in batch:
             # Only pin CPU tensors; skip if already pinned
-            if (
-                isinstance(t, torch.Tensor)
-                and t.device.type == "cpu"
-                and not t.is_pinned()
-            ):
+            if isinstance(t, torch.Tensor) and t.device.type == "cpu" and not t.is_pinned():
                 t = t.pin_memory()
             out.append(t.to(device, non_blocking=True))
 
@@ -273,8 +264,8 @@ class L1ADDataModule(LightningDataModule):
     def _load_aux_split(self, data_dir: Path, split: str) -> dict[str, SplitTensors]:
         """Load a split of auxiliary data, either val or test.
 
-        The auxiliary data is not used at training time, since it consists of
-        simulations for the background of the signal.
+        The auxiliary data is not used at training time, since it consists of simulations for the
+        background of the signal.
         """
         aux_dir = data_dir / "aux"
         out: dict[str, SplitTensors] = {}
@@ -333,9 +324,7 @@ class L1ADDataModule(LightningDataModule):
             raise ValueError("max_normal_eval_batches must be positive, -1, or None.")
         return max_batches
 
-    def _to_loader(
-        self, split: SplitTensors, batch_size: int, max_b: int = None
-    ) -> DataLoader:
+    def _to_loader(self, split: SplitTensors, batch_size: int, max_b: int = None) -> DataLoader:
         """Transform a SplitTensor to a proper pytorch DataLoader."""
         ds = L1ADDataset(
             split.x,
@@ -384,19 +373,17 @@ class L1ADDataModule(LightningDataModule):
         elif stage == "test":
             show_split("Test data:", "test", "test")
 
-    def get_extra(
-        self, normalizer: L1DataNormalizer, extra_feats: dict, stage: str, flag: str
-    ):
+    def get_extra(self, normalizer: L1DataNormalizer, extra_feats: dict, stage: str, flag: str):
         """Hook for callbacks to get additional data.
 
-        The data provided through this hook should not be already included in the
-        training data. Otherwise, no point in calling this hook.
+        The data provided through this hook should not be already included in the training data.
+        Otherwise, no point in calling this hook.
 
         :param normalizer: Normalizer object for the additional data.
-        :param extra_feats: Dictionary containing the object and the features to be
-            extracted from that object.
-        :param flag: String specifying subdirectory to put the extra feature parquet
-            files in so they don't get mixed up at training time.
+        :param extra_feats: Dictionary containing the object and the features to be extracted from
+            that object.
+        :param flag: String specifying subdirectory to put the extra feature parquet files in so
+            they don't get mixed up at training time.
         """
         log.info(Back.GREEN + f"Extracting additional features: {extra_feats}...")
         self.hparams.data_mlready.prepare(normalizer, extra_feats, flag)
@@ -414,9 +401,7 @@ class L1ADDataModule(LightningDataModule):
             )
 
         if stage not in {"val", "test"}:
-            raise ValueError(
-                f"Unknown stage '{stage}'. Expected one of: 'train', 'val', 'test'."
-            )
+            raise ValueError(f"Unknown stage '{stage}'. Expected one of: 'train', 'val', 'test'.")
 
         split_name = "valid" if stage == "val" else "test"
         main_key = "normal"

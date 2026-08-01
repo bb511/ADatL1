@@ -74,6 +74,7 @@ def _write_manifest(root: Path) -> dict:
     stage3 = jetclr_campaign.stage3_specs()
     stage4 = jetclr_campaign.stage4_specs()
     stage5 = jetclr_campaign.stage5_specs()
+    stage6 = jetclr_campaign.stage6_specs()
     manifest = {
         "schema_version": 1,
         "campaign_id": "jetclr_test_deadbeef",
@@ -128,6 +129,15 @@ def _write_manifest(root: Path) -> dict:
             "source_summary_csv_sha256": jetclr_campaign.STAGE5_SOURCE_SUMMARY_CSV_SHA256,
             "candidates": stage5,
             "design_sha256": jetclr_campaign._value_sha256(stage5),
+        },
+        "stage6": {
+            "seeds": list(jetclr_campaign.STAGE6_SEEDS),
+            "full_epochs": jetclr_campaign.STAGE6_EPOCHS,
+            "milestone_epochs": list(jetclr_campaign.STAGE6_MILESTONES),
+            "source_campaign_id": jetclr_campaign.STAGE6_SOURCE_CAMPAIGN,
+            "source_promotions": {"layers2": True, "official_projector": True},
+            "candidates": stage6,
+            "design_sha256": jetclr_campaign._value_sha256(stage6),
         },
     }
     manifest["manifest_payload_sha256"] = jetclr_campaign._value_sha256(manifest)
@@ -248,6 +258,70 @@ def _write_stage5_results(root: Path, manifest: dict) -> None:
         }
         result["result_payload_sha256"] = jetclr_campaign._value_sha256(result)
         jetclr_campaign._atomic_json(trial_root / "result.json", result)
+
+
+def _write_stage6_results(root: Path, manifest: dict) -> None:
+    """Write authenticated 16-epoch synthetic pilot bundles."""
+    for spec in manifest["stage6"]["candidates"]:
+        trial = root / "stage6" / f"candidate_{spec['candidate_id']:03d}"
+        trial.mkdir(parents=True)
+        weights = spec["regularization_params"]
+        training = _stage4_training_metrics(
+            weights["algorithm.encoder_variance_weight"],
+            weights["algorithm.encoder_covariance_weight"],
+        )
+        metrics = trial / "metrics.csv"
+        pairing_path = trial / "pairing_diagnostics.json"
+        anomaly_path = trial / "embedding_anomaly.json"
+        checkpoint_dir = trial / "checkpoints"
+        checkpoint_dir.mkdir()
+        metrics.write_text("metrics", encoding="utf-8")
+        pairing = _pairing_metrics()
+        anomaly = _anomaly_metrics()
+        if not spec["is_architecture_control"]:
+            pairing["embedding_effective_rank"] = 46.0
+        pairing_path.write_text(json.dumps(pairing), encoding="utf-8")
+        anomaly_path.write_text(json.dumps(anomaly), encoding="utf-8")
+        inventory = []
+        for index in range(16):
+            checkpoint = checkpoint_dir / f"epoch-{index:02d}.ckpt"
+            checkpoint.write_bytes(f"{spec['candidate_id']}/{index}".encode())
+            inventory.append(
+                {
+                    "completed_epoch": index + 1,
+                    "epoch_index": index,
+                    "path": str(checkpoint),
+                    "sha256": jetclr_campaign._sha256(checkpoint),
+                    "is_milestone": index + 1 in jetclr_campaign.STAGE6_MILESTONES,
+                }
+            )
+        last = checkpoint_dir / "last.ckpt"
+        last.write_bytes(b"last")
+        artifacts = {
+            name: {"path": str(path), "sha256": jetclr_campaign._sha256(path)}
+            for name, path in {
+                "training_csv": metrics,
+                "pairing_json": pairing_path,
+                "anomaly_json": anomaly_path,
+                "last_checkpoint": last,
+            }.items()
+        }
+        result = {
+            "campaign_id": manifest["campaign_id"],
+            "git_commit": manifest["git"]["commit"],
+            "candidate_id": spec["candidate_id"],
+            "spec_sha256": spec["spec_sha256"],
+            "source_campaign_id": jetclr_campaign.STAGE6_SOURCE_CAMPAIGN,
+            "source_candidate_id": spec["source_candidate_id"],
+            "source_candidate_spec_sha256": spec["source_candidate_spec_sha256"],
+            "artifacts": artifacts,
+            "checkpoint_inventory": inventory,
+            "training_metrics": training,
+            "pairing_metrics": pairing,
+            "anomaly_metrics": anomaly,
+        }
+        result["result_payload_sha256"] = jetclr_campaign._value_sha256(result)
+        jetclr_campaign._atomic_json(trial / "result.json", result)
 
 
 def test_canary_specs_are_deterministic_and_cover_four_distinct_recipes() -> None:
@@ -1037,3 +1111,80 @@ def test_collect_stage5_combines_authenticated_seed123_and_reports_promotions(
     assert {row["origin"] for row in rows} == {"stage4_seed123", "stage5_fresh"}
     assert all(row["result_payload_sha256"] for row in rows)
     assert all(row["checkpoint_sha256"] for row in rows)
+
+
+def test_stage6_exact_design_configs_and_launcher(tmp_path: Path) -> None:
+    """Stage 6 must compose twelve 16-epoch runs and pack them over three nodes."""
+    specs = jetclr_campaign.stage6_specs()
+    assert len(specs) == 12
+    assert [item["source_candidate_id"] for item in specs] == [0] * 3 + [4] * 3 + [6] * 3 + [
+        10
+    ] * 3
+    assert [item["seed"] for item in specs] == [123, 2027, 31415] * 4
+    assert {item["full_epochs"] for item in specs} == {16}
+    config_dir = Path(jetclr_campaign.__file__).resolve().parents[1] / "configs"
+    with initialize_config_dir(config_dir=str(config_dir), version_base="1.3"):
+        for spec in specs:
+            config = compose(
+                config_name="train",
+                overrides=[
+                    "experiment=physics/jetclr_pairing",
+                    "trainer=gpu",
+                    f"seed={spec['seed']}",
+                    "trainer.min_epochs=16",
+                    "trainer.max_epochs=16",
+                    "callbacks.last_epoch_ckpt.filename='epoch-{epoch:02d}'",
+                    "callbacks.last_epoch_ckpt.save_top_k=-1",
+                    "callbacks.last_epoch_ckpt.every_n_epochs=1",
+                    *spec["overrides"],
+                ],
+            )
+            assert config.trainer.max_epochs == 16
+            assert config.callbacks.last_epoch_ckpt.filename == "epoch-{epoch:02d}"
+
+    manifest = _write_manifest(tmp_path)
+    launchers = jetclr_campaign._write_stage6_launchers(tmp_path, manifest)
+    stage6 = launchers["stage6"].read_text(encoding="utf-8")
+    assert "#SBATCH --array=0-2%3" in stage6
+    assert "#SBATCH --time=12:00:00" in stage6
+    assert "run-stage6" in stage6
+
+
+def test_collect_stage6_authenticates_inventory_source_promotions_and_epoch16_pairs(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Stage 6 must retain checkpoint hashes and expose six matched final comparisons."""
+    manifest = _write_manifest(tmp_path)
+    _write_stage6_results(tmp_path, manifest)
+    source_summary = tmp_path / "source_summary.json"
+    source_summary_csv = tmp_path / "source_summary.csv"
+    source_paired_csv = tmp_path / "source_paired.csv"
+    source_summary.write_text(
+        json.dumps(
+            {
+                "confirmations": {
+                    "layers2": {"promotion": True},
+                    "official_projector": {"promotion": True},
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
+    source_summary_csv.write_text("candidate_id\n0\n", encoding="utf-8")
+    source_paired_csv.write_text("seed\n123\n", encoding="utf-8")
+    for path_name, digest_name, path in (
+        ("STAGE6_SOURCE_SUMMARY", "STAGE6_SOURCE_SUMMARY_SHA256", source_summary),
+        ("STAGE6_SOURCE_SUMMARY_CSV", "STAGE6_SOURCE_SUMMARY_CSV_SHA256", source_summary_csv),
+        ("STAGE6_SOURCE_PAIRED_CSV", "STAGE6_SOURCE_PAIRED_CSV_SHA256", source_paired_csv),
+    ):
+        monkeypatch.setattr(jetclr_campaign, path_name, path)
+        monkeypatch.setattr(jetclr_campaign, digest_name, jetclr_campaign._sha256(path))
+
+    output = jetclr_campaign.collect_stage6(tmp_path)
+    summary = json.loads(output.read_text(encoding="utf-8"))
+    assert summary["n_candidates"] == 12
+    assert summary["epoch16_pair_count"] == 6
+    assert summary["milestone_epochs"] == [1, 2, 4, 8, 16]
+    assert summary["all_candidates_milestone_evaluation_ready"] is True
+    assert summary["source_promotions"] == {"layers2": True, "official_projector": True}
+    assert "winner" not in summary

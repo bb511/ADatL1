@@ -20,6 +20,7 @@ class ADLightningModule(LightningModule):
         scheduler: Optional[DictConfig] = None,
         masking: Optional[nn.Module] = None,
         save_hyperparameters: bool = False,
+        sync_dist_metrics: bool = False,
     ):
         super().__init__()
         self.save_hyperparameters(
@@ -30,6 +31,7 @@ class ADLightningModule(LightningModule):
         self.model = model
         self.loss = loss
         self.masking = masking if masking is not None else nn.Identity()
+        self.sync_dist_metrics = bool(sync_dist_metrics)
         self._log_sum = {}
         self._log_nsteps = {}
 
@@ -81,7 +83,13 @@ class ADLightningModule(LightningModule):
 
     def on_validation_epoch_end(self):
         """Log the epochs so the mlflow plotting is not buggy, clean memory."""
-        self.log("epoch_idx", float(self.current_epoch), on_epoch=True, on_step=False)
+        self.log(
+            "epoch_idx",
+            float(self.current_epoch),
+            on_epoch=True,
+            on_step=False,
+            sync_dist=self.sync_dist_metrics,
+        )
 
     def on_test_epoch_end(self):
         """Clean up memory."""
@@ -110,13 +118,15 @@ class ADLightningModule(LightningModule):
 
         for mname, mvalue in outdict.items():
             if isinstance(mvalue, (int, float)):
-                self._log_sum[dataloader_idx][mname] = self._log_sum[dataloader_idx].get(
-                    mname, 0.0
-                ) + float(mvalue)
+                value = torch.tensor(float(mvalue), device=self.device)
+                self._log_sum[dataloader_idx][mname] = (
+                    self._log_sum[dataloader_idx].get(mname, torch.zeros_like(value)) + value
+                )
             elif torch.is_tensor(mvalue) and mvalue.ndim == 0:
-                self._log_sum[dataloader_idx][mname] = self._log_sum[dataloader_idx].get(
-                    mname, 0.0
-                ) + float(mvalue.detach())
+                value = mvalue.detach()
+                self._log_sum[dataloader_idx][mname] = (
+                    self._log_sum[dataloader_idx].get(mname, torch.zeros_like(value)) + value
+                )
 
         self._log_nsteps[dataloader_idx] += 1
 
@@ -137,7 +147,7 @@ class ADLightningModule(LightningModule):
             on_epoch=True,
             logger=True,
             prog_bar=False,
-            sync_dist=False,  # set True only for a few key metrics if needed
+            sync_dist=self.sync_dist_metrics,
             add_dataloader_idx=False,
         )
 

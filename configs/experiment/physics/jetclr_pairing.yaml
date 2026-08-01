@@ -4,7 +4,7 @@ defaults:
   - override /data: basis
   - override /algorithm: jetclr
   - override /callbacks: default
-  - override /trainer: cpu
+  - override /trainer: gpu
   - override /evaluation: default
   - override /evaluation/callbacks: null
   - override /logger: mlflow
@@ -16,14 +16,23 @@ experiment_name: physics_pairing_encoder
 run_name: ${short_hash:${hydra:runtime.output_dir},12}
 
 data:
-  batch_size: 8192
+  batch_size: 2048
   max_val_batches: 10
+  # 32,768 fixed normal events: bounded enough for search and identical across trials.
+  max_normal_eval_batches: 16
 
 trainer:
   min_epochs: 1
-  max_epochs: 50
+  max_epochs: 100
+  precision: bf16-mixed
   gradient_clip_algorithm: norm
-  gradient_clip_val: 1.0
+  gradient_clip_val: 0.1
+
+algorithm:
+  diagnosis_metrics: false
+
+extras:
+  matmul_precision: high
 
 test: false
 
@@ -49,4 +58,16 @@ evaluation:
       closure_dataset: normal
       k: 20
       caliper_quantile: 0.95
+      max_events_per_dataset: 32768
+      closure_chunk_size: 512
       name: pairing_diagnostics
+    embedding_anomaly:
+      _target_: src.evaluation.callbacks.embedding_anomaly.EmbeddingAnomalyMetrics
+      output_name: pairing_rep_data
+      reference_dataset: normal
+      background_datasets: [SingleNeutrino_E-10-gun]
+      reference_size: 8192
+      max_query_events: 8192
+      k: 10
+      target_fprs: [0.01, 0.001]
+      name: embedding_anomaly

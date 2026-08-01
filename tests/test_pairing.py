@@ -84,6 +84,19 @@ def test_pairing_algorithms_validate_inputs_and_return_unique_pairs() -> None:
         closure_metrics(z1, z2[:2])
 
 
+def test_closure_metrics_are_exact_across_query_chunks() -> None:
+    generator = torch.Generator().manual_seed(123)
+    z1 = torch.randn(23, 7, generator=generator)
+    z2 = z1 + 0.2 * torch.randn(23, 7, generator=generator)
+
+    chunked = closure_metrics(z1, z2, ks=(1, 5, 10), chunk_size=4)
+    dense = closure_metrics(z1, z2, ks=(1, 5, 10), chunk_size=23)
+
+    assert chunked == pytest.approx(dense)
+    with pytest.raises(ValueError, match="chunk_size"):
+        closure_metrics(z1, z2, chunk_size=0)
+
+
 def test_versioned_pair_table_round_trip_and_overwrite_protection(tmp_path: Path) -> None:
     path = tmp_path / "pairs.pt"
     table = _table(tmp_path)

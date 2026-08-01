@@ -33,5 +33,9 @@ batch_size: 16384
 # How many batches to split the validation data into. -1 means use batch_size
 max_val_batches: 10
 
+# Independent deterministic cap for the normal validation/test loader. Null keeps
+# the full split for backward compatibility; JetCLR experiments override this.
+max_normal_eval_batches: null
+
 # Seed for shuffling the data, if any shuffling is happening.
 seed: ${seed}

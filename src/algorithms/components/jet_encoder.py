@@ -19,7 +19,8 @@ class ObjectTransformerEncoder(nn.Module):
     def __init__(
         self,
         feature_names: list[str] | tuple[str, ...] = ("Et", "eta", "phi"),
-        object_types: list[str] | tuple[str, ...] = (
+        object_types: list[str]
+        | tuple[str, ...] = (
             "FET",
             "egammas",
             "jets",
@@ -66,7 +67,9 @@ class ObjectTransformerEncoder(nn.Module):
         self.encoder = nn.TransformerEncoder(layer, num_layers=n_layers)
         self.norm = nn.LayerNorm(self.d_model)
         self.output = (
-            nn.Identity() if self.out_dim == self.d_model else nn.Linear(self.d_model, self.out_dim)
+            nn.Identity()
+            if self.out_dim == self.d_model
+            else nn.Linear(self.d_model, self.out_dim)
         )
 
         nn.init.trunc_normal_(self.cls_token, std=0.02)
@@ -140,9 +143,14 @@ class ObjectTransformerEncoder(nn.Module):
 
                 token_values.append(torch.stack(values, dim=1))
                 if masks:
-                    token_masks.append(torch.stack(masks, dim=1).all(dim=1))
+                    # Unified schemas pad unavailable features. FET, for example,
+                    # has valid Et and phi but no eta, so requiring every feature
+                    # would incorrectly mask every FET token.
+                    token_masks.append(torch.stack(masks, dim=1).any(dim=1))
                 else:
-                    token_masks.append(torch.ones(x_flat.shape[0], dtype=torch.bool, device=x_flat.device))
+                    token_masks.append(
+                        torch.ones(x_flat.shape[0], dtype=torch.bool, device=x_flat.device)
+                    )
                 token_types.append(type_idx)
 
         if not token_values:

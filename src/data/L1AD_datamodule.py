@@ -4,6 +4,7 @@ from dataclasses import dataclass
 from pathlib import Path
 import gc
 import warnings
+from typing import TYPE_CHECKING
 
 import torch
 import numpy as np
@@ -14,6 +15,12 @@ from src.utils import pylogger
 from colorama import Fore, Back, Style
 from src.data.components.dataset import L1ADDataset
 from src.data.components.normalization import L1DataNormalizer
+
+if TYPE_CHECKING:
+    from src.data.components.awkward2torch import L1DataAwkward2Torch
+    from src.data.components.extraction import L1DataExtractor
+    from src.data.components.mlready import L1DataMLReady
+    from src.data.components.processing import L1DataProcessor
 
 log = pylogger.RankedLogger(__name__)
 
@@ -55,6 +62,7 @@ class L1ADDataModule(LightningDataModule):
         l1_scales: dict,
         batch_size: int = 16384,
         max_val_batches: int = -1,
+        max_normal_eval_batches: int | None = None,
         seed: int = 42,
     ) -> None:
         """Prepare the L1 data for using it to train and validate ML models.
@@ -75,7 +83,10 @@ class L1ADDataModule(LightningDataModule):
             all features that could be in the data set.
         :param batch_size: Integer specifying the batch size of the data.
         :param max_val_batches: Integer specifying how many batches to use for the val
-            data sets.
+            auxiliary data sets.
+        :param max_normal_eval_batches: Optional independent cap on batches from the
+            normal validation and test splits. These loaders are unshuffled, so every
+            candidate sees the same rows. ``None`` preserves the full-split behavior.
         :param seed: Integer specifying the seed with which to shuffle the training
             data when constructing the data set.
         """
@@ -91,6 +102,9 @@ class L1ADDataModule(LightningDataModule):
         self._aux: dict[str, dict[str, SplitTensors]] = {"valid": {}, "test": {}}
         self.shuffler = torch.Generator().manual_seed(seed)
         self.max_val_batches = max_val_batches
+        self.max_normal_eval_batches = self._normal_eval_batch_cap(
+            max_normal_eval_batches
+        )
 
     def prepare_data(self) -> None:
         """Get zero bias data and the simulated MC signal data."""
@@ -287,7 +301,9 @@ class L1ADDataModule(LightningDataModule):
         loaders: dict[str, DataLoader] = {}
 
         loaders[main_name] = self._to_loader(
-            main, batch_size=self.batch_size_per_device
+            main,
+            batch_size=self.batch_size_per_device,
+            max_b=self.max_normal_eval_batches,
         )
 
         for name, split in self._aux.get(aux_key, {}).items():
@@ -296,6 +312,16 @@ class L1ADDataModule(LightningDataModule):
             )
 
         return loaders
+
+    @staticmethod
+    def _normal_eval_batch_cap(max_batches: int | None) -> int | None:
+        """Validate the optional deterministic cap for the normal eval split."""
+        if max_batches is None or int(max_batches) == -1:
+            return None
+        max_batches = int(max_batches)
+        if max_batches <= 0:
+            raise ValueError("max_normal_eval_batches must be positive, -1, or None.")
+        return max_batches
 
     def _to_loader(
         self, split: SplitTensors, batch_size: int, max_b: int = None

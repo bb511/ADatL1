@@ -4,34 +4,39 @@ _target_: src.algorithms.jetclr.JetCLR
 
 seed: ${seed}
 diagnosis_metrics: true
+sync_dist_metrics: true
 ckpt: ""
 
-feature_blur:
-  _target_: src.algorithms.components.augmentation.FastFeatureBlur
-  prob: 0.25
-  magnitude: 0.10
-  strength: 0.35
+feature_blur: null
+
+detector_smearing:
+  _target_: src.algorithms.components.augmentation.FastDetectorSmearing
+  _partial_: true
+  prob: 0.80
+  strength: 0.50
 
 object_mask:
-  _target_: src.algorithms.components.augmentation.FastObjectMask
-  prob: 0.02
+  _target_: src.algorithms.components.augmentation.FastObjectDropout
+  prob: 0.80
+  object_prob: 0.05
+  protected_object_types: [FET, MET]
 
 lorentz_rotation:
   _target_: src.algorithms.components.augmentation.FastLorentzRotation
   _partial_: true
-  prob: 0.30
+  prob: 0.50
 
 model:
   _target_: src.algorithms.components.jet_encoder.ObjectTransformerEncoder
   feature_names: [Et, eta, phi]
   object_types: [FET, MET, egammas, jets, muons, taus]
   feature_dim: 3
-  d_model: 64
-  out_dim: 64
-  n_heads: 4
-  n_layers: 2
-  dim_feedforward: 256
-  dropout: 0.0
+  d_model: 128
+  out_dim: 128
+  n_heads: 8
+  n_layers: 4
+  dim_feedforward: 512
+  dropout: 0.1
   activation: gelu
   pooling: cls
 
@@ -39,13 +44,14 @@ projector:
   _target_: src.algorithms.components.mlp.MLP
   in_dim: ${algorithm.model.out_dim}
   nodes: [256, 256]
-  out_dim: 64
+  out_dim: 128
   batchnorm: true
   activation: gelu
 
 loss:
   _target_: src.algorithms.losses.contrastive.NTXentLoss
   temperature: 0.10
+  gather_distributed: true
 
 optimizer:
   _partial_: true
@@ -53,7 +59,7 @@ optimizer:
   lr: 0.0003
   weight_decay: 0.0001
   betas: [0.9, 0.99]
-  eps: 1e-8
+  eps: 1e-6
 
 scheduler:
   scheduler:

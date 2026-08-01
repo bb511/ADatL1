@@ -110,7 +110,7 @@ class PairingDiagnostics(Callback):
         root.mkdir(parents=True, exist_ok=True)
         atomic_json_dump(metrics, root / "pairing_diagnostics.json", overwrite=True)
 
-    def _compute_metrics(self) -> dict[str, float]:
+    def _compute_metrics(self) -> dict[str, object]:
         missing = [
             name
             for name, values in (
@@ -145,33 +145,42 @@ class PairingDiagnostics(Callback):
                 self.caliper_quantile,
             ).item()
         pairs = mutual_nearest_pairs(z1, z2, k=self.k, caliper=caliper)
-        if not pairs.idx_1.numel():
-            raise RuntimeError(
-                "Pairing diagnostics produced no mutual-nearest pairs. "
-                "Inspect the encoder or caliper before continuing."
-            )
-
         smd_before = standardized_mean_differences(x1, x2)
-        smd_after = standardized_mean_differences(x1, x2, pairs.idx_1, pairs.idx_2)
         value_smd_before = self._masked_value_smd(x1, m1, x2, m2)
-        value_smd_after = self._masked_value_smd(
-            x1[pairs.idx_1],
-            m1[pairs.idx_1],
-            x2[pairs.idx_2],
-            m2[pairs.idx_2],
-            jointly_valid=True,
-        )
         occupancy_smd_before = standardized_mean_differences(m1.float(), m2.float())
-        occupancy_smd_after = standardized_mean_differences(
-            m1.float(), m2.float(), pairs.idx_1, pairs.idx_2
-        )
         coverage = pairs.idx_1.numel() / max(min(z1.shape[0], z2.shape[0]), 1)
-        mean_smd_after = smd_after.mean().item() if smd_after.numel() else float("inf")
         embedding = self._embedding_statistics(z1)
 
-        selection_score = (
-            close.get("closure_recall_at_10", 0.0) * coverage / (1.0 + max(mean_smd_after, 0.0))
-        )
+        if pairs.idx_1.numel():
+            smd_after = standardized_mean_differences(x1, x2, pairs.idx_1, pairs.idx_2)
+            value_smd_after = self._masked_value_smd(
+                x1[pairs.idx_1],
+                m1[pairs.idx_1],
+                x2[pairs.idx_2],
+                m2[pairs.idx_2],
+                jointly_valid=True,
+            )
+            occupancy_smd_after = standardized_mean_differences(
+                m1.float(), m2.float(), pairs.idx_1, pairs.idx_2
+            )
+            mean_smd_after = smd_after.mean().item()
+            selection_score = (
+                close.get("closure_recall_at_10", 0.0)
+                * coverage
+                / (1.0 + max(mean_smd_after, 0.0))
+            )
+        else:
+            smd_after = torch.empty(0)
+            value_smd_after = torch.empty(0)
+            occupancy_smd_after = torch.empty(0)
+            mean_smd_after = None
+            selection_score = 0.0
+            embedding["collapse_pass"] = False
+            embedding["collapse_failures"] = [
+                *embedding["collapse_failures"],
+                "no_mutual_nearest_pairs",
+            ]
+
         if not embedding["collapse_pass"]:
             selection_score = 0.0
 
@@ -180,20 +189,22 @@ class PairingDiagnostics(Callback):
             "mnn_pairs": int(pairs.idx_1.numel()),
             "mnn_coverage": float(coverage),
             "caliper": None if caliper is None else float(caliper),
-            "pair_distance_mean": pairs.distance.mean().item()
-            if pairs.distance.numel()
-            else float("nan"),
-            "pair_distance_p95": torch.quantile(pairs.distance, 0.95).item()
-            if pairs.distance.numel()
-            else float("nan"),
-            "smd_before_mean": smd_before.mean().item() if smd_before.numel() else float("nan"),
-            "smd_before_max": smd_before.max().item() if smd_before.numel() else float("nan"),
+            "pair_distance_mean": pairs.distance.mean().item() if pairs.distance.numel() else None,
+            "pair_distance_p95": (
+                torch.quantile(pairs.distance, 0.95).item() if pairs.distance.numel() else None
+            ),
+            "smd_before_mean": smd_before.mean().item() if smd_before.numel() else None,
+            "smd_before_max": smd_before.max().item() if smd_before.numel() else None,
             "smd_after_mean": mean_smd_after,
-            "smd_after_max": smd_after.max().item() if smd_after.numel() else float("nan"),
+            "smd_after_max": smd_after.max().item() if smd_after.numel() else None,
             "value_smd_before_mean": self._finite_mean(value_smd_before),
-            "value_smd_after_mean": self._finite_mean(value_smd_after),
+            "value_smd_after_mean": (
+                self._finite_mean(value_smd_after) if value_smd_after.numel() else None
+            ),
             "occupancy_smd_before_mean": self._finite_mean(occupancy_smd_before),
-            "occupancy_smd_after_mean": self._finite_mean(occupancy_smd_after),
+            "occupancy_smd_after_mean": (
+                self._finite_mean(occupancy_smd_after) if occupancy_smd_after.numel() else None
+            ),
             "selection_score": float(selection_score),
             "n_dataset_1": int(z1.shape[0]),
             "n_dataset_2": int(z2.shape[0]),

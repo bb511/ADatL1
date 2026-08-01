@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from types import SimpleNamespace
 
 import pytest
@@ -236,6 +237,29 @@ def test_embedding_diagnostics_detect_rank_collapse() -> None:
     assert healthy_stats["collapse_pass"]
     assert not collapsed_stats["collapse_pass"]
     assert "inactive_dimensions" in collapsed_stats["collapse_failures"]
+
+
+def test_pairing_diagnostics_records_zero_pairs_as_ineligible() -> None:
+    callback = PairingDiagnostics(k=1, caliper_quantile=0.0)
+    z1 = torch.eye(4)
+    z2 = -torch.eye(4)
+    raw = torch.arange(16, dtype=torch.float32).reshape(4, 4)
+    mask = torch.ones_like(raw, dtype=torch.bool)
+    callback.reps = {"normal": [z1], "reference_normal": [z2]}
+    callback.raw = {"normal": [raw], "reference_normal": [raw.clone()]}
+    callback.raw_mask = {"normal": [mask], "reference_normal": [mask.clone()]}
+    callback.closure_1 = [z1]
+    callback.closure_2 = [z1.clone()]
+
+    metrics = callback._compute_metrics()
+
+    assert metrics["mnn_pairs"] == 0
+    assert metrics["mnn_coverage"] == 0.0
+    assert metrics["selection_score"] == 0.0
+    assert metrics["collapse_pass"] is False
+    assert "no_mutual_nearest_pairs" in metrics["collapse_failures"]
+    assert metrics["pair_distance_mean"] is None
+    json.dumps(metrics, allow_nan=False)
 
 
 def test_masked_smd_ignores_padding_values() -> None:

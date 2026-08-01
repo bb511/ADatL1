@@ -1,10 +1,12 @@
 from __future__ import annotations
 
 import json
+from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
 import torch
+from omegaconf import OmegaConf
 from torch import nn
 
 from src.algorithms.components.augmentation import (
@@ -151,6 +153,13 @@ def test_evaluation_augmentation_reset_is_independent_of_rng_history() -> None:
     torch.testing.assert_close(actual, expected)
 
 
+def test_jetclr_cosine_scheduler_runs_each_optimizer_step() -> None:
+    config = OmegaConf.load(Path(__file__).parents[1] / "configs/algorithm/jetclr.yaml")
+
+    assert config.scheduler.interval == "step"
+    assert config.scheduler.frequency == 1
+
+
 def test_detector_smearing_sanitizes_energy_and_wraps_phi() -> None:
     x = torch.tensor([[0.0, 3.13], [0.0, -3.13]])
     mask = torch.ones_like(x)
@@ -255,6 +264,7 @@ def test_pairing_diagnostics_records_zero_pairs_as_ineligible() -> None:
 
     assert metrics["mnn_pairs"] == 0
     assert metrics["mnn_coverage"] == 0.0
+    assert metrics["raw_selection_score"] == 0.0
     assert metrics["selection_score"] == 0.0
     assert metrics["collapse_pass"] is False
     assert "no_mutual_nearest_pairs" in metrics["collapse_failures"]

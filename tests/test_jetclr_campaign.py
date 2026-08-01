@@ -14,6 +14,7 @@ def _pairing_metrics(collapse_pass: bool = True) -> dict:
     """Return a complete synthetic pairing artifact."""
     return {
         "selection_score": 0.5,
+        "raw_selection_score": 0.5,
         "closure_recall_at_10": 0.8,
         "mnn_coverage": 0.7,
         "embedding_finite_fraction": 1.0,
@@ -244,7 +245,10 @@ def test_collect_rejects_modified_metrics(tmp_path: Path) -> None:
         jetclr_campaign.collect(tmp_path)
 
 
-def test_collect_stage1_authenticates_ranks_and_applies_collapse_gate(tmp_path: Path) -> None:
+@pytest.mark.parametrize("all_collapsed", [False, True])
+def test_collect_stage1_authenticates_ranks_and_applies_collapse_gate(
+    tmp_path: Path, all_collapsed: bool
+) -> None:
     """Collection should rank eligible utility while retaining collapsed candidates."""
     manifest = _write_manifest(tmp_path)
     for spec in manifest["stage1"]["candidates"]:
@@ -254,7 +258,7 @@ def test_collect_stage1_authenticates_ranks_and_applies_collapse_gate(tmp_path: 
         pairing_path = trial_root / "pairing_diagnostics.json"
         anomaly_path = trial_root / "embedding_anomaly.json"
         metrics.write_text("train/loss_mean\n2.0\n", encoding="utf-8")
-        collapse = spec["candidate_id"] != 1
+        collapse = False if all_collapsed else spec["candidate_id"] != 1
         pairing = _pairing_metrics(collapse)
         anomaly = _anomaly_metrics(0.99 if spec["candidate_id"] == 1 else 0.75)
         pairing_path.write_text(json.dumps(pairing), encoding="utf-8")
@@ -292,9 +296,15 @@ def test_collect_stage1_authenticates_ranks_and_applies_collapse_gate(tmp_path: 
         rows = list(csv.DictReader(handle))
 
     assert summary["n_candidates"] == 48
-    assert summary["n_collapse_pass"] == 47
-    assert summary["n_eligible"] == 47
-    assert summary["best_candidate_id"] != 1
+    expected_eligible = 0 if all_collapsed else 47
+    assert summary["n_collapse_pass"] == expected_eligible
+    assert summary["n_eligible"] == expected_eligible
+    if all_collapsed:
+        assert summary["status"] == "complete_no_eligible_candidates"
+        assert summary["best_candidate_id"] is None
+    else:
+        assert summary["status"] == "complete"
+        assert summary["best_candidate_id"] != 1
     collapsed = next(row for row in rows if row["candidate_id"] == "1")
     assert collapsed["eligible"] == "False"
     assert float(collapsed["worst_quartile_mean_auroc"]) == pytest.approx(0.89)

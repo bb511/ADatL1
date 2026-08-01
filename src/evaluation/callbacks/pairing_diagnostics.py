@@ -164,7 +164,7 @@ class PairingDiagnostics(Callback):
                 m1.float(), m2.float(), pairs.idx_1, pairs.idx_2
             )
             mean_smd_after = smd_after.mean().item()
-            selection_score = (
+            raw_selection_score = (
                 close.get("closure_recall_at_10", 0.0)
                 * coverage
                 / (1.0 + max(mean_smd_after, 0.0))
@@ -174,15 +174,14 @@ class PairingDiagnostics(Callback):
             value_smd_after = torch.empty(0)
             occupancy_smd_after = torch.empty(0)
             mean_smd_after = None
-            selection_score = 0.0
+            raw_selection_score = 0.0
             embedding["collapse_pass"] = False
             embedding["collapse_failures"] = [
                 *embedding["collapse_failures"],
                 "no_mutual_nearest_pairs",
             ]
 
-        if not embedding["collapse_pass"]:
-            selection_score = 0.0
+        selection_score = raw_selection_score if embedding["collapse_pass"] else 0.0
 
         return {
             **close,
@@ -205,6 +204,7 @@ class PairingDiagnostics(Callback):
             "occupancy_smd_after_mean": (
                 self._finite_mean(occupancy_smd_after) if occupancy_smd_after.numel() else None
             ),
+            "raw_selection_score": float(raw_selection_score),
             "selection_score": float(selection_score),
             "n_dataset_1": int(z1.shape[0]),
             "n_dataset_2": int(z2.shape[0]),

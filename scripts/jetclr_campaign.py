@@ -854,6 +854,7 @@ def run_stage1(root: Path, candidate_id: int) -> Path:
         pairing_path,
         (
             "selection_score",
+            "raw_selection_score",
             "closure_recall_at_10",
             "mnn_coverage",
             "embedding_finite_fraction",
@@ -1005,6 +1006,7 @@ def collect_stage1(root: Path) -> Path:
                 "embedding_participation_rank": pairing["embedding_participation_rank"],
                 "embedding_top_pc_fraction": pairing["embedding_top_pc_fraction"],
                 "pairing_selection_score": pairing["selection_score"],
+                "pairing_raw_selection_score": pairing["raw_selection_score"],
                 "closure_recall_at_10": pairing["closure_recall_at_10"],
                 "mnn_coverage": pairing["mnn_coverage"],
                 "macro_median_auroc": anomaly["macro_median_auroc"],
@@ -1020,8 +1022,6 @@ def collect_stage1(root: Path) -> Path:
         raise FileNotFoundError(
             f"Stage 1 is incomplete: {len(missing)} results missing; first is {missing[0]}"
         )
-    if not any(row["eligible"] for row in rows):
-        raise RuntimeError("Every Stage-1 candidate failed the embedding collapse gates.")
     rows.sort(
         key=lambda row: (
             bool(row["eligible"]),
@@ -1039,7 +1039,7 @@ def collect_stage1(root: Path) -> Path:
     summary = {
         "schema_version": 1,
         "campaign_id": manifest["campaign_id"],
-        "status": "complete",
+        "status": "complete" if eligible else "complete_no_eligible_candidates",
         "n_candidates": len(rows),
         "n_collapse_pass": sum(bool(row["collapse_pass"]) for row in rows),
         "n_eligible": len(eligible),
@@ -1049,8 +1049,9 @@ def collect_stage1(root: Path) -> Path:
             "macro_median_auroc",
             "pairing_selection_score",
         ],
-        "best_candidate_id": eligible[0]["candidate_id"],
-        "best_candidate_spec_sha256": eligible[0]["spec_sha256"],
+        "best_candidate_id": eligible[0]["candidate_id"] if eligible else None,
+        "best_candidate_spec_sha256": eligible[0]["spec_sha256"] if eligible else None,
+        "proxy_candidate_id": rows[0]["candidate_id"],
         "summary_csv": str(table),
         "summary_csv_sha256": _sha256(table),
     }

@@ -43,6 +43,14 @@ def test_canary_specs_are_deterministic_and_cover_four_distinct_recipes() -> Non
     assert any("algorithm.model.d_model=256" in item["overrides"] for item in first)
 
 
+def test_canary_disables_evaluation_callbacks_without_deleting_config_group() -> None:
+    """The physics experiment's evaluation group must remain Hydra-composable."""
+    source = Path(jetclr_campaign.__file__).read_text(encoding="utf-8")
+
+    assert '"evaluation.callbacks=null"' in source
+    assert '"evaluation=null"' not in source
+
+
 def test_campaign_manifest_detects_tampering(tmp_path: Path) -> None:
     """Changing any authenticated manifest field must fail closed."""
     manifest = _write_manifest(tmp_path)

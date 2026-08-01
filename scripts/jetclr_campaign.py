@@ -428,7 +428,7 @@ def run_trial(root: Path, trial_id: int) -> Path:
         "+trainer.enable_progress_bar=false",
         "+trainer.enable_model_summary=false",
         "logger=csv",
-        "evaluation=null",
+        "evaluation.callbacks=null",
         "test=false",
         f"seed={spec['seed']}",
         f"experiment_name=jetclr_canary_{manifest['campaign_id']}",

@@ -1265,10 +1265,23 @@ Cell[BoxData[{
         RowBox[{"\"\<14 TeV\>\"", ",", 
          RowBox[{"FontFamily", "->", "\"\<TeX Gyre Heros\>\""}], ",", "24"}], 
         "]"}]}], ";", "\[IndentingNewLine]", 
-      RowBox[{"xCenters", "=", 
-       RowBox[{"{", 
-        RowBox[{"0.165", ",", " ", "0.3", ",", "0.43", ",", " ", "0.57"}], 
-        "}"}]}], ";", "\[IndentingNewLine]", "\[IndentingNewLine]", 
+      RowBox[{"xCenters", "=",
+       RowBox[{"If", "[",
+        RowBox[{
+         RowBox[{"nBoxes", "==", "4"}], ",",
+         RowBox[{"{",
+          RowBox[{"0.165", ",", " ", "0.3", ",", "0.43", ",", " ", "0.57"}],
+          "}"}], ",",
+         RowBox[{"Table", "[",
+          RowBox[{
+           RowBox[{"0.0975", "+",
+            RowBox[{"0.54", "*",
+             RowBox[{
+              RowBox[{"(",
+               RowBox[{"i", "-", "0.5"}], ")"}], "/", "nBoxes"}]}]}], ",",
+           RowBox[{"{",
+            RowBox[{"i", ",", "nBoxes"}], "}"}]}], "]"}]}], "]"}]}], ";",
+      "\[IndentingNewLine]", "\[IndentingNewLine]",
       RowBox[{"Graphics", "[", "\[IndentingNewLine]", 
        RowBox[{
         RowBox[{"Join", "[", "\[IndentingNewLine]", 
@@ -1403,11 +1416,11 @@ Cell[BoxData[{
                   "]"}]}], ";", "\n", "       ", 
                 RowBox[{"makeBoxCMS", "[", 
                  RowBox[{"data", ",", "\n", "        ", 
-                  RowBox[{"{", 
+                  RowBox[{
                    RowBox[{
-                   "\"\<semi-supervised\>\"", ",", " ", "\"\<stable\>\"", ",",
-                     " ", "\"\<CAP\>\"", ",", " ", "\"\<wasserstein\>\""}], 
-                   "}"}], ",", "\n", "        ", "\"\<Efficiency (%)\>\"", 
+                    RowBox[{"strategyPretty", "[", "#", "]"}], "&"}], "/@",
+                   "boxStrategyOrder"}], ",", "\n", "        ",
+                  "\"\<Efficiency (%)\>\"",
                   ",", " ", 
                   RowBox[{"{", 
                    RowBox[{"0.085", ",", " ", "0.9"}], "}"}], ",", " ", 
@@ -1819,10 +1832,11 @@ Cell[BoxData[
             RowBox[{"makeFrontPlot", "[", 
              RowBox[{"frontsDir", ",", "model", ",", "#", ",", "modelLabel"}],
               "]"}], "&"}], "/@", 
-           RowBox[{"{", 
+           RowBox[{"{",
             RowBox[{
-            "\"\<cvar25\>\"", ",", "\"\<stability\>\"", ",", "\"\<cap\>\"", 
-             ",", "\"\<wasserstein\>\""}], "}"}]}], "]"}]}], ";", 
+            "\"\<cvar25\>\"", ",", "\"\<stability\>\"", ",", "\"\<cap\>\"",
+             ",", "\"\<consistency\>\"", ",", "\"\<wasserstein\>\""}],
+            "}"}]}], "]"}]}], ";",
         "\[IndentingNewLine]", 
         RowBox[{"If", "[", 
          RowBox[{
@@ -1874,24 +1888,30 @@ MarkdownRowCompactAsymCollapse[row_Association, digits_:2] :=
   StringJoin[\"| \", StringRiffle[{row[\"Architecture\"],
       FormatMeanOrDash[row[\"Semi\"], digits],
       FormatMeanOrDash[row[\"CAP\"], digits],
+      FormatMeanOrDash[Lookup[row, \"Cons\", {0.}], digits],
       FormatMeanOrDash[row[\"Stable\"], digits],
       FormatMeanOrDash[row[\"W1\"], digits],
+      FormatAsymPMOrDash[Lookup[row, \"CAPMinusCons\", Missing[\"Collapsed\"]],
+       Lookup[row, \"CAPMinusConsCI\", Missing[\"Collapsed\"]], digits],
+      FormatP[Lookup[row, \"CAPMinusConsP\", Missing[\"Collapsed\"]]],
       FormatAsymPMOrDash[row[\"CAPMinusStable\"], row[\"CAPMinusStableCI\"],
        digits], FormatP[row[\"CAPMinusStableP\"]],
       FormatAsymPMOrDash[row[\"CAPMinusW1\"], row[\"CAPMinusW1CI\"], digits],
       FormatP[row[\"CAPMinusW1P\"]]}, \" | \"], \" |\"];
 
 LatexTableFromRows[rows_List, digits_:2] := StringJoin[
-   \"\\\\begin{tabular}{lcccccccc}\\n\\\\toprule\\n\",
-   \"Arch. & Semi & CAP & Stable & W1 & CAP$-$Stable & $p$ & CAP$-$W1 & $p$ \
+   \"\\\\begin{tabular}{lccccccccccc}\\n\\\\toprule\\n\",
+   \"Arch. & Semi & CAP & Cons & Stable & W1 & CAP$-$Cons & $p$ & \
+CAP$-$Stable & $p$ & CAP$-$W1 & $p$ \
 \\\\\\\\\\n\",
    \"\\\\midrule\\n\",
    StringRiffle[LatexRowCompactAsymCollapse[#, digits] & /@ rows, \"\\n\"],
    \"\\n\\\\bottomrule\\n\\\\end{tabular}\"];
 
 MarkdownTableFromRows[rows_List, digits_:2] := StringJoin[
-   \"| Arch. | Semi | CAP | Stable | W1 | CAP-Stable | p | CAP-W1 | p |\\n\",
-   \"|---|---|---|---|---|---|---|---|---|\\n\",
+   \"| Arch. | Semi | CAP | Cons | Stable | W1 | CAP-Cons | p | CAP-Stable | \
+p | CAP-W1 | p |\\n\",
+   \"|---|---|---|---|---|---|---|---|---|---|---|---|\\n\",
    StringRiffle[MarkdownRowCompactAsymCollapse[#, digits] & /@ rows, \"\\n\"]];
 
 ruleTableMarkdown[rows_List, ruleLabel_String] := StringJoin[
@@ -1928,7 +1948,8 @@ spearmanTableMarkdown[modelExps_Association, domain_String] :=
    strategy (legacy order); cell = rho (n), with n the number of front points
    entering the ranking. \"-\" = strategy absent; \"- (n)\" = rho undefined
    (n < 3 or tied/zero-variance efficiencies). *)
-spearmanDisplayOrder = {\"cvar25\", \"cap\", \"stability\", \"wasserstein\"};
+spearmanDisplayOrder = {\"cvar25\", \"cap\", \"consistency\", \"stability\", \
+\"wasserstein\"};
 spearmanCellString[fronts_Association, strat_String] := Module[{front, \
 usable, rho},
   If[!KeyExistsQ[fronts, strat], Return[\"-\"]];
@@ -1941,521 +1962,129 @@ spearmanMatrixCells[modelExps_Association] := Table[
    Prepend[Table[spearmanCellString[frontsOf[rebuttalRuns[modelExps[m]]], s],
      {s, spearmanDisplayOrder}], m], {m, Keys[modelExps]}];
 spearmanMatrixLatex[modelExps_Association] := StringJoin[
-   \"\\\\begin{tabular}{lcccc}\\n\\\\toprule\\n\",
-   \"Arch. & Semi & CAP & Stable & W1 \\\\\\\\\\n\\\\midrule\\n\",
+   \"\\\\begin{tabular}{lccccc}\\n\\\\toprule\\n\",
+   \"Arch. & Semi & CAP & Cons & Stable & W1 \\\\\\\\\\n\\\\midrule\\n\",
    StringRiffle[StringRiffle[#, \" & \"] <> \" \\\\\\\\\" & /@
      spearmanMatrixCells[modelExps], \"\\n\"],
    \"\\n\\\\bottomrule\\n\\\\end{tabular}\"];
 spearmanMatrixMarkdown[modelExps_Association] := StringJoin[
-   \"| Arch. | Semi | CAP | Stable | W1 |\\n|---|---|---|---|---|\\n\",
+   \"| Arch. | Semi | CAP | Cons | Stable | W1 \
+|\\n|---|---|---|---|---|---|\\n\",
    StringRiffle[(\"| \" <> StringRiffle[#, \" | \"] <> \" |\") & /@
      spearmanMatrixCells[modelExps], \"\\n\"]];\
 \>", "Input",
  CellLabel->"In[38]:=",ExpressionUUID->"9102812a-abb6-4648-b1a4-cc69d4f24d95"],
 
-Cell[BoxData[{
- RowBox[{
-  RowBox[{
-   RowBox[{"ClearAll", "[", 
-    RowBox[{
-    "BootstrapPairedDiffCI", ",", "WilcoxonSignedRankPExact", ",", 
-     "SafeWilcoxonP", ",", "CollapsedMethodQ", ",", "FormatNum", ",", 
-     "FormatP", ",", "FormatMeanOrDash", ",", "FormatAsymPMOrDash", ",", 
-     "ArchitectureRowDataCompactCollapse", ",", "LatexRowCompactAsymCollapse",
-      ",", "BuildArchitectureRowsCompactCollapse", ",", 
-     "BuildLatexTableCompactAsymCollapse"}], "]"}], ";"}], 
-  "\[IndentingNewLine]", "\[IndentingNewLine]", 
-  RowBox[{"(*", 
-   RowBox[{
-    RowBox[{"Treat", " ", "all"}], "-", 
-    RowBox[{"zero", " ", "arrays", " ", "as", " ", "collapsed"}]}], 
-   "*)"}]}], "\n", 
- RowBox[{
-  RowBox[{
-   RowBox[{
-    RowBox[{"CollapsedMethodQ", "[", "x_List", "]"}], ":=", 
-    RowBox[{"AllTrue", "[", 
-     RowBox[{"x", ",", 
-      RowBox[{
-       RowBox[{"#", "==", "0."}], "&"}]}], "]"}]}], ";"}], 
-  "\[IndentingNewLine]", "\[IndentingNewLine]", 
-  RowBox[{"(*", 
-   RowBox[{
-   "95", "%", " ", "bootstrap", " ", "CI", " ", "for", " ", "paired", " ", 
-    "mean", " ", 
-    RowBox[{"difference", ":", 
-     RowBox[{"a", "-", "b"}]}]}], "*)"}]}], "\n", 
- RowBox[{
-  RowBox[{
-   RowBox[{
-    RowBox[{"BootstrapPairedDiffCI", "[", 
-     RowBox[{"a_List", ",", "b_List", ",", 
-      RowBox[{"nBoot_", ":", "10000"}], ",", 
-      RowBox[{"alpha_", ":", "0.05"}]}], "]"}], ":=", 
-    RowBox[{"Module", "[", 
-     RowBox[{
-      RowBox[{"{", 
-       RowBox[{"n", ",", "diffs", ",", "boots"}], "}"}], ",", 
-      RowBox[{
-       RowBox[{"If", "[", 
-        RowBox[{
-         RowBox[{
-          RowBox[{"Length", "[", "a", "]"}], "=!=", 
-          RowBox[{"Length", "[", "b", "]"}]}], ",", 
-         RowBox[{"Return", "[", 
-          RowBox[{"Missing", "[", "\"\<LengthMismatch\>\"", "]"}], "]"}]}], 
-        "]"}], ";", "\[IndentingNewLine]", 
-       RowBox[{"n", "=", 
-        RowBox[{"Length", "[", "a", "]"}]}], ";", "\[IndentingNewLine]", 
-       RowBox[{"diffs", "=", 
-        RowBox[{"a", "-", "b"}]}], ";", "\[IndentingNewLine]", 
-       RowBox[{"boots", "=", 
-        RowBox[{"Table", "[", 
-         RowBox[{
-          RowBox[{"Mean", "[", 
-           RowBox[{"RandomChoice", "[", 
-            RowBox[{"diffs", ",", "n"}], "]"}], "]"}], ",", 
-          RowBox[{"{", "nBoot", "}"}]}], "]"}]}], ";", "\[IndentingNewLine]", 
-       
-       RowBox[{"Quantile", "[", 
-        RowBox[{"boots", ",", 
-         RowBox[{"{", 
-          RowBox[{
-           RowBox[{"alpha", "/", "2"}], ",", 
-           RowBox[{"1", "-", 
-            RowBox[{"alpha", "/", "2"}]}]}], "}"}]}], "]"}]}]}], "]"}]}], 
-   ";"}], "\[IndentingNewLine]", "\[IndentingNewLine]", 
-  RowBox[{"(*", 
-   RowBox[{
-    RowBox[{"Exact", " ", "two"}], "-", 
-    RowBox[{"sided", " ", "Wilcoxon", " ", "signed"}], "-", 
-    RowBox[{"rank", " ", "p"}], "-", "value"}], "*)"}]}], "\n", 
- RowBox[{
-  RowBox[{
-   RowBox[{
-    RowBox[{"WilcoxonSignedRankPExact", "[", 
-     RowBox[{"a_List", ",", "b_List"}], "]"}], ":=", 
-    RowBox[{"Module", "[", 
-     RowBox[{
-      RowBox[{"{", 
-       RowBox[{
-       "d", ",", "absd", ",", "sgn", ",", "n", ",", "order", ",", "sortedAbs",
-         ",", "sortedIdx", ",", "ranks", ",", "groups", ",", "start", ",", 
-        "wPlus", ",", "allSums", ",", "pLeft", ",", "pRight"}], "}"}], ",", 
-      RowBox[{
-       RowBox[{"If", "[", 
-        RowBox[{
-         RowBox[{
-          RowBox[{"Length", "[", "a", "]"}], "=!=", 
-          RowBox[{"Length", "[", "b", "]"}]}], ",", 
-         RowBox[{"Return", "[", 
-          RowBox[{"Missing", "[", "\"\<LengthMismatch\>\"", "]"}], "]"}]}], 
-        "]"}], ";", "\[IndentingNewLine]", 
-       RowBox[{"d", "=", 
-        RowBox[{"DeleteCases", "[", 
-         RowBox[{
-          RowBox[{"a", "-", "b"}], ",", "0."}], "]"}]}], ";", 
-       "\[IndentingNewLine]", 
-       RowBox[{"If", "[", 
-        RowBox[{
-         RowBox[{"d", "===", 
-          RowBox[{"{", "}"}]}], ",", 
-         RowBox[{"Return", "[", "1.0", "]"}]}], "]"}], ";", 
-       "\[IndentingNewLine]", 
-       RowBox[{"absd", "=", 
-        RowBox[{"Abs", "[", "d", "]"}]}], ";", "\[IndentingNewLine]", 
-       RowBox[{"sgn", "=", 
-        RowBox[{"Sign", "[", "d", "]"}]}], ";", "\[IndentingNewLine]", 
-       RowBox[{"n", "=", 
-        RowBox[{"Length", "[", "d", "]"}]}], ";", "\[IndentingNewLine]", 
-       RowBox[{"order", "=", 
-        RowBox[{"Ordering", "[", "absd", "]"}]}], ";", "\[IndentingNewLine]", 
-       
-       RowBox[{"sortedAbs", "=", 
-        RowBox[{"absd", "[", 
-         RowBox[{"[", "order", "]"}], "]"}]}], ";", "\[IndentingNewLine]", 
-       RowBox[{"sortedIdx", "=", "order"}], ";", "\[IndentingNewLine]", 
-       RowBox[{"ranks", "=", 
-        RowBox[{"ConstantArray", "[", 
-         RowBox[{"0.", ",", "n"}], "]"}]}], ";", "\[IndentingNewLine]", 
-       RowBox[{"groups", "=", 
-        RowBox[{"Split", "[", 
-         RowBox[{
-          RowBox[{"Range", "[", "n", "]"}], ",", 
-          RowBox[{
-           RowBox[{
-            RowBox[{"sortedAbs", "[", 
-             RowBox[{"[", "#1", "]"}], "]"}], "==", 
-            RowBox[{"sortedAbs", "[", 
-             RowBox[{"[", "#2", "]"}], "]"}]}], "&"}]}], "]"}]}], ";", 
-       "\[IndentingNewLine]", 
-       RowBox[{"start", "=", "1"}], ";", "\[IndentingNewLine]", 
-       RowBox[{"Do", "[", 
-        RowBox[{
-         RowBox[{"Module", "[", 
-          RowBox[{
-           RowBox[{"{", 
-            RowBox[{
-             RowBox[{"len", "=", 
-              RowBox[{"Length", "[", "g", "]"}]}], ",", "mid"}], "}"}], ",", 
-           RowBox[{
-            RowBox[{"mid", "=", 
-             RowBox[{"Mean", "[", 
-              RowBox[{"Range", "[", 
-               RowBox[{"start", ",", 
-                RowBox[{"start", "+", "len", "-", "1"}]}], "]"}], "]"}]}], 
-            ";", "\[IndentingNewLine]", 
-            RowBox[{
-             RowBox[{"ranks", "[", 
-              RowBox[{"[", 
-               RowBox[{"sortedIdx", "[", 
-                RowBox[{"[", "g", "]"}], "]"}], "]"}], "]"}], "=", "mid"}], 
-            ";", "\[IndentingNewLine]", 
-            RowBox[{"start", "+=", "len"}], ";"}]}], "]"}], ",", 
-         RowBox[{"{", 
-          RowBox[{"g", ",", "groups"}], "}"}]}], "]"}], ";", 
-       "\[IndentingNewLine]", 
-       RowBox[{"wPlus", "=", 
-        RowBox[{"Total", "[", 
-         RowBox[{"Pick", "[", 
-          RowBox[{"ranks", ",", "sgn", ",", "1"}], "]"}], "]"}]}], ";", 
-       "\[IndentingNewLine]", 
-       RowBox[{"allSums", "=", 
-        RowBox[{"Total", "/@", 
-         RowBox[{"(", 
-          RowBox[{
-           RowBox[{
-            RowBox[{"Pick", "[", 
-             RowBox[{"ranks", ",", "#", ",", "1"}], "]"}], "&"}], "/@", 
-           RowBox[{"Tuples", "[", 
-            RowBox[{
-             RowBox[{"{", 
-              RowBox[{"0", ",", "1"}], "}"}], ",", "n"}], "]"}]}], ")"}]}]}], 
-       ";", "\[IndentingNewLine]", 
-       RowBox[{"pLeft", "=", 
-        RowBox[{"N", "[", 
-         RowBox[{
-          RowBox[{"Count", "[", 
-           RowBox[{"allSums", ",", 
-            RowBox[{"x_", "/;", 
-             RowBox[{"x", "<=", "wPlus"}]}]}], "]"}], "/", 
-          RowBox[{"Length", "[", "allSums", "]"}]}], "]"}]}], ";", 
-       "\[IndentingNewLine]", 
-       RowBox[{"pRight", "=", 
-        RowBox[{"N", "[", 
-         RowBox[{
-          RowBox[{"Count", "[", 
-           RowBox[{"allSums", ",", 
-            RowBox[{"x_", "/;", 
-             RowBox[{"x", ">=", "wPlus"}]}]}], "]"}], "/", 
-          RowBox[{"Length", "[", "allSums", "]"}]}], "]"}]}], ";", 
-       "\[IndentingNewLine]", 
-       RowBox[{"Min", "[", 
-        RowBox[{"1.0", ",", 
-         RowBox[{"2.0", " ", 
-          RowBox[{"Min", "[", 
-           RowBox[{"pLeft", ",", "pRight"}], "]"}]}]}], "]"}]}]}], "]"}]}], 
-   ";"}], "\[IndentingNewLine]"}], "\n", 
- RowBox[{
-  RowBox[{
-   RowBox[{
-    RowBox[{"SafeWilcoxonP", "[", 
-     RowBox[{"a_List", ",", "b_List"}], "]"}], ":=", 
-    RowBox[{"WilcoxonSignedRankPExact", "[", 
-     RowBox[{"a", ",", "b"}], "]"}]}], ";"}], "\[IndentingNewLine]"}], "\n", 
- RowBox[{
-  RowBox[{
-   RowBox[{
-    RowBox[{"FormatNum", "[", 
-     RowBox[{"x_", ",", 
-      RowBox[{"digits_", ":", "2"}]}], "]"}], ":=", 
-    RowBox[{"ToString", "@", 
-     RowBox[{"NumberForm", "[", 
-      RowBox[{"x", ",", 
-       RowBox[{"{", 
-        RowBox[{"Infinity", ",", "digits"}], "}"}], ",", 
-       RowBox[{"NumberPadding", "->", 
-        RowBox[{"{", 
-         RowBox[{"\"\<\>\"", ",", "\"\<0\>\""}], "}"}]}], ",", 
-       RowBox[{"NumberPoint", "->", "\"\<.\>\""}]}], "]"}]}]}], ";"}], 
-  "\[IndentingNewLine]"}], "\n", 
- RowBox[{
-  RowBox[{
-   RowBox[{
-    RowBox[{"FormatP", "[", "p_", "]"}], ":=", 
-    RowBox[{"Which", "[", 
-     RowBox[{
-      RowBox[{"MissingQ", "[", "p", "]"}], ",", "\"\<-\>\"", ",", 
-      RowBox[{"p", "<", "0.001"}], ",", "\"\<<0.001\>\"", ",", "True", ",", 
-      RowBox[{"ToString", "@", 
-       RowBox[{"NumberForm", "[", 
-        RowBox[{"p", ",", 
-         RowBox[{"{", 
-          RowBox[{"Infinity", ",", "3"}], "}"}], ",", 
-         RowBox[{"NumberPadding", "->", 
-          RowBox[{"{", 
-           RowBox[{"\"\<\>\"", ",", "\"\<0\>\""}], "}"}]}], ",", 
-         RowBox[{"NumberPoint", "->", "\"\<.\>\""}]}], "]"}]}]}], "]"}]}], 
-   ";"}], "\[IndentingNewLine]"}], "\n", 
- RowBox[{
-  RowBox[{
-   RowBox[{
-    RowBox[{"FormatMeanOrDash", "[", 
-     RowBox[{"x_List", ",", 
-      RowBox[{"digits_", ":", "2"}]}], "]"}], ":=", 
-    RowBox[{"If", "[", 
-     RowBox[{
-      RowBox[{"CollapsedMethodQ", "[", "x", "]"}], ",", "\"\<-\>\"", ",", 
-      RowBox[{"FormatNum", "[", 
-       RowBox[{
-        RowBox[{"Mean", "[", "x", "]"}], ",", "digits"}], "]"}]}], "]"}]}], 
-   ";"}], "\[IndentingNewLine]"}], "\n", 
- RowBox[{
-  RowBox[{
-   RowBox[{
-    RowBox[{"FormatAsymPMOrDash", "[", 
-     RowBox[{"center_", ",", "ci_", ",", 
-      RowBox[{"digits_", ":", "2"}]}], "]"}], ":=", 
-    RowBox[{"Module", "[", 
-     RowBox[{
-      RowBox[{"{", 
-       RowBox[{"lower", ",", "upper"}], "}"}], ",", 
-      RowBox[{
-       RowBox[{"If", "[", 
-        RowBox[{
-         RowBox[{
-          RowBox[{"MissingQ", "[", "center", "]"}], "||", 
-          RowBox[{"MissingQ", "[", "ci", "]"}]}], ",", 
-         RowBox[{"Return", "[", "\"\<-\>\"", "]"}]}], "]"}], ";", 
-       "\[IndentingNewLine]", 
-       RowBox[{"lower", "=", 
-        RowBox[{"center", "-", 
-         RowBox[{"ci", "[", 
-          RowBox[{"[", "1", "]"}], "]"}]}]}], ";", "\[IndentingNewLine]", 
-       RowBox[{"upper", "=", 
-        RowBox[{
-         RowBox[{"ci", "[", 
-          RowBox[{"[", "2", "]"}], "]"}], "-", "center"}]}], ";", 
-       "\[IndentingNewLine]", 
-       RowBox[{"\"\<$\>\"", "<>", 
-        RowBox[{"FormatNum", "[", 
-         RowBox[{"center", ",", "digits"}], "]"}], "<>", "\"\<^{+\>\"", "<>", 
-        
-        RowBox[{"FormatNum", "[", 
-         RowBox[{"upper", ",", "digits"}], "]"}], "<>", "\"\<}\>\"", "<>", 
-        "\"\<_{-\>\"", "<>", 
-        RowBox[{"FormatNum", "[", 
-         RowBox[{"lower", ",", "digits"}], "]"}], "<>", "\"\<}$\>\""}]}]}], 
-     "]"}]}], ";"}], "\[IndentingNewLine]"}], "\n", 
- RowBox[{
-  RowBox[{
-   RowBox[{
-    RowBox[{"ArchitectureRowDataCompactCollapse", "[", 
-     RowBox[{"archName_String", ",", "methods_Association", ",", 
-      RowBox[{"nBoot_", ":", "10000"}], ",", 
-      RowBox[{"alpha_", ":", "0.05"}]}], "]"}], ":=", 
-    RowBox[{"Module", "[", 
-     RowBox[{
-      RowBox[{"{", 
-       RowBox[{
-       "semi", ",", "cap", ",", "stable", ",", "w1", ",", "semiCollapsed", 
-        ",", "capCollapsed", ",", "stableCollapsed", ",", "w1Collapsed", ",", 
-        "dCS", ",", "dCW", ",", "ciCS", ",", "ciCW", ",", "pCS", ",", "pCW"}],
-        "}"}], ",", 
-      RowBox[{
-       RowBox[{"semi", "=", 
-        RowBox[{"methods", "[", "\"\<semisupervised\>\"", "]"}]}], ";", 
-       "\[IndentingNewLine]", 
-       RowBox[{"cap", "=", 
-        RowBox[{"methods", "[", "\"\<CAP\>\"", "]"}]}], ";", 
-       "\[IndentingNewLine]", 
-       RowBox[{"stable", "=", 
-        RowBox[{"methods", "[", "\"\<stable\>\"", "]"}]}], ";", 
-       "\[IndentingNewLine]", 
-       RowBox[{"w1", "=", 
-        RowBox[{"methods", "[", "\"\<wasserstein\>\"", "]"}]}], ";", 
-       "\[IndentingNewLine]", 
-       RowBox[{"If", "[", 
-        RowBox[{
-         RowBox[{"!", 
-          RowBox[{"(", 
-           RowBox[{
-            RowBox[{"Length", "[", "semi", "]"}], "==", 
-            RowBox[{"Length", "[", "cap", "]"}], "==", 
-            RowBox[{"Length", "[", "stable", "]"}], "==", 
-            RowBox[{"Length", "[", "w1", "]"}]}], ")"}]}], ",", 
-         RowBox[{"Return", "[", 
-          RowBox[{"<|", 
-           RowBox[{
-            RowBox[{"\"\<Architecture\>\"", "->", "archName"}], ",", 
-            RowBox[{
-            "\"\<Error\>\"", "->", 
-             "\"\<All method arrays must have equal lengths.\>\""}]}], "|>"}],
-           "]"}]}], "]"}], ";", "\[IndentingNewLine]", 
-       RowBox[{"semiCollapsed", "=", 
-        RowBox[{"CollapsedMethodQ", "[", "semi", "]"}]}], ";", 
-       "\[IndentingNewLine]", 
-       RowBox[{"capCollapsed", "=", 
-        RowBox[{"CollapsedMethodQ", "[", "cap", "]"}]}], ";", 
-       "\[IndentingNewLine]", 
-       RowBox[{"stableCollapsed", "=", 
-        RowBox[{"CollapsedMethodQ", "[", "stable", "]"}]}], ";", 
-       "\[IndentingNewLine]", 
-       RowBox[{"w1Collapsed", "=", 
-        RowBox[{"CollapsedMethodQ", "[", "w1", "]"}]}], ";", 
-       "\[IndentingNewLine]", 
-       RowBox[{"dCS", "=", 
-        RowBox[{"If", "[", 
-         RowBox[{
-          RowBox[{"capCollapsed", "||", "stableCollapsed"}], ",", 
-          RowBox[{"Missing", "[", "\"\<Collapsed\>\"", "]"}], ",", 
-          RowBox[{"Mean", "[", 
-           RowBox[{"cap", "-", "stable"}], "]"}]}], "]"}]}], ";", 
-       "\[IndentingNewLine]", 
-       RowBox[{"dCW", "=", 
-        RowBox[{"If", "[", 
-         RowBox[{
-          RowBox[{"capCollapsed", "||", "w1Collapsed"}], ",", 
-          RowBox[{"Missing", "[", "\"\<Collapsed\>\"", "]"}], ",", 
-          RowBox[{"Mean", "[", 
-           RowBox[{"cap", "-", "w1"}], "]"}]}], "]"}]}], ";", 
-       "\[IndentingNewLine]", 
-       RowBox[{"ciCS", "=", 
-        RowBox[{"If", "[", 
-         RowBox[{
-          RowBox[{"capCollapsed", "||", "stableCollapsed"}], ",", 
-          RowBox[{"Missing", "[", "\"\<Collapsed\>\"", "]"}], ",", 
-          RowBox[{"BootstrapPairedDiffCI", "[", 
-           RowBox[{"cap", ",", "stable", ",", "nBoot", ",", "alpha"}], 
-           "]"}]}], "]"}]}], ";", "\[IndentingNewLine]", 
-       RowBox[{"ciCW", "=", 
-        RowBox[{"If", "[", 
-         RowBox[{
-          RowBox[{"capCollapsed", "||", "w1Collapsed"}], ",", 
-          RowBox[{"Missing", "[", "\"\<Collapsed\>\"", "]"}], ",", 
-          RowBox[{"BootstrapPairedDiffCI", "[", 
-           RowBox[{"cap", ",", "w1", ",", "nBoot", ",", "alpha"}], "]"}]}], 
-         "]"}]}], ";", "\[IndentingNewLine]", 
-       RowBox[{"pCS", "=", 
-        RowBox[{"If", "[", 
-         RowBox[{
-          RowBox[{"capCollapsed", "||", "stableCollapsed"}], ",", 
-          RowBox[{"Missing", "[", "\"\<Collapsed\>\"", "]"}], ",", 
-          RowBox[{"SafeWilcoxonP", "[", 
-           RowBox[{"cap", ",", "stable"}], "]"}]}], "]"}]}], ";", 
-       "\[IndentingNewLine]", 
-       RowBox[{"pCW", "=", 
-        RowBox[{"If", "[", 
-         RowBox[{
-          RowBox[{"capCollapsed", "||", "w1Collapsed"}], ",", 
-          RowBox[{"Missing", "[", "\"\<Collapsed\>\"", "]"}], ",", 
-          RowBox[{"SafeWilcoxonP", "[", 
-           RowBox[{"cap", ",", "w1"}], "]"}]}], "]"}]}], ";", 
-       "\[IndentingNewLine]", 
-       RowBox[{"<|", 
-        RowBox[{
-         RowBox[{"\"\<Architecture\>\"", "->", "archName"}], ",", 
-         RowBox[{"\"\<Semi\>\"", "->", "semi"}], ",", 
-         RowBox[{"\"\<CAP\>\"", "->", "cap"}], ",", 
-         RowBox[{"\"\<Stable\>\"", "->", "stable"}], ",", 
-         RowBox[{"\"\<W1\>\"", "->", "w1"}], ",", 
-         RowBox[{"\"\<CAPMinusStable\>\"", "->", "dCS"}], ",", 
-         RowBox[{"\"\<CAPMinusStableCI\>\"", "->", "ciCS"}], ",", 
-         RowBox[{"\"\<CAPMinusStableP\>\"", "->", "pCS"}], ",", 
-         RowBox[{"\"\<CAPMinusW1\>\"", "->", "dCW"}], ",", 
-         RowBox[{"\"\<CAPMinusW1CI\>\"", "->", "ciCW"}], ",", 
-         RowBox[{"\"\<CAPMinusW1P\>\"", "->", "pCW"}]}], "|>"}]}]}], "]"}]}], 
-   ";"}], "\[IndentingNewLine]"}], "\n", 
- RowBox[{
-  RowBox[{
-   RowBox[{
-    RowBox[{"LatexRowCompactAsymCollapse", "[", 
-     RowBox[{"row_Association", ",", 
-      RowBox[{"digits_", ":", "2"}]}], "]"}], ":=", 
-    RowBox[{
-     RowBox[{"StringRiffle", "[", 
-      RowBox[{
-       RowBox[{"{", 
-        RowBox[{
-         RowBox[{"row", "[", "\"\<Architecture\>\"", "]"}], ",", 
-         RowBox[{"FormatMeanOrDash", "[", 
-          RowBox[{
-           RowBox[{"row", "[", "\"\<Semi\>\"", "]"}], ",", "digits"}], "]"}], 
-         ",", 
-         RowBox[{"FormatMeanOrDash", "[", 
-          RowBox[{
-           RowBox[{"row", "[", "\"\<CAP\>\"", "]"}], ",", "digits"}], "]"}], 
-         ",", 
-         RowBox[{"FormatMeanOrDash", "[", 
-          RowBox[{
-           RowBox[{"row", "[", "\"\<Stable\>\"", "]"}], ",", "digits"}], 
-          "]"}], ",", 
-         RowBox[{"FormatMeanOrDash", "[", 
-          RowBox[{
-           RowBox[{"row", "[", "\"\<W1\>\"", "]"}], ",", "digits"}], "]"}], 
-         ",", 
-         RowBox[{"FormatAsymPMOrDash", "[", 
-          RowBox[{
-           RowBox[{"row", "[", "\"\<CAPMinusStable\>\"", "]"}], ",", 
-           RowBox[{"row", "[", "\"\<CAPMinusStableCI\>\"", "]"}], ",", 
-           "digits"}], "]"}], ",", 
-         RowBox[{"FormatP", "[", 
-          RowBox[{"row", "[", "\"\<CAPMinusStableP\>\"", "]"}], "]"}], ",", 
-         RowBox[{"FormatAsymPMOrDash", "[", 
-          RowBox[{
-           RowBox[{"row", "[", "\"\<CAPMinusW1\>\"", "]"}], ",", 
-           RowBox[{"row", "[", "\"\<CAPMinusW1CI\>\"", "]"}], ",", "digits"}],
-           "]"}], ",", 
-         RowBox[{"FormatP", "[", 
-          RowBox[{"row", "[", "\"\<CAPMinusW1P\>\"", "]"}], "]"}]}], "}"}], 
-       ",", "\"\< & \>\""}], "]"}], "<>", "\"\< \\\\\\\\\>\""}]}], ";"}], 
-  "\[IndentingNewLine]"}], "\n", 
- RowBox[{
-  RowBox[{
-   RowBox[{
-    RowBox[{"BuildArchitectureRowsCompactCollapse", "[", 
-     RowBox[{"allArchitectures_Association", ",", 
-      RowBox[{"nBoot_", ":", "10000"}], ",", 
-      RowBox[{"alpha_", ":", "0.05"}]}], "]"}], ":=", 
-    RowBox[{"KeyValueMap", "[", 
-     RowBox[{
-      RowBox[{
-       RowBox[{"ArchitectureRowDataCompactCollapse", "[", 
-        RowBox[{"#1", ",", "#2", ",", "nBoot", ",", "alpha"}], "]"}], "&"}], 
-      ",", "allArchitectures"}], "]"}]}], ";"}], 
-  "\[IndentingNewLine]"}], "\n", 
- RowBox[{
-  RowBox[{
-   RowBox[{"BuildLatexTableCompactAsymCollapse", "[", 
-    RowBox[{"allArchitectures_Association", ",", 
-     RowBox[{"nBoot_", ":", "10000"}], ",", 
-     RowBox[{"alpha_", ":", "0.05"}], ",", 
-     RowBox[{"digits_", ":", "2"}]}], "]"}], ":=", 
-   RowBox[{"Module", "[", 
-    RowBox[{
-     RowBox[{"{", 
-      RowBox[{"rows", ",", "body"}], "}"}], ",", 
-     RowBox[{
-      RowBox[{"rows", "=", 
-       RowBox[{"BuildArchitectureRowsCompactCollapse", "[", 
-        RowBox[{"allArchitectures", ",", "nBoot", ",", "alpha"}], "]"}]}], 
-      ";", "\[IndentingNewLine]", 
-      RowBox[{"body", "=", 
-       RowBox[{"StringRiffle", "[", 
-        RowBox[{
-         RowBox[{
-          RowBox[{
-           RowBox[{"LatexRowCompactAsymCollapse", "[", 
-            RowBox[{"#", ",", "digits"}], "]"}], "&"}], "/@", "rows"}], ",", 
-         "\"\<\\n\>\""}], "]"}]}], ";", "\[IndentingNewLine]", 
-      RowBox[{"StringJoin", "[", 
-       RowBox[{
-       "\"\<\\\\begin{tabular}{lcccccccc}\\n\>\"", ",", 
-        "\"\<\\\\toprule\\n\>\"", ",", 
-        "\"\<Arch. & Semi & CAP & Stable & W1 & CAP$-$Stable & $p$ & CAP$-$W1 \
-& $p$ \\\\\\\\\\n\>\"", ",", "\"\<\\\\midrule\\n\>\"", ",", "body", ",", 
-        "\"\<\\n\>\"", ",", "\"\<\\\\bottomrule\\n\>\"", ",", 
-        "\"\<\\\\end{tabular}\>\""}], "]"}]}]}], "]"}]}], ";"}]}], "Input",
+Cell["\<\
+ClearAll[BootstrapPairedDiffCI, WilcoxonSignedRankPExact, SafeWilcoxonP, \
+CollapsedMethodQ, FormatNum, FormatP, FormatMeanOrDash, FormatAsymPMOrDash, \
+ArchitectureRowDataCompactCollapse, LatexRowCompactAsymCollapse, \
+BuildArchitectureRowsCompactCollapse, BuildLatexTableCompactAsymCollapse]; 
+
+CollapsedMethodQ[x_List] := AllTrue[x, #1 == 0. & ]; 
+
+BootstrapPairedDiffCI[a_List, b_List, nBoot_:10000, alpha_:0.05] := \
+Module[{n, diffs, boots}, If[Length[a] =!= Length[b], \
+Return[Missing[\"LengthMismatch\"]]]; n = Length[a]; diffs = a - b; boots = \
+Table[Mean[RandomChoice[diffs, n]], {nBoot}]; Quantile[boots, {alpha/2, 1 - \
+alpha/2}]]; 
+
+WilcoxonSignedRankPExact[a_List, b_List] := Module[{d, absd, sgn, n, order, \
+sortedAbs, sortedIdx, ranks, groups, start, wPlus, allSums, pLeft, pRight}, \
+If[Length[a] =!= Length[b], Return[Missing[\"LengthMismatch\"]]]; d = \
+DeleteCases[a - b, 0.]; If[d === {}, Return[1.]]; absd = Abs[d]; sgn = \
+Sign[d]; n = Length[d]; order = Ordering[absd]; sortedAbs = absd[[order]]; \
+sortedIdx = order; ranks = ConstantArray[0., n]; groups = Split[Range[n], \
+sortedAbs[[#1]] == sortedAbs[[#2]] & ]; start = 1; Do[Module[{len = \
+Length[g], mid}, mid = Mean[Range[start, start + len - 1]]; \
+ranks[[sortedIdx[[g]]]] = mid; start += len; ], {g, groups}]; wPlus = \
+Total[Pick[ranks, sgn, 1]]; allSums = Total /@ (Pick[ranks, #1, 1] & ) /@ \
+Tuples[{0, 1}, n]; pLeft = N[Count[allSums, x_ /; x <= \
+wPlus]/Length[allSums]]; pRight = N[Count[allSums, x_ /; x >= \
+wPlus]/Length[allSums]]; Min[1., 2.*Min[pLeft, pRight]]]; 
+
+SafeWilcoxonP[a_List, b_List] := WilcoxonSignedRankPExact[a, b]; 
+
+FormatNum[x_, digits_:2] := ToString[NumberForm[x, {Infinity, digits}, \
+NumberPadding -> {\"\", \"0\"}, NumberPoint -> \".\"]]; 
+
+FormatP[p_] := Which[MissingQ[p], \"-\", p < 0.001, \"<0.001\", True, \
+ToString[NumberForm[p, {Infinity, 3}, NumberPadding -> {\"\", \"0\"}, \
+NumberPoint -> \".\"]]]; 
+
+FormatMeanOrDash[x_List, digits_:2] := If[CollapsedMethodQ[x], \"-\", \
+FormatNum[Mean[x], digits]]; 
+
+FormatAsymPMOrDash[center_, ci_, digits_:2] := Module[{lower, upper}, \
+If[MissingQ[center] || MissingQ[ci], Return[\"-\"]]; lower = center - \
+ci[[1]]; upper = ci[[2]] - center; StringJoin[\"$\", FormatNum[center, \
+digits], \"^{+\", FormatNum[upper, digits], \"}\", \"_{-\", FormatNum[lower, \
+digits], \"}$\"]]; 
+
+ArchitectureRowDataCompactCollapse[archName_String, methods_Association, \
+nBoot_:10000, alpha_:0.05] := Module[{semi, cap, cons, stable, w1, \
+semiCollapsed, capCollapsed, consCollapsed, stableCollapsed, w1Collapsed, \
+dCC, dCS, dCW, ciCC, ciCS, ciCW, pCC, pCS, pCW}, \
+semi = methods[\"semisupervised\"]; cap = methods[\"CAP\"]; stable = methods[\
+\"stable\"]; w1 = methods[\"wasserstein\"]; cons = Lookup[methods, \
+\"consistency\", ConstantArray[0., Length[cap]]]; If[ !Length[semi] == \
+Length[cap] == Length[cons] == Length[stable] == Length[w1], \
+Return[Association[\"Architecture\" -> \
+archName, \"Error\" -> \"All method arrays must have equal lengths.\"]]]; \
+semiCollapsed = CollapsedMethodQ[semi]; capCollapsed = CollapsedMethodQ[cap]; \
+consCollapsed = CollapsedMethodQ[cons]; \
+stableCollapsed = CollapsedMethodQ[stable]; w1Collapsed = \
+CollapsedMethodQ[w1]; dCC = If[capCollapsed || consCollapsed, \
+Missing[\"Collapsed\"], Mean[cap - cons]]; dCS = If[capCollapsed || \
+stableCollapsed, \
+Missing[\"Collapsed\"], Mean[cap - stable]]; dCW = If[capCollapsed || \
+w1Collapsed, Missing[\"Collapsed\"], Mean[cap - w1]]; ciCC = If[capCollapsed \
+|| consCollapsed, Missing[\"Collapsed\"], BootstrapPairedDiffCI[cap, \
+cons, nBoot, alpha]]; ciCS = If[capCollapsed \
+|| stableCollapsed, Missing[\"Collapsed\"], BootstrapPairedDiffCI[cap, \
+stable, nBoot, alpha]]; ciCW = If[capCollapsed || w1Collapsed, \
+Missing[\"Collapsed\"], BootstrapPairedDiffCI[cap, w1, nBoot, alpha]]; pCC = \
+If[capCollapsed || consCollapsed, Missing[\"Collapsed\"], \
+SafeWilcoxonP[cap, cons]]; pCS = \
+If[capCollapsed || stableCollapsed, Missing[\"Collapsed\"], \
+SafeWilcoxonP[cap, stable]]; pCW = If[capCollapsed || w1Collapsed, \
+Missing[\"Collapsed\"], SafeWilcoxonP[cap, w1]]; Association[\"Architecture\" \
+-> archName, \"Semi\" -> semi, \"CAP\" -> cap, \"Cons\" -> cons, \
+\"Stable\" -> stable, \"W1\" \
+-> w1, \"CAPMinusCons\" -> dCC, \"CAPMinusConsCI\" -> ciCC, \
+\"CAPMinusConsP\" -> pCC, \
+\"CAPMinusStable\" -> dCS, \"CAPMinusStableCI\" -> ciCS, \
+\"CAPMinusStableP\" -> pCS, \"CAPMinusW1\" -> dCW, \"CAPMinusW1CI\" -> ciCW, \
+\"CAPMinusW1P\" -> pCW]];
+
+LatexRowCompactAsymCollapse[row_Association, digits_:2] := \
+StringJoin[StringRiffle[{row[\"Architecture\"], \
+FormatMeanOrDash[row[\"Semi\"], digits], FormatMeanOrDash[row[\"CAP\"], \
+digits], FormatMeanOrDash[Lookup[row, \"Cons\", {0.}], digits], \
+FormatMeanOrDash[row[\"Stable\"], digits], FormatMeanOrDash[row[\"W1\
+\"], digits], FormatAsymPMOrDash[Lookup[row, \"CAPMinusCons\", \
+Missing[\"Collapsed\"]], Lookup[row, \"CAPMinusConsCI\", \
+Missing[\"Collapsed\"]], digits], FormatP[Lookup[row, \"CAPMinusConsP\", \
+Missing[\"Collapsed\"]]], FormatAsymPMOrDash[row[\"CAPMinusStable\"], \
+row[\"CAPMinusStableCI\"], digits], FormatP[row[\"CAPMinusStableP\"]], \
+FormatAsymPMOrDash[row[\"CAPMinusW1\"], row[\"CAPMinusW1CI\"], digits], \
+FormatP[row[\"CAPMinusW1P\"]]}, \" & \"], \" \\\\\\\\\"];
+
+BuildArchitectureRowsCompactCollapse[allArchitectures_Association, \
+nBoot_:10000, alpha_:0.05] := \
+KeyValueMap[ArchitectureRowDataCompactCollapse[#1, #2, nBoot, alpha] & , \
+allArchitectures]; 
+
+BuildLatexTableCompactAsymCollapse[allArchitectures_Association, \
+nBoot_:10000, alpha_:0.05, digits_:2] := Module[{rows, body}, rows = \
+BuildArchitectureRowsCompactCollapse[allArchitectures, nBoot, alpha]; body = \
+StringRiffle[(LatexRowCompactAsymCollapse[#1, digits] & ) /@ rows, \"\\n\"]; \
+StringJoin[\"\\\\begin{tabular}{lccccccccccc}\\n\", \"\\\\toprule\\n\", \"Arch. \
+& Semi & CAP & Cons & Stable & W1 & CAP$-$Cons & $p$ & CAP$-$Stable & $p$ & \
+CAP$-$W1 & $p$ \
+\\\\\\\\\\n\", \"\\\\midrule\\n\", body, \"\\n\", \"\\\\bottomrule\\n\", \"\\\
+\\end{tabular}\"]];\
+\>", "Input",
  CellChangeTimes->{{3.9864558226749268`*^9, 3.986455822845752*^9}, 
    3.986456384867589*^9, 3.986456833048745*^9, 3.98645691762808*^9, 
    3.98645703684982*^9, {3.986457199626202*^9, 3.986457213070983*^9}, 
@@ -2834,11 +2463,14 @@ $\\\\rho_{\\\\mathrm{Spearman}}$ \\\\\\\\\\n\\\\midrule\\n\>\"", ",", "\n",
 
 Cell["\<\
 (* Holm-Bonferroni step-down correction applied jointly to all Wilcoxon
-   p-values of one table -- the benchmark's family of comparisons (2 tests
-   per architecture row; 12 for physics, 8 for cifar10/robustad). Raw
-   p-values are kept under <key>Raw. *)
+   p-values of one table -- the benchmark's family of comparisons (3 tests
+   per architecture row since consistency joined; 18 for physics, 12 for
+   cifar10/robustad). Only NumericQ p-values enter the family, so a collapsed
+   or absent strategy does not inflate m. Raw p-values are kept under
+   <key>Raw. *)
 HolmAdjustRows[rows_List] := Module[
-  {keys = {\"CAPMinusStableP\", \"CAPMinusW1P\"}, idx = {}, ps, m, order,
+  {keys = {\"CAPMinusConsP\", \"CAPMinusStableP\", \"CAPMinusW1P\"}, idx = {}, \
+ps, m, order,
    run = 0., newRows = rows, i, k, adj},
   Do[If[NumericQ[Lookup[newRows[[a]], b]], AppendTo[idx, {a, b}]],
    {a, Length[newRows]}, {b, keys}];
@@ -2890,19 +2522,23 @@ QuantileAxisCells[assocTail_Association, assocQ99_Association, latexQ_,
    rQ = HolmAdjustRows[
      BuildArchitectureRowsCompactCollapse[assocQ99, nBoot, alpha]]},
   MapThread[Function[{a, b}, Join[{a[\"Architecture\"]},
+     axisPair[a, \"CAPMinusCons\", \"CAPMinusConsP\", latexQ],
      axisPair[a, \"CAPMinusStable\", \"CAPMinusStableP\", latexQ],
      axisPair[a, \"CAPMinusW1\", \"CAPMinusW1P\", latexQ],
+     axisPair[b, \"CAPMinusCons\", \"CAPMinusConsP\", latexQ],
      axisPair[b, \"CAPMinusStable\", \"CAPMinusStableP\", latexQ],
      axisPair[b, \"CAPMinusW1\", \"CAPMinusW1P\", latexQ]]], {rT, rQ}]];
 
 QuantileAxisLatex[assocTail_Association, assocQ99_Association,
    nBoot_:10000, alpha_:0.05] := StringJoin[
-  \"\\\\begin{tabular}{lcccccccc}\\n\\\\toprule\\n\",
-  \" & \\\\multicolumn{4}{c}{$q \\\\approx 0.999991$ (250\\\\,Hz)} & \",
-  \"\\\\multicolumn{4}{c}{$q = 0.99$} \\\\\\\\\\n\",
-  \"Arch. & $\\\\Delta_{\\\\mathrm{C-S}}$ & $p$ & \
+  \"\\\\begin{tabular}{lcccccccccccc}\\n\\\\toprule\\n\",
+  \" & \\\\multicolumn{6}{c}{$q \\\\approx 0.999991$ (250\\\\,Hz)} & \",
+  \"\\\\multicolumn{6}{c}{$q = 0.99$} \\\\\\\\\\n\",
+  \"Arch. & $\\\\Delta_{\\\\mathrm{C-C}}$ & $p$ & \
+$\\\\Delta_{\\\\mathrm{C-S}}$ & $p$ & \
 $\\\\Delta_{\\\\mathrm{C-W}}$ & $p$ & \",
-  \"$\\\\Delta_{\\\\mathrm{C-S}}$ & $p$ & $\\\\Delta_{\\\\mathrm{C-W}}$ & $p$ \
+  \"$\\\\Delta_{\\\\mathrm{C-C}}$ & $p$ & \
+$\\\\Delta_{\\\\mathrm{C-S}}$ & $p$ & $\\\\Delta_{\\\\mathrm{C-W}}$ & $p$ \
 \\\\\\\\\\n\\\\midrule\\n\",
   StringRiffle[StringRiffle[#, \" & \"] <> \" \\\\\\\\\" & /@
     QuantileAxisCells[assocTail, assocQ99, True, nBoot, alpha], \"\\n\"],
@@ -2910,8 +2546,10 @@ $\\\\Delta_{\\\\mathrm{C-W}}$ & $p$ & \",
 
 QuantileAxisMarkdown[assocTail_Association, assocQ99_Association,
    nBoot_:10000, alpha_:0.05] := StringJoin[
-  \"| Arch. | d(C-S) tail | p | d(C-W) tail | p | d(C-S) q99 | p | \",
-  \"d(C-W) q99 | p |\\n|---|---|---|---|---|---|---|---|---|\\n\",
+  \"| Arch. | d(C-C) tail | p | d(C-S) tail | p | d(C-W) tail | p | \",
+  \"d(C-C) q99 | p | d(C-S) q99 | p | \",
+  \"d(C-W) q99 | p \
+|\\n|---|---|---|---|---|---|---|---|---|---|---|---|---|\\n\",
   StringRiffle[(\"| \" <> StringRiffle[#, \" | \"] <> \" |\") & /@
     QuantileAxisCells[assocTail, assocQ99, False, nBoot, alpha], \"\\n\"]];
 
@@ -2928,13 +2566,20 @@ MetricAxisSummary[assoc_Association, label_String:\"AUPRC\",
     fmtNum[d, 2] <> \" (\" <> FormatP[p] <>
      If[p < 0.05, \"*\", \"\"] <> \")\"];
   Do[Module[{cap = Mean[r[\"CAP\"]], st = Mean[r[\"Stable\"]],
-     w1 = Mean[r[\"W1\"]], best},
-    best = cap >= st && cap >= w1;
+     w1 = Mean[r[\"W1\"]], consArr = Lookup[r, \"Cons\", {0.}], consOK,
+     best},
+    (* A collapsed/absent consistency column must not make CAP look 'best'
+       by comparing against an all-zero array. *)
+    consOK = !CollapsedMethodQ[consArr];
+    best = cap >= st && cap >= w1 && (!consOK || cap >= Mean[consArr]);
     If[best, bestCells++];
+    tally[Lookup[r, \"CAPMinusCons\"], Lookup[r, \"CAPMinusConsP\"]];
     tally[Lookup[r, \"CAPMinusStable\"], Lookup[r, \"CAPMinusStableP\"]];
     tally[Lookup[r, \"CAPMinusW1\"], Lookup[r, \"CAPMinusW1P\"]];
     AppendTo[lines, StringJoin[\"| \", r[\"Architecture\"], \" | \",
       fmtNum[cap, 2], If[best, \" (best)\", \"\"], \" | \",
+      fmtDP[Lookup[r, \"CAPMinusCons\"], Lookup[r, \"CAPMinusConsP\"]],
+      \" | \",
       fmtDP[Lookup[r, \"CAPMinusStable\"], Lookup[r, \"CAPMinusStableP\"]],
       \" | \",
       fmtDP[Lookup[r, \"CAPMinusW1\"], Lookup[r, \"CAPMinusW1P\"]], \" \
@@ -2942,8 +2587,8 @@ MetricAxisSummary[assoc_Association, label_String:\"AUPRC\",
    {r, rows}];
   StringJoin[\"Axis 2 (\", label, \") summary -- \",
    \"star = Holm-adjusted p < 0.05, family = this table:\\n\",
-   \"| Arch. | CAP | d CAP-Stable (p) | d CAP-W1 (p) |\\n\",
-   \"|---|---|---|---|\\n\", StringRiffle[lines, \"\\n\"], \"\\n\",
+   \"| Arch. | CAP | d CAP-Cons (p) | d CAP-Stable (p) | d CAP-W1 (p) |\\n\",
+   \"|---|---|---|---|---|\\n\", StringRiffle[lines, \"\\n\"], \"\\n\",
    \"counts: CAP best point estimate in \", ToString[bestCells], \"/\",
    ToString[Length[rows]], \" cells; significant for CAP: \",
    ToString[sigFor], \", against: \", ToString[sigAgainst], \", n/a: \",

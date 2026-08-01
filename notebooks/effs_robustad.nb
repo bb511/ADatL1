@@ -299,8 +299,10 @@ ImageSize -> 1300, AspectRatio -> 0.65, ImagePadding -> {{100, 40}, {40, \
 Scaled[-0.03]}, {Scaled[0.03], Scaled[0.01]}}]; cmsText = Row[{Style[\"CMS\", \
 Bold, FontFamily -> \"TeX Gyre Heros\", 24], Style[\" Simulation \
 Preliminary\", Italic, FontFamily -> \"TeX Gyre Heros\", 24]}]; tevText = \
-Style[\"14 TeV\", FontFamily -> \"TeX Gyre Heros\", 24]; xCenters = {0.165, \
-0.3, 0.43, 0.57}; Graphics[Join[{Inset[plot, Scaled[{plotLeft, plotBottom}], \
+Style[\"14 TeV\", FontFamily -> \"TeX Gyre Heros\", 24]; xCenters = \
+If[nBoxes == 4, {0.165, 0.3, 0.43, 0.57}, Table[0.0975 + (i - \
+0.5)/nBoxes*0.54, {i, nBoxes}]]; Graphics[Join[{Inset[plot, \
+Scaled[{plotLeft, plotBottom}], \
 {Left, Bottom}, Scaled[{plotWidth, plotHeight}]]}, \
 Table[Inset[Style[labels[[i]], FontFamily -> \"TeX Gyre Heros\", 22], \
 Scaled[{xCenters[[i]], xLabelY}], {Center, Top}], {i, Length[labels]}], \
@@ -318,8 +320,11 @@ Module[{panels},
        len = Length[First[Values[sub]]];
        data = Table[If[KeyExistsQ[sub, s], sub[s],
           ConstantArray[0., len]], {s, boxStrategyOrder}];
+       (* Labels are derived from strategyPretty in boxStrategyOrder rather
+          than hardcoded, so box order and label order cannot drift apart
+          when a strategy is added. *)
        makeBoxCMS[data,
-        {\"semi-supervised\", \"stable\", \"CAP\", \"wasserstein\"},
+        strategyPretty[#] & /@ boxStrategyOrder,
         \"Efficiency (%)\", {0.085, 0.9}, {0.64, 0.9}, 1, 0.17,
         modelLabel]]]], groups];
   (* Panels are built at full legacy scale (1300 pt each) so fonts and label
@@ -380,7 +385,7 @@ modelFrontRow[frontsDir_String, model_String, modelLabel_String] :=
   Module[{plots},
    plots = DeleteMissing[
      makeFrontPlot[frontsDir, model, #, modelLabel] & /@
-      {\"cvar25\", \"stability\", \"cap\", \"wasserstein\"}];
+      {\"cvar25\", \"stability\", \"cap\", \"consistency\", \"wasserstein\"}];
    If[plots === {}, Missing[\"NoStudies\"], GraphicsRow[plots,
      ImageSize -> 420*Length[plots], Spacings -> 0]]];\
 \>", "Input",
@@ -456,36 +461,53 @@ digits], \"^{+\", FormatNum[upper, digits], \"}\", \"_{-\", FormatNum[lower, \
 digits], \"}$\"]]; 
 
 ArchitectureRowDataCompactCollapse[archName_String, methods_Association, \
-nBoot_:10000, alpha_:0.05] := Module[{semi, cap, stable, w1, semiCollapsed, \
-capCollapsed, stableCollapsed, w1Collapsed, dCS, dCW, ciCS, ciCW, pCS, pCW}, \
+nBoot_:10000, alpha_:0.05] := Module[{semi, cap, cons, stable, w1, \
+semiCollapsed, capCollapsed, consCollapsed, stableCollapsed, w1Collapsed, \
+dCC, dCS, dCW, ciCC, ciCS, ciCW, pCC, pCS, pCW}, \
 semi = methods[\"semisupervised\"]; cap = methods[\"CAP\"]; stable = methods[\
-\"stable\"]; w1 = methods[\"wasserstein\"]; If[ !Length[semi] == Length[cap] \
-== Length[stable] == Length[w1], Return[Association[\"Architecture\" -> \
+\"stable\"]; w1 = methods[\"wasserstein\"]; cons = Lookup[methods, \
+\"consistency\", ConstantArray[0., Length[cap]]]; If[ !Length[semi] == \
+Length[cap] == Length[cons] == Length[stable] == Length[w1], \
+Return[Association[\"Architecture\" -> \
 archName, \"Error\" -> \"All method arrays must have equal lengths.\"]]]; \
 semiCollapsed = CollapsedMethodQ[semi]; capCollapsed = CollapsedMethodQ[cap]; \
+consCollapsed = CollapsedMethodQ[cons]; \
 stableCollapsed = CollapsedMethodQ[stable]; w1Collapsed = \
-CollapsedMethodQ[w1]; dCS = If[capCollapsed || stableCollapsed, \
+CollapsedMethodQ[w1]; dCC = If[capCollapsed || consCollapsed, \
+Missing[\"Collapsed\"], Mean[cap - cons]]; dCS = If[capCollapsed || \
+stableCollapsed, \
 Missing[\"Collapsed\"], Mean[cap - stable]]; dCW = If[capCollapsed || \
-w1Collapsed, Missing[\"Collapsed\"], Mean[cap - w1]]; ciCS = If[capCollapsed \
+w1Collapsed, Missing[\"Collapsed\"], Mean[cap - w1]]; ciCC = If[capCollapsed \
+|| consCollapsed, Missing[\"Collapsed\"], BootstrapPairedDiffCI[cap, \
+cons, nBoot, alpha]]; ciCS = If[capCollapsed \
 || stableCollapsed, Missing[\"Collapsed\"], BootstrapPairedDiffCI[cap, \
 stable, nBoot, alpha]]; ciCW = If[capCollapsed || w1Collapsed, \
-Missing[\"Collapsed\"], BootstrapPairedDiffCI[cap, w1, nBoot, alpha]]; pCS = \
+Missing[\"Collapsed\"], BootstrapPairedDiffCI[cap, w1, nBoot, alpha]]; pCC = \
+If[capCollapsed || consCollapsed, Missing[\"Collapsed\"], \
+SafeWilcoxonP[cap, cons]]; pCS = \
 If[capCollapsed || stableCollapsed, Missing[\"Collapsed\"], \
 SafeWilcoxonP[cap, stable]]; pCW = If[capCollapsed || w1Collapsed, \
 Missing[\"Collapsed\"], SafeWilcoxonP[cap, w1]]; Association[\"Architecture\" \
--> archName, \"Semi\" -> semi, \"CAP\" -> cap, \"Stable\" -> stable, \"W1\" \
--> w1, \"CAPMinusStable\" -> dCS, \"CAPMinusStableCI\" -> ciCS, \
+-> archName, \"Semi\" -> semi, \"CAP\" -> cap, \"Cons\" -> cons, \
+\"Stable\" -> stable, \"W1\" \
+-> w1, \"CAPMinusCons\" -> dCC, \"CAPMinusConsCI\" -> ciCC, \
+\"CAPMinusConsP\" -> pCC, \
+\"CAPMinusStable\" -> dCS, \"CAPMinusStableCI\" -> ciCS, \
 \"CAPMinusStableP\" -> pCS, \"CAPMinusW1\" -> dCW, \"CAPMinusW1CI\" -> ciCW, \
-\"CAPMinusW1P\" -> pCW]]; 
+\"CAPMinusW1P\" -> pCW]];
 
 LatexRowCompactAsymCollapse[row_Association, digits_:2] := \
 StringJoin[StringRiffle[{row[\"Architecture\"], \
 FormatMeanOrDash[row[\"Semi\"], digits], FormatMeanOrDash[row[\"CAP\"], \
-digits], FormatMeanOrDash[row[\"Stable\"], digits], FormatMeanOrDash[row[\"W1\
-\"], digits], FormatAsymPMOrDash[row[\"CAPMinusStable\"], \
+digits], FormatMeanOrDash[Lookup[row, \"Cons\", {0.}], digits], \
+FormatMeanOrDash[row[\"Stable\"], digits], FormatMeanOrDash[row[\"W1\
+\"], digits], FormatAsymPMOrDash[Lookup[row, \"CAPMinusCons\", \
+Missing[\"Collapsed\"]], Lookup[row, \"CAPMinusConsCI\", \
+Missing[\"Collapsed\"]], digits], FormatP[Lookup[row, \"CAPMinusConsP\", \
+Missing[\"Collapsed\"]]], FormatAsymPMOrDash[row[\"CAPMinusStable\"], \
 row[\"CAPMinusStableCI\"], digits], FormatP[row[\"CAPMinusStableP\"]], \
 FormatAsymPMOrDash[row[\"CAPMinusW1\"], row[\"CAPMinusW1CI\"], digits], \
-FormatP[row[\"CAPMinusW1P\"]]}, \" & \"], \" \\\\\\\\\"]; 
+FormatP[row[\"CAPMinusW1P\"]]}, \" & \"], \" \\\\\\\\\"];
 
 BuildArchitectureRowsCompactCollapse[allArchitectures_Association, \
 nBoot_:10000, alpha_:0.05] := \
@@ -496,8 +518,9 @@ BuildLatexTableCompactAsymCollapse[allArchitectures_Association, \
 nBoot_:10000, alpha_:0.05, digits_:2] := Module[{rows, body}, rows = \
 BuildArchitectureRowsCompactCollapse[allArchitectures, nBoot, alpha]; body = \
 StringRiffle[(LatexRowCompactAsymCollapse[#1, digits] & ) /@ rows, \"\\n\"]; \
-StringJoin[\"\\\\begin{tabular}{lcccccccc}\\n\", \"\\\\toprule\\n\", \"Arch. \
-& Semi & CAP & Stable & W1 & CAP$-$Stable & $p$ & CAP$-$W1 & $p$ \
+StringJoin[\"\\\\begin{tabular}{lccccccccccc}\\n\", \"\\\\toprule\\n\", \"Arch. \
+& Semi & CAP & Cons & Stable & W1 & CAP$-$Cons & $p$ & CAP$-$Stable & $p$ & \
+CAP$-$W1 & $p$ \
 \\\\\\\\\\n\", \"\\\\midrule\\n\", body, \"\\n\", \"\\\\bottomrule\\n\", \"\\\
 \\end{tabular}\"]];\
 \>", "Input",
@@ -511,24 +534,30 @@ MarkdownRowCompactAsymCollapse[row_Association, digits_:2] :=
   StringJoin[\"| \", StringRiffle[{row[\"Architecture\"],
       FormatMeanOrDash[row[\"Semi\"], digits],
       FormatMeanOrDash[row[\"CAP\"], digits],
+      FormatMeanOrDash[Lookup[row, \"Cons\", {0.}], digits],
       FormatMeanOrDash[row[\"Stable\"], digits],
       FormatMeanOrDash[row[\"W1\"], digits],
+      FormatAsymPMOrDash[Lookup[row, \"CAPMinusCons\", Missing[\"Collapsed\"]],
+       Lookup[row, \"CAPMinusConsCI\", Missing[\"Collapsed\"]], digits],
+      FormatP[Lookup[row, \"CAPMinusConsP\", Missing[\"Collapsed\"]]],
       FormatAsymPMOrDash[row[\"CAPMinusStable\"], row[\"CAPMinusStableCI\"],
        digits], FormatP[row[\"CAPMinusStableP\"]],
       FormatAsymPMOrDash[row[\"CAPMinusW1\"], row[\"CAPMinusW1CI\"], digits],
       FormatP[row[\"CAPMinusW1P\"]]}, \" | \"], \" |\"];
 
 LatexTableFromRows[rows_List, digits_:2] := StringJoin[
-   \"\\\\begin{tabular}{lcccccccc}\\n\\\\toprule\\n\",
-   \"Arch. & Semi & CAP & Stable & W1 & CAP$-$Stable & $p$ & CAP$-$W1 & $p$ \
+   \"\\\\begin{tabular}{lccccccccccc}\\n\\\\toprule\\n\",
+   \"Arch. & Semi & CAP & Cons & Stable & W1 & CAP$-$Cons & $p$ & \
+CAP$-$Stable & $p$ & CAP$-$W1 & $p$ \
 \\\\\\\\\\n\",
    \"\\\\midrule\\n\",
    StringRiffle[LatexRowCompactAsymCollapse[#, digits] & /@ rows, \"\\n\"],
    \"\\n\\\\bottomrule\\n\\\\end{tabular}\"];
 
 MarkdownTableFromRows[rows_List, digits_:2] := StringJoin[
-   \"| Arch. | Semi | CAP | Stable | W1 | CAP-Stable | p | CAP-W1 | p |\\n\",
-   \"|---|---|---|---|---|---|---|---|---|\\n\",
+   \"| Arch. | Semi | CAP | Cons | Stable | W1 | CAP-Cons | p | CAP-Stable | \
+p | CAP-W1 | p |\\n\",
+   \"|---|---|---|---|---|---|---|---|---|---|---|---|\\n\",
    StringRiffle[MarkdownRowCompactAsymCollapse[#, digits] & /@ rows, \"\\n\"]];
 
 ruleTableMarkdown[rows_List, ruleLabel_String] := StringJoin[
@@ -566,7 +595,8 @@ spearmanTableMarkdown[modelExps_Association, domain_String] :=
    strategy (legacy order); cell = rho (n), with n the number of front points
    entering the ranking. \"-\" = strategy absent; \"- (n)\" = rho undefined
    (n < 3 or tied/zero-variance efficiencies). *)
-spearmanDisplayOrder = {\"cvar25\", \"cap\", \"stability\", \"wasserstein\"};
+spearmanDisplayOrder = {\"cvar25\", \"cap\", \"consistency\", \"stability\", \
+\"wasserstein\"};
 spearmanCellString[fronts_Association, strat_String] := Module[{front, \
 usable, rho},
   If[!KeyExistsQ[fronts, strat], Return[\"-\"]];
@@ -579,13 +609,14 @@ spearmanMatrixCells[modelExps_Association] := Table[
    Prepend[Table[spearmanCellString[frontsOf[rebuttalRuns[modelExps[m]]], s],
      {s, spearmanDisplayOrder}], m], {m, Keys[modelExps]}];
 spearmanMatrixLatex[modelExps_Association] := StringJoin[
-   \"\\\\begin{tabular}{lcccc}\\n\\\\toprule\\n\",
-   \"Arch. & Semi & CAP & Stable & W1 \\\\\\\\\\n\\\\midrule\\n\",
+   \"\\\\begin{tabular}{lccccc}\\n\\\\toprule\\n\",
+   \"Arch. & Semi & CAP & Cons & Stable & W1 \\\\\\\\\\n\\\\midrule\\n\",
    StringRiffle[StringRiffle[#, \" & \"] <> \" \\\\\\\\\" & /@
      spearmanMatrixCells[modelExps], \"\\n\"],
    \"\\n\\\\bottomrule\\n\\\\end{tabular}\"];
 spearmanMatrixMarkdown[modelExps_Association] := StringJoin[
-   \"| Arch. | Semi | CAP | Stable | W1 |\\n|---|---|---|---|---|\\n\",
+   \"| Arch. | Semi | CAP | Cons | Stable | W1 \
+|\\n|---|---|---|---|---|---|\\n\",
    StringRiffle[(\"| \" <> StringRiffle[#, \" | \"] <> \" |\") & /@
      spearmanMatrixCells[modelExps], \"\\n\"]];\
 \>", "Input",
@@ -593,11 +624,14 @@ spearmanMatrixMarkdown[modelExps_Association] := StringJoin[
 
 Cell["\<\
 (* Holm-Bonferroni step-down correction applied jointly to all Wilcoxon
-   p-values of one table -- the benchmark's family of comparisons (2 tests
-   per architecture row; 12 for physics, 8 for cifar10/robustad). Raw
-   p-values are kept under <key>Raw. *)
+   p-values of one table -- the benchmark's family of comparisons (3 tests
+   per architecture row since consistency joined; 18 for physics, 12 for
+   cifar10/robustad). Only NumericQ p-values enter the family, so a collapsed
+   or absent strategy does not inflate m. Raw p-values are kept under
+   <key>Raw. *)
 HolmAdjustRows[rows_List] := Module[
-  {keys = {\"CAPMinusStableP\", \"CAPMinusW1P\"}, idx = {}, ps, m, order,
+  {keys = {\"CAPMinusConsP\", \"CAPMinusStableP\", \"CAPMinusW1P\"}, idx = {}, \
+ps, m, order,
    run = 0., newRows = rows, i, k, adj},
   Do[If[NumericQ[Lookup[newRows[[a]], b]], AppendTo[idx, {a, b}]],
    {a, Length[newRows]}, {b, keys}];
@@ -650,19 +684,23 @@ QuantileAxisCells[assocTail_Association, assocQ99_Association, latexQ_,
    rQ = HolmAdjustRows[
      BuildArchitectureRowsCompactCollapse[assocQ99, nBoot, alpha]]},
   MapThread[Function[{a, b}, Join[{a[\"Architecture\"]},
+     axisPair[a, \"CAPMinusCons\", \"CAPMinusConsP\", latexQ],
      axisPair[a, \"CAPMinusStable\", \"CAPMinusStableP\", latexQ],
      axisPair[a, \"CAPMinusW1\", \"CAPMinusW1P\", latexQ],
+     axisPair[b, \"CAPMinusCons\", \"CAPMinusConsP\", latexQ],
      axisPair[b, \"CAPMinusStable\", \"CAPMinusStableP\", latexQ],
      axisPair[b, \"CAPMinusW1\", \"CAPMinusW1P\", latexQ]]], {rT, rQ}]];
 
 QuantileAxisLatex[assocTail_Association, assocQ99_Association,
    nBoot_:10000, alpha_:0.05] := StringJoin[
-  \"\\\\begin{tabular}{lcccccccc}\\n\\\\toprule\\n\",
-  \" & \\\\multicolumn{4}{c}{$q \\\\approx 0.999991$ (250\\\\,Hz)} & \",
-  \"\\\\multicolumn{4}{c}{$q = 0.99$} \\\\\\\\\\n\",
-  \"Arch. & $\\\\Delta_{\\\\mathrm{C-S}}$ & $p$ & \
+  \"\\\\begin{tabular}{lcccccccccccc}\\n\\\\toprule\\n\",
+  \" & \\\\multicolumn{6}{c}{$q \\\\approx 0.999991$ (250\\\\,Hz)} & \",
+  \"\\\\multicolumn{6}{c}{$q = 0.99$} \\\\\\\\\\n\",
+  \"Arch. & $\\\\Delta_{\\\\mathrm{C-C}}$ & $p$ & \
+$\\\\Delta_{\\\\mathrm{C-S}}$ & $p$ & \
 $\\\\Delta_{\\\\mathrm{C-W}}$ & $p$ & \",
-  \"$\\\\Delta_{\\\\mathrm{C-S}}$ & $p$ & $\\\\Delta_{\\\\mathrm{C-W}}$ & $p$ \
+  \"$\\\\Delta_{\\\\mathrm{C-C}}$ & $p$ & \
+$\\\\Delta_{\\\\mathrm{C-S}}$ & $p$ & $\\\\Delta_{\\\\mathrm{C-W}}$ & $p$ \
 \\\\\\\\\\n\\\\midrule\\n\",
   StringRiffle[StringRiffle[#, \" & \"] <> \" \\\\\\\\\" & /@
     QuantileAxisCells[assocTail, assocQ99, True, nBoot, alpha], \"\\n\"],
@@ -670,8 +708,10 @@ $\\\\Delta_{\\\\mathrm{C-W}}$ & $p$ & \",
 
 QuantileAxisMarkdown[assocTail_Association, assocQ99_Association,
    nBoot_:10000, alpha_:0.05] := StringJoin[
-  \"| Arch. | d(C-S) tail | p | d(C-W) tail | p | d(C-S) q99 | p | \",
-  \"d(C-W) q99 | p |\\n|---|---|---|---|---|---|---|---|---|\\n\",
+  \"| Arch. | d(C-C) tail | p | d(C-S) tail | p | d(C-W) tail | p | \",
+  \"d(C-C) q99 | p | d(C-S) q99 | p | \",
+  \"d(C-W) q99 | p \
+|\\n|---|---|---|---|---|---|---|---|---|---|---|---|---|\\n\",
   StringRiffle[(\"| \" <> StringRiffle[#, \" | \"] <> \" |\") & /@
     QuantileAxisCells[assocTail, assocQ99, False, nBoot, alpha], \"\\n\"]];
 
@@ -688,13 +728,20 @@ MetricAxisSummary[assoc_Association, label_String:\"AUPRC\",
     fmtNum[d, 2] <> \" (\" <> FormatP[p] <>
      If[p < 0.05, \"*\", \"\"] <> \")\"];
   Do[Module[{cap = Mean[r[\"CAP\"]], st = Mean[r[\"Stable\"]],
-     w1 = Mean[r[\"W1\"]], best},
-    best = cap >= st && cap >= w1;
+     w1 = Mean[r[\"W1\"]], consArr = Lookup[r, \"Cons\", {0.}], consOK,
+     best},
+    (* A collapsed/absent consistency column must not make CAP look 'best'
+       by comparing against an all-zero array. *)
+    consOK = !CollapsedMethodQ[consArr];
+    best = cap >= st && cap >= w1 && (!consOK || cap >= Mean[consArr]);
     If[best, bestCells++];
+    tally[Lookup[r, \"CAPMinusCons\"], Lookup[r, \"CAPMinusConsP\"]];
     tally[Lookup[r, \"CAPMinusStable\"], Lookup[r, \"CAPMinusStableP\"]];
     tally[Lookup[r, \"CAPMinusW1\"], Lookup[r, \"CAPMinusW1P\"]];
     AppendTo[lines, StringJoin[\"| \", r[\"Architecture\"], \" | \",
       fmtNum[cap, 2], If[best, \" (best)\", \"\"], \" | \",
+      fmtDP[Lookup[r, \"CAPMinusCons\"], Lookup[r, \"CAPMinusConsP\"]],
+      \" | \",
       fmtDP[Lookup[r, \"CAPMinusStable\"], Lookup[r, \"CAPMinusStableP\"]],
       \" | \",
       fmtDP[Lookup[r, \"CAPMinusW1\"], Lookup[r, \"CAPMinusW1P\"]], \" \
@@ -702,8 +749,8 @@ MetricAxisSummary[assoc_Association, label_String:\"AUPRC\",
    {r, rows}];
   StringJoin[\"Axis 2 (\", label, \") summary -- \",
    \"star = Holm-adjusted p < 0.05, family = this table:\\n\",
-   \"| Arch. | CAP | d CAP-Stable (p) | d CAP-W1 (p) |\\n\",
-   \"|---|---|---|---|\\n\", StringRiffle[lines, \"\\n\"], \"\\n\",
+   \"| Arch. | CAP | d CAP-Cons (p) | d CAP-Stable (p) | d CAP-W1 (p) |\\n\",
+   \"|---|---|---|---|---|\\n\", StringRiffle[lines, \"\\n\"], \"\\n\",
    \"counts: CAP best point estimate in \", ToString[bestCells], \"/\",
    ToString[Length[rows]], \" cells; significant for CAP: \",
    ToString[sigFor], \", against: \", ToString[sigAgainst], \", n/a: \",

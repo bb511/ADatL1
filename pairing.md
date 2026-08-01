@@ -313,6 +313,69 @@ evaluation:
 Using the test table as `pairing_index_path` is data leakage during evaluator
 validation and is now prevented by split validation.
 
+## Deterministic Physics Controls
+
+The learned JetCLR result should be compared to three controls produced without
+anomaly scores or learned parameters:
+
+- `flat_physical` is the deliberately simple data-space baseline. It undoes the
+  preprocessing normalization, converts hardware coordinates to GeV/eta/radians,
+  keeps object slots and presence bits, and embeds phi as sine/cosine.
+- `physics_summary` is the primary interpretable control. Its typed event summary
+  contains multiplicity, scalar and leading Et, eta moments, circular energy flow,
+  and FET-relative recoil. It is invariant to permutations within an object family
+  and to a global azimuthal rotation.
+- `typed_sliced_wasserstein` is the stronger transport control. It represents each
+  object family as an Et-weighted measure in eta and FET-relative phi, then stores
+  deterministic projected weighted quantiles. This is a scalable linearized
+  sliced-W2 approximation, not an exact event-by-event EMD solve.
+
+All metric scales are fitted on a deterministic 200,000-event subset of ZeroBias
+training data. No target simulation, anomaly-model output, or test label is used.
+Each target queries the full ZeroBias reference split. Candidate edges are assigned
+globally in `(distance, target_index, reference_index)` order, making ties and
+one-to-one conflicts reproducible. A q99 distance caliper is derived only from a
+separate ZeroBias-train to ZeroBias-reference closure sample.
+
+The producer reads the ordered tensor caches directly and emits two contracts:
+
+```text
+<split>_<strategy>_full.pt
+  target_to_reference: LongTensor[N_target]
+  reference_to_target: LongTensor[N_reference]
+  distance: FloatTensor[N_target]
+  valid: BoolTensor[N_target]
+  caliper_valid: BoolTensor[N_target]
+  candidate_rank: LongTensor[N_target]
+
+<split>_<strategy>_cap[_n<runtime-size>].pt
+  strict compact pair table consumed by pairing_type=precomputed
+```
+
+For example, generate a full validation map and the usual 81,920/163,840-event
+runtime tables with:
+
+```bash
+uv run python -m src.utils.pairing.physics_tables \
+  --stage validate \
+  --strategy physics_summary \
+  --out-dir results/physics-pairing-control/production \
+  --max-target-events 1199981 \
+  --cap-prefix-events 81920 163840 \
+  --device cuda:0 \
+  --backend torch
+```
+
+Repeat with `--stage test` and the other strategies. The torch search is exact and
+chunked; FAISS `IndexFlatL2` is used when available on CPU but is not required.
+Every artifact records the descriptor state, schema signature, source paths and
+SHA-256 fingerprints, search parameters, caliper, coverage, and balance diagnostics.
+
+Use the prefix matching the actual number of auxiliary events collected by CAP.
+With `batch_size=8192,max_val_batches=10`, choose `_n81920.pt`; with
+`batch_size=16384,max_val_batches=10`, choose `_n163840.pt`. Strict source-size and
+source-hash checks deliberately reject the wrong choice.
+
 ## Final Checklist
 
 Before using a pairing encoder in the paper:
@@ -325,3 +388,4 @@ Before using a pairing encoder in the paper:
 6. CAP configs use `pairing_type: precomputed`,
 7. paper tables report both CAP results and pairing diagnostics.
 8. `make preflight-cloud` passes from a clean commit on the target environment.
+9. physics-control full maps, runtime CAP tables, and diagnostic JSON files are archived.

@@ -14,6 +14,7 @@ import hashlib
 import json
 import math
 import os
+import re
 import shutil
 import statistics
 import subprocess  # nosec B404 - commands are fixed argument vectors, never shell strings
@@ -195,6 +196,8 @@ STAGE9_CANONICAL_SEED = 456
 STAGE9_CANONICAL_CHECKPOINT_SHA256 = (
     "8ce02d89201f130b5c97526ab95ae68badb295928da2f10768b0ea40e9993ecf"
 )
+STAGE9_ALLOWED_MISSING_CANDIDATE_ID = 3
+STAGE9_ALLOWED_MISSING_SEED = 1337
 STAGE9_EVENTS = 32_768
 STAGE9_BATCH_SIZE = 8192
 
@@ -2677,6 +2680,46 @@ def run_stage7(root: Path, candidate_id: int) -> Path:
     return result_path
 
 
+def _stage9_command(root: Path, spec: Mapping[str, Any], candidate_id: int) -> list[str]:
+    """Build the immutable Stage-9 command for execution and later authentication."""
+    trial_root = root / "stage9" / f"candidate_{candidate_id:03d}"
+    return [
+        sys.executable,
+        "src/train.py",
+        "experiment=physics/jetclr_pairing",
+        "trainer=gpu",
+        "trainer.devices=[0]",
+        "train=false",
+        "test=true",
+        "+trainer.limit_val_batches=0",
+        "+trainer.enable_progress_bar=false",
+        "+trainer.enable_model_summary=false",
+        "callbacks.clear_ckpts=null",
+        "callbacks.last_epoch_ckpt=null",
+        "callbacks.rich_progress_bar=null",
+        "callbacks.model_summary=null",
+        "callbacks.log_data_mlflow=null",
+        "logger=csv",
+        f"seed={spec['seed']}",
+        f"data.batch_size={STAGE9_BATCH_SIZE}",
+        "data.max_val_batches=4",
+        # The normal loader supplies disjoint 32k reference and 32k query samples.
+        "data.max_normal_eval_batches=8",
+        f"evaluation.callbacks.pairing_diagnostics.max_events_per_dataset={STAGE9_EVENTS}",
+        f"evaluation.callbacks.embedding_anomaly.reference_size={STAGE9_EVENTS}",
+        f"evaluation.callbacks.embedding_anomaly.max_query_events={STAGE9_EVENTS}",
+        "experiment_name=checkpoint_alias",
+        "run_name=frozen",
+        f"paths.log_dir={root / 'logs'}",
+        f"paths.output_dir={trial_root / 'output'}",
+        f"paths.checkpoints_dir={trial_root}",
+        f"hydra.run.dir={trial_root / 'hydra'}",
+        "extras.print_config=false",
+        "extras.enforce_tags=false",
+        *spec["overrides"],
+    ]
+
+
 def run_stage9(root: Path, candidate_id: int) -> Path:
     """Evaluate one frozen encoder exactly once on the sealed held-out test split."""
     root = root.resolve()
@@ -2744,41 +2787,7 @@ def run_stage9(root: Path, candidate_id: int) -> Path:
     ):
         raise ValueError(f"Stage-9 checkpoint alias mismatch: {alias_checkpoint}")
 
-    command = [
-        sys.executable,
-        "src/train.py",
-        "experiment=physics/jetclr_pairing",
-        "trainer=gpu",
-        "trainer.devices=[0]",
-        "train=false",
-        "test=true",
-        "+trainer.limit_val_batches=0",
-        "+trainer.enable_progress_bar=false",
-        "+trainer.enable_model_summary=false",
-        "callbacks.clear_ckpts=null",
-        "callbacks.last_epoch_ckpt=null",
-        "callbacks.rich_progress_bar=null",
-        "callbacks.model_summary=null",
-        "callbacks.log_data_mlflow=null",
-        "logger=csv",
-        f"seed={spec['seed']}",
-        f"data.batch_size={STAGE9_BATCH_SIZE}",
-        "data.max_val_batches=4",
-        # The normal loader supplies disjoint 32k reference and 32k query samples.
-        "data.max_normal_eval_batches=8",
-        f"evaluation.callbacks.pairing_diagnostics.max_events_per_dataset={STAGE9_EVENTS}",
-        f"evaluation.callbacks.embedding_anomaly.reference_size={STAGE9_EVENTS}",
-        f"evaluation.callbacks.embedding_anomaly.max_query_events={STAGE9_EVENTS}",
-        "experiment_name=checkpoint_alias",
-        "run_name=frozen",
-        f"paths.log_dir={root / 'logs'}",
-        f"paths.output_dir={trial_root / 'output'}",
-        f"paths.checkpoints_dir={trial_root}",
-        f"hydra.run.dir={trial_root / 'hydra'}",
-        "extras.print_config=false",
-        "extras.enforce_tags=false",
-        *spec["overrides"],
-    ]
+    command = _stage9_command(root, spec, candidate_id)
     environment = os.environ.copy()
     environment.update(
         {
@@ -4589,10 +4598,124 @@ def collect_stage8(root: Path) -> Path:
     return output
 
 
-def _stage9_summary_stats(values: Sequence[float]) -> dict[str, float | int]:
-    """Summarize one test metric across the complete frozen eight-seed population."""
-    if len(values) != STAGE9_N_CANDIDATES or not all(math.isfinite(value) for value in values):
-        raise ValueError("Stage-9 aggregate statistics require eight finite values.")
+def _stage9_oom_before_test_evidence(
+    root: Path, manifest: Mapping[str, Any], spec: Mapping[str, Any]
+) -> dict[str, Any]:
+    """Authenticate the sole allowed SIGKILL/OOM before held-out test entry."""
+    candidate_id = int(spec["candidate_id"])
+    if (
+        candidate_id != STAGE9_ALLOWED_MISSING_CANDIDATE_ID
+        or int(spec["seed"]) != STAGE9_ALLOWED_MISSING_SEED
+    ):
+        raise ValueError("Stage-9 recovery is only preregistered for missing seed 1337.")
+    trial_root = root / "stage9" / f"candidate_{candidate_id:03d}"
+    if (trial_root / "result.json").exists():
+        raise ValueError("Stage-9 OOM recovery cannot replace an existing result.")
+    access_path = trial_root / "test_access.json"
+    failure_path = trial_root / "failure.json"
+    if not access_path.is_file() or not failure_path.is_file():
+        raise FileNotFoundError("Stage-9 OOM recovery requires access and failure records.")
+    access = json.loads(access_path.read_text(encoding="utf-8"))
+    failure = json.loads(failure_path.read_text(encoding="utf-8"))
+    expected_command_sha256 = _value_sha256(_stage9_command(root, spec, candidate_id))
+    if (
+        access.get("campaign_id") != manifest["campaign_id"]
+        or access.get("candidate_id") != candidate_id
+        or access.get("spec_sha256") != spec["spec_sha256"]
+        or access.get("seed") != spec["seed"]
+        or access.get("source_checkpoint_sha256") != spec["source_checkpoint_sha256"]
+        or access.get("command_sha256") != expected_command_sha256
+        or access.get("test_accessed") is not True
+    ):
+        raise ValueError("Stage-9 missing-candidate access record is not authentic.")
+    if (
+        failure.get("campaign_id") != manifest["campaign_id"]
+        or failure.get("candidate_id") != candidate_id
+        or failure.get("spec_sha256") != spec["spec_sha256"]
+        or failure.get("returncode") != -9
+        or failure.get("test_accessed") is not True
+        or not str(failure.get("slurm_job_id", "")).isdigit()
+    ):
+        raise ValueError("Stage-9 missing-candidate failure is not the allowed SIGKILL.")
+
+    slurm_job_id = str(failure["slurm_job_id"])
+    error_matches = []
+    for error_path in sorted((root / "slurm").glob("*.err")):
+        error_text = error_path.read_text(encoding="utf-8", errors="replace")
+        if (
+            f"seed={spec['seed']}" in error_text
+            and "<Signals.SIGKILL: 9>" in error_text
+            and re.search(
+                rf"oom_kill event in StepId={re.escape(slurm_job_id)}(?:\.\d+)?", error_text
+            )
+            and "Out Of Memory" in error_text
+        ):
+            error_matches.append((error_path, error_text))
+    if len(error_matches) != 1:
+        raise ValueError("Stage-9 missing-candidate OOM log evidence is ambiguous or absent.")
+    error_path, error_text = error_matches[0]
+    output_path = error_path.with_suffix(".out")
+    if not output_path.is_file():
+        raise FileNotFoundError(output_path)
+    output_text = output_path.read_text(encoding="utf-8", errors="replace")
+    checkpoint_marker = f"stage9/candidate_{candidate_id:03d}/checkpoint_alias/frozen/last.ckpt"
+    validation_lines = [
+        line
+        for line in output_text.splitlines()
+        if checkpoint_marker in line and "Evaluating checkpoint" in line
+    ]
+    if len(validation_lines) != 1:
+        raise ValueError("Stage-9 missing candidate lacks unique validation log evidence.")
+
+    local_pattern = re.compile(r"\[(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2},\d+)\]")
+    oom_pattern = re.compile(r"\[(\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d+)\].*oom_kill")
+    validation_match = local_pattern.search(validation_lines[0])
+    oom_match = oom_pattern.search(error_text)
+    test_matches = [
+        local_pattern.search(line)
+        for line in output_text.splitlines()
+        if "STARTING RUN TESTING" in line
+    ]
+    test_matches = [match for match in test_matches if match is not None]
+    if validation_match is None or oom_match is None or not test_matches:
+        raise ValueError("Stage-9 OOM/test phase chronology cannot be authenticated.")
+    validation_at = datetime.strptime(validation_match.group(1), "%Y-%m-%d %H:%M:%S,%f")
+    oom_at = datetime.strptime(oom_match.group(1), "%Y-%m-%dT%H:%M:%S.%f")
+    first_test_at = min(
+        datetime.strptime(match.group(1), "%Y-%m-%d %H:%M:%S,%f") for match in test_matches
+    )
+    if not validation_at < oom_at < first_test_at:
+        raise ValueError("Stage-9 missing candidate was not proven OOM-killed before test entry.")
+    return {
+        "candidate_id": candidate_id,
+        "candidate_label": f"candidate_{candidate_id:03d}",
+        "seed": int(spec["seed"]),
+        "reason": "OOM-before-test",
+        "returncode": -9,
+        "signal": "SIGKILL",
+        "slurm_job_id": slurm_job_id,
+        "validation_started_at": validation_at.isoformat(),
+        "oom_detected_at": oom_at.isoformat(),
+        "first_other_process_test_marker_at": first_test_at.isoformat(),
+        "result_absent": True,
+        "missing_test_artifacts_inspected": False,
+        "test_access_record": {"path": str(access_path), "sha256": _sha256(access_path)},
+        "failure_record": {"path": str(failure_path), "sha256": _sha256(failure_path)},
+        "slurm_stdout": {"path": str(output_path), "sha256": _sha256(output_path)},
+        "slurm_stderr": {"path": str(error_path), "sha256": _sha256(error_path)},
+    }
+
+
+def _stage9_summary_stats(
+    values: Sequence[float], expected_count: int = STAGE9_N_CANDIDATES
+) -> dict[str, float | int]:
+    """Summarize one test metric across the authenticated completed population."""
+    if (
+        len(values) != expected_count
+        or expected_count < 2
+        or not all(math.isfinite(value) for value in values)
+    ):
+        raise ValueError(f"Stage-9 aggregate statistics require {expected_count} finite values.")
     return {
         "n": len(values),
         "mean": statistics.mean(values),
@@ -4625,10 +4748,27 @@ def collect_stage9(root: Path) -> Path:
     result_hashes = {}
     seen_checkpoints = set()
     expected_entrypoint_sha = _sha256(Path(manifest["deployment"]["path"]) / "src" / "train.py")
+    missing_specs = [
+        spec
+        for spec in stage9["candidates"]
+        if not (
+            root / "stage9" / f"candidate_{spec['candidate_id']:03d}" / "result.json"
+        ).is_file()
+    ]
+    if len(missing_specs) > 1:
+        raise FileNotFoundError("Stage 9 has more than one missing result.")
+    missing_evidence = (
+        _stage9_oom_before_test_evidence(root, manifest, missing_specs[0])
+        if missing_specs
+        else None
+    )
+    completed_specs = [spec for spec in stage9["candidates"] if spec not in missing_specs]
+    if not any(int(spec["seed"]) == canonical["seed"] for spec in completed_specs):
+        raise ValueError("The preregistered canonical Stage-9 checkpoint did not complete test.")
     for spec in stage9["candidates"]:
         result_path = root / "stage9" / f"candidate_{spec['candidate_id']:03d}" / "result.json"
         if not result_path.is_file():
-            raise FileNotFoundError(result_path)
+            continue
         result = json.loads(result_path.read_text(encoding="utf-8"))
         result_digest = result.pop("result_payload_sha256", None)
         if result_digest is None or _value_sha256(result) != result_digest:
@@ -4735,13 +4875,14 @@ def collect_stage9(root: Path) -> Path:
             )
         result_hashes[str(spec["seed"])] = result_digest
 
-    if len(per_seed_rows) != STAGE9_N_CANDIDATES or seen_checkpoints != {
-        spec["source_checkpoint_sha256"] for spec in stage9["candidates"]
+    completed_count = len(completed_specs)
+    if len(per_seed_rows) != completed_count or seen_checkpoints != {
+        spec["source_checkpoint_sha256"] for spec in completed_specs
     }:
-        raise ValueError("Stage-9 one-shot evaluation population is incomplete.")
+        raise ValueError("Stage-9 completed-result population is internally inconsistent.")
     dataset_names = sorted({row["dataset"] for row in per_dataset_rows})
     if any(
-        len([row for row in per_dataset_rows if row["dataset"] == dataset]) != STAGE9_N_CANDIDATES
+        len([row for row in per_dataset_rows if row["dataset"] == dataset]) != completed_count
         for dataset in dataset_names
     ):
         raise ValueError("Stage-9 per-dataset test population is incomplete.")
@@ -4758,7 +4899,9 @@ def collect_stage9(root: Path) -> Path:
         "test_macro_median_auprc",
     )
     aggregate_metrics = {
-        name: _stage9_summary_stats([float(row[name]) for row in per_seed_rows])
+        name: _stage9_summary_stats(
+            [float(row[name]) for row in per_seed_rows], expected_count=completed_count
+        )
         for name in overall_metric_columns
     }
     aggregate_rows = []
@@ -4769,7 +4912,9 @@ def collect_stage9(root: Path) -> Path:
         dataset_rows = [row for row in per_dataset_rows if row["dataset"] == dataset]
         per_dataset_aggregates[dataset] = {}
         for metric in ("auroc", "auprc", "tpr_at_fpr_0.01", "tpr_at_fpr_0.001"):
-            values = _stage9_summary_stats([float(row[metric]) for row in dataset_rows])
+            values = _stage9_summary_stats(
+                [float(row[metric]) for row in dataset_rows], expected_count=completed_count
+            )
             per_dataset_aggregates[dataset][metric] = values
             aggregate_rows.append(
                 {"scope": "dataset", "dataset": dataset, "metric": metric, **values}
@@ -4786,20 +4931,40 @@ def collect_stage9(root: Path) -> Path:
     summary = {
         "schema_version": 1,
         "campaign_id": manifest["campaign_id"],
-        "status": "complete",
+        "status": (
+            "complete" if missing_evidence is None else "complete_with_operational_failure"
+        ),
         "test_accessed": True,
-        "test_access_policy": "each of eight frozen checkpoints evaluated exactly once",
+        "test_access_policy": (
+            "each frozen checkpoint process launched at most once; seven produced test results "
+            "and one authenticated OOM occurred before test entry"
+            if missing_evidence is not None
+            else "each of eight frozen checkpoints evaluated exactly once"
+        ),
         "frozen_recipe": stage9["frozen_recipe"],
         "completed_epoch": stage9["completed_epoch"],
         "scheduler_total_steps": stage9["scheduler_total_steps"],
+        "n_frozen_checkpoints_planned": STAGE9_N_CANDIDATES,
+        "n_frozen_checkpoints_completed": len(per_seed_rows),
         "n_frozen_checkpoints": len(per_seed_rows),
+        "test_population_complete": missing_evidence is None,
         "seeds": [int(row["seed"]) for row in per_seed_rows],
+        "missing_evaluation": missing_evidence,
+        "missing_candidate_id": (
+            missing_evidence["candidate_id"] if missing_evidence is not None else None
+        ),
+        "missing_candidate_label": (
+            missing_evidence["candidate_label"] if missing_evidence is not None else None
+        ),
+        "missing_seed": missing_evidence["seed"] if missing_evidence is not None else None,
+        "missing_reason": missing_evidence["reason"] if missing_evidence is not None else None,
         "event_counts": {
             "pairing_per_dataset": STAGE9_EVENTS,
             "anomaly_reference": STAGE9_EVENTS,
             "anomaly_query_cap_per_dataset": STAGE9_EVENTS,
         },
         "canonical_checkpoint": canonical,
+        "canonical_test_completed": True,
         "canonical_selection_frozen_before_test": True,
         "post_test_selection_performed": False,
         "no_post_test_selection_statement": (

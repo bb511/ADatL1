@@ -1655,3 +1655,84 @@ def test_stage9_failed_test_launch_cannot_be_repeated(
     with pytest.raises(RuntimeError, match="Refusing to repeat"):
         jetclr_campaign.run_stage9(tmp_path, 0)
     assert launches == 1
+
+
+def test_collect_stage9_reports_single_authenticated_oom_before_test(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A single pre-test OOM yields a seven-seed report without changing selection."""
+    _write_manifest(tmp_path)
+    entrypoint = tmp_path / "src" / "train.py"
+    entrypoint.parent.mkdir(parents=True)
+    entrypoint.write_text("# synthetic entrypoint\n", encoding="utf-8")
+    monkeypatch.setattr(jetclr_campaign, "_assert_runtime", lambda _: tmp_path)
+    monkeypatch.setenv("SLURM_JOB_ID", "12345")
+
+    def fake_run(command, **kwargs):
+        output_arg = next(value for value in command if value.startswith("paths.output_dir="))
+        output = Path(output_arg.split("=", 1)[1])
+        candidate_id = int(output.parent.name.removeprefix("candidate_"))
+        if candidate_id == 3:
+            return SimpleNamespace(returncode=-9)
+        pairing_dir = output / "metrics" / "pairing_diagnostics" / "last"
+        anomaly_dir = output / "metrics" / "embedding_anomaly" / "last"
+        pairing_dir.mkdir(parents=True)
+        anomaly_dir.mkdir(parents=True)
+        pairing = _pairing_metrics()
+        pairing.update(
+            {
+                "n_dataset_1": 32_768,
+                "n_dataset_2": 32_768,
+                "embedding_effective_rank": 15.0 + candidate_id,
+            }
+        )
+        (pairing_dir / "pairing_diagnostics.json").write_text(
+            json.dumps(pairing), encoding="utf-8"
+        )
+        (anomaly_dir / "embedding_anomaly.json").write_text(
+            json.dumps(_stage9_anomaly_metrics(0.80 + 0.001 * candidate_id)),
+            encoding="utf-8",
+        )
+        return SimpleNamespace(returncode=0)
+
+    monkeypatch.setattr(jetclr_campaign.subprocess, "run", fake_run)
+    for candidate_id in range(8):
+        if candidate_id == 3:
+            with pytest.raises(jetclr_campaign.subprocess.CalledProcessError):
+                jetclr_campaign.run_stage9(tmp_path, candidate_id)
+        else:
+            jetclr_campaign.run_stage9(tmp_path, candidate_id)
+
+    slurm = tmp_path / "slurm"
+    slurm.mkdir()
+    stdout = slurm / "stage9.out"
+    stderr = slurm / "stage9.err"
+    stdout.write_text(
+        "[2026-08-01 18:34:07,039] Evaluating checkpoint at "
+        f"{tmp_path}/stage9/candidate_003/checkpoint_alias/frozen/last.ckpt.\n"
+        "[2026-08-01 18:34:25,390] --------STARTING RUN TESTING--------\n",
+        encoding="utf-8",
+    )
+    stderr.write_text(
+        "seed=1337 died with <Signals.SIGKILL: 9>.\n"
+        "[2026-08-01T18:34:21.770] error: Detected 1 oom_kill event in "
+        "StepId=12345.2.\n"
+        "task 0: Out Of Memory\n",
+        encoding="utf-8",
+    )
+    output = jetclr_campaign.collect_stage9(tmp_path)
+    summary = json.loads(output.read_text(encoding="utf-8"))
+    assert summary["status"] == "complete_with_operational_failure"
+    assert summary["n_frozen_checkpoints_planned"] == 8
+    assert summary["n_frozen_checkpoints_completed"] == 7
+    assert summary["test_population_complete"] is False
+    assert summary["missing_evaluation"]["seed"] == 1337
+    assert summary["missing_evaluation"]["reason"] == "OOM-before-test"
+    assert summary["missing_candidate_label"] == "candidate_003"
+    assert summary["missing_seed"] == 1337
+    assert summary["missing_reason"] == "OOM-before-test"
+    assert summary["missing_evaluation"]["missing_test_artifacts_inspected"] is False
+    assert summary["canonical_checkpoint"]["seed"] == 456
+    assert summary["canonical_test_completed"] is True
+    assert summary["post_test_selection_performed"] is False
+    assert summary["aggregate_test_metrics"]["test_macro_mean_auroc"]["n"] == 7

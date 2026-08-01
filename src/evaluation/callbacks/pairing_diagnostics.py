@@ -31,6 +31,10 @@ class PairingDiagnostics(Callback):
         caliper_quantile: float | None = 0.95,
         max_events_per_dataset: int | None = 32768,
         closure_chunk_size: int = 512,
+        min_active_fraction: float = 0.8,
+        min_effective_rank: float = 6.0,
+        min_participation_rank: float = 4.5,
+        max_top_pc_fraction: float = 0.5,
         name: str = "pairing_diagnostics",
     ):
         super().__init__()
@@ -54,6 +58,16 @@ class PairingDiagnostics(Callback):
         self.closure_chunk_size = int(closure_chunk_size)
         if self.closure_chunk_size <= 0:
             raise ValueError("PairingDiagnostics closure_chunk_size must be positive.")
+        self.min_active_fraction = float(min_active_fraction)
+        self.min_effective_rank = float(min_effective_rank)
+        self.min_participation_rank = float(min_participation_rank)
+        self.max_top_pc_fraction = float(max_top_pc_fraction)
+        if not 0.0 <= self.min_active_fraction <= 1.0:
+            raise ValueError("min_active_fraction must be between zero and one.")
+        if self.min_effective_rank <= 0.0 or self.min_participation_rank <= 0.0:
+            raise ValueError("Rank thresholds must be positive.")
+        if not 0.0 < self.max_top_pc_fraction <= 1.0:
+            raise ValueError("max_top_pc_fraction must be in (0, 1].")
         self.name = name
         self.summary = defaultdict(float)
         self.last_metrics = {}
@@ -149,7 +163,13 @@ class PairingDiagnostics(Callback):
         value_smd_before = self._masked_value_smd(x1, m1, x2, m2)
         occupancy_smd_before = standardized_mean_differences(m1.float(), m2.float())
         coverage = pairs.idx_1.numel() / max(min(z1.shape[0], z2.shape[0]), 1)
-        embedding = self._embedding_statistics(z1)
+        embedding = self._embedding_statistics(
+            z1,
+            min_active_fraction=self.min_active_fraction,
+            min_effective_rank=self.min_effective_rank,
+            min_participation_rank=self.min_participation_rank,
+            max_top_pc_fraction=self.max_top_pc_fraction,
+        )
 
         if pairs.idx_1.numel():
             smd_after = standardized_mean_differences(x1, x2, pairs.idx_1, pairs.idx_2)
@@ -246,7 +266,13 @@ class PairingDiagnostics(Callback):
         return torch.tensor(values)
 
     @staticmethod
-    def _embedding_statistics(z: torch.Tensor) -> dict[str, float | bool | list[str]]:
+    def _embedding_statistics(
+        z: torch.Tensor,
+        min_active_fraction: float = 0.8,
+        min_effective_rank: float = 6.0,
+        min_participation_rank: float = 4.5,
+        max_top_pc_fraction: float = 0.5,
+    ) -> dict[str, float | bool | list[str]]:
         z = z.float()
         finite_fraction = torch.isfinite(z).float().mean().item()
         safe = torch.nan_to_num(z)
@@ -264,19 +290,18 @@ class PairingDiagnostics(Callback):
             variance.square() / eigenvalues.square().sum().clamp_min(1e-12)
         ).item()
         top_pc_fraction = (eigenvalues.max() / variance).item()
-        dim = z.shape[1]
         active_fraction = (std > 1e-3).float().mean().item()
 
         failures = []
         if finite_fraction < 1.0:
             failures.append("nonfinite")
-        if active_fraction < 0.8:
+        if active_fraction < min_active_fraction:
             failures.append("inactive_dimensions")
-        if effective_rank < 0.25 * dim:
+        if effective_rank < min_effective_rank:
             failures.append("low_effective_rank")
-        if participation_rank < 0.2 * dim:
+        if participation_rank < min_participation_rank:
             failures.append("low_participation_rank")
-        if top_pc_fraction > 0.5:
+        if top_pc_fraction > max_top_pc_fraction:
             failures.append("dominant_principal_component")
 
         sample = torch.nn.functional.normalize(safe[: min(2048, safe.shape[0])], dim=1)
@@ -292,6 +317,10 @@ class PairingDiagnostics(Callback):
             "embedding_top_pc_fraction": top_pc_fraction,
             "embedding_mean_norm": safe.norm(dim=1).mean().item(),
             "embedding_mean_offdiag_cosine": mean_offdiag_cosine,
+            "collapse_min_active_fraction": float(min_active_fraction),
+            "collapse_min_effective_rank": float(min_effective_rank),
+            "collapse_min_participation_rank": float(min_participation_rank),
+            "collapse_max_top_pc_fraction": float(max_top_pc_fraction),
             "collapse_pass": not failures,
             "collapse_failures": failures,
         }

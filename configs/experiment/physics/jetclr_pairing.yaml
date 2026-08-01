@@ -60,6 +60,12 @@ evaluation:
       caliper_quantile: 0.95
       max_events_per_dataset: 32768
       closure_chunk_size: 512
+      # Calibrated at roughly twice the untrained real-data rank baseline. Absolute
+      # thresholds avoid tying physical intrinsic dimension to encoder width.
+      min_active_fraction: 0.8
+      min_effective_rank: 6.0
+      min_participation_rank: 4.5
+      max_top_pc_fraction: 0.5
       name: pairing_diagnostics
     embedding_anomaly:
       _target_: src.evaluation.callbacks.embedding_anomaly.EmbeddingAnomalyMetrics

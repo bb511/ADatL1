@@ -248,6 +248,23 @@ def test_embedding_diagnostics_detect_rank_collapse() -> None:
     assert "inactive_dimensions" in collapsed_stats["collapse_failures"]
 
 
+def test_embedding_rank_gate_is_calibrated_independently_of_output_width() -> None:
+    generator = torch.Generator().manual_seed(23)
+    latent = torch.randn(1024, 8, generator=generator)
+    embedding = latent @ torch.randn(8, 128, generator=generator)
+
+    calibrated = PairingDiagnostics._embedding_statistics(embedding)
+    width_fraction_gate = PairingDiagnostics._embedding_statistics(
+        embedding,
+        min_effective_rank=32.0,
+        min_participation_rank=25.6,
+    )
+
+    assert calibrated["collapse_pass"]
+    assert not width_fraction_gate["collapse_pass"]
+    assert calibrated["collapse_min_effective_rank"] == 6.0
+
+
 def test_pairing_diagnostics_records_zero_pairs_as_ineligible() -> None:
     callback = PairingDiagnostics(k=1, caliper_quantile=0.0)
     z1 = torch.eye(4)

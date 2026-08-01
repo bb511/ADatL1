@@ -84,6 +84,34 @@ STAGE4_SOURCE_ARCHITECTURES = (
     (10, "layers2", "0ef568e754d5530bd517b55ecbd6d0b19aa9c84f38bff1dfcc5b80a827b73856"),
     (9, "official_projector", "c19d089c7261c9c2055fbc218fb44333b7e99bd9020937a3282cbe5f2de50d67"),
 )
+STAGE5_SEEDS = (321, 777)
+STAGE5_N_CANDIDATES = 8
+STAGE5_SOURCE_CAMPAIGN = "jetclr_20260801_1c4c0cc"
+STAGE5_SOURCE_SUMMARY_SHA256 = "e47c477ceb6529d2d497c57c216d01657ca4eee6e9a7a362a9af52e90c277c21"
+STAGE5_SOURCE_SUMMARY_CSV_SHA256 = (
+    "de522f251948160c2e4343be103d0fc271647363d3721e8f52ad7f7621e7bfc2"
+)
+STAGE5_SOURCE_ROOT = DEFAULT_CAMPAIGN_BASE / STAGE5_SOURCE_CAMPAIGN
+STAGE5_SOURCE_SUMMARY = STAGE5_SOURCE_ROOT / "stage4" / "summary.json"
+STAGE5_SOURCE_SUMMARY_CSV = STAGE5_SOURCE_ROOT / "stage4" / "summary.csv"
+STAGE5_SOURCE_CANDIDATES = (
+    (0, "layers2_var0_cov0", "0b2579c4f46e24d4b88463731c5d25ae15cd99d48ca2fe53bf69431546029d2e"),
+    (
+        4,
+        "layers2_var0.5_cov0.005",
+        "6aa762be009195995513b85cc3c437d831aedbdf0e24459ddb323fe0df564cf7",
+    ),
+    (
+        6,
+        "official_projector_var0_cov0",
+        "d566dd6f0b365e5a8c100b50b02a1f85973aa1deec790d073b495bb19a81a645",
+    ),
+    (
+        10,
+        "official_projector_var0.5_cov0.005",
+        "2f4c6c9486466b5dc2b77b9266cf649f4c89bfbedafab24b61cb2d7804844dc5",
+    ),
+)
 
 
 def _stage1_base_overrides() -> dict[str, Any]:
@@ -501,6 +529,40 @@ def stage4_specs() -> list[dict[str, Any]]:
             specs.append({**identity, "spec_sha256": _value_sha256(identity)})
     if len(specs) != STAGE4_N_CANDIDATES:
         raise AssertionError("Stage-4 design must contain exactly 12 candidates.")
+    return specs
+
+
+def stage5_specs() -> list[dict[str, Any]]:
+    """Return four frozen Stage-4 configurations crossed with two fresh seeds."""
+    stage4 = stage4_specs()
+    specs = []
+    for source_id, source_name, source_sha256 in STAGE5_SOURCE_CANDIDATES:
+        source = stage4[source_id]
+        if source["name"] != source_name or source["spec_sha256"] != source_sha256:
+            raise RuntimeError("Frozen Stage-4 confirmation source identity changed.")
+        for seed in STAGE5_SEEDS:
+            candidate_id = len(specs)
+            identity = {
+                "candidate_id": candidate_id,
+                "name": f"{source_name}_seed{seed}",
+                "kind": "fresh_seed_confirmation",
+                "seed": seed,
+                "full_epochs": 1,
+                "source_campaign_id": STAGE5_SOURCE_CAMPAIGN,
+                "source_candidate_id": source_id,
+                "source_candidate_name": source_name,
+                "source_candidate_spec_sha256": source_sha256,
+                "source_architecture_id": source["source_candidate_id"],
+                "source_architecture_name": source["source_candidate_name"],
+                "is_architecture_control": source["is_architecture_control"],
+                "regularization_params": source["regularization_params"],
+                "params": source["params"],
+                "overrides": source["overrides"],
+                "rationale": "Fresh-seed confirmation of a frozen Stage-4 configuration.",
+            }
+            specs.append({**identity, "spec_sha256": _value_sha256(identity)})
+    if len(specs) != STAGE5_N_CANDIDATES:
+        raise AssertionError("Stage-5 design must contain exactly eight candidates.")
     return specs
 
 
@@ -987,6 +1049,28 @@ def _write_stage4_launchers(root: Path, manifest: Mapping[str, Any]) -> dict[str
     return destinations
 
 
+def _write_stage5_launchers(root: Path, manifest: Mapping[str, Any]) -> dict[str, Path]:
+    """Write two packed four-GPU Stage-5 nodes and their dependent collector."""
+    templates = _write_stage4_launchers(root, manifest)
+    destinations = {
+        "stage5": root / "slurm" / "stage5.sbatch",
+        "collector": root / "slurm" / "stage5_collect.sbatch",
+        "submitter": root / "slurm" / "submit_stage5.sh",
+    }
+    source_by_role = {
+        "stage5": templates["stage4"],
+        "collector": templates["collector"],
+        "submitter": templates["submitter"],
+    }
+    for role, destination in destinations.items():
+        text = source_by_role[role].read_text(encoding="utf-8")
+        text = text.replace("stage4", "stage5").replace("jetclr-s4", "jetclr-s5")
+        text = text.replace("#SBATCH --array=0-2%3", "#SBATCH --array=0-1%2")
+        destination.write_text(text, encoding="utf-8")
+        destination.chmod(0o755)
+    return destinations
+
+
 def initialize(
     root: Path,
     deployment: Path,
@@ -1042,6 +1126,20 @@ def initialize(
             or source_architecture["params"] != stage3_specs()[source_id]["params"]
         ):
             raise RuntimeError("Frozen Stage-3 promoted architecture identity changed.")
+    if _sha256(STAGE5_SOURCE_SUMMARY) != STAGE5_SOURCE_SUMMARY_SHA256:
+        raise RuntimeError("Frozen Stage-4 source summary fingerprint changed.")
+    if _sha256(STAGE5_SOURCE_SUMMARY_CSV) != STAGE5_SOURCE_SUMMARY_CSV_SHA256:
+        raise RuntimeError("Frozen Stage-4 source metric table fingerprint changed.")
+    source_stage4 = json.loads((STAGE5_SOURCE_ROOT / "campaign.json").read_text(encoding="utf-8"))
+    for source_id, source_name, source_sha256 in STAGE5_SOURCE_CANDIDATES:
+        source_configuration = source_stage4["stage4"]["candidates"][source_id]
+        if (
+            source_configuration["candidate_id"] != source_id
+            or source_configuration["name"] != source_name
+            or source_configuration["spec_sha256"] != source_sha256
+            or source_configuration["params"] != stage4_specs()[source_id]["params"]
+        ):
+            raise RuntimeError("Frozen Stage-4 confirmation candidate identity changed.")
 
     deployment.parent.mkdir(parents=True, exist_ok=True)
     git = shutil.which("git")
@@ -1063,11 +1161,13 @@ def initialize(
     stage2 = stage2_specs()
     stage3 = stage3_specs()
     stage4 = stage4_specs()
+    stage5 = stage5_specs()
     _atomic_json(root / "design" / "canary_trials.json", specs)
     _atomic_json(root / "design" / "stage1_candidates.json", stage1)
     _atomic_json(root / "design" / "stage2_candidates.json", stage2)
     _atomic_json(root / "design" / "stage3_candidates.json", stage3)
     _atomic_json(root / "design" / "stage4_candidates.json", stage4)
+    _atomic_json(root / "design" / "stage5_candidates.json", stage5)
     manifest = {
         "schema_version": 1,
         "campaign_id": campaign_id,
@@ -1142,6 +1242,21 @@ def initialize(
             "candidates": stage4,
             "design_sha256": _value_sha256(stage4),
         },
+        "stage5": {
+            "seeds": list(STAGE5_SEEDS),
+            "full_epochs": 1,
+            "source_campaign_id": STAGE5_SOURCE_CAMPAIGN,
+            "source_summary": str(STAGE5_SOURCE_SUMMARY),
+            "source_summary_sha256": STAGE5_SOURCE_SUMMARY_SHA256,
+            "source_summary_csv": str(STAGE5_SOURCE_SUMMARY_CSV),
+            "source_summary_csv_sha256": STAGE5_SOURCE_SUMMARY_CSV_SHA256,
+            "source_candidates": [
+                {"candidate_id": item[0], "name": item[1], "spec_sha256": item[2]}
+                for item in STAGE5_SOURCE_CANDIDATES
+            ],
+            "candidates": stage5,
+            "design_sha256": _value_sha256(stage5),
+        },
     }
     manifest["manifest_payload_sha256"] = _value_sha256(manifest)
     _atomic_json(root / "campaign.json", manifest)
@@ -1150,6 +1265,7 @@ def initialize(
     _write_stage2_launchers(root, manifest)
     _write_stage3_launchers(root, manifest)
     _write_stage4_launchers(root, manifest)
+    _write_stage5_launchers(root, manifest)
     return launcher
 
 
@@ -1560,8 +1676,8 @@ def _validate_stage4_training_metrics(
 
 
 def _run_full_epoch_stage(root: Path, candidate_id: int, stage: str) -> Path:
-    """Run one authenticated full-epoch candidate for Stage 2, 3, or 4."""
-    if stage not in {"stage2", "stage3", "stage4"}:
+    """Run one authenticated full-epoch candidate for Stage 2 through 5."""
+    if stage not in {"stage2", "stage3", "stage4", "stage5"}:
         raise ValueError(f"Unsupported full-epoch stage: {stage}")
     root = root.resolve()
     manifest = _load_campaign(root)
@@ -1598,7 +1714,7 @@ def _run_full_epoch_stage(root: Path, candidate_id: int, stage: str) -> Path:
         "callbacks.log_data_mlflow=null",
         "logger=csv",
         "test=false",
-        f"seed={manifest[stage]['seed']}",
+        f"seed={spec['seed']}",
         "data.max_val_batches=4",
         "data.max_normal_eval_batches=8",
         "evaluation.callbacks.pairing_diagnostics.max_events_per_dataset=8192",
@@ -1647,7 +1763,7 @@ def _run_full_epoch_stage(root: Path, candidate_id: int, stage: str) -> Path:
 
     metrics_csv = _single_artifact(trial_root / "output", "metrics.csv")
     training = _last_finite_metrics(metrics_csv)
-    if stage == "stage4":
+    if stage in {"stage4", "stage5"}:
         _validate_stage4_training_metrics(training, spec, metrics_csv)
     pairing_path = _single_artifact(trial_root / "output", "pairing_diagnostics.json")
     required_pairing = [
@@ -1665,7 +1781,7 @@ def _run_full_epoch_stage(root: Path, candidate_id: int, stage: str) -> Path:
         "occupancy_smd_before_mean",
         "occupancy_smd_after_mean",
     ]
-    if stage in {"stage3", "stage4"}:
+    if stage in {"stage3", "stage4", "stage5"}:
         required_pairing.extend(
             [
                 "projector_embedding_finite_fraction",
@@ -1680,7 +1796,7 @@ def _run_full_epoch_stage(root: Path, candidate_id: int, stage: str) -> Path:
         pairing.get("collapse_failures"), list
     ):
         raise ValueError(f"Pairing collapse gate is malformed: {pairing_path}")
-    if stage in {"stage3", "stage4"} and (
+    if stage in {"stage3", "stage4", "stage5"} and (
         not isinstance(pairing.get("projector_collapse_pass"), bool)
         or not isinstance(pairing.get("projector_collapse_failures"), list)
     ):
@@ -1695,7 +1811,7 @@ def _run_full_epoch_stage(root: Path, candidate_id: int, stage: str) -> Path:
     for name in ("macro_median_auroc", "macro_mean_auroc", "worst_quartile_mean_auroc"):
         if not 0.0 <= float(anomaly[name]) <= 1.0:
             raise ValueError(f"AUROC {name!r} is outside [0, 1]: {anomaly_path}")
-    if stage == "stage4" and not _valid_anomaly_aurocs(anomaly):
+    if stage in {"stage4", "stage5"} and not _valid_anomaly_aurocs(anomaly):
         raise ValueError(f"Stage-4 per-dataset AUROCs are malformed: {anomaly_path}")
 
     artifacts = {
@@ -1703,7 +1819,7 @@ def _run_full_epoch_stage(root: Path, candidate_id: int, stage: str) -> Path:
         "pairing_json": pairing_path,
         "anomaly_json": anomaly_path,
     }
-    if stage == "stage4":
+    if stage in {"stage4", "stage5"}:
         artifacts["last_checkpoint"] = _single_artifact(trial_root, "last.ckpt")
     result = {
         "schema_version": 1,
@@ -1749,6 +1865,11 @@ def run_stage3(root: Path, candidate_id: int) -> Path:
 def run_stage4(root: Path, candidate_id: int) -> Path:
     """Run one Stage-4 encoder-regularization ablation for one complete epoch."""
     return _run_full_epoch_stage(root, candidate_id, "stage4")
+
+
+def run_stage5(root: Path, candidate_id: int) -> Path:
+    """Run one fresh-seed Stage-5 confirmation for one complete epoch."""
+    return _run_full_epoch_stage(root, candidate_id, "stage5")
 
 
 def collect(root: Path) -> Path:
@@ -2411,6 +2532,275 @@ def collect_stage4(root: Path) -> Path:
     return output
 
 
+def _stage5_result_row(
+    result: Mapping[str, Any],
+    spec: Mapping[str, Any],
+    origin: str,
+    result_sha256: str,
+) -> dict[str, Any]:
+    """Build one authenticated confirmation row without discarding its identities."""
+    pairing = result["pairing_metrics"]
+    anomaly = result["anomaly_metrics"]
+    training = result["training_metrics"]
+    encoder_finite = float(pairing["embedding_finite_fraction"]) == 1.0
+    projector_finite = float(pairing["projector_embedding_finite_fraction"]) == 1.0
+    scientifically_eligible = (
+        bool(pairing["collapse_pass"])
+        and bool(pairing["projector_collapse_pass"])
+        and encoder_finite
+        and projector_finite
+        and float(pairing["mnn_coverage"]) > 0.0
+        and _valid_anomaly_aurocs(anomaly)
+    )
+    artifacts = result["artifacts"]
+    return {
+        "origin": origin,
+        "candidate_id": spec["candidate_id"],
+        "stage4_config_id": (
+            spec["candidate_id"] if origin == "stage4_seed123" else spec["source_candidate_id"]
+        ),
+        "configuration_name": (
+            spec["name"] if origin == "stage4_seed123" else spec["source_candidate_name"]
+        ),
+        "architecture_id": spec["source_architecture_id"]
+        if origin != "stage4_seed123"
+        else spec["source_candidate_id"],
+        "architecture_name": spec["source_architecture_name"]
+        if origin != "stage4_seed123"
+        else spec["source_candidate_name"],
+        "is_architecture_control": spec["is_architecture_control"],
+        "seed": spec["seed"],
+        "scientifically_eligible": scientifically_eligible,
+        "balance_pass": _balance_improves(pairing),
+        "encoder_effective_rank": pairing["embedding_effective_rank"],
+        "encoder_participation_rank": pairing["embedding_participation_rank"],
+        "encoder_top_pc_fraction": pairing["embedding_top_pc_fraction"],
+        "projector_effective_rank": pairing["projector_embedding_effective_rank"],
+        "raw_selection_score": pairing["raw_selection_score"],
+        "macro_mean_auroc": anomaly["macro_mean_auroc"],
+        "macro_median_auroc": anomaly["macro_median_auroc"],
+        "worst_quartile_mean_auroc": anomaly["worst_quartile_mean_auroc"],
+        "train_loss": training["train/loss_mean"],
+        "spec_sha256": spec["spec_sha256"],
+        "result_payload_sha256": result_sha256,
+        "checkpoint_path": artifacts["last_checkpoint"]["path"],
+        "checkpoint_sha256": artifacts["last_checkpoint"]["sha256"],
+        "artifact_hashes_json": _canonical_json(
+            {name: artifact["sha256"] for name, artifact in sorted(artifacts.items())}
+        ),
+    }
+
+
+def _authenticate_stage5_result(
+    result_path: Path,
+    manifest: Mapping[str, Any],
+    spec: Mapping[str, Any],
+    *,
+    source: bool,
+) -> tuple[dict[str, Any], str]:
+    """Authenticate one Stage-4 or Stage-5 result and every referenced artifact."""
+    result = json.loads(result_path.read_text(encoding="utf-8"))
+    digest = result.pop("result_payload_sha256", None)
+    if digest is None or _value_sha256(result) != digest:
+        raise ValueError(f"Stage-5 input result fingerprint mismatch: {result_path}")
+    expected_source_campaign = STAGE4_SOURCE_CAMPAIGN if source else STAGE5_SOURCE_CAMPAIGN
+    expected_source_id = spec["source_candidate_id"]
+    expected_source_sha = spec["source_candidate_spec_sha256"]
+    if (
+        result.get("campaign_id") != manifest["campaign_id"]
+        or result.get("git_commit") != manifest["git"]["commit"]
+        or result.get("candidate_id") != spec["candidate_id"]
+        or result.get("spec_sha256") != spec["spec_sha256"]
+        or result.get("source_campaign_id") != expected_source_campaign
+        or result.get("source_candidate_id") != expected_source_id
+        or result.get("source_candidate_spec_sha256") != expected_source_sha
+    ):
+        raise ValueError(f"Stage-5 input result identity mismatch: {result_path}")
+    expected_artifacts = {"training_csv", "pairing_json", "anomaly_json", "last_checkpoint"}
+    if set(result.get("artifacts", {})) != expected_artifacts:
+        raise ValueError(f"Stage-5 input artifact inventory mismatch: {result_path}")
+    for artifact in result["artifacts"].values():
+        path = Path(artifact["path"])
+        if not path.is_file() or _sha256(path) != artifact["sha256"]:
+            raise ValueError(f"Stage-5 input artifact mismatch: {path}")
+    checkpoint = Path(result["artifacts"]["last_checkpoint"]["path"])
+    if checkpoint.name != "last.ckpt":
+        raise ValueError(f"Stage-5 handoff checkpoint must be last.ckpt: {checkpoint}")
+    _validate_stage4_training_metrics(
+        result["training_metrics"], spec, Path(result["artifacts"]["training_csv"]["path"])
+    )
+    return result, digest
+
+
+def collect_stage5(root: Path) -> Path:
+    """Confirm two hybrid recipes against matched controls over three seeds."""
+    root = root.resolve()
+    manifest = _load_campaign(root)
+    if _sha256(STAGE5_SOURCE_SUMMARY) != STAGE5_SOURCE_SUMMARY_SHA256:
+        raise ValueError("Stage-5 source summary fingerprint mismatch.")
+    if _sha256(STAGE5_SOURCE_SUMMARY_CSV) != STAGE5_SOURCE_SUMMARY_CSV_SHA256:
+        raise ValueError("Stage-5 source metric table fingerprint mismatch.")
+    source_manifest = _load_campaign(STAGE5_SOURCE_ROOT)
+
+    rows: list[dict[str, Any]] = []
+    for source_id, source_name, source_sha256 in STAGE5_SOURCE_CANDIDATES:
+        spec = source_manifest["stage4"]["candidates"][source_id]
+        if spec["name"] != source_name or spec["spec_sha256"] != source_sha256:
+            raise ValueError("Stage-5 frozen seed-123 source identity mismatch.")
+        result_path = STAGE5_SOURCE_ROOT / "stage4" / f"candidate_{source_id:03d}" / "result.json"
+        result, digest = _authenticate_stage5_result(
+            result_path, source_manifest, spec, source=True
+        )
+        rows.append(_stage5_result_row(result, spec, "stage4_seed123", digest))
+
+    missing = []
+    for spec in manifest["stage5"]["candidates"]:
+        result_path = root / "stage5" / f"candidate_{spec['candidate_id']:03d}" / "result.json"
+        if not result_path.is_file():
+            missing.append(str(result_path))
+            continue
+        result, digest = _authenticate_stage5_result(result_path, manifest, spec, source=False)
+        rows.append(_stage5_result_row(result, spec, "stage5_fresh", digest))
+    if missing:
+        raise FileNotFoundError(
+            f"Stage 5 is incomplete: {len(missing)} results missing; first is {missing[0]}"
+        )
+
+    paired: dict[str, list[dict[str, Any]]] = {}
+    for architecture_name in ("layers2", "official_projector"):
+        paired[architecture_name] = []
+        architecture_rows = [row for row in rows if row["architecture_name"] == architecture_name]
+        for seed in (STAGE4_SEED, *STAGE5_SEEDS):
+            seed_rows = [row for row in architecture_rows if int(row["seed"]) == seed]
+            controls = [row for row in seed_rows if row["is_architecture_control"]]
+            hybrids = [row for row in seed_rows if not row["is_architecture_control"]]
+            if len(controls) != 1 or len(hybrids) != 1:
+                raise ValueError(
+                    f"Stage-5 matched pair is incomplete for {architecture_name}/{seed}."
+                )
+            control, hybrid = controls[0], hybrids[0]
+            raw_control = float(control["raw_selection_score"])
+            delta = {
+                "architecture_name": architecture_name,
+                "seed": seed,
+                "control_stage4_config_id": control["stage4_config_id"],
+                "hybrid_stage4_config_id": hybrid["stage4_config_id"],
+                "macro_mean_auroc_delta": float(hybrid["macro_mean_auroc"])
+                - float(control["macro_mean_auroc"]),
+                "worst_quartile_mean_auroc_delta": float(hybrid["worst_quartile_mean_auroc"])
+                - float(control["worst_quartile_mean_auroc"]),
+                "raw_selection_score_relative_delta": (
+                    (float(hybrid["raw_selection_score"]) - raw_control) / abs(raw_control)
+                    if raw_control != 0.0
+                    else None
+                ),
+                "encoder_effective_rank_relative_delta": (
+                    float(hybrid["encoder_effective_rank"])
+                    - float(control["encoder_effective_rank"])
+                )
+                / float(control["encoder_effective_rank"]),
+                "encoder_participation_rank_relative_delta": (
+                    float(hybrid["encoder_participation_rank"])
+                    - float(control["encoder_participation_rank"])
+                )
+                / float(control["encoder_participation_rank"]),
+                "encoder_top_pc_fraction_delta": float(hybrid["encoder_top_pc_fraction"])
+                - float(control["encoder_top_pc_fraction"]),
+                "pair_scientifically_eligible": bool(control["scientifically_eligible"])
+                and bool(hybrid["scientifically_eligible"]),
+            }
+            paired[architecture_name].append(delta)
+            for row in (control, hybrid):
+                row["paired_role"] = "control" if row is control else "hybrid"
+                for key, value in delta.items():
+                    if key not in {"architecture_name", "seed"}:
+                        row[f"paired_{key}"] = (
+                            0.0 if row is control and isinstance(value, float) else value
+                        )
+
+    confirmations = {}
+    for architecture_name, deltas in paired.items():
+        numeric = (
+            "macro_mean_auroc_delta",
+            "worst_quartile_mean_auroc_delta",
+            "raw_selection_score_relative_delta",
+            "encoder_effective_rank_relative_delta",
+            "encoder_participation_rank_relative_delta",
+            "encoder_top_pc_fraction_delta",
+        )
+        means = {key: sum(float(row[key]) for row in deltas) / len(deltas) for key in numeric}
+        all_seed_noninferior = all(
+            float(row["macro_mean_auroc_delta"]) >= -0.01
+            and float(row["worst_quartile_mean_auroc_delta"]) >= -0.01
+            and row["raw_selection_score_relative_delta"] is not None
+            and float(row["raw_selection_score_relative_delta"]) >= -0.05
+            for row in deltas
+        )
+        mean_noninferior = (
+            means["macro_mean_auroc_delta"] >= -0.01
+            and means["worst_quartile_mean_auroc_delta"] >= -0.01
+            and means["raw_selection_score_relative_delta"] >= -0.05
+        )
+        material_geometry = (
+            means["encoder_effective_rank_relative_delta"] >= 0.10
+            or means["encoder_participation_rank_relative_delta"] >= 0.10
+            or means["encoder_top_pc_fraction_delta"] <= -0.03
+        )
+        all_eligible = all(bool(row["pair_scientifically_eligible"]) for row in deltas)
+        confirmations[architecture_name] = {
+            "seeds": [int(row["seed"]) for row in deltas],
+            "mean_deltas": means,
+            "all_seed_noninferior": all_seed_noninferior,
+            "mean_noninferior": mean_noninferior,
+            "material_geometry": material_geometry,
+            "all_pairs_scientifically_eligible": all_eligible,
+            "promotion": all_eligible
+            and all_seed_noninferior
+            and mean_noninferior
+            and material_geometry,
+        }
+
+    rows.sort(
+        key=lambda row: (
+            str(row["architecture_name"]),
+            int(row["seed"]),
+            bool(row["is_architecture_control"]),
+        )
+    )
+    table = root / "stage5" / "summary.csv"
+    _atomic_csv(table, rows)
+    paired_rows = [row for values in paired.values() for row in values]
+    paired_table = root / "stage5" / "paired_deltas.csv"
+    _atomic_csv(paired_table, paired_rows)
+    summary = {
+        "schema_version": 1,
+        "campaign_id": manifest["campaign_id"],
+        "status": "complete",
+        "n_seed_rows": len(rows),
+        "seeds": [STAGE4_SEED, *STAGE5_SEEDS],
+        "confirmations": confirmations,
+        "promotion_policy": {
+            "macro_mean_auroc_delta_min": -0.01,
+            "worst_quartile_mean_auroc_delta_min": -0.01,
+            "raw_selection_score_relative_delta_min": -0.05,
+            "material_encoder_rank_relative_delta_min": 0.10,
+            "material_top_pc_fraction_delta_max": -0.03,
+            "requires_every_seed_noninferior": True,
+        },
+        "selection_policy": "No scalar global winner is selected; promotions are per architecture.",
+        "summary_csv": str(table),
+        "summary_csv_sha256": _sha256(table),
+        "paired_deltas_csv": str(paired_table),
+        "paired_deltas_csv_sha256": _sha256(paired_table),
+        "source_summary_sha256": STAGE5_SOURCE_SUMMARY_SHA256,
+        "source_summary_csv_sha256": STAGE5_SOURCE_SUMMARY_CSV_SHA256,
+    }
+    output = root / "stage5" / "summary.json"
+    _atomic_json(output, summary)
+    print(output)
+    return output
+
+
 def status(root: Path) -> dict[str, Any]:
     """Report trial completion state without mutating the campaign."""
     root = root.resolve()
@@ -2478,6 +2868,19 @@ def status(root: Path) -> dict[str, Any]:
         stage4_trials.append(
             {"candidate_id": spec["candidate_id"], "name": spec["name"], "state": state}
         )
+    stage5_trials = []
+    for spec in manifest.get("stage5", {}).get("candidates", []):
+        trial_root = root / "stage5" / f"candidate_{spec['candidate_id']:03d}"
+        state = (
+            "complete"
+            if (trial_root / "result.json").is_file()
+            else "failed"
+            if (trial_root / "failure.json").is_file()
+            else "pending"
+        )
+        stage5_trials.append(
+            {"candidate_id": spec["candidate_id"], "name": spec["name"], "state": state}
+        )
     value = {
         "campaign_id": manifest["campaign_id"],
         "complete": all(item["state"] == "complete" for item in trials),
@@ -2513,6 +2916,13 @@ def status(root: Path) -> dict[str, Any]:
             "n_complete": sum(item["state"] == "complete" for item in stage4_trials),
             "n_total": len(stage4_trials),
             "trials": stage4_trials,
+        },
+        "stage5": {
+            "complete": bool(stage5_trials)
+            and all(item["state"] == "complete" for item in stage5_trials),
+            "n_complete": sum(item["state"] == "complete" for item in stage5_trials),
+            "n_total": len(stage5_trials),
+            "trials": stage5_trials,
         },
     }
     print(json.dumps(value, indent=2, sort_keys=True))
@@ -2568,6 +2978,13 @@ def main() -> None:
     collect_stage4_parser.add_argument("--root", type=Path, required=True)
     stage4_status_parser = subparsers.add_parser("stage4-status")
     stage4_status_parser.add_argument("--root", type=Path, required=True)
+    stage5_parser = subparsers.add_parser("run-stage5")
+    stage5_parser.add_argument("--root", type=Path, required=True)
+    stage5_parser.add_argument("--candidate-id", type=int, required=True)
+    collect_stage5_parser = subparsers.add_parser("collect-stage5")
+    collect_stage5_parser.add_argument("--root", type=Path, required=True)
+    stage5_status_parser = subparsers.add_parser("stage5-status")
+    stage5_status_parser.add_argument("--root", type=Path, required=True)
     args = parser.parse_args()
 
     if args.command == "init":
@@ -2615,6 +3032,12 @@ def main() -> None:
     elif args.command == "collect-stage4":
         collect_stage4(args.root)
     elif args.command == "stage4-status":
+        status(args.root)
+    elif args.command == "run-stage5":
+        run_stage5(args.root, args.candidate_id)
+    elif args.command == "collect-stage5":
+        collect_stage5(args.root)
+    elif args.command == "stage5-status":
         status(args.root)
     elif args.command == "status":
         status(args.root)

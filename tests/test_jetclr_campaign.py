@@ -73,6 +73,7 @@ def _write_manifest(root: Path) -> dict:
     stage2 = jetclr_campaign.stage2_specs()
     stage3 = jetclr_campaign.stage3_specs()
     stage4 = jetclr_campaign.stage4_specs()
+    stage5 = jetclr_campaign.stage5_specs()
     manifest = {
         "schema_version": 1,
         "campaign_id": "jetclr_test_deadbeef",
@@ -118,6 +119,15 @@ def _write_manifest(root: Path) -> dict:
             "source_summary_csv_sha256": jetclr_campaign.STAGE4_SOURCE_SUMMARY_CSV_SHA256,
             "candidates": stage4,
             "design_sha256": jetclr_campaign._value_sha256(stage4),
+        },
+        "stage5": {
+            "seeds": list(jetclr_campaign.STAGE5_SEEDS),
+            "full_epochs": 1,
+            "source_campaign_id": jetclr_campaign.STAGE5_SOURCE_CAMPAIGN,
+            "source_summary_sha256": jetclr_campaign.STAGE5_SOURCE_SUMMARY_SHA256,
+            "source_summary_csv_sha256": jetclr_campaign.STAGE5_SOURCE_SUMMARY_CSV_SHA256,
+            "candidates": stage5,
+            "design_sha256": jetclr_campaign._value_sha256(stage5),
         },
     }
     manifest["manifest_payload_sha256"] = jetclr_campaign._value_sha256(manifest)
@@ -186,6 +196,58 @@ def _write_stage4_results(root: Path, manifest: dict) -> list[Path]:
         result["result_payload_sha256"] = jetclr_campaign._value_sha256(result)
         jetclr_campaign._atomic_json(trial_root / "result.json", result)
     return checkpoints
+
+
+def _write_stage5_results(root: Path, manifest: dict) -> None:
+    """Write eight authenticated fresh-seed confirmation bundles."""
+    for spec in manifest["stage5"]["candidates"]:
+        trial_root = root / "stage5" / f"candidate_{spec['candidate_id']:03d}"
+        trial_root.mkdir(parents=True)
+        weights = spec["regularization_params"]
+        training = _stage4_training_metrics(
+            weights["algorithm.encoder_variance_weight"],
+            weights["algorithm.encoder_covariance_weight"],
+        )
+        metrics = trial_root / "metrics.csv"
+        metrics.write_text("metrics", encoding="utf-8")
+        pairing = _pairing_metrics()
+        anomaly = _anomaly_metrics()
+        if not spec["is_architecture_control"]:
+            pairing["embedding_effective_rank"] = 46.0
+            pairing["embedding_participation_rank"] = 40.25
+            pairing["raw_selection_score"] = 0.49
+            anomaly["macro_mean_auroc"] -= 0.005
+            anomaly["worst_quartile_mean_auroc"] -= 0.005
+        pairing_path = trial_root / "pairing_diagnostics.json"
+        anomaly_path = trial_root / "embedding_anomaly.json"
+        pairing_path.write_text(json.dumps(pairing), encoding="utf-8")
+        anomaly_path.write_text(json.dumps(anomaly), encoding="utf-8")
+        checkpoint = trial_root / "last.ckpt"
+        checkpoint.write_bytes(f"fresh {spec['candidate_id']}".encode())
+        artifacts = {
+            name: {"path": str(path), "sha256": jetclr_campaign._sha256(path)}
+            for name, path in {
+                "training_csv": metrics,
+                "pairing_json": pairing_path,
+                "anomaly_json": anomaly_path,
+                "last_checkpoint": checkpoint,
+            }.items()
+        }
+        result = {
+            "campaign_id": manifest["campaign_id"],
+            "git_commit": manifest["git"]["commit"],
+            "candidate_id": spec["candidate_id"],
+            "spec_sha256": spec["spec_sha256"],
+            "source_campaign_id": jetclr_campaign.STAGE5_SOURCE_CAMPAIGN,
+            "source_candidate_id": spec["source_candidate_id"],
+            "source_candidate_spec_sha256": spec["source_candidate_spec_sha256"],
+            "artifacts": artifacts,
+            "training_metrics": training,
+            "pairing_metrics": pairing,
+            "anomaly_metrics": anomaly,
+        }
+        result["result_payload_sha256"] = jetclr_campaign._value_sha256(result)
+        jetclr_campaign._atomic_json(trial_root / "result.json", result)
 
 
 def test_canary_specs_are_deterministic_and_cover_four_distinct_recipes() -> None:
@@ -912,3 +974,66 @@ def test_collect_stage4_rejects_tampered_handoff_checkpoint(tmp_path: Path) -> N
 
     with pytest.raises(ValueError, match="Stage-4 artifact mismatch"):
         jetclr_campaign.collect_stage4(tmp_path)
+
+
+def test_stage5_design_and_launcher_freeze_sources_seeds_and_packing(tmp_path: Path) -> None:
+    """Stage 5 must cross four exact sources with two seeds on two packed nodes."""
+    specs = jetclr_campaign.stage5_specs()
+    assert len(specs) == 8
+    assert [item["source_candidate_id"] for item in specs] == [0, 0, 4, 4, 6, 6, 10, 10]
+    assert [item["seed"] for item in specs] == [321, 777] * 4
+    assert {item["source_candidate_spec_sha256"] for item in specs} == {
+        item[2] for item in jetclr_campaign.STAGE5_SOURCE_CANDIDATES
+    }
+
+    manifest = _write_manifest(tmp_path)
+    launchers = jetclr_campaign._write_stage5_launchers(tmp_path, manifest)
+    stage5 = launchers["stage5"].read_text(encoding="utf-8")
+    submitter = launchers["submitter"].read_text(encoding="utf-8")
+    assert "#SBATCH --array=0-1%2" in stage5
+    assert "base=$((SLURM_ARRAY_TASK_ID * 4))" in stage5
+    assert "run-stage5" in stage5
+    assert 'dependency="afterok:$stage5_job"' in submitter
+
+
+def test_collect_stage5_combines_authenticated_seed123_and_reports_promotions(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Stage 5 must retain all seed rows and compute matched per-architecture decisions."""
+    source_root = tmp_path / "source"
+    current_root = tmp_path / "current"
+    source_manifest = _write_manifest(source_root)
+    _write_stage4_results(source_root, source_manifest)
+    current_manifest = _write_manifest(current_root)
+    _write_stage5_results(current_root, current_manifest)
+    source_summary = source_root / "stage4" / "summary.json"
+    source_csv = source_root / "stage4" / "summary.csv"
+    source_summary.write_text("{}\n", encoding="utf-8")
+    source_csv.write_text("candidate_id\n0\n", encoding="utf-8")
+    monkeypatch.setattr(jetclr_campaign, "STAGE5_SOURCE_ROOT", source_root)
+    monkeypatch.setattr(jetclr_campaign, "STAGE5_SOURCE_SUMMARY", source_summary)
+    monkeypatch.setattr(jetclr_campaign, "STAGE5_SOURCE_SUMMARY_CSV", source_csv)
+    monkeypatch.setattr(
+        jetclr_campaign, "STAGE5_SOURCE_SUMMARY_SHA256", jetclr_campaign._sha256(source_summary)
+    )
+    monkeypatch.setattr(
+        jetclr_campaign,
+        "STAGE5_SOURCE_SUMMARY_CSV_SHA256",
+        jetclr_campaign._sha256(source_csv),
+    )
+
+    output = jetclr_campaign.collect_stage5(current_root)
+    summary = json.loads(output.read_text(encoding="utf-8"))
+    with Path(summary["summary_csv"]).open(encoding="utf-8", newline="") as handle:
+        rows = list(csv.DictReader(handle))
+
+    assert summary["n_seed_rows"] == 12
+    assert summary["seeds"] == [123, 321, 777]
+    assert set(summary["confirmations"]) == {"layers2", "official_projector"}
+    assert all(item["promotion"] for item in summary["confirmations"].values())
+    assert "global_winner" not in summary
+    assert "No scalar global winner" in summary["selection_policy"]
+    assert len(rows) == 12
+    assert {row["origin"] for row in rows} == {"stage4_seed123", "stage5_fresh"}
+    assert all(row["result_payload_sha256"] for row in rows)
+    assert all(row["checkpoint_sha256"] for row in rows)

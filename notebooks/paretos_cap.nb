@@ -74,7 +74,7 @@ Cell[BoxData[{
  RowBox[{
   RowBox[{"loadParetoData", "[", 
    RowBox[{"dataName_", ",", 
-    RowBox[{"dir_", ":", "\"\<paretos/cap_optimisations\>\""}]}], "]"}], ":=",
+    RowBox[{"dir_", ":", "\"\<paretos/cap_optimisation\>\""}]}], "]"}], ":=",
    "\[IndentingNewLine]", 
   RowBox[{"Module", "[", "\[IndentingNewLine]", 
    RowBox[{
@@ -1295,7 +1295,7 @@ Cell[BoxData[
    RowBox[{"Export", "[", 
     RowBox[{
      RowBox[{
-     "\"\<paretos/cap_optimisation/plots\>\"", " ", "<>", " ", "dataName", 
+     "\"\<paretos/cap_optimisation/plots/\>\"", " ", "<>", " ", "dataName", 
       " ", "<>", "\"\<.svg\>\""}], ",", "plot", ",", "\"\<SVG\>\""}], 
     "]"}]}]}]], "Input",
  CellChangeTimes->{
@@ -5660,13 +5660,13 @@ FontWeight->\\\"Bold\\\", FontSlant->\\\"Plain\\\"], \\(sim\\)]\\))\>\"",
    RowBox[{"Export", "[", 
     RowBox[{
      RowBox[{
-     "\"\<paretos/cap_optimisation/plots\>\"", " ", "<>", " ", "dataName", 
+     "\"\<paretos/cap_optimisation/plots/\>\"", " ", "<>", " ", "dataName", 
       " ", "<>", "\"\<.svg\>\""}], ",", "plot", ",", "\"\<SVG\>\""}], "]"}], 
    "\[IndentingNewLine]", 
    RowBox[{"Export", "[", 
     RowBox[{
      RowBox[{
-     "\"\<paretos/cap_optimisation/plots\>\"", " ", "<>", " ", "dataName", 
+     "\"\<paretos/cap_optimisation/plots/\>\"", " ", "<>", " ", "dataName", 
       " ", "<>", "\"\<.pdf\>\""}], ",", "plot", ",", "\"\<PDF\>\""}], "]"}], 
    "\[IndentingNewLine]"}]}]], "Input",
  CellChangeTimes->{{3.9846450400110598`*^9, 3.9846451237505913`*^9}, {
@@ -6944,7 +6944,7 @@ FontSlant->\\\"Plain\\\"], \\(sim\\)]\\))\>\"", ",",
    RowBox[{"Export", "[", 
     RowBox[{
      RowBox[{
-     "\"\<paretos/cap_optimisation/plots\>\"", " ", "<>", " ", "dataName", 
+     "\"\<paretos/cap_optimisation/plots/\>\"", " ", "<>", " ", "dataName", 
       " ", "<>", "\"\<.svg\>\""}], ",", "plot", ",", "\"\<SVG\>\""}], "]"}], 
    "\[IndentingNewLine]"}]}]], "Input",
  CellChangeTimes->{
@@ -8857,13 +8857,13 @@ Cell[BoxData[
    RowBox[{"Export", "[", 
     RowBox[{
      RowBox[{
-     "\"\<paretos/cap_optimisation/plots\>\"", " ", "<>", " ", "dataName", 
+     "\"\<paretos/cap_optimisation/plots/\>\"", " ", "<>", " ", "dataName", 
       " ", "<>", "\"\<.svg\>\""}], ",", "plot", ",", "\"\<SVG\>\""}], "]"}], 
    "\[LineSeparator]", 
    RowBox[{"Export", "[", 
     RowBox[{
      RowBox[{
-     "\"\<paretos/cap_optimisation/plots\>\"", " ", "<>", " ", "dataName", 
+     "\"\<paretos/cap_optimisation/plots/\>\"", " ", "<>", " ", "dataName", 
       " ", "<>", "\"\<.pdf\>\""}], ",", "plot", ",", "\"\<PDF\>\""}], 
     "]"}]}]}]], "Input",
  CellChangeTimes->{{3.981099841082159*^9, 3.981099846672134*^9}, {
@@ -19337,13 +19337,13 @@ Cell[BoxData[
    RowBox[{"Export", "[", 
     RowBox[{
      RowBox[{
-     "\"\<paretos/cap_optimisation/plots\>\"", " ", "<>", " ", "dataName", 
+     "\"\<paretos/cap_optimisation/plots/\>\"", " ", "<>", " ", "dataName", 
       " ", "<>", "\"\<.svg\>\""}], ",", "plot", ",", "\"\<SVG\>\""}], "]"}], 
    "\[LineSeparator]", 
    RowBox[{"Export", "[", 
     RowBox[{
      RowBox[{
-     "\"\<paretos/cap_optimisation/plots\>\"", " ", "<>", " ", "dataName", 
+     "\"\<paretos/cap_optimisation/plots/\>\"", " ", "<>", " ", "dataName", 
       " ", "<>", "\"\<.pdf\>\""}], ",", "plot", ",", "\"\<PDF\>\""}], 
     "]"}]}]}]], "Input",
  CellChangeTimes->{{3.9827514678663273`*^9, 3.982751546289029*^9}, 
@@ -24626,13 +24626,13 @@ Cell[BoxData[
    RowBox[{"Export", "[", 
     RowBox[{
      RowBox[{
-     "\"\<paretos/cap_optimisation/plots\>\"", " ", "<>", " ", "dataName", 
+     "\"\<paretos/cap_optimisation/plots/\>\"", " ", "<>", " ", "dataName", 
       " ", "<>", "\"\<.svg\>\""}], ",", "plot", ",", "\"\<SVG\>\""}], "]"}], 
    "\[LineSeparator]", 
    RowBox[{"Export", "[", 
     RowBox[{
      RowBox[{
-     "\"\<paretos/cap_optimisation/plots\>\"", " ", "<>", " ", "dataName", 
+     "\"\<paretos/cap_optimisation/plots/\>\"", " ", "<>", " ", "dataName", 
       " ", "<>", "\"\<.pdf\>\""}], ",", "plot", ",", "\"\<PDF\>\""}], "]"}], 
    "\[IndentingNewLine]"}]}]], "Input",
  CellChangeTimes->{
@@ -26445,13 +26445,13 @@ Cell[BoxData[
    RowBox[{"Export", "[", 
     RowBox[{
      RowBox[{
-     "\"\<paretos/cap_optimisation/plots\>\"", " ", "<>", " ", "dataName", 
+     "\"\<paretos/cap_optimisation/plots/\>\"", " ", "<>", " ", "dataName", 
       " ", "<>", "\"\<.svg\>\""}], ",", "plot", ",", "\"\<SVG\>\""}], "]"}], 
    "\[LineSeparator]", 
    RowBox[{"Export", "[", 
     RowBox[{
      RowBox[{
-     "\"\<paretos/cap_optimisation/plots\>\"", " ", "<>", " ", "dataName", 
+     "\"\<paretos/cap_optimisation/plots/\>\"", " ", "<>", " ", "dataName", 
       " ", "<>", "\"\<.pdf\>\""}], ",", "plot", ",", "\"\<PDF\>\""}], 
     "]"}]}]}]], "Input",
  CellChangeTimes->{
@@ -28314,13 +28314,13 @@ Cell[BoxData[
    RowBox[{"Export", "[", 
     RowBox[{
      RowBox[{
-     "\"\<paretos/cap_optimisation/plots\>\"", " ", "<>", " ", "dataName", 
+     "\"\<paretos/cap_optimisation/plots/\>\"", " ", "<>", " ", "dataName", 
       " ", "<>", "\"\<.svg\>\""}], ",", "plot", ",", "\"\<SVG\>\""}], "]"}], 
    "\[LineSeparator]", 
    RowBox[{"Export", "[", 
     RowBox[{
      RowBox[{
-     "\"\<paretos/cap_optimisation/plots\>\"", " ", "<>", " ", "dataName", 
+     "\"\<paretos/cap_optimisation/plots/\>\"", " ", "<>", " ", "dataName", 
       " ", "<>", "\"\<.pdf\>\""}], ",", "plot", ",", "\"\<PDF\>\""}], 
     "]"}]}]}]], "Input",
  CellChangeTimes->{{3.982752140830619*^9, 3.982752250861641*^9}, 
@@ -30232,13 +30232,13 @@ Cell[BoxData[
    RowBox[{"Export", "[", 
     RowBox[{
      RowBox[{
-     "\"\<paretos/cap_optimisation/plots\>\"", " ", "<>", " ", "dataName", 
+     "\"\<paretos/cap_optimisation/plots/\>\"", " ", "<>", " ", "dataName", 
       " ", "<>", "\"\<.svg\>\""}], ",", "plot", ",", "\"\<SVG\>\""}], "]"}], 
    "\[LineSeparator]", 
    RowBox[{"Export", "[", 
     RowBox[{
      RowBox[{
-     "\"\<paretos/cap_optimisation/plots\>\"", " ", "<>", " ", "dataName", 
+     "\"\<paretos/cap_optimisation/plots/\>\"", " ", "<>", " ", "dataName", 
       " ", "<>", "\"\<.pdf\>\""}], ",", "plot", ",", "\"\<PDF\>\""}], 
     "]"}]}]}]], "Input",
  CellChangeTimes->{{3.982752361948057*^9, 3.982752429979868*^9}, {
@@ -32031,13 +32031,13 @@ Cell[BoxData[
    RowBox[{"Export", "[", 
     RowBox[{
      RowBox[{
-     "\"\<paretos/cap_optimisation/plots\>\"", " ", "<>", " ", "dataName", 
+     "\"\<paretos/cap_optimisation/plots/\>\"", " ", "<>", " ", "dataName", 
       " ", "<>", "\"\<.svg\>\""}], ",", "plot", ",", "\"\<SVG\>\""}], "]"}], 
    "\[LineSeparator]", 
    RowBox[{"Export", "[", 
     RowBox[{
      RowBox[{
-     "\"\<paretos/cap_optimisation/plots\>\"", " ", "<>", " ", "dataName", 
+     "\"\<paretos/cap_optimisation/plots/\>\"", " ", "<>", " ", "dataName", 
       " ", "<>", "\"\<.pdf\>\""}], ",", "plot", ",", "\"\<PDF\>\""}], "]"}], 
    "\[IndentingNewLine]"}]}]], "Input",
  CellChangeTimes->{{3.982753008222966*^9, 3.982753059846326*^9}, {
@@ -33101,13 +33101,13 @@ Cell[BoxData[
    RowBox[{"Export", "[", 
     RowBox[{
      RowBox[{
-     "\"\<paretos/cap_optimisation/plots\>\"", " ", "<>", " ", "dataName", 
+     "\"\<paretos/cap_optimisation/plots/\>\"", " ", "<>", " ", "dataName", 
       " ", "<>", "\"\<.svg\>\""}], ",", "plot", ",", "\"\<SVG\>\""}], "]"}], 
    "\[LineSeparator]", 
    RowBox[{"Export", "[", 
     RowBox[{
      RowBox[{
-     "\"\<paretos/cap_optimisation/plots\>\"", " ", "<>", " ", "dataName", 
+     "\"\<paretos/cap_optimisation/plots/\>\"", " ", "<>", " ", "dataName", 
       " ", "<>", "\"\<.pdf\>\""}], ",", "plot", ",", "\"\<PDF\>\""}], 
     "]"}]}]}]], "Input",
  CellChangeTimes->{{3.982770720460664*^9, 3.9827707349939337`*^9}, 
@@ -34185,13 +34185,13 @@ Cell[BoxData[
    RowBox[{"Export", "[", 
     RowBox[{
      RowBox[{
-     "\"\<paretos/cap_optimisation/plots\>\"", " ", "<>", " ", "dataName", 
+     "\"\<paretos/cap_optimisation/plots/\>\"", " ", "<>", " ", "dataName", 
       " ", "<>", "\"\<.svg\>\""}], ",", "plot", ",", "\"\<SVG\>\""}], "]"}], 
    "\[LineSeparator]", 
    RowBox[{"Export", "[", 
     RowBox[{
      RowBox[{
-     "\"\<paretos/cap_optimisation/plots\>\"", " ", "<>", " ", "dataName", 
+     "\"\<paretos/cap_optimisation/plots/\>\"", " ", "<>", " ", "dataName", 
       " ", "<>", "\"\<.pdf\>\""}], ",", "plot", ",", "\"\<PDF\>\""}], "]"}], 
    "\[IndentingNewLine]"}]}]], "Input",
  CellChangeTimes->{{3.982770972135483*^9, 3.982771003097579*^9}, 
@@ -35305,13 +35305,13 @@ Cell[BoxData[
    RowBox[{"Export", "[", 
     RowBox[{
      RowBox[{
-     "\"\<paretos/cap_optimisation/plots\>\"", " ", "<>", " ", "dataName", 
+     "\"\<paretos/cap_optimisation/plots/\>\"", " ", "<>", " ", "dataName", 
       " ", "<>", "\"\<.svg\>\""}], ",", "plot", ",", "\"\<SVG\>\""}], "]"}], 
    "\[LineSeparator]", 
    RowBox[{"Export", "[", 
     RowBox[{
      RowBox[{
-     "\"\<paretos/cap_optimisation/plots\>\"", " ", "<>", " ", "dataName", 
+     "\"\<paretos/cap_optimisation/plots/\>\"", " ", "<>", " ", "dataName", 
       " ", "<>", "\"\<.pdf\>\""}], ",", "plot", ",", "\"\<PDF\>\""}], 
     "]"}]}]}]], "Input",
  CellChangeTimes->{{3.982771092418889*^9, 3.982771121292616*^9}, {
@@ -37171,13 +37171,13 @@ Cell[BoxData[
    RowBox[{"Export", "[", 
     RowBox[{
      RowBox[{
-     "\"\<paretos/cap_optimisation/plots\>\"", " ", "<>", " ", "dataName", 
+     "\"\<paretos/cap_optimisation/plots/\>\"", " ", "<>", " ", "dataName", 
       " ", "<>", "\"\<.svg\>\""}], ",", "plot", ",", "\"\<SVG\>\""}], "]"}], 
    "\[LineSeparator]", 
    RowBox[{"Export", "[", 
     RowBox[{
      RowBox[{
-     "\"\<paretos/cap_optimisation/plots\>\"", " ", "<>", " ", "dataName", 
+     "\"\<paretos/cap_optimisation/plots/\>\"", " ", "<>", " ", "dataName", 
       " ", "<>", "\"\<.pdf\>\""}], ",", "plot", ",", "\"\<PDF\>\""}], 
     "]"}]}]}]], "Input",
  CellChangeTimes->{{3.982771533175906*^9, 3.982771559955418*^9}, 
@@ -38869,13 +38869,13 @@ Cell[BoxData[
    RowBox[{"Export", "[", 
     RowBox[{
      RowBox[{
-     "\"\<paretos/cap_optimisation/plots\>\"", " ", "<>", " ", "dataName", 
+     "\"\<paretos/cap_optimisation/plots/\>\"", " ", "<>", " ", "dataName", 
       " ", "<>", "\"\<.svg\>\""}], ",", "plot", ",", "\"\<SVG\>\""}], "]"}], 
    "\[LineSeparator]", 
    RowBox[{"Export", "[", 
     RowBox[{
      RowBox[{
-     "\"\<paretos/cap_optimisation/plots\>\"", " ", "<>", " ", "dataName", 
+     "\"\<paretos/cap_optimisation/plots/\>\"", " ", "<>", " ", "dataName", 
       " ", "<>", "\"\<.pdf\>\""}], ",", "plot", ",", "\"\<PDF\>\""}], 
     "]"}]}]}]], "Input",
  CellChangeTimes->{{3.982771930123528*^9, 3.982771971284292*^9}, 
@@ -40737,13 +40737,13 @@ Cell[BoxData[
    RowBox[{"Export", "[", 
     RowBox[{
      RowBox[{
-     "\"\<paretos/cap_optimisation/plots\>\"", " ", "<>", " ", "dataName", 
+     "\"\<paretos/cap_optimisation/plots/\>\"", " ", "<>", " ", "dataName", 
       " ", "<>", "\"\<.svg\>\""}], ",", "plot", ",", "\"\<SVG\>\""}], "]"}], 
    "\[LineSeparator]", 
    RowBox[{"Export", "[", 
     RowBox[{
      RowBox[{
-     "\"\<paretos/cap_optimisation/plots\>\"", " ", "<>", " ", "dataName", 
+     "\"\<paretos/cap_optimisation/plots/\>\"", " ", "<>", " ", "dataName", 
       " ", "<>", "\"\<.pdf\>\""}], ",", "plot", ",", "\"\<PDF\>\""}], 
     "]"}]}]}]], "Input",
  CellChangeTimes->{{3.982772020704775*^9, 3.9827721087866373`*^9}, 
@@ -42603,13 +42603,13 @@ Cell[BoxData[
    RowBox[{"Export", "[", 
     RowBox[{
      RowBox[{
-     "\"\<paretos/cap_optimisation/plots\>\"", " ", "<>", " ", "dataName", 
+     "\"\<paretos/cap_optimisation/plots/\>\"", " ", "<>", " ", "dataName", 
       " ", "<>", "\"\<.svg\>\""}], ",", "plot", ",", "\"\<SVG\>\""}], "]"}], 
    "\[LineSeparator]", 
    RowBox[{"Export", "[", 
     RowBox[{
      RowBox[{
-     "\"\<paretos/cap_optimisation/plots\>\"", " ", "<>", " ", "dataName", 
+     "\"\<paretos/cap_optimisation/plots/\>\"", " ", "<>", " ", "dataName", 
       " ", "<>", "\"\<.pdf\>\""}], ",", "plot", ",", "\"\<PDF\>\""}], 
     "]"}]}]}]], "Input",
  CellChangeTimes->{{3.982772197812482*^9, 3.982772215151165*^9}, {
@@ -44442,13 +44442,13 @@ Cell[BoxData[
    RowBox[{"Export", "[", 
     RowBox[{
      RowBox[{
-     "\"\<paretos/cap_optimisation/plots\>\"", " ", "<>", " ", "dataName", 
+     "\"\<paretos/cap_optimisation/plots/\>\"", " ", "<>", " ", "dataName", 
       " ", "<>", "\"\<.svg\>\""}], ",", "plot", ",", "\"\<SVG\>\""}], "]"}], 
    "\[LineSeparator]", 
    RowBox[{"Export", "[", 
     RowBox[{
      RowBox[{
-     "\"\<paretos/cap_optimisation/plots\>\"", " ", "<>", " ", "dataName", 
+     "\"\<paretos/cap_optimisation/plots/\>\"", " ", "<>", " ", "dataName", 
       " ", "<>", "\"\<.pdf\>\""}], ",", "plot", ",", "\"\<PDF\>\""}], 
     "]"}]}]}]], "Input",
  CellChangeTimes->{{3.982772286742785*^9, 3.982772329952156*^9}, 
@@ -46288,13 +46288,13 @@ Cell[BoxData[
    RowBox[{"Export", "[", 
     RowBox[{
      RowBox[{
-     "\"\<paretos/cap_optimisation/plots\>\"", " ", "<>", " ", "dataName", 
+     "\"\<paretos/cap_optimisation/plots/\>\"", " ", "<>", " ", "dataName", 
       " ", "<>", "\"\<.svg\>\""}], ",", "plot", ",", "\"\<SVG\>\""}], "]"}], 
    "\[LineSeparator]", 
    RowBox[{"Export", "[", 
     RowBox[{
      RowBox[{
-     "\"\<paretos/cap_optimisation/plots\>\"", " ", "<>", " ", "dataName", 
+     "\"\<paretos/cap_optimisation/plots/\>\"", " ", "<>", " ", "dataName", 
       " ", "<>", "\"\<.pdf\>\""}], ",", "plot", ",", "\"\<PDF\>\""}], 
     "]"}]}]}]], "Input",
  CellChangeTimes->{{3.982772348067191*^9, 3.982772404458165*^9}, 
@@ -48184,13 +48184,13 @@ Cell[BoxData[
    RowBox[{"Export", "[", 
     RowBox[{
      RowBox[{
-     "\"\<paretos/cap_optimisation/plots\>\"", " ", "<>", " ", "dataName", 
+     "\"\<paretos/cap_optimisation/plots/\>\"", " ", "<>", " ", "dataName", 
       " ", "<>", "\"\<.svg\>\""}], ",", "plot", ",", "\"\<SVG\>\""}], "]"}], 
    "\[LineSeparator]", 
    RowBox[{"Export", "[", 
     RowBox[{
      RowBox[{
-     "\"\<paretos/cap_optimisation/plots\>\"", " ", "<>", " ", "dataName", 
+     "\"\<paretos/cap_optimisation/plots/\>\"", " ", "<>", " ", "dataName", 
       " ", "<>", "\"\<.pdf\>\""}], ",", "plot", ",", "\"\<PDF\>\""}], 
     "]"}]}]}]], "Input",
  CellChangeTimes->{{3.9827728030127993`*^9, 3.9827728231457663`*^9}, {
@@ -49286,13 +49286,13 @@ Cell[BoxData[
    RowBox[{"Export", "[", 
     RowBox[{
      RowBox[{
-     "\"\<paretos/cap_optimisation/plots\>\"", " ", "<>", " ", "dataName", 
+     "\"\<paretos/cap_optimisation/plots/\>\"", " ", "<>", " ", "dataName", 
       " ", "<>", "\"\<.svg\>\""}], ",", "plot", ",", "\"\<SVG\>\""}], "]"}], 
    "\[LineSeparator]", 
    RowBox[{"Export", "[", 
     RowBox[{
      RowBox[{
-     "\"\<paretos/cap_optimisation/plots\>\"", " ", "<>", " ", "dataName", 
+     "\"\<paretos/cap_optimisation/plots/\>\"", " ", "<>", " ", "dataName", 
       " ", "<>", "\"\<.pdf\>\""}], ",", "plot", ",", "\"\<PDF\>\""}], 
     "]"}]}]}]], "Input",
  CellChangeTimes->{{3.982772841098263*^9, 3.982772845569436*^9}, {
@@ -50353,13 +50353,13 @@ Cell[BoxData[
    RowBox[{"Export", "[", 
     RowBox[{
      RowBox[{
-     "\"\<paretos/cap_optimisation/plots\>\"", " ", "<>", " ", "dataName", 
+     "\"\<paretos/cap_optimisation/plots/\>\"", " ", "<>", " ", "dataName", 
       " ", "<>", "\"\<.svg\>\""}], ",", "plot", ",", "\"\<SVG\>\""}], "]"}], 
    "\[LineSeparator]", 
    RowBox[{"Export", "[", 
     RowBox[{
      RowBox[{
-     "\"\<paretos/cap_optimisation/plots\>\"", " ", "<>", " ", "dataName", 
+     "\"\<paretos/cap_optimisation/plots/\>\"", " ", "<>", " ", "dataName", 
       " ", "<>", "\"\<.pdf\>\""}], ",", "plot", ",", "\"\<PDF\>\""}], 
     "]"}]}]}]], "Input",
  CellChangeTimes->{{3.98277287064318*^9, 3.982772917375004*^9}, {

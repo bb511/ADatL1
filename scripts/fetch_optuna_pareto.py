@@ -5,7 +5,7 @@
 For a study, this writes one CSV under ``notebooks/paretos/<domain>/`` with the
 columns ``number, values_0, values_1, params_*, state, is_pareto``.
 Outputs are grouped by dataset/domain, so e.g. the physics Pareto fronts live in
-``notebooks/paretos/physics/``.  These CSVs are consumed by ``notebooks/paretos.nb``.
+``notebooks/paretos/physics/``.  These CSVs are consumed by ``notebooks/paretos_cap.nb``.
 
 * single study -- ``fetch_optuna_pareto.py <study_name> <db_path>``;
 * sweep -- ``fetch_optuna_pareto.py --all`` loops over every ``logs/optuna/**/

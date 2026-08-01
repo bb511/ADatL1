@@ -1,6 +1,11 @@
+from types import SimpleNamespace
+from unittest.mock import Mock
+
 import torch
 
+from src.data.L1AD_datamodule import L1ADDataModule, SplitTensors
 from src.data.CIFAR10_datamodule import CIFAR10DataModule
+from src.data.components.normalization import L1DataNormalizer
 from src.data.synthetic import SyntheticL1ADDataModule
 
 
@@ -29,6 +34,49 @@ def test_cifar10_datamodule_smoke() -> None:
 
     val_loaders = dm.val_dataloader()
     assert list(val_loaders) == ["normal", "1", "reference_normal"]
+
+
+def test_l1_validation_setup_resolves_cache_without_preparing_data(
+    tmp_path, monkeypatch
+) -> None:
+    """Evaluation-only runs must load an existing deterministic mlready cache."""
+    mlready = SimpleNamespace(
+        cache_root_dir=str(tmp_path),
+        name="aad_default",
+        prepare=Mock(side_effect=AssertionError("preprocessing must not run")),
+    )
+    normalizer = L1DataNormalizer(name="standard", hyperparams={})
+    datamodule = L1ADDataModule(
+        zerobias={},
+        signal={},
+        background={},
+        data_extractor=Mock(),
+        data_processor=Mock(),
+        data_normalizer=normalizer,
+        data_mlready=mlready,
+        data_awkward2torch=Mock(),
+        train_features={},
+        l1_scales={},
+        batch_size=8,
+    )
+    split = SplitTensors(
+        x=torch.zeros(2, 3),
+        mask=torch.ones(2, 3, dtype=torch.bool),
+        l1bit=torch.ones(2, dtype=torch.bool),
+        y=torch.zeros(2),
+    )
+    load_main = Mock(return_value=split)
+    load_aux = Mock(return_value={"signal": split})
+    monkeypatch.setattr(datamodule, "_load_main_split", load_main)
+    monkeypatch.setattr(datamodule, "_load_aux_split", load_aux)
+
+    datamodule.setup("validate")
+
+    expected = tmp_path / "mlready" / "aad_default" / "standard"
+    assert datamodule.main_cache_folder == expected
+    load_main.assert_called_once_with(expected, "valid", label=0)
+    load_aux.assert_called_once_with(expected, "valid")
+    mlready.prepare.assert_not_called()
 
 
 def test_gaussian_subspace_synthetic_l1_datamodule() -> None:

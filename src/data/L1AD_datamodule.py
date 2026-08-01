@@ -95,8 +95,17 @@ class L1ADDataModule(LightningDataModule):
         self.save_hyperparameters(logger=False)
 
         self.l1_scales = l1_scales
-        self.normalizer: L1DataNormalizer | None = None
-        self.main_cache_folder: Path | None = None
+        self.normalizer: L1DataNormalizer = data_normalizer
+        # ``prepare_data`` runs only on rank zero under Lightning, so setup must
+        # not depend on process-local state assigned there.  The mlready cache
+        # location is fully determined by configuration and can be resolved for
+        # fitting and evaluation-only runs alike.
+        self.main_cache_folder = (
+            Path(data_mlready.cache_root_dir)
+            / "mlready"
+            / data_mlready.name
+            / data_normalizer.name
+        )
 
         self._main: dict[str, SplitTensors] = {}
         self._aux: dict[str, dict[str, SplitTensors]] = {"valid": {}, "test": {}}
@@ -119,9 +128,13 @@ class L1ADDataModule(LightningDataModule):
         self.hparams.data_processor.process("signal")
 
         log.info(Back.GREEN + "Splitting data into train, val, test and normalizing...")
-        self.normalizer = self.hparams.data_normalizer
         self.hparams.data_mlready.prepare(self.normalizer, self.hparams.train_features)
-        self.main_cache_folder = self.hparams.data_mlready.cache_folder
+        prepared_cache_folder = Path(self.hparams.data_mlready.cache_folder)
+        if prepared_cache_folder != self.main_cache_folder:
+            raise RuntimeError(
+                "Prepared L1 cache path does not match the configured cache path: "
+                f"{prepared_cache_folder} != {self.main_cache_folder}"
+            )
 
     def setup(self, stage: str = None) -> None:
         """Load data. Set `self.data_train`, `self.data_val`, `self.data_test`.
@@ -134,9 +147,6 @@ class L1ADDataModule(LightningDataModule):
             "predict"`. Defaults to ``None``.
         """
         self._set_batch_size()
-        if self.main_cache_folder is None:
-            raise RuntimeError("Cache folder not set. Did prepare_data() run?")
-
         log.info(Back.GREEN + "Loading data in memory...")
         self.loader = self.hparams.data_awkward2torch
         data_dir = self.main_cache_folder

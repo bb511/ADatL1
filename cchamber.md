@@ -136,11 +136,15 @@ cchamber_<model>_wasserstein
 The four CAP conditions are the main Causal Chamber result. Drift and Wasserstein are
 included as non-CAP validation baselines.
 
-For corrected SVDD runs, the seed-123 bias-free pairing AE uses encoder widths
-`[128, 64, 16]`. Its exact authenticated checkpoint initializes the identically
-shaped SVDD encoder strictly; the encoder remains trainable. SVDD then uses the
-one-class mean-center objective and tunes only optimizer learning rate/betas,
-gradient clipping, and network weight decay.
+For the 2026-08-02 SVDD rerun, residual-OAS/CDF selects AE candidate `060` using
+validation-normal information only. Its `[24, 8]` encoder weights initialize a
+bias-free SVDD of the same topology; only the incompatible AE bias tensors are
+dropped. Every transferred weight remains trainable. Reporting seed controls
+`data.train_seed` independently of the fixed split seed, and the freeze gate
+requires three distinct minibatch-order and final-state fingerprints per
+candidate. The outcome-gated score audit retains the native radial SVDD score
+but reverses CAP's direction: SVDD minimizes normal-view CAP because invariance,
+not capacity, aligns with its one-class objective.
 
 ## Generating Runs
 
@@ -321,87 +325,67 @@ target, strength, and family-by-strength summaries are reported as complementary
 descriptive analyses. Conclusions remain conditional on the fixed public dataset
 split and the prespecified Sobol candidate pool.
 
-## Corrected 2026-08-01 Results
+## Revised 2026-08-02 AE and SVDD Results
 
-The authoritative rerun is campaign `cchamber_real_20260801_3789655`. It
-completed all 1,300 search fits and all 240 reporting retrains without a model
-failure. Thresholds were frozen from validation-normal data before intervention
-evaluation. The threshold-safe table contains exactly 27,840 rows
-(4 architectures × 6 criteria × 10 seeds × 58 interventions × 2 metrics).
+The residual-OAS AE campaign and the independently seeded inverse-CAP SVDD
+campaign each contain 16 candidates, three reporting seeds, six checkpoint
+branches, and all 58 interventions: 48 trajectories, 288 frozen checkpoints,
+and 33,408 complete intervention-metric rows per architecture. VAE and RealNVP
+remain unchanged from campaign `cchamber_real_20260801_3789655`.
 
-Values below average the 58 interventions within each reporting seed before
-averaging the ten seeds. `Eff.` is intervention efficiency at the threshold
-calibrated to 1% validation-normal acceptance.
+Values average interventions within reporting seed before averaging seeds.
+`Eff.` is efficiency at a threshold calibrated to 1% validation-normal
+acceptance. New AE/SVDD intervals use three retrains; unchanged VAE/RealNVP
+intervals use ten.
 
-| Architecture | Selection criterion | AUPRC | Eff. |
-|---|---|---:|---:|
-| AE | CAP metadata-nearest | 0.6024 | 0.3022 |
-| AE | CAP encoder-nearest | 0.6021 | 0.3024 |
-| AE | CAP random pairs | 0.6116 | 0.2228 |
-| AE | CAP CDF ranks | 0.5697 | 0.2463 |
-| AE | Marginal drift | 0.5593 | 0.2352 |
-| AE | Wasserstein | 0.6968 | 0.3149 |
-| VAE | CAP metadata-nearest | 0.3710 | 0.0713 |
-| VAE | CAP encoder-nearest | 0.2851 | 0.0786 |
-| VAE | CAP random pairs | 0.3771 | 0.0162 |
-| VAE | CAP CDF ranks | 0.2855 | 0.0815 |
-| VAE | Marginal drift | 0.3710 | 0.0319 |
-| VAE | Wasserstein | 0.3853 | 0.0681 |
-| SVDD | CAP metadata-nearest | 0.4692 | 0.2090 |
-| SVDD | CAP encoder-nearest | 0.4692 | 0.2090 |
-| SVDD | CAP random pairs | 0.4585 | 0.0951 |
-| SVDD | CAP CDF ranks | 0.4637 | 0.2172 |
-| SVDD | Marginal drift | 0.5219 | 0.2899 |
-| SVDD | Wasserstein | 0.5025 | 0.2431 |
-| RealNVP | CAP metadata-nearest | 0.7513 | 0.4974 |
-| RealNVP | CAP encoder-nearest | 0.7554 | 0.5678 |
-| RealNVP | CAP random pairs | 0.6828 | 0.3125 |
-| RealNVP | CAP CDF ranks | 0.7722 | 0.5615 |
-| RealNVP | Marginal drift | 0.6473 | 0.3322 |
-| RealNVP | Wasserstein | 0.4678 | 0.1074 |
+| Architecture | Selection criterion | AUPRC | Eff. | Retrains |
+|---|---|---:|---:|---:|
+| AE | CAP metadata-nearest | 0.7224 | 0.3451 | 3 |
+| AE | CAP encoder-nearest | 0.7238 | 0.3813 | 3 |
+| AE | CAP random pairs | 0.6860 | 0.2891 | 3 |
+| AE | CAP CDF ranks | 0.7355 | 0.4609 | 3 |
+| AE | Marginal drift | 0.7296 | 0.4407 | 3 |
+| AE | Wasserstein | 0.7347 | 0.4370 | 3 |
+| VAE | CAP metadata-nearest | 0.3710 | 0.0713 | 10 |
+| VAE | CAP encoder-nearest | 0.2851 | 0.0786 | 10 |
+| VAE | CAP random pairs | 0.3771 | 0.0162 | 10 |
+| VAE | CAP CDF ranks | 0.2855 | 0.0815 | 10 |
+| VAE | Marginal drift | 0.3710 | 0.0319 | 10 |
+| VAE | Wasserstein | 0.3853 | 0.0681 | 10 |
+| SVDD | CAP metadata-nearest | 0.5016 | 0.1942 | 3 |
+| SVDD | CAP encoder-nearest | 0.5229 | 0.2608 | 3 |
+| SVDD | CAP random pairs | 0.4823 | 0.2229 | 3 |
+| SVDD | CAP CDF ranks | 0.4320 | 0.0459 | 3 |
+| SVDD | Marginal drift | 0.5110 | 0.2507 | 3 |
+| SVDD | Wasserstein | 0.5256 | 0.2626 | 3 |
+| RealNVP | CAP metadata-nearest | 0.7513 | 0.4974 | 10 |
+| RealNVP | CAP encoder-nearest | 0.7554 | 0.5678 | 10 |
+| RealNVP | CAP random pairs | 0.6828 | 0.3125 | 10 |
+| RealNVP | CAP CDF ranks | 0.7722 | 0.5615 | 10 |
+| RealNVP | Marginal drift | 0.6473 | 0.3322 | 10 |
+| RealNVP | Wasserstein | 0.4678 | 0.1074 | 10 |
 
 ### Main findings
 
-- RealNVP is the strongest CAP result. CDF selection reaches 0.7722 AUPRC and
-  0.5615 efficiency. Its gains over drift are 0.1248 and 0.2293; its gains over
-  Wasserstein are 0.3044 and 0.4541. All four paired comparisons survive Holm
-  correction (`p_Holm = 0.0352`). Encoder-nearest has the largest RealNVP mean
-  efficiency, 0.5678.
-- AE metadata- and encoder-nearest CAP both improve on drift for AUPRC and
-  efficiency (`p_Holm = 0.0352`), although Wasserstein has the largest AE mean
-  AUPRC. For VAE, CDF improves efficiency over random-pair CAP by 0.0653
-  (`p_Holm = 0.0352`) but does not improve AUPRC.
-- Corrected SVDD is not seed-degenerate. Every selector cell contains ten
-  distinct tensor states. Encoder-nearest AUPRC has standard deviation 0.0018
-  and 95% interval `[0.4679, 0.4705]`; drift-selected SVDD has standard
-  deviation 0.1008 and interval `[0.4497, 0.5940]`. The narrow intervals of
-  some SVDD cells therefore reflect stable aggregate outcomes, not frozen
-  encoder weights.
-- Relative to the original SVDD architecture, the revised model improves the
-  intended deterministic-pair use case: metadata-nearest gains 0.0381 AUPRC
-  and 0.0691 efficiency, and encoder-nearest gains 0.0531 and 0.0691. It is not
-  uniformly better: random-pair selection loses 0.1069 AUPRC and 0.0926
-  efficiency, while drift and Wasserstein have mixed changes.
-
-### Candidate-ranking audit
-
-The outcome-blind audit trained 192 candidate trajectories (16 candidates × 4
-architectures × 3 reporting seeds), froze 1,152 criterion-branch checkpoints,
-and evaluated 133,632 candidate–intervention rows. Inference used 10,000
-candidate-label permutations and 10,000 paired hierarchical bootstrap draws.
-
-Encoder-nearest CAP ranks both RealNVP AUPRC (`rho = 0.749`,
-`p_Holm = 0.0161`) and efficiency (`rho = 0.751`, `p_Holm = 0.0115`). CDF
-ranks RealNVP efficiency (`rho = 0.703`, `p_Holm = 0.0294`) and VAE efficiency
-(`rho = 0.786`, `p_Holm = 0.0132`). Wasserstein ranks AE AUPRC and efficiency
-(`rho = 0.953` and `0.918`, both `p_Holm = 0.0024`).
-
-SVDD remains the proxy-ranking failure case after correcting its seed logic.
-All six AUPRC associations are negative: metadata `-0.768`, encoder `-0.903`,
-CDF `-0.929`, random pairs `-0.949`, drift `-0.532`, and Wasserstein `-0.853`.
-Efficiency has the same pattern, including `-0.956` for encoder-nearest and
-`-0.915` for CDF. This is a proxy–objective mismatch rather than an artifact of
-identical SVDD checkpoints.
+- Residual-OAS fixes the AE score-geometry mismatch. CDF selection reaches
+  0.7355 AUPRC and 0.4609 efficiency, versus 0.5697 and 0.2463 for the old
+  scalar-MSE CDF cell. CDF ranks all 16 candidates positively for AUPRC
+  (`rho = 0.600`, `p_Holm = 0.0450`) and efficiency (`rho = 0.809`,
+  `p_Holm = 0.0006`).
+- The outcome-gated SVDD score audit rejected the preregistered center-OAS/CDF
+  guess. The strongest complete-grid result preserves radial distance but
+  minimizes encoder-nearest CAP: old-panel AUPRC rank `rho = 0.982`,
+  `p_Holm = 0.0036`, with validation/test proxy `rho = 1.000`.
+- The fresh SVDD rerun confirms that rule. Encoder-nearest CAP ranks AUPRC
+  (`rho = 0.947`, `p_Holm = 0.0006`) and efficiency (`rho = 0.876`,
+  `p_Holm = 0.0006`), selecting 0.5229 AUPRC and 0.2608 efficiency. Relative
+  to the previous corrected encoder-SVDD cell, the gains are 0.0537 and 0.0518.
+- Wasserstein has a marginally larger SVDD mean, 0.5256 / 0.2626. The claim is
+  therefore ranking validity and competitive deterministic CAP selection, not
+  that CAP has the single largest observed mean.
+- Every SVDD branch fine-tunes the transferred AE weights. The freeze gate
+  verifies changed tensors and three distinct minibatch-order/final-state
+  fingerprints for every candidate, eliminating both prior degeneracies.
 
 ### Report artifacts
 
@@ -409,7 +393,7 @@ identical SVDD checkpoints.
 - [Selected-checkpoint performance](results/reports/extra/cchamber_selected_checkpoint_performance.png)
 - [Candidate-ranking validity](results/reports/extra/cchamber_candidate_rank_validity.png)
 - [Controlled physical-shift synthesis](results/reports/extra/cchamber_theorem_bridge.png)
-- [Complete analysis bundle](results/reports/cchamber_real_20260801_88aaec5)
+- [Authoritative Markdown report](/iopsstor/scratch/cscs/vjimenez/adatl1/reports/cchamber_ae_svdd_oas_20260802_0ea01bb/final_report/results_summary.md)
 
 ## Smoke Tests
 

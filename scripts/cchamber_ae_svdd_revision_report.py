@@ -70,7 +70,7 @@ def _markdown(summary: pd.DataFrame, rank: pd.DataFrame, output: Path) -> None:
     ae_cdf = lookup.loc[("ae", "cap_cdf")]
     svdd_encoder = lookup.loc[("svdd", "cap_encoder_nearest")]
     lines = [
-        "# Revised Causal Chamber results: residual-OAS AE and center-OAS SVDD",
+        "# Revised Causal Chamber results: residual-OAS AE and inverse-CAP SVDD",
         "",
         "This report supersedes the AE and SVDD cells of the `88aaec5` report. VAE and "
         "RealNVP are unchanged. All new selections use validation-normal information only; "

@@ -479,9 +479,25 @@ def deterministic_iterative_pairing(
         )
         assigned = before - unmatched.size
         if assigned == 0:
-            raise RuntimeError(
-                "Pairing made no progress. Increase nprobe/k or use the flat backend."
-            )
+            if backend == "ivf_flat" and index.nprobe < index.nlist:
+                previous_nprobe = int(index.nprobe)
+                index.nprobe = min(2 * previous_nprobe, int(index.nlist))
+                rounds.append(
+                    {
+                        "round": round_index,
+                        "before": before,
+                        "assigned": 0,
+                        "after": unmatched.size,
+                        "nprobe_before": previous_nprobe,
+                        "nprobe_after": int(index.nprobe),
+                    }
+                )
+                print(
+                    f"Assignment round {round_index}: no candidates remained; "
+                    f"increased nprobe from {previous_nprobe} to {index.nprobe}."
+                )
+                continue
+            raise RuntimeError("Pairing made no progress after exhaustive reference probing.")
         if remove_ids.size != assigned or np.unique(remove_ids).size != assigned:
             raise RuntimeError("Reference assignment accounting became inconsistent.")
         index.remove_ids(np.ascontiguousarray(remove_ids, dtype=np.int64))

@@ -86,3 +86,28 @@ def test_iterative_flat_pairing_is_complete_unique_and_deterministic() -> None:
     assert torch.equal(first.reference_to_target, second.reference_to_target)
     assert torch.equal(first.distance, second.distance)
     assert first_rounds == second_rounds
+
+
+def test_iterative_ivf_pairing_widens_probe_to_complete() -> None:
+    rng = np.random.default_rng(19)
+    reference = rng.normal(size=(101, 8)).astype(np.float32)
+    target = rng.normal(size=(97, 8)).astype(np.float32)
+    reference /= np.linalg.norm(reference, axis=1, keepdims=True)
+    target /= np.linalg.norm(target, axis=1, keepdims=True)
+    pairing, rounds = deterministic_iterative_pairing(
+        target,
+        reference,
+        backend="ivf_flat",
+        k=2,
+        nlist=8,
+        nprobe=1,
+        train_events=101,
+        train_iterations=4,
+        search_batch_size=31,
+        add_batch_size=41,
+        threads=2,
+        seed=123,
+    )
+    assert pairing.n_pairs == target.shape[0]
+    assert torch.unique(pairing.target_to_reference).numel() == target.shape[0]
+    assert any("nprobe_after" in row for row in rounds)

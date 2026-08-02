@@ -18,7 +18,7 @@ AE_ROOT = Path(
     "/iopsstor/scratch/cscs/vjimenez/adatl1/campaigns/" "cchamber_ae_residual_oas_20260802_6e05000"
 )
 SVDD_ROOT = Path(
-    "/iopsstor/scratch/cscs/vjimenez/adatl1/campaigns/" "cchamber_svdd_inverse_cap_20260802"
+    "/iopsstor/scratch/cscs/vjimenez/adatl1/campaigns/" "cchamber_svdd_inverse_cap_20260802_seeded"
 )
 OLD_THRESHOLD = Path(
     "/iopsstor/scratch/cscs/vjimenez/adatl1/audits/"

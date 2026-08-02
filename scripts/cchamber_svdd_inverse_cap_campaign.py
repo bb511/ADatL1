@@ -131,6 +131,7 @@ def initialize(root: Path) -> Path:
         "pretrained_encoder_seed": int(ae["initialization_seed"]),
         "encoder_topology": [24, 8],
         "encoder_transfer": "weights copied; AE biases dropped; all SVDD weights trainable",
+        "training_order_seed": "reporting_seed",
         "score_audit_design": str(SCORE_AUDIT_ROOT / "design.json"),
         "score_audit_design_sha256": common._sha256(SCORE_AUDIT_ROOT / "design.json"),
         "score_audit_results": str(score_results),
@@ -184,6 +185,7 @@ def _training_command(
         "trainer.num_sanity_val_steps=0",
         f"seed={int(trajectory['reporting_seed'])}",
         "data.seed=314159",
+        f"data.train_seed={int(trajectory['reporting_seed'])}",
         "data.signal_experiments=[]",
         "train=true",
         "test=false",
@@ -246,6 +248,7 @@ def train(root: Path, trajectory_index: int) -> Path:
     command, environment = _training_command(root, design, trajectory, attempt)
     subprocess.run(command, cwd=REPO_ROOT, env=environment, check=True)  # nosec B603
     branch_manifest = attempt / "checkpoint_branches.json"
+    fingerprint = attempt / "trajectory_fingerprint.json"
     branches = rank._validate_branch_manifest(branch_manifest, expected_epochs=EXPECTED_EPOCHS)
     for branch in branches:
         branch["encoder_delta"] = _encoder_delta(
@@ -263,6 +266,8 @@ def train(root: Path, trajectory_index: int) -> Path:
             "branches": branches,
             "branch_manifest": str(branch_manifest),
             "branch_manifest_sha256": common._sha256(branch_manifest),
+            "trajectory_fingerprint": str(fingerprint),
+            "trajectory_fingerprint_sha256": common._sha256(fingerprint),
             "slurm_job_id": os.environ.get("SLURM_JOB_ID"),
             "slurm_array_task_id": os.environ.get("SLURM_ARRAY_TASK_ID"),
         },
@@ -275,9 +280,16 @@ def freeze(root: Path) -> Path:
     root = root.resolve()
     design, trajectories = _design(root)
     records = []
+    fingerprints: dict[str, list[dict[str, Any]]] = {}
     for trajectory in trajectories:
         marker = common._load(
             root / "training" / f"{int(trajectory['trajectory_index']):03d}.json"
+        )
+        fingerprint_path = Path(marker["trajectory_fingerprint"])
+        if common._sha256(fingerprint_path) != marker["trajectory_fingerprint_sha256"]:
+            raise ValueError("SVDD trajectory fingerprint changed after training.")
+        fingerprints.setdefault(str(trajectory["candidate_id"]), []).append(
+            common._load(fingerprint_path)
         )
         for branch in marker["branches"]:
             checkpoint = Path(branch["checkpoint"])
@@ -292,6 +304,13 @@ def freeze(root: Path) -> Path:
             )
     if len(records) != EXPECTED_TRAJECTORIES * len(rank.STRATEGIES):
         raise ValueError("SVDD checkpoint freeze coverage is incomplete.")
+    for candidate, values in fingerprints.items():
+        batch_orders = {tuple(value["train_batch_sha256"]) for value in values}
+        final_states = {value["final_model_state_sha256"] for value in values}
+        if len(values) != 3 or len(batch_orders) != 3 or len(final_states) != 3:
+            raise ValueError(
+                f"SVDD candidate {candidate} lacks three distinct order/state fingerprints."
+            )
     output = root / "checkpoint_manifest.json"
     common._write_json(
         output,

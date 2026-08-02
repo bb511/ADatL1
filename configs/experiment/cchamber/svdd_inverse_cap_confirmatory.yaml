@@ -1,0 +1,26 @@
+# @package _global_
+
+defaults:
+  - /experiment/cchamber/svdd_candidate_rank_audit
+
+# Architecture-aware SVDD rerun. The bias-free topology matches the selected
+# residual-OAS AE encoder; AE bias tensors are intentionally ignored at transfer.
+tags: ["causal_chamber", "svdd_inverse_cap", "confirmatory", "label_free"]
+
+algorithm:
+  encoder:
+    nodes: [24, 8]
+    bias: false
+    batchnorm: false
+  pretrained_encoder_strict: false
+
+callbacks:
+  # The outcome-gated score audit froze lower normal-view CAP as the SVDD objective.
+  audit_ckpt_cap_metadata_nearest:
+    mode: min
+  audit_ckpt_cap_encoder_nearest:
+    mode: min
+  audit_ckpt_cap_random:
+    mode: min
+  audit_ckpt_cap_cdf:
+    mode: min

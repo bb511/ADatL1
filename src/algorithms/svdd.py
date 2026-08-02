@@ -77,21 +77,27 @@ class DeepSVDD(ADLightningModule):
         self.loss = SVDDLoss(objective=objective, nu=nu)
         self.register_buffer("center", torch.empty(0))
         self.register_buffer("radius", torch.tensor(0.0, dtype=torch.float32))
+        self.register_buffer("center_oas_precision", torch.empty(0, 0))
+        self.register_buffer("center_oas_ready", torch.tensor(False))
         self._training_distances: list[torch.Tensor] = []
 
     @property
     def objective(self) -> str:
+        """Return the configured one-class or soft-boundary objective."""
         return self.loss.objective
 
     @property
     def center_initialized(self) -> bool:
+        """Return whether the fixed nominal center has been installed."""
         return self.center.numel() > 0
 
     @property
     def target_fpr(self) -> float:
+        """Return the configured operational false-positive rate."""
         return self.compute_target_fpr()
 
     def on_fit_start(self) -> None:
+        """Load initialization, validate topology, and compute the nominal center."""
         self.features.to(self.device)
 
         if self.ckpt_path and self.pretrained_encoder_ckpt:
@@ -116,10 +122,12 @@ class DeepSVDD(ADLightningModule):
             self.initialize_center(datamodule.train_dataloader())
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
+        """Encode flattened inputs into the SVDD latent space."""
         x = self.features(x)
         return self.encoder(x)
 
     def _prepare_input(self, batch) -> torch.Tensor:
+        """Extract and flatten one input batch."""
         return torch.flatten(unpack_batch(batch).x, start_dim=1)
 
     @torch.no_grad()
@@ -168,6 +176,7 @@ class DeepSVDD(ADLightningModule):
         self.center = center.detach()
 
     def _validate_encoder_architecture(self) -> None:
+        """Reject affine mechanisms that permit the trivial constant solution."""
         biased_layers = []
         affine_normalizers = []
         affine_types = (
@@ -198,11 +207,33 @@ class DeepSVDD(ADLightningModule):
             )
 
     def _compute_distance(self, z: torch.Tensor) -> torch.Tensor:
+        """Return squared Euclidean distance to the fixed SVDD center."""
         if not self.center_initialized:
             raise RuntimeError("SVDD center has not been initialized.")
         return torch.sum((z - self.center) ** 2, dim=1)
 
+    def set_center_oas_state(self, precision: torch.Tensor) -> None:
+        """Install train-normal OAS precision around the fixed SVDD center."""
+        expected = (self.center.numel(), self.center.numel())
+        if tuple(precision.shape) != expected:
+            raise ValueError(
+                f"Expected center-OAS precision {expected}, got {tuple(precision.shape)}."
+            )
+        self.center_oas_precision = precision.to(device=self.device, dtype=self.center.dtype)
+        self.center_oas_ready.fill_(True)
+
+    def center_oas_score(self, z: torch.Tensor) -> torch.Tensor:
+        """Return dimension-normalized Mahalanobis energy around the SVDD center."""
+        if not self.center_initialized or not bool(self.center_oas_ready):
+            raise RuntimeError("SVDD center-OAS state has not been initialized.")
+        deviation = z - self.center
+        return (
+            torch.einsum("bi,ij,bj->b", deviation, self.center_oas_precision, deviation)
+            / deviation.shape[1]
+        )
+
     def _network_regularization(self) -> torch.Tensor:
+        """Return explicit L2 regularization over trainable encoder weights."""
         weights = [
             parameter
             for parameter in self.encoder.parameters()
@@ -214,9 +245,11 @@ class DeepSVDD(ADLightningModule):
         return 0.5 * self.network_weight_decay * squared_norm
 
     def model_step(self, batch) -> dict[str, torch.Tensor]:
+        """Compute objective, anomaly scores, and monitoring quantities."""
         x = self._prepare_input(batch)
         z = self.forward(x)
         ascore = self._compute_distance(z)
+        center_oas = self.center_oas_score(z) if bool(self.center_oas_ready) else ascore
         if ascore.ndim != 1:
             raise ValueError(f"Expected per-event ascores, got {tuple(ascore.shape)}.")
 
@@ -257,10 +290,12 @@ class DeepSVDD(ADLightningModule):
             "radius": self.radius.detach(),
             "loss/full": data_loss.detach(),
             "ascore/full": ascore.detach(),
+            "ascore/center_oas": center_oas.detach(),
             "encoded_data": z.detach(),
         }
 
     def on_train_epoch_end(self) -> None:
+        """Update the soft-boundary radius after its warmup period."""
         if (
             self.objective == "soft_boundary"
             and self.current_epoch >= self.radius_warmup_epochs
@@ -286,6 +321,7 @@ class DeepSVDD(ADLightningModule):
         super().on_train_epoch_end()
 
     def outlog(self, outdict: dict) -> dict:
+        """Select scalar quantities for the base module logger."""
         return {
             "loss": outdict.get("loss"),
             "loss_mean": outdict.get("loss/mean"),
@@ -300,6 +336,7 @@ class DeepSVDD(ADLightningModule):
         }
 
     def _load_pretrained_encoder(self) -> None:
+        """Load matching encoder tensors from a pretrained checkpoint."""
         checkpoint_path = Path(self.pretrained_encoder_ckpt).expanduser()
         checkpoint = torch.load(checkpoint_path, map_location="cpu", weights_only=False)
         state_dict = checkpoint.get("state_dict", checkpoint)
@@ -316,6 +353,7 @@ class DeepSVDD(ADLightningModule):
         self.encoder.load_state_dict(encoder_state, strict=self.pretrained_encoder_strict)
 
     def _load_svdd_checkpoint(self) -> None:
+        """Restore a complete SVDD checkpoint for continued training."""
         checkpoint = torch.load(self.ckpt_path, map_location="cpu", weights_only=False)
         state_dict = checkpoint["state_dict"]
         if "center" in state_dict:
@@ -332,9 +370,21 @@ class DeepSVDD(ADLightningModule):
         unexpected_keys,
         error_msgs,
     ) -> None:
+        """Resize dynamic center and OAS buffers before state restoration."""
         center_key = prefix + "center"
         if center_key in state_dict and self.center.shape != state_dict[center_key].shape:
             self.center = torch.empty_like(state_dict[center_key])
+        precision_key = prefix + "center_oas_precision"
+        ready_key = prefix + "center_oas_ready"
+        if precision_key not in state_dict:
+            state_dict[precision_key] = self.center_oas_precision
+        if ready_key not in state_dict:
+            state_dict[ready_key] = self.center_oas_ready
+        if (
+            precision_key in state_dict
+            and self.center_oas_precision.shape != state_dict[precision_key].shape
+        ):
+            self.center_oas_precision = torch.empty_like(state_dict[precision_key])
         super()._load_from_state_dict(
             state_dict,
             prefix,
@@ -346,6 +396,7 @@ class DeepSVDD(ADLightningModule):
         )
 
     def _add_hgq_loss(self, loss: torch.Tensor) -> torch.Tensor:
+        """Preserve compatibility with optional quantization-aware subclasses."""
         if hasattr(self.encoder, "losses") and len(self.encoder.losses) > 0:
             extra = torch.stack(
                 [torch.as_tensor(value, device=loss.device) for value in self.encoder.losses]

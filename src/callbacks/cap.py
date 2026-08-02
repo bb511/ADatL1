@@ -289,3 +289,36 @@ class ResidualOASStateCallback(Callback):
             torch.from_numpy(estimator.location_),
             torch.from_numpy(estimator.precision_),
         )
+
+
+class SVDDCenterOASStateCallback(Callback):
+    """Fit anisotropic train-normal precision around the fixed SVDD center."""
+
+    def on_validation_epoch_start(self, trainer, pl_module):
+        """Install an OAS precision from a clean, final-weight embedding pass."""
+        if trainer.sanity_checking:
+            return
+        if int(getattr(trainer, "world_size", 1)) != 1:
+            raise RuntimeError("SVDDCenterOASStateCallback currently requires one process.")
+        if not hasattr(pl_module, "set_center_oas_state"):
+            raise TypeError("SVDDCenterOASStateCallback requires the SVDD OAS interface.")
+        if not bool(getattr(pl_module, "center_initialized", False)):
+            raise RuntimeError("The SVDD center must be initialized before fitting OAS state.")
+        chunks = []
+        loader = trainer.train_dataloader
+        shuffler = getattr(getattr(loader, "dataset", None), "shuffler", None)
+        shuffler_state = None if shuffler is None else shuffler.get_state()
+        pl_module.eval()
+        try:
+            with torch.no_grad():
+                for batch in loader:
+                    x = torch.flatten(unpack_batch(batch).x, start_dim=1).to(pl_module.device)
+                    chunks.append((pl_module.forward(x) - pl_module.center).double().cpu())
+        finally:
+            if shuffler_state is not None:
+                shuffler.set_state(shuffler_state)
+        if not chunks:
+            raise RuntimeError("SVDD center-OAS CAP received an empty training loader.")
+        deviation = torch.cat(chunks, dim=0).numpy()
+        estimator = OAS(store_precision=True, assume_centered=True).fit(deviation)
+        pl_module.set_center_oas_state(torch.from_numpy(estimator.precision_))

@@ -78,9 +78,17 @@ def _load(root: Path) -> tuple[dict, pd.DataFrame, pd.DataFrame]:
     return design, checkpoints, outcomes
 
 
-def analyze(root: Path, output_dir: Path, permutations: int = 10_000) -> list[Path]:
+def analyze(
+    root: Path,
+    output_dir: Path,
+    permutations: int = 10_000,
+    *,
+    model: str = "ae",
+    score: str = "residual_oas",
+) -> list[Path]:
     """Write outcome-blind selections, performance, rank validity, and figures."""
     design, checkpoints, outcomes = _load(root)
+    directions = dict(design.get("directions", rank.DIRECTIONS))
     output_dir.mkdir(parents=True, exist_ok=True)
     seed_first = (
         outcomes.groupby(["candidate_id", "reporting_seed", "strategy", "metric"], sort=True)[
@@ -106,7 +114,7 @@ def analyze(root: Path, output_dir: Path, permutations: int = 10_000) -> list[Pa
     for strategy in rank.STRATEGIES:
         branch = proxy[proxy.strategy == strategy]
         candidate_proxy = branch.groupby("candidate_id").monitor_value.mean()
-        direction = rank.DIRECTIONS[strategy]
+        direction = directions[strategy]
         selected_candidate = (
             candidate_proxy.idxmax() if direction == "maximize" else candidate_proxy.idxmin()
         )
@@ -142,8 +150,8 @@ def analyze(root: Path, output_dir: Path, permutations: int = 10_000) -> list[Pa
         mean, sd, low, high = _interval(group.value)
         summary_rows.append(
             {
-                "model": "ae",
-                "score": "residual_oas",
+                "model": model,
+                "score": score,
                 "strategy": strategy,
                 "metric": metric,
                 "mean": mean,
@@ -159,7 +167,7 @@ def analyze(root: Path, output_dir: Path, permutations: int = 10_000) -> list[Pa
     rng = np.random.default_rng(2_608_2026)
     association_rows = []
     for strategy in rank.STRATEGIES:
-        direction = rank.DIRECTIONS[strategy]
+        direction = directions[strategy]
         candidate_proxy = (
             proxy[proxy.strategy == strategy].groupby("candidate_id").monitor_value.mean()
         )
@@ -178,8 +186,8 @@ def analyze(root: Path, output_dir: Path, permutations: int = 10_000) -> list[Pa
                 exceed += int(float(stats.spearmanr(utility, permuted).statistic) >= observed)
             association_rows.append(
                 {
-                    "model": "ae",
-                    "score": "residual_oas",
+                    "model": model,
+                    "score": score,
                     "strategy": strategy,
                     "metric": metric,
                     "direction": direction,
@@ -226,9 +234,9 @@ def analyze(root: Path, output_dir: Path, permutations: int = 10_000) -> list[Pa
             ha="right",
         )
         axis.grid(axis="y", alpha=0.25)
-    figure.suptitle("Causal Chamber AE with train-normal residual OAS scoring")
+    figure.suptitle(f"Causal Chamber {model.upper()} with train-normal {score} scoring")
     figure.tight_layout()
-    performance_plot = output_dir / "ae_selected_checkpoint_performance.png"
+    performance_plot = output_dir / f"{model}_selected_checkpoint_performance.png"
     figure.savefig(performance_plot, dpi=220, bbox_inches="tight")
     plt.close(figure)
     paths.append(performance_plot)
@@ -243,10 +251,10 @@ def analyze(root: Path, output_dir: Path, permutations: int = 10_000) -> list[Pa
             axis.text(column, row, f"{matrix.iloc[row, column]:.2f}", ha="center", va="center")
     axis.set_yticks(range(len(matrix)), [STRATEGY_LABELS[value] for value in matrix.index])
     axis.set_xticks(range(len(matrix.columns)), [METRIC_LABELS[value] for value in matrix.columns])
-    axis.set_title("Residual-OAS proxy rank validity (16 candidates)")
+    axis.set_title(f"{score} proxy rank validity (16 candidates)")
     figure.colorbar(image, ax=axis, label="Spearman rho")
     figure.tight_layout()
-    rank_plot = output_dir / "ae_candidate_rank_validity.png"
+    rank_plot = output_dir / f"{model}_candidate_rank_validity.png"
     figure.savefig(rank_plot, dpi=220, bbox_inches="tight")
     plt.close(figure)
     paths.append(rank_plot)
@@ -254,6 +262,8 @@ def analyze(root: Path, output_dir: Path, permutations: int = 10_000) -> list[Pa
     primary = selection[selection.strategy == design["primary_strategy"]].iloc[0].to_dict()
     provenance = {
         "schema_version": 1,
+        "model": model,
+        "score": score,
         "campaign_design": str((root / "design.json").resolve()),
         "campaign_design_sha256": campaign._sha256(root / "design.json"),
         "checkpoint_manifest_sha256": campaign._sha256(root / "checkpoint_manifest.json"),
@@ -278,8 +288,16 @@ def main() -> None:
     parser.add_argument("--root", type=Path, required=True)
     parser.add_argument("--output-dir", type=Path, required=True)
     parser.add_argument("--permutations", type=int, default=10_000)
+    parser.add_argument("--model", choices=("ae", "svdd"), default="ae")
+    parser.add_argument("--score", default="residual_oas")
     args = parser.parse_args()
-    for path in analyze(args.root, args.output_dir, args.permutations):
+    for path in analyze(
+        args.root,
+        args.output_dir,
+        args.permutations,
+        model=args.model,
+        score=args.score,
+    ):
         print(path)
 
 

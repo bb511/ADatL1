@@ -384,6 +384,7 @@ intervals use ten.
 - [Rewritten appendix](results/reports/extra_cchamber.tex)
 - [Selected-checkpoint performance](results/reports/extra/cchamber_selected_checkpoint_performance.png)
 - [Candidate-ranking validity](results/reports/extra/cchamber_candidate_rank_validity.png)
+- [Controlled physical-shift synthesis](results/reports/extra/cchamber_theorem_bridge.png)
 - [Authoritative Markdown report](/iopsstor/scratch/cscs/vjimenez/adatl1/reports/cchamber_ae_svdd_oas_20260802_0ea01bb/final_report/results_summary.md)
 
 ## Smoke Tests

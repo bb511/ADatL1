@@ -139,6 +139,13 @@ def _markdown(summary: pd.DataFrame, rank: pd.DataFrame, output: Path) -> None:
             "",
             "![Candidate-ranking validity](./candidate_rank_validity.png)",
             "",
+            "## Controlled physical-shift synthesis",
+            "",
+            "This recomputation uses the newly selected AE and SVDD checkpoints and only "
+            "encoder-nearest CAP, CDF-rank CAP, marginal drift, and Wasserstein.",
+            "",
+            "![Controlled physical-shift synthesis](./physical_shift_synthesis.png)",
+            "",
             "## Integrity",
             "",
             "- AE: 48 trajectories, 288 frozen branch checkpoints, 33,408 complete outcome rows.",
@@ -218,10 +225,8 @@ def run(output_dir: Path, repository_extra: Path | None = None) -> list[Path]:
     )
     rank_plot = output_dir / "candidate_rank_validity.png"
     plots._plot_rank_heatmap(rank, rank_plot, models=REPORT_MODELS, strategies=REPORT_STRATEGIES)
-    # This synthesis is defined around metadata-versus-random CAP, which is intentionally
-    # excluded from the revised presentation. Remove stale copies from earlier generations.
     physical_plot = output_dir / "physical_shift_synthesis.png"
-    physical_plot.unlink(missing_ok=True)
+    plots._plot_retained_physical_synthesis(intervention, physical_plot, models=REPORT_MODELS)
     markdown = output_dir / "results_summary.md"
     _markdown(summary, rank, markdown)
     outputs = [
@@ -230,6 +235,7 @@ def run(output_dir: Path, repository_extra: Path | None = None) -> list[Path]:
         intervention_path,
         selected_plot,
         rank_plot,
+        physical_plot,
         markdown,
     ]
     if repository_extra is not None:
@@ -237,11 +243,11 @@ def run(output_dir: Path, repository_extra: Path | None = None) -> list[Path]:
         for source, name in (
             (selected_plot, "cchamber_selected_checkpoint_performance.png"),
             (rank_plot, "cchamber_candidate_rank_validity.png"),
+            (physical_plot, "cchamber_theorem_bridge.png"),
         ):
             destination = repository_extra / name
             shutil.copy2(source, destination)
             outputs.append(destination)
-        (repository_extra / "cchamber_theorem_bridge.png").unlink(missing_ok=True)
     provenance = {
         "schema_version": 1,
         "old_report": str(OLD_REPORT),

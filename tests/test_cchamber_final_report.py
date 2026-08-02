@@ -32,6 +32,23 @@ def test_physical_presentation_contrasts_use_requested_strategies() -> None:
     assert result["encoder_minus_wasserstein"].item() == pytest.approx(0.1)
 
 
+def test_retained_physical_contrasts_exclude_removed_cap_strategies() -> None:
+    """The revised synthesis uses only the four criteria retained in the report."""
+    pivot = pd.DataFrame(
+        {
+            "cap_encoder_nearest": [0.7],
+            "cap_cdf": [0.8],
+            "drift": [0.4],
+            "wasserstein": [0.6],
+        }
+    )
+    result = cchamber_final_report._add_retained_criterion_contrasts(pivot)
+
+    assert result["cdf_minus_encoder"].item() == pytest.approx(0.1)
+    assert result["encoder_minus_drift"].item() == pytest.approx(0.3)
+    assert result["encoder_minus_wasserstein"].item() == pytest.approx(0.1)
+
+
 def _inputs() -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
     """Return a monotonic three-strength synthetic report bundle."""
     rows = []

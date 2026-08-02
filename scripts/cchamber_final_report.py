@@ -426,6 +426,134 @@ def _add_presentation_contrasts(pivot: pd.DataFrame) -> pd.DataFrame:
     return output
 
 
+def _add_retained_criterion_contrasts(pivot: pd.DataFrame) -> pd.DataFrame:
+    """Add physical-synthesis contrasts for the four retained report criteria."""
+    required = {"cap_encoder_nearest", "cap_cdf", "drift", "wasserstein"}
+    missing = sorted(required - set(pivot.columns))
+    if missing:
+        raise ValueError(f"Retained-criterion physical synthesis misses strategies {missing}.")
+    output = pivot.copy()
+    output["cdf_minus_encoder"] = output["cap_cdf"] - output["cap_encoder_nearest"]
+    output["encoder_minus_drift"] = output["cap_encoder_nearest"] - output["drift"]
+    output["encoder_minus_wasserstein"] = output["cap_encoder_nearest"] - output["wasserstein"]
+    return output
+
+
+def _plot_retained_physical_synthesis(
+    intervention: pd.DataFrame,
+    output: Path,
+    *,
+    models: tuple[str, ...] = PRESENTATION_MODELS,
+) -> None:
+    """Plot physical shift and AUPRC differences for the retained criteria."""
+    auprc = intervention[intervention["metric"] == "auprc"]
+    index = [
+        "model",
+        "intervention",
+        "target",
+        "strength",
+        "semantic_family",
+        "system_group",
+        "biased_energy_distance",
+    ]
+    pivot = auprc.pivot(index=index, columns="strategy", values="mean_performance").reset_index()
+    pivot = _add_retained_criterion_contrasts(pivot)
+    figure, axes = plt.subplots(4, len(models), figsize=(15.5, 13.2), sharex="col", sharey="row")
+    class_style = {
+        "process": ("#D55E00", "o", "process / actuator"),
+        "measurement": ("#0072B2", "^", "measurement chain"),
+    }
+    for column, model in enumerate(models):
+        selected = pivot[pivot["model"] == model]
+        top = axes[0, column]
+        cdf_encoder = axes[1, column]
+        encoder_drift = axes[2, column]
+        encoder_wasserstein = axes[3, column]
+        for group, (color, marker, label) in class_style.items():
+            group_rows = selected[selected["system_group"] == group]
+            top.scatter(
+                group_rows["biased_energy_distance"],
+                group_rows["cap_encoder_nearest"],
+                c=color,
+                marker=marker,
+                s=24,
+                alpha=0.8,
+                label=label,
+            )
+            top.scatter(
+                group_rows["biased_energy_distance"],
+                group_rows["cap_cdf"],
+                facecolors="none",
+                edgecolors=color,
+                marker=marker,
+                s=24,
+                alpha=0.65,
+            )
+            cdf_encoder.scatter(
+                group_rows["biased_energy_distance"],
+                group_rows["cdf_minus_encoder"],
+                c=color,
+                marker=marker,
+                s=24,
+                alpha=0.8,
+            )
+            encoder_drift.scatter(
+                group_rows["biased_energy_distance"],
+                group_rows["encoder_minus_drift"],
+                c=color,
+                marker=marker,
+                s=24,
+                alpha=0.8,
+            )
+            encoder_wasserstein.scatter(
+                group_rows["biased_energy_distance"],
+                group_rows["encoder_minus_wasserstein"],
+                c=color,
+                marker=marker,
+                s=24,
+                alpha=0.8,
+            )
+        process_rho = _class_rho(selected, "cap_encoder_nearest", "process")
+        measurement_rho = _class_rho(selected, "cap_encoder_nearest", "measurement")
+        top.text(
+            0.03,
+            0.96,
+            f"Encoder-CAP ρ: process {process_rho:+.2f}\nmeasurement {measurement_rho:+.2f}",
+            transform=top.transAxes,
+            va="top",
+            fontsize=8,
+            bbox={"facecolor": "white", "alpha": 0.75, "edgecolor": "none"},
+        )
+        for contrast_axis in (cdf_encoder, encoder_drift, encoder_wasserstein):
+            contrast_axis.axhline(0, color="black", linewidth=0.8)
+        for axis in (top, cdf_encoder, encoder_drift, encoder_wasserstein):
+            axis.set_xscale("log")
+            axis.grid(alpha=0.18)
+        top.set_ylim(0, 1.02)
+        top.set_title(MODEL_LABELS[model])
+        encoder_wasserstein.set_xlabel("Physical shift (energy distance, log scale)")
+        if column == 0:
+            top.set_ylabel("AUPRC")
+            cdf_encoder.set_ylabel("CDF CAP − encoder CAP")
+            encoder_drift.set_ylabel("Encoder CAP − marginal drift")
+            encoder_wasserstein.set_ylabel("Encoder CAP − Wasserstein")
+    handles, labels = axes[0, 0].get_legend_handles_labels()
+    figure.legend(handles, labels, loc="lower center", ncol=2, frameon=False)
+    figure.text(
+        0.5,
+        0.045,
+        "Filled: encoder-nearest CAP; open: CDF-rank CAP. "
+        "All contrasts are AUPRC differences. Correlations are descriptive "
+        "within system group; no pooled causal regression.",
+        ha="center",
+        fontsize=9,
+    )
+    figure.suptitle("Controlled physical shift, anomaly detectability, and selection gain")
+    figure.tight_layout(rect=(0, 0.07, 1, 0.97), h_pad=1.7)
+    figure.savefig(output, dpi=220, bbox_inches="tight")
+    plt.close(figure)
+
+
 def _plot_physical_synthesis(
     intervention: pd.DataFrame,
     output: Path,

@@ -77,7 +77,8 @@ makeRuleBoxGrid[groups_Association, ncols_Integer, mag_:0.55] := Module[{panels}
 (* --- optimisation-front plot --------------------------------------------- *)
 
 secObjLabel = <|"mse" -> "MSE", "mseq99" -> "MSE", "kl" -> "KL",
-   "dist" -> "dist", "logp" -> "-log p"|>;
+   "dist" -> "dist", "logp" -> "-log p", "ascore" -> "anomaly score",
+   "ascoreq99" -> "anomaly score"|>;
 
 studyFile[frontsDir_String, model_String, strat_String] := Module[{cands},
   cands = Select[FileNames[

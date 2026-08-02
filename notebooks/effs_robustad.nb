@@ -113,6 +113,12 @@ Cell["\<\
 frontRowRealNVP = modelFrontRow[rebuttalFrontsDir, \"realnvp\", \"RealNVP\"]
 Export[rebuttalOutDir <> \"fronts_realnvp\" <> rebuttalTierSuffix <> \".svg\", frontRowRealNVP, \"SVG\"];
 Export[rebuttalOutDir <> \"fronts_realnvp\" <> rebuttalTierSuffix <> \".pdf\", frontRowRealNVP, \"PDF\"];\
+\>", "Input"],
+
+Cell["\<\
+frontRowDTE = modelFrontRow[rebuttalFrontsDir, \"dte\", \"DTE\"]
+Export[rebuttalOutDir <> \"fronts_dte\" <> rebuttalTierSuffix <> \".svg\", frontRowDTE, \"SVG\"];
+Export[rebuttalOutDir <> \"fronts_dte\" <> rebuttalTierSuffix <> \".pdf\", frontRowDTE, \"PDF\"];\
 \>", "Input"]
 }, Open]],
 

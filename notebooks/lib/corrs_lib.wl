@@ -13,20 +13,22 @@ ClearAll[ZeroVarianceQ, RunMethodFromName, MetricFilePatternForMethod, EffMedFil
 ZeroVarianceQ[x_List] := Length[DeleteDuplicates[N[x]]] <= 1;
 
 (*Infer validation method from run folder name*)
-RunMethodFromName[runName_String] := 
-  Which[StringStartsQ[runName, "cap"], "CAP", 
-   StringStartsQ[runName, "stability"], "Stable", 
-   StringStartsQ[runName, "wasserstein"], "W1", 
-   StringStartsQ[runName, "cvar25"], "Semi", True, "Unknown"];
+RunMethodFromName[runName_String] :=
+  Which[StringStartsQ[runName, "cap"], "CAP",
+   StringStartsQ[runName, "stability"], "Stable",
+   StringStartsQ[runName, "wasserstein"], "W1",
+   StringStartsQ[runName, "cvar25"], "Semi",
+   StringStartsQ[runName, "consistency"], "Cons", True, "Unknown"];
 
 (*Which metric file should be used for each method*)
 MetricFilePatternForMethod[method_String] := 
   Switch[method, "CAP", {"val_summary_cap_ema*.csv"}, 
    "Stable", {"val_summary_*drift_ema*.csv", 
     "val_summary_operational_drift_ema.csv"}, 
-   "W1", {"val_summary_w1dist_ema*.csv"}, 
-   "Semi", {"val_summary_eff_cvar25_ema*.csv", 
-    "val_summary_eff_cvar25_ema_operational.csv"}, _, None];
+   "W1", {"val_summary_w1dist_ema*.csv"},
+   "Semi", {"val_summary_eff_cvar25_ema*.csv",
+    "val_summary_eff_cvar25_ema_operational.csv"},
+   "Cons", {"val_summary_consistency_ema*.csv"}, _, None];
 
 (*Find the median efficiency CSV*)
 EffMedFile[runDir_String] := 

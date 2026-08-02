@@ -275,7 +275,7 @@ MetricAxisSummary[assoc_Association, label_String:"AUPRC",
    "counts: CAP best point estimate in ", ToString[bestCells], "/",
    ToString[Length[rows]], " cells; significant for CAP: ",
    ToString[sigFor], ", against: ", ToString[sigAgainst], ", n/a: ",
-   ToString[na], " (of ", ToString[2*Length[rows]], " comparisons)."]];
+   ToString[na], " (of ", ToString[3*Length[rows]], " comparisons)."]];
 
 (* Every table carries its own legend: a trailing line in markdown, a LaTeX
    comment after the tabular so it survives copy-paste into the paper.

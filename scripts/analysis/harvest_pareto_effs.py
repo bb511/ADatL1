@@ -59,12 +59,38 @@ STRATEGY_MONITORS = {
 
 EFF_KEY_RE = re.compile(r"^val/(?!summary/)([^/]+)/eff__")
 
+# A run*_pareto.sh block carries both keys, so the catalogue is self-describing
+# and no experiment-name -> file-path guessing is needed.
+BLOCK_EXP_RE = re.compile(r"^#\s+experiment_name=(\S+?)\s*\\?$", re.M)
+BLOCK_RUN_RE = re.compile(r"^#\s+run_name=(\S+?)\s*\\?$", re.M)
+
 
 def find_repo_root(start: Path) -> Path:
     for p in [start, *start.parents]:
         if (p / ".project-root").exists():
             return p
     return start
+
+
+def catalogue_run_names(repo: Path) -> dict:
+    """experiment_name -> {run_name} over every checked-in Pareto catalogue.
+
+    An experiment accumulates runs forever, so a front that was re-fetched after
+    its Optuna study changed leaves the *previous* front's retrainings behind in
+    the same MLflow experiment (the pre-bugfix svdd fronts are the live case:
+    126 superseded run names across the four svdd experiments). Harvesting those
+    silently mixes superseded models into the fronts, so --restrict-to-catalogues
+    keeps only what the current catalogue actually asks for.
+    """
+    allowed: dict = {}
+    for path in sorted(repo.glob("scripts/*/run*_pareto.sh")):
+        text = path.read_text()
+        for block in text.split("# ---"):
+            exps = BLOCK_EXP_RE.findall(block)
+            runs = BLOCK_RUN_RE.findall(block)
+            if len(exps) == 1 and len(runs) == 1:
+                allowed.setdefault(exps[0], set()).add(runs[0])
+    return allowed
 
 
 def history_values(client: MlflowClient, run_id: str, key: str) -> list:
@@ -85,10 +111,16 @@ def strategy_of(run_name: str):
     return m.group(1) if m else None
 
 
-def harvest_experiment(client, exp, bkg_re, outdir):
+def harvest_experiment(client, exp, bkg_re, outdir, allowed=None):
     runs = client.search_runs(
         [exp.experiment_id], max_results=5000, order_by=["attributes.start_time ASC"]
     )
+    if allowed is not None:
+        dropped = {r.info.run_name for r in runs} - allowed
+        runs = [r for r in runs if r.info.run_name in allowed]
+        if dropped:
+            print(f"  restricted to catalogue: dropped {len(dropped)} superseded "
+                  f"run name(s), e.g. {sorted(dropped)[:3]}")
     # Newest run with training histories per run name.
     by_name = {}
     for run in runs:
@@ -171,11 +203,17 @@ def harvest_experiment(client, exp, bkg_re, outdir):
 PER_SIGNAL_EVAL_RE = re.compile(r"^eval/(val|test)/.*/eff_(?!med_|min_)[^/]+_[^/]+$")
 
 
-def harvest_experiment_eval(client, exp, outdir):
+def harvest_experiment_eval(client, exp, outdir, allowed=None):
     """Harvest the flat eval/* metrics (one row per run x split x context)."""
     runs = client.search_runs(
         [exp.experiment_id], max_results=5000, order_by=["attributes.start_time ASC"]
     )
+    if allowed is not None:
+        dropped = {r.info.run_name for r in runs} - allowed
+        runs = [r for r in runs if r.info.run_name in allowed]
+        if dropped:
+            print(f"  restricted to catalogue: dropped {len(dropped)} superseded "
+                  f"run name(s), e.g. {sorted(dropped)[:3]}")
     # Per run name, prefer the newest entry with per-signal eval keys (the
     # patched eval-only rerun), else the newest with any eval metrics.
     by_name = {}
@@ -248,6 +286,14 @@ def main():
         "(default); 'eval': flat eval/* metrics incl. test-split per-signal "
         "efficiencies from the eval-only pass.",
     )
+    parser.add_argument(
+        "--restrict-to-catalogues",
+        action="store_true",
+        help="Keep only run names listed for that experiment in "
+        "scripts/*/run*_pareto.sh. Off by default (harvest everything); needed "
+        "wherever a front was re-fetched, since the superseded front's "
+        "retrainings still live in the same MLflow experiment.",
+    )
     args = parser.parse_args()
 
     repo = find_repo_root(Path(__file__).resolve().parent)
@@ -256,17 +302,24 @@ def main():
     outdir.mkdir(parents=True, exist_ok=True)
     bkg_re = re.compile(args.bkg_regex)
 
+    catalogues = catalogue_run_names(repo) if args.restrict_to_catalogues else {}
+
     client = MlflowClient(uri)
     for name in args.experiments:
         exp = client.get_experiment_by_name(name)
         if exp is None:
             print(f"experiment {name!r} not found in {uri}")
             continue
+        allowed = None
+        if args.restrict_to_catalogues:
+            allowed = catalogues.get(name)
+            if not allowed:
+                print(f"  warn: {name} has no catalogue block, harvesting unrestricted")
         print(f"harvesting {name}...")
         if args.mode == "eval":
-            harvest_experiment_eval(client, exp, outdir)
+            harvest_experiment_eval(client, exp, outdir, allowed)
         else:
-            harvest_experiment(client, exp, bkg_re, outdir)
+            harvest_experiment(client, exp, bkg_re, outdir, allowed)
 
 
 if __name__ == "__main__":

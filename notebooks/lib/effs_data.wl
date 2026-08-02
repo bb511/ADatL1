@@ -96,14 +96,18 @@ loadRuns[exp_String] := Module[
 
 frontsOf[runs_Association] := GroupBy[runs, #["strategy"] &];
 
-(* A model whose campaign has not run yet has no harvest CSV (DTE, until its
-   Optuna searches and Pareto retrainings land). Degrade gracefully: note it
-   once and treat the architecture as absent, so every table and plot below
-   simply omits it instead of failing on a ragged row. *)
-rebuttalRuns[exp_String] := rebuttalRuns[exp] = Module[{f},
+(* A model whose campaign has not run yet has no harvest CSVs. Degrade
+   gracefully: note it once and treat the architecture as absent, so every
+   table and plot below simply omits it instead of failing on a ragged row.
+   Both files of the pair are required -- loadRuns imports <exp>_eval.csv
+   unconditionally, so a half-harvested pair would throw, not degrade. The
+   miss is deliberately not memoised: dropping the CSVs into place mid-session
+   is picked up by the next evaluation without re-Get-ing the library. *)
+rebuttalRuns[exp_String] := Module[{f, fe},
    f = FileNameJoin[{paretoEffsDir, exp <> ".csv"}];
-   If[!FileExistsQ[f],
-     Print["note: no harvest CSV for ", exp, " -- omitting this model."];
+   fe = FileNameJoin[{paretoEffsDir, exp <> "_eval.csv"}];
+   If[!FileExistsQ[f] || !FileExistsQ[fe],
+     Print["note: no harvest CSV pair for ", exp, " -- omitting this model."];
      <||>,
-     loadRuns[exp]]];
+     rebuttalRuns[exp] = loadRuns[exp]]];
 dropEmptyModels[groups_Association] := Select[groups, Length[#] > 0 &];

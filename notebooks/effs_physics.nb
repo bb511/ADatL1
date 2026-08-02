@@ -220,7 +220,15 @@ Export[rebuttalOutDir <> \"fronts_realnvp\" <> rebuttalTierSuffix <> \
 \".svg\", frontRowRealNVP, \"SVG\"];
 Export[rebuttalOutDir <> \"fronts_realnvp\" <> rebuttalTierSuffix <> \
 \".pdf\", frontRowRealNVP, \"PDF\"];\
-\>", "Input",ExpressionUUID->"9f21b26e-62a2-45d9-8e84-bf3734ca8835"]
+\>", "Input",ExpressionUUID->"9f21b26e-62a2-45d9-8e84-bf3734ca8835"],
+
+Cell["\<\
+frontRowDTE = modelFrontRow[rebuttalFrontsDir, \"dte\", \"DTE\"]
+Export[rebuttalOutDir <> \"fronts_dte\" <> rebuttalTierSuffix <> \".svg\", \
+frontRowDTE, \"SVG\"];
+Export[rebuttalOutDir <> \"fronts_dte\" <> rebuttalTierSuffix <> \".pdf\", \
+frontRowDTE, \"PDF\"];\
+\>", "Input",ExpressionUUID->"bdc19822-7d67-41d4-a0fd-cd60e397f811"]
 }, Closed]],
 
 Cell[CellGroupData[{

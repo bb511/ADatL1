@@ -65,6 +65,7 @@ wandb = [
 
 [dependency-groups]
 dev = [
+    "faiss-cpu>=1.14.3",
     "ipdb>=0.13.13,<0.14",
     "packaging>=24",
     "pre-commit>=3,<4",

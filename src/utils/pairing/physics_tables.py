@@ -27,6 +27,7 @@ from src.utils.pairing.artifacts import (
     full_pairing_artifact,
     save_full_pairing_artifact,
 )
+from src.utils.pairing.jetclr import encode_in_batches, load_frozen_encoder
 from src.utils.pairing.matching import deterministic_one_to_one_match
 from src.utils.pairing.physics import PhysicsFeatureSchema, PhysicsPairingDescriptor
 from src.utils.pairing.table import (
@@ -38,9 +39,7 @@ from src.utils.pairing.table import (
 )
 from src.utils.pairing.utils import PairingResult, pair_table_dict
 
-DEFAULT_CACHE_RELATIVE = Path(
-    "data_2025E+G/mlready/eminimalTauFET_pdefaultTauFET_default/robust"
-)
+DEFAULT_CACHE_RELATIVE = Path("data_2025E+G/mlready/eminimalTauFET_pdefaultTauFET_default/robust")
 DEFAULT_DATASET_1 = "ZB_run396102"
 DEFAULT_DATASET_2 = "ZB_run398183"
 
@@ -77,6 +76,7 @@ def parse_args() -> argparse.Namespace:
             "flat_physical",
             "physics_summary",
             "typed_sliced_wasserstein",
+            "jetclr",
         ),
         required=True,
     )
@@ -112,6 +112,23 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument("--device", default="cuda:0")
     parser.add_argument("--transform-batch-size", type=int, default=131_072)
+    parser.add_argument("--jetclr-batch-size", type=int, default=8192)
+    parser.add_argument(
+        "--jetclr-checkpoint",
+        type=Path,
+        help="Frozen encoder checkpoint; required when --strategy=jetclr.",
+    )
+    parser.add_argument("--jetclr-config-dir", type=Path, default=Path("configs"))
+    parser.add_argument("--jetclr-config-name", default="train")
+    parser.add_argument(
+        "--jetclr-config-override",
+        action="append",
+        dest="jetclr_config_overrides",
+        help=(
+            "Hydra override used to instantiate the frozen encoder. Repeat as needed; "
+            "defaults to experiment=physics/jetclr_aad_best."
+        ),
+    )
     parser.add_argument("--query-batch-size", type=int, default=256)
     parser.add_argument("--reference-batch-size", type=int, default=262_144)
     parser.add_argument("--audit-events", type=int, default=20_000)
@@ -311,10 +328,9 @@ def _complete_pairing(
 ) -> FullPairingTensors:
     """Deterministically complete a sparse candidate assignment.
 
-    The nearest-neighbour graph handles the overwhelming majority of rows. Any
-    residual unmatched rows are ordered by a fixed, data-derived scalar projection
-    and paired in rank order. This guarantees a total, unique map without allocating
-    an intractable dense N-by-N cost matrix.
+    The nearest-neighbour graph handles the overwhelming majority of rows. Any residual unmatched
+    rows are ordered by a fixed, data-derived scalar projection and paired in rank order. This
+    guarantees a total, unique map without allocating an intractable dense N-by-N cost matrix.
     """
     if pairing.n_pairs == dataset_1.shape[0]:
         return pairing
@@ -365,6 +381,7 @@ def _validate_args(args: argparse.Namespace) -> None:
         "initial_k",
         "max_k",
         "transform_batch_size",
+        "jetclr_batch_size",
         "query_batch_size",
         "reference_batch_size",
         "audit_events",
@@ -379,6 +396,11 @@ def _validate_args(args: argparse.Namespace) -> None:
         raise ValueError("--caliper-quantile must be between zero and one.")
     if str(args.device).startswith("cuda") and not torch.cuda.is_available():
         raise RuntimeError(f"CUDA was requested but is unavailable: {args.device}")
+    if args.strategy == "jetclr":
+        if args.jetclr_checkpoint is None:
+            raise ValueError("--jetclr-checkpoint is required when --strategy=jetclr.")
+        if not args.jetclr_checkpoint.expanduser().is_file():
+            raise FileNotFoundError(f"JetCLR checkpoint does not exist: {args.jetclr_checkpoint}")
 
 
 def main() -> None:
@@ -432,39 +454,93 @@ def main() -> None:
             f"A total one-to-one 0->1 map requires dataset 2 to have at least as many "
             f"rows as dataset 1 ({dataset_2_x.shape[0]} < {dataset_1_x.shape[0]})."
         )
-    descriptor = PhysicsPairingDescriptor(
-        schema,
-        kind=args.strategy,
-        canonicalize_flat=False,
-        fit_max_events=args.fit_events,
-    )
-    # Fit metric scaling symmetrically on equal deterministic prefixes of both
-    # backgrounds. Pairing remains entirely independent of ZeroBias data.
-    fit_each = min(max(1, args.fit_events // 2), dataset_1_x.shape[0], dataset_2_x.shape[0])
-    fit_x = torch.cat((dataset_1_x[:fit_each], dataset_2_x[:fit_each]), dim=0)
-    fit_mask = torch.cat((dataset_1_mask[:fit_each], dataset_2_mask[:fit_each]), dim=0)
-    descriptor.fit(fit_x, fit_mask)
-    del fit_x, fit_mask
-    state = descriptor.state_dict()
-    atomic_torch_save(state, state_path, overwrite=args.overwrite)
-    state_sha256 = sha256_file(state_path)
+    if args.strategy == "jetclr":
+        checkpoint = args.jetclr_checkpoint.expanduser().resolve()
+        config_overrides = args.jetclr_config_overrides or ["experiment=physics/jetclr_aad_best"]
+        torch.use_deterministic_algorithms(True)
+        if torch.cuda.is_available():
+            torch.backends.cuda.matmul.allow_tf32 = False
+            torch.backends.cudnn.allow_tf32 = False
+        encoder = load_frozen_encoder(
+            checkpoint,
+            schema.object_feature_map,
+            config_dir=args.jetclr_config_dir,
+            config_name=args.jetclr_config_name,
+            overrides=config_overrides,
+            device=device,
+        )
+        checkpoint_sha256 = sha256_file(checkpoint)
+        state = {
+            "kind": "jetclr",
+            "checkpoint": str(checkpoint),
+            "checkpoint_sha256": checkpoint_sha256,
+            "config_dir": str(args.jetclr_config_dir),
+            "config_name": args.jetclr_config_name,
+            "config_overrides": config_overrides,
+            "l2_normalized": True,
+            "deterministic_algorithms": True,
+            "tf32": False,
+            "object_feature_map_sha256": sha256_file(cache_root / "object_feature_map.json"),
+        }
+        atomic_torch_save(state, state_path, overwrite=args.overwrite)
+        print(f"Encoding {dataset_1_x.shape[0]:,} background-0 events (JetCLR)...")
+        dataset_1 = encode_in_batches(
+            encoder,
+            dataset_1_x,
+            dataset_1_mask,
+            batch_size=args.jetclr_batch_size,
+            device=device,
+        )
+        print(f"Encoding {dataset_2_x.shape[0]:,} background-1 events (JetCLR)...")
+        dataset_2 = encode_in_batches(
+            encoder,
+            dataset_2_x,
+            dataset_2_mask,
+            batch_size=args.jetclr_batch_size,
+            device=device,
+        )
+        encoder_ckpt = str(checkpoint)
+        fit_events = 0
+        fit_source = "frozen checkpoint; no pairing-time fitting"
+        del encoder
+    else:
+        descriptor = PhysicsPairingDescriptor(
+            schema,
+            kind=args.strategy,
+            canonicalize_flat=False,
+            fit_max_events=args.fit_events,
+        )
+        # Fit metric scaling symmetrically on equal deterministic prefixes of both
+        # backgrounds. Pairing remains entirely independent of anomaly labels.
+        fit_each = min(max(1, args.fit_events // 2), dataset_1_x.shape[0], dataset_2_x.shape[0])
+        fit_x = torch.cat((dataset_1_x[:fit_each], dataset_2_x[:fit_each]), dim=0)
+        fit_mask = torch.cat((dataset_1_mask[:fit_each], dataset_2_mask[:fit_each]), dim=0)
+        descriptor.fit(fit_x, fit_mask)
+        del fit_x, fit_mask
+        state = descriptor.state_dict()
+        atomic_torch_save(state, state_path, overwrite=args.overwrite)
+        checkpoint_sha256 = sha256_file(state_path)
+        print(f"Transforming {dataset_1_x.shape[0]:,} background-0 events ({args.strategy})...")
+        dataset_1 = transform_in_batches(
+            descriptor,
+            dataset_1_x,
+            dataset_1_mask,
+            batch_size=args.transform_batch_size,
+            device=device,
+        )
+        print(f"Transforming {dataset_2_x.shape[0]:,} background-1 events ({args.strategy})...")
+        dataset_2 = transform_in_batches(
+            descriptor,
+            dataset_2_x,
+            dataset_2_mask,
+            batch_size=args.transform_batch_size,
+            device=device,
+        )
+        encoder_ckpt = str(state_path)
+        fit_events = int(args.fit_events)
+        fit_source = "balanced deterministic prefixes of dataset_1 and dataset_2"
 
-    print(f"Transforming {dataset_1_x.shape[0]:,} background-0 events ({args.strategy})...")
-    dataset_1 = transform_in_batches(
-        descriptor,
-        dataset_1_x,
-        dataset_1_mask,
-        batch_size=args.transform_batch_size,
-        device=device,
-    )
-    print(f"Transforming {dataset_2_x.shape[0]:,} background-1 events ({args.strategy})...")
-    dataset_2 = transform_in_batches(
-        descriptor,
-        dataset_2_x,
-        dataset_2_mask,
-        batch_size=args.transform_batch_size,
-        device=device,
-    )
+    state_sha256 = sha256_file(state_path)
 
     print(f"Matching {dataset_1.shape[0]:,} background-0 rows into background 1...")
     pairing, candidates = deterministic_one_to_one_match(
@@ -514,8 +590,8 @@ def main() -> None:
         "n_dataset_2_full_source": int(_load_tensor(dataset_2_folder / "torch_cache.pt").shape[0]),
         "prefix_events": int(dataset_1_x.shape[0]),
         "descriptor_dimension": int(dataset_1.shape[1]),
-        "fit_events": int(args.fit_events),
-        "fit_source": "balanced deterministic prefixes of dataset_1 and dataset_2",
+        "fit_events": fit_events,
+        "fit_source": fit_source,
         "initial_k": int(args.initial_k),
         "final_k": int(candidates.k),
         "max_k": int(args.max_k),
@@ -551,7 +627,7 @@ def main() -> None:
         "n_dataset_2": int(dataset_2_x.shape[0]),
         "n_pairs": int(dataset_1_index.numel()),
         "coverage": 1.0,
-        "encoder_checkpoint_sha256": state_sha256,
+        "encoder_checkpoint_sha256": checkpoint_sha256,
         "source_1_sha256": source_1_sha256,
         "source_2_sha256": source_2_sha256,
         "data_seed": int(source_metadata["seed"]),
@@ -562,7 +638,7 @@ def main() -> None:
         dataset_1=args.dataset_1,
         dataset_2=args.dataset_2,
         split=args.stage,
-        encoder_ckpt=str(state_path),
+        encoder_ckpt=encoder_ckpt,
         metadata=cap_metadata,
     )
     table["map_0_to_1"] = pairing.target_to_reference.clone()
@@ -615,7 +691,7 @@ def main() -> None:
             dataset_1=args.dataset_1,
             dataset_2=args.dataset_2,
             split=args.stage,
-            encoder_ckpt=str(state_path),
+            encoder_ckpt=encoder_ckpt,
             metadata=prefix_metadata,
         )
         prefix_table["map_0_to_1"] = prefix_dataset_2.clone()

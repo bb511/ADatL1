@@ -74,9 +74,13 @@ def collect_closure_representations(
         b = unpack_batch(batch)
         x = torch.flatten(b.x, start_dim=1)
         m = model._flat_mask(b.mask) if hasattr(model, "_flat_mask") else None
-        x1, x2 = model.augment_pair(x)
-        reps1.append(model.encode_flat(x1, m).detach().cpu())
-        reps2.append(model.encode_flat(x2, m).detach().cpu())
+        try:
+            x1, x2, m1, m2 = model.augment_pair(x, m, return_masks=True)
+        except TypeError:
+            x1, x2 = model.augment_pair(x)
+            m1 = m2 = m
+        reps1.append(model.encode_flat(x1, m1).detach().cpu())
+        reps2.append(model.encode_flat(x2, m2).detach().cpu())
         if max_events is not None and sum(t.shape[0] for t in reps1) >= max_events:
             break
 
@@ -94,26 +98,40 @@ def closure_metrics(
     z1: torch.Tensor,
     z2: torch.Tensor,
     ks: tuple[int, ...] = (1, 10),
+    chunk_size: int = 1024,
 ) -> dict[str, float]:
     _validate_embedding_pair(z1, z2, require_equal_rows=True)
     if not ks or any(int(k) <= 0 for k in ks):
         raise ValueError("Closure recall values k must be positive.")
+    if int(chunk_size) <= 0:
+        raise ValueError("Closure chunk_size must be positive.")
     z1 = F.normalize(z1.float(), dim=1)
     z2 = F.normalize(z2.float(), dim=1)
-    sim = z1 @ z2.T
-    labels = torch.arange(z1.shape[0])
-    metrics = {}
-    for k in ks:
-        k_eff = min(int(k), z2.shape[0])
-        topk = torch.topk(sim, k=k_eff, dim=1).indices
-        metrics[f"closure_recall_at_{k}"] = (
-            (topk == labels[:, None]).any(dim=1).float().mean().item()
-        )
+    max_k = min(max(int(k) for k in ks), z2.shape[0])
+    hits = {int(k): 0 for k in ks}
+    true_ranks = []
+    positive_distances = []
 
-    order = torch.argsort(sim, dim=1, descending=True)
-    true_pos = (order == labels[:, None]).nonzero(as_tuple=False)[:, 1] + 1
-    metrics["closure_median_rank"] = true_pos.float().median().item()
-    metrics["closure_mean_pos_distance"] = (1.0 - torch.diagonal(sim, 0)).mean().item()
+    # Computing the full N x N matrix is prohibitive for real L1 validation sets.
+    # Chunking over queries keeps the exact retrieval metrics while bounding memory by
+    # chunk_size x N. The positive rank is one plus the number of strictly closer
+    # candidates; exact ties are extraordinarily unlikely for continuous embeddings.
+    for start in range(0, z1.shape[0], int(chunk_size)):
+        stop = min(start + int(chunk_size), z1.shape[0])
+        sim = z1[start:stop] @ z2.T
+        labels = torch.arange(start, stop, device=sim.device)
+        positive = sim[torch.arange(stop - start, device=sim.device), labels]
+        topk = torch.topk(sim, k=max_k, dim=1).indices
+        for k in hits:
+            k_eff = min(k, max_k)
+            hits[k] += int((topk[:, :k_eff] == labels[:, None]).any(dim=1).sum())
+        true_ranks.append(1 + (sim > positive[:, None]).sum(dim=1).cpu())
+        positive_distances.append((1.0 - positive).cpu())
+
+    metrics = {f"closure_recall_at_{k}": hits[int(k)] / z1.shape[0] for k in ks}
+    ranks = torch.cat(true_ranks)
+    metrics["closure_median_rank"] = ranks.float().median().item()
+    metrics["closure_mean_pos_distance"] = torch.cat(positive_distances).mean().item()
     return metrics
 
 

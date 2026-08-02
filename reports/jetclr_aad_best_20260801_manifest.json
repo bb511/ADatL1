@@ -1,0 +1,32 @@
+{
+  "schema_version": 1,
+  "release_name": "jetclr_aad_best_20260801",
+  "created_at": "2026-08-01",
+  "data_root": "/iopsstor/scratch/cscs/podagiu/data",
+  "selection": {
+    "seed": 456,
+    "completed_epoch": 1,
+    "optimizer_steps": 1530,
+    "scheduler_total_steps": 24480,
+    "selection_frozen_before_test": true,
+    "post_test_selection_performed": false
+  },
+  "provenance": {
+    "stage8_training_commit": "4a130b4",
+    "selected_config_commit": "f09c000",
+    "stage9_sealed_test_commit": "3980422",
+    "stage9_recovery_collector_commit": "8187d59"
+  },
+  "artifacts": {
+    "jetclr_aad_seed456_epoch1.ckpt": "8ce02d89201f130b5c97526ab95ae68badb295928da2f10768b0ea40e9993ecf",
+    "jetclr_aad_seed456_encoder.pt": "7d73823b74445e822e4d97495223b287a90a8559e0a97704380c8636a23db7ec",
+    "jetclr_aad_best.yaml": "4ca6871c46b2ea16964ef8549764370a829b2e8854117733bf1971060f9cfb68",
+    "REPORT.md": "ac18c84f498f3f27f17c07d0966ed9d003123f842d1fdde6d04eedcadd0e0ab4",
+    "results/stage7/summary.json": "efc9125f08a2c6ced13d082f1d549bf553bf430e05c1b18501fd90971625ae62",
+    "results/stage8/summary.json": "084d49d1e867b2ac697ff488871d99baa08488cf2fb1a5e8ffc468fc2d68641f",
+    "results/stage9/summary.json": "f0b8dba9c3f90accd6a40d4ff309e22d7edd11087b01e87b724a61e3ca153fe1",
+    "results/stage9/per_seed_test.csv": "cf7a0596cefb87afcdd0ca4697f9e4462e7206b1c1398e5e1e8d59f405d2baf3",
+    "results/stage9/per_dataset_test.csv": "b0871ce2e6bc4c2ee9dfc6d08badeedbd31aba09f1ceb50c1a967ba9dfbabbc4",
+    "results/stage9/aggregate_test.csv": "f271eaadb5aa2ea62794573ea518d7a2e553050fd5088c06b688e3717a033eb7"
+  }
+}

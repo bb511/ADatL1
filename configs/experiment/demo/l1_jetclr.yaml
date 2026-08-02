@@ -39,12 +39,12 @@ algorithm:
     out_dim: 32
   loss:
     temperature: 0.2
-  feature_blur:
-    prob: 0.20
-    magnitude: 0.05
+  detector_smearing:
+    prob: 0.50
     strength: 0.25
   object_mask:
-    prob: 0.01
+    prob: 0.50
+    object_prob: 0.05
   lorentz_rotation:
     prob: 0.0
 

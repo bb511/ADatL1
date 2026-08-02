@@ -1,0 +1,34 @@
+# @package _global_
+
+defaults:
+  - override /hydra/sweeper: optuna
+  - override /hydra/sweeper/sampler: motpe
+
+optimized_metric_config:
+  main_metric:
+    callback:
+      name: pairing_diagnostics
+      params: {}
+    direction: maximize
+
+hydra:
+  mode: MULTIRUN
+  sweeper:
+    _target_: hydra_plugins.hydra_optuna_sweeper.optuna_sweeper.OptunaSweeper
+    storage: sqlite:///logs/optuna/physics/jetclr_capacity.db
+    study_name: pairing_capacity
+    n_jobs: 1
+    direction: maximize
+    n_trials: 40
+    sampler:
+      n_startup_trials: 10
+      consider_endpoints: true
+      n_ehvi_candidates: 128
+    params:
+      data.batch_size: choice(1024, 2048, 4096)
+      algorithm.model.d_model: choice(64, 128, 256)
+      algorithm.model.out_dim: choice(64, 128, 256)
+      algorithm.model.n_layers: choice(2, 4, 6)
+      algorithm.model.n_heads: choice(4, 8)
+      algorithm.model.dim_feedforward: choice(256, 512, 1024)
+      algorithm.model.dropout: choice(0.0, 0.1)

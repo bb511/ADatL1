@@ -51,7 +51,7 @@ Supported real-data pairing strategies:
   pool. This is the negative control for pairing quality.
 - `encoder_nearest`: train a larger AE on real `uniform_reference` training rows,
   freeze it, build fixed nearest-neighbor pair tables in AE latent space, and run
-  CAP with `pairing_type=precomputed`.
+  CAP with `pairing_type=mapping`.
 
 The intended paper comparison is:
 

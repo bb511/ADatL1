@@ -1,6 +1,10 @@
+from types import SimpleNamespace
+from unittest.mock import Mock
+
 import torch
 
 from src.data.CIFAR10_datamodule import CIFAR10DataModule
+from src.data.L1AD_datamodule import L1ADDataModule, SplitTensors
 from src.data.synthetic import SyntheticL1ADDataModule
 
 
@@ -29,6 +33,58 @@ def test_cifar10_datamodule_smoke() -> None:
 
     val_loaders = dm.val_dataloader()
     assert list(val_loaders) == ["normal", "1", "reference_normal"]
+
+
+def test_l1_validation_setup_resolves_cache_without_preparing_data(tmp_path, monkeypatch) -> None:
+    """Evaluation-only runs must load an existing deterministic mlready cache."""
+    mlready = SimpleNamespace(
+        cache_root_dir=str(tmp_path),
+        name="aad_default",
+        prepare=Mock(side_effect=AssertionError("preprocessing must not run")),
+    )
+    expected = tmp_path / "mlready" / "aad_default" / "standard"
+    expected.mkdir(parents=True)
+    (expected / "FET_norm_params.pkl").touch()
+    normalizer = Mock(name="normalizer")
+    normalizer.name = "standard"
+    normalizer.norm_params = {}
+
+    def import_params(_path, object_name):
+        normalizer.norm_params[object_name] = {"Et": {"shift": 0.0, "scale": 1.0}}
+
+    normalizer.import_norm_params.side_effect = import_params
+    loader = SimpleNamespace(object_feature_map={"FET": {"Et": [0]}})
+    datamodule = L1ADDataModule(
+        zerobias={},
+        signal={},
+        background={},
+        data_extractor=Mock(),
+        data_processor=Mock(),
+        data_normalizer=normalizer,
+        data_mlready=mlready,
+        data_awkward2torch=loader,
+        train_features={},
+        l1_scales={},
+        batch_size=8,
+    )
+    split = SplitTensors(
+        x=torch.zeros(2, 3),
+        mask=torch.ones(2, 3, dtype=torch.bool),
+        l1bit=torch.ones(2, dtype=torch.bool),
+        y=torch.zeros(2),
+    )
+    load_main = Mock(return_value=split)
+    load_aux = Mock(return_value={"signal": split})
+    monkeypatch.setattr(datamodule, "_load_main_split", load_main)
+    monkeypatch.setattr(datamodule, "_load_aux_split", load_aux)
+
+    datamodule.setup("validate")
+
+    assert datamodule.main_cache_folder == expected
+    load_main.assert_called_once_with(expected, "valid", label=0)
+    load_aux.assert_called_once_with(expected, "valid")
+    normalizer.import_norm_params.assert_called_once_with(expected / "FET_norm_params.pkl", "FET")
+    mlready.prepare.assert_not_called()
 
 
 def test_gaussian_subspace_synthetic_l1_datamodule() -> None:

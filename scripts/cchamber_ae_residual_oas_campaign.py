@@ -174,6 +174,7 @@ def _training_command(
         "data.signal_experiments=[]",
         "train=true",
         "test=false",
+        "logger=none",
         "experiment_name=cchamber_ae_residual_oas_confirmatory",
         f"run_name={run_name}",
         f"paths.base_data_dir={design['data_dir']}",

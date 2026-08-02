@@ -6,7 +6,7 @@
 
    Spearman correlation between each run's validation metric and
    its median efficiency, from the CSVs exported by
-   notebooks/get_mlflow_corrs.py into exported_metrics/. *)
+   scripts/get_mlflow_corrs.py into exported_metrics/. *)
 
 ClearAll[ZeroVarianceQ, RunMethodFromName, MetricFilePatternForMethod, EffMedFile, MetricFileForRun, LoadMetricCSV, MergeOnStep, FlipSignQ, SpearmanFromCSVs, ComputeRunCorrelation, ComputeExperimentCorrelations, ComputeAllCorrelations];
 

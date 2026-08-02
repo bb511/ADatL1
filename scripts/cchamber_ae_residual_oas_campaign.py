@@ -289,7 +289,9 @@ def _compose(design: Mapping[str, Any], trajectory: Mapping[str, Any]):
     datamodule = hydra.utils.instantiate(cfg.data)
     datamodule.prepare_data()
     datamodule.setup("test")
-    loaders = datamodule.test_dataloader()
+    all_loaders = datamodule.test_dataloader()
+    loaders = {"normal": all_loaders["normal"]}
+    loaders.update({name: all_loaders[name] for name in design["interventions"]})
     loaders["normal"].loader = datamodule.loader
     return cfg, datamodule, loaders
 

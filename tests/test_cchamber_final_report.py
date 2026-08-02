@@ -44,7 +44,7 @@ def test_retained_physical_contrasts_exclude_removed_cap_strategies() -> None:
     )
     result = cchamber_final_report._add_retained_criterion_contrasts(pivot)
 
-    assert result["cdf_minus_encoder"].item() == pytest.approx(0.1)
+    assert result["encoder_minus_cdf"].item() == pytest.approx(-0.1)
     assert result["encoder_minus_drift"].item() == pytest.approx(0.3)
     assert result["encoder_minus_wasserstein"].item() == pytest.approx(0.1)
 

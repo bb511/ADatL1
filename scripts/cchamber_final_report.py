@@ -433,7 +433,7 @@ def _add_retained_criterion_contrasts(pivot: pd.DataFrame) -> pd.DataFrame:
     if missing:
         raise ValueError(f"Retained-criterion physical synthesis misses strategies {missing}.")
     output = pivot.copy()
-    output["cdf_minus_encoder"] = output["cap_cdf"] - output["cap_encoder_nearest"]
+    output["encoder_minus_cdf"] = output["cap_encoder_nearest"] - output["cap_cdf"]
     output["encoder_minus_drift"] = output["cap_encoder_nearest"] - output["drift"]
     output["encoder_minus_wasserstein"] = output["cap_encoder_nearest"] - output["wasserstein"]
     return output
@@ -466,7 +466,7 @@ def _plot_retained_physical_synthesis(
     for column, model in enumerate(models):
         selected = pivot[pivot["model"] == model]
         top = axes[0, column]
-        cdf_encoder = axes[1, column]
+        encoder_cdf = axes[1, column]
         encoder_drift = axes[2, column]
         encoder_wasserstein = axes[3, column]
         for group, (color, marker, label) in class_style.items():
@@ -489,9 +489,9 @@ def _plot_retained_physical_synthesis(
                 s=24,
                 alpha=0.65,
             )
-            cdf_encoder.scatter(
+            encoder_cdf.scatter(
                 group_rows["biased_energy_distance"],
-                group_rows["cdf_minus_encoder"],
+                group_rows["encoder_minus_cdf"],
                 c=color,
                 marker=marker,
                 s=24,
@@ -524,9 +524,9 @@ def _plot_retained_physical_synthesis(
             fontsize=8,
             bbox={"facecolor": "white", "alpha": 0.75, "edgecolor": "none"},
         )
-        for contrast_axis in (cdf_encoder, encoder_drift, encoder_wasserstein):
+        for contrast_axis in (encoder_cdf, encoder_drift, encoder_wasserstein):
             contrast_axis.axhline(0, color="black", linewidth=0.8)
-        for axis in (top, cdf_encoder, encoder_drift, encoder_wasserstein):
+        for axis in (top, encoder_cdf, encoder_drift, encoder_wasserstein):
             axis.set_xscale("log")
             axis.grid(alpha=0.18)
         top.set_ylim(0, 1.02)
@@ -534,7 +534,7 @@ def _plot_retained_physical_synthesis(
         encoder_wasserstein.set_xlabel("Physical shift (energy distance, log scale)")
         if column == 0:
             top.set_ylabel("AUPRC")
-            cdf_encoder.set_ylabel("CDF CAP − encoder CAP")
+            encoder_cdf.set_ylabel("Encoder CAP − CDF CAP")
             encoder_drift.set_ylabel("Encoder CAP − marginal drift")
             encoder_wasserstein.set_ylabel("Encoder CAP − Wasserstein")
     handles, labels = axes[0, 0].get_legend_handles_labels()

@@ -12,11 +12,12 @@ seed (`42`), concatenation order, and split boundaries as `L1DataMLReady`.
 
 ## Pairing controls
 
-Three deterministic physics representations are available:
+Four deterministic representations are available:
 
 - `flat_physical`: slot-preserving physical data-space distance with periodic phi.
 - `physics_summary`: permutation- and rotation-invariant event summaries.
 - `typed_sliced_wasserstein`: typed energy-flow optimal-transport summaries.
+- `jetclr`: cosine-equivalent distance between normalized frozen-encoder embeddings.
 
 Each artifact contains a dense tensor with the contract:
 
@@ -50,6 +51,10 @@ Run the same command with `--stage test`. Repeat for `flat_physical` and
 `typed_sliced_wasserstein`. Writers refuse accidental replacement unless
 `--overwrite` is supplied.
 
+For the learned representation, use the same command and row count with
+`--strategy jetclr --jetclr-checkpoint /path/to/selected.ckpt`. The encoder runs
+directly on the exact ordered CAP cache rows; it does not use a full-run lookup.
+
 `events` must equal the rows CAP collects from each named stream. With the supplied
 experiment this is `data.batch_size * data.max_val_batches = 16384 * 10`.
 
@@ -68,6 +73,7 @@ physics_pairing:
   strategy: physics_summary
   # strategy: flat_physical
   # strategy: typed_sliced_wasserstein
+  # strategy: jetclr
 ```
 
 The callback uses:

@@ -1,9 +1,8 @@
-"""Build deterministic physics-control pairings directly from L1 tensor caches.
+"""Build deterministic background-to-background pairings from L1 tensor caches.
 
-This producer intentionally does not instantiate the L1 datamodule: doing so loads
-every auxiliary signal sample even though a pairing table needs only ZeroBias and
-one background simulation.  It reads the exact ordered caches that CAP later sees,
-fits descriptor scaling on ZeroBias *training* data, and records source hashes.
+The producer reads the exact ordered auxiliary prefixes that CAP later sees.  Dataset
+1 is background 0 and dataset 2 is background 1; the emitted dense map therefore has
+the literal contract ``map_0_to_1[i] == j``.
 """
 
 from __future__ import annotations
@@ -24,6 +23,7 @@ from sklearn.metrics import roc_auc_score
 from sklearn.model_selection import train_test_split
 
 from src.utils.pairing.artifacts import (
+    FullPairingTensors,
     full_pairing_artifact,
     save_full_pairing_artifact,
 )
@@ -38,8 +38,11 @@ from src.utils.pairing.table import (
 )
 from src.utils.pairing.utils import PairingResult, pair_table_dict
 
-DEFAULT_CACHE_RELATIVE = Path("data_2025E+G/mlready/eminimalTauFET_pdefaultTauFET_default/robust")
-DEFAULT_TARGET_DATASET = "SingleNeutrino_E-10-gun"
+DEFAULT_CACHE_RELATIVE = Path(
+    "data_2025E+G/mlready/eminimalTauFET_pdefaultTauFET_default/robust"
+)
+DEFAULT_DATASET_1 = "ZB_run396102"
+DEFAULT_DATASET_2 = "ZB_run398183"
 
 
 def parse_args() -> argparse.Namespace:
@@ -52,7 +55,22 @@ def parse_args() -> argparse.Namespace:
         help="Robust mlready cache containing train/valid/test and aux/.",
     )
     parser.add_argument("--stage", choices=("validate", "test"), required=True)
-    parser.add_argument("--target-dataset", default=DEFAULT_TARGET_DATASET)
+    parser.add_argument(
+        "--source-metadata-dir",
+        type=Path,
+        required=True,
+        help="Directory containing zerobias_sources.json and split source-ID arrays.",
+    )
+    parser.add_argument(
+        "--dataset-1",
+        default=DEFAULT_DATASET_1,
+        help="Background 0; the domain of the emitted dense map.",
+    )
+    parser.add_argument(
+        "--dataset-2",
+        default=DEFAULT_DATASET_2,
+        help="Background 1; the codomain of the emitted dense map.",
+    )
     parser.add_argument(
         "--strategy",
         choices=(
@@ -64,25 +82,34 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument("--out-dir", type=Path, required=True)
     parser.add_argument(
+        "--events",
         "--max-target-events",
+        dest="events",
         type=int,
         default=81_920,
-        help="Ordered target prefix collected by the configured CAP experiment.",
+        help="Ordered prefix from both auxiliary datasets collected by CAP.",
     )
     parser.add_argument(
         "--cap-prefix-events",
         type=int,
         nargs="*",
-        default=(81_920, 163_840),
+        default=(),
         help="Also materialize CAP tables for these common runtime prefixes.",
     )
     parser.add_argument("--fit-events", type=int, default=200_000)
-    parser.add_argument("--closure-events", type=int, default=10_000)
     parser.add_argument("--initial-k", type=int, default=64)
     parser.add_argument("--max-k", type=int, default=256)
     parser.add_argument("--caliper-quantile", type=float, default=0.99)
-    parser.add_argument("--no-caliper", action="store_true")
-    parser.add_argument("--backend", choices=("auto", "faiss", "torch"), default="auto")
+    parser.add_argument(
+        "--use-caliper",
+        action="store_true",
+        help="Compute a diagnostic caliper. It never removes rows from the CAP map.",
+    )
+    parser.add_argument(
+        "--backend",
+        choices=("auto", "faiss", "faiss_hnsw", "torch"),
+        default="auto",
+    )
     parser.add_argument("--device", default="cuda:0")
     parser.add_argument("--transform-batch-size", type=int, default=131_072)
     parser.add_argument("--query-batch-size", type=int, default=256)
@@ -109,14 +136,36 @@ def load_split(
     *,
     dataset: str | None = None,
     limit: int | None = None,
+    source_metadata_dir: Path | None = None,
 ) -> tuple[torch.Tensor, torch.Tensor, Path]:
-    """Memory-map one ordered ZeroBias or auxiliary split."""
+    """Memory-map one ordered main or auxiliary split."""
     split_name = "valid" if split == "validate" else split
-    folder = (
-        cache_root / split_name if dataset is None else cache_root / "aux" / dataset / split_name
-    )
-    x = _load_tensor(folder / "torch_cache.pt", limit=limit)
-    mask = _load_tensor(folder / "torch_mask.pt", limit=limit)
+    folder = cache_root / split_name
+    source_root = source_metadata_dir or cache_root
+    source_metadata = source_root / "zerobias_sources.json"
+    if dataset is not None and source_metadata.is_file():
+        with source_metadata.open(encoding="utf-8") as handle:
+            source_names = json.load(handle)["sources"]
+        if dataset in source_names:
+            source_id = torch.from_numpy(
+                np.load(source_root / split_name / "zerobias_source_id.npy")
+            )
+            selected = torch.nonzero(
+                source_id == source_names.index(dataset), as_tuple=False
+            ).flatten()
+            if limit is not None:
+                selected = selected[: int(limit)]
+            x = _load_tensor(folder / "torch_cache.pt")[selected]
+            mask = _load_tensor(folder / "torch_mask.pt")[selected]
+        else:
+            folder = cache_root / "aux" / dataset / split_name
+            x = _load_tensor(folder / "torch_cache.pt", limit=limit)
+            mask = _load_tensor(folder / "torch_mask.pt", limit=limit)
+    else:
+        if dataset is not None:
+            folder = cache_root / "aux" / dataset / split_name
+        x = _load_tensor(folder / "torch_cache.pt", limit=limit)
+        mask = _load_tensor(folder / "torch_mask.pt", limit=limit)
     if x.shape != mask.shape:
         raise ValueError(f"Data/mask shape mismatch under {folder}: {x.shape} vs {mask.shape}.")
     return x, mask, folder
@@ -253,12 +302,66 @@ def balance_diagnostics(
     }
 
 
+def _complete_pairing(
+    pairing: FullPairingTensors,
+    dataset_1: torch.Tensor,
+    dataset_2: torch.Tensor,
+    *,
+    residual_rank: int,
+) -> FullPairingTensors:
+    """Deterministically complete a sparse candidate assignment.
+
+    The nearest-neighbour graph handles the overwhelming majority of rows. Any
+    residual unmatched rows are ordered by a fixed, data-derived scalar projection
+    and paired in rank order. This guarantees a total, unique map without allocating
+    an intractable dense N-by-N cost matrix.
+    """
+    if pairing.n_pairs == dataset_1.shape[0]:
+        return pairing
+    missing_1 = torch.nonzero(~pairing.valid, as_tuple=False).flatten()
+    missing_2 = torch.nonzero(pairing.reference_to_target < 0, as_tuple=False).flatten()
+    if missing_2.numel() < missing_1.numel():
+        raise ValueError("Not enough unused dataset-2 rows to complete the one-to-one map.")
+
+    dimension = dataset_1.shape[1]
+    weights = torch.linspace(1.0, 2.0, dimension, dtype=torch.float64)
+    weights /= torch.linalg.vector_norm(weights)
+    score_1 = dataset_1[missing_1].double() @ weights
+    score_2 = dataset_2[missing_2].double() @ weights
+    order_1 = torch.argsort(score_1, stable=True)
+    order_2 = torch.argsort(score_2, stable=True)[: missing_1.numel()]
+    rows_1 = missing_1[order_1]
+    rows_2 = missing_2[order_2]
+
+    target_to_reference = pairing.target_to_reference.clone()
+    reference_to_target = pairing.reference_to_target.clone()
+    distance = pairing.distance.clone()
+    valid = pairing.valid.clone()
+    candidate_rank = pairing.candidate_rank.clone()
+    target_to_reference[rows_1] = rows_2
+    reference_to_target[rows_2] = rows_1
+    distance[rows_1] = torch.linalg.vector_norm(
+        dataset_1[rows_1].float() - dataset_2[rows_2].float(), dim=1
+    )
+    valid[rows_1] = True
+    candidate_rank[rows_1] = int(residual_rank)
+    completed = FullPairingTensors(
+        target_to_reference=target_to_reference,
+        reference_to_target=reference_to_target,
+        distance=distance,
+        valid=valid,
+        caliper_valid=valid.clone(),
+        candidate_rank=candidate_rank,
+    )
+    completed.validate()
+    return completed
+
+
 def _validate_args(args: argparse.Namespace) -> None:
     """Reject inconsistent or unsafe production settings."""
     for name in (
-        "max_target_events",
+        "events",
         "fit_events",
-        "closure_events",
         "initial_k",
         "max_k",
         "transform_batch_size",
@@ -283,18 +386,22 @@ def main() -> None:
     args = parse_args()
     _validate_args(args)
     cache_root = args.cache_root.expanduser().resolve()
+    source_metadata_dir = args.source_metadata_dir.expanduser().resolve()
+    source_metadata_path = source_metadata_dir / "zerobias_sources.json"
+    with source_metadata_path.open(encoding="utf-8") as handle:
+        source_metadata = json.load(handle)
     out_dir = args.out_dir.expanduser().resolve()
     out_dir.mkdir(parents=True, exist_ok=True)
     stem = f"{args.stage}_{args.strategy}"
     state_path = out_dir / f"{stem}_descriptor_state.pt"
     full_path = out_dir / f"{stem}_full.pt"
-    cap_path = out_dir / f"{stem}_cap.pt"
+    cap_path = out_dir / f"{stem}_cap_n{int(args.events)}.pt"
     diagnostics_path = out_dir / f"{stem}_diagnostics.json"
     candidate_path = out_dir / f"{stem}_candidates.pt"
     prefix_paths = [
         out_dir / f"{stem}_cap_n{int(n)}.pt"
         for n in sorted(set(args.cap_prefix_events))
-        if int(n) < args.max_target_events
+        if int(n) < args.events
     ]
     if not args.overwrite:
         outputs = [state_path, full_path, cap_path, diagnostics_path, *prefix_paths]
@@ -306,114 +413,115 @@ def main() -> None:
 
     device = torch.device(args.device)
     schema = load_physics_schema(cache_root)
-    train_x, train_mask, _ = load_split(cache_root, "train")
-    reference_x, reference_mask, reference_folder = load_split(cache_root, args.stage)
-    target_x, target_mask, target_folder = load_split(
+    dataset_1_x, dataset_1_mask, dataset_1_folder = load_split(
         cache_root,
         args.stage,
-        dataset=args.target_dataset,
-        limit=args.max_target_events,
+        dataset=args.dataset_1,
+        limit=args.events,
+        source_metadata_dir=source_metadata_dir,
     )
+    dataset_2_x, dataset_2_mask, dataset_2_folder = load_split(
+        cache_root,
+        args.stage,
+        dataset=args.dataset_2,
+        limit=args.events,
+        source_metadata_dir=source_metadata_dir,
+    )
+    if dataset_2_x.shape[0] < dataset_1_x.shape[0]:
+        raise ValueError(
+            f"A total one-to-one 0->1 map requires dataset 2 to have at least as many "
+            f"rows as dataset 1 ({dataset_2_x.shape[0]} < {dataset_1_x.shape[0]})."
+        )
     descriptor = PhysicsPairingDescriptor(
         schema,
         kind=args.strategy,
         canonicalize_flat=False,
         fit_max_events=args.fit_events,
     )
-    descriptor.fit(train_x, train_mask)
+    # Fit metric scaling symmetrically on equal deterministic prefixes of both
+    # backgrounds. Pairing remains entirely independent of ZeroBias data.
+    fit_each = min(max(1, args.fit_events // 2), dataset_1_x.shape[0], dataset_2_x.shape[0])
+    fit_x = torch.cat((dataset_1_x[:fit_each], dataset_2_x[:fit_each]), dim=0)
+    fit_mask = torch.cat((dataset_1_mask[:fit_each], dataset_2_mask[:fit_each]), dim=0)
+    descriptor.fit(fit_x, fit_mask)
+    del fit_x, fit_mask
     state = descriptor.state_dict()
     atomic_torch_save(state, state_path, overwrite=args.overwrite)
     state_sha256 = sha256_file(state_path)
 
-    print(f"Transforming {reference_x.shape[0]:,} reference events ({args.strategy})...")
-    reference = transform_in_batches(
+    print(f"Transforming {dataset_1_x.shape[0]:,} background-0 events ({args.strategy})...")
+    dataset_1 = transform_in_batches(
         descriptor,
-        reference_x,
-        reference_mask,
+        dataset_1_x,
+        dataset_1_mask,
         batch_size=args.transform_batch_size,
         device=device,
     )
-    print(f"Transforming {target_x.shape[0]:,} target events ({args.strategy})...")
-    target = transform_in_batches(
+    print(f"Transforming {dataset_2_x.shape[0]:,} background-1 events ({args.strategy})...")
+    dataset_2 = transform_in_batches(
         descriptor,
-        target_x,
-        target_mask,
+        dataset_2_x,
+        dataset_2_mask,
         batch_size=args.transform_batch_size,
         device=device,
     )
 
-    closure_n = min(args.closure_events, train_x.shape[0])
-    closure = transform_in_batches(
-        descriptor,
-        train_x[:closure_n],
-        train_mask[:closure_n],
-        batch_size=args.transform_batch_size,
-        device=device,
-    )
-    print(f"Matching {target.shape[0]:,} targets into {reference.shape[0]:,} references...")
+    print(f"Matching {dataset_1.shape[0]:,} background-0 rows into background 1...")
     pairing, candidates = deterministic_one_to_one_match(
-        target.to(device),
-        reference.to(device),
+        dataset_1.to(device),
+        dataset_2.to(device),
         initial_k=args.initial_k,
         max_k=args.max_k,
         backend=args.backend,
         query_batch_size=args.query_batch_size,
         reference_batch_size=args.reference_batch_size,
     )
-    if pairing.n_pairs != target.shape[0]:
-        print(
-            f"Candidate graph assigned {pairing.n_pairs}/{target.shape[0]} targets; "
-            "unassigned target-aligned entries remain explicit (-1/inf/False)."
-        )
+    pairing = _complete_pairing(pairing, dataset_1, dataset_2, residual_rank=candidates.k + 1)
+    if pairing.n_pairs != dataset_1.shape[0]:
+        raise RuntimeError("Failed to construct a total background-0 to background-1 map.")
 
     caliper = None
     closure_quantiles: dict[str, float] = {}
-    if not args.no_caliper:
-        closure_pairing, _ = deterministic_one_to_one_match(
-            closure.to(device),
-            reference.to(device),
-            initial_k=args.initial_k,
-            max_k=args.max_k,
-            backend=args.backend,
-            query_batch_size=args.query_batch_size,
-            reference_batch_size=args.reference_batch_size,
-        )
-        closure_distance = closure_pairing.distance[closure_pairing.valid]
-        caliper = float(torch.quantile(closure_distance, args.caliper_quantile))
+    if args.use_caliper:
+        assigned_distance = pairing.distance[pairing.valid]
+        caliper = float(torch.quantile(assigned_distance, args.caliper_quantile))
         closure_quantiles = {
-            "closure_distance_q50": float(torch.quantile(closure_distance, 0.50)),
-            "closure_distance_q95": float(torch.quantile(closure_distance, 0.95)),
-            "closure_distance_q99": float(torch.quantile(closure_distance, 0.99)),
+            "pair_distance_q50": float(torch.quantile(assigned_distance, 0.50)),
+            "pair_distance_q95": float(torch.quantile(assigned_distance, 0.95)),
+            "pair_distance_q99": float(torch.quantile(assigned_distance, 0.99)),
         }
     caliper_valid = pairing.valid.clone()
     if caliper is not None:
         caliper_valid &= pairing.distance <= caliper
 
-    target_index = torch.nonzero(caliper_valid, as_tuple=False).flatten()
-    reference_index = pairing.target_to_reference[target_index]
-    source_reference_sha256 = sha256_tensor(reference_x.flatten(start_dim=1))
-    source_target_sha256 = sha256_tensor(target_x.flatten(start_dim=1))
+    dataset_1_index = torch.arange(dataset_1_x.shape[0], dtype=torch.long)
+    dataset_2_index = pairing.target_to_reference
+    source_1_sha256 = sha256_tensor(dataset_1_x.flatten(start_dim=1))
+    source_2_sha256 = sha256_tensor(dataset_2_x.flatten(start_dim=1))
     common_metadata: dict[str, Any] = {
         "producer": "src.utils.pairing.physics_tables",
         "strategy": args.strategy,
         "descriptor_state_sha256": state_sha256,
         "descriptor_state_semantic_sha256": _state_digest(state),
         "schema_signature": schema.signature(),
-        "source_reference_sha256": source_reference_sha256,
-        "source_target_sha256": source_target_sha256,
-        "source_reference_folder": str(reference_folder),
-        "source_target_folder": str(target_folder),
-        "n_target_full_source": int(_load_tensor(target_folder / "torch_cache.pt").shape[0]),
-        "target_prefix_events": int(target_x.shape[0]),
-        "descriptor_dimension": int(target.shape[1]),
+        "source_1_sha256": source_1_sha256,
+        "source_2_sha256": source_2_sha256,
+        "source_1_folder": str(dataset_1_folder),
+        "source_2_folder": str(dataset_2_folder),
+        "source_metadata_path": str(source_metadata_path),
+        "source_metadata_sha256": sha256_file(source_metadata_path),
+        "n_dataset_1_full_source": int(_load_tensor(dataset_1_folder / "torch_cache.pt").shape[0]),
+        "n_dataset_2_full_source": int(_load_tensor(dataset_2_folder / "torch_cache.pt").shape[0]),
+        "prefix_events": int(dataset_1_x.shape[0]),
+        "descriptor_dimension": int(dataset_1.shape[1]),
         "fit_events": int(args.fit_events),
-        "fit_source": str(cache_root / "train"),
+        "fit_source": "balanced deterministic prefixes of dataset_1 and dataset_2",
         "initial_k": int(args.initial_k),
         "final_k": int(candidates.k),
         "max_k": int(args.max_k),
         "search_backend": args.backend,
         "caliper": caliper,
-        "caliper_quantile": None if args.no_caliper else float(args.caliper_quantile),
+        "caliper_quantile": float(args.caliper_quantile) if args.use_caliper else None,
         "caliper_accepted": int(caliper_valid.sum()),
         "caliper_coverage": float(caliper_valid.float().mean()),
         **closure_quantiles,
@@ -422,8 +530,8 @@ def main() -> None:
     accepted_pairing = replace(pairing, caliper_valid=caliper_valid)
     full = full_pairing_artifact(
         accepted_pairing,
-        target_dataset=args.target_dataset,
-        reference_dataset="normal",
+        target_dataset=args.dataset_1,
+        reference_dataset=args.dataset_2,
         split=args.stage,
         strategy=args.strategy,
         metadata=common_metadata,
@@ -431,76 +539,94 @@ def main() -> None:
     save_full_pairing_artifact(full, full_path, overwrite=args.overwrite)
 
     pairs = PairingResult(
-        idx_1=reference_index,
-        idx_2=target_index,
-        distance=pairing.distance[target_index],
-        rank_1_to_2=torch.zeros(target_index.numel(), dtype=torch.long),
-        rank_2_to_1=pairing.candidate_rank[target_index],
+        idx_1=dataset_1_index,
+        idx_2=dataset_2_index,
+        distance=pairing.distance,
+        rank_1_to_2=pairing.candidate_rank,
+        rank_2_to_1=torch.zeros(dataset_1_index.numel(), dtype=torch.long),
     )
     cap_metadata = {
         **common_metadata,
-        "n_dataset_1": int(reference_x.shape[0]),
-        "n_dataset_2": int(target_x.shape[0]),
-        "n_pairs": int(target_index.numel()),
-        "coverage": float(target_index.numel() / target_x.shape[0]),
+        "n_dataset_1": int(dataset_1_x.shape[0]),
+        "n_dataset_2": int(dataset_2_x.shape[0]),
+        "n_pairs": int(dataset_1_index.numel()),
+        "coverage": 1.0,
         "encoder_checkpoint_sha256": state_sha256,
-        "source_1_sha256": source_reference_sha256,
-        "source_2_sha256": source_target_sha256,
-        "data_seed": 123,
-        "pairing_orientation": "dataset_2_target_to_dataset_1_reference",
+        "source_1_sha256": source_1_sha256,
+        "source_2_sha256": source_2_sha256,
+        "data_seed": int(source_metadata["seed"]),
+        "pairing_orientation": "dataset_1_background0_to_dataset_2_background1",
     }
     table = pair_table_dict(
         pairs,
-        dataset_1="normal",
-        dataset_2=args.target_dataset,
+        dataset_1=args.dataset_1,
+        dataset_2=args.dataset_2,
         split=args.stage,
         encoder_ckpt=str(state_path),
         metadata=cap_metadata,
     )
+    table["map_0_to_1"] = pairing.target_to_reference.clone()
     validate_pair_table(table)
     atomic_torch_save(table, cap_path, overwrite=args.overwrite)
 
     prefix_tables: dict[str, dict[str, Any]] = {}
     for prefix in sorted({int(n) for n in args.cap_prefix_events}):
-        if prefix >= target_x.shape[0]:
+        if prefix >= dataset_1_x.shape[0]:
             continue
-        prefix_valid = caliper_valid[:prefix]
-        prefix_target = torch.nonzero(prefix_valid, as_tuple=False).flatten()
-        prefix_reference = pairing.target_to_reference[:prefix][prefix_target]
-        prefix_source_sha256 = sha256_tensor(target_x[:prefix].flatten(start_dim=1))
+        prefix_pairing, prefix_candidates = deterministic_one_to_one_match(
+            dataset_1[:prefix].to(device),
+            dataset_2[:prefix].to(device),
+            initial_k=args.initial_k,
+            max_k=args.max_k,
+            backend=args.backend,
+            query_batch_size=args.query_batch_size,
+            reference_batch_size=args.reference_batch_size,
+        )
+        prefix_pairing = _complete_pairing(
+            prefix_pairing,
+            dataset_1[:prefix],
+            dataset_2[:prefix],
+            residual_rank=prefix_candidates.k + 1,
+        )
+        prefix_dataset_1 = torch.arange(prefix, dtype=torch.long)
+        prefix_dataset_2 = prefix_pairing.target_to_reference
+        prefix_source_1_sha256 = sha256_tensor(dataset_1_x[:prefix].flatten(start_dim=1))
+        prefix_source_2_sha256 = sha256_tensor(dataset_2_x[:prefix].flatten(start_dim=1))
         prefix_result = PairingResult(
-            idx_1=prefix_reference,
-            idx_2=prefix_target,
-            distance=pairing.distance[:prefix][prefix_target],
-            rank_1_to_2=torch.zeros(prefix_target.numel(), dtype=torch.long),
-            rank_2_to_1=pairing.candidate_rank[:prefix][prefix_target],
+            idx_1=prefix_dataset_1,
+            idx_2=prefix_dataset_2,
+            distance=prefix_pairing.distance,
+            rank_1_to_2=prefix_pairing.candidate_rank,
+            rank_2_to_1=torch.zeros(prefix, dtype=torch.long),
         )
         prefix_metadata = {
             **cap_metadata,
+            "n_dataset_1": prefix,
             "n_dataset_2": prefix,
-            "n_pairs": int(prefix_target.numel()),
-            "coverage": float(prefix_target.numel() / prefix),
-            "source_2_sha256": prefix_source_sha256,
-            "source_target_sha256": prefix_source_sha256,
-            "target_prefix_events": prefix,
+            "n_pairs": prefix,
+            "coverage": 1.0,
+            "source_1_sha256": prefix_source_1_sha256,
+            "source_2_sha256": prefix_source_2_sha256,
+            "prefix_events": prefix,
             "parent_full_artifact": str(full_path),
         }
         prefix_table = pair_table_dict(
             prefix_result,
-            dataset_1="normal",
-            dataset_2=args.target_dataset,
+            dataset_1=args.dataset_1,
+            dataset_2=args.dataset_2,
             split=args.stage,
             encoder_ckpt=str(state_path),
             metadata=prefix_metadata,
         )
+        prefix_table["map_0_to_1"] = prefix_dataset_2.clone()
         validate_pair_table(prefix_table)
         prefix_path = out_dir / f"{stem}_cap_n{prefix}.pt"
         atomic_torch_save(prefix_table, prefix_path, overwrite=args.overwrite)
         prefix_tables[str(prefix)] = {
             "path": str(prefix_path),
             "sha256": sha256_file(prefix_path),
-            "n_pairs": int(prefix_target.numel()),
-            "coverage": float(prefix_target.numel() / prefix),
+            "n_pairs": prefix,
+            "coverage": 1.0,
         }
 
     if args.save_candidates:
@@ -508,8 +634,8 @@ def main() -> None:
             {
                 "squared_distance": candidates.squared_distance,
                 "reference_index": candidates.reference_index,
-                "target_dataset": args.target_dataset,
-                "reference_dataset": "normal",
+                "target_dataset": args.dataset_1,
+                "reference_dataset": args.dataset_2,
                 "split": args.stage,
                 "strategy": args.strategy,
                 "descriptor_state_sha256": state_sha256,
@@ -536,8 +662,8 @@ def main() -> None:
         "cap_prefix_tables": prefix_tables,
         **closure_quantiles,
         **balance_diagnostics(
-            target,
-            reference,
+            dataset_1,
+            dataset_2,
             pairing.target_to_reference,
             maximum=args.audit_events,
         ),

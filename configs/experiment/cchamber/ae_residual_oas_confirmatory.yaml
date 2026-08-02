@@ -1,0 +1,13 @@
+# @package _global_
+
+defaults:
+  - /experiment/cchamber/ae_candidate_rank_audit
+
+# Confirmatory AE trajectory: the CDF branch alone uses covariance-aware
+# reconstruction residuals fitted exclusively on each epoch's training normals.
+# All other branches remain scalar-MSE controls on the identical trajectory.
+tags: ["causal_chamber", "ae_residual_oas", "confirmatory", "label_free"]
+
+callbacks:
+  cap_cdf:
+    _target_: src.callbacks.cap.ResidualOASCAPCallback

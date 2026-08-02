@@ -1,5 +1,6 @@
 import torch
 from pytorch_lightning import Callback
+from sklearn.covariance import OAS
 
 from src.callbacks.metrics.cap.binary import get_pairing_fn
 from src.callbacks.metrics.cap.metric import ApproximationCapacity
@@ -242,3 +243,80 @@ class CAPCallback(Callback):
             self.cap_ema = float(cap)
         else:
             self.cap_ema = self.beta * self.cap_ema + (1 - self.beta) * float(cap)
+
+
+class ResidualOASCAPCallback(CAPCallback):
+    """Compute CAP from train-normal-fitted AE residual Mahalanobis scores.
+
+    The covariance model is re-fitted from the complete training epoch before
+    validation.  Intervention labels and validation scores never enter the fit.
+    This callback is intentionally separate from ``CAPCallback`` so that
+    selecting this score is an explicit experiment configuration choice.
+    """
+
+    def __init__(self, *args, **kwargs):
+        """Initialize CAP configuration and empty epoch-local OAS state."""
+        super().__init__(*args, **kwargs)
+        self._oas_location = None
+        self._oas_precision = None
+
+    def on_validation_epoch_start(self, trainer, pl_module):
+        """Fit OAS with final epoch weights, then initialize CAP collection."""
+        super().on_validation_epoch_start(trainer, pl_module)
+        if trainer.sanity_checking:
+            return
+        if int(getattr(trainer, "world_size", 1)) != 1:
+            raise RuntimeError("ResidualOASCAPCallback currently requires a single process.")
+        residual_chunks = []
+        with torch.no_grad():
+            for batch in trainer.train_dataloader:
+                x = torch.flatten(unpack_batch(batch).x, start_dim=1).to(pl_module.device)
+                _, reconstruction = pl_module.forward(x)
+                if x.shape != reconstruction.shape:
+                    raise ValueError(
+                        "Residual OAS CAP requires input and reconstruction with equal shapes, "
+                        f"got {tuple(x.shape)} and {tuple(reconstruction.shape)}."
+                    )
+                residual_chunks.append((x - reconstruction).double().cpu())
+        if not residual_chunks:
+            raise RuntimeError("Residual OAS CAP received an empty training loader.")
+        residuals = torch.cat(residual_chunks, dim=0).numpy()
+        estimator = OAS(store_precision=True, assume_centered=False).fit(residuals)
+        self._oas_location = torch.from_numpy(estimator.location_).double()
+        self._oas_precision = torch.from_numpy(estimator.precision_).double()
+
+    def on_validation_batch_end(
+        self, trainer, pl_module, outputs, batch, batch_idx, dataloader_idx=0
+    ):
+        """Score validation residuals with the train-fitted OAS precision."""
+        if trainer.sanity_checking:
+            return
+        if self._oas_location is None or self._oas_precision is None:
+            raise RuntimeError("Residual OAS state was not fitted before validation.")
+
+        dset_name = list(trainer.val_dataloaders.keys())[dataloader_idx]
+        if dset_name not in (self.dataset_1_name, self.dataset_2_name):
+            return
+        x = torch.flatten(unpack_batch(batch).x, start_dim=1).detach().cpu().double()
+        reconstruction = (
+            torch.flatten(outputs["reconstructed_data"], start_dim=1).detach().cpu().double()
+        )
+        residual = x - reconstruction
+        centered = residual - self._oas_location
+        score = (
+            torch.einsum("bi,ij,bj->b", centered, self._oas_precision, centered)
+            / residual.shape[1]
+        )
+
+        if dset_name == self.dataset_1_name:
+            self.dataset_1_scores.append(score.to(self.device))
+            self.dataset_1_inputs.append(x)
+        else:
+            self.dataset_2_scores.append(score.to(self.device))
+            self.dataset_2_inputs.append(x)
+
+    def on_validation_epoch_end(self, trainer, pl_module):
+        """Skip sanity-check data or compute the usual CAP epoch summary."""
+        if trainer.sanity_checking:
+            return
+        super().on_validation_epoch_end(trainer, pl_module)

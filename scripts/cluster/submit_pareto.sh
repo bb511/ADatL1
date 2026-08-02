@@ -9,9 +9,9 @@
 # after all jobs are submitted. Driver logs land in logs/submit/<file-stem>/.
 #
 # Usage (from the repository root, on clariden):
-#   bash scripts/submit_pareto.sh scripts/physics/runae_pareto.sh \
+#   bash scripts/cluster/submit_pareto.sh scripts/physics/runae_pareto.sh \
 #       paths.raw_data_dir=/path/to/adl1t_data/parquet_files
-#   bash scripts/submit_pareto.sh --only consistency scripts/physics/runae_pareto.sh \
+#   bash scripts/cluster/submit_pareto.sh --only consistency scripts/physics/runae_pareto.sh \
 #       paths.raw_data_dir=/path/to/adl1t_data/parquet_files
 #
 #   --dry-run       print the full commands without submitting anything
@@ -25,6 +25,9 @@
 # usually not what you want -- at 12 h per job, re-running the four strategies
 # that are already trained is an expensive accident. Hence --only.
 set -eu
+
+# shellcheck source=scripts/cluster/lib.sh
+. "$(dirname "${BASH_SOURCE[0]}")/lib.sh"
 
 TIMEOUT_MIN=720  # slurm time limit per job; the launcher default (60) is too short
 
@@ -44,59 +47,22 @@ file=${1:?usage: submit_pareto.sh [--dry-run] [--only sel] <run*_pareto.sh> [ove
 shift || true
 extra="$*"
 
+require_repo_root
 [ -f "$file" ] || { echo "no such file: $file" >&2; exit 1; }
 
-extract_cmds() {
-    awk '
-        /^# python3 src\/train\.py/ { collecting = 1; cmd = ""; next }
-        collecting {
-            line = $0
-            sub(/^# ?/, "", line)
-            gsub(/^[ \t]+|[ \t]+$/, "", line)
-            ends = (line ~ /\\$/)
-            sub(/[ \t]*\\$/, "", line)
-            if (line != "") cmd = cmd " " line
-            if (!ends) { collecting = 0; print cmd }
-        }
-    ' "$1"
-}
-
-n_total=$(extract_cmds "$file" | wc -l | tr -d " ")
+# Parsed once; the loop below reads from this list.
+cmds=$(extract_cmds "$file")
+n_total=$(printf "%s\n" "$cmds" | grep -c . || true)
 if [ "$n_total" -eq 0 ]; then
     echo "No training commands found in $file" >&2
     exit 1
 fi
 
-# $1 = index, $2 = run_name. Written with explicit ifs rather than
-# 'test && action': under 'set -e' a bare failing && list aborts the script.
-selected() {
-    if [ -z "$only" ]; then return 0; fi
-    local idx="$1" name="$2" s
-    local IFS=','
-    for s in $only; do
-        if [ -n "$s" ]; then
-            case "$s" in
-                # An all-digit selector is an index only. Matching it as a
-                # substring too would make '--only 1' also pick *_t1, *_t10, ...
-                *[!0-9]*) case "$name" in *"$s"*) return 0 ;; esac ;;
-                *) if [ "$s" = "$idx" ]; then return 0; fi ;;
-            esac
-        fi
-    done
-    return 1
-}
-
-# Preflight: the drivers are nohup'd, so an unimportable dependency shows up only
-# as a tiny log per driver and nothing ever reaches slurm. Forgetting to activate
-# the env once cost 24 silent failures on the search side, so check it here too.
 # Override with PYTHON=/path/to/env/bin/python3 to skip activation entirely.
 PYTHON=${PYTHON:-python3}
-if [ "$dry" -eq 0 ] && ! "$PYTHON" -c 'import hydra' >/dev/null 2>&1; then
-    echo "error: '$PYTHON' cannot import hydra - the adl1t env is not active." >&2
-    echo "       conda activate /users/podagiu/.conda/envs/adl1t" >&2
-    echo "       (or re-run with PYTHON=/users/podagiu/.conda/envs/adl1t/bin/python3)" >&2
-    exit 1
-fi
+[ "$dry" -eq 1 ] || require_imports "$PYTHON" hydra \
+    "conda activate $CLARIDEN_ENV" \
+    "(or re-run with PYTHON=$CLARIDEN_ENV/bin/python3)"
 
 command -v sbatch >/dev/null 2>&1 || echo "warning: sbatch not on PATH - are you on clariden?" >&2
 
@@ -105,6 +71,14 @@ command -v sbatch >/dev/null 2>&1 || echo "warning: sbatch not on PATH - are you
 # it in place (rather than relying on the appended override winning) is what
 # makes the placeholder check below meaningful.
 rdd=$(printf "%s" "$extra" | grep -oE 'paths\.raw_data_dir=[^ ]+' | tail -1 | cut -d= -f2- || true)
+
+# cifar10/robustad blocks carry no raw-data path (their data is downloaded), so
+# there is nothing for the rewrite above to hit and the override would survive
+# into the command and trip the placeholder guard. Say so here instead.
+if [ -n "$rdd" ] && ! printf "%s" "$cmds" | grep -q 'paths\.raw_data_dir='; then
+    echo "error: $file has no paths.raw_data_dir to rewrite - drop that override." >&2
+    exit 1
+fi
 
 # Prefix with the domain directory: physics/cifar10/robustad share file stems,
 # and a bare stem makes concurrent submissions clobber each other's logs.
@@ -117,7 +91,7 @@ i=0
 n_sub=0
 while IFS= read -r cmd; do
     i=$((i + 1))
-    run_name=$(printf "%s" "$cmd" | grep -oE 'run_name=[^ ]+' | head -1 | cut -d= -f2- || true)
+    run_name=$(field "$cmd" 'run_name')
     selected "$i" "$run_name" || continue
 
     # Each slurm job sees a single GPU.
@@ -127,15 +101,13 @@ while IFS= read -r cmd; do
     fi
     # Unique sweep dir per job: hydra's default second-resolution timestamp
     # collides when several drivers start simultaneously, merging job outputs.
-    launcher="-m hydra/launcher=submitit_slurm_clariden hydra.launcher.timeout_min=$TIMEOUT_MIN hydra.sweep.dir=logs/train/multiruns/${sweep_ts}_${stem}_j$i"
-    full="$PYTHON src/train.py $launcher$cmd $extra"
+    launcher="-m hydra/launcher=submitit_slurm_clariden"
+    launcher="$launcher hydra.launcher.timeout_min=$TIMEOUT_MIN"
+    launcher="$launcher hydra.sweep.dir=logs/train/multiruns/${sweep_ts}_${stem}_j$i"
+    full="$PYTHON src/train.py $launcher$cmd${extra:+ $extra}"
 
-    case "$full" in
-        *"/path/to/"*)
-            echo "error: job $i ($run_name) still contains a '/path/to/...' placeholder." >&2
-            echo "       pass paths.raw_data_dir=<real path> after the file name." >&2
-            exit 1 ;;
-    esac
+    assert_no_placeholder "$full" "job $i ($run_name)" \
+        "pass paths.raw_data_dir=<real path> after the file name."
 
     n_sub=$((n_sub + 1))
     if [ "$dry" -eq 1 ]; then
@@ -146,7 +118,7 @@ while IFS= read -r cmd; do
     nohup bash -c "$full" > "$logdir/job_${i}_${run_name}.log" 2>&1 &
     sleep 1
 done <<EOF
-$(extract_cmds "$file")
+$cmds
 EOF
 
 if [ "$n_sub" -eq 0 ]; then

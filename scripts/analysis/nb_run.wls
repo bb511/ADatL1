@@ -2,7 +2,7 @@
 (* Headless Mathematica notebook runner.
 
    Usage:
-     wolframscript -f scripts/nb_run.wls <notebook.nb> <log.txt> [<symbol> <out.m>]
+     wolframscript -f scripts/analysis/nb_run.wls <notebook.nb> <log.txt> [<symbol> <out.m>]
 
    Evaluates every evaluatable cell of the notebook top-to-bottom in this
    kernel with the front end attached (so NotebookDirectory[], CellPrint and

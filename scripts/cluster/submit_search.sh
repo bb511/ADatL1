@@ -4,38 +4,50 @@
 # This is the sibling of submit_pareto.sh, and the difference matters. A
 # run*_pareto.sh file holds bare single-training commands, so submit_pareto.sh
 # has to prepend '-m hydra/launcher=... timeout_min=...'. A run*_search.sh block
-# already carries '-m', hydra/launcher=submitit_slurm_clariden,
-# hydra.launcher.timeout_min and hydra.sweeper.n_jobs. So this script runs each
+# already carries '-m' and its own launcher settings. So this script runs each
 # block as written and adds only what the file cannot know: the raw data path
 # and a private sweep directory.
+#
+# Which launcher a block carries is a property of the block, not of this script.
+# The physics ae/dsae/dsvae/realnvp/vae searches (both tiers) were run with
+# hydra/launcher=submitit_local on olqti and still say so; only dte/svdd and the
+# whole of cifar10/robustad carry submitit_slurm_clariden + n_jobs=6. Submitting
+# a submitit_local block on clariden starts a local driver that never reaches
+# slurm -- check the block with --list/--dry-run before launching it there.
 #
 # Each block is one long-lived Optuna driver: it keeps n_jobs trials in the
 # queue and stays alive until its study reaches n_trials. Drivers are therefore
 # nohup'd and this command returns as soon as they are all up.
 #
 # Usage (from the repository root, on clariden):
-#   bash scripts/submit_search.sh --list    scripts/physics/runsvdd_search.sh
-#   bash scripts/submit_search.sh --dry-run scripts/physics/runsvdd_search.sh
-#   bash scripts/submit_search.sh           scripts/physics/runsvdd_search.sh
-#   bash scripts/submit_search.sh --only cap,consistency scripts/physics/rundte_search.sh
+#   bash scripts/cluster/submit_search.sh --list    scripts/physics/runsvdd_search.sh
+#   bash scripts/cluster/submit_search.sh --dry-run scripts/physics/runsvdd_search.sh
+#   bash scripts/cluster/submit_search.sh           scripts/physics/runsvdd_search.sh
+#   bash scripts/cluster/submit_search.sh --only cap,consistency scripts/physics/rundte_search.sh
 #
-#   --list              list the drivers in the file and exit
-#   --dry-run           print the full commands without running anything
+#   --list              list the drivers in the file (with their launcher) and exit
+#   --dry-run           print the full commands without running anything; works
+#                       off the cluster, so it needs neither the env nor the data
 #   --only <sel>        comma-separated study names (substring) or 1-based
 #                       indices; default is every driver in the file
 #   --raw-data-dir <p>  value for paths.raw_data_dir; defaults to
-#                       $SCRATCH/adl1t_data/parquet_files. Only applied to files
-#                       that actually reference it (the physics ones).
+#                       $SCRATCH/adl1t_data/parquet_files when $SCRATCH is set.
+#                       Only applied to files that reference it (the physics ones).
 #
 # Any extra hydra overrides after the file name are appended to every driver.
 # Hydra takes the last of a duplicated override, so appending wins over the
 # value baked into the file.
 set -eu
 
+# shellcheck source=scripts/cluster/lib.sh
+. "$(dirname "${BASH_SOURCE[0]}")/lib.sh"
+
 only=""
 dry=0
 list=0
-raw_data_dir="${RAW_DATA_DIR:-${SCRATCH:-}/adl1t_data/parquet_files}"
+# Empty when neither is set, so the "no raw data path given" branch below is
+# reachable -- '${SCRATCH:-}/adl1t_data/...' would silently yield '/adl1t_data/...'.
+raw_data_dir="${RAW_DATA_DIR:-${SCRATCH:+$SCRATCH/adl1t_data/parquet_files}}"
 
 while [ $# -gt 0 ]; do
     case "$1" in
@@ -49,35 +61,21 @@ while [ $# -gt 0 ]; do
     esac
 done
 
-file=${1:?usage: submit_search.sh [--list|--dry-run] [--only sel] [--raw-data-dir p] <run*_search.sh> [overrides...]}
+usage="usage: submit_search.sh [--list|--dry-run] [--only sel] [--raw-data-dir p]"
+usage="$usage <run*_search.sh> [overrides...]"
+file=${1:?$usage}
 shift || true
 extra="$*"
 
-[ -f .project-root ] || { echo "run this from the repository root" >&2; exit 1; }
+require_repo_root
 [ -f "$file" ] || { echo "no such file: $file" >&2; exit 1; }
 
-# Same block parser as submit_pareto.sh: a block opens at the commented
-# 'python3 src/train.py' line and runs to the first line without a continuation.
-extract_cmds() {
-    awk '
-        /^# python3 src\/train\.py/ { collecting = 1; cmd = ""; next }
-        collecting {
-            line = $0
-            sub(/^# ?/, "", line)
-            gsub(/^[ \t]+|[ \t]+$/, "", line)
-            ends = (line ~ /\\$/)
-            sub(/[ \t]*\\$/, "", line)
-            if (line != "") cmd = cmd " " line
-            if (!ends) { collecting = 0; print cmd }
-        }
-    ' "$1"
-}
-
-field() { printf "%s" "$1" | grep -oE "$2=[^ ]+" | head -1 | cut -d= -f2- ; }
+# Parsed once; every loop below reads from this list.
+cmds=$(extract_cmds "$file")
 
 # Optuna storage a driver will use: an explicit hydra.sweeper.storage override
-# if the block carries one (cifar10/robustad), else the value in the
-# hparams_search config it selects (physics).
+# if the block carries one, else the value in the hparams_search config it
+# selects. No block carries one today, so in practice it is always the config.
 storage_of() {
     local s hp
     s=$(printf "%s" "$1" | grep -oE "hydra\.sweeper\.storage='[^']+'" | head -1 | sed "s/.*='//;s/'\$//")
@@ -91,40 +89,27 @@ storage_of() {
     printf "%s" "$s"
 }
 
-n_total=$(extract_cmds "$file" | wc -l | tr -d " ")
-[ "$n_total" -eq 0 ] && { echo "No search commands found in $file" >&2; exit 1; }
-
-if [ "$list" -eq 1 ]; then
-    printf "%-3s %-26s %-34s %s\n" "#" "study" "experiment_name" "n_trials"
-    i=0
-    extract_cmds "$file" | while IFS= read -r cmd; do
-        i=$((i + 1))
-        printf "%-3s %-26s %-34s %s\n" "$i" \
-            "$(field "$cmd" 'hydra\.sweeper\.study_name')" \
-            "$(field "$cmd" 'experiment_name')" \
-            "$(field "$cmd" 'hydra\.sweeper\.n_trials')"
-    done
-    exit 0
+n_total=$(printf "%s\n" "$cmds" | grep -c . || true)
+if [ "$n_total" -eq 0 ]; then
+    echo "No search commands found in $file" >&2
+    exit 1
 fi
 
-# $1 = index, $2 = study name. Written with explicit ifs rather than
-# 'test && action': under 'set -e' a bare failing && list aborts the script.
-selected() {
-    if [ -z "$only" ]; then return 0; fi
-    local idx="$1" name="$2" s
-    local IFS=','
-    for s in $only; do
-        if [ -n "$s" ]; then
-            case "$s" in
-                # An all-digit selector is an index only. Matching it as a
-                # substring too would make '--only 1' also pick cvar10eff_*.
-                *[!0-9]*) case "$name" in *"$s"*) return 0 ;; esac ;;
-                *) if [ "$s" = "$idx" ]; then return 0; fi ;;
-            esac
-        fi
-    done
-    return 1
-}
+if [ "$list" -eq 1 ]; then
+    printf "%-3s %-26s %-34s %-24s %s\n" "#" "study" "experiment_name" "launcher" "n_trials"
+    i=0
+    while IFS= read -r cmd; do
+        i=$((i + 1))
+        printf "%-3s %-26s %-34s %-24s %s\n" "$i" \
+            "$(field "$cmd" 'hydra\.sweeper\.study_name')" \
+            "$(field "$cmd" 'experiment_name')" \
+            "$(field "$cmd" 'hydra/launcher')" \
+            "$(field "$cmd" 'hydra\.sweeper\.n_trials')"
+    done <<EOF
+$cmds
+EOF
+    exit 0
+fi
 
 # Domain-prefixed stem: the three domains share file stems, and a bare stem
 # makes concurrent submissions clobber each other's driver logs.
@@ -135,17 +120,12 @@ sweep_ts=$(date +%Y-%m-%d_%H-%M-%S)
 
 command -v sbatch >/dev/null 2>&1 || echo "warning: sbatch not on PATH - are you on clariden?" >&2
 
-# Preflight: the drivers are nohup'd, so an unimportable dependency shows up only
-# as a 141-byte log per driver and nothing ever reaches slurm. Forgetting to
-# activate the env once cost 24 silent failures, so check it here instead.
 # Override with PYTHON=/path/to/env/bin/python3 to skip activation entirely.
+# Skipped for --dry-run, which is meant to be usable off the cluster.
 PYTHON=${PYTHON:-python3}
-if ! "$PYTHON" -c 'import hydra, optuna' >/dev/null 2>&1; then
-    echo "error: '$PYTHON' cannot import hydra/optuna - the adl1t env is not active." >&2
-    echo "       conda activate /users/podagiu/.conda/envs/adl1t" >&2
-    echo "       (or re-run with PYTHON=/users/podagiu/.conda/envs/adl1t/bin/python3)" >&2
-    exit 1
-fi
+[ "$dry" -eq 1 ] || require_imports "$PYTHON" "hydra, optuna" \
+    "conda activate $CLARIDEN_ENV" \
+    "(or re-run with PYTHON=$CLARIDEN_ENV/bin/python3)"
 
 # Create each sqlite study database, serially, before any driver starts.
 # Drivers launched together against a not-yet-existing file all run optuna's
@@ -154,7 +134,7 @@ fi
 # locked', which kills the driver seconds in. Doing it once here removes it.
 # Idempotent: on an existing database this only opens and closes it.
 if [ "$dry" -eq 0 ]; then
-    extract_cmds "$file" | while IFS= read -r c; do storage_of "$c"; echo; done |
+    printf "%s\n" "$cmds" | while IFS= read -r c; do storage_of "$c"; echo; done |
         sort -u | grep -v '^$' | while IFS= read -r url; do
         case "$url" in
             sqlite:///*)
@@ -210,11 +190,8 @@ while IFS= read -r cmd; do
     sweep=" hydra.sweep.dir=logs/train/multiruns/${sweep_ts}_${stem}_j$i"
     full="$PYTHON src/train.py$cmd$sweep${extra:+ $extra}"
 
-    case "$full" in
-        *"/path/to/"*)
-            echo "error: driver $i still contains a '/path/to/...' placeholder." >&2
-            exit 1 ;;
-    esac
+    assert_no_placeholder "$full" "driver $i ($study)" \
+        "pass --raw-data-dir <real path>."
 
     if [ "$dry" -eq 1 ]; then
         echo "[$i/$n_total] $full"
@@ -233,10 +210,13 @@ while IFS= read -r cmd; do
     # rows; stagger them rather than starting six in the same second.
     sleep 5
 done <<EOF
-$(extract_cmds "$file")
+$cmds
 EOF
 
-[ "$n_sub" -eq 0 ] && { echo "nothing matched --only '$only'" >&2; exit 1; }
+if [ "$n_sub" -eq 0 ]; then
+    echo "nothing matched --only '$only'" >&2
+    exit 1
+fi
 
 if [ "$dry" -eq 0 ]; then
     echo

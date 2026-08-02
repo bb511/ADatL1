@@ -27,7 +27,7 @@ does not work, for three reasons found while building this:
    so it is easy to miss. Per-epoch cost is invariant to the difference.
 2. **The sweeps logged nothing.** They ran with `logger=none`, so no MLflow
    record of a search trial exists. Their durations survive only in the Optuna
-   databases, which `scripts/fetch_optuna_pareto.py` does not export.
+   databases, which `scripts/optuna/fetch_optuna_pareto.py` does not export.
 3. **Total job time is not comparable across strategies.** The post-fit
    evaluation phase is roughly 8x heavier for the semi-supervised runs (they
    evaluate ~24 checkpoints against ~3 for the agnostic ones), which runs in the

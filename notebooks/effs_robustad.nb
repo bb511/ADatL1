@@ -13,9 +13,9 @@ Efficiency Comparison RobustAD Data\
 Cell["\<\
 Model-picking analysis for the RobustAD tabular-AD benchmark: the validation strategies are compared across architectures by the test efficiency of the Pareto point each one selects.
 
-Inputs: pareto_effs/<exp>.csv and <exp>_eval.csv harvested by scripts/harvest_pareto_effs.py, and Optuna front CSVs under paretos/robustad/ from scripts/fetch_optuna_pareto.py. Figures are exported to effs_robustad/.
+Inputs: pareto_effs/<exp>.csv and <exp>_eval.csv harvested by scripts/analysis/harvest_pareto_effs.py, and Optuna front CSVs under paretos/robustad/ from scripts/optuna/fetch_optuna_pareto.py. Figures are exported to effs_robustad/.
 
-All methods live in notebooks/lib/ (effs_*.wl); this notebook holds only configuration, hand-transcribed legacy data, and drivers. Run it top-to-bottom (Evaluation > Evaluate Notebook), or headlessly via scripts/nb_run.wls.\
+All methods live in notebooks/lib/ (effs_*.wl); this notebook holds only configuration, hand-transcribed legacy data, and drivers. Run it top-to-bottom (Evaluation > Evaluate Notebook), or headlessly via scripts/analysis/nb_run.wls.\
 \>", "Text"],
 
 Cell[CellGroupData[{

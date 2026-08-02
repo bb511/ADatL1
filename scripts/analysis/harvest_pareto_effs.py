@@ -32,9 +32,9 @@ eval-only rerun); output goes to ``<experiment>_eval.csv``.
 Usage (any machine holding the mlruns folder, e.g. after copying from
 clariden)::
 
-    python scripts/harvest_pareto_effs.py physics_ae_pareto physics_ae_q99_pareto
-    python scripts/harvest_pareto_effs.py --mode eval physics_ae_pareto ...
-    python scripts/harvest_pareto_effs.py cifar10_ae_pareto \\
+    python scripts/analysis/harvest_pareto_effs.py physics_ae_pareto physics_ae_q99_pareto
+    python scripts/analysis/harvest_pareto_effs.py --mode eval physics_ae_pareto ...
+    python scripts/analysis/harvest_pareto_effs.py cifar10_ae_pareto \\
         --tracking-uri file:logs/mlflow/mlruns
 """
 from __future__ import annotations
@@ -115,7 +115,13 @@ def harvest_experiment(client, exp, bkg_re, outdir):
         eff_keys = {EFF_KEY_RE.match(k).group(1): k for k in keys if EFF_KEY_RE.match(k)}
         histories = {ds: history_values(client, run.info.run_id, k)
                      for ds, k in eff_keys.items()}
-        n_epochs = max(len(h) for h in histories.values())
+        # by_name only holds runs with at least one eff history, so this is
+        # non-empty in practice -- but a run whose only history is empty would
+        # otherwise crash the whole harvest on max() of an empty sequence.
+        n_epochs = max((len(h) for h in histories.values()), default=0)
+        if n_epochs == 0:
+            print(f"  note: {run_name} has no efficiency history points, skipped")
+            continue
 
         targets = {"last": n_epochs - 1}
         strat = strategy_of(run_name)

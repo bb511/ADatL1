@@ -26,12 +26,12 @@ first and is never opened for writing.
 Usage
 -----
     # on olqti, with the optuna-ui env (4.7.0)
-    python3 scripts/downgrade_optuna_db.py <src.db> <dst.db>
+    python3 scripts/optuna/downgrade_optuna_db.py <src.db> <dst.db>
 
 Then verify with the pinned env, which should report identical digests::
 
-    python3 scripts/downgrade_optuna_db.py --digest <dst.db>   # optuna 2.10.1
-    python3 scripts/downgrade_optuna_db.py --digest <src.db>   # optuna 4.7.0
+    python3 scripts/optuna/downgrade_optuna_db.py --digest <dst.db>   # optuna 2.10.1
+    python3 scripts/optuna/downgrade_optuna_db.py --digest <src.db>   # optuna 4.7.0
 
 ``--digest`` normalises the distribution classes across Optuna versions, so the
 hashes are directly comparable; matching hashes mean no trial, parameter, value,
@@ -173,7 +173,8 @@ def downgrade(src, dst):
     if before[0] == TARGET:
         print("already at %s, nothing to do" % TARGET)
         return 0
-    print("before: alembic=%s  trial_params=%d  trial_values=%d" % (before[0], before[2], before[3]))
+    print("before: alembic=%s  trial_params=%d  trial_values=%d"
+          % (before[0], before[2], before[3]))
     for name, n in before[1].items():
         print("        %-32s %d trials" % (name, n))
 
@@ -199,7 +200,8 @@ def downgrade(src, dst):
     storage.engine.dispose()
 
     after = _counts(dst)
-    print("\nafter:  alembic=%s  trial_params=%d  trial_values=%d" % (after[0], after[2], after[3]))
+    print("\nafter:  alembic=%s  trial_params=%d  trial_values=%d"
+          % (after[0], after[2], after[3]))
     for name, n in after[1].items():
         print("        %-32s %d trials" % (name, n))
 
@@ -209,7 +211,9 @@ def downgrade(src, dst):
 
 
 def main():
-    ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    ap = argparse.ArgumentParser(
+        description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
+    )
     ap.add_argument("src", help="source .db (never modified), or the db to digest")
     ap.add_argument("dst", nargs="?", help="destination .db (must not exist)")
     ap.add_argument("--digest", action="store_true", help="print a digest of src and exit")

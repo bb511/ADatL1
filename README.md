@@ -29,14 +29,16 @@ pip install -r requirements.txt
 
 ## Project layout
 
-Run this once, from the repository root. It creates `data/ logs/ outputs/ results/ checkpoints/`
-and writes the `.env` that `configs/paths/default.yaml` reads through `${oc.env:PROJECT_ROOT}`.
-Nothing composes without it.
+Run this once. It creates `data/ logs/ outputs/ checkpoints/` and writes the `.env` that
+`configs/paths/default.yaml` reads through `${oc.env:PROJECT_ROOT}`. Nothing composes
+without it. Re-running never overwrites an existing `.env`.
 ```
 bash scripts/setup.sh
 ```
-Edit `RES_DIR` in `.env` if those directories should live elsewhere, then run
-`bash scripts/symbolink.sh` to symlink them.
+To keep those directories on another filesystem, edit `RES_DIR` in `.env` and then run
+`bash scripts/symbolink.sh`, which replaces them with symlinks. That step **deletes** any
+real directory in the way, so run it before the first training, not after; it asks for
+confirmation unless given `--force`.
 
 ## Data
 
@@ -65,6 +67,7 @@ Domains are `physics/`, `cifar10/` and `robustad/`; `*_agnostic` variants valida
 label-free objectives instead of signal efficiency. Hyperparameter searches use
 `--multirun hparams_search=physics/ae_optuna`.
 
-See the `scripts` directory for the exact commands used to run the experiments described in the
-paper. The experiments are already configured with the hyperparameter values described for the
-models shown in the paper.
+The exact commands behind every result in the paper are in [`scripts/`](scripts/README.md) —
+one catalogue of commented, copy-pasteable `src/train.py` invocations per model and domain,
+plus the tooling that generated them, submitted them to slurm, and harvested the results.
+The experiment configs already carry the hyperparameter values reported in the paper.

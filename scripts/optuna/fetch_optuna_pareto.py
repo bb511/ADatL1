@@ -16,8 +16,8 @@ Outputs are grouped by dataset/domain, so e.g. the physics Pareto fronts live in
 Paths are anchored to the repository root (the directory holding
 ``.project-root``), so this can be executed from anywhere, e.g.::
 
-    python scripts/fetch_optuna_pareto.py --all
-    ./scripts/fetch_optuna_pareto.py --domain physics --model ae --all
+    python scripts/optuna/fetch_optuna_pareto.py --all
+    python scripts/optuna/fetch_optuna_pareto.py --domain physics --model ae --all
 
 Note: the databases were written by Optuna >= 4, whose schema the training env's
 pinned Optuna (2.10.1) cannot read.  Run this in the ``optuna-ui`` conda env,
@@ -76,11 +76,11 @@ def export_study(
     outdir: Path,
     filename: str | None = None,
     overwrite: bool = True,
-) -> tuple[pd.DataFrame, Path, bool]:
+) -> tuple[int, bool]:
     """Load a study and write its trials (with an ``is_pareto`` flag) to CSV.
 
-    :returns: ``(dataframe, output_path, written)`` -- ``written`` is ``False``
-        when the file already existed and ``overwrite`` is ``False``.
+    :returns: ``(n_pareto, written)`` -- ``written`` is ``False`` when the file
+        already existed and ``overwrite`` is ``False``.
     """
     storage_url = f"sqlite:///{Path(db_path).expanduser().resolve()}"
     study = optuna.load_study(study_name=study_name, storage=storage_url)
@@ -102,14 +102,14 @@ def export_study(
             f"skip (exists): {output_path}  "
             f"[total={len(df)} pareto={n_pareto} dirs={directions}]"
         )
-        return df, output_path, False
+        return n_pareto, False
 
     df.to_csv(output_path, index=False)
     print(
         f"{study_name}: total={len(df)} pareto={n_pareto} dirs={directions} "
         f"-> {output_path}"
     )
-    return df, output_path, True
+    return n_pareto, True
 
 
 def main() -> None:
@@ -147,7 +147,8 @@ def main() -> None:
     parser.add_argument(
         "--output",
         default=None,
-        help="Output CSV filename for single-study mode (default: <study_name>.csv).",
+        help="Output CSV filename; single-study mode only (default: <study_name>.csv). "
+        "--all names its files <model>_<study>.csv and rejects this flag.",
     )
     parser.add_argument(
         "--domain",
@@ -170,7 +171,8 @@ def main() -> None:
     parser.add_argument(
         "--overwrite",
         action="store_true",
-        help="In --all, overwrite existing CSVs (default: skip files already present).",
+        help="In --all, overwrite existing CSVs (default: skip files already present). "
+        "Single-study mode always overwrites: naming one study is a request to refresh it.",
     )
     args = parser.parse_args()
 
@@ -178,6 +180,8 @@ def main() -> None:
     outdir = Path(args.outdir) if args.outdir else repo / "notebooks" / "paretos"
 
     if args.all:
+        if args.output:
+            parser.error("--output is single-study mode only; --all derives its filenames")
         root = Path(args.root) if args.root else repo / "logs" / "optuna"
         dbs = find_dbs(root, args.domain, args.model)
         if not dbs:
@@ -192,7 +196,7 @@ def main() -> None:
             for study_name in study_names(db):
                 if args.studies and not any(s in study_name for s in args.studies):
                     continue
-                df, _, written = export_study(
+                n_pareto, written = export_study(
                     study_name,
                     db,
                     outdir / domain,
@@ -201,7 +205,7 @@ def main() -> None:
                 )
                 n_studies += 1
                 n_written += int(written)
-                total_pareto += int(df["is_pareto"].sum())
+                total_pareto += n_pareto
 
         print(
             f"\nSwept {len(dbs)} dbs, {n_studies} studies, {total_pareto} Pareto "

@@ -27,12 +27,12 @@ Model-picking analysis for the CIFAR10 image-AD benchmark: the validation \
 strategies are compared across architectures by the test efficiency of the \
 Pareto point each one selects.
 Inputs: pareto_effs/<exp>.csv and <exp>_eval.csv harvested by \
-scripts/harvest_pareto_effs.py, and Optuna front CSVs under paretos/cifar10/ \
-from scripts/fetch_optuna_pareto.py. Figures are exported to effs_cifar10/.
+scripts/analysis/harvest_pareto_effs.py, and Optuna front CSVs under paretos/cifar10/ \
+from scripts/optuna/fetch_optuna_pareto.py. Figures are exported to effs_cifar10/.
 All methods live in notebooks/lib/ (effs_*.wl); this notebook holds only \
 configuration, hand-transcribed legacy data, and drivers. Run it \
 top-to-bottom (Evaluation > Evaluate Notebook), or headlessly via \
-scripts/nb_run.wls.\
+scripts/analysis/nb_run.wls.\
 \>", "Text",
  CellChangeTimes->{{3.994647337516883*^9, 
   3.994647339096065*^9}},ExpressionUUID->"47461260-588e-454e-91ae-\

@@ -13,7 +13,7 @@ Correlations Between Main Metric and Median Efficiency\
 Cell["\<\
 Spearman rank correlation between each training run's validation metric (CAP, threshold drift, W1 distance, or CVaR25 efficiency, per the run's strategy) and its median signal efficiency, over the training steps the two series share.
 
-Inputs: notebooks/exported_metrics/<experiment>/<run>/val_summary_*.csv, exported from MLflow by scripts/get_mlflow_corrs.py. Methods live in notebooks/lib/corrs_lib.wl. Nothing is exported; the result is the association displayed at the end.\
+Inputs: notebooks/exported_metrics/<experiment>/<run>/val_summary_*.csv, exported from MLflow by scripts/analysis/get_mlflow_corrs.py. Methods live in notebooks/lib/corrs_lib.wl. Nothing is exported; the result is the association displayed at the end.\
 \>", "Text"],
 
 Cell["\<\

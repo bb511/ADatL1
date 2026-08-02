@@ -1,15 +1,42 @@
 #!/usr/bin/env python3
+"""Export the per-step MLflow metric histories that notebooks/corrs.nb reads.
+
+``notebooks/lib/corrs_lib.wl`` correlates each run's validation metric with its
+median signal efficiency over the training steps the two series share, which
+needs the full history of both -- not the final value MLflow shows in its UI.
+
+Writes one directory per run under ``<output-dir>/<experiment>/<run>/``, holding
+``run_info.json``, ``selected_metrics.json`` and one CSV per metric matching
+``--include-regex`` (by default every ``val/summary/*`` curve).
+
+Usage (from the repository root, wherever the tracking store lives)::
+
+    python scripts/analysis/get_mlflow_corrs.py \\
+        --tracking-uri file:logs/mlflow/mlruns \\
+        --experiment-name physics_ae_pareto
+"""
 from __future__ import annotations
 
 import argparse
 import json
 import re
 from pathlib import Path
-from typing import Iterable
 
 import pandas as pd
-from mlflow.tracking import MlflowClient
 from mlflow.entities import Run
+from mlflow.tracking import MlflowClient
+
+# Where corrs_lib.wl looks for the export; anchored on the repo root so this
+# runs from anywhere, like its sibling analysis scripts.
+DEFAULT_OUTPUT_DIR = "notebooks/exported_metrics"
+
+
+def find_repo_root(start: Path) -> Path:
+    """Walk up from ``start`` to the directory holding ``.project-root``."""
+    for p in [start, *start.parents]:
+        if (p / ".project-root").exists():
+            return p
+    return start
 
 
 def sanitize_filename(name: str) -> str:
@@ -121,7 +148,6 @@ def export_metrics_for_run(
     output_root: Path,
     include_patterns: list[re.Pattern],
     exclude_patterns: list[re.Pattern] | None = None,
-    skip_missing: bool = True,
 ) -> None:
     study_name = sanitize_filename(get_run_study_name(run))
     run_dir = output_root / study_name
@@ -133,7 +159,7 @@ def export_metrics_for_run(
 
     for metric_name in selected_metrics:
         df = fetch_metric_history_df(client, run.info.run_id, metric_name)
-        if df.empty and skip_missing:
+        if df.empty:  # logged once with no history: nothing to correlate over
             continue
         metric_file = sanitize_filename(metric_name) + ".csv"
         df.to_csv(run_dir / metric_file, index=False)
@@ -146,7 +172,12 @@ def main() -> None:
     parser.add_argument("--tracking-uri", required=True)
     parser.add_argument("--experiment-name", default=None)
     parser.add_argument("--experiment-id", default=None)
-    parser.add_argument("--output-dir", default="mlflow_metric_export")
+    parser.add_argument(
+        "--output-dir",
+        default=None,
+        help=f"Where to write the export; default <repo>/{DEFAULT_OUTPUT_DIR}, "
+        "which is what notebooks/corrs.nb reads.",
+    )
     parser.add_argument("--filter-string", default="")
     parser.add_argument("--include-failed", action="store_true")
     parser.add_argument("--overwrite-experiment-folder", action="store_true")
@@ -167,8 +198,10 @@ def main() -> None:
     client = MlflowClient(tracking_uri=args.tracking_uri)
     exp = get_experiment(client, args.experiment_name, args.experiment_id)
 
+    repo = find_repo_root(Path(__file__).resolve().parent)
+    out_root = Path(args.output_dir) if args.output_dir else repo / DEFAULT_OUTPUT_DIR
     experiment_label = sanitize_filename(exp.name or exp.experiment_id)
-    experiment_dir = Path(args.output_dir) / experiment_label
+    experiment_dir = out_root / experiment_label
 
     if experiment_dir.exists() and not args.overwrite_experiment_folder:
         raise FileExistsError(
@@ -180,7 +213,10 @@ def main() -> None:
     filter_string = args.filter_string.strip()
     if not args.include_failed:
         status_filter = "attributes.status = 'FINISHED'"
-        filter_string = f"({filter_string}) and {status_filter}" if filter_string else status_filter
+        if filter_string:
+            filter_string = f"({filter_string}) and {status_filter}"
+        else:
+            filter_string = status_filter
 
     runs = list_all_runs(client, exp.experiment_id, filter_string=filter_string)
     if not runs:

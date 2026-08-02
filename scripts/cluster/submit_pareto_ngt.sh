@@ -2,7 +2,7 @@
 # Run training commands of run*_pareto.sh files locally on an NGT session.
 #
 # The NGT sessions are interactive kubernetes pods with no batch scheduler, so
-# unlike scripts/submit_pareto.sh (which hands every point to slurm through the
+# unlike scripts/cluster/submit_pareto.sh (which hands every point to slurm through the
 # submitit launcher) this script *is* the scheduler: it keeps a fixed number of
 # jobs running, each pinned to one GPU and a 3-CPU range, and starts the next
 # queued point as soon as a slot frees.
@@ -16,11 +16,11 @@
 # Usage (from the repository root, inside an NGT session):
 #
 #   # L40s session: 2 full cards, 3 jobs each
-#   bash scripts/submit_pareto_ngt.sh --only consistency --shard 1/6 \
+#   bash scripts/cluster/submit_pareto_ngt.sh --only consistency --shard 1/6 \
 #       --gpus 0,1 --per-gpu 3 --tag session-1 scripts/*/run*_pareto.sh
 #
 #   # H100 session: 4 MIG slices of 12 GB, capped at 6 concurrent (2/2/1/1)
-#   bash scripts/submit_pareto_ngt.sh --only consistency --shard 2/6 \
+#   bash scripts/cluster/submit_pareto_ngt.sh --only consistency --shard 2/6 \
 #       --gpus 0,1,2,3 --per-gpu 2 --max-jobs 6 --tag session-2 \
 #       scripts/*/run*_pareto.sh
 #
@@ -43,8 +43,11 @@
 # dropped 'kubectl exec' but the exec'd process tree does not, so launch it
 # detached:
 #
-#   setsid nohup bash scripts/submit_pareto_ngt.sh ... > run.log 2>&1 &
+#   setsid nohup bash scripts/cluster/submit_pareto_ngt.sh ... > run.log 2>&1 &
 set -eu
+
+# shellcheck source=scripts/cluster/lib.sh
+. "$(dirname "${BASH_SOURCE[0]}")/lib.sh"
 
 PYTHON=${PYTHON:-/opt/venv/bin/python3}
 CPUS_PER_JOB=3
@@ -100,23 +103,6 @@ if [ "$max_jobs" -gt 0 ] && [ "$max_jobs" -lt "$slots" ]; then
     slots=$max_jobs
 fi
 
-# Same parser as scripts/submit_pareto.sh:49-62 -- the block format is identical,
-# so this stays byte-for-byte in step with the generator.
-extract_cmds() {
-    awk '
-        /^# python3 src\/train\.py/ { collecting = 1; cmd = ""; next }
-        collecting {
-            line = $0
-            sub(/^# ?/, "", line)
-            gsub(/^[ \t]+|[ \t]+$/, "", line)
-            ends = (line ~ /\\$/)
-            sub(/[ \t]*\\$/, "", line)
-            if (line != "") cmd = cmd " " line
-            if (!ends) { collecting = 0; print cmd }
-        }
-    ' "$1"
-}
-
 # The pods are cgroup-restricted to a CPU subset that is neither 0-based nor
 # contiguous -- an L40s session reports '64-94,96-126,192-222,224-254', so a
 # naive 'taskset -c 0-2' dies with "failed to set affinity: Invalid argument"
@@ -141,25 +127,6 @@ cpus_allowed() {
     done
 }
 
-# $1 = index, $2 = run_name. Explicit ifs rather than 'test && action': under
-# 'set -e' a bare failing && list aborts the script.
-selected() {
-    if [ -z "$only" ]; then return 0; fi
-    local idx="$1" name="$2" s
-    local IFS=','
-    for s in $only; do
-        if [ -n "$s" ]; then
-            case "$s" in
-                # An all-digit selector is an index only. Matching it as a
-                # substring too would make '--only 1' also pick *_t1, *_t10, ...
-                *[!0-9]*) case "$name" in *"$s"*) return 0 ;; esac ;;
-                *) if [ "$s" = "$idx" ]; then return 0; fi ;;
-            esac
-        fi
-    done
-    return 1
-}
-
 # ---------------------------------------------------------------------------
 # Build the selected, sharded job list.
 # ---------------------------------------------------------------------------
@@ -172,7 +139,7 @@ for file in "$@"; do
     while IFS= read -r cmd; do
         [ -n "$cmd" ] || continue
         n_seen=$((n_seen + 1))
-        run_name=$(printf "%s" "$cmd" | grep -oE 'run_name=[^ ]+' | head -1 | cut -d= -f2- || true)
+        run_name=$(field "$cmd" 'run_name')
         selected "$n_seen" "$run_name" || continue
 
         # Interleaved shard: index 0 -> shard 1, index 1 -> shard 2, ...
@@ -188,12 +155,7 @@ for file in "$@"; do
         cmd=$(printf "%s" "$cmd" | sed -E "s#paths\.raw_data_dir=[^ ]+#paths.raw_data_dir=${raw_data_dir}#")
 
         full="$PYTHON src/train.py$cmd"
-        case "$full" in
-            *"/path/to/"*)
-                echo "error: '$run_name' still contains a '/path/to/...' placeholder." >&2
-                echo "       pass --raw-data-dir <real path>." >&2
-                exit 1 ;;
-        esac
+        assert_no_placeholder "$full" "'$run_name'" "pass --raw-data-dir <real path>."
 
         JOB_CMD+=("$full")
         JOB_NAME+=("$run_name")
@@ -270,13 +232,34 @@ if [ "$dry" -eq 1 ]; then
     exit 0
 fi
 
+# A slot is reaped as soon as its process is gone, so its exit status has to be
+# collected then -- 'wait' at the end would only see the stragglers, and a job
+# that crashed three seconds in would be indistinguishable from one that trained
+# for twelve hours. Unattended runs are the whole point of this script, so the
+# failures have to end up in the summary.
+declare -a slot_name
+failed=()
+
+# Reap slot $1 if its job has exited; returns 0 when the slot is free. Explicit
+# ifs rather than 'test && action': under 'set -e' a bare failing && list aborts.
+reap() {
+    local s="$1" pid=${slot_pid[$1]}
+    if [ "$pid" -eq 0 ]; then return 0; fi
+    if kill -0 "$pid" 2>/dev/null; then return 1; fi
+    if ! wait "$pid"; then
+        failed+=("${slot_name[$s]}")
+        echo "  FAILED: ${slot_name[$s]} (see $logdir)" >&2
+    fi
+    slot_pid[$s]=0
+    return 0
+}
+
 launched=0
 j=0
 while [ "$j" -lt "$n_jobs" ]; do
     free=-1
     for s in $(seq 0 $((slots - 1))); do
-        pid=${slot_pid[$s]}
-        if [ "$pid" -eq 0 ] || ! kill -0 "$pid" 2>/dev/null; then free=$s; break; fi
+        if reap "$s"; then free=$s; break; fi
     done
     if [ "$free" -lt 0 ]; then
         sleep "$POLL_SECONDS"
@@ -292,11 +275,22 @@ while [ "$j" -lt "$n_jobs" ]; do
     CUDA_VISIBLE_DEVICES="$gpu" nohup taskset -c "$cpus" \
         bash -c "${JOB_CMD[$j]}" > "$log" 2>&1 &
     slot_pid[$free]=$!
+    slot_name[$free]=$name
     launched=$((launched + 1))
     j=$((j + 1))
     sleep 1
 done
 
-wait
+# Drain the still-running slots, collecting their statuses the same way.
+for s in $(seq 0 $((slots - 1))); do
+    until reap "$s"; do sleep "$POLL_SECONDS"; done
+done
+
 echo
-echo "$launched job(s) finished (logs: $logdir)."
+if [ ${#failed[@]} -eq 0 ]; then
+    echo "$launched job(s) finished, all succeeded (logs: $logdir)."
+else
+    echo "$launched job(s) finished, ${#failed[@]} FAILED (logs: $logdir):"
+    printf '  %s\n' "${failed[@]}"
+    exit 1
+fi

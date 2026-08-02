@@ -1,45 +1,66 @@
 #!/bin/bash
-# This script generates symbolic links for data, logs, and outputs
-# It ensures the directories exist and links them to the specified locations in the .env file
-# It assumes the script is run from the root project directory
-
+# Replace data/ logs/ outputs/ checkpoints/ with symlinks to the locations named
+# in .env, for keeping them on a scratch filesystem instead of in the repository.
+#
+# Run scripts/setup.sh first: this reads the .env that writes. Edit RES_DIR
+# there (or the individual *_DIR variables) before running this.
+#
+#   bash scripts/symbolink.sh          # asks before destroying anything
+#   bash scripts/symbolink.sh --force  # no questions
+#
+# DESTRUCTIVE: a real directory in the way is deleted with its contents, because
+# a symlink cannot replace it. With RES_DIR unchanged from setup.sh's "." the
+# targets are the directories themselves, which this refuses to do.
 set -euo pipefail
 
-# Ensure we are in the root project folder
 cd "$(dirname "$0")/.."
 
-# Source the .env file to get the environment variables
-source .env
+force=0
+[ "${1:-}" != "--force" ] || force=1
 
-# Function to create the directory if it doesn't exist and link it
+if [ ! -f .env ]; then
+    echo "no .env - run 'bash scripts/setup.sh' first" >&2
+    exit 1
+fi
+# shellcheck disable=SC1091  # .env is generated, not checked in
+source .env
+: "${RES_DIR:?RES_DIR is not set in .env}"
+
+# $1 = link to create in the repository, $2 = directory it should point at.
 create_and_link_dir() {
     local dir_name="$1"
     local target_dir="$2"
 
-    # If the target directory doesn't exist, create it
+    if [ "$(cd "$(dirname "$dir_name")" && pwd)/$(basename "$dir_name")" = \
+         "$(cd "$(dirname "$target_dir")" 2>/dev/null && pwd)/$(basename "$target_dir")" ]; then
+        echo "skipping $dir_name: it is its own target (set RES_DIR in .env)"
+        return
+    fi
+
     if [ ! -d "$target_dir" ]; then
         echo "Target directory $target_dir does not exist. Creating it."
         mkdir -p "$target_dir"
     fi
 
-    # If the directory already exists as a symbolic link, unlink it
     if [ -L "$dir_name" ]; then
         echo "Found existing symbolic link $dir_name. It will be replaced."
         unlink "$dir_name"
     elif [ -d "$dir_name" ]; then
-        # If a non-empty directory exists, remove it and its contents
+        if [ "$force" -eq 0 ] && [ -n "$(ls -A "$dir_name")" ]; then
+            printf "%s is a non-empty directory. Delete it and its contents? [y/N] " "$dir_name"
+            read -r reply
+            case "$reply" in [yY]*) ;; *) echo "skipping $dir_name"; return ;; esac
+        fi
         echo "Removing existing directory $dir_name."
         rm -rf "$dir_name"
     fi
 
-    # Create the symbolic link
     ln -s "$target_dir" "$dir_name"
 }
 
-# Link the data, logs, and outputs directories based on the .env variables
-create_and_link_dir "$PROJECT_ROOT/data" "$DATA_DIR"
-create_and_link_dir "$PROJECT_ROOT/logs" "$LOG_DIR"
-create_and_link_dir "$PROJECT_ROOT/outputs" "$OUTPUT_DIR"
-create_and_link_dir "$PROJECT_ROOT/checkpoints" "${CHECKPOINT_DIR:-$RES_DIR/checkpoints}"
+create_and_link_dir data        "${DATA_DIR:-$RES_DIR/data}"
+create_and_link_dir logs        "${LOG_DIR:-$RES_DIR/logs}"
+create_and_link_dir outputs     "${OUTPUT_DIR:-$RES_DIR/outputs}"
+create_and_link_dir checkpoints "${CHECKPOINT_DIR:-$RES_DIR/checkpoints}"
 
-echo "Symbolic links for data, logs, and outputs created successfully."
+echo "Done."

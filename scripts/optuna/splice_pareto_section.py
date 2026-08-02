@@ -3,13 +3,13 @@
 
 Why this exists
 ---------------
-``scripts/make_pareto_scripts.py`` writes whole files (``out_path.write_text``),
+``scripts/optuna/make_pareto_scripts.py`` writes whole files (``out_path.write_text``),
 so regenerating in place to add a strategy also rewrites every existing block.
 That is not wanted here: the cap/cvar/drift/wasserstein points have already been
 retrained and their blocks document exactly what produced the current results
 table. Commit ``02024aa`` also changed those strategies' callback lists without
-the scripts ever being regenerated, so a plain rerun would silently rewrite all
-786 of them.
+the scripts ever being regenerated, so a plain rerun would silently rewrite every
+block in the tree, not just the new strategy's.
 
 So instead: generate into a scratch tree from a directory holding only the new
 strategy's CSVs (``make_pareto_scripts.py --paretos-dir ... --out-root ...``),
@@ -31,8 +31,10 @@ section are skipped, so re-running is harmless.
 
 Usage
 -----
-    python scripts/splice_pareto_section.py --generated-root /tmp/pareto_gen
-    python scripts/splice_pareto_section.py --generated-root /tmp/pareto_gen \\
+    python scripts/optuna/splice_pareto_section.py \\
+        --generated-root /tmp/pareto_gen --strategy-title CONSISTENCY
+    python scripts/optuna/splice_pareto_section.py \\
+        --generated-root /tmp/pareto_gen --strategy-title CONSISTENCY \\
         --exclude '*_q99_pareto.sh' --dry-run
 """
 
@@ -105,20 +107,21 @@ def insertion_point(lines: list[str], title: str) -> int:
     # No later section: after the last existing one.
     if present:
         return present[-1][2]
-    raise SystemExit("no sections found in target")
+    return None
 
 
 def splice(
     generated: Path, target: Path, title: str, dry: bool, replace: bool = False
-) -> tuple[bool, str]:
+) -> tuple[str, str]:
+    """Splice one section in. Returns ('ok'|'skip'|'fail', message)."""
     gen_lines = generated.read_text().splitlines()
     tgt_lines = target.read_text().splitlines()
 
     gen_secs = [s for s in sections(gen_lines) if s[0] == title]
     if not gen_secs:
-        return False, "no %s section in generated file" % title
+        return "fail", "no %s section in generated file" % title
     if len(gen_secs) > 1:
-        return False, "generated file has %d %s sections" % (len(gen_secs), title)
+        return "fail", "generated file has %d %s sections" % (len(gen_secs), title)
     _, gs, ge = gen_secs[0]
     block = gen_lines[gs:ge]
 
@@ -128,9 +131,9 @@ def splice(
     # strategy's points.
     existing = [s for s in sections(tgt_lines) if s[0] == title]
     if existing and not replace:
-        return False, "target already has a %s section - skipped" % title
+        return "skip", "target already has a %s section" % title
     if len(existing) > 1:
-        return False, "target has %d %s sections - refusing" % (len(existing), title)
+        return "fail", "target has %d %s sections - refusing" % (len(existing), title)
     if existing:
         _, ts, te = existing[0]
         old_block = tgt_lines[ts:te]
@@ -140,20 +143,22 @@ def splice(
         base_lines = tgt_lines
 
     at = insertion_point(base_lines, title)
+    if at is None:
+        return "fail", "no sections found in target"
     new_lines = base_lines[:at] + block + base_lines[at:]
 
     # Strip the inserted span back out and require an exact match with the
     # target minus its old section. This is what proves that nothing outside
     # this one section moved, whether inserting or replacing.
     if new_lines[:at] + new_lines[at + len(block) :] != base_lines:
-        return False, "ABORT: splice would alter existing content"
+        return "fail", "ABORT: splice would alter existing content"
 
     n_cmds = sum(1 for l in block if l.startswith("# python3 src/train.py"))
     old_cmds = sum(1 for l in old_block if l.startswith("# python3 src/train.py"))
     before = sum(1 for l in tgt_lines if l.startswith("# python3 src/train.py"))
     after = sum(1 for l in new_lines if l.startswith("# python3 src/train.py"))
     if after != before - old_cmds + n_cmds:
-        return False, "ABORT: command count %d != %d - %d + %d" % (
+        return "fail", "ABORT: command count %d != %d - %d + %d" % (
             after,
             before,
             old_cmds,
@@ -163,7 +168,7 @@ def splice(
     if not dry:
         target.write_text("\n".join(new_lines).rstrip("\n") + "\n")
     verb = "replaced" if old_block else "inserted"
-    return True, "%d commands %s at line %d (was %d, now %d)" % (
+    return "ok", "%d commands %s at line %d (was %d, now %d)" % (
         n_cmds,
         verb,
         at + 1,
@@ -176,8 +181,8 @@ def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     ap.add_argument("--generated-root", required=True,
                     help="tree written by make_pareto_scripts.py --out-root")
-    ap.add_argument("--strategy-title", default="CONSISTENCY",
-                    help="section title to move (default: CONSISTENCY)")
+    ap.add_argument("--strategy-title", required=True,
+                    help="section title to move, e.g. CONSISTENCY")
     ap.add_argument("--exclude", action="append", default=[],
                     help="glob of generated filenames to skip (repeatable)")
     ap.add_argument("--replace", action="store_true",
@@ -209,15 +214,12 @@ def main() -> int:
             print("%-42s SKIP (no target: %s)" % (rel, target))
             skipped += 1
             continue
-        good, msg = splice(gen, target, args.strategy_title, args.dry_run,
-                           replace=args.replace)
-        print("%-42s %s %s" % (rel, "OK  " if good else "FAIL", msg))
-        if good:
-            ok += 1
-        elif "skipped" in msg:
-            skipped += 1
-        else:
-            failed += 1
+        status, msg = splice(gen, target, args.strategy_title, args.dry_run,
+                             replace=args.replace)
+        print("%-42s %-4s %s" % (rel, status.upper(), msg))
+        ok += status == "ok"
+        skipped += status == "skip"
+        failed += status == "fail"
 
     print("\n%d spliced, %d skipped, %d failed%s"
           % (ok, skipped, failed, "  (dry run)" if args.dry_run else ""))

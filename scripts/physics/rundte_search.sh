@@ -1,3 +1,4 @@
+#!/usr/bin/env bash
 # ========================================================================
 # DTE HYPERPARAMETER SEARCH COMMANDS
 # ========================================================================
@@ -9,7 +10,7 @@
 # BEFORE THE FIRST LAUNCH the processed data must already exist on clariden.
 # configs/experiment/physics/dte*.yaml override /data/data_normalizer to
 # `standard`, which has its own cache tree that nothing else in the repo builds.
-# Build it on olqti with scripts/physics/rundte_pareto.sh and copy the trees
+# Build it on olqti with scripts/physics/rundte_cache.sh and copy the trees
 # listed there; six drivers starting against a missing cache race on the same
 # directory and leave partial parquet behind. Then run one trial
 # (hydra.sweeper.n_trials=1) to confirm 720 minutes is enough.
@@ -17,9 +18,9 @@
 
 # ========================================================================
 # HYPERPARAMETER SEARCHES
-# =========================================================================
+# ========================================================================
 # ------------------------------------------------------------------------
-# Semi-supervised cvar25 training
+# Semi-supervised search (cvar25)
 # ------------------------------------------------------------------------
 # python3 src/train.py \
 #     -m \
@@ -45,7 +46,7 @@
 #     trainer.devices=[0]
 
 # ------------------------------------------------------------------------
-# Semi-supervised cvar10 training
+# Semi-supervised search (cvar10)
 # ------------------------------------------------------------------------
 # python3 src/train.py \
 #     -m \
@@ -72,7 +73,7 @@
 #     trainer.devices=[0]
 
 # ------------------------------------------------------------------------
-# CAP training
+# CAP search
 # ------------------------------------------------------------------------
 # python3 src/train.py \
 #     -m \
@@ -106,7 +107,7 @@
 #     trainer.devices=[0]
 
 # ------------------------------------------------------------------------
-# Stability training
+# Stability search
 # ------------------------------------------------------------------------
 # python3 src/train.py \
 #     -m \
@@ -143,7 +144,7 @@
 #     trainer.devices=[0]
 
 # ------------------------------------------------------------------------
-# Wasserstein training
+# Wasserstein search
 # ------------------------------------------------------------------------
 # python3 src/train.py \
 #     -m \

@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Harvest per-trial wall-clock durations from the Optuna study databases.
 
-``scripts/fetch_optuna_pareto.py`` exports the trials' objective values and
+``scripts/optuna/fetch_optuna_pareto.py`` exports the trials' objective values and
 parameters but drops their timing (its ``attrs=`` omits ``duration`` and
 ``datetime_*``). The sweeps were run with ``logger=none``, so the study
 databases are the *only* record of how long a hyperparameter-search trial took,
@@ -40,7 +40,7 @@ import sqlite3
 from pathlib import Path
 
 # Study-name prefix -> the column it fills in the paper's table. Matches
-# STRATEGIES in scripts/make_pareto_scripts.py.
+# STRATEGIES in scripts/optuna/make_pareto_scripts.py.
 TABLE_STRATEGIES = ["cvar25eff", "drift", "wasserstein", "cap"]
 
 # Databases holding side studies rather than the model/strategy sweeps.

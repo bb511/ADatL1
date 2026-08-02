@@ -13,7 +13,7 @@ Pareto Fronts for the CAP Optimisations\
 Cell["\<\
 Pareto fronts of the CAP hyper-parameter optimisation sweeps: the final publication fronts (semi-supervised, stability, CAP, wasserstein) and one diagnostic front per CAP variant explored during the search.
 
-Inputs: paretos/cap_optimisation/<study>.csv, exported from the Optuna databases by scripts/fetch_optuna_pareto.py. Figures land in paretos/cap_optimisation/plots/ (the ae/drift finals additionally in paretos/). Methods live in notebooks/lib/pareto_cap_lib.wl; run top-to-bottom, or headlessly via scripts/nb_run.wls.
+Inputs: paretos/cap_optimisation/<study>.csv, exported from the Optuna databases by scripts/optuna/fetch_optuna_pareto.py. Figures land in paretos/cap_optimisation/plots/ (the ae/drift finals additionally in paretos/). Methods live in notebooks/lib/pareto_cap_lib.wl; run top-to-bottom, or headlessly via scripts/analysis/nb_run.wls.
 
 Note: makeParetoPlot now takes named options instead of 17 positional arguments. The old search-section calls passed too few positional arguments to match the definition at all, so those sections had been exporting images of the unevaluated expression; with options they fall back to defaults and render real fronts again.\
 \>", "Text"],

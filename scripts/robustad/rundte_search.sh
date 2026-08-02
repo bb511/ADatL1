@@ -1,3 +1,4 @@
+#!/usr/bin/env bash
 # ========================================================================
 # DTE HYPERPARAMETER SEARCH COMMANDS
 # ========================================================================
@@ -6,7 +7,7 @@
 # slurm jobs, so the whole study completes in a single invocation.
 #
 # BEFORE THE FIRST LAUNCH the processed data must already exist on clariden.
-# Build it on olqti with rundte_pareto.sh in this directory and copy the trees
+# Build it on olqti with rundte_cache.sh in this directory and copy the trees
 # listed there.
 #
 # The search space is configs/hparams_search/robustad/dte_optuna.yaml and holds
@@ -15,7 +16,7 @@
 
 
 # ========================================================================
-# HYPERPARAMETER SEARCH
+# HYPERPARAMETER SEARCHES
 # ========================================================================
 # ------------------------------------------------------------------------
 # Semi-supervised search (cvar25)

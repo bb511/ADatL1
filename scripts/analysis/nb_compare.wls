@@ -2,7 +2,7 @@
 (* Compare two trees of exported notebook artifacts (pdf/svg/jpeg/...).
 
    Usage:
-     wolframscript -f scripts/nb_compare.wls <dirA> <dirB> <failDir>
+     wolframscript -f scripts/analysis/nb_compare.wls <dirA> <dirB> <failDir>
 
    Three tiers:
      1. inventory equality (same relative file lists, else exit 1);

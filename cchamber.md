@@ -340,27 +340,19 @@ intervals use ten.
 
 | Architecture | Selection criterion | AUPRC | Eff. | Retrains |
 |---|---|---:|---:|---:|
-| AE | CAP metadata-nearest | 0.7224 | 0.3451 | 3 |
-| AE | CAP encoder-nearest | 0.7238 | 0.3813 | 3 |
-| AE | CAP random pairs | 0.6860 | 0.2891 | 3 |
-| AE | CAP CDF ranks | 0.7355 | 0.4609 | 3 |
-| AE | Marginal drift | 0.7296 | 0.4407 | 3 |
-| AE | Wasserstein | 0.7347 | 0.4370 | 3 |
-| VAE | CAP metadata-nearest | 0.3710 | 0.0713 | 10 |
-| VAE | CAP encoder-nearest | 0.2851 | 0.0786 | 10 |
-| VAE | CAP random pairs | 0.3771 | 0.0162 | 10 |
-| VAE | CAP CDF ranks | 0.2855 | 0.0815 | 10 |
-| VAE | Marginal drift | 0.3710 | 0.0319 | 10 |
-| VAE | Wasserstein | 0.3853 | 0.0681 | 10 |
-| SVDD | CAP metadata-nearest | 0.5016 | 0.1942 | 3 |
 | SVDD | CAP encoder-nearest | 0.5229 | 0.2608 | 3 |
-| SVDD | CAP random pairs | 0.4823 | 0.2229 | 3 |
 | SVDD | CAP CDF ranks | 0.4320 | 0.0459 | 3 |
 | SVDD | Marginal drift | 0.5110 | 0.2507 | 3 |
 | SVDD | Wasserstein | 0.5256 | 0.2626 | 3 |
-| RealNVP | CAP metadata-nearest | 0.7513 | 0.4974 | 10 |
+| AE | CAP encoder-nearest | 0.7238 | 0.3813 | 3 |
+| AE | CAP CDF ranks | 0.7355 | 0.4609 | 3 |
+| AE | Marginal drift | 0.7296 | 0.4407 | 3 |
+| AE | Wasserstein | 0.7347 | 0.4370 | 3 |
+| VAE | CAP encoder-nearest | 0.2851 | 0.0786 | 10 |
+| VAE | CAP CDF ranks | 0.2855 | 0.0815 | 10 |
+| VAE | Marginal drift | 0.3710 | 0.0319 | 10 |
+| VAE | Wasserstein | 0.3853 | 0.0681 | 10 |
 | RealNVP | CAP encoder-nearest | 0.7554 | 0.5678 | 10 |
-| RealNVP | CAP random pairs | 0.6828 | 0.3125 | 10 |
 | RealNVP | CAP CDF ranks | 0.7722 | 0.5615 | 10 |
 | RealNVP | Marginal drift | 0.6473 | 0.3322 | 10 |
 | RealNVP | Wasserstein | 0.4678 | 0.1074 | 10 |
@@ -392,7 +384,6 @@ intervals use ten.
 - [Rewritten appendix](results/reports/extra_cchamber.tex)
 - [Selected-checkpoint performance](results/reports/extra/cchamber_selected_checkpoint_performance.png)
 - [Candidate-ranking validity](results/reports/extra/cchamber_candidate_rank_validity.png)
-- [Controlled physical-shift synthesis](results/reports/extra/cchamber_theorem_bridge.png)
 - [Authoritative Markdown report](/iopsstor/scratch/cscs/vjimenez/adatl1/reports/cchamber_ae_svdd_oas_20260802_0ea01bb/final_report/results_summary.md)
 
 ## Smoke Tests

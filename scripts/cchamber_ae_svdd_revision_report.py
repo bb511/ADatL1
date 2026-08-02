@@ -30,6 +30,9 @@ PHYSICAL = Path(
     "physical_shift_magnitude.csv"
 )
 
+REPORT_MODELS = ("svdd", "ae", "vae", "realnvp")
+REPORT_STRATEGIES = ("cap_encoder_nearest", "cap_cdf", "drift", "wasserstein")
+
 
 def _sha256(path: Path) -> str:
     """Return a streaming SHA-256 digest."""
@@ -85,8 +88,8 @@ def _markdown(summary: pd.DataFrame, rank: pd.DataFrame, output: Path) -> None:
         "| Architecture | Selection criterion | AUPRC | Eff. | Retrains |",
         "|---|---|---:|---:|---:|",
     ]
-    for model in plots.MODELS:
-        for strategy in plots.STRATEGIES:
+    for model in REPORT_MODELS:
+        for strategy in REPORT_STRATEGIES:
             auprc = lookup.loc[(model, strategy, "auprc")]
             efficiency = lookup.loc[(model, strategy, "efficiency_operational")]
             lines.append(
@@ -136,16 +139,12 @@ def _markdown(summary: pd.DataFrame, rank: pd.DataFrame, output: Path) -> None:
             "",
             "![Candidate-ranking validity](./candidate_rank_validity.png)",
             "",
-            "## Controlled physical-shift synthesis",
-            "",
-            "![Controlled physical-shift synthesis](./physical_shift_synthesis.png)",
-            "",
             "## Integrity",
             "",
             "- AE: 48 trajectories, 288 frozen branch checkpoints, 33,408 complete outcome rows.",
             "- SVDD: 48 trajectories, 288 frozen branch checkpoints, 33,408 complete outcome rows.",
             "- Both candidate-rank analyses use all 16 candidates and 10,000 permutations.",
-            "- The random-pair branch is retained as a negative control; all six criteria are reported.",
+            "- The presentation reports encoder-nearest CAP, CDF CAP, marginal drift, and Wasserstein.",
             "",
         ]
     )
@@ -176,6 +175,15 @@ def run(output_dir: Path, repository_extra: Path | None = None) -> list[Path]:
     old_results = pd.read_csv(OLD_THRESHOLD)
     unchanged_results = old_results[old_results.model.isin(("vae", "realnvp"))]
     results = pd.concat([ae_results, svdd_results, unchanged_results], ignore_index=True)
+    # Keep the complete campaigns authoritative at their source roots, while the revised
+    # presentation intentionally contains only the requested models and criteria.
+    summary = summary[
+        summary.model.isin(REPORT_MODELS) & summary.strategy.isin(REPORT_STRATEGIES)
+    ].copy()
+    rank = rank[rank.model.isin(REPORT_MODELS) & rank.strategy.isin(REPORT_STRATEGIES)].copy()
+    results = results[
+        results.model.isin(REPORT_MODELS) & results.strategy.isin(REPORT_STRATEGIES)
+    ].copy()
     physical = pd.read_csv(PHYSICAL)
     physical["system_group"] = physical["physical_class"].map(plots.CLASS_MAP)
     intervention = (
@@ -205,11 +213,15 @@ def run(output_dir: Path, repository_extra: Path | None = None) -> list[Path]:
     rank.to_csv(rank_path, index=False)
     intervention.to_csv(intervention_path, index=False)
     selected_plot = output_dir / "selected_checkpoint_performance.png"
-    plots._plot_architecture_overview(summary, selected_plot)
+    plots._plot_architecture_overview(
+        summary, selected_plot, models=REPORT_MODELS, strategies=REPORT_STRATEGIES
+    )
     rank_plot = output_dir / "candidate_rank_validity.png"
-    plots._plot_rank_heatmap(rank, rank_plot)
+    plots._plot_rank_heatmap(rank, rank_plot, models=REPORT_MODELS, strategies=REPORT_STRATEGIES)
+    # This synthesis is defined around metadata-versus-random CAP, which is intentionally
+    # excluded from the revised presentation. Remove stale copies from earlier generations.
     physical_plot = output_dir / "physical_shift_synthesis.png"
-    plots._plot_physical_synthesis(intervention, physical_plot)
+    physical_plot.unlink(missing_ok=True)
     markdown = output_dir / "results_summary.md"
     _markdown(summary, rank, markdown)
     outputs = [
@@ -218,7 +230,6 @@ def run(output_dir: Path, repository_extra: Path | None = None) -> list[Path]:
         intervention_path,
         selected_plot,
         rank_plot,
-        physical_plot,
         markdown,
     ]
     if repository_extra is not None:
@@ -226,11 +237,11 @@ def run(output_dir: Path, repository_extra: Path | None = None) -> list[Path]:
         for source, name in (
             (selected_plot, "cchamber_selected_checkpoint_performance.png"),
             (rank_plot, "cchamber_candidate_rank_validity.png"),
-            (physical_plot, "cchamber_theorem_bridge.png"),
         ):
             destination = repository_extra / name
             shutil.copy2(source, destination)
             outputs.append(destination)
+        (repository_extra / "cchamber_theorem_bridge.png").unlink(missing_ok=True)
     provenance = {
         "schema_version": 1,
         "old_report": str(OLD_REPORT),

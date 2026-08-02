@@ -58,11 +58,7 @@ class CAPCallback(Callback):
             raise ValueError("metric_name must be a non-empty MLflow-safe metric component.")
         self.dataset_1_inputs = []
         self.dataset_2_inputs = []
-        self.pairing_fn = (
-            None
-            if pairing_type in {"mapping", "precomputed"}
-            else get_pairing_fn(pairing_type)
-        )
+        self.pairing_fn = get_pairing_fn(pairing_type)
         self.beta = beta
 
         self.log_kwargs = dict(
@@ -182,7 +178,7 @@ class CAPCallback(Callback):
         return float(cap_value), float(rankcorr_value)
 
     def _pair_indices(self, dataset_1_scores: torch.Tensor, dataset_2_scores: torch.Tensor):
-        if self.pairing_type not in {"mapping", "precomputed"}:
+        if self.pairing_type != "mapping":
             if self.pairing_type == "random" and self.pairing_seed is not None:
                 n = min(len(dataset_1_scores), len(dataset_2_scores))
                 generator = torch.Generator(device=dataset_2_scores.device)
@@ -214,11 +210,10 @@ class CAPCallback(Callback):
             if self.dataset_2_inputs
             else None,
         )
-        idxs1 = table["idx_1"]
-        idxs2 = table["idx_2"]
-        idxs1 = idxs1.long().to(dataset_1_scores.device)
-        idxs2 = idxs2.long().to(dataset_2_scores.device)
-        return idxs1, idxs2
+        pairing = table.get("map_0_to_1")
+        if pairing is None:
+            pairing = (table["idx_1"], table["idx_2"])
+        return self.pairing_fn(dataset_1_scores, dataset_2_scores, pairing)
 
     def _spearman_corr(self, x: torch.Tensor, y: torch.Tensor) -> float:
         """Compute the Spearman correlation between paired anomaly scores."""

@@ -490,6 +490,17 @@ def _tracking_uri(root: Path) -> str:
     return f"file:{(root / 'mlflow' / 'mlruns').resolve()}"
 
 
+def _initialize_tracking_experiments(root: Path, campaign_id: str) -> str:
+    """Create per-model tracking namespaces before parallel workers start."""
+    tracking_uri = _tracking_uri(root)
+    client = MlflowClient(tracking_uri=tracking_uri)
+    for model in MODELS:
+        experiment_name = f"{campaign_id}_candidate_rank_{model}"
+        if client.get_experiment_by_name(experiment_name) is None:
+            client.create_experiment(experiment_name)
+    return tracking_uri
+
+
 def design(
     root: Path,
     campaign_manifest: Path,
@@ -517,6 +528,7 @@ def design(
     if root.exists():
         raise FileExistsError(f"Audit root already exists: {root}")
     root.mkdir(parents=True)
+    tracking_uri = _initialize_tracking_experiments(root, str(campaign["campaign_id"]))
     panel_path = root / "design" / "candidate_audit_panel.json"
     panel = {
         "schema_version": 1,
@@ -646,7 +658,7 @@ def design(
         "expected_trajectories": EXPECTED_TRAJECTORIES,
         "expected_checkpoints": EXPECTED_CHECKPOINTS,
         "expected_rows": EXPECTED_ROWS,
-        "tracking_uri": _tracking_uri(root),
+        "tracking_uri": tracking_uri,
     }
     _atomic_json(root / "audit.json", audit)
     _write_slurm_scripts(root)
@@ -665,13 +677,13 @@ def _write_slurm_scripts(root: Path) -> None:
         f"AUDIT_ROOT={shlex.quote(str(root.resolve()))}\n"
         f"AUDIT_MANIFEST={shlex.quote(str(audit.resolve()))}\n"
         f"AUDIT_SHA256=$(sha256sum \"$AUDIT_MANIFEST\" | awk '{{print $1}}')\n"
-        'export CCHAMBER_RANK_PANEL=$(python -c \'import json,sys; print(json.load(open(sys.argv[1]))["panel"])\' "$AUDIT_MANIFEST")\n'
-        'export CCHAMBER_RANK_PANEL_SHA256=$(python -c \'import json,sys; print(json.load(open(sys.argv[1]))["panel_sha256"])\' "$AUDIT_MANIFEST")\n'
-        'export CCHAMBER_RANK_CONTRACT=$(python -c \'import json,sys; print(json.load(open(sys.argv[1]))["execution_contract"])\' "$AUDIT_MANIFEST")\n'
-        'export CCHAMBER_RANK_CONTRACT_SHA256=$(python -c \'import json,sys; print(json.load(open(sys.argv[1]))["execution_contract_sha256"])\' "$AUDIT_MANIFEST")\n'
-        'export CCHAMBER_RANK_CAMPAIGN_COMMIT=$(python -c \'import json,sys; print(json.load(open(sys.argv[1]))["campaign_training_commit"])\' "$AUDIT_MANIFEST")\n'
         'cd "$REPO"\n'
         f"UV=({shlex.quote(uv)} run --frozen --no-sync python)\n"
+        'export CCHAMBER_RANK_PANEL=$("${UV[@]}" -c \'import json,sys; print(json.load(open(sys.argv[1]))["panel"])\' "$AUDIT_MANIFEST")\n'
+        'export CCHAMBER_RANK_PANEL_SHA256=$("${UV[@]}" -c \'import json,sys; print(json.load(open(sys.argv[1]))["panel_sha256"])\' "$AUDIT_MANIFEST")\n'
+        'export CCHAMBER_RANK_CONTRACT=$("${UV[@]}" -c \'import json,sys; print(json.load(open(sys.argv[1]))["execution_contract"])\' "$AUDIT_MANIFEST")\n'
+        'export CCHAMBER_RANK_CONTRACT_SHA256=$("${UV[@]}" -c \'import json,sys; print(json.load(open(sys.argv[1]))["execution_contract_sha256"])\' "$AUDIT_MANIFEST")\n'
+        'export CCHAMBER_RANK_CAMPAIGN_COMMIT=$("${UV[@]}" -c \'import json,sys; print(json.load(open(sys.argv[1]))["campaign_training_commit"])\' "$AUDIT_MANIFEST")\n'
     )
 
     def packed(stage: str) -> str:

@@ -699,6 +699,8 @@ def test_generated_slurm_scripts_are_packed_and_resource_exact(tmp_path) -> None
     analyze = (scripts / "analyze.sh").read_text(encoding="utf-8")
     for script in (train, evaluate, canary, timing, freeze, collect, analyze):
         assert "#SBATCH --account=a0166" in script
+        assert "$(python -c" not in script
+        assert '$("${UV[@]}" -c' in script
     for script in (train, evaluate, canary, timing):
         assert "--gpus-per-node=1 --mem=110G" in script
     assert "#SBATCH --partition=normal" in train
@@ -735,6 +737,24 @@ def test_generated_slurm_scripts_are_packed_and_resource_exact(tmp_path) -> None
     }
     for path in scripts.glob("*.sh"):
         subprocess.run(["bash", "-n", str(path)], check=True)  # nosec B603 B607
+
+
+def test_tracking_experiments_are_precreated_idempotently(tmp_path) -> None:
+    """Parallel workers must inherit unique, serially-created MLflow namespaces."""
+    campaign_id = "cchamber_tracking_test"
+    uri = audit._initialize_tracking_experiments(tmp_path, campaign_id)
+    client = audit.MlflowClient(tracking_uri=uri)
+    first = {
+        model: client.get_experiment_by_name(f"{campaign_id}_candidate_rank_{model}").experiment_id
+        for model in audit.MODELS
+    }
+
+    assert audit._initialize_tracking_experiments(tmp_path, campaign_id) == uri
+    second = {
+        model: client.get_experiment_by_name(f"{campaign_id}_candidate_rank_{model}").experiment_id
+        for model in audit.MODELS
+    }
+    assert second == first
 
 
 def test_generated_slurm_workflow_has_exact_afterok_chain(tmp_path) -> None:

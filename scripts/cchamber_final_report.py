@@ -27,7 +27,7 @@ matplotlib.use("Agg")
 import matplotlib.pyplot as plt  # noqa: E402
 
 MODELS = ("ae", "vae", "svdd", "realnvp")
-PRESENTATION_MODELS = ("svdd", "vae", "realnvp")
+PRESENTATION_MODELS = ("ae", "vae", "svdd", "realnvp")
 STRATEGIES = (
     "cap_metadata_nearest",
     "cap_encoder_nearest",

@@ -8,11 +8,10 @@ import pytest
 from scripts import cchamber_final_report
 
 
-def test_presentation_model_order_excludes_ae() -> None:
-    """The first two presentation figures use the frozen requested model order."""
-    assert cchamber_final_report.PRESENTATION_MODELS == ("svdd", "vae", "realnvp")
-    assert "ae" not in cchamber_final_report.PRESENTATION_MODELS
-    assert "ae" in cchamber_final_report.MODELS
+def test_presentation_model_order_includes_every_architecture() -> None:
+    """The first two presentation figures include all reported architectures."""
+    assert cchamber_final_report.PRESENTATION_MODELS == ("ae", "vae", "svdd", "realnvp")
+    assert cchamber_final_report.PRESENTATION_MODELS == cchamber_final_report.MODELS
 
 
 def test_physical_presentation_contrasts_use_requested_strategies() -> None:

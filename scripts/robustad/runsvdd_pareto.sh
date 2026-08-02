@@ -16,784 +16,674 @@
 # CVAR25 TRAINING  (study: cvar25eff_vs_dist, 1 Pareto points)
 # ========================================================================
 # ------------------------------------------------------------------------
-# trial 518: cvar25eff=1000, dist=6.3251e-05  << ORIGINAL PICK | BEST cvar25eff
+# trial 504: cvar25eff=1000, dist=0.00010483  << BEST cvar25eff
 # ------------------------------------------------------------------------
 # taskset -c 0-2 \
 # python3 src/train.py \
 #     experiment=robustad/svdd \
 #     experiment_name=robustad_svdd_pareto \
-#     run_name=cvar25_t518 \
-#     algorithm.center_init_method=mean \
-#     algorithm.encoder.activation=silu \
-#     algorithm.encoder.batchnorm=False \
+#     run_name=cvar25_t504 \
 #     algorithm.encoder.nodes='[8,16,32]' \
 #     algorithm.encoder.strides='[2,2]' \
-#     algorithm.nu=0.2 \
-#     algorithm.optimizer.betas='[0.9,0.999]' \
-#     algorithm.optimizer.lr=0.0008931169751749622 \
-#     algorithm.optimizer.weight_decay=0.0 \
-#     algorithm.soft_boundary=True \
-#     algorithm.weight_decay=1e-05 \
+#     algorithm.network_weight_decay=0.0 \
+#     algorithm.optimizer.betas='[0.9,0.99]' \
+#     algorithm.optimizer.lr=0.000954875333296137 \
 #     trainer.gradient_clip_val=0.5 \
 #     trainer=gpu \
 #     trainer.devices=[0]
 
 # ========================================================================
-# CAP TRAINING  (study: cap_vs_dist, 26 Pareto points)
+# CAP TRAINING  (study: cap_vs_dist, 25 Pareto points)
 # ========================================================================
 # ------------------------------------------------------------------------
-# trial 220: cap=-0.72115, dist=0.00018649
+# trial 143: cap=-0.7371, dist=0.00016883
 # ------------------------------------------------------------------------
 # taskset -c 0-2 \
 # python3 src/train.py \
 #     experiment=robustad/svdd_agnostic \
 #     experiment_name=robustad_svdd_pareto \
-#     run_name=cap_t220 \
+#     run_name=cap_t143 \
 #     callbacks.wasserstein_dist=null \
 #     callbacks.thres_drift=null \
+#     callbacks.consistency_sn_zb=null \
 #     callbacks.wasserstein_dist_ema_ckpt=null \
 #     callbacks.thres_drift_ema_ckpt=null \
+#     callbacks.consistency_sn_zb_ema_ckpt=null \
 #     ~evaluation.evaluator.ckpts.summary.operational_drift_ema \
 #     ~evaluation.evaluator.ckpts.summary.w1dist_ema_normal_vs_shifted_normal_all \
-#     algorithm.center_init_method=zeros \
-#     algorithm.encoder.activation=relu \
-#     algorithm.encoder.batchnorm=False \
-#     algorithm.encoder.nodes='[32,64,128]' \
-#     algorithm.encoder.strides='[2,2]' \
-#     algorithm.nu=0.1 \
-#     algorithm.optimizer.betas='[0.9,0.999]' \
-#     algorithm.optimizer.lr=0.0009995761229175649 \
-#     algorithm.optimizer.weight_decay=1e-06 \
-#     algorithm.soft_boundary=False \
-#     algorithm.weight_decay=1e-08 \
-#     trainer.gradient_clip_val=0.5 \
-#     trainer=gpu \
-#     trainer.devices=[0]
-
-# ------------------------------------------------------------------------
-# trial 222: cap=-0.72237, dist=0.00016724
-# ------------------------------------------------------------------------
-# taskset -c 3-5 \
-# python3 src/train.py \
-#     experiment=robustad/svdd_agnostic \
-#     experiment_name=robustad_svdd_pareto \
-#     run_name=cap_t222 \
-#     callbacks.wasserstein_dist=null \
-#     callbacks.thres_drift=null \
-#     callbacks.wasserstein_dist_ema_ckpt=null \
-#     callbacks.thres_drift_ema_ckpt=null \
-#     ~evaluation.evaluator.ckpts.summary.operational_drift_ema \
-#     ~evaluation.evaluator.ckpts.summary.w1dist_ema_normal_vs_shifted_normal_all \
-#     algorithm.center_init_method=zeros \
-#     algorithm.encoder.activation=relu \
-#     algorithm.encoder.batchnorm=False \
-#     algorithm.encoder.nodes='[32,64,128]' \
-#     algorithm.encoder.strides='[2,2]' \
-#     algorithm.nu=0.1 \
-#     algorithm.optimizer.betas='[0.9,0.999]' \
-#     algorithm.optimizer.lr=0.0009955551099150152 \
-#     algorithm.optimizer.weight_decay=1e-06 \
-#     algorithm.soft_boundary=False \
-#     algorithm.weight_decay=1e-08 \
-#     trainer.gradient_clip_val=0.5 \
-#     trainer=gpu \
-#     trainer.devices=[1]
-
-# ------------------------------------------------------------------------
-# trial 227: cap=-0.72221, dist=0.00017457
-# ------------------------------------------------------------------------
-# taskset -c 6-8 \
-# python3 src/train.py \
-#     experiment=robustad/svdd_agnostic \
-#     experiment_name=robustad_svdd_pareto \
-#     run_name=cap_t227 \
-#     callbacks.wasserstein_dist=null \
-#     callbacks.thres_drift=null \
-#     callbacks.wasserstein_dist_ema_ckpt=null \
-#     callbacks.thres_drift_ema_ckpt=null \
-#     ~evaluation.evaluator.ckpts.summary.operational_drift_ema \
-#     ~evaluation.evaluator.ckpts.summary.w1dist_ema_normal_vs_shifted_normal_all \
-#     algorithm.center_init_method=zeros \
-#     algorithm.encoder.activation=relu \
-#     algorithm.encoder.batchnorm=False \
-#     algorithm.encoder.nodes='[32,64,128]' \
-#     algorithm.encoder.strides='[2,2]' \
-#     algorithm.nu=0.05 \
-#     algorithm.optimizer.betas='[0.9,0.999]' \
-#     algorithm.optimizer.lr=0.000999365956058271 \
-#     algorithm.optimizer.weight_decay=1e-06 \
-#     algorithm.soft_boundary=False \
-#     algorithm.weight_decay=1e-08 \
-#     trainer.gradient_clip_val=0.5 \
-#     trainer=gpu \
-#     trainer.devices=[2]
-
-# ------------------------------------------------------------------------
-# trial 265: cap=-0.71611, dist=0.00019045
-# ------------------------------------------------------------------------
-# taskset -c 9-11 \
-# python3 src/train.py \
-#     experiment=robustad/svdd_agnostic \
-#     experiment_name=robustad_svdd_pareto \
-#     run_name=cap_t265 \
-#     callbacks.wasserstein_dist=null \
-#     callbacks.thres_drift=null \
-#     callbacks.wasserstein_dist_ema_ckpt=null \
-#     callbacks.thres_drift_ema_ckpt=null \
-#     ~evaluation.evaluator.ckpts.summary.operational_drift_ema \
-#     ~evaluation.evaluator.ckpts.summary.w1dist_ema_normal_vs_shifted_normal_all \
-#     algorithm.center_init_method=zeros \
-#     algorithm.encoder.activation=relu \
-#     algorithm.encoder.batchnorm=False \
-#     algorithm.encoder.nodes='[32,64,128]' \
-#     algorithm.encoder.strides='[2,2]' \
-#     algorithm.nu=0.05 \
-#     algorithm.optimizer.betas='[0.9,0.999]' \
-#     algorithm.optimizer.lr=0.000999679348708815 \
-#     algorithm.optimizer.weight_decay=0.0 \
-#     algorithm.soft_boundary=True \
-#     algorithm.weight_decay=1e-07 \
-#     trainer.gradient_clip_val=0.5 \
-#     trainer=gpu \
-#     trainer.devices=[3]
-
-# ------------------------------------------------------------------------
-# trial 344: cap=-0.74106, dist=0.00011993
-# ------------------------------------------------------------------------
-# taskset -c 0-2 \
-# python3 src/train.py \
-#     experiment=robustad/svdd_agnostic \
-#     experiment_name=robustad_svdd_pareto \
-#     run_name=cap_t344 \
-#     callbacks.wasserstein_dist=null \
-#     callbacks.thres_drift=null \
-#     callbacks.wasserstein_dist_ema_ckpt=null \
-#     callbacks.thres_drift_ema_ckpt=null \
-#     ~evaluation.evaluator.ckpts.summary.operational_drift_ema \
-#     ~evaluation.evaluator.ckpts.summary.w1dist_ema_normal_vs_shifted_normal_all \
-#     algorithm.center_init_method=mean \
-#     algorithm.encoder.activation=gelu \
-#     algorithm.encoder.batchnorm=False \
-#     algorithm.encoder.nodes='[8,16,32]' \
-#     algorithm.encoder.strides='[2,2]' \
-#     algorithm.nu=0.05 \
-#     algorithm.optimizer.betas='[0.9,0.999]' \
-#     algorithm.optimizer.lr=0.000999960363091811 \
-#     algorithm.optimizer.weight_decay=1e-05 \
-#     algorithm.soft_boundary=True \
-#     algorithm.weight_decay=1e-08 \
-#     trainer.gradient_clip_val=0.5 \
-#     trainer=gpu \
-#     trainer.devices=[0]
-
-# ------------------------------------------------------------------------
-# trial 358: cap=-0.74119, dist=0.0001001
-# ------------------------------------------------------------------------
-# taskset -c 3-5 \
-# python3 src/train.py \
-#     experiment=robustad/svdd_agnostic \
-#     experiment_name=robustad_svdd_pareto \
-#     run_name=cap_t358 \
-#     callbacks.wasserstein_dist=null \
-#     callbacks.thres_drift=null \
-#     callbacks.wasserstein_dist_ema_ckpt=null \
-#     callbacks.thres_drift_ema_ckpt=null \
-#     ~evaluation.evaluator.ckpts.summary.operational_drift_ema \
-#     ~evaluation.evaluator.ckpts.summary.w1dist_ema_normal_vs_shifted_normal_all \
-#     algorithm.center_init_method=mean \
-#     algorithm.encoder.activation=gelu \
-#     algorithm.encoder.batchnorm=False \
-#     algorithm.encoder.nodes='[8,16,32]' \
-#     algorithm.encoder.strides='[2,2]' \
-#     algorithm.nu=0.05 \
-#     algorithm.optimizer.betas='[0.9,0.999]' \
-#     algorithm.optimizer.lr=0.0009424949076079646 \
-#     algorithm.optimizer.weight_decay=1e-05 \
-#     algorithm.soft_boundary=True \
-#     algorithm.weight_decay=1e-08 \
-#     trainer.gradient_clip_val=0.5 \
-#     trainer=gpu \
-#     trainer.devices=[1]
-
-# ------------------------------------------------------------------------
-# trial 366: cap=-0.74157, dist=9.9424e-05
-# ------------------------------------------------------------------------
-# taskset -c 6-8 \
-# python3 src/train.py \
-#     experiment=robustad/svdd_agnostic \
-#     experiment_name=robustad_svdd_pareto \
-#     run_name=cap_t366 \
-#     callbacks.wasserstein_dist=null \
-#     callbacks.thres_drift=null \
-#     callbacks.wasserstein_dist_ema_ckpt=null \
-#     callbacks.thres_drift_ema_ckpt=null \
-#     ~evaluation.evaluator.ckpts.summary.operational_drift_ema \
-#     ~evaluation.evaluator.ckpts.summary.w1dist_ema_normal_vs_shifted_normal_all \
-#     algorithm.center_init_method=mean \
-#     algorithm.encoder.activation=gelu \
-#     algorithm.encoder.batchnorm=False \
-#     algorithm.encoder.nodes='[8,16,32]' \
-#     algorithm.encoder.strides='[2,2]' \
-#     algorithm.nu=0.05 \
-#     algorithm.optimizer.betas='[0.9,0.999]' \
-#     algorithm.optimizer.lr=0.0008779182094569178 \
-#     algorithm.optimizer.weight_decay=1e-05 \
-#     algorithm.soft_boundary=True \
-#     algorithm.weight_decay=1e-08 \
-#     trainer.gradient_clip_val=0.5 \
-#     trainer=gpu \
-#     trainer.devices=[2]
-
-# ------------------------------------------------------------------------
-# trial 391: cap=-0.69405, dist=0.0030467
-# ------------------------------------------------------------------------
-# taskset -c 9-11 \
-# python3 src/train.py \
-#     experiment=robustad/svdd_agnostic \
-#     experiment_name=robustad_svdd_pareto \
-#     run_name=cap_t391 \
-#     callbacks.wasserstein_dist=null \
-#     callbacks.thres_drift=null \
-#     callbacks.wasserstein_dist_ema_ckpt=null \
-#     callbacks.thres_drift_ema_ckpt=null \
-#     ~evaluation.evaluator.ckpts.summary.operational_drift_ema \
-#     ~evaluation.evaluator.ckpts.summary.w1dist_ema_normal_vs_shifted_normal_all \
-#     algorithm.center_init_method=mean \
-#     algorithm.encoder.activation=relu \
-#     algorithm.encoder.batchnorm=False \
-#     algorithm.encoder.nodes='[32,64,128]' \
-#     algorithm.encoder.strides='[2,2]' \
-#     algorithm.nu=0.05 \
-#     algorithm.optimizer.betas='[0.9,0.999]' \
-#     algorithm.optimizer.lr=0.0009410966842111044 \
-#     algorithm.optimizer.weight_decay=0.0 \
-#     algorithm.soft_boundary=True \
-#     algorithm.weight_decay=1e-07 \
-#     trainer.gradient_clip_val=0.5 \
-#     trainer=gpu \
-#     trainer.devices=[3]
-
-# ------------------------------------------------------------------------
-# trial 465: cap=-0.74017, dist=0.00015288
-# ------------------------------------------------------------------------
-# taskset -c 0-2 \
-# python3 src/train.py \
-#     experiment=robustad/svdd_agnostic \
-#     experiment_name=robustad_svdd_pareto \
-#     run_name=cap_t465 \
-#     callbacks.wasserstein_dist=null \
-#     callbacks.thres_drift=null \
-#     callbacks.wasserstein_dist_ema_ckpt=null \
-#     callbacks.thres_drift_ema_ckpt=null \
-#     ~evaluation.evaluator.ckpts.summary.operational_drift_ema \
-#     ~evaluation.evaluator.ckpts.summary.w1dist_ema_normal_vs_shifted_normal_all \
-#     algorithm.center_init_method=mean \
-#     algorithm.encoder.activation=relu \
-#     algorithm.encoder.batchnorm=False \
+#     ~evaluation.evaluator.ckpts.summary.consistency_ema_normal_vs_shifted_normal_all \
 #     algorithm.encoder.nodes='[16,32,64]' \
 #     algorithm.encoder.strides='[2,2]' \
-#     algorithm.nu=0.01 \
-#     algorithm.optimizer.betas='[0.9,0.99]' \
-#     algorithm.optimizer.lr=0.0009457302452553448 \
-#     algorithm.optimizer.weight_decay=0.0 \
-#     algorithm.soft_boundary=True \
-#     algorithm.weight_decay=1e-07 \
+#     algorithm.network_weight_decay=1e-05 \
+#     algorithm.optimizer.betas='[0.9,0.999]' \
+#     algorithm.optimizer.lr=0.0008933147576047501 \
 #     trainer.gradient_clip_val=0.5 \
 #     trainer=gpu \
 #     trainer.devices=[0]
 
 # ------------------------------------------------------------------------
-# trial 490: cap=-0.69895, dist=0.0025104
+# trial 181: cap=-0.71104, dist=0.00022244
 # ------------------------------------------------------------------------
 # taskset -c 3-5 \
 # python3 src/train.py \
 #     experiment=robustad/svdd_agnostic \
 #     experiment_name=robustad_svdd_pareto \
-#     run_name=cap_t490 \
+#     run_name=cap_t181 \
 #     callbacks.wasserstein_dist=null \
 #     callbacks.thres_drift=null \
+#     callbacks.consistency_sn_zb=null \
 #     callbacks.wasserstein_dist_ema_ckpt=null \
 #     callbacks.thres_drift_ema_ckpt=null \
+#     callbacks.consistency_sn_zb_ema_ckpt=null \
 #     ~evaluation.evaluator.ckpts.summary.operational_drift_ema \
 #     ~evaluation.evaluator.ckpts.summary.w1dist_ema_normal_vs_shifted_normal_all \
-#     algorithm.center_init_method=mean \
-#     algorithm.encoder.activation=relu \
-#     algorithm.encoder.batchnorm=False \
+#     ~evaluation.evaluator.ckpts.summary.consistency_ema_normal_vs_shifted_normal_all \
 #     algorithm.encoder.nodes='[32,64,128]' \
 #     algorithm.encoder.strides='[2,2]' \
-#     algorithm.nu=0.05 \
+#     algorithm.network_weight_decay=1e-05 \
 #     algorithm.optimizer.betas='[0.9,0.99]' \
-#     algorithm.optimizer.lr=0.0008908476000488082 \
-#     algorithm.optimizer.weight_decay=0.0 \
-#     algorithm.soft_boundary=True \
-#     algorithm.weight_decay=0.0 \
-#     trainer.gradient_clip_val=1.0 \
+#     algorithm.optimizer.lr=0.0008715972234716673 \
+#     trainer.gradient_clip_val=0.5 \
 #     trainer=gpu \
 #     trainer.devices=[1]
 
 # ------------------------------------------------------------------------
-# trial 496: cap=-0.69489, dist=0.0026483
+# trial 184: cap=-0.69646, dist=0.0063097
 # ------------------------------------------------------------------------
 # taskset -c 6-8 \
 # python3 src/train.py \
 #     experiment=robustad/svdd_agnostic \
 #     experiment_name=robustad_svdd_pareto \
-#     run_name=cap_t496 \
+#     run_name=cap_t184 \
 #     callbacks.wasserstein_dist=null \
 #     callbacks.thres_drift=null \
+#     callbacks.consistency_sn_zb=null \
 #     callbacks.wasserstein_dist_ema_ckpt=null \
 #     callbacks.thres_drift_ema_ckpt=null \
+#     callbacks.consistency_sn_zb_ema_ckpt=null \
 #     ~evaluation.evaluator.ckpts.summary.operational_drift_ema \
 #     ~evaluation.evaluator.ckpts.summary.w1dist_ema_normal_vs_shifted_normal_all \
-#     algorithm.center_init_method=mean \
-#     algorithm.encoder.activation=relu \
-#     algorithm.encoder.batchnorm=False \
+#     ~evaluation.evaluator.ckpts.summary.consistency_ema_normal_vs_shifted_normal_all \
 #     algorithm.encoder.nodes='[32,64,128]' \
 #     algorithm.encoder.strides='[2,2]' \
-#     algorithm.nu=0.05 \
+#     algorithm.network_weight_decay=1e-05 \
 #     algorithm.optimizer.betas='[0.9,0.99]' \
-#     algorithm.optimizer.lr=0.000948604434020951 \
-#     algorithm.optimizer.weight_decay=0.0 \
-#     algorithm.soft_boundary=True \
-#     algorithm.weight_decay=0.0 \
-#     trainer.gradient_clip_val=1.0 \
+#     algorithm.optimizer.lr=0.0008675305083617928 \
+#     trainer.gradient_clip_val=0.5 \
 #     trainer=gpu \
 #     trainer.devices=[2]
 
 # ------------------------------------------------------------------------
-# trial 525: cap=-0.70849, dist=0.00049658
+# trial 186: cap=-0.70858, dist=0.00030801
 # ------------------------------------------------------------------------
 # taskset -c 9-11 \
 # python3 src/train.py \
 #     experiment=robustad/svdd_agnostic \
 #     experiment_name=robustad_svdd_pareto \
-#     run_name=cap_t525 \
+#     run_name=cap_t186 \
 #     callbacks.wasserstein_dist=null \
 #     callbacks.thres_drift=null \
+#     callbacks.consistency_sn_zb=null \
 #     callbacks.wasserstein_dist_ema_ckpt=null \
 #     callbacks.thres_drift_ema_ckpt=null \
+#     callbacks.consistency_sn_zb_ema_ckpt=null \
 #     ~evaluation.evaluator.ckpts.summary.operational_drift_ema \
 #     ~evaluation.evaluator.ckpts.summary.w1dist_ema_normal_vs_shifted_normal_all \
-#     algorithm.center_init_method=mean \
-#     algorithm.encoder.activation=relu \
-#     algorithm.encoder.batchnorm=False \
+#     ~evaluation.evaluator.ckpts.summary.consistency_ema_normal_vs_shifted_normal_all \
 #     algorithm.encoder.nodes='[32,64,128]' \
 #     algorithm.encoder.strides='[2,2]' \
-#     algorithm.nu=0.05 \
+#     algorithm.network_weight_decay=1e-05 \
 #     algorithm.optimizer.betas='[0.9,0.99]' \
-#     algorithm.optimizer.lr=0.0009525505170223769 \
-#     algorithm.optimizer.weight_decay=0.0 \
-#     algorithm.soft_boundary=True \
-#     algorithm.weight_decay=0.0 \
-#     trainer.gradient_clip_val=1.0 \
+#     algorithm.optimizer.lr=0.0009975353100871247 \
+#     trainer.gradient_clip_val=0.5 \
 #     trainer=gpu \
 #     trainer.devices=[3]
 
 # ------------------------------------------------------------------------
-# trial 538: cap=-0.70291, dist=0.0014079
+# trial 188: cap=-0.70768, dist=0.00039871
 # ------------------------------------------------------------------------
 # taskset -c 0-2 \
 # python3 src/train.py \
 #     experiment=robustad/svdd_agnostic \
 #     experiment_name=robustad_svdd_pareto \
-#     run_name=cap_t538 \
+#     run_name=cap_t188 \
 #     callbacks.wasserstein_dist=null \
 #     callbacks.thres_drift=null \
+#     callbacks.consistency_sn_zb=null \
 #     callbacks.wasserstein_dist_ema_ckpt=null \
 #     callbacks.thres_drift_ema_ckpt=null \
+#     callbacks.consistency_sn_zb_ema_ckpt=null \
 #     ~evaluation.evaluator.ckpts.summary.operational_drift_ema \
 #     ~evaluation.evaluator.ckpts.summary.w1dist_ema_normal_vs_shifted_normal_all \
-#     algorithm.center_init_method=mean \
-#     algorithm.encoder.activation=relu \
-#     algorithm.encoder.batchnorm=False \
+#     ~evaluation.evaluator.ckpts.summary.consistency_ema_normal_vs_shifted_normal_all \
 #     algorithm.encoder.nodes='[32,64,128]' \
 #     algorithm.encoder.strides='[2,2]' \
-#     algorithm.nu=0.05 \
+#     algorithm.network_weight_decay=1e-05 \
 #     algorithm.optimizer.betas='[0.9,0.99]' \
-#     algorithm.optimizer.lr=0.0009533480508782476 \
-#     algorithm.optimizer.weight_decay=0.0 \
-#     algorithm.soft_boundary=True \
-#     algorithm.weight_decay=0.0 \
-#     trainer.gradient_clip_val=1.0 \
+#     algorithm.optimizer.lr=0.0009918688940934667 \
+#     trainer.gradient_clip_val=0.5 \
 #     trainer=gpu \
 #     trainer.devices=[0]
 
 # ------------------------------------------------------------------------
-# trial 539: cap=-0.71049, dist=0.00025746
+# trial 192: cap=-0.70914, dist=0.00027162
 # ------------------------------------------------------------------------
 # taskset -c 3-5 \
 # python3 src/train.py \
 #     experiment=robustad/svdd_agnostic \
 #     experiment_name=robustad_svdd_pareto \
-#     run_name=cap_t539 \
+#     run_name=cap_t192 \
 #     callbacks.wasserstein_dist=null \
 #     callbacks.thres_drift=null \
+#     callbacks.consistency_sn_zb=null \
 #     callbacks.wasserstein_dist_ema_ckpt=null \
 #     callbacks.thres_drift_ema_ckpt=null \
+#     callbacks.consistency_sn_zb_ema_ckpt=null \
 #     ~evaluation.evaluator.ckpts.summary.operational_drift_ema \
 #     ~evaluation.evaluator.ckpts.summary.w1dist_ema_normal_vs_shifted_normal_all \
-#     algorithm.center_init_method=mean \
-#     algorithm.encoder.activation=relu \
-#     algorithm.encoder.batchnorm=False \
+#     ~evaluation.evaluator.ckpts.summary.consistency_ema_normal_vs_shifted_normal_all \
 #     algorithm.encoder.nodes='[32,64,128]' \
 #     algorithm.encoder.strides='[2,2]' \
-#     algorithm.nu=0.05 \
+#     algorithm.network_weight_decay=1e-05 \
 #     algorithm.optimizer.betas='[0.9,0.99]' \
-#     algorithm.optimizer.lr=0.0009537078274266963 \
-#     algorithm.optimizer.weight_decay=0.0 \
-#     algorithm.soft_boundary=True \
-#     algorithm.weight_decay=0.0 \
-#     trainer.gradient_clip_val=1.0 \
+#     algorithm.optimizer.lr=0.000999863043063352 \
+#     trainer.gradient_clip_val=0.5 \
 #     trainer=gpu \
 #     trainer.devices=[1]
 
 # ------------------------------------------------------------------------
-# trial 543: cap=-0.71005, dist=0.00038515
+# trial 193: cap=-0.70767, dist=0.00055497
 # ------------------------------------------------------------------------
 # taskset -c 6-8 \
 # python3 src/train.py \
 #     experiment=robustad/svdd_agnostic \
 #     experiment_name=robustad_svdd_pareto \
-#     run_name=cap_t543 \
+#     run_name=cap_t193 \
 #     callbacks.wasserstein_dist=null \
 #     callbacks.thres_drift=null \
+#     callbacks.consistency_sn_zb=null \
 #     callbacks.wasserstein_dist_ema_ckpt=null \
 #     callbacks.thres_drift_ema_ckpt=null \
+#     callbacks.consistency_sn_zb_ema_ckpt=null \
 #     ~evaluation.evaluator.ckpts.summary.operational_drift_ema \
 #     ~evaluation.evaluator.ckpts.summary.w1dist_ema_normal_vs_shifted_normal_all \
-#     algorithm.center_init_method=mean \
-#     algorithm.encoder.activation=relu \
-#     algorithm.encoder.batchnorm=False \
+#     ~evaluation.evaluator.ckpts.summary.consistency_ema_normal_vs_shifted_normal_all \
 #     algorithm.encoder.nodes='[32,64,128]' \
 #     algorithm.encoder.strides='[2,2]' \
-#     algorithm.nu=0.05 \
+#     algorithm.network_weight_decay=1e-05 \
 #     algorithm.optimizer.betas='[0.9,0.99]' \
-#     algorithm.optimizer.lr=0.0008952477832509553 \
-#     algorithm.optimizer.weight_decay=0.0 \
-#     algorithm.soft_boundary=True \
-#     algorithm.weight_decay=0.0 \
-#     trainer.gradient_clip_val=1.0 \
+#     algorithm.optimizer.lr=0.000997766616209934 \
+#     trainer.gradient_clip_val=0.5 \
 #     trainer=gpu \
 #     trainer.devices=[2]
 
 # ------------------------------------------------------------------------
-# trial 546: cap=-0.69141, dist=0.0052143  << ORIGINAL PICK | BEST cap
+# trial 194: cap=-0.70735, dist=0.0005658
 # ------------------------------------------------------------------------
 # taskset -c 9-11 \
+# python3 src/train.py \
+#     experiment=robustad/svdd_agnostic \
+#     experiment_name=robustad_svdd_pareto \
+#     run_name=cap_t194 \
+#     callbacks.wasserstein_dist=null \
+#     callbacks.thres_drift=null \
+#     callbacks.consistency_sn_zb=null \
+#     callbacks.wasserstein_dist_ema_ckpt=null \
+#     callbacks.thres_drift_ema_ckpt=null \
+#     callbacks.consistency_sn_zb_ema_ckpt=null \
+#     ~evaluation.evaluator.ckpts.summary.operational_drift_ema \
+#     ~evaluation.evaluator.ckpts.summary.w1dist_ema_normal_vs_shifted_normal_all \
+#     ~evaluation.evaluator.ckpts.summary.consistency_ema_normal_vs_shifted_normal_all \
+#     algorithm.encoder.nodes='[32,64,128]' \
+#     algorithm.encoder.strides='[2,2]' \
+#     algorithm.network_weight_decay=1e-05 \
+#     algorithm.optimizer.betas='[0.9,0.99]' \
+#     algorithm.optimizer.lr=0.0009987872528446273 \
+#     trainer.gradient_clip_val=0.5 \
+#     trainer=gpu \
+#     trainer.devices=[3]
+
+# ------------------------------------------------------------------------
+# trial 206: cap=-0.70581, dist=0.00090382
+# ------------------------------------------------------------------------
+# taskset -c 0-2 \
+# python3 src/train.py \
+#     experiment=robustad/svdd_agnostic \
+#     experiment_name=robustad_svdd_pareto \
+#     run_name=cap_t206 \
+#     callbacks.wasserstein_dist=null \
+#     callbacks.thres_drift=null \
+#     callbacks.consistency_sn_zb=null \
+#     callbacks.wasserstein_dist_ema_ckpt=null \
+#     callbacks.thres_drift_ema_ckpt=null \
+#     callbacks.consistency_sn_zb_ema_ckpt=null \
+#     ~evaluation.evaluator.ckpts.summary.operational_drift_ema \
+#     ~evaluation.evaluator.ckpts.summary.w1dist_ema_normal_vs_shifted_normal_all \
+#     ~evaluation.evaluator.ckpts.summary.consistency_ema_normal_vs_shifted_normal_all \
+#     algorithm.encoder.nodes='[32,64,128]' \
+#     algorithm.encoder.strides='[2,2]' \
+#     algorithm.network_weight_decay=1e-05 \
+#     algorithm.optimizer.betas='[0.9,0.99]' \
+#     algorithm.optimizer.lr=0.0009995480562602053 \
+#     trainer.gradient_clip_val=0.5 \
+#     trainer=gpu \
+#     trainer.devices=[0]
+
+# ------------------------------------------------------------------------
+# trial 238: cap=-0.70808, dist=0.00031605  << KNEE
+# ------------------------------------------------------------------------
+# taskset -c 3-5 \
+# python3 src/train.py \
+#     experiment=robustad/svdd_agnostic \
+#     experiment_name=robustad_svdd_pareto \
+#     run_name=cap_t238 \
+#     callbacks.wasserstein_dist=null \
+#     callbacks.thres_drift=null \
+#     callbacks.consistency_sn_zb=null \
+#     callbacks.wasserstein_dist_ema_ckpt=null \
+#     callbacks.thres_drift_ema_ckpt=null \
+#     callbacks.consistency_sn_zb_ema_ckpt=null \
+#     ~evaluation.evaluator.ckpts.summary.operational_drift_ema \
+#     ~evaluation.evaluator.ckpts.summary.w1dist_ema_normal_vs_shifted_normal_all \
+#     ~evaluation.evaluator.ckpts.summary.consistency_ema_normal_vs_shifted_normal_all \
+#     algorithm.encoder.nodes='[32,64,128]' \
+#     algorithm.encoder.strides='[2,2]' \
+#     algorithm.network_weight_decay=1e-05 \
+#     algorithm.optimizer.betas='[0.9,0.99]' \
+#     algorithm.optimizer.lr=0.0009458645243551287 \
+#     trainer.gradient_clip_val=0.5 \
+#     trainer=gpu \
+#     trainer.devices=[1]
+
+# ------------------------------------------------------------------------
+# trial 256: cap=-0.70896, dist=0.00027286
+# ------------------------------------------------------------------------
+# taskset -c 6-8 \
+# python3 src/train.py \
+#     experiment=robustad/svdd_agnostic \
+#     experiment_name=robustad_svdd_pareto \
+#     run_name=cap_t256 \
+#     callbacks.wasserstein_dist=null \
+#     callbacks.thres_drift=null \
+#     callbacks.consistency_sn_zb=null \
+#     callbacks.wasserstein_dist_ema_ckpt=null \
+#     callbacks.thres_drift_ema_ckpt=null \
+#     callbacks.consistency_sn_zb_ema_ckpt=null \
+#     ~evaluation.evaluator.ckpts.summary.operational_drift_ema \
+#     ~evaluation.evaluator.ckpts.summary.w1dist_ema_normal_vs_shifted_normal_all \
+#     ~evaluation.evaluator.ckpts.summary.consistency_ema_normal_vs_shifted_normal_all \
+#     algorithm.encoder.nodes='[32,64,128]' \
+#     algorithm.encoder.strides='[2,2]' \
+#     algorithm.network_weight_decay=1e-05 \
+#     algorithm.optimizer.betas='[0.9,0.99]' \
+#     algorithm.optimizer.lr=0.0009543605145395421 \
+#     trainer.gradient_clip_val=0.5 \
+#     trainer=gpu \
+#     trainer.devices=[2]
+
+# ------------------------------------------------------------------------
+# trial 300: cap=-0.70892, dist=0.00030651
+# ------------------------------------------------------------------------
+# taskset -c 9-11 \
+# python3 src/train.py \
+#     experiment=robustad/svdd_agnostic \
+#     experiment_name=robustad_svdd_pareto \
+#     run_name=cap_t300 \
+#     callbacks.wasserstein_dist=null \
+#     callbacks.thres_drift=null \
+#     callbacks.consistency_sn_zb=null \
+#     callbacks.wasserstein_dist_ema_ckpt=null \
+#     callbacks.thres_drift_ema_ckpt=null \
+#     callbacks.consistency_sn_zb_ema_ckpt=null \
+#     ~evaluation.evaluator.ckpts.summary.operational_drift_ema \
+#     ~evaluation.evaluator.ckpts.summary.w1dist_ema_normal_vs_shifted_normal_all \
+#     ~evaluation.evaluator.ckpts.summary.consistency_ema_normal_vs_shifted_normal_all \
+#     algorithm.encoder.nodes='[32,64,128]' \
+#     algorithm.encoder.strides='[2,2]' \
+#     algorithm.network_weight_decay=1e-05 \
+#     algorithm.optimizer.betas='[0.9,0.99]' \
+#     algorithm.optimizer.lr=0.0009437854097068876 \
+#     trainer.gradient_clip_val=0.5 \
+#     trainer=gpu \
+#     trainer.devices=[3]
+
+# ------------------------------------------------------------------------
+# trial 303: cap=-0.70636, dist=0.00078259
+# ------------------------------------------------------------------------
+# taskset -c 0-2 \
+# python3 src/train.py \
+#     experiment=robustad/svdd_agnostic \
+#     experiment_name=robustad_svdd_pareto \
+#     run_name=cap_t303 \
+#     callbacks.wasserstein_dist=null \
+#     callbacks.thres_drift=null \
+#     callbacks.consistency_sn_zb=null \
+#     callbacks.wasserstein_dist_ema_ckpt=null \
+#     callbacks.thres_drift_ema_ckpt=null \
+#     callbacks.consistency_sn_zb_ema_ckpt=null \
+#     ~evaluation.evaluator.ckpts.summary.operational_drift_ema \
+#     ~evaluation.evaluator.ckpts.summary.w1dist_ema_normal_vs_shifted_normal_all \
+#     ~evaluation.evaluator.ckpts.summary.consistency_ema_normal_vs_shifted_normal_all \
+#     algorithm.encoder.nodes='[32,64,128]' \
+#     algorithm.encoder.strides='[2,2]' \
+#     algorithm.network_weight_decay=1e-05 \
+#     algorithm.optimizer.betas='[0.9,0.99]' \
+#     algorithm.optimizer.lr=0.0009461630714232329 \
+#     trainer.gradient_clip_val=0.5 \
+#     trainer=gpu \
+#     trainer.devices=[0]
+
+# ------------------------------------------------------------------------
+# trial 359: cap=-0.70428, dist=0.00109
+# ------------------------------------------------------------------------
+# taskset -c 3-5 \
+# python3 src/train.py \
+#     experiment=robustad/svdd_agnostic \
+#     experiment_name=robustad_svdd_pareto \
+#     run_name=cap_t359 \
+#     callbacks.wasserstein_dist=null \
+#     callbacks.thres_drift=null \
+#     callbacks.consistency_sn_zb=null \
+#     callbacks.wasserstein_dist_ema_ckpt=null \
+#     callbacks.thres_drift_ema_ckpt=null \
+#     callbacks.consistency_sn_zb_ema_ckpt=null \
+#     ~evaluation.evaluator.ckpts.summary.operational_drift_ema \
+#     ~evaluation.evaluator.ckpts.summary.w1dist_ema_normal_vs_shifted_normal_all \
+#     ~evaluation.evaluator.ckpts.summary.consistency_ema_normal_vs_shifted_normal_all \
+#     algorithm.encoder.nodes='[32,64,128]' \
+#     algorithm.encoder.strides='[2,2]' \
+#     algorithm.network_weight_decay=1e-05 \
+#     algorithm.optimizer.betas='[0.9,0.99]' \
+#     algorithm.optimizer.lr=0.0009988631564632367 \
+#     trainer.gradient_clip_val=0.5 \
+#     trainer=gpu \
+#     trainer.devices=[1]
+
+# ------------------------------------------------------------------------
+# trial 370: cap=-0.74407, dist=0.00013249
+# ------------------------------------------------------------------------
+# taskset -c 6-8 \
+# python3 src/train.py \
+#     experiment=robustad/svdd_agnostic \
+#     experiment_name=robustad_svdd_pareto \
+#     run_name=cap_t370 \
+#     callbacks.wasserstein_dist=null \
+#     callbacks.thres_drift=null \
+#     callbacks.consistency_sn_zb=null \
+#     callbacks.wasserstein_dist_ema_ckpt=null \
+#     callbacks.thres_drift_ema_ckpt=null \
+#     callbacks.consistency_sn_zb_ema_ckpt=null \
+#     ~evaluation.evaluator.ckpts.summary.operational_drift_ema \
+#     ~evaluation.evaluator.ckpts.summary.w1dist_ema_normal_vs_shifted_normal_all \
+#     ~evaluation.evaluator.ckpts.summary.consistency_ema_normal_vs_shifted_normal_all \
+#     algorithm.encoder.nodes='[8,16,32]' \
+#     algorithm.encoder.strides='[2,2]' \
+#     algorithm.network_weight_decay=1e-05 \
+#     algorithm.optimizer.betas='[0.9,0.99]' \
+#     algorithm.optimizer.lr=0.000942266592491852 \
+#     trainer.gradient_clip_val=0.5 \
+#     trainer=gpu \
+#     trainer.devices=[2]
+
+# ------------------------------------------------------------------------
+# trial 371: cap=-0.74509, dist=0.00012196
+# ------------------------------------------------------------------------
+# taskset -c 9-11 \
+# python3 src/train.py \
+#     experiment=robustad/svdd_agnostic \
+#     experiment_name=robustad_svdd_pareto \
+#     run_name=cap_t371 \
+#     callbacks.wasserstein_dist=null \
+#     callbacks.thres_drift=null \
+#     callbacks.consistency_sn_zb=null \
+#     callbacks.wasserstein_dist_ema_ckpt=null \
+#     callbacks.thres_drift_ema_ckpt=null \
+#     callbacks.consistency_sn_zb_ema_ckpt=null \
+#     ~evaluation.evaluator.ckpts.summary.operational_drift_ema \
+#     ~evaluation.evaluator.ckpts.summary.w1dist_ema_normal_vs_shifted_normal_all \
+#     ~evaluation.evaluator.ckpts.summary.consistency_ema_normal_vs_shifted_normal_all \
+#     algorithm.encoder.nodes='[8,16,32]' \
+#     algorithm.encoder.strides='[2,2]' \
+#     algorithm.network_weight_decay=1e-05 \
+#     algorithm.optimizer.betas='[0.9,0.99]' \
+#     algorithm.optimizer.lr=0.0009428349949769751 \
+#     trainer.gradient_clip_val=0.5 \
+#     trainer=gpu \
+#     trainer.devices=[3]
+
+# ------------------------------------------------------------------------
+# trial 375: cap=-0.66659, dist=0.011476  << BEST cap
+# ------------------------------------------------------------------------
+# taskset -c 0-2 \
+# python3 src/train.py \
+#     experiment=robustad/svdd_agnostic \
+#     experiment_name=robustad_svdd_pareto \
+#     run_name=cap_t375 \
+#     callbacks.wasserstein_dist=null \
+#     callbacks.thres_drift=null \
+#     callbacks.consistency_sn_zb=null \
+#     callbacks.wasserstein_dist_ema_ckpt=null \
+#     callbacks.thres_drift_ema_ckpt=null \
+#     callbacks.consistency_sn_zb_ema_ckpt=null \
+#     ~evaluation.evaluator.ckpts.summary.operational_drift_ema \
+#     ~evaluation.evaluator.ckpts.summary.w1dist_ema_normal_vs_shifted_normal_all \
+#     ~evaluation.evaluator.ckpts.summary.consistency_ema_normal_vs_shifted_normal_all \
+#     algorithm.encoder.nodes='[32,64,128]' \
+#     algorithm.encoder.strides='[2,2]' \
+#     algorithm.network_weight_decay=1e-05 \
+#     algorithm.optimizer.betas='[0.9,0.99]' \
+#     algorithm.optimizer.lr=0.0009380663091333337 \
+#     trainer.gradient_clip_val=0.5 \
+#     trainer=gpu \
+#     trainer.devices=[0]
+
+# ------------------------------------------------------------------------
+# trial 415: cap=-0.69985, dist=0.0040498
+# ------------------------------------------------------------------------
+# taskset -c 3-5 \
+# python3 src/train.py \
+#     experiment=robustad/svdd_agnostic \
+#     experiment_name=robustad_svdd_pareto \
+#     run_name=cap_t415 \
+#     callbacks.wasserstein_dist=null \
+#     callbacks.thres_drift=null \
+#     callbacks.consistency_sn_zb=null \
+#     callbacks.wasserstein_dist_ema_ckpt=null \
+#     callbacks.thres_drift_ema_ckpt=null \
+#     callbacks.consistency_sn_zb_ema_ckpt=null \
+#     ~evaluation.evaluator.ckpts.summary.operational_drift_ema \
+#     ~evaluation.evaluator.ckpts.summary.w1dist_ema_normal_vs_shifted_normal_all \
+#     ~evaluation.evaluator.ckpts.summary.consistency_ema_normal_vs_shifted_normal_all \
+#     algorithm.encoder.nodes='[32,64,128]' \
+#     algorithm.encoder.strides='[2,2]' \
+#     algorithm.network_weight_decay=1e-05 \
+#     algorithm.optimizer.betas='[0.9,0.99]' \
+#     algorithm.optimizer.lr=0.0009127557591569211 \
+#     trainer.gradient_clip_val=0.5 \
+#     trainer=gpu \
+#     trainer.devices=[1]
+
+# ------------------------------------------------------------------------
+# trial 423: cap=-0.74493, dist=0.00012709
+# ------------------------------------------------------------------------
+# taskset -c 6-8 \
+# python3 src/train.py \
+#     experiment=robustad/svdd_agnostic \
+#     experiment_name=robustad_svdd_pareto \
+#     run_name=cap_t423 \
+#     callbacks.wasserstein_dist=null \
+#     callbacks.thres_drift=null \
+#     callbacks.consistency_sn_zb=null \
+#     callbacks.wasserstein_dist_ema_ckpt=null \
+#     callbacks.thres_drift_ema_ckpt=null \
+#     callbacks.consistency_sn_zb_ema_ckpt=null \
+#     ~evaluation.evaluator.ckpts.summary.operational_drift_ema \
+#     ~evaluation.evaluator.ckpts.summary.w1dist_ema_normal_vs_shifted_normal_all \
+#     ~evaluation.evaluator.ckpts.summary.consistency_ema_normal_vs_shifted_normal_all \
+#     algorithm.encoder.nodes='[8,16,32]' \
+#     algorithm.encoder.strides='[2,2]' \
+#     algorithm.network_weight_decay=1e-05 \
+#     algorithm.optimizer.betas='[0.9,0.99]' \
+#     algorithm.optimizer.lr=0.0009160869543847125 \
+#     trainer.gradient_clip_val=0.5 \
+#     trainer=gpu \
+#     trainer.devices=[2]
+
+# ------------------------------------------------------------------------
+# trial 464: cap=-0.70161, dist=0.002521
+# ------------------------------------------------------------------------
+# taskset -c 9-11 \
+# python3 src/train.py \
+#     experiment=robustad/svdd_agnostic \
+#     experiment_name=robustad_svdd_pareto \
+#     run_name=cap_t464 \
+#     callbacks.wasserstein_dist=null \
+#     callbacks.thres_drift=null \
+#     callbacks.consistency_sn_zb=null \
+#     callbacks.wasserstein_dist_ema_ckpt=null \
+#     callbacks.thres_drift_ema_ckpt=null \
+#     callbacks.consistency_sn_zb_ema_ckpt=null \
+#     ~evaluation.evaluator.ckpts.summary.operational_drift_ema \
+#     ~evaluation.evaluator.ckpts.summary.w1dist_ema_normal_vs_shifted_normal_all \
+#     ~evaluation.evaluator.ckpts.summary.consistency_ema_normal_vs_shifted_normal_all \
+#     algorithm.encoder.nodes='[32,64,128]' \
+#     algorithm.encoder.strides='[2,2]' \
+#     algorithm.network_weight_decay=0.0 \
+#     algorithm.optimizer.betas='[0.9,0.99]' \
+#     algorithm.optimizer.lr=0.000952282300250192 \
+#     trainer.gradient_clip_val=1.0 \
+#     trainer=gpu \
+#     trainer.devices=[3]
+
+# ------------------------------------------------------------------------
+# trial 511: cap=-0.74599, dist=0.00012039
+# ------------------------------------------------------------------------
+# taskset -c 0-2 \
+# python3 src/train.py \
+#     experiment=robustad/svdd_agnostic \
+#     experiment_name=robustad_svdd_pareto \
+#     run_name=cap_t511 \
+#     callbacks.wasserstein_dist=null \
+#     callbacks.thres_drift=null \
+#     callbacks.consistency_sn_zb=null \
+#     callbacks.wasserstein_dist_ema_ckpt=null \
+#     callbacks.thres_drift_ema_ckpt=null \
+#     callbacks.consistency_sn_zb_ema_ckpt=null \
+#     ~evaluation.evaluator.ckpts.summary.operational_drift_ema \
+#     ~evaluation.evaluator.ckpts.summary.w1dist_ema_normal_vs_shifted_normal_all \
+#     ~evaluation.evaluator.ckpts.summary.consistency_ema_normal_vs_shifted_normal_all \
+#     algorithm.encoder.nodes='[8,16,32]' \
+#     algorithm.encoder.strides='[2,2]' \
+#     algorithm.network_weight_decay=1e-05 \
+#     algorithm.optimizer.betas='[0.9,0.99]' \
+#     algorithm.optimizer.lr=0.0008975557666056532 \
+#     trainer.gradient_clip_val=0.5 \
+#     trainer=gpu \
+#     trainer.devices=[0]
+
+# ------------------------------------------------------------------------
+# trial 540: cap=-0.69772, dist=0.0052545
+# ------------------------------------------------------------------------
+# taskset -c 3-5 \
+# python3 src/train.py \
+#     experiment=robustad/svdd_agnostic \
+#     experiment_name=robustad_svdd_pareto \
+#     run_name=cap_t540 \
+#     callbacks.wasserstein_dist=null \
+#     callbacks.thres_drift=null \
+#     callbacks.consistency_sn_zb=null \
+#     callbacks.wasserstein_dist_ema_ckpt=null \
+#     callbacks.thres_drift_ema_ckpt=null \
+#     callbacks.consistency_sn_zb_ema_ckpt=null \
+#     ~evaluation.evaluator.ckpts.summary.operational_drift_ema \
+#     ~evaluation.evaluator.ckpts.summary.w1dist_ema_normal_vs_shifted_normal_all \
+#     ~evaluation.evaluator.ckpts.summary.consistency_ema_normal_vs_shifted_normal_all \
+#     algorithm.encoder.nodes='[32,64,128]' \
+#     algorithm.encoder.strides='[2,2]' \
+#     algorithm.network_weight_decay=1e-05 \
+#     algorithm.optimizer.betas='[0.9,0.99]' \
+#     algorithm.optimizer.lr=0.000908865634517757 \
+#     trainer.gradient_clip_val=0.5 \
+#     trainer=gpu \
+#     trainer.devices=[1]
+
+# ------------------------------------------------------------------------
+# trial 546: cap=-0.73681, dist=0.00018522  << ORIGINAL PICK
+# ------------------------------------------------------------------------
+# taskset -c 6-8 \
 # python3 src/train.py \
 #     experiment=robustad/svdd_agnostic \
 #     experiment_name=robustad_svdd_pareto \
 #     run_name=cap_t546 \
 #     callbacks.wasserstein_dist=null \
 #     callbacks.thres_drift=null \
+#     callbacks.consistency_sn_zb=null \
 #     callbacks.wasserstein_dist_ema_ckpt=null \
 #     callbacks.thres_drift_ema_ckpt=null \
+#     callbacks.consistency_sn_zb_ema_ckpt=null \
 #     ~evaluation.evaluator.ckpts.summary.operational_drift_ema \
 #     ~evaluation.evaluator.ckpts.summary.w1dist_ema_normal_vs_shifted_normal_all \
-#     algorithm.center_init_method=mean \
-#     algorithm.encoder.activation=relu \
-#     algorithm.encoder.batchnorm=False \
-#     algorithm.encoder.nodes='[32,64,128]' \
+#     ~evaluation.evaluator.ckpts.summary.consistency_ema_normal_vs_shifted_normal_all \
+#     algorithm.encoder.nodes='[16,32,64]' \
 #     algorithm.encoder.strides='[2,2]' \
-#     algorithm.nu=0.05 \
-#     algorithm.optimizer.betas='[0.9,0.99]' \
-#     algorithm.optimizer.lr=0.0009585626245761539 \
-#     algorithm.optimizer.weight_decay=0.0 \
-#     algorithm.soft_boundary=True \
-#     algorithm.weight_decay=0.0 \
+#     algorithm.network_weight_decay=1e-07 \
+#     algorithm.optimizer.betas='[0.9,0.999]' \
+#     algorithm.optimizer.lr=0.0009571264792363442 \
 #     trainer.gradient_clip_val=1.0 \
 #     trainer=gpu \
-#     trainer.devices=[3]
+#     trainer.devices=[2]
 
 # ------------------------------------------------------------------------
-# trial 549: cap=-0.70435, dist=0.0011712
+# trial 550: cap=-0.7365, dist=0.000188
 # ------------------------------------------------------------------------
-# taskset -c 0-2 \
-# python3 src/train.py \
-#     experiment=robustad/svdd_agnostic \
-#     experiment_name=robustad_svdd_pareto \
-#     run_name=cap_t549 \
-#     callbacks.wasserstein_dist=null \
-#     callbacks.thres_drift=null \
-#     callbacks.wasserstein_dist_ema_ckpt=null \
-#     callbacks.thres_drift_ema_ckpt=null \
-#     ~evaluation.evaluator.ckpts.summary.operational_drift_ema \
-#     ~evaluation.evaluator.ckpts.summary.w1dist_ema_normal_vs_shifted_normal_all \
-#     algorithm.center_init_method=mean \
-#     algorithm.encoder.activation=relu \
-#     algorithm.encoder.batchnorm=False \
-#     algorithm.encoder.nodes='[32,64,128]' \
-#     algorithm.encoder.strides='[2,2]' \
-#     algorithm.nu=0.05 \
-#     algorithm.optimizer.betas='[0.9,0.99]' \
-#     algorithm.optimizer.lr=0.0009505968851670328 \
-#     algorithm.optimizer.weight_decay=0.0 \
-#     algorithm.soft_boundary=True \
-#     algorithm.weight_decay=0.0 \
-#     trainer.gradient_clip_val=1.0 \
-#     trainer=gpu \
-#     trainer.devices=[0]
-
-# ------------------------------------------------------------------------
-# trial 550: cap=-0.69939, dist=0.0020866
-# ------------------------------------------------------------------------
-# taskset -c 3-5 \
+# taskset -c 9-11 \
 # python3 src/train.py \
 #     experiment=robustad/svdd_agnostic \
 #     experiment_name=robustad_svdd_pareto \
 #     run_name=cap_t550 \
 #     callbacks.wasserstein_dist=null \
 #     callbacks.thres_drift=null \
+#     callbacks.consistency_sn_zb=null \
 #     callbacks.wasserstein_dist_ema_ckpt=null \
 #     callbacks.thres_drift_ema_ckpt=null \
+#     callbacks.consistency_sn_zb_ema_ckpt=null \
 #     ~evaluation.evaluator.ckpts.summary.operational_drift_ema \
 #     ~evaluation.evaluator.ckpts.summary.w1dist_ema_normal_vs_shifted_normal_all \
-#     algorithm.center_init_method=mean \
-#     algorithm.encoder.activation=relu \
-#     algorithm.encoder.batchnorm=False \
-#     algorithm.encoder.nodes='[32,64,128]' \
+#     ~evaluation.evaluator.ckpts.summary.consistency_ema_normal_vs_shifted_normal_all \
+#     algorithm.encoder.nodes='[16,32,64]' \
 #     algorithm.encoder.strides='[2,2]' \
-#     algorithm.nu=0.05 \
-#     algorithm.optimizer.betas='[0.9,0.99]' \
-#     algorithm.optimizer.lr=0.0009516354859217911 \
-#     algorithm.optimizer.weight_decay=0.0 \
-#     algorithm.soft_boundary=True \
-#     algorithm.weight_decay=0.0 \
-#     trainer.gradient_clip_val=1.0 \
-#     trainer=gpu \
-#     trainer.devices=[1]
-
-# ------------------------------------------------------------------------
-# trial 553: cap=-0.71286, dist=0.00020632
-# ------------------------------------------------------------------------
-# taskset -c 6-8 \
-# python3 src/train.py \
-#     experiment=robustad/svdd_agnostic \
-#     experiment_name=robustad_svdd_pareto \
-#     run_name=cap_t553 \
-#     callbacks.wasserstein_dist=null \
-#     callbacks.thres_drift=null \
-#     callbacks.wasserstein_dist_ema_ckpt=null \
-#     callbacks.thres_drift_ema_ckpt=null \
-#     ~evaluation.evaluator.ckpts.summary.operational_drift_ema \
-#     ~evaluation.evaluator.ckpts.summary.w1dist_ema_normal_vs_shifted_normal_all \
-#     algorithm.center_init_method=mean \
-#     algorithm.encoder.activation=relu \
-#     algorithm.encoder.batchnorm=False \
-#     algorithm.encoder.nodes='[32,64,128]' \
-#     algorithm.encoder.strides='[2,2]' \
-#     algorithm.nu=0.05 \
-#     algorithm.optimizer.betas='[0.9,0.99]' \
-#     algorithm.optimizer.lr=0.0009560418303424424 \
-#     algorithm.optimizer.weight_decay=0.0 \
-#     algorithm.soft_boundary=True \
-#     algorithm.weight_decay=0.0 \
-#     trainer.gradient_clip_val=1.0 \
-#     trainer=gpu \
-#     trainer.devices=[2]
-
-# ------------------------------------------------------------------------
-# trial 570: cap=-0.70803, dist=0.00056783
-# ------------------------------------------------------------------------
-# taskset -c 9-11 \
-# python3 src/train.py \
-#     experiment=robustad/svdd_agnostic \
-#     experiment_name=robustad_svdd_pareto \
-#     run_name=cap_t570 \
-#     callbacks.wasserstein_dist=null \
-#     callbacks.thres_drift=null \
-#     callbacks.wasserstein_dist_ema_ckpt=null \
-#     callbacks.thres_drift_ema_ckpt=null \
-#     ~evaluation.evaluator.ckpts.summary.operational_drift_ema \
-#     ~evaluation.evaluator.ckpts.summary.w1dist_ema_normal_vs_shifted_normal_all \
-#     algorithm.center_init_method=mean \
-#     algorithm.encoder.activation=relu \
-#     algorithm.encoder.batchnorm=False \
-#     algorithm.encoder.nodes='[32,64,128]' \
-#     algorithm.encoder.strides='[2,2]' \
-#     algorithm.nu=0.05 \
-#     algorithm.optimizer.betas='[0.9,0.99]' \
-#     algorithm.optimizer.lr=0.0009533955342615703 \
-#     algorithm.optimizer.weight_decay=0.0 \
-#     algorithm.soft_boundary=True \
-#     algorithm.weight_decay=0.0 \
+#     algorithm.network_weight_decay=1e-07 \
+#     algorithm.optimizer.betas='[0.9,0.999]' \
+#     algorithm.optimizer.lr=0.0009556037613343593 \
 #     trainer.gradient_clip_val=1.0 \
 #     trainer=gpu \
 #     trainer.devices=[3]
 
 # ------------------------------------------------------------------------
-# trial 581: cap=-0.69936, dist=0.0024725
+# trial 583: cap=-0.71098, dist=0.00026758
 # ------------------------------------------------------------------------
 # taskset -c 0-2 \
-# python3 src/train.py \
-#     experiment=robustad/svdd_agnostic \
-#     experiment_name=robustad_svdd_pareto \
-#     run_name=cap_t581 \
-#     callbacks.wasserstein_dist=null \
-#     callbacks.thres_drift=null \
-#     callbacks.wasserstein_dist_ema_ckpt=null \
-#     callbacks.thres_drift_ema_ckpt=null \
-#     ~evaluation.evaluator.ckpts.summary.operational_drift_ema \
-#     ~evaluation.evaluator.ckpts.summary.w1dist_ema_normal_vs_shifted_normal_all \
-#     algorithm.center_init_method=mean \
-#     algorithm.encoder.activation=relu \
-#     algorithm.encoder.batchnorm=False \
-#     algorithm.encoder.nodes='[32,64,128]' \
-#     algorithm.encoder.strides='[2,2]' \
-#     algorithm.nu=0.05 \
-#     algorithm.optimizer.betas='[0.9,0.99]' \
-#     algorithm.optimizer.lr=0.0009521065704804709 \
-#     algorithm.optimizer.weight_decay=0.0 \
-#     algorithm.soft_boundary=True \
-#     algorithm.weight_decay=0.0 \
-#     trainer.gradient_clip_val=1.0 \
-#     trainer=gpu \
-#     trainer.devices=[0]
-
-# ------------------------------------------------------------------------
-# trial 583: cap=-0.70357, dist=0.0013887
-# ------------------------------------------------------------------------
-# taskset -c 3-5 \
 # python3 src/train.py \
 #     experiment=robustad/svdd_agnostic \
 #     experiment_name=robustad_svdd_pareto \
 #     run_name=cap_t583 \
 #     callbacks.wasserstein_dist=null \
 #     callbacks.thres_drift=null \
+#     callbacks.consistency_sn_zb=null \
 #     callbacks.wasserstein_dist_ema_ckpt=null \
 #     callbacks.thres_drift_ema_ckpt=null \
+#     callbacks.consistency_sn_zb_ema_ckpt=null \
 #     ~evaluation.evaluator.ckpts.summary.operational_drift_ema \
 #     ~evaluation.evaluator.ckpts.summary.w1dist_ema_normal_vs_shifted_normal_all \
-#     algorithm.center_init_method=mean \
-#     algorithm.encoder.activation=relu \
-#     algorithm.encoder.batchnorm=False \
+#     ~evaluation.evaluator.ckpts.summary.consistency_ema_normal_vs_shifted_normal_all \
 #     algorithm.encoder.nodes='[32,64,128]' \
 #     algorithm.encoder.strides='[2,2]' \
-#     algorithm.nu=0.05 \
+#     algorithm.network_weight_decay=1e-06 \
 #     algorithm.optimizer.betas='[0.9,0.99]' \
-#     algorithm.optimizer.lr=0.0009547425800153348 \
-#     algorithm.optimizer.weight_decay=0.0 \
-#     algorithm.soft_boundary=True \
-#     algorithm.weight_decay=0.0 \
-#     trainer.gradient_clip_val=1.0 \
-#     trainer=gpu \
-#     trainer.devices=[1]
-
-# ------------------------------------------------------------------------
-# trial 586: cap=-0.7122, dist=0.00021684
-# ------------------------------------------------------------------------
-# taskset -c 6-8 \
-# python3 src/train.py \
-#     experiment=robustad/svdd_agnostic \
-#     experiment_name=robustad_svdd_pareto \
-#     run_name=cap_t586 \
-#     callbacks.wasserstein_dist=null \
-#     callbacks.thres_drift=null \
-#     callbacks.wasserstein_dist_ema_ckpt=null \
-#     callbacks.thres_drift_ema_ckpt=null \
-#     ~evaluation.evaluator.ckpts.summary.operational_drift_ema \
-#     ~evaluation.evaluator.ckpts.summary.w1dist_ema_normal_vs_shifted_normal_all \
-#     algorithm.center_init_method=mean \
-#     algorithm.encoder.activation=relu \
-#     algorithm.encoder.batchnorm=False \
-#     algorithm.encoder.nodes='[32,64,128]' \
-#     algorithm.encoder.strides='[2,2]' \
-#     algorithm.nu=0.05 \
-#     algorithm.optimizer.betas='[0.9,0.99]' \
-#     algorithm.optimizer.lr=0.0009522371396542728 \
-#     algorithm.optimizer.weight_decay=0.0 \
-#     algorithm.soft_boundary=True \
-#     algorithm.weight_decay=0.0 \
-#     trainer.gradient_clip_val=1.0 \
-#     trainer=gpu \
-#     trainer.devices=[2]
-
-# ------------------------------------------------------------------------
-# trial 587: cap=-0.70967, dist=0.00046991
-# ------------------------------------------------------------------------
-# taskset -c 9-11 \
-# python3 src/train.py \
-#     experiment=robustad/svdd_agnostic \
-#     experiment_name=robustad_svdd_pareto \
-#     run_name=cap_t587 \
-#     callbacks.wasserstein_dist=null \
-#     callbacks.thres_drift=null \
-#     callbacks.wasserstein_dist_ema_ckpt=null \
-#     callbacks.thres_drift_ema_ckpt=null \
-#     ~evaluation.evaluator.ckpts.summary.operational_drift_ema \
-#     ~evaluation.evaluator.ckpts.summary.w1dist_ema_normal_vs_shifted_normal_all \
-#     algorithm.center_init_method=mean \
-#     algorithm.encoder.activation=relu \
-#     algorithm.encoder.batchnorm=False \
-#     algorithm.encoder.nodes='[32,64,128]' \
-#     algorithm.encoder.strides='[2,2]' \
-#     algorithm.nu=0.05 \
-#     algorithm.optimizer.betas='[0.9,0.99]' \
-#     algorithm.optimizer.lr=0.0009537999961874654 \
-#     algorithm.optimizer.weight_decay=0.0 \
-#     algorithm.soft_boundary=True \
-#     algorithm.weight_decay=0.0 \
-#     trainer.gradient_clip_val=1.0 \
-#     trainer=gpu \
-#     trainer.devices=[3]
-
-# ------------------------------------------------------------------------
-# trial 593: cap=-0.70518, dist=0.0010393
-# ------------------------------------------------------------------------
-# taskset -c 0-2 \
-# python3 src/train.py \
-#     experiment=robustad/svdd_agnostic \
-#     experiment_name=robustad_svdd_pareto \
-#     run_name=cap_t593 \
-#     callbacks.wasserstein_dist=null \
-#     callbacks.thres_drift=null \
-#     callbacks.wasserstein_dist_ema_ckpt=null \
-#     callbacks.thres_drift_ema_ckpt=null \
-#     ~evaluation.evaluator.ckpts.summary.operational_drift_ema \
-#     ~evaluation.evaluator.ckpts.summary.w1dist_ema_normal_vs_shifted_normal_all \
-#     algorithm.center_init_method=mean \
-#     algorithm.encoder.activation=relu \
-#     algorithm.encoder.batchnorm=False \
-#     algorithm.encoder.nodes='[32,64,128]' \
-#     algorithm.encoder.strides='[2,2]' \
-#     algorithm.nu=0.05 \
-#     algorithm.optimizer.betas='[0.9,0.99]' \
-#     algorithm.optimizer.lr=0.0009560766949692073 \
-#     algorithm.optimizer.weight_decay=0.0 \
-#     algorithm.soft_boundary=True \
-#     algorithm.weight_decay=0.0 \
-#     trainer.gradient_clip_val=1.0 \
+#     algorithm.optimizer.lr=0.0009381743013465871 \
+#     trainer.gradient_clip_val=0.5 \
 #     trainer=gpu \
 #     trainer.devices=[0]
-
-# ------------------------------------------------------------------------
-# trial 599: cap=-0.7061, dist=0.00057367  << KNEE
-# ------------------------------------------------------------------------
-# taskset -c 3-5 \
-# python3 src/train.py \
-#     experiment=robustad/svdd_agnostic \
-#     experiment_name=robustad_svdd_pareto \
-#     run_name=cap_t599 \
-#     callbacks.wasserstein_dist=null \
-#     callbacks.thres_drift=null \
-#     callbacks.wasserstein_dist_ema_ckpt=null \
-#     callbacks.thres_drift_ema_ckpt=null \
-#     ~evaluation.evaluator.ckpts.summary.operational_drift_ema \
-#     ~evaluation.evaluator.ckpts.summary.w1dist_ema_normal_vs_shifted_normal_all \
-#     algorithm.center_init_method=mean \
-#     algorithm.encoder.activation=relu \
-#     algorithm.encoder.batchnorm=False \
-#     algorithm.encoder.nodes='[32,64,128]' \
-#     algorithm.encoder.strides='[2,2]' \
-#     algorithm.nu=0.05 \
-#     algorithm.optimizer.betas='[0.9,0.99]' \
-#     algorithm.optimizer.lr=0.000949954213179476 \
-#     algorithm.optimizer.weight_decay=0.0 \
-#     algorithm.soft_boundary=True \
-#     algorithm.weight_decay=0.0 \
-#     trainer.gradient_clip_val=1.0 \
-#     trainer=gpu \
-#     trainer.devices=[1]
 
 # ========================================================================
 # CONSISTENCY TRAINING  (study: consistency_vs_dist, 16 Pareto points, trimmed to 11 around the knee (endpoints kept))
@@ -1088,442 +978,449 @@
 # STABILITY TRAINING  (study: drift_vs_dist, 1 Pareto points)
 # ========================================================================
 # ------------------------------------------------------------------------
-# trial 525: drift=0.16551, dist=7.0869e-05  << ORIGINAL PICK | BEST drift
+# trial 305: drift=0.16551, dist=0.00010297  << BEST drift
 # ------------------------------------------------------------------------
 # taskset -c 0-2 \
 # python3 src/train.py \
 #     experiment=robustad/svdd_agnostic \
 #     experiment_name=robustad_svdd_pareto \
-#     run_name=stability_t525 \
+#     run_name=stability_t305 \
 #     callbacks.wasserstein_dist=null \
 #     callbacks.cap_sn_zb=null \
+#     callbacks.consistency_sn_zb=null \
 #     callbacks.wasserstein_dist_ema_ckpt=null \
 #     callbacks.cap_sn_zb_ema_ckpt=null \
+#     callbacks.consistency_sn_zb_ema_ckpt=null \
 #     ~evaluation.evaluator.ckpts.summary.w1dist_ema_normal_vs_shifted_normal_all \
 #     ~evaluation.evaluator.ckpts.summary.cap_ema_normal_vs_shifted_normal_all \
-#     algorithm.center_init_method=zeros \
-#     algorithm.encoder.activation=silu \
-#     algorithm.encoder.batchnorm=False \
+#     ~evaluation.evaluator.ckpts.summary.consistency_ema_normal_vs_shifted_normal_all \
 #     algorithm.encoder.nodes='[8,16,32]' \
 #     algorithm.encoder.strides='[2,2]' \
-#     algorithm.nu=0.1 \
-#     algorithm.optimizer.betas='[0.9,0.999]' \
-#     algorithm.optimizer.lr=0.0006495587687856368 \
-#     algorithm.optimizer.weight_decay=0.0 \
-#     algorithm.soft_boundary=True \
-#     algorithm.weight_decay=0.0 \
+#     algorithm.network_weight_decay=1e-08 \
+#     algorithm.optimizer.betas='[0.9,0.99]' \
+#     algorithm.optimizer.lr=0.0009147688701524873 \
 #     trainer.gradient_clip_val=0.5 \
 #     trainer=gpu \
 #     trainer.devices=[0]
 
 # ========================================================================
-# WASSERSTEIN TRAINING  (study: wasserstein_vs_dist, 14 Pareto points)
+# WASSERSTEIN TRAINING  (study: wasserstein_vs_dist, 16 Pareto points)
 # ========================================================================
 # ------------------------------------------------------------------------
-# trial 236: wasserstein=0.0065399, dist=9.1514e-05  << KNEE
+# trial 402: wasserstein=0.019827, dist=0.00010689
 # ------------------------------------------------------------------------
 # taskset -c 0-2 \
 # python3 src/train.py \
 #     experiment=robustad/svdd_agnostic \
 #     experiment_name=robustad_svdd_pareto \
-#     run_name=wasserstein_t236 \
+#     run_name=wasserstein_t402 \
 #     callbacks.thres_drift=null \
 #     callbacks.cap_sn_zb=null \
+#     callbacks.consistency_sn_zb=null \
 #     callbacks.thres_drift_ema_ckpt=null \
 #     callbacks.cap_sn_zb_ema_ckpt=null \
+#     callbacks.consistency_sn_zb_ema_ckpt=null \
 #     ~evaluation.evaluator.ckpts.summary.operational_drift_ema \
 #     ~evaluation.evaluator.ckpts.summary.cap_ema_normal_vs_shifted_normal_all \
-#     algorithm.center_init_method=zeros \
-#     algorithm.encoder.activation=silu \
-#     algorithm.encoder.batchnorm=False \
+#     ~evaluation.evaluator.ckpts.summary.consistency_ema_normal_vs_shifted_normal_all \
 #     algorithm.encoder.nodes='[8,16,32]' \
 #     algorithm.encoder.strides='[2,2]' \
-#     algorithm.nu=0.1 \
-#     algorithm.optimizer.betas='[0.9,0.999]' \
-#     algorithm.optimizer.lr=0.0005267397203039592 \
-#     algorithm.optimizer.weight_decay=1e-05 \
-#     algorithm.soft_boundary=True \
-#     algorithm.weight_decay=1e-07 \
+#     algorithm.network_weight_decay=1e-06 \
+#     algorithm.optimizer.betas='[0.9,0.99]' \
+#     algorithm.optimizer.lr=0.0009984106857605028 \
 #     trainer.gradient_clip_val=0.5 \
 #     trainer=gpu \
 #     trainer.devices=[0]
 
 # ------------------------------------------------------------------------
-# trial 267: wasserstein=0.0064749, dist=0.00012171
+# trial 408: wasserstein=0.016194, dist=0.0014728  << BEST wasserstein
 # ------------------------------------------------------------------------
 # taskset -c 3-5 \
 # python3 src/train.py \
 #     experiment=robustad/svdd_agnostic \
 #     experiment_name=robustad_svdd_pareto \
-#     run_name=wasserstein_t267 \
+#     run_name=wasserstein_t408 \
 #     callbacks.thres_drift=null \
 #     callbacks.cap_sn_zb=null \
+#     callbacks.consistency_sn_zb=null \
 #     callbacks.thres_drift_ema_ckpt=null \
 #     callbacks.cap_sn_zb_ema_ckpt=null \
+#     callbacks.consistency_sn_zb_ema_ckpt=null \
 #     ~evaluation.evaluator.ckpts.summary.operational_drift_ema \
 #     ~evaluation.evaluator.ckpts.summary.cap_ema_normal_vs_shifted_normal_all \
-#     algorithm.center_init_method=zeros \
-#     algorithm.encoder.activation=silu \
-#     algorithm.encoder.batchnorm=False \
+#     ~evaluation.evaluator.ckpts.summary.consistency_ema_normal_vs_shifted_normal_all \
 #     algorithm.encoder.nodes='[8,16,32]' \
 #     algorithm.encoder.strides='[2,2]' \
-#     algorithm.nu=0.1 \
-#     algorithm.optimizer.betas='[0.9,0.999]' \
-#     algorithm.optimizer.lr=0.0005838066411827784 \
-#     algorithm.optimizer.weight_decay=1e-05 \
-#     algorithm.soft_boundary=True \
-#     algorithm.weight_decay=1e-07 \
+#     algorithm.network_weight_decay=1e-06 \
+#     algorithm.optimizer.betas='[0.9,0.99]' \
+#     algorithm.optimizer.lr=0.0009995868644635997 \
 #     trainer.gradient_clip_val=0.5 \
 #     trainer=gpu \
 #     trainer.devices=[1]
 
 # ------------------------------------------------------------------------
-# trial 297: wasserstein=0.0069254, dist=6.6856e-05
+# trial 412: wasserstein=0.019393, dist=0.00010695
 # ------------------------------------------------------------------------
 # taskset -c 6-8 \
 # python3 src/train.py \
 #     experiment=robustad/svdd_agnostic \
 #     experiment_name=robustad_svdd_pareto \
-#     run_name=wasserstein_t297 \
+#     run_name=wasserstein_t412 \
 #     callbacks.thres_drift=null \
 #     callbacks.cap_sn_zb=null \
+#     callbacks.consistency_sn_zb=null \
 #     callbacks.thres_drift_ema_ckpt=null \
 #     callbacks.cap_sn_zb_ema_ckpt=null \
+#     callbacks.consistency_sn_zb_ema_ckpt=null \
 #     ~evaluation.evaluator.ckpts.summary.operational_drift_ema \
 #     ~evaluation.evaluator.ckpts.summary.cap_ema_normal_vs_shifted_normal_all \
-#     algorithm.center_init_method=zeros \
-#     algorithm.encoder.activation=silu \
-#     algorithm.encoder.batchnorm=False \
+#     ~evaluation.evaluator.ckpts.summary.consistency_ema_normal_vs_shifted_normal_all \
 #     algorithm.encoder.nodes='[8,16,32]' \
 #     algorithm.encoder.strides='[2,2]' \
-#     algorithm.nu=0.1 \
-#     algorithm.optimizer.betas='[0.9,0.999]' \
-#     algorithm.optimizer.lr=0.0006217491601128081 \
-#     algorithm.optimizer.weight_decay=1e-05 \
-#     algorithm.soft_boundary=True \
-#     algorithm.weight_decay=1e-07 \
+#     algorithm.network_weight_decay=1e-06 \
+#     algorithm.optimizer.betas='[0.9,0.99]' \
+#     algorithm.optimizer.lr=0.0009999639157469203 \
 #     trainer.gradient_clip_val=0.5 \
 #     trainer=gpu \
 #     trainer.devices=[2]
 
 # ------------------------------------------------------------------------
-# trial 307: wasserstein=0.0060349, dist=0.00027871
+# trial 429: wasserstein=0.021142, dist=0.00010172
 # ------------------------------------------------------------------------
 # taskset -c 9-11 \
 # python3 src/train.py \
 #     experiment=robustad/svdd_agnostic \
 #     experiment_name=robustad_svdd_pareto \
-#     run_name=wasserstein_t307 \
+#     run_name=wasserstein_t429 \
 #     callbacks.thres_drift=null \
 #     callbacks.cap_sn_zb=null \
+#     callbacks.consistency_sn_zb=null \
 #     callbacks.thres_drift_ema_ckpt=null \
 #     callbacks.cap_sn_zb_ema_ckpt=null \
+#     callbacks.consistency_sn_zb_ema_ckpt=null \
 #     ~evaluation.evaluator.ckpts.summary.operational_drift_ema \
 #     ~evaluation.evaluator.ckpts.summary.cap_ema_normal_vs_shifted_normal_all \
-#     algorithm.center_init_method=zeros \
-#     algorithm.encoder.activation=silu \
-#     algorithm.encoder.batchnorm=False \
+#     ~evaluation.evaluator.ckpts.summary.consistency_ema_normal_vs_shifted_normal_all \
 #     algorithm.encoder.nodes='[8,16,32]' \
 #     algorithm.encoder.strides='[2,2]' \
-#     algorithm.nu=0.1 \
-#     algorithm.optimizer.betas='[0.9,0.999]' \
-#     algorithm.optimizer.lr=0.0006519187478717954 \
-#     algorithm.optimizer.weight_decay=1e-05 \
-#     algorithm.soft_boundary=True \
-#     algorithm.weight_decay=1e-07 \
+#     algorithm.network_weight_decay=1e-07 \
+#     algorithm.optimizer.betas='[0.9,0.99]' \
+#     algorithm.optimizer.lr=0.0009476473911894325 \
 #     trainer.gradient_clip_val=0.5 \
 #     trainer=gpu \
 #     trainer.devices=[3]
 
 # ------------------------------------------------------------------------
-# trial 377: wasserstein=0.0061945, dist=0.00026915
+# trial 441: wasserstein=0.019366, dist=0.00011006
 # ------------------------------------------------------------------------
 # taskset -c 0-2 \
 # python3 src/train.py \
 #     experiment=robustad/svdd_agnostic \
 #     experiment_name=robustad_svdd_pareto \
-#     run_name=wasserstein_t377 \
+#     run_name=wasserstein_t441 \
 #     callbacks.thres_drift=null \
 #     callbacks.cap_sn_zb=null \
+#     callbacks.consistency_sn_zb=null \
 #     callbacks.thres_drift_ema_ckpt=null \
 #     callbacks.cap_sn_zb_ema_ckpt=null \
+#     callbacks.consistency_sn_zb_ema_ckpt=null \
 #     ~evaluation.evaluator.ckpts.summary.operational_drift_ema \
 #     ~evaluation.evaluator.ckpts.summary.cap_ema_normal_vs_shifted_normal_all \
-#     algorithm.center_init_method=zeros \
-#     algorithm.encoder.activation=silu \
-#     algorithm.encoder.batchnorm=False \
+#     ~evaluation.evaluator.ckpts.summary.consistency_ema_normal_vs_shifted_normal_all \
 #     algorithm.encoder.nodes='[8,16,32]' \
 #     algorithm.encoder.strides='[2,2]' \
-#     algorithm.nu=0.1 \
-#     algorithm.optimizer.betas='[0.9,0.999]' \
-#     algorithm.optimizer.lr=0.0006508355225077969 \
-#     algorithm.optimizer.weight_decay=1e-05 \
-#     algorithm.soft_boundary=True \
-#     algorithm.weight_decay=1e-07 \
+#     algorithm.network_weight_decay=1e-07 \
+#     algorithm.optimizer.betas='[0.9,0.99]' \
+#     algorithm.optimizer.lr=0.000999373012155083 \
 #     trainer.gradient_clip_val=0.5 \
 #     trainer=gpu \
 #     trainer.devices=[0]
 
 # ------------------------------------------------------------------------
-# trial 386: wasserstein=0.0055496, dist=0.00046035  << BEST wasserstein
+# trial 477: wasserstein=0.016891, dist=0.00016
 # ------------------------------------------------------------------------
 # taskset -c 3-5 \
 # python3 src/train.py \
 #     experiment=robustad/svdd_agnostic \
 #     experiment_name=robustad_svdd_pareto \
-#     run_name=wasserstein_t386 \
+#     run_name=wasserstein_t477 \
 #     callbacks.thres_drift=null \
 #     callbacks.cap_sn_zb=null \
+#     callbacks.consistency_sn_zb=null \
 #     callbacks.thres_drift_ema_ckpt=null \
 #     callbacks.cap_sn_zb_ema_ckpt=null \
+#     callbacks.consistency_sn_zb_ema_ckpt=null \
 #     ~evaluation.evaluator.ckpts.summary.operational_drift_ema \
 #     ~evaluation.evaluator.ckpts.summary.cap_ema_normal_vs_shifted_normal_all \
-#     algorithm.center_init_method=zeros \
-#     algorithm.encoder.activation=silu \
-#     algorithm.encoder.batchnorm=False \
+#     ~evaluation.evaluator.ckpts.summary.consistency_ema_normal_vs_shifted_normal_all \
 #     algorithm.encoder.nodes='[8,16,32]' \
 #     algorithm.encoder.strides='[2,2]' \
-#     algorithm.nu=0.1 \
-#     algorithm.optimizer.betas='[0.9,0.999]' \
-#     algorithm.optimizer.lr=0.0005915538705440909 \
-#     algorithm.optimizer.weight_decay=1e-05 \
-#     algorithm.soft_boundary=True \
-#     algorithm.weight_decay=1e-07 \
+#     algorithm.network_weight_decay=1e-05 \
+#     algorithm.optimizer.betas='[0.9,0.99]' \
+#     algorithm.optimizer.lr=0.0009446902695083377 \
 #     trainer.gradient_clip_val=0.5 \
 #     trainer=gpu \
 #     trainer.devices=[1]
 
 # ------------------------------------------------------------------------
-# trial 414: wasserstein=0.0068413, dist=7.8557e-05
+# trial 518: wasserstein=0.017884, dist=0.00015206
 # ------------------------------------------------------------------------
 # taskset -c 6-8 \
 # python3 src/train.py \
 #     experiment=robustad/svdd_agnostic \
 #     experiment_name=robustad_svdd_pareto \
-#     run_name=wasserstein_t414 \
+#     run_name=wasserstein_t518 \
 #     callbacks.thres_drift=null \
 #     callbacks.cap_sn_zb=null \
+#     callbacks.consistency_sn_zb=null \
 #     callbacks.thres_drift_ema_ckpt=null \
 #     callbacks.cap_sn_zb_ema_ckpt=null \
+#     callbacks.consistency_sn_zb_ema_ckpt=null \
 #     ~evaluation.evaluator.ckpts.summary.operational_drift_ema \
 #     ~evaluation.evaluator.ckpts.summary.cap_ema_normal_vs_shifted_normal_all \
-#     algorithm.center_init_method=zeros \
-#     algorithm.encoder.activation=silu \
-#     algorithm.encoder.batchnorm=False \
+#     ~evaluation.evaluator.ckpts.summary.consistency_ema_normal_vs_shifted_normal_all \
 #     algorithm.encoder.nodes='[8,16,32]' \
 #     algorithm.encoder.strides='[2,2]' \
-#     algorithm.nu=0.1 \
-#     algorithm.optimizer.betas='[0.9,0.999]' \
-#     algorithm.optimizer.lr=0.0006262104268807702 \
-#     algorithm.optimizer.weight_decay=1e-05 \
-#     algorithm.soft_boundary=True \
-#     algorithm.weight_decay=1e-07 \
+#     algorithm.network_weight_decay=1e-05 \
+#     algorithm.optimizer.betas='[0.9,0.99]' \
+#     algorithm.optimizer.lr=0.0009278224302659119 \
 #     trainer.gradient_clip_val=0.5 \
 #     trainer=gpu \
 #     trainer.devices=[2]
 
 # ------------------------------------------------------------------------
-# trial 447: wasserstein=0.0067264, dist=8.8788e-05
+# trial 523: wasserstein=0.016676, dist=0.000398
 # ------------------------------------------------------------------------
 # taskset -c 9-11 \
 # python3 src/train.py \
 #     experiment=robustad/svdd_agnostic \
 #     experiment_name=robustad_svdd_pareto \
-#     run_name=wasserstein_t447 \
+#     run_name=wasserstein_t523 \
 #     callbacks.thres_drift=null \
 #     callbacks.cap_sn_zb=null \
+#     callbacks.consistency_sn_zb=null \
 #     callbacks.thres_drift_ema_ckpt=null \
 #     callbacks.cap_sn_zb_ema_ckpt=null \
+#     callbacks.consistency_sn_zb_ema_ckpt=null \
 #     ~evaluation.evaluator.ckpts.summary.operational_drift_ema \
 #     ~evaluation.evaluator.ckpts.summary.cap_ema_normal_vs_shifted_normal_all \
-#     algorithm.center_init_method=zeros \
-#     algorithm.encoder.activation=silu \
-#     algorithm.encoder.batchnorm=False \
+#     ~evaluation.evaluator.ckpts.summary.consistency_ema_normal_vs_shifted_normal_all \
 #     algorithm.encoder.nodes='[8,16,32]' \
 #     algorithm.encoder.strides='[2,2]' \
-#     algorithm.nu=0.1 \
-#     algorithm.optimizer.betas='[0.9,0.999]' \
-#     algorithm.optimizer.lr=0.0006109532365044968 \
-#     algorithm.optimizer.weight_decay=1e-05 \
-#     algorithm.soft_boundary=True \
-#     algorithm.weight_decay=1e-07 \
+#     algorithm.network_weight_decay=1e-05 \
+#     algorithm.optimizer.betas='[0.9,0.99]' \
+#     algorithm.optimizer.lr=0.0009297976040354228 \
 #     trainer.gradient_clip_val=0.5 \
 #     trainer=gpu \
 #     trainer.devices=[3]
 
 # ------------------------------------------------------------------------
-# trial 480: wasserstein=0.0062807, dist=0.00019582
+# trial 524: wasserstein=0.018076, dist=0.00013872
 # ------------------------------------------------------------------------
 # taskset -c 0-2 \
-# python3 src/train.py \
-#     experiment=robustad/svdd_agnostic \
-#     experiment_name=robustad_svdd_pareto \
-#     run_name=wasserstein_t480 \
-#     callbacks.thres_drift=null \
-#     callbacks.cap_sn_zb=null \
-#     callbacks.thres_drift_ema_ckpt=null \
-#     callbacks.cap_sn_zb_ema_ckpt=null \
-#     ~evaluation.evaluator.ckpts.summary.operational_drift_ema \
-#     ~evaluation.evaluator.ckpts.summary.cap_ema_normal_vs_shifted_normal_all \
-#     algorithm.center_init_method=zeros \
-#     algorithm.encoder.activation=silu \
-#     algorithm.encoder.batchnorm=False \
-#     algorithm.encoder.nodes='[8,16,32]' \
-#     algorithm.encoder.strides='[2,2]' \
-#     algorithm.nu=0.1 \
-#     algorithm.optimizer.betas='[0.9,0.999]' \
-#     algorithm.optimizer.lr=0.0006199731990980755 \
-#     algorithm.optimizer.weight_decay=1e-05 \
-#     algorithm.soft_boundary=True \
-#     algorithm.weight_decay=1e-07 \
-#     trainer.gradient_clip_val=0.5 \
-#     trainer=gpu \
-#     trainer.devices=[0]
-
-# ------------------------------------------------------------------------
-# trial 483: wasserstein=0.0068413, dist=7.8552e-05
-# ------------------------------------------------------------------------
-# taskset -c 3-5 \
-# python3 src/train.py \
-#     experiment=robustad/svdd_agnostic \
-#     experiment_name=robustad_svdd_pareto \
-#     run_name=wasserstein_t483 \
-#     callbacks.thres_drift=null \
-#     callbacks.cap_sn_zb=null \
-#     callbacks.thres_drift_ema_ckpt=null \
-#     callbacks.cap_sn_zb_ema_ckpt=null \
-#     ~evaluation.evaluator.ckpts.summary.operational_drift_ema \
-#     ~evaluation.evaluator.ckpts.summary.cap_ema_normal_vs_shifted_normal_all \
-#     algorithm.center_init_method=zeros \
-#     algorithm.encoder.activation=silu \
-#     algorithm.encoder.batchnorm=False \
-#     algorithm.encoder.nodes='[8,16,32]' \
-#     algorithm.encoder.strides='[2,2]' \
-#     algorithm.nu=0.1 \
-#     algorithm.optimizer.betas='[0.9,0.999]' \
-#     algorithm.optimizer.lr=0.0006262209591177468 \
-#     algorithm.optimizer.weight_decay=1e-05 \
-#     algorithm.soft_boundary=True \
-#     algorithm.weight_decay=1e-07 \
-#     trainer.gradient_clip_val=0.5 \
-#     trainer=gpu \
-#     trainer.devices=[1]
-
-# ------------------------------------------------------------------------
-# trial 513: wasserstein=0.0064326, dist=0.00016021
-# ------------------------------------------------------------------------
-# taskset -c 6-8 \
-# python3 src/train.py \
-#     experiment=robustad/svdd_agnostic \
-#     experiment_name=robustad_svdd_pareto \
-#     run_name=wasserstein_t513 \
-#     callbacks.thres_drift=null \
-#     callbacks.cap_sn_zb=null \
-#     callbacks.thres_drift_ema_ckpt=null \
-#     callbacks.cap_sn_zb_ema_ckpt=null \
-#     ~evaluation.evaluator.ckpts.summary.operational_drift_ema \
-#     ~evaluation.evaluator.ckpts.summary.cap_ema_normal_vs_shifted_normal_all \
-#     algorithm.center_init_method=zeros \
-#     algorithm.encoder.activation=silu \
-#     algorithm.encoder.batchnorm=False \
-#     algorithm.encoder.nodes='[8,16,32]' \
-#     algorithm.encoder.strides='[2,2]' \
-#     algorithm.nu=0.1 \
-#     algorithm.optimizer.betas='[0.9,0.999]' \
-#     algorithm.optimizer.lr=0.0006074287827437135 \
-#     algorithm.optimizer.weight_decay=1e-05 \
-#     algorithm.soft_boundary=True \
-#     algorithm.weight_decay=1e-07 \
-#     trainer.gradient_clip_val=0.5 \
-#     trainer=gpu \
-#     trainer.devices=[2]
-
-# ------------------------------------------------------------------------
-# trial 524: wasserstein=0.0057214, dist=0.0003634
-# ------------------------------------------------------------------------
-# taskset -c 9-11 \
 # python3 src/train.py \
 #     experiment=robustad/svdd_agnostic \
 #     experiment_name=robustad_svdd_pareto \
 #     run_name=wasserstein_t524 \
 #     callbacks.thres_drift=null \
 #     callbacks.cap_sn_zb=null \
+#     callbacks.consistency_sn_zb=null \
 #     callbacks.thres_drift_ema_ckpt=null \
 #     callbacks.cap_sn_zb_ema_ckpt=null \
+#     callbacks.consistency_sn_zb_ema_ckpt=null \
 #     ~evaluation.evaluator.ckpts.summary.operational_drift_ema \
 #     ~evaluation.evaluator.ckpts.summary.cap_ema_normal_vs_shifted_normal_all \
-#     algorithm.center_init_method=zeros \
-#     algorithm.encoder.activation=silu \
-#     algorithm.encoder.batchnorm=False \
+#     ~evaluation.evaluator.ckpts.summary.consistency_ema_normal_vs_shifted_normal_all \
 #     algorithm.encoder.nodes='[8,16,32]' \
 #     algorithm.encoder.strides='[2,2]' \
-#     algorithm.nu=0.1 \
-#     algorithm.optimizer.betas='[0.9,0.999]' \
-#     algorithm.optimizer.lr=0.0005915704500204442 \
-#     algorithm.optimizer.weight_decay=1e-05 \
-#     algorithm.soft_boundary=True \
-#     algorithm.weight_decay=1e-07 \
-#     trainer.gradient_clip_val=0.5 \
-#     trainer=gpu \
-#     trainer.devices=[3]
-
-# ------------------------------------------------------------------------
-# trial 547: wasserstein=0.00674, dist=8.0716e-05
-# ------------------------------------------------------------------------
-# taskset -c 0-2 \
-# python3 src/train.py \
-#     experiment=robustad/svdd_agnostic \
-#     experiment_name=robustad_svdd_pareto \
-#     run_name=wasserstein_t547 \
-#     callbacks.thres_drift=null \
-#     callbacks.cap_sn_zb=null \
-#     callbacks.thres_drift_ema_ckpt=null \
-#     callbacks.cap_sn_zb_ema_ckpt=null \
-#     ~evaluation.evaluator.ckpts.summary.operational_drift_ema \
-#     ~evaluation.evaluator.ckpts.summary.cap_ema_normal_vs_shifted_normal_all \
-#     algorithm.center_init_method=zeros \
-#     algorithm.encoder.activation=silu \
-#     algorithm.encoder.batchnorm=False \
-#     algorithm.encoder.nodes='[8,16,32]' \
-#     algorithm.encoder.strides='[2,2]' \
-#     algorithm.nu=0.1 \
-#     algorithm.optimizer.betas='[0.9,0.999]' \
-#     algorithm.optimizer.lr=0.0005897519048319808 \
-#     algorithm.optimizer.weight_decay=1e-05 \
-#     algorithm.soft_boundary=True \
-#     algorithm.weight_decay=1e-06 \
+#     algorithm.network_weight_decay=1e-05 \
+#     algorithm.optimizer.betas='[0.9,0.99]' \
+#     algorithm.optimizer.lr=0.0009306814897377092 \
 #     trainer.gradient_clip_val=0.5 \
 #     trainer=gpu \
 #     trainer.devices=[0]
 
 # ------------------------------------------------------------------------
-# trial 581: wasserstein=0.006826, dist=7.9576e-05  << ORIGINAL PICK
+# trial 553: wasserstein=0.018392, dist=0.00012867
 # ------------------------------------------------------------------------
 # taskset -c 3-5 \
 # python3 src/train.py \
 #     experiment=robustad/svdd_agnostic \
 #     experiment_name=robustad_svdd_pareto \
-#     run_name=wasserstein_t581 \
+#     run_name=wasserstein_t553 \
 #     callbacks.thres_drift=null \
 #     callbacks.cap_sn_zb=null \
+#     callbacks.consistency_sn_zb=null \
 #     callbacks.thres_drift_ema_ckpt=null \
 #     callbacks.cap_sn_zb_ema_ckpt=null \
+#     callbacks.consistency_sn_zb_ema_ckpt=null \
 #     ~evaluation.evaluator.ckpts.summary.operational_drift_ema \
 #     ~evaluation.evaluator.ckpts.summary.cap_ema_normal_vs_shifted_normal_all \
-#     algorithm.center_init_method=zeros \
-#     algorithm.encoder.activation=silu \
-#     algorithm.encoder.batchnorm=False \
+#     ~evaluation.evaluator.ckpts.summary.consistency_ema_normal_vs_shifted_normal_all \
 #     algorithm.encoder.nodes='[8,16,32]' \
 #     algorithm.encoder.strides='[2,2]' \
-#     algorithm.nu=0.1 \
-#     algorithm.optimizer.betas='[0.9,0.999]' \
-#     algorithm.optimizer.lr=0.0006079271679609457 \
-#     algorithm.optimizer.weight_decay=1e-05 \
-#     algorithm.soft_boundary=True \
-#     algorithm.weight_decay=1e-07 \
+#     algorithm.network_weight_decay=1e-05 \
+#     algorithm.optimizer.betas='[0.9,0.99]' \
+#     algorithm.optimizer.lr=0.0009123298771913037 \
 #     trainer.gradient_clip_val=0.5 \
 #     trainer=gpu \
 #     trainer.devices=[1]
+
+# ------------------------------------------------------------------------
+# trial 554: wasserstein=0.018806, dist=0.00012831
+# ------------------------------------------------------------------------
+# taskset -c 6-8 \
+# python3 src/train.py \
+#     experiment=robustad/svdd_agnostic \
+#     experiment_name=robustad_svdd_pareto \
+#     run_name=wasserstein_t554 \
+#     callbacks.thres_drift=null \
+#     callbacks.cap_sn_zb=null \
+#     callbacks.consistency_sn_zb=null \
+#     callbacks.thres_drift_ema_ckpt=null \
+#     callbacks.cap_sn_zb_ema_ckpt=null \
+#     callbacks.consistency_sn_zb_ema_ckpt=null \
+#     ~evaluation.evaluator.ckpts.summary.operational_drift_ema \
+#     ~evaluation.evaluator.ckpts.summary.cap_ema_normal_vs_shifted_normal_all \
+#     ~evaluation.evaluator.ckpts.summary.consistency_ema_normal_vs_shifted_normal_all \
+#     algorithm.encoder.nodes='[8,16,32]' \
+#     algorithm.encoder.strides='[2,2]' \
+#     algorithm.network_weight_decay=1e-05 \
+#     algorithm.optimizer.betas='[0.9,0.99]' \
+#     algorithm.optimizer.lr=0.0009131113704215903 \
+#     trainer.gradient_clip_val=0.5 \
+#     trainer=gpu \
+#     trainer.devices=[2]
+
+# ------------------------------------------------------------------------
+# trial 556: wasserstein=0.019259, dist=0.00011217
+# ------------------------------------------------------------------------
+# taskset -c 9-11 \
+# python3 src/train.py \
+#     experiment=robustad/svdd_agnostic \
+#     experiment_name=robustad_svdd_pareto \
+#     run_name=wasserstein_t556 \
+#     callbacks.thres_drift=null \
+#     callbacks.cap_sn_zb=null \
+#     callbacks.consistency_sn_zb=null \
+#     callbacks.thres_drift_ema_ckpt=null \
+#     callbacks.cap_sn_zb_ema_ckpt=null \
+#     callbacks.consistency_sn_zb_ema_ckpt=null \
+#     ~evaluation.evaluator.ckpts.summary.operational_drift_ema \
+#     ~evaluation.evaluator.ckpts.summary.cap_ema_normal_vs_shifted_normal_all \
+#     ~evaluation.evaluator.ckpts.summary.consistency_ema_normal_vs_shifted_normal_all \
+#     algorithm.encoder.nodes='[8,16,32]' \
+#     algorithm.encoder.strides='[2,2]' \
+#     algorithm.network_weight_decay=1e-05 \
+#     algorithm.optimizer.betas='[0.9,0.99]' \
+#     algorithm.optimizer.lr=0.0009117957513465599 \
+#     trainer.gradient_clip_val=0.5 \
+#     trainer=gpu \
+#     trainer.devices=[3]
+
+# ------------------------------------------------------------------------
+# trial 578: wasserstein=0.017647, dist=0.00015926
+# ------------------------------------------------------------------------
+# taskset -c 0-2 \
+# python3 src/train.py \
+#     experiment=robustad/svdd_agnostic \
+#     experiment_name=robustad_svdd_pareto \
+#     run_name=wasserstein_t578 \
+#     callbacks.thres_drift=null \
+#     callbacks.cap_sn_zb=null \
+#     callbacks.consistency_sn_zb=null \
+#     callbacks.thres_drift_ema_ckpt=null \
+#     callbacks.cap_sn_zb_ema_ckpt=null \
+#     callbacks.consistency_sn_zb_ema_ckpt=null \
+#     ~evaluation.evaluator.ckpts.summary.operational_drift_ema \
+#     ~evaluation.evaluator.ckpts.summary.cap_ema_normal_vs_shifted_normal_all \
+#     ~evaluation.evaluator.ckpts.summary.consistency_ema_normal_vs_shifted_normal_all \
+#     algorithm.encoder.nodes='[8,16,32]' \
+#     algorithm.encoder.strides='[2,2]' \
+#     algorithm.network_weight_decay=1e-05 \
+#     algorithm.optimizer.betas='[0.9,0.99]' \
+#     algorithm.optimizer.lr=0.0009200244031977769 \
+#     trainer.gradient_clip_val=0.5 \
+#     trainer=gpu \
+#     trainer.devices=[0]
+
+# ------------------------------------------------------------------------
+# trial 579: wasserstein=0.018357, dist=0.00013586
+# ------------------------------------------------------------------------
+# taskset -c 3-5 \
+# python3 src/train.py \
+#     experiment=robustad/svdd_agnostic \
+#     experiment_name=robustad_svdd_pareto \
+#     run_name=wasserstein_t579 \
+#     callbacks.thres_drift=null \
+#     callbacks.cap_sn_zb=null \
+#     callbacks.consistency_sn_zb=null \
+#     callbacks.thres_drift_ema_ckpt=null \
+#     callbacks.cap_sn_zb_ema_ckpt=null \
+#     callbacks.consistency_sn_zb_ema_ckpt=null \
+#     ~evaluation.evaluator.ckpts.summary.operational_drift_ema \
+#     ~evaluation.evaluator.ckpts.summary.cap_ema_normal_vs_shifted_normal_all \
+#     ~evaluation.evaluator.ckpts.summary.consistency_ema_normal_vs_shifted_normal_all \
+#     algorithm.encoder.nodes='[8,16,32]' \
+#     algorithm.encoder.strides='[2,2]' \
+#     algorithm.network_weight_decay=1e-05 \
+#     algorithm.optimizer.betas='[0.9,0.99]' \
+#     algorithm.optimizer.lr=0.000920683037470414 \
+#     trainer.gradient_clip_val=0.5 \
+#     trainer=gpu \
+#     trainer.devices=[1]
+
+# ------------------------------------------------------------------------
+# trial 583: wasserstein=0.016829, dist=0.00017721  << KNEE
+# ------------------------------------------------------------------------
+# taskset -c 6-8 \
+# python3 src/train.py \
+#     experiment=robustad/svdd_agnostic \
+#     experiment_name=robustad_svdd_pareto \
+#     run_name=wasserstein_t583 \
+#     callbacks.thres_drift=null \
+#     callbacks.cap_sn_zb=null \
+#     callbacks.consistency_sn_zb=null \
+#     callbacks.thres_drift_ema_ckpt=null \
+#     callbacks.cap_sn_zb_ema_ckpt=null \
+#     callbacks.consistency_sn_zb_ema_ckpt=null \
+#     ~evaluation.evaluator.ckpts.summary.operational_drift_ema \
+#     ~evaluation.evaluator.ckpts.summary.cap_ema_normal_vs_shifted_normal_all \
+#     ~evaluation.evaluator.ckpts.summary.consistency_ema_normal_vs_shifted_normal_all \
+#     algorithm.encoder.nodes='[8,16,32]' \
+#     algorithm.encoder.strides='[2,2]' \
+#     algorithm.network_weight_decay=1e-05 \
+#     algorithm.optimizer.betas='[0.9,0.99]' \
+#     algorithm.optimizer.lr=0.0009204598289099297 \
+#     trainer.gradient_clip_val=0.5 \
+#     trainer=gpu \
+#     trainer.devices=[2]
+
+# ------------------------------------------------------------------------
+# trial 587: wasserstein=0.016428, dist=0.0010447
+# ------------------------------------------------------------------------
+# taskset -c 9-11 \
+# python3 src/train.py \
+#     experiment=robustad/svdd_agnostic \
+#     experiment_name=robustad_svdd_pareto \
+#     run_name=wasserstein_t587 \
+#     callbacks.thres_drift=null \
+#     callbacks.cap_sn_zb=null \
+#     callbacks.consistency_sn_zb=null \
+#     callbacks.thres_drift_ema_ckpt=null \
+#     callbacks.cap_sn_zb_ema_ckpt=null \
+#     callbacks.consistency_sn_zb_ema_ckpt=null \
+#     ~evaluation.evaluator.ckpts.summary.operational_drift_ema \
+#     ~evaluation.evaluator.ckpts.summary.cap_ema_normal_vs_shifted_normal_all \
+#     ~evaluation.evaluator.ckpts.summary.consistency_ema_normal_vs_shifted_normal_all \
+#     algorithm.encoder.nodes='[8,16,32]' \
+#     algorithm.encoder.strides='[2,2]' \
+#     algorithm.network_weight_decay=1e-05 \
+#     algorithm.optimizer.betas='[0.9,0.99]' \
+#     algorithm.optimizer.lr=0.0009203556386300428 \
+#     trainer.gradient_clip_val=0.5 \
+#     trainer=gpu \
+#     trainer.devices=[3]
 
 # ========================================================================
 # SUBMIT EVERYTHING ABOVE TO CLARIDEN  (one slurm job per command)

@@ -278,16 +278,19 @@ MetricAxisSummary[assoc_Association, label_String:"AUPRC",
    ToString[na], " (of ", ToString[2*Length[rows]], " comparisons)."]];
 
 (* Every table carries its own legend: a trailing line in markdown, a LaTeX
-   comment after the tabular so it survives copy-paste into the paper. *)
+   comment after the tabular so it survives copy-paste into the paper.
+   Headers must stay in lockstep with Latex/MarkdownRowCompactAsymCollapse,
+   which emit 12 fields including the consistency column and its CAP-Cons
+   comparison pair. *)
 LatexTableFromRows[rows_List, digits_:2] := StringJoin[
-   "\\begin{tabular}{lcccccccc}\n\\toprule\n",
-   "Arch. & Semi & CAP & Stable & W1 & CAP$-$Stable & $p$ & CAP$-$W1 & $p$ \\\\\n",
+   "\\begin{tabular}{lccccccccccc}\n\\toprule\n",
+   "Arch. & Semi & CAP & Cons & Stable & W1 & CAP$-$Cons & $p$ & CAP$-$Stable & $p$ & CAP$-$W1 & $p$ \\\\\n",
    "\\midrule\n",
    StringRiffle[LatexRowCompactAsymCollapse[#, digits] & /@ rows, "\n"],
    "\n\\bottomrule\n\\end{tabular}\n% legend: ", tableLegendText[]];
 MarkdownTableFromRows[rows_List, digits_:2] := StringJoin[
-   "| Arch. | Semi | CAP | Stable | W1 | CAP-Stable | p | CAP-W1 | p |\n",
-   "|---|---|---|---|---|---|---|---|---|\n",
+   "| Arch. | Semi | CAP | Cons | Stable | W1 | CAP-Cons | p | CAP-Stable | p | CAP-W1 | p |\n",
+   "|---|---|---|---|---|---|---|---|---|---|---|---|\n",
    StringRiffle[MarkdownRowCompactAsymCollapse[#, digits] & /@ rows, "\n"],
    "\n\nlegend: ", tableLegendText[]];
 

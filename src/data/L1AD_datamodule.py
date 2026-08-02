@@ -3,6 +3,7 @@
 from dataclasses import dataclass
 from pathlib import Path
 import gc
+import json
 import warnings
 
 import torch
@@ -38,6 +39,7 @@ class SplitTensors:
     mask: torch.Tensor
     l1bit: torch.Tensor
     y: torch.Tensor
+    source_id: torch.Tensor | None = None
 
 
 class L1ADDataModule(LightningDataModule):
@@ -55,6 +57,8 @@ class L1ADDataModule(LightningDataModule):
         l1_scales: dict,
         batch_size: int = 16384,
         max_val_batches: int = -1,
+        expose_zerobias_sources: bool = False,
+        zerobias_source_metadata_dir: str | None = None,
         seed: int = 42,
     ) -> None:
         """Prepare the L1 data for using it to train and validate ML models.
@@ -91,6 +95,12 @@ class L1ADDataModule(LightningDataModule):
         self._aux: dict[str, dict[str, SplitTensors]] = {"valid": {}, "test": {}}
         self.shuffler = torch.Generator().manual_seed(seed)
         self.max_val_batches = max_val_batches
+        self.expose_zerobias_sources = bool(expose_zerobias_sources)
+        self.zerobias_source_metadata_dir = (
+            Path(zerobias_source_metadata_dir).expanduser().resolve()
+            if zerobias_source_metadata_dir
+            else None
+        )
 
     def prepare_data(self) -> None:
         """Get zero bias data and the simulated MC signal data."""
@@ -239,12 +249,30 @@ class L1ADDataModule(LightningDataModule):
         """Load main data splits: train, val, and test of ZB data."""
         x, mask, l1bit = self.loader.load_folder(data_dir / split)
         y = torch.full((x.size(0),), label, dtype=torch.int64)
+        source_root = self.zerobias_source_metadata_dir or data_dir
+        source_id_path = source_root / split / "zerobias_source_id.npy"
+        source_id = (
+            torch.from_numpy(np.load(source_id_path).astype(np.int64, copy=False)).contiguous()
+            if source_id_path.is_file()
+            else None
+        )
+        if self.expose_zerobias_sources and source_id is None:
+            raise FileNotFoundError(
+                f"Per-run ZeroBias evaluation requested but {source_id_path} is missing. "
+                "Copy the generated pairing source sidecars into the configured "
+                "zerobias_source_metadata_dir."
+            )
+        if source_id is not None and source_id.numel() != x.size(0):
+            raise ValueError(
+                f"ZeroBias source IDs contain {source_id.numel()} rows but the {split} "
+                f"tensor contains {x.size(0)} rows."
+            )
         x = x.contiguous()
         mask = mask.contiguous()
         l1bit = l1bit.contiguous()
         y = y.contiguous()
 
-        return SplitTensors(x=x, mask=mask, l1bit=l1bit, y=y)
+        return SplitTensors(x=x, mask=mask, l1bit=l1bit, y=y, source_id=source_id)
 
     def _load_aux_split(self, data_dir: Path, split: str) -> dict[str, SplitTensors]:
         """Load a split of auxiliary data, either val or test.
@@ -289,6 +317,31 @@ class L1ADDataModule(LightningDataModule):
         loaders[main_name] = self._to_loader(
             main, batch_size=self.batch_size_per_device
         )
+
+        if self.expose_zerobias_sources:
+            source_root = self.zerobias_source_metadata_dir or self.main_cache_folder
+            metadata_path = source_root / "zerobias_sources.json"
+            with metadata_path.open(encoding="utf-8") as handle:
+                source_names = json.load(handle)["sources"]
+            for source_index, source_name in enumerate(source_names):
+                selector = torch.nonzero(
+                    main.source_id == source_index, as_tuple=False
+                ).flatten()
+                if self.max_val_batches is not None and self.max_val_batches > 0:
+                    maximum = self.batch_size_per_device * self.max_val_batches
+                    selector = selector[:maximum]
+                source = SplitTensors(
+                    x=main.x[selector].contiguous(),
+                    mask=main.mask[selector].contiguous(),
+                    l1bit=main.l1bit[selector].contiguous(),
+                    y=main.y[selector].contiguous(),
+                    source_id=None,
+                )
+                loaders[source_name] = self._to_loader(
+                    source,
+                    batch_size=self.batch_size_per_device,
+                    max_b=self.max_val_batches,
+                )
 
         for name, split in self._aux.get(aux_key, {}).items():
             loaders[name] = self._to_loader(

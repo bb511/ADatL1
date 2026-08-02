@@ -136,6 +136,8 @@ class Evaluator:
         log.info(Fore.GREEN + f"-> Evaluating strategy '{self.strategy_name}'")
 
         for metric_name in self.ckpts[self.strategy_name].keys():
+            if self.ckpts[self.strategy_name][metric_name] in (None, False):
+                continue
             metric_subdir = self._get_subdir(strategy_folder, metric_name)
             if metric_subdir is None:
                 raise ValueError(
@@ -213,7 +215,7 @@ class Evaluator:
 
     def evaluate_last(self, run_folder: Path, model, test_loaders):
         """Evaluate the checkpoint taken at the last epoch."""
-        log.info(Fore.GREEN + f"-> Evaluating strategy 'last'")
+        log.info(Fore.GREEN + "-> Evaluating strategy 'last'")
         self.evaluator.strat_name = "last"
         ckpt_path = run_folder / "last.ckpt"
         self.evaluate_ckpt(ckpt_path, model, test_loaders)

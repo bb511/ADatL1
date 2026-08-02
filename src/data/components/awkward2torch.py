@@ -41,9 +41,15 @@ class L1DataAwkward2Torch:
             if self.object_feature_map is None:
                 self._set_obj_feat_map()
             return (
-                torch.load(self.cache_filepath),
-                torch.load(self.cache_maskpath),
-                torch.load(self.cache_l1bitpath),
+                torch.load(
+                    self.cache_filepath, map_location="cpu", weights_only=True, mmap=True
+                ),
+                torch.load(
+                    self.cache_maskpath, map_location="cpu", weights_only=True, mmap=True
+                ),
+                torch.load(
+                    self.cache_l1bitpath, map_location="cpu", weights_only=True, mmap=True
+                ),
             )
 
         self.cached_objects = set()

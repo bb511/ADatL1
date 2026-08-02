@@ -1,0 +1,18 @@
+# @package _global_
+
+# Production CAP comparison between the two named 2025E+G ZeroBias backgrounds.
+defaults:
+  - physics/vae_agnostic
+  - /pairing: physics
+  - override /data: basis
+  - _self_
+
+tags: ["vae", "physics", "background-pairing", "mapping"]
+experiment_name: physics_vae_background_pairing
+
+# These must match the ordered prefixes used by the generated pair tables.
+data:
+  batch_size: 16384
+  max_val_batches: 10
+  expose_zerobias_sources: true
+  zerobias_source_metadata_dir: ${physics_pairing.source_metadata_dir}

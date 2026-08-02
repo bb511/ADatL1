@@ -150,6 +150,24 @@ def validate_pair_table(
             f"but CAP collected {n_dataset_2}."
         )
 
+    dense_map = table.get("map_0_to_1")
+    if dense_map is not None:
+        if (
+            not torch.is_tensor(dense_map)
+            or dense_map.ndim != 1
+            or dense_map.dtype not in _INTEGER_DTYPES
+        ):
+            raise ValueError("Pair-table map_0_to_1 must be a one-dimensional integer tensor.")
+        dense_map = dense_map.long().cpu()
+        if dense_map.numel() != stored_n_1:
+            raise ValueError("Pair-table map_0_to_1 must have one entry per dataset-1 row.")
+        if idx_1.numel() != stored_n_1 or not torch.equal(
+            idx_1, torch.arange(stored_n_1, dtype=torch.long)
+        ):
+            raise ValueError("Dense map_0_to_1 requires idx_1 == arange(n_dataset_1).")
+        if not torch.equal(dense_map, idx_2):
+            raise ValueError("Pair-table map_0_to_1 must be identical to idx_2.")
+
     for name in (
         "encoder_checkpoint_sha256",
         "source_1_sha256",

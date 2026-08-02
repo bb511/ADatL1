@@ -5,11 +5,8 @@ import awkward as ak
 import numpy as np
 import torch
 
-from src.utils.pairing.jetclr_run_tables import (
-    ProcessedRunReader,
-    deterministic_iterative_pairing,
-    load_run_schema,
-)
+from src.utils.pairing.jetclr_run_tables import ProcessedRunReader, load_run_schema
+from src.utils.pairing.matching import deterministic_iterative_pairing
 
 
 def _write_processed_run(root: Path) -> tuple[Path, Path]:

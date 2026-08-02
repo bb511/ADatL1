@@ -2,14 +2,17 @@
 
 # Add this control to any physics experiment with: +pairing=physics
 physics_pairing:
-  artifact_dir: ${paths.root_dir}/results/physics-pairing-control/production
+  dataset_1: ZB_run396102  # background 0: 2025E
+  dataset_2: ZB_run398183  # background 1: 2025G
+  artifact_dir: ${paths.data_dir}/pairing/ZB_run396102_to_ZB_run398183
+  source_metadata_dir: ${physics_pairing.artifact_dir}/sources
 
   # Select exactly one deterministic pairing strategy.
   strategy: physics_summary
   # strategy: flat_physical
   # strategy: typed_sliced_wasserstein
 
-  # Must equal data.batch_size * data.max_val_batches for the auxiliary sample.
+  # Must equal data.batch_size * data.max_val_batches for each named stream.
   events: 163840
   # events: 81920  # JetCLR pairing runs use batch_size=8192 and 10 batches.
 
@@ -18,12 +21,24 @@ physics_pairing:
 
 callbacks:
   cap_sn_zb:
-    pairing_type: precomputed
+    dataset_1: ${physics_pairing.dataset_1}
+    dataset_2: ${physics_pairing.dataset_2}
+    pairing_type: mapping
     pairing_index_path: ${physics_pairing.validation_table}
+  cap_sn_zb_ema_ckpt:
+    dirpath: '${paths.checkpoints_dir}/${experiment_name}/${run_name}/summary/cap_ema_${physics_pairing.dataset_1}_vs_${physics_pairing.dataset_2}/max'
+    monitor: 'val/summary/cap_ema_${physics_pairing.dataset_1}_vs_${physics_pairing.dataset_2}'
+    filename: 'cap_ema_${physics_pairing.dataset_1}_vs_${physics_pairing.dataset_2}'
 
 evaluation:
+  evaluator:
+    ckpts:
+      summary:
+        cap_ema_ZB_run396102_vs_ZB_run398183: ['max']
   callbacks:
     cap_sn_zb:
-      pairing_type: precomputed
+      dataset_1: ${physics_pairing.dataset_1}
+      dataset_2: ${physics_pairing.dataset_2}
+      pairing_type: mapping
       pairing_index_path: ${physics_pairing.validation_table}
       pairing_test_index_path: ${physics_pairing.test_table}

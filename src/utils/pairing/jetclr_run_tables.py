@@ -24,11 +24,11 @@ import torch
 import torch.nn.functional as F
 
 from src.utils.pairing.artifacts import (
-    FullPairingTensors,
     full_pairing_artifact,
     save_full_pairing_artifact,
 )
 from src.utils.pairing.io import compose_config
+from src.utils.pairing.matching import deterministic_iterative_pairing
 from src.utils.pairing.table import atomic_json_dump, sha256_file
 
 SELECTED_FEATURES = {
@@ -38,8 +38,6 @@ SELECTED_FEATURES = {
     "muons": ("Et", "eta", "phi"),
     "taus": ("Et", "eta", "phi"),
 }
-TARGET_INDEX_BITS = 24
-TARGET_INDEX_LIMIT = 1 << TARGET_INDEX_BITS
 
 
 @dataclass(frozen=True)
@@ -324,198 +322,6 @@ def _load_embedding_artifact(path: Path) -> tuple[np.ndarray, dict]:
     if sha256_file(path) != metadata["embedding_sha256"]:
         raise ValueError(f"Embedding artifact hash mismatch: {path}")
     return matrix, metadata
-
-
-def _build_faiss_index(
-    reference: np.ndarray,
-    *,
-    backend: str,
-    nlist: int,
-    nprobe: int,
-    train_events: int,
-    train_iterations: int,
-    add_batch_size: int,
-    seed: int,
-):
-    """Build a deterministic ID-preserving FAISS reference index."""
-    import faiss
-
-    dimension = reference.shape[1]
-    if backend == "flat":
-        index = faiss.IndexIDMap2(faiss.IndexFlatL2(dimension))
-    elif backend == "ivf_flat":
-        effective_nlist = min(int(nlist), reference.shape[0])
-        index = faiss.IndexIVFFlat(
-            faiss.IndexFlatL2(dimension),
-            dimension,
-            effective_nlist,
-            faiss.METRIC_L2,
-        )
-        index.cp.seed = int(seed)
-        index.cp.niter = int(train_iterations)
-        train_n = min(int(train_events), reference.shape[0])
-        train_index = np.linspace(0, reference.shape[0] - 1, train_n, dtype=np.int64)
-        training = np.ascontiguousarray(reference[train_index], dtype=np.float32)
-        index.train(training)
-        index.nprobe = min(int(nprobe), effective_nlist)
-    else:
-        raise ValueError("backend must be 'flat' or 'ivf_flat'.")
-    for start in range(0, reference.shape[0], int(add_batch_size)):
-        stop = min(start + int(add_batch_size), reference.shape[0])
-        rows = np.ascontiguousarray(reference[start:stop], dtype=np.float32)
-        ids = np.arange(start, stop, dtype=np.int64)
-        index.add_with_ids(rows, ids)
-    return index
-
-
-def _proposal_assign(
-    *,
-    unmatched: np.ndarray,
-    squared_distance: np.ndarray,
-    reference_index: np.ndarray,
-    target_to_reference: np.ndarray,
-    reference_to_target: np.ndarray,
-    distance: np.ndarray,
-    candidate_rank: np.ndarray,
-) -> tuple[np.ndarray, np.ndarray]:
-    """Resolve proposals deterministically by rank, distance, then target index."""
-    alive = np.ones(unmatched.shape[0], dtype=np.bool_)
-    assigned_references = []
-    max_key = np.iinfo(np.uint64).max
-    for rank in range(reference_index.shape[1]):
-        positions = np.flatnonzero(alive)
-        if positions.size == 0:
-            break
-        refs = reference_index[positions, rank]
-        d2 = squared_distance[positions, rank]
-        eligible = (refs >= 0) & np.isfinite(d2) & (reference_to_target[refs.clip(min=0)] < 0)
-        positions = positions[eligible]
-        if positions.size == 0:
-            continue
-        refs = reference_index[positions, rank]
-        d2 = squared_distance[positions, rank].astype(np.float32, copy=False)
-        targets = unmatched[positions]
-        bits = d2.view(np.uint32).astype(np.uint64)
-        keys = (bits << np.uint64(TARGET_INDEX_BITS)) | targets.astype(np.uint64)
-        best = np.full(reference_to_target.shape[0], max_key, dtype=np.uint64)
-        np.minimum.at(best, refs, keys)
-        winners = positions[keys == best[refs]]
-        winner_refs = reference_index[winners, rank]
-        winner_targets = unmatched[winners]
-        target_to_reference[winner_targets] = winner_refs
-        reference_to_target[winner_refs] = winner_targets
-        distance[winner_targets] = np.sqrt(squared_distance[winners, rank]).astype(np.float32)
-        candidate_rank[winner_targets] = rank + 1
-        alive[winners] = False
-        assigned_references.append(winner_refs)
-    references = (
-        np.concatenate(assigned_references) if assigned_references else np.empty(0, dtype=np.int64)
-    )
-    return unmatched[alive], references
-
-
-def deterministic_iterative_pairing(
-    target: np.ndarray,
-    reference: np.ndarray,
-    *,
-    backend: str,
-    k: int,
-    nlist: int,
-    nprobe: int,
-    train_events: int,
-    train_iterations: int,
-    search_batch_size: int,
-    add_batch_size: int,
-    threads: int,
-    seed: int,
-) -> tuple[FullPairingTensors, list[dict[str, int]]]:
-    """Pair every target uniquely using iterative deterministic ANN proposals."""
-    import faiss
-
-    if target.ndim != 2 or reference.ndim != 2 or target.shape[1] != reference.shape[1]:
-        raise ValueError("Target and reference embeddings must be compatible matrices.")
-    if target.shape[0] > reference.shape[0]:
-        raise ValueError("Every target can be paired uniquely only when target <= reference.")
-    if target.shape[0] >= TARGET_INDEX_LIMIT:
-        raise ValueError(
-            f"Target count must be below {TARGET_INDEX_LIMIT} for deterministic keys."
-        )
-    faiss.omp_set_num_threads(int(threads))
-    index = _build_faiss_index(
-        reference,
-        backend=backend,
-        nlist=nlist,
-        nprobe=nprobe,
-        train_events=train_events,
-        train_iterations=train_iterations,
-        add_batch_size=add_batch_size,
-        seed=seed,
-    )
-    n_target, n_reference = target.shape[0], reference.shape[0]
-    target_to_reference = np.full(n_target, -1, dtype=np.int64)
-    reference_to_target = np.full(n_reference, -1, dtype=np.int64)
-    distance = np.full(n_target, np.inf, dtype=np.float32)
-    candidate_rank = np.zeros(n_target, dtype=np.int64)
-    unmatched = np.arange(n_target, dtype=np.int64)
-    rounds = []
-    round_index = 0
-    while unmatched.size:
-        round_index += 1
-        before = unmatched.size
-        distances = np.empty((before, int(k)), dtype=np.float32)
-        indices = np.empty((before, int(k)), dtype=np.int64)
-        for start in range(0, before, int(search_batch_size)):
-            stop = min(start + int(search_batch_size), before)
-            queries = np.ascontiguousarray(target[unmatched[start:stop]], dtype=np.float32)
-            distances[start:stop], indices[start:stop] = index.search(queries, int(k))
-        unmatched, remove_ids = _proposal_assign(
-            unmatched=unmatched,
-            squared_distance=distances,
-            reference_index=indices,
-            target_to_reference=target_to_reference,
-            reference_to_target=reference_to_target,
-            distance=distance,
-            candidate_rank=candidate_rank,
-        )
-        assigned = before - unmatched.size
-        if assigned == 0:
-            if backend == "ivf_flat" and index.nprobe < index.nlist:
-                previous_nprobe = int(index.nprobe)
-                index.nprobe = min(2 * previous_nprobe, int(index.nlist))
-                rounds.append(
-                    {
-                        "round": round_index,
-                        "before": before,
-                        "assigned": 0,
-                        "after": unmatched.size,
-                        "nprobe_before": previous_nprobe,
-                        "nprobe_after": int(index.nprobe),
-                    }
-                )
-                print(
-                    f"Assignment round {round_index}: no candidates remained; "
-                    f"increased nprobe from {previous_nprobe} to {index.nprobe}."
-                )
-                continue
-            raise RuntimeError("Pairing made no progress after exhaustive reference probing.")
-        if remove_ids.size != assigned or np.unique(remove_ids).size != assigned:
-            raise RuntimeError("Reference assignment accounting became inconsistent.")
-        index.remove_ids(np.ascontiguousarray(remove_ids, dtype=np.int64))
-        rounds.append(
-            {"round": round_index, "before": before, "assigned": assigned, "after": unmatched.size}
-        )
-        print(f"Assignment round {round_index}: {assigned:,} paired, {unmatched.size:,} remain.")
-    valid = np.ones(n_target, dtype=np.bool_)
-    tensors = FullPairingTensors(
-        target_to_reference=torch.from_numpy(target_to_reference),
-        reference_to_target=torch.from_numpy(reference_to_target),
-        distance=torch.from_numpy(distance),
-        valid=torch.from_numpy(valid),
-        caliper_valid=torch.from_numpy(valid.copy()),
-        candidate_rank=torch.from_numpy(candidate_rank),
-    )
-    tensors.validate()
-    return tensors, rounds
 
 
 def build_pairing(

@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from types import SimpleNamespace
+
 import torch
 
 from src.data.L1AD_datamodule import L1ADDataModule, SplitTensors
@@ -14,14 +16,16 @@ def _split(n_events: int, label: int) -> SplitTensors:
 
 
 def _datamodule(*, normal_cap: int | None, seed: int = 42) -> L1ADDataModule:
+    normalizer = SimpleNamespace(name="robust")
+    mlready = SimpleNamespace(cache_root_dir=".", name="test")
     dm = L1ADDataModule(
         zerobias={},
         signal={},
         background={},
         data_extractor=object(),
         data_processor=object(),
-        data_normalizer=object(),
-        data_mlready=object(),
+        data_normalizer=normalizer,
+        data_mlready=mlready,
         data_awkward2torch=object(),
         train_features={},
         l1_scales={},

@@ -3,11 +3,26 @@
 defaults:
   - /experiment/cchamber/ae_candidate_rank_audit
 
-# Confirmatory AE trajectory: the CDF branch alone uses covariance-aware
-# reconstruction residuals fitted exclusively on each epoch's training normals.
-# All other branches remain scalar-MSE controls on the identical trajectory.
+# Confirmatory AE trajectory: every selector uses covariance-aware reconstruction
+# residuals fitted exclusively on each epoch's training normals. This keeps the
+# anomaly score fixed while comparing pairing and selection strategies.
 tags: ["causal_chamber", "ae_residual_oas", "confirmatory", "label_free"]
 
 callbacks:
+  residual_oas_state:
+    _target_: src.callbacks.cap.ResidualOASStateCallback
+
+  anomaly_eff:
+    output_name: "ascore/residual_oas"
+  thres_drift:
+    output_name: "ascore/residual_oas"
+  wasserstein_dist:
+    output_name: "ascore/residual_oas"
+  cap_ref:
+    output_name: "ascore/residual_oas"
   cap_cdf:
-    _target_: src.callbacks.cap.ResidualOASCAPCallback
+    output_name: "ascore/residual_oas"
+  cap_random:
+    output_name: "ascore/residual_oas"
+  cap_encoder:
+    output_name: "ascore/residual_oas"

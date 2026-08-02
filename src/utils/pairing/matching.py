@@ -7,7 +7,7 @@ import torch
 
 from src.utils.pairing.artifacts import FullPairingTensors
 
-SearchBackend = Literal["auto", "faiss", "torch"]
+SearchBackend = Literal["auto", "faiss", "faiss_hnsw", "torch"]
 
 
 @dataclass(frozen=True)
@@ -70,13 +70,15 @@ def exact_topk_l2(
     target, reference = _validated_matrices(target, reference)
     if isinstance(k, bool) or int(k) <= 0:
         raise ValueError("k must be a positive integer.")
-    if backend not in {"auto", "faiss", "torch"}:
-        raise ValueError("backend must be one of: auto, faiss, torch.")
+    if backend not in {"auto", "faiss", "faiss_hnsw", "torch"}:
+        raise ValueError("backend must be one of: auto, faiss, faiss_hnsw, torch.")
     if int(query_batch_size) <= 0 or int(reference_batch_size) <= 0:
         raise ValueError("Search batch sizes must be positive.")
     k_eff = min(int(k), reference.shape[0])
 
-    use_faiss = backend == "faiss" or (backend == "auto" and target.device.type == "cpu")
+    use_faiss = backend in {"faiss", "faiss_hnsw"} or (
+        backend == "auto" and target.device.type == "cpu"
+    )
     faiss = _try_import_faiss() if use_faiss else None
     if backend == "faiss" and faiss is None:
         raise ImportError("FAISS was requested but is not installed.")
@@ -87,6 +89,7 @@ def exact_topk_l2(
             k=k_eff,
             query_batch_size=int(query_batch_size),
             faiss=faiss,
+            approximate=backend == "faiss_hnsw",
         )
     return _torch_topk_l2(
         target,
@@ -223,11 +226,21 @@ def deterministic_one_to_one_match(
         k = min(2 * k, search_limit)
 
 
-def _faiss_topk_l2(target, reference, *, k, query_batch_size, faiss):
-    """Retrieve exact CPU neighbors with FAISS IndexFlatL2."""
+def _faiss_topk_l2(
+    target, reference, *, k, query_batch_size, faiss, approximate=False
+):
+    """Retrieve deterministic CPU neighbors with flat L2 or an HNSW graph."""
     target = target.cpu()
     reference = reference.cpu()
-    index = faiss.IndexFlatL2(reference.shape[1])
+    # HNSW insertion order changes with parallel scheduling. A single thread makes
+    # independently generated pair tables bitwise reproducible.
+    faiss.omp_set_num_threads(1)
+    if approximate:
+        index = faiss.IndexHNSWFlat(reference.shape[1], 16)
+        index.hnsw.efConstruction = 40
+        index.hnsw.efSearch = max(128, 2 * int(k))
+    else:
+        index = faiss.IndexFlatL2(reference.shape[1])
     index.add(reference.numpy())
     all_distances = []
     all_indices = []

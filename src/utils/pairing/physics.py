@@ -2,7 +2,8 @@
 
 The representations in this module are controls for learned event embeddings.  They
 operate in physical L1 units, treat azimuth as a periodic coordinate, retain padding
-information explicitly, and fit all metric scales on a reference sample only.
+information explicitly, and fit metric scales on an explicitly supplied calibration
+sample. The production background control supplies equal prefixes from both domains.
 
 Two complementary controls are provided:
 
@@ -149,7 +150,7 @@ class PhysicsFeatureSchema:
 
 @dataclass(frozen=True)
 class PhysicsDescriptorState:
-    """Serializable robust-scaling state fitted on reference background only."""
+    """Serializable robust-scaling state fitted on a declared calibration sample."""
 
     kind: str
     schema_signature: str
@@ -256,7 +257,7 @@ class PhysicsPairingDescriptor:
         self.state: PhysicsDescriptorState | None = None
 
     def fit(self, x: torch.Tensor, mask: torch.Tensor | None) -> PhysicsPairingDescriptor:
-        """Fit robust metric scales using a deterministic subset of reference rows."""
+        """Fit robust metric scales using a deterministic subset of calibration rows."""
         if not torch.is_tensor(x) or x.ndim < 2 or x.shape[0] == 0:
             raise ValueError("x must be a non-empty tensor with an event dimension.")
         indices = _evenly_spaced_indices(x.shape[0], self.fit_max_events, x.device)

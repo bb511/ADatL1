@@ -26,6 +26,8 @@ data-versus-simulation agreement test.
    training-normal residuals. MSE is retained only as a named diagnostic.
 6. Pair-table metadata, source names, split, sample count, index bijection, and ordered
    input hashes must pass authentication before CAP is evaluated.
+7. Each search trial retains and compares the paper's three checkpoint candidates:
+   last epoch, best EMA primary-selection metric, and stable operational score.
 
 ## Selection metrics
 
@@ -51,10 +53,13 @@ For each model, run six 600-trial, 50-epoch Optuna searches:
 5. Wasserstein-1 / E versus G
 6. Threshold drift / E calibration to G evaluation
 
-This is 36 studies and at most 21,600 trials. After each study, retain the Pareto
-candidates, retrain the selected candidates for 200 epochs, and evaluate all paper
-signals at the unchanged operational rate. Search submission may be staged by model
-and metric based on pilot runtime and cluster limits, but the matrix does not shrink.
+This is 36 studies and at most 21,600 trials. After each study, retain every Pareto
+candidate, retrain it for 200 epochs with the paper's fixed reporting seed, and evaluate
+all configured physics signals at the unchanged operational rate. As in the paper, the
+final reported trial is the retrained Pareto candidate with the best mean downstream
+anomaly efficiency; this oracle step is explicitly marked as downstream-label-using.
+Search submission may be staged by model and metric based on pilot runtime and cluster
+limits, but the matrix does not shrink.
 
 ## Execution gates
 

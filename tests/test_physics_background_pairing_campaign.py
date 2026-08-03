@@ -40,3 +40,12 @@ def test_sweep_command_preserves_paper_budget_and_selection_contract(tmp_path) -
     assert f"trainer.max_epochs={campaign.SEARCH_EPOCHS}" in command
     assert "test=false" in command
     assert "sqlite:///" in joined
+
+
+def test_checkpoint_identity_matches_evaluator_normalization() -> None:
+    """Aggregation must match stable dataset-aware and ordinary checkpoint names."""
+    assert campaign._checkpoint_identity("ascore_operational__ds=normal__stable") == "normal"
+    assert campaign._checkpoint_identity("cap_ema_ZB_run396102_vs_ZB_run398183") == (
+        "cap_ema_ZB_run396102_vs_ZB_run398183"
+    )
+    assert campaign._checkpoint_identity("last") == "last"

@@ -1,5 +1,6 @@
 # Main training script.
 import gc
+import json
 import os
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
@@ -112,6 +113,8 @@ def train(cfg: DictConfig) -> Tuple[Dict[str, Any], Dict[str, Any]]:
     datamodule.setup("validate")
     val_loader = datamodule.val_dataloader()
     evaluator.evaluate_run(run_ckpts, algorithm, val_loader, "val", set_optimized_metric=True)
+    if cfg.get("optimized_metric_artifact", False):
+        _write_optimized_metric_artifact(evaluator)
     object_dict.update({"evaluator": evaluator})
 
     # Evaluate once more on a held out test set for final performance.
@@ -156,6 +159,27 @@ def _get_evaluator(cfg: DictConfig, datamodule, logger):
     )
 
     return evaluator
+
+
+def _write_optimized_metric_artifact(evaluator) -> Path:
+    """Persist the selected checkpoint and objective values in the Hydra run folder."""
+    output_dir = Path(HydraConfig.get().runtime.output_dir)
+    path = output_dir / "optimized_metric.json"
+    value = evaluator.optimized_metric
+    if isinstance(value, tuple):
+        value = list(value)
+    payload = {
+        "schema_version": 1,
+        "optimized_ckpt_name": evaluator.optimized_ckpt_name,
+        "optimized_metric": value,
+    }
+    temporary = path.with_suffix(path.suffix + f".{os.getpid()}.tmp")
+    temporary.write_text(
+        json.dumps(payload, indent=2, sort_keys=True, allow_nan=False) + "\n",
+        encoding="utf-8",
+    )
+    temporary.replace(path)
+    return path
 
 
 def _get_directions(cfg):

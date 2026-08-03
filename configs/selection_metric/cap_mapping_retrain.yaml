@@ -1,0 +1,6 @@
+# @package _global_
+
+defaults:
+  - cap_mapping
+  - retrain_downstream
+  - _self_

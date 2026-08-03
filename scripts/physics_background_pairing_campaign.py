@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import argparse
+import csv
 import hashlib
 import json
 import os
@@ -49,6 +50,10 @@ def parse_args() -> argparse.Namespace:
     submit = subparsers.add_parser("submit-next")
     submit.add_argument("--trials", type=int, default=48)
     submit.add_argument("--jobs", type=int, default=48)
+    subparsers.add_parser("freeze")
+    retrain = subparsers.add_parser("retrain")
+    retrain.add_argument("--index", type=int, required=True)
+    subparsers.add_parser("aggregate")
     return parser.parse_args()
 
 
@@ -86,6 +91,19 @@ def _write_json(path: Path, value: Any, *, create: bool = False) -> None:
         temporary.unlink()
         raise FileExistsError(path)
     temporary.replace(path)
+
+
+def _jsonable(value: Any) -> Any:
+    """Convert tuples and scalar-like Optuna values into JSON-compatible values."""
+    if isinstance(value, tuple):
+        return [_jsonable(item) for item in value]
+    if isinstance(value, list):
+        return [_jsonable(item) for item in value]
+    if isinstance(value, dict):
+        return {str(key): _jsonable(item) for key, item in value.items()}
+    if hasattr(value, "item"):
+        return value.item()
+    return value
 
 
 def _cells() -> list[dict[str, str]]:
@@ -173,6 +191,22 @@ def _trial_counts(root: Path, cell_id: str) -> dict[str, int]:
     return counts
 
 
+def _fail_stale_running_trials(root: Path, cell_id: str) -> int:
+    """Mark orphaned running trials failed before starting a replacement chunk."""
+    database = _study_path(root, cell_id)
+    if not database.is_file():
+        return 0
+    study = optuna.load_study(study_name=cell_id, storage=f"sqlite:///{database}")
+    stale = [
+        trial
+        for trial in study.get_trials(deepcopy=False)
+        if trial.state == optuna.trial.TrialState.RUNNING
+    ]
+    for trial in stale:
+        study.tell(trial.number, state=optuna.trial.TrialState.FAIL)
+    return len(stale)
+
+
 def status(root: Path) -> list[dict[str, Any]]:
     """Return and print completion state for all primary cells."""
     design = _load_design(root)
@@ -182,6 +216,181 @@ def status(root: Path) -> list[dict[str, Any]]:
         rows.append({**cell, **counts, "target": TARGET_TRIALS})
     print(json.dumps(rows, indent=2, sort_keys=True))
     return rows
+
+
+def freeze(root: Path) -> Path:
+    """Freeze every completed study's full Pareto front before anomaly evaluation."""
+    design = _load_design(root)
+    manifest_path = root / "selection" / "pareto_retrain_manifest.json"
+    if manifest_path.exists():
+        return manifest_path
+    rows = []
+    for cell in design["cells"]:
+        counts = _trial_counts(root, cell["id"])
+        if counts["complete"] < TARGET_TRIALS:
+            raise RuntimeError(
+                f"Cannot freeze {cell['id']}: {counts['complete']}/{TARGET_TRIALS} "
+                "trials are complete."
+            )
+        database = _study_path(root, cell["id"])
+        study = optuna.load_study(study_name=cell["id"], storage=f"sqlite:///{database}")
+        for trial in sorted(study.best_trials, key=lambda item: item.number):
+            rows.append(
+                {
+                    "retrain_index": len(rows),
+                    **cell,
+                    "trial_number": int(trial.number),
+                    "objective_values": _jsonable(trial.values),
+                    "params": _jsonable(trial.params),
+                    "seed": 123,
+                    "epochs": RETRAIN_EPOCHS,
+                }
+            )
+    payload = {
+        "schema_version": 1,
+        "created_at": datetime.now(timezone.utc).isoformat(),
+        "code_commit": design["code_commit"],
+        "selection_uses_downstream_anomalies": False,
+        "rows": rows,
+    }
+    _write_json(manifest_path, payload, create=True)
+    return manifest_path
+
+
+def _hydra_value(value: Any) -> str:
+    """Serialize an Optuna parameter as one Hydra override value."""
+    if isinstance(value, (list, tuple, dict)):
+        return json.dumps(value, separators=(",", ":"))
+    if isinstance(value, bool):
+        return str(value).lower()
+    return str(value)
+
+
+def retrain(root: Path, index: int) -> Path:
+    """Retrain one frozen Pareto-front trial for 200 epochs and evaluate anomalies."""
+    design = _load_design(root)
+    manifest_path = root / "selection" / "pareto_retrain_manifest.json"
+    if not manifest_path.is_file():
+        raise FileNotFoundError("Freeze the Pareto fronts before retraining.")
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    rows = manifest["rows"]
+    if index < 0 or index >= len(rows):
+        raise IndexError(f"Retrain index {index} is outside [0,{len(rows)}).")
+    row = rows[index]
+    marker = root / "retraining" / "markers" / f"{index:04d}.json"
+    if marker.is_file():
+        return marker
+    run_name = f"{row['id']}__trial{int(row['trial_number']):04d}"
+    hydra_dir = root / "retraining" / "hydra" / f"{index:04d}"
+    command = [
+        sys.executable,
+        "src/train.py",
+        f"experiment=physics/{row['model']}_background_pairing",
+        f"+selection_metric={row['metric']}_retrain",
+        f"physics_pairing.strategy={row['strategy']}",
+        "experiment_name=physics_bgpair_retrain",
+        f"run_name={run_name}",
+        f"hydra.run.dir={hydra_dir}",
+        "logger=none",
+        "trainer=gpu",
+        "trainer.devices=[0]",
+        f"trainer.min_epochs={RETRAIN_EPOCHS}",
+        f"trainer.max_epochs={RETRAIN_EPOCHS}",
+        "trainer.num_sanity_val_steps=0",
+        "test=true",
+        f"seed={int(row['seed'])}",
+    ]
+    command.extend(f"{key}={_hydra_value(value)}" for key, value in row["params"].items())
+    subprocess.run(command, cwd=REPOSITORY_ROOT, check=True)  # nosec B603
+    optimized = hydra_dir / "optimized_metric.json"
+    if not optimized.is_file():
+        raise RuntimeError(f"Retraining did not emit {optimized}.")
+    checkpoint_root = Path(os.environ.get("CHECKPOINT_DIR", REPOSITORY_ROOT / "checkpoints"))
+    checkpoint_root = checkpoint_root / "physics_bgpair_retrain" / run_name
+    value_files = sorted(checkpoint_root.glob("**/plots/test/**/anomaly_efficiency/values.csv"))
+    if not value_files:
+        raise RuntimeError("Retraining emitted no held-out anomaly-efficiency values.")
+    _write_json(
+        marker,
+        {
+            "schema_version": 1,
+            "completed_at": datetime.now(timezone.utc).isoformat(),
+            "row": row,
+            "command": command,
+            "optimized_metric_artifact": str(optimized),
+            "optimized_metric_artifact_sha256": _sha256(optimized),
+            "checkpoint_root": str(checkpoint_root),
+            "value_files": [{"path": str(path), "sha256": _sha256(path)} for path in value_files],
+        },
+        create=True,
+    )
+    return marker
+
+
+def _checkpoint_identity(name: str) -> str:
+    """Apply the evaluator's dataset-aware checkpoint-name normalization."""
+    parts = name.split("ds=")
+    return parts[1].split("__")[0] if len(parts) > 1 else parts[0]
+
+
+def aggregate(root: Path) -> Path:
+    """Select the paper-style downstream oracle winner within each frozen Pareto set."""
+    design = _load_design(root)
+    manifest_path = root / "selection" / "pareto_retrain_manifest.json"
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    results = []
+    for row in manifest["rows"]:
+        index = int(row["retrain_index"])
+        marker_path = root / "retraining" / "markers" / f"{index:04d}.json"
+        if not marker_path.is_file():
+            raise RuntimeError(f"Missing retraining marker {marker_path}.")
+        marker = json.loads(marker_path.read_text(encoding="utf-8"))
+        optimized_path = Path(marker["optimized_metric_artifact"])
+        if _sha256(optimized_path) != marker["optimized_metric_artifact_sha256"]:
+            raise RuntimeError(f"Optimized-metric artifact changed: {optimized_path}")
+        optimized = json.loads(optimized_path.read_text(encoding="utf-8"))
+        checkpoint = optimized["optimized_ckpt_name"]
+        efficiencies = {}
+        for entry in marker["value_files"]:
+            path = Path(entry["path"])
+            if _sha256(path) != entry["sha256"]:
+                raise RuntimeError(f"Efficiency artifact changed: {path}")
+            with path.open(encoding="utf-8", newline="") as handle:
+                for value_row in csv.DictReader(handle):
+                    if _checkpoint_identity(value_row["checkpoint"]) != checkpoint:
+                        continue
+                    if value_row["metric"] != "efficiency_operational":
+                        continue
+                    efficiencies[value_row["intervention"]] = float(value_row["value"])
+        if len(efficiencies) != 20:
+            raise RuntimeError(
+                f"Expected 20 downstream efficiencies for retrain {index}, "
+                f"found {len(efficiencies)}."
+            )
+        results.append(
+            {
+                **row,
+                "optimized_ckpt_name": checkpoint,
+                "mean_downstream_efficiency": sum(efficiencies.values()) / len(efficiencies),
+                "downstream_efficiencies": efficiencies,
+            }
+        )
+    winners = []
+    for cell in design["cells"]:
+        candidates = [result for result in results if result["id"] == cell["id"]]
+        winners.append(max(candidates, key=lambda item: item["mean_downstream_efficiency"]))
+    output = root / "results" / "oracle_winners.json"
+    _write_json(
+        output,
+        {
+            "schema_version": 1,
+            "created_at": datetime.now(timezone.utc).isoformat(),
+            "oracle_uses_downstream_anomalies": True,
+            "winners": winners,
+            "all_retrains": results,
+        },
+    )
+    return output
 
 
 def _base_train_command(root: Path, cell: dict[str, str]) -> list[str]:
@@ -213,6 +422,7 @@ def sweep(root: Path, cell_id: str, trials: int, jobs: int) -> None:
     cell = _cell(design, cell_id)
     if trials <= 0 or jobs <= 0:
         raise ValueError("trials and jobs must be positive.")
+    _fail_stale_running_trials(root, cell_id)
     remaining = TARGET_TRIALS - _trial_counts(root, cell_id)["complete"]
     if remaining <= 0:
         print(f"{cell_id} already has {TARGET_TRIALS} completed trials.")
@@ -321,6 +531,12 @@ def main() -> None:
         sweep(root, args.cell, args.trials, args.jobs)
     elif args.command == "submit-next":
         submit_next(root, args.trials, args.jobs)
+    elif args.command == "freeze":
+        print(freeze(root))
+    elif args.command == "retrain":
+        print(retrain(root, args.index))
+    elif args.command == "aggregate":
+        print(aggregate(root))
 
 
 if __name__ == "__main__":

@@ -57,6 +57,7 @@ def test_search_overlays_retain_only_requested_primary_metric() -> None:
         )
         assert cfg.optimized_metric_config.main_metric.callback.name == callback_name
         assert cfg.optimized_metric_config.main_metric.direction == direction
+        assert cfg.evaluation.evaluator.ckpts.last is True
         enabled = {
             "cap": cfg.callbacks.cap_sn_zb is not None,
             "wasserstein": cfg.callbacks.wasserstein_dist is not None,
@@ -64,3 +65,18 @@ def test_search_overlays_retain_only_requested_primary_metric() -> None:
         }
         assert enabled[callback_name]
         assert sum(enabled.values()) == 1
+
+
+def test_retrain_overlays_restore_downstream_only_after_selection() -> None:
+    """Frozen-Pareto retraining must restore all downstream physics signals."""
+    for overlay in SELECTION_METRICS:
+        cfg = compose_config(
+            overrides=[
+                "experiment=physics/vae_background_pairing",
+                f"+selection_metric={overlay}_retrain",
+            ]
+        )
+        assert cfg.test is True
+        assert cfg.callbacks.anomaly_eff is None
+        assert cfg.evaluation.callbacks.anomaly_efficiency is not None
+        assert len(cfg.evaluation.callbacks.anomaly_efficiency.ds) == 20

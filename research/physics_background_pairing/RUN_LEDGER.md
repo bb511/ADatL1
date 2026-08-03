@@ -18,12 +18,12 @@ Last updated: 2026-08-03 (Europe/Zurich)
 |---|---|---|
 | Scientific contract | complete | `PLAN.md` |
 | Implementation audit | complete | Confirmed prior prototype covered only mapped VAE CAP |
-| Code and configs | complete | Six model overlays; CAP/W1/E-to-G drift search overlays; AE canonical residual OAS score |
-| Tests and preflight | complete | 22 targeted tests passed; all 8 pair tables authenticated in `preflight.json` |
+| Code and configs | complete | Six model overlays; search/retrain overlays; E-to-G metrics; AE residual OAS; persistent selection provenance |
+| Tests and preflight | complete | 25 targeted tests passed; all 8 pair tables authenticated in `preflight.json` |
 | Pilots | queued for capacity | First submission attempt was rejected by the per-user QOS job cap; resumable three-metric pilot array is ready |
 | Full searches | pending | 36 persistent studies, 600 trials each |
-| Retraining/evaluation | pending | Freeze Pareto candidates first |
-| Aggregation/report | pending | Must cover full matrix |
+| Retraining/evaluation | pending | Automated freeze gate and 200-epoch indexed retraining are implemented |
+| Aggregation/report | pending | Authenticated paper-style downstream oracle aggregation is implemented; awaits results |
 
 ## Decisions
 
@@ -39,8 +39,8 @@ Last updated: 2026-08-03 (Europe/Zurich)
 
 - 2026-08-03: all six paper-model configurations composed with the JetCLR variant.
 - 2026-08-03: CAP, Wasserstein, and drift search-only overlays composed independently.
-- 2026-08-03: targeted callback, AE-score, pairing, configuration, and campaign suite
-  passed (22 tests).
+- 2026-08-03: targeted callback, AE-score, pairing, configuration, provenance, and
+  campaign suite passed (25 tests).
 - 2026-08-03: pre-commit passed on every changed file.
 - 2026-08-03: validation and test tables for all four strategies authenticated against
   the exact ordered 163,840-event source-loader tensors. See `preflight.json`.
@@ -48,3 +48,7 @@ Last updated: 2026-08-03 (Europe/Zurich)
   `QOSMaxSubmitJobPerUserLimit`; no job was created and no unrelated queued work was
   cancelled. Pilot and chunked search submission scripts are ready for the first free
   scheduler slots.
+- 2026-08-03: paper protocol rechecked from the supplied PDF. Search evaluation now
+  retains all three required checkpoint candidates. The campaign freezes every Pareto
+  trial, retrains it for 200 epochs, and performs the paper's explicitly labelled
+  downstream-oracle selection only after the Pareto manifest is immutable.

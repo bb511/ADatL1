@@ -1,6 +1,8 @@
 # @package _global_
 
 # Add this control to any physics experiment with: +pairing=physics
+optimized_metric_artifact: true
+
 physics_pairing:
   dataset_1: ZB_run396102 # background 0: 2025E
   dataset_2: ZB_run398183 # background 1: 2025G

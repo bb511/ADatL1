@@ -17,7 +17,7 @@ callbacks:
 evaluation:
   evaluator:
     ckpts:
-      last: null
+      last: true
       summary:
         operational_drift_ema: null
         w1dist_ema_normal_vs_SingleNeutrino_E-10-gun: null

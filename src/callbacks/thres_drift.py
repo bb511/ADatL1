@@ -1,6 +1,6 @@
 # Threshold drift callback.
-from collections import defaultdict
 import math
+from collections import defaultdict
 
 import torch
 from pytorch_lightning import Callback
@@ -46,15 +46,19 @@ class ThresholdDriftCallback(Callback):
         calibration_fraction: float = 0.5,
         split_seed: int = 12345,
         beta: float = 0.9,
+        metric_name: str | None = None,
     ):
         super().__init__()
         self.output_name = output_name
-        self.target_rates = None if target_rates is None else sorted(float(x) for x in target_rates)
+        self.target_rates = (
+            None if target_rates is None else sorted(float(x) for x in target_rates)
+        )
         self.base_rate = base_rate
 
         self.calibration_fraction = float(calibration_fraction)
         self.split_seed = int(split_seed)
         self.beta = beta
+        self.metric_name = None if metric_name is None else str(metric_name)
 
         self.log_kwargs = dict(
             prog_bar=False,
@@ -135,7 +139,12 @@ class ThresholdDriftCallback(Callback):
 
             is_operational = abs(trate - module_target) < 1e-12
             if is_operational:
-                key = "val/summary/operational_drift_ema"
+                component = (
+                    "operational_drift_ema"
+                    if self.metric_name is None
+                    else f"{self.metric_name}_operational_drift_ema"
+                )
+                key = f"val/summary/{component}"
             else:
                 key = f"val/summary/trate{trate_name}kHz_drift_ema"
 
@@ -170,16 +179,12 @@ class ThresholdDriftCallback(Callback):
 
         return scores[cal_idx], scores[eval_idx]
 
-    def _compute_threshold(
-        self, scores: torch.Tensor, exceedance_prob: float
-    ) -> torch.Tensor:
+    def _compute_threshold(self, scores: torch.Tensor, exceedance_prob: float) -> torch.Tensor:
         """Compute the threshold corresponding to a certain rate -> exceedance prob."""
         scores = scores.view(-1)
         n = int(scores.numel())
         if n == 0:
-            raise RuntimeError(
-                "Cannot compute threshold from an empty calibration set."
-            )
+            raise RuntimeError("Cannot compute threshold from an empty calibration set.")
 
         if exceedance_prob <= 0.0:
             return torch.tensor(float("inf"), device=scores.device, dtype=scores.dtype)

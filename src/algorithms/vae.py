@@ -1,5 +1,7 @@
 # Variational auto-encoder model implementation.
+import math
 from contextlib import nullcontext
+from pathlib import Path
 from typing import Optional
 
 import torch
@@ -43,6 +45,10 @@ class VAE(ADLightningModule):
         mask: bool = True,
         masking: nn.Module | None = None,
         ckpt: str = "",
+        pretrained_ae_ckpt: str = "",
+        pretrained_ae_strict: bool = True,
+        initial_log_variance: float = math.log(0.01),
+        normalize_kl_by_latent_dim: bool = False,
         target_rate: float = 0.25,
         base_rate: float | None = None,
         **kwargs,
@@ -53,6 +59,10 @@ class VAE(ADLightningModule):
         )
 
         self.ckpt_path = ckpt
+        self.pretrained_ae_ckpt = str(pretrained_ae_ckpt)
+        self.pretrained_ae_strict = bool(pretrained_ae_strict)
+        self.initial_log_variance = float(initial_log_variance)
+        self.normalize_kl_by_latent_dim = bool(normalize_kl_by_latent_dim)
         self.encoder = encoder
         self.decoder = decoder
         self.features = features if features is not None else nn.Identity()
@@ -68,6 +78,9 @@ class VAE(ADLightningModule):
         # configured step-aware warmup below.
         self._setup_kl_annealing(0.0, total_steps=1)
         self._maybe_build_keras_modules()
+        self._initialize_residual_score_state()
+        if self.pretrained_ae_ckpt:
+            self._load_pretrained_ae()
 
     def on_fit_start(self):
         """Initialize feature injection and step-aware KL annealing for fitting."""
@@ -97,6 +110,76 @@ class VAE(ADLightningModule):
             reconstruction = self.decoder(z)
         return z_mean, z_log_var, z, reconstruction
 
+    def deterministic_reconstruction(self, x: torch.Tensor) -> torch.Tensor:
+        """Reconstruct from the posterior mean without sampling noise."""
+        x = self.features(x)
+        with self._keras_device_scope(x.device):
+            z_mean, _, _ = self.encoder(x)
+            return self.decoder(z_mean)
+
+    def _initialize_residual_score_state(self) -> None:
+        """Register train-normal residual state for deterministic VAE scores."""
+        output_layers = [
+            module for module in self.decoder.modules() if isinstance(module, nn.Linear)
+        ]
+        if not output_layers:
+            return
+        residual_dim = int(output_layers[-1].out_features)
+        self.register_buffer("residual_score_mean", torch.zeros(residual_dim))
+        self.register_buffer("residual_score_variance", torch.ones(residual_dim))
+        self.register_buffer("residual_oas_location", torch.zeros(residual_dim))
+        self.register_buffer("residual_oas_precision", torch.eye(residual_dim))
+        self.register_buffer("residual_score_ready", torch.tensor(False))
+
+    def set_residual_score_state(
+        self,
+        mean: torch.Tensor,
+        variance: torch.Tensor,
+        oas_location: torch.Tensor,
+        oas_precision: torch.Tensor,
+    ) -> None:
+        """Install train-normal state shared by diagonal and OAS residual scores."""
+        state = {
+            "residual_score_mean": mean,
+            "residual_score_variance": variance,
+            "residual_oas_location": oas_location,
+            "residual_oas_precision": oas_precision,
+        }
+        for name, value in state.items():
+            target = getattr(self, name)
+            value = value.to(device=self.device, dtype=target.dtype)
+            if value.shape != target.shape:
+                raise ValueError(
+                    f"Expected {name} shape {tuple(target.shape)}, got {tuple(value.shape)}."
+                )
+            target.copy_(value)
+        self.residual_score_ready.fill_(True)
+
+    def residual_scores(
+        self, target: torch.Tensor, reconstruction: torch.Tensor
+    ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+        """Return MSE, diagonal-standardized, and OAS residual energies."""
+        residual = target - reconstruction
+        mse = torch.mean(torch.square(residual), dim=1)
+        if not bool(self.residual_score_ready):
+            return mse, mse, mse
+        centered = residual - self.residual_score_mean
+        diagonal = torch.mean(
+            torch.square(centered) / self.residual_score_variance.clamp_min(1.0e-12),
+            dim=1,
+        )
+        oas_centered = residual - self.residual_oas_location
+        oas = (
+            torch.einsum(
+                "bi,ij,bj->b",
+                oas_centered,
+                self.residual_oas_precision,
+                oas_centered,
+            )
+            / residual.shape[1]
+        )
+        return mse, diagonal, oas
+
     def model_step(self, batch: torch.Tensor) -> dict[str, torch.Tensor]:
         """Compute VAE losses, anomaly scores, and diagnostic quantities."""
         b = unpack_batch(batch)
@@ -117,8 +200,18 @@ class VAE(ADLightningModule):
             mask=m,
             kl_scale=kl_current_scale,
         )
+        if self.normalize_kl_by_latent_dim:
+            kl_scaled = kl_scaled / z_mean.shape[1]
+            loss = self.loss.scale * (reco_loss + kl_scaled)
 
-        # The operational anomaly score is hard-configured to the raw KL.
+        with self._keras_device_scope(z_mean.device):
+            deterministic_reconstruction = self.decoder(z_mean)
+        reconstruction_mse, residual_diagonal, residual_oas = self.residual_scores(
+            x, deterministic_reconstruction
+        )
+
+        # Keep raw KL as the legacy operational score while exposing every
+        # prespecified score to independent validation selectors.
         ascore = kl_raw
         if ascore.ndim != 1:
             raise ValueError(f"Expected per-event ascores, got {tuple(ascore.shape)}.")
@@ -167,8 +260,13 @@ class VAE(ADLightningModule):
             "loss/reco/full": reco_loss.detach(),
             "loss/kl_raw/full": kl_raw.detach(),
             "ascore/full": ascore.detach(),
+            "ascore/kl_raw": kl_raw.detach(),
+            "ascore/reconstruction_mse": reconstruction_mse.detach(),
+            "ascore/residual_diagonal": residual_diagonal.detach(),
+            "ascore/residual_oas": residual_oas.detach(),
             "z_mean_squared/full": z_mean_squared.detach(),
             "reconstructed_data": reconstruction.detach(),
+            "deterministic_reconstructed_data": deterministic_reconstruction.detach(),
         }
 
     def outlog(self, outdict: dict) -> dict:
@@ -221,6 +319,73 @@ class VAE(ADLightningModule):
         dec_mlp = self.decoder.get_layer("dec_mlp")
         load_weights(enc_mlp, state_dict, "encoder", False)
         load_weights(dec_mlp, state_dict, "decoder", False)
+
+    def _load_pretrained_ae(self) -> None:
+        """Initialize the dense VAE trunk, mean head, and decoder from an AE."""
+        if not isinstance(self.encoder, VariationalEncoder) or not isinstance(
+            self.decoder, Decoder
+        ):
+            raise TypeError("AE initialization currently requires dense PyTorch modules.")
+        checkpoint = Path(self.pretrained_ae_ckpt).expanduser().resolve()
+        payload = torch.load(checkpoint, map_location="cpu", weights_only=False)
+        source = payload.get("state_dict") if isinstance(payload, dict) else None
+        if not isinstance(source, dict):
+            raise ValueError(f"AE checkpoint has no state_dict: {checkpoint}")
+
+        target = self.state_dict()
+        copied: set[str] = set()
+        for name in target:
+            if name.startswith("encoder.net.") or name.startswith("decoder."):
+                if name in source and source[name].shape == target[name].shape:
+                    target[name] = source[name].detach().clone()
+                    copied.add(name)
+
+        ae_encoder_weights = sorted(
+            (
+                name
+                for name, value in source.items()
+                if name.startswith("encoder.net.net.")
+                and name.endswith(".weight")
+                and value.shape == target["encoder.z_mean.weight"].shape
+            ),
+            key=lambda name: int(name.split(".")[3]),
+        )
+        if ae_encoder_weights:
+            weight_name = ae_encoder_weights[-1]
+            bias_name = weight_name.removesuffix("weight") + "bias"
+            target["encoder.z_mean.weight"] = source[weight_name].detach().clone()
+            target["encoder.z_mean.bias"] = source[bias_name].detach().clone()
+            copied.update({"encoder.z_mean.weight", "encoder.z_mean.bias"})
+
+        target["encoder.z_log_var.weight"] = torch.zeros_like(target["encoder.z_log_var.weight"])
+        target["encoder.z_log_var.bias"] = torch.full_like(
+            target["encoder.z_log_var.bias"], self.initial_log_variance
+        )
+        copied.update({"encoder.z_log_var.weight", "encoder.z_log_var.bias"})
+
+        required = {
+            name
+            for name in target
+            if name.startswith(("encoder.net.", "encoder.z_mean.", "decoder."))
+        }
+        missing = sorted(required - copied)
+        if missing and self.pretrained_ae_strict:
+            raise ValueError(f"AE checkpoint is incompatible with the VAE: {missing}")
+        self.load_state_dict(target, strict=True)
+
+    def load_state_dict(self, state_dict, strict: bool = True, assign: bool = False):
+        """Load legacy checkpoints that predate residual-score buffers."""
+        state_dict = dict(state_dict)
+        for name in (
+            "residual_score_mean",
+            "residual_score_variance",
+            "residual_oas_location",
+            "residual_oas_precision",
+            "residual_score_ready",
+        ):
+            if hasattr(self, name) and name not in state_dict:
+                state_dict[name] = getattr(self, name).detach().clone()
+        return super().load_state_dict(state_dict, strict=strict, assign=assign)
 
     def _add_hgq_loss(self, loss: torch.Tensor) -> torch.Tensor:
         """Add additional HGQ losses if they exist."""

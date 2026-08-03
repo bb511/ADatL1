@@ -1,0 +1,260 @@
+# @package _global_
+
+defaults:
+  - /experiment/cchamber/vae_candidate_rank_audit
+
+tags: ["causal_chamber", "vae_multiscore", "ae_initialized", "auto_research"]
+
+algorithm:
+  target_rate: 0.01
+  base_rate: null
+  pretrained_ae_ckpt: ???
+  pretrained_ae_strict: true
+  initial_log_variance: -4.605170185988091
+  normalize_kl_by_latent_dim: true
+  encoder:
+    in_dim: 11
+    nodes: [24, 8]
+    activation: relu
+    clamp_zlogvar_range: [-8.0, 4.0]
+  decoder:
+    nodes: [8, 24]
+    activation: relu
+    out_dim: 11
+
+callbacks:
+  anomaly_eff: null
+  thres_drift: null
+  wasserstein_dist: null
+  cap_ref: null
+  cap_cdf: null
+  cap_random: null
+  cap_encoder: null
+  audit_ckpt_cap_metadata_nearest: null
+  audit_ckpt_cap_encoder_nearest: null
+  audit_ckpt_cap_random: null
+  audit_ckpt_cap_cdf: null
+  audit_ckpt_drift: null
+  audit_ckpt_wasserstein: null
+  audit_checkpoint_manifest: null
+
+  vae_residual_state:
+    _target_: src.callbacks.cap.VAEResidualScoreStateCallback
+
+  cap_kl_raw_encoder: &cap_encoder
+    _target_: src.callbacks.cap.CAPCallback
+    output_name: ascore/kl_raw
+    dataset_1: normal
+    dataset_2: reference_normal
+    pairing_type: precomputed
+    pairing_index_path: ${oc.env:CCHAMBER_VALID_PAIR_TABLE}
+    metric_name: cap_kl_raw_encoder
+    cap_metric_config: &cap_config
+      beta0: 1.0
+      normalization_type: sigmoid
+      normalization_params: null
+      energy_type: adaptive
+      energy_params: { scale: 0.5 }
+      regularization_type: none
+      regularization_params: null
+      binary: true
+      lr: 0.01
+      n_epochs: 20
+      batch_size: 512
+      normalize_gradients: true
+      process_group: null
+      dist_sync_fn: null
+
+  cap_kl_raw_cdf: &cap_cdf
+    <<: *cap_encoder
+    pairing_type: cdf
+    pairing_index_path: null
+    metric_name: cap_kl_raw_cdf
+
+  drift_kl_raw: &drift
+    _target_: src.callbacks.thres_drift.ThresholdDriftCallback
+    output_name: ascore/kl_raw
+    calibration_fraction: 0.5
+    split_seed: 12345
+    beta: 0.9
+    metric_name: kl_raw
+
+  wasserstein_kl_raw: &wasserstein
+    _target_: src.callbacks.wasserstein.WassersteinCallback
+    output_name: ascore/kl_raw
+    dataset_1: normal
+    dataset_2: reference_normal
+    apply_log1p: true
+    beta: 0.9
+    metric_name: kl_raw
+
+  cap_reconstruction_mse_encoder:
+    <<: *cap_encoder
+    output_name: ascore/reconstruction_mse
+    metric_name: cap_reconstruction_mse_encoder
+  cap_reconstruction_mse_cdf:
+    <<: *cap_cdf
+    output_name: ascore/reconstruction_mse
+    metric_name: cap_reconstruction_mse_cdf
+  drift_reconstruction_mse:
+    <<: *drift
+    output_name: ascore/reconstruction_mse
+    metric_name: reconstruction_mse
+  wasserstein_reconstruction_mse:
+    <<: *wasserstein
+    output_name: ascore/reconstruction_mse
+    metric_name: reconstruction_mse
+
+  cap_residual_diagonal_encoder:
+    <<: *cap_encoder
+    output_name: ascore/residual_diagonal
+    metric_name: cap_residual_diagonal_encoder
+  cap_residual_diagonal_cdf:
+    <<: *cap_cdf
+    output_name: ascore/residual_diagonal
+    metric_name: cap_residual_diagonal_cdf
+  drift_residual_diagonal:
+    <<: *drift
+    output_name: ascore/residual_diagonal
+    metric_name: residual_diagonal
+  wasserstein_residual_diagonal:
+    <<: *wasserstein
+    output_name: ascore/residual_diagonal
+    metric_name: residual_diagonal
+
+  cap_residual_oas_encoder:
+    <<: *cap_encoder
+    output_name: ascore/residual_oas
+    metric_name: cap_residual_oas_encoder
+  cap_residual_oas_cdf:
+    <<: *cap_cdf
+    output_name: ascore/residual_oas
+    metric_name: cap_residual_oas_cdf
+  drift_residual_oas:
+    <<: *drift
+    output_name: ascore/residual_oas
+    metric_name: residual_oas
+  wasserstein_residual_oas:
+    <<: *wasserstein
+    output_name: ascore/residual_oas
+    metric_name: residual_oas
+
+  checkpoint_kl_raw_cap_encoder: &checkpoint
+    _target_: pytorch_lightning.callbacks.ModelCheckpoint
+    dirpath: ${paths.checkpoints_dir}/${experiment_name}/${run_name}/branches/kl_raw__cap_encoder
+    monitor: val/summary/cap_kl_raw_encoder_ema_normal_vs_reference_normal
+    filename: kl_raw__cap_encoder
+    save_last: false
+    save_top_k: 1
+    mode: max
+    auto_insert_metric_name: false
+    save_weights_only: false
+    every_n_epochs: 1
+    save_on_train_epoch_end: false
+  checkpoint_kl_raw_cap_cdf:
+    <<: *checkpoint
+    dirpath: ${paths.checkpoints_dir}/${experiment_name}/${run_name}/branches/kl_raw__cap_cdf
+    monitor: val/summary/cap_kl_raw_cdf_ema_normal_vs_reference_normal
+    filename: kl_raw__cap_cdf
+  checkpoint_kl_raw_drift:
+    <<: *checkpoint
+    dirpath: ${paths.checkpoints_dir}/${experiment_name}/${run_name}/branches/kl_raw__drift
+    monitor: val/summary/kl_raw_operational_drift_ema
+    filename: kl_raw__drift
+    mode: min
+  checkpoint_kl_raw_wasserstein:
+    <<: *checkpoint
+    dirpath: ${paths.checkpoints_dir}/${experiment_name}/${run_name}/branches/kl_raw__wasserstein
+    monitor: val/summary/w1dist_kl_raw_ema_normal_vs_reference_normal
+    filename: kl_raw__wasserstein
+    mode: min
+
+  checkpoint_reconstruction_mse_cap_encoder:
+    <<: *checkpoint
+    dirpath: ${paths.checkpoints_dir}/${experiment_name}/${run_name}/branches/reconstruction_mse__cap_encoder
+    monitor: val/summary/cap_reconstruction_mse_encoder_ema_normal_vs_reference_normal
+    filename: reconstruction_mse__cap_encoder
+  checkpoint_reconstruction_mse_cap_cdf:
+    <<: *checkpoint
+    dirpath: ${paths.checkpoints_dir}/${experiment_name}/${run_name}/branches/reconstruction_mse__cap_cdf
+    monitor: val/summary/cap_reconstruction_mse_cdf_ema_normal_vs_reference_normal
+    filename: reconstruction_mse__cap_cdf
+  checkpoint_reconstruction_mse_drift:
+    <<: *checkpoint
+    dirpath: ${paths.checkpoints_dir}/${experiment_name}/${run_name}/branches/reconstruction_mse__drift
+    monitor: val/summary/reconstruction_mse_operational_drift_ema
+    filename: reconstruction_mse__drift
+    mode: min
+  checkpoint_reconstruction_mse_wasserstein:
+    <<: *checkpoint
+    dirpath: ${paths.checkpoints_dir}/${experiment_name}/${run_name}/branches/reconstruction_mse__wasserstein
+    monitor: val/summary/w1dist_reconstruction_mse_ema_normal_vs_reference_normal
+    filename: reconstruction_mse__wasserstein
+    mode: min
+
+  checkpoint_residual_diagonal_cap_encoder:
+    <<: *checkpoint
+    dirpath: ${paths.checkpoints_dir}/${experiment_name}/${run_name}/branches/residual_diagonal__cap_encoder
+    monitor: val/summary/cap_residual_diagonal_encoder_ema_normal_vs_reference_normal
+    filename: residual_diagonal__cap_encoder
+  checkpoint_residual_diagonal_cap_cdf:
+    <<: *checkpoint
+    dirpath: ${paths.checkpoints_dir}/${experiment_name}/${run_name}/branches/residual_diagonal__cap_cdf
+    monitor: val/summary/cap_residual_diagonal_cdf_ema_normal_vs_reference_normal
+    filename: residual_diagonal__cap_cdf
+  checkpoint_residual_diagonal_drift:
+    <<: *checkpoint
+    dirpath: ${paths.checkpoints_dir}/${experiment_name}/${run_name}/branches/residual_diagonal__drift
+    monitor: val/summary/residual_diagonal_operational_drift_ema
+    filename: residual_diagonal__drift
+    mode: min
+  checkpoint_residual_diagonal_wasserstein:
+    <<: *checkpoint
+    dirpath: ${paths.checkpoints_dir}/${experiment_name}/${run_name}/branches/residual_diagonal__wasserstein
+    monitor: val/summary/w1dist_residual_diagonal_ema_normal_vs_reference_normal
+    filename: residual_diagonal__wasserstein
+    mode: min
+
+  checkpoint_residual_oas_cap_encoder:
+    <<: *checkpoint
+    dirpath: ${paths.checkpoints_dir}/${experiment_name}/${run_name}/branches/residual_oas__cap_encoder
+    monitor: val/summary/cap_residual_oas_encoder_ema_normal_vs_reference_normal
+    filename: residual_oas__cap_encoder
+  checkpoint_residual_oas_cap_cdf:
+    <<: *checkpoint
+    dirpath: ${paths.checkpoints_dir}/${experiment_name}/${run_name}/branches/residual_oas__cap_cdf
+    monitor: val/summary/cap_residual_oas_cdf_ema_normal_vs_reference_normal
+    filename: residual_oas__cap_cdf
+  checkpoint_residual_oas_drift:
+    <<: *checkpoint
+    dirpath: ${paths.checkpoints_dir}/${experiment_name}/${run_name}/branches/residual_oas__drift
+    monitor: val/summary/residual_oas_operational_drift_ema
+    filename: residual_oas__drift
+    mode: min
+  checkpoint_residual_oas_wasserstein:
+    <<: *checkpoint
+    dirpath: ${paths.checkpoints_dir}/${experiment_name}/${run_name}/branches/residual_oas__wasserstein
+    monitor: val/summary/w1dist_residual_oas_ema_normal_vs_reference_normal
+    filename: residual_oas__wasserstein
+    mode: min
+
+  multiscore_checkpoint_manifest:
+    _target_: src.callbacks.audit.CheckpointBranchManifest
+    output_path: ${oc.env:CCHAMBER_AUDIT_CHECKPOINT_MANIFEST}
+    expected_monitors:
+      kl_raw__cap_encoder: val/summary/cap_kl_raw_encoder_ema_normal_vs_reference_normal
+      kl_raw__cap_cdf: val/summary/cap_kl_raw_cdf_ema_normal_vs_reference_normal
+      kl_raw__drift: val/summary/kl_raw_operational_drift_ema
+      kl_raw__wasserstein: val/summary/w1dist_kl_raw_ema_normal_vs_reference_normal
+      reconstruction_mse__cap_encoder: val/summary/cap_reconstruction_mse_encoder_ema_normal_vs_reference_normal
+      reconstruction_mse__cap_cdf: val/summary/cap_reconstruction_mse_cdf_ema_normal_vs_reference_normal
+      reconstruction_mse__drift: val/summary/reconstruction_mse_operational_drift_ema
+      reconstruction_mse__wasserstein: val/summary/w1dist_reconstruction_mse_ema_normal_vs_reference_normal
+      residual_diagonal__cap_encoder: val/summary/cap_residual_diagonal_encoder_ema_normal_vs_reference_normal
+      residual_diagonal__cap_cdf: val/summary/cap_residual_diagonal_cdf_ema_normal_vs_reference_normal
+      residual_diagonal__drift: val/summary/residual_diagonal_operational_drift_ema
+      residual_diagonal__wasserstein: val/summary/w1dist_residual_diagonal_ema_normal_vs_reference_normal
+      residual_oas__cap_encoder: val/summary/cap_residual_oas_encoder_ema_normal_vs_reference_normal
+      residual_oas__cap_cdf: val/summary/cap_residual_oas_cdf_ema_normal_vs_reference_normal
+      residual_oas__drift: val/summary/residual_oas_operational_drift_ema
+      residual_oas__wasserstein: val/summary/w1dist_residual_oas_ema_normal_vs_reference_normal

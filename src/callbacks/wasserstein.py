@@ -36,6 +36,7 @@ class WassersteinCallback(Callback):
         dataset_2: str,
         apply_log1p: bool = True,
         beta: float = 0.9,
+        metric_name: str | None = None,
     ):
         super().__init__()
         self.output_name = output_name
@@ -43,6 +44,7 @@ class WassersteinCallback(Callback):
         self.dataset_2_name = dataset_2
         self.apply_log1p = bool(apply_log1p)
         self.beta = beta
+        self.metric_name = None if metric_name is None else str(metric_name)
 
         self.log_kwargs = dict(
             prog_bar=False,
@@ -99,13 +101,9 @@ class WassersteinCallback(Callback):
     def on_validation_epoch_end(self, trainer, pl_module):
         """Compute and log the Wasserstein distance across the two data sets."""
         if not self.dataset_1_scores:
-            raise RuntimeError(
-                f"No validation scores were collected for '{self.dataset_1_name}'."
-            )
+            raise RuntimeError(f"No validation scores were collected for '{self.dataset_1_name}'.")
         if not self.dataset_2_scores:
-            raise RuntimeError(
-                f"No validation scores were collected for '{self.dataset_2_name}'."
-            )
+            raise RuntimeError(f"No validation scores were collected for '{self.dataset_2_name}'.")
 
         wasserstein = self._compute_wasserstein()
         self._compute_w1dist_ema(wasserstein)
@@ -113,8 +111,9 @@ class WassersteinCallback(Callback):
         ds1 = self.dataset_1_name.replace("/", "_")
         ds2 = self.dataset_2_name.replace("/", "_")
 
+        prefix = "w1dist" if self.metric_name is None else f"w1dist_{self.metric_name}"
         pl_module.log_dict(
-            {f"val/summary/w1dist_ema_{ds1}_vs_{ds2}": float(self.w1dist_ema)},
+            {f"val/summary/{prefix}_ema_{ds1}_vs_{ds2}": float(self.w1dist_ema)},
             **self.log_kwargs,
         )
 
@@ -151,9 +150,7 @@ class WassersteinCallback(Callback):
 
         return torch.mean(torch.abs(xq - yq)).item()
 
-    def _interp_quantiles(
-        self, sorted_vals: torch.Tensor, q: torch.Tensor
-    ) -> torch.Tensor:
+    def _interp_quantiles(self, sorted_vals: torch.Tensor, q: torch.Tensor) -> torch.Tensor:
         """Interpolate sorted samples at quantiles q in [0, 1]."""
         sorted_vals = sorted_vals.view(-1)
         n = int(sorted_vals.numel())
@@ -176,6 +173,4 @@ class WassersteinCallback(Callback):
         if self.w1dist_ema is None:
             self.w1dist_ema = float(w1dist)
         else:
-            self.w1dist_ema = self.beta * self.w1dist_ema + (1 - self.beta) * float(
-                w1dist
-            )
+            self.w1dist_ema = self.beta * self.w1dist_ema + (1 - self.beta) * float(w1dist)

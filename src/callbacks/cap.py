@@ -1,3 +1,4 @@
+import numpy as np
 import torch
 from pytorch_lightning import Callback
 from sklearn.covariance import OAS
@@ -286,6 +287,48 @@ class ResidualOASStateCallback(Callback):
         residuals = torch.cat(residual_chunks, dim=0).numpy()
         estimator = OAS(store_precision=True, assume_centered=False).fit(residuals)
         pl_module.set_residual_oas_state(
+            torch.from_numpy(estimator.location_),
+            torch.from_numpy(estimator.precision_),
+        )
+
+
+class VAEResidualScoreStateCallback(Callback):
+    """Fit deterministic VAE residual score geometry on training normals."""
+
+    def on_validation_epoch_start(self, trainer, pl_module):
+        """Install diagonal and OAS residual states before validation scoring."""
+        if trainer.sanity_checking:
+            return
+        if int(getattr(trainer, "world_size", 1)) != 1:
+            raise RuntimeError("VAE residual scoring currently requires a single process.")
+        if not hasattr(pl_module, "set_residual_score_state"):
+            raise TypeError("VAE residual scoring requires its residual-state interface.")
+        residual_chunks = []
+        loader = trainer.train_dataloader
+        shuffler = getattr(getattr(loader, "dataset", None), "shuffler", None)
+        shuffler_state = None if shuffler is None else shuffler.get_state()
+        pl_module.eval()
+        try:
+            with torch.no_grad():
+                for batch in loader:
+                    x = torch.flatten(unpack_batch(batch).x, start_dim=1).to(pl_module.device)
+                    reconstruction = pl_module.deterministic_reconstruction(x)
+                    if x.shape != reconstruction.shape:
+                        raise ValueError(
+                            "VAE residual scoring requires equal input/reconstruction shapes."
+                        )
+                    residual_chunks.append((x - reconstruction).double().cpu())
+        finally:
+            if shuffler_state is not None:
+                shuffler.set_state(shuffler_state)
+        if not residual_chunks:
+            raise RuntimeError("VAE residual scoring received an empty training loader.")
+        residuals = torch.cat(residual_chunks, dim=0).numpy()
+        estimator = OAS(store_precision=True, assume_centered=False).fit(residuals)
+        variance = residuals.var(axis=0).clip(min=np.finfo(np.float64).eps)
+        pl_module.set_residual_score_state(
+            torch.from_numpy(residuals.mean(axis=0)),
+            torch.from_numpy(variance),
             torch.from_numpy(estimator.location_),
             torch.from_numpy(estimator.precision_),
         )

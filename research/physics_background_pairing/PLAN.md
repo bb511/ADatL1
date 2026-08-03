@@ -68,6 +68,8 @@ limits, but the matrix does not shrink.
 3. Compose every model/metric/strategy Hydra configuration.
 4. Run one-batch CPU configuration tests and one short GPU pilot per metric family.
 5. Submit persistent Optuna studies with unique storage and study names.
+   Execute every Slurm phase from a dedicated commit-pinned worktree rather than the
+   mutable development checkout.
 6. Monitor jobs, retry infrastructure failures, and record job/study state in
    `RUN_LEDGER.md` and machine-readable manifests.
 7. Freeze Pareto selections before 200-epoch retraining.

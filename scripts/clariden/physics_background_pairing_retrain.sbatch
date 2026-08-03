@@ -12,8 +12,8 @@
 
 set -euo pipefail
 
-readonly REPOSITORY_ROOT=/users/vjimenez/adatl1
 readonly SCRATCH_ROOT=/iopsstor/scratch/cscs/vjimenez/adatl1
+readonly REPOSITORY_ROOT="${SCRATCH_ROOT}/worktrees/physics_background_pairing_20260803"
 readonly CAMPAIGN_ROOT="${SCRATCH_ROOT}/campaigns/physics_background_pairing_20260803"
 readonly UV_BIN="${SCRATCH_ROOT}/tools/uv-0.11.32/uv"
 

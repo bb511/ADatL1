@@ -1,0 +1,105 @@
+{
+  "artifact_dir": "/iopsstor/scratch/cscs/vjimenez/adatl1/data/data_2025E+G/pairing/ZB_run396102_to_ZB_run398183",
+  "cache_root": "/iopsstor/scratch/cscs/podagiu/data/data_2025E+G/mlready/eminimalTauFET_pdefaultTauFET_default/robust",
+  "created_at": "2026-08-03T17:05:12.139101+00:00",
+  "dataset_1": "ZB_run396102",
+  "dataset_2": "ZB_run398183",
+  "events_per_source": 163840,
+  "schema_version": 1,
+  "source_counts": {
+    "test": {
+      "0": 2071954,
+      "1": 2105483
+    },
+    "train": {
+      "0": 6220337,
+      "1": 6311970
+    },
+    "valid": {
+      "0": 2071254,
+      "1": 2106181
+    }
+  },
+  "tables": [
+    {
+      "authenticated": true,
+      "pairs": 163840,
+      "path": "/iopsstor/scratch/cscs/vjimenez/adatl1/data/data_2025E+G/pairing/ZB_run396102_to_ZB_run398183/validate_flat_physical_cap_n163840.pt",
+      "sha256": "c58990e315412f8139cc87bf2c4ad8258d50394b9a1f4e88c20d56fde786087e",
+      "source_1_sha256": "93af0da613e479e8da487345256c94cf8a87a343862dcebe7b6bc4001f56f394",
+      "source_2_sha256": "2cff2f3ca6b849e8c14592ec16ec3130a89fb5de5177e82e580f8a5e481ed971",
+      "stage": "validate",
+      "strategy": "flat_physical"
+    },
+    {
+      "authenticated": true,
+      "pairs": 163840,
+      "path": "/iopsstor/scratch/cscs/vjimenez/adatl1/data/data_2025E+G/pairing/ZB_run396102_to_ZB_run398183/validate_physics_summary_cap_n163840.pt",
+      "sha256": "05d1e9e8c0bfaab46d7afc56fc2c11e744efb244fc0a78477503be104a3caad7",
+      "source_1_sha256": "93af0da613e479e8da487345256c94cf8a87a343862dcebe7b6bc4001f56f394",
+      "source_2_sha256": "2cff2f3ca6b849e8c14592ec16ec3130a89fb5de5177e82e580f8a5e481ed971",
+      "stage": "validate",
+      "strategy": "physics_summary"
+    },
+    {
+      "authenticated": true,
+      "pairs": 163840,
+      "path": "/iopsstor/scratch/cscs/vjimenez/adatl1/data/data_2025E+G/pairing/ZB_run396102_to_ZB_run398183/validate_typed_sliced_wasserstein_cap_n163840.pt",
+      "sha256": "46f2da55fef970b4f116692d5c530591a2349f79e500416cadec8df2f450c95c",
+      "source_1_sha256": "93af0da613e479e8da487345256c94cf8a87a343862dcebe7b6bc4001f56f394",
+      "source_2_sha256": "2cff2f3ca6b849e8c14592ec16ec3130a89fb5de5177e82e580f8a5e481ed971",
+      "stage": "validate",
+      "strategy": "typed_sliced_wasserstein"
+    },
+    {
+      "authenticated": true,
+      "pairs": 163840,
+      "path": "/iopsstor/scratch/cscs/vjimenez/adatl1/data/data_2025E+G/pairing/ZB_run396102_to_ZB_run398183/validate_jetclr_cap_n163840.pt",
+      "sha256": "f24558dfcce1efbe56f0229fe0b90a3e95c13038e3577d734b3d396ae04d7334",
+      "source_1_sha256": "93af0da613e479e8da487345256c94cf8a87a343862dcebe7b6bc4001f56f394",
+      "source_2_sha256": "2cff2f3ca6b849e8c14592ec16ec3130a89fb5de5177e82e580f8a5e481ed971",
+      "stage": "validate",
+      "strategy": "jetclr"
+    },
+    {
+      "authenticated": true,
+      "pairs": 163840,
+      "path": "/iopsstor/scratch/cscs/vjimenez/adatl1/data/data_2025E+G/pairing/ZB_run396102_to_ZB_run398183/test_flat_physical_cap_n163840.pt",
+      "sha256": "afc3343fd559bccbc658fd70d9a886d2cdb7a12f8612378b727871b5d73a0ff0",
+      "source_1_sha256": "e9432284bf46d51b4ab7edc81efaabe0927a18bfc18421f2c4a5e0c617c130d6",
+      "source_2_sha256": "7e9e0ac3ed1e2c793cf8d74f42655069daa4cc472fc6ad48cbf9c715bafb1f98",
+      "stage": "test",
+      "strategy": "flat_physical"
+    },
+    {
+      "authenticated": true,
+      "pairs": 163840,
+      "path": "/iopsstor/scratch/cscs/vjimenez/adatl1/data/data_2025E+G/pairing/ZB_run396102_to_ZB_run398183/test_physics_summary_cap_n163840.pt",
+      "sha256": "062815f9b6b5498fedf2eb31777574dc318801f9cf385ecae158f037d59c0745",
+      "source_1_sha256": "e9432284bf46d51b4ab7edc81efaabe0927a18bfc18421f2c4a5e0c617c130d6",
+      "source_2_sha256": "7e9e0ac3ed1e2c793cf8d74f42655069daa4cc472fc6ad48cbf9c715bafb1f98",
+      "stage": "test",
+      "strategy": "physics_summary"
+    },
+    {
+      "authenticated": true,
+      "pairs": 163840,
+      "path": "/iopsstor/scratch/cscs/vjimenez/adatl1/data/data_2025E+G/pairing/ZB_run396102_to_ZB_run398183/test_typed_sliced_wasserstein_cap_n163840.pt",
+      "sha256": "83f20a0e7fb13ead76468cc9925a362ab5d735c812c261e9569f0c7eb0e57984",
+      "source_1_sha256": "e9432284bf46d51b4ab7edc81efaabe0927a18bfc18421f2c4a5e0c617c130d6",
+      "source_2_sha256": "7e9e0ac3ed1e2c793cf8d74f42655069daa4cc472fc6ad48cbf9c715bafb1f98",
+      "stage": "test",
+      "strategy": "typed_sliced_wasserstein"
+    },
+    {
+      "authenticated": true,
+      "pairs": 163840,
+      "path": "/iopsstor/scratch/cscs/vjimenez/adatl1/data/data_2025E+G/pairing/ZB_run396102_to_ZB_run398183/test_jetclr_cap_n163840.pt",
+      "sha256": "a004a0bb7e5a2a4dcc74cff978208a7761ad61251b4580b879bfe963391e19a2",
+      "source_1_sha256": "e9432284bf46d51b4ab7edc81efaabe0927a18bfc18421f2c4a5e0c617c130d6",
+      "source_2_sha256": "7e9e0ac3ed1e2c793cf8d74f42655069daa4cc472fc6ad48cbf9c715bafb1f98",
+      "stage": "test",
+      "strategy": "jetclr"
+    }
+  ]
+}

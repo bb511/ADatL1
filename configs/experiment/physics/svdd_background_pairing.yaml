@@ -1,0 +1,16 @@
+# @package _global_
+
+defaults:
+  - physics/svdd_agnostic
+  - /pairing: physics
+  - override /data: basis
+  - _self_
+
+tags: ["svdd", "physics", "background-pairing"]
+experiment_name: physics_svdd_background_pairing
+
+data:
+  batch_size: 16384
+  max_val_batches: 10
+  expose_zerobias_sources: true
+  zerobias_source_metadata_dir: ${physics_pairing.source_metadata_dir}

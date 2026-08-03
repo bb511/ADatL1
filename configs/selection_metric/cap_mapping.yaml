@@ -1,0 +1,33 @@
+# @package _global_
+
+# Search only the selected precomputed CAP mapping plus the operational-score
+# secondary objective. This avoids evaluating unrelated branches in every trial.
+optimized_metric_config:
+  main_metric:
+    callback:
+      name: cap
+      params: {}
+    direction: maximize
+
+callbacks:
+  anomaly_eff: null
+  thres_drift: null
+  wasserstein_dist: null
+  thres_drift_ema_ckpt: null
+  wasserstein_dist_ema_ckpt: null
+
+evaluation:
+  evaluator:
+    ckpts:
+      last: null
+      summary:
+        operational_drift_ema: null
+        w1dist_ema_normal_vs_SingleNeutrino_E-10-gun: null
+        cap_ema_normal_vs_SingleNeutrino_E-10-gun: null
+        w1dist_ema_ZB_run396102_vs_ZB_run398183: null
+        cap_ema_ZB_run396102_vs_ZB_run398183: ["max"]
+  callbacks:
+    anomaly_efficiency: null
+    thres_drift: null
+    wasserstein: null
+    reco: null

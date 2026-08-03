@@ -7,12 +7,12 @@ from pytorch_lightning import Callback
 
 
 class ThresholdDriftCallback(Callback):
-    """Compute a validation-style split-transfer drift metric from one dataset.
+    """Compute a validation-style threshold-transfer drift metric.
 
-    This callback collects all scores from the 'normal' dataloader, splits them
-    internally into:
-        - calibration subset
-        - evaluation subset
+    By default this preserves the original behaviour: collect scores from the
+    ``normal`` dataloader and split them into calibration and evaluation subsets.
+    When ``dataset_2`` is provided, the full ``dataset_1`` sample is instead used
+    for calibration and the full ``dataset_2`` sample for evaluation.
 
     Then, for each target rate:
         1) compute a threshold on the calibration subset
@@ -47,6 +47,8 @@ class ThresholdDriftCallback(Callback):
         split_seed: int = 12345,
         beta: float = 0.9,
         metric_name: str | None = None,
+        dataset_1: str = "normal",
+        dataset_2: str | None = None,
     ):
         super().__init__()
         self.output_name = output_name
@@ -59,6 +61,8 @@ class ThresholdDriftCallback(Callback):
         self.split_seed = int(split_seed)
         self.beta = beta
         self.metric_name = None if metric_name is None else str(metric_name)
+        self.dataset_1_name = str(dataset_1)
+        self.dataset_2_name = None if dataset_2 is None else str(dataset_2)
 
         self.log_kwargs = dict(
             prog_bar=False,
@@ -82,20 +86,25 @@ class ThresholdDriftCallback(Callback):
         self.target_rates, self.base_rate = self._resolve_rate_config(pl_module)
 
         dset_names = list(trainer.val_dataloaders.keys())
-        if "normal" not in dset_names:
+        required = [self.dataset_1_name]
+        if self.dataset_2_name is not None:
+            required.append(self.dataset_2_name)
+        missing = [name for name in required if name not in dset_names]
+        if missing:
             raise ValueError(
-                f"{self.__class__.__name__} requires a dataloader named 'normal'. "
+                f"{self.__class__.__name__} requires validation dataloaders {missing}. "
                 f"Available validation dataloaders: {dset_names}"
             )
 
-        self.normal_scores = []
+        self.dataset_1_scores = []
+        self.dataset_2_scores = []
 
     def on_validation_batch_end(
         self, trainer, pl_module, outputs, batch, batch_idx, dataloader_idx=0
     ):
-        """Split the normal validation data set and aggregate anomaly scores."""
+        """Aggregate scores from the configured calibration/evaluation datasets."""
         dset_name = list(trainer.val_dataloaders.keys())[dataloader_idx]
-        if dset_name != "normal":
+        if dset_name not in (self.dataset_1_name, self.dataset_2_name):
             return
 
         loss = outputs[self.output_name]
@@ -103,21 +112,31 @@ class ThresholdDriftCallback(Callback):
             raise ValueError(f"outputs['{self.output_name}'] is scalar. Need a tensor.")
 
         loss = loss.detach().view(-1)
-        self.normal_scores.append(loss)
+        if dset_name == self.dataset_1_name:
+            self.dataset_1_scores.append(loss)
+        if dset_name == self.dataset_2_name:
+            self.dataset_2_scores.append(loss)
 
     def on_validation_epoch_end(self, trainer, pl_module):
         """Compute and log the threshold drift metric across the two data sets."""
-        if not self.normal_scores:
-            raise RuntimeError("No normal validation scores were collected.")
+        if not self.dataset_1_scores:
+            raise RuntimeError(f"No validation scores were collected for '{self.dataset_1_name}'.")
 
         module_target = float(pl_module.hparams.target_rate)
 
-        scores = torch.cat(self.normal_scores, dim=0).view(-1)
-        n_total = int(scores.numel())
-        if n_total < 2:
-            raise RuntimeError(f"Need >=2 normal scores to split, got {n_total}.")
-
-        cal_scores, eval_scores = self._split_scores(scores)
+        dataset_1_scores = torch.cat(self.dataset_1_scores, dim=0).view(-1)
+        if self.dataset_2_name is None:
+            n_total = int(dataset_1_scores.numel())
+            if n_total < 2:
+                raise RuntimeError(f"Need >=2 scores to split, got {n_total}.")
+            cal_scores, eval_scores = self._split_scores(dataset_1_scores)
+        else:
+            if not self.dataset_2_scores:
+                raise RuntimeError(
+                    f"No validation scores were collected for '{self.dataset_2_name}'."
+                )
+            cal_scores = dataset_1_scores
+            eval_scores = torch.cat(self.dataset_2_scores, dim=0).view(-1)
         n_eval = int(eval_scores.numel())
         if n_eval <= 0:
             raise RuntimeError("Evaluation split is empty after internal split.")

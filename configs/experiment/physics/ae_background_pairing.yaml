@@ -1,0 +1,21 @@
+# @package _global_
+
+defaults:
+  - physics/ae_agnostic
+  - /pairing: physics
+  - override /data: basis
+  - _self_
+
+tags: ["ae", "physics", "background-pairing", "mahalanobis"]
+experiment_name: physics_ae_background_pairing
+
+data:
+  batch_size: 16384
+  max_val_batches: 10
+  expose_zerobias_sources: true
+  zerobias_source_metadata_dir: ${physics_pairing.source_metadata_dir}
+
+callbacks:
+  residual_oas_state:
+    _target_: src.callbacks.cap.ResidualOASStateCallback
+    max_samples: 163840

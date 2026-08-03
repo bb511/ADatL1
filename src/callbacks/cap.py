@@ -255,6 +255,13 @@ class ResidualOASStateCallback(Callback):
     never enter the covariance estimate.
     """
 
+    def __init__(self, max_samples: int | None = None):
+        super().__init__()
+        if max_samples is not None and int(max_samples) <= 0:
+            raise ValueError("max_samples must be positive when provided.")
+        self.max_samples = None if max_samples is None else int(max_samples)
+        self.fit_samples = 0
+
     def on_validation_epoch_start(self, trainer, pl_module):
         """Fit and install OAS state using a clean final-weight training pass."""
         if trainer.sanity_checking:
@@ -272,6 +279,13 @@ class ResidualOASStateCallback(Callback):
             with torch.no_grad():
                 for batch in loader:
                     x = torch.flatten(unpack_batch(batch).x, start_dim=1).to(pl_module.device)
+                    if self.max_samples is not None:
+                        remaining = self.max_samples - sum(
+                            chunk.shape[0] for chunk in residual_chunks
+                        )
+                        if remaining <= 0:
+                            break
+                        x = x[:remaining]
                     _, reconstruction = pl_module.forward(x)
                     if x.shape != reconstruction.shape:
                         raise ValueError(
@@ -279,12 +293,18 @@ class ResidualOASStateCallback(Callback):
                             f"got {tuple(x.shape)} and {tuple(reconstruction.shape)}."
                         )
                     residual_chunks.append((x - reconstruction).double().cpu())
+                    if (
+                        self.max_samples is not None
+                        and sum(chunk.shape[0] for chunk in residual_chunks) >= self.max_samples
+                    ):
+                        break
         finally:
             if shuffler_state is not None:
                 shuffler.set_state(shuffler_state)
         if not residual_chunks:
             raise RuntimeError("Residual OAS CAP received an empty training loader.")
         residuals = torch.cat(residual_chunks, dim=0).numpy()
+        self.fit_samples = int(residuals.shape[0])
         estimator = OAS(store_precision=True, assume_centered=False).fit(residuals)
         pl_module.set_residual_oas_state(
             torch.from_numpy(estimator.location_),

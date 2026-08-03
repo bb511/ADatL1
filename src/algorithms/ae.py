@@ -142,10 +142,16 @@ class AE(ADLightningModule):
         z, reconstruction = self.forward(x_noisy)
         loss = self.loss(reco=reconstruction, target=x, mask=m)
         # The anomaly score is expected to be a distribution over events.
-        ascore = self.ascore(x, reconstruction, m)
+        mse_ascore = self.ascore(x, reconstruction, m)
         residual_oas = (
-            self.residual_oas_score(x, reconstruction) if bool(self.residual_oas_ready) else ascore
+            self.residual_oas_score(x, reconstruction)
+            if bool(self.residual_oas_ready)
+            else mse_ascore
         )
+        # Residual Mahalanobis is the canonical AE anomaly score. During Lightning's
+        # pre-fit sanity validation the train-only OAS state is not available yet, so
+        # MSE is used only as a temporary, non-checkpointed fallback.
+        ascore = residual_oas
         if ascore.ndim != 1:
             raise ValueError(f"Expected per-event ascores, got {tuple(ascore.shape)}.")
 
@@ -171,6 +177,7 @@ class AE(ADLightningModule):
             # Used for callbacks:
             "loss/full": loss.detach(),
             "ascore/full": ascore.detach(),
+            "ascore/mse": mse_ascore.detach(),
             "ascore/residual_oas": residual_oas.detach(),
             "reconstructed_data": reconstruction.detach(),
         }

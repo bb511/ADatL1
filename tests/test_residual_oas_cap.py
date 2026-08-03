@@ -62,3 +62,47 @@ def test_ae_residual_oas_score_matches_sklearn_mahalanobis() -> None:
         model.residual_oas_score(target, reconstruction),
         torch.tensor(expected, dtype=target.dtype),
     )
+
+
+def test_ae_canonical_score_is_residual_mahalanobis() -> None:
+    """All generic AE consumers must see Mahalanobis, with MSE only diagnostic."""
+    model = AE(
+        encoder=nn.Linear(2, 1, bias=False),
+        decoder=nn.Linear(1, 2, bias=False),
+        target_rate=0.25,
+    )
+    with torch.no_grad():
+        model.encoder.weight.copy_(torch.tensor([[1.0, 0.0]]))
+        model.decoder.weight.copy_(torch.tensor([[0.0], [0.0]]))
+    model.set_residual_oas_state(
+        torch.tensor([0.25, -0.5]),
+        torch.tensor([[4.0, 0.0], [0.0, 1.0]]),
+    )
+    batch = {"x": torch.tensor([[1.0, 2.0], [2.0, 1.0]]), "y": torch.zeros(2)}
+
+    output = model.model_step(batch)
+    expected = model.residual_oas_score(batch["x"], torch.zeros_like(batch["x"]))
+
+    torch.testing.assert_close(output["ascore/full"], expected)
+    torch.testing.assert_close(output["ascore/residual_oas"], expected)
+    assert not torch.equal(output["ascore/full"], output["ascore/mse"])
+
+
+def test_residual_oas_state_respects_max_samples() -> None:
+    """OAS fitting must stop after its configured deterministic sample budget."""
+    callback = ResidualOASStateCallback(max_samples=3)
+    batches = [
+        {"x": torch.tensor([[0.0, 0.0], [1.0, 0.0]]), "y": torch.zeros(2)},
+        {"x": torch.tensor([[0.0, 2.0], [2.0, 1.0]]), "y": torch.zeros(2)},
+    ]
+    seen = []
+    module = SimpleNamespace(device=torch.device("cpu"))
+    module.eval = lambda: None
+    module.forward = lambda x: (torch.zeros(len(x), 1), seen.append(x.clone()) or x * 0.5)
+    module.set_residual_oas_state = lambda location, precision: None
+    trainer = SimpleNamespace(world_size=1, sanity_checking=False, train_dataloader=batches)
+
+    callback.on_validation_epoch_start(trainer, module)
+
+    assert callback.fit_samples == 3
+    assert sum(len(x) for x in seen) == 3

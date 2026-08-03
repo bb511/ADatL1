@@ -1,0 +1,31 @@
+# @package _global_
+
+optimized_metric_config:
+  main_metric:
+    callback:
+      name: wasserstein
+      params: {}
+    direction: minimize
+
+callbacks:
+  anomaly_eff: null
+  thres_drift: null
+  cap_sn_zb: null
+  thres_drift_ema_ckpt: null
+  cap_sn_zb_ema_ckpt: null
+
+evaluation:
+  evaluator:
+    ckpts:
+      last: null
+      summary:
+        operational_drift_ema: null
+        w1dist_ema_normal_vs_SingleNeutrino_E-10-gun: null
+        cap_ema_normal_vs_SingleNeutrino_E-10-gun: null
+        w1dist_ema_ZB_run396102_vs_ZB_run398183: ["min"]
+        cap_ema_ZB_run396102_vs_ZB_run398183: null
+  callbacks:
+    anomaly_efficiency: null
+    cap_sn_zb: null
+    thres_drift: null
+    reco: null

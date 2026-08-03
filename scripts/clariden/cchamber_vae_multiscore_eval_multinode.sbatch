@@ -2,7 +2,7 @@
 #SBATCH --account=a0166
 #SBATCH --partition=debug
 #SBATCH --nodes=4
-#SBATCH --time=01:30:00
+#SBATCH --time=00:20:00
 #SBATCH --ntasks-per-node=4
 #SBATCH --cpus-per-task=72
 #SBATCH --gpus-per-node=4

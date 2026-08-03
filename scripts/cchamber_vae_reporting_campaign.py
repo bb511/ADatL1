@@ -278,6 +278,10 @@ def evaluate(root: Path, trajectory_index: int) -> Path:
     validation = datamodule.val_dataloader()
     test = datamodule.test_dataloader()
     device = torch.device("cuda")
+    # The frozen score helper enters inference mode before calling ``model.to``.
+    # Move once here so residual-state buffers remain ordinary tensors and later
+    # branch checkpoints can be copied into them safely.
+    model.eval().to(device)
     rows = []
     for branch in branches:
         checkpoint = Path(branch["checkpoint"])

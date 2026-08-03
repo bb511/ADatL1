@@ -30,7 +30,7 @@ for worker in $(seq 0 15); do
       worker=$1
       for trajectory_index in "${worker}" "$((worker + 16))" "$((worker + 32))"; do
         "$2" run --frozen --no-sync python \
-          scripts/cchamber_vae_multiscore_campaign.py evaluate \
+          /users/vjimenez/adatl1/scripts/cchamber_vae_multiscore_evaluate_safe.py \
           --root "$3" --trajectory-index "${trajectory_index}"
       done
     ' _ "${worker}" "${UV_BIN}" "${CAMPAIGN_ROOT}" &

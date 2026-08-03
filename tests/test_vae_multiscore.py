@@ -3,10 +3,12 @@
 from __future__ import annotations
 
 import math
+from types import SimpleNamespace
 
 import torch
 
 from scripts import cchamber_vae_multiscore_campaign as campaign
+from scripts import cchamber_vae_multiscore_evaluate_safe as safe_evaluation
 from src.algorithms.components.decoder import Decoder
 from src.algorithms.components.encoder import Encoder, VariationalEncoder
 from src.algorithms.vae import VAE
@@ -80,3 +82,36 @@ def test_campaign_covers_every_score_selector_on_shared_grid() -> None:
     }
     assert set(campaign.MONITORS) == set(campaign.BRANCHES)
     assert campaign.EXPECTED_TRAJECTORIES == 48
+
+
+def test_safe_evaluation_moves_model_before_inference_mode(monkeypatch, tmp_path) -> None:
+    """The evaluation adapter performs the first device move outside inference mode."""
+    inference_states: list[bool] = []
+
+    class FakeModel:
+        def eval(self):
+            return self
+
+        def to(self, _device):
+            inference_states.append(torch.is_inference_mode_enabled())
+            return self
+
+    @torch.inference_mode()
+    def inference_scores(model, _loader, _score_name, device):
+        model.eval().to(device)
+        return torch.ones(1).numpy()
+
+    frozen = SimpleNamespace(_scores=inference_scores)
+
+    def evaluate(root, trajectory_index):
+        frozen._scores(FakeModel(), [], "residual_oas", torch.device("cpu"))
+        assert trajectory_index == 7
+        return root / "evaluation" / "007.json"
+
+    frozen.evaluate = evaluate
+    monkeypatch.setattr(safe_evaluation, "_frozen_module", lambda: frozen)
+
+    result = safe_evaluation.evaluate(tmp_path, 7)
+
+    assert result == tmp_path / "evaluation" / "007.json"
+    assert inference_states == [False, True]

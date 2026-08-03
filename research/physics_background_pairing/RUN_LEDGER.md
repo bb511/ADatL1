@@ -19,8 +19,8 @@ Last updated: 2026-08-03 (Europe/Zurich)
 | Scientific contract | complete | `PLAN.md` |
 | Implementation audit | complete | Confirmed prior prototype covered only mapped VAE CAP |
 | Code and configs | complete | Six model overlays; CAP/W1/E-to-G drift search overlays; AE canonical residual OAS score |
-| Tests and preflight | complete | 19 targeted tests passed; all 8 pair tables authenticated in `preflight.json` |
-| Pilots | pending | Submit after tests |
+| Tests and preflight | complete | 22 targeted tests passed; all 8 pair tables authenticated in `preflight.json` |
+| Pilots | queued for capacity | First submission attempt was rejected by the per-user QOS job cap; resumable three-metric pilot array is ready |
 | Full searches | pending | 36 persistent studies, 600 trials each |
 | Retraining/evaluation | pending | Freeze Pareto candidates first |
 | Aggregation/report | pending | Must cover full matrix |
@@ -39,8 +39,12 @@ Last updated: 2026-08-03 (Europe/Zurich)
 
 - 2026-08-03: all six paper-model configurations composed with the JetCLR variant.
 - 2026-08-03: CAP, Wasserstein, and drift search-only overlays composed independently.
-- 2026-08-03: targeted callback, AE-score, pairing, and configuration suite passed
-  (19 tests).
+- 2026-08-03: targeted callback, AE-score, pairing, configuration, and campaign suite
+  passed (22 tests).
 - 2026-08-03: pre-commit passed on every changed file.
 - 2026-08-03: validation and test tables for all four strategies authenticated against
   the exact ordered 163,840-event source-loader tensors. See `preflight.json`.
+- 2026-08-03: initial pilot submission was rejected with
+  `QOSMaxSubmitJobPerUserLimit`; no job was created and no unrelated queued work was
+  cancelled. Pilot and chunked search submission scripts are ready for the first free
+  scheduler slots.

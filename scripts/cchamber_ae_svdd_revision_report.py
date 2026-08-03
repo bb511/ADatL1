@@ -20,6 +20,9 @@ AE_ROOT = Path(
 SVDD_ROOT = Path(
     "/iopsstor/scratch/cscs/vjimenez/adatl1/campaigns/" "cchamber_svdd_inverse_cap_20260802_seeded"
 )
+VAE_ROOT = Path(
+    "/iopsstor/scratch/cscs/vjimenez/adatl1/campaigns/" "cchamber_vae_reporting_20260803_auto"
+)
 OLD_THRESHOLD = Path(
     "/iopsstor/scratch/cscs/vjimenez/adatl1/audits/"
     "cchamber_real_20260801_3789655_threshold_3789655/results/threshold_safe_results.csv"
@@ -72,16 +75,23 @@ def _markdown(summary: pd.DataFrame, rank: pd.DataFrame, output: Path) -> None:
     lookup = summary.set_index(["model", "strategy", "metric"])
     ae_cdf = lookup.loc[("ae", "cap_cdf")]
     svdd_encoder = lookup.loc[("svdd", "cap_encoder_nearest")]
+    vae_design = json.loads((VAE_ROOT / "design.json").read_text(encoding="utf-8"))
+    vae_cap_strategy = {
+        "cap_encoder": "cap_encoder_nearest",
+        "cap_cdf": "cap_cdf",
+    }[vae_design["selected_cap_selector"]]
+    vae_cap = lookup.loc[("vae", vae_cap_strategy)]
     lines = [
-        "# Revised Causal Chamber results: residual-OAS AE and inverse-CAP SVDD",
+        "# Revised Causal Chamber results: AE, SVDD, and AE-initialized VAE",
         "",
-        "This report supersedes the AE and SVDD cells of the `88aaec5` report. VAE and "
-        "RealNVP are unchanged. All new selections use validation-normal information only; "
-        "the 58 interventions were sealed until every branch checkpoint was hash-frozen.",
+        "This report supersedes the AE, SVDD, and VAE cells of the `88aaec5` report. "
+        "RealNVP is unchanged. AE and SVDD use their revised score audits. The VAE score "
+        "and hyperparameters are outcome-optimized on the exploratory search requested for "
+        "this analysis; its five reporting retrains are independent of those search seeds.",
         "",
         "The new AE and SVDD intervals use three independent reporting retrains per selected "
-        "candidate. The unchanged VAE and RealNVP intervals use ten retrains. Interventions "
-        "are averaged within seed before means and intervals are computed.",
+        "candidate, the new VAE uses five, and unchanged RealNVP uses ten. Interventions are "
+        "averaged within seed before means and intervals are computed.",
         "",
         "## Selected-checkpoint performance",
         "",
@@ -120,11 +130,25 @@ def _markdown(summary: pd.DataFrame, rank: pd.DataFrame, output: Path) -> None:
             "fine-tunes every transferred weight. Per-branch tensor deltas authenticate that "
             "no transferred encoder tensor remained frozen.",
             "",
+            "## VAE result",
+            "",
+            f"The outcome-optimized search selected `{vae_design['selected_score']}` with "
+            f"{plots.STRATEGY_LABELS[vae_cap_strategy]}. On five independent fresh retrains, "
+            f"this reaches **{vae_cap.loc['auprc', 'mean']:.4f} AUPRC** and "
+            f"**{vae_cap.loc['efficiency_operational', 'mean']:.4f} efficiency**. The VAE "
+            "starts from the residual-OAS AE encoder/decoder and fine-tunes every weight. "
+            "The anomaly-score and hyperparameter choice used exploratory intervention "
+            "outcomes by design; checkpoint selection within each fresh run remains normal-only.",
+            "",
             "## Candidate-ranking validity",
             "",
         ]
     )
-    for model, strategy in (("ae", "cap_cdf"), ("svdd", "cap_encoder_nearest")):
+    for model, strategy in (
+        ("ae", "cap_cdf"),
+        ("svdd", "cap_encoder_nearest"),
+        ("vae", vae_cap_strategy),
+    ):
         branch = rank[(rank.model == model) & (rank.strategy == strategy)]
         values = {row.metric: row for row in branch.itertuples()}
         lines.append(
@@ -141,8 +165,8 @@ def _markdown(summary: pd.DataFrame, rank: pd.DataFrame, output: Path) -> None:
             "",
             "## Controlled physical-shift synthesis",
             "",
-            "This recomputation uses the newly selected AE and SVDD checkpoints and only "
-            "encoder-nearest CAP, CDF-rank CAP, marginal drift, and Wasserstein.",
+            "This recomputation uses the newly selected AE, SVDD, and VAE checkpoints and "
+            "only encoder-nearest CAP, CDF-rank CAP, marginal drift, and Wasserstein.",
             "",
             "![Controlled physical-shift synthesis](./physical_shift_synthesis.png)",
             "",
@@ -150,7 +174,10 @@ def _markdown(summary: pd.DataFrame, rank: pd.DataFrame, output: Path) -> None:
             "",
             "- AE: 48 trajectories, 288 frozen branch checkpoints, 33,408 complete outcome rows.",
             "- SVDD: 48 trajectories, 288 frozen branch checkpoints, 33,408 complete outcome rows.",
-            "- Both candidate-rank analyses use all 16 candidates and 10,000 permutations.",
+            "- VAE: selector-specific winners, five fresh reporting seeds, and 2,320 complete "
+            "outcome rows across the four retained criteria.",
+            "- AE, SVDD, and VAE candidate-rank analyses use all 16 search candidates and "
+            "10,000 permutations.",
             "- The presentation reports encoder-nearest CAP, CDF CAP, marginal drift, and Wasserstein.",
             "",
         ]
@@ -165,23 +192,24 @@ def run(output_dir: Path, repository_extra: Path | None = None) -> list[Path]:
     old_rank = pd.read_csv(OLD_REPORT / "paper_analysis" / "candidate_rank_associations.csv")
     ae_summary, ae_rank, ae_results = _new_results(AE_ROOT, "ae")
     svdd_summary, svdd_rank, svdd_results = _new_results(SVDD_ROOT, "svdd")
-    unchanged = old_summary[old_summary.model.isin(("vae", "realnvp"))].copy()
+    vae_summary, vae_rank, vae_results = _new_results(VAE_ROOT, "vae")
+    unchanged = old_summary[old_summary.model == "realnvp"].copy()
     unchanged = unchanged.rename(columns={"std": "sd", "n_seeds": "n_reporting_seeds"})
-    summary = pd.concat([ae_summary, svdd_summary, unchanged], ignore_index=True, sort=False)
-    if len(summary) != 48:
-        raise ValueError("Combined strategy summary lacks exact 4x6x2 coverage.")
-    new_rank = pd.concat([ae_rank, svdd_rank], ignore_index=True)
+    summary = pd.concat(
+        [ae_summary, svdd_summary, vae_summary, unchanged], ignore_index=True, sort=False
+    )
+    new_rank = pd.concat([ae_rank, svdd_rank, vae_rank], ignore_index=True)
     new_rank = new_rank.rename(columns={"holm_p": "spearman_holm_p"})
     rank = pd.concat(
-        [new_rank, old_rank[old_rank.model.isin(("vae", "realnvp"))]],
+        [new_rank, old_rank[old_rank.model == "realnvp"]],
         ignore_index=True,
         sort=False,
     )
-    if len(rank) != 48:
-        raise ValueError("Combined rank table lacks exact 4x6x2 coverage.")
     old_results = pd.read_csv(OLD_THRESHOLD)
-    unchanged_results = old_results[old_results.model.isin(("vae", "realnvp"))]
-    results = pd.concat([ae_results, svdd_results, unchanged_results], ignore_index=True)
+    unchanged_results = old_results[old_results.model == "realnvp"]
+    results = pd.concat(
+        [ae_results, svdd_results, vae_results, unchanged_results], ignore_index=True
+    )
     # Keep the complete campaigns authoritative at their source roots, while the revised
     # presentation intentionally contains only the requested models and criteria.
     summary = summary[
@@ -191,6 +219,8 @@ def run(output_dir: Path, repository_extra: Path | None = None) -> list[Path]:
     results = results[
         results.model.isin(REPORT_MODELS) & results.strategy.isin(REPORT_STRATEGIES)
     ].copy()
+    if len(summary) != 32 or len(rank) != 32:
+        raise ValueError("Combined report tables lack exact 4x4x2 coverage.")
     physical = pd.read_csv(PHYSICAL)
     physical["system_group"] = physical["physical_class"].map(plots.CLASS_MAP)
     intervention = (
@@ -253,6 +283,7 @@ def run(output_dir: Path, repository_extra: Path | None = None) -> list[Path]:
         "old_report": str(OLD_REPORT),
         "ae_root": str(AE_ROOT),
         "svdd_root": str(SVDD_ROOT),
+        "vae_root": str(VAE_ROOT),
         "outputs": {str(path): _sha256(path) for path in outputs},
     }
     provenance_path = output_dir / "report_provenance.json"

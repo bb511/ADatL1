@@ -13,8 +13,8 @@
 set -euo pipefail
 
 readonly SCRATCH_ROOT=/iopsstor/scratch/cscs/vjimenez/adatl1
-readonly REPOSITORY_ROOT="${SCRATCH_ROOT}/worktrees/physics_background_pairing_20260803"
-readonly CAMPAIGN_ROOT="${SCRATCH_ROOT}/campaigns/physics_background_pairing_20260803"
+readonly REPOSITORY_ROOT="${PHYSICS_BGPAIR_REPOSITORY_ROOT:-${SCRATCH_ROOT}/worktrees/physics_background_shared_20260804}"
+readonly CAMPAIGN_ROOT="${PHYSICS_BGPAIR_CAMPAIGN_ROOT:-${SCRATCH_ROOT}/campaigns/physics_background_shared_20260804}"
 readonly UV_BIN="${SCRATCH_ROOT}/tools/uv-0.11.32/uv"
 
 export UV_PROJECT_ENVIRONMENT="${SCRATCH_ROOT}/.venv-clariden"

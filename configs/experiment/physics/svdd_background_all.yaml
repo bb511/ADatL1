@@ -1,0 +1,20 @@
+# @package _global_
+
+defaults:
+  - physics/svdd_agnostic
+  - /pairing: physics
+  - /selection_suite: physics_background_native
+  - override /data: basis
+  - _self_
+
+tags: ["svdd", "physics", "background-pairing", "shared-validation-pool"]
+experiment_name: physics_svdd_background_all
+
+data:
+  batch_size: 16384
+  max_val_batches: 10
+  expose_zerobias_sources: true
+  zerobias_source_metadata_dir: ${physics_pairing.source_metadata_dir}
+  validation_aux_datasets: []
+
+test: false

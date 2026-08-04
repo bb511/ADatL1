@@ -1,7 +1,10 @@
-"""Tests for the frozen physics background-pairing campaign matrix."""
+"""Tests for the six shared physics background-pairing studies."""
 
 import importlib.util
 from pathlib import Path
+from types import SimpleNamespace
+
+import yaml
 
 SCRIPT = Path(__file__).parents[1] / "scripts/physics_background_pairing_campaign.py"
 SPEC = importlib.util.spec_from_file_location("physics_background_pairing_campaign", SCRIPT)
@@ -10,106 +13,140 @@ assert SPEC.loader is not None
 SPEC.loader.exec_module(campaign)
 
 
-def test_campaign_contains_exactly_the_56_score_stratified_search_cells() -> None:
-    """AE/VAE have native and OAS variants; other models retain native scores."""
-    cells = campaign._cells()
-    assert len(cells) == 56
-    assert len({cell["id"] for cell in cells}) == 56
-    for model in campaign.MODELS:
-        model_cells = [cell for cell in cells if cell["model"] == model]
-        score_count = len(campaign.MODEL_SCORES[model])
-        assert len(model_cells) == 7 * score_count
-        assert sum(cell["metric"] == "cap_mapping" for cell in model_cells) == 5 * score_count
-        assert sum(cell["metric"] == "wasserstein" for cell in model_cells) == score_count
-        assert sum(cell["metric"] == "drift" for cell in model_cells) == score_count
+def test_campaign_has_six_studies_and_56_logical_fronts() -> None:
+    """AE/VAE add OAS views without duplicating trained trial pools."""
+    studies = campaign._studies()
+    assert len(studies) == 6
+    assert {study["model"] for study in studies} == set(campaign.MODELS)
+    assert sum(len(study["objectives"]) for study in studies) == 56
+    for study in studies:
+        expected = 14 if study["model"] in {"ae", "vae"} else 7
+        assert len(study["objectives"]) == expected
+        assert len({objective["id"] for objective in study["objectives"]}) == expected
+        assert [
+            index for objective in study["objectives"] for index in objective["value_indices"]
+        ] == list(range(2 * expected))
 
 
-def test_sweep_command_preserves_paper_budget_and_selection_contract(tmp_path) -> None:
-    """Hydra sweep commands must preserve epochs, data pairing, and persistent storage."""
-    cell = {
-        "id": "ae__residual_oas__cap__jetclr",
-        "model": "ae",
-        "score": "residual_oas",
-        "metric": "cap_mapping",
-        "strategy": "jetclr",
-    }
-    command = campaign._base_train_command(tmp_path, cell)
+def test_shared_sweep_command_preserves_paper_budget_and_logging(tmp_path) -> None:
+    """One model command trains 50 epochs and retains the configured MLflow logger."""
+    command = campaign._base_train_command(tmp_path, "ae")
     joined = " ".join(command)
     assert "-m" in command
-    assert "experiment=physics/ae_background_pairing" in command
-    assert "+selection_metric=cap_mapping" in command
-    assert "physics_pairing.strategy=jetclr" in command
-    assert "algorithm.anomaly_score=residual_oas" in command
+    assert "experiment=physics/ae_background_all" in command
+    assert "hparams_search=ae_shared_optuna" in command
     assert f"trainer.max_epochs={campaign.SEARCH_EPOCHS}" in command
     assert "test=false" in command
     assert "sqlite:///" in joined
     assert "?timeout=600" in joined
+    assert not any(value.startswith("logger=") for value in command)
+    assert not any("selection_metric" in value for value in command)
 
 
-def test_cdf_control_uses_no_precomputed_pair_table(tmp_path) -> None:
-    """CDF is a score-rank control on the same domains, not a scratch-table lookup."""
-    cell = {
-        "id": "vae__kl_raw__cap__cdf",
-        "model": "vae",
-        "score": "kl_raw",
-        "metric": "cap_mapping",
-        "strategy": "cdf",
-    }
-    command = campaign._base_train_command(tmp_path, cell)
-    assert "pairing=physics_cdf" in command
-    assert not any(item.startswith("physics_pairing.strategy=") for item in command)
+def test_logical_objective_directions_match_the_metrics() -> None:
+    """CAP is maximized; W1, drift, and native Q-double-prime are minimized."""
+    objectives = campaign._logical_objectives("ae")
+    for objective in objectives:
+        expected = (
+            ["maximize", "minimize"]
+            if objective["metric"] == "cap"
+            else [
+                "minimize",
+                "minimize",
+            ]
+        )
+        assert objective["directions"] == expected
 
 
-def test_cdf_control_is_preserved_for_pareto_retraining() -> None:
-    """Search and retraining must select the same CAP pairing implementation."""
-    row = {
-        "model": "ae",
-        "score": "mse",
-        "metric": "cap_mapping",
-        "strategy": "cdf",
-    }
-    assert campaign._pairing_overrides(row) == ["pairing=physics_cdf"]
+def test_shared_hpo_files_match_campaign_objective_order() -> None:
+    """Optuna receives exactly the directions expected by offline front slicing."""
+    root = Path(__file__).parents[1]
+    for model in campaign.MODELS:
+        config = yaml.safe_load(
+            (root / "configs" / "hparams_search" / f"{model}_shared_optuna.yaml").read_text(
+                encoding="utf-8"
+            )
+        )
+        assert config["hydra"]["sweeper"]["direction"] == [
+            direction
+            for objective in campaign._logical_objectives(model)
+            for direction in objective["directions"]
+        ]
+
+
+def test_mixed_direction_pareto_front_uses_only_requested_pair() -> None:
+    """Offline fronts must ignore all other values from the shared objective vector."""
+    trials = [
+        SimpleNamespace(number=0, values=(0.8, 2.0, 999.0), params={}),
+        SimpleNamespace(number=1, values=(0.7, 3.0, -999.0), params={}),
+        SimpleNamespace(number=2, values=(0.9, 4.0, 0.0), params={}),
+        SimpleNamespace(number=3, values=(0.8, 1.0, 0.0), params={}),
+    ]
+    front = campaign._pareto_front(trials, [0, 1], ["maximize", "minimize"])
+    assert [trial.number for trial in front] == [2, 3]
+
+
+def test_only_full_finite_objective_vectors_count_toward_600() -> None:
+    """Missing-metric fallback values must be replaced, not treated as usable trials."""
+    assert campaign._usable_trial(SimpleNamespace(values=(0.5, 1.0)), expected_values=2)
+    assert not campaign._usable_trial(
+        SimpleNamespace(values=(0.5, float("inf"))), expected_values=2
+    )
+    assert not campaign._usable_trial(SimpleNamespace(values=(0.5,)), expected_values=2)
 
 
 def test_checkpoint_identity_matches_evaluator_normalization() -> None:
     """Aggregation must match stable dataset-aware and ordinary checkpoint names."""
     assert campaign._checkpoint_identity("ascore_operational__ds=normal__stable") == "normal"
-    assert campaign._checkpoint_identity("cap_ema_ZB_run396102_vs_ZB_run398183") == (
-        "cap_ema_ZB_run396102_vs_ZB_run398183"
-    )
+    assert campaign._checkpoint_identity("cap_native_cdf_ema") == "cap_native_cdf_ema"
     assert campaign._checkpoint_identity("last") == "last"
 
 
-def test_native_and_oas_score_overrides_are_explicit() -> None:
-    """Native branches skip OAS fitting while OAS branches route the canonical score."""
-    assert campaign._score_overrides({"model": "ae", "score": "mse"}) == [
-        "algorithm.anomaly_score=mse",
-        "callbacks.residual_oas_state=null",
-    ]
-    assert campaign._score_overrides({"model": "ae", "score": "residual_oas"}) == [
-        "algorithm.anomaly_score=residual_oas"
-    ]
-    assert campaign._score_overrides({"model": "vae", "score": "kl_raw"}) == [
-        "algorithm.anomaly_score=kl_raw",
-        "callbacks.vae_residual_state=null",
-    ]
-    assert campaign._score_overrides({"model": "vae", "score": "residual_oas"}) == [
-        "algorithm.anomaly_score=residual_oas"
-    ]
+def test_retraining_uses_score_aware_downstream_suite() -> None:
+    """Only AE/VAE need the additional OAS threshold and efficiency callback."""
+    assert campaign._retrain_suite("ae") == "physics_background_native_oas"
+    assert campaign._retrain_suite("vae") == "physics_background_native_oas"
+    assert campaign._retrain_suite("dsae") == "physics_background_native"
 
 
-def test_pilot_parser_exposes_cdf_pairing_control(monkeypatch) -> None:
-    """A real-data pilot must be able to exercise the table-free CDF path."""
+def test_pilot_parser_exercises_the_complete_model_suite(monkeypatch) -> None:
+    """A pilot validates all pairings and scores together, not one isolated cell."""
     monkeypatch.setattr(
         "sys.argv",
-        [
-            "physics_background_pairing_campaign.py",
-            "pilot",
-            "--metric",
-            "cap_mapping",
-            "--strategy",
-            "cdf",
-        ],
+        ["physics_background_pairing_campaign.py", "pilot", "--model", "vae"],
     )
     args = campaign.parse_args()
-    assert args.strategy == "cdf"
+    assert args.model == "vae"
+
+
+def test_pilot_reduces_only_inner_cap_optimization(monkeypatch, tmp_path) -> None:
+    """The unified pilot checks every path without changing data or pairing tables."""
+    commands = []
+    monkeypatch.setattr(campaign, "_load_design", lambda root: {"code_commit": "a" * 40})
+    monkeypatch.setattr(
+        campaign.subprocess, "run", lambda command, **kwargs: commands.append(command)
+    )
+    artifact = tmp_path / "pilots" / "dsae" / "optimized_metric.json"
+    artifact.parent.mkdir(parents=True)
+    objectives = [objective["id"] for objective in campaign._logical_objectives("dsae")]
+    artifact.write_text(
+        campaign.json.dumps(
+            {
+                "schema_version": 2,
+                "objective_order": objectives,
+                "selections": {
+                    name: {
+                        "optimized_ckpt_name": "last",
+                        "optimized_metric": [1.0, 1.0],
+                    }
+                    for name in objectives
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    campaign.pilot(tmp_path, "dsae")
+
+    assert "physics_selection.cap_metric_config.n_epochs=1" in commands[0]
+    assert not any(value.startswith("data.max_val_batches=") for value in commands[0])

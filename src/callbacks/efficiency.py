@@ -25,6 +25,8 @@ class AnomalyEfficiencyCallback(Callback):
         target_rates: list[int] | None = None,
         base_rate: float | None = None,
         beta: float = 0.9,
+        threshold_namespace: str | None = None,
+        metric_suffix: str | None = None,
     ):
         super().__init__()
         self.device = None
@@ -34,6 +36,8 @@ class AnomalyEfficiencyCallback(Callback):
         )
         self.base_rate = base_rate
         self.beta = beta
+        self.threshold_namespace = self._clean_namespace(threshold_namespace)
+        self.metric_suffix = self._clean_namespace(metric_suffix)
 
         self.log_kwargs = dict(
             prog_bar=False,
@@ -102,7 +106,7 @@ class AnomalyEfficiencyCallback(Callback):
             sig_effs = self._compute_efficiencies(self.sig_rates, target_rate)
 
             pl_module.log_dict(
-                {f"val/normal/brate_{rate_suffix}": main_rate},
+                {self._metric_key(f"val/normal/brate_{rate_suffix}"): main_rate},
                 **self.log_kwargs,
             )
             pl_module.log_dict(bkg_effs, **self.log_kwargs)
@@ -127,9 +131,10 @@ class AnomalyEfficiencyCallback(Callback):
                     f"val/summary/eff_cvar25_ema_{trate_name}": self.cvar25_ema[target_rate],
                     f"val/summary/eff_cvar10_ema_{trate_name}": self.cvar10_ema[target_rate],
                 }
+                summaries = {self._metric_key(name): value for name, value in summaries.items()}
                 pl_module.log_dict(summaries, **self.log_kwargs)
             pl_module.log_dict(
-                {f"val/normal/thr__brate_{rate_suffix}": thres_zb},
+                {self._metric_key(f"val/normal/thr__brate_{rate_suffix}"): thres_zb},
                 **self.log_kwargs,
             )
 
@@ -259,17 +264,40 @@ class AnomalyEfficiencyCallback(Callback):
 
     def _set_thres_on_module(self, pl_module, target_rate: float, thres: torch.Tensor):
         """Pass the threshold to the module so it ends up in the checkpoint."""
-        if self._is_operational_rate(target_rate):
-            name = "thres_operational"
-        else:
-            trate_name = f"{target_rate}".replace(".", "_")
-            name = f"thres_{trate_name}kHz"
+        name = self._threshold_name(target_rate)
 
         if name not in dict(pl_module.named_buffers()):
             pl_module.register_buffer(name, thres.detach().clone(), persistent=True)
         else:
             buf = getattr(pl_module, name)
             buf.data.copy_(thres.detach())
+
+    def _threshold_name(self, target_rate: float) -> str:
+        """Return the persistent buffer name for a score-specific threshold."""
+        if self._is_operational_rate(target_rate):
+            base = "thres_operational"
+        else:
+            trate_name = f"{target_rate}".replace(".", "_")
+            base = f"thres_{trate_name}kHz"
+        if self.threshold_namespace is None:
+            return base
+        return f"{base}__{self.threshold_namespace}"
+
+    def _metric_key(self, key: str) -> str:
+        """Namespace duplicated rate summaries without changing legacy defaults."""
+        if self.metric_suffix is None:
+            return key
+        return f"{key}__{self.metric_suffix}"
+
+    @staticmethod
+    def _clean_namespace(value: str | None) -> str | None:
+        """Validate a namespace used in state-dict and metric keys."""
+        if value is None:
+            return None
+        value = str(value).strip()
+        if not value or not value.replace("_", "").isalnum():
+            raise ValueError("Namespaces may contain only letters, numbers, and underscores.")
+        return value
 
     def _resolve_rate_config(self, pl_module) -> tuple[list[float], float | None]:
         """Resolve target rates and base rate from module + callback config."""

@@ -165,6 +165,7 @@ def _get_evaluator(cfg: DictConfig, datamodule, logger):
         callbacks=callbacks,
         logger=logger,
         optimized_metric_config=cfg.get("optimized_metric_config"),
+        optimized_metric_configs=cfg.get("optimized_metric_configs"),
     )
 
     return evaluator
@@ -177,11 +178,28 @@ def _write_optimized_metric_artifact(evaluator) -> Path:
     value = evaluator.optimized_metric
     if isinstance(value, tuple):
         value = list(value)
-    payload = {
-        "schema_version": 1,
-        "optimized_ckpt_name": evaluator.optimized_ckpt_name,
-        "optimized_metric": value,
-    }
+    if getattr(evaluator, "optimized_metric_configs", None) is None:
+        payload = {
+            "schema_version": 1,
+            "optimized_ckpt_name": evaluator.optimized_ckpt_name,
+            "optimized_metric": value,
+        }
+    else:
+        selections = {}
+        for name in evaluator.optimized_metric_configs:
+            objective = evaluator.optimized_metrics[str(name)]
+            if isinstance(objective, tuple):
+                objective = list(objective)
+            selections[str(name)] = {
+                "optimized_ckpt_name": evaluator.optimized_ckpt_names[str(name)],
+                "optimized_metric": objective,
+            }
+        payload = {
+            "schema_version": 2,
+            "objective_order": [str(name) for name in evaluator.optimized_metric_configs],
+            "optimized_metric": value,
+            "selections": selections,
+        }
     temporary = path.with_suffix(path.suffix + f".{os.getpid()}.tmp")
     temporary.write_text(
         json.dumps(payload, indent=2, sort_keys=True, allow_nan=False) + "\n",
@@ -193,6 +211,13 @@ def _write_optimized_metric_artifact(evaluator) -> Path:
 
 def _get_directions(cfg):
     # 1) Prefer your own config (always available)
+    if "optimized_metric_configs" in cfg:
+        directions = []
+        for config in cfg.optimized_metric_configs.values():
+            directions.append(config.main_metric.direction)
+            if "sec_metric" in config and config.sec_metric is not None:
+                directions.append(config.sec_metric.direction)
+        return directions
     if "optimized_metric_config" in cfg:
         # multi-objective if sec_metric exists
         main_dir = cfg.optimized_metric_config.main_metric.direction

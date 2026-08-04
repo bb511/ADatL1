@@ -1,0 +1,374 @@
+# @package _global_
+
+# Shared-pool physics validation suite. Every trial evaluates all seven paper-style
+# strategies on the same model trajectory; native Q'' remains the secondary objective.
+physics_selection:
+  native_output: ascore/full
+  native_secondary:
+    callback:
+      name: ascore_operational
+      params:
+        ckpt_name: null
+        test_ds: normal
+    direction: minimize
+  cap_metric_config:
+    beta0: 1.0
+    normalization_type: sigmoid
+    normalization_params: null
+    energy_type: adaptive
+    energy_params:
+      scale: 0.5
+    regularization_type: none
+    regularization_params: null
+    binary: true
+    lr: 0.01
+    n_epochs: 20
+    batch_size: 8192
+    normalize_gradients: true
+    process_group: null
+    dist_sync_fn: null
+
+optimized_metric_config: null
+optimized_metric_configs:
+  native__cap__flat_physical:
+    primary_checkpoint_metric: cap_native_flat_physical_ema_ZB_run396102_vs_ZB_run398183
+    main_metric:
+      callback:
+        name: cap_native_flat_physical
+        params: {}
+      direction: maximize
+    sec_metric: ${physics_selection.native_secondary}
+
+  native__cap__physics_summary:
+    primary_checkpoint_metric: cap_native_physics_summary_ema_ZB_run396102_vs_ZB_run398183
+    main_metric:
+      callback:
+        name: cap_native_physics_summary
+        params: {}
+      direction: maximize
+    sec_metric: ${physics_selection.native_secondary}
+
+  native__cap__typed_sliced_wasserstein:
+    primary_checkpoint_metric: cap_native_typed_sliced_wasserstein_ema_ZB_run396102_vs_ZB_run398183
+    main_metric:
+      callback:
+        name: cap_native_typed_sliced_wasserstein
+        params: {}
+      direction: maximize
+    sec_metric: ${physics_selection.native_secondary}
+
+  native__cap__jetclr:
+    primary_checkpoint_metric: cap_native_jetclr_ema_ZB_run396102_vs_ZB_run398183
+    main_metric:
+      callback:
+        name: cap_native_jetclr
+        params: {}
+      direction: maximize
+    sec_metric: ${physics_selection.native_secondary}
+
+  native__cap__cdf:
+    primary_checkpoint_metric: cap_native_cdf_ema_ZB_run396102_vs_ZB_run398183
+    main_metric:
+      callback:
+        name: cap_native_cdf
+        params: {}
+      direction: maximize
+    sec_metric: ${physics_selection.native_secondary}
+
+  native__wasserstein:
+    primary_checkpoint_metric: w1dist_native_ema_ZB_run396102_vs_ZB_run398183
+    main_metric:
+      callback:
+        name: wasserstein_native
+        params: {}
+      direction: minimize
+    sec_metric: ${physics_selection.native_secondary}
+
+  native__drift:
+    primary_checkpoint_metric: native_operational_drift_ema
+    main_metric:
+      callback:
+        name: drift_native
+        params: {}
+      direction: minimize
+    sec_metric: ${physics_selection.native_secondary}
+
+callbacks:
+  anomaly_eff: null
+  thres_drift: null
+  wasserstein_dist: null
+  cap_sn_zb: null
+  thres_drift_ema_ckpt: null
+  wasserstein_dist_ema_ckpt: null
+  cap_sn_zb_ema_ckpt: null
+
+  cap_native_flat_physical:
+    _target_: src.callbacks.cap.CAPCallback
+    output_name: ${physics_selection.native_output}
+    dataset_1: ${physics_pairing.dataset_1}
+    dataset_2: ${physics_pairing.dataset_2}
+    pairing_type: mapping
+    pairing_index_path: ${physics_pairing.artifact_dir}/validate_flat_physical_cap_n${physics_pairing.events}.pt
+    metric_name: cap_native_flat_physical
+    cap_metric_config: ${physics_selection.cap_metric_config}
+    beta: 0.9
+
+  cap_native_physics_summary:
+    _target_: src.callbacks.cap.CAPCallback
+    output_name: ${physics_selection.native_output}
+    dataset_1: ${physics_pairing.dataset_1}
+    dataset_2: ${physics_pairing.dataset_2}
+    pairing_type: mapping
+    pairing_index_path: ${physics_pairing.artifact_dir}/validate_physics_summary_cap_n${physics_pairing.events}.pt
+    metric_name: cap_native_physics_summary
+    cap_metric_config: ${physics_selection.cap_metric_config}
+    beta: 0.9
+
+  cap_native_typed_sliced_wasserstein:
+    _target_: src.callbacks.cap.CAPCallback
+    output_name: ${physics_selection.native_output}
+    dataset_1: ${physics_pairing.dataset_1}
+    dataset_2: ${physics_pairing.dataset_2}
+    pairing_type: mapping
+    pairing_index_path: ${physics_pairing.artifact_dir}/validate_typed_sliced_wasserstein_cap_n${physics_pairing.events}.pt
+    metric_name: cap_native_typed_sliced_wasserstein
+    cap_metric_config: ${physics_selection.cap_metric_config}
+    beta: 0.9
+
+  cap_native_jetclr:
+    _target_: src.callbacks.cap.CAPCallback
+    output_name: ${physics_selection.native_output}
+    dataset_1: ${physics_pairing.dataset_1}
+    dataset_2: ${physics_pairing.dataset_2}
+    pairing_type: mapping
+    pairing_index_path: ${physics_pairing.artifact_dir}/validate_jetclr_cap_n${physics_pairing.events}.pt
+    metric_name: cap_native_jetclr
+    cap_metric_config: ${physics_selection.cap_metric_config}
+    beta: 0.9
+
+  cap_native_cdf:
+    _target_: src.callbacks.cap.CAPCallback
+    output_name: ${physics_selection.native_output}
+    dataset_1: ${physics_pairing.dataset_1}
+    dataset_2: ${physics_pairing.dataset_2}
+    pairing_type: cdf
+    metric_name: cap_native_cdf
+    cap_metric_config: ${physics_selection.cap_metric_config}
+    beta: 0.9
+
+  wasserstein_native:
+    _target_: src.callbacks.wasserstein.WassersteinCallback
+    output_name: ${physics_selection.native_output}
+    dataset_1: ${physics_pairing.dataset_1}
+    dataset_2: ${physics_pairing.dataset_2}
+    apply_log1p: true
+    beta: 0.9
+    metric_name: native
+
+  drift_native:
+    _target_: src.callbacks.thres_drift.ThresholdDriftCallback
+    output_name: ${physics_selection.native_output}
+    dataset_1: ${physics_pairing.dataset_1}
+    dataset_2: ${physics_pairing.dataset_2}
+    calibration_fraction: 0.5
+    split_seed: 12345
+    beta: 0.9
+    metric_name: native
+
+  cap_native_flat_physical_ema_ckpt:
+    _target_: pytorch_lightning.callbacks.ModelCheckpoint
+    dirpath: "${paths.checkpoints_dir}/${experiment_name}/${run_name}/summary/cap_native_flat_physical_ema_ZB_run396102_vs_ZB_run398183/max"
+    monitor: "val/summary/cap_native_flat_physical_ema_ZB_run396102_vs_ZB_run398183"
+    filename: "cap_native_flat_physical_ema_ZB_run396102_vs_ZB_run398183"
+    save_last: false
+    save_top_k: 1
+    mode: "max"
+    auto_insert_metric_name: false
+    save_weights_only: false
+    every_n_epochs: 1
+    save_on_train_epoch_end: false
+
+  cap_native_physics_summary_ema_ckpt:
+    _target_: pytorch_lightning.callbacks.ModelCheckpoint
+    dirpath: "${paths.checkpoints_dir}/${experiment_name}/${run_name}/summary/cap_native_physics_summary_ema_ZB_run396102_vs_ZB_run398183/max"
+    monitor: "val/summary/cap_native_physics_summary_ema_ZB_run396102_vs_ZB_run398183"
+    filename: "cap_native_physics_summary_ema_ZB_run396102_vs_ZB_run398183"
+    save_last: false
+    save_top_k: 1
+    mode: "max"
+    auto_insert_metric_name: false
+    save_weights_only: false
+    every_n_epochs: 1
+    save_on_train_epoch_end: false
+
+  cap_native_typed_sliced_wasserstein_ema_ckpt:
+    _target_: pytorch_lightning.callbacks.ModelCheckpoint
+    dirpath: "${paths.checkpoints_dir}/${experiment_name}/${run_name}/summary/cap_native_typed_sliced_wasserstein_ema_ZB_run396102_vs_ZB_run398183/max"
+    monitor: "val/summary/cap_native_typed_sliced_wasserstein_ema_ZB_run396102_vs_ZB_run398183"
+    filename: "cap_native_typed_sliced_wasserstein_ema_ZB_run396102_vs_ZB_run398183"
+    save_last: false
+    save_top_k: 1
+    mode: "max"
+    auto_insert_metric_name: false
+    save_weights_only: false
+    every_n_epochs: 1
+    save_on_train_epoch_end: false
+
+  cap_native_jetclr_ema_ckpt:
+    _target_: pytorch_lightning.callbacks.ModelCheckpoint
+    dirpath: "${paths.checkpoints_dir}/${experiment_name}/${run_name}/summary/cap_native_jetclr_ema_ZB_run396102_vs_ZB_run398183/max"
+    monitor: "val/summary/cap_native_jetclr_ema_ZB_run396102_vs_ZB_run398183"
+    filename: "cap_native_jetclr_ema_ZB_run396102_vs_ZB_run398183"
+    save_last: false
+    save_top_k: 1
+    mode: "max"
+    auto_insert_metric_name: false
+    save_weights_only: false
+    every_n_epochs: 1
+    save_on_train_epoch_end: false
+
+  cap_native_cdf_ema_ckpt:
+    _target_: pytorch_lightning.callbacks.ModelCheckpoint
+    dirpath: "${paths.checkpoints_dir}/${experiment_name}/${run_name}/summary/cap_native_cdf_ema_ZB_run396102_vs_ZB_run398183/max"
+    monitor: "val/summary/cap_native_cdf_ema_ZB_run396102_vs_ZB_run398183"
+    filename: "cap_native_cdf_ema_ZB_run396102_vs_ZB_run398183"
+    save_last: false
+    save_top_k: 1
+    mode: "max"
+    auto_insert_metric_name: false
+    save_weights_only: false
+    every_n_epochs: 1
+    save_on_train_epoch_end: false
+
+  wasserstein_native_ema_ckpt:
+    _target_: pytorch_lightning.callbacks.ModelCheckpoint
+    dirpath: "${paths.checkpoints_dir}/${experiment_name}/${run_name}/summary/w1dist_native_ema_ZB_run396102_vs_ZB_run398183/min"
+    monitor: "val/summary/w1dist_native_ema_ZB_run396102_vs_ZB_run398183"
+    filename: "w1dist_native_ema_ZB_run396102_vs_ZB_run398183"
+    save_last: false
+    save_top_k: 1
+    mode: "min"
+    auto_insert_metric_name: false
+    save_weights_only: false
+    every_n_epochs: 1
+    save_on_train_epoch_end: false
+
+  drift_native_ema_ckpt:
+    _target_: pytorch_lightning.callbacks.ModelCheckpoint
+    dirpath: "${paths.checkpoints_dir}/${experiment_name}/${run_name}/summary/native_operational_drift_ema/min"
+    monitor: "val/summary/native_operational_drift_ema"
+    filename: "native_operational_drift_ema"
+    save_last: false
+    save_top_k: 1
+    mode: "min"
+    auto_insert_metric_name: false
+    save_weights_only: false
+    every_n_epochs: 1
+    save_on_train_epoch_end: false
+
+evaluation:
+  evaluator:
+    ckpts:
+      last: true
+      summary:
+        operational_drift_ema: null
+        w1dist_ema_normal_vs_SingleNeutrino_E-10-gun: null
+        cap_ema_normal_vs_SingleNeutrino_E-10-gun: null
+        w1dist_ema_ZB_run396102_vs_ZB_run398183: null
+        cap_ema_ZB_run396102_vs_ZB_run398183: null
+        cap_native_flat_physical_ema_ZB_run396102_vs_ZB_run398183: ["max"]
+        cap_native_physics_summary_ema_ZB_run396102_vs_ZB_run398183: ["max"]
+        cap_native_typed_sliced_wasserstein_ema_ZB_run396102_vs_ZB_run398183:
+          ["max"]
+        cap_native_jetclr_ema_ZB_run396102_vs_ZB_run398183: ["max"]
+        cap_native_cdf_ema_ZB_run396102_vs_ZB_run398183: ["max"]
+        w1dist_native_ema_ZB_run396102_vs_ZB_run398183: ["min"]
+        native_operational_drift_ema: ["min"]
+      single:
+        ascore_operational: ["stable"]
+  callbacks:
+    anomaly_efficiency: null
+    cap_sn_zb: null
+    wasserstein: null
+    thres_drift: null
+    reco: null
+
+    ascore_operational:
+      ds: [normal]
+
+    cap_native_flat_physical:
+      _target_: src.evaluation.callbacks.cap.CAP
+      name: cap_native_flat_physical
+      output_name: ${physics_selection.native_output}
+      dataset_1: ${physics_pairing.dataset_1}
+      dataset_2: ${physics_pairing.dataset_2}
+      pairing_type: mapping
+      pairing_index_path: ${physics_pairing.artifact_dir}/validate_flat_physical_cap_n${physics_pairing.events}.pt
+      pairing_test_index_path: ${physics_pairing.artifact_dir}/test_flat_physical_cap_n${physics_pairing.events}.pt
+      cap_metric_config: ${physics_selection.cap_metric_config}
+      log_raw_mlflow: false
+
+    cap_native_physics_summary:
+      _target_: src.evaluation.callbacks.cap.CAP
+      name: cap_native_physics_summary
+      output_name: ${physics_selection.native_output}
+      dataset_1: ${physics_pairing.dataset_1}
+      dataset_2: ${physics_pairing.dataset_2}
+      pairing_type: mapping
+      pairing_index_path: ${physics_pairing.artifact_dir}/validate_physics_summary_cap_n${physics_pairing.events}.pt
+      pairing_test_index_path: ${physics_pairing.artifact_dir}/test_physics_summary_cap_n${physics_pairing.events}.pt
+      cap_metric_config: ${physics_selection.cap_metric_config}
+      log_raw_mlflow: false
+
+    cap_native_typed_sliced_wasserstein:
+      _target_: src.evaluation.callbacks.cap.CAP
+      name: cap_native_typed_sliced_wasserstein
+      output_name: ${physics_selection.native_output}
+      dataset_1: ${physics_pairing.dataset_1}
+      dataset_2: ${physics_pairing.dataset_2}
+      pairing_type: mapping
+      pairing_index_path: ${physics_pairing.artifact_dir}/validate_typed_sliced_wasserstein_cap_n${physics_pairing.events}.pt
+      pairing_test_index_path: ${physics_pairing.artifact_dir}/test_typed_sliced_wasserstein_cap_n${physics_pairing.events}.pt
+      cap_metric_config: ${physics_selection.cap_metric_config}
+      log_raw_mlflow: false
+
+    cap_native_jetclr:
+      _target_: src.evaluation.callbacks.cap.CAP
+      name: cap_native_jetclr
+      output_name: ${physics_selection.native_output}
+      dataset_1: ${physics_pairing.dataset_1}
+      dataset_2: ${physics_pairing.dataset_2}
+      pairing_type: mapping
+      pairing_index_path: ${physics_pairing.artifact_dir}/validate_jetclr_cap_n${physics_pairing.events}.pt
+      pairing_test_index_path: ${physics_pairing.artifact_dir}/test_jetclr_cap_n${physics_pairing.events}.pt
+      cap_metric_config: ${physics_selection.cap_metric_config}
+      log_raw_mlflow: false
+
+    cap_native_cdf:
+      _target_: src.evaluation.callbacks.cap.CAP
+      name: cap_native_cdf
+      output_name: ${physics_selection.native_output}
+      dataset_1: ${physics_pairing.dataset_1}
+      dataset_2: ${physics_pairing.dataset_2}
+      pairing_type: cdf
+      cap_metric_config: ${physics_selection.cap_metric_config}
+      log_raw_mlflow: false
+
+    wasserstein_native:
+      _target_: src.evaluation.callbacks.wasserstein.Wasserstein
+      name: wasserstein_native
+      output_name: ${physics_selection.native_output}
+      dataset_1: ${physics_pairing.dataset_1}
+      dataset_2: ${physics_pairing.dataset_2}
+      apply_log1p: true
+      log_raw_mlflow: false
+
+    drift_native:
+      _target_: src.evaluation.callbacks.thres_drift.ThresholdDriftCallback
+      name: drift_native
+      output_name: ${physics_selection.native_output}
+      dataset_1: ${physics_pairing.dataset_1}
+      dataset_2: ${physics_pairing.dataset_2}
+      calibration_fraction: 0.5
+      split_seed: 12345
+      log_raw_mlflow: false

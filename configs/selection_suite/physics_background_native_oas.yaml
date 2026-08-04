@@ -1,0 +1,330 @@
+# @package _global_
+
+defaults:
+  - physics_background_native
+  - _self_
+
+# AE/VAE extension: OAS supplies only Q'. Native reconstruction MSE / latent KL
+# remains Q'' and owns the shared stable checkpoint.
+physics_selection:
+  residual_oas_output: ascore/residual_oas
+
+optimized_metric_configs:
+  residual_oas__cap__flat_physical:
+    primary_checkpoint_metric: cap_residual_oas_flat_physical_ema_ZB_run396102_vs_ZB_run398183
+    main_metric:
+      callback:
+        name: cap_residual_oas_flat_physical
+        params: {}
+      direction: maximize
+    sec_metric: ${physics_selection.native_secondary}
+
+  residual_oas__cap__physics_summary:
+    primary_checkpoint_metric: cap_residual_oas_physics_summary_ema_ZB_run396102_vs_ZB_run398183
+    main_metric:
+      callback:
+        name: cap_residual_oas_physics_summary
+        params: {}
+      direction: maximize
+    sec_metric: ${physics_selection.native_secondary}
+
+  residual_oas__cap__typed_sliced_wasserstein:
+    primary_checkpoint_metric: cap_residual_oas_typed_sliced_wasserstein_ema_ZB_run396102_vs_ZB_run398183
+    main_metric:
+      callback:
+        name: cap_residual_oas_typed_sliced_wasserstein
+        params: {}
+      direction: maximize
+    sec_metric: ${physics_selection.native_secondary}
+
+  residual_oas__cap__jetclr:
+    primary_checkpoint_metric: cap_residual_oas_jetclr_ema_ZB_run396102_vs_ZB_run398183
+    main_metric:
+      callback:
+        name: cap_residual_oas_jetclr
+        params: {}
+      direction: maximize
+    sec_metric: ${physics_selection.native_secondary}
+
+  residual_oas__cap__cdf:
+    primary_checkpoint_metric: cap_residual_oas_cdf_ema_ZB_run396102_vs_ZB_run398183
+    main_metric:
+      callback:
+        name: cap_residual_oas_cdf
+        params: {}
+      direction: maximize
+    sec_metric: ${physics_selection.native_secondary}
+
+  residual_oas__wasserstein:
+    primary_checkpoint_metric: w1dist_residual_oas_ema_ZB_run396102_vs_ZB_run398183
+    main_metric:
+      callback:
+        name: wasserstein_residual_oas
+        params: {}
+      direction: minimize
+    sec_metric: ${physics_selection.native_secondary}
+
+  residual_oas__drift:
+    primary_checkpoint_metric: residual_oas_operational_drift_ema
+    main_metric:
+      callback:
+        name: drift_residual_oas
+        params: {}
+      direction: minimize
+    sec_metric: ${physics_selection.native_secondary}
+
+callbacks:
+  cap_residual_oas_flat_physical:
+    _target_: src.callbacks.cap.CAPCallback
+    output_name: ${physics_selection.residual_oas_output}
+    dataset_1: ${physics_pairing.dataset_1}
+    dataset_2: ${physics_pairing.dataset_2}
+    pairing_type: mapping
+    pairing_index_path: ${physics_pairing.artifact_dir}/validate_flat_physical_cap_n${physics_pairing.events}.pt
+    metric_name: cap_residual_oas_flat_physical
+    cap_metric_config: ${physics_selection.cap_metric_config}
+    beta: 0.9
+
+  cap_residual_oas_physics_summary:
+    _target_: src.callbacks.cap.CAPCallback
+    output_name: ${physics_selection.residual_oas_output}
+    dataset_1: ${physics_pairing.dataset_1}
+    dataset_2: ${physics_pairing.dataset_2}
+    pairing_type: mapping
+    pairing_index_path: ${physics_pairing.artifact_dir}/validate_physics_summary_cap_n${physics_pairing.events}.pt
+    metric_name: cap_residual_oas_physics_summary
+    cap_metric_config: ${physics_selection.cap_metric_config}
+    beta: 0.9
+
+  cap_residual_oas_typed_sliced_wasserstein:
+    _target_: src.callbacks.cap.CAPCallback
+    output_name: ${physics_selection.residual_oas_output}
+    dataset_1: ${physics_pairing.dataset_1}
+    dataset_2: ${physics_pairing.dataset_2}
+    pairing_type: mapping
+    pairing_index_path: ${physics_pairing.artifact_dir}/validate_typed_sliced_wasserstein_cap_n${physics_pairing.events}.pt
+    metric_name: cap_residual_oas_typed_sliced_wasserstein
+    cap_metric_config: ${physics_selection.cap_metric_config}
+    beta: 0.9
+
+  cap_residual_oas_jetclr:
+    _target_: src.callbacks.cap.CAPCallback
+    output_name: ${physics_selection.residual_oas_output}
+    dataset_1: ${physics_pairing.dataset_1}
+    dataset_2: ${physics_pairing.dataset_2}
+    pairing_type: mapping
+    pairing_index_path: ${physics_pairing.artifact_dir}/validate_jetclr_cap_n${physics_pairing.events}.pt
+    metric_name: cap_residual_oas_jetclr
+    cap_metric_config: ${physics_selection.cap_metric_config}
+    beta: 0.9
+
+  cap_residual_oas_cdf:
+    _target_: src.callbacks.cap.CAPCallback
+    output_name: ${physics_selection.residual_oas_output}
+    dataset_1: ${physics_pairing.dataset_1}
+    dataset_2: ${physics_pairing.dataset_2}
+    pairing_type: cdf
+    metric_name: cap_residual_oas_cdf
+    cap_metric_config: ${physics_selection.cap_metric_config}
+    beta: 0.9
+
+  wasserstein_residual_oas:
+    _target_: src.callbacks.wasserstein.WassersteinCallback
+    output_name: ${physics_selection.residual_oas_output}
+    dataset_1: ${physics_pairing.dataset_1}
+    dataset_2: ${physics_pairing.dataset_2}
+    apply_log1p: true
+    beta: 0.9
+    metric_name: residual_oas
+
+  drift_residual_oas:
+    _target_: src.callbacks.thres_drift.ThresholdDriftCallback
+    output_name: ${physics_selection.residual_oas_output}
+    dataset_1: ${physics_pairing.dataset_1}
+    dataset_2: ${physics_pairing.dataset_2}
+    calibration_fraction: 0.5
+    split_seed: 12345
+    beta: 0.9
+    metric_name: residual_oas
+
+  cap_residual_oas_flat_physical_ema_ckpt:
+    _target_: pytorch_lightning.callbacks.ModelCheckpoint
+    dirpath: "${paths.checkpoints_dir}/${experiment_name}/${run_name}/summary/cap_residual_oas_flat_physical_ema_ZB_run396102_vs_ZB_run398183/max"
+    monitor: "val/summary/cap_residual_oas_flat_physical_ema_ZB_run396102_vs_ZB_run398183"
+    filename: "cap_residual_oas_flat_physical_ema_ZB_run396102_vs_ZB_run398183"
+    save_last: false
+    save_top_k: 1
+    mode: "max"
+    auto_insert_metric_name: false
+    save_weights_only: false
+    every_n_epochs: 1
+    save_on_train_epoch_end: false
+
+  cap_residual_oas_physics_summary_ema_ckpt:
+    _target_: pytorch_lightning.callbacks.ModelCheckpoint
+    dirpath: "${paths.checkpoints_dir}/${experiment_name}/${run_name}/summary/cap_residual_oas_physics_summary_ema_ZB_run396102_vs_ZB_run398183/max"
+    monitor: "val/summary/cap_residual_oas_physics_summary_ema_ZB_run396102_vs_ZB_run398183"
+    filename: "cap_residual_oas_physics_summary_ema_ZB_run396102_vs_ZB_run398183"
+    save_last: false
+    save_top_k: 1
+    mode: "max"
+    auto_insert_metric_name: false
+    save_weights_only: false
+    every_n_epochs: 1
+    save_on_train_epoch_end: false
+
+  cap_residual_oas_typed_sliced_wasserstein_ema_ckpt:
+    _target_: pytorch_lightning.callbacks.ModelCheckpoint
+    dirpath: "${paths.checkpoints_dir}/${experiment_name}/${run_name}/summary/cap_residual_oas_typed_sliced_wasserstein_ema_ZB_run396102_vs_ZB_run398183/max"
+    monitor: "val/summary/cap_residual_oas_typed_sliced_wasserstein_ema_ZB_run396102_vs_ZB_run398183"
+    filename: "cap_residual_oas_typed_sliced_wasserstein_ema_ZB_run396102_vs_ZB_run398183"
+    save_last: false
+    save_top_k: 1
+    mode: "max"
+    auto_insert_metric_name: false
+    save_weights_only: false
+    every_n_epochs: 1
+    save_on_train_epoch_end: false
+
+  cap_residual_oas_jetclr_ema_ckpt:
+    _target_: pytorch_lightning.callbacks.ModelCheckpoint
+    dirpath: "${paths.checkpoints_dir}/${experiment_name}/${run_name}/summary/cap_residual_oas_jetclr_ema_ZB_run396102_vs_ZB_run398183/max"
+    monitor: "val/summary/cap_residual_oas_jetclr_ema_ZB_run396102_vs_ZB_run398183"
+    filename: "cap_residual_oas_jetclr_ema_ZB_run396102_vs_ZB_run398183"
+    save_last: false
+    save_top_k: 1
+    mode: "max"
+    auto_insert_metric_name: false
+    save_weights_only: false
+    every_n_epochs: 1
+    save_on_train_epoch_end: false
+
+  cap_residual_oas_cdf_ema_ckpt:
+    _target_: pytorch_lightning.callbacks.ModelCheckpoint
+    dirpath: "${paths.checkpoints_dir}/${experiment_name}/${run_name}/summary/cap_residual_oas_cdf_ema_ZB_run396102_vs_ZB_run398183/max"
+    monitor: "val/summary/cap_residual_oas_cdf_ema_ZB_run396102_vs_ZB_run398183"
+    filename: "cap_residual_oas_cdf_ema_ZB_run396102_vs_ZB_run398183"
+    save_last: false
+    save_top_k: 1
+    mode: "max"
+    auto_insert_metric_name: false
+    save_weights_only: false
+    every_n_epochs: 1
+    save_on_train_epoch_end: false
+
+  wasserstein_residual_oas_ema_ckpt:
+    _target_: pytorch_lightning.callbacks.ModelCheckpoint
+    dirpath: "${paths.checkpoints_dir}/${experiment_name}/${run_name}/summary/w1dist_residual_oas_ema_ZB_run396102_vs_ZB_run398183/min"
+    monitor: "val/summary/w1dist_residual_oas_ema_ZB_run396102_vs_ZB_run398183"
+    filename: "w1dist_residual_oas_ema_ZB_run396102_vs_ZB_run398183"
+    save_last: false
+    save_top_k: 1
+    mode: "min"
+    auto_insert_metric_name: false
+    save_weights_only: false
+    every_n_epochs: 1
+    save_on_train_epoch_end: false
+
+  drift_residual_oas_ema_ckpt:
+    _target_: pytorch_lightning.callbacks.ModelCheckpoint
+    dirpath: "${paths.checkpoints_dir}/${experiment_name}/${run_name}/summary/residual_oas_operational_drift_ema/min"
+    monitor: "val/summary/residual_oas_operational_drift_ema"
+    filename: "residual_oas_operational_drift_ema"
+    save_last: false
+    save_top_k: 1
+    mode: "min"
+    auto_insert_metric_name: false
+    save_weights_only: false
+    every_n_epochs: 1
+    save_on_train_epoch_end: false
+
+evaluation:
+  evaluator:
+    ckpts:
+      summary:
+        cap_residual_oas_flat_physical_ema_ZB_run396102_vs_ZB_run398183: ["max"]
+        cap_residual_oas_physics_summary_ema_ZB_run396102_vs_ZB_run398183:
+          ["max"]
+        cap_residual_oas_typed_sliced_wasserstein_ema_ZB_run396102_vs_ZB_run398183:
+          ["max"]
+        cap_residual_oas_jetclr_ema_ZB_run396102_vs_ZB_run398183: ["max"]
+        cap_residual_oas_cdf_ema_ZB_run396102_vs_ZB_run398183: ["max"]
+        w1dist_residual_oas_ema_ZB_run396102_vs_ZB_run398183: ["min"]
+        residual_oas_operational_drift_ema: ["min"]
+  callbacks:
+    cap_residual_oas_flat_physical:
+      _target_: src.evaluation.callbacks.cap.CAP
+      name: cap_residual_oas_flat_physical
+      output_name: ${physics_selection.residual_oas_output}
+      dataset_1: ${physics_pairing.dataset_1}
+      dataset_2: ${physics_pairing.dataset_2}
+      pairing_type: mapping
+      pairing_index_path: ${physics_pairing.artifact_dir}/validate_flat_physical_cap_n${physics_pairing.events}.pt
+      pairing_test_index_path: ${physics_pairing.artifact_dir}/test_flat_physical_cap_n${physics_pairing.events}.pt
+      cap_metric_config: ${physics_selection.cap_metric_config}
+      log_raw_mlflow: false
+
+    cap_residual_oas_physics_summary:
+      _target_: src.evaluation.callbacks.cap.CAP
+      name: cap_residual_oas_physics_summary
+      output_name: ${physics_selection.residual_oas_output}
+      dataset_1: ${physics_pairing.dataset_1}
+      dataset_2: ${physics_pairing.dataset_2}
+      pairing_type: mapping
+      pairing_index_path: ${physics_pairing.artifact_dir}/validate_physics_summary_cap_n${physics_pairing.events}.pt
+      pairing_test_index_path: ${physics_pairing.artifact_dir}/test_physics_summary_cap_n${physics_pairing.events}.pt
+      cap_metric_config: ${physics_selection.cap_metric_config}
+      log_raw_mlflow: false
+
+    cap_residual_oas_typed_sliced_wasserstein:
+      _target_: src.evaluation.callbacks.cap.CAP
+      name: cap_residual_oas_typed_sliced_wasserstein
+      output_name: ${physics_selection.residual_oas_output}
+      dataset_1: ${physics_pairing.dataset_1}
+      dataset_2: ${physics_pairing.dataset_2}
+      pairing_type: mapping
+      pairing_index_path: ${physics_pairing.artifact_dir}/validate_typed_sliced_wasserstein_cap_n${physics_pairing.events}.pt
+      pairing_test_index_path: ${physics_pairing.artifact_dir}/test_typed_sliced_wasserstein_cap_n${physics_pairing.events}.pt
+      cap_metric_config: ${physics_selection.cap_metric_config}
+      log_raw_mlflow: false
+
+    cap_residual_oas_jetclr:
+      _target_: src.evaluation.callbacks.cap.CAP
+      name: cap_residual_oas_jetclr
+      output_name: ${physics_selection.residual_oas_output}
+      dataset_1: ${physics_pairing.dataset_1}
+      dataset_2: ${physics_pairing.dataset_2}
+      pairing_type: mapping
+      pairing_index_path: ${physics_pairing.artifact_dir}/validate_jetclr_cap_n${physics_pairing.events}.pt
+      pairing_test_index_path: ${physics_pairing.artifact_dir}/test_jetclr_cap_n${physics_pairing.events}.pt
+      cap_metric_config: ${physics_selection.cap_metric_config}
+      log_raw_mlflow: false
+
+    cap_residual_oas_cdf:
+      _target_: src.evaluation.callbacks.cap.CAP
+      name: cap_residual_oas_cdf
+      output_name: ${physics_selection.residual_oas_output}
+      dataset_1: ${physics_pairing.dataset_1}
+      dataset_2: ${physics_pairing.dataset_2}
+      pairing_type: cdf
+      cap_metric_config: ${physics_selection.cap_metric_config}
+      log_raw_mlflow: false
+
+    wasserstein_residual_oas:
+      _target_: src.evaluation.callbacks.wasserstein.Wasserstein
+      name: wasserstein_residual_oas
+      output_name: ${physics_selection.residual_oas_output}
+      dataset_1: ${physics_pairing.dataset_1}
+      dataset_2: ${physics_pairing.dataset_2}
+      apply_log1p: true
+      log_raw_mlflow: false
+
+    drift_residual_oas:
+      _target_: src.evaluation.callbacks.thres_drift.ThresholdDriftCallback
+      name: drift_residual_oas
+      output_name: ${physics_selection.residual_oas_output}
+      dataset_1: ${physics_pairing.dataset_1}
+      dataset_2: ${physics_pairing.dataset_2}
+      calibration_fraction: 0.5
+      split_seed: 12345
+      log_raw_mlflow: false

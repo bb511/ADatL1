@@ -10,13 +10,14 @@
 #SBATCH --output=/iopsstor/scratch/cscs/vjimenez/adatl1/logs/slurm/%x-%j.out
 
 set -euo pipefail
-: "${CELL_ID:?CELL_ID must identify one frozen campaign cell}"
+: "${STUDY_MODEL:?STUDY_MODEL must identify one of the six model studies}"
 : "${CHUNK_TRIALS:=48}"
 : "${CHUNK_JOBS:=48}"
+: "${TIMEOUT_MIN:=720}"
 
 readonly SCRATCH_ROOT=/iopsstor/scratch/cscs/vjimenez/adatl1
-readonly REPOSITORY_ROOT="${SCRATCH_ROOT}/worktrees/physics_background_pairing_20260803"
-readonly CAMPAIGN_ROOT="${SCRATCH_ROOT}/campaigns/physics_background_pairing_20260803"
+readonly REPOSITORY_ROOT="${PHYSICS_BGPAIR_REPOSITORY_ROOT:-${SCRATCH_ROOT}/worktrees/physics_background_shared_20260804}"
+readonly CAMPAIGN_ROOT="${PHYSICS_BGPAIR_CAMPAIGN_ROOT:-${SCRATCH_ROOT}/campaigns/physics_background_shared_20260804}"
 readonly UV_BIN="${SCRATCH_ROOT}/tools/uv-0.11.32/uv"
 
 export UV_PROJECT_ENVIRONMENT="${SCRATCH_ROOT}/.venv-clariden"
@@ -27,5 +28,6 @@ export HYDRA_FULL_ERROR=1
 
 cd "${REPOSITORY_ROOT}"
 "${UV_BIN}" run --frozen --no-sync python scripts/physics_background_pairing_campaign.py \
-  --root "${CAMPAIGN_ROOT}" sweep --cell "${CELL_ID}" \
-  --trials "${CHUNK_TRIALS}" --jobs "${CHUNK_JOBS}"
+  --root "${CAMPAIGN_ROOT}" sweep --model "${STUDY_MODEL}" \
+  --trials "${CHUNK_TRIALS}" --jobs "${CHUNK_JOBS}" \
+  --timeout-min "${TIMEOUT_MIN}"

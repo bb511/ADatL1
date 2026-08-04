@@ -1,0 +1,29 @@
+# @package _global_
+
+defaults:
+  - dsae_optuna
+  - _self_
+
+# The master study shares each sampled model trajectory across every logical
+# validation strategy. Strategy-specific two-objective fronts are built offline.
+hydra:
+  sweeper:
+    study_name: physics_dsae_background_all
+    n_trials: 600
+    direction:
+      [
+        maximize,
+        minimize,
+        maximize,
+        minimize,
+        maximize,
+        minimize,
+        maximize,
+        minimize,
+        maximize,
+        minimize,
+        minimize,
+        minimize,
+        minimize,
+        minimize,
+      ]

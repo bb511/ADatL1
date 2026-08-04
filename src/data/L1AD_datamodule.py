@@ -67,6 +67,8 @@ class L1ADDataModule(LightningDataModule):
         max_normal_eval_batches: int | None = None,
         expose_zerobias_sources: bool = False,
         zerobias_source_metadata_dir: str | None = None,
+        validation_aux_datasets: list[str] | None = None,
+        test_aux_datasets: list[str] | None = None,
         seed: int = 42,
     ) -> None:
         """Prepare the L1 data for using it to train and validate ML models.
@@ -95,6 +97,9 @@ class L1ADDataModule(LightningDataModule):
             per original ZeroBias run using generated source-ID sidecars.
         :param zerobias_source_metadata_dir: Optional location of the source-ID
             sidecars. Defaults to the main ML-ready cache when omitted.
+        :param validation_aux_datasets: Optional allowlist of auxiliary validation
+            datasets. ``None`` keeps all of them; an empty list keeps none.
+        :param test_aux_datasets: Equivalent allowlist for held-out test loaders.
         :param seed: Integer specifying the seed with which to shuffle the training
             data when constructing the data set.
         """
@@ -126,6 +131,8 @@ class L1ADDataModule(LightningDataModule):
             if zerobias_source_metadata_dir
             else None
         )
+        self.validation_aux_datasets = self._dataset_allowlist(validation_aux_datasets)
+        self.test_aux_datasets = self._dataset_allowlist(test_aux_datasets)
 
     def prepare_data(self) -> None:
         """Get zero bias data and the simulated MC signal data."""
@@ -222,10 +229,20 @@ class L1ADDataModule(LightningDataModule):
         )
 
     def val_dataloader(self):
-        return self._make_eval_loaders(main_key="valid", aux_key="valid", main_name="normal")
+        return self._make_eval_loaders(
+            main_key="valid",
+            aux_key="valid",
+            main_name="normal",
+            allowed_aux=self.validation_aux_datasets,
+        )
 
     def test_dataloader(self):
-        return self._make_eval_loaders(main_key="test", aux_key="test", main_name="normal")
+        return self._make_eval_loaders(
+            main_key="test",
+            aux_key="test",
+            main_name="normal",
+            allowed_aux=self.test_aux_datasets,
+        )
 
     def teardown(self, stage: str | None = None) -> None:
         # Drop references to large tensors so they become collectible
@@ -327,7 +344,11 @@ class L1ADDataModule(LightningDataModule):
         return out
 
     def _make_eval_loaders(
-        self, main_key: str, aux_key: str, main_name: str
+        self,
+        main_key: str,
+        aux_key: str,
+        main_name: str,
+        allowed_aux: frozenset[str] | None = None,
     ) -> dict[str, DataLoader]:
         """Make an evaluation loader out of the main data and aux data."""
         main = self._main[main_key]
@@ -363,11 +384,22 @@ class L1ADDataModule(LightningDataModule):
                 )
 
         for name, split in self._aux.get(aux_key, {}).items():
+            if allowed_aux is not None and name not in allowed_aux:
+                continue
             loaders[name] = self._to_loader(
                 split, batch_size=self.batch_size_per_device, max_b=self.max_val_batches
             )
 
         return loaders
+
+    @staticmethod
+    def _dataset_allowlist(names: list[str] | None) -> frozenset[str] | None:
+        """Normalize an optional auxiliary-dataset allowlist."""
+        if names is None:
+            return None
+        if isinstance(names, (str, bytes)):
+            raise TypeError("Auxiliary dataset allowlists must be lists of names.")
+        return frozenset(str(name) for name in names)
 
     @staticmethod
     def _normal_eval_batch_cap(max_batches: int | None) -> int | None:

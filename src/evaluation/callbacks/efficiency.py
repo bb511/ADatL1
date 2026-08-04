@@ -56,6 +56,7 @@ class AnomalyEfficiencyCallback(Callback):
         cvar_summary: float = 0.25,
         log_raw_mlflow: bool = True,
         name: str = "eff",
+        threshold_namespace: str | None = None,
         operating_point_diagnostics_path: str | Path | None = None,
         operating_point_context: Mapping[str, Any] | None = None,
         operating_point_only: bool = False,
@@ -68,6 +69,7 @@ class AnomalyEfficiencyCallback(Callback):
         super().__init__()
         self.device = None
         self.name = name
+        self.threshold_namespace = self._clean_namespace(threshold_namespace)
 
         self.output_name = output_name
         self.ds = set(ds)
@@ -387,11 +389,13 @@ class AnomalyEfficiencyCallback(Callback):
         for target_rate in self.target_rates_resolved:
             # --- NEW: operational handling ---
             if self._is_operational(target_rate):
-                thres = getattr(pl_module, "thres_operational", None)
+                threshold_name = self._threshold_name("thres_operational")
+                thres = getattr(pl_module, threshold_name, None)
                 trate_name = "operational"
             else:
                 trate_name = str(target_rate).replace(".", "_")
-                thres = getattr(pl_module, f"thres_{trate_name}kHz", None)
+                threshold_name = self._threshold_name(f"thres_{trate_name}kHz")
+                thres = getattr(pl_module, threshold_name, None)
 
             if thres is None:
                 log.warn(
@@ -405,6 +409,22 @@ class AnomalyEfficiencyCallback(Callback):
 
         self.target_rates_resolved = valid_rates
         return thresholds
+
+    def _threshold_name(self, base: str) -> str:
+        """Return the score-specific threshold buffer name."""
+        if self.threshold_namespace is None:
+            return base
+        return f"{base}__{self.threshold_namespace}"
+
+    @staticmethod
+    def _clean_namespace(value: str | None) -> str | None:
+        """Validate a namespace used in checkpoint state keys."""
+        if value is None:
+            return None
+        value = str(value).strip()
+        if not value or not value.replace("_", "").isalnum():
+            raise ValueError("Namespaces may contain only letters, numbers, and underscores.")
+        return value
 
     def _resolve_rate_config(self, pl_module) -> tuple[list[float], float, float | None]:
         """Resolve target rates and base rate from module + callback config."""

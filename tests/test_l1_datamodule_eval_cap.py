@@ -15,7 +15,13 @@ def _split(n_events: int, label: int) -> SplitTensors:
     return SplitTensors(x=x, mask=mask, l1bit=l1bit, y=y)
 
 
-def _datamodule(*, normal_cap: int | None, seed: int = 42) -> L1ADDataModule:
+def _datamodule(
+    *,
+    normal_cap: int | None,
+    seed: int = 42,
+    validation_aux_datasets: list[str] | None = None,
+    test_aux_datasets: list[str] | None = None,
+) -> L1ADDataModule:
     normalizer = SimpleNamespace(name="robust")
     mlready = SimpleNamespace(cache_root_dir=".", name="test")
     dm = L1ADDataModule(
@@ -32,6 +38,8 @@ def _datamodule(*, normal_cap: int | None, seed: int = 42) -> L1ADDataModule:
         batch_size=4,
         max_val_batches=1,
         max_normal_eval_batches=normal_cap,
+        validation_aux_datasets=validation_aux_datasets,
+        test_aux_datasets=test_aux_datasets,
         seed=seed,
     )
     dm.batch_size_per_device = 4
@@ -76,3 +84,11 @@ def test_minus_one_normal_eval_cap_aliases_unbounded() -> None:
     dm = _datamodule(normal_cap=-1)
 
     assert len(dm.test_dataloader()["normal"]) == 3
+
+
+def test_validation_aux_filter_does_not_remove_held_out_test_signals() -> None:
+    """Search can hide validation anomalies while retraining still tests on them."""
+    dm = _datamodule(normal_cap=1, validation_aux_datasets=[])
+
+    assert list(dm.val_dataloader()) == ["normal"]
+    assert list(dm.test_dataloader()) == ["normal", "signal"]

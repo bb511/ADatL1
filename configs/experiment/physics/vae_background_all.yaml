@@ -1,0 +1,28 @@
+# @package _global_
+
+defaults:
+  - physics/vae_agnostic
+  - /pairing: physics
+  - /selection_suite: physics_background_native_oas
+  - override /data: basis
+  - _self_
+
+tags: ["vae", "physics", "background-pairing", "shared-validation-pool"]
+experiment_name: physics_vae_background_all
+
+data:
+  batch_size: 16384
+  max_val_batches: 10
+  expose_zerobias_sources: true
+  zerobias_source_metadata_dir: ${physics_pairing.source_metadata_dir}
+  validation_aux_datasets: []
+
+callbacks:
+  vae_residual_state:
+    _target_: src.callbacks.cap.VAEResidualScoreStateCallback
+    max_samples: 163840
+    sample_seed: 123
+
+algorithm:
+  anomaly_score: kl_raw
+test: false

@@ -36,7 +36,7 @@ data-versus-simulation agreement test.
 
 ## Selection metrics
 
-- CAP: five independent searches: one for each stored one-to-one pairing
+- CAP: five logical selection views: one for each stored one-to-one pairing
   (`flat_physical`, `physics_summary`, `typed_sliced_wasserstein`, and `jetclr`) plus
   empirical-CDF score-rank pairing as the paper-aligned control.
 - Wasserstein-1: one search on the background0/background1 score marginals. Pair-table
@@ -50,7 +50,7 @@ data-versus-simulation agreement test.
 Models: AE, VAE, DSAE, DSVAE, SVDD, and RealNVP. DTE is excluded because it was not
 one of the six physics models in the paper.
 
-For each score variant, run seven 600-trial, 50-epoch Optuna searches:
+For every trained trial, evaluate seven logical two-objective selection views:
 
 1. CAP / `flat_physical`
 2. CAP / `physics_summary`
@@ -60,22 +60,30 @@ For each score variant, run seven 600-trial, 50-epoch Optuna searches:
 6. Wasserstein-1 / E versus G
 7. Threshold drift / E calibration to G evaluation
 
-AE and VAE each use two score variants; the other four models retain their native
-score. This is 56 studies and at most 33,600 trials. After each study, retain every Pareto
-candidate, retrain it for 200 epochs with the paper's fixed reporting seed, and evaluate
-all configured physics signals at the unchanged operational rate. As in the paper, the
-final reported trial is the retrained Pareto candidate with the best mean downstream
-anomaly efficiency; this oracle step is explicitly marked as downstream-label-using.
-Search submission may be staged by model and metric based on pilot runtime and cluster
-limits, but the matrix does not shrink.
+AE and VAE each expose native and OAS views; the other four models retain their native
+score. One shared 600-trial pool is trained per model, so the campaign consists of six
+Optuna studies and 3,600 trained trials. Each AE/VAE trial returns 28 scalar objectives
+(14 ordered pairs), and each other model returns 14 (7 ordered pairs). The 56
+strategy-specific two-dimensional Pareto fronts are reconstructed from those shared
+pools; the high-dimensional global Optuna front is not used. This deliberately gives
+every selection strategy exactly the same sampled configurations, at the cost of using
+one joint M-TPE sampling history per model instead of independent paper-style 2D M-TPE
+histories.
+
+After all fronts are frozen, every unique front configuration is retrained once for 200
+epochs with the paper's fixed reporting seed. Native and OAS downstream scores use
+separate validation-derived operating thresholds. As in the paper, the reported trial
+for each logical front is the retrained candidate with the best mean downstream anomaly
+efficiency; this oracle step is explicitly marked as downstream-label-using.
 
 ## Execution gates
 
 1. Implement and unit-test cross-dataset drift and AE canonical Mahalanobis scoring.
 2. Validate all four pair tables against the exact source-specific loader prefixes.
-3. Compose every model/metric/strategy Hydra configuration.
-4. Run one-batch CPU configuration tests and one short GPU pilot per metric family.
-5. Submit persistent Optuna studies with unique storage and study names.
+3. Compose all six shared-study Hydra configurations and verify their ordered objective
+   vectors against the campaign manifest.
+4. Run unit/configuration tests and one short unified GPU pilot before any full study.
+5. Submit six persistent Optuna studies with unique storage and study names.
    Execute every Slurm phase from a dedicated commit-pinned worktree rather than the
    mutable development checkout.
 6. Monitor jobs, retry infrastructure failures, and record job/study state in
@@ -86,8 +94,8 @@ limits, but the matrix does not shrink.
 
 ## Completion evidence
 
-Completion requires: green targeted tests; successful config composition for all 56
-cells; authenticated pair-table preflight; completed Optuna study manifests showing
-600 finished trials per cell (or explicit accounted failed trials followed by enough
-replacement trials); completed retraining/evaluation manifests; and a final result
-table/report covering every model and selection strategy.
+Completion requires: green targeted tests; successful composition of all six shared
+studies; authenticated pair-table preflight; completed Optuna manifests showing 600
+finished trials per model; 56 frozen logical Pareto fronts; completed unique
+retraining/evaluation manifests; and a final result table/report covering every model
+and selection strategy.

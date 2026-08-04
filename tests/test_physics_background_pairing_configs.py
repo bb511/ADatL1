@@ -75,18 +75,81 @@ def test_cdf_control_uses_background_domains_without_pair_tables() -> None:
     assert cfg.evaluation.callbacks.cap_sn_zb.pairing_test_index_path is None
 
 
-def test_every_primary_search_cell_composes() -> None:
-    """The frozen 56-study matrix must contain no stale Hydra keys."""
-    for cell in campaign._cells():
+def test_every_shared_model_study_composes() -> None:
+    """All six master studies must contain the full ordered objective vector."""
+    for study in campaign._studies():
+        model = study["model"]
         overrides = [
-            f"experiment=physics/{cell['model']}_background_pairing",
-            f"+selection_metric={cell['metric']}",
-            f"hparams_search={cell['model']}_optuna",
-            *campaign._pairing_overrides(cell),
-            *campaign._score_overrides(cell),
+            f"experiment=physics/{model}_background_all",
+            f"hparams_search={model}_shared_optuna",
         ]
         cfg = compose_config(overrides=overrides)
         assert cfg.optimized_metric_artifact is True
+        assert list(cfg.optimized_metric_configs) == [
+            objective["id"] for objective in study["objectives"]
+        ]
+        assert [
+            direction
+            for config in cfg.optimized_metric_configs.values()
+            for direction in (
+                config.main_metric.direction,
+                config.sec_metric.direction,
+            )
+        ] == [
+            direction for objective in study["objectives"] for direction in objective["directions"]
+        ]
+        assert cfg.data.validation_aux_datasets == []
+        assert cfg.logger.mlflow is not None
+
+
+def test_shared_ae_and_vae_keep_native_training_score() -> None:
+    """OAS supplies extra Q-prime views but never replaces native Q-double-prime."""
+    ae = compose_config(overrides=["experiment=physics/ae_background_all"])
+    vae = compose_config(overrides=["experiment=physics/vae_background_all"])
+    assert ae.algorithm.anomaly_score == "mse"
+    assert vae.algorithm.anomaly_score == "kl_raw"
+    assert ae.physics_selection.native_output == "ascore/full"
+    assert vae.physics_selection.native_output == "ascore/full"
+    assert len(ae.optimized_metric_configs) == 14
+    assert len(vae.optimized_metric_configs) == 14
+
+
+def test_shared_suite_exposes_all_four_tables_and_cdf_on_both_scores() -> None:
+    """AE/VAE native and OAS views must use identical background pairings."""
+    cfg = compose_config(overrides=["experiment=physics/ae_background_all"])
+    for score in ("native", "residual_oas"):
+        for strategy in campaign.CAP_STRATEGIES:
+            callback = cfg.callbacks[f"cap_{score}_{strategy}"]
+            assert callback.dataset_1 == "ZB_run396102"
+            assert callback.dataset_2 == "ZB_run398183"
+            if strategy == "cdf":
+                assert callback.pairing_type == "cdf"
+                assert callback.get("pairing_index_path") is None
+            else:
+                assert callback.pairing_type == "mapping"
+                assert callback.pairing_index_path.endswith(f"validate_{strategy}_cap_n163840.pt")
+                evaluation = cfg.evaluation.callbacks[f"cap_{score}_{strategy}"]
+                assert evaluation.pairing_test_index_path.endswith(
+                    f"test_{strategy}_cap_n163840.pt"
+                )
+
+
+def test_retrain_suite_restores_20_signals_with_score_specific_thresholds() -> None:
+    """Native and OAS downstream efficiencies use separately calibrated thresholds."""
+    cfg = compose_config(
+        overrides=[
+            "experiment=physics/ae_background_all",
+            "+retrain_suite=physics_background_native_oas",
+        ]
+    )
+    assert cfg.test is True
+    assert cfg.callbacks.anomaly_eff.output_name == "ascore/full"
+    assert cfg.callbacks.anomaly_eff_oas.output_name == "ascore/residual_oas"
+    assert cfg.callbacks.anomaly_eff_oas.threshold_namespace == "residual_oas"
+    assert len(cfg.evaluation.callbacks.anomaly_efficiency.ds) == 20
+    assert len(cfg.evaluation.callbacks.anomaly_efficiency_oas.ds) == 20
+    assert cfg.evaluation.callbacks.anomaly_efficiency.name == "eff_native"
+    assert cfg.evaluation.callbacks.anomaly_efficiency_oas.name == "eff_residual_oas"
 
 
 def test_search_overlays_retain_only_requested_primary_metric() -> None:

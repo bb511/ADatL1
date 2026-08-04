@@ -20,12 +20,12 @@ Last updated: 2026-08-04 (Europe/Zurich)
 |---|---|---|
 | Scientific contract | complete | `PLAN.md` |
 | Implementation audit | complete | Model/data/HPO settings match `dev/patrick`; requested metric scope, score routing, CDF, retraining, and padding semantics audited |
-| Code and configs | complete | Expanded 56-study matrix and mask-aware AE/VAE OAS are implemented and validated after the remote merge |
-| Tests and preflight | complete | 52 targeted tests passed, including all 56 configurations; all 8 pair tables are authenticated |
-| Pilots | in progress | AE/OAS stored-CAP, VAE/OAS CDF-CAP, and AE/OAS W1 passed from `6d10cd5`; drift and native-score controls remain |
-| Full searches | pending | 56 persistent studies, 600 trials each; five CAP pairings including CDF, with AE MSE/OAS and VAE KL/OAS as separate cells |
-| Retraining/evaluation | pending | Automated freeze gate and 200-epoch indexed retraining are implemented |
-| Aggregation/report | pending | Authenticated paper-style downstream oracle aggregation is implemented; awaits results |
+| Code and configs | complete | Refactored to six shared model studies with 56 logical fronts, per-strategy checkpoint selection, and score-aware retraining |
+| Tests and preflight | complete | 45 targeted tests pass, all six search/retrain configs compose, all changed-file hooks pass, and all 8 pair tables are authenticated |
+| Pilots | pending | Earlier isolated pilots passed from `6d10cd5`, but they do not validate the new unified callback/evaluator path |
+| Full searches | pending | Six persistent studies, 600 trials each; no full-scale job is authorized or submitted yet |
+| Retraining/evaluation | pending | Offline 56-front freeze, unique 200-epoch retraining, and native/OAS threshold separation are implemented; validation pending |
+| Aggregation/report | pending | Score-aware downstream oracle aggregation is implemented; awaits validation and results |
 
 ## Decisions
 
@@ -38,8 +38,21 @@ Last updated: 2026-08-04 (Europe/Zurich)
   training-normal sample so it is practical during every validation epoch.
 - AE and VAE each retain the paper-native anomaly score as a direct control: AE MSE
   versus residual OAS, and VAE latent KL versus residual OAS.
+- All logical strategies for one model share the same 600 sampled configurations. This
+  gives six trained studies rather than 56 and enables direct strategy comparisons;
+  logical two-dimensional fronts are reconstructed offline.
 
 ## Verification log
+
+- 2026-08-04: implemented the six shared 600-trial model studies. Every trial now
+  returns all native/OAS CAP, W1, drift, and native-secondary objective pairs in a
+  frozen order; the 56 logical two-dimensional fronts are reconstructed offline.
+- 2026-08-04: added independent native/OAS validation thresholds for downstream AE/VAE
+  evaluation, restricted search validation to normal plus the two source backgrounds,
+  and kept all 20 anomaly datasets held out until 200-epoch retraining.
+- 2026-08-04: the new shared evaluator, campaign, score thresholds, configurations,
+  pairing paths, and masked OAS contracts passed 45 targeted tests. All six final
+  configs recomposed after formatting, and every changed-file pre-commit hook passed.
 
 - 2026-08-04: model, trainer, data, and HPO settings match the `dev/patrick` physics
   setup at `9c2c4ec`; the later posterior-consistency callback is intentionally absent

@@ -96,3 +96,20 @@ def test_native_and_oas_score_overrides_are_explicit() -> None:
     assert campaign._score_overrides({"model": "vae", "score": "residual_oas"}) == [
         "algorithm.anomaly_score=residual_oas"
     ]
+
+
+def test_pilot_parser_exposes_cdf_pairing_control(monkeypatch) -> None:
+    """A real-data pilot must be able to exercise the table-free CDF path."""
+    monkeypatch.setattr(
+        "sys.argv",
+        [
+            "physics_background_pairing_campaign.py",
+            "pilot",
+            "--metric",
+            "cap_mapping",
+            "--strategy",
+            "cdf",
+        ],
+    )
+    args = campaign.parse_args()
+    assert args.strategy == "cdf"

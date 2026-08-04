@@ -54,6 +54,7 @@ def parse_args() -> argparse.Namespace:
     pilot.add_argument("--metric", choices=("cap_mapping", *METRICS), required=True)
     pilot.add_argument("--model", choices=MODELS, default="ae")
     pilot.add_argument("--score", default="residual_oas")
+    pilot.add_argument("--strategy", choices=CAP_STRATEGIES, default="physics_summary")
     sweep = subparsers.add_parser("sweep")
     sweep.add_argument("--cell", required=True)
     sweep.add_argument("--trials", type=int, default=48)
@@ -492,18 +493,23 @@ def sweep(root: Path, cell_id: str, trials: int, jobs: int) -> None:
     subprocess.run(command, cwd=REPOSITORY_ROOT, check=True)  # nosec B603
 
 
-def pilot(root: Path, metric: str, model: str, score: str) -> None:
-    """Run one one-epoch pilot for a model, score, and metric family."""
+def pilot(root: Path, metric: str, model: str, score: str, strategy: str) -> None:
+    """Run one one-epoch pilot for a model, score, and metric/pairing family."""
     design = _load_design(root)
     if score not in MODEL_SCORES[model]:
         raise ValueError(f"Score {score!r} is not configured for model {model!r}.")
+    if metric != "cap_mapping" and strategy != "physics_summary":
+        raise ValueError("A pairing strategy can only be selected for a CAP pilot.")
     cell = {
         "model": model,
         "score": score,
         "metric": metric,
-        "strategy": "physics_summary",
+        "strategy": strategy,
     }
-    output = root / "pilots" / f"{model}__{score}__{metric}"
+    pilot_id = f"{model}__{score}__{metric}"
+    if metric == "cap_mapping":
+        pilot_id = f"{pilot_id}__{strategy}"
+    output = root / "pilots" / pilot_id
     command = [
         sys.executable,
         "src/train.py",
@@ -531,6 +537,7 @@ def pilot(root: Path, metric: str, model: str, score: str) -> None:
             "metric": metric,
             "model": model,
             "score": score,
+            "strategy": strategy,
             "code_commit": design["code_commit"],
             "command": command,
         },
@@ -576,7 +583,7 @@ def main() -> None:
     elif args.command == "status":
         status(root)
     elif args.command == "pilot":
-        pilot(root, args.metric, args.model, args.score)
+        pilot(root, args.metric, args.model, args.score, args.strategy)
     elif args.command == "sweep":
         sweep(root, args.cell, args.trials, args.jobs)
     elif args.command == "submit-next":

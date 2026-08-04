@@ -12,21 +12,39 @@ from src.utils.pairing.table import load_pair_table, sha256_tensor
 def _fit_masked_residual_oas(
     residuals: torch.Tensor, masks: torch.Tensor
 ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
-    """Fit OAS after observed-only mean estimation and neutral mean imputation."""
+    """Fit OAS on observed residual features with neutral mean imputation."""
     masks = masks.to(dtype=torch.bool)
     if residuals.ndim != 2 or masks.shape != residuals.shape:
         raise ValueError("Residuals and masks must be equal-shape rank-2 tensors.")
     counts = masks.sum(dim=0)
-    if torch.any(counts == 0):
-        missing = torch.nonzero(counts == 0, as_tuple=False).view(-1).tolist()
-        raise RuntimeError(f"OAS fit sample never observes residual features {missing}.")
-    observed = masks.to(dtype=residuals.dtype)
-    location = (residuals * observed).sum(dim=0) / counts.to(dtype=residuals.dtype)
-    completed = torch.where(masks, residuals, location.unsqueeze(0))
+    active = counts > 0
+    if not torch.any(active):
+        raise RuntimeError("OAS fit sample observes no residual features.")
+
+    active_residuals = residuals[:, active]
+    active_masks = masks[:, active]
+    active_observed = active_masks.to(dtype=residuals.dtype)
+    active_counts = counts[active].to(dtype=residuals.dtype)
+    active_location = (active_residuals * active_observed).sum(dim=0) / active_counts
+    completed = torch.where(
+        active_masks,
+        active_residuals,
+        active_location.unsqueeze(0),
+    )
     estimator = OAS(store_precision=True, assume_centered=False).fit(completed.numpy())
-    centered = (residuals - location) * observed
-    variance = centered.square().sum(dim=0) / counts.to(dtype=residuals.dtype)
-    return location, variance, torch.from_numpy(estimator.precision_)
+    active_centered = (active_residuals - active_location) * active_observed
+
+    n_features = residuals.shape[1]
+    location = residuals.new_zeros(n_features)
+    variance = residuals.new_ones(n_features)
+    precision = residuals.new_zeros((n_features, n_features))
+    location[active] = active_location
+    variance[active] = active_centered.square().sum(dim=0) / active_counts
+    active_indices = torch.nonzero(active, as_tuple=False).view(-1)
+    precision[active_indices[:, None], active_indices[None, :]] = torch.from_numpy(
+        estimator.precision_
+    ).to(dtype=residuals.dtype)
+    return location, variance, precision
 
 
 class CAPCallback(Callback):

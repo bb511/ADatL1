@@ -8,8 +8,7 @@
 #SBATCH --cpus-per-task=16
 #SBATCH --gpus-per-node=1
 #SBATCH --mem=96G
-#SBATCH --array=0-2%3
-#SBATCH --output=/iopsstor/scratch/cscs/vjimenez/adatl1/logs/slurm/%x-%A_%a.out
+#SBATCH --output=/iopsstor/scratch/cscs/vjimenez/adatl1/logs/slurm/%x-%j.out
 
 set -euo pipefail
 
@@ -17,9 +16,10 @@ readonly SCRATCH_ROOT=/iopsstor/scratch/cscs/vjimenez/adatl1
 readonly REPOSITORY_ROOT="${SCRATCH_ROOT}/worktrees/physics_background_pairing_20260803"
 readonly CAMPAIGN_ROOT="${SCRATCH_ROOT}/campaigns/physics_background_pairing_20260803"
 readonly UV_BIN="${SCRATCH_ROOT}/tools/uv-0.11.32/uv"
-readonly METRICS=(cap_mapping wasserstein drift)
 : "${PILOT_MODEL:=ae}"
 : "${PILOT_SCORE:=residual_oas}"
+: "${PILOT_METRIC:=cap_mapping}"
+: "${PILOT_STRATEGY:=physics_summary}"
 
 export UV_PROJECT_ENVIRONMENT="${SCRATCH_ROOT}/.venv-clariden"
 export UV_CACHE_DIR="${SCRATCH_ROOT}/uv-cache-clariden-arm64"
@@ -29,5 +29,5 @@ export HYDRA_FULL_ERROR=1
 
 cd "${REPOSITORY_ROOT}"
 "${UV_BIN}" run --frozen --no-sync python scripts/physics_background_pairing_campaign.py \
-  --root "${CAMPAIGN_ROOT}" pilot --metric "${METRICS[SLURM_ARRAY_TASK_ID]}" \
-  --model "${PILOT_MODEL}" --score "${PILOT_SCORE}"
+  --root "${CAMPAIGN_ROOT}" pilot --metric "${PILOT_METRIC}" \
+  --model "${PILOT_MODEL}" --score "${PILOT_SCORE}" --strategy "${PILOT_STRATEGY}"

@@ -42,11 +42,11 @@ def test_residual_oas_state_uses_clean_final_weight_training_pass() -> None:
     torch.testing.assert_close(state["precision"], torch.from_numpy(expected.precision_))
 
 
-def test_residual_oas_state_mean_imputes_padded_coordinates() -> None:
-    """Padding values must be neutral during covariance fitting."""
+def test_residual_oas_state_excludes_structurally_padded_coordinates() -> None:
+    """Padding must be neutral, including coordinates absent from every event."""
     callback = ResidualOASStateCallback()
-    train_x = torch.tensor([[1.0, 999.0], [2.0, 3.0]])
-    train_mask = torch.tensor([[True, False], [True, True]])
+    train_x = torch.tensor([[1.0, 999.0, -999.0], [2.0, 3.0, 999.0]])
+    train_mask = torch.tensor([[True, False, False], [True, True, False]])
     trainer = SimpleNamespace(
         sanity_checking=False,
         world_size=1,
@@ -64,8 +64,12 @@ def test_residual_oas_state_mean_imputes_padded_coordinates() -> None:
 
     completed = np.array([[1.0, 3.0], [2.0, 3.0]])
     expected = OAS().fit(completed)
-    torch.testing.assert_close(state["location"], torch.tensor([1.5, 3.0], dtype=torch.float64))
-    torch.testing.assert_close(state["precision"], torch.from_numpy(expected.precision_))
+    torch.testing.assert_close(
+        state["location"], torch.tensor([1.5, 3.0, 0.0], dtype=torch.float64)
+    )
+    torch.testing.assert_close(state["precision"][:2, :2], torch.from_numpy(expected.precision_))
+    torch.testing.assert_close(state["precision"][2], torch.zeros(3, dtype=torch.float64))
+    torch.testing.assert_close(state["precision"][:, 2], torch.zeros(3, dtype=torch.float64))
 
 
 def test_ae_residual_oas_score_matches_sklearn_mahalanobis() -> None:

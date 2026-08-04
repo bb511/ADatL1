@@ -71,6 +71,14 @@ class AE(ADLightningModule):
         self.reco_loss = HuberAELoss(delta=delta, scale=1.0, reduction="none")
         self.ascore_loss = MSEReconstructionLoss(scale=1.0, reduction="none")
 
+        # Initialised here so full training checkpoints can be restored before
+        # the anomaly-efficiency validation callback updates this threshold.
+        self.register_buffer(
+            "thres_operational",
+            torch.tensor(float("nan")),
+            persistent=True,
+        )
+
         # HepInfo Bernoulli latent bottleneck. The decoder consumes the
         # straight-through Bernoulli sample, while the MI estimator below is
         # computed on the pre-sampling logits z.

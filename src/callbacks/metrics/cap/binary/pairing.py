@@ -12,16 +12,25 @@ def _get_small_large(tensor1: Tensor, tensor2: Tensor) -> Tuple[Tensor, Tensor]:
         return tensor2, tensor1, True
 
 
-def mapping(tensor1: Tensor, tensor2: Tensor, pairing: Tensor) -> Tuple[Tensor, Tensor]:
-    """Use a precomputed map from ``tensor1`` rows to ``tensor2`` rows.
+def mapping(
+    tensor1: Tensor,
+    tensor2: Tensor,
+    pairing: Tensor | tuple[Tensor, Tensor],
+) -> Tuple[Tensor, Tensor]:
+    """Use a fixed map from ``tensor1`` rows to ``tensor2`` rows.
 
-    ``pairing[j]`` is the index of the row in ``tensor1`` paired with row ``j``
-    of ``tensor2``. Equivalently, ``tensor1[pairing]`` is aligned row-for-row
-    with ``tensor2``. The tensor values are not inspected and no pairing is
-    calculated at runtime.
+    A dense tensor follows ``pairing[i] == j``: row ``i`` of ``tensor1`` is paired
+    with row ``j`` of ``tensor2``. A tuple of two tensors represents the equivalent
+    sparse row indices. Tensor values are not inspected at runtime.
     """
-    tensor1_indices = pairing.to(device=tensor1.device, dtype=torch.long)
-    tensor2_indices = torch.arange(len(tensor2), device=tensor2.device)
+    if isinstance(pairing, tuple):
+        tensor1_indices, tensor2_indices = pairing
+        return (
+            tensor1_indices.to(device=tensor1.device, dtype=torch.long),
+            tensor2_indices.to(device=tensor2.device, dtype=torch.long),
+        )
+    tensor1_indices = torch.arange(len(pairing), device=tensor1.device)
+    tensor2_indices = pairing.to(device=tensor2.device, dtype=torch.long)
     return tensor1_indices, tensor2_indices
 
 

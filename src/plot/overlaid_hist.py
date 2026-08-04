@@ -1,10 +1,10 @@
 # Overlaid histogram plot.
 from pathlib import Path
-from pathvalidate import sanitize_filename
 
-import numpy as np
 import matplotlib.pyplot as plt
 import mplhep as hep
+import numpy as np
+from pathvalidate import sanitize_filename
 
 
 def plot_1d(
@@ -18,8 +18,8 @@ def plot_1d(
 ):
     """Plots 1d overalid histogram of data1 and data2.
 
-    Expects that data1 and data2 are one dimensional tensors, containing a feature
-    with the name feat_name.
+    Expects that data1 and data2 are one dimensional tensors, containing a feature with the name
+    feat_name.
     """
     plt.style.use(hep.style.CMS)
 
@@ -27,7 +27,7 @@ def plot_1d(
 
     fig, ax = plt.subplots()
 
-    # Use mplhep.histplot with precomputed counts
+    # Use mplhep.histplot with already-binned counts
     c1, _ = np.histogram(x1, bins=bins)
     c2, _ = np.histogram(x2, bins=bins)
 
@@ -82,12 +82,8 @@ def plot_streamed(
     counts1 = counts1 / max(counts1.sum(), 1)
     counts2 = counts2 / max(counts2.sum(), 1)
 
-    hep.histplot(
-        counts1, edges, ax=ax, label=label1, histtype="fill", color="C0", alpha=0.5
-    )
-    hep.histplot(
-        counts2, edges, ax=ax, label=label2, histtype="fill", color="C1", alpha=0.5
-    )
+    hep.histplot(counts1, edges, ax=ax, label=label1, histtype="fill", color="C0", alpha=0.5)
+    hep.histplot(counts2, edges, ax=ax, label=label2, histtype="fill", color="C1", alpha=0.5)
     ax.legend()
 
     if check_feature_is_Et(feat_name):
@@ -113,6 +109,6 @@ def plot_streamed(
 
 def check_feature_is_Et(feat_name: str):
     is_et = "Et" in feat_name or "EtUnconstrained" in feat_name or "ETTEM" in feat_name
-    is_not_eta = not "Eta" in feat_name
+    is_not_eta = "Eta" not in feat_name
 
     return is_et and is_not_eta

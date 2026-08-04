@@ -379,7 +379,7 @@ def notes_for(dataset: Dataset, strategy: Strategy) -> tuple[str, ...]:
             )
         elif strategy == Strategy.CAP_ENCODER_NEAREST:
             notes.append(
-                "CAP uses frozen-encoder fixed pair tables via pairing_type=precomputed. "
+                "CAP uses frozen-encoder fixed pair tables via pairing_type=mapping. "
                 "Set CCHAMBER_VALID_PAIR_TABLE and CCHAMBER_TEST_PAIR_TABLE before running."
             )
         elif strategy == Strategy.CAP_CDF:
@@ -423,9 +423,9 @@ def strategy_overrides_for(strategy: Strategy) -> tuple[str, ...]:
             overrides.extend(
                 [
                     "data.pairing_strategy=metadata_nearest",
-                    "callbacks.cap_ref.pairing_type=precomputed",
+                    "callbacks.cap_ref.pairing_type=mapping",
                     "+callbacks.cap_ref.pairing_index_path=$CCHAMBER_VALID_PAIR_TABLE",
-                    "evaluation.callbacks.cap_ref.pairing_type=precomputed",
+                    "evaluation.callbacks.cap_ref.pairing_type=mapping",
                     "+evaluation.callbacks.cap_ref.pairing_index_path=$CCHAMBER_VALID_PAIR_TABLE",
                 ]
             )

@@ -1,0 +1,68 @@
+# @package _global_
+
+# Frozen AAD L1 JetCLR recipe selected by the staged real-data campaign.
+defaults:
+  - /experiment/physics/jetclr_pairing
+  - _self_
+
+seed: 456
+tags: ["physics", "jetclr", "aad", "selected"]
+
+experiment_name: jetclr_aad_best
+run_name: seed456
+
+data:
+  batch_size: 8192
+  max_val_batches: 4
+  max_normal_eval_batches: 8
+
+trainer:
+  min_epochs: 1
+  max_epochs: 1
+  gradient_clip_val: 0.1
+
+algorithm:
+  diagnosis_metrics: true
+  encoder_variance_weight: 0.5
+  encoder_covariance_weight: 0.005
+  detector_smearing:
+    prob: 0.5
+    strength: 0.3
+  object_mask:
+    prob: 0.5
+    object_prob: 0.025
+  lorentz_rotation:
+    prob: 0.0
+  model:
+    d_model: 128
+    out_dim: 128
+    n_heads: 8
+    n_layers: 2
+    dim_feedforward: 512
+    pooling: cls
+    norm_first: true
+    post_pool_norm: true
+  projector:
+    nodes: [256, 256]
+    out_dim: 128
+    batchnorm: true
+    activation: gelu
+  loss:
+    temperature: 0.1
+  optimizer:
+    lr: 0.0002
+    weight_decay: 0.0001
+  scheduler:
+    # Preserve the 16-epoch search schedule while stopping at the selected
+    # epoch-1 milestone (1,530 of 24,480 optimizer steps).
+    total_steps: 24480
+
+test: false
+
+evaluation:
+  callbacks:
+    pairing_diagnostics:
+      max_events_per_dataset: 8192
+    embedding_anomaly:
+      reference_size: 8192
+      max_query_events: 8192

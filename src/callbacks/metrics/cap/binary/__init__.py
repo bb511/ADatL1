@@ -39,6 +39,9 @@ def get_pairing_fn(
     elif pairing_type == "cdf":
         return cdf
 
+    elif pairing_type == "mapping":
+        return mapping
+
     else:
         raise ValueError(f"Unknown pairing type: {pairing_type}")
 

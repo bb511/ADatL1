@@ -2,8 +2,8 @@ import warnings
 from importlib.util import find_spec
 from typing import Any, Callable, Dict, Optional, Tuple
 
-from omegaconf import DictConfig
-from omegaconf import OmegaConf
+import torch
+from omegaconf import DictConfig, OmegaConf
 
 from src.utils import pylogger, rich_utils
 
@@ -42,7 +42,7 @@ def extras(cfg: DictConfig) -> None:
 
     if cfg.extras.get("matmul_precision"):
         log.info(
-            f"Setting matmul presision to <cfg.extras.matmul_precision="
+            f"Setting matmul precision to <cfg.extras.matmul_precision="
             f"{cfg.extras.get('matmul_precision')}>"
         )
         torch.set_float32_matmul_precision(cfg.extras.get("matmul_precision"))
@@ -103,9 +103,7 @@ def task_wrapper(task_func: Callable) -> Callable:
     return wrap
 
 
-def get_metric_value(
-    metric_dict: Dict[str, Any], metric_name: Optional[str]
-) -> Optional[float]:
+def get_metric_value(metric_dict: Dict[str, Any], metric_name: Optional[str]) -> Optional[float]:
     """Safely retrieves value of the metric logged in LightningModule.
 
     :param metric_dict: A dict containing metric values.

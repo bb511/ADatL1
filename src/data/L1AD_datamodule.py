@@ -1,20 +1,27 @@
 # Lightning data module for loading parquet data produced with:
 # https://github.com/cdfpzmvpvg/info_ad_data
-from dataclasses import dataclass
-from pathlib import Path
 import gc
 import json
 import warnings
+from dataclasses import dataclass
+from pathlib import Path
+from typing import TYPE_CHECKING
 
-import torch
 import numpy as np
+import torch
+from colorama import Back, Fore, Style
 from pytorch_lightning import LightningDataModule
-from torch.utils.data import Dataset, DataLoader
+from torch.utils.data import DataLoader, Dataset
 
-from src.utils import pylogger
-from colorama import Fore, Back, Style
 from src.data.components.dataset import L1ADDataset
 from src.data.components.normalization import L1DataNormalizer
+from src.utils import pylogger
+
+if TYPE_CHECKING:
+    from src.data.components.awkward2torch import L1DataAwkward2Torch
+    from src.data.components.extraction import L1DataExtractor
+    from src.data.components.mlready import L1DataMLReady
+    from src.data.components.processing import L1DataProcessor
 
 log = pylogger.RankedLogger(__name__)
 
@@ -57,6 +64,7 @@ class L1ADDataModule(LightningDataModule):
         l1_scales: dict,
         batch_size: int = 16384,
         max_val_batches: int = -1,
+        max_normal_eval_batches: int | None = None,
         expose_zerobias_sources: bool = False,
         zerobias_source_metadata_dir: str | None = None,
         seed: int = 42,
@@ -79,7 +87,14 @@ class L1ADDataModule(LightningDataModule):
             all features that could be in the data set.
         :param batch_size: Integer specifying the batch size of the data.
         :param max_val_batches: Integer specifying how many batches to use for the val
-            data sets.
+            auxiliary data sets.
+        :param max_normal_eval_batches: Optional independent cap on batches from the
+            normal validation and test splits. These loaders are unshuffled, so every
+            candidate sees the same rows. ``None`` preserves the full-split behavior.
+        :param expose_zerobias_sources: Whether to add one ordered evaluation loader
+            per original ZeroBias run using generated source-ID sidecars.
+        :param zerobias_source_metadata_dir: Optional location of the source-ID
+            sidecars. Defaults to the main ML-ready cache when omitted.
         :param seed: Integer specifying the seed with which to shuffle the training
             data when constructing the data set.
         """
@@ -88,13 +103,23 @@ class L1ADDataModule(LightningDataModule):
         self.save_hyperparameters(logger=False)
 
         self.l1_scales = l1_scales
-        self.normalizer: L1DataNormalizer | None = None
-        self.main_cache_folder: Path | None = None
+        self.normalizer: L1DataNormalizer = data_normalizer
+        # ``prepare_data`` runs only on rank zero under Lightning, so setup must
+        # not depend on process-local state assigned there.  The mlready cache
+        # location is fully determined by configuration and can be resolved for
+        # fitting and evaluation-only runs alike.
+        self.main_cache_folder = (
+            Path(data_mlready.cache_root_dir)
+            / "mlready"
+            / data_mlready.name
+            / data_normalizer.name
+        )
 
         self._main: dict[str, SplitTensors] = {}
         self._aux: dict[str, dict[str, SplitTensors]] = {"valid": {}, "test": {}}
         self.shuffler = torch.Generator().manual_seed(seed)
         self.max_val_batches = max_val_batches
+        self.max_normal_eval_batches = self._normal_eval_batch_cap(max_normal_eval_batches)
         self.expose_zerobias_sources = bool(expose_zerobias_sources)
         self.zerobias_source_metadata_dir = (
             Path(zerobias_source_metadata_dir).expanduser().resolve()
@@ -115,9 +140,13 @@ class L1ADDataModule(LightningDataModule):
         self.hparams.data_processor.process("signal")
 
         log.info(Back.GREEN + "Splitting data into train, val, test and normalizing...")
-        self.normalizer = self.hparams.data_normalizer
         self.hparams.data_mlready.prepare(self.normalizer, self.hparams.train_features)
-        self.main_cache_folder = self.hparams.data_mlready.cache_folder
+        prepared_cache_folder = Path(self.hparams.data_mlready.cache_folder)
+        if prepared_cache_folder != self.main_cache_folder:
+            raise RuntimeError(
+                "Prepared L1 cache path does not match the configured cache path: "
+                f"{prepared_cache_folder} != {self.main_cache_folder}"
+            )
 
     def setup(self, stage: str = None) -> None:
         """Load data. Set `self.data_train`, `self.data_val`, `self.data_test`.
@@ -130,51 +159,49 @@ class L1ADDataModule(LightningDataModule):
             "predict"`. Defaults to ``None``.
         """
         self._set_batch_size()
-        if self.main_cache_folder is None:
-            raise RuntimeError("Cache folder not set. Did prepare_data() run?")
-
         log.info(Back.GREEN + "Loading data in memory...")
         self.loader = self.hparams.data_awkward2torch
         data_dir = self.main_cache_folder
 
         if stage in (None, "fit"):
-            self._main.setdefault(
-                "train", self._load_main_split(data_dir, "train", label=0)
-            )
-            self._main.setdefault(
-                "valid", self._load_main_split(data_dir, "valid", label=0)
-            )
-            self._aux["valid"] = self._aux["valid"] or self._load_aux_split(
-                data_dir, "valid"
-            )
+            self._main.setdefault("train", self._load_main_split(data_dir, "train", label=0))
+            self._main.setdefault("valid", self._load_main_split(data_dir, "valid", label=0))
+            self._aux["valid"] = self._aux["valid"] or self._load_aux_split(data_dir, "valid")
 
         if stage in (None, "validate"):
-            self._main.setdefault(
-                "valid", self._load_main_split(data_dir, "valid", label=0)
-            )
-            self._aux["valid"] = self._aux["valid"] or self._load_aux_split(
-                data_dir, "valid"
-            )
+            self._main.setdefault("valid", self._load_main_split(data_dir, "valid", label=0))
+            self._aux["valid"] = self._aux["valid"] or self._load_aux_split(data_dir, "valid")
 
         if stage in (None, "test"):
-            self._main.setdefault(
-                "test", self._load_main_split(data_dir, "test", label=0)
-            )
-            self._aux["test"] = self._aux["test"] or self._load_aux_split(
-                data_dir, "test"
-            )
+            self._main.setdefault("test", self._load_main_split(data_dir, "test", label=0))
+            self._aux["test"] = self._aux["test"] or self._load_aux_split(data_dir, "test")
 
         if stage == "predict":
             raise ValueError("The predict dataloader is not implemented yet.")
 
+        self._load_normalizer_params()
         self._data_summary(stage)
+
+    def _load_normalizer_params(self) -> None:
+        """Restore cached training-split normalization state for evaluation-only runs."""
+        object_feature_map = getattr(self.loader, "object_feature_map", None)
+        if not object_feature_map:
+            return
+        for object_name in object_feature_map:
+            if object_name in self.normalizer.norm_params:
+                continue
+            params_path = self.main_cache_folder / f"{object_name}_norm_params.pkl"
+            if not params_path.is_file():
+                raise FileNotFoundError(
+                    f"Missing cached normalization parameters for {object_name}: " f"{params_path}"
+                )
+            self.normalizer.import_norm_params(params_path, object_name)
 
     def train_dataloader(self) -> Dataset:
         """Create and return the training dataloader.
 
-        This dataloader is based on a custom dataset class from components/dataset.py,
-        which basically makes the loading of numpy arrays that are already in memory
-        a bit faster.
+        This dataloader is based on a custom dataset class from components/dataset.py, which
+        basically makes the loading of numpy arrays that are already in memory a bit faster.
         """
         split = self._main["train"]
         dataset = L1ADDataset(
@@ -195,14 +222,10 @@ class L1ADDataModule(LightningDataModule):
         )
 
     def val_dataloader(self):
-        return self._make_eval_loaders(
-            main_key="valid", aux_key="valid", main_name="normal"
-        )
+        return self._make_eval_loaders(main_key="valid", aux_key="valid", main_name="normal")
 
     def test_dataloader(self):
-        return self._make_eval_loaders(
-            main_key="test", aux_key="test", main_name="normal"
-        )
+        return self._make_eval_loaders(main_key="test", aux_key="test", main_name="normal")
 
     def teardown(self, stage: str | None = None) -> None:
         # Drop references to large tensors so they become collectible
@@ -235,11 +258,7 @@ class L1ADDataModule(LightningDataModule):
         out = []
         for t in batch:
             # Only pin CPU tensors; skip if already pinned
-            if (
-                isinstance(t, torch.Tensor)
-                and t.device.type == "cpu"
-                and not t.is_pinned()
-            ):
+            if isinstance(t, torch.Tensor) and t.device.type == "cpu" and not t.is_pinned():
                 t = t.pin_memory()
             out.append(t.to(device, non_blocking=True))
 
@@ -249,24 +268,24 @@ class L1ADDataModule(LightningDataModule):
         """Load main data splits: train, val, and test of ZB data."""
         x, mask, l1bit = self.loader.load_folder(data_dir / split)
         y = torch.full((x.size(0),), label, dtype=torch.int64)
-        source_root = self.zerobias_source_metadata_dir or data_dir
-        source_id_path = source_root / split / "zerobias_source_id.npy"
-        source_id = (
-            torch.from_numpy(np.load(source_id_path).astype(np.int64, copy=False)).contiguous()
-            if source_id_path.is_file()
-            else None
-        )
-        if self.expose_zerobias_sources and source_id is None:
-            raise FileNotFoundError(
-                f"Per-run ZeroBias evaluation requested but {source_id_path} is missing. "
-                "Copy the generated pairing source sidecars into the configured "
-                "zerobias_source_metadata_dir."
-            )
-        if source_id is not None and source_id.numel() != x.size(0):
-            raise ValueError(
-                f"ZeroBias source IDs contain {source_id.numel()} rows but the {split} "
-                f"tensor contains {x.size(0)} rows."
-            )
+        source_id = None
+        if self.expose_zerobias_sources:
+            source_root = self.zerobias_source_metadata_dir or data_dir
+            source_id_path = source_root / split / "zerobias_source_id.npy"
+            if not source_id_path.is_file():
+                raise FileNotFoundError(
+                    f"Per-run ZeroBias evaluation requested but {source_id_path} is missing. "
+                    "Copy the generated pairing source sidecars into the configured "
+                    "zerobias_source_metadata_dir."
+                )
+            source_id = torch.from_numpy(
+                np.load(source_id_path).astype(np.int64, copy=False)
+            ).contiguous()
+            if source_id.numel() != x.size(0):
+                raise ValueError(
+                    f"ZeroBias source IDs contain {source_id.numel()} rows but the {split} "
+                    f"tensor contains {x.size(0)} rows."
+                )
         x = x.contiguous()
         mask = mask.contiguous()
         l1bit = l1bit.contiguous()
@@ -277,8 +296,8 @@ class L1ADDataModule(LightningDataModule):
     def _load_aux_split(self, data_dir: Path, split: str) -> dict[str, SplitTensors]:
         """Load a split of auxiliary data, either val or test.
 
-        The auxiliary data is not used at training time, since it consists of
-        simulations for the background of the signal.
+        The auxiliary data is not used at training time, since it consists of simulations for the
+        background of the signal.
         """
         aux_dir = data_dir / "aux"
         out: dict[str, SplitTensors] = {}
@@ -315,7 +334,9 @@ class L1ADDataModule(LightningDataModule):
         loaders: dict[str, DataLoader] = {}
 
         loaders[main_name] = self._to_loader(
-            main, batch_size=self.batch_size_per_device
+            main,
+            batch_size=self.batch_size_per_device,
+            max_b=self.max_normal_eval_batches,
         )
 
         if self.expose_zerobias_sources:
@@ -324,9 +345,7 @@ class L1ADDataModule(LightningDataModule):
             with metadata_path.open(encoding="utf-8") as handle:
                 source_names = json.load(handle)["sources"]
             for source_index, source_name in enumerate(source_names):
-                selector = torch.nonzero(
-                    main.source_id == source_index, as_tuple=False
-                ).flatten()
+                selector = torch.nonzero(main.source_id == source_index, as_tuple=False).flatten()
                 if self.max_val_batches is not None and self.max_val_batches > 0:
                     maximum = self.batch_size_per_device * self.max_val_batches
                     selector = selector[:maximum]
@@ -350,9 +369,17 @@ class L1ADDataModule(LightningDataModule):
 
         return loaders
 
-    def _to_loader(
-        self, split: SplitTensors, batch_size: int, max_b: int = None
-    ) -> DataLoader:
+    @staticmethod
+    def _normal_eval_batch_cap(max_batches: int | None) -> int | None:
+        """Validate the optional deterministic cap for the normal eval split."""
+        if max_batches is None or int(max_batches) == -1:
+            return None
+        max_batches = int(max_batches)
+        if max_batches <= 0:
+            raise ValueError("max_normal_eval_batches must be positive, -1, or None.")
+        return max_batches
+
+    def _to_loader(self, split: SplitTensors, batch_size: int, max_b: int = None) -> DataLoader:
         """Transform a SplitTensor to a proper pytorch DataLoader."""
         ds = L1ADDataset(
             split.x,
@@ -401,19 +428,17 @@ class L1ADDataModule(LightningDataModule):
         elif stage == "test":
             show_split("Test data:", "test", "test")
 
-    def get_extra(
-        self, normalizer: L1DataNormalizer, extra_feats: dict, stage: str, flag: str
-    ):
+    def get_extra(self, normalizer: L1DataNormalizer, extra_feats: dict, stage: str, flag: str):
         """Hook for callbacks to get additional data.
 
-        The data provided through this hook should not be already included in the
-        training data. Otherwise, no point in calling this hook.
+        The data provided through this hook should not be already included in the training data.
+        Otherwise, no point in calling this hook.
 
         :param normalizer: Normalizer object for the additional data.
-        :param extra_feats: Dictionary containing the object and the features to be
-            extracted from that object.
-        :param flag: String specifying subdirectory to put the extra feature parquet
-            files in so they don't get mixed up at training time.
+        :param extra_feats: Dictionary containing the object and the features to be extracted from
+            that object.
+        :param flag: String specifying subdirectory to put the extra feature parquet files in so
+            they don't get mixed up at training time.
         """
         log.info(Back.GREEN + f"Extracting additional features: {extra_feats}...")
         self.hparams.data_mlready.prepare(normalizer, extra_feats, flag)
@@ -431,9 +456,7 @@ class L1ADDataModule(LightningDataModule):
             )
 
         if stage not in {"val", "test"}:
-            raise ValueError(
-                f"Unknown stage '{stage}'. Expected one of: 'train', 'val', 'test'."
-            )
+            raise ValueError(f"Unknown stage '{stage}'. Expected one of: 'train', 'val', 'test'.")
 
         split_name = "valid" if stage == "val" else "test"
         main_key = "normal"

@@ -111,6 +111,7 @@ def train(cfg: DictConfig) -> Tuple[Dict[str, Any], Dict[str, Any]]:
 
     log.info(Back.MAGENTA + 8 * "-" + "STARTING RUN VALIDATION" + 8 * "-")
     datamodule.setup("validate")
+    _setup_algorithm_for_evaluation(algorithm, datamodule)
     val_loader = datamodule.val_dataloader()
     evaluator.evaluate_run(run_ckpts, algorithm, val_loader, "val", set_optimized_metric=True)
     if cfg.get("optimized_metric_artifact", False):
@@ -121,12 +122,20 @@ def train(cfg: DictConfig) -> Tuple[Dict[str, Any], Dict[str, Any]]:
     if cfg.get("test"):
         log.info(Back.MAGENTA + 8 * "-" + "STARTING RUN TESTING" + 8 * "-")
         datamodule.setup("test")
+        _setup_algorithm_for_evaluation(algorithm, datamodule)
         test_loader = datamodule.test_dataloader()
         evaluator.evaluate_run(run_ckpts, algorithm, test_loader, "test")
         object_dict.update({"evaluator": evaluator})
 
     metric_dict = {**train_metrics}
     return metric_dict, object_dict
+
+
+def _setup_algorithm_for_evaluation(algorithm, datamodule) -> None:
+    """Initialize optional data-dependent model state before checkpoint evaluation."""
+    setup_pairing = getattr(algorithm, "setup_pairing", None)
+    if callable(setup_pairing):
+        setup_pairing(datamodule, setup_lorentz=True)
 
 
 def _worst_for(direction: str) -> float:

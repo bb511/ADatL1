@@ -1,5 +1,5 @@
 # Compute the approximation capacity metric.
-import pickle
+import pickle  # nosec B403 - writes trusted local metric artifacts; never loads pickle
 from collections import defaultdict
 from pathlib import Path
 
@@ -71,11 +71,8 @@ class CAP(Callback):
         self.pair_table_split = None
         self.dataset_1_inputs = []
         self.dataset_2_inputs = []
-        self.pairing_fn = (
-            None
-            if pairing_type in {"mapping", "precomputed"}
-            else get_pairing_fn(pairing_type)
-        )
+        canonical_pairing_type = "mapping" if pairing_type == "precomputed" else pairing_type
+        self.pairing_fn = get_pairing_fn(canonical_pairing_type)
         self.log_raw_mlflow = log_raw_mlflow
         self.name = name
 
@@ -168,9 +165,7 @@ class CAP(Callback):
             else self.pairing_index_path
         )
         if not pairing_index_path:
-            raise ValueError(
-                "pairing_index_path is required for mapping CAP pairing."
-            )
+            raise ValueError("pairing_index_path is required for mapping CAP pairing.")
 
         table = load_pair_table(
             pairing_index_path,
@@ -186,11 +181,10 @@ class CAP(Callback):
             if self.dataset_2_inputs
             else None,
         )
-        idxs1 = table["idx_1"]
-        idxs2 = table["idx_2"]
-        idxs1 = idxs1.long().to(dataset_1_scores.device)
-        idxs2 = idxs2.long().to(dataset_2_scores.device)
-        return idxs1, idxs2
+        pairing = table.get("map_0_to_1")
+        if pairing is None:
+            pairing = (table["idx_1"], table["idx_2"])
+        return self.pairing_fn(dataset_1_scores, dataset_2_scores, pairing)
 
     def on_test_epoch_end(self, trainer, pl_module):
         """Compute the CAP metric on the designated dataset."""

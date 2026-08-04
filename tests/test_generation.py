@@ -78,7 +78,7 @@ def test_generation_registry_includes_paired_causal_chamber() -> None:
 
     encoder_spec = specs["cchamber_ae_cap_encoder_nearest"]
     assert "data.pairing_strategy=metadata_nearest" in encoder_spec.strategy_overrides
-    assert "callbacks.cap_ref.pairing_type=precomputed" in encoder_spec.strategy_overrides
+    assert "callbacks.cap_ref.pairing_type=mapping" in encoder_spec.strategy_overrides
     assert (
         "+callbacks.cap_ref.pairing_index_path=$CCHAMBER_VALID_PAIR_TABLE"
         in encoder_spec.strategy_overrides
@@ -160,7 +160,7 @@ def test_encoder_pairing_sweep_uses_validation_pair_table(tmp_path) -> None:
     script = (tmp_path / spec.name / "sweep.sh").read_text(encoding="utf-8")
     assert "CCHAMBER_VALID_PAIR_TABLE" in script
     assert "CCHAMBER_TEST_PAIR_TABLE" not in script
-    assert "callbacks.cap_ref.pairing_type=precomputed" in script
+    assert "callbacks.cap_ref.pairing_type=mapping" in script
     assert "+callbacks.cap_ref.pairing_index_path=$CCHAMBER_VALID_PAIR_TABLE" in script
     assert "+evaluation.callbacks.cap_ref.pairing_index_path=$CCHAMBER_VALID_PAIR_TABLE" in script
     assert "logger=mlflow" in script

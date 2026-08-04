@@ -20,6 +20,7 @@ class ADLightningModule(LightningModule):
         scheduler: Optional[DictConfig] = None,
         masking: Optional[nn.Module] = None,
         save_hyperparameters: bool = False,
+        sync_dist_metrics: bool = False,
     ):
         super().__init__()
         self.save_hyperparameters(
@@ -30,6 +31,7 @@ class ADLightningModule(LightningModule):
         self.model = model
         self.loss = loss
         self.masking = masking if masking is not None else nn.Identity()
+        self.sync_dist_metrics = bool(sync_dist_metrics)
         self._log_sum = {}
         self._log_nsteps = {}
 
@@ -81,7 +83,13 @@ class ADLightningModule(LightningModule):
 
     def on_validation_epoch_end(self):
         """Log the epochs so the mlflow plotting is not buggy, clean memory."""
-        self.log("epoch_idx", float(self.current_epoch), on_epoch=True, on_step=False)
+        self.log(
+            "epoch_idx",
+            float(self.current_epoch),
+            on_epoch=True,
+            on_step=False,
+            sync_dist=self.sync_dist_metrics,
+        )
 
     def on_test_epoch_end(self):
         """Clean up memory."""
@@ -110,13 +118,15 @@ class ADLightningModule(LightningModule):
 
         for mname, mvalue in outdict.items():
             if isinstance(mvalue, (int, float)):
-                self._log_sum[dataloader_idx][mname] = self._log_sum[dataloader_idx].get(
-                    mname, 0.0
-                ) + float(mvalue)
+                value = torch.tensor(float(mvalue), device=self.device)
+                self._log_sum[dataloader_idx][mname] = (
+                    self._log_sum[dataloader_idx].get(mname, torch.zeros_like(value)) + value
+                )
             elif torch.is_tensor(mvalue) and mvalue.ndim == 0:
-                self._log_sum[dataloader_idx][mname] = self._log_sum[dataloader_idx].get(
-                    mname, 0.0
-                ) + float(mvalue.detach())
+                value = mvalue.detach()
+                self._log_sum[dataloader_idx][mname] = (
+                    self._log_sum[dataloader_idx].get(mname, torch.zeros_like(value)) + value
+                )
 
         self._log_nsteps[dataloader_idx] += 1
 
@@ -137,7 +147,7 @@ class ADLightningModule(LightningModule):
             on_epoch=True,
             logger=True,
             prog_bar=False,
-            sync_dist=False,  # set True only for a few key metrics if needed
+            sync_dist=self.sync_dist_metrics,
             add_dataloader_idx=False,
         )
 
@@ -148,14 +158,28 @@ class ADLightningModule(LightningModule):
         """Configure a scheduler for the optimiser, that can be used for lr etc..."""
         scheduler_fn = self.hparams.scheduler.scheduler
         param_names = inspect.signature(scheduler_fn).parameters
+        scheduler_dict = OmegaConf.to_container(self.hparams.scheduler, resolve=True)
+        total_steps_override = scheduler_dict.pop("total_steps", None)
         kwargs = {}
         if "total_steps" in param_names:
-            kwargs["total_steps"] = int(self.trainer.estimated_stepping_batches)
+            kwargs["total_steps"] = int(
+                total_steps_override
+                if total_steps_override is not None
+                else self.trainer.estimated_stepping_batches
+            )
         elif "T_max" in param_names:
-            kwargs["T_max"] = int(self.trainer.estimated_stepping_batches)
+            kwargs["T_max"] = int(
+                total_steps_override
+                if total_steps_override is not None
+                else self.trainer.estimated_stepping_batches
+            )
+        elif total_steps_override is not None:
+            raise ValueError(
+                "scheduler.total_steps was configured, but the scheduler accepts "
+                "neither total_steps nor T_max."
+            )
 
         scheduler = scheduler_fn(optimizer=optimizer, **kwargs)
-        scheduler_dict = OmegaConf.to_container(self.hparams.scheduler, resolve=True)
         scheduler_dict.update({"scheduler": scheduler})
 
         return scheduler_dict

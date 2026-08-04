@@ -6,6 +6,7 @@ import pytest
 import torch
 
 from src.callbacks.cap import CAPCallback
+from src.callbacks.metrics.cap.binary import get_pairing_fn
 from src.evaluation.callbacks.cap import CAP as EvaluationCAP
 from src.utils.pairing.table import (
     atomic_torch_save,
@@ -84,6 +85,37 @@ def test_pairing_algorithms_validate_inputs_and_return_unique_pairs() -> None:
         closure_metrics(z1, z2[:2])
 
 
+def test_mapping_pairing_supports_dense_and_sparse_tables() -> None:
+    pairing_fn = get_pairing_fn("mapping")
+    scores_1 = torch.zeros(3)
+    scores_2 = torch.zeros(4)
+
+    dense = pairing_fn(scores_1, scores_2, torch.tensor([2, 0, 3]))
+    sparse = pairing_fn(
+        scores_1,
+        scores_2,
+        (torch.tensor([0, 2]), torch.tensor([1, 3])),
+    )
+
+    torch.testing.assert_close(dense[0], torch.tensor([0, 1, 2]))
+    torch.testing.assert_close(dense[1], torch.tensor([2, 0, 3]))
+    torch.testing.assert_close(sparse[0], torch.tensor([0, 2]))
+    torch.testing.assert_close(sparse[1], torch.tensor([1, 3]))
+
+
+def test_closure_metrics_are_exact_across_query_chunks() -> None:
+    generator = torch.Generator().manual_seed(123)
+    z1 = torch.randn(23, 7, generator=generator)
+    z2 = z1 + 0.2 * torch.randn(23, 7, generator=generator)
+
+    chunked = closure_metrics(z1, z2, ks=(1, 5, 10), chunk_size=4)
+    dense = closure_metrics(z1, z2, ks=(1, 5, 10), chunk_size=23)
+
+    assert chunked == pytest.approx(dense)
+    with pytest.raises(ValueError, match="chunk_size"):
+        closure_metrics(z1, z2, chunk_size=0)
+
+
 def test_versioned_pair_table_round_trip_and_overwrite_protection(tmp_path: Path) -> None:
     path = tmp_path / "pairs.pt"
     table = _table(tmp_path)
@@ -135,7 +167,7 @@ def test_training_cap_rejects_pair_table_for_different_source_size(tmp_path: Pat
         output_name="ascore/full",
         dataset_1="normal",
         dataset_2="reference_normal",
-        pairing_type="precomputed",
+        pairing_type="mapping",
         pairing_index_path=str(path),
         cap_metric_config={},
     )
@@ -180,7 +212,7 @@ def test_evaluation_cap_uses_distinct_validation_and_test_tables(tmp_path: Path)
         output_name="ascore/full",
         dataset_1="normal",
         dataset_2="reference_normal",
-        pairing_type="precomputed",
+        pairing_type="mapping",
         pairing_index_path=str(valid_path),
         pairing_test_index_path=str(test_path),
         cap_metric_config={},

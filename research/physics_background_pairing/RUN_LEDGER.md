@@ -19,8 +19,8 @@ Last updated: 2026-08-04 (Europe/Zurich)
 |---|---|---|
 | Scientific contract | complete | `PLAN.md` |
 | Implementation audit | complete | Physics bases and HPO spaces match `origin/dev/patrick`; score routing, CDF, retraining, and padding semantics audited |
-| Code and configs | complete | Expanded 56-study matrix and mask-aware AE/VAE OAS are implemented; final post-merge validation remains |
-| Tests and preflight | complete | 40 targeted tests passed, including all 56 configurations; all 8 pair tables are authenticated |
+| Code and configs | complete | Expanded 56-study matrix and mask-aware AE/VAE OAS are implemented and validated after the remote merge |
+| Tests and preflight | complete | 49 post-merge tests passed, including all 56 configurations; all 8 pair tables are authenticated |
 | Pilots | superseded | Three pre-mask AE/OAS pilots completed; fresh pilots from the audited commit are required |
 | Full searches | pending | 56 persistent studies, 600 trials each; five CAP pairings including CDF, with AE MSE/OAS and VAE KL/OAS as separate cells |
 | Retraining/evaluation | pending | Automated freeze gate and 200-epoch indexed retraining are implemented |
@@ -50,6 +50,9 @@ Last updated: 2026-08-04 (Europe/Zurich)
   observed-feature-only event energies.
 - 2026-08-04: expanded targeted suite passed (40 tests), including composition of all
   56 primary search cells; pre-commit passed on every changed file.
+- 2026-08-04: merged the newer `origin/research/main` JetCLR and mapping-table work,
+  preserved the CDF/native/OAS campaign contract, and passed the expanded post-merge
+  suite (49 tests).
 
 - 2026-08-03: all six paper-model configurations composed with the JetCLR variant.
 - 2026-08-03: CAP, Wasserstein, and drift search-only overlays composed independently.

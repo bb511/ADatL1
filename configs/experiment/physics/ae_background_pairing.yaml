@@ -6,8 +6,11 @@ defaults:
   - override /data: basis
   - _self_
 
-tags: ["ae", "physics", "background-pairing", "mahalanobis"]
+tags: ["ae", "physics", "background-pairing", "score-variant"]
 experiment_name: physics_ae_background_pairing
+
+algorithm:
+  anomaly_score: residual_oas
 
 data:
   batch_size: 16384
@@ -19,3 +22,4 @@ callbacks:
   residual_oas_state:
     _target_: src.callbacks.cap.ResidualOASStateCallback
     max_samples: 163840
+    sample_seed: 123

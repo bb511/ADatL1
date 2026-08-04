@@ -18,6 +18,8 @@ readonly REPOSITORY_ROOT="${SCRATCH_ROOT}/worktrees/physics_background_pairing_2
 readonly CAMPAIGN_ROOT="${SCRATCH_ROOT}/campaigns/physics_background_pairing_20260803"
 readonly UV_BIN="${SCRATCH_ROOT}/tools/uv-0.11.32/uv"
 readonly METRICS=(cap_mapping wasserstein drift)
+: "${PILOT_MODEL:=ae}"
+: "${PILOT_SCORE:=residual_oas}"
 
 export UV_PROJECT_ENVIRONMENT="${SCRATCH_ROOT}/.venv-clariden"
 export UV_CACHE_DIR="${SCRATCH_ROOT}/uv-cache-clariden-arm64"
@@ -27,4 +29,5 @@ export HYDRA_FULL_ERROR=1
 
 cd "${REPOSITORY_ROOT}"
 "${UV_BIN}" run --frozen --no-sync python scripts/physics_background_pairing_campaign.py \
-  --root "${CAMPAIGN_ROOT}" pilot --metric "${METRICS[SLURM_ARRAY_TASK_ID]}"
+  --root "${CAMPAIGN_ROOT}" pilot --metric "${METRICS[SLURM_ARRAY_TASK_ID]}" \
+  --model "${PILOT_MODEL}" --score "${PILOT_SCORE}"

@@ -7,8 +7,11 @@ defaults:
   - override /data: basis
   - _self_
 
-tags: ["vae", "physics", "background-pairing", "mapping"]
+tags: ["vae", "physics", "background-pairing", "score-variant"]
 experiment_name: physics_vae_background_pairing
+
+algorithm:
+  anomaly_score: residual_oas
 
 # These must match the ordered prefixes used by the generated pair tables.
 data:
@@ -16,3 +19,9 @@ data:
   max_val_batches: 10
   expose_zerobias_sources: true
   zerobias_source_metadata_dir: ${physics_pairing.source_metadata_dir}
+
+callbacks:
+  vae_residual_state:
+    _target_: src.callbacks.cap.VAEResidualScoreStateCallback
+    max_samples: 163840
+    sample_seed: 123

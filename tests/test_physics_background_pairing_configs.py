@@ -1,5 +1,6 @@
 """Configuration contracts for the physics background-pairing campaign."""
 
+from scripts import physics_background_pairing_campaign as campaign
 from src.utils.pairing.io import compose_config
 
 MODELS = ("ae", "vae", "dsae", "dsvae", "svdd", "realnvp")
@@ -41,9 +42,51 @@ def test_all_paper_models_compose_with_background_selection_streams(monkeypatch,
 def test_physics_ae_installs_bounded_train_only_mahalanobis_state() -> None:
     """Physics AE must fit bounded train-only OAS state for its canonical score."""
     cfg = compose_config(overrides=["experiment=physics/ae_background_pairing"])
+    assert cfg.algorithm.anomaly_score == "residual_oas"
     assert cfg.callbacks.residual_oas_state.max_samples == 163840
     assert cfg.callbacks.anomaly_eff.output_name == "ascore/full"
     assert cfg.evaluation.callbacks.anomaly_efficiency.output_name == "ascore/full"
+
+
+def test_physics_vae_routes_bounded_train_only_oas_as_canonical_score() -> None:
+    """All generic VAE selection metrics must consume the configured OAS score."""
+    cfg = compose_config(overrides=["experiment=physics/vae_background_pairing"])
+    assert cfg.algorithm.anomaly_score == "residual_oas"
+    assert cfg.callbacks.vae_residual_state.max_samples == 163840
+    assert cfg.callbacks.cap_sn_zb.output_name == "ascore/full"
+    assert cfg.callbacks.wasserstein_dist.output_name == "ascore/full"
+    assert cfg.callbacks.thres_drift.output_name == "ascore/full"
+
+
+def test_cdf_control_uses_background_domains_without_pair_tables() -> None:
+    """CDF must change only CAP pairing while retaining background0/background1."""
+    cfg = compose_config(
+        overrides=[
+            "experiment=physics/ae_background_pairing",
+            "pairing=physics_cdf",
+        ]
+    )
+    assert cfg.callbacks.cap_sn_zb.dataset_1 == "ZB_run396102"
+    assert cfg.callbacks.cap_sn_zb.dataset_2 == "ZB_run398183"
+    assert cfg.physics_pairing.validation_table is None
+    assert cfg.physics_pairing.test_table is None
+    assert cfg.callbacks.cap_sn_zb.pairing_type == "cdf"
+    assert cfg.callbacks.cap_sn_zb.pairing_index_path is None
+    assert cfg.evaluation.callbacks.cap_sn_zb.pairing_test_index_path is None
+
+
+def test_every_primary_search_cell_composes() -> None:
+    """The frozen 56-study matrix must contain no stale Hydra keys."""
+    for cell in campaign._cells():
+        overrides = [
+            f"experiment=physics/{cell['model']}_background_pairing",
+            f"+selection_metric={cell['metric']}",
+            f"hparams_search={cell['model']}_optuna",
+            *campaign._pairing_overrides(cell),
+            *campaign._score_overrides(cell),
+        ]
+        cfg = compose_config(overrides=overrides)
+        assert cfg.optimized_metric_artifact is True
 
 
 def test_search_overlays_retain_only_requested_primary_metric() -> None:

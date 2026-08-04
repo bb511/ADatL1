@@ -2,6 +2,7 @@
 
 from types import SimpleNamespace
 
+import numpy as np
 import torch
 from sklearn.covariance import OAS
 from torch import nn
@@ -41,6 +42,32 @@ def test_residual_oas_state_uses_clean_final_weight_training_pass() -> None:
     torch.testing.assert_close(state["precision"], torch.from_numpy(expected.precision_))
 
 
+def test_residual_oas_state_mean_imputes_padded_coordinates() -> None:
+    """Padding values must be neutral during covariance fitting."""
+    callback = ResidualOASStateCallback()
+    train_x = torch.tensor([[1.0, 999.0], [2.0, 3.0]])
+    train_mask = torch.tensor([[True, False], [True, True]])
+    trainer = SimpleNamespace(
+        sanity_checking=False,
+        world_size=1,
+        train_dataloader=[{"x": train_x, "mask": train_mask, "y": torch.zeros(2)}],
+    )
+    module = nn.Module()
+    module.device = torch.device("cpu")
+    module.forward = lambda x: (x[:, :1], torch.zeros_like(x))
+    state = {}
+    module.set_residual_oas_state = lambda location, precision: state.update(
+        location=location, precision=precision
+    )
+
+    callback.on_validation_epoch_start(trainer, module)
+
+    completed = np.array([[1.0, 3.0], [2.0, 3.0]])
+    expected = OAS().fit(completed)
+    torch.testing.assert_close(state["location"], torch.tensor([1.5, 3.0], dtype=torch.float64))
+    torch.testing.assert_close(state["precision"], torch.from_numpy(expected.precision_))
+
+
 def test_ae_residual_oas_score_matches_sklearn_mahalanobis() -> None:
     """AE scoring must apply the installed dimension-normalized precision."""
     model = AE(
@@ -64,11 +91,25 @@ def test_ae_residual_oas_score_matches_sklearn_mahalanobis() -> None:
     )
 
 
+def test_ae_residual_oas_score_ignores_padded_decoder_residuals() -> None:
+    """A nonexistent object's decoder output must contribute no anomaly energy."""
+    model = AE(encoder=nn.Linear(2, 1), decoder=nn.Linear(1, 2))
+    model.set_residual_oas_state(torch.zeros(2), torch.eye(2))
+    target = torch.tensor([[2.0, 0.0]])
+    reconstruction = torch.tensor([[0.0, 1000.0]])
+    mask = torch.tensor([[True, False]])
+
+    score = model.residual_oas_score(target, reconstruction, mask)
+
+    torch.testing.assert_close(score, torch.tensor([4.0]))
+
+
 def test_ae_canonical_score_is_residual_mahalanobis() -> None:
     """All generic AE consumers must see Mahalanobis, with MSE only diagnostic."""
     model = AE(
         encoder=nn.Linear(2, 1, bias=False),
         decoder=nn.Linear(1, 2, bias=False),
+        anomaly_score="residual_oas",
         target_rate=0.25,
     )
     with torch.no_grad():

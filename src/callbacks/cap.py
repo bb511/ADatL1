@@ -9,6 +9,26 @@ from src.data.utils import unpack_batch
 from src.utils.pairing.table import load_pair_table, sha256_tensor
 
 
+def _fit_masked_residual_oas(
+    residuals: torch.Tensor, masks: torch.Tensor
+) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+    """Fit OAS after observed-only mean estimation and neutral mean imputation."""
+    masks = masks.to(dtype=torch.bool)
+    if residuals.ndim != 2 or masks.shape != residuals.shape:
+        raise ValueError("Residuals and masks must be equal-shape rank-2 tensors.")
+    counts = masks.sum(dim=0)
+    if torch.any(counts == 0):
+        missing = torch.nonzero(counts == 0, as_tuple=False).view(-1).tolist()
+        raise RuntimeError(f"OAS fit sample never observes residual features {missing}.")
+    observed = masks.to(dtype=residuals.dtype)
+    location = (residuals * observed).sum(dim=0) / counts.to(dtype=residuals.dtype)
+    completed = torch.where(masks, residuals, location.unsqueeze(0))
+    estimator = OAS(store_precision=True, assume_centered=False).fit(completed.numpy())
+    centered = (residuals - location) * observed
+    variance = centered.square().sum(dim=0) / counts.to(dtype=residuals.dtype)
+    return location, variance, torch.from_numpy(estimator.precision_)
+
+
 class CAPCallback(Callback):
     """Compute a validation approximation capacity metric between two datasets.
 
@@ -255,11 +275,12 @@ class ResidualOASStateCallback(Callback):
     never enter the covariance estimate.
     """
 
-    def __init__(self, max_samples: int | None = None):
+    def __init__(self, max_samples: int | None = None, sample_seed: int = 123):
         super().__init__()
         if max_samples is not None and int(max_samples) <= 0:
             raise ValueError("max_samples must be positive when provided.")
         self.max_samples = None if max_samples is None else int(max_samples)
+        self.sample_seed = int(sample_seed)
         self.fit_samples = 0
 
     def on_validation_epoch_start(self, trainer, pl_module):
@@ -271,14 +292,25 @@ class ResidualOASStateCallback(Callback):
         if not hasattr(pl_module, "set_residual_oas_state"):
             raise TypeError("ResidualOASStateCallback requires an AE residual-score interface.")
         residual_chunks = []
+        mask_chunks = []
         loader = trainer.train_dataloader
         shuffler = getattr(getattr(loader, "dataset", None), "shuffler", None)
         shuffler_state = None if shuffler is None else shuffler.get_state()
+        if shuffler is not None:
+            shuffler.manual_seed(self.sample_seed)
         pl_module.eval()
         try:
             with torch.no_grad():
                 for batch in loader:
-                    x = torch.flatten(unpack_batch(batch).x, start_dim=1).to(pl_module.device)
+                    batch_view = unpack_batch(batch)
+                    x = torch.flatten(batch_view.x, start_dim=1).to(pl_module.device)
+                    mask = (
+                        torch.ones_like(x, dtype=torch.bool)
+                        if batch_view.mask is None
+                        else torch.flatten(batch_view.mask, start_dim=1)
+                        .to(pl_module.device)
+                        .bool()
+                    )
                     if self.max_samples is not None:
                         remaining = self.max_samples - sum(
                             chunk.shape[0] for chunk in residual_chunks
@@ -286,6 +318,7 @@ class ResidualOASStateCallback(Callback):
                         if remaining <= 0:
                             break
                         x = x[:remaining]
+                        mask = mask[:remaining]
                     _, reconstruction = pl_module.forward(x)
                     if x.shape != reconstruction.shape:
                         raise ValueError(
@@ -293,6 +326,7 @@ class ResidualOASStateCallback(Callback):
                             f"got {tuple(x.shape)} and {tuple(reconstruction.shape)}."
                         )
                     residual_chunks.append((x - reconstruction).double().cpu())
+                    mask_chunks.append(mask.cpu())
                     if (
                         self.max_samples is not None
                         and sum(chunk.shape[0] for chunk in residual_chunks) >= self.max_samples
@@ -303,17 +337,26 @@ class ResidualOASStateCallback(Callback):
                 shuffler.set_state(shuffler_state)
         if not residual_chunks:
             raise RuntimeError("Residual OAS CAP received an empty training loader.")
-        residuals = torch.cat(residual_chunks, dim=0).numpy()
+        residuals = torch.cat(residual_chunks, dim=0)
+        masks = torch.cat(mask_chunks, dim=0)
         self.fit_samples = int(residuals.shape[0])
-        estimator = OAS(store_precision=True, assume_centered=False).fit(residuals)
+        location, _, precision = _fit_masked_residual_oas(residuals, masks)
         pl_module.set_residual_oas_state(
-            torch.from_numpy(estimator.location_),
-            torch.from_numpy(estimator.precision_),
+            location,
+            precision,
         )
 
 
 class VAEResidualScoreStateCallback(Callback):
     """Fit deterministic VAE residual score geometry on training normals."""
+
+    def __init__(self, max_samples: int | None = None, sample_seed: int = 123):
+        super().__init__()
+        if max_samples is not None and max_samples <= 0:
+            raise ValueError("max_samples must be positive when provided.")
+        self.max_samples = max_samples
+        self.sample_seed = int(sample_seed)
+        self.fit_samples = 0
 
     def on_validation_epoch_start(self, trainer, pl_module):
         """Install diagonal and OAS residual states before validation scoring."""
@@ -324,33 +367,59 @@ class VAEResidualScoreStateCallback(Callback):
         if not hasattr(pl_module, "set_residual_score_state"):
             raise TypeError("VAE residual scoring requires its residual-state interface.")
         residual_chunks = []
+        mask_chunks = []
         loader = trainer.train_dataloader
         shuffler = getattr(getattr(loader, "dataset", None), "shuffler", None)
         shuffler_state = None if shuffler is None else shuffler.get_state()
+        if shuffler is not None:
+            shuffler.manual_seed(self.sample_seed)
         pl_module.eval()
         try:
             with torch.no_grad():
                 for batch in loader:
-                    x = torch.flatten(unpack_batch(batch).x, start_dim=1).to(pl_module.device)
+                    batch_view = unpack_batch(batch)
+                    x = torch.flatten(batch_view.x, start_dim=1).to(pl_module.device)
+                    mask = (
+                        torch.ones_like(x, dtype=torch.bool)
+                        if batch_view.mask is None
+                        else torch.flatten(batch_view.mask, start_dim=1)
+                        .to(pl_module.device)
+                        .bool()
+                    )
                     reconstruction = pl_module.deterministic_reconstruction(x)
                     if x.shape != reconstruction.shape:
                         raise ValueError(
                             "VAE residual scoring requires equal input/reconstruction shapes."
                         )
-                    residual_chunks.append((x - reconstruction).double().cpu())
+                    residual = (x - reconstruction).double().cpu()
+                    if self.max_samples is not None:
+                        remaining = self.max_samples - sum(
+                            chunk.shape[0] for chunk in residual_chunks
+                        )
+                        residual = residual[:remaining]
+                        mask = mask[:remaining]
+                    residual_chunks.append(residual)
+                    mask_chunks.append(mask.cpu())
+                    if (
+                        self.max_samples is not None
+                        and sum(chunk.shape[0] for chunk in residual_chunks) >= self.max_samples
+                    ):
+                        break
         finally:
             if shuffler_state is not None:
                 shuffler.set_state(shuffler_state)
         if not residual_chunks:
             raise RuntimeError("VAE residual scoring received an empty training loader.")
-        residuals = torch.cat(residual_chunks, dim=0).numpy()
-        estimator = OAS(store_precision=True, assume_centered=False).fit(residuals)
-        variance = residuals.var(axis=0).clip(min=np.finfo(np.float64).eps)
+        residuals = torch.cat(residual_chunks, dim=0)
+        masks = torch.cat(mask_chunks, dim=0)
+        self.fit_samples = int(residuals.shape[0])
+        location, variance, precision = _fit_masked_residual_oas(residuals, masks)
+        variance = variance.clamp_min(np.finfo(np.float64).eps)
         pl_module.set_residual_score_state(
-            torch.from_numpy(residuals.mean(axis=0)),
-            torch.from_numpy(variance),
-            torch.from_numpy(estimator.location_),
-            torch.from_numpy(estimator.precision_),
+            location,
+            variance,
+            location,
+            precision,
         )
 
 

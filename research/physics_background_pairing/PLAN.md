@@ -21,9 +21,14 @@ data-versus-simulation agreement test.
    streams. The streams use held-out validation or test events only.
 4. Signal datasets, target rate (0.25 kHz), base rate (28608.8064 kHz), preprocessing,
    search spaces, epoch budgets, and downstream evaluation remain those of the paper.
-5. AE training still minimizes Huber reconstruction loss, but its anomaly score is
-   residual Mahalanobis distance with OAS covariance estimated only from clean
-   training-normal residuals. MSE is retained only as a named diagnostic.
+5. AE training still minimizes Huber reconstruction loss. AE searches are repeated
+   with the paper-native reconstruction MSE and with residual Mahalanobis distance;
+   VAE searches are repeated with the paper-native latent KL score and residual
+   Mahalanobis distance. OAS covariance is estimated only from clean training-normal
+   residuals using a deterministic bounded sample. Padding is treated as missing:
+   feature means use observed entries only, missing entries are mean-imputed for the
+   covariance fit, and the event score includes and normalizes over observed features
+   only.
 6. Pair-table metadata, source names, split, sample count, index bijection, and ordered
    input hashes must pass authentication before CAP is evaluated.
 7. Each search trial retains and compares the paper's three checkpoint candidates:
@@ -31,8 +36,9 @@ data-versus-simulation agreement test.
 
 ## Selection metrics
 
-- CAP: four independent searches, one for each stored one-to-one pairing:
-  `flat_physical`, `physics_summary`, `typed_sliced_wasserstein`, and `jetclr`.
+- CAP: five independent searches: one for each stored one-to-one pairing
+  (`flat_physical`, `physics_summary`, `typed_sliced_wasserstein`, and `jetclr`) plus
+  empirical-CDF score-rank pairing as the paper-aligned control.
 - Wasserstein-1: one search on the background0/background1 score marginals. Pair-table
   permutations cannot affect a one-dimensional marginal Wasserstein distance.
 - Threshold drift: calibrate the operational threshold on background0 and evaluate it
@@ -44,16 +50,18 @@ data-versus-simulation agreement test.
 Models: AE, VAE, DSAE, DSVAE, SVDD, and RealNVP. DTE is excluded because it was not
 one of the six physics models in the paper.
 
-For each model, run six 600-trial, 50-epoch Optuna searches:
+For each score variant, run seven 600-trial, 50-epoch Optuna searches:
 
 1. CAP / `flat_physical`
 2. CAP / `physics_summary`
 3. CAP / `typed_sliced_wasserstein`
 4. CAP / `jetclr`
-5. Wasserstein-1 / E versus G
-6. Threshold drift / E calibration to G evaluation
+5. CAP / empirical-CDF control
+6. Wasserstein-1 / E versus G
+7. Threshold drift / E calibration to G evaluation
 
-This is 36 studies and at most 21,600 trials. After each study, retain every Pareto
+AE and VAE each use two score variants; the other four models retain their native
+score. This is 56 studies and at most 33,600 trials. After each study, retain every Pareto
 candidate, retrain it for 200 epochs with the paper's fixed reporting seed, and evaluate
 all configured physics signals at the unchanged operational rate. As in the paper, the
 final reported trial is the retrained Pareto candidate with the best mean downstream
@@ -78,7 +86,7 @@ limits, but the matrix does not shrink.
 
 ## Completion evidence
 
-Completion requires: green targeted tests; successful config composition for all 36
+Completion requires: green targeted tests; successful config composition for all 56
 cells; authenticated pair-table preflight; completed Optuna study manifests showing
 600 finished trials per cell (or explicit accounted failed trials followed by enough
 replacement trials); completed retraining/evaluation manifests; and a final result

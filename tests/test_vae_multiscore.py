@@ -6,12 +6,14 @@ import math
 from types import SimpleNamespace
 
 import torch
+from torch import nn
 
 from scripts import cchamber_vae_multiscore_campaign as campaign
 from scripts import cchamber_vae_multiscore_evaluate_safe as safe_evaluation
 from src.algorithms.components.decoder import Decoder
 from src.algorithms.components.encoder import Encoder, VariationalEncoder
 from src.algorithms.vae import VAE
+from src.callbacks.cap import VAEResidualScoreStateCallback
 
 
 def _dense_modules():
@@ -71,6 +73,68 @@ def test_residual_scores_match_prespecified_formulas() -> None:
     torch.testing.assert_close(mse, torch.tensor([5.0 / 11.0, 25.0 / 11.0]))
     torch.testing.assert_close(diagonal, torch.tensor([1.0 / 11.0, 10.0 / 11.0]))
     torch.testing.assert_close(oas, torch.tensor([1.0 / 11.0, 13.0 / 11.0]))
+
+
+def test_vae_can_route_residual_oas_as_its_canonical_score() -> None:
+    """Generic metric consumers must receive OAS when the experiment selects it."""
+    _, _, encoder, decoder = _dense_modules()
+    model = VAE(encoder=encoder, decoder=decoder, anomaly_score="residual_oas")
+    model.set_residual_score_state(
+        mean=torch.zeros(11),
+        variance=torch.ones(11),
+        oas_location=torch.zeros(11),
+        oas_precision=torch.eye(11),
+    )
+    batch = {"x": torch.ones(3, 11), "y": torch.zeros(3)}
+
+    output = model.model_step(batch)
+
+    torch.testing.assert_close(output["ascore/full"], output["ascore/residual_oas"])
+    assert not torch.equal(output["ascore/full"], output["ascore/kl_raw"])
+
+
+def test_vae_residual_oas_ignores_padded_decoder_residuals() -> None:
+    """VAE residual scores must use the same observed-feature support as masked MSE."""
+    _, _, encoder, decoder = _dense_modules()
+    model = VAE(encoder=encoder, decoder=decoder)
+    model.set_residual_score_state(
+        mean=torch.zeros(11),
+        variance=torch.ones(11),
+        oas_location=torch.zeros(11),
+        oas_precision=torch.eye(11),
+    )
+    target = torch.tensor([[2.0] + [0.0] * 10])
+    reconstruction = torch.tensor([[0.0] + [1000.0] * 10])
+    mask = torch.tensor([[True] + [False] * 10])
+
+    mse, diagonal, oas = model.residual_scores(target, reconstruction, mask)
+
+    expected = torch.tensor([4.0])
+    torch.testing.assert_close(mse, expected)
+    torch.testing.assert_close(diagonal, expected)
+    torch.testing.assert_close(oas, expected)
+
+
+def test_vae_residual_state_respects_max_samples() -> None:
+    """Physics OAS fitting must remain bounded on the large training dataset."""
+    callback = VAEResidualScoreStateCallback(max_samples=3)
+    batches = [
+        {"x": torch.tensor([[0.0, 0.0], [1.0, 0.0]]), "y": torch.zeros(2)},
+        {"x": torch.tensor([[2.0, 0.0], [3.0, 0.0]]), "y": torch.zeros(2)},
+    ]
+    trainer = SimpleNamespace(
+        sanity_checking=False,
+        world_size=1,
+        train_dataloader=batches,
+    )
+    module = nn.Module()
+    module.deterministic_reconstruction = lambda x: torch.zeros_like(x)
+    module.set_residual_score_state = lambda *args: None
+    module.device = torch.device("cpu")
+
+    callback.on_validation_epoch_start(trainer, module)
+
+    assert callback.fit_samples == 3
 
 
 def test_campaign_covers_every_score_selector_on_shared_grid() -> None:

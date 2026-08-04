@@ -1,0 +1,24 @@
+# @package _global_
+
+defaults:
+  - physics
+  - _self_
+
+# Empirical-CDF control: the same held-out background domains, paired by score rank
+# rather than by a precomputed input-space correspondence.
+physics_pairing:
+  strategy: cdf
+  validation_table: null
+  test_table: null
+
+callbacks:
+  cap_sn_zb:
+    pairing_type: cdf
+    pairing_index_path: null
+
+evaluation:
+  callbacks:
+    cap_sn_zb:
+      pairing_type: cdf
+      pairing_index_path: null
+      pairing_test_index_path: null

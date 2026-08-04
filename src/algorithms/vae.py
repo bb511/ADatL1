@@ -49,6 +49,7 @@ class VAE(ADLightningModule):
         pretrained_ae_strict: bool = True,
         initial_log_variance: float = math.log(0.01),
         normalize_kl_by_latent_dim: bool = False,
+        anomaly_score: str = "kl_raw",
         target_rate: float = 0.25,
         base_rate: float | None = None,
         **kwargs,
@@ -63,6 +64,18 @@ class VAE(ADLightningModule):
         self.pretrained_ae_strict = bool(pretrained_ae_strict)
         self.initial_log_variance = float(initial_log_variance)
         self.normalize_kl_by_latent_dim = bool(normalize_kl_by_latent_dim)
+        allowed_scores = {
+            "kl_raw",
+            "reconstruction_mse",
+            "residual_diagonal",
+            "residual_oas",
+        }
+        if anomaly_score not in allowed_scores:
+            raise ValueError(
+                f"Unknown VAE anomaly_score {anomaly_score!r}; "
+                f"choose one of {sorted(allowed_scores)}."
+            )
+        self.anomaly_score = anomaly_score
         self.encoder = encoder
         self.decoder = decoder
         self.features = features if features is not None else nn.Identity()
@@ -156,19 +169,31 @@ class VAE(ADLightningModule):
         self.residual_score_ready.fill_(True)
 
     def residual_scores(
-        self, target: torch.Tensor, reconstruction: torch.Tensor
+        self,
+        target: torch.Tensor,
+        reconstruction: torch.Tensor,
+        mask: torch.Tensor | None = None,
     ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
-        """Return MSE, diagonal-standardized, and OAS residual energies."""
+        """Return reconstruction energies over observed features only."""
         residual = target - reconstruction
-        mse = torch.mean(torch.square(residual), dim=1)
+        if mask is None:
+            observed = torch.ones_like(residual, dtype=torch.bool)
+        else:
+            observed = mask.to(device=residual.device, dtype=torch.bool)
+            if observed.shape != residual.shape:
+                raise ValueError(
+                    f"Expected residual mask {tuple(residual.shape)}, "
+                    f"got {tuple(observed.shape)}."
+                )
+        denominator = observed.sum(dim=1).clamp_min(1).to(dtype=residual.dtype)
+        mse = torch.square(residual).masked_fill(~observed, 0.0).sum(dim=1) / denominator
         if not bool(self.residual_score_ready):
             return mse, mse, mse
         centered = residual - self.residual_score_mean
-        diagonal = torch.mean(
-            torch.square(centered) / self.residual_score_variance.clamp_min(1.0e-12),
-            dim=1,
-        )
+        diagonal_terms = torch.square(centered) / self.residual_score_variance.clamp_min(1.0e-12)
+        diagonal = diagonal_terms.masked_fill(~observed, 0.0).sum(dim=1) / denominator
         oas_centered = residual - self.residual_oas_location
+        oas_centered = oas_centered.masked_fill(~observed, 0.0)
         oas = (
             torch.einsum(
                 "bi,ij,bj->b",
@@ -176,7 +201,7 @@ class VAE(ADLightningModule):
                 self.residual_oas_precision,
                 oas_centered,
             )
-            / residual.shape[1]
+            / denominator
         )
         return mse, diagonal, oas
 
@@ -207,12 +232,17 @@ class VAE(ADLightningModule):
         with self._keras_device_scope(z_mean.device):
             deterministic_reconstruction = self.decoder(z_mean)
         reconstruction_mse, residual_diagonal, residual_oas = self.residual_scores(
-            x, deterministic_reconstruction
+            x, deterministic_reconstruction, m
         )
 
-        # Keep raw KL as the legacy operational score while exposing every
-        # prespecified score to independent validation selectors.
-        ascore = kl_raw
+        # Preserve raw KL as the default while allowing an experiment to route one
+        # prespecified score consistently through every generic metric consumer.
+        ascore = {
+            "kl_raw": kl_raw,
+            "reconstruction_mse": reconstruction_mse,
+            "residual_diagonal": residual_diagonal,
+            "residual_oas": residual_oas,
+        }[self.anomaly_score]
         if ascore.ndim != 1:
             raise ValueError(f"Expected per-event ascores, got {tuple(ascore.shape)}.")
 

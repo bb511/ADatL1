@@ -22,11 +22,20 @@ DEFAULT_ROOT = Path(
     "/iopsstor/scratch/cscs/vjimenez/adatl1/campaigns/" "physics_background_pairing_20260803"
 )
 MODELS = ("ae", "vae", "dsae", "dsvae", "svdd", "realnvp")
+MODEL_SCORES = {
+    "ae": ("mse", "residual_oas"),
+    "vae": ("kl_raw", "residual_oas"),
+    "dsae": ("native",),
+    "dsvae": ("native",),
+    "svdd": ("native",),
+    "realnvp": ("native",),
+}
 CAP_STRATEGIES = (
     "flat_physical",
     "physics_summary",
     "typed_sliced_wasserstein",
     "jetclr",
+    "cdf",
 )
 METRICS = ("wasserstein", "drift")
 TARGET_TRIALS = 600
@@ -43,6 +52,8 @@ def parse_args() -> argparse.Namespace:
     subparsers.add_parser("status")
     pilot = subparsers.add_parser("pilot")
     pilot.add_argument("--metric", choices=("cap_mapping", *METRICS), required=True)
+    pilot.add_argument("--model", choices=MODELS, default="ae")
+    pilot.add_argument("--score", default="residual_oas")
     sweep = subparsers.add_parser("sweep")
     sweep.add_argument("--cell", required=True)
     sweep.add_argument("--trials", type=int, default=48)
@@ -107,27 +118,31 @@ def _jsonable(value: Any) -> Any:
 
 
 def _cells() -> list[dict[str, str]]:
-    """Construct the complete 36-cell primary search matrix."""
+    """Construct the complete score-stratified primary search matrix."""
     cells = []
     for model in MODELS:
-        for strategy in CAP_STRATEGIES:
-            cells.append(
-                {
-                    "id": f"{model}__cap__{strategy}",
-                    "model": model,
-                    "metric": "cap_mapping",
-                    "strategy": strategy,
-                }
-            )
-        for metric in METRICS:
-            cells.append(
-                {
-                    "id": f"{model}__{metric}",
-                    "model": model,
-                    "metric": metric,
-                    "strategy": "physics_summary",
-                }
-            )
+        for score in MODEL_SCORES[model]:
+            score_id = f"__{score}" if len(MODEL_SCORES[model]) > 1 else ""
+            for strategy in CAP_STRATEGIES:
+                cells.append(
+                    {
+                        "id": f"{model}{score_id}__cap__{strategy}",
+                        "model": model,
+                        "score": score,
+                        "metric": "cap_mapping",
+                        "strategy": strategy,
+                    }
+                )
+            for metric in METRICS:
+                cells.append(
+                    {
+                        "id": f"{model}{score_id}__{metric}",
+                        "model": model,
+                        "score": score,
+                        "metric": metric,
+                        "strategy": "physics_summary",
+                    }
+                )
     return cells
 
 
@@ -148,6 +163,7 @@ def initialize(root: Path) -> Path:
         "search_epochs": SEARCH_EPOCHS,
         "retrain_epochs": RETRAIN_EPOCHS,
         "models": list(MODELS),
+        "model_scores": {model: list(scores) for model, scores in MODEL_SCORES.items()},
         "cap_strategies": list(CAP_STRATEGIES),
         "cells": _cells(),
     }
@@ -287,7 +303,6 @@ def retrain(root: Path, index: int) -> Path:
         "src/train.py",
         f"experiment=physics/{row['model']}_background_pairing",
         f"+selection_metric={row['metric']}_retrain",
-        f"physics_pairing.strategy={row['strategy']}",
         "experiment_name=physics_bgpair_retrain",
         f"run_name={run_name}",
         f"hydra.run.dir={hydra_dir}",
@@ -300,6 +315,8 @@ def retrain(root: Path, index: int) -> Path:
         "test=true",
         f"seed={int(row['seed'])}",
     ]
+    command.extend(_pairing_overrides(row))
+    command.extend(_score_overrides(row))
     command.extend(f"{key}={_hydra_value(value)}" for key, value in row["params"].items())
     subprocess.run(command, cwd=REPOSITORY_ROOT, check=True)  # nosec B603
     optimized = hydra_dir / "optimized_metric.json"
@@ -395,13 +412,12 @@ def aggregate(root: Path) -> Path:
 
 def _base_train_command(root: Path, cell: dict[str, str]) -> list[str]:
     """Build invariant Hydra overrides for one selection cell."""
-    return [
+    command = [
         sys.executable,
         "src/train.py",
         "-m",
         f"experiment=physics/{cell['model']}_background_pairing",
         f"+selection_metric={cell['metric']}",
-        f"physics_pairing.strategy={cell['strategy']}",
         f"hparams_search={cell['model']}_optuna",
         f"experiment_name=physics_bgpair_{cell['id']}",
         "logger=none",
@@ -411,9 +427,37 @@ def _base_train_command(root: Path, cell: dict[str, str]) -> list[str]:
         f"trainer.max_epochs={SEARCH_EPOCHS}",
         "trainer.num_sanity_val_steps=0",
         "test=false",
-        f"hydra.sweeper.storage=sqlite:///{_study_path(root, cell['id'])}",
+        f"hydra.sweeper.storage=sqlite:///{_study_path(root, cell['id'])}?timeout=600",
         f"hydra.sweeper.study_name={cell['id']}",
     ]
+    command.extend(_pairing_overrides(cell))
+    command.extend(_score_overrides(cell))
+    return command
+
+
+def _pairing_overrides(cell: dict[str, str]) -> list[str]:
+    """Select a precomputed CAP table or the empirical-CDF control."""
+    if cell["metric"] == "cap_mapping" and cell["strategy"] == "cdf":
+        return ["pairing=physics_cdf"]
+    return [f"physics_pairing.strategy={cell['strategy']}"]
+
+
+def _score_overrides(cell: dict[str, str]) -> list[str]:
+    """Route one model's generic anomaly output through the selected score."""
+    model, score = cell["model"], cell["score"]
+    if score not in MODEL_SCORES[model]:
+        raise ValueError(f"Score {score!r} is not configured for model {model!r}.")
+    if model == "ae":
+        overrides = [f"algorithm.anomaly_score={score}"]
+        if score == "mse":
+            overrides.append("callbacks.residual_oas_state=null")
+        return overrides
+    if model == "vae":
+        overrides = [f"algorithm.anomaly_score={score}"]
+        if score == "kl_raw":
+            overrides.append("callbacks.vae_residual_state=null")
+        return overrides
+    return []
 
 
 def sweep(root: Path, cell_id: str, trials: int, jobs: int) -> None:
@@ -448,22 +492,24 @@ def sweep(root: Path, cell_id: str, trials: int, jobs: int) -> None:
     subprocess.run(command, cwd=REPOSITORY_ROOT, check=True)  # nosec B603
 
 
-def pilot(root: Path, metric: str) -> None:
-    """Run one one-epoch AE pilot for a model-selection metric family."""
+def pilot(root: Path, metric: str, model: str, score: str) -> None:
+    """Run one one-epoch pilot for a model, score, and metric family."""
     design = _load_design(root)
+    if score not in MODEL_SCORES[model]:
+        raise ValueError(f"Score {score!r} is not configured for model {model!r}.")
     cell = {
-        "model": "ae",
+        "model": model,
+        "score": score,
         "metric": metric,
         "strategy": "physics_summary",
     }
-    output = root / "pilots" / metric
+    output = root / "pilots" / f"{model}__{score}__{metric}"
     command = [
         sys.executable,
         "src/train.py",
         f"experiment=physics/{cell['model']}_background_pairing",
         f"+selection_metric={metric}",
-        f"physics_pairing.strategy={cell['strategy']}",
-        f"experiment_name=physics_bgpair_pilot_{metric}",
+        f"experiment_name=physics_bgpair_pilot_{model}_{score}_{metric}",
         f"run_name={design['code_commit'][:12]}",
         f"hydra.run.dir={output}",
         "logger=none",
@@ -475,12 +521,16 @@ def pilot(root: Path, metric: str) -> None:
         "+trainer.limit_train_batches=2",
         "test=false",
     ]
+    command.extend(_pairing_overrides(cell))
+    command.extend(_score_overrides(cell))
     subprocess.run(command, cwd=REPOSITORY_ROOT, check=True)  # nosec B603
     _write_json(
         output / "success.json",
         {
             "completed_at": datetime.now(timezone.utc).isoformat(),
             "metric": metric,
+            "model": model,
+            "score": score,
             "code_commit": design["code_commit"],
             "command": command,
         },
@@ -526,7 +576,7 @@ def main() -> None:
     elif args.command == "status":
         status(root)
     elif args.command == "pilot":
-        pilot(root, args.metric)
+        pilot(root, args.metric, args.model, args.score)
     elif args.command == "sweep":
         sweep(root, args.cell, args.trials, args.jobs)
     elif args.command == "submit-next":

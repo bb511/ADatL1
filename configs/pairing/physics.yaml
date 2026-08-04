@@ -14,6 +14,7 @@ physics_pairing:
   # strategy: flat_physical
   # strategy: typed_sliced_wasserstein
   # strategy: jetclr
+  # Empirical-CDF control is configured separately with pairing=physics_cdf.
 
   # Must equal data.batch_size * data.max_val_batches for each named stream.
   events: 163840

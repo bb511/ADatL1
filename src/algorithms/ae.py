@@ -34,6 +34,7 @@ class AE(ADLightningModule):
         input_noise_std: float = 0.0,
         delta: float = 3.0,
         features: nn.Module = None,
+        anomaly_score: str = "mse",
         target_rate: float = 0.25,
         base_rate: float | None = None,
         **kwargs,
@@ -45,6 +46,9 @@ class AE(ADLightningModule):
 
         self.encoder, self.decoder = encoder, decoder
         self.input_noise_std = input_noise_std
+        if anomaly_score not in {"mse", "residual_oas"}:
+            raise ValueError("AE anomaly_score must be 'mse' or 'residual_oas'.")
+        self.anomaly_score = anomaly_score
         self.loss = HuberAELoss(delta=delta, reduction="none")
         self.ascore = MSEReconstructionLoss(reduction="none")
         output_layers = [
@@ -112,14 +116,27 @@ class AE(ADLightningModule):
         self.residual_oas_ready.fill_(True)
 
     def residual_oas_score(
-        self, target: torch.Tensor, reconstruction: torch.Tensor
+        self,
+        target: torch.Tensor,
+        reconstruction: torch.Tensor,
+        mask: torch.Tensor | None = None,
     ) -> torch.Tensor:
-        """Return dimension-normalized residual Mahalanobis energy."""
+        """Return residual Mahalanobis energy over observed features only."""
         residual = target - reconstruction
         centered = residual - self.residual_oas_location
+        if mask is None:
+            denominator = residual.new_full((residual.shape[0],), residual.shape[1])
+        else:
+            mask = mask.to(device=centered.device, dtype=torch.bool)
+            if mask.shape != centered.shape:
+                raise ValueError(
+                    f"Expected residual mask {tuple(centered.shape)}, got {tuple(mask.shape)}."
+                )
+            centered = centered.masked_fill(~mask, 0.0)
+            denominator = mask.sum(dim=1).clamp_min(1).to(dtype=residual.dtype)
         return (
             torch.einsum("bi,ij,bj->b", centered, self.residual_oas_precision, centered)
-            / residual.shape[1]
+            / denominator
         )
 
     def model_step(self, batch: torch.Tensor) -> torch.Tensor:
@@ -144,14 +161,14 @@ class AE(ADLightningModule):
         # The anomaly score is expected to be a distribution over events.
         mse_ascore = self.ascore(x, reconstruction, m)
         residual_oas = (
-            self.residual_oas_score(x, reconstruction)
+            self.residual_oas_score(x, reconstruction, m)
             if bool(self.residual_oas_ready)
             else mse_ascore
         )
-        # Residual Mahalanobis is the canonical AE anomaly score. During Lightning's
-        # pre-fit sanity validation the train-only OAS state is not available yet, so
-        # MSE is used only as a temporary, non-checkpointed fallback.
-        ascore = residual_oas
+        ascore = {
+            "mse": mse_ascore,
+            "residual_oas": residual_oas,
+        }[self.anomaly_score]
         if ascore.ndim != 1:
             raise ValueError(f"Expected per-event ascores, got {tuple(ascore.shape)}.")
 

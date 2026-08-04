@@ -11,11 +11,11 @@ spec:
       resources:
         requests:
           cpu: "3"
-          memory: "16Gi"
+          memory: "64Gi"
           nvidia.com/gpu: "1"
         limits:
           cpu: "3"
-          memory: "32Gi"
+          memory: "64Gi"
           nvidia.com/gpu: "1"
   nodeSelector:
     nvidia.com/gpu.product: NVIDIA-L40S

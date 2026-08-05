@@ -3,7 +3,7 @@ from types import SimpleNamespace
 
 import pytest
 import torch
-from pytorch_lightning import Trainer
+from pytorch_lightning import Callback, Trainer
 
 from scripts import physics_background_pairing_restart_canary as canary
 
@@ -130,6 +130,42 @@ def test_real_production_callback_suite_round_trips_in_lightning_checkpoint(
     )
     for name, callback in resumed_callbacks.items():
         assert canary._jsonable(callback.state_dict()) != {}, name
+
+
+def test_exact_epoch_checkpoint_is_saved_before_train_end(monkeypatch, tmp_path: Path) -> None:
+    """The forced preemption must not rely on Lightning's train-end fallback."""
+    monkeypatch.setenv("SLURM_RESTART_COUNT", "1")
+    checkpoint = canary._build_exact_epoch_checkpoint(tmp_path)
+    assert checkpoint.save_last is True
+    assert checkpoint.save_top_k == 1
+    assert checkpoint._every_n_epochs == 1
+    assert checkpoint._save_on_train_epoch_end is False
+
+    class EpochBoundaryWitness(Callback):
+        observed = False
+
+        def on_train_epoch_start(self, trainer, pl_module) -> None:
+            if int(trainer.current_epoch) != 1:
+                return
+            path = tmp_path / "exact_epoch" / "last.ckpt"
+            payload = torch.load(path, map_location="cpu", weights_only=False)
+            assert payload["epoch"] == 0
+            assert canary.ExactRetrainRNGState().state_key in payload["callbacks"]
+            self.observed = True
+
+    witness = EpochBoundaryWitness()
+    trainer = Trainer(
+        accelerator="cpu",
+        devices=1,
+        max_epochs=2,
+        callbacks=[canary.ExactRetrainRNGState(), witness, checkpoint],
+        logger=False,
+        enable_progress_bar=False,
+        enable_model_summary=False,
+        num_sanity_val_steps=0,
+    )
+    trainer.fit(canary._SyntheticModule(), datamodule=canary._CanaryDataModule())
+    assert witness.observed
 
 
 def test_hpc_is_archived_as_non_resume_evidence(tmp_path: Path) -> None:

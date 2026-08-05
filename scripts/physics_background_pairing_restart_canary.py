@@ -461,6 +461,21 @@ def _build_callbacks(root: Path) -> dict[str, Callback]:
     }
 
 
+def _build_exact_epoch_checkpoint(root: Path) -> ModelCheckpoint:
+    """Mirror the production last-checkpoint behavior at every completed epoch."""
+    # Lightning 2.6 writes ``save_last`` during validation only after a primary
+    # checkpoint was saved at the same global step. With ``save_top_k=0`` it waits
+    # until ``on_train_end``, which an intentionally preempted allocation never
+    # reaches. Production uses the same one-primary-plus-last shape.
+    return ModelCheckpoint(
+        dirpath=root / "exact_epoch",
+        save_last=True,
+        save_top_k=1,
+        every_n_epochs=1,
+        save_on_train_epoch_end=False,
+    )
+
+
 def _archive_hpc(root: Path, restart_count: int) -> dict[str, Any] | None:
     """Move mid-epoch state out of Lightning discovery before constructing Trainer."""
     checkpoints = sorted((root / "lightning").glob("hpc_ckpt_*.ckpt"))
@@ -610,13 +625,7 @@ def run(root: Path, scheduler_log: Path, expected_commit: str) -> Path:
     )
     expected_states = _load_callback_states(exact_checkpoint, callbacks)
     proof = _RestartProof(root, callbacks, expected_states, restart_count, client, run_id)
-    exact_checkpointing = ModelCheckpoint(
-        dirpath=root / "exact_epoch",
-        save_last=True,
-        save_top_k=0,
-        every_n_epochs=1,
-        save_on_train_epoch_end=False,
-    )
+    exact_checkpointing = _build_exact_epoch_checkpoint(root)
     logger = MLFlowLogger(
         experiment_name=EXPERIMENT_NAME,
         run_name=RUN_NAME,

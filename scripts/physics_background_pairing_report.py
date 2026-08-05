@@ -750,6 +750,133 @@ def _marker_rows(root: Path, manifest: dict[str, Any]) -> list[dict[str, Any]]:
     return rows
 
 
+def _checkpoint_identity(name: str) -> str:
+    """Normalize evaluator checkpoint labels exactly as campaign aggregation does."""
+    parts = str(name).split("ds=")
+    return parts[1].split("__")[0] if len(parts) > 1 else parts[0]
+
+
+def _marker_efficiencies(marker: dict[str, Any], checkpoint: str, score: str) -> dict[str, float]:
+    """Reconstruct one candidate's authenticated 20-anomaly efficiency vector."""
+    efficiencies: dict[str, float] = {}
+    score_folder = f"/eff_{score}/"
+    for entry in marker["value_files"]:
+        path = Path(entry["path"])
+        if score_folder not in path.as_posix():
+            continue
+        if _sha256(path) != entry["sha256"]:
+            raise RuntimeError(f"Changed downstream artifact: {path}")
+        with path.open(encoding="utf-8", newline="") as handle:
+            for row in csv.DictReader(handle):
+                if (
+                    _checkpoint_identity(row["checkpoint"]) != checkpoint
+                    or row["metric"] != "efficiency_operational"
+                ):
+                    continue
+                anomaly = row["intervention"]
+                if anomaly in efficiencies:
+                    raise RuntimeError(
+                        f"Duplicate downstream efficiency for {score}, {checkpoint}, {anomaly}."
+                    )
+                efficiencies[anomaly] = float(row["value"])
+    if set(efficiencies) != set(DOWNSTREAM_DATASETS) or not all(
+        math.isfinite(value) and 0.0 <= value <= 1.0 for value in efficiencies.values()
+    ):
+        raise RuntimeError(
+            f"Expected exactly 20 finite downstream efficiencies for {score}, {checkpoint}."
+        )
+    return efficiencies
+
+
+def _deterministic_oracle_winner(candidates: list[dict[str, Any]]) -> dict[str, Any]:
+    """Select maximum mean efficiency, breaking exact ties by membership index."""
+    if not candidates:
+        raise RuntimeError("Cannot select an oracle winner from an empty front.")
+    return min(
+        candidates,
+        key=lambda row: (-float(row["mean_downstream_efficiency"]), int(row["membership_index"])),
+    )
+
+
+def _validate_oracle_candidates(
+    root: Path, manifest: dict[str, Any], oracle: dict[str, Any]
+) -> None:
+    """Rebuild every oracle candidate and prove all declared winners are correct."""
+    retrains = {int(row["retrain_index"]): row for row in manifest["retrain_runs"]}
+    expected_memberships = {
+        int(row["membership_index"]): row for row in manifest["front_memberships"]
+    }
+    candidates = oracle.get("all_front_memberships", [])
+    candidate_by_index: dict[int, dict[str, Any]] = {}
+    for candidate in candidates:
+        index = int(candidate["membership_index"])
+        if index in candidate_by_index:
+            raise RuntimeError(f"Duplicate oracle front membership index: {index}.")
+        candidate_by_index[index] = candidate
+    if set(candidate_by_index) != set(expected_memberships):
+        raise RuntimeError("Oracle candidates do not exactly cover the frozen front memberships.")
+
+    verified_by_front: dict[tuple[str, str], list[dict[str, Any]]] = {}
+    for index, membership in expected_memberships.items():
+        candidate = candidate_by_index[index]
+        if any(candidate.get(key) != value for key, value in membership.items()):
+            raise RuntimeError(f"Oracle candidate differs from frozen membership {index}.")
+        retrain_index = int(membership["retrain_index"])
+        retrain = retrains[retrain_index]
+        if (
+            candidate.get("params") != retrain["params"]
+            or candidate["model"] != retrain["model"]
+            or int(candidate["trial_number"]) != int(retrain["trial_number"])
+        ):
+            raise RuntimeError(f"Oracle candidate differs from retrain row {retrain_index}.")
+        marker = _read_json(root / "retraining" / "markers" / f"{retrain_index:04d}.json")
+        if marker.get("row") != retrain:
+            raise RuntimeError(f"Retrain marker differs for oracle candidate {index}.")
+        optimized_path = Path(marker["optimized_metric_artifact"])
+        if _sha256(optimized_path) != marker["optimized_metric_artifact_sha256"]:
+            raise RuntimeError(f"Changed optimized artifact: {optimized_path}")
+        optimized = _read_json(optimized_path)
+        selection = optimized["selections"][membership["logical_objective"]]
+        pair = [float(value) for value in selection["optimized_metric"]]
+        if (
+            candidate.get("optimized_ckpt_name") != selection["optimized_ckpt_name"]
+            or [float(value) for value in candidate.get("retrained_objective_values", [])] != pair
+            or len(pair) != 2
+            or not all(math.isfinite(value) for value in pair)
+        ):
+            raise RuntimeError(
+                f"Oracle candidate selection differs from retrain artifact {index}."
+            )
+        efficiencies = _marker_efficiencies(
+            marker, selection["optimized_ckpt_name"], membership["score"]
+        )
+        if candidate.get("downstream_efficiencies") != efficiencies:
+            raise RuntimeError(f"Oracle candidate efficiencies differ from marker {index}.")
+        mean = sum(efficiencies.values()) / len(efficiencies)
+        if not math.isclose(
+            float(candidate.get("mean_downstream_efficiency", math.nan)),
+            mean,
+            rel_tol=1e-12,
+            abs_tol=1e-15,
+        ):
+            raise RuntimeError(f"Oracle candidate mean is incorrect for membership {index}.")
+        verified_by_front.setdefault(
+            (membership["model"], membership["logical_objective"]), []
+        ).append(candidate)
+
+    declared = {(row["model"], row["logical_objective"]): row for row in oracle.get("winners", [])}
+    if len(declared) != len(oracle.get("winners", [])):
+        raise RuntimeError("Oracle result contains duplicate logical winners.")
+    if set(declared) != set(verified_by_front):
+        raise RuntimeError("Oracle winners do not exactly cover the frozen logical fronts.")
+    for front, front_candidates in verified_by_front.items():
+        expected = _deterministic_oracle_winner(front_candidates)
+        if declared[front] != expected:
+            raise RuntimeError(
+                f"Declared oracle winner is not the deterministic downstream argmax for {front}."
+            )
+
+
 def _winner_exports(
     root: Path, design: dict[str, Any], manifest: dict[str, Any], oracle: dict[str, Any]
 ) -> tuple[list[dict[str, Any]], list[dict[str, Any]], list[dict[str, Any]]]:
@@ -761,6 +888,7 @@ def _winner_exports(
     }
     if len(expected_ids) != EXPECTED_FRONTS:
         raise RuntimeError("Design does not contain exactly 56 logical fronts.")
+    _validate_oracle_candidates(root, manifest, oracle)
     winners = oracle.get("winners", [])
     winner_ids = [(row["model"], row["logical_objective"]) for row in winners]
     if len(winners) != EXPECTED_FRONTS or set(winner_ids) != expected_ids:

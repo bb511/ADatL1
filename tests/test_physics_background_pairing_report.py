@@ -230,7 +230,18 @@ def _frozen_results(root: Path, design: dict) -> None:
         (hydra / "overrides.yaml").write_text("[]\n", encoding="utf-8")
         (artifact.parent / "train.log").write_text("synthetic retrain log\n", encoding="utf-8")
         checkpoint_root = root / "runtime" / "checkpoints" / study["model"]
+        value_files = []
         for score in design["scores_by_model"][study["model"]]:
+            values_path = (
+                checkpoint_root / "last" / "plots" / "test" / f"eff_{score}" / "values.csv"
+            )
+            values_path.parent.mkdir(parents=True, exist_ok=True)
+            values_path.write_text(
+                "checkpoint,intervention,metric,value\n"
+                + "".join(f"last,{anomaly},efficiency_operational,0.5\n" for anomaly in anomalies),
+                encoding="utf-8",
+            )
+            value_files.append({"path": str(values_path), "sha256": report._sha256(values_path)})
             callbacks = [
                 (f"cap_{score}_{strategy}_summary", ({"last": 0.5}, {"last": 0.4}))
                 for strategy in design["cap_strategies"]
@@ -266,7 +277,7 @@ def _frozen_results(root: Path, design: dict) -> None:
             "optimized_metric_artifact": str(artifact),
             "optimized_metric_artifact_sha256": report._sha256(artifact),
             "checkpoint_root": str(checkpoint_root),
-            "value_files": [],
+            "value_files": value_files,
         }
         _json(root / "retraining" / "markers" / f"{retrain_index:04d}.json", marker)
         for objective in study["objectives"]:
@@ -365,6 +376,43 @@ def test_finalize_rejects_tampered_pareto_membership(tmp_path) -> None:
 
     with pytest.raises(RuntimeError, match="differ from reconstructed Optuna fronts"):
         report.finalize(root, root / "portable")
+
+
+def test_finalize_rejects_tampered_front_member_winner(tmp_path) -> None:
+    """A frozen front member is not valid unless its retrain selection is authentic."""
+    root, design = _campaign(tmp_path)
+    _frozen_results(root, design)
+    oracle_path = root / "results" / "oracle_winners.json"
+    oracle = json.loads(oracle_path.read_text(encoding="utf-8"))
+    oracle["winners"][0]["optimized_ckpt_name"] = "tampered"
+    _json(oracle_path, oracle)
+
+    with pytest.raises(RuntimeError, match="deterministic downstream argmax"):
+        report.finalize(root, root / "portable")
+
+
+def test_finalize_rejects_tampered_oracle_candidate_efficiency(tmp_path) -> None:
+    """Every candidate efficiency must be reconstructed from hashed marker CSVs."""
+    root, design = _campaign(tmp_path)
+    _frozen_results(root, design)
+    oracle_path = root / "results" / "oracle_winners.json"
+    oracle = json.loads(oracle_path.read_text(encoding="utf-8"))
+    anomaly = report.DOWNSTREAM_DATASETS[0]
+    oracle["all_front_memberships"][0]["downstream_efficiencies"][anomaly] = 0.9
+    _json(oracle_path, oracle)
+
+    with pytest.raises(RuntimeError, match="efficiencies differ from marker"):
+        report.finalize(root, root / "portable")
+
+
+def test_oracle_tie_break_uses_lowest_membership_index() -> None:
+    """Exact downstream-mean ties reproduce aggregate's stable manifest order."""
+    candidates = [
+        {"membership_index": 9, "mean_downstream_efficiency": 0.5},
+        {"membership_index": 3, "mean_downstream_efficiency": 0.5},
+    ]
+
+    assert report._deterministic_oracle_winner(candidates)["membership_index"] == 3
 
 
 def test_pickle_reader_rejects_path_outside_authenticated_root(tmp_path) -> None:

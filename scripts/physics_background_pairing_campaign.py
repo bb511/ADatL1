@@ -102,6 +102,70 @@ def _sha256(path: Path) -> str:
     return digest.hexdigest()
 
 
+def _selected_checkpoint_path(checkpoint_root: Path, family_id: str) -> Path:
+    """Resolve one evaluator checkpoint-family ID inside its authenticated run root."""
+    if family_id == "last":
+        path = checkpoint_root / "last.ckpt"
+    else:
+        family = (checkpoint_root / family_id).resolve()
+        if not family.is_relative_to(checkpoint_root.resolve()) or not family.is_dir():
+            raise RuntimeError(f"Checkpoint family escapes or is missing: {family_id}")
+        candidates = sorted(family.glob("*.ckpt"))
+        if len(candidates) != 1:
+            raise RuntimeError(
+                f"Expected one checkpoint for {family_id}, found {len(candidates)}."
+            )
+        path = candidates[0]
+    path = path.resolve()
+    if not path.is_relative_to(checkpoint_root.resolve()) or not path.is_file():
+        raise RuntimeError(f"Selected checkpoint is missing or outside its run: {path}")
+    return path
+
+
+def _audit_selected_threshold_checkpoints(artifact_path: Path, model: str) -> list[dict[str, Any]]:
+    """Prove selected checkpoints restore finite, score-specific thresholds."""
+    import torch
+
+    artifact = json.loads(artifact_path.read_text(encoding="utf-8"))
+    checkpoint_root = Path(artifact["run_provenance"]["checkpoint_run_dir"]).resolve()
+    if not checkpoint_root.is_dir():
+        raise RuntimeError(f"Checkpoint run directory is missing: {checkpoint_root}")
+    expected = {"thres_operational"}
+    if model in {"ae", "vae"}:
+        expected.add("thres_operational__residual_oas")
+    family_ids = sorted(
+        {str(row["optimized_ckpt_name"]) for row in artifact["selections"].values()}
+    )
+    rows = []
+    for family_id in family_ids:
+        checkpoint = _selected_checkpoint_path(checkpoint_root, family_id)
+        payload = torch.load(  # nosec B614 -- authenticated campaign-local checkpoint
+            checkpoint, map_location="cpu", weights_only=False
+        )
+        state = payload.get("state_dict", {})
+        observed = {str(key) for key in state if str(key).startswith("thres_operational")}
+        if observed != expected:
+            raise RuntimeError(
+                f"Threshold buffers differ in {checkpoint}: expected {expected}, "
+                f"found {observed}."
+            )
+        values = {}
+        for name in sorted(expected):
+            value = torch.as_tensor(state[name]).detach().cpu()
+            if value.numel() != 1 or not torch.isfinite(value).item():
+                raise RuntimeError(f"Threshold buffer {name} is not finite scalar: {checkpoint}")
+            values[name] = float(value.item())
+        rows.append(
+            {
+                "checkpoint_family_id": family_id,
+                "checkpoint_path": str(checkpoint),
+                "checkpoint_sha256": _sha256(checkpoint),
+                "thresholds": values,
+            }
+        )
+    return rows
+
+
 def _git_commit() -> str:
     """Return the repository's current commit."""
     git = shutil.which("git")
@@ -341,7 +405,9 @@ def _write_chunk_bindings(
                 "hydra_job_num": local_index,
                 "hydra_run_dir": None if run_dir is None else str(run_dir.resolve()),
                 "optimized_metric_artifact": (str(optimized.resolve()) if has_optimized else None),
-                "optimized_metric_artifact_sha256": _sha256(optimized) if has_optimized else None,
+                "optimized_metric_artifact_sha256": (
+                    _sha256(optimized) if has_optimized else None
+                ),
                 "state": trial.state.name,
                 "params": _jsonable(trial.params),
                 "values": None if trial.values is None else _jsonable(trial.values),
@@ -513,7 +579,8 @@ def freeze(root: Path) -> Path:
 
     retrain_rows = []
     for row in sorted(
-        retrains.values(), key=lambda item: (MODELS.index(item["model"]), item["trial_number"])
+        retrains.values(),
+        key=lambda item: (MODELS.index(item["model"]), item["trial_number"]),
     ):
         row["retrain_index"] = len(retrain_rows)
         row["logical_objectives"] = sorted(set(row["logical_objectives"]))
@@ -875,6 +942,7 @@ def pilot(root: Path, model: str) -> None:
         for name in expected
     ):
         raise RuntimeError("Pilot did not select a complete checkpoint/objective pair per view.")
+    threshold_audit = _audit_selected_threshold_checkpoints(optimized, model)
     _write_json(
         output / "success.json",
         {
@@ -884,6 +952,7 @@ def pilot(root: Path, model: str) -> None:
             "slurm_job_id": os.environ.get("SLURM_JOB_ID"),
             "model": model,
             "logical_objectives": expected,
+            "threshold_checkpoint_audit": threshold_audit,
             "code_commit": design["code_commit"],
             "command": command,
         },
@@ -947,6 +1016,15 @@ def packed_pilot(root: Path, model: str) -> None:
         for row in binding_rows
     ):
         raise RuntimeError("Packed pilot trial-to-Hydra bindings are incomplete or reordered.")
+    threshold_audit = [
+        {
+            "trial_number": int(row["trial_number"]),
+            "checkpoints": _audit_selected_threshold_checkpoints(
+                Path(row["optimized_metric_artifact"]), model
+            ),
+        }
+        for row in binding_rows
+    ]
     _write_json(
         output / "success.json",
         {
@@ -957,6 +1035,7 @@ def packed_pilot(root: Path, model: str) -> None:
             "model": model,
             "trials": 4,
             "values_per_trial": expected_values,
+            "threshold_checkpoint_audit": threshold_audit,
             "code_commit": design["code_commit"],
             "command": command,
         },

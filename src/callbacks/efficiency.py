@@ -52,7 +52,38 @@ class AnomalyEfficiencyCallback(Callback):
         """Instantiate useful quantities."""
         self.cvar25_ema = {}
         self.cvar10_ema = {}
-        self.module_target_rate = None
+        self.module_target_rate = float(getattr(pl_module.hparams, "target_rate"))
+        self._register_threshold_buffers(pl_module)
+
+    def _register_threshold_buffers(self, pl_module) -> None:
+        """Declare every threshold buffer before any checkpoint can be saved.
+
+        Registering a buffer only after the first validation pass is too late for
+        Lightning's checkpoint state contract: dynamically added buffers can be
+        absent from retained checkpoints, causing checkpoint evaluation to reuse
+        the final in-memory threshold.  NaN sentinels make the state shape stable;
+        validation replaces them with finite, score-specific thresholds before a
+        monitored checkpoint is eligible for selection.
+        """
+        target_rates, _ = self._resolve_rate_config(pl_module)
+        existing = dict(pl_module.named_buffers())
+        for target_rate in target_rates:
+            name = self._threshold_name(target_rate)
+            if name in existing:
+                buffer = existing[name]
+                if buffer.numel() != 1:
+                    raise ValueError(f"Threshold buffer {name!r} must be scalar.")
+                continue
+            if hasattr(pl_module, name):
+                raise ValueError(
+                    f"Cannot register threshold buffer {name!r}: the attribute already exists."
+                )
+            pl_module.register_buffer(
+                name,
+                torch.full((), float("nan"), device=pl_module.device),
+                persistent=True,
+            )
+            existing[name] = getattr(pl_module, name)
 
     def on_validation_start(self, trainer, pl_module):
         """Do checks required for this callback to work."""

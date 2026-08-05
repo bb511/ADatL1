@@ -109,6 +109,47 @@ def test_oas_operating_threshold_has_an_independent_checkpoint_buffer() -> None:
     assert thresholds[0.25].item() == pytest.approx(3.5)
 
 
+def test_threshold_buffers_exist_before_checkpointing_and_restore_per_score() -> None:
+    """Native and OAS thresholds are persistent before the first checkpoint save."""
+
+    class Module(torch.nn.Module):
+        def __init__(self):
+            super().__init__()
+            self.hparams = SimpleNamespace(target_rate=0.25, base_rate=28608.8064)
+
+        @property
+        def device(self):
+            return torch.device("cpu")
+
+    module = Module()
+    native = TrainingEfficiency(output_name="ascore/full")
+    oas = TrainingEfficiency(
+        output_name="ascore/residual_oas",
+        threshold_namespace="residual_oas",
+        metric_suffix="residual_oas",
+    )
+
+    native.on_fit_start(None, module)
+    oas.on_fit_start(None, module)
+
+    assert set(module.state_dict()) == {
+        "thres_operational",
+        "thres_operational__residual_oas",
+    }
+    assert torch.isnan(module.thres_operational)
+    assert torch.isnan(module.thres_operational__residual_oas)
+
+    native._set_thres_on_module(module, 0.25, torch.tensor(1.25))
+    oas._set_thres_on_module(module, 0.25, torch.tensor(3.5))
+    restored = Module()
+    native.on_fit_start(None, restored)
+    oas.on_fit_start(None, restored)
+    restored.load_state_dict(module.state_dict(), strict=True)
+
+    assert restored.thres_operational.item() == pytest.approx(1.25)
+    assert restored.thres_operational__residual_oas.item() == pytest.approx(3.5)
+
+
 def test_invalid_threshold_namespace_is_rejected() -> None:
     """Buffer namespaces are deliberately limited to state-dict-safe names."""
     with pytest.raises(ValueError, match="Namespaces"):

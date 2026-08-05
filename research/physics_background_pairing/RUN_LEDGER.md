@@ -13,11 +13,12 @@ Last updated: 2026-08-05 (Europe/Zurich)
 - Frozen debug campaign commit: `6d10cd5601ffa86111a12415b521c4e104c261e6`.
 - Superseded pilot campaigns at `ebe2ce1` and `bb0f981` are archived in scratch;
   neither is eligible for production submission.
-- Candidate packed execution commit: `59b47b0c41bcb2e9f233d0695bb2ba005c4e9c8f`.
-- Candidate packed campaign root:
+- Superseded packed execution commit: `59b47b0c41bcb2e9f233d0695bb2ba005c4e9c8f`.
+- Superseded packed campaign root:
   `/iopsstor/scratch/cscs/vjimenez/adatl1/campaigns/physics_background_shared_59b47b0c41bc`.
-- The earlier valid scientific canary remains isolated under commit `d7fd395485d8`;
-  its one-GPU nested-Submitit path is retained only to finish that reference trial.
+- The earlier `d7fd395485d8` reference and all `59b47b0c41bc` canaries were cancelled
+  after a checkpoint audit proved that dynamically registered operating-threshold
+  buffers were absent from retained checkpoints.
 
 ## Status
 
@@ -25,19 +26,18 @@ Last updated: 2026-08-05 (Europe/Zurich)
 |---|---|---|
 | Scientific contract | complete | `PLAN.md` |
 | Implementation audit | complete | Model/data/HPO settings match `dev/patrick`; requested metric scope, score routing, CDF, retraining, and padding semantics audited |
-| Code and configs | complete | Refactored to six shared model studies with 56 logical fronts, per-strategy checkpoint selection, and score-aware retraining |
+| Code and configs | fix in validation | Six-study implementation is intact; operating-threshold buffers are now registered before checkpointing so every candidate restores its own native/OAS threshold |
 | Tests and preflight | complete | 67 campaign tests pass after the single-run provenance fix; all six configs compose, scoped hooks pass, all 8 pair tables authenticate, and scratch capacity is sufficient |
 | Autonomous runbook | complete | `PLAN.md` now specifies the full six-study state machine, artifact contract, scheduler/timer policy, failure recovery, portable exports, analysis, and final `REPORT.md` |
 | Provenance/report hardening | complete | Added persistent Optuna-to-Hydra chunk bindings, run/checkpoint/MLflow identities, reverse G-to-E drift persistence, and fail-closed snapshot/finalize exports with synthetic positive/tamper/leakage tests |
-| Pilots | complete | All six unified jobs passed on `d7fd395485d8`; exact objective/vector/selection, MLflow, reverse-drift, provenance, validation-allowlist, runtime, and memory evidence is persisted |
-| Full searches | six canaries running | Four 50-epoch trials per model are running in packed jobs AE `3007292`, VAE `3007311`, DSAE `3007310`, DSVAE `3007318`, DeepSVDD `3007340`, and RealNVP `3007345`; legacy AE reference `3005821`/`3005823` remains isolated |
-| Retraining/evaluation | pending | Offline 56-front freeze, unique 200-epoch retraining, and native/OAS threshold separation are implemented; validation pending |
+| Pilots | replacement pending | Earlier unified/packed pilots proved objective and launcher behavior but did not inspect threshold buffers; a focused replacement GPU pilot must prove native/OAS thresholds are finite and checkpoint-specific |
+| Full searches | superseded before completion | Jobs AE `3007292`, VAE `3007311`, DSAE `3007310`, DSVAE `3007318`, DeepSVDD `3007340`, RealNVP `3007345`, and legacy `3005821`/`3005823` were cancelled; no usable trial completed and no bulk chunk was submitted |
+| Retraining/evaluation | pending | Offline 56-front freeze and unique 200-epoch retraining remain implemented; corrected checkpoint-specific native/OAS threshold restoration requires GPU validation |
 | Aggregation/report | pending | Score-aware downstream oracle aggregation is implemented; awaits validation and results |
 
-The `59b47b0c41bc` campaign is the current packed-launch candidate. No bulk search
-chunk has been submitted. It becomes the immutable execution campaign only after the
-four-way packed pilot and per-model 50-epoch canaries pass. Never reuse a superseded
-campaign.
+The `59b47b0c41bc` campaign is superseded and must never be resumed. No bulk search
+chunk was submitted. A new immutable campaign must be derived from the threshold fix
+commit only after focused checkpoint and unified GPU pilots pass.
 
 Repository-wide `pre-commit -a` is not a usable clean gate on the current baseline: it
 rewrites 82 unrelated legacy files and separately reports pre-existing executable shell
@@ -64,6 +64,18 @@ codespell) pass; the unrelated baseline debt must not be mixed into this campaig
   or running competing controllers against one study.
 
 ## Verification log
+
+- 2026-08-05: a direct audit of completed pilot and live canary Lightning files proved
+  that `residual_oas_location`, `residual_oas_precision`, and `residual_oas_ready` were
+  checkpointed, but neither `thres_operational` nor
+  `thres_operational__residual_oas` appeared in any retained state dict. Because the
+  evaluator cycles checkpoint candidates on the same in-memory module, downstream
+  test evaluation would otherwise reuse the final epoch's thresholds. All six packed
+  canaries and the isolated legacy reference were cancelled and preserved. The active
+  campaign failure ledger records this as a scientific-code failure. Threshold buffers
+  are now declared as persistent NaN sentinels before checkpointing and updated
+  independently by native/OAS validation; 23 focused tests pass. A real GPU checkpoint
+  proof is required before creating the replacement production campaign.
 
 - 2026-08-05: all six four-trial production canaries were accepted on one node each:
   AE `3007292`, VAE `3007311`, DSAE `3007310`, DSVAE `3007318`, DeepSVDD `3007340`,

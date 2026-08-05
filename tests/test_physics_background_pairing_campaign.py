@@ -5,6 +5,7 @@ from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
+import torch
 import yaml
 
 SCRIPT = Path(__file__).parents[1] / "scripts/physics_background_pairing_campaign.py"
@@ -193,6 +194,11 @@ def test_pilot_reduces_only_inner_cap_optimization(monkeypatch, tmp_path) -> Non
     monkeypatch.setattr(
         campaign.subprocess, "run", lambda command, **kwargs: commands.append(command)
     )
+    monkeypatch.setattr(
+        campaign,
+        "_audit_selected_threshold_checkpoints",
+        lambda artifact, model: [{"checkpoint_family_id": "last"}],
+    )
     artifact = tmp_path / "pilots" / "dsae" / "optimized_metric.json"
     artifact.parent.mkdir(parents=True)
     objectives = [objective["id"] for objective in campaign._logical_objectives("dsae")]
@@ -239,6 +245,11 @@ def test_packed_pilot_creates_storage_parent_before_optuna(monkeypatch, tmp_path
     )
     monkeypatch.setattr(campaign, "_load_design", lambda root: design)
     monkeypatch.setattr(campaign, "_optuna", lambda: fake_optuna)
+    monkeypatch.setattr(
+        campaign,
+        "_audit_selected_threshold_checkpoints",
+        lambda artifact, model: [{"checkpoint_family_id": "last"}],
+    )
 
     def run(command, **kwargs):
         output = tmp_path / "packed_pilots" / "ae"
@@ -251,6 +262,50 @@ def test_packed_pilot_creates_storage_parent_before_optuna(monkeypatch, tmp_path
     monkeypatch.setattr(campaign.subprocess, "run", run)
     campaign.packed_pilot(tmp_path, "ae")
     assert (tmp_path / "packed_pilots" / "ae" / "success.json").is_file()
+
+
+def test_pilot_audit_requires_finite_score_specific_checkpoint_thresholds(
+    tmp_path,
+) -> None:
+    """The GPU gate authenticates thresholds restored from each selected checkpoint."""
+    checkpoint_root = tmp_path / "checkpoints"
+    checkpoint_root.mkdir()
+    torch.save(
+        {
+            "state_dict": {
+                "thres_operational": torch.tensor(1.25),
+                "thres_operational__residual_oas": torch.tensor(3.5),
+            }
+        },
+        checkpoint_root / "last.ckpt",
+    )
+    # Multiple ModelCheckpoint callbacks legitimately create this unused sibling.
+    torch.save({"state_dict": {}}, checkpoint_root / "last-v1.ckpt")
+    artifact = tmp_path / "optimized_metric.json"
+    artifact.write_text(
+        campaign.json.dumps(
+            {
+                "run_provenance": {"checkpoint_run_dir": str(checkpoint_root)},
+                "selections": {
+                    "native__cap__cdf": {"optimized_ckpt_name": "last"},
+                    "residual_oas__cap__cdf": {"optimized_ckpt_name": "last"},
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    rows = campaign._audit_selected_threshold_checkpoints(artifact, "ae")
+
+    assert rows[0]["thresholds"] == {
+        "thres_operational": pytest.approx(1.25),
+        "thres_operational__residual_oas": pytest.approx(3.5),
+    }
+    payload = torch.load(checkpoint_root / "last.ckpt", weights_only=True)
+    payload["state_dict"].pop("thres_operational__residual_oas")
+    torch.save(payload, checkpoint_root / "last.ckpt")
+    with pytest.raises(RuntimeError, match="Threshold buffers differ"):
+        campaign._audit_selected_threshold_checkpoints(artifact, "ae")
 
 
 def test_chunk_bindings_preserve_global_trial_identity(monkeypatch, tmp_path) -> None:

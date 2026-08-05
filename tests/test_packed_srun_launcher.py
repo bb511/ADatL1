@@ -148,6 +148,6 @@ def test_launcher_precreates_mlflow_experiment_before_workers(tmp_path, monkeypa
         config=config,
     )
 
-    results = launcher.launch([["x=0"]], 0)
+    results = launcher.launch((("x=0",),), 0)
     assert prepared == [config]
     assert results[0].return_value == 0

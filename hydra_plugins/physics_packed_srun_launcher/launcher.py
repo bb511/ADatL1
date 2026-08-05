@@ -173,7 +173,7 @@ class PackedSrunLauncher(Launcher):
 
         representative_config = self.hydra_context.config_loader.load_sweep_config(
             self.config,
-            job_overrides[0],
+            list(job_overrides[0]),
         )
         _prepare_mlflow_experiments(representative_config)
 

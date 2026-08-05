@@ -502,6 +502,7 @@ def _validate_restart_canary_evidence(
     restored_exact_rng = (
         callback_states.get("exact_rng") if isinstance(callback_states, dict) else None
     )
+    restored_retained = complete.get("restored_retained_checkpoints")
     retained = complete.get("retained_checkpoints")
     if (
         restore.get("schema_version") != RESTART_CANARY_SCHEMA_VERSION
@@ -511,15 +512,22 @@ def _validate_restart_canary_evidence(
         or set(callback_states)
         != {"exact_rng", "efficiency", "cap", "wasserstein", "drift", "stable"}
         or restored_exact_rng != _restart_canary_jsonable(exact_rng)
+        or not isinstance(restored_retained, list)
+        or not restored_retained
+        or restore.get("retained_checkpoints") != restored_retained
         or not isinstance(retained, list)
         or not retained
-        or restore.get("retained_checkpoints") != retained
     ):
         raise RuntimeError("Restart-canary callback restoration evidence is incomplete.")
+    restored_retained_paths = [
+        authenticated_reference(row, parent=evidence_root) for row in restored_retained
+    ]
     retained_paths = [
         authenticated_reference(row, parent=canary_root / "retained") for row in retained
     ]
-    if len(set(retained_paths)) != len(retained_paths):
+    if len(set(restored_retained_paths)) != len(restored_retained_paths) or len(
+        set(retained_paths)
+    ) != len(retained_paths):
         raise RuntimeError("Restart-canary retained checkpoint inventory contains duplicates.")
 
     scheduler = complete.get("scheduler_log", {})
@@ -615,6 +623,9 @@ def _validate_restart_canary_evidence(
         "exact_resume_completed_epochs": completed_epochs,
         "restore_evidence": str(restore_path),
         "restore_evidence_sha256": _sha256(restore_path),
+        "restored_retained_checkpoints": [
+            {"path": str(path), "sha256": _sha256(path)} for path in restored_retained_paths
+        ],
         "retained_checkpoints": [
             {"path": str(path), "sha256": _sha256(path)} for path in retained_paths
         ],

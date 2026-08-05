@@ -903,9 +903,12 @@ def test_restart_canary_evidence_authenticates_exact_epoch_oracle_and_hashes(
     hpc = evidence_root / "hpc_input_001.ckpt"
     exact_resume = evidence_root / "exact_resume_001.ckpt"
     retained = retained_root / "stable.ckpt"
+    restored_retained = evidence_root / "restored_retained_001" / "stable.ckpt"
+    restored_retained.parent.mkdir()
     for path, value in (
         (hpc, "hpc"),
         (retained, "stable"),
+        (restored_retained, "restored stable"),
     ):
         path.write_text(value, encoding="utf-8")
     rng_state = {
@@ -935,6 +938,12 @@ def test_restart_canary_evidence_authenticates_exact_epoch_oracle_and_hashes(
         exact_resume,
     )
     retained_rows = [{"path": str(retained.resolve()), "sha256": operations._sha256(retained)}]
+    restored_retained_rows = [
+        {
+            "path": str(restored_retained.resolve()),
+            "sha256": operations._sha256(restored_retained),
+        }
+    ]
     restore = evidence_root / "restore_001.json"
     restore.write_text(
         json.dumps(
@@ -949,7 +958,7 @@ def test_restart_canary_evidence_authenticates_exact_epoch_oracle_and_hashes(
                         for name in ("efficiency", "cap", "wasserstein", "drift", "stable")
                     },
                 },
-                "retained_checkpoints": retained_rows,
+                "retained_checkpoints": restored_retained_rows,
             }
         ),
         encoding="utf-8",
@@ -1023,6 +1032,7 @@ def test_restart_canary_evidence_authenticates_exact_epoch_oracle_and_hashes(
             "path": str(restore.resolve()),
             "sha256": operations._sha256(restore),
         },
+        "restored_retained_checkpoints": restored_retained_rows,
         "retained_checkpoints": retained_rows,
         "mlflow": {
             "tracking_uri": tracking_uri,

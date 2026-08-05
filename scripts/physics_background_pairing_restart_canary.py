@@ -324,7 +324,14 @@ class _RestartProof(Callback):
             path = Path(record["fpath"]).resolve()
             if not path.is_file():
                 raise RuntimeError(f"Retained stable checkpoint disappeared: {path}")
-            retained.append({"path": str(path), "sha256": _sha256(path)})
+            snapshot = (
+                self.root / "evidence" / f"restored_retained_{self.restart_count:03d}" / path.name
+            )
+            snapshot.parent.mkdir(parents=True, exist_ok=True)
+            if snapshot.exists():
+                raise RuntimeError(f"Restored stable evidence already exists: {snapshot}")
+            shutil.copy2(path, snapshot)
+            retained.append({"path": str(snapshot.resolve()), "sha256": _sha256(snapshot)})
         _write_json(
             self.root / "evidence" / f"restore_{self.restart_count:03d}.json",
             {
@@ -831,11 +838,21 @@ def run(root: Path, scheduler_log: Path, expected_commit: str) -> Path:
         raise RuntimeError(f"Scheduler-log evidence already exists: {scheduler_snapshot}")
     shutil.copy2(scheduler_log, scheduler_snapshot)
     restore = json.loads(restore_path.read_text(encoding="utf-8"))
-    retained = restore["retained_checkpoints"]
-    for row in retained:
+    restored_retained = restore["retained_checkpoints"]
+    for row in restored_retained:
         path = Path(row["path"])
         if not path.is_file() or _sha256(path) != row["sha256"]:
-            raise RuntimeError(f"Retained stable checkpoint changed after restore: {path}")
+            raise RuntimeError(f"Restored stable evidence changed after capture: {path}")
+    final_stable_state = callbacks["stable"].state_dict()
+    final_records = final_stable_state.get("checkpoints", {}).get("background0", [])
+    retained = []
+    for record in final_records:
+        path = Path(record["fpath"]).resolve()
+        if not path.is_file():
+            raise RuntimeError(f"Final retained stable checkpoint is missing: {path}")
+        retained.append({"path": str(path), "sha256": _sha256(path)})
+    if not retained:
+        raise RuntimeError("Final stable callback retained no checkpoint.")
 
     payload = {
         "schema_version": SCHEMA_VERSION,
@@ -851,6 +868,7 @@ def run(root: Path, scheduler_log: Path, expected_commit: str) -> Path:
             "path": str(restore_path),
             "sha256": _sha256(restore_path),
         },
+        "restored_retained_checkpoints": restored_retained,
         "retained_checkpoints": retained,
         "mlflow": {
             "tracking_uri": tracking_uri,

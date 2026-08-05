@@ -355,8 +355,9 @@ contains all four mappings and CDF simultaneously.
   an immutable campaign. It submits an exact frozen-worktree search chunk, refuses
   scheduler or Optuna overlap, reconciles Slurm state into `job_history.csv`, seals
   terminal logs by SHA-256, creates consistent quiescent SQLite backups, and applies a
-  fail-closed terminal canary gate. It never imports or changes the scientific runner
-  used by an active campaign.
+  fail-closed terminal canary gate. Search submission also refuses to exceed 600
+  potentially usable trials, including the final partial chunk. It never imports or
+  changes the scientific runner used by an active campaign.
 - `scripts/clariden/physics_background_pairing_pilot.sbatch` runs one unified one-epoch
   model pilot on the debug partition.
 - `scripts/clariden/physics_background_pairing_sweep.sbatch` is a 12-hour packed
@@ -685,8 +686,10 @@ uv run python scripts/physics_background_pairing_operations.py \
 
 The helper calculates `--nodes=ceil(jobs/4)`, authenticates the frozen commit and clean
 worktree, exports campaign-local runtime paths, and rejects an active ledger row or
-`RUNNING`/`WAITING` Optuna trial for the same model. The direct `sbatch` equivalent is a
-recovery/debug fallback only:
+`RUNNING`/`WAITING` Optuna trial for the same model. It additionally requires the
+authenticated six-model terminal canary artifact and refuses `usable_complete + trials`
+above 600; therefore the last request must use the exact remaining count. The direct
+`sbatch` equivalent is a recovery/debug fallback only:
 
 ```bash
 sbatch --parsable \

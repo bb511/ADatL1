@@ -44,6 +44,8 @@ def test_submit_registers_exact_frozen_job(monkeypatch, tmp_path) -> None:
     """Submission exports frozen roots and atomically records the Slurm ID."""
     root, repository = _campaign(tmp_path)
     _authenticate(monkeypatch)
+    monkeypatch.setattr(operations, "_require_canary_gate", lambda *args: None)
+    monkeypatch.setattr(operations, "_usable_search_trials", lambda *args: 4)
     calls = []
 
     def run(command, **kwargs):
@@ -88,6 +90,92 @@ def test_submit_rejects_active_same_model(monkeypatch, tmp_path) -> None:
             "vae",
             4,
             4,
+            720,
+            tmp_path / "data",
+            tmp_path / "raw",
+            tmp_path / "pairing",
+        )
+
+
+def test_submit_requires_terminal_canary_gate(monkeypatch, tmp_path) -> None:
+    """A quiescent individual model cannot start before all six canaries pass."""
+    root, repository = _campaign(tmp_path)
+    _authenticate(monkeypatch)
+
+    with pytest.raises(RuntimeError, match="terminal validation gate"):
+        operations.submit_search(
+            root,
+            repository,
+            "ae",
+            4,
+            4,
+            720,
+            tmp_path / "data",
+            tmp_path / "raw",
+            tmp_path / "pairing",
+        )
+
+
+def test_terminal_canary_gate_authenticates_exact_campaign_cardinalities(tmp_path) -> None:
+    """The search gate accepts only the complete six-model validator contract."""
+    root, _ = _campaign(tmp_path)
+    design = operations._design(root)
+    payload = {
+        "schema_version": 1,
+        "code_commit": "a" * 40,
+        "bindings": 24,
+        "checkpoint_selections": 224,
+        "mlflow_runs": [{} for _ in range(24)],
+        "candidate_checkpoints": [{} for _ in range(272)],
+        "jobs": [
+            {
+                "model": model,
+                "state": "COMPLETED",
+                "exit_code": "0:0",
+                "commit": "a" * 40,
+                "log_sha256": "b" * 64,
+            }
+            for model in operations.MODELS
+        ],
+        "studies": [
+            {
+                "model": model,
+                "total": 4,
+                "complete": 4,
+                "usable_complete": 4,
+                "running": 0,
+                "waiting": 0,
+                "fail": 0,
+                "pruned": 0,
+            }
+            for model in operations.MODELS
+        ],
+    }
+    gate = root / "state" / "production_canary_validation.json"
+    gate.parent.mkdir()
+    gate.write_text(json.dumps(payload), encoding="utf-8")
+
+    operations._require_canary_gate(root, design)
+    payload["bindings"] = 23
+    gate.write_text(json.dumps(payload), encoding="utf-8")
+    with pytest.raises(RuntimeError, match="incomplete or inconsistent"):
+        operations._require_canary_gate(root, design)
+
+
+def test_submit_refuses_trial_target_overshoot(monkeypatch, tmp_path) -> None:
+    """The final chunk cannot create more than 600 potentially usable trials."""
+    root, repository = _campaign(tmp_path)
+    _authenticate(monkeypatch)
+    monkeypatch.setattr(operations, "_require_canary_gate", lambda *args: None)
+    monkeypatch.setattr(operations, "_usable_search_trials", lambda *args: 580)
+
+    with pytest.raises(RuntimeError, match="at most 20 remain"):
+        operations.submit_search(
+            root,
+            repository,
+            "vae",
+            48,
+            48,
             720,
             tmp_path / "data",
             tmp_path / "raw",

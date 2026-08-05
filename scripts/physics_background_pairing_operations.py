@@ -30,6 +30,7 @@ if str(REPOSITORY_ROOT) not in sys.path:
     sys.path.insert(0, str(REPOSITORY_ROOT))
 
 MODELS = ("ae", "vae", "dsae", "dsvae", "svdd", "realnvp")
+TARGET_TRIALS = 600
 ACTIVE_STATES = {"PENDING", "RUNNING", "CONFIGURING", "COMPLETING", "SUSPENDED"}
 TERMINAL_STATES = {
     "BOOT_FAIL",
@@ -201,6 +202,65 @@ def _assert_database_quiescent(root: Path, model: str) -> None:
         raise RuntimeError(f"Study {model} is not quiescent: {sorted(states)}.")
 
 
+def _require_canary_gate(root: Path, design: dict[str, Any]) -> None:
+    """Require the authenticated terminal gate before any production search chunk."""
+    path = root / "state" / "production_canary_validation.json"
+    if not path.is_file():
+        raise RuntimeError("Production canaries have not passed the terminal validation gate.")
+    payload = json.loads(path.read_text(encoding="utf-8"))
+    jobs = payload.get("jobs", [])
+    studies = payload.get("studies", [])
+    if (
+        payload.get("schema_version") != 1
+        or payload.get("code_commit") != design["code_commit"]
+        or payload.get("bindings") != 24
+        or payload.get("checkpoint_selections") != 224
+        or len(payload.get("mlflow_runs", [])) != 24
+        or len(payload.get("candidate_checkpoints", [])) != 272
+        or len(jobs) != len(MODELS)
+        or {row.get("model") for row in jobs} != set(MODELS)
+        or any(
+            row.get("state") != "COMPLETED"
+            or row.get("exit_code") != "0:0"
+            or row.get("commit") != design["code_commit"]
+            or not row.get("log_sha256")
+            for row in jobs
+        )
+        or len(studies) != len(MODELS)
+        or {row.get("model") for row in studies} != set(MODELS)
+        or any(
+            int(row.get("total", -1)) != 4
+            or int(row.get("complete", -1)) != 4
+            or int(row.get("usable_complete", -1)) != 4
+            or any(int(row.get(key, -1)) != 0 for key in ("running", "waiting", "fail", "pruned"))
+            for row in studies
+        )
+    ):
+        raise RuntimeError("Production-canary validation artifact is incomplete or inconsistent.")
+
+
+def _usable_search_trials(root: Path, design: dict[str, Any], model: str) -> int:
+    """Count complete finite full-vector trials in one quiescent persistent study."""
+    import optuna
+
+    matches = [study for study in design["studies"] if study["model"] == model]
+    if len(matches) != 1:
+        raise RuntimeError(f"Campaign design does not contain exactly one {model} study.")
+    database = root / "studies" / f"{model}.db"
+    if not database.is_file():
+        return 0
+    study = matches[0]
+    loaded = optuna.load_study(study_name=study["study_name"], storage=f"sqlite:///{database}")
+    expected_values = 2 * len(study["objectives"])
+    return sum(
+        trial.state == optuna.trial.TrialState.COMPLETE
+        and trial.values is not None
+        and len(trial.values) == expected_values
+        and all(math.isfinite(float(value)) for value in trial.values)
+        for trial in loaded.get_trials(deepcopy=False)
+    )
+
+
 def submit_search(
     root: Path,
     repository: Path,
@@ -221,6 +281,16 @@ def submit_search(
     if _active_model_rows(rows, model):
         raise RuntimeError(f"Refusing to overlap an active {model} campaign job.")
     _assert_database_quiescent(root, model)
+    _require_canary_gate(root, design)
+    usable = _usable_search_trials(root, design, model)
+    remaining = TARGET_TRIALS - usable
+    if remaining <= 0:
+        raise RuntimeError(f"Study {model} already has {usable} usable trials.")
+    if trials > remaining:
+        raise RuntimeError(
+            f"Search chunk would exceed {TARGET_TRIALS} usable trials for {model}: "
+            f"{usable} complete + {trials} requested; at most {remaining} remain."
+        )
     for path in (data_dir, raw_data_dir, pairing_dir):
         if not path.is_dir():
             raise FileNotFoundError(path)

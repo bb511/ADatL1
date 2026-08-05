@@ -160,12 +160,18 @@ def _get_evaluator(cfg: DictConfig, datamodule, logger):
     log.info("Instantiating evaluator callbacks...")
     callbacks = instantiate_callbacks(eval_config.get("callbacks"))
     log.info(f"Instantiating evaluator <{evaluator_cfg._target_}>")
+    optimized_metric_config = cfg.get("optimized_metric_config")
+    optimized_metric_configs = cfg.get("optimized_metric_configs")
+    if optimized_metric_config is not None:
+        optimized_metric_config = OmegaConf.to_container(optimized_metric_config, resolve=True)
+    if optimized_metric_configs is not None:
+        optimized_metric_configs = OmegaConf.to_container(optimized_metric_configs, resolve=True)
     evaluator = hydra.utils.instantiate(
         evaluator_cfg,
         callbacks=callbacks,
         logger=logger,
-        optimized_metric_config=cfg.get("optimized_metric_config"),
-        optimized_metric_configs=cfg.get("optimized_metric_configs"),
+        optimized_metric_config=optimized_metric_config,
+        optimized_metric_configs=optimized_metric_configs,
     )
 
     return evaluator

@@ -1,6 +1,9 @@
 """Configuration contracts for the physics background-pairing campaign."""
 
+from omegaconf import OmegaConf
+
 from scripts import physics_background_pairing_campaign as campaign
+from src import train as train_module
 from src.utils.pairing.io import compose_config
 
 MODELS = ("ae", "vae", "dsae", "dsvae", "svdd", "realnvp")
@@ -100,6 +103,36 @@ def test_every_shared_model_study_composes() -> None:
         ]
         assert cfg.data.validation_aux_datasets == []
         assert cfg.logger.mlflow is not None
+
+
+def test_shared_evaluator_receives_resolved_objective_configs(monkeypatch, tmp_path) -> None:
+    """Evaluator instantiation must not detach unresolved root interpolations."""
+    cfg = compose_config(overrides=["experiment=physics/ae_background_all"])
+    cfg.trainer.default_root_dir = str(tmp_path)
+    captured = {}
+
+    def instantiate(evaluator_cfg, **kwargs):
+        detached = OmegaConf.create(
+            {"optimized_metric_configs": kwargs["optimized_metric_configs"]}
+        )
+        OmegaConf.resolve(detached)
+        captured.update(kwargs)
+        return object()
+
+    monkeypatch.setattr(train_module, "instantiate_callbacks", lambda callbacks: [])
+    monkeypatch.setattr(train_module.hydra.utils, "instantiate", instantiate)
+
+    train_module._get_evaluator(cfg, datamodule=None, logger=[])
+
+    objectives = captured["optimized_metric_configs"]
+    assert isinstance(objectives, dict)
+    assert objectives["native__cap__flat_physical"]["sec_metric"] == {
+        "callback": {
+            "name": "ascore_operational",
+            "params": {"ckpt_name": None, "test_ds": "normal"},
+        },
+        "direction": "minimize",
+    }
 
 
 def test_shared_ae_and_vae_keep_native_training_score() -> None:

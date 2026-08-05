@@ -21,7 +21,7 @@ Last updated: 2026-08-04 (Europe/Zurich)
 | Scientific contract | complete | `PLAN.md` |
 | Implementation audit | complete | Model/data/HPO settings match `dev/patrick`; requested metric scope, score routing, CDF, retraining, and padding semantics audited |
 | Code and configs | complete | Refactored to six shared model studies with 56 logical fronts, per-strategy checkpoint selection, and score-aware retraining |
-| Tests and preflight | complete | 65 campaign tests pass, all six search/retrain configs compose, scoped hooks pass, all 8 pair tables authenticate, and scratch reports 134.7 GiB used with no per-user block/file limit |
+| Tests and preflight | complete | 66 campaign tests pass after the unified-pilot interpolation fix; all six configs compose, scoped hooks pass, all 8 pair tables authenticate, and scratch capacity is sufficient |
 | Autonomous runbook | complete | `PLAN.md` now specifies the full six-study state machine, artifact contract, scheduler/timer policy, failure recovery, portable exports, analysis, and final `REPORT.md` |
 | Provenance/report hardening | complete | Added persistent Optuna-to-Hydra chunk bindings, run/checkpoint/MLflow identities, reverse G-to-E drift persistence, and fail-closed snapshot/finalize exports with synthetic positive/tamper/leakage tests |
 | Pilots | pending | Earlier isolated pilots passed from `6d10cd5`, but they do not validate the new unified callback/evaluator path |
@@ -55,6 +55,15 @@ codespell) pass; the unrelated baseline debt must not be mixed into this campaig
   logical two-dimensional fronts are reconstructed offline.
 
 ## Verification log
+
+- 2026-08-05: schema-2 campaign `bcdffe3eb8c1` authenticated all eight pair tables and
+  froze the correct six-study/56-front design, but unified AE pilot job `3004987`
+  failed before evaluation because the evaluator detached unresolved
+  `${physics_selection.native_secondary}` interpolations from the Hydra root. No
+  Optuna trial was submitted. The failed campaign is superseded and its log hash,
+  scheduler record, and classified failure are persisted under its `state/` directory.
+  The evaluator now receives fully resolved objective dictionaries, covered by a
+  runtime-instantiation regression test; a new commit-derived campaign is required.
 
 - 2026-08-04: implemented the six shared 600-trial model studies. Every trial now
   returns all native/OAS CAP, W1, drift, and native-secondary objective pairs in a

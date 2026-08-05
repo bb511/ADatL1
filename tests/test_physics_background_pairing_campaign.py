@@ -148,21 +148,176 @@ def test_retraining_uses_score_aware_downstream_suite() -> None:
     assert campaign._retrain_suite("ae") == "physics_background_native_oas"
     assert campaign._retrain_suite("vae") == "physics_background_native_oas"
     assert campaign._retrain_suite("dsae") == "physics_background_native"
+    config = yaml.safe_load(
+        (
+            Path(__file__).parents[1]
+            / "configs"
+            / "retrain_suite"
+            / "physics_background_native.yaml"
+        ).read_text(encoding="utf-8")
+    )
+    assert config["callbacks"]["clear_ckpts"] is None
 
 
-def test_existing_retrain_marker_is_hash_validated(tmp_path) -> None:
-    """Resume cannot silently accept a stale or hand-edited success marker."""
+def test_retrain_attempts_advance_only_from_authenticated_boundaries(
+    monkeypatch, tmp_path
+) -> None:
+    """Normal allocation continuation advances 40 cumulative epochs at a time."""
+    root = tmp_path / "campaign"
+    root.mkdir()
+    identity = {
+        "retrain_index": 0,
+        "row": {"retrain_index": 0},
+        "mlflow_tracking_uri": f"file:{tmp_path / 'mlruns'}",
+        "experiment_name": "experiment",
+        "run_name": "run",
+        "hydra_dir": str(root / "retraining" / "hydra" / "0000"),
+        "code_commit": "a" * 40,
+    }
+    monkeypatch.setattr(campaign, "_mlflow_run_for_retrain", lambda *args: "one-run")
+
+    state, first = campaign._prepare_retrain_attempt(root, identity)
+
+    assert first["target_epoch_boundary"] == 40
+    assert first["resume"] is None
+    assert state["mlflow_run_id"] == "one-run"
+
+    paths = campaign._retrain_paths(root, 0)
+    checkpoint = paths["segments"] / "epoch_040.ckpt"
+    config = paths["segments"] / "epoch_040_config.yaml"
+    checkpoint.parent.mkdir(parents=True)
+    checkpoint.write_text("checkpoint\n", encoding="utf-8")
+    config.write_text("trainer: {}\n", encoding="utf-8")
+    state["segments"].append(
+        {
+            "epoch_boundary": 40,
+            "continuation_checkpoint": str(checkpoint),
+            "continuation_checkpoint_sha256": campaign._sha256(checkpoint),
+            "resolved_config": str(config),
+            "resolved_config_sha256": campaign._sha256(config),
+        }
+    )
+    campaign._write_json(paths["state"], state)
+
+    resumed_state, second = campaign._prepare_retrain_attempt(root, identity)
+
+    assert resumed_state["mlflow_run_id"] == "one-run"
+    assert second["target_epoch_boundary"] == 80
+    assert second["resume"]["kind"] == "completed_segment"
+    assert second["resume"]["sha256"] == campaign._sha256(checkpoint)
+
+
+def test_retrain_retry_without_checkpoint_fails_closed(monkeypatch, tmp_path) -> None:
+    """An interrupted allocation cannot silently restart the trajectory at epoch zero."""
+    root = tmp_path / "campaign"
+    root.mkdir()
+    identity = {
+        "retrain_index": 0,
+        "row": {"retrain_index": 0},
+        "mlflow_tracking_uri": f"file:{tmp_path / 'mlruns'}",
+        "experiment_name": "experiment",
+        "run_name": "run",
+        "hydra_dir": str(root / "retraining" / "hydra" / "0000"),
+        "code_commit": "a" * 40,
+    }
+    monkeypatch.setattr(campaign, "_mlflow_run_for_retrain", lambda *args: "one-run")
+    campaign._prepare_retrain_attempt(root, identity)
+
+    with pytest.raises(RuntimeError, match="no authenticated resume checkpoint"):
+        campaign._prepare_retrain_attempt(root, identity)
+
+
+def test_retrain_slurm_signal_targets_lightning_job_step() -> None:
+    """The emergency signal must reach Python; Slurm's B prefix would exclude it."""
+    script = (
+        Path(__file__).parents[1]
+        / "scripts"
+        / "clariden"
+        / "physics_background_pairing_retrain.sbatch"
+    ).read_text(encoding="utf-8")
+
+    assert "#SBATCH --requeue" in script
+    assert "#SBATCH --signal=USR1@900" in script
+    assert "--signal=B:" not in script
+    assert '\nsrun "${UV_PROJECT_ENVIRONMENT}/bin/python"' in script
+
+
+def test_oracle_ties_use_lowest_frozen_membership_index() -> None:
+    """Equal downstream means have a documented deterministic winner."""
+    candidates = [
+        {"membership_index": 9, "mean_downstream_efficiency": 0.5},
+        {"membership_index": 3, "mean_downstream_efficiency": 0.5},
+        {"membership_index": 7, "mean_downstream_efficiency": 0.4},
+    ]
+
+    assert campaign._oracle_winner(candidates)["membership_index"] == 3
+
+
+def test_existing_retrain_marker_is_hash_validated(monkeypatch, tmp_path) -> None:
+    """Resume cannot silently accept stale result or restart-evidence artifacts."""
+    root = tmp_path / "campaign"
+    marker = root / "retraining" / "markers" / "0000.json"
+    marker.parent.mkdir(parents=True)
     artifact = tmp_path / "optimized_metric.json"
     artifact.write_text("{}\n", encoding="utf-8")
     values = tmp_path / "values.csv"
     values.write_text("value\n1\n", encoding="utf-8")
-    row = {"model": "ae", "trial_number": 1}
-    marker = tmp_path / "marker.json"
+    row = {
+        "model": "ae",
+        "trial_number": 1,
+        "retrain_index": 0,
+        "epochs": 200,
+        "seed": 123,
+        "params": {},
+    }
+    state_dir = root / "retraining" / "restart_state" / "0000"
+    manifest = root / "selection" / "pareto_retrain_manifest.json"
+    manifest.parent.mkdir(parents=True)
+    manifest.write_text("{}\n", encoding="utf-8")
+    segments = []
+    for boundary in (40, 80, 120, 160, 200):
+        checkpoint = state_dir / "segments" / f"epoch_{boundary:03d}.ckpt"
+        config = state_dir / "segments" / f"epoch_{boundary:03d}_config.yaml"
+        checkpoint.parent.mkdir(parents=True, exist_ok=True)
+        checkpoint.write_text(f"checkpoint-{boundary}\n", encoding="utf-8")
+        config.write_text(f"boundary: {boundary}\n", encoding="utf-8")
+        segments.append(
+            {
+                "epoch_boundary": boundary,
+                "continuation_checkpoint": str(checkpoint),
+                "continuation_checkpoint_sha256": campaign._sha256(checkpoint),
+                "resolved_config": str(config),
+                "resolved_config_sha256": campaign._sha256(config),
+            }
+        )
+    completed_at = "2026-08-05T00:00:00+00:00"
+    state = state_dir / "state.json"
+    state.write_text(
+        campaign.json.dumps(
+            {
+                "schema_version": 1,
+                "identity": {
+                    "row": row,
+                    "manifest": str(manifest),
+                    "manifest_sha256": campaign._sha256(manifest),
+                },
+                "mlflow_run_id": "run-id",
+                "completed_at": completed_at,
+                "segments": segments,
+            }
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(campaign, "_audit_retrain_outputs", lambda *args: {})
     marker.write_text(
         campaign.json.dumps(
             {
                 "schema_version": 2,
                 "row": row,
+                "completed_at": completed_at,
+                "mlflow_run_id": "run-id",
+                "restart_state_artifact": str(state),
+                "restart_state_artifact_sha256": campaign._sha256(state),
                 "optimized_metric_artifact": str(artifact),
                 "optimized_metric_artifact_sha256": campaign._sha256(artifact),
                 "value_files": [{"path": str(values), "sha256": campaign._sha256(values)}],

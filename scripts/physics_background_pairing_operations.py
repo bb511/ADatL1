@@ -85,6 +85,7 @@ def _parse_args() -> argparse.Namespace:
     commands.add_parser("missing-retrains")
     commands.add_parser("validate-canaries")
     commands.add_parser("reconcile")
+    commands.add_parser("freeze")
     backup = commands.add_parser("backup-study")
     backup.add_argument("--model", choices=MODELS, required=True)
     repair = commands.add_parser("repair-stale")
@@ -500,22 +501,14 @@ def _validate_retrain_marker(marker: Path, row: dict[str, Any]) -> bool:
     """Return whether one marker completely authenticates its frozen retrain row."""
     if not marker.is_file():
         return False
-    payload = json.loads(marker.read_text(encoding="utf-8"))
-    if payload.get("schema_version") != 2 or payload.get("row") != row:
-        raise RuntimeError(f"Retraining marker differs from its frozen row: {marker}")
-    artifacts = [
-        {
-            "path": payload.get("optimized_metric_artifact"),
-            "sha256": payload.get("optimized_metric_artifact_sha256"),
-        },
-        *payload.get("value_files", []),
-    ]
-    if not payload.get("value_files"):
-        raise RuntimeError(f"Retraining marker contains no downstream values: {marker}")
-    for artifact in artifacts:
-        path = Path(str(artifact.get("path", "")))
-        if not path.is_file() or _sha256(path) != artifact.get("sha256"):
-            raise RuntimeError(f"Retraining artifact is missing or changed: {path}")
+    from scripts import physics_background_pairing_campaign as campaign
+
+    try:
+        campaign._validate_retrain_marker(marker, row)
+    except Exception as error:
+        raise RuntimeError(
+            f"Retraining marker failed the complete artifact audit: {marker}"
+        ) from error
     return True
 
 
@@ -1155,6 +1148,198 @@ def backup_study(root: Path, repository: Path, model: str) -> Path:
         return _create_study_backup(root, model)
 
 
+def _validate_frozen_manifest_contract(
+    root: Path, design: dict[str, Any], manifest: dict[str, Any]
+) -> None:
+    """Authenticate the immutable 56-front manifest against the frozen studies."""
+    from scripts import physics_background_pairing_report as report
+
+    if (
+        manifest.get("schema_version") != 2
+        or manifest.get("code_commit") != design["code_commit"]
+        or manifest.get("selection_uses_downstream_anomalies") is not False
+    ):
+        raise RuntimeError("Frozen Pareto manifest violates the campaign contract.")
+    expected_fronts = {
+        (str(study["model"]), str(objective["id"]))
+        for study in design["studies"]
+        for objective in study["objectives"]
+    }
+    if len(expected_fronts) != 56:
+        raise RuntimeError("Frozen campaign design does not contain exactly 56 logical fronts.")
+    memberships = manifest.get("front_memberships", [])
+    observed_fronts = {
+        (str(row.get("model")), str(row.get("logical_objective"))) for row in memberships
+    }
+    if observed_fronts != expected_fronts:
+        raise RuntimeError("Frozen manifest does not contain every logical front.")
+    if [row.get("membership_index") for row in memberships] != list(range(len(memberships))):
+        raise RuntimeError("Frozen front membership indices are not exact and contiguous.")
+    retrains = manifest.get("retrain_runs", [])
+    if [row.get("retrain_index") for row in retrains] != list(range(len(retrains))):
+        raise RuntimeError("Frozen retrain indices are not exact and contiguous.")
+    if any(
+        int(row.get("seed", -1)) != 123
+        or int(row.get("epochs", -1)) != int(design["retrain_epochs"])
+        or int(row.get("epochs", -1)) != 200
+        for row in retrains
+    ):
+        raise RuntimeError("Frozen retrains do not use seed 123 and exactly 200 epochs.")
+    retrain_indices = {int(row["retrain_index"]) for row in retrains}
+    if any(int(row.get("retrain_index", -1)) not in retrain_indices for row in memberships):
+        raise RuntimeError("A frozen front membership has no retrain row.")
+    report._validate_manifest_against_studies(root, design, manifest)
+
+
+def freeze_campaign(root: Path, repository: Path) -> Path:
+    """Freeze only an authenticated, exact, scheduler- and database-quiescent search."""
+    with _operation_lock(root):
+        return _freeze_campaign_locked(root, repository)
+
+
+def _freeze_campaign_locked(root: Path, repository: Path) -> Path:
+    """Run the frozen front builder and seal its complete transition evidence."""
+    from scripts import physics_background_pairing_report as report
+
+    design = report._design(root)
+    _authenticate_execution_repository(repository, design)
+    ledger_rows = _reconcile_locked(root, repository)
+    for model in MODELS:
+        _assert_no_live_search_overlap(ledger_rows, model)
+        _assert_database_quiescent(root, model)
+    _assert_no_live_retrain_overlap(ledger_rows)
+    active = [
+        row for row in ledger_rows if _normalized_state(row.get("state", "")) in ACTIVE_STATES
+    ]
+    if active:
+        raise RuntimeError(f"Campaign jobs remain active at freeze: {active}.")
+
+    status_rows, trial_rows = report._trial_exports(root, design)
+    target = int(design["target_trials_per_study"])
+    if target != TARGET_TRIALS:
+        raise RuntimeError(f"Frozen design target differs from {TARGET_TRIALS} trials.")
+    if len(status_rows) != len(MODELS) or {str(row["model"]) for row in status_rows} != set(
+        MODELS
+    ):
+        raise RuntimeError("Freeze status does not exactly cover the six model studies.")
+    for row in status_rows:
+        if (
+            int(row["usable_complete"]) != target
+            or int(row["selected_for_freeze"]) != target
+            or int(row["running"]) != 0
+            or int(row["waiting"]) != 0
+        ):
+            raise RuntimeError(f"Study is not exact and quiescent at freeze: {row}.")
+    selected = {
+        (str(row["model"]), int(row["trial_number"]))
+        for row in trial_rows
+        if bool(row["selected_for_freeze"])
+    }
+    expected_selected = len(MODELS) * target
+    if len(selected) != expected_selected or any(
+        sum(model == selected_model for selected_model, _ in selected) != target
+        for model in MODELS
+    ):
+        raise RuntimeError(
+            f"Freeze selected {len(selected)} trials, expected {expected_selected}."
+        )
+    bindings = report._binding_index(root)
+    selected_bindings = {key: bindings[key] for key in selected if key in bindings}
+    if set(selected_bindings) != selected or any(
+        not row.get("optimized_metric_artifact") for row in selected_bindings.values()
+    ):
+        missing = sorted(selected - set(selected_bindings))
+        raise RuntimeError(f"Selected trials lack complete explicit bindings: {missing[:10]}.")
+    report._validate_bindings(root, design, selected_bindings)
+    checkpoint_rows, mlflow_rows = report._checkpoint_rows(root, design, include_retrains=False)
+    selected_checkpoint_rows = [
+        row for row in checkpoint_rows if (str(row["model"]), int(row["trial_number"])) in selected
+    ]
+    expected_selections = sum(len(study["objectives"]) * target for study in design["studies"])
+    if len(selected_checkpoint_rows) != expected_selections:
+        raise RuntimeError(
+            "Selected optimized-metric artifacts do not contain every logical selection."
+        )
+    report._annotate_checkpoint_families(design, selected_checkpoint_rows)
+    selected_mlflow_rows = [
+        row for row in mlflow_rows if (str(row["model"]), int(row["trial_number"])) in selected
+    ]
+    validated_mlflow = report._validate_mlflow_runs(root, design, selected_mlflow_rows, final=True)
+    if len(validated_mlflow) != expected_selected:
+        raise RuntimeError("Selected trials do not have exact authenticated MLflow identities.")
+    candidate_rows = report._checkpoint_candidate_rows(root, design, selected_bindings, final=True)
+    if any(bool(row["required"]) and not bool(row["available"]) for row in candidate_rows):
+        raise RuntimeError("A required first-600 checkpoint candidate is unavailable.")
+
+    database_evidence = []
+    source_hashes = {}
+    for model in MODELS:
+        source = root / "studies" / f"{model}.db"
+        source_hashes[model] = _sha256(source)
+        backup = _create_study_backup(root, model)
+        database_evidence.append(
+            {
+                "model": model,
+                "source": str(source.resolve()),
+                "source_sha256": source_hashes[model],
+                "backup": str(backup.resolve()),
+                "backup_sha256": _sha256(backup),
+                "backup_manifest": str(backup.with_suffix(".sha256").resolve()),
+                "backup_manifest_sha256": _sha256(backup.with_suffix(".sha256")),
+            }
+        )
+    if any(
+        _sha256(root / "studies" / f"{model}.db") != digest
+        for model, digest in source_hashes.items()
+    ):
+        raise RuntimeError("A study database changed while freeze backups were created.")
+
+    runner = repository / "scripts" / "physics_background_pairing_campaign.py"
+    if not runner.is_file():
+        raise FileNotFoundError(runner)
+    command = [sys.executable, str(runner), "--root", str(root), "freeze"]
+    subprocess.run(command, cwd=repository, check=True)  # nosec B603
+    manifest_path = root / "selection" / "pareto_retrain_manifest.json"
+    if not manifest_path.is_file():
+        raise RuntimeError("Frozen campaign runner emitted no Pareto manifest.")
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    _validate_frozen_manifest_contract(root, design, manifest)
+    if any(
+        _sha256(root / "studies" / f"{model}.db") != digest
+        for model, digest in source_hashes.items()
+    ):
+        raise RuntimeError("A study database changed while Pareto fronts were frozen.")
+
+    stable_rows = [row for row in candidate_rows if row["slot"] == "stable_native"]
+    output = root / "state" / "freeze_validation.json"
+    _atomic_json(
+        output,
+        {
+            "schema_version": 1,
+            "validated_at": datetime.now(timezone.utc).isoformat(),
+            "code_commit": design["code_commit"],
+            "command": command,
+            "target_trials_per_study": target,
+            "selected_trials": len(selected),
+            "logical_fronts": 56,
+            "front_memberships": len(manifest["front_memberships"]),
+            "unique_retrains": len(manifest["retrain_runs"]),
+            "checkpoint_selections": len(selected_checkpoint_rows),
+            "mlflow_runs": len(validated_mlflow),
+            "candidate_slots": len(candidate_rows),
+            "required_candidates_available": sum(
+                bool(row["required"]) and bool(row["available"]) for row in candidate_rows
+            ),
+            "stable_candidates_configured": len(stable_rows),
+            "stable_candidates_available": sum(bool(row["available"]) for row in stable_rows),
+            "manifest": str(manifest_path.resolve()),
+            "manifest_sha256": _sha256(manifest_path),
+            "study_databases": database_evidence,
+        },
+    )
+    return output
+
+
 def _append_failure_event(root: Path, payload: dict[str, Any]) -> None:
     """Append one auditable recovery event while the operation lock is held."""
     path = root / "state" / "failures.jsonl"
@@ -1336,6 +1521,8 @@ def main() -> None:
         print(validate_canaries(root, repository))
     elif args.command == "reconcile":
         print(json.dumps(reconcile(root, repository), indent=2, sort_keys=True))
+    elif args.command == "freeze":
+        print(freeze_campaign(root, repository))
     elif args.command == "repair-stale":
         print(repair_stale(root, repository, args.model, args.trial))
     else:

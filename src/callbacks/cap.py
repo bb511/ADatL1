@@ -101,6 +101,7 @@ class CAPCallback(Callback):
         canonical_pairing_type = "mapping" if pairing_type == "precomputed" else pairing_type
         self.pairing_fn = get_pairing_fn(canonical_pairing_type)
         self.beta = beta
+        self.cap_ema = None
 
         self.log_kwargs = dict(
             prog_bar=False,
@@ -111,9 +112,25 @@ class CAPCallback(Callback):
             add_dataloader_idx=False,
         )
 
-    def on_fit_start(self, trainer, pl_module):
-        """Instantiate useful quantities."""
-        self.cap_ema = None
+    @property
+    def state_key(self) -> str:
+        """Identify independent CAP instances in a Lightning checkpoint."""
+        return self._generate_state_key(
+            output_name=self.output_name,
+            dataset_1=self.dataset_1_name,
+            dataset_2=self.dataset_2_name,
+            metric_name=self.metric_name,
+            pairing_type=self.pairing_type,
+            pairing_index_path=self.pairing_index_path,
+        )
+
+    def state_dict(self) -> dict:
+        """Persist the EMA across preemption/requeue boundaries."""
+        return {"cap_ema": self.cap_ema}
+
+    def load_state_dict(self, state_dict: dict) -> None:
+        """Restore the EMA before resumed validation continues."""
+        self.cap_ema = state_dict.get("cap_ema")
 
     def on_validation_epoch_start(self, trainer, pl_module):
         """Set device, validate dataloaders, and initialize metric state."""

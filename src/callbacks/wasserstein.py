@@ -45,6 +45,7 @@ class WassersteinCallback(Callback):
         self.apply_log1p = bool(apply_log1p)
         self.beta = beta
         self.metric_name = None if metric_name is None else str(metric_name)
+        self.w1dist_ema = None
 
         self.log_kwargs = dict(
             prog_bar=False,
@@ -55,9 +56,23 @@ class WassersteinCallback(Callback):
             add_dataloader_idx=False,
         )
 
-    def on_fit_start(self, trainer, pl_module):
-        """Instantiate useful quantities."""
-        self.w1dist_ema = None
+    @property
+    def state_key(self) -> str:
+        """Identify independent W1 instances in a Lightning checkpoint."""
+        return self._generate_state_key(
+            output_name=self.output_name,
+            dataset_1=self.dataset_1_name,
+            dataset_2=self.dataset_2_name,
+            metric_name=self.metric_name,
+        )
+
+    def state_dict(self) -> dict:
+        """Persist the EMA across preemption/requeue boundaries."""
+        return {"w1dist_ema": self.w1dist_ema}
+
+    def load_state_dict(self, state_dict: dict) -> None:
+        """Restore the EMA before resumed validation continues."""
+        self.w1dist_ema = state_dict.get("w1dist_ema")
 
     def on_validation_epoch_start(self, trainer, pl_module):
         """Set the device and check that both required dataloaders are present."""

@@ -38,6 +38,9 @@ class AnomalyEfficiencyCallback(Callback):
         self.beta = beta
         self.threshold_namespace = self._clean_namespace(threshold_namespace)
         self.metric_suffix = self._clean_namespace(metric_suffix)
+        self.cvar25_ema = {}
+        self.cvar10_ema = {}
+        self.module_target_rate = None
 
         self.log_kwargs = dict(
             prog_bar=False,
@@ -48,22 +51,48 @@ class AnomalyEfficiencyCallback(Callback):
             add_dataloader_idx=False,
         )
 
+    @property
+    def state_key(self) -> str:
+        """Identify independent score/threshold callback instances."""
+        return self._generate_state_key(
+            output_name=self.output_name,
+            threshold_namespace=self.threshold_namespace,
+            metric_suffix=self.metric_suffix,
+        )
+
+    def state_dict(self) -> dict:
+        """Persist downstream-performance EMAs across requeues."""
+        return {
+            "cvar25_ema": dict(self.cvar25_ema),
+            "cvar10_ema": dict(self.cvar10_ema),
+            "module_target_rate": self.module_target_rate,
+        }
+
+    def load_state_dict(self, state_dict: dict) -> None:
+        """Restore downstream-performance EMAs before resumed validation."""
+        self.cvar25_ema = dict(state_dict.get("cvar25_ema", {}))
+        self.cvar10_ema = dict(state_dict.get("cvar10_ema", {}))
+        self.module_target_rate = state_dict.get("module_target_rate")
+
+    def setup(self, trainer, pl_module, stage: str) -> None:
+        """Register threshold buffers before Lightning restores model state."""
+        if stage == "fit":
+            self.module_target_rate = float(getattr(pl_module.hparams, "target_rate"))
+            self._register_threshold_buffers(pl_module)
+
     def on_fit_start(self, trainer, pl_module):
-        """Instantiate useful quantities."""
-        self.cvar25_ema = {}
-        self.cvar10_ema = {}
+        """Resolve rate state, retaining restored EMA history."""
         self.module_target_rate = float(getattr(pl_module.hparams, "target_rate"))
         self._register_threshold_buffers(pl_module)
 
     def _register_threshold_buffers(self, pl_module) -> None:
         """Declare every threshold buffer before any checkpoint can be saved.
 
-        Registering a buffer only after the first validation pass is too late for
-        Lightning's checkpoint state contract: dynamically added buffers can be
-        absent from retained checkpoints, causing checkpoint evaluation to reuse
-        the final in-memory threshold.  NaN sentinels make the state shape stable;
-        validation replaces them with finite, score-specific thresholds before a
-        monitored checkpoint is eligible for selection.
+        Registering a buffer only after the first validation pass is too late for Lightning's
+        checkpoint state contract: dynamically added buffers can be absent from retained
+        checkpoints, causing checkpoint evaluation to reuse the final in-memory threshold.  NaN
+        sentinels make the state shape stable; validation replaces them with finite, score-specific
+        thresholds before a monitored checkpoint is eligible for selection.
         """
         target_rates, _ = self._resolve_rate_config(pl_module)
         existing = dict(pl_module.named_buffers())

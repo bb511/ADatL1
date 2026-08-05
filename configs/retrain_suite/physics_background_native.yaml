@@ -5,6 +5,9 @@
 test: true
 
 callbacks:
+  # Retrain segments restore checkpoint callbacks from the previous boundary;
+  # clearing their run directory would destroy last/primary/stable candidates.
+  clear_ckpts: null
   anomaly_eff:
     _target_: src.callbacks.efficiency.AnomalyEfficiencyCallback
     output_name: ascore/full

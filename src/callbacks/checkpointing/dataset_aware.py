@@ -1,16 +1,15 @@
 # Different ways of doing model checkpointing.
-import os
-from typing import Optional
-from collections import defaultdict
-from pathvalidate import sanitize_filename
-import importlib.util
-
-from weakref import proxy
-from pathlib import Path
 import copy
+import importlib.util
+import os
 import shutil
-import numpy as np
+from collections import defaultdict, deque
+from pathlib import Path
+from typing import Optional
+from weakref import proxy
 
+import numpy as np
+from pathvalidate import sanitize_filename
 from pytorch_lightning.callbacks import Callback
 
 from src.callbacks.checkpointing.criterion import Criterion
@@ -23,10 +22,10 @@ log = pylogger.RankedLogger(__name__)
 class DatasetAwareModelCheckpoint(Callback):
     """ModelCheckpoint class to store dataset-specific checkpoints.
 
-    :param monitor: String name of the metric key in the metrics log dictionary, this
-        is what comes after the dataset name.
-    :param mode: Callable method that takes the value of the metric at one epoch and
-        decides whether to create a checkpoint or not.
+    :param monitor: String name of the metric key in the metrics log dictionary, this is what comes
+        after the dataset name.
+    :param mode: Callable method that takes the value of the metric at one epoch and decides
+        whether to create a checkpoint or not.
     :param dirpath: String to dir path where to save the checkpoints.
     :param filename: String of the checkpoint filename template.
     :param ds: List of strings specifying which datasets to checkpoint on.
@@ -51,10 +50,119 @@ class DatasetAwareModelCheckpoint(Callback):
 
         self.checkpoints = defaultdict(list)
         self.ds_criterion = None
+        self._state_restored = False
+
+    @property
+    def state_key(self) -> str:
+        """Identify each independently configured checkpoint callback."""
+        return self._generate_state_key(
+            dirpath=str(self.dirpath),
+            monitor=self.monitor,
+            criterion=self.criterion.name,
+            datasets=tuple(self.ds or ()),
+        )
+
+    def state_dict(self) -> dict:
+        """Persist ranking windows and retained-checkpoint bookkeeping."""
+        return {
+            "criterion": self._criterion_state(self.criterion),
+            "ds_criterion": None
+            if self.ds_criterion is None
+            else {
+                name: self._criterion_state(criterion)
+                for name, criterion in self.ds_criterion.items()
+            },
+            "checkpoints": {
+                name: [
+                    {
+                        "value": float(record["value"]),
+                        "epoch": int(record["epoch"]),
+                        "fpath": str(record["fpath"]),
+                    }
+                    for record in records
+                ]
+                for name, records in self.checkpoints.items()
+            },
+        }
+
+    def load_state_dict(self, state_dict: dict) -> None:
+        """Restore checkpoint selection exactly across a Lightning restart."""
+        if "criterion" in state_dict:
+            self._restore_criterion_state(self.criterion, state_dict["criterion"])
+        ds_state = state_dict.get("ds_criterion")
+        if ds_state is None:
+            self.ds_criterion = None
+        else:
+            self.ds_criterion = {}
+            for name, criterion_state in ds_state.items():
+                criterion = copy.deepcopy(self.criterion)
+                self._restore_criterion_state(criterion, criterion_state)
+                self.ds_criterion[name] = criterion
+        self.checkpoints = defaultdict(list, copy.deepcopy(state_dict.get("checkpoints", {})))
+        self._state_restored = True
+
+    @staticmethod
+    def _criterion_state(criterion: Criterion) -> dict:
+        """Return a weights-only-safe representation of criterion state."""
+        state = {
+            "name": criterion.name,
+            "top_k_values": [float(value) for value in criterion.top_k_values],
+            "last_ranking_value": None
+            if criterion.last_ranking_value is None
+            else float(criterion.last_ranking_value),
+        }
+        if hasattr(criterion, "_window"):
+            state["window"] = [float(value) for value in criterion._window]
+            state["patience"] = int(criterion.patience)
+            state["threshold"] = float(criterion.threshold)
+        return state
+
+    @staticmethod
+    def _restore_criterion_state(criterion: Criterion, state: dict) -> None:
+        """Restore and validate a criterion against the current configuration."""
+        if state.get("name") != criterion.name:
+            raise RuntimeError("Restored checkpoint criterion does not match the config.")
+        top_k_values = np.asarray(state["top_k_values"], dtype=np.float64)
+        if top_k_values.shape != criterion.top_k_values.shape:
+            raise RuntimeError("Restored checkpoint top-k shape does not match the config.")
+        criterion.top_k_values = top_k_values
+        criterion.last_ranking_value = state.get("last_ranking_value")
+        if hasattr(criterion, "_window"):
+            if int(
+                state.get("patience", criterion.patience)
+            ) != criterion.patience or not np.isclose(
+                float(state.get("threshold", criterion.threshold)), criterion.threshold
+            ):
+                raise RuntimeError("Restored stability criterion does not match the config.")
+            criterion._window = deque(state.get("window", ()), maxlen=criterion.patience)
+
+    def on_fit_start(self, trainer, pl_module) -> None:
+        """Clean stale output only for a genuinely fresh fit."""
+        resuming = self._state_restored or bool(getattr(trainer, "ckpt_path", None))
+        if not resuming:
+            shutil.rmtree(self.dirpath, ignore_errors=True)
+        self.dirpath.mkdir(parents=True, exist_ok=True)
+        if resuming:
+            self._validate_retained_checkpoints()
+
+    def _validate_retained_checkpoints(self) -> None:
+        """Fail closed when restored bookkeeping cannot name a retained file."""
+        checkpoint_root = self.dirpath.resolve()
+        for records in self.checkpoints.values():
+            for record in records:
+                if "fpath" not in record:
+                    raise RuntimeError("Restored checkpoint bookkeeping has no file path.")
+                path = Path(record["fpath"]).resolve()
+                if not path.is_relative_to(checkpoint_root):
+                    raise RuntimeError(
+                        f"Restored checkpoint path escapes {checkpoint_root}: {path}"
+                    )
+                if not path.is_file():
+                    raise RuntimeError(f"Restored checkpoint file does not exist: {path}")
 
     def on_validation_start(self, trainer, pl_module):
         """Initialize the criterion object for each dataset at the start of training."""
-        if not self.ds_criterion is None:
+        if self.ds_criterion is not None:
             return
         if getattr(trainer, "sanity_checking", False):
             return
@@ -85,8 +193,8 @@ class DatasetAwareModelCheckpoint(Callback):
     def _get_metric(self, available_metrics: dict, dataset_name: str):
         """Cache the value of the specified metric for one given data set name.
 
-        This is expecting the format of the metric name 'val/[dataset_name]/metric_name'
-        make sure that this is how the callback metrics are named.
+        This is expecting the format of the metric name 'val/[dataset_name]/metric_name' make sure
+        that this is how the callback metrics are named.
         """
         metric_key = self._metric_key(dataset_name)
         if metric_key in available_metrics:
@@ -161,12 +269,14 @@ class DatasetAwareModelCheckpoint(Callback):
             os.remove(filepath)
 
     def create_checkpoint_dir(self):
-        """Create the directory where the checkpoints are saved."""
-        shutil.rmtree(self.dirpath, ignore_errors=True)
+        """Declare the output directory without destroying resumable state."""
         self.dirpath.mkdir(parents=True, exist_ok=True)
 
     def on_fit_end(self, trainer, pl_module):
-        """Plot results. Save the models obtained at the end of the training."""
+        """Plot results.
+
+        Save the models obtained at the end of the training.
+        """
         self._plot_epochs()
         if not self.save_last:
             return
@@ -229,7 +339,7 @@ class DatasetAwareModelCheckpoint(Callback):
                 continue
 
             xlabel = f"top {k+1} epoch"
-            ylabel = f"metric value"
+            ylabel = "metric value"
             horizontal_bar.plot_yright(epochs, values, xlabel, ylabel, plot_folder)
 
     def _maybe_save_keras_models(self, pl_module, ckpt_path: Path) -> None:
@@ -249,6 +359,4 @@ class DatasetAwareModelCheckpoint(Callback):
             elif isinstance(v, dict):
                 for name, vv in v.items():
                     if isinstance(vv, keras_model_cls):
-                        vv.save(
-                            str(ckpt_path.with_suffix("")) + f"__component={name}.keras"
-                        )
+                        vv.save(str(ckpt_path.with_suffix("")) + f"__component={name}.keras")

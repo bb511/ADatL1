@@ -896,9 +896,17 @@ retraining script also requests 12 hours, and downstream evaluation of many chec
 candidates may be the larger timeout risk.
 
 - Use production canary runtimes to predict whether the limit is safe.
-- If science is correct but the scheduler limit is insufficient, stop and report that
-  account `a0166` cannot access the 24-hour `low` QOS. Preserve epochs, data, callbacks,
-  hyperparameters, and seeds unless the user explicitly authorizes a scientific change.
+- Retraining is deliberately divided at cumulative epoch boundaries 40, 80, 120, 160,
+  and 200. Each normal boundary persists an authenticated continuation checkpoint and
+  resolved config, then requeues the same array task. The final segment alone runs the
+  post-fit validator and 20-anomaly evaluation. This changes no epoch, batch, callback,
+  hyperparameter, seed, or objective semantics.
+- Lightning receives an emergency `SIGUSR1` 15 minutes before the allocation limit. The
+  Slurm job uses an ordinary job-step signal and `srun`; never add the `B:` prefix,
+  because Slurm documents that `B:` signals only the batch shell and excludes Python.
+  Emergency HPC checkpoints live in the retrain-index-specific
+  `trainer.default_root_dir`, are authenticated on restart, and are archived after the
+  interrupted segment reaches its deterministic boundary.
 - Do not pass a timeout greater than the partition maximum.
 - Record the partition/time-limit change as operational, not scientific.
 - The controller and all packed steps share one 12-hour allocation, so queue time is
@@ -959,13 +967,22 @@ marker already exists and `aggregate` rejects missing/hash-changed artifacts.
 
 ### 9.1 Freeze
 
-Freeze only after all six studies report at least 600 usable trials:
+Freeze only after all six studies report exactly 600 usable trials and both the
+scheduler and Optuna databases are quiescent:
 
 ```bash
-"${BGPAIR_UV}" run --frozen --no-sync python \
-  scripts/physics_background_pairing_campaign.py \
-  --root "${BGPAIR_ROOT}" freeze
+uv run python scripts/physics_background_pairing_operations.py \
+  --root "${BGPAIR_ROOT}" --execution-repository "${BGPAIR_REPO}" freeze
 ```
+
+The operations-level gate holds the campaign lock while it reconciles Slurm, rejects
+every live search/retrain allocation and RUNNING/WAITING Optuna trial, authenticates
+the exact first 600 usable trials per model and their Hydra/MLflow/optimized-metric
+bindings, and hashes every required retained checkpoint candidate. It then makes a
+transactionally consistent hashed backup of all six quiescent SQLite databases,
+invokes the commit-pinned campaign runner, reconstructs all fronts independently, and
+writes `state/freeze_validation.json`. A pre-existing Pareto manifest is accepted only
+after the same validation; file existence alone is never a resume condition.
 
 The command writes:
 
@@ -984,6 +1001,9 @@ Required manifest checks:
 - deduplicated `retrain_runs` contains one row per unique `(model, trial_number)`;
 - each row has seed 123 and 200 epochs;
 - membership-to-retrain indices are complete.
+- `state/freeze_validation.json` authenticates 3,600 selected trials, 56 nonempty
+  fronts, all required checkpoint candidates, six database backups, and the immutable
+  manifest hash.
 
 Once written, treat the manifest as immutable. Do not inspect downstream efficiencies
 and then rebuild a more favorable front.
@@ -1026,12 +1046,26 @@ Direct `sbatch --array` is a recovery fallback only.
 Each index must:
 
 - reconstruct the exact frozen Optuna hyperparameters;
-- train 200 epochs with seed 123;
+- train exactly 200 cumulative epochs with seed 123 across five authenticated 40-epoch
+  segments, restoring optimizer, scheduler, RNG, loop, model, and callback state;
+- reuse one persisted MLflow run ID across every allocation and fail closed if its
+  identity tag, frozen row, manifest hash, or restart state differs;
 - recompute the full relevant selection suite;
 - select a checkpoint separately for every logical objective;
 - evaluate all 20 anomalies for the score(s) supported by the model;
 - derive native and OAS operating thresholds independently;
 - write schema-2 `optimized_metric.json` and a hash-bearing marker.
+
+The per-index restart record is
+`retraining/restart_state/<index>/state.json`. It records every Slurm attempt, resume
+source, cumulative boundary, copied boundary checkpoint/config and hash, emergency HPC
+evidence, the frozen row/manifest/commit identity, and the single MLflow run ID. A
+repeated attempt without either an authenticated completed-boundary checkpoint or an
+HPC checkpoint is an error, not permission to restart from epoch zero. Completion
+markers are accepted only after the final resolved config proves 200 epochs, seed and
+Optuna parameters match the manifest, selected checkpoints remain confined to the
+campaign and contain the exact finite native/OAS thresholds, and every logical
+selection has exactly 20 held-out downstream efficiencies.
 
 The completion count must equal `N`:
 

@@ -89,13 +89,13 @@ def train(cfg: DictConfig) -> Tuple[Dict[str, Any], Dict[str, Any]]:
         "trainer": trainer,
     }
 
-    if logger:
+    if logger and cfg.get("log_hyperparameters", True):
         log.info("Logging hyperparameters!")
         log_hyperparameters(object_dict)
 
     if cfg.get("train"):
         log.info("Starting training!")
-        trainer.fit(model=algorithm, datamodule=datamodule)
+        trainer.fit(model=algorithm, datamodule=datamodule, ckpt_path=cfg.get("ckpt_path"))
 
     train_metrics = trainer.callback_metrics
 

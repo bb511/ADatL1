@@ -75,10 +75,25 @@ class ThresholdDriftCallback(Callback):
 
         if not (0.0 < self.calibration_fraction < 1.0):
             raise ValueError("calibration_fraction must be strictly between 0 and 1.")
-
-    def on_fit_start(self, trainer, pl_module):
-        """Instantiate useful quantities."""
         self.drift_ema = defaultdict(float)
+
+    @property
+    def state_key(self) -> str:
+        """Identify independent drift directions/scores in a checkpoint."""
+        return self._generate_state_key(
+            output_name=self.output_name,
+            dataset_1=self.dataset_1_name,
+            dataset_2=self.dataset_2_name,
+            metric_name=self.metric_name,
+        )
+
+    def state_dict(self) -> dict:
+        """Persist per-rate EMAs across preemption/requeue boundaries."""
+        return {"drift_ema": dict(self.drift_ema)}
+
+    def load_state_dict(self, state_dict: dict) -> None:
+        """Restore per-rate EMAs before resumed validation continues."""
+        self.drift_ema = defaultdict(float, state_dict.get("drift_ema", {}))
 
     def on_validation_epoch_start(self, trainer, pl_module):
         """Set the device and make sure the normal data is in the used data sets."""

@@ -2,6 +2,13 @@
 
 Last updated: 2026-08-05 (Europe/Zurich)
 
+- 2026-08-05: added a fail-closed operations-level Pareto freeze transition. The gate
+  requires exact 600-trial quiescence for every study, authenticates all selected
+  binding/metric/MLflow/checkpoint evidence, creates and hashes consistent backups of
+  all six SQLite databases, invokes the commit-pinned front builder, independently
+  reconstructs the 56 fronts and deduplicated retrain union, and seals
+  `state/freeze_validation.json`. Existing manifests must pass the same checks.
+
 ## Contract and inputs
 
 - Plan: `research/physics_background_pairing/PLAN.md`

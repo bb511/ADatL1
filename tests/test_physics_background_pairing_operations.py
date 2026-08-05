@@ -42,6 +42,241 @@ def _authenticate(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(operations, "_live_retrain_job_ids", lambda: set())
 
 
+def _freeze_design() -> dict:
+    """Return the smallest target-one design with the production 56-front shape."""
+    counts = {"ae": 14, "vae": 14, "dsae": 7, "dsvae": 7, "svdd": 7, "realnvp": 7}
+    return {
+        "schema_version": 2,
+        "code_commit": "a" * 40,
+        "target_trials_per_study": 1,
+        "retrain_epochs": 200,
+        "studies": [
+            {
+                "model": model,
+                "study_name": f"study_{model}",
+                "objectives": [
+                    {
+                        "id": f"objective_{index}",
+                        "score": "native",
+                        "metric": "wasserstein",
+                        "strategy": None,
+                        "directions": ["minimize", "minimize"],
+                        "value_indices": [2 * index, 2 * index + 1],
+                    }
+                    for index in range(count)
+                ],
+            }
+            for model, count in counts.items()
+        ],
+    }
+
+
+def _freeze_manifest(design: dict) -> dict:
+    """Build one nonempty membership per logical front and one retrain per model."""
+    retrains = []
+    memberships = []
+    for retrain_index, study in enumerate(design["studies"]):
+        objective_ids = [row["id"] for row in study["objectives"]]
+        retrains.append(
+            {
+                "model": study["model"],
+                "trial_number": 0,
+                "params": {},
+                "logical_objectives": objective_ids,
+                "seed": 123,
+                "epochs": 200,
+                "retrain_index": retrain_index,
+            }
+        )
+        for objective in study["objectives"]:
+            memberships.append(
+                {
+                    "membership_index": len(memberships),
+                    "model": study["model"],
+                    "logical_objective": objective["id"],
+                    "score": objective["score"],
+                    "metric": objective["metric"],
+                    "strategy": objective["strategy"],
+                    "trial_number": 0,
+                    "objective_values": [0.1, 0.2],
+                    "retrain_index": retrain_index,
+                }
+            )
+    return {
+        "schema_version": 2,
+        "code_commit": design["code_commit"],
+        "selection_uses_downstream_anomalies": False,
+        "front_memberships": memberships,
+        "retrain_runs": retrains,
+    }
+
+
+def test_freeze_gate_seals_exact_quiescent_first_trial_pool(monkeypatch, tmp_path) -> None:
+    """Freeze authenticates search evidence, backups, and the resulting 56-front manifest."""
+    root, repository = _campaign(tmp_path)
+    _authenticate(monkeypatch)
+    design = _freeze_design()
+    manifest = _freeze_manifest(design)
+    (repository / "scripts" / "physics_background_pairing_campaign.py").write_text(
+        "#!/usr/bin/env python\n", encoding="utf-8"
+    )
+    for model in operations.MODELS:
+        database = root / "studies" / f"{model}.db"
+        database.parent.mkdir(parents=True, exist_ok=True)
+        database.write_bytes(f"database-{model}".encode())
+
+    monkeypatch.setattr(operations, "TARGET_TRIALS", 1)
+    monkeypatch.setattr(report, "_design", lambda campaign_root: design)
+    monkeypatch.setattr(operations, "_reconcile_locked", lambda *args: [])
+    monkeypatch.setattr(operations, "_assert_no_live_search_overlap", lambda *args: set())
+    monkeypatch.setattr(operations, "_assert_no_live_retrain_overlap", lambda *args: set())
+    monkeypatch.setattr(operations, "_assert_database_quiescent", lambda *args: None)
+    statuses = [
+        {
+            "model": model,
+            "usable_complete": 1,
+            "selected_for_freeze": 1,
+            "running": 0,
+            "waiting": 0,
+        }
+        for model in operations.MODELS
+    ]
+    trials = [
+        {"model": model, "trial_number": 0, "selected_for_freeze": True}
+        for model in operations.MODELS
+    ]
+    monkeypatch.setattr(report, "_trial_exports", lambda *args: (statuses, trials))
+    bindings = {
+        (model, 0): {"optimized_metric_artifact": str(tmp_path / f"{model}.json")}
+        for model in operations.MODELS
+    }
+    monkeypatch.setattr(report, "_binding_index", lambda *args: bindings)
+    monkeypatch.setattr(report, "_validate_bindings", lambda *args: None)
+    checkpoint_rows = [
+        {"model": study["model"], "trial_number": 0, "logical_objective": objective["id"]}
+        for study in design["studies"]
+        for objective in study["objectives"]
+    ]
+    mlflow_rows = [{"model": model, "trial_number": 0} for model in operations.MODELS]
+    monkeypatch.setattr(
+        report, "_checkpoint_rows", lambda *args, **kwargs: (checkpoint_rows, mlflow_rows)
+    )
+    monkeypatch.setattr(report, "_annotate_checkpoint_families", lambda *args: args[1])
+    monkeypatch.setattr(report, "_validate_mlflow_runs", lambda *args, **kwargs: args[2])
+    candidates = [
+        {"slot": "last", "required": True, "available": True}
+        for _ in range(len(operations.MODELS))
+    ]
+    monkeypatch.setattr(report, "_checkpoint_candidate_rows", lambda *args, **kwargs: candidates)
+    monkeypatch.setattr(report, "_validate_manifest_against_studies", lambda *args: None)
+
+    def backup(campaign_root: Path, model: str) -> Path:
+        path = campaign_root / "studies" / "backups" / model / "frozen.db"
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_bytes((campaign_root / "studies" / f"{model}.db").read_bytes())
+        path.with_suffix(".sha256").write_text("digest  frozen.db\n", encoding="utf-8")
+        return path
+
+    monkeypatch.setattr(operations, "_create_study_backup", backup)
+
+    def run(command, **kwargs):
+        path = root / "selection" / "pareto_retrain_manifest.json"
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(json.dumps(manifest), encoding="utf-8")
+        return SimpleNamespace()
+
+    monkeypatch.setattr(operations.subprocess, "run", run)
+    output = operations.freeze_campaign(root, repository)
+
+    payload = json.loads(output.read_text(encoding="utf-8"))
+    assert payload["selected_trials"] == 6
+    assert payload["logical_fronts"] == 56
+    assert payload["front_memberships"] == 56
+    assert payload["unique_retrains"] == 6
+    assert payload["mlflow_runs"] == 6
+    assert len(payload["study_databases"]) == 6
+    assert all(Path(row["backup"]).is_file() for row in payload["study_databases"])
+
+
+def test_freeze_gate_rejects_nonexact_trial_budget(monkeypatch, tmp_path) -> None:
+    """A quiescent study with fewer than the exact budget cannot be frozen."""
+    root, repository = _campaign(tmp_path)
+    _authenticate(monkeypatch)
+    design = _freeze_design()
+    monkeypatch.setattr(operations, "TARGET_TRIALS", 1)
+    monkeypatch.setattr(report, "_design", lambda campaign_root: design)
+    monkeypatch.setattr(operations, "_reconcile_locked", lambda *args: [])
+    monkeypatch.setattr(operations, "_assert_no_live_search_overlap", lambda *args: set())
+    monkeypatch.setattr(operations, "_assert_no_live_retrain_overlap", lambda *args: set())
+    monkeypatch.setattr(operations, "_assert_database_quiescent", lambda *args: None)
+    statuses = [
+        {
+            "model": model,
+            "usable_complete": 0 if model == "ae" else 1,
+            "selected_for_freeze": 0 if model == "ae" else 1,
+            "running": 0,
+            "waiting": 0,
+        }
+        for model in operations.MODELS
+    ]
+    monkeypatch.setattr(report, "_trial_exports", lambda *args: (statuses, []))
+
+    with pytest.raises(RuntimeError, match="not exact and quiescent"):
+        operations.freeze_campaign(root, repository)
+
+
+def test_freeze_gate_rejects_active_ledger_job(monkeypatch, tmp_path) -> None:
+    """Reconciled scheduler activity blocks the immutable transition."""
+    root, repository = _campaign(tmp_path)
+    _authenticate(monkeypatch)
+    design = _freeze_design()
+    monkeypatch.setattr(report, "_design", lambda campaign_root: design)
+    monkeypatch.setattr(
+        operations,
+        "_reconcile_locked",
+        lambda *args: [
+            {"job_id": "42", "kind": "search_chunk", "model": "ae", "state": "RUNNING"}
+        ],
+    )
+    monkeypatch.setattr(operations, "_assert_no_live_search_overlap", lambda *args: set())
+    monkeypatch.setattr(operations, "_assert_no_live_retrain_overlap", lambda *args: set())
+    monkeypatch.setattr(operations, "_assert_database_quiescent", lambda *args: None)
+
+    with pytest.raises(RuntimeError, match="remain active"):
+        operations.freeze_campaign(root, repository)
+
+
+def test_freeze_gate_rejects_active_optuna_database(monkeypatch, tmp_path) -> None:
+    """A RUNNING/WAITING Optuna writer blocks freeze even without a live ledger row."""
+    root, repository = _campaign(tmp_path)
+    _authenticate(monkeypatch)
+    design = _freeze_design()
+    monkeypatch.setattr(report, "_design", lambda campaign_root: design)
+    monkeypatch.setattr(operations, "_reconcile_locked", lambda *args: [])
+    monkeypatch.setattr(operations, "_assert_no_live_search_overlap", lambda *args: set())
+    monkeypatch.setattr(operations, "_assert_no_live_retrain_overlap", lambda *args: set())
+
+    def quiescent(campaign_root: Path, model: str) -> None:
+        if model == "ae":
+            raise RuntimeError("Study ae is not quiescent: ['RUNNING'].")
+
+    monkeypatch.setattr(operations, "_assert_database_quiescent", quiescent)
+
+    with pytest.raises(RuntimeError, match="not quiescent"):
+        operations.freeze_campaign(root, repository)
+
+
+def test_existing_frozen_manifest_must_authenticate(monkeypatch, tmp_path) -> None:
+    """A pre-existing manifest is never accepted merely because the file exists."""
+    design = _freeze_design()
+    manifest = _freeze_manifest(design)
+    manifest["selection_uses_downstream_anomalies"] = True
+    monkeypatch.setattr(report, "_validate_manifest_against_studies", lambda *args: None)
+
+    with pytest.raises(RuntimeError, match="violates the campaign contract"):
+        operations._validate_frozen_manifest_contract(tmp_path, design, manifest)
+
+
 def test_submit_registers_exact_frozen_job(monkeypatch, tmp_path) -> None:
     """Submission exports frozen roots and atomically records the Slurm ID."""
     root, repository = _campaign(tmp_path)
@@ -569,6 +804,9 @@ def test_reconcile_seals_successful_retrain_marker(monkeypatch, tmp_path) -> Non
         ),
         encoding="utf-8",
     )
+    from scripts import physics_background_pairing_campaign as campaign
+
+    monkeypatch.setattr(campaign, "_validate_retrain_marker", lambda *args: None)
     operations._atomic_csv(
         root / "state" / "job_history.csv",
         [
@@ -750,7 +988,7 @@ def test_missing_retrains_rejects_changed_marker_artifact(monkeypatch, tmp_path)
         encoding="utf-8",
     )
 
-    with pytest.raises(RuntimeError, match="missing or changed"):
+    with pytest.raises(RuntimeError, match="complete artifact audit"):
         operations.missing_retrains(root, repository)
 
 

@@ -3,8 +3,11 @@
 #SBATCH --account=a0166
 #SBATCH --partition=normal
 #SBATCH --time=12:00:00
+#SBATCH --requeue
+# Do not use Slurm's B: prefix: it signals only the batch shell, not Lightning.
+#SBATCH --signal=USR1@900
 #SBATCH --nodes=1
-#SBATCH --ntasks=1
+#SBATCH --ntasks-per-node=1
 #SBATCH --cpus-per-task=16
 #SBATCH --gpus-per-node=1
 #SBATCH --mem=96G
@@ -15,8 +18,6 @@ set -euo pipefail
 readonly SCRATCH_ROOT=/iopsstor/scratch/cscs/vjimenez/adatl1
 readonly REPOSITORY_ROOT="${PHYSICS_BGPAIR_REPOSITORY_ROOT:-${SCRATCH_ROOT}/worktrees/physics_background_shared_20260804}"
 readonly CAMPAIGN_ROOT="${PHYSICS_BGPAIR_CAMPAIGN_ROOT:-${SCRATCH_ROOT}/campaigns/physics_background_shared_20260804}"
-readonly UV_BIN="${SCRATCH_ROOT}/tools/uv-0.11.32/uv"
-
 export UV_PROJECT_ENVIRONMENT="${SCRATCH_ROOT}/.venv-clariden"
 export UV_CACHE_DIR="${SCRATCH_ROOT}/uv-cache-clariden-arm64"
 export UV_PYTHON_INSTALL_DIR="${SCRATCH_ROOT}/python"
@@ -24,5 +25,5 @@ export UV_MANAGED_PYTHON=1
 export HYDRA_FULL_ERROR=1
 
 cd "${REPOSITORY_ROOT}"
-"${UV_BIN}" run --frozen --no-sync python scripts/physics_background_pairing_campaign.py \
+srun "${UV_PROJECT_ENVIRONMENT}/bin/python" scripts/physics_background_pairing_campaign.py \
   --root "${CAMPAIGN_ROOT}" retrain --index "${SLURM_ARRAY_TASK_ID}"

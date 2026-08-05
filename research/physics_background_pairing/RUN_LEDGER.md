@@ -21,7 +21,7 @@ Last updated: 2026-08-04 (Europe/Zurich)
 | Scientific contract | complete | `PLAN.md` |
 | Implementation audit | complete | Model/data/HPO settings match `dev/patrick`; requested metric scope, score routing, CDF, retraining, and padding semantics audited |
 | Code and configs | complete | Refactored to six shared model studies with 56 logical fronts, per-strategy checkpoint selection, and score-aware retraining |
-| Tests and preflight | complete | 66 campaign tests pass after the unified-pilot interpolation fix; all six configs compose, scoped hooks pass, all 8 pair tables authenticate, and scratch capacity is sufficient |
+| Tests and preflight | complete | 67 campaign tests pass after the single-run provenance fix; all six configs compose, scoped hooks pass, all 8 pair tables authenticate, and scratch capacity is sufficient |
 | Autonomous runbook | complete | `PLAN.md` now specifies the full six-study state machine, artifact contract, scheduler/timer policy, failure recovery, portable exports, analysis, and final `REPORT.md` |
 | Provenance/report hardening | complete | Added persistent Optuna-to-Hydra chunk bindings, run/checkpoint/MLflow identities, reverse G-to-E drift persistence, and fail-closed snapshot/finalize exports with synthetic positive/tamper/leakage tests |
 | Pilots | pending | Earlier isolated pilots passed from `6d10cd5`, but they do not validate the new unified callback/evaluator path |
@@ -72,6 +72,13 @@ codespell) pass; the unrelated baseline debt must not be mixed into this campaig
   asserts every plot destination exists. Final reporting was also completed with four
   compact figures plus winner-resolved Hydra configs and deterministic compressed
   search/retrain/Slurm log indices.
+- 2026-08-05: campaign `e184adeb8676` unified AE pilot job `3005118` successfully
+  trained and evaluated the last, all 14 primary-EMA candidates, and stable-native
+  candidate, including both reverse drift plots. It failed only when provenance tried
+  to read mandatory-but-unset `hydra.job.num` in a Hydra single run. The campaign is
+  superseded before any search trial, with complete scheduler/log/failure evidence.
+  Single-run provenance now serializes this field as null while preserving integer
+  multirun indices; both cases are covered.
 
 - 2026-08-04: implemented the six shared 600-trial model studies. Every trial now
   returns all native/OAS CAP, W1, drift, and native-secondary objective pairs in a

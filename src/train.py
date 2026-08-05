@@ -194,12 +194,16 @@ def _run_provenance(cfg: DictConfig, loggers: List[Logger]) -> dict[str, Any]:
                 "save_dir": str(getattr(logger, "save_dir", "")) or None,
             }
         )
-    job = getattr(hydra_cfg, "job", None)
+    if OmegaConf.is_config(hydra_cfg):
+        hydra_job_num = OmegaConf.select(hydra_cfg, "job.num", default=None)
+    else:
+        job = getattr(hydra_cfg, "job", None)
+        hydra_job_num = None if job is None else getattr(job, "num", None)
     return {
         "experiment_name": str(cfg.experiment_name),
         "run_name": str(cfg.run_name),
         "hydra_output_dir": str(output_dir),
-        "hydra_job_num": None if job is None else getattr(job, "num", None),
+        "hydra_job_num": hydra_job_num,
         "checkpoint_run_dir": str(checkpoint_dir),
         "loggers": logger_rows,
     }

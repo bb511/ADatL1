@@ -120,3 +120,24 @@ def test_optimized_metric_artifact_records_run_provenance(tmp_path, monkeypatch)
     assert provenance["run_name"] == "abc123"
     assert provenance["loggers"][0]["run_id"] == "run-1"
     assert provenance["checkpoint_run_dir"].endswith("checkpoints/physics_bgpair_search_ae/abc123")
+
+
+def test_single_run_provenance_accepts_unset_hydra_job_number(tmp_path, monkeypatch) -> None:
+    """Hydra single runs have no multirun job index and must serialize it as null."""
+    output = tmp_path / "hydra"
+    output.mkdir()
+    hydra_cfg = OmegaConf.create({"runtime": {"output_dir": str(output)}, "job": {"num": "???"}})
+    monkeypatch.setattr(train.HydraConfig, "get", lambda: hydra_cfg)
+    cfg = OmegaConf.create(
+        {
+            "paths": {"checkpoints_dir": str(tmp_path / "checkpoints")},
+            "experiment_name": "physics_bgpair_pilot_ae",
+            "run_name": "abc123",
+        }
+    )
+    evaluator = SimpleNamespace(optimized_ckpt_name="last", optimized_metric=[1.0])
+
+    artifact = train._write_optimized_metric_artifact(evaluator, cfg=cfg, loggers=[])
+
+    provenance = json.loads(artifact.read_text(encoding="utf-8"))["run_provenance"]
+    assert provenance["hydra_job_num"] is None

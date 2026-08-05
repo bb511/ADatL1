@@ -896,6 +896,7 @@ def packed_pilot(root: Path, model: str) -> None:
     study = _study(design, model)
     output = root / "packed_pilots" / model
     database = output / "study.db"
+    output.mkdir(parents=True, exist_ok=True)
     study_name = f"physics_{model}_packed_launcher_pilot_{design['code_commit'][:12]}"
     command = [
         sys.executable,

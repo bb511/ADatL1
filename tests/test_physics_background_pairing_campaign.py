@@ -219,6 +219,40 @@ def test_pilot_reduces_only_inner_cap_optimization(monkeypatch, tmp_path) -> Non
     assert not any(value.startswith("data.max_val_batches=") for value in commands[0])
 
 
+def test_packed_pilot_creates_storage_parent_before_optuna(monkeypatch, tmp_path) -> None:
+    """SQLite must be able to create the temporary packed-pilot database."""
+    from optuna.trial import TrialState
+
+    design = {"code_commit": "a" * 40, "studies": campaign._studies()}
+    trials = [
+        SimpleNamespace(
+            number=index,
+            state=TrialState.COMPLETE,
+            values=[1.0] * 28,
+            params={"x": index},
+        )
+        for index in range(4)
+    ]
+    fake_optuna = SimpleNamespace(
+        load_study=lambda **kwargs: SimpleNamespace(get_trials=lambda deepcopy=False: trials),
+        trial=SimpleNamespace(TrialState=TrialState),
+    )
+    monkeypatch.setattr(campaign, "_load_design", lambda root: design)
+    monkeypatch.setattr(campaign, "_optuna", lambda: fake_optuna)
+
+    def run(command, **kwargs):
+        output = tmp_path / "packed_pilots" / "ae"
+        assert output.is_dir()
+        for index in range(4):
+            run_dir = output / str(index)
+            run_dir.mkdir()
+            (run_dir / "optimized_metric.json").write_text("{}", encoding="utf-8")
+
+    monkeypatch.setattr(campaign.subprocess, "run", run)
+    campaign.packed_pilot(tmp_path, "ae")
+    assert (tmp_path / "packed_pilots" / "ae" / "success.json").is_file()
+
+
 def test_chunk_bindings_preserve_global_trial_identity(monkeypatch, tmp_path) -> None:
     """Chunk-local Hydra indices map explicitly to persistent trial numbers."""
     study = campaign._studies()[0]

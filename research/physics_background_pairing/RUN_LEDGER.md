@@ -60,9 +60,10 @@ codespell) pass; the unrelated baseline debt must not be mixed into this campaig
 
 ## Verification log
 
-- 2026-08-05: the first 50-epoch AE canary gate found two orchestration-only defects
+- 2026-08-05: the first 50-epoch AE canary gate found orchestration-only defects
   before any Optuna trial was created. Clariden `xfer` nodes are x86-64 and cannot run
-  the pinned ARM environment, so the 24-hour controller now uses an ARM `low` node.
+  the pinned ARM environment. Account `a0166` also lacks the `slowdown` QOS required
+  by the 24-hour `low` partition, so the controller uses a 12-hour ARM `normal` node.
   Hydra also requires the SQLite URL containing `?timeout=600` to be quoted as one
   override value. The exact override now composes successfully, 38 focused campaign
   tests pass, and all changed-file hooks pass. A fresh commit-derived campaign is

@@ -2,8 +2,9 @@
 #SBATCH --job-name=phys-bgpair-sweep
 #SBATCH --account=a0166
 # The project environment is built for the ARM GPU nodes; xfer nodes are x86-64.
-#SBATCH --partition=low
-#SBATCH --time=24:00:00
+# This account has normal QOS only, so the controller uses a normal ARM node.
+#SBATCH --partition=normal
+#SBATCH --time=12:00:00
 #SBATCH --nodes=1
 #SBATCH --ntasks=1
 #SBATCH --cpus-per-task=2

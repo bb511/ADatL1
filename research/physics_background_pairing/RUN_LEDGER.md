@@ -21,11 +21,23 @@ Last updated: 2026-08-04 (Europe/Zurich)
 | Scientific contract | complete | `PLAN.md` |
 | Implementation audit | complete | Model/data/HPO settings match `dev/patrick`; requested metric scope, score routing, CDF, retraining, and padding semantics audited |
 | Code and configs | complete | Refactored to six shared model studies with 56 logical fronts, per-strategy checkpoint selection, and score-aware retraining |
-| Tests and preflight | complete | 45 targeted tests pass, all six search/retrain configs compose, all changed-file hooks pass, and all 8 pair tables are authenticated |
+| Tests and preflight | complete | 65 campaign tests pass, all six search/retrain configs compose, scoped hooks pass, all 8 pair tables authenticate, and scratch reports 134.7 GiB used with no per-user block/file limit |
+| Autonomous runbook | complete | `PLAN.md` now specifies the full six-study state machine, artifact contract, scheduler/timer policy, failure recovery, portable exports, analysis, and final `REPORT.md` |
+| Provenance/report hardening | complete | Added persistent Optuna-to-Hydra chunk bindings, run/checkpoint/MLflow identities, reverse G-to-E drift persistence, and fail-closed snapshot/finalize exports with synthetic positive/tamper/leakage tests |
 | Pilots | pending | Earlier isolated pilots passed from `6d10cd5`, but they do not validate the new unified callback/evaluator path |
 | Full searches | pending | Six persistent studies, 600 trials each; no full-scale job is authorized or submitted yet |
 | Retraining/evaluation | pending | Offline 56-front freeze, unique 200-epoch retraining, and native/OAS threshold separation are implemented; validation pending |
 | Aggregation/report | pending | Score-aware downstream oracle aggregation is implemented; awaits validation and results |
+
+The schema-2 production worktree and scratch campaign have not been created. The next
+agent must use a fresh commit-derived campaign ID after the runbook/reporting changes
+are committed; it must not reuse the superseded schema-1 scratch campaigns.
+
+Repository-wide `pre-commit -a` is not a usable clean gate on the current baseline: it
+rewrites 82 unrelated legacy files and separately reports pre-existing executable shell
+scripts without shebangs. Those hook-induced edits were restored. All campaign-scoped
+hooks (including direct Black, isort, docformatter, interrogate, flake8, Bandit, and
+codespell) pass; the unrelated baseline debt must not be mixed into this campaign.
 
 ## Decisions
 

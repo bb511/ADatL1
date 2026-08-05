@@ -4,6 +4,7 @@ import importlib.util
 from pathlib import Path
 from types import SimpleNamespace
 
+import pytest
 import yaml
 
 SCRIPT = Path(__file__).parents[1] / "scripts/physics_background_pairing_campaign.py"
@@ -26,6 +27,18 @@ def test_campaign_has_six_studies_and_56_logical_fronts() -> None:
         assert [
             index for objective in study["objectives"] for index in objective["value_indices"]
         ] == list(range(2 * expected))
+
+
+def test_campaign_rejects_dirty_execution_checkout(monkeypatch) -> None:
+    """A prior commit SHA cannot disguise uncommitted scientific changes."""
+    monkeypatch.setattr(campaign.shutil, "which", lambda name: "/usr/bin/git")
+    monkeypatch.setattr(
+        campaign.subprocess,
+        "run",
+        lambda *args, **kwargs: SimpleNamespace(stdout=" M src/train.py\n"),
+    )
+    with pytest.raises(RuntimeError, match="clean commit-pinned"):
+        campaign._require_clean_checkout()
 
 
 def test_shared_sweep_command_preserves_paper_budget_and_logging(tmp_path) -> None:
@@ -109,6 +122,33 @@ def test_retraining_uses_score_aware_downstream_suite() -> None:
     assert campaign._retrain_suite("dsae") == "physics_background_native"
 
 
+def test_existing_retrain_marker_is_hash_validated(tmp_path) -> None:
+    """Resume cannot silently accept a stale or hand-edited success marker."""
+    artifact = tmp_path / "optimized_metric.json"
+    artifact.write_text("{}\n", encoding="utf-8")
+    values = tmp_path / "values.csv"
+    values.write_text("value\n1\n", encoding="utf-8")
+    row = {"model": "ae", "trial_number": 1}
+    marker = tmp_path / "marker.json"
+    marker.write_text(
+        campaign.json.dumps(
+            {
+                "schema_version": 2,
+                "row": row,
+                "optimized_metric_artifact": str(artifact),
+                "optimized_metric_artifact_sha256": campaign._sha256(artifact),
+                "value_files": [{"path": str(values), "sha256": campaign._sha256(values)}],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    campaign._validate_retrain_marker(marker, row)
+    values.write_text("value\n2\n", encoding="utf-8")
+    with pytest.raises(RuntimeError, match="value artifact changed"):
+        campaign._validate_retrain_marker(marker, row)
+
+
 def test_pilot_parser_exercises_the_complete_model_suite(monkeypatch) -> None:
     """A pilot validates all pairings and scores together, not one isolated cell."""
     monkeypatch.setattr(
@@ -150,3 +190,64 @@ def test_pilot_reduces_only_inner_cap_optimization(monkeypatch, tmp_path) -> Non
 
     assert "physics_selection.cap_metric_config.n_epochs=1" in commands[0]
     assert not any(value.startswith("data.max_val_batches=") for value in commands[0])
+
+
+def test_chunk_bindings_preserve_global_trial_identity(monkeypatch, tmp_path) -> None:
+    """Chunk-local Hydra indices map explicitly to persistent trial numbers."""
+    study = campaign._studies()[0]
+    sweep_dir = tmp_path / "sweeps" / "ae" / "stamp"
+    for job in range(2):
+        run_dir = sweep_dir / str(job)
+        run_dir.mkdir(parents=True)
+        (run_dir / "optimized_metric.json").write_text("{}\n", encoding="utf-8")
+    trials = [
+        SimpleNamespace(
+            number=8,
+            state=SimpleNamespace(name="COMPLETE"),
+            params={"x": 1},
+            values=(1.0,),
+        ),
+        SimpleNamespace(
+            number=9,
+            state=SimpleNamespace(name="FAIL"),
+            params={"x": 2},
+            values=None,
+        ),
+    ]
+    monkeypatch.setattr(campaign, "_study_trials", lambda root, selected: trials)
+
+    output = campaign._write_chunk_bindings(tmp_path, study, sweep_dir, {0, 1})
+    bindings = campaign.json.loads(output.read_text(encoding="utf-8"))["bindings"]
+
+    assert [(row["trial_number"], row["hydra_job_num"]) for row in bindings] == [
+        (8, 0),
+        (9, 1),
+    ]
+    assert all(row["optimized_metric_artifact_sha256"] for row in bindings)
+
+
+def test_refreshing_chunk_bindings_reconciles_persistent_trial_state(
+    monkeypatch, tmp_path
+) -> None:
+    """A recovery refresh overwrites stale state and objective values deterministically."""
+    study = campaign._studies()[0]
+    sweep_dir = tmp_path / "sweeps" / "ae" / "stamp"
+    run_dir = sweep_dir / "0"
+    run_dir.mkdir(parents=True)
+    (run_dir / "optimized_metric.json").write_text("{}\n", encoding="utf-8")
+    trial = SimpleNamespace(
+        number=8,
+        state=SimpleNamespace(name="RUNNING"),
+        params={"x": 1},
+        values=None,
+    )
+    monkeypatch.setattr(campaign, "_study_trials", lambda root, selected: [trial])
+    output = campaign._write_chunk_bindings(tmp_path, study, sweep_dir, {0, 1})
+
+    trial.state = SimpleNamespace(name="COMPLETE")
+    trial.values = (1.0, 2.0)
+    campaign._write_chunk_bindings(tmp_path, study, sweep_dir, {0, 1})
+    binding = campaign.json.loads(output.read_text(encoding="utf-8"))["bindings"][0]
+
+    assert binding["state"] == "COMPLETE"
+    assert binding["values"] == [1.0, 2.0]

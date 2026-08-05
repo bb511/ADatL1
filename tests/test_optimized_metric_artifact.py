@@ -90,3 +90,33 @@ def test_shared_objective_directions_are_flattened_in_config_order() -> None:
         }
     )
     assert train._get_directions(cfg) == ["maximize", "minimize", "minimize", "minimize"]
+
+
+def test_optimized_metric_artifact_records_run_provenance(tmp_path, monkeypatch) -> None:
+    """A campaign artifact explicitly binds Hydra, checkpoint, and logger identities."""
+    (tmp_path / "hydra").mkdir()
+    monkeypatch.setattr(
+        train.HydraConfig,
+        "get",
+        lambda: SimpleNamespace(
+            runtime=SimpleNamespace(output_dir=str(tmp_path / "hydra")),
+            job=SimpleNamespace(num=7),
+        ),
+    )
+    cfg = OmegaConf.create(
+        {
+            "paths": {"checkpoints_dir": str(tmp_path / "checkpoints")},
+            "experiment_name": "physics_bgpair_search_ae",
+            "run_name": "abc123",
+        }
+    )
+    logger = SimpleNamespace(experiment_id="4", run_id="run-1", save_dir=str(tmp_path / "mlruns"))
+    evaluator = SimpleNamespace(optimized_ckpt_name="last", optimized_metric=[1.0])
+
+    artifact = train._write_optimized_metric_artifact(evaluator, cfg=cfg, loggers=[logger])
+    provenance = json.loads(artifact.read_text(encoding="utf-8"))["run_provenance"]
+
+    assert provenance["hydra_job_num"] == 7
+    assert provenance["run_name"] == "abc123"
+    assert provenance["loggers"][0]["run_id"] == "run-1"
+    assert provenance["checkpoint_run_dir"].endswith("checkpoints/physics_bgpair_search_ae/abc123")

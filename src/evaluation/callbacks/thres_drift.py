@@ -69,6 +69,7 @@ class ThresholdDriftCallback(Callback):
             raise ValueError("calibration_fraction must be strictly between 0 and 1.")
 
         self.transfer_summary = defaultdict(dict)
+        self.reverse_transfer_summary = defaultdict(dict)
 
     def on_test_epoch_start(self, trainer, pl_module):
         """Resolve rates and initialize buffers for the configured test streams."""
@@ -131,20 +132,12 @@ class ThresholdDriftCallback(Callback):
                 raise RuntimeError(f"No scores were collected for '{self.dataset_2_name}'.")
             cal_scores = dataset_1_scores
             eval_scores = torch.cat(self.dataset_2_scores, dim=0).view(-1)
-        n_eval = int(eval_scores.numel())
-        if n_eval <= 0:
+        if int(eval_scores.numel()) <= 0:
             raise RuntimeError("Evaluation split is empty after internal split.")
-
-        eps = 0.5 / float(n_eval)
 
         for trate in self.target_rates_resolved:
             fpr = self._compute_target_fpr(trate)
-            thr = self._compute_threshold(cal_scores, exceedance_prob=fpr)
-
-            fp = int((eval_scores >= thr).sum().item())
-            p_hat = fp / float(n_eval)
-
-            drift_metric = abs(math.log((p_hat + eps) / (fpr + eps)))
+            drift_metric = self._transfer_drift(cal_scores, eval_scores, fpr)
 
             if self._is_operational(trate):
                 trate_key = "operational"
@@ -161,6 +154,18 @@ class ThresholdDriftCallback(Callback):
             )
             self._plot({comparison: drift_metric}, xlabel, plot_folder, percent=False)
             self._store_summary(drift_metric, ckpt_name, trate_key)
+
+            if self.dataset_2_name is not None:
+                reverse = self._transfer_drift(eval_scores, cal_scores, fpr)
+                reverse_comparison = f"{self.dataset_2_name} -> {self.dataset_1_name}"
+                self._plot(
+                    {reverse_comparison: reverse},
+                    f"Reverse {xlabel.lower()}",
+                    plot_folder / "reverse",
+                    percent=False,
+                )
+                ckpt_ds = utils.misc.get_ckpt_ds_name(ckpt_name)
+                self.reverse_transfer_summary[trate_key][ckpt_ds] = reverse
 
         utils.mlflow.log_plots_to_mlflow(
             trainer,
@@ -251,6 +256,18 @@ class ThresholdDriftCallback(Callback):
         idx = max(0, min(n - 1, idx))
         return sorted_scores[idx]
 
+    def _transfer_drift(
+        self, calibration_scores: torch.Tensor, evaluation_scores: torch.Tensor, fpr: float
+    ) -> float:
+        """Compute directional threshold-transfer drift between two score samples."""
+        n_eval = int(evaluation_scores.numel())
+        if n_eval <= 0:
+            raise RuntimeError("Evaluation score sample is empty.")
+        threshold = self._compute_threshold(calibration_scores, exceedance_prob=fpr)
+        observed = float((evaluation_scores >= threshold).sum().item()) / float(n_eval)
+        eps = 0.5 / float(n_eval)
+        return abs(math.log((observed + eps) / (fpr + eps)))
+
     def _plot(self, data: dict, xlabel: str, plot_folder: Path, percent: bool = False):
         """Render a horizontal comparison bar plot."""
         ylabel = " "
@@ -307,9 +324,12 @@ class ThresholdDriftCallback(Callback):
     def clear_crit_summary(self):
         """Clear checkpoint summaries after one evaluator criterion."""
         self.transfer_summary.clear()
+        self.reverse_transfer_summary.clear()
 
     def _cache_summary(self, cache_folder: Path):
         """Persist the trusted local summary for downstream aggregation."""
         with open(cache_folder / "summary.pkl", "wb") as f:
             plain_dict = utils.misc.to_plain_dict(self.transfer_summary)
             pickle.dump(plain_dict, f, protocol=pickle.HIGHEST_PROTOCOL)
+            reverse = utils.misc.to_plain_dict(self.reverse_transfer_summary)
+            pickle.dump(reverse, f, protocol=pickle.HIGHEST_PROTOCOL)

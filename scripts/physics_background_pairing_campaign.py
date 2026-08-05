@@ -12,6 +12,7 @@ import os
 import shutil
 import subprocess  # nosec B404 -- executes frozen repository/Slurm commands
 import sys
+import time
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Iterable
@@ -40,6 +41,28 @@ TARGET_TRIALS = 600
 SEARCH_EPOCHS = 50
 RETRAIN_EPOCHS = 200
 DOWNSTREAM_DATASETS = 20
+DOWNSTREAM_DATASET_NAMES = {
+    "GluGluHTo2B_Par-MH-125",
+    "GluGluHto2G_Par-MH-125",
+    "GluGluHto2G_Par-MH-90",
+    "GluGluHto2Tau_Par-MH-125",
+    "GluGlutoHHto2B2WtoLNu2Q_Par-c2-0-kl-1-kt-1",
+    "HHHto4B2Tau_Par-c3-0-d4-0",
+    "HHHto6B_Par-c3-0-d4-0",
+    "SUSYGluGluToBBHTo2B_Par-M-1200",
+    "SUSYGluGluToBBHToBB_Par-M-120",
+    "SUSYGluGluToBBHToBB_Par-M-350",
+    "SUSYGluGluToBBHToBB_Par-M-600",
+    "TTHTo2C_Par-MH-125",
+    "TTHto2B_Par-MH-125",
+    "VBFHTo2C_Par-MH-125",
+    "VBFHto2B_Par-MH-125",
+    "VBFHto2Tau_Par-MH-125",
+    "WtoTauto3Mu",
+    "ggH-suep-decay",
+    "smj-case-A",
+    "haa-4b-ma15",
+}
 
 
 def parse_args() -> argparse.Namespace:
@@ -49,6 +72,7 @@ def parse_args() -> argparse.Namespace:
     subparsers = parser.add_subparsers(dest="command", required=True)
     subparsers.add_parser("init")
     subparsers.add_parser("status")
+    subparsers.add_parser("refresh-bindings")
     pilot = subparsers.add_parser("pilot")
     pilot.add_argument("--model", choices=MODELS, default="ae")
     sweep = subparsers.add_parser("sweep")
@@ -88,6 +112,22 @@ def _git_commit() -> str:
         capture_output=True,
         text=True,
     ).stdout.strip()
+
+
+def _require_clean_checkout() -> None:
+    """Refuse to pin or execute campaign state from a dirty worktree."""
+    git = shutil.which("git")
+    if git is None:
+        raise FileNotFoundError("git is required for campaign provenance.")
+    dirty = subprocess.run(  # nosec B603 -- fixed git command
+        [git, "status", "--porcelain", "--untracked-files=all"],
+        cwd=REPOSITORY_ROOT,
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout.strip()
+    if dirty:
+        raise RuntimeError("Campaign execution requires a clean commit-pinned worktree.")
 
 
 def _write_json(path: Path, value: Any, *, create: bool = False) -> None:
@@ -181,6 +221,7 @@ def initialize(root: Path) -> Path:
     design_path = root / "design.json"
     if design_path.exists():
         return design_path
+    _require_clean_checkout()
     preflight = REPOSITORY_ROOT / "research/physics_background_pairing/preflight.json"
     design = {
         "schema_version": 2,
@@ -203,6 +244,7 @@ def initialize(root: Path) -> Path:
 
 def _load_design(root: Path) -> dict[str, Any]:
     """Load and authenticate the frozen campaign design."""
+    _require_clean_checkout()
     design_path = initialize(root)
     design = json.loads(design_path.read_text(encoding="utf-8"))
     if design.get("schema_version") != 2:
@@ -227,6 +269,15 @@ def _study_path(root: Path, model: str) -> Path:
     return root / "studies" / f"{model}.db"
 
 
+def _study_trials(root: Path, study: dict[str, Any]) -> list[Any]:
+    """Load existing trials without creating a database or study."""
+    database = _study_path(root, study["model"])
+    if not database.is_file():
+        return []
+    loaded = _optuna().load_study(study_name=study["study_name"], storage=f"sqlite:///{database}")
+    return list(loaded.get_trials(deepcopy=False))
+
+
 def _trial_counts(root: Path, study: dict[str, Any]) -> dict[str, int]:
     """Count persistent trials by Optuna state without creating a study."""
     optuna = _optuna()
@@ -235,14 +286,89 @@ def _trial_counts(root: Path, study: dict[str, Any]) -> dict[str, int]:
     empty["usable_complete"] = 0
     if not database.is_file():
         return empty
-    loaded = optuna.load_study(study_name=study["study_name"], storage=f"sqlite:///{database}")
-    for trial in loaded.get_trials(deepcopy=False):
+    for trial in _study_trials(root, study):
         empty[trial.state.name.lower()] += 1
         if trial.state == optuna.trial.TrialState.COMPLETE and _usable_trial(
             trial, expected_values=2 * len(study["objectives"])
         ):
             empty["usable_complete"] += 1
     return empty
+
+
+def _write_chunk_bindings(
+    root: Path,
+    study: dict[str, Any],
+    sweep_dir: Path,
+    prior_trial_numbers: set[int],
+) -> Path:
+    """Bind chunk-local Hydra jobs to persistent Optuna trial numbers."""
+    new_trials = sorted(
+        (
+            trial
+            for trial in _study_trials(root, study)
+            if int(trial.number) not in prior_trial_numbers
+        ),
+        key=lambda trial: int(trial.number),
+    )
+    run_dirs = (
+        sorted(
+            (path for path in sweep_dir.iterdir() if path.is_dir() and path.name.isdigit()),
+            key=lambda path: int(path.name),
+        )
+        if sweep_dir.is_dir()
+        else []
+    )
+    run_by_job = {int(path.name): path for path in run_dirs}
+    if run_dirs and [int(path.name) for path in run_dirs] != list(range(len(run_dirs))):
+        raise RuntimeError(f"Hydra job directories are not contiguous in {sweep_dir}.")
+    if len(new_trials) < len(run_dirs):
+        raise RuntimeError(f"Fewer Optuna trials than Hydra runs in {sweep_dir}.")
+    new_trials = new_trials[: len(run_dirs)]
+    rows = []
+    for local_index, trial in enumerate(new_trials):
+        run_dir = run_by_job.get(local_index)
+        optimized = None if run_dir is None else run_dir / "optimized_metric.json"
+        has_optimized = optimized is not None and optimized.is_file()
+        rows.append(
+            {
+                "model": study["model"],
+                "study_name": study["study_name"],
+                "trial_number": int(trial.number),
+                "hydra_job_num": local_index,
+                "hydra_run_dir": None if run_dir is None else str(run_dir.resolve()),
+                "optimized_metric_artifact": (str(optimized.resolve()) if has_optimized else None),
+                "optimized_metric_artifact_sha256": _sha256(optimized) if has_optimized else None,
+                "state": trial.state.name,
+                "params": _jsonable(trial.params),
+                "values": None if trial.values is None else _jsonable(trial.values),
+            }
+        )
+    output = sweep_dir / "trial_bindings.json"
+    _write_json(
+        output,
+        {
+            "schema_version": 1,
+            "model": study["model"],
+            "study_name": study["study_name"],
+            "prior_trial_numbers": sorted(prior_trial_numbers),
+            "bindings": rows,
+        },
+    )
+    return output
+
+
+def refresh_bindings(root: Path) -> None:
+    """Reconcile chunk bindings after a classified partial-failure repair."""
+    design = _load_design(root)
+    for study in design["studies"]:
+        for chunk_path in sorted((root / "sweeps" / study["model"]).glob("*/chunk.json")):
+            chunk = json.loads(chunk_path.read_text(encoding="utf-8"))
+            _write_chunk_bindings(
+                root,
+                study,
+                chunk_path.parent,
+                {int(number) for number in chunk["prior_trial_numbers"]},
+            )
 
 
 def _usable_trial(trial: Any, *, expected_values: int) -> bool:
@@ -423,6 +549,20 @@ def _retrain_suite(model: str) -> str:
     return f"physics_background_{suffix}"
 
 
+def _validate_retrain_marker(marker: Path, expected_row: dict[str, Any]) -> None:
+    """Fail closed when resuming an existing retraining marker."""
+    payload = json.loads(marker.read_text(encoding="utf-8"))
+    if payload.get("schema_version") != 2 or payload.get("row") != expected_row:
+        raise RuntimeError(f"Retraining marker does not match its frozen row: {marker}")
+    optimized = Path(payload["optimized_metric_artifact"])
+    if _sha256(optimized) != payload["optimized_metric_artifact_sha256"]:
+        raise RuntimeError(f"Retraining optimized artifact changed: {optimized}")
+    for entry in payload["value_files"]:
+        path = Path(entry["path"])
+        if _sha256(path) != entry["sha256"]:
+            raise RuntimeError(f"Retraining value artifact changed: {path}")
+
+
 def retrain(root: Path, index: int) -> Path:
     """Retrain one unique shared-front trial for 200 epochs and evaluate anomalies."""
     _load_design(root)
@@ -436,6 +576,7 @@ def retrain(root: Path, index: int) -> Path:
     row = rows[index]
     marker = root / "retraining" / "markers" / f"{index:04d}.json"
     if marker.is_file():
+        _validate_retrain_marker(marker, row)
         return marker
 
     run_name = f"{row['model']}__trial{int(row['trial_number']):04d}"
@@ -458,7 +599,10 @@ def retrain(root: Path, index: int) -> Path:
         f"seed={int(row['seed'])}",
     ]
     command.extend(f"{key}={_hydra_value(value)}" for key, value in row["params"].items())
+    started_at = datetime.now(timezone.utc).isoformat()
+    started_clock = time.monotonic()
     subprocess.run(command, cwd=REPOSITORY_ROOT, check=True)  # nosec B603
+    elapsed_seconds = time.monotonic() - started_clock
 
     optimized = hydra_dir / "optimized_metric.json"
     if not optimized.is_file():
@@ -480,7 +624,12 @@ def retrain(root: Path, index: int) -> Path:
         marker,
         {
             "schema_version": 2,
+            "started_at": started_at,
             "completed_at": datetime.now(timezone.utc).isoformat(),
+            "elapsed_seconds": elapsed_seconds,
+            "slurm_job_id": os.environ.get("SLURM_JOB_ID"),
+            "slurm_array_job_id": os.environ.get("SLURM_ARRAY_JOB_ID"),
+            "slurm_array_task_id": os.environ.get("SLURM_ARRAY_TASK_ID"),
             "row": row,
             "command": command,
             "optimized_metric_artifact": str(optimized),
@@ -518,11 +667,13 @@ def _read_downstream_efficiencies(
                 if row["metric"] != "efficiency_operational":
                     continue
                 efficiencies[row["intervention"]] = float(row["value"])
-    if len(efficiencies) != DOWNSTREAM_DATASETS:
+    if set(efficiencies) != DOWNSTREAM_DATASET_NAMES:
         raise RuntimeError(
-            f"Expected {DOWNSTREAM_DATASETS} {score} efficiencies for {checkpoint}, "
-            f"found {len(efficiencies)}."
+            f"Expected the exact {DOWNSTREAM_DATASETS}-dataset anomaly set for {score} "
+            f"and {checkpoint}; found {sorted(efficiencies)}."
         )
+    if not all(math.isfinite(value) and 0.0 <= value <= 1.0 for value in efficiencies.values()):
+        raise RuntimeError(f"Invalid downstream efficiency for {score} and {checkpoint}.")
     return efficiencies
 
 
@@ -539,6 +690,7 @@ def aggregate(root: Path) -> Path:
         marker_path = root / "retraining" / "markers" / f"{index:04d}.json"
         if not marker_path.is_file():
             raise RuntimeError(f"Missing retraining marker {marker_path}.")
+        _validate_retrain_marker(marker_path, row)
         marker = json.loads(marker_path.read_text(encoding="utf-8"))
         optimized_path = Path(marker["optimized_metric_artifact"])
         if _sha256(optimized_path) != marker["optimized_metric_artifact_sha256"]:
@@ -638,6 +790,7 @@ def sweep(root: Path, model: str, trials: int, jobs: int, timeout_min: int = 720
     sweep_dir = root / "sweeps" / model / stamp
     database = _study_path(root, model)
     database.parent.mkdir(parents=True, exist_ok=True)
+    prior_trial_numbers = {int(trial.number) for trial in _study_trials(root, study)}
     command = _base_train_command(root, model) + [
         "hydra/launcher=submitit_slurm_clariden",
         f"hydra.sweeper.n_trials={trials}",
@@ -648,7 +801,38 @@ def sweep(root: Path, model: str, trials: int, jobs: int, timeout_min: int = 720
         "hydra.launcher.cpus_per_task=16",
         "hydra.launcher.mem_gb=96",
     ]
-    subprocess.run(command, cwd=REPOSITORY_ROOT, check=True)  # nosec B603
+    chunk_path = sweep_dir / "chunk.json"
+    chunk = {
+        "schema_version": 1,
+        "created_at": datetime.now(timezone.utc).isoformat(),
+        "slurm_job_id": os.environ.get("SLURM_JOB_ID"),
+        "model": model,
+        "study_name": study["study_name"],
+        "requested_trials": trials,
+        "parallel_jobs": jobs,
+        "timeout_min": int(timeout_min),
+        "prior_trial_numbers": sorted(prior_trial_numbers),
+        "command": command,
+    }
+    _write_json(chunk_path, chunk, create=True)
+    failure = None
+    started_clock = time.monotonic()
+    try:
+        subprocess.run(command, cwd=REPOSITORY_ROOT, check=True)  # nosec B603
+    except subprocess.CalledProcessError as error:
+        failure = error
+    finally:
+        _write_chunk_bindings(root, study, sweep_dir, prior_trial_numbers)
+        chunk.update(
+            {
+                "completed_at": datetime.now(timezone.utc).isoformat(),
+                "elapsed_seconds": time.monotonic() - started_clock,
+                "controller_status": "failed" if failure is not None else "complete",
+            }
+        )
+        _write_json(chunk_path, chunk)
+    if failure is not None:
+        raise failure
 
 
 def pilot(root: Path, model: str) -> None:
@@ -671,7 +855,10 @@ def pilot(root: Path, model: str) -> None:
         "physics_selection.cap_metric_config.n_epochs=1",
         "test=false",
     ]
+    started_at = datetime.now(timezone.utc).isoformat()
+    started_clock = time.monotonic()
     subprocess.run(command, cwd=REPOSITORY_ROOT, check=True)  # nosec B603
+    elapsed_seconds = time.monotonic() - started_clock
     optimized = output / "optimized_metric.json"
     if not optimized.is_file():
         raise RuntimeError(f"Pilot emitted no {optimized}.")
@@ -690,6 +877,9 @@ def pilot(root: Path, model: str) -> None:
         output / "success.json",
         {
             "completed_at": datetime.now(timezone.utc).isoformat(),
+            "started_at": started_at,
+            "elapsed_seconds": elapsed_seconds,
+            "slurm_job_id": os.environ.get("SLURM_JOB_ID"),
             "model": model,
             "logical_objectives": expected,
             "code_commit": design["code_commit"],
@@ -740,6 +930,8 @@ def main() -> None:
         print(initialize(root))
     elif args.command == "status":
         status(root)
+    elif args.command == "refresh-bindings":
+        refresh_bindings(root)
     elif args.command == "pilot":
         pilot(root, args.model)
     elif args.command == "sweep":

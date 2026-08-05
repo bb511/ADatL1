@@ -115,7 +115,7 @@ def train(cfg: DictConfig) -> Tuple[Dict[str, Any], Dict[str, Any]]:
     val_loader = datamodule.val_dataloader()
     evaluator.evaluate_run(run_ckpts, algorithm, val_loader, "val", set_optimized_metric=True)
     if cfg.get("optimized_metric_artifact", False):
-        _write_optimized_metric_artifact(evaluator)
+        _write_optimized_metric_artifact(evaluator, cfg=cfg, loggers=logger)
     object_dict.update({"evaluator": evaluator})
 
     # Evaluate once more on a held out test set for final performance.
@@ -171,7 +171,37 @@ def _get_evaluator(cfg: DictConfig, datamodule, logger):
     return evaluator
 
 
-def _write_optimized_metric_artifact(evaluator) -> Path:
+def _run_provenance(cfg: DictConfig, loggers: List[Logger]) -> dict[str, Any]:
+    """Return explicit Hydra/checkpoint/logger identities for artifact indexing."""
+    hydra_cfg = HydraConfig.get()
+    output_dir = Path(hydra_cfg.runtime.output_dir).resolve()
+    checkpoint_dir = (
+        Path(str(cfg.paths.checkpoints_dir)) / str(cfg.experiment_name) / str(cfg.run_name)
+    ).resolve()
+    logger_rows = []
+    for logger in loggers:
+        logger_rows.append(
+            {
+                "class": f"{logger.__class__.__module__}.{logger.__class__.__name__}",
+                "experiment_id": getattr(logger, "experiment_id", None),
+                "run_id": getattr(logger, "run_id", None),
+                "save_dir": str(getattr(logger, "save_dir", "")) or None,
+            }
+        )
+    job = getattr(hydra_cfg, "job", None)
+    return {
+        "experiment_name": str(cfg.experiment_name),
+        "run_name": str(cfg.run_name),
+        "hydra_output_dir": str(output_dir),
+        "hydra_job_num": None if job is None else getattr(job, "num", None),
+        "checkpoint_run_dir": str(checkpoint_dir),
+        "loggers": logger_rows,
+    }
+
+
+def _write_optimized_metric_artifact(
+    evaluator, *, cfg: DictConfig | None = None, loggers: List[Logger] | None = None
+) -> Path:
     """Persist the selected checkpoint and objective values in the Hydra run folder."""
     output_dir = Path(HydraConfig.get().runtime.output_dir)
     path = output_dir / "optimized_metric.json"
@@ -200,6 +230,8 @@ def _write_optimized_metric_artifact(evaluator) -> Path:
             "optimized_metric": value,
             "selections": selections,
         }
+    if cfg is not None:
+        payload["run_provenance"] = _run_provenance(cfg, loggers or [])
     temporary = path.with_suffix(path.suffix + f".{os.getpid()}.tmp")
     temporary.write_text(
         json.dumps(payload, indent=2, sort_keys=True, allow_nan=False) + "\n",

@@ -89,3 +89,4 @@ def test_evaluation_drift_uses_two_named_datasets(tmp_path, monkeypatch) -> None
     callback.on_test_epoch_end(trainer, module)
 
     assert callback.transfer_summary["operational"]["last"] == pytest.approx(math.log(3.0))
+    assert callback.reverse_transfer_summary["operational"]["last"] >= 0.0

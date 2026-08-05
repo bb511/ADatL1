@@ -67,6 +67,12 @@ def _parse_args() -> argparse.Namespace:
     submit.add_argument("--data-dir", type=Path, required=True)
     submit.add_argument("--raw-data-dir", type=Path, required=True)
     submit.add_argument("--pairing-dir", type=Path, required=True)
+    retrain = commands.add_parser("submit-retrains")
+    retrain.add_argument("--concurrency", type=int, default=24)
+    retrain.add_argument("--data-dir", type=Path, required=True)
+    retrain.add_argument("--raw-data-dir", type=Path, required=True)
+    retrain.add_argument("--pairing-dir", type=Path, required=True)
+    commands.add_parser("missing-retrains")
     commands.add_parser("reconcile")
     backup = commands.add_parser("backup-study")
     backup.add_argument("--model", choices=MODELS, required=True)
@@ -159,6 +165,15 @@ def _active_model_rows(rows: list[dict[str, str]], model: str) -> list[dict[str,
         row
         for row in rows
         if row.get("model") == model and _normalized_state(row.get("state", "")) in ACTIVE_STATES
+    ]
+
+
+def _active_kind_rows(rows: list[dict[str, str]], kind: str) -> list[dict[str, str]]:
+    """Return active operator-ledger rows for one operational phase."""
+    return [
+        row
+        for row in rows
+        if row.get("kind") == kind and _normalized_state(row.get("state", "")) in ACTIVE_STATES
     ]
 
 
@@ -256,6 +271,141 @@ def submit_search(
     return job_id
 
 
+def _validate_retrain_marker(marker: Path, row: dict[str, Any]) -> bool:
+    """Return whether one marker completely authenticates its frozen retrain row."""
+    if not marker.is_file():
+        return False
+    payload = json.loads(marker.read_text(encoding="utf-8"))
+    if payload.get("schema_version") != 2 or payload.get("row") != row:
+        raise RuntimeError(f"Retraining marker differs from its frozen row: {marker}")
+    artifacts = [
+        {
+            "path": payload.get("optimized_metric_artifact"),
+            "sha256": payload.get("optimized_metric_artifact_sha256"),
+        },
+        *payload.get("value_files", []),
+    ]
+    if not payload.get("value_files"):
+        raise RuntimeError(f"Retraining marker contains no downstream values: {marker}")
+    for artifact in artifacts:
+        path = Path(str(artifact.get("path", "")))
+        if not path.is_file() or _sha256(path) != artifact.get("sha256"):
+            raise RuntimeError(f"Retraining artifact is missing or changed: {path}")
+    return True
+
+
+def missing_retrains(root: Path, repository: Path) -> list[int]:
+    """Return exact frozen retrain indices lacking an authenticated marker."""
+    design = _design(root)
+    _authenticate_execution_repository(repository, design)
+    manifest_path = root / "selection" / "pareto_retrain_manifest.json"
+    if not manifest_path.is_file():
+        raise FileNotFoundError("Freeze the Pareto fronts before submitting retraining.")
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    if manifest.get("schema_version") != 2 or manifest.get("code_commit") != design["code_commit"]:
+        raise RuntimeError("Retrain manifest does not match the frozen campaign.")
+    rows = manifest.get("retrain_runs", [])
+    if [row.get("retrain_index") for row in rows] != list(range(len(rows))):
+        raise RuntimeError("Retrain manifest indices are not exact and contiguous.")
+    return [
+        index
+        for index, row in enumerate(rows)
+        if not _validate_retrain_marker(root / "retraining" / "markers" / f"{index:04d}.json", row)
+    ]
+
+
+def _array_spec(indices: list[int]) -> str:
+    """Compress sorted unique indices into one deterministic Slurm array expression."""
+    if not indices or indices != sorted(set(indices)):
+        raise ValueError("Array indices must be nonempty, sorted, and unique.")
+    ranges: list[str] = []
+    start = previous = indices[0]
+    for value in indices[1:]:
+        if value == previous + 1:
+            previous = value
+            continue
+        ranges.append(str(start) if start == previous else f"{start}-{previous}")
+        start = previous = value
+    ranges.append(str(start) if start == previous else f"{start}-{previous}")
+    return ",".join(ranges)
+
+
+def submit_retrains(
+    root: Path,
+    repository: Path,
+    concurrency: int,
+    data_dir: Path,
+    raw_data_dir: Path,
+    pairing_dir: Path,
+) -> str | None:
+    """Submit only missing authenticated retrain indices and ledger every array task."""
+    if concurrency <= 0:
+        raise ValueError("Retrain concurrency must be positive.")
+    design = _design(root)
+    _authenticate_execution_repository(repository, design)
+    ledger_path, ledger_rows = _ledger(root)
+    if _active_kind_rows(ledger_rows, "retrain"):
+        raise RuntimeError("Refusing to overlap an active retraining array.")
+    missing = missing_retrains(root, repository)
+    if not missing:
+        return None
+    for path in (data_dir, raw_data_dir, pairing_dir):
+        if not path.is_dir():
+            raise FileNotFoundError(path)
+    manifest = json.loads(
+        (root / "selection" / "pareto_retrain_manifest.json").read_text(encoding="utf-8")
+    )
+    rows_by_index = {int(row["retrain_index"]): row for row in manifest["retrain_runs"]}
+    script = repository / "scripts" / "clariden" / "physics_background_pairing_retrain.sbatch"
+    if not script.is_file():
+        raise FileNotFoundError(script)
+    exports = {
+        "PHYSICS_BGPAIR_REPOSITORY_ROOT": repository.resolve(),
+        "PHYSICS_BGPAIR_CAMPAIGN_ROOT": root.resolve(),
+        "PROJECT_ROOT": repository.resolve(),
+        "DATA_DIR": data_dir.resolve(),
+        "RAW_DATA_DIR": raw_data_dir.resolve(),
+        "PHYSICS_PAIRING_DIR": pairing_dir.resolve(),
+        "LOG_DIR": root.resolve() / "runtime" / "logs",
+        "OUTPUT_DIR": root.resolve() / "runtime" / "outputs",
+        "CHECKPOINT_DIR": root.resolve() / "runtime" / "checkpoints",
+        "WANDB_MODE": "offline",
+    }
+    export_value = "ALL," + ",".join(f"{key}={value}" for key, value in exports.items())
+    sbatch = shutil.which("sbatch")
+    if sbatch is None:
+        raise FileNotFoundError("sbatch")
+    result = subprocess.run(  # nosec B603 -- reviewed sbatch command
+        [
+            sbatch,
+            "--parsable",
+            f"--array={_array_spec(missing)}%{min(concurrency, len(missing))}",
+            f"--export={export_value}",
+            str(script),
+        ],
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    array_job_id = result.stdout.strip().split(";")[0]
+    if not array_job_id.isdigit():
+        raise RuntimeError(f"Unexpected sbatch array job ID: {result.stdout!r}")
+    log_root = root.parent.parent / "logs" / "slurm"
+    for index in missing:
+        ledger_rows.append(
+            {
+                "job_id": f"{array_job_id}_{index}",
+                "kind": "retrain",
+                "model": str(rows_by_index[index]["model"]),
+                "state": "PENDING",
+                "commit": design["code_commit"],
+                "log_path": str(log_root / f"phys-bgpair-retrain-{array_job_id}_{index}.out"),
+            }
+        )
+    _atomic_csv(ledger_path, ledger_rows)
+    return array_job_id
+
+
 def _accounting(job_ids: list[str]) -> dict[str, dict[str, str]]:
     """Read allocation-level accounting for exact registered job IDs."""
     if not job_ids:
@@ -263,12 +413,13 @@ def _accounting(job_ids: list[str]) -> dict[str, dict[str, str]]:
     sacct = shutil.which("sacct")
     if sacct is None:
         raise FileNotFoundError("sacct")
+    query_ids = sorted({job_id.split("_", maxsplit=1)[0] for job_id in job_ids})
     result = subprocess.run(  # nosec B603 -- fixed sacct fields
         [
             sacct,
             "-X",
             "--json",
-            "--jobs=" + ",".join(job_ids),
+            "--jobs=" + ",".join(query_ids),
         ],
         check=True,
         capture_output=True,
@@ -277,6 +428,10 @@ def _accounting(job_ids: list[str]) -> dict[str, dict[str, str]]:
     observed: dict[str, dict[str, str]] = {}
     for job in json.loads(result.stdout).get("jobs", []):
         job_id = str(job.get("job_id", ""))
+        array = job.get("array") or {}
+        task = array.get("task_id", {})
+        if task.get("set"):
+            job_id = f"{array.get('job_id')}_{int(task['number'])}"
         if job_id not in job_ids:
             continue
         states = job.get("state", {}).get("current", [])
@@ -369,6 +524,19 @@ def main() -> None:
                 args.pairing_dir,
             )
         )
+    elif args.command == "submit-retrains":
+        print(
+            submit_retrains(
+                root,
+                repository,
+                args.concurrency,
+                args.data_dir,
+                args.raw_data_dir,
+                args.pairing_dir,
+            )
+        )
+    elif args.command == "missing-retrains":
+        print(json.dumps(missing_retrains(root, repository)))
     elif args.command == "reconcile":
         print(json.dumps(reconcile(root, repository), indent=2, sort_keys=True))
     else:

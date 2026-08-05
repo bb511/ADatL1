@@ -948,10 +948,19 @@ do not change or prune a correct front merely because it is expensive.
 Submit an indexed array, initially with conservative concurrency:
 
 ```bash
-sbatch --parsable --array=0-$((N-1))%24 \
-  --export=ALL,PHYSICS_BGPAIR_REPOSITORY_ROOT="${BGPAIR_REPO}",PHYSICS_BGPAIR_CAMPAIGN_ROOT="${BGPAIR_ROOT}" \
-  "${BGPAIR_REPO}/scripts/clariden/physics_background_pairing_retrain.sbatch"
+uv run python scripts/physics_background_pairing_operations.py \
+  --root "${BGPAIR_ROOT}" \
+  --execution-repository "${BGPAIR_REPO}" \
+  submit-retrains --concurrency 24 \
+  --data-dir "${DATA_DIR}" --raw-data-dir "${RAW_DATA_DIR}" \
+  --pairing-dir "${PHYSICS_PAIRING_DIR}"
 ```
+
+The helper validates every existing marker and referenced hash, computes the exact
+missing index set, compresses it into one Slurm array expression, refuses overlapping
+retrain arrays, exports the frozen runtime paths, and registers every array task in
+`job_history.csv`. Use `missing-retrains` for a read-only reconciliation before and
+after each array. Direct `sbatch --array` is a recovery fallback only.
 
 Each index must:
 

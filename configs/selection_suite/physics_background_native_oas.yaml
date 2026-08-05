@@ -74,6 +74,15 @@ optimized_metric_configs:
     sec_metric: ${physics_selection.native_secondary}
 
 callbacks:
+  # OAS needs a separate persisted threshold; sharing the native namespace
+  # would make checkpoint-specific downstream efficiencies ambiguous.
+  anomaly_eff_oas:
+    _target_: src.callbacks.efficiency.AnomalyEfficiencyCallback
+    output_name: ${physics_selection.residual_oas_output}
+    beta: 0.9
+    threshold_namespace: residual_oas
+    metric_suffix: residual_oas
+
   cap_residual_oas_flat_physical:
     _target_: src.callbacks.cap.CAPCallback
     output_name: ${physics_selection.residual_oas_output}

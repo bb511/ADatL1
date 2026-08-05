@@ -147,6 +147,24 @@ def test_shared_ae_and_vae_keep_native_training_score() -> None:
     assert len(vae.optimized_metric_configs) == 14
 
 
+def test_shared_search_checkpoints_persist_native_and_oas_thresholds_without_signals() -> None:
+    """Search calibration is score-specific and uses no downstream validation data."""
+    ae = compose_config(overrides=["experiment=physics/ae_background_all"])
+    dsae = compose_config(overrides=["experiment=physics/dsae_background_all"])
+
+    assert ae.data.validation_aux_datasets == []
+    assert ae.callbacks.anomaly_eff.output_name == "ascore/full"
+    assert ae.callbacks.anomaly_eff.get("threshold_namespace") is None
+    assert ae.callbacks.anomaly_eff_oas.output_name == "ascore/residual_oas"
+    assert ae.callbacks.anomaly_eff_oas.threshold_namespace == "residual_oas"
+    assert ae.callbacks.anomaly_eff_oas.metric_suffix == "residual_oas"
+    assert ae.evaluation.callbacks.anomaly_efficiency is None
+
+    assert dsae.data.validation_aux_datasets == []
+    assert dsae.callbacks.anomaly_eff.output_name == "ascore/full"
+    assert dsae.callbacks.get("anomaly_eff_oas") is None
+
+
 def test_shared_suite_exposes_all_four_tables_and_cdf_on_both_scores() -> None:
     """AE/VAE native and OAS views must use identical background pairings."""
     cfg = compose_config(overrides=["experiment=physics/ae_background_all"])

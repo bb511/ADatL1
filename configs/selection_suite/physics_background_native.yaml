@@ -94,7 +94,13 @@ optimized_metric_configs:
     sec_metric: ${physics_selection.native_secondary}
 
 callbacks:
-  anomaly_eff: null
+  # Persist the validation-derived native operating threshold in every retained
+  # checkpoint. With no auxiliary validation datasets this calibrates on the
+  # normal stream only and cannot introduce downstream-signal leakage.
+  anomaly_eff:
+    _target_: src.callbacks.efficiency.AnomalyEfficiencyCallback
+    output_name: ${physics_selection.native_output}
+    beta: 0.9
   thres_drift: null
   wasserstein_dist: null
   cap_sn_zb: null

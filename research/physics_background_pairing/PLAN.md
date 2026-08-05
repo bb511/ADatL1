@@ -987,8 +987,8 @@ candidates may be the larger timeout risk.
   so its stricter `0..5` step assertion is a separate test-only contract.
   Exact continuation restores Torch CPU/CUDA and the datamodule shuffler at
   `on_fit_start`, before Lightning constructs the train iterator. It restores Python and
-  NumPy at the first resumed `on_train_epoch_start`, after resumed-only logger/startup
-  hooks but before the first training step.
+  NumPy at the first resumed `on_train_batch_start`, after resumed-only logger and
+  epoch-start hooks but immediately before the first training step.
 - `--requeue` is reserved for Lightning's emergency USR1 path; normal boundaries never
   call `scontrol requeue`. `REQUEUED` remains an active ledger state. Use Slurm append
   mode for `%A_%a` output so an emergency requeue cannot truncate prior-attempt evidence.

@@ -63,10 +63,21 @@ class _StochasticModel(LightningModule):
 class _ResumeStartupRNGConsumer(Callback):
     """Model a lazy logger/setup path that runs only in a resumed process."""
 
+    def __init__(self) -> None:
+        self.consumed_start = False
+        self.consumed_epoch_start = False
+
     def on_train_start(self, trainer, pl_module) -> None:
-        if trainer.ckpt_path is not None:
+        if trainer.ckpt_path is not None and not self.consumed_start:
             random.random()  # nosec B311 -- deliberate lifecycle perturbation
             np.random.random()
+            self.consumed_start = True
+
+    def on_train_epoch_start(self, trainer, pl_module) -> None:
+        if trainer.ckpt_path is not None and not self.consumed_epoch_start:
+            random.getrandbits(32)  # nosec B311 -- deliberate lifecycle perturbation
+            np.random.random()
+            self.consumed_epoch_start = True
 
 
 def _trainer(max_epochs: int, callbacks: list, root: Path) -> Trainer:

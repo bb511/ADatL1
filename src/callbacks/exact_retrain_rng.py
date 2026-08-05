@@ -184,8 +184,10 @@ class ExactRetrainRNGState(Callback):
         if shuffler is not None:
             shuffler.set_state(state["datamodule_shuffler"].cpu())
 
-    def on_train_epoch_start(self, trainer: Trainer, pl_module) -> None:
-        """Restore host RNGs after resumed-only trainer/logger startup hooks."""
+    def on_train_batch_start(
+        self, trainer: Trainer, pl_module, batch: Any, batch_idx: int
+    ) -> None:
+        """Restore host RNGs immediately before the first resumed training step."""
         if self._pending_state is None:
             return
         state = self._pending_state

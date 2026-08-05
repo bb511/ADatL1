@@ -13,11 +13,11 @@ Last updated: 2026-08-05 (Europe/Zurich)
 - Frozen debug campaign commit: `6d10cd5601ffa86111a12415b521c4e104c261e6`.
 - Superseded pilot campaigns at `ebe2ce1` and `bb0f981` are archived in scratch;
   neither is eligible for production submission.
-- Active schema-2 execution commit: `d7fd395485d8c3038fdf906912d8ef3bfc1ec98e`.
-- Active campaign root:
-  `/iopsstor/scratch/cscs/vjimenez/adatl1/campaigns/physics_background_shared_d7fd395485d8`.
-- Operational-only branch head: `ca3658d` changes the sweep wrapper's default from an
-  unavailable `low` QOS to `normal`; the active controller uses the identical override.
+- Candidate packed execution commit: `59b47b0c41bcb2e9f233d0695bb2ba005c4e9c8f`.
+- Candidate packed campaign root:
+  `/iopsstor/scratch/cscs/vjimenez/adatl1/campaigns/physics_background_shared_59b47b0c41bc`.
+- The earlier valid scientific canary remains isolated under commit `d7fd395485d8`;
+  its one-GPU nested-Submitit path is retained only to finish that reference trial.
 
 ## Status
 
@@ -30,15 +30,14 @@ Last updated: 2026-08-05 (Europe/Zurich)
 | Autonomous runbook | complete | `PLAN.md` now specifies the full six-study state machine, artifact contract, scheduler/timer policy, failure recovery, portable exports, analysis, and final `REPORT.md` |
 | Provenance/report hardening | complete | Added persistent Optuna-to-Hydra chunk bindings, run/checkpoint/MLflow identities, reverse G-to-E drift persistence, and fail-closed snapshot/finalize exports with synthetic positive/tamper/leakage tests |
 | Pilots | complete | All six unified jobs passed on `d7fd395485d8`; exact objective/vector/selection, MLflow, reverse-drift, provenance, validation-allowlist, runtime, and memory evidence is persisted |
-| Full searches | canary running | AE controller `3005821` and worker `3005823` are executing the first real 50-epoch Optuna trial; epoch 0 completed with all 28 metrics in 8.2 minutes |
+| Full searches | packed gate passed | Four-way packed AE pilot `3006215` completed four finite 28-value trials on GPUs 0-3 in 4m24s; legacy AE controller `3005821`/worker `3005823` continues the first valid 50-epoch reference trial |
 | Retraining/evaluation | pending | Offline 56-front freeze, unique 200-epoch retraining, and native/OAS threshold separation are implemented; validation pending |
 | Aggregation/report | pending | Score-aware downstream oracle aggregation is implemented; awaits validation and results |
 
-The `d7fd395485d8` campaign is the immutable execution campaign. Its six pilots passed,
-and its AE production canary is running. The later `ca3658d` commit changes only the
-wrapper's default scheduler partition to match the CLI override already used by the
-active controller; it does not change worker code or scientific configuration. No bulk
-search chunk has been submitted. Never reuse a superseded campaign.
+The `59b47b0c41bc` campaign is the current packed-launch candidate. No bulk search
+chunk has been submitted. It becomes the immutable execution campaign only after the
+four-way packed pilot and per-model 50-epoch canaries pass. Never reuse a superseded
+campaign.
 
 Repository-wide `pre-commit -a` is not a usable clean gate on the current baseline: it
 rewrites 82 unrelated legacy files and separately reports pre-existing executable shell
@@ -60,8 +59,24 @@ codespell) pass; the unrelated baseline debt must not be mixed into this campaig
 - All logical strategies for one model share the same 600 sampled configurations. This
   gives six trained studies rather than 56 and enables direct strategy comparisons;
   logical two-dimensional fronts are reconstructed offline.
+- Normal jobs are node-exclusive. One Hydra/Optuna controller therefore packs four
+  ordered, resource-exact one-GPU `srun` steps per node instead of wasting three GPUs
+  or running competing controllers against one study.
 
 ## Verification log
+
+- 2026-08-05: scheduler accounting showed that a nominal one-GPU normal job reserves
+  an entire four-GPU GH200 node. A custom packed launcher now runs four ordered Hydra
+  jobs per node under one Optuna controller. Packed pilot `3006163` proved distinct
+  GPUs 0-3 and exposed a concurrent file-backed MLflow experiment-creation race;
+  three workers completed and one returned a failed Hydra result. The controller now
+  pre-creates the experiment. Retry `3006210` then failed before launching workers
+  because the real Optuna plugin supplies tuple overrides; the launcher now normalizes
+  that API boundary to a list, with a regression test. Neither failed pilot touched a
+  production study. Candidate pilot `3006215` then completed all four workers on
+  distinct GPUs from frozen commit `59b47b0c41bc` in 4m24s. Optuna trials 0-3 are all
+  `COMPLETE`, each has 28 finite values, and the ordered trial/Hydra bindings and
+  scheduler/log hashes are persisted under the campaign `state/` directory.
 
 - 2026-08-05: final execution campaign `d7fd395485d8` passed all six unified pilots:
   AE `3005586`, VAE `3005587`, DSAE `3005633`, DSVAE `3005661`, DeepSVDD `3005772`,

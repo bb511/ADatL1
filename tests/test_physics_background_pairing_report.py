@@ -241,6 +241,21 @@ def _campaign(tmp_path: Path) -> tuple[Path, dict]:
             phase="search",
             epochs=design["search_epochs"],
         )
+        checkpoint_root = root / "runtime" / "checkpoints" / study["model"]
+        checkpoint_root.mkdir(parents=True, exist_ok=True)
+        thresholds = {"thres_operational": torch.tensor(0.4)}
+        if study["model"] in {"ae", "vae"}:
+            thresholds["thres_operational__residual_oas"] = torch.tensor(0.4)
+        payload = {"state_dict": thresholds}
+        torch.save(payload, checkpoint_root / "last.ckpt")
+        if study["model"] != "ae":
+            stable = checkpoint_root / "single" / "ascore_operational" / "stable"
+            stable.mkdir(parents=True)
+            torch.save(payload, stable / "epoch.ckpt")
+        for objective in study["objectives"]:
+            primary = checkpoint_root / report._primary_checkpoint_candidate(objective)
+            primary.mkdir(parents=True)
+            torch.save(payload, primary / "epoch.ckpt")
         artifact = root / "sweeps" / study["model"] / "stamp" / "0" / "optimized_metric.json"
         objective_order = [objective["id"] for objective in study["objectives"]]
         _json(
@@ -261,7 +276,7 @@ def _campaign(tmp_path: Path) -> tuple[Path, dict]:
                     "run_name": run_name,
                     "hydra_output_dir": str(artifact.parent),
                     "hydra_job_num": 0,
-                    "checkpoint_run_dir": str(root / "runtime" / "checkpoints" / study["model"]),
+                    "checkpoint_run_dir": str(checkpoint_root),
                     "loggers": [{"experiment_id": experiment_id, "run_id": run_id}],
                 },
             },
@@ -328,6 +343,37 @@ def test_snapshot_is_stable_and_selects_one_trial_per_study(tmp_path) -> None:
         trials = list(report.csv.DictReader(handle))
     assert len(trials) == 6
     assert all(row["selected_for_freeze"] == "True" for row in trials)
+
+
+def test_search_checkpoint_candidate_audit_allows_only_absent_stable(tmp_path) -> None:
+    """Last/primary are mandatory, while the reference stable slot may be absent."""
+    root, design = _campaign(tmp_path)
+    bindings = report._binding_index(root)
+
+    rows = report._checkpoint_candidate_rows(root, design, bindings, final=True)
+
+    assert len(rows) == 68
+    assert sum(bool(row["required"]) for row in rows) == 62
+    stable = [row for row in rows if row["slot"] == "stable_native"]
+    assert len(stable) == 6
+    assert sum(bool(row["available"]) for row in stable) == 5
+    assert all(row["checkpoint_sha256"] for row in rows if row["available"])
+
+    ae_objective = design["studies"][0]["objectives"][0]
+    primary = (
+        root
+        / "runtime"
+        / "checkpoints"
+        / "ae"
+        / report._primary_checkpoint_candidate(ae_objective)
+    )
+    torch.save({"state_dict": {}}, primary / "duplicate.ckpt")
+    with pytest.raises(RuntimeError, match="Invalid primary_ema candidate count"):
+        report._checkpoint_candidate_rows(root, design, bindings, final=True)
+    (primary / "duplicate.ckpt").unlink()
+    (primary / "epoch.ckpt").unlink()
+    with pytest.raises(RuntimeError, match="Invalid primary_ema candidate count"):
+        report._checkpoint_candidate_rows(root, design, bindings, final=True)
 
 
 def test_snapshot_accepts_active_unhashed_job_log(tmp_path) -> None:
@@ -659,6 +705,14 @@ def test_finalize_exports_56_winners_and_reverse_drift(tmp_path) -> None:
         metrics = list(report.csv.DictReader(handle))
     assert sum(row["metric_name"] == "reverse_drift_posthoc" for row in metrics) == 8
     assert sum(row["metric_name"] == "rankcorr_test" for row in metrics) == 40
+    with (output / "checkpoint_candidates.csv").open(encoding="utf-8") as handle:
+        candidate_rows = list(report.csv.DictReader(handle))
+    assert len(candidate_rows) == 68
+    assert sum(row["available"] == "True" for row in candidate_rows) == 67
+    with (output / "checkpoint_candidate_availability.csv").open(encoding="utf-8") as handle:
+        availability_rows = list(report.csv.DictReader(handle))
+    assert len(availability_rows) == 18
+    assert sum(int(row["configured"]) for row in availability_rows) == 68
     analysis_summary = json.loads(
         (output / "analysis" / "analysis_summary.json").read_text(encoding="utf-8")
     )

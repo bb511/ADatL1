@@ -500,6 +500,8 @@ input pair tables and the global Slurm output stream:
     front_memberships.csv
     retrains.csv
     checkpoint_selections.csv
+    checkpoint_candidates.csv
+    checkpoint_candidate_availability.csv
     primary_metrics.csv
     downstream_efficiencies.csv
     winners.csv
@@ -1112,6 +1114,8 @@ At minimum, produce:
 | `front_memberships.csv` | logical front, model, score, strategy, trial, two objective values, retrain index |
 | `retrains.csv` | unique retrain index, model/trial, status, job, runtime, marker/hash, shared fronts |
 | `checkpoint_selections.csv` | search/retrain run, logical objective, chosen candidate/name, Q', Q'' |
+| `checkpoint_candidates.csv` | all 40,800 configured physical search-candidate slots, availability, path/hash, thresholds |
+| `checkpoint_candidate_availability.csv` | per-model/family configured, required, available, and absent counts |
 | `primary_metrics.csv` | reported checkpoint CAP/rankcorr/W1/drift/native-secondary and directions |
 | `downstream_efficiencies.csv` | long form: front/winner/model/score/anomaly/efficiency |
 | `winners.csv` | exactly 56 rows with winner identity, objectives, mean/median/worst/CVaR efficiencies |

@@ -561,8 +561,8 @@ def _checkpoint_rows(
     return checkpoint_rows, mlflow_rows
 
 
-def _checkpoint_family(checkpoint: str, objective: dict[str, Any]) -> str:
-    """Classify one exact evaluator checkpoint ID for its logical objective."""
+def _primary_checkpoint_candidate(objective: dict[str, Any]) -> str:
+    """Return the exact primary-EMA checkpoint-family path for one objective."""
     metric = objective["metric"]
     score = objective["score"]
     if metric == "cap":
@@ -574,16 +574,193 @@ def _checkpoint_family(checkpoint: str, objective: dict[str, Any]) -> str:
     else:
         raise RuntimeError(f"Unknown logical metric: {metric}")
     direction = "max" if objective["directions"][0] == "maximize" else "min"
+    return f"summary/{primary}/{direction}"
+
+
+def _checkpoint_family(checkpoint: str, objective: dict[str, Any]) -> str:
+    """Classify one exact evaluator checkpoint ID for its logical objective."""
     allowed = {
         "last": "last",
         "single/ascore_operational/stable": "stable_native",
-        f"summary/{primary}/{direction}": "primary_ema",
+        _primary_checkpoint_candidate(objective): "primary_ema",
     }
     if checkpoint not in allowed:
         raise RuntimeError(
             f"Checkpoint {checkpoint!r} is not an exact candidate for {objective['id']}."
         )
     return allowed[checkpoint]
+
+
+def _checkpoint_candidate_rows(
+    root: Path,
+    design: dict[str, Any],
+    bindings: dict[tuple[str, int], dict[str, Any]],
+    *,
+    final: bool,
+) -> list[dict[str, Any]]:
+    """Audit every configured search checkpoint slot and record stable availability."""
+    import torch
+
+    studies = {study["model"]: study for study in design["studies"]}
+    trusted_root = (root / "runtime" / "checkpoints").resolve(strict=True)
+    rows = []
+    checkpoint_roots: dict[Path, tuple[str, int]] = {}
+    for (model, trial_number), binding in sorted(
+        bindings.items(), key=lambda item: (MODEL_ORDER.index(item[0][0]), item[0][1])
+    ):
+        artifact_path = binding.get("optimized_metric_artifact")
+        if not artifact_path:
+            continue
+        artifact = _read_json(Path(artifact_path))
+        checkpoint_root = Path(artifact["run_provenance"]["checkpoint_run_dir"]).resolve(
+            strict=True
+        )
+        if not checkpoint_root.is_relative_to(trusted_root):
+            raise RuntimeError(
+                f"Checkpoint candidate root escapes the campaign: {checkpoint_root}"
+            )
+        key = (model, trial_number)
+        if checkpoint_root in checkpoint_roots:
+            raise RuntimeError(
+                f"Search trials {checkpoint_roots[checkpoint_root]} and {key} share checkpoint "
+                f"root {checkpoint_root}."
+            )
+        checkpoint_roots[checkpoint_root] = key
+        slots = [
+            {
+                "slot": "last",
+                "checkpoint_family_id": "last",
+                "logical_objective": "",
+                "score": "",
+                "metric": "",
+                "strategy": "",
+                "required": True,
+                "paths": [checkpoint_root / "last.ckpt"],
+            },
+            {
+                "slot": "stable_native",
+                "checkpoint_family_id": "single/ascore_operational/stable",
+                "logical_objective": "",
+                "score": "native",
+                "metric": "native_secondary",
+                "strategy": "",
+                "required": False,
+                "paths": sorted(
+                    (checkpoint_root / "single" / "ascore_operational" / "stable").glob("*.ckpt")
+                ),
+            },
+        ]
+        slots.extend(
+            {
+                "slot": "primary_ema",
+                "checkpoint_family_id": _primary_checkpoint_candidate(objective),
+                "logical_objective": objective["id"],
+                "score": objective["score"],
+                "metric": objective["metric"],
+                "strategy": objective.get("strategy") or "",
+                "required": True,
+                "paths": sorted(
+                    (checkpoint_root / _primary_checkpoint_candidate(objective)).glob("*.ckpt")
+                ),
+            }
+            for objective in studies[model]["objectives"]
+        )
+        for slot in slots:
+            paths = slot.pop("paths")
+            available = len(paths) == 1 and paths[0].is_file()
+            if len(paths) > 1 or (slot["required"] and not available):
+                raise RuntimeError(
+                    f"Invalid {slot['slot']} candidate count for {(model, trial_number)}: "
+                    f"{len(paths)}."
+                )
+            path = paths[0] if available else None
+            thresholds = {}
+            if path is not None:
+                path = path.resolve(strict=True)
+                if not path.is_relative_to(checkpoint_root):
+                    raise RuntimeError(f"Checkpoint candidate escapes its run root: {path}")
+                payload = torch.load(  # nosec B614 -- authenticated campaign-local checkpoint
+                    path, map_location="cpu", weights_only=False
+                )
+                state = payload.get("state_dict", {})
+                expected_thresholds = {"thres_operational"}
+                if model in {"ae", "vae"}:
+                    expected_thresholds.add("thres_operational__residual_oas")
+                observed_thresholds = {
+                    str(name) for name in state if str(name).startswith("thres_operational")
+                }
+                if observed_thresholds != expected_thresholds:
+                    raise ValueError(
+                        f"Threshold buffer keys differ in {path}: expected "
+                        f"{expected_thresholds}, found {observed_thresholds}."
+                    )
+                for name in sorted(expected_thresholds):
+                    value = torch.as_tensor(state[name]).detach().cpu()
+                    if value.numel() != 1 or not torch.isfinite(value).item():
+                        raise ValueError(
+                            f"Threshold buffer {name} is not a finite scalar in {path}."
+                        )
+                    thresholds[name] = float(value.item())
+            rows.append(
+                {
+                    "model": model,
+                    "trial_number": trial_number,
+                    **slot,
+                    "available": available,
+                    "checkpoint": "" if path is None else _relative(path, root),
+                    "checkpoint_sha256": "" if path is None else _sha256(path),
+                    "thresholds_json": _json_cell(thresholds),
+                }
+            )
+    if final:
+        expected = int(design["target_trials_per_study"]) * sum(
+            len(study["objectives"]) + 2 for study in design["studies"]
+        )
+        if len(rows) != expected:
+            raise RuntimeError(
+                f"Checkpoint-candidate export has {len(rows)} rows, expected {expected}."
+            )
+    return rows
+
+
+def _checkpoint_candidate_fields() -> list[str]:
+    """Return the stable retained-candidate audit columns."""
+    return [
+        "model",
+        "trial_number",
+        "slot",
+        "checkpoint_family_id",
+        "logical_objective",
+        "score",
+        "metric",
+        "strategy",
+        "required",
+        "available",
+        "checkpoint",
+        "checkpoint_sha256",
+        "thresholds_json",
+    ]
+
+
+def _checkpoint_availability_rows(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Summarize configured and available retained candidates by model and family."""
+    output = []
+    for model in MODEL_ORDER:
+        for slot in ("last", "primary_ema", "stable_native"):
+            selected = [row for row in rows if row["model"] == model and row["slot"] == slot]
+            if not selected:
+                continue
+            output.append(
+                {
+                    "model": model,
+                    "slot": slot,
+                    "configured": len(selected),
+                    "required": sum(bool(row["required"]) for row in selected),
+                    "available": sum(bool(row["available"]) for row in selected),
+                    "unavailable": sum(not bool(row["available"]) for row in selected),
+                }
+            )
+    return output
 
 
 def _annotate_checkpoint_families(
@@ -975,7 +1152,41 @@ def _build_snapshot(
     _write_csv(output / "trials.csv", trial_rows, trial_fields)
     bindings = _binding_index(root)
     _validate_bindings(root, design, bindings)
+    selected = {
+        (str(row["model"]), int(row["trial_number"]))
+        for row in trial_rows
+        if bool(row["selected_for_freeze"])
+    }
+    if final:
+        target = int(design["target_trials_per_study"])
+        selected_counts = Counter(model for model, _ in selected)
+        if any(selected_counts[model] != target for model in MODEL_ORDER):
+            raise RuntimeError(
+                f"Final selected-trial counts differ from {target}: {dict(selected_counts)}."
+            )
+        selected_bindings = {key: bindings[key] for key in selected if key in bindings}
+        if len(selected_bindings) != len(selected):
+            missing = sorted(selected - selected_bindings.keys())
+            raise RuntimeError(f"Selected trials lack explicit run bindings: {missing[:10]}")
+        candidate_rows = _checkpoint_candidate_rows(root, design, selected_bindings, final=True)
+        availability_rows = _checkpoint_availability_rows(candidate_rows)
+        _write_csv(
+            output / "checkpoint_candidates.csv",
+            candidate_rows,
+            _checkpoint_candidate_fields(),
+        )
+        _write_csv(
+            output / "checkpoint_candidate_availability.csv",
+            availability_rows,
+            list(availability_rows[0]),
+        )
     checkpoints, mlflow = _checkpoint_rows(root, design, include_retrains=False)
+    if final:
+        checkpoints = [
+            row for row in checkpoints if (row["model"], int(row["trial_number"])) in selected
+        ]
+        mlflow = [row for row in mlflow if (row["model"], int(row["trial_number"])) in selected]
+    checkpoints = _annotate_checkpoint_families(design, checkpoints)
     if validate_mlflow:
         mlflow = _validate_mlflow_runs(root, design, mlflow, final=final)
     checkpoint_fields = _checkpoint_fields()
@@ -1030,6 +1241,7 @@ def _checkpoint_fields() -> list[str]:
         "metric",
         "strategy",
         "optimized_ckpt_name",
+        "checkpoint_family",
         "q_prime",
         "q_double_prime",
         "q_prime_direction",
@@ -1942,6 +2154,13 @@ def _write_report(output: Path, design: dict[str, Any], winners: list[dict[str, 
         by_metric.setdefault(row["metric"], []).append(float(row["mean_efficiency"]))
         by_model.setdefault(row["model"], []).append(float(row["mean_efficiency"]))
         by_score.setdefault(row["score"], []).append(float(row["mean_efficiency"]))
+    with (output / "checkpoint_candidate_availability.csv").open(encoding="utf-8") as handle:
+        candidate_availability = list(csv.DictReader(handle))
+    configured_candidates = sum(int(row["configured"]) for row in candidate_availability)
+    available_candidates = sum(int(row["available"]) for row in candidate_availability)
+    stable_rows = [row for row in candidate_availability if row["slot"] == "stable_native"]
+    stable_configured = sum(int(row["configured"]) for row in stable_rows)
+    stable_available = sum(int(row["available"]) for row in stable_rows)
     lines = [
         "# Physics background-pairing experiment report",
         "",
@@ -2050,9 +2269,14 @@ def _write_report(output: Path, design: dict[str, Any], winners: list[dict[str, 
             "",
             "## Checkpoint and proxy diagnostics",
             "",
-            "`checkpoint_selections.csv` records every selected candidate and Q′/Q″ pair. "
-            "`primary_metrics.csv` adds held-out CAP, rank correlation, W1, forward drift, and "
-            "post-hoc reverse G→E drift for the reported checkpoints.",
+            f"All {configured_candidates} configured physical search-candidate slots are indexed "
+            f"in `checkpoint_candidates.csv`; {available_candidates} exist. Stable-native "
+            f"checkpoints were available for {stable_available}/{stable_configured} trials; "
+            "absence is permitted by the reference callback, while last and primary-EMA "
+            "candidates are mandatory. `checkpoint_selections.csv` records every selected "
+            "candidate, its family, and Q′/Q″ pair. `primary_metrics.csv` adds held-out CAP, "
+            "rank correlation, W1, forward drift, and post-hoc reverse G→E drift for the "
+            "reported checkpoints.",
             "",
             "## Limitations and interpretation guardrails",
             "",
@@ -2076,6 +2300,7 @@ def _write_report(output: Path, design: dict[str, Any], winners: list[dict[str, 
             "",
             "See `manifest.sha256`, `provenance.json`, `study_status.csv`, `trials.csv`, "
             "`front_memberships.csv`, `retrains.csv`, `checkpoint_selections.csv`, "
+            "`checkpoint_candidates.csv`, `checkpoint_candidate_availability.csv`, "
             "`primary_metrics.csv`, `downstream_efficiencies.csv`, `winners.csv`, and "
             "`mlflow_runs.csv`. Winner-resolved configurations and compressed execution logs "
             "are indexed under `configs/` and `logs/`.",
@@ -2222,8 +2447,36 @@ def _build_final(
     winner_rows, downstream_rows, primary_rows = _winner_exports(root, design, manifest, oracle)
     _append_test_metrics(root, manifest, oracle, primary_rows)
     checkpoints, mlflow = _checkpoint_rows(root, design, include_retrains=True)
+    checkpoints = [
+        row
+        for row in checkpoints
+        if row["phase"] != "search" or (row["model"], int(row["trial_number"])) in selected
+    ]
+    mlflow = [
+        row
+        for row in mlflow
+        if row["phase"] != "search" or (row["model"], int(row["trial_number"])) in selected
+    ]
     mlflow = _validate_mlflow_runs(root, design, mlflow, final=True)
     annotated_checkpoints = _annotate_checkpoint_families(design, checkpoints)
+    candidate_rows = list(
+        csv.DictReader((output / "checkpoint_candidates.csv").open(encoding="utf-8"))
+    )
+    available_candidates = {
+        (row["model"], int(row["trial_number"]), row["checkpoint_family_id"])
+        for row in candidate_rows
+        if row["available"] == "True"
+    }
+    for row in annotated_checkpoints:
+        if row["phase"] != "search":
+            continue
+        key = (
+            row["model"],
+            int(row["trial_number"]),
+            row["optimized_ckpt_name"],
+        )
+        if key not in available_candidates:
+            raise RuntimeError(f"Selected search checkpoint is not retained: {key}.")
     markers = []
     for row in manifest["retrain_runs"]:
         marker = _read_json(
@@ -2261,7 +2514,11 @@ def _build_final(
     analysis_tables = {name: rows for name, rows in analysis.items() if name != "analysis_summary"}
     _write_csv(output / "front_memberships.csv", front_rows, list(front_rows[0]))
     _write_csv(output / "retrains.csv", retrain_rows, list(retrain_rows[0]))
-    _write_csv(output / "checkpoint_selections.csv", checkpoints, _checkpoint_fields())
+    _write_csv(
+        output / "checkpoint_selections.csv",
+        annotated_checkpoints,
+        _checkpoint_fields(),
+    )
     _write_csv(output / "mlflow_runs.csv", mlflow, _mlflow_fields())
     _write_csv(output / "winners.csv", winner_rows, list(winner_rows[0]))
     _write_csv(output / "downstream_efficiencies.csv", downstream_rows, list(downstream_rows[0]))

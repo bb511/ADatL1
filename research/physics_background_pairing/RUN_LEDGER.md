@@ -2,6 +2,18 @@
 
 Last updated: 2026-08-05 (Europe/Zurich)
 
+- 2026-08-05: implementation commit
+  `ed19c503538ef71ba61d9c6a230afb55872bf28e` closes the retraining control-plane
+  audit: bounded retrain maps, fresh 40-epoch continuation jobs, separate epoch-200
+  evaluation, exact MLflow/checkpoint recovery, immutable task receipts, independently
+  gated aggregation, restart-provenance exports, and the forced USR1 canary. The 184-test
+  campaign regression suite and every changed-file hook pass. Its detached worktree is
+  `/iopsstor/scratch/cscs/vjimenez/adatl1/worktrees/physics_background_shared_ed19c50`;
+  the fresh empty campaign is
+  `/iopsstor/scratch/cscs/vjimenez/adatl1/campaigns/physics_background_shared_ed19c50`.
+  Forced restart debug job `3010505` is running from that exact commit. No search or
+  retraining job has been submitted to the new campaign.
+
 - 2026-08-05: froze the next execution checkout at commit
   `1e0b94089e13ae64251387eb2141c9480537a17c` in
   `/iopsstor/scratch/cscs/vjimenez/adatl1/worktrees/physics_background_shared_1e0b940`
@@ -9,7 +21,8 @@ Last updated: 2026-08-05 (Europe/Zurich)
   `/iopsstor/scratch/cscs/vjimenez/adatl1/campaigns/physics_background_shared_1e0b940`.
   The design authenticates the existing pair-table preflight and targets exactly 600
   usable 50-epoch trials for each model. No jobs have been submitted to this campaign;
-  a forced requeue/restart GPU canary and six production canaries are required first.
+  it was superseded empty by `ed19c50` after the final retraining audit found scheduler
+  array/requeue, immutable receipt, aggregate-gate, and report-provenance gaps.
 
 - 2026-08-05: added a fail-closed operations-level Pareto freeze transition. The gate
   requires exact 600-trial quiescence for every study, authenticates all selected
@@ -48,20 +61,22 @@ Last updated: 2026-08-05 (Europe/Zurich)
 |---|---|---|
 | Scientific contract | complete | `PLAN.md` |
 | Implementation audit | complete | Model/data/HPO settings match `dev/patrick`; requested metric scope, score routing, CDF, retraining, and padding semantics audited |
-| Code and configs | fix in validation | Threshold buffers are registered before checkpointing and the shared search suites now instantiate native plus AE/VAE OAS calibration callbacks on the normal validation stream only |
-| Tests and preflight | complete | 36 selection/config/campaign tests, 54 reporting/analysis/artifact-audit tests, and 26 operational-control cases pass; all six configs compose, all 8 pair tables authenticate, and scratch capacity is sufficient |
+| Code and configs | complete locally | Commit `ed19c50` contains the audited shared search, callback restart, bounded retrain, aggregate, and reporting paths; it is not pushed |
+| Tests and preflight | complete | 184 campaign tests pass; every changed-file hook, shell syntax check, Python compilation, all six config compositions, and all 8 pair-table authentications pass |
 | Autonomous runbook | complete | `PLAN.md` now specifies the full six-study state machine, artifact contract, scheduler/timer policy, failure recovery, portable exports, analysis, and final `REPORT.md` |
 | Provenance/report hardening | complete | Added persistent Optuna-to-Hydra bindings, run/checkpoint/MLflow identities, reverse G-to-E drift, fail-closed artifact audits, and deterministic scientific-analysis tables in the final portable package |
 | Operational control | complete | Separate mutable helper locks scheduler checks through submission/ledger registration, rejects live or unregistered search/retrain allocations, enforces the 720-minute limit, audits complete per-chunk Optuna/Hydra/MLflow/checkpoint state before sealing success, and provides backed-up scheduler-proven exact stale-trial repair |
 | Pilots | complete | Corrected unified jobs AE `3008281`, VAE `3008282`, DSAE `3008321`, DSVAE `3008344`, DeepSVDD `3008351`, and RealNVP `3008360` passed; four-GPU temporary AE/Optuna pilot `3008377` passed all launcher, binding, objective, and threshold gates |
-| Production canaries | running | Four-trial x 50-epoch jobs AE `3008470`, VAE `3008471`, DSAE `3008472`, DSVAE `3008473`, DeepSVDD `3008474`, and RealNVP `3008475` are running concurrently on six one-node allocations |
+| Forced restart canary | running | Exact-commit debug job `3010505` must requeue once and emit authenticated `COMPLETE.json` before any new campaign search submission |
+| Production canaries | evidence-only, partly terminal | Older-commit four-trial jobs AE `3008470`, VAE `3008471`, DSAE `3008472`, and RealNVP `3008475` are running; DSVAE `3008473` and DeepSVDD `3008474` completed cleanly. All six remain runtime evidence, not the `ed19c50` terminal campaign gate |
 | Full searches | superseded before completion | Jobs AE `3007292`, VAE `3007311`, DSAE `3007310`, DSVAE `3007318`, DeepSVDD `3007340`, RealNVP `3007345`, and legacy `3005821`/`3005823` were cancelled; no usable trial completed and no bulk chunk was submitted |
-| Retraining/evaluation | pending | Offline 56-front freeze and unique 200-epoch retraining remain implemented; corrected checkpoint-specific native/OAS threshold restoration requires GPU validation |
-| Aggregation/report | pending | Score-aware downstream oracle aggregation is implemented; awaits validation and results |
+| Retraining/evaluation | implemented, pending data | Five authenticated 40-epoch segments, separate evaluation, emergency requeue recovery, bounded arrays, and immutable per-task receipts pass local tests; real forced-requeue evidence is pending |
+| Aggregation/report | implemented, pending data | Locked exact-marker aggregation writes `aggregate_validation.json`; final reporting independently validates restart provenance and exports `retrain_restart_evidence.csv`; campaign results are not yet available |
 
-The `59b47b0c41bc` and `6edb3f7` campaigns are superseded and must never be resumed.
-No bulk search chunk was submitted. `cbeb3fa` is debug-only until its focused checkpoint,
-unified GPU, packed-launcher, and 50-epoch canary gates pass.
+The `59b47b0c41bc`, `6edb3f7`, `cbeb3fa`, and `1e0b940` campaigns are superseded and
+must never be resumed for the final study. No bulk search chunk was submitted. Only the
+fresh `ed19c50` campaign can proceed after its forced restart and terminal six-model
+canary gates pass.
 
 Repository-wide `pre-commit -a` is not a usable clean gate on the current baseline: it
 rewrites 82 unrelated legacy files and separately reports pre-existing executable shell

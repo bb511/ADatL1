@@ -128,7 +128,7 @@ class PackedSrunLauncher(Launcher):
             f"--error={stderr_path}",
             sys.executable,
             "-m",
-            "src.utils.packed_srun_launcher",
+            "hydra_plugins.physics_packed_srun_launcher.launcher",
             "--worker",
             str(payload_path),
             str(result_path),

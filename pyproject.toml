@@ -75,7 +75,7 @@ dev = [
 
 [tool.setuptools.packages.find]
 where = ["."]
-include = ["src*", "configs*"]
+include = ["src*", "configs*", "hydra_plugins*"]
 
 [tool.setuptools.package-data]
 configs = ["**/*.yaml"]

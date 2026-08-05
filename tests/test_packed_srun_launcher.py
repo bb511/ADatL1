@@ -5,10 +5,19 @@ from types import SimpleNamespace
 
 import cloudpickle
 import pytest
+from hydra.core.plugins import Plugins
 from hydra.core.utils import JobReturn, JobStatus
 from omegaconf import OmegaConf
 
-from src.utils import packed_srun_launcher as packed
+from hydra_plugins.physics_packed_srun_launcher import launcher as packed
+
+
+def test_hydra_accepts_launcher_from_plugin_namespace() -> None:
+    """Hydra rejects launchers outside its required top-level namespace."""
+    config = OmegaConf.create(
+        {"_target_": ("hydra_plugins.physics_packed_srun_launcher.launcher." "PackedSrunLauncher")}
+    )
+    assert isinstance(Plugins.instance()._instantiate(config), packed.PackedSrunLauncher)
 
 
 def test_allocation_capacity_counts_all_visible_node_gpus(monkeypatch) -> None:

@@ -353,8 +353,9 @@ contains all four mappings and CDF simultaneously.
   and `aggregate`.
 - `scripts/clariden/physics_background_pairing_pilot.sbatch` runs one unified one-epoch
   model pilot on the debug partition.
-- `scripts/clariden/physics_background_pairing_sweep.sbatch` is a 12-hour `normal` controller
-  that launches normal-partition Hydra/Submitit search workers.
+- `scripts/clariden/physics_background_pairing_sweep.sbatch` is a 12-hour packed
+  `normal` allocation: one Hydra/Optuna controller launches four independent one-GPU
+  `srun` steps per GH200 node.
 - `scripts/clariden/physics_background_pairing_retrain.sbatch` retrains one manifest
   index on one GPU.
 - `research/physics_background_pairing/preflight.json` authenticates mapping inputs.
@@ -611,28 +612,33 @@ runtime is not yet known and may approach the current 90-minute debug limit.
 
 ### Gate E: one-trial production canaries
 
-The unified pilot does not exercise Optuna, SQLite, Hydra multirun, or Submitit. Launch
-one real 50-epoch trial per model through the production `sweep` path before large
-chunks. These are valid production trials and count toward 600 if usable.
+The unified pilot does not exercise Optuna, SQLite, Hydra multirun, or the packed
+launcher. First run `physics_background_pairing_packed_pilot.sbatch`; it asks four
+temporary Optuna trials and proves ordered Hydra job/result binding across all four
+GPUs on one debug node. Then launch four real 50-epoch trials per model through the
+production `sweep` path before large chunks. These are valid production trials and
+count toward 600 if usable.
 
-Use `--trials 1 --jobs 1 --timeout-min 720`. Confirm the database direction vector,
-full finite objective vector, MLflow link, checkpoints, Hydra artifact, and wall time.
+Use `--nodes=1`, `--trials 4 --jobs 4 --timeout-min 720`. Confirm the database direction
+vector, four full finite objective vectors, ordered Optuna-to-Hydra bindings, distinct
+MLflow links/checkpoints, and wall time.
 Measure AE and VAE especially carefully because they evaluate 28 objectives. If a
 50-epoch canary cannot comfortably finish within 12 hours, do not launch bulk normal
-jobs; first implement/test a scheduler-only low-partition option without changing the
-scientific configuration.
+jobs. Account `a0166` cannot use the 24-hour `low` QOS, so report the scheduler limit
+before considering any scientific change.
 
 ## 6. Search execution: six studies, 600 usable trials each
 
 ### 6.1 Submission model
 
-`physics_background_pairing_sweep.sbatch` is a controller on an ARM `normal` node. The
-controller intentionally requests one GPU because Clariden's ARM nodes are GPU nodes;
-the `xfer` nodes are x86-64 and cannot execute the campaign's pinned ARM environment,
-and account `a0166` currently has only the `normal` QOS. It
-calls the campaign `sweep` command, which launches GPU workers through Hydra Submitit on
-the `normal` partition. The default worker limit is 720 minutes, 16 CPUs, 96 GB RAM,
-and one GPU.
+`physics_background_pairing_sweep.sbatch` requests twelve ARM `normal` nodes by default.
+Normal allocations are node-exclusive and each node has four GH200 GPUs, so the custom
+Hydra launcher dispatches 48 ordered jobs as 48 concurrent resource-exact `srun` steps:
+four per node, each with one GPU, 16 CPUs, and 96 GB RAM. One controller retains the
+original Optuna ask/tell sequence, Hydra job numbering, SQLite writer, and result order;
+there are no nested Submitit allocations and no idle controller node. The `xfer` nodes
+are x86-64 and cannot execute the pinned ARM environment, while account `a0166` has only
+the `normal` QOS.
 
 For sequential operation, `submit-next` chooses the first incomplete model:
 
@@ -647,6 +653,7 @@ For explicit model control or parallel progress across different databases:
 
 ```bash
 sbatch --parsable \
+  --nodes=6 \
   --export=ALL,PHYSICS_BGPAIR_REPOSITORY_ROOT="${BGPAIR_REPO}",PHYSICS_BGPAIR_CAMPAIGN_ROOT="${BGPAIR_ROOT}",STUDY_MODEL=ae,CHUNK_TRIALS=48,CHUNK_JOBS=24,TIMEOUT_MIN=720 \
   "${BGPAIR_REPO}/scripts/clariden/physics_background_pairing_sweep.sbatch"
 ```
@@ -656,7 +663,8 @@ quota allows. Never overlap two chunks for the same model. The campaign refuses 
 chunk when that study has `RUNNING` or `WAITING` trials, but scheduler state must still
 be checked before submission.
 
-Start with conservative `CHUNK_JOBS` (for example 12 or 24) after the one-trial canary.
+Set `--nodes=ceil(CHUNK_JOBS/4)` whenever overriding the 48-job default. Start with a
+one-node, four-trial production canary after the packed debug pilot.
 Increase only if scheduler quota, SQLite locking, filesystem load, and GPU throughput
 are healthy. `CHUNK_TRIALS=48` is a convenient accounting unit, not a scientific
 requirement. Thirteen 48-trial chunks normally produce 600 trials, with the final chunk
@@ -802,19 +810,18 @@ or controller death while valid worker state remains.
 
 ### 8.2 Time limits
 
-Normal-partition search workers have an absolute 720-minute limit. The 200-epoch
+Normal-partition packed search allocations have an absolute 720-minute limit. The 200-epoch
 retraining script also requests 12 hours, and downstream evaluation of many checkpoint
 candidates may be the larger timeout risk.
 
 - Use production canary runtimes to predict whether the limit is safe.
-- If science is correct but the scheduler limit is insufficient, add a tested
-  scheduler-only low-partition/24-hour option. Preserve epochs, data, callbacks,
-  hyperparameters, and seeds.
+- If science is correct but the scheduler limit is insufficient, stop and report that
+  account `a0166` cannot access the 24-hour `low` QOS. Preserve epochs, data, callbacks,
+  hyperparameters, and seeds unless the user explicitly authorizes a scientific change.
 - Do not pass a timeout greater than the partition maximum.
 - Record the partition/time-limit change as operational, not scientific.
-- The `normal` search controller itself has a 12-hour limit and may remain alive while
-  Submitit workers wait. A long normal-queue delay can therefore kill the controller;
-  inspect worker and database state rather than assuming all children failed.
+- The controller and all packed steps share one 12-hour allocation, so queue time is
+  paid before the controller starts and cannot consume training wall time.
 
 ### 8.3 SQLite contention or stale Optuna trials
 

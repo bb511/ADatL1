@@ -1,0 +1,29 @@
+#!/usr/bin/env bash
+#SBATCH --job-name=phys-bgpair-pack
+#SBATCH --account=a0166
+#SBATCH --partition=debug
+#SBATCH --time=01:30:00
+#SBATCH --nodes=1
+#SBATCH --ntasks-per-node=4
+#SBATCH --cpus-per-task=16
+#SBATCH --gpus-per-node=4
+#SBATCH --mem=384G
+#SBATCH --output=/iopsstor/scratch/cscs/vjimenez/adatl1/logs/slurm/%x-%j.out
+
+set -euo pipefail
+
+readonly SCRATCH_ROOT=/iopsstor/scratch/cscs/vjimenez/adatl1
+readonly REPOSITORY_ROOT="${PHYSICS_BGPAIR_REPOSITORY_ROOT:-${SCRATCH_ROOT}/worktrees/physics_background_shared_20260804}"
+readonly CAMPAIGN_ROOT="${PHYSICS_BGPAIR_CAMPAIGN_ROOT:-${SCRATCH_ROOT}/campaigns/physics_background_shared_20260804}"
+readonly UV_BIN="${SCRATCH_ROOT}/tools/uv-0.11.32/uv"
+: "${PILOT_MODEL:=ae}"
+
+export UV_PROJECT_ENVIRONMENT="${SCRATCH_ROOT}/.venv-clariden"
+export UV_CACHE_DIR="${SCRATCH_ROOT}/uv-cache-clariden-arm64"
+export UV_PYTHON_INSTALL_DIR="${SCRATCH_ROOT}/python"
+export UV_MANAGED_PYTHON=1
+export HYDRA_FULL_ERROR=1
+
+cd "${REPOSITORY_ROOT}"
+"${UV_BIN}" run --frozen --no-sync python scripts/physics_background_pairing_campaign.py \
+  --root "${CAMPAIGN_ROOT}" packed-pilot --model "${PILOT_MODEL}"

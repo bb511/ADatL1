@@ -13,9 +13,11 @@ Last updated: 2026-08-05 (Europe/Zurich)
 - Frozen debug campaign commit: `6d10cd5601ffa86111a12415b521c4e104c261e6`.
 - Superseded pilot campaigns at `ebe2ce1` and `bb0f981` are archived in scratch;
   neither is eligible for production submission.
-- Active schema-2 campaign commit: `fec1619f932122fd70fbbd7d3b8b877458671d2b`.
+- Active schema-2 execution commit: `d7fd395485d8c3038fdf906912d8ef3bfc1ec98e`.
 - Active campaign root:
-  `/iopsstor/scratch/cscs/vjimenez/adatl1/campaigns/physics_background_shared_fec1619f9321`.
+  `/iopsstor/scratch/cscs/vjimenez/adatl1/campaigns/physics_background_shared_d7fd395485d8`.
+- Operational-only branch head: `ca3658d` changes the sweep wrapper's default from an
+  unavailable `low` QOS to `normal`; the active controller uses the identical override.
 
 ## Status
 
@@ -27,15 +29,16 @@ Last updated: 2026-08-05 (Europe/Zurich)
 | Tests and preflight | complete | 67 campaign tests pass after the single-run provenance fix; all six configs compose, scoped hooks pass, all 8 pair tables authenticate, and scratch capacity is sufficient |
 | Autonomous runbook | complete | `PLAN.md` now specifies the full six-study state machine, artifact contract, scheduler/timer policy, failure recovery, portable exports, analysis, and final `REPORT.md` |
 | Provenance/report hardening | complete | Added persistent Optuna-to-Hydra chunk bindings, run/checkpoint/MLflow identities, reverse G-to-E drift persistence, and fail-closed snapshot/finalize exports with synthetic positive/tamper/leakage tests |
-| Pilots | complete | All six unified jobs passed on `fec1619f9321`; exact objective/vector/selection, MLflow, reverse-drift, provenance, validation-allowlist, runtime, and memory evidence is persisted |
-| Full searches | pending | The 50-epoch canary exposed and fixed two controller-only launch defects; a new frozen commit/campaign must repeat the gate before bulk submission |
+| Pilots | complete | All six unified jobs passed on `d7fd395485d8`; exact objective/vector/selection, MLflow, reverse-drift, provenance, validation-allowlist, runtime, and memory evidence is persisted |
+| Full searches | canary running | AE controller `3005821` and worker `3005823` are executing the first real 50-epoch Optuna trial; epoch 0 completed with all 28 metrics in 8.2 minutes |
 | Retraining/evaluation | pending | Offline 56-front freeze, unique 200-epoch retraining, and native/OAS threshold separation are implemented; validation pending |
 | Aggregation/report | pending | Score-aware downstream oracle aggregation is implemented; awaits validation and results |
 
-The `fec1619f9321` campaign remains immutable evidence for the successful pilots, but is
-superseded for production submission by the controller fixes below. The next gate is a
-new commit-derived campaign followed by one 50-epoch Optuna/SQLite/Submitit canary per
-model; no bulk search chunk has been submitted. Never reuse a superseded campaign.
+The `d7fd395485d8` campaign is the immutable execution campaign. Its six pilots passed,
+and its AE production canary is running. The later `ca3658d` commit changes only the
+wrapper's default scheduler partition to match the CLI override already used by the
+active controller; it does not change worker code or scientific configuration. No bulk
+search chunk has been submitted. Never reuse a superseded campaign.
 
 Repository-wide `pre-commit -a` is not a usable clean gate on the current baseline: it
 rewrites 82 unrelated legacy files and separately reports pre-existing executable shell
@@ -60,14 +63,22 @@ codespell) pass; the unrelated baseline debt must not be mixed into this campaig
 
 ## Verification log
 
+- 2026-08-05: final execution campaign `d7fd395485d8` passed all six unified pilots:
+  AE `3005586`, VAE `3005587`, DSAE `3005633`, DSVAE `3005661`, DeepSVDD `3005772`,
+  and RealNVP `3005779`. The cross-pilot audit proved 56 logical selections, exact
+  finite 28/14-value vectors, matching objective order, MLflow/run/checkpoint
+  provenance, and two AE/VAE or one native-only reverse-drift artifacts. AE production
+  controller `3005821` launched worker `3005823`; Optuna created the exact 28-direction
+  study and epoch 0 logged every native/OAS objective at 13:00 CEST. At 8.2 minutes per
+  epoch, predicted trial completion is about 19:50 CEST, inside the 12-hour limit.
+
 - 2026-08-05: the first 50-epoch AE canary gate found orchestration-only defects
   before any Optuna trial was created. Clariden `xfer` nodes are x86-64 and cannot run
   the pinned ARM environment. Account `a0166` also lacks the `slowdown` QOS required
   by the 24-hour `low` partition, so the controller uses a 12-hour ARM `normal` node.
   Hydra also requires the SQLite URL containing `?timeout=600` to be quoted as one
   override value. The exact override now composes successfully, 38 focused campaign
-  tests pass, and all changed-file hooks pass. A fresh commit-derived campaign is
-  required before retrying the canaries.
+  tests pass, and all changed-file hooks pass.
 
 - 2026-08-05: active campaign `fec1619f9321` passed all six unified GPU pilots:
   AE `3005314` (3m59s, 7.03 GiB peak), VAE `3005446` (4m12s, 7.07 GiB), DSAE

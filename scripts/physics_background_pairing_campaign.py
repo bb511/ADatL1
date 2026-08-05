@@ -75,6 +75,8 @@ def parse_args() -> argparse.Namespace:
     subparsers.add_parser("refresh-bindings")
     pilot = subparsers.add_parser("pilot")
     pilot.add_argument("--model", choices=MODELS, default="ae")
+    packed_pilot = subparsers.add_parser("packed-pilot")
+    packed_pilot.add_argument("--model", choices=MODELS, default="ae")
     sweep = subparsers.add_parser("sweep")
     sweep.add_argument("--model", choices=MODELS, required=True)
     sweep.add_argument("--trials", type=int, default=48)
@@ -300,12 +302,14 @@ def _write_chunk_bindings(
     study: dict[str, Any],
     sweep_dir: Path,
     prior_trial_numbers: set[int],
+    *,
+    all_trials: list[Any] | None = None,
 ) -> Path:
     """Bind chunk-local Hydra jobs to persistent Optuna trial numbers."""
     new_trials = sorted(
         (
             trial
-            for trial in _study_trials(root, study)
+            for trial in (_study_trials(root, study) if all_trials is None else all_trials)
             if int(trial.number) not in prior_trial_numbers
         ),
         key=lambda trial: int(trial.number),
@@ -769,7 +773,7 @@ def _base_train_command(root: Path, model: str) -> list[str]:
 
 
 def sweep(root: Path, model: str, trials: int, jobs: int, timeout_min: int = 720) -> None:
-    """Launch one resumable shared-study chunk through Hydra's Slurm launcher."""
+    """Launch one resumable shared-study chunk inside a packed Slurm allocation."""
     design = _load_design(root)
     study = _study(design, model)
     if trials <= 0 or jobs <= 0 or timeout_min <= 0:
@@ -792,12 +796,10 @@ def sweep(root: Path, model: str, trials: int, jobs: int, timeout_min: int = 720
     database.parent.mkdir(parents=True, exist_ok=True)
     prior_trial_numbers = {int(trial.number) for trial in _study_trials(root, study)}
     command = _base_train_command(root, model) + [
-        "hydra/launcher=submitit_slurm_clariden",
+        "hydra/launcher=packed_srun_clariden",
         f"hydra.sweeper.n_trials={trials}",
         f"hydra.sweeper.n_jobs={jobs}",
         f"hydra.sweep.dir={sweep_dir}",
-        f"hydra.launcher.array_parallelism={jobs}",
-        f"hydra.launcher.timeout_min={int(timeout_min)}",
         "hydra.launcher.cpus_per_task=16",
         "hydra.launcher.mem_gb=96",
     ]
@@ -888,6 +890,78 @@ def pilot(root: Path, model: str) -> None:
     )
 
 
+def packed_pilot(root: Path, model: str) -> None:
+    """Exercise four real Optuna trials in one four-GPU debug allocation."""
+    design = _load_design(root)
+    study = _study(design, model)
+    output = root / "packed_pilots" / model
+    database = output / "study.db"
+    study_name = f"physics_{model}_packed_launcher_pilot_{design['code_commit'][:12]}"
+    command = [
+        sys.executable,
+        "src/train.py",
+        "-m",
+        f"experiment=physics/{model}_background_all",
+        f"hparams_search={model}_shared_optuna",
+        "hydra/launcher=packed_srun_clariden",
+        f"experiment_name=physics_bgpair_packed_pilot_{model}",
+        "trainer=gpu",
+        "trainer.devices=[0]",
+        "trainer.min_epochs=1",
+        "trainer.max_epochs=1",
+        "trainer.num_sanity_val_steps=0",
+        "+trainer.limit_train_batches=2",
+        "physics_selection.cap_metric_config.n_epochs=1",
+        "test=false",
+        f"hydra.sweeper.storage='sqlite:///{database}?timeout=600'",
+        f"hydra.sweeper.study_name={study_name}",
+        "hydra.sweeper.n_trials=4",
+        "hydra.sweeper.n_jobs=4",
+        f"hydra.sweep.dir={output}",
+    ]
+    started_at = datetime.now(timezone.utc).isoformat()
+    started_clock = time.monotonic()
+    subprocess.run(command, cwd=REPOSITORY_ROOT, check=True)  # nosec B603
+    elapsed_seconds = time.monotonic() - started_clock
+    loaded = _optuna().load_study(study_name=study_name, storage=f"sqlite:///{database}")
+    trials = list(loaded.get_trials(deepcopy=False))
+    expected_values = 2 * len(study["objectives"])
+    if len(trials) != 4 or any(
+        trial.state != _optuna().trial.TrialState.COMPLETE
+        or not _usable_trial(trial, expected_values=expected_values)
+        for trial in trials
+    ):
+        raise RuntimeError("Packed pilot did not produce four finite completed trials.")
+    pilot_study = {**study, "study_name": study_name}
+    bindings = _write_chunk_bindings(
+        root,
+        pilot_study,
+        output,
+        set(),
+        all_trials=trials,
+    )
+    binding_rows = json.loads(bindings.read_text(encoding="utf-8"))["bindings"]
+    if [row["trial_number"] for row in binding_rows] != [0, 1, 2, 3] or any(
+        row["hydra_job_num"] != row["trial_number"] or row["optimized_metric_artifact"] is None
+        for row in binding_rows
+    ):
+        raise RuntimeError("Packed pilot trial-to-Hydra bindings are incomplete or reordered.")
+    _write_json(
+        output / "success.json",
+        {
+            "completed_at": datetime.now(timezone.utc).isoformat(),
+            "started_at": started_at,
+            "elapsed_seconds": elapsed_seconds,
+            "slurm_job_id": os.environ.get("SLURM_JOB_ID"),
+            "model": model,
+            "trials": 4,
+            "values_per_trial": expected_values,
+            "code_commit": design["code_commit"],
+            "command": command,
+        },
+    )
+
+
 def submit_next(root: Path, trials: int, jobs: int, timeout_min: int = 720) -> None:
     """Submit a controller for the first incomplete model study."""
     design = _load_design(root)
@@ -908,6 +982,7 @@ def submit_next(root: Path, trials: int, jobs: int, timeout_min: int = 720) -> N
         [
             sbatch,
             "--parsable",
+            f"--nodes={math.ceil(min(trials, jobs) / 4)}",
             (
                 "--export=ALL,"
                 f"STUDY_MODEL={study['model']},CHUNK_TRIALS={trials},"
@@ -934,6 +1009,8 @@ def main() -> None:
         refresh_bindings(root)
     elif args.command == "pilot":
         pilot(root, args.model)
+    elif args.command == "packed-pilot":
+        packed_pilot(root, args.model)
     elif args.command == "sweep":
         sweep(root, args.model, args.trials, args.jobs, args.timeout_min)
     elif args.command == "submit-next":

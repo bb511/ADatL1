@@ -57,6 +57,32 @@ def test_shared_sweep_command_preserves_paper_budget_and_logging(tmp_path) -> No
     assert not any("selection_metric" in value for value in command)
 
 
+def test_sweep_uses_one_packed_controller_without_nested_submitit(tmp_path, monkeypatch) -> None:
+    """One Optuna sampler dispatches ordered jobs across the enclosing allocation."""
+    design = {"studies": campaign._studies()}
+    monkeypatch.setattr(campaign, "_load_design", lambda root: design)
+    monkeypatch.setattr(
+        campaign,
+        "_trial_counts",
+        lambda root, study: {"running": 0, "waiting": 0, "usable_complete": 0},
+    )
+    monkeypatch.setattr(campaign, "_study_trials", lambda root, study: [])
+    monkeypatch.setattr(campaign, "_write_chunk_bindings", lambda *args: tmp_path / "bindings")
+    captured = {}
+
+    def run(command, **kwargs):
+        captured["command"] = command
+
+    monkeypatch.setattr(campaign.subprocess, "run", run)
+    campaign.sweep(tmp_path, "ae", trials=4, jobs=4)
+
+    command = captured["command"]
+    assert "hydra/launcher=packed_srun_clariden" in command
+    assert "hydra.sweeper.n_trials=4" in command
+    assert "hydra.sweeper.n_jobs=4" in command
+    assert not any("submitit" in value for value in command)
+
+
 def test_logical_objective_directions_match_the_metrics() -> None:
     """CAP is maximized; W1, drift, and native Q-double-prime are minimized."""
     objectives = campaign._logical_objectives("ae")

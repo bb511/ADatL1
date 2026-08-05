@@ -2,14 +2,15 @@
 #SBATCH --job-name=phys-bgpair-sweep
 #SBATCH --account=a0166
 # The project environment is built for the ARM GPU nodes; xfer nodes are x86-64.
-# This account has normal QOS only, so the controller uses a normal ARM node.
+# This account has normal QOS only. One allocation packs four independent trials
+# per node and the Hydra/Optuna controller runs in the enclosing batch step.
 #SBATCH --partition=normal
 #SBATCH --time=12:00:00
-#SBATCH --nodes=1
-#SBATCH --ntasks=1
-#SBATCH --cpus-per-task=2
-#SBATCH --gpus-per-node=1
-#SBATCH --mem=8G
+#SBATCH --nodes=12
+#SBATCH --ntasks-per-node=4
+#SBATCH --cpus-per-task=16
+#SBATCH --gpus-per-node=4
+#SBATCH --mem=384G
 #SBATCH --output=/iopsstor/scratch/cscs/vjimenez/adatl1/logs/slurm/%x-%j.out
 
 set -euo pipefail

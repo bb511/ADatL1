@@ -19,6 +19,12 @@ Last updated: 2026-08-05 (Europe/Zurich)
 - The earlier `d7fd395485d8` reference and all `59b47b0c41bc` canaries were cancelled
   after a checkpoint audit proved that dynamically registered operating-threshold
   buffers were absent from retained checkpoints.
+- Campaign `6edb3f7` is also superseded: pilot `3008187` proved that the shared
+  search suite still set `callbacks.anomaly_eff: null`, so the new buffer lifecycle
+  code was never invoked; queued VAE pilot `3008189` was cancelled with it.
+- Current replacement execution commit: `cbeb3fad2500b11de6bb5c5e1571ec46000fa673`.
+- Current replacement campaign root:
+  `/iopsstor/scratch/cscs/vjimenez/adatl1/campaigns/physics_background_shared_cbeb3fa`.
 
 ## Status
 
@@ -26,18 +32,18 @@ Last updated: 2026-08-05 (Europe/Zurich)
 |---|---|---|
 | Scientific contract | complete | `PLAN.md` |
 | Implementation audit | complete | Model/data/HPO settings match `dev/patrick`; requested metric scope, score routing, CDF, retraining, and padding semantics audited |
-| Code and configs | fix in validation | Six-study implementation is intact; operating-threshold buffers are now registered before checkpointing so every candidate restores its own native/OAS threshold |
+| Code and configs | fix in validation | Threshold buffers are registered before checkpointing and the shared search suites now instantiate native plus AE/VAE OAS calibration callbacks on the normal validation stream only |
 | Tests and preflight | complete | 67 campaign tests pass after the single-run provenance fix; all six configs compose, scoped hooks pass, all 8 pair tables authenticate, and scratch capacity is sufficient |
 | Autonomous runbook | complete | `PLAN.md` now specifies the full six-study state machine, artifact contract, scheduler/timer policy, failure recovery, portable exports, analysis, and final `REPORT.md` |
 | Provenance/report hardening | complete | Added persistent Optuna-to-Hydra chunk bindings, run/checkpoint/MLflow identities, reverse G-to-E drift persistence, and fail-closed snapshot/finalize exports with synthetic positive/tamper/leakage tests |
-| Pilots | replacement pending | Earlier unified/packed pilots proved objective and launcher behavior but did not inspect threshold buffers; a focused replacement GPU pilot must prove native/OAS thresholds are finite and checkpoint-specific |
+| Pilots | replacement running | Corrected AE `3008281` is running; VAE `3008282` is queued behind the debug-QoS one-job limit. Both fail closed unless selected checkpoints contain finite native/OAS thresholds |
 | Full searches | superseded before completion | Jobs AE `3007292`, VAE `3007311`, DSAE `3007310`, DSVAE `3007318`, DeepSVDD `3007340`, RealNVP `3007345`, and legacy `3005821`/`3005823` were cancelled; no usable trial completed and no bulk chunk was submitted |
 | Retraining/evaluation | pending | Offline 56-front freeze and unique 200-epoch retraining remain implemented; corrected checkpoint-specific native/OAS threshold restoration requires GPU validation |
 | Aggregation/report | pending | Score-aware downstream oracle aggregation is implemented; awaits validation and results |
 
-The `59b47b0c41bc` campaign is superseded and must never be resumed. No bulk search
-chunk was submitted. A new immutable campaign must be derived from the threshold fix
-commit only after focused checkpoint and unified GPU pilots pass.
+The `59b47b0c41bc` and `6edb3f7` campaigns are superseded and must never be resumed.
+No bulk search chunk was submitted. `cbeb3fa` is debug-only until its focused checkpoint,
+unified GPU, packed-launcher, and 50-epoch canary gates pass.
 
 Repository-wide `pre-commit -a` is not a usable clean gate on the current baseline: it
 rewrites 82 unrelated legacy files and separately reports pre-existing executable shell
@@ -64,6 +70,15 @@ codespell) pass; the unrelated baseline debt must not be mixed into this campaig
   or running competing controllers against one study.
 
 ## Verification log
+
+- 2026-08-05: replacement AE pilot `3008187` on `6edb3f7` produced retained
+  checkpoints but the live state-dict audit still found no threshold keys. Resolved
+  Hydra configuration and callback logs proved the cause: the shared selection suite
+  explicitly disabled `anomaly_eff`, so the fixed buffer registration code never ran.
+  The job and queued VAE pilot `3008189` were cancelled. Commit `cbeb3fa` now enables
+  native calibration for all six models and a separately namespaced OAS calibration
+  for AE/VAE while keeping `validation_aux_datasets: []`; 36 focused tests pass.
+  Replacement pilots `3008281`/`3008282` were submitted from a fresh campaign.
 
 - 2026-08-05: a direct audit of completed pilot and live canary Lightning files proved
   that `residual_oas_location`, `residual_oas_precision`, and `residual_oas_ready` were

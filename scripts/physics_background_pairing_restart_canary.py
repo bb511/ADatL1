@@ -577,9 +577,8 @@ def _exact_epoch_resume(
     }
 
 
-def _uninterrupted_reference_hash(root: Path, expected_commit: str) -> str:
-    """Train an uninterrupted oracle with the resumed run's exact callback/logger topology."""
-    reference_root = root / "reference"
+def _run_uninterrupted_reference(reference_root: Path, expected_commit: str) -> str:
+    """Train the uninterrupted oracle inside its own cold Python process."""
     client, run_id, tracking_uri = _create_or_authenticate_run(
         reference_root, expected_commit, None
     )
@@ -612,6 +611,34 @@ def _uninterrupted_reference_hash(root: Path, expected_commit: str) -> str:
     trainer.fit(model, datamodule=_CanaryDataModule())
     logger.finalize("success")
     return _parameter_sha256(model)
+
+
+def _uninterrupted_reference_hash(root: Path, expected_commit: str) -> str:
+    """Launch a cold-process oracle matching the first Slurm allocation lifecycle."""
+    output = root / "evidence" / "uninterrupted_reference.json"
+    subprocess.run(  # nosec B603 -- current interpreter and fixed local script
+        [
+            sys.executable,
+            str(Path(__file__).resolve()),
+            "--reference-root",
+            str(root / "reference"),
+            "--reference-output",
+            str(output),
+            "--expected-commit",
+            expected_commit,
+        ],
+        cwd=REPOSITORY_ROOT,
+        check=True,
+    )
+    payload = json.loads(output.read_text(encoding="utf-8"))
+    if (
+        payload.get("schema_version") != SCHEMA_VERSION
+        or payload.get("code_commit") != expected_commit
+        or not isinstance(payload.get("parameter_sha256"), str)
+        or len(payload["parameter_sha256"]) != 64
+    ):
+        raise RuntimeError("Cold-process uninterrupted reference evidence is invalid.")
+    return str(payload["parameter_sha256"])
 
 
 def run(root: Path, scheduler_log: Path, expected_commit: str) -> Path:
@@ -709,6 +736,11 @@ def run(root: Path, scheduler_log: Path, expected_commit: str) -> Path:
         )
     final_state_sha256 = _parameter_sha256(model)
     uninterrupted_reference_state_sha256 = _uninterrupted_reference_hash(root, expected_commit)
+    reference_evidence_path = root / "evidence" / "uninterrupted_reference.json"
+    reference_evidence = {
+        "path": str(reference_evidence_path.resolve()),
+        "sha256": _sha256(reference_evidence_path),
+    }
     parameters_match_reference = final_state_sha256 == uninterrupted_reference_state_sha256
     if not parameters_match_reference:
         raise RuntimeError(
@@ -766,6 +798,7 @@ def run(root: Path, scheduler_log: Path, expected_commit: str) -> Path:
         "cuda_device": torch.cuda.get_device_name(0),
         "hpc_checkpoint_evidence": hpc_evidence,
         "exact_resume_checkpoint": exact_resume_evidence,
+        "uninterrupted_reference_evidence": reference_evidence,
         "restore_evidence": {
             "path": str(restore_path),
             "sha256": _sha256(restore_path),
@@ -799,11 +832,39 @@ def run(root: Path, scheduler_log: Path, expected_commit: str) -> Path:
 
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--root", type=Path, required=True)
-    parser.add_argument("--scheduler-log", type=Path, required=True)
+    parser.add_argument("--root", type=Path)
+    parser.add_argument("--scheduler-log", type=Path)
+    parser.add_argument("--reference-root", type=Path)
+    parser.add_argument("--reference-output", type=Path)
     parser.add_argument("--expected-commit", required=True)
     args = parser.parse_args()
     logging.basicConfig(level=logging.INFO)
+    if args.reference_root is not None or args.reference_output is not None:
+        if args.reference_root is None or args.reference_output is None:
+            parser.error("reference mode requires --reference-root and --reference-output")
+        if args.root is not None or args.scheduler_log is not None:
+            parser.error("reference mode cannot receive --root or --scheduler-log")
+        if _git("rev-parse", "HEAD") != args.expected_commit:
+            raise RuntimeError("Reference subprocess commit differs from the canary commit.")
+        if _git("status", "--porcelain", "--untracked-files=no"):
+            raise RuntimeError("Reference subprocess requires a clean execution worktree.")
+        if not torch.cuda.is_available():
+            raise RuntimeError("Reference subprocess requires the canary CUDA allocation.")
+        reference_hash = _run_uninterrupted_reference(
+            args.reference_root.resolve(), args.expected_commit
+        )
+        _write_json(
+            args.reference_output.resolve(),
+            {
+                "schema_version": SCHEMA_VERSION,
+                "code_commit": args.expected_commit,
+                "parameter_sha256": reference_hash,
+            },
+            create=True,
+        )
+        return
+    if args.root is None or args.scheduler_log is None:
+        parser.error("canary mode requires --root and --scheduler-log")
     run(args.root, args.scheduler_log, args.expected_commit)
 
 

@@ -48,9 +48,20 @@ class ExactRetrainRNGState(Callback):
             raise RuntimeError("Exact RNG callback was checkpointed before Trainer setup.")
         shuffler = self._shuffler(self._trainer)
         numpy_state = np.random.get_state()
+        python_state = random.getstate()
+        if self._pending_state is not None:
+            python_state = self._pending_state["python"]
+            pending_numpy = self._pending_state["numpy"]
+            numpy_state = (
+                str(pending_numpy["algorithm"]),
+                pending_numpy["keys"].cpu().numpy().astype(np.uint32, copy=False),
+                int(pending_numpy["position"]),
+                int(pending_numpy["has_gauss"]),
+                float(pending_numpy["cached_gaussian"]),
+            )
         return {
             "schema_version": self.STATE_SCHEMA_VERSION,
-            "python": random.getstate(),
+            "python": python_state,
             "numpy": {
                 "algorithm": numpy_state[0],
                 "keys": torch.from_numpy(numpy_state[1].copy()),
@@ -159,17 +170,6 @@ class ExactRetrainRNGState(Callback):
             self._shuffler(trainer)
             return
         state = self._pending_state
-        random.setstate(state["python"])
-        numpy_state = state["numpy"]
-        np.random.set_state(
-            (
-                str(numpy_state["algorithm"]),
-                numpy_state["keys"].cpu().numpy().astype(np.uint32, copy=False),
-                int(numpy_state["position"]),
-                int(numpy_state["has_gauss"]),
-                float(numpy_state["cached_gaussian"]),
-            )
-        )
         torch.set_rng_state(state["torch_cpu"].cpu())
         cuda_states = state["torch_cuda"]
         if torch.cuda.is_available():
@@ -183,4 +183,21 @@ class ExactRetrainRNGState(Callback):
         shuffler = self._shuffler(trainer)
         if shuffler is not None:
             shuffler.set_state(state["datamodule_shuffler"].cpu())
+
+    def on_train_epoch_start(self, trainer: Trainer, pl_module) -> None:
+        """Restore host RNGs after resumed-only trainer/logger startup hooks."""
+        if self._pending_state is None:
+            return
+        state = self._pending_state
+        random.setstate(state["python"])
+        numpy_state = state["numpy"]
+        np.random.set_state(
+            (
+                str(numpy_state["algorithm"]),
+                numpy_state["keys"].cpu().numpy().astype(np.uint32, copy=False),
+                int(numpy_state["position"]),
+                int(numpy_state["has_gauss"]),
+                float(numpy_state["cached_gaussian"]),
+            )
+        )
         self._pending_state = None

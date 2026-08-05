@@ -182,6 +182,29 @@ def test_canary_train_loader_matches_production_iterable_shuffle_contract() -> N
     assert sum(1 for _ in loader) == 5
 
 
+def test_uninterrupted_oracle_runs_in_a_fresh_python_process(monkeypatch, tmp_path: Path) -> None:
+    root = tmp_path / "retrain_restart_canary_cold_reference"
+    commit = "a" * 40
+
+    def run(command, **kwargs):
+        assert command[0] == canary.sys.executable
+        assert "--reference-root" in command
+        output = Path(command[command.index("--reference-output") + 1])
+        canary._write_json(
+            output,
+            {
+                "schema_version": canary.SCHEMA_VERSION,
+                "code_commit": commit,
+                "parameter_sha256": "b" * 64,
+            },
+            create=True,
+        )
+
+    monkeypatch.setattr(canary.subprocess, "run", run)
+
+    assert canary._uninterrupted_reference_hash(root, commit) == "b" * 64
+
+
 def test_hpc_is_archived_as_non_resume_evidence(tmp_path: Path) -> None:
     root = canary._validate_root(tmp_path / "retrain_restart_canary_archive")
     source = root / "lightning" / "hpc_ckpt_1.ckpt"

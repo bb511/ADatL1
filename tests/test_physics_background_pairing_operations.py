@@ -985,6 +985,17 @@ def test_restart_canary_evidence_authenticates_exact_epoch_oracle_and_hashes(
     )
     expected_tags = operations._restart_canary_expected_tags(canary_root, commit)
     sentinels = operations._restart_canary_scheduler_sentinels(snapshot_text)
+    reference = evidence_root / "uninterrupted_reference.json"
+    reference.write_text(
+        json.dumps(
+            {
+                "schema_version": 2,
+                "code_commit": commit,
+                "parameter_sha256": "2" * 64,
+            }
+        ),
+        encoding="utf-8",
+    )
     complete = {
         "schema_version": 2,
         "completed_at": "now",
@@ -1003,6 +1014,10 @@ def test_restart_canary_evidence_authenticates_exact_epoch_oracle_and_hashes(
             "completed_epochs": 1,
             "mlflow_epoch_steps": [0],
             "mlflow_epoch_values": [0.0],
+        },
+        "uninterrupted_reference_evidence": {
+            "path": str(reference.resolve()),
+            "sha256": operations._sha256(reference),
         },
         "restore_evidence": {
             "path": str(restore.resolve()),

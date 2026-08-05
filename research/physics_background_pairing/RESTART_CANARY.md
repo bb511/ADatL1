@@ -11,7 +11,9 @@ retained stable files remain present, and one explicitly tagged MLflow run spans
 allocations. Nonzero-learning-rate terminal parameters must equal an uninterrupted
 same-allocation reference run with identical logger/callback topology exactly. The
 checkpoint is accepted only when Lightning's ready, started, and processed epoch counts
-all equal `epoch + 1`; validation-end pseudo-boundaries are rejected.
+all equal `epoch + 1`; validation-end pseudo-boundaries are rejected. The uninterrupted
+oracle runs in a fresh Python subprocess so lazy logger/runtime initialization matches a
+cold allocation instead of inheriting warmed process state.
 The same run must contain exactly one `epoch_idx` record for each completed epoch,
 with both steps and values equal to `0,1,2,3,4,5`; this catches a restart that silently
 duplicates or skips an epoch even when it reaches the nominal final epoch.

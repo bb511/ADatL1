@@ -410,6 +410,19 @@ def _validate_restart_canary_evidence(
         parent=evidence_root,
         expected_name=f"exact_resume_{restart_count:03d}.ckpt",
     )
+    reference_path = authenticated_reference(
+        complete.get("uninterrupted_reference_evidence"),
+        parent=evidence_root,
+        expected_name="uninterrupted_reference.json",
+    )
+    reference_payload = json.loads(reference_path.read_text(encoding="utf-8"))
+    if (
+        reference_payload.get("schema_version") != RESTART_CANARY_SCHEMA_VERSION
+        or reference_payload.get("code_commit") != code_commit
+        or reference_payload.get("parameter_sha256")
+        != complete.get("uninterrupted_reference_state_sha256")
+    ):
+        raise RuntimeError("Restart-canary cold-process reference evidence is invalid.")
     exact_resume = complete["exact_resume_checkpoint"]
     completed_epochs = int(exact_resume.get("completed_epochs", -1))
     expected_pre_resume_epochs = list(range(completed_epochs))

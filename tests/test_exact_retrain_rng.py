@@ -8,6 +8,7 @@ from pathlib import Path
 import numpy as np
 import torch
 from pytorch_lightning import (
+    Callback,
     LightningDataModule,
     LightningModule,
     Trainer,
@@ -59,6 +60,15 @@ class _StochasticModel(LightningModule):
         return torch.optim.SGD(self.parameters(), lr=0.04, momentum=0.3)
 
 
+class _ResumeStartupRNGConsumer(Callback):
+    """Model a lazy logger/setup path that runs only in a resumed process."""
+
+    def on_train_start(self, trainer, pl_module) -> None:
+        if trainer.ckpt_path is not None:
+            random.random()  # nosec B311 -- deliberate lifecycle perturbation
+            np.random.random()
+
+
 def _trainer(max_epochs: int, callbacks: list, root: Path) -> Trainer:
     return Trainer(
         accelerator="cpu",
@@ -104,7 +114,11 @@ def test_segmented_rng_and_iterable_shuffle_match_uninterrupted_training(tmp_pat
     # again, then the exact callback restores boundary state before iteration.
     seed_everything(123, workers=True)
     resumed = _StochasticModel()
-    _trainer(4, [ExactRetrainRNGState()], tmp_path / "resumed").fit(
+    _trainer(
+        4,
+        [ExactRetrainRNGState(), _ResumeStartupRNGConsumer()],
+        tmp_path / "resumed",
+    ).fit(
         resumed,
         datamodule=_DataModule(),
         ckpt_path=checkpoint,

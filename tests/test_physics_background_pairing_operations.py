@@ -9,8 +9,11 @@ from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
+import torch
+import yaml
 
 from scripts import physics_background_pairing_operations as operations
+from scripts import physics_background_pairing_report as report
 
 
 def _campaign(tmp_path: Path) -> tuple[Path, Path]:
@@ -289,3 +292,194 @@ def test_consistent_backup_refuses_live_trial_and_hashes_copy(monkeypatch, tmp_p
         .read_text(encoding="utf-8")
         .startswith(operations._sha256(backup))
     )
+
+
+@pytest.mark.parametrize(
+    ("objective", "expected"),
+    [
+        (
+            {"score": "native", "metric": "cap", "strategy": "jetclr"},
+            "summary/cap_native_jetclr_ema_ZB_run396102_vs_ZB_run398183/max",
+        ),
+        (
+            {"score": "residual_oas", "metric": "wasserstein", "strategy": None},
+            "summary/w1dist_residual_oas_ema_ZB_run396102_vs_ZB_run398183/min",
+        ),
+        (
+            {"score": "native", "metric": "drift", "strategy": None},
+            "summary/native_operational_drift_ema/min",
+        ),
+    ],
+)
+def test_primary_checkpoint_family_is_exact(objective, expected) -> None:
+    """Every objective maps to its only allowed primary checkpoint family."""
+    assert operations._primary_checkpoint_family(objective) == expected
+
+
+def test_candidate_checkpoint_requires_independent_oas_threshold(tmp_path) -> None:
+    """AE/VAE candidates require finite independent native and OAS thresholds."""
+    checkpoint = tmp_path / "candidate.ckpt"
+    torch.save({"state_dict": {"thres_operational": torch.tensor(1.0)}}, checkpoint)
+    with pytest.raises(RuntimeError, match="threshold keys differ"):
+        operations._candidate_checkpoint(checkpoint, "ae")
+
+    torch.save(
+        {
+            "state_dict": {
+                "thres_operational": torch.tensor(1.0),
+                "thres_operational__residual_oas": torch.tensor(2.0),
+            }
+        },
+        checkpoint,
+    )
+    audited = operations._candidate_checkpoint(checkpoint, "ae")
+
+    assert audited["thresholds"] == {
+        "thres_operational": 1.0,
+        "thres_operational__residual_oas": 2.0,
+    }
+
+
+def test_validate_canaries_covers_all_trials_and_candidate_families(monkeypatch, tmp_path) -> None:
+    """The terminal gate covers 24 runs, 224 selections, and every retained candidate."""
+    root, repository = _campaign(tmp_path)
+    _authenticate(monkeypatch)
+    scores = {
+        "ae": ("native", "residual_oas"),
+        "vae": ("native", "residual_oas"),
+        "dsae": ("native",),
+        "dsvae": ("native",),
+        "svdd": ("native",),
+        "realnvp": ("native",),
+    }
+    studies = []
+    for model in operations.MODELS:
+        objectives = []
+        for score in scores[model]:
+            objectives.extend(
+                {
+                    "id": f"{score}__cap__{strategy}",
+                    "score": score,
+                    "metric": "cap",
+                    "strategy": strategy,
+                    "directions": ["maximize", "minimize"],
+                }
+                for strategy in (
+                    "flat_physical",
+                    "physics_summary",
+                    "typed_sliced_wasserstein",
+                    "jetclr",
+                    "cdf",
+                )
+            )
+            objectives.extend(
+                [
+                    {
+                        "id": f"{score}__wasserstein",
+                        "score": score,
+                        "metric": "wasserstein",
+                        "strategy": None,
+                        "directions": ["minimize", "minimize"],
+                    },
+                    {
+                        "id": f"{score}__drift",
+                        "score": score,
+                        "metric": "drift",
+                        "strategy": None,
+                        "directions": ["minimize", "minimize"],
+                    },
+                ]
+            )
+        studies.append({"model": model, "objectives": objectives})
+    design = {"schema_version": 2, "code_commit": "a" * 40, "studies": studies}
+    bindings = {}
+    for study in studies:
+        model = study["model"]
+        for index in range(4):
+            hydra = root / "sweeps" / model / "stamp" / str(index)
+            (hydra / ".hydra").mkdir(parents=True)
+            (hydra / ".hydra" / "config.yaml").write_text(
+                yaml.safe_dump(
+                    {
+                        "test": False,
+                        "data": {
+                            "validation_aux_datasets": [],
+                            "expose_zerobias_sources": True,
+                        },
+                        "paths": {
+                            "zerobias": {
+                                "ZB_run396102": "e",
+                                "ZB_run398183": "g",
+                            }
+                        },
+                    }
+                ),
+                encoding="utf-8",
+            )
+            checkpoint_root = root / "checkpoints" / model / str(index)
+            checkpoint_root.mkdir(parents=True)
+            (checkpoint_root / "last.ckpt").write_text("last", encoding="utf-8")
+            families = ["single/ascore_operational/stable"] + [
+                operations._primary_checkpoint_family(objective)
+                for objective in study["objectives"]
+            ]
+            for family in families:
+                directory = checkpoint_root / family
+                directory.mkdir(parents=True)
+                (directory / "candidate.ckpt").write_text("candidate", encoding="utf-8")
+            artifact = hydra / "optimized_metric.json"
+            artifact.write_text(
+                json.dumps({"run_provenance": {"checkpoint_run_dir": str(checkpoint_root)}}),
+                encoding="utf-8",
+            )
+            bindings[(model, index)] = {
+                "hydra_run_dir": str(hydra),
+                "optimized_metric_artifact": str(artifact),
+            }
+
+    jobs = [
+        {
+            "kind": "production_canary",
+            "model": model,
+            "state": "COMPLETED",
+            "exit_code": "0:0",
+            "commit": "a" * 40,
+            "log_sha256": "1" * 64,
+        }
+        for model in operations.MODELS
+    ]
+    status = [
+        {
+            "model": model,
+            "total": 4,
+            "complete": 4,
+            "usable_complete": 4,
+            "running": 0,
+            "waiting": 0,
+            "fail": 0,
+            "pruned": 0,
+        }
+        for model in operations.MODELS
+    ]
+    monkeypatch.setattr(operations, "reconcile", lambda *args: jobs)
+    monkeypatch.setattr(report, "_design", lambda root: design)
+    monkeypatch.setattr(report, "_trial_exports", lambda *args: (status, []))
+    monkeypatch.setattr(report, "_binding_index", lambda root: bindings)
+    monkeypatch.setattr(report, "_validate_bindings", lambda *args: None)
+    monkeypatch.setattr(
+        report, "_checkpoint_rows", lambda *args, **kwargs: ([{}] * 224, [{}] * 24)
+    )
+    monkeypatch.setattr(report, "_annotate_checkpoint_families", lambda *args: [{}] * 224)
+    monkeypatch.setattr(report, "_validate_mlflow_runs", lambda *args, **kwargs: [{}] * 24)
+    monkeypatch.setattr(
+        operations,
+        "_candidate_checkpoint",
+        lambda path, model: {"path": str(path), "sha256": "2" * 64, "thresholds": {}},
+    )
+
+    output = operations.validate_canaries(root, repository)
+    payload = json.loads(output.read_text(encoding="utf-8"))
+
+    assert payload["bindings"] == 24
+    assert payload["checkpoint_selections"] == 224
+    assert len(payload["candidate_checkpoints"]) == 272

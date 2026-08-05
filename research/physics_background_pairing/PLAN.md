@@ -354,8 +354,9 @@ contains all four mappings and CDF simultaneously.
 - `scripts/physics_background_pairing_operations.py` is the mutable control plane for
   an immutable campaign. It submits an exact frozen-worktree search chunk, refuses
   scheduler or Optuna overlap, reconciles Slurm state into `job_history.csv`, seals
-  terminal logs by SHA-256, and creates consistent quiescent SQLite backups. It never
-  imports or changes the scientific runner used by an active campaign.
+  terminal logs by SHA-256, creates consistent quiescent SQLite backups, and applies a
+  fail-closed terminal canary gate. It never imports or changes the scientific runner
+  used by an active campaign.
 - `scripts/clariden/physics_background_pairing_pilot.sbatch` runs one unified one-epoch
   model pilot on the debug partition.
 - `scripts/clariden/physics_background_pairing_sweep.sbatch` is a 12-hour packed
@@ -639,6 +640,22 @@ Measure AE and VAE especially carefully because they evaluate 28 objectives. If 
 50-epoch canary cannot comfortably finish within 12 hours, do not launch bulk normal
 jobs. Account `a0166` cannot use the 24-hour `low` QOS, so report the scheduler limit
 before considering any scientific change.
+
+After all six jobs terminate, authenticate the complete gate from the mutable control
+checkout:
+
+```bash
+uv run python scripts/physics_background_pairing_operations.py \
+  --root "${BGPAIR_ROOT}" \
+  --execution-repository "${BGPAIR_REPO}" validate-canaries
+```
+
+This must produce `state/production_canary_validation.json` and otherwise fail closed.
+It requires six successful hash-sealed Slurm jobs, 24 usable 50-epoch Optuna trials,
+exact Optuna/Hydra/MLflow bindings, all finite contiguous metric histories, 224 logical
+checkpoint selections, and all 272 retained checkpoint candidates with finite native
+thresholds plus independent OAS thresholds for AE/VAE. It also reauthenticates the
+resolved E/G-only search configuration. Do not submit a bulk chunk without this file.
 
 ## 6. Search execution: six studies, 600 usable trials each
 

@@ -17,10 +17,17 @@ import os
 import shutil
 import sqlite3
 import subprocess  # nosec B404 -- fixed git, Slurm, and sbatch commands
+import sys
 import tempfile
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
+
+import yaml
+
+REPOSITORY_ROOT = Path(__file__).resolve().parents[1]
+if str(REPOSITORY_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPOSITORY_ROOT))
 
 MODELS = ("ae", "vae", "dsae", "dsvae", "svdd", "realnvp")
 ACTIVE_STATES = {"PENDING", "RUNNING", "CONFIGURING", "COMPLETING", "SUSPENDED"}
@@ -73,6 +80,7 @@ def _parse_args() -> argparse.Namespace:
     retrain.add_argument("--raw-data-dir", type=Path, required=True)
     retrain.add_argument("--pairing-dir", type=Path, required=True)
     commands.add_parser("missing-retrains")
+    commands.add_parser("validate-canaries")
     commands.add_parser("reconcile")
     backup = commands.add_parser("backup-study")
     backup.add_argument("--model", choices=MODELS, required=True)
@@ -406,6 +414,158 @@ def submit_retrains(
     return array_job_id
 
 
+def _primary_checkpoint_family(objective: dict[str, Any]) -> str:
+    """Return the exact checkpoint-family path for one logical primary metric."""
+    score = str(objective["score"])
+    metric = str(objective["metric"])
+    suffix = "ZB_run396102_vs_ZB_run398183"
+    if metric == "cap":
+        name = f"cap_{score}_{objective['strategy']}_ema_{suffix}"
+        direction = "max"
+    elif metric == "wasserstein":
+        name = f"w1dist_{score}_ema_{suffix}"
+        direction = "min"
+    elif metric == "drift":
+        name = f"{score}_operational_drift_ema"
+        direction = "min"
+    else:  # pragma: no cover - authenticated by the design loader
+        raise RuntimeError(f"Unknown logical metric: {metric}")
+    return f"summary/{name}/{direction}"
+
+
+def _candidate_checkpoint(path: Path, model: str) -> dict[str, Any]:
+    """Authenticate score-specific thresholds in one retained candidate checkpoint."""
+    import torch
+
+    payload = torch.load(  # nosec B614 -- frozen campaign-local checkpoint
+        path, map_location="cpu", weights_only=False
+    )
+    state = payload.get("state_dict", {})
+    expected = {"thres_operational"}
+    if model in {"ae", "vae"}:
+        expected.add("thres_operational__residual_oas")
+    observed = {str(key) for key in state if str(key).startswith("thres_operational")}
+    if observed != expected:
+        raise RuntimeError(f"Candidate threshold keys differ in {path}: {observed}")
+    thresholds = {}
+    for key in sorted(expected):
+        value = torch.as_tensor(state[key]).detach().cpu()
+        if value.numel() != 1 or not torch.isfinite(value).item():
+            raise RuntimeError(f"Candidate threshold is not finite in {path}: {key}")
+        thresholds[key] = float(value.item())
+    return {"path": str(path.resolve()), "sha256": _sha256(path), "thresholds": thresholds}
+
+
+def validate_canaries(root: Path, repository: Path) -> Path:
+    """Fail closed unless all six four-trial production canaries satisfy every gate."""
+    from scripts import physics_background_pairing_report as report
+
+    design = report._design(root)
+    _authenticate_execution_repository(repository, design)
+    ledger_rows = reconcile(root, repository)
+    canary_jobs = [row for row in ledger_rows if row.get("kind") == "production_canary"]
+    if len(canary_jobs) != len(MODELS) or {row["model"] for row in canary_jobs} != set(MODELS):
+        raise RuntimeError("Canary ledger does not contain exactly one job per model.")
+    for row in canary_jobs:
+        if (
+            row["state"] != "COMPLETED"
+            or row["exit_code"] != "0:0"
+            or row["commit"] != design["code_commit"]
+            or not row["log_sha256"]
+        ):
+            raise RuntimeError(f"Production canary job is not authenticated: {row}")
+
+    status_rows, _ = report._trial_exports(root, design)
+    for row in status_rows:
+        if any(
+            int(row[key]) != expected
+            for key, expected in (
+                ("total", 4),
+                ("complete", 4),
+                ("usable_complete", 4),
+                ("running", 0),
+                ("waiting", 0),
+                ("fail", 0),
+                ("pruned", 0),
+            )
+        ):
+            raise RuntimeError(f"Canary Optuna state is incomplete: {row}")
+    bindings = report._binding_index(root)
+    expected_bindings = {(model, index) for model in MODELS for index in range(4)}
+    if set(bindings) != expected_bindings:
+        raise RuntimeError("Canary bindings do not exactly cover trials 0-3 for six models.")
+    report._validate_bindings(root, design, bindings)
+    checkpoint_rows, mlflow_rows = report._checkpoint_rows(root, design, include_retrains=False)
+    annotated = report._annotate_checkpoint_families(design, checkpoint_rows)
+    if len(mlflow_rows) != 24 or len(annotated) != 224:
+        raise RuntimeError("Canary MLflow/checkpoint-selection cardinality is incomplete.")
+    validated_mlflow = report._validate_mlflow_runs(root, design, mlflow_rows, final=True)
+
+    studies = {study["model"]: study for study in design["studies"]}
+    candidate_rows = []
+    for (model, trial_number), binding in sorted(bindings.items()):
+        hydra_dir = Path(binding["hydra_run_dir"])
+        config = yaml.safe_load((hydra_dir / ".hydra" / "config.yaml").read_text(encoding="utf-8"))
+        if (
+            config.get("test") is not False
+            or config.get("data", {}).get("validation_aux_datasets") != []
+            or config.get("data", {}).get("expose_zerobias_sources") is not True
+            or set(config.get("paths", {}).get("zerobias", {})) != {"ZB_run396102", "ZB_run398183"}
+        ):
+            raise RuntimeError(
+                f"Canary search config leaks or lacks the exact E/G sources: {hydra_dir}"
+            )
+        artifact = json.loads(
+            Path(binding["optimized_metric_artifact"]).read_text(encoding="utf-8")
+        )
+        checkpoint_root = Path(artifact["run_provenance"]["checkpoint_run_dir"])
+        families = ["last", "single/ascore_operational/stable"] + [
+            _primary_checkpoint_family(objective) for objective in studies[model]["objectives"]
+        ]
+        if len(set(families)) != len(families):
+            raise RuntimeError(f"Duplicate expected checkpoint family for {model}.")
+        for family in families:
+            if family == "last":
+                paths = [checkpoint_root / "last.ckpt"]
+            else:
+                paths = sorted((checkpoint_root / family).glob("*.ckpt"))
+            if len(paths) != 1 or not paths[0].is_file():
+                raise RuntimeError(
+                    f"Expected one retained {family} checkpoint for {(model, trial_number)}."
+                )
+            candidate_rows.append(
+                {
+                    "model": model,
+                    "trial_number": trial_number,
+                    "family": family,
+                    **_candidate_checkpoint(paths[0], model),
+                }
+            )
+
+    if len(candidate_rows) != 272:
+        raise RuntimeError(
+            f"Canary retained-candidate cardinality is incomplete: {len(candidate_rows)} != 272."
+        )
+
+    output = root / "state" / "production_canary_validation.json"
+    payload = {
+        "schema_version": 1,
+        "validated_at": datetime.now(timezone.utc).isoformat(),
+        "code_commit": design["code_commit"],
+        "jobs": canary_jobs,
+        "studies": status_rows,
+        "bindings": len(bindings),
+        "checkpoint_selections": len(annotated),
+        "mlflow_runs": validated_mlflow,
+        "candidate_checkpoints": candidate_rows,
+    }
+    output.parent.mkdir(parents=True, exist_ok=True)
+    temporary = output.with_suffix(".json.tmp")
+    temporary.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    temporary.replace(output)
+    return output
+
+
 def _accounting(job_ids: list[str]) -> dict[str, dict[str, str]]:
     """Read allocation-level accounting for exact registered job IDs."""
     if not job_ids:
@@ -537,6 +697,8 @@ def main() -> None:
         )
     elif args.command == "missing-retrains":
         print(json.dumps(missing_retrains(root, repository)))
+    elif args.command == "validate-canaries":
+        print(validate_canaries(root, repository))
     elif args.command == "reconcile":
         print(json.dumps(reconcile(root, repository), indent=2, sort_keys=True))
     else:

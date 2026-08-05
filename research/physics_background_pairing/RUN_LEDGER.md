@@ -2,6 +2,15 @@
 
 Last updated: 2026-08-05 (Europe/Zurich)
 
+- 2026-08-05: froze the next execution checkout at commit
+  `1e0b94089e13ae64251387eb2141c9480537a17c` in
+  `/iopsstor/scratch/cscs/vjimenez/adatl1/worktrees/physics_background_shared_1e0b940`
+  and initialized its empty six-study campaign at
+  `/iopsstor/scratch/cscs/vjimenez/adatl1/campaigns/physics_background_shared_1e0b940`.
+  The design authenticates the existing pair-table preflight and targets exactly 600
+  usable 50-epoch trials for each model. No jobs have been submitted to this campaign;
+  a forced requeue/restart GPU canary and six production canaries are required first.
+
 - 2026-08-05: added a fail-closed operations-level Pareto freeze transition. The gate
   requires exact 600-trial quiescence for every study, authenticates all selected
   binding/metric/MLflow/checkpoint evidence, creates and hashes consistent backups of

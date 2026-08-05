@@ -351,6 +351,11 @@ contains all four mappings and CDF simultaneously.
 - `scripts/physics_background_pairing_campaign.py` is the campaign state machine. Its
   commands are `init`, `status`, `pilot`, `sweep`, `submit-next`, `freeze`, `retrain`,
   and `aggregate`.
+- `scripts/physics_background_pairing_operations.py` is the mutable control plane for
+  an immutable campaign. It submits an exact frozen-worktree search chunk, refuses
+  scheduler or Optuna overlap, reconciles Slurm state into `job_history.csv`, seals
+  terminal logs by SHA-256, and creates consistent quiescent SQLite backups. It never
+  imports or changes the scientific runner used by an active campaign.
 - `scripts/clariden/physics_background_pairing_pilot.sbatch` runs one unified one-epoch
   model pilot on the debug partition.
 - `scripts/clariden/physics_background_pairing_sweep.sbatch` is a 12-hour packed
@@ -648,16 +653,23 @@ there are no nested Submitit allocations and no idle controller node. The `xfer`
 are x86-64 and cannot execute the pinned ARM environment, while account `a0166` has only
 the `normal` QOS.
 
-For sequential operation, `submit-next` chooses the first incomplete model:
+Use the operational helper from a clean mutable/reporting checkout for normal chunk
+submission. It requires all three external inputs explicitly and records the returned
+Slurm allocation in the campaign ledger atomically:
 
 ```bash
-"${BGPAIR_UV}" run --frozen --no-sync python \
-  scripts/physics_background_pairing_campaign.py \
-  --root "${BGPAIR_ROOT}" submit-next \
-  --trials 48 --jobs 48 --timeout-min 720
+uv run python scripts/physics_background_pairing_operations.py \
+  --root "${BGPAIR_ROOT}" \
+  --execution-repository "${BGPAIR_REPO}" \
+  submit-search --model ae --trials 48 --jobs 48 --timeout-min 720 \
+  --data-dir "${DATA_DIR}" --raw-data-dir "${RAW_DATA_DIR}" \
+  --pairing-dir "${PHYSICS_PAIRING_DIR}"
 ```
 
-For explicit model control or parallel progress across different databases:
+The helper calculates `--nodes=ceil(jobs/4)`, authenticates the frozen commit and clean
+worktree, exports campaign-local runtime paths, and rejects an active ledger row or
+`RUNNING`/`WAITING` Optuna trial for the same model. The direct `sbatch` equivalent is a
+recovery/debug fallback only:
 
 ```bash
 sbatch --parsable \
@@ -683,6 +695,10 @@ capped to the remaining 24, but failed/unusable trials require replacements.
 After every chunk, run:
 
 ```bash
+uv run python scripts/physics_background_pairing_operations.py \
+  --root "${BGPAIR_ROOT}" \
+  --execution-repository "${BGPAIR_REPO}" reconcile
+
 "${BGPAIR_UV}" run --frozen --no-sync python \
   scripts/physics_background_pairing_campaign.py \
   --root "${BGPAIR_ROOT}" status
@@ -704,7 +720,16 @@ mixed into the analysis.
 
 Back up each SQLite database after a completed chunk when no writer is active. Store
 the backup under `<BGPAIR_ROOT>/studies/backups/<model>/<timestamp>.db` and record its
-SHA-256. Do not copy a live SQLite database without a consistent SQLite backup method.
+SHA-256. Use the consistent SQLite backup API through:
+
+```bash
+uv run python scripts/physics_background_pairing_operations.py \
+  --root "${BGPAIR_ROOT}" \
+  --execution-repository "${BGPAIR_REPO}" \
+  backup-study --model ae
+```
+
+Do not copy a live SQLite database directly.
 
 ### 6.3 Per-trial outputs that must exist
 
@@ -766,11 +791,11 @@ Before waiting on the scheduler, estimate both queue and runtime blocking time:
 4. Record the prediction and evidence in `job_history.csv`/`RUN_LEDGER.md`.
 5. Keep doing independent useful work while jobs are queued/running: reporting code,
    artifact indexing, another completed-model audit, or failure classification.
-6. When scheduler progress is genuinely the only blocker, set a product-level timer or
-   recurring monitor for the predicted start/completion window. Do not burn tokens with
-   minute-by-minute polling and do not run a long blocking shell `sleep`.
-7. On wake, check once, update the prediction, and schedule the next timer only if the
-   scheduler remains the sole blocker.
+6. When queued scheduler progress is genuinely the only blocker, tell the user with the
+   job IDs, queue reason, and prediction, then stop polling. Do not create a timer and do
+   not run a blocking shell `sleep`.
+7. Resume with one scheduler/accounting check after the user returns or supplies new
+   evidence that the jobs advanced.
 
 Suggested check timing:
 

@@ -30,7 +30,7 @@ Last updated: 2026-08-05 (Europe/Zurich)
 | Autonomous runbook | complete | `PLAN.md` now specifies the full six-study state machine, artifact contract, scheduler/timer policy, failure recovery, portable exports, analysis, and final `REPORT.md` |
 | Provenance/report hardening | complete | Added persistent Optuna-to-Hydra chunk bindings, run/checkpoint/MLflow identities, reverse G-to-E drift persistence, and fail-closed snapshot/finalize exports with synthetic positive/tamper/leakage tests |
 | Pilots | complete | All six unified jobs passed on `d7fd395485d8`; exact objective/vector/selection, MLflow, reverse-drift, provenance, validation-allowlist, runtime, and memory evidence is persisted |
-| Full searches | packed gate passed | Four-way packed AE pilot `3006215` completed four finite 28-value trials on GPUs 0-3 in 4m24s; legacy AE controller `3005821`/worker `3005823` continues the first valid 50-epoch reference trial |
+| Full searches | six canaries running | Four 50-epoch trials per model are running in packed jobs AE `3007292`, VAE `3007311`, DSAE `3007310`, DSVAE `3007318`, DeepSVDD `3007340`, and RealNVP `3007345`; legacy AE reference `3005821`/`3005823` remains isolated |
 | Retraining/evaluation | pending | Offline 56-front freeze, unique 200-epoch retraining, and native/OAS threshold separation are implemented; validation pending |
 | Aggregation/report | pending | Score-aware downstream oracle aggregation is implemented; awaits validation and results |
 
@@ -64,6 +64,18 @@ codespell) pass; the unrelated baseline debt must not be mixed into this campaig
   or running competing controllers against one study.
 
 ## Verification log
+
+- 2026-08-05: all six four-trial production canaries were accepted on one node each:
+  AE `3007292`, VAE `3007311`, DSAE `3007310`, DSVAE `3007318`, DeepSVDD `3007340`,
+  and RealNVP `3007345`. Every job asked four Optuna trials with exactly 50 epochs and
+  launched one worker on each of GPUs 0-3. Each model has four distinct MLflow runs;
+  AE/VAE studies have 28 scalar directions and the other studies have 14. DSAE and
+  DSVAE, DeepSVDD, and RealNVP completed epoch 0 for all workers at step 764 with seven
+  finite summary metrics each; all AE/VAE workers completed epoch 0 with all 14 finite
+  native/OAS summary metrics. First-epoch projections are 8.5 hours for AE/VAE and
+  4.4-4.7 hours for the other models, inside the 12-hour limit. No traceback, OOM,
+  nonfinite metric, or failed step is present. Active-job, latest-study, and startup
+  audit snapshots are persisted under campaign `state/`.
 
 - 2026-08-05: scheduler accounting showed that a nominal one-GPU normal job reserves
   an entire four-GPU GH200 node. A custom packed launcher now runs four ordered Hydra

@@ -158,10 +158,12 @@ class ThresholdDriftCallback(Callback):
             if self.dataset_2_name is not None:
                 reverse = self._transfer_drift(eval_scores, cal_scores, fpr)
                 reverse_comparison = f"{self.dataset_2_name} -> {self.dataset_1_name}"
+                reverse_plot_folder = plot_folder / "reverse"
+                reverse_plot_folder.mkdir(parents=True, exist_ok=True)
                 self._plot(
                     {reverse_comparison: reverse},
                     f"Reverse {xlabel.lower()}",
-                    plot_folder / "reverse",
+                    reverse_plot_folder,
                     percent=False,
                 )
                 ckpt_ds = utils.misc.get_ckpt_ds_name(ckpt_name)

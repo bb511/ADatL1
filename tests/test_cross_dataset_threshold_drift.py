@@ -74,7 +74,14 @@ def test_evaluation_drift_uses_two_named_datasets(tmp_path, monkeypatch) -> None
         dataset_2="background1",
         log_raw_mlflow=False,
     )
-    monkeypatch.setattr(callback, "_plot", lambda *args, **kwargs: None)
+    plotted_folders = []
+
+    def capture_plot(values, xlabel, folder, percent):
+        del values, xlabel, percent
+        assert folder.is_dir()
+        plotted_folders.append(folder)
+
+    monkeypatch.setattr(callback, "_plot", capture_plot)
     monkeypatch.setattr(
         "src.evaluation.callbacks.thres_drift.utils.mlflow.log_plots_to_mlflow",
         lambda *args, **kwargs: None,
@@ -90,3 +97,4 @@ def test_evaluation_drift_uses_two_named_datasets(tmp_path, monkeypatch) -> None
 
     assert callback.transfer_summary["operational"]["last"] == pytest.approx(math.log(3.0))
     assert callback.reverse_transfer_summary["operational"]["last"] >= 0.0
+    assert plotted_folders[-1].name == "reverse"

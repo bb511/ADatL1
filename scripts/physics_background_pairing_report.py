@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import argparse
 import csv
+import gzip
 import hashlib
 import json
 import math
@@ -13,6 +14,7 @@ import pickle  # nosec B403 -- restricted to authenticated campaign checkpoint r
 import shutil
 import statistics
 import subprocess  # nosec B404 -- fixed read-only git commands
+import tempfile
 from collections import Counter
 from pathlib import Path
 from typing import Any, Iterable
@@ -1116,6 +1118,266 @@ def _append_test_metrics(
             )
 
 
+def _gzip_copy(source: Path, destination: Path) -> None:
+    """Copy one text log into a deterministic gzip member."""
+    if not source.is_file():
+        raise FileNotFoundError(source)
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    temporary = destination.with_suffix(destination.suffix + f".{os.getpid()}.tmp")
+    with source.open("rb") as input_handle, temporary.open("wb") as raw_output:
+        with gzip.GzipFile(
+            filename="",
+            mode="wb",
+            fileobj=raw_output,
+            mtime=0,
+        ) as output_handle:
+            shutil.copyfileobj(input_handle, output_handle)
+    temporary.replace(destination)
+
+
+def _copy_run_evidence(root: Path, output: Path, winners: list[dict[str, Any]]) -> None:
+    """Package winner-resolved Hydra configs and compact training/Slurm logs."""
+    bindings = _binding_index(root)
+    config_rows = []
+    run_log_rows = []
+    search_runs = sorted(
+        {(row["model"], int(row["trial_number"])) for row in winners},
+        key=lambda item: (MODEL_ORDER.index(item[0]), item[1]),
+    )
+    retrain_runs = sorted({int(row["retrain_index"]) for row in winners})
+
+    def copy_run(
+        phase: str,
+        model: str,
+        trial_number: int,
+        retrain_index: int | None,
+        run_dir: Path,
+    ) -> None:
+        identity = (
+            f"{model}__trial{trial_number:04d}"
+            if retrain_index is None
+            else f"{retrain_index:04d}__{model}__trial{trial_number:04d}"
+        )
+        destination = output / "configs" / phase / identity
+        for name in ("config.yaml", "overrides.yaml"):
+            source = run_dir / ".hydra" / name
+            if not source.is_file():
+                raise FileNotFoundError(f"Missing resolved Hydra evidence: {source}")
+            target = destination / name
+            target.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copyfile(source, target)
+            config_rows.append(
+                {
+                    "phase": phase,
+                    "model": model,
+                    "trial_number": trial_number,
+                    "retrain_index": "" if retrain_index is None else retrain_index,
+                    "kind": name,
+                    "source": str(source.resolve()),
+                    "source_sha256": _sha256(source),
+                    "portable_path": target.relative_to(output).as_posix(),
+                    "portable_sha256": _sha256(target),
+                }
+            )
+        source_log = run_dir / "train.log"
+        target_log = output / "logs" / "runs" / phase / f"{identity}.train.log.gz"
+        _gzip_copy(source_log, target_log)
+        run_log_rows.append(
+            {
+                "phase": phase,
+                "model": model,
+                "trial_number": trial_number,
+                "retrain_index": "" if retrain_index is None else retrain_index,
+                "source": str(source_log.resolve()),
+                "source_sha256": _sha256(source_log),
+                "portable_path": target_log.relative_to(output).as_posix(),
+                "portable_sha256": _sha256(target_log),
+            }
+        )
+
+    for model, trial_number in search_runs:
+        binding = bindings[(model, trial_number)]
+        copy_run(
+            "search",
+            model,
+            trial_number,
+            None,
+            Path(binding["hydra_run_dir"]),
+        )
+    manifest = _read_json(root / "selection" / "pareto_retrain_manifest.json")
+    retrain_by_index = {int(row["retrain_index"]): row for row in manifest["retrain_runs"]}
+    for retrain_index in retrain_runs:
+        row = retrain_by_index[retrain_index]
+        marker = _read_json(root / "retraining" / "markers" / f"{retrain_index:04d}.json")
+        copy_run(
+            "retrain",
+            row["model"],
+            int(row["trial_number"]),
+            retrain_index,
+            Path(marker["optimized_metric_artifact"]).parent,
+        )
+    _write_csv(
+        output / "configs" / "index.csv",
+        config_rows,
+        [
+            "phase",
+            "model",
+            "trial_number",
+            "retrain_index",
+            "kind",
+            "source",
+            "source_sha256",
+            "portable_path",
+            "portable_sha256",
+        ],
+    )
+    _write_csv(
+        output / "logs" / "runs" / "index.csv",
+        run_log_rows,
+        [
+            "phase",
+            "model",
+            "trial_number",
+            "retrain_index",
+            "source",
+            "source_sha256",
+            "portable_path",
+            "portable_sha256",
+        ],
+    )
+
+    slurm_rows = []
+    job_history = root / "state" / "job_history.csv"
+    if job_history.is_file():
+        with job_history.open(encoding="utf-8", newline="") as handle:
+            jobs = list(csv.DictReader(handle))
+        for index, job in enumerate(jobs):
+            source_value = job.get("log_path", "")
+            if not source_value:
+                continue
+            source = Path(source_value)
+            if not source.is_file():
+                raise FileNotFoundError(f"Recorded Slurm log is missing: {source}")
+            job_id = job.get("job_id") or f"row{index:04d}"
+            target = output / "logs" / "slurm" / f"{job_id}__{source.name}.gz"
+            _gzip_copy(source, target)
+            slurm_rows.append(
+                {
+                    "job_id": job_id,
+                    "source": str(source.resolve()),
+                    "source_sha256": _sha256(source),
+                    "portable_path": target.relative_to(output).as_posix(),
+                    "portable_sha256": _sha256(target),
+                }
+            )
+    _write_csv(
+        output / "logs" / "slurm" / "index.csv",
+        slurm_rows,
+        ["job_id", "source", "source_sha256", "portable_path", "portable_sha256"],
+    )
+
+
+def _write_figures(
+    output: Path,
+    winners: list[dict[str, Any]],
+    downstream: list[dict[str, Any]],
+) -> None:
+    """Render the compact descriptive figures referenced by the final report."""
+    cache = Path(tempfile.mkdtemp(prefix="adatl1-physics-bgpair-mpl-"))
+    os.environ.setdefault("MPLCONFIGDIR", str(cache))
+    import matplotlib
+
+    matplotlib.use("Agg")
+    import matplotlib.pyplot as plt
+
+    figure_dir = output / "figures"
+    figure_dir.mkdir(parents=True, exist_ok=True)
+    plt.rcParams.update({"figure.dpi": 120, "savefig.dpi": 160, "font.size": 9})
+
+    metric_order = ("cap", "wasserstein", "drift")
+    metric_means = [
+        statistics.fmean(
+            float(row["mean_efficiency"]) for row in winners if row["metric"] == metric
+        )
+        for metric in metric_order
+    ]
+    figure, axis = plt.subplots(figsize=(6.2, 3.8))
+    axis.bar(metric_order, metric_means, color=("#4477AA", "#EE6677", "#228833"))
+    axis.set_ylabel("Mean downstream efficiency")
+    axis.set_ylim(0.0, 1.0)
+    axis.set_title("Reported Pareto winner performance by selection metric")
+    figure.tight_layout()
+    figure.savefig(figure_dir / "metric_summary.png")
+    plt.close(figure)
+
+    pairing_means = [
+        statistics.fmean(
+            float(row["mean_efficiency"])
+            for row in winners
+            if row["metric"] == "cap" and row["strategy"] == strategy
+        )
+        for strategy in CAP_STRATEGIES
+    ]
+    figure, axis = plt.subplots(figsize=(8.2, 4.2))
+    axis.bar(range(len(CAP_STRATEGIES)), pairing_means, color="#4477AA")
+    axis.set_xticks(range(len(CAP_STRATEGIES)), CAP_STRATEGIES, rotation=25, ha="right")
+    axis.set_ylabel("Mean downstream efficiency")
+    axis.set_ylim(0.0, 1.0)
+    axis.set_title("CAP pairing comparison across reported winners")
+    figure.tight_layout()
+    figure.savefig(figure_dir / "cap_pairing_summary.png")
+    plt.close(figure)
+
+    score_models = ("ae", "vae")
+    score_names = ("native", "residual_oas")
+    figure, axis = plt.subplots(figsize=(6.4, 4.0))
+    width = 0.36
+    for offset, score in enumerate(score_names):
+        values = [
+            statistics.fmean(
+                float(row["mean_efficiency"])
+                for row in winners
+                if row["model"] == model and row["score"] == score
+            )
+            for model in score_models
+        ]
+        positions = [index + (offset - 0.5) * width for index in range(len(score_models))]
+        axis.bar(positions, values, width=width, label=score)
+    axis.set_xticks(range(len(score_models)), [name.upper() for name in score_models])
+    axis.set_ylabel("Mean downstream efficiency")
+    axis.set_ylim(0.0, 1.0)
+    axis.set_title("Native versus masked residual-OAS selection")
+    axis.legend()
+    figure.tight_layout()
+    figure.savefig(figure_dir / "ae_vae_score_summary.png")
+    plt.close(figure)
+
+    anomaly_index = {name: index for index, name in enumerate(DOWNSTREAM_DATASETS)}
+    winner_index = {
+        (row["model"], row["logical_objective"]): index for index, row in enumerate(winners)
+    }
+    matrix = [[math.nan] * len(DOWNSTREAM_DATASETS) for _ in winners]
+    for row in downstream:
+        row_index = winner_index[(row["model"], row["logical_objective"])]
+        column_index = anomaly_index[row["anomaly"]]
+        matrix[row_index][column_index] = float(row["efficiency_operational"])
+    if any(not math.isfinite(value) for values in matrix for value in values):
+        raise RuntimeError("Winner/anomaly heatmap is incomplete.")
+    figure, axis = plt.subplots(figsize=(13.5, 11.5))
+    image = axis.imshow(matrix, aspect="auto", vmin=0.0, vmax=1.0, cmap="viridis")
+    axis.set_xticks(range(len(DOWNSTREAM_DATASETS)), DOWNSTREAM_DATASETS, rotation=75, ha="right")
+    axis.set_yticks(
+        range(len(winners)),
+        [f"{row['model']} · {row['logical_objective']}" for row in winners],
+        fontsize=5.5,
+    )
+    axis.set_title("Operational efficiency of all 56 reported winners")
+    figure.colorbar(image, ax=axis, label="Efficiency")
+    figure.tight_layout()
+    figure.savefig(figure_dir / "winner_anomaly_heatmap.png")
+    plt.close(figure)
+
+
 def _write_report(output: Path, design: dict[str, Any], winners: list[dict[str, Any]]) -> None:
     """Write the self-contained human-readable report from portable rows."""
     by_metric: dict[str, list[float]] = {}
@@ -1178,6 +1440,8 @@ def _write_report(output: Path, design: dict[str, Any], winners: list[dict[str, 
         "",
         "## Main results",
         "",
+        "![Selection metric summary](figures/metric_summary.png)",
+        "",
         "| Metric | Winner rows | Mean of winner mean efficiencies |",
         "|---|---:|---:|",
     ]
@@ -1190,6 +1454,8 @@ def _write_report(output: Path, design: dict[str, Any], winners: list[dict[str, 
             "`downstream_efficiencies.csv`.",
             "",
             "## Pairing comparison",
+            "",
+            "![CAP pairing summary](figures/cap_pairing_summary.png)",
             "",
             "The four mapping CAP strategies and CDF control can be compared within each "
             "model/score using `winners.csv`. Raw CAP magnitudes across different mappings are not "
@@ -1204,11 +1470,15 @@ def _write_report(output: Path, design: dict[str, Any], winners: list[dict[str, 
             "",
             "## AE/VAE native versus OAS",
             "",
+            "![AE/VAE native versus residual OAS](figures/ae_vae_score_summary.png)",
+            "",
             f"The score groups contain {len(by_score.get('native', []))} native and "
             f"{len(by_score.get('residual_oas', []))} residual-OAS winner rows. Exact paired "
             "per-anomaly comparisons are reproducible from `downstream_efficiencies.csv`.",
             "",
             "## Model comparison and robustness",
+            "",
+            "![Winner-by-anomaly efficiency heatmap](figures/winner_anomaly_heatmap.png)",
             "",
             "| Model | Winner rows | Mean of winner mean efficiencies |",
             "|---|---:|---:|",
@@ -1252,7 +1522,8 @@ def _write_report(output: Path, design: dict[str, Any], winners: list[dict[str, 
             "See `manifest.sha256`, `provenance.json`, `study_status.csv`, `trials.csv`, "
             "`front_memberships.csv`, `retrains.csv`, `checkpoint_selections.csv`, "
             "`primary_metrics.csv`, `downstream_efficiencies.csv`, `winners.csv`, and "
-            "`mlflow_runs.csv`.",
+            "`mlflow_runs.csv`. Winner-resolved configurations and compressed execution logs "
+            "are indexed under `configs/` and `logs/`.",
             "",
         ]
     )
@@ -1324,6 +1595,8 @@ def finalize(root: Path, output: Path) -> None:
     _write_csv(output / "winners.csv", winner_rows, list(winner_rows[0]))
     _write_csv(output / "downstream_efficiencies.csv", downstream_rows, list(downstream_rows[0]))
     _write_csv(output / "primary_metrics.csv", primary_rows, list(primary_rows[0]))
+    _copy_run_evidence(root, output, winner_rows)
+    _write_figures(output, winner_rows, downstream_rows)
     _write_json(output / "provenance.json", _provenance(root, design, final=True))
     _write_experiment_matrix(
         root,

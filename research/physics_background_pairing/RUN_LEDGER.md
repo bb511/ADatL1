@@ -64,6 +64,14 @@ codespell) pass; the unrelated baseline debt must not be mixed into this campaig
   scheduler record, and classified failure are persisted under its `state/` directory.
   The evaluator now receives fully resolved objective dictionaries, covered by a
   runtime-instantiation regression test; a new commit-derived campaign is required.
+- 2026-08-05: replacement campaign `483da88a2bd5` passed evaluator construction and
+  reached held-out E/G validation, then unified AE pilot job `3005037` exposed that
+  the new reverse-drift plot directory was not created before rendering. No search
+  trial was submitted. The campaign is superseded with the job/log/failure evidence
+  preserved. The reverse directory is now created explicitly and the callback test
+  asserts every plot destination exists. Final reporting was also completed with four
+  compact figures plus winner-resolved Hydra configs and deterministic compressed
+  search/retrain/Slurm log indices.
 
 - 2026-08-04: implemented the six shared 600-trial model studies. Every trial now
   returns all native/OAS CAP, W1, drift, and native-secondary objective pairs in a

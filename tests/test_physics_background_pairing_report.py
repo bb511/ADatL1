@@ -114,6 +114,11 @@ def _campaign(tmp_path: Path) -> tuple[Path, dict]:
                 },
             },
         )
+        hydra = artifact.parent / ".hydra"
+        hydra.mkdir()
+        (hydra / "config.yaml").write_text("model: synthetic\n", encoding="utf-8")
+        (hydra / "overrides.yaml").write_text("[]\n", encoding="utf-8")
+        (artifact.parent / "train.log").write_text("synthetic search log\n", encoding="utf-8")
         _json(
             artifact.parents[1] / "trial_bindings.json",
             {
@@ -219,6 +224,11 @@ def _frozen_results(root: Path, design: dict) -> None:
                 },
             },
         )
+        hydra = artifact.parent / ".hydra"
+        hydra.mkdir()
+        (hydra / "config.yaml").write_text("model: synthetic\n", encoding="utf-8")
+        (hydra / "overrides.yaml").write_text("[]\n", encoding="utf-8")
+        (artifact.parent / "train.log").write_text("synthetic retrain log\n", encoding="utf-8")
         checkpoint_root = root / "runtime" / "checkpoints" / study["model"]
         for score in design["scores_by_model"][study["model"]]:
             callbacks = [
@@ -322,6 +332,15 @@ def test_finalize_exports_56_winners_and_reverse_drift(tmp_path) -> None:
     manifest_lines = (output / "manifest.sha256").read_text(encoding="utf-8").splitlines()
     assert all(not line.endswith("  manifest.sha256") for line in manifest_lines)
     assert (output / "REPORT.md").is_file()
+    assert len(list((output / "figures").glob("*.png"))) == 4
+    with (output / "configs" / "index.csv").open(encoding="utf-8") as handle:
+        config_rows = list(report.csv.DictReader(handle))
+    assert {row["phase"] for row in config_rows} == {"search", "retrain"}
+    assert all((output / row["portable_path"]).is_file() for row in config_rows)
+    with (output / "logs" / "runs" / "index.csv").open(encoding="utf-8") as handle:
+        log_rows = list(report.csv.DictReader(handle))
+    assert {row["phase"] for row in log_rows} == {"search", "retrain"}
+    assert all((output / row["portable_path"]).is_file() for row in log_rows)
 
 
 def test_finalize_rejects_changed_retrain_artifact(tmp_path) -> None:

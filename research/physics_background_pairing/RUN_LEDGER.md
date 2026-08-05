@@ -73,6 +73,13 @@ codespell) pass; the unrelated baseline debt must not be mixed into this campaig
 
 ## Verification log
 
+- 2026-08-05: persisted a per-worker runtime projection from actual MLflow summary
+  timestamps after 2-6 completed epochs. Native-only canaries project to finish between
+  19:53 and 20:30 CEST, AE around 23:56 CEST, and VAE around 00:54 CEST. Even the
+  slowest VAE projection retains more than three hours before its 12-hour deadline.
+  These are monitoring estimates only; bulk submission remains gated on terminal
+  50-epoch authentication.
+
 - 2026-08-05: added the reporting-side operational helper without changing the frozen
   scientific campaign. Five focused tests and every changed-file hook pass. Its live
   reconciliation path authenticated the exact `cbeb3fa` execution worktree, updated

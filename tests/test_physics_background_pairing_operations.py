@@ -283,6 +283,66 @@ def test_reconcile_seals_successful_search_manifest_and_bindings(monkeypatch, tm
     assert row["bindings_sha256"] == operations._sha256(bindings)
 
 
+def test_reconcile_seals_successful_retrain_marker(monkeypatch, tmp_path) -> None:
+    """A successful retrain array task authenticates its complete marker artifact."""
+    root, repository = _campaign(tmp_path)
+    _authenticate(monkeypatch)
+    log = tmp_path / "retrain.out"
+    log.write_text("done\n", encoding="utf-8")
+    retrain_row = {"retrain_index": 0, "model": "ae", "trial_number": 3}
+    selection = root / "selection"
+    selection.mkdir()
+    (selection / "pareto_retrain_manifest.json").write_text(
+        json.dumps(
+            {
+                "schema_version": 2,
+                "code_commit": "a" * 40,
+                "retrain_runs": [retrain_row],
+            }
+        ),
+        encoding="utf-8",
+    )
+    optimized = tmp_path / "optimized.json"
+    optimized.write_text("{}\n", encoding="utf-8")
+    values = tmp_path / "values.csv"
+    values.write_text("value\n1\n", encoding="utf-8")
+    marker = root / "retraining" / "markers" / "0000.json"
+    marker.parent.mkdir(parents=True)
+    marker.write_text(
+        json.dumps(
+            {
+                "schema_version": 2,
+                "row": retrain_row,
+                "optimized_metric_artifact": str(optimized),
+                "optimized_metric_artifact_sha256": operations._sha256(optimized),
+                "value_files": [{"path": str(values), "sha256": operations._sha256(values)}],
+            }
+        ),
+        encoding="utf-8",
+    )
+    operations._atomic_csv(
+        root / "state" / "job_history.csv",
+        [
+            {
+                "job_id": "9_0",
+                "kind": "retrain",
+                "model": "ae",
+                "state": "RUNNING",
+                "log_path": str(log),
+            }
+        ],
+    )
+    monkeypatch.setattr(
+        operations,
+        "_accounting",
+        lambda ids: {"9_0": {"state": "COMPLETED", "exit_code": "0:0"}},
+    )
+
+    row = operations.reconcile(root, repository)[0]
+
+    assert row["success_sha256"] == operations._sha256(marker)
+
+
 def test_accounting_uses_unambiguous_json_timestamps(monkeypatch) -> None:
     """Slurm epoch fields become stable UTC timestamps instead of local clock times."""
     monkeypatch.setattr(operations.shutil, "which", lambda name: f"/bin/{name}")

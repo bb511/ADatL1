@@ -775,6 +775,29 @@ def _completed_search_artifacts(root: Path, row: dict[str, str]) -> tuple[str, s
     return _sha256(chunk_path), _sha256(bindings_path)
 
 
+def _completed_retrain_marker(root: Path, design: dict[str, Any], row: dict[str, str]) -> str:
+    """Authenticate the result marker for one successful Slurm array task."""
+    try:
+        index = int(row["job_id"].rsplit("_", maxsplit=1)[1])
+    except (IndexError, ValueError) as error:
+        raise RuntimeError(f"Invalid retrain task job ID: {row['job_id']}.") from error
+    manifest_path = root / "selection" / "pareto_retrain_manifest.json"
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    runs = manifest.get("retrain_runs", [])
+    if (
+        manifest.get("schema_version") != 2
+        or manifest.get("code_commit") != design["code_commit"]
+        or not 0 <= index < len(runs)
+        or runs[index].get("retrain_index") != index
+        or runs[index].get("model") != row["model"]
+    ):
+        raise RuntimeError(f"Retrain task does not match the frozen manifest: {row['job_id']}.")
+    marker = root / "retraining" / "markers" / f"{index:04d}.json"
+    if not _validate_retrain_marker(marker, runs[index]):
+        raise RuntimeError(f"Successful retrain task has no valid marker: {row['job_id']}.")
+    return _sha256(marker)
+
+
 def reconcile(root: Path, repository: Path) -> list[dict[str, str]]:
     """Reconcile scheduler state and seal terminal Slurm logs by SHA-256."""
     design = _design(root)
@@ -801,6 +824,10 @@ def reconcile(root: Path, repository: Path) -> list[dict[str, str]]:
                 row["success_sha256"], row["bindings_sha256"] = _completed_search_artifacts(
                     root, row
                 )
+            elif (
+                state == "COMPLETED" and row["exit_code"] == "0:0" and row.get("kind") == "retrain"
+            ):
+                row["success_sha256"] = _completed_retrain_marker(root, design, row)
     _atomic_csv(ledger_path, rows)
     return rows
 

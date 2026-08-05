@@ -877,7 +877,7 @@ def _hpc_checkpoint_rows(trainer_root: Path) -> list[dict[str, Any]]:
 
 
 def _validate_exact_rng_checkpoint_payload(payload: dict[str, Any], checkpoint: Path) -> None:
-    """Require the retrain-only stochastic state needed for exact continuation."""
+    """Require exact stochastic state at a true completed-epoch boundary."""
     state = payload.get("callbacks", {}).get(EXACT_RETRAIN_RNG_STATE_KEY)
     from src.callbacks.exact_retrain_rng import ExactRetrainRNGState
 
@@ -889,6 +889,17 @@ def _validate_exact_rng_checkpoint_payload(payload: dict[str, Any], checkpoint: 
         )
     except RuntimeError as error:
         raise RuntimeError(f"Checkpoint lacks exact retrain RNG state: {checkpoint}") from error
+    completed_epochs = int(payload.get("epoch", -1)) + 1
+    try:
+        progress = payload["loops"]["fit_loop"]["epoch_progress"]["total"]
+        observed = [int(progress[name]) for name in ("ready", "started", "processed")]
+    except (KeyError, TypeError, ValueError) as error:
+        raise RuntimeError(f"Checkpoint lacks completed-epoch loop state: {checkpoint}") from error
+    if completed_epochs <= 0 or observed != [completed_epochs] * 3:
+        raise RuntimeError(
+            f"Checkpoint is not a completed-epoch boundary: {checkpoint}; "
+            f"completed_epochs={completed_epochs}, progress={observed}."
+        )
 
 
 def _validate_exact_rng_checkpoint(checkpoint: Path) -> None:

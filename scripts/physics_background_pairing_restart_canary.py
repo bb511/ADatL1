@@ -37,7 +37,7 @@ from pytorch_lightning import (
 )
 from pytorch_lightning.callbacks import ModelCheckpoint
 from pytorch_lightning.loggers import MLFlowLogger
-from torch.utils.data import DataLoader, TensorDataset
+from torch.utils.data import DataLoader, IterableDataset, TensorDataset
 
 REPOSITORY_ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(REPOSITORY_ROOT))
@@ -390,8 +390,26 @@ def _make_loaders() -> tuple[DataLoader, dict[str, DataLoader]]:
     return train, validation
 
 
+class _CanaryTrainDataset(IterableDataset):
+    """Batch and shuffle synthetic data exactly like the production L1 dataset."""
+
+    def __init__(self, values: torch.Tensor, shuffler: torch.Generator) -> None:
+        super().__init__()
+        self.values = values
+        self.shuffler = shuffler
+
+    def __len__(self) -> int:
+        return 5
+
+    def __iter__(self):
+        for batch_index in torch.randperm(len(self), generator=self.shuffler):
+            start = int(batch_index) * 16
+            values = self.values[start : start + 16]
+            yield values, torch.zeros(len(values), dtype=torch.long)
+
+
 class _CanaryDataModule(LightningDataModule):
-    """Synthetic data with the same dedicated train-shuffler contract as L1AD."""
+    """Synthetic data with the production iterable-dataset shuffler contract."""
 
     def __init__(self) -> None:
         super().__init__()
@@ -400,10 +418,9 @@ class _CanaryDataModule(LightningDataModule):
     def train_dataloader(self):
         train, _ = _make_loaders()
         return DataLoader(
-            train.dataset,
-            batch_size=16,
-            shuffle=True,
-            generator=self.shuffler,
+            _CanaryTrainDataset(train.dataset.tensors[0], self.shuffler),
+            batch_size=None,
+            shuffle=False,
             num_workers=0,
         )
 
@@ -463,17 +480,30 @@ def _build_callbacks(root: Path) -> dict[str, Callback]:
 
 def _build_exact_epoch_checkpoint(root: Path) -> ModelCheckpoint:
     """Mirror the production last-checkpoint behavior at every completed epoch."""
-    # Lightning 2.6 writes ``save_last`` during validation only after a primary
-    # checkpoint was saved at the same global step. With ``save_top_k=0`` it waits
-    # until ``on_train_end``, which an intentionally preempted allocation never
-    # reaches. Production uses the same one-primary-plus-last shape.
+    # Lightning's validation-end hook runs before FitLoop marks the epoch as
+    # processed. Such a checkpoint repeats that epoch after a process restart.
+    # The train-epoch-end hook runs after validation and after this loop update.
     return ModelCheckpoint(
         dirpath=root / "exact_epoch",
         save_last=True,
         save_top_k=1,
         every_n_epochs=1,
-        save_on_train_epoch_end=False,
+        save_on_train_epoch_end=True,
     )
+
+
+def _validate_completed_epoch_boundary(payload: dict[str, Any], completed_epochs: int) -> None:
+    """Reject checkpoints saved before Lightning marks the epoch as processed."""
+    try:
+        progress = payload["loops"]["fit_loop"]["epoch_progress"]["total"]
+        observed = [int(progress[name]) for name in ("ready", "started", "processed")]
+    except (KeyError, TypeError, ValueError) as error:
+        raise RuntimeError("Completed-epoch checkpoint has invalid fit-loop state.") from error
+    if observed != [completed_epochs] * 3:
+        raise RuntimeError(
+            "Checkpoint was not saved at a completed epoch boundary: "
+            f"completed_epochs={completed_epochs}, progress={observed}."
+        )
 
 
 def _archive_hpc(root: Path, restart_count: int) -> dict[str, Any] | None:
@@ -519,6 +549,7 @@ def _exact_epoch_resume(
         raise RuntimeError("Requeued canary has no authenticated completed-epoch state.")
     payload = torch.load(checkpoint, map_location="cpu", weights_only=False)
     completed_epochs = int(payload.get("epoch", -1)) + 1
+    _validate_completed_epoch_boundary(payload, completed_epochs)
     steps = [int(row.step) for row in history]
     values = [float(row.value) for row in history]
     expected = list(range(completed_epochs))
@@ -546,18 +577,32 @@ def _exact_epoch_resume(
     }
 
 
-def _uninterrupted_reference_hash(root: Path) -> str:
-    """Train the same optimization trajectory once without scheduler interruption."""
+def _uninterrupted_reference_hash(root: Path, expected_commit: str) -> str:
+    """Train an uninterrupted oracle with the resumed run's exact callback/logger topology."""
+    reference_root = root / "reference"
+    client, run_id, tracking_uri = _create_or_authenticate_run(
+        reference_root, expected_commit, None
+    )
     seed_everything(123, workers=True)
     model = _SyntheticModule()
-    callbacks = _build_callbacks(root / "reference")
+    callbacks = _build_callbacks(reference_root)
+    proof = _RestartProof(reference_root, callbacks, None, 0, client, run_id)
+    exact_checkpointing = _build_exact_epoch_checkpoint(reference_root)
+    logger = MLFlowLogger(
+        experiment_name=EXPERIMENT_NAME,
+        run_name=RUN_NAME,
+        tracking_uri=tracking_uri,
+        run_id=run_id,
+        tags=_expected_tags(reference_root, expected_commit),
+        log_model=False,
+    )
     trainer = Trainer(
         accelerator="gpu",
         devices=1,
         max_epochs=MAX_EPOCHS,
-        logger=False,
-        callbacks=list(callbacks.values()),
-        enable_checkpointing=False,
+        logger=logger,
+        callbacks=[*callbacks.values(), proof, exact_checkpointing],
+        default_root_dir=str(reference_root / "lightning"),
         deterministic=True,
         num_sanity_val_steps=0,
         enable_progress_bar=False,
@@ -565,6 +610,7 @@ def _uninterrupted_reference_hash(root: Path) -> str:
         log_every_n_steps=1,
     )
     trainer.fit(model, datamodule=_CanaryDataModule())
+    logger.finalize("success")
     return _parameter_sha256(model)
 
 
@@ -662,7 +708,7 @@ def run(root: Path, scheduler_log: Path, expected_commit: str) -> Path:
             f"Resumed canary stopped at epoch {trainer.current_epoch}, expected {MAX_EPOCHS}."
         )
     final_state_sha256 = _parameter_sha256(model)
-    uninterrupted_reference_state_sha256 = _uninterrupted_reference_hash(root)
+    uninterrupted_reference_state_sha256 = _uninterrupted_reference_hash(root, expected_commit)
     parameters_match_reference = final_state_sha256 == uninterrupted_reference_state_sha256
     if not parameters_match_reference:
         raise RuntimeError(

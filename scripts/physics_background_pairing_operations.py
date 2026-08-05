@@ -430,10 +430,16 @@ def _validate_restart_canary_evidence(
             else []
         ),
     ]
+    try:
+        progress = exact_resume_payload["loops"]["fit_loop"]["epoch_progress"]["total"]
+        loop_counts = [int(progress[name]) for name in ("ready", "started", "processed")]
+    except (KeyError, TypeError, ValueError):
+        loop_counts = []
     if (
         not 0 < completed_epochs < RESTART_CANARY_EPOCHS
         or not isinstance(exact_resume_payload, dict)
         or int(exact_resume_payload.get("epoch", -1)) + 1 != completed_epochs
+        or loop_counts != [completed_epochs] * 3
         or not isinstance(checkpoint_callbacks, dict)
         or set(exact_rng)
         != {

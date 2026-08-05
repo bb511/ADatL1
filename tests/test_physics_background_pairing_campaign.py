@@ -21,6 +21,17 @@ def _write_exact_checkpoint(path: Path, epoch: int = 0) -> None:
     torch.save(
         {
             "epoch": epoch,
+            "loops": {
+                "fit_loop": {
+                    "epoch_progress": {
+                        "total": {
+                            "ready": epoch + 1,
+                            "started": epoch + 1,
+                            "processed": epoch + 1,
+                        }
+                    }
+                }
+            },
             "callbacks": {
                 campaign.EXACT_RETRAIN_RNG_STATE_KEY: {
                     "schema_version": 1,
@@ -617,6 +628,13 @@ def test_live_last_resume_requires_checkpoint_epoch_and_contiguous_mlflow(
     ]
     _write_exact_checkpoint(checkpoint_root / "last.ckpt", epoch=3)
     with pytest.raises(RuntimeError, match="differs from contiguous"):
+        campaign._live_last_resume(identity, checkpoint_root)
+
+    _write_exact_checkpoint(checkpoint_root / "last.ckpt", epoch=2)
+    payload = torch.load(checkpoint_root / "last.ckpt", weights_only=False)
+    payload["loops"]["fit_loop"]["epoch_progress"]["total"]["processed"] = 2
+    torch.save(payload, checkpoint_root / "last.ckpt")
+    with pytest.raises(RuntimeError, match="completed-epoch boundary"):
         campaign._live_last_resume(identity, checkpoint_root)
 
 

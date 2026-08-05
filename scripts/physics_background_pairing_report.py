@@ -1486,6 +1486,18 @@ def _restart_state_evidence(
             raise RuntimeError(
                 f"Retrain checkpoint lacks exact RNG state: {checkpoint}"
             ) from error
+        completed_epochs = int(payload.get("epoch", -1)) + 1
+        try:
+            progress = payload["loops"]["fit_loop"]["epoch_progress"]["total"]
+            loop_counts = [int(progress[name]) for name in ("ready", "started", "processed")]
+        except (KeyError, TypeError, ValueError) as error:
+            raise RuntimeError(
+                f"Retrain checkpoint lacks completed-epoch loop state: {checkpoint}"
+            ) from error
+        if completed_epochs != boundary or loop_counts != [completed_epochs] * 3:
+            raise RuntimeError(
+                f"Retrain checkpoint is not the declared completed-epoch boundary: {checkpoint}"
+            )
         evidence_rows.append(
             {
                 "retrain_index": index,

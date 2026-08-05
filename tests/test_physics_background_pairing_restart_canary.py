@@ -4,6 +4,7 @@ from types import SimpleNamespace
 import pytest
 import torch
 from pytorch_lightning import Callback, Trainer
+from torch.utils.data import IterableDataset
 
 from scripts import physics_background_pairing_restart_canary as canary
 
@@ -140,7 +141,7 @@ def test_exact_epoch_checkpoint_is_saved_before_train_end(monkeypatch, tmp_path:
     assert checkpoint.save_last is True
     assert checkpoint.save_top_k == 1
     assert checkpoint._every_n_epochs == 1
-    assert checkpoint._save_on_train_epoch_end is False
+    assert checkpoint._save_on_train_epoch_end is True
 
     class EpochBoundaryWitness(Callback):
         observed = False
@@ -151,6 +152,7 @@ def test_exact_epoch_checkpoint_is_saved_before_train_end(monkeypatch, tmp_path:
             path = tmp_path / "exact_epoch" / "last.ckpt"
             payload = torch.load(path, map_location="cpu", weights_only=False)
             assert payload["epoch"] == 0
+            canary._validate_completed_epoch_boundary(payload, 1)
             assert canary.ExactRetrainRNGState().state_key in payload["callbacks"]
             self.observed = True
 
@@ -167,6 +169,17 @@ def test_exact_epoch_checkpoint_is_saved_before_train_end(monkeypatch, tmp_path:
     )
     trainer.fit(canary._SyntheticModule(), datamodule=canary._CanaryDataModule())
     assert witness.observed
+
+
+def test_canary_train_loader_matches_production_iterable_shuffle_contract() -> None:
+    datamodule = canary._CanaryDataModule()
+    loader = datamodule.train_dataloader()
+
+    assert isinstance(loader.dataset, IterableDataset)
+    assert loader.batch_size is None
+    assert loader.generator is None
+    assert loader.dataset.shuffler is datamodule.shuffler
+    assert sum(1 for _ in loader) == 5
 
 
 def test_hpc_is_archived_as_non_resume_evidence(tmp_path: Path) -> None:
@@ -187,7 +200,17 @@ def test_exact_epoch_resume_requires_contiguous_mlflow_history(tmp_path: Path) -
     root = canary._validate_root(tmp_path / "retrain_restart_canary_exact")
     checkpoint = root / "exact_epoch" / "last.ckpt"
     checkpoint.parent.mkdir(parents=True)
-    torch.save({"epoch": 1}, checkpoint)
+    torch.save(
+        {
+            "epoch": 1,
+            "loops": {
+                "fit_loop": {
+                    "epoch_progress": {"total": {"ready": 2, "started": 2, "processed": 2}}
+                }
+            },
+        },
+        checkpoint,
+    )
 
     class Client:
         def __init__(self):
@@ -209,3 +232,27 @@ def test_exact_epoch_resume_requires_contiguous_mlflow_history(tmp_path: Path) -
     client.history[1] = SimpleNamespace(step=2, value=1.0)
     with pytest.raises(RuntimeError, match="differs from contiguous"):
         canary._exact_epoch_resume(root, 2, client, "run")
+
+
+def test_exact_epoch_resume_rejects_validation_end_loop_state(tmp_path: Path) -> None:
+    root = canary._validate_root(tmp_path / "retrain_restart_canary_incomplete")
+    checkpoint = root / "exact_epoch" / "last.ckpt"
+    checkpoint.parent.mkdir(parents=True)
+    torch.save(
+        {
+            "epoch": 0,
+            "loops": {
+                "fit_loop": {
+                    "epoch_progress": {"total": {"ready": 1, "started": 1, "processed": 0}}
+                }
+            },
+        },
+        checkpoint,
+    )
+
+    class Client:
+        def get_metric_history(self, run_id, key):
+            return [SimpleNamespace(step=0, value=0.0)]
+
+    with pytest.raises(RuntimeError, match="completed epoch boundary"):
+        canary._exact_epoch_resume(root, 1, Client(), "run")

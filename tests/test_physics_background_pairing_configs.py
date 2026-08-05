@@ -204,6 +204,9 @@ def test_retrain_suite_restores_20_signals_with_score_specific_thresholds() -> N
         == "src.callbacks.exact_retrain_rng.ExactRetrainRNGState"
     )
     assert cfg.callbacks.exact_rng_state.require_datamodule_shuffler is True
+    assert cfg.callbacks.last_epoch_ckpt.save_on_train_epoch_end is True
+    assert cfg.callbacks.last_epoch_ckpt.filename == "epoch={epoch}-step={step}"
+    assert cfg.callbacks.last_epoch_ckpt.auto_insert_metric_name is False
     assert len(cfg.evaluation.callbacks.anomaly_efficiency.ds) == 20
     assert len(cfg.evaluation.callbacks.anomaly_efficiency_oas.ds) == 20
     assert cfg.evaluation.callbacks.anomaly_efficiency.name == "eff_native"

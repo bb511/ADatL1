@@ -8,6 +8,16 @@ callbacks:
   # Retrain segments restore checkpoint callbacks from the previous boundary;
   # clearing their run directory would destroy last/primary/stable candidates.
   clear_ckpts: null
+  # Validation-end checkpoints precede Lightning's completed-epoch loop update
+  # and repeat the boundary epoch after a process restart. Keep the continuation
+  # checkpoint distinct from the reported metric/stable candidates and save it
+  # only after validation and the completed-epoch bookkeeping have finished.
+  last_epoch_ckpt:
+    filename: epoch={epoch}-step={step}
+    auto_insert_metric_name: false
+    save_last: true
+    save_top_k: 1
+    save_on_train_epoch_end: true
   exact_rng_state:
     _target_: src.callbacks.exact_retrain_rng.ExactRetrainRNGState
     require_datamodule_shuffler: true

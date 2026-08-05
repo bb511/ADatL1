@@ -41,6 +41,17 @@ def _write_exact_checkpoint(path: Path, epoch: int) -> None:
     torch.save(
         {
             "epoch": epoch,
+            "loops": {
+                "fit_loop": {
+                    "epoch_progress": {
+                        "total": {
+                            "ready": epoch + 1,
+                            "started": epoch + 1,
+                            "processed": epoch + 1,
+                        }
+                    }
+                }
+            },
             "callbacks": {
                 report.EXACT_RETRAIN_RNG_STATE_KEY: {
                     "schema_version": 1,

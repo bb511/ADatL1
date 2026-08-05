@@ -925,6 +925,11 @@ def test_restart_canary_evidence_authenticates_exact_epoch_oracle_and_hashes(
     torch.save(
         {
             "epoch": 0,
+            "loops": {
+                "fit_loop": {
+                    "epoch_progress": {"total": {"ready": 1, "started": 1, "processed": 1}}
+                }
+            },
             "callbacks": {"physics-background-pairing-exact-retrain-rng-v1": rng_state},
         },
         exact_resume,

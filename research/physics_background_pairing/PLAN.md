@@ -973,8 +973,12 @@ candidates may be the larger timeout risk.
   therefore are never fit-resume state. Before constructing the next Trainer, move every
   stale HPC file into immutable, hash-bearing attempt evidence so Lightning cannot
   auto-discover it. Resume only an authenticated end-of-epoch live `last.ckpt` whose
-  epoch matches exact contiguous MLflow `epoch_idx`, preferring it when newer than the
+  epoch matches exact contiguous MLflow `epoch_idx` and whose Lightning loop state has
+  `ready == started == processed == epoch + 1`, preferring it when newer than the
   last committed 40-epoch boundary; otherwise use that immutable boundary checkpoint.
+  Retrain continuation checkpoints must therefore use `save_on_train_epoch_end=true`;
+  validation-end checkpoints are metric candidates, not resumable boundaries, because
+  Lightning has not yet incremented its processed-epoch counter at that hook.
   If neither checkpoint nor epoch history exists, retry from scratch. This rolls an
   interrupted partial epoch back to its last completed epoch. In production,
   `epoch_idx` values must be exactly `0..N-1`, while their unique increasing MLflow
@@ -1162,7 +1166,8 @@ source, phase, cumulative boundary, copied boundary checkpoint/config and hash, 
 evidence, the frozen row/manifest/commit identity, and the single MLflow run ID. HPC is
 scheduler evidence only. A repeated attempt uses a committed boundary or a live
 `last.ckpt` whose epoch agrees exactly with contiguous MLflow `epoch_idx` history,
-with newer completed live epochs taking priority. Every resumable checkpoint must
+whose ready/started/processed loop counts all equal `epoch + 1`, with newer completed
+live epochs taking priority. Every resumable checkpoint must
 contain the retrain-only exact RNG callback state, including the L1 shuffler. Scratch
 retry is allowed only when both checkpoint and history are empty; one-sided or
 inconsistent state fails closed. Segment files are atomically published, and an interrupted publish

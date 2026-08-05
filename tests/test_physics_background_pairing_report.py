@@ -4,11 +4,14 @@ from __future__ import annotations
 
 import importlib.util
 import json
+import os
 import pickle  # nosec B403 -- writes only synthetic trusted-local test fixtures
 from pathlib import Path
 
 import optuna
 import pytest
+from mlflow.entities import Metric
+from mlflow.tracking import MlflowClient
 
 CAMPAIGN_SCRIPT = Path(__file__).parents[1] / "scripts/physics_background_pairing_campaign.py"
 REPORT_SCRIPT = Path(__file__).parents[1] / "scripts/physics_background_pairing_report.py"
@@ -27,9 +30,55 @@ report = _load("physics_background_pairing_report", REPORT_SCRIPT)
 report.TARGET_TRIALS = 1
 
 
+@pytest.fixture(autouse=True)
+def _clean_reporting_checkout(monkeypatch):
+    """Synthetic finalization is independent of the developer worktree state."""
+    monkeypatch.setattr(report, "_git_state", lambda: ("b" * 40, True, []))
+
+
 def _json(path: Path, value) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(value, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+
+
+def _mlflow_run(
+    root: Path,
+    design: dict,
+    *,
+    model: str,
+    phase: str,
+    epochs: int,
+    finished: bool = True,
+) -> tuple[str, str, str]:
+    """Create one compact but contract-complete synthetic FileStore run."""
+    store = root / "runtime" / "logs" / "mlflow" / "mlruns"
+    client = MlflowClient(tracking_uri=store.resolve().as_uri())
+    experiment_name = f"physics_bgpair_{phase}_{model}"
+    experiment = client.get_experiment_by_name(experiment_name)
+    experiment_id = (
+        client.create_experiment(experiment_name)
+        if experiment is None
+        else str(experiment.experiment_id)
+    )
+    run_name = f"{phase}-{model}"
+    run = client.create_run(
+        experiment_id,
+        tags={
+            "mlflow.runName": run_name,
+            "mlflow.source.git.commit": design["code_commit"],
+        },
+    )
+    metrics = []
+    keys = report._selection_metric_keys(design, model)
+    for epoch in range(epochs):
+        step = 100 + 17 * epoch
+        metrics.append(Metric("epoch_idx", float(epoch), 1_000 + epoch, step))
+        metrics.extend(Metric(key, 0.5, 1_000 + epoch, step) for key in keys)
+    for start in range(0, len(metrics), 500):
+        client.log_batch(run.info.run_id, metrics=metrics[start : start + 500])
+    if finished:
+        client.set_terminated(run.info.run_id, status="FINISHED", end_time=10_000)
+    return str(experiment_id), run.info.run_id, run_name
 
 
 def _campaign(tmp_path: Path) -> tuple[Path, dict]:
@@ -77,6 +126,17 @@ def _campaign(tmp_path: Path) -> tuple[Path, dict]:
         "studies": studies,
     }
     _json(root / "design.json", design)
+    slurm_log = root / "runtime" / "slurm" / "synthetic.out"
+    slurm_log.parent.mkdir(parents=True, exist_ok=True)
+    slurm_log.write_text("synthetic completed job\n", encoding="utf-8")
+    state = root / "state"
+    state.mkdir(parents=True, exist_ok=True)
+    (state / "job_history.csv").write_text(
+        "job_id,state,commit,log_path,log_sha256\n"
+        f"1234,COMPLETED,{design['code_commit']},{slurm_log},{report._sha256(slurm_log)}\n",
+        encoding="utf-8",
+    )
+    (state / "failures.jsonl").write_text("", encoding="utf-8")
     for study in studies:
         database = root / "studies" / f"{study['model']}.db"
         database.parent.mkdir(parents=True, exist_ok=True)
@@ -89,6 +149,13 @@ def _campaign(tmp_path: Path) -> tuple[Path, dict]:
             directions=directions,
         )
         loaded.add_trial(optuna.trial.create_trial(values=[0.5] * len(directions)))
+        experiment_id, run_id, run_name = _mlflow_run(
+            root,
+            design,
+            model=study["model"],
+            phase="search",
+            epochs=design["search_epochs"],
+        )
         artifact = root / "sweeps" / study["model"] / "stamp" / "0" / "optimized_metric.json"
         objective_order = [objective["id"] for objective in study["objectives"]]
         _json(
@@ -106,11 +173,11 @@ def _campaign(tmp_path: Path) -> tuple[Path, dict]:
                 },
                 "run_provenance": {
                     "experiment_name": f"physics_bgpair_search_{study['model']}",
-                    "run_name": f"search-{study['model']}",
+                    "run_name": run_name,
                     "hydra_output_dir": str(artifact.parent),
                     "hydra_job_num": 0,
                     "checkpoint_run_dir": str(root / "runtime" / "checkpoints" / study["model"]),
-                    "loggers": [{"experiment_id": "1", "run_id": f"run-{study['model']}"}],
+                    "loggers": [{"experiment_id": experiment_id, "run_id": run_id}],
                 },
             },
         )
@@ -145,6 +212,17 @@ def _campaign(tmp_path: Path) -> tuple[Path, dict]:
     return root, design
 
 
+def _mlflow_rows(root: Path, design: dict, *, retrains: bool = False):
+    """Return indexed synthetic run rows and their canonical store."""
+    _, rows = report._checkpoint_rows(root, design, include_retrains=retrains)
+    store = root / "runtime" / "logs" / "mlflow" / "mlruns"
+    return rows, store
+
+
+def _run_store(store: Path, row: dict) -> Path:
+    return store / str(row["experiment_id"]) / str(row["run_id"])
+
+
 def test_snapshot_is_stable_and_selects_one_trial_per_study(tmp_path) -> None:
     """Repeated search snapshots are byte-stable for unchanged sources."""
     root, _ = _campaign(tmp_path)
@@ -165,6 +243,23 @@ def test_snapshot_is_stable_and_selects_one_trial_per_study(tmp_path) -> None:
         trials = list(report.csv.DictReader(handle))
     assert len(trials) == 6
     assert all(row["selected_for_freeze"] == "True" for row in trials)
+
+
+def test_snapshot_accepts_active_unhashed_job_log(tmp_path) -> None:
+    """An operational snapshot remains usable before a running Slurm log is sealed."""
+    root, _ = _campaign(tmp_path)
+    ledger = root / "state" / "job_history.csv"
+    row = ledger.read_text(encoding="utf-8").splitlines()[1].split(",")
+    row[1] = "RUNNING"
+    row[-1] = ""
+    ledger.write_text(
+        ledger.read_text(encoding="utf-8").splitlines()[0] + "\n" + ",".join(row) + "\n",
+        encoding="utf-8",
+    )
+
+    latest = report.snapshot(root, root / "portable")
+
+    assert latest["ready_to_freeze"] is True
 
 
 def test_snapshot_does_not_read_downstream_oracle(tmp_path) -> None:
@@ -191,6 +286,95 @@ def test_snapshot_rejects_binding_that_differs_from_optuna(tmp_path) -> None:
         report.snapshot(root, root / "portable")
 
 
+def test_final_study_capture_rejects_live_and_extra_usable_trials(tmp_path) -> None:
+    """Final publication requires quiescence and exactly the frozen usable budget."""
+    root, design = _campaign(tmp_path / "live")
+    study = design["studies"][0]
+    loaded = report._load_study(root, study)
+    loaded.enqueue_trial({})
+    with pytest.raises(RuntimeError, match="not quiescent"):
+        report._capture_quiescent_studies(root, design)
+
+    root, design = _campaign(tmp_path / "extra")
+    study = design["studies"][0]
+    loaded = report._load_study(root, study)
+    directions = [
+        direction for objective in study["objectives"] for direction in objective["directions"]
+    ]
+    loaded.add_trial(optuna.trial.create_trial(values=[0.4] * len(directions)))
+    with pytest.raises(RuntimeError, match="exactly 1"):
+        report._capture_quiescent_studies(root, design)
+
+
+def test_study_evidence_detects_database_change(tmp_path) -> None:
+    """Even metadata-only database changes invalidate the reporting read window."""
+    root, design = _campaign(tmp_path)
+    evidence = report._capture_quiescent_studies(root, design)
+    database = Path(evidence["ae"]["path"])
+    stat = database.stat()
+    os.utime(database, ns=(stat.st_atime_ns, stat.st_mtime_ns + 1))
+
+    with pytest.raises(RuntimeError, match="changed during reporting"):
+        report._assert_studies_unchanged(evidence)
+
+
+@pytest.mark.parametrize(
+    ("corruption", "message"),
+    (
+        ("missing", "Missing indexed MLflow run"),
+        ("experiment", "experiment differs"),
+        ("status", "invalid status"),
+        ("commit", "execution commit differs"),
+        ("artifact", "artifact URI escapes"),
+        ("epoch", "epoch history"),
+        ("history", "Invalid MLflow selection history"),
+    ),
+)
+def test_mlflow_final_validation_fails_closed(tmp_path, corruption: str, message: str) -> None:
+    """FileStore identity, status, containment, and histories are authoritative."""
+    root, design = _campaign(tmp_path)
+    rows, store = _mlflow_rows(root, design)
+    row = rows[0]
+    run_store = _run_store(store, row)
+    if corruption == "missing":
+        run_store.rename(run_store.with_name(run_store.name + ".missing"))
+    elif corruption == "experiment":
+        meta = store / str(row["experiment_id"]) / "meta.yaml"
+        meta.write_text(
+            meta.read_text(encoding="utf-8").replace(
+                f"name: {row['experiment_name']}", "name: wrong-experiment"
+            ),
+            encoding="utf-8",
+        )
+    elif corruption == "status":
+        meta = run_store / "meta.yaml"
+        meta.write_text(
+            meta.read_text(encoding="utf-8").replace("status: 3", "status: 1"),
+            encoding="utf-8",
+        )
+    elif corruption == "commit":
+        (run_store / "tags" / "mlflow.source.git.commit").write_text("wrong", encoding="utf-8")
+    elif corruption == "artifact":
+        meta = run_store / "meta.yaml"
+        lines = [
+            "artifact_uri: file:///tmp/escaped" if line.startswith("artifact_uri:") else line
+            for line in meta.read_text(encoding="utf-8").splitlines()
+        ]
+        meta.write_text("\n".join(lines) + "\n", encoding="utf-8")
+    elif corruption == "epoch":
+        epoch = run_store / "metrics" / "epoch_idx"
+        epoch.write_text(
+            "\n".join(epoch.read_text(encoding="utf-8").splitlines()[:-1]) + "\n",
+            encoding="utf-8",
+        )
+    else:
+        key = "train/ascore_operational"
+        (run_store / "metrics" / key).unlink()
+
+    with pytest.raises(RuntimeError, match=message):
+        report._validate_mlflow_runs(root, design, rows, final=True)
+
+
 def _frozen_results(root: Path, design: dict) -> None:
     memberships = []
     retrains = []
@@ -209,6 +393,13 @@ def _frozen_results(root: Path, design: dict) -> None:
         }
         retrains.append(retrain_row)
         artifact = root / "retraining" / "hydra" / f"{retrain_index:04d}" / "optimized_metric.json"
+        experiment_id, run_id, run_name = _mlflow_run(
+            root,
+            design,
+            model=study["model"],
+            phase="retrain",
+            epochs=design["retrain_epochs"],
+        )
         _json(
             artifact,
             {
@@ -221,6 +412,14 @@ def _frozen_results(root: Path, design: dict) -> None:
                         "optimized_metric": [0.5, 0.5],
                     }
                     for objective in objectives
+                },
+                "run_provenance": {
+                    "experiment_name": f"physics_bgpair_retrain_{study['model']}",
+                    "run_name": run_name,
+                    "hydra_output_dir": str(artifact.parent),
+                    "hydra_job_num": retrain_index,
+                    "checkpoint_run_dir": str(root / "runtime" / "checkpoints" / study["model"]),
+                    "loggers": [{"experiment_id": experiment_id, "run_id": run_id}],
                 },
             },
         )
@@ -328,10 +527,14 @@ def test_finalize_exports_56_winners_and_reverse_drift(tmp_path) -> None:
     """Finalization enforces the full logical matrix and portable row counts."""
     root, design = _campaign(tmp_path)
     _frozen_results(root, design)
-    output = root / "portable"
+    output = root / "results"
+    (output / "stale.txt").write_text("must disappear\n", encoding="utf-8")
+    repository_report = tmp_path / "repository" / "REPORT.md"
 
-    report.finalize(root, output)
+    report.finalize(root, output, repository_report=repository_report)
 
+    assert not (output / "stale.txt").exists()
+    assert repository_report.read_bytes() == (output / "REPORT.md").read_bytes()
     with (output / "winners.csv").open(encoding="utf-8") as handle:
         assert len(list(report.csv.DictReader(handle))) == 56
     with (output / "downstream_efficiencies.csv").open(encoding="utf-8") as handle:
@@ -342,6 +545,7 @@ def test_finalize_exports_56_winners_and_reverse_drift(tmp_path) -> None:
     assert sum(row["metric_name"] == "rankcorr_test" for row in metrics) == 40
     manifest_lines = (output / "manifest.sha256").read_text(encoding="utf-8").splitlines()
     assert all(not line.endswith("  manifest.sha256") for line in manifest_lines)
+    assert all("repository" not in line for line in manifest_lines)
     assert (output / "REPORT.md").is_file()
     assert len(list((output / "figures").glob("*.png"))) == 4
     with (output / "configs" / "index.csv").open(encoding="utf-8") as handle:
@@ -352,6 +556,24 @@ def test_finalize_exports_56_winners_and_reverse_drift(tmp_path) -> None:
         log_rows = list(report.csv.DictReader(handle))
     assert {row["phase"] for row in log_rows} == {"search", "retrain"}
     assert all((output / row["portable_path"]).is_file() for row in log_rows)
+    with (output / "logs" / "slurm" / "index.csv").open(encoding="utf-8") as handle:
+        slurm_rows = list(report.csv.DictReader(handle))
+    assert len(slurm_rows) == 1
+    assert all((output / row["portable_path"]).is_file() for row in slurm_rows)
+    with (output / "mlflow_runs.csv").open(encoding="utf-8") as handle:
+        mlflow_rows = list(report.csv.DictReader(handle))
+    assert len(mlflow_rows) == 12
+    assert {row["status"] for row in mlflow_rows} == {"FINISHED"}
+    assert {row["histories_validated"] for row in mlflow_rows} == {"True"}
+    provenance = json.loads((output / "provenance.json").read_text(encoding="utf-8"))
+    assert provenance["execution_code_commit"] == design["code_commit"]
+    assert provenance["report_code_commit"] == "b" * 40
+
+    before = report._tree_digests(output)
+    manifest_before = (output / "manifest.sha256").read_bytes()
+    report.finalize(root, output, repository_report=repository_report)
+    assert report._tree_digests(output) == before
+    assert (output / "manifest.sha256").read_bytes() == manifest_before
 
 
 def test_finalize_rejects_changed_retrain_artifact(tmp_path) -> None:
@@ -363,6 +585,77 @@ def test_finalize_rejects_changed_retrain_artifact(tmp_path) -> None:
 
     with pytest.raises(RuntimeError, match="Changed optimized artifact"):
         report.finalize(root, root / "portable")
+
+
+@pytest.mark.parametrize("corruption", ("empty_jobs", "missing_failures", "log_hash"))
+def test_final_ledgers_fail_closed(tmp_path, corruption: str) -> None:
+    """A final package never invents ledgers or silently omits recorded Slurm evidence."""
+    root, design = _campaign(tmp_path)
+    jobs = root / "state" / "job_history.csv"
+    if corruption == "empty_jobs":
+        jobs.write_text(jobs.read_text(encoding="utf-8").splitlines()[0] + "\n", encoding="utf-8")
+    elif corruption == "missing_failures":
+        (root / "state" / "failures.jsonl").unlink()
+    else:
+        path = Path(jobs.read_text(encoding="utf-8").splitlines()[1].split(",")[-2])
+        path.write_text("changed after recording\n", encoding="utf-8")
+
+    with pytest.raises((RuntimeError, FileNotFoundError)):
+        report._validated_state_ledgers(root, design, final=True)
+
+
+def test_dirty_reporting_checkout_is_rejected_before_publication(tmp_path, monkeypatch) -> None:
+    """Execution and reporting commits may differ, but reporting must begin clean."""
+    root, _ = _campaign(tmp_path)
+    output = root / "portable"
+    monkeypatch.setattr(report, "_git_state", lambda: ("c" * 40, False, [" M report.py"]))
+
+    with pytest.raises(RuntimeError, match="clean checkout"):
+        report.finalize(root, output)
+    assert not output.exists()
+
+
+def test_staged_failure_preserves_previous_canonical_output(tmp_path, monkeypatch) -> None:
+    """No build or source-stability failure can expose a partial replacement."""
+    root, design = _campaign(tmp_path)
+    _frozen_results(root, design)
+    output = root / "portable"
+    output.mkdir()
+    sentinel = output / "previous.txt"
+    sentinel.write_text("previous complete package\n", encoding="utf-8")
+
+    def fail_build(*args, **kwargs):
+        raise RuntimeError("injected staged build failure")
+
+    monkeypatch.setattr(report, "_build_final", fail_build)
+    with pytest.raises(RuntimeError, match="injected staged build failure"):
+        report.finalize(root, output)
+
+    assert sentinel.read_text(encoding="utf-8") == "previous complete package\n"
+    assert not list(output.parent.glob(f".{output.name}.staging-*"))
+
+
+def test_publish_failure_restores_previous_directory(tmp_path, monkeypatch) -> None:
+    """A failed stage rename restores the prior canonical directory from backup."""
+    output = tmp_path / "results"
+    stage = tmp_path / ".results.staging-test"
+    output.mkdir()
+    stage.mkdir()
+    (output / "old.txt").write_text("old\n", encoding="utf-8")
+    (stage / "new.txt").write_text("new\n", encoding="utf-8")
+    original_rename = Path.rename
+
+    def fail_stage_rename(path: Path, target: Path):
+        if path == stage:
+            raise OSError("injected rename failure")
+        return original_rename(path, target)
+
+    monkeypatch.setattr(Path, "rename", fail_stage_rename)
+    with pytest.raises(OSError, match="injected rename failure"):
+        report._publish_staged(stage, output)
+
+    assert (output / "old.txt").read_text(encoding="utf-8") == "old\n"
+    assert stage.is_dir()
 
 
 def test_finalize_rejects_tampered_pareto_membership(tmp_path) -> None:

@@ -18,6 +18,7 @@ import tempfile
 from collections import Counter
 from pathlib import Path
 from typing import Any, Iterable
+from urllib.parse import unquote, urlparse
 
 REPOSITORY_ROOT = Path(__file__).resolve().parents[1]
 MODEL_ORDER = ("ae", "vae", "dsae", "dsvae", "svdd", "realnvp")
@@ -70,6 +71,11 @@ def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--root", type=Path, required=True)
     parser.add_argument("--output", type=Path)
+    parser.add_argument(
+        "--repository-report",
+        type=Path,
+        help="Optionally copy the published REPORT.md outside the portable package.",
+    )
     parser.add_argument("command", choices=("snapshot", "finalize"))
     return parser.parse_args()
 
@@ -292,6 +298,57 @@ def _trial_exports(
     return status_rows, trial_rows
 
 
+def _capture_quiescent_studies(root: Path, design: dict[str, Any]) -> dict[str, dict[str, Any]]:
+    """Freeze read-only study evidence and reject an incomplete or live final state."""
+    target = int(design["target_trials_per_study"])
+    captured: dict[str, dict[str, Any]] = {}
+    for study in design["studies"]:
+        model = str(study["model"])
+        database = root / "studies" / f"{model}.db"
+        if not database.is_file():
+            raise FileNotFoundError(database)
+        loaded = _load_study(root, study)
+        if loaded is None:  # pragma: no cover - guarded by the file check
+            raise RuntimeError(f"Missing Optuna study for {model}.")
+        trials = list(loaded.get_trials(deepcopy=False))
+        states = Counter(trial.state.name for trial in trials)
+        expected_values = 2 * len(study["objectives"])
+        usable = sum(_usable(trial, expected_values) for trial in trials)
+        if states["RUNNING"] or states["WAITING"]:
+            raise RuntimeError(
+                f"Study {model} is not quiescent: RUNNING={states['RUNNING']}, "
+                f"WAITING={states['WAITING']}."
+            )
+        if usable != target:
+            raise RuntimeError(
+                f"Study {model} has {usable} usable trials; finalization requires exactly {target}."
+            )
+        stat = database.stat()
+        captured[model] = {
+            "path": str(database.resolve()),
+            "sha256": _sha256(database),
+            "size": stat.st_size,
+            "mtime_ns": stat.st_mtime_ns,
+            "usable": usable,
+            "total": len(trials),
+            "states": dict(sorted(states.items())),
+        }
+    return captured
+
+
+def _assert_studies_unchanged(captured: dict[str, dict[str, Any]]) -> None:
+    """Prove that no study database changed while the portable package was built."""
+    for model, evidence in captured.items():
+        database = Path(evidence["path"])
+        if not database.is_file():
+            raise RuntimeError(f"Study database disappeared during reporting: {model}.")
+        stat = database.stat()
+        observed = (_sha256(database), stat.st_size, stat.st_mtime_ns)
+        expected = (evidence["sha256"], evidence["size"], evidence["mtime_ns"])
+        if observed != expected:
+            raise RuntimeError(f"Study database changed during reporting: {model}.")
+
+
 def _binding_index(root: Path) -> dict[tuple[str, int], dict[str, Any]]:
     """Load the unique explicit Optuna-to-Hydra binding for every search run."""
     bindings: dict[tuple[str, int], dict[str, Any]] = {}
@@ -407,6 +464,11 @@ def _checkpoint_rows(
         ):
             raise RuntimeError(f"Objective contract mismatch: {path}")
         provenance = artifact.get("run_provenance", {})
+        indexed_loggers = [
+            logger for logger in provenance.get("loggers", []) if logger.get("run_id")
+        ]
+        if len(indexed_loggers) != 1:
+            raise RuntimeError(f"Expected exactly one indexed MLflow run in {path}.")
         for objective_id in expected_order:
             selection = artifact["selections"][objective_id]
             pair = selection["optimized_metric"]
@@ -441,9 +503,7 @@ def _checkpoint_rows(
                     ),
                 }
             )
-        for logger in provenance.get("loggers", []):
-            if not logger.get("run_id"):
-                continue
+        for logger in indexed_loggers:
             mlflow_rows.append(
                 {
                     "phase": phase,
@@ -470,8 +530,182 @@ def _checkpoint_rows(
     return checkpoint_rows, mlflow_rows
 
 
-def _copy_state_ledgers(root: Path, output: Path) -> None:
-    """Copy deterministic operator ledgers or create explicit empty schemas."""
+def _selection_metric_keys(design: dict[str, Any], model: str) -> list[str]:
+    """Return the exact per-epoch selection histories required for one model."""
+    pairing = _read_json(Path(design["preflight"]))
+    suffix = f"{pairing['dataset_1']}_vs_{pairing['dataset_2']}"
+    keys = []
+    for score in SCORES_BY_MODEL[model]:
+        for strategy in CAP_STRATEGIES:
+            keys.append(f"val/summary/cap_{score}_{strategy}_ema_{suffix}")
+            keys.append(f"val/summary/rankcorr_cap_{score}_{strategy}_{suffix}")
+        keys.append(f"val/summary/w1dist_{score}_ema_{suffix}")
+        keys.append(f"val/summary/{score}_operational_drift_ema")
+    keys.append("train/ascore_operational")
+    return keys
+
+
+def _validate_mlflow_runs(
+    root: Path,
+    design: dict[str, Any],
+    rows: list[dict[str, Any]],
+    *,
+    final: bool,
+) -> list[dict[str, Any]]:
+    """Authenticate indexed runs and their complete file-backed epoch histories."""
+    from mlflow.tracking import MlflowClient
+
+    store = (root / "runtime" / "logs" / "mlflow" / "mlruns").resolve()
+    if not store.is_dir():
+        raise FileNotFoundError(f"Canonical MLflow FileStore is missing: {store}")
+    client = MlflowClient(tracking_uri=store.as_uri())
+    seen: set[tuple[str, str]] = set()
+    validated = []
+    for source in rows:
+        row = dict(source)
+        experiment_id = str(row["experiment_id"])
+        run_id = str(row["run_id"])
+        identity = (experiment_id, run_id)
+        if identity in seen:
+            raise RuntimeError(f"Duplicate indexed MLflow run: {identity}.")
+        seen.add(identity)
+        try:
+            run = client.get_run(run_id)
+            experiment = client.get_experiment(experiment_id)
+        except Exception as error:
+            raise RuntimeError(f"Missing indexed MLflow run: {identity}.") from error
+        if experiment is None or experiment.name != row["experiment_name"]:
+            raise RuntimeError(f"MLflow experiment differs for run {run_id}.")
+        if str(run.info.experiment_id) != experiment_id:
+            raise RuntimeError(f"MLflow experiment ID differs for run {run_id}.")
+        if run.data.tags.get("mlflow.source.git.commit") != design["code_commit"]:
+            raise RuntimeError(f"MLflow execution commit differs for run {run_id}.")
+        if run.data.tags.get("mlflow.runName") != row["run_name"]:
+            raise RuntimeError(f"MLflow run name differs for run {run_id}.")
+        if run.info.lifecycle_stage != "active":
+            raise RuntimeError(f"MLflow run is not active: {run_id}.")
+
+        parsed = urlparse(run.info.artifact_uri)
+        if parsed.scheme != "file" or parsed.netloc not in ("", "localhost"):
+            raise RuntimeError(f"MLflow artifact URI is not a local file URI: {run_id}.")
+        artifact_path = Path(unquote(parsed.path)).resolve()
+        run_store = (store / experiment_id / run_id).resolve()
+        if not (run_store / "meta.yaml").is_file() or not artifact_path.is_relative_to(run_store):
+            raise RuntimeError(f"MLflow artifact URI escapes its canonical run: {run_id}.")
+
+        expected_epochs = int(
+            design["search_epochs"] if row["phase"] == "search" else design["retrain_epochs"]
+        )
+        epoch_history = sorted(
+            client.get_metric_history(run_id, "epoch_idx"), key=lambda x: x.step
+        )
+        observed_epochs = len(epoch_history)
+        allowed_statuses = {"FINISHED"} if final else {"RUNNING", "FINISHED"}
+        if run.info.status not in allowed_statuses:
+            raise RuntimeError(f"MLflow run has invalid status {run.info.status}: {run_id}.")
+        if run.info.status == "FINISHED" or final:
+            if observed_epochs != expected_epochs:
+                raise RuntimeError(
+                    f"MLflow epoch history for {run_id} has {observed_epochs}, "
+                    f"expected {expected_epochs}."
+                )
+        elif not 0 < observed_epochs <= expected_epochs:
+            raise RuntimeError(f"MLflow running epoch history is invalid: {run_id}.")
+        epoch_steps = [int(metric.step) for metric in epoch_history]
+        epoch_values = [float(metric.value) for metric in epoch_history]
+        if (
+            len(set(epoch_steps)) != observed_epochs
+            or epoch_steps != sorted(epoch_steps)
+            or epoch_values != [float(index) for index in range(observed_epochs)]
+        ):
+            raise RuntimeError(f"MLflow epoch/global-step history is not contiguous: {run_id}.")
+
+        required = _selection_metric_keys(design, str(row["model"]))
+        for key in required:
+            history = sorted(client.get_metric_history(run_id, key), key=lambda x: x.step)
+            if (
+                [int(metric.step) for metric in history] != epoch_steps
+                or len(history) != observed_epochs
+                or not all(math.isfinite(float(metric.value)) for metric in history)
+            ):
+                raise RuntimeError(f"Invalid MLflow selection history {key!r} for run {run_id}.")
+        row.update(
+            {
+                "tracking_uri": store.as_uri(),
+                "status": run.info.status,
+                "lifecycle_stage": run.info.lifecycle_stage,
+                "artifact_uri": run.info.artifact_uri,
+                "expected_epochs": expected_epochs,
+                "observed_epochs": observed_epochs,
+                "required_history_count": len(required),
+                "histories_validated": True,
+            }
+        )
+        validated.append(row)
+    return validated
+
+
+def _validated_state_ledgers(
+    root: Path, design: dict[str, Any], *, final: bool
+) -> tuple[list[dict[str, str]], list[dict[str, Any]]]:
+    """Load operator ledgers and authenticate every recorded final-job log."""
+    source_jobs = root / "state" / "job_history.csv"
+    source_failures = root / "state" / "failures.jsonl"
+    if not final and not source_jobs.is_file():
+        return [], []
+    if not source_jobs.is_file():
+        raise FileNotFoundError(source_jobs)
+    with source_jobs.open(encoding="utf-8", newline="") as handle:
+        jobs = list(csv.DictReader(handle))
+    if final and not jobs:
+        raise RuntimeError("Final job_history.csv must contain at least one data row.")
+    required = {"job_id", "state", "commit", "log_path", "log_sha256"}
+    if final and (not jobs or not required.issubset(jobs[0])):
+        raise RuntimeError(f"job_history.csv lacks required columns: {sorted(required)}.")
+    nonterminal = {"", "PENDING", "RUNNING", "WAITING", "CONFIGURING", "COMPLETING"}
+    for index, job in enumerate(jobs):
+        if final and str(job.get("state", "")).upper() in nonterminal:
+            raise RuntimeError(f"Job ledger row {index} is not terminal.")
+        if final and job.get("commit") != design["code_commit"]:
+            raise RuntimeError(f"Job ledger execution commit differs at row {index}.")
+        log_name = job.get("log_path", "")
+        expected_hash = job.get("log_sha256", "")
+        if not final and not expected_hash:
+            continue
+        if not log_name or not expected_hash:
+            raise RuntimeError(f"Job ledger row {index} lacks a recorded Slurm log/hash.")
+        log_path = Path(log_name)
+        if not log_path.is_file():
+            raise FileNotFoundError(f"Recorded Slurm log is missing: {log_path}")
+        if _sha256(log_path) != expected_hash:
+            raise RuntimeError(f"Recorded Slurm log hash differs: {log_path}")
+
+    if final and not source_failures.is_file():
+        raise FileNotFoundError(source_failures)
+    failures = []
+    if source_failures.is_file():
+        for line_number, line in enumerate(
+            source_failures.read_text(encoding="utf-8").splitlines(), start=1
+        ):
+            if not line.strip():
+                continue
+            try:
+                value = json.loads(line)
+            except json.JSONDecodeError as error:
+                raise RuntimeError(
+                    f"Malformed failures.jsonl record at line {line_number}."
+                ) from error
+            if not isinstance(value, dict):
+                raise RuntimeError(f"failures.jsonl line {line_number} is not an object.")
+            failures.append(value)
+    return jobs, failures
+
+
+def _copy_state_ledgers(
+    root: Path, output: Path, design: dict[str, Any], *, final: bool
+) -> list[dict[str, str]]:
+    """Copy validated deterministic operator ledgers into the portable package."""
+    jobs, _ = _validated_state_ledgers(root, design, final=final)
     job_fields = [
         "job_id",
         "phase",
@@ -495,6 +729,7 @@ def _copy_state_ledgers(root: Path, output: Path) -> None:
         shutil.copyfile(source_failures, destination)
     else:
         destination.write_text("", encoding="utf-8")
+    return jobs
 
 
 def _git_state() -> tuple[str, bool, list[str]]:
@@ -519,23 +754,51 @@ def _git_state() -> tuple[str, bool, list[str]]:
     return commit, not dirty, dirty
 
 
-def _provenance(root: Path, design: dict[str, Any], *, final: bool) -> dict[str, Any]:
+def _require_clean_reporting_checkout() -> tuple[str, bool, list[str]]:
+    """Require reporting to originate from one committed, reproducible checkout."""
+    state = _git_state()
+    if not state[0] or not state[1]:
+        raise RuntimeError(
+            "Final reporting requires a clean checkout; dirty entries: " f"{state[2][:10]}"
+        )
+    return state
+
+
+def _provenance(
+    root: Path,
+    design: dict[str, Any],
+    *,
+    final: bool,
+    report_state: tuple[str, bool, list[str]] | None = None,
+    study_evidence: dict[str, dict[str, Any]] | None = None,
+) -> dict[str, Any]:
     """Build portable code, input, budget, and source-artifact provenance."""
-    commit, clean, dirty = _git_state()
+    commit, clean, dirty = report_state or _git_state()
     databases = {}
     for model in MODEL_ORDER:
         path = root / "studies" / f"{model}.db"
-        databases[model] = _sha256(path) if final and path.is_file() else None
+        databases[model] = (
+            study_evidence[model]["sha256"]
+            if final and study_evidence is not None
+            else (_sha256(path) if final and path.is_file() else None)
+        )
     value = {
-        "schema_version": 1,
+        "schema_version": 2,
         "campaign_root": str(root.resolve()),
         "code_commit": design["code_commit"],
+        "execution_code_commit": design["code_commit"],
+        "report_code_commit": commit,
         "report_checkout_commit": commit,
         "report_checkout_clean": clean,
         "report_checkout_dirty_entries": dirty,
         "design_sha256": _sha256(root / "design.json"),
         "preflight_sha256": design["preflight_sha256"],
         "uv_lock_sha256": _sha256(REPOSITORY_ROOT / "uv.lock"),
+        "report_script_sha256": _sha256(Path(__file__).resolve()),
+        "report_plan_sha256": _sha256(
+            REPOSITORY_ROOT / "research" / "physics_background_pairing" / "PLAN.md"
+        ),
+        "report_uv_lock_sha256": _sha256(REPOSITORY_ROOT / "uv.lock"),
         "target_trials_per_study": design["target_trials_per_study"],
         "search_epochs": design["search_epochs"],
         "retrain_epochs": design["retrain_epochs"],
@@ -543,6 +806,7 @@ def _provenance(root: Path, design: dict[str, Any], *, final: bool) -> dict[str,
         "target_rate_khz": TARGET_RATE_KHZ,
         "base_rate_khz": BASE_RATE_KHZ,
         "study_database_sha256": databases,
+        "study_evidence": study_evidence if final else None,
     }
     manifest = root / "selection" / "pareto_retrain_manifest.json"
     oracle = root / "results" / "oracle_winners.json"
@@ -551,8 +815,16 @@ def _provenance(root: Path, design: dict[str, Any], *, final: bool) -> dict[str,
     return value
 
 
-def snapshot(root: Path, output: Path) -> dict[str, Any]:
-    """Export search-only state without traversing downstream result artifacts."""
+def _build_snapshot(
+    root: Path,
+    output: Path,
+    *,
+    final: bool,
+    update_state: bool,
+    validate_mlflow: bool = True,
+    report_state: tuple[str, bool, list[str]] | None = None,
+) -> dict[str, Any]:
+    """Build search-state files, optionally under strict final-publication rules."""
     design = _design(root)
     output.mkdir(parents=True, exist_ok=True)
     status_rows, trial_rows = _trial_exports(root, design)
@@ -581,20 +853,31 @@ def snapshot(root: Path, output: Path) -> dict[str, Any]:
     bindings = _binding_index(root)
     _validate_bindings(root, design, bindings)
     checkpoints, mlflow = _checkpoint_rows(root, design, include_retrains=False)
+    if validate_mlflow:
+        mlflow = _validate_mlflow_runs(root, design, mlflow, final=final)
     checkpoint_fields = _checkpoint_fields()
     _write_csv(output / "checkpoint_selections.csv", checkpoints, checkpoint_fields)
     _write_csv(output / "mlflow_runs.csv", mlflow, _mlflow_fields())
-    _write_json(output / "provenance.json", _provenance(root, design, final=False))
+    _write_json(
+        output / "provenance.json",
+        _provenance(root, design, final=False, report_state=report_state),
+    )
     latest = {
         "schema_version": 1,
         "code_commit": design["code_commit"],
         "studies": status_rows,
         "ready_to_freeze": all(row["usable_complete"] >= row["target"] for row in status_rows),
     }
-    _write_json(root / "state" / "latest_status.json", latest)
-    _write_experiment_matrix(root, design, status_rows)
-    _copy_state_ledgers(root, output)
+    if update_state:
+        _write_json(root / "state" / "latest_status.json", latest)
+        _write_experiment_matrix(root, design, status_rows)
+    _copy_state_ledgers(root, output, design, final=final)
     return latest
+
+
+def snapshot(root: Path, output: Path) -> dict[str, Any]:
+    """Export a search-only snapshot while allowing valid active-run prefixes."""
+    return _build_snapshot(root, output, final=False, update_state=True)
 
 
 def _checkpoint_fields() -> list[str]:
@@ -634,6 +917,14 @@ def _mlflow_fields() -> list[str]:
         "hydra_run_dir",
         "checkpoint_run_dir",
         "artifact",
+        "tracking_uri",
+        "status",
+        "lifecycle_stage",
+        "artifact_uri",
+        "expected_epochs",
+        "observed_epochs",
+        "required_history_count",
+        "histories_validated",
     ]
 
 
@@ -1263,7 +1554,12 @@ def _gzip_copy(source: Path, destination: Path) -> None:
     temporary.replace(destination)
 
 
-def _copy_run_evidence(root: Path, output: Path, winners: list[dict[str, Any]]) -> None:
+def _copy_run_evidence(
+    root: Path,
+    output: Path,
+    winners: list[dict[str, Any]],
+    jobs: list[dict[str, str]],
+) -> None:
     """Package winner-resolved Hydra configs and compact training/Slurm logs."""
     bindings = _binding_index(root)
     config_rows = []
@@ -1375,29 +1671,22 @@ def _copy_run_evidence(root: Path, output: Path, winners: list[dict[str, Any]]) 
     )
 
     slurm_rows = []
-    job_history = root / "state" / "job_history.csv"
-    if job_history.is_file():
-        with job_history.open(encoding="utf-8", newline="") as handle:
-            jobs = list(csv.DictReader(handle))
-        for index, job in enumerate(jobs):
-            source_value = job.get("log_path", "")
-            if not source_value:
-                continue
-            source = Path(source_value)
-            if not source.is_file():
-                raise FileNotFoundError(f"Recorded Slurm log is missing: {source}")
-            job_id = job.get("job_id") or f"row{index:04d}"
-            target = output / "logs" / "slurm" / f"{job_id}__{source.name}.gz"
-            _gzip_copy(source, target)
-            slurm_rows.append(
-                {
-                    "job_id": job_id,
-                    "source": str(source.resolve()),
-                    "source_sha256": _sha256(source),
-                    "portable_path": target.relative_to(output).as_posix(),
-                    "portable_sha256": _sha256(target),
-                }
-            )
+    for index, job in enumerate(jobs):
+        source = Path(job["log_path"])
+        job_id = job.get("job_id") or f"row{index:04d}"
+        target = output / "logs" / "slurm" / f"{index:04d}__{job_id}__{source.name}.gz"
+        _gzip_copy(source, target)
+        slurm_rows.append(
+            {
+                "job_id": job_id,
+                "source": str(source.resolve()),
+                "source_sha256": _sha256(source),
+                "portable_path": target.relative_to(output).as_posix(),
+                "portable_sha256": _sha256(target),
+            }
+        )
+    if len(slurm_rows) != len(jobs):  # pragma: no cover - structural guard
+        raise RuntimeError("Not every recorded Slurm log was copied.")
     _write_csv(
         output / "logs" / "slurm" / "index.csv",
         slurm_rows,
@@ -1671,14 +1960,91 @@ def _write_manifest(output: Path) -> None:
     temporary.replace(output / "manifest.sha256")
 
 
-def finalize(root: Path, output: Path) -> None:
-    """Validate the frozen campaign and emit the complete portable package."""
+def _verify_manifest(output: Path) -> None:
+    """Require the portable manifest to cover exactly every other package file."""
+    manifest = output / "manifest.sha256"
+    if not manifest.is_file():
+        raise FileNotFoundError(manifest)
+    expected = {
+        path.relative_to(output).as_posix(): _sha256(path)
+        for path in output.rglob("*")
+        if path.is_file() and path != manifest
+    }
+    observed = {}
+    for line in manifest.read_text(encoding="utf-8").splitlines():
+        digest, separator, relative = line.partition("  ")
+        if not separator or relative in observed:
+            raise RuntimeError("Portable manifest is malformed or contains duplicates.")
+        observed[relative] = digest
+    if observed != expected:
+        raise RuntimeError("Portable manifest does not exactly authenticate the package.")
+
+
+def _tree_digests(root: Path) -> dict[str, str]:
+    """Return deterministic content identities for idempotent publication."""
+    if not root.is_dir():
+        return {}
+    return {
+        path.relative_to(root).as_posix(): _sha256(path)
+        for path in root.rglob("*")
+        if path.is_file()
+    }
+
+
+def _publish_staged(stage: Path, output: Path) -> None:
+    """Recoverably replace one canonical directory after a complete staged build."""
+    if _tree_digests(stage) == _tree_digests(output) and output.is_dir():
+        shutil.rmtree(stage)
+        return
+    backup = output.with_name(f".{output.name}.backup-{os.getpid()}")
+    if backup.exists():
+        raise RuntimeError(f"Refusing to overwrite stale publication backup: {backup}")
+    moved_old = False
+    try:
+        if output.exists():
+            output.rename(backup)
+            moved_old = True
+        stage.rename(output)
+    except Exception:
+        if moved_old and not output.exists() and backup.exists():
+            backup.rename(output)
+        raise
+    if moved_old:
+        shutil.rmtree(backup)
+
+
+def _copy_repository_report(output: Path, destination: Path) -> None:
+    """Copy the published human report outside the manifested portable tree."""
+    destination = destination.expanduser().resolve()
+    if destination.is_relative_to(output.resolve()):
+        raise RuntimeError("The optional repository report must remain outside portable output.")
+    source = output / "REPORT.md"
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    if destination.is_file() and destination.read_bytes() == source.read_bytes():
+        return
+    temporary = destination.with_suffix(destination.suffix + f".{os.getpid()}.tmp")
+    shutil.copyfile(source, temporary)
+    temporary.replace(destination)
+
+
+def _build_final(
+    root: Path,
+    output: Path,
+    *,
+    report_state: tuple[str, bool, list[str]],
+    study_evidence: dict[str, dict[str, Any]],
+) -> dict[str, Any]:
+    """Build and validate a complete final package in a private staging directory."""
     design = _design(root)
-    snapshot(root, output)
+    latest = _build_snapshot(
+        root,
+        output,
+        final=True,
+        update_state=False,
+        validate_mlflow=False,
+        report_state=report_state,
+    )
     status_rows, _ = _trial_exports(root, design)
-    target = int(design["target_trials_per_study"])
-    if any(row["usable_complete"] < target for row in status_rows):
-        raise RuntimeError("Cannot finalize before all six studies reach their usable target.")
     bindings = _binding_index(root)
     selected = {
         (row["model"], int(row["trial_number"]))
@@ -1716,6 +2082,7 @@ def finalize(root: Path, output: Path) -> None:
     winner_rows, downstream_rows, primary_rows = _winner_exports(root, design, manifest, oracle)
     _append_test_metrics(root, manifest, oracle, primary_rows)
     checkpoints, mlflow = _checkpoint_rows(root, design, include_retrains=True)
+    mlflow = _validate_mlflow_runs(root, design, mlflow, final=True)
     _write_csv(output / "front_memberships.csv", front_rows, list(front_rows[0]))
     _write_csv(output / "retrains.csv", retrain_rows, list(retrain_rows[0]))
     _write_csv(output / "checkpoint_selections.csv", checkpoints, _checkpoint_fields())
@@ -1723,15 +2090,18 @@ def finalize(root: Path, output: Path) -> None:
     _write_csv(output / "winners.csv", winner_rows, list(winner_rows[0]))
     _write_csv(output / "downstream_efficiencies.csv", downstream_rows, list(downstream_rows[0]))
     _write_csv(output / "primary_metrics.csv", primary_rows, list(primary_rows[0]))
-    _copy_run_evidence(root, output, winner_rows)
+    jobs, _ = _validated_state_ledgers(root, design, final=True)
+    _copy_run_evidence(root, output, winner_rows, jobs)
     _write_figures(output, winner_rows, downstream_rows)
-    _write_json(output / "provenance.json", _provenance(root, design, final=True))
-    _write_experiment_matrix(
-        root,
-        design,
-        status_rows,
-        manifest=manifest,
-        oracle=oracle,
+    _write_json(
+        output / "provenance.json",
+        _provenance(
+            root,
+            design,
+            final=True,
+            report_state=report_state,
+            study_evidence=study_evidence,
+        ),
     )
     for source, name in (
         (REPOSITORY_ROOT / "research/physics_background_pairing/PLAN.md", "PLAN.md"),
@@ -1753,6 +2123,55 @@ def finalize(root: Path, output: Path) -> None:
         encoding="utf-8",
     )
     _write_manifest(output)
+    _verify_manifest(output)
+    return {
+        "design": design,
+        "latest": latest,
+        "status_rows": status_rows,
+        "manifest": manifest,
+        "oracle": oracle,
+    }
+
+
+def finalize(root: Path, output: Path, repository_report: Path | None = None) -> None:
+    """Fail closed, then transactionally publish the final portable package."""
+    root = root.resolve()
+    output = output.resolve()
+    report_state = _require_clean_reporting_checkout()
+    design = _design(root)
+    study_evidence = _capture_quiescent_studies(root, design)
+    ledger_paths = (root / "state" / "job_history.csv", root / "state" / "failures.jsonl")
+    _validated_state_ledgers(root, design, final=True)
+    ledger_hashes = {str(path): _sha256(path) for path in ledger_paths}
+    output.parent.mkdir(parents=True, exist_ok=True)
+    stage = Path(tempfile.mkdtemp(prefix=f".{output.name}.staging-", dir=output.parent))
+    try:
+        context = _build_final(
+            root,
+            stage,
+            report_state=report_state,
+            study_evidence=study_evidence,
+        )
+        _assert_studies_unchanged(study_evidence)
+        _validated_state_ledgers(root, design, final=True)
+        if any(_sha256(Path(path)) != digest for path, digest in ledger_hashes.items()):
+            raise RuntimeError("Operator ledgers changed during final reporting.")
+        _verify_manifest(stage)
+        _publish_staged(stage, output)
+    except Exception:
+        if stage.exists():
+            shutil.rmtree(stage)
+        raise
+    _write_json(root / "state" / "latest_status.json", context["latest"])
+    _write_experiment_matrix(
+        root,
+        context["design"],
+        context["status_rows"],
+        manifest=context["manifest"],
+        oracle=context["oracle"],
+    )
+    if repository_report is not None:
+        _copy_repository_report(output, repository_report)
 
 
 def main() -> None:
@@ -1763,7 +2182,7 @@ def main() -> None:
     if args.command == "snapshot":
         print(json.dumps(snapshot(root, output), indent=2, sort_keys=True))
     else:
-        finalize(root, output)
+        finalize(root, output, repository_report=args.repository_report)
         print(output / "REPORT.md")
 
 

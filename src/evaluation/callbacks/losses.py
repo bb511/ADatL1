@@ -13,7 +13,7 @@ log = pylogger.RankedLogger(__name__, rank_zero_only=True)
 
 
 class LossesCallback(Callback):
-    """Plot MI, reconstruction, and total training losses together.
+    """Plot and summarize MI, reconstruction, and total training losses.
 
     At the end of training, the callback reads ``train/loss_mi``,
     ``train/loss_reco``, and ``train/loss`` from the active MLflow run. Each history
@@ -22,7 +22,9 @@ class LossesCallback(Callback):
     on the left y-axis, with total loss on a separate right y-axis. The line-only
     figures are saved as PNGs in the run's checkpoint plot folder and logged as
     MLflow run artifacts. ``train/loss`` is labelled ``Loss_total`` because it is the
-    total objective used for backpropagation.
+    total objective used for backpropagation. The callback also logs the minimum MI
+    loss and its same-step reconstruction loss, plus the minimum reconstruction loss
+    and its same-step MI loss, as scalar MLflow metrics.
 
     :param include_loss_mi: Include the mutual-information loss.
     :param include_loss_reco: Include the reconstruction loss.
@@ -56,7 +58,7 @@ class LossesCallback(Callback):
             raise ValueError("At least one loss must be enabled for LossesCallback.")
 
     def on_train_end(self, trainer, pl_module) -> None:
-        """Create and log the combined loss plot after the training loop finishes."""
+        """Log loss summaries and plots after the training loop finishes."""
         if not trainer.is_global_zero:
             return
 
@@ -74,6 +76,7 @@ class LossesCallback(Callback):
         normalized_histories = {}
         raw_colors = {}
         normalized_colors = {}
+        step_histories = {}
         for metric_name, label, enabled in self._configured_metrics():
             if not enabled:
                 continue
@@ -88,7 +91,9 @@ class LossesCallback(Callback):
                     "Cannot create the combined training-loss plot."
                 )
 
-            values = self._history_values(metric_history)
+            step_history = self._history_by_step(metric_history)
+            step_histories[metric_name] = step_history
+            values = np.asarray(list(step_history.values()), dtype=float)
             normalized = self._normalize(values)
             raw_label = "Loss_mi * gamma" if metric_name == "loss_mi" else label
             raw_values = values * gamma if metric_name == "loss_mi" else values
@@ -101,6 +106,13 @@ class LossesCallback(Callback):
             }
             raw_colors[raw_label] = LOSS_COLORS[label]
             normalized_colors[label] = LOSS_COLORS[label]
+
+        if self.include_loss_mi and self.include_loss_reco:
+            minimum_metrics, final_step = self._paired_minimum_metrics(
+                mi_by_step=step_histories["loss_mi"],
+                reco_by_step=step_histories["loss_reco"],
+            )
+            mlflow_logger.log_metrics(minimum_metrics, step=final_step)
 
         plot_folder = self._resolve_plot_folder(trainer)
         raw_component_histories = {
@@ -158,10 +170,57 @@ class LossesCallback(Callback):
     @staticmethod
     def _history_values(metric_history) -> np.ndarray:
         """Sort MLflow history by step and keep the last value for each step."""
-        values_by_step = {}
-        for point in sorted(metric_history, key=lambda item: (item.step, item.timestamp)):
-            values_by_step[point.step] = point.value
+        values_by_step = LossesCallback._history_by_step(metric_history)
         return np.asarray(list(values_by_step.values()), dtype=float)
+
+    @staticmethod
+    def _history_by_step(metric_history) -> dict[int, float]:
+        """Return a finite, step-aligned MLflow history with duplicates resolved."""
+        values_by_step = {}
+        for point in sorted(
+            metric_history,
+            key=lambda item: (item.step, item.timestamp),
+        ):
+            values_by_step[int(point.step)] = float(point.value)
+
+        values = np.asarray(list(values_by_step.values()), dtype=float)
+        if values.size == 0 or not np.all(np.isfinite(values)):
+            raise ValueError("Loss histories must contain finite numeric values.")
+        return values_by_step
+
+    @staticmethod
+    def _paired_minimum_metrics(
+        mi_by_step: dict[int, float],
+        reco_by_step: dict[int, float],
+    ) -> tuple[dict[str, float], int]:
+        """Compute both minima and counterpart losses at the exact same steps."""
+        mi_steps = set(mi_by_step)
+        reco_steps = set(reco_by_step)
+        if mi_steps != reco_steps:
+            missing_reco = sorted(mi_steps - reco_steps)
+            missing_mi = sorted(reco_steps - mi_steps)
+            raise RuntimeError(
+                "MLflow training-loss histories are not step-aligned; cannot select "
+                "corresponding losses exactly. "
+                f"Missing loss_reco steps: {missing_reco}; "
+                f"missing loss_mi steps: {missing_mi}."
+            )
+        if not mi_steps:
+            raise ValueError("Training-loss histories must not be empty.")
+
+        ordered_steps = sorted(mi_steps)
+        min_mi_step = min(ordered_steps, key=lambda step: mi_by_step[step])
+        min_reco_step = min(ordered_steps, key=lambda step: reco_by_step[step])
+
+        return (
+            {
+                "train/min_loss_mi": mi_by_step[min_mi_step],
+                "train/loss_reco_at_min_loss_mi": reco_by_step[min_mi_step],
+                "train/min_loss_reco": reco_by_step[min_reco_step],
+                "train/loss_mi_at_min_loss_reco": mi_by_step[min_reco_step],
+            },
+            ordered_steps[-1],
+        )
 
     @staticmethod
     def _normalize(values: np.ndarray) -> np.ndarray:

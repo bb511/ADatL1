@@ -208,6 +208,7 @@ class AE(ADLightningModule):
                 "loss/mean": total_loss.detach(),
                 "loss/reco": reco_loss.mean().detach(),
                 "loss/mi": mi_loss.detach(),
+                "loss/gamma_mi": gamma_mi_loss.detach(),
 
                 # Anomaly score logging:
                 "ascore/operational": operational_ascore,
@@ -226,6 +227,7 @@ class AE(ADLightningModule):
             "loss_mean": outdict.get("loss/mean"),
             "loss_reco": outdict.get("loss/reco"),
             "loss_mi": outdict.get("loss/mi"),
+            "loss_gamma_mi": outdict.get("loss/gamma_mi"),
 
             # Existing anomaly-score logging:
             "ascore_operational": outdict.get("ascore/operational"),

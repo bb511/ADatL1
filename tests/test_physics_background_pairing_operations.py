@@ -38,6 +38,8 @@ def _campaign(tmp_path: Path) -> tuple[Path, Path]:
 def _authenticate(monkeypatch: pytest.MonkeyPatch) -> None:
     """Replace Git authentication for isolated filesystem tests."""
     monkeypatch.setattr(operations, "_authenticate_execution_repository", lambda *args: None)
+    monkeypatch.setattr(operations, "_live_search_job_ids", lambda: set())
+    monkeypatch.setattr(operations, "_live_retrain_job_ids", lambda: set())
 
 
 def test_submit_registers_exact_frozen_job(monkeypatch, tmp_path) -> None:
@@ -193,6 +195,56 @@ def test_submit_refuses_trial_target_overshoot(monkeypatch, tmp_path) -> None:
         )
 
 
+def test_submit_refuses_timeout_beyond_normal_partition_limit(monkeypatch, tmp_path) -> None:
+    """The mutable helper cannot advertise more time than Slurm grants."""
+    root, repository = _campaign(tmp_path)
+    _authenticate(monkeypatch)
+
+    with pytest.raises(ValueError, match="720-minute"):
+        operations.submit_search(
+            root,
+            repository,
+            "ae",
+            4,
+            4,
+            721,
+            tmp_path / "data",
+            tmp_path / "raw",
+            tmp_path / "pairing",
+        )
+
+
+def test_submit_refuses_unregistered_live_packed_job(monkeypatch, tmp_path) -> None:
+    """A live scheduler allocation cannot hide outside the campaign ledger."""
+    root, repository = _campaign(tmp_path)
+    _authenticate(monkeypatch)
+    monkeypatch.setattr(operations, "_live_search_job_ids", lambda: {"123"})
+
+    with pytest.raises(RuntimeError, match="absent from the campaign ledger"):
+        operations.submit_search(
+            root,
+            repository,
+            "ae",
+            4,
+            4,
+            720,
+            tmp_path / "data",
+            tmp_path / "raw",
+            tmp_path / "pairing",
+        )
+
+
+def test_operation_lock_refuses_concurrent_operator(tmp_path) -> None:
+    """A second process-equivalent file description cannot enter the control plane."""
+    root = tmp_path / "campaign"
+    root.mkdir()
+
+    with operations._operation_lock(root):
+        with pytest.raises(RuntimeError, match="Another campaign operation"):
+            with operations._operation_lock(root):
+                pass
+
+
 def test_reconcile_hashes_only_terminal_logs(monkeypatch, tmp_path) -> None:
     """Only immutable terminal logs receive an authentication digest."""
     root, repository = _campaign(tmp_path)
@@ -276,11 +328,208 @@ def test_reconcile_seals_successful_search_manifest_and_bindings(monkeypatch, tm
         "_accounting",
         lambda ids: {"7": {"state": "COMPLETED", "exit_code": "0:0"}},
     )
+    validation = chunk.parent / "chunk_validation.json"
+    validation.write_text('{"validated": true}\n', encoding="utf-8")
+    monkeypatch.setattr(
+        operations,
+        "_validate_completed_search_bindings",
+        lambda *args: validation,
+    )
 
     row = operations.reconcile(root, repository)[0]
 
-    assert row["success_sha256"] == operations._sha256(chunk)
+    assert row["success_sha256"] == operations._sha256(validation)
     assert row["bindings_sha256"] == operations._sha256(bindings)
+
+
+def test_terminal_chunk_validation_authenticates_only_supplied_bindings(
+    monkeypatch, tmp_path
+) -> None:
+    """Per-chunk sealing checks objectives, candidates, MLflow, and exact identities."""
+    root = tmp_path / "campaign"
+    chunk = root / "sweeps" / "ae" / "stamp" / "chunk.json"
+    run_dir = chunk.parent / "0"
+    run_dir.mkdir(parents=True)
+    chunk.write_text(json.dumps({"model": "ae"}), encoding="utf-8")
+    bindings_path = chunk.parent / "trial_bindings.json"
+    bindings_path.write_text("{}\n", encoding="utf-8")
+    artifact = run_dir / "optimized_metric.json"
+    artifact.write_text(
+        json.dumps(
+            {
+                "schema_version": 2,
+                "objective_order": ["native__wasserstein"],
+                "optimized_metric": [1.0, 2.0],
+                "selections": {
+                    "native__wasserstein": {
+                        "optimized_metric": [1.0, 2.0],
+                        "optimized_ckpt_name": "last",
+                    }
+                },
+                "run_provenance": {
+                    "experiment_name": "experiment",
+                    "run_name": "run",
+                    "hydra_output_dir": str(run_dir),
+                    "checkpoint_run_dir": str(root / "runtime" / "checkpoints" / "run"),
+                    "loggers": [{"experiment_id": "1", "run_id": "abc"}],
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+    binding = {
+        "model": "ae",
+        "study_name": "study",
+        "trial_number": 4,
+        "hydra_job_num": 0,
+        "state": "COMPLETE",
+        "params": {"x": 1},
+        "values": [1.0, 2.0],
+        "optimized_metric_artifact": str(artifact),
+        "optimized_metric_artifact_sha256": operations._sha256(artifact),
+    }
+    design = {
+        "schema_version": 2,
+        "code_commit": "a" * 40,
+        "studies": [
+            {
+                "model": "ae",
+                "study_name": "study",
+                "objectives": [
+                    {
+                        "id": "native__wasserstein",
+                        "score": "native",
+                        "metric": "wasserstein",
+                        "strategy": None,
+                        "directions": ["minimize", "minimize"],
+                    }
+                ],
+            }
+        ],
+    }
+    observed = {}
+    monkeypatch.setattr(
+        report,
+        "_validate_bindings",
+        lambda campaign, frozen, bindings: observed.setdefault("bindings", bindings),
+    )
+    monkeypatch.setattr(report, "_annotate_checkpoint_families", lambda *args: args[1])
+    monkeypatch.setattr(
+        report,
+        "_checkpoint_candidate_rows",
+        lambda *args, **kwargs: [
+            {"required": True, "available": True},
+            {"required": False, "available": False},
+            {"required": True, "available": True},
+        ],
+    )
+    monkeypatch.setattr(
+        report, "_validate_mlflow_runs", lambda campaign, frozen, rows, final: rows
+    )
+
+    output = operations._validate_completed_search_bindings(
+        root, design, chunk, bindings_path, [binding]
+    )
+
+    payload = json.loads(output.read_text(encoding="utf-8"))
+    assert set(observed["bindings"]) == {("ae", 4)}
+    assert payload["usable_trials"] == 1
+    assert payload["selection_rows"] == 1
+    assert payload["candidate_slots"] == 3
+    assert payload["mlflow_runs"] == 1
+
+
+def test_terminal_chunk_validation_rejects_noncomplete_binding(tmp_path) -> None:
+    """A finite vector is insufficient when its explicit binding is not COMPLETE."""
+    root = tmp_path / "campaign"
+    chunk = root / "sweeps" / "ae" / "stamp" / "chunk.json"
+    run_dir = chunk.parent / "0"
+    run_dir.mkdir(parents=True)
+    chunk.write_text(json.dumps({"model": "ae"}), encoding="utf-8")
+    bindings = chunk.parent / "trial_bindings.json"
+    bindings.write_text("{}\n", encoding="utf-8")
+    artifact = run_dir / "optimized_metric.json"
+    artifact.write_text("{}\n", encoding="utf-8")
+    design = {
+        "studies": [
+            {
+                "model": "ae",
+                "study_name": "study",
+                "objectives": [{"id": "objective"}],
+            }
+        ]
+    }
+    binding = {
+        "model": "ae",
+        "study_name": "study",
+        "trial_number": 4,
+        "hydra_job_num": 0,
+        "state": "RUNNING",
+        "values": [1.0, 2.0],
+        "optimized_metric_artifact": str(artifact),
+        "optimized_metric_artifact_sha256": operations._sha256(artifact),
+    }
+
+    with pytest.raises(RuntimeError, match="not usable"):
+        operations._validate_completed_search_bindings(root, design, chunk, bindings, [binding])
+
+
+def test_repair_stale_backs_up_and_fails_only_explicit_trials(monkeypatch, tmp_path) -> None:
+    """Stale repair is scheduler-proven, API-based, backed up, and auditable."""
+    import optuna
+
+    root, repository = _campaign(tmp_path)
+    _authenticate(monkeypatch)
+    design = {
+        "schema_version": 2,
+        "code_commit": "a" * 40,
+        "studies": [{"model": "ae", "study_name": "study", "objectives": []}],
+    }
+    (root / "design.json").write_text(json.dumps(design), encoding="utf-8")
+    database = root / "studies" / "ae.db"
+    database.parent.mkdir()
+    study = optuna.create_study(study_name="study", storage=f"sqlite:///{database}")
+    study.ask()
+    study.enqueue_trial({"x": 1})
+    monkeypatch.setattr(operations, "_reconcile_locked", lambda *args: [])
+
+    output = operations.repair_stale(root, repository, "ae", [0, 1])
+
+    repaired = optuna.load_study(study_name="study", storage=f"sqlite:///{database}")
+    assert [trial.state.name for trial in repaired.get_trials()] == ["FAIL", "FAIL"]
+    payload = json.loads(output.read_text(encoding="utf-8"))
+    assert payload["trials_before"] == [
+        {"state": "RUNNING", "trial_number": 0},
+        {"state": "WAITING", "trial_number": 1},
+    ]
+    assert Path(payload["backup"]).is_file()
+    assert operations._sha256(Path(payload["backup"])) == payload["backup_sha256"]
+    events = [
+        json.loads(line)
+        for line in (root / "state" / "failures.jsonl").read_text(encoding="utf-8").splitlines()
+    ]
+    assert events[-1]["outcome"] == "repaired"
+
+
+def test_repair_stale_refuses_live_same_model_and_records_evidence(monkeypatch, tmp_path) -> None:
+    """No Optuna mutation is attempted while the scheduler still owns the model."""
+    root, repository = _campaign(tmp_path)
+    _authenticate(monkeypatch)
+    monkeypatch.setattr(
+        operations,
+        "_reconcile_locked",
+        lambda *args: [{"job_id": "7", "kind": "search_chunk", "model": "ae", "state": "RUNNING"}],
+    )
+    monkeypatch.setattr(operations, "_live_search_job_ids", lambda: {"7"})
+
+    with pytest.raises(RuntimeError, match="Live ae packed-search"):
+        operations.repair_stale(root, repository, "ae", [0])
+
+    event = json.loads(
+        (root / "state" / "failures.jsonl").read_text(encoding="utf-8").splitlines()[-1]
+    )
+    assert event["outcome"] == "refused_or_failed"
+    assert "Live ae packed-search" in event["error_signature"]
 
 
 def test_reconcile_seals_successful_retrain_marker(monkeypatch, tmp_path) -> None:
@@ -452,6 +701,23 @@ def test_submit_retrains_uses_exact_missing_indices(monkeypatch, tmp_path) -> No
     with (root / "state" / "job_history.csv").open(encoding="utf-8") as handle:
         ledger = list(csv.DictReader(handle))
     assert [row["job_id"] for row in ledger] == ["987_1", "987_3"]
+
+
+def test_submit_retrains_refuses_unregistered_live_array(monkeypatch, tmp_path) -> None:
+    """A post-sbatch ledger crash cannot permit a duplicate retraining array."""
+    root, repository = _campaign(tmp_path)
+    _authenticate(monkeypatch)
+    monkeypatch.setattr(operations, "_live_retrain_job_ids", lambda: {"987"})
+
+    with pytest.raises(RuntimeError, match="absent from the campaign ledger"):
+        operations.submit_retrains(
+            root,
+            repository,
+            24,
+            tmp_path / "data",
+            tmp_path / "raw",
+            tmp_path / "pairing",
+        )
 
 
 def test_missing_retrains_rejects_changed_marker_artifact(monkeypatch, tmp_path) -> None:

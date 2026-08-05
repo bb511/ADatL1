@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import argparse
 import csv
+import fcntl
 import hashlib
 import json
 import math
@@ -19,6 +20,7 @@ import sqlite3
 import subprocess  # nosec B404 -- fixed git, Slurm, and sbatch commands
 import sys
 import tempfile
+from contextlib import contextmanager
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -85,6 +87,9 @@ def _parse_args() -> argparse.Namespace:
     commands.add_parser("reconcile")
     backup = commands.add_parser("backup-study")
     backup.add_argument("--model", choices=MODELS, required=True)
+    repair = commands.add_parser("repair-stale")
+    repair.add_argument("--model", choices=MODELS, required=True)
+    repair.add_argument("--trial", type=int, action="append", required=True)
     return parser.parse_args()
 
 
@@ -114,6 +119,38 @@ def _atomic_csv(path: Path, rows: list[dict[str, str]]) -> None:
     finally:
         if temporary.exists():
             temporary.unlink()
+
+
+def _atomic_json(path: Path, payload: dict[str, Any]) -> None:
+    """Replace one machine-readable operational artifact atomically."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    fd, temporary_name = tempfile.mkstemp(prefix=f".{path.name}.", dir=path.parent)
+    os.close(fd)
+    temporary = Path(temporary_name)
+    try:
+        temporary.write_text(
+            json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8"
+        )
+        temporary.replace(path)
+    finally:
+        if temporary.exists():
+            temporary.unlink()
+
+
+@contextmanager
+def _operation_lock(root: Path):
+    """Serialize scheduler checks, submissions, reconciliation, and repair."""
+    path = root / "state" / ".operations.lock"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with path.open("a+", encoding="utf-8") as handle:
+        try:
+            fcntl.flock(handle.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except BlockingIOError as error:
+            raise RuntimeError(f"Another campaign operation holds {path}.") from error
+        try:
+            yield
+        finally:
+            fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
 
 
 def _ledger(root: Path) -> tuple[Path, list[dict[str, str]]]:
@@ -184,6 +221,77 @@ def _active_kind_rows(rows: list[dict[str, str]], kind: str) -> list[dict[str, s
         for row in rows
         if row.get("kind") == kind and _normalized_state(row.get("state", "")) in ACTIVE_STATES
     ]
+
+
+def _live_job_ids(name: str) -> set[str]:
+    """Return user-scoped live Slurm allocation IDs for one exact job name."""
+    squeue = shutil.which("squeue")
+    if squeue is None:
+        raise FileNotFoundError("squeue")
+    result = subprocess.run(  # nosec B603 -- fixed read-only Slurm query
+        [
+            squeue,
+            "--noheader",
+            "--me",
+            f"--name={name}",
+            "--states=PENDING,RUNNING,CONFIGURING,COMPLETING,SUSPENDED",
+            "--format=%A",
+        ],
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    job_ids = {line.strip() for line in result.stdout.splitlines() if line.strip()}
+    if any(not job_id.isdigit() for job_id in job_ids):
+        raise RuntimeError(f"Unexpected live {name} job IDs: {sorted(job_ids)}.")
+    return job_ids
+
+
+def _live_search_job_ids() -> set[str]:
+    """Return allocation IDs for live packed-search jobs directly from Slurm."""
+    return _live_job_ids("phys-bgpair-sweep")
+
+
+def _live_retrain_job_ids() -> set[str]:
+    """Return allocation IDs for live retraining arrays directly from Slurm."""
+    return _live_job_ids("phys-bgpair-retrain")
+
+
+def _assert_no_live_search_overlap(rows: list[dict[str, str]], model: str) -> set[str]:
+    """Reject live same-model or unregistered packed-search allocations."""
+    live = _live_search_job_ids()
+    registered = {
+        row["job_id"]: row
+        for row in rows
+        if row.get("kind") in {"production_canary", "search_chunk"}
+    }
+    unknown = live - set(registered)
+    if unknown:
+        raise RuntimeError(
+            "Live packed-search jobs are absent from the campaign ledger: "
+            f"{sorted(unknown)}. Reconcile their provenance before continuing."
+        )
+    overlapping = sorted(job_id for job_id in live if registered[job_id].get("model") == model)
+    if overlapping:
+        raise RuntimeError(f"Live {model} packed-search jobs already exist: {overlapping}.")
+    return live
+
+
+def _assert_no_live_retrain_overlap(rows: list[dict[str, str]]) -> set[str]:
+    """Reject every live retrain allocation, including unregistered arrays."""
+    live = _live_retrain_job_ids()
+    registered = {
+        row["job_id"].split("_", maxsplit=1)[0] for row in rows if row.get("kind") == "retrain"
+    }
+    unknown = live - registered
+    if unknown:
+        raise RuntimeError(
+            "Live retrain arrays are absent from the campaign ledger: "
+            f"{sorted(unknown)}. Reconcile their provenance before continuing."
+        )
+    if live:
+        raise RuntimeError(f"Live retraining arrays already exist: {sorted(live)}.")
+    return live
 
 
 def _assert_database_quiescent(root: Path, model: str) -> None:
@@ -282,12 +390,41 @@ def submit_search(
     raw_data_dir: Path,
     pairing_dir: Path,
 ) -> str:
+    """Serialize and submit one non-overlapping packed search chunk."""
+    with _operation_lock(root):
+        return _submit_search_locked(
+            root,
+            repository,
+            model,
+            trials,
+            jobs,
+            timeout_min,
+            data_dir,
+            raw_data_dir,
+            pairing_dir,
+        )
+
+
+def _submit_search_locked(
+    root: Path,
+    repository: Path,
+    model: str,
+    trials: int,
+    jobs: int,
+    timeout_min: int,
+    data_dir: Path,
+    raw_data_dir: Path,
+    pairing_dir: Path,
+) -> str:
     """Submit one non-overlapping packed search chunk and register it atomically."""
     if min(trials, jobs, timeout_min) <= 0 or jobs > trials:
         raise ValueError("Require positive trials/jobs/timeout and jobs <= trials.")
+    if timeout_min > 720:
+        raise ValueError("Search timeout cannot exceed the 720-minute Slurm limit.")
     design = _design(root)
     _authenticate_execution_repository(repository, design)
     ledger_path, rows = _ledger(root)
+    _assert_no_live_search_overlap(rows, model)
     if _active_model_rows(rows, model):
         raise RuntimeError(f"Refusing to overlap an active {model} campaign job.")
     _assert_database_quiescent(root, model)
@@ -426,12 +563,28 @@ def submit_retrains(
     raw_data_dir: Path,
     pairing_dir: Path,
 ) -> str | None:
+    """Serialize and submit only missing authenticated retrain indices."""
+    with _operation_lock(root):
+        return _submit_retrains_locked(
+            root, repository, concurrency, data_dir, raw_data_dir, pairing_dir
+        )
+
+
+def _submit_retrains_locked(
+    root: Path,
+    repository: Path,
+    concurrency: int,
+    data_dir: Path,
+    raw_data_dir: Path,
+    pairing_dir: Path,
+) -> str | None:
     """Submit only missing authenticated retrain indices and ledger every array task."""
     if concurrency <= 0:
         raise ValueError("Retrain concurrency must be positive.")
     design = _design(root)
     _authenticate_execution_repository(repository, design)
     ledger_path, ledger_rows = _ledger(root)
+    _assert_no_live_retrain_overlap(ledger_rows)
     if _active_kind_rows(ledger_rows, "retrain"):
         raise RuntimeError("Refusing to overlap an active retraining array.")
     missing = missing_retrains(root, repository)
@@ -739,7 +892,137 @@ def _accounting_time(value: Any) -> str:
     return "" if seconds <= 0 else datetime.fromtimestamp(seconds, timezone.utc).isoformat()
 
 
-def _completed_search_artifacts(root: Path, row: dict[str, str]) -> tuple[str, str]:
+def _validate_completed_search_bindings(
+    root: Path,
+    design: dict[str, Any],
+    chunk_path: Path,
+    bindings_path: Path,
+    binding_rows: list[dict[str, Any]],
+) -> Path:
+    """Authenticate one terminal chunk's trials without rescanning prior chunks."""
+    from scripts import physics_background_pairing_report as report
+
+    model = str(json.loads(chunk_path.read_text(encoding="utf-8"))["model"])
+    studies = [study for study in design["studies"] if study["model"] == model]
+    if len(studies) != 1:
+        raise RuntimeError(f"Frozen design does not contain exactly one {model} study.")
+    study = studies[0]
+    expected_order = [objective["id"] for objective in study["objectives"]]
+    expected_values = 2 * len(expected_order)
+    indexed: dict[tuple[str, int], dict[str, Any]] = {}
+    mlflow_rows = []
+    selection_rows = []
+    chunk_root = chunk_path.parent.resolve()
+
+    if [int(binding.get("hydra_job_num", -1)) for binding in binding_rows] != list(
+        range(len(binding_rows))
+    ):
+        raise RuntimeError(f"Terminal Hydra binding order is not contiguous: {bindings_path}.")
+    for binding in binding_rows:
+        trial_number = int(binding["trial_number"])
+        key = (model, trial_number)
+        values = binding.get("values")
+        artifact_path = Path(str(binding.get("optimized_metric_artifact", ""))).resolve()
+        if (
+            binding.get("model") != model
+            or binding.get("study_name") != study["study_name"]
+            or binding.get("state") != "COMPLETE"
+            or key in indexed
+            or not isinstance(values, list)
+            or len(values) != expected_values
+            or not all(math.isfinite(float(value)) for value in values)
+            or not artifact_path.is_file()
+            or artifact_path.parent.parent != chunk_root
+            or _sha256(artifact_path) != binding.get("optimized_metric_artifact_sha256")
+        ):
+            raise RuntimeError(f"Terminal search binding is not usable: {key}.")
+        indexed[key] = binding
+        artifact = json.loads(artifact_path.read_text(encoding="utf-8"))
+        provenance = artifact.get("run_provenance", {})
+        loggers = [logger for logger in provenance.get("loggers", []) if logger.get("run_id")]
+        selections = artifact.get("selections", {})
+        if (
+            artifact.get("schema_version") != 2
+            or artifact.get("objective_order") != expected_order
+            or artifact.get("optimized_metric") != values
+            or set(selections) != set(expected_order)
+            or len(loggers) != 1
+        ):
+            raise RuntimeError(f"Terminal objective/provenance contract differs: {artifact_path}.")
+        for objective in study["objectives"]:
+            selection = selections[objective["id"]]
+            pair = selection.get("optimized_metric")
+            if (
+                not isinstance(pair, list)
+                or len(pair) != 2
+                or not all(math.isfinite(float(value)) for value in pair)
+            ):
+                raise RuntimeError(
+                    f"Invalid selected objective pair in {artifact_path}: {objective['id']}."
+                )
+            selection_rows.append(
+                {
+                    "model": model,
+                    "logical_objective": objective["id"],
+                    "optimized_ckpt_name": selection.get("optimized_ckpt_name"),
+                }
+            )
+        logger = loggers[0]
+        mlflow_rows.append(
+            {
+                "phase": "search",
+                "model": model,
+                "trial_number": trial_number,
+                "retrain_index": "",
+                "experiment_name": provenance.get("experiment_name", ""),
+                "experiment_id": logger.get("experiment_id", ""),
+                "run_id": logger["run_id"],
+                "run_name": provenance.get("run_name", ""),
+                "hydra_run_dir": provenance.get("hydra_output_dir", ""),
+                "checkpoint_run_dir": provenance.get("checkpoint_run_dir", ""),
+                "artifact": str(artifact_path),
+            }
+        )
+
+    report._validate_bindings(root, design, indexed)
+    report._annotate_checkpoint_families(design, selection_rows)
+    candidates = report._checkpoint_candidate_rows(root, design, indexed, final=False)
+    expected_candidates = len(binding_rows) * (len(expected_order) + 2)
+    if len(candidates) != expected_candidates or any(
+        candidate["required"] and not candidate["available"] for candidate in candidates
+    ):
+        raise RuntimeError(
+            f"Terminal retained checkpoint candidates are incomplete: {chunk_root}."
+        )
+    validated_mlflow = report._validate_mlflow_runs(root, design, mlflow_rows, final=True)
+    if len(validated_mlflow) != len(binding_rows):
+        raise RuntimeError(f"Terminal MLflow identities are incomplete: {chunk_root}.")
+
+    output = chunk_root / "chunk_validation.json"
+    _atomic_json(
+        output,
+        {
+            "schema_version": 1,
+            "validated_at": datetime.now(timezone.utc).isoformat(),
+            "code_commit": design["code_commit"],
+            "model": model,
+            "chunk": str(chunk_path.resolve()),
+            "chunk_sha256": _sha256(chunk_path),
+            "bindings": str(bindings_path.resolve()),
+            "bindings_sha256": _sha256(bindings_path),
+            "trial_numbers": sorted(trial_number for _, trial_number in indexed),
+            "usable_trials": len(indexed),
+            "selection_rows": len(selection_rows),
+            "candidate_slots": len(candidates),
+            "mlflow_runs": len(validated_mlflow),
+        },
+    )
+    return output
+
+
+def _completed_search_artifacts(
+    root: Path, design: dict[str, Any], row: dict[str, str]
+) -> tuple[str, str]:
     """Authenticate one successful packed controller and its final trial bindings."""
     model = row["model"]
     matches = []
@@ -772,7 +1055,8 @@ def _completed_search_artifacts(root: Path, row: dict[str, str]) -> tuple[str, s
         or any(binding.get("optimized_metric_artifact") is None for binding in rows)
     ):
         raise RuntimeError(f"Terminal trial bindings are incomplete: {bindings_path}.")
-    return _sha256(chunk_path), _sha256(bindings_path)
+    validation = _validate_completed_search_bindings(root, design, chunk_path, bindings_path, rows)
+    return _sha256(validation), _sha256(bindings_path)
 
 
 def _completed_retrain_marker(root: Path, design: dict[str, Any], row: dict[str, str]) -> str:
@@ -799,6 +1083,12 @@ def _completed_retrain_marker(root: Path, design: dict[str, Any], row: dict[str,
 
 
 def reconcile(root: Path, repository: Path) -> list[dict[str, str]]:
+    """Serialize reconciliation against submissions and stale-trial repair."""
+    with _operation_lock(root):
+        return _reconcile_locked(root, repository)
+
+
+def _reconcile_locked(root: Path, repository: Path) -> list[dict[str, str]]:
     """Reconcile scheduler state and seal terminal Slurm logs by SHA-256."""
     design = _design(root)
     _authenticate_execution_repository(repository, design)
@@ -821,9 +1111,10 @@ def reconcile(root: Path, repository: Path) -> list[dict[str, str]]:
                 and row["exit_code"] == "0:0"
                 and row.get("kind") in {"production_canary", "search_chunk"}
             ):
-                row["success_sha256"], row["bindings_sha256"] = _completed_search_artifacts(
-                    root, row
-                )
+                if not row.get("success_sha256") or not row.get("bindings_sha256"):
+                    row["success_sha256"], row["bindings_sha256"] = _completed_search_artifacts(
+                        root, design, row
+                    )
             elif (
                 state == "COMPLETED" and row["exit_code"] == "0:0" and row.get("kind") == "retrain"
             ):
@@ -832,18 +1123,12 @@ def reconcile(root: Path, repository: Path) -> list[dict[str, str]]:
     return rows
 
 
-def backup_study(root: Path, repository: Path, model: str) -> Path:
-    """Create an authenticated, transactionally consistent SQLite backup."""
-    design = _design(root)
-    _authenticate_execution_repository(repository, design)
-    _, rows = _ledger(root)
-    if _active_model_rows(rows, model):
-        raise RuntimeError(f"Refusing to back up active model {model}.")
-    _assert_database_quiescent(root, model)
+def _create_study_backup(root: Path, model: str) -> Path:
+    """Create one transactionally consistent SQLite backup without policy checks."""
     source = root / "studies" / f"{model}.db"
     if not source.is_file():
         raise FileNotFoundError(source)
-    stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+    stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S%fZ")
     destination = root / "studies" / "backups" / model / f"{stamp}.db"
     destination.parent.mkdir(parents=True, exist_ok=True)
     temporary = destination.with_suffix(".db.tmp")
@@ -856,6 +1141,163 @@ def backup_study(root: Path, repository: Path, model: str) -> Path:
     manifest = destination.with_suffix(".sha256")
     manifest.write_text(f"{digest}  {destination.name}\n", encoding="utf-8")
     return destination
+
+
+def backup_study(root: Path, repository: Path, model: str) -> Path:
+    """Create an authenticated, transactionally consistent SQLite backup."""
+    with _operation_lock(root):
+        design = _design(root)
+        _authenticate_execution_repository(repository, design)
+        _, rows = _ledger(root)
+        if _active_model_rows(rows, model):
+            raise RuntimeError(f"Refusing to back up active model {model}.")
+        _assert_database_quiescent(root, model)
+        return _create_study_backup(root, model)
+
+
+def _append_failure_event(root: Path, payload: dict[str, Any]) -> None:
+    """Append one auditable recovery event while the operation lock is held."""
+    path = root / "state" / "failures.jsonl"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with path.open("a", encoding="utf-8") as handle:
+        handle.write(json.dumps(payload, sort_keys=True) + "\n")
+        handle.flush()
+        os.fsync(handle.fileno())
+
+
+def _refresh_repaired_bindings(
+    root: Path, model: str, trial_numbers: set[int]
+) -> list[dict[str, str]]:
+    """Persist FAIL state in any existing explicit bindings for repaired trials."""
+    updated = []
+    seen: set[int] = set()
+    for path in sorted((root / "sweeps" / model).glob("*/trial_bindings.json")):
+        payload = json.loads(path.read_text(encoding="utf-8"))
+        changed = False
+        for row in payload.get("bindings", []):
+            trial_number = int(row["trial_number"])
+            if trial_number not in trial_numbers:
+                continue
+            if trial_number in seen:
+                raise RuntimeError(f"Duplicate explicit binding for {(model, trial_number)}.")
+            seen.add(trial_number)
+            row["state"] = "FAIL"
+            row["values"] = None
+            changed = True
+        if changed:
+            _atomic_json(path, payload)
+            updated.append({"path": str(path.resolve()), "sha256": _sha256(path)})
+    return updated
+
+
+def repair_stale(
+    root: Path,
+    repository: Path,
+    model: str,
+    trial_numbers: list[int],
+) -> Path:
+    """Fail exact stale Optuna trials only after proving their scheduler is absent."""
+    requested = sorted(set(trial_numbers))
+    if (
+        not requested
+        or len(requested) != len(trial_numbers)
+        or any(value < 0 for value in requested)
+    ):
+        raise ValueError("Repair trials must be explicit, unique, non-negative numbers.")
+    event = {
+        "timestamp": datetime.now(timezone.utc).isoformat(),
+        "phase": "search",
+        "model": model,
+        "trial_ids": requested,
+        "classification": "stale_optuna_trial_repair",
+        "action": "mark_exact_stale_trials_failed",
+    }
+    with _operation_lock(root):
+        try:
+            design = _design(root)
+            _authenticate_execution_repository(repository, design)
+            rows = _reconcile_locked(root, repository)
+            live = _assert_no_live_search_overlap(rows, model)
+            active_rows = _active_model_rows(rows, model)
+            if active_rows:
+                raise RuntimeError(f"Active ledger jobs still exist for {model}: {active_rows}.")
+            studies = [study for study in design["studies"] if study["model"] == model]
+            if len(studies) != 1:
+                raise RuntimeError(f"Frozen design does not contain exactly one {model} study.")
+            database = root / "studies" / f"{model}.db"
+            if not database.is_file():
+                raise FileNotFoundError(database)
+            import optuna
+
+            study = optuna.load_study(
+                study_name=studies[0]["study_name"], storage=f"sqlite:///{database}"
+            )
+            by_number = {int(trial.number): trial for trial in study.get_trials(deepcopy=False)}
+            before = []
+            for number in requested:
+                trial = by_number.get(number)
+                if trial is None or trial.state not in {
+                    optuna.trial.TrialState.RUNNING,
+                    optuna.trial.TrialState.WAITING,
+                }:
+                    observed = "missing" if trial is None else trial.state.name
+                    raise RuntimeError(
+                        f"Trial {(model, number)} is not stale RUNNING/WAITING: {observed}."
+                    )
+                before.append({"trial_number": number, "state": trial.state.name})
+            source_sha256 = _sha256(database)
+            backup = _create_study_backup(root, model)
+            backup_sha256 = _sha256(backup)
+            for number in requested:
+                study.tell(number, state=optuna.trial.TrialState.FAIL)
+            observed_after = {
+                int(trial.number): trial.state.name for trial in study.get_trials(deepcopy=False)
+            }
+            if any(observed_after.get(number) != "FAIL" for number in requested):
+                raise RuntimeError("Optuna did not persist every requested stale trial as FAIL.")
+            binding_artifacts = _refresh_repaired_bindings(root, model, set(requested))
+            stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S%fZ")
+            output = root / "state" / "stale_repairs" / f"{stamp}__{model}.json"
+            payload = {
+                "schema_version": 1,
+                "repaired_at": datetime.now(timezone.utc).isoformat(),
+                "code_commit": design["code_commit"],
+                "model": model,
+                "scheduler_proof": {
+                    "live_packed_search_job_ids": sorted(live),
+                    "active_model_ledger_rows": [],
+                },
+                "database": str(database.resolve()),
+                "database_sha256_before": source_sha256,
+                "database_sha256_after": _sha256(database),
+                "backup": str(backup.resolve()),
+                "backup_sha256": backup_sha256,
+                "trials_before": before,
+                "trials_after": [
+                    {"trial_number": number, "state": observed_after[number]}
+                    for number in requested
+                ],
+                "updated_binding_artifacts": binding_artifacts,
+            }
+            _atomic_json(output, payload)
+            _append_failure_event(
+                root,
+                {
+                    **event,
+                    "outcome": "repaired",
+                    "artifact": str(output.resolve()),
+                    "artifact_sha256": _sha256(output),
+                    "backup": str(backup.resolve()),
+                    "backup_sha256": backup_sha256,
+                },
+            )
+            return output
+        except Exception as error:
+            _append_failure_event(
+                root,
+                {**event, "outcome": "refused_or_failed", "error_signature": str(error)},
+            )
+            raise
 
 
 def main() -> None:
@@ -894,6 +1336,8 @@ def main() -> None:
         print(validate_canaries(root, repository))
     elif args.command == "reconcile":
         print(json.dumps(reconcile(root, repository), indent=2, sort_keys=True))
+    elif args.command == "repair-stale":
+        print(repair_stale(root, repository, args.model, args.trial))
     else:
         print(backup_study(root, repository, args.model))
 

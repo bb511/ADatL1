@@ -358,14 +358,17 @@ contains all four mappings and CDF simultaneously.
   and `aggregate`.
 - `scripts/physics_background_pairing_operations.py` is the mutable control plane for
   an immutable campaign. It submits an exact frozen-worktree search chunk, refuses
-  scheduler or Optuna overlap, reconciles Slurm state into `job_history.csv`, seals
-  terminal logs by SHA-256, and for each successful packed controller also seals its
-  terminal chunk manifest and Optuna-to-Hydra binding file. Successful retrain array
-  tasks likewise seal their already-validated result marker. It creates consistent
-  quiescent SQLite backups and applies a fail-closed terminal canary gate. Search
-  submission also refuses to exceed 600 potentially usable trials, including the final
-  partial chunk. It never imports or changes the scientific runner used by an active
-  campaign.
+  scheduler or Optuna overlap, and holds an interprocess campaign lock across live
+  scheduler checks, `sbatch`, and ledger registration. Reconciliation seals terminal
+  logs and validates every successful packed chunk's exact bindings, objective
+  contract, run provenance, complete MLflow histories, and required retained
+  checkpoint/threshold state before sealing `chunk_validation.json`. Successful
+  retrain array tasks likewise seal their already-validated result marker. It creates
+  consistent quiescent SQLite backups, applies a fail-closed terminal canary gate, and
+  provides an explicit backed-up, scheduler-proven `repair-stale` recovery command.
+  Search submission enforces the 720-minute partition limit and refuses to exceed 600
+  potentially usable trials, including the final partial chunk. It never imports or
+  changes the scientific runner used by an active campaign.
 - `scripts/clariden/physics_background_pairing_pilot.sbatch` runs one unified one-epoch
   model pilot on the debug partition.
 - `scripts/clariden/physics_background_pairing_sweep.sbatch` is a 12-hour packed
@@ -697,11 +700,13 @@ uv run python scripts/physics_background_pairing_operations.py \
 ```
 
 The helper calculates `--nodes=ceil(jobs/4)`, authenticates the frozen commit and clean
-worktree, exports campaign-local runtime paths, and rejects an active ledger row or
-`RUNNING`/`WAITING` Optuna trial for the same model. It additionally requires the
-authenticated six-model terminal canary artifact and refuses `usable_complete + trials`
-above 600; therefore the last request must use the exact remaining count. The direct
-`sbatch` equivalent is a recovery/debug fallback only:
+worktree, exports campaign-local runtime paths, queries user-scoped live Slurm jobs,
+and rejects an active or unregistered packed allocation, active ledger row, or
+`RUNNING`/`WAITING` Optuna trial for the same model. The check, submission, and ledger
+write share one interprocess lock. It additionally requires the authenticated six-model
+terminal canary artifact, rejects timeouts above 720 minutes, and refuses
+`usable_complete + trials` above 600; therefore the last request must use the exact
+remaining count. The direct `sbatch` equivalent is a recovery/debug fallback only:
 
 ```bash
 sbatch --parsable \
@@ -719,8 +724,9 @@ Set `--nodes=ceil(CHUNK_JOBS/4)` whenever overriding the 48-job default. Start w
 one-node, four-trial production canary after the packed debug pilot.
 Increase only if scheduler quota, SQLite locking, filesystem load, and GPU throughput
 are healthy. `CHUNK_TRIALS=48` is a convenient accounting unit, not a scientific
-requirement. Thirteen 48-trial chunks normally produce 600 trials, with the final chunk
-capped to the remaining 24, but failed/unusable trials require replacements.
+requirement. From an empty study, twelve full chunks plus a final 24 produce 600; after
+the four production-canary trials, twelve full chunks plus a final 20 produce 600.
+Failed/unusable trials require replacements based on the exact remaining usable count.
 
 ### 6.2 Completion semantics
 
@@ -738,6 +744,14 @@ uv run python scripts/physics_background_pairing_operations.py \
 
 Persist the output atomically to `state/latest_status.json`, append a timestamped row to
 `state/job_history.csv`, and update `RUN_LEDGER.md`.
+
+For a successful packed job, `reconcile` writes `chunk_validation.json` beside
+`chunk.json` and records its SHA-256 as the ledger's `success_sha256`; the separate
+`bindings_sha256` seals `trial_bindings.json`. A chunk is not sealed merely because
+Optuna contains finite vectors. Every chunk-local binding must be `COMPLETE`, match the
+persistent Optuna trial and schema-2 artifact, have exact objective order/provenance and
+one finished 50-epoch MLflow run with complete finite histories, and retain all required
+last/primary checkpoints with the correct finite native/OAS threshold namespace.
 
 Only `usable_complete` counts toward 600. A usable trial is:
 
@@ -898,10 +912,21 @@ Forty-eight workers may contend on one SQLite database despite `timeout=600`.
 - Reduce parallel jobs when lock errors occur.
 - Back up the quiescent database before repair.
 - A hard kill may leave Optuna trials `RUNNING`. First prove with `squeue` and `sacct`
-  that no corresponding worker exists. Only then use a small tested Optuna repair
-  utility/API to mark those exact stale trials failed. Never edit SQLite manually.
-- Add a unit-tested `repair-stale` campaign command if this situation occurs more than
-  once; record trial IDs and backup hash.
+  that no corresponding worker exists. Then invoke the explicit mutable-control command
+  with every exact stale trial number, for example:
+
+```bash
+uv run python scripts/physics_background_pairing_operations.py \
+  --root "${BGPAIR_ROOT}" --execution-repository "${BGPAIR_REPO}" \
+  repair-stale --model ae --trial 48 --trial 49
+```
+
+  The command reconciles the ledger under the campaign lock, refuses a live same-model
+  or unregistered packed job, requires every requested trial to be `RUNNING`/`WAITING`,
+  creates and hashes a consistent database backup, then marks only those trial numbers
+  `FAIL` through Optuna's API. It updates any explicit binding state and writes both a
+  `state/stale_repairs/*.json` audit artifact and a `failures.jsonl` success/refusal
+  event. Never edit SQLite manually or repair an inferred range of trial numbers.
 
 ### 8.4 Scientific/code/data failures
 
@@ -992,9 +1017,11 @@ uv run python scripts/physics_background_pairing_operations.py \
 
 The helper validates every existing marker and referenced hash, computes the exact
 missing index set, compresses it into one Slurm array expression, refuses overlapping
-retrain arrays, exports the frozen runtime paths, and registers every array task in
-`job_history.csv`. Use `missing-retrains` for a read-only reconciliation before and
-after each array. Direct `sbatch --array` is a recovery fallback only.
+retrain arrays by both user-scoped live Slurm state and the ledger, exports the frozen
+runtime paths, and registers every array task in `job_history.csv`. The live check,
+`sbatch`, and registration share the same campaign operation lock used by search jobs.
+Use `missing-retrains` for a read-only reconciliation before and after each array.
+Direct `sbatch --array` is a recovery fallback only.
 
 Each index must:
 

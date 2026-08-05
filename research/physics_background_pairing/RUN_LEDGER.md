@@ -33,10 +33,10 @@ Last updated: 2026-08-05 (Europe/Zurich)
 | Scientific contract | complete | `PLAN.md` |
 | Implementation audit | complete | Model/data/HPO settings match `dev/patrick`; requested metric scope, score routing, CDF, retraining, and padding semantics audited |
 | Code and configs | fix in validation | Threshold buffers are registered before checkpointing and the shared search suites now instantiate native plus AE/VAE OAS calibration callbacks on the normal validation stream only |
-| Tests and preflight | complete | 36 selection/config/campaign tests, 54 reporting/analysis/artifact-audit tests, and 18 operational-control tests pass; all six configs compose, all 8 pair tables authenticate, and scratch capacity is sufficient |
+| Tests and preflight | complete | 36 selection/config/campaign tests, 54 reporting/analysis/artifact-audit tests, and 26 operational-control cases pass; all six configs compose, all 8 pair tables authenticate, and scratch capacity is sufficient |
 | Autonomous runbook | complete | `PLAN.md` now specifies the full six-study state machine, artifact contract, scheduler/timer policy, failure recovery, portable exports, analysis, and final `REPORT.md` |
 | Provenance/report hardening | complete | Added persistent Optuna-to-Hydra bindings, run/checkpoint/MLflow identities, reverse G-to-E drift, fail-closed artifact audits, and deterministic scientific-analysis tables in the final portable package |
-| Operational control | complete | Separate mutable helper submits only into the frozen execution worktree, refuses scheduler/Optuna overlap and target overshoot, reconciles Slurm and array tasks, hashes terminal logs plus successful chunk/binding/retrain-marker artifacts, creates consistent SQLite backups, fail-closes the 24-run canary gate, and resubmits only missing authenticated retrain indices |
+| Operational control | complete | Separate mutable helper locks scheduler checks through submission/ledger registration, rejects live or unregistered search/retrain allocations, enforces the 720-minute limit, audits complete per-chunk Optuna/Hydra/MLflow/checkpoint state before sealing success, and provides backed-up scheduler-proven exact stale-trial repair |
 | Pilots | complete | Corrected unified jobs AE `3008281`, VAE `3008282`, DSAE `3008321`, DSVAE `3008344`, DeepSVDD `3008351`, and RealNVP `3008360` passed; four-GPU temporary AE/Optuna pilot `3008377` passed all launcher, binding, objective, and threshold gates |
 | Production canaries | running | Four-trial x 50-epoch jobs AE `3008470`, VAE `3008471`, DSAE `3008472`, DSVAE `3008473`, DeepSVDD `3008474`, and RealNVP `3008475` are running concurrently on six one-node allocations |
 | Full searches | superseded before completion | Jobs AE `3007292`, VAE `3007311`, DSAE `3007310`, DSVAE `3007318`, DeepSVDD `3007340`, RealNVP `3007345`, and legacy `3005821`/`3005823` were cancelled; no usable trial completed and no bulk chunk was submitted |
@@ -72,6 +72,18 @@ codespell) pass; the unrelated baseline debt must not be mixed into this campaig
   or running competing controllers against one study.
 
 ## Verification log
+
+- 2026-08-05: hardened the mutable control plane before bulk transition. Search and
+  retrain submissions now share an interprocess lock across user-scoped live Slurm
+  checks, `sbatch`, and ledger registration; search timeouts cannot exceed 720 minutes.
+  Successful packed reconciliation validates only that chunk's COMPLETE bindings,
+  schema-2 objective/provenance contract, finished 50-epoch MLflow histories, and
+  required candidate/threshold state before hashing `chunk_validation.json` as
+  `success_sha256`. The new explicit `repair-stale` path requires exact trial IDs,
+  terminal scheduler proof, and an authenticated pre-mutation SQLite backup before
+  using Optuna's API, and persists repair/refusal evidence. This mutable-checkout change
+  does not alter the frozen `cbeb3fa` execution worktree or campaign science. All 26
+  focused operational-control cases and all changed-file hooks pass.
 
 - 2026-08-05: final reporting now authenticates all 40,800 configured physical search
   checkpoint slots across the authoritative first 600 usable trials per model. It

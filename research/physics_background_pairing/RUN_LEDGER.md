@@ -73,6 +73,12 @@ codespell) pass; the unrelated baseline debt must not be mixed into this campaig
 
 ## Verification log
 
+- 2026-08-05: reconciled the paper's three-candidate prose with its `dev/patrick`
+  implementation. Stable-native is configured for every trial but is absent when no
+  10-epoch window reaches less than 5% variation; the reference evaluator then compares
+  last and primary without a fallback. The terminal gate now audits 272 configured
+  slots, requires all 248 last/primary checkpoints, and records stable availability.
+
 - 2026-08-05: hardened bulk submission so no individual model can start until the
   authenticated six-model canary artifact exists, and so a final chunk cannot exceed
   the 600-usable-trial target. Sixteen focused operational-control tests now pass.

@@ -210,6 +210,7 @@ def _require_canary_gate(root: Path, design: dict[str, Any]) -> None:
     payload = json.loads(path.read_text(encoding="utf-8"))
     jobs = payload.get("jobs", [])
     studies = payload.get("studies", [])
+    availability = payload.get("candidate_availability", {})
     if (
         payload.get("schema_version") != 1
         or payload.get("code_commit") != design["code_commit"]
@@ -217,6 +218,13 @@ def _require_canary_gate(root: Path, design: dict[str, Any]) -> None:
         or payload.get("checkpoint_selections") != 224
         or len(payload.get("mlflow_runs", [])) != 24
         or len(payload.get("candidate_checkpoints", [])) != 272
+        or availability.get("configured_slots") != 272
+        or availability.get("required_available") != 248
+        or availability.get("stable_configured") != 24
+        or not 0 <= availability.get("stable_available", -1) <= 24
+        or not 0 <= availability.get("stable_missing", -1) <= 24
+        or availability.get("stable_available", -1) + availability.get("stable_missing", -1) != 24
+        or availability.get("available", -1) != 248 + availability.get("stable_available", -1)
         or len(jobs) != len(MODELS)
         or {row.get("model") for row in jobs} != set(MODELS)
         or any(
@@ -589,12 +597,13 @@ def validate_canaries(root: Path, repository: Path) -> Path:
             Path(binding["optimized_metric_artifact"]).read_text(encoding="utf-8")
         )
         checkpoint_root = Path(artifact["run_provenance"]["checkpoint_run_dir"])
-        families = ["last", "single/ascore_operational/stable"] + [
+        required_families = ["last"] + [
             _primary_checkpoint_family(objective) for objective in studies[model]["objectives"]
         ]
-        if len(set(families)) != len(families):
+        stable_family = "single/ascore_operational/stable"
+        if len({*required_families, stable_family}) != len(required_families) + 1:
             raise RuntimeError(f"Duplicate expected checkpoint family for {model}.")
-        for family in families:
+        for family in required_families:
             if family == "last":
                 paths = [checkpoint_root / "last.ckpt"]
             else:
@@ -608,14 +617,52 @@ def validate_canaries(root: Path, repository: Path) -> Path:
                     "model": model,
                     "trial_number": trial_number,
                     "family": family,
+                    "available": True,
                     **_candidate_checkpoint(paths[0], model),
                 }
             )
+        stable_directory = checkpoint_root / stable_family
+        if not stable_directory.is_dir():
+            raise RuntimeError(
+                f"Stable checkpoint family is not configured for {(model, trial_number)}."
+            )
+        stable_paths = sorted(stable_directory.glob("*.ckpt"))
+        if len(stable_paths) > 1:
+            raise RuntimeError(
+                f"Expected at most one retained {stable_family} checkpoint for "
+                f"{(model, trial_number)}."
+            )
+        candidate_rows.append(
+            {
+                "model": model,
+                "trial_number": trial_number,
+                "family": stable_family,
+                "available": bool(stable_paths),
+                **(
+                    _candidate_checkpoint(stable_paths[0], model)
+                    if stable_paths
+                    else {"path": "", "sha256": "", "thresholds": {}}
+                ),
+            }
+        )
 
     if len(candidate_rows) != 272:
         raise RuntimeError(
-            f"Canary retained-candidate cardinality is incomplete: {len(candidate_rows)} != 272."
+            f"Canary configured-candidate cardinality is incomplete: {len(candidate_rows)} != 272."
         )
+
+    stable_rows = [
+        row for row in candidate_rows if row["family"] == "single/ascore_operational/stable"
+    ]
+    stable_available = sum(bool(row["available"]) for row in stable_rows)
+    candidate_availability = {
+        "configured_slots": len(candidate_rows),
+        "available": sum(bool(row["available"]) for row in candidate_rows),
+        "required_available": len(candidate_rows) - len(stable_rows),
+        "stable_configured": len(stable_rows),
+        "stable_available": stable_available,
+        "stable_missing": len(stable_rows) - stable_available,
+    }
 
     output = root / "state" / "production_canary_validation.json"
     payload = {
@@ -627,6 +674,7 @@ def validate_canaries(root: Path, repository: Path) -> Path:
         "bindings": len(bindings),
         "checkpoint_selections": len(annotated),
         "mlflow_runs": validated_mlflow,
+        "candidate_availability": candidate_availability,
         "candidate_checkpoints": candidate_rows,
     }
     output.parent.mkdir(parents=True, exist_ok=True)

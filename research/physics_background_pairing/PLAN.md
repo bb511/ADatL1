@@ -64,11 +64,16 @@ The paper workflow, adapted to the approved six shared studies, is:
 1. Run 600 usable Optuna trials for each of the six models. Each trial evaluates every
    relevant dataset/score/validation strategy for that model.
 2. Train every search trial for exactly 50 epochs.
-3. For each logical strategy within each trial, retain three checkpoint candidates in
-   this order:
+3. For each logical strategy within each trial, configure three checkpoint candidate
+   families in this order:
    - last epoch;
    - best EMA checkpoint for that strategy's primary criterion;
    - stable native operational-anomaly-score checkpoint.
+   The paper prose calls these three retained candidates, but the `dev/patrick`
+   implementation creates the stable checkpoint only if a 10-epoch window has less
+   than 5% variation. When that condition never occurs, its configured directory is
+   empty and the evaluator compares the two available candidates; it does not invent a
+   fallback or fail the trial. Preserve this reference behavior and audit availability.
 4. Choose one checkpoint per logical strategy using the paper's fixed relative-change
    comparison, `1.25 * relative_change(Q') + relative_change(Q'') > 0`, with metric
    directions respected.
@@ -654,9 +659,11 @@ uv run python scripts/physics_background_pairing_operations.py \
 This must produce `state/production_canary_validation.json` and otherwise fail closed.
 It requires six successful hash-sealed Slurm jobs, 24 usable 50-epoch Optuna trials,
 exact Optuna/Hydra/MLflow bindings, all finite contiguous metric histories, 224 logical
-checkpoint selections, and all 272 retained checkpoint candidates with finite native
-thresholds plus independent OAS thresholds for AE/VAE. It also reauthenticates the
-resolved E/G-only search configuration. Do not submit a bulk chunk without this file.
+checkpoint selections, and all 272 configured candidate slots. The 248 required
+last/primary candidates must exist with finite native thresholds plus independent OAS
+thresholds for AE/VAE; each of the 24 stable slots records whether its strict criterion
+produced a checkpoint. It also reauthenticates the resolved E/G-only search
+configuration. Do not submit a bulk chunk without this file.
 
 ## 6. Search execution: six studies, 600 usable trials each
 
@@ -761,7 +768,9 @@ Every search trial must provide:
   - the flattened vector;
   - `selections[logical_objective].optimized_ckpt_name`;
   - `selections[logical_objective].optimized_metric`;
-- the three checkpoint families required by each logical objective;
+- the configured last, primary-EMA, and stable-native checkpoint families required by
+  each logical objective; last and primary must contain a checkpoint, while an empty
+  stable family is valid only when the reference 10-epoch/5% criterion never fired;
 - MLflow epoch series for every relevant native/OAS CAP, rank correlation, W1, drift,
   and native secondary score;
 - Hydra resolved config and run logs;
@@ -1156,8 +1165,9 @@ scientific conclusions.
 5. **Robustness:** report mean, median, worst anomaly, bottom-quartile/CVaR, and the
    dispersion across the 20 anomalies. These are across-anomaly summaries, not
    training-seed uncertainty.
-6. **Checkpoint behavior:** report how often `last`, primary EMA, and stable native win
-   per metric/model/score. This validates the paper checkpoint rule's practical effect.
+6. **Checkpoint behavior:** report stable-candidate availability and how often `last`,
+   primary EMA, and stable native win per metric/model/score. This validates the paper
+   checkpoint rule's practical effect without hiding strict-stability non-availability.
 7. **Proxy association:** analyze how validation Q'/Q'' values and front location
    associate with downstream mean performance. Distinguish descriptive correlation
    from causal or unbiased model-selection claims.

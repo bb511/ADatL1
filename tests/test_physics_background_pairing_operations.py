@@ -127,6 +127,14 @@ def test_terminal_canary_gate_authenticates_exact_campaign_cardinalities(tmp_pat
         "checkpoint_selections": 224,
         "mlflow_runs": [{} for _ in range(24)],
         "candidate_checkpoints": [{} for _ in range(272)],
+        "candidate_availability": {
+            "configured_slots": 272,
+            "available": 272,
+            "required_available": 248,
+            "stable_configured": 24,
+            "stable_available": 24,
+            "stable_missing": 0,
+        },
         "jobs": [
             {
                 "model": model,
@@ -429,7 +437,7 @@ def test_candidate_checkpoint_requires_independent_oas_threshold(tmp_path) -> No
 
 
 def test_validate_canaries_covers_all_trials_and_candidate_families(monkeypatch, tmp_path) -> None:
-    """The terminal gate covers 24 runs, 224 selections, and every retained candidate."""
+    """The terminal gate audits all candidate slots and tolerates absent stable checkpoints."""
     root, repository = _campaign(tmp_path)
     _authenticate(monkeypatch)
     scores = {
@@ -514,7 +522,10 @@ def test_validate_canaries_covers_all_trials_and_candidate_families(monkeypatch,
             for family in families:
                 directory = checkpoint_root / family
                 directory.mkdir(parents=True)
-                (directory / "candidate.ckpt").write_text("candidate", encoding="utf-8")
+                if not (
+                    model == "ae" and index == 0 and family == "single/ascore_operational/stable"
+                ):
+                    (directory / "candidate.ckpt").write_text("candidate", encoding="utf-8")
             artifact = hydra / "optimized_metric.json"
             artifact.write_text(
                 json.dumps({"run_provenance": {"checkpoint_run_dir": str(checkpoint_root)}}),
@@ -571,3 +582,11 @@ def test_validate_canaries_covers_all_trials_and_candidate_families(monkeypatch,
     assert payload["bindings"] == 24
     assert payload["checkpoint_selections"] == 224
     assert len(payload["candidate_checkpoints"]) == 272
+    assert payload["candidate_availability"] == {
+        "configured_slots": 272,
+        "available": 271,
+        "required_available": 248,
+        "stable_configured": 24,
+        "stable_available": 23,
+        "stable_missing": 1,
+    }

@@ -33,10 +33,11 @@ Last updated: 2026-08-05 (Europe/Zurich)
 | Scientific contract | complete | `PLAN.md` |
 | Implementation audit | complete | Model/data/HPO settings match `dev/patrick`; requested metric scope, score routing, CDF, retraining, and padding semantics audited |
 | Code and configs | fix in validation | Threshold buffers are registered before checkpointing and the shared search suites now instantiate native plus AE/VAE OAS calibration callbacks on the normal validation stream only |
-| Tests and preflight | complete | 67 campaign tests pass after the single-run provenance fix; all six configs compose, scoped hooks pass, all 8 pair tables authenticate, and scratch capacity is sufficient |
+| Tests and preflight | complete | 36 selection/config/campaign tests and 54 reporting/analysis/artifact-audit tests pass; all six configs compose, all 8 pair tables authenticate, and scratch capacity is sufficient |
 | Autonomous runbook | complete | `PLAN.md` now specifies the full six-study state machine, artifact contract, scheduler/timer policy, failure recovery, portable exports, analysis, and final `REPORT.md` |
-| Provenance/report hardening | complete | Added persistent Optuna-to-Hydra chunk bindings, run/checkpoint/MLflow identities, reverse G-to-E drift persistence, and fail-closed snapshot/finalize exports with synthetic positive/tamper/leakage tests |
-| Pilots | replacement running | Corrected AE `3008281` is running; VAE `3008282` is queued behind the debug-QoS one-job limit. Both fail closed unless selected checkpoints contain finite native/OAS thresholds |
+| Provenance/report hardening | complete | Added persistent Optuna-to-Hydra bindings, run/checkpoint/MLflow identities, reverse G-to-E drift, fail-closed artifact audits, and deterministic scientific-analysis tables in the final portable package |
+| Pilots | complete | Corrected unified jobs AE `3008281`, VAE `3008282`, DSAE `3008321`, DSVAE `3008344`, DeepSVDD `3008351`, and RealNVP `3008360` passed; four-GPU temporary AE/Optuna pilot `3008377` passed all launcher, binding, objective, and threshold gates |
+| Production canaries | running | Four-trial x 50-epoch jobs AE `3008470`, VAE `3008471`, DSAE `3008472`, DSVAE `3008473`, DeepSVDD `3008474`, and RealNVP `3008475` are running concurrently on six one-node allocations |
 | Full searches | superseded before completion | Jobs AE `3007292`, VAE `3007311`, DSAE `3007310`, DSVAE `3007318`, DeepSVDD `3007340`, RealNVP `3007345`, and legacy `3005821`/`3005823` were cancelled; no usable trial completed and no bulk chunk was submitted |
 | Retraining/evaluation | pending | Offline 56-front freeze and unique 200-epoch retraining remain implemented; corrected checkpoint-specific native/OAS threshold restoration requires GPU validation |
 | Aggregation/report | pending | Score-aware downstream oracle aggregation is implemented; awaits validation and results |
@@ -70,6 +71,24 @@ codespell) pass; the unrelated baseline debt must not be mixed into this campaig
   or running competing controllers against one study.
 
 ## Verification log
+
+- 2026-08-05: packed launcher pilot `3008377` completed in 6m25s. Its temporary
+  Optuna study contains trials 0-3 in `COMPLETE` state, exactly 28 finite values
+  per trial, ordered Hydra bindings 0-3, and four threshold audits with distinct
+  finite native/OAS thresholds. Scheduler accounting proves four one-GPU steps,
+  each with 16 CPUs and 96 GB, and worker logs prove CUDA devices 0-3. Six real
+  four-trial x 50-epoch canaries were then submitted from the same frozen commit:
+  AE `3008470`, VAE `3008471`, DSAE `3008472`, DSVAE `3008473`, DeepSVDD
+  `3008474`, and RealNVP `3008475`; all six entered `RUNNING` immediately.
+
+- 2026-08-05: all six corrected unified pilots on `cbeb3fa` completed in 2m37s
+  to 4m54s with the exact 14/7 logical-objective contracts and finite threshold
+  audits. AE and VAE checkpoints contain distinct native/OAS thresholds. An
+  independent MLflow audit of AE/VAE proved exactly the normal, background0, and
+  background1 validation streams, all 25 required finite one-epoch histories, all
+  four authenticated mapping strategies plus CDF, and no anomaly loader exposure.
+  The packed launcher pilot uses a temporary database and does not touch any
+  production study.
 
 - 2026-08-05: replacement AE pilot `3008187` on `6edb3f7` produced retained
   checkpoints but the live state-dict audit still found no threshold keys. Resolved

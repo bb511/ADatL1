@@ -20,6 +20,13 @@ from pathlib import Path
 from typing import Any, Iterable
 from urllib.parse import unquote, urlparse
 
+from src.evaluation.physics_background_pairing_analysis import (
+    build_physics_background_pairing_analysis,
+)
+from src.evaluation.physics_background_pairing_artifact_audit import (
+    audit_physics_background_pairing_artifacts,
+)
+
 REPOSITORY_ROOT = Path(__file__).resolve().parents[1]
 MODEL_ORDER = ("ae", "vae", "dsae", "dsvae", "svdd", "realnvp")
 TARGET_RATE_KHZ = 0.25
@@ -125,6 +132,25 @@ def _write_csv(path: Path, rows: Iterable[dict[str, Any]], fields: list[str]) ->
         for row in rows:
             writer.writerow({field: row.get(field) for field in fields})
     temporary.replace(path)
+
+
+def _write_table_group(directory: Path, tables: dict[str, list[dict[str, Any]]]) -> None:
+    """Write nonempty, schema-consistent deterministic row tables."""
+    for name in sorted(tables):
+        rows = tables[name]
+        if not rows:
+            raise RuntimeError(f"Portable table {name!r} is unexpectedly empty.")
+        fields = list(rows[0])
+        if any(set(row) != set(fields) for row in rows):
+            raise RuntimeError(f"Portable table {name!r} has inconsistent row schemas.")
+        encoded = [
+            {
+                key: _json_cell(value) if isinstance(value, (dict, list, tuple)) else value
+                for key, value in row.items()
+            }
+            for row in rows
+        ]
+        _write_csv(directory / f"{name}.csv", encoded, fields)
 
 
 def _json_cell(value: Any) -> str:
@@ -533,6 +559,49 @@ def _checkpoint_rows(
         )
     )
     return checkpoint_rows, mlflow_rows
+
+
+def _checkpoint_family(checkpoint: str, objective: dict[str, Any]) -> str:
+    """Classify one exact evaluator checkpoint ID for its logical objective."""
+    metric = objective["metric"]
+    score = objective["score"]
+    if metric == "cap":
+        primary = f"cap_{score}_{objective['strategy']}_ema_" "ZB_run396102_vs_ZB_run398183"
+    elif metric == "wasserstein":
+        primary = f"w1dist_{score}_ema_ZB_run396102_vs_ZB_run398183"
+    elif metric == "drift":
+        primary = f"{score}_operational_drift_ema"
+    else:
+        raise RuntimeError(f"Unknown logical metric: {metric}")
+    direction = "max" if objective["directions"][0] == "maximize" else "min"
+    allowed = {
+        "last": "last",
+        "single/ascore_operational/stable": "stable_native",
+        f"summary/{primary}/{direction}": "primary_ema",
+    }
+    if checkpoint not in allowed:
+        raise RuntimeError(
+            f"Checkpoint {checkpoint!r} is not an exact candidate for {objective['id']}."
+        )
+    return allowed[checkpoint]
+
+
+def _annotate_checkpoint_families(
+    design: dict[str, Any], rows: list[dict[str, Any]]
+) -> list[dict[str, Any]]:
+    """Attach fail-closed family labels to authenticated selection rows."""
+    objectives = {
+        (study["model"], objective["id"]): objective
+        for study in design["studies"]
+        for objective in study["objectives"]
+    }
+    output = []
+    for source in rows:
+        row = dict(source)
+        objective = objectives[(row["model"], row["logical_objective"])]
+        row["checkpoint_family"] = _checkpoint_family(str(row["optimized_ckpt_name"]), objective)
+        output.append(row)
+    return output
 
 
 def _selection_metric_keys(design: dict[str, Any], model: str) -> list[str]:
@@ -2154,6 +2223,42 @@ def _build_final(
     _append_test_metrics(root, manifest, oracle, primary_rows)
     checkpoints, mlflow = _checkpoint_rows(root, design, include_retrains=True)
     mlflow = _validate_mlflow_runs(root, design, mlflow, final=True)
+    annotated_checkpoints = _annotate_checkpoint_families(design, checkpoints)
+    markers = []
+    for row in manifest["retrain_runs"]:
+        marker = _read_json(
+            root / "retraining" / "markers" / f"{int(row['retrain_index']):04d}.json"
+        )
+        markers.append({**marker, "retrain_index": int(row["retrain_index"])})
+    artifact_audit = audit_physics_background_pairing_artifacts(
+        campaign_root=root,
+        design=design,
+        manifest=manifest,
+        markers=markers,
+        checkpoint_selections=[row for row in annotated_checkpoints if row["phase"] == "retrain"],
+    )
+    audited_families = {
+        (row["model"], int(row["retrain_index"]), row["logical_objective"]): (
+            row["checkpoint_family_id"],
+            row["checkpoint_family"],
+        )
+        for row in artifact_audit["checkpoint_families"]
+    }
+    for row in annotated_checkpoints:
+        if row["phase"] != "retrain":
+            continue
+        key = (row["model"], int(row["retrain_index"]), row["logical_objective"])
+        expected = (row["optimized_ckpt_name"], row["checkpoint_family"])
+        if audited_families.get(key) != expected:
+            raise RuntimeError(f"Artifact-audit checkpoint family differs for {key}.")
+    analysis = build_physics_background_pairing_analysis(
+        design,
+        manifest,
+        oracle,
+        annotated_checkpoints,
+        primary_rows,
+    )
+    analysis_tables = {name: rows for name, rows in analysis.items() if name != "analysis_summary"}
     _write_csv(output / "front_memberships.csv", front_rows, list(front_rows[0]))
     _write_csv(output / "retrains.csv", retrain_rows, list(retrain_rows[0]))
     _write_csv(output / "checkpoint_selections.csv", checkpoints, _checkpoint_fields())
@@ -2161,6 +2266,9 @@ def _build_final(
     _write_csv(output / "winners.csv", winner_rows, list(winner_rows[0]))
     _write_csv(output / "downstream_efficiencies.csv", downstream_rows, list(downstream_rows[0]))
     _write_csv(output / "primary_metrics.csv", primary_rows, list(primary_rows[0]))
+    _write_table_group(output / "analysis", analysis_tables)
+    _write_json(output / "analysis" / "analysis_summary.json", analysis["analysis_summary"])
+    _write_table_group(output / "artifact_audit", artifact_audit)
     jobs, _ = _validated_state_ledgers(root, design, final=True)
     _copy_run_evidence(root, output, winner_rows, jobs)
     _write_figures(output, winner_rows, downstream_rows)
@@ -2189,6 +2297,8 @@ def _build_final(
     (output / "README.md").write_text(
         "# Portable physics background-pairing results\n\n"
         "Start with `REPORT.md`. Verify downloads with `sha256sum -c manifest.sha256`. "
+        "Machine-readable scientific comparisons and checkpoint/config validation are under "
+        "`analysis/` and `artifact_audit/`. "
         "The manifest intentionally excludes itself. Large databases, checkpoints, raw data, "
         "and the full MLflow store remain in the authoritative scratch campaign recorded in "
         "`provenance.json`.\n",

@@ -12,6 +12,7 @@ from pathlib import Path
 
 import optuna
 import pytest
+import torch
 from mlflow.entities import Metric
 from mlflow.tracking import MlflowClient
 
@@ -509,10 +510,41 @@ def _frozen_results(root: Path, design: dict) -> None:
         )
         hydra = artifact.parent / ".hydra"
         hydra.mkdir()
-        (hydra / "config.yaml").write_text("model: synthetic\n", encoding="utf-8")
+        callbacks = {"anomaly_eff": {"output_name": "ascore/full"}}
+        evaluation_callbacks = {
+            "anomaly_efficiency": {"name": "eff_native", "output_name": "ascore/full"}
+        }
+        if study["model"] in {"ae", "vae"}:
+            callbacks["anomaly_eff_oas"] = {
+                "output_name": "ascore/residual_oas",
+                "threshold_namespace": "residual_oas",
+                "metric_suffix": "residual_oas",
+            }
+            evaluation_callbacks["anomaly_efficiency_oas"] = {
+                "name": "eff_residual_oas",
+                "output_name": "ascore/residual_oas",
+                "threshold_namespace": "residual_oas",
+            }
+        resolved_config = {
+            "data": {"validation_aux_datasets": []},
+            "algorithm": {
+                "target_rate": report.TARGET_RATE_KHZ,
+                "base_rate": report.BASE_RATE_KHZ,
+            },
+            "callbacks": callbacks,
+            "evaluation": {"callbacks": evaluation_callbacks},
+        }
+        (hydra / "config.yaml").write_text(
+            json.dumps(resolved_config, indent=2) + "\n", encoding="utf-8"
+        )
         (hydra / "overrides.yaml").write_text("[]\n", encoding="utf-8")
         (artifact.parent / "train.log").write_text("synthetic retrain log\n", encoding="utf-8")
         checkpoint_root = root / "runtime" / "checkpoints" / study["model"]
+        checkpoint_root.mkdir(parents=True, exist_ok=True)
+        thresholds = {"thres_operational": torch.tensor(0.4)}
+        if study["model"] in {"ae", "vae"}:
+            thresholds["thres_operational__residual_oas"] = torch.tensor(0.4)
+        torch.save({"state_dict": thresholds}, checkpoint_root / "last.ckpt")
         value_files = []
         for score in design["scores_by_model"][study["model"]]:
             values_path = (
@@ -542,7 +574,7 @@ def _frozen_results(root: Path, design: dict) -> None:
                 ]
             )
             for callback, objects in callbacks:
-                summary = checkpoint_root / "last" / "plots" / "test" / callback / "summary.pkl"
+                summary = checkpoint_root / "plots" / "test" / callback / "summary.pkl"
                 summary.parent.mkdir(parents=True, exist_ok=True)
                 with summary.open("wb") as handle:
                     for value in objects:
@@ -627,6 +659,19 @@ def test_finalize_exports_56_winners_and_reverse_drift(tmp_path) -> None:
         metrics = list(report.csv.DictReader(handle))
     assert sum(row["metric_name"] == "reverse_drift_posthoc" for row in metrics) == 8
     assert sum(row["metric_name"] == "rankcorr_test" for row in metrics) == 40
+    analysis_summary = json.loads(
+        (output / "analysis" / "analysis_summary.json").read_text(encoding="utf-8")
+    )
+    assert analysis_summary["fronts"] == 56
+    assert analysis_summary["front_candidates"] == 56
+    with (output / "artifact_audit" / "checkpoint_families.csv").open(encoding="utf-8") as handle:
+        assert len(list(report.csv.DictReader(handle))) == 56
+    with (output / "artifact_audit" / "threshold_audit.csv").open(encoding="utf-8") as handle:
+        assert len(list(report.csv.DictReader(handle))) == 8
+    with (output / "artifact_audit" / "metric_summary_files.csv").open(encoding="utf-8") as handle:
+        assert len(list(report.csv.DictReader(handle))) == 56
+    assert (output / "analysis" / "mapping_comparisons.csv").is_file()
+    assert (output / "analysis" / "proxy_associations.csv").is_file()
     manifest_lines = (output / "manifest.sha256").read_text(encoding="utf-8").splitlines()
     assert all(not line.endswith("  manifest.sha256") for line in manifest_lines)
     assert all("repository" not in line for line in manifest_lines)
@@ -676,6 +721,17 @@ def test_finalize_rejects_changed_retrain_artifact(tmp_path) -> None:
     artifact.write_text("{}\n", encoding="utf-8")
 
     with pytest.raises(RuntimeError, match="Changed optimized artifact"):
+        report.finalize(root, root / "portable")
+
+
+def test_finalize_rejects_missing_checkpoint_threshold(tmp_path) -> None:
+    """Final publication fails closed when a selected checkpoint lacks its OAS threshold."""
+    root, design = _campaign(tmp_path)
+    _frozen_results(root, design)
+    checkpoint = root / "runtime" / "checkpoints" / "ae" / "last.ckpt"
+    torch.save({"state_dict": {"thres_operational": torch.tensor(0.4)}}, checkpoint)
+
+    with pytest.raises(ValueError, match="Threshold buffer keys differ"):
         report.finalize(root, root / "portable")
 
 

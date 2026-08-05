@@ -232,6 +232,8 @@ def _require_canary_gate(root: Path, design: dict[str, Any]) -> None:
             or row.get("exit_code") != "0:0"
             or row.get("commit") != design["code_commit"]
             or not row.get("log_sha256")
+            or not row.get("success_sha256")
+            or not row.get("bindings_sha256")
             for row in jobs
         )
         or len(studies) != len(MODELS)
@@ -550,6 +552,8 @@ def validate_canaries(root: Path, repository: Path) -> Path:
             or row["exit_code"] != "0:0"
             or row["commit"] != design["code_commit"]
             or not row["log_sha256"]
+            or not row["success_sha256"]
+            or not row["bindings_sha256"]
         ):
             raise RuntimeError(f"Production canary job is not authenticated: {row}")
 
@@ -735,6 +739,42 @@ def _accounting_time(value: Any) -> str:
     return "" if seconds <= 0 else datetime.fromtimestamp(seconds, timezone.utc).isoformat()
 
 
+def _completed_search_artifacts(root: Path, row: dict[str, str]) -> tuple[str, str]:
+    """Authenticate one successful packed controller and its final trial bindings."""
+    model = row["model"]
+    matches = []
+    for path in sorted((root / "sweeps" / model).glob("*/chunk.json")):
+        payload = json.loads(path.read_text(encoding="utf-8"))
+        if str(payload.get("slurm_job_id")) == row["job_id"]:
+            matches.append((path, payload))
+    if len(matches) != 1:
+        raise RuntimeError(
+            f"Expected one terminal chunk manifest for job {row['job_id']}, found {len(matches)}."
+        )
+    chunk_path, chunk = matches[0]
+    if (
+        chunk.get("schema_version") != 1
+        or chunk.get("model") != model
+        or chunk.get("controller_status") != "complete"
+        or not chunk.get("completed_at")
+        or int(chunk.get("requested_trials", 0)) <= 0
+    ):
+        raise RuntimeError(f"Terminal chunk manifest is incomplete: {chunk_path}.")
+    bindings_path = chunk_path.parent / "trial_bindings.json"
+    if not bindings_path.is_file():
+        raise FileNotFoundError(f"Terminal trial bindings are missing: {bindings_path}.")
+    bindings = json.loads(bindings_path.read_text(encoding="utf-8"))
+    rows = bindings.get("bindings", [])
+    if (
+        bindings.get("schema_version") != 1
+        or bindings.get("model") != model
+        or len(rows) != int(chunk["requested_trials"])
+        or any(binding.get("optimized_metric_artifact") is None for binding in rows)
+    ):
+        raise RuntimeError(f"Terminal trial bindings are incomplete: {bindings_path}.")
+    return _sha256(chunk_path), _sha256(bindings_path)
+
+
 def reconcile(root: Path, repository: Path) -> list[dict[str, str]]:
     """Reconcile scheduler state and seal terminal Slurm logs by SHA-256."""
     design = _design(root)
@@ -753,6 +793,14 @@ def reconcile(root: Path, repository: Path) -> list[dict[str, str]]:
             if not log_path.is_file():
                 raise FileNotFoundError(f"Terminal job log is missing: {log_path}")
             row["log_sha256"] = _sha256(log_path)
+            if (
+                state == "COMPLETED"
+                and row["exit_code"] == "0:0"
+                and row.get("kind") in {"production_canary", "search_chunk"}
+            ):
+                row["success_sha256"], row["bindings_sha256"] = _completed_search_artifacts(
+                    root, row
+                )
     _atomic_csv(ledger_path, rows)
     return rows
 

@@ -33,10 +33,10 @@ Last updated: 2026-08-05 (Europe/Zurich)
 | Scientific contract | complete | `PLAN.md` |
 | Implementation audit | complete | Model/data/HPO settings match `dev/patrick`; requested metric scope, score routing, CDF, retraining, and padding semantics audited |
 | Code and configs | fix in validation | Threshold buffers are registered before checkpointing and the shared search suites now instantiate native plus AE/VAE OAS calibration callbacks on the normal validation stream only |
-| Tests and preflight | complete | 36 selection/config/campaign tests, 54 reporting/analysis/artifact-audit tests, and 16 operational-control tests pass; all six configs compose, all 8 pair tables authenticate, and scratch capacity is sufficient |
+| Tests and preflight | complete | 36 selection/config/campaign tests, 54 reporting/analysis/artifact-audit tests, and 17 operational-control tests pass; all six configs compose, all 8 pair tables authenticate, and scratch capacity is sufficient |
 | Autonomous runbook | complete | `PLAN.md` now specifies the full six-study state machine, artifact contract, scheduler/timer policy, failure recovery, portable exports, analysis, and final `REPORT.md` |
 | Provenance/report hardening | complete | Added persistent Optuna-to-Hydra bindings, run/checkpoint/MLflow identities, reverse G-to-E drift, fail-closed artifact audits, and deterministic scientific-analysis tables in the final portable package |
-| Operational control | complete | Separate mutable helper submits only into the frozen execution worktree, refuses scheduler/Optuna overlap and target overshoot, reconciles Slurm and array tasks, hashes terminal logs, creates consistent SQLite backups, fail-closes the 24-run canary gate, and resubmits only missing authenticated retrain indices |
+| Operational control | complete | Separate mutable helper submits only into the frozen execution worktree, refuses scheduler/Optuna overlap and target overshoot, reconciles Slurm and array tasks, hashes terminal logs plus successful chunk/binding artifacts, creates consistent SQLite backups, fail-closes the 24-run canary gate, and resubmits only missing authenticated retrain indices |
 | Pilots | complete | Corrected unified jobs AE `3008281`, VAE `3008282`, DSAE `3008321`, DSVAE `3008344`, DeepSVDD `3008351`, and RealNVP `3008360` passed; four-GPU temporary AE/Optuna pilot `3008377` passed all launcher, binding, objective, and threshold gates |
 | Production canaries | running | Four-trial x 50-epoch jobs AE `3008470`, VAE `3008471`, DSAE `3008472`, DSVAE `3008473`, DeepSVDD `3008474`, and RealNVP `3008475` are running concurrently on six one-node allocations |
 | Full searches | superseded before completion | Jobs AE `3007292`, VAE `3007311`, DSAE `3007310`, DSVAE `3007318`, DeepSVDD `3007340`, RealNVP `3007345`, and legacy `3005821`/`3005823` were cancelled; no usable trial completed and no bulk chunk was submitted |
@@ -72,6 +72,10 @@ codespell) pass; the unrelated baseline debt must not be mixed into this campaig
   or running competing controllers against one study.
 
 ## Verification log
+
+- 2026-08-05: successful packed search/canary reconciliation now seals the terminal
+  chunk manifest and exact Optuna-to-Hydra binding file in addition to the Slurm log.
+  The canary gate requires all three hashes. Seventeen operational-control tests pass.
 
 - 2026-08-05: reconciled the paper's three-candidate prose with its `dev/patrick`
   implementation. Stable-native is configured for every trial but is absent when no

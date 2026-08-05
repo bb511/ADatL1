@@ -359,10 +359,12 @@ contains all four mappings and CDF simultaneously.
 - `scripts/physics_background_pairing_operations.py` is the mutable control plane for
   an immutable campaign. It submits an exact frozen-worktree search chunk, refuses
   scheduler or Optuna overlap, reconciles Slurm state into `job_history.csv`, seals
-  terminal logs by SHA-256, creates consistent quiescent SQLite backups, and applies a
-  fail-closed terminal canary gate. Search submission also refuses to exceed 600
-  potentially usable trials, including the final partial chunk. It never imports or
-  changes the scientific runner used by an active campaign.
+  terminal logs by SHA-256, and for each successful packed controller also seals its
+  terminal chunk manifest and Optuna-to-Hydra binding file. It creates consistent
+  quiescent SQLite backups and applies a fail-closed terminal canary gate. Search
+  submission also refuses to exceed 600 potentially usable trials, including the final
+  partial chunk. It never imports or changes the scientific runner used by an active
+  campaign.
 - `scripts/clariden/physics_background_pairing_pilot.sbatch` runs one unified one-epoch
   model pilot on the debug partition.
 - `scripts/clariden/physics_background_pairing_sweep.sbatch` is a 12-hour packed

@@ -142,6 +142,8 @@ def test_terminal_canary_gate_authenticates_exact_campaign_cardinalities(tmp_pat
                 "exit_code": "0:0",
                 "commit": "a" * 40,
                 "log_sha256": "b" * 64,
+                "success_sha256": "c" * 64,
+                "bindings_sha256": "d" * 64,
             }
             for model in operations.MODELS
         ],
@@ -219,6 +221,66 @@ def test_reconcile_hashes_only_terminal_logs(monkeypatch, tmp_path) -> None:
 
     assert rows[0]["log_sha256"] == operations._sha256(terminal_log)
     assert rows[1]["log_sha256"] == ""
+
+
+def test_reconcile_seals_successful_search_manifest_and_bindings(monkeypatch, tmp_path) -> None:
+    """A successful search row authenticates its chunk and exact trial bindings."""
+    root, repository = _campaign(tmp_path)
+    _authenticate(monkeypatch)
+    log = tmp_path / "search.out"
+    log.write_text("done\n", encoding="utf-8")
+    chunk = root / "sweeps" / "ae" / "stamp" / "chunk.json"
+    chunk.parent.mkdir(parents=True)
+    chunk.write_text(
+        json.dumps(
+            {
+                "schema_version": 1,
+                "slurm_job_id": "7",
+                "model": "ae",
+                "controller_status": "complete",
+                "completed_at": "now",
+                "requested_trials": 2,
+            }
+        ),
+        encoding="utf-8",
+    )
+    bindings = chunk.parent / "trial_bindings.json"
+    bindings.write_text(
+        json.dumps(
+            {
+                "schema_version": 1,
+                "slurm_job_id": "7",
+                "model": "ae",
+                "bindings": [
+                    {"optimized_metric_artifact": "a"},
+                    {"optimized_metric_artifact": "b"},
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+    operations._atomic_csv(
+        root / "state" / "job_history.csv",
+        [
+            {
+                "job_id": "7",
+                "kind": "search_chunk",
+                "model": "ae",
+                "state": "RUNNING",
+                "log_path": str(log),
+            }
+        ],
+    )
+    monkeypatch.setattr(
+        operations,
+        "_accounting",
+        lambda ids: {"7": {"state": "COMPLETED", "exit_code": "0:0"}},
+    )
+
+    row = operations.reconcile(root, repository)[0]
+
+    assert row["success_sha256"] == operations._sha256(chunk)
+    assert row["bindings_sha256"] == operations._sha256(bindings)
 
 
 def test_accounting_uses_unambiguous_json_timestamps(monkeypatch) -> None:
@@ -544,6 +606,8 @@ def test_validate_canaries_covers_all_trials_and_candidate_families(monkeypatch,
             "exit_code": "0:0",
             "commit": "a" * 40,
             "log_sha256": "1" * 64,
+            "success_sha256": "2" * 64,
+            "bindings_sha256": "3" * 64,
         }
         for model in operations.MODELS
     ]

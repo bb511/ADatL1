@@ -6,6 +6,8 @@ import importlib.util
 import json
 import os
 import pickle  # nosec B403 -- writes only synthetic trusted-local test fixtures
+import shutil
+import subprocess  # nosec B404 -- fixed Git argv executes only in local test fixtures
 from pathlib import Path
 
 import optuna
@@ -28,12 +30,94 @@ def _load(name: str, path: Path):
 campaign = _load("physics_background_pairing_campaign_for_report", CAMPAIGN_SCRIPT)
 report = _load("physics_background_pairing_report", REPORT_SCRIPT)
 report.TARGET_TRIALS = 1
+REAL_EXECUTION_REPOSITORY_EVIDENCE = report._execution_repository_evidence
 
 
 @pytest.fixture(autouse=True)
 def _clean_reporting_checkout(monkeypatch):
     """Synthetic finalization is independent of the developer worktree state."""
     monkeypatch.setattr(report, "_git_state", lambda: ("b" * 40, True, []))
+    monkeypatch.setattr(
+        report,
+        "_execution_repository_evidence",
+        lambda root, design, explicit=None: {
+            "execution_repository_root": "/synthetic/execution",
+            "execution_repository_commit": design["code_commit"],
+            "execution_repository_clean": True,
+            "execution_uv_lock_sha256": "d" * 64,
+        },
+    )
+
+
+def _git(repository: Path, *arguments: str) -> str:
+    git = shutil.which("git")
+    assert git is not None
+    return subprocess.run(  # nosec B603
+        [git, *arguments],
+        cwd=repository,
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout.strip()
+
+
+def test_execution_repository_evidence_uses_campaign_worktree_convention(
+    tmp_path,
+) -> None:
+    """Execution provenance is authenticated from the campaign's immutable worktree."""
+    campaign_root = tmp_path / "campaigns" / "campaign-name"
+    repository = tmp_path / "worktrees" / campaign_root.name
+    campaign_root.mkdir(parents=True)
+    repository.mkdir(parents=True)
+    (repository / "uv.lock").write_text("version = 1\n", encoding="utf-8")
+    _git(repository, "init")
+    _git(repository, "add", "uv.lock")
+    _git(
+        repository,
+        "-c",
+        "user.name=Test",
+        "-c",
+        "user.email=test@example.invalid",
+        "commit",
+        "-m",
+        "fixture",
+    )
+    commit = _git(repository, "rev-parse", "HEAD")
+
+    evidence = REAL_EXECUTION_REPOSITORY_EVIDENCE(campaign_root, {"code_commit": commit})
+
+    assert evidence == {
+        "execution_repository_root": str(repository.resolve()),
+        "execution_repository_commit": commit,
+        "execution_repository_clean": True,
+        "execution_uv_lock_sha256": report._sha256(repository / "uv.lock"),
+    }
+
+
+def test_execution_repository_evidence_rejects_dirty_explicit_worktree(tmp_path) -> None:
+    """An explicit execution checkout cannot conceal post-run code changes."""
+    repository = tmp_path / "execution"
+    repository.mkdir()
+    (repository / "uv.lock").write_text("version = 1\n", encoding="utf-8")
+    _git(repository, "init")
+    _git(repository, "add", "uv.lock")
+    _git(
+        repository,
+        "-c",
+        "user.name=Test",
+        "-c",
+        "user.email=test@example.invalid",
+        "commit",
+        "-m",
+        "fixture",
+    )
+    commit = _git(repository, "rev-parse", "HEAD")
+    (repository / "uv.lock").write_text("changed\n", encoding="utf-8")
+
+    with pytest.raises(RuntimeError, match="dirty"):
+        REAL_EXECUTION_REPOSITORY_EVIDENCE(
+            tmp_path / "campaign", {"code_commit": commit}, repository
+        )
 
 
 def _json(path: Path, value) -> None:
@@ -567,7 +651,15 @@ def test_finalize_exports_56_winners_and_reverse_drift(tmp_path) -> None:
     assert {row["histories_validated"] for row in mlflow_rows} == {"True"}
     provenance = json.loads((output / "provenance.json").read_text(encoding="utf-8"))
     assert provenance["execution_code_commit"] == design["code_commit"]
+    assert provenance["execution_repository_commit"] == design["code_commit"]
+    assert provenance["execution_repository_clean"] is True
+    assert provenance["execution_uv_lock_sha256"] == "d" * 64
     assert provenance["report_code_commit"] == "b" * 40
+    assert provenance["report_repository_root"] == str(report.REPOSITORY_ROOT.resolve())
+    assert provenance["report_uv_lock_sha256"] == report._sha256(
+        report.REPOSITORY_ROOT / "uv.lock"
+    )
+    assert "uv_lock_sha256" not in provenance
 
     before = report._tree_digests(output)
     manifest_before = (output / "manifest.sha256").read_bytes()

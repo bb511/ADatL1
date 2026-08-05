@@ -72,6 +72,11 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--root", type=Path, required=True)
     parser.add_argument("--output", type=Path)
     parser.add_argument(
+        "--execution-repository",
+        type=Path,
+        help="Override the immutable execution worktree resolved from the campaign convention.",
+    )
+    parser.add_argument(
         "--repository-report",
         type=Path,
         help="Optionally copy the published REPORT.md outside the portable package.",
@@ -754,6 +759,50 @@ def _git_state() -> tuple[str, bool, list[str]]:
     return commit, not dirty, dirty
 
 
+def _execution_repository_evidence(
+    root: Path,
+    design: dict[str, Any],
+    explicit: Path | None = None,
+) -> dict[str, Any]:
+    """Authenticate the immutable worktree that produced the execution campaign."""
+    repository = (
+        explicit.expanduser()
+        if explicit is not None
+        else root.parent.parent / "worktrees" / root.name
+    ).resolve(strict=True)
+    git = shutil.which("git")
+    if git is None:
+        raise RuntimeError("git is required to authenticate the execution worktree.")
+
+    def git_output(*arguments: str) -> str:
+        return subprocess.run(  # nosec B603
+            [git, *arguments],
+            cwd=repository,
+            check=True,
+            capture_output=True,
+            text=True,
+        ).stdout.strip()
+
+    top_level = Path(git_output("rev-parse", "--show-toplevel")).resolve(strict=True)
+    commit = git_output("rev-parse", "HEAD")
+    dirty = git_output("status", "--porcelain").splitlines()
+    uv_lock = repository / "uv.lock"
+    if top_level != repository:
+        raise RuntimeError("Execution repository path is not its Git worktree root.")
+    if commit != design["code_commit"]:
+        raise RuntimeError("Execution worktree HEAD differs from design.code_commit.")
+    if dirty:
+        raise RuntimeError(f"Execution worktree is dirty: {dirty[:10]}")
+    if not uv_lock.is_file():
+        raise FileNotFoundError(uv_lock)
+    return {
+        "execution_repository_root": str(repository),
+        "execution_repository_commit": commit,
+        "execution_repository_clean": True,
+        "execution_uv_lock_sha256": _sha256(uv_lock),
+    }
+
+
 def _require_clean_reporting_checkout() -> tuple[str, bool, list[str]]:
     """Require reporting to originate from one committed, reproducible checkout."""
     state = _git_state()
@@ -771,6 +820,7 @@ def _provenance(
     final: bool,
     report_state: tuple[str, bool, list[str]] | None = None,
     study_evidence: dict[str, dict[str, Any]] | None = None,
+    execution_evidence: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Build portable code, input, budget, and source-artifact provenance."""
     commit, clean, dirty = report_state or _git_state()
@@ -791,9 +841,9 @@ def _provenance(
         "report_checkout_commit": commit,
         "report_checkout_clean": clean,
         "report_checkout_dirty_entries": dirty,
+        "report_repository_root": str(REPOSITORY_ROOT.resolve()),
         "design_sha256": _sha256(root / "design.json"),
         "preflight_sha256": design["preflight_sha256"],
-        "uv_lock_sha256": _sha256(REPOSITORY_ROOT / "uv.lock"),
         "report_script_sha256": _sha256(Path(__file__).resolve()),
         "report_plan_sha256": _sha256(
             REPOSITORY_ROOT / "research" / "physics_background_pairing" / "PLAN.md"
@@ -808,6 +858,9 @@ def _provenance(
         "study_database_sha256": databases,
         "study_evidence": study_evidence if final else None,
     }
+    if execution_evidence is None:
+        raise RuntimeError("Execution-worktree evidence is required for provenance.")
+    value.update(execution_evidence)
     manifest = root / "selection" / "pareto_retrain_manifest.json"
     oracle = root / "results" / "oracle_winners.json"
     value["pareto_manifest_sha256"] = _sha256(manifest) if manifest.is_file() else None
@@ -823,6 +876,7 @@ def _build_snapshot(
     update_state: bool,
     validate_mlflow: bool = True,
     report_state: tuple[str, bool, list[str]] | None = None,
+    execution_evidence: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Build search-state files, optionally under strict final-publication rules."""
     design = _design(root)
@@ -860,7 +914,13 @@ def _build_snapshot(
     _write_csv(output / "mlflow_runs.csv", mlflow, _mlflow_fields())
     _write_json(
         output / "provenance.json",
-        _provenance(root, design, final=False, report_state=report_state),
+        _provenance(
+            root,
+            design,
+            final=False,
+            report_state=report_state,
+            execution_evidence=execution_evidence,
+        ),
     )
     latest = {
         "schema_version": 1,
@@ -875,9 +935,18 @@ def _build_snapshot(
     return latest
 
 
-def snapshot(root: Path, output: Path) -> dict[str, Any]:
+def snapshot(root: Path, output: Path, execution_repository: Path | None = None) -> dict[str, Any]:
     """Export a search-only snapshot while allowing valid active-run prefixes."""
-    return _build_snapshot(root, output, final=False, update_state=True)
+    root = root.resolve()
+    design = _design(root)
+    execution_evidence = _execution_repository_evidence(root, design, execution_repository)
+    return _build_snapshot(
+        root,
+        output,
+        final=False,
+        update_state=True,
+        execution_evidence=execution_evidence,
+    )
 
 
 def _checkpoint_fields() -> list[str]:
@@ -2033,6 +2102,7 @@ def _build_final(
     *,
     report_state: tuple[str, bool, list[str]],
     study_evidence: dict[str, dict[str, Any]],
+    execution_evidence: dict[str, Any],
 ) -> dict[str, Any]:
     """Build and validate a complete final package in a private staging directory."""
     design = _design(root)
@@ -2043,6 +2113,7 @@ def _build_final(
         update_state=False,
         validate_mlflow=False,
         report_state=report_state,
+        execution_evidence=execution_evidence,
     )
     status_rows, _ = _trial_exports(root, design)
     bindings = _binding_index(root)
@@ -2101,6 +2172,7 @@ def _build_final(
             final=True,
             report_state=report_state,
             study_evidence=study_evidence,
+            execution_evidence=execution_evidence,
         ),
     )
     for source, name in (
@@ -2133,12 +2205,18 @@ def _build_final(
     }
 
 
-def finalize(root: Path, output: Path, repository_report: Path | None = None) -> None:
+def finalize(
+    root: Path,
+    output: Path,
+    repository_report: Path | None = None,
+    execution_repository: Path | None = None,
+) -> None:
     """Fail closed, then transactionally publish the final portable package."""
     root = root.resolve()
     output = output.resolve()
     report_state = _require_clean_reporting_checkout()
     design = _design(root)
+    execution_evidence = _execution_repository_evidence(root, design, execution_repository)
     study_evidence = _capture_quiescent_studies(root, design)
     ledger_paths = (root / "state" / "job_history.csv", root / "state" / "failures.jsonl")
     _validated_state_ledgers(root, design, final=True)
@@ -2151,6 +2229,7 @@ def finalize(root: Path, output: Path, repository_report: Path | None = None) ->
             stage,
             report_state=report_state,
             study_evidence=study_evidence,
+            execution_evidence=execution_evidence,
         )
         _assert_studies_unchanged(study_evidence)
         _validated_state_ledgers(root, design, final=True)
@@ -2180,9 +2259,20 @@ def main() -> None:
     root = args.root.expanduser().resolve()
     output = (args.output or root / "results").expanduser().resolve()
     if args.command == "snapshot":
-        print(json.dumps(snapshot(root, output), indent=2, sort_keys=True))
+        print(
+            json.dumps(
+                snapshot(root, output, execution_repository=args.execution_repository),
+                indent=2,
+                sort_keys=True,
+            )
+        )
     else:
-        finalize(root, output, repository_report=args.repository_report)
+        finalize(
+            root,
+            output,
+            repository_report=args.repository_report,
+            execution_repository=args.execution_repository,
+        )
         print(output / "REPORT.md")
 
 

@@ -73,6 +73,14 @@ codespell) pass; the unrelated baseline debt must not be mixed into this campaig
 
 ## Verification log
 
+- 2026-08-05: final reporting now authenticates all 40,800 configured physical search
+  checkpoint slots across the authoritative first 600 usable trials per model. It
+  requires and hashes all 37,200 last/primary candidates, records optional
+  stable-native availability, validates native/OAS threshold namespaces, rejects
+  escaped or shared run roots, and exports candidate-level plus grouped portable CSVs.
+  Seventy-three focused reporting, operations, analysis, and artifact-audit tests pass;
+  all changed-file hooks pass. Local reporting commit: `d274aba`.
+
 - 2026-08-05: successful 200-epoch retrain array tasks now seal their validated result
   marker in the scheduler ledger. This complements selective missing-index recovery and
   makes terminal task provenance self-authenticating. Eighteen operational tests pass.

@@ -763,7 +763,7 @@ def _base_train_command(root: Path, model: str) -> list[str]:
         f"trainer.max_epochs={SEARCH_EPOCHS}",
         "trainer.num_sanity_val_steps=0",
         "test=false",
-        f"hydra.sweeper.storage=sqlite:///{_study_path(root, model)}?timeout=600",
+        f"hydra.sweeper.storage='sqlite:///{_study_path(root, model)}?timeout=600'",
         f"hydra.sweeper.study_name={study_name}",
     ]
 

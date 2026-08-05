@@ -52,6 +52,7 @@ def test_shared_sweep_command_preserves_paper_budget_and_logging(tmp_path) -> No
     assert "test=false" in command
     assert "sqlite:///" in joined
     assert "?timeout=600" in joined
+    assert any("storage='sqlite:///" in value for value in command)
     assert not any(value.startswith("logger=") for value in command)
     assert not any("selection_metric" in value for value in command)
 

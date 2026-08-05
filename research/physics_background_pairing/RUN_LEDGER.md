@@ -1,6 +1,6 @@
 # Run ledger
 
-Last updated: 2026-08-04 (Europe/Zurich)
+Last updated: 2026-08-05 (Europe/Zurich)
 
 ## Contract and inputs
 
@@ -13,6 +13,9 @@ Last updated: 2026-08-04 (Europe/Zurich)
 - Frozen debug campaign commit: `6d10cd5601ffa86111a12415b521c4e104c261e6`.
 - Superseded pilot campaigns at `ebe2ce1` and `bb0f981` are archived in scratch;
   neither is eligible for production submission.
+- Active schema-2 campaign commit: `fec1619f932122fd70fbbd7d3b8b877458671d2b`.
+- Active campaign root:
+  `/iopsstor/scratch/cscs/vjimenez/adatl1/campaigns/physics_background_shared_fec1619f9321`.
 
 ## Status
 
@@ -24,14 +27,15 @@ Last updated: 2026-08-04 (Europe/Zurich)
 | Tests and preflight | complete | 67 campaign tests pass after the single-run provenance fix; all six configs compose, scoped hooks pass, all 8 pair tables authenticate, and scratch capacity is sufficient |
 | Autonomous runbook | complete | `PLAN.md` now specifies the full six-study state machine, artifact contract, scheduler/timer policy, failure recovery, portable exports, analysis, and final `REPORT.md` |
 | Provenance/report hardening | complete | Added persistent Optuna-to-Hydra chunk bindings, run/checkpoint/MLflow identities, reverse G-to-E drift persistence, and fail-closed snapshot/finalize exports with synthetic positive/tamper/leakage tests |
-| Pilots | pending | Earlier isolated pilots passed from `6d10cd5`, but they do not validate the new unified callback/evaluator path |
-| Full searches | pending | Six persistent studies, 600 trials each; no full-scale job is authorized or submitted yet |
+| Pilots | complete | All six unified jobs passed on `fec1619f9321`; exact objective/vector/selection, MLflow, reverse-drift, provenance, validation-allowlist, runtime, and memory evidence is persisted |
+| Full searches | pending | The 50-epoch canary exposed and fixed two controller-only launch defects; a new frozen commit/campaign must repeat the gate before bulk submission |
 | Retraining/evaluation | pending | Offline 56-front freeze, unique 200-epoch retraining, and native/OAS threshold separation are implemented; validation pending |
 | Aggregation/report | pending | Score-aware downstream oracle aggregation is implemented; awaits validation and results |
 
-The schema-2 production worktree and scratch campaign have not been created. The next
-agent must use a fresh commit-derived campaign ID after the runbook/reporting changes
-are committed; it must not reuse the superseded schema-1 scratch campaigns.
+The `fec1619f9321` campaign remains immutable evidence for the successful pilots, but is
+superseded for production submission by the controller fixes below. The next gate is a
+new commit-derived campaign followed by one 50-epoch Optuna/SQLite/Submitit canary per
+model; no bulk search chunk has been submitted. Never reuse a superseded campaign.
 
 Repository-wide `pre-commit -a` is not a usable clean gate on the current baseline: it
 rewrites 82 unrelated legacy files and separately reports pre-existing executable shell
@@ -55,6 +59,23 @@ codespell) pass; the unrelated baseline debt must not be mixed into this campaig
   logical two-dimensional fronts are reconstructed offline.
 
 ## Verification log
+
+- 2026-08-05: the first 50-epoch AE canary gate found two orchestration-only defects
+  before any Optuna trial was created. Clariden `xfer` nodes are x86-64 and cannot run
+  the pinned ARM environment, so the 24-hour controller now uses an ARM `low` node.
+  Hydra also requires the SQLite URL containing `?timeout=600` to be quoted as one
+  override value. The exact override now composes successfully, 38 focused campaign
+  tests pass, and all changed-file hooks pass. A fresh commit-derived campaign is
+  required before retrying the canaries.
+
+- 2026-08-05: active campaign `fec1619f9321` passed all six unified GPU pilots:
+  AE `3005314` (3m59s, 7.03 GiB peak), VAE `3005446` (4m12s, 7.07 GiB), DSAE
+  `3005499` (2m31s, 5.71 GiB), DSVAE `3005510` (2m40s, 6.13 GiB), DeepSVDD
+  `3005522` (2m24s, 11.29 GiB), and RealNVP `3005531` (2m12s, 6.06 GiB).
+  A cross-pilot audit proved 56 logical selections, exact 28/14-value vectors,
+  finite pairs, commit/run/checkpoint/MLflow provenance, 24 AE/VAE or 12 native-only
+  metric families, forward/reverse drift plots, and an empty anomaly-validation
+  allowlist. Scheduler/log hashes and success artifacts are in campaign `state/`.
 
 - 2026-08-05: schema-2 campaign `bcdffe3eb8c1` authenticated all eight pair tables and
   froze the correct six-study/56-front design, but unified AE pilot job `3004987`

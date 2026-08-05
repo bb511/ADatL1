@@ -353,7 +353,7 @@ contains all four mappings and CDF simultaneously.
   and `aggregate`.
 - `scripts/clariden/physics_background_pairing_pilot.sbatch` runs one unified one-epoch
   model pilot on the debug partition.
-- `scripts/clariden/physics_background_pairing_sweep.sbatch` is an `xfer` controller
+- `scripts/clariden/physics_background_pairing_sweep.sbatch` is a 24-hour `low` controller
   that launches normal-partition Hydra/Submitit search workers.
 - `scripts/clariden/physics_background_pairing_retrain.sbatch` retrains one manifest
   index on one GPU.
@@ -626,7 +626,9 @@ scientific configuration.
 
 ### 6.1 Submission model
 
-`physics_background_pairing_sweep.sbatch` is a lightweight controller on `xfer`. It
+`physics_background_pairing_sweep.sbatch` is a controller on an ARM `low` node. The
+controller intentionally requests one GPU because Clariden's ARM nodes are GPU nodes;
+the `xfer` nodes are x86-64 and cannot execute the campaign's pinned ARM environment. It
 calls the campaign `sweep` command, which launches GPU workers through Hydra Submitit on
 the `normal` partition. The default worker limit is 720 minutes, 16 CPUs, 96 GB RAM,
 and one GPU.
@@ -809,7 +811,7 @@ candidates may be the larger timeout risk.
   hyperparameters, and seeds.
 - Do not pass a timeout greater than the partition maximum.
 - Record the partition/time-limit change as operational, not scientific.
-- The `xfer` search controller itself has a 24-hour limit and may remain alive while
+- The `low` search controller itself has a 24-hour limit and may remain alive while
   Submitit workers wait. A long normal-queue delay can therefore kill the controller;
   inspect worker and database state rather than assuming all children failed.
 

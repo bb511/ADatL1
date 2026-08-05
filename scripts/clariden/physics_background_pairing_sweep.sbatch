@@ -1,11 +1,13 @@
 #!/usr/bin/env bash
 #SBATCH --job-name=phys-bgpair-sweep
 #SBATCH --account=a0166
-#SBATCH --partition=xfer
+# The project environment is built for the ARM GPU nodes; xfer nodes are x86-64.
+#SBATCH --partition=low
 #SBATCH --time=24:00:00
 #SBATCH --nodes=1
 #SBATCH --ntasks=1
 #SBATCH --cpus-per-task=2
+#SBATCH --gpus-per-node=1
 #SBATCH --mem=8G
 #SBATCH --output=/iopsstor/scratch/cscs/vjimenez/adatl1/logs/slurm/%x-%j.out
 

@@ -672,7 +672,94 @@ def _frozen_results(root: Path, design: dict) -> None:
         "front_memberships": memberships,
         "retrain_runs": retrains,
     }
-    _json(root / "selection" / "pareto_retrain_manifest.json", manifest)
+    manifest_path = root / "selection" / "pareto_retrain_manifest.json"
+    _json(manifest_path, manifest)
+    for retrain_row in retrains:
+        index = int(retrain_row["retrain_index"])
+        state_dir = root / "retraining" / "restart_state" / f"{index:04d}"
+        segment_rows = []
+        attempts = []
+        for attempt_number, boundary in enumerate((40, 80, 120, 160, 200), start=1):
+            checkpoint = state_dir / "segments" / f"epoch_{boundary:03d}.ckpt"
+            config = state_dir / "segments" / f"epoch_{boundary:03d}_config.yaml"
+            checkpoint.parent.mkdir(parents=True, exist_ok=True)
+            checkpoint.write_text(f"checkpoint-{boundary}\n", encoding="utf-8")
+            config.write_text(f"trainer:\n  max_epochs: {boundary}\n", encoding="utf-8")
+            segment_rows.append(
+                {
+                    "epoch_boundary": boundary,
+                    "attempt_number": attempt_number,
+                    "continuation_checkpoint": str(checkpoint.resolve()),
+                    "continuation_checkpoint_sha256": report._sha256(checkpoint),
+                    "resolved_config": str(config.resolve()),
+                    "resolved_config_sha256": report._sha256(config),
+                }
+            )
+            attempts.append(
+                {
+                    "attempt_number": attempt_number,
+                    "started_at": f"2026-01-01T{attempt_number:02d}:00:00+00:00",
+                    "completed_at": f"2026-01-01T{attempt_number:02d}:30:00+00:00",
+                    "target_epoch_boundary": boundary,
+                    "phase": "training",
+                }
+            )
+        attempts.append(
+            {
+                "attempt_number": 6,
+                "started_at": "2026-01-01T23:00:00+00:00",
+                "completed_at": "2026-01-02T00:00:00+00:00",
+                "target_epoch_boundary": 200,
+                "phase": "evaluation",
+            }
+        )
+        model = retrain_row["model"]
+        run_name = f"{model}__trial{int(retrain_row['trial_number']):04d}"
+        experiment_name = f"physics_bgpair_retrain_{model}"
+        mlflow_run_id = next(
+            json.loads(path.read_text(encoding="utf-8"))["run_provenance"]["loggers"][0]["run_id"]
+            for path in [root / "retraining" / "hydra" / f"{index:04d}" / "optimized_metric.json"]
+        )
+        identity = {
+            "code_commit": design["code_commit"],
+            "manifest": str(manifest_path.resolve()),
+            "manifest_sha256": report._sha256(manifest_path),
+            "retrain_index": index,
+            "row": retrain_row,
+            "row_sha256": report._json_sha256(retrain_row),
+            "experiment_name": experiment_name,
+            "run_name": run_name,
+            "hydra_dir": str((root / "retraining" / "hydra" / f"{index:04d}").resolve()),
+            "trainer_default_root_dir": str((state_dir / "lightning").resolve()),
+            "mlflow_tracking_uri": (
+                f"file:{(root / 'runtime' / 'logs' / 'mlflow' / 'mlruns').resolve()}"
+            ),
+        }
+        state_path = state_dir / "state.json"
+        _json(
+            state_path,
+            {
+                "schema_version": 1,
+                "identity": identity,
+                "mlflow_run_id": mlflow_run_id,
+                "attempts": attempts,
+                "segments": segment_rows,
+                "completed_at": "2026-01-02T00:00:00+00:00",
+            },
+        )
+        marker_path = root / "retraining" / "markers" / f"{index:04d}.json"
+        marker = json.loads(marker_path.read_text(encoding="utf-8"))
+        marker.update(
+            {
+                "experiment_name": experiment_name,
+                "run_name": run_name,
+                "mlflow_run_id": mlflow_run_id,
+                "restart_count": len(attempts) - 1,
+                "restart_state_artifact": str(state_path.resolve()),
+                "restart_state_artifact_sha256": report._sha256(state_path),
+            }
+        )
+        _json(marker_path, marker)
     _json(
         root / "results" / "oracle_winners.json",
         {
@@ -748,6 +835,14 @@ def test_finalize_exports_56_winners_and_reverse_drift(tmp_path) -> None:
     assert len(mlflow_rows) == 12
     assert {row["status"] for row in mlflow_rows} == {"FINISHED"}
     assert {row["histories_validated"] for row in mlflow_rows} == {"True"}
+    with (output / "retrain_restart_evidence.csv").open(encoding="utf-8") as handle:
+        restart_rows = list(report.csv.DictReader(handle))
+    assert len(restart_rows) == 30
+    assert {int(row["epoch_boundary"]) for row in restart_rows} == {40, 80, 120, 160, 200}
+    with (output / "retrains.csv").open(encoding="utf-8") as handle:
+        retrain_rows = list(report.csv.DictReader(handle))
+    assert {row["terminal_phase"] for row in retrain_rows} == {"evaluation"}
+    assert {int(row["attempt_count"]) for row in retrain_rows} == {6}
     provenance = json.loads((output / "provenance.json").read_text(encoding="utf-8"))
     assert provenance["execution_code_commit"] == design["code_commit"]
     assert provenance["execution_repository_commit"] == design["code_commit"]
@@ -776,6 +871,70 @@ def test_finalize_rejects_changed_retrain_artifact(tmp_path) -> None:
 
     with pytest.raises(RuntimeError, match="Changed optimized artifact"):
         report.finalize(root, root / "portable")
+
+
+def test_report_rejects_changed_or_escaped_restart_state(tmp_path) -> None:
+    """The marker cannot redirect or conceal changes to its restart-state artifact."""
+    root, design = _campaign(tmp_path)
+    _frozen_results(root, design)
+    manifest = json.loads(
+        (root / "selection" / "pareto_retrain_manifest.json").read_text(encoding="utf-8")
+    )
+    state = root / "retraining" / "restart_state" / "0000" / "state.json"
+    state.write_text(state.read_text(encoding="utf-8") + " ", encoding="utf-8")
+    with pytest.raises(RuntimeError, match="Changed retrain restart state"):
+        report._marker_rows(root, manifest)
+
+    root, design = _campaign(tmp_path / "escaped")
+    _frozen_results(root, design)
+    manifest = json.loads(
+        (root / "selection" / "pareto_retrain_manifest.json").read_text(encoding="utf-8")
+    )
+    marker_path = root / "retraining" / "markers" / "0000.json"
+    marker = json.loads(marker_path.read_text(encoding="utf-8"))
+    external = tmp_path / "external-state.json"
+    external.write_text("{}\n", encoding="utf-8")
+    marker["restart_state_artifact"] = str(external)
+    marker["restart_state_artifact_sha256"] = report._sha256(external)
+    _json(marker_path, marker)
+    with pytest.raises(RuntimeError, match="outside its authenticated directory"):
+        report._marker_rows(root, manifest)
+
+
+@pytest.mark.parametrize(
+    ("corruption", "message"),
+    (
+        ("identity", "restart identity differs"),
+        ("boundaries", "segment boundaries are incomplete"),
+        ("segment_hash", "Changed retrain segment artifact"),
+        ("terminal_attempt", "terminal attempt is incomplete"),
+    ),
+)
+def test_report_reconstructs_restart_provenance(tmp_path, corruption: str, message: str) -> None:
+    """Rehashing a semantically false state does not make it valid for reporting."""
+    root, design = _campaign(tmp_path)
+    _frozen_results(root, design)
+    manifest = json.loads(
+        (root / "selection" / "pareto_retrain_manifest.json").read_text(encoding="utf-8")
+    )
+    state_path = root / "retraining" / "restart_state" / "0000" / "state.json"
+    state = json.loads(state_path.read_text(encoding="utf-8"))
+    if corruption == "identity":
+        state["identity"]["row_sha256"] = "0" * 64
+    elif corruption == "boundaries":
+        state["segments"].pop()
+    elif corruption == "segment_hash":
+        state["segments"][0]["continuation_checkpoint_sha256"] = "0" * 64
+    else:
+        state["attempts"][-1]["phase"] = "training"
+    _json(state_path, state)
+    marker_path = root / "retraining" / "markers" / "0000.json"
+    marker = json.loads(marker_path.read_text(encoding="utf-8"))
+    marker["restart_state_artifact_sha256"] = report._sha256(state_path)
+    _json(marker_path, marker)
+
+    with pytest.raises(RuntimeError, match=message):
+        report._marker_rows(root, manifest)
 
 
 def test_finalize_rejects_missing_checkpoint_threshold(tmp_path) -> None:

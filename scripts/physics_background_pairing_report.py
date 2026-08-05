@@ -158,6 +158,11 @@ def _json_cell(value: Any) -> str:
     return json.dumps(value, sort_keys=True, separators=(",", ":"), allow_nan=False)
 
 
+def _json_sha256(value: Any) -> str:
+    """Hash one JSON-compatible value using the campaign's canonical encoding."""
+    return hashlib.sha256(_json_cell(value).encode("utf-8")).hexdigest()
+
+
 def _relative(path: Path, root: Path) -> str:
     """Prefer a campaign-relative path and retain external provenance paths."""
     try:
@@ -1347,7 +1352,171 @@ def _write_experiment_matrix(
     _write_csv(root / "state" / "experiment_matrix.csv", rows, list(rows[0]))
 
 
-def _marker_rows(root: Path, manifest: dict[str, Any]) -> list[dict[str, Any]]:
+def _confined_file(path: Path, parent: Path, label: str) -> Path:
+    """Resolve one required file without allowing it to escape its evidence tree."""
+    resolved = path.resolve(strict=True)
+    expected_parent = parent.resolve(strict=True)
+    if not resolved.is_file() or not resolved.is_relative_to(expected_parent):
+        raise RuntimeError(f"{label} is outside its authenticated directory: {resolved}")
+    return resolved
+
+
+def _restart_state_evidence(
+    root: Path,
+    manifest: dict[str, Any],
+    expected: dict[str, Any],
+    marker: dict[str, Any],
+) -> tuple[dict[str, Any], list[dict[str, Any]]]:
+    """Authenticate one retrain's complete restart history independently of execution code."""
+    index = int(expected["retrain_index"])
+    state_dir = root / "retraining" / "restart_state" / f"{index:04d}"
+    state_path = _confined_file(
+        Path(str(marker.get("restart_state_artifact", ""))),
+        state_dir,
+        "Retrain restart state",
+    )
+    if state_path != (state_dir / "state.json").resolve():
+        raise RuntimeError(f"Retrain restart state has the wrong path: {state_path}")
+    state_sha256 = _sha256(state_path)
+    if state_sha256 != marker.get("restart_state_artifact_sha256"):
+        raise RuntimeError(f"Changed retrain restart state: {state_path}")
+    state = _read_json(state_path)
+    manifest_path = (root / "selection" / "pareto_retrain_manifest.json").resolve(strict=True)
+    run_name = f"{expected['model']}__trial{int(expected['trial_number']):04d}"
+    experiment_name = f"physics_bgpair_retrain_{expected['model']}"
+    expected_identity = {
+        "code_commit": manifest["code_commit"],
+        "manifest": str(manifest_path),
+        "manifest_sha256": _sha256(manifest_path),
+        "retrain_index": index,
+        "row": expected,
+        "row_sha256": _json_sha256(expected),
+        "experiment_name": experiment_name,
+        "run_name": run_name,
+        "hydra_dir": str((root / "retraining" / "hydra" / f"{index:04d}").resolve()),
+        "trainer_default_root_dir": str((state_dir / "lightning").resolve()),
+        "mlflow_tracking_uri": (
+            f"file:{(root / 'runtime' / 'logs' / 'mlflow' / 'mlruns').resolve()}"
+        ),
+    }
+    completed_at = marker.get("completed_at")
+    mlflow_run_id = marker.get("mlflow_run_id")
+    if (
+        state.get("schema_version") != 1
+        or state.get("identity") != expected_identity
+        or not isinstance(mlflow_run_id, str)
+        or not mlflow_run_id
+        or state.get("mlflow_run_id") != mlflow_run_id
+        or not isinstance(completed_at, str)
+        or not completed_at
+        or state.get("completed_at") != completed_at
+        or marker.get("experiment_name") != experiment_name
+        or marker.get("run_name") != run_name
+    ):
+        raise RuntimeError(f"Retrain restart identity differs: {state_path}")
+
+    boundaries = [40, 80, 120, 160, 200]
+    segments = state.get("segments")
+    attempts = state.get("attempts")
+    if (
+        not isinstance(segments, list)
+        or [row.get("epoch_boundary") for row in segments] != boundaries
+    ):
+        raise RuntimeError(f"Retrain segment boundaries are incomplete: {state_path}")
+    if not isinstance(attempts, list) or not attempts:
+        raise RuntimeError(f"Retrain attempt history is missing: {state_path}")
+    if [row.get("attempt_number") for row in attempts] != list(range(1, len(attempts) + 1)):
+        raise RuntimeError(f"Retrain attempt numbers are not contiguous: {state_path}")
+    for attempt in attempts:
+        phase = attempt.get("phase")
+        boundary = attempt.get("target_epoch_boundary")
+        if phase not in {"training", "evaluation", "finalization"}:
+            raise RuntimeError(f"Retrain attempt has an invalid phase: {state_path}")
+        if phase == "training" and boundary not in boundaries:
+            raise RuntimeError(f"Retrain training attempt has an invalid boundary: {state_path}")
+        if phase in {"evaluation", "finalization"} and boundary != 200:
+            raise RuntimeError(f"Retrain terminal attempt has an invalid boundary: {state_path}")
+
+    segment_root = state_dir / "segments"
+    evidence_rows: list[dict[str, Any]] = []
+    for segment in segments:
+        boundary = int(segment["epoch_boundary"])
+        attempt_number = int(segment.get("attempt_number", -1))
+        if attempt_number < 1 or attempt_number > len(attempts):
+            raise RuntimeError(f"Retrain segment has no owning attempt: {state_path}")
+        owner = attempts[attempt_number - 1]
+        if (
+            owner.get("phase") != "training"
+            or owner.get("target_epoch_boundary") != boundary
+            or not owner.get("completed_at")
+        ):
+            raise RuntimeError(f"Retrain segment owner is incomplete: {state_path}")
+        checkpoint = _confined_file(
+            Path(str(segment.get("continuation_checkpoint", ""))),
+            segment_root,
+            "Retrain continuation checkpoint",
+        )
+        config = _confined_file(
+            Path(str(segment.get("resolved_config", ""))),
+            segment_root,
+            "Retrain segment config",
+        )
+        checkpoint_sha256 = _sha256(checkpoint)
+        config_sha256 = _sha256(config)
+        if checkpoint_sha256 != segment.get(
+            "continuation_checkpoint_sha256"
+        ) or config_sha256 != segment.get("resolved_config_sha256"):
+            raise RuntimeError(f"Changed retrain segment artifact: {state_path}")
+        evidence_rows.append(
+            {
+                "retrain_index": index,
+                "model": expected["model"],
+                "trial_number": expected["trial_number"],
+                "epoch_boundary": boundary,
+                "attempt_number": attempt_number,
+                "attempt_started_at": owner.get("started_at", ""),
+                "attempt_completed_at": owner["completed_at"],
+                "slurm_job_id": owner.get("slurm_job_id") or "",
+                "slurm_array_job_id": owner.get("slurm_array_job_id") or "",
+                "slurm_array_task_id": owner.get("slurm_array_task_id") or "",
+                "continuation_checkpoint": _relative(checkpoint, root),
+                "continuation_checkpoint_sha256": checkpoint_sha256,
+                "resolved_config": _relative(config, root),
+                "resolved_config_sha256": config_sha256,
+            }
+        )
+    terminal = attempts[-1]
+    if terminal.get("phase") not in {"evaluation", "finalization"} or not terminal.get(
+        "completed_at"
+    ):
+        raise RuntimeError(f"Retrain terminal attempt is incomplete: {state_path}")
+    if not any(
+        attempt.get("phase") == "evaluation" and attempt.get("completed_at")
+        for attempt in attempts
+    ):
+        raise RuntimeError(f"Retrain evaluation attempt is missing: {state_path}")
+    restart_count = len(attempts) - 1
+    if marker.get("restart_count") != restart_count:
+        raise RuntimeError(f"Retrain restart count differs: {state_path}")
+    return (
+        {
+            "restart_count": restart_count,
+            "restart_state_artifact": _relative(state_path, root),
+            "restart_state_artifact_sha256": state_sha256,
+            "mlflow_run_id": mlflow_run_id,
+            "attempt_count": len(attempts),
+            "terminal_phase": terminal["phase"],
+            "segment_boundaries_json": _json_cell(boundaries),
+        },
+        evidence_rows,
+    )
+
+
+def _marker_rows(
+    root: Path,
+    manifest: dict[str, Any],
+    restart_summaries: dict[int, dict[str, Any]] | None = None,
+) -> list[dict[str, Any]]:
     """Authenticate every frozen retraining row and completion marker."""
     rows = []
     expected_indices = list(range(len(manifest["retrain_runs"])))
@@ -1360,6 +1529,10 @@ def _marker_rows(root: Path, manifest: dict[str, Any]) -> list[dict[str, Any]]:
         marker = _read_json(marker_path)
         if marker.get("schema_version") != 2 or marker.get("row") != expected:
             raise RuntimeError(f"Retraining marker does not match frozen row: {marker_path}")
+        if restart_summaries is None:
+            restart_summary, _ = _restart_state_evidence(root, manifest, expected, marker)
+        else:
+            restart_summary = restart_summaries[index]
         optimized = Path(marker["optimized_metric_artifact"])
         if _sha256(optimized) != marker["optimized_metric_artifact_sha256"]:
             raise RuntimeError(f"Changed optimized artifact: {optimized}")
@@ -1386,9 +1559,25 @@ def _marker_rows(root: Path, manifest: dict[str, Any]) -> list[dict[str, Any]]:
                 "optimized_artifact_sha256": marker["optimized_metric_artifact_sha256"],
                 "checkpoint_root": marker["checkpoint_root"],
                 "logical_objectives_json": _json_cell(expected["logical_objectives"]),
+                **restart_summary,
             }
         )
     return rows
+
+
+def _restart_evidence_bundle(
+    root: Path, manifest: dict[str, Any]
+) -> tuple[dict[int, dict[str, Any]], list[dict[str, Any]]]:
+    """Authenticate restart state once and return summaries plus segment rows."""
+    summaries: dict[int, dict[str, Any]] = {}
+    rows: list[dict[str, Any]] = []
+    for expected in manifest["retrain_runs"]:
+        index = int(expected["retrain_index"])
+        marker = _read_json(root / "retraining" / "markers" / f"{index:04d}.json")
+        summary, evidence = _restart_state_evidence(root, manifest, expected, marker)
+        summaries[index] = summary
+        rows.extend(evidence)
+    return summaries, rows
 
 
 def _checkpoint_identity(name: str) -> str:
@@ -2476,7 +2665,8 @@ def _build_final(
     ):
         raise RuntimeError("Oracle winner artifact violates the campaign contract.")
     front_rows = _front_rows(design, manifest)
-    retrain_rows = _marker_rows(root, manifest)
+    restart_summaries, restart_evidence_rows = _restart_evidence_bundle(root, manifest)
+    retrain_rows = _marker_rows(root, manifest, restart_summaries)
     winner_rows, downstream_rows, primary_rows = _winner_exports(root, design, manifest, oracle)
     _append_test_metrics(root, manifest, oracle, primary_rows)
     checkpoints, mlflow = _checkpoint_rows(root, design, include_retrains=True)
@@ -2547,6 +2737,11 @@ def _build_final(
     analysis_tables = {name: rows for name, rows in analysis.items() if name != "analysis_summary"}
     _write_csv(output / "front_memberships.csv", front_rows, list(front_rows[0]))
     _write_csv(output / "retrains.csv", retrain_rows, list(retrain_rows[0]))
+    _write_csv(
+        output / "retrain_restart_evidence.csv",
+        restart_evidence_rows,
+        list(restart_evidence_rows[0]),
+    )
     _write_csv(
         output / "checkpoint_selections.csv",
         annotated_checkpoints,

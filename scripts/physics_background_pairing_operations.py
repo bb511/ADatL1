@@ -33,7 +33,15 @@ if str(REPOSITORY_ROOT) not in sys.path:
 
 MODELS = ("ae", "vae", "dsae", "dsvae", "svdd", "realnvp")
 TARGET_TRIALS = 600
-ACTIVE_STATES = {"PENDING", "RUNNING", "CONFIGURING", "COMPLETING", "SUSPENDED"}
+MAX_RETRAIN_ARRAY_TASKS = 1001
+ACTIVE_STATES = {
+    "PENDING",
+    "RUNNING",
+    "CONFIGURING",
+    "COMPLETING",
+    "SUSPENDED",
+    "REQUEUED",
+}
 TERMINAL_STATES = {
     "BOOT_FAIL",
     "CANCELLED",
@@ -86,6 +94,7 @@ def _parse_args() -> argparse.Namespace:
     commands.add_parser("validate-canaries")
     commands.add_parser("reconcile")
     commands.add_parser("freeze")
+    commands.add_parser("aggregate")
     backup = commands.add_parser("backup-study")
     backup.add_argument("--model", choices=MODELS, required=True)
     repair = commands.add_parser("repair-stale")
@@ -101,6 +110,12 @@ def _sha256(path: Path) -> str:
         for chunk in iter(lambda: handle.read(1024 * 1024), b""):
             digest.update(chunk)
     return digest.hexdigest()
+
+
+def _json_sha256(value: Any) -> str:
+    """Hash one JSON-compatible value using its canonical representation."""
+    payload = json.dumps(value, sort_keys=True, separators=(",", ":"), allow_nan=False)
+    return hashlib.sha256(payload.encode("utf-8")).hexdigest()
 
 
 def _atomic_csv(path: Path, rows: list[dict[str, str]]) -> None:
@@ -548,6 +563,120 @@ def _array_spec(indices: list[int]) -> str:
     return ",".join(ranges)
 
 
+def _write_retrain_task_map(
+    root: Path,
+    design: dict[str, Any],
+    manifest_path: Path,
+    manifest: dict[str, Any],
+    actual_indices: list[int],
+) -> tuple[Path, str, dict[str, Any]]:
+    """Persist one content-addressed local-to-frozen retrain-index map."""
+    if (
+        not actual_indices
+        or actual_indices != sorted(set(actual_indices))
+        or len(actual_indices) > MAX_RETRAIN_ARRAY_TASKS
+    ):
+        raise ValueError(
+            f"A retrain batch must contain 1..{MAX_RETRAIN_ARRAY_TASKS} sorted unique indices."
+        )
+    runs = manifest.get("retrain_runs", [])
+    entries = []
+    for local_task_id, retrain_index in enumerate(actual_indices):
+        if not 0 <= retrain_index < len(runs):
+            raise RuntimeError(
+                f"Retrain index {retrain_index} is absent from the frozen manifest."
+            )
+        row = runs[retrain_index]
+        if int(row.get("retrain_index", -1)) != retrain_index:
+            raise RuntimeError(f"Frozen retrain row {retrain_index} has a mismatched index.")
+        entries.append(
+            {
+                "local_task_id": local_task_id,
+                "retrain_index": retrain_index,
+                "model": str(row["model"]),
+                "row_sha256": _json_sha256(row),
+            }
+        )
+    payload = {
+        "schema_version": 1,
+        "code_commit": design["code_commit"],
+        "campaign_root": str(root.resolve()),
+        "manifest": str(manifest_path.resolve()),
+        "manifest_sha256": _sha256(manifest_path),
+        "batch_size": len(entries),
+        "entries": entries,
+    }
+    serialized = json.dumps(payload, indent=2, sort_keys=True) + "\n"
+    digest = hashlib.sha256(serialized.encode("utf-8")).hexdigest()
+    path = root / "state" / "retrain_task_maps" / f"{digest}.json"
+    if path.exists():
+        existing = json.loads(path.read_text(encoding="utf-8"))
+        if existing != payload or _sha256(path) != digest:
+            raise RuntimeError(f"Existing retrain task map is not authentic: {path}")
+    else:
+        _atomic_json(path, payload)
+        if _sha256(path) != digest:
+            raise RuntimeError(f"Persisted retrain task-map digest differs: {path}")
+    return path, digest, payload
+
+
+def _load_retrain_task_map(root: Path, design: dict[str, Any], digest: str) -> dict[str, Any]:
+    """Authenticate a ledger-bound retrain task map against the frozen manifest."""
+    if len(digest) != 64 or any(character not in "0123456789abcdef" for character in digest):
+        raise RuntimeError(f"Invalid retrain task-map SHA-256: {digest!r}.")
+    path = root / "state" / "retrain_task_maps" / f"{digest}.json"
+    if not path.is_file() or _sha256(path) != digest:
+        raise RuntimeError(f"Retrain task map is missing or changed: {path}")
+    payload = json.loads(path.read_text(encoding="utf-8"))
+    manifest_path = root / "selection" / "pareto_retrain_manifest.json"
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    entries = payload.get("entries", [])
+    if (
+        payload.get("schema_version") != 1
+        or payload.get("code_commit") != design["code_commit"]
+        or payload.get("campaign_root") != str(root.resolve())
+        or payload.get("manifest") != str(manifest_path.resolve())
+        or payload.get("manifest_sha256") != _sha256(manifest_path)
+        or payload.get("batch_size") != len(entries)
+        or not 1 <= len(entries) <= MAX_RETRAIN_ARRAY_TASKS
+        or [entry.get("local_task_id") for entry in entries] != list(range(len(entries)))
+    ):
+        raise RuntimeError(f"Retrain task map does not match the frozen campaign: {path}")
+    runs = manifest.get("retrain_runs", [])
+    actual_indices = [entry.get("retrain_index") for entry in entries]
+    if actual_indices != sorted(set(actual_indices)):
+        raise RuntimeError(f"Retrain task map has non-exact actual indices: {path}")
+    for entry in entries:
+        index = int(entry["retrain_index"])
+        if (
+            not 0 <= index < len(runs)
+            or runs[index].get("retrain_index") != index
+            or entry.get("model") != runs[index].get("model")
+            or entry.get("row_sha256") != _json_sha256(runs[index])
+        ):
+            raise RuntimeError(f"Retrain task-map row differs from the frozen manifest: {path}")
+    return payload
+
+
+def _retrain_index_for_ledger_row(root: Path, design: dict[str, Any], row: dict[str, str]) -> int:
+    """Resolve a task ledger row, retaining compatibility with legacy direct arrays."""
+    try:
+        local_task_id = int(row["job_id"].rsplit("_", maxsplit=1)[1])
+    except (IndexError, ValueError) as error:
+        raise RuntimeError(f"Invalid retrain task job ID: {row['job_id']}.") from error
+    digest = row.get("bindings_sha256", "")
+    if not digest:
+        return local_task_id
+    payload = _load_retrain_task_map(root, design, digest)
+    entries = payload["entries"]
+    if not 0 <= local_task_id < len(entries):
+        raise RuntimeError(f"Retrain local task is absent from its map: {row['job_id']}.")
+    entry = entries[local_task_id]
+    if entry["local_task_id"] != local_task_id or entry["model"] != row.get("model"):
+        raise RuntimeError(f"Retrain ledger row differs from its task map: {row['job_id']}.")
+    return int(entry["retrain_index"])
+
+
 def submit_retrains(
     root: Path,
     repository: Path,
@@ -586,10 +715,13 @@ def _submit_retrains_locked(
     for path in (data_dir, raw_data_dir, pairing_dir):
         if not path.is_dir():
             raise FileNotFoundError(path)
-    manifest = json.loads(
-        (root / "selection" / "pareto_retrain_manifest.json").read_text(encoding="utf-8")
-    )
+    manifest_path = root / "selection" / "pareto_retrain_manifest.json"
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
     rows_by_index = {int(row["retrain_index"]): row for row in manifest["retrain_runs"]}
+    batch = missing[:MAX_RETRAIN_ARRAY_TASKS]
+    task_map_path, task_map_sha256, task_map = _write_retrain_task_map(
+        root, design, manifest_path, manifest, batch
+    )
     script = repository / "scripts" / "clariden" / "physics_background_pairing_retrain.sbatch"
     if not script.is_file():
         raise FileNotFoundError(script)
@@ -604,6 +736,8 @@ def _submit_retrains_locked(
         "OUTPUT_DIR": root.resolve() / "runtime" / "outputs",
         "CHECKPOINT_DIR": root.resolve() / "runtime" / "checkpoints",
         "WANDB_MODE": "offline",
+        "PHYSICS_BGPAIR_RETRAIN_TASK_MAP": task_map_path.resolve(),
+        "PHYSICS_BGPAIR_RETRAIN_TASK_MAP_SHA256": task_map_sha256,
     }
     export_value = "ALL," + ",".join(f"{key}={value}" for key, value in exports.items())
     sbatch = shutil.which("sbatch")
@@ -613,7 +747,7 @@ def _submit_retrains_locked(
         [
             sbatch,
             "--parsable",
-            f"--array={_array_spec(missing)}%{min(concurrency, len(missing))}",
+            f"--array=0-{len(batch) - 1}%{min(concurrency, len(batch))}",
             f"--export={export_value}",
             str(script),
         ],
@@ -625,15 +759,20 @@ def _submit_retrains_locked(
     if not array_job_id.isdigit():
         raise RuntimeError(f"Unexpected sbatch array job ID: {result.stdout!r}")
     log_root = root.parent.parent / "logs" / "slurm"
-    for index in missing:
+    for entry in task_map["entries"]:
+        local_task_id = int(entry["local_task_id"])
+        index = int(entry["retrain_index"])
         ledger_rows.append(
             {
-                "job_id": f"{array_job_id}_{index}",
+                "job_id": f"{array_job_id}_{local_task_id}",
                 "kind": "retrain",
                 "model": str(rows_by_index[index]["model"]),
                 "state": "PENDING",
                 "commit": design["code_commit"],
-                "log_path": str(log_root / f"phys-bgpair-retrain-{array_job_id}_{index}.out"),
+                "log_path": str(
+                    log_root / f"phys-bgpair-retrain-{array_job_id}_{local_task_id}.out"
+                ),
+                "bindings_sha256": task_map_sha256,
             }
         )
     _atomic_csv(ledger_path, ledger_rows)
@@ -1052,12 +1191,221 @@ def _completed_search_artifacts(
     return _sha256(validation), _sha256(bindings_path)
 
 
+def _retrain_receipt_path(root: Path, scheduler_job_id: str) -> Path:
+    """Return the immutable receipt path for one exact Slurm array task."""
+    parts = scheduler_job_id.split("_")
+    if len(parts) != 2 or any(not part.isdigit() for part in parts):
+        raise RuntimeError(f"Invalid retrain task job ID: {scheduler_job_id}.")
+    return root / "state" / "retrain_receipts" / f"{scheduler_job_id}.json"
+
+
+def _receipt_segment_artifacts(
+    root: Path, index: int, snapshot: dict[str, Any]
+) -> list[dict[str, str]]:
+    """Authenticate and enumerate immutable files named by a state snapshot."""
+    segment_root = (root / "retraining" / "restart_state" / f"{index:04d}" / "segments").resolve()
+    artifacts: list[dict[str, str]] = []
+    for segment in snapshot.get("segments", []):
+        for key in ("continuation_checkpoint", "resolved_config"):
+            path = Path(str(segment.get(key, ""))).resolve()
+            try:
+                path.relative_to(segment_root)
+            except ValueError as error:
+                raise RuntimeError(
+                    f"Retrain receipt artifact escapes {segment_root}: {path}"
+                ) from error
+            expected = str(segment.get(f"{key}_sha256", ""))
+            if not path.is_file() or _sha256(path) != expected:
+                raise RuntimeError(f"Retrain receipt artifact is missing or changed: {path}")
+            artifacts.append({"role": key, "path": str(path), "sha256": expected})
+    return artifacts
+
+
+def _attempt_scheduler_job_id(attempt: dict[str, Any]) -> str | None:
+    """Return the exact Slurm array-task identity recorded by one attempt."""
+    array_job_id = attempt.get("slurm_array_job_id")
+    array_task_id = attempt.get("slurm_array_task_id")
+    if array_job_id is None or array_task_id is None:
+        return None
+    return f"{array_job_id}_{array_task_id}"
+
+
+def _segment_snapshot_for_job(state: dict[str, Any], scheduler_job_id: str) -> dict[str, Any]:
+    """Project later mutable state back to the exact boundary owned by one task."""
+    attempts = state.get("attempts", [])
+    task_attempts = [
+        (position, attempt)
+        for position, attempt in enumerate(attempts)
+        if _attempt_scheduler_job_id(attempt) == scheduler_job_id
+    ]
+    matches = [
+        (position, attempt)
+        for position, attempt in task_attempts
+        if attempt.get("phase") == "training" and attempt.get("completed_at") is not None
+    ]
+    if len(matches) != 1:
+        raise RuntimeError(
+            f"Restart state has {len(matches)} completed segments for scheduler task "
+            f"{scheduler_job_id}."
+        )
+    position, attempt = matches[0]
+    attempt_number = int(attempt.get("attempt_number", -1))
+    boundary = int(attempt.get("target_epoch_boundary", -1))
+    segments = [
+        segment
+        for segment in state.get("segments", [])
+        if int(segment.get("epoch_boundary", -1)) <= boundary
+    ]
+    if (
+        not segments
+        or int(segments[-1].get("epoch_boundary", -1)) != boundary
+        or int(segments[-1].get("attempt_number", -2)) != attempt_number
+    ):
+        raise RuntimeError(f"Scheduler task {scheduler_job_id} has no exact segment boundary.")
+    snapshot = json.loads(json.dumps(state, allow_nan=False))
+    snapshot["attempts"] = snapshot["attempts"][: position + 1]
+    snapshot["segments"] = snapshot["segments"][: len(segments)]
+    snapshot.pop("completed_at", None)
+    return snapshot
+
+
+def _scheduler_identity_matches(
+    scheduler_identity: Any,
+    task_map_sha256: str,
+    local_task_id: int,
+    retrain_index: int,
+) -> bool:
+    """Authenticate an attempt's optional mapped-array identity."""
+    if not task_map_sha256:
+        return scheduler_identity is None
+    return (
+        isinstance(scheduler_identity, dict)
+        and scheduler_identity.get("mode") == "mapped"
+        and scheduler_identity.get("task_map_sha256") == task_map_sha256
+        and scheduler_identity.get("local_task_id") == local_task_id
+        and scheduler_identity.get("retrain_index") == retrain_index
+    )
+
+
+def _validate_retrain_receipt(
+    root: Path, design: dict[str, Any], ledger_row: dict[str, str], receipt_path: Path
+) -> None:
+    """Fail closed unless one immutable receipt seals its original task boundary."""
+    expected_path = _retrain_receipt_path(root, ledger_row["job_id"])
+    if receipt_path.resolve() != expected_path.resolve() or not receipt_path.is_file():
+        raise RuntimeError(f"Retrain receipt has the wrong path: {receipt_path}")
+    receipt = json.loads(receipt_path.read_text(encoding="utf-8"))
+    receipt_sha256 = _sha256(receipt_path)
+    if (ledger_row.get("success_sha256") or "") not in {"", receipt_sha256}:
+        raise RuntimeError(f"Retrain receipt changed after ledger sealing: {receipt_path}")
+    index = _retrain_index_for_ledger_row(root, design, ledger_row)
+    manifest_path = root / "selection" / "pareto_retrain_manifest.json"
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    runs = manifest.get("retrain_runs", [])
+    expected_row = runs[index] if 0 <= index < len(runs) else None
+    local_task_id = int(ledger_row["job_id"].rsplit("_", maxsplit=1)[1])
+    if (
+        receipt.get("schema_version") != 1
+        or receipt.get("code_commit") != design["code_commit"]
+        or receipt.get("campaign_root") != str(root.resolve())
+        or receipt.get("scheduler_job_id") != ledger_row["job_id"]
+        or receipt.get("local_task_id") != local_task_id
+        or receipt.get("task_map_sha256") != ledger_row.get("bindings_sha256", "")
+        or receipt.get("retrain_index") != index
+        or receipt.get("model") != ledger_row.get("model")
+        or receipt.get("manifest") != str(manifest_path.resolve())
+        or receipt.get("manifest_sha256") != _sha256(manifest_path)
+        or expected_row is None
+        or receipt.get("row") != expected_row
+        or receipt.get("row_sha256") != _json_sha256(expected_row)
+    ):
+        raise RuntimeError(f"Retrain receipt differs from its frozen task: {receipt_path}")
+
+    evidence = receipt.get("evidence", {})
+    if evidence.get("kind") == "final_marker":
+        marker = root / "retraining" / "markers" / f"{index:04d}.json"
+        marker_snapshot = (
+            json.loads(marker.read_text(encoding="utf-8")) if marker.is_file() else {}
+        )
+        marker_job_id = _attempt_scheduler_job_id(marker_snapshot)
+        if (
+            evidence.get("path") != str(marker.resolve())
+            or not marker.is_file()
+            or evidence.get("sha256") != _sha256(marker)
+            or evidence.get("snapshot") != marker_snapshot
+            or marker_job_id != ledger_row["job_id"]
+            or not _scheduler_identity_matches(
+                marker_snapshot.get("scheduler_identity"),
+                ledger_row.get("bindings_sha256", ""),
+                local_task_id,
+                index,
+            )
+            or not _validate_retrain_marker(marker, expected_row)
+        ):
+            raise RuntimeError(f"Retrain final-marker receipt is invalid: {receipt_path}")
+        return
+    if evidence.get("kind") != "training_segment":
+        raise RuntimeError(f"Retrain receipt has an unknown evidence kind: {receipt_path}")
+
+    snapshot = evidence.get("snapshot")
+    if not isinstance(snapshot, dict) or evidence.get("snapshot_sha256") != _json_sha256(snapshot):
+        raise RuntimeError(f"Retrain receipt state snapshot changed: {receipt_path}")
+    identity = snapshot.get("identity", {})
+    segments = snapshot.get("segments", [])
+    attempts = snapshot.get("attempts", [])
+    boundaries = [int(segment.get("epoch_boundary", -1)) for segment in segments]
+    from scripts import physics_background_pairing_campaign as campaign
+
+    expected_boundaries = list(
+        range(
+            campaign.RETRAIN_SEGMENT_EPOCHS,
+            campaign.RETRAIN_EPOCHS + 1,
+            campaign.RETRAIN_SEGMENT_EPOCHS,
+        )
+    )[: len(boundaries)]
+    latest = attempts[-1] if attempts else {}
+    observed_job_id = _attempt_scheduler_job_id(latest)
+    scheduler_identity = latest.get("scheduler_identity")
+    task_map_sha256 = ledger_row.get("bindings_sha256", "")
+    scheduler_identity_valid = _scheduler_identity_matches(
+        scheduler_identity, task_map_sha256, local_task_id, index
+    )
+    if (
+        snapshot.get("schema_version") != 1
+        or identity.get("code_commit") != design["code_commit"]
+        or identity.get("manifest") != str(manifest_path.resolve())
+        or identity.get("manifest_sha256") != _sha256(manifest_path)
+        or identity.get("retrain_index") != index
+        or identity.get("row") != expected_row
+        or identity.get("row_sha256") != _json_sha256(expected_row)
+        or snapshot.get("completed_at") is not None
+        or not boundaries
+        or boundaries != expected_boundaries
+        or latest.get("phase") != "training"
+        or latest.get("completed_at") is None
+        or int(latest.get("target_epoch_boundary", -1)) != boundaries[-1]
+        or int(segments[-1].get("attempt_number", -1)) != int(latest.get("attempt_number", -2))
+        or observed_job_id != ledger_row["job_id"]
+        or not scheduler_identity_valid
+    ):
+        raise RuntimeError(f"Retrain receipt state boundary is invalid: {receipt_path}")
+    artifacts = _receipt_segment_artifacts(root, index, snapshot)
+    if evidence.get("segment_artifacts") != artifacts:
+        raise RuntimeError(f"Retrain receipt artifact inventory differs: {receipt_path}")
+
+
 def _completed_retrain_marker(root: Path, design: dict[str, Any], row: dict[str, str]) -> str:
-    """Authenticate the result marker for one successful Slurm array task."""
-    try:
-        index = int(row["job_id"].rsplit("_", maxsplit=1)[1])
-    except (IndexError, ValueError) as error:
-        raise RuntimeError(f"Invalid retrain task job ID: {row['job_id']}.") from error
+    """Seal or revalidate one task's immutable final/segment receipt."""
+    receipt_path = _retrain_receipt_path(root, row["job_id"])
+    if receipt_path.is_file():
+        _validate_retrain_receipt(root, design, row, receipt_path)
+        return _sha256(receipt_path)
+    if row.get("success_sha256"):
+        raise RuntimeError(
+            f"Ledger names a retrain success receipt that is missing: {receipt_path}"
+        )
+
+    index = _retrain_index_for_ledger_row(root, design, row)
     manifest_path = root / "selection" / "pareto_retrain_manifest.json"
     manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
     runs = manifest.get("retrain_runs", [])
@@ -1070,9 +1418,72 @@ def _completed_retrain_marker(root: Path, design: dict[str, Any], row: dict[str,
     ):
         raise RuntimeError(f"Retrain task does not match the frozen manifest: {row['job_id']}.")
     marker = root / "retraining" / "markers" / f"{index:04d}.json"
-    if not _validate_retrain_marker(marker, runs[index]):
-        raise RuntimeError(f"Successful retrain task has no valid marker: {row['job_id']}.")
-    return _sha256(marker)
+    if marker.is_file():
+        if not _validate_retrain_marker(marker, runs[index]):
+            raise RuntimeError(f"Successful retrain task has an invalid marker: {row['job_id']}.")
+        marker_snapshot = json.loads(marker.read_text(encoding="utf-8"))
+        local_task_id = int(row["job_id"].rsplit("_", maxsplit=1)[1])
+        if _attempt_scheduler_job_id(marker_snapshot) == row["job_id"] and (
+            _scheduler_identity_matches(
+                marker_snapshot.get("scheduler_identity"),
+                row.get("bindings_sha256", ""),
+                local_task_id,
+                index,
+            )
+        ):
+            evidence = {
+                "kind": "final_marker",
+                "path": str(marker.resolve()),
+                "sha256": _sha256(marker),
+                "snapshot": marker_snapshot,
+            }
+        else:
+            state_path = Path(str(marker_snapshot.get("restart_state_artifact", "")))
+            state = json.loads(state_path.read_text(encoding="utf-8"))
+            snapshot = _segment_snapshot_for_job(state, row["job_id"])
+            evidence = {
+                "kind": "training_segment",
+                "source_state": str(state_path.resolve()),
+                "snapshot": snapshot,
+                "snapshot_sha256": _json_sha256(snapshot),
+                "segment_artifacts": _receipt_segment_artifacts(root, index, snapshot),
+            }
+    else:
+        from scripts import physics_background_pairing_campaign as campaign
+
+        try:
+            progress = campaign._validate_retrain_progress(root, index, runs[index])
+        except Exception as error:
+            raise RuntimeError(
+                f"Successful retrain task has neither a valid marker nor segment: {row['job_id']}."
+            ) from error
+        state = json.loads(progress.read_text(encoding="utf-8"))
+        snapshot = _segment_snapshot_for_job(state, row["job_id"])
+        evidence = {
+            "kind": "training_segment",
+            "source_state": str(progress.resolve()),
+            "snapshot": snapshot,
+            "snapshot_sha256": _json_sha256(snapshot),
+            "segment_artifacts": _receipt_segment_artifacts(root, index, snapshot),
+        }
+    receipt = {
+        "schema_version": 1,
+        "code_commit": design["code_commit"],
+        "campaign_root": str(root.resolve()),
+        "scheduler_job_id": row["job_id"],
+        "local_task_id": int(row["job_id"].rsplit("_", maxsplit=1)[1]),
+        "task_map_sha256": row.get("bindings_sha256", ""),
+        "retrain_index": index,
+        "model": row["model"],
+        "manifest": str(manifest_path.resolve()),
+        "manifest_sha256": _sha256(manifest_path),
+        "row": runs[index],
+        "row_sha256": _json_sha256(runs[index]),
+        "evidence": evidence,
+    }
+    _atomic_json(receipt_path, receipt)
+    _validate_retrain_receipt(root, design, row, receipt_path)
+    return _sha256(receipt_path)
 
 
 def reconcile(root: Path, repository: Path) -> list[dict[str, str]]:
@@ -1340,6 +1751,236 @@ def _freeze_campaign_locked(root: Path, repository: Path) -> Path:
     return output
 
 
+def _validate_aggregate_oracle(
+    design: dict[str, Any], manifest: dict[str, Any], oracle: dict[str, Any]
+) -> None:
+    """Authenticate the exact oracle output against every frozen front membership."""
+    if set(oracle) != {
+        "schema_version",
+        "created_at",
+        "oracle_uses_downstream_anomalies",
+        "winners",
+        "all_front_memberships",
+    } or (
+        oracle.get("schema_version") != 2
+        or oracle.get("oracle_uses_downstream_anomalies") is not True
+    ):
+        raise RuntimeError("Oracle result does not have the exact schema-2 contract.")
+
+    expected_fronts = [
+        (str(study["model"]), str(objective["id"]))
+        for study in design["studies"]
+        for objective in study["objectives"]
+    ]
+    if len(expected_fronts) != 56 or len(set(expected_fronts)) != 56:
+        raise RuntimeError("Campaign design does not define exactly 56 unique logical fronts.")
+    expected_memberships = manifest["front_memberships"]
+    memberships = oracle.get("all_front_memberships")
+    if not isinstance(memberships, list) or len(memberships) != len(expected_memberships):
+        raise RuntimeError("Oracle membership cardinality differs from the frozen manifest.")
+    retrains = {int(row["retrain_index"]): row for row in manifest["retrain_runs"]}
+    membership_by_index: dict[int, dict[str, Any]] = {}
+    for expected, observed in zip(expected_memberships, memberships, strict=True):
+        if not isinstance(observed, dict) or any(
+            observed.get(key) != value for key, value in expected.items()
+        ):
+            raise RuntimeError("Oracle membership identity differs from the frozen manifest.")
+        index = int(expected["membership_index"])
+        if (
+            index in membership_by_index
+            or observed.get("params") != retrains[int(expected["retrain_index"])]["params"]
+        ):
+            raise RuntimeError("Oracle membership has duplicate identity or changed parameters.")
+        values = observed.get("retrained_objective_values")
+        efficiencies = observed.get("downstream_efficiencies")
+        mean = observed.get("mean_downstream_efficiency")
+        if (
+            not observed.get("optimized_ckpt_name")
+            or not isinstance(values, list)
+            or len(values) != 2
+            or not all(math.isfinite(float(value)) for value in values)
+            or not isinstance(efficiencies, dict)
+            or len(efficiencies) != 20
+            or not all(
+                math.isfinite(float(value)) and 0.0 <= float(value) <= 1.0
+                for value in efficiencies.values()
+            )
+            or not isinstance(mean, (int, float))
+            or not math.isfinite(float(mean))
+            or not math.isclose(
+                float(mean), sum(float(value) for value in efficiencies.values()) / 20
+            )
+        ):
+            raise RuntimeError(f"Oracle membership {index} has invalid downstream values.")
+        membership_by_index[index] = observed
+    if list(membership_by_index) != list(range(len(expected_memberships))):
+        raise RuntimeError("Oracle membership indices are not exact and contiguous.")
+
+    winners = oracle.get("winners")
+    if not isinstance(winners, list) or len(winners) != 56:
+        raise RuntimeError("Oracle output does not contain exactly 56 winners.")
+    observed_fronts = [
+        (str(row.get("model")), str(row.get("logical_objective")))
+        for row in winners
+        if isinstance(row, dict)
+    ]
+    if observed_fronts != expected_fronts:
+        raise RuntimeError("Oracle winners do not exactly follow the 56 campaign fronts.")
+    for front, winner in zip(expected_fronts, winners, strict=True):
+        candidates = [
+            row
+            for row in memberships
+            if (str(row["model"]), str(row["logical_objective"])) == front
+        ]
+        if not candidates:
+            raise RuntimeError(f"Oracle front has no frozen membership: {front}.")
+        expected_winner = max(
+            candidates,
+            key=lambda row: (
+                float(row["mean_downstream_efficiency"]),
+                -int(row["membership_index"]),
+            ),
+        )
+        if winner != expected_winner:
+            raise RuntimeError(f"Oracle winner does not maximize mean performance: {front}.")
+
+
+def _validate_aggregate_receipt(
+    path: Path,
+    design: dict[str, Any],
+    manifest_path: Path,
+    manifest: dict[str, Any],
+    marker_evidence: list[dict[str, Any]],
+    oracle_path: Path,
+    oracle: dict[str, Any],
+    command: list[str],
+) -> None:
+    """Authenticate an existing completed transition without rerunning aggregation."""
+    receipt = json.loads(path.read_text(encoding="utf-8"))
+    expected = {
+        "schema_version": 1,
+        "code_commit": design["code_commit"],
+        "command": command,
+        "manifest": str(manifest_path.resolve()),
+        "manifest_sha256": _sha256(manifest_path),
+        "logical_fronts": 56,
+        "front_memberships": len(manifest["front_memberships"]),
+        "unique_retrains": len(manifest["retrain_runs"]),
+        "retrain_markers": marker_evidence,
+        "retrain_markers_sha256": _json_sha256(marker_evidence),
+        "oracle": str(oracle_path.resolve()),
+        "oracle_sha256": _sha256(oracle_path),
+        "oracle_winners": len(oracle["winners"]),
+        "oracle_memberships": len(oracle["all_front_memberships"]),
+    }
+    if set(receipt) != {*expected, "validated_at"} or any(
+        receipt.get(key) != value for key, value in expected.items()
+    ):
+        raise RuntimeError("Existing aggregate validation receipt is changed or inconsistent.")
+
+
+def aggregate_campaign(root: Path, repository: Path) -> Path:
+    """Aggregate only a complete, quiescent, authenticated retraining campaign."""
+    with _operation_lock(root):
+        design = _design(root)
+        _authenticate_execution_repository(repository, design)
+        ledger_rows = _reconcile_locked(root, repository)
+        _assert_no_live_retrain_overlap(ledger_rows)
+        active_retrains = _active_kind_rows(ledger_rows, "retrain")
+        if active_retrains:
+            raise RuntimeError(f"Retraining jobs remain active at aggregation: {active_retrains}.")
+
+        manifest_path = root / "selection" / "pareto_retrain_manifest.json"
+        if not manifest_path.is_file():
+            raise FileNotFoundError("Freeze the Pareto fronts before aggregation.")
+        manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+        _validate_frozen_manifest_contract(root, design, manifest)
+        freeze_path = root / "state" / "freeze_validation.json"
+        if not freeze_path.is_file():
+            raise RuntimeError("The authenticated freeze transition receipt is missing.")
+        freeze = json.loads(freeze_path.read_text(encoding="utf-8"))
+        if (
+            freeze.get("schema_version") != 1
+            or freeze.get("code_commit") != design["code_commit"]
+            or freeze.get("logical_fronts") != 56
+            or freeze.get("front_memberships") != len(manifest["front_memberships"])
+            or freeze.get("unique_retrains") != len(manifest["retrain_runs"])
+            or freeze.get("manifest") != str(manifest_path.resolve())
+            or freeze.get("manifest_sha256") != _sha256(manifest_path)
+        ):
+            raise RuntimeError("Freeze receipt does not authenticate the current Pareto manifest.")
+
+        marker_root = root / "retraining" / "markers"
+        expected_marker_paths = [
+            marker_root / f"{int(row['retrain_index']):04d}.json"
+            for row in manifest["retrain_runs"]
+        ]
+        observed_marker_paths = sorted(marker_root.glob("*.json")) if marker_root.is_dir() else []
+        if observed_marker_paths != expected_marker_paths:
+            raise RuntimeError("Retraining markers do not exactly cover the frozen retrain rows.")
+        marker_evidence = []
+        for row, marker_path in zip(manifest["retrain_runs"], expected_marker_paths, strict=True):
+            if not _validate_retrain_marker(marker_path, row):
+                raise RuntimeError(f"Retraining marker failed validation: {marker_path}.")
+            marker_evidence.append(
+                {
+                    "retrain_index": int(row["retrain_index"]),
+                    "path": str(marker_path.resolve()),
+                    "sha256": _sha256(marker_path),
+                }
+            )
+
+        runner = repository / "scripts" / "physics_background_pairing_campaign.py"
+        if not runner.is_file():
+            raise FileNotFoundError(runner)
+        command = [sys.executable, str(runner), "--root", str(root), "aggregate"]
+        output = root / "state" / "aggregate_validation.json"
+        oracle_path = root / "results" / "oracle_winners.json"
+        if output.exists():
+            if not oracle_path.is_file():
+                raise RuntimeError("Aggregate receipt exists but its oracle result is missing.")
+            oracle = json.loads(oracle_path.read_text(encoding="utf-8"))
+            _validate_aggregate_oracle(design, manifest, oracle)
+            _validate_aggregate_receipt(
+                output,
+                design,
+                manifest_path,
+                manifest,
+                marker_evidence,
+                oracle_path,
+                oracle,
+                command,
+            )
+            return output
+        subprocess.run(command, cwd=repository, check=True)  # nosec B603
+        if not oracle_path.is_file():
+            raise RuntimeError("Campaign runner emitted no oracle result.")
+        oracle = json.loads(oracle_path.read_text(encoding="utf-8"))
+        _validate_aggregate_oracle(design, manifest, oracle)
+
+        _atomic_json(
+            output,
+            {
+                "schema_version": 1,
+                "validated_at": datetime.now(timezone.utc).isoformat(),
+                "code_commit": design["code_commit"],
+                "command": command,
+                "manifest": str(manifest_path.resolve()),
+                "manifest_sha256": _sha256(manifest_path),
+                "logical_fronts": 56,
+                "front_memberships": len(manifest["front_memberships"]),
+                "unique_retrains": len(manifest["retrain_runs"]),
+                "retrain_markers": marker_evidence,
+                "retrain_markers_sha256": _json_sha256(marker_evidence),
+                "oracle": str(oracle_path.resolve()),
+                "oracle_sha256": _sha256(oracle_path),
+                "oracle_winners": len(oracle["winners"]),
+                "oracle_memberships": len(oracle["all_front_memberships"]),
+            },
+        )
+        return output
+
+
 def _append_failure_event(root: Path, payload: dict[str, Any]) -> None:
     """Append one auditable recovery event while the operation lock is held."""
     path = root / "state" / "failures.jsonl"
@@ -1523,6 +2164,8 @@ def main() -> None:
         print(json.dumps(reconcile(root, repository), indent=2, sort_keys=True))
     elif args.command == "freeze":
         print(freeze_campaign(root, repository))
+    elif args.command == "aggregate":
+        print(aggregate_campaign(root, repository))
     elif args.command == "repair-stale":
         print(repair_stale(root, repository, args.model, args.trial))
     else:

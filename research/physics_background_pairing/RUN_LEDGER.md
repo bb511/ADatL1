@@ -89,6 +89,21 @@ codespell) pass; the unrelated baseline debt must not be mixed into this campaig
 
 ## Verification log
 
+- 2026-08-05: retrain submission now respects Clariden's `MaxArraySize=1001` even when
+  the frozen union reaches 3,600 runs. Each non-overlapping submission uses local IDs
+  `0..N-1` for at most 1,001 missing frozen indices and persists a content-addressed,
+  manifest/row-authenticated mapping used by the batch runner, campaign, ledger, and
+  reconciliation. Later recovery batches may remap an actual index without changing
+  its scientific restart identity; submission identity is retained per attempt. Legacy
+  direct-index ledger rows remain readable. Normal 40-epoch boundaries exit and resume
+  through fresh mapped submissions because `MaxBatchRequeue=5`; only emergency USR1
+  recovery self-requeues, with append-mode logs and `REQUEUED` treated as active.
+  Epoch-200 training and downstream evaluation are separate tasks. Live-last/MLflow
+  epoch recovery, atomic segment publication/orphan adoption, and idempotent audited
+  marker finalization cover allocation crashes without silently restarting. The
+  persistent MLflow run logs parameters only on its first segment, carries the required
+  source-commit/run identity tags, and serializes concurrent experiment creation.
+
 - 2026-08-05: hardened the mutable control plane before bulk transition. Search and
   retrain submissions now share an interprocess lock across user-scoped live Slurm
   checks, `sbatch`, and ledger registration; search timeouts cannot exceed 720 minutes.

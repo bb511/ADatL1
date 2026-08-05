@@ -45,6 +45,7 @@ TARGET_TRIALS = 600
 SEARCH_EPOCHS = 50
 RETRAIN_EPOCHS = 200
 DOWNSTREAM_DATASETS = 20
+MAX_RETRAIN_ARRAY_TASKS = 1001
 DOWNSTREAM_DATASET_NAMES = {
     "GluGluHTo2B_Par-MH-125",
     "GluGluHto2G_Par-MH-125",
@@ -91,8 +92,14 @@ def parse_args() -> argparse.Namespace:
     submit.add_argument("--jobs", type=int, default=48)
     submit.add_argument("--timeout-min", type=int, default=720)
     subparsers.add_parser("freeze")
+    resolve_retrain = subparsers.add_parser("resolve-retrain-index")
+    resolve_retrain.add_argument("--task-map", type=Path, required=True)
+    resolve_retrain.add_argument("--task-map-sha256", required=True)
+    resolve_retrain.add_argument("--local-task-id", type=int, required=True)
     retrain = subparsers.add_parser("retrain")
     retrain.add_argument("--index", type=int, required=True)
+    retrain.add_argument("--task-map", type=Path)
+    retrain.add_argument("--task-map-sha256")
     subparsers.add_parser("aggregate")
     return parser.parse_args()
 
@@ -227,6 +234,119 @@ def _write_json(path: Path, value: Any, *, create: bool = False) -> None:
         temporary.unlink()
         raise FileExistsError(path)
     temporary.replace(path)
+
+
+def _load_retrain_task_map(root: Path, task_map: Path, expected_sha256: str) -> dict[str, Any]:
+    """Authenticate one content-addressed Slurm-local retrain task map."""
+    if len(expected_sha256) != 64 or any(
+        character not in "0123456789abcdef" for character in expected_sha256
+    ):
+        raise RuntimeError(f"Invalid retrain task-map SHA-256: {expected_sha256!r}.")
+    expected_path = (root / "state" / "retrain_task_maps" / f"{expected_sha256}.json").resolve()
+    task_map = task_map.expanduser().resolve()
+    if task_map != expected_path or not task_map.is_file() or _sha256(task_map) != expected_sha256:
+        raise RuntimeError(f"Retrain task map is missing, misplaced, or changed: {task_map}")
+    payload = json.loads(task_map.read_text(encoding="utf-8"))
+    design_path = root / "design.json"
+    design = json.loads(design_path.read_text(encoding="utf-8"))
+    if design.get("schema_version") != 2:
+        raise RuntimeError(f"Retrain task map references an invalid campaign: {design_path}")
+    manifest_path = (root / "selection" / "pareto_retrain_manifest.json").resolve()
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    entries = payload.get("entries", [])
+    if (
+        payload.get("schema_version") != 1
+        or payload.get("code_commit") != design["code_commit"]
+        or payload.get("campaign_root") != str(root.resolve())
+        or payload.get("manifest") != str(manifest_path)
+        or payload.get("manifest_sha256") != _sha256(manifest_path)
+        or payload.get("batch_size") != len(entries)
+        or not 1 <= len(entries) <= MAX_RETRAIN_ARRAY_TASKS
+        or [entry.get("local_task_id") for entry in entries] != list(range(len(entries)))
+    ):
+        raise RuntimeError(f"Retrain task map does not match the frozen campaign: {task_map}")
+    rows = manifest.get("retrain_runs", [])
+    actual_indices = [entry.get("retrain_index") for entry in entries]
+    if actual_indices != sorted(set(actual_indices)):
+        raise RuntimeError(f"Retrain task map has non-exact actual indices: {task_map}")
+    for entry in entries:
+        index = int(entry["retrain_index"])
+        if (
+            not 0 <= index < len(rows)
+            or rows[index].get("retrain_index") != index
+            or entry.get("model") != rows[index].get("model")
+            or entry.get("row_sha256") != _json_sha256(rows[index])
+        ):
+            raise RuntimeError(
+                f"Retrain task-map row differs from the frozen manifest: {task_map}"
+            )
+    return payload
+
+
+def resolve_retrain_task_index(
+    root: Path, task_map: Path, task_map_sha256: str, local_task_id: int
+) -> int:
+    """Map one bounded Slurm-local task ID to its exact frozen retrain index."""
+    payload = _load_retrain_task_map(root, task_map, task_map_sha256)
+    entries = payload["entries"]
+    if not 0 <= local_task_id < len(entries):
+        raise RuntimeError(f"Local retrain task {local_task_id} is absent from its task map.")
+    entry = entries[local_task_id]
+    if int(entry["local_task_id"]) != local_task_id:
+        raise RuntimeError(f"Local retrain task {local_task_id} is not exact in its task map.")
+    return int(entry["retrain_index"])
+
+
+def _retrain_scheduler_identity(
+    root: Path,
+    index: int,
+    task_map: Path | None,
+    task_map_sha256: str | None,
+) -> dict[str, Any]:
+    """Authenticate mapped Slurm identity, or a legacy direct-index invocation."""
+    task_id = os.environ.get("SLURM_ARRAY_TASK_ID")
+    map_environment = os.environ.get("PHYSICS_BGPAIR_RETRAIN_TASK_MAP")
+    sha_environment = os.environ.get("PHYSICS_BGPAIR_RETRAIN_TASK_MAP_SHA256")
+    index_environment = os.environ.get("PHYSICS_BGPAIR_RETRAIN_INDEX")
+    local_environment = os.environ.get("PHYSICS_BGPAIR_RETRAIN_LOCAL_TASK_ID")
+    if task_map is None and task_map_sha256 is None:
+        if any(
+            value is not None
+            for value in (map_environment, sha_environment, index_environment, local_environment)
+        ):
+            raise RuntimeError("A retrain task-map environment requires explicit map arguments.")
+        if task_id is not None and int(task_id) != index:
+            raise RuntimeError(
+                f"Legacy Slurm task {task_id} cannot execute retrain index {index}."
+            )
+        return {
+            "mode": "legacy_direct" if task_id is not None else "manual",
+            "local_task_id": None if task_id is None else int(task_id),
+            "retrain_index": index,
+        }
+    if task_map is None or task_map_sha256 is None or task_id is None:
+        raise RuntimeError("Mapped retraining requires a map, SHA-256, and Slurm array task.")
+    task_map = task_map.expanduser().resolve()
+    local_task_id = int(task_id)
+    if (
+        map_environment != str(task_map)
+        or sha_environment != task_map_sha256
+        or local_environment != str(local_task_id)
+        or index_environment != str(index)
+    ):
+        raise RuntimeError("Mapped retrain arguments differ from their exported Slurm identity.")
+    resolved = resolve_retrain_task_index(root, task_map, task_map_sha256, local_task_id)
+    if resolved != index:
+        raise RuntimeError(
+            f"Mapped Slurm task {local_task_id} resolves to {resolved}, not retrain index {index}."
+        )
+    return {
+        "mode": "mapped",
+        "task_map": str(task_map),
+        "task_map_sha256": task_map_sha256,
+        "local_task_id": local_task_id,
+        "retrain_index": index,
+    }
 
 
 def _jsonable(value: Any) -> Any:
@@ -692,11 +812,18 @@ def _mlflow_run_for_retrain(identity: dict[str, Any], existing_run_id: str | Non
     tracking_dir.mkdir(parents=True, exist_ok=True)
     client = MlflowClient(tracking_uri=tracking_uri)
     experiment_name = str(identity["experiment_name"])
-    experiment = client.get_experiment_by_name(experiment_name)
-    if experiment is None:
-        experiment_id = client.create_experiment(experiment_name)
-    else:
-        experiment_id = experiment.experiment_id
+    experiment_lock = tracking_dir.parent / ".physics_bgpair_mlflow_experiments.lock"
+    experiment_lock.parent.mkdir(parents=True, exist_ok=True)
+    with experiment_lock.open("a+", encoding="utf-8") as handle:
+        fcntl.flock(handle.fileno(), fcntl.LOCK_EX)
+        experiment = client.get_experiment_by_name(experiment_name)
+        if experiment is None:
+            experiment_id = client.create_experiment(experiment_name)
+        else:
+            experiment_id = experiment.experiment_id
+    authenticated_experiment = client.get_experiment(experiment_id)
+    if authenticated_experiment is None or authenticated_experiment.name != experiment_name:
+        raise RuntimeError("Retrain MLflow experiment identity changed after creation.")
     identity_sha = _json_sha256(identity)
     tag_name = "physics_bgpair_retrain_identity_sha256"
     matches = client.search_runs(
@@ -712,19 +839,31 @@ def _mlflow_run_for_retrain(identity: dict[str, Any], existing_run_id: str | Non
     if discovered is None:
         if existing_run_id is not None:
             raise RuntimeError("Persisted retrain MLflow run is missing from its experiment.")
+        expected_tags = {
+            tag_name: identity_sha,
+            "mlflow.runName": str(identity["run_name"]),
+            "mlflow.source.git.commit": str(identity["code_commit"]),
+            "physics_bgpair_code_commit": str(identity["code_commit"]),
+            "physics_bgpair_retrain_index": str(identity["retrain_index"]),
+        }
         run = client.create_run(
             experiment_id,
-            tags={
-                tag_name: identity_sha,
-                "mlflow.runName": str(identity["run_name"]),
-                "physics_bgpair_code_commit": str(identity["code_commit"]),
-                "physics_bgpair_retrain_index": str(identity["retrain_index"]),
-            },
+            tags=expected_tags,
         )
         discovered = run.info.run_id
+    else:
+        expected_tags = {
+            tag_name: identity_sha,
+            "mlflow.runName": str(identity["run_name"]),
+            "mlflow.source.git.commit": str(identity["code_commit"]),
+            "physics_bgpair_code_commit": str(identity["code_commit"]),
+            "physics_bgpair_retrain_index": str(identity["retrain_index"]),
+        }
     run = client.get_run(discovered)
     if run.info.experiment_id != experiment_id:
         raise RuntimeError("Retrain MLflow run belongs to a different experiment.")
+    if any(run.data.tags.get(key) != value for key, value in expected_tags.items()):
+        raise RuntimeError("Retrain MLflow run tags differ from its immutable identity.")
     return str(discovered)
 
 
@@ -736,9 +875,131 @@ def _hpc_checkpoint_rows(trainer_root: Path) -> list[dict[str, Any]]:
     return rows
 
 
+def _live_last_resume(identity: dict[str, Any], checkpoint_root: Path) -> dict[str, Any] | None:
+    """Authenticate a live last checkpoint against exact contiguous MLflow epochs."""
+    from mlflow.tracking import MlflowClient
+
+    checkpoint = checkpoint_root / "last.ckpt"
+    client = MlflowClient(tracking_uri=str(identity["mlflow_tracking_uri"]))
+    history = sorted(
+        client.get_metric_history(str(identity["mlflow_run_id"]), "epoch_idx"),
+        key=lambda metric: int(metric.step),
+    )
+    if not checkpoint.is_file() and not history:
+        return None
+    if not checkpoint.is_file() or not history:
+        raise RuntimeError("Live last checkpoint and MLflow epoch history are inconsistent.")
+    import torch
+
+    payload = torch.load(checkpoint, map_location="cpu", weights_only=False)  # nosec B614
+    checkpoint_epoch = int(payload.get("epoch", -1))
+    steps = [int(metric.step) for metric in history]
+    values = [float(metric.value) for metric in history]
+    completed_epochs = checkpoint_epoch + 1
+    if (
+        completed_epochs <= 0
+        or len(history) != completed_epochs
+        or len(set(steps)) != len(steps)
+        or steps != list(range(completed_epochs))
+        or values != [float(epoch) for epoch in range(completed_epochs)]
+    ):
+        raise RuntimeError("Live last checkpoint differs from contiguous MLflow epoch history.")
+    return {
+        "kind": "live_last",
+        "path": str(checkpoint.resolve()),
+        "sha256": _sha256(checkpoint),
+        "completed_epochs": completed_epochs,
+    }
+
+
+def _atomic_copy(source: Path, target: Path) -> None:
+    """Durably publish one immutable segment artifact without a partial final path."""
+    target.parent.mkdir(parents=True, exist_ok=True)
+    temporary = target.with_name(f".{target.name}.{os.getpid()}.tmp")
+    if temporary.exists():
+        temporary.unlink()
+    try:
+        shutil.copy2(source, temporary)
+        with temporary.open("rb") as handle:
+            os.fsync(handle.fileno())
+        os.replace(temporary, target)
+        directory_fd = os.open(target.parent, os.O_RDONLY)
+        try:
+            os.fsync(directory_fd)
+        finally:
+            os.close(directory_fd)
+    finally:
+        if temporary.exists():
+            temporary.unlink()
+
+
+def _adopt_exact_orphan_segment(
+    root: Path,
+    identity: dict[str, Any],
+    state: dict[str, Any],
+    paths: dict[str, Path],
+) -> None:
+    """Adopt a crash-between-copy-and-state segment only when every source is exact."""
+    completed = [int(row["epoch_boundary"]) for row in state["segments"]]
+    boundary = (len(completed) + 1) * RETRAIN_SEGMENT_EPOCHS
+    if boundary > RETRAIN_EPOCHS:
+        return
+    checkpoint = paths["segments"] / f"epoch_{boundary:03d}.ckpt"
+    config = paths["segments"] / f"epoch_{boundary:03d}_config.yaml"
+    if not checkpoint.exists() and not config.exists():
+        return
+    checkpoint_root = (
+        root
+        / "runtime"
+        / "checkpoints"
+        / str(identity["experiment_name"])
+        / str(identity["run_name"])
+    )
+    live = _live_last_resume(
+        {**identity, "mlflow_run_id": state["mlflow_run_id"]}, checkpoint_root
+    )
+    resolved = Path(str(identity["hydra_dir"])) / ".hydra" / "config.yaml"
+    if live is None or int(live["completed_epochs"]) != boundary or not resolved.is_file():
+        raise RuntimeError(f"Orphan retrain segment does not match live epoch {boundary} state.")
+    live_checkpoint = Path(str(live["path"]))
+    if checkpoint.exists() and (not checkpoint.is_file() or live["sha256"] != _sha256(checkpoint)):
+        raise RuntimeError(f"Orphan checkpoint differs at epoch {boundary}.")
+    if config.exists() and (not config.is_file() or _sha256(resolved) != _sha256(config)):
+        raise RuntimeError(f"Orphan config differs at epoch {boundary}.")
+    if not checkpoint.exists():
+        _atomic_copy(live_checkpoint, checkpoint)
+    if not config.exists():
+        _atomic_copy(resolved, config)
+    candidates = [
+        attempt
+        for attempt in state["attempts"]
+        if attempt.get("phase") == "training"
+        and int(attempt.get("target_epoch_boundary", -1)) == boundary
+    ]
+    if not candidates:
+        raise RuntimeError(f"Orphan retrain segment has no owning attempt at epoch {boundary}.")
+    attempt = candidates[-1]
+    if attempt.get("completed_at") is not None:
+        raise RuntimeError(f"Orphan retrain owner is already completed at epoch {boundary}.")
+    adopted_at = datetime.now(timezone.utc).isoformat()
+    attempt["completed_at"] = adopted_at
+    attempt["orphan_adopted_at"] = adopted_at
+    state["segments"].append(
+        {
+            "epoch_boundary": boundary,
+            "attempt_number": int(attempt["attempt_number"]),
+            "continuation_checkpoint": str(checkpoint.resolve()),
+            "continuation_checkpoint_sha256": _sha256(checkpoint),
+            "resolved_config": str(config.resolve()),
+            "resolved_config_sha256": _sha256(config),
+        }
+    )
+
+
 def _prepare_retrain_attempt(
     root: Path,
     identity: dict[str, Any],
+    scheduler_identity: dict[str, Any] | None = None,
 ) -> tuple[dict[str, Any], dict[str, Any]]:
     """Persist one fail-closed allocation attempt and its exact resume source."""
     index = int(identity["retrain_index"])
@@ -780,19 +1041,32 @@ def _prepare_retrain_attempt(
                 "attempts": [],
                 "segments": [],
             }
-        if state.get("completed_at") is not None:
-            raise RuntimeError("Completed retrain restart state exists without a success marker.")
+        checkpoint_root = (
+            root
+            / "runtime"
+            / "checkpoints"
+            / str(identity["experiment_name"])
+            / str(identity["run_name"])
+        )
+        _adopt_exact_orphan_segment(root, identity, state, paths)
         completed = [int(row["epoch_boundary"]) for row in state["segments"]]
-        expected_completed = list(
-            range(RETRAIN_SEGMENT_EPOCHS, RETRAIN_EPOCHS, RETRAIN_SEGMENT_EPOCHS)
-        )[: len(completed)]
+        all_boundaries = list(
+            range(RETRAIN_SEGMENT_EPOCHS, RETRAIN_EPOCHS + 1, RETRAIN_SEGMENT_EPOCHS)
+        )
+        expected_completed = all_boundaries[: len(completed)]
         if completed != expected_completed:
             raise RuntimeError(f"Retrain segment history is not contiguous: {completed}")
+        if state.get("completed_at") is not None:
+            if completed != all_boundaries:
+                raise RuntimeError("Completed retrain state lacks all training boundaries.")
+            phase = "finalization"
+        else:
+            phase = "evaluation" if completed == all_boundaries else "training"
         hpc_rows = _hpc_checkpoint_rows(paths["trainer"])
         resume = None
-        if hpc_rows:
+        if phase == "training" and hpc_rows:
             resume = {"kind": "lightning_hpc", **hpc_rows[-1]}
-        elif completed:
+        elif phase == "training" and completed:
             segment = state["segments"][-1]
             checkpoint = _inside(
                 Path(segment["continuation_checkpoint"]),
@@ -807,11 +1081,30 @@ def _prepare_retrain_attempt(
                 "path": str(checkpoint),
                 "sha256": segment["continuation_checkpoint_sha256"],
             }
-        elif state["attempts"]:
-            raise RuntimeError(
-                "A repeated retrain attempt has no authenticated resume checkpoint."
+        elif phase == "training" and state["attempts"]:
+            live = _live_last_resume(
+                {**identity, "mlflow_run_id": state["mlflow_run_id"]}, checkpoint_root
             )
-        next_boundary = min(RETRAIN_EPOCHS, (len(completed) + 1) * RETRAIN_SEGMENT_EPOCHS)
+            if live is not None:
+                resume = live
+            # A prior attempt that logged no epoch and wrote no checkpoint is an exact
+            # scratch retry; every one-sided or non-contiguous case failed in the helper.
+        if phase == "training" and completed:
+            live = _live_last_resume(
+                {**identity, "mlflow_run_id": state["mlflow_run_id"]}, checkpoint_root
+            )
+            if live is not None:
+                if int(live["completed_epochs"]) < completed[-1]:
+                    raise RuntimeError("Live last checkpoint predates committed retrain progress.")
+                if int(live["completed_epochs"]) > completed[-1] and (
+                    resume is None or resume.get("kind") != "lightning_hpc"
+                ):
+                    resume = live
+        next_boundary = (
+            RETRAIN_EPOCHS
+            if phase in {"evaluation", "finalization"}
+            else (len(completed) + 1) * RETRAIN_SEGMENT_EPOCHS
+        )
         attempt = {
             "attempt_number": len(state["attempts"]) + 1,
             "started_at": datetime.now(timezone.utc).isoformat(),
@@ -819,12 +1112,23 @@ def _prepare_retrain_attempt(
             "slurm_array_job_id": os.environ.get("SLURM_ARRAY_JOB_ID"),
             "slurm_array_task_id": os.environ.get("SLURM_ARRAY_TASK_ID"),
             "target_epoch_boundary": next_boundary,
+            "phase": phase,
             "resume": resume,
             "hpc_checkpoints_before": hpc_rows,
+            "scheduler_identity": scheduler_identity,
         }
         task_id = attempt["slurm_array_task_id"]
-        if task_id is not None and int(task_id) != index:
-            raise RuntimeError(f"Slurm task {task_id} cannot execute retrain index {index}.")
+        expected_task_id = (
+            index if scheduler_identity is None else scheduler_identity.get("local_task_id")
+        )
+        if (
+            task_id is not None
+            and expected_task_id is not None
+            and int(task_id) != expected_task_id
+        ):
+            raise RuntimeError(
+                f"Slurm task {task_id} differs from authenticated task {expected_task_id}."
+            )
         state["attempts"].append(attempt)
         _write_json(paths["state"], state)
         return state, attempt
@@ -845,16 +1149,101 @@ def _archive_hpc_checkpoints(paths: dict[str, Path], attempt_number: int) -> lis
     return archived
 
 
-def _requeue_current_task() -> None:
-    """Requeue the current Slurm task after a deterministic epoch boundary."""
-    job_id = os.environ.get("SLURM_ARRAY_JOB_ID")
-    task_id = os.environ.get("SLURM_ARRAY_TASK_ID")
-    if job_id is None or task_id is None:
-        raise RuntimeError("An intermediate retrain segment requires a Slurm array task.")
-    scontrol = shutil.which("scontrol")
-    if scontrol is None:
-        raise FileNotFoundError("scontrol")
-    subprocess.run([scontrol, "requeue", f"{job_id}_{task_id}"], check=True)  # nosec B603
+def _validate_retrain_progress(
+    root: Path,
+    index: int,
+    expected_row: dict[str, Any],
+    scheduler_job_id: str | None = None,
+) -> Path:
+    """Authenticate one successfully committed training segment without a final marker."""
+    paths = _retrain_paths(root, index)
+    state_path = _inside(
+        paths["state"], paths["state"].parent, "retrain restart state", require_file=True
+    )
+    state = json.loads(state_path.read_text(encoding="utf-8"))
+    design_path = root / "design.json"
+    design = json.loads(design_path.read_text(encoding="utf-8"))
+    manifest_path = root / "selection" / "pareto_retrain_manifest.json"
+    identity = _retrain_identity(root, design, manifest_path, index, expected_row)
+    boundaries = [int(segment["epoch_boundary"]) for segment in state.get("segments", [])]
+    expected_boundaries = list(
+        range(RETRAIN_SEGMENT_EPOCHS, RETRAIN_EPOCHS + 1, RETRAIN_SEGMENT_EPOCHS)
+    )[: len(boundaries)]
+    attempts = state.get("attempts", [])
+    if (
+        state.get("schema_version") != 1
+        or state.get("identity") != identity
+        or state.get("completed_at") is not None
+        or not boundaries
+        or boundaries != expected_boundaries
+        or not attempts
+    ):
+        raise RuntimeError(f"Retrain segment progress is not exact: {state_path}")
+    latest = attempts[-1]
+    if (
+        latest.get("phase") != "training"
+        or latest.get("completed_at") is None
+        or int(latest.get("target_epoch_boundary", -1)) != boundaries[-1]
+        or int(state["segments"][-1].get("attempt_number", -1))
+        != int(latest.get("attempt_number", -2))
+    ):
+        raise RuntimeError(f"Latest retrain segment attempt is incomplete: {state_path}")
+    if scheduler_job_id is not None:
+        array_job_id = latest.get("slurm_array_job_id")
+        array_task_id = latest.get("slurm_array_task_id")
+        observed_job_id = (
+            None
+            if array_job_id is None or array_task_id is None
+            else f"{array_job_id}_{array_task_id}"
+        )
+        if observed_job_id != scheduler_job_id:
+            raise RuntimeError(
+                f"Committed retrain segment belongs to {observed_job_id}, not {scheduler_job_id}."
+            )
+    for attempt in attempts:
+        scheduler_identity = attempt.get("scheduler_identity")
+        if scheduler_identity is None or scheduler_identity.get("mode") != "mapped":
+            continue
+        resolved = resolve_retrain_task_index(
+            root,
+            Path(scheduler_identity["task_map"]),
+            str(scheduler_identity["task_map_sha256"]),
+            int(scheduler_identity["local_task_id"]),
+        )
+        if resolved != index or scheduler_identity.get("retrain_index") != index:
+            raise RuntimeError(f"Retrain progress has an invalid scheduler map: {state_path}")
+    for segment in state["segments"]:
+        boundary = int(segment["epoch_boundary"])
+        checkpoint = _inside(
+            Path(segment["continuation_checkpoint"]),
+            paths["segments"],
+            "continuation checkpoint",
+            require_file=True,
+        )
+        config_path = _inside(
+            Path(segment["resolved_config"]),
+            paths["segments"],
+            "segment resolved config",
+            require_file=True,
+        )
+        if _sha256(checkpoint) != segment.get("continuation_checkpoint_sha256") or _sha256(
+            config_path
+        ) != segment.get("resolved_config_sha256"):
+            raise RuntimeError(f"Retrain segment artifact changed: {state_path}")
+        config = yaml.safe_load(config_path.read_text(encoding="utf-8"))
+        if (
+            int(_config_value(config, "trainer.min_epochs")) != boundary
+            or int(_config_value(config, "trainer.max_epochs")) != boundary
+            or _config_value(config, "train") is not True
+            or _config_value(config, "test") is not False
+            or _config_value(config, "skip_evaluation") is not True
+            or int(_config_value(config, "seed")) != int(expected_row["seed"])
+        ):
+            raise RuntimeError(f"Retrain segment config differs at epoch {boundary}.")
+        for key, value in expected_row["params"].items():
+            if _config_value(config, key) != value:
+                raise RuntimeError(f"Retrain segment parameter differs for {key}.")
+    return state_path
 
 
 def _validate_retrain_marker(marker: Path, expected_row: dict[str, Any]) -> None:
@@ -898,6 +1287,23 @@ def _validate_retrain_marker(marker: Path, expected_row: dict[str, Any]) -> None
         or state.get("completed_at") != payload.get("completed_at")
     ):
         raise RuntimeError(f"Retraining restart evidence differs: {state_path}")
+    scheduler_identity = payload.get("scheduler_identity")
+    if scheduler_identity is not None:
+        attempts = state.get("attempts", [])
+        if not attempts or scheduler_identity != attempts[-1].get("scheduler_identity"):
+            raise RuntimeError(f"Retraining scheduler identity differs: {state_path}")
+        for attempt in attempts:
+            attempt_identity = attempt.get("scheduler_identity")
+            if attempt_identity is None or attempt_identity.get("mode") != "mapped":
+                continue
+            resolved = resolve_retrain_task_index(
+                root,
+                Path(attempt_identity["task_map"]),
+                str(attempt_identity["task_map_sha256"]),
+                int(attempt_identity["local_task_id"]),
+            )
+            if resolved != index or attempt_identity.get("retrain_index") != index:
+                raise RuntimeError(f"Retraining scheduler map resolves incorrectly: {state_path}")
     boundaries = [int(row["epoch_boundary"]) for row in state.get("segments", [])]
     if boundaries != list(
         range(RETRAIN_SEGMENT_EPOCHS, RETRAIN_EPOCHS + 1, RETRAIN_SEGMENT_EPOCHS)
@@ -942,6 +1348,12 @@ def _audit_retrain_outputs(
     trainer = config.get("trainer", {})
     if trainer.get("min_epochs") != RETRAIN_EPOCHS or trainer.get("max_epochs") != RETRAIN_EPOCHS:
         raise RuntimeError("Final retrain config is not exactly 200 epochs.")
+    if (
+        config.get("train") is not False
+        or config.get("test") is not True
+        or config.get("skip_evaluation") is not False
+    ):
+        raise RuntimeError("Final retrain phase is not evaluation-only after epoch 200.")
     if int(config.get("seed", -1)) != int(row["seed"]):
         raise RuntimeError("Final retrain seed differs from its frozen row.")
     if int(row.get("epochs", -1)) != RETRAIN_EPOCHS or int(row["retrain_index"]) != index:
@@ -1026,9 +1438,22 @@ def _audit_retrain_outputs(
     }
 
 
-def retrain(root: Path, index: int) -> Path:
+def _retrain_hyperparameter_logging_override(attempt_number: int) -> str:
+    """Log immutable retrain parameters once, before cumulative boundaries change."""
+    if attempt_number <= 0:
+        raise ValueError("Retrain attempt numbers are one-based.")
+    return f"log_hyperparameters={str(attempt_number == 1).lower()}"
+
+
+def retrain(
+    root: Path,
+    index: int,
+    task_map: Path | None = None,
+    task_map_sha256: str | None = None,
+) -> Path:
     """Retrain one front trial in exact resumable segments, then evaluate once at epoch 200."""
     design = _load_design(root)
+    scheduler_identity = _retrain_scheduler_identity(root, index, task_map, task_map_sha256)
     manifest_path = root / "selection" / "pareto_retrain_manifest.json"
     if not manifest_path.is_file():
         raise FileNotFoundError("Freeze the Pareto fronts before retraining.")
@@ -1043,100 +1468,115 @@ def retrain(root: Path, index: int) -> Path:
         return marker
 
     identity = _retrain_identity(root, design, manifest_path, index, row)
-    state, attempt = _prepare_retrain_attempt(root, identity)
+    state, attempt = _prepare_retrain_attempt(root, identity, scheduler_identity)
     paths = _retrain_paths(root, index)
     run_name = str(identity["run_name"])
     experiment_name = str(identity["experiment_name"])
     hydra_dir = paths["hydra"]
     boundary = int(attempt["target_epoch_boundary"])
-    final_segment = boundary == RETRAIN_EPOCHS
-    command = [
-        sys.executable,
-        "src/train.py",
-        f"experiment=physics/{row['model']}_background_all",
-        f"+retrain_suite={_retrain_suite(row['model'])}",
-        f"experiment_name={experiment_name}",
-        f"run_name={run_name}",
-        f"hydra.run.dir={hydra_dir}",
-        "trainer=gpu",
-        f"trainer.default_root_dir={paths['trainer']}",
-        "trainer.devices=[0]",
-        f"trainer.min_epochs={boundary}",
-        f"trainer.max_epochs={boundary}",
-        "trainer.num_sanity_val_steps=0",
-        f"test={str(final_segment).lower()}",
-        f"skip_evaluation={str(not final_segment).lower()}",
-        "log_hyperparameters=false",
-        f"seed={int(row['seed'])}",
-        f"+logger.mlflow.run_id={state['mlflow_run_id']}",
-    ]
-    resume = attempt.get("resume")
-    if resume is not None:
-        command.append(
-            "ckpt_path=hpc" if resume["kind"] == "lightning_hpc" else f"ckpt_path={resume['path']}"
-        )
-    command.extend(f"{key}={_hydra_value(value)}" for key, value in row["params"].items())
+    phase = str(attempt["phase"])
+    training_segment = phase == "training"
+    finalization_only = phase == "finalization"
+    if phase not in {"training", "evaluation", "finalization"}:
+        raise RuntimeError(f"Unknown retrain attempt phase: {phase}")
+    command = []
+    if not finalization_only:
+        command = [
+            sys.executable,
+            "src/train.py",
+            f"experiment=physics/{row['model']}_background_all",
+            f"+retrain_suite={_retrain_suite(row['model'])}",
+            f"experiment_name={experiment_name}",
+            f"run_name={run_name}",
+            f"hydra.run.dir={hydra_dir}",
+            "trainer=gpu",
+            f"trainer.default_root_dir={paths['trainer']}",
+            "trainer.devices=[0]",
+            f"trainer.min_epochs={boundary}",
+            f"trainer.max_epochs={boundary}",
+            "trainer.num_sanity_val_steps=0",
+            f"train={str(training_segment).lower()}",
+            f"test={str(not training_segment).lower()}",
+            f"skip_evaluation={str(training_segment).lower()}",
+            _retrain_hyperparameter_logging_override(int(attempt["attempt_number"])),
+            f"seed={int(row['seed'])}",
+            f"+logger.mlflow.run_id={state['mlflow_run_id']}",
+        ]
+        resume = attempt.get("resume")
+        if training_segment and resume is not None:
+            command.append(
+                "ckpt_path=hpc"
+                if resume["kind"] == "lightning_hpc"
+                else f"ckpt_path={resume['path']}"
+            )
+        command.extend(f"{key}={_hydra_value(value)}" for key, value in row["params"].items())
     started_at = datetime.now(timezone.utc).isoformat()
     started_clock = time.monotonic()
-    previous_sigusr1 = signal.getsignal(signal.SIGUSR1)
-    signal.signal(signal.SIGUSR1, lambda _signum, _frame: None)
-    try:
-        subprocess.run(command, cwd=REPOSITORY_ROOT, check=True)  # nosec B603
-    finally:
-        signal.signal(signal.SIGUSR1, previous_sigusr1)
+    if not finalization_only:
+        previous_sigusr1 = signal.getsignal(signal.SIGUSR1)
+        signal.signal(signal.SIGUSR1, lambda _signum, _frame: None)
+        try:
+            subprocess.run(command, cwd=REPOSITORY_ROOT, check=True)  # nosec B603
+        finally:
+            signal.signal(signal.SIGUSR1, previous_sigusr1)
     elapsed_seconds = time.monotonic() - started_clock
 
     checkpoint_root = Path(os.environ.get("CHECKPOINT_DIR", REPOSITORY_ROOT / "checkpoints"))
     checkpoint_root = checkpoint_root / experiment_name / run_name
-    last_checkpoint = _inside(
-        checkpoint_root / "last.ckpt",
-        root / "runtime" / "checkpoints",
-        "retrain segment checkpoint",
-        require_file=True,
-    )
-    paths["segments"].mkdir(parents=True, exist_ok=True)
-    continuation = paths["segments"] / f"epoch_{boundary:03d}.ckpt"
-    if continuation.exists():
-        raise RuntimeError(f"Retrain continuation checkpoint already exists: {continuation}")
-    shutil.copy2(last_checkpoint, continuation)
-    resolved_config = _inside(
-        hydra_dir / ".hydra" / "config.yaml", root, "resolved retrain config", require_file=True
-    )
-    config_evidence = paths["segments"] / f"epoch_{boundary:03d}_config.yaml"
-    if config_evidence.exists():
-        raise RuntimeError(f"Retrain segment config already exists: {config_evidence}")
-    shutil.copy2(resolved_config, config_evidence)
     archived_hpc = _archive_hpc_checkpoints(paths, int(attempt["attempt_number"]))
-    with paths["lock"].open("a+", encoding="utf-8") as handle:
-        fcntl.flock(handle.fileno(), fcntl.LOCK_EX)
-        state = json.loads(paths["state"].read_text(encoding="utf-8"))
-        active = state["attempts"][-1]
-        if active != attempt:
-            raise RuntimeError("Retrain attempt state changed while training.")
-        active.update(
-            {
-                "completed_at": datetime.now(timezone.utc).isoformat(),
-                "elapsed_seconds": elapsed_seconds,
-                "archived_hpc_checkpoints": archived_hpc,
-            }
+    continuation = None
+    config_evidence = None
+    if training_segment:
+        last_checkpoint = _inside(
+            checkpoint_root / "last.ckpt",
+            root / "runtime" / "checkpoints",
+            "retrain segment checkpoint",
+            require_file=True,
         )
-        state["segments"].append(
-            {
-                "epoch_boundary": boundary,
-                "attempt_number": int(attempt["attempt_number"]),
-                "continuation_checkpoint": str(continuation.resolve()),
-                "continuation_checkpoint_sha256": _sha256(continuation),
-                "resolved_config": str(config_evidence.resolve()),
-                "resolved_config_sha256": _sha256(config_evidence),
-            }
+        paths["segments"].mkdir(parents=True, exist_ok=True)
+        continuation = paths["segments"] / f"epoch_{boundary:03d}.ckpt"
+        if continuation.exists():
+            raise RuntimeError(f"Retrain continuation checkpoint already exists: {continuation}")
+        _atomic_copy(last_checkpoint, continuation)
+        resolved_config = _inside(
+            hydra_dir / ".hydra" / "config.yaml",
+            root,
+            "resolved retrain config",
+            require_file=True,
         )
-        if final_segment:
-            state["completed_at"] = datetime.now(timezone.utc).isoformat()
-        _write_json(paths["state"], state)
-
-    if not final_segment:
-        _requeue_current_task()
+        config_evidence = paths["segments"] / f"epoch_{boundary:03d}_config.yaml"
+        if config_evidence.exists():
+            raise RuntimeError(f"Retrain segment config already exists: {config_evidence}")
+        _atomic_copy(resolved_config, config_evidence)
+    if training_segment:
+        with paths["lock"].open("a+", encoding="utf-8") as handle:
+            fcntl.flock(handle.fileno(), fcntl.LOCK_EX)
+            state = json.loads(paths["state"].read_text(encoding="utf-8"))
+            active = state["attempts"][-1]
+            if active != attempt:
+                raise RuntimeError("Retrain attempt state changed while training.")
+            active.update(
+                {
+                    "completed_at": datetime.now(timezone.utc).isoformat(),
+                    "elapsed_seconds": elapsed_seconds,
+                    "archived_hpc_checkpoints": archived_hpc,
+                }
+            )
+            assert continuation is not None and config_evidence is not None
+            state["segments"].append(
+                {
+                    "epoch_boundary": boundary,
+                    "attempt_number": int(attempt["attempt_number"]),
+                    "continuation_checkpoint": str(continuation.resolve()),
+                    "continuation_checkpoint_sha256": _sha256(continuation),
+                    "resolved_config": str(config_evidence.resolve()),
+                    "resolved_config_sha256": _sha256(config_evidence),
+                }
+            )
+            _write_json(paths["state"], state)
         return paths["state"]
+
+    completion_time = str(state.get("completed_at") or datetime.now(timezone.utc).isoformat())
 
     optimized = hydra_dir / "optimized_metric.json"
     if not optimized.is_file():
@@ -1153,11 +1593,12 @@ def retrain(root: Path, index: int) -> Path:
     payload = {
         "schema_version": 2,
         "started_at": started_at,
-        "completed_at": state["completed_at"],
+        "completed_at": completion_time,
         "elapsed_seconds": elapsed_seconds,
         "slurm_job_id": os.environ.get("SLURM_JOB_ID"),
         "slurm_array_job_id": os.environ.get("SLURM_ARRAY_JOB_ID"),
         "slurm_array_task_id": os.environ.get("SLURM_ARRAY_TASK_ID"),
+        "scheduler_identity": scheduler_identity,
         "retrain_index": index,
         "row": row,
         "command": command,
@@ -1174,6 +1615,27 @@ def retrain(root: Path, index: int) -> Path:
         "threshold_checkpoint_audit": threshold_audit,
     }
     audit = _audit_retrain_outputs(root, index, row, payload)
+
+    with paths["lock"].open("a+", encoding="utf-8") as handle:
+        fcntl.flock(handle.fileno(), fcntl.LOCK_EX)
+        state = json.loads(paths["state"].read_text(encoding="utf-8"))
+        active = state["attempts"][-1]
+        if active != attempt:
+            raise RuntimeError("Retrain attempt state changed while training.")
+        active.update(
+            {
+                "completed_at": datetime.now(timezone.utc).isoformat(),
+                "elapsed_seconds": elapsed_seconds,
+                "archived_hpc_checkpoints": archived_hpc,
+            }
+        )
+        if state.get("completed_at") is None:
+            state["completed_at"] = datetime.now(timezone.utc).isoformat()
+            completion_time = state["completed_at"]
+        _write_json(paths["state"], state)
+    payload["completed_at"] = completion_time
+    payload["restart_count"] = len(state["attempts"]) - 1
+    payload["restart_state_artifact_sha256"] = _sha256(paths["state"])
     payload["resolved_config"] = audit["config"]
     payload["resolved_config_sha256"] = audit["config_sha256"]
     payload["downstream_efficiency_counts"] = audit["downstream_efficiency_counts"]
@@ -1594,8 +2056,15 @@ def main() -> None:
         submit_next(root, args.trials, args.jobs, args.timeout_min)
     elif args.command == "freeze":
         print(freeze(root))
+    elif args.command == "resolve-retrain-index":
+        _load_design(root)
+        print(
+            resolve_retrain_task_index(
+                root, args.task_map, args.task_map_sha256, args.local_task_id
+            )
+        )
     elif args.command == "retrain":
-        print(retrain(root, args.index))
+        print(retrain(root, args.index, args.task_map, args.task_map_sha256))
     elif args.command == "aggregate":
         print(aggregate(root))
 

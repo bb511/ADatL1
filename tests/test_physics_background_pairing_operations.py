@@ -42,6 +42,65 @@ def _authenticate(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(operations, "_live_retrain_job_ids", lambda: set())
 
 
+def _write_retrain_progress(root: Path, row: dict, job_ids: list[str]) -> Path:
+    """Write mutable campaign state with immutable artifacts through each boundary."""
+    index = int(row["retrain_index"])
+    manifest = root / "selection" / "pareto_retrain_manifest.json"
+    state_dir = root / "retraining" / "restart_state" / f"{index:04d}"
+    segments_dir = state_dir / "segments"
+    segments_dir.mkdir(parents=True, exist_ok=True)
+    segments = []
+    attempts = []
+    for attempt_number, job_id in enumerate(job_ids, start=1):
+        boundary = attempt_number * 40
+        checkpoint = segments_dir / f"epoch_{boundary:03d}.ckpt"
+        config = segments_dir / f"epoch_{boundary:03d}_config.yaml"
+        checkpoint.write_text(f"checkpoint {boundary}\n", encoding="utf-8")
+        config.write_text(f"boundary: {boundary}\n", encoding="utf-8")
+        array_job_id, task_id = job_id.split("_")
+        attempts.append(
+            {
+                "attempt_number": attempt_number,
+                "phase": "training",
+                "target_epoch_boundary": boundary,
+                "slurm_array_job_id": array_job_id,
+                "slurm_array_task_id": task_id,
+                "completed_at": f"done-{boundary}",
+            }
+        )
+        segments.append(
+            {
+                "epoch_boundary": boundary,
+                "attempt_number": attempt_number,
+                "continuation_checkpoint": str(checkpoint.resolve()),
+                "continuation_checkpoint_sha256": operations._sha256(checkpoint),
+                "resolved_config": str(config.resolve()),
+                "resolved_config_sha256": operations._sha256(config),
+            }
+        )
+    identity = {
+        "code_commit": "a" * 40,
+        "manifest": str(manifest.resolve()),
+        "manifest_sha256": operations._sha256(manifest),
+        "retrain_index": index,
+        "row": row,
+        "row_sha256": operations._json_sha256(row),
+    }
+    state = state_dir / "state.json"
+    state.write_text(
+        json.dumps(
+            {
+                "schema_version": 1,
+                "identity": identity,
+                "attempts": attempts,
+                "segments": segments,
+            }
+        ),
+        encoding="utf-8",
+    )
+    return state
+
+
 def _freeze_design() -> dict:
     """Return the smallest target-one design with the production 56-front shape."""
     counts = {"ae": 14, "vae": 14, "dsae": 7, "dsvae": 7, "svdd": 7, "realnvp": 7}
@@ -109,6 +168,187 @@ def _freeze_manifest(design: dict) -> dict:
         "front_memberships": memberships,
         "retrain_runs": retrains,
     }
+
+
+def _oracle(manifest: dict) -> dict:
+    """Build a valid aggregate result from a minimal frozen manifest."""
+    retrains = {row["retrain_index"]: row for row in manifest["retrain_runs"]}
+    memberships = []
+    for row in manifest["front_memberships"]:
+        values = {f"anomaly_{index:02d}": 0.5 for index in range(20)}
+        memberships.append(
+            {
+                **row,
+                "params": retrains[row["retrain_index"]]["params"],
+                "optimized_ckpt_name": "last",
+                "retrained_objective_values": [0.1, 0.2],
+                "mean_downstream_efficiency": 0.5,
+                "downstream_efficiencies": values,
+            }
+        )
+    return {
+        "schema_version": 2,
+        "created_at": "2026-01-01T00:00:00+00:00",
+        "oracle_uses_downstream_anomalies": True,
+        "winners": memberships.copy(),
+        "all_front_memberships": memberships,
+    }
+
+
+def _aggregate_campaign_files(root: Path, design: dict, manifest: dict) -> None:
+    """Persist the frozen inputs consumed by the aggregation transition."""
+    (root / "design.json").write_text(json.dumps(design), encoding="utf-8")
+    manifest_path = root / "selection" / "pareto_retrain_manifest.json"
+    manifest_path.parent.mkdir(parents=True)
+    manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
+    freeze_path = root / "state" / "freeze_validation.json"
+    freeze_path.parent.mkdir(parents=True)
+    freeze_path.write_text(
+        json.dumps(
+            {
+                "schema_version": 1,
+                "code_commit": design["code_commit"],
+                "logical_fronts": 56,
+                "front_memberships": len(manifest["front_memberships"]),
+                "unique_retrains": len(manifest["retrain_runs"]),
+                "manifest": str(manifest_path.resolve()),
+                "manifest_sha256": operations._sha256(manifest_path),
+            }
+        ),
+        encoding="utf-8",
+    )
+    marker_root = root / "retraining" / "markers"
+    marker_root.mkdir(parents=True)
+    for row in manifest["retrain_runs"]:
+        (marker_root / f"{row['retrain_index']:04d}.json").write_text(
+            json.dumps({"retrain_index": row["retrain_index"]}), encoding="utf-8"
+        )
+
+
+def test_aggregate_gate_seals_exact_quiescent_oracle(monkeypatch, tmp_path) -> None:
+    """Aggregation validates all retrains, 56 fronts, memberships, and hashes."""
+    root, repository = _campaign(tmp_path)
+    design = _freeze_design()
+    manifest = _freeze_manifest(design)
+    oracle = _oracle(manifest)
+    _aggregate_campaign_files(root, design, manifest)
+    runner = repository / "scripts" / "physics_background_pairing_campaign.py"
+    runner.parent.mkdir(parents=True, exist_ok=True)
+    runner.write_text("#!/usr/bin/env python\n", encoding="utf-8")
+    _authenticate(monkeypatch)
+    monkeypatch.setattr(operations, "_reconcile_locked", lambda *args: [])
+    monkeypatch.setattr(operations, "_validate_frozen_manifest_contract", lambda *args: None)
+    monkeypatch.setattr(operations, "_validate_retrain_marker", lambda *args: True)
+
+    def run(command, **kwargs):
+        oracle_path = root / "results" / "oracle_winners.json"
+        oracle_path.parent.mkdir(parents=True)
+        oracle_path.write_text(json.dumps(oracle), encoding="utf-8")
+        return SimpleNamespace()
+
+    monkeypatch.setattr(operations.subprocess, "run", run)
+    output = operations.aggregate_campaign(root, repository)
+
+    payload = json.loads(output.read_text(encoding="utf-8"))
+    assert payload["logical_fronts"] == 56
+    assert payload["front_memberships"] == 56
+    assert payload["unique_retrains"] == 6
+    assert payload["oracle_winners"] == 56
+    assert payload["oracle_memberships"] == 56
+    assert len(payload["retrain_markers"]) == 6
+    assert payload["manifest_sha256"] == operations._sha256(
+        root / "selection" / "pareto_retrain_manifest.json"
+    )
+    assert payload["oracle_sha256"] == operations._sha256(root / "results" / "oracle_winners.json")
+    monkeypatch.setattr(
+        operations.subprocess,
+        "run",
+        lambda *args, **kwargs: pytest.fail("idempotent aggregation reran the campaign runner"),
+    )
+    assert operations.aggregate_campaign(root, repository) == output
+
+
+def test_aggregate_gate_rejects_active_retrain(monkeypatch, tmp_path) -> None:
+    """A ledger-active retrain prevents the terminal aggregation transition."""
+    root, repository = _campaign(tmp_path)
+    _authenticate(monkeypatch)
+    monkeypatch.setattr(
+        operations,
+        "_reconcile_locked",
+        lambda *args: [{"kind": "retrain", "state": "REQUEUED", "job_id": "1_0"}],
+    )
+    with pytest.raises(RuntimeError, match="remain active"):
+        operations.aggregate_campaign(root, repository)
+
+
+def test_aggregate_gate_rejects_changed_membership(monkeypatch, tmp_path) -> None:
+    """An oracle cannot change a frozen front membership while retaining its index."""
+    root, repository = _campaign(tmp_path)
+    design = _freeze_design()
+    manifest = _freeze_manifest(design)
+    oracle = _oracle(manifest)
+    oracle["all_front_memberships"][0]["trial_number"] = 99
+    _aggregate_campaign_files(root, design, manifest)
+    runner = repository / "scripts" / "physics_background_pairing_campaign.py"
+    runner.parent.mkdir(parents=True, exist_ok=True)
+    runner.write_text("#!/usr/bin/env python\n", encoding="utf-8")
+    _authenticate(monkeypatch)
+    monkeypatch.setattr(operations, "_reconcile_locked", lambda *args: [])
+    monkeypatch.setattr(operations, "_validate_frozen_manifest_contract", lambda *args: None)
+    monkeypatch.setattr(operations, "_validate_retrain_marker", lambda *args: True)
+
+    def run(command, **kwargs):
+        oracle_path = root / "results" / "oracle_winners.json"
+        oracle_path.parent.mkdir(parents=True)
+        oracle_path.write_text(json.dumps(oracle), encoding="utf-8")
+        return SimpleNamespace()
+
+    monkeypatch.setattr(operations.subprocess, "run", run)
+    with pytest.raises(RuntimeError, match="identity differs"):
+        operations.aggregate_campaign(root, repository)
+
+
+@pytest.mark.parametrize("tampered_artifact", ["marker", "oracle"])
+def test_aggregate_gate_rejects_tampered_completed_transition(
+    monkeypatch, tmp_path, tampered_artifact: str
+) -> None:
+    """An idempotent rerun fails closed if a receipt-bound artifact changed."""
+    root, repository = _campaign(tmp_path)
+    design = _freeze_design()
+    manifest = _freeze_manifest(design)
+    oracle = _oracle(manifest)
+    _aggregate_campaign_files(root, design, manifest)
+    runner = repository / "scripts" / "physics_background_pairing_campaign.py"
+    runner.parent.mkdir(parents=True, exist_ok=True)
+    runner.write_text("#!/usr/bin/env python\n", encoding="utf-8")
+    _authenticate(monkeypatch)
+    monkeypatch.setattr(operations, "_reconcile_locked", lambda *args: [])
+    monkeypatch.setattr(operations, "_validate_frozen_manifest_contract", lambda *args: None)
+    monkeypatch.setattr(operations, "_validate_retrain_marker", lambda *args: True)
+
+    def run(command, **kwargs):
+        oracle_path = root / "results" / "oracle_winners.json"
+        oracle_path.parent.mkdir(parents=True)
+        oracle_path.write_text(json.dumps(oracle), encoding="utf-8")
+        return SimpleNamespace()
+
+    monkeypatch.setattr(operations.subprocess, "run", run)
+    operations.aggregate_campaign(root, repository)
+    if tampered_artifact == "marker":
+        marker = root / "retraining" / "markers" / "0000.json"
+        marker.write_text(marker.read_text(encoding="utf-8") + "\n", encoding="utf-8")
+    else:
+        oracle_path = root / "results" / "oracle_winners.json"
+        changed = json.loads(oracle_path.read_text(encoding="utf-8"))
+        changed["created_at"] = "2026-01-02T00:00:00+00:00"
+        oracle_path.write_text(json.dumps(changed), encoding="utf-8")
+    monkeypatch.setattr(
+        operations.subprocess,
+        "run",
+        lambda *args, **kwargs: pytest.fail("a completed transition was rerun"),
+    )
+    with pytest.raises(RuntimeError, match="receipt is changed or inconsistent"):
+        operations.aggregate_campaign(root, repository)
 
 
 def test_freeze_gate_seals_exact_quiescent_first_trial_pool(monkeypatch, tmp_path) -> None:
@@ -797,6 +1037,9 @@ def test_reconcile_seals_successful_retrain_marker(monkeypatch, tmp_path) -> Non
             {
                 "schema_version": 2,
                 "row": retrain_row,
+                "slurm_array_job_id": "9",
+                "slurm_array_task_id": "0",
+                "scheduler_identity": None,
                 "optimized_metric_artifact": str(optimized),
                 "optimized_metric_artifact_sha256": operations._sha256(optimized),
                 "value_files": [{"path": str(values), "sha256": operations._sha256(values)}],
@@ -827,7 +1070,11 @@ def test_reconcile_seals_successful_retrain_marker(monkeypatch, tmp_path) -> Non
 
     row = operations.reconcile(root, repository)[0]
 
-    assert row["success_sha256"] == operations._sha256(marker)
+    receipt = root / "state" / "retrain_receipts" / "9_0.json"
+    assert row["success_sha256"] == operations._sha256(receipt)
+    assert json.loads(receipt.read_text(encoding="utf-8"))["evidence"]["sha256"] == (
+        operations._sha256(marker)
+    )
 
 
 def test_accounting_uses_unambiguous_json_timestamps(monkeypatch) -> None:
@@ -898,7 +1145,7 @@ def test_accounting_maps_array_allocation_and_task(monkeypatch) -> None:
 
 
 def test_submit_retrains_uses_exact_missing_indices(monkeypatch, tmp_path) -> None:
-    """Retraining submits a compressed missing-index array and records every task."""
+    """Retraining maps bounded local tasks to exact sparse frozen indices."""
     root, repository = _campaign(tmp_path)
     _authenticate(monkeypatch)
     selection = root / "selection"
@@ -935,10 +1182,379 @@ def test_submit_retrains_uses_exact_missing_indices(monkeypatch, tmp_path) -> No
     )
 
     assert job_id == "987"
-    assert "--array=1,3%2" in calls[0]
+    assert "--array=0-1%2" in calls[0]
     with (root / "state" / "job_history.csv").open(encoding="utf-8") as handle:
         ledger = list(csv.DictReader(handle))
-    assert [row["job_id"] for row in ledger] == ["987_1", "987_3"]
+    assert [row["job_id"] for row in ledger] == ["987_0", "987_1"]
+    assert len({row["bindings_sha256"] for row in ledger}) == 1
+    digest = ledger[0]["bindings_sha256"]
+    task_map_path = root / "state" / "retrain_task_maps" / f"{digest}.json"
+    assert operations._sha256(task_map_path) == digest
+    task_map = json.loads(task_map_path.read_text(encoding="utf-8"))
+    assert [entry["retrain_index"] for entry in task_map["entries"]] == [1, 3]
+    assert operations._retrain_index_for_ledger_row(root, operations._design(root), ledger[1]) == 3
+
+
+def test_submit_retrains_batches_at_clariden_max_array_size(monkeypatch, tmp_path) -> None:
+    """Only one <=1001-local-task batch is submitted even for a 3,600-row front union."""
+    root, repository = _campaign(tmp_path)
+    _authenticate(monkeypatch)
+    selection = root / "selection"
+    selection.mkdir()
+    rows = [
+        {"retrain_index": index, "model": "ae", "trial_number": index} for index in range(3600)
+    ]
+    (selection / "pareto_retrain_manifest.json").write_text(
+        json.dumps({"schema_version": 2, "code_commit": "a" * 40, "retrain_runs": rows}),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(operations, "_validate_retrain_marker", lambda *args: False)
+    monkeypatch.setattr(operations.shutil, "which", lambda name: f"/bin/{name}")
+    calls = []
+    monkeypatch.setattr(
+        operations.subprocess,
+        "run",
+        lambda command, **kwargs: calls.append(command) or SimpleNamespace(stdout="988\n"),
+    )
+
+    operations.submit_retrains(
+        root, repository, 24, tmp_path / "data", tmp_path / "raw", tmp_path / "pairing"
+    )
+
+    assert "--array=0-1000%24" in calls[0]
+    with (root / "state" / "job_history.csv").open(encoding="utf-8") as handle:
+        ledger = list(csv.DictReader(handle))
+    assert len(ledger) == operations.MAX_RETRAIN_ARRAY_TASKS
+    assert ledger[-1]["job_id"] == "988_1000"
+    assert (
+        operations._retrain_index_for_ledger_row(root, operations._design(root), ledger[-1])
+        == 1000
+    )
+
+
+def test_retrain_ledger_mapping_fails_closed_on_map_tampering(monkeypatch, tmp_path) -> None:
+    """A successful local task cannot be reconciled through a changed map."""
+    root, repository = _campaign(tmp_path)
+    _authenticate(monkeypatch)
+    selection = root / "selection"
+    selection.mkdir()
+    manifest_path = selection / "pareto_retrain_manifest.json"
+    manifest = {
+        "schema_version": 2,
+        "code_commit": "a" * 40,
+        "retrain_runs": [{"retrain_index": 0, "model": "vae", "trial_number": 7}],
+    }
+    manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
+    task_map_path, digest, _ = operations._write_retrain_task_map(
+        root, operations._design(root), manifest_path, manifest, [0]
+    )
+    task_map_path.write_text(task_map_path.read_text(encoding="utf-8") + " ", encoding="utf-8")
+
+    with pytest.raises(RuntimeError, match="missing or changed"):
+        operations._retrain_index_for_ledger_row(
+            root,
+            operations._design(root),
+            {
+                "job_id": "900_0",
+                "kind": "retrain",
+                "model": "vae",
+                "bindings_sha256": digest,
+            },
+        )
+
+
+def test_retrain_ledger_supports_legacy_direct_index_rows(tmp_path) -> None:
+    """Pre-map campaign ledgers retain their direct task-index interpretation."""
+    root, _ = _campaign(tmp_path)
+    assert (
+        operations._retrain_index_for_ledger_row(
+            root,
+            operations._design(root),
+            {"job_id": "900_3599", "kind": "retrain", "model": "ae", "bindings_sha256": ""},
+        )
+        == 3599
+    )
+
+
+def test_completed_retrain_reconciliation_resolves_local_task_to_actual_marker(
+    monkeypatch, tmp_path
+) -> None:
+    """Terminal reconciliation seals the mapped frozen index, not the local array ID."""
+    root, _ = _campaign(tmp_path)
+    selection = root / "selection"
+    selection.mkdir()
+    rows = [{"retrain_index": index, "model": "vae", "trial_number": index} for index in range(4)]
+    manifest = {"schema_version": 2, "code_commit": "a" * 40, "retrain_runs": rows}
+    manifest_path = selection / "pareto_retrain_manifest.json"
+    manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
+    _, digest, _ = operations._write_retrain_task_map(
+        root, operations._design(root), manifest_path, manifest, [3]
+    )
+    marker = root / "retraining" / "markers" / "0003.json"
+    marker.parent.mkdir(parents=True)
+    marker.write_text(
+        json.dumps(
+            {
+                "schema_version": 2,
+                "row": rows[3],
+                "slurm_array_job_id": "999",
+                "slurm_array_task_id": "0",
+                "scheduler_identity": {
+                    "mode": "mapped",
+                    "task_map_sha256": digest,
+                    "local_task_id": 0,
+                    "retrain_index": 3,
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(operations, "_validate_retrain_marker", lambda path, row: True)
+
+    sealed = operations._completed_retrain_marker(
+        root,
+        operations._design(root),
+        {
+            "job_id": "999_0",
+            "kind": "retrain",
+            "model": "vae",
+            "bindings_sha256": digest,
+        },
+    )
+
+    receipt = root / "state" / "retrain_receipts" / "999_0.json"
+    assert sealed == operations._sha256(receipt)
+    assert json.loads(receipt.read_text(encoding="utf-8"))["evidence"]["sha256"] == (
+        operations._sha256(marker)
+    )
+
+
+def test_completed_retrain_reconciliation_accepts_authenticated_pending_segment(
+    monkeypatch, tmp_path
+) -> None:
+    """A successful 40-epoch task seals progress before a fresh array runs the next phase."""
+    from scripts import physics_background_pairing_campaign as campaign
+
+    root, _ = _campaign(tmp_path)
+    row = {"retrain_index": 0, "model": "ae", "trial_number": 3}
+    selection = root / "selection"
+    selection.mkdir()
+    (selection / "pareto_retrain_manifest.json").write_text(
+        json.dumps({"schema_version": 2, "code_commit": "a" * 40, "retrain_runs": [row]}),
+        encoding="utf-8",
+    )
+    progress = _write_retrain_progress(root, row, ["777_0"])
+    monkeypatch.setattr(campaign, "_validate_retrain_progress", lambda *args, **kwargs: progress)
+
+    sealed = operations._completed_retrain_marker(
+        root,
+        operations._design(root),
+        {
+            "job_id": "777_0",
+            "kind": "retrain",
+            "model": "ae",
+            "bindings_sha256": "",
+        },
+    )
+
+    receipt = root / "state" / "retrain_receipts" / "777_0.json"
+    assert sealed == operations._sha256(receipt)
+    assert json.loads(receipt.read_text(encoding="utf-8"))["evidence"][
+        "snapshot_sha256"
+    ] == operations._json_sha256(json.loads(progress.read_text(encoding="utf-8")))
+
+
+def test_segment_receipt_projection_accepts_emergency_requeue_attempts() -> None:
+    """One Slurm task may restart repeatedly before its unique completed boundary."""
+    attempts = [
+        {
+            "attempt_number": 1,
+            "phase": "training",
+            "target_epoch_boundary": 40,
+            "slurm_array_job_id": "777",
+            "slurm_array_task_id": "0",
+            "completed_at": None,
+        },
+        {
+            "attempt_number": 2,
+            "phase": "training",
+            "target_epoch_boundary": 40,
+            "slurm_array_job_id": "777",
+            "slurm_array_task_id": "0",
+            "completed_at": "done",
+        },
+    ]
+    state = {
+        "schema_version": 1,
+        "attempts": attempts,
+        "segments": [{"epoch_boundary": 40, "attempt_number": 2}],
+    }
+
+    snapshot = operations._segment_snapshot_for_job(state, "777_0")
+
+    assert snapshot["attempts"] == attempts
+    assert snapshot["segments"] == state["segments"]
+
+
+def test_retrain_receipts_remain_valid_after_later_segments(monkeypatch, tmp_path) -> None:
+    """A later mutable restart state cannot rebind an earlier completed task."""
+    from scripts import physics_background_pairing_campaign as campaign
+
+    root, repository = _campaign(tmp_path)
+    _authenticate(monkeypatch)
+    row = {"retrain_index": 0, "model": "ae", "trial_number": 3}
+    selection = root / "selection"
+    selection.mkdir()
+    (selection / "pareto_retrain_manifest.json").write_text(
+        json.dumps({"schema_version": 2, "code_commit": "a" * 40, "retrain_runs": [row]}),
+        encoding="utf-8",
+    )
+    progress = _write_retrain_progress(root, row, ["700_0"])
+    monkeypatch.setattr(campaign, "_validate_retrain_progress", lambda *args, **kwargs: progress)
+    first_row = {
+        "job_id": "700_0",
+        "kind": "retrain",
+        "model": "ae",
+        "state": "RUNNING",
+        "log_path": str(tmp_path / "700_0.out"),
+        "bindings_sha256": "",
+    }
+    Path(first_row["log_path"]).write_text("first\n", encoding="utf-8")
+    operations._atomic_csv(root / "state" / "job_history.csv", [first_row])
+    monkeypatch.setattr(
+        operations,
+        "_accounting",
+        lambda ids: {job_id: {"state": "COMPLETED", "exit_code": "0:0"} for job_id in ids},
+    )
+    first_digest = operations.reconcile(root, repository)[0]["success_sha256"]
+
+    _write_retrain_progress(root, row, ["700_0", "701_0"])
+    second_row = {
+        **first_row,
+        "job_id": "701_0",
+        "state": "RUNNING",
+        "log_path": str(tmp_path / "701_0.out"),
+        "success_sha256": "",
+        "log_sha256": "",
+    }
+    Path(second_row["log_path"]).write_text("second\n", encoding="utf-8")
+    _, ledger = operations._ledger(root)
+    operations._atomic_csv(root / "state" / "job_history.csv", [*ledger, second_row])
+    reconciled = operations.reconcile(root, repository)
+    second_digest = reconciled[1]["success_sha256"]
+
+    assert reconciled[0]["success_sha256"] == first_digest
+    assert operations.reconcile(root, repository)[0]["success_sha256"] == first_digest
+    assert (
+        operations._completed_retrain_marker(root, operations._design(root), reconciled[0])
+        == first_digest
+    )
+    assert second_digest != first_digest
+    assert (
+        json.loads(
+            (root / "state" / "retrain_receipts" / "700_0.json").read_text(encoding="utf-8")
+        )["evidence"]["snapshot"]["segments"][-1]["epoch_boundary"]
+        == 40
+    )
+    assert (
+        json.loads(
+            (root / "state" / "retrain_receipts" / "701_0.json").read_text(encoding="utf-8")
+        )["evidence"]["snapshot"]["segments"][-1]["epoch_boundary"]
+        == 80
+    )
+
+
+def test_retrain_receipt_rejects_segment_and_receipt_tampering(monkeypatch, tmp_path) -> None:
+    """Receipts fail closed if either sealed artifact bytes or receipt identity changes."""
+    from scripts import physics_background_pairing_campaign as campaign
+
+    root, _ = _campaign(tmp_path)
+    row = {"retrain_index": 0, "model": "vae", "trial_number": 4}
+    selection = root / "selection"
+    selection.mkdir()
+    (selection / "pareto_retrain_manifest.json").write_text(
+        json.dumps({"schema_version": 2, "code_commit": "a" * 40, "retrain_runs": [row]}),
+        encoding="utf-8",
+    )
+    progress = _write_retrain_progress(root, row, ["800_0"])
+    monkeypatch.setattr(campaign, "_validate_retrain_progress", lambda *args, **kwargs: progress)
+    ledger_row = {
+        "job_id": "800_0",
+        "kind": "retrain",
+        "model": "vae",
+        "bindings_sha256": "",
+    }
+    operations._completed_retrain_marker(root, operations._design(root), ledger_row)
+    checkpoint = root / "retraining" / "restart_state" / "0000" / "segments" / "epoch_040.ckpt"
+    checkpoint.write_text("tampered\n", encoding="utf-8")
+    with pytest.raises(RuntimeError, match="artifact is missing or changed"):
+        operations._completed_retrain_marker(root, operations._design(root), ledger_row)
+
+    checkpoint.write_text("checkpoint 40\n", encoding="utf-8")
+    receipt = root / "state" / "retrain_receipts" / "800_0.json"
+    payload = json.loads(receipt.read_text(encoding="utf-8"))
+    payload["model"] = "ae"
+    receipt.write_text(json.dumps(payload), encoding="utf-8")
+    with pytest.raises(RuntimeError, match="differs from its frozen task"):
+        operations._completed_retrain_marker(root, operations._design(root), ledger_row)
+
+
+def test_older_retrain_task_cannot_seal_a_later_final_marker(monkeypatch, tmp_path) -> None:
+    """A final marker is scheduler-bound; an older task receives its segment snapshot."""
+    root, _ = _campaign(tmp_path)
+    row = {"retrain_index": 0, "model": "ae", "trial_number": 2}
+    selection = root / "selection"
+    selection.mkdir()
+    (selection / "pareto_retrain_manifest.json").write_text(
+        json.dumps({"schema_version": 2, "code_commit": "a" * 40, "retrain_runs": [row]}),
+        encoding="utf-8",
+    )
+    state_path = _write_retrain_progress(root, row, ["900_0"])
+    state = json.loads(state_path.read_text(encoding="utf-8"))
+    state["attempts"].append(
+        {
+            "attempt_number": 2,
+            "phase": "evaluation",
+            "slurm_array_job_id": "901",
+            "slurm_array_task_id": "0",
+            "completed_at": "done-evaluation",
+        }
+    )
+    state["completed_at"] = "done-evaluation"
+    state_path.write_text(json.dumps(state), encoding="utf-8")
+    marker = root / "retraining" / "markers" / "0000.json"
+    marker.parent.mkdir(parents=True)
+    marker.write_text(
+        json.dumps(
+            {
+                "schema_version": 2,
+                "row": row,
+                "slurm_array_job_id": "901",
+                "slurm_array_task_id": "0",
+                "scheduler_identity": None,
+                "restart_state_artifact": str(state_path.resolve()),
+            }
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(operations, "_validate_retrain_marker", lambda *args: True)
+
+    sealed = operations._completed_retrain_marker(
+        root,
+        operations._design(root),
+        {
+            "job_id": "900_0",
+            "kind": "retrain",
+            "model": "ae",
+            "bindings_sha256": "",
+        },
+    )
+
+    receipt = root / "state" / "retrain_receipts" / "900_0.json"
+    assert sealed == operations._sha256(receipt)
+    payload = json.loads(receipt.read_text(encoding="utf-8"))
+    assert payload["evidence"]["kind"] == "training_segment"
+    assert "completed_at" not in payload["evidence"]["snapshot"]
 
 
 def test_submit_retrains_refuses_unregistered_live_array(monkeypatch, tmp_path) -> None:

@@ -355,7 +355,7 @@ contains all four mappings and CDF simultaneously.
 
 - `scripts/physics_background_pairing_campaign.py` is the campaign state machine. Its
   commands are `init`, `status`, `pilot`, `sweep`, `submit-next`, `freeze`, `retrain`,
-  and `aggregate`.
+  `resolve-retrain-index`, and `aggregate`.
 - `scripts/physics_background_pairing_operations.py` is the mutable control plane for
   an immutable campaign. It submits an exact frozen-worktree search chunk, refuses
   scheduler or Optuna overlap, and holds an interprocess campaign lock across live
@@ -363,9 +363,10 @@ contains all four mappings and CDF simultaneously.
   logs and validates every successful packed chunk's exact bindings, objective
   contract, run provenance, complete MLflow histories, and required retained
   checkpoint/threshold state before sealing `chunk_validation.json`. Successful
-  retrain array tasks likewise seal their already-validated result marker. It creates
+  retrain array tasks likewise seal an immutable, task-bound segment/final receipt. It creates
   consistent quiescent SQLite backups, applies a fail-closed terminal canary gate, and
-  provides an explicit backed-up, scheduler-proven `repair-stale` recovery command.
+  provides explicit backed-up, scheduler-proven `repair-stale` recovery and a
+  quiescent, independently validated `aggregate` transition.
   Search submission enforces the 720-minute partition limit and refuses to exceed 600
   potentially usable trials, including the final partial chunk. It never imports or
   changes the scientific runner used by an active campaign.
@@ -375,7 +376,11 @@ contains all four mappings and CDF simultaneously.
   `normal` allocation: one Hydra/Optuna controller launches four independent one-GPU
   `srun` steps per GH200 node.
 - `scripts/clariden/physics_background_pairing_retrain.sbatch` retrains one manifest
-  index on one GPU.
+  index on one GPU through an authenticated bounded local-task map.
+- `scripts/clariden/physics_background_pairing_restart_canary.sbatch` and
+  `scripts/physics_background_pairing_restart_canary.py` force a real Slurm USR1
+  requeue on synthetic data and authenticate callback/HPC/MLflow/log restoration before
+  any full campaign is allowed.
 - `research/physics_background_pairing/preflight.json` authenticates mapping inputs.
 - `research/physics_background_pairing/RUN_LEDGER.md` is the concise human status
   ledger. Update it after every phase transition or failure classification.
@@ -594,6 +599,20 @@ new worktree and new campaign root.
 Generate `state/experiment_matrix.csv` immediately from `design.json`: one row for each
 of the 56 expected logical fronts, with model, score, metric, strategy, directions, and
 phase/status columns. This is the master completeness checklist throughout the run.
+
+### Gate C.5: forced Slurm restart canary
+
+Before any production search or retraining allocation, run the isolated procedure in
+`research/physics_background_pairing/RESTART_CANARY.md` from the exact immutable
+execution worktree. It deliberately holds the first debug allocation until Slurm sends
+ordinary `USR1`, requires Lightning to write an HPC checkpoint and requeue the same
+job, then authenticates restoration in the production efficiency/CAP/W1/drift/stable
+callbacks. It also requires one explicitly tagged MLflow run with exact `epoch_idx`
+steps and values `0..5`, retained stable files, deterministic terminal model weights,
+append-preserved scheduler sentinels from both allocations, and a hash-bearing
+`COMPLETE.json` under a fresh non-campaign canary root. A completed job without a
+nonzero restart count does not pass. Preserve the complete canary root and scheduler
+log as preflight evidence; do not submit full-scale work after any failure.
 
 ### Gate D: unified GPU pilots
 
@@ -898,8 +917,12 @@ candidates may be the larger timeout risk.
 - Use production canary runtimes to predict whether the limit is safe.
 - Retraining is deliberately divided at cumulative epoch boundaries 40, 80, 120, 160,
   and 200. Each normal boundary persists an authenticated continuation checkpoint and
-  resolved config, then requeues the same array task. The final segment alone runs the
-  post-fit validator and 20-anomaly evaluation. This changes no epoch, batch, callback,
+  resolved config, exits successfully, and is reconciled against that exact ledger
+  task. A later `submit-retrains` invocation maps the still-missing frozen index into a
+  fresh array. This avoids Clariden's `MaxBatchRequeue=5` limit. Epoch-200 training also
+  exits after committing its boundary; one additional fresh task runs evaluation only
+  (`train=false`) from the immutable checkpoint families, so evaluator signals/HPC
+  files can never become fit-resume state. This changes no epoch, batch, callback,
   hyperparameter, seed, or objective semantics.
 - Lightning receives an emergency `SIGUSR1` 15 minutes before the allocation limit. The
   Slurm job uses an ordinary job-step signal and `srun`; never add the `B:` prefix,
@@ -907,6 +930,9 @@ candidates may be the larger timeout risk.
   Emergency HPC checkpoints live in the retrain-index-specific
   `trainer.default_root_dir`, are authenticated on restart, and are archived after the
   interrupted segment reaches its deterministic boundary.
+- `--requeue` is reserved for Lightning's emergency USR1 path; normal boundaries never
+  call `scontrol requeue`. `REQUEUED` remains an active ledger state. Use Slurm append
+  mode for `%A_%a` output so an emergency requeue cannot truncate prior-attempt evidence.
 - Do not pass a timeout greater than the partition maximum.
 - Record the partition/time-limit change as operational, not scientific.
 - The controller and all packed steps share one 12-hour allocation, so queue time is
@@ -954,12 +980,18 @@ fault.
 
 ### 8.5 Partial retraining artifacts
 
-Successful retrain indices have hash-bearing marker files. `retrain` returns early if a
-marker already exists and `aggregate` rejects missing/hash-changed artifacts.
+Successful retrain indices have hash-bearing marker files. Every successful Slurm task
+also has an immutable `state/retrain_receipts/<array>_<task>.json` receipt that seals
+the exact task map, frozen row, completed boundary snapshot, and immutable segment
+artifacts (or its exact final marker). This prevents later restart-state mutation from
+silently rebinding an earlier ledger row. `retrain` returns early if a marker already
+exists and the operations-level aggregate gate rejects missing/hash-changed artifacts.
 
 - Never fabricate or hand-edit a success marker.
 - For a corrupt/partial index, preserve the failed marker/artifacts in an archive,
-  document the reason, and rerun only that index after ensuring no job is active.
+  document the reason, and rerun only that index after ensuring no job is active. Never
+  delete or replace a sealed task receipt; a changed receipt or referenced artifact is
+  a provenance failure requiring a new campaign.
 - Split large arrays and lower array concurrency when filesystem or queue pressure is
   high.
 
@@ -1035,13 +1067,26 @@ uv run python scripts/physics_background_pairing_operations.py \
   --pairing-dir "${PHYSICS_PAIRING_DIR}"
 ```
 
-The helper validates every existing marker and referenced hash, computes the exact
-missing index set, compresses it into one Slurm array expression, refuses overlapping
-retrain arrays by both user-scoped live Slurm state and the ledger, exports the frozen
-runtime paths, and registers every array task in `job_history.csv`. The live check,
-`sbatch`, and registration share the same campaign operation lock used by search jobs.
-Use `missing-retrains` for a read-only reconciliation before and after each array.
-Direct `sbatch --array` is a recovery fallback only.
+The helper validates every existing marker and referenced hash and computes the exact
+missing frozen-index set. Clariden permits array task IDs only through 1000
+(`MaxArraySize=1001`), while the frozen retrain union can contain as many as 3,600
+indices. Each invocation therefore submits only the first at-most-1,001 missing indices
+as local task IDs `0..N-1`. It writes a content-addressed map under
+`state/retrain_task_maps/<sha256>.json`; the map authenticates the campaign, frozen
+manifest, and every local-to-frozen row. Its hash is exported to Slurm and recorded in
+each retrain ledger row's `bindings_sha256`. The batch script, campaign runner, and
+reconciler independently verify local task, actual index, map path/hash, and manifest
+row. Missing, modified, oversized, non-contiguous, or inconsistent maps fail closed.
+Legacy ledger rows without a map hash retain their former direct-index interpretation.
+
+Only one retrain batch may be live at once. After it is terminal and reconciled, invoke
+`submit-retrains` again for the next bounded batch. A failed actual index may receive a
+different local task ID in a later recovery batch: the scientific restart identity is
+stable, while every attempt records its authenticated submission map and resumes from
+the existing boundary checkpoint. The helper refuses overlaps using both user-scoped
+Slurm state and the ledger, and scheduler check, `sbatch`, and registration share the
+campaign operation lock. Use `missing-retrains` before and after each array. Direct
+`sbatch --array` is a recovery fallback only and must reproduce the map contract.
 
 Each index must:
 
@@ -1050,6 +1095,9 @@ Each index must:
   segments, restoring optimizer, scheduler, RNG, loop, model, and callback state;
 - reuse one persisted MLflow run ID across every allocation and fail closed if its
   identity tag, frozen row, manifest hash, or restart state differs;
+- log immutable hyperparameters on the first segment only; pre-create and authenticate
+  the source-commit, run-name, campaign-commit, and retrain-index MLflow tags, with
+  experiment creation serialized across concurrent array tasks;
 - recompute the full relevant selection suite;
 - select a checkpoint separately for every logical objective;
 - evaluate all 20 anomalies for the score(s) supported by the model;
@@ -1058,14 +1106,25 @@ Each index must:
 
 The per-index restart record is
 `retraining/restart_state/<index>/state.json`. It records every Slurm attempt, resume
-source, cumulative boundary, copied boundary checkpoint/config and hash, emergency HPC
+source, phase, cumulative boundary, copied boundary checkpoint/config and hash, emergency HPC
 evidence, the frozen row/manifest/commit identity, and the single MLflow run ID. A
-repeated attempt without either an authenticated completed-boundary checkpoint or an
-HPC checkpoint is an error, not permission to restart from epoch zero. Completion
+repeated attempt uses an HPC checkpoint, a committed boundary, or a live `last.ckpt`
+whose epoch agrees exactly with contiguous MLflow `epoch_idx` history. Scratch retry is
+allowed only when both checkpoint and history are empty; one-sided or inconsistent
+state fails closed. Segment files are atomically published, and an interrupted publish
+is adopted only when both copies match the live checkpoint/resolved config exactly.
+The final completion transition occurs only after evaluation artifacts pass their full
+audit; a crash during marker finalization enters an idempotent finalization phase.
+Completion
 markers are accepted only after the final resolved config proves 200 epochs, seed and
 Optuna parameters match the manifest, selected checkpoints remain confined to the
 campaign and contain the exact finite native/OAS thresholds, and every logical
 selection has exactly 20 held-out downstream efficiencies.
+
+After every terminal retrain array, run `reconcile` before submitting its continuation.
+Reconciliation writes one immutable receipt per successful local task. Earlier
+40-epoch receipts remain valid after later attempts mutate `state.json`; their ledger
+`success_sha256` always names the receipt, never the mutable restart state.
 
 The completion count must equal `N`:
 
@@ -1081,13 +1140,20 @@ marker and referenced CSV/hash validates.
 
 ### 10.1 Existing aggregation
 
-After all retraining markers are valid:
+After all retraining markers are valid, use the locked operations transition (not the
+campaign runner directly):
 
 ```bash
-"${BGPAIR_UV}" run --frozen --no-sync python \
-  scripts/physics_background_pairing_campaign.py \
-  --root "${BGPAIR_ROOT}" aggregate
+uv run python scripts/physics_background_pairing_operations.py \
+  --root "${BGPAIR_ROOT}" --execution-repository "${BGPAIR_REPO}" aggregate
 ```
+
+This reconciles Slurm, rejects every live/active retrain, authenticates the freeze
+receipt, exact marker set, and every marker, invokes the commit-pinned campaign runner,
+then independently checks all 56 ordered winners, every frozen membership, tie-break,
+and 20 finite downstream efficiencies. It writes an idempotent
+`state/aggregate_validation.json`; reruns authenticate its manifest/marker/oracle hashes
+without rewriting the oracle.
 
 This writes schema-2:
 
@@ -1127,6 +1193,9 @@ The utility must:
   source artifact;
 - export all 56 fronts and every membership;
 - export every retrain and its completion/hash state;
+- independently authenticate every retrain restart identity, five 40-epoch segment
+  boundaries, owning attempts, continuation/config hashes, terminal evaluation, and
+  MLflow run identity;
 - export long-form downstream efficiency rows;
 - export CAP, rank correlation, W1, forward drift, and native-secondary metrics for
   reported checkpoints;
@@ -1174,6 +1243,7 @@ At minimum, produce:
 | `trials.csv` | one row per Optuna trial with model, number, state, duration, params, objective vector |
 | `front_memberships.csv` | logical front, model, score, strategy, trial, two objective values, retrain index |
 | `retrains.csv` | unique retrain index, model/trial, status, job, runtime, marker/hash, shared fronts |
+| `retrain_restart_evidence.csv` | five rows per retrain with boundary, owning attempt/Slurm identity, continuation/config paths and hashes |
 | `checkpoint_selections.csv` | search/retrain run, logical objective, chosen candidate/name, Q', Q'' |
 | `checkpoint_candidates.csv` | all 40,800 configured physical search-candidate slots, availability, path/hash, thresholds |
 | `checkpoint_candidate_availability.csv` | per-model/family configured, required, available, and absent counts |
@@ -1325,9 +1395,9 @@ The agent should work through these phases in order and update both
 - [ ] Final `REPORT.md` written, cross-checked, and copied to the requested locations.
 
 The auto-research task is complete only when every box is satisfied. A queued/running
-job is not a terminal blocker: predict its completion, set a timer, and continue other
-useful work. A genuine scientific/configuration failure requires fixing, retesting, a
-new immutable commit/campaign if trials have begun, and continued execution. Stop and
-ask the user only when new authority is required, the scheduler/external system is the
-sole blocker and no timer mechanism exists, or a scientific choice outside this
-contract would materially change the experiment.
+job is not a terminal blocker while other useful work remains: predict its completion
+and continue that work. Do not create a timer or poll automatically. A genuine
+scientific/configuration failure requires fixing, retesting, a new immutable
+commit/campaign if trials have begun, and continued execution. Stop and tell the user
+when new authority is required, the scheduler/external system is the sole blocker, or a
+scientific choice outside this contract would materially change the experiment.

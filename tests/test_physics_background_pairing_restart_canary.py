@@ -1,0 +1,131 @@
+from pathlib import Path
+from types import SimpleNamespace
+
+import pytest
+from pytorch_lightning import Trainer
+
+from scripts import physics_background_pairing_restart_canary as canary
+
+
+def test_canary_root_cannot_overlap_campaign_data(tmp_path: Path) -> None:
+    valid = tmp_path / "canaries" / "retrain_restart_canary_abc123"
+    assert canary._validate_root(valid) == valid.resolve()
+
+    with pytest.raises(ValueError, match="campaign"):
+        canary._validate_root(tmp_path / "campaigns" / "retrain_restart_canary_abc123")
+    with pytest.raises(ValueError, match="basename"):
+        canary._validate_root(tmp_path / "canaries" / "production")
+
+
+def test_scheduler_log_requires_append_preserved_restart_evidence() -> None:
+    text = (
+        "CANARY_ATTEMPT_START restart=0\n"
+        "CANARY_LIGHTNING_CHILD restart=0\n"
+        "Handling auto-requeue signal: 10\n"
+        "CANARY_ATTEMPT_START restart=1\n"
+        "CANARY_LIGHTNING_CHILD restart=1"
+    )
+    evidence = canary._scheduler_log_evidence(text)
+    assert evidence["CANARY_ATTEMPT_START restart=0"] == 1
+    assert evidence["CANARY_ATTEMPT_START restart=1"] == 1
+
+    with pytest.raises(RuntimeError, match="missing restart evidence"):
+        canary._scheduler_log_evidence(text.replace("CANARY_ATTEMPT_START restart=0", ""))
+
+
+def test_restart_canary_sbatch_exercises_production_signal_shape() -> None:
+    script = (
+        Path(__file__).parents[1]
+        / "scripts"
+        / "clariden"
+        / "physics_background_pairing_restart_canary.sbatch"
+    ).read_text(encoding="utf-8")
+    assert "#SBATCH --partition=debug" in script
+    assert "#SBATCH --requeue" in script
+    assert "#SBATCH --signal=USR1@120" in script
+    assert "#SBATCH --open-mode=append" in script
+    assert "#SBATCH --signal=B:" not in script
+    assert '\nsrun "${UV_PROJECT_ENVIRONMENT}/bin/python"' in script
+    assert "physics_background_pairing_restart_canary.py" in script
+    assert "physics_background_pairing_campaign.py" not in script
+
+
+def test_mlflow_tags_include_explicit_source_commit(tmp_path: Path) -> None:
+    root = canary._validate_root(tmp_path / "retrain_restart_canary_tags")
+    commit = "a" * 40
+    tags = canary._expected_tags(root, commit)
+    assert tags["mlflow.runName"] == canary.RUN_NAME
+    assert tags["mlflow.source.git.commit"] == commit
+    assert tags["physics_bgpair_restart_canary"] == "true"
+    assert len(tags["physics_bgpair_restart_canary_identity_sha256"]) == 64
+
+
+def test_epoch_proof_logs_exact_contiguous_steps(tmp_path: Path) -> None:
+    class Client:
+        def __init__(self):
+            self.rows = []
+
+        def log_metric(self, run_id, key, value, step):
+            self.rows.append((run_id, key, value, step))
+
+    client = Client()
+    proof = canary._RestartProof(tmp_path, {}, None, 0, client, "run")
+    proof.on_validation_epoch_end(SimpleNamespace(current_epoch=0), None)
+    proof.on_validation_epoch_end(SimpleNamespace(current_epoch=1), None)
+    assert client.rows == [
+        ("run", "epoch_idx", 0.0, 0),
+        ("run", "epoch_idx", 1.0, 1),
+    ]
+    assert proof.validation_epochs == 2
+
+    with pytest.raises(RuntimeError, match="not contiguous"):
+        proof.on_validation_epoch_end(SimpleNamespace(current_epoch=3), None)
+
+
+def test_real_production_callback_suite_round_trips_in_lightning_checkpoint(
+    monkeypatch, tmp_path: Path
+) -> None:
+    monkeypatch.setenv("SLURM_RESTART_COUNT", "1")
+    train_loader, val_loaders = canary._make_loaders()
+    original_callbacks = canary._build_callbacks(tmp_path)
+    trainer = Trainer(
+        accelerator="cpu",
+        devices=1,
+        max_epochs=1,
+        callbacks=list(original_callbacks.values()),
+        logger=False,
+        enable_checkpointing=False,
+        enable_progress_bar=False,
+        enable_model_summary=False,
+        num_sanity_val_steps=0,
+    )
+    trainer.fit(
+        canary._SyntheticModule(),
+        train_dataloaders=train_loader,
+        val_dataloaders=val_loaders,
+    )
+    checkpoint = tmp_path / "resume.ckpt"
+    trainer.save_checkpoint(checkpoint)
+    expected = canary._load_hpc_callback_states(checkpoint, original_callbacks)
+    assert expected is not None
+
+    resumed_callbacks = canary._build_callbacks(tmp_path)
+    resumed = Trainer(
+        accelerator="cpu",
+        devices=1,
+        max_epochs=2,
+        callbacks=list(resumed_callbacks.values()),
+        logger=False,
+        enable_checkpointing=False,
+        enable_progress_bar=False,
+        enable_model_summary=False,
+        num_sanity_val_steps=0,
+    )
+    resumed.fit(
+        canary._SyntheticModule(),
+        train_dataloaders=train_loader,
+        val_dataloaders=val_loaders,
+        ckpt_path=checkpoint,
+    )
+    for name, callback in resumed_callbacks.items():
+        assert canary._jsonable(callback.state_dict()) != {}, name

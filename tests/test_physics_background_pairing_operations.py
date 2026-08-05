@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import csv
 import json
+import random
 import sqlite3
 from pathlib import Path
 from types import SimpleNamespace
@@ -14,6 +15,32 @@ import yaml
 
 from scripts import physics_background_pairing_operations as operations
 from scripts import physics_background_pairing_report as report
+
+
+def _write_exact_checkpoint(path: Path, epoch: int) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    torch.save(
+        {
+            "epoch": epoch,
+            "callbacks": {
+                "physics-background-pairing-exact-retrain-rng-v1": {
+                    "schema_version": 1,
+                    "python": random.getstate(),
+                    "numpy": {
+                        "algorithm": "MT19937",
+                        "keys": torch.zeros(624, dtype=torch.uint32),
+                        "position": 0,
+                        "has_gauss": 0,
+                        "cached_gaussian": 0.0,
+                    },
+                    "torch_cpu": torch.get_rng_state(),
+                    "torch_cuda": [torch.get_rng_state()],
+                    "datamodule_shuffler": torch.Generator().manual_seed(123).get_state(),
+                }
+            },
+        },
+        path,
+    )
 
 
 def _campaign(tmp_path: Path) -> tuple[Path, Path]:
@@ -55,7 +82,7 @@ def _write_retrain_progress(root: Path, row: dict, job_ids: list[str]) -> Path:
         boundary = attempt_number * 40
         checkpoint = segments_dir / f"epoch_{boundary:03d}.ckpt"
         config = segments_dir / f"epoch_{boundary:03d}_config.yaml"
-        checkpoint.write_text(f"checkpoint {boundary}\n", encoding="utf-8")
+        _write_exact_checkpoint(checkpoint, epoch=boundary - 1)
         config.write_text(f"boundary: {boundary}\n", encoding="utf-8")
         array_job_id, task_id = job_id.split("_")
         attempts.append(
@@ -551,6 +578,124 @@ def test_submit_registers_exact_frozen_job(monkeypatch, tmp_path) -> None:
     assert row["commit"] == "a" * 40
 
 
+def test_submit_canary_registers_fixed_four_trial_one_node_job(monkeypatch, tmp_path) -> None:
+    """The first-class production canary has no operator-tunable search shape."""
+    root, repository = _campaign(tmp_path)
+    _authenticate(monkeypatch)
+    monkeypatch.setattr(operations, "_require_restart_canary_gate", lambda *args: None)
+    monkeypatch.setattr(operations, "_study_trial_count", lambda *args: 0)
+    calls = []
+
+    def run(command, **kwargs):
+        calls.append(command)
+        return SimpleNamespace(stdout="24680;cluster\n")
+
+    monkeypatch.setattr(operations.subprocess, "run", run)
+    job_id = operations.submit_canary(
+        root,
+        repository,
+        "ae",
+        tmp_path / "data",
+        tmp_path / "raw",
+        tmp_path / "pairing",
+    )
+
+    assert job_id == "24680"
+    assert "--nodes=1" in calls[0]
+    export = next(value for value in calls[0] if value.startswith("--export="))
+    assert "CHUNK_TRIALS=4" in export
+    assert "CHUNK_JOBS=4" in export
+    assert "TIMEOUT_MIN=720" in export
+    with (root / "state" / "job_history.csv").open(encoding="utf-8") as handle:
+        row = next(csv.DictReader(handle))
+    assert row["kind"] == "production_canary"
+    assert row["model"] == "ae"
+    assert row["state"] == "PENDING"
+    assert row["commit"] == "a" * 40
+
+
+def test_submit_canary_requires_validated_forced_restart_gate(monkeypatch, tmp_path) -> None:
+    """No real Optuna canary starts before scheduler restart recovery is proved."""
+    root, repository = _campaign(tmp_path)
+    _authenticate(monkeypatch)
+
+    with pytest.raises(RuntimeError, match="Forced-restart canary"):
+        operations.submit_canary(
+            root,
+            repository,
+            "vae",
+            tmp_path / "data",
+            tmp_path / "raw",
+            tmp_path / "pairing",
+        )
+
+
+def test_submit_canary_requires_exact_empty_study(monkeypatch, tmp_path) -> None:
+    """A production canary cannot be mislabeled after any persisted trial exists."""
+    root, repository = _campaign(tmp_path)
+    _authenticate(monkeypatch)
+    monkeypatch.setattr(operations, "_require_restart_canary_gate", lambda *args: None)
+    monkeypatch.setattr(operations, "_study_trial_count", lambda *args: 1)
+
+    with pytest.raises(RuntimeError, match="requires an empty vae study"):
+        operations.submit_canary(
+            root,
+            repository,
+            "vae",
+            tmp_path / "data",
+            tmp_path / "raw",
+            tmp_path / "pairing",
+        )
+
+
+def test_study_trial_count_includes_every_persisted_trial_state(tmp_path) -> None:
+    """Canary emptiness is total trial cardinality, not merely usable completions."""
+    import optuna
+
+    root = tmp_path / "campaign"
+    (root / "studies").mkdir(parents=True)
+    design = {
+        "studies": [{"model": "ae", "study_name": "study_ae"}],
+    }
+    study = optuna.create_study(
+        study_name="study_ae",
+        storage=f"sqlite:///{root / 'studies' / 'ae.db'}",
+        directions=["minimize"],
+    )
+    assert operations._study_trial_count(root, design, "ae") == 0
+
+    trial = study.ask()
+    study.tell(trial, state=optuna.trial.TrialState.FAIL)
+    assert operations._study_trial_count(root, design, "ae") == 1
+
+
+def test_submit_canary_refuses_a_second_registered_model_canary(monkeypatch, tmp_path) -> None:
+    """Exactly one production-canary allocation may claim each model."""
+    root, repository = _campaign(tmp_path)
+    _authenticate(monkeypatch)
+    operations._atomic_csv(
+        root / "state" / "job_history.csv",
+        [
+            {
+                "job_id": "123",
+                "kind": "production_canary",
+                "model": "ae",
+                "state": "COMPLETED",
+            }
+        ],
+    )
+
+    with pytest.raises(RuntimeError, match="already contains"):
+        operations.submit_canary(
+            root,
+            repository,
+            "ae",
+            tmp_path / "data",
+            tmp_path / "raw",
+            tmp_path / "pairing",
+        )
+
+
 def test_submit_rejects_active_same_model(monkeypatch, tmp_path) -> None:
     """A second chunk cannot overlap an active writer for the same study."""
     root, repository = _campaign(tmp_path)
@@ -647,6 +792,299 @@ def test_terminal_canary_gate_authenticates_exact_campaign_cardinalities(tmp_pat
     gate.write_text(json.dumps(payload), encoding="utf-8")
     with pytest.raises(RuntimeError, match="incomplete or inconsistent"):
         operations._require_canary_gate(root, design)
+
+
+def test_validate_restart_canary_persists_idempotent_authenticated_evidence(
+    monkeypatch, tmp_path
+) -> None:
+    """Repeated validation preserves one immutable gate rather than rewriting it."""
+    root, repository = _campaign(tmp_path)
+    _authenticate(monkeypatch)
+    canary_root = tmp_path / "canaries" / "retrain_restart_canary_example"
+    evidence = {
+        "schema_version": 1,
+        "code_commit": "a" * 40,
+        "canary_root": str(canary_root.resolve()),
+        "job_id": "987",
+        "complete_sha256": "b" * 64,
+    }
+    monkeypatch.setattr(operations, "_validate_restart_canary_evidence", lambda *args: evidence)
+
+    first = operations.validate_restart_canary(root, repository, canary_root, "987")
+    first_bytes = first.read_bytes()
+    second = operations.validate_restart_canary(root, repository, canary_root, "987")
+
+    assert second == first
+    assert second.read_bytes() == first_bytes
+    assert json.loads(first.read_text(encoding="utf-8"))["evidence"] == evidence
+
+
+def test_restart_canary_gate_reauthenticates_persisted_evidence(monkeypatch, tmp_path) -> None:
+    """A gate file alone is insufficient when its external evidence has changed."""
+    root, _ = _campaign(tmp_path)
+    design = operations._design(root)
+    canary_root = tmp_path / "canaries" / "retrain_restart_canary_example"
+    evidence = {
+        "schema_version": 1,
+        "code_commit": "a" * 40,
+        "canary_root": str(canary_root.resolve()),
+        "job_id": "987",
+        "complete_sha256": "b" * 64,
+    }
+    gate = root / "state" / "restart_canary_validation.json"
+    gate.parent.mkdir()
+    gate.write_text(
+        json.dumps({"schema_version": 1, "validated_at": "now", "evidence": evidence}),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(
+        operations,
+        "_validate_restart_canary_evidence",
+        lambda *args: {**evidence, "complete_sha256": "c" * 64},
+    )
+
+    with pytest.raises(RuntimeError, match="changed after validation"):
+        operations._require_restart_canary_gate(root, design)
+
+
+def test_restart_canary_accounting_reads_terminal_restart_count(monkeypatch) -> None:
+    """The forced gate uses allocation-level JSON, including Slurm RestartCnt."""
+    payload = {
+        "jobs": [
+            {
+                "job_id": 987,
+                "name": "phys-bgpair-restart-canary",
+                "state": {"current": ["COMPLETED"]},
+                "exit_code": {
+                    "return_code": {"number": 0},
+                    "signal": {"id": {"number": 0}},
+                },
+                "restart_cnt": 1,
+                "stdout_expanded": "/scratch/phys-bgpair-restart-canary-987.out",
+            }
+        ]
+    }
+    monkeypatch.setattr(
+        operations.subprocess,
+        "run",
+        lambda *args, **kwargs: SimpleNamespace(stdout=json.dumps(payload)),
+    )
+
+    observed = operations._restart_canary_accounting("987")
+
+    assert observed == {
+        "job_id": "987",
+        "job_name": "phys-bgpair-restart-canary",
+        "state": "COMPLETED",
+        "exit_code": "0:0",
+        "restart_count": 1,
+        "stdout": "/scratch/phys-bgpair-restart-canary-987.out",
+    }
+
+
+def test_restart_canary_accounting_rejects_nonallocation_identity() -> None:
+    """Task-like or otherwise nonnumeric scheduler IDs cannot satisfy the gate."""
+    with pytest.raises(ValueError, match="must be numeric"):
+        operations._restart_canary_accounting("987_0")
+
+
+def test_restart_canary_evidence_authenticates_exact_epoch_oracle_and_hashes(
+    monkeypatch, tmp_path
+) -> None:
+    """The independent validator covers scheduler, MLflow, rollback, and oracle proof."""
+    root, _ = _campaign(tmp_path)
+    commit = "a" * 40
+    job_id = "987"
+    canary_root = tmp_path / "canaries" / "retrain_restart_canary_schema2"
+    evidence_root = canary_root / "evidence"
+    retained_root = canary_root / "retained"
+    evidence_root.mkdir(parents=True)
+    retained_root.mkdir()
+    hpc = evidence_root / "hpc_input_001.ckpt"
+    exact_resume = evidence_root / "exact_resume_001.ckpt"
+    retained = retained_root / "stable.ckpt"
+    for path, value in (
+        (hpc, "hpc"),
+        (retained, "stable"),
+    ):
+        path.write_text(value, encoding="utf-8")
+    rng_state = {
+        "schema_version": 1,
+        "python": (3, (1, 2, 3), None),
+        "numpy": {
+            "algorithm": "MT19937",
+            "keys": torch.tensor([1, 2, 3], dtype=torch.uint32),
+            "position": 1,
+            "has_gauss": 0,
+            "cached_gaussian": 0.0,
+        },
+        "torch_cpu": torch.tensor([1, 2, 3], dtype=torch.uint8),
+        "torch_cuda": [torch.tensor([4, 5, 6], dtype=torch.uint8)],
+        "datamodule_shuffler": torch.tensor([7, 8, 9], dtype=torch.uint8),
+    }
+    torch.save(
+        {
+            "epoch": 0,
+            "callbacks": {"physics-background-pairing-exact-retrain-rng-v1": rng_state},
+        },
+        exact_resume,
+    )
+    retained_rows = [{"path": str(retained.resolve()), "sha256": operations._sha256(retained)}]
+    restore = evidence_root / "restore_001.json"
+    restore.write_text(
+        json.dumps(
+            {
+                "schema_version": 2,
+                "restored_at": "now",
+                "restart_count": 1,
+                "callback_states": {
+                    "exact_rng": operations._restart_canary_jsonable(rng_state),
+                    **{
+                        name: {"state": name}
+                        for name in ("efficiency", "cap", "wasserstein", "drift", "stable")
+                    },
+                },
+                "retained_checkpoints": retained_rows,
+            }
+        ),
+        encoding="utf-8",
+    )
+    snapshot = evidence_root / "scheduler_log_snapshot.txt"
+    snapshot_text = (
+        "CANARY_ATTEMPT_START restart=0 job=987\n"
+        "CANARY_LIGHTNING_CHILD restart=0\n"
+        "Handling auto-requeue signal\n"
+        "CANARY_ATTEMPT_START restart=1 job=987\n"
+        "CANARY_LIGHTNING_CHILD restart=1\n"
+    )
+    snapshot.write_text(snapshot_text, encoding="utf-8")
+    complete_path = canary_root / "COMPLETE.json"
+    scheduler_log = tmp_path / "phys-bgpair-restart-canary-987.out"
+    scheduler_log.write_text(
+        snapshot_text
+        + f"CANARY_COMPLETE path={complete_path}\n"
+        + "CANARY_ATTEMPT_FINISH restart=1 job=987\n",
+        encoding="utf-8",
+    )
+    tracking_uri = f"file:{(canary_root / 'mlflow' / 'mlruns').resolve()}"
+    (canary_root / "state.json").write_text(
+        json.dumps(
+            {
+                "schema_version": 2,
+                "code_commit": commit,
+                "mlflow_run_id": "run",
+                "tracking_uri": tracking_uri,
+            }
+        ),
+        encoding="utf-8",
+    )
+    expected_tags = operations._restart_canary_expected_tags(canary_root, commit)
+    sentinels = operations._restart_canary_scheduler_sentinels(snapshot_text)
+    complete = {
+        "schema_version": 2,
+        "completed_at": "now",
+        "code_commit": commit,
+        "slurm_job_id": job_id,
+        "slurm_restart_count": 1,
+        "cuda_device": "gpu",
+        "hpc_checkpoint_evidence": {
+            "path": str(hpc.resolve()),
+            "sha256": operations._sha256(hpc),
+            "resume_eligible": False,
+        },
+        "exact_resume_checkpoint": {
+            "path": str(exact_resume.resolve()),
+            "sha256": operations._sha256(exact_resume),
+            "completed_epochs": 1,
+            "mlflow_epoch_steps": [0],
+            "mlflow_epoch_values": [0.0],
+        },
+        "restore_evidence": {
+            "path": str(restore.resolve()),
+            "sha256": operations._sha256(restore),
+        },
+        "retained_checkpoints": retained_rows,
+        "mlflow": {
+            "tracking_uri": tracking_uri,
+            "experiment_name": operations.RESTART_CANARY_EXPERIMENT,
+            "run_id": "run",
+            "allocation_steps": [0, 1],
+            "epoch_steps": list(range(6)),
+            "epoch_values": [float(value) for value in range(6)],
+            "tags": expected_tags,
+        },
+        "scheduler_log": {
+            "source_path": str(scheduler_log.resolve()),
+            "snapshot_path": str(snapshot.resolve()),
+            "snapshot_sha256": operations._sha256(snapshot),
+            "sentinels": sentinels,
+        },
+        "initial_state_sha256": "1" * 64,
+        "final_state_sha256": "2" * 64,
+        "uninterrupted_reference_state_sha256": "2" * 64,
+        "parameters_match_uninterrupted_reference": True,
+        "final_epoch": 6,
+    }
+    complete_path.write_text(json.dumps(complete), encoding="utf-8")
+    expected_tracking_uri = tracking_uri
+
+    class Client:
+        def __init__(self, tracking_uri):
+            assert tracking_uri == expected_tracking_uri
+
+        def get_run(self, run_id):
+            assert run_id == "run"
+            return SimpleNamespace(
+                info=SimpleNamespace(experiment_id="experiment", status="FINISHED"),
+                data=SimpleNamespace(tags=expected_tags),
+            )
+
+        def get_experiment(self, experiment_id):
+            assert experiment_id == "experiment"
+            return SimpleNamespace(name=operations.RESTART_CANARY_EXPERIMENT)
+
+        def get_metric_history(self, run_id, name):
+            values = range(6) if name == "epoch_idx" else range(2)
+            return [
+                SimpleNamespace(step=value, value=float(value), timestamp=value)
+                for value in values
+            ]
+
+    import mlflow.tracking
+
+    monkeypatch.setattr(mlflow.tracking, "MlflowClient", Client)
+    monkeypatch.setattr(
+        operations,
+        "_restart_canary_accounting",
+        lambda _: {
+            "job_id": job_id,
+            "job_name": "phys-bgpair-restart-canary",
+            "state": "COMPLETED",
+            "exit_code": "0:0",
+            "restart_count": 1,
+            "stdout": str(scheduler_log.resolve()),
+        },
+    )
+
+    observed = operations._validate_restart_canary_evidence(root, canary_root, job_id, commit)
+    assert observed["exact_resume_completed_epochs"] == 1
+    assert observed["mlflow_run_id"] == "run"
+
+    restore_payload = json.loads(restore.read_text(encoding="utf-8"))
+    restored_original = json.loads(json.dumps(restore_payload))
+    restore_payload["callback_states"]["exact_rng"]["torch_cpu"][0] = 255
+    restore.write_text(json.dumps(restore_payload), encoding="utf-8")
+    complete["restore_evidence"]["sha256"] = operations._sha256(restore)
+    complete_path.write_text(json.dumps(complete), encoding="utf-8")
+    with pytest.raises(RuntimeError, match="callback restoration evidence"):
+        operations._validate_restart_canary_evidence(root, canary_root, job_id, commit)
+
+    restore.write_text(json.dumps(restored_original), encoding="utf-8")
+    complete["restore_evidence"]["sha256"] = operations._sha256(restore)
+    complete_path.write_text(json.dumps(complete), encoding="utf-8")
+    exact_resume.write_text("tampered", encoding="utf-8")
+    with pytest.raises(RuntimeError, match="artifact reference is invalid"):
+        operations._validate_restart_canary_evidence(root, canary_root, job_id, commit)
 
 
 def test_submit_refuses_trial_target_overshoot(monkeypatch, tmp_path) -> None:
@@ -1490,7 +1928,7 @@ def test_retrain_receipt_rejects_segment_and_receipt_tampering(monkeypatch, tmp_
     with pytest.raises(RuntimeError, match="artifact is missing or changed"):
         operations._completed_retrain_marker(root, operations._design(root), ledger_row)
 
-    checkpoint.write_text("checkpoint 40\n", encoding="utf-8")
+    _write_exact_checkpoint(checkpoint, epoch=39)
     receipt = root / "state" / "retrain_receipts" / "800_0.json"
     payload = json.loads(receipt.read_text(encoding="utf-8"))
     payload["model"] = "ae"

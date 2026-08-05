@@ -319,9 +319,14 @@ configs/retrain_suite/physics_background_native.yaml
 configs/retrain_suite/physics_background_native_oas.yaml
 ```
 
-The native overlay restores all 20 anomalies and native efficiency evaluation. The OAS
-overlay extends it with `eff_residual_oas` and a separate `residual_oas` threshold
-namespace.
+The native overlay restores all 20 anomalies and native efficiency evaluation. It also
+installs the retrain-only `ExactRetrainRNGState` callback; search runs intentionally do
+not use it. The callback persists Python, NumPy, torch CPU/CUDA, and
+`L1ADDataModule.shuffler` state in weights-only-safe primitive/tensor form, restores
+after strategy setup and before the first iterator, and fails closed outside the
+campaign's one-GPU contract or when any state is absent/malformed. The OAS overlay
+inherits this callback and extends native evaluation with `eff_residual_oas` and a
+separate `residual_oas` threshold namespace.
 
 Do not use these older files for the primary campaign:
 
@@ -379,7 +384,8 @@ contains all four mappings and CDF simultaneously.
   index on one GPU through an authenticated bounded local-task map.
 - `scripts/clariden/physics_background_pairing_restart_canary.sbatch` and
   `scripts/physics_background_pairing_restart_canary.py` force a real Slurm USR1
-  requeue on synthetic data and authenticate callback/HPC/MLflow/log restoration before
+  requeue on synthetic data and authenticate exact-epoch callback/RNG/MLflow/log
+  restoration (with HPC retained only as scheduler evidence) before
   any full campaign is allowed.
 - `research/physics_background_pairing/preflight.json` authenticates mapping inputs.
 - `research/physics_background_pairing/RUN_LEDGER.md` is the concise human status
@@ -606,13 +612,29 @@ Before any production search or retraining allocation, run the isolated procedur
 `research/physics_background_pairing/RESTART_CANARY.md` from the exact immutable
 execution worktree. It deliberately holds the first debug allocation until Slurm sends
 ordinary `USR1`, requires Lightning to write an HPC checkpoint and requeue the same
-job, then authenticates restoration in the production efficiency/CAP/W1/drift/stable
-callbacks. It also requires one explicitly tagged MLflow run with exact `epoch_idx`
-steps and values `0..5`, retained stable files, deterministic terminal model weights,
+job, archives that mid-epoch file as non-resumable scheduler evidence, then restores an
+authenticated end-of-epoch checkpoint in the production
+efficiency/CAP/W1/drift/stable callbacks. It also requires one explicitly tagged MLflow
+run with exact `epoch_idx` steps and values `0..5`, retained stable files, and
+terminal parameters exactly equal to an uninterrupted nonzero-learning-rate reference,
 append-preserved scheduler sentinels from both allocations, and a hash-bearing
 `COMPLETE.json` under a fresh non-campaign canary root. A completed job without a
 nonzero restart count does not pass. Preserve the complete canary root and scheduler
-log as preflight evidence; do not submit full-scale work after any failure.
+log as preflight evidence. Once Slurm reports terminal `COMPLETED`, register the gate
+through the mutable control checkout (never by hand-editing campaign state):
+
+```bash
+uv run python scripts/physics_background_pairing_operations.py \
+  --root "${BGPAIR_ROOT}" \
+  --execution-repository "${BGPAIR_REPO}" \
+  validate-restart-canary --canary-root "${CANARY_ROOT}" --job-id "${CANARY_JOB_ID}"
+```
+
+This independently reauthenticates the frozen design commit, all referenced paths and
+hashes, exact MLflow epoch/allocation/tag histories, append-preserved scheduler log,
+and terminal `sacct` state/exit/restart count, then atomically creates the idempotent
+`state/restart_canary_validation.json`. Do not submit production canaries after any
+failure; their submission helper revalidates this evidence on every call.
 
 ### Gate D: unified GPU pilots
 
@@ -673,6 +695,25 @@ Measure AE and VAE especially carefully because they evaluate 28 objectives. If 
 50-epoch canary cannot comfortably finish within 12 hours, do not launch bulk normal
 jobs. Account `a0166` cannot use the 24-hour `low` QOS, so report the scheduler limit
 before considering any scientific change.
+
+Submit each model through the dedicated control-plane command from the mutable control
+checkout, replacing `ae` successively with all six model IDs:
+
+```bash
+uv run python scripts/physics_background_pairing_operations.py \
+  --root "${BGPAIR_ROOT}" \
+  --execution-repository "${BGPAIR_REPO}" \
+  submit-canary --model ae \
+  --data-dir "${DATA_DIR}" --raw-data-dir "${RAW_DATA_DIR}" \
+  --pairing-dir "${PHYSICS_PAIRING_DIR}"
+```
+
+This is the only normal submission path for the production canaries. It requires the
+validated forced-restart gate and an exactly empty study for that model, rejects live
+or previously registered same-model work, and fixes the request to four trials, four
+jobs, one node, and 720 minutes. Each successful `sbatch` return is atomically recorded
+as `kind=production_canary` in `state/job_history.csv`; there are no CLI switches that
+can silently turn this gate into a bulk search.
 
 After all six jobs terminate, authenticate the complete gate from the mutable control
 checkout:
@@ -928,8 +969,18 @@ candidates may be the larger timeout risk.
   Slurm job uses an ordinary job-step signal and `srun`; never add the `B:` prefix,
   because Slurm documents that `B:` signals only the batch shell and excludes Python.
   Emergency HPC checkpoints live in the retrain-index-specific
-  `trainer.default_root_dir`, are authenticated on restart, and are archived after the
-  interrupted segment reaches its deterministic boundary.
+  `trainer.default_root_dir`. They may represent a partially consumed dataloader and
+  therefore are never fit-resume state. Before constructing the next Trainer, move every
+  stale HPC file into immutable, hash-bearing attempt evidence so Lightning cannot
+  auto-discover it. Resume only an authenticated end-of-epoch live `last.ckpt` whose
+  epoch matches exact contiguous MLflow `epoch_idx`, preferring it when newer than the
+  last committed 40-epoch boundary; otherwise use that immutable boundary checkpoint.
+  If neither checkpoint nor epoch history exists, retry from scratch. This rolls an
+  interrupted partial epoch back to its last completed epoch. In production,
+  `epoch_idx` values must be exactly `0..N-1`, while their unique increasing MLflow
+  steps are Lightning global-step values and are not expected to equal epoch numbers.
+  The isolated canary deliberately logs `epoch_idx` with explicit epoch-number steps,
+  so its stricter `0..5` step assertion is a separate test-only contract.
 - `--requeue` is reserved for Lightning's emergency USR1 path; normal boundaries never
   call `scontrol requeue`. `REQUEUED` remains an active ledger state. Use Slurm append
   mode for `%A_%a` output so an emergency requeue cannot truncate prior-attempt evidence.
@@ -1092,7 +1143,8 @@ Each index must:
 
 - reconstruct the exact frozen Optuna hyperparameters;
 - train exactly 200 cumulative epochs with seed 123 across five authenticated 40-epoch
-  segments, restoring optimizer, scheduler, RNG, loop, model, and callback state;
+  segments, restoring optimizer, scheduler, loop, model, callback state, Python/NumPy/
+  torch CPU and CUDA RNG state, and the L1 datamodule shuffler generator state;
 - reuse one persisted MLflow run ID across every allocation and fail closed if its
   identity tag, frozen row, manifest hash, or restart state differs;
 - log immutable hyperparameters on the first segment only; pre-create and authenticate
@@ -1107,11 +1159,13 @@ Each index must:
 The per-index restart record is
 `retraining/restart_state/<index>/state.json`. It records every Slurm attempt, resume
 source, phase, cumulative boundary, copied boundary checkpoint/config and hash, emergency HPC
-evidence, the frozen row/manifest/commit identity, and the single MLflow run ID. A
-repeated attempt uses an HPC checkpoint, a committed boundary, or a live `last.ckpt`
-whose epoch agrees exactly with contiguous MLflow `epoch_idx` history. Scratch retry is
-allowed only when both checkpoint and history are empty; one-sided or inconsistent
-state fails closed. Segment files are atomically published, and an interrupted publish
+evidence, the frozen row/manifest/commit identity, and the single MLflow run ID. HPC is
+scheduler evidence only. A repeated attempt uses a committed boundary or a live
+`last.ckpt` whose epoch agrees exactly with contiguous MLflow `epoch_idx` history,
+with newer completed live epochs taking priority. Every resumable checkpoint must
+contain the retrain-only exact RNG callback state, including the L1 shuffler. Scratch
+retry is allowed only when both checkpoint and history are empty; one-sided or
+inconsistent state fails closed. Segment files are atomically published, and an interrupted publish
 is adopted only when both copies match the live checkpoint/resolved config exactly.
 The final completion transition occurs only after evaluation artifacts pass their full
 audit; a crash during marker finalization enters an idempotent finalization phase.

@@ -49,6 +49,7 @@ SCORES_BY_MODEL = {
     "svdd": ("native",),
     "realnvp": ("native",),
 }
+EXACT_RETRAIN_RNG_STATE_KEY = "physics-background-pairing-exact-retrain-rng-v1"
 DOWNSTREAM_DATASETS = (
     "GluGluHTo2B_Par-MH-125",
     "GluGluHto2G_Par-MH-125",
@@ -1467,6 +1468,24 @@ def _restart_state_evidence(
             "continuation_checkpoint_sha256"
         ) or config_sha256 != segment.get("resolved_config_sha256"):
             raise RuntimeError(f"Changed retrain segment artifact: {state_path}")
+        import torch
+
+        payload = torch.load(  # nosec B614 -- confined, hash-authenticated campaign artifact
+            checkpoint, map_location="cpu", weights_only=False
+        )
+        rng_state = payload.get("callbacks", {}).get(EXACT_RETRAIN_RNG_STATE_KEY)
+        from src.callbacks.exact_retrain_rng import ExactRetrainRNGState
+
+        try:
+            ExactRetrainRNGState.validate_state(
+                rng_state,
+                require_datamodule_shuffler=True,
+                expected_cuda_states=1,
+            )
+        except RuntimeError as error:
+            raise RuntimeError(
+                f"Retrain checkpoint lacks exact RNG state: {checkpoint}"
+            ) from error
         evidence_rows.append(
             {
                 "retrain_index": index,

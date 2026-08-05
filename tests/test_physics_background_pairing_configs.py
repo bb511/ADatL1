@@ -187,6 +187,8 @@ def test_shared_suite_exposes_all_four_tables_and_cdf_on_both_scores() -> None:
 
 def test_retrain_suite_restores_20_signals_with_score_specific_thresholds() -> None:
     """Native and OAS downstream efficiencies use separately calibrated thresholds."""
+    search_cfg = compose_config(overrides=["experiment=physics/ae_background_all"])
+    assert "exact_rng_state" not in search_cfg.callbacks
     cfg = compose_config(
         overrides=[
             "experiment=physics/ae_background_all",
@@ -197,6 +199,11 @@ def test_retrain_suite_restores_20_signals_with_score_specific_thresholds() -> N
     assert cfg.callbacks.anomaly_eff.output_name == "ascore/full"
     assert cfg.callbacks.anomaly_eff_oas.output_name == "ascore/residual_oas"
     assert cfg.callbacks.anomaly_eff_oas.threshold_namespace == "residual_oas"
+    assert (
+        cfg.callbacks.exact_rng_state._target_
+        == "src.callbacks.exact_retrain_rng.ExactRetrainRNGState"
+    )
+    assert cfg.callbacks.exact_rng_state.require_datamodule_shuffler is True
     assert len(cfg.evaluation.callbacks.anomaly_efficiency.ds) == 20
     assert len(cfg.evaluation.callbacks.anomaly_efficiency_oas.ds) == 20
     assert cfg.evaluation.callbacks.anomaly_efficiency.name == "eff_native"

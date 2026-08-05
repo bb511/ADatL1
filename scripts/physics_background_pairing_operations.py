@@ -34,6 +34,10 @@ if str(REPOSITORY_ROOT) not in sys.path:
 MODELS = ("ae", "vae", "dsae", "dsvae", "svdd", "realnvp")
 TARGET_TRIALS = 600
 MAX_RETRAIN_ARRAY_TASKS = 1001
+RESTART_CANARY_SCHEMA_VERSION = 2
+RESTART_CANARY_EPOCHS = 6
+RESTART_CANARY_EXPERIMENT = "physics_bgpair_restart_canary"
+RESTART_CANARY_RUN_NAME = "slurm_hpc_resume"
 ACTIVE_STATES = {
     "PENDING",
     "RUNNING",
@@ -77,6 +81,11 @@ def _parse_args() -> argparse.Namespace:
     parser.add_argument("--root", type=Path, required=True)
     parser.add_argument("--execution-repository", type=Path, required=True)
     commands = parser.add_subparsers(dest="command", required=True)
+    canary = commands.add_parser("submit-canary")
+    canary.add_argument("--model", choices=MODELS, required=True)
+    canary.add_argument("--data-dir", type=Path, required=True)
+    canary.add_argument("--raw-data-dir", type=Path, required=True)
+    canary.add_argument("--pairing-dir", type=Path, required=True)
     submit = commands.add_parser("submit-search")
     submit.add_argument("--model", choices=MODELS, required=True)
     submit.add_argument("--trials", type=int, default=48)
@@ -92,6 +101,9 @@ def _parse_args() -> argparse.Namespace:
     retrain.add_argument("--pairing-dir", type=Path, required=True)
     commands.add_parser("missing-retrains")
     commands.add_parser("validate-canaries")
+    restart = commands.add_parser("validate-restart-canary")
+    restart.add_argument("--canary-root", type=Path, required=True)
+    restart.add_argument("--job-id", required=True)
     commands.add_parser("reconcile")
     commands.add_parser("freeze")
     commands.add_parser("aggregate")
@@ -214,6 +226,440 @@ def _authenticate_execution_repository(repository: Path, design: dict[str, Any])
         raise RuntimeError("Execution repository does not match the frozen campaign commit.")
     if _git(repository, "status", "--porcelain", "--untracked-files=all"):
         raise RuntimeError("Execution repository is dirty.")
+
+
+def _path_within(path: Path, parent: Path) -> bool:
+    """Return whether one resolved path is confined beneath a resolved directory."""
+    try:
+        path.resolve().relative_to(parent.resolve())
+    except ValueError:
+        return False
+    return True
+
+
+def _restart_canary_accounting(job_id: str) -> dict[str, Any]:
+    """Return the unique allocation-level Slurm record for an isolated canary."""
+    if not job_id.isdigit():
+        raise ValueError("Restart-canary job ID must be numeric.")
+    sacct = shutil.which("sacct")
+    if sacct is None:
+        raise FileNotFoundError("sacct")
+    result = subprocess.run(  # nosec B603 -- fixed read-only Slurm query
+        [sacct, "-X", "--json", f"--jobs={job_id}"],
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    matches = [
+        row
+        for row in json.loads(result.stdout).get("jobs", [])
+        if str(row.get("job_id", "")) == job_id
+    ]
+    if len(matches) != 1:
+        raise RuntimeError(
+            f"Expected one allocation-level accounting row for restart canary {job_id}."
+        )
+    row = matches[0]
+    states = row.get("state", {}).get("current", [])
+    exit_code = row.get("exit_code", {})
+    return_code = exit_code.get("return_code", {})
+    signal = exit_code.get("signal", {}).get("id", {})
+    if len(states) != 1:
+        raise RuntimeError(f"Unexpected restart-canary scheduler state: {states!r}.")
+    return {
+        "job_id": job_id,
+        "job_name": str(row.get("name", "")),
+        "state": _normalized_state(str(states[0])),
+        "exit_code": (f"{int(return_code.get('number', 0))}:" f"{int(signal.get('number', 0))}"),
+        "restart_count": int(row.get("restart_cnt", 0)),
+        "stdout": str(row.get("stdout_expanded", "")),
+    }
+
+
+def _restart_canary_metric_history(client, run_id: str, name: str) -> list[dict[str, Any]]:
+    """Export one MLflow history without hiding duplicates behind set operations."""
+    return [
+        {"step": int(item.step), "value": float(item.value), "timestamp": int(item.timestamp)}
+        for item in sorted(client.get_metric_history(run_id, name), key=lambda item: item.step)
+    ]
+
+
+def _restart_canary_jsonable(value: Any) -> Any:
+    """Normalize checkpoint state exactly as the canary's JSON restore evidence."""
+    import torch
+
+    if isinstance(value, dict):
+        return {str(key): _restart_canary_jsonable(item) for key, item in value.items()}
+    if isinstance(value, (list, tuple)):
+        return [_restart_canary_jsonable(item) for item in value]
+    if isinstance(value, torch.Tensor):
+        return value.detach().cpu().tolist()
+    if hasattr(value, "item"):
+        return value.item()
+    return value
+
+
+def _restart_canary_expected_tags(root: Path, code_commit: str) -> dict[str, str]:
+    """Return the independently specified immutable MLflow identity contract."""
+    identity = {
+        "schema_version": RESTART_CANARY_SCHEMA_VERSION,
+        "root": str(root.resolve()),
+        "commit": code_commit,
+        "experiment_name": RESTART_CANARY_EXPERIMENT,
+        "run_name": RESTART_CANARY_RUN_NAME,
+    }
+    return {
+        "mlflow.runName": RESTART_CANARY_RUN_NAME,
+        "mlflow.source.git.commit": code_commit,
+        "physics_bgpair_restart_canary": "true",
+        "physics_bgpair_restart_canary_identity_sha256": _json_sha256(identity),
+    }
+
+
+def _restart_canary_scheduler_sentinels(text: str) -> dict[str, int]:
+    """Authenticate append-preserved evidence from original and resumed allocations."""
+    required = (
+        "CANARY_ATTEMPT_START restart=0",
+        "CANARY_ATTEMPT_START restart=1",
+        "CANARY_LIGHTNING_CHILD restart=0",
+        "CANARY_LIGHTNING_CHILD restart=1",
+        "Handling auto-requeue signal",
+    )
+    counts = {needle: text.count(needle) for needle in required}
+    if any(count < 1 for count in counts.values()):
+        raise RuntimeError(f"Restart-canary scheduler log is missing sentinels: {counts}.")
+    return counts
+
+
+def _validate_restart_canary_evidence(
+    campaign_root: Path,
+    canary_root: Path,
+    job_id: str,
+    code_commit: str,
+) -> dict[str, Any]:
+    """Independently authenticate the complete forced-restart canary contract."""
+    from mlflow.tracking import MlflowClient
+
+    campaign_root = campaign_root.resolve()
+    canary_root = canary_root.expanduser().resolve()
+    if (
+        not canary_root.name.startswith("retrain_restart_canary_")
+        or "campaigns" in canary_root.parts
+    ):
+        raise RuntimeError("Restart canary root does not satisfy the isolated-root contract.")
+    if _path_within(canary_root, campaign_root) or _path_within(campaign_root, canary_root):
+        raise RuntimeError("Restart canary and scientific campaign roots must be disjoint.")
+    complete_path = canary_root / "COMPLETE.json"
+    state_path = canary_root / "state.json"
+    if not complete_path.is_file() or not state_path.is_file():
+        raise FileNotFoundError("Restart canary is missing COMPLETE.json or state.json.")
+    complete = json.loads(complete_path.read_text(encoding="utf-8"))
+    state = json.loads(state_path.read_text(encoding="utf-8"))
+    restart_count = int(complete.get("slurm_restart_count", -1))
+    expected_tracking_uri = f"file:{(canary_root / 'mlflow' / 'mlruns').resolve()}"
+    mlflow = complete.get("mlflow", {})
+    if (
+        complete.get("schema_version") != RESTART_CANARY_SCHEMA_VERSION
+        or complete.get("code_commit") != code_commit
+        or str(complete.get("slurm_job_id", "")) != job_id
+        or restart_count < 1
+        or complete.get("final_epoch") != RESTART_CANARY_EPOCHS
+        or not complete.get("cuda_device")
+        or not complete.get("completed_at")
+        or complete.get("initial_state_sha256") == complete.get("final_state_sha256")
+        or len(str(complete.get("initial_state_sha256", ""))) != 64
+        or complete.get("uninterrupted_reference_state_sha256")
+        != complete.get("final_state_sha256")
+        or len(str(complete.get("final_state_sha256", ""))) != 64
+        or complete.get("parameters_match_uninterrupted_reference") is not True
+        or state.get("schema_version") != RESTART_CANARY_SCHEMA_VERSION
+        or state.get("code_commit") != code_commit
+        or state.get("mlflow_run_id") != mlflow.get("run_id")
+        or state.get("tracking_uri") != expected_tracking_uri
+        or mlflow.get("tracking_uri") != expected_tracking_uri
+        or mlflow.get("experiment_name") != RESTART_CANARY_EXPERIMENT
+    ):
+        raise RuntimeError("Restart-canary completion identity is inconsistent.")
+
+    evidence_root = canary_root / "evidence"
+
+    def authenticated_reference(
+        row: Any, *, parent: Path, expected_name: str | None = None
+    ) -> Path:
+        if not isinstance(row, dict):
+            raise RuntimeError("Restart-canary artifact reference is not a mapping.")
+        path = Path(str(row.get("path", ""))).resolve()
+        if (
+            not path.is_file()
+            or not _path_within(path, parent)
+            or (expected_name is not None and path.name != expected_name)
+            or row.get("sha256") != _sha256(path)
+        ):
+            raise RuntimeError(f"Restart-canary artifact reference is invalid: {path}.")
+        return path
+
+    hpc_path = authenticated_reference(
+        complete.get("hpc_checkpoint_evidence"),
+        parent=evidence_root,
+        expected_name=f"hpc_input_{restart_count:03d}.ckpt",
+    )
+    if complete["hpc_checkpoint_evidence"].get("resume_eligible") is not False:
+        raise RuntimeError("Restart-canary HPC checkpoint was incorrectly marked resumable.")
+    exact_resume_path = authenticated_reference(
+        complete.get("exact_resume_checkpoint"),
+        parent=evidence_root,
+        expected_name=f"exact_resume_{restart_count:03d}.ckpt",
+    )
+    exact_resume = complete["exact_resume_checkpoint"]
+    completed_epochs = int(exact_resume.get("completed_epochs", -1))
+    expected_pre_resume_epochs = list(range(completed_epochs))
+    import torch
+
+    exact_resume_payload = torch.load(  # nosec B614 -- hash-authenticated canary artifact
+        exact_resume_path, map_location="cpu", weights_only=False
+    )
+    checkpoint_callbacks = exact_resume_payload.get("callbacks", {})
+    exact_rng = checkpoint_callbacks.get("physics-background-pairing-exact-retrain-rng-v1", {})
+    numpy_rng = exact_rng.get("numpy", {})
+    byte_states = [
+        exact_rng.get("torch_cpu"),
+        exact_rng.get("datamodule_shuffler"),
+        *(
+            exact_rng.get("torch_cuda", [])
+            if isinstance(exact_rng.get("torch_cuda"), list)
+            else []
+        ),
+    ]
+    if (
+        not 0 < completed_epochs < RESTART_CANARY_EPOCHS
+        or not isinstance(exact_resume_payload, dict)
+        or int(exact_resume_payload.get("epoch", -1)) + 1 != completed_epochs
+        or not isinstance(checkpoint_callbacks, dict)
+        or set(exact_rng)
+        != {
+            "schema_version",
+            "python",
+            "numpy",
+            "torch_cpu",
+            "torch_cuda",
+            "datamodule_shuffler",
+        }
+        or exact_rng.get("schema_version") != 1
+        or not isinstance(exact_rng.get("python"), tuple)
+        or len(exact_rng["python"]) != 3
+        or set(numpy_rng) != {"algorithm", "keys", "position", "has_gauss", "cached_gaussian"}
+        or numpy_rng.get("algorithm") != "MT19937"
+        or not isinstance(numpy_rng.get("keys"), torch.Tensor)
+        or numpy_rng["keys"].dtype != torch.uint32
+        or numpy_rng["keys"].ndim != 1
+        or numpy_rng["keys"].numel() == 0
+        or not isinstance(numpy_rng.get("position"), int)
+        or not 0 <= numpy_rng["position"] <= numpy_rng["keys"].numel()
+        or not isinstance(numpy_rng.get("has_gauss"), int)
+        or numpy_rng["has_gauss"] not in {0, 1}
+        or not isinstance(numpy_rng.get("cached_gaussian"), (int, float))
+        or not math.isfinite(float(numpy_rng["cached_gaussian"]))
+        or not isinstance(exact_rng.get("torch_cuda"), list)
+        or len(exact_rng["torch_cuda"]) != 1
+        or any(
+            not isinstance(state, torch.Tensor)
+            or state.dtype != torch.uint8
+            or state.ndim != 1
+            or state.numel() == 0
+            for state in byte_states
+        )
+        or exact_resume.get("mlflow_epoch_steps") != expected_pre_resume_epochs
+        or exact_resume.get("mlflow_epoch_values")
+        != [float(value) for value in expected_pre_resume_epochs]
+    ):
+        raise RuntimeError("Restart-canary exact completed-epoch resume evidence is invalid.")
+    restore_path = authenticated_reference(
+        complete.get("restore_evidence"),
+        parent=evidence_root,
+        expected_name=f"restore_{restart_count:03d}.json",
+    )
+    restore = json.loads(restore_path.read_text(encoding="utf-8"))
+    callback_states = restore.get("callback_states", {})
+    restored_exact_rng = (
+        callback_states.get("exact_rng") if isinstance(callback_states, dict) else None
+    )
+    retained = complete.get("retained_checkpoints")
+    if (
+        restore.get("schema_version") != RESTART_CANARY_SCHEMA_VERSION
+        or restore.get("restart_count") != restart_count
+        or not restore.get("restored_at")
+        or not isinstance(callback_states, dict)
+        or set(callback_states)
+        != {"exact_rng", "efficiency", "cap", "wasserstein", "drift", "stable"}
+        or restored_exact_rng != _restart_canary_jsonable(exact_rng)
+        or not isinstance(retained, list)
+        or not retained
+        or restore.get("retained_checkpoints") != retained
+    ):
+        raise RuntimeError("Restart-canary callback restoration evidence is incomplete.")
+    retained_paths = [
+        authenticated_reference(row, parent=canary_root / "retained") for row in retained
+    ]
+    if len(set(retained_paths)) != len(retained_paths):
+        raise RuntimeError("Restart-canary retained checkpoint inventory contains duplicates.")
+
+    scheduler = complete.get("scheduler_log", {})
+    source_path = Path(str(scheduler.get("source_path", ""))).resolve()
+    snapshot_path = Path(str(scheduler.get("snapshot_path", ""))).resolve()
+    if (
+        not source_path.is_file()
+        or not snapshot_path.is_file()
+        or not _path_within(snapshot_path, evidence_root)
+        or snapshot_path.name != "scheduler_log_snapshot.txt"
+        or scheduler.get("snapshot_sha256") != _sha256(snapshot_path)
+    ):
+        raise RuntimeError("Restart-canary append-preserved scheduler log is invalid.")
+    scheduler_text = snapshot_path.read_text(encoding="utf-8")
+    terminal_scheduler_text = source_path.read_text(encoding="utf-8")
+    sentinels = _restart_canary_scheduler_sentinels(scheduler_text)
+    if scheduler.get("sentinels") != sentinels:
+        raise RuntimeError("Restart-canary scheduler sentinel counts differ.")
+    allocation_indices = range(restart_count + 1)
+    if (
+        any(
+            terminal_scheduler_text.count(f"CANARY_ATTEMPT_START restart={index} job={job_id}")
+            != 1
+            or terminal_scheduler_text.count(f"CANARY_LIGHTNING_CHILD restart={index}") != 1
+            for index in allocation_indices
+        )
+        or terminal_scheduler_text.count("Handling auto-requeue signal") != restart_count
+        or terminal_scheduler_text.count(
+            f"CANARY_ATTEMPT_FINISH restart={restart_count} job={job_id}"
+        )
+        != 1
+        or f"CANARY_COMPLETE path={complete_path}" not in terminal_scheduler_text
+        or scheduler_text not in terminal_scheduler_text
+    ):
+        raise RuntimeError("Restart-canary scheduler log lacks exact terminal sentinels.")
+
+    accounting = _restart_canary_accounting(job_id)
+    if (
+        accounting["job_name"] != "phys-bgpair-restart-canary"
+        or accounting["state"] != "COMPLETED"
+        or accounting["exit_code"] != "0:0"
+        or accounting["restart_count"] < 1
+        or accounting["restart_count"] != restart_count
+        or not accounting["stdout"]
+        or Path(accounting["stdout"]).resolve() != source_path
+    ):
+        raise RuntimeError(f"Restart-canary scheduler accounting did not pass: {accounting}.")
+
+    run_id = str(mlflow.get("run_id", ""))
+    client = MlflowClient(tracking_uri=expected_tracking_uri)
+    run = client.get_run(run_id)
+    experiment = client.get_experiment(run.info.experiment_id)
+    expected_tags = _restart_canary_expected_tags(canary_root, code_commit)
+    if (
+        experiment is None
+        or experiment.name != RESTART_CANARY_EXPERIMENT
+        or run.info.status != "FINISHED"
+        or any(run.data.tags.get(key) != value for key, value in expected_tags.items())
+        or mlflow.get("tags") != expected_tags
+    ):
+        raise RuntimeError("Restart-canary MLflow run identity or tags differ.")
+    epoch_history = _restart_canary_metric_history(client, run_id, "epoch_idx")
+    allocation_history = _restart_canary_metric_history(
+        client, run_id, "canary/allocation_restart_count"
+    )
+    expected_epochs = list(range(RESTART_CANARY_EPOCHS))
+    expected_allocations = list(range(restart_count + 1))
+    if (
+        [row["step"] for row in epoch_history] != expected_epochs
+        or [row["value"] for row in epoch_history] != [float(value) for value in expected_epochs]
+        or [row["step"] for row in allocation_history] != expected_allocations
+        or [row["value"] for row in allocation_history]
+        != [float(value) for value in expected_allocations]
+        or mlflow.get("epoch_steps") != expected_epochs
+        or mlflow.get("epoch_values") != [float(value) for value in expected_epochs]
+        or mlflow.get("allocation_steps") != expected_allocations
+    ):
+        raise RuntimeError("Restart-canary MLflow epoch/allocation history is not exact.")
+
+    return {
+        "schema_version": 1,
+        "code_commit": code_commit,
+        "canary_root": str(canary_root),
+        "job_id": job_id,
+        "complete": str(complete_path.resolve()),
+        "complete_sha256": _sha256(complete_path),
+        "state": str(state_path.resolve()),
+        "state_sha256": _sha256(state_path),
+        "hpc_checkpoint": str(hpc_path),
+        "hpc_checkpoint_sha256": _sha256(hpc_path),
+        "exact_resume_checkpoint": str(exact_resume_path),
+        "exact_resume_checkpoint_sha256": _sha256(exact_resume_path),
+        "exact_resume_completed_epochs": completed_epochs,
+        "restore_evidence": str(restore_path),
+        "restore_evidence_sha256": _sha256(restore_path),
+        "retained_checkpoints": [
+            {"path": str(path), "sha256": _sha256(path)} for path in retained_paths
+        ],
+        "scheduler_log": str(source_path),
+        "scheduler_log_sha256": _sha256(source_path),
+        "scheduler_sentinels": sentinels,
+        "scheduler_accounting": accounting,
+        "mlflow_run_id": run_id,
+        "mlflow_epoch_history": epoch_history,
+        "mlflow_allocation_history": allocation_history,
+    }
+
+
+def validate_restart_canary(root: Path, repository: Path, canary_root: Path, job_id: str) -> Path:
+    """Validate and persist the forced-restart prerequisite idempotently."""
+    with _operation_lock(root):
+        design = _design(root)
+        _authenticate_execution_repository(repository, design)
+        evidence = _validate_restart_canary_evidence(
+            root, canary_root, job_id, design["code_commit"]
+        )
+        output = root / "state" / "restart_canary_validation.json"
+        if output.is_file():
+            existing = json.loads(output.read_text(encoding="utf-8"))
+            if existing.get("evidence") != evidence:
+                raise RuntimeError(
+                    "Existing restart-canary validation differs from current evidence."
+                )
+            return output
+        _atomic_json(
+            output,
+            {
+                "schema_version": 1,
+                "validated_at": datetime.now(timezone.utc).isoformat(),
+                "evidence": evidence,
+            },
+        )
+        return output
+
+
+def _require_restart_canary_gate(root: Path, design: dict[str, Any]) -> None:
+    """Reauthenticate the forced-restart gate before a production canary."""
+    path = root / "state" / "restart_canary_validation.json"
+    if not path.is_file():
+        raise RuntimeError("Forced-restart canary has not passed its validation gate.")
+    payload = json.loads(path.read_text(encoding="utf-8"))
+    evidence = payload.get("evidence", {})
+    if (
+        payload.get("schema_version") != 1
+        or not payload.get("validated_at")
+        or evidence.get("schema_version") != 1
+        or evidence.get("code_commit") != design["code_commit"]
+        or not evidence.get("canary_root")
+        or not evidence.get("job_id")
+    ):
+        raise RuntimeError("Forced-restart canary validation artifact is inconsistent.")
+    observed = _validate_restart_canary_evidence(
+        root,
+        Path(evidence["canary_root"]),
+        str(evidence["job_id"]),
+        design["code_commit"],
+    )
+    if observed != evidence:
+        raise RuntimeError("Forced-restart canary evidence changed after validation.")
 
 
 def _normalized_state(value: str) -> str:
@@ -393,6 +839,109 @@ def _usable_search_trials(root: Path, design: dict[str, Any], model: str) -> int
         and all(math.isfinite(float(value)) for value in trial.values)
         for trial in loaded.get_trials(deepcopy=False)
     )
+
+
+def _study_trial_count(root: Path, design: dict[str, Any], model: str) -> int:
+    """Return the total persisted trial count, including every terminal state."""
+    import optuna
+
+    matches = [study for study in design["studies"] if study["model"] == model]
+    if len(matches) != 1:
+        raise RuntimeError(f"Campaign design does not contain exactly one {model} study.")
+    database = root / "studies" / f"{model}.db"
+    if not database.is_file():
+        return 0
+    loaded = optuna.load_study(
+        study_name=matches[0]["study_name"], storage=f"sqlite:///{database}"
+    )
+    return len(loaded.get_trials(deepcopy=False))
+
+
+def submit_canary(
+    root: Path,
+    repository: Path,
+    model: str,
+    data_dir: Path,
+    raw_data_dir: Path,
+    pairing_dir: Path,
+) -> str:
+    """Submit one exact four-trial production canary from an empty study."""
+    with _operation_lock(root):
+        design = _design(root)
+        _authenticate_execution_repository(repository, design)
+        ledger_path, rows = _ledger(root)
+        _assert_no_live_search_overlap(rows, model)
+        if _active_model_rows(rows, model):
+            raise RuntimeError(f"Refusing to overlap an active {model} campaign job.")
+        if any(
+            row.get("kind") == "production_canary" and row.get("model") == model for row in rows
+        ):
+            raise RuntimeError(
+                f"Campaign ledger already contains a production canary for {model}."
+            )
+        _assert_database_quiescent(root, model)
+        _require_restart_canary_gate(root, design)
+        trial_count = _study_trial_count(root, design, model)
+        if trial_count != 0:
+            raise RuntimeError(
+                f"Production canary requires an empty {model} study; found {trial_count} trials."
+            )
+        for path in (data_dir, raw_data_dir, pairing_dir):
+            if not path.is_dir():
+                raise FileNotFoundError(path)
+        script = repository / "scripts" / "clariden" / "physics_background_pairing_sweep.sbatch"
+        if not script.is_file():
+            raise FileNotFoundError(script)
+        exports = {
+            "PHYSICS_BGPAIR_REPOSITORY_ROOT": repository.resolve(),
+            "PHYSICS_BGPAIR_CAMPAIGN_ROOT": root.resolve(),
+            "PROJECT_ROOT": repository.resolve(),
+            "DATA_DIR": data_dir.resolve(),
+            "RAW_DATA_DIR": raw_data_dir.resolve(),
+            "PHYSICS_PAIRING_DIR": pairing_dir.resolve(),
+            "LOG_DIR": root.resolve() / "runtime" / "logs",
+            "OUTPUT_DIR": root.resolve() / "runtime" / "outputs",
+            "CHECKPOINT_DIR": root.resolve() / "runtime" / "checkpoints",
+            "WANDB_MODE": "offline",
+            "STUDY_MODEL": model,
+            "CHUNK_TRIALS": 4,
+            "CHUNK_JOBS": 4,
+            "TIMEOUT_MIN": 720,
+        }
+        export_value = "ALL," + ",".join(f"{key}={value}" for key, value in exports.items())
+        sbatch = shutil.which("sbatch")
+        if sbatch is None:
+            raise FileNotFoundError("sbatch")
+        result = subprocess.run(  # nosec B603 -- reviewed fixed canary shape
+            [
+                sbatch,
+                "--parsable",
+                "--nodes=1",
+                f"--export={export_value}",
+                str(script),
+            ],
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+        job_id = result.stdout.strip().split(";")[0]
+        if not job_id.isdigit():
+            raise RuntimeError(f"Unexpected sbatch job ID: {result.stdout!r}")
+        rows.append(
+            {
+                "job_id": job_id,
+                "kind": "production_canary",
+                "model": model,
+                "state": "PENDING",
+                "commit": design["code_commit"],
+                "log_path": str(
+                    Path("/iopsstor/scratch/cscs/vjimenez/adatl1/logs/slurm")
+                    / f"phys-bgpair-sweep-{job_id}.out"
+                ),
+            }
+        )
+        _atomic_csv(ledger_path, rows)
+        return job_id
 
 
 def submit_search(
@@ -2131,7 +2680,18 @@ def main() -> None:
     args = _parse_args()
     root = args.root.expanduser().resolve()
     repository = args.execution_repository.expanduser().resolve()
-    if args.command == "submit-search":
+    if args.command == "submit-canary":
+        print(
+            submit_canary(
+                root,
+                repository,
+                args.model,
+                args.data_dir,
+                args.raw_data_dir,
+                args.pairing_dir,
+            )
+        )
+    elif args.command == "submit-search":
         print(
             submit_search(
                 root,
@@ -2160,6 +2720,8 @@ def main() -> None:
         print(json.dumps(missing_retrains(root, repository)))
     elif args.command == "validate-canaries":
         print(validate_canaries(root, repository))
+    elif args.command == "validate-restart-canary":
+        print(validate_restart_canary(root, repository, args.canary_root, args.job_id))
     elif args.command == "reconcile":
         print(json.dumps(reconcile(root, repository), indent=2, sort_keys=True))
     elif args.command == "freeze":

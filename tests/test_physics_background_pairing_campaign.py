@@ -1,6 +1,7 @@
 """Tests for the six shared physics background-pairing studies."""
 
 import importlib.util
+import random
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -13,6 +14,32 @@ SPEC = importlib.util.spec_from_file_location("physics_background_pairing_campai
 campaign = importlib.util.module_from_spec(SPEC)
 assert SPEC.loader is not None
 SPEC.loader.exec_module(campaign)
+
+
+def _write_exact_checkpoint(path: Path, epoch: int = 0) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    torch.save(
+        {
+            "epoch": epoch,
+            "callbacks": {
+                campaign.EXACT_RETRAIN_RNG_STATE_KEY: {
+                    "schema_version": 1,
+                    "python": random.getstate(),
+                    "numpy": {
+                        "algorithm": "MT19937",
+                        "keys": torch.zeros(624, dtype=torch.uint32),
+                        "position": 0,
+                        "has_gauss": 0,
+                        "cached_gaussian": 0.0,
+                    },
+                    "torch_cpu": torch.get_rng_state(),
+                    "torch_cuda": [torch.get_rng_state()],
+                    "datamodule_shuffler": torch.Generator().manual_seed(123).get_state(),
+                }
+            },
+        },
+        path,
+    )
 
 
 def test_campaign_has_six_studies_and_56_logical_fronts() -> None:
@@ -188,7 +215,7 @@ def test_retrain_attempts_advance_only_from_authenticated_boundaries(
     checkpoint = paths["segments"] / "epoch_040.ckpt"
     config = paths["segments"] / "epoch_040_config.yaml"
     checkpoint.parent.mkdir(parents=True)
-    checkpoint.write_text("checkpoint\n", encoding="utf-8")
+    _write_exact_checkpoint(checkpoint, epoch=39)
     config.write_text("trainer: {}\n", encoding="utf-8")
     state["segments"].append(
         {
@@ -235,7 +262,7 @@ def test_retrain_boundary_can_resume_from_a_later_authenticated_batch(
     checkpoint = paths["segments"] / "epoch_040.ckpt"
     config = paths["segments"] / "epoch_040_config.yaml"
     checkpoint.parent.mkdir(parents=True)
-    checkpoint.write_text("checkpoint\n", encoding="utf-8")
+    _write_exact_checkpoint(checkpoint, epoch=39)
     config.write_text("trainer: {}\n", encoding="utf-8")
     state["segments"].append(
         {
@@ -278,7 +305,7 @@ def test_epoch_200_progress_schedules_fresh_evaluation_without_fit_resume(
         checkpoint = paths["segments"] / f"epoch_{boundary:03d}.ckpt"
         config = paths["segments"] / f"epoch_{boundary:03d}_config.yaml"
         checkpoint.parent.mkdir(parents=True, exist_ok=True)
-        checkpoint.write_text(f"checkpoint-{boundary}\n", encoding="utf-8")
+        _write_exact_checkpoint(checkpoint, epoch=boundary - 1)
         config.write_text("trainer: {}\n", encoding="utf-8")
         segments.append(
             {
@@ -307,7 +334,8 @@ def test_epoch_200_progress_schedules_fresh_evaluation_without_fit_resume(
     assert attempt["phase"] == "evaluation"
     assert attempt["target_epoch_boundary"] == 200
     assert attempt["resume"] is None
-    assert attempt["hpc_checkpoints_before"]
+    assert attempt["hpc_evidence_archived_before_fit"]
+    assert not list(paths["trainer"].glob("hpc_ckpt_*.ckpt"))
     state["completed_at"] = "2026-08-05T00:00:00+00:00"
     campaign._write_json(paths["state"], state)
 
@@ -343,7 +371,7 @@ def test_committed_training_segment_is_strictly_authenticated(tmp_path) -> None:
     checkpoint = paths["segments"] / "epoch_040.ckpt"
     config_path = paths["segments"] / "epoch_040_config.yaml"
     checkpoint.parent.mkdir(parents=True)
-    checkpoint.write_text("checkpoint\n", encoding="utf-8")
+    _write_exact_checkpoint(checkpoint, epoch=39)
     config_path.write_text(
         """trainer:
   min_epochs: 40
@@ -418,19 +446,150 @@ def test_retrain_retry_before_any_epoch_allows_exact_scratch_retry(monkeypatch, 
     monkeypatch.setattr(campaign, "_mlflow_run_for_retrain", lambda *args: "one-run")
     monkeypatch.setattr(campaign, "_live_last_resume", lambda *args: None)
     campaign._prepare_retrain_attempt(root, identity)
+    paths = campaign._retrain_paths(root, 0)
+    paths["trainer"].mkdir(parents=True, exist_ok=True)
+    hpc = paths["trainer"] / "hpc_ckpt_1.ckpt"
+    hpc.write_text("mid-epoch scheduler evidence\n", encoding="utf-8")
 
     _, retry = campaign._prepare_retrain_attempt(root, identity)
 
     assert retry["phase"] == "training"
     assert retry["resume"] is None
     assert retry["target_epoch_boundary"] == 40
+    assert len(retry["hpc_evidence_archived_before_fit"]) == 1
+    evidence = retry["hpc_evidence_archived_before_fit"][0]
+    assert Path(evidence["path"]).is_file()
+    assert evidence["sha256"] == campaign._sha256(Path(evidence["path"]))
+    assert not hpc.exists()
+
+
+def test_live_completed_epoch_newer_than_boundary_has_priority_over_segment(
+    monkeypatch, tmp_path
+) -> None:
+    """Exact live end-of-epoch state wins only when newer than committed progress."""
+    root = tmp_path / "campaign"
+    root.mkdir()
+    identity = {
+        "retrain_index": 0,
+        "row": {"retrain_index": 0},
+        "mlflow_tracking_uri": f"file:{tmp_path / 'mlruns'}",
+        "experiment_name": "experiment",
+        "run_name": "run",
+        "hydra_dir": str(root / "retraining" / "hydra" / "0000"),
+        "code_commit": "a" * 40,
+    }
+    monkeypatch.setattr(campaign, "_mlflow_run_for_retrain", lambda *args: "one-run")
+    paths = campaign._retrain_paths(root, 0)
+    checkpoint = paths["segments"] / "epoch_040.ckpt"
+    config = paths["segments"] / "epoch_040_config.yaml"
+    checkpoint.parent.mkdir(parents=True)
+    _write_exact_checkpoint(checkpoint, epoch=39)
+    config.write_text("trainer: {}\n", encoding="utf-8")
+    live = root / "runtime" / "checkpoints" / "experiment" / "run" / "last.ckpt"
+    live.parent.mkdir(parents=True)
+    live.write_text("epoch 57 checkpoint\n", encoding="utf-8")
+    paths["trainer"].mkdir(parents=True)
+    (paths["trainer"] / "hpc_ckpt_3.ckpt").write_text("mid-epoch checkpoint\n", encoding="utf-8")
+    campaign._write_json(
+        paths["state"],
+        {
+            "schema_version": 1,
+            "identity": identity,
+            "mlflow_run_id": "one-run",
+            "attempts": [],
+            "segments": [
+                {
+                    "epoch_boundary": 40,
+                    "continuation_checkpoint": str(checkpoint),
+                    "continuation_checkpoint_sha256": campaign._sha256(checkpoint),
+                    "resolved_config": str(config),
+                    "resolved_config_sha256": campaign._sha256(config),
+                }
+            ],
+        },
+    )
+    monkeypatch.setattr(
+        campaign,
+        "_live_last_resume",
+        lambda *args: {
+            "kind": "live_last",
+            "path": str(live),
+            "sha256": campaign._sha256(live),
+            "completed_epochs": 57,
+        },
+    )
+
+    _, attempt = campaign._prepare_retrain_attempt(root, identity)
+
+    assert attempt["resume"]["kind"] == "live_last"
+    assert attempt["resume"]["completed_epochs"] == 57
+    assert attempt["target_epoch_boundary"] == 80
+    assert attempt["hpc_evidence_archived_before_fit"]
+    assert not list(paths["trainer"].glob("hpc_ckpt_*.ckpt"))
+
+
+def test_live_checkpoint_at_committed_boundary_uses_immutable_segment(
+    monkeypatch, tmp_path
+) -> None:
+    """An equal live checkpoint cannot displace the authenticated boundary copy."""
+    root = tmp_path / "campaign"
+    root.mkdir()
+    identity = {
+        "retrain_index": 0,
+        "row": {"retrain_index": 0},
+        "mlflow_tracking_uri": f"file:{tmp_path / 'mlruns'}",
+        "experiment_name": "experiment",
+        "run_name": "run",
+        "hydra_dir": str(root / "retraining" / "hydra" / "0000"),
+        "code_commit": "a" * 40,
+    }
+    monkeypatch.setattr(campaign, "_mlflow_run_for_retrain", lambda *args: "one-run")
+    paths = campaign._retrain_paths(root, 0)
+    checkpoint = paths["segments"] / "epoch_040.ckpt"
+    config = paths["segments"] / "epoch_040_config.yaml"
+    checkpoint.parent.mkdir(parents=True)
+    _write_exact_checkpoint(checkpoint, epoch=39)
+    config.write_text("trainer: {}\n", encoding="utf-8")
+    campaign._write_json(
+        paths["state"],
+        {
+            "schema_version": 1,
+            "identity": identity,
+            "mlflow_run_id": "one-run",
+            "attempts": [],
+            "segments": [
+                {
+                    "epoch_boundary": 40,
+                    "continuation_checkpoint": str(checkpoint),
+                    "continuation_checkpoint_sha256": campaign._sha256(checkpoint),
+                    "resolved_config": str(config),
+                    "resolved_config_sha256": campaign._sha256(config),
+                }
+            ],
+        },
+    )
+    monkeypatch.setattr(
+        campaign,
+        "_live_last_resume",
+        lambda *args: {
+            "kind": "live_last",
+            "path": "unused-live.ckpt",
+            "sha256": "b" * 64,
+            "completed_epochs": 40,
+        },
+    )
+
+    _, attempt = campaign._prepare_retrain_attempt(root, identity)
+
+    assert attempt["resume"]["kind"] == "completed_segment"
+    assert attempt["resume"]["path"] == str(checkpoint.resolve())
 
 
 def test_live_last_resume_requires_checkpoint_epoch_and_contiguous_mlflow(
     monkeypatch, tmp_path
 ) -> None:
     """Latest-epoch recovery is accepted only when checkpoint and MLflow agree exactly."""
-    history = [SimpleNamespace(step=index, value=float(index)) for index in range(3)]
+    history = [SimpleNamespace(step=(index + 1) * 765, value=float(index)) for index in range(3)]
 
     class Client:
         def __init__(self, **kwargs):
@@ -443,18 +602,20 @@ def test_live_last_resume_requires_checkpoint_epoch_and_contiguous_mlflow(
     monkeypatch.setattr("mlflow.tracking.MlflowClient", Client)
     checkpoint_root = tmp_path / "checkpoints"
     checkpoint_root.mkdir()
-    torch.save({"epoch": 2}, checkpoint_root / "last.ckpt")
+    _write_exact_checkpoint(checkpoint_root / "last.ckpt", epoch=2)
     identity = {"mlflow_tracking_uri": "file:/unused", "mlflow_run_id": "run-id"}
 
     resume = campaign._live_last_resume(identity, checkpoint_root)
 
     assert resume["completed_epochs"] == 3
     assert resume["kind"] == "live_last"
-    history[:] = [SimpleNamespace(step=index + 1, value=float(index)) for index in range(3)]
+    history[:] = [SimpleNamespace(step=765, value=float(index)) for index in range(3)]
     with pytest.raises(RuntimeError, match="differs from contiguous"):
         campaign._live_last_resume(identity, checkpoint_root)
-    history[:] = [SimpleNamespace(step=index, value=float(index)) for index in range(3)]
-    torch.save({"epoch": 3}, checkpoint_root / "last.ckpt")
+    history[:] = [
+        SimpleNamespace(step=(index + 1) * 765, value=float(index)) for index in range(3)
+    ]
+    _write_exact_checkpoint(checkpoint_root / "last.ckpt", epoch=3)
     with pytest.raises(RuntimeError, match="differs from contiguous"):
         campaign._live_last_resume(identity, checkpoint_root)
 
@@ -525,7 +686,10 @@ def test_retrain_slurm_signal_targets_lightning_job_step() -> None:
     assert "resolve-retrain-index" in script
     assert '--index "${PHYSICS_BGPAIR_RETRAIN_INDEX}"' in script
     assert "Normal 40-epoch" in script
-    assert "_requeue_current_task" not in SCRIPT.read_text(encoding="utf-8")
+    campaign_source = SCRIPT.read_text(encoding="utf-8")
+    assert "_requeue_current_task" not in campaign_source
+    assert "ckpt_path=hpc" not in campaign_source
+    assert '"kind": "lightning_hpc"' not in campaign_source
 
 
 def _mapped_retrain_fixture(monkeypatch, tmp_path: Path):
@@ -685,7 +849,7 @@ def test_existing_retrain_marker_is_hash_validated(monkeypatch, tmp_path) -> Non
         checkpoint = state_dir / "segments" / f"epoch_{boundary:03d}.ckpt"
         config = state_dir / "segments" / f"epoch_{boundary:03d}_config.yaml"
         checkpoint.parent.mkdir(parents=True, exist_ok=True)
-        checkpoint.write_text(f"checkpoint-{boundary}\n", encoding="utf-8")
+        _write_exact_checkpoint(checkpoint, epoch=boundary - 1)
         config.write_text(f"boundary: {boundary}\n", encoding="utf-8")
         segments.append(
             {

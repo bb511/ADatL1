@@ -8,6 +8,9 @@ callbacks:
   # Retrain segments restore checkpoint callbacks from the previous boundary;
   # clearing their run directory would destroy last/primary/stable candidates.
   clear_ckpts: null
+  exact_rng_state:
+    _target_: src.callbacks.exact_retrain_rng.ExactRetrainRNGState
+    require_datamodule_shuffler: true
   anomaly_eff:
     _target_: src.callbacks.efficiency.AnomalyEfficiencyCallback
     output_name: ascore/full

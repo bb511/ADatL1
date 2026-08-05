@@ -2,6 +2,7 @@ from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
+import torch
 from pytorch_lightning import Trainer
 
 from scripts import physics_background_pairing_restart_canary as canary
@@ -48,6 +49,9 @@ def test_restart_canary_sbatch_exercises_production_signal_shape() -> None:
     assert '\nsrun "${UV_PROJECT_ENVIRONMENT}/bin/python"' in script
     assert "physics_background_pairing_restart_canary.py" in script
     assert "physics_background_pairing_campaign.py" not in script
+    source = Path(canary.__file__).read_text(encoding="utf-8")
+    assert 'ckpt_path="hpc"' not in source
+    assert "_discover_hpc" not in source
 
 
 def test_mlflow_tags_include_explicit_source_commit(tmp_path: Path) -> None:
@@ -86,7 +90,6 @@ def test_real_production_callback_suite_round_trips_in_lightning_checkpoint(
     monkeypatch, tmp_path: Path
 ) -> None:
     monkeypatch.setenv("SLURM_RESTART_COUNT", "1")
-    train_loader, val_loaders = canary._make_loaders()
     original_callbacks = canary._build_callbacks(tmp_path)
     trainer = Trainer(
         accelerator="cpu",
@@ -101,12 +104,11 @@ def test_real_production_callback_suite_round_trips_in_lightning_checkpoint(
     )
     trainer.fit(
         canary._SyntheticModule(),
-        train_dataloaders=train_loader,
-        val_dataloaders=val_loaders,
+        datamodule=canary._CanaryDataModule(),
     )
     checkpoint = tmp_path / "resume.ckpt"
     trainer.save_checkpoint(checkpoint)
-    expected = canary._load_hpc_callback_states(checkpoint, original_callbacks)
+    expected = canary._load_callback_states(checkpoint, original_callbacks)
     assert expected is not None
 
     resumed_callbacks = canary._build_callbacks(tmp_path)
@@ -123,9 +125,50 @@ def test_real_production_callback_suite_round_trips_in_lightning_checkpoint(
     )
     resumed.fit(
         canary._SyntheticModule(),
-        train_dataloaders=train_loader,
-        val_dataloaders=val_loaders,
+        datamodule=canary._CanaryDataModule(),
         ckpt_path=checkpoint,
     )
     for name, callback in resumed_callbacks.items():
         assert canary._jsonable(callback.state_dict()) != {}, name
+
+
+def test_hpc_is_archived_as_non_resume_evidence(tmp_path: Path) -> None:
+    root = canary._validate_root(tmp_path / "retrain_restart_canary_archive")
+    source = root / "lightning" / "hpc_ckpt_1.ckpt"
+    source.parent.mkdir(parents=True)
+    source.write_text("mid-epoch\n", encoding="utf-8")
+
+    evidence = canary._archive_hpc(root, restart_count=1)
+
+    assert evidence["resume_eligible"] is False
+    assert Path(evidence["path"]).read_text(encoding="utf-8") == "mid-epoch\n"
+    assert not source.exists()
+    assert not list((root / "lightning").glob("hpc_ckpt_*.ckpt"))
+
+
+def test_exact_epoch_resume_requires_contiguous_mlflow_history(tmp_path: Path) -> None:
+    root = canary._validate_root(tmp_path / "retrain_restart_canary_exact")
+    checkpoint = root / "exact_epoch" / "last.ckpt"
+    checkpoint.parent.mkdir(parents=True)
+    torch.save({"epoch": 1}, checkpoint)
+
+    class Client:
+        def __init__(self):
+            self.history = [
+                SimpleNamespace(step=0, value=0.0),
+                SimpleNamespace(step=1, value=1.0),
+            ]
+
+        def get_metric_history(self, run_id, key):
+            assert (run_id, key) == ("run", "epoch_idx")
+            return self.history
+
+    client = Client()
+    resume, evidence = canary._exact_epoch_resume(root, 1, client, "run")
+
+    assert resume == Path(evidence["path"])
+    assert evidence["completed_epochs"] == 2
+    assert evidence["mlflow_epoch_steps"] == [0, 1]
+    client.history[1] = SimpleNamespace(step=2, value=1.0)
+    with pytest.raises(RuntimeError, match="differs from contiguous"):
+        canary._exact_epoch_resume(root, 2, client, "run")

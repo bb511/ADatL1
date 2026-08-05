@@ -1,10 +1,12 @@
 #!/usr/bin/env python3
-"""Isolated Clariden canary for Lightning's Slurm restart contract.
+"""Isolated Clariden canary for the production exact-epoch restart contract.
 
 This is deliberately not a configurable version of the physics runner.  It trains a
 small synthetic model, but attaches the production CAP, Wasserstein, drift, and stable
 checkpoint callbacks.  A Slurm ``USR1`` must interrupt the first allocation; the
-requeued allocation then authenticates and restores the resulting HPC checkpoint.
+requeued allocation archives the resulting HPC checkpoint as scheduler evidence, then
+restores the latest authenticated end-of-epoch checkpoint. Its terminal parameters
+must exactly match an uninterrupted, nonzero-learning-rate reference run.
 """
 
 from __future__ import annotations
@@ -14,6 +16,7 @@ import hashlib
 import json
 import logging
 import os
+import random
 import shutil
 import subprocess  # nosec B404 -- fixed git executable and argv only
 import sys
@@ -22,9 +25,17 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
+import numpy as np
 import torch
 from mlflow.tracking import MlflowClient
-from pytorch_lightning import Callback, LightningModule, Trainer, seed_everything
+from pytorch_lightning import (
+    Callback,
+    LightningDataModule,
+    LightningModule,
+    Trainer,
+    seed_everything,
+)
+from pytorch_lightning.callbacks import ModelCheckpoint
 from pytorch_lightning.loggers import MLFlowLogger
 from torch.utils.data import DataLoader, TensorDataset
 
@@ -34,11 +45,12 @@ sys.path.insert(0, str(REPOSITORY_ROOT))
 from src.callbacks.cap import CAPCallback
 from src.callbacks.checkpointing.criterion import Stable
 from src.callbacks.efficiency import AnomalyEfficiencyCallback
+from src.callbacks.exact_retrain_rng import ExactRetrainRNGState
 from src.callbacks.model_checkpoint import SingleDatasetModelCheckpoint
 from src.callbacks.thres_drift import ThresholdDriftCallback
 from src.callbacks.wasserstein import WassersteinCallback
 
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 2
 EXPERIMENT_NAME = "physics_bgpair_restart_canary"
 RUN_NAME = "slurm_hpc_resume"
 DATASET_NAMES = ("normal", "background0", "background1", "signal")
@@ -103,6 +115,8 @@ def _jsonable(value: Any) -> Any:
         return str(value)
     if isinstance(value, torch.Tensor):
         return value.detach().cpu().tolist()
+    if isinstance(value, np.ndarray):
+        return value.tolist()
     if hasattr(value, "item"):
         return value.item()
     return value
@@ -174,7 +188,7 @@ def _create_or_authenticate_run(
 
 
 class _SyntheticModule(LightningModule):
-    """A deterministic GPU workload whose parameters cannot drift."""
+    """A deterministic GPU workload with meaningful parameter updates."""
 
     def __init__(self) -> None:
         super().__init__()
@@ -185,7 +199,9 @@ class _SyntheticModule(LightningModule):
 
     def training_step(self, batch, batch_idx):
         x, _ = batch
-        prediction = self.layer(x)
+        python_scale = random.uniform(0.95, 1.05)  # nosec B311 -- stochastic test oracle
+        numpy_shift = float(np.random.uniform(-0.02, 0.02))
+        prediction = self.layer(x) * python_scale + numpy_shift + torch.randn_like(x) * 0.01
         loss = prediction.square().mean()
         self.log("canary/train_loss", loss, on_step=False, on_epoch=True)
         # This delay exists only in this isolated canary.  It keeps allocation zero
@@ -209,9 +225,7 @@ class _SyntheticModule(LightningModule):
         return {"score": score}
 
     def configure_optimizers(self):
-        # Zero learning rate makes the terminal tensor hash an exact deterministic
-        # oracle even if Slurm interrupts in the middle of a batch sequence.
-        return torch.optim.SGD(self.parameters(), lr=0.0)
+        return torch.optim.SGD(self.parameters(), lr=0.01)
 
 
 class _RestartProof(Callback):
@@ -257,14 +271,14 @@ class _RestartProof(Callback):
                 raise RuntimeError("Fresh canary allocation unexpectedly has resume state.")
             return
         if self.expected_states is None:
-            raise RuntimeError("Requeued canary allocation has no HPC callback state.")
+            raise RuntimeError("Requeued canary allocation has no exact-epoch callback state.")
 
         restored = {
             name: _jsonable(callback.state_dict())
             for name, callback in self.production_callbacks.items()
         }
         if restored != self.expected_states:
-            raise RuntimeError("Production callback state differs after Lightning restore.")
+            raise RuntimeError("Production callback state differs after exact-epoch restore.")
 
         cap_state = restored["cap"]
         w1_state = restored["wasserstein"]
@@ -321,17 +335,17 @@ class _RestartProof(Callback):
         self.validation_epochs += 1
 
 
-def _load_hpc_callback_states(
-    hpc_checkpoint: Path | None, callbacks: dict[str, Callback]
+def _load_callback_states(
+    checkpoint: Path | None, callbacks: dict[str, Callback]
 ) -> dict[str, Any] | None:
-    if hpc_checkpoint is None:
+    if checkpoint is None:
         return None
-    payload = torch.load(hpc_checkpoint, map_location="cpu", weights_only=False)
+    payload = torch.load(checkpoint, map_location="cpu", weights_only=False)
     stored = payload.get("callbacks", {})
     expected = {}
     for name, callback in callbacks.items():
         if callback.state_key not in stored:
-            raise RuntimeError(f"HPC checkpoint has no state for {name}: {callback.state_key}")
+            raise RuntimeError(f"Checkpoint has no state for {name}: {callback.state_key}")
         expected[name] = _jsonable(stored[callback.state_key])
     return expected
 
@@ -376,6 +390,28 @@ def _make_loaders() -> tuple[DataLoader, dict[str, DataLoader]]:
     return train, validation
 
 
+class _CanaryDataModule(LightningDataModule):
+    """Synthetic data with the same dedicated train-shuffler contract as L1AD."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.shuffler = torch.Generator().manual_seed(123)
+
+    def train_dataloader(self):
+        train, _ = _make_loaders()
+        return DataLoader(
+            train.dataset,
+            batch_size=16,
+            shuffle=True,
+            generator=self.shuffler,
+            num_workers=0,
+        )
+
+    def val_dataloader(self):
+        _, validation = _make_loaders()
+        return validation
+
+
 def _build_callbacks(root: Path) -> dict[str, Callback]:
     efficiency = AnomalyEfficiencyCallback("score", beta=0.9)
     cap = CAPCallback(
@@ -416,6 +452,7 @@ def _build_callbacks(root: Path) -> dict[str, Callback]:
         weights_only=False,
     )
     return {
+        "exact_rng": ExactRetrainRNGState(require_datamodule_shuffler=True),
         "efficiency": efficiency,
         "cap": cap,
         "wasserstein": wasserstein,
@@ -424,21 +461,95 @@ def _build_callbacks(root: Path) -> dict[str, Callback]:
     }
 
 
-def _discover_hpc(root: Path, restart_count: int) -> tuple[Path | None, dict[str, Any] | None]:
+def _archive_hpc(root: Path, restart_count: int) -> dict[str, Any] | None:
+    """Move mid-epoch state out of Lightning discovery before constructing Trainer."""
     checkpoints = sorted((root / "lightning").glob("hpc_ckpt_*.ckpt"))
     if restart_count == 0:
         if checkpoints:
             raise RuntimeError("Fresh canary allocation found an unauthenticated HPC checkpoint.")
-        return None, None
+        return None
     if not checkpoints:
         raise RuntimeError("Requeued canary allocation found no Lightning HPC checkpoint.")
-    source = checkpoints[-1].resolve()
+    if len(checkpoints) != 1:
+        raise RuntimeError(f"Expected one requeue HPC checkpoint, found {len(checkpoints)}.")
+    source = checkpoints[0].resolve()
     archive = root / "evidence" / f"hpc_input_{restart_count:03d}.ckpt"
     archive.parent.mkdir(parents=True, exist_ok=True)
     if archive.exists():
         raise RuntimeError(f"HPC evidence already exists: {archive}")
-    shutil.copy2(source, archive)
-    return source, {"path": str(archive.resolve()), "sha256": _sha256(archive)}
+    source.replace(archive)
+    if list((root / "lightning").glob("hpc_ckpt_*.ckpt")):
+        raise RuntimeError("HPC checkpoint remains discoverable after archival.")
+    return {
+        "path": str(archive.resolve()),
+        "sha256": _sha256(archive),
+        "resume_eligible": False,
+    }
+
+
+def _exact_epoch_resume(
+    root: Path,
+    restart_count: int,
+    client: MlflowClient,
+    run_id: str,
+) -> tuple[Path | None, dict[str, Any] | None]:
+    """Authenticate and freeze the completed-epoch checkpoint used for rollback."""
+    checkpoint = root / "exact_epoch" / "last.ckpt"
+    history = sorted(client.get_metric_history(run_id, "epoch_idx"), key=lambda row: row.step)
+    if restart_count == 0:
+        if checkpoint.exists() or history:
+            raise RuntimeError("Fresh canary allocation found prior completed-epoch state.")
+        return None, None
+    if not checkpoint.is_file() or not history:
+        raise RuntimeError("Requeued canary has no authenticated completed-epoch state.")
+    payload = torch.load(checkpoint, map_location="cpu", weights_only=False)
+    completed_epochs = int(payload.get("epoch", -1)) + 1
+    steps = [int(row.step) for row in history]
+    values = [float(row.value) for row in history]
+    expected = list(range(completed_epochs))
+    if (
+        completed_epochs <= 0
+        or completed_epochs >= MAX_EPOCHS
+        or steps != expected
+        or values != [float(epoch) for epoch in expected]
+    ):
+        raise RuntimeError(
+            "Completed-epoch checkpoint differs from contiguous MLflow history: "
+            f"checkpoint_epochs={completed_epochs}, steps={steps}, values={values}."
+        )
+    frozen = root / "evidence" / f"exact_resume_{restart_count:03d}.ckpt"
+    if frozen.exists():
+        raise RuntimeError(f"Exact resume evidence already exists: {frozen}")
+    frozen.parent.mkdir(parents=True, exist_ok=True)
+    shutil.copy2(checkpoint, frozen)
+    return frozen, {
+        "path": str(frozen.resolve()),
+        "sha256": _sha256(frozen),
+        "completed_epochs": completed_epochs,
+        "mlflow_epoch_steps": steps,
+        "mlflow_epoch_values": values,
+    }
+
+
+def _uninterrupted_reference_hash(root: Path) -> str:
+    """Train the same optimization trajectory once without scheduler interruption."""
+    seed_everything(123, workers=True)
+    model = _SyntheticModule()
+    callbacks = _build_callbacks(root / "reference")
+    trainer = Trainer(
+        accelerator="gpu",
+        devices=1,
+        max_epochs=MAX_EPOCHS,
+        logger=False,
+        callbacks=list(callbacks.values()),
+        enable_checkpointing=False,
+        deterministic=True,
+        enable_progress_bar=False,
+        enable_model_summary=False,
+        log_every_n_steps=1,
+    )
+    trainer.fit(model, datamodule=_CanaryDataModule())
+    return _parameter_sha256(model)
 
 
 def run(root: Path, scheduler_log: Path, expected_commit: str) -> Path:
@@ -493,9 +604,19 @@ def run(root: Path, scheduler_log: Path, expected_commit: str) -> Path:
     model = _SyntheticModule()
     initial_state_sha256 = _parameter_sha256(model)
     callbacks = _build_callbacks(root)
-    hpc_checkpoint, hpc_evidence = _discover_hpc(root, restart_count)
-    expected_states = _load_hpc_callback_states(hpc_checkpoint, callbacks)
+    hpc_evidence = _archive_hpc(root, restart_count)
+    exact_checkpoint, exact_resume_evidence = _exact_epoch_resume(
+        root, restart_count, client, run_id
+    )
+    expected_states = _load_callback_states(exact_checkpoint, callbacks)
     proof = _RestartProof(root, callbacks, expected_states, restart_count, client, run_id)
+    exact_checkpointing = ModelCheckpoint(
+        dirpath=root / "exact_epoch",
+        save_last=True,
+        save_top_k=0,
+        every_n_epochs=1,
+        save_on_train_epoch_end=False,
+    )
     logger = MLFlowLogger(
         experiment_name=EXPERIMENT_NAME,
         run_name=RUN_NAME,
@@ -508,7 +629,7 @@ def run(root: Path, scheduler_log: Path, expected_commit: str) -> Path:
         accelerator="gpu",
         devices=1,
         max_epochs=MAX_EPOCHS,
-        callbacks=[*callbacks.values(), proof],
+        callbacks=[*callbacks.values(), proof, exact_checkpointing],
         logger=logger,
         default_root_dir=str(root / "lightning"),
         deterministic=True,
@@ -517,12 +638,10 @@ def run(root: Path, scheduler_log: Path, expected_commit: str) -> Path:
         enable_model_summary=False,
         log_every_n_steps=1,
     )
-    train_loader, val_loaders = _make_loaders()
     trainer.fit(
         model,
-        train_dataloaders=train_loader,
-        val_dataloaders=val_loaders,
-        ckpt_path="hpc" if hpc_checkpoint is not None else None,
+        datamodule=_CanaryDataModule(),
+        ckpt_path=exact_checkpoint,
     )
 
     # Allocation zero must never finish: doing so would not test a restart.
@@ -533,11 +652,16 @@ def run(root: Path, scheduler_log: Path, expected_commit: str) -> Path:
             f"Resumed canary stopped at epoch {trainer.current_epoch}, expected {MAX_EPOCHS}."
         )
     final_state_sha256 = _parameter_sha256(model)
-    if final_state_sha256 != initial_state_sha256:
-        raise RuntimeError("Deterministic terminal model state differs from its fixed oracle.")
+    uninterrupted_reference_state_sha256 = _uninterrupted_reference_hash(root)
+    parameters_match_reference = final_state_sha256 == uninterrupted_reference_state_sha256
+    if not parameters_match_reference:
+        raise RuntimeError(
+            "Exact-epoch resumed parameters differ from uninterrupted training: "
+            f"resumed={final_state_sha256}, reference={uninterrupted_reference_state_sha256}."
+        )
     restore_path = root / "evidence" / f"restore_{restart_count:03d}.json"
-    if not restore_path.is_file() or hpc_evidence is None:
-        raise RuntimeError("Resumed fit did not emit restore/HPC evidence.")
+    if not restore_path.is_file() or hpc_evidence is None or exact_resume_evidence is None:
+        raise RuntimeError("Resumed fit did not emit exact-epoch and scheduler evidence.")
 
     logger.finalize("success")
     allocation_history = client.get_metric_history(run_id, "canary/allocation_restart_count")
@@ -585,6 +709,7 @@ def run(root: Path, scheduler_log: Path, expected_commit: str) -> Path:
         "slurm_restart_count": restart_count,
         "cuda_device": torch.cuda.get_device_name(0),
         "hpc_checkpoint_evidence": hpc_evidence,
+        "exact_resume_checkpoint": exact_resume_evidence,
         "restore_evidence": {
             "path": str(restore_path),
             "sha256": _sha256(restore_path),
@@ -607,6 +732,8 @@ def run(root: Path, scheduler_log: Path, expected_commit: str) -> Path:
         },
         "initial_state_sha256": initial_state_sha256,
         "final_state_sha256": final_state_sha256,
+        "uninterrupted_reference_state_sha256": uninterrupted_reference_state_sha256,
+        "parameters_match_uninterrupted_reference": parameters_match_reference,
         "final_epoch": int(trainer.current_epoch),
     }
     _write_json(complete, payload, create=True)

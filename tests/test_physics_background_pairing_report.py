@@ -6,6 +6,7 @@ import importlib.util
 import json
 import os
 import pickle  # nosec B403 -- writes only synthetic trusted-local test fixtures
+import random
 import shutil
 import subprocess  # nosec B404 -- fixed Git argv executes only in local test fixtures
 from pathlib import Path
@@ -32,6 +33,33 @@ campaign = _load("physics_background_pairing_campaign_for_report", CAMPAIGN_SCRI
 report = _load("physics_background_pairing_report", REPORT_SCRIPT)
 report.TARGET_TRIALS = 1
 REAL_EXECUTION_REPOSITORY_EVIDENCE = report._execution_repository_evidence
+
+
+def _write_exact_checkpoint(path: Path, epoch: int) -> None:
+    """Write a minimal continuation checkpoint with the production RNG contract."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    torch.save(
+        {
+            "epoch": epoch,
+            "callbacks": {
+                report.EXACT_RETRAIN_RNG_STATE_KEY: {
+                    "schema_version": 1,
+                    "python": random.getstate(),
+                    "numpy": {
+                        "algorithm": "MT19937",
+                        "keys": torch.zeros(624, dtype=torch.uint32),
+                        "position": 0,
+                        "has_gauss": 0,
+                        "cached_gaussian": 0.0,
+                    },
+                    "torch_cpu": torch.get_rng_state(),
+                    "torch_cuda": [torch.get_rng_state()],
+                    "datamodule_shuffler": torch.Generator().manual_seed(123).get_state(),
+                }
+            },
+        },
+        path,
+    )
 
 
 @pytest.fixture(autouse=True)
@@ -683,7 +711,7 @@ def _frozen_results(root: Path, design: dict) -> None:
             checkpoint = state_dir / "segments" / f"epoch_{boundary:03d}.ckpt"
             config = state_dir / "segments" / f"epoch_{boundary:03d}_config.yaml"
             checkpoint.parent.mkdir(parents=True, exist_ok=True)
-            checkpoint.write_text(f"checkpoint-{boundary}\n", encoding="utf-8")
+            _write_exact_checkpoint(checkpoint, epoch=boundary - 1)
             config.write_text(f"trainer:\n  max_epochs: {boundary}\n", encoding="utf-8")
             segment_rows.append(
                 {
@@ -907,6 +935,7 @@ def test_report_rejects_changed_or_escaped_restart_state(tmp_path) -> None:
         ("identity", "restart identity differs"),
         ("boundaries", "segment boundaries are incomplete"),
         ("segment_hash", "Changed retrain segment artifact"),
+        ("rng_state", "lacks exact RNG state"),
         ("terminal_attempt", "terminal attempt is incomplete"),
     ),
 )
@@ -925,6 +954,12 @@ def test_report_reconstructs_restart_provenance(tmp_path, corruption: str, messa
         state["segments"].pop()
     elif corruption == "segment_hash":
         state["segments"][0]["continuation_checkpoint_sha256"] = "0" * 64
+    elif corruption == "rng_state":
+        checkpoint = Path(state["segments"][0]["continuation_checkpoint"])
+        payload = torch.load(checkpoint, map_location="cpu", weights_only=False)
+        payload["callbacks"].pop(report.EXACT_RETRAIN_RNG_STATE_KEY)
+        torch.save(payload, checkpoint)
+        state["segments"][0]["continuation_checkpoint_sha256"] = report._sha256(checkpoint)
     else:
         state["attempts"][-1]["phase"] = "training"
     _json(state_path, state)

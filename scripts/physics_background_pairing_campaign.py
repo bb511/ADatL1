@@ -761,6 +761,7 @@ def _retrain_suite(model: str) -> str:
 
 
 RETRAIN_SEGMENT_EPOCHS = 40
+EXACT_RETRAIN_RNG_STATE_KEY = "physics-background-pairing-exact-retrain-rng-v1"
 
 
 def _retrain_paths(root: Path, index: int) -> dict[str, Path]:
@@ -875,6 +876,29 @@ def _hpc_checkpoint_rows(trainer_root: Path) -> list[dict[str, Any]]:
     return rows
 
 
+def _validate_exact_rng_checkpoint_payload(payload: dict[str, Any], checkpoint: Path) -> None:
+    """Require the retrain-only stochastic state needed for exact continuation."""
+    state = payload.get("callbacks", {}).get(EXACT_RETRAIN_RNG_STATE_KEY)
+    from src.callbacks.exact_retrain_rng import ExactRetrainRNGState
+
+    try:
+        ExactRetrainRNGState.validate_state(
+            state,
+            require_datamodule_shuffler=True,
+            expected_cuda_states=1,
+        )
+    except RuntimeError as error:
+        raise RuntimeError(f"Checkpoint lacks exact retrain RNG state: {checkpoint}") from error
+
+
+def _validate_exact_rng_checkpoint(checkpoint: Path) -> None:
+    """Load and authenticate exact stochastic continuation state."""
+    import torch
+
+    payload = torch.load(checkpoint, map_location="cpu", weights_only=False)  # nosec B614
+    _validate_exact_rng_checkpoint_payload(payload, checkpoint)
+
+
 def _live_last_resume(identity: dict[str, Any], checkpoint_root: Path) -> dict[str, Any] | None:
     """Authenticate a live last checkpoint against exact contiguous MLflow epochs."""
     from mlflow.tracking import MlflowClient
@@ -892,6 +916,7 @@ def _live_last_resume(identity: dict[str, Any], checkpoint_root: Path) -> dict[s
     import torch
 
     payload = torch.load(checkpoint, map_location="cpu", weights_only=False)  # nosec B614
+    _validate_exact_rng_checkpoint_payload(payload, checkpoint)
     checkpoint_epoch = int(payload.get("epoch", -1))
     steps = [int(metric.step) for metric in history]
     values = [float(metric.value) for metric in history]
@@ -900,7 +925,7 @@ def _live_last_resume(identity: dict[str, Any], checkpoint_root: Path) -> dict[s
         completed_epochs <= 0
         or len(history) != completed_epochs
         or len(set(steps)) != len(steps)
-        or steps != list(range(completed_epochs))
+        or any(later <= earlier for earlier, later in zip(steps, steps[1:]))
         or values != [float(epoch) for epoch in range(completed_epochs)]
     ):
         raise RuntimeError("Live last checkpoint differs from contiguous MLflow epoch history.")
@@ -1062,11 +1087,20 @@ def _prepare_retrain_attempt(
             phase = "finalization"
         else:
             phase = "evaluation" if completed == all_boundaries else "training"
-        hpc_rows = _hpc_checkpoint_rows(paths["trainer"])
+        attempt_number = len(state["attempts"]) + 1
+        # Lightning HPC checkpoints can be written between epochs. Restoring one can
+        # replay or skip dataloader state, so retain it as scheduler/restart evidence
+        # but remove it from the trainer directory before Trainer.fit can discover it.
+        hpc_evidence = _archive_hpc_checkpoints(paths, attempt_number)
+        if _hpc_checkpoint_rows(paths["trainer"]):
+            raise RuntimeError("HPC checkpoints remain discoverable after archival.")
         resume = None
-        if phase == "training" and hpc_rows:
-            resume = {"kind": "lightning_hpc", **hpc_rows[-1]}
-        elif phase == "training" and completed:
+        live = None
+        if phase == "training":
+            live = _live_last_resume(
+                {**identity, "mlflow_run_id": state["mlflow_run_id"]}, checkpoint_root
+            )
+        if phase == "training" and completed:
             segment = state["segments"][-1]
             checkpoint = _inside(
                 Path(segment["continuation_checkpoint"]),
@@ -1076,37 +1110,37 @@ def _prepare_retrain_attempt(
             )
             if _sha256(checkpoint) != segment["continuation_checkpoint_sha256"]:
                 raise RuntimeError(f"Continuation checkpoint changed: {checkpoint}")
+            _validate_exact_rng_checkpoint(checkpoint)
             resume = {
                 "kind": "completed_segment",
                 "path": str(checkpoint),
                 "sha256": segment["continuation_checkpoint_sha256"],
+                "completed_epochs": completed[-1],
             }
-        elif phase == "training" and state["attempts"]:
-            live = _live_last_resume(
-                {**identity, "mlflow_run_id": state["mlflow_run_id"]}, checkpoint_root
-            )
-            if live is not None:
-                resume = live
-            # A prior attempt that logged no epoch and wrote no checkpoint is an exact
-            # scratch retry; every one-sided or non-contiguous case failed in the helper.
-        if phase == "training" and completed:
-            live = _live_last_resume(
-                {**identity, "mlflow_run_id": state["mlflow_run_id"]}, checkpoint_root
-            )
-            if live is not None:
-                if int(live["completed_epochs"]) < completed[-1]:
-                    raise RuntimeError("Live last checkpoint predates committed retrain progress.")
-                if int(live["completed_epochs"]) > completed[-1] and (
-                    resume is None or resume.get("kind") != "lightning_hpc"
-                ):
-                    resume = live
         next_boundary = (
             RETRAIN_EPOCHS
             if phase in {"evaluation", "finalization"}
             else (len(completed) + 1) * RETRAIN_SEGMENT_EPOCHS
         )
+        if live is not None:
+            live_epochs = int(live["completed_epochs"])
+            committed_epochs = 0 if not completed else completed[-1]
+            if live_epochs < committed_epochs:
+                raise RuntimeError("Live last checkpoint predates committed retrain progress.")
+            if live_epochs > next_boundary:
+                raise RuntimeError(
+                    "Live last checkpoint exceeds the next retrain segment boundary."
+                )
+            # Prefer the live checkpoint only when it contains additional completed
+            # epochs. At an exact committed boundary, the immutable segment copy is
+            # the stronger recovery source.
+            if live_epochs > committed_epochs:
+                resume = live
+        # With neither an authenticated live epoch nor committed boundary, retrying
+        # from scratch is exact. Archived HPC evidence is deliberately never a fit
+        # resume source.
         attempt = {
-            "attempt_number": len(state["attempts"]) + 1,
+            "attempt_number": attempt_number,
             "started_at": datetime.now(timezone.utc).isoformat(),
             "slurm_job_id": os.environ.get("SLURM_JOB_ID"),
             "slurm_array_job_id": os.environ.get("SLURM_ARRAY_JOB_ID"),
@@ -1114,7 +1148,7 @@ def _prepare_retrain_attempt(
             "target_epoch_boundary": next_boundary,
             "phase": phase,
             "resume": resume,
-            "hpc_checkpoints_before": hpc_rows,
+            "hpc_evidence_archived_before_fit": hpc_evidence,
             "scheduler_identity": scheduler_identity,
         }
         task_id = attempt["slurm_array_task_id"]
@@ -1135,18 +1169,28 @@ def _prepare_retrain_attempt(
 
 
 def _archive_hpc_checkpoints(paths: dict[str, Path], attempt_number: int) -> list[dict[str, Any]]:
-    """Move consumed emergency checkpoints into immutable restart evidence."""
+    """Remove HPC files from Lightning discovery and retain content-addressed evidence."""
+    if attempt_number <= 0:
+        raise ValueError("Retrain attempt numbers are one-based.")
     rows = _hpc_checkpoint_rows(paths["trainer"])
-    archived = []
+    archive_root = paths["hpc_archive"]
+    archive_root.mkdir(parents=True, exist_ok=True)
     for source_row in rows:
         source = Path(source_row["path"])
-        paths["hpc_archive"].mkdir(parents=True, exist_ok=True)
-        target = paths["hpc_archive"] / f"attempt_{attempt_number:03d}__{source.name}"
+        digest = str(source_row["sha256"])
+        target = archive_root / (
+            f"attempt_{attempt_number:03d}__{source.stem}__{digest[:16]}{source.suffix}"
+        )
         if target.exists():
-            raise RuntimeError(f"HPC archive target already exists: {target}")
+            if not target.is_file() or _sha256(target) != digest:
+                raise RuntimeError(f"HPC archive target differs: {target}")
+            raise RuntimeError(f"HPC checkpoint and its immutable archive both exist: {source}")
         source.replace(target)
-        archived.append({"path": str(target.resolve()), "sha256": _sha256(target)})
-    return archived
+    prefix = f"attempt_{attempt_number:03d}__"
+    return [
+        {"path": str(path.resolve()), "sha256": _sha256(path)}
+        for path in sorted(archive_root.glob(f"{prefix}*.ckpt"))
+    ]
 
 
 def _validate_retrain_progress(
@@ -1230,6 +1274,7 @@ def _validate_retrain_progress(
             config_path
         ) != segment.get("resolved_config_sha256"):
             raise RuntimeError(f"Retrain segment artifact changed: {state_path}")
+        _validate_exact_rng_checkpoint(checkpoint)
         config = yaml.safe_load(config_path.read_text(encoding="utf-8"))
         if (
             int(_config_value(config, "trainer.min_epochs")) != boundary
@@ -1316,6 +1361,7 @@ def _validate_retrain_marker(marker: Path, expected_row: dict[str, Any]) -> None
             )
             if _sha256(path) != segment[f"{key}_sha256"]:
                 raise RuntimeError(f"Retraining segment evidence changed: {path}")
+        _validate_exact_rng_checkpoint(Path(segment["continuation_checkpoint"]))
     _audit_retrain_outputs(root, index, expected_row, payload)
 
 
@@ -1504,11 +1550,9 @@ def retrain(
         ]
         resume = attempt.get("resume")
         if training_segment and resume is not None:
-            command.append(
-                "ckpt_path=hpc"
-                if resume["kind"] == "lightning_hpc"
-                else f"ckpt_path={resume['path']}"
-            )
+            if resume.get("kind") not in {"live_last", "completed_segment"}:
+                raise RuntimeError(f"Unsupported exact retrain resume source: {resume!r}")
+            command.append(f"ckpt_path={resume['path']}")
         command.extend(f"{key}={_hydra_value(value)}" for key, value in row["params"].items())
     started_at = datetime.now(timezone.utc).isoformat()
     started_clock = time.monotonic()
@@ -1523,7 +1567,7 @@ def retrain(
 
     checkpoint_root = Path(os.environ.get("CHECKPOINT_DIR", REPOSITORY_ROOT / "checkpoints"))
     checkpoint_root = checkpoint_root / experiment_name / run_name
-    archived_hpc = _archive_hpc_checkpoints(paths, int(attempt["attempt_number"]))
+    hpc_evidence = _archive_hpc_checkpoints(paths, int(attempt["attempt_number"]))
     continuation = None
     config_evidence = None
     if training_segment:
@@ -1538,6 +1582,7 @@ def retrain(
         if continuation.exists():
             raise RuntimeError(f"Retrain continuation checkpoint already exists: {continuation}")
         _atomic_copy(last_checkpoint, continuation)
+        _validate_exact_rng_checkpoint(continuation)
         resolved_config = _inside(
             hydra_dir / ".hydra" / "config.yaml",
             root,
@@ -1559,7 +1604,7 @@ def retrain(
                 {
                     "completed_at": datetime.now(timezone.utc).isoformat(),
                     "elapsed_seconds": elapsed_seconds,
-                    "archived_hpc_checkpoints": archived_hpc,
+                    "hpc_evidence": hpc_evidence,
                 }
             )
             assert continuation is not None and config_evidence is not None
@@ -1626,7 +1671,7 @@ def retrain(
             {
                 "completed_at": datetime.now(timezone.utc).isoformat(),
                 "elapsed_seconds": elapsed_seconds,
-                "archived_hpc_checkpoints": archived_hpc,
+                "hpc_evidence": hpc_evidence,
             }
         )
         if state.get("completed_at") is None:

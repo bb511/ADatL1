@@ -133,6 +133,15 @@ def _parameter_sha256(module: torch.nn.Module) -> str:
     return digest.hexdigest()
 
 
+def _tensor_sha256(tensor: torch.Tensor) -> str:
+    value = tensor.detach().cpu().contiguous()
+    digest = hashlib.sha256()
+    digest.update(str(value.dtype).encode())
+    digest.update(json.dumps(list(value.shape)).encode())
+    digest.update(value.numpy().tobytes())
+    return digest.hexdigest()
+
+
 def _expected_tags(root: Path, commit: str) -> dict[str, str]:
     identity = {
         "schema_version": SCHEMA_VERSION,
@@ -199,10 +208,22 @@ class _SyntheticModule(LightningModule):
 
     def training_step(self, batch, batch_idx):
         x, _ = batch
+        pre_step_sha256 = _parameter_sha256(self)
         python_scale = random.uniform(0.95, 1.05)  # nosec B311 -- stochastic test oracle
         numpy_shift = float(np.random.uniform(-0.02, 0.02))
-        prediction = self.layer(x) * python_scale + numpy_shift + torch.randn_like(x) * 0.01
+        noise = torch.randn_like(x) * 0.01
+        prediction = self.layer(x) * python_scale + numpy_shift + noise
         loss = prediction.square().mean()
+        self._canary_batch_record = {
+            "epoch": int(self.current_epoch),
+            "batch": int(batch_idx),
+            "input_sha256": _tensor_sha256(x),
+            "python_scale_hex": python_scale.hex(),
+            "numpy_shift_hex": numpy_shift.hex(),
+            "cuda_noise_sha256": _tensor_sha256(noise),
+            "pre_step_parameter_sha256": pre_step_sha256,
+            "loss_hex": float(loss.detach().cpu()).hex(),
+        }
         self.log("canary/train_loss", loss, on_step=False, on_epoch=True)
         # This delay exists only in this isolated canary.  It keeps allocation zero
         # alive until Slurm delivers its configured signal, while resumed work is fast.
@@ -333,6 +354,23 @@ class _RestartProof(Callback):
             step=epoch,
         )
         self.validation_epochs += 1
+
+
+class _BatchTranscript(Callback):
+    """Append the stochastic and optimization trajectory for canary diagnosis."""
+
+    def __init__(self, path: Path, allocation: str) -> None:
+        super().__init__()
+        self.path = path
+        self.allocation = allocation
+
+    def on_train_batch_end(self, trainer, pl_module, outputs, batch, batch_idx) -> None:
+        row = dict(pl_module._canary_batch_record)
+        row["allocation"] = self.allocation
+        row["post_step_parameter_sha256"] = _parameter_sha256(pl_module)
+        self.path.parent.mkdir(parents=True, exist_ok=True)
+        with self.path.open("a", encoding="utf-8") as handle:
+            handle.write(json.dumps(row, sort_keys=True) + "\n")
 
 
 def _load_callback_states(
@@ -478,7 +516,7 @@ def _build_callbacks(root: Path) -> dict[str, Callback]:
     }
 
 
-def _build_exact_epoch_checkpoint(root: Path) -> ModelCheckpoint:
+def _build_exact_epoch_checkpoint(root: Path, *, retain_all: bool = False) -> ModelCheckpoint:
     """Mirror the production last-checkpoint behavior at every completed epoch."""
     # Lightning's validation-end hook runs before FitLoop marks the epoch as
     # processed. Such a checkpoint repeats that epoch after a process restart.
@@ -486,7 +524,7 @@ def _build_exact_epoch_checkpoint(root: Path) -> ModelCheckpoint:
     return ModelCheckpoint(
         dirpath=root / "exact_epoch",
         save_last=True,
-        save_top_k=1,
+        save_top_k=-1 if retain_all else 1,
         every_n_epochs=1,
         save_on_train_epoch_end=True,
     )
@@ -586,7 +624,7 @@ def _run_uninterrupted_reference(reference_root: Path, expected_commit: str) -> 
     model = _SyntheticModule()
     callbacks = _build_callbacks(reference_root)
     proof = _RestartProof(reference_root, callbacks, None, 0, client, run_id)
-    exact_checkpointing = _build_exact_epoch_checkpoint(reference_root)
+    exact_checkpointing = _build_exact_epoch_checkpoint(reference_root, retain_all=True)
     logger = MLFlowLogger(
         experiment_name=EXPERIMENT_NAME,
         run_name=RUN_NAME,
@@ -600,7 +638,12 @@ def _run_uninterrupted_reference(reference_root: Path, expected_commit: str) -> 
         devices=1,
         max_epochs=MAX_EPOCHS,
         logger=logger,
-        callbacks=[*callbacks.values(), proof, exact_checkpointing],
+        callbacks=[
+            *callbacks.values(),
+            proof,
+            _BatchTranscript(reference_root / "evidence" / "batch_transcript.jsonl", "reference"),
+            exact_checkpointing,
+        ],
         default_root_dir=str(reference_root / "lightning"),
         deterministic=True,
         num_sanity_val_steps=0,
@@ -712,7 +755,12 @@ def run(root: Path, scheduler_log: Path, expected_commit: str) -> Path:
         accelerator="gpu",
         devices=1,
         max_epochs=MAX_EPOCHS,
-        callbacks=[*callbacks.values(), proof, exact_checkpointing],
+        callbacks=[
+            *callbacks.values(),
+            proof,
+            _BatchTranscript(root / "evidence" / "batch_transcript.jsonl", str(restart_count)),
+            exact_checkpointing,
+        ],
         logger=logger,
         default_root_dir=str(root / "lightning"),
         deterministic=True,

@@ -14,7 +14,7 @@ from hydra.core.singleton import Singleton
 from hydra.core.utils import JobReturn, JobStatus, run_job, setup_globals
 from hydra.plugins.launcher import Launcher
 from hydra.types import HydraContext, TaskFunction
-from omegaconf import DictConfig, open_dict
+from omegaconf import DictConfig, ListConfig, open_dict
 
 log = logging.getLogger(__name__)
 
@@ -40,6 +40,26 @@ def _failed_return(overrides: Sequence[str], error: Exception) -> JobReturn:
     result = JobReturn(overrides=list(overrides), status=JobStatus.FAILED)
     result.return_value = error
     return result
+
+
+def _prepare_mlflow_experiments(config: DictConfig) -> None:
+    """Create configured MLflow experiments before concurrent workers start."""
+    logger_config = config.get("logger")
+    if not isinstance(logger_config, (DictConfig, ListConfig)):
+        return
+
+    from mlflow.tracking import MlflowClient
+
+    entries = logger_config.values() if isinstance(logger_config, DictConfig) else logger_config
+    for entry in entries:
+        if not isinstance(entry, DictConfig):
+            continue
+        if str(entry.get("_target_", "")) != ("pytorch_lightning.loggers.mlflow.MLFlowLogger"):
+            continue
+        experiment_name = str(entry.experiment_name)
+        client = MlflowClient(tracking_uri=str(entry.tracking_uri))
+        if client.get_experiment_by_name(experiment_name) is None:
+            client.create_experiment(experiment_name)
 
 
 def _run_payload(payload_path: Path, result_path: Path) -> None:
@@ -150,6 +170,12 @@ class PackedSrunLauncher(Launcher):
                 f"Packed batch has {len(job_overrides)} jobs but allocation exposes "
                 f"only {capacity} GPUs."
             )
+
+        representative_config = self.hydra_context.config_loader.load_sweep_config(
+            self.config,
+            job_overrides[0],
+        )
+        _prepare_mlflow_experiments(representative_config)
 
         sweep_dir = Path(str(self.config.hydra.sweep.dir)).resolve()
         slurm_job_id = os.environ.get("SLURM_JOB_ID")

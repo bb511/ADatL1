@@ -66,9 +66,13 @@ def test_launcher_preserves_job_order_and_exact_step_resources(
             return 0
 
     monkeypatch.setattr(packed.subprocess, "Popen", FinishedProcess)
+    monkeypatch.setattr(packed, "_prepare_mlflow_experiments", lambda config: None)
     launcher = packed.PackedSrunLauncher(cpus_per_task=16, mem_gb=96)
+    hydra_context = SimpleNamespace(
+        config_loader=SimpleNamespace(load_sweep_config=lambda config, overrides: config)
+    )
     launcher.setup(
-        hydra_context=SimpleNamespace(),
+        hydra_context=hydra_context,
         task_function=lambda _: None,
         config=OmegaConf.create({"hydra": {"sweep": {"dir": str(tmp_path)}}}),
     )
@@ -98,3 +102,52 @@ def test_launcher_rejects_more_jobs_than_allocated_gpus(tmp_path, monkeypatch) -
     )
     with pytest.raises(RuntimeError, match="only 4 GPUs"):
         launcher.launch([[f"x={index}"] for index in range(5)], 0)
+
+
+def test_launcher_precreates_mlflow_experiment_before_workers(tmp_path, monkeypatch) -> None:
+    """Parallel workers cannot race while creating a file-backed experiment."""
+    monkeypatch.setenv("SLURM_JOB_ID", "12345")
+    monkeypatch.setenv("SLURM_NNODES", "1")
+    monkeypatch.setenv("SLURM_GPUS_ON_NODE", "4")
+    prepared = []
+    monkeypatch.setattr(packed, "_prepare_mlflow_experiments", prepared.append)
+    config = OmegaConf.create(
+        {
+            "hydra": {"sweep": {"dir": str(tmp_path)}},
+            "experiment_name": "pilot",
+            "logger": {
+                "mlflow": {
+                    "_target_": "pytorch_lightning.loggers.mlflow.MLFlowLogger",
+                    "experiment_name": "pilot",
+                    "tracking_uri": f"file:{tmp_path}/mlruns",
+                }
+            },
+        }
+    )
+
+    class FinishedProcess:
+        def __init__(self, command, cwd):
+            assert prepared == [config]
+            result_path = Path(command[-1])
+            result = JobReturn(overrides=["x=0"], status=JobStatus.COMPLETED)
+            result.return_value = 0
+            with result_path.open("wb") as handle:
+                cloudpickle.dump(result, handle)
+
+        def wait(self):
+            return 0
+
+    monkeypatch.setattr(packed.subprocess, "Popen", FinishedProcess)
+    hydra_context = SimpleNamespace(
+        config_loader=SimpleNamespace(load_sweep_config=lambda base, overrides: base)
+    )
+    launcher = packed.PackedSrunLauncher()
+    launcher.setup(
+        hydra_context=hydra_context,
+        task_function=lambda _: None,
+        config=config,
+    )
+
+    results = launcher.launch([["x=0"]], 0)
+    assert prepared == [config]
+    assert results[0].return_value == 0

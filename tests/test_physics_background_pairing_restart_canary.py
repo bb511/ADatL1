@@ -52,6 +52,7 @@ def test_restart_canary_sbatch_exercises_production_signal_shape() -> None:
     source = Path(canary.__file__).read_text(encoding="utf-8")
     assert 'ckpt_path="hpc"' not in source
     assert "_discover_hpc" not in source
+    assert source.count("num_sanity_val_steps=0") == 2
 
 
 def test_mlflow_tags_include_explicit_source_commit(tmp_path: Path) -> None:

@@ -559,6 +559,7 @@ def _uninterrupted_reference_hash(root: Path) -> str:
         callbacks=list(callbacks.values()),
         enable_checkpointing=False,
         deterministic=True,
+        num_sanity_val_steps=0,
         enable_progress_bar=False,
         enable_model_summary=False,
         log_every_n_steps=1,

@@ -47,6 +47,7 @@ def test_restart_canary_sbatch_exercises_production_signal_shape() -> None:
     assert "#SBATCH --signal=USR1@120" in script
     assert "#SBATCH --open-mode=append" in script
     assert "#SBATCH --signal=B:" not in script
+    assert "MLFLOW_DISABLE_TELEMETRY=true" in script
     assert '\nsrun "${UV_PROJECT_ENVIRONMENT}/bin/python"' in script
     assert "physics_background_pairing_restart_canary.py" in script
     assert "physics_background_pairing_campaign.py" not in script

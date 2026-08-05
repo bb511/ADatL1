@@ -26,6 +26,7 @@ export UV_CACHE_DIR="${SCRATCH_ROOT}/uv-cache-clariden-arm64"
 export UV_PYTHON_INSTALL_DIR="${SCRATCH_ROOT}/python"
 export UV_MANAGED_PYTHON=1
 export HYDRA_FULL_ERROR=1
+export MLFLOW_DISABLE_TELEMETRY=true
 
 cd "${REPOSITORY_ROOT}"
 readonly RETRAIN_TASK_MAP="${PHYSICS_BGPAIR_RETRAIN_TASK_MAP:?missing retrain task map}"

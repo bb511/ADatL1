@@ -23,6 +23,7 @@ export UV_CACHE_DIR="${SCRATCH_ROOT}/uv-cache-clariden-arm64"
 export UV_PYTHON_INSTALL_DIR="${SCRATCH_ROOT}/python"
 export UV_MANAGED_PYTHON=1
 export HYDRA_FULL_ERROR=1
+export MLFLOW_DISABLE_TELEMETRY=true
 
 cd "${REPOSITORY_ROOT}"
 "${UV_BIN}" run --frozen --no-sync python scripts/physics_background_pairing_campaign.py \

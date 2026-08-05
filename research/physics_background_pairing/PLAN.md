@@ -602,10 +602,18 @@ A pilot succeeds only if all of these hold:
 - `<BGPAIR_ROOT>/pilots/<model>/success.json` exists and names the frozen commit;
 - `optimized_metric.json` has schema 2 and exactly the expected objective order;
 - every logical selection has a non-null checkpoint and finite objective pair;
+- every selected checkpoint contains a finite `thres_operational` buffer and AE/VAE
+  checkpoints also contain an independent finite
+  `thres_operational__residual_oas` buffer;
 - all four mapping tables and CDF were actually exercised;
 - AE/VAE native and residual-OAS views both appear;
 - MLflow contains per-epoch CAP/W1/drift and score-specific metric names;
 - no anomaly validation loader was used.
+
+The search suites instantiate threshold-calibration callbacks even though downstream
+efficiency is not a search objective. They see only the normal validation stream because
+`data.validation_aux_datasets: []`; this makes checkpoint state complete without exposing
+any downstream anomaly sample during model selection.
 
 Earlier isolated 8-10 minute pilots do not satisfy this gate. The unified pilot's
 runtime is not yet known and may approach the current 90-minute debug limit.

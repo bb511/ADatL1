@@ -2161,6 +2161,19 @@ def _write_report(output: Path, design: dict[str, Any], winners: list[dict[str, 
     stable_rows = [row for row in candidate_availability if row["slot"] == "stable_native"]
     stable_configured = sum(int(row["configured"]) for row in stable_rows)
     stable_available = sum(int(row["available"]) for row in stable_rows)
+    with (output / "analysis" / "checkpoint_family_summary.csv").open(encoding="utf-8") as handle:
+        family_rows = list(csv.DictReader(handle))
+    family_counts = Counter(
+        {
+            (population, family): sum(
+                int(row["count"])
+                for row in family_rows
+                if row["population"] == population and row["family"] == family
+            )
+            for population in ("search", "retrain_candidate", "winner")
+            for family in ("last", "primary_ema", "stable_native")
+        }
+    )
     lines = [
         "# Physics background-pairing experiment report",
         "",
@@ -2277,6 +2290,26 @@ def _write_report(output: Path, design: dict[str, Any], winners: list[dict[str, 
             "candidate, its family, and Q′/Q″ pair. `primary_metrics.csv` adds held-out CAP, "
             "rank correlation, W1, forward drift, and post-hoc reverse G→E drift for the "
             "reported checkpoints.",
+            "",
+            "| Population | Last | Primary EMA | Stable native |",
+            "|---|---:|---:|---:|",
+        ]
+    )
+    for population, label in (
+        ("search", "Search selections"),
+        ("retrain_candidate", "Retrained front candidates"),
+        ("winner", "Reported winners"),
+    ):
+        lines.append(
+            f"| {label} | {family_counts[(population, 'last')]} | "
+            f"{family_counts[(population, 'primary_ema')]} | "
+            f"{family_counts[(population, 'stable_native')]} |"
+        )
+    lines.extend(
+        [
+            "",
+            "The model/score/metric/strategy breakdown is in "
+            "`analysis/checkpoint_family_summary.csv`.",
             "",
             "## Limitations and interpretation guardrails",
             "",

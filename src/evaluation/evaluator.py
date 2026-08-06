@@ -356,7 +356,7 @@ class Evaluator:
         for name, config in self.optimized_metric_configs.items():
             if not self._candidate_enabled(config, candidate):
                 continue
-            self._update_named_optimized_metric(str(name), config)
+            self._update_named_optimized_metric(str(name), config, candidate)
         self._sync_flattened_optimized_metric()
 
     def _candidate_path(self) -> str:
@@ -384,7 +384,7 @@ class Evaluator:
         criterion = "max" if direction == "maximize" else "min"
         return candidate == f"summary/{primary}/{criterion}"
 
-    def _update_named_optimized_metric(self, name: str, config: dict) -> None:
+    def _update_named_optimized_metric(self, name: str, config: dict, candidate: str) -> None:
         """Apply the paper checkpoint rule to one logical validation strategy."""
         main_cfg = config["main_metric"]
         ckpt_name, main_metric = self._get_metric(
@@ -408,7 +408,7 @@ class Evaluator:
         incumbent = self.optimized_metrics[name]
         if incumbent is None or self._contender_wins(values, incumbent, directions):
             self.optimized_metrics[name] = values
-            self.optimized_ckpt_names[name] = ckpt_name
+            self.optimized_ckpt_names[name] = candidate
 
     @staticmethod
     def _contender_wins(values, incumbent, directions: list[str]) -> bool:

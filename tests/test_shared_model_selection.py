@@ -42,6 +42,27 @@ def test_flattened_objectives_preserve_config_insertion_order() -> None:
     assert evaluator.optimized_ckpt_name is None
 
 
+def test_shared_selection_persists_canonical_checkpoint_family() -> None:
+    """Metric-local dataset names must not leak into the checkpoint identity."""
+    evaluator = object.__new__(Evaluator)
+    evaluator.optimized_metrics = {"cdf": None}
+    evaluator.optimized_ckpt_names = {"cdf": None}
+    evaluator._get_metric = lambda *_: ("normal", 2.0)
+    evaluator._get_secondary_metric = lambda *_: (3.0, "minimize")
+    config = {
+        "main_metric": {
+            "callback": {"name": "cap", "params": {}},
+            "direction": "maximize",
+        },
+        "sec_metric": {"callback": {"name": "efficiency"}},
+    }
+
+    evaluator._update_named_optimized_metric("cdf", config, "single/ascore_operational/stable")
+
+    assert evaluator.optimized_metrics["cdf"] == [2.0, 3.0]
+    assert evaluator.optimized_ckpt_names["cdf"] == "single/ascore_operational/stable"
+
+
 def test_primary_candidate_runs_only_its_qprime_and_shared_qdoubleprime() -> None:
     """Shared evaluation avoids recomputing every expensive CAP for every checkpoint."""
     evaluator = object.__new__(Evaluator)

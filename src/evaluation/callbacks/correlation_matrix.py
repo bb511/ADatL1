@@ -276,6 +276,7 @@ class CorrelationMatrixCallback(Callback):
                         plot_folder=plot_folder,
                         stem=f"{space_name}_{method}_correlation_matrix",
                         title=title,
+                        save_csv=True
                     )
 
                     self._write_fet_summary(
@@ -316,6 +317,21 @@ class CorrelationMatrixCallback(Callback):
                         "|corr_after| - |corr_before|"
                     ),
                 )
+
+                for direction, ascending in (
+                    ("increase", False),
+                    ("decrease", True),
+                ):
+                    self._write_correlation_matrix_variants(
+                        corr=correlation_change,
+                        plot_folder=plot_folder,
+                        stem=f"{change_stem}_sorted_by_{direction}",
+                        title=(
+                            f"Change in {method_name} correlation: "
+                            f"variables sorted by mean {direction}"
+                        ),
+                        sort_ascending=ascending,
+                    )
 
             utils.mlflow.log_plots_to_mlflow(
                 trainer,
@@ -542,6 +558,8 @@ class CorrelationMatrixCallback(Callback):
         plot_folder: Path,
         stem: str,
         title: str,
+        sort_ascending: bool | None = None,
+        save_csv: bool = False
     ) -> None:
         """Save full-variable and ``*.Et``-only CSV and PNG correlation matrices."""
         variants = [("", corr, 1.0)]
@@ -557,8 +575,16 @@ class CorrelationMatrixCallback(Callback):
         variants.append(("_et_only", et_corr, 0.6))
 
         for suffix, variant, figure_scale in variants:
+            if sort_ascending is not None:
+                variant = self._sort_correlation_change_matrix(
+                    variant,
+                    ascending=sort_ascending,
+                )
+
             variant_stem = f"{stem}{suffix}"
-            variant.to_csv(plot_folder / f"{variant_stem}.csv")
+            if save_csv:
+                variant.to_csv(plot_folder / f"{variant_stem}.csv")
+
             matrix.plot(
                 data=variant.to_dict(orient="index"),
                 value_name=title,
@@ -569,6 +595,34 @@ class CorrelationMatrixCallback(Callback):
                 filename=f"{variant_stem}.png",
                 figure_scale=figure_scale,
             )
+
+    @staticmethod
+    def _sort_correlation_change_matrix(
+        corr: pd.DataFrame,
+        ascending: bool,
+    ) -> pd.DataFrame:
+        """Order both axes by each variable's mean off-diagonal correlation change.
+
+        Positive scores mean that a variable became more strongly correlated on
+        average after reconstruction; negative scores mean that it became less
+        strongly correlated. The diagonal is excluded because self-correlation does
+        not describe a relationship between variables.
+        """
+        if list(corr.index) != list(corr.columns):
+            raise ValueError(
+                "Cannot sort a correlation-change matrix whose row and column "
+                "labels differ."
+            )
+
+        off_diagonal = corr.copy()
+        np.fill_diagonal(off_diagonal.values, np.nan)
+        mean_change = off_diagonal.mean(axis=1).fillna(0.0)
+        ordered_labels = mean_change.sort_values(
+            ascending=ascending,
+            kind="stable",
+        ).index
+
+        return corr.loc[ordered_labels, ordered_labels]
 
     def _write_fet_summary(self, corr: pd.DataFrame, save_path: Path):
         """Save correlations of all selected variables with FET.Et."""

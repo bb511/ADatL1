@@ -249,8 +249,12 @@ def plot_histogram_counts(
     xlabel: str,
     ylabel: str = "Number of events",
     metadata: Mapping[str, object] | None = None,
+    label: str | None = None,
+    overlay_counts: Sequence[int | float] | np.ndarray | None = None,
+    overlay_edges: Sequence[int | float] | np.ndarray | None = None,
+    overlay_label: str | None = None,
 ) -> Path:
-    """Plot precomputed, unnormalized continuous-histogram counts."""
+    """Plot precomputed histogram counts and an optional outline overlay."""
     histogram_counts = np.asarray(counts)
     histogram_edges = np.asarray(edges, dtype=float)
     if histogram_counts.ndim != 1 or histogram_counts.size == 0:
@@ -268,6 +272,37 @@ def plot_histogram_counts(
     ):
         raise ValueError("edges must be finite and strictly increasing.")
 
+    if (overlay_counts is None) != (overlay_edges is None):
+        raise ValueError("overlay_counts and overlay_edges must be provided together.")
+
+    overlay_histogram_counts = None
+    overlay_histogram_edges = None
+    if overlay_counts is not None and overlay_edges is not None:
+        overlay_histogram_counts = np.asarray(overlay_counts)
+        overlay_histogram_edges = np.asarray(overlay_edges, dtype=float)
+        if overlay_histogram_counts.ndim != 1 or overlay_histogram_counts.size == 0:
+            raise ValueError(
+                "overlay_counts must be a non-empty one-dimensional array."
+            )
+        if overlay_histogram_edges.shape != (overlay_histogram_counts.size + 1,):
+            raise ValueError(
+                "overlay_edges must contain exactly one more value than overlay_counts."
+            )
+        if (
+            not np.all(np.isfinite(overlay_histogram_counts))
+            or np.any(overlay_histogram_counts < 0)
+        ):
+            raise ValueError(
+                "overlay_counts must contain finite, non-negative values."
+            )
+        if (
+            not np.all(np.isfinite(overlay_histogram_edges))
+            or np.any(np.diff(overlay_histogram_edges) <= 0)
+        ):
+            raise ValueError(
+                "overlay_edges must be finite and strictly increasing."
+            )
+
     output_path = _png_output_path(save_path)
     output_path.parent.mkdir(parents=True, exist_ok=True)
 
@@ -282,14 +317,32 @@ def plot_histogram_counts(
                 color="C0",
                 alpha=0.8,
                 linewidth=1.5,
+                label=label,
             )
+            if overlay_histogram_counts is not None:
+                ax.stairs(
+                    overlay_histogram_counts,
+                    overlay_histogram_edges,
+                    fill=False,
+                    color="C1",
+                    linewidth=2.0,
+                    label=overlay_label,
+                    zorder=3,
+                )
             ax.set_title(title)
             ax.set_xlabel(xlabel, fontsize=20, loc="center", labelpad=14)
             ax.set_ylabel(ylabel, fontsize=20, loc="center", labelpad=14)
-            ax.set_xlim(histogram_edges[0], histogram_edges[-1])
+            x_min = float(histogram_edges[0])
+            x_max = float(histogram_edges[-1])
+            y_maximum = float(histogram_counts.max())
+            if overlay_histogram_counts is not None:
+                x_min = min(x_min, float(overlay_histogram_edges[0]))
+                x_max = max(x_max, float(overlay_histogram_edges[-1]))
+                y_maximum = max(y_maximum, float(overlay_histogram_counts.max()))
+            ax.set_xlim(x_min, x_max)
             ax.set_ylim(
                 0,
-                max(float(histogram_counts.max()) * 1.12, 1.0),
+                max(y_maximum * 1.12, 1.0),
             )
             ax.yaxis.set_major_locator(MaxNLocator(integer=True))
             ax.grid(axis="y", alpha=0.25)
@@ -305,6 +358,9 @@ def plot_histogram_counts(
                 table.set_fontsize(10)
                 for row_idx in range(len(rows)):
                     table[(row_idx, 0)].set_text_props(weight="bold")
+
+            if label is not None or overlay_label is not None:
+                ax.legend(loc="upper right")
 
             fig.savefig(output_path, bbox_inches="tight")
         finally:

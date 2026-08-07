@@ -5,7 +5,6 @@ enabled: true
 epochs: [0]
 include_last_epoch: true
 batch_indices: [0, 100, 400, 764]
-raw_histogram_bins: 50
 output_root_dir: '${paths.checkpoints_dir}/${experiment_name}/${run_name}/plots'
 output_subdir: mi_diagnostics
 log_to_mlflow: true

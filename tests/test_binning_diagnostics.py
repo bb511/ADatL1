@@ -35,9 +35,13 @@ class _DiagnosticModule:
             "mean": 1.8,
             "std": 1.4,
             "num_values": 100,
+            "num_unique_values": 4,
             "raw_histogram_bins": 3,
             "raw_histogram_counts": [50, 30, 20],
             "raw_histogram_edges": [0.0, 1.0, 2.0, 4.0],
+            "unique_value_histogram_bins": 4,
+            "unique_value_histogram_counts": [25, 25, 25, 25],
+            "unique_value_histogram_edges": [0.0, 1.0, 2.0, 3.0, 4.0],
         }
         self.extraction_calls = 0
 
@@ -94,6 +98,10 @@ def test_plotting_helpers_save_png_and_close_figures(
         save_path=tmp_path / "raw_histogram.png",
         title="Raw FET.Et distribution: batch = 0",
         xlabel="Raw FET.Et value",
+        label="Effective MI bins (2)",
+        overlay_counts=[1, 1, 2, 1],
+        overlay_edges=[0.0, 0.5, 1.0, 1.5, 2.0],
+        overlay_label="Unique-value bins (4)",
     )
     diversity_path = plot_minibatch_scalar_histogram(
         values=[3, 4, 4, 5],
@@ -136,6 +144,14 @@ def test_plotting_helpers_save_png_and_close_figures(
         raw_histogram_axis.patches[0].get_data().values,
         [2, 3],
     )
+    np.testing.assert_allclose(
+        raw_histogram_axis.patches[1].get_data().values,
+        [1, 1, 2, 1],
+    )
+    assert [text.get_text() for text in raw_histogram_axis.get_legend().get_texts()] == [
+        "Effective MI bins (2)",
+        "Unique-value bins (4)",
+    ]
 
     diversity_axis = captured_figures[3].axes[0]
     bar_centers = [
@@ -313,16 +329,24 @@ def test_callback_collects_every_batch_and_plots_selected_batches(
     assert full_path.name == "full_fet_et_histogram_epoch0000.png"
     assert full_kwargs["title"] == "Full training FET.Et distribution"
     assert full_kwargs["metadata"]["Training values"] == 100
+    assert full_kwargs["metadata"]["Unique values"] == 4
+    np.testing.assert_array_equal(full_kwargs["overlay_counts"], [25, 25, 25, 25])
+    np.testing.assert_array_equal(
+        full_kwargs["overlay_edges"],
+        [0.0, 1.0, 2.0, 3.0, 4.0],
+    )
+    assert full_kwargs["label"] == "Effective MI bins (3)"
+    assert full_kwargs["overlay_label"] == "Unique-value bins (4)"
 
     raw_counts, raw_edges, raw_path, raw_kwargs = raw_histogram_calls[1]
-    assert raw_counts.shape == (50,)
-    assert raw_edges.shape == (51,)
+    assert raw_counts.shape == (3,)
+    assert raw_edges.shape == (4,)
     assert raw_counts.sum() == 5
     assert raw_path.name == "raw_fet_et_histogram_batch_0_epoch0000.png"
     assert raw_kwargs["title"] == "Raw FET.Et distribution: batch = 0"
     assert raw_kwargs["xlabel"] == "Raw FET.Et value"
     assert raw_kwargs["metadata"]["Finite values"] == 5
-    assert raw_kwargs["metadata"]["Histogram bins"] == 50
+    assert raw_kwargs["metadata"]["Histogram bins"] == 3
     assert float(raw_kwargs["metadata"]["Min"]) == 0.2
     assert float(raw_kwargs["metadata"]["Max"]) == 2.5
     assert float(raw_kwargs["metadata"]["Mean"]) == 1.58
@@ -488,7 +512,6 @@ def test_binner_fit_stores_full_training_histogram() -> None:
     binner = FixedQuantileSensitiveBinner(
         variable="FET.Et",
         num_bins=3,
-        diagnostic_histogram_bins=4,
     )
     values = torch.tensor([[0.0], [1.0], [2.0], [3.0], [4.0]])
 
@@ -499,11 +522,35 @@ def test_binner_fit_stores_full_training_histogram() -> None:
 
     histogram_counts = binner.fit_stats["raw_histogram_counts"]
     histogram_edges = binner.fit_stats["raw_histogram_edges"]
-    assert len(histogram_counts) == 4
-    assert len(histogram_edges) == 5
+    assert binner.fit_stats["num_bins_effective"] == 3
+    assert binner.fit_stats["raw_histogram_bins"] == 3
+    assert binner.fit_stats["num_unique_values"] == 5
+    assert binner.fit_stats["unique_value_histogram_bins"] == 5
+    assert len(histogram_counts) == 3
+    assert len(histogram_edges) == 4
+    assert len(binner.fit_stats["unique_value_histogram_counts"]) == 5
+    assert len(binner.fit_stats["unique_value_histogram_edges"]) == 6
     assert sum(histogram_counts) == 5
     assert histogram_edges[0] == 0.0
     assert histogram_edges[-1] == 4.0
+
+
+def test_raw_histogram_uses_effective_bins_after_duplicate_edges() -> None:
+    binner = FixedQuantileSensitiveBinner(variable="FET.Et", num_bins=5)
+    values = torch.tensor([[0.0]] * 9 + [[1.0]])
+
+    binner.fit(
+        x=values,
+        object_feature_map={"FET": {"Et": [0]}},
+    )
+
+    assert binner.fit_stats["num_bins_requested"] == 5
+    assert binner.fit_stats["num_bins_effective"] == 2
+    assert binner.fit_stats["raw_histogram_bins"] == 2
+    assert binner.fit_stats["num_unique_values"] == 2
+    assert binner.fit_stats["unique_value_histogram_bins"] == 2
+    assert len(binner.fit_stats["raw_histogram_counts"]) == 2
+    assert len(binner.fit_stats["raw_histogram_edges"]) == 3
 
 
 def test_physics_ae_enables_binning_diagnostics_only_for_that_experiment(
@@ -528,7 +575,7 @@ def test_physics_ae_enables_binning_diagnostics_only_for_that_experiment(
     assert list(physics_ae.callbacks.binning.epochs) == [0]
     assert physics_ae.callbacks.binning.include_last_epoch is True
     assert list(physics_ae.callbacks.binning.batch_indices) == [0, 100, 400, 764]
-    assert physics_ae.callbacks.binning.raw_histogram_bins == 50
+    assert "raw_histogram_bins" not in physics_ae.callbacks.binning
     output_root = Path(physics_ae.callbacks.binning.output_root_dir)
     assert output_root.name == "plots"
     assert output_root.parent.name == "diagnostics-test"

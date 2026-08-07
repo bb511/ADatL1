@@ -33,7 +33,6 @@ class BinningDiagnosticsCallback(Callback):
         checkpoint_root_dir: str | Path | None = None,
         log_to_mlflow: bool = False,
         mlflow_artifact_path: str | None = None,
-        raw_histogram_bins: int = 50,
     ) -> None:
         super().__init__()
         self.enabled = bool(enabled)
@@ -56,9 +55,6 @@ class BinningDiagnosticsCallback(Callback):
             Path(checkpoint_root_dir) if checkpoint_root_dir is not None else None
         )
         self.log_to_mlflow = bool(log_to_mlflow)
-        self.raw_histogram_bins = int(raw_histogram_bins)
-        if self.raw_histogram_bins < 1:
-            raise ValueError("raw_histogram_bins must be at least 1.")
         self.mlflow_artifact_path = (
             mlflow_artifact_path
             if mlflow_artifact_path is not None
@@ -157,7 +153,10 @@ class BinningDiagnosticsCallback(Callback):
                 raw_histogram_counts,
                 raw_histogram_edges,
                 raw_histogram_stats,
-            ) = self._raw_histogram(finite_values)
+            ) = self._raw_histogram(
+                finite_values,
+                num_bins=num_effective_bins,
+            )
 
         fit_total = float(fit_counts.sum())
         expected_counts = fit_counts / fit_total * minibatch_size
@@ -248,7 +247,7 @@ class BinningDiagnosticsCallback(Callback):
             metadata={
                 **metadata,
                 "Finite values": raw_histogram_stats["finite_values"],
-                "Histogram bins": self.raw_histogram_bins,
+                "Histogram bins": num_effective_bins,
                 "Min": raw_histogram_stats["min"],
                 "Max": raw_histogram_stats["max"],
                 "Mean": raw_histogram_stats["mean"],
@@ -456,8 +455,20 @@ class BinningDiagnosticsCallback(Callback):
     def _plot_full_training_distribution(self, trainer, binner) -> None:
         """Render the fitted full-training raw-value histogram once at epoch 0."""
         stats = binner.fit_stats
+        num_effective_bins = int(stats.get("num_bins_effective", 0))
         counts = np.asarray(stats.get("raw_histogram_counts", []), dtype=float)
         edges = np.asarray(stats.get("raw_histogram_edges", []), dtype=float)
+        num_unique_values = int(stats.get("num_unique_values", 0))
+        unique_value_counts = np.asarray(
+            stats.get("unique_value_histogram_counts", []),
+            dtype=float,
+        )
+        unique_value_edges = np.asarray(
+            stats.get("unique_value_histogram_edges", []),
+            dtype=float,
+        )
+        if num_effective_bins < 1:
+            raise RuntimeError("fit_stats must contain a positive 'num_bins_effective'.")
         if counts.ndim != 1 or counts.size == 0:
             raise RuntimeError(
                 "fit_stats must contain non-empty 'raw_histogram_counts'."
@@ -467,6 +478,21 @@ class BinningDiagnosticsCallback(Callback):
                 "fit_stats['raw_histogram_edges'] must contain one more "
                 "value than 'raw_histogram_counts'."
             )
+        if counts.size != num_effective_bins:
+            raise RuntimeError(
+                "The full-training raw histogram must contain one bin per "
+                "effective MI bin."
+            )
+        if num_unique_values < 1:
+            raise RuntimeError("fit_stats must contain a positive 'num_unique_values'.")
+        if unique_value_counts.shape != (num_unique_values,):
+            raise RuntimeError(
+                "The unique-value overlay must contain one bin per unique value."
+            )
+        if unique_value_edges.shape != (num_unique_values + 1,):
+            raise RuntimeError(
+                "The unique-value overlay edges must contain one more value than bins."
+            )
 
         epoch = int(trainer.current_epoch)
         variable = binner.variable
@@ -474,7 +500,9 @@ class BinningDiagnosticsCallback(Callback):
         metadata = {
             "Epoch": epoch,
             "Training values": int(stats["num_values"]),
-            "Histogram bins": int(counts.size),
+            "Unique values": num_unique_values,
+            "Effective bins": num_effective_bins,
+            "Histogram bins": num_effective_bins,
             "Min": f"{float(stats['min']):.6g}",
             "Max": f"{float(stats['max']):.6g}",
             "Mean": f"{float(stats['mean']):.6g}",
@@ -488,24 +516,46 @@ class BinningDiagnosticsCallback(Callback):
             xlabel=f"Raw {variable} value",
             ylabel="Number of training events",
             metadata=metadata,
+            label=f"Effective MI bins ({num_effective_bins})",
+            overlay_counts=unique_value_counts,
+            overlay_edges=unique_value_edges,
+            overlay_label=f"Unique-value bins ({num_unique_values})",
         )
         self._publish_artifact(trainer, output_path)
 
-        num_histogram_bins = counts.size
+        layer_counts = np.concatenate((counts, unique_value_counts))
+        layer_left_edges = np.concatenate((edges[:-1], unique_value_edges[:-1]))
+        layer_right_edges = np.concatenate((edges[1:], unique_value_edges[1:]))
+        layer_names = np.concatenate(
+            (
+                np.full(counts.size, "effective_mi_bins"),
+                np.full(unique_value_counts.size, "unique_value_bins"),
+            )
+        )
+        layer_bin_counts = np.concatenate(
+            (
+                np.full(counts.size, num_effective_bins),
+                np.full(unique_value_counts.size, num_unique_values),
+            )
+        )
+        num_histogram_rows = layer_counts.size
         csv_path = save_plot_data_csv(
             {
-                "epoch": np.full(num_histogram_bins, epoch),
-                "bin_left": edges[:-1],
-                "bin_right": edges[1:],
-                "count": counts,
+                "epoch": np.full(num_histogram_rows, epoch),
+                "layer": layer_names,
+                "layer_bins": layer_bin_counts,
+                "bin_left": layer_left_edges,
+                "bin_right": layer_right_edges,
+                "count": layer_counts,
                 "training_values": np.full(
-                    num_histogram_bins,
+                    num_histogram_rows,
                     metadata["Training values"],
                 ),
-                "min": np.full(num_histogram_bins, metadata["Min"]),
-                "max": np.full(num_histogram_bins, metadata["Max"]),
-                "mean": np.full(num_histogram_bins, metadata["Mean"]),
-                "std": np.full(num_histogram_bins, metadata["Std"]),
+                "unique_values": np.full(num_histogram_rows, num_unique_values),
+                "min": np.full(num_histogram_rows, metadata["Min"]),
+                "max": np.full(num_histogram_rows, metadata["Max"]),
+                "mean": np.full(num_histogram_rows, metadata["Mean"]),
+                "std": np.full(num_histogram_rows, metadata["Std"]),
             },
             self._data_dir(trainer) / Path(filename).with_suffix(".csv"),
         )
@@ -576,11 +626,15 @@ class BinningDiagnosticsCallback(Callback):
             )
         return widths
 
+    @staticmethod
     def _raw_histogram(
-        self,
         finite_values: torch.Tensor,
+        num_bins: int,
     ) -> tuple[np.ndarray, np.ndarray, dict[str, int | str]]:
-        """Compute raw-value histogram counts on-device and return small arrays."""
+        """Compute a raw-value histogram with one bar per effective MI bin."""
+        if num_bins < 1:
+            raise ValueError("num_bins must be at least 1.")
+
         if finite_values.numel() == 0:
             stats: dict[str, int | str] = {
                 "finite_values": 0,
@@ -590,14 +644,14 @@ class BinningDiagnosticsCallback(Callback):
                 "std": "n/a",
             }
             counts = torch.zeros(
-                self.raw_histogram_bins,
+                num_bins,
                 device=finite_values.device,
                 dtype=torch.float32,
             )
             edges = torch.linspace(
                 0.0,
                 1.0,
-                steps=self.raw_histogram_bins + 1,
+                steps=num_bins + 1,
                 device=finite_values.device,
             )
         else:
@@ -620,15 +674,15 @@ class BinningDiagnosticsCallback(Callback):
 
             counts = torch.histc(
                 histogram_values,
-                bins=self.raw_histogram_bins,
+                bins=num_bins,
                 min=value_min,
                 max=value_max,
             )
             edges = torch.linspace(
                 value_min,
                 value_max,
-                steps=self.raw_histogram_bins + 1,
-                device=finite_values.device,
+                steps=num_bins + 1,
+                device=histogram_values.device,
                 dtype=histogram_values.dtype,
             )
 

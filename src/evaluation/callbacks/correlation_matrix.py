@@ -11,13 +11,19 @@ from src.evaluation.callbacks import utils
 from src.plot import matrix
 
 
+CORRELATION_SOURCE_FILENAMES = {
+    "input": "input_variables.csv",
+    "reconstruction": "reconstruction_variables.csv",
+}
+
+
 class CorrelationMatrixCallback(Callback):
     """Save event-level variable tables and plot correlation matrices.
 
     This callback is intended for the post-training evaluator, in the same integration
     pattern as ReconstructionPlots. It collects selected object-level features from the
     test batches, aggregates multi-candidate objects to one scalar per event, then saves
-    both the variable table and the resulting correlation matrices.
+    the input/reconstruction source tables and the resulting correlation matrices.
 
     :param variables: Variables to extract, written as '<object>.<feature>'. Singular
         aliases such as 'muon.Et' are accepted and resolved through object_feature_map.
@@ -244,10 +250,11 @@ class CorrelationMatrixCallback(Callback):
             plot_folder.mkdir(parents=True, exist_ok=True)
             self._write_metadata(plot_folder, dset_name)
             correlations: dict[tuple[str, str], pd.DataFrame] = {}
+            space_dataframes: dict[str, pd.DataFrame] = {}
 
             for space_name, tables in space_buffers.items():
                 df = self._to_dataframe(tables)
-                df.to_csv(plot_folder / f"{space_name}_variables.csv", index=False)
+                space_dataframes[space_name] = df
 
                 clean_df = df.replace([np.inf, -np.inf], np.nan).dropna(axis=0)
                 if clean_df.empty:
@@ -276,14 +283,12 @@ class CorrelationMatrixCallback(Callback):
                         plot_folder=plot_folder,
                         stem=f"{space_name}_{method}_correlation_matrix",
                         title=title,
-                        save_csv=True
                     )
 
-                    self._write_fet_summary(
-                        corr=corr,
-                        save_path=plot_folder
-                        / f"{space_name}_{method}_correlation_with_FET_Et.csv",
-                    )
+            self._write_correlation_source_tables(
+                space_dataframes,
+                plot_folder,
+            )
 
             for method in self.correlation_methods:
                 corr_before = correlations.get(("input", method))
@@ -559,9 +564,8 @@ class CorrelationMatrixCallback(Callback):
         stem: str,
         title: str,
         sort_ascending: bool | None = None,
-        save_csv: bool = False
     ) -> None:
-        """Save full-variable and ``*.Et``-only CSV and PNG correlation matrices."""
+        """Save full-variable and ``*.Et``-only PNG correlation matrices."""
         variants = [("", corr, 1.0)]
 
         et_labels = [label for label in corr.columns if str(label).endswith(".Et")]
@@ -582,9 +586,6 @@ class CorrelationMatrixCallback(Callback):
                 )
 
             variant_stem = f"{stem}{suffix}"
-            if save_csv:
-                variant.to_csv(plot_folder / f"{variant_stem}.csv")
-
             matrix.plot(
                 data=variant.to_dict(orient="index"),
                 value_name=title,
@@ -624,25 +625,16 @@ class CorrelationMatrixCallback(Callback):
 
         return corr.loc[ordered_labels, ordered_labels]
 
-    def _write_fet_summary(self, corr: pd.DataFrame, save_path: Path):
-        """Save correlations of all selected variables with FET.Et."""
-        fet_label = self._find_fet_label(corr.columns)
-        if fet_label is None:
-            return
-
-        summary = corr[fet_label].drop(labels=[fet_label], errors="ignore")
-        summary = summary.rename("corr_with_FET.Et").to_frame()
-        summary["abs_corr_with_FET.Et"] = summary["corr_with_FET.Et"].abs()
-        summary = summary.sort_values("abs_corr_with_FET.Et", ascending=False)
-        summary.to_csv(save_path)
-
-    def _find_fet_label(self, labels) -> str | None:
-        """Find the configured FET.Et label, allowing for exact configured spelling."""
-        for label in labels:
-            obj, _, feat = label.partition(".")
-            if obj == "FET" and feat == "Et":
-                return label
-        return None
+    @staticmethod
+    def _write_correlation_source_tables(
+        space_dataframes: dict[str, pd.DataFrame],
+        plot_folder: Path,
+    ) -> None:
+        """Save the input and reconstruction event tables as the two source CSVs."""
+        for space, filename in CORRELATION_SOURCE_FILENAMES.items():
+            dataframe = space_dataframes.get(space)
+            if dataframe is not None:
+                dataframe.to_csv(plot_folder / filename, index=False)
 
     def _should_run_for_current_ckpt(self, trainer):
         """Determine whether this callback should run for the current checkpoint."""

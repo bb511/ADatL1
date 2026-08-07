@@ -24,6 +24,7 @@ def test_test_epoch_end_automatically_writes_sorted_change_matrices(
         "c.Et": np.array([0.0, 1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0]),
     }
     plot_filenames = []
+    gallery_snapshots = []
 
     monkeypatch.setattr(
         "src.evaluation.callbacks.correlation_matrix.matrix.plot",
@@ -31,7 +32,7 @@ def test_test_epoch_end_automatically_writes_sorted_change_matrices(
     )
     monkeypatch.setattr(
         "src.evaluation.callbacks.correlation_matrix.utils.mlflow.log_plots_to_mlflow",
-        lambda *args, **kwargs: None,
+        lambda *args, **kwargs: gallery_snapshots.append(set(plot_filenames)),
     )
 
     callback = CorrelationMatrixCallback(
@@ -56,17 +57,26 @@ def test_test_epoch_end_automatically_writes_sorted_change_matrices(
 
     output_dir = tmp_path / "plots/test/last/correlation_matrix/normal"
     change_stem = "abs_reconstruction_minus_input_pearson_correlation_matrix"
-    expected_sorted_files = {
-        f"{change_stem}_sorted_by_increase.csv",
-        f"{change_stem}_sorted_by_increase_et_only.csv",
-        f"{change_stem}_sorted_by_decrease.csv",
-        f"{change_stem}_sorted_by_decrease_et_only.csv",
+    expected_sorted_plots = {
+        f"{change_stem}_sorted_by_increase.png",
+        f"{change_stem}_sorted_by_increase_et_only.png",
+        f"{change_stem}_sorted_by_decrease.png",
+        f"{change_stem}_sorted_by_decrease_et_only.png",
     }
 
-    assert expected_sorted_files <= {path.name for path in output_dir.glob("*.csv")}
-    assert {path.replace(".csv", ".png") for path in expected_sorted_files} <= set(
-        plot_filenames
+    input_variables = pd.read_csv(output_dir / "input_variables.csv")
+    reconstruction_variables = pd.read_csv(
+        output_dir / "reconstruction_variables.csv"
     )
+    assert list(input_variables.columns) == labels
+    assert list(reconstruction_variables.columns) == labels
+    assert {path.name for path in output_dir.glob("*.csv")} == {
+        "input_variables.csv",
+        "reconstruction_variables.csv",
+    }
+    assert expected_sorted_plots <= set(plot_filenames)
+    assert len(gallery_snapshots) == 1
+    assert expected_sorted_plots <= gallery_snapshots[0]
 
 
 def test_sort_correlation_change_matrix_orders_both_axes_by_off_diagonal_mean() -> None:
@@ -95,7 +105,7 @@ def test_sort_correlation_change_matrix_orders_both_axes_by_off_diagonal_mean() 
     assert list(by_decrease.columns) == ["c", "a", "b"]
 
 
-def test_write_correlation_matrix_variants_saves_sorted_full_and_et_matrices(
+def test_write_correlation_matrix_variants_sorts_full_and_et_matrices_without_csvs(
     tmp_path: Path,
     monkeypatch,
 ) -> None:
@@ -108,10 +118,10 @@ def test_write_correlation_matrix_variants_saves_sorted_full_and_et_matrices(
         index=["a.Et", "b.Et", "c.Et"],
         columns=["a.Et", "b.Et", "c.Et"],
     )
-    plot_filenames = []
+    plot_calls = []
 
     def capture_plot(**kwargs) -> None:
-        plot_filenames.append(kwargs["filename"])
+        plot_calls.append(kwargs)
 
     monkeypatch.setattr(
         "src.evaluation.callbacks.correlation_matrix.matrix.plot",
@@ -131,13 +141,15 @@ def test_write_correlation_matrix_variants_saves_sorted_full_and_et_matrices(
         sort_ascending=False,
     )
 
-    full_matrix = pd.read_csv(tmp_path / f"{stem}.csv", index_col=0)
-    et_matrix = pd.read_csv(tmp_path / f"{stem}_et_only.csv", index_col=0)
-
-    assert list(full_matrix.index) == ["b.Et", "a.Et", "c.Et"]
-    assert list(full_matrix.columns) == ["b.Et", "a.Et", "c.Et"]
-    pd.testing.assert_frame_equal(full_matrix, et_matrix)
-    assert plot_filenames == [f"{stem}.png", f"{stem}_et_only.png"]
+    expected_order = ["b.Et", "a.Et", "c.Et"]
+    assert list(plot_calls[0]["data"].keys()) == expected_order
+    assert list(plot_calls[0]["data"]["b.Et"].keys()) == expected_order
+    assert list(plot_calls[1]["data"].keys()) == expected_order
+    assert [call["filename"] for call in plot_calls] == [
+        f"{stem}.png",
+        f"{stem}_et_only.png",
+    ]
+    assert not list(tmp_path.glob("*.csv"))
 
 
 def test_sort_correlation_change_matrix_rejects_misaligned_labels() -> None:

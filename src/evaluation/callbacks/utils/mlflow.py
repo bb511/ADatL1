@@ -93,8 +93,6 @@ def make_gall(
         in the parent directory where the plots are stored.
     """
     plots_dir = plots_dir.resolve()
-    image_paths = get_image_paths(plots_dir, sec_name)
-
     # Check if index file already exists.
     index_exists = check_html_exists(mlflow_logger, gallery_dir, f"{fname}.html")
     if index_exists:
@@ -102,7 +100,7 @@ def make_gall(
     else:
         html_page = generate_gallery_header()
 
-    html_page += write_gallery_section(mlflow_logger, sec_name, image_paths)
+    html_page += build_gallery_section(plots_dir, sec_name)
     html_page = "\n".join(html_page)
 
     mlflow_logger.experiment.log_text(
@@ -110,6 +108,18 @@ def make_gall(
     )
 
     return html_page
+
+
+def build_gallery_html(plots_dir: Path, section_name: str) -> str:
+    """Build a standalone HTML gallery containing every current image in a folder."""
+    html_page = generate_gallery_header()
+    html_page += build_gallery_section(plots_dir, section_name)
+    return "\n".join(html_page)
+
+
+def build_gallery_section(plots_dir: Path, section_name: str) -> list[str]:
+    """Build one gallery section from every current image in ``plots_dir``."""
+    return write_gallery_section(section_name, get_image_paths(plots_dir, section_name))
 
 
 def check_html_exists(mlflow_logger: Logger, gallery_dir: Path, fname: str) -> bool:
@@ -195,9 +205,7 @@ def generate_gallery_header():
     return html_header
 
 
-def write_gallery_section(
-    mlflow_logger: Logger, section: str, image_paths: list[Path, ...]
-) -> list[str, ...]:
+def write_gallery_section(section: str, image_paths: list[Path]) -> list[str]:
     """Write a section of the index html file generated in build_html.
 
     A section is made up of compressed small image thumbnail that expand when clicked.

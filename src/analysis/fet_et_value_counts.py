@@ -34,6 +34,7 @@ DEFAULT_MATRIX_DIR = DEFAULT_VARIABLES_CSV.parent
 class ValueCountSpecs:
     variables_csv: str | Path = DEFAULT_VARIABLES_CSV
     column: str = "FET.Et"
+    space: str = "input"
 
 
 class ValueCountPlotter:
@@ -74,7 +75,19 @@ class ValueCountPlotter:
         return counts.rename_axis("value").reset_index(name="count")
 
     def _load_values(self) -> pd.Series:
-        df = CheckpointLoader(self.specs.variables_csv).load_table()
+        variables_path = Path(self.specs.variables_csv)
+        if variables_path.name == "correlation_variables.csv":
+            source_table = pd.read_csv(variables_path, header=[0, 1])
+            spaces = set(source_table.columns.get_level_values(0))
+            if self.specs.space not in spaces:
+                raise KeyError(
+                    f"Space {self.specs.space!r} not found in {variables_path}. "
+                    f"Available spaces: {sorted(spaces)}"
+                )
+            df = source_table.xs(self.specs.space, axis=1, level=0)
+        else:
+            df = CheckpointLoader(variables_path).load_table()
+
         if self.specs.column not in df.columns:
             raise KeyError(
                 f"Column {self.specs.column!r} not found in {self.specs.variables_csv}. "
@@ -197,8 +210,9 @@ def _parse_args() -> argparse.Namespace:
         "--variables-csv",
         type=Path,
         default=None,
-        help="CSV containing event-level variables, e.g. input_variables.csv.",
+        help="CSV containing event-level correlation variables.",
     )
+    parser.add_argument("--space", default="input", help="Source-table space to use.")
     parser.add_argument("--column", default="FET.Et", help="Column to count.")
     parser.add_argument("--output-dir", type=Path, help="Directory for CSV and PNG.")
     parser.add_argument("--output-stem", help="Output filename stem without extension.")
@@ -216,6 +230,7 @@ def main() -> None:
         ValueCountSpecs(
             variables_csv=variables_csv,
             column=args.column,
+            space=args.space,
         )
     )
     plotter.plot(

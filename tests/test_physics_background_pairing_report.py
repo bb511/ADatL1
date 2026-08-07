@@ -496,8 +496,11 @@ def test_study_evidence_detects_database_change(tmp_path) -> None:
         ("status", "invalid status"),
         ("commit", "execution commit differs"),
         ("artifact", "artifact URI escapes"),
+        ("run_id", "run ID differs"),
         ("epoch", "epoch history"),
         ("history", "Invalid MLflow selection history"),
+        ("metric_escape", "escapes its canonical run"),
+        ("malformed_history", "Malformed MLflow metric history"),
     ),
 )
 def test_mlflow_final_validation_fails_closed(tmp_path, corruption: str, message: str) -> None:
@@ -531,18 +534,57 @@ def test_mlflow_final_validation_fails_closed(tmp_path, corruption: str, message
             for line in meta.read_text(encoding="utf-8").splitlines()
         ]
         meta.write_text("\n".join(lines) + "\n", encoding="utf-8")
+    elif corruption == "run_id":
+        meta = run_store / "meta.yaml"
+        meta.write_text(
+            meta.read_text(encoding="utf-8").replace(
+                f"run_id: {row['run_id']}", f"run_id: {'f' * 32}"
+            ),
+            encoding="utf-8",
+        )
     elif corruption == "epoch":
         epoch = run_store / "metrics" / "epoch_idx"
         epoch.write_text(
             "\n".join(epoch.read_text(encoding="utf-8").splitlines()[:-1]) + "\n",
             encoding="utf-8",
         )
-    else:
+    elif corruption == "history":
         key = "train/ascore_operational"
         (run_store / "metrics" / key).unlink()
+    elif corruption == "metric_escape":
+        key = "train/ascore_operational"
+        metric = run_store / "metrics" / key
+        outside = tmp_path / "outside-metric"
+        outside.write_text(metric.read_text(encoding="utf-8"), encoding="utf-8")
+        metric.unlink()
+        metric.symlink_to(outside)
+    else:
+        key = "train/ascore_operational"
+        (run_store / "metrics" / key).write_text("not-a-metric\n", encoding="utf-8")
 
     with pytest.raises(RuntimeError, match=message):
         report._validate_mlflow_runs(root, design, rows, final=True)
+
+
+def test_mlflow_validation_does_not_scan_unrelated_file_store_data(monkeypatch, tmp_path) -> None:
+    """Exact bound paths replace generic run and history discovery."""
+    root, design = _campaign(tmp_path)
+    rows, _ = _mlflow_rows(root, design)
+    monkeypatch.setattr(
+        MlflowClient,
+        "get_run",
+        lambda *args, **kwargs: pytest.fail("generic FileStore run scan was used"),
+    )
+    monkeypatch.setattr(
+        MlflowClient,
+        "get_metric_history",
+        lambda *args, **kwargs: pytest.fail("generic FileStore history scan was used"),
+    )
+
+    validated = report._validate_mlflow_runs(root, design, rows, final=True)
+
+    assert len(validated) == len(rows)
+    assert all(row["histories_validated"] for row in validated)
 
 
 def _frozen_results(root: Path, design: dict) -> None:

@@ -1218,6 +1218,129 @@ def test_reconcile_hashes_only_terminal_logs(monkeypatch, tmp_path) -> None:
     assert rows[1]["log_sha256"] == ""
 
 
+def test_routine_reconcile_skips_fully_sealed_terminal_rows(monkeypatch, tmp_path) -> None:
+    """Routine polling does no scheduler, log, or scientific work for sealed records."""
+    root, repository = _campaign(tmp_path)
+    _authenticate(monkeypatch)
+    sealed_log = tmp_path / "sealed.out"
+    sealed_log.write_text("sealed\n", encoding="utf-8")
+    live_log = tmp_path / "live.out"
+    live_log.write_text("live\n", encoding="utf-8")
+    operations._atomic_csv(
+        root / "state" / "job_history.csv",
+        [
+            {
+                "job_id": "1",
+                "kind": "search_chunk",
+                "model": "ae",
+                "state": "COMPLETED",
+                "exit_code": "0:0",
+                "log_path": str(sealed_log),
+                "log_sha256": "a" * 64,
+                "success_sha256": "b" * 64,
+                "bindings_sha256": "c" * 64,
+            },
+            {
+                "job_id": "2",
+                "kind": "search_chunk",
+                "model": "vae",
+                "state": "RUNNING",
+                "log_path": str(live_log),
+            },
+        ],
+    )
+
+    def accounting(job_ids):
+        assert job_ids == ["2"]
+        return {"2": {"state": "RUNNING", "elapsed": "00:10:00", "exit_code": "0:0"}}
+
+    monkeypatch.setattr(operations, "_accounting", accounting)
+    monkeypatch.setattr(
+        operations,
+        "_completed_search_artifacts",
+        lambda *args: pytest.fail("sealed search artifacts were revalidated"),
+    )
+
+    rows = operations.reconcile(root, repository)
+
+    assert rows[0]["log_sha256"] == "a" * 64
+    assert rows[0]["success_sha256"] == "b" * 64
+    assert rows[1]["elapsed"] == "00:10:00"
+
+
+def test_reconcile_persists_each_terminal_seal_before_later_failure(monkeypatch, tmp_path) -> None:
+    """A later terminal-row failure cannot discard an earlier expensive seal."""
+    root, repository = _campaign(tmp_path)
+    _authenticate(monkeypatch)
+    first_log = tmp_path / "first.out"
+    first_log.write_text("done\n", encoding="utf-8")
+    missing_log = tmp_path / "missing.out"
+    operations._atomic_csv(
+        root / "state" / "job_history.csv",
+        [
+            {
+                "job_id": "1",
+                "kind": "packed_pilot",
+                "model": "ae",
+                "state": "RUNNING",
+                "log_path": str(first_log),
+            },
+            {
+                "job_id": "2",
+                "kind": "packed_pilot",
+                "model": "vae",
+                "state": "RUNNING",
+                "log_path": str(missing_log),
+            },
+        ],
+    )
+    monkeypatch.setattr(
+        operations,
+        "_accounting",
+        lambda ids: {
+            job_id: {"state": "COMPLETED", "elapsed": "00:01:00", "exit_code": "0:0"}
+            for job_id in ids
+        },
+    )
+
+    with pytest.raises(FileNotFoundError, match="Terminal job log is missing"):
+        operations.reconcile(root, repository)
+
+    _, persisted = operations._ledger(root)
+    assert persisted[0]["state"] == "COMPLETED"
+    assert persisted[0]["log_sha256"] == operations._sha256(first_log)
+    assert persisted[1]["state"] == "RUNNING"
+    assert persisted[1]["log_sha256"] == ""
+
+
+def test_full_reconcile_audits_sealed_terminal_log(monkeypatch, tmp_path) -> None:
+    """Transition gates still reject mutation of a routinely cached terminal record."""
+    root, repository = _campaign(tmp_path)
+    _authenticate(monkeypatch)
+    log = tmp_path / "sealed.out"
+    log.write_text("original\n", encoding="utf-8")
+    operations._atomic_csv(
+        root / "state" / "job_history.csv",
+        [
+            {
+                "job_id": "1",
+                "kind": "packed_pilot",
+                "model": "ae",
+                "state": "COMPLETED",
+                "exit_code": "0:0",
+                "log_path": str(log),
+                "log_sha256": operations._sha256(log),
+            }
+        ],
+    )
+    log.write_text("changed\n", encoding="utf-8")
+    monkeypatch.setattr(operations, "_accounting", lambda ids: {})
+
+    operations.reconcile(root, repository)
+    with pytest.raises(RuntimeError, match="changed after sealing"):
+        operations.reconcile(root, repository, True)
+
+
 def test_reconcile_seals_successful_search_manifest_and_bindings(monkeypatch, tmp_path) -> None:
     """A successful search row authenticates its chunk and exact trial bindings."""
     root, repository = _campaign(tmp_path)

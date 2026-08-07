@@ -1406,7 +1406,7 @@ def validate_canaries(root: Path, repository: Path) -> Path:
 
     design = report._design(root)
     _authenticate_execution_repository(repository, design)
-    ledger_rows = reconcile(root, repository)
+    ledger_rows = reconcile(root, repository, True)
     canary_jobs = [row for row in ledger_rows if row.get("kind") == "production_canary"]
     if len(canary_jobs) != len(MODELS) or {row["model"] for row in canary_jobs} != set(MODELS):
         raise RuntimeError("Canary ledger does not contain exactly one job per model.")
@@ -2065,22 +2065,44 @@ def _completed_retrain_marker(root: Path, design: dict[str, Any], row: dict[str,
     return _sha256(receipt_path)
 
 
-def reconcile(root: Path, repository: Path) -> list[dict[str, str]]:
+def reconcile(root: Path, repository: Path, audit_sealed: bool = False) -> list[dict[str, str]]:
     """Serialize reconciliation against submissions and stale-trial repair."""
     with _operation_lock(root):
-        return _reconcile_locked(root, repository)
+        return _reconcile_locked(root, repository, audit_sealed)
 
 
-def _reconcile_locked(root: Path, repository: Path) -> list[dict[str, str]]:
+def _terminal_row_is_sealed(row: dict[str, str]) -> bool:
+    """Return whether routine reconciliation can trust one immutable terminal record."""
+    state = _normalized_state(row.get("state", ""))
+    if state not in TERMINAL_STATES or not row.get("log_sha256"):
+        return False
+    successful = state == "COMPLETED" and row.get("exit_code") == "0:0"
+    if not successful:
+        return True
+    if row.get("kind") in {"production_canary", "search_chunk"}:
+        return bool(row.get("success_sha256") and row.get("bindings_sha256"))
+    if row.get("kind") == "retrain":
+        return bool(row.get("success_sha256"))
+    return True
+
+
+def _reconcile_locked(
+    root: Path, repository: Path, audit_sealed: bool = False
+) -> list[dict[str, str]]:
     """Reconcile scheduler state and seal terminal Slurm logs by SHA-256."""
     design = _design(root)
     _authenticate_execution_repository(repository, design)
     ledger_path, rows = _ledger(root)
-    accounting = _accounting([row["job_id"] for row in rows])
+    query_rows = (
+        rows if audit_sealed else [row for row in rows if not _terminal_row_is_sealed(row)]
+    )
+    accounting = _accounting([row["job_id"] for row in query_rows])
     for row in rows:
-        if row["job_id"] not in accounting:
+        sealed = _terminal_row_is_sealed(row)
+        if row["job_id"] in accounting:
+            row.update(accounting[row["job_id"]])
+        elif not (audit_sealed and sealed):
             continue
-        row.update(accounting[row["job_id"]])
         state = row["state"]
         if state not in ACTIVE_STATES and state not in TERMINAL_STATES:
             raise RuntimeError(f"Unknown scheduler state {state!r} for job {row['job_id']}.")
@@ -2088,7 +2110,10 @@ def _reconcile_locked(root: Path, repository: Path) -> list[dict[str, str]]:
             log_path = Path(row["log_path"])
             if not log_path.is_file():
                 raise FileNotFoundError(f"Terminal job log is missing: {log_path}")
-            row["log_sha256"] = _sha256(log_path)
+            log_sha256 = _sha256(log_path)
+            if row.get("log_sha256") and row["log_sha256"] != log_sha256:
+                raise RuntimeError(f"Terminal job log changed after sealing: {log_path}")
+            row["log_sha256"] = log_sha256
             if (
                 state == "COMPLETED"
                 and row["exit_code"] == "0:0"
@@ -2101,7 +2126,11 @@ def _reconcile_locked(root: Path, repository: Path) -> list[dict[str, str]]:
             elif (
                 state == "COMPLETED" and row["exit_code"] == "0:0" and row.get("kind") == "retrain"
             ):
-                row["success_sha256"] = _completed_retrain_marker(root, design, row)
+                if audit_sealed or not row.get("success_sha256"):
+                    row["success_sha256"] = _completed_retrain_marker(root, design, row)
+            if not sealed:
+                # Keep new authentication work durable if a later row fails or is interrupted.
+                _atomic_csv(ledger_path, rows)
     _atomic_csv(ledger_path, rows)
     return rows
 
@@ -2193,7 +2222,7 @@ def _freeze_campaign_locked(root: Path, repository: Path) -> Path:
 
     design = report._design(root)
     _authenticate_execution_repository(repository, design)
-    ledger_rows = _reconcile_locked(root, repository)
+    ledger_rows = _reconcile_locked(root, repository, True)
     for model in MODELS:
         _assert_no_live_search_overlap(ledger_rows, model)
         _assert_database_quiescent(root, model)
@@ -2463,7 +2492,7 @@ def aggregate_campaign(root: Path, repository: Path) -> Path:
     with _operation_lock(root):
         design = _design(root)
         _authenticate_execution_repository(repository, design)
-        ledger_rows = _reconcile_locked(root, repository)
+        ledger_rows = _reconcile_locked(root, repository, True)
         _assert_no_live_retrain_overlap(ledger_rows)
         active_retrains = _active_kind_rows(ledger_rows, "retrain")
         if active_retrains:

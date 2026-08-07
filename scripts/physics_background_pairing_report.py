@@ -20,6 +20,8 @@ from pathlib import Path
 from typing import Any, Iterable
 from urllib.parse import unquote, urlparse
 
+import yaml
+
 from src.evaluation.physics_background_pairing_analysis import (
     build_physics_background_pairing_analysis,
 )
@@ -802,6 +804,40 @@ def _selection_metric_keys(design: dict[str, Any], model: str) -> list[str]:
     return keys
 
 
+def _file_store_resource(root: Path, name: str) -> Path | None:
+    """Resolve one exact FileStore resource without walking unrelated run data."""
+    candidate = root.joinpath(*name.split("/"))
+    if not candidate.exists():
+        return None
+    resolved_root = root.resolve(strict=True)
+    if resolved_root != root.absolute():
+        raise RuntimeError(f"MLflow resource root escapes its canonical run: {root}")
+    resolved = candidate.resolve(strict=True)
+    if not resolved.is_relative_to(resolved_root) or not resolved.is_file():
+        raise RuntimeError(f"MLflow resource escapes its canonical run: {candidate}")
+    return resolved
+
+
+def _file_store_metric_history(
+    run_store: Path, experiment_id: str, run_id: str, key: str
+) -> list[Any]:
+    """Read one exact FileStore metric history with MLflow's canonical line parser."""
+    from mlflow.store.tracking.file_store import FileStore
+
+    path = _file_store_resource(run_store / "metrics", key)
+    if path is None:
+        return []
+    try:
+        return [
+            FileStore._get_metric_from_line(  # noqa: SLF001 -- pinned FileStore format
+                run_id, key, line, experiment_id
+            )
+            for line in path.read_text(encoding="utf-8").splitlines()
+        ]
+    except Exception as error:
+        raise RuntimeError(f"Malformed MLflow metric history {key!r}: {path}") from error
+
+
 def _validate_mlflow_runs(
     root: Path,
     design: dict[str, Any],
@@ -810,6 +846,7 @@ def _validate_mlflow_runs(
     final: bool,
 ) -> list[dict[str, Any]]:
     """Authenticate indexed runs and their complete file-backed epoch histories."""
+    from mlflow.entities import RunStatus
     from mlflow.tracking import MlflowClient
 
     store = (root / "runtime" / "logs" / "mlflow" / "mlruns").resolve()
@@ -817,6 +854,7 @@ def _validate_mlflow_runs(
         raise FileNotFoundError(f"Canonical MLflow FileStore is missing: {store}")
     client = MlflowClient(tracking_uri=store.as_uri())
     seen: set[tuple[str, str]] = set()
+    experiments = {}
     validated = []
     for source in rows:
         row = dict(source)
@@ -826,27 +864,44 @@ def _validate_mlflow_runs(
         if identity in seen:
             raise RuntimeError(f"Duplicate indexed MLflow run: {identity}.")
         seen.add(identity)
+        run_store = (store / experiment_id / run_id).resolve()
+        metadata_path = (
+            _file_store_resource(run_store, "meta.yaml")
+            if run_store.is_relative_to(store)
+            else None
+        )
+        if metadata_path is None:
+            raise RuntimeError(f"Missing indexed MLflow run: {identity}.")
         try:
-            run = client.get_run(run_id)
-            experiment = client.get_experiment(experiment_id)
+            metadata = yaml.safe_load(metadata_path.read_text(encoding="utf-8"))
+            if experiment_id not in experiments:
+                experiments[experiment_id] = client.get_experiment(experiment_id)
+            experiment = experiments[experiment_id]
         except Exception as error:
             raise RuntimeError(f"Missing indexed MLflow run: {identity}.") from error
+        if not isinstance(metadata, dict):
+            raise RuntimeError(f"Missing indexed MLflow run: {identity}.")
         if experiment is None or experiment.name != row["experiment_name"]:
             raise RuntimeError(f"MLflow experiment differs for run {run_id}.")
-        if str(run.info.experiment_id) != experiment_id:
+        if str(metadata.get("experiment_id")) != experiment_id:
             raise RuntimeError(f"MLflow experiment ID differs for run {run_id}.")
-        if run.data.tags.get("mlflow.source.git.commit") != design["code_commit"]:
+        if str(metadata.get("run_id")) != run_id:
+            raise RuntimeError(f"MLflow run ID differs for run {run_id}.")
+        tags = run_store / "tags"
+        commit_tag = _file_store_resource(tags, "mlflow.source.git.commit")
+        run_name_tag = _file_store_resource(tags, "mlflow.runName")
+        if commit_tag is None or commit_tag.read_text(encoding="utf-8") != design["code_commit"]:
             raise RuntimeError(f"MLflow execution commit differs for run {run_id}.")
-        if run.data.tags.get("mlflow.runName") != row["run_name"]:
+        if run_name_tag is None or run_name_tag.read_text(encoding="utf-8") != row["run_name"]:
             raise RuntimeError(f"MLflow run name differs for run {run_id}.")
-        if run.info.lifecycle_stage != "active":
+        if metadata.get("lifecycle_stage") != "active":
             raise RuntimeError(f"MLflow run is not active: {run_id}.")
 
-        parsed = urlparse(run.info.artifact_uri)
+        artifact_uri = str(metadata.get("artifact_uri", ""))
+        parsed = urlparse(artifact_uri)
         if parsed.scheme != "file" or parsed.netloc not in ("", "localhost"):
             raise RuntimeError(f"MLflow artifact URI is not a local file URI: {run_id}.")
         artifact_path = Path(unquote(parsed.path)).resolve()
-        run_store = (store / experiment_id / run_id).resolve()
         if not (run_store / "meta.yaml").is_file() or not artifact_path.is_relative_to(run_store):
             raise RuntimeError(f"MLflow artifact URI escapes its canonical run: {run_id}.")
 
@@ -854,13 +909,18 @@ def _validate_mlflow_runs(
             design["search_epochs"] if row["phase"] == "search" else design["retrain_epochs"]
         )
         epoch_history = sorted(
-            client.get_metric_history(run_id, "epoch_idx"), key=lambda x: x.step
+            _file_store_metric_history(run_store, experiment_id, run_id, "epoch_idx"),
+            key=lambda x: x.step,
         )
         observed_epochs = len(epoch_history)
         allowed_statuses = {"FINISHED"} if final else {"RUNNING", "FINISHED"}
-        if run.info.status not in allowed_statuses:
-            raise RuntimeError(f"MLflow run has invalid status {run.info.status}: {run_id}.")
-        if run.info.status == "FINISHED" or final:
+        try:
+            status = RunStatus.to_string(int(metadata.get("status")))
+        except (TypeError, ValueError, KeyError) as error:
+            raise RuntimeError(f"MLflow run has invalid status: {run_id}.") from error
+        if status not in allowed_statuses:
+            raise RuntimeError(f"MLflow run has invalid status {status}: {run_id}.")
+        if status == "FINISHED" or final:
             if observed_epochs != expected_epochs:
                 raise RuntimeError(
                     f"MLflow epoch history for {run_id} has {observed_epochs}, "
@@ -879,7 +939,10 @@ def _validate_mlflow_runs(
 
         required = _selection_metric_keys(design, str(row["model"]))
         for key in required:
-            history = sorted(client.get_metric_history(run_id, key), key=lambda x: x.step)
+            history = sorted(
+                _file_store_metric_history(run_store, experiment_id, run_id, key),
+                key=lambda x: x.step,
+            )
             if (
                 [int(metric.step) for metric in history] != epoch_steps
                 or len(history) != observed_epochs
@@ -889,9 +952,9 @@ def _validate_mlflow_runs(
         row.update(
             {
                 "tracking_uri": store.as_uri(),
-                "status": run.info.status,
-                "lifecycle_stage": run.info.lifecycle_stage,
-                "artifact_uri": run.info.artifact_uri,
+                "status": status,
+                "lifecycle_stage": metadata["lifecycle_stage"],
+                "artifact_uri": artifact_uri,
                 "expected_epochs": expected_epochs,
                 "observed_epochs": observed_epochs,
                 "required_history_count": len(required),

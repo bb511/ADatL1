@@ -86,7 +86,7 @@ def test_shared_sweep_command_preserves_paper_budget_and_logging(tmp_path) -> No
     joined = " ".join(command)
     assert "-m" in command
     assert "experiment=physics/ae_background_all" in command
-    assert "hparams_search=ae_shared_optuna" in command
+    assert "hparams_search=ae_shared_nsgaii" in command
     assert f"trainer.max_epochs={campaign.SEARCH_EPOCHS}" in command
     assert "test=false" in command
     assert "sqlite:///" in joined
@@ -98,7 +98,11 @@ def test_shared_sweep_command_preserves_paper_budget_and_logging(tmp_path) -> No
 
 def test_sweep_uses_one_packed_controller_without_nested_submitit(tmp_path, monkeypatch) -> None:
     """One Optuna sampler dispatches ordered jobs across the enclosing allocation."""
-    design = {"studies": campaign._studies()}
+    design = {
+        "studies": campaign._studies(),
+        "screening_sampler": campaign.SCREENING_SAMPLER,
+        "screening_sampler_seed_policy": campaign.SCREENING_SAMPLER_SEED_POLICY,
+    }
     monkeypatch.setattr(campaign, "_load_design", lambda root: design)
     monkeypatch.setattr(
         campaign,
@@ -106,7 +110,9 @@ def test_sweep_uses_one_packed_controller_without_nested_submitit(tmp_path, monk
         lambda root, study: {"running": 0, "waiting": 0, "usable_complete": 0},
     )
     monkeypatch.setattr(campaign, "_study_trials", lambda root, study: [])
-    monkeypatch.setattr(campaign, "_write_chunk_bindings", lambda *args: tmp_path / "bindings")
+    monkeypatch.setattr(
+        campaign, "_write_chunk_bindings", lambda *args, **kwargs: tmp_path / "bindings"
+    )
     captured = {}
 
     def run(command, **kwargs):
@@ -120,6 +126,12 @@ def test_sweep_uses_one_packed_controller_without_nested_submitit(tmp_path, monk
     assert "hydra.sweeper.n_trials=4" in command
     assert "hydra.sweeper.n_jobs=4" in command
     assert not any("submitit" in value for value in command)
+
+
+def test_submit_next_is_fail_closed() -> None:
+    """Direct scheduler submission cannot bypass the operational control plane."""
+    with pytest.raises(RuntimeError, match="operations.py submit-search"):
+        campaign.submit_next(Path("/unused"), 48, 48)
 
 
 def test_logical_objective_directions_match_the_metrics() -> None:
@@ -151,6 +163,22 @@ def test_shared_hpo_files_match_campaign_objective_order() -> None:
             for objective in campaign._logical_objectives(model)
             for direction in objective["directions"]
         ]
+
+
+def test_shared_nsgaii_configs_freeze_one_explicit_sampler_contract() -> None:
+    """All six studies inherit their paper spaces and resolve one fixed NSGA-II policy."""
+    root = Path(__file__).parents[1]
+    expected = {key: value for key, value in campaign.SCREENING_SAMPLER.items() if key != "name"}
+    for model in campaign.MODELS:
+        config = yaml.safe_load(
+            (root / "configs" / "hparams_search" / f"{model}_shared_nsgaii.yaml").read_text(
+                encoding="utf-8"
+            )
+        )
+        assert config["defaults"][0] == f"{model}_shared_optuna"
+        assert config["hydra"]["sweeper"]["sampler"] == {
+            key: value for key, value in expected.items() if key != "_target_"
+        }
 
 
 def test_mixed_direction_pareto_front_uses_only_requested_pair() -> None:
@@ -977,6 +1005,7 @@ def test_packed_pilot_creates_storage_parent_before_optuna(monkeypatch, tmp_path
         SimpleNamespace(
             number=index,
             state=TrialState.COMPLETE,
+            system_attrs={"nsga2:generation": 0},
             values=[1.0] * 28,
             params={"x": index},
         )
@@ -1005,6 +1034,57 @@ def test_packed_pilot_creates_storage_parent_before_optuna(monkeypatch, tmp_path
     monkeypatch.setattr(campaign.subprocess, "run", run)
     campaign.packed_pilot(tmp_path, "ae")
     assert (tmp_path / "packed_pilots" / "ae" / "success.json").is_file()
+
+
+def test_production_canary_uses_full_search_budget_in_an_isolated_study(
+    monkeypatch, tmp_path
+) -> None:
+    """The scheduler canary is four full trials, not the one-epoch debug pilot."""
+    from optuna.trial import TrialState
+
+    design = {
+        "code_commit": "a" * 40,
+        "studies": campaign._studies(),
+        "screening_sampler": campaign.SCREENING_SAMPLER,
+        "screening_sampler_seed_policy": campaign.SCREENING_SAMPLER_SEED_POLICY,
+    }
+    trials = [
+        SimpleNamespace(
+            number=index,
+            state=TrialState.COMPLETE,
+            system_attrs={"nsga2:generation": 0},
+            values=[1.0] * 28,
+            params={"x": index},
+        )
+        for index in range(4)
+    ]
+    fake_optuna = SimpleNamespace(
+        load_study=lambda **kwargs: SimpleNamespace(get_trials=lambda deepcopy=False: trials),
+        trial=SimpleNamespace(TrialState=TrialState),
+    )
+    observed = {}
+
+    def run(command, **kwargs):
+        observed["command"] = command
+        output = tmp_path / "production_canaries" / "ae" / "attempt_0001"
+        for index in range(4):
+            run_dir = output / str(index)
+            run_dir.mkdir()
+            (run_dir / "optimized_metric.json").write_text("{}\n", encoding="utf-8")
+
+    monkeypatch.setattr(campaign, "_load_design", lambda root: design)
+    monkeypatch.setattr(campaign, "_optuna", lambda: fake_optuna)
+    monkeypatch.setattr(campaign.subprocess, "run", run)
+
+    campaign.production_canary(tmp_path, "ae", 1)
+
+    command = observed["command"]
+    assert "trainer.min_epochs=50" in command
+    assert "trainer.max_epochs=50" in command
+    assert "hydra.sweeper.n_trials=4" in command
+    assert not any("limit_train_batches" in value for value in command)
+    assert any("production_canaries/ae/attempt_0001/study.db" in value for value in command)
+    assert not any("/studies/ae.db" in value for value in command)
 
 
 def test_pilot_audit_requires_finite_score_specific_checkpoint_thresholds(
@@ -1063,12 +1143,14 @@ def test_chunk_bindings_preserve_global_trial_identity(monkeypatch, tmp_path) ->
         SimpleNamespace(
             number=8,
             state=SimpleNamespace(name="COMPLETE"),
+            system_attrs={"nsga2:generation": 0},
             params={"x": 1},
             values=(1.0,),
         ),
         SimpleNamespace(
             number=9,
             state=SimpleNamespace(name="FAIL"),
+            system_attrs={"nsga2:generation": 0},
             params={"x": 2},
             values=None,
         ),
@@ -1076,13 +1158,51 @@ def test_chunk_bindings_preserve_global_trial_identity(monkeypatch, tmp_path) ->
     monkeypatch.setattr(campaign, "_study_trials", lambda root, selected: trials)
 
     output = campaign._write_chunk_bindings(tmp_path, study, sweep_dir, {0, 1})
-    bindings = campaign.json.loads(output.read_text(encoding="utf-8"))["bindings"]
+    payload = campaign.json.loads(output.read_text(encoding="utf-8"))
+    bindings = payload["bindings"]
 
     assert [(row["trial_number"], row["hydra_job_num"]) for row in bindings] == [
         (8, 0),
         (9, 1),
     ]
     assert all(row["optimized_metric_artifact_sha256"] for row in bindings)
+    assert payload["screening_sampler"] == campaign.SCREENING_SAMPLER
+    assert [row["nsga2_generation"] for row in bindings] == [0, 0]
+
+
+def test_chunk_bindings_preserve_generationless_pre_sampling_failure(tmp_path) -> None:
+    """An asked trial with no Hydra directory remains explicitly auditable."""
+    study = campaign._studies()[0]
+    sweep_dir = tmp_path / "sweeps" / "ae" / "stamp"
+    sweep_dir.mkdir(parents=True)
+    trial = SimpleNamespace(
+        number=0,
+        state=SimpleNamespace(name="FAIL"),
+        system_attrs={},
+        params={},
+        values=None,
+    )
+
+    output = campaign._write_chunk_bindings(
+        tmp_path,
+        study,
+        sweep_dir,
+        set(),
+        all_trials=[trial],
+        sampler_invocation={
+            "starting_optuna_trial_number": 0,
+            "expected_generation": 0,
+            "resolved_seed": 123,
+        },
+    )
+    row = campaign.json.loads(output.read_text(encoding="utf-8"))["bindings"][0]
+
+    assert row["hydra_job_num"] == 0
+    assert row["hydra_run_dir"] is None
+    assert row["optimized_metric_artifact"] is None
+    assert row["nsga2_trial_phase"] == "pre_sampling_failure"
+    assert row["nsga2_generation"] is None
+    assert row["pre_sampling_failure_evidence"] == "optuna_terminal_state"
 
 
 def test_refreshing_chunk_bindings_reconciles_persistent_trial_state(
@@ -1097,6 +1217,7 @@ def test_refreshing_chunk_bindings_reconciles_persistent_trial_state(
     trial = SimpleNamespace(
         number=8,
         state=SimpleNamespace(name="RUNNING"),
+        system_attrs={"nsga2:generation": 0},
         params={"x": 1},
         values=None,
     )

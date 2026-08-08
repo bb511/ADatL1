@@ -46,6 +46,29 @@ SEARCH_EPOCHS = 50
 RETRAIN_EPOCHS = 200
 DOWNSTREAM_DATASETS = 20
 MAX_RETRAIN_ARRAY_TASKS = 1001
+DESIGN_SCHEMA_VERSION = 2
+SCREENING_SAMPLER = {
+    "name": "nsgaii",
+    "_target_": "optuna.samplers.NSGAIISampler",
+    "seed": 123,
+    "population_size": 48,
+    "mutation_prob": None,
+    "crossover_prob": 0.9,
+    "swapping_prob": 0.5,
+    "constraints_func": None,
+}
+SCREENING_SAMPLER_SEED_POLICY = {
+    "name": "base_seed_plus_model_offset_plus_starting_trial",
+    "formula": "base_seed + model_offsets[model] + starting_optuna_trial_number",
+    "base_seed": 123,
+    "model_offsets": {model: index * 100000 for index, model in enumerate(MODELS)},
+    "population_size": 48,
+    "generation_size": 48,
+    "final_partial_population": 24,
+    "target_trials": TARGET_TRIALS,
+    "require_pristine_study": True,
+    "canary_studies_are_separate": True,
+}
 DOWNSTREAM_DATASET_NAMES = {
     "GluGluHTo2B_Par-MH-125",
     "GluGluHto2G_Par-MH-125",
@@ -82,6 +105,9 @@ def parse_args() -> argparse.Namespace:
     pilot.add_argument("--model", choices=MODELS, default="ae")
     packed_pilot = subparsers.add_parser("packed-pilot")
     packed_pilot.add_argument("--model", choices=MODELS, default="ae")
+    production_canary = subparsers.add_parser("production-canary")
+    production_canary.add_argument("--model", choices=MODELS, required=True)
+    production_canary.add_argument("--attempt", type=int, required=True)
     sweep = subparsers.add_parser("sweep")
     sweep.add_argument("--model", choices=MODELS, required=True)
     sweep.add_argument("--trials", type=int, default=48)
@@ -249,7 +275,7 @@ def _load_retrain_task_map(root: Path, task_map: Path, expected_sha256: str) -> 
     payload = json.loads(task_map.read_text(encoding="utf-8"))
     design_path = root / "design.json"
     design = json.loads(design_path.read_text(encoding="utf-8"))
-    if design.get("schema_version") != 2:
+    if design.get("schema_version") != DESIGN_SCHEMA_VERSION:
         raise RuntimeError(f"Retrain task map references an invalid campaign: {design_path}")
     manifest_path = (root / "selection" / "pareto_retrain_manifest.json").resolve()
     manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
@@ -415,6 +441,7 @@ def _studies() -> list[dict[str, Any]]:
             "id": model,
             "model": model,
             "study_name": f"physics_{model}_background_all",
+            "hparams_search": f"{model}_shared_nsgaii",
             "objectives": _logical_objectives(model),
         }
         for model in MODELS
@@ -430,7 +457,7 @@ def initialize(root: Path) -> Path:
     _require_clean_checkout()
     preflight = REPOSITORY_ROOT / "research/physics_background_pairing/preflight.json"
     design = {
-        "schema_version": 2,
+        "schema_version": DESIGN_SCHEMA_VERSION,
         "created_at": datetime.now(timezone.utc).isoformat(),
         "code_commit": _git_commit(),
         "preflight": str(preflight),
@@ -439,6 +466,8 @@ def initialize(root: Path) -> Path:
         "search_epochs": SEARCH_EPOCHS,
         "retrain_epochs": RETRAIN_EPOCHS,
         "shared_trial_pool": True,
+        "screening_sampler": SCREENING_SAMPLER,
+        "screening_sampler_seed_policy": SCREENING_SAMPLER_SEED_POLICY,
         "models": list(MODELS),
         "scores_by_model": {model: list(scores) for model, scores in SCORES_BY_MODEL.items()},
         "cap_strategies": list(CAP_STRATEGIES),
@@ -453,8 +482,17 @@ def _load_design(root: Path) -> dict[str, Any]:
     _require_clean_checkout()
     design_path = initialize(root)
     design = json.loads(design_path.read_text(encoding="utf-8"))
-    if design.get("schema_version") != 2:
+    if design.get("schema_version") != DESIGN_SCHEMA_VERSION:
         raise RuntimeError("Campaign design is not the six-study schema.")
+    if design.get("screening_sampler") is not None:
+        if design["screening_sampler"] != SCREENING_SAMPLER:
+            raise RuntimeError("Campaign sampler differs from the frozen NSGA-II contract.")
+        for study in design.get("studies", []):
+            expected = f"{study.get('model')}_shared_nsgaii"
+            if study.get("hparams_search") != expected:
+                raise RuntimeError("Campaign HPO config differs from the NSGA-II contract.")
+        if design.get("screening_sampler_seed_policy") != SCREENING_SAMPLER_SEED_POLICY:
+            raise RuntimeError("Campaign sampler seed policy differs from the frozen contract.")
     if _git_commit() != design["code_commit"]:
         raise RuntimeError("Current commit differs from the frozen campaign design.")
     if _sha256(Path(design["preflight"])) != design["preflight_sha256"]:
@@ -508,8 +546,20 @@ def _write_chunk_bindings(
     prior_trial_numbers: set[int],
     *,
     all_trials: list[Any] | None = None,
+    sampler_invocation: dict[str, int] | None = None,
 ) -> Path:
     """Bind chunk-local Hydra jobs to persistent Optuna trial numbers."""
+    hparams_search = study.get("hparams_search", f"{study['model']}_shared_optuna")
+    sampler = SCREENING_SAMPLER if hparams_search.endswith("_shared_nsgaii") else None
+    if sampler is not None and sampler_invocation is None:
+        sampler_invocation = {
+            "starting_optuna_trial_number": 0,
+            "expected_generation": 0,
+            "resolved_seed": SCREENING_SAMPLER["seed"],
+        }
+    resolved_sampler = (
+        None if sampler is None else {**sampler, "seed": sampler_invocation["resolved_seed"]}
+    )
     new_trials = sorted(
         (
             trial
@@ -531,35 +581,71 @@ def _write_chunk_bindings(
         raise RuntimeError(f"Hydra job directories are not contiguous in {sweep_dir}.")
     if len(new_trials) < len(run_dirs):
         raise RuntimeError(f"Fewer Optuna trials than Hydra runs in {sweep_dir}.")
-    new_trials = new_trials[: len(run_dirs)]
     rows = []
     for local_index, trial in enumerate(new_trials):
         run_dir = run_by_job.get(local_index)
         optimized = None if run_dir is None else run_dir / "optimized_metric.json"
         has_optimized = optimized is not None and optimized.is_file()
-        rows.append(
-            {
-                "model": study["model"],
-                "study_name": study["study_name"],
-                "trial_number": int(trial.number),
-                "hydra_job_num": local_index,
-                "hydra_run_dir": None if run_dir is None else str(run_dir.resolve()),
-                "optimized_metric_artifact": (str(optimized.resolve()) if has_optimized else None),
-                "optimized_metric_artifact_sha256": (
-                    _sha256(optimized) if has_optimized else None
-                ),
-                "state": trial.state.name,
-                "params": _jsonable(trial.params),
-                "values": None if trial.values is None else _jsonable(trial.values),
-            }
-        )
+        row = {
+            "model": study["model"],
+            "study_name": study["study_name"],
+            "hparams_search": hparams_search,
+            "trial_number": int(trial.number),
+            "hydra_job_num": local_index,
+            "hydra_run_dir": None if run_dir is None else str(run_dir.resolve()),
+            "optimized_metric_artifact": (str(optimized.resolve()) if has_optimized else None),
+            "optimized_metric_artifact_sha256": (_sha256(optimized) if has_optimized else None),
+            "state": trial.state.name,
+            "params": _jsonable(trial.params),
+            "values": None if trial.values is None else _jsonable(trial.values),
+        }
+        if sampler is not None:
+            generation = getattr(trial, "system_attrs", {}).get("nsga2:generation")
+            if isinstance(generation, int) and generation >= 0:
+                if generation != sampler_invocation["expected_generation"]:
+                    raise RuntimeError(
+                        f"NSGA-II trial {trial.number} belongs to generation {generation}, not "
+                        f"{sampler_invocation['expected_generation']}."
+                    )
+                row["nsga2_trial_phase"] = "sampled"
+                row["nsga2_generation"] = generation
+            elif (
+                trial.state.name == "FAIL"
+                and not trial.params
+                and trial.values is None
+                and "nsga2:generation" not in getattr(trial, "system_attrs", {})
+            ):
+                row["nsga2_trial_phase"] = "pre_sampling_failure"
+                row["nsga2_generation"] = None
+                row["pre_sampling_failure_evidence"] = "optuna_terminal_state"
+            else:
+                raise RuntimeError(
+                    f"NSGA-II trial {trial.number} has an unauthenticated sampling state."
+                )
+            row["screening_sampler"] = resolved_sampler
+            row["resolved_sampler_seed"] = sampler_invocation["resolved_seed"]
+        rows.append(row)
     output = sweep_dir / "trial_bindings.json"
     _write_json(
         output,
         {
-            "schema_version": 1,
+            "schema_version": 2 if sampler is not None else 1,
             "model": study["model"],
             "study_name": study["study_name"],
+            "hparams_search": hparams_search,
+            "screening_sampler_base": sampler,
+            "screening_sampler_base_sha256": (None if sampler is None else _json_sha256(sampler)),
+            "screening_sampler": resolved_sampler,
+            "screening_sampler_sha256": (
+                None if resolved_sampler is None else _json_sha256(resolved_sampler)
+            ),
+            "screening_sampler_seed_policy": (
+                None if sampler is None else SCREENING_SAMPLER_SEED_POLICY
+            ),
+            "screening_sampler_seed_policy_sha256": (
+                None if sampler is None else _json_sha256(SCREENING_SAMPLER_SEED_POLICY)
+            ),
+            "sampler_invocation": sampler_invocation,
             "prior_trial_numbers": sorted(prior_trial_numbers),
             "bindings": rows,
         },
@@ -578,6 +664,7 @@ def refresh_bindings(root: Path) -> None:
                 study,
                 chunk_path.parent,
                 {int(number) for number in chunk["prior_trial_numbers"]},
+                sampler_invocation=chunk.get("sampler_invocation"),
             )
 
 
@@ -1833,15 +1920,26 @@ def _oracle_winner(candidates: list[dict[str, Any]]) -> dict[str, Any]:
     )
 
 
-def _base_train_command(root: Path, model: str) -> list[str]:
+def _base_train_command(
+    root: Path,
+    model: str,
+    study: dict[str, Any] | None = None,
+    *,
+    database: Path | None = None,
+    study_name: str | None = None,
+) -> list[str]:
     """Build invariant Hydra overrides for one shared model study."""
-    study_name = f"physics_{model}_background_all"
+    if study is None:
+        study = _study({"studies": _studies()}, model)
+    study_name = study["study_name"] if study_name is None else study_name
+    database = _study_path(root, model) if database is None else database
+    hparams_search = study.get("hparams_search", f"{model}_shared_optuna")
     return [
         sys.executable,
         "src/train.py",
         "-m",
         f"experiment=physics/{model}_background_all",
-        f"hparams_search={model}_shared_optuna",
+        f"hparams_search={hparams_search}",
         f"experiment_name=physics_bgpair_search_{model}",
         "trainer=gpu",
         "trainer.devices=[0]",
@@ -1849,7 +1947,7 @@ def _base_train_command(root: Path, model: str) -> list[str]:
         f"trainer.max_epochs={SEARCH_EPOCHS}",
         "trainer.num_sanity_val_steps=0",
         "test=false",
-        f"hydra.sweeper.storage='sqlite:///{_study_path(root, model)}?timeout=600'",
+        f"hydra.sweeper.storage='sqlite:///{database}?timeout=600'",
         f"hydra.sweeper.study_name={study_name}",
     ]
 
@@ -1870,14 +1968,36 @@ def sweep(root: Path, model: str, trials: int, jobs: int, timeout_min: int = 720
     if remaining <= 0:
         print(f"{model} already has {TARGET_TRIALS} usable completed trials.")
         return
-    trials = min(int(trials), remaining)
+    generation = counts["usable_complete"] // SCREENING_SAMPLER_SEED_POLICY["generation_size"]
+    completed_in_generation = (
+        counts["usable_complete"] % SCREENING_SAMPLER_SEED_POLICY["generation_size"]
+    )
+    generation_capacity = min(
+        SCREENING_SAMPLER_SEED_POLICY["generation_size"],
+        TARGET_TRIALS - generation * SCREENING_SAMPLER_SEED_POLICY["generation_size"],
+    )
+    generation_remaining = generation_capacity - completed_in_generation
+    trials = min(int(trials), remaining, generation_remaining)
     jobs = min(int(jobs), trials)
     stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
     sweep_dir = root / "sweeps" / model / stamp
     database = _study_path(root, model)
     database.parent.mkdir(parents=True, exist_ok=True)
     prior_trial_numbers = {int(trial.number) for trial in _study_trials(root, study)}
-    command = _base_train_command(root, model) + [
+    starting_trial_number = max(prior_trial_numbers, default=-1) + 1
+    resolved_seed = (
+        SCREENING_SAMPLER_SEED_POLICY["base_seed"]
+        + SCREENING_SAMPLER_SEED_POLICY["model_offsets"][model]
+        + starting_trial_number
+    )
+    sampler_invocation = {
+        "starting_optuna_trial_number": starting_trial_number,
+        "expected_generation": generation,
+        "resolved_seed": resolved_seed,
+    }
+    resolved_sampler = {**design["screening_sampler"], "seed": resolved_seed}
+    command = _base_train_command(root, model, study) + [
+        f"hydra.sweeper.sampler.seed={resolved_seed}",
         "hydra/launcher=packed_srun_clariden",
         f"hydra.sweeper.n_trials={trials}",
         f"hydra.sweeper.n_jobs={jobs}",
@@ -1887,11 +2007,25 @@ def sweep(root: Path, model: str, trials: int, jobs: int, timeout_min: int = 720
     ]
     chunk_path = sweep_dir / "chunk.json"
     chunk = {
-        "schema_version": 1,
+        "schema_version": 2 if design.get("screening_sampler") is not None else 1,
         "created_at": datetime.now(timezone.utc).isoformat(),
         "slurm_job_id": os.environ.get("SLURM_JOB_ID"),
         "model": model,
         "study_name": study["study_name"],
+        "hparams_search": study.get("hparams_search", f"{model}_shared_optuna"),
+        "screening_sampler_base": design.get("screening_sampler"),
+        "screening_sampler_base_sha256": (
+            None
+            if design.get("screening_sampler") is None
+            else _json_sha256(design["screening_sampler"])
+        ),
+        "screening_sampler": resolved_sampler,
+        "screening_sampler_sha256": _json_sha256(resolved_sampler),
+        "screening_sampler_seed_policy": design.get("screening_sampler_seed_policy"),
+        "screening_sampler_seed_policy_sha256": _json_sha256(
+            design["screening_sampler_seed_policy"]
+        ),
+        "sampler_invocation": sampler_invocation,
         "requested_trials": trials,
         "parallel_jobs": jobs,
         "timeout_min": int(timeout_min),
@@ -1906,7 +2040,13 @@ def sweep(root: Path, model: str, trials: int, jobs: int, timeout_min: int = 720
     except subprocess.CalledProcessError as error:
         failure = error
     finally:
-        _write_chunk_bindings(root, study, sweep_dir, prior_trial_numbers)
+        _write_chunk_bindings(
+            root,
+            study,
+            sweep_dir,
+            prior_trial_numbers,
+            sampler_invocation=sampler_invocation,
+        )
         chunk.update(
             {
                 "completed_at": datetime.now(timezone.utc).isoformat(),
@@ -1961,6 +2101,7 @@ def pilot(root: Path, model: str) -> None:
     _write_json(
         output / "success.json",
         {
+            "schema_version": 2,
             "completed_at": datetime.now(timezone.utc).isoformat(),
             "started_at": started_at,
             "elapsed_seconds": elapsed_seconds,
@@ -1969,6 +2110,101 @@ def pilot(root: Path, model: str) -> None:
             "logical_objectives": expected,
             "threshold_checkpoint_audit": threshold_audit,
             "code_commit": design["code_commit"],
+            "command": command,
+        },
+    )
+
+
+def production_canary(root: Path, model: str, attempt: int) -> None:
+    """Run four full 50-epoch trials in an isolated disposable Optuna study."""
+    if attempt <= 0:
+        raise ValueError("Production-canary attempt must be positive.")
+    design = _load_design(root)
+    study = _study(design, model)
+    output = root / "production_canaries" / model / f"attempt_{attempt:04d}"
+    database = output / "study.db"
+    if database.exists():
+        raise RuntimeError(f"Production canary study already exists: {database}")
+    output.mkdir(parents=True, exist_ok=True)
+    study_name = (
+        f"physics_{model}_production_canary_{design['code_commit'][:12]}_attempt_{attempt:04d}"
+    )
+    resolved_seed = (
+        SCREENING_SAMPLER_SEED_POLICY["base_seed"]
+        + SCREENING_SAMPLER_SEED_POLICY["model_offsets"][model]
+    )
+    invocation = {
+        "starting_optuna_trial_number": 0,
+        "expected_generation": 0,
+        "resolved_seed": resolved_seed,
+    }
+    canary_study = {**study, "study_name": study_name}
+    command = _base_train_command(
+        root,
+        model,
+        canary_study,
+        database=database,
+        study_name=study_name,
+    ) + [
+        f"hydra.sweeper.sampler.seed={resolved_seed}",
+        "hydra/launcher=packed_srun_clariden",
+        "hydra.sweeper.n_trials=4",
+        "hydra.sweeper.n_jobs=4",
+        f"hydra.sweep.dir={output}",
+        "hydra.launcher.cpus_per_task=16",
+        "hydra.launcher.mem_gb=96",
+    ]
+    started_at = datetime.now(timezone.utc).isoformat()
+    started_clock = time.monotonic()
+    subprocess.run(command, cwd=REPOSITORY_ROOT, check=True)  # nosec B603
+    loaded = _optuna().load_study(study_name=study_name, storage=f"sqlite:///{database}")
+    trials = list(loaded.get_trials(deepcopy=False))
+    expected_values = 2 * len(study["objectives"])
+    if len(trials) != 4 or any(
+        trial.state != _optuna().trial.TrialState.COMPLETE
+        or not _usable_trial(trial, expected_values=expected_values)
+        for trial in trials
+    ):
+        raise RuntimeError("Production canary did not produce four finite completed trials.")
+    bindings = _write_chunk_bindings(
+        root,
+        canary_study,
+        output,
+        set(),
+        all_trials=trials,
+        sampler_invocation=invocation,
+    )
+    rows = json.loads(bindings.read_text(encoding="utf-8"))["bindings"]
+    if len(rows) != 4 or any(row["optimized_metric_artifact"] is None for row in rows):
+        raise RuntimeError("Production canary bindings are incomplete.")
+    _write_json(
+        output / "success.json",
+        {
+            "schema_version": 2,
+            "completed_at": datetime.now(timezone.utc).isoformat(),
+            "started_at": started_at,
+            "elapsed_seconds": time.monotonic() - started_clock,
+            "slurm_job_id": os.environ.get("SLURM_JOB_ID"),
+            "model": model,
+            "attempt": attempt,
+            "study_name": study_name,
+            "trials": 4,
+            "epochs": SEARCH_EPOCHS,
+            "values_per_trial": expected_values,
+            "code_commit": design["code_commit"],
+            "screening_sampler_base": design["screening_sampler"],
+            "screening_sampler_base_sha256": _json_sha256(design["screening_sampler"]),
+            "screening_sampler": {**design["screening_sampler"], "seed": resolved_seed},
+            "screening_sampler_sha256": _json_sha256(
+                {**design["screening_sampler"], "seed": resolved_seed}
+            ),
+            "screening_sampler_seed_policy": design["screening_sampler_seed_policy"],
+            "screening_sampler_seed_policy_sha256": _json_sha256(
+                design["screening_sampler_seed_policy"]
+            ),
+            "sampler_invocation": invocation,
+            "bindings": str(bindings.resolve()),
+            "bindings_sha256": _sha256(bindings),
             "command": command,
         },
     )
@@ -1987,7 +2223,8 @@ def packed_pilot(root: Path, model: str) -> None:
         "src/train.py",
         "-m",
         f"experiment=physics/{model}_background_all",
-        f"hparams_search={model}_shared_optuna",
+        f"hparams_search={study.get('hparams_search', f'{model}_shared_optuna')}",
+        f"hydra.sweeper.sampler.seed={SCREENING_SAMPLER['seed']}",
         "hydra/launcher=packed_srun_clariden",
         f"experiment_name=physics_bgpair_packed_pilot_{model}",
         "trainer=gpu",
@@ -2024,6 +2261,11 @@ def packed_pilot(root: Path, model: str) -> None:
         output,
         set(),
         all_trials=trials,
+        sampler_invocation={
+            "starting_optuna_trial_number": 0,
+            "expected_generation": 0,
+            "resolved_seed": SCREENING_SAMPLER["seed"],
+        },
     )
     binding_rows = json.loads(bindings.read_text(encoding="utf-8"))["bindings"]
     if [row["trial_number"] for row in binding_rows] != [0, 1, 2, 3] or any(
@@ -2043,6 +2285,7 @@ def packed_pilot(root: Path, model: str) -> None:
     _write_json(
         output / "success.json",
         {
+            "schema_version": 2,
             "completed_at": datetime.now(timezone.utc).isoformat(),
             "started_at": started_at,
             "elapsed_seconds": elapsed_seconds,
@@ -2052,44 +2295,25 @@ def packed_pilot(root: Path, model: str) -> None:
             "values_per_trial": expected_values,
             "threshold_checkpoint_audit": threshold_audit,
             "code_commit": design["code_commit"],
+            "screening_sampler_base": design.get("screening_sampler"),
+            "screening_sampler": design.get("screening_sampler"),
+            "screening_sampler_seed_policy": design.get("screening_sampler_seed_policy"),
+            "sampler_invocation": {
+                "starting_optuna_trial_number": 0,
+                "expected_generation": 0,
+                "resolved_seed": SCREENING_SAMPLER["seed"],
+            },
             "command": command,
         },
     )
 
 
 def submit_next(root: Path, trials: int, jobs: int, timeout_min: int = 720) -> None:
-    """Submit a controller for the first incomplete model study."""
-    design = _load_design(root)
-    incomplete = [
-        study
-        for study in design["studies"]
-        if _trial_counts(root, study)["usable_complete"] < TARGET_TRIALS
-    ]
-    if not incomplete:
-        print("All six shared studies are complete.")
-        return
-    sbatch = shutil.which("sbatch")
-    if sbatch is None:
-        raise FileNotFoundError("sbatch is required to submit campaign controllers.")
-    study = incomplete[0]
-    script = REPOSITORY_ROOT / "scripts/clariden/physics_background_pairing_sweep.sbatch"
-    result = subprocess.run(  # nosec B603
-        [
-            sbatch,
-            "--parsable",
-            f"--nodes={math.ceil(min(trials, jobs) / 4)}",
-            (
-                "--export=ALL,"
-                f"STUDY_MODEL={study['model']},CHUNK_TRIALS={trials},"
-                f"CHUNK_JOBS={jobs},TIMEOUT_MIN={timeout_min}"
-            ),
-            str(script),
-        ],
-        check=True,
-        capture_output=True,
-        text=True,
+    """Refuse the legacy launcher that bypasses the operational control plane."""
+    raise RuntimeError(
+        "submit-next is disabled. Use physics_background_pairing_operations.py "
+        "submit-search so the canary gate, ledger, and generation boundaries are enforced."
     )
-    print(json.dumps({"model": study["model"], "job_id": result.stdout.strip()}))
 
 
 def main() -> None:
@@ -2106,6 +2330,8 @@ def main() -> None:
         pilot(root, args.model)
     elif args.command == "packed-pilot":
         packed_pilot(root, args.model)
+    elif args.command == "production-canary":
+        production_canary(root, args.model, args.attempt)
     elif args.command == "sweep":
         sweep(root, args.model, args.trials, args.jobs, args.timeout_min)
     elif args.command == "submit-next":

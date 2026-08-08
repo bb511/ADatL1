@@ -382,6 +382,307 @@ def test_snapshot_is_stable_and_selects_one_trial_per_study(tmp_path) -> None:
         trials = list(report.csv.DictReader(handle))
     assert len(trials) == 6
     assert all(row["selected_for_freeze"] == "True" for row in trials)
+    assert {row["sampler_name"] for row in trials} == {"legacy_unspecified"}
+    assert {row["sampler_seed_policy_identity_sha256"] for row in trials} == {""}
+    assert {row["nsga_generation"] for row in trials} == {""}
+
+
+def test_nsga_sampler_and_generation_are_exported_and_authenticated(tmp_path, monkeypatch) -> None:
+    """A clean screening package binds every trial to the frozen NSGA-II contract."""
+    root, design = _campaign(tmp_path)
+    design["screening_sampler"] = dict(report.NSGAII_SCREENING_SAMPLER)
+    design["screening_sampler_seed_policy"] = dict(report.NSGAII_SCREENING_SEED_POLICY)
+    loaded_studies = {}
+    for study in design["studies"]:
+        loaded = report._load_study(root, study)
+        trial = loaded.get_trials(deepcopy=False)[0]
+        trial.system_attrs[report.NSGA_GENERATION_KEY] = 0
+        loaded_studies[study["model"]] = loaded
+    monkeypatch.setattr(report, "_load_study", lambda _root, study: loaded_studies[study["model"]])
+
+    status, trials = report._trial_exports(root, design, final=True)
+
+    identity = report._json_sha256(report.NSGAII_SCREENING_SAMPLER)
+    policy_identity = report._json_sha256(report.NSGAII_SCREENING_SEED_POLICY)
+    assert {row["sampler_name"] for row in status} == {"nsgaii"}
+    assert {row["sampler_identity_sha256"] for row in status} == {identity}
+    assert {row["nsga_population_size"] for row in status} == {48}
+    assert {row["nsga_generation_count"] for row in status} == {1}
+    assert {row["nsga_missing_generation_trials"] for row in status} == {0}
+    assert {row["sampler_identity_sha256"] for row in trials} == {identity}
+    assert {row["sampler_seed_policy_identity_sha256"] for row in trials} == {policy_identity}
+    assert {row["nsga_generation"] for row in trials} == {0}
+
+
+def test_design_authenticates_frozen_nsga_seed_policy(tmp_path) -> None:
+    """A new campaign cannot silently change the sampler restart policy."""
+    root, design = _campaign(tmp_path)
+    design["screening_sampler"] = dict(report.NSGAII_SCREENING_SAMPLER)
+    design["screening_sampler_seed_policy"] = dict(report.NSGAII_SCREENING_SEED_POLICY)
+    _json(root / "design.json", design)
+
+    assert report._design(root)["screening_sampler_seed_policy"] == (
+        report.NSGAII_SCREENING_SEED_POLICY
+    )
+
+    design["screening_sampler_seed_policy"]["base_seed"] = 124
+    _json(root / "design.json", design)
+    with pytest.raises(RuntimeError, match="seed policy differs"):
+        report._design(root)
+
+
+def test_final_nsga_export_rejects_missing_generation(tmp_path) -> None:
+    """Final publication cannot infer an NSGA-II generation from trial order."""
+    root, design = _campaign(tmp_path)
+    design["screening_sampler"] = dict(report.NSGAII_SCREENING_SAMPLER)
+    design["screening_sampler_seed_policy"] = dict(report.NSGAII_SCREENING_SEED_POLICY)
+
+    with pytest.raises(RuntimeError, match="nsga2:generation"):
+        report._trial_exports(root, design, final=True)
+
+
+def test_resolved_hydra_sampler_must_equal_frozen_design(tmp_path) -> None:
+    """The design declaration is checked against the sampler workers resolved."""
+    design = {
+        "screening_sampler": dict(report.NSGAII_SCREENING_SAMPLER),
+        "screening_sampler_seed_policy": dict(report.NSGAII_SCREENING_SEED_POLICY),
+    }
+    hydra = tmp_path / ".hydra" / "hydra.yaml"
+    hydra.parent.mkdir()
+    resolved = {
+        key: value for key, value in report.NSGAII_SCREENING_SAMPLER.items() if key != "name"
+    }
+    hydra.write_text(
+        report.yaml.safe_dump({"hydra": {"sweeper": {"sampler": resolved}}}),
+        encoding="utf-8",
+    )
+
+    report._validate_resolved_screening_sampler(tmp_path, design, resolved_seed=123)
+
+    with pytest.raises(RuntimeError, match="differs from the design"):
+        report._validate_resolved_screening_sampler(tmp_path, design, resolved_seed=124)
+
+    resolved["population_size"] = 47
+    hydra.write_text(
+        report.yaml.safe_dump({"hydra": {"sweeper": {"sampler": resolved}}}),
+        encoding="utf-8",
+    )
+    with pytest.raises(RuntimeError, match="differs from the design"):
+        report._validate_resolved_screening_sampler(tmp_path, design, resolved_seed=123)
+
+
+def test_nsga_binding_authenticates_invocation_seed_policy(tmp_path, monkeypatch) -> None:
+    """Every binding proves the exact per-model, per-starting-trial sampler seed."""
+    root, design = _campaign(tmp_path)
+    design["screening_sampler"] = dict(report.NSGAII_SCREENING_SAMPLER)
+    design["screening_sampler_seed_policy"] = dict(report.NSGAII_SCREENING_SEED_POLICY)
+
+    loaded_studies = {}
+    for study in design["studies"]:
+        model = study["model"]
+        loaded = report._load_study(root, study)
+        trial = loaded.get_trials(deepcopy=False)[0]
+        trial.system_attrs[report.NSGA_GENERATION_KEY] = 0
+        if model == "ae":
+            trial.state = optuna.trial.TrialState.FAIL
+            trial.values = None
+            trial.system_attrs.pop(report.NSGA_GENERATION_KEY)
+        loaded_studies[model] = loaded
+        seed = (
+            report.NSGAII_SCREENING_SEED_POLICY["base_seed"]
+            + report.NSGAII_SCREENING_SEED_POLICY["model_offsets"][model]
+        )
+        resolved_sampler = {**report.NSGAII_SCREENING_SAMPLER, "seed": seed}
+        binding_path = next((root / "sweeps" / model).glob("*/trial_bindings.json"))
+        payload = json.loads(binding_path.read_text(encoding="utf-8"))
+        payload.update(
+            {
+                "schema_version": 2,
+                "hparams_search": study["hparams_search"],
+                "screening_sampler_base": report.NSGAII_SCREENING_SAMPLER,
+                "screening_sampler_base_sha256": report._json_sha256(
+                    report.NSGAII_SCREENING_SAMPLER
+                ),
+                "screening_sampler": resolved_sampler,
+                "screening_sampler_sha256": report._json_sha256(resolved_sampler),
+                "screening_sampler_seed_policy": report.NSGAII_SCREENING_SEED_POLICY,
+                "screening_sampler_seed_policy_sha256": report._json_sha256(
+                    report.NSGAII_SCREENING_SEED_POLICY
+                ),
+                "sampler_invocation": {
+                    "starting_optuna_trial_number": 0,
+                    "expected_generation": 0,
+                    "resolved_seed": seed,
+                },
+            }
+        )
+        payload["bindings"][0].update(
+            {
+                "hparams_search": study["hparams_search"],
+                "screening_sampler": resolved_sampler,
+                "nsga2_trial_phase": ("pre_sampling_failure" if model == "ae" else "sampled"),
+                "nsga2_generation": None if model == "ae" else 0,
+                "resolved_sampler_seed": seed,
+            }
+        )
+        if model == "ae":
+            payload["bindings"][0].update(
+                {
+                    "state": "FAIL",
+                    "params": {},
+                    "values": None,
+                    "hydra_run_dir": None,
+                    "optimized_metric_artifact": None,
+                    "optimized_metric_artifact_sha256": None,
+                    "pre_sampling_failure_evidence": "optuna_terminal_state",
+                }
+            )
+        _json(binding_path, payload)
+        if model != "ae":
+            hydra_path = Path(payload["bindings"][0]["hydra_run_dir"]) / ".hydra/hydra.yaml"
+            hydra_path.write_text(
+                report.yaml.safe_dump(
+                    {
+                        "hydra": {
+                            "sweeper": {
+                                "sampler": {
+                                    key: value
+                                    for key, value in resolved_sampler.items()
+                                    if key != "name"
+                                }
+                            }
+                        }
+                    }
+                ),
+                encoding="utf-8",
+            )
+
+    monkeypatch.setattr(report, "_load_study", lambda _root, study: loaded_studies[study["model"]])
+    bindings = report._binding_index(root)
+    report._validate_bindings(root, design, bindings)
+    status, trials = report._trial_exports(root, design, final=True)
+    assert (
+        next(row for row in status if row["model"] == "ae")["nsga_pre_sampling_failure_trials"]
+        == 1
+    )
+    assert next(row for row in trials if row["model"] == "ae")["nsga_trial_phase"] == (
+        "pre_sampling_failure"
+    )
+
+    bindings[("ae", 0)]["pre_sampling_failure_evidence"] = "stale_repair"
+    with pytest.raises(RuntimeError, match="sampler evidence"):
+        report._validate_bindings(root, design, bindings)
+    bindings[("ae", 0)]["pre_sampling_failure_evidence"] = "optuna_terminal_state"
+
+    bindings[("vae", 0)]["resolved_sampler_seed"] += 1
+    with pytest.raises(RuntimeError, match="sampler evidence"):
+        report._validate_bindings(root, design, bindings)
+
+
+def test_unbound_pre_sampling_failure_requires_authenticated_stale_repair(
+    tmp_path, monkeypatch
+) -> None:
+    """A hard kill before any Hydra run is reportable only through repair evidence."""
+    root, design = _campaign(tmp_path)
+    design["screening_sampler"] = dict(report.NSGAII_SCREENING_SAMPLER)
+    design["screening_sampler_seed_policy"] = dict(report.NSGAII_SCREENING_SEED_POLICY)
+    loaded_studies = {}
+    for study in design["studies"]:
+        loaded = report._load_study(root, study)
+        trial = loaded.get_trials(deepcopy=False)[0]
+        if study["model"] == "ae":
+            trial.state = optuna.trial.TrialState.FAIL
+            trial.values = None
+        else:
+            trial.system_attrs[report.NSGA_GENERATION_KEY] = 0
+        loaded_studies[study["model"]] = loaded
+    ae_study = design["studies"][0]
+    sweep_dir = next((root / "sweeps" / "ae").iterdir())
+    (sweep_dir / "trial_bindings.json").unlink()
+    invocation = {
+        "starting_optuna_trial_number": 0,
+        "expected_generation": 0,
+        "resolved_seed": 123,
+    }
+    resolved_sampler = {**report.NSGAII_SCREENING_SAMPLER, "seed": 123}
+    _json(
+        sweep_dir / "chunk.json",
+        {
+            "schema_version": 2,
+            "model": "ae",
+            "study_name": ae_study["study_name"],
+            "hparams_search": ae_study["hparams_search"],
+            "screening_sampler_base": report.NSGAII_SCREENING_SAMPLER,
+            "screening_sampler_base_sha256": report._json_sha256(report.NSGAII_SCREENING_SAMPLER),
+            "screening_sampler": resolved_sampler,
+            "screening_sampler_sha256": report._json_sha256(resolved_sampler),
+            "screening_sampler_seed_policy": report.NSGAII_SCREENING_SEED_POLICY,
+            "screening_sampler_seed_policy_sha256": report._json_sha256(
+                report.NSGAII_SCREENING_SEED_POLICY
+            ),
+            "sampler_invocation": invocation,
+            "requested_trials": 1,
+            "prior_trial_numbers": [],
+        },
+    )
+    backup = root / "state/study_backups/ae.db"
+    backup.parent.mkdir(parents=True)
+    backup.write_bytes(b"authenticated synthetic backup")
+    repair = root / "state/stale_repairs/repair__ae.json"
+    _json(
+        repair,
+        {
+            "schema_version": 1,
+            "code_commit": design["code_commit"],
+            "model": "ae",
+            "scheduler_proof": {
+                "live_packed_search_job_ids": [],
+                "active_model_ledger_rows": [],
+            },
+            "database": str((root / "studies/ae.db").resolve()),
+            "backup": str(backup.resolve()),
+            "backup_sha256": report._sha256(backup),
+            "trials_before": [{"trial_number": 0, "state": "RUNNING"}],
+            "trials_after": [
+                {
+                    "trial_number": 0,
+                    "state": "FAIL",
+                    "params": {},
+                    "values": None,
+                    "system_attrs": {},
+                    "nsga2_trial_phase": "pre_sampling_failure",
+                }
+            ],
+            "updated_binding_artifacts": [],
+        },
+    )
+    (root / "state/failures.jsonl").write_text(
+        json.dumps(
+            {
+                "classification": "stale_optuna_trial_repair",
+                "outcome": "repaired",
+                "artifact": str(repair.resolve()),
+                "artifact_sha256": report._sha256(repair),
+            }
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(report, "_load_study", lambda _root, study: loaded_studies[study["model"]])
+
+    status, trials = report._trial_exports(root, design, final=True)
+
+    assert (
+        next(row for row in status if row["model"] == "ae")["nsga_pre_sampling_failure_trials"]
+        == 1
+    )
+    assert next(row for row in trials if row["model"] == "ae")["nsga_trial_phase"] == (
+        "pre_sampling_failure"
+    )
+
+    (root / "state/failures.jsonl").write_text("", encoding="utf-8")
+    with pytest.raises(RuntimeError, match="pre-sampling failure evidence"):
+        report._trial_exports(root, design, final=True)
 
 
 def test_search_checkpoint_candidate_audit_allows_only_absent_stable(tmp_path) -> None:

@@ -33,6 +33,29 @@ if str(REPOSITORY_ROOT) not in sys.path:
 
 MODELS = ("ae", "vae", "dsae", "dsvae", "svdd", "realnvp")
 TARGET_TRIALS = 600
+NSGA_GENERATION_KEY = "nsga2:generation"
+NSGAII_SCREENING_SAMPLER = {
+    "name": "nsgaii",
+    "_target_": "optuna.samplers.NSGAIISampler",
+    "seed": 123,
+    "population_size": 48,
+    "mutation_prob": None,
+    "crossover_prob": 0.9,
+    "swapping_prob": 0.5,
+    "constraints_func": None,
+}
+NSGAII_SEED_POLICY = {
+    "name": "base_seed_plus_model_offset_plus_starting_trial",
+    "formula": "base_seed + model_offsets[model] + starting_optuna_trial_number",
+    "base_seed": 123,
+    "model_offsets": {model: index * 100000 for index, model in enumerate(MODELS)},
+    "population_size": 48,
+    "generation_size": 48,
+    "final_partial_population": 24,
+    "target_trials": TARGET_TRIALS,
+    "require_pristine_study": True,
+    "canary_studies_are_separate": True,
+}
 MAX_RETRAIN_ARRAY_TASKS = 1001
 RESTART_CANARY_SCHEMA_VERSION = 2
 RESTART_CANARY_EPOCHS = 6
@@ -72,7 +95,9 @@ LEDGER_FIELDS = (
     "log_sha256",
     "success_sha256",
     "bindings_sha256",
+    "attempt",
 )
+LEGACY_LEDGER_FIELDS = LEDGER_FIELDS[:-1]
 
 
 def _parse_args() -> argparse.Namespace:
@@ -188,9 +213,13 @@ def _ledger(root: Path) -> tuple[Path, list[dict[str, str]]]:
         return path, []
     with path.open(encoding="utf-8", newline="") as handle:
         reader = csv.DictReader(handle)
-        if tuple(reader.fieldnames or ()) != LEDGER_FIELDS:
+        fields = tuple(reader.fieldnames or ())
+        if fields not in {LEDGER_FIELDS, LEGACY_LEDGER_FIELDS}:
             raise RuntimeError(f"Unexpected job-ledger columns in {path}.")
         rows = list(reader)
+    if fields == LEGACY_LEDGER_FIELDS:
+        for row in rows:
+            row["attempt"] = ""
     if len({row["job_id"] for row in rows}) != len(rows):
         raise RuntimeError("job_history.csv contains duplicate job IDs.")
     return path, rows
@@ -202,6 +231,16 @@ def _design(root: Path) -> dict[str, Any]:
     design = json.loads(path.read_text(encoding="utf-8"))
     if design.get("schema_version") != 2:
         raise RuntimeError("Expected a schema-2 frozen campaign design.")
+    sampler = design.get("screening_sampler")
+    if sampler is not None and sampler != NSGAII_SCREENING_SAMPLER:
+        raise RuntimeError("Campaign screening sampler differs from the NSGA-II contract.")
+    if sampler is not None and any(
+        study.get("hparams_search") != f"{study.get('model')}_shared_nsgaii"
+        for study in design.get("studies", [])
+    ):
+        raise RuntimeError("Campaign HPO config differs from the NSGA-II contract.")
+    if sampler is not None and design.get("screening_sampler_seed_policy") != NSGAII_SEED_POLICY:
+        raise RuntimeError("Campaign sampler seed policy differs from the NSGA-II contract.")
     return design
 
 
@@ -814,6 +853,7 @@ def _require_canary_gate(root: Path, design: dict[str, Any]) -> None:
     if (
         payload.get("schema_version") != 1
         or payload.get("code_commit") != design["code_commit"]
+        or payload.get("main_studies_empty") is not True
         or payload.get("bindings") != 24
         or payload.get("checkpoint_selections") != 224
         or len(payload.get("mlflow_runs", [])) != 24
@@ -827,6 +867,7 @@ def _require_canary_gate(root: Path, design: dict[str, Any]) -> None:
         or availability.get("available", -1) != 248 + availability.get("stable_available", -1)
         or len(jobs) != len(MODELS)
         or {row.get("model") for row in jobs} != set(MODELS)
+        or len({(row.get("model"), row.get("attempt")) for row in jobs}) != len(MODELS)
         or any(
             row.get("state") != "COMPLETED"
             or row.get("exit_code") != "0:0"
@@ -834,6 +875,8 @@ def _require_canary_gate(root: Path, design: dict[str, Any]) -> None:
             or not row.get("log_sha256")
             or not row.get("success_sha256")
             or not row.get("bindings_sha256")
+            or not str(row.get("attempt", "")).isdigit()
+            or int(row["attempt"]) <= 0
             for row in jobs
         )
         or len(studies) != len(MODELS)
@@ -903,18 +946,37 @@ def submit_canary(
         _assert_no_live_search_overlap(rows, model)
         if _active_model_rows(rows, model):
             raise RuntimeError(f"Refusing to overlap an active {model} campaign job.")
+        model_attempts = [
+            row
+            for row in rows
+            if row.get("kind") == "production_canary" and row.get("model") == model
+        ]
         if any(
-            row.get("kind") == "production_canary" and row.get("model") == model for row in rows
+            _normalized_state(row.get("state", "")) == "COMPLETED"
+            and row.get("exit_code") == "0:0"
+            for row in model_attempts
         ):
             raise RuntimeError(
-                f"Campaign ledger already contains a production canary for {model}."
+                f"Campaign ledger already contains a successful production canary for {model}."
             )
-        _assert_database_quiescent(root, model)
+        attempt = (
+            max(
+                (
+                    int(row["attempt"])
+                    for row in model_attempts
+                    if str(row.get("attempt", "")).isdigit()
+                ),
+                default=len(model_attempts),
+            )
+            + 1
+        )
         _require_restart_canary_gate(root, design)
-        trial_count = _study_trial_count(root, design, model)
-        if trial_count != 0:
+        canary_database = (
+            root / "production_canaries" / model / f"attempt_{attempt:04d}" / "study.db"
+        )
+        if canary_database.exists():
             raise RuntimeError(
-                f"Production canary requires an empty {model} study; found {trial_count} trials."
+                f"Production canary study already exists for {model}: {canary_database}."
             )
         for path in (data_dir, raw_data_dir, pairing_dir):
             if not path.is_dir():
@@ -937,6 +999,8 @@ def submit_canary(
             "CHUNK_TRIALS": 4,
             "CHUNK_JOBS": 4,
             "TIMEOUT_MIN": 720,
+            "CANARY_MODE": 1,
+            "CANARY_ATTEMPT": attempt,
         }
         export_value = "ALL," + ",".join(f"{key}={value}" for key, value in exports.items())
         sbatch = shutil.which("sbatch")
@@ -964,6 +1028,7 @@ def submit_canary(
                 "model": model,
                 "state": "PENDING",
                 "commit": design["code_commit"],
+                "attempt": str(attempt),
                 "log_path": str(
                     Path("/iopsstor/scratch/cscs/vjimenez/adatl1/logs/slurm")
                     / f"phys-bgpair-sweep-{job_id}.out"
@@ -1033,6 +1098,18 @@ def _submit_search_locked(
             f"Search chunk would exceed {TARGET_TRIALS} usable trials for {model}: "
             f"{usable} complete + {trials} requested; at most {remaining} remain."
         )
+    completed_in_generation = usable % NSGAII_SEED_POLICY["generation_size"]
+    generation = usable // NSGAII_SEED_POLICY["generation_size"]
+    generation_capacity = min(
+        NSGAII_SEED_POLICY["generation_size"],
+        TARGET_TRIALS - generation * NSGAII_SEED_POLICY["generation_size"],
+    )
+    generation_remaining = generation_capacity - completed_in_generation
+    if trials > generation_remaining:
+        raise RuntimeError(
+            f"Search chunk crosses the NSGA-II generation boundary for {model}: "
+            f"generation {generation} has {generation_remaining} slots, got {trials}."
+        )
     for path in (data_dir, raw_data_dir, pairing_dir):
         if not path.is_dir():
             raise FileNotFoundError(path)
@@ -1054,6 +1131,7 @@ def _submit_search_locked(
         "CHUNK_TRIALS": trials,
         "CHUNK_JOBS": jobs,
         "TIMEOUT_MIN": timeout_min,
+        "CANARY_MODE": 0,
     }
     export_value = "ALL," + ",".join(f"{key}={value}" for key, value in exports.items())
     sbatch = shutil.which("sbatch")
@@ -1400,6 +1478,108 @@ def _candidate_checkpoint(path: Path, model: str) -> dict[str, Any]:
     return {"path": str(path.resolve()), "sha256": _sha256(path), "thresholds": thresholds}
 
 
+def _canary_trial_evidence(
+    root: Path, design: dict[str, Any], accepted_jobs: list[dict[str, str]]
+) -> tuple[
+    list[dict[str, Any]],
+    dict[tuple[str, int], dict[str, Any]],
+    list[dict[str, Any]],
+    list[dict[str, Any]],
+]:
+    """Authenticate isolated canary studies, bindings, selections, and MLflow identities."""
+    import optuna
+
+    status_rows = []
+    bindings = {}
+    selection_rows = []
+    mlflow_rows = []
+    accepted_by_model = {row["model"]: row for row in accepted_jobs}
+    for study in design["studies"]:
+        model = study["model"]
+        attempt = int(accepted_by_model[model]["attempt"])
+        canary_root = root / "production_canaries" / model / f"attempt_{attempt:04d}"
+        database = canary_root / "study.db"
+        study_name = (
+            f"physics_{model}_production_canary_{design['code_commit'][:12]}_"
+            f"attempt_{attempt:04d}"
+        )
+        loaded = optuna.load_study(study_name=study_name, storage=f"sqlite:///{database}")
+        trials = list(loaded.get_trials(deepcopy=False))
+        expected_values = 2 * len(study["objectives"])
+        usable = [
+            trial
+            for trial in trials
+            if trial.state == optuna.trial.TrialState.COMPLETE
+            and trial.values is not None
+            and len(trial.values) == expected_values
+            and all(math.isfinite(float(value)) for value in trial.values)
+        ]
+        states = {state.name.lower(): 0 for state in optuna.trial.TrialState}
+        for trial in trials:
+            states[trial.state.name.lower()] += 1
+        status_rows.append(
+            {
+                "model": model,
+                "total": len(trials),
+                "usable_complete": len(usable),
+                **states,
+            }
+        )
+        payload = json.loads((canary_root / "trial_bindings.json").read_text(encoding="utf-8"))
+        trial_index = {int(trial.number): trial for trial in trials}
+        for binding in payload["bindings"]:
+            trial_number = int(binding["trial_number"])
+            trial = trial_index[trial_number]
+            values = [float(value) for value in trial.values]
+            if (
+                binding["state"] != trial.state.name
+                or binding["params"] != trial.params
+                or binding["values"] != values
+                or binding.get("nsga2_generation") != trial.system_attrs.get(NSGA_GENERATION_KEY)
+            ):
+                raise RuntimeError(
+                    f"Canary binding differs from Optuna trial {(model, trial_number)}."
+                )
+            key = (model, trial_number)
+            bindings[key] = binding
+            artifact_path = Path(binding["optimized_metric_artifact"])
+            if _sha256(artifact_path) != binding["optimized_metric_artifact_sha256"]:
+                raise RuntimeError(f"Changed canary objective artifact: {artifact_path}.")
+            artifact = json.loads(artifact_path.read_text(encoding="utf-8"))
+            if artifact.get("optimized_metric") != values:
+                raise RuntimeError(f"Canary artifact differs from Optuna trial {key}.")
+            for objective in study["objectives"]:
+                selection_rows.append(
+                    {
+                        "model": model,
+                        "logical_objective": objective["id"],
+                        "optimized_ckpt_name": artifact["selections"][objective["id"]][
+                            "optimized_ckpt_name"
+                        ],
+                    }
+                )
+            provenance = artifact["run_provenance"]
+            loggers = [logger for logger in provenance.get("loggers", []) if logger.get("run_id")]
+            if len(loggers) != 1:
+                raise RuntimeError(f"Canary run has no unique MLflow identity: {key}.")
+            mlflow_rows.append(
+                {
+                    "phase": "search",
+                    "model": model,
+                    "trial_number": trial_number,
+                    "retrain_index": "",
+                    "experiment_name": provenance.get("experiment_name", ""),
+                    "experiment_id": loggers[0].get("experiment_id", ""),
+                    "run_id": loggers[0]["run_id"],
+                    "run_name": provenance.get("run_name", ""),
+                    "hydra_run_dir": provenance.get("hydra_output_dir", ""),
+                    "checkpoint_run_dir": provenance.get("checkpoint_run_dir", ""),
+                    "artifact": str(artifact_path),
+                }
+            )
+    return status_rows, bindings, selection_rows, mlflow_rows
+
+
 def validate_canaries(root: Path, repository: Path) -> Path:
     """Fail closed unless all six four-trial production canaries satisfy every gate."""
     from scripts import physics_background_pairing_report as report
@@ -1407,9 +1587,42 @@ def validate_canaries(root: Path, repository: Path) -> Path:
     design = report._design(root)
     _authenticate_execution_repository(repository, design)
     ledger_rows = reconcile(root, repository, True)
-    canary_jobs = [row for row in ledger_rows if row.get("kind") == "production_canary"]
+    canary_attempts = [row for row in ledger_rows if row.get("kind") == "production_canary"]
+    if any(
+        not str(row.get("attempt", "")).isdigit()
+        or int(row["attempt"]) <= 0
+        or _normalized_state(row.get("state", "")) not in TERMINAL_STATES
+        for row in canary_attempts
+    ):
+        raise RuntimeError("Canary ledger contains an active or unidentified attempt.")
+    if len({(row["model"], row["attempt"]) for row in canary_attempts}) != len(canary_attempts):
+        raise RuntimeError("Canary ledger contains duplicate attempt identities.")
+    for model in MODELS:
+        attempts = sorted(
+            (row for row in canary_attempts if row["model"] == model),
+            key=lambda row: int(row["attempt"]),
+        )
+        if [int(row["attempt"]) for row in attempts] != list(range(1, len(attempts) + 1)):
+            raise RuntimeError(f"Canary attempt history is not contiguous for {model}.")
+    canary_jobs = [
+        row
+        for row in canary_attempts
+        if _normalized_state(row["state"]) == "COMPLETED" and row["exit_code"] == "0:0"
+    ]
     if len(canary_jobs) != len(MODELS) or {row["model"] for row in canary_jobs} != set(MODELS):
-        raise RuntimeError("Canary ledger does not contain exactly one job per model.")
+        raise RuntimeError(
+            "Canary ledger must contain exactly one successful accepted attempt per model."
+        )
+    if any(
+        int(row["attempt"])
+        != max(
+            int(attempt["attempt"])
+            for attempt in canary_attempts
+            if attempt["model"] == row["model"]
+        )
+        for row in canary_jobs
+    ):
+        raise RuntimeError("A successful canary is not the final accepted model attempt.")
     for row in canary_jobs:
         if (
             row["state"] != "COMPLETED"
@@ -1420,8 +1633,13 @@ def validate_canaries(root: Path, repository: Path) -> Path:
             or not row["bindings_sha256"]
         ):
             raise RuntimeError(f"Production canary job is not authenticated: {row}")
+        current_hashes = _completed_canary_artifacts(root, design, row)
+        if current_hashes != (row["success_sha256"], row["bindings_sha256"]):
+            raise RuntimeError(f"Production canary changed after ledger sealing: {row}")
 
-    status_rows, _ = report._trial_exports(root, design)
+    status_rows, bindings, selection_rows, mlflow_rows = _canary_trial_evidence(
+        root, design, canary_jobs
+    )
     for row in status_rows:
         if any(
             int(row[key]) != expected
@@ -1436,13 +1654,10 @@ def validate_canaries(root: Path, repository: Path) -> Path:
             )
         ):
             raise RuntimeError(f"Canary Optuna state is incomplete: {row}")
-    bindings = report._binding_index(root)
     expected_bindings = {(model, index) for model in MODELS for index in range(4)}
     if set(bindings) != expected_bindings:
         raise RuntimeError("Canary bindings do not exactly cover trials 0-3 for six models.")
-    report._validate_bindings(root, design, bindings)
-    checkpoint_rows, mlflow_rows = report._checkpoint_rows(root, design, include_retrains=False)
-    annotated = report._annotate_checkpoint_families(design, checkpoint_rows)
+    annotated = report._annotate_checkpoint_families(design, selection_rows)
     if len(mlflow_rows) != 24 or len(annotated) != 224:
         raise RuntimeError("Canary MLflow/checkpoint-selection cardinality is incomplete.")
     validated_mlflow = report._validate_mlflow_runs(root, design, mlflow_rows, final=True)
@@ -1454,6 +1669,8 @@ def validate_canaries(root: Path, repository: Path) -> Path:
         config = yaml.safe_load((hydra_dir / ".hydra" / "config.yaml").read_text(encoding="utf-8"))
         if (
             config.get("test") is not False
+            or config.get("trainer", {}).get("min_epochs") != 50
+            or config.get("trainer", {}).get("max_epochs") != 50
             or config.get("data", {}).get("validation_aux_datasets") != []
             or config.get("data", {}).get("expose_zerobias_sources") is not True
             or set(config.get("paths", {}).get("zerobias", {})) != {"ZB_run396102", "ZB_run398183"}
@@ -1531,13 +1748,18 @@ def validate_canaries(root: Path, repository: Path) -> Path:
         "stable_available": stable_available,
         "stable_missing": len(stable_rows) - stable_available,
     }
+    main_studies_empty = all(_study_trial_count(root, design, model) == 0 for model in MODELS)
+    if not main_studies_empty:
+        raise RuntimeError("Production canaries contaminated one or more final Optuna studies.")
 
     output = root / "state" / "production_canary_validation.json"
     payload = {
         "schema_version": 1,
         "validated_at": datetime.now(timezone.utc).isoformat(),
         "code_commit": design["code_commit"],
+        "main_studies_empty": main_studies_empty,
         "jobs": canary_jobs,
+        "attempt_history": canary_attempts,
         "studies": status_rows,
         "bindings": len(bindings),
         "checkpoint_selections": len(annotated),
@@ -1618,6 +1840,17 @@ def _validate_completed_search_bindings(
     if len(studies) != 1:
         raise RuntimeError(f"Frozen design does not contain exactly one {model} study.")
     study = studies[0]
+    sampler = design.get("screening_sampler")
+    expected_hparams = study.get("hparams_search", f"{model}_shared_optuna")
+    chunk = json.loads(chunk_path.read_text(encoding="utf-8"))
+    invocation = chunk.get("sampler_invocation")
+    resolved_sampler = (
+        None
+        if sampler is None or not isinstance(invocation, dict)
+        else {**sampler, "seed": invocation.get("resolved_seed")}
+    )
+    if sampler is not None and not isinstance(invocation, dict):
+        raise RuntimeError(f"Terminal chunk has no sampler invocation: {chunk_path}.")
     expected_order = [objective["id"] for objective in study["objectives"]]
     expected_values = 2 * len(expected_order)
     indexed: dict[tuple[str, int], dict[str, Any]] = {}
@@ -1637,6 +1870,7 @@ def _validate_completed_search_bindings(
         if (
             binding.get("model") != model
             or binding.get("study_name") != study["study_name"]
+            or binding.get("hparams_search", expected_hparams) != expected_hparams
             or binding.get("state") != "COMPLETE"
             or key in indexed
             or not isinstance(values, list)
@@ -1647,6 +1881,17 @@ def _validate_completed_search_bindings(
             or _sha256(artifact_path) != binding.get("optimized_metric_artifact_sha256")
         ):
             raise RuntimeError(f"Terminal search binding is not usable: {key}.")
+        if sampler is not None and (
+            binding.get("screening_sampler") != resolved_sampler
+            or binding.get("nsga2_trial_phase") != "sampled"
+            or not isinstance(binding.get("nsga2_generation"), int)
+            or int(binding["nsga2_generation"]) < 0
+            or binding.get("nsga2_generation") != invocation.get("expected_generation")
+            or binding.get("resolved_sampler_seed") != invocation.get("resolved_seed")
+        ):
+            raise RuntimeError(
+                f"Terminal search binding has unauthenticated {NSGA_GENERATION_KEY}: {key}."
+            )
         indexed[key] = binding
         artifact = json.loads(artifact_path.read_text(encoding="utf-8"))
         provenance = artifact.get("run_provenance", {})
@@ -1726,6 +1971,26 @@ def _validate_completed_search_bindings(
             "selection_rows": len(selection_rows),
             "candidate_slots": len(candidates),
             "mlflow_runs": len(validated_mlflow),
+            "hparams_search": expected_hparams,
+            "screening_sampler_base": sampler,
+            "screening_sampler_base_sha256": (None if sampler is None else _json_sha256(sampler)),
+            "screening_sampler": resolved_sampler,
+            "screening_sampler_sha256": (
+                None if resolved_sampler is None else _json_sha256(resolved_sampler)
+            ),
+            "screening_sampler_seed_policy": design.get("screening_sampler_seed_policy"),
+            "screening_sampler_seed_policy_sha256": (
+                None if sampler is None else _json_sha256(design["screening_sampler_seed_policy"])
+            ),
+            "sampler_invocation": invocation,
+            "nsga2_generations": (
+                None
+                if sampler is None
+                else {
+                    str(binding["trial_number"]): int(binding["nsga2_generation"])
+                    for binding in binding_rows
+                }
+            ),
         },
     )
     return output
@@ -1746,28 +2011,141 @@ def _completed_search_artifacts(
             f"Expected one terminal chunk manifest for job {row['job_id']}, found {len(matches)}."
         )
     chunk_path, chunk = matches[0]
+    sampler = design.get("screening_sampler")
+    studies = [study for study in design.get("studies", []) if study.get("model") == model]
+    if sampler is not None and len(studies) != 1:
+        raise RuntimeError(f"Frozen design does not contain exactly one {model} study.")
+    study = studies[0] if studies else {"model": model, "study_name": chunk.get("study_name")}
+    expected_hparams = study.get("hparams_search", f"{model}_shared_optuna")
+    expected_schema = 2 if sampler is not None else 1
+    invocation = chunk.get("sampler_invocation")
+    resolved_sampler = (
+        None
+        if sampler is None or not isinstance(invocation, dict)
+        else {**sampler, "seed": invocation.get("resolved_seed")}
+    )
+    if sampler is not None and not isinstance(invocation, dict):
+        raise RuntimeError(f"Terminal chunk has no sampler invocation: {chunk_path}.")
     if (
-        chunk.get("schema_version") != 1
+        chunk.get("schema_version") != expected_schema
         or chunk.get("model") != model
         or chunk.get("controller_status") != "complete"
         or not chunk.get("completed_at")
         or int(chunk.get("requested_trials", 0)) <= 0
     ):
         raise RuntimeError(f"Terminal chunk manifest is incomplete: {chunk_path}.")
+    if sampler is not None and (
+        chunk.get("study_name") != study["study_name"]
+        or chunk.get("hparams_search") != expected_hparams
+        or chunk.get("screening_sampler_base") != sampler
+        or chunk.get("screening_sampler_base_sha256") != _json_sha256(sampler)
+        or chunk.get("screening_sampler") != resolved_sampler
+        or chunk.get("screening_sampler_sha256") != _json_sha256(resolved_sampler)
+        or chunk.get("screening_sampler_seed_policy") != NSGAII_SEED_POLICY
+        or chunk.get("screening_sampler_seed_policy_sha256") != _json_sha256(NSGAII_SEED_POLICY)
+        or not isinstance(invocation.get("expected_generation"), int)
+        or not isinstance(invocation.get("starting_optuna_trial_number"), int)
+        or invocation.get("resolved_seed")
+        != NSGAII_SEED_POLICY["base_seed"]
+        + NSGAII_SEED_POLICY["model_offsets"][model]
+        + invocation["starting_optuna_trial_number"]
+        or f"hparams_search={expected_hparams}" not in chunk.get("command", [])
+        or f"hydra.sweeper.sampler.seed={invocation['resolved_seed']}"
+        not in chunk.get("command", [])
+    ):
+        raise RuntimeError(f"Terminal chunk sampler provenance differs: {chunk_path}.")
     bindings_path = chunk_path.parent / "trial_bindings.json"
     if not bindings_path.is_file():
         raise FileNotFoundError(f"Terminal trial bindings are missing: {bindings_path}.")
     bindings = json.loads(bindings_path.read_text(encoding="utf-8"))
     rows = bindings.get("bindings", [])
     if (
-        bindings.get("schema_version") != 1
+        bindings.get("schema_version") != expected_schema
         or bindings.get("model") != model
         or len(rows) != int(chunk["requested_trials"])
         or any(binding.get("optimized_metric_artifact") is None for binding in rows)
     ):
         raise RuntimeError(f"Terminal trial bindings are incomplete: {bindings_path}.")
+    if sampler is not None and (
+        bindings.get("study_name") != study["study_name"]
+        or bindings.get("hparams_search") != expected_hparams
+        or bindings.get("screening_sampler_base") != sampler
+        or bindings.get("screening_sampler") != resolved_sampler
+        or bindings.get("screening_sampler_sha256") != _json_sha256(resolved_sampler)
+        or bindings.get("screening_sampler_seed_policy") != NSGAII_SEED_POLICY
+        or bindings.get("sampler_invocation") != invocation
+    ):
+        raise RuntimeError(f"Terminal binding sampler provenance differs: {bindings_path}.")
     validation = _validate_completed_search_bindings(root, design, chunk_path, bindings_path, rows)
     return _sha256(validation), _sha256(bindings_path)
+
+
+def _completed_canary_artifacts(
+    root: Path, design: dict[str, Any], row: dict[str, str]
+) -> tuple[str, str]:
+    """Authenticate one disposable four-trial packed canary."""
+    model = row["model"]
+    if not str(row.get("attempt", "")).isdigit() or int(row["attempt"]) <= 0:
+        raise RuntimeError(f"Production canary has no valid attempt identity: {row}.")
+    attempt = int(row["attempt"])
+    canary_root = root / "production_canaries" / model / f"attempt_{attempt:04d}"
+    success_path = canary_root / "success.json"
+    bindings_path = canary_root / "trial_bindings.json"
+    if not success_path.is_file() or not bindings_path.is_file():
+        raise FileNotFoundError(f"Packed canary artifacts are missing for {model}.")
+    success = json.loads(success_path.read_text(encoding="utf-8"))
+    bindings = json.loads(bindings_path.read_text(encoding="utf-8"))
+    resolved_seed = NSGAII_SEED_POLICY["base_seed"] + NSGAII_SEED_POLICY["model_offsets"][model]
+    resolved_sampler = {**NSGAII_SCREENING_SAMPLER, "seed": resolved_seed}
+    invocation = {
+        "starting_optuna_trial_number": 0,
+        "expected_generation": 0,
+        "resolved_seed": resolved_seed,
+    }
+    expected_study_name = (
+        f"physics_{model}_production_canary_{design['code_commit'][:12]}_attempt_{attempt:04d}"
+    )
+    if (
+        success.get("schema_version") != 2
+        or str(success.get("slurm_job_id")) != row["job_id"]
+        or success.get("model") != model
+        or success.get("attempt") != attempt
+        or success.get("trials") != 4
+        or success.get("epochs") != 50
+        or success.get("code_commit") != design["code_commit"]
+        or success.get("bindings") != str(bindings_path.resolve())
+        or success.get("bindings_sha256") != _sha256(bindings_path)
+        or success.get("screening_sampler_base") != NSGAII_SCREENING_SAMPLER
+        or success.get("screening_sampler_base_sha256") != _json_sha256(NSGAII_SCREENING_SAMPLER)
+        or success.get("screening_sampler") != resolved_sampler
+        or success.get("screening_sampler_sha256") != _json_sha256(resolved_sampler)
+        or success.get("screening_sampler_seed_policy") != NSGAII_SEED_POLICY
+        or success.get("screening_sampler_seed_policy_sha256") != _json_sha256(NSGAII_SEED_POLICY)
+        or success.get("sampler_invocation") != invocation
+        or "trainer.min_epochs=50" not in success.get("command", [])
+        or "trainer.max_epochs=50" not in success.get("command", [])
+        or any("limit_train_batches" in item for item in success.get("command", []))
+        or bindings.get("schema_version") != 2
+        or bindings.get("model") != model
+        or bindings.get("study_name") != expected_study_name
+        or bindings.get("screening_sampler_base") != NSGAII_SCREENING_SAMPLER
+        or bindings.get("screening_sampler_base_sha256") != _json_sha256(NSGAII_SCREENING_SAMPLER)
+        or bindings.get("screening_sampler") != resolved_sampler
+        or bindings.get("screening_sampler_sha256") != _json_sha256(resolved_sampler)
+        or bindings.get("screening_sampler_seed_policy") != NSGAII_SEED_POLICY
+        or bindings.get("screening_sampler_seed_policy_sha256") != _json_sha256(NSGAII_SEED_POLICY)
+        or bindings.get("sampler_invocation") != invocation
+        or len(bindings.get("bindings", [])) != 4
+        or any(
+            binding.get("state") != "COMPLETE"
+            or binding.get("nsga2_generation") != 0
+            or binding.get("resolved_sampler_seed") != resolved_seed
+            or binding.get("optimized_metric_artifact") is None
+            for binding in bindings.get("bindings", [])
+        )
+    ):
+        raise RuntimeError(f"Packed canary provenance is incomplete for {model}.")
+    return _sha256(success_path), _sha256(bindings_path)
 
 
 def _retrain_receipt_path(root: Path, scheduler_job_id: str) -> Path:
@@ -2119,10 +2497,18 @@ def _reconcile_locked(
                 and row["exit_code"] == "0:0"
                 and row.get("kind") in {"production_canary", "search_chunk"}
             ):
-                if not row.get("success_sha256") or not row.get("bindings_sha256"):
-                    row["success_sha256"], row["bindings_sha256"] = _completed_search_artifacts(
-                        root, design, row
-                    )
+                if audit_sealed or not row.get("success_sha256") or not row.get("bindings_sha256"):
+                    if row.get("kind") == "production_canary":
+                        evidence = _completed_canary_artifacts(root, design, row)
+                    else:
+                        evidence = _completed_search_artifacts(root, design, row)
+                    sealed_evidence = (row.get("success_sha256"), row.get("bindings_sha256"))
+                    if audit_sealed and all(sealed_evidence) and evidence != sealed_evidence:
+                        raise RuntimeError(
+                            f"Terminal {row.get('kind')} artifacts changed after sealing: "
+                            f"{row['job_id']}."
+                        )
+                    row["success_sha256"], row["bindings_sha256"] = evidence
             elif (
                 state == "COMPLETED" and row["exit_code"] == "0:0" and row.get("kind") == "retrain"
             ):
@@ -2600,7 +2986,7 @@ def _append_failure_event(root: Path, payload: dict[str, Any]) -> None:
 
 
 def _refresh_repaired_bindings(
-    root: Path, model: str, trial_numbers: set[int]
+    root: Path, model: str, repaired: dict[int, dict[str, Any]]
 ) -> list[dict[str, str]]:
     """Persist FAIL state in any existing explicit bindings for repaired trials."""
     updated = []
@@ -2610,13 +2996,18 @@ def _refresh_repaired_bindings(
         changed = False
         for row in payload.get("bindings", []):
             trial_number = int(row["trial_number"])
-            if trial_number not in trial_numbers:
+            if trial_number not in repaired:
                 continue
             if trial_number in seen:
                 raise RuntimeError(f"Duplicate explicit binding for {(model, trial_number)}.")
             seen.add(trial_number)
             row["state"] = "FAIL"
             row["values"] = None
+            phase = repaired[trial_number]["nsga2_trial_phase"]
+            row["nsga2_trial_phase"] = phase
+            if phase == "pre_sampling_failure":
+                row["nsga2_generation"] = None
+                row["pre_sampling_failure_evidence"] = "stale_repair"
             changed = True
         if changed:
             _atomic_json(path, payload)
@@ -2678,18 +3069,40 @@ def repair_stale(
                     raise RuntimeError(
                         f"Trial {(model, number)} is not stale RUNNING/WAITING: {observed}."
                     )
-                before.append({"trial_number": number, "state": trial.state.name})
+                generation = trial.system_attrs.get(NSGA_GENERATION_KEY)
+                if type(generation) is int and generation >= 0:
+                    phase = "sampled"
+                elif (
+                    NSGA_GENERATION_KEY not in trial.system_attrs
+                    and not trial.params
+                    and trial.values is None
+                ):
+                    phase = "pre_sampling_failure"
+                else:
+                    raise RuntimeError(
+                        f"Trial {(model, number)} has an ambiguous NSGA-II sampling state."
+                    )
+                before.append(
+                    {
+                        "trial_number": number,
+                        "state": trial.state.name,
+                        "params": trial.params,
+                        "values": trial.values,
+                        "system_attrs": trial.system_attrs,
+                        "nsga2_trial_phase": phase,
+                        "nsga2_generation": generation,
+                    }
+                )
             source_sha256 = _sha256(database)
             backup = _create_study_backup(root, model)
             backup_sha256 = _sha256(backup)
             for number in requested:
                 study.tell(number, state=optuna.trial.TrialState.FAIL)
-            observed_after = {
-                int(trial.number): trial.state.name for trial in study.get_trials(deepcopy=False)
-            }
-            if any(observed_after.get(number) != "FAIL" for number in requested):
+            after_trials = {int(trial.number): trial for trial in study.get_trials(deepcopy=False)}
+            if any(after_trials[number].state.name != "FAIL" for number in requested):
                 raise RuntimeError("Optuna did not persist every requested stale trial as FAIL.")
-            binding_artifacts = _refresh_repaired_bindings(root, model, set(requested))
+            before_by_number = {int(row["trial_number"]): row for row in before}
+            binding_artifacts = _refresh_repaired_bindings(root, model, before_by_number)
             stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S%fZ")
             output = root / "state" / "stale_repairs" / f"{stamp}__{model}.json"
             payload = {
@@ -2708,7 +3121,15 @@ def repair_stale(
                 "backup_sha256": backup_sha256,
                 "trials_before": before,
                 "trials_after": [
-                    {"trial_number": number, "state": observed_after[number]}
+                    {
+                        "trial_number": number,
+                        "state": after_trials[number].state.name,
+                        "params": after_trials[number].params,
+                        "values": after_trials[number].values,
+                        "system_attrs": after_trials[number].system_attrs,
+                        "nsga2_trial_phase": before_by_number[number]["nsga2_trial_phase"],
+                        "nsga2_generation": before_by_number[number]["nsga2_generation"],
+                    }
                     for number in requested
                 ],
                 "updated_binding_artifacts": binding_artifacts,

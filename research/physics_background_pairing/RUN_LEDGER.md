@@ -1,6 +1,36 @@
 # Run ledger
 
-Last updated: 2026-08-05 (Europe/Zurich)
+Last updated: 2026-08-08 (Europe/Zurich)
+
+- 2026-08-08: the search protocol was corrected before the next clean campaign. Stage
+  1 is now six shared NSGA-II screening studies, not six high-dimensional M-TPE
+  studies. The frozen base sampler contract is `NSGAIISampler(seed=123,
+  population_size=48, mutation_prob=None, crossover_prob=0.9,
+  swapping_prob=0.5, constraints_func=None)`. Every trial must persist
+  `nsga2:generation`; portable reporting authenticates the resolved Hydra sampler,
+  hashes the design mapping and seed policy, and exports the generation per sampled
+  trial. A generation-less `FAIL` is accepted only with explicit binding evidence that
+  it failed before sampling; stale repairs additionally require their hashed repair
+  artifact. No generation is backfilled.
+  Canaries use disposable databases and never enter the final studies. A healthy final
+  study runs twelve complete 48-trial generations and a final 24 trials: exactly 600.
+  Each sampler process receives a unique authenticated seed given exactly by
+  `123 + model_offsets[model] + starting_optuna_trial_number`, with model offsets
+  `ae=0`, `vae=100000`, `dsae=200000`, `dsvae=300000`, `svdd=400000`, and
+  `realnvp=500000`. Allocated Optuna trial numbers are never reused during recovery.
+  Stage 2
+  will freeze a target manifest from screening and run independent, two-objective
+  paper-style M-TPE studies only for the selected targets. Because the targets follow
+  inspection of the all-20-anomaly oracle, this is exploratory, target-selection-biased
+  follow-up rather than unbiased confirmation. The stages must use separate
+  databases/artifact namespaces and must not be pooled.
+
+- 2026-08-08: all campaigns and scheduler evidence listed below predate the NSGA-II
+  correction. They remain useful implementation/runtime evidence but are scientifically
+  superseded and operationally read-only: do not submit, repair, retrain, aggregate, or
+  finalize into those roots. No clean NSGA-II campaign
+  root, accepted NSGA-II production canary, full screening generation, or targeted
+  confirmation study is recorded in this ledger yet.
 
 - 2026-08-05: implementation commit
   `ed19c503538ef71ba61d9c6a230afb55872bf28e` closes the retraining control-plane
@@ -95,9 +125,12 @@ codespell) pass; the unrelated baseline debt must not be mixed into this campaig
   training-normal sample so it is practical during every validation epoch.
 - AE and VAE each retain the paper-native anomaly score as a direct control: AE MSE
   versus residual OAS, and VAE latent KL versus residual OAS.
-- All logical strategies for one model share the same 600 sampled configurations. This
-  gives six trained studies rather than 56 and enables direct strategy comparisons;
-  logical two-dimensional fronts are reconstructed offline.
+- In screening, all logical strategies for one model share the same 600 NSGA-II sampled
+  configurations. This gives six screening studies rather than 56 and enables direct
+  strategy comparisons; logical two-dimensional fronts are reconstructed offline.
+- Targeted confirmation is separate: each frozen selected target receives an
+  independent two-objective M-TPE history. Confirmation trials never enter the six
+  screening databases or retroactively alter their fronts.
 - Normal jobs are node-exclusive. One Hydra/Optuna controller therefore packs four
   ordered, resource-exact one-GPU `srun` steps per node instead of wasting three GPUs
   or running competing controllers against one study.

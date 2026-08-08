@@ -2,7 +2,7 @@
 
 defaults:
   - override /hydra/sweeper: optuna
-  - override /hydra/sweeper/sampler: motpe
+  - override /hydra/sweeper/sampler: motpe_paper
 
 hydra:
   mode: "MULTIRUN" # set hydra to multirun by default if this config is attached
@@ -28,11 +28,6 @@ hydra:
     # choose Optuna hyperparameter sampler
     # you can choose bayesian sampler (tpe), random search (without optimization), grid sampler, and others
     # docs: https://optuna.readthedocs.io/en/stable/reference/samplers.html
-    sampler:
-      n_startup_trials: 30
-      consider_endpoints: true
-      n_ehvi_candidates: 256
-
     # define hyperparameter search space. Assumes using torch.optim.AdamW
     params:
       trainer.gradient_clip_val: choice(0.0, 0.5, 1.0, 2.0)

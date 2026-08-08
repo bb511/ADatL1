@@ -36,6 +36,30 @@ BASE_RATE_KHZ = 28608.8064
 EXPECTED_FRONTS = 56
 EXPECTED_ANOMALIES = 20
 TARGET_TRIALS = 600
+NSGA_GENERATION_KEY = "nsga2:generation"
+UNBOUND_REPAIR_EVIDENCE = "__authenticated_unbound_stale_repair__"
+NSGAII_SCREENING_SAMPLER = {
+    "name": "nsgaii",
+    "_target_": "optuna.samplers.NSGAIISampler",
+    "seed": 123,
+    "population_size": 48,
+    "mutation_prob": None,
+    "crossover_prob": 0.9,
+    "swapping_prob": 0.5,
+    "constraints_func": None,
+}
+NSGAII_SCREENING_SEED_POLICY = {
+    "name": "base_seed_plus_model_offset_plus_starting_trial",
+    "formula": "base_seed + model_offsets[model] + starting_optuna_trial_number",
+    "base_seed": 123,
+    "model_offsets": {model: index * 100000 for index, model in enumerate(MODEL_ORDER)},
+    "population_size": 48,
+    "generation_size": 48,
+    "final_partial_population": 24,
+    "target_trials": TARGET_TRIALS,
+    "require_pristine_study": True,
+    "canary_studies_are_separate": True,
+}
 CAP_STRATEGIES = (
     "flat_physical",
     "physics_summary",
@@ -191,6 +215,19 @@ def _design(root: Path) -> dict[str, Any]:
         raise RuntimeError("Campaign model order differs from the six-study contract.")
     if len(design.get("studies", [])) != len(MODEL_ORDER):
         raise RuntimeError("Campaign design does not contain exactly six studies.")
+    sampler = design.get("screening_sampler")
+    if sampler is not None and sampler != NSGAII_SCREENING_SAMPLER:
+        raise RuntimeError("Campaign screening sampler differs from the NSGA-II contract.")
+    seed_policy = design.get("screening_sampler_seed_policy")
+    if sampler is None and seed_policy is not None:
+        raise RuntimeError("Legacy campaign declares a sampler seed policy without a sampler.")
+    if sampler is not None and seed_policy != NSGAII_SCREENING_SEED_POLICY:
+        raise RuntimeError("Campaign sampler seed policy differs from the frozen contract.")
+    if sampler is not None and any(
+        study.get("hparams_search") != f"{study.get('model')}_shared_nsgaii"
+        for study in design["studies"]
+    ):
+        raise RuntimeError("Campaign HPO config differs from the NSGA-II contract.")
     expected_scores = {model: list(scores) for model, scores in SCORES_BY_MODEL.items()}
     if (
         int(design.get("target_trials_per_study", -1)) != TARGET_TRIALS
@@ -251,6 +288,57 @@ def _design(root: Path) -> dict[str, Any]:
     return design
 
 
+def _screening_sampler(design: dict[str, Any]) -> dict[str, Any]:
+    """Return authenticated screening-sampler metadata with a legacy fallback."""
+    sampler = design.get("screening_sampler")
+    if sampler is None:
+        return {
+            "name": "legacy_unspecified",
+            "identity_sha256": "",
+            "config_json": _json_cell({}),
+            "seed_policy_identity_sha256": "",
+            "seed_policy_json": _json_cell({}),
+            "population_size": "",
+            "generation_key": "",
+        }
+    if sampler != NSGAII_SCREENING_SAMPLER:
+        raise RuntimeError("Campaign screening sampler differs from the NSGA-II contract.")
+    return {
+        "name": str(sampler["name"]),
+        "identity_sha256": _json_sha256(sampler),
+        "config_json": _json_cell(sampler),
+        "seed_policy_identity_sha256": _json_sha256(design["screening_sampler_seed_policy"]),
+        "seed_policy_json": _json_cell(design["screening_sampler_seed_policy"]),
+        "population_size": int(sampler["population_size"]),
+        "generation_key": NSGA_GENERATION_KEY,
+    }
+
+
+def _validate_resolved_screening_sampler(
+    hydra_run_dir: Path, design: dict[str, Any], *, resolved_seed: int
+) -> None:
+    """Authenticate the resolved Hydra sampler against the frozen design contract."""
+    sampler = design.get("screening_sampler")
+    if sampler is None:
+        return
+    hydra_path = hydra_run_dir / ".hydra" / "hydra.yaml"
+    if not hydra_path.is_file():
+        raise RuntimeError(f"NSGA-II run has no resolved Hydra configuration: {hydra_path}")
+    with hydra_path.open(encoding="utf-8") as handle:
+        resolved = yaml.safe_load(handle)
+    try:
+        observed = resolved["hydra"]["sweeper"]["sampler"]
+    except (KeyError, TypeError) as error:
+        raise RuntimeError(f"Resolved Hydra sampler is missing: {hydra_path}") from error
+    expected = {
+        key: (resolved_seed if key == "seed" else value)
+        for key, value in sampler.items()
+        if key != "name"
+    }
+    if observed != expected:
+        raise RuntimeError(f"Resolved Hydra sampler differs from the design: {hydra_path}")
+
+
 def _load_study(root: Path, study: dict[str, Any]):
     """Load one existing Optuna study without creating missing state."""
     database = root / "studies" / f"{study['model']}.db"
@@ -259,6 +347,146 @@ def _load_study(root: Path, study: dict[str, Any]):
     import optuna
 
     return optuna.load_study(study_name=study["study_name"], storage=f"sqlite:///{database}")
+
+
+def _pre_sampling_repair_index(
+    root: Path, design: dict[str, Any]
+) -> dict[tuple[str, int], set[str]]:
+    """Authenticate stale-repair evidence for explicitly unsampled failed trials."""
+    failures_path = root / "state" / "failures.jsonl"
+    events = []
+    if failures_path.is_file():
+        for line in failures_path.read_text(encoding="utf-8").splitlines():
+            if line.strip():
+                events.append(json.loads(line))
+    repaired_events = {
+        str(Path(event["artifact"]).resolve()): event
+        for event in events
+        if event.get("classification") == "stale_optuna_trial_repair"
+        and event.get("outcome") == "repaired"
+        and event.get("artifact")
+    }
+    evidence: dict[tuple[str, int], set[str]] = {}
+    studies = {str(study["model"]): study for study in design["studies"]}
+    for path in sorted((root / "state" / "stale_repairs").glob("*.json")):
+        resolved_path = str(path.resolve())
+        event = repaired_events.get(resolved_path)
+        if event is None or event.get("artifact_sha256") != _sha256(path):
+            continue
+        payload = _read_json(path)
+        model = str(payload.get("model", ""))
+        scheduler = payload.get("scheduler_proof", {})
+        backup = Path(str(payload.get("backup", "")))
+        database = Path(str(payload.get("database", "")))
+        binding_paths = {
+            str(Path(row["path"]).resolve())
+            for row in payload.get("updated_binding_artifacts", [])
+            if row.get("path") and row.get("sha256") == _sha256(Path(row["path"]))
+        }
+        if (
+            payload.get("schema_version") != 1
+            or payload.get("code_commit") != design["code_commit"]
+            or model not in MODEL_ORDER
+            or scheduler.get("live_packed_search_job_ids") != []
+            or scheduler.get("active_model_ledger_rows") != []
+            or database.resolve() != (root / "studies" / f"{model}.db").resolve()
+            or not backup.is_file()
+            or payload.get("backup_sha256") != _sha256(backup)
+        ):
+            continue
+        before = {int(row["trial_number"]): row for row in payload.get("trials_before", [])}
+        for row in payload.get("trials_after", []):
+            trial_number = int(row["trial_number"])
+            prior = before.get(trial_number, {})
+            attrs = row.get("system_attrs", {})
+            if (
+                prior.get("state") in {"RUNNING", "WAITING"}
+                and row.get("state") == "FAIL"
+                and row.get("params") == {}
+                and row.get("values") is None
+                and NSGA_GENERATION_KEY not in attrs
+                and row.get("nsga2_trial_phase") == "pre_sampling_failure"
+            ):
+                authenticated_sources = set(binding_paths)
+                for chunk_path in sorted((root / "sweeps" / model).glob("*/chunk.json")):
+                    chunk = _read_json(chunk_path)
+                    invocation = chunk.get("sampler_invocation", {})
+                    start = invocation.get("starting_optuna_trial_number")
+                    requested = chunk.get("requested_trials")
+                    if type(start) is not int or type(requested) is not int:
+                        continue
+                    expected_seed = (
+                        NSGAII_SCREENING_SEED_POLICY["base_seed"]
+                        + NSGAII_SCREENING_SEED_POLICY["model_offsets"][model]
+                        + start
+                    )
+                    resolved_sampler = {**NSGAII_SCREENING_SAMPLER, "seed": expected_seed}
+                    prior_numbers = [
+                        int(number) for number in chunk.get("prior_trial_numbers", [])
+                    ]
+                    expected_study = studies[model]
+                    if (
+                        start <= trial_number < start + requested
+                        and trial_number not in prior_numbers
+                        and start == max(prior_numbers, default=-1) + 1
+                        and chunk.get("schema_version") == 2
+                        and chunk.get("model") == model
+                        and chunk.get("study_name") == expected_study["study_name"]
+                        and chunk.get("hparams_search") == expected_study["hparams_search"]
+                        and chunk.get("screening_sampler_base") == NSGAII_SCREENING_SAMPLER
+                        and chunk.get("screening_sampler_base_sha256")
+                        == _json_sha256(NSGAII_SCREENING_SAMPLER)
+                        and chunk.get("screening_sampler") == resolved_sampler
+                        and chunk.get("screening_sampler_sha256") == _json_sha256(resolved_sampler)
+                        and chunk.get("screening_sampler_seed_policy")
+                        == NSGAII_SCREENING_SEED_POLICY
+                        and chunk.get("screening_sampler_seed_policy_sha256")
+                        == _json_sha256(NSGAII_SCREENING_SEED_POLICY)
+                        and invocation.get("resolved_seed") == expected_seed
+                        and type(invocation.get("expected_generation")) is int
+                        and invocation["expected_generation"] >= 0
+                    ):
+                        authenticated_sources.add(UNBOUND_REPAIR_EVIDENCE)
+                if authenticated_sources:
+                    evidence[(model, trial_number)] = authenticated_sources
+    return evidence
+
+
+def _is_authenticated_pre_sampling_failure(
+    trial: Any,
+    binding: dict[str, Any] | None,
+    repair_index: dict[tuple[str, int], set[str]],
+    *,
+    model: str,
+) -> bool:
+    """Recognize only explicitly evidenced failures that occurred before sampling."""
+    trial_number = int(trial.number)
+    trial_contract = (
+        trial.state.name == "FAIL"
+        and trial.params == {}
+        and trial.values is None
+        and NSGA_GENERATION_KEY not in trial.system_attrs
+    )
+    if not trial_contract:
+        return False
+    if binding is None:
+        return UNBOUND_REPAIR_EVIDENCE in repair_index.get((model, trial_number), set())
+    binding_contract = (
+        binding.get("state") == "FAIL"
+        and binding.get("params") == {}
+        and binding.get("values") is None
+        and binding.get("nsga2_trial_phase") == "pre_sampling_failure"
+        and binding.get("nsga2_generation") is None
+    )
+    if not binding_contract:
+        return False
+    evidence = binding.get("pre_sampling_failure_evidence")
+    if evidence == "optuna_terminal_state":
+        return True
+    return evidence == "stale_repair" and (
+        binding.get("binding_artifact") in repair_index.get((model, trial_number), set())
+        or UNBOUND_REPAIR_EVIDENCE in repair_index.get((model, trial_number), set())
+    )
 
 
 def _usable(trial: Any, expected_values: int) -> bool:
@@ -272,13 +500,17 @@ def _usable(trial: Any, expected_values: int) -> bool:
 
 
 def _trial_exports(
-    root: Path, design: dict[str, Any]
+    root: Path, design: dict[str, Any], *, final: bool = False
 ) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
     """Build study-status and all-trial portable rows."""
     trial_rows: list[dict[str, Any]] = []
     status_rows: list[dict[str, Any]] = []
     target = int(design["target_trials_per_study"])
     max_objectives = max(2 * len(study["objectives"]) for study in design["studies"])
+    sampler = _screening_sampler(design)
+    authenticated_nsga = sampler["name"] == "nsgaii"
+    bindings = _binding_index(root) if authenticated_nsga else {}
+    repair_index = _pre_sampling_repair_index(root, design) if authenticated_nsga else {}
     for study in design["studies"]:
         expected = 2 * len(study["objectives"])
         loaded = _load_study(root, study)
@@ -291,10 +523,47 @@ def _trial_exports(
         durations = [
             float(trial.duration.total_seconds()) for trial in trials if trial.duration is not None
         ]
+        generations = []
+        missing_generations = 0
+        pre_sampling_failures = 0
+        for trial in trials:
+            generation = trial.system_attrs.get(NSGA_GENERATION_KEY)
+            if authenticated_nsga and (type(generation) is not int or generation < 0):
+                key = (study["model"], int(trial.number))
+                authenticated_failure = _is_authenticated_pre_sampling_failure(
+                    trial,
+                    bindings.get(key),
+                    repair_index,
+                    model=study["model"],
+                )
+                if authenticated_failure:
+                    pre_sampling_failures += 1
+                else:
+                    missing_generations += 1
+                if final and not authenticated_failure:
+                    raise RuntimeError(
+                        f"NSGA-II trial {(study['model'], int(trial.number))} has no "
+                        f"authenticated {NSGA_GENERATION_KEY!r} or explicit pre-sampling "
+                        "failure evidence."
+                    )
+            elif type(generation) is int and generation >= 0:
+                generations.append(generation)
         status_rows.append(
             {
                 "model": study["model"],
                 "study_name": study["study_name"],
+                "sampler_name": sampler["name"],
+                "sampler_identity_sha256": sampler["identity_sha256"],
+                "sampler_config_json": sampler["config_json"],
+                "sampler_seed_policy_identity_sha256": sampler["seed_policy_identity_sha256"],
+                "sampler_seed_policy_json": sampler["seed_policy_json"],
+                "nsga_population_size": sampler["population_size"],
+                "nsga_generation_key": sampler["generation_key"],
+                "nsga_generation_count": len(set(generations)),
+                "nsga_min_generation": min(generations) if generations else "",
+                "nsga_max_generation": max(generations) if generations else "",
+                "nsga_missing_generation_trials": missing_generations,
+                "nsga_pre_sampling_failure_trials": pre_sampling_failures,
                 "logical_objectives": len(study["objectives"]),
                 "target": target,
                 "total": len(trials),
@@ -312,9 +581,28 @@ def _trial_exports(
         )
         for trial in sorted(trials, key=lambda item: int(item.number)):
             values = None if trial.values is None else [float(value) for value in trial.values]
+            generation = trial.system_attrs.get(NSGA_GENERATION_KEY)
+            binding = bindings.get((study["model"], int(trial.number)))
+            authenticated_failure = _is_authenticated_pre_sampling_failure(
+                trial,
+                binding,
+                repair_index,
+                model=study["model"],
+            )
             row = {
                 "model": study["model"],
                 "study_name": study["study_name"],
+                "sampler_name": sampler["name"],
+                "sampler_identity_sha256": sampler["identity_sha256"],
+                "sampler_seed_policy_identity_sha256": sampler["seed_policy_identity_sha256"],
+                "nsga_trial_phase": (
+                    "pre_sampling_failure"
+                    if authenticated_failure
+                    else ("" if binding is None else binding.get("nsga2_trial_phase", ""))
+                ),
+                "nsga_generation": (
+                    generation if type(generation) is int and generation >= 0 else ""
+                ),
                 "trial_number": int(trial.number),
                 "state": trial.state.name,
                 "usable": _usable(trial, expected),
@@ -397,7 +685,11 @@ def _binding_index(root: Path) -> dict[tuple[str, int], dict[str, Any]]:
             key = (str(row["model"]), int(row["trial_number"]))
             if key in bindings:
                 raise RuntimeError(f"Duplicate search binding for {key}.")
-            row = {**row, "binding_artifact": str(path.resolve())}
+            row = {
+                **row,
+                "binding_artifact": str(path.resolve()),
+                "_binding_payload": payload,
+            }
             artifact = row.get("optimized_metric_artifact")
             if artifact:
                 artifact_path = Path(artifact)
@@ -411,6 +703,11 @@ def _validate_bindings(
     root: Path, design: dict[str, Any], bindings: dict[tuple[str, int], dict[str, Any]]
 ) -> None:
     """Cross-check every explicit binding against Optuna and run provenance."""
+    repair_index = (
+        _pre_sampling_repair_index(root, design)
+        if design.get("screening_sampler") is not None
+        else {}
+    )
     for study in design["studies"]:
         loaded = _load_study(root, study)
         trials = (
@@ -425,6 +722,60 @@ def _validate_bindings(
                 )
             trial = trials[trial_number]
             values = None if trial.values is None else [float(value) for value in trial.values]
+            sampler = design.get("screening_sampler")
+            if sampler is not None:
+                generation = trial.system_attrs.get(NSGA_GENERATION_KEY)
+                policy = design["screening_sampler_seed_policy"]
+                payload = binding.get("_binding_payload", {})
+                invocation = payload.get("sampler_invocation", {})
+                starting_trial = invocation.get("starting_optuna_trial_number")
+                expected_generation = invocation.get("expected_generation")
+                resolved_seed = invocation.get("resolved_seed")
+                prior_numbers = payload.get("prior_trial_numbers", [])
+                expected_start = max((int(number) for number in prior_numbers), default=-1) + 1
+                expected_seed = (
+                    policy["base_seed"] + policy["model_offsets"][model] + expected_start
+                )
+                resolved_sampler = {**sampler, "seed": expected_seed}
+                expected_hparams_search = study.get("hparams_search", f"{model}_shared_nsgaii")
+                sampled = (
+                    binding.get("nsga2_trial_phase") == "sampled"
+                    and type(generation) is int
+                    and generation >= 0
+                    and binding.get("nsga2_generation") == generation
+                    and generation == expected_generation
+                )
+                pre_sampling_failure = _is_authenticated_pre_sampling_failure(
+                    trial,
+                    binding,
+                    repair_index,
+                    model=model,
+                )
+                if (
+                    payload.get("schema_version") != 2
+                    or payload.get("hparams_search") != expected_hparams_search
+                    or payload.get("screening_sampler_base") != sampler
+                    or payload.get("screening_sampler_base_sha256") != _json_sha256(sampler)
+                    or payload.get("screening_sampler") != resolved_sampler
+                    or payload.get("screening_sampler_sha256") != _json_sha256(resolved_sampler)
+                    or payload.get("screening_sampler_seed_policy") != policy
+                    or payload.get("screening_sampler_seed_policy_sha256") != _json_sha256(policy)
+                    or type(starting_trial) is not int
+                    or starting_trial != expected_start
+                    or type(expected_generation) is not int
+                    or expected_generation < 0
+                    or type(resolved_seed) is not int
+                    or resolved_seed != expected_seed
+                    or trial_number < starting_trial
+                    or binding.get("hparams_search") != expected_hparams_search
+                    or binding.get("screening_sampler") != resolved_sampler
+                    or binding.get("resolved_sampler_seed") != resolved_seed
+                    or not (sampled or pre_sampling_failure)
+                ):
+                    raise RuntimeError(
+                        f"Binding sampler evidence differs from NSGA-II trial "
+                        f"{(model, trial_number)}."
+                    )
             if (
                 binding["study_name"] != study["study_name"]
                 or binding["state"] != trial.state.name
@@ -443,6 +794,12 @@ def _validate_bindings(
                 )
             provenance = artifact.get("run_provenance", {})
             hydra_dir = Path(binding["hydra_run_dir"]).resolve()
+            if sampler is not None:
+                _validate_resolved_screening_sampler(
+                    hydra_dir,
+                    design,
+                    resolved_seed=int(binding["resolved_sampler_seed"]),
+                )
             checkpoint_dir = Path(provenance.get("checkpoint_run_dir", ""))
             if (
                 int(provenance.get("hydra_job_num", -1)) != int(binding["hydra_job_num"])
@@ -1139,6 +1496,7 @@ def _provenance(
 ) -> dict[str, Any]:
     """Build portable code, input, budget, and source-artifact provenance."""
     commit, clean, dirty = report_state or _git_state()
+    sampler = _screening_sampler(design)
     databases = {}
     for model in MODEL_ORDER:
         path = root / "studies" / f"{model}.db"
@@ -1165,6 +1523,12 @@ def _provenance(
         ),
         "report_uv_lock_sha256": _sha256(REPOSITORY_ROOT / "uv.lock"),
         "target_trials_per_study": design["target_trials_per_study"],
+        "screening_sampler": design.get("screening_sampler"),
+        "screening_sampler_name": sampler["name"],
+        "screening_sampler_identity_sha256": sampler["identity_sha256"],
+        "screening_sampler_seed_policy": design.get("screening_sampler_seed_policy"),
+        "screening_sampler_seed_policy_identity_sha256": sampler["seed_policy_identity_sha256"],
+        "screening_sampler_generation_key": sampler["generation_key"],
         "search_epochs": design["search_epochs"],
         "retrain_epochs": design["retrain_epochs"],
         "retrain_seed": 123,
@@ -1196,7 +1560,7 @@ def _build_snapshot(
     """Build search-state files, optionally under strict final-publication rules."""
     design = _design(root)
     output.mkdir(parents=True, exist_ok=True)
-    status_rows, trial_rows = _trial_exports(root, design)
+    status_rows, trial_rows = _trial_exports(root, design, final=final)
     status_fields = list(status_rows[0])
     trial_fields = (
         list(trial_rows[0])
@@ -1204,6 +1568,11 @@ def _build_snapshot(
         else [
             "model",
             "study_name",
+            "sampler_name",
+            "sampler_identity_sha256",
+            "sampler_seed_policy_identity_sha256",
+            "nsga_trial_phase",
+            "nsga_generation",
             "trial_number",
             "state",
             "usable",
@@ -2430,6 +2799,13 @@ def _write_figures(
 
 def _write_report(output: Path, design: dict[str, Any], winners: list[dict[str, Any]]) -> None:
     """Write the self-contained human-readable report from portable rows."""
+    sampler = _screening_sampler(design)
+    sampler_description = (
+        "NSGA-II (population 48; invocation seed = 123 + model offset + starting "
+        "Optuna trial number)"
+        if sampler["name"] == "nsgaii"
+        else "legacy campaign with no authenticated sampler identity"
+    )
     by_metric: dict[str, list[float]] = {}
     by_model: dict[str, list[float]] = {}
     by_score: dict[str, list[float]] = {}
@@ -2471,6 +2847,10 @@ def _write_report(output: Path, design: dict[str, Any], winners: list[dict[str, 
         f"- Code commit: `{design['code_commit']}`",
         f"- Search: {design['target_trials_per_study']} usable trials per model, "
         f"{design['search_epochs']} epochs each",
+        f"- Screening sampler: {sampler_description}; identity "
+        f"`{sampler['identity_sha256'] or 'not recorded'}`",
+        f"- Screening seed-policy identity: "
+        f"`{sampler['seed_policy_identity_sha256'] or 'not recorded'}`",
         f"- Retraining: {design['retrain_epochs']} epochs, seed 123",
         "- Validation sources: ZB_run396102 (2025E) and ZB_run398183 (2025G)",
         "- Fronts are signal-agnostic; each reported member is a downstream-label oracle winner.",
@@ -2495,16 +2875,23 @@ def _write_report(output: Path, design: dict[str, Any], winners: list[dict[str, 
         "",
         "## Protocol",
         "",
-        "Each model has one shared multi-objective study. Every 50-epoch trial evaluates all of "
+        "Stage 1 uses six shared high-dimensional NSGA-II screening studies, one per model. "
+        "Every 50-epoch trial evaluates all of "
         "its CAP, W1, and forward E→G drift views. Selection compares last, primary-EMA, and "
         "stable-native checkpoints with the fixed `1.25Q' + Q''` relative-change rule. The 56 "
         "two-dimensional fronts were frozen before downstream access; unique members were "
-        "retrained for 200 epochs with seed 123.",
+        "retrained for 200 epochs with seed 123. Stage 2 is a separate exploratory targeted "
+        "follow-up: "
+        "selected screening winners receive independent two-objective M-TPE studies. Screening "
+        "and confirmation results must remain separately identified and must not be pooled as "
+        "one optimization history.",
         "",
         "## Execution and completeness",
         "",
-        "`study_status.csv` proves the six study budgets; `trials.csv` identifies the first 600 "
-        "usable trials per model; `front_memberships.csv` and `retrains.csv` prove front and "
+        "`study_status.csv` proves the six screening-study budgets and sampler identity; "
+        "`trials.csv` identifies the first 600 usable trials per model and records each trial's "
+        "authenticated NSGA-II generation or explicit pre-sampling-failure phase; "
+        "`front_memberships.csv` and `retrains.csv` prove front and "
         "retraining completeness. `job_history.csv` and `failures.jsonl` record operational "
         "history without silently dropping failures.",
         "",
@@ -2596,7 +2983,11 @@ def _write_report(output: Path, design: dict[str, Any], winners: list[dict[str, 
             "",
             "## Limitations and interpretation guardrails",
             "",
-            "The six-study sampler couples strategies through a high-dimensional M-TPE history. "
+            "The six-study NSGA-II screen couples strategies through one high-dimensional "
+            "population history per model. Targeted two-objective M-TPE follow-up is a "
+            "separate second-stage analysis and does not retroactively make the screening "
+            "fronts independent. Because its shortlist is selected after the all-20-anomaly "
+            "oracle, it is exploratory and target-selection-biased, not an unbiased confirmation. "
             "The final winner within each frozen front uses the 20 anomaly labels and is therefore "
             "an oracle reporting choice, not deployable signal-free model selection. W1 uses only "
             "marginals and cannot measure pairing quality. Reverse G→E drift is post-hoc only.",
@@ -2725,7 +3116,7 @@ def _build_final(
         report_state=report_state,
         execution_evidence=execution_evidence,
     )
-    status_rows, _ = _trial_exports(root, design)
+    status_rows, _ = _trial_exports(root, design, final=True)
     bindings = _binding_index(root)
     selected = {
         (row["model"], int(row["trial_number"]))

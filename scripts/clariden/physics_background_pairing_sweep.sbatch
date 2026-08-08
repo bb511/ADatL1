@@ -18,10 +18,13 @@ set -euo pipefail
 : "${CHUNK_TRIALS:=48}"
 : "${CHUNK_JOBS:=48}"
 : "${TIMEOUT_MIN:=720}"
+: "${CANARY_MODE:=0}"
 
 readonly SCRATCH_ROOT=/iopsstor/scratch/cscs/vjimenez/adatl1
-readonly REPOSITORY_ROOT="${PHYSICS_BGPAIR_REPOSITORY_ROOT:-${SCRATCH_ROOT}/worktrees/physics_background_shared_20260804}"
-readonly CAMPAIGN_ROOT="${PHYSICS_BGPAIR_CAMPAIGN_ROOT:-${SCRATCH_ROOT}/campaigns/physics_background_shared_20260804}"
+: "${PHYSICS_BGPAIR_REPOSITORY_ROOT:?PHYSICS_BGPAIR_REPOSITORY_ROOT is required}"
+: "${PHYSICS_BGPAIR_CAMPAIGN_ROOT:?PHYSICS_BGPAIR_CAMPAIGN_ROOT is required}"
+readonly REPOSITORY_ROOT="${PHYSICS_BGPAIR_REPOSITORY_ROOT}"
+readonly CAMPAIGN_ROOT="${PHYSICS_BGPAIR_CAMPAIGN_ROOT}"
 readonly UV_BIN="${SCRATCH_ROOT}/tools/uv-0.11.32/uv"
 
 export UV_PROJECT_ENVIRONMENT="${SCRATCH_ROOT}/.venv-clariden"
@@ -32,7 +35,14 @@ export HYDRA_FULL_ERROR=1
 export MLFLOW_DISABLE_TELEMETRY=true
 
 cd "${REPOSITORY_ROOT}"
-"${UV_BIN}" run --frozen --no-sync python scripts/physics_background_pairing_campaign.py \
-  --root "${CAMPAIGN_ROOT}" sweep --model "${STUDY_MODEL}" \
-  --trials "${CHUNK_TRIALS}" --jobs "${CHUNK_JOBS}" \
-  --timeout-min "${TIMEOUT_MIN}"
+if [[ "${CANARY_MODE}" == "1" ]]; then
+  : "${CANARY_ATTEMPT:?CANARY_ATTEMPT is required for production canaries}"
+  "${UV_BIN}" run --frozen --no-sync python scripts/physics_background_pairing_campaign.py \
+    --root "${CAMPAIGN_ROOT}" production-canary --model "${STUDY_MODEL}" \
+    --attempt "${CANARY_ATTEMPT}"
+else
+  "${UV_BIN}" run --frozen --no-sync python scripts/physics_background_pairing_campaign.py \
+    --root "${CAMPAIGN_ROOT}" sweep --model "${STUDY_MODEL}" \
+    --trials "${CHUNK_TRIALS}" --jobs "${CHUNK_JOBS}" \
+    --timeout-min "${TIMEOUT_MIN}"
+fi

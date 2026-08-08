@@ -45,11 +45,14 @@ At the time this runbook was written:
 The agent must keep the following outcome in mind before every mutation or job
 submission:
 
-> Exactly six shared Optuna studies must yield 600 usable 50-epoch trials each; 56
-> logical two-objective fronts must then be frozen; every unique front configuration
-> must be retrained once for 200 epochs; and every one of the 56 reported winners must
-> be selected by mean downstream performance and represented in the final portable
-> results and `REPORT.md`.
+> Stage 1 must run exactly six shared NSGA-II screening studies with 600 usable
+> 50-epoch trials each; 56 logical two-objective fronts must then be frozen; every
+> unique front configuration must be retrained once for 200 epochs; and every one of
+> the 56 screening winners must be selected by mean downstream performance and
+> represented in the portable results and `REPORT.md`. Stage 2 must then run separate,
+> exploratory targeted two-objective M-TPE studies for the explicitly frozen subset
+> of screening winners. Screening and confirmation are different optimization
+> populations and must never be merged.
 
 Do not launch 56 independent 600-trial searches. The user explicitly chose six shared
 model studies so that every validation strategy for a model sees the same sampled
@@ -88,10 +91,77 @@ The paper workflow, adapted to the approved six shared studies, is:
 9. Within each logical front, choose the reported retrained model using mean downstream
    anomaly efficiency over the 20 held-out anomaly datasets.
 
-The shared-pool design gives each model one joint multi-objective M-TPE sampling history
-rather than independent two-objective M-TPE histories. This is an intentional,
-user-approved difference from a literal independent-search replication and must be
-reported as a methodological limitation.
+The shared-pool screen gives each model one joint high-dimensional NSGA-II population
+history rather than independent two-objective M-TPE histories. This is an intentional,
+user-approved screening design. The paper-aligned two-objective M-TPE comparison is
+restored only in targeted confirmation studies selected after screening. Because those
+targets are chosen from screening outcomes, confirmation is targeted follow-up rather
+than an unbiased repeat of all 56 objectives; that distinction must remain explicit.
+
+### 1.1.1 Frozen NSGA-II schedule and sampler evidence
+
+The screening sampler contract is frozen in `design.json` as
+`screening_sampler`: `optuna.samplers.NSGAIISampler`, population size 48, default
+mutation probability (`null`, meaning Optuna's `1 / n_params`), crossover probability
+0.9, swapping probability 0.5, and no constraints function. The companion frozen seed
+policy is named `base_seed_plus_model_offset_plus_starting_trial` and resolves every
+sampler process exactly as
+`123 + model_offsets[model] + starting_optuna_trial_number`, where the frozen offsets
+are `ae=0`, `vae=100000`, `dsae=200000`, `dsvae=300000`, `svdd=400000`, and
+`realnvp=500000`. `starting_optuna_trial_number` is one greater than the largest trial
+number already allocated in that model's study. Optuna trial numbers are never reused,
+so failed or partial allocations necessarily lead to a new seed. This matters because
+Hydra creates a fresh sampler process for each submitted chunk: reusing a seed would
+restart the NSGA-II random stream.
+Every sampled trial must carry the Optuna system attribute `nsga2:generation`; final
+reporting rejects missing or negative generations for every sampled trial. The sole
+exception is an explicitly authenticated pre-sampling `FAIL`: it must have empty
+parameters, null values, and no generation key. Normally its allocation binding is
+marked `nsga2_trial_phase=pre_sampling_failure` with terminal-Optuna or stale-repair
+evidence. If a hard kill prevented the binding file itself from being written, the
+hashed stale-repair before/after record plus the authenticated allocating `chunk.json`
+is sufficient; an unusable failed trial is never required to have a Hydra run directory
+or optimized-metric artifact. Never synthesize or backfill a generation for that case.
+Reporting exports the sampler mapping, seed policy, their SHA-256 identities, and each
+trial's sampled generation or explicit pre-sampling-failure phase.
+
+Production canaries use separate disposable studies and databases. They prove the
+resolved sampler and generation metadata but never enter the final studies. Each final
+model study therefore starts pristine. Every invocation is bounded to the remaining
+slots in the current generation:
+`min(48 - current_complete_slots, 600 - total_complete)`. A healthy run uses 12
+complete generations of 48 followed by 24 members of generation 12:
+`12 * 48 + 24 = 600`. Failed or partial invocations consume their allocated trial
+numbers; recovery starts from the next Optuna trial number and seed while filling only
+the unresolved slots in the same generation. Do not open a later generation while the
+preceding full generation is active or unresolved.
+
+All earlier M-TPE campaign roots are read-only operational evidence. They may be
+inspected and reported as superseded history, but must never receive new submissions,
+repairs, retrains, aggregation, or final-publication mutations.
+
+### 1.1.2 Exploratory targeted two-objective M-TPE follow-up
+
+After the 56 screening fronts, retrains, and oracle summaries are sealed, write an
+immutable confirmation-target manifest naming each selected model, score, metric,
+pairing strategy, screening trial/configuration, selection rationale, and all source
+artifact hashes. Each target then receives its own two-objective M-TPE study over only
+that target's Q' and Q'', using the paper search space, 600 usable 50-epoch trials, the
+same three checkpoint candidates, and the same fixed relative-change rule. Reconstruct
+and freeze each confirmation front before its 200-epoch retraining and downstream
+evaluation. Store confirmation databases, bindings, checkpoints, MLflow runs, fronts,
+retrain results, and reports under a distinct `confirmation/` namespace. Never append
+confirmation trials to the six NSGA-II databases or describe the combined stages as one
+sampler history.
+
+Under the current paper protocol, the shortlist is chosen after inspecting the oracle
+mean over all 20 downstream anomaly datasets. It is therefore target-selection-biased
+exploratory follow-up, even if called “confirmation” operationally; it cannot provide an
+unbiased confirmatory claim on those same 20 datasets. A stronger confirmatory design
+would require either preregistering the shortlist before downstream evaluation or
+freezing a discovery/holdout split of anomaly datasets and evaluating confirmation only
+on the untouched holdout. Do not imply either safeguard unless it was actually used and
+authenticated.
 
 ### 1.2 Data invariants and leakage boundary
 
@@ -176,7 +246,7 @@ validation data. Never reuse a native-score threshold for OAS.
 
 ## 2. Exact experiment matrix and objective semantics
 
-### 2.1 Six shared studies
+### 2.1 Six shared NSGA-II screening studies
 
 The persistent Optuna studies are exactly:
 
@@ -308,9 +378,11 @@ configs/hparams_search/svdd_shared_optuna.yaml
 configs/hparams_search/realnvp_shared_optuna.yaml
 ```
 
-Each inherits the corresponding paper HPO file (`*_optuna.yaml`), including its search
-space and M-TPE settings, then sets 600 trials, the shared study name, and the exact 28
-or 14 direction vector.
+Each inherits the corresponding paper HPO search space but overrides the sampler with
+the frozen NSGA-II screening contract, then sets 600 trials, the shared study name, and
+the exact 28- or 14-direction vector. The inherited paper M-TPE sampler settings are
+not active in screening. Targeted confirmation configs must instead compose the paper
+M-TPE sampler with exactly one selected logical Q'/Q'' objective pair.
 
 Retraining/downstream overlays:
 
@@ -359,8 +431,10 @@ contains all four mappings and CDF simultaneously.
 ### 3.3 Orchestration
 
 - `scripts/physics_background_pairing_campaign.py` is the campaign state machine. Its
-  commands are `init`, `status`, `pilot`, `sweep`, `submit-next`, `freeze`, `retrain`,
-  `resolve-retrain-index`, and `aggregate`.
+  active commands include `init`, `status`, `pilot`, `production-canary`, `sweep`,
+  `freeze`, `retrain`, `resolve-retrain-index`, and `aggregate`. The legacy
+  `submit-next` entry point is deliberately fail-closed; all scheduler submissions go
+  through the authenticated operations helper.
 - `scripts/physics_background_pairing_operations.py` is the mutable control plane for
   an immutable campaign. It submits an exact frozen-worktree search chunk, refuses
   scheduler or Optuna overlap, and holds an interprocess campaign lock across live
@@ -679,14 +753,14 @@ any downstream anomaly sample during model selection.
 Earlier isolated 8-10 minute pilots do not satisfy this gate. The unified pilot's
 runtime is not yet known and may approach the current 90-minute debug limit.
 
-### Gate E: one-trial production canaries
+### Gate E: four-trial NSGA-II production canaries
 
 The unified pilot does not exercise Optuna, SQLite, Hydra multirun, or the packed
 launcher. First run `physics_background_pairing_packed_pilot.sbatch`; it asks four
 temporary Optuna trials and proves ordered Hydra job/result binding across all four
-GPUs on one debug node. Then launch four real 50-epoch trials per model through the
-production `sweep` path before large chunks. These are valid production trials and
-count toward 600 if usable.
+GPUs on one debug node. Then launch four 50-epoch trials per model through dedicated
+disposable canary studies before large chunks. Canary trials never count toward 600
+and their databases must never be reused as final screening databases.
 
 Use `--nodes=1`, `--trials 4 --jobs 4 --timeout-min 720`. Confirm the database direction
 vector, four full finite objective vectors, ordered Optuna-to-Hydra bindings, distinct
@@ -731,13 +805,16 @@ checkpoint selections, and all 272 configured candidate slots. The 248 required
 last/primary candidates must exist with finite native thresholds plus independent OAS
 thresholds for AE/VAE; each of the 24 stable slots records whether its strict criterion
 produced a checkpoint. It also reauthenticates the resolved E/G-only search
-configuration. Do not submit a bulk chunk without this file.
+configuration, the exact frozen NSGA-II sampler/seed policy, and
+`nsga2:generation == 0` for all 24 canary trials. The gate must also prove that the six
+final study databases are pristine. Do not submit a bulk chunk without this file.
 
 ## 6. Search execution: six studies, 600 usable trials each
 
 ### 6.1 Submission model
 
-`physics_background_pairing_sweep.sbatch` requests twelve ARM `normal` nodes by default.
+`physics_background_pairing_sweep.sbatch` requests twelve ARM `normal` nodes for each
+full 48-member generation.
 Normal allocations are node-exclusive and each node has four GH200 GPUs, so the custom
 Hydra launcher dispatches 48 ordered jobs as 48 concurrent resource-exact `srun` steps:
 four per node, each with one GPU, 16 CPUs, and 96 GB RAM. One controller retains the
@@ -766,7 +843,12 @@ and rejects an active or unregistered packed allocation, active ledger row, or
 write share one interprocess lock. It additionally requires the authenticated six-model
 terminal canary artifact, rejects timeouts above 720 minutes, and refuses
 `usable_complete + trials` above 600; therefore the last request must use the exact
-remaining count. The direct `sbatch` equivalent is a recovery/debug fallback only:
+remaining count. Final studies start empty. Each request is bounded to
+`min(48 - current_complete_slots, 600 - total_complete)` and uses the next authenticated
+Optuna trial number in the frozen seed formula. A healthy study therefore requests
+twelve complete 48-trial generations, then the final 24 trials of generation 12.
+Reconcile and authenticate each invocation before submitting the next.
+The direct `sbatch` equivalent is a recovery/debug fallback only:
 
 ```bash
 sbatch --parsable \
@@ -781,12 +863,13 @@ chunk when that study has `RUNNING` or `WAITING` trials, but scheduler state mus
 be checked before submission.
 
 Set `--nodes=ceil(CHUNK_JOBS/4)` whenever overriding the 48-job default. Start with a
-one-node, four-trial production canary after the packed debug pilot.
+one-node, four-trial disposable production canary after the packed debug pilot.
 Increase only if scheduler quota, SQLite locking, filesystem load, and GPU throughput
-are healthy. `CHUNK_TRIALS=48` is a convenient accounting unit, not a scientific
-requirement. From an empty study, twelve full chunks plus a final 24 produce 600; after
-the four production-canary trials, twelve full chunks plus a final 20 produce 600.
-Failed/unusable trials require replacements based on the exact remaining usable count.
+are healthy. Here the 48-trial unit is scientifically material because it is the
+frozen NSGA-II population size, not merely an accounting convenience. The only nominal
+final-study schedule is `12 * 48 + 24 = 600`. Failed/unusable trials require
+authenticated recovery that preserves generation and seed semantics; do not submit
+arbitrary replacements merely to reach the scalar trial count.
 
 ### 6.2 Completion semantics
 
@@ -1383,8 +1466,10 @@ label it correctly.
 - The downstream winner is an oracle chosen with anomaly labels; it measures the best
   member available on a front, not deployable signal-free selection performance.
 - The front itself is signal-agnostic and must be frozen before oracle evaluation.
-- Six shared studies improve paired strategy comparability but couple sampling through
-  a high-dimensional M-TPE history.
+- Six shared screening studies improve paired strategy comparability but couple
+  sampling through a high-dimensional NSGA-II population history. The later
+  two-objective M-TPE studies are targeted confirmations, not a complete independent
+  repeat of all screening objectives.
 - W1 cannot test pairing quality because it ignores event correspondence.
 - Different CAP pairings encode different notions of event similarity; a higher raw
   CAP under one mapping is not automatically superior to a lower raw CAP under another.
@@ -1409,8 +1494,10 @@ The report must contain:
 3. **Data:** training/normal invariants, E/G source definitions, counts/splits, anomaly
    leakage boundary, mappings, and CDF control.
 4. **Models and scores:** six models, native scores, OAS definition and padding mask.
-5. **Protocol:** six shared studies, budgets, objective order/directions, three
-   checkpoints, relative-change rule, fronts, deduplicated retraining, oracle winner.
+5. **Protocol:** six shared NSGA-II screening studies, sampler hash and generation
+   schedule, budgets, objective order/directions, three checkpoints, relative-change
+   rule, fronts, deduplicated retraining, oracle winner, and the separately scoped
+   targeted two-objective M-TPE confirmation stage.
 6. **Execution/completeness:** study and job counts, failures/retries, wall-clock and GPU
    usage where available, 56-front/retrain validation.
 7. **Main results:** a 56-row machine table plus readable grouped tables/figures.
@@ -1421,8 +1508,9 @@ The report must contain:
     behavior.
 12. **Checkpoint and proxy diagnostics:** candidate selection frequencies, rank
     correlation, front/downstream association, and directional drift.
-13. **Limitations:** oracle use of downstream labels, shared high-dimensional sampler,
-    fixed retraining seed, scheduler failures/missingness, and scope of E/G conclusions.
+13. **Limitations:** oracle use of downstream labels, shared high-dimensional NSGA-II
+    screening, target-selection bias in the two-objective M-TPE confirmations, fixed
+    retraining seed, scheduler failures/missingness, and scope of E/G conclusions.
 14. **Conclusion:** concise evidence-backed answer to whether and how pairing and OAS
     alter useful model selection.
 15. **Artifact index:** every CSV/JSON/figure/log bundle and its role.
@@ -1441,7 +1529,12 @@ The agent should work through these phases in order and update both
 - [ ] Worktree `.env`, quota, pair input, and shared UV environment verified.
 - [ ] `design.json` schema 2 initialized and audited.
 - [ ] Six unified model pilots completed successfully.
-- [ ] Six one-trial production canaries completed and runtime/resource plan calibrated.
+- [ ] Disposable four-trial production canaries completed for every model and proved
+      separate from pristine final-study databases.
+- [ ] Each final model study completed 12 full 48-trial generations and one final
+      24-trial generation, with unique authenticated invocation seeds and
+      `nsga2:generation` exported for every sampled trial; any generation-less `FAIL`
+      has explicit authenticated pre-sampling evidence and is exported separately.
 - [ ] AE has 600 usable 50-epoch trials.
 - [ ] VAE has 600 usable 50-epoch trials.
 - [ ] DSAE has 600 usable 50-epoch trials.
@@ -1456,6 +1549,11 @@ The agent should work through these phases in order and update both
 - [ ] Portable CSV/JSON/figure/log package generated and hash-manifested.
 - [ ] Independent sub-agent audit finds no missing strategy/model/artifact.
 - [ ] Final `REPORT.md` written, cross-checked, and copied to the requested locations.
+- [ ] Immutable targeted-confirmation manifest frozen from the screening results.
+- [ ] Every selected target completed its independent 600-trial, 50-epoch,
+      two-objective M-TPE study and front freeze.
+- [ ] Confirmation front members retrained/evaluated for 200 epochs and reported under
+      a separate authenticated `confirmation/` namespace.
 
 The auto-research task is complete only when every box is satisfied. A queued/running
 job is not a terminal blocker while other useful work remains: predict its completion

@@ -1,0 +1,16 @@
+# @package _global_
+
+defaults:
+  - vae_shared_optuna
+  - override /hydra/sweeper/sampler: nsgaii
+  - _self_
+
+hydra:
+  sweeper:
+    sampler:
+      seed: 123
+      population_size: 48
+      mutation_prob: null # Optuna's defined 1 / n_params policy.
+      crossover_prob: 0.9
+      swapping_prob: 0.5
+      constraints_func: null

@@ -549,7 +549,7 @@ def test_submit_registers_exact_frozen_job(monkeypatch, tmp_path) -> None:
     root, repository = _campaign(tmp_path)
     _authenticate(monkeypatch)
     monkeypatch.setattr(operations, "_require_canary_gate", lambda *args: None)
-    monkeypatch.setattr(operations, "_usable_search_trials", lambda *args: 4)
+    monkeypatch.setattr(operations, "_usable_search_trials", lambda *args: 0)
     calls = []
 
     def run(command, **kwargs):
@@ -572,6 +572,7 @@ def test_submit_registers_exact_frozen_job(monkeypatch, tmp_path) -> None:
     assert job_id == "12345"
     assert "--nodes=12" in calls[0]
     assert any("PHYSICS_BGPAIR_REPOSITORY_ROOT=" in value for value in calls[0])
+    assert any("CANARY_MODE=0" in value for value in calls[0])
     with (root / "state" / "job_history.csv").open(encoding="utf-8") as handle:
         row = next(csv.DictReader(handle))
     assert row["state"] == "PENDING"
@@ -606,6 +607,8 @@ def test_submit_canary_registers_fixed_four_trial_one_node_job(monkeypatch, tmp_
     assert "CHUNK_TRIALS=4" in export
     assert "CHUNK_JOBS=4" in export
     assert "TIMEOUT_MIN=720" in export
+    assert "CANARY_MODE=1" in export
+    assert "CANARY_ATTEMPT=1" in export
     with (root / "state" / "job_history.csv").open(encoding="utf-8") as handle:
         row = next(csv.DictReader(handle))
     assert row["kind"] == "production_canary"
@@ -630,14 +633,65 @@ def test_submit_canary_requires_validated_forced_restart_gate(monkeypatch, tmp_p
         )
 
 
-def test_submit_canary_requires_exact_empty_study(monkeypatch, tmp_path) -> None:
-    """A production canary cannot be mislabeled after any persisted trial exists."""
+def test_submit_canary_retries_in_a_new_attempt_directory(monkeypatch, tmp_path) -> None:
+    """A failed scheduler attempt is retained and cannot poison its retry."""
     root, repository = _campaign(tmp_path)
     _authenticate(monkeypatch)
     monkeypatch.setattr(operations, "_require_restart_canary_gate", lambda *args: None)
-    monkeypatch.setattr(operations, "_study_trial_count", lambda *args: 1)
+    failed_log = tmp_path / "failed.out"
+    failed_log.write_text("failed\n", encoding="utf-8")
+    operations._atomic_csv(
+        root / "state" / "job_history.csv",
+        [
+            {
+                "job_id": "100",
+                "kind": "production_canary",
+                "model": "ae",
+                "attempt": "1",
+                "state": "FAILED",
+                "exit_code": "1:0",
+                "commit": "a" * 40,
+                "log_path": str(failed_log),
+                "log_sha256": operations._sha256(failed_log),
+            }
+        ],
+    )
+    observed = {}
 
-    with pytest.raises(RuntimeError, match="requires an empty vae study"):
+    def run(command, **kwargs):
+        observed["command"] = command
+        return SimpleNamespace(stdout="101;cluster\n")
+
+    monkeypatch.setattr(operations.subprocess, "run", run)
+    job_id = operations.submit_canary(
+        root,
+        repository,
+        "ae",
+        tmp_path / "data",
+        tmp_path / "raw",
+        tmp_path / "pairing",
+    )
+
+    assert job_id == "101"
+    export = next(value for value in observed["command"] if value.startswith("--export="))
+    assert "CANARY_ATTEMPT=2" in export
+    _, rows = operations._ledger(root)
+    assert [(row["job_id"], row["attempt"], row["state"]) for row in rows] == [
+        ("100", "1", "FAILED"),
+        ("101", "2", "PENDING"),
+    ]
+
+
+def test_submit_canary_requires_fresh_disposable_study(monkeypatch, tmp_path) -> None:
+    """A production canary cannot overwrite its isolated disposable study."""
+    root, repository = _campaign(tmp_path)
+    _authenticate(monkeypatch)
+    monkeypatch.setattr(operations, "_require_restart_canary_gate", lambda *args: None)
+    database = root / "production_canaries" / "vae" / "attempt_0001" / "study.db"
+    database.parent.mkdir(parents=True)
+    database.write_bytes(b"existing")
+
+    with pytest.raises(RuntimeError, match="already exists for vae"):
         operations.submit_canary(
             root,
             repository,
@@ -681,6 +735,8 @@ def test_submit_canary_refuses_a_second_registered_model_canary(monkeypatch, tmp
                 "kind": "production_canary",
                 "model": "ae",
                 "state": "COMPLETED",
+                "exit_code": "0:0",
+                "attempt": "1",
             }
         ],
     )
@@ -745,6 +801,7 @@ def test_terminal_canary_gate_authenticates_exact_campaign_cardinalities(tmp_pat
     payload = {
         "schema_version": 1,
         "code_commit": "a" * 40,
+        "main_studies_empty": True,
         "bindings": 24,
         "checkpoint_selections": 224,
         "mlflow_runs": [{} for _ in range(24)],
@@ -766,6 +823,7 @@ def test_terminal_canary_gate_authenticates_exact_campaign_cardinalities(tmp_pat
                 "log_sha256": "b" * 64,
                 "success_sha256": "c" * 64,
                 "bindings_sha256": "d" * 64,
+                "attempt": "1",
             }
             for model in operations.MODELS
         ],
@@ -1138,6 +1196,27 @@ def test_submit_refuses_trial_target_overshoot(monkeypatch, tmp_path) -> None:
         )
 
 
+def test_submit_refuses_to_cross_nsgaii_generation_boundary(monkeypatch, tmp_path) -> None:
+    """Recovery chunks fill only the unfinished generation before advancing."""
+    root, repository = _campaign(tmp_path)
+    _authenticate(monkeypatch)
+    monkeypatch.setattr(operations, "_require_canary_gate", lambda *args: None)
+    monkeypatch.setattr(operations, "_usable_search_trials", lambda *args: 10)
+
+    with pytest.raises(RuntimeError, match="generation 0 has 38 slots"):
+        operations.submit_search(
+            root,
+            repository,
+            "ae",
+            48,
+            48,
+            720,
+            tmp_path / "data",
+            tmp_path / "raw",
+            tmp_path / "pairing",
+        )
+
+
 def test_submit_refuses_timeout_beyond_normal_partition_limit(monkeypatch, tmp_path) -> None:
     """The mutable helper cannot advertise more time than Slurm grants."""
     root, repository = _campaign(tmp_path)
@@ -1408,6 +1487,155 @@ def test_reconcile_seals_successful_search_manifest_and_bindings(monkeypatch, tm
     assert row["bindings_sha256"] == operations._sha256(bindings)
 
 
+def test_full_reconcile_reauthenticates_sealed_search_artifacts(monkeypatch, tmp_path) -> None:
+    """Audit mode compares current success/binding hashes with the sealed ledger."""
+    root, repository = _campaign(tmp_path)
+    _authenticate(monkeypatch)
+    log = tmp_path / "search.out"
+    log.write_text("done\n", encoding="utf-8")
+    operations._atomic_csv(
+        root / "state" / "job_history.csv",
+        [
+            {
+                "job_id": "7",
+                "kind": "search_chunk",
+                "model": "ae",
+                "state": "COMPLETED",
+                "exit_code": "0:0",
+                "log_path": str(log),
+                "log_sha256": operations._sha256(log),
+                "success_sha256": "a" * 64,
+                "bindings_sha256": "b" * 64,
+            }
+        ],
+    )
+    monkeypatch.setattr(operations, "_accounting", lambda ids: {})
+    monkeypatch.setattr(
+        operations,
+        "_completed_search_artifacts",
+        lambda *args: ("c" * 64, "d" * 64),
+    )
+
+    with pytest.raises(RuntimeError, match="artifacts changed after sealing"):
+        operations.reconcile(root, repository, True)
+
+
+def test_full_reconcile_reauthenticates_sealed_canary_artifacts(monkeypatch, tmp_path) -> None:
+    """Audit mode also reauthenticates accepted production-canary evidence."""
+    root, repository = _campaign(tmp_path)
+    _authenticate(monkeypatch)
+    log = tmp_path / "canary.out"
+    log.write_text("done\n", encoding="utf-8")
+    operations._atomic_csv(
+        root / "state" / "job_history.csv",
+        [
+            {
+                "job_id": "8",
+                "kind": "production_canary",
+                "model": "ae",
+                "attempt": "1",
+                "state": "COMPLETED",
+                "exit_code": "0:0",
+                "log_path": str(log),
+                "log_sha256": operations._sha256(log),
+                "success_sha256": "a" * 64,
+                "bindings_sha256": "b" * 64,
+            }
+        ],
+    )
+    monkeypatch.setattr(operations, "_accounting", lambda ids: {})
+    monkeypatch.setattr(
+        operations,
+        "_completed_canary_artifacts",
+        lambda *args: ("c" * 64, "d" * 64),
+    )
+
+    with pytest.raises(RuntimeError, match="artifacts changed after sealing"):
+        operations.reconcile(root, repository, True)
+
+
+def test_completed_search_authenticates_nsgaii_sampler_provenance(monkeypatch, tmp_path) -> None:
+    """A new campaign cannot seal a chunk produced with a different sampler config."""
+    root, _ = _campaign(tmp_path)
+    design = json.loads((root / "design.json").read_text(encoding="utf-8"))
+    design["screening_sampler"] = operations.NSGAII_SCREENING_SAMPLER
+    design["screening_sampler_seed_policy"] = operations.NSGAII_SEED_POLICY
+    study = {
+        "model": "ae",
+        "study_name": "physics_ae_background_all",
+        "hparams_search": "ae_shared_nsgaii",
+    }
+    design["studies"] = [study]
+    chunk = root / "sweeps" / "ae" / "stamp" / "chunk.json"
+    chunk.parent.mkdir(parents=True)
+    invocation = {
+        "starting_optuna_trial_number": 0,
+        "expected_generation": 0,
+        "resolved_seed": 123,
+    }
+    provenance = {
+        "schema_version": 2,
+        "slurm_job_id": "7",
+        "model": "ae",
+        "study_name": study["study_name"],
+        "hparams_search": "ae_shared_nsgaii",
+        "screening_sampler_base": operations.NSGAII_SCREENING_SAMPLER,
+        "screening_sampler_base_sha256": operations._json_sha256(
+            operations.NSGAII_SCREENING_SAMPLER
+        ),
+        "screening_sampler": operations.NSGAII_SCREENING_SAMPLER,
+        "screening_sampler_sha256": operations._json_sha256(operations.NSGAII_SCREENING_SAMPLER),
+        "screening_sampler_seed_policy": operations.NSGAII_SEED_POLICY,
+        "screening_sampler_seed_policy_sha256": operations._json_sha256(
+            operations.NSGAII_SEED_POLICY
+        ),
+        "sampler_invocation": invocation,
+    }
+    chunk.write_text(
+        json.dumps(
+            {
+                **provenance,
+                "controller_status": "complete",
+                "completed_at": "now",
+                "requested_trials": 1,
+                "command": [
+                    "hparams_search=ae_shared_nsgaii",
+                    "hydra.sweeper.sampler.seed=123",
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+    bindings = chunk.parent / "trial_bindings.json"
+    bindings.write_text(
+        json.dumps(
+            {
+                **provenance,
+                "bindings": [
+                    {
+                        "optimized_metric_artifact": "artifact.json",
+                        "screening_sampler": operations.NSGAII_SCREENING_SAMPLER,
+                        "nsga2_generation": 0,
+                    }
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+    validation = chunk.parent / "chunk_validation.json"
+    validation.write_text("{}\n", encoding="utf-8")
+    monkeypatch.setattr(
+        operations, "_validate_completed_search_bindings", lambda *args: validation
+    )
+
+    operations._completed_search_artifacts(root, design, {"model": "ae", "job_id": "7"})
+    changed = json.loads(chunk.read_text(encoding="utf-8"))
+    changed["screening_sampler"]["seed"] = 999
+    chunk.write_text(json.dumps(changed), encoding="utf-8")
+    with pytest.raises(RuntimeError, match="sampler provenance differs"):
+        operations._completed_search_artifacts(root, design, {"model": "ae", "job_id": "7"})
+
+
 def test_terminal_chunk_validation_authenticates_only_supplied_bindings(
     monkeypatch, tmp_path
 ) -> None:
@@ -1564,10 +1792,18 @@ def test_repair_stale_backs_up_and_fails_only_explicit_trials(monkeypatch, tmp_p
     repaired = optuna.load_study(study_name="study", storage=f"sqlite:///{database}")
     assert [trial.state.name for trial in repaired.get_trials()] == ["FAIL", "FAIL"]
     payload = json.loads(output.read_text(encoding="utf-8"))
-    assert payload["trials_before"] == [
-        {"state": "RUNNING", "trial_number": 0},
-        {"state": "WAITING", "trial_number": 1},
+    assert [(row["trial_number"], row["state"]) for row in payload["trials_before"]] == [
+        (0, "RUNNING"),
+        (1, "WAITING"),
     ]
+    assert all(
+        row["nsga2_trial_phase"] == "pre_sampling_failure"
+        and row["nsga2_generation"] is None
+        and row["params"] == {}
+        and row["values"] is None
+        for row in payload["trials_before"] + payload["trials_after"]
+    )
+    assert payload["updated_binding_artifacts"] == []
     assert Path(payload["backup"]).is_file()
     assert operations._sha256(Path(payload["backup"])) == payload["backup_sha256"]
     events = [
@@ -2331,6 +2567,7 @@ def test_validate_canaries_covers_all_trials_and_candidate_families(monkeypatch,
                 yaml.safe_dump(
                     {
                         "test": False,
+                        "trainer": {"min_epochs": 50, "max_epochs": 50},
                         "data": {
                             "validation_aux_datasets": [],
                             "expose_zerobias_sources": True,
@@ -2379,9 +2616,24 @@ def test_validate_canaries_covers_all_trials_and_candidate_families(monkeypatch,
             "log_sha256": "1" * 64,
             "success_sha256": "2" * 64,
             "bindings_sha256": "3" * 64,
+            "attempt": "2" if model == "ae" else "1",
         }
         for model in operations.MODELS
     ]
+    jobs.insert(
+        0,
+        {
+            "kind": "production_canary",
+            "model": "ae",
+            "state": "FAILED",
+            "exit_code": "1:0",
+            "commit": "a" * 40,
+            "log_sha256": "4" * 64,
+            "success_sha256": "",
+            "bindings_sha256": "",
+            "attempt": "1",
+        },
+    )
     status = [
         {
             "model": model,
@@ -2396,9 +2648,19 @@ def test_validate_canaries_covers_all_trials_and_candidate_families(monkeypatch,
         for model in operations.MODELS
     ]
     monkeypatch.setattr(operations, "reconcile", lambda *args: jobs)
+    monkeypatch.setattr(
+        operations,
+        "_completed_canary_artifacts",
+        lambda root, design, row: (row["success_sha256"], row["bindings_sha256"]),
+    )
     monkeypatch.setattr(report, "_design", lambda root: design)
     monkeypatch.setattr(report, "_trial_exports", lambda *args: (status, []))
     monkeypatch.setattr(report, "_binding_index", lambda root: bindings)
+    monkeypatch.setattr(
+        operations,
+        "_canary_trial_evidence",
+        lambda *args: (status, bindings, [{}] * 224, [{}] * 24),
+    )
     monkeypatch.setattr(report, "_validate_bindings", lambda *args: None)
     monkeypatch.setattr(
         report, "_checkpoint_rows", lambda *args, **kwargs: ([{}] * 224, [{}] * 24)
@@ -2425,3 +2687,10 @@ def test_validate_canaries_covers_all_trials_and_candidate_families(monkeypatch,
         "stable_available": 23,
         "stable_missing": 1,
     }
+    assert len(payload["jobs"]) == len(operations.MODELS)
+    assert len(payload["attempt_history"]) == len(operations.MODELS) + 1
+    assert [
+        (row["attempt"], row["state"])
+        for row in payload["attempt_history"]
+        if row["model"] == "ae"
+    ] == [("1", "FAILED"), ("2", "COMPLETED")]

@@ -10,10 +10,10 @@
 NotebookFileLineBreakTest
 NotebookFileLineBreakTest
 NotebookDataPosition[       154,          7]
-NotebookDataLength[     18824,        417]
-NotebookOptionsPosition[     14852,        351]
-NotebookOutlinePosition[     15245,        367]
-CellTagsIndexPosition[     15202,        364]
+NotebookDataLength[     27675,        626]
+NotebookOptionsPosition[     22829,        541]
+NotebookOutlinePosition[     23222,        557]
+CellTagsIndexPosition[     23179,        554]
 WindowFrame->Normal*)
 
 (* Beginning of Notebook Content *)
@@ -27,8 +27,9 @@ Model-picking analysis for the CIFAR10 image-AD benchmark: the validation \
 strategies are compared across architectures by the test efficiency of the \
 Pareto point each one selects.
 Inputs: pareto_effs/<exp>.csv and <exp>_eval.csv harvested by \
-scripts/analysis/harvest_pareto_effs.py, and Optuna front CSVs under paretos/cifar10/ \
-from scripts/optuna/fetch_optuna_pareto.py. Figures are exported to effs_cifar10/.
+scripts/analysis/harvest_pareto_effs.py, and Optuna front CSVs under \
+paretos/cifar10/ from scripts/optuna/fetch_optuna_pareto.py. Figures are \
+exported to effs_cifar10/.
 All methods live in notebooks/lib/ (effs_*.wl); this notebook holds only \
 configuration, hand-transcribed legacy data, and drivers. Run it \
 top-to-bottom (Evaluation > Evaluate Notebook), or headlessly via \
@@ -54,7 +55,8 @@ Get[FileNameJoin[{NotebookDirectory[], \"lib\", #}]] & /@
 \"effs_format.wl\",
    \"effs_tables.wl\", \"effs_style.wl\", \"effs_plots.wl\"};
 paretoEffsDir = \"pareto_effs\";\
-\>", "Input",ExpressionUUID->"a91c9b0a-0228-4529-9c64-44c8054c7067"],
+\>", "Input",
+ CellLabel->"In[1]:=",ExpressionUUID->"a91c9b0a-0228-4529-9c64-44c8054c7067"],
 
 Cell["\<\
 Five validation strategies compete to pick a model from each architecture's \
@@ -84,7 +86,8 @@ strategyBoxColors = <|\"cvar25\" -> \"#3f90da\", \"stability\" -> \
 \"#ffa90e\",
    \"cap\" -> \"#bd1f01\", \"wasserstein\" -> \"#832db6\", \"consistency\" -> \
 \"#94a4a2\"|>;\
-\>", "Input",ExpressionUUID->"42b88561-ab04-4c56-879f-f4288eeba947"],
+\>", "Input",
+ CellLabel->"In[4]:=",ExpressionUUID->"42b88561-ab04-4c56-879f-f4288eeba947"],
 
 Cell["\<\
 Domain configuration: which harvest experiment backs each architecture, where \
@@ -99,7 +102,8 @@ rebuttalTierSuffix = \"\";
 rebuttalModelExps = <|\"AE\" -> \"cifar10_ae_pareto\", \"VAE\" -> \
 \"cifar10_vae_pareto\", \"SVDD\" -> \"cifar10_svdd_pareto\", \"RealNVP\" -> \
 \"cifar10_realnvp_pareto\", \"DTE\" -> \"cifar10_dte_pareto\"|>;\
-\>", "Input",ExpressionUUID->"25545085-aff5-4509-8d6e-f83b9db6e567"],
+\>", "Input",
+ CellLabel->"In[10]:=",ExpressionUUID->"25545085-aff5-4509-8d6e-f83b9db6e567"],
 
 Cell["\<\
 Fire-on-everything guard. Picks whose per-signal efficiencies are all ~100% \
@@ -119,8 +123,9 @@ off with Block, because a saturated AUPRC column means perfect separation \
 rather than a degenerate detector.\
 \>", "Text",ExpressionUUID->"3d96915d-9a19-416e-aba8-071211f94d77"],
 
-Cell["$degenerateGuard = True;", "Input",ExpressionUUID->"470e7952-df4f-4d91-88bc-ab8f883c5c10"]
-}, Open  ]],
+Cell["$degenerateGuard = True;", "Input",
+ CellLabel->"In[15]:=",ExpressionUUID->"470e7952-df4f-4d91-88bc-ab8f883c5c10"]
+}, Closed]],
 
 Cell[CellGroupData[{
 
@@ -174,7 +179,7 @@ frontRowDTE, \"SVG\"];
 Export[rebuttalOutDir <> \"fronts_dte\" <> rebuttalTierSuffix <> \".pdf\", \
 frontRowDTE, \"PDF\"];\
 \>", "Input",ExpressionUUID->"f0229083-4683-4b18-ab4f-0d1dd92176db"]
-}, Open  ]],
+}, Closed]],
 
 Cell[CellGroupData[{
 
@@ -213,7 +218,10 @@ cifarArchitectures = Association[\"AE\" -> Association[\"semisupervised\" -> \
       3.8, 6.9, 3.6, 4.4, 2.8, 3.8, 3.5}, \"wasserstein\" -> {8.2, 0.7, 5.8, \
 3.3, 6.4, 1.1, 5.7,
       2.6, 7.2}]];\
-\>", "Input",ExpressionUUID->"2bcd1554-2fc8-4dee-b391-463f2a610071"],
+\>", "Input",
+ CellLabel->"In[24]:=",ExpressionUUID->"2bcd1554-2fc8-4dee-b391-463f2a610071"],
+
+Cell[CellGroupData[{
 
 Cell["\<\
 cifarTableTex = BuildLatexTableCompactAsymCollapse[cifarArchitectures, 10000, \
@@ -221,7 +229,61 @@ cifarTableTex = BuildLatexTableCompactAsymCollapse[cifarArchitectures, 10000, \
 printTable[cifarTableTex];
 printTable[BuildMarkdownTableCompactAsymCollapse[cifarArchitectures, 10000, \
 0.05, 2]];\
-\>", "Input",ExpressionUUID->"12af4599-d9ee-420c-9453-3b4fc28d3e03"],
+\>", "Input",
+ CellLabel->"In[25]:=",ExpressionUUID->"12af4599-d9ee-420c-9453-3b4fc28d3e03"],
+
+Cell[CellGroupData[{
+
+Cell["\<\
+\\begin{tabular}{lccccccccccc}
+\\toprule
+Arch. & Semi & CAP & Cons & Stable & W1 & CAP$-$Cons & $p$ & CAP$-$Stable & \
+$p$ & CAP$-$W1 & $p$ \\\\
+\\midrule
+AE & 7.22 & 6.47 & coll & 5.02 & 4.72 & n/a & n/a & $1.44^{+1.13}_{-1.12}$ & \
+0.129 & $1.74^{+1.14}_{-1.16}$ & 0.109 \\\\
+VAE & 3.93 & 0.87 & coll & 0.06 & 1.01 & n/a & n/a & $0.81^{+0.50}_{-0.40}$ & \
+0.055 & $-0.14^{+0.54}_{-0.58}$ & 1.000 \\\\
+SVDD & 3.21 & 0.94 & coll & 1.79 & coll & n/a & n/a & $-0.84^{+0.32}_{-0.31}$ \
+& 0.055 & n/a & n/a \\\\
+RealNVP & 9.22 & 5.23 & coll & 3.63 & 4.56 & n/a & n/a & \
+$1.60^{+0.52}_{-0.56}$ & 0.055 & $0.68^{+1.67}_{-1.52}$ & 1.000 \\\\
+\\bottomrule
+\\end{tabular}
+% legend: no-pick = rule could not select from this front (knee needs >= 3 \
+Pareto points, best-Q' needs >= 1); coll = method collapsed (all-zero) or \
+excluded by the saturation guard; n/a = comparison not computable (a required \
+side is missing).\
+\>", "Print",
+ PageWidth->DirectedInfinity[1],
+ CellChangeTimes->{3.9947394295978317`*^9},
+ ShowStringCharacters->
+  False,ExpressionUUID->"d8b0c848-16e7-47c0-a014-821ffec2b18c"],
+
+Cell["\<\
+| Arch. | Semi | CAP | Cons | Stable | W1 | CAP-Cons | p | CAP-Stable | p | \
+CAP-W1 | p |
+|---|---|---|---|---|---|---|---|---|---|---|---|
+| AE | 7.22 | 6.47 | coll | 5.02 | 4.72 | n/a | n/a | $1.44^{+1.14}_{-1.13}$ \
+| 0.129 | $1.74^{+1.17}_{-1.13}$ | 0.109 |
+| VAE | 3.93 | 0.87 | coll | 0.06 | 1.01 | n/a | n/a | $0.81^{+0.51}_{-0.40}$ \
+| 0.055 | $-0.14^{+0.54}_{-0.59}$ | 1.000 |
+| SVDD | 3.21 | 0.94 | coll | 1.79 | coll | n/a | n/a | \
+$-0.84^{+0.34}_{-0.30}$ | 0.055 | n/a | n/a |
+| RealNVP | 9.22 | 5.23 | coll | 3.63 | 4.56 | n/a | n/a | \
+$1.60^{+0.53}_{-0.57}$ | 0.055 | $0.68^{+1.71}_{-1.50}$ | 1.000 |
+
+legend: no-pick = rule could not select from this front (knee needs >= 3 \
+Pareto points, best-Q' needs >= 1); coll = method collapsed (all-zero) or \
+excluded by the saturation guard; n/a = comparison not computable (a required \
+side is missing).\
+\>", "Print",
+ PageWidth->DirectedInfinity[1],
+ CellChangeTimes->{3.994739429626169*^9},
+ ShowStringCharacters->
+  False,ExpressionUUID->"2638732f-dc8c-4c73-a1c8-40a10846a357"]
+}, Open  ]]
+}, Open  ]],
 
 Cell["\<\
 cifarAUPRCArchitectures = Association[\"AE\" -> \
@@ -291,13 +353,73 @@ objective Q' is best. Tables carry bootstrap CIs and Holm-adjusted Wilcoxon \
 p-values; the grid exports as grouped_bestq.\
 \>", "Text",ExpressionUUID->"2a95f2b3-396e-49e6-b620-a52fa75924dd"],
 
+Cell[CellGroupData[{
+
 Cell["\<\
 bestqGroups = rulePickArrays[rebuttalModelExps, bestQPick];
 bestqTabRows = HolmAdjustRows[BuildArchitectureRowsCompactCollapse[
    toLegacyGroups[bestqGroups], 10000, 0.05]];
 printTable[LatexTableFromRows[bestqTabRows, 2]];
 printTable[MarkdownTableFromRows[bestqTabRows, 2]];\
-\>", "Input",ExpressionUUID->"66f71861-dece-47fe-b8ec-3ce0dfa31600"],
+\>", "Input",
+ CellLabel->"In[16]:=",ExpressionUUID->"66f71861-dece-47fe-b8ec-3ce0dfa31600"],
+
+Cell[CellGroupData[{
+
+Cell["\<\
+\\begin{tabular}{lccccccccccc}
+\\toprule
+Arch. & Semi & CAP & Cons & Stable & W1 & CAP$-$Cons & $p$ & CAP$-$Stable & \
+$p$ & CAP$-$W1 & $p$ \\\\
+\\midrule
+AE & 7.52 & 5.53 & 4.43 & 4.74 & 3.74 & $1.10^{+1.09}_{-0.99}$ & 0.586 & \
+$0.79^{+0.97}_{-0.98}$ & 1.000 & $1.79^{+1.17}_{-1.13}$ & 0.313 \\\\
+VAE & 4.04 & 0.23 & 0.86 & 0.06 & 1.01 & $-0.62^{+0.29}_{-0.41}$ & 0.055 & \
+$0.18^{+0.22}_{-0.17}$ & 0.438 & $-0.78^{+0.34}_{-0.30}$ & 0.078 \\\\
+SVDD & coll & 0.51 & 0.37 & 1.51 & coll & $0.14^{+0.30}_{-0.27}$ & 1.000 & \
+$-1.00^{+0.63}_{-0.80}$ & 0.078 & n/a & n/a \\\\
+RealNVP & 10.11 & 0.53 & 4.03 & 2.89 & 3.68 & $-3.50^{+1.63}_{-1.72}$ & 0.055 \
+& $-2.36^{+0.79}_{-0.94}$ & 0.055 & $-3.14^{+1.23}_{-1.20}$ & 0.055 \\\\
+DTE & coll & 2.84 & 1.97 & 2.80 & 3.18 & $0.88^{+1.21}_{-1.01}$ & 1.000 & \
+$0.04^{+1.22}_{-1.37}$ & 1.000 & $-0.33^{+0.73}_{-1.04}$ & 1.000 \\\\
+\\bottomrule
+\\end{tabular}
+% legend: no-pick = rule could not select from this front (knee needs >= 3 \
+Pareto points, best-Q' needs >= 1); coll = method collapsed (all-zero) or \
+excluded by the saturation guard; n/a = comparison not computable (a required \
+side is missing).\
+\>", "Print",
+ PageWidth->DirectedInfinity[1],
+ CellChangeTimes->{3.994739384464817*^9},
+ ShowStringCharacters->
+  False,ExpressionUUID->"b751d017-8277-40f4-9c2d-5f9c8a0b6560"],
+
+Cell["\<\
+| Arch. | Semi | CAP | Cons | Stable | W1 | CAP-Cons | p | CAP-Stable | p | \
+CAP-W1 | p |
+|---|---|---|---|---|---|---|---|---|---|---|---|
+| AE | 7.52 | 5.53 | 4.43 | 4.74 | 3.74 | $1.10^{+1.09}_{-0.99}$ | 0.586 | \
+$0.79^{+0.97}_{-0.98}$ | 1.000 | $1.79^{+1.17}_{-1.13}$ | 0.313 |
+| VAE | 4.04 | 0.23 | 0.86 | 0.06 | 1.01 | $-0.62^{+0.29}_{-0.41}$ | 0.055 | \
+$0.18^{+0.22}_{-0.17}$ | 0.438 | $-0.78^{+0.34}_{-0.30}$ | 0.078 |
+| SVDD | coll | 0.51 | 0.37 | 1.51 | coll | $0.14^{+0.30}_{-0.27}$ | 1.000 | \
+$-1.00^{+0.63}_{-0.80}$ | 0.078 | n/a | n/a |
+| RealNVP | 10.11 | 0.53 | 4.03 | 2.89 | 3.68 | $-3.50^{+1.63}_{-1.72}$ | \
+0.055 | $-2.36^{+0.79}_{-0.94}$ | 0.055 | $-3.14^{+1.23}_{-1.20}$ | 0.055 |
+| DTE | coll | 2.84 | 1.97 | 2.80 | 3.18 | $0.88^{+1.21}_{-1.01}$ | 1.000 | \
+$0.04^{+1.22}_{-1.37}$ | 1.000 | $-0.33^{+0.73}_{-1.04}$ | 1.000 |
+
+legend: no-pick = rule could not select from this front (knee needs >= 3 \
+Pareto points, best-Q' needs >= 1); coll = method collapsed (all-zero) or \
+excluded by the saturation guard; n/a = comparison not computable (a required \
+side is missing).\
+\>", "Print",
+ PageWidth->DirectedInfinity[1],
+ CellChangeTimes->{3.994739384478858*^9},
+ ShowStringCharacters->
+  False,ExpressionUUID->"947a3bc8-9bf2-4299-8138-62e3adaefd17"]
+}, Open  ]]
+}, Open  ]],
 
 Cell["\<\
 bestqPlot = makeRuleBoxGrid[dropEmptyModels[bestqGroups], 2]
@@ -320,13 +442,73 @@ the point furthest from the chord joining the endpoints (kneePick). Same \
 table and grid as Best Q'; the grid exports as grouped_knee.\
 \>", "Text",ExpressionUUID->"bbbb4a13-c63e-4742-a7cb-433c40227c1a"],
 
+Cell[CellGroupData[{
+
 Cell["\<\
 kneeGroups = rulePickArrays[rebuttalModelExps, kneePick];
 kneeTabRows = HolmAdjustRows[BuildArchitectureRowsCompactCollapse[
    toLegacyGroups[kneeGroups], 10000, 0.05]];
 printTable[LatexTableFromRows[kneeTabRows, 2]];
 printTable[MarkdownTableFromRows[kneeTabRows, 2]];\
-\>", "Input",ExpressionUUID->"3e91c4a8-9b44-41af-8f98-756be334d1fc"],
+\>", "Input",
+ CellLabel->"In[20]:=",ExpressionUUID->"3e91c4a8-9b44-41af-8f98-756be334d1fc"],
+
+Cell[CellGroupData[{
+
+Cell["\<\
+\\begin{tabular}{lccccccccccc}
+\\toprule
+Arch. & Semi & CAP & Cons & Stable & W1 & CAP$-$Cons & $p$ & CAP$-$Stable & \
+$p$ & CAP$-$W1 & $p$ \\\\
+\\midrule
+AE & 6.48 & 5.46 & 4.70 & no-pick & 5.54 & $0.76^{+0.41}_{-0.38}$ & 0.039 & \
+n/a & n/a & $-0.09^{+0.49}_{-0.54}$ & 1.000 \\\\
+VAE & 1.23 & 0.79 & 0.08 & no-pick & no-pick & $0.71^{+0.43}_{-0.38}$ & 0.047 \
+& n/a & n/a & n/a & n/a \\\\
+SVDD & 3.11 & 1.56 & 0.97 & no-pick & coll & $0.59^{+0.62}_{-0.60}$ & 0.387 & \
+n/a & n/a & n/a & n/a \\\\
+RealNVP & 13.46 & 4.13 & 0.31 & 4.22 & 1.21 & $3.82^{+1.42}_{-1.40}$ & 0.031 \
+& $-0.09^{+2.31}_{-2.87}$ & 1.000 & $2.92^{+1.30}_{-1.24}$ & 0.031 \\\\
+DTE & 99.23 & 1.42 & no-pick & no-pick & 3.12 & n/a & n/a & n/a & n/a & \
+$-1.70^{+0.54}_{-0.58}$ & 0.031 \\\\
+\\bottomrule
+\\end{tabular}
+% legend: no-pick = rule could not select from this front (knee needs >= 3 \
+Pareto points, best-Q' needs >= 1); coll = method collapsed (all-zero) or \
+excluded by the saturation guard; n/a = comparison not computable (a required \
+side is missing).\
+\>", "Print",
+ PageWidth->DirectedInfinity[1],
+ CellChangeTimes->{3.9947393880065117`*^9},
+ ShowStringCharacters->
+  False,ExpressionUUID->"8cf752a0-7af8-421b-b189-127054108070"],
+
+Cell["\<\
+| Arch. | Semi | CAP | Cons | Stable | W1 | CAP-Cons | p | CAP-Stable | p | \
+CAP-W1 | p |
+|---|---|---|---|---|---|---|---|---|---|---|---|
+| AE | 6.48 | 5.46 | 4.70 | no-pick | 5.54 | $0.76^{+0.41}_{-0.38}$ | 0.039 | \
+n/a | n/a | $-0.09^{+0.49}_{-0.54}$ | 1.000 |
+| VAE | 1.23 | 0.79 | 0.08 | no-pick | no-pick | $0.71^{+0.43}_{-0.38}$ | \
+0.047 | n/a | n/a | n/a | n/a |
+| SVDD | 3.11 | 1.56 | 0.97 | no-pick | coll | $0.59^{+0.62}_{-0.60}$ | 0.387 \
+| n/a | n/a | n/a | n/a |
+| RealNVP | 13.46 | 4.13 | 0.31 | 4.22 | 1.21 | $3.82^{+1.42}_{-1.40}$ | \
+0.031 | $-0.09^{+2.31}_{-2.87}$ | 1.000 | $2.92^{+1.30}_{-1.24}$ | 0.031 |
+| DTE | 99.23 | 1.42 | no-pick | no-pick | 3.12 | n/a | n/a | n/a | n/a | \
+$-1.70^{+0.54}_{-0.58}$ | 0.031 |
+
+legend: no-pick = rule could not select from this front (knee needs >= 3 \
+Pareto points, best-Q' needs >= 1); coll = method collapsed (all-zero) or \
+excluded by the saturation guard; n/a = comparison not computable (a required \
+side is missing).\
+\>", "Print",
+ PageWidth->DirectedInfinity[1],
+ CellChangeTimes->{3.994739388013524*^9},
+ ShowStringCharacters->
+  False,ExpressionUUID->"1a23285a-648f-4757-9bb7-a846a4da0071"]
+}, Open  ]]
+}, Open  ]],
 
 Cell["\<\
 kneePlot = makeRuleBoxGrid[dropEmptyModels[kneeGroups], 2]
@@ -376,54 +558,73 @@ CellTagsIndex->{}
 Notebook[{
 Cell[CellGroupData[{
 Cell[576, 22, 106, 0, 96, "Title",ExpressionUUID->"3166cf5c-db88-4117-a7c8-fc2d446b051c"],
-Cell[685, 24, 782, 14, 77, "Text",ExpressionUUID->"47461260-588e-454e-91ae-a8d10ab98426"],
+Cell[685, 24, 809, 15, 77, "Text",ExpressionUUID->"47461260-588e-454e-91ae-a8d10ab98426"],
 Cell[CellGroupData[{
-Cell[1492, 42, 79, 0, 67, "Chapter",ExpressionUUID->"e1f4fc8c-da27-42b4-ab36-23d5127c0285"],
-Cell[1574, 44, 165, 3, 33, "Text",ExpressionUUID->"f86615d9-dd4f-4456-821e-17287ebc9c21"],
-Cell[1742, 49, 348, 7, 98, "Input",ExpressionUUID->"a91c9b0a-0228-4529-9c64-44c8054c7067"],
-Cell[2093, 58, 468, 6, 55, "Text",ExpressionUUID->"4f856d68-b7ef-4e7d-814d-dd8b6ba84f32"],
-Cell[2564, 66, 1028, 20, 185, "Input",ExpressionUUID->"42b88561-ab04-4c56-879f-f4288eeba947"],
-Cell[3595, 88, 203, 3, 33, "Text",ExpressionUUID->"792bbc83-866a-4e89-89e2-70b0c691eae2"],
-Cell[3801, 93, 424, 8, 98, "Input",ExpressionUUID->"25545085-aff5-4509-8d6e-f83b9db6e567"],
-Cell[4228, 103, 961, 16, 164, "Text",ExpressionUUID->"3d96915d-9a19-416e-aba8-071211f94d77"],
-Cell[5192, 121, 96, 0, 29, "Input",ExpressionUUID->"470e7952-df4f-4d91-88bc-ab8f883c5c10"]
+Cell[1519, 43, 79, 0, 67, "Chapter",ExpressionUUID->"e1f4fc8c-da27-42b4-ab36-23d5127c0285"],
+Cell[1601, 45, 165, 3, 33, "Text",ExpressionUUID->"f86615d9-dd4f-4456-821e-17287ebc9c21"],
+Cell[1769, 50, 371, 8, 98, "Input",ExpressionUUID->"a91c9b0a-0228-4529-9c64-44c8054c7067"],
+Cell[2143, 60, 468, 6, 55, "Text",ExpressionUUID->"4f856d68-b7ef-4e7d-814d-dd8b6ba84f32"],
+Cell[2614, 68, 1051, 21, 185, "Input",ExpressionUUID->"42b88561-ab04-4c56-879f-f4288eeba947"],
+Cell[3668, 91, 203, 3, 33, "Text",ExpressionUUID->"792bbc83-866a-4e89-89e2-70b0c691eae2"],
+Cell[3874, 96, 448, 9, 98, "Input",ExpressionUUID->"25545085-aff5-4509-8d6e-f83b9db6e567"],
+Cell[4325, 107, 961, 16, 164, "Text",ExpressionUUID->"3d96915d-9a19-416e-aba8-071211f94d77"],
+Cell[5289, 125, 120, 1, 29, "Input",ExpressionUUID->"470e7952-df4f-4d91-88bc-ab8f883c5c10"]
+}, Closed]],
+Cell[CellGroupData[{
+Cell[5446, 131, 81, 0, 56, "Chapter",ExpressionUUID->"13137716-8eb0-42cb-b2fa-992f75cefa3c"],
+Cell[CellGroupData[{
+Cell[5552, 135, 87, 0, 66, "Section",ExpressionUUID->"c9dd84ab-73b7-4b23-b094-a0d95a2f3c84"],
+Cell[5642, 137, 227, 3, 33, "Text",ExpressionUUID->"ce8e86a5-9e65-4f41-affd-7f05402af097"],
+Cell[5872, 142, 337, 6, 64, "Input",ExpressionUUID->"613dd318-3c0e-4169-abbc-3e4e4a5e1dd4"],
+Cell[6212, 150, 344, 6, 64, "Input",ExpressionUUID->"028bdd3f-3e91-4cf3-a21d-9fe93a768157"],
+Cell[6559, 158, 351, 6, 64, "Input",ExpressionUUID->"85129fa4-3ed3-4166-b6a9-d83f5b637d9e"],
+Cell[6913, 166, 372, 6, 64, "Input",ExpressionUUID->"014c0460-4dca-48b7-b978-8de9573382ff"],
+Cell[7288, 174, 344, 6, 64, "Input",ExpressionUUID->"f0229083-4683-4b18-ab4f-0d1dd92176db"]
+}, Closed]],
+Cell[CellGroupData[{
+Cell[7669, 185, 113, 0, 52, "Section",ExpressionUUID->"195a596a-df33-4ca7-a06b-44471af89a23"],
+Cell[7785, 187, 346, 5, 33, "Text",ExpressionUUID->"0305a2c4-006f-4e34-9b6a-02f141e04cbb"],
+Cell[8134, 194, 1336, 27, 237, "Input",ExpressionUUID->"2bcd1554-2fc8-4dee-b391-463f2a610071"],
+Cell[CellGroupData[{
+Cell[9495, 225, 309, 7, 64, "Input",ExpressionUUID->"12af4599-d9ee-420c-9453-3b4fc28d3e03"],
+Cell[CellGroupData[{
+Cell[9829, 236, 1104, 24, 183, "Print",ExpressionUUID->"d8b0c848-16e7-47c0-a014-821ffec2b18c"],
+Cell[10936, 262, 1055, 21, 135, "Print",ExpressionUUID->"2638732f-dc8c-4c73-a1c8-40a10846a357"]
+}, Open  ]]
+}, Open  ]],
+Cell[12018, 287, 1775, 34, 306, "Input",ExpressionUUID->"26274c38-2877-49af-8fe2-fb61230f0b46"],
+Cell[13796, 323, 248, 4, 33, "Text",ExpressionUUID->"c30cd0ae-f0c8-499e-a897-bca03047fbc0"],
+Cell[14047, 329, 304, 7, 81, "Input",ExpressionUUID->"187a8248-36b9-44d8-ad14-5d2c0095c4a7"],
+Cell[14354, 338, 184, 4, 64, "Input",ExpressionUUID->"0eb9244d-3642-41f0-92d1-2f95ba23d9d9"]
 }, Open  ]],
 Cell[CellGroupData[{
-Cell[5325, 126, 81, 0, 67, "Chapter",ExpressionUUID->"13137716-8eb0-42cb-b2fa-992f75cefa3c"],
+Cell[14575, 347, 81, 0, 66, "Section",ExpressionUUID->"607e90a3-84da-4944-af07-f32b19e4add0"],
+Cell[14659, 349, 277, 4, 33, "Text",ExpressionUUID->"2a95f2b3-396e-49e6-b620-a52fa75924dd"],
 Cell[CellGroupData[{
-Cell[5431, 130, 87, 0, 66, "Section",ExpressionUUID->"c9dd84ab-73b7-4b23-b094-a0d95a2f3c84"],
-Cell[5521, 132, 227, 3, 33, "Text",ExpressionUUID->"ce8e86a5-9e65-4f41-affd-7f05402af097"],
-Cell[5751, 137, 337, 6, 64, "Input",ExpressionUUID->"613dd318-3c0e-4169-abbc-3e4e4a5e1dd4"],
-Cell[6091, 145, 344, 6, 64, "Input",ExpressionUUID->"028bdd3f-3e91-4cf3-a21d-9fe93a768157"],
-Cell[6438, 153, 351, 6, 64, "Input",ExpressionUUID->"85129fa4-3ed3-4166-b6a9-d83f5b637d9e"],
-Cell[6792, 161, 372, 6, 64, "Input",ExpressionUUID->"014c0460-4dca-48b7-b978-8de9573382ff"]
+Cell[14961, 357, 379, 7, 98, "Input",ExpressionUUID->"66f71861-dece-47fe-b8ec-3ce0dfa31600"],
+Cell[CellGroupData[{
+Cell[15365, 368, 1337, 26, 200, "Print",ExpressionUUID->"b751d017-8277-40f4-9c2d-5f9c8a0b6560"],
+Cell[16705, 396, 1289, 23, 151, "Print",ExpressionUUID->"947a3bc8-9bf2-4299-8138-62e3adaefd17"]
+}, Open  ]]
+}, Open  ]],
+Cell[18021, 423, 445, 8, 81, "Input",ExpressionUUID->"631ff788-5885-47cf-ac74-33970dfd14fa"]
 }, Open  ]],
 Cell[CellGroupData[{
-Cell[7201, 172, 113, 0, 66, "Section",ExpressionUUID->"195a596a-df33-4ca7-a06b-44471af89a23"],
-Cell[7317, 174, 346, 5, 33, "Text",ExpressionUUID->"0305a2c4-006f-4e34-9b6a-02f141e04cbb"],
-Cell[7666, 181, 1312, 26, 237, "Input",ExpressionUUID->"2bcd1554-2fc8-4dee-b391-463f2a610071"],
-Cell[8981, 209, 285, 6, 64, "Input",ExpressionUUID->"12af4599-d9ee-420c-9453-3b4fc28d3e03"],
-Cell[9269, 217, 1775, 34, 306, "Input",ExpressionUUID->"26274c38-2877-49af-8fe2-fb61230f0b46"],
-Cell[11047, 253, 248, 4, 33, "Text",ExpressionUUID->"c30cd0ae-f0c8-499e-a897-bca03047fbc0"],
-Cell[11298, 259, 304, 7, 81, "Input",ExpressionUUID->"187a8248-36b9-44d8-ad14-5d2c0095c4a7"],
-Cell[11605, 268, 184, 4, 64, "Input",ExpressionUUID->"0eb9244d-3642-41f0-92d1-2f95ba23d9d9"]
+Cell[18503, 436, 95, 0, 66, "Section",ExpressionUUID->"f72e00ee-65b6-42f8-8a3d-001645b32437"],
+Cell[18601, 438, 291, 4, 33, "Text",ExpressionUUID->"bbbb4a13-c63e-4742-a7cb-433c40227c1a"],
+Cell[CellGroupData[{
+Cell[18917, 446, 373, 7, 98, "Input",ExpressionUUID->"3e91c4a8-9b44-41af-8f98-756be334d1fc"],
+Cell[CellGroupData[{
+Cell[19315, 457, 1228, 26, 200, "Print",ExpressionUUID->"8cf752a0-7af8-421b-b189-127054108070"],
+Cell[20546, 485, 1178, 23, 151, "Print",ExpressionUUID->"1a23285a-648f-4757-9bb7-a846a4da0071"]
+}, Open  ]]
+}, Open  ]],
+Cell[21751, 512, 437, 8, 81, "Input",ExpressionUUID->"48b8c85f-f3f0-4c98-ba9c-1e4cf0b56224"]
 }, Open  ]],
 Cell[CellGroupData[{
-Cell[11826, 277, 81, 0, 66, "Section",ExpressionUUID->"607e90a3-84da-4944-af07-f32b19e4add0"],
-Cell[11910, 279, 277, 4, 33, "Text",ExpressionUUID->"2a95f2b3-396e-49e6-b620-a52fa75924dd"],
-Cell[12190, 285, 355, 6, 98, "Input",ExpressionUUID->"66f71861-dece-47fe-b8ec-3ce0dfa31600"],
-Cell[12548, 293, 445, 8, 81, "Input",ExpressionUUID->"631ff788-5885-47cf-ac74-33970dfd14fa"]
-}, Open  ]],
-Cell[CellGroupData[{
-Cell[13030, 306, 95, 0, 66, "Section",ExpressionUUID->"f72e00ee-65b6-42f8-8a3d-001645b32437"],
-Cell[13128, 308, 291, 4, 33, "Text",ExpressionUUID->"bbbb4a13-c63e-4742-a7cb-433c40227c1a"],
-Cell[13422, 314, 349, 6, 98, "Input",ExpressionUUID->"3e91c4a8-9b44-41af-8f98-756be334d1fc"],
-Cell[13774, 322, 437, 8, 81, "Input",ExpressionUUID->"48b8c85f-f3f0-4c98-ba9c-1e4cf0b56224"]
-}, Open  ]],
-Cell[CellGroupData[{
-Cell[14248, 335, 90, 0, 66, "Section",ExpressionUUID->"7f260d63-52e2-436a-864e-27b612ae12b6"],
-Cell[14341, 337, 282, 4, 33, "Text",ExpressionUUID->"7236de4d-cf5d-4ea5-bc9e-66615f9c88d2"],
-Cell[14626, 343, 186, 3, 46, "Input",ExpressionUUID->"e586c542-3f96-4d82-9e5f-c8e6627ae82a"]
+Cell[22225, 525, 90, 0, 66, "Section",ExpressionUUID->"7f260d63-52e2-436a-864e-27b612ae12b6"],
+Cell[22318, 527, 282, 4, 33, "Text",ExpressionUUID->"7236de4d-cf5d-4ea5-bc9e-66615f9c88d2"],
+Cell[22603, 533, 186, 3, 46, "Input",ExpressionUUID->"e586c542-3f96-4d82-9e5f-c8e6627ae82a"]
 }, Open  ]]
 }, Open  ]]
 }, Open  ]]

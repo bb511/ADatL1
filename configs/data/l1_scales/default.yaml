@@ -4,6 +4,10 @@
 # Kept for the pure-rate calculation, which needs physical units. That calculation is
 # not implemented yet, so nothing applies these today and the tensors the models see
 # stay in integer hardware units.
+#
+# The eta steps are 0.0870/2 for the calorimeter objects and 0.0870/8 for muons, which
+# is four times finer. See docs/README.md in the adl1t_datamaker repository, which is
+# the specification these restate.
 
 muons:
   Et: 0.5
@@ -17,18 +21,20 @@ muons:
   idx: 1
 jets:
   Et: 0.5
-  eta: 0.5
+  eta: 0.0435
   phi: 0.043633231299858
   quality: 1
   rawEt: 1
 egammas:
   Et: 0.5
-  eta: 0.5
+  eta: 0.0435
   phi: 0.043633231299858
+  iso: 1
 taus:
   Et: 0.5
-  eta: 0.5
+  eta: 0.0435
   phi: 0.043633231299858
+  iso: 1
 ET:
   Et: 0.5
   ETTEM: 0.5

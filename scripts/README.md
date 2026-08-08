@@ -13,7 +13,6 @@ Run everything from the repository root.
 | `optuna/` | Reading the Optuna study databases: Pareto fronts out, retraining catalogues in. |
 | `analysis/` | Turning finished MLflow runs and the notebooks into the paper's numbers and figures. |
 | `runtime_study/` | Rebuilding `tab:compute_resources`. Self-contained — see [its README](runtime_study/README.md). |
-| `publish_l1data/` | Packaging the L1AD data for Zenodo and HuggingFace. Self-contained — see [its README](publish_l1data/README.md). |
 | `setup.sh` `symbolink.sh` | One-time bootstrap. `setup.sh` is required before anything composes. |
 
 ## The catalogues are documentation, not programs

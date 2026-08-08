@@ -45,6 +45,12 @@ confirmation unless given `--force`.
 The LHC L1 AD data runs on data produced by [this code](https://github.com/bb511/adl1t_datamaker).
 For the LHC L1 AD dataset, you must download the data [here](https://cernbox.cern.ch/s/dRnVAa3ZDHWl2bs), unzip it, and then point to it by configuring `paths.raw_data_dir` in the running scripts.
 
+The same data is published under CC0 at [10.5281/zenodo.21787779](https://doi.org/10.5281/zenodo.21787779).
+That release is not a drop-in replacement for the CernBox download: it is partitioned by split
+(`<category>/<sample>/<split>/<object>/`) rather than by data set, so `paths.raw_data_dir` cannot read it.
+Recovering the raw row order from it is not possible either, since `order` records a position within a split
+and the raw row index is not published.
+
 The data is one directory per dataset, each holding one subdirectory per trigger object
 (`muons/`, `jets/`, `egammas/`, `taus/`, `ET/`, `FET/`, `HT/`, `event_info/`, `seeds/`, ...) of
 parquet shards. Values are in L1 integer hardware units; `configs/data/l1_scales/default.yaml`

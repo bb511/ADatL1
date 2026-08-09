@@ -1727,6 +1727,8 @@ def test_terminal_chunk_validation_authenticates_only_supplied_bindings(
 
     payload = json.loads(output.read_text(encoding="utf-8"))
     assert set(observed["bindings"]) == {("ae", 4)}
+    assert observed["bindings"][("ae", 4)]["_binding_payload"] == {}
+    assert observed["bindings"][("ae", 4)]["binding_artifact"] == str(bindings_path.resolve())
     assert payload["usable_trials"] == 1
     assert payload["selection_rows"] == 1
     assert payload["candidate_slots"] == 3

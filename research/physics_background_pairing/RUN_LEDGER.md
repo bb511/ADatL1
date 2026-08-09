@@ -2,6 +2,30 @@
 
 Last updated: 2026-08-08 (Europe/Zurich)
 
+- 2026-08-08: clean NSGA-II execution campaign
+  `physics_background_nsgaii_05b649c` is active at frozen commit
+  `05b649c4439db6c7a3bfc5196addfc27b03dcc05`. The isolated forced-restart canary
+  (`3036360`), all six unified one-epoch pilots (`3036377`, `3036378`, `3036391`,
+  `3036392`, `3036403`, `3036404`), and all six four-trial packed one-epoch pilots
+  (`3036441`, `3036442`, `3036458`, `3036459`, `3036490`, `3036491`) completed.
+  Six disposable four-trial, 50-epoch production canaries are running as jobs
+  `3036509`-`3036514`; after about 54 minutes their MLflow histories show AE at
+  epochs 4-5, VAE at epoch 5, and DSAE/DSVAE/DeepSVDD/RealNVP at epochs 9-11, with
+  no failure signature. The six final study databases remain pristine. Once the
+  terminal canary artifact authenticates, submit the first 48-member generation for
+  every model through the operations helper.
+
+- 2026-08-09: all six disposable 4-trial x 50-epoch production canaries completed
+  and passed the terminal authentication gate. Runtimes were AE 8:27:44, VAE
+  7:34:38, DSAE 4:23:45, DSVAE 3:58:26, DeepSVDD 3:42:19, and RealNVP 3:47:00.
+  `state/production_canary_validation.json` authenticates all 24 trial bindings, 224
+  logical checkpoint selections, all 248 required last/primary candidates, 16 of 24
+  optional strict-stable candidates, exact MLflow histories and score thresholds,
+  and pristine final studies. Generation-0 search jobs were then submitted with 48
+  trials on 12 nodes each: AE `3037884`, VAE `3037885`, DSAE `3037886`, DSVAE
+  `3037888`, DeepSVDD `3037889`, and RealNVP `3037890`. All six are currently
+  `PENDING (Priority)`; only AE initially has a scheduler estimate (`05:28:42` local).
+
 - 2026-08-08: the search protocol was corrected before the next clean campaign. Stage
   1 is now six shared NSGA-II screening studies, not six high-dimensional M-TPE
   studies. The frozen base sampler contract is `NSGAIISampler(seed=123,

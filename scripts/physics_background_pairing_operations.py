@@ -1843,6 +1843,7 @@ def _validate_completed_search_bindings(
     sampler = design.get("screening_sampler")
     expected_hparams = study.get("hparams_search", f"{model}_shared_optuna")
     chunk = json.loads(chunk_path.read_text(encoding="utf-8"))
+    binding_payload = json.loads(bindings_path.read_text(encoding="utf-8"))
     invocation = chunk.get("sampler_invocation")
     resolved_sampler = (
         None
@@ -1892,7 +1893,11 @@ def _validate_completed_search_bindings(
             raise RuntimeError(
                 f"Terminal search binding has unauthenticated {NSGA_GENERATION_KEY}: {key}."
             )
-        indexed[key] = binding
+        indexed[key] = {
+            **binding,
+            "binding_artifact": str(bindings_path.resolve()),
+            "_binding_payload": binding_payload,
+        }
         artifact = json.loads(artifact_path.read_text(encoding="utf-8"))
         provenance = artifact.get("run_provenance", {})
         loggers = [logger for logger in provenance.get("loggers", []) if logger.get("run_id")]

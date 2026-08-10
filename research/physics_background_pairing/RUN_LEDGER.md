@@ -1,6 +1,19 @@
 # Run ledger
 
-Last updated: 2026-08-08 (Europe/Zurich)
+Last updated: 2026-08-10 (Europe/Zurich)
+
+- 2026-08-10: sustained six-pipeline screening execution is healthy. AE and VAE have
+  each sealed generations 0-2 (144 usable trials/model) and have generation 3 queued
+  or running. DSAE, DSVAE, DeepSVDD, and RealNVP have each sealed generations 0-4
+  (240 usable trials/model) and have generation 5 queued or running. Every terminal
+  chunk has been reconciled, fully artifact-authenticated, and followed by a
+  transactionally consistent study backup before the next generation. No scientific
+  trial failure or nonfinite objective vector has occurred. One mutable control-plane
+  bug omitted the parent sampler payload during chunk-local validation; persisted
+  Optuna generations, seeds, resolved samplers, and 48 unique parameter sets were
+  independently verified correct. Commit `24eeed397aae93a636f9a21c2184537f57058ac1`
+  fixes only that validator and adds a regression test; no scientific artifact or
+  frozen execution code changed.
 
 - 2026-08-08: clean NSGA-II execution campaign
   `physics_background_nsgaii_05b649c` is active at frozen commit

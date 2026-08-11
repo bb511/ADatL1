@@ -2,10 +2,11 @@ from dataclasses import dataclass
 from pathlib import Path
 import gc
 
+import numpy as np
 import torch
+from datasets import load_dataset
 from pytorch_lightning import LightningDataModule
 from torch.utils.data import DataLoader, TensorDataset, random_split
-from torchvision.datasets import CIFAR10
 
 from src.utils import pylogger
 from colorama import Fore, Back
@@ -13,11 +14,27 @@ from src.data.components.dataset import CIFARADDataset
 
 log = pylogger.RankedLogger(__name__)
 
+# The data set as published on the HuggingFace hub, which names its two columns img and
+# label. Both splits are held whole in memory, as the whole of CIFAR-10 is 180 MB.
+HF_REPO_ID = "uoft-cs/cifar10"
+
 
 @dataclass(frozen=True)
 class SplitTensors:
     x: torch.Tensor
     y: torch.Tensor
+
+
+@dataclass(frozen=True)
+class CIFARSplit:
+    """One split of CIFAR-10, indexed the way the rest of this module indexes it.
+
+    :param data: Images of the split, (nimages, 32, 32, 3) and in the 0-255 range.
+    :param targets: One class index per image.
+    """
+
+    data: np.ndarray
+    targets: list[int]
 
 
 class CIFAR10DataModule(LightningDataModule):
@@ -91,8 +108,19 @@ class CIFAR10DataModule(LightningDataModule):
     def prepare_data(self) -> None:
         """Download CIFAR-10 if needed."""
         log.info(Back.GREEN + "Preparing CIFAR10 data...")
-        CIFAR10(self.hparams.data_dir, train=True, download=True)
-        CIFAR10(self.hparams.data_dir, train=False, download=True)
+        load_dataset(HF_REPO_ID, cache_dir=self.hparams.data_dir)
+
+    def _load_split(self, train: bool) -> CIFARSplit:
+        """One split of CIFAR-10, from the hub cache or downloaded on first use."""
+        split = load_dataset(
+            HF_REPO_ID,
+            split="train" if train else "test",
+            cache_dir=self.hparams.data_dir,
+        ).with_format("numpy")
+        # Sliced in one go: reading a column of a lazy split decodes it row by row.
+        rows = split[0 : len(split)]
+
+        return CIFARSplit(np.stack(rows["img"]), rows["label"].tolist())
 
     def setup(self, stage: str = None) -> None:
         """Load CIFAR-10 into memory and prepare train/val/test splits."""
@@ -102,20 +130,10 @@ class CIFAR10DataModule(LightningDataModule):
             self._load_or_compute_stats()
 
         if stage in (None, "fit", "validate"):
-            train_ds = CIFAR10(
-                root=self.hparams.data_dir,
-                train=True,
-                download=False,
-            )
-            self._setup_fit_validate(train_ds)
+            self._setup_fit_validate(self._load_split(train=True))
 
         if stage in (None, "test"):
-            test_ds = CIFAR10(
-                root=self.hparams.data_dir,
-                train=False,
-                download=False,
-            )
-            self._setup_test(test_ds)
+            self._setup_test(self._load_split(train=False))
 
         if stage == "predict":
             raise ValueError("The predict dataloader is not implemented yet.")
@@ -197,17 +215,12 @@ class CIFAR10DataModule(LightningDataModule):
             log.info(f"Loaded CIFAR10 normalization stats from {stats_path}")
             return
 
-        train_ds = CIFAR10(
-            root=self.hparams.data_dir,
-            train=True,
-            download=False,
-        )
-        self._compute_normalization(train_ds)
+        self._compute_normalization(self._load_split(train=True))
         stats_path.parent.mkdir(parents=True, exist_ok=True)
         torch.save({"mean": self.mean, "std": self.std}, stats_path)
         log.info(f"Saved CIFAR10 normalization stats to {stats_path}")
 
-    def _compute_normalization(self, dataset: CIFAR10) -> None:
+    def _compute_normalization(self, dataset: CIFARSplit) -> None:
         """Compute mean/std using only the normal-class training samples."""
         normal_indices = self._get_class_indices(
             dataset.targets, self.hparams.normal_classes
@@ -238,7 +251,7 @@ class CIFAR10DataModule(LightningDataModule):
         seed = self.hparams.seed if self.hparams.seed is not None else 42
         return torch.Generator().manual_seed(seed)
 
-    def _setup_fit_validate(self, train_ds: CIFAR10) -> None:
+    def _setup_fit_validate(self, train_ds: CIFARSplit) -> None:
         """Prepare train and validation splits from the CIFAR train set."""
         normal_indices = self._get_class_indices(
             train_ds.targets, self.hparams.normal_classes
@@ -274,7 +287,7 @@ class CIFAR10DataModule(LightningDataModule):
             aux_valid["reference_normal"] = ref_valid
             self._aux["valid"] = aux_valid
 
-    def _setup_test(self, test_ds: CIFAR10) -> None:
+    def _setup_test(self, test_ds: CIFARSplit) -> None:
         """Prepare test splits from the CIFAR test set."""
         normal_indices = self._get_class_indices(
             test_ds.targets, self.hparams.normal_classes
@@ -326,7 +339,7 @@ class CIFAR10DataModule(LightningDataModule):
         )
         return main, ref
 
-    def _build_aux_split(self, dataset: CIFAR10) -> dict[str, SplitTensors]:
+    def _build_aux_split(self, dataset: CIFARSplit) -> dict[str, SplitTensors]:
         """Build auxiliary validation/test datasets.
 
         The returned dict does not contain the main normal split; that is stored in
@@ -406,7 +419,7 @@ class CIFAR10DataModule(LightningDataModule):
 
     def _extract_subset(
         self,
-        dataset: CIFAR10,
+        dataset: CIFARSplit,
         indices: list[int],
         label: int,
     ) -> tuple[torch.Tensor, torch.Tensor]:

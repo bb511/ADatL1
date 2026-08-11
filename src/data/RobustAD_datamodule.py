@@ -124,7 +124,6 @@ class RobustADDataModule(LightningDataModule):
             repo_id="AmazonScience/RobustAD",
             repo_type="dataset",
             local_dir=str(self.hparams.data_dir),
-            local_dir_use_symlinks=False,
         )
 
     def setup(self, stage: str = None) -> None:

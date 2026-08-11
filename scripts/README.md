@@ -97,6 +97,7 @@ each script's docstring.
 | `get_mlflow_corrs.py` | MLflow metric *histories* → `notebooks/exported_metrics/`, which `notebooks/corrs.nb` correlates against signal efficiency. |
 | `nb_run.wls` | Run a `.nb` headless with the front end attached, strip volatile cell metadata, log every output. Seeds the RNG so bootstrap CIs reproduce. |
 | `nb_compare.wls` | Compare two trees of exported figures: inventory → file hash → rasterised image distance. |
+| `check_hf_parity.py` | Check that the two physics pipelines end at the same tensors. `physics --raw-data-dir <parquet files>` surveys `data=basis` and `data=basis_hf` in turn, comparing the tensors, labels, dataset order, feature map and normalisation parameters a model would be handed; `cifar` compares the hub's CIFAR-10 against `torchvision`. Needs `PYTHONPATH=$PWD`. |
 
 `wolframscript` is not on `PATH` on macOS; invoke it as
 `/Applications/Wolfram.app/Contents/MacOS/wolframscript -f scripts/analysis/nb_run.wls ...`.

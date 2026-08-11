@@ -1,0 +1,41 @@
+# @package data
+
+# The same basis data as configs/data/basis.yaml, built by the loader that ships inside
+# the published record rather than by this project's own stages. The record carries the
+# configuration tree that drives it, so the objects, features, filters, split and
+# normalization are all fixed there, and only the wrapper is configured here.
+
+defaults:
+  # Selected here only so that an experiment overriding /data/data_normalizer composes
+  # against this config too. The name picks the matching scheme inside the record, which
+  # runs its own normalizer over its own data.
+  - data_normalizer: robust
+  - _self_
+
+_target_: src.data.L1AD_HF_datamodule.L1ADHFDataModule
+
+repo_id: podagiu/anomaly_detection_cmsl1t
+
+# The record ships the pipeline as well as the data, so a run reads and executes whatever
+# is at this commit. null would follow the head of the record instead, leaving what a run
+# trained on decided by when it was launched. Bump it deliberately, and rerun
+# scripts/analysis/check_hf_parity.py physics when you do.
+revision: 525665bb0b73fd9705dd482391a850a26d27129f
+
+# Mapped onto the record's paths.base_data_dir. Its extracted, processed and ml-ready
+# caches land under <cache_dir>/data_2025E+G/, beside the ones the raw route builds.
+cache_dir: ${paths.base_data_dir}/hf
+
+# Anything else to override when composing the record's configuration. An element
+# carries an = and a /, so hydra needs it quoted:
+# data.overrides='["data/data_awkward2torch=minimal"]'.
+overrides: []
+
+# The batch size of the data.
+batch_size: 16384
+
+# How many batches to split the validation data into. -1 means use the full dataset
+max_val_batches: 10
+
+# Seed for shuffling the data, if any shuffling is happening.
+seed: ${seed}

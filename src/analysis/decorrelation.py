@@ -418,7 +418,7 @@ def plot_decorrelation(
         frame[EFFECTIVE_BIN_NUMBER],
         frame[FET_ET_SUM],
         c=frame[GAMMA],
-        cmap="viridis",
+        cmap="hot",
         s=72,
         edgecolors="black",
         linewidths=0.45,

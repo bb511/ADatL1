@@ -262,10 +262,13 @@ evaluation:
         - normal
       output_name: reconstructed_data
       ckpts:
-        last: true
+        last: false
+        summary:
+          cvar25_ema: [max]
       aggregate: sum
       correlation_methods:
         - pearson
+        - spearman
       include_input: true
       include_reconstruction: true
       include_residual: false

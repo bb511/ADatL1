@@ -13,6 +13,10 @@ from . import plots
 
 log = pylogger.RankedLogger(__name__, rank_zero_only=True)
 
+# The collections that can hold more than one object, and so have an order to fix. The
+# rest are energy sums, one entry per event.
+COLLECTIONS = ("egammas", "jets", "muons", "taus")
+
 
 @dataclass
 class L1DataExtractor(object):
@@ -103,6 +107,8 @@ class L1DataExtractor(object):
         """Stream batches of given obj in data to a single parquet file."""
         for batch in data(obj_name):
             batch = self._rename_features(batch, obj_name)
+            if obj_name in COLLECTIONS:
+                batch = _et_ordered(batch)
             batch = ak.to_arrow_table(batch)
             if writer is None:
                 writer = parquet.ParquetWriter(
@@ -164,3 +170,21 @@ class L1DataExtractor(object):
 
         for feature in data.fields:
             plots.plot_hist(data[feature], feature, obj_folder)
+
+
+def _et_ordered(data: ak.Array) -> ak.Array:
+    """Return one collection's objects, hardest first.
+
+    The raw files keep the order the global trigger read the objects out in. That is ET
+    descending for the calorimeter objects but not for the muons, a quarter of the
+    multi-muon zero bias events carrying a softer muon ahead of a harder one. The torch
+    stage clips each collection to a fixed count and then stacks it by position, so
+    without this a truncated event would lose the wrong muons and the leading muon would
+    not always land in the leading slot. The sort is stable, so the collections that
+    already arrive ordered come out untouched.
+    """
+    if "Et" not in data.fields:
+        log.warn(f"No Et among {data.fields}, so the raw readout order is kept.")
+        return data
+
+    return data[ak.argsort(data["Et"], axis=-1, ascending=False, stable=True)]

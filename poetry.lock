@@ -43,8 +43,8 @@ xrootd = ["fsspec-xrootd (>=0.5.1,<0.6.0)", "xrootd (>=5.9.1,<6.0.0)"]
 [package.source]
 type = "git"
 url = "https://github.com/bb511/adl1t_datamaker.git"
-reference = "dc81a322e152c03f85ce3e1ff85a5c4e9a518e97"
-resolved_reference = "dc81a322e152c03f85ce3e1ff85a5c4e9a518e97"
+reference = "38c47c48af7da26e6e2678ac11a6509c13ab3595"
+resolved_reference = "38c47c48af7da26e6e2678ac11a6509c13ab3595"
 
 [[package]]
 name = "aiohappyeyeballs"
@@ -7698,4 +7698,4 @@ quant = ["hgq2", "hls4ml", "keras"]
 [metadata]
 lock-version = "2.1"
 python-versions = ">=3.10"
-content-hash = "80a0c6e43ab800fee9d7da7886f3bd90c66b14c227ddd1714783cbdb49f9cff6"
+content-hash = "83385e8828438603dbc0358dbc7560b1ed2b39e4adf026876bcef004a45b0d1f"

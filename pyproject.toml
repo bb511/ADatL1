@@ -10,7 +10,7 @@ readme = "README.md"
 
 requires-python = ">=3.10"
 dependencies = [
-    "adl1t-datamaker @ git+https://github.com/bb511/adl1t_datamaker.git@dc81a322e152c03f85ce3e1ff85a5c4e9a518e97",
+    "adl1t-datamaker @ git+https://github.com/bb511/adl1t_datamaker.git@38c47c48af7da26e6e2678ac11a6509c13ab3595",
     "torch (==2.*)",
     "torchvision (==0.*)",
     "pytorch-lightning (==2.*)",

@@ -28,6 +28,9 @@ from src.evaluation.physics_background_pairing_analysis import (
 from src.evaluation.physics_background_pairing_artifact_audit import (
     audit_physics_background_pairing_artifacts,
 )
+from src.evaluation.physics_background_pairing_screening_analysis import (
+    build_screening_convergence,
+)
 
 REPOSITORY_ROOT = Path(__file__).resolve().parents[1]
 MODEL_ORDER = ("ae", "vae", "dsae", "dsvae", "svdd", "realnvp")
@@ -1650,7 +1653,80 @@ def _build_snapshot(
         _write_json(root / "state" / "latest_status.json", latest)
         _write_experiment_matrix(root, design, status_rows)
     _copy_state_ledgers(root, output, design, final=final)
+    _write_screening_audit(root, output, design, trial_rows)
     return latest
+
+
+def _write_screening_audit(
+    root: Path,
+    output: Path,
+    design: dict[str, Any],
+    trial_rows: list[dict[str, Any]],
+) -> None:
+    """Export convergence only after an authenticated, signal-blind front freeze."""
+    manifest_path = root / "selection" / "pareto_retrain_manifest.json"
+    freeze_path = root / "state" / "freeze_validation.json"
+    if not manifest_path.is_file() or not freeze_path.is_file():
+        return
+    manifest = _read_json(manifest_path)
+    freeze = _read_json(freeze_path)
+    if (
+        manifest.get("schema_version") != 2
+        or manifest.get("code_commit") != design["code_commit"]
+        or manifest.get("selection_uses_downstream_anomalies") is not False
+        or freeze.get("code_commit") != design["code_commit"]
+        or freeze.get("manifest") != str(manifest_path.resolve())
+        or freeze.get("manifest_sha256") != _sha256(manifest_path)
+        or freeze.get("logical_fronts") != EXPECTED_FRONTS
+    ):
+        raise RuntimeError("Screening audit inputs do not match the authenticated freeze.")
+    analysis = build_screening_convergence(design, trial_rows)
+    convergence = analysis["search_convergence"]
+    evolution = analysis["front_evolution"]
+    final_generation = {
+        (row["model"], row["logical_objective"]): int(row["generation"]) for row in convergence
+    }
+    evolved_members = {
+        (row["model"], row["logical_objective"], int(row["trial_number"]))
+        for row in evolution
+        if int(row["generation"]) == final_generation[(row["model"], row["logical_objective"])]
+    }
+    frozen_members = {
+        (row["model"], row["logical_objective"], int(row["trial_number"]))
+        for row in manifest["front_memberships"]
+    }
+    if evolved_members != frozen_members:
+        raise RuntimeError("Final convergence fronts differ from the frozen Pareto manifest.")
+    analysis_dir = output / "analysis"
+    _write_csv(analysis_dir / "search_convergence.csv", convergence, list(convergence[0]))
+    _write_csv(analysis_dir / "front_evolution.csv", evolution, list(evolution[0]))
+    method = {
+        **analysis["method"],
+        "pareto_manifest": _relative(manifest_path, root),
+        "pareto_manifest_sha256": _sha256(manifest_path),
+        "freeze_receipt": _relative(freeze_path, root),
+        "freeze_receipt_sha256": _sha256(freeze_path),
+        "logical_fronts": len(final_generation),
+        "final_front_memberships": len(frozen_members),
+    }
+    _write_json(analysis_dir / "screening_convergence_method.json", method)
+    (output / "SCREENING_AUDIT.md").write_text(
+        "# Signal-blind screening convergence audit\n\n"
+        "This audit was generated only after the 56 logical Pareto fronts were frozen. "
+        "It uses Optuna objectives, trial generations, and frozen front identities only; "
+        "no downstream anomaly outcome is read.\n\n"
+        "- `analysis/search_convergence.csv`: one cumulative diagnostic row per model, "
+        "logical front, and NSGA-II generation.\n"
+        "- `analysis/front_evolution.csv`: the cumulative nondominated memberships at each "
+        "generation.\n"
+        "- `analysis/screening_convergence_method.json`: the exact deterministic scaling, "
+        "reference point, freeze hashes, and interpretation contract.\n\n"
+        "Hypervolume uses per-front observed-range scaling over the complete frozen pool, "
+        "with both axes transformed so larger is preferable and a fixed `(0, 0)` reference. "
+        "It is therefore suitable for within-front generation diagnostics, not absolute "
+        "comparisons between metrics or pairing definitions.\n",
+        encoding="utf-8",
+    )
 
 
 def snapshot(root: Path, output: Path, execution_repository: Path | None = None) -> dict[str, Any]:
@@ -2894,6 +2970,11 @@ def _write_report(output: Path, design: dict[str, Any], winners: list[dict[str, 
         "`front_memberships.csv` and `retrains.csv` prove front and "
         "retraining completeness. `job_history.csv` and `failures.jsonl` record operational "
         "history without silently dropping failures.",
+        "Generation-wise signal-blind convergence diagnostics are in "
+        "`analysis/search_convergence.csv` and `analysis/front_evolution.csv`; their fixed "
+        "observed-range scaling and `(0, 0)` hypervolume reference are documented in "
+        "`analysis/screening_convergence_method.json`. Hypervolume is comparable across "
+        "generations within one logical front, not across unlike metrics.",
         "",
         "## Main results",
         "",
@@ -3009,7 +3090,8 @@ def _write_report(output: Path, design: dict[str, Any], winners: list[dict[str, 
             "`front_memberships.csv`, `retrains.csv`, `checkpoint_selections.csv`, "
             "`checkpoint_candidates.csv`, `checkpoint_candidate_availability.csv`, "
             "`primary_metrics.csv`, `downstream_efficiencies.csv`, `winners.csv`, and "
-            "`mlflow_runs.csv`. Winner-resolved configurations and compressed execution logs "
+            "`mlflow_runs.csv`. The post-freeze signal-blind audit is indexed by "
+            "`SCREENING_AUDIT.md`. Winner-resolved configurations and compressed execution logs "
             "are indexed under `configs/` and `logs/`.",
             "",
         ]

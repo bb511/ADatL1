@@ -1,0 +1,102 @@
+{
+  "schema_version": 1,
+  "artifact_id": "physics_paper_reference_v1",
+  "description": "Machine-readable physics baselines transcribed from the tracked paper-analysis notebooks for use by the background-pairing intermediate report.",
+  "units": {
+    "efficiency_means": "percent",
+    "epoch_metric_downstream_correlations": "spearman_rho"
+  },
+  "method_semantics": {
+    "semi": "Signal-informed CVaR25 model selection; an oracle benchmark, not a signal-agnostic method.",
+    "cap": "Paper CAP model selection using empirical-CDF pairing.",
+    "stable": "Threshold-drift/stability model selection.",
+    "wasserstein": "Wasserstein-1 model selection."
+  },
+  "source_artifacts": [
+    {
+      "path": "notebooks/effs.nb",
+      "sha256": "55f06c64bd6ca33ffd1d540540d1e45f98ddbea65fbde4e3b6a3be21b488e02e",
+      "git_blob": "50f17b558c345aaaddf8fd6c8467fbc2bf7993f6",
+      "evidence": {
+        "250hz_table_lines": "1363-1374",
+        "q99_table_lines": "1612-1623"
+      }
+    },
+    {
+      "path": "notebooks/corrs.nb",
+      "sha256": "693253d70fdd25b9e97ec4f148e23e4b8161b7c7c0c57e4554d7402259b4c3cc",
+      "git_blob": "1df99e266bb86825ef51621231a63795fd6ae204",
+      "evidence": {
+        "correlation_definition_lines": "263-346",
+        "paper_run_records_lines": "479-541, 804-1066, 1338-1403"
+      }
+    }
+  ],
+  "reference_protocol": {
+    "model_selection_domains": [
+      "combined recorded ZeroBias (normal)",
+      "SingleNeutrino_E-10-gun simulation"
+    ],
+    "cap_pairing": "cdf",
+    "downstream_anomaly_count": 20,
+    "operating_rate_khz": 0.25,
+    "base_rate_khz": 28608.8064
+  },
+  "efficiency_means_percent": {
+    "250hz": {
+      "ae": {"semi": 6.84, "cap": 5.73, "stable": 4.29, "wasserstein": 3.22},
+      "vae": {"semi": 4.56, "cap": 4.79, "stable": 4.39, "wasserstein": 4.49},
+      "dsae": {"semi": 7.80, "cap": 8.55, "stable": 3.57, "wasserstein": 3.75},
+      "dsvae": {"semi": 5.38, "cap": 5.02, "stable": 4.85, "wasserstein": 0.80},
+      "svdd": {"semi": 3.30, "cap": 4.03, "stable": 3.56, "wasserstein": 3.25},
+      "realnvp": {"semi": 5.04, "cap": 3.26, "stable": 3.17, "wasserstein": 1.66}
+    },
+    "q99": {
+      "ae": {"semi": 66.66, "cap": 64.25, "stable": 67.43, "wasserstein": 61.52},
+      "vae": {"semi": 72.70, "cap": 73.52, "stable": 64.87, "wasserstein": 66.07},
+      "dsae": {"semi": 67.25, "cap": 59.06, "stable": 59.53, "wasserstein": 60.64},
+      "dsvae": {"semi": 74.47, "cap": 74.32, "stable": 63.22, "wasserstein": 57.21},
+      "svdd": {"semi": null, "cap": 61.94, "stable": 66.58, "wasserstein": null},
+      "realnvp": {"semi": 73.95, "cap": 37.85, "stable": 36.59, "wasserstein": 34.65}
+    }
+  },
+  "missing_values": [
+    {
+      "field": "efficiency_means_percent.q99.svdd.semi",
+      "reason": "The source notebook reports a dash because this method result is unavailable/collapsed; it is not zero."
+    },
+    {
+      "field": "efficiency_means_percent.q99.svdd.wasserstein",
+      "reason": "The source notebook reports a dash because this method result is unavailable/collapsed; it is not zero."
+    }
+  ],
+  "epoch_metric_downstream_correlations": {
+    "sign_convention": "Spearman correlation with median downstream efficiency over common epoch steps. Stable and Wasserstein metric signs are inverted so larger always means better before correlation.",
+    "values": {
+      "ae": {"cap": 0.04297734506518382, "semi": 0.8920872212461981, "stable": 0.3049621177733832, "wasserstein": 0.24100014314186477},
+      "vae": {"cap": 0.8358027057226879, "semi": -0.42722954889764186, "stable": -0.4193746904480002, "wasserstein": -0.22807644558930143},
+      "dsae": {"cap": 0.7243524237075277, "semi": 0.7733216630330407, "stable": 0.3524349444540322, "wasserstein": 0.030836282470669864},
+      "dsvae": {"cap": -0.2162852392175999, "semi": 0.41289645622783056, "stable": -0.3147648691217281, "wasserstein": 0.279713492837321},
+      "svdd": {"cap": -0.11120911363470738, "semi": 0.309970347975537, "stable": -0.5066668660864071, "wasserstein": -0.059422574698296364},
+      "realnvp": {"cap": 0.23188479711992804, "semi": 0.47265431635790905, "stable": -0.13700072639344188, "wasserstein": -0.24911122778069456}
+    }
+  },
+  "paper_selected_trial_numbers": {
+    "ae": {"cap": 175, "semi": 169, "stable": 564, "wasserstein": 499},
+    "vae": {"cap": 179, "semi": 345, "stable": 529, "wasserstein": 539},
+    "dsae": {"cap": 570, "semi": 599, "stable": 565, "wasserstein": 383},
+    "dsvae": {"cap": 324, "semi": 372, "stable": 445, "wasserstein": 503},
+    "svdd": {"cap": 536, "semi": 739, "stable": 419, "wasserstein": 545},
+    "realnvp": {"cap": 376, "semi": 523, "stable": 505, "wasserstein": 539}
+  },
+  "comparison_caveats": [
+    "Compare paper CAP only with the new campaign's native-score CDF CAP control; mapping-based CAP is a different method variant.",
+    "Absolute CAP, Wasserstein, and drift values are not directly comparable because the paper compares combined ZeroBias with SingleNeutrino simulation, while the new campaign compares two recorded ZeroBias eras.",
+    "Native-score downstream efficiency over the same 20 anomalies and operating point is the primary paper-comparable outcome.",
+    "Semi is signal-informed oracle selection and must not be described as signal-agnostic.",
+    "Residual OAS for AE/VAE has no paper baseline and must be compared against native scores within the new campaign.",
+    "The six shared high-dimensional NSGA-II studies are screening studies, whereas the paper used independent two-objective M-TPE searches; sampler/front behavior is not directly paper-equivalent until targeted two-objective follow-up.",
+    "Missing q99 SVDD values must remain null and must not be imputed as zero.",
+    "The epoch correlations describe within-run metric/downstream co-movement over common epoch steps, not across-trial predictive validity."
+  ]
+}

@@ -20,7 +20,7 @@ repo_id: podagiu/anomaly_detection_cmsl1t
 # is at this commit. null would follow the head of the record instead, leaving what a run
 # trained on decided by when it was launched. A bump can change the tensors: f00e4b8c
 # ordered each collection by ET, which the on-disk pipeline had to be taught to match.
-revision: f00e4b8c8090823953aaeeba99287932fec2485c
+revision: 6ccbdc3cbe193a8899c6d220db2dd1c79237418e
 
 # Mapped onto the record's paths.base_data_dir. Its extracted, processed and ml-ready
 # caches land under <cache_dir>/data_2025E+G/, beside the ones the raw route builds.

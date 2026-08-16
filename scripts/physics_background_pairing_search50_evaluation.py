@@ -534,6 +534,8 @@ def evaluate(args: argparse.Namespace) -> None:
                 "optimized_metric_config=null",
                 "optimized_metric_configs=null",
                 "evaluation.evaluator.ckpts.last=false",
+                "evaluation.evaluator.ckpts.summary=false",
+                "evaluation.evaluator.ckpts.single=false",
                 "++evaluation.evaluator.ckpts={candidate:{checkpoint:[selected]}}",
                 f"paths.checkpoints_dir={staged_store}",
                 f"experiment_name={experiment}",

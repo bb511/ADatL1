@@ -1,6 +1,30 @@
 # Run ledger
 
-Last updated: 2026-08-10 (Europe/Zurich)
+Last updated: 2026-08-16 (Europe/Zurich)
+
+- 2026-08-16: all six frozen NSGA-II screening studies reached exactly 600 usable
+  COMPLETE trials (3,600 total, 50 epochs each) with no RUNNING or WAITING trials.
+  The authenticated freeze contains 56 signal-blind logical fronts, 591 front
+  memberships, and 346 unique `(model, trial)` configurations to retrain for 200
+  epochs. `state/freeze_validation.json` seals the six database backups, 3,600 MLflow
+  runs, 33,600 checkpoint selections, and 40,800 configured checkpoint slots.
+  `results/SCREENING_AUDIT.md` and `results/analysis/` now persist generation-wise
+  convergence diagnostics plus authenticated paper 250 Hz/q99 baselines; downstream
+  improvement remains explicitly provisional until retraining and evaluation finish.
+  Retraining array `3093119` was submitted from the frozen commit with 346 mapped
+  tasks, a 24-task concurrency limit, and the campaign-owned immutable data snapshot;
+  its first 24 AE tasks entered RUNNING immediately.
+
+- 2026-08-16: the first strict freeze attempt exposed a control-plane-only receipt
+  bug: sealed-chunk auditing rewrote `chunk_validation.json` with a fresh
+  `validated_at` before comparing its full-file SHA. Job `3037884` was the sole
+  affected sealed receipt; its binding, chunk, Slurm log, all 48 objective artifacts,
+  retained checkpoints, and MLflow histories independently revalidated unchanged.
+  Commit `2535d9abd76b3bcbca87e50935773f869b149b60` makes receipt validation idempotent
+  and rejects semantic changes. The old/new receipt hashes, unchanged evidence,
+  pre-repair ledger backup, and explicit limitation are preserved under
+  `state/validation_seal_repairs/20260816T140100Z__3037884.json`. The subsequent full
+  sealed audit and freeze passed.
 
 - 2026-08-10: sustained six-pipeline screening execution is healthy. AE and VAE have
   each sealed generations 0-2 (144 usable trials/model) and have generation 3 queued

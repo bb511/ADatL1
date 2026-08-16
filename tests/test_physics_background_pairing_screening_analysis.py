@@ -10,6 +10,8 @@ import pytest
 from scripts import physics_background_pairing_report as report
 from src.evaluation.physics_background_pairing_screening_analysis import (
     build_screening_convergence,
+    screening_findings_markdown,
+    summarize_screening_convergence,
 )
 
 
@@ -103,6 +105,40 @@ def test_missing_frozen_trial_or_generation_fails_closed() -> None:
         build_screening_convergence(_design(), trials)
 
 
+def test_findings_summary_is_derived_from_generation_rows() -> None:
+    rows = []
+    for objective, exponent in (("front_a", 1), ("front_b", 2)):
+        for generation in range(13):
+            rows.append(
+                {
+                    "model": "model_a",
+                    "logical_objective": objective,
+                    "generation": generation,
+                    "cumulative_trials": 600 if generation == 12 else 48 * (generation + 1),
+                    "normalized_hypervolume": (generation / 12) ** exponent,
+                }
+            )
+    summary = summarize_screening_convergence(
+        {"search_convergence": rows}, final_memberships=7, unique_retrains=5
+    )
+    assert summary["models"] == 1
+    assert summary["logical_fronts"] == 2
+    assert summary["total_frozen_trials"] == 600
+    assert summary["final_front_memberships"] == 7
+    assert summary["unique_retrains"] == 5
+    assert [row["generation"] for row in summary["milestones"]] == [3, 6, 9, 11]
+    assert summary["milestones"][0]["median_fraction_of_final_gain"] == pytest.approx(0.15625)
+    assert summary["final_generation_changes"]["materially_changed_fronts"] == 2
+    assert summary["final_generation_changes"]["maximum_hypervolume_gain"] == pytest.approx(
+        23 / 144
+    )
+    assert len(summary["material_late_gain_flags"]) == 2
+    markdown = "\n".join(screening_findings_markdown(summary))
+    assert "15.62%" in markdown
+    assert "model_a / front_b" in markdown
+    assert "no downstream anomaly outcome is used" in markdown
+
+
 def test_post_freeze_report_export_authenticates_final_front(tmp_path, monkeypatch) -> None:
     root = tmp_path / "campaign"
     output = tmp_path / "portable"
@@ -119,6 +155,7 @@ def test_post_freeze_report_export_authenticates_final_front(tmp_path, monkeypat
                 "trial_number": 2,
             }
         ],
+        "retrain_runs": [{"retrain_index": 0}],
     }
     manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
     freeze_path = root / "state" / "freeze_validation.json"
@@ -143,6 +180,7 @@ def test_post_freeze_report_export_authenticates_final_front(tmp_path, monkeypat
     assert method["paper_comparison_phase"] == "provisional_search_only"
     assert (output / "analysis" / "search_convergence.csv").is_file()
     assert (output / "analysis" / "front_evolution.csv").is_file()
+    assert (output / "analysis" / "screening_findings.json").is_file()
     assert (output / "analysis" / "paper_reference.json").is_file()
     with (output / "analysis" / "paper_comparison.csv").open(encoding="utf-8") as handle:
         paper_rows = list(csv.DictReader(handle))
@@ -153,3 +191,6 @@ def test_post_freeze_report_export_authenticates_final_front(tmp_path, monkeypat
     assert "Paper mean efficiency at q99" in audit
     assert "Paper epoch-level metric/downstream correlations" in audit
     assert "cannot establish downstream improvement" in audit
+    assert "Scientific findings from the frozen screen" in audit
+    assert "3 frozen usable trials across 1 models" in audit
+    assert "deduplicated to 1 retraining configurations" in audit

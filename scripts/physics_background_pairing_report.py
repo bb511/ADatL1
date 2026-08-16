@@ -36,6 +36,8 @@ from src.evaluation.physics_background_pairing_paper_comparison import (
 )
 from src.evaluation.physics_background_pairing_screening_analysis import (
     build_screening_convergence,
+    screening_findings_markdown,
+    summarize_screening_convergence,
 )
 
 REPOSITORY_ROOT = Path(__file__).resolve().parents[1]
@@ -1705,9 +1707,15 @@ def _write_screening_audit(
     }
     if evolved_members != frozen_members:
         raise RuntimeError("Final convergence fronts differ from the frozen Pareto manifest.")
+    findings = summarize_screening_convergence(
+        analysis,
+        final_memberships=len(frozen_members),
+        unique_retrains=len(manifest["retrain_runs"]),
+    )
     analysis_dir = output / "analysis"
     _write_csv(analysis_dir / "search_convergence.csv", convergence, list(convergence[0]))
     _write_csv(analysis_dir / "front_evolution.csv", evolution, list(evolution[0]))
+    _write_json(analysis_dir / "screening_findings.json", findings)
     method = {
         **analysis["method"],
         "pareto_manifest": _relative(manifest_path, root),
@@ -1738,6 +1746,8 @@ def _write_screening_audit(
         "generation.",
         "- `analysis/screening_convergence_method.json`: the exact deterministic scaling, "
         "reference point, freeze hashes, and interpretation contract.",
+        "- `analysis/screening_findings.json`: the machine-readable values rendered in the "
+        "scientific findings section below.",
         "- `analysis/paper_reference.json`: authenticated paper means and epoch-correlation "
         "references.",
         "- `analysis/paper_comparison.csv`: explicit phase-aware comparison statuses.",
@@ -1746,6 +1756,8 @@ def _write_screening_audit(
         "with both axes transformed so larger is preferable and a fixed `(0, 0)` reference. "
         "It is therefore suitable for within-front generation diagnostics, not absolute "
         "comparisons between metrics or pairing definitions.",
+        "",
+        *screening_findings_markdown(findings),
         "",
         *paper_reference_markdown(reference, reference_sha256),
         *paper_comparison_markdown(paper_rows, provisional=True),
@@ -3001,8 +3013,9 @@ def _write_report(output: Path, design: dict[str, Any], winners: list[dict[str, 
         "Generation-wise signal-blind convergence diagnostics are in "
         "`analysis/search_convergence.csv` and `analysis/front_evolution.csv`; their fixed "
         "observed-range scaling and `(0, 0)` hypervolume reference are documented in "
-        "`analysis/screening_convergence_method.json`. Hypervolume is comparable across "
-        "generations within one logical front, not across unlike metrics.",
+        "`analysis/screening_convergence_method.json`; the derived audit values are in "
+        "`analysis/screening_findings.json`. Hypervolume is comparable across generations "
+        "within one logical front, not across unlike metrics.",
         "",
         *paper_reference_markdown(paper_reference, _sha256(paper_reference_path)),
         *paper_comparison_markdown(paper_comparison, provisional=False),

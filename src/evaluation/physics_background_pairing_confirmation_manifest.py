@@ -154,4 +154,48 @@ def freeze_confirmation_manifest(
     return output
 
 
-__all__ = ["build_freeze_payload", "freeze_confirmation_manifest"]
+def load_authenticated_confirmation_manifest(campaign_root: Path) -> dict[str, Any]:
+    """Load a frozen manifest and fail closed on payload or source drift."""
+    campaign_root = campaign_root.resolve()
+    manifest_path = campaign_root / CONFIRMATION_RELATIVE / "manifest.json"
+    if not manifest_path.is_file():
+        raise FileNotFoundError(f"Frozen confirmation manifest is missing: {manifest_path}")
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    if not isinstance(manifest, dict):
+        raise ValueError("Malformed frozen confirmation manifest.")
+    content_sha256 = manifest.get("content_sha256")
+    unhashed = {key: value for key, value in manifest.items() if key != "content_sha256"}
+    if not isinstance(content_sha256, str) or _value_sha256(unhashed) != content_sha256:
+        raise ValueError("Frozen confirmation manifest content hash does not match.")
+    if (
+        manifest.get("schema_version") != 1
+        or manifest.get("kind") != "frozen_confirmation_target_manifest"
+        or manifest.get("campaign_root") != str(campaign_root)
+    ):
+        raise ValueError("Frozen confirmation manifest identity does not match this campaign.")
+
+    expected_analysis = campaign_root / ANALYSIS_RELATIVE
+    expected_artifacts = campaign_root / ARTIFACT_MANIFEST_RELATIVE
+    if (
+        manifest.get("source_analysis") != str(expected_analysis)
+        or manifest.get("source_artifact_manifest") != str(expected_artifacts)
+        or not expected_analysis.is_file()
+        or not expected_artifacts.is_file()
+        or manifest.get("source_analysis_sha256") != _sha256(expected_analysis)
+        or manifest.get("source_artifact_manifest_sha256") != _sha256(expected_artifacts)
+    ):
+        raise ValueError("Frozen confirmation manifest source hash does not match.")
+
+    # This independently checks that analysis.json is authenticated by the published
+    # provisional artifact manifest, then reconstructs every derived target and argv.
+    expected = build_freeze_payload(campaign_root, scope=str(manifest.get("scope")))
+    if manifest != expected:
+        raise ValueError("Frozen confirmation targets differ from authenticated sources.")
+    return manifest
+
+
+__all__ = [
+    "build_freeze_payload",
+    "freeze_confirmation_manifest",
+    "load_authenticated_confirmation_manifest",
+]

@@ -11,6 +11,7 @@ import pytest
 from src.evaluation.physics_background_pairing_confirmation_manifest import (
     build_freeze_payload,
     freeze_confirmation_manifest,
+    load_authenticated_confirmation_manifest,
 )
 
 
@@ -128,3 +129,21 @@ def test_analysis_tampering_fails_before_preview(tmp_path: Path) -> None:
     analysis.write_text("{}", encoding="utf-8")
     with pytest.raises(ValueError, match="hash"):
         build_freeze_payload(root, scope="native")
+
+
+def test_load_frozen_manifest_authenticates_content_and_sources(tmp_path: Path) -> None:
+    """The runtime loader must reconstruct the frozen payload from pinned sources."""
+    root = _campaign(tmp_path)
+    payload = build_freeze_payload(root, scope="native")
+    path = freeze_confirmation_manifest(
+        root,
+        scope="native",
+        expected_preview_sha256=payload["preview_content_sha256"],
+    )
+    assert load_authenticated_confirmation_manifest(root) == payload
+
+    tampered = json.loads(path.read_text(encoding="utf-8"))
+    tampered["targets"][0]["study_name"] = "tampered"
+    path.write_text(json.dumps(tampered), encoding="utf-8")
+    with pytest.raises(ValueError, match="content hash"):
+        load_authenticated_confirmation_manifest(root)

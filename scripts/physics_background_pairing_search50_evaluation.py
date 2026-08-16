@@ -61,6 +61,27 @@ def _write_json(path: Path, value: Any) -> None:
     temporary.replace(path)
 
 
+def _write_csv(path: Path, rows: list[dict[str, Any]]) -> None:
+    """Atomically write a nonempty list of uniform records as CSV."""
+    if not rows:
+        raise ValueError(f"Refusing to write an empty CSV: {path}")
+    path.parent.mkdir(parents=True, exist_ok=True)
+    temporary = path.with_suffix(path.suffix + f".{os.getpid()}.tmp")
+    with temporary.open("w", newline="", encoding="utf-8") as handle:
+        writer = csv.DictWriter(handle, fieldnames=list(rows[0]))
+        writer.writeheader()
+        writer.writerows(rows)
+    temporary.replace(path)
+
+
+def _write_text(path: Path, value: str) -> None:
+    """Atomically write a text artifact."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    temporary = path.with_suffix(path.suffix + f".{os.getpid()}.tmp")
+    temporary.write_text(value, encoding="utf-8")
+    temporary.replace(path)
+
+
 def _git(repository: Path, *args: str) -> str:
     """Run a read-only Git query in a repository."""
     git = shutil.which("git")
@@ -512,6 +533,7 @@ def evaluate(args: argparse.Namespace) -> None:
                 "skip_validation_evaluation=true",
                 "optimized_metric_config=null",
                 "optimized_metric_configs=null",
+                "evaluation.evaluator.ckpts.last=false",
                 "++evaluation.evaluator.ckpts={candidate:{checkpoint:[selected]}}",
                 f"paths.checkpoints_dir={staged_store}",
                 f"experiment_name={experiment}",
@@ -591,12 +613,14 @@ def aggregate_input(args: argparse.Namespace) -> None:
     root = args.root.resolve(strict=True)
     manifest = _load_prepared(root)
     rows = []
+    candidate_rows = []
     for task in manifest["tasks"]:
         marker_path = _screening_dir(root) / "tasks" / f"{task['task_index']:03d}" / "marker.json"
         marker = _read_json(marker_path)
         if not _marker_valid(root, manifest, task, marker):
             raise RuntimeError(f"Missing or invalid marker for task {task['task_index']}.")
         values = {(row["checkpoint_id"], row["score"]): row for row in marker["values"]}
+        checkpoints = {row["checkpoint_id"]: row for row in task["checkpoints"]}
         for membership in task["memberships"]:
             for score in task["scores"]:
                 value = values[(membership["checkpoint_id"], score)]
@@ -621,19 +645,120 @@ def aggregate_input(args: argparse.Namespace) -> None:
                             "values_sha256": value["values_sha256"],
                         }
                     )
+            checkpoint = checkpoints[membership["checkpoint_id"]]
+            selected_values = values[(membership["checkpoint_id"], membership["score"])]
+            for efficiency in selected_values["rows"]:
+                candidate_rows.append(
+                    {
+                        "membership_index": membership["membership_index"],
+                        "model": task["model"],
+                        "logical_objective": membership["logical_objective"],
+                        "score": membership["score"],
+                        "metric": membership["metric"],
+                        "strategy": membership["strategy"],
+                        "trial_number": task["trial_number"],
+                        "checkpoint": checkpoint["source_path"],
+                        "checkpoint_sha256": checkpoint["source_sha256"],
+                        "anomaly": efficiency["intervention"],
+                        "efficiency_operational": efficiency["value"],
+                    }
+                )
     output = _screening_dir(root) / "aggregate_input.json"
     _write_json(
         output,
         {
             "schema_version": SCHEMA_VERSION,
             "manifest_content_sha256": manifest["content_sha256"],
-            "rows": rows,
-            "rows_sha256": _canonical_hash(rows),
+            "cross_score_rows": rows,
+            "cross_score_rows_sha256": _canonical_hash(rows),
+            "candidate_efficiencies": candidate_rows,
+            "candidate_efficiencies_sha256": _canonical_hash(candidate_rows),
         },
     )
     print(
         json.dumps(
-            {"output": str(output), "rows": len(rows), "sha256": _sha256(output)}, sort_keys=True
+            {
+                "output": str(output),
+                "cross_score_rows": len(rows),
+                "candidate_efficiencies": len(candidate_rows),
+                "sha256": _sha256(output),
+            },
+            sort_keys=True,
+        )
+    )
+
+
+def analyze(args: argparse.Namespace) -> None:
+    """Build all provisional result tables and the caveated Markdown report."""
+    from src.evaluation.physics_background_pairing_paper_comparison import (
+        load_authenticated_paper_reference,
+    )
+    from src.evaluation.physics_background_pairing_search50_analysis import (
+        build_provisional_search50_analysis,
+        render_provisional_search50_report,
+    )
+
+    root = args.root.resolve(strict=True)
+    manifest = _load_prepared(root)
+    aggregate_path = _screening_dir(root) / "aggregate_input.json"
+    aggregate = _read_json(aggregate_path)
+    if aggregate.get("manifest_content_sha256") != manifest["content_sha256"]:
+        raise RuntimeError("Aggregate input belongs to another evaluation manifest.")
+    candidate_rows = aggregate.get("candidate_efficiencies", [])
+    if aggregate.get("candidate_efficiencies_sha256") != _canonical_hash(candidate_rows):
+        raise RuntimeError("Candidate-efficiency aggregate hash differs.")
+    frozen_manifest = _read_json(Path(manifest["frozen_manifest"]))
+    paper_reference, paper_reference_sha256 = load_authenticated_paper_reference(
+        Path(manifest["evaluation_execution_repository"])
+    )
+    result = build_provisional_search50_analysis(frozen_manifest, candidate_rows, paper_reference)
+    result["method"].update(
+        {
+            "evaluation_manifest_sha256": _sha256(_screening_dir(root) / "manifest.json"),
+            "aggregate_input_sha256": _sha256(aggregate_path),
+            "paper_reference_sha256": paper_reference_sha256,
+        }
+    )
+
+    result_dir = root / "results" / "provisional_search50"
+    result_dir.mkdir(parents=True, exist_ok=True)
+    _write_json(result_dir / "evaluation_manifest.json", manifest)
+    _write_json(result_dir / "analysis.json", result)
+    table_names = (
+        "candidate_efficiencies",
+        "candidate_summary",
+        "front_winners",
+        "cross_combination_rankings",
+        "cross_combination_choices",
+        "paper_comparison",
+    )
+    for name in table_names:
+        _write_csv(result_dir / f"{name}.csv", result[name])
+    _write_text(
+        result_dir / "PROVISIONAL_REPORT.md",
+        render_provisional_search50_report(result),
+    )
+    artifact_paths = sorted(
+        path for path in result_dir.iterdir() if path.name != "artifact_manifest.json"
+    )
+    artifact_manifest = {
+        "schema_version": SCHEMA_VERSION,
+        "namespace": "provisional_search50",
+        "artifacts": [
+            {"name": path.name, "sha256": _sha256(path), "bytes": path.stat().st_size}
+            for path in artifact_paths
+        ],
+    }
+    _write_json(result_dir / "artifact_manifest.json", artifact_manifest)
+    print(
+        json.dumps(
+            {
+                "result_dir": str(result_dir),
+                "front_winners": len(result["front_winners"]),
+                "cross_combination_choices": len(result["cross_combination_choices"]),
+                "artifact_manifest_sha256": _sha256(result_dir / "artifact_manifest.json"),
+            },
+            sort_keys=True,
         )
     )
 
@@ -654,6 +779,7 @@ def parse_args() -> argparse.Namespace:
     run.add_argument("--attempt-id")
     commands.add_parser("status")
     commands.add_parser("aggregate-input")
+    commands.add_parser("analyze")
     return parser.parse_args()
 
 
@@ -665,6 +791,7 @@ def main() -> None:
         "evaluate": evaluate,
         "status": status,
         "aggregate-input": aggregate_input,
+        "analyze": analyze,
     }[args.command](args)
 
 

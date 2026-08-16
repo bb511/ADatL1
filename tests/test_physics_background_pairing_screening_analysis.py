@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import csv
 import json
 
 import pytest
@@ -139,5 +140,16 @@ def test_post_freeze_report_export_authenticates_final_front(tmp_path, monkeypat
     method = json.loads((output / "analysis" / "screening_convergence_method.json").read_text())
     assert method["downstream_outcomes_used"] is False
     assert method["final_front_memberships"] == 1
+    assert method["paper_comparison_phase"] == "provisional_search_only"
     assert (output / "analysis" / "search_convergence.csv").is_file()
     assert (output / "analysis" / "front_evolution.csv").is_file()
+    assert (output / "analysis" / "paper_reference.json").is_file()
+    with (output / "analysis" / "paper_comparison.csv").open(encoding="utf-8") as handle:
+        paper_rows = list(csv.DictReader(handle))
+    assert len(paper_rows) == 48
+    assert not any(row["delta_percentage_points"] for row in paper_rows)
+    audit = (output / "SCREENING_AUDIT.md").read_text(encoding="utf-8")
+    assert "Paper mean efficiency at 250 Hz" in audit
+    assert "Paper mean efficiency at q99" in audit
+    assert "Paper epoch-level metric/downstream correlations" in audit
+    assert "cannot establish downstream improvement" in audit

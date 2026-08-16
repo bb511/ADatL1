@@ -28,6 +28,12 @@ from src.evaluation.physics_background_pairing_analysis import (
 from src.evaluation.physics_background_pairing_artifact_audit import (
     audit_physics_background_pairing_artifacts,
 )
+from src.evaluation.physics_background_pairing_paper_comparison import (
+    build_paper_comparison,
+    load_authenticated_paper_reference,
+    paper_comparison_markdown,
+    paper_reference_markdown,
+)
 from src.evaluation.physics_background_pairing_screening_analysis import (
     build_screening_convergence,
 )
@@ -1680,6 +1686,8 @@ def _write_screening_audit(
         or freeze.get("logical_fronts") != EXPECTED_FRONTS
     ):
         raise RuntimeError("Screening audit inputs do not match the authenticated freeze.")
+    reference, reference_sha256 = load_authenticated_paper_reference(REPOSITORY_ROOT)
+    paper_rows = build_paper_comparison(reference)
     analysis = build_screening_convergence(design, trial_rows)
     convergence = analysis["search_convergence"]
     evolution = analysis["front_evolution"]
@@ -1709,24 +1717,40 @@ def _write_screening_audit(
         "logical_fronts": len(final_generation),
         "final_front_memberships": len(frozen_members),
     }
+    paper_reference_path = REPOSITORY_ROOT / (
+        "research/physics_background_pairing/paper_reference.json"
+    )
+    shutil.copyfile(paper_reference_path, analysis_dir / "paper_reference.json")
+    _write_csv(analysis_dir / "paper_comparison.csv", paper_rows, list(paper_rows[0]))
+    method["paper_reference_sha256"] = reference_sha256
+    method["paper_comparison_phase"] = "provisional_search_only"
     _write_json(analysis_dir / "screening_convergence_method.json", method)
-    (output / "SCREENING_AUDIT.md").write_text(
-        "# Signal-blind screening convergence audit\n\n"
+    lines = [
+        "# Signal-blind screening convergence audit",
+        "",
         "This audit was generated only after the 56 logical Pareto fronts were frozen. "
         "It uses Optuna objectives, trial generations, and frozen front identities only; "
-        "no downstream anomaly outcome is read.\n\n"
+        "no downstream anomaly outcome is read.",
+        "",
         "- `analysis/search_convergence.csv`: one cumulative diagnostic row per model, "
-        "logical front, and NSGA-II generation.\n"
+        "logical front, and NSGA-II generation.",
         "- `analysis/front_evolution.csv`: the cumulative nondominated memberships at each "
-        "generation.\n"
+        "generation.",
         "- `analysis/screening_convergence_method.json`: the exact deterministic scaling, "
-        "reference point, freeze hashes, and interpretation contract.\n\n"
+        "reference point, freeze hashes, and interpretation contract.",
+        "- `analysis/paper_reference.json`: authenticated paper means and epoch-correlation "
+        "references.",
+        "- `analysis/paper_comparison.csv`: explicit phase-aware comparison statuses.",
+        "",
         "Hypervolume uses per-front observed-range scaling over the complete frozen pool, "
         "with both axes transformed so larger is preferable and a fixed `(0, 0)` reference. "
         "It is therefore suitable for within-front generation diagnostics, not absolute "
-        "comparisons between metrics or pairing definitions.\n",
-        encoding="utf-8",
-    )
+        "comparisons between metrics or pairing definitions.",
+        "",
+        *paper_reference_markdown(reference, reference_sha256),
+        *paper_comparison_markdown(paper_rows, provisional=True),
+    ]
+    (output / "SCREENING_AUDIT.md").write_text("\n".join(lines), encoding="utf-8")
 
 
 def snapshot(root: Path, output: Path, execution_repository: Path | None = None) -> dict[str, Any]:
@@ -2875,6 +2899,10 @@ def _write_figures(
 
 def _write_report(output: Path, design: dict[str, Any], winners: list[dict[str, Any]]) -> None:
     """Write the self-contained human-readable report from portable rows."""
+    paper_reference_path = output / "analysis" / "paper_reference.json"
+    paper_reference = _read_json(paper_reference_path)
+    with (output / "analysis" / "paper_comparison.csv").open(encoding="utf-8") as handle:
+        paper_comparison = list(csv.DictReader(handle))
     sampler = _screening_sampler(design)
     sampler_description = (
         "NSGA-II (population 48; invocation seed = 123 + model offset + starting "
@@ -2976,6 +3004,8 @@ def _write_report(output: Path, design: dict[str, Any], winners: list[dict[str, 
         "`analysis/screening_convergence_method.json`. Hypervolume is comparable across "
         "generations within one logical front, not across unlike metrics.",
         "",
+        *paper_reference_markdown(paper_reference, _sha256(paper_reference_path)),
+        *paper_comparison_markdown(paper_comparison, provisional=False),
         "## Main results",
         "",
         "![Selection metric summary](figures/metric_summary.png)",
@@ -3235,6 +3265,8 @@ def _build_final(
     restart_summaries, restart_evidence_rows = _restart_evidence_bundle(root, manifest)
     retrain_rows = _marker_rows(root, manifest, restart_summaries)
     winner_rows, downstream_rows, primary_rows = _winner_exports(root, design, manifest, oracle)
+    paper_reference, _ = load_authenticated_paper_reference(REPOSITORY_ROOT)
+    paper_comparison = build_paper_comparison(paper_reference, winner_rows)
     _append_test_metrics(root, manifest, oracle, primary_rows)
     checkpoints, mlflow = _checkpoint_rows(root, design, include_retrains=True)
     checkpoints = [
@@ -3319,6 +3351,15 @@ def _build_final(
     _write_csv(output / "downstream_efficiencies.csv", downstream_rows, list(downstream_rows[0]))
     _write_csv(output / "primary_metrics.csv", primary_rows, list(primary_rows[0]))
     _write_table_group(output / "analysis", analysis_tables)
+    shutil.copyfile(
+        REPOSITORY_ROOT / "research/physics_background_pairing/paper_reference.json",
+        output / "analysis" / "paper_reference.json",
+    )
+    _write_csv(
+        output / "analysis" / "paper_comparison.csv",
+        paper_comparison,
+        list(paper_comparison[0]),
+    )
     _write_json(output / "analysis" / "analysis_summary.json", analysis["analysis_summary"])
     _write_table_group(output / "artifact_audit", artifact_audit)
     jobs, _ = _validated_state_ledgers(root, design, final=True)

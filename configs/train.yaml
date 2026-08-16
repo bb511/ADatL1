@@ -50,6 +50,14 @@ test: True
 # Skip post-fit evaluation while retaining training-time checkpoint callbacks.
 skip_evaluation: false
 
+# Evaluation-only runs may skip the validation pass and evaluate retained checkpoints directly on
+# the test split. This is opt-in because validation normally selects the optimized checkpoint.
+skip_validation_evaluation: false
+
+# Optional list of keys from evaluation.callbacks to instantiate. Null preserves the complete
+# configured callback set; an explicit list enables narrow evaluation-only passes.
+evaluation_callback_allowlist: null
+
 # Resumable segmented jobs can disable repeated MLflow parameter writes while
 # preserving one continuous metric run.
 log_hyperparameters: true

@@ -109,14 +109,17 @@ def train(cfg: DictConfig) -> Tuple[Dict[str, Any], Dict[str, Any]]:
 
     run_ckpts = Path(cfg.paths.checkpoints_dir) / cfg.experiment_name / cfg.run_name
 
-    log.info(Back.MAGENTA + 8 * "-" + "STARTING RUN VALIDATION" + 8 * "-")
-    datamodule.setup("validate")
-    _setup_algorithm_for_evaluation(algorithm, datamodule)
-    val_loader = datamodule.val_dataloader()
-    evaluator.evaluate_run(run_ckpts, algorithm, val_loader, "val", set_optimized_metric=True)
-    if cfg.get("optimized_metric_artifact", False):
-        _write_optimized_metric_artifact(evaluator, cfg=cfg, loggers=logger)
     object_dict.update({"evaluator": evaluator})
+    if not cfg.get("skip_validation_evaluation", False):
+        log.info(Back.MAGENTA + 8 * "-" + "STARTING RUN VALIDATION" + 8 * "-")
+        datamodule.setup("validate")
+        _setup_algorithm_for_evaluation(algorithm, datamodule)
+        val_loader = datamodule.val_dataloader()
+        evaluator.evaluate_run(run_ckpts, algorithm, val_loader, "val", set_optimized_metric=True)
+        if cfg.get("optimized_metric_artifact", False):
+            _write_optimized_metric_artifact(evaluator, cfg=cfg, loggers=logger)
+    else:
+        log.info(Back.YELLOW + "Skipping validation evaluation by configuration.")
 
     # Evaluate once more on a held out test set for final performance.
     if cfg.get("test"):
@@ -158,7 +161,10 @@ def _get_evaluator(cfg: DictConfig, datamodule, logger):
     evaluator_cfg = OmegaConf.create(merged_dict)
 
     log.info("Instantiating evaluator callbacks...")
-    callbacks = instantiate_callbacks(eval_config.get("callbacks"))
+    callback_configs = _allowed_evaluation_callback_configs(
+        eval_config.get("callbacks"), cfg.get("evaluation_callback_allowlist")
+    )
+    callbacks = instantiate_callbacks(callback_configs)
     log.info(f"Instantiating evaluator <{evaluator_cfg._target_}>")
     optimized_metric_config = cfg.get("optimized_metric_config")
     optimized_metric_configs = cfg.get("optimized_metric_configs")
@@ -175,6 +181,35 @@ def _get_evaluator(cfg: DictConfig, datamodule, logger):
     )
 
     return evaluator
+
+
+def _allowed_evaluation_callback_configs(
+    callbacks_cfg: DictConfig | None, allowlist
+) -> DictConfig | None:
+    """Return the explicitly allowed evaluator callback configs.
+
+    A null allowlist preserves the historical behavior. An explicit list is fail-closed: every
+    requested name must identify an instantiable callback in ``evaluation.callbacks``.
+    """
+    if allowlist is None:
+        return callbacks_cfg
+    if isinstance(allowlist, str) or not OmegaConf.is_list(allowlist):
+        raise TypeError("evaluation_callback_allowlist must be a list of callback names or null.")
+    if callbacks_cfg is None:
+        if len(allowlist) == 0:
+            return OmegaConf.create({})
+        raise ValueError("Cannot allow evaluator callbacks when evaluation.callbacks is null.")
+
+    selected = {}
+    for raw_name in allowlist:
+        name = str(raw_name)
+        if name in selected:
+            raise ValueError(f"Duplicate evaluator callback in allowlist: {name!r}.")
+        config = callbacks_cfg.get(name)
+        if not isinstance(config, DictConfig) or "_target_" not in config:
+            raise ValueError(f"Unknown or non-instantiable evaluator callback: {name!r}.")
+        selected[name] = config
+    return OmegaConf.create(selected)
 
 
 def _run_provenance(cfg: DictConfig, loggers: List[Logger]) -> dict[str, Any]:

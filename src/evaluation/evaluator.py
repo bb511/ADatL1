@@ -19,6 +19,36 @@ log = pylogger.RankedLogger(__name__)
 
 from src.utils.checkpoints import is_valid_ckpt
 
+_RESTORABLE_THRESHOLD_BUFFERS = frozenset({"thres_operational", "thres_operational__residual_oas"})
+
+
+def _register_checkpoint_threshold_buffers(model, state_dict: dict) -> None:
+    """Declare known dynamic threshold buffers before strict checkpoint restoration.
+
+    Training callbacks create these two scalar buffers before fitting, but an evaluation-only
+    model does not run those callbacks. Only the exact known names are restored here; malformed
+    threshold values fail before loading and every other state-dict key remains subject to
+    ``strict=True``.
+    """
+    existing_buffers = dict(model.named_buffers())
+    for name in _RESTORABLE_THRESHOLD_BUFFERS:
+        if name not in state_dict:
+            continue
+        value = state_dict[name]
+        if not isinstance(value, torch.Tensor) or value.numel() != 1:
+            raise ValueError(f"Checkpoint threshold {name!r} must be a scalar tensor.")
+        if not bool(torch.isfinite(value).all()):
+            raise ValueError(f"Checkpoint threshold {name!r} must be finite.")
+        if name in existing_buffers:
+            if existing_buffers[name].numel() != 1:
+                raise ValueError(f"Model threshold buffer {name!r} must be scalar.")
+            continue
+        if hasattr(model, name):
+            raise ValueError(
+                f"Cannot restore checkpoint threshold {name!r}: model attribute is not a buffer."
+            )
+        model.register_buffer(name, torch.empty_like(value), persistent=True)
+
 
 class Evaluator:
     """Thin wrapper around pl.Trainer that performs the evaluation of a model.
@@ -247,6 +277,7 @@ class Evaluator:
         self._activate_candidate_callbacks()
 
         state_dict = torch.load(ckpt_path, weights_only=False, map_location="cpu")["state_dict"]
+        _register_checkpoint_threshold_buffers(model, state_dict)
         model.load_state_dict(state_dict, strict=True)
         model._ckpt_path = ckpt_path
 

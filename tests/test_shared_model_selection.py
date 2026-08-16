@@ -9,7 +9,7 @@ from src.callbacks.efficiency import AnomalyEfficiencyCallback as TrainingEffici
 from src.evaluation.callbacks.efficiency import (
     AnomalyEfficiencyCallback as EvaluationEfficiency,
 )
-from src.evaluation.evaluator import Evaluator
+from src.evaluation.evaluator import Evaluator, _register_checkpoint_threshold_buffers
 
 
 def test_fixed_relative_change_rule_respects_weight_and_direction() -> None:
@@ -134,12 +134,16 @@ def test_threshold_buffers_exist_before_checkpointing_and_restore_per_score() ->
     """Native and OAS thresholds are persistent before the first checkpoint save."""
 
     class Module(torch.nn.Module):
+        """Minimal module exposing the rate configuration needed by callbacks."""
+
         def __init__(self):
+            """Initialize the callback-facing hyperparameters."""
             super().__init__()
             self.hparams = SimpleNamespace(target_rate=0.25, base_rate=28608.8064)
 
         @property
         def device(self):
+            """Return the CPU device used by this unit contract."""
             return torch.device("cpu")
 
     module = Module()
@@ -169,6 +173,42 @@ def test_threshold_buffers_exist_before_checkpointing_and_restore_per_score() ->
 
     assert restored.thres_operational.item() == pytest.approx(1.25)
     assert restored.thres_operational__residual_oas.item() == pytest.approx(3.5)
+
+
+def test_evaluation_only_model_registers_exact_checkpoint_threshold_buffers() -> None:
+    """Known saved thresholds are declared before a fresh model's strict load."""
+    module = torch.nn.Linear(2, 1)
+    state = {
+        **module.state_dict(),
+        "thres_operational": torch.tensor(1.25),
+        "thres_operational__residual_oas": torch.tensor(3.5),
+    }
+
+    _register_checkpoint_threshold_buffers(module, state)
+    module.load_state_dict(state, strict=True)
+
+    assert module.thres_operational.item() == pytest.approx(1.25)
+    assert module.thres_operational__residual_oas.item() == pytest.approx(3.5)
+
+
+@pytest.mark.parametrize("value", [torch.tensor(float("nan")), torch.ones(2)])
+def test_evaluation_only_threshold_restoration_rejects_malformed_values(value) -> None:
+    """Non-finite or non-scalar checkpoint thresholds fail closed."""
+    module = torch.nn.Linear(2, 1)
+
+    with pytest.raises(ValueError, match="Checkpoint threshold"):
+        _register_checkpoint_threshold_buffers(module, {"thres_operational": value})
+
+
+def test_evaluation_only_threshold_restoration_keeps_other_state_strict() -> None:
+    """Dynamic threshold support does not relax unrelated checkpoint state."""
+    module = torch.nn.Linear(2, 1)
+    state = {**module.state_dict(), "unexpected": torch.tensor(1.0)}
+
+    _register_checkpoint_threshold_buffers(module, state)
+
+    with pytest.raises(RuntimeError, match="Unexpected key"):
+        module.load_state_dict(state, strict=True)
 
 
 def test_invalid_threshold_namespace_is_rejected() -> None:

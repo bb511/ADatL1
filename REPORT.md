@@ -1,107 +1,146 @@
-# Background0-background1 model-selection results
+# Background-pairing experiment: results
 
-## The two research questions
+## Executive answer
 
-### 1. Does CAP beat W1 and drift in AUPRC and efficiency?
+At the evaluated 250 Hz operating point:
 
-**Efficiency: usually, but not universally.** The best CAP variant wins for four of
-the six native-score models. W1 wins for AE and DSAE. Drift wins for none.
+1. **CAP is the best model-selection metric for four of six algorithms using their
+   paper-native anomaly scores.** W1 is narrowly better for AE and DSAE; drift is never
+   best. With OAS, CAP wins for AE and W1 wins for VAE.
+2. **Learned event pairing improves CAP for VAE, DSVAE, and especially RealNVP.** It
+   hurts AE and is effectively neutral for DSAE and DeepSVDD. Pairing therefore works,
+   but must be chosen per algorithm.
+3. **The best paired-CAP result is numerically above the paper's CAP result for four
+   of six algorithms:** VAE, DSVAE, DeepSVDD, and RealNVP. AE and DSAE remain below.
+4. **OAS is not competitive with the native AE/VAE anomaly scores.** It lowers the
+   best overall efficiency by 35% for AE and 21% for VAE.
 
-| Model | Best CAP efficiency | W1 efficiency | Drift efficiency | Winner |
-|---|---:|---:|---:|---|
-| AE | 4.71% | **4.77%** | 4.13% | W1 |
-| VAE | **5.36%** | 4.67% | 4.67% | CAP |
-| DSAE | 6.10% | **6.15%** | 5.35% | W1 |
-| DSVAE | **7.40%** | 0.84% | 6.39% | CAP |
-| DeepSVDD | **8.28%** | 5.48% | 4.65% | CAP |
-| RealNVP | **7.57%** | 2.78% | 2.78% | CAP |
+The completed evaluation measured fixed-rate signal efficiency, which is the physics
+endpoint reported below. It did not persist AUPRC, so no AUPRC claim is made.
 
-Across models, the mean of the model-specific best CAP results is 6.57%, compared
-with 4.12% for W1 and 4.66% for drift. This aggregate is descriptive: each entry is a
-downstream-oracle winner selected using the same 20 anomaly datasets.
+## Native anomaly scores: complete per-algorithm comparison
 
-**AUPRC: the completed evaluation does not contain it.** It evaluated and persisted
-only efficiency at the fixed 250 Hz operating point. Therefore this campaign currently
-provides no evidence for whether CAP beats W1 or drift in AUPRC. Any report claiming
-otherwise would be inventing a result.
+All values are mean signal efficiency over the same 20 downstream anomaly datasets.
+“Paired CAP” is the best of the four learned pairings; CDF is the unlearned control.
 
-### 2. Does learned pairing improve CAP, and does it affect AUPRC differently from efficiency?
+| Algorithm | Best paired CAP | CDF CAP | W1 | Drift | Overall winner | Paired CAP vs paper CAP |
+|---|---:|---:|---:|---:|---|---:|
+| AE | JetCLR: 4.21% | 4.71% | **4.77%** | 4.13% | **W1** | **-1.52 pp** |
+| VAE | flat-physical: **5.36%** | 4.53% | 4.67% | 4.67% | **paired CAP** | **+0.57 pp** |
+| DSAE | flat-physical: 6.10% | 6.10% | **6.15%** | 5.35% | **W1** | **-2.45 pp** |
+| DSVAE | typed-sliced: **7.40%** | 6.84% | 0.84% | 6.39% | **paired CAP** | **+2.38 pp** |
+| DeepSVDD | flat-physical: **8.28%** | 8.27% | 5.48% | 4.65% | **paired CAP** | **+4.25 pp** |
+| RealNVP | physics-summary: **7.57%** | 5.50% | 2.78% | 2.78% | **paired CAP** | **+4.31 pp** |
 
-**For efficiency, learned pairing helps some models strongly, but is not a universal
-improvement over CDF pairing.**
+### Does CAP beat the other metrics?
 
-| Model | Best learned CAP pairing | Learned | CDF control | Learned - CDF |
-|---|---|---:|---:|---:|
-| AE | JetCLR | 4.21% | **4.71%** | **-0.51 pp** |
-| VAE | flat-physical | **5.36%** | 4.53% | **+0.83 pp** |
-| DSAE | flat-physical | 6.10% | 6.10% | 0.00 pp |
-| DSVAE | typed-sliced | **7.40%** | 6.84% | **+0.56 pp** |
-| DeepSVDD | flat-physical | **8.28%** | 8.27% | +0.01 pp |
-| RealNVP | physics-summary | **7.57%** | 5.50% | **+2.06 pp** |
+Yes for VAE, DSVAE, DeepSVDD, and RealNVP. No for AE and DSAE, where W1 wins by only
+0.06 and 0.05 percentage points respectively. Drift never wins.
 
-The substantive pairing gains are RealNVP (+2.06 percentage points), VAE (+0.83),
-and DSVAE (+0.56). AE becomes worse, while DSAE and DeepSVDD are effectively tied.
-Across all six models, flat-physical CAP averages only 0.06 percentage points above
-CDF, confirming that the useful choice is model-specific rather than universal.
+This is not merely an average effect. CAP is decisively stronger for:
 
-**For AUPRC, this comparison has not yet been measured.** Because AUPRC is absent,
-we cannot say whether pairing helps ranking quality more or less than fixed-rate
-efficiency.
+- DSVAE: 7.40% versus 6.39% drift and 0.84% W1;
+- DeepSVDD: 8.28% versus 5.48% W1 and 4.65% drift;
+- RealNVP: 7.57% versus 2.78% for both alternatives.
 
-Pairing itself applies only to CAP. W1 compares the two anomaly-score marginals and is
-unchanged by a one-to-one event permutation. Drift compares operating thresholds
-between background0 and background1 and likewise has no event-pairing input. Thus the
-meaningful second question is:
+For VAE the advantage is smaller but still clear: 5.36% versus approximately 4.67%.
 
-> For CAP, does each learned event pairing beat the CDF control on downstream AUPRC
-> and fixed-rate efficiency? For W1 and drift, which selected checkpoints provide the
-> corresponding unpaired baselines?
+### Does learned pairing improve CAP?
 
-The efficiency half is answered above; the AUPRC half requires evaluating the same
-frozen checkpoints with the AUPRC callback.
+Compared with CDF CAP:
 
-## OAS finding
+- RealNVP improves by **+2.06 pp** with physics-summary pairing.
+- VAE improves by **+0.83 pp** with flat-physical pairing.
+- DSVAE improves by **+0.56 pp** with typed-sliced pairing.
+- DeepSVDD improves by only **+0.01 pp**, effectively a tie.
+- DSAE is exactly tied.
+- AE becomes **0.51 pp worse**; CDF remains preferable for AE's native score.
 
-Masked residual OAS should not replace the native AE/VAE scores based on efficiency:
+The correct scientific conclusion is therefore not “pairing always improves CAP.” It
+is: **pairing creates substantial gains for particular model geometries, with the
+optimal pairing depending on the algorithm.**
 
-- AE: 3.09% best OAS versus 4.77% native, a 35% relative loss.
-- VAE: 4.25% best OAS versus 5.36% native, a 21% relative loss.
-- OAS is lower in all 14 like-for-like AE/VAE selector comparisons.
+Pairing does not apply to W1 or drift. W1 uses only the two score marginals, so a
+one-to-one reordering of events cannot change it. Drift compares operating thresholds
+between background0 and background1 and likewise has no event-correspondence input.
+They are the unpaired metric baselines against which paired CAP is compared.
 
-Its AUPRC behavior remains unmeasured for the same reason described above.
+## AE and VAE with OAS: separate results
 
-## Comparison with the paper
+OAS is a second anomaly-score view, not a second training run or pairing definition.
+It must be compared separately from each model's native score.
 
-For the endpoint that is available—250 Hz efficiency—the campaign is numerically
-above the paper in 13 of 18 closest-form model/metric comparisons. The strongest
-positive differences are DeepSVDD CDF-CAP (+4.24 pp), DSAE W1 (+2.40 pp), RealNVP
-CDF-CAP (+2.24 pp), and DSVAE CDF-CAP (+1.82 pp). The strongest regressions are DSAE
-CDF-CAP (-2.45 pp) and AE CDF-CAP (-1.02 pp).
+| Algorithm and score | Best paired CAP | CDF CAP | W1 | Drift | Winner |
+|---|---:|---:|---:|---:|---|
+| AE native MSE | 4.21% | 4.71% | **4.77%** | 4.13% | W1 |
+| AE masked OAS | **3.09%** | 2.64% | 2.37% | 2.37% | paired CAP |
+| VAE native latent KL | **5.36%** | 4.53% | 4.67% | 4.67% | paired CAP |
+| VAE masked OAS | 2.78% | 2.91% | **4.25%** | 2.82% | W1 |
 
-These are directional comparisons, not proof of improvement: this evaluation uses
-50-epoch search checkpoints, background0-background1 rather than the paper's original
-model-selection domains, shared multi-objective NSGA-II rather than independent
-two-objective M-TPE, and downstream-oracle checkpoint selection. The available paper
-reference also does not provide an AUPRC table for a like-for-like comparison.
+The metric ranking changes under OAS, but the absolute result becomes worse:
 
-## What is supported now
+- AE: the best OAS result is 3.09%, versus 4.77% native (**-1.69 pp; -35%**).
+- VAE: the best OAS result is 4.25%, versus 5.36% native (**-1.11 pp; -21%**).
+- Across the seven like-for-like CAP/W1/drift comparisons for each model, OAS loses
+  every one: **14 losses out of 14 comparisons**.
 
-1. CAP is the strongest efficiency selector for VAE, DSVAE, DeepSVDD, and RealNVP.
-2. W1 is narrowly best for AE and DSAE; drift is never best.
-3. Pairing is valuable for RealNVP, VAE, and DSVAE, but pairing choice must be
-   model-specific.
-4. Native scores beat masked OAS for both AE and VAE on efficiency.
-5. No AUPRC conclusion is currently supported; that endpoint must be evaluated before
-   answering either research question completely.
+Pairing itself remains score-dependent. JetCLR pairing improves AE OAS over its CDF
+control by +0.45 pp, whereas the best learned VAE OAS pairing is 0.13 pp below CDF.
+There is no paper OAS baseline, so OAS cannot be used to claim an improvement over the
+paper.
+
+## Does pairing improve the paper result?
+
+Using each algorithm's native score and comparing the best learned-pairing CAP result
+with the paper's CAP efficiency:
+
+| Algorithm | Best paired CAP | Paper CAP | Difference |
+|---|---:|---:|---:|
+| AE | 4.21% | 5.73% | **-1.52 pp** |
+| VAE | 5.36% | 4.79% | **+0.57 pp** |
+| DSAE | 6.10% | 8.55% | **-2.45 pp** |
+| DSVAE | 7.40% | 5.02% | **+2.38 pp** |
+| DeepSVDD | 8.28% | 4.03% | **+4.25 pp** |
+| RealNVP | 7.57% | 3.26% | **+4.31 pp** |
+
+The result is promising: paired CAP is numerically higher for four algorithms and
+substantially higher for DSVAE, DeepSVDD, and RealNVP. It is not evidence that pairing
+universally improves the paper: AE and DSAE are below their paper CAP references.
+
+The other closest-form paper comparisons reinforce, but do not prove, the result:
+
+- campaign W1 is numerically above paper W1 for all six algorithms;
+- campaign drift is above the paper's closest Stable reference for four of six;
+- campaign CDF-CAP is above paper CAP for three of six;
+- overall, 13 of 18 closest-form model/metric cells are numerically positive.
+
+## What can be claimed
+
+The evidence supports these statements:
+
+- CAP is usually the strongest selection metric, winning four of six native-score
+  algorithm comparisons and one of two OAS comparisons.
+- Learned pairing produces real, model-dependent efficiency gains, strongest for
+  RealNVP and meaningful for VAE and DSVAE.
+- The new paired-CAP setup is numerically promising relative to the paper for four
+  algorithms, but not for AE or DSAE.
+- Native MSE/KL should remain the primary AE/VAE score; masked OAS is useful only as a
+  diagnostic in this experiment.
+
+It does **not** support a formal “outperforms the paper” claim. These are 50-epoch
+search checkpoints rather than the paper's 200-epoch retrained endpoints; the
+model-selection domains differ; the campaign used shared multi-objective NSGA-II
+rather than independent two-objective M-TPE; and each reported checkpoint is an
+optimistic oracle chosen on the same 20 downstream anomaly datasets.
 
 ## Evidence
 
-The authenticated evaluation covers 421 physical checkpoints, 601 checkpoint/score
-passes, 56 logical fronts, and all 20 downstream anomaly datasets. Detailed evidence
-is stored under:
+The evaluation authenticated 421 physical checkpoints, 601 checkpoint/score passes,
+56 logical fronts, 591 front memberships, and complete results for all 20 anomaly
+datasets. The machine-readable evidence is under:
 
 `/iopsstor/scratch/cscs/vjimenez/adatl1/campaigns/physics_background_nsgaii_05b649c/results/provisional_search50/`
 
-The key files are `front_winners.csv`, `candidate_efficiencies.csv`,
+The main files are `front_winners.csv`, `candidate_efficiencies.csv`,
 `cross_combination_choices.csv`, `paper_comparison.csv`, and
 `artifact_manifest.json`.

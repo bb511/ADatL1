@@ -14,8 +14,8 @@ average precision over the same 20 downstream anomaly datasets.
 2. **Does learned pairing improve CAP?** Not universally. Relative to CDF-CAP,
    the best learned pairing improves efficiency for VAE, DSVAE, DeepSVDD, and
    RealNVP, ties DSAE, and hurts AE. It improves AUPRC for DSVAE and DeepSVDD,
-   ties DSAE and RealNVP, and hurts AE and VAE. The clearest joint gain is
-   DeepSVDD; DSVAE also improves both endpoints, but with different best pairings.
+   ties DSAE and RealNVP, and hurts AE and VAE. DSVAE has the clearest joint gain;
+   DeepSVDD improves AUPRC while its efficiency is effectively tied with CDF.
 3. **Does OAS help AE/VAE?** No overall. Every one of the 14 matched OAS results
    has lower efficiency than its native-score counterpart, and 12/14 also have
    lower AUPRC. Native MSE/KL remains the primary choice.
@@ -30,18 +30,20 @@ ranking quality.**
 Each campaign cell is **efficiency % / AUPRC**. The four learned-pairing columns
 and CDF are CAP selectors. W1 and drift do not consume event pairings. Paper
 references are efficiency-only (`CAP / W1 / Stable`); the paper did not report a
-directly comparable physics AUPRC, so no paper AUPRC is invented here.
+directly comparable physics AUPRC, so no paper AUPRC is invented here. Bold marks
+the best campaign efficiency and the best campaign AUPRC in each row independently;
+all exact ties are marked.
 
 | Model | Score | Paper efficiency: CAP / W1 / Stable | Flat CAP | Physics-summary CAP | Typed-sliced CAP | JetCLR CAP | CDF CAP | W1 | Drift |
 |---|---|---:|---:|---:|---:|---:|---:|---:|---:|
-| AE | native MSE | 5.73 / 3.22 / 4.29% | 4.13% / 0.617 | 4.13% / 0.617 | 4.13% / 0.617 | 4.21% / 0.623 | 4.71% / 0.628 | 4.77% / 0.619 | 4.13% / 0.617 |
-| AE | masked OAS | not reported | 2.64% / 0.501 | 2.75% / 0.501 | 2.66% / 0.498 | 3.09% / 0.481 | 2.64% / 0.501 | 2.37% / 0.452 | 2.37% / 0.462 |
-| VAE | native latent KL | 4.79 / 4.49 / 4.39% | 5.36% / 0.512 | 5.21% / 0.308 | 5.36% / 0.512 | 5.21% / 0.308 | 4.53% / 0.634 | 4.67% / 0.632 | 4.67% / 0.632 |
-| VAE | masked OAS | not reported | 2.78% / 0.457 | 2.78% / 0.457 | 2.78% / 0.457 | 2.78% / 0.457 | 2.91% / 0.494 | 4.25% / 0.544 | 2.82% / 0.483 |
-| DSAE | native reconstruction | 8.55 / 3.75 / 3.57% | 6.10% / 0.601 | 5.35% / 0.585 | 5.35% / 0.585 | 5.35% / 0.585 | 6.10% / 0.601 | 6.15% / 0.599 | 5.35% / 0.585 |
-| DSVAE | native variational | 5.02 / 0.80 / 4.85% | 6.92% / 0.626 | 6.01% / 0.039 | 7.40% / 0.633 | 6.78% / 0.649 | 6.84% / 0.627 | 0.84% / 0.533 | 6.39% / 0.672 |
-| DeepSVDD | native center distance | 4.03 / 3.25 / 3.56% | 8.28% / 0.315 | 7.23% / 0.290 | 7.23% / 0.290 | 7.23% / 0.290 | 8.27% / 0.303 | 5.48% / 0.256 | 4.65% / 0.234 |
-| RealNVP | native likelihood | 3.26 / 1.66 / 3.17% | 5.50% / 0.431 | 7.57% / 0.387 | 3.57% / 0.406 | 3.32% / 0.333 | 5.50% / 0.431 | 2.78% / 0.333 | 2.78% / 0.333 |
+| AE | native MSE | 5.73 / 3.22 / 4.29% | 4.13% / 0.617 | 4.13% / 0.617 | 4.13% / 0.617 | 4.21% / 0.623 | 4.71% / **0.628** | **4.77%** / 0.619 | 4.13% / 0.617 |
+| AE | masked OAS | not reported | 2.64% / 0.501 | 2.75% / **0.501** | 2.66% / 0.498 | **3.09%** / 0.481 | 2.64% / 0.501 | 2.37% / 0.452 | 2.37% / 0.462 |
+| VAE | native latent KL | 4.79 / 4.49 / 4.39% | **5.36%** / 0.512 | 5.21% / 0.308 | **5.36%** / 0.512 | 5.21% / 0.308 | 4.53% / **0.634** | 4.67% / 0.632 | 4.67% / 0.632 |
+| VAE | masked OAS | not reported | 2.78% / 0.457 | 2.78% / 0.457 | 2.78% / 0.457 | 2.78% / 0.457 | 2.91% / 0.494 | **4.25% / 0.544** | 2.82% / 0.483 |
+| DSAE | native reconstruction | 8.55 / 3.75 / 3.57% | 6.10% / **0.601** | 5.35% / 0.585 | 5.35% / 0.585 | 5.35% / 0.585 | 6.10% / **0.601** | **6.15%** / 0.599 | 5.35% / 0.585 |
+| DSVAE | native variational | 5.02 / 0.80 / 4.85% | 6.92% / 0.626 | 6.01% / 0.039 | **7.40%** / 0.633 | 6.78% / 0.649 | 6.84% / 0.627 | 0.84% / 0.533 | 6.39% / **0.672** |
+| DeepSVDD | native center distance | 4.03 / 3.25 / 3.56% | **8.28% / 0.315** | 7.23% / 0.290 | 7.23% / 0.290 | 7.23% / 0.290 | 8.27% / 0.303 | 5.48% / 0.256 | 4.65% / 0.234 |
+| RealNVP | native likelihood | 3.26 / 1.66 / 3.17% | 5.50% / **0.431** | **7.57%** / 0.387 | 3.57% / 0.406 | 3.32% / 0.333 | 5.50% / **0.431** | 2.78% / 0.333 | 2.78% / 0.333 |
 
 These are not 32 isolated configurations. The analysis authenticates **421 unique
 physical checkpoints**, **601 checkpoint/score evaluations**, and **591 Pareto-front
@@ -57,12 +59,12 @@ best-of-four pairing advantage.
 
 | Native-score model | Best efficiency selector | Best AUPRC selector | CDF-CAP | W1 | Drift |
 |---|---|---|---:|---:|---:|
-| AE | W1 | CDF-CAP | 4.71% / 0.628 | 4.77% / 0.619 | 4.13% / 0.617 |
-| VAE | W1 | CDF-CAP | 4.53% / 0.634 | 4.67% / 0.632 | 4.67% / 0.632 |
-| DSAE | W1 | CDF-CAP | 6.10% / 0.601 | 6.15% / 0.599 | 5.35% / 0.585 |
-| DSVAE | CDF-CAP | drift | 6.84% / 0.627 | 0.84% / 0.533 | 6.39% / 0.672 |
-| DeepSVDD | CDF-CAP | CDF-CAP | 8.27% / 0.303 | 5.48% / 0.256 | 4.65% / 0.234 |
-| RealNVP | CDF-CAP | CDF-CAP | 5.50% / 0.431 | 2.78% / 0.333 | 2.78% / 0.333 |
+| AE | W1 | CDF-CAP | 4.71% / **0.628** | **4.77%** / 0.619 | 4.13% / 0.617 |
+| VAE | W1 | CDF-CAP | 4.53% / **0.634** | **4.67%** / 0.632 | 4.67% / 0.632 |
+| DSAE | W1 | CDF-CAP | 6.10% / **0.601** | **6.15%** / 0.599 | 5.35% / 0.585 |
+| DSVAE | CDF-CAP | drift | **6.84%** / 0.627 | 0.84% / 0.533 | 6.39% / **0.672** |
+| DeepSVDD | CDF-CAP | CDF-CAP | **8.27% / 0.303** | 5.48% / 0.256 | 4.65% / 0.234 |
+| RealNVP | CDF-CAP | CDF-CAP | **5.50% / 0.431** | 2.78% / 0.333 | 2.78% / 0.333 |
 | **Macro mean** | **CDF-CAP** | **CDF-CAP** | **5.99% / 0.537** | **4.12% / 0.496** | **4.66% / 0.512** |
 
 The efficiency result is a tie in model wins but not in macro performance: CAP's
@@ -119,6 +121,20 @@ policy. Compared with CDF, the macro changes are:
 Thus pairing should be treated as model-dependent, and claims of improvement must
 name the endpoint. The present evidence does **not** support “pairing improves both
 efficiency and AUPRC in general.”
+
+### Bottom line versus the CDF baseline
+
+Pairing **does improve the baseline for the intended low-rate efficiency endpoint**
+when the pairing is chosen per model: the gains are large for RealNVP (+2.06 pp),
+meaningful for VAE (+0.83 pp) and DSVAE (+0.56 pp), and negligible for DeepSVDD.
+It does not help native DSAE and hurts native AE.
+
+The AUPRC evidence is much weaker: only DSVAE and DeepSVDD improve, DSAE and
+RealNVP merely tie their CDF baselines, and AE/VAE regress. Therefore the defensible
+claim is **model-specific improvement at the 250 Hz operating point**, not a general
+improvement in anomaly ranking. If both endpoints must improve with one pairing,
+typed-sliced DSVAE is the strongest result; flat-physical DeepSVDD is positive but
+its efficiency gain is practically zero.
 
 ## OAS versus native AE/VAE scores
 

@@ -531,8 +531,6 @@ def evaluate(args: argparse.Namespace) -> None:
                 "train=false",
                 "test=true",
                 "skip_validation_evaluation=true",
-                "optimized_metric_config=null",
-                "optimized_metric_configs=null",
                 "evaluation.evaluator.ckpts.last=false",
                 "evaluation.evaluator.ckpts.summary=false",
                 "evaluation.evaluator.ckpts.single=false",

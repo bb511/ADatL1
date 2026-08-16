@@ -18,6 +18,7 @@ import shutil
 import subprocess  # nosec B404 -- authenticated executable and fixed argv
 import sys
 from collections import defaultdict
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
@@ -343,6 +344,83 @@ def prepare(args: argparse.Namespace) -> None:
     print(
         json.dumps(
             {"manifest": str(path), "sha256": _sha256(path), "tasks": len(manifest["tasks"])},
+            sort_keys=True,
+        )
+    )
+
+
+def supersede_execution(args: argparse.Namespace) -> None:
+    """Migrate valid markers to a clean descendant evaluation-code revision."""
+    root = args.root.resolve(strict=True)
+    old = _load_prepared(root)
+    new = build_manifest(
+        root,
+        Path(old["frozen_science_repository"]),
+        args.new_execution_repository,
+        Path(old["inputs"]["data_dir"]),
+        Path(old["inputs"]["raw_data_dir"]),
+        Path(old["inputs"]["pairing_dir"]),
+    )
+    if old["tasks"] != new["tasks"] or old["inputs"] != new["inputs"]:
+        raise RuntimeError("Execution migration changed scientific tasks or immutable inputs.")
+    if old["evaluation_execution_commit"] == new["evaluation_execution_commit"]:
+        raise RuntimeError("Execution migration requires a different code revision.")
+
+    valid_markers = []
+    for task in old["tasks"]:
+        marker_path = _screening_dir(root) / "tasks" / f"{task['task_index']:03d}" / "marker.json"
+        if not marker_path.exists():
+            continue
+        marker = _read_json(marker_path)
+        if not _marker_valid(root, old, task, marker):
+            raise RuntimeError(f"Refusing to migrate invalid marker {task['task_index']}.")
+        valid_markers.append((task, marker_path, marker))
+
+    migration_id = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+    backup_dir = _screening_dir(root) / "migration_backups" / migration_id
+    marker_changes = []
+    for task, marker_path, marker in valid_markers:
+        backup = backup_dir / f"{int(task['task_index']):03d}.json"
+        _write_json(backup, marker)
+        migrated = dict(marker)
+        migrated["manifest_content_sha256"] = new["content_sha256"]
+        migrated["execution_migration"] = {
+            "migration_id": migration_id,
+            "from_commit": old["evaluation_execution_commit"],
+            "to_commit": new["evaluation_execution_commit"],
+            "scientific_task_unchanged": True,
+        }
+        marker_changes.append((marker_path, migrated, _sha256(backup)))
+
+    manifest_path = _screening_dir(root) / "manifest.json"
+    old_manifest_sha256 = _sha256(manifest_path)
+    _write_json(manifest_path, new)
+    for marker_path, migrated, _ in marker_changes:
+        _write_json(marker_path, migrated)
+    for task, marker_path, _ in valid_markers:
+        if not _marker_valid(root, new, task, _read_json(marker_path)):
+            raise RuntimeError(f"Migrated marker failed validation: {task['task_index']}.")
+    receipt = {
+        "schema_version": SCHEMA_VERSION,
+        "migration_id": migration_id,
+        "old_manifest_sha256": old_manifest_sha256,
+        "new_manifest_sha256": _sha256(manifest_path),
+        "from_commit": old["evaluation_execution_commit"],
+        "to_commit": new["evaluation_execution_commit"],
+        "migrated_task_indices": [int(task["task_index"]) for task, _, _ in valid_markers],
+        "marker_backup_sha256": {str(path): backup_sha for path, _, backup_sha in marker_changes},
+        "scientific_tasks_sha256": _canonical_hash(new["tasks"]),
+        "immutable_inputs_sha256": _canonical_hash(new["inputs"]),
+    }
+    receipt_path = root / "state" / "evaluation_execution_migrations" / f"{migration_id}.json"
+    _write_json(receipt_path, receipt)
+    print(
+        json.dumps(
+            {
+                "receipt": str(receipt_path),
+                "migrated_markers": len(valid_markers),
+                "execution_commit": new["evaluation_execution_commit"],
+            },
             sort_keys=True,
         )
     )
@@ -774,6 +852,8 @@ def parse_args() -> argparse.Namespace:
     prep.add_argument("--data-dir", type=Path, required=True)
     prep.add_argument("--raw-data-dir", type=Path, required=True)
     prep.add_argument("--pairing-dir", type=Path, required=True)
+    migrate = commands.add_parser("supersede-execution")
+    migrate.add_argument("--new-execution-repository", type=Path, required=True)
     run = commands.add_parser("evaluate")
     run.add_argument("--task-index", type=int, required=True, choices=range(346))
     run.add_argument("--attempt-id")
@@ -788,6 +868,7 @@ def main() -> None:
     args = parse_args()
     {
         "prepare": prepare,
+        "supersede-execution": supersede_execution,
         "evaluate": evaluate,
         "status": status,
         "aggregate-input": aggregate_input,

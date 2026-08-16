@@ -288,14 +288,14 @@ def _write_optimized_metric_artifact(
 
 def _get_directions(cfg):
     # 1) Prefer your own config (always available)
-    if "optimized_metric_configs" in cfg:
+    if cfg.get("optimized_metric_configs") is not None:
         directions = []
         for config in cfg.optimized_metric_configs.values():
             directions.append(config.main_metric.direction)
             if "sec_metric" in config and config.sec_metric is not None:
                 directions.append(config.sec_metric.direction)
         return directions
-    if "optimized_metric_config" in cfg:
+    if cfg.get("optimized_metric_config") is not None:
         # multi-objective if sec_metric exists
         main_dir = cfg.optimized_metric_config.main_metric.direction
         if "sec_metric" in cfg.optimized_metric_config:

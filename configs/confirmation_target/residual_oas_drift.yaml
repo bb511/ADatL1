@@ -1,0 +1,12 @@
+# @package _global_
+defaults: [_base, _self_]
+optimized_metric_config:
+  primary_checkpoint_metric: residual_oas_operational_drift_ema
+  main_metric:
+    { callback: { name: drift_residual_oas, params: {} }, direction: minimize }
+  sec_metric: ${physics_selection.native_secondary}
+evaluation:
+  evaluator:
+    ckpts:
+      summary:
+        residual_oas_operational_drift_ema: [min]

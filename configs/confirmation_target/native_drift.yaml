@@ -1,0 +1,12 @@
+# @package _global_
+defaults: [_base, _self_]
+optimized_metric_config:
+  primary_checkpoint_metric: native_operational_drift_ema
+  main_metric:
+    { callback: { name: drift_native, params: {} }, direction: minimize }
+  sec_metric: ${physics_selection.native_secondary}
+evaluation:
+  evaluator:
+    ckpts:
+      summary:
+        native_operational_drift_ema: [min]

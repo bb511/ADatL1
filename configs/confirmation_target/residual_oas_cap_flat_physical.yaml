@@ -1,0 +1,15 @@
+# @package _global_
+defaults: [_base, _self_]
+optimized_metric_config:
+  primary_checkpoint_metric: cap_residual_oas_flat_physical_ema_ZB_run396102_vs_ZB_run398183
+  main_metric:
+    {
+      callback: { name: cap_residual_oas_flat_physical, params: {} },
+      direction: maximize,
+    }
+  sec_metric: ${physics_selection.native_secondary}
+evaluation:
+  evaluator:
+    ckpts:
+      summary:
+        cap_residual_oas_flat_physical_ema_ZB_run396102_vs_ZB_run398183: [max]

@@ -1,0 +1,28 @@
+# @package _global_
+
+# Stage-2 confirmation keeps the complete training/evaluation callback suite active,
+# but exposes only the three checkpoint candidates used by the paper selection rule.
+optimized_metric_configs: null
+optimized_metric_config: null
+
+evaluation:
+  evaluator:
+    ckpts:
+      last: true
+      summary:
+        cap_native_flat_physical_ema_ZB_run396102_vs_ZB_run398183: null
+        cap_native_physics_summary_ema_ZB_run396102_vs_ZB_run398183: null
+        cap_native_typed_sliced_wasserstein_ema_ZB_run396102_vs_ZB_run398183: null
+        cap_native_jetclr_ema_ZB_run396102_vs_ZB_run398183: null
+        cap_native_cdf_ema_ZB_run396102_vs_ZB_run398183: null
+        w1dist_native_ema_ZB_run396102_vs_ZB_run398183: null
+        native_operational_drift_ema: null
+        cap_residual_oas_flat_physical_ema_ZB_run396102_vs_ZB_run398183: null
+        cap_residual_oas_physics_summary_ema_ZB_run396102_vs_ZB_run398183: null
+        cap_residual_oas_typed_sliced_wasserstein_ema_ZB_run396102_vs_ZB_run398183: null
+        cap_residual_oas_jetclr_ema_ZB_run396102_vs_ZB_run398183: null
+        cap_residual_oas_cdf_ema_ZB_run396102_vs_ZB_run398183: null
+        w1dist_residual_oas_ema_ZB_run396102_vs_ZB_run398183: null
+        residual_oas_operational_drift_ema: null
+      single:
+        ascore_operational: [stable]

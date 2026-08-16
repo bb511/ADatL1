@@ -2,6 +2,18 @@
 
 Last updated: 2026-08-16 (Europe/Zurich)
 
+- 2026-08-16: paper-style confirmation composition is implemented locally at commit
+  `ed1cf84`. Fourteen target overlays cover native CAP/W1/drift and AE/VAE masked-OAS
+  CAP/W1/drift while retaining all per-epoch callbacks. Every composed target exposes
+  exactly one Q' plus native Q'', and exactly `last`, target-primary EMA, and stable
+  native checkpoint candidates. Nine new composition tests and 20 adjacent campaign
+  regression tests pass; changed-file pre-commit hooks pass. Deterministic previews
+  identify 12 native-only studies (hash `3d94a6de...`) or 16 studies including OAS
+  (hash `ef75ea88...`). Neither preview is frozen and no confirmation job was submitted:
+  the complete 16-study strict sequential M-TPE stage is projected at about 15,000
+  GPU-hours, conflicting with the later instruction not to wait another multi-week
+  campaign unless that compute is explicitly re-authorized.
+
 - 2026-08-16: at the user's direction, the 346-configuration 200-epoch retraining
   array `3093119` was cancelled before any 40-epoch segment completed because its
   projected wall-clock cost was 2–3 weeks. The frozen search universe is unchanged.

@@ -384,6 +384,35 @@ the exact 28- or 14-direction vector. The inherited paper M-TPE sampler settings
 not active in screening. Targeted confirmation configs must instead compose the paper
 M-TPE sampler with exactly one selected logical Q'/Q'' objective pair.
 
+Paper-style confirmation-target overlays are now available under:
+
+```text
+configs/confirmation_target/_base.yaml
+configs/confirmation_target/native_{cap_flat_physical,cap_physics_summary,
+  cap_typed_sliced_wasserstein,cap_jetclr,cap_cdf,wasserstein,drift}.yaml
+configs/confirmation_target/residual_oas_{cap_flat_physical,cap_physics_summary,
+  cap_typed_sliced_wasserstein,cap_jetclr,cap_cdf,wasserstein,drift}.yaml
+```
+
+Each overlay keeps the complete callback suite active for per-epoch logging, clears
+the shared 14/28-dimensional objective map, exposes exactly one Q' plus native Q'',
+and limits evaluator selection to `last`, that target's primary EMA checkpoint, and
+stable native `ascore_operational`. Compose it with the corresponding paper search
+space (`hparams_search={model}_optuna`), which supplies the original M-TPE sampler;
+strict paper behavior requires `hydra.sweeper.n_jobs=1`. The OAS overlays are valid
+only for AE and VAE.
+
+`src/evaluation/physics_background_pairing_confirmation_targets.py` deterministically
+previews two possible target sets from the authenticated provisional checkpoint
+analysis without freezing either one. The native-only 12-study preview has content
+hash `3d94a6deacefcfe460d1d4dbfc775652df4ea0b6da3d6c57edbb03a2b34f241e`.
+The scientifically complete 16-study preview, which adds AE/VAE residual-OAS mapping
+and CDF controls, has content hash
+`ef75ea8897cc6bd47b8f1bca1f6ab16351766ef8aa7e0bf43ddf5354463c212b`.
+These are previews, not immutable manifests: freezing and launching either target set
+requires an explicit compute-scope decision because the 16-study design is projected
+at roughly 15,000 GPU-hours before its 200-epoch front retraining.
+
 Retraining/downstream overlays:
 
 ```text

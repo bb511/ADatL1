@@ -47,6 +47,34 @@ For VAE the advantage is smaller but still clear: 5.36% versus approximately 4.6
 
 ### Does learned pairing improve CAP?
 
+Here is the complete pairing comparison for the native anomaly scores. Each entry is
+the mean downstream efficiency of the best checkpoint on that pairing's CAP front:
+
+| Algorithm | Flat-physical | Physics-summary | Typed-sliced | JetCLR | CDF control |
+|---|---:|---:|---:|---:|---:|
+| AE | 4.13% | 4.13% | 4.13% | 4.21% | **4.71%** |
+| VAE | **5.36%** | 5.21% | **5.36%** | 5.21% | 4.53% |
+| DSAE | **6.10%** | 5.35% | 5.35% | 5.35% | **6.10%** |
+| DSVAE | 6.92% | 6.01% | **7.40%** | 6.78% | 6.84% |
+| DeepSVDD | **8.28%** | 7.23% | 7.23% | 7.23% | 8.27% |
+| RealNVP | 5.50% | **7.57%** | 3.57% | 3.32% | 5.50% |
+| **Mean across algorithms** | **6.05%** | 5.91% | 5.51% | 5.35% | 5.99% |
+
+The pairing types behave differently by model:
+
+- **Flat-physical is the safest learned default.** It wins or ties for VAE, DSAE, and
+  DeepSVDD, and is second for DSVAE. Its aggregate mean is the highest, but only 0.06
+  percentage points above CDF.
+- **Physics-summary is uniquely valuable for RealNVP.** It raises efficiency from
+  5.50% with CDF/flat-physical to 7.57%. For every other model it is below the best
+  pairing.
+- **Typed-sliced is best for DSVAE** at 7.40%, versus 6.84% for CDF and 6.92% for
+  flat-physical. It also ties flat-physical for VAE, but performs badly for RealNVP.
+- **JetCLR is best only for AE OAS.** For native scores it never wins; it is especially
+  weak for RealNVP.
+- **CDF remains the best AE-native pairing and ties the best result for DSAE.** It is
+  also essentially tied with flat-physical for DeepSVDD.
+
 Compared with CDF CAP:
 
 - RealNVP improves by **+2.06 pp** with physics-summary pairing.
@@ -88,6 +116,16 @@ Pairing itself remains score-dependent. JetCLR pairing improves AE OAS over its 
 control by +0.45 pp, whereas the best learned VAE OAS pairing is 0.13 pp below CDF.
 There is no paper OAS baseline, so OAS cannot be used to claim an improvement over the
 paper.
+
+The complete OAS pairing matrix is:
+
+| Algorithm | Flat-physical | Physics-summary | Typed-sliced | JetCLR | CDF control |
+|---|---:|---:|---:|---:|---:|
+| AE masked OAS | 2.64% | 2.75% | 2.66% | **3.09%** | 2.64% |
+| VAE masked OAS | 2.78% | 2.78% | 2.78% | 2.78% | **2.91%** |
+
+Thus OAS does not reveal a generally superior pairing either: JetCLR helps AE OAS,
+while every learned pairing is tied and slightly below CDF for VAE OAS.
 
 ## Does pairing improve the paper result?
 

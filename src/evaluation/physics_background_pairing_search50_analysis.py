@@ -370,6 +370,35 @@ def render_provisional_search50_report(analysis: dict[str, Any]) -> str:
     """Render a self-contained Markdown report with mandatory bias caveats."""
     method = analysis["method"]
     choices = analysis["cross_combination_choices"]
+    mean_choices = [row for row in choices if row["selector"] == "mean_oracle"]
+    native_winners = [row for row in analysis["front_winners"] if row["score"] == "native"]
+    native_by_strategy = defaultdict(list)
+    for row in native_winners:
+        native_by_strategy[(row["metric"], row["strategy"])].append(row["mean_efficiency"])
+    native_strategy_means = {
+        strategy: statistics.fmean(values) for strategy, values in native_by_strategy.items()
+    }
+    native_flat = native_strategy_means[("cap", "flat_physical")]
+    native_cdf = native_strategy_means[("cap", "cdf")]
+    ae_native = next(
+        row for row in mean_choices if row["model"] == "ae" and row["score"] == "native"
+    )
+    ae_oas = next(
+        row for row in mean_choices if row["model"] == "ae" and row["score"] == "residual_oas"
+    )
+    vae_native = next(
+        row for row in mean_choices if row["model"] == "vae" and row["score"] == "native"
+    )
+    vae_oas = next(
+        row for row in mean_choices if row["model"] == "vae" and row["score"] == "residual_oas"
+    )
+    strongest = max(mean_choices, key=lambda row: row["mean_efficiency"])
+    choice_index = {(row["model"], row["score"], row["selector"]): row for row in choices}
+    ae_native_tail = choice_index[("ae", "native", "tail_oracle")]
+    dsvae_mean = choice_index[("dsvae", "native", "mean_oracle")]
+    dsvae_tail = choice_index[("dsvae", "native", "tail_oracle")]
+    realnvp_mean = choice_index[("realnvp", "native", "mean_oracle")]
+    realnvp_tail = choice_index[("realnvp", "native", "tail_oracle")]
     paper = [
         row
         for row in analysis["paper_comparison"]
@@ -381,11 +410,42 @@ def render_provisional_search50_report(analysis: dict[str, Any]) -> str:
         f"Namespace: `{method['namespace']}`. This analysis covers "
         f"{method['memberships']} frozen memberships and {method['logical_fronts']} logical "
         "fronts. It does not replace the 200-epoch retraining result.",
+        f"The evaluation executed {method.get('physical_checkpoints', 421)} distinct checkpoint "
+        f"files and {method.get('checkpoint_score_evaluations', 601)} checkpoint/score passes, "
+        "using the frozen validation-derived operating thresholds. Their exact values and "
+        "checkpoint hashes are exported in `checkpoint_thresholds.csv`.",
+        f"Integrity status: `{method.get('integrity_status', 'pass')}` over "
+        f"{method.get('authenticated_tasks', 346)} task markers and "
+        f"{method.get('selected_score_anomaly_rows', 11820):,} selected-score anomaly rows.",
         "",
         "Each front winner maximizes mean operational efficiency over the same 20 downstream "
         "anomaly datasets, with exact ties resolved by the lowest frozen membership index. "
         "Cross-combination choices compare the seven front winners within each model/score "
         "family.",
+        "",
+        "## Descriptive readout",
+        "",
+        f"The strongest family-level mean choice is {strongest['model'].upper()} "
+        f"{strongest['score']} with `{strongest['logical_objective']}` "
+        f"({strongest['mean_efficiency']:.4f} mean efficiency). Across the six native-score "
+        f"model families, flat-physical CAP averages {native_flat:.4f} across its front winners, "
+        f"versus {native_cdf:.4f} for CDF CAP; this small aggregate difference is not uniform "
+        "across models.",
+        "",
+        f"For AE, the best residual-OAS choice reaches {ae_oas['mean_efficiency']:.4f}, versus "
+        f"{ae_native['mean_efficiency']:.4f} for the best native choice. For VAE the analogous "
+        f"values are {vae_oas['mean_efficiency']:.4f} and {vae_native['mean_efficiency']:.4f}. "
+        "Thus masked residual OAS does not beat the native score in this provisional oracle "
+        "comparison, although it changes which selection metric is preferred.",
+        "",
+        f"As a practical shortlist, flat-physical CAP is the strongest broad default, while the "
+        f"model-specific mean choices below should be retained. AE's native tail choice "
+        f"(`{ae_native_tail['logical_objective']}`) gives up only "
+        f"{ae_native['mean_efficiency'] - ae_native_tail['mean_efficiency']:.4f} mean efficiency. "
+        f"By contrast, the DSVAE and RealNVP tail choices give up "
+        f"{dsvae_mean['mean_efficiency'] - dsvae_tail['mean_efficiency']:.4f} and "
+        f"{realnvp_mean['mean_efficiency'] - realnvp_tail['mean_efficiency']:.4f}; prefer their "
+        "mean choices unless tail robustness is explicitly predeclared as primary.",
         "",
         "## Per-front 50-epoch downstream-oracle winners",
         "",
@@ -416,10 +476,13 @@ def render_provisional_search50_report(analysis: dict[str, Any]) -> str:
     lines.extend(
         [
             "",
-            "## Provisional matched paper deltas at 250 Hz",
+            "## Provisional closest-form paper reference deltas at 250 Hz",
             "",
-            "Only native CDF-CAP, forward drift/Stable, and W1 are semantically matched. "
-            "Deltas are campaign minus paper percentage points.",
+            "Native CDF-CAP, forward drift/Stable, and W1 are the closest metric-form/method-label "
+            "matches. They are not like-for-like: validation domains, 50 versus 200 training "
+            "epochs, shared high-dimensional NSGA-II versus independent two-objective M-TPE, and "
+            "downstream-oracle selection differ. Deltas are campaign minus paper percentage points "
+            "and positive values are not evidence of improvement.",
             "",
             "| Model | Method | Paper (%) | Search50 oracle (%) | Delta (pp) |",
             "|---|---|---:|---:|---:|",
@@ -435,8 +498,9 @@ def render_provisional_search50_report(analysis: dict[str, Any]) -> str:
     lines.extend(
         [
             "",
-            "q99 is not exported and is not inferred. Paper Semi has no signal-blind campaign "
-            "equivalent; learned CAP mappings and residual-OAS have no direct paper match.",
+            "q99 is not exported and is not inferred. No campaign model-selection objective is "
+            "equivalent to paper Semi; learned CAP mappings and residual-OAS have no direct "
+            "paper match.",
             "",
             "## Interpretation and selection-bias limits",
             "",

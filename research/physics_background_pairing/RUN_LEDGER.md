@@ -11,9 +11,15 @@ Last updated: 2026-08-16 (Europe/Zurich)
   checkpoint hashes, immutable data aliases, pairing tables, stored native/OAS
   thresholds, and exact output coverage. Hard AE canary `3094017` passed for five
   checkpoints and both native and masked-OAS scores. Full checkpoint-only array
-  `3094019` was then submitted with 48 concurrent GPUs. Results are isolated under
-  `results/provisional_search50/` and must remain labelled as 50-epoch downstream
-  oracle screening, not the paper's 200-epoch confirmation protocol.
+  `3094019` completed 310 tasks; all 36 initial DSVAE misses exposed a test-only KL
+  schedule lifecycle defect, fixed and tested at `066fb3d`. The 310 valid markers
+  migrated with unchanged scientific task/input hashes, and DSVAE retry array
+  `3094397` completed all remaining tasks. The final authenticated result contains
+  346/346 tasks, 421 physical checkpoints, 601 checkpoint/score evaluations, 11,820
+  membership/anomaly rows, 56 front winners, and 16 mean/tail cross-method choices.
+  Results and hashes are isolated under `results/provisional_search50/`; the readable
+  summary is `results/REPORT.md`. Both remain labelled as 50-epoch downstream-oracle
+  screening, not the paper's 200-epoch confirmation protocol.
 
 - 2026-08-16: all six frozen NSGA-II screening studies reached exactly 600 usable
   COMPLETE trials (3,600 total, 50 epochs each) with no RUNNING or WAITING trials.

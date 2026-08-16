@@ -13,6 +13,7 @@ import csv
 import fcntl
 import hashlib
 import json
+import math
 import os
 import shutil
 import subprocess  # nosec B404 -- authenticated executable and fixed argv
@@ -766,6 +767,57 @@ def aggregate_input(args: argparse.Namespace) -> None:
     )
 
 
+def _checkpoint_threshold_rows(manifest: dict) -> list[dict[str, Any]]:
+    """Export finite stored operating thresholds for every physical checkpoint."""
+    import torch
+
+    rows = []
+    seen = set()
+    allowed = {"thres_operational", "thres_operational__residual_oas"}
+    for task in manifest["tasks"]:
+        for checkpoint in task["checkpoints"]:
+            identity = (checkpoint["source_path"], checkpoint["source_sha256"])
+            if identity in seen:
+                raise RuntimeError(f"Duplicate physical checkpoint identity: {identity}")
+            seen.add(identity)
+            path = Path(checkpoint["source_path"])
+            if _sha256(path) != checkpoint["source_sha256"]:
+                raise RuntimeError(f"Checkpoint changed before threshold export: {path}")
+            state = torch.load(path, weights_only=False, map_location="cpu")["state_dict"]
+            threshold_keys = {key for key in state if key.startswith("thres_operational")}
+            expected = {"thres_operational"}
+            if task["model"] in OAS_MODELS:
+                expected.add("thres_operational__residual_oas")
+            if threshold_keys != expected or not threshold_keys <= allowed:
+                raise RuntimeError(f"Threshold coverage differs for checkpoint: {path}")
+            values = {}
+            for key in sorted(expected):
+                value = state[key]
+                if not isinstance(value, torch.Tensor) or value.numel() != 1:
+                    raise RuntimeError(f"Nonscalar threshold {key} in checkpoint: {path}")
+                scalar = float(value.detach().cpu().item())
+                if not math.isfinite(scalar):
+                    raise RuntimeError(f"Nonfinite threshold {key} in checkpoint: {path}")
+                values[key] = scalar
+            rows.append(
+                {
+                    "task_index": task["task_index"],
+                    "model": task["model"],
+                    "trial_number": task["trial_number"],
+                    "checkpoint_id": checkpoint["checkpoint_id"],
+                    "checkpoint": str(path),
+                    "checkpoint_sha256": checkpoint["source_sha256"],
+                    "thres_operational": values["thres_operational"],
+                    "thres_operational__residual_oas": values.get(
+                        "thres_operational__residual_oas", ""
+                    ),
+                }
+            )
+    if len(rows) != 421:
+        raise RuntimeError(f"Expected 421 checkpoint threshold rows, found {len(rows)}.")
+    return rows
+
+
 def analyze(args: argparse.Namespace) -> None:
     """Build all provisional result tables and the caveated Markdown report."""
     from src.evaluation.physics_background_pairing_paper_comparison import (
@@ -790,8 +842,18 @@ def analyze(args: argparse.Namespace) -> None:
         Path(manifest["evaluation_execution_repository"])
     )
     result = build_provisional_search50_analysis(frozen_manifest, candidate_rows, paper_reference)
+    result["checkpoint_thresholds"] = _checkpoint_threshold_rows(manifest)
     result["method"].update(
         {
+            "integrity_status": "pass",
+            "authenticated_tasks": len(manifest["tasks"]),
+            "physical_checkpoints": sum(len(task["checkpoints"]) for task in manifest["tasks"]),
+            "checkpoint_score_evaluations": sum(
+                len(task["checkpoints"]) * len(task["scores"]) for task in manifest["tasks"]
+            ),
+            "checkpoint_threshold_records": len(result["checkpoint_thresholds"]),
+            "selected_score_anomaly_rows": len(candidate_rows),
+            "cross_score_anomaly_rows": len(aggregate["cross_score_rows"]),
             "evaluation_manifest_sha256": _sha256(_screening_dir(root) / "manifest.json"),
             "aggregate_input_sha256": _sha256(aggregate_path),
             "paper_reference_sha256": paper_reference_sha256,
@@ -809,13 +871,13 @@ def analyze(args: argparse.Namespace) -> None:
         "cross_combination_rankings",
         "cross_combination_choices",
         "paper_comparison",
+        "checkpoint_thresholds",
     )
     for name in table_names:
         _write_csv(result_dir / f"{name}.csv", result[name])
-    _write_text(
-        result_dir / "PROVISIONAL_REPORT.md",
-        render_provisional_search50_report(result),
-    )
+    report = render_provisional_search50_report(result)
+    _write_text(result_dir / "PROVISIONAL_REPORT.md", report)
+    _write_text(root / "results" / "REPORT.md", report)
     artifact_paths = sorted(
         path for path in result_dir.iterdir() if path.name != "artifact_manifest.json"
     )
@@ -826,6 +888,10 @@ def analyze(args: argparse.Namespace) -> None:
             {"name": path.name, "sha256": _sha256(path), "bytes": path.stat().st_size}
             for path in artifact_paths
         ],
+        "report_copy": {
+            "path": str((root / "results" / "REPORT.md").resolve()),
+            "sha256": _sha256(root / "results" / "REPORT.md"),
+        },
     }
     _write_json(result_dir / "artifact_manifest.json", artifact_manifest)
     print(

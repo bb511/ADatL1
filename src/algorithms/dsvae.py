@@ -14,8 +14,8 @@ from src.data.utils import unpack_batch
 class DeepSetsVAE(ADLightningModule):
     """DeepSets variational autoencoder module.
 
-    Same structure and logging convention as the flat VAE, but using a DeepSets encoder.
-    The operational anomaly score is hard-configured to the raw KL divergence.
+    Same structure and logging convention as the flat VAE, but using a DeepSets encoder. The
+    operational anomaly score is hard-configured to the raw KL divergence.
 
     :param encoder: DeepSets variational encoder nn module.
     :param decoder: Decoder nn module.
@@ -24,8 +24,8 @@ class DeepSetsVAE(ADLightningModule):
     :param mask: Whether to mask padded input features in reconstruction loss.
     :param ckpt: Optional checkpoint path to resume training from.
     :param target_rate: Target background rate or FPR.
-    :param base_rate: Base rate used to convert target_rate into an FPR. If None,
-        target_rate is interpreted directly as an FPR.
+    :param base_rate: Base rate used to convert target_rate into an FPR. If None, target_rate is
+        interpreted directly as an FPR.
     """
 
     def __init__(
@@ -41,9 +41,7 @@ class DeepSetsVAE(ADLightningModule):
         **kwargs,
     ):
         super().__init__(model=None, **kwargs)
-        self.save_hyperparameters(
-            ignore=["model", "features", "encoder", "decoder"]
-        )
+        self.save_hyperparameters(ignore=["model", "features", "encoder", "decoder"])
 
         self.encoder = encoder
         self.decoder = decoder
@@ -55,8 +53,12 @@ class DeepSetsVAE(ADLightningModule):
 
         # Hard-coded algorithm definition.
         self.loss = ClassicVAELoss(kl_scale=kl_scale, reduction="none")
+        # Validation/test-only runs do not call ``on_fit_start``. Initialize at
+        # the final KL scale; fitting replaces this with the step-aware warmup.
+        self._setup_kl_annealing(0.0, total_steps=1)
 
     def on_fit_start(self):
+        """Initialize feature mapping and the training KL schedule."""
         inject_object_feature_map(self)
         self.features.to(self.device)
 
@@ -67,10 +69,12 @@ class DeepSetsVAE(ADLightningModule):
             self._load_checkpoint()
 
     def on_test_start(self):
+        """Inject the configured object-feature mapping for inference."""
         inject_object_feature_map(self)
 
     @property
     def target_fpr(self) -> float:
+        """Return the configured operational false-positive rate."""
         return self.compute_target_fpr()
 
     def forward(
@@ -78,12 +82,14 @@ class DeepSetsVAE(ADLightningModule):
         x_by_type: dict[str, torch.Tensor],
         m_by_type: dict[str, torch.Tensor],
     ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
+        """Encode typed objects and decode one sampled latent representation."""
         x_by_type = {k: self.features(v) for k, v in x_by_type.items()}
         z_mean, z_log_var, z = self.encoder(x_by_type, m_by_type)
         reconstruction = self.decoder(z)
         return z_mean, z_log_var, z, reconstruction
 
     def model_step(self, batch: torch.Tensor) -> dict[str, torch.Tensor]:
+        """Compute loss components and the native per-event KL score."""
         b = unpack_batch(batch)
 
         x_flat = torch.flatten(b.x, start_dim=1)
@@ -109,9 +115,7 @@ class DeepSetsVAE(ADLightningModule):
         # The anomaly score is expected to be a distribution over events.
         ascore = kl_raw
         if ascore.ndim != 1:
-            raise ValueError(
-                f"Expected per-event ascores, got {tuple(ascore.shape)}."
-            )
+            raise ValueError(f"Expected per-event ascores, got {tuple(ascore.shape)}.")
 
         loss = self._add_hgq_loss(loss)
 
@@ -124,9 +128,7 @@ class DeepSetsVAE(ADLightningModule):
                 k_eff = min(max(10, k), n)
                 operational_ascore = torch.topk(ascore, k_eff).values.mean().item()
             else:
-                operational_ascore = torch.quantile(
-                    ascore, 1.0 - self.target_fpr
-                ).item()
+                operational_ascore = torch.quantile(ascore, 1.0 - self.target_fpr).item()
 
             q50, q99 = torch.quantile(
                 ascore, torch.tensor([0.5, 0.99], device=ascore.device)
@@ -165,6 +167,7 @@ class DeepSetsVAE(ADLightningModule):
         }
 
     def outlog(self, outdict: dict) -> dict:
+        """Return scalar values suitable for Lightning logging."""
         return {
             "loss": outdict.get("loss"),
             "loss_mean": outdict.get("loss/mean"),
@@ -202,17 +205,13 @@ class DeepSetsVAE(ADLightningModule):
             n_feat = len(feat_indices)
 
             if not all(len(idxs) == n_obj for idxs in feat_indices):
-                raise ValueError(
-                    f"Feature map for '{obj_name}' has inconsistent object counts."
-                )
+                raise ValueError(f"Feature map for '{obj_name}' has inconsistent object counts.")
 
             obj_features = []
             obj_masks = []
 
             for obj_idx in range(n_obj):
-                this_obj_feat_idx = [
-                    feat_indices[f_idx][obj_idx] for f_idx in range(n_feat)
-                ]
+                this_obj_feat_idx = [feat_indices[f_idx][obj_idx] for f_idx in range(n_feat)]
                 idx_tensor = torch.tensor(
                     this_obj_feat_idx, device=x_flat.device, dtype=torch.long
                 )
@@ -242,15 +241,17 @@ class DeepSetsVAE(ADLightningModule):
         )
 
     def _load_checkpoint(self):
+        """Load configured continuation weights without optimizer state."""
         ckpt = torch.load(self.ckpt_path, map_location="cpu", weights_only=False)
         state_dict = ckpt["state_dict"]
         self.load_state_dict(state_dict, strict=False)
 
     def _add_hgq_loss(self, loss: torch.Tensor) -> torch.Tensor:
+        """Add optional HGQ layer regularization losses."""
         add_loss = 0.0
         if hasattr(self.encoder, "losses") and len(self.encoder.losses) > 0:
-            add_loss = add_loss + torch.stack([l for l in self.encoder.losses]).sum()
+            add_loss = add_loss + torch.stack(list(self.encoder.losses)).sum()
         if hasattr(self.decoder, "losses") and len(self.decoder.losses) > 0:
-            add_loss = add_loss + torch.stack([l for l in self.decoder.losses]).sum()
+            add_loss = add_loss + torch.stack(list(self.decoder.losses)).sum()
 
         return loss + add_loss

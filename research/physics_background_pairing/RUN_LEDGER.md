@@ -2,6 +2,19 @@
 
 Last updated: 2026-08-16 (Europe/Zurich)
 
+- 2026-08-16: at the user's direction, the 346-configuration 200-epoch retraining
+  array `3093119` was cancelled before any 40-epoch segment completed because its
+  projected wall-clock cost was 2–3 weeks. The frozen search universe is unchanged.
+  The approved provisional route evaluates only the 421 physically distinct retained
+  50-epoch checkpoints (591 front memberships) on the fixed 20 downstream anomalies.
+  Evaluation code is pinned at `5e3e5c8`; it reauthenticates the frozen commit,
+  checkpoint hashes, immutable data aliases, pairing tables, stored native/OAS
+  thresholds, and exact output coverage. Hard AE canary `3094017` passed for five
+  checkpoints and both native and masked-OAS scores. Full checkpoint-only array
+  `3094019` was then submitted with 48 concurrent GPUs. Results are isolated under
+  `results/provisional_search50/` and must remain labelled as 50-epoch downstream
+  oracle screening, not the paper's 200-epoch confirmation protocol.
+
 - 2026-08-16: all six frozen NSGA-II screening studies reached exactly 600 usable
   COMPLETE trials (3,600 total, 50 epochs each) with no RUNNING or WAITING trials.
   The authenticated freeze contains 56 signal-blind logical fronts, 591 front

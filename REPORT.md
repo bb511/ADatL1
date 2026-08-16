@@ -18,19 +18,23 @@ At the evaluated 250 Hz operating point:
 The completed evaluation measured fixed-rate signal efficiency, which is the physics
 endpoint reported below. It did not persist AUPRC, so no AUPRC claim is made.
 
-## Native anomaly scores: complete per-algorithm comparison
+## Complete per-algorithm comparison
 
 All values are mean signal efficiency over the same 20 downstream anomaly datasets.
-“Paired CAP” is the best of the four learned pairings; CDF is the unlearned control.
+The four learned-pairing columns and CDF are CAP results. Paper references are shown
+as `CAP / W1 / Stable`; Stable is the closest paper counterpart to campaign drift.
+Bold marks the best campaign result within each algorithm/score row.
 
-| Algorithm | Best paired CAP | CDF CAP | W1 | Drift | Overall winner | Paired CAP vs paper CAP |
-|---|---:|---:|---:|---:|---|---:|
-| AE | JetCLR: 4.21% | 4.71% | **4.77%** | 4.13% | **W1** | **-1.52 pp** |
-| VAE | flat-physical: **5.36%** | 4.53% | 4.67% | 4.67% | **paired CAP** | **+0.57 pp** |
-| DSAE | flat-physical: 6.10% | 6.10% | **6.15%** | 5.35% | **W1** | **-2.45 pp** |
-| DSVAE | typed-sliced: **7.40%** | 6.84% | 0.84% | 6.39% | **paired CAP** | **+2.38 pp** |
-| DeepSVDD | flat-physical: **8.28%** | 8.27% | 5.48% | 4.65% | **paired CAP** | **+4.25 pp** |
-| RealNVP | physics-summary: **7.57%** | 5.50% | 2.78% | 2.78% | **paired CAP** | **+4.31 pp** |
+| Algorithm | Anomaly score | Paper CAP / W1 / Stable | Flat-physical CAP | Physics-summary CAP | Typed-sliced CAP | JetCLR CAP | CDF CAP | W1 | Drift | Campaign winner |
+|---|---|---:|---:|---:|---:|---:|---:|---:|---:|---|
+| AE | native MSE | 5.73 / 3.22 / 4.29% | 4.13% | 4.13% | 4.13% | 4.21% | 4.71% | **4.77%** | 4.13% | W1 |
+| AE | masked OAS | no paper OAS baseline | 2.64% | 2.75% | 2.66% | **3.09%** | 2.64% | 2.37% | 2.37% | JetCLR CAP |
+| VAE | native latent KL | 4.79 / 4.49 / 4.39% | **5.36%** | 5.21% | **5.36%** | 5.21% | 4.53% | 4.67% | 4.67% | flat/typed CAP |
+| VAE | masked OAS | no paper OAS baseline | 2.78% | 2.78% | 2.78% | 2.78% | 2.91% | **4.25%** | 2.82% | W1 |
+| DSAE | native reconstruction | 8.55 / 3.75 / 3.57% | 6.10% | 5.35% | 5.35% | 5.35% | 6.10% | **6.15%** | 5.35% | W1 |
+| DSVAE | native variational | 5.02 / 0.80 / 4.85% | 6.92% | 6.01% | **7.40%** | 6.78% | 6.84% | 0.84% | 6.39% | typed-sliced CAP |
+| DeepSVDD | native center distance | 4.03 / 3.25 / 3.56% | **8.28%** | 7.23% | 7.23% | 7.23% | 8.27% | 5.48% | 4.65% | flat-physical CAP |
+| RealNVP | native likelihood | 3.26 / 1.66 / 3.17% | 5.50% | **7.57%** | 3.57% | 3.32% | 5.50% | 2.78% | 2.78% | physics-summary CAP |
 
 ### Does CAP beat the other metrics?
 
@@ -46,19 +50,6 @@ This is not merely an average effect. CAP is decisively stronger for:
 For VAE the advantage is smaller but still clear: 5.36% versus approximately 4.67%.
 
 ### Does learned pairing improve CAP?
-
-Here is the complete pairing comparison for the native anomaly scores. Each entry is
-the mean downstream efficiency of the best checkpoint on that pairing's CAP front:
-
-| Algorithm | Flat-physical | Physics-summary | Typed-sliced | JetCLR | CDF control |
-|---|---:|---:|---:|---:|---:|
-| AE | 4.13% | 4.13% | 4.13% | 4.21% | **4.71%** |
-| VAE | **5.36%** | 5.21% | **5.36%** | 5.21% | 4.53% |
-| DSAE | **6.10%** | 5.35% | 5.35% | 5.35% | **6.10%** |
-| DSVAE | 6.92% | 6.01% | **7.40%** | 6.78% | 6.84% |
-| DeepSVDD | **8.28%** | 7.23% | 7.23% | 7.23% | 8.27% |
-| RealNVP | 5.50% | **7.57%** | 3.57% | 3.32% | 5.50% |
-| **Mean across algorithms** | **6.05%** | 5.91% | 5.51% | 5.35% | 5.99% |
 
 The pairing types behave differently by model:
 
@@ -98,13 +89,6 @@ They are the unpaired metric baselines against which paired CAP is compared.
 OAS is a second anomaly-score view, not a second training run or pairing definition.
 It must be compared separately from each model's native score.
 
-| Algorithm and score | Best paired CAP | CDF CAP | W1 | Drift | Winner |
-|---|---:|---:|---:|---:|---|
-| AE native MSE | 4.21% | 4.71% | **4.77%** | 4.13% | W1 |
-| AE masked OAS | **3.09%** | 2.64% | 2.37% | 2.37% | paired CAP |
-| VAE native latent KL | **5.36%** | 4.53% | 4.67% | 4.67% | paired CAP |
-| VAE masked OAS | 2.78% | 2.91% | **4.25%** | 2.82% | W1 |
-
 The metric ranking changes under OAS, but the absolute result becomes worse:
 
 - AE: the best OAS result is 3.09%, versus 4.77% native (**-1.69 pp; -35%**).
@@ -115,16 +99,7 @@ The metric ranking changes under OAS, but the absolute result becomes worse:
 Pairing itself remains score-dependent. JetCLR pairing improves AE OAS over its CDF
 control by +0.45 pp, whereas the best learned VAE OAS pairing is 0.13 pp below CDF.
 There is no paper OAS baseline, so OAS cannot be used to claim an improvement over the
-paper.
-
-The complete OAS pairing matrix is:
-
-| Algorithm | Flat-physical | Physics-summary | Typed-sliced | JetCLR | CDF control |
-|---|---:|---:|---:|---:|---:|
-| AE masked OAS | 2.64% | 2.75% | 2.66% | **3.09%** | 2.64% |
-| VAE masked OAS | 2.78% | 2.78% | 2.78% | 2.78% | **2.91%** |
-
-Thus OAS does not reveal a generally superior pairing either: JetCLR helps AE OAS,
+paper. OAS also does not reveal a generally superior pairing: JetCLR helps AE OAS,
 while every learned pairing is tied and slightly below CDF for VAE OAS.
 
 ## Does pairing improve the paper result?

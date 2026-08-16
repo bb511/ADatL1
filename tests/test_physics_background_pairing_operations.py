@@ -1734,6 +1734,18 @@ def test_terminal_chunk_validation_authenticates_only_supplied_bindings(
     assert payload["candidate_slots"] == 3
     assert payload["mlflow_runs"] == 1
 
+    original = output.read_bytes()
+    operations._validate_completed_search_bindings(root, design, chunk, bindings_path, [binding])
+    assert output.read_bytes() == original
+
+    changed = json.loads(output.read_text(encoding="utf-8"))
+    changed["usable_trials"] = 2
+    output.write_text(json.dumps(changed), encoding="utf-8")
+    with pytest.raises(RuntimeError, match="validation receipt differs"):
+        operations._validate_completed_search_bindings(
+            root, design, chunk, bindings_path, [binding]
+        )
+
 
 def test_terminal_chunk_validation_rejects_noncomplete_binding(tmp_path) -> None:
     """A finite vector is insufficient when its explicit binding is not COMPLETE."""

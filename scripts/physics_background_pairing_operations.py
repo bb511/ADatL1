@@ -1960,43 +1960,49 @@ def _validate_completed_search_bindings(
         raise RuntimeError(f"Terminal MLflow identities are incomplete: {chunk_root}.")
 
     output = chunk_root / "chunk_validation.json"
+    payload = {
+        "schema_version": 1,
+        "code_commit": design["code_commit"],
+        "model": model,
+        "chunk": str(chunk_path.resolve()),
+        "chunk_sha256": _sha256(chunk_path),
+        "bindings": str(bindings_path.resolve()),
+        "bindings_sha256": _sha256(bindings_path),
+        "trial_numbers": sorted(trial_number for _, trial_number in indexed),
+        "usable_trials": len(indexed),
+        "selection_rows": len(selection_rows),
+        "candidate_slots": len(candidates),
+        "mlflow_runs": len(validated_mlflow),
+        "hparams_search": expected_hparams,
+        "screening_sampler_base": sampler,
+        "screening_sampler_base_sha256": (None if sampler is None else _json_sha256(sampler)),
+        "screening_sampler": resolved_sampler,
+        "screening_sampler_sha256": (
+            None if resolved_sampler is None else _json_sha256(resolved_sampler)
+        ),
+        "screening_sampler_seed_policy": design.get("screening_sampler_seed_policy"),
+        "screening_sampler_seed_policy_sha256": (
+            None if sampler is None else _json_sha256(design["screening_sampler_seed_policy"])
+        ),
+        "sampler_invocation": invocation,
+        "nsga2_generations": (
+            None
+            if sampler is None
+            else {
+                str(binding["trial_number"]): int(binding["nsga2_generation"])
+                for binding in binding_rows
+            }
+        ),
+    }
+    if output.is_file():
+        existing = json.loads(output.read_text(encoding="utf-8"))
+        validated_at = existing.pop("validated_at", None)
+        if not isinstance(validated_at, str) or not validated_at or existing != payload:
+            raise RuntimeError(f"Terminal chunk validation receipt differs: {output}.")
+        return output
     _atomic_json(
         output,
-        {
-            "schema_version": 1,
-            "validated_at": datetime.now(timezone.utc).isoformat(),
-            "code_commit": design["code_commit"],
-            "model": model,
-            "chunk": str(chunk_path.resolve()),
-            "chunk_sha256": _sha256(chunk_path),
-            "bindings": str(bindings_path.resolve()),
-            "bindings_sha256": _sha256(bindings_path),
-            "trial_numbers": sorted(trial_number for _, trial_number in indexed),
-            "usable_trials": len(indexed),
-            "selection_rows": len(selection_rows),
-            "candidate_slots": len(candidates),
-            "mlflow_runs": len(validated_mlflow),
-            "hparams_search": expected_hparams,
-            "screening_sampler_base": sampler,
-            "screening_sampler_base_sha256": (None if sampler is None else _json_sha256(sampler)),
-            "screening_sampler": resolved_sampler,
-            "screening_sampler_sha256": (
-                None if resolved_sampler is None else _json_sha256(resolved_sampler)
-            ),
-            "screening_sampler_seed_policy": design.get("screening_sampler_seed_policy"),
-            "screening_sampler_seed_policy_sha256": (
-                None if sampler is None else _json_sha256(design["screening_sampler_seed_policy"])
-            ),
-            "sampler_invocation": invocation,
-            "nsga2_generations": (
-                None
-                if sampler is None
-                else {
-                    str(binding["trial_number"]): int(binding["nsga2_generation"])
-                    for binding in binding_rows
-                }
-            ),
-        },
+        {**payload, "validated_at": datetime.now(timezone.utc).isoformat()},
     )
     return output
 

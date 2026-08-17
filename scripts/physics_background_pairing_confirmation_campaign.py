@@ -372,6 +372,14 @@ def submit_restart_canary(root: Path, repository: Path, canary_root: Path) -> di
     frozen = load_authenticated_confirmation_campaign(root)
     operations._authenticate_execution_repository(repository.resolve(), frozen["design"])
     canary_root = canary_root.expanduser().resolve()
+    if (
+        not canary_root.name.startswith("retrain_restart_canary_")
+        or "campaigns" in canary_root.parts
+    ):
+        raise ValueError(
+            "Restart canary root must start with 'retrain_restart_canary_' and remain "
+            "outside every campaign directory."
+        )
     if canary_root.exists():
         raise FileExistsError(f"Restart canary root must be fresh: {canary_root}")
     squeue = shutil.which("squeue")

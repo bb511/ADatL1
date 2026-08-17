@@ -19,6 +19,8 @@ def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--matrix", type=Path, required=True)
     parser.add_argument("--endpoint-rows", type=Path, required=True)
+    parser.add_argument("--endpoint-receipt", type=Path, required=True)
+    parser.add_argument("--oas-rows", type=Path, required=True)
     parser.add_argument("--output-dir", type=Path, required=True)
     parser.add_argument("--bootstrap-replicates", type=int, default=DEFAULT_BOOTSTRAP_REPLICATES)
     parser.add_argument("--bootstrap-seed", type=int, default=DEFAULT_BOOTSTRAP_SEED)
@@ -26,6 +28,8 @@ def main() -> None:
     result = write_confirmation_endpoint_analysis(
         args.matrix.resolve(strict=True),
         args.endpoint_rows.resolve(strict=True),
+        args.endpoint_receipt.resolve(strict=True),
+        args.oas_rows.resolve(strict=True),
         args.output_dir.resolve(),
         bootstrap_replicates=args.bootstrap_replicates,
         bootstrap_seed=args.bootstrap_seed,

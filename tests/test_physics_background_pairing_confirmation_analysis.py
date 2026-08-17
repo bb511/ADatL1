@@ -96,10 +96,13 @@ def test_complete_confirmation_matrix_produces_exact_paired_tables() -> None:
     method = result["method"]
     assert method["endpoint_rows"] == 42 * 3 * 20 * 2 == 5040
     assert method["endpoint_summaries"] == 42 * 3 * 2 == 252
+    assert method["across_seed_summaries"] == 42 * 2 == 84
     assert method["controlled_paired_rows"] == 6 * 2 * 3 * 20 * 2 == 1440
     assert method["pairing_paired_rows"] == 6 * 4 * 3 * 20 * 2 == 2880
     assert method["comparison_summaries"] == 72 + 12 == 84
     assert len(result["endpoints_summary"]) == 252
+    assert len(result["endpoints_across_seeds"]) == 84
+    assert len(result["reserve_seed_decisions"]) == 6
     assert {row["contrast"] for row in result["selector_comparison_paired"]} == {
         "cdf_cap_minus_wasserstein",
         "cdf_cap_minus_drift",
@@ -173,3 +176,33 @@ def test_matrix_hash_and_row_cell_identity_are_authenticated() -> None:
     changed[0]["trial_number"] += 1
     with pytest.raises(ValueError, match="trial_number differs"):
         build_confirmation_endpoint_analysis(matrix, changed, bootstrap_replicates=1_000)
+
+
+def test_oas_diagnostics_use_the_same_ae_vae_checkpoints() -> None:
+    """Masked OAS is paired with native endpoints without selecting new checkpoints."""
+    matrix, native = _fixture()
+    oas = []
+    for row in native:
+        if row["model"] not in {"ae", "vae"}:
+            continue
+        oas.append({**row, "score": "residual_oas", "value": row["value"] + 0.01})
+    result = build_confirmation_endpoint_analysis(
+        matrix,
+        native,
+        oas_endpoint_rows=oas,
+        bootstrap_replicates=1_000,
+        bootstrap_seed=29,
+    )
+    assert result["method"]["oas_endpoint_rows"] == 2 * 7 * 3 * 20 * 2 == 1680
+    assert result["method"]["oas_paired_rows"] == 1680
+    assert result["method"]["oas_comparison_summaries"] == 2 * 7 * 2 == 28
+    assert {round(row["delta"], 8) for row in result["oas_vs_native_paired"]} == {0.01}
+    changed = copy.deepcopy(oas)
+    changed[0]["checkpoint_sha256"] = "f" * 64
+    with pytest.raises(ValueError, match="same selected checkpoint"):
+        build_confirmation_endpoint_analysis(
+            matrix,
+            native,
+            oas_endpoint_rows=changed,
+            bootstrap_replicates=1_000,
+        )

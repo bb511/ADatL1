@@ -373,6 +373,8 @@ uv run python scripts/physics_background_pairing_confirmation_endpoints.py \
 uv run python scripts/physics_background_pairing_confirmation_analysis.py \
   --matrix "$CONFIRM_ROOT/selection/native_28_manifest.json" \
   --endpoint-rows "$CONFIRM_ROOT/results/endpoints/endpoints_long.csv" \
+  --endpoint-receipt "$CONFIRM_ROOT/results/endpoints/endpoint_extraction.json" \
+  --oas-rows "$CONFIRM_ROOT/results/endpoints/oas_diagnostics.csv" \
   --output-dir "$CONFIRM_ROOT/results/analysis"
 ```
 

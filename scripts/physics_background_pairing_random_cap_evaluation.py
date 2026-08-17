@@ -9,6 +9,7 @@ import fcntl
 import json
 import math
 import os
+import re
 import statistics
 import subprocess  # nosec B404 -- authenticated repository and fixed argv
 import sys
@@ -40,11 +41,14 @@ SPLITS = ("validate", "test")
 EXPECTED_REPLICATES = 5
 
 
-def _workspace(root: Path, mode: str) -> Path:
+def _workspace(root: Path, mode: str, namespace: str | None = None) -> Path:
     """Return the mode-specific namespace isolated from endpoint artifacts."""
     if mode not in MODES:
         raise ValueError(f"Unknown random-CAP mode: {mode}")
-    return root / "random_cap_evaluation" / mode
+    name = mode if namespace is None else namespace
+    if re.fullmatch(r"[a-z0-9][a-z0-9_.-]*", name) is None:
+        raise ValueError(f"Invalid random-CAP workspace namespace: {name!r}")
+    return root / "random_cap_evaluation" / name
 
 
 def _table_identity(root: Path) -> dict[str, Any]:
@@ -254,7 +258,12 @@ def prepare(args: argparse.Namespace) -> None:
             args.endpoint_receipt,
         )
         mode = "confirmation"
-    path = _workspace(root, mode) / "manifest.json"
+    namespace = args.namespace or mode
+    if namespace != mode:
+        manifest.pop("content_sha256")
+        manifest["workspace_namespace"] = namespace
+        manifest["content_sha256"] = _canonical_hash(manifest)
+    path = _workspace(root, mode, namespace) / "manifest.json"
     if path.exists() and _read_json(path) != manifest:
         raise RuntimeError(f"Refusing to replace a different random-CAP manifest: {path}")
     if not path.exists():
@@ -267,14 +276,17 @@ def prepare(args: argparse.Namespace) -> None:
     )
 
 
-def _load_manifest(root: Path, mode: str) -> dict[str, Any]:
+def _load_manifest(root: Path, mode: str, namespace: str | None = None) -> dict[str, Any]:
     """Reauthenticate a prepared manifest, tables, execution code, and checkpoints."""
-    path = _workspace(root, mode) / "manifest.json"
+    name = namespace or mode
+    path = _workspace(root, mode, name) / "manifest.json"
     manifest = _read_json(path)
     digest = manifest.pop("content_sha256", None)
     if digest != _canonical_hash(manifest):
         raise RuntimeError("Prepared random-CAP manifest content hash differs.")
     manifest["content_sha256"] = digest
+    if manifest.get("workspace_namespace", mode) != name:
+        raise RuntimeError("Prepared random-CAP workspace namespace differs.")
     _authenticate_execution(Path(manifest["execution_repository"]), manifest["execution_commit"])
     if mode == "discovery":
         source = _load_prepared(root)
@@ -306,9 +318,11 @@ def _load_manifest(root: Path, mode: str) -> dict[str, Any]:
     return manifest
 
 
-def _stage(root: Path, mode: str, task: dict) -> tuple[Path, str, str]:
+def _stage(
+    root: Path, mode: str, task: dict, namespace: str | None = None
+) -> tuple[Path, str, str]:
     """Stage only authenticated symlinks below the random-CAP namespace."""
-    task_dir = _workspace(root, mode) / "tasks" / f"{int(task['task_index']):03d}"
+    task_dir = _workspace(root, mode, namespace) / "tasks" / f"{int(task['task_index']):03d}"
     experiment = f"physics_bgpair_random_cap_{mode}_{task['model']}"
     suffix = (
         f"trial_{task['trial_number']:04d}__seed_{task['training_seed']}"
@@ -433,11 +447,11 @@ def _marker_valid(manifest: dict, task: dict, marker: dict) -> bool:
 def evaluate(args: argparse.Namespace) -> None:
     """Evaluate all five fixed random controls for one checkpoint task."""
     root = args.root.resolve(strict=True)
-    manifest = _load_manifest(root, args.mode)
+    manifest = _load_manifest(root, args.mode, args.namespace)
     task = manifest["tasks"][args.task_index]
     if int(task["task_index"]) != args.task_index:
         raise RuntimeError("Random-CAP task index mismatch.")
-    task_dir, experiment, run_name = _stage(root, args.mode, task)
+    task_dir, experiment, run_name = _stage(root, args.mode, task, args.namespace)
     marker_path = task_dir / "marker.json"
     with (task_dir / ".lock").open("a+") as lock:
         fcntl.flock(lock, fcntl.LOCK_EX)
@@ -524,10 +538,14 @@ def evaluate(args: argparse.Namespace) -> None:
 def status(args: argparse.Namespace) -> None:
     """Report authenticated complete, pending, and invalid task counts."""
     root = args.root.resolve(strict=True)
-    manifest = _load_manifest(root, args.mode)
+    manifest = _load_manifest(root, args.mode, args.namespace)
     complete, invalid = [], []
     for task in manifest["tasks"]:
-        path = _workspace(root, args.mode) / "tasks" / f"{int(task['task_index']):03d}/marker.json"
+        path = (
+            _workspace(root, args.mode, args.namespace)
+            / "tasks"
+            / f"{int(task['task_index']):03d}/marker.json"
+        )
         if path.exists():
             (complete if _marker_valid(manifest, task, _read_json(path)) else invalid).append(
                 task["task_index"]
@@ -549,11 +567,13 @@ def status(args: argparse.Namespace) -> None:
 def aggregate(args: argparse.Namespace) -> None:
     """Emit seed-level CAP rows plus descriptive five-pairing mean and variance."""
     root = args.root.resolve(strict=True)
-    manifest = _load_manifest(root, args.mode)
+    manifest = _load_manifest(root, args.mode, args.namespace)
     rows = []
     for task in manifest["tasks"]:
         marker_path = (
-            _workspace(root, args.mode) / "tasks" / f"{int(task['task_index']):03d}/marker.json"
+            _workspace(root, args.mode, args.namespace)
+            / "tasks"
+            / f"{int(task['task_index']):03d}/marker.json"
         )
         marker = _read_json(marker_path)
         if not _marker_valid(manifest, task, marker):
@@ -646,7 +666,7 @@ def aggregate(args: argparse.Namespace) -> None:
                 "cap_sample_variance": statistics.variance(values),
             }
         )
-    output = _workspace(root, args.mode) / "aggregate.json"
+    output = _workspace(root, args.mode, args.namespace) / "aggregate.json"
     _write_json(
         output,
         {
@@ -675,6 +695,11 @@ def parse_args() -> argparse.Namespace:
     """Parse preparation and authenticated evaluation operations."""
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--root", type=Path, required=True)
+    parser.add_argument(
+        "--namespace",
+        default=os.environ.get("PHYSICS_BGPAIR_RANDOM_CAP_NAMESPACE"),
+        help="Versioned workspace name; defaults to the evaluation mode.",
+    )
     commands = parser.add_subparsers(dest="command", required=True)
     discovery = commands.add_parser("prepare-discovery")
     discovery.add_argument("--execution-repository", type=Path, required=True)

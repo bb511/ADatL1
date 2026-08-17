@@ -17,6 +17,7 @@ from scripts.physics_background_pairing_random_cap_evaluation import (
     _canonical_hash,
     _marker_valid,
     _value_rows,
+    _workspace,
     build_confirmation_manifest,
 )
 from src.evaluation.callbacks import random_cap
@@ -50,6 +51,16 @@ class _Metric:
 
     def compute(self):
         return self.value
+
+
+def test_versioned_workspace_is_isolated_and_path_safe(tmp_path: Path) -> None:
+    """A code-fixed rerun can use a new immutable namespace without path escape."""
+    assert _workspace(tmp_path, "discovery") == tmp_path / "random_cap_evaluation/discovery"
+    assert _workspace(tmp_path, "discovery", "discovery_aace145") == (
+        tmp_path / "random_cap_evaluation/discovery_aace145"
+    )
+    with pytest.raises(ValueError, match="Invalid random-CAP workspace"):
+        _workspace(tmp_path, "discovery", "../escape")
 
 
 def test_callback_reuses_scores_across_five_authenticated_tables(

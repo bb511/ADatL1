@@ -1,0 +1,17 @@
+# @package _global_
+
+defaults:
+  - physics_background_random_cap_native
+  - _self_
+
+evaluation:
+  callbacks:
+    random_cap_residual_oas:
+      _target_: src.evaluation.callbacks.random_cap.RandomBijectionCAP
+      name: random_cap_residual_oas
+      score: residual_oas
+      output_name: ascore/residual_oas
+      dataset_1: ${physics_pairing.dataset_1}
+      dataset_2: ${physics_pairing.dataset_2}
+      pairing_manifest_path: ${oc.env:PHYSICS_RANDOM_PAIRING_MANIFEST}
+      cap_metric_config: ${physics_selection.cap_metric_config}

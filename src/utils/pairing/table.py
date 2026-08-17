@@ -207,6 +207,40 @@ def validate_pair_table(
         if torch.any(table[name] < 0):
             raise ValueError(f"Pair-table {name} values must be non-negative.")
 
+    if metadata.get("strategy") == "random_uniform_bijection":
+        _validate_random_bijection_metadata(table, metadata, idx_1, idx_2)
+
+
+def _validate_random_bijection_metadata(
+    table: Mapping[str, Any],
+    metadata: Mapping[str, Any],
+    idx_1: torch.Tensor,
+    idx_2: torch.Tensor,
+) -> None:
+    """Validate the additional contract for frozen uniform random bijections."""
+    seed = metadata.get("random_seed")
+    if isinstance(seed, bool) or not isinstance(seed, int) or seed < 0:
+        raise ValueError("Random pair-table metadata.random_seed must be a non-negative integer.")
+    _nonempty_string(metadata, "generator")
+    _nonempty_string(metadata, "generator_version")
+    permutation_sha256 = metadata.get("permutation_sha256")
+    if not _is_sha256(permutation_sha256):
+        raise ValueError("Random pair-table metadata.permutation_sha256 must be a SHA-256 digest.")
+
+    n_1 = _positive_metadata_int(metadata, "n_dataset_1")
+    n_2 = _positive_metadata_int(metadata, "n_dataset_2")
+    n_pairs = _positive_metadata_int(metadata, "n_pairs")
+    if n_1 != n_2 or n_pairs != n_1:
+        raise ValueError("Random pair tables must be total equal-size bijections.")
+    expected_idx_1 = torch.arange(n_1, dtype=torch.long)
+    if not torch.equal(idx_1, expected_idx_1):
+        raise ValueError("Random pair-table idx_1 must equal arange(n_dataset_1).")
+    if not torch.equal(torch.sort(idx_2).values, expected_idx_1):
+        raise ValueError("Random pair-table idx_2 must be a full permutation.")
+    dense_map = table.get("map_0_to_1")
+    if dense_map is None or sha256_tensor(dense_map) != permutation_sha256:
+        raise ValueError("Random pair-table permutation SHA-256 differs from map_0_to_1.")
+
 
 def atomic_torch_save(value: Any, path: str | Path, *, overwrite: bool = False) -> Path:
     """Atomically write a torch artifact and refuse accidental replacement by default."""
@@ -272,3 +306,12 @@ def _positive_metadata_int(metadata: Mapping[str, Any], name: str) -> int:
     if isinstance(value, bool) or not isinstance(value, int) or value <= 0:
         raise ValueError(f"Pair-table metadata.{name} must be a positive integer.")
     return value
+
+
+def _is_sha256(value: Any) -> bool:
+    """Return whether a value is a lowercase hexadecimal SHA-256 digest."""
+    return (
+        isinstance(value, str)
+        and len(value) == 64
+        and all(char in "0123456789abcdef" for char in value)
+    )

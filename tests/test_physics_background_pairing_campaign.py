@@ -810,6 +810,42 @@ def test_retrain_scheduler_identity_rejects_map_or_export_tampering(monkeypatch,
         campaign._retrain_scheduler_identity(root, 3, path, digest)
 
 
+def test_confirmation_retrain_identity_uses_frozen_seeded_run_id(tmp_path) -> None:
+    """Multi-seed confirmations cannot share one model/trial checkpoint directory."""
+    root = tmp_path / "campaign"
+    root.mkdir()
+    design = {"schema_version": 2, "code_commit": "a" * 40}
+    manifest = root / "selection" / "pareto_retrain_manifest.json"
+    manifest.parent.mkdir()
+    manifest.write_text("{}\n", encoding="utf-8")
+    row = {
+        "model": "vae",
+        "trial_number": 507,
+        "seed": 47842262,
+        "run_id": "vae__trial0507__seed047842262",
+    }
+
+    identity = campaign._retrain_identity(root, design, manifest, 4, row)
+
+    assert identity["run_name"] == row["run_id"]
+
+
+def test_confirmation_retrain_identity_rejects_path_run_id(tmp_path) -> None:
+    """A manifest run ID must remain a single checkpoint-directory component."""
+    root = tmp_path / "campaign"
+    root.mkdir()
+    manifest = root / "manifest.json"
+    manifest.write_text("{}\n", encoding="utf-8")
+    with pytest.raises(RuntimeError, match="Invalid frozen retrain run ID"):
+        campaign._retrain_identity(
+            root,
+            {"code_commit": "a" * 40},
+            manifest,
+            0,
+            {"model": "ae", "trial_number": 1, "run_id": "../escape"},
+        )
+
+
 def test_retrain_hyperparameters_are_logged_only_on_first_segment() -> None:
     """The persistent MLflow run gets params once; changing cumulative bounds do not conflict."""
     assert campaign._retrain_hyperparameter_logging_override(1) == "log_hyperparameters=true"

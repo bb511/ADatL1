@@ -144,17 +144,19 @@ from that trajectory; deduplicate training, not checkpoint semantics.
 
 ### 3.2 Seeds and run count
 
-Use three new, fixed seeds that were not the discovery training seed. Freeze them in
-the manifest before submission. Do not choose seeds based on pilot performance.
+Use three new, fixed seeds that were not the discovery training seed. They are frozen
+before submission as `271828`, `314159`, and `161803`; reserve seeds four and five are
+`141421` and `173205`. Do not choose or replace seeds based on pilot performance.
 
 ```text
 28 configurations x 3 seeds = 84 independent 200-epoch runs
 ```
 
-Predeclare a variance-based extension to five seeds. Add seeds four and five only if
-the three-seed interval for a primary comparison is inconclusive under a threshold
-defined before the first production run. Never add seeds because a preferred method
-is losing. The five-seed maximum is 140 runs.
+The variance-based extension is predeclared as follows: after all three primary seeds
+complete for one model, add both reserve seeds to every configuration of that model
+only if any multiplicity-adjusted primary-efficiency contrast interval spans both
+`-0.005` and `+0.005`. Never add seeds because a preferred method is losing, and never
+use secondary AUPRC to trigger the extension. The five-seed maximum is 140 runs.
 
 ### 3.3 Why approximate hyperparameter merging is forbidden
 
@@ -297,6 +299,95 @@ Use small, config-driven changes and preserve all discovery artifacts.
 Do not mutate the completed discovery root except to add explicitly namespaced,
 hash-manifested diagnostic results. Prefer a new confirmation campaign root and a
 detached clean worktree pinned to the final implementation commit.
+
+### 6.1 Code and configuration inventory
+
+The implementation is intentionally split between a small control plane, immutable
+experiment configs, and pure aggregation code. A future agent must inspect these
+files before changing campaign semantics:
+
+| Path | Responsibility |
+|---|---|
+| `scripts/physics_background_pairing_confirmation_campaign.py` | Prepare, authenticate, submit, reconcile, and report status for the fixed confirmation matrix; it must never launch Optuna. |
+| `src/evaluation/physics_background_pairing_confirmation_matrix.py` | Reconstruct the exact 28 unique configurations, 42 logical selector cells, fixed seeds, hashes, and run IDs from discovery evidence. |
+| `scripts/clariden/physics_background_pairing_confirmation_canary.sbatch` | One short real-data GPU canary per model family before production. |
+| `scripts/clariden/physics_background_pairing_restart_canary.sbatch` | Forced interruption/resume test for exact epoch, optimizer, callback, RNG, and dataloader state. |
+| `scripts/clariden/physics_background_pairing_retrain.sbatch` | Restart-safe 40-epoch production segments up to 200 cumulative epochs. |
+| `scripts/physics_background_pairing_confirmation_endpoints.py` | Resolve the exact physical selected checkpoint and extract the sealed 20-anomaly efficiency and AUPRC rows. |
+| `src/evaluation/physics_background_pairing_confirmation_analysis.py` and its script wrapper | Produce per-model and macro paired comparisons, hierarchical-bootstrap intervals, and multiplicity-aware tables. |
+| `src/utils/pairing/random_tables.py` and `scripts/physics_background_pairing_random_tables.py` | Freeze and validate the prespecified random bijections without touching structured pairing tables. |
+| `src/evaluation/callbacks/random_cap.py` | Compute CAP for frozen random tables without registering it as an optimization objective. |
+| `configs/diagnostic_suite/physics_background_random_cap_native.yaml` | Offline random-CAP evaluation using each model's native anomaly score. |
+| `configs/diagnostic_suite/physics_background_random_cap_native_oas.yaml` | Separate masked-OAS diagnostic for AE/VAE only. |
+| `scripts/physics_background_pairing_random_cap_evaluation.py` | Prepare authenticated discovery/confirmation checkpoint tasks, evaluate them, report status, and aggregate random-CAP outputs. |
+| `scripts/clariden/physics_background_pairing_random_cap.sbatch` | GPU array wrapper for offline random-CAP tasks. |
+
+The paper-reference experiment configs under `configs/experiment/physics/` remain the
+source of model/data/trainer behavior. New confirmation tooling overlays exact trial
+parameters and run identity; it must not rewrite those reference configs. The five
+structured/CDF CAP callbacks plus W1 and drift execute together on each trajectory,
+which is what permits 42 logical comparisons from only 28 unique configurations per
+seed. Random CAP remains offline because it neither selects a checkpoint nor changes
+training.
+
+### 6.2 Ordered execution procedure
+
+Use placeholders below rather than embedding machine-specific paths in committed
+configuration. `EXECUTION_REPOSITORY` must be a clean detached worktree at the tested
+commit, not a mutable development checkout.
+
+```bash
+# 1. Freeze the authenticated matrix in a new root.
+uv run python scripts/physics_background_pairing_confirmation_campaign.py \
+  --root "$CONFIRM_ROOT" \
+  --execution-repository "$EXECUTION_REPOSITORY" \
+  prepare --discovery-root "$DISCOVERY_ROOT"
+
+# 2. Freeze and validate the random-bijection controls before looking at results.
+uv run python scripts/physics_background_pairing_random_tables.py \
+  --root "$CONFIRM_ROOT" freeze
+uv run python scripts/physics_background_pairing_random_tables.py \
+  --root "$CONFIRM_ROOT" validate
+
+# 3. Submit all six model canaries and separately exercise forced restart.
+uv run python scripts/physics_background_pairing_confirmation_campaign.py \
+  --root "$CONFIRM_ROOT" --execution-repository "$EXECUTION_REPOSITORY" \
+  submit-canaries --concurrency 6 --data-dir "$DATA_DIR" \
+  --raw-data-dir "$RAW_DATA_DIR" --pairing-dir "$PAIRING_DIR"
+
+# 4. Only after all canary/restart receipts validate, submit production segments.
+uv run python scripts/physics_background_pairing_confirmation_campaign.py \
+  --root "$CONFIRM_ROOT" --execution-repository "$EXECUTION_REPOSITORY" \
+  submit --concurrency "$SAFE_CONCURRENCY" --data-dir "$DATA_DIR" \
+  --raw-data-dir "$RAW_DATA_DIR" --pairing-dir "$PAIRING_DIR"
+
+# 5. Reconcile after every Slurm wave, inspect status, and resubmit only missing work.
+uv run python scripts/physics_background_pairing_confirmation_campaign.py \
+  --root "$CONFIRM_ROOT" --execution-repository "$EXECUTION_REPOSITORY" reconcile
+uv run python scripts/physics_background_pairing_confirmation_campaign.py \
+  --root "$CONFIRM_ROOT" --execution-repository "$EXECUTION_REPOSITORY" status
+
+# 6. Extract exact checkpoint-bound endpoint rows, then perform paired analysis.
+uv run python scripts/physics_background_pairing_confirmation_endpoints.py \
+  --root "$CONFIRM_ROOT" --output-dir "$CONFIRM_ROOT/results/endpoints"
+uv run python scripts/physics_background_pairing_confirmation_analysis.py \
+  --matrix "$CONFIRM_ROOT/selection/native_28_manifest.json" \
+  --endpoint-rows "$CONFIRM_ROOT/results/endpoints/endpoints_long.csv" \
+  --output-dir "$CONFIRM_ROOT/results/analysis"
+```
+
+The control-plane commands must be treated as gates: a failed hash, count, canary, or
+restart validation blocks production submission. Do not bypass a gate by editing a
+receipt. Exact CLI arguments may be rechecked with `--help`; record every actual
+command and Slurm job ID in campaign state.
+
+Random CAP has two phases. First prepare/evaluate the sealed discovery universe for a
+cheap retrospective diagnostic. After confirmation endpoints are sealed, prepare the
+confirmation tasks using `checkpoint_selections.csv` and its endpoint receipt, submit
+the random-CAP array, then run `status` and `aggregate`. The confirmation preparation
+must deduplicate physical checkpoints while retaining all logical selector
+memberships. Never run `prepare-confirmation` before endpoint extraction has bound
+every row to a checkpoint hash.
 
 ## 7. Training and checkpoint protocol
 

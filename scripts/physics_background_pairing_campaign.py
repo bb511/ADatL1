@@ -873,7 +873,13 @@ def _retrain_identity(
     row: dict[str, Any],
 ) -> dict[str, Any]:
     """Build the immutable identity shared by every allocation of one retrain."""
-    run_name = f"{row['model']}__trial{int(row['trial_number']):04d}"
+    # Historical Pareto manifests contain one seed per (model, trial) and retain
+    # their original run name.  Confirmation manifests provide an explicit
+    # content-authenticated run ID because the same trial is trained under
+    # multiple seeds; omitting the seed would make those runs share checkpoints.
+    run_name = str(row.get("run_id", f"{row['model']}__trial{int(row['trial_number']):04d}"))
+    if not run_name or "/" in run_name or run_name in {".", ".."}:
+        raise RuntimeError(f"Invalid frozen retrain run ID: {run_name!r}.")
     paths = _retrain_paths(root, index)
     tracking_dir = root / "runtime" / "logs" / "mlflow" / "mlruns"
     return {
@@ -934,6 +940,8 @@ def _mlflow_run_for_retrain(identity: dict[str, Any], existing_run_id: str | Non
             "physics_bgpair_code_commit": str(identity["code_commit"]),
             "physics_bgpair_retrain_index": str(identity["retrain_index"]),
         }
+        if "seed" in identity.get("row", {}):
+            expected_tags["physics_bgpair_seed"] = str(identity["row"]["seed"])
         run = client.create_run(
             experiment_id,
             tags=expected_tags,
@@ -947,6 +955,8 @@ def _mlflow_run_for_retrain(identity: dict[str, Any], existing_run_id: str | Non
             "physics_bgpair_code_commit": str(identity["code_commit"]),
             "physics_bgpair_retrain_index": str(identity["retrain_index"]),
         }
+        if "seed" in identity.get("row", {}):
+            expected_tags["physics_bgpair_seed"] = str(identity["row"]["seed"])
     run = client.get_run(discovered)
     if run.info.experiment_id != experiment_id:
         raise RuntimeError("Retrain MLflow run belongs to a different experiment.")
@@ -1460,7 +1470,12 @@ def _validate_retrain_marker(marker: Path, expected_row: dict[str, Any]) -> None
             if _sha256(path) != segment[f"{key}_sha256"]:
                 raise RuntimeError(f"Retraining segment evidence changed: {path}")
         _validate_exact_rng_checkpoint(Path(segment["continuation_checkpoint"]))
-    _audit_retrain_outputs(root, index, expected_row, payload)
+    audit = _audit_retrain_outputs(root, index, expected_row, payload)
+    if "run_id" in expected_row and (
+        payload.get("downstream_efficiency_counts") != audit["downstream_efficiency_counts"]
+        or payload.get("downstream_auprc_counts") != audit["downstream_auprc_counts"]
+    ):
+        raise RuntimeError("Confirmation endpoint counts differ from the sealed marker.")
 
 
 def _config_value(config: dict[str, Any], dotted_key: str) -> Any:
@@ -1561,6 +1576,7 @@ def _audit_retrain_outputs(
             Path(entry["path"]), checkpoint_root, "downstream efficiency file", require_file=True
         )
     efficiency_counts = {}
+    auprc_counts = {}
     for objective_id, selection in artifact["selections"].items():
         checkpoint = str(selection.get("optimized_ckpt_name", ""))
         values = selection.get("optimized_metric")
@@ -1572,13 +1588,17 @@ def _audit_retrain_outputs(
         ):
             raise RuntimeError(f"Invalid retrained selection for {objective_id}.")
         score = objective_id.split("__", maxsplit=1)[0]
-        efficiencies = _read_downstream_efficiencies(marker, checkpoint, score)
+        checkpoint_path = _selected_checkpoint_path(checkpoint_root, checkpoint)
+        efficiencies = _read_downstream_efficiencies(marker, checkpoint_path, score)
+        auprcs = _read_downstream_auprcs(marker, checkpoint_path, score)
         efficiency_counts[f"{objective_id}:{checkpoint}"] = len(efficiencies)
+        auprc_counts[f"{objective_id}:{checkpoint}"] = len(auprcs)
     return {
         "config": str(config_path),
         "config_sha256": _sha256(config_path),
         "threshold_checkpoint_audit": threshold_rows,
         "downstream_efficiency_counts": efficiency_counts,
+        "downstream_auprc_counts": auprc_counts,
     }
 
 
@@ -1732,6 +1752,8 @@ def retrain(
     for score in expected_scores:
         if not any(f"/eff_{score}/" in path.as_posix() for path in value_files):
             raise RuntimeError(f"Retraining emitted no downstream values for {score}.")
+        if not any(f"/auprc_{score}/" in path.as_posix() for path in value_files):
+            raise RuntimeError(f"Retraining emitted no downstream AUPRC values for {score}.")
     threshold_audit = _audit_selected_threshold_checkpoints(optimized, row["model"])
     payload = {
         "schema_version": 2,
@@ -1782,6 +1804,7 @@ def retrain(
     payload["resolved_config"] = audit["config"]
     payload["resolved_config_sha256"] = audit["config_sha256"]
     payload["downstream_efficiency_counts"] = audit["downstream_efficiency_counts"]
+    payload["downstream_auprc_counts"] = audit["downstream_auprc_counts"]
     _write_json(marker, payload, create=True)
     _validate_retrain_marker(marker, row)
     return marker
@@ -1793,38 +1816,74 @@ def _checkpoint_identity(name: str) -> str:
     return parts[1].split("__")[0] if len(parts) > 1 else parts[0]
 
 
+def _read_downstream_values(
+    marker: dict[str, Any],
+    checkpoint: Path,
+    score: str,
+    *,
+    callback_prefix: str,
+    metric: str,
+) -> dict[str, float]:
+    """Read one exact callback file bound to one physical checkpoint path."""
+    checkpoint = checkpoint.resolve(strict=True)
+    folder = f"{callback_prefix}_{score}"
+    expected_path = (
+        checkpoint.parent / "plots" / "test" / checkpoint.stem / folder / "values.csv"
+    ).resolve()
+    entries = [
+        entry for entry in marker["value_files"] if Path(entry["path"]).resolve() == expected_path
+    ]
+    if len(entries) != 1:
+        raise RuntimeError(
+            f"Expected one {folder} artifact for checkpoint {checkpoint}; found {len(entries)}."
+        )
+    entry = entries[0]
+    if not expected_path.is_file() or _sha256(expected_path) != entry["sha256"]:
+        raise RuntimeError(f"Endpoint artifact changed: {expected_path}")
+    values = {}
+    with expected_path.open(encoding="utf-8", newline="") as handle:
+        for row in csv.DictReader(handle):
+            if row["checkpoint"] != checkpoint.stem:
+                raise RuntimeError(
+                    f"Endpoint row checkpoint differs from {checkpoint.stem}: {expected_path}"
+                )
+            if row["metric"] != metric:
+                continue
+            if row["intervention"] in values:
+                raise RuntimeError(
+                    f"Duplicate {metric} for {score}, {checkpoint}, and " f"{row['intervention']}."
+                )
+            values[row["intervention"]] = float(row["value"])
+    if set(values) != DOWNSTREAM_DATASET_NAMES:
+        raise RuntimeError(
+            f"Expected the exact {DOWNSTREAM_DATASETS}-dataset {metric} set for {score} "
+            f"and {checkpoint}; found {sorted(values)}."
+        )
+    if not all(math.isfinite(value) and 0.0 <= value <= 1.0 for value in values.values()):
+        raise RuntimeError(f"Invalid downstream {metric} for {score} and {checkpoint}.")
+    return values
+
+
 def _read_downstream_efficiencies(
-    marker: dict[str, Any], checkpoint: str, score: str
+    marker: dict[str, Any], checkpoint: Path, score: str
 ) -> dict[str, float]:
     """Read one score's 20 held-out efficiencies for the selected checkpoint."""
-    efficiencies = {}
-    score_folder = f"/eff_{score}/"
-    for entry in marker["value_files"]:
-        path = Path(entry["path"])
-        if score_folder not in path.as_posix():
-            continue
-        if _sha256(path) != entry["sha256"]:
-            raise RuntimeError(f"Efficiency artifact changed: {path}")
-        with path.open(encoding="utf-8", newline="") as handle:
-            for row in csv.DictReader(handle):
-                if _checkpoint_identity(row["checkpoint"]) != checkpoint:
-                    continue
-                if row["metric"] != "efficiency_operational":
-                    continue
-                if row["intervention"] in efficiencies:
-                    raise RuntimeError(
-                        f"Duplicate downstream efficiency for {score}, {checkpoint}, "
-                        f"and {row['intervention']}."
-                    )
-                efficiencies[row["intervention"]] = float(row["value"])
-    if set(efficiencies) != DOWNSTREAM_DATASET_NAMES:
-        raise RuntimeError(
-            f"Expected the exact {DOWNSTREAM_DATASETS}-dataset anomaly set for {score} "
-            f"and {checkpoint}; found {sorted(efficiencies)}."
-        )
-    if not all(math.isfinite(value) and 0.0 <= value <= 1.0 for value in efficiencies.values()):
-        raise RuntimeError(f"Invalid downstream efficiency for {score} and {checkpoint}.")
-    return efficiencies
+    return _read_downstream_values(
+        marker,
+        checkpoint,
+        score,
+        callback_prefix="eff",
+        metric="efficiency_operational",
+    )
+
+
+def _read_downstream_auprcs(
+    marker: dict[str, Any], checkpoint: Path, score: str
+) -> dict[str, float]:
+    """Read one score's exact 20-anomaly AUPRC panel for a selected checkpoint."""
+    return _read_downstream_values(
+        marker, checkpoint, score, callback_prefix="auprc", metric="auprc"
+    )
 
 
 def aggregate(root: Path) -> Path:
@@ -1857,8 +1916,11 @@ def aggregate(root: Path) -> Path:
         index = int(membership["retrain_index"])
         selection = optimized_artifacts[index]["selections"][membership["logical_objective"]]
         checkpoint = selection["optimized_ckpt_name"]
+        checkpoint_path = _selected_checkpoint_path(
+            Path(markers[index]["checkpoint_root"]), checkpoint
+        )
         efficiencies = _read_downstream_efficiencies(
-            markers[index], checkpoint, membership["score"]
+            markers[index], checkpoint_path, membership["score"]
         )
         results.append(
             {

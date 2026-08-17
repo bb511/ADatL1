@@ -1,0 +1,20 @@
+# @package _global_
+
+# Offline diagnostic only. Random CAP is never an Optuna objective, checkpoint
+# monitor, Pareto-front coordinate, or checkpoint-selection criterion.
+optimized_metric_config: null
+optimized_metric_configs: null
+optimized_metric_artifact: false
+random_cap_is_diagnostic_only: true
+
+evaluation:
+  callbacks:
+    random_cap_native:
+      _target_: src.evaluation.callbacks.random_cap.RandomBijectionCAP
+      name: random_cap_native
+      score: native
+      output_name: ascore/full
+      dataset_1: ${physics_pairing.dataset_1}
+      dataset_2: ${physics_pairing.dataset_2}
+      pairing_manifest_path: ${oc.env:PHYSICS_RANDOM_PAIRING_MANIFEST}
+      cap_metric_config: ${physics_selection.cap_metric_config}

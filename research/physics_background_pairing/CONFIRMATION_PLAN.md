@@ -290,6 +290,46 @@ The interpretation is deliberately narrow:
   comparison for a random-CAP-selected model, because random CAP did not define the
   Optuna search or the frozen confirmation configurations.
 
+### 5.4 Exact random-control deliverable and acceptance criteria
+
+The random control is an **evaluation-only perturbation of the pairing**, holding the
+trained checkpoint, background0/background1 samples, anomaly-score stream, split,
+CAP implementation, and evaluation prefix fixed. This isolates the information in
+the correspondence as cleanly as the existing checkpoint universe permits.
+
+| Item | Required decision |
+|---|---|
+| Training/Optuna | No additional training and no optimization on random CAP |
+| Pairing distribution | Uniform random bijection without replacement |
+| Replicates | Five frozen bijections per split |
+| Splits | Separate validation and test permutations; never reuse one across splits |
+| Models/scores | All six native scores; masked OAS additionally for AE and VAE |
+| Checkpoints | Every authenticated discovery checkpoint, then every sealed confirmation checkpoint |
+| Persisted values | Per-bijection CAP, five-bijection mean, sample variance, rank association, hashes, and provenance |
+| Primary comparison | Each structured CAP variant versus random CAP within model, score stream, split, and checkpoint universe |
+| Scientific status | Negative-control diagnostic only; not an eighth selector or a downstream winner |
+
+The retrospective discovery phase is accepted only when all 346 authenticated
+physical tasks are complete with no invalid task, the aggregate reproduces every
+five-bijection mean and sample variance from seed-level rows, and the analysis emits
+separate native/OAS and validation/test tables. The confirmation phase is accepted
+only after endpoint extraction has sealed checkpoint hashes and random CAP has been
+evaluated for every distinct sealed checkpoint with all logical memberships restored
+in the analysis join.
+
+The final report must answer the random-control question without overclaiming:
+
+1. Does each structured pairing rank the fixed checkpoint universe more consistently
+   with downstream efficiency and AUPRC than random pairing?
+2. Are any apparent differences larger than the variation across the five random
+   permutations?
+3. Do the conclusions persist in the independent 200-epoch, multi-seed confirmation?
+
+Because random CAP does not select its own hyperparameters or checkpoints, do not put
+a random-CAP efficiency/AUPRC entry beside selector winners as if it had undergone the
+same selection procedure. A rigorous random-CAP selector comparison would require a
+separately preregistered optimization study and is outside this compute-saving phase.
+
 ## 6. Implementation work before production
 
 Use small, config-driven changes and preserve all discovery artifacts.

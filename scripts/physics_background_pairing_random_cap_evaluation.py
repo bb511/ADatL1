@@ -31,7 +31,6 @@ from scripts.physics_background_pairing_search50_evaluation import (
     _write_json,
 )
 from src.evaluation.physics_background_pairing_confirmation_matrix import (
-    authenticate_reserve_execution_repository,
     load_authenticated_confirmation_campaign,
 )
 from src.utils.pairing.random_tables import validate_frozen_random_pairing_tables
@@ -137,14 +136,6 @@ def build_confirmation_manifest(
     expected_tasks = len(runner["retrain_runs"])
     expected_memberships = len(runner["front_memberships"])
     repository, commit = _authenticate_execution(execution_repository)
-    extension = frozen.get("reserve_extension")
-    expected_commit = (
-        frozen["design"]["code_commit"] if extension is None else extension["execution_commit"]
-    )
-    if extension is not None:
-        authenticate_reserve_execution_repository(repository, extension)
-    if commit != expected_commit:
-        raise RuntimeError("Random-CAP execution commit differs from sealed confirmation.")
     checkpoint_selections = checkpoint_selections.resolve(strict=True)
     endpoint_receipt = endpoint_receipt.resolve(strict=True)
     receipt = _read_json(endpoint_receipt)

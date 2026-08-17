@@ -218,6 +218,17 @@ configuration during the confirmation.
 
 ## 5. Random-pairing negative control
 
+### 5.0 Frozen decision
+
+Include random pairing in the campaign. It is computationally cheap because CAP is
+evaluated on already trained, sealed checkpoints; it does not require another Optuna
+study or another 200-epoch training configuration. Use the same random tables for
+every eligible checkpoint so comparisons are paired and reproducible. This control
+must appear beside flat-physical, physics-summary, typed-sliced, JetCLR, and CDF in
+the diagnostic result tables, but it remains outside the seven primary selection
+strategies and therefore does not change the 28 configurations, 42 logical cells, or
+84 primary runs.
+
 ### 5.1 Scientific purpose
 
 Random pairing tests whether structured correspondence contributes information beyond
@@ -266,6 +277,18 @@ CDF remain the only CAP callbacks used for validation checkpoint selection.
 Retrospective random-CAP results are conditioned on a checkpoint universe selected by
 other metrics. Report them as diagnostic association, never as evidence of how random
 CAP would have optimized or selected a model.
+
+The interpretation is deliberately narrow:
+
+- structured CAP outperforming random CAP as a checkpoint-ranking diagnostic is
+  evidence that the correspondence contains useful structure;
+- structured and random CAP behaving similarly suggests that CAP is responding
+  mainly to score marginals rather than the proposed event correspondence;
+- random CAP outperforming a structured method is a warning that the structured
+  mapping may inject harmful or irrelevant geometry;
+- none of these outcomes, by itself, is an unbiased downstream efficiency/AUPRC
+  comparison for a random-CAP-selected model, because random CAP did not define the
+  Optuna search or the frozen confirmation configurations.
 
 ## 6. Implementation work before production
 
@@ -698,7 +721,7 @@ blocker is reported with exact evidence. A queued job is not a reason to abandon
 campaign; continue independent analysis and implementation until scheduler completion
 is the only remaining dependency.
 
-## 14. Live handoff state (2026-08-17 06:19 Europe/Zurich)
+## 14. Live handoff state (2026-08-17 09:29 Europe/Zurich)
 
 This section records the current execution identity. Treat durable campaign receipts
 and Slurm as authoritative if this snapshot becomes stale.
@@ -714,7 +737,7 @@ Random-CAP execution worktree:
   /iopsstor/scratch/cscs/vjimenez/adatl1/worktrees/physics_background_random_cap_5293a29
 Reserve-extension execution worktree:
   /iopsstor/scratch/cscs/vjimenez/adatl1/worktrees/physics_background_confirmation_reserve_runtime
-Reserve-extension execution commit: 00cd78d13f4d5a9d43be32fd0250d22b23a76704
+Reserve-extension execution commit: 0aefbe8a5ead152edacf301cb8ac63dacb95c534
 Discovery root:
   /iopsstor/scratch/cscs/vjimenez/adatl1/campaigns/physics_background_nsgaii_05b649c
 ```
@@ -725,25 +748,26 @@ frozen random tables. The forced-restart canary job `3098320` passed after exact
 requeue and has a sealed validation receipt. All six independent real-data model
 canaries passed: AE `3098330`, VAE `3098337`, DSAE `3098343`, DSVAE `3098346`,
 DeepSVDD `3098356`, and RealNVP `3098364`. Production array `3098367` contains all 84
-primary runs with concurrency 32. At this snapshot, tasks 0--11 were running their
-first authenticated 0--40 epoch segment and tasks 12--83 were pending for resources.
-This is not 84 complete 200-epoch allocations. Reconcile and submit the 40--80,
-80--120, 120--160, and 160--200 segments only after the preceding authenticated
-boundary for each run.
+primary runs with concurrency 32. Fourteen runs have authenticated epoch-40
+boundaries: indices 2, 3, 4, 5, 8, 9, 10, 11, 14, 15, 16, 17, 20, and 21. Array
+`3099316` is their exact disjoint 40--80 continuation. Eighteen other first segments
+remain running and indices 32--83 have not started. This is not 84 complete 200-epoch
+allocations. Reconcile and submit the 40--80, 80--120, 120--160, and 160--200 segments
+only after the preceding authenticated boundary for each run.
 
 Retrospective random-CAP pilot `3098386_0` passed against the authoritative
 `discovery_5293a29` namespace and produced the expected native/OAS validation/test
-rows over all five frozen random bijections. Remaining discovery tasks have complete,
-non-overlapping coverage: debug task `3098415_1` was running, dependent debug task
-`3098423_2` was queued, normal array `3098429_3-5` was pending, and normal array
-`3098406_6-345` was pending. Preserve that coverage when moving work between queues:
-cancel an exact pending task before resubmitting it elsewhere, and never duplicate a
-running or completed task. Failed pilots `3098368`, `3098378`, and `3098383` remain
-diagnostic evidence and must not be counted as completed work.
+rows over all five frozen random bijections. At this snapshot, 307 of 346 tasks are
+complete with no invalid artifacts. Packed debug job `3099042` has completed tasks
+304--306 and is processing 307 before 308--309; normal array `3098406` retains exact
+non-overlapping coverage of tasks 310--345. Preserve that coverage when moving work
+between queues: cancel an exact pending task before resubmitting it elsewhere, and
+never duplicate a running or completed task. Failed pilots `3098368`, `3098378`, and
+`3098383` remain diagnostic evidence and must not be counted as completed work.
 
 The reserve-extension worktree descends directly from the immutable training commit
 and changes only the authenticated control-plane and its tests. Its Git-diff SHA-256
-is `b9ba0876b780bd0fb6782678ef1d5c72b318d4f102b411ca960d239d1227706e`; 113
+is `b8f266228e0cf5d0c2d88bb22f010b60e49be7b525da3e83d23199b7dda6a094`; 115
 focused tests passed in that exact worktree. Use it only after the three-primary-seed
 analysis has frozen the per-model extension decisions. Offline random-CAP evaluation
 uses its own clean, manifest-recorded execution commit because it neither trains nor

@@ -208,7 +208,10 @@ def _allowed_evaluation_callback_configs(
         config = callbacks_cfg.get(name)
         if not isinstance(config, DictConfig) or "_target_" not in config:
             raise ValueError(f"Unknown or non-instantiable evaluator callback: {name!r}.")
-        selected[name] = config
+        # Resolve while the callback remains attached to the full Hydra tree.
+        # Copying the DictConfig node first detaches root-level interpolations
+        # such as ``${physics_pairing.dataset_1}``.
+        selected[name] = OmegaConf.to_container(config, resolve=True)
     return OmegaConf.create(selected)
 
 

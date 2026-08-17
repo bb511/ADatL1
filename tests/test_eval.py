@@ -64,6 +64,29 @@ def test_evaluation_callback_allowlist_selects_only_exact_named_configs() -> Non
     assert selected.eff_oas._target_ == "package.OAS"
 
 
+def test_evaluation_callback_allowlist_preserves_root_interpolations() -> None:
+    """Selected callbacks resolve references before detaching from the full config."""
+    config = OmegaConf.create(
+        {
+            "physics_pairing": {"dataset_1": "background0"},
+            "evaluation": {
+                "callbacks": {
+                    "cap": {
+                        "_target_": "package.CAP",
+                        "dataset_1": "${physics_pairing.dataset_1}",
+                    }
+                }
+            },
+        }
+    )
+
+    selected = _allowed_evaluation_callback_configs(
+        config.evaluation.callbacks, OmegaConf.create(["cap"])
+    )
+
+    assert selected.cap.dataset_1 == "background0"
+
+
 def test_evaluation_callback_allowlist_fails_closed_on_unknown_name() -> None:
     """A misspelled allowlist entry must not silently reduce evaluation coverage."""
     callbacks = OmegaConf.create({"eff_native": {"_target_": "package.Native"}})

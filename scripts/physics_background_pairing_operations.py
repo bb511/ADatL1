@@ -839,6 +839,44 @@ def _assert_no_live_retrain_overlap(rows: list[dict[str, str]]) -> set[str]:
     return live
 
 
+def _active_retrain_indices(
+    root: Path, design: dict[str, Any], rows: list[dict[str, str]]
+) -> set[int]:
+    """Authenticate live arrays and return their exact frozen run indices."""
+    live = _live_retrain_job_ids()
+    retrain_rows = [row for row in rows if row.get("kind") == "retrain"]
+    registered = {row["job_id"].split("_", maxsplit=1)[0] for row in retrain_rows}
+    unknown = live - registered
+    if unknown:
+        raise RuntimeError(
+            "Live retrain arrays are absent from the campaign ledger: "
+            f"{sorted(unknown)}. Reconcile their provenance before continuing."
+        )
+    active_rows = [
+        row for row in retrain_rows if _normalized_state(row.get("state", "")) in ACTIVE_STATES
+    ]
+    active_allocations = {row["job_id"].split("_", maxsplit=1)[0] for row in active_rows}
+    stale = active_allocations - live
+    if stale:
+        raise RuntimeError(
+            "Retrain ledger contains terminal-but-unreconciled arrays: "
+            f"{sorted(stale)}. Reconcile before submitting another segment."
+        )
+    unrepresented = live - active_allocations
+    if unrepresented:
+        raise RuntimeError(
+            "Live retrain arrays have no active ledger tasks: "
+            f"{sorted(unrepresented)}. Reconcile before submitting another segment."
+        )
+    indices: set[int] = set()
+    for row in active_rows:
+        index = _retrain_index_for_ledger_row(root, design, row)
+        if index in indices:
+            raise RuntimeError(f"Retrain index {index} is active in more than one allocation.")
+        indices.add(index)
+    return indices
+
+
 def _assert_database_quiescent(root: Path, model: str) -> None:
     """Reject a study database with an active Optuna trial."""
     database = root / "studies" / f"{model}.db"
@@ -1385,10 +1423,10 @@ def _submit_retrains_locked(
     design = _design(root)
     _authenticate_execution_repository(repository, design)
     ledger_path, ledger_rows = _ledger(root)
-    _assert_no_live_retrain_overlap(ledger_rows)
-    if _active_kind_rows(ledger_rows, "retrain"):
-        raise RuntimeError("Refusing to overlap an active retraining array.")
-    missing = missing_retrains(root, repository)
+    active_indices = _active_retrain_indices(root, design, ledger_rows)
+    missing = [
+        index for index in missing_retrains(root, repository) if index not in active_indices
+    ]
     if not missing:
         return None
     for path in (data_dir, raw_data_dir, pairing_dir):

@@ -2162,6 +2162,63 @@ def test_submit_retrains_uses_exact_missing_indices(monkeypatch, tmp_path) -> No
     assert operations._retrain_index_for_ledger_row(root, operations._design(root), ledger[1]) == 3
 
 
+def test_submit_retrains_allows_only_disjoint_indices_while_an_array_is_live(
+    monkeypatch, tmp_path
+) -> None:
+    """Completed boundaries advance without duplicating pending/running base tasks."""
+    root, repository = _campaign(tmp_path)
+    _authenticate(monkeypatch)
+    selection = root / "selection"
+    selection.mkdir()
+    rows = [{"retrain_index": index, "model": "ae", "trial_number": index} for index in range(4)]
+    (selection / "pareto_retrain_manifest.json").write_text(
+        json.dumps(
+            {
+                "schema_version": 2,
+                "code_commit": "a" * 40,
+                "retrain_runs": rows,
+            }
+        ),
+        encoding="utf-8",
+    )
+    operations._atomic_csv(
+        root / "state/job_history.csv",
+        [
+            {"job_id": "111_0", "kind": "retrain", "model": "ae", "state": "RUNNING"},
+            {"job_id": "111_1", "kind": "retrain", "model": "ae", "state": "COMPLETED"},
+        ],
+    )
+    monkeypatch.setattr(operations, "_validate_retrain_marker", lambda *args: False)
+    monkeypatch.setattr(operations, "_live_retrain_job_ids", lambda: {"111"})
+    monkeypatch.setattr(operations.shutil, "which", lambda name: f"/bin/{name}")
+    calls = []
+    monkeypatch.setattr(
+        operations.subprocess,
+        "run",
+        lambda command, **kwargs: calls.append(command) or SimpleNamespace(stdout="987\n"),
+    )
+
+    assert (
+        operations.submit_retrains(
+            root,
+            repository,
+            24,
+            tmp_path / "data",
+            tmp_path / "raw",
+            tmp_path / "pairing",
+        )
+        == "987"
+    )
+    with (root / "state/job_history.csv").open(encoding="utf-8") as handle:
+        ledger = list(csv.DictReader(handle))
+    new_rows = [row for row in ledger if row["job_id"].startswith("987_")]
+    task_map = operations._load_retrain_task_map(
+        root, operations._design(root), new_rows[0]["bindings_sha256"]
+    )
+    assert [entry["retrain_index"] for entry in task_map["entries"]] == [1, 2, 3]
+    assert "--array=0-2%3" in calls[0]
+
+
 def test_submit_retrains_batches_at_clariden_max_array_size(monkeypatch, tmp_path) -> None:
     """Only one <=1001-local-task batch is submitted even for a 3,600-row front union."""
     root, repository = _campaign(tmp_path)

@@ -471,7 +471,7 @@ def evaluate(args: argparse.Namespace) -> None:
             "test=true",
             "skip_validation_evaluation=false",
             "data.validation_aux_datasets=[]",
-            "data.test_aux_datasets=[]",
+            "+data.test_aux_datasets=[]",
             "data.max_normal_eval_batches=null",
             "evaluation.evaluator.ckpts.last=false",
             "evaluation.evaluator.ckpts.summary=false",

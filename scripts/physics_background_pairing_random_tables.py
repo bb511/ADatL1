@@ -17,6 +17,8 @@ def parse_args() -> argparse.Namespace:
     """Parse the campaign root and fail-closed operation."""
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--root", type=Path, required=True)
+    parser.add_argument("--namespace", default="random_pairing")
+    parser.add_argument("--cache-root", type=Path)
     parser.add_argument("command", choices=("freeze", "validate"))
     return parser.parse_args()
 
@@ -24,16 +26,18 @@ def parse_args() -> argparse.Namespace:
 def main() -> None:
     """Freeze new tables or reauthenticate an existing frozen directory."""
     args = parse_args()
-    operation = (
-        freeze_random_pairing_tables
-        if args.command == "freeze"
-        else validate_frozen_random_pairing_tables
-    )
-    manifest = operation(args.root)
+    if args.command == "freeze":
+        manifest = freeze_random_pairing_tables(
+            args.root, cache_root=args.cache_root, namespace=args.namespace
+        )
+    else:
+        manifest = validate_frozen_random_pairing_tables(
+            args.root, manifest_path=args.root / args.namespace / "manifest.json"
+        )
     print(
         json.dumps(
             {
-                "random_pairing": str(args.root / "random_pairing"),
+                "random_pairing": str(args.root / args.namespace),
                 "tables": len(manifest["tables"]),
                 "content_sha256": manifest["content_sha256"],
             },

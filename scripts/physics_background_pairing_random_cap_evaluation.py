@@ -51,10 +51,14 @@ def _workspace(root: Path, mode: str, namespace: str | None = None) -> Path:
     return root / "random_cap_evaluation" / name
 
 
-def _table_identity(root: Path) -> dict[str, Any]:
+def _table_identity(root: Path, manifest_path: Path | None = None) -> dict[str, Any]:
     """Authenticate and summarize the frozen ten-table control universe."""
-    manifest = validate_frozen_random_pairing_tables(root)
-    path = root / "random_pairing/manifest.json"
+    path = (
+        root / "random_pairing/manifest.json"
+        if manifest_path is None
+        else Path(manifest_path).expanduser().resolve(strict=True)
+    )
+    manifest = validate_frozen_random_pairing_tables(root, manifest_path=path)
     return {
         "path": str(path.resolve(strict=True)),
         "file_sha256": _sha256(path),
@@ -74,7 +78,11 @@ def _table_identity(root: Path) -> dict[str, Any]:
     }
 
 
-def build_discovery_manifest(root: Path, execution_repository: Path) -> dict[str, Any]:
+def build_discovery_manifest(
+    root: Path,
+    execution_repository: Path,
+    random_pairing_manifest: Path | None = None,
+) -> dict[str, Any]:
     """Bind the exact frozen 346/421/601 discovery checkpoint universe."""
     source = _load_prepared(root)
     repository, commit = _authenticate_execution(execution_repository)
@@ -94,7 +102,7 @@ def build_discovery_manifest(root: Path, execution_repository: Path) -> dict[str
         "execution_repository": str(repository),
         "execution_commit": commit,
         "inputs": source["inputs"],
-        "random_pairing": _table_identity(root),
+        "random_pairing": _table_identity(root, random_pairing_manifest),
         "tasks": tasks,
     }
     payload["content_sha256"] = _canonical_hash(payload)
@@ -115,6 +123,7 @@ def build_confirmation_manifest(
     execution_repository: Path,
     checkpoint_selections: Path,
     endpoint_receipt: Path,
+    random_pairing_manifest: Path | None = None,
 ) -> dict[str, Any]:
     """Bind every sealed confirmation cell/seed checkpoint selection."""
     frozen = load_authenticated_confirmation_campaign(root)
@@ -237,7 +246,7 @@ def build_confirmation_manifest(
         "execution_commit": commit,
         "source_discovery_evaluation_manifest_content_sha256": discovery_source["content_sha256"],
         "inputs": discovery_source["inputs"],
-        "random_pairing": _table_identity(root),
+        "random_pairing": _table_identity(root, random_pairing_manifest),
         "tasks": tasks,
     }
     payload["content_sha256"] = _canonical_hash(payload)
@@ -248,7 +257,9 @@ def prepare(args: argparse.Namespace) -> None:
     """Persist one immutable mode-specific task manifest."""
     root = args.root.resolve(strict=True)
     if args.command == "prepare-discovery":
-        manifest = build_discovery_manifest(root, args.execution_repository)
+        manifest = build_discovery_manifest(
+            root, args.execution_repository, args.random_pairing_manifest
+        )
         mode = "discovery"
     else:
         manifest = build_confirmation_manifest(
@@ -256,6 +267,7 @@ def prepare(args: argparse.Namespace) -> None:
             args.execution_repository,
             args.checkpoint_selections,
             args.endpoint_receipt,
+            args.random_pairing_manifest,
         )
         mode = "confirmation"
     namespace = args.namespace or mode
@@ -307,7 +319,7 @@ def _load_manifest(root: Path, mode: str, namespace: str | None = None) -> dict[
             or _sha256(Path(manifest["endpoint_receipt"])) != manifest["endpoint_receipt_sha256"]
         ):
             raise RuntimeError("Prepared sealed confirmation identity differs.")
-    tables = _table_identity(root)
+    tables = _table_identity(root, Path(manifest["random_pairing"]["path"]))
     if tables != manifest["random_pairing"]:
         raise RuntimeError("Prepared random-CAP table identity differs.")
     for task in manifest["tasks"]:
@@ -703,10 +715,12 @@ def parse_args() -> argparse.Namespace:
     commands = parser.add_subparsers(dest="command", required=True)
     discovery = commands.add_parser("prepare-discovery")
     discovery.add_argument("--execution-repository", type=Path, required=True)
+    discovery.add_argument("--random-pairing-manifest", type=Path)
     confirmation = commands.add_parser("prepare-confirmation")
     confirmation.add_argument("--execution-repository", type=Path, required=True)
     confirmation.add_argument("--checkpoint-selections", type=Path, required=True)
     confirmation.add_argument("--endpoint-receipt", type=Path, required=True)
+    confirmation.add_argument("--random-pairing-manifest", type=Path)
     for name in ("evaluate", "status", "aggregate"):
         command = commands.add_parser(name)
         command.add_argument("--mode", choices=MODES, required=True)

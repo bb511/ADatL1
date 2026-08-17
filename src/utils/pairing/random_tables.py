@@ -5,6 +5,7 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import re
 import shutil
 import tempfile
 from pathlib import Path
@@ -147,11 +148,23 @@ def _authenticate_campaign(root: Path) -> tuple[dict[str, Any], dict[str, Any]]:
     return design, preflight
 
 
-def freeze_random_pairing_tables(root: Path) -> dict[str, Any]:
+def _destination(root: Path, namespace: str) -> Path:
+    """Return one path-safe immutable random-table namespace."""
+    if re.fullmatch(r"random_pairing(?:_[a-z0-9][a-z0-9_.-]*)?", namespace) is None:
+        raise ValueError(f"Invalid random-pairing namespace: {namespace!r}")
+    return root / namespace
+
+
+def freeze_random_pairing_tables(
+    root: Path,
+    *,
+    cache_root: Path | None = None,
+    namespace: str = "random_pairing",
+) -> dict[str, Any]:
     """Atomically freeze ten tables without touching existing structured artifacts."""
     root = root.expanduser().resolve(strict=True)
     design, preflight = _authenticate_campaign(root)
-    destination = root / "random_pairing"
+    destination = _destination(root, namespace)
     if destination.exists():
         raise FileExistsError(
             f"Refusing to replace frozen random pairing artifacts: {destination}"
@@ -161,7 +174,9 @@ def freeze_random_pairing_tables(root: Path) -> dict[str, Any]:
     try:
         table_dir = temporary / "tables"
         table_dir.mkdir(parents=True)
-        cache_root = Path(preflight["cache_root"]).resolve(strict=True)
+        cache_root = (
+            Path(preflight["cache_root"]) if cache_root is None else Path(cache_root)
+        ).resolve(strict=True)
         source_metadata_dir = Path(preflight["artifact_dir"]).resolve(strict=True) / "sources"
         table_rows = []
         for split, seeds in SEEDS_BY_SPLIT.items():
@@ -226,6 +241,8 @@ def freeze_random_pairing_tables(root: Path) -> dict[str, Any]:
             "dataset_2": DATASET_2,
             "events": EVENTS,
             "strategy": STRATEGY,
+            "cache_root": str(cache_root),
+            "namespace": namespace,
             "seed_contract": seed_contract(),
             "generator": "torch.Generator(device=cpu)+torch.randperm",
             "generator_version": str(torch.__version__),
@@ -240,16 +257,32 @@ def freeze_random_pairing_tables(root: Path) -> dict[str, Any]:
         raise
 
 
-def validate_frozen_random_pairing_tables(root: Path) -> dict[str, Any]:
+def validate_frozen_random_pairing_tables(
+    root: Path,
+    *,
+    manifest_path: Path | None = None,
+) -> dict[str, Any]:
     """Reauthenticate a frozen random table directory and every table file."""
     root = root.expanduser().resolve(strict=True)
     _, preflight = _authenticate_campaign(root)
-    manifest_path = root / "random_pairing" / "manifest.json"
+    manifest_path = (
+        root / "random_pairing" / "manifest.json"
+        if manifest_path is None
+        else Path(manifest_path).expanduser().resolve(strict=True)
+    )
+    if (
+        manifest_path.name != "manifest.json"
+        or manifest_path.parent.parent != root
+        or _destination(root, manifest_path.parent.name) != manifest_path.parent
+    ):
+        raise ValueError("Random-pairing manifest must use a campaign-local namespace.")
     manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
     content_sha256 = manifest.pop("content_sha256", None)
     if content_sha256 != _canonical_hash(manifest):
         raise RuntimeError("Random pairing manifest content hash differs.")
     manifest["content_sha256"] = content_sha256
+    if manifest.get("namespace", "random_pairing") != manifest_path.parent.name:
+        raise RuntimeError("Random-pairing manifest namespace differs from its path.")
     if manifest.get("seed_contract") != seed_contract() or len(manifest.get("tables", [])) != 10:
         raise RuntimeError("Random pairing manifest seed/table coverage differs.")
     expected_pairs = {(split, seed) for split, seeds in SEEDS_BY_SPLIT.items() for seed in seeds}
@@ -269,7 +302,7 @@ def validate_frozen_random_pairing_tables(root: Path) -> dict[str, Any]:
         for row in manifest["tables"]
     ):
         raise RuntimeError("Random pairing manifest replicate/seed ordering differs.")
-    artifact_root = (root / "random_pairing" / "tables").resolve(strict=True)
+    artifact_root = (manifest_path.parent / "tables").resolve(strict=True)
     for row in manifest["tables"]:
         path = Path(row["path"]).resolve(strict=True)
         if not path.is_relative_to(artifact_root) or sha256_file(path) != row["file_sha256"]:

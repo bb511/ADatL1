@@ -170,6 +170,21 @@ def test_freeze_is_atomic_reauthenticatable_and_preserves_structured_tables(
     assert validate_frozen_random_pairing_tables(root) == manifest
     with pytest.raises(FileExistsError, match="Refusing to replace"):
         freeze_random_pairing_tables(root)
+    versioned = freeze_random_pairing_tables(
+        root,
+        cache_root=tmp_path / "cache",
+        namespace="random_pairing_runtime_test",
+    )
+    assert versioned["namespace"] == "random_pairing_runtime_test"
+    assert (
+        validate_frozen_random_pairing_tables(
+            root,
+            manifest_path=root / "random_pairing_runtime_test/manifest.json",
+        )
+        == versioned
+    )
+    with pytest.raises(ValueError, match="Invalid random-pairing namespace"):
+        freeze_random_pairing_tables(root, namespace="../escape")
 
 
 def test_freeze_cleans_partial_directory_after_failure(

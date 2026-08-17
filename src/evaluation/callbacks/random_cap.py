@@ -59,15 +59,9 @@ class RandomBijectionCAP(Callback):
                 )
         if not hasattr(self, "manifest"):
             self.manifest = validate_frozen_random_pairing_tables(
-                self.pairing_manifest_path.parent.parent
+                self.pairing_manifest_path.parent.parent,
+                manifest_path=self.pairing_manifest_path,
             )
-        if (
-            self.pairing_manifest_path
-            != (
-                self.pairing_manifest_path.parent.parent / "random_pairing/manifest.json"
-            ).resolve()
-        ):
-            raise ValueError("Random CAP manifest must be the campaign's frozen manifest.")
         loaders = set(trainer.test_dataloaders)
         expected = {self.dataset_1_name, self.dataset_2_name}
         if not expected <= loaders:

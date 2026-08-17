@@ -370,7 +370,7 @@ def test_confirmation_manifest_deduplicates_126_sealed_cell_checkpoints(
             "inputs": {"data_dir": "/data", "raw_data_dir": "/raw", "pairing_dir": "/pairs"},
         },
     )
-    monkeypatch.setattr(runner, "_table_identity", lambda _: {"content_sha256": "tables"})
+    monkeypatch.setattr(runner, "_table_identity", lambda *_: {"content_sha256": "tables"})
     manifest = build_confirmation_manifest(root, repository, selections, receipt)
     assert len(manifest["tasks"]) == 84
     assert sum(len(task["memberships"]) for task in manifest["tasks"]) == 126

@@ -1394,7 +1394,7 @@ def _validate_retrain_progress(
         ):
             raise RuntimeError(f"Retrain segment config differs at epoch {boundary}.")
         for key, value in expected_row["params"].items():
-            if _config_value(config, key) != value:
+            if _config_value(config, key) != _resolved_parameter_value(value):
                 raise RuntimeError(f"Retrain segment parameter differs for {key}.")
     return state_path
 
@@ -1488,6 +1488,16 @@ def _config_value(config: dict[str, Any], dotted_key: str) -> Any:
     return value
 
 
+def _resolved_parameter_value(value: Any) -> Any:
+    """Normalize a frozen Hydra override to its resolved config representation."""
+    if not isinstance(value, str):
+        return value
+    try:
+        return yaml.safe_load(value)
+    except yaml.YAMLError:
+        return value
+
+
 def _audit_retrain_outputs(
     root: Path,
     index: int,
@@ -1518,7 +1528,7 @@ def _audit_retrain_outputs(
     if int(row.get("epochs", -1)) != RETRAIN_EPOCHS or int(row["retrain_index"]) != index:
         raise RuntimeError("Frozen retrain epoch/index contract differs.")
     for key, expected in row.get("params", {}).items():
-        if _config_value(config, str(key)) != expected:
+        if _config_value(config, str(key)) != _resolved_parameter_value(expected):
             raise RuntimeError(f"Final retrain parameter differs for {key}.")
     expected_trainer_root = _retrain_paths(root, index)["trainer"].resolve()
     if Path(str(trainer.get("default_root_dir"))).resolve() != expected_trainer_root:

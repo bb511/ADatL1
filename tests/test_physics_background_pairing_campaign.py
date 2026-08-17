@@ -209,6 +209,14 @@ def test_checkpoint_identity_matches_evaluator_normalization() -> None:
     assert campaign._checkpoint_identity("last") == "last"
 
 
+def test_frozen_hydra_collection_parameters_match_resolved_config_values() -> None:
+    """String-encoded Optuna collections compare as Hydra-resolved lists."""
+    assert campaign._resolved_parameter_value("[64,32,32]") == [64, 32, 32]
+    assert campaign._resolved_parameter_value("[0.9,0.99]") == [0.9, 0.99]
+    assert campaign._resolved_parameter_value("relu") == "relu"
+    assert campaign._resolved_parameter_value(0.001) == 0.001
+
+
 def test_retraining_uses_score_aware_downstream_suite() -> None:
     """Only AE/VAE need the additional OAS threshold and efficiency callback."""
     assert campaign._retrain_suite("ae") == "physics_background_native_oas"

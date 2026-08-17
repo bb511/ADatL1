@@ -183,6 +183,8 @@ def _validate_canary(root: Path, model: str, marker: dict[str, Any]) -> None:
     }
     for key, expected in expected_config.items():
         observed = training_campaign._config_value(config, key)
+        if key in configuration["params"]:
+            expected = training_campaign._resolved_parameter_value(expected)
         if observed != expected:
             raise RuntimeError(
                 f"Confirmation canary config differs for {model}/{key}: "

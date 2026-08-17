@@ -712,6 +712,9 @@ Clean execution worktree:
   /iopsstor/scratch/cscs/vjimenez/adatl1/worktrees/physics_background_confirmation_ddfcfbb
 Random-CAP execution worktree:
   /iopsstor/scratch/cscs/vjimenez/adatl1/worktrees/physics_background_random_cap_5293a29
+Reserve-extension execution worktree:
+  /iopsstor/scratch/cscs/vjimenez/adatl1/worktrees/physics_background_confirmation_reserve_runtime
+Reserve-extension execution commit: 00cd78d13f4d5a9d43be32fd0250d22b23a76704
 Discovery root:
   /iopsstor/scratch/cscs/vjimenez/adatl1/campaigns/physics_background_nsgaii_05b649c
 ```
@@ -737,6 +740,14 @@ non-overlapping coverage: debug task `3098415_1` was running, dependent debug ta
 cancel an exact pending task before resubmitting it elsewhere, and never duplicate a
 running or completed task. Failed pilots `3098368`, `3098378`, and `3098383` remain
 diagnostic evidence and must not be counted as completed work.
+
+The reserve-extension worktree descends directly from the immutable training commit
+and changes only the authenticated control-plane and its tests. Its Git-diff SHA-256
+is `b9ba0876b780bd0fb6782678ef1d5c72b318d4f102b411ca960d239d1227706e`; 113
+focused tests passed in that exact worktree. Use it only after the three-primary-seed
+analysis has frozen the per-model extension decisions. Offline random-CAP evaluation
+uses its own clean, manifest-recorded execution commit because it neither trains nor
+selects the sealed confirmation checkpoints.
 
 During execution, update durable state under `<CONFIRM_ROOT>/state/` rather than
 continually rewriting this section. Use bounded sub-agents for independent log,

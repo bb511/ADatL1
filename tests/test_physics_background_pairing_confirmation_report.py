@@ -7,6 +7,8 @@ import hashlib
 import json
 from pathlib import Path
 
+import pytest
+
 from src.evaluation.physics_background_pairing_confirmation_analysis import (
     _content_hash,
 )
@@ -79,6 +81,36 @@ def _analysis(tmp_path: Path) -> Path:
                         "classification": "meaningful_improvement",
                     }
                 )
+    for endpoint in ("efficiency_250hz", "auprc"):
+        for family, contrasts in (
+            ("controlled", ("cdf_cap_minus_wasserstein", "cdf_cap_minus_drift")),
+            (
+                "pairing",
+                tuple(
+                    f"{pairing}_minus_cdf"
+                    for pairing in (
+                        "flat_physical",
+                        "physics_summary",
+                        "typed_sliced_wasserstein",
+                        "jetclr",
+                    )
+                ),
+            ),
+        ):
+            for contrast in contrasts:
+                comparisons.append(
+                    {
+                        "scope": "macro",
+                        "model": "macro_equal_model",
+                        "family": family,
+                        "endpoint": endpoint,
+                        "contrast": contrast,
+                        "mean_delta": 0.01,
+                        "adjusted_ci_low": 0.005,
+                        "adjusted_ci_high": 0.015,
+                        "classification": "positive_but_not_meaningful",
+                    }
+                )
     oas = []
     for model in ("ae", "vae"):
         for selector, pairing, _ in SELECTORS:
@@ -129,5 +161,26 @@ def test_final_report_answers_three_questions_and_shows_every_cell(tmp_path: Pat
     assert report.count("| AE |") >= 1
     assert "**" in report
     assert summary["paper_matched_total"] == 18
-    assert summary["cdf_cap_total"] == 24
-    assert summary["learned_pairing_total"] == 48
+    assert summary["cdf_cap_efficiency_total"] == 12
+    assert summary["cdf_cap_auprc_total"] == 12
+    assert summary["learned_pairing_efficiency_total"] == 24
+    assert summary["learned_pairing_auprc_total"] == 24
+
+
+def test_final_report_refuses_pending_reserve_extension(tmp_path: Path) -> None:
+    """A triggered but incomplete reserve extension cannot be called final."""
+    analysis = _analysis(tmp_path)
+    reserve_path = analysis / "reserve_seed_decisions.csv"
+    rows = list(csv.DictReader(reserve_path.open(encoding="utf-8", newline="")))
+    rows[0]["decision"] = "add_both_reserve_seeds"
+    _write(reserve_path, rows)
+    manifest_path = analysis / "confirmation_endpoint_analysis.json"
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    manifest.pop("content_sha256")
+    manifest["artifacts"]["reserve_seed_decisions.csv"] = hashlib.sha256(
+        reserve_path.read_bytes()
+    ).hexdigest()
+    manifest["content_sha256"] = _content_hash(manifest)
+    manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
+    with pytest.raises(RuntimeError, match="extension is incomplete"):
+        build_confirmation_report(analysis, Path(__file__).resolve().parents[1])

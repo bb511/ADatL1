@@ -125,6 +125,41 @@ def _cell_table(rows: list[dict[str, str]]) -> tuple[list[str], dict[tuple[str, 
     return lines, compact
 
 
+def _validated_reserve_decisions(rows: list[dict[str, str]]) -> dict[str, dict[str, str]]:
+    """Require one terminal reserve-seed decision for every model."""
+    decisions: dict[str, dict[str, str]] = {}
+    for row in rows:
+        model = row.get("model", "")
+        if model not in MODELS or model in decisions:
+            raise ValueError("Reserve-seed decisions must name each model exactly once.")
+        decision = row.get("decision")
+        if decision not in {"no_extension", "extension_complete"}:
+            raise RuntimeError(
+                f"Final report blocked: reserve-seed extension is incomplete for {model}: "
+                f"{decision!r}."
+            )
+        expected = 3 if decision == "no_extension" else 5
+        observed = int(row.get("observed_seed_count", expected))
+        if observed != expected:
+            raise ValueError(
+                f"Reserve decision/count mismatch for {model}: {decision} with {observed} seeds."
+            )
+        decisions[model] = row
+    if set(decisions) != set(MODELS):
+        raise ValueError("Reserve-seed decisions must cover all six models.")
+    return decisions
+
+
+def _contrast_counts(rows: list[dict[str, str]], endpoint: str) -> tuple[int, int, int]:
+    """Return directional-positive, adjusted-improvement, and total counts."""
+    selected = [row for row in rows if row["endpoint"] == endpoint]
+    return (
+        sum(_number(row, "mean_delta") > 0.0 for row in selected),
+        sum(row["classification"] == "meaningful_improvement" for row in selected),
+        len(selected),
+    )
+
+
 def _paper_rows(
     repository: Path, cell_values: dict[tuple[str, str, str, str], float]
 ) -> tuple[list[dict[str, Any]], str]:
@@ -157,6 +192,7 @@ def build_confirmation_report(
 ) -> tuple[str, dict[str, Any]]:
     """Build an information-dense report and machine-readable result summary."""
     manifest, tables = _load_analysis(analysis_dir.resolve(strict=True))
+    reserve_decisions = _validated_reserve_decisions(tables["reserve_seed_decisions.csv"])
     cell_lines, cell_values = _cell_table(tables["endpoints_across_seeds.csv"])
     paper_rows, paper_reference_hash = _paper_rows(repository.resolve(strict=True), cell_values)
     comparisons = tables["comparison_summary.csv"]
@@ -166,23 +202,32 @@ def build_confirmation_report(
     pairing = [
         row for row in comparisons if row["scope"] == "model" and row["family"] == "pairing"
     ]
+    macro_controlled = [
+        row for row in comparisons if row["scope"] == "macro" and row["family"] == "controlled"
+    ]
+    macro_pairing = [
+        row for row in comparisons if row["scope"] == "macro" and row["family"] == "pairing"
+    ]
     if len(controlled) != 6 * 2 * 2 or len(pairing) != 6 * 4 * 2:
         raise ValueError("Model-level comparison summary cardinality differs.")
+    if len(macro_controlled) != 2 * 2 or len(macro_pairing) != 4 * 2:
+        raise ValueError("Macro comparison summary cardinality differs.")
 
     comparable_paper = [row for row in paper_rows if row["comparison_status"] == "comparable"]
     paper_better = sum(float(row["delta_percentage_points"]) > 0 for row in comparable_paper)
-    cap_better = sum(_number(row, "mean_delta") > 0 for row in controlled)
-    pairing_better = sum(_number(row, "mean_delta") > 0 for row in pairing)
-    pairing_meaningful = sum(row["classification"] == "meaningful_improvement" for row in pairing)
+    cap_eff = _contrast_counts(controlled, "efficiency_250hz")
+    cap_auprc = _contrast_counts(controlled, "auprc")
+    pairing_eff = _contrast_counts(pairing, "efficiency_250hz")
+    pairing_auprc = _contrast_counts(pairing, "auprc")
 
     lines = [
         "# Physics background-pairing confirmation results",
         "",
         "## Direct answers",
         "",
-        f"1. **Background0/background1 versus the paper:** {paper_better}/{len(comparable_paper)} semantically matched model/selector efficiency means exceed the paper values. This comparison is available only for efficiency; the paper did not report matching AUPRC.",
-        f"2. **Does pairing improve CAP?** {pairing_better}/{len(pairing)} learned-pairing model/endpoint contrasts are positive relative to CDF CAP; {pairing_meaningful} are classified as practically meaningful after multiplicity adjustment.",
-        f"3. **Does CAP beat W1/drift?** CDF CAP is positive in {cap_better}/{len(controlled)} model/endpoint comparisons. Learned pairing effects are reported separately, avoiding a best-of-four selection advantage.",
+        f"1. **Background0/background1 system versus the paper:** {paper_better}/{len(comparable_paper)} method-matched efficiency means are directionally higher. This is a cross-system benchmark, not a causal isolation of the changed validation datasets; the paper has no matching AUPRC.",
+        f"2. **Does pairing improve CAP?** Efficiency: {pairing_eff[0]}/{pairing_eff[2]} directional gains and {pairing_eff[1]} multiplicity-adjusted meaningful improvements. AUPRC: {pairing_auprc[0]}/{pairing_auprc[2]} directional gains and {pairing_auprc[1]} adjusted meaningful improvements.",
+        f"3. **Does CDF CAP beat W1/drift?** Efficiency: {cap_eff[0]}/{cap_eff[2]} directional gains and {cap_eff[1]} adjusted meaningful improvements. AUPRC: {cap_auprc[0]}/{cap_auprc[2]} directional gains and {cap_auprc[1]} adjusted meaningful improvements. W1 and drift remain separate contrasts below.",
         "",
         "All values below are means over the fixed seeds and the same 20 downstream anomalies. Efficiency is at 250 Hz. Each cell is `efficiency / AUPRC`; bold marks the independent winner within that model and endpoint.",
         "",
@@ -192,7 +237,7 @@ def build_confirmation_report(
         "",
         "## CDF CAP versus W1 and drift",
         "",
-        "| Model | Endpoint | Contrast | Mean delta | Adjusted CI | Classification |",
+        "| Model | Endpoint | Contrast | Mean delta (pp or AUPRC) | Adjusted CI | Classification |",
         "|---|---|---|---:|---:|---|",
     ]
     for row in controlled:
@@ -207,7 +252,7 @@ def build_confirmation_report(
             "",
             "## Learned pairing versus CDF CAP",
             "",
-            "| Model | Pairing contrast | Endpoint | Mean delta | Adjusted CI | Classification |",
+            "| Model | Pairing contrast | Endpoint | Mean delta (pp or AUPRC) | Adjusted CI | Classification |",
             "|---|---|---|---:|---:|---|",
         ]
     )
@@ -217,6 +262,24 @@ def build_confirmation_report(
             f"| {row['model'].upper()} | {row['contrast']} | {row['endpoint']} | "
             f"{scale * _number(row, 'mean_delta'):+.3f} | "
             f"[{scale * _number(row, 'adjusted_ci_low'):+.3f}, {scale * _number(row, 'adjusted_ci_high'):+.3f}] | {row['classification']} |"
+        )
+    lines.extend(
+        [
+            "",
+            "## Equal-model macro contrasts",
+            "",
+            "| Family | Contrast | Endpoint | Mean delta (pp or AUPRC) | Adjusted CI | Classification |",
+            "|---|---|---|---:|---:|---|",
+        ]
+    )
+    for row in (*macro_controlled, *macro_pairing):
+        scale = 100.0 if row["endpoint"] == "efficiency_250hz" else 1.0
+        lines.append(
+            f"| {row['family']} | {row['contrast']} | {row['endpoint']} | "
+            f"{scale * _number(row, 'mean_delta'):+.3f} | "
+            f"[{scale * _number(row, 'adjusted_ci_low'):+.3f}, "
+            f"{scale * _number(row, 'adjusted_ci_high'):+.3f}] | "
+            f"{row['classification']} |"
         )
     lines.extend(
         [
@@ -237,7 +300,7 @@ def build_confirmation_report(
     lines.extend(
         [
             "",
-            "These are semantically matched native-score comparisons: CDF CAP to paper CAP, forward drift to paper Stable, and W1 to paper W1. They test the full changed validation/selection system, not dataset choice in isolation.",
+            "These are method-matched native-score cross-system comparisons: CDF CAP to paper CAP, forward drift to paper Stable, and W1 to paper W1. They test the full changed validation/selection system, not dataset choice in isolation.",
             "",
             "## AE/VAE masked-OAS diagnostic",
             "",
@@ -255,6 +318,30 @@ def build_confirmation_report(
             f"{scale * _number(row, 'mean_delta'):+.3f} | "
             f"[{scale * _number(row, 'ci95_low'):+.3f}, {scale * _number(row, 'ci95_high'):+.3f}] |"
         )
+    oas_rows = tables["oas_vs_native_summary.csv"]
+    oas_eff = [row for row in oas_rows if row["endpoint"] == "efficiency_250hz"]
+    oas_auprc = [row for row in oas_rows if row["endpoint"] == "auprc"]
+    lines.extend(
+        [
+            "",
+            f"Masked OAS is directionally higher than native scoring in "
+            f"{sum(_number(row, 'mean_delta') > 0 for row in oas_eff)}/{len(oas_eff)} "
+            f"efficiency cells and {sum(_number(row, 'mean_delta') > 0 for row in oas_auprc)}/"
+            f"{len(oas_auprc)} AUPRC cells. Interpret the confidence intervals above; "
+            "these are same-checkpoint score effects, not independently optimized selectors.",
+            "",
+            "## Reserve-seed decisions",
+            "",
+            "| Model | Observed seeds | Decision |",
+            "|---|---:|---|",
+            *[
+                f"| {model.upper()} | "
+                f"{reserve_decisions[model].get('observed_seed_count', '3')} | "
+                f"{reserve_decisions[model]['decision']} |"
+                for model in MODELS
+            ],
+        ]
+    )
 
     random_status = "not_supplied"
     if random_aggregate is not None:
@@ -287,11 +374,21 @@ def build_confirmation_report(
         "paper_reference_sha256": paper_reference_hash,
         "paper_matched_positive": paper_better,
         "paper_matched_total": len(comparable_paper),
-        "cdf_cap_positive": cap_better,
-        "cdf_cap_total": len(controlled),
-        "learned_pairing_positive": pairing_better,
-        "learned_pairing_total": len(pairing),
-        "learned_pairing_meaningful": pairing_meaningful,
+        "cdf_cap_efficiency_directional_positive": cap_eff[0],
+        "cdf_cap_efficiency_meaningful": cap_eff[1],
+        "cdf_cap_efficiency_total": cap_eff[2],
+        "cdf_cap_auprc_directional_positive": cap_auprc[0],
+        "cdf_cap_auprc_meaningful": cap_auprc[1],
+        "cdf_cap_auprc_total": cap_auprc[2],
+        "learned_pairing_efficiency_directional_positive": pairing_eff[0],
+        "learned_pairing_efficiency_meaningful": pairing_eff[1],
+        "learned_pairing_efficiency_total": pairing_eff[2],
+        "learned_pairing_auprc_directional_positive": pairing_auprc[0],
+        "learned_pairing_auprc_meaningful": pairing_auprc[1],
+        "learned_pairing_auprc_total": pairing_auprc[2],
+        "reserve_seed_decisions": {
+            model: reserve_decisions[model]["decision"] for model in MODELS
+        },
         "random_cap_status": random_status,
     }
     summary["content_sha256"] = _content_hash(summary)

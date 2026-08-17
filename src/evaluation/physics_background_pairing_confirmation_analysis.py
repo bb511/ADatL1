@@ -221,7 +221,11 @@ def _across_seed_summaries(
             replicates=bootstrap_replicates,
             seed=derived_seed,
         )
-        values = np.sort(matrix.reshape(-1))
+        # Robustness is defined over anomaly types after averaging retraining
+        # seeds. Flattening seed × anomaly would incorrectly count each seed as
+        # another anomaly and overweight models with reserve-seed extensions.
+        anomaly_means = matrix.mean(axis=0)
+        values = np.sort(anomaly_means)
         first = group[0]
         summaries.append(
             {
@@ -242,9 +246,9 @@ def _across_seed_summaries(
                 "seeds": len(seeds),
                 "anomalies": len(DOWNSTREAM_DATASETS),
                 "mean": float(matrix.mean()),
-                "median": float(np.median(matrix)),
+                "median": float(np.median(anomaly_means)),
                 "worst": float(values[0]),
-                "bottom_quartile_cvar": float(values[: max(1, len(values) // 4)].mean()),
+                "bottom_quartile_cvar": float(values[:5].mean()),
                 "seed_mean_std": float(matrix.mean(axis=1).std(ddof=1)),
                 "ci95_low": low,
                 "ci95_high": high,

@@ -154,6 +154,32 @@ def test_bootstrap_is_deterministic_and_macro_is_equal_model() -> None:
     assert macro["mean_delta"] == pytest.approx(0.02)
 
 
+def test_across_seed_robustness_summarizes_anomaly_means() -> None:
+    """Worst/CVaR average seeds first instead of flattening seed observations."""
+    matrix, rows = _fixture()
+    target = [
+        row for row in rows if row["cell_index"] == 0 and row["endpoint"] == "efficiency_250hz"
+    ]
+    for row in target:
+        if row["anomaly"] == DOWNSTREAM_DATASETS[0]:
+            row["value"] = 0.0 if row["seed"] == SEEDS[0] else 1.0
+    anomaly_means = sorted(
+        sum(row["value"] for row in target if row["anomaly"] == anomaly) / len(SEEDS)
+        for anomaly in DOWNSTREAM_DATASETS
+    )
+    result = build_confirmation_endpoint_analysis(
+        matrix, rows, bootstrap_replicates=1_000, bootstrap_seed=27
+    )
+    summary = next(
+        row
+        for row in result["endpoints_across_seeds"]
+        if row["cell_index"] == 0 and row["endpoint"] == "efficiency_250hz"
+    )
+    assert summary["worst"] == pytest.approx(anomaly_means[0])
+    assert summary["bottom_quartile_cvar"] == pytest.approx(sum(anomaly_means[:5]) / 5)
+    assert summary["median"] == pytest.approx((anomaly_means[9] + anomaly_means[10]) / 2)
+
+
 def test_incomplete_or_cross_endpoint_checkpoint_mismatch_fails_closed() -> None:
     """Missing observations and endpoints attached to different checkpoints are fatal."""
     matrix, rows = _fixture()

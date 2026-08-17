@@ -95,7 +95,16 @@ def train(cfg: DictConfig) -> Tuple[Dict[str, Any], Dict[str, Any]]:
 
     if cfg.get("train"):
         log.info("Starting training!")
-        trainer.fit(model=algorithm, datamodule=datamodule, ckpt_path=cfg.get("ckpt_path"))
+        ckpt_path = cfg.get("ckpt_path")
+        trainer.fit(
+            model=algorithm,
+            datamodule=datamodule,
+            ckpt_path=ckpt_path,
+            # A resumed Lightning checkpoint must restore optimizer, callback, and
+            # RNG state, not only model weights. Checkpoint paths are supplied by
+            # the user or by hash-authenticated campaign state.
+            weights_only=False if ckpt_path else None,
+        )
 
     train_metrics = trainer.callback_metrics
 

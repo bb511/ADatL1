@@ -1,5 +1,6 @@
 import os
 from pathlib import Path
+from unittest.mock import Mock
 
 import pytest
 from hydra.core.hydra_config import HydraConfig
@@ -7,6 +8,37 @@ from omegaconf import DictConfig, open_dict
 
 from src.train import train
 from tests.helpers.run_if import RunIf
+
+
+def test_train_restores_full_state_from_resume_checkpoint(
+    monkeypatch: pytest.MonkeyPatch, cfg_train: DictConfig
+) -> None:
+    """A trusted Lightning resume must restore optimizer, callback, and RNG state."""
+    datamodule = Mock()
+    algorithm = Mock()
+    trainer = Mock(callback_metrics={})
+    instantiated = iter([datamodule, algorithm, trainer])
+
+    with open_dict(cfg_train):
+        cfg_train.train = True
+        cfg_train.test = False
+        cfg_train.ckpt_path = "/authenticated/campaign/epoch_040.ckpt"
+        cfg_train.callbacks = None
+        cfg_train.logger = None
+
+    monkeypatch.setattr(
+        "src.train.hydra.utils.instantiate", lambda *args, **kwargs: next(instantiated)
+    )
+    monkeypatch.setattr("src.train._get_evaluator", lambda *args, **kwargs: None)
+
+    train(cfg_train)
+
+    trainer.fit.assert_called_once_with(
+        model=algorithm,
+        datamodule=datamodule,
+        ckpt_path="/authenticated/campaign/epoch_040.ckpt",
+        weights_only=False,
+    )
 
 
 def test_train_fast_dev_run(cfg_train: DictConfig) -> None:

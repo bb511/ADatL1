@@ -95,12 +95,17 @@ Use paper-native anomaly scores as the primary analysis:
 | DeepSVDD | distance from learned center |
 | RealNVP | likelihood/density score |
 
-OAS must not replace AE MSE or VAE KL. On the discovery checkpoints, OAS reduced the
-best AE result from 4.77%/0.628 to 3.09%/0.501 and the best VAE result from
-5.36%/0.634 to 4.25%/0.544. During confirmation, compute masked OAS on AE/VAE as a
-secondary diagnostic when cheap, but do not add OAS-selected hyperparameter
-configurations to the 28-config primary matrix. State explicitly that this tests OAS
-on native-selected trajectories, not OAS as an independently optimized selector.
+OAS must not replace AE MSE or VAE KL in the 42-cell primary confirmation matrix. On
+the discovery checkpoints, OAS reduced the best AE result from 4.77%/0.628 to
+3.09%/0.501 and the best VAE result from
+5.36%/0.634 to 4.25%/0.544. During confirmation, masked OAS evaluation on every
+sealed AE/VAE checkpoint is mandatory, but it does not add OAS-selected
+hyperparameter configurations to the 28-config primary matrix. Persist CAP, W1, and
+drift values derived from both the native and OAS score streams wherever the model
+supports OAS. State explicitly that this is a same-checkpoint score comparison on
+native-selected trajectories, not an independently optimized OAS selector. The OAS
+implementation must apply the physics presence/padding mask before covariance fitting
+and scoring so nonexistent object slots contribute neither residuals nor covariance.
 
 Downstream anomaly labels must never affect training, checkpoint selection, early
 stopping, retries, or adaptive seed decisions. Evaluate them only after a run's
@@ -156,7 +161,12 @@ The variance-based extension is predeclared as follows: after all three primary 
 complete for one model, add both reserve seeds to every configuration of that model
 only if any multiplicity-adjusted primary-efficiency contrast interval spans both
 `-0.005` and `+0.005`. Never add seeds because a preferred method is losing, and never
-use secondary AUPRC to trigger the extension. The five-seed maximum is 140 runs.
+use secondary AUPRC to trigger the extension. The five-seed maximum is 140 runs. The
+manifest, analysis, and report code must support mixed seed counts across models: a
+model that triggers the rule has five seeds while an untriggered model remains at
+three. A triggered extension is part of the required campaign, not an optional
+follow-up. The final-report command must refuse final status until both reserve seeds
+have completed for every triggered model.
 
 ### 3.3 Why approximate hyperparameter merging is forbidden
 
@@ -283,8 +293,9 @@ Use small, config-driven changes and preserve all discovery artifacts.
      RNG, dataloader-shuffler, MLflow, and exact-epoch state across allocations.
    - Evaluate all five structured/CDF CAP callbacks, W1, and drift on the same
      trajectory.
-   - For AE/VAE, optionally persist masked OAS diagnostics with independent OAS
-     thresholds, without adding OAS-selected configurations.
+   - For AE/VAE, persist mandatory masked-OAS CAP/W1/drift diagnostics with
+     independently calibrated OAS thresholds, without adding OAS-selected
+     hyperparameter configurations.
 5. **Endpoint aggregator**
    - Join efficiency and AUPRC on exact model/trial/seed/checkpoint-hash/anomaly keys.
    - Preserve logical-cell multiplicity when one physical run serves several cells.
@@ -391,6 +402,22 @@ must deduplicate physical checkpoints while retaining all logical selector
 memberships. Never run `prepare-confirmation` before endpoint extraction has bound
 every row to a checkpoint hash.
 
+The already frozen retrospective discovery manifest is authoritative and must be
+reused rather than regenerated:
+
+```text
+<DISCOVERY_ROOT>/random_cap_evaluation/discovery/manifest.json
+```
+
+It contains 346 physical tasks covering 421 checkpoints and 601 logical
+score/checkpoint memberships. It is intentionally bound to execution commit
+`ef3ee37`; the later confirmation-control-plane normalization fix did not change the
+random evaluator, callback, configuration, or Slurm wrapper. A prior one-task pilot
+was cancelled before execution, so no result may be inferred from it. Resubmit one
+pilot task against this immutable manifest, validate its receipt, and only then submit
+the remaining tasks. Do not overwrite or reprepare the manifest merely to change its
+execution-commit field.
+
 ## 7. Training and checkpoint protocol
 
 For every `(model, trial, seed)` run:
@@ -486,9 +513,13 @@ predeclared paired model. Correct multiplicity across the four learned-pairing v
 CDF tests within each model. Do not treat 20 anomalies as 20 independent training
 replicates.
 
-Report mean, median, worst anomaly, and bottom-quartile/CVaR for both endpoints. AUPRC
-is prevalence-sensitive; preserve anomaly-specific prevalence and do not compare its
-absolute magnitude with the paper unless an exactly matching paper endpoint exists.
+Report mean, median, worst anomaly, and bottom-quartile/CVaR for both endpoints. First
+average the available seeds within each anomaly and logical cell; compute worst-anomaly
+and bottom-five-anomaly/CVaR summaries over those 20 anomaly means. Do not flatten the
+seed-by-anomaly grid, because that incorrectly treats seeds as additional anomaly
+types. AUPRC is prevalence-sensitive; preserve anomaly-specific prevalence and do not
+compare its absolute magnitude with the paper unless an exactly matching paper
+endpoint exists.
 
 ### 9.3 Claims and limitations
 
@@ -594,15 +625,32 @@ The final `REPORT.md` must be concise but information-dense and contain:
 1. exact completion/provenance and whether all 84 runs succeeded;
 2. a complete table with efficiency and AUPRC in every campaign cell, highlighting
    the winner for each endpoint independently;
-3. controlled CDF-CAP versus W1/drift comparisons per model and in macro average;
-4. every learned pairing versus CDF per model, with paired seed uncertainty;
-5. random-CAP values, seed variability, and ranking association as a negative control;
-6. AE/VAE OAS diagnostics, clearly separated from native-selected primary results;
+3. controlled CDF-CAP versus W1 and versus drift comparisons per model and in macro
+   average, reported separately for efficiency and AUPRC rather than collapsed into a
+   combined win count;
+4. every learned pairing versus CDF per model and in macro average, with paired-seed
+   uncertainty separately for efficiency and AUPRC;
+5. random-CAP values, between-random-seed variability, and checkpoint-ranking
+   association with every structured CAP variant as a negative control;
+6. a direct AE/VAE native-versus-masked-OAS conclusion on identical checkpoint hashes,
+   clearly separated from native-selected primary results;
 7. paper efficiency comparisons, with no invented paper AUPRC;
 8. training curves and discussion of whether 50-epoch findings persist at 200 epochs;
 9. failures, missingness, multiplicity treatment, and discovery-selection limitation;
 10. a direct conclusion stating where pairing improves efficiency, AUPRC, both, or
-    neither, and whether CAP beats W1/drift.
+    neither, and whether CAP beats W1 and drift separately;
+11. the per-model reserve-seed decision and evidence, including completion of every
+    triggered extension;
+12. discovery hypotheses that reversed at 200 epochs or across seeds, not only those
+    that survived.
+
+Use “beats” or “improves” only when the prespecified multiplicity-adjusted interval
+supports that conclusion. Label a favorable point estimate whose interval crosses
+zero as directional or inconclusive. Efficiency differences are percentage-point
+deltas; AUPRC differences are absolute-score deltas, and every table must print those
+units. Paper comparisons are cross-system benchmarks because the validation/model-
+selection sources differ; they cannot by themselves isolate a causal effect of
+background0/background1 or pairing.
 
 Every quantitative statement must be reproducible from a named CSV/JSON artifact.
 Copy the compact report package to the requested locations and verify
@@ -622,7 +670,8 @@ Copy the compact report package to the requested locations and verify
 - [ ] Seal validation-selected checkpoints before downstream evaluation.
 - [ ] Evaluate efficiency and AUPRC on all 20 anomalies for all 42 cells and seeds.
 - [ ] Evaluate random CAP on every sealed reported checkpoint.
-- [ ] Persist optional AE/VAE OAS diagnostics without changing the primary matrix.
+- [ ] Persist mandatory masked-OAS AE/VAE diagnostics without changing the primary
+      matrix.
 - [ ] Produce paired uncertainty, multiplicity-corrected comparisons, and robustness
       summaries.
 - [ ] Independently audit counts, hashes, joins, and claims, using sub-agents for
@@ -633,3 +682,37 @@ The task is complete only when every required box is satisfied or a genuine exte
 blocker is reported with exact evidence. A queued job is not a reason to abandon the
 campaign; continue independent analysis and implementation until scheduler completion
 is the only remaining dependency.
+
+## 14. Live handoff state (2026-08-17)
+
+This section records the current execution identity. Treat durable campaign receipts
+and Slurm as authoritative if this snapshot becomes stale.
+
+```text
+Implementation commit: ddfcfbb46d7fed7308b2066328b7b898a6316cc8
+Confirmation root:
+  /iopsstor/scratch/cscs/vjimenez/adatl1/campaigns/physics_background_confirmation_ddfcfbb
+Clean execution worktree:
+  /iopsstor/scratch/cscs/vjimenez/adatl1/worktrees/physics_background_confirmation_ddfcfbb
+Discovery root:
+  /iopsstor/scratch/cscs/vjimenez/adatl1/campaigns/physics_background_nsgaii_05b649c
+```
+
+The confirmation root has authenticated 28 configurations, 42 native logical cells,
+84 primary runs, 126 run-to-cell memberships, the three frozen primary seeds, and ten
+frozen random tables. No production 200-epoch run had started at this snapshot.
+
+The forced-restart canary job `3098320` completed after exactly one requeue and wrote
+its terminal marker; its validation receipt must be sealed before production. The
+six-model real-data canary array is job `3098319` and was pending at the snapshot.
+Validate all six model markers and the restart receipt before calling `submit` for the
+84-run campaign. Retrospective random CAP remains at 0/346 complete and should begin
+with one pilot task using the immutable discovery manifest described in Section 6.2.
+
+During execution, update durable state under `<CONFIRM_ROOT>/state/` rather than
+continually rewriting this section. Use bounded sub-agents for independent log,
+artifact, or statistical audits when useful, but require the primary agent to verify
+their conclusions against receipts before submissions or scientific claims. When
+jobs or the scheduler are the only blocker, predict the next useful check from recent
+runtime and queue evidence, use the supported timer/wait mechanism, and resume until
+all required artifacts and the final report are complete.

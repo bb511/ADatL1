@@ -1,5 +1,13 @@
 # Autonomous physics background-pairing research plan
 
+> **Status (2026-08-17): historical discovery-campaign runbook.** The six 600-trial
+> searches and frozen 50-epoch checkpoint evaluation described here are complete.
+> Do not use this file to launch the previously planned exhaustive 346-configuration
+> retrain. The authoritative next-phase design is
+> [`CONFIRMATION_PLAN.md`](CONFIRMATION_PLAN.md), which freezes 42 native-score
+> selector cells, deduplicates them to 28 configurations, adds random CAP as a
+> non-optimizing diagnostic, and confirms them with independent 200-epoch seeds.
+
 ## 0. Mission, current state, and non-negotiable outcome
 
 This document is the authoritative runbook for completing the physics auto-research

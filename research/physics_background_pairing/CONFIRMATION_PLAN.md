@@ -402,21 +402,35 @@ must deduplicate physical checkpoints while retaining all logical selector
 memberships. Never run `prepare-confirmation` before endpoint extraction has bound
 every row to a checkpoint hash.
 
-The already frozen retrospective discovery manifest is authoritative and must be
+The runtime-bound retrospective discovery manifest is authoritative and must be
 reused rather than regenerated:
 
 ```text
-<DISCOVERY_ROOT>/random_cap_evaluation/discovery/manifest.json
+<DISCOVERY_ROOT>/random_cap_evaluation/discovery_5293a29/manifest.json
 ```
 
-It contains 346 physical tasks covering 421 checkpoints and 601 logical
-score/checkpoint memberships. It is intentionally bound to execution commit
-`ef3ee37`; the later confirmation-control-plane normalization fix did not change the
-random evaluator, callback, configuration, or Slurm wrapper. A prior one-task pilot
-was cancelled before execution, so no result may be inferred from it. Resubmit one
-pilot task against this immutable manifest, validate its receipt, and only then submit
-the remaining tasks. Do not overwrite or reprepare the manifest merely to change its
-execution-commit field.
+It contains 346 physical tasks and is bound to execution commit `5293a29`, the exact
+immutable runtime data cache, and the versioned random-table namespace
+`random_pairing_runtime_5293a29`. Its manifest SHA-256 is
+`cd755201c36b036a2b5b9b83fffd28dbb0153614de42b3d7e695b6b137fd463d`; the random-table
+manifest content hash is
+`d767bff5f5fb21eba668455f85fc02504159783426a91e3d00b68cf382a5d67a`.
+Always set `PHYSICS_BGPAIR_RANDOM_CAP_NAMESPACE=discovery_5293a29` when invoking the
+discovery evaluator control plane. Three earlier namespaces are failed pilot evidence
+and must not be resumed or aggregated: the unversioned `discovery`,
+`discovery_5f2a9df`, and `discovery_1f037a0`. Validate one task's terminal receipt
+against the authoritative namespace before submitting tasks 1--345. Do not overwrite
+or reprepare the manifest to accommodate a runtime mismatch; fix the implementation,
+create a new commit/worktree/namespace, and preserve the failed evidence.
+
+The authenticated random-CAP analysis must verify the prepared-manifest hash, task
+list hashes, table/source hashes, task membership identity, unique keys, dynamic
+cardinalities, and recomputed seed means/sample variances before producing any claim.
+For discovery, quantify checkpoint-ranking association only within model, logical
+objective, split, and anomaly-score stream. Compare the structured optimized CAP
+value with the mean over the five random bijections using tie-aware Spearman
+correlation; also persist each random seed's correlation and their range. Never pool
+models, splits, or native/OAS streams to manufacture a larger sample.
 
 ## 7. Training and checkpoint protocol
 
@@ -683,31 +697,40 @@ blocker is reported with exact evidence. A queued job is not a reason to abandon
 campaign; continue independent analysis and implementation until scheduler completion
 is the only remaining dependency.
 
-## 14. Live handoff state (2026-08-17)
+## 14. Live handoff state (2026-08-17 05:51 Europe/Zurich)
 
 This section records the current execution identity. Treat durable campaign receipts
 and Slurm as authoritative if this snapshot becomes stale.
 
 ```text
-Implementation commit: ddfcfbb46d7fed7308b2066328b7b898a6316cc8
+Training implementation commit: ddfcfbb46d7fed7308b2066328b7b898a6316cc8
+Current analysis/random-control commit: 5293a29
 Confirmation root:
   /iopsstor/scratch/cscs/vjimenez/adatl1/campaigns/physics_background_confirmation_ddfcfbb
 Clean execution worktree:
   /iopsstor/scratch/cscs/vjimenez/adatl1/worktrees/physics_background_confirmation_ddfcfbb
+Random-CAP execution worktree:
+  /iopsstor/scratch/cscs/vjimenez/adatl1/worktrees/physics_background_random_cap_5293a29
 Discovery root:
   /iopsstor/scratch/cscs/vjimenez/adatl1/campaigns/physics_background_nsgaii_05b649c
 ```
 
 The confirmation root has authenticated 28 configurations, 42 native logical cells,
 84 primary runs, 126 run-to-cell memberships, the three frozen primary seeds, and ten
-frozen random tables. No production 200-epoch run had started at this snapshot.
+frozen random tables. The forced-restart canary job `3098320` passed after exactly one
+requeue and has a sealed validation receipt. All six independent real-data model
+canaries passed: AE `3098330`, VAE `3098337`, DSAE `3098343`, DSVAE `3098346`,
+DeepSVDD `3098356`, and RealNVP `3098364`. Production array `3098367` contains all 84
+primary runs with concurrency 32; it was queued for priority at this snapshot. Its
+first submission is the 0--40 epoch segment, not 84 complete 200-epoch allocations.
+Reconcile and submit the 40--80, 80--120, 120--160, and 160--200 segments only after
+the preceding authenticated boundary for each run.
 
-The forced-restart canary job `3098320` completed after exactly one requeue and wrote
-its terminal marker; its validation receipt must be sealed before production. The
-six-model real-data canary array is job `3098319` and was pending at the snapshot.
-Validate all six model markers and the restart receipt before calling `submit` for the
-84-run campaign. Retrospective random CAP remains at 0/346 complete and should begin
-with one pilot task using the immutable discovery manifest described in Section 6.2.
+Retrospective random-CAP pilot `3098386_0` was running against the authoritative
+`discovery_5293a29` namespace and had passed configuration, source-hash, data-loading,
+and checkpoint-loading gates at this snapshot. Do not submit tasks 1--345 until task 0
+has a valid terminal marker. Failed pilots `3098368`, `3098378`, and `3098383` are
+preserved as diagnostic evidence and must not be counted as completed work.
 
 During execution, update durable state under `<CONFIRM_ROOT>/state/` rather than
 continually rewriting this section. Use bounded sub-agents for independent log,

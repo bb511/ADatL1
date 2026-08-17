@@ -768,8 +768,10 @@ def _active_kind_rows(rows: list[dict[str, str]], kind: str) -> list[dict[str, s
     ]
 
 
-def _live_job_ids(name: str) -> set[str]:
+def _live_job_ids(name: str, identifier_format: str = "%A") -> set[str]:
     """Return user-scoped live Slurm allocation IDs for one exact job name."""
+    if identifier_format not in {"%A", "%F"}:
+        raise ValueError(f"Unsupported Slurm job-identity format: {identifier_format}")
     squeue = shutil.which("squeue")
     if squeue is None:
         raise FileNotFoundError("squeue")
@@ -780,7 +782,7 @@ def _live_job_ids(name: str) -> set[str]:
             "--me",
             f"--name={name}",
             "--states=PENDING,RUNNING,CONFIGURING,COMPLETING,SUSPENDED",
-            "--format=%A",
+            f"--format={identifier_format}",
         ],
         check=True,
         capture_output=True,
@@ -798,8 +800,8 @@ def _live_search_job_ids() -> set[str]:
 
 
 def _live_retrain_job_ids() -> set[str]:
-    """Return allocation IDs for live retraining arrays directly from Slurm."""
-    return _live_job_ids("phys-bgpair-retrain")
+    """Return master array IDs for live retraining arrays directly from Slurm."""
+    return _live_job_ids("phys-bgpair-retrain", "%F")
 
 
 def _assert_no_live_search_overlap(rows: list[dict[str, str]], model: str) -> set[str]:

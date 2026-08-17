@@ -195,6 +195,20 @@ def _authenticate(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(operations, "_live_retrain_job_ids", lambda: set())
 
 
+def test_live_retrain_query_uses_master_array_identity(monkeypatch) -> None:
+    """Slurm child allocation IDs cannot be mistaken for unregistered arrays."""
+    captured = []
+    monkeypatch.setattr(operations.shutil, "which", lambda name: f"/bin/{name}")
+    monkeypatch.setattr(
+        operations.subprocess,
+        "run",
+        lambda command, **kwargs: captured.append(command) or SimpleNamespace(stdout="3098367\n"),
+    )
+
+    assert operations._live_retrain_job_ids() == {"3098367"}
+    assert "--format=%F" in captured[0]
+
+
 def _write_retrain_progress(root: Path, row: dict, job_ids: list[str]) -> Path:
     """Write mutable campaign state with immutable artifacts through each boundary."""
     index = int(row["retrain_index"])

@@ -261,6 +261,20 @@ def _git(repository: Path, *args: str) -> str:
 def _authenticate_execution_repository(repository: Path, design: dict[str, Any]) -> None:
     """Require the exact clean worktree named by the campaign design."""
     repository = repository.resolve()
+    if design.get("campaign_kind") == "physics_background_native_confirmation":
+        root = Path(str(design["runner_manifest"])).resolve().parents[1]
+        extension_path = root / "selection/reserve_extension_manifest.json"
+        if extension_path.is_file():
+            from src.evaluation.physics_background_pairing_confirmation_matrix import (
+                authenticate_reserve_execution_repository,
+                load_authenticated_confirmation_campaign,
+            )
+
+            frozen = load_authenticated_confirmation_campaign(root)
+            if frozen["design"] != design or frozen["reserve_extension"] is None:
+                raise RuntimeError("Reserve execution identity is detached from the campaign.")
+            authenticate_reserve_execution_repository(repository, frozen["reserve_extension"])
+            return
     if _git(repository, "rev-parse", "HEAD") != design["code_commit"]:
         raise RuntimeError("Execution repository does not match the frozen campaign commit.")
     if _git(repository, "status", "--porcelain", "--untracked-files=all"):
@@ -1184,11 +1198,19 @@ def _validate_retrain_marker(marker: Path, row: dict[str, Any]) -> bool:
     return True
 
 
+def _retrain_manifest_path(root: Path) -> Path:
+    """Use the immutable reserve-extended runner when one has been frozen."""
+    effective = root / "selection" / "effective_retrain_manifest.json"
+    return (
+        effective if effective.is_file() else root / "selection" / "pareto_retrain_manifest.json"
+    )
+
+
 def missing_retrains(root: Path, repository: Path) -> list[int]:
     """Return exact frozen retrain indices lacking an authenticated marker."""
     design = _design(root)
     _authenticate_execution_repository(repository, design)
-    manifest_path = root / "selection" / "pareto_retrain_manifest.json"
+    manifest_path = _retrain_manifest_path(root)
     if not manifest_path.is_file():
         raise FileNotFoundError("Freeze the Pareto fronts before submitting retraining.")
     manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
@@ -1285,7 +1307,7 @@ def _load_retrain_task_map(root: Path, design: dict[str, Any], digest: str) -> d
     if not path.is_file() or _sha256(path) != digest:
         raise RuntimeError(f"Retrain task map is missing or changed: {path}")
     payload = json.loads(path.read_text(encoding="utf-8"))
-    manifest_path = root / "selection" / "pareto_retrain_manifest.json"
+    manifest_path = _retrain_manifest_path(root)
     manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
     entries = payload.get("entries", [])
     if (
@@ -1372,7 +1394,7 @@ def _submit_retrains_locked(
     for path in (data_dir, raw_data_dir, pairing_dir):
         if not path.is_dir():
             raise FileNotFoundError(path)
-    manifest_path = root / "selection" / "pareto_retrain_manifest.json"
+    manifest_path = _retrain_manifest_path(root)
     manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
     rows_by_index = {int(row["retrain_index"]): row for row in manifest["retrain_runs"]}
     batch = missing[:MAX_RETRAIN_ARRAY_TASKS]
@@ -2267,7 +2289,7 @@ def _validate_retrain_receipt(
     if (ledger_row.get("success_sha256") or "") not in {"", receipt_sha256}:
         raise RuntimeError(f"Retrain receipt changed after ledger sealing: {receipt_path}")
     index = _retrain_index_for_ledger_row(root, design, ledger_row)
-    manifest_path = root / "selection" / "pareto_retrain_manifest.json"
+    manifest_path = _retrain_manifest_path(root)
     manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
     runs = manifest.get("retrain_runs", [])
     expected_row = runs[index] if 0 <= index < len(runs) else None
@@ -2374,7 +2396,7 @@ def _completed_retrain_marker(root: Path, design: dict[str, Any], row: dict[str,
         )
 
     index = _retrain_index_for_ledger_row(root, design, row)
-    manifest_path = root / "selection" / "pareto_retrain_manifest.json"
+    manifest_path = _retrain_manifest_path(root)
     manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
     runs = manifest.get("retrain_runs", [])
     if (
@@ -2715,7 +2737,7 @@ def _freeze_campaign_locked(root: Path, repository: Path) -> Path:
         raise FileNotFoundError(runner)
     command = [sys.executable, str(runner), "--root", str(root), "freeze"]
     subprocess.run(command, cwd=repository, check=True)  # nosec B603
-    manifest_path = root / "selection" / "pareto_retrain_manifest.json"
+    manifest_path = _retrain_manifest_path(root)
     if not manifest_path.is_file():
         raise RuntimeError("Frozen campaign runner emitted no Pareto manifest.")
     manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
@@ -2895,7 +2917,7 @@ def aggregate_campaign(root: Path, repository: Path) -> Path:
         if active_retrains:
             raise RuntimeError(f"Retraining jobs remain active at aggregation: {active_retrains}.")
 
-        manifest_path = root / "selection" / "pareto_retrain_manifest.json"
+        manifest_path = _retrain_manifest_path(root)
         if not manifest_path.is_file():
             raise FileNotFoundError("Freeze the Pareto fronts before aggregation.")
         manifest = json.loads(manifest_path.read_text(encoding="utf-8"))

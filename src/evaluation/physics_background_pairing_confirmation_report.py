@@ -7,6 +7,7 @@ import hashlib
 import json
 import math
 import os
+import statistics
 import tempfile
 from pathlib import Path
 from typing import Any
@@ -17,6 +18,15 @@ from src.evaluation.physics_background_pairing_confirmation_analysis import (
 from src.evaluation.physics_background_pairing_paper_comparison import (
     build_paper_comparison,
     load_authenticated_paper_reference,
+)
+from src.evaluation.physics_background_pairing_random_cap_analysis import (
+    DISCOVERY_MANIFEST_CONTENT_SHA256,
+    DISCOVERY_MANIFEST_SHA256,
+    DISCOVERY_MEMBERSHIP_SCORES,
+    DISCOVERY_MEMBERSHIPS,
+    DISCOVERY_NAMESPACE,
+    DISCOVERY_RANDOM_PAIRING_CONTENT_SHA256,
+    DISCOVERY_TASKS,
 )
 
 MODELS = ("ae", "vae", "dsae", "dsvae", "svdd", "realnvp")
@@ -73,6 +83,200 @@ def _load_analysis(analysis_dir: Path) -> tuple[dict[str, Any], dict[str, list[d
     return manifest, tables
 
 
+def _load_random_analysis(
+    analysis_dir: Path,
+    expected_mode: str,
+    *,
+    confirmation_provenance: dict[str, str | None] | None = None,
+) -> tuple[dict[str, Any], dict[str, list[dict[str, str]]]]:
+    """Authenticate one portable random-CAP analysis package and its tables."""
+    analysis_dir = analysis_dir.resolve(strict=True)
+    manifest_path = analysis_dir / "random_cap_analysis.json"
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    digest = manifest.pop("content_sha256", None)
+    if digest != _content_hash(manifest):
+        raise ValueError("Random-CAP analysis receipt content hash differs.")
+    manifest["content_sha256"] = digest
+    if (
+        manifest.get("schema_version") != 1
+        or manifest.get("method", {}).get("mode") != expected_mode
+        or manifest.get("method", {}).get("purpose") != "negative_control_diagnostic_only"
+        or not manifest.get("method", {}).get(
+            "random_cap_did_not_select_hyperparameters_or_checkpoints"
+        )
+    ):
+        raise ValueError(f"Random-CAP {expected_mode} analysis identity differs.")
+    inputs = manifest.get("inputs", {})
+    if expected_mode == "discovery":
+        expected_identity = {
+            "manifest_namespace": DISCOVERY_NAMESPACE,
+            "manifest_sha256": DISCOVERY_MANIFEST_SHA256,
+            "manifest_content_sha256": DISCOVERY_MANIFEST_CONTENT_SHA256,
+            "random_pairing_content_sha256": DISCOVERY_RANDOM_PAIRING_CONTENT_SHA256,
+        }
+        expected_counts = {
+            "tasks": DISCOVERY_TASKS,
+            "memberships": DISCOVERY_MEMBERSHIPS,
+            "membership_scores": DISCOVERY_MEMBERSHIP_SCORES,
+            "seed_rows": DISCOVERY_MEMBERSHIP_SCORES * 10,
+            "variability_rows": DISCOVERY_MEMBERSHIP_SCORES * 2,
+        }
+        if any(inputs.get(key) != value for key, value in expected_identity.items()) or any(
+            int(manifest["method"].get(key, -1)) != value for key, value in expected_counts.items()
+        ):
+            raise ValueError(
+                "Discovery random-CAP authoritative provenance or cardinality differs."
+            )
+    elif confirmation_provenance is None or any(
+        inputs.get(key) != value for key, value in confirmation_provenance.items()
+    ):
+        raise ValueError(
+            "Confirmation random-CAP analysis is not bound to the endpoint provenance."
+        )
+    tables = {}
+    for name, expected_hash in manifest.get("artifacts", {}).items():
+        path = (analysis_dir / name).resolve(strict=True)
+        if not path.is_relative_to(analysis_dir) or _sha256(path) != expected_hash:
+            raise ValueError(f"Random-CAP analysis artifact changed: {path}")
+        tables[name] = _read_csv(path)
+    if "random_cap_variability.csv" not in tables or "random_cap_values.csv" not in tables:
+        raise ValueError("Random-CAP analysis lacks values or variability evidence.")
+    if expected_mode == "discovery" and "structured_random_rank_associations.csv" not in tables:
+        raise ValueError("Discovery random-CAP analysis lacks rank associations.")
+    values = tables["random_cap_values.csv"]
+    variability = tables["random_cap_variability.csv"]
+    required_value_fields = {
+        "task_index",
+        "membership_index",
+        "evaluation_score",
+        "split",
+        "replicate",
+        "pairing_seed",
+        "checkpoint_sha256",
+        "pair_table_sha256",
+        "cap",
+    }
+    required_variability_fields = {
+        "task_index",
+        "membership_index",
+        "evaluation_score",
+        "split",
+        "n_pairings",
+        "cap_mean",
+        "cap_sample_variance",
+        "cap_sample_std",
+        "cap_range",
+    }
+    if (
+        any(not required_value_fields <= set(row) for row in values)
+        or any(not required_variability_fields <= set(row) for row in variability)
+        or len(values) != int(manifest["method"].get("seed_rows", -1))
+        or len(variability) != int(manifest["method"].get("variability_rows", -1))
+    ):
+        raise ValueError("Random-CAP analysis table schema or cardinality differs.")
+    value_keys = {
+        (
+            row["task_index"],
+            row["membership_index"],
+            row["evaluation_score"],
+            row["split"],
+            row["replicate"],
+        )
+        for row in values
+    }
+    variability_keys = {
+        (row["task_index"], row["membership_index"], row["evaluation_score"], row["split"])
+        for row in variability
+    }
+    if len(value_keys) != len(values) or len(variability_keys) != len(variability):
+        raise ValueError("Random-CAP analysis contains duplicate value or variability keys.")
+    for row in values:
+        _number(row, "cap")
+    for row in variability:
+        if int(row["n_pairings"]) != 5:
+            raise ValueError("Random-CAP variability row does not contain five pairings.")
+        for field in ("cap_mean", "cap_sample_variance", "cap_sample_std", "cap_range"):
+            _number(row, field)
+    if expected_mode == "discovery":
+        associations = tables["structured_random_rank_associations.csv"]
+        required_association_fields = {
+            "model",
+            "logical_objective",
+            "split",
+            "random_source",
+            "n_checkpoints",
+            "spearman_rho",
+            "pairing_seed_rho_finite_count",
+            "pairing_seed_rho_undefined_count",
+            "pairing_seed_rho_min",
+            "pairing_seed_rho_max",
+            "pairing_seed_rho_range",
+        }
+        if len(associations) != int(manifest["method"].get("rank_association_rows", -1)) or any(
+            not required_association_fields <= set(row) for row in associations
+        ):
+            raise ValueError("Random-CAP rank-association schema or cardinality differs.")
+        panels: dict[tuple[str, str, str], set[str]] = {}
+        for row in associations:
+            key = (row["model"], row["logical_objective"], row["split"])
+            sources = panels.setdefault(key, set())
+            if row["random_source"] in sources:
+                raise ValueError(f"Duplicate random-CAP association source for {key}.")
+            sources.add(row["random_source"])
+            if row["spearman_rho"]:
+                rho = _number(row, "spearman_rho")
+                if not -1.0 <= rho <= 1.0:
+                    raise ValueError("Random-CAP Spearman rho is outside [-1, 1].")
+            finite_count = int(row["pairing_seed_rho_finite_count"])
+            undefined_count = int(row["pairing_seed_rho_undefined_count"])
+            if finite_count + undefined_count != 5:
+                raise ValueError("Random-CAP pairing-seed rho coverage is not five.")
+            if finite_count:
+                low = _number(row, "pairing_seed_rho_min")
+                high = _number(row, "pairing_seed_rho_max")
+                span = _number(row, "pairing_seed_rho_range")
+                if low > high or not math.isclose(span, high - low, abs_tol=1e-12):
+                    raise ValueError("Random-CAP pairing-seed rho range differs.")
+        expected_sources = {"five_pairing_mean", *[f"pairing_replicate_{i}" for i in range(5)]}
+        if len(panels) != int(manifest["method"].get("rank_panels", -1)) or any(
+            sources != expected_sources for sources in panels.values()
+        ):
+            raise ValueError("Random-CAP rank-panel coverage differs.")
+    return manifest, tables
+
+
+def _confirmation_provenance(
+    analysis_manifest: dict[str, Any],
+) -> dict[str, str | None]:
+    """Authenticate and expose the endpoint analysis's upstream identities."""
+    inputs = analysis_manifest.get("inputs", {})
+    matrix_path = Path(inputs.get("matrix", "")).resolve(strict=True)
+    if _sha256(matrix_path) != inputs.get("matrix_sha256"):
+        raise ValueError("Confirmation endpoint matrix file hash differs.")
+    matrix = json.loads(matrix_path.read_text(encoding="utf-8"))
+    digest = matrix.get("content_sha256")
+    if digest != _content_hash(
+        {key: value for key, value in matrix.items() if key != "content_sha256"}
+    ):
+        raise ValueError("Confirmation endpoint matrix content hash differs.")
+    endpoint_path = Path(inputs.get("endpoint_receipt", "")).resolve(strict=True)
+    endpoint_sha256 = inputs.get("endpoint_receipt_sha256")
+    if _sha256(endpoint_path) != endpoint_sha256:
+        raise ValueError("Confirmation endpoint receipt file hash differs.")
+    endpoint = json.loads(endpoint_path.read_text(encoding="utf-8"))
+    if endpoint.get("matrix_content_sha256") != digest:
+        raise ValueError("Confirmation endpoint receipt matrix identity differs.")
+    return {
+        "confirmation_matrix_content_sha256": str(digest),
+        "runner_manifest_content_sha256": endpoint.get("effective_runner_content_sha256"),
+        "reserve_extension_content_sha256": endpoint.get("reserve_extension_content_sha256"),
+        "checkpoint_selections_sha256": endpoint.get("artifacts", {}).get(
+            "checkpoint_selections.csv"
+        ),
+        "endpoint_receipt_sha256": endpoint_sha256,
+    }
+
+
 def _number(row: dict[str, str], field: str) -> float:
     """Read one finite numeric result."""
     value = float(row[field])
@@ -125,7 +329,9 @@ def _cell_table(rows: list[dict[str, str]]) -> tuple[list[str], dict[tuple[str, 
     return lines, compact
 
 
-def _validated_reserve_decisions(rows: list[dict[str, str]]) -> dict[str, dict[str, str]]:
+def _validated_reserve_decisions(
+    rows: list[dict[str, str]], seeds_by_model: dict[str, list[int]]
+) -> dict[str, dict[str, str]]:
     """Require one terminal reserve-seed decision for every model."""
     decisions: dict[str, dict[str, str]] = {}
     for row in rows:
@@ -140,7 +346,7 @@ def _validated_reserve_decisions(rows: list[dict[str, str]]) -> dict[str, dict[s
             )
         expected = 3 if decision == "no_extension" else 5
         observed = int(row.get("observed_seed_count", expected))
-        if observed != expected:
+        if observed != expected or observed != len(seeds_by_model.get(model, [])):
             raise ValueError(
                 f"Reserve decision/count mismatch for {model}: {decision} with {observed} seeds."
             )
@@ -188,11 +394,17 @@ def build_confirmation_report(
     analysis_dir: Path,
     repository: Path,
     *,
-    random_aggregate: Path | None = None,
+    discovery_random_analysis: Path | None = None,
+    confirmation_random_analysis: Path | None = None,
 ) -> tuple[str, dict[str, Any]]:
     """Build an information-dense report and machine-readable result summary."""
     manifest, tables = _load_analysis(analysis_dir.resolve(strict=True))
-    reserve_decisions = _validated_reserve_decisions(tables["reserve_seed_decisions.csv"])
+    seeds_by_model = manifest["method"].get("training_seeds_by_model") or {
+        model: manifest["method"]["seeds"] for model in MODELS
+    }
+    reserve_decisions = _validated_reserve_decisions(
+        tables["reserve_seed_decisions.csv"], seeds_by_model
+    )
     cell_lines, cell_values = _cell_table(tables["endpoints_across_seeds.csv"])
     paper_rows, paper_reference_hash = _paper_rows(repository.resolve(strict=True), cell_values)
     comparisons = tables["comparison_summary.csv"]
@@ -344,17 +556,93 @@ def build_confirmation_report(
     )
 
     random_status = "not_supplied"
-    if random_aggregate is not None:
-        payload = json.loads(random_aggregate.read_text(encoding="utf-8"))
-        if payload.get("seed_split_values_sha256") != _content_hash(
-            payload.get("seed_split_values")
-        ) or payload.get("summary_sha256") != _content_hash(payload.get("summary")):
-            raise ValueError("Random-CAP aggregate content hash differs.")
-        random_status = f"authenticated: {len(payload['seed_split_values'])} seed-level rows, {len(payload['summary'])} summaries"
+    random_receipts: dict[str, str] = {}
+    lines.extend(["", "## Random-pairing negative control", ""])
+    if discovery_random_analysis is not None:
+        discovery_receipt, discovery_tables = _load_random_analysis(
+            discovery_random_analysis, "discovery"
+        )
+        random_receipts["discovery"] = discovery_receipt["content_sha256"]
+        mean_associations = [
+            row
+            for row in discovery_tables["structured_random_rank_associations.csv"]
+            if row["random_source"] == "five_pairing_mean"
+        ]
+        association_index: dict[tuple[str, str], dict[str, dict[str, str]]] = {}
+        for row in mean_associations:
+            key = (row["model"], row["logical_objective"])
+            if row["split"] in association_index.setdefault(key, {}):
+                raise ValueError(f"Duplicate random-CAP rank association: {key}.")
+            association_index[key][row["split"]] = row
+        if any(
+            set(split_rows) != {"validate", "test"} for split_rows in association_index.values()
+        ):
+            raise ValueError("Random-CAP rank association lacks one analysis split.")
+        lines.extend(
+            [
+                "Structured-CAP versus mean-random-CAP checkpoint-rank association on the frozen discovery universe:",
+                "",
+                "| Model | Structured objective | N | Validation rho | Validation seed-rho range | Test rho | Test seed-rho range |",
+                "|---|---|---:|---:|---:|---:|---:|",
+            ]
+        )
+        for (model, objective), split_rows in sorted(association_index.items()):
+            validate, test = split_rows["validate"], split_rows["test"]
+            if validate["n_checkpoints"] != test["n_checkpoints"]:
+                raise ValueError("Random-CAP rank-association split cardinalities differ.")
+
+            def seed_range(row: dict[str, str]) -> str:
+                if int(row["pairing_seed_rho_finite_count"]) == 0:
+                    return f"undefined ({row['pairing_seed_rho_undefined_count']}/5)"
+                return (
+                    f"[{float(row['pairing_seed_rho_min']):.3f}, "
+                    f"{float(row['pairing_seed_rho_max']):.3f}] "
+                    f"({row['pairing_seed_rho_undefined_count']}/5 undefined)"
+                )
+
+            lines.append(
+                f"| {model.upper()} | {objective} | {validate['n_checkpoints']} | "
+                f"{validate['spearman_rho'] or 'undefined'} | "
+                f"{seed_range(validate)} | {test['spearman_rho'] or 'undefined'} | "
+                f"{seed_range(test)} |"
+            )
+        random_status = (
+            f"discovery authenticated ({discovery_receipt['method']['seed_rows']} seed rows)"
+        )
+    if confirmation_random_analysis is not None:
+        confirmation_receipt, confirmation_tables = _load_random_analysis(
+            confirmation_random_analysis,
+            "confirmation",
+            confirmation_provenance=_confirmation_provenance(manifest),
+        )
+        random_receipts["confirmation"] = confirmation_receipt["content_sha256"]
+        variability_groups: dict[tuple[str, str, str], list[dict[str, str]]] = {}
+        for row in confirmation_tables["random_cap_variability.csv"]:
+            variability_groups.setdefault(
+                (row["model"], row["evaluation_score"], row["split"]), []
+            ).append(row)
+        lines.extend(
+            [
+                "",
+                "Five-random-bijection variability on sealed confirmation checkpoints:",
+                "",
+                "| Model | Score | Split | Checkpoint memberships | Median random-CAP SD | Maximum range |",
+                "|---|---|---|---:|---:|---:|",
+            ]
+        )
+        for (model, score, split), rows in sorted(variability_groups.items()):
+            standard_deviations = [_number(row, "cap_sample_std") for row in rows]
+            ranges = [_number(row, "cap_range") for row in rows]
+            lines.append(
+                f"| {model.upper()} | {score} | {split} | {len(rows)} | "
+                f"{statistics.median(standard_deviations):.4g} | {max(ranges):.4g} |"
+            )
+        random_status = (
+            f"{random_status}; confirmation authenticated "
+            f"({confirmation_receipt['method']['seed_rows']} seed rows)"
+        )
     lines.extend(
         [
-            "",
-            "## Random-pairing negative control",
             "",
             f"Status: {random_status}. Random CAP is diagnostic only and never selected a hyperparameter or checkpoint.",
             "",
@@ -390,6 +678,7 @@ def build_confirmation_report(
             model: reserve_decisions[model]["decision"] for model in MODELS
         },
         "random_cap_status": random_status,
+        "random_cap_analysis_receipts": random_receipts,
     }
     summary["content_sha256"] = _content_hash(summary)
     return "\n".join(lines), summary
@@ -400,11 +689,15 @@ def write_confirmation_report(
     repository: Path,
     output_dir: Path,
     *,
-    random_aggregate: Path | None = None,
+    discovery_random_analysis: Path | None = None,
+    confirmation_random_analysis: Path | None = None,
 ) -> dict[str, Any]:
     """Persist final Markdown and JSON atomically without overwriting different results."""
     report, summary = build_confirmation_report(
-        analysis_dir, repository, random_aggregate=random_aggregate
+        analysis_dir,
+        repository,
+        discovery_random_analysis=discovery_random_analysis,
+        confirmation_random_analysis=confirmation_random_analysis,
     )
     output_dir.mkdir(parents=True, exist_ok=True)
     artifacts = {

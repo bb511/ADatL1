@@ -16,6 +16,18 @@ assert SPEC.loader is not None
 SPEC.loader.exec_module(campaign)
 
 
+def test_retrain_manifest_prefers_frozen_reserve_extension(tmp_path: Path) -> None:
+    """Mapped reserve jobs resolve the immutable effective runner manifest."""
+    selection = tmp_path / "selection"
+    selection.mkdir()
+    base = selection / "pareto_retrain_manifest.json"
+    effective = selection / "effective_retrain_manifest.json"
+    base.write_text("{}", encoding="utf-8")
+    assert campaign._retrain_manifest_path(tmp_path) == base
+    effective.write_text("{}", encoding="utf-8")
+    assert campaign._retrain_manifest_path(tmp_path) == effective
+
+
 def _write_exact_checkpoint(path: Path, epoch: int = 0) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     torch.save(

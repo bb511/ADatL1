@@ -376,3 +376,18 @@ def test_confirmation_manifest_deduplicates_126_sealed_cell_checkpoints(
     assert sum(len(task["memberships"]) for task in manifest["tasks"]) == 126
     assert sum(len(task["checkpoints"]) for task in manifest["tasks"]) == 84
     assert all(task["scores"] == ["native", "residual_oas"] for task in manifest["tasks"])
+
+    authenticated = []
+    frozen["design"]["code_commit"] = "b" * 40
+    frozen["reserve_extension"] = {
+        "execution_commit": commit,
+        "content_sha256": "extension",
+    }
+    monkeypatch.setattr(
+        runner,
+        "authenticate_reserve_execution_repository",
+        lambda repo, extension: authenticated.append((repo.resolve(), extension)),
+    )
+    reserve_manifest = build_confirmation_manifest(root, repository, selections, receipt)
+    assert reserve_manifest["execution_commit"] == commit
+    assert authenticated == [(repository.resolve(), frozen["reserve_extension"])]

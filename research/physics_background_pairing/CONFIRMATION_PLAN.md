@@ -332,6 +332,7 @@ files before changing campaign semantics:
 | `configs/diagnostic_suite/physics_background_random_cap_native_oas.yaml` | Separate masked-OAS diagnostic for AE/VAE only. |
 | `scripts/physics_background_pairing_random_cap_evaluation.py` | Prepare authenticated discovery/confirmation checkpoint tasks, evaluate them, report status, and aggregate random-CAP outputs. |
 | `scripts/clariden/physics_background_pairing_random_cap.sbatch` | GPU array wrapper for offline random-CAP tasks. |
+| `src/evaluation/physics_background_pairing_random_cap_analysis.py` and its script wrapper | Reauthenticate random-CAP aggregates, reproduce five-bijection mean/variance, and compute split/score-specific structured-versus-random rank diagnostics without pooled panels. |
 
 The paper-reference experiment configs under `configs/experiment/physics/` remain the
 source of model/data/trainer behavior. New confirmation tooling overlays exact trial
@@ -697,7 +698,7 @@ blocker is reported with exact evidence. A queued job is not a reason to abandon
 campaign; continue independent analysis and implementation until scheduler completion
 is the only remaining dependency.
 
-## 14. Live handoff state (2026-08-17 05:51 Europe/Zurich)
+## 14. Live handoff state (2026-08-17 06:19 Europe/Zurich)
 
 This section records the current execution identity. Treat durable campaign receipts
 and Slurm as authoritative if this snapshot becomes stale.
@@ -721,16 +722,21 @@ frozen random tables. The forced-restart canary job `3098320` passed after exact
 requeue and has a sealed validation receipt. All six independent real-data model
 canaries passed: AE `3098330`, VAE `3098337`, DSAE `3098343`, DSVAE `3098346`,
 DeepSVDD `3098356`, and RealNVP `3098364`. Production array `3098367` contains all 84
-primary runs with concurrency 32; it was queued for priority at this snapshot. Its
-first submission is the 0--40 epoch segment, not 84 complete 200-epoch allocations.
-Reconcile and submit the 40--80, 80--120, 120--160, and 160--200 segments only after
-the preceding authenticated boundary for each run.
+primary runs with concurrency 32. At this snapshot, tasks 0--11 were running their
+first authenticated 0--40 epoch segment and tasks 12--83 were pending for resources.
+This is not 84 complete 200-epoch allocations. Reconcile and submit the 40--80,
+80--120, 120--160, and 160--200 segments only after the preceding authenticated
+boundary for each run.
 
-Retrospective random-CAP pilot `3098386_0` was running against the authoritative
-`discovery_5293a29` namespace and had passed configuration, source-hash, data-loading,
-and checkpoint-loading gates at this snapshot. Do not submit tasks 1--345 until task 0
-has a valid terminal marker. Failed pilots `3098368`, `3098378`, and `3098383` are
-preserved as diagnostic evidence and must not be counted as completed work.
+Retrospective random-CAP pilot `3098386_0` passed against the authoritative
+`discovery_5293a29` namespace and produced the expected native/OAS validation/test
+rows over all five frozen random bijections. Remaining discovery tasks have complete,
+non-overlapping coverage: debug task `3098415_1` was running, dependent debug task
+`3098423_2` was queued, normal array `3098429_3-5` was pending, and normal array
+`3098406_6-345` was pending. Preserve that coverage when moving work between queues:
+cancel an exact pending task before resubmitting it elsewhere, and never duplicate a
+running or completed task. Failed pilots `3098368`, `3098378`, and `3098383` remain
+diagnostic evidence and must not be counted as completed work.
 
 During execution, update durable state under `<CONFIRM_ROOT>/state/` rather than
 continually rewriting this section. Use bounded sub-agents for independent log,

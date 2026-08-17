@@ -6,6 +6,7 @@ import csv
 import json
 import random
 import sqlite3
+import subprocess  # nosec B404 -- isolated fixed Git fixture commands
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -13,8 +14,133 @@ import pytest
 import torch
 import yaml
 
+from scripts import physics_background_pairing_campaign as training_campaign
 from scripts import physics_background_pairing_operations as operations
 from scripts import physics_background_pairing_report as report
+from src.evaluation import (
+    physics_background_pairing_confirmation_matrix as confirmation_matrix,
+)
+
+
+def test_operations_prefer_frozen_reserve_extension_manifest(tmp_path: Path) -> None:
+    """Submission, reconciliation, and task maps share the effective runner path."""
+    selection = tmp_path / "selection"
+    selection.mkdir()
+    base = selection / "pareto_retrain_manifest.json"
+    effective = selection / "effective_retrain_manifest.json"
+    base.write_text("{}", encoding="utf-8")
+    assert operations._retrain_manifest_path(tmp_path) == base
+    effective.write_text("{}", encoding="utf-8")
+    assert operations._retrain_manifest_path(tmp_path) == effective
+
+
+def test_reserve_task_launches_from_authenticated_post_base_worktree(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A clean control-plane commit launches reserve work without rebinding base receipts."""
+    repository = tmp_path / "repository"
+    repository.mkdir()
+    git = operations.shutil.which("git")
+    assert git is not None
+
+    def run_git(*args: str, capture_output: bool = False) -> subprocess.CompletedProcess[str]:
+        return subprocess.run(  # nosec B603 -- fixed Git executable and fixture arguments
+            [git, *args],
+            cwd=repository,
+            check=True,
+            capture_output=capture_output,
+            text=True,
+        )
+
+    run_git("init", "-q")
+    run_git("config", "user.email", "test@example.invalid")
+    run_git("config", "user.name", "Test")
+    required = sorted(confirmation_matrix.REQUIRED_RESERVE_EXECUTION_PATHS)
+    for relative in required:
+        path = repository / relative
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text("base\n", encoding="utf-8")
+    retrain_script = repository / "scripts/clariden/physics_background_pairing_retrain.sbatch"
+    retrain_script.parent.mkdir(parents=True, exist_ok=True)
+    retrain_script.write_text("#!/bin/sh\n", encoding="utf-8")
+    run_git("add", ".")
+    run_git("commit", "-qm", "base")
+    base_commit = run_git("rev-parse", "HEAD", capture_output=True).stdout.strip()
+    for relative in required:
+        (repository / relative).write_text("base\nreserve control plane\n", encoding="utf-8")
+    run_git("add", ".")
+    run_git("commit", "-qm", "reserve")
+    extension = confirmation_matrix._reserve_execution_identity(repository, base_commit)
+
+    root = tmp_path / "campaign"
+    selection = root / "selection"
+    selection.mkdir(parents=True)
+    base_row = {"retrain_index": 0, "model": "ae", "seed": 271828}
+    reserve_row = {"retrain_index": 1, "model": "ae", "seed": 141421}
+    base_manifest = {
+        "schema_version": 2,
+        "code_commit": base_commit,
+        "retrain_runs": [base_row],
+        "front_memberships": [],
+    }
+    effective_manifest = {
+        **base_manifest,
+        "retrain_runs": [base_row, reserve_row],
+        "base_content_sha256": "d" * 64,
+        "reserve_extension_content_sha256": "e" * 64,
+    }
+    base_path = selection / "pareto_retrain_manifest.json"
+    effective_path = selection / "effective_retrain_manifest.json"
+    base_path.write_text(json.dumps(base_manifest), encoding="utf-8")
+    effective_path.write_text(json.dumps(effective_manifest), encoding="utf-8")
+    (selection / "reserve_extension_manifest.json").write_text("{}", encoding="utf-8")
+    design = {
+        "schema_version": 2,
+        "code_commit": base_commit,
+        "campaign_kind": "physics_background_native_confirmation",
+        "runner_manifest": str(base_path.resolve()),
+    }
+    (root / "design.json").write_text(json.dumps(design), encoding="utf-8")
+    frozen = {"design": design, "reserve_extension": extension}
+    monkeypatch.setattr(
+        confirmation_matrix, "load_authenticated_confirmation_campaign", lambda root: frozen
+    )
+    operations._authenticate_execution_repository(repository, design)
+
+    # Base evidence remains bound to the original manifest; only the added index uses the overlay.
+    assert training_campaign._retrain_manifest_path(root, 0) == base_path
+    assert training_campaign._retrain_manifest_path(root, 1) == effective_path
+    task_map, digest, _ = operations._write_retrain_task_map(
+        root, design, effective_path, effective_manifest, [1]
+    )
+    assert training_campaign.resolve_retrain_task_index(root, task_map, digest, 0) == 1
+
+    for name in ("data", "raw", "pairing"):
+        (tmp_path / name).mkdir()
+    monkeypatch.setattr(operations, "_authenticate_execution_repository", lambda *args: None)
+    monkeypatch.setattr(
+        operations, "_validate_retrain_marker", lambda marker, row: row == base_row
+    )
+    monkeypatch.setattr(operations, "_live_retrain_job_ids", lambda: set())
+    monkeypatch.setattr(operations.shutil, "which", lambda command: "/fake/sbatch")
+    monkeypatch.setattr(
+        operations.subprocess,
+        "run",
+        lambda *args, **kwargs: SimpleNamespace(stdout="4242\n"),
+    )
+    assert (
+        operations.submit_retrains(
+            root,
+            repository,
+            1,
+            tmp_path / "data",
+            tmp_path / "raw",
+            tmp_path / "pairing",
+        )
+        == "4242"
+    )
+    ledger = list(csv.DictReader((root / "state/job_history.csv").open(encoding="utf-8")))
+    assert [(row["job_id"], row["commit"]) for row in ledger] == [("4242_0", base_commit)]
 
 
 def _write_exact_checkpoint(path: Path, epoch: int) -> None:

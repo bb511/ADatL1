@@ -7,10 +7,12 @@ import hashlib
 import json
 import math
 import os
+import shutil
+import subprocess  # nosec B404 -- fixed read-only Git provenance commands
 import tempfile
 from collections import defaultdict
 from pathlib import Path
-from typing import Any, Iterable
+from typing import Any, Iterable, Mapping
 
 MODELS = ("ae", "vae", "dsae", "dsvae", "svdd", "realnvp")
 SELECTORS = (
@@ -52,6 +54,23 @@ EXPECTED_UNIQUE_BY_MODEL = {
 }
 TRIALS_RELATIVE = Path("results/trials.csv")
 FRONTS_RELATIVE = Path("results/endpoint_analysis/primary_front_summary.csv")
+RESERVE_EXTENSION_RELATIVE = Path("selection/reserve_extension_manifest.json")
+EFFECTIVE_RUNNER_RELATIVE = Path("selection/effective_retrain_manifest.json")
+RESERVE_EXECUTION_PATH_PREFIXES = (
+    "research/physics_background_pairing/CONFIRMATION_PLAN.md",
+    "scripts/physics_background_pairing_campaign.py",
+    "scripts/physics_background_pairing_confirmation_",
+    "scripts/physics_background_pairing_operations.py",
+    "scripts/physics_background_pairing_random_cap_",
+    "src/evaluation/physics_background_pairing_confirmation_",
+    "src/evaluation/physics_background_pairing_random_cap_",
+    "tests/test_physics_background_pairing_",
+)
+REQUIRED_RESERVE_EXECUTION_PATHS = {
+    "scripts/physics_background_pairing_campaign.py",
+    "scripts/physics_background_pairing_operations.py",
+    "src/evaluation/physics_background_pairing_confirmation_matrix.py",
+}
 
 
 def _sha256(path: Path) -> str:
@@ -354,6 +373,240 @@ def _atomic_text(path: Path, text: str) -> Path:
     return path
 
 
+def _reserve_execution_identity(repository: Path, base_commit: str) -> dict[str, Any]:
+    """Authenticate a clean post-base commit containing control-plane changes only."""
+    repository = repository.expanduser().resolve(strict=True)
+    git = shutil.which("git")
+    if git is None:
+        raise FileNotFoundError("git")
+
+    def query(*args: str, text: bool = True) -> str | bytes:
+        return subprocess.run(  # nosec B603 -- fixed Git executable and reviewed arguments
+            [git, *args], cwd=repository, check=True, capture_output=True, text=text
+        ).stdout
+
+    if str(query("status", "--porcelain", "--untracked-files=all")).strip():
+        raise RuntimeError("Reserve execution requires a clean commit-pinned worktree.")
+    execution_commit = str(query("rev-parse", "HEAD")).strip()
+    ancestor = subprocess.run(  # nosec B603 -- fixed read-only Git query
+        [git, "merge-base", "--is-ancestor", base_commit, execution_commit],
+        cwd=repository,
+        check=False,
+    )
+    if ancestor.returncode != 0:
+        raise RuntimeError("Reserve execution commit does not descend from the base campaign.")
+    if execution_commit == base_commit:
+        raise RuntimeError("Reserve execution must use a post-base control-plane commit.")
+    changed_paths = tuple(
+        line
+        for line in str(
+            query("diff", "--name-only", f"{base_commit}..{execution_commit}")
+        ).splitlines()
+        if line
+    )
+    disallowed = [
+        path
+        for path in changed_paths
+        if not any(path.startswith(prefix) for prefix in RESERVE_EXECUTION_PATH_PREFIXES)
+    ]
+    if disallowed:
+        raise RuntimeError(
+            "Reserve execution commit changes scientific/non-reserve paths: "
+            + ", ".join(disallowed)
+        )
+    missing = REQUIRED_RESERVE_EXECUTION_PATHS.difference(changed_paths)
+    if missing:
+        raise RuntimeError(
+            "Reserve execution commit lacks required control-plane changes: "
+            + ", ".join(sorted(missing))
+        )
+    diff = query("diff", "--binary", f"{base_commit}..{execution_commit}", text=False)
+    assert isinstance(diff, bytes)
+    return {
+        "base_code_commit": base_commit,
+        "execution_commit": execution_commit,
+        "execution_changed_paths": list(changed_paths),
+        "execution_diff_sha256": hashlib.sha256(diff).hexdigest(),
+    }
+
+
+def authenticate_reserve_execution_repository(
+    repository: Path, extension: Mapping[str, Any]
+) -> None:
+    """Require the exact clean worktree and safe Git delta frozen by an extension."""
+    expected = {
+        key: extension.get(key)
+        for key in (
+            "base_code_commit",
+            "execution_commit",
+            "execution_changed_paths",
+            "execution_diff_sha256",
+        )
+    }
+    observed = _reserve_execution_identity(repository, str(extension.get("base_code_commit", "")))
+    if observed != expected:
+        raise RuntimeError("Execution repository differs from the frozen reserve control plane.")
+
+
+def _reserve_decisions(path: Path) -> dict[str, dict[str, str]]:
+    """Authenticate the exact six-model primary-seed extension decisions."""
+    rows = _csv_rows(path)
+    indexed: dict[str, dict[str, str]] = {}
+    for row in rows:
+        model = row.get("model", "")
+        if model not in MODELS or model in indexed:
+            raise ValueError("Reserve decisions must name every model exactly once.")
+        decision = row.get("decision")
+        if decision not in {"add_both_reserve_seeds", "no_extension"}:
+            raise ValueError(f"Invalid primary-seed reserve decision for {model}: {decision!r}.")
+        if int(row.get("observed_seed_count", -1)) != len(TRAINING_SEEDS):
+            raise ValueError("Reserve decisions must be derived from exactly three primary seeds.")
+        indexed[model] = row
+    if set(indexed) != set(MODELS):
+        raise ValueError("Reserve decisions do not cover the exact six-model panel.")
+    return indexed
+
+
+def _extension_rows(
+    matrix: Mapping[str, Any], runner: Mapping[str, Any], triggering_models: set[str]
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+    """Build deterministic reserve-only runs and cell memberships."""
+    configurations = {int(row["configuration_index"]): row for row in matrix["configurations"]}
+    cells = {int(row["cell_index"]): row for row in matrix["logical_cells"]}
+    runs: list[dict[str, Any]] = []
+    run_index: dict[tuple[int, int], int] = {}
+    next_run = len(runner["retrain_runs"])
+    for model in MODELS:
+        if model not in triggering_models:
+            continue
+        for configuration in sorted(
+            (row for row in configurations.values() if row["model"] == model),
+            key=lambda row: int(row["configuration_index"]),
+        ):
+            objectives = sorted(
+                cells[index]["logical_objective"]
+                for index in configuration["logical_cell_indices"]
+            )
+            for seed in RESERVE_TRAINING_SEEDS:
+                index = next_run + len(runs)
+                run_index[(int(configuration["configuration_index"]), seed)] = index
+                runs.append(
+                    {
+                        "retrain_index": index,
+                        "configuration_index": int(configuration["configuration_index"]),
+                        "model": model,
+                        "trial_number": int(configuration["trial_number"]),
+                        "params": configuration["params"],
+                        "params_sha256": configuration["params_sha256"],
+                        "logical_objectives": objectives,
+                        "seed": seed,
+                        "epochs": 200,
+                        "run_id": f"{model}__trial{int(configuration['trial_number']):04d}__seed{seed}",
+                        "confirmation_matrix_sha256": matrix["content_sha256"],
+                    }
+                )
+    memberships: list[dict[str, Any]] = []
+    next_membership = len(runner["front_memberships"])
+    for model in MODELS:
+        if model not in triggering_models:
+            continue
+        for seed in RESERVE_TRAINING_SEEDS:
+            for cell in sorted(
+                (row for row in cells.values() if row["model"] == model),
+                key=lambda row: int(row["cell_index"]),
+            ):
+                memberships.append(
+                    {
+                        "membership_index": next_membership + len(memberships),
+                        "cell_index": int(cell["cell_index"]),
+                        "model": model,
+                        "logical_objective": cell["logical_objective"],
+                        "score": cell["score"],
+                        "metric": cell["selector"],
+                        "strategy": cell["pairing"],
+                        "trial_number": int(cell["trial_number"]),
+                        "seed": seed,
+                        "retrain_index": run_index[(int(cell["configuration_index"]), seed)],
+                    }
+                )
+    return runs, memberships
+
+
+def freeze_reserve_extension_manifest(
+    confirmation_root: Path,
+    decisions_path: Path,
+    analysis_manifest_path: Path,
+    execution_repository: Path,
+) -> Path:
+    """Freeze a hash-bound overlay containing only preregistered reserve work."""
+    root = confirmation_root.expanduser().resolve(strict=True)
+    frozen = load_authenticated_confirmation_campaign(root, include_extension=False)
+    if tuple(frozen["matrix"]["training_seeds"]) != TRAINING_SEEDS:
+        raise ValueError("Reserve extension requires the immutable three-seed base matrix.")
+    decisions_path = decisions_path.expanduser().resolve(strict=True)
+    analysis_manifest_path = analysis_manifest_path.expanduser().resolve(strict=True)
+    analysis = json.loads(analysis_manifest_path.read_text(encoding="utf-8"))
+    digest = analysis.get("content_sha256")
+    if digest != _content_hash(
+        {key: value for key, value in analysis.items() if key != "content_sha256"}
+    ):
+        raise ValueError("Primary-seed analysis manifest content hash differs.")
+    declared = analysis.get("artifacts", {}).get(decisions_path.name)
+    if declared != _sha256(decisions_path):
+        raise ValueError("Reserve decisions are not bound by the primary-seed analysis.")
+    decisions = _reserve_decisions(decisions_path)
+    execution_identity = _reserve_execution_identity(
+        execution_repository, str(frozen["design"]["code_commit"])
+    )
+    triggering = {
+        model for model, row in decisions.items() if row["decision"] == "add_both_reserve_seeds"
+    }
+    runs, memberships = _extension_rows(frozen["matrix"], frozen["runner_manifest"], triggering)
+    seeds_by_model = {
+        model: list(TRAINING_SEEDS + RESERVE_TRAINING_SEEDS)
+        if model in triggering
+        else list(TRAINING_SEEDS)
+        for model in MODELS
+    }
+    payload = {
+        "schema_version": 1,
+        "kind": "physics_background_reserve_seed_extension",
+        **execution_identity,
+        "base_matrix_content_sha256": frozen["matrix"]["content_sha256"],
+        "base_runner_content_sha256": frozen["runner_manifest"]["content_sha256"],
+        "primary_analysis_manifest": str(analysis_manifest_path),
+        "primary_analysis_manifest_sha256": _sha256(analysis_manifest_path),
+        "reserve_decisions": str(decisions_path),
+        "reserve_decisions_sha256": _sha256(decisions_path),
+        "triggering_models": sorted(triggering, key=MODELS.index),
+        "training_seeds_by_model": seeds_by_model,
+        "retrain_runs": runs,
+        "front_memberships": memberships,
+        "cardinality": {
+            "added_runs": len(runs),
+            "added_memberships": len(memberships),
+            "effective_runs": len(frozen["runner_manifest"]["retrain_runs"]) + len(runs),
+            "effective_memberships": len(frozen["runner_manifest"]["front_memberships"])
+            + len(memberships),
+        },
+    }
+    payload["content_sha256"] = _content_hash(payload)
+    output = root / RESERVE_EXTENSION_RELATIVE
+    _atomic_text(output, json.dumps(payload, indent=2, sort_keys=True, allow_nan=False) + "\n")
+    effective = dict(frozen["runner_manifest"])
+    effective["retrain_runs"] = [*effective["retrain_runs"], *runs]
+    effective["front_memberships"] = [*effective["front_memberships"], *memberships]
+    effective["base_content_sha256"] = frozen["runner_manifest"]["content_sha256"]
+    effective["reserve_extension_content_sha256"] = payload["content_sha256"]
+    effective.pop("content_sha256", None)
+    effective["content_sha256"] = _content_hash(effective)
+    _atomic_text(
+        root / EFFECTIVE_RUNNER_RELATIVE,
+        json.dumps(effective, indent=2, sort_keys=True, allow_nan=False) + "\n",
+    )
+    return output
+
+
 def freeze_confirmation_matrix(
     discovery_root: Path,
     confirmation_root: Path,
@@ -500,7 +753,9 @@ def freeze_confirmation_campaign(
     }
 
 
-def load_authenticated_confirmation_campaign(confirmation_root: Path) -> dict[str, Any]:
+def load_authenticated_confirmation_campaign(
+    confirmation_root: Path, *, include_extension: bool = True
+) -> dict[str, Any]:
     """Rebuild and authenticate every immutable confirmation control-plane file."""
     root = confirmation_root.expanduser().resolve(strict=True)
     design_path = root / "design.json"
@@ -594,15 +849,93 @@ def load_authenticated_confirmation_campaign(confirmation_root: Path) -> dict[st
             raise ValueError(
                 f"Frozen membership differs from cell/seed {(cell['cell_index'], seed)}."
             )
-    return {"design": design, "matrix": matrix, "runner_manifest": runner}
+    seeds_by_model = {model: list(matrix["training_seeds"]) for model in MODELS}
+    extension = None
+    extension_path = root / RESERVE_EXTENSION_RELATIVE
+    if include_extension and extension_path.is_file():
+        extension = json.loads(extension_path.read_text(encoding="utf-8"))
+        digest = extension.get("content_sha256")
+        unhashed = {key: value for key, value in extension.items() if key != "content_sha256"}
+        if (
+            digest != _content_hash(unhashed)
+            or extension.get("schema_version") != 1
+            or extension.get("kind") != "physics_background_reserve_seed_extension"
+            or extension.get("base_matrix_content_sha256") != matrix["content_sha256"]
+            or extension.get("base_runner_content_sha256") != runner["content_sha256"]
+            or extension.get("base_code_commit") != design["code_commit"]
+            or not isinstance(extension.get("execution_commit"), str)
+            or len(extension["execution_commit"]) != 40
+            or not isinstance(extension.get("execution_diff_sha256"), str)
+            or len(extension["execution_diff_sha256"]) != 64
+            or not REQUIRED_RESERVE_EXECUTION_PATHS.issubset(
+                set(extension.get("execution_changed_paths", []))
+            )
+        ):
+            raise ValueError("Frozen reserve-extension identity differs.")
+        analysis_path = Path(extension.get("primary_analysis_manifest", "")).resolve(strict=True)
+        decisions_path = Path(extension.get("reserve_decisions", "")).resolve(strict=True)
+        if _sha256(analysis_path) != extension.get("primary_analysis_manifest_sha256") or _sha256(
+            decisions_path
+        ) != extension.get("reserve_decisions_sha256"):
+            raise ValueError("Frozen reserve-extension source evidence changed.")
+        analysis = json.loads(analysis_path.read_text(encoding="utf-8"))
+        if analysis.get("artifacts", {}).get(decisions_path.name) != _sha256(decisions_path):
+            raise ValueError("Frozen reserve decisions differ from their analysis manifest.")
+        decisions = _reserve_decisions(decisions_path)
+        triggering = {
+            model
+            for model, row in decisions.items()
+            if row["decision"] == "add_both_reserve_seeds"
+        }
+        expected_runs, expected_memberships = _extension_rows(matrix, runner, triggering)
+        expected_seeds = {
+            model: list(TRAINING_SEEDS + RESERVE_TRAINING_SEEDS)
+            if model in triggering
+            else list(TRAINING_SEEDS)
+            for model in MODELS
+        }
+        if (
+            extension.get("triggering_models") != sorted(triggering, key=MODELS.index)
+            or extension.get("training_seeds_by_model") != expected_seeds
+            or extension.get("retrain_runs") != expected_runs
+            or extension.get("front_memberships") != expected_memberships
+        ):
+            raise ValueError("Frozen reserve-extension expansion differs.")
+        expected_effective = dict(runner)
+        expected_effective["retrain_runs"] = [*runner["retrain_runs"], *expected_runs]
+        expected_effective["front_memberships"] = [
+            *runner["front_memberships"],
+            *expected_memberships,
+        ]
+        expected_effective["base_content_sha256"] = runner["content_sha256"]
+        expected_effective["reserve_extension_content_sha256"] = extension["content_sha256"]
+        expected_effective.pop("content_sha256", None)
+        expected_effective["content_sha256"] = _content_hash(expected_effective)
+        effective_path = root / EFFECTIVE_RUNNER_RELATIVE
+        effective = json.loads(effective_path.read_text(encoding="utf-8"))
+        if effective != expected_effective:
+            raise ValueError("Frozen effective retrain manifest differs.")
+        runner = effective
+        seeds_by_model = expected_seeds
+    return {
+        "design": design,
+        "matrix": matrix,
+        "runner_manifest": runner,
+        "training_seeds_by_model": seeds_by_model,
+        "reserve_extension": extension,
+    }
 
 
 __all__ = [
     "TRAINING_SEEDS",
     "RESERVE_TRAINING_SEEDS",
+    "RESERVE_EXTENSION_RELATIVE",
+    "EFFECTIVE_RUNNER_RELATIVE",
     "SEED_EXTENSION_RULE",
     "TRIALS_BY_MODEL",
     "build_confirmation_matrix",
+    "authenticate_reserve_execution_repository",
+    "freeze_reserve_extension_manifest",
     "freeze_confirmation_matrix",
     "freeze_confirmation_campaign",
     "load_authenticated_confirmation_campaign",

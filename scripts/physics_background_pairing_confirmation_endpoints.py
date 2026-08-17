@@ -82,18 +82,26 @@ def _values_for_checkpoint(
 
 
 def extract_confirmation_endpoints(root: Path, output_dir: Path) -> dict[str, Any]:
-    """Authenticate all 84 markers and emit primary plus OAS diagnostic rows."""
+    """Authenticate all required primary/reserve markers and emit endpoint rows."""
     root = root.expanduser().resolve(strict=True)
     frozen = load_authenticated_confirmation_campaign(root)
     matrix = frozen["matrix"]
     runner = frozen["runner_manifest"]
     cells = {int(row["cell_index"]): row for row in matrix["logical_cells"]}
-    seed_count = len(matrix["training_seeds"])
+    seeds_by_model = {
+        model: tuple(int(seed) for seed in seeds)
+        for model, seeds in frozen["training_seeds_by_model"].items()
+    }
+    model_seed_total = sum(len(seeds) for seeds in seeds_by_model.values())
     memberships = runner["front_memberships"]
-    if len(memberships) != 42 * seed_count:
+    if len(memberships) != 7 * model_seed_total:
         raise RuntimeError("Confirmation cell/seed membership cardinality differs.")
     run_rows = {int(row["retrain_index"]): row for row in runner["retrain_runs"]}
-    if len(run_rows) != 28 * seed_count:
+    expected_runs = sum(
+        sum(row["model"] == model for row in matrix["configurations"]) * len(seeds)
+        for model, seeds in seeds_by_model.items()
+    )
+    if len(run_rows) != expected_runs:
         raise RuntimeError("Confirmation physical-run cardinality differs.")
     markers: dict[int, dict[str, Any]] = {}
     artifacts: dict[int, dict[str, Any]] = {}
@@ -192,8 +200,8 @@ def extract_confirmation_endpoints(root: Path, output_dir: Path) -> dict[str, An
                             "value": value,
                         }
                     )
-    expected_primary = 42 * seed_count * 20 * 2
-    expected_oas = 2 * 7 * seed_count * 20 * 2
+    expected_primary = 7 * model_seed_total * 20 * 2
+    expected_oas = 7 * (len(seeds_by_model["ae"]) + len(seeds_by_model["vae"])) * 20 * 2
     if len(primary) != expected_primary or len(oas) != expected_oas:
         raise RuntimeError(
             f"Endpoint cardinality differs: primary={len(primary)}/{expected_primary}, "
@@ -209,6 +217,13 @@ def extract_confirmation_endpoints(root: Path, output_dir: Path) -> dict[str, An
         "campaign_root": str(root),
         "matrix_content_sha256": matrix["content_sha256"],
         "runner_manifest_sha256": _sha256(root / "selection/pareto_retrain_manifest.json"),
+        "effective_runner_content_sha256": runner["content_sha256"],
+        "reserve_extension_content_sha256": (
+            None
+            if frozen["reserve_extension"] is None
+            else frozen["reserve_extension"]["content_sha256"]
+        ),
+        "training_seeds_by_model": seeds_by_model,
         "cardinality": {
             "sealed_runs": len(markers),
             "checkpoint_selections": len(selection_rows),

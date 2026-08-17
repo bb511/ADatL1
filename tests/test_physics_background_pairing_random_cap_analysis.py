@@ -1,0 +1,257 @@
+"""Contracts for authenticated random-CAP negative-control analysis."""
+
+from __future__ import annotations
+
+import json
+import statistics
+from pathlib import Path
+
+import pytest
+
+from src.evaluation import (
+    physics_background_pairing_random_cap_analysis as analysis_module,
+)
+from src.evaluation.physics_background_pairing_random_cap_analysis import (
+    _content_hash,
+    build_random_cap_analysis,
+    write_random_cap_analysis,
+)
+
+
+def _inputs() -> tuple[dict, dict]:
+    """Build a minimal three-checkpoint, two-split authenticated fixture."""
+    tables = [
+        {
+            "split": split,
+            "replicate": replicate,
+            "seed": 1000 + split_index * 10 + replicate,
+            "file_sha256": f"{split_index * 10 + replicate + 1:064x}",
+        }
+        for split_index, split in enumerate(("validate", "test"))
+        for replicate in range(5)
+    ]
+    tasks = []
+    for index in range(3):
+        tasks.append(
+            {
+                "task_index": index,
+                "model": "ae",
+                "trial_number": 10 + index,
+                "scores": ["native"],
+                "checkpoints": [
+                    {
+                        "checkpoint_id": "selected_000",
+                        "source_sha256": f"{index + 100:064x}",
+                    }
+                ],
+                "memberships": [
+                    {
+                        "membership_index": index,
+                        "checkpoint_id": "selected_000",
+                        "logical_objective": "native__cap__cdf",
+                        "score": "native",
+                        "metric": "cap",
+                        "strategy": "cdf",
+                        "optimized_metric": [float(index), 0.1],
+                    }
+                ],
+            }
+        )
+    manifest = {
+        "schema_version": 1,
+        "mode": "discovery",
+        "purpose": "offline_random_cap_diagnostic_only",
+        "runner_manifest_content_sha256": "b" * 64,
+        "reserve_extension_content_sha256": "c" * 64,
+        "checkpoint_selections_sha256": "d" * 64,
+        "endpoint_receipt_sha256": "e" * 64,
+        "random_pairing": {"tables": tables},
+        "tasks": tasks,
+    }
+    manifest["content_sha256"] = _content_hash(manifest)
+    rows = []
+    for task in tasks:
+        membership = task["memberships"][0]
+        checkpoint = task["checkpoints"][0]
+        for split in ("validate", "test"):
+            split_tables = [row for row in tables if row["split"] == split]
+            for table in split_tables:
+                rows.append(
+                    {
+                        "mode": "discovery",
+                        "task_index": task["task_index"],
+                        "model": "ae",
+                        "trial_number": task["trial_number"],
+                        "training_seed": "",
+                        "membership_index": membership["membership_index"],
+                        "logical_objective": membership["logical_objective"],
+                        "selection_score": "native",
+                        "selection_metric": "cap",
+                        "selection_strategy": "cdf",
+                        "evaluation_score": "native",
+                        "split": split,
+                        "replicate": table["replicate"],
+                        "pairing_seed": table["seed"],
+                        "cap": task["task_index"] + table["replicate"] / 10,
+                        "checkpoint_id": "selected_000",
+                        "pair_table_sha256": table["file_sha256"],
+                        "checkpoint_sha256": checkpoint["source_sha256"],
+                    }
+                )
+    summaries = []
+    for task in tasks:
+        for split in ("validate", "test"):
+            selected = [
+                row
+                for row in rows
+                if row["task_index"] == task["task_index"] and row["split"] == split
+            ]
+            values = [row["cap"] for row in selected]
+            first = selected[0]
+            summaries.append(
+                {
+                    "mode": "discovery",
+                    "task_index": task["task_index"],
+                    "membership_index": task["task_index"],
+                    "model": "ae",
+                    "trial_number": task["trial_number"],
+                    "training_seed": "",
+                    "logical_objective": "native__cap__cdf",
+                    "selection_score": "native",
+                    "selection_metric": "cap",
+                    "selection_strategy": "cdf",
+                    "evaluation_score": "native",
+                    "split": split,
+                    "checkpoint_id": "selected_000",
+                    "checkpoint_sha256": first["checkpoint_sha256"],
+                    "n_pairings": 5,
+                    "cap_mean": statistics.fmean(values),
+                    "cap_sample_variance": statistics.variance(values),
+                }
+            )
+    aggregate = {
+        "schema_version": 1,
+        "manifest_content_sha256": manifest["content_sha256"],
+        "seed_split_values": rows,
+        "seed_split_values_sha256": _content_hash(rows),
+        "summary": summaries,
+        "summary_sha256": _content_hash(summaries),
+    }
+    return manifest, aggregate
+
+
+def test_analysis_recomputes_variability_and_unpooled_rank_association() -> None:
+    """Seed variability and rank panels are recomputed without cross-panel pooling."""
+    manifest, aggregate = _inputs()
+    result = build_random_cap_analysis(manifest, aggregate)
+    assert result["method"]["seed_rows"] == 30
+    assert result["method"]["variability_rows"] == 6
+    assert result["method"]["rank_association_rows"] == 12
+    assert {row["split"] for row in result["structured_random_rank_associations"]} == {
+        "validate",
+        "test",
+    }
+    assert all(
+        row["spearman_rho"] == pytest.approx(1.0)
+        for row in result["structured_random_rank_associations"]
+    )
+
+
+@pytest.mark.parametrize("target", ["seed_hash", "summary_value", "pair_seed"])
+def test_analysis_rejects_tampered_aggregate(target: str) -> None:
+    """Child hashes, summaries, and random-table identities are fail-closed."""
+    manifest, aggregate = _inputs()
+    if target == "seed_hash":
+        aggregate["seed_split_values_sha256"] = "0" * 64
+    elif target == "summary_value":
+        aggregate["summary"][0]["cap_mean"] += 1
+        aggregate["summary_sha256"] = _content_hash(aggregate["summary"])
+    else:
+        aggregate["seed_split_values"][0]["pairing_seed"] += 1
+        aggregate["seed_split_values_sha256"] = _content_hash(aggregate["seed_split_values"])
+    with pytest.raises(ValueError):
+        build_random_cap_analysis(manifest, aggregate)
+
+
+def test_writer_persists_hash_bound_tables_idempotently(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Portable tables and their receipt can be reproduced byte-for-byte."""
+    manifest, aggregate = _inputs()
+    manifest_path = tmp_path / "manifest.json"
+    aggregate_path = tmp_path / "aggregate.json"
+    manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
+    aggregate_path.write_text(json.dumps(aggregate), encoding="utf-8")
+    monkeypatch.setattr(analysis_module, "DISCOVERY_NAMESPACE", manifest_path.parent.name)
+    monkeypatch.setattr(
+        analysis_module,
+        "DISCOVERY_MANIFEST_SHA256",
+        analysis_module.hashlib.sha256(manifest_path.read_bytes()).hexdigest(),
+    )
+    monkeypatch.setattr(
+        analysis_module, "DISCOVERY_MANIFEST_CONTENT_SHA256", manifest["content_sha256"]
+    )
+    monkeypatch.setattr(
+        analysis_module,
+        "DISCOVERY_RANDOM_PAIRING_CONTENT_SHA256",
+        manifest["random_pairing"].get("content_sha256"),
+    )
+    monkeypatch.setattr(analysis_module, "DISCOVERY_TASKS", 3)
+    monkeypatch.setattr(analysis_module, "DISCOVERY_MEMBERSHIPS", 3)
+    monkeypatch.setattr(analysis_module, "DISCOVERY_MEMBERSHIP_SCORES", 3)
+    output = tmp_path / "results"
+    write_random_cap_analysis(manifest_path, aggregate_path, output)
+    first = (output / "random_cap_analysis.json").read_bytes()
+    receipt = json.loads(first)
+    assert receipt["inputs"]["runner_manifest_content_sha256"] == "b" * 64
+    assert receipt["inputs"]["reserve_extension_content_sha256"] == "c" * 64
+    assert receipt["inputs"]["checkpoint_selections_sha256"] == "d" * 64
+    assert receipt["inputs"]["endpoint_receipt_sha256"] == "e" * 64
+    write_random_cap_analysis(manifest_path, aggregate_path, output)
+    assert (output / "random_cap_analysis.json").read_bytes() == first
+    assert (output / "random_cap_values.csv").exists()
+    assert (output / "structured_random_rank_associations.csv").exists()
+
+
+def test_rank_analysis_handles_constant_and_tied_panels() -> None:
+    """Constant inputs are undefined while ties use deterministic average ranks."""
+    manifest, aggregate = _inputs()
+    for task in manifest["tasks"]:
+        task["memberships"][0]["optimized_metric"][0] = 1.0
+    manifest["content_sha256"] = _content_hash(
+        {key: value for key, value in manifest.items() if key != "content_sha256"}
+    )
+    aggregate["manifest_content_sha256"] = manifest["content_sha256"]
+    constant = build_random_cap_analysis(manifest, aggregate)
+    assert all(
+        row["spearman_rho"] is None for row in constant["structured_random_rank_associations"]
+    )
+    assert all(
+        row["pairing_seed_rho_undefined_count"] == 5
+        for row in constant["structured_random_rank_associations"]
+    )
+
+    manifest, aggregate = _inputs()
+    manifest["tasks"][1]["memberships"][0]["optimized_metric"][0] = 0.0
+    manifest["content_sha256"] = _content_hash(
+        {key: value for key, value in manifest.items() if key != "content_sha256"}
+    )
+    aggregate["manifest_content_sha256"] = manifest["content_sha256"]
+    tied = build_random_cap_analysis(manifest, aggregate)
+    assert all(row["ties"] for row in tied["structured_random_rank_associations"])
+    assert all(
+        row["spearman_rho"] == pytest.approx(0.8660254037844387)
+        for row in tied["structured_random_rank_associations"]
+    )
+
+
+def test_rank_analysis_rejects_missing_structured_panel_metric() -> None:
+    """A malformed membership cannot silently remove a structured-CAP rank panel."""
+    manifest, aggregate = _inputs()
+    manifest["tasks"][0]["memberships"][0].pop("optimized_metric")
+    manifest["content_sha256"] = _content_hash(
+        {key: value for key, value in manifest.items() if key != "content_sha256"}
+    )
+    aggregate["manifest_content_sha256"] = manifest["content_sha256"]
+    with pytest.raises(ValueError, match="Structured CAP metric is missing"):
+        build_random_cap_analysis(manifest, aggregate)

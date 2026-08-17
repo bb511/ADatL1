@@ -23,6 +23,7 @@ SELECTORS = (
     ("drift", None),
 )
 SEEDS = (271828, 314159, 161803)
+RESERVE_SEEDS = (141421, 173205)
 
 
 def _fixture() -> tuple[dict, list[dict]]:
@@ -232,3 +233,62 @@ def test_oas_diagnostics_use_the_same_ae_vae_checkpoints() -> None:
             oas_endpoint_rows=changed,
             bootstrap_replicates=1_000,
         )
+
+
+def test_only_dsvae_extended_uses_mixed_seed_counts_and_primary_trigger() -> None:
+    """A DSVAE-only extension has exact dynamic counts and three-seed macro inference."""
+    matrix, rows = _fixture()
+    dsvae_cells = {row["cell_index"] for row in matrix["logical_cells"] if row["model"] == "dsvae"}
+    for row in rows:
+        if (
+            row["cell_index"] not in dsvae_cells
+            or row["selector"] == "cap"
+            and row["pairing"] == "cdf"
+        ):
+            continue
+        row["value"] += {SEEDS[0]: -0.03, SEEDS[1]: 0.0, SEEDS[2]: 0.03}[row["seed"]]
+    templates = {
+        (row["cell_index"], row["anomaly"], row["endpoint"]): row
+        for row in rows
+        if row["cell_index"] in dsvae_cells and row["seed"] == SEEDS[1]
+    }
+    for seed_index, seed in enumerate(RESERVE_SEEDS):
+        for template in templates.values():
+            rows.append(
+                {
+                    **template,
+                    "seed": seed,
+                    "checkpoint_path": f"{template['cell_index']:02d}-{seed}.ckpt",
+                    "checkpoint_sha256": f"{9000 + template['cell_index'] * 10 + seed_index:064x}",
+                }
+            )
+    seeds_by_model = {
+        model: SEEDS + RESERVE_SEEDS if model == "dsvae" else SEEDS for model in MODELS
+    }
+    result = build_confirmation_endpoint_analysis(
+        matrix,
+        rows,
+        training_seeds_by_model=seeds_by_model,
+        bootstrap_replicates=1_000,
+        bootstrap_seed=31,
+    )
+    method = result["method"]
+    assert method["endpoint_rows"] == 5600
+    assert method["endpoint_summaries"] == 280
+    assert method["controlled_paired_rows"] == 1600
+    assert method["pairing_paired_rows"] == 3200
+    assert method["across_seed_summaries"] == 84
+    assert method["comparison_summaries"] == 84
+    dsvae_summary = next(
+        row
+        for row in result["comparison_summary"]
+        if row["scope"] == "model"
+        and row["model"] == "dsvae"
+        and row["endpoint"] == "efficiency_250hz"
+    )
+    macro = next(row for row in result["comparison_summary"] if row["scope"] == "macro")
+    assert dsvae_summary["seeds"] == 5
+    assert macro["seeds"] == 3
+    decision = next(row for row in result["reserve_seed_decisions"] if row["model"] == "dsvae")
+    assert decision["triggered"] is True
+    assert decision["decision"] == "extension_complete"

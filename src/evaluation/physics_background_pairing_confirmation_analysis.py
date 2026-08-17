@@ -28,6 +28,8 @@ LEARNED_PAIRINGS = (
 PRACTICAL_THRESHOLDS = {"efficiency_250hz": 0.005, "auprc": 0.01}
 DEFAULT_BOOTSTRAP_SEED = 150050165
 DEFAULT_BOOTSTRAP_REPLICATES = 100_000
+PRIMARY_SEEDS = (271828, 314159, 161803)
+RESERVE_SEEDS = (141421, 173205)
 
 
 def _content_hash(value: Any) -> str:
@@ -44,7 +46,9 @@ def _finite_unit(value: Any, label: str) -> float:
     return result
 
 
-def _authenticate_matrix(matrix: dict[str, Any]) -> tuple[list[dict], tuple[int, ...]]:
+def _authenticate_matrix(
+    matrix: dict[str, Any], supplied_seeds_by_model: dict[str, Iterable[int]] | None = None
+) -> tuple[list[dict], dict[str, tuple[int, ...]]]:
     """Authenticate the frozen 42-cell/28-config matrix and return its seeds."""
     digest = matrix.get("content_sha256")
     unhashed = {key: value for key, value in matrix.items() if key != "content_sha256"}
@@ -79,11 +83,28 @@ def _authenticate_matrix(matrix: dict[str, Any]) -> tuple[list[dict], tuple[int,
     observed = {(cell["model"], cell["selector"], cell.get("pairing")) for cell in cells}
     if observed != expected:
         raise ValueError("Confirmation cells do not cover the exact selector matrix.")
-    return cells, seeds
+    models = ("ae", "vae", "dsae", "dsvae", "svdd", "realnvp")
+    if supplied_seeds_by_model is None:
+        seeds_by_model = {model: seeds for model in models}
+    else:
+        if set(supplied_seeds_by_model) != set(models):
+            raise ValueError("Effective seed mapping must cover the exact six models.")
+        seeds_by_model = {
+            model: tuple(int(seed) for seed in supplied_seeds_by_model[model]) for model in models
+        }
+        for model, model_seeds in seeds_by_model.items():
+            if model_seeds not in {
+                PRIMARY_SEEDS,
+                PRIMARY_SEEDS + RESERVE_SEEDS,
+            }:
+                raise ValueError(f"Invalid effective confirmation seeds for {model}.")
+    return cells, seeds_by_model
 
 
 def _normalize_rows(
-    cells: list[dict], seeds: tuple[int, ...], rows: Iterable[dict[str, Any]]
+    cells: list[dict],
+    seeds_by_model: dict[str, tuple[int, ...]],
+    rows: Iterable[dict[str, Any]],
 ) -> list[dict[str, Any]]:
     """Validate exact endpoint coverage and same-checkpoint attachment."""
     cells_by_index = {int(cell["cell_index"]): cell for cell in cells}
@@ -100,7 +121,7 @@ def _normalize_rows(
         row["pairing"] = row.get("pairing") or "not_applicable"
         row["value"] = _finite_unit(row["value"], str(row.get("endpoint")))
         cell = cells_by_index.get(row["cell_index"])
-        if cell is None or row["seed"] not in seeds:
+        if cell is None or row["seed"] not in seeds_by_model[cell["model"]]:
             raise ValueError("Endpoint row names an unknown cell or seed.")
         expected_fields = {
             "configuration_index": int(cell["configuration_index"]),
@@ -130,14 +151,22 @@ def _normalize_rows(
             (str(row["checkpoint_path"]), str(row["checkpoint_sha256"]))
         )
         normalized.append(row)
-    expected_rows = 42 * len(seeds) * len(DOWNSTREAM_DATASETS) * len(ENDPOINTS)
+    expected_rows = (
+        7
+        * sum(len(seeds) for seeds in seeds_by_model.values())
+        * len(DOWNSTREAM_DATASETS)
+        * len(ENDPOINTS)
+    )
     if len(normalized) != expected_rows:
         raise ValueError(
             f"Confirmation endpoint coverage incomplete: expected {expected_rows}, "
             f"found {len(normalized)}."
         )
     expected_groups = {
-        (cell, seed, endpoint) for cell in range(42) for seed in seeds for endpoint in ENDPOINTS
+        (int(cell["cell_index"]), seed, endpoint)
+        for cell in cells
+        for seed in seeds_by_model[cell["model"]]
+        for endpoint in ENDPOINTS
     }
     if set(coverage) != expected_groups or any(
         anomalies != expected_anomalies for anomalies in coverage.values()
@@ -151,7 +180,7 @@ def _normalize_rows(
         normalized,
         key=lambda row: (
             row["cell_index"],
-            seeds.index(row["seed"]),
+            seeds_by_model[row["model"]].index(row["seed"]),
             DOWNSTREAM_DATASETS.index(row["anomaly"]),
             ENDPOINTS.index(row["endpoint"]),
         ),
@@ -198,7 +227,7 @@ def _endpoint_summaries(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
 
 def _across_seed_summaries(
     rows: list[dict[str, Any]],
-    seeds: tuple[int, ...],
+    seeds_by_model: dict[str, tuple[int, ...]],
     *,
     bootstrap_replicates: int,
     bootstrap_seed: int,
@@ -209,6 +238,7 @@ def _across_seed_summaries(
         groups[(row["cell_index"], row["endpoint"])].append(row)
     summaries = []
     for (cell_index, endpoint), group in sorted(groups.items()):
+        seeds = seeds_by_model[group[0]["model"]]
         indexed = {(row["seed"], row["anomaly"]): row["value"] for row in group}
         matrix = np.array(
             [[indexed[(seed, anomaly)] for anomaly in DOWNSTREAM_DATASETS] for seed in seeds]
@@ -263,7 +293,7 @@ def _across_seed_summaries(
 
 def _normalize_oas_rows(
     cells: list[dict],
-    seeds: tuple[int, ...],
+    seeds_by_model: dict[str, tuple[int, ...]],
     supplied_rows: Iterable[dict[str, Any]],
     native_rows: list[dict[str, Any]],
 ) -> list[dict[str, Any]]:
@@ -284,7 +314,7 @@ def _normalize_oas_rows(
         row["pairing"] = row.get("pairing") or "not_applicable"
         row["value"] = _finite_unit(row["value"], str(row.get("endpoint")))
         cell = oas_cells.get(row["cell_index"])
-        if cell is None or row["seed"] not in seeds:
+        if cell is None or row["seed"] not in seeds_by_model[cell["model"]]:
             raise ValueError("OAS endpoint row names an unknown AE/VAE cell or seed.")
         expected_fields = {
             "configuration_index": int(cell["configuration_index"]),
@@ -311,7 +341,12 @@ def _normalize_oas_rows(
         keys.add(key)
         coverage[(row["cell_index"], row["seed"], row["endpoint"])].add(row["anomaly"])
         normalized.append(row)
-    expected_rows = len(oas_cells) * len(seeds) * len(DOWNSTREAM_DATASETS) * len(ENDPOINTS)
+    expected_rows = (
+        7
+        * sum(len(seeds_by_model[model]) for model in ("ae", "vae"))
+        * len(DOWNSTREAM_DATASETS)
+        * len(ENDPOINTS)
+    )
     if len(normalized) != expected_rows or any(
         anomalies != set(DOWNSTREAM_DATASETS) for anomalies in coverage.values()
     ):
@@ -322,7 +357,7 @@ def _normalize_oas_rows(
         normalized,
         key=lambda row: (
             row["cell_index"],
-            seeds.index(row["seed"]),
+            seeds_by_model[row["model"]].index(row["seed"]),
             DOWNSTREAM_DATASETS.index(row["anomaly"]),
             ENDPOINTS.index(row["endpoint"]),
         ),
@@ -332,7 +367,7 @@ def _normalize_oas_rows(
 def _oas_comparisons(
     native_rows: list[dict[str, Any]],
     oas_rows: list[dict[str, Any]],
-    seeds: tuple[int, ...],
+    seeds_by_model: dict[str, tuple[int, ...]],
     *,
     bootstrap_replicates: int,
     bootstrap_seed: int,
@@ -371,6 +406,7 @@ def _oas_comparisons(
         grouped[(row["cell_index"], row["endpoint"])].append(row)
     summaries = []
     for (cell_index, endpoint), group in sorted(grouped.items()):
+        seeds = seeds_by_model[group[0]["model"]]
         indexed = {(row["seed"], row["anomaly"]): row["delta"] for row in group}
         matrix = np.array(
             [[indexed[(seed, anomaly)] for anomaly in DOWNSTREAM_DATASETS] for seed in seeds]
@@ -415,7 +451,9 @@ def _oas_comparisons(
     return paired, summaries
 
 
-def _paired_rows(rows: list[dict[str, Any]]) -> tuple[list[dict], list[dict]]:
+def _paired_rows(
+    rows: list[dict[str, Any]], seeds_by_model: dict[str, tuple[int, ...]]
+) -> tuple[list[dict], list[dict]]:
     """Construct exact CDF-baseline and learned-pairing-minus-CDF differences."""
     index = {
         (
@@ -430,9 +468,8 @@ def _paired_rows(rows: list[dict[str, Any]]) -> tuple[list[dict], list[dict]]:
     }
     controlled, pairings = [], []
     models = ("ae", "vae", "dsae", "dsvae", "svdd", "realnvp")
-    seeds = sorted({row["seed"] for row in rows})
     for model in models:
-        for seed in seeds:
+        for seed in seeds_by_model[model]:
             for anomaly in DOWNSTREAM_DATASETS:
                 for endpoint in ENDPOINTS:
                     cdf = index[(model, seed, anomaly, endpoint, "cap", "cdf")]
@@ -516,7 +553,7 @@ def _classification(low: float, high: float, threshold: float) -> str:
 def _comparison_summaries(
     controlled: list[dict],
     pairings: list[dict],
-    seeds: tuple[int, ...],
+    seeds_by_model: dict[str, tuple[int, ...]],
     *,
     bootstrap_replicates: int,
     bootstrap_seed: int,
@@ -531,6 +568,17 @@ def _comparison_summaries(
     def summarize(
         family: str, model: str, endpoint: str, contrast: str, group: list[dict]
     ) -> dict:
+        seeds = (
+            tuple(
+                seed
+                for seed in PRIMARY_SEEDS
+                if all(seed in values for values in seeds_by_model.values())
+            )
+            if model == "__macro__"
+            else seeds_by_model[model]
+        )
+        if not seeds:
+            raise ValueError("Macro comparisons require common primary seeds.")
         indexed = {(row["seed"], row["anomaly"]): row["delta"] for row in group}
         controls = {(row["seed"], row["anomaly"]): row["control_value"] for row in group}
         matrix = np.array(
@@ -606,7 +654,7 @@ def _comparison_summaries(
                     for model in models
                 }
                 macro = []
-                for seed in seeds:
+                for seed in PRIMARY_SEEDS:
                     for anomaly in DOWNSTREAM_DATASETS:
                         selected = [
                             next(
@@ -638,30 +686,32 @@ def build_confirmation_endpoint_analysis(
     endpoint_rows: Iterable[dict[str, Any]],
     *,
     oas_endpoint_rows: Iterable[dict[str, Any]] | None = None,
+    training_seeds_by_model: dict[str, Iterable[int]] | None = None,
     bootstrap_replicates: int = DEFAULT_BOOTSTRAP_REPLICATES,
     bootstrap_seed: int = DEFAULT_BOOTSTRAP_SEED,
 ) -> dict[str, Any]:
     """Validate, pair, and summarize a complete confirmation endpoint matrix."""
     if bootstrap_replicates < 1_000:
         raise ValueError("Confirmation analysis requires at least 1,000 bootstrap replicates.")
-    cells, seeds = _authenticate_matrix(matrix)
-    rows = _normalize_rows(cells, seeds, endpoint_rows)
+    cells, seeds_by_model = _authenticate_matrix(matrix, training_seeds_by_model)
+    rows = _normalize_rows(cells, seeds_by_model, endpoint_rows)
     endpoint_summaries = _endpoint_summaries(rows)
     across_seed_summaries = _across_seed_summaries(
         rows,
-        seeds,
+        seeds_by_model,
         bootstrap_replicates=bootstrap_replicates,
         bootstrap_seed=bootstrap_seed,
     )
-    controlled, pairings = _paired_rows(rows)
-    expected_controlled = 6 * 2 * len(seeds) * 20 * 2
-    expected_pairings = 6 * 4 * len(seeds) * 20 * 2
+    controlled, pairings = _paired_rows(rows, seeds_by_model)
+    seed_total = sum(len(seeds) for seeds in seeds_by_model.values())
+    expected_controlled = 2 * seed_total * 20 * 2
+    expected_pairings = 4 * seed_total * 20 * 2
     if len(controlled) != expected_controlled or len(pairings) != expected_pairings:
         raise RuntimeError("Internal paired-comparison cardinality differs.")
     comparisons = _comparison_summaries(
         controlled,
         pairings,
-        seeds,
+        seeds_by_model,
         bootstrap_replicates=bootstrap_replicates,
         bootstrap_seed=bootstrap_seed,
     )
@@ -669,11 +719,23 @@ def build_confirmation_endpoint_analysis(
     oas_paired: list[dict[str, Any]] = []
     oas_summaries: list[dict[str, Any]] = []
     if oas_endpoint_rows is not None:
-        oas_rows = _normalize_oas_rows(cells, seeds, oas_endpoint_rows, rows)
+        oas_rows = _normalize_oas_rows(cells, seeds_by_model, oas_endpoint_rows, rows)
         oas_paired, oas_summaries = _oas_comparisons(
             rows,
             oas_rows,
-            seeds,
+            seeds_by_model,
+            bootstrap_replicates=bootstrap_replicates,
+            bootstrap_seed=bootstrap_seed,
+        )
+    if all(seeds == PRIMARY_SEEDS for seeds in seeds_by_model.values()):
+        primary_comparisons = comparisons
+    else:
+        primary_controlled = [row for row in controlled if row["seed"] in PRIMARY_SEEDS]
+        primary_pairings = [row for row in pairings if row["seed"] in PRIMARY_SEEDS]
+        primary_comparisons = _comparison_summaries(
+            primary_controlled,
+            primary_pairings,
+            {model: PRIMARY_SEEDS for model in seeds_by_model},
             bootstrap_replicates=bootstrap_replicates,
             bootstrap_seed=bootstrap_seed,
         )
@@ -681,7 +743,7 @@ def build_confirmation_endpoint_analysis(
     for model in ("ae", "vae", "dsae", "dsvae", "svdd", "realnvp"):
         relevant = [
             row
-            for row in comparisons
+            for row in primary_comparisons
             if row["scope"] == "model"
             and row["model"] == model
             and row["endpoint"] == "efficiency_250hz"
@@ -692,20 +754,23 @@ def build_confirmation_endpoint_analysis(
             if row["adjusted_ci_low"] <= -PRACTICAL_THRESHOLDS["efficiency_250hz"]
             and row["adjusted_ci_high"] >= PRACTICAL_THRESHOLDS["efficiency_250hz"]
         ]
+        observed_seed_count = len(seeds_by_model[model])
+        if not triggering and observed_seed_count != len(PRIMARY_SEEDS):
+            raise ValueError(f"Untriggered model {model} contains reserve-seed endpoints.")
         reserve_seed_decisions.append(
             {
                 "model": model,
                 "primary_seed_count": 3,
-                "observed_seed_count": len(seeds),
+                "observed_seed_count": observed_seed_count,
                 "reserve_seeds": "141421;173205",
                 "trigger_rule": "adjusted efficiency CI spans both -0.005 and +0.005",
-                "triggered": bool(triggering) if len(seeds) == 3 else False,
+                "triggered": bool(triggering),
                 "triggering_contrasts": ";".join(sorted(triggering)),
                 "decision": (
-                    "add_both_reserve_seeds"
-                    if len(seeds) == 3 and triggering
-                    else "extension_complete"
-                    if len(seeds) == 5
+                    "extension_complete"
+                    if observed_seed_count == 5 and triggering
+                    else "add_both_reserve_seeds"
+                    if observed_seed_count == 3 and triggering
                     else "no_extension"
                 ),
             }
@@ -717,7 +782,11 @@ def build_confirmation_endpoint_analysis(
             "models": 6,
             "logical_cells": 42,
             "unique_configurations": 28,
-            "seeds": list(seeds),
+            "seeds": list(PRIMARY_SEEDS),
+            "training_seeds_by_model": {
+                model: list(seeds) for model, seeds in seeds_by_model.items()
+            },
+            "macro_seed_scope": "three_common_primary_seeds",
             "anomalies": 20,
             "endpoints": list(ENDPOINTS),
             "endpoint_rows": len(rows),
@@ -803,6 +872,7 @@ def write_confirmation_endpoint_analysis(
         matrix,
         rows,
         oas_endpoint_rows=oas_rows,
+        training_seeds_by_model=receipt.get("training_seeds_by_model"),
         bootstrap_replicates=bootstrap_replicates,
         bootstrap_seed=bootstrap_seed,
     )

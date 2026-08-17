@@ -262,6 +262,17 @@ def _write_json(path: Path, value: Any, *, create: bool = False) -> None:
     temporary.replace(path)
 
 
+def _retrain_manifest_path(root: Path, index: int | None = None) -> Path:
+    """Use the base manifest for base receipts and the overlay for reserve work."""
+    base = root / "selection" / "pareto_retrain_manifest.json"
+    effective = root / "selection" / "effective_retrain_manifest.json"
+    if index is not None and base.is_file():
+        base_rows = json.loads(base.read_text(encoding="utf-8")).get("retrain_runs", [])
+        if 0 <= index < len(base_rows):
+            return base
+    return effective if effective.is_file() else base
+
+
 def _load_retrain_task_map(root: Path, task_map: Path, expected_sha256: str) -> dict[str, Any]:
     """Authenticate one content-addressed Slurm-local retrain task map."""
     if len(expected_sha256) != 64 or any(
@@ -277,7 +288,7 @@ def _load_retrain_task_map(root: Path, task_map: Path, expected_sha256: str) -> 
     design = json.loads(design_path.read_text(encoding="utf-8"))
     if design.get("schema_version") != DESIGN_SCHEMA_VERSION:
         raise RuntimeError(f"Retrain task map references an invalid campaign: {design_path}")
-    manifest_path = (root / "selection" / "pareto_retrain_manifest.json").resolve()
+    manifest_path = _retrain_manifest_path(root).resolve()
     manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
     entries = payload.get("entries", [])
     if (
@@ -493,8 +504,19 @@ def _load_design(root: Path) -> dict[str, Any]:
                 raise RuntimeError("Campaign HPO config differs from the NSGA-II contract.")
         if design.get("screening_sampler_seed_policy") != SCREENING_SAMPLER_SEED_POLICY:
             raise RuntimeError("Campaign sampler seed policy differs from the frozen contract.")
-    if _git_commit() != design["code_commit"]:
-        raise RuntimeError("Current commit differs from the frozen campaign design.")
+    expected_commit = design["code_commit"]
+    extension_path = root / "selection/reserve_extension_manifest.json"
+    if extension_path.is_file():
+        from src.evaluation.physics_background_pairing_confirmation_matrix import (
+            authenticate_reserve_execution_repository,
+            load_authenticated_confirmation_campaign,
+        )
+
+        frozen = load_authenticated_confirmation_campaign(root)
+        authenticate_reserve_execution_repository(REPOSITORY_ROOT, frozen["reserve_extension"])
+        expected_commit = frozen["reserve_extension"]["execution_commit"]
+    if _git_commit() != expected_commit:
+        raise RuntimeError("Current commit differs from the authenticated execution commit.")
     if _sha256(Path(design["preflight"])) != design["preflight_sha256"]:
         raise RuntimeError("Pair-table preflight changed after campaign initialization.")
     return design
@@ -739,7 +761,7 @@ def freeze(root: Path) -> Path:
     """Freeze all strategy-specific fronts before downstream anomaly evaluation."""
     optuna = _optuna()
     design = _load_design(root)
-    manifest_path = root / "selection" / "pareto_retrain_manifest.json"
+    manifest_path = _retrain_manifest_path(root)
     if manifest_path.exists():
         return manifest_path
 
@@ -1315,7 +1337,7 @@ def _validate_retrain_progress(
     state = json.loads(state_path.read_text(encoding="utf-8"))
     design_path = root / "design.json"
     design = json.loads(design_path.read_text(encoding="utf-8"))
-    manifest_path = root / "selection" / "pareto_retrain_manifest.json"
+    manifest_path = _retrain_manifest_path(root, index)
     identity = _retrain_identity(root, design, manifest_path, index, expected_row)
     boundaries = [int(segment["epoch_boundary"]) for segment in state.get("segments", [])]
     expected_boundaries = list(
@@ -1430,7 +1452,7 @@ def _validate_retrain_marker(marker: Path, expected_row: dict[str, Any]) -> None
         "frozen retrain manifest",
         require_file=True,
     )
-    if manifest_path != (root / "selection" / "pareto_retrain_manifest.json").resolve():
+    if manifest_path != _retrain_manifest_path(root, index).resolve():
         raise RuntimeError(f"Retrain restart state names the wrong manifest: {manifest_path}")
     if (
         state.get("schema_version") != 1
@@ -1628,7 +1650,7 @@ def retrain(
     """Retrain one front trial in exact resumable segments, then evaluate once at epoch 200."""
     design = _load_design(root)
     scheduler_identity = _retrain_scheduler_identity(root, index, task_map, task_map_sha256)
-    manifest_path = root / "selection" / "pareto_retrain_manifest.json"
+    manifest_path = _retrain_manifest_path(root, index)
     if not manifest_path.is_file():
         raise FileNotFoundError("Freeze the Pareto fronts before retraining.")
     manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
@@ -1899,7 +1921,7 @@ def _read_downstream_auprcs(
 def aggregate(root: Path) -> Path:
     """Select the downstream-oracle winner within every logical Pareto front."""
     design = _load_design(root)
-    manifest_path = root / "selection" / "pareto_retrain_manifest.json"
+    manifest_path = _retrain_manifest_path(root)
     manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
     markers: dict[int, dict[str, Any]] = {}
     optimized_artifacts: dict[int, dict[str, Any]] = {}

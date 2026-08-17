@@ -31,6 +31,7 @@ from scripts.physics_background_pairing_search50_evaluation import (
     _write_json,
 )
 from src.evaluation.physics_background_pairing_confirmation_matrix import (
+    authenticate_reserve_execution_repository,
     load_authenticated_confirmation_campaign,
 )
 from src.utils.pairing.random_tables import validate_frozen_random_pairing_tables
@@ -129,11 +130,20 @@ def build_confirmation_manifest(
     frozen = load_authenticated_confirmation_campaign(root)
     matrix = frozen["matrix"]
     runner = frozen["runner_manifest"]
-    seed_count = len(matrix["training_seeds"])
-    expected_tasks = 28 * seed_count
-    expected_memberships = 42 * seed_count
+    seeds_by_model = frozen.get("training_seeds_by_model") or {
+        model: list(matrix["training_seeds"])
+        for model in {row["model"] for row in matrix["configurations"]}
+    }
+    expected_tasks = len(runner["retrain_runs"])
+    expected_memberships = len(runner["front_memberships"])
     repository, commit = _authenticate_execution(execution_repository)
-    if commit != frozen["design"]["code_commit"]:
+    extension = frozen.get("reserve_extension")
+    expected_commit = (
+        frozen["design"]["code_commit"] if extension is None else extension["execution_commit"]
+    )
+    if extension is not None:
+        authenticate_reserve_execution_repository(repository, extension)
+    if commit != expected_commit:
         raise RuntimeError("Random-CAP execution commit differs from sealed confirmation.")
     checkpoint_selections = checkpoint_selections.resolve(strict=True)
     endpoint_receipt = endpoint_receipt.resolve(strict=True)
@@ -238,6 +248,12 @@ def build_confirmation_manifest(
         "campaign_root": str(root.resolve(strict=True)),
         "confirmation_matrix_content_sha256": matrix["content_sha256"],
         "runner_manifest_content_sha256": runner["content_sha256"],
+        "reserve_extension_content_sha256": (
+            None
+            if frozen.get("reserve_extension") is None
+            else frozen["reserve_extension"]["content_sha256"]
+        ),
+        "training_seeds_by_model": seeds_by_model,
         "checkpoint_selections": str(checkpoint_selections),
         "checkpoint_selections_sha256": _sha256(checkpoint_selections),
         "endpoint_receipt": str(endpoint_receipt),
@@ -314,6 +330,20 @@ def _load_manifest(root: Path, mode: str, namespace: str | None = None) -> dict[
             frozen["matrix"]["content_sha256"] != manifest["confirmation_matrix_content_sha256"]
             or frozen["runner_manifest"]["content_sha256"]
             != manifest["runner_manifest_content_sha256"]
+            or (
+                None
+                if frozen.get("reserve_extension") is None
+                else frozen["reserve_extension"]["content_sha256"]
+            )
+            != manifest.get("reserve_extension_content_sha256")
+            or (
+                frozen.get("training_seeds_by_model")
+                or {
+                    model: list(frozen["matrix"]["training_seeds"])
+                    for model in {row["model"] for row in frozen["matrix"]["configurations"]}
+                }
+            )
+            != manifest.get("training_seeds_by_model")
             or _sha256(Path(manifest["checkpoint_selections"]))
             != manifest["checkpoint_selections_sha256"]
             or _sha256(Path(manifest["endpoint_receipt"])) != manifest["endpoint_receipt_sha256"]

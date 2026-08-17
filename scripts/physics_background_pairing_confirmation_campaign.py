@@ -29,6 +29,7 @@ from scripts import physics_background_pairing_campaign as training_campaign
 from scripts import physics_background_pairing_operations as operations
 from src.evaluation.physics_background_pairing_confirmation_matrix import (
     freeze_confirmation_campaign,
+    freeze_reserve_extension_manifest,
     load_authenticated_confirmation_campaign,
 )
 
@@ -439,6 +440,9 @@ def _parse_args() -> argparse.Namespace:
     prepare_parser = commands.add_parser("prepare")
     prepare_parser.add_argument("--discovery-root", type=Path, default=DEFAULT_DISCOVERY_ROOT)
     commands.add_parser("status")
+    extension = commands.add_parser("freeze-reserve-extension")
+    extension.add_argument("--decisions", type=Path, required=True)
+    extension.add_argument("--analysis-manifest", type=Path, required=True)
     reconcile = commands.add_parser("reconcile")
     reconcile.add_argument("--audit-sealed", action="store_true")
     submit = commands.add_parser("submit")
@@ -470,7 +474,17 @@ def main() -> None:
         result: Any = prepare(root, args.discovery_root, repository)
     elif args.command == "status":
         result = status(root, repository)
+    elif args.command == "freeze-reserve-extension":
+        result = {
+            "reserve_extension": str(
+                freeze_reserve_extension_manifest(
+                    root, args.decisions, args.analysis_manifest, repository
+                ).resolve()
+            )
+        }
     elif args.command == "reconcile":
+        frozen = load_authenticated_confirmation_campaign(root)
+        operations._authenticate_execution_repository(repository, frozen["design"])
         result = operations.reconcile(root, repository, args.audit_sealed)
     elif args.command == "run-canary":
         result = {"marker": str(run_canary(root, repository, args.model))}

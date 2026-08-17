@@ -226,6 +226,113 @@ def test_freeze_campaign_projects_exact_runner_manifest(
         matrix.load_authenticated_confirmation_campaign(root)
 
 
+def test_reserve_extension_overlay_supports_only_dsvae_mixed_seed_counts(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """One triggered model appends only its exact runs and memberships."""
+    discovery = _fixture(tmp_path, monkeypatch)
+    root = tmp_path / "confirmation"
+    matrix.freeze_confirmation_campaign(
+        discovery,
+        root,
+        execution_commit=COMMIT,
+        execution_preflight=discovery / "preflight.json",
+    )
+    decisions = root / "results/analysis/reserve_seed_decisions.csv"
+    decisions.parent.mkdir(parents=True)
+    with decisions.open("w", encoding="utf-8", newline="") as handle:
+        writer = csv.DictWriter(handle, fieldnames=("model", "observed_seed_count", "decision"))
+        writer.writeheader()
+        writer.writerows(
+            {
+                "model": model,
+                "observed_seed_count": 3,
+                "decision": ("add_both_reserve_seeds" if model == "dsvae" else "no_extension"),
+            }
+            for model in matrix.MODELS
+        )
+    analysis = root / "results/analysis/confirmation_endpoint_analysis.json"
+    payload = {
+        "schema_version": 1,
+        "artifacts": {decisions.name: matrix._sha256(decisions)},
+    }
+    payload["content_sha256"] = matrix._content_hash(payload)
+    analysis.write_text(json.dumps(payload), encoding="utf-8")
+    monkeypatch.setattr(
+        matrix,
+        "_reserve_execution_identity",
+        lambda repository, base: {
+            "base_code_commit": base,
+            "execution_commit": "b" * 40,
+            "execution_changed_paths": sorted(matrix.REQUIRED_RESERVE_EXECUTION_PATHS),
+            "execution_diff_sha256": "c" * 64,
+        },
+    )
+    extension_path = matrix.freeze_reserve_extension_manifest(root, decisions, analysis, tmp_path)
+    extension = json.loads(extension_path.read_text(encoding="utf-8"))
+    assert extension["cardinality"] == {
+        "added_runs": 14,
+        "added_memberships": 14,
+        "effective_runs": 98,
+        "effective_memberships": 140,
+    }
+    frozen = matrix.load_authenticated_confirmation_campaign(root)
+    assert len(frozen["runner_manifest"]["retrain_runs"]) == 98
+    assert len(frozen["runner_manifest"]["front_memberships"]) == 140
+    assert frozen["training_seeds_by_model"]["dsvae"] == list(
+        matrix.TRAINING_SEEDS + matrix.RESERVE_TRAINING_SEEDS
+    )
+    assert frozen["training_seeds_by_model"]["ae"] == list(matrix.TRAINING_SEEDS)
+    assert (
+        len(
+            matrix.load_authenticated_confirmation_campaign(root, include_extension=False)[
+                "runner_manifest"
+            ]["retrain_runs"]
+        )
+        == 84
+    )
+
+
+def test_reserve_extension_rejects_partial_or_tampered_decisions(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The overlay cannot be detached from exact three-seed decision evidence."""
+    discovery = _fixture(tmp_path, monkeypatch)
+    root = tmp_path / "confirmation"
+    matrix.freeze_confirmation_campaign(
+        discovery,
+        root,
+        execution_commit=COMMIT,
+        execution_preflight=discovery / "preflight.json",
+    )
+    decisions = root / "decisions.csv"
+    with decisions.open("w", encoding="utf-8", newline="") as handle:
+        writer = csv.DictWriter(handle, fieldnames=("model", "observed_seed_count", "decision"))
+        writer.writeheader()
+        writer.writerows(
+            {"model": model, "observed_seed_count": 3, "decision": "no_extension"}
+            for model in matrix.MODELS
+        )
+    analysis = root / "analysis.json"
+    payload = {"artifacts": {decisions.name: matrix._sha256(decisions)}}
+    payload["content_sha256"] = matrix._content_hash(payload)
+    analysis.write_text(json.dumps(payload), encoding="utf-8")
+    monkeypatch.setattr(
+        matrix,
+        "_reserve_execution_identity",
+        lambda repository, base: {
+            "base_code_commit": base,
+            "execution_commit": "b" * 40,
+            "execution_changed_paths": sorted(matrix.REQUIRED_RESERVE_EXECUTION_PATHS),
+            "execution_diff_sha256": "c" * 64,
+        },
+    )
+    matrix.freeze_reserve_extension_manifest(root, decisions, analysis, tmp_path)
+    decisions.write_text(decisions.read_text(encoding="utf-8") + " ", encoding="utf-8")
+    with pytest.raises(ValueError, match="source evidence changed"):
+        matrix.load_authenticated_confirmation_campaign(root)
+
+
 def test_database_reader_requires_finite_complete_exact_trial(tmp_path: Path) -> None:
     """The SQLite reader accepts only requested finite COMPLETE trials."""
     optuna = pytest.importorskip("optuna")

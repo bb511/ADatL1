@@ -279,6 +279,49 @@ def _random_analysis(
         for split in ("validate", "test")
         for source in ("five_pairing_mean", *[f"pairing_replicate_{i}" for i in range(5)])
     ]
+    downstream_rhos = {
+        ("validate", "efficiency_250hz"): (0.7, 0.2),
+        ("validate", "auprc"): (0.1, 0.4),
+        ("test", "efficiency_250hz"): (0.5, 0.5),
+        ("test", "auprc"): (None, None),
+    }
+    downstream = []
+    for split in ("validate", "test"):
+        for endpoint in ("efficiency_250hz", "auprc"):
+            structured_rho, random_mean_rho = downstream_rhos[(split, endpoint)]
+            for source in (
+                "structured_cap",
+                "five_pairing_mean",
+                *[f"pairing_replicate_{index}" for index in range(5)],
+            ):
+                rho = (
+                    structured_rho
+                    if source == "structured_cap"
+                    else random_mean_rho
+                    if source == "five_pairing_mean"
+                    else random_mean_rho
+                )
+                downstream.append(
+                    {
+                        "model": "ae",
+                        "selection_score": "native",
+                        "logical_objective": "native__cap__cdf",
+                        "selection_strategy": "cdf",
+                        "split": split,
+                        "downstream_endpoint": endpoint,
+                        "cap_source": source,
+                        "cap_direction": "maximize",
+                        "downstream_direction": "maximize",
+                        "n_checkpoints": 20,
+                        "n_anomalies_per_checkpoint": 20,
+                        "spearman_rho": "" if rho is None else rho,
+                        "spearman_defined": rho is not None,
+                        "constant": rho is None,
+                        "ties": False,
+                        "insufficient_n": False,
+                    }
+                )
+    tables["cap_downstream_rank_associations.csv"] = downstream
     for name, rows in tables.items():
         _write(tmp_path / name, rows)
     receipt = {
@@ -293,6 +336,16 @@ def _random_analysis(
             "variability_rows": 2,
             "rank_association_rows": 12,
             "rank_panels": 2,
+            "downstream_rows": 40,
+            "downstream_memberships": 1,
+            "downstream_anomalies": 20,
+            "downstream_endpoints": 2,
+            "downstream_association_rows": 28,
+            "downstream_association_panels": 4,
+            "downstream_association_sources": 7,
+            "downstream_association_defined_rows": 21,
+            "downstream_association_undefined_rows": 7,
+            "downstream_panels_are_unpooled": True,
             "random_cap_did_not_select_hyperparameters_or_checkpoints": True,
         },
         "inputs": {
@@ -473,7 +526,18 @@ def test_final_report_authenticates_random_control_analysis(tmp_path: Path, monk
     assert "Structured-CAP versus mean-random-CAP" in report
     assert "Five-random-bijection variability" in report
     assert "Validation seed-rho range" in report
+    assert "Discovery CAP-to-downstream rank alignment" in report
+    assert "Confirmation CAP-to-downstream rank alignment" in report
+    assert "structured/random/tie/undefined panels are 1/0/1/0" in report
+    assert "for AUPRC they are 0/1/0/1" in report
+    assert "post-hoc on the fixed structured-selected checkpoint universes" in report
     assert set(summary["random_cap_analysis_receipts"]) == {"discovery", "confirmation"}
+    assert summary["random_cap_downstream_rank_comparison"]["discovery"]["auprc"] == {
+        "structured": 0,
+        "random": 1,
+        "tie": 0,
+        "undefined": 1,
+    }
 
 
 @pytest.mark.parametrize(
@@ -482,6 +546,8 @@ def test_final_report_authenticates_random_control_analysis(tmp_path: Path, monk
         ("provenance", "authoritative provenance"),
         ("method_count", "authoritative provenance or cardinality"),
         ("missing_rank_source", "rank-panel coverage"),
+        ("missing_downstream", "lacks downstream rank associations"),
+        ("downstream_method_count", "downstream-association method cardinality"),
     ),
 )
 def test_final_report_rejects_random_analysis_tampering(
@@ -502,7 +568,7 @@ def test_final_report_rejects_random_analysis_tampering(
         receipt["inputs"]["manifest_namespace"] = "failed_pilot"
     elif tamper == "method_count":
         receipt["method"]["seed_rows"] = 11
-    else:
+    elif tamper == "missing_rank_source":
         associations_path = random_dir / "structured_random_rank_associations.csv"
         associations = list(csv.DictReader(associations_path.open(encoding="utf-8")))
         _write(associations_path, associations[1:])
@@ -510,6 +576,10 @@ def test_final_report_rejects_random_analysis_tampering(
         receipt["artifacts"][associations_path.name] = hashlib.sha256(
             associations_path.read_bytes()
         ).hexdigest()
+    elif tamper == "missing_downstream":
+        receipt["artifacts"].pop("cap_downstream_rank_associations.csv")
+    else:
+        receipt["method"]["downstream_association_rows"] = 29
     receipt["content_sha256"] = _content_hash(receipt)
     receipt_path.write_text(json.dumps(receipt), encoding="utf-8")
     with pytest.raises(ValueError, match=message):
@@ -611,6 +681,8 @@ def test_report_bundle_manifest_and_explicit_promotion(
     verified = verify_confirmation_report_bundle(bundle)
     assert verified["scientifically_final"] is True
     assert (bundle / "prior_repository_REPORT.md").exists()
+    assert (bundle / "evidence/discovery_random_cap_downstream_rank_associations.csv").exists()
+    assert (bundle / "evidence/confirmation_random_cap_downstream_rank_associations.csv").exists()
 
     install_repository = tmp_path / "install_repository"
     install_repository.mkdir()

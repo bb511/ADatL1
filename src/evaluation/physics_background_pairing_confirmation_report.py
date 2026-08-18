@@ -144,6 +144,10 @@ def _load_random_analysis(
         raise ValueError("Random-CAP analysis lacks values or variability evidence.")
     if "structured_random_rank_associations.csv" not in tables:
         raise ValueError(f"{expected_mode.title()} random-CAP analysis lacks rank associations.")
+    if "cap_downstream_rank_associations.csv" not in tables:
+        raise ValueError(
+            f"{expected_mode.title()} random-CAP analysis lacks downstream rank associations."
+        )
     values = tables["random_cap_values.csv"]
     variability = tables["random_cap_variability.csv"]
     required_value_fields = {
@@ -243,6 +247,102 @@ def _load_random_analysis(
             sources != expected_sources for sources in panels.values()
         ):
             raise ValueError("Random-CAP rank-panel coverage differs.")
+    downstream = tables["cap_downstream_rank_associations.csv"]
+    required_downstream_fields = {
+        "model",
+        "selection_score",
+        "logical_objective",
+        "selection_strategy",
+        "split",
+        "downstream_endpoint",
+        "cap_source",
+        "cap_direction",
+        "downstream_direction",
+        "n_checkpoints",
+        "n_anomalies_per_checkpoint",
+        "spearman_rho",
+        "spearman_defined",
+        "constant",
+        "ties",
+        "insufficient_n",
+    }
+    method = manifest["method"]
+    expected_downstream_sources = {
+        "structured_cap",
+        "five_pairing_mean",
+        *[f"pairing_replicate_{index}" for index in range(5)],
+    }
+    if any(not required_downstream_fields <= set(row) for row in downstream):
+        raise ValueError("Random-CAP downstream-association schema differs.")
+    downstream_panels: dict[tuple[str, str, str, str, str, str], set[str]] = {}
+    defined_rows = 0
+    rank_panel_n = {
+        (row["model"], row["logical_objective"], row["split"]): int(row["n_checkpoints"])
+        for row in associations
+    }
+
+    def boolean(row: dict[str, str], field: str) -> bool:
+        if row[field] not in {"True", "False"}:
+            raise ValueError(f"Random-CAP downstream {field} flag differs.")
+        return row[field] == "True"
+
+    for row in downstream:
+        key = (
+            row["model"],
+            row["selection_score"],
+            row["logical_objective"],
+            row["selection_strategy"],
+            row["split"],
+            row["downstream_endpoint"],
+        )
+        sources = downstream_panels.setdefault(key, set())
+        if row["cap_source"] in sources:
+            raise ValueError(f"Duplicate random-CAP downstream source for {key}.")
+        sources.add(row["cap_source"])
+        n_checkpoints = int(row["n_checkpoints"])
+        defined = boolean(row, "spearman_defined")
+        boolean(row, "constant")
+        boolean(row, "ties")
+        insufficient = boolean(row, "insufficient_n")
+        if (
+            row["split"] not in {"validate", "test"}
+            or row["downstream_endpoint"] not in {"efficiency_250hz", "auprc"}
+            or row["cap_direction"] != "maximize"
+            or row["downstream_direction"] != "maximize"
+            or int(row["n_anomalies_per_checkpoint"]) != 20
+            or n_checkpoints < 1
+            or insufficient != (n_checkpoints < 3)
+            or rank_panel_n.get((row["model"], row["logical_objective"], row["split"]))
+            != n_checkpoints
+        ):
+            raise ValueError("Random-CAP downstream panel identity or cardinality differs.")
+        if defined:
+            rho = _number(row, "spearman_rho")
+            if not -1.0 <= rho <= 1.0:
+                raise ValueError("Random-CAP downstream Spearman rho is outside [-1, 1].")
+            defined_rows += 1
+        elif row["spearman_rho"]:
+            raise ValueError("Undefined random-CAP downstream rho is not empty.")
+    base_downstream_panels = {
+        (model, objective, split) for model, _, objective, _, split, _ in downstream_panels
+    }
+    if (
+        len(downstream) != int(method.get("downstream_association_rows", -1))
+        or len(downstream_panels) != int(method.get("downstream_association_panels", -1))
+        or int(method.get("downstream_association_sources", -1)) != 7
+        or int(method.get("downstream_association_defined_rows", -1)) != defined_rows
+        or int(method.get("downstream_association_undefined_rows", -1))
+        != len(downstream) - defined_rows
+        or int(method.get("downstream_anomalies", -1)) != 20
+        or int(method.get("downstream_endpoints", -1)) != 2
+        or int(method.get("downstream_memberships", -1)) != int(method.get("memberships", -2))
+        or int(method.get("downstream_rows", -1))
+        != int(method.get("downstream_memberships", -2)) * 20 * 2
+        or method.get("downstream_panels_are_unpooled") is not True
+        or any(sources != expected_downstream_sources for sources in downstream_panels.values())
+        or base_downstream_panels != set(rank_panel_n)
+    ):
+        raise ValueError("Random-CAP downstream-association method cardinality differs.")
     return manifest, tables
 
 
@@ -376,6 +476,107 @@ def _fmt(value: float, *, percent: bool = False, bold: bool = False) -> str:
     """Format an endpoint value and optional row winner."""
     text = f"{100.0 * value:.2f}%" if percent else f"{value:.3f}"
     return f"**{text}**" if bold else text
+
+
+def _downstream_random_comparisons(
+    tables: dict[str, list[dict[str, str]]],
+) -> list[dict[str, Any]]:
+    """Compare structured CAP with five-random-mean downstream rank alignment."""
+    grouped: dict[tuple[str, str, str, str, str, str], dict[str, dict[str, str]]] = {}
+    for row in tables["cap_downstream_rank_associations.csv"]:
+        key = (
+            row["model"],
+            row["selection_score"],
+            row["logical_objective"],
+            row["selection_strategy"],
+            row["split"],
+            row["downstream_endpoint"],
+        )
+        grouped.setdefault(key, {})[row["cap_source"]] = row
+    output = []
+    for key, sources in sorted(grouped.items()):
+        structured = sources["structured_cap"]
+        random_mean = sources["five_pairing_mean"]
+        structured_rho = (
+            _number(structured, "spearman_rho")
+            if structured["spearman_defined"] == "True"
+            else None
+        )
+        random_rho = (
+            _number(random_mean, "spearman_rho")
+            if random_mean["spearman_defined"] == "True"
+            else None
+        )
+        if structured_rho is None or random_rho is None:
+            stronger = "undefined"
+            delta = None
+        else:
+            delta = structured_rho - random_rho
+            stronger = "structured" if delta > 0 else "random" if delta < 0 else "tie"
+        output.append(
+            {
+                "model": key[0],
+                "score": key[1],
+                "logical_objective": key[2],
+                "pairing": key[3],
+                "split": key[4],
+                "endpoint": key[5],
+                "n_checkpoints": int(structured["n_checkpoints"]),
+                "structured_rho": structured_rho,
+                "random_mean_rho": random_rho,
+                "delta_rho": delta,
+                "stronger": stronger,
+            }
+        )
+    return output
+
+
+def _append_downstream_random_summary(
+    lines: list[str], mode: str, rows: list[dict[str, Any]]
+) -> dict[str, dict[str, int]]:
+    """Render every unpooled downstream comparison and return endpoint counts."""
+    counts: dict[str, dict[str, int]] = {}
+    for endpoint in ("efficiency_250hz", "auprc"):
+        endpoint_rows = [row for row in rows if row["endpoint"] == endpoint]
+        counts[endpoint] = {
+            verdict: sum(row["stronger"] == verdict for row in endpoint_rows)
+            for verdict in ("structured", "random", "tie", "undefined")
+        }
+    lines.extend(
+        [
+            "",
+            f"### {mode.title()} CAP-to-downstream rank alignment",
+            "",
+            (
+                f"Higher rho is better because CAP and both downstream endpoints are maximized. "
+                f"For efficiency, structured/random/tie/undefined panels are "
+                f"{counts['efficiency_250hz']['structured']}/"
+                f"{counts['efficiency_250hz']['random']}/"
+                f"{counts['efficiency_250hz']['tie']}/"
+                f"{counts['efficiency_250hz']['undefined']}; for AUPRC they are "
+                f"{counts['auprc']['structured']}/"
+                f"{counts['auprc']['random']}/"
+                f"{counts['auprc']['tie']}/"
+                f"{counts['auprc']['undefined']}."
+            ),
+            "",
+            "| Model | Score | Pairing | Split | Endpoint | N | Structured rho | Five-random-mean rho | Stronger |",
+            "|---|---|---|---|---|---:|---:|---:|---|",
+        ]
+    )
+    for row in rows:
+        structured = (
+            "undefined" if row["structured_rho"] is None else f"{row['structured_rho']:.3f}"
+        )
+        random_mean = (
+            "undefined" if row["random_mean_rho"] is None else f"{row['random_mean_rho']:.3f}"
+        )
+        lines.append(
+            f"| {row['model'].upper()} | {row['score']} | {row['pairing']} | "
+            f"{row['split']} | {row['endpoint']} | {row['n_checkpoints']} | "
+            f"{structured} | {random_mean} | {row['stronger']} |"
+        )
+    return counts
 
 
 def _cell_table(rows: list[dict[str, str]]) -> tuple[list[str], dict[tuple[str, str, str], float]]:
@@ -752,6 +953,7 @@ def build_confirmation_report(
 
     random_status = "not_supplied"
     random_receipts: dict[str, str] = {}
+    random_downstream_summary: dict[str, dict[str, dict[str, int]]] = {}
     lines.extend(["", "## Random-pairing negative control", ""])
     if discovery_random_analysis is not None:
         discovery_receipt, discovery_tables = _load_random_analysis(
@@ -801,6 +1003,10 @@ def build_confirmation_report(
                 f"{seed_range(validate)} | {test['spearman_rho'] or 'undefined'} | "
                 f"{seed_range(test)} |"
             )
+        discovery_downstream = _downstream_random_comparisons(discovery_tables)
+        random_downstream_summary["discovery"] = _append_downstream_random_summary(
+            lines, "discovery", discovery_downstream
+        )
         random_status = (
             f"discovery authenticated ({discovery_receipt['method']['seed_rows']} seed rows)"
         )
@@ -855,6 +1061,10 @@ def build_confirmation_report(
                 f"| {row['model'].upper()} | {row['logical_objective']} | {row['split']} | "
                 f"{row['n_checkpoints']} | {rho} |"
             )
+        confirmation_downstream = _downstream_random_comparisons(confirmation_tables)
+        random_downstream_summary["confirmation"] = _append_downstream_random_summary(
+            lines, "confirmation", confirmation_downstream
+        )
         random_status = (
             f"{random_status}; confirmation authenticated "
             f"({confirmation_receipt['method']['seed_rows']} seed rows)"
@@ -863,6 +1073,7 @@ def build_confirmation_report(
         [
             "",
             f"Status: {random_status}. Random CAP is diagnostic only and never selected a hyperparameter or checkpoint.",
+            "The downstream-rank comparison is post-hoc on the fixed structured-selected checkpoint universes. It does not estimate the efficiency or AUPRC of a random-CAP-selected model and does not turn random CAP into a selector.",
             "",
             "## Provenance and limitations",
             "",
@@ -900,6 +1111,7 @@ def build_confirmation_report(
         },
         "random_cap_status": random_status,
         "random_cap_analysis_receipts": random_receipts,
+        "random_cap_downstream_rank_comparison": random_downstream_summary,
         "confirmation_context_receipt": (
             None if context_receipt is None else context_receipt["content_sha256"]
         ),
@@ -972,6 +1184,7 @@ def write_confirmation_report(
             "random_cap_analysis.json",
             "random_cap_variability.csv",
             "structured_random_rank_associations.csv",
+            "cap_downstream_rank_associations.csv",
         ):
             evidence_sources[f"{prefix}_{name}"] = source / name
     if confirmation_context is not None:

@@ -510,3 +510,86 @@ def test_writer_authenticates_endpoint_receipt_and_persists_downstream_hash(
             tmp_path / "analysis_versions" / "downstream_v2",
             endpoint_analysis_path=endpoint_path,
         )
+
+
+def test_confirmation_writer_joins_cell_seed_endpoint_analysis(tmp_path: Path) -> None:
+    """Confirmation endpoints_long rows join to random memberships by cell and seed."""
+    manifest, aggregate = _inputs()
+    manifest["mode"] = "confirmation"
+    manifest["endpoint_receipt_sha256"] = "f" * 64
+    endpoint_rows = []
+    for task in manifest["tasks"]:
+        task["training_seed"] = 100 + task["task_index"]
+        checkpoint = task["checkpoints"][0]
+        checkpoint["source_path"] = f"/sealed/checkpoint_{task['task_index']}.ckpt"
+        membership = task["memberships"][0]
+        membership["cell_index"] = task["task_index"]
+        membership["seed"] = task["training_seed"]
+        membership["selection_metric_name"] = "cap"
+        membership["selection_metric_direction"] = "maximize"
+        membership["selection_metric_objective_index"] = 0
+        membership["objective_values"] = membership["optimized_metric"]
+        for anomaly in DOWNSTREAM_DATASETS:
+            for endpoint in ("efficiency_250hz", "auprc"):
+                endpoint_rows.append(
+                    {
+                        "cell_index": task["task_index"],
+                        "configuration_index": task["task_index"],
+                        "model": task["model"],
+                        "trial_number": task["trial_number"],
+                        "seed": task["training_seed"],
+                        "score": "native",
+                        "selector": "cap",
+                        "pairing": "cdf",
+                        "logical_objective": membership["logical_objective"],
+                        "checkpoint_path": checkpoint["source_path"],
+                        "checkpoint_sha256": checkpoint["source_sha256"],
+                        "anomaly": anomaly,
+                        "endpoint": endpoint,
+                        "value": (task["task_index"] + 1) / 4,
+                    }
+                )
+    for row in aggregate["seed_split_values"]:
+        row["mode"] = "confirmation"
+        row["training_seed"] = 100 + row["task_index"]
+    for row in aggregate["summary"]:
+        row["mode"] = "confirmation"
+        row["training_seed"] = 100 + row["task_index"]
+    manifest["content_sha256"] = _content_hash(
+        {key: value for key, value in manifest.items() if key != "content_sha256"}
+    )
+    aggregate["manifest_content_sha256"] = manifest["content_sha256"]
+    aggregate["seed_split_values_sha256"] = _content_hash(aggregate["seed_split_values"])
+    aggregate["summary_sha256"] = _content_hash(aggregate["summary"])
+    endpoint_dir = tmp_path / "confirmation_endpoint"
+    endpoint_dir.mkdir()
+    endpoints_path = endpoint_dir / "endpoints_long.csv"
+    with endpoints_path.open("w", newline="", encoding="utf-8") as handle:
+        writer = csv.DictWriter(handle, fieldnames=list(endpoint_rows[0]))
+        writer.writeheader()
+        writer.writerows(endpoint_rows)
+    endpoint_receipt = {
+        "method": {"schema_version": 1, "anomalies": 20, "endpoint_rows": 120},
+        "inputs": {"endpoint_receipt_sha256": "f" * 64},
+        "artifact_hashes": {
+            "endpoints_long.csv": hashlib.sha256(endpoints_path.read_bytes()).hexdigest()
+        },
+    }
+    endpoint_analysis_path = endpoint_dir / "confirmation_endpoint_analysis.json"
+    endpoint_analysis_path.write_text(json.dumps(endpoint_receipt), encoding="utf-8")
+    manifest_path = tmp_path / "manifest.json"
+    aggregate_path = tmp_path / "aggregate.json"
+    manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
+    aggregate_path.write_text(json.dumps(aggregate), encoding="utf-8")
+    output = tmp_path / "confirmation_downstream_v1"
+    result = write_random_cap_analysis(
+        manifest_path,
+        aggregate_path,
+        output,
+        endpoint_analysis_path=endpoint_analysis_path,
+    )
+    assert result["method"]["downstream_rows"] == 120
+    assert result["method"]["downstream_association_rows"] == 28
+    receipt = json.loads((output / "random_cap_analysis.json").read_text())
+    assert receipt["inputs"]["endpoint_analysis_kind"] == "confirmation"
+    assert receipt["inputs"]["upstream_endpoint_receipt_sha256"] == "f" * 64

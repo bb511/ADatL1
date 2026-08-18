@@ -905,7 +905,7 @@ Never rerun a reserve-extended extraction into a primary directory. Use exactly:
 <CONFIRM_ROOT>/results/analysis_primary/
 <CONFIRM_ROOT>/results/endpoints_final/
 <CONFIRM_ROOT>/results/analysis_final/
-<CONFIRM_ROOT>/results/random_cap_analysis/confirmation_<EXECUTION_COMMIT>/
+<CONFIRM_ROOT>/results/random_cap_analysis/confirmation_<EXECUTION_COMMIT>_downstream_v1/
 <CONFIRM_ROOT>/results/report_final_<EXECUTION_COMMIT>/
 ```
 
@@ -922,6 +922,37 @@ selected checkpoint ID/hash. Analysis computes structured-versus-random rank
 association separately for each model, logical CAP selector, score, and split. It
 persists both the five-random-pairing mean correlation and all five replicate
 correlations/ranges; undefined constant or undersized panels remain explicit.
+After each aggregate is sealed, create a new downstream-bound analysis version; do
+not extend the earlier completed package in place:
+
+```bash
+uv run python scripts/physics_background_pairing_random_cap_analysis.py \
+  --manifest \
+    <DISCOVERY_ROOT>/random_cap_evaluation/discovery_immutable_presort_20260818/manifest.json \
+  --aggregate \
+    <DISCOVERY_ROOT>/random_cap_evaluation/discovery_immutable_presort_20260818/aggregate.json \
+  --endpoint-analysis-receipt \
+    <DISCOVERY_ROOT>/results/endpoint_analysis/endpoint_analysis.json \
+  --output-dir <DISCOVERY_ROOT>/results/random_cap_analysis \
+  --output-version discovery_immutable_presort_20260818_downstream_v1
+
+uv run python scripts/physics_background_pairing_random_cap_analysis.py \
+  --manifest \
+    <CONFIRM_ROOT>/random_cap_evaluation/confirmation_<EXECUTION_COMMIT>/manifest.json \
+  --aggregate \
+    <CONFIRM_ROOT>/random_cap_evaluation/confirmation_<EXECUTION_COMMIT>/aggregate.json \
+  --endpoint-analysis-receipt \
+    <CONFIRM_ROOT>/results/analysis_final/confirmation_endpoint_analysis.json \
+  --output-dir <CONFIRM_ROOT>/results/random_cap_analysis \
+  --output-version confirmation_<EXECUTION_COMMIT>_downstream_v1
+```
+
+The discovery receipt authenticates `combined_long.csv`; the confirmation receipt
+authenticates `endpoints_long.csv` and must bind the same final endpoint-extraction
+receipt as the confirmation random-CAP manifest. Both packages must contain
+`cap_downstream_rank_associations.csv`, with structured CAP, the five-random mean,
+and all five random replicates kept separate by model, score, pairing, split, and
+endpoint.
 
 Final report generation is fail-closed. `--report-mode final` requires authenticated
 discovery and confirmation random-control analyses and `--analysis-stage final`.
@@ -935,9 +966,9 @@ uv run python scripts/physics_background_pairing_confirmation_report.py \
   --repository <CLEAN_ANALYSIS_WORKTREE> \
   --output-dir <CONFIRM_ROOT>/results/report_final_<EXECUTION_COMMIT> \
   --discovery-random-analysis \
-    <DISCOVERY_ROOT>/results/random_cap_analysis/discovery_immutable_presort_20260818 \
+    <DISCOVERY_ROOT>/results/random_cap_analysis/discovery_immutable_presort_20260818_downstream_v1 \
   --confirmation-random-analysis \
-    <CONFIRM_ROOT>/results/random_cap_analysis/confirmation_<EXECUTION_COMMIT> \
+    <CONFIRM_ROOT>/results/random_cap_analysis/confirmation_<EXECUTION_COMMIT>_downstream_v1 \
   --analysis-stage final --report-mode final
 ```
 

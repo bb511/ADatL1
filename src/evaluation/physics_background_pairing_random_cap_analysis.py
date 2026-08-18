@@ -272,50 +272,125 @@ def _normalize(
 
 def _load_downstream_rows(
     endpoint_analysis_path: Path,
+    manifest: dict[str, Any],
 ) -> tuple[list[dict[str, str]], dict[str, Any]]:
     """Authenticate and load the endpoint long table named by its analysis receipt."""
     receipt = json.loads(endpoint_analysis_path.read_text(encoding="utf-8"))
     method = receipt.get("method", {})
-    expected_hash = receipt.get("artifact_hashes", {}).get("combined_long.csv")
-    if (
-        method.get("schema_version") != SCHEMA_VERSION
-        or not isinstance(expected_hash, str)
-        or len(expected_hash) != 64
+    artifact_hashes = receipt.get("artifact_hashes", {})
+    if "combined_long.csv" in artifact_hashes:
+        artifact_names = ("combined_long.csv",)
+        analysis_kind = "discovery"
+        expected_columns = [
+            "membership_index",
+            "model",
+            "logical_objective",
+            "score",
+            "trial_number",
+            "checkpoint",
+            "checkpoint_sha256",
+            "anomaly",
+            "selector",
+            "pairing",
+            "endpoint",
+            "value",
+        ]
+    elif "endpoints_long.csv" in artifact_hashes:
+        artifact_names = ("endpoints_long.csv",)
+        analysis_kind = "confirmation"
+        expected_columns = [
+            "cell_index",
+            "configuration_index",
+            "model",
+            "trial_number",
+            "seed",
+            "score",
+            "selector",
+            "pairing",
+            "logical_objective",
+            "checkpoint_path",
+            "checkpoint_sha256",
+            "anomaly",
+            "endpoint",
+            "value",
+        ]
+    else:
+        raise ValueError("Endpoint analysis receipt lacks a supported downstream table.")
+    expected_hashes = {name: artifact_hashes.get(name) for name in artifact_names}
+    if method.get("schema_version") != SCHEMA_VERSION or any(
+        not isinstance(digest, str) or len(digest) != 64 for digest in expected_hashes.values()
     ):
-        raise ValueError("Endpoint analysis receipt schema or combined-long hash differs.")
-    combined_path = endpoint_analysis_path.parent / "combined_long.csv"
-    if not combined_path.is_file() or _sha256(combined_path) != expected_hash:
-        raise ValueError("Endpoint combined_long.csv does not match its analysis receipt.")
-    expected_columns = [
-        "membership_index",
-        "model",
-        "logical_objective",
-        "score",
-        "trial_number",
-        "checkpoint",
-        "checkpoint_sha256",
-        "anomaly",
-        "selector",
-        "pairing",
-        "endpoint",
-        "value",
-    ]
-    with combined_path.open(newline="", encoding="utf-8") as handle:
-        reader = csv.DictReader(handle)
-        if reader.fieldnames != expected_columns:
-            raise ValueError("Endpoint combined_long.csv schema differs.")
-        rows = list(reader)
-    return rows, {
+        raise ValueError("Endpoint analysis receipt schema or downstream-table hash differs.")
+    table_paths = {name: endpoint_analysis_path.parent / name for name in artifact_names}
+    rows = []
+    for name, table_path in table_paths.items():
+        if not table_path.is_file() or _sha256(table_path) != expected_hashes[name]:
+            raise ValueError("Endpoint downstream table does not match its analysis receipt.")
+        with table_path.open(newline="", encoding="utf-8") as handle:
+            reader = csv.DictReader(handle)
+            if reader.fieldnames != expected_columns:
+                raise ValueError("Endpoint downstream-table schema differs.")
+            rows.extend(reader)
+    if analysis_kind == "confirmation":
+        membership_indices = {}
+        for task in manifest.get("tasks", []):
+            for membership in task.get("memberships", []):
+                key = (int(membership["cell_index"]), int(membership["seed"]))
+                if key in membership_indices:
+                    raise ValueError(f"Duplicate confirmation endpoint membership key {key}.")
+                membership_indices[key] = int(membership["membership_index"])
+        normalized = []
+        for row in rows:
+            try:
+                key = (int(row["cell_index"]), int(row["seed"]))
+                membership_index = membership_indices[key]
+            except (KeyError, TypeError, ValueError) as error:
+                raise ValueError("Confirmation endpoint membership join differs.") from error
+            normalized.append(
+                {
+                    "membership_index": membership_index,
+                    "model": row["model"],
+                    "logical_objective": row["logical_objective"],
+                    "score": row["score"],
+                    "trial_number": row["trial_number"],
+                    "checkpoint": row["checkpoint_path"],
+                    "checkpoint_sha256": row["checkpoint_sha256"],
+                    "anomaly": row["anomaly"],
+                    "selector": row["selector"],
+                    "pairing": row["pairing"],
+                    "endpoint": row["endpoint"],
+                    "value": row["value"],
+                }
+            )
+        rows = normalized
+    provenance = {
         "endpoint_analysis": str(endpoint_analysis_path.resolve()),
         "endpoint_analysis_sha256": _sha256(endpoint_analysis_path),
-        "combined_long": str(combined_path.resolve()),
-        "combined_long_sha256": expected_hash,
+        "endpoint_analysis_kind": analysis_kind,
+        "downstream_tables": {
+            name: {"path": str(table_paths[name].resolve()), "sha256": expected_hashes[name]}
+            for name in artifact_names
+        },
         "endpoint_method": method,
     }
+    if analysis_kind == "discovery":
+        table_path = table_paths["combined_long.csv"]
+        provenance.update(
+            {
+                "combined_long": str(table_path.resolve()),
+                "combined_long_sha256": expected_hashes["combined_long.csv"],
+            }
+        )
+    else:
+        provenance["upstream_endpoint_receipt_sha256"] = receipt.get("inputs", {}).get(
+            "endpoint_receipt_sha256"
+        )
+    return rows, provenance
 
 
 def _normalize_downstream(
-    rows: list[dict[str, Any]], memberships: dict[tuple[int, int], dict[str, Any]]
+    rows: list[dict[str, Any]],
+    memberships: dict[tuple[int, int], dict[str, Any]],
 ) -> tuple[dict[tuple[int, int, str], float], dict[str, int]]:
     """Exact-join and average the two downstream endpoints over 20 anomalies."""
     by_membership_index: dict[int, tuple[tuple[int, int], dict[str, Any]]] = {}
@@ -700,7 +775,9 @@ def write_random_cap_analysis(
     downstream_rows = None
     downstream_provenance = None
     if endpoint_analysis_path is not None:
-        downstream_rows, downstream_provenance = _load_downstream_rows(endpoint_analysis_path)
+        downstream_rows, downstream_provenance = _load_downstream_rows(
+            endpoint_analysis_path, manifest
+        )
     result = build_random_cap_analysis(manifest, aggregate, downstream_rows)
     manifest_sha256 = hashlib.sha256(manifest_path.read_bytes()).hexdigest()
     namespace = manifest_path.parent.name
@@ -717,27 +794,45 @@ def write_random_cap_analysis(
         )
     if downstream_provenance is not None:
         endpoint_method = downstream_provenance.pop("endpoint_method")
-        expected_method = {
-            "schema_version": SCHEMA_VERSION,
-            "anomalies": result["method"]["downstream_anomalies"],
-            "candidate_memberships": result["method"]["downstream_memberships"],
-            "combined_rows": result["method"]["downstream_rows"],
-            "rows_per_endpoint": result["method"]["downstream_rows"] // len(DOWNSTREAM_ENDPOINTS),
-        }
+        analysis_kind = downstream_provenance["endpoint_analysis_kind"]
+        if analysis_kind != manifest["mode"]:
+            raise ValueError("Endpoint-analysis mode differs from the random-CAP manifest.")
+        if analysis_kind == "discovery":
+            expected_method = {
+                "schema_version": SCHEMA_VERSION,
+                "anomalies": result["method"]["downstream_anomalies"],
+                "candidate_memberships": result["method"]["downstream_memberships"],
+                "combined_rows": result["method"]["downstream_rows"],
+                "rows_per_endpoint": result["method"]["downstream_rows"]
+                // len(DOWNSTREAM_ENDPOINTS),
+            }
+        else:
+            expected_method = {
+                "schema_version": SCHEMA_VERSION,
+                "anomalies": result["method"]["downstream_anomalies"],
+                "endpoint_rows": result["method"]["downstream_rows"],
+            }
         for field, value in expected_method.items():
             if endpoint_method.get(field) != value:
                 raise ValueError(f"Endpoint analysis method field {field} differs.")
         bound_receipt = manifest.get("endpoint_receipt_sha256")
-        if (
-            bound_receipt is not None
-            and bound_receipt != downstream_provenance["endpoint_analysis_sha256"]
+        if analysis_kind == "discovery":
+            if (
+                bound_receipt is not None
+                and bound_receipt != downstream_provenance["endpoint_analysis_sha256"]
+            ):
+                raise ValueError("Manifest endpoint receipt binding differs.")
+            if (
+                downstream_provenance["endpoint_analysis_sha256"]
+                != DISCOVERY_ENDPOINT_ANALYSIS_SHA256
+                or downstream_provenance["combined_long_sha256"] != DISCOVERY_COMBINED_LONG_SHA256
+            ):
+                raise ValueError("Discovery endpoint-analysis identity differs.")
+        elif (
+            bound_receipt is None
+            or bound_receipt != downstream_provenance["upstream_endpoint_receipt_sha256"]
         ):
-            raise ValueError("Manifest endpoint receipt binding differs.")
-        if manifest["mode"] == "discovery" and (
-            downstream_provenance["endpoint_analysis_sha256"] != DISCOVERY_ENDPOINT_ANALYSIS_SHA256
-            or downstream_provenance["combined_long_sha256"] != DISCOVERY_COMBINED_LONG_SHA256
-        ):
-            raise ValueError("Discovery endpoint-analysis identity differs.")
+            raise ValueError("Confirmation endpoint-analysis provenance differs.")
     _guard_output_package(output_dir, downstream_rows is not None)
     output_dir.mkdir(parents=True, exist_ok=True)
     artifacts = {}

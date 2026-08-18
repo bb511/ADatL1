@@ -15,6 +15,7 @@ import hashlib
 import json
 import math
 import os
+import re
 import shutil
 import sqlite3
 import subprocess  # nosec B404 -- fixed git, Slurm, and sbatch commands
@@ -135,6 +136,11 @@ def _parse_args() -> argparse.Namespace:
     commands.add_parser("reconcile")
     retire = commands.add_parser("retire-unmaterialized-retrains")
     retire.add_argument("--array-job-id", required=True)
+    candidate_audit = commands.add_parser("audit-retrain-candidates")
+    candidate_audit.add_argument("--incident-id", required=True)
+    candidate_reset = commands.add_parser("reset-affected-retrains")
+    candidate_reset.add_argument("--incident-id", required=True)
+    candidate_reset.add_argument("--audit-sha256", required=True)
     commands.add_parser("freeze")
     commands.add_parser("aggregate")
     backup = commands.add_parser("backup-study")
@@ -193,6 +199,30 @@ def _atomic_json(path: Path, payload: dict[str, Any]) -> None:
     finally:
         if temporary.exists():
             temporary.unlink()
+
+
+def _write_once_json(path: Path, payload: dict[str, Any]) -> None:
+    """Create one immutable JSON receipt, accepting only identical repetition."""
+    encoded = json.dumps(payload, indent=2, sort_keys=True) + "\n"
+    if path.exists():
+        if not path.is_file() or path.read_text(encoding="utf-8") != encoded:
+            raise RuntimeError(f"Immutable receipt already exists with different content: {path}")
+        return
+    path.parent.mkdir(parents=True, exist_ok=True)
+    fd, temporary_name = tempfile.mkstemp(prefix=f".{path.name}.", dir=path.parent)
+    os.close(fd)
+    temporary = Path(temporary_name)
+    try:
+        temporary.write_text(encoded, encoding="utf-8")
+        try:
+            os.link(temporary, path)
+        except FileExistsError:
+            if not path.is_file() or path.read_text(encoding="utf-8") != encoded:
+                raise RuntimeError(
+                    f"Immutable receipt was concurrently created with different content: {path}"
+                )
+    finally:
+        temporary.unlink(missing_ok=True)
 
 
 @contextmanager
@@ -1023,6 +1053,168 @@ def _assert_no_live_retrain_overlap(rows: list[dict[str, str]]) -> set[str]:
     return live
 
 
+_RECOVERY_INCIDENT_PATTERN = re.compile(r"[a-z0-9][a-z0-9_-]{2,79}\Z")
+
+
+def _recovery_incident_id(value: str) -> str:
+    """Reject incident names that could escape or alias the recovery namespace."""
+    if not _RECOVERY_INCIDENT_PATTERN.fullmatch(value):
+        raise RuntimeError(
+            "Recovery incident IDs must contain 3..80 lowercase letters, digits, '_' or '-'."
+        )
+    return value
+
+
+def _contained(path: Path, parent: Path, role: str) -> Path:
+    """Resolve a campaign artifact path without permitting containment escapes."""
+    resolved = path.expanduser().resolve()
+    root = parent.expanduser().resolve()
+    if not resolved.is_relative_to(root):
+        raise RuntimeError(f"{role} escapes {root}: {resolved}")
+    return resolved
+
+
+def _embedded_checkpoint_epoch(path: Path) -> int:
+    """Load the epoch recorded inside one trusted campaign-local checkpoint."""
+    import torch
+
+    payload = torch.load(path, map_location="cpu", weights_only=False)  # nosec B614
+    epoch = payload.get("epoch") if isinstance(payload, dict) else None
+    if isinstance(epoch, bool) or not isinstance(epoch, int) or epoch < 0:
+        raise RuntimeError(f"Checkpoint has no valid embedded epoch: {path}")
+    return epoch
+
+
+def _candidate_reference(
+    path_value: Any,
+    *,
+    checkpoint_root: Path,
+    callback: str,
+    role: str,
+    expected_epoch: int | None,
+    boundary: int,
+) -> dict[str, Any]:
+    """Audit one retained candidate reference without weakening path boundaries."""
+    if not isinstance(path_value, (str, Path)) or not str(path_value):
+        raise RuntimeError(f"Malformed {role} path in checkpoint callback {callback}.")
+    path = _contained(Path(path_value), checkpoint_root, f"{role} candidate")
+    evidence: dict[str, Any] = {
+        "callback": callback,
+        "role": role,
+        "path": str(path),
+        "expected_record_epoch": expected_epoch,
+        "exists": path.is_file(),
+        "sha256": None,
+        "embedded_epoch": None,
+        "valid": False,
+        "reason": None,
+    }
+    if not path.is_file():
+        evidence["reason"] = "missing"
+        return evidence
+    try:
+        embedded_epoch = _embedded_checkpoint_epoch(path)
+    except Exception as error:
+        evidence["reason"] = f"unreadable_or_invalid_epoch:{type(error).__name__}:{error}"
+        return evidence
+    evidence["sha256"] = _sha256(path)
+    evidence["embedded_epoch"] = embedded_epoch
+    if expected_epoch is not None and embedded_epoch != expected_epoch:
+        evidence["reason"] = "dataset_aware_record_epoch_mismatch"
+    elif expected_epoch is None and embedded_epoch >= boundary:
+        evidence["reason"] = "lightning_candidate_not_before_committed_boundary"
+    else:
+        evidence["valid"] = True
+    return evidence
+
+
+def _checkpoint_candidate_evidence(
+    checkpoint: Path, checkpoint_root: Path, boundary: int
+) -> tuple[list[dict[str, Any]], list[str]]:
+    """Audit DatasetAware and Lightning candidate references in a boundary checkpoint."""
+    import torch
+
+    payload = torch.load(checkpoint, map_location="cpu", weights_only=False)  # nosec B614
+    callbacks = payload.get("callbacks") if isinstance(payload, dict) else None
+    if not isinstance(callbacks, dict):
+        raise RuntimeError(f"Boundary checkpoint has no callback state: {checkpoint}")
+    references: list[dict[str, Any]] = []
+    custom_callbacks = 0
+    lightning_callbacks = 0
+    lightning_references = 0
+    for raw_key, state in callbacks.items():
+        callback = str(raw_key)
+        if not isinstance(state, dict):
+            continue
+        records_by_dataset = state.get("checkpoints")
+        if isinstance(records_by_dataset, dict) and "criterion" in state:
+            custom_callbacks += 1
+            for dataset, records in sorted(
+                records_by_dataset.items(), key=lambda item: str(item[0])
+            ):
+                if not isinstance(records, list):
+                    raise RuntimeError(
+                        f"DatasetAware callback {callback} has malformed records for {dataset}."
+                    )
+                for position, record in enumerate(records):
+                    if (
+                        not isinstance(record, dict)
+                        or isinstance(record.get("epoch"), bool)
+                        or not isinstance(record.get("epoch"), int)
+                    ):
+                        raise RuntimeError(
+                            f"DatasetAware callback {callback} has a malformed record."
+                        )
+                    references.append(
+                        _candidate_reference(
+                            record.get("fpath"),
+                            checkpoint_root=checkpoint_root,
+                            callback=callback,
+                            role=f"dataset_aware:{dataset}:{position}",
+                            expected_epoch=int(record["epoch"]),
+                            boundary=boundary,
+                        )
+                    )
+        if any(key in state for key in ("best_model_path", "best_k_models", "last_model_path")):
+            lightning_callbacks += 1
+            for key in ("last_model_path", "best_model_path"):
+                path = state.get(key)
+                if not path:
+                    continue
+                lightning_references += 1
+                references.append(
+                    _candidate_reference(
+                        path,
+                        checkpoint_root=checkpoint_root,
+                        callback=callback,
+                        role=f"lightning:{key}",
+                        expected_epoch=None,
+                        boundary=boundary,
+                    )
+                )
+            best_k = state.get("best_k_models", {})
+            if not isinstance(best_k, dict):
+                raise RuntimeError(f"Lightning callback {callback} has malformed best_k_models.")
+            for position, path in enumerate(sorted(best_k, key=str)):
+                lightning_references += 1
+                references.append(
+                    _candidate_reference(
+                        path,
+                        checkpoint_root=checkpoint_root,
+                        callback=callback,
+                        role=f"lightning:best_k_models:{position}",
+                        expected_epoch=None,
+                        boundary=boundary,
+                    )
+                )
+    structural_failures = []
+    if custom_callbacks == 0:
+        structural_failures.append("no_dataset_aware_checkpoint_state")
+    if lightning_callbacks == 0 or lightning_references == 0:
+        structural_failures.append("no_lightning_model_checkpoint_candidate_references")
+    return references, structural_failures
+
+
 def _active_retrain_indices(
     root: Path, design: dict[str, Any], rows: list[dict[str, str]]
 ) -> set[int]:
@@ -1446,6 +1638,531 @@ def missing_retrains(root: Path, repository: Path) -> list[int]:
         for index, row in enumerate(rows)
         if not _validate_retrain_marker(root / "retraining" / "markers" / f"{index:04d}.json", row)
     ]
+
+
+def _mlflow_retrain_run_directory(root: Path, run_id: str) -> Path:
+    """Resolve exactly one campaign-local MLflow run directory."""
+    if not re.fullmatch(r"[0-9a-f]{32}", run_id):
+        raise RuntimeError(f"Invalid retrain MLflow run ID: {run_id!r}.")
+    tracking_root = (root / "runtime" / "logs" / "mlflow" / "mlruns").resolve()
+    matches = [
+        path.resolve()
+        for path in tracking_root.glob(f"*/{run_id}")
+        if path.is_dir() and path.parent.name != ".trash"
+    ]
+    if len(matches) != 1 or not matches[0].is_relative_to(tracking_root):
+        raise RuntimeError(f"Expected exactly one campaign-local MLflow run for {run_id}.")
+    return matches[0]
+
+
+def _latest_committed_retrain_snapshot(
+    root: Path,
+    design: dict[str, Any],
+    ledger_rows: list[dict[str, str]],
+    index: int,
+) -> tuple[Path, dict[str, Any], dict[str, str]]:
+    """Authenticate the newest sealed segment despite later incomplete attempts."""
+    candidates = []
+    for ledger_row in ledger_rows:
+        if (
+            ledger_row.get("kind") != "retrain"
+            or ledger_row.get("state") != "COMPLETED"
+            or ledger_row.get("exit_code") != "0:0"
+            or _retrain_index_for_ledger_row(root, design, ledger_row) != index
+        ):
+            continue
+        receipt_path = _retrain_receipt_path(root, ledger_row["job_id"])
+        if not receipt_path.is_file():
+            raise RuntimeError(
+                f"Successful retrain {ledger_row['job_id']} has no sealed segment receipt."
+            )
+        _validate_retrain_receipt(root, design, ledger_row, receipt_path)
+        receipt = json.loads(receipt_path.read_text(encoding="utf-8"))
+        snapshot = receipt.get("evidence", {}).get("snapshot")
+        segments = snapshot.get("segments", []) if isinstance(snapshot, dict) else []
+        if not segments:
+            raise RuntimeError(f"Retrain receipt has no committed segment: {receipt_path}")
+        candidates.append(
+            (
+                int(segments[-1].get("epoch_boundary", -1)),
+                snapshot,
+                {
+                    "scheduler_job_id": ledger_row["job_id"],
+                    "path": str(receipt_path.resolve()),
+                    "sha256": _sha256(receipt_path),
+                },
+            )
+        )
+    if not candidates:
+        raise RuntimeError(f"Retrain index {index} has no sealed committed segment receipt.")
+    candidates.sort(key=lambda item: item[0])
+    if len(candidates) > 1 and candidates[-2][0] == candidates[-1][0]:
+        raise RuntimeError(f"Retrain index {index} has duplicate latest committed boundaries.")
+    _, snapshot, receipt_evidence = candidates[-1]
+    state_path = root / "retraining" / "restart_state" / f"{index:04d}" / "state.json"
+    if not state_path.is_file():
+        raise FileNotFoundError(state_path)
+    current = json.loads(state_path.read_text(encoding="utf-8"))
+    committed_segments = snapshot["segments"]
+    if (
+        current.get("identity") != snapshot.get("identity")
+        or current.get("mlflow_run_id") != snapshot.get("mlflow_run_id")
+        or current.get("segments", [])[: len(committed_segments)] != committed_segments
+    ):
+        raise RuntimeError(f"Current retrain state changed its sealed prefix: {state_path}")
+    return state_path, snapshot, receipt_evidence
+
+
+def _candidate_audit_payload(
+    root: Path,
+    design: dict[str, Any],
+    ledger_rows: list[dict[str, str]],
+    incident_id: str,
+) -> dict[str, Any]:
+    """Build deterministic evidence for retained candidates at every committed boundary."""
+    incident_id = _recovery_incident_id(incident_id)
+    manifest_path = _retrain_manifest_path(root).resolve()
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    rows = manifest.get("retrain_runs", [])
+    if (
+        manifest.get("schema_version") != 2
+        or manifest.get("code_commit") != design.get("code_commit")
+        or [row.get("retrain_index") for row in rows] != list(range(len(rows)))
+    ):
+        raise RuntimeError("Recovery requires an authenticated contiguous retrain manifest.")
+    audits = []
+    affected_indices = []
+    for index, row in enumerate(rows):
+        marker = root / "retraining" / "markers" / f"{index:04d}.json"
+        if marker.exists():
+            raise RuntimeError(f"Refusing to recover completed retrain index {index}: {marker}")
+        state_path, state, committed_receipt = _latest_committed_retrain_snapshot(
+            root, design, ledger_rows, index
+        )
+        segments = state.get("segments", [])
+        if not segments:
+            raise RuntimeError(f"Retrain index {index} has no committed boundary.")
+        latest = segments[-1]
+        boundary = int(latest.get("epoch_boundary", -1))
+        segment_root = root / "retraining" / "restart_state" / f"{index:04d}" / "segments"
+        checkpoint = _contained(
+            Path(str(latest.get("continuation_checkpoint", ""))),
+            segment_root,
+            "latest committed boundary checkpoint",
+        )
+        expected_sha256 = str(latest.get("continuation_checkpoint_sha256", ""))
+        if (
+            boundary <= 0
+            or boundary > int(design.get("retrain_epochs", -1))
+            or not checkpoint.is_file()
+            or _sha256(checkpoint) != expected_sha256
+            or _embedded_checkpoint_epoch(checkpoint) != boundary - 1
+        ):
+            raise RuntimeError(f"Immutable committed boundary is invalid for retrain {index}.")
+        identity = state.get("identity")
+        if not isinstance(identity, dict):
+            raise RuntimeError(f"Retrain index {index} has no immutable identity.")
+        checkpoint_root = _contained(
+            root
+            / "runtime"
+            / "checkpoints"
+            / str(identity.get("experiment_name", ""))
+            / str(identity.get("run_name", "")),
+            root / "runtime" / "checkpoints",
+            "retrain checkpoint root",
+        )
+        hydra_dir = _contained(
+            Path(str(identity.get("hydra_dir", ""))),
+            root / "retraining" / "hydra",
+            "retrain Hydra directory",
+        )
+        if hydra_dir != (root / "retraining" / "hydra" / f"{index:04d}").resolve():
+            raise RuntimeError(f"Retrain index {index} has a mismatched Hydra directory.")
+        mlflow_run = _mlflow_retrain_run_directory(root, str(state.get("mlflow_run_id", "")))
+        references, structural_failures = _checkpoint_candidate_evidence(
+            checkpoint, checkpoint_root, boundary
+        )
+        failures = [*structural_failures]
+        failures.extend(
+            f"{reference['role']}:{reference['reason']}"
+            for reference in references
+            if not reference["valid"]
+        )
+        affected = bool(failures)
+        if affected:
+            affected_indices.append(index)
+        audits.append(
+            {
+                "retrain_index": index,
+                "model": row["model"],
+                "boundary": boundary,
+                "boundary_checkpoint": str(checkpoint),
+                "boundary_checkpoint_sha256": expected_sha256,
+                "committed_segment_receipt": committed_receipt,
+                "checkpoint_root": str(checkpoint_root),
+                "hydra_dir": str(hydra_dir),
+                "restart_state_dir": str(state_path.parent.resolve()),
+                "mlflow_run_id": str(state["mlflow_run_id"]),
+                "mlflow_run_dir": str(mlflow_run),
+                "candidate_references": references,
+                "failures": failures,
+                "affected": affected,
+            }
+        )
+    return {
+        "schema_version": 1,
+        "kind": "retrain_candidate_integrity_audit",
+        "incident_id": incident_id,
+        "campaign_root": str(root.resolve()),
+        "code_commit": design["code_commit"],
+        "manifest": str(manifest_path),
+        "manifest_sha256": _sha256(manifest_path),
+        "audited_indices": list(range(len(rows))),
+        "affected_indices": affected_indices,
+        "retrain_audits": audits,
+    }
+
+
+def audit_retrain_candidates(root: Path, repository: Path, incident_id: str) -> Path:
+    """Seal a quiescent, read-only audit of every retained checkpoint reference."""
+    with _operation_lock(root):
+        design = _design(root)
+        _authenticate_execution_repository(repository, design)
+        _, ledger_rows = _ledger(root)
+        _assert_no_live_retrain_overlap(ledger_rows)
+        payload = _candidate_audit_payload(root, design, ledger_rows, incident_id)
+        path = root / "state" / "retrain_candidate_audits" / f"{incident_id}.json"
+        _write_once_json(path, payload)
+        return path
+
+
+def _archive_inventory(path: Path) -> dict[str, Any]:
+    """Hash a regular file tree without following aliases or special files."""
+    if path.is_symlink():
+        raise RuntimeError(f"Recovery source may not be a symlink: {path}")
+    if path.is_file():
+        files = [{"path": ".", "size": path.stat().st_size, "sha256": _sha256(path)}]
+        directories: list[str] = []
+        kind = "file"
+    elif path.is_dir():
+        files = []
+        directories = []
+        for child in sorted(path.rglob("*")):
+            if child.is_symlink() or (not child.is_file() and not child.is_dir()):
+                raise RuntimeError(f"Recovery source contains an unsupported entry: {child}")
+            if child.is_file():
+                files.append(
+                    {
+                        "path": child.relative_to(path).as_posix(),
+                        "size": child.stat().st_size,
+                        "sha256": _sha256(child),
+                    }
+                )
+            elif child.is_dir():
+                directories.append(child.relative_to(path).as_posix())
+        kind = "directory"
+    else:
+        raise FileNotFoundError(path)
+    content = {"directories": directories, "files": files}
+    return {"kind": kind, **content, "content_sha256": _json_sha256(content)}
+
+
+def _retrain_rows_for_indices(
+    root: Path, design: dict[str, Any], ledger_rows: list[dict[str, str]], indices: set[int]
+) -> list[dict[str, str]]:
+    """Select every historical retrain ledger row owned by an affected index."""
+    selected = []
+    for row in ledger_rows:
+        if row.get("kind") != "retrain":
+            continue
+        index = _retrain_index_for_ledger_row(root, design, row)
+        if index in indices:
+            selected.append(dict(row))
+    return selected
+
+
+def _inventory_contract(artifact: dict[str, Any]) -> dict[str, Any]:
+    """Project an archive row to its immutable content inventory."""
+    return {key: artifact.get(key) for key in ("kind", "directories", "files", "content_sha256")}
+
+
+def _validate_reset_intent_sources(
+    root: Path,
+    design: dict[str, Any],
+    archive_root: Path,
+    audit_rows: list[dict[str, Any]],
+    affected: set[int],
+    original_ledger_rows: list[dict[str, str]],
+    sources: Any,
+) -> list[dict[str, Any]]:
+    """Authenticate exact source/target identities before starting or resuming moves."""
+    if not isinstance(sources, list) or not sources:
+        raise RuntimeError("Candidate reset intent has no archive sources.")
+    expected_base = {}
+    for row in audit_rows:
+        if not row.get("affected"):
+            continue
+        index = int(row["retrain_index"])
+        expected_base.update(
+            {
+                (index, "restart_state"): (
+                    root / "retraining" / "restart_state" / f"{index:04d}"
+                ).resolve(),
+                (index, "hydra"): (root / "retraining" / "hydra" / f"{index:04d}").resolve(),
+                (index, "checkpoints"): Path(str(row["checkpoint_root"])).resolve(),
+                (index, "mlflow_run"): Path(str(row["mlflow_run_dir"])).resolve(),
+            }
+        )
+    originals = {row["job_id"]: row for row in original_ledger_rows}
+    seen: set[tuple[int, str]] = set()
+    successful_receipts = {
+        job_id
+        for job_id, row in originals.items()
+        if row.get("state") == "COMPLETED" and row.get("exit_code") == "0:0"
+    }
+    observed_receipts = set()
+    for artifact in sources:
+        if not isinstance(artifact, dict):
+            raise RuntimeError("Candidate reset intent contains a malformed archive row.")
+        index = artifact.get("retrain_index")
+        role = artifact.get("role")
+        if isinstance(index, bool) or not isinstance(index, int) or index not in affected:
+            raise RuntimeError("Candidate reset intent names an unaudited retrain index.")
+        if not isinstance(role, str) or (index, role) in seen:
+            raise RuntimeError("Candidate reset intent contains a duplicate or invalid role.")
+        seen.add((index, role))
+        source = _contained(Path(str(artifact.get("source", ""))), root, "recovery source")
+        if (index, role) in expected_base:
+            if source != expected_base[(index, role)]:
+                raise RuntimeError(f"Candidate reset intent changed its {role} source.")
+        elif role.startswith("retrain_receipt:"):
+            job_id = role.removeprefix("retrain_receipt:")
+            if job_id not in originals or source != _retrain_receipt_path(root, job_id).resolve():
+                raise RuntimeError("Candidate reset intent names an unrelated retrain receipt.")
+            if _retrain_index_for_ledger_row(root, design, originals[job_id]) != index:
+                raise RuntimeError("Candidate reset receipt belongs to another retrain index.")
+            if job_id in successful_receipts:
+                observed_receipts.add(job_id)
+        else:
+            raise RuntimeError(f"Candidate reset intent has an unsupported role: {role!r}.")
+        target = _contained(
+            Path(str(artifact.get("target", ""))), archive_root, "recovery archive target"
+        )
+        digest = artifact.get("content_sha256")
+        if (
+            not isinstance(digest, str)
+            or not re.fullmatch(r"[0-9a-f]{64}", digest)
+            or digest[:20] not in target.name
+        ):
+            raise RuntimeError("Candidate reset target is not content-addressed.")
+        inventory = _inventory_contract(artifact)
+        if (
+            inventory["kind"] not in {"file", "directory"}
+            or not isinstance(inventory["directories"], list)
+            or not isinstance(inventory["files"], list)
+        ):
+            raise RuntimeError("Candidate reset intent has a malformed content inventory.")
+    if not set(expected_base).issubset(seen) or observed_receipts != successful_receipts:
+        raise RuntimeError("Candidate reset intent does not cover its exact required sources.")
+    if len({row["source"] for row in sources}) != len(sources) or len(
+        {row["target"] for row in sources}
+    ) != len(sources):
+        raise RuntimeError("Candidate reset intent aliases archive sources or targets.")
+    return sources
+
+
+def reset_affected_retrains(
+    root: Path, repository: Path, incident_id: str, audit_sha256: str
+) -> Path:
+    """Archive only audited corruption and authorize exact frozen-identity reruns."""
+    with _operation_lock(root):
+        incident_id = _recovery_incident_id(incident_id)
+        if not re.fullmatch(r"[0-9a-f]{64}", audit_sha256):
+            raise RuntimeError("A candidate reset requires the exact audit SHA-256.")
+        design = _design(root)
+        _authenticate_execution_repository(repository, design)
+        ledger_path, ledger_rows = _ledger(root)
+        _assert_no_live_retrain_overlap(ledger_rows)
+        reset_path = root / "state" / "retrain_candidate_resets" / f"{incident_id}.json"
+        if reset_path.exists():
+            raise RuntimeError(f"Recovery incident was already reset: {reset_path}")
+        audit_path = root / "state" / "retrain_candidate_audits" / f"{incident_id}.json"
+        if not audit_path.is_file() or _sha256(audit_path) != audit_sha256:
+            raise RuntimeError("Candidate reset audit is missing or has the wrong SHA-256.")
+        audit = json.loads(audit_path.read_text(encoding="utf-8"))
+        affected = audit.get("affected_indices")
+        audit_rows = audit.get("retrain_audits")
+        if (
+            audit.get("schema_version") != 1
+            or audit.get("kind") != "retrain_candidate_integrity_audit"
+            or audit.get("incident_id") != incident_id
+            or audit.get("campaign_root") != str(root.resolve())
+            or audit.get("code_commit") != design["code_commit"]
+            or not isinstance(affected, list)
+            or not affected
+            or len(set(affected)) != len(affected)
+            or not isinstance(audit_rows, list)
+            or audit.get("audited_indices") != list(range(len(audit_rows)))
+            or [row.get("retrain_index") for row in audit_rows] != list(range(len(audit_rows)))
+            or [row.get("retrain_index") for row in audit_rows if row.get("affected")] != affected
+        ):
+            raise RuntimeError("Candidate reset audit has an invalid affected-index contract.")
+        manifest_path = _retrain_manifest_path(root).resolve()
+        if audit.get("manifest") != str(manifest_path) or audit.get("manifest_sha256") != _sha256(
+            manifest_path
+        ):
+            raise RuntimeError("Candidate reset audit is detached from the retrain manifest.")
+        affected_set = {int(index) for index in affected}
+        original_ledger_rows = _retrain_rows_for_indices(root, design, ledger_rows, affected_set)
+        if not original_ledger_rows:
+            raise RuntimeError("No retrain ledger rows map to the affected indices.")
+        if any(
+            _normalized_state(row.get("state", "")) not in TERMINAL_STATES
+            or not row.get("log_sha256")
+            for row in original_ledger_rows
+        ):
+            raise RuntimeError("Affected retrain ledger rows must be reconciled and terminal.")
+        archive_root = (
+            root / "state" / "retrain_candidate_recovery_archives" / incident_id
+        ).resolve()
+        intent_path = root / "state" / "retrain_candidate_reset_intents" / f"{incident_id}.json"
+        if intent_path.is_file():
+            intent = json.loads(intent_path.read_text(encoding="utf-8"))
+            if (
+                intent.get("schema_version") != 1
+                or intent.get("kind") != "retrain_candidate_reset_intent"
+                or intent.get("incident_id") != incident_id
+                or intent.get("campaign_root") != str(root.resolve())
+                or intent.get("audit") != str(audit_path.resolve())
+                or intent.get("audit_sha256") != audit_sha256
+                or intent.get("affected_indices") != affected
+                or intent.get("original_ledger_rows") != original_ledger_rows
+            ):
+                raise RuntimeError("Existing candidate reset intent differs from current state.")
+            sources = intent.get("sources")
+        else:
+            for row in original_ledger_rows:
+                successful = row.get("state") == "COMPLETED" and row.get("exit_code") == "0:0"
+                if successful and not _retrain_receipt_path(root, row["job_id"]).is_file():
+                    raise RuntimeError(
+                        f"Successful affected retrain has no sealed receipt: {row['job_id']}."
+                    )
+            sources = []
+            for row in audit_rows:
+                if not row.get("affected"):
+                    continue
+                index = int(row["retrain_index"])
+                expected = {
+                    "restart_state": root / "retraining" / "restart_state" / f"{index:04d}",
+                    "hydra": root / "retraining" / "hydra" / f"{index:04d}",
+                    "checkpoints": Path(str(row["checkpoint_root"])),
+                    "mlflow_run": Path(str(row["mlflow_run_dir"])),
+                }
+                for role, raw_source in expected.items():
+                    source = _contained(raw_source, root, f"recovery {role}")
+                    inventory = _archive_inventory(source)
+                    target = (
+                        archive_root
+                        / f"{index:04d}"
+                        / (f"{role}__{inventory['content_sha256'][:20]}")
+                    )
+                    sources.append(
+                        {
+                            "retrain_index": index,
+                            "role": role,
+                            "source": str(source),
+                            "target": str(target),
+                            **inventory,
+                        }
+                    )
+            for ledger_row in original_ledger_rows:
+                receipt = _retrain_receipt_path(root, ledger_row["job_id"])
+                if not receipt.exists():
+                    continue
+                inventory = _archive_inventory(receipt)
+                index = _retrain_index_for_ledger_row(root, design, ledger_row)
+                target = (
+                    archive_root
+                    / f"{index:04d}"
+                    / (
+                        f"retrain_receipt_{ledger_row['job_id']}__"
+                        f"{inventory['content_sha256'][:20]}.json"
+                    )
+                )
+                sources.append(
+                    {
+                        "retrain_index": index,
+                        "role": f"retrain_receipt:{ledger_row['job_id']}",
+                        "source": str(receipt.resolve()),
+                        "target": str(target),
+                        **inventory,
+                    }
+                )
+            intent = {
+                "schema_version": 1,
+                "kind": "retrain_candidate_reset_intent",
+                "incident_id": incident_id,
+                "campaign_root": str(root.resolve()),
+                "audit": str(audit_path.resolve()),
+                "audit_sha256": audit_sha256,
+                "affected_indices": affected,
+                "sources": sources,
+                "original_ledger_rows": original_ledger_rows,
+            }
+        sources = _validate_reset_intent_sources(
+            root,
+            design,
+            archive_root,
+            audit_rows,
+            affected_set,
+            original_ledger_rows,
+            sources,
+        )
+        _write_once_json(intent_path, intent)
+        for artifact in sources:
+            source = Path(artifact["source"])
+            target = Path(artifact["target"])
+            source_exists = source.exists()
+            target_exists = target.exists()
+            if source_exists == target_exists:
+                raise RuntimeError(
+                    f"Recovery transition requires exactly one source/archive copy: {source}"
+                )
+            expected_inventory = _inventory_contract(artifact)
+            if source_exists:
+                if _archive_inventory(source) != expected_inventory:
+                    raise RuntimeError(f"Recovery source changed after intent: {source}")
+                target.parent.mkdir(parents=True, exist_ok=True)
+                source.replace(target)
+            if _archive_inventory(target) != expected_inventory:
+                raise RuntimeError(f"Archived recovery artifact changed while moving: {target}")
+        reset = {
+            "schema_version": 1,
+            "kind": "retrain_candidate_reset",
+            "incident_id": incident_id,
+            "campaign_root": str(root.resolve()),
+            "code_commit": design["code_commit"],
+            "audit": str(audit_path.resolve()),
+            "audit_sha256": audit_sha256,
+            "intent": str(intent_path.resolve()),
+            "intent_sha256": _sha256(intent_path),
+            "affected_indices": affected,
+            "archives": [
+                {**row, "source_absent": not Path(row["source"]).exists()} for row in sources
+            ],
+            "original_ledger_rows": original_ledger_rows,
+            "superseded_job_ids": [row["job_id"] for row in original_ledger_rows],
+            "rerun_contract": "from_scratch_with_unchanged_frozen_manifest_row_and_seed",
+        }
+        _write_once_json(reset_path, reset)
+        reset_sha256 = _sha256(reset_path)
+        superseded_ids = set(reset["superseded_job_ids"])
+        for ledger_row in ledger_rows:
+            if ledger_row["job_id"] in superseded_ids:
+                ledger_row["kind"] = "retrain_superseded"
+                ledger_row["success_sha256"] = reset_sha256
+        _atomic_csv(ledger_path, ledger_rows)
+        return reset_path
 
 
 def _array_spec(indices: list[int]) -> str:
@@ -2825,7 +3542,70 @@ def _terminal_row_is_sealed(row: dict[str, str]) -> bool:
         return bool(row.get("success_sha256") and row.get("bindings_sha256"))
     if row.get("kind") == "retrain":
         return bool(row.get("success_sha256"))
+    if row.get("kind") == "retrain_superseded":
+        return bool(row.get("success_sha256") and row.get("bindings_sha256"))
     return True
+
+
+def _validate_superseded_retrain_row(root: Path, row: dict[str, str]) -> None:
+    """Bind one superseded ledger row to its immutable reset and archived evidence."""
+    expected_sha256 = row.get("success_sha256", "")
+    matches = [
+        path
+        for path in (root / "state" / "retrain_candidate_resets").glob("*.json")
+        if _sha256(path) == expected_sha256
+    ]
+    if len(matches) != 1:
+        raise RuntimeError(f"Superseded retrain row has no unique reset receipt: {row['job_id']}.")
+    reset = json.loads(matches[0].read_text(encoding="utf-8"))
+    originals = reset.get("original_ledger_rows", [])
+    original = next((item for item in originals if item.get("job_id") == row["job_id"]), None)
+    if (
+        reset.get("schema_version") != 1
+        or reset.get("kind") != "retrain_candidate_reset"
+        or row["job_id"] not in reset.get("superseded_job_ids", [])
+        or original is None
+        or original.get("kind") != "retrain"
+        or any(
+            row.get(field) != original.get(field)
+            for field in LEDGER_FIELDS
+            if field not in {"kind", "success_sha256"}
+        )
+    ):
+        raise RuntimeError(f"Superseded retrain ledger provenance differs: {row['job_id']}.")
+    incident_id = _recovery_incident_id(str(reset.get("incident_id", "")))
+    audit = Path(str(reset.get("audit", "")))
+    intent = Path(str(reset.get("intent", "")))
+    if (
+        reset.get("campaign_root") != str(root.resolve())
+        or audit != (root / "state" / "retrain_candidate_audits" / f"{incident_id}.json").resolve()
+        or not audit.is_file()
+        or _sha256(audit) != reset.get("audit_sha256")
+        or intent
+        != (root / "state" / "retrain_candidate_reset_intents" / f"{incident_id}.json").resolve()
+        or not intent.is_file()
+        or _sha256(intent) != reset.get("intent_sha256")
+    ):
+        raise RuntimeError(f"Superseded retrain reset provenance differs: {row['job_id']}.")
+    archived_receipt = False
+    for archive in reset.get("archives", []):
+        source = _contained(Path(str(archive.get("source", ""))), root, "recovery source")
+        target = Path(str(archive.get("target", "")))
+        _contained(
+            target,
+            root / "state" / "retrain_candidate_recovery_archives" / incident_id,
+            "recovery archive",
+        )
+        observed = _archive_inventory(target)
+        expected = {
+            key: archive.get(key) for key in ("kind", "directories", "files", "content_sha256")
+        }
+        if source.exists() or archive.get("source_absent") is not True or observed != expected:
+            raise RuntimeError(f"Superseded retrain receipt archive changed: {target}")
+        archived_receipt |= archive.get("role") == f"retrain_receipt:{row['job_id']}"
+    successful = original.get("state") == "COMPLETED" and original.get("exit_code") == "0:0"
+    if successful and not archived_receipt:
+        raise RuntimeError(f"Superseded successful retrain receipt is absent: {row['job_id']}.")
 
 
 def _reconcile_locked(
@@ -2878,6 +3658,8 @@ def _reconcile_locked(
             ):
                 if audit_sealed or not row.get("success_sha256"):
                     row["success_sha256"] = _completed_retrain_marker(root, design, row)
+            elif row.get("kind") == "retrain_superseded":
+                _validate_superseded_retrain_row(root, row)
             if not sealed:
                 # Keep new authentication work durable if a later row fails or is interrupted.
                 _atomic_csv(ledger_path, rows)
@@ -3570,6 +4352,10 @@ def main() -> None:
         print(json.dumps(reconcile(root, repository), indent=2, sort_keys=True))
     elif args.command == "retire-unmaterialized-retrains":
         print(retire_unmaterialized_retrains(root, repository, args.array_job_id))
+    elif args.command == "audit-retrain-candidates":
+        print(audit_retrain_candidates(root, repository, args.incident_id))
+    elif args.command == "reset-affected-retrains":
+        print(reset_affected_retrains(root, repository, args.incident_id, args.audit_sha256))
     elif args.command == "freeze":
         print(freeze_campaign(root, repository))
     elif args.command == "aggregate":

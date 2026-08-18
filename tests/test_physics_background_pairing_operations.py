@@ -173,6 +173,358 @@ def _write_exact_checkpoint(path: Path, epoch: int) -> None:
     )
 
 
+def _write_candidate_checkpoint(path: Path, epoch: int) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    torch.save({"epoch": epoch}, path)
+
+
+def test_candidate_recovery_audit_finds_missing_and_epoch_mismatched_references(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The immutable boundary remains usable while damaged retained candidates are listed."""
+    root, repository = _campaign(tmp_path)
+    design = {"schema_version": 2, "code_commit": "a" * 40, "retrain_epochs": 200}
+    (root / "design.json").write_text(json.dumps(design), encoding="utf-8")
+    row = {"retrain_index": 0, "model": "ae", "seed": 123, "params": {}}
+    manifest = root / "selection" / "pareto_retrain_manifest.json"
+    manifest.parent.mkdir()
+    manifest.write_text(
+        json.dumps({"schema_version": 2, "code_commit": "a" * 40, "retrain_runs": [row]}),
+        encoding="utf-8",
+    )
+    state_dir = root / "retraining" / "restart_state" / "0000"
+    checkpoint_root = root / "runtime/checkpoints/physics_bgpair_retrain_ae/run0"
+    hydra_dir = root / "retraining/hydra/0000"
+    hydra_dir.mkdir(parents=True)
+    good = checkpoint_root / "primary/good.ckpt"
+    mismatched = checkpoint_root / "stable/mismatch.ckpt"
+    lightning = checkpoint_root / "epoch=38.ckpt"
+    _write_candidate_checkpoint(good, 10)
+    _write_candidate_checkpoint(mismatched, 12)
+    _write_candidate_checkpoint(lightning, 38)
+    boundary = state_dir / "segments/epoch_040.ckpt"
+    boundary.parent.mkdir(parents=True)
+    torch.save(
+        {
+            "epoch": 39,
+            "callbacks": {
+                "DatasetAwareModelCheckpoint{primary}": {
+                    "criterion": {"name": "ema"},
+                    "checkpoints": {
+                        "background": [
+                            {"epoch": 10, "fpath": str(good), "value": 1.0},
+                            {
+                                "epoch": 11,
+                                "fpath": str(mismatched),
+                                "value": 2.0,
+                            },
+                            {
+                                "epoch": 9,
+                                "fpath": str(checkpoint_root / "deleted.ckpt"),
+                                "value": 3.0,
+                            },
+                        ]
+                    },
+                },
+                "ModelCheckpoint{last}": {
+                    "best_model_path": str(lightning),
+                    "best_k_models": {str(lightning): 0.0},
+                },
+            },
+        },
+        boundary,
+    )
+    mlflow_run_id = "1" * 32
+    (root / f"runtime/logs/mlflow/mlruns/7/{mlflow_run_id}").mkdir(parents=True)
+    state = state_dir / "state.json"
+    state.write_text(
+        json.dumps(
+            {
+                "identity": {
+                    "experiment_name": "physics_bgpair_retrain_ae",
+                    "run_name": "run0",
+                    "hydra_dir": str(hydra_dir.resolve()),
+                },
+                "mlflow_run_id": mlflow_run_id,
+                "segments": [
+                    {
+                        "epoch_boundary": 40,
+                        "continuation_checkpoint": str(boundary.resolve()),
+                        "continuation_checkpoint_sha256": operations._sha256(boundary),
+                    }
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(operations, "_authenticate_execution_repository", lambda *args: None)
+    monkeypatch.setattr(operations, "_live_retrain_job_ids", lambda: set())
+    monkeypatch.setattr(
+        operations,
+        "_latest_committed_retrain_snapshot",
+        lambda *args, **kwargs: (
+            state,
+            json.loads(state.read_text(encoding="utf-8")),
+            {"scheduler_job_id": "123_0", "path": "receipt", "sha256": "a" * 64},
+        ),
+    )
+
+    receipt = operations.audit_retrain_candidates(root, repository, "candidate-loss")
+    payload = json.loads(receipt.read_text(encoding="utf-8"))
+
+    assert payload["affected_indices"] == [0]
+    evidence = payload["retrain_audits"][0]
+    assert evidence["boundary"] == 40
+    assert evidence["boundary_checkpoint_sha256"] == operations._sha256(boundary)
+    assert [item["reason"] for item in evidence["candidate_references"]] == [
+        None,
+        "dataset_aware_record_epoch_mismatch",
+        "missing",
+        None,
+        None,
+    ]
+
+
+def test_candidate_reference_refuses_checkpoint_root_escape(tmp_path: Path) -> None:
+    """A malicious retained path cannot broaden recovery beyond its run directory."""
+    root = tmp_path / "checkpoints"
+    root.mkdir()
+    escaped = tmp_path / "outside.ckpt"
+    _write_candidate_checkpoint(escaped, 1)
+    with pytest.raises(RuntimeError, match="escapes"):
+        operations._candidate_reference(
+            escaped,
+            checkpoint_root=root,
+            callback="callback",
+            role="dataset_aware:test:0",
+            expected_epoch=1,
+            boundary=40,
+        )
+
+
+def test_empty_dataset_aware_stable_state_is_valid_and_last_path_is_audited(
+    tmp_path: Path,
+) -> None:
+    """An early stable window may be empty, while Lightning last remains mandatory evidence."""
+    checkpoint_root = tmp_path / "checkpoints"
+    last = checkpoint_root / "last.ckpt"
+    _write_candidate_checkpoint(last, 4)
+    boundary = tmp_path / "epoch_005.ckpt"
+    torch.save(
+        {
+            "epoch": 4,
+            "callbacks": {
+                "DatasetAwareModelCheckpoint{stable}": {
+                    "criterion": {"name": "stable"},
+                    "checkpoints": {"background": []},
+                },
+                "ModelCheckpoint{last}": {
+                    "last_model_path": str(last),
+                    "best_model_path": "",
+                    "best_k_models": {},
+                },
+            },
+        },
+        boundary,
+    )
+
+    references, failures = operations._checkpoint_candidate_evidence(boundary, checkpoint_root, 5)
+
+    assert failures == []
+    assert [(row["role"], row["embedded_epoch"], row["valid"]) for row in references] == [
+        ("lightning:last_model_path", 4, True)
+    ]
+
+
+def test_candidate_audit_uses_latest_sealed_boundary_before_failed_attempt(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """An incomplete retry cannot hide the latest scientifically committed segment."""
+    root = tmp_path / "campaign"
+    state_path = root / "retraining/restart_state/0000/state.json"
+    state_path.parent.mkdir(parents=True)
+    segments = [{"epoch_boundary": 40}, {"epoch_boundary": 80}]
+    committed = {
+        "identity": {"retrain_index": 0},
+        "mlflow_run_id": "1" * 32,
+        "attempts": [{"completed_at": "done"}, {"completed_at": "done"}],
+        "segments": segments,
+    }
+    current = {
+        **committed,
+        "attempts": [*committed["attempts"], {"completed_at": None}],
+    }
+    state_path.write_text(json.dumps(current), encoding="utf-8")
+    ledger = []
+    for job_id, boundary in (("100_0", 40), ("101_0", 80)):
+        row = {
+            "job_id": job_id,
+            "kind": "retrain",
+            "state": "COMPLETED",
+            "exit_code": "0:0",
+        }
+        ledger.append(row)
+        receipt = operations._retrain_receipt_path(root, job_id)
+        receipt.parent.mkdir(parents=True, exist_ok=True)
+        receipt.write_text(
+            json.dumps(
+                {
+                    "evidence": {
+                        "snapshot": {
+                            **committed,
+                            "attempts": committed["attempts"][: boundary // 40],
+                            "segments": segments[: boundary // 40],
+                        }
+                    }
+                }
+            ),
+            encoding="utf-8",
+        )
+    monkeypatch.setattr(operations, "_retrain_index_for_ledger_row", lambda *args: 0)
+    monkeypatch.setattr(operations, "_validate_retrain_receipt", lambda *args: None)
+
+    observed_path, snapshot, receipt = operations._latest_committed_retrain_snapshot(
+        root, {"code_commit": "a" * 40}, ledger, 0
+    )
+
+    assert observed_path == state_path
+    assert snapshot["segments"][-1]["epoch_boundary"] == 80
+    assert receipt["scheduler_job_id"] == "101_0"
+
+
+def test_reset_resumes_partial_archive_and_supersedes_only_audit_listed_index(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Reset moves evidence, preserves unaffected runs, and retires historical receipts."""
+    root, repository = _campaign(tmp_path)
+    design = {"schema_version": 2, "code_commit": "a" * 40, "retrain_epochs": 200}
+    (root / "design.json").write_text(json.dumps(design), encoding="utf-8")
+    rows = [
+        {"retrain_index": index, "model": "ae", "seed": 123 + index, "params": {}}
+        for index in range(2)
+    ]
+    manifest = root / "selection/pareto_retrain_manifest.json"
+    manifest.parent.mkdir()
+    manifest.write_text(
+        json.dumps({"schema_version": 2, "code_commit": "a" * 40, "retrain_runs": rows}),
+        encoding="utf-8",
+    )
+    affected_paths = {
+        "restart_state_dir": root / "retraining/restart_state/0000",
+        "hydra_dir": root / "retraining/hydra/0000",
+        "checkpoint_root": root / "runtime/checkpoints/experiment/run0",
+        "mlflow_run_dir": root / ("runtime/logs/mlflow/mlruns/7/" + "2" * 32),
+    }
+    for path in affected_paths.values():
+        path.mkdir(parents=True)
+        (path / "evidence.txt").write_text(path.name, encoding="utf-8")
+    unaffected = root / "retraining/restart_state/0001"
+    unaffected.mkdir(parents=True)
+    (unaffected / "keep.txt").write_text("keep", encoding="utf-8")
+    audit = {
+        "schema_version": 1,
+        "kind": "retrain_candidate_integrity_audit",
+        "incident_id": "candidate-loss",
+        "campaign_root": str(root.resolve()),
+        "code_commit": "a" * 40,
+        "manifest": str(manifest.resolve()),
+        "manifest_sha256": operations._sha256(manifest),
+        "audited_indices": [0, 1],
+        "affected_indices": [0],
+        "retrain_audits": [
+            {
+                "retrain_index": 0,
+                "affected": True,
+                **{name: str(path.resolve()) for name, path in affected_paths.items()},
+            },
+            {"retrain_index": 1, "affected": False},
+        ],
+    }
+    audit_path = root / "state/retrain_candidate_audits/candidate-loss.json"
+    operations._write_once_json(audit_path, audit)
+    job_log = root / "job.log"
+    job_log.write_text("completed\n", encoding="utf-8")
+    ledger_row = {
+        "job_id": "123_0",
+        "kind": "retrain",
+        "model": "ae",
+        "state": "COMPLETED",
+        "elapsed": "1:00",
+        "exit_code": "0:0",
+        "started": "start",
+        "ended": "end",
+        "commit": "a" * 40,
+        "log_path": str(job_log.resolve()),
+        "log_sha256": operations._sha256(job_log),
+        "success_sha256": "c" * 64,
+        "bindings_sha256": "d" * 64,
+        "attempt": "1",
+    }
+    operations._atomic_csv(root / "state/job_history.csv", [ledger_row])
+    old_receipt = operations._retrain_receipt_path(root, "123_0")
+    old_receipt.parent.mkdir(parents=True)
+    old_receipt.write_text("old receipt\n", encoding="utf-8")
+    monkeypatch.setattr(operations, "_authenticate_execution_repository", lambda *args: None)
+    monkeypatch.setattr(operations, "_live_retrain_job_ids", lambda: set())
+    monkeypatch.setattr(operations, "_retrain_index_for_ledger_row", lambda *args: 0)
+
+    original_replace = Path.replace
+    archive_moves = 0
+
+    def interrupt_second_archive_move(source: Path, target: Path) -> Path:
+        nonlocal archive_moves
+        if "retrain_candidate_recovery_archives" in target.parts:
+            archive_moves += 1
+            if archive_moves == 2:
+                raise RuntimeError("simulated interruption")
+        return original_replace(source, target)
+
+    monkeypatch.setattr(Path, "replace", interrupt_second_archive_move)
+    with pytest.raises(RuntimeError, match="simulated interruption"):
+        operations.reset_affected_retrains(
+            root, repository, "candidate-loss", operations._sha256(audit_path)
+        )
+    intent_path = root / "state/retrain_candidate_reset_intents/candidate-loss.json"
+    assert intent_path.is_file()
+    assert not affected_paths["restart_state_dir"].exists()
+    assert affected_paths["hydra_dir"].exists()
+
+    monkeypatch.setattr(Path, "replace", original_replace)
+    reset_path = operations.reset_affected_retrains(
+        root, repository, "candidate-loss", operations._sha256(audit_path)
+    )
+    reset = json.loads(reset_path.read_text(encoding="utf-8"))
+
+    assert all(not path.exists() for path in affected_paths.values())
+    assert not old_receipt.exists()
+    assert (unaffected / "keep.txt").read_text(encoding="utf-8") == "keep"
+    assert {item["retrain_index"] for item in reset["archives"]} == {0}
+    assert any(item["role"] == "retrain_receipt:123_0" for item in reset["archives"])
+    ledger = list(csv.DictReader((root / "state/job_history.csv").open(encoding="utf-8")))
+    assert ledger[0]["kind"] == "retrain_superseded"
+    assert ledger[0]["success_sha256"] == operations._sha256(reset_path)
+    operations._validate_superseded_retrain_row(root, ledger[0])
+    monkeypatch.setattr(operations, "_accounting", lambda job_ids: {})
+    assert operations._reconcile_locked(root, repository, audit_sealed=True)[0]["kind"] == (
+        "retrain_superseded"
+    )
+    with pytest.raises(RuntimeError, match="already reset"):
+        operations.reset_affected_retrains(
+            root, repository, "candidate-loss", operations._sha256(audit_path)
+        )
+
+
+def test_candidate_reset_refuses_live_retrain_array(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """No destructive archive transition is allowed while a retrain allocation is live."""
+    root, repository = _campaign(tmp_path)
+    monkeypatch.setattr(operations, "_authenticate_execution_repository", lambda *args: None)
+    monkeypatch.setattr(operations, "_live_retrain_job_ids", lambda: {"987"})
+    with pytest.raises(RuntimeError, match="Live retrain"):
+        operations.reset_affected_retrains(root, repository, "candidate-loss", "a" * 64)
+
+
 def _campaign(tmp_path: Path) -> tuple[Path, Path]:
     """Create one minimal frozen campaign and execution tree."""
     root = tmp_path / "campaign"

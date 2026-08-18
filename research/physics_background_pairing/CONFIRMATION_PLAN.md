@@ -935,7 +935,7 @@ uv run python scripts/physics_background_pairing_confirmation_report.py \
   --repository <CLEAN_ANALYSIS_WORKTREE> \
   --output-dir <CONFIRM_ROOT>/results/report_final_<EXECUTION_COMMIT> \
   --discovery-random-analysis \
-    <DISCOVERY_ROOT>/results/random_cap_analysis/discovery_5293a29 \
+    <DISCOVERY_ROOT>/results/random_cap_analysis/discovery_immutable_presort_20260818 \
   --confirmation-random-analysis \
     <CONFIRM_ROOT>/results/random_cap_analysis/confirmation_<EXECUTION_COMMIT> \
   --analysis-stage final --report-mode final
@@ -956,3 +956,113 @@ persistence/reversal sections must consume dedicated hash-bound MLflow/discovery
 artifacts; do not infer them from scheduler logs or filenames. Until those inputs are
 present and authenticated, keep the report provisional rather than omitting the
 required sections or inventing a trend.
+
+## 16. Current recovery state and exact next actions (2026-08-18)
+
+This section supersedes the operational snapshot in Section 14 where the two differ.
+The scientific design, matrix, endpoints, and reporting contract above are unchanged.
+
+### 16.1 Completed evidence
+
+- All 84 confirmation runs completed and authenticated their first 40-epoch segment.
+- Recovery canary task 2 subsequently authenticated an epoch-80 boundary using the
+  immutable presort data identity and full Lightning state.
+- The corrected retrospective random-CAP array `3108575` completed all 346 physical
+  tasks with zero missing or invalid markers. Its aggregate contains 8,590 seed-level
+  rows and 1,718 five-permutation summaries:
+
+  ```text
+  <DISCOVERY_ROOT>/random_cap_evaluation/
+    discovery_immutable_presort_20260818/aggregate.json
+  SHA-256: 1b86936bc47f6c294ed4243e60081a73631cf0a484e380e203e3eca597c56baa
+  ```
+
+- The masked-OAS scientific audit remains valid and requires no model restart.
+
+### 16.2 Checkpoint-candidate incident
+
+A broad continuation wave was stopped after revealing that earlier failed retries had
+mutated mutable retained-candidate directories even though their authenticated
+segment boundaries remained intact. The immutable boundary, optimizer, RNG, and
+dataloader state were not lost. The affected configuration indices are currently:
+
+```text
+0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17,
+20, 21, 22, 23, 34, 46, 56, 59, 72, 76
+```
+
+This yields 28 affected runs and 56 unaffected runs. Because the protocol requires
+three valid checkpoint candidates (last, best primary EMA, and stable native score),
+an authenticated training boundary alone is insufficient for an affected run. The
+scientifically conservative recovery is:
+
+- archive every affected run's existing runtime state and receipts without deleting
+  evidence;
+- supersede its old ledger identity explicitly;
+- restart that run from epoch 0 with the same frozen configuration and seed;
+- retain the 56 unaffected epoch-40 boundaries and resume those from epoch 40;
+- never reconstruct missing candidates from a different checkpoint family or waive
+  the three-candidate rule.
+
+Before executing the reset, the recovery tooling must pass tests for all of the
+following: locating the latest sealed successful segment despite trailing failed
+attempts; validating every callback-referenced candidate and Lightning
+`last_model_path`; accepting a legitimately empty early stable-score record; and
+resuming safely if archival is interrupted between intent and completion.
+
+### 16.3 Immediate execution sequence
+
+No additional production array may be submitted until these gates pass in order:
+
+1. Finish and test `audit-retrain-candidates` and
+   `reset-affected-retrains`; run focused tests and pre-commit.
+2. Run the audit against the real confirmation root and verify that its authenticated
+   affected set is exactly explained by candidate-file/hash failures.
+3. Hash-bind the audit receipt, then archive/reset only its affected identities.
+4. Run a full reconciliation and prove that all archive hashes, supersession rows,
+   remaining epoch-40 boundaries, and reset identities agree.
+5. Submit the resulting 84 tasks through the fail-closed data-identity guard with a
+   maximum concurrency of 32. The 28 reset tasks run epoch 0 to 40; the 56 intact
+   tasks run epoch 40 to 80.
+6. Inspect early logs for correct immutable roots, expected resume epochs, callback
+   restoration, and absence of tracebacks. Reconcile every completed wave and submit
+   subsequent 40-epoch segments until all runs seal epoch 200.
+7. Run endpoint extraction, primary analysis, the predeclared reserve-seed decision,
+   any required reserve retraining, final endpoint extraction, confirmation random
+   CAP, authenticated 50-to-200 context extraction, and final report promotion in
+   exactly that order.
+
+Canceled array elements that never materialized must be retired with an immutable
+receipt rather than represented as training failures. Arrays `3108572` and `3110136`
+already have such retirement evidence under:
+
+```text
+<CONFIRM_ROOT>/state/unmaterialized_retrain_retirements/
+```
+
+### 16.4 Autonomous-agent operating rules
+
+The executing agent must keep the terminal scientific outcome in view: complete and
+authenticated answers to whether CAP beats W1/drift and whether each pairing improves
+CAP, separately for efficiency and AUPRC and per algorithm. It must:
+
+- keep a durable matrix of every required run, segment, selector membership,
+  checkpoint, endpoint, diagnostic, and report artifact;
+- use bounded sub-agents for independent log reading, artifact audits, or statistical
+  cross-checks, while verifying their conclusions before changing state;
+- keep the scheduler populated up to the safe concurrency limit without ever running
+  two segments for the same run identity;
+- estimate both queue delay and runtime from Slurm evidence; when that is the sole
+  blocker, record the prediction and use a timer/wait until the next useful check
+  instead of tight polling;
+- continue implementation, aggregation, documentation, and audits while jobs run;
+- persist all large evidence in the confirmation scratch root and every compact
+  CSV/JSON/report artifact in its `results/` tree, then mirror the verified compact
+  bundle into the repository-ignored `results/` directory;
+- stop only after the final bundle manifest verifies and repository-root `REPORT.md`
+  answers the two research questions without unsupported claims.
+
+The current absence of live production jobs is intentional recovery gating, not
+campaign completion. Once the recovery audit/reset passes, production submission is
+the next action; the campaign then proceeds autonomously through the terminal
+checklist in Section 13.

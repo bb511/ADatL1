@@ -18,13 +18,13 @@ from src.evaluation.physics_background_pairing_analysis import _spearman
 SCHEMA_VERSION = 1
 SPLITS = ("validate", "test")
 REPLICATES = tuple(range(5))
-DISCOVERY_NAMESPACE = "discovery_5293a29"
-DISCOVERY_MANIFEST_SHA256 = "cd755201c36b036a2b5b9b83fffd28dbb0153614de42b3d7e695b6b137fd463d"
+DISCOVERY_NAMESPACE = "discovery_immutable_presort_20260818"
+DISCOVERY_MANIFEST_SHA256 = "ed5b59cbc4eaec05c2f384e18659767b794656182d53e6ea2ac363efdc80b3bd"
 DISCOVERY_MANIFEST_CONTENT_SHA256 = (
-    "8327effabdaaefc68ed0dd2ee0b7504c2e505390635c5fbdc7ca25478c57a70d"
+    "8371c822f16e2eeaf2f65f6d1ee9e96c9c664c03f0b86804c86bdec2bb4a3f66"
 )
 DISCOVERY_RANDOM_PAIRING_CONTENT_SHA256 = (
-    "d767bff5f5fb21eba668455f85fc02504159783426a91e3d00b68cf382a5d67a"
+    "4ed193bf05b453bbfaf95de9ffea2ab618956b235d388c39e1aafcb6400f6870"
 )
 DISCOVERY_TASKS = 346
 DISCOVERY_MEMBERSHIPS = 591
@@ -427,7 +427,10 @@ def write_random_cap_analysis(
         or manifest.get("random_pairing", {}).get("content_sha256")
         != DISCOVERY_RANDOM_PAIRING_CONTENT_SHA256
     ):
-        raise ValueError("Discovery random-CAP analysis is not bound to discovery_5293a29.")
+        raise ValueError(
+            "Discovery random-CAP analysis is not bound to the authenticated "
+            "immutable-presort namespace."
+        )
     output_dir.mkdir(parents=True, exist_ok=True)
     artifacts = {}
     for name in (

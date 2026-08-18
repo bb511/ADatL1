@@ -13,11 +13,15 @@ from collections import defaultdict
 from pathlib import Path
 from typing import Any
 
-from src.evaluation.physics_background_pairing_analysis import _spearman
+from src.evaluation.physics_background_pairing_analysis import (
+    DOWNSTREAM_DATASETS,
+    _spearman,
+)
 
 SCHEMA_VERSION = 1
 SPLITS = ("validate", "test")
 REPLICATES = tuple(range(5))
+DOWNSTREAM_ENDPOINTS = ("efficiency_250hz", "auprc")
 DISCOVERY_NAMESPACE = "discovery_immutable_presort_20260818"
 DISCOVERY_MANIFEST_SHA256 = "ed5b59cbc4eaec05c2f384e18659767b794656182d53e6ea2ac363efdc80b3bd"
 DISCOVERY_MANIFEST_CONTENT_SHA256 = (
@@ -26,6 +30,10 @@ DISCOVERY_MANIFEST_CONTENT_SHA256 = (
 DISCOVERY_RANDOM_PAIRING_CONTENT_SHA256 = (
     "4ed193bf05b453bbfaf95de9ffea2ab618956b235d388c39e1aafcb6400f6870"
 )
+DISCOVERY_ENDPOINT_ANALYSIS_SHA256 = (
+    "b8baede48d8da59aecd6acdd816120ef754cda9edfb25e4c15d89c92afec9d1d"
+)
+DISCOVERY_COMBINED_LONG_SHA256 = "51018c9993ed01d1b8c612ca7f1ccfbdb82b3480e189e0995677c7ac975c4f36"
 DISCOVERY_TASKS = 346
 DISCOVERY_MEMBERSHIPS = 591
 DISCOVERY_MEMBERSHIP_SCORES = 859
@@ -48,6 +56,11 @@ def _finite(value: Any, label: str) -> float:
     if not math.isfinite(result):
         raise ValueError(f"{label} must be finite, got {value!r}.")
     return result
+
+
+def _sha256(path: Path) -> str:
+    """Return the physical SHA-256 digest of one input artifact."""
+    return hashlib.sha256(path.read_bytes()).hexdigest()
 
 
 def _authenticate_manifest(manifest: dict[str, Any]) -> dict[tuple[int, int], dict[str, Any]]:
@@ -257,6 +270,247 @@ def _normalize(
     return normalized, summaries, memberships
 
 
+def _load_downstream_rows(
+    endpoint_analysis_path: Path,
+) -> tuple[list[dict[str, str]], dict[str, Any]]:
+    """Authenticate and load the endpoint long table named by its analysis receipt."""
+    receipt = json.loads(endpoint_analysis_path.read_text(encoding="utf-8"))
+    method = receipt.get("method", {})
+    expected_hash = receipt.get("artifact_hashes", {}).get("combined_long.csv")
+    if (
+        method.get("schema_version") != SCHEMA_VERSION
+        or not isinstance(expected_hash, str)
+        or len(expected_hash) != 64
+    ):
+        raise ValueError("Endpoint analysis receipt schema or combined-long hash differs.")
+    combined_path = endpoint_analysis_path.parent / "combined_long.csv"
+    if not combined_path.is_file() or _sha256(combined_path) != expected_hash:
+        raise ValueError("Endpoint combined_long.csv does not match its analysis receipt.")
+    expected_columns = [
+        "membership_index",
+        "model",
+        "logical_objective",
+        "score",
+        "trial_number",
+        "checkpoint",
+        "checkpoint_sha256",
+        "anomaly",
+        "selector",
+        "pairing",
+        "endpoint",
+        "value",
+    ]
+    with combined_path.open(newline="", encoding="utf-8") as handle:
+        reader = csv.DictReader(handle)
+        if reader.fieldnames != expected_columns:
+            raise ValueError("Endpoint combined_long.csv schema differs.")
+        rows = list(reader)
+    return rows, {
+        "endpoint_analysis": str(endpoint_analysis_path.resolve()),
+        "endpoint_analysis_sha256": _sha256(endpoint_analysis_path),
+        "combined_long": str(combined_path.resolve()),
+        "combined_long_sha256": expected_hash,
+        "endpoint_method": method,
+    }
+
+
+def _normalize_downstream(
+    rows: list[dict[str, Any]], memberships: dict[tuple[int, int], dict[str, Any]]
+) -> tuple[dict[tuple[int, int, str], float], dict[str, int]]:
+    """Exact-join and average the two downstream endpoints over 20 anomalies."""
+    by_membership_index: dict[int, tuple[tuple[int, int], dict[str, Any]]] = {}
+    for key, identity in memberships.items():
+        membership_index = key[1]
+        if membership_index in by_membership_index:
+            raise ValueError("Endpoint join requires globally unique membership indices.")
+        by_membership_index[membership_index] = (key, identity)
+
+    expected_anomalies = set(DOWNSTREAM_DATASETS)
+    expected_keys = {
+        (membership_index, endpoint, anomaly)
+        for membership_index in by_membership_index
+        for endpoint in DOWNSTREAM_ENDPOINTS
+        for anomaly in DOWNSTREAM_DATASETS
+    }
+    grouped: dict[tuple[int, int, str], list[float]] = defaultdict(list)
+    seen = set()
+    for supplied in rows:
+        row = dict(supplied)
+        try:
+            membership_index = int(row["membership_index"])
+            trial_number = int(row["trial_number"])
+        except (KeyError, TypeError, ValueError) as error:
+            raise ValueError("Endpoint membership or trial identity is invalid.") from error
+        joined = by_membership_index.get(membership_index)
+        if joined is None:
+            raise ValueError(f"Unexpected endpoint membership {membership_index}.")
+        key, identity = joined
+        task, membership, checkpoint = (
+            identity["task"],
+            identity["membership"],
+            identity["checkpoint"],
+        )
+        endpoint = row.get("endpoint")
+        anomaly = row.get("anomaly")
+        row_key = (membership_index, endpoint, anomaly)
+        if (
+            row_key in seen
+            or endpoint not in DOWNSTREAM_ENDPOINTS
+            or anomaly not in expected_anomalies
+        ):
+            raise ValueError(f"Unexpected or duplicate downstream row {row_key}.")
+        expected_pairing = membership.get("strategy") or "not_applicable"
+        expected_fields = {
+            "model": task["model"],
+            "logical_objective": membership["logical_objective"],
+            "score": membership.get("score", "native"),
+            "checkpoint_sha256": checkpoint["source_sha256"],
+            "selector": membership.get("metric"),
+            "pairing": expected_pairing,
+        }
+        for field, value in expected_fields.items():
+            if row.get(field) != value:
+                raise ValueError(f"Endpoint {field} differs for membership {membership_index}.")
+        if trial_number != int(task["trial_number"]):
+            raise ValueError(f"Endpoint trial differs for membership {membership_index}.")
+        source_path = checkpoint.get("source_path")
+        if source_path is not None and row.get("checkpoint") != source_path:
+            raise ValueError(
+                f"Endpoint checkpoint path differs for membership {membership_index}."
+            )
+        value = _finite(row.get("value"), f"downstream {row_key}")
+        if value < 0.0 or value > 1.0:
+            raise ValueError(f"Downstream value lies outside [0, 1] for {row_key}.")
+        seen.add(row_key)
+        grouped[(key[0], key[1], endpoint)].append(value)
+    if seen != expected_keys:
+        raise ValueError(
+            f"Endpoint coverage differs: expected {len(expected_keys)}, found {len(seen)}."
+        )
+    means = {}
+    for key, values in grouped.items():
+        if len(values) != len(DOWNSTREAM_DATASETS):
+            raise ValueError(f"Endpoint anomaly count differs for membership panel {key}.")
+        means[key] = statistics.fmean(values)
+    expected_means = len(memberships) * len(DOWNSTREAM_ENDPOINTS)
+    if len(means) != expected_means:
+        raise ValueError("Endpoint mean coverage differs after the exact membership join.")
+    return means, {
+        "downstream_rows": len(rows),
+        "downstream_memberships": len(memberships),
+        "downstream_anomalies": len(DOWNSTREAM_DATASETS),
+        "downstream_endpoints": len(DOWNSTREAM_ENDPOINTS),
+    }
+
+
+def _structured_cap(
+    key: tuple[int, int], memberships: dict[tuple[int, int], dict[str, Any]]
+) -> float:
+    """Return one authenticated, maximize-direction structured CAP value."""
+    membership = memberships[key]["membership"]
+    metric = membership.get("optimized_metric")
+    if not isinstance(metric, list) or not metric:
+        raise ValueError(f"Structured CAP metric is missing for rank membership {key}.")
+    objective_values = membership.get("objective_values")
+    if objective_values is not None and objective_values != metric:
+        raise ValueError(f"Structured CAP metric vectors differ for membership {key}.")
+    objective_index = int(membership.get("selection_metric_objective_index", 0))
+    if (
+        membership.get("metric") != "cap"
+        or objective_index != 0
+        or objective_index >= len(metric)
+        or membership.get("selection_metric_name", "cap") != "cap"
+        or membership.get("selection_metric_direction", "maximize") != "maximize"
+    ):
+        raise ValueError(f"Structured CAP objective identity differs for membership {key}.")
+    return _finite(metric[objective_index], f"structured CAP {key}")
+
+
+def _downstream_rank_associations(
+    rows: list[dict[str, Any]],
+    memberships: dict[tuple[int, int], dict[str, Any]],
+    downstream: dict[tuple[int, int, str], float],
+) -> list[dict[str, Any]]:
+    """Relate structured and random CAP ranks to downstream endpoints per panel."""
+    groups: dict[tuple[str, str, str, str, str], list[dict[str, Any]]] = defaultdict(list)
+    for row in rows:
+        if row["selection_metric"] == "cap" and row["evaluation_score"] == row["selection_score"]:
+            groups[
+                (
+                    row["model"],
+                    row["selection_score"],
+                    row["logical_objective"],
+                    row["selection_strategy"],
+                    row["split"],
+                )
+            ].append(row)
+    expected_panels = {
+        (
+            identity["task"]["model"],
+            membership.get("score", "native"),
+            membership["logical_objective"],
+            membership.get("strategy", ""),
+            split,
+        )
+        for identity in memberships.values()
+        if (membership := identity["membership"]).get("metric") == "cap"
+        for split in SPLITS
+    }
+    if set(groups) != expected_panels:
+        raise ValueError("Downstream rank-panel coverage differs from the manifest.")
+
+    output = []
+    for panel, group in sorted(groups.items()):
+        by_membership: dict[tuple[int, int], list[dict[str, Any]]] = defaultdict(list)
+        for row in group:
+            by_membership[(row["task_index"], row["membership_index"])].append(row)
+        ordered = sorted(by_membership)
+        structured = [_structured_cap(key, memberships) for key in ordered]
+        random_columns = {
+            "five_pairing_mean": [
+                statistics.fmean(row["cap"] for row in by_membership[key]) for key in ordered
+            ]
+        }
+        for replicate in REPLICATES:
+            random_columns[f"pairing_replicate_{replicate}"] = [
+                next(row["cap"] for row in by_membership[key] if row["replicate"] == replicate)
+                for key in ordered
+            ]
+        cap_sources = {"structured_cap": structured, **random_columns}
+        for endpoint in DOWNSTREAM_ENDPOINTS:
+            endpoint_values = [downstream[(key[0], key[1], endpoint)] for key in ordered]
+            for source, cap_values in cap_sources.items():
+                rho, constant, ties = (
+                    _spearman(cap_values, endpoint_values)
+                    if len(ordered) >= 3
+                    else (None, False, False)
+                )
+                output.append(
+                    {
+                        "model": panel[0],
+                        "selection_score": panel[1],
+                        "logical_objective": panel[2],
+                        "selection_strategy": panel[3],
+                        "split": panel[4],
+                        "downstream_endpoint": endpoint,
+                        "cap_source": source,
+                        "cap_direction": "maximize",
+                        "downstream_direction": "maximize",
+                        "n_checkpoints": len(ordered),
+                        "n_anomalies_per_checkpoint": len(DOWNSTREAM_DATASETS),
+                        "spearman_rho": rho,
+                        "spearman_defined": rho is not None,
+                        "constant": constant,
+                        "ties": ties,
+                        "insufficient_n": len(ordered) < 3,
+                    }
+                )
+    expected_rows = len(expected_panels) * len(DOWNSTREAM_ENDPOINTS) * (2 + len(REPLICATES))
+    if len(output) != expected_rows:
+        raise ValueError("Downstream rank-association cardinality differs.")
+    return output
+
+
 def _rank_associations(
     rows: list[dict[str, Any]], memberships: dict[tuple[int, int], dict[str, Any]]
 ) -> list[dict[str, Any]]:
@@ -279,32 +533,14 @@ def _rank_associations(
         for row in group:
             by_membership[(row["task_index"], row["membership_index"])].append(row)
         ordered = sorted(by_membership)
-        structured = []
+        structured = [_structured_cap(key, memberships) for key in ordered]
         for key in ordered:
             membership = memberships[key]["membership"]
-            metric = membership.get("optimized_metric")
-            if not isinstance(metric, list) or not metric:
-                raise ValueError(f"Structured CAP metric is missing for rank membership {key}.")
-            objective_values = membership.get("objective_values")
-            if objective_values is not None and objective_values != metric:
-                raise ValueError(f"Structured CAP metric vectors differ for membership {key}.")
-            if membership.get("metric") != "cap":
-                raise ValueError(f"Structured CAP membership metric identity differs for {key}.")
             if (
                 memberships[key]["task"]["model"] != group_key[0]
                 or membership.get("logical_objective") != group_key[1]
             ):
                 raise ValueError(f"Structured CAP panel identity differs for membership {key}.")
-            objective_index = int(membership.get("selection_metric_objective_index", 0))
-            if objective_index != 0 or objective_index >= len(metric):
-                raise ValueError(f"Structured CAP objective index differs for membership {key}.")
-            metric_name = membership.get("selection_metric_name", "cap")
-            direction = membership.get("selection_metric_direction", "maximize")
-            if metric_name != "cap" or direction != "maximize":
-                raise ValueError(
-                    f"Structured CAP objective identity differs for membership {key}."
-                )
-            structured.append(_finite(metric[objective_index], f"structured CAP {key}"))
         random_columns = {
             "five_pairing_mean": [
                 statistics.fmean(row["cap"] for row in by_membership[key]) for key in ordered
@@ -357,7 +593,9 @@ def _rank_associations(
 
 
 def build_random_cap_analysis(
-    manifest: dict[str, Any], aggregate: dict[str, Any]
+    manifest: dict[str, Any],
+    aggregate: dict[str, Any],
+    downstream_rows: list[dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
     """Return authenticated random-CAP values, variability, and rank diagnostics."""
     rows, variability, memberships = _normalize(manifest, aggregate)
@@ -366,26 +604,45 @@ def build_random_cap_analysis(
         len(task.get("memberships", [])) * len(task.get("scores", []))
         for task in manifest["tasks"]
     )
-    return {
-        "method": {
-            "schema_version": SCHEMA_VERSION,
-            "mode": manifest["mode"],
-            "purpose": "negative_control_diagnostic_only",
-            "pairing_replicates_per_split": 5,
-            "tasks": len(manifest["tasks"]),
-            "memberships": len(memberships),
-            "membership_scores": membership_scores,
-            "seed_rows": len(rows),
-            "variability_rows": len(variability),
-            "rank_association_rows": len(associations),
-            "rank_panels": len(associations) // 6,
-            "rank_panels_are_unpooled": True,
-            "random_cap_did_not_select_hyperparameters_or_checkpoints": True,
-        },
+    method = {
+        "schema_version": SCHEMA_VERSION,
+        "mode": manifest["mode"],
+        "purpose": "negative_control_diagnostic_only",
+        "pairing_replicates_per_split": 5,
+        "tasks": len(manifest["tasks"]),
+        "memberships": len(memberships),
+        "membership_scores": membership_scores,
+        "seed_rows": len(rows),
+        "variability_rows": len(variability),
+        "rank_association_rows": len(associations),
+        "rank_panels": len(associations) // 6,
+        "rank_panels_are_unpooled": True,
+        "random_cap_did_not_select_hyperparameters_or_checkpoints": True,
+    }
+    result = {
+        "method": method,
         "random_cap_values": rows,
         "random_cap_variability": variability,
         "structured_random_rank_associations": associations,
     }
+    if downstream_rows is not None:
+        downstream, downstream_method = _normalize_downstream(downstream_rows, memberships)
+        downstream_associations = _downstream_rank_associations(rows, memberships, downstream)
+        defined = sum(row["spearman_defined"] for row in downstream_associations)
+        method.update(
+            {
+                **downstream_method,
+                "downstream_association_rows": len(downstream_associations),
+                "downstream_association_panels": len(downstream_associations)
+                // (2 + len(REPLICATES)),
+                "downstream_association_sources": 2 + len(REPLICATES),
+                "downstream_association_defined_rows": defined,
+                "downstream_association_undefined_rows": len(downstream_associations) - defined,
+                "downstream_panels_are_unpooled": True,
+            }
+        )
+        result["cap_downstream_rank_associations"] = downstream_associations
+    return result
 
 
 def _write_csv(path: Path, rows: list[dict[str, Any]]) -> None:
@@ -411,13 +668,40 @@ def _write_csv(path: Path, rows: list[dict[str, Any]]) -> None:
         Path(temporary_name).unlink(missing_ok=True)
 
 
+def _guard_output_package(output_dir: Path, includes_downstream: bool) -> None:
+    """Refuse to extend an existing immutable package with a different table set."""
+    if not output_dir.exists():
+        return
+    receipt_path = output_dir / "random_cap_analysis.json"
+    if not receipt_path.is_file():
+        if any(output_dir.iterdir()):
+            raise FileExistsError(
+                f"Refusing to reuse nonempty analysis directory without a receipt: {output_dir}"
+            )
+        return
+    receipt = json.loads(receipt_path.read_text(encoding="utf-8"))
+    existing_downstream = "cap_downstream_rank_associations.csv" in receipt.get("artifacts", {})
+    if existing_downstream != includes_downstream:
+        raise FileExistsError(
+            "Refusing to change an existing analysis package's downstream table set; "
+            "write a new versioned output directory."
+        )
+
+
 def write_random_cap_analysis(
-    manifest_path: Path, aggregate_path: Path, output_dir: Path
+    manifest_path: Path,
+    aggregate_path: Path,
+    output_dir: Path,
+    endpoint_analysis_path: Path | None = None,
 ) -> dict[str, Any]:
     """Write a portable, hash-bound random-CAP diagnostic package."""
     manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
     aggregate = json.loads(aggregate_path.read_text(encoding="utf-8"))
-    result = build_random_cap_analysis(manifest, aggregate)
+    downstream_rows = None
+    downstream_provenance = None
+    if endpoint_analysis_path is not None:
+        downstream_rows, downstream_provenance = _load_downstream_rows(endpoint_analysis_path)
+    result = build_random_cap_analysis(manifest, aggregate, downstream_rows)
     manifest_sha256 = hashlib.sha256(manifest_path.read_bytes()).hexdigest()
     namespace = manifest_path.parent.name
     if manifest["mode"] == "discovery" and (
@@ -431,13 +715,40 @@ def write_random_cap_analysis(
             "Discovery random-CAP analysis is not bound to the authenticated "
             "immutable-presort namespace."
         )
+    if downstream_provenance is not None:
+        endpoint_method = downstream_provenance.pop("endpoint_method")
+        expected_method = {
+            "schema_version": SCHEMA_VERSION,
+            "anomalies": result["method"]["downstream_anomalies"],
+            "candidate_memberships": result["method"]["downstream_memberships"],
+            "combined_rows": result["method"]["downstream_rows"],
+            "rows_per_endpoint": result["method"]["downstream_rows"] // len(DOWNSTREAM_ENDPOINTS),
+        }
+        for field, value in expected_method.items():
+            if endpoint_method.get(field) != value:
+                raise ValueError(f"Endpoint analysis method field {field} differs.")
+        bound_receipt = manifest.get("endpoint_receipt_sha256")
+        if (
+            bound_receipt is not None
+            and bound_receipt != downstream_provenance["endpoint_analysis_sha256"]
+        ):
+            raise ValueError("Manifest endpoint receipt binding differs.")
+        if manifest["mode"] == "discovery" and (
+            downstream_provenance["endpoint_analysis_sha256"] != DISCOVERY_ENDPOINT_ANALYSIS_SHA256
+            or downstream_provenance["combined_long_sha256"] != DISCOVERY_COMBINED_LONG_SHA256
+        ):
+            raise ValueError("Discovery endpoint-analysis identity differs.")
+    _guard_output_package(output_dir, downstream_rows is not None)
     output_dir.mkdir(parents=True, exist_ok=True)
     artifacts = {}
-    for name in (
+    artifact_names = [
         "random_cap_values",
         "random_cap_variability",
         "structured_random_rank_associations",
-    ):
+    ]
+    if downstream_rows is not None:
+        artifact_names.append("cap_downstream_rank_associations")
+    for name in artifact_names:
         rows = result[name]
         if rows:
             path = output_dir / f"{name}.csv"
@@ -465,6 +776,7 @@ def write_random_cap_analysis(
             "endpoint_receipt_sha256": manifest.get("endpoint_receipt_sha256"),
             "aggregate": str(aggregate_path.resolve()),
             "aggregate_sha256": hashlib.sha256(aggregate_path.read_bytes()).hexdigest(),
+            **(downstream_provenance or {}),
         },
         "artifacts": artifacts,
     }

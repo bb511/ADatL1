@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import csv
+import hashlib
 import json
 import statistics
 from pathlib import Path
@@ -12,6 +14,7 @@ from src.evaluation import (
     physics_background_pairing_random_cap_analysis as analysis_module,
 )
 from src.evaluation.physics_background_pairing_random_cap_analysis import (
+    DOWNSTREAM_DATASETS,
     _content_hash,
     build_random_cap_analysis,
     write_random_cap_analysis,
@@ -138,6 +141,36 @@ def _inputs() -> tuple[dict, dict]:
         "summary_sha256": _content_hash(summaries),
     }
     return manifest, aggregate
+
+
+def _downstream_rows(manifest: dict) -> list[dict]:
+    """Build exact 20-anomaly endpoint coverage for every logical membership."""
+    rows = []
+    for task in manifest["tasks"]:
+        checkpoints = {row["checkpoint_id"]: row for row in task["checkpoints"]}
+        for membership in task["memberships"]:
+            checkpoint = checkpoints[membership["checkpoint_id"]]
+            for anomaly in DOWNSTREAM_DATASETS:
+                for endpoint in ("efficiency_250hz", "auprc"):
+                    index = int(membership["membership_index"])
+                    value = (index + 1) / 4 if endpoint == "efficiency_250hz" else (3 - index) / 4
+                    rows.append(
+                        {
+                            "membership_index": str(index),
+                            "model": task["model"],
+                            "logical_objective": membership["logical_objective"],
+                            "score": membership["score"],
+                            "trial_number": str(task["trial_number"]),
+                            "checkpoint": "unused-in-fixture",
+                            "checkpoint_sha256": checkpoint["source_sha256"],
+                            "anomaly": anomaly,
+                            "selector": membership["metric"],
+                            "pairing": membership["strategy"],
+                            "endpoint": endpoint,
+                            "value": str(value),
+                        }
+                    )
+    return rows
 
 
 def test_analysis_recomputes_variability_and_unpooled_rank_association() -> None:
@@ -292,3 +325,188 @@ def test_rank_analysis_rejects_missing_structured_panel_metric() -> None:
     aggregate["manifest_content_sha256"] = manifest["content_sha256"]
     with pytest.raises(ValueError, match="Structured CAP metric is missing"):
         build_random_cap_analysis(manifest, aggregate)
+
+
+def test_downstream_associations_preserve_endpoint_score_and_split_panels() -> None:
+    """Structured and six random sources are correlated with both endpoints per split."""
+    manifest, aggregate = _inputs()
+    result = build_random_cap_analysis(manifest, aggregate, _downstream_rows(manifest))
+    rows = result["cap_downstream_rank_associations"]
+    assert len(rows) == 28
+    assert result["method"]["downstream_association_panels"] == 4
+    assert result["method"]["downstream_association_sources"] == 7
+    assert result["method"]["downstream_association_undefined_rows"] == 0
+    assert {row["split"] for row in rows} == {"validate", "test"}
+    assert {row["downstream_endpoint"] for row in rows} == {
+        "efficiency_250hz",
+        "auprc",
+    }
+    assert {row["cap_source"] for row in rows} == {
+        "structured_cap",
+        "five_pairing_mean",
+        *(f"pairing_replicate_{replicate}" for replicate in range(5)),
+    }
+    assert all(row["n_checkpoints"] == 3 for row in rows)
+    assert all(row["n_anomalies_per_checkpoint"] == 20 for row in rows)
+    assert all(
+        row["spearman_rho"] == pytest.approx(1.0)
+        for row in rows
+        if row["downstream_endpoint"] == "efficiency_250hz"
+    )
+    assert all(
+        row["spearman_rho"] == pytest.approx(-1.0)
+        for row in rows
+        if row["downstream_endpoint"] == "auprc"
+    )
+
+
+@pytest.mark.parametrize("target", ["identity", "coverage"])
+def test_downstream_exact_join_fails_closed(target: str) -> None:
+    """Endpoint identity mismatches and incomplete anomaly coverage cannot be analyzed."""
+    manifest, aggregate = _inputs()
+    rows = _downstream_rows(manifest)
+    if target == "identity":
+        rows[0]["checkpoint_sha256"] = "f" * 64
+        match = "checkpoint_sha256 differs"
+    else:
+        rows.pop()
+        match = "coverage differs"
+    with pytest.raises(ValueError, match=match):
+        build_random_cap_analysis(manifest, aggregate, rows)
+
+
+def test_downstream_constant_panels_remain_explicit_and_undefined() -> None:
+    """Undefined endpoint associations retain their panel cardinality and reason flags."""
+    manifest, aggregate = _inputs()
+    rows = _downstream_rows(manifest)
+    for row in rows:
+        row["value"] = "0.5"
+    result = build_random_cap_analysis(manifest, aggregate, rows)
+    associations = result["cap_downstream_rank_associations"]
+    assert len(associations) == 28
+    assert all(not row["spearman_defined"] for row in associations)
+    assert all(row["constant"] for row in associations)
+    assert result["method"]["downstream_association_undefined_rows"] == 28
+
+
+def test_downstream_panels_do_not_pool_models_or_score_streams() -> None:
+    """Model and native/OAS identities remain distinct even for undersized panels."""
+    manifest, aggregate = _inputs()
+    task = manifest["tasks"][2]
+    membership = task["memberships"][0]
+    task["model"] = "vae"
+    task["scores"] = ["residual_oas"]
+    membership["score"] = "residual_oas"
+    membership["logical_objective"] = "residual_oas__cap__cdf"
+    for collection in (aggregate["seed_split_values"], aggregate["summary"]):
+        for row in collection:
+            if row["task_index"] == 2:
+                row["model"] = "vae"
+                row["selection_score"] = "residual_oas"
+                row["evaluation_score"] = "residual_oas"
+                row["logical_objective"] = "residual_oas__cap__cdf"
+    manifest["content_sha256"] = _content_hash(
+        {key: value for key, value in manifest.items() if key != "content_sha256"}
+    )
+    aggregate["manifest_content_sha256"] = manifest["content_sha256"]
+    aggregate["seed_split_values_sha256"] = _content_hash(aggregate["seed_split_values"])
+    aggregate["summary_sha256"] = _content_hash(aggregate["summary"])
+    result = build_random_cap_analysis(manifest, aggregate, _downstream_rows(manifest))
+    rows = result["cap_downstream_rank_associations"]
+    assert {(row["model"], row["selection_score"]) for row in rows} == {
+        ("ae", "native"),
+        ("vae", "residual_oas"),
+    }
+    assert {(row["model"], row["selection_score"], row["n_checkpoints"]) for row in rows} == {
+        ("ae", "native", 2),
+        ("vae", "residual_oas", 1),
+    }
+    assert all(row["insufficient_n"] and not row["spearman_defined"] for row in rows)
+
+
+def test_writer_authenticates_endpoint_receipt_and_persists_downstream_hash(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The downstream table and receipt are hash-bound in a fresh analysis version."""
+    manifest, aggregate = _inputs()
+    endpoint_dir = tmp_path / "endpoint"
+    endpoint_dir.mkdir()
+    combined_path = endpoint_dir / "combined_long.csv"
+    downstream_rows = _downstream_rows(manifest)
+    with combined_path.open("w", newline="", encoding="utf-8") as handle:
+        writer = csv.DictWriter(handle, fieldnames=list(downstream_rows[0]))
+        writer.writeheader()
+        writer.writerows(downstream_rows)
+    endpoint_receipt = {
+        "artifact_hashes": {
+            "combined_long.csv": hashlib.sha256(combined_path.read_bytes()).hexdigest()
+        },
+        "method": {
+            "schema_version": 1,
+            "anomalies": 20,
+            "candidate_memberships": 3,
+            "combined_rows": 120,
+            "rows_per_endpoint": 60,
+        },
+    }
+    endpoint_path = endpoint_dir / "endpoint_analysis.json"
+    endpoint_path.write_text(json.dumps(endpoint_receipt), encoding="utf-8")
+    manifest["endpoint_receipt_sha256"] = hashlib.sha256(endpoint_path.read_bytes()).hexdigest()
+    manifest["content_sha256"] = _content_hash(
+        {key: value for key, value in manifest.items() if key != "content_sha256"}
+    )
+    aggregate["manifest_content_sha256"] = manifest["content_sha256"]
+    manifest_path = tmp_path / "manifest.json"
+    aggregate_path = tmp_path / "aggregate.json"
+    manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
+    aggregate_path.write_text(json.dumps(aggregate), encoding="utf-8")
+    monkeypatch.setattr(analysis_module, "DISCOVERY_NAMESPACE", manifest_path.parent.name)
+    monkeypatch.setattr(
+        analysis_module,
+        "DISCOVERY_MANIFEST_SHA256",
+        hashlib.sha256(manifest_path.read_bytes()).hexdigest(),
+    )
+    monkeypatch.setattr(
+        analysis_module, "DISCOVERY_MANIFEST_CONTENT_SHA256", manifest["content_sha256"]
+    )
+    monkeypatch.setattr(
+        analysis_module,
+        "DISCOVERY_RANDOM_PAIRING_CONTENT_SHA256",
+        manifest["random_pairing"].get("content_sha256"),
+    )
+    monkeypatch.setattr(analysis_module, "DISCOVERY_TASKS", 3)
+    monkeypatch.setattr(analysis_module, "DISCOVERY_MEMBERSHIPS", 3)
+    monkeypatch.setattr(analysis_module, "DISCOVERY_MEMBERSHIP_SCORES", 3)
+    monkeypatch.setattr(
+        analysis_module,
+        "DISCOVERY_ENDPOINT_ANALYSIS_SHA256",
+        hashlib.sha256(endpoint_path.read_bytes()).hexdigest(),
+    )
+    monkeypatch.setattr(
+        analysis_module,
+        "DISCOVERY_COMBINED_LONG_SHA256",
+        hashlib.sha256(combined_path.read_bytes()).hexdigest(),
+    )
+    output = tmp_path / "analysis_versions" / "downstream_v1"
+    write_random_cap_analysis(
+        manifest_path, aggregate_path, output, endpoint_analysis_path=endpoint_path
+    )
+    receipt = json.loads((output / "random_cap_analysis.json").read_text())
+    artifact = output / "cap_downstream_rank_associations.csv"
+    assert artifact.exists()
+    assert receipt["artifacts"][artifact.name] == hashlib.sha256(artifact.read_bytes()).hexdigest()
+    assert (
+        receipt["inputs"]["combined_long_sha256"]
+        == endpoint_receipt["artifact_hashes"]["combined_long.csv"]
+    )
+    with pytest.raises(FileExistsError, match="new versioned output directory"):
+        write_random_cap_analysis(manifest_path, aggregate_path, output)
+
+    combined_path.write_text("tampered\n", encoding="utf-8")
+    with pytest.raises(ValueError, match="does not match"):
+        write_random_cap_analysis(
+            manifest_path,
+            aggregate_path,
+            tmp_path / "analysis_versions" / "downstream_v2",
+            endpoint_analysis_path=endpoint_path,
+        )

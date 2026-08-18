@@ -2336,6 +2336,69 @@ def test_confirmation_retrain_rejects_data_before_sbatch(monkeypatch, tmp_path) 
         )
 
 
+def test_retire_unmaterialized_retrains_seals_only_absent_canceled_tasks(
+    monkeypatch, tmp_path
+) -> None:
+    """Canceled pre-allocation placeholders get durable evidence and stop blocking."""
+    root, repository = _campaign(tmp_path)
+    _authenticate(monkeypatch)
+    missing_log = tmp_path / "logs/physical-400_0.out"
+    completed_log = tmp_path / "logs/physical-400_1.out"
+    completed_log.parent.mkdir()
+    completed_log.write_text("complete\n", encoding="utf-8")
+    rows = [
+        {
+            "job_id": "400_0",
+            "kind": "retrain",
+            "model": "ae",
+            "state": "PENDING",
+            "commit": "a" * 40,
+            "log_path": str(missing_log),
+            "bindings_sha256": "b" * 64,
+        },
+        {
+            "job_id": "400_1",
+            "kind": "retrain",
+            "model": "vae",
+            "state": "COMPLETED",
+            "elapsed": "00:02:00",
+            "exit_code": "0:0",
+            "commit": "a" * 40,
+            "log_path": str(completed_log),
+            "log_sha256": operations._sha256(completed_log),
+            "success_sha256": "c" * 64,
+            "bindings_sha256": "b" * 64,
+        },
+    ]
+    operations._atomic_csv(root / "state/job_history.csv", rows)
+    monkeypatch.setattr(operations, "_live_retrain_job_ids", lambda: set())
+    monkeypatch.setattr(
+        operations,
+        "_accounting",
+        lambda job_ids: {
+            "400_1": {
+                "state": "COMPLETED",
+                "elapsed": "00:02:00",
+                "exit_code": "0:0",
+                "started": "2026-08-18T00:00:00+00:00",
+                "ended": "2026-08-18T00:02:00+00:00",
+            }
+        },
+    )
+
+    receipt = operations.retire_unmaterialized_retrains(root, repository, "400")
+    payload = json.loads(receipt.read_text(encoding="utf-8"))
+    digest = payload.pop("content_sha256")
+    assert digest == operations._json_sha256(payload)
+    assert [row["job_id"] for row in payload["retired_tasks"]] == ["400_0"]
+    with (root / "state/job_history.csv").open(encoding="utf-8", newline="") as handle:
+        ledger = {row["job_id"]: row for row in csv.DictReader(handle)}
+    assert ledger["400_0"]["state"] == "CANCELLED"
+    assert ledger["400_0"]["log_sha256"] == operations._sha256(receipt)
+    assert ledger["400_1"]["state"] == "COMPLETED"
+    assert operations.retire_unmaterialized_retrains(root, repository, "400") == receipt
+
+
 def test_submit_retrains_allows_only_disjoint_indices_while_an_array_is_live(
     monkeypatch, tmp_path
 ) -> None:

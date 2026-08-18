@@ -133,6 +133,8 @@ def _parse_args() -> argparse.Namespace:
     restart.add_argument("--canary-root", type=Path, required=True)
     restart.add_argument("--job-id", required=True)
     commands.add_parser("reconcile")
+    retire = commands.add_parser("retire-unmaterialized-retrains")
+    retire.add_argument("--array-job-id", required=True)
     commands.add_parser("freeze")
     commands.add_parser("aggregate")
     backup = commands.add_parser("backup-study")
@@ -2703,6 +2705,114 @@ def reconcile(root: Path, repository: Path, audit_sealed: bool = False) -> list[
         return _reconcile_locked(root, repository, audit_sealed)
 
 
+def retire_unmaterialized_retrains(root: Path, repository: Path, array_job_id: str) -> Path:
+    """Seal canceled array placeholders that Slurm never materialized.
+
+    Slurm may omit accounting rows for array elements canceled before they obtain an allocation.
+    The submission ledger intentionally records every requested element, so those placeholders need
+    explicit, hash-bound retirement before another array can be submitted.
+    """
+    with _operation_lock(root):
+        if not array_job_id.isdigit():
+            raise ValueError("Retrain array job ID must be numeric.")
+        design = _design(root)
+        _authenticate_execution_repository(repository, design)
+        if array_job_id in _live_retrain_job_ids():
+            raise RuntimeError(f"Retrain array {array_job_id} is still live.")
+        ledger_path, rows = _ledger(root)
+        array_rows = [
+            row
+            for row in rows
+            if row.get("kind") == "retrain"
+            and row["job_id"].split("_", maxsplit=1)[0] == array_job_id
+        ]
+        if not array_rows:
+            raise RuntimeError(f"Retrain array {array_job_id} is absent from the ledger.")
+        accounting = _accounting([row["job_id"] for row in array_rows])
+        if not accounting or any(
+            _normalized_state(row["state"]) not in TERMINAL_STATES for row in accounting.values()
+        ):
+            raise RuntimeError(f"Retrain array {array_job_id} lacks terminal accounting evidence.")
+        ledger_by_job = {row["job_id"]: row for row in array_rows}
+        if any(
+            _normalized_state(ledger_by_job[job_id].get("state", ""))
+            != _normalized_state(observed["state"])
+            for job_id, observed in accounting.items()
+        ):
+            raise RuntimeError(
+                f"Retrain array {array_job_id} must be reconciled before retirement."
+            )
+        targets = [
+            row
+            for row in array_rows
+            if _normalized_state(row.get("state", "")) in ACTIVE_STATES
+            and row["job_id"] not in accounting
+        ]
+        receipt_path = (
+            root / "state" / "unmaterialized_retrain_retirements" / f"{array_job_id}.json"
+        )
+        if not targets:
+            if not receipt_path.is_file():
+                raise RuntimeError(
+                    f"Retrain array {array_job_id} has no unmaterialized active placeholders."
+                )
+            existing = json.loads(receipt_path.read_text(encoding="utf-8"))
+            digest = existing.pop("content_sha256", None)
+            if (
+                digest != _json_sha256(existing)
+                or existing.get("array_job_id") != array_job_id
+                or existing.get("campaign_root") != str(root.resolve())
+                or existing.get("code_commit") != design["code_commit"]
+            ):
+                raise RuntimeError(f"Retirement receipt changed: {receipt_path}")
+            return receipt_path
+        materialized_missing = [row["job_id"] for row in targets if Path(row["log_path"]).exists()]
+        if materialized_missing:
+            raise RuntimeError(
+                "Refusing to retire retrain tasks with scheduler logs but no accounting: "
+                f"{materialized_missing}."
+            )
+        retired_at = datetime.now(timezone.utc).isoformat()
+        receipt = {
+            "schema_version": 1,
+            "kind": "unmaterialized_retrain_array_retirement",
+            "campaign_root": str(root.resolve()),
+            "code_commit": design["code_commit"],
+            "array_job_id": array_job_id,
+            "retired_at": retired_at,
+            "terminal_accounting": accounting,
+            "retired_tasks": [
+                {
+                    "job_id": row["job_id"],
+                    "original_log_path": row["log_path"],
+                    "bindings_sha256": row.get("bindings_sha256", ""),
+                }
+                for row in targets
+            ],
+        }
+        receipt["content_sha256"] = _json_sha256(receipt)
+        if receipt_path.exists():
+            raise FileExistsError(f"Refusing to replace retirement receipt: {receipt_path}")
+        else:
+            _atomic_json(receipt_path, receipt)
+        receipt_sha256 = _sha256(receipt_path)
+        for row in targets:
+            row.update(
+                {
+                    "state": "CANCELLED",
+                    "elapsed": "",
+                    "exit_code": "",
+                    "started": "",
+                    "ended": retired_at,
+                    "log_path": str(receipt_path.resolve()),
+                    "log_sha256": receipt_sha256,
+                    "success_sha256": "",
+                }
+            )
+        _atomic_csv(ledger_path, rows)
+        return receipt_path
+
+
 def _terminal_row_is_sealed(row: dict[str, str]) -> bool:
     """Return whether routine reconciliation can trust one immutable terminal record."""
     state = _normalized_state(row.get("state", ""))
@@ -3458,6 +3568,8 @@ def main() -> None:
         print(validate_restart_canary(root, repository, args.canary_root, args.job_id))
     elif args.command == "reconcile":
         print(json.dumps(reconcile(root, repository), indent=2, sort_keys=True))
+    elif args.command == "retire-unmaterialized-retrains":
+        print(retire_unmaterialized_retrains(root, repository, args.array_job_id))
     elif args.command == "freeze":
         print(freeze_campaign(root, repository))
     elif args.command == "aggregate":

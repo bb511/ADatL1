@@ -5,6 +5,7 @@ from __future__ import annotations
 import csv
 import json
 import random
+import shutil
 import sqlite3
 import subprocess  # nosec B404 -- isolated fixed Git fixture commands
 from pathlib import Path
@@ -122,6 +123,9 @@ def test_reserve_task_launches_from_authenticated_post_base_worktree(
         operations, "_validate_retrain_marker", lambda marker, row: row == base_row
     )
     monkeypatch.setattr(operations, "_live_retrain_job_ids", lambda: set())
+    monkeypatch.setattr(
+        operations, "_authenticate_confirmation_submission_data", lambda *args: None
+    )
     monkeypatch.setattr(operations.shutil, "which", lambda command: "/fake/sbatch")
     monkeypatch.setattr(
         operations.subprocess,
@@ -2174,6 +2178,162 @@ def test_submit_retrains_uses_exact_missing_indices(monkeypatch, tmp_path) -> No
     task_map = json.loads(task_map_path.read_text(encoding="utf-8"))
     assert [entry["retrain_index"] for entry in task_map["entries"]] == [1, 3]
     assert operations._retrain_index_for_ledger_row(root, operations._design(root), ledger[1]) == 3
+
+
+def _submission_identity_fixture(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    """Build a tiny content-authenticated stand-in for the physics cache."""
+    data = tmp_path / "data"
+    cache = data / "data_2025E+G/cache"
+    pairing = tmp_path / "pairing"
+    raw = tmp_path / "raw"
+    for split in ("valid", "test"):
+        (cache / split).mkdir(parents=True)
+        (cache / split / "torch_cache.pt").write_bytes(b"cache")
+    for path, payload in (
+        (pairing / "sources/zerobias_sources.json", b"sources"),
+        (pairing / "sources/valid/zerobias_source_id.npy", b"valid-ids"),
+        (pairing / "sources/test/zerobias_source_id.npy", b"test-ids"),
+    ):
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_bytes(payload)
+    raw.mkdir()
+    tensors = {
+        ("validate", "background0"): torch.tensor([[1.0, 2.0]]),
+        ("validate", "background1"): torch.tensor([[3.0, 4.0]]),
+        ("test", "background0"): torch.tensor([[5.0, 6.0]]),
+        ("test", "background1"): torch.tensor([[7.0, 8.0]]),
+    }
+    expected = {
+        stage: tuple(
+            operations.sha256_tensor(tensors[(stage, dataset)])
+            for dataset in ("background0", "background1")
+        )
+        for stage in ("validate", "test")
+    }
+    rows = []
+    for stage in ("validate", "test"):
+        table = pairing / f"{stage}_flat.pt"
+        table.write_bytes(f"{stage}-table".encode())
+        rows.append(
+            {
+                "stage": stage,
+                "strategy": "flat",
+                "path": f"/frozen/pairing/{table.name}",
+                "sha256": operations._sha256(table),
+                "source_1_sha256": expected[stage][0],
+                "source_2_sha256": expected[stage][1],
+            }
+        )
+    preflight = tmp_path / "preflight.json"
+    preflight.write_text(
+        json.dumps(
+            {
+                "schema_version": 1,
+                "cache_root": "/frozen/data/data_2025E+G/cache",
+                "events_per_source": 1,
+                "dataset_1": "background0",
+                "dataset_2": "background1",
+                "tables": rows,
+            }
+        ),
+        encoding="utf-8",
+    )
+    design = {
+        "schema_version": 2,
+        "campaign_kind": "physics_background_native_confirmation",
+        "preflight": str(preflight),
+        "preflight_sha256": operations._sha256(preflight),
+        "content_sha256": "a" * 64,
+    }
+
+    def fake_load_split(cache_root, stage, *, dataset, **kwargs):
+        del cache_root, kwargs
+        value = tensors[(stage, dataset)]
+        return value, torch.ones_like(value, dtype=torch.bool), tmp_path
+
+    monkeypatch.setattr(operations, "load_split", fake_load_split)
+    monkeypatch.setattr(operations, "load_pair_table", lambda *args, **kwargs: {})
+    return data, raw, pairing, design
+
+
+def test_confirmation_submission_identity_accepts_only_content_identical_roots(
+    monkeypatch, tmp_path
+) -> None:
+    """Moved byte-identical inputs are recorded; changed ordered prefixes fail closed."""
+    root = tmp_path / "campaign"
+    root.mkdir()
+    data, raw, pairing, design = _submission_identity_fixture(tmp_path, monkeypatch)
+    operations._authenticate_confirmation_submission_data(root, design, data, raw, pairing)
+
+    alternate_data = tmp_path / "alternate_data"
+    alternate_pairing = tmp_path / "alternate_pairing"
+    (alternate_data / "data_2025E+G").mkdir(parents=True)
+    shutil.copytree(data / "data_2025E+G/cache", alternate_data / "data_2025E+G/cache")
+    shutil.copytree(pairing, alternate_pairing)
+    operations._authenticate_confirmation_submission_data(
+        root, design, alternate_data, raw, alternate_pairing
+    )
+    binding = json.loads(
+        (root / "state/submission_data_identity.json").read_text(encoding="utf-8")
+    )
+    assert len(binding["accepted_paths"]) == 2
+    assert binding["content_identity_sha256"] == operations._json_sha256(
+        binding["content_identity"]
+    )
+
+    original_load_split = operations.load_split
+
+    def changed_load_split(cache_root, stage, *, dataset, **kwargs):
+        value, mask, folder = original_load_split(cache_root, stage, dataset=dataset, **kwargs)
+        if stage == "validate" and dataset == "background1":
+            value = value + 1
+        return value, mask, folder
+
+    monkeypatch.setattr(operations, "load_split", changed_load_split)
+    with pytest.raises(RuntimeError, match="ordered validate background prefixes"):
+        operations._authenticate_confirmation_submission_data(root, design, data, raw, pairing)
+
+
+def test_confirmation_retrain_rejects_data_before_sbatch(monkeypatch, tmp_path) -> None:
+    """A failed confirmation data guard cannot create a scheduler job."""
+    root, repository = _campaign(tmp_path)
+    design_path = root / "design.json"
+    design = json.loads(design_path.read_text(encoding="utf-8"))
+    design["campaign_kind"] = "physics_background_native_confirmation"
+    design_path.write_text(json.dumps(design), encoding="utf-8")
+    _authenticate(monkeypatch)
+    selection = root / "selection"
+    selection.mkdir()
+    (selection / "pareto_retrain_manifest.json").write_text(
+        json.dumps(
+            {
+                "schema_version": 2,
+                "code_commit": "a" * 40,
+                "retrain_runs": [{"retrain_index": 0, "model": "ae"}],
+            }
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(operations, "_validate_retrain_marker", lambda *args: False)
+    monkeypatch.setattr(
+        operations,
+        "_authenticate_confirmation_submission_data",
+        lambda *args: (_ for _ in ()).throw(RuntimeError("wrong cache identity")),
+    )
+    monkeypatch.setattr(
+        operations.subprocess,
+        "run",
+        lambda *args, **kwargs: pytest.fail("sbatch must not be called"),
+    )
+    with pytest.raises(RuntimeError, match="wrong cache identity"):
+        operations.submit_retrains(
+            root,
+            repository,
+            1,
+            tmp_path / "data",
+            tmp_path / "raw",
+            tmp_path / "pairing",
+        )
 
 
 def test_submit_retrains_allows_only_disjoint_indices_while_an_array_is_live(

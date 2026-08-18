@@ -20,6 +20,9 @@ from src.evaluation.physics_background_pairing_confirmation_report import (
     MODELS,
     SELECTORS,
     build_confirmation_report,
+    promote_confirmation_report,
+    verify_confirmation_report_bundle,
+    write_confirmation_report,
 )
 
 TEST_RUNNER_CONTENT_SHA256 = "b" * 64
@@ -51,6 +54,10 @@ def _analysis(tmp_path: Path) -> Path:
                         + 0.01 * selector_index
                         + 0.001 * model_index
                         + (0.4 if endpoint == "auprc" else 0.0),
+                        "median": 0.09,
+                        "worst": 0.01,
+                        "bottom_quartile_cvar": 0.03,
+                        "seed_mean_std": 0.002,
                     }
                 )
     comparisons = []
@@ -147,6 +154,31 @@ def _analysis(tmp_path: Path) -> Path:
     matrix["content_sha256"] = _content_hash(matrix)
     matrix_path = tmp_path / "matrix.json"
     matrix_path.write_text(json.dumps(matrix), encoding="utf-8")
+    optimized = tmp_path / "optimized_metric.json"
+    optimized.write_text(json.dumps({"schema_version": 2}), encoding="utf-8")
+    marker = tmp_path / "complete_marker.json"
+    marker.write_text(
+        json.dumps(
+            {
+                "run_name": "synthetic_run",
+                "optimized_metric_artifact": str(optimized.resolve()),
+                "optimized_metric_artifact_sha256": hashlib.sha256(
+                    optimized.read_bytes()
+                ).hexdigest(),
+            }
+        ),
+        encoding="utf-8",
+    )
+    source_markers = [
+        {
+            "retrain_index": 0,
+            "run_id": "synthetic_run",
+            "marker": str(marker.resolve()),
+            "marker_sha256": hashlib.sha256(marker.read_bytes()).hexdigest(),
+            "optimized_metric_artifact": str(optimized.resolve()),
+            "optimized_metric_artifact_sha256": hashlib.sha256(optimized.read_bytes()).hexdigest(),
+        }
+    ]
     endpoint_receipt = {
         "matrix_content_sha256": matrix["content_sha256"],
         "effective_runner_content_sha256": TEST_RUNNER_CONTENT_SHA256,
@@ -154,6 +186,14 @@ def _analysis(tmp_path: Path) -> Path:
         "artifacts": {
             "checkpoint_selections.csv": TEST_CHECKPOINT_SELECTIONS_SHA256,
         },
+        "cardinality": {
+            "sealed_runs": 1,
+            "checkpoint_selections": 42,
+            "primary_endpoint_rows": 5040,
+            "oas_endpoint_rows": 1680,
+        },
+        "source_markers": source_markers,
+        "source_markers_content_sha256": _content_hash(source_markers),
     }
     endpoint_receipt_path = tmp_path / "endpoint_extraction.json"
     endpoint_receipt_path.write_text(json.dumps(endpoint_receipt), encoding="utf-8")
@@ -222,24 +262,23 @@ def _random_analysis(
             }
         )
     tables = {"random_cap_values.csv": values, "random_cap_variability.csv": variability}
-    if mode == "discovery":
-        tables["structured_random_rank_associations.csv"] = [
-            {
-                "model": "ae",
-                "logical_objective": "native__cap__cdf",
-                "split": split,
-                "random_source": source,
-                "n_checkpoints": 20,
-                "spearman_rho": 0.25,
-                "pairing_seed_rho_finite_count": 5,
-                "pairing_seed_rho_undefined_count": 0,
-                "pairing_seed_rho_min": 0.1,
-                "pairing_seed_rho_max": 0.4,
-                "pairing_seed_rho_range": 0.3,
-            }
-            for split in ("validate", "test")
-            for source in ("five_pairing_mean", *[f"pairing_replicate_{i}" for i in range(5)])
-        ]
+    tables["structured_random_rank_associations.csv"] = [
+        {
+            "model": "ae",
+            "logical_objective": "native__cap__cdf",
+            "split": split,
+            "random_source": source,
+            "n_checkpoints": 20,
+            "spearman_rho": 0.25,
+            "pairing_seed_rho_finite_count": 5,
+            "pairing_seed_rho_undefined_count": 0,
+            "pairing_seed_rho_min": 0.1,
+            "pairing_seed_rho_max": 0.4,
+            "pairing_seed_rho_range": 0.3,
+        }
+        for split in ("validate", "test")
+        for source in ("five_pairing_mean", *[f"pairing_replicate_{i}" for i in range(5)])
+    ]
     for name, rows in tables.items():
         _write(tmp_path / name, rows)
     receipt = {
@@ -252,8 +291,8 @@ def _random_analysis(
             "membership_scores": 1,
             "seed_rows": 10,
             "variability_rows": 2,
-            "rank_association_rows": 12 if mode == "discovery" else 0,
-            "rank_panels": 2 if mode == "discovery" else 0,
+            "rank_association_rows": 12,
+            "rank_panels": 2,
             "random_cap_did_not_select_hyperparameters_or_checkpoints": True,
         },
         "inputs": {
@@ -272,10 +311,103 @@ def _random_analysis(
     return tmp_path
 
 
+def _context(tmp_path: Path, analysis: Path) -> Path:
+    """Create a minimal authenticated persistence/curve package for report tests."""
+    tmp_path.mkdir()
+    analysis_manifest = json.loads((analysis / "confirmation_endpoint_analysis.json").read_text())
+    persistence = [
+        {
+            "model": model,
+            "selector": selector,
+            "pairing": pairing,
+            "endpoint": endpoint,
+            "mean_50_epoch": 0.1,
+            "mean_200_epoch": 0.2,
+            "delta_200_minus_50": 0.1,
+        }
+        for model in MODELS
+        for selector, pairing, _ in SELECTORS
+        for endpoint in ("efficiency_250hz", "auprc")
+    ]
+    hypotheses = [
+        {
+            "model": model,
+            "endpoint": endpoint,
+            "contrast": contrast,
+            "delta_50_epoch": -0.1 if contrast.endswith("minus_cdf") else 0.1,
+            "delta_200_epoch": 0.1,
+            "direction_outcome": (
+                "reversed" if contrast.endswith("minus_cdf") else "survived_directionally"
+            ),
+        }
+        for model in MODELS
+        for endpoint in ("efficiency_250hz", "auprc")
+        for contrast in (
+            "cdf_cap_minus_wasserstein",
+            "cdf_cap_minus_drift",
+            "flat_physical_minus_cdf",
+            "physics_summary_minus_cdf",
+            "typed_sliced_wasserstein_minus_cdf",
+            "jetclr_minus_cdf",
+        )
+    ]
+    curves = [
+        {
+            "model": "ae",
+            "trial_number": 1,
+            "training_seed": 2,
+            "run_id": "synthetic",
+            "logical_objective": "native__cap__cdf",
+            "direction": "maximize",
+            "epoch": epoch,
+            "mlflow_step": epoch,
+            "value": epoch / 200,
+        }
+        for epoch in range(1, 201)
+    ]
+    curve_summary = [
+        {
+            "model": "ae",
+            "logical_objective": "native__cap__cdf",
+            "direction": "maximize",
+            "runs": 1,
+            "mean_epoch_50": 0.25,
+            "mean_epoch_200": 1.0,
+            "favorable_change_50_to_200": 0.75,
+            "mean_last_40_change": 0.2,
+        }
+    ]
+    tables = {
+        "persistence.csv": persistence,
+        "hypotheses.csv": hypotheses,
+        "training_curves.csv": curves,
+        "training_curve_summary.csv": curve_summary,
+    }
+    for name, rows in tables.items():
+        _write(tmp_path / name, rows)
+    receipt = {
+        "schema_version": 1,
+        "kind": "physics_background_pairing_confirmation_context",
+        "inputs": {
+            "confirmation_analysis_content_sha256": analysis_manifest["content_sha256"],
+            "endpoint_receipt_sha256": analysis_manifest["inputs"]["endpoint_receipt_sha256"],
+        },
+        "cardinality": {name.removesuffix(".csv"): len(rows) for name, rows in tables.items()},
+        "artifacts": {
+            name: hashlib.sha256((tmp_path / name).read_bytes()).hexdigest() for name in tables
+        },
+    }
+    receipt["content_sha256"] = _content_hash(receipt)
+    (tmp_path / "confirmation_context.json").write_text(json.dumps(receipt), encoding="utf-8")
+    return tmp_path
+
+
 def test_final_report_answers_three_questions_and_shows_every_cell(tmp_path: Path) -> None:
     """The report is complete, winner-aware, and explicit about paper AUPRC."""
     repository = Path(__file__).resolve().parents[1]
-    report, summary = build_confirmation_report(_analysis(tmp_path), repository)
+    report, summary = build_confirmation_report(
+        _analysis(tmp_path), repository, report_mode="provisional"
+    )
     assert "## Direct answers" in report
     assert "## Complete confirmation matrix" in report
     assert "## CDF CAP versus W1 and drift" in report
@@ -288,6 +420,12 @@ def test_final_report_answers_three_questions_and_shows_every_cell(tmp_path: Pat
     assert summary["cdf_cap_auprc_total"] == 12
     assert summary["learned_pairing_efficiency_total"] == 24
     assert summary["learned_pairing_auprc_total"] == 24
+
+
+def test_final_mode_requires_both_random_control_analyses(tmp_path: Path) -> None:
+    """A missing mandatory negative-control package cannot produce a final report."""
+    with pytest.raises(RuntimeError, match="context are mandatory"):
+        build_confirmation_report(_analysis(tmp_path), Path(__file__).resolve().parents[1])
 
 
 def test_final_report_refuses_pending_reserve_extension(tmp_path: Path) -> None:
@@ -306,7 +444,9 @@ def test_final_report_refuses_pending_reserve_extension(tmp_path: Path) -> None:
     manifest["content_sha256"] = _content_hash(manifest)
     manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
     with pytest.raises(RuntimeError, match="extension is incomplete"):
-        build_confirmation_report(analysis, Path(__file__).resolve().parents[1])
+        build_confirmation_report(
+            analysis, Path(__file__).resolve().parents[1], report_mode="provisional"
+        )
 
 
 def test_final_report_authenticates_random_control_analysis(tmp_path: Path, monkeypatch) -> None:
@@ -328,6 +468,7 @@ def test_final_report_authenticates_random_control_analysis(tmp_path: Path, monk
             "confirmation",
             confirmation_provenance=confirmation_provenance,
         ),
+        confirmation_context=_context(tmp_path / "context", analysis),
     )
     assert "Structured-CAP versus mean-random-CAP" in report
     assert "Five-random-bijection variability" in report
@@ -376,6 +517,7 @@ def test_final_report_rejects_random_analysis_tampering(
             analysis,
             Path(__file__).resolve().parents[1],
             discovery_random_analysis=random_dir,
+            report_mode="provisional",
         )
 
 
@@ -404,6 +546,7 @@ def test_final_report_rejects_mixed_confirmation_endpoint_provenance(
             analysis,
             Path(__file__).resolve().parents[1],
             confirmation_random_analysis=random_dir,
+            report_mode="provisional",
         )
 
 
@@ -429,5 +572,56 @@ def test_final_report_accepts_completed_dsvae_only_extension(tmp_path: Path) -> 
     ).hexdigest()
     manifest["content_sha256"] = _content_hash(manifest)
     manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
-    report, _ = build_confirmation_report(analysis, Path(__file__).resolve().parents[1])
+    report, _ = build_confirmation_report(
+        analysis, Path(__file__).resolve().parents[1], report_mode="provisional"
+    )
     assert "| DSVAE | 5 | extension_complete |" in report
+
+
+def test_report_bundle_manifest_and_explicit_promotion(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The compact bundle is complete, tamper-evident, and explicitly promotable."""
+    analysis = tmp_path / "analysis"
+    analysis.mkdir()
+    analysis = _analysis(analysis)
+    provenance = report_module._confirmation_provenance(
+        json.loads((analysis / "confirmation_endpoint_analysis.json").read_text())
+    )
+    monkeypatch.setattr(report_module, "DISCOVERY_TASKS", 1)
+    monkeypatch.setattr(report_module, "DISCOVERY_MEMBERSHIPS", 1)
+    monkeypatch.setattr(report_module, "DISCOVERY_MEMBERSHIP_SCORES", 1)
+    discovery = _random_analysis(tmp_path / "random_discovery", "discovery")
+    confirmation = _random_analysis(
+        tmp_path / "random_confirmation",
+        "confirmation",
+        confirmation_provenance=provenance,
+    )
+    repository = Path(__file__).resolve().parents[1]
+    bundle = tmp_path / "bundle"
+    summary = write_confirmation_report(
+        analysis,
+        repository,
+        bundle,
+        discovery_random_analysis=discovery,
+        confirmation_random_analysis=confirmation,
+        confirmation_context=_context(tmp_path / "context", analysis),
+    )
+    assert summary["scientifically_final"] is True
+    verified = verify_confirmation_report_bundle(bundle)
+    assert verified["scientifically_final"] is True
+    assert (bundle / "prior_repository_REPORT.md").exists()
+
+    install_repository = tmp_path / "install_repository"
+    install_repository.mkdir()
+    mirror = install_repository / "results/physics_confirmation/final_v1"
+    installed = promote_confirmation_report(bundle, install_repository, mirror)
+    assert Path(installed["repository_report"]).read_bytes() == (bundle / "REPORT.md").read_bytes()
+    assert (
+        verify_confirmation_report_bundle(mirror)["content_sha256"] == verified["content_sha256"]
+    )
+
+    evidence = next((bundle / "evidence").glob("*.csv"))
+    evidence.write_text(evidence.read_text() + "tamper", encoding="utf-8")
+    with pytest.raises(ValueError, match="manifest differs"):
+        verify_confirmation_report_bundle(bundle)

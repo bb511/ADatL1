@@ -281,13 +281,30 @@ def _rank_associations(
         ordered = sorted(by_membership)
         structured = []
         for key in ordered:
-            metric = memberships[key]["membership"].get("optimized_metric")
+            membership = memberships[key]["membership"]
+            metric = membership.get("optimized_metric")
             if not isinstance(metric, list) or not metric:
                 raise ValueError(f"Structured CAP metric is missing for rank membership {key}.")
-            objective_values = memberships[key]["membership"].get("objective_values")
+            objective_values = membership.get("objective_values")
             if objective_values is not None and objective_values != metric:
                 raise ValueError(f"Structured CAP metric vectors differ for membership {key}.")
-            structured.append(_finite(metric[0], f"structured CAP {key}"))
+            if membership.get("metric") != "cap":
+                raise ValueError(f"Structured CAP membership metric identity differs for {key}.")
+            if (
+                memberships[key]["task"]["model"] != group_key[0]
+                or membership.get("logical_objective") != group_key[1]
+            ):
+                raise ValueError(f"Structured CAP panel identity differs for membership {key}.")
+            objective_index = int(membership.get("selection_metric_objective_index", 0))
+            if objective_index != 0 or objective_index >= len(metric):
+                raise ValueError(f"Structured CAP objective index differs for membership {key}.")
+            metric_name = membership.get("selection_metric_name", "cap")
+            direction = membership.get("selection_metric_direction", "maximize")
+            if metric_name != "cap" or direction != "maximize":
+                raise ValueError(
+                    f"Structured CAP objective identity differs for membership {key}."
+                )
+            structured.append(_finite(metric[objective_index], f"structured CAP {key}"))
         random_columns = {
             "five_pairing_mean": [
                 statistics.fmean(row["cap"] for row in by_membership[key]) for key in ordered
@@ -344,7 +361,7 @@ def build_random_cap_analysis(
 ) -> dict[str, Any]:
     """Return authenticated random-CAP values, variability, and rank diagnostics."""
     rows, variability, memberships = _normalize(manifest, aggregate)
-    associations = _rank_associations(rows, memberships) if manifest["mode"] == "discovery" else []
+    associations = _rank_associations(rows, memberships)
     membership_scores = sum(
         len(task.get("memberships", [])) * len(task.get("scores", []))
         for task in manifest["tasks"]

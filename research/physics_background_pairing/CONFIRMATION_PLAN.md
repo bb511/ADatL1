@@ -104,8 +104,14 @@ hyperparameter configurations to the 28-config primary matrix. Persist CAP, W1, 
 drift values derived from both the native and OAS score streams wherever the model
 supports OAS. State explicitly that this is a same-checkpoint score comparison on
 native-selected trajectories, not an independently optimized OAS selector. The OAS
-implementation must apply the physics presence/padding mask before covariance fitting
-and scoring so nonexistent object slots contribute neither residuals nor covariance.
+implementation must apply the physics presence/padding mask so nonexistent object
+slots contribute no direct residual energy. The frozen implementation uses
+observed-only feature means, neutral-mean completion for missing residuals, excludes
+globally absent coordinates, scores the observed principal block of the global
+precision matrix, and normalizes by observed-feature count. This is a mask-aware
+mean-completion Mahalanobis energy, not a separately refitted or marginalized
+covariance for every event mask. Its exact audit is frozen at
+`<CONFIRM_ROOT>/state/oas_masking_scientific_audit_20260818.md`.
 
 Downstream anomaly labels must never affect training, checkpoint selection, early
 stopping, retries, or adaptive seed decisions. Evaluate them only after a run's
@@ -389,6 +395,7 @@ files before changing campaign semantics:
 | `scripts/clariden/physics_background_pairing_retrain.sbatch` | Restart-safe 40-epoch production segments up to 200 cumulative epochs. |
 | `scripts/physics_background_pairing_confirmation_endpoints.py` | Resolve the exact physical selected checkpoint and extract the sealed 20-anomaly efficiency and AUPRC rows. |
 | `src/evaluation/physics_background_pairing_confirmation_analysis.py` and its script wrapper | Produce per-model and macro paired comparisons, hierarchical-bootstrap intervals, and multiplicity-aware tables. |
+| `src/evaluation/physics_background_pairing_confirmation_context.py` and its script wrapper | Authenticate the discovery-to-confirmation 50-to-200 comparison and extract complete 200-epoch MLflow validation histories for the final report. |
 | `src/utils/pairing/random_tables.py` and `scripts/physics_background_pairing_random_tables.py` | Freeze and validate the prespecified random bijections without touching structured pairing tables. |
 | `src/evaluation/callbacks/random_cap.py` | Compute CAP for frozen random tables without registering it as an optimization objective. |
 | `configs/diagnostic_suite/physics_background_random_cap_native.yaml` | Offline random-CAP evaluation using each model's native anomaly score. |
@@ -466,26 +473,27 @@ must deduplicate physical checkpoints while retaining all logical selector
 memberships. Never run `prepare-confirmation` before endpoint extraction has bound
 every row to a checkpoint hash.
 
-The runtime-bound retrospective discovery manifest is authoritative and must be
-reused rather than regenerated:
+The data-identity-correct retrospective discovery manifest is authoritative and must
+be reused rather than regenerated:
 
 ```text
-<DISCOVERY_ROOT>/random_cap_evaluation/discovery_5293a29/manifest.json
+<DISCOVERY_ROOT>/random_cap_evaluation/discovery_immutable_presort_20260818/manifest.json
 ```
 
-It contains 346 physical tasks and is bound to execution commit `5293a29`, the exact
-immutable runtime data cache, and the versioned random-table namespace
-`random_pairing_runtime_5293a29`. Its manifest SHA-256 is
-`cd755201c36b036a2b5b9b83fffd28dbb0153614de42b3d7e695b6b137fd463d`; the random-table
-manifest content hash is
-`d767bff5f5fb21eba668455f85fc02504159783426a91e3d00b68cf382a5d67a`.
-Always set `PHYSICS_BGPAIR_RANDOM_CAP_NAMESPACE=discovery_5293a29` when invoking the
-discovery evaluator control plane. Three earlier namespaces are failed pilot evidence
-and must not be resumed or aggregated: the unversioned `discovery`,
-`discovery_5f2a9df`, and `discovery_1f037a0`. Validate one task's terminal receipt
-against the authoritative namespace before submitting tasks 1--345. Do not overwrite
-or reprepare the manifest to accommodate a runtime mismatch; fix the implementation,
-create a new commit/worktree/namespace, and preserve the failed evidence.
+It contains 346 physical tasks and is bound to execution commit `5293a29`, the same
+immutable presort data root and raw-data skeleton as successful confirmation
+training, and random-table namespace `random_pairing_immutable_presort_20260818`.
+Its manifest SHA-256 is
+`ed5b59cbc4eaec05c2f384e18659767b794656182d53e6ea2ac363efdc80b3bd`.
+Always set
+`PHYSICS_BGPAIR_RANDOM_CAP_NAMESPACE=discovery_immutable_presort_20260818` when
+invoking the discovery evaluator control plane. The completed
+`discovery_5293a29` namespace used a different source-tensor identity and is retained
+as failed-comparability evidence; it must not support the final structured-versus-
+random claim. The unversioned `discovery`, `discovery_5f2a9df`, and
+`discovery_1f037a0` namespaces are also failed pilots. Do not overwrite or reprepare
+any manifest to accommodate a runtime mismatch; fix the implementation, create a new
+commit/worktree/namespace, and preserve the failed evidence.
 
 The authenticated random-CAP analysis must verify the prepared-manifest hash, task
 list hashes, table/source hashes, task membership identity, unique keys, dynamic
@@ -761,7 +769,7 @@ blocker is reported with exact evidence. A queued job is not a reason to abandon
 campaign; continue independent analysis and implementation until scheduler completion
 is the only remaining dependency.
 
-## 14. Live handoff state (2026-08-17 09:29 Europe/Zurich)
+## 14. Live handoff state (2026-08-18 05:03 Europe/Zurich)
 
 This section records the current execution identity. Treat durable campaign receipts
 and Slurm as authoritative if this snapshot becomes stale.
@@ -769,6 +777,7 @@ and Slurm as authoritative if this snapshot becomes stale.
 ```text
 Training implementation commit: ddfcfbb46d7fed7308b2066328b7b898a6316cc8
 Current analysis/random-control commit: 5293a29
+Main-branch resume fix commit: c33ff62
 Confirmation root:
   /iopsstor/scratch/cscs/vjimenez/adatl1/campaigns/physics_background_confirmation_ddfcfbb
 Clean execution worktree:
@@ -787,23 +796,88 @@ The confirmation root has authenticated 28 configurations, 42 native logical cel
 frozen random tables. The forced-restart canary job `3098320` passed after exactly one
 requeue and has a sealed validation receipt. All six independent real-data model
 canaries passed: AE `3098330`, VAE `3098337`, DSAE `3098343`, DSVAE `3098346`,
-DeepSVDD `3098356`, and RealNVP `3098364`. Production array `3098367` contains all 84
-primary runs with concurrency 32. Fourteen runs have authenticated epoch-40
-boundaries: indices 2, 3, 4, 5, 8, 9, 10, 11, 14, 15, 16, 17, 20, and 21. Array
-`3099316` is their exact disjoint 40--80 continuation. Eighteen other first segments
-remain running and indices 32--83 have not started. This is not 84 complete 200-epoch
-allocations. Reconcile and submit the 40--80, 80--120, 120--160, and 160--200 segments
-only after the preceding authenticated boundary for each run.
+DeepSVDD `3098356`, and RealNVP `3098364`.
 
-Retrospective random-CAP pilot `3098386_0` passed against the authoritative
-`discovery_5293a29` namespace and produced the expected native/OAS validation/test
-rows over all five frozen random bijections. At this snapshot, 307 of 346 tasks are
-complete with no invalid artifacts. Packed debug job `3099042` has completed tasks
-304--306 and is processing 307 before 308--309; normal array `3098406` retains exact
-non-overlapping coverage of tasks 310--345. Preserve that coverage when moving work
-between queues: cancel an exact pending task before resubmitting it elsewhere, and
-never duplicate a running or completed task. Failed pilots `3098368`, `3098378`, and
-`3098383` remain diagnostic evidence and must not be counted as completed work.
+Production array `3098367` completed the first 40 epochs for all 84 runs with no
+first-segment failure. Every run therefore has an authenticated epoch-40 boundary;
+none has yet reached epoch 80. The first continuation waves exposed two independent
+resume defects and are failed evidence, not completed work:
+
+1. continuations for indices 0--31 initially failed while loading the full Lightning
+   checkpoint because PyTorch 2.12 defaults to a weights-only loader that rejects
+   serialized callback state;
+2. after enabling full-state loading, continuation arrays covering indices 0--83
+   passed checkpoint deserialization but failed at the first resumed CAP validation
+   with `source_1_sha256` disagreement between the collected samples and the frozen
+   pair-table metadata.
+
+The first defect has a tested permanent fix on the main branch at `c33ff62`:
+`trainer.fit` explicitly requests `weights_only=False` for a trusted local resume
+checkpoint. The immutable production worktree still uses `ddfcfbb`; its retries used
+the equivalent compatibility environment switch. Preserve both provenance records.
+The durable incident record is:
+
+```text
+<CONFIRM_ROOT>/state/resume_compatibility_incident_20260817.json
+```
+
+The second defect was not a model or callback failure: the retry submission supplied
+the wrong data roots. Slurm provenance proves successful job `3098367` used:
+
+```text
+DATA_DIR=<DISCOVERY_ROOT>/inputs/immutable_presort_data_root
+RAW_DATA_DIR=<DISCOVERY_ROOT>/inputs/immutable_raw_skeleton
+```
+
+Those roots reproduce the frozen validation and test source hashes. The failed
+retries used different roots and therefore different source tensors. All 84 epoch-40
+checkpoint hashes still match their successful receipts, and failed retries did not
+advance an authenticated boundary. The complete audit is
+`<CONFIRM_ROOT>/state/data_identity_resume_incident_20260818.md`.
+
+Recovery array `3108572` retains only task 2 as a 40-to-80 epoch canary; all other
+array elements were deliberately canceled. It restored epoch 40 with full Lightning
+state and has logged resumed validation epochs with strict CAP source-hash checks
+passing. Do not release the other 83 continuations until this task seals and
+authenticates its epoch-80 receipt. Thereafter submit only through the
+pre-submission data-identity guard, whose frozen receipt is
+`<CONFIRM_ROOT>/state/submission_data_identity.json` (file SHA-256
+`9d4479f9d6034912dbd6cc61e17adb955b3340cd6f4e9f978ec956460485cf7f`).
+
+Do not recover by suppressing the CAP hash check or regenerating pair tables. Every
+continuation submission must prove all of the following:
+
+- the exact runtime data root and source ordering used by successful job `3098367`;
+- the two tensors collected by resumed validation reproduce the frozen source hashes;
+- every on-disk epoch-40 checkpoint still matches its successful segment receipt;
+- no failed retry advanced or replaced an authenticated boundary artifact;
+- the recovery command binds the same immutable data, raw-data, pairing, code, and
+  task-map identities as the successful first segment.
+
+The active canary must complete the next boundary and pass receipt/hash validation
+before the remaining 83 continuations are released. Record the root cause, proof,
+affected job IDs, and recovery command in the incident JSON.
+
+An earlier retrospective discovery random-CAP campaign completed 346 tasks, but it
+used a non-presort source-tensor identity and is therefore not comparable to the
+structured CAP evidence. Its aggregate is retained only as failed-comparability
+evidence:
+
+```text
+<DISCOVERY_ROOT>/random_cap_evaluation/discovery_5293a29/aggregate.json
+```
+
+Corrected array `3108575` evaluates all 346 discovery tasks against the immutable
+presort source identity under namespace `discovery_immutable_presort_20260818`; its
+manifest hash is frozen in Section 6.2. Only its fully authenticated aggregate and
+analysis may enter the final report. This retrospective result still has no
+random-selected downstream efficiency or AUPRC and must not be presented as though
+random pairing selected its own checkpoint.
+
+The OAS masking audit concluded that the existing frozen AE/VAE implementation is
+scientifically valid for this campaign and does not require a restart. The audit
+SHA-256 is
+`29ff17d16a30f448ff4ebbb5cf1980935e7f02e3501142eac206141ed9cb52f2`.
 
 The reserve-extension worktree descends directly from the immutable training commit
 and changes only the authenticated control-plane and its tests. Its Git-diff SHA-256
@@ -820,3 +894,65 @@ their conclusions against receipts before submissions or scientific claims. When
 jobs or the scheduler are the only blocker, predict the next useful check from recent
 runtime and queue evidence, use the supported timer/wait mechanism, and resume until
 all required artifacts and the final report are complete.
+
+## 15. Versioned post-training workflow and final-report promotion
+
+Primary-seed evidence and effective final evidence are separate immutable products.
+Never rerun a reserve-extended extraction into a primary directory. Use exactly:
+
+```text
+<CONFIRM_ROOT>/results/endpoints_primary/
+<CONFIRM_ROOT>/results/analysis_primary/
+<CONFIRM_ROOT>/results/endpoints_final/
+<CONFIRM_ROOT>/results/analysis_final/
+<CONFIRM_ROOT>/results/random_cap_analysis/confirmation_<EXECUTION_COMMIT>/
+<CONFIRM_ROOT>/results/report_final_<EXECUTION_COMMIT>/
+```
+
+The primary analysis alone freezes `reserve_seed_decisions.csv`. If no model triggers,
+copying primary evidence into the final namespace still requires an explicit receipt
+recording byte-identical source and destination hashes. If any model triggers, the
+final namespace is built only after both reserve seeds for every triggered model have
+sealed markers. Confirmation random CAP binds only the final endpoint receipt and
+checkpoint-selection table.
+
+Every confirmation random-CAP membership must contain the parsed two-component
+selection vector, named first-objective metric, direction, objective index, and exact
+selected checkpoint ID/hash. Analysis computes structured-versus-random rank
+association separately for each model, logical CAP selector, score, and split. It
+persists both the five-random-pairing mean correlation and all five replicate
+correlations/ranges; undefined constant or undersized panels remain explicit.
+
+Final report generation is fail-closed. `--report-mode final` requires authenticated
+discovery and confirmation random-control analyses and `--analysis-stage final`.
+`--report-mode provisional --analysis-stage primary` is permitted for reserve
+decisions and inspection, but its heading and JSON identity are explicitly nonfinal
+and it cannot be promoted. The final invocation has the following shape:
+
+```bash
+uv run python scripts/physics_background_pairing_confirmation_report.py \
+  --analysis-dir <CONFIRM_ROOT>/results/analysis_final \
+  --repository <CLEAN_ANALYSIS_WORKTREE> \
+  --output-dir <CONFIRM_ROOT>/results/report_final_<EXECUTION_COMMIT> \
+  --discovery-random-analysis \
+    <DISCOVERY_ROOT>/results/random_cap_analysis/discovery_5293a29 \
+  --confirmation-random-analysis \
+    <CONFIRM_ROOT>/results/random_cap_analysis/confirmation_<EXECUTION_COMMIT> \
+  --analysis-stage final --report-mode final
+```
+
+This first creates an immutable compact scratch bundle containing `REPORT.md`,
+`report_summary.json`, `provenance.json`, `manifest.sha256`, the prior repository
+report, and hash-bound compact confirmation/random CSV evidence. Verify the manifest
+before installation. Promotion is a separate explicit operation: add `--promote` and
+`--results-mirror <REPOSITORY>/results/physics_background_pairing_confirmation/<VERSION>`.
+Only a verified scientifically-final bundle may atomically replace the repository
+root `REPORT.md`; the ignored results mirror must either be absent or byte-identical.
+
+The final report must authenticate the endpoint receipt's complete marker inventory,
+print exact sealed-run/selection/endpoint counts, and render mean, median, worst
+anomaly, bottom-five CVaR, and seed dispersion. Training-curve and 50-to-200-epoch
+persistence/reversal sections must consume dedicated hash-bound MLflow/discovery
+artifacts; do not infer them from scheduler logs or filenames. Until those inputs are
+present and authenticated, keep the report provisional rather than omitting the
+required sections or inventing a trend.

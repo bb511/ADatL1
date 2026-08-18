@@ -269,6 +269,8 @@ def test_confirmation_manifest_deduplicates_126_sealed_cell_checkpoints(
             "model": "ae",
             "trial_number": 100 + index % 28,
             "logical_objective": f"native__cap__pairing_{index}",
+            "selector": "cap",
+            "pairing": f"pairing_{index}",
         }
         for index in range(42)
     ]
@@ -318,6 +320,7 @@ def test_confirmation_manifest_deduplicates_126_sealed_cell_checkpoints(
                     "checkpoint_family_id": "last",
                     "checkpoint_path": str(checkpoint),
                     "checkpoint_sha256": hashlib.sha256(checkpoint.read_bytes()).hexdigest(),
+                    "selection_metric": json.dumps([0.2 + cell["cell_index"] / 1000, 0.1]),
                 }
             )
     selections = root / "results/checkpoint_selections.csv"
@@ -376,6 +379,13 @@ def test_confirmation_manifest_deduplicates_126_sealed_cell_checkpoints(
     assert sum(len(task["memberships"]) for task in manifest["tasks"]) == 126
     assert sum(len(task["checkpoints"]) for task in manifest["tasks"]) == 84
     assert all(task["scores"] == ["native", "residual_oas"] for task in manifest["tasks"])
+    assert all(
+        membership["selection_metric_name"] == "cap"
+        and membership["selection_metric_direction"] == "maximize"
+        and membership["optimized_metric"] == membership["objective_values"]
+        for task in manifest["tasks"]
+        for membership in task["memberships"]
+    )
 
     # Offline diagnostics have their own immutable execution identity; they need not
     # pretend to run from the older commit that trained the sealed checkpoints.

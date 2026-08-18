@@ -7,6 +7,7 @@ import hashlib
 import json
 import math
 import os
+import shutil
 import statistics
 import tempfile
 from pathlib import Path
@@ -141,8 +142,8 @@ def _load_random_analysis(
         tables[name] = _read_csv(path)
     if "random_cap_variability.csv" not in tables or "random_cap_values.csv" not in tables:
         raise ValueError("Random-CAP analysis lacks values or variability evidence.")
-    if expected_mode == "discovery" and "structured_random_rank_associations.csv" not in tables:
-        raise ValueError("Discovery random-CAP analysis lacks rank associations.")
+    if "structured_random_rank_associations.csv" not in tables:
+        raise ValueError(f"{expected_mode.title()} random-CAP analysis lacks rank associations.")
     values = tables["random_cap_values.csv"]
     variability = tables["random_cap_variability.csv"]
     required_value_fields = {
@@ -197,8 +198,8 @@ def _load_random_analysis(
             raise ValueError("Random-CAP variability row does not contain five pairings.")
         for field in ("cap_mean", "cap_sample_variance", "cap_sample_std", "cap_range"):
             _number(row, field)
-    if expected_mode == "discovery":
-        associations = tables["structured_random_rank_associations.csv"]
+    associations = tables["structured_random_rank_associations.csv"]
+    if expected_mode in {"discovery", "confirmation"}:
         required_association_fields = {
             "model",
             "logical_objective",
@@ -275,6 +276,92 @@ def _confirmation_provenance(
         ),
         "endpoint_receipt_sha256": endpoint_sha256,
     }
+
+
+def _completion_summary(analysis_manifest: dict[str, Any]) -> dict[str, Any]:
+    """Authenticate the endpoint receipt's complete-run marker inventory."""
+    receipt_path = Path(analysis_manifest["inputs"]["endpoint_receipt"]).resolve(strict=True)
+    receipt = json.loads(receipt_path.read_text(encoding="utf-8"))
+    markers = receipt.get("source_markers")
+    cardinality = receipt.get("cardinality", {})
+    sealed_runs = int(cardinality.get("sealed_runs", -1))
+    if (
+        not isinstance(markers, list)
+        or sealed_runs <= 0
+        or len(markers) != sealed_runs
+        or receipt.get("source_markers_content_sha256") != _content_hash(markers)
+    ):
+        raise ValueError("Endpoint receipt lacks an authenticated complete-run marker inventory.")
+    run_ids: set[str] = set()
+    for row in markers:
+        marker_path = Path(str(row.get("marker", ""))).resolve(strict=True)
+        metric_path = Path(str(row.get("optimized_metric_artifact", ""))).resolve(strict=True)
+        if (
+            row.get("marker_sha256") != _sha256(marker_path)
+            or row.get("optimized_metric_artifact_sha256") != _sha256(metric_path)
+            or not str(row.get("run_id", ""))
+            or str(row["run_id"]) in run_ids
+        ):
+            raise ValueError("Endpoint receipt complete-run marker identity differs.")
+        marker = json.loads(marker_path.read_text(encoding="utf-8"))
+        if (
+            marker.get("run_name") != row["run_id"]
+            or marker.get("optimized_metric_artifact") != str(metric_path)
+            or marker.get("optimized_metric_artifact_sha256")
+            != row["optimized_metric_artifact_sha256"]
+        ):
+            raise ValueError("Endpoint receipt marker contents differ from its inventory.")
+        run_ids.add(str(row["run_id"]))
+    return {
+        "sealed_runs": sealed_runs,
+        "checkpoint_selections": int(cardinality.get("checkpoint_selections", -1)),
+        "primary_endpoint_rows": int(cardinality.get("primary_endpoint_rows", -1)),
+        "oas_endpoint_rows": int(cardinality.get("oas_endpoint_rows", -1)),
+        "marker_inventory_sha256": receipt["source_markers_content_sha256"],
+        "endpoint_receipt_sha256": _sha256(receipt_path),
+    }
+
+
+def _load_confirmation_context(
+    context_dir: Path, analysis_manifest: dict[str, Any]
+) -> tuple[dict[str, Any], dict[str, list[dict[str, str]]]]:
+    """Authenticate the dedicated MLflow/discovery context package."""
+    context_dir = context_dir.resolve(strict=True)
+    path = context_dir / "confirmation_context.json"
+    receipt = json.loads(path.read_text(encoding="utf-8"))
+    digest = receipt.pop("content_sha256", None)
+    if digest != _content_hash(receipt):
+        raise ValueError("Confirmation context receipt content hash differs.")
+    receipt["content_sha256"] = digest
+    inputs = receipt.get("inputs", {})
+    if (
+        receipt.get("kind") != "physics_background_pairing_confirmation_context"
+        or inputs.get("confirmation_analysis_content_sha256")
+        != analysis_manifest["content_sha256"]
+        or inputs.get("endpoint_receipt_sha256")
+        != analysis_manifest["inputs"]["endpoint_receipt_sha256"]
+    ):
+        raise ValueError("Confirmation context is not bound to the final endpoint analysis.")
+    tables = {}
+    for name, expected_hash in receipt.get("artifacts", {}).items():
+        artifact = (context_dir / name).resolve(strict=True)
+        if not artifact.is_relative_to(context_dir) or _sha256(artifact) != expected_hash:
+            raise ValueError(f"Confirmation context artifact changed: {artifact}")
+        tables[name] = _read_csv(artifact)
+    required = {
+        "persistence.csv",
+        "hypotheses.csv",
+        "training_curves.csv",
+        "training_curve_summary.csv",
+    }
+    if set(tables) != required or any(
+        len(tables[name]) != int(receipt["cardinality"].get(name.removesuffix(".csv"), -1))
+        for name in required
+    ):
+        raise ValueError("Confirmation context table coverage differs.")
+    if len(tables["persistence.csv"]) != 84 or len(tables["hypotheses.csv"]) != 72:
+        raise ValueError("Confirmation 50-to-200 persistence cardinality differs.")
+    return receipt, tables
 
 
 def _number(row: dict[str, str], field: str) -> float:
@@ -396,9 +483,31 @@ def build_confirmation_report(
     *,
     discovery_random_analysis: Path | None = None,
     confirmation_random_analysis: Path | None = None,
+    confirmation_context: Path | None = None,
+    report_mode: str = "final",
 ) -> tuple[str, dict[str, Any]]:
     """Build an information-dense report and machine-readable result summary."""
+    if report_mode not in {"final", "provisional"}:
+        raise ValueError(f"Unknown confirmation report mode: {report_mode!r}.")
+    if report_mode == "final" and (
+        discovery_random_analysis is None
+        or confirmation_random_analysis is None
+        or confirmation_context is None
+    ):
+        raise RuntimeError(
+            "Final report blocked: authenticated discovery and confirmation random-CAP "
+            "analyses and the authenticated 50-to-200/training-curve context are mandatory. "
+            "Use report_mode='provisional' for an explicitly "
+            "nonfinal report."
+        )
     manifest, tables = _load_analysis(analysis_dir.resolve(strict=True))
+    completion = _completion_summary(manifest)
+    context_receipt = None
+    context_tables = None
+    if confirmation_context is not None:
+        context_receipt, context_tables = _load_confirmation_context(
+            confirmation_context, manifest
+        )
     seeds_by_model = manifest["method"].get("training_seeds_by_model") or {
         model: manifest["method"]["seeds"] for model in MODELS
     }
@@ -433,9 +542,15 @@ def build_confirmation_report(
     pairing_auprc = _contrast_counts(pairing, "auprc")
 
     lines = [
-        "# Physics background-pairing confirmation results",
+        (
+            "# Physics background-pairing confirmation results"
+            if report_mode == "final"
+            else "# PROVISIONAL physics background-pairing confirmation results"
+        ),
         "",
         "## Direct answers",
+        "",
+        f"Completion: **{completion['sealed_runs']}/{completion['sealed_runs']} authenticated retraining runs sealed**; {completion['checkpoint_selections']} logical checkpoint selections and {completion['primary_endpoint_rows']} native endpoint rows were verified.",
         "",
         f"1. **Background0/background1 system versus the paper:** {paper_better}/{len(comparable_paper)} method-matched efficiency means are directionally higher. This is a cross-system benchmark, not a causal isolation of the changed validation datasets; the paper has no matching AUPRC.",
         f"2. **Does pairing improve CAP?** Efficiency: {pairing_eff[0]}/{pairing_eff[2]} directional gains and {pairing_eff[1]} multiplicity-adjusted meaningful improvements. AUPRC: {pairing_auprc[0]}/{pairing_auprc[2]} directional gains and {pairing_auprc[1]} adjusted meaningful improvements.",
@@ -447,11 +562,39 @@ def build_confirmation_report(
         "",
         *cell_lines,
         "",
-        "## CDF CAP versus W1 and drift",
+        "## Robustness of the mean-winning cells",
         "",
-        "| Model | Endpoint | Contrast | Mean delta (pp or AUPRC) | Adjusted CI | Classification |",
-        "|---|---|---|---:|---:|---|",
+        "The table reports anomaly-level robustness after averaging seeds first. Worst is the lowest of the 20 anomaly means; bottom-quartile CVaR is the mean of the lowest five.",
+        "",
+        "| Model | Endpoint | Mean-winning method | Mean | Median | Worst | Bottom-five CVaR | Seed-mean SD |",
+        "|---|---|---|---:|---:|---:|---:|---:|",
     ]
+    across_rows = tables["endpoints_across_seeds.csv"]
+    for model in MODELS:
+        for endpoint in ("efficiency_250hz", "auprc"):
+            candidates = [
+                row for row in across_rows if row["model"] == model and row["endpoint"] == endpoint
+            ]
+            winner = max(candidates, key=lambda row: _number(row, "mean"))
+            method = winner["pairing"] if winner["selector"] == "cap" else winner["selector"]
+            scale = 100.0 if endpoint == "efficiency_250hz" else 1.0
+            lines.append(
+                f"| {model.upper()} | {endpoint} | {method} | "
+                f"{scale * _number(winner, 'mean'):.3f} | "
+                f"{scale * _number(winner, 'median'):.3f} | "
+                f"{scale * _number(winner, 'worst'):.3f} | "
+                f"{scale * _number(winner, 'bottom_quartile_cvar'):.3f} | "
+                f"{scale * _number(winner, 'seed_mean_std'):.3f} |"
+            )
+    lines.extend(
+        [
+            "",
+            "## CDF CAP versus W1 and drift",
+            "",
+            "| Model | Endpoint | Contrast | Mean delta (pp or AUPRC) | Adjusted CI | Classification |",
+            "|---|---|---|---:|---:|---|",
+        ]
+    )
     for row in controlled:
         scale = 100.0 if row["endpoint"] == "efficiency_250hz" else 1.0
         lines.append(
@@ -555,6 +698,58 @@ def build_confirmation_report(
         ]
     )
 
+    lines.extend(["", "## 50-to-200-epoch persistence and training curves", ""])
+    if context_tables is None:
+        lines.append(
+            "Not supplied in this provisional report. No convergence or persistence claim is made."
+        )
+    else:
+        hypotheses = context_tables["hypotheses.csv"]
+        reversed_rows = [row for row in hypotheses if row["direction_outcome"] == "reversed"]
+        survived_rows = [
+            row for row in hypotheses if row["direction_outcome"] == "survived_directionally"
+        ]
+        curve_rows = context_tables["training_curve_summary.csv"]
+        favorable_curves = sum(
+            _number(row, "favorable_change_50_to_200") > 0 for row in curve_rows
+        )
+        lines.extend(
+            [
+                f"Across the 72 predeclared selector/pairing endpoint contrasts, {len(survived_rows)} retained their discovery direction and {len(reversed_rows)} reversed between the selected 50-epoch checkpoint and the multi-seed 200-epoch mean. This is persistence evidence, not a fresh untouched selection test.",
+                f"The authenticated validation-objective histories show favorable mean movement from epoch 50 to 200 in {favorable_curves}/{len(curve_rows)} model/selector panels.",
+                "",
+                "| Model | Objective | Direction | Runs | Epoch 50 mean | Epoch 200 mean | Favorable change | Epoch 160→200 raw change |",
+                "|---|---|---|---:|---:|---:|---:|---:|",
+            ]
+        )
+        for row in curve_rows:
+            lines.append(
+                f"| {row['model'].upper()} | {row['logical_objective']} | {row['direction']} | "
+                f"{row['runs']} | {_number(row, 'mean_epoch_50'):.5g} | "
+                f"{_number(row, 'mean_epoch_200'):.5g} | "
+                f"{_number(row, 'favorable_change_50_to_200'):+.5g} | "
+                f"{_number(row, 'mean_last_40_change'):+.5g} |"
+            )
+        lines.extend(
+            [
+                "",
+                "Discovery-direction reversals (all non-reversed hypotheses remain in the packaged CSV):",
+                "",
+                "| Model | Endpoint | Contrast | 50-epoch delta | 200-epoch delta |",
+                "|---|---|---|---:|---:|",
+            ]
+        )
+        if reversed_rows:
+            for row in reversed_rows:
+                scale = 100.0 if row["endpoint"] == "efficiency_250hz" else 1.0
+                lines.append(
+                    f"| {row['model'].upper()} | {row['endpoint']} | {row['contrast']} | "
+                    f"{scale * _number(row, 'delta_50_epoch'):+.3f} | "
+                    f"{scale * _number(row, 'delta_200_epoch'):+.3f} |"
+                )
+        else:
+            lines.append("| — | — | No directional reversals | — | — |")
+
     random_status = "not_supplied"
     random_receipts: dict[str, str] = {}
     lines.extend(["", "## Random-pairing negative control", ""])
@@ -616,6 +811,11 @@ def build_confirmation_report(
             confirmation_provenance=_confirmation_provenance(manifest),
         )
         random_receipts["confirmation"] = confirmation_receipt["content_sha256"]
+        confirmation_mean_associations = [
+            row
+            for row in confirmation_tables["structured_random_rank_associations.csv"]
+            if row["random_source"] == "five_pairing_mean"
+        ]
         variability_groups: dict[tuple[str, str, str], list[dict[str, str]]] = {}
         for row in confirmation_tables["random_cap_variability.csv"]:
             variability_groups.setdefault(
@@ -636,6 +836,24 @@ def build_confirmation_report(
             lines.append(
                 f"| {model.upper()} | {score} | {split} | {len(rows)} | "
                 f"{statistics.median(standard_deviations):.4g} | {max(ranges):.4g} |"
+            )
+        lines.extend(
+            [
+                "",
+                "Structured-versus-random CAP rank association on the sealed confirmation checkpoints (unpooled by model, selector, split, and score):",
+                "",
+                "| Model | Objective | Split | N | Five-pairing-mean rho |",
+                "|---|---|---|---:|---:|",
+            ]
+        )
+        for row in sorted(
+            confirmation_mean_associations,
+            key=lambda item: (item["model"], item["logical_objective"], item["split"]),
+        ):
+            rho = row["spearman_rho"] or "undefined"
+            lines.append(
+                f"| {row['model'].upper()} | {row['logical_objective']} | {row['split']} | "
+                f"{row['n_checkpoints']} | {rho} |"
             )
         random_status = (
             f"{random_status}; confirmation authenticated "
@@ -658,7 +876,10 @@ def build_confirmation_report(
     )
     summary = {
         "schema_version": 1,
+        "report_mode": report_mode,
+        "scientifically_final": report_mode == "final",
         "analysis_content_sha256": manifest["content_sha256"],
+        "completion": completion,
         "paper_reference_sha256": paper_reference_hash,
         "paper_matched_positive": paper_better,
         "paper_matched_total": len(comparable_paper),
@@ -679,6 +900,9 @@ def build_confirmation_report(
         },
         "random_cap_status": random_status,
         "random_cap_analysis_receipts": random_receipts,
+        "confirmation_context_receipt": (
+            None if context_receipt is None else context_receipt["content_sha256"]
+        ),
     }
     summary["content_sha256"] = _content_hash(summary)
     return "\n".join(lines), summary
@@ -691,13 +915,22 @@ def write_confirmation_report(
     *,
     discovery_random_analysis: Path | None = None,
     confirmation_random_analysis: Path | None = None,
+    confirmation_context: Path | None = None,
+    report_mode: str = "final",
+    analysis_stage: str = "final",
 ) -> dict[str, Any]:
-    """Persist final Markdown and JSON atomically without overwriting different results."""
+    """Persist an immutable compact report bundle with authenticated evidence."""
+    if analysis_stage not in {"primary", "final"}:
+        raise ValueError(f"Unknown confirmation analysis stage: {analysis_stage!r}.")
+    if report_mode == "final" and analysis_stage != "final":
+        raise RuntimeError("A final report must consume the final endpoint/analysis namespace.")
     report, summary = build_confirmation_report(
         analysis_dir,
         repository,
         discovery_random_analysis=discovery_random_analysis,
         confirmation_random_analysis=confirmation_random_analysis,
+        confirmation_context=confirmation_context,
+        report_mode=report_mode,
     )
     output_dir.mkdir(parents=True, exist_ok=True)
     artifacts = {
@@ -720,7 +953,233 @@ def write_confirmation_report(
                 os.replace(temporary, path)
         finally:
             Path(temporary_name).unlink(missing_ok=True)
+    evidence_sources: dict[str, Path] = {}
+    for name in (
+        "endpoints_across_seeds.csv",
+        "comparison_summary.csv",
+        "oas_vs_native_summary.csv",
+        "reserve_seed_decisions.csv",
+        "confirmation_endpoint_analysis.json",
+    ):
+        evidence_sources[f"confirmation_{name}"] = analysis_dir / name
+    for prefix, source in (
+        ("discovery_random", discovery_random_analysis),
+        ("confirmation_random", confirmation_random_analysis),
+    ):
+        if source is None:
+            continue
+        for name in (
+            "random_cap_analysis.json",
+            "random_cap_variability.csv",
+            "structured_random_rank_associations.csv",
+        ):
+            evidence_sources[f"{prefix}_{name}"] = source / name
+    if confirmation_context is not None:
+        for name in (
+            "confirmation_context.json",
+            "persistence.csv",
+            "hypotheses.csv",
+            "training_curve_summary.csv",
+        ):
+            evidence_sources[f"context_{name}"] = confirmation_context / name
+    evidence_dir = output_dir / "evidence"
+    evidence_dir.mkdir(parents=True, exist_ok=True)
+    for name, source in evidence_sources.items():
+        source = source.resolve(strict=True)
+        target = evidence_dir / name
+        if target.exists():
+            if target.read_bytes() != source.read_bytes():
+                raise FileExistsError(f"Refusing to replace different report evidence: {target}")
+        else:
+            descriptor, temporary_name = tempfile.mkstemp(prefix=f".{name}.", dir=evidence_dir)
+            os.close(descriptor)
+            temporary = Path(temporary_name)
+            try:
+                shutil.copyfile(source, temporary)
+                os.replace(temporary, target)
+            finally:
+                temporary.unlink(missing_ok=True)
+
+    figures_dir = output_dir / "figures"
+    figures_dir.mkdir(parents=True, exist_ok=True)
+    _atomic_report_text(
+        figures_dir / "mean_endpoint_matrix.svg",
+        _endpoint_matrix_svg(_read_csv(analysis_dir / "endpoints_across_seeds.csv")),
+    )
+
+    prior_report = repository / "REPORT.md"
+    prior_target = output_dir / "prior_repository_REPORT.md"
+    if (
+        prior_report.is_file()
+        and prior_report.read_bytes() != (output_dir / "REPORT.md").read_bytes()
+    ):
+        if prior_target.exists() and prior_target.read_bytes() != prior_report.read_bytes():
+            raise FileExistsError(f"Refusing to replace a different prior report: {prior_target}")
+        if not prior_target.exists():
+            shutil.copyfile(prior_report, prior_target)
+
+    provenance = {
+        "schema_version": 1,
+        "kind": "physics_background_pairing_confirmation_report_bundle",
+        "report_mode": report_mode,
+        "analysis_stage": analysis_stage,
+        "scientifically_final": summary["scientifically_final"],
+        "analysis_content_sha256": summary["analysis_content_sha256"],
+        "random_cap_analysis_receipts": summary["random_cap_analysis_receipts"],
+        "paper_reference_sha256": summary["paper_reference_sha256"],
+        "completion": summary["completion"],
+        "evidence": {
+            str((Path("evidence") / name).as_posix()): _sha256(evidence_dir / name)
+            for name in sorted(evidence_sources)
+        },
+    }
+    provenance["content_sha256"] = _content_hash(provenance)
+    _atomic_report_text(
+        output_dir / "provenance.json",
+        json.dumps(provenance, indent=2, sort_keys=True) + "\n",
+    )
+    manifest_rows = []
+    for path in sorted(item for item in output_dir.rglob("*") if item.is_file()):
+        if path.name == "manifest.sha256":
+            continue
+        manifest_rows.append(f"{_sha256(path)}  {path.relative_to(output_dir).as_posix()}")
+    _atomic_report_text(output_dir / "manifest.sha256", "\n".join(manifest_rows) + "\n")
+    verify_confirmation_report_bundle(output_dir)
     return summary
 
 
-__all__ = ["build_confirmation_report", "write_confirmation_report"]
+def _atomic_report_text(path: Path, content: str) -> None:
+    """Write one report-package text file idempotently."""
+    descriptor, temporary_name = tempfile.mkstemp(prefix=f".{path.name}.", dir=path.parent)
+    try:
+        with os.fdopen(descriptor, "w", encoding="utf-8") as handle:
+            handle.write(content)
+            handle.flush()
+            os.fsync(handle.fileno())
+        temporary = Path(temporary_name)
+        if path.exists():
+            if path.read_bytes() != temporary.read_bytes():
+                raise FileExistsError(f"Refusing to replace different report artifact: {path}")
+        else:
+            os.replace(temporary, path)
+    finally:
+        Path(temporary_name).unlink(missing_ok=True)
+
+
+def _endpoint_matrix_svg(rows: list[dict[str, str]]) -> str:
+    """Render one dependency-free compact mean endpoint matrix."""
+    values = {
+        (row["model"], row["selector"], row["pairing"], row["endpoint"]): _number(row, "mean")
+        for row in rows
+    }
+    width, height = 1120, 330
+    left, top, cell_width, cell_height = 100, 55, 142, 42
+    parts = [
+        f'<svg xmlns="http://www.w3.org/2000/svg" width="{width}" height="{height}" viewBox="0 0 {width} {height}">',
+        '<rect width="100%" height="100%" fill="white"/>',
+        "<style>text{font-family:Arial,sans-serif;fill:#172033}.h{font-size:12px;font-weight:700}.c{font-size:11px}.m{font-size:12px;font-weight:700}</style>",
+        '<text x="15" y="22" class="h">Mean efficiency at 250 Hz / AUPRC</text>',
+    ]
+    for column, (_, _, label) in enumerate(SELECTORS):
+        parts.append(
+            f'<text x="{left + column * cell_width + cell_width / 2:.0f}" y="44" text-anchor="middle" class="h">{label}</text>'
+        )
+    for row_index, model in enumerate(MODELS):
+        y = top + row_index * cell_height
+        parts.append(
+            f'<text x="88" y="{y + 25}" text-anchor="end" class="m">{model.upper()}</text>'
+        )
+        for column, (selector, pairing, _) in enumerate(SELECTORS):
+            efficiency = values[(model, selector, pairing, "efficiency_250hz")]
+            auprc = values[(model, selector, pairing, "auprc")]
+            intensity = max(0, min(255, round(245 - efficiency * 1200)))
+            fill = f"rgb({intensity},{min(250, intensity + 18)},250)"
+            x = left + column * cell_width
+            parts.extend(
+                [
+                    f'<rect x="{x}" y="{y}" width="{cell_width - 4}" height="{cell_height - 4}" rx="3" fill="{fill}" stroke="#c8d0dc"/>',
+                    f'<text x="{x + (cell_width - 4) / 2:.0f}" y="{y + 24}" text-anchor="middle" class="c">{100 * efficiency:.2f}% / {auprc:.3f}</text>',
+                ]
+            )
+    parts.append("</svg>")
+    return "\n".join(parts) + "\n"
+
+
+def verify_confirmation_report_bundle(bundle: Path) -> dict[str, Any]:
+    """Verify every declared compact-package hash and its final/provisional identity."""
+    bundle = bundle.resolve(strict=True)
+    manifest = bundle / "manifest.sha256"
+    declared: set[str] = set()
+    for line in manifest.read_text(encoding="utf-8").splitlines():
+        digest, relative = line.split("  ", maxsplit=1)
+        path = (bundle / relative).resolve(strict=True)
+        if not path.is_relative_to(bundle) or relative in declared or _sha256(path) != digest:
+            raise ValueError(f"Report bundle manifest differs for {relative}.")
+        declared.add(relative)
+    actual = {
+        path.relative_to(bundle).as_posix()
+        for path in bundle.rglob("*")
+        if path.is_file() and path.name != "manifest.sha256"
+    }
+    if declared != actual:
+        raise ValueError("Report bundle manifest coverage differs.")
+    provenance = json.loads((bundle / "provenance.json").read_text(encoding="utf-8"))
+    digest = provenance.pop("content_sha256", None)
+    if digest != _content_hash(provenance):
+        raise ValueError("Report bundle provenance content hash differs.")
+    provenance["content_sha256"] = digest
+    return provenance
+
+
+def promote_confirmation_report(
+    bundle: Path, repository: Path, results_dir: Path
+) -> dict[str, str]:
+    """Atomically install one verified final report and ignored download mirror."""
+    provenance = verify_confirmation_report_bundle(bundle)
+    if provenance.get("scientifically_final") is not True:
+        raise RuntimeError("Only a scientifically final report bundle may be promoted.")
+    repository = repository.resolve(strict=True)
+    root_report = repository / "REPORT.md"
+    source_report = bundle.resolve(strict=True) / "REPORT.md"
+    descriptor, temporary_name = tempfile.mkstemp(prefix=".REPORT.md.", dir=repository)
+    try:
+        os.close(descriptor)
+        temporary = Path(temporary_name)
+        shutil.copyfile(source_report, temporary)
+        os.replace(temporary, root_report)
+    finally:
+        Path(temporary_name).unlink(missing_ok=True)
+    results_dir = results_dir.expanduser().resolve()
+    if results_dir.exists():
+        if not results_dir.is_dir():
+            raise FileExistsError(f"Report mirror is not a directory: {results_dir}")
+        existing_manifest = results_dir / "manifest.sha256"
+        if (
+            not existing_manifest.exists()
+            or existing_manifest.read_bytes() != (bundle / "manifest.sha256").read_bytes()
+        ):
+            raise FileExistsError(f"Refusing to replace a different report mirror: {results_dir}")
+    else:
+        results_dir.parent.mkdir(parents=True, exist_ok=True)
+        temporary_dir = Path(
+            tempfile.mkdtemp(prefix=f".{results_dir.name}.", dir=results_dir.parent)
+        )
+        try:
+            shutil.copytree(bundle, temporary_dir, dirs_exist_ok=True)
+            os.replace(temporary_dir, results_dir)
+        finally:
+            shutil.rmtree(temporary_dir, ignore_errors=True)
+    verify_confirmation_report_bundle(results_dir)
+    return {
+        "repository_report": str(root_report),
+        "results_mirror": str(results_dir),
+        "manifest_sha256": _sha256(results_dir / "manifest.sha256"),
+    }
+
+
+__all__ = [
+    "build_confirmation_report",
+    "promote_confirmation_report",
+    "verify_confirmation_report_bundle",
+    "write_confirmation_report",
+]

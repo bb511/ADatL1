@@ -159,6 +159,24 @@ def build_confirmation_manifest(
         path = Path(row["checkpoint_path"]).resolve(strict=True)
         if not path.is_relative_to(root.resolve()) or _sha256(path) != row["checkpoint_sha256"]:
             raise RuntimeError(f"Sealed confirmation checkpoint changed: {path}")
+        try:
+            objective_values = json.loads(row["selection_metric"])
+        except (KeyError, TypeError, json.JSONDecodeError) as error:
+            raise RuntimeError(f"Invalid sealed selection metric for {key}.") from error
+        if (
+            not isinstance(objective_values, list)
+            or len(objective_values) != 2
+            or any(
+                isinstance(value, bool)
+                or not isinstance(value, (int, float))
+                or not math.isfinite(float(value))
+                for value in objective_values
+            )
+        ):
+            raise RuntimeError(
+                f"Sealed selection metric for {key} must contain two finite objectives."
+            )
+        row["_objective_values"] = [float(value) for value in objective_values]
         row_index[key] = row
 
     discovery_source = _load_prepared(Path(matrix["discovery_root"]))
@@ -204,6 +222,18 @@ def build_confirmation_manifest(
                     **membership,
                     "checkpoint_id": checkpoint["checkpoint_id"],
                     "checkpoint_name": selection["checkpoint_family_id"],
+                    # The first component is the cell's named validation selector and
+                    # the second is the native anomaly-score stability objective.
+                    # Persist both aliases because discovery manifests historically
+                    # used ``optimized_metric`` while confirmation endpoint evidence
+                    # calls the same vector ``selection_metric``.
+                    "selection_metric_name": cell["selector"],
+                    "selection_metric_direction": (
+                        "maximize" if cell["selector"] == "cap" else "minimize"
+                    ),
+                    "selection_metric_objective_index": 0,
+                    "optimized_metric": selection["_objective_values"],
+                    "objective_values": selection["_objective_values"],
                 }
             )
             seen_memberships.add(key)

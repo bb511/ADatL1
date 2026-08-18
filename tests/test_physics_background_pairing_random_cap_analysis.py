@@ -157,6 +157,43 @@ def test_analysis_recomputes_variability_and_unpooled_rank_association() -> None
     )
 
 
+def test_confirmation_analysis_requires_and_uses_structured_metric_identity() -> None:
+    """Confirmation mode emits the same authenticated unpooled rank evidence."""
+    manifest, aggregate = _inputs()
+    manifest["mode"] = "confirmation"
+    for task in manifest["tasks"]:
+        membership = task["memberships"][0]
+        membership.update(
+            {
+                "selection_metric_name": "cap",
+                "selection_metric_direction": "maximize",
+                "selection_metric_objective_index": 0,
+                "objective_values": membership["optimized_metric"],
+            }
+        )
+    manifest["content_sha256"] = _content_hash(
+        {key: value for key, value in manifest.items() if key != "content_sha256"}
+    )
+    for row in aggregate["seed_split_values"]:
+        row["mode"] = "confirmation"
+    for row in aggregate["summary"]:
+        row["mode"] = "confirmation"
+    aggregate["manifest_content_sha256"] = manifest["content_sha256"]
+    aggregate["seed_split_values_sha256"] = _content_hash(aggregate["seed_split_values"])
+    aggregate["summary_sha256"] = _content_hash(aggregate["summary"])
+    result = build_random_cap_analysis(manifest, aggregate)
+    assert result["method"]["rank_panels"] == 2
+    assert result["method"]["rank_association_rows"] == 12
+
+    manifest["tasks"][0]["memberships"][0]["selection_metric_name"] = "wasserstein"
+    manifest["content_sha256"] = _content_hash(
+        {key: value for key, value in manifest.items() if key != "content_sha256"}
+    )
+    aggregate["manifest_content_sha256"] = manifest["content_sha256"]
+    with pytest.raises(ValueError, match="objective identity differs"):
+        build_random_cap_analysis(manifest, aggregate)
+
+
 @pytest.mark.parametrize("target", ["seed_hash", "summary_value", "pair_seed"])
 def test_analysis_rejects_tampered_aggregate(target: str) -> None:
     """Child hashes, summaries, and random-table identities are fail-closed."""

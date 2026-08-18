@@ -31,6 +31,9 @@ REPOSITORY_ROOT = Path(__file__).resolve().parents[1]
 if str(REPOSITORY_ROOT) not in sys.path:
     sys.path.insert(0, str(REPOSITORY_ROOT))
 
+from src.utils.pairing.physics_tables import load_split
+from src.utils.pairing.table import load_pair_table, sha256_tensor
+
 MODELS = ("ae", "vae", "dsae", "dsvae", "svdd", "realnvp")
 TARGET_TRIALS = 600
 NSGA_GENERATION_KEY = "nsga2:generation"
@@ -279,6 +282,183 @@ def _authenticate_execution_repository(repository: Path, design: dict[str, Any])
         raise RuntimeError("Execution repository does not match the frozen campaign commit.")
     if _git(repository, "status", "--porcelain", "--untracked-files=all"):
         raise RuntimeError("Execution repository is dirty.")
+
+
+def _cache_root_for_submission(data_dir: Path, frozen_cache_root: Path) -> Path:
+    """Resolve the configured robust cache below one supplied base data directory."""
+    resolved = data_dir.expanduser().resolve(strict=True)
+    frozen_parts = frozen_cache_root.parts
+    try:
+        marker_index = frozen_parts.index("data_2025E+G")
+    except ValueError as error:
+        raise RuntimeError(
+            f"Frozen preflight cache has no data_2025E+G anchor: {frozen_cache_root}."
+        ) from error
+    suffix = Path(*frozen_parts[marker_index:])
+    candidates = [resolved / suffix]
+    if resolved.name == "data_2025E+G":
+        candidates.append(resolved / Path(*frozen_parts[marker_index + 1 :]))
+    candidates.append(resolved)
+    matches = []
+    for candidate in dict.fromkeys(path.resolve() for path in candidates):
+        if all((candidate / split / "torch_cache.pt").is_file() for split in ("valid", "test")):
+            matches.append(candidate)
+    if len(matches) != 1:
+        raise RuntimeError(
+            "DATA_DIR must resolve unambiguously to the frozen robust cache suffix; "
+            f"found {len(matches)} candidates below {resolved}: {matches}."
+        )
+    return matches[0]
+
+
+def _expected_source_hashes(preflight: dict[str, Any]) -> dict[str, tuple[str, str]]:
+    """Recover the one frozen ordered source-prefix identity for each split."""
+    expected: dict[str, tuple[str, str]] = {}
+    for row in preflight.get("tables", []):
+        stage = str(row.get("stage"))
+        identity = (str(row.get("source_1_sha256")), str(row.get("source_2_sha256")))
+        if stage in expected and expected[stage] != identity:
+            raise RuntimeError(f"Frozen preflight has inconsistent {stage} source identities.")
+        expected[stage] = identity
+    if set(expected) != {"validate", "test"}:
+        raise RuntimeError("Frozen preflight must bind validation and test source identities.")
+    return expected
+
+
+def _authenticate_confirmation_submission_data(
+    root: Path,
+    design: dict[str, Any],
+    data_dir: Path,
+    raw_data_dir: Path,
+    pairing_dir: Path,
+) -> dict[str, Any] | None:
+    """Authenticate and persist the data identity before a confirmation sbatch.
+
+    Paths may move, but the ordered source prefixes and pair-table bytes may not.  The raw-data
+    root is not read by an already materialized retrain and therefore remains path-bound.
+    """
+    import torch
+
+    if design.get("campaign_kind") != "physics_background_native_confirmation":
+        return None
+    preflight_value = design.get("preflight")
+    expected_preflight_sha256 = str(design.get("preflight_sha256", ""))
+    if (
+        not isinstance(preflight_value, str)
+        or not preflight_value
+        or len(expected_preflight_sha256) != 64
+    ):
+        raise RuntimeError("Frozen confirmation design has no authenticated preflight identity.")
+    preflight_path = Path(preflight_value).expanduser().resolve(strict=True)
+    if _sha256(preflight_path) != expected_preflight_sha256:
+        raise RuntimeError("Frozen confirmation preflight changed before submission.")
+    preflight = json.loads(preflight_path.read_text(encoding="utf-8"))
+    if preflight.get("schema_version") != 1:
+        raise RuntimeError("Expected a schema-1 physics pairing preflight.")
+
+    resolved_pairing = pairing_dir.expanduser().resolve(strict=True)
+    resolved_raw = raw_data_dir.expanduser().resolve(strict=True)
+    cache_root = _cache_root_for_submission(
+        data_dir, Path(str(preflight["cache_root"])).expanduser()
+    )
+    source_root = resolved_pairing / "sources"
+    source_files = [
+        source_root / "zerobias_sources.json",
+        source_root / "valid/zerobias_source_id.npy",
+        source_root / "test/zerobias_source_id.npy",
+    ]
+    for path in source_files:
+        if not path.is_file():
+            raise FileNotFoundError(path)
+
+    events = int(preflight["events_per_source"])
+    datasets = (str(preflight["dataset_1"]), str(preflight["dataset_2"]))
+    expected_sources = _expected_source_hashes(preflight)
+    observed_sources: dict[str, dict[str, str]] = {}
+    for stage in ("validate", "test"):
+        digests = []
+        for dataset in datasets:
+            inputs, _, _ = load_split(
+                cache_root,
+                stage,
+                dataset=dataset,
+                limit=events,
+                source_metadata_dir=source_root,
+            )
+            digests.append(sha256_tensor(torch.flatten(inputs, start_dim=1).contiguous()))
+        if tuple(digests) != expected_sources[stage]:
+            raise RuntimeError(
+                f"DATA_DIR ordered {stage} background prefixes do not match the frozen "
+                f"preflight: expected {expected_sources[stage]}, observed {tuple(digests)}."
+            )
+        observed_sources[stage] = {
+            "source_1_sha256": digests[0],
+            "source_2_sha256": digests[1],
+        }
+
+    table_identities = []
+    for frozen_row in preflight["tables"]:
+        table_path = resolved_pairing / Path(str(frozen_row["path"])).name
+        if _sha256(table_path) != frozen_row["sha256"]:
+            raise RuntimeError(f"Pair table differs from the frozen preflight: {table_path}.")
+        stage = str(frozen_row["stage"])
+        load_pair_table(
+            table_path,
+            expected_dataset_1=datasets[0],
+            expected_dataset_2=datasets[1],
+            expected_split=stage,
+            n_dataset_1=events,
+            n_dataset_2=events,
+            source_1_sha256=observed_sources[stage]["source_1_sha256"],
+            source_2_sha256=observed_sources[stage]["source_2_sha256"],
+        )
+        table_identities.append({"name": table_path.name, "sha256": str(frozen_row["sha256"])})
+
+    content_identity = {
+        "preflight_sha256": expected_preflight_sha256,
+        "events_per_source": events,
+        "datasets": list(datasets),
+        "ordered_source_prefixes": observed_sources,
+        "source_sidecars": {
+            str(path.relative_to(source_root)): _sha256(path) for path in source_files
+        },
+        "pair_tables": sorted(table_identities, key=lambda row: row["name"]),
+    }
+    content_sha256 = _json_sha256(content_identity)
+    binding_path = root / "state/submission_data_identity.json"
+    supplied_paths = {
+        "data_dir": str(data_dir.expanduser().resolve()),
+        "cache_root": str(cache_root),
+        "raw_data_dir": str(resolved_raw),
+        "pairing_dir": str(resolved_pairing),
+    }
+    if binding_path.is_file():
+        binding = json.loads(binding_path.read_text(encoding="utf-8"))
+        if (
+            binding.get("schema_version") != 1
+            or binding.get("campaign_design_sha256") != str(design.get("content_sha256", ""))
+            or binding.get("content_identity_sha256") != content_sha256
+            or binding.get("content_identity") != content_identity
+        ):
+            raise RuntimeError("Confirmation submission data content differs from its binding.")
+        if binding.get("raw_data_dir") != str(resolved_raw):
+            raise RuntimeError("RAW_DATA_DIR differs from the path frozen at first submission.")
+        accepted_paths = list(binding.get("accepted_paths", []))
+        if supplied_paths not in accepted_paths:
+            accepted_paths.append(supplied_paths)
+        binding["accepted_paths"] = accepted_paths
+    else:
+        binding = {
+            "schema_version": 1,
+            "campaign_design_sha256": str(design.get("content_sha256", "")),
+            "content_identity": content_identity,
+            "content_identity_sha256": content_sha256,
+            "raw_data_dir": str(resolved_raw),
+            "accepted_paths": [supplied_paths],
+        }
+    binding["last_authenticated_at"] = datetime.now(timezone.utc).isoformat()
+    _atomic_json(binding_path, binding)
+    return binding
 
 
 def _path_within(path: Path, parent: Path) -> bool:
@@ -1434,6 +1614,7 @@ def _submit_retrains_locked(
     for path in (data_dir, raw_data_dir, pairing_dir):
         if not path.is_dir():
             raise FileNotFoundError(path)
+    _authenticate_confirmation_submission_data(root, design, data_dir, raw_data_dir, pairing_dir)
     manifest_path = _retrain_manifest_path(root)
     manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
     rows_by_index = {int(row["retrain_index"]): row for row in manifest["retrain_runs"]}

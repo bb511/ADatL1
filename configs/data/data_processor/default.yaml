@@ -11,11 +11,11 @@ extracted_folder: ${data.data_extractor.cache_root_dir}/extracted/${data.data_ex
 event_filters:
   ET: 'Et < 4095'
 
-# Mask objects with energies above certain saturation thresholds.
+# Remove objects with energies above certain saturation thresholds.
 object_filters:
   muons: 'Et < 511'
   egammas: 'Et < 511'
-  jets: 'Et < 511'
+  jets: 'Et < 2047'
   MET: 'Et < 4095'
 
 cache_root_dir: ${paths.data_dir}

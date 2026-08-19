@@ -65,9 +65,11 @@ class L1DataAwkward2Torch:
             self._cache_l1bit(l1bit)
             return data, mask, l1bit
 
-        l1bit = ak.from_parquet(l1bit_path)
-        l1bit = ak.to_numpy(ak.flatten(l1bit["L1bit"]))
-        l1bit = torch.from_numpy(l1bit)
+        l1bit = ak.from_parquet(l1bit_path)["L1bit"]
+        # The 2024 seeds store one bool per event, the 2025 ones a list per event.
+        if l1bit.ndim > 1:
+            l1bit = ak.flatten(l1bit)
+        l1bit = torch.from_numpy(ak.to_numpy(l1bit))
         self._cache_l1bit(l1bit)
 
         return data, mask, l1bit

@@ -19,8 +19,9 @@ repo_id: podagiu/anomaly_detection_cmsl1t
 # The record ships the pipeline as well as the data, so a run reads and executes whatever
 # is at this commit. null would follow the head of the record instead, leaving what a run
 # trained on decided by when it was launched. A bump can change the tensors: f00e4b8c
-# ordered each collection by ET, which the on-disk pipeline had to be taught to match.
-revision: 6ccbdc3cbe193a8899c6d220db2dd1c79237418e
+# ordered each collection by ET, which the on-disk pipeline had to be taught to match,
+# and 85c2f1a9 widened the jet saturation cut from the 9-bit 511 to the 11-bit 2047.
+revision: 85c2f1a986d072562c32d2fd935db6520b5a7ec8
 
 # Mapped onto the record's paths.base_data_dir. Its extracted, processed and ml-ready
 # caches land under <cache_dir>/data_2025E+G/, beside the ones the raw route builds.

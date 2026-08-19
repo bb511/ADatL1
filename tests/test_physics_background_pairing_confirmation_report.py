@@ -143,8 +143,14 @@ def _analysis(tmp_path: Path) -> Path:
                 )
     reserve = [{"model": model, "decision": "no_extension"} for model in MODELS]
     tables = {
+        "endpoints_long.csv": [{"synthetic": "endpoint"}],
+        "endpoints_summary.csv": [{"synthetic": "summary"}],
         "endpoints_across_seeds.csv": across,
+        "selector_comparison_paired.csv": [{"synthetic": "selector"}],
+        "pairing_vs_cdf_paired.csv": [{"synthetic": "pairing"}],
         "comparison_summary.csv": comparisons,
+        "oas_endpoints_long.csv": [{"synthetic": "oas_endpoint"}],
+        "oas_vs_native_paired.csv": [{"synthetic": "oas_pair"}],
         "oas_vs_native_summary.csv": oas,
         "reserve_seed_decisions.csv": reserve,
     }
@@ -683,6 +689,12 @@ def test_report_bundle_manifest_and_explicit_promotion(
     assert (bundle / "prior_repository_REPORT.md").exists()
     assert (bundle / "evidence/discovery_random_cap_downstream_rank_associations.csv").exists()
     assert (bundle / "evidence/confirmation_random_cap_downstream_rank_associations.csv").exists()
+    assert (bundle / "evidence/confirmation_endpoints_long.csv").exists()
+    assert (bundle / "evidence/confirmation_selector_comparison_paired.csv").exists()
+    assert (bundle / "evidence/discovery_random_random_cap_values.csv").exists()
+    assert (bundle / "evidence/confirmation_random_random_cap_values.csv").exists()
+    assert (bundle / "evidence/context_training_curves.csv").exists()
+    assert (bundle / "evidence/paper_comparison.csv").exists()
 
     install_repository = tmp_path / "install_repository"
     install_repository.mkdir()

@@ -1092,6 +1092,7 @@ def build_confirmation_report(
         "analysis_content_sha256": manifest["content_sha256"],
         "completion": completion,
         "paper_reference_sha256": paper_reference_hash,
+        "paper_comparison": paper_rows,
         "paper_matched_positive": paper_better,
         "paper_matched_total": len(comparable_paper),
         "cdf_cap_efficiency_directional_positive": cap_eff[0],
@@ -1167,8 +1168,14 @@ def write_confirmation_report(
             Path(temporary_name).unlink(missing_ok=True)
     evidence_sources: dict[str, Path] = {}
     for name in (
+        "endpoints_long.csv",
+        "endpoints_summary.csv",
         "endpoints_across_seeds.csv",
+        "selector_comparison_paired.csv",
+        "pairing_vs_cdf_paired.csv",
         "comparison_summary.csv",
+        "oas_endpoints_long.csv",
+        "oas_vs_native_paired.csv",
         "oas_vs_native_summary.csv",
         "reserve_seed_decisions.csv",
         "confirmation_endpoint_analysis.json",
@@ -1182,6 +1189,7 @@ def write_confirmation_report(
             continue
         for name in (
             "random_cap_analysis.json",
+            "random_cap_values.csv",
             "random_cap_variability.csv",
             "structured_random_rank_associations.csv",
             "cap_downstream_rank_associations.csv",
@@ -1192,6 +1200,7 @@ def write_confirmation_report(
             "confirmation_context.json",
             "persistence.csv",
             "hypotheses.csv",
+            "training_curves.csv",
             "training_curve_summary.csv",
         ):
             evidence_sources[f"context_{name}"] = confirmation_context / name
@@ -1212,6 +1221,29 @@ def write_confirmation_report(
                 os.replace(temporary, target)
             finally:
                 temporary.unlink(missing_ok=True)
+
+    paper_comparison_path = evidence_dir / "paper_comparison.csv"
+    descriptor, temporary_name = tempfile.mkstemp(
+        prefix=f".{paper_comparison_path.name}.", dir=evidence_dir
+    )
+    try:
+        with os.fdopen(descriptor, "w", newline="", encoding="utf-8") as handle:
+            paper_rows = summary["paper_comparison"]
+            writer = csv.DictWriter(handle, fieldnames=list(paper_rows[0]))
+            writer.writeheader()
+            writer.writerows(paper_rows)
+            handle.flush()
+            os.fsync(handle.fileno())
+        temporary = Path(temporary_name)
+        if paper_comparison_path.exists():
+            if paper_comparison_path.read_bytes() != temporary.read_bytes():
+                raise FileExistsError(
+                    f"Refusing to replace different report evidence: {paper_comparison_path}"
+                )
+        else:
+            os.replace(temporary, paper_comparison_path)
+    finally:
+        Path(temporary_name).unlink(missing_ok=True)
 
     figures_dir = output_dir / "figures"
     figures_dir.mkdir(parents=True, exist_ok=True)
@@ -1246,6 +1278,7 @@ def write_confirmation_report(
             for name in sorted(evidence_sources)
         },
     }
+    provenance["evidence"]["evidence/paper_comparison.csv"] = _sha256(paper_comparison_path)
     provenance["content_sha256"] = _content_hash(provenance)
     _atomic_report_text(
         output_dir / "provenance.json",

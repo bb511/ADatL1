@@ -969,6 +969,7 @@ uv run python scripts/physics_background_pairing_confirmation_report.py \
     <DISCOVERY_ROOT>/results/random_cap_analysis/discovery_immutable_presort_20260818_downstream_v1 \
   --confirmation-random-analysis \
     <CONFIRM_ROOT>/results/random_cap_analysis/confirmation_<EXECUTION_COMMIT>_downstream_v1 \
+  --confirmation-context <CONFIRM_ROOT>/results/context_final \
   --analysis-stage final --report-mode final
 ```
 

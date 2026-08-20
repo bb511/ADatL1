@@ -1106,10 +1106,9 @@ CAP, separately for efficiency and AUPRC and per algorithm. It must:
 - stop only after the final bundle manifest verifies and repository-root `REPORT.md`
   answers the two research questions without unsupported claims.
 
-The current absence of live production jobs is intentional recovery gating, not
-campaign completion. Once the recovery audit/reset passes, production submission is
-the next action; the campaign then proceeds autonomously through the terminal
-checklist in Section 13.
+The recovery gates have passed and the fixed production confirmation trajectories are
+actively running. Reconcile every completed segment and immediately submit its next
+segment while any of the 84 required trajectories remains incomplete.
 
 ## 17. Live execution update (2026-08-20 Europe/Zurich)
 
@@ -1121,18 +1120,18 @@ The immutable training campaign remains bound to `ddfcfbb` and continues from:
 ```
 
 Post-training extraction, random-CAP evaluation, analysis, context, and reporting are
-now pinned to clean detached commit/worktree `0c276aa`:
+now pinned to clean detached commit/worktree `ba4a889`:
 
 ```text
-/iopsstor/scratch/cscs/vjimenez/adatl1/worktrees/physics_background_analysis_0c276aa
+/iopsstor/scratch/cscs/vjimenez/adatl1/worktrees/physics_background_analysis_ba4a889
 ```
 
-That commit fixes the confirmation-analysis/random-analysis receipt handoff, makes
-analysis receipts immutable, evaluates structured native/OAS CAP and random
-native/OAS CAP on the same sealed checkpoints, preserves all non-CAP endpoint rows,
-and packages completion provenance. OAS and random CAP remain diagnostics on
-native-selected checkpoints; neither creates a selector, membership, training run,
-or checkpoint choice.
+That commit includes the confirmation-analysis/random-analysis receipt handoff,
+immutable analysis receipts, same-checkpoint structured/random native/OAS CAP,
+non-CAP endpoint preservation, portable completion evidence, and fail-closed
+generator provenance for every post-training phase. OAS and random CAP remain
+diagnostics on native-selected checkpoints; neither creates a selector, membership,
+training run, or checkpoint choice.
 
 Always pass the immutable-presort random-table manifest explicitly for confirmation:
 

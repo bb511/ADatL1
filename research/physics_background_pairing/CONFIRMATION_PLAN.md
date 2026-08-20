@@ -1098,3 +1098,54 @@ The current absence of live production jobs is intentional recovery gating, not
 campaign completion. Once the recovery audit/reset passes, production submission is
 the next action; the campaign then proceeds autonomously through the terminal
 checklist in Section 13.
+
+## 17. Live execution update (2026-08-20 Europe/Zurich)
+
+The immutable training campaign remains bound to `ddfcfbb` and continues from:
+
+```text
+<CONFIRM_ROOT> = /iopsstor/scratch/cscs/vjimenez/adatl1/campaigns/physics_background_confirmation_ddfcfbb
+<TRAINING_WORKTREE> = /iopsstor/scratch/cscs/vjimenez/adatl1/worktrees/physics_background_confirmation_ddfcfbb
+```
+
+Post-training extraction, random-CAP evaluation, analysis, context, and reporting are
+now pinned to clean detached commit/worktree `0c276aa`:
+
+```text
+/iopsstor/scratch/cscs/vjimenez/adatl1/worktrees/physics_background_analysis_0c276aa
+```
+
+That commit fixes the confirmation-analysis/random-analysis receipt handoff, makes
+analysis receipts immutable, evaluates structured native/OAS CAP and random
+native/OAS CAP on the same sealed checkpoints, preserves all non-CAP endpoint rows,
+and packages completion provenance. OAS and random CAP remain diagnostics on
+native-selected checkpoints; neither creates a selector, membership, training run,
+or checkpoint choice.
+
+Always pass the immutable-presort random-table manifest explicitly for confirmation:
+
+```text
+<CONFIRM_ROOT>/random_pairing_immutable_presort_20260818/manifest.json
+```
+
+The earlier unversioned `random_pairing/manifest.json` has a different source-tensor
+identity and is not valid evidence. The regenerated authenticated discovery
+random-control package for the final report is:
+
+```text
+<DISCOVERY_ROOT>/results/random_cap_analysis/
+  discovery_immutable_presort_20260818_downstream_v2_0c276aa/
+```
+
+Its content identity is
+`7219f41327051b2601455a648d493764fac0957d3ceab4b450afda083e31c6a5`.
+It contains 8,590 random seed rows, 966 portable structured-CAP values, 480
+structured/random rank-association rows, and 1,120 downstream association rows. Use
+this `v2` package, not the earlier `_downstream_v1_cbf670b` package, in the final
+report command.
+
+During the live segmented training wave, every newly sealed boundary is reconciled
+and its next segment is submitted immediately. All successor submissions must retain
+`TORCH_FORCE_NO_WEIGHTS_ONLY_LOAD=1` because the frozen `ddfcfbb` worktree predates
+the explicit Lightning full-checkpoint loader argument. This trusted local full-state
+resume setting does not change scientific state.

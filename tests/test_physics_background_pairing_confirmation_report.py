@@ -27,7 +27,6 @@ from src.evaluation.physics_background_pairing_confirmation_report import (
 
 TEST_RUNNER_CONTENT_SHA256 = "b" * 64
 TEST_RESERVE_CONTENT_SHA256 = "c" * 64
-TEST_CHECKPOINT_SELECTIONS_SHA256 = "d" * 64
 
 
 def _write(path: Path, rows: list[dict]) -> None:
@@ -189,9 +188,7 @@ def _analysis(tmp_path: Path) -> Path:
         "matrix_content_sha256": matrix["content_sha256"],
         "effective_runner_content_sha256": TEST_RUNNER_CONTENT_SHA256,
         "reserve_extension_content_sha256": TEST_RESERVE_CONTENT_SHA256,
-        "artifacts": {
-            "checkpoint_selections.csv": TEST_CHECKPOINT_SELECTIONS_SHA256,
-        },
+        "artifacts": {},
         "cardinality": {
             "sealed_runs": 1,
             "checkpoint_selections": 42,
@@ -201,6 +198,11 @@ def _analysis(tmp_path: Path) -> Path:
         "source_markers": source_markers,
         "source_markers_content_sha256": _content_hash(source_markers),
     }
+    checkpoint_selections = tmp_path / "checkpoint_selections.csv"
+    _write(checkpoint_selections, [{"checkpoint": "synthetic"}])
+    endpoint_receipt["artifacts"]["checkpoint_selections.csv"] = hashlib.sha256(
+        checkpoint_selections.read_bytes()
+    ).hexdigest()
     endpoint_receipt_path = tmp_path / "endpoint_extraction.json"
     endpoint_receipt_path.write_text(json.dumps(endpoint_receipt), encoding="utf-8")
     manifest = {

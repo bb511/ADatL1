@@ -1191,6 +1191,7 @@ def write_confirmation_report(
         confirmation_context=confirmation_context,
         report_mode=report_mode,
     )
+    analysis_manifest, _ = _load_analysis(analysis_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
     artifacts = {
         "REPORT.md": report + "\n",
@@ -1227,6 +1228,30 @@ def write_confirmation_report(
         "confirmation_endpoint_analysis.json",
     ):
         evidence_sources[f"confirmation_{name}"] = analysis_dir / name
+    analysis_inputs = analysis_manifest.get("inputs", {})
+    evidence_sources["confirmation_matrix.json"] = Path(analysis_inputs["matrix"])
+    endpoint_receipt_path = Path(analysis_inputs["endpoint_receipt"])
+    evidence_sources["confirmation_endpoint_extraction.json"] = endpoint_receipt_path
+    endpoint_receipt = json.loads(endpoint_receipt_path.read_text(encoding="utf-8"))
+    checkpoint_selections = endpoint_receipt_path.parent / "checkpoint_selections.csv"
+    if not checkpoint_selections.is_file() or _sha256(
+        checkpoint_selections
+    ) != endpoint_receipt.get("artifacts", {}).get("checkpoint_selections.csv"):
+        raise ValueError("Confirmation checkpoint-selection evidence differs.")
+    evidence_sources["confirmation_checkpoint_selections.csv"] = checkpoint_selections
+    campaign_root_value = endpoint_receipt.get("campaign_root")
+    if campaign_root_value:
+        campaign_root = Path(campaign_root_value).resolve(strict=True)
+        campaign_evidence = {
+            "confirmation_design.json": campaign_root / "design.json",
+            "confirmation_runner_manifest.json": campaign_root
+            / "selection/pareto_retrain_manifest.json",
+            "confirmation_job_history.csv": campaign_root / "state/job_history.csv",
+        }
+        failures = campaign_root / "state/failures.jsonl"
+        if failures.is_file():
+            campaign_evidence["confirmation_failures.jsonl"] = failures
+        evidence_sources.update(campaign_evidence)
     for prefix, source in (
         ("discovery_random", discovery_random_analysis),
         ("confirmation_random", confirmation_random_analysis),

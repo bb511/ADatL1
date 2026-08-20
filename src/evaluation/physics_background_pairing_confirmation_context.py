@@ -305,6 +305,8 @@ def write_confirmation_context(
     discovery_analysis_dir: Path,
     mlflow_root: Path,
     output_dir: Path,
+    *,
+    generator: dict[str, Any],
 ) -> dict[str, Any]:
     result = build_confirmation_context(
         confirmation_analysis_dir, discovery_analysis_dir, mlflow_root
@@ -316,6 +318,7 @@ def write_confirmation_context(
     receipt = {
         "schema_version": 1,
         "kind": "physics_background_pairing_confirmation_context",
+        "generator": generator,
         "inputs": result["inputs"],
         "cardinality": {name: len(result[name]) for name in names},
         "artifacts": {f"{name}.csv": _sha256(output_dir / f"{name}.csv") for name in names},

@@ -291,6 +291,7 @@ def test_confirmation_marker_authenticates_same_checkpoint_structured_cap(
     assert {row["selection_strategy"] for row in structured} == {"flat_physical"}
     assert len(task["memberships"]) == 1
     marker = {
+        "generator": {"commit": "a" * 40, "worktree_clean": True},
         "manifest_content_sha256": "manifest",
         "task_sha256": _canonical_hash(task),
         "task_dir": str(tmp_path),
@@ -301,9 +302,11 @@ def test_confirmation_marker_authenticates_same_checkpoint_structured_cap(
         "structured_cap_values_count": 4,
         "structured_cap_values_sha256": _canonical_hash(structured),
     }
+    marker["content_sha256"] = _canonical_hash(marker)
     manifest = {
         "mode": "confirmation",
         "content_sha256": "manifest",
+        "generator": {"commit": "a" * 40, "worktree_clean": True},
         "random_pairing": random_pairing,
     }
     assert _marker_valid(manifest, task, marker)
@@ -372,12 +375,14 @@ def test_confirmation_aggregate_emits_exact_structured_cap_contract(
     manifest = {
         "mode": "confirmation",
         "content_sha256": "manifest",
+        "generator": {"commit": "a" * 40, "worktree_clean": True},
         "random_pairing": random_pairing,
         "tasks": [task],
     }
     values, value_files = _value_rows(task_dir, task, random_pairing)
     structured, structured_files = _structured_value_rows(task_dir, task)
     marker = {
+        "generator": manifest["generator"],
         "manifest_content_sha256": "manifest",
         "task_sha256": _canonical_hash(task),
         "task_dir": str(task_dir),
@@ -393,6 +398,10 @@ def test_confirmation_aggregate_emits_exact_structured_cap_contract(
     monkeypatch.setattr(runner, "_load_manifest", lambda *_: manifest)
     runner.aggregate(SimpleNamespace(root=root, mode="confirmation", namespace=None))
     payload = json.loads((_workspace(root, "confirmation") / "aggregate.json").read_text())
+    assert payload["generator"] == manifest["generator"]
+    assert payload["content_sha256"] == _canonical_hash(
+        {key: value for key, value in payload.items() if key != "content_sha256"}
+    )
     rows = payload["structured_cap_values"]
     assert len(rows) == payload["structured_cap_values_count"] == 4
     assert payload["structured_cap_values_sha256"] == _canonical_hash(rows)

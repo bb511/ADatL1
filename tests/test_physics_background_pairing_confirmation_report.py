@@ -694,6 +694,18 @@ def test_report_bundle_manifest_and_explicit_promotion(
     )
     repository = Path(__file__).resolve().parents[1]
     bundle = tmp_path / "bundle"
+    generator = {
+        "schema_version": 1,
+        "repository": str(repository),
+        "commit": "1" * 40,
+        "tree": "2" * 40,
+        "worktree_clean": True,
+        "status_porcelain_sha256": hashlib.sha256(b"").hexdigest(),
+        "script": "scripts/physics_background_pairing_confirmation_report.py",
+        "script_sha256": "3" * 64,
+        "head_is_detached": True,
+        "head_ref": None,
+    }
     summary = write_confirmation_report(
         analysis,
         repository,
@@ -701,10 +713,13 @@ def test_report_bundle_manifest_and_explicit_promotion(
         discovery_random_analysis=discovery,
         confirmation_random_analysis=confirmation,
         confirmation_context=_context(tmp_path / "context", analysis),
+        generator=generator,
     )
     assert summary["scientifically_final"] is True
+    assert summary["generator"] == generator
     verified = verify_confirmation_report_bundle(bundle)
     assert verified["scientifically_final"] is True
+    assert verified["generator"] == generator
     assert (bundle / "prior_repository_REPORT.md").exists()
     assert (bundle / "evidence/discovery_random_cap_downstream_rank_associations.csv").exists()
     assert (bundle / "evidence/confirmation_random_cap_downstream_rank_associations.csv").exists()

@@ -12,6 +12,7 @@ from src.evaluation.physics_background_pairing_confirmation_analysis import (
     DEFAULT_BOOTSTRAP_SEED,
     write_confirmation_endpoint_analysis,
 )
+from src.utils.execution_provenance import authenticate_generator
 
 
 def main() -> None:
@@ -22,15 +23,18 @@ def main() -> None:
     parser.add_argument("--endpoint-receipt", type=Path, required=True)
     parser.add_argument("--oas-rows", type=Path, required=True)
     parser.add_argument("--output-dir", type=Path, required=True)
+    parser.add_argument("--execution-repository", type=Path, required=True)
     parser.add_argument("--bootstrap-replicates", type=int, default=DEFAULT_BOOTSTRAP_REPLICATES)
     parser.add_argument("--bootstrap-seed", type=int, default=DEFAULT_BOOTSTRAP_SEED)
     args = parser.parse_args()
+    generator = authenticate_generator(args.execution_repository, Path(__file__))
     result = write_confirmation_endpoint_analysis(
         args.matrix.resolve(strict=True),
         args.endpoint_rows.resolve(strict=True),
         args.endpoint_receipt.resolve(strict=True),
         args.oas_rows.resolve(strict=True),
         args.output_dir.resolve(),
+        generator=generator,
         bootstrap_replicates=args.bootstrap_replicates,
         bootstrap_seed=args.bootstrap_seed,
     )

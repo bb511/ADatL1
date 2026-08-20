@@ -10,6 +10,7 @@ from pathlib import Path
 from src.evaluation.physics_background_pairing_random_cap_analysis import (
     write_random_cap_analysis,
 )
+from src.utils.execution_provenance import authenticate_generator
 
 
 def main() -> None:
@@ -18,6 +19,7 @@ def main() -> None:
     parser.add_argument("--manifest", type=Path, required=True)
     parser.add_argument("--aggregate", type=Path, required=True)
     parser.add_argument("--output-dir", type=Path, required=True)
+    parser.add_argument("--execution-repository", type=Path, required=True)
     parser.add_argument(
         "--output-version",
         help="Optional single-component child directory for a new immutable analysis version.",
@@ -28,6 +30,7 @@ def main() -> None:
         help="Hash-authenticated endpoint_analysis.json used for downstream rank associations.",
     )
     args = parser.parse_args()
+    generator = authenticate_generator(args.execution_repository, Path(__file__))
     output_dir = args.output_dir.resolve()
     if args.output_version is not None:
         version = Path(args.output_version)
@@ -43,6 +46,7 @@ def main() -> None:
             if args.endpoint_analysis_receipt is not None
             else None
         ),
+        generator=generator,
     )
     print(json.dumps(result["method"], sort_keys=True))
 

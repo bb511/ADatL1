@@ -21,6 +21,7 @@ from scripts import physics_background_pairing_campaign as campaign
 from src.evaluation.physics_background_pairing_confirmation_matrix import (
     load_authenticated_confirmation_campaign,
 )
+from src.utils.execution_provenance import authenticate_generator
 
 ENDPOINT_FOLDERS = {
     "native": {"efficiency_250hz": "eff_native", "auprc": "auprc_native"},
@@ -81,7 +82,9 @@ def _values_for_checkpoint(
     return campaign._read_downstream_auprcs(marker, checkpoint, score)
 
 
-def extract_confirmation_endpoints(root: Path, output_dir: Path) -> dict[str, Any]:
+def extract_confirmation_endpoints(
+    root: Path, output_dir: Path, *, generator: dict[str, Any]
+) -> dict[str, Any]:
     """Authenticate all required primary/reserve markers and emit endpoint rows."""
     root = root.expanduser().resolve(strict=True)
     frozen = load_authenticated_confirmation_campaign(root)
@@ -213,6 +216,9 @@ def extract_confirmation_endpoints(root: Path, output_dir: Path) -> dict[str, An
     selections_path = _atomic_csv(output_dir / "checkpoint_selections.csv", selection_rows)
     receipt = {
         "schema_version": 1,
+        "generator": generator,
+        "training_commit": frozen["design"]["code_commit"],
+        # Retained for backward compatibility; this is the training identity.
         "execution_commit": frozen["design"]["code_commit"],
         "campaign_root": str(root),
         "matrix_content_sha256": matrix["content_sha256"],
@@ -240,6 +246,7 @@ def extract_confirmation_endpoints(root: Path, output_dir: Path) -> dict[str, An
         "source_markers": source_markers,
         "source_markers_content_sha256": _canonical_hash(source_markers),
     }
+    receipt["content_sha256"] = _canonical_hash(receipt)
     receipt_path = output_dir / "endpoint_extraction.json"
     encoded = json.dumps(receipt, indent=2, sort_keys=True, allow_nan=False) + "\n"
     if receipt_path.exists():
@@ -267,10 +274,12 @@ def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--root", type=Path, required=True)
     parser.add_argument("--output-dir", type=Path, required=True)
+    parser.add_argument("--execution-repository", type=Path, required=True)
     args = parser.parse_args()
+    generator = authenticate_generator(args.execution_repository, Path(__file__))
     print(
         json.dumps(
-            extract_confirmation_endpoints(args.root, args.output_dir),
+            extract_confirmation_endpoints(args.root, args.output_dir, generator=generator),
             indent=2,
             sort_keys=True,
         )

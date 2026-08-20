@@ -10,6 +10,7 @@ from pathlib import Path
 from src.evaluation.physics_background_pairing_confirmation_context import (
     write_confirmation_context,
 )
+from src.utils.execution_provenance import authenticate_generator
 
 
 def main() -> None:
@@ -18,7 +19,9 @@ def main() -> None:
     parser.add_argument("--discovery-analysis-dir", type=Path, required=True)
     parser.add_argument("--mlflow-root", type=Path, required=True)
     parser.add_argument("--output-dir", type=Path, required=True)
+    parser.add_argument("--execution-repository", type=Path, required=True)
     args = parser.parse_args()
+    generator = authenticate_generator(args.execution_repository, Path(__file__))
     print(
         json.dumps(
             write_confirmation_context(
@@ -26,6 +29,7 @@ def main() -> None:
                 args.discovery_analysis_dir,
                 args.mlflow_root,
                 args.output_dir,
+                generator=generator,
             ),
             sort_keys=True,
         )

@@ -11,6 +11,7 @@ from src.evaluation.physics_background_pairing_confirmation_report import (
     promote_confirmation_report,
     write_confirmation_report,
 )
+from src.utils.execution_provenance import authenticate_generator
 
 
 def main() -> None:
@@ -18,6 +19,7 @@ def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--analysis-dir", type=Path, required=True)
     parser.add_argument("--repository", type=Path, required=True)
+    parser.add_argument("--execution-repository", type=Path, required=True)
     parser.add_argument("--output-dir", type=Path, required=True)
     parser.add_argument("--discovery-random-analysis", type=Path)
     parser.add_argument("--confirmation-random-analysis", type=Path)
@@ -49,6 +51,7 @@ def main() -> None:
         help="Ignored download mirror required with --promote.",
     )
     args = parser.parse_args()
+    generator = authenticate_generator(args.execution_repository, Path(__file__))
     summary = write_confirmation_report(
         args.analysis_dir.resolve(strict=True),
         args.repository.resolve(strict=True),
@@ -68,6 +71,7 @@ def main() -> None:
         ),
         report_mode=args.report_mode,
         analysis_stage=args.analysis_stage,
+        generator=generator,
     )
     promotion = None
     if args.promote:

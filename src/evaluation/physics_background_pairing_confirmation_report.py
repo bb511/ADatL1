@@ -1219,6 +1219,7 @@ def write_confirmation_report(
     confirmation_context: Path | None = None,
     report_mode: str = "final",
     analysis_stage: str = "final",
+    generator: dict[str, Any],
 ) -> dict[str, Any]:
     """Persist an immutable compact report bundle with authenticated evidence."""
     if analysis_stage not in {"primary", "final"}:
@@ -1233,6 +1234,9 @@ def write_confirmation_report(
         confirmation_context=confirmation_context,
         report_mode=report_mode,
     )
+    summary.pop("content_sha256", None)
+    summary["generator"] = generator
+    summary["content_sha256"] = _content_hash(summary)
     analysis_manifest, _ = _load_analysis(analysis_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
     artifacts = {
@@ -1380,6 +1384,7 @@ def write_confirmation_report(
     provenance = {
         "schema_version": 1,
         "kind": "physics_background_pairing_confirmation_report_bundle",
+        "generator": generator,
         "report_mode": report_mode,
         "analysis_stage": analysis_stage,
         "scientifically_final": summary["scientifically_final"],

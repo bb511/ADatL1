@@ -451,13 +451,15 @@ uv run python scripts/physics_background_pairing_confirmation_campaign.py \
 
 # 6. Extract exact checkpoint-bound endpoint rows, then perform paired analysis.
 uv run python scripts/physics_background_pairing_confirmation_endpoints.py \
-  --root "$CONFIRM_ROOT" --output-dir "$CONFIRM_ROOT/results/endpoints"
+  --root "$CONFIRM_ROOT" --output-dir "$CONFIRM_ROOT/results/endpoints" \
+  --execution-repository "$EXECUTION_REPOSITORY"
 uv run python scripts/physics_background_pairing_confirmation_analysis.py \
   --matrix "$CONFIRM_ROOT/selection/native_28_manifest.json" \
   --endpoint-rows "$CONFIRM_ROOT/results/endpoints/endpoints_long.csv" \
   --endpoint-receipt "$CONFIRM_ROOT/results/endpoints/endpoint_extraction.json" \
   --oas-rows "$CONFIRM_ROOT/results/endpoints/oas_diagnostics.csv" \
-  --output-dir "$CONFIRM_ROOT/results/analysis"
+  --output-dir "$CONFIRM_ROOT/results/analysis" \
+  --execution-repository "$EXECUTION_REPOSITORY"
 ```
 
 The control-plane commands must be treated as gates: a failed hash, count, canary, or
@@ -927,6 +929,7 @@ not extend the earlier completed package in place:
 
 ```bash
 uv run python scripts/physics_background_pairing_random_cap_analysis.py \
+  --execution-repository <CLEAN_ANALYSIS_WORKTREE> \
   --manifest \
     <DISCOVERY_ROOT>/random_cap_evaluation/discovery_immutable_presort_20260818/manifest.json \
   --aggregate \
@@ -937,6 +940,7 @@ uv run python scripts/physics_background_pairing_random_cap_analysis.py \
   --output-version discovery_immutable_presort_20260818_downstream_v1
 
 uv run python scripts/physics_background_pairing_random_cap_analysis.py \
+  --execution-repository <CLEAN_ANALYSIS_WORKTREE> \
   --manifest \
     <CONFIRM_ROOT>/random_cap_evaluation/confirmation_<EXECUTION_COMMIT>/manifest.json \
   --aggregate \
@@ -961,7 +965,15 @@ decisions and inspection, but its heading and JSON identity are explicitly nonfi
 and it cannot be promoted. The final invocation has the following shape:
 
 ```bash
+uv run python scripts/physics_background_pairing_confirmation_context.py \
+  --execution-repository <CLEAN_ANALYSIS_WORKTREE> \
+  --confirmation-analysis-dir <CONFIRM_ROOT>/results/analysis_final \
+  --discovery-analysis-dir <DISCOVERY_ROOT>/results/endpoint_analysis \
+  --mlflow-root <CONFIRM_ROOT>/runtime/mlflow \
+  --output-dir <CONFIRM_ROOT>/results/context_final
+
 uv run python scripts/physics_background_pairing_confirmation_report.py \
+  --execution-repository <CLEAN_ANALYSIS_WORKTREE> \
   --analysis-dir <CONFIRM_ROOT>/results/analysis_final \
   --repository <CLEAN_ANALYSIS_WORKTREE> \
   --output-dir <CONFIRM_ROOT>/results/report_final_<EXECUTION_COMMIT> \

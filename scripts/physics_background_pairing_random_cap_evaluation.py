@@ -34,6 +34,10 @@ from scripts.physics_background_pairing_search50_evaluation import (
 from src.evaluation.physics_background_pairing_confirmation_matrix import (
     load_authenticated_confirmation_campaign,
 )
+from src.utils.execution_provenance import (
+    authenticate_generator,
+    reauthenticate_generator,
+)
 from src.utils.pairing.random_tables import validate_frozen_random_pairing_tables
 
 SCHEMA_VERSION = 1
@@ -90,6 +94,8 @@ def build_discovery_manifest(
     root: Path,
     execution_repository: Path,
     random_pairing_manifest: Path | None = None,
+    *,
+    generator: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Bind the exact frozen 346/421/601 discovery checkpoint universe."""
     source = _load_prepared(root)
@@ -113,6 +119,8 @@ def build_discovery_manifest(
         "random_pairing": _table_identity(root, random_pairing_manifest),
         "tasks": tasks,
     }
+    if generator is not None:
+        payload["generator"] = generator
     payload["content_sha256"] = _canonical_hash(payload)
     return payload
 
@@ -132,6 +140,8 @@ def build_confirmation_manifest(
     checkpoint_selections: Path,
     endpoint_receipt: Path,
     random_pairing_manifest: Path | None = None,
+    *,
+    generator: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Bind every sealed confirmation cell/seed checkpoint selection."""
     frozen = load_authenticated_confirmation_campaign(root)
@@ -294,6 +304,8 @@ def build_confirmation_manifest(
         "random_pairing": _table_identity(root, random_pairing_manifest),
         "tasks": tasks,
     }
+    if generator is not None:
+        payload["generator"] = generator
     payload["content_sha256"] = _canonical_hash(payload)
     return payload
 
@@ -301,9 +313,13 @@ def build_confirmation_manifest(
 def prepare(args: argparse.Namespace) -> None:
     """Persist one immutable mode-specific task manifest."""
     root = args.root.resolve(strict=True)
+    generator = authenticate_generator(args.execution_repository, Path(__file__))
     if args.command == "prepare-discovery":
         manifest = build_discovery_manifest(
-            root, args.execution_repository, args.random_pairing_manifest
+            root,
+            args.execution_repository,
+            args.random_pairing_manifest,
+            generator=generator,
         )
         mode = "discovery"
     else:
@@ -313,6 +329,7 @@ def prepare(args: argparse.Namespace) -> None:
             args.checkpoint_selections,
             args.endpoint_receipt,
             args.random_pairing_manifest,
+            generator=generator,
         )
         mode = "confirmation"
     namespace = args.namespace or mode
@@ -345,6 +362,8 @@ def _load_manifest(root: Path, mode: str, namespace: str | None = None) -> dict[
     if manifest.get("workspace_namespace", mode) != name:
         raise RuntimeError("Prepared random-CAP workspace namespace differs.")
     _authenticate_execution(Path(manifest["execution_repository"]), manifest["execution_commit"])
+    if manifest.get("generator") is not None:
+        reauthenticate_generator(manifest["generator"], Path(__file__))
     if mode == "discovery":
         source = _load_prepared(root)
         if (
@@ -616,9 +635,16 @@ def _structured_value_rows(task_dir: Path, task: dict) -> tuple[list[dict], list
 
 def _marker_valid(manifest: dict, task: dict, marker: dict) -> bool:
     """Reauthenticate a marker and every seed-level CSV it references."""
-    if marker.get("manifest_content_sha256") != manifest["content_sha256"] or marker.get(
-        "task_sha256"
-    ) != _canonical_hash(task):
+    if (
+        marker.get("manifest_content_sha256") != manifest["content_sha256"]
+        or marker.get("task_sha256") != _canonical_hash(task)
+        or marker.get("generator") != manifest.get("generator")
+    ):
+        return False
+    digest = marker.get("content_sha256")
+    if digest is not None and digest != _canonical_hash(
+        {key: value for key, value in marker.items() if key != "content_sha256"}
+    ):
         return False
     try:
         rows, files = _value_rows(
@@ -718,6 +744,11 @@ def evaluate(args: argparse.Namespace) -> None:
             structured_values, structured_files = _structured_value_rows(task_dir, task)
         marker = {
             "schema_version": SCHEMA_VERSION,
+            **(
+                {"generator": manifest["generator"]}
+                if manifest.get("generator") is not None
+                else {}
+            ),
             "task_index": args.task_index,
             "manifest_content_sha256": manifest["content_sha256"],
             "task_sha256": _canonical_hash(task),
@@ -738,6 +769,7 @@ def evaluate(args: argparse.Namespace) -> None:
                     "structured_cap_values_sha256": _canonical_hash(structured_values),
                 }
             )
+        marker["content_sha256"] = _canonical_hash(marker)
         _write_json(
             marker_path,
             marker,
@@ -939,6 +971,7 @@ def aggregate(args: argparse.Namespace) -> None:
     output = _workspace(root, args.mode, args.namespace) / "aggregate.json"
     payload = {
         "schema_version": SCHEMA_VERSION,
+        **({"generator": manifest["generator"]} if manifest.get("generator") is not None else {}),
         "manifest_content_sha256": manifest["content_sha256"],
         "seed_split_values": rows,
         "seed_split_values_sha256": _canonical_hash(rows),
@@ -964,6 +997,7 @@ def aggregate(args: argparse.Namespace) -> None:
                 "structured_cap_values_count": len(structured_cap_values),
             }
         )
+    payload["content_sha256"] = _canonical_hash(payload)
     _write_json(
         output,
         payload,

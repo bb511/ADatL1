@@ -20,6 +20,19 @@ from src.evaluation.physics_background_pairing_random_cap_analysis import (
     write_random_cap_analysis,
 )
 
+GENERATOR = {
+    "schema_version": 1,
+    "repository": "/clean/repository",
+    "commit": "1" * 40,
+    "tree": "2" * 40,
+    "worktree_clean": True,
+    "status_porcelain_sha256": hashlib.sha256(b"").hexdigest(),
+    "script": "scripts/physics_background_pairing_random_cap_analysis.py",
+    "script_sha256": "3" * 64,
+    "head_is_detached": True,
+    "head_ref": None,
+}
+
 
 def _inputs() -> tuple[dict, dict]:
     """Build a minimal three-checkpoint, two-split authenticated fixture."""
@@ -262,7 +275,7 @@ def test_confirmation_analysis_requires_and_uses_structured_metric_identity() ->
         build_random_cap_analysis(manifest, aggregate)
 
 
-@pytest.mark.parametrize("target", ["seed_hash", "summary_value", "pair_seed"])
+@pytest.mark.parametrize("target", ["seed_hash", "summary_value", "pair_seed", "generator"])
 def test_analysis_rejects_tampered_aggregate(target: str) -> None:
     """Child hashes, summaries, and random-table identities are fail-closed."""
     manifest, aggregate = _inputs()
@@ -271,9 +284,11 @@ def test_analysis_rejects_tampered_aggregate(target: str) -> None:
     elif target == "summary_value":
         aggregate["summary"][0]["cap_mean"] += 1
         aggregate["summary_sha256"] = _content_hash(aggregate["summary"])
-    else:
+    elif target == "pair_seed":
         aggregate["seed_split_values"][0]["pairing_seed"] += 1
         aggregate["seed_split_values_sha256"] = _content_hash(aggregate["seed_split_values"])
+    else:
+        aggregate["generator"] = GENERATOR
     with pytest.raises(ValueError):
         build_random_cap_analysis(manifest, aggregate)
 
@@ -283,6 +298,12 @@ def test_writer_persists_hash_bound_tables_idempotently(
 ) -> None:
     """Portable tables and their receipt can be reproduced byte-for-byte."""
     manifest, aggregate = _inputs()
+    manifest["generator"] = GENERATOR
+    manifest["content_sha256"] = _content_hash(
+        {key: value for key, value in manifest.items() if key != "content_sha256"}
+    )
+    aggregate["generator"] = GENERATOR
+    aggregate["manifest_content_sha256"] = manifest["content_sha256"]
     manifest_path = tmp_path / "manifest.json"
     aggregate_path = tmp_path / "aggregate.json"
     manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
@@ -305,14 +326,17 @@ def test_writer_persists_hash_bound_tables_idempotently(
     monkeypatch.setattr(analysis_module, "DISCOVERY_MEMBERSHIPS", 3)
     monkeypatch.setattr(analysis_module, "DISCOVERY_MEMBERSHIP_SCORES", 3)
     output = tmp_path / "results"
-    write_random_cap_analysis(manifest_path, aggregate_path, output)
+    write_random_cap_analysis(manifest_path, aggregate_path, output, generator=GENERATOR)
     first = (output / "random_cap_analysis.json").read_bytes()
     receipt = json.loads(first)
+    assert receipt["generator"] == GENERATOR
+    assert receipt["inputs"]["random_cap_evaluation_commit"] == manifest.get("execution_commit")
+    assert receipt["inputs"]["random_cap_evaluation_generator"] == GENERATOR
     assert receipt["inputs"]["runner_manifest_content_sha256"] == "b" * 64
     assert receipt["inputs"]["reserve_extension_content_sha256"] == "c" * 64
     assert receipt["inputs"]["checkpoint_selections_sha256"] == "d" * 64
     assert receipt["inputs"]["endpoint_receipt_sha256"] == "e" * 64
-    write_random_cap_analysis(manifest_path, aggregate_path, output)
+    write_random_cap_analysis(manifest_path, aggregate_path, output, generator=GENERATOR)
     assert (output / "random_cap_analysis.json").read_bytes() == first
     assert (output / "random_cap_values.csv").exists()
     assert (output / "structured_random_rank_associations.csv").exists()
@@ -524,7 +548,11 @@ def test_writer_authenticates_endpoint_receipt_and_persists_downstream_hash(
     )
     output = tmp_path / "analysis_versions" / "downstream_v1"
     write_random_cap_analysis(
-        manifest_path, aggregate_path, output, endpoint_analysis_path=endpoint_path
+        manifest_path,
+        aggregate_path,
+        output,
+        endpoint_analysis_path=endpoint_path,
+        generator=GENERATOR,
     )
     receipt = json.loads((output / "random_cap_analysis.json").read_text())
     artifact = output / "cap_downstream_rank_associations.csv"
@@ -535,7 +563,7 @@ def test_writer_authenticates_endpoint_receipt_and_persists_downstream_hash(
         == endpoint_receipt["artifact_hashes"]["combined_long.csv"]
     )
     with pytest.raises(FileExistsError, match="new versioned output directory"):
-        write_random_cap_analysis(manifest_path, aggregate_path, output)
+        write_random_cap_analysis(manifest_path, aggregate_path, output, generator=GENERATOR)
 
     combined_path.write_text("tampered\n", encoding="utf-8")
     with pytest.raises(ValueError, match="does not match"):
@@ -544,6 +572,7 @@ def test_writer_authenticates_endpoint_receipt_and_persists_downstream_hash(
             aggregate_path,
             tmp_path / "analysis_versions" / "downstream_v2",
             endpoint_analysis_path=endpoint_path,
+            generator=GENERATOR,
         )
 
 
@@ -643,6 +672,7 @@ def test_confirmation_writer_joins_cell_seed_endpoint_analysis(tmp_path: Path) -
         aggregate_path,
         output,
         endpoint_analysis_path=endpoint_analysis_path,
+        generator=GENERATOR,
     )
     assert result["method"]["downstream_rows"] == 240
     assert result["method"]["downstream_association_rows"] == 56

@@ -127,8 +127,14 @@ def _normalize(
 ]:
     """Validate exact seed rows and independently recompute every summary."""
     memberships = _authenticate_manifest(manifest)
+    aggregate_digest = aggregate.get("content_sha256")
     if (
         aggregate.get("schema_version") != SCHEMA_VERSION
+        or (
+            aggregate_digest is not None
+            and aggregate_digest != _content_hash(_without_hash(aggregate))
+        )
+        or aggregate.get("generator") != manifest.get("generator")
         or aggregate.get("manifest_content_sha256") != manifest["content_sha256"]
         or aggregate.get("seed_split_values_sha256")
         != _content_hash(aggregate.get("seed_split_values", []))
@@ -941,6 +947,8 @@ def write_random_cap_analysis(
     aggregate_path: Path,
     output_dir: Path,
     endpoint_analysis_path: Path | None = None,
+    *,
+    generator: dict[str, Any],
 ) -> dict[str, Any]:
     """Write a portable, hash-bound random-CAP diagnostic package."""
     manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
@@ -1030,6 +1038,7 @@ def write_random_cap_analysis(
             artifacts[path.name] = hashlib.sha256(path.read_bytes()).hexdigest()
     receipt = {
         "schema_version": SCHEMA_VERSION,
+        "generator": generator,
         "method": result["method"],
         "inputs": {
             "manifest": str(manifest_path.resolve()),
@@ -1039,7 +1048,11 @@ def write_random_cap_analysis(
             "random_pairing_content_sha256": manifest.get("random_pairing", {}).get(
                 "content_sha256"
             ),
+            # Retained for consumers of the historical schema.
             "execution_commit": manifest.get("execution_commit"),
+            "random_cap_evaluation_commit": manifest.get("execution_commit"),
+            "random_cap_evaluation_repository": manifest.get("execution_repository"),
+            "random_cap_evaluation_generator": manifest.get("generator"),
             "campaign_root": manifest.get("campaign_root"),
             "confirmation_matrix_content_sha256": manifest.get(
                 "confirmation_matrix_content_sha256"

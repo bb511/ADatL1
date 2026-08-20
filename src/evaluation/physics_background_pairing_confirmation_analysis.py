@@ -869,14 +869,20 @@ def write_confirmation_endpoint_analysis(
     oas_rows_path: Path,
     output_dir: Path,
     *,
+    generator: dict[str, Any],
     bootstrap_replicates: int = DEFAULT_BOOTSTRAP_REPLICATES,
     bootstrap_seed: int = DEFAULT_BOOTSTRAP_SEED,
 ) -> dict[str, Any]:
     """Read JSON/CSV inputs and persist portable authenticated result tables."""
     matrix = json.loads(matrix_path.read_text(encoding="utf-8"))
     receipt = json.loads(endpoint_receipt_path.read_text(encoding="utf-8"))
+    receipt_digest = receipt.get("content_sha256")
+    receipt_without_digest = {
+        key: value for key, value in receipt.items() if key != "content_sha256"
+    }
     if (
         receipt.get("schema_version") != 1
+        or (receipt_digest is not None and receipt_digest != _content_hash(receipt_without_digest))
         or receipt.get("matrix_content_sha256") != matrix.get("content_sha256")
         or receipt.get("artifacts", {}).get("endpoints_long.csv")
         != hashlib.sha256(endpoint_rows_path.read_bytes()).hexdigest()
@@ -913,6 +919,7 @@ def write_confirmation_endpoint_analysis(
         _write_csv(output_dir / f"{name}.csv", result[name])
     manifest = {
         "schema_version": SCHEMA_VERSION,
+        "generator": generator,
         "method": result["method"],
         "inputs": {
             "matrix": str(matrix_path.resolve()),
@@ -925,6 +932,8 @@ def write_confirmation_endpoint_analysis(
             "endpoint_receipt_sha256": hashlib.sha256(
                 endpoint_receipt_path.read_bytes()
             ).hexdigest(),
+            "endpoint_extraction_generator": receipt.get("generator"),
+            "training_commit": receipt.get("training_commit", receipt.get("execution_commit")),
         },
         "artifacts": {
             f"{name}.csv": hashlib.sha256((output_dir / f"{name}.csv").read_bytes()).hexdigest()

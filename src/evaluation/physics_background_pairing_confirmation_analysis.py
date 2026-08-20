@@ -842,6 +842,26 @@ def _write_csv(path: Path, rows: list[dict[str, Any]]) -> None:
         Path(temporary_name).unlink(missing_ok=True)
 
 
+def _write_json(path: Path, payload: dict[str, Any]) -> None:
+    """Write one canonical JSON receipt atomically without replacing different evidence."""
+    encoded = json.dumps(payload, indent=2, sort_keys=True, allow_nan=False) + "\n"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    descriptor, temporary_name = tempfile.mkstemp(prefix=f".{path.name}.", dir=path.parent)
+    try:
+        with os.fdopen(descriptor, "w", encoding="utf-8") as handle:
+            handle.write(encoded)
+            handle.flush()
+            os.fsync(handle.fileno())
+        temporary = Path(temporary_name)
+        if path.exists():
+            if path.read_bytes() != temporary.read_bytes():
+                raise FileExistsError(f"Refusing to replace different analysis receipt: {path}")
+        else:
+            os.replace(temporary, path)
+    finally:
+        Path(temporary_name).unlink(missing_ok=True)
+
+
 def write_confirmation_endpoint_analysis(
     matrix_path: Path,
     endpoint_rows_path: Path,
@@ -912,9 +932,7 @@ def write_confirmation_endpoint_analysis(
         },
     }
     manifest["content_sha256"] = _content_hash(manifest)
-    (output_dir / "confirmation_endpoint_analysis.json").write_text(
-        json.dumps(manifest, indent=2, sort_keys=True) + "\n", encoding="utf-8"
-    )
+    _write_json(output_dir / "confirmation_endpoint_analysis.json", manifest)
     return result
 
 

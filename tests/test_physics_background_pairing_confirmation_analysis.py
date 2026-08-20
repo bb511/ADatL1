@@ -3,12 +3,14 @@
 from __future__ import annotations
 
 import copy
+import json
 
 import pytest
 
 from src.evaluation.physics_background_pairing_analysis import DOWNSTREAM_DATASETS
 from src.evaluation.physics_background_pairing_confirmation_analysis import (
     _content_hash,
+    _write_json,
     build_confirmation_endpoint_analysis,
 )
 
@@ -24,6 +26,17 @@ SELECTORS = (
 )
 SEEDS = (271828, 314159, 161803)
 RESERVE_SEEDS = (141421, 173205)
+
+
+def test_analysis_receipt_is_atomic_idempotent_and_immutable(tmp_path) -> None:
+    """Analysis receipts can be replayed exactly but cannot be silently replaced."""
+    path = tmp_path / "confirmation_endpoint_analysis.json"
+    payload = {"schema_version": 1, "value": "sealed"}
+    _write_json(path, payload)
+    _write_json(path, payload)
+    assert json.loads(path.read_text(encoding="utf-8")) == payload
+    with pytest.raises(FileExistsError, match="different analysis receipt"):
+        _write_json(path, {**payload, "value": "changed"})
 
 
 def _fixture() -> tuple[dict, list[dict]]:

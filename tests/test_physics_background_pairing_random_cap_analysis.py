@@ -571,7 +571,7 @@ def test_confirmation_writer_joins_cell_seed_endpoint_analysis(tmp_path: Path) -
     endpoint_receipt = {
         "method": {"schema_version": 1, "anomalies": 20, "endpoint_rows": 120},
         "inputs": {"endpoint_receipt_sha256": "f" * 64},
-        "artifact_hashes": {
+        "artifacts": {
             "endpoints_long.csv": hashlib.sha256(endpoints_path.read_bytes()).hexdigest()
         },
     }

@@ -277,7 +277,18 @@ def _load_downstream_rows(
     """Authenticate and load the endpoint long table named by its analysis receipt."""
     receipt = json.loads(endpoint_analysis_path.read_text(encoding="utf-8"))
     method = receipt.get("method", {})
-    artifact_hashes = receipt.get("artifact_hashes", {})
+    legacy_hashes = receipt.get("artifact_hashes", {})
+    confirmation_hashes = receipt.get("artifacts", {})
+    if (
+        legacy_hashes
+        and confirmation_hashes
+        and any(
+            legacy_hashes[name] != confirmation_hashes[name]
+            for name in set(legacy_hashes) & set(confirmation_hashes)
+        )
+    ):
+        raise ValueError("Endpoint analysis receipt declares conflicting artifact hashes.")
+    artifact_hashes = legacy_hashes or confirmation_hashes
     if "combined_long.csv" in artifact_hashes:
         artifact_names = ("combined_long.csv",)
         analysis_kind = "discovery"

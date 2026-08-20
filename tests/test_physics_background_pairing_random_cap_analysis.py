@@ -173,6 +173,40 @@ def _downstream_rows(manifest: dict) -> list[dict]:
     return rows
 
 
+def _add_structured_cap_values(manifest: dict, aggregate: dict) -> None:
+    """Bind same-checkpoint structured CAP for every confirmation score and split."""
+    rows = []
+    for task in manifest["tasks"]:
+        checkpoints = {row["checkpoint_id"]: row for row in task["checkpoints"]}
+        for membership in task["memberships"]:
+            if membership["metric"] != "cap":
+                continue
+            checkpoint = checkpoints[membership["checkpoint_id"]]
+            for score_index, score in enumerate(task["scores"]):
+                for split_index, split in enumerate(("validate", "test")):
+                    rows.append(
+                        {
+                            "mode": "confirmation",
+                            "task_index": task["task_index"],
+                            "membership_index": membership["membership_index"],
+                            "model": task["model"],
+                            "training_seed": task.get("training_seed", ""),
+                            "logical_objective": membership["logical_objective"],
+                            "selection_score": membership["score"],
+                            "selection_metric": "cap",
+                            "selection_strategy": membership["strategy"],
+                            "evaluation_score": score,
+                            "split": split,
+                            "checkpoint_id": membership["checkpoint_id"],
+                            "checkpoint_sha256": checkpoint["source_sha256"],
+                            "cap": task["task_index"] + score_index / 10 + split_index / 100,
+                        }
+                    )
+    aggregate["structured_cap_values"] = rows
+    aggregate["structured_cap_values_sha256"] = _content_hash(rows)
+    aggregate["structured_cap_values_count"] = len(rows)
+
+
 def test_analysis_recomputes_variability_and_unpooled_rank_association() -> None:
     """Seed variability and rank panels are recomputed without cross-panel pooling."""
     manifest, aggregate = _inputs()
@@ -214,6 +248,7 @@ def test_confirmation_analysis_requires_and_uses_structured_metric_identity() ->
     aggregate["manifest_content_sha256"] = manifest["content_sha256"]
     aggregate["seed_split_values_sha256"] = _content_hash(aggregate["seed_split_values"])
     aggregate["summary_sha256"] = _content_hash(aggregate["summary"])
+    _add_structured_cap_values(manifest, aggregate)
     result = build_random_cap_analysis(manifest, aggregate)
     assert result["method"]["rank_panels"] == 2
     assert result["method"]["rank_association_rows"] == 12
@@ -555,12 +590,22 @@ def test_confirmation_writer_joins_cell_seed_endpoint_analysis(tmp_path: Path) -
     for row in aggregate["summary"]:
         row["mode"] = "confirmation"
         row["training_seed"] = 100 + row["task_index"]
+    for task in manifest["tasks"]:
+        task["scores"].append("residual_oas")
+    aggregate["seed_split_values"].extend(
+        {**row, "evaluation_score": "residual_oas"} for row in list(aggregate["seed_split_values"])
+    )
+    aggregate["summary"].extend(
+        {**row, "evaluation_score": "residual_oas"} for row in list(aggregate["summary"])
+    )
+    oas_endpoint_rows = [{**row, "score": "residual_oas"} for row in endpoint_rows]
     manifest["content_sha256"] = _content_hash(
         {key: value for key, value in manifest.items() if key != "content_sha256"}
     )
     aggregate["manifest_content_sha256"] = manifest["content_sha256"]
     aggregate["seed_split_values_sha256"] = _content_hash(aggregate["seed_split_values"])
     aggregate["summary_sha256"] = _content_hash(aggregate["summary"])
+    _add_structured_cap_values(manifest, aggregate)
     endpoint_dir = tmp_path / "confirmation_endpoint"
     endpoint_dir.mkdir()
     endpoints_path = endpoint_dir / "endpoints_long.csv"
@@ -568,11 +613,22 @@ def test_confirmation_writer_joins_cell_seed_endpoint_analysis(tmp_path: Path) -
         writer = csv.DictWriter(handle, fieldnames=list(endpoint_rows[0]))
         writer.writeheader()
         writer.writerows(endpoint_rows)
+    oas_endpoints_path = endpoint_dir / "oas_endpoints_long.csv"
+    with oas_endpoints_path.open("w", newline="", encoding="utf-8") as handle:
+        writer = csv.DictWriter(handle, fieldnames=list(oas_endpoint_rows[0]))
+        writer.writeheader()
+        writer.writerows(oas_endpoint_rows)
     endpoint_receipt = {
-        "method": {"schema_version": 1, "anomalies": 20, "endpoint_rows": 120},
+        "method": {
+            "schema_version": 1,
+            "anomalies": 20,
+            "endpoint_rows": 120,
+            "oas_endpoint_rows": 120,
+        },
         "inputs": {"endpoint_receipt_sha256": "f" * 64},
         "artifacts": {
-            "endpoints_long.csv": hashlib.sha256(endpoints_path.read_bytes()).hexdigest()
+            "endpoints_long.csv": hashlib.sha256(endpoints_path.read_bytes()).hexdigest(),
+            "oas_endpoints_long.csv": hashlib.sha256(oas_endpoints_path.read_bytes()).hexdigest(),
         },
     }
     endpoint_analysis_path = endpoint_dir / "confirmation_endpoint_analysis.json"
@@ -588,8 +644,8 @@ def test_confirmation_writer_joins_cell_seed_endpoint_analysis(tmp_path: Path) -
         output,
         endpoint_analysis_path=endpoint_analysis_path,
     )
-    assert result["method"]["downstream_rows"] == 120
-    assert result["method"]["downstream_association_rows"] == 28
+    assert result["method"]["downstream_rows"] == 240
+    assert result["method"]["downstream_association_rows"] == 56
     receipt = json.loads((output / "random_cap_analysis.json").read_text())
     assert receipt["inputs"]["endpoint_analysis_kind"] == "confirmation"
     assert receipt["inputs"]["upstream_endpoint_receipt_sha256"] == "f" * 64

@@ -5,6 +5,7 @@ from __future__ import annotations
 import csv
 import hashlib
 import json
+import pickle  # nosec B403 -- writes synthetic trusted evaluator summaries
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -15,7 +16,9 @@ from omegaconf import OmegaConf
 from scripts import physics_background_pairing_random_cap_evaluation as runner
 from scripts.physics_background_pairing_random_cap_evaluation import (
     _canonical_hash,
+    _evaluation_callback_names,
     _marker_valid,
+    _structured_value_rows,
     _value_rows,
     _workspace,
     build_confirmation_manifest,
@@ -194,6 +197,25 @@ def _write_values(root: Path, score: str, split: str) -> Path:
     return path
 
 
+def _write_structured_summary(
+    root: Path, score: str, strategy: str, split: str, *, cap: float = 0.25
+) -> Path:
+    """Write one trusted evaluator CAP summary for same-checkpoint tests."""
+    split_folder = "val" if split == "validate" else "test"
+    path = (
+        root
+        / "checkpoint_store/a/b/c/plots"
+        / split_folder
+        / f"cap_{score}_{strategy}_summary"
+        / "summary.pkl"
+    )
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with path.open("wb") as handle:
+        pickle.dump({"selected_000": cap}, handle)
+        pickle.dump({"selected_000": 0.5}, handle)
+    return path
+
+
 def test_marker_requires_complete_score_split_seed_matrix_and_file_hashes(tmp_path: Path) -> None:
     """Missing or changed native/OAS seed-level rows invalidate completion."""
     task = _task()
@@ -227,6 +249,172 @@ def test_marker_requires_complete_score_split_seed_matrix_and_file_hashes(tmp_pa
     changed = Path(files[0]["path"])
     changed.write_text(changed.read_text().replace("0.1,", "0.2,"), encoding="utf-8")
     assert not _marker_valid(manifest, task, marker)
+
+
+def test_confirmation_marker_authenticates_same_checkpoint_structured_cap(
+    tmp_path: Path,
+) -> None:
+    """Native/OAS structured CAP is complete, hash-bound, and never a membership."""
+    task = _task()
+    task["training_seed"] = 271828
+    task["memberships"] = [
+        {
+            "membership_index": 0,
+            "checkpoint_id": "selected_000",
+            "logical_objective": "native__cap__flat_physical",
+            "score": "native",
+            "metric": "cap",
+            "strategy": "flat_physical",
+        }
+    ]
+    for score in task["scores"]:
+        for split in ("validate", "test"):
+            _write_values(tmp_path, score, split)
+            _write_structured_summary(tmp_path, score, "flat_physical", split)
+    random_pairing = {
+        "tables": [
+            {
+                "split": split,
+                "replicate": replicate,
+                "seed": SEEDS_BY_SPLIT[split][replicate],
+                "file_sha256": f"{replicate + 1:064x}",
+                "permutation_sha256": f"{replicate + 11:064x}",
+            }
+            for split in ("validate", "test")
+            for replicate in range(5)
+        ]
+    }
+    values, value_files = _value_rows(tmp_path, task, random_pairing)
+    structured, structured_files = _structured_value_rows(tmp_path, task)
+    assert len(structured) == 4
+    assert {row["score"] for row in structured} == {"native", "residual_oas"}
+    assert {row["selection_strategy"] for row in structured} == {"flat_physical"}
+    assert len(task["memberships"]) == 1
+    marker = {
+        "manifest_content_sha256": "manifest",
+        "task_sha256": _canonical_hash(task),
+        "task_dir": str(tmp_path),
+        "values": values,
+        "value_files": value_files,
+        "structured_cap_values": structured,
+        "structured_cap_value_files": structured_files,
+        "structured_cap_values_count": 4,
+        "structured_cap_values_sha256": _canonical_hash(structured),
+    }
+    manifest = {
+        "mode": "confirmation",
+        "content_sha256": "manifest",
+        "random_pairing": random_pairing,
+    }
+    assert _marker_valid(manifest, task, marker)
+    marker["structured_cap_values_sha256"] = "0" * 64
+    assert not _marker_valid(manifest, task, marker)
+
+
+def test_callback_allowlist_adds_structured_cap_only_for_confirmation() -> None:
+    """Discovery execution stays unchanged while confirmation computes matched evidence."""
+    task = _task()
+    task["memberships"] = [
+        {"metric": "cap", "strategy": "cdf"},
+        {"metric": "cap", "strategy": "flat_physical"},
+        {"metric": "wasserstein", "strategy": ""},
+    ]
+    assert _evaluation_callback_names(task, "discovery") == (
+        "random_cap_native",
+        "random_cap_residual_oas",
+    )
+    assert _evaluation_callback_names(task, "confirmation") == (
+        "random_cap_native",
+        "random_cap_residual_oas",
+        "cap_native_flat_physical",
+        "cap_native_cdf",
+        "cap_residual_oas_flat_physical",
+        "cap_residual_oas_cdf",
+    )
+
+
+def test_confirmation_aggregate_emits_exact_structured_cap_contract(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Aggregate rows preserve native selection and OAS evaluation identities."""
+    root = tmp_path / "campaign"
+    root.mkdir()
+    task = _task()
+    task.update({"training_seed": 271828, "trial_number": 154})
+    task["memberships"] = [
+        {
+            "membership_index": 7,
+            "checkpoint_id": "selected_000",
+            "logical_objective": "native__cap__physics_summary",
+            "score": "native",
+            "metric": "cap",
+            "strategy": "physics_summary",
+        }
+    ]
+    task_dir = _workspace(root, "confirmation") / "tasks/000"
+    for score in task["scores"]:
+        for split in ("validate", "test"):
+            _write_values(task_dir, score, split)
+            _write_structured_summary(task_dir, score, "physics_summary", split, cap=0.75)
+    random_pairing = {
+        "tables": [
+            {
+                "split": split,
+                "replicate": replicate,
+                "seed": SEEDS_BY_SPLIT[split][replicate],
+                "file_sha256": f"{replicate + 1:064x}",
+                "permutation_sha256": f"{replicate + 11:064x}",
+            }
+            for split in ("validate", "test")
+            for replicate in range(5)
+        ]
+    }
+    manifest = {
+        "mode": "confirmation",
+        "content_sha256": "manifest",
+        "random_pairing": random_pairing,
+        "tasks": [task],
+    }
+    values, value_files = _value_rows(task_dir, task, random_pairing)
+    structured, structured_files = _structured_value_rows(task_dir, task)
+    marker = {
+        "manifest_content_sha256": "manifest",
+        "task_sha256": _canonical_hash(task),
+        "task_dir": str(task_dir),
+        "values": values,
+        "value_files": value_files,
+        "structured_cap_values": structured,
+        "structured_cap_value_files": structured_files,
+        "structured_cap_values_count": len(structured),
+        "structured_cap_values_sha256": _canonical_hash(structured),
+    }
+    marker_path = task_dir / "marker.json"
+    marker_path.write_text(json.dumps(marker), encoding="utf-8")
+    monkeypatch.setattr(runner, "_load_manifest", lambda *_: manifest)
+    runner.aggregate(SimpleNamespace(root=root, mode="confirmation", namespace=None))
+    payload = json.loads((_workspace(root, "confirmation") / "aggregate.json").read_text())
+    rows = payload["structured_cap_values"]
+    assert len(rows) == payload["structured_cap_values_count"] == 4
+    assert payload["structured_cap_values_sha256"] == _canonical_hash(rows)
+    assert set(rows[0]) == {
+        "mode",
+        "task_index",
+        "membership_index",
+        "model",
+        "training_seed",
+        "logical_objective",
+        "selection_score",
+        "evaluation_score",
+        "selection_metric",
+        "selection_strategy",
+        "split",
+        "checkpoint_id",
+        "checkpoint_sha256",
+        "cap",
+    }
+    assert {row["selection_score"] for row in rows} == {"native"}
+    assert {row["evaluation_score"] for row in rows} == {"native", "residual_oas"}
+    assert {row["logical_objective"] for row in rows} == {"native__cap__physics_summary"}
 
 
 def test_diagnostic_configs_cannot_optimize_or_checkpoint() -> None:

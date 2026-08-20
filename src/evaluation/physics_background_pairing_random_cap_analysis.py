@@ -119,7 +119,12 @@ def _authenticate_manifest(manifest: dict[str, Any]) -> dict[tuple[int, int], di
 
 def _normalize(
     manifest: dict[str, Any], aggregate: dict[str, Any]
-) -> tuple[list[dict[str, Any]], list[dict[str, Any]], dict[tuple[int, int], dict[str, Any]]]:
+) -> tuple[
+    list[dict[str, Any]],
+    list[dict[str, Any]],
+    dict[tuple[int, int], dict[str, Any]],
+    dict[tuple[int, int, str, str], float],
+]:
     """Validate exact seed rows and independently recompute every summary."""
     memberships = _authenticate_manifest(manifest)
     if (
@@ -267,7 +272,77 @@ def _normalize(
                 "cap_range": max(values) - min(values),
             }
         )
-    return normalized, summaries, memberships
+    structured = _normalize_structured_cap(manifest, aggregate, memberships)
+    return normalized, summaries, memberships, structured
+
+
+def _normalize_structured_cap(
+    manifest: dict[str, Any],
+    aggregate: dict[str, Any],
+    memberships: dict[tuple[int, int], dict[str, Any]],
+) -> dict[tuple[int, int, str, str], float]:
+    """Authenticate same-checkpoint structured CAP values for every evaluated score."""
+    if manifest["mode"] == "discovery":
+        return {
+            (*key, identity["membership"].get("score", "native"), split): _structured_cap(
+                key, memberships
+            )
+            for key, identity in memberships.items()
+            if identity["membership"].get("metric") == "cap"
+            for split in SPLITS
+        }
+    supplied_rows = aggregate.get("structured_cap_values", [])
+    if aggregate.get("structured_cap_values_sha256") != _content_hash(supplied_rows) or int(
+        aggregate.get("structured_cap_values_count", -1)
+    ) != len(supplied_rows):
+        raise ValueError("Structured-CAP aggregate hash differs.")
+    for key, identity in memberships.items():
+        if identity["membership"].get("metric") == "cap":
+            _structured_cap(key, memberships)
+    expected = {
+        (*key, score, split)
+        for key, identity in memberships.items()
+        if identity["membership"].get("metric") == "cap"
+        for score in identity["task"]["scores"]
+        for split in SPLITS
+    }
+    normalized: dict[tuple[int, int, str, str], float] = {}
+    for supplied in supplied_rows:
+        row = dict(supplied)
+        key = (
+            int(row["task_index"]),
+            int(row["membership_index"]),
+            row["evaluation_score"],
+            row["split"],
+        )
+        identity = memberships.get(key[:2])
+        if key in normalized or key not in expected or identity is None:
+            raise ValueError(f"Unexpected or duplicate structured-CAP row: {key}.")
+        task, membership, checkpoint = (
+            identity["task"],
+            identity["membership"],
+            identity["checkpoint"],
+        )
+        expected_fields = {
+            "mode": manifest["mode"],
+            "model": task["model"],
+            "training_seed": task.get("training_seed", ""),
+            "logical_objective": membership["logical_objective"],
+            "selection_score": membership.get("score", "native"),
+            "selection_metric": "cap",
+            "selection_strategy": membership.get("strategy", ""),
+            "checkpoint_id": membership["checkpoint_id"],
+            "checkpoint_sha256": checkpoint["source_sha256"],
+        }
+        if any(str(row.get(field, "")) != str(value) for field, value in expected_fields.items()):
+            raise ValueError(f"Structured-CAP identity differs for {key}.")
+        normalized[key] = _finite(row["cap"], f"structured CAP {key}")
+    if set(normalized) != expected:
+        raise ValueError(
+            f"Structured-CAP coverage differs: expected {len(expected)}, "
+            f"found {len(normalized)}."
+        )
+    return normalized
 
 
 def _load_downstream_rows(
@@ -307,7 +382,7 @@ def _load_downstream_rows(
             "value",
         ]
     elif "endpoints_long.csv" in artifact_hashes:
-        artifact_names = ("endpoints_long.csv",)
+        artifact_names = ("endpoints_long.csv", "oas_endpoints_long.csv")
         analysis_kind = "confirmation"
         expected_columns = [
             "cell_index",
@@ -334,6 +409,7 @@ def _load_downstream_rows(
         raise ValueError("Endpoint analysis receipt schema or downstream-table hash differs.")
     table_paths = {name: endpoint_analysis_path.parent / name for name in artifact_names}
     rows = []
+    table_row_counts = {}
     for name, table_path in table_paths.items():
         if not table_path.is_file() or _sha256(table_path) != expected_hashes[name]:
             raise ValueError("Endpoint downstream table does not match its analysis receipt.")
@@ -341,7 +417,9 @@ def _load_downstream_rows(
             reader = csv.DictReader(handle)
             if reader.fieldnames != expected_columns:
                 raise ValueError("Endpoint downstream-table schema differs.")
-            rows.extend(reader)
+            table_rows = list(reader)
+            table_row_counts[name] = len(table_rows)
+            rows.extend(table_rows)
     if analysis_kind == "confirmation":
         membership_indices = {}
         for task in manifest.get("tasks", []):
@@ -383,6 +461,7 @@ def _load_downstream_rows(
             for name in artifact_names
         },
         "endpoint_method": method,
+        "downstream_table_rows": table_row_counts,
     }
     if analysis_kind == "discovery":
         table_path = table_paths["combined_long.csv"]
@@ -402,7 +481,8 @@ def _load_downstream_rows(
 def _normalize_downstream(
     rows: list[dict[str, Any]],
     memberships: dict[tuple[int, int], dict[str, Any]],
-) -> tuple[dict[tuple[int, int, str], float], dict[str, int]]:
+    structured_cap: dict[tuple[int, int, str, str], float],
+) -> tuple[dict[tuple[int, int, str, str], float], dict[str, int]]:
     """Exact-join and average the two downstream endpoints over 20 anomalies."""
     by_membership_index: dict[int, tuple[tuple[int, int], dict[str, Any]]] = {}
     for key, identity in memberships.items():
@@ -413,12 +493,15 @@ def _normalize_downstream(
 
     expected_anomalies = set(DOWNSTREAM_DATASETS)
     expected_keys = {
-        (membership_index, endpoint, anomaly)
-        for membership_index in by_membership_index
+        (membership_index, score, endpoint, anomaly)
+        for membership_index, (key, _) in by_membership_index.items()
+        for score in {
+            structured_key[2] for structured_key in structured_cap if structured_key[:2] == key
+        }
         for endpoint in DOWNSTREAM_ENDPOINTS
         for anomaly in DOWNSTREAM_DATASETS
     }
-    grouped: dict[tuple[int, int, str], list[float]] = defaultdict(list)
+    grouped: dict[tuple[int, int, str, str], list[float]] = defaultdict(list)
     seen = set()
     for supplied in rows:
         row = dict(supplied)
@@ -438,7 +521,8 @@ def _normalize_downstream(
         )
         endpoint = row.get("endpoint")
         anomaly = row.get("anomaly")
-        row_key = (membership_index, endpoint, anomaly)
+        score = row.get("score")
+        row_key = (membership_index, score, endpoint, anomaly)
         if (
             row_key in seen
             or endpoint not in DOWNSTREAM_ENDPOINTS
@@ -449,7 +533,6 @@ def _normalize_downstream(
         expected_fields = {
             "model": task["model"],
             "logical_objective": membership["logical_objective"],
-            "score": membership.get("score", "native"),
             "checkpoint_sha256": checkpoint["source_sha256"],
             "selector": membership.get("metric"),
             "pairing": expected_pairing,
@@ -459,6 +542,8 @@ def _normalize_downstream(
                 raise ValueError(f"Endpoint {field} differs for membership {membership_index}.")
         if trial_number != int(task["trial_number"]):
             raise ValueError(f"Endpoint trial differs for membership {membership_index}.")
+        if not any(structured_key[:3] == (*key, score) for structured_key in structured_cap):
+            raise ValueError(f"Endpoint score differs for membership {membership_index}.")
         source_path = checkpoint.get("source_path")
         if source_path is not None and row.get("checkpoint") != source_path:
             raise ValueError(
@@ -468,7 +553,7 @@ def _normalize_downstream(
         if value < 0.0 or value > 1.0:
             raise ValueError(f"Downstream value lies outside [0, 1] for {row_key}.")
         seen.add(row_key)
-        grouped[(key[0], key[1], endpoint)].append(value)
+        grouped[(key[0], key[1], score, endpoint)].append(value)
     if seen != expected_keys:
         raise ValueError(
             f"Endpoint coverage differs: expected {len(expected_keys)}, found {len(seen)}."
@@ -478,12 +563,14 @@ def _normalize_downstream(
         if len(values) != len(DOWNSTREAM_DATASETS):
             raise ValueError(f"Endpoint anomaly count differs for membership panel {key}.")
         means[key] = statistics.fmean(values)
-    expected_means = len(memberships) * len(DOWNSTREAM_ENDPOINTS)
+    membership_scores = len({key[:3] for key in structured_cap})
+    expected_means = membership_scores * len(DOWNSTREAM_ENDPOINTS)
     if len(means) != expected_means:
         raise ValueError("Endpoint mean coverage differs after the exact membership join.")
     return means, {
         "downstream_rows": len(rows),
         "downstream_memberships": len(memberships),
+        "downstream_membership_scores": membership_scores,
         "downstream_anomalies": len(DOWNSTREAM_DATASETS),
         "downstream_endpoints": len(DOWNSTREAM_ENDPOINTS),
     }
@@ -515,16 +602,24 @@ def _structured_cap(
 def _downstream_rank_associations(
     rows: list[dict[str, Any]],
     memberships: dict[tuple[int, int], dict[str, Any]],
-    downstream: dict[tuple[int, int, str], float],
+    structured_cap: dict[tuple[int, int, str, str], float],
+    downstream: dict[tuple[int, int, str, str], float],
 ) -> list[dict[str, Any]]:
     """Relate structured and random CAP ranks to downstream endpoints per panel."""
-    groups: dict[tuple[str, str, str, str, str], list[dict[str, Any]]] = defaultdict(list)
+    groups: dict[tuple[str, str, str, str, str, str], list[dict[str, Any]]] = defaultdict(list)
     for row in rows:
-        if row["selection_metric"] == "cap" and row["evaluation_score"] == row["selection_score"]:
+        structured_key = (
+            row["task_index"],
+            row["membership_index"],
+            row["evaluation_score"],
+            row["split"],
+        )
+        if row["selection_metric"] == "cap" and structured_key in structured_cap:
             groups[
                 (
                     row["model"],
                     row["selection_score"],
+                    row["evaluation_score"],
                     row["logical_objective"],
                     row["selection_strategy"],
                     row["split"],
@@ -532,15 +627,14 @@ def _downstream_rank_associations(
             ].append(row)
     expected_panels = {
         (
-            identity["task"]["model"],
-            membership.get("score", "native"),
-            membership["logical_objective"],
-            membership.get("strategy", ""),
-            split,
+            memberships[key[:2]]["task"]["model"],
+            memberships[key[:2]]["membership"].get("score", "native"),
+            key[2],
+            memberships[key[:2]]["membership"]["logical_objective"],
+            memberships[key[:2]]["membership"].get("strategy", ""),
+            key[3],
         )
-        for identity in memberships.values()
-        if (membership := identity["membership"]).get("metric") == "cap"
-        for split in SPLITS
+        for key in structured_cap
     }
     if set(groups) != expected_panels:
         raise ValueError("Downstream rank-panel coverage differs from the manifest.")
@@ -551,7 +645,7 @@ def _downstream_rank_associations(
         for row in group:
             by_membership[(row["task_index"], row["membership_index"])].append(row)
         ordered = sorted(by_membership)
-        structured = [_structured_cap(key, memberships) for key in ordered]
+        structured = [structured_cap[(*key, panel[2], panel[5])] for key in ordered]
         random_columns = {
             "five_pairing_mean": [
                 statistics.fmean(row["cap"] for row in by_membership[key]) for key in ordered
@@ -564,7 +658,7 @@ def _downstream_rank_associations(
             ]
         cap_sources = {"structured_cap": structured, **random_columns}
         for endpoint in DOWNSTREAM_ENDPOINTS:
-            endpoint_values = [downstream[(key[0], key[1], endpoint)] for key in ordered]
+            endpoint_values = [downstream[(key[0], key[1], panel[2], endpoint)] for key in ordered]
             for source, cap_values in cap_sources.items():
                 rho, constant, ties = (
                     _spearman(cap_values, endpoint_values)
@@ -575,9 +669,10 @@ def _downstream_rank_associations(
                     {
                         "model": panel[0],
                         "selection_score": panel[1],
-                        "logical_objective": panel[2],
-                        "selection_strategy": panel[3],
-                        "split": panel[4],
+                        "evaluation_score": panel[2],
+                        "logical_objective": panel[3],
+                        "selection_strategy": panel[4],
+                        "split": panel[5],
                         "downstream_endpoint": endpoint,
                         "cap_source": source,
                         "cap_direction": "maximize",
@@ -598,18 +693,40 @@ def _downstream_rank_associations(
 
 
 def _rank_associations(
-    rows: list[dict[str, Any]], memberships: dict[tuple[int, int], dict[str, Any]]
+    rows: list[dict[str, Any]],
+    memberships: dict[tuple[int, int], dict[str, Any]],
+    structured_cap: dict[tuple[int, int, str, str], float],
 ) -> list[dict[str, Any]]:
     """Relate structured-CAP search ranks to random-CAP ranks without pooling panels."""
-    groups: dict[tuple[str, str, str], list[dict[str, Any]]] = defaultdict(list)
+    groups: dict[tuple[str, str, str, str, str, str], list[dict[str, Any]]] = defaultdict(list)
     for row in rows:
-        if row["selection_metric"] == "cap" and row["evaluation_score"] == row["selection_score"]:
-            groups[(row["model"], row["logical_objective"], row["split"])].append(row)
+        structured_key = (
+            row["task_index"],
+            row["membership_index"],
+            row["evaluation_score"],
+            row["split"],
+        )
+        if row["selection_metric"] == "cap" and structured_key in structured_cap:
+            groups[
+                (
+                    row["model"],
+                    row["selection_score"],
+                    row["evaluation_score"],
+                    row["logical_objective"],
+                    row["selection_strategy"],
+                    row["split"],
+                )
+            ].append(row)
     expected_panels = {
-        (identity["task"]["model"], membership["logical_objective"], split)
-        for identity in memberships.values()
-        if (membership := identity["membership"]).get("metric") == "cap"
-        for split in SPLITS
+        (
+            memberships[key[:2]]["task"]["model"],
+            memberships[key[:2]]["membership"].get("score", "native"),
+            key[2],
+            memberships[key[:2]]["membership"]["logical_objective"],
+            memberships[key[:2]]["membership"].get("strategy", ""),
+            key[3],
+        )
+        for key in structured_cap
     }
     if set(groups) != expected_panels:
         raise ValueError("Structured-CAP rank-panel coverage differs from the frozen manifest.")
@@ -619,12 +736,12 @@ def _rank_associations(
         for row in group:
             by_membership[(row["task_index"], row["membership_index"])].append(row)
         ordered = sorted(by_membership)
-        structured = [_structured_cap(key, memberships) for key in ordered]
+        structured = [structured_cap[(*key, group_key[2], group_key[5])] for key in ordered]
         for key in ordered:
             membership = memberships[key]["membership"]
             if (
                 memberships[key]["task"]["model"] != group_key[0]
-                or membership.get("logical_objective") != group_key[1]
+                or membership.get("logical_objective") != group_key[3]
             ):
                 raise ValueError(f"Structured CAP panel identity differs for membership {key}.")
         random_columns = {
@@ -648,8 +765,11 @@ def _rank_associations(
             output.append(
                 {
                     "model": group_key[0],
-                    "logical_objective": group_key[1],
-                    "split": group_key[2],
+                    "selection_score": group_key[1],
+                    "evaluation_score": group_key[2],
+                    "logical_objective": group_key[3],
+                    "selection_strategy": group_key[4],
+                    "split": group_key[5],
                     "random_source": source,
                     "structured_objective_index": 0,
                     "structured_direction": "maximize",
@@ -684,8 +804,8 @@ def build_random_cap_analysis(
     downstream_rows: list[dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
     """Return authenticated random-CAP values, variability, and rank diagnostics."""
-    rows, variability, memberships = _normalize(manifest, aggregate)
-    associations = _rank_associations(rows, memberships)
+    rows, variability, memberships, structured_cap = _normalize(manifest, aggregate)
+    associations = _rank_associations(rows, memberships, structured_cap)
     membership_scores = sum(
         len(task.get("memberships", [])) * len(task.get("scores", []))
         for task in manifest["tasks"]
@@ -700,20 +820,53 @@ def build_random_cap_analysis(
         "membership_scores": membership_scores,
         "seed_rows": len(rows),
         "variability_rows": len(variability),
+        "structured_cap_values": len(structured_cap),
         "rank_association_rows": len(associations),
         "rank_panels": len(associations) // 6,
         "rank_panels_are_unpooled": True,
         "random_cap_did_not_select_hyperparameters_or_checkpoints": True,
     }
+    structured_rows = []
+    for key, cap in sorted(structured_cap.items()):
+        identity = memberships[key[:2]]
+        task, membership, checkpoint = (
+            identity["task"],
+            identity["membership"],
+            identity["checkpoint"],
+        )
+        structured_rows.append(
+            {
+                "mode": manifest["mode"],
+                "task_index": key[0],
+                "membership_index": key[1],
+                "model": task["model"],
+                "trial_number": int(task["trial_number"]),
+                "training_seed": task.get("training_seed", ""),
+                "logical_objective": membership["logical_objective"],
+                "selection_score": membership.get("score", "native"),
+                "selection_metric": "cap",
+                "selection_strategy": membership.get("strategy", ""),
+                "evaluation_score": key[2],
+                "split": key[3],
+                "checkpoint_id": membership["checkpoint_id"],
+                "checkpoint_sha256": checkpoint["source_sha256"],
+                "cap": cap,
+            }
+        )
     result = {
         "method": method,
         "random_cap_values": rows,
         "random_cap_variability": variability,
+        "structured_cap_values": structured_rows,
         "structured_random_rank_associations": associations,
     }
     if downstream_rows is not None:
-        downstream, downstream_method = _normalize_downstream(downstream_rows, memberships)
-        downstream_associations = _downstream_rank_associations(rows, memberships, downstream)
+        downstream, downstream_method = _normalize_downstream(
+            downstream_rows, memberships, structured_cap
+        )
+        downstream_associations = _downstream_rank_associations(
+            rows, memberships, structured_cap, downstream
+        )
         defined = sum(row["spearman_defined"] for row in downstream_associations)
         method.update(
             {
@@ -821,7 +974,12 @@ def write_random_cap_analysis(
             expected_method = {
                 "schema_version": SCHEMA_VERSION,
                 "anomalies": result["method"]["downstream_anomalies"],
-                "endpoint_rows": result["method"]["downstream_rows"],
+                "endpoint_rows": downstream_provenance["downstream_table_rows"][
+                    "endpoints_long.csv"
+                ],
+                "oas_endpoint_rows": downstream_provenance["downstream_table_rows"][
+                    "oas_endpoints_long.csv"
+                ],
             }
         for field, value in expected_method.items():
             if endpoint_method.get(field) != value:
@@ -850,6 +1008,7 @@ def write_random_cap_analysis(
     artifact_names = [
         "random_cap_values",
         "random_cap_variability",
+        "structured_cap_values",
         "structured_random_rank_associations",
     ]
     if downstream_rows is not None:

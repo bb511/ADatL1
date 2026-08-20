@@ -268,10 +268,25 @@ def _random_analysis(
             }
         )
     tables = {"random_cap_values.csv": values, "random_cap_variability.csv": variability}
+    tables["structured_cap_values.csv"] = [
+        {
+            "model": "ae",
+            "selection_score": "native",
+            "evaluation_score": "native",
+            "selection_strategy": "cdf",
+            "split": split,
+            "checkpoint_sha256": "a" * 64,
+            "cap": 0.5,
+        }
+        for split in ("validate", "test")
+    ]
     tables["structured_random_rank_associations.csv"] = [
         {
             "model": "ae",
+            "selection_score": "native",
+            "evaluation_score": "native",
             "logical_objective": "native__cap__cdf",
+            "selection_strategy": "cdf",
             "split": split,
             "random_source": source,
             "n_checkpoints": 20,
@@ -311,6 +326,7 @@ def _random_analysis(
                     {
                         "model": "ae",
                         "selection_score": "native",
+                        "evaluation_score": "native",
                         "logical_objective": "native__cap__cdf",
                         "selection_strategy": "cdf",
                         "split": split,
@@ -344,6 +360,7 @@ def _random_analysis(
             "rank_panels": 2,
             "downstream_rows": 40,
             "downstream_memberships": 1,
+            "downstream_membership_scores": 1,
             "downstream_anomalies": 20,
             "downstream_endpoints": 2,
             "downstream_association_rows": 28,

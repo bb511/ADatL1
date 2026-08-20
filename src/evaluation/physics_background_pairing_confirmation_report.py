@@ -206,7 +206,10 @@ def _load_random_analysis(
     if expected_mode in {"discovery", "confirmation"}:
         required_association_fields = {
             "model",
+            "selection_score",
+            "evaluation_score",
             "logical_objective",
+            "selection_strategy",
             "split",
             "random_source",
             "n_checkpoints",
@@ -221,9 +224,16 @@ def _load_random_analysis(
             not required_association_fields <= set(row) for row in associations
         ):
             raise ValueError("Random-CAP rank-association schema or cardinality differs.")
-        panels: dict[tuple[str, str, str], set[str]] = {}
+        panels: dict[tuple[str, str, str, str, str, str], set[str]] = {}
         for row in associations:
-            key = (row["model"], row["logical_objective"], row["split"])
+            key = (
+                row["model"],
+                row["selection_score"],
+                row["evaluation_score"],
+                row["logical_objective"],
+                row["selection_strategy"],
+                row["split"],
+            )
             sources = panels.setdefault(key, set())
             if row["random_source"] in sources:
                 raise ValueError(f"Duplicate random-CAP association source for {key}.")
@@ -251,6 +261,7 @@ def _load_random_analysis(
     required_downstream_fields = {
         "model",
         "selection_score",
+        "evaluation_score",
         "logical_objective",
         "selection_strategy",
         "split",
@@ -274,10 +285,17 @@ def _load_random_analysis(
     }
     if any(not required_downstream_fields <= set(row) for row in downstream):
         raise ValueError("Random-CAP downstream-association schema differs.")
-    downstream_panels: dict[tuple[str, str, str, str, str, str], set[str]] = {}
+    downstream_panels: dict[tuple[str, str, str, str, str, str, str], set[str]] = {}
     defined_rows = 0
     rank_panel_n = {
-        (row["model"], row["logical_objective"], row["split"]): int(row["n_checkpoints"])
+        (
+            row["model"],
+            row["selection_score"],
+            row["evaluation_score"],
+            row["logical_objective"],
+            row["selection_strategy"],
+            row["split"],
+        ): int(row["n_checkpoints"])
         for row in associations
     }
 
@@ -290,6 +308,7 @@ def _load_random_analysis(
         key = (
             row["model"],
             row["selection_score"],
+            row["evaluation_score"],
             row["logical_objective"],
             row["selection_strategy"],
             row["split"],
@@ -312,7 +331,16 @@ def _load_random_analysis(
             or int(row["n_anomalies_per_checkpoint"]) != 20
             or n_checkpoints < 1
             or insufficient != (n_checkpoints < 3)
-            or rank_panel_n.get((row["model"], row["logical_objective"], row["split"]))
+            or rank_panel_n.get(
+                (
+                    row["model"],
+                    row["selection_score"],
+                    row["evaluation_score"],
+                    row["logical_objective"],
+                    row["selection_strategy"],
+                    row["split"],
+                )
+            )
             != n_checkpoints
         ):
             raise ValueError("Random-CAP downstream panel identity or cardinality differs.")
@@ -324,7 +352,8 @@ def _load_random_analysis(
         elif row["spearman_rho"]:
             raise ValueError("Undefined random-CAP downstream rho is not empty.")
     base_downstream_panels = {
-        (model, objective, split) for model, _, objective, _, split, _ in downstream_panels
+        (model, selection_score, evaluation_score, objective, strategy, split)
+        for model, selection_score, evaluation_score, objective, strategy, split, _ in downstream_panels
     }
     if (
         len(downstream) != int(method.get("downstream_association_rows", -1))
@@ -337,7 +366,7 @@ def _load_random_analysis(
         or int(method.get("downstream_endpoints", -1)) != 2
         or int(method.get("downstream_memberships", -1)) != int(method.get("memberships", -2))
         or int(method.get("downstream_rows", -1))
-        != int(method.get("downstream_memberships", -2)) * 20 * 2
+        != int(method.get("downstream_membership_scores", -2)) * 20 * 2
         or method.get("downstream_panels_are_unpooled") is not True
         or any(sources != expected_downstream_sources for sources in downstream_panels.values())
         or base_downstream_panels != set(rank_panel_n)
@@ -482,11 +511,12 @@ def _downstream_random_comparisons(
     tables: dict[str, list[dict[str, str]]],
 ) -> list[dict[str, Any]]:
     """Compare structured CAP with five-random-mean downstream rank alignment."""
-    grouped: dict[tuple[str, str, str, str, str, str], dict[str, dict[str, str]]] = {}
+    grouped: dict[tuple[str, str, str, str, str, str, str], dict[str, dict[str, str]]] = {}
     for row in tables["cap_downstream_rank_associations.csv"]:
         key = (
             row["model"],
             row["selection_score"],
+            row["evaluation_score"],
             row["logical_objective"],
             row["selection_strategy"],
             row["split"],
@@ -516,11 +546,12 @@ def _downstream_random_comparisons(
         output.append(
             {
                 "model": key[0],
-                "score": key[1],
-                "logical_objective": key[2],
-                "pairing": key[3],
-                "split": key[4],
-                "endpoint": key[5],
+                "selection_score": key[1],
+                "score": key[2],
+                "logical_objective": key[3],
+                "pairing": key[4],
+                "split": key[5],
+                "endpoint": key[6],
                 "n_checkpoints": int(structured["n_checkpoints"]),
                 "structured_rho": structured_rho,
                 "random_mean_rho": random_rho,
@@ -965,9 +996,14 @@ def build_confirmation_report(
             for row in discovery_tables["structured_random_rank_associations.csv"]
             if row["random_source"] == "five_pairing_mean"
         ]
-        association_index: dict[tuple[str, str], dict[str, dict[str, str]]] = {}
+        association_index: dict[tuple[str, str, str, str], dict[str, dict[str, str]]] = {}
         for row in mean_associations:
-            key = (row["model"], row["logical_objective"])
+            key = (
+                row["model"],
+                row["selection_score"],
+                row["evaluation_score"],
+                row["logical_objective"],
+            )
             if row["split"] in association_index.setdefault(key, {}):
                 raise ValueError(f"Duplicate random-CAP rank association: {key}.")
             association_index[key][row["split"]] = row
@@ -979,11 +1015,13 @@ def build_confirmation_report(
             [
                 "Structured-CAP versus mean-random-CAP checkpoint-rank association on the frozen discovery universe:",
                 "",
-                "| Model | Structured objective | N | Validation rho | Validation seed-rho range | Test rho | Test seed-rho range |",
-                "|---|---|---:|---:|---:|---:|---:|",
+                "| Model | Selection score | Evaluation score | Structured objective | N | Validation rho | Validation seed-rho range | Test rho | Test seed-rho range |",
+                "|---|---|---|---|---:|---:|---:|---:|---:|",
             ]
         )
-        for (model, objective), split_rows in sorted(association_index.items()):
+        for (model, selection_score, evaluation_score, objective), split_rows in sorted(
+            association_index.items()
+        ):
             validate, test = split_rows["validate"], split_rows["test"]
             if validate["n_checkpoints"] != test["n_checkpoints"]:
                 raise ValueError("Random-CAP rank-association split cardinalities differ.")
@@ -998,7 +1036,8 @@ def build_confirmation_report(
                 )
 
             lines.append(
-                f"| {model.upper()} | {objective} | {validate['n_checkpoints']} | "
+                f"| {model.upper()} | {selection_score} | {evaluation_score} | {objective} | "
+                f"{validate['n_checkpoints']} | "
                 f"{validate['spearman_rho'] or 'undefined'} | "
                 f"{seed_range(validate)} | {test['spearman_rho'] or 'undefined'} | "
                 f"{seed_range(test)} |"
@@ -1048,17 +1087,24 @@ def build_confirmation_report(
                 "",
                 "Structured-versus-random CAP rank association on the sealed confirmation checkpoints (unpooled by model, selector, split, and score):",
                 "",
-                "| Model | Objective | Split | N | Five-pairing-mean rho |",
-                "|---|---|---|---:|---:|",
+                "| Model | Selection score | Evaluation score | Objective | Split | N | Five-pairing-mean rho |",
+                "|---|---|---|---|---|---:|---:|",
             ]
         )
         for row in sorted(
             confirmation_mean_associations,
-            key=lambda item: (item["model"], item["logical_objective"], item["split"]),
+            key=lambda item: (
+                item["model"],
+                item["selection_score"],
+                item["evaluation_score"],
+                item["logical_objective"],
+                item["split"],
+            ),
         ):
             rho = row["spearman_rho"] or "undefined"
             lines.append(
-                f"| {row['model'].upper()} | {row['logical_objective']} | {row['split']} | "
+                f"| {row['model'].upper()} | {row['selection_score']} | "
+                f"{row['evaluation_score']} | {row['logical_objective']} | {row['split']} | "
                 f"{row['n_checkpoints']} | {rho} |"
             )
         confirmation_downstream = _downstream_random_comparisons(confirmation_tables)
@@ -1191,6 +1237,7 @@ def write_confirmation_report(
             "random_cap_analysis.json",
             "random_cap_values.csv",
             "random_cap_variability.csv",
+            "structured_cap_values.csv",
             "structured_random_rank_associations.csv",
             "cap_downstream_rank_associations.csv",
         ):

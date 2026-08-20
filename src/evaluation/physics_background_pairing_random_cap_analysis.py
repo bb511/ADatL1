@@ -482,6 +482,7 @@ def _normalize_downstream(
     rows: list[dict[str, Any]],
     memberships: dict[tuple[int, int], dict[str, Any]],
     structured_cap: dict[tuple[int, int, str, str], float],
+    mode: str,
 ) -> tuple[dict[tuple[int, int, str, str], float], dict[str, int]]:
     """Exact-join and average the two downstream endpoints over 20 anomalies."""
     by_membership_index: dict[int, tuple[tuple[int, int], dict[str, Any]]] = {}
@@ -494,10 +495,12 @@ def _normalize_downstream(
     expected_anomalies = set(DOWNSTREAM_DATASETS)
     expected_keys = {
         (membership_index, score, endpoint, anomaly)
-        for membership_index, (key, _) in by_membership_index.items()
-        for score in {
-            structured_key[2] for structured_key in structured_cap if structured_key[:2] == key
-        }
+        for membership_index, (_, identity) in by_membership_index.items()
+        for score in (
+            identity["task"]["scores"]
+            if mode == "confirmation"
+            else (identity["membership"].get("score", "native"),)
+        )
         for endpoint in DOWNSTREAM_ENDPOINTS
         for anomaly in DOWNSTREAM_DATASETS
     }
@@ -542,7 +545,10 @@ def _normalize_downstream(
                 raise ValueError(f"Endpoint {field} differs for membership {membership_index}.")
         if trial_number != int(task["trial_number"]):
             raise ValueError(f"Endpoint trial differs for membership {membership_index}.")
-        if not any(structured_key[:3] == (*key, score) for structured_key in structured_cap):
+        expected_scores = (
+            task["scores"] if mode == "confirmation" else (membership.get("score", "native"),)
+        )
+        if score not in expected_scores:
             raise ValueError(f"Endpoint score differs for membership {membership_index}.")
         source_path = checkpoint.get("source_path")
         if source_path is not None and row.get("checkpoint") != source_path:
@@ -563,7 +569,10 @@ def _normalize_downstream(
         if len(values) != len(DOWNSTREAM_DATASETS):
             raise ValueError(f"Endpoint anomaly count differs for membership panel {key}.")
         means[key] = statistics.fmean(values)
-    membership_scores = len({key[:3] for key in structured_cap})
+    membership_scores = sum(
+        len(identity["task"]["scores"]) if mode == "confirmation" else 1
+        for identity in memberships.values()
+    )
     expected_means = membership_scores * len(DOWNSTREAM_ENDPOINTS)
     if len(means) != expected_means:
         raise ValueError("Endpoint mean coverage differs after the exact membership join.")
@@ -862,7 +871,7 @@ def build_random_cap_analysis(
     }
     if downstream_rows is not None:
         downstream, downstream_method = _normalize_downstream(
-            downstream_rows, memberships, structured_cap
+            downstream_rows, memberships, structured_cap, manifest["mode"]
         )
         downstream_associations = _downstream_rank_associations(
             rows, memberships, structured_cap, downstream

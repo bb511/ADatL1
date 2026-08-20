@@ -2520,6 +2520,9 @@ def test_submit_retrains_uses_exact_missing_indices(monkeypatch, tmp_path) -> No
 
     assert job_id == "987"
     assert "--array=0-1%2" in calls[0]
+    assert "TORCH_FORCE_NO_WEIGHTS_ONLY_LOAD=1" in next(
+        argument for argument in calls[0] if argument.startswith("--export=")
+    )
     with (root / "state" / "job_history.csv").open(encoding="utf-8") as handle:
         ledger = list(csv.DictReader(handle))
     assert [row["job_id"] for row in ledger] == ["987_0", "987_1"]
@@ -2749,6 +2752,52 @@ def test_retire_unmaterialized_retrains_seals_only_absent_canceled_tasks(
     assert ledger["400_0"]["log_sha256"] == operations._sha256(receipt)
     assert ledger["400_1"]["state"] == "COMPLETED"
     assert operations.retire_unmaterialized_retrains(root, repository, "400") == receipt
+
+
+def test_retire_unmaterialized_retrains_accepts_terminal_parent_accounting(
+    monkeypatch, tmp_path
+) -> None:
+    """A terminal array parent authenticates children canceled before allocation."""
+    root, repository = _campaign(tmp_path)
+    _authenticate(monkeypatch)
+    missing_log = tmp_path / "logs/physical-401_0.out"
+    operations._atomic_csv(
+        root / "state/job_history.csv",
+        [
+            {
+                "job_id": "401_0",
+                "kind": "retrain",
+                "model": "ae",
+                "state": "PENDING",
+                "commit": "a" * 40,
+                "log_path": str(missing_log),
+                "bindings_sha256": "b" * 64,
+            }
+        ],
+    )
+    monkeypatch.setattr(operations, "_live_retrain_job_ids", lambda: set())
+    monkeypatch.setattr(
+        operations,
+        "_accounting",
+        lambda job_ids: {
+            "401": {
+                "state": "CANCELLED",
+                "elapsed": "00:00:00",
+                "exit_code": "0:0",
+                "started": "",
+                "ended": "2026-08-20T00:00:00+00:00",
+            }
+        },
+    )
+
+    receipt = operations.retire_unmaterialized_retrains(root, repository, "401")
+
+    payload = json.loads(receipt.read_text(encoding="utf-8"))
+    assert payload["terminal_accounting"]["401"]["state"] == "CANCELLED"
+    with (root / "state/job_history.csv").open(encoding="utf-8", newline="") as handle:
+        ledger = list(csv.DictReader(handle))
+    assert ledger[0]["state"] == "CANCELLED"
+    assert ledger[0]["log_sha256"] == operations._sha256(receipt)
 
 
 def test_submit_retrains_allows_only_disjoint_indices_while_an_array_is_live(

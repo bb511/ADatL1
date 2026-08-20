@@ -2355,6 +2355,9 @@ def _submit_retrains_locked(
         "OUTPUT_DIR": root.resolve() / "runtime" / "outputs",
         "CHECKPOINT_DIR": root.resolve() / "runtime" / "checkpoints",
         "WANDB_MODE": "offline",
+        # Lightning resumes these trusted, locally produced full-state checkpoints. PyTorch
+        # otherwise defaults to weights-only loading and rejects the serialized optimizer.
+        "TORCH_FORCE_NO_WEIGHTS_ONLY_LOAD": "1",
         "PHYSICS_BGPAIR_RETRAIN_TASK_MAP": task_map_path.resolve(),
         "PHYSICS_BGPAIR_RETRAIN_TASK_MAP_SHA256": task_map_sha256,
     }
@@ -3445,9 +3448,24 @@ def retire_unmaterialized_retrains(root: Path, repository: Path, array_job_id: s
         ]
         if not array_rows:
             raise RuntimeError(f"Retrain array {array_job_id} is absent from the ledger.")
-        accounting = _accounting([row["job_id"] for row in array_rows])
-        if not accounting or any(
-            _normalized_state(row["state"]) not in TERMINAL_STATES for row in accounting.values()
+        scheduler_accounting = _accounting(
+            [array_job_id, *(row["job_id"] for row in array_rows)]
+        )
+        parent_accounting = scheduler_accounting.get(array_job_id)
+        accounting = {
+            job_id: observed
+            for job_id, observed in scheduler_accounting.items()
+            if job_id != array_job_id
+        }
+        terminal_parent = parent_accounting is not None and _normalized_state(
+            parent_accounting["state"]
+        ) in TERMINAL_STATES
+        if (
+            (not accounting and not terminal_parent)
+            or any(
+                _normalized_state(row["state"]) not in TERMINAL_STATES
+                for row in accounting.values()
+            )
         ):
             raise RuntimeError(f"Retrain array {array_job_id} lacks terminal accounting evidence.")
         ledger_by_job = {row["job_id"]: row for row in array_rows}
@@ -3497,7 +3515,7 @@ def retire_unmaterialized_retrains(root: Path, repository: Path, array_job_id: s
             "code_commit": design["code_commit"],
             "array_job_id": array_job_id,
             "retired_at": retired_at,
-            "terminal_accounting": accounting,
+            "terminal_accounting": scheduler_accounting,
             "retired_tasks": [
                 {
                     "job_id": row["job_id"],

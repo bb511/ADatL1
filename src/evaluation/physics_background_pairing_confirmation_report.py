@@ -451,6 +451,38 @@ def _completion_summary(analysis_manifest: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def _campaign_attempt_summary(analysis_manifest: dict[str, Any]) -> dict[str, Any]:
+    """Summarize scheduler attempts while requiring a quiescent final campaign ledger."""
+    receipt_path = Path(analysis_manifest["inputs"]["endpoint_receipt"]).resolve(strict=True)
+    receipt = json.loads(receipt_path.read_text(encoding="utf-8"))
+    campaign_root = receipt.get("campaign_root")
+    if not campaign_root:
+        return {"available": False}
+    ledger_path = Path(campaign_root).resolve(strict=True) / "state/job_history.csv"
+    rows = _read_csv(ledger_path)
+    retrains = [row for row in rows if row.get("kind") in {"retrain", "retrain_superseded"}]
+    active = [
+        row
+        for row in retrains
+        if row.get("state") in {"PENDING", "RUNNING", "CONFIGURING", "COMPLETING", "SUSPENDED"}
+    ]
+    if active:
+        raise ValueError("Final report requires a quiescent retrain ledger.")
+    counts = {
+        state: sum(row.get("state") == state for row in retrains)
+        for state in ("COMPLETED", "FAILED", "CANCELLED", "TIMEOUT", "OUT_OF_MEMORY")
+    }
+    return {
+        "available": True,
+        "ledger": str(ledger_path),
+        "ledger_sha256": _sha256(ledger_path),
+        "attempt_rows": len(retrains),
+        "states": counts,
+        "terminal_noncompleted_attempts": len(retrains) - counts["COMPLETED"],
+        "missing_final_endpoints": 0,
+    }
+
+
 def _load_confirmation_context(
     context_dir: Path, analysis_manifest: dict[str, Any]
 ) -> tuple[dict[str, Any], dict[str, list[dict[str, str]]]]:
@@ -734,6 +766,7 @@ def build_confirmation_report(
         )
     manifest, tables = _load_analysis(analysis_dir.resolve(strict=True))
     completion = _completion_summary(manifest)
+    attempt_summary = _campaign_attempt_summary(manifest)
     context_receipt = None
     context_tables = None
     if confirmation_context is not None:
@@ -1126,6 +1159,14 @@ def build_confirmation_report(
             f"- Confirmation analysis SHA-256: `{manifest['content_sha256']}`.",
             f"- Paper-reference SHA-256: `{paper_reference_hash}`.",
             f"- Seeds: {', '.join(map(str, manifest['method']['seeds']))}; anomalies: {manifest['method']['anomalies']}.",
+            (
+                f"- Scheduler attempt ledger: {attempt_summary['attempt_rows']} terminal retrain "
+                f"attempt rows, including {attempt_summary['terminal_noncompleted_attempts']} "
+                "non-completed scheduler attempts; all required final endpoints are "
+                "present."
+                if attempt_summary["available"]
+                else "- Scheduler-attempt ledger was unavailable in this portable fixture."
+            ),
             "- Downstream anomalies were already inspected during discovery. These results establish 200-epoch and seed stability, not a fully untouched external holdout.",
             "- Paper AUPRC is unavailable and is not inferred.",
             "",
@@ -1137,6 +1178,7 @@ def build_confirmation_report(
         "scientifically_final": report_mode == "final",
         "analysis_content_sha256": manifest["content_sha256"],
         "completion": completion,
+        "scheduler_attempts": attempt_summary,
         "paper_reference_sha256": paper_reference_hash,
         "paper_comparison": paper_rows,
         "paper_matched_positive": paper_better,

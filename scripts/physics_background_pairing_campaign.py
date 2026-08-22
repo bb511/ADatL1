@@ -288,14 +288,21 @@ def _load_retrain_task_map(root: Path, task_map: Path, expected_sha256: str) -> 
     design = json.loads(design_path.read_text(encoding="utf-8"))
     if design.get("schema_version") != DESIGN_SCHEMA_VERSION:
         raise RuntimeError(f"Retrain task map references an invalid campaign: {design_path}")
-    manifest_path = _retrain_manifest_path(root).resolve()
+    manifest_value = payload.get("manifest")
+    allowed_manifests = {
+        (root / "selection" / "pareto_retrain_manifest.json").resolve(),
+        (root / "selection" / "effective_retrain_manifest.json").resolve(),
+    }
+    manifest_path = Path(str(manifest_value)).expanduser().resolve()
+    if manifest_path not in allowed_manifests or not manifest_path.is_file():
+        raise RuntimeError(f"Retrain task map names an invalid manifest: {task_map}")
     manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
     entries = payload.get("entries", [])
     if (
         payload.get("schema_version") != 1
         or payload.get("code_commit") != design["code_commit"]
         or payload.get("campaign_root") != str(root.resolve())
-        or payload.get("manifest") != str(manifest_path)
+        or manifest_value != str(manifest_path)
         or payload.get("manifest_sha256") != _sha256(manifest_path)
         or payload.get("batch_size") != len(entries)
         or not 1 <= len(entries) <= MAX_RETRAIN_ARRAY_TASKS

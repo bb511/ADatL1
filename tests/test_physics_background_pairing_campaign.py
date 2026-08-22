@@ -1,6 +1,8 @@
 """Tests for the six shared physics background-pairing studies."""
 
 import importlib.util
+import hashlib
+import json
 import random
 from pathlib import Path
 from types import SimpleNamespace
@@ -26,6 +28,58 @@ def test_retrain_manifest_prefers_frozen_reserve_extension(tmp_path: Path) -> No
     assert campaign._retrain_manifest_path(tmp_path) == base
     effective.write_text("{}", encoding="utf-8")
     assert campaign._retrain_manifest_path(tmp_path) == effective
+
+
+def test_base_task_map_remains_valid_after_reserve_extension(tmp_path: Path) -> None:
+    """Reserve freezing must not invalidate scheduler evidence for completed base runs."""
+    root = tmp_path / "campaign"
+    selection = root / "selection"
+    maps = root / "state" / "retrain_task_maps"
+    selection.mkdir(parents=True)
+    maps.mkdir(parents=True)
+    row = {"retrain_index": 0, "model": "ae"}
+    base = selection / "pareto_retrain_manifest.json"
+    effective = selection / "effective_retrain_manifest.json"
+    base.write_text(
+        json.dumps({"schema_version": 2, "code_commit": "a" * 40, "retrain_runs": [row]}),
+        encoding="utf-8",
+    )
+    effective.write_text(
+        json.dumps(
+            {
+                "schema_version": 2,
+                "code_commit": "a" * 40,
+                "retrain_runs": [row, {"retrain_index": 1, "model": "ae"}],
+            }
+        ),
+        encoding="utf-8",
+    )
+    (root / "design.json").write_text(
+        json.dumps({"schema_version": campaign.DESIGN_SCHEMA_VERSION, "code_commit": "a" * 40}),
+        encoding="utf-8",
+    )
+    payload = {
+        "schema_version": 1,
+        "code_commit": "a" * 40,
+        "campaign_root": str(root.resolve()),
+        "manifest": str(base.resolve()),
+        "manifest_sha256": campaign._sha256(base),
+        "batch_size": 1,
+        "entries": [
+            {
+                "local_task_id": 0,
+                "retrain_index": 0,
+                "model": "ae",
+                "row_sha256": campaign._json_sha256(row),
+            }
+        ],
+    }
+    encoded = json.dumps(payload, indent=2, sort_keys=True) + "\n"
+    digest = hashlib.sha256(encoded.encode()).hexdigest()
+    task_map = maps / f"{digest}.json"
+    task_map.write_text(encoded, encoding="utf-8")
+
+    assert campaign.resolve_retrain_task_index(root, task_map, digest, 0) == 0
 
 
 def _write_exact_checkpoint(path: Path, epoch: int = 0) -> None:

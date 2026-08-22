@@ -2520,9 +2520,9 @@ def test_submit_retrains_uses_exact_missing_indices(monkeypatch, tmp_path) -> No
 
     assert job_id == "987"
     assert "--array=0-1%2" in calls[0]
-    assert "TORCH_FORCE_NO_WEIGHTS_ONLY_LOAD=1" in next(
-        argument for argument in calls[0] if argument.startswith("--export=")
-    )
+    exports = next(argument for argument in calls[0] if argument.startswith("--export="))
+    assert "TORCH_FORCE_NO_WEIGHTS_ONLY_LOAD=1" in exports
+    assert f"PYTHONPATH={repository.resolve()}" in exports
     with (root / "state" / "job_history.csv").open(encoding="utf-8") as handle:
         ledger = list(csv.DictReader(handle))
     assert [row["job_id"] for row in ledger] == ["987_0", "987_1"]

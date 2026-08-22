@@ -23,6 +23,9 @@ export UV_PYTHON_INSTALL_DIR="${SCRATCH_ROOT}/python"
 export UV_MANAGED_PYTHON=1
 export HYDRA_FULL_ERROR=1
 export MLFLOW_DISABLE_TELEMETRY=true
+# The shared uv environment can be editable from a different worktree. Bind
+# imports to the repository whose generator provenance the manifest authenticates.
+export PYTHONPATH="${REPOSITORY}${PYTHONPATH:+:${PYTHONPATH}}"
 
 cd "${REPOSITORY}"
 srun "${UV_PROJECT_ENVIRONMENT}/bin/python" \

@@ -42,6 +42,9 @@ The cache was new and isolated because the former shared cache also contained an
 incomplete `adl1t_datamaker` archive. After verification, the replacement directory
 was moved to the unchanged runtime path `.venv-clariden`; the damaged directory was
 preserved as `.venv-clariden-corrupt-20260822T1317`.
+Because virtual-environment console-script shebangs retain the off-path build prefix,
+`.venv-clariden-recovery-ddfcfbb-v2` is a symlink to `.venv-clariden`; direct Python
+and installed console-script entry points therefore resolve the same verified files.
 
 ## Verification gates
 

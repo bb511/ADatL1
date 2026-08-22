@@ -1135,6 +1135,20 @@ checkout. OAS and random CAP remain
 diagnostics on native-selected checkpoints; neither creates a selector, membership,
 training run, or checkpoint choice.
 
+If the frozen primary analysis triggers reserve seeds, use the clean reserve-only
+control-plane commit/worktree below when freezing and executing the extension:
+
+```text
+commit: 6cb560a1f6fe87da354b310c999dda184798dca6
+worktree: /iopsstor/scratch/cscs/vjimenez/adatl1/worktrees/physics_background_reserve_6cb560a
+```
+
+It is a direct child of `ddfcfbb`; its complete diff is restricted to the reserve
+execution allowlist, and `_reserve_execution_identity` authenticates it with diff
+SHA-256 `e4d9143084048ad4cc0c5157bd24f4162e56fe4916efa770faf5e929bb65c4d4`.
+The focused reserve/submit test suite passed 8 tests. Do not freeze or submit this
+extension before `reserve_seed_decisions.csv` and its primary-analysis receipt exist.
+
 Always pass the immutable-presort random-table manifest explicitly for confirmation:
 
 ```text

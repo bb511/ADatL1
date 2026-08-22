@@ -1139,15 +1139,19 @@ If the frozen primary analysis triggers reserve seeds, use the clean reserve-onl
 control-plane commit/worktree below when freezing and executing the extension:
 
 ```text
-commit: 6cb560a1f6fe87da354b310c999dda184798dca6
+commit: c3c3cce529289ea57694f5659aa133e073323256
 worktree: /iopsstor/scratch/cscs/vjimenez/adatl1/worktrees/physics_background_reserve_6cb560a
 ```
 
-It is a direct child of `ddfcfbb`; its complete diff is restricted to the reserve
-execution allowlist, and `_reserve_execution_identity` authenticates it with diff
-SHA-256 `e4d9143084048ad4cc0c5157bd24f4162e56fe4916efa770faf5e929bb65c4d4`.
-The focused reserve/submit test suite passed 8 tests. Do not freeze or submit this
-extension before `reserve_seed_decisions.csv` and its primary-analysis receipt exist.
+It descends from the direct-child reserve commit `6cb560a`; its complete diff from
+`ddfcfbb` remains restricted to the reserve execution allowlist, and
+`_reserve_execution_identity` authenticates it with diff SHA-256
+`084375836706544388929fb9c9f24699ed8f585b630715621a3d5d3bac9424cf`.
+The two follow-up commits preserve the original manifest identity of completed base
+task maps and receipts after the reserve overlay is frozen. The focused compatibility
+suite passed 5 tests in addition to the original reserve/submit suite. Do not freeze
+or submit this extension before `reserve_seed_decisions.csv` and its primary-analysis
+receipt exist.
 
 Always pass the immutable-presort random-table manifest explicitly for confirmation:
 

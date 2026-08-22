@@ -1612,12 +1612,15 @@ def _validate_retrain_marker(marker: Path, row: dict[str, Any]) -> bool:
     return True
 
 
-def _retrain_manifest_path(root: Path) -> Path:
-    """Use the immutable reserve-extended runner when one has been frozen."""
+def _retrain_manifest_path(root: Path, index: int | None = None) -> Path:
+    """Use base evidence for base indices and the overlay for reserve work."""
+    base = root / "selection" / "pareto_retrain_manifest.json"
     effective = root / "selection" / "effective_retrain_manifest.json"
-    return (
-        effective if effective.is_file() else root / "selection" / "pareto_retrain_manifest.json"
-    )
+    if index is not None and base.is_file():
+        base_rows = json.loads(base.read_text(encoding="utf-8")).get("retrain_runs", [])
+        if 0 <= index < len(base_rows):
+            return base
+    return effective if effective.is_file() else base
 
 
 def missing_retrains(root: Path, repository: Path) -> list[int]:
@@ -2246,14 +2249,21 @@ def _load_retrain_task_map(root: Path, design: dict[str, Any], digest: str) -> d
     if not path.is_file() or _sha256(path) != digest:
         raise RuntimeError(f"Retrain task map is missing or changed: {path}")
     payload = json.loads(path.read_text(encoding="utf-8"))
-    manifest_path = _retrain_manifest_path(root)
+    manifest_value = payload.get("manifest")
+    allowed_manifests = {
+        (root / "selection" / "pareto_retrain_manifest.json").resolve(),
+        (root / "selection" / "effective_retrain_manifest.json").resolve(),
+    }
+    manifest_path = Path(str(manifest_value)).expanduser().resolve()
+    if manifest_path not in allowed_manifests or not manifest_path.is_file():
+        raise RuntimeError(f"Retrain task map names an invalid manifest: {path}")
     manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
     entries = payload.get("entries", [])
     if (
         payload.get("schema_version") != 1
         or payload.get("code_commit") != design["code_commit"]
         or payload.get("campaign_root") != str(root.resolve())
-        or payload.get("manifest") != str(manifest_path.resolve())
+        or manifest_value != str(manifest_path)
         or payload.get("manifest_sha256") != _sha256(manifest_path)
         or payload.get("batch_size") != len(entries)
         or not 1 <= len(entries) <= MAX_RETRAIN_ARRAY_TASKS
@@ -3236,7 +3246,7 @@ def _validate_retrain_receipt(
     if (ledger_row.get("success_sha256") or "") not in {"", receipt_sha256}:
         raise RuntimeError(f"Retrain receipt changed after ledger sealing: {receipt_path}")
     index = _retrain_index_for_ledger_row(root, design, ledger_row)
-    manifest_path = _retrain_manifest_path(root)
+    manifest_path = _retrain_manifest_path(root, index)
     manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
     runs = manifest.get("retrain_runs", [])
     expected_row = runs[index] if 0 <= index < len(runs) else None
@@ -3343,7 +3353,7 @@ def _completed_retrain_marker(root: Path, design: dict[str, Any], row: dict[str,
         )
 
     index = _retrain_index_for_ledger_row(root, design, row)
-    manifest_path = _retrain_manifest_path(root)
+    manifest_path = _retrain_manifest_path(root, index)
     manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
     runs = manifest.get("retrain_runs", [])
     if (

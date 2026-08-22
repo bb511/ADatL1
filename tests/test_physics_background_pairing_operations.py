@@ -35,6 +35,41 @@ def test_operations_prefer_frozen_reserve_extension_manifest(tmp_path: Path) -> 
     assert operations._retrain_manifest_path(tmp_path) == effective
 
 
+def test_operations_keep_base_task_maps_valid_after_reserve_extension(tmp_path: Path) -> None:
+    """Historical ledger bindings remain attached to their immutable base manifest."""
+    root = tmp_path / "campaign"
+    selection = root / "selection"
+    selection.mkdir(parents=True)
+    base_row = {"retrain_index": 0, "model": "ae"}
+    reserve_row = {"retrain_index": 1, "model": "ae"}
+    base = selection / "pareto_retrain_manifest.json"
+    effective = selection / "effective_retrain_manifest.json"
+    base.write_text(
+        json.dumps({"schema_version": 2, "code_commit": "a" * 40, "retrain_runs": [base_row]}),
+        encoding="utf-8",
+    )
+    effective.write_text(
+        json.dumps(
+            {
+                "schema_version": 2,
+                "code_commit": "a" * 40,
+                "retrain_runs": [base_row, reserve_row],
+            }
+        ),
+        encoding="utf-8",
+    )
+    design = {"code_commit": "a" * 40}
+    task_map, digest, _ = operations._write_retrain_task_map(
+        root, design, base, json.loads(base.read_text(encoding="utf-8")), [0]
+    )
+
+    assert operations._load_retrain_task_map(root, design, digest)["manifest"] == str(
+        base.resolve()
+    )
+    assert operations._retrain_manifest_path(root, 0) == base
+    assert operations._retrain_manifest_path(root, 1) == effective
+
+
 def test_reserve_task_launches_from_authenticated_post_base_worktree(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

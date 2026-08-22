@@ -1120,16 +1120,18 @@ The immutable training campaign remains bound to `ddfcfbb` and continues from:
 ```
 
 Post-training extraction, random-CAP evaluation, analysis, context, and reporting are
-now pinned to clean detached commit/worktree `ba4a889`:
+now pinned to clean detached commit/worktree `35cc29c`:
 
 ```text
-/iopsstor/scratch/cscs/vjimenez/adatl1/worktrees/physics_background_analysis_ba4a889
+/iopsstor/scratch/cscs/vjimenez/adatl1/worktrees/physics_background_analysis_35cc29c
 ```
 
 That commit includes the confirmation-analysis/random-analysis receipt handoff,
 immutable analysis receipts, same-checkpoint structured/random native/OAS CAP,
 non-CAP endpoint preservation, portable completion evidence, and fail-closed
-generator provenance for every post-training phase. OAS and random CAP remain
+generator provenance for every post-training phase. It also binds Slurm imports to
+the authenticated execution worktree rather than an editable environment's source
+checkout. OAS and random CAP remain
 diagnostics on native-selected checkpoints; neither creates a selector, membership,
 training run, or checkpoint choice.
 

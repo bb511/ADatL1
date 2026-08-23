@@ -1,203 +1,159 @@
-# Background-pairing experiment: efficiency and AUPRC results
+# Physics background-pairing confirmation: 200-epoch primary results
 
 ## Executive answer
 
-The two research questions now have endpoint-complete answers. Here, **efficiency**
-is mean signal efficiency at the 250 Hz operating point, and **AUPRC** is mean
-average precision over the same 20 downstream anomaly datasets.
+The complete primary campaign contains **84/84 authenticated 200-epoch retraining
+runs**: 28 model/selector configurations, three fixed seeds, and 20 downstream
+anomaly datasets. Efficiency is mean signal efficiency at 250 Hz; AUPRC is mean
+average precision. The optional two-seed extension was cancelled for cost after
+partial runs reached epochs 40–80. Those partial trajectories are excluded from
+every number below.
 
-1. **Does CAP beat W1 and drift?** With the controlled CDF pairing and native scores,
-   CAP has the best macro-average on both endpoints: **5.99% efficiency / 0.537
-   AUPRC**, versus **4.12% / 0.496** for W1 and **4.66% / 0.512** for drift. Per
-   algorithm, CDF-CAP wins AUPRC for **5/6** models and efficiency for **3/6**;
-   W1 wins efficiency for the other three, while drift wins AUPRC only for DSVAE.
-2. **Does learned pairing improve CAP?** Not universally. Relative to CDF-CAP,
-   the best learned pairing improves efficiency for VAE, DSVAE, DeepSVDD, and
-   RealNVP, ties DSAE, and hurts AE. It improves AUPRC for DSVAE and DeepSVDD,
-   ties DSAE and RealNVP, and hurts AE and VAE. DSVAE has the clearest joint gain;
-   DeepSVDD improves AUPRC while its efficiency is effectively tied with CDF.
-3. **Does OAS help AE/VAE?** No overall. Every one of the 14 matched OAS results
-   has lower efficiency than its native-score counterpart, and 12/14 also have
-   lower AUPRC. Native MSE/KL remains the primary choice.
+1. **Does CAP beat W1 and drift?** CDF-CAP is directionally better in **11/12
+   efficiency contrasts**, with an equal-model macro advantage of +1.16 pp over
+   drift and +0.80 pp over W1. It is not universally better: after multiplicity
+   adjustment only SVDD CAP versus drift is a meaningful efficiency improvement.
+   AUPRC is mixed: CAP is better in **5/12 contrasts**, with DSVAE CAP versus drift
+   meaningfully better and AE CAP versus W1 meaningfully worse.
+2. **Does learned pairing improve CAP over CDF pairing?** **Not overall.** Only
+   6/24 model/pairing efficiency contrasts and 9/24 AUPRC contrasts are positive;
+   none is an adjusted meaningful improvement. Every fixed learned pairing has a
+   negative macro-average delta versus CDF on both endpoints.
+3. **Does OAS help AE/VAE?** No. Padding-masked OAS improves 0/14 matched
+   efficiency cells and 2/14 AUPRC cells. The native MSE/KL scores remain better.
+4. **Are results better than the paper?** The changed background0/background1
+   system is directionally higher in **11/18 method-matched efficiency cells**.
+   This compares two complete systems; it does not causally isolate the dataset
+   change. The paper provides no matched physics AUPRC.
 
-The main scientific result is therefore more nuanced than the efficiency-only
-result: **CAP is the strongest controlled selector overall, while learned pairing
-can improve the low-rate operating point without necessarily improving global
-ranking quality.**
+The strongest defensible conclusion is therefore: **CDF-CAP has a broad
+directional efficiency advantage over W1/drift, but learned pairings do not
+improve CDF-CAP robustly, and CAP does not dominate AUPRC.**
 
-## Complete result table
+## Complete primary matrix
 
-Each campaign cell is **efficiency % / AUPRC**. The four learned-pairing columns
-and CDF are CAP selectors. W1 and drift do not consume event pairings. Paper
-references are efficiency-only (`CAP / W1 / Stable`); the paper did not report a
-directly comparable physics AUPRC, so no paper AUPRC is invented here. Bold marks
-the best campaign efficiency and the best campaign AUPRC in each row independently;
-all exact ties are marked.
+Each cell is `efficiency / AUPRC`, averaged over three seeds and 20 anomalies.
+Bold marks the efficiency winner and AUPRC winner independently within each row.
+Flat, Summary, Typed, JetCLR, and CDF are CAP pairings; W1 and Drift are unpaired
+selectors.
 
-| Model | Score | Paper efficiency: CAP / W1 / Stable | Flat CAP | Physics-summary CAP | Typed-sliced CAP | JetCLR CAP | CDF CAP | W1 | Drift |
-|---|---|---:|---:|---:|---:|---:|---:|---:|---:|
-| AE | native MSE | 5.73 / 3.22 / 4.29% | 4.13% / 0.617 | 4.13% / 0.617 | 4.13% / 0.617 | 4.21% / 0.623 | 4.71% / **0.628** | **4.77%** / 0.619 | 4.13% / 0.617 |
-| AE | masked OAS | not reported | 2.64% / 0.501 | 2.75% / **0.501** | 2.66% / 0.498 | **3.09%** / 0.481 | 2.64% / 0.501 | 2.37% / 0.452 | 2.37% / 0.462 |
-| VAE | native latent KL | 4.79 / 4.49 / 4.39% | **5.36%** / 0.512 | 5.21% / 0.308 | **5.36%** / 0.512 | 5.21% / 0.308 | 4.53% / **0.634** | 4.67% / 0.632 | 4.67% / 0.632 |
-| VAE | masked OAS | not reported | 2.78% / 0.457 | 2.78% / 0.457 | 2.78% / 0.457 | 2.78% / 0.457 | 2.91% / 0.494 | **4.25% / 0.544** | 2.82% / 0.483 |
-| DSAE | native reconstruction | 8.55 / 3.75 / 3.57% | 6.10% / **0.601** | 5.35% / 0.585 | 5.35% / 0.585 | 5.35% / 0.585 | 6.10% / **0.601** | **6.15%** / 0.599 | 5.35% / 0.585 |
-| DSVAE | native variational | 5.02 / 0.80 / 4.85% | 6.92% / 0.626 | 6.01% / 0.039 | **7.40%** / 0.633 | 6.78% / 0.649 | 6.84% / 0.627 | 0.84% / 0.533 | 6.39% / **0.672** |
-| DeepSVDD | native center distance | 4.03 / 3.25 / 3.56% | **8.28% / 0.315** | 7.23% / 0.290 | 7.23% / 0.290 | 7.23% / 0.290 | 8.27% / 0.303 | 5.48% / 0.256 | 4.65% / 0.234 |
-| RealNVP | native likelihood | 3.26 / 1.66 / 3.17% | 5.50% / **0.431** | **7.57%** / 0.387 | 3.57% / 0.406 | 3.32% / 0.333 | 5.50% / **0.431** | 2.78% / 0.333 | 2.78% / 0.333 |
+| Model | Flat CAP | Summary CAP | Typed CAP | JetCLR CAP | CDF CAP | W1 | Drift |
+|---|---:|---:|---:|---:|---:|---:|---:|
+| AE | 4.11% / 0.611 | 4.11% / 0.611 | 4.11% / 0.611 | **5.24%** / 0.602 | 4.37% / 0.592 | 3.73% / **0.620** | 4.11% / 0.611 |
+| VAE | **4.75%** / 0.254 | 4.58% / 0.534 | 4.64% / 0.239 | 4.58% / 0.534 | 4.46% / 0.592 | 4.52% / **0.618** | 4.41% / 0.607 |
+| DSAE | 7.53% / 0.589 | 5.71% / 0.591 | 5.71% / 0.591 | 5.71% / 0.591 | **7.71%** / 0.588 | 7.53% / 0.589 | 5.39% / **0.594** |
+| DSVAE | 2.90% / 0.505 | **5.14%** / 0.068 | 1.64% / 0.348 | 1.02% / 0.219 | 4.66% / **0.657** | 3.24% / 0.544 | 4.18% / 0.522 |
+| DeepSVDD | 5.46% / 0.253 | 6.09% / 0.263 | 6.09% / 0.263 | 6.09% / 0.263 | **6.63% / 0.278** | 5.07% / 0.255 | 4.54% / 0.257 |
+| RealNVP | **3.96%** / 0.369 | 1.95% / 0.359 | 2.43% / **0.390** | 2.29% / 0.176 | **3.96%** / 0.369 | 2.94% / 0.342 | 2.20% / 0.385 |
 
-These are not 32 isolated configurations. The analysis authenticates **421 unique
-physical checkpoints**, **601 checkpoint/score evaluations**, and **591 Pareto-front
-memberships** across 56 logical fronts. The table reports one efficiency-selected
-checkpoint per model, score, and selector/pairing combination.
+The apparent DSVAE Summary efficiency winner has AUPRC 0.068, illustrating why
+the two endpoints must be reported together rather than cherry-picking efficiency.
 
-## Research question 1: CAP versus W1 and drift
+## Pairing versus the CDF control
 
-### Controlled comparison: CDF-CAP versus unpaired selectors
+Equal-model macro deltas for each fixed learned pairing relative to CDF-CAP:
 
-CDF is the prespecified control and therefore the cleanest comparison, without a
-best-of-four pairing advantage.
+| Learned pairing | Efficiency delta | AUPRC delta | Interpretation |
+|---|---:|---:|---|
+| Flat physical | -0.513 pp | -0.082 | Worse on average |
+| Physics summary | -0.702 pp | -0.108 | Worse on average |
+| Typed sliced-Wasserstein | -1.194 pp | -0.106 | Worse on average |
+| JetCLR | -1.143 pp | -0.115 | Worse on average |
 
-| Native-score model | Best efficiency selector | Best AUPRC selector | CDF-CAP | W1 | Drift |
-|---|---|---|---:|---:|---:|
-| AE | W1 | CDF-CAP | 4.71% / **0.628** | **4.77%** / 0.619 | 4.13% / 0.617 |
-| VAE | W1 | CDF-CAP | 4.53% / **0.634** | **4.67%** / 0.632 | 4.67% / 0.632 |
-| DSAE | W1 | CDF-CAP | 6.10% / **0.601** | **6.15%** / 0.599 | 5.35% / 0.585 |
-| DSVAE | CDF-CAP | drift | **6.84%** / 0.627 | 0.84% / 0.533 | 6.39% / **0.672** |
-| DeepSVDD | CDF-CAP | CDF-CAP | **8.27% / 0.303** | 5.48% / 0.256 | 4.65% / 0.234 |
-| RealNVP | CDF-CAP | CDF-CAP | **5.50% / 0.431** | 2.78% / 0.333 | 2.78% / 0.333 |
-| **Macro mean** | **CDF-CAP** | **CDF-CAP** | **5.99% / 0.537** | **4.12% / 0.496** | **4.66% / 0.512** |
+There are isolated directional gains—notably AE JetCLR efficiency (+0.872 pp)
+and DSVAE Summary efficiency (+0.477 pp)—but their adjusted intervals remain
+inconclusive. No learned pairing establishes a robust improvement over CDF for
+any model/endpoint contrast. The result does **not** support the general claim
+that learned pairing improves CAP.
 
-The efficiency result is a tie in model wins but not in macro performance: CAP's
-large gains on DSVAE, DeepSVDD, and RealNVP outweigh W1's small gains on AE, VAE,
-and DSAE. The AUPRC result is stronger: CDF-CAP wins five models, with DSVAE the
-only exception.
+## CDF-CAP versus W1 and drift
 
-If the best learned pairing is allowed after looking at efficiency, paired CAP wins
-efficiency for 4/6 native models. That is a useful system result, but it is
-exploratory because CAP receives four learned candidates while W1 and drift each
-receive one.
+The controlled macro contrasts average models equally:
 
-## Research question 2: does pairing improve CAP?
+| Contrast | Endpoint | Mean delta | Adjusted classification |
+|---|---|---:|---|
+| CDF-CAP − drift | Efficiency | +1.162 pp | Positive, not multiplicity-adjusted meaningful |
+| CDF-CAP − W1 | Efficiency | +0.796 pp | Positive, not multiplicity-adjusted meaningful |
+| CDF-CAP − drift | AUPRC | +0.017 | Positive, not multiplicity-adjusted meaningful |
+| CDF-CAP − W1 | AUPRC | +0.018 | Inconclusive |
 
-The table below compares the best learned pairing with CDF separately for each
-endpoint. `Delta efficiency` is in percentage points; `delta AUPRC` is absolute.
-The best pairing can differ between endpoints.
+At model level, the adjusted meaningful findings are:
 
-| Model/score | Best efficiency pairing | Delta efficiency vs CDF | Best AUPRC pairing | Delta AUPRC vs CDF |
-|---|---|---:|---|---:|
-| AE native | JetCLR | -0.51 pp | JetCLR | -0.005 |
-| AE OAS | JetCLR | +0.45 pp | physics-summary | +0.000 |
-| VAE native | flat-physical | +0.83 pp | flat-physical | -0.122 |
-| VAE OAS | all tied | -0.13 pp | all tied | -0.036 |
-| DSAE native | flat-physical | 0.00 pp | flat-physical | 0.000 |
-| DSVAE native | typed-sliced | +0.56 pp | JetCLR | +0.022 |
-| DeepSVDD native | flat-physical | +0.01 pp | flat-physical | +0.011 |
-| RealNVP native | physics-summary | +2.06 pp | flat-physical | 0.000 |
+- SVDD: CDF-CAP improves efficiency over drift by +2.096 pp.
+- DSVAE: CDF-CAP improves AUPRC over drift by +0.136.
+- AE: CDF-CAP degrades AUPRC versus W1 by -0.029.
 
-Interpretation by pairing:
+Everything else is inconclusive or practically equivalent after the predeclared
+multiple-comparison rules. CAP therefore looks promising for low-rate efficiency,
+but “CAP always beats W1 and drift” would overstate the evidence.
 
-- **Flat-physical is the safest learned pairing.** It is neutral or positive on
-  both endpoints for DSAE, DeepSVDD, and RealNVP. It improves VAE efficiency by
-  0.83 pp but reduces VAE AUPRC by 0.122.
-- **Typed-sliced is the best DSVAE efficiency pairing**, raising efficiency by
-  0.56 pp and AUPRC by 0.006 relative to CDF.
-- **JetCLR gives the best DSVAE AUPRC**, +0.022 over CDF, but slightly lowers its
-  efficiency. It is also the least-bad learned pairing for native AE.
-- **Physics-summary produces the largest efficiency gain**, +2.06 pp for RealNVP,
-  but lowers its AUPRC by 0.044. Its DSVAE checkpoint is the sharpest endpoint
-  conflict: 6.01% efficiency but only 0.039 AUPRC. The per-anomaly outputs and
-  checkpoint hash were verified; this is not a missing-row or join artifact.
+## Masked OAS diagnostic
 
-Across native models, applying any one fixed learned pairing globally is not a good
-policy. Compared with CDF, the macro changes are:
+OAS was evaluated on the **same native-selected checkpoints**, so this isolates
+the anomaly-score change rather than running a second checkpoint oracle. The OAS
+residual covariance and score exclude padded/nonexistent physics objects.
 
-| Fixed pairing | Delta efficiency | Delta AUPRC |
-|---|---:|---:|
-| flat-physical | +0.06 pp | -0.020 |
-| physics-summary | -0.08 pp | -0.166 |
-| typed-sliced | -0.49 pp | -0.030 |
-| JetCLR | -0.64 pp | -0.073 |
+| Model | Flat CAP | Summary CAP | Typed CAP | JetCLR CAP | CDF CAP | W1 | Drift |
+|---|---:|---:|---:|---:|---:|---:|---:|
+| AE OAS | **3.05%** / 0.466 | **3.05%** / 0.466 | **3.05%** / 0.466 | 2.70% / **0.488** | 1.93% / 0.480 | 2.04% / 0.476 | **3.05%** / 0.466 |
+| VAE OAS | **3.96% / 0.545** | 2.87% / 0.495 | 3.67% / 0.530 | 2.87% / 0.495 | 2.77% / 0.526 | 2.62% / 0.514 | 2.57% / 0.512 |
 
-Thus pairing should be treated as model-dependent, and claims of improvement must
-name the endpoint. The present evidence does **not** support “pairing improves both
-efficiency and AUPRC in general.”
+Relative to native scoring, OAS is higher in 0/14 efficiency cells and only two
+VAE AUPRC cells (Flat and Typed), both because their native AUPRC is unusually
+poor. It should remain a diagnostic rather than the primary score.
 
-### Bottom line versus the CDF baseline
+## Method-matched comparison with the paper
 
-Pairing **does improve the baseline for the intended low-rate efficiency endpoint**
-when the pairing is chosen per model: the gains are large for RealNVP (+2.06 pp),
-meaningful for VAE (+0.83 pp) and DSVAE (+0.56 pp), and negligible for DeepSVDD.
-It does not help native DSAE and hurts native AE.
+The paper values are efficiency-only. CDF-CAP is matched to paper CAP, forward
+drift to paper Stable, and W1 to paper W1.
 
-The AUPRC evidence is much weaker: only DSVAE and DeepSVDD improve, DSAE and
-RealNVP merely tie their CDF baselines, and AE/VAE regress. Therefore the defensible
-claim is **model-specific improvement at the 250 Hz operating point**, not a general
-improvement in anomaly ranking. If both endpoints must improve with one pairing,
-typed-sliced DSVAE is the strongest result; flat-physical DeepSVDD is positive but
-its efficiency gain is practically zero.
+| Model | CAP: paper → confirmation | W1: paper → confirmation | Stable/Drift: paper → confirmation |
+|---|---:|---:|---:|
+| AE | 5.73% → 4.37% | 3.22% → 3.73% | 4.29% → 4.11% |
+| VAE | 4.79% → 4.46% | 4.49% → 4.52% | 4.39% → 4.41% |
+| DSAE | 8.55% → 7.71% | 3.75% → 7.53% | 3.57% → 5.39% |
+| DSVAE | 5.02% → 4.66% | 0.80% → 3.24% | 4.85% → 4.18% |
+| DeepSVDD | 4.03% → 6.63% | 3.25% → 5.07% | 3.56% → 4.54% |
+| RealNVP | 3.26% → 3.96% | 1.66% → 2.94% | 3.17% → 2.20% |
 
-## OAS versus native AE/VAE scores
+Eleven of these 18 cells improve. CAP itself improves for DeepSVDD and RealNVP,
+W1 improves for all six models, and Drift improves for VAE, DSAE, and DeepSVDD.
+The datasets, search formulation, and selection system differ from the paper, so
+this is a full-system benchmark—not proof that background0/background1 alone
+caused the gains.
 
-Masked OAS is an additional anomaly score evaluated on the same models; it is not a
-new training run. Its padding-aware implementation excludes nonexistent physics
-objects.
+## Why the 200-epoch result supersedes the earlier report
 
-- AE's best native efficiency/AUPRC across the table is **4.77% / 0.628**; its best
-  OAS result is **3.09% efficiency** and **0.501 AUPRC** (from different selectors).
-- VAE's best native result is **5.36% efficiency** and **0.634 AUPRC**; its best OAS
-  result is **4.25% / 0.544** with W1.
-- In all 14 like-for-like selector/pairing cells, OAS lowers efficiency. It lowers
-  AUPRC in 12; the two exceptions are VAE physics-summary and JetCLR, where the
-  native checkpoints themselves have unusually poor AUPRC.
+Of 72 predeclared selector/pairing endpoint contrasts, only 40 retained their
+50-epoch direction and 28 reversed at the three-seed 200-epoch endpoint. Validation
+objectives improved favorably from epoch 50 to 200 in only 13/42 panels. The old
+50-epoch screening results were useful for selecting candidates, but they were not
+stable enough to support the final conclusions above.
 
-OAS is therefore useful as a diagnostic but is not competitive with the native
-scores in this campaign.
+## Scope, limitations, and artifacts
 
-## Comparison with the paper
+- Primary evidence: 84 sealed runs, 126 checkpoint selections, 5,040 native and
+  1,680 OAS endpoint rows; seeds 271828, 314159, and 161803.
+- The reserve rule requested two additional seeds for AE, DSVAE, DeepSVDD, and
+  RealNVP. Those jobs were stopped for cost; partial epoch-40–80 results are
+  excluded. This is therefore complete for the three-seed primary campaign, but
+  not the originally planned five-seed confirmatory extension.
+- The random-CAP control in the full bundle is an authenticated discovery
+  diagnostic only. A new confirmation random-CAP selector was not run after the
+  cost stop, and no primary conclusion depends on it.
+- Downstream anomalies were inspected during discovery, so this establishes
+  200-epoch and seed stability rather than performance on a wholly untouched
+  external holdout.
+- Paper AUPRC is unavailable and is not inferred.
 
-The paper comparison is possible only for efficiency. Using each native model's
-best learned-pairing CAP result:
+The detailed confidence intervals, per-model contrasts, robustness statistics,
+training curves, random-control diagnostics, and machine-readable evidence are in
+[the full report](results/physics_background_pairing_confirmation/primary_cost_stopped_4d031ab/REPORT.md)
+and [report bundle](results/physics_background_pairing_confirmation/primary_cost_stopped_4d031ab/).
 
-| Model | Best paired CAP efficiency | Paper CAP efficiency | Difference | Paired-checkpoint AUPRC |
-|---|---:|---:|---:|---:|
-| AE | 4.21% | 5.73% | -1.52 pp | 0.623 |
-| VAE | 5.36% | 4.79% | +0.57 pp | 0.512 |
-| DSAE | 6.10% | 8.55% | -2.45 pp | 0.601 |
-| DSVAE | 7.40% | 5.02% | +2.38 pp | 0.633 |
-| DeepSVDD | 8.28% | 4.03% | +4.25 pp | 0.315 |
-| RealNVP | 7.57% | 3.26% | +4.31 pp | 0.387 |
+Provenance:
 
-The paired setup is numerically above the paper CAP efficiency for four of six
-models, especially DSVAE, DeepSVDD, and RealNVP. This is promising, but it is not a
-formal paper-level superiority claim: these are 50-epoch search checkpoints rather
-than independently retrained 200-epoch endpoints; the selection datasets changed
-from zero-bias/background to background0/background1; the campaign used shared
-multi-objective NSGA-II; and the reported checkpoint within each front was selected
-using downstream mean efficiency.
-
-The AUPRC column above characterizes those exact checkpoints. It is not a comparison
-with the paper because the paper provides no matching physics AUPRC reference.
-
-## Selection rule and evidence integrity
-
-The primary candidate was retained exactly as in the efficiency analysis: one
-checkpoint was selected from each strategy-specific Pareto front using mean
-downstream 250 Hz efficiency, and AUPRC was then attached to that **same checkpoint**.
-No second AUPRC oracle was used. This makes the endpoint comparison honest: a model
-that looks good at 250 Hz is allowed to look poor under AUPRC.
-
-The frozen evaluation contains all 20 anomalies and passed exact joins on model,
-trial, checkpoint path, checkpoint SHA-256, anomaly, score, selector, and pairing.
-There are 11,820 rows per endpoint and 23,640 joined rows. Machine-readable results
-are in:
-
-`/iopsstor/scratch/cscs/vjimenez/adatl1/campaigns/physics_background_nsgaii_05b649c/results/endpoint_analysis/`
-
-Key files are `primary_front_summary.csv`, `controlled_selector_comparison.csv`,
-`fixed_pairing_vs_cdf.csv`, `oas_panel.csv`, `combined_long.csv`, and
-`endpoint_analysis.json`. The authenticated AUPRC aggregate is:
-
-`/iopsstor/scratch/cscs/vjimenez/adatl1/campaigns/physics_background_nsgaii_05b649c/auprc_evaluation/aggregate.json`
-
-Its SHA-256 is
-`ffaa4e66c67408cbed0975ec50363789db655010bb66251c87826ea69b9b0225`.
+- Confirmation analysis SHA-256: `11c104ee1a65d4950eb47308e20d61c85329b06830a49d54760c51f48fb03bbd`
+- Report summary SHA-256: `e04907395ceacb42fcde57738fae3038b1d43b3fa5e10194eacb8aa2b377a20b`
+- Reserve cost-stop receipt SHA-256: `543dbfa2c113c6201b1b1644fcf119b2578ae5df1b2922df6236734e67eb6b85`
+- Report generator commit: `4d031abe6e4057f803602a4073839ef7495330e8`

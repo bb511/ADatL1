@@ -527,6 +527,42 @@ def test_final_report_refuses_pending_reserve_extension(tmp_path: Path) -> None:
         )
 
 
+def test_provisional_report_can_exclude_a_user_stopped_reserve_extension(
+    tmp_path: Path,
+) -> None:
+    """A cost-stopped reserve wave is visible and cannot contaminate primary results."""
+    analysis = _analysis(tmp_path)
+    reserve_path = analysis / "reserve_seed_decisions.csv"
+    rows = list(csv.DictReader(reserve_path.open(encoding="utf-8", newline="")))
+    rows[0]["decision"] = "add_both_reserve_seeds"
+    _write(reserve_path, rows)
+    manifest_path = analysis / "confirmation_endpoint_analysis.json"
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    manifest.pop("content_sha256")
+    manifest["artifacts"]["reserve_seed_decisions.csv"] = hashlib.sha256(
+        reserve_path.read_bytes()
+    ).hexdigest()
+    manifest["content_sha256"] = _content_hash(manifest)
+    manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
+    stop = {
+        "content_sha256": "f" * 64,
+        "minimum_completed_epoch_boundary": 40,
+        "maximum_completed_epoch_boundary": 80,
+    }
+
+    report, summary = build_confirmation_report(
+        analysis,
+        Path(__file__).resolve().parents[1],
+        report_mode="provisional",
+        reserve_stop=stop,
+    )
+
+    assert "optional reserve-seed extension was stopped for cost" in report
+    assert "excluded from every result below" in report
+    assert summary["reserve_extension_status"] == "cost_stopped_excluded"
+    assert summary["reserve_stop_receipt_content_sha256"] == "f" * 64
+
+
 def test_final_report_authenticates_random_control_analysis(tmp_path: Path, monkeypatch) -> None:
     """The final report renders discovery rank and confirmation variability evidence."""
     analysis = tmp_path / "analysis"

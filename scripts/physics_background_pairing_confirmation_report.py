@@ -41,6 +41,14 @@ def main() -> None:
         help="Bind the report to the primary reserve-decision or final effective-seed namespace.",
     )
     parser.add_argument(
+        "--reserve-stop-receipt",
+        type=Path,
+        help=(
+            "Authenticated user-directed cost-stop receipt. Valid only for a provisional "
+            "primary report; partial reserve results remain excluded."
+        ),
+    )
+    parser.add_argument(
         "--promote",
         action="store_true",
         help="After verification, atomically install a final bundle as root REPORT.md.",
@@ -71,6 +79,11 @@ def main() -> None:
         ),
         report_mode=args.report_mode,
         analysis_stage=args.analysis_stage,
+        reserve_stop_receipt=(
+            args.reserve_stop_receipt.resolve(strict=True)
+            if args.reserve_stop_receipt
+            else None
+        ),
         generator=generator,
     )
     promotion = None

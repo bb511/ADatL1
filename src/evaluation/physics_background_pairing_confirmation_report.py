@@ -681,7 +681,10 @@ def _cell_table(rows: list[dict[str, str]]) -> tuple[list[str], dict[tuple[str, 
 
 
 def _validated_reserve_decisions(
-    rows: list[dict[str, str]], seeds_by_model: dict[str, list[int]]
+    rows: list[dict[str, str]],
+    seeds_by_model: dict[str, list[int]],
+    *,
+    allow_cost_stopped: bool = False,
 ) -> dict[str, dict[str, str]]:
     """Require one terminal reserve-seed decision for every model."""
     decisions: dict[str, dict[str, str]] = {}
@@ -690,12 +693,14 @@ def _validated_reserve_decisions(
         if model not in MODELS or model in decisions:
             raise ValueError("Reserve-seed decisions must name each model exactly once.")
         decision = row.get("decision")
-        if decision not in {"no_extension", "extension_complete"}:
+        if decision not in {"no_extension", "extension_complete"} and not (
+            allow_cost_stopped and decision == "add_both_reserve_seeds"
+        ):
             raise RuntimeError(
                 f"Final report blocked: reserve-seed extension is incomplete for {model}: "
                 f"{decision!r}."
             )
-        expected = 3 if decision == "no_extension" else 5
+        expected = 5 if decision == "extension_complete" else 3
         observed = int(row.get("observed_seed_count", expected))
         if observed != expected or observed != len(seeds_by_model.get(model, [])):
             raise ValueError(
@@ -749,6 +754,7 @@ def build_confirmation_report(
     confirmation_random_analysis: Path | None = None,
     confirmation_context: Path | None = None,
     report_mode: str = "final",
+    reserve_stop: dict[str, Any] | None = None,
 ) -> tuple[str, dict[str, Any]]:
     """Build an information-dense report and machine-readable result summary."""
     if report_mode not in {"final", "provisional"}:
@@ -777,7 +783,9 @@ def build_confirmation_report(
         model: manifest["method"]["seeds"] for model in MODELS
     }
     reserve_decisions = _validated_reserve_decisions(
-        tables["reserve_seed_decisions.csv"], seeds_by_model
+        tables["reserve_seed_decisions.csv"],
+        seeds_by_model,
+        allow_cost_stopped=reserve_stop is not None,
     )
     cell_lines, cell_values = _cell_table(tables["endpoints_across_seeds.csv"])
     paper_rows, paper_reference_hash = _paper_rows(repository.resolve(strict=True), cell_values)
@@ -813,6 +821,19 @@ def build_confirmation_report(
             else "# PROVISIONAL physics background-pairing confirmation results"
         ),
         "",
+        *(
+            [
+                "**Scope note:** the optional reserve-seed extension was stopped for cost "
+                "with partial trajectories at "
+                f"{reserve_stop['minimum_completed_epoch_boundary']}–"
+                f"{reserve_stop['maximum_completed_epoch_boundary']} epochs and is excluded "
+                "from every result below. This report uses only the complete three-seed, "
+                "200-epoch primary campaign.",
+                "",
+            ]
+            if reserve_stop is not None
+            else []
+        ),
         "## Direct answers",
         "",
         f"Completion: **{completion['sealed_runs']}/{completion['sealed_runs']} authenticated retraining runs sealed**; {completion['checkpoint_selections']} logical checkpoint selections and {completion['primary_endpoint_rows']} native endpoint rows were verified.",
@@ -1198,6 +1219,12 @@ def build_confirmation_report(
         "reserve_seed_decisions": {
             model: reserve_decisions[model]["decision"] for model in MODELS
         },
+        "reserve_extension_status": (
+            "complete" if reserve_stop is None else "cost_stopped_excluded"
+        ),
+        "reserve_stop_receipt_content_sha256": (
+            None if reserve_stop is None else reserve_stop["content_sha256"]
+        ),
         "random_cap_status": random_status,
         "random_cap_analysis_receipts": random_receipts,
         "random_cap_downstream_rank_comparison": random_downstream_summary,
@@ -1219,6 +1246,7 @@ def write_confirmation_report(
     confirmation_context: Path | None = None,
     report_mode: str = "final",
     analysis_stage: str = "final",
+    reserve_stop_receipt: Path | None = None,
     generator: dict[str, Any],
 ) -> dict[str, Any]:
     """Persist an immutable compact report bundle with authenticated evidence."""
@@ -1226,6 +1254,42 @@ def write_confirmation_report(
         raise ValueError(f"Unknown confirmation analysis stage: {analysis_stage!r}.")
     if report_mode == "final" and analysis_stage != "final":
         raise RuntimeError("A final report must consume the final endpoint/analysis namespace.")
+    reserve_stop = None
+    if reserve_stop_receipt is not None:
+        if report_mode != "provisional" or analysis_stage != "primary":
+            raise RuntimeError(
+                "A reserve-stop receipt is valid only for a provisional primary report."
+            )
+        reserve_stop_receipt = reserve_stop_receipt.resolve(strict=True)
+        reserve_stop = json.loads(reserve_stop_receipt.read_text(encoding="utf-8"))
+        digest = reserve_stop.pop("content_sha256", None)
+        if digest != _content_hash(reserve_stop):
+            raise ValueError("Reserve-stop receipt content hash differs.")
+        reserve_stop["content_sha256"] = digest
+        analysis_manifest, _ = _load_analysis(analysis_dir.resolve(strict=True))
+        endpoint_receipt = Path(analysis_manifest["inputs"]["endpoint_receipt"])
+        endpoint = json.loads(endpoint_receipt.read_text(encoding="utf-8"))
+        campaign_root = Path(endpoint["campaign_root"]).resolve(strict=True)
+        retirements = reserve_stop.get("retirement_receipts", [])
+        if (
+            reserve_stop.get("schema_version") != 1
+            or reserve_stop.get("kind") != "physics_background_reserve_extension_cost_stop"
+            or reserve_stop.get("campaign_root") != str(campaign_root)
+            or reserve_stop.get("analysis_content_sha256")
+            != analysis_manifest["content_sha256"]
+            or reserve_stop.get("minimum_completed_epoch_boundary") != 40
+            or reserve_stop.get("maximum_completed_epoch_boundary") != 80
+            or not reserve_stop.get("reserve_results_excluded_from_report")
+            or not retirements
+        ):
+            raise ValueError("Reserve-stop receipt identity differs.")
+        for row in retirements:
+            path = Path(str(row.get("path", ""))).resolve(strict=True)
+            if (
+                not path.is_relative_to(campaign_root / "state/unmaterialized_retrain_retirements")
+                or _sha256(path) != row.get("sha256")
+            ):
+                raise ValueError(f"Reserve-stop retirement evidence differs: {path}")
     report, summary = build_confirmation_report(
         analysis_dir,
         repository,
@@ -1233,6 +1297,7 @@ def write_confirmation_report(
         confirmation_random_analysis=confirmation_random_analysis,
         confirmation_context=confirmation_context,
         report_mode=report_mode,
+        reserve_stop=reserve_stop,
     )
     summary.pop("content_sha256", None)
     summary["generator"] = generator
@@ -1322,6 +1387,8 @@ def write_confirmation_report(
             "training_curve_summary.csv",
         ):
             evidence_sources[f"context_{name}"] = confirmation_context / name
+    if reserve_stop_receipt is not None:
+        evidence_sources["reserve_extension_cost_stop.json"] = reserve_stop_receipt
     evidence_dir = output_dir / "evidence"
     evidence_dir.mkdir(parents=True, exist_ok=True)
     for name, source in evidence_sources.items():

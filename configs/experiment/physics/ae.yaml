@@ -72,6 +72,22 @@ callbacks:
     name: losses
     log_raw_mlflow: true
 
+  # Keep the epoch with the smallest training objective
+  # loss_reco + mi_gamma * loss_mi next to last.ckpt.
+  loss_total_ckpt:
+    _target_: pytorch_lightning.callbacks.ModelCheckpoint
+    dirpath: '${paths.checkpoints_dir}/${experiment_name}/${run_name}'
+    monitor: 'train/loss'
+    filename: 'loss_total'
+    save_last: false
+    save_top_k: 1
+    mode: min
+    auto_insert_metric_name: false
+    enable_version_counter: false
+    save_weights_only: false
+    every_n_epochs: 1
+    save_on_train_epoch_end: true
+
   anomaly_eff:
     _target_: src.callbacks.efficiency.AnomalyEfficiencyCallback
     output_name: 'ascore/full'

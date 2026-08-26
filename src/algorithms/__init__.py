@@ -26,6 +26,11 @@ class ADLightningModule(LightningModule):
         self.model = model
         self._log_sum = {}
         self._log_nsteps = {}
+        # Preserve the completed training epoch's total loss until validation ends.
+        # Lightning clears train metrics from callback_metrics before
+        # ModelCheckpoint.on_validation_end, so the checkpoint callback monitors the
+        # bridged metric logged in on_validation_epoch_end below.
+        self._checkpoint_train_loss_total = None
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         """Override with the forward pass."""
@@ -76,6 +81,16 @@ class ADLightningModule(LightningModule):
 
     def on_validation_epoch_end(self):
         """Log the epochs so the mlflow plotting is not buggy, clean memory."""
+        if self._checkpoint_train_loss_total is not None:
+            self.log(
+                "checkpoint/train_loss_total",
+                self._checkpoint_train_loss_total,
+                on_step=False,
+                on_epoch=True,
+                logger=False,
+                prog_bar=False,
+                sync_dist=False,
+            )
         self.log("epoch_idx", float(self.current_epoch), on_epoch=True, on_step=False)
 
     def on_test_epoch_end(self):
@@ -121,6 +136,8 @@ class ADLightningModule(LightningModule):
         logs = self._log_sum[dataloader_idx]
         if stage == "train":
             logs = {f"train/{k}": v / nsteps for k, v in logs.items()}
+            if "train/loss" in logs:
+                self._checkpoint_train_loss_total = float(logs["train/loss"])
         else:
             datasets = list(getattr(self.trainer, f"{stage}_dataloaders").keys())
             dataset_name = datasets[dataloader_idx]

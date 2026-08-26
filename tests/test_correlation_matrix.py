@@ -1,3 +1,4 @@
+import json
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -29,7 +30,7 @@ def test_checkpoint_selection_supports_named_root_checkpoint() -> None:
     assert not callback._should_run_for_current_ckpt(last)
 
 
-def test_test_epoch_end_automatically_writes_sorted_change_matrices(
+def test_test_epoch_end_writes_method_folders_sources_means_and_sorted_matrices(
     tmp_path: Path,
     monkeypatch,
 ) -> None:
@@ -44,21 +45,24 @@ def test_test_epoch_end_automatically_writes_sorted_change_matrices(
         "b.Et": np.array([7.0, 5.0, 6.0, 3.0, 4.0, 1.0, 2.0, 0.0]),
         "c.Et": np.array([0.0, 1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0]),
     }
-    plot_filenames = []
-    gallery_snapshots = []
+    plot_paths = []
+    gallery_folders = []
 
     monkeypatch.setattr(
         "src.evaluation.callbacks.correlation_matrix.matrix.plot",
-        lambda **kwargs: plot_filenames.append(kwargs["filename"]),
+        lambda **kwargs: plot_paths.append(
+            Path(kwargs["save_dir"]) / kwargs["filename"]
+        ),
     )
     monkeypatch.setattr(
         "src.evaluation.callbacks.correlation_matrix.utils.mlflow.log_plots_to_mlflow",
-        lambda *args, **kwargs: gallery_snapshots.append(set(plot_filenames)),
+        lambda *args, **kwargs: gallery_folders.append(Path(args[3])),
     )
 
     callback = CorrelationMatrixCallback(
         variables=labels,
-        correlation_methods=["pearson"],
+        correlation_methods=["pearson", "spearman"],
+        sensitive_variable="a.Et",
     )
     callback._active = True
     callback._resolved_variables = [{"label": label} for label in labels]
@@ -77,27 +81,91 @@ def test_test_epoch_end_automatically_writes_sorted_change_matrices(
     )
 
     output_dir = tmp_path / "plots/test/last/correlation_matrix/normal"
-    change_stem = "abs_reconstruction_minus_input_pearson_correlation_matrix"
-    expected_sorted_plots = {
-        f"{change_stem}_sorted_by_increase.png",
-        f"{change_stem}_sorted_by_increase_et_only.png",
-        f"{change_stem}_sorted_by_decrease.png",
-        f"{change_stem}_sorted_by_decrease_et_only.png",
-    }
-
-    input_variables = pd.read_csv(output_dir / "input_variables.csv")
-    reconstruction_variables = pd.read_csv(
-        output_dir / "reconstruction_variables.csv"
-    )
-    assert list(input_variables.columns) == labels
-    assert list(reconstruction_variables.columns) == labels
     assert {path.name for path in output_dir.glob("*.csv")} == {
         "input_variables.csv",
         "reconstruction_variables.csv",
     }
-    assert expected_sorted_plots <= set(plot_filenames)
-    assert len(gallery_snapshots) == 1
-    assert expected_sorted_plots <= gallery_snapshots[0]
+
+    for method in ("pearson", "spearman"):
+        method_dir = output_dir / method.capitalize()
+        change_stem = (
+            f"abs_reconstruction_minus_input_{method}_correlation_matrix"
+        )
+        expected_sorted_plots = {
+            method_dir / f"{change_stem}_sorted_by_increase.png",
+            method_dir / f"{change_stem}_sorted_by_increase_et_only.png",
+            method_dir / f"{change_stem}_sorted_by_decrease.png",
+            method_dir / f"{change_stem}_sorted_by_decrease_et_only.png",
+        }
+
+        input_variables = pd.read_csv(method_dir / "input_variables.csv")
+        reconstruction_variables = pd.read_csv(
+            method_dir / "reconstruction_variables.csv"
+        )
+        input_correlation = pd.read_csv(
+            method_dir / f"input_{method}_correlation_matrix.csv",
+            index_col=0,
+        )
+        reconstruction_correlation = pd.read_csv(
+            method_dir / f"reconstruction_{method}_correlation_matrix.csv",
+            index_col=0,
+        )
+
+        assert list(input_variables.columns) == labels
+        assert list(reconstruction_variables.columns) == labels
+        assert list(input_correlation.index) == labels
+        assert list(reconstruction_correlation.index) == labels
+        assert expected_sorted_plots <= set(plot_paths)
+
+    assert gallery_folders == [output_dir / "Pearson", output_dir / "Spearman"]
+
+    summary = json.loads((output_dir / "mean_correlations.json").read_text())
+    reconstructed = pd.DataFrame(reconstruction_table)
+    expected_pearson = reconstructed.corr(method="pearson").loc[
+        "a.Et", ["b.Et", "c.Et"]
+    ].abs().mean()
+    expected_spearman = reconstructed.corr(method="spearman").loc[
+        "a.Et", ["b.Et", "c.Et"]
+    ].abs().mean()
+    assert summary["sensitive_variable"] == "a.Et"
+    assert set(summary["spaces"]) == {"input", "reconstruction"}
+    assert set(summary["spaces"]["input"]) == {"pearson", "spearman"}
+    assert set(summary["spaces"]["reconstruction"]) == {"pearson", "spearman"}
+    assert summary["spaces"]["reconstruction"]["pearson"][
+        "num_other_variables"
+    ] == 2
+    assert summary["mean_pearson_correlation"] == pytest.approx(expected_pearson)
+    assert summary["mean_spearman_correlation"] == pytest.approx(expected_spearman)
+    assert summary["C"] == pytest.approx(
+        max(max(0.0, expected_pearson), max(0.0, expected_spearman))
+    )
+
+
+def test_write_mean_correlations_uses_larger_absolute_mean_for_pareto_c(
+    tmp_path: Path,
+) -> None:
+    callback = CorrelationMatrixCallback(sensitive_variable="FET.Et")
+    output_path = tmp_path / "mean_correlations.json"
+    callback._write_mean_correlations(
+        {
+            "reconstruction": {
+                "pearson": {
+                    "mean_correlation": 0.4,
+                    "num_other_variables": 3,
+                },
+                "spearman": {
+                    "mean_correlation": 0.25,
+                    "num_other_variables": 3,
+                },
+            }
+        },
+        output_path,
+    )
+
+    summary = json.loads(output_path.read_text())
+    assert summary["mean_pearson_correlation"] == 0.4
+    assert summary["mean_spearman_correlation"] == 0.25
+    assert summary["C"] == 0.4
 
 
 def test_sort_correlation_change_matrix_orders_both_axes_by_off_diagonal_mean() -> None:

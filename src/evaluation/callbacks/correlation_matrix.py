@@ -1,4 +1,5 @@
 # Callback that saves and plots correlation matrices of selected event-level variables.
+import json
 from collections.abc import Mapping, Sequence
 from pathlib import Path
 
@@ -35,6 +36,8 @@ class CorrelationMatrixCallback(Callback):
         'sum', 'mean', 'max', 'first'.
     :param correlation_methods: Pandas correlation methods to save/plot, e.g.
         ['pearson'] or ['pearson', 'spearman'].
+    :param sensitive_variable: Variable whose mean correlation with every other
+        configured variable is written for Pareto-front construction.
     :param include_input: Whether to save/plot correlations of input variables.
     :param include_reconstruction: Whether to save/plot correlations of reconstructed
         variables. This is the gamma-dependent table for an autoencoder.
@@ -53,6 +56,7 @@ class CorrelationMatrixCallback(Callback):
         ckpts: dict | None = None,
         aggregate: str = "sum",
         correlation_methods: list[str] | None = None,
+        sensitive_variable: str = "FET.Et",
         include_input: bool = True,
         include_reconstruction: bool = True,
         include_residual: bool = False,
@@ -83,6 +87,7 @@ class CorrelationMatrixCallback(Callback):
         self.ckpts = ckpts or {"last": True}
         self.aggregate = aggregate.lower()
         self.correlation_methods = correlation_methods or ["pearson"]
+        self.sensitive_variable = sensitive_variable
         self.include_input = include_input
         self.include_reconstruction = include_reconstruction
         self.include_residual = include_residual
@@ -94,6 +99,14 @@ class CorrelationMatrixCallback(Callback):
             raise ValueError(
                 "aggregate must be one of {'sum', 'mean', 'max', 'first'}, "
                 f"got {aggregate!r}."
+            )
+        if not any(
+            variable.lower() == self.sensitive_variable.lower()
+            for variable in self.variables
+        ):
+            raise ValueError(
+                f"Sensitive variable {self.sensitive_variable!r} must be included in "
+                "the configured correlation variables."
             )
 
     def on_test_epoch_start(self, trainer, pl_module):
@@ -268,7 +281,38 @@ class CorrelationMatrixCallback(Callback):
 
                     correlations[(space_name, method)] = corr
 
-                    method_name = method.capitalize()
+            # Keep one parent-level copy for existing analysis utilities and write a
+            # copy into every method folder so each correlation result is standalone.
+            self._write_correlation_source_tables(space_dataframes, plot_folder)
+
+            mean_correlations: dict[str, dict[str, dict[str, float | int]]] = {}
+            for method in self.correlation_methods:
+                method_name = method.capitalize()
+                method_folder = plot_folder / method_name
+                method_folder.mkdir(parents=True, exist_ok=True)
+                self._write_correlation_source_tables(
+                    space_dataframes,
+                    method_folder,
+                )
+
+                for space_name in space_dataframes:
+                    corr = correlations.get((space_name, method))
+                    if corr is None:
+                        continue
+
+                    corr.to_csv(
+                        method_folder
+                        / f"{space_name}_{method}_correlation_matrix.csv"
+                    )
+
+                    mean_value, num_other_variables = (
+                        self._mean_sensitive_variable_correlation(corr)
+                    )
+                    mean_correlations.setdefault(space_name, {})[method] = {
+                        "mean_correlation": mean_value,
+                        "num_other_variables": num_other_variables,
+                    }
+
                     title = {
                         "input": f"{method_name} correlation matrix before training",
                         "reconstruction": (
@@ -281,71 +325,77 @@ class CorrelationMatrixCallback(Callback):
 
                     self._write_correlation_matrix_variants(
                         corr=corr,
-                        plot_folder=plot_folder,
+                        plot_folder=method_folder,
                         stem=f"{space_name}_{method}_correlation_matrix",
                         title=title,
                     )
 
-            self._write_correlation_source_tables(
-                space_dataframes,
-                plot_folder,
-            )
-
-            for method in self.correlation_methods:
                 corr_before = correlations.get(("input", method))
                 corr_after = correlations.get(("reconstruction", method))
-                if corr_before is None or corr_after is None:
-                    continue
+                if corr_before is not None and corr_after is not None:
+                    common_labels = [
+                        label
+                        for label in corr_before.index
+                        if label in corr_after.index
+                    ]
+                    if not common_labels:
+                        continue
 
-                common_labels = [
-                    label for label in corr_before.index if label in corr_after.index
-                ]
-                if not common_labels:
-                    continue
+                    correlation_change = corr_after.loc[
+                        common_labels,
+                        common_labels,
+                    ].abs()
+                    correlation_change -= corr_before.loc[
+                        common_labels,
+                        common_labels,
+                    ].abs()
+                    correlation_change = self._exclude_nan_variables(
+                        correlation_change
+                    )
+                    if correlation_change.empty:
+                        continue
 
-                correlation_change = corr_after.loc[common_labels, common_labels].abs()
-                correlation_change -= corr_before.loc[common_labels, common_labels].abs()
-                correlation_change = self._exclude_nan_variables(correlation_change)
-                if correlation_change.empty:
-                    continue
-
-                change_stem = (
-                    f"abs_reconstruction_minus_input_{method}_correlation_matrix"
-                )
-
-                method_name = method.capitalize()
-                self._write_correlation_matrix_variants(
-                    corr=correlation_change,
-                    plot_folder=plot_folder,
-                    stem=change_stem,
-                    title=(
-                        f"Change in {method_name} correlation: "
-                        "|corr_after| - |corr_before|"
-                    ),
-                )
-
-                for direction, ascending in (
-                    ("increase", False),
-                    ("decrease", True),
-                ):
-                    self._write_correlation_matrix_variants(
-                        corr=correlation_change,
-                        plot_folder=plot_folder,
-                        stem=f"{change_stem}_sorted_by_{direction}",
-                        title=(
-                            f"Change in {method_name} correlation: "
-                            f"variables sorted by mean {direction}"
-                        ),
-                        sort_ascending=ascending,
+                    change_stem = (
+                        f"abs_reconstruction_minus_input_{method}_correlation_matrix"
                     )
 
-            utils.mlflow.log_plots_to_mlflow(
-                trainer,
-                ckpt_name,
-                self.name,
-                plot_folder,
-                log_raw=self.log_raw_mlflow,
-                gallery_name=f"{dset_name}_{self.name}",
+                    self._write_correlation_matrix_variants(
+                        corr=correlation_change,
+                        plot_folder=method_folder,
+                        stem=change_stem,
+                        title=(
+                            f"Change in {method_name} correlation: "
+                            "|corr_after| - |corr_before|"
+                        ),
+                    )
+
+                    for direction, ascending in (
+                        ("increase", False),
+                        ("decrease", True),
+                    ):
+                        self._write_correlation_matrix_variants(
+                            corr=correlation_change,
+                            plot_folder=method_folder,
+                            stem=f"{change_stem}_sorted_by_{direction}",
+                            title=(
+                                f"Change in {method_name} correlation: "
+                                f"variables sorted by mean {direction}"
+                            ),
+                            sort_ascending=ascending,
+                        )
+
+                utils.mlflow.log_plots_to_mlflow(
+                    trainer,
+                    ckpt_name,
+                    f"{self.name}/{method_name}",
+                    method_folder,
+                    log_raw=self.log_raw_mlflow,
+                    gallery_name=f"{dset_name}_{self.name}_{method}",
+                )
+
+            self._write_mean_correlations(
+                mean_correlations,
+                plot_folder / "mean_correlations.json",
             )
 
     def _resolve_variables(self) -> list[dict]:
@@ -538,6 +588,7 @@ class CorrelationMatrixCallback(Callback):
             f"dataset: {dset_name}",
             f"aggregate: {self.aggregate}",
             f"max_events: {self.max_events}",
+            f"sensitive_variable: {self.sensitive_variable}",
             "variables:",
         ]
         for item in self._resolved_variables:
@@ -557,6 +608,79 @@ class CorrelationMatrixCallback(Callback):
                 f"indices={shown_indices}, control_indices={control_indices}"
             )
         (plot_folder / "metadata.txt").write_text("\n".join(lines) + "\n")
+
+    def _mean_sensitive_variable_correlation(
+        self,
+        corr: pd.DataFrame,
+    ) -> tuple[float, int]:
+        """Mean absolute correlation of the sensitive variable with all others."""
+        matching_labels = [
+            label
+            for label in corr.index
+            if str(label).lower() == self.sensitive_variable.lower()
+        ]
+        if not matching_labels:
+            raise ValueError(
+                f"Sensitive variable {self.sensitive_variable!r} is missing from "
+                f"the correlation matrix. Available variables: {list(corr.index)}"
+            )
+
+        sensitive_label = matching_labels[0]
+        other_labels = [label for label in corr.columns if label != sensitive_label]
+        if not other_labels:
+            raise ValueError(
+                "At least one non-sensitive variable is required to calculate the "
+                "mean sensitive-variable correlation."
+            )
+
+        values = corr.loc[sensitive_label, other_labels].dropna()
+        if values.empty:
+            raise ValueError(
+                f"No finite correlations remain for {self.sensitive_variable!r}."
+            )
+
+        return float(values.abs().mean()), int(values.size)
+
+    def _write_mean_correlations(
+        self,
+        mean_correlations: dict[str, dict[str, dict[str, float | int]]],
+        output_path: Path,
+    ) -> None:
+        """Write sensitive-variable means and reconstructed Pareto metric ``C``."""
+        reconstruction = mean_correlations.get("reconstruction", {})
+        required_methods = ("pearson", "spearman")
+        missing = [
+            method for method in required_methods if method not in reconstruction
+        ]
+        if missing:
+            raise ValueError(
+                "Cannot calculate Pareto metric C because reconstructed mean "
+                f"correlations are missing for: {missing}."
+            )
+
+        mean_pearson = float(reconstruction["pearson"]["mean_correlation"])
+        mean_spearman = float(reconstruction["spearman"]["mean_correlation"])
+        pareto_c = max(max(0.0, mean_pearson), max(0.0, mean_spearman))
+
+        payload = {
+            "sensitive_variable": self.sensitive_variable,
+            "definition": (
+                "Arithmetic mean of absolute correlations between the sensitive "
+                "variable and every other variable; self-correlation is excluded."
+            ),
+            "spaces": mean_correlations,
+            "mean_pearson_correlation": mean_pearson,
+            "mean_spearman_correlation": mean_spearman,
+            "C": pareto_c,
+            "C_definition": (
+                "max(max(0, mean_pearson_correlation), "
+                "max(0, mean_spearman_correlation)) using reconstruction means"
+            ),
+        }
+        output_path.write_text(
+            json.dumps(payload, indent=2, sort_keys=True, allow_nan=False) + "\n",
+            encoding="utf-8",
+        )
 
     def _write_correlation_matrix_variants(
         self,

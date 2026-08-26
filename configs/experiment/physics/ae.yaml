@@ -77,7 +77,7 @@ callbacks:
   loss_total_ckpt:
     _target_: pytorch_lightning.callbacks.ModelCheckpoint
     dirpath: '${paths.checkpoints_dir}/${experiment_name}/${run_name}'
-    monitor: 'train/loss'
+    monitor: 'checkpoint/train_loss_total'
     filename: 'loss_total'
     save_last: false
     save_top_k: 1
@@ -87,7 +87,8 @@ callbacks:
     save_weights_only: false
     every_n_epochs: 1
     # Save after validation so the checkpoint contains the operational threshold
-    # calibrated for this epoch, while still ranking epochs by train/loss.
+    # calibrated for this epoch. checkpoint/train_loss_total is the completed
+    # epoch's train/loss bridged through validation by ADLightningModule.
     save_on_train_epoch_end: false
 
   anomaly_eff:
@@ -279,6 +280,7 @@ evaluation:
       correlation_methods:
         - pearson
         - spearman
+      sensitive_variable: ${algorithm.mi_sensitive_variable}
       include_input: true
       include_reconstruction: true
       include_residual: false

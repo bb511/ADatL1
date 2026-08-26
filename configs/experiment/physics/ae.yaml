@@ -86,7 +86,9 @@ callbacks:
     enable_version_counter: false
     save_weights_only: false
     every_n_epochs: 1
-    save_on_train_epoch_end: true
+    # Save after validation so the checkpoint contains the operational threshold
+    # calibrated for this epoch, while still ranking epochs by train/loss.
+    save_on_train_epoch_end: false
 
   anomaly_eff:
     _target_: src.callbacks.efficiency.AnomalyEfficiencyCallback
@@ -163,13 +165,7 @@ callbacks:
 evaluation:
   evaluator:
     ckpts:
-      last: true
-      summary:
-        cvar25_ema: ['max']
-        cvar10_ema: ['max']
-      single:
-        ascore_operational: ['stable']
-        eff__ascore_full__brate_operational: ['max']
+      loss_total: true
 
   callbacks:
     anomaly_efficiency:
@@ -249,7 +245,7 @@ evaluation:
       warmup_batches: 0.2
       output_name: reconstructed_data
       ckpts:
-        last: true
+        loss_total: true
       datasets:
         - 'normal'
         - 'SingleNeutrino_E-10-gun'
@@ -278,9 +274,7 @@ evaluation:
         - normal
       output_name: reconstructed_data
       ckpts:
-        last: false
-        summary:
-          cvar25_ema: [max]
+        loss_total: true
       aggregate: sum
       correlation_methods:
         - pearson

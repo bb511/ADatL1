@@ -1,4 +1,5 @@
 # Callback that saves and plots correlation matrices of selected event-level variables.
+from collections.abc import Mapping, Sequence
 from pathlib import Path
 
 import numpy as np
@@ -645,17 +646,19 @@ class CorrelationMatrixCallback(Callback):
         if strat is None:
             return False
 
-        if strat == "last":
-            return bool(self.ckpts.get("last", False))
-
         strat_cfg = self.ckpts.get(strat, None)
+        if isinstance(strat_cfg, bool):
+            return strat_cfg
 
-        if not isinstance(strat_cfg, dict) or metric is None or crit is None:
+        if not isinstance(strat_cfg, Mapping) or metric is None or crit is None:
             return False
 
         allowed_criteria = strat_cfg.get(metric, None)
 
-        if not isinstance(allowed_criteria, (list, tuple)):
+        if not isinstance(allowed_criteria, Sequence) or isinstance(
+            allowed_criteria,
+            (str, bytes),
+        ):
             return False
 
         return crit in allowed_criteria

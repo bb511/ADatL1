@@ -8,6 +8,27 @@ import pytest
 from src.evaluation.callbacks.correlation_matrix import CorrelationMatrixCallback
 
 
+def test_checkpoint_selection_supports_named_root_checkpoint() -> None:
+    callback = CorrelationMatrixCallback(
+        correlation_methods=["pearson", "spearman"],
+        ckpts={"loss_total": True},
+    )
+
+    loss_total = SimpleNamespace(
+        strat_name="loss_total",
+        metric_name=None,
+        criterion_name=None,
+    )
+    last = SimpleNamespace(
+        strat_name="last",
+        metric_name=None,
+        criterion_name=None,
+    )
+
+    assert callback._should_run_for_current_ckpt(loss_total)
+    assert not callback._should_run_for_current_ckpt(last)
+
+
 def test_test_epoch_end_automatically_writes_sorted_change_matrices(
     tmp_path: Path,
     monkeypatch,

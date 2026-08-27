@@ -191,3 +191,54 @@ def test_ae_forwards_denormalization_override() -> None:
         normalizer=normalizer,
         use_denormalized=True,
     )
+
+def test_ae_accepts_explicit_normalizer_without_trainer() -> None:
+    model = AE(
+        encoder=nn.Identity(),
+        decoder=nn.Identity(),
+        mi_sensitive_num_bins=2,
+    )
+
+    model.object_feature_map = {
+        "input": {
+            "feature": [0],
+        }
+    }
+    model.control_object_feature_map = make_feature_map()
+    model._trainer = None
+
+    x = torch.zeros((2, 1))
+    mask = torch.ones_like(x, dtype=torch.bool)
+    l1bit = torch.zeros(2, dtype=torch.bool)
+    labels = torch.zeros(2)
+
+    control_x = torch.tensor(
+        [
+            [-1.0],
+            [2.0],
+        ]
+    )
+    control_mask = torch.ones_like(
+        control_x,
+        dtype=torch.bool,
+    )
+
+    batch = (
+        x,
+        mask,
+        l1bit,
+        labels,
+        control_x,
+        control_mask,
+    )
+
+    values = model.extract_sensitive_values(
+        batch,
+        use_denormalized=True,
+        normalizer=make_normalizer(),
+    )
+
+    torch.testing.assert_close(
+        values,
+        torch.tensor([80.0, 140.0]),
+    )

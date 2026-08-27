@@ -340,6 +340,7 @@ class AE(ADLightningModule):
         batch,
         *,
         use_denormalized: bool | None = None,
+        normalizer=None,
     ) -> torch.Tensor:
         """Extract one sensitive value per event before MI binning.
 
@@ -349,13 +350,19 @@ class AE(ADLightningModule):
         """
         batch_view = unpack_batch(batch)
         control_x, control_mask = self._get_sensitive_inputs(batch_view)
-        trainer = getattr(self, "trainer", None)
-        datamodule = getattr(trainer, "datamodule", None) if trainer is not None else None
-        normalizer = (
-            getattr(datamodule, "normalizer", None)
-            if datamodule is not None
-            else None
-        )
+
+        if normalizer is None:
+            trainer = getattr(self, "_trainer", None)
+            datamodule = (
+                getattr(trainer, "datamodule", None)
+                if trainer is not None
+                else None
+            )
+            normalizer = (
+                getattr(datamodule, "normalizer", None)
+                if datamodule is not None
+                else None
+            )
 
         return self.sensitive_binner.extract_values(
             x=control_x,

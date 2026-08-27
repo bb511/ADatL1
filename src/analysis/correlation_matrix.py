@@ -9,7 +9,7 @@ import numpy as np
 import pandas as pd
 
 try:
-    from checkpointloader import CheckpointLoader
+    from src.analysis.checkpointloader import CheckpointLoader
 except ImportError:
     from .checkpointloader import CheckpointLoader
 

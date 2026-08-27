@@ -11,6 +11,38 @@ import torch
 
 from src.data.utils import unpack_batch
 
+import warnings
+from types import MappingProxyType
+
+from sklearn.exceptions import ConvergenceWarning
+from sklearn.metrics import mean_absolute_error, r2_score
+from sklearn.neural_network import MLPRegressor
+from sklearn.preprocessing import StandardScaler
+
+PROBE_INNER_SPLIT_SEED = 12345
+PROBE_INNER_VALIDATION_FRACTION = 0.2
+PROBE_INITIALIZATION_SEEDS = (10, 123, 500)
+
+MLP_PROBE_CONFIG = MappingProxyType(
+    {
+        "hidden_layer_sizes": (64, 32),
+        "activation": "relu",
+        "solver": "adam",
+        "alpha": 1e-4,
+        "learning_rate": "constant",
+        "learning_rate_init": 1e-3,
+        "max_iter": 500,
+        "shuffle": True,
+        "early_stopping": True,
+        "validation_fraction": 0.1,
+        "n_iter_no_change": 10,
+        "tol": 1e-4,
+        "beta_1": 0.9,
+        "beta_2": 0.999,
+        "epsilon": 1e-8,
+    }
+)
+
 
 class ProbeExtractionError(RuntimeError):
     """Failure to construct a scientifically valid probe dataset."""
@@ -362,11 +394,6 @@ def extract_probe_split(
     finally:
         datamodule.release_probe_split()
 
-
-PROBE_INNER_SPLIT_SEED = 12345
-PROBE_INNER_VALIDATION_FRACTION = 0.2
-
-
 class ProbePartitionError(ValueError):
     """Failure to construct the fixed inner probe partition."""
 
@@ -483,4 +510,286 @@ def make_probe_inner_partition(
         seed=seed,
         validation_fraction=float(validation_fraction),
         manifest_hash=manifest.hexdigest(),
+    )
+
+class ProbeFitError(RuntimeError):
+    """Failure while fitting or evaluating one probe candidate."""
+
+    def __init__(self, reason: str, message: str) -> None:
+        self.reason = reason
+        super().__init__(message)
+
+
+@dataclass(frozen=True)
+class MLPProbeCandidateResult:
+    """Fitted MLP and its inner-validation diagnostics."""
+
+    seed: int
+    inner_r2_raw: float
+    inner_mae_gev: float
+    convergence_warnings: tuple[str, ...]
+    n_iter: int
+    final_loss: float
+    feature_scaler: StandardScaler
+    target_scaler: StandardScaler
+    estimator: MLPRegressor
+
+
+def _validate_candidate_inputs(
+    features: np.ndarray,
+    target: np.ndarray,
+    partition: ProbeInnerPartition,
+) -> tuple[np.ndarray, np.ndarray]:
+    features = np.asarray(features)
+    target = np.asarray(target)
+
+    if features.ndim != 2:
+        raise ProbeFitError(
+            "invalid_probe_feature_shape",
+            "Probe features must have shape [events, features], "
+            f"got {features.shape}.",
+        )
+
+    if target.ndim == 2 and target.shape[1] == 1:
+        target = target.reshape(-1)
+    elif target.ndim != 1:
+        raise ProbeFitError(
+            "invalid_probe_target_shape",
+            "Probe target must have shape [events], "
+            f"got {target.shape}.",
+        )
+
+    if features.shape[0] != target.shape[0]:
+        raise ProbeFitError(
+            "probe_feature_target_row_mismatch",
+            "Probe features and target have different event counts: "
+            f"{features.shape[0]} != {target.shape[0]}.",
+        )
+
+    if not np.isfinite(features).all():
+        raise ProbeFitError(
+            "non_finite_probe_features",
+            "Probe features contain NaN or infinity.",
+        )
+
+    if not np.isfinite(target).all():
+        raise ProbeFitError(
+            "non_finite_probe_target",
+            "Probe target contains NaN or infinity.",
+        )
+
+    combined_indices = np.concatenate(
+        [
+            partition.fit_indices,
+            partition.validation_indices,
+        ]
+    )
+
+    expected_indices = np.arange(
+        features.shape[0],
+        dtype=np.int64,
+    )
+
+    if (
+        combined_indices.size != expected_indices.size
+        or not np.array_equal(
+            np.sort(combined_indices),
+            expected_indices,
+        )
+    ):
+        raise ProbeFitError(
+            "invalid_inner_partition",
+            "The inner partition must contain every event exactly once.",
+        )
+
+    return features, target
+
+
+def _validate_fitted_mlp(estimator: MLPRegressor) -> None:
+    parameter_arrays = [
+        *getattr(estimator, "coefs_", []),
+        *getattr(estimator, "intercepts_", []),
+    ]
+
+    if not parameter_arrays:
+        raise ProbeFitError(
+            "missing_mlp_parameters",
+            "The fitted MLP does not expose weights and biases.",
+        )
+
+    if not all(
+        np.isfinite(parameter).all()
+        for parameter in parameter_arrays
+    ):
+        raise ProbeFitError(
+            "non_finite_mlp_parameters",
+            "The fitted MLP contains non-finite parameters.",
+        )
+
+    final_loss = float(
+        getattr(estimator, "loss_", np.nan)
+    )
+
+    if not np.isfinite(final_loss):
+        raise ProbeFitError(
+            "non_finite_mlp_loss",
+            "The fitted MLP has a non-finite final loss.",
+        )
+
+
+def fit_mlp_probe_candidate(
+    features: np.ndarray,
+    target: np.ndarray,
+    partition: ProbeInnerPartition,
+    *,
+    seed: int,
+) -> MLPProbeCandidateResult:
+    """Fit one fixed MLP candidate and score inner validation.
+
+    Feature and target preprocessing are fitted only on probe_fit.
+    """
+
+    if seed not in PROBE_INITIALIZATION_SEEDS:
+        raise ProbeFitError(
+            "invalid_probe_seed",
+            f"Probe seed must be one of "
+            f"{PROBE_INITIALIZATION_SEEDS}, got {seed}.",
+        )
+
+    features, target = _validate_candidate_inputs(
+        features,
+        target,
+        partition,
+    )
+
+    features_fit = features[partition.fit_indices]
+    target_fit = target[partition.fit_indices]
+
+    features_validation = features[
+        partition.validation_indices
+    ]
+    target_validation = target[
+        partition.validation_indices
+    ]
+
+    if np.unique(target_fit).size < 2:
+        raise ProbeFitError(
+            "constant_probe_fit_target",
+            "The probe-fit target is constant.",
+        )
+
+    if np.unique(target_validation).size < 2:
+        raise ProbeFitError(
+            "constant_probe_inner_validation_target",
+            "The inner-validation target is constant.",
+        )
+
+    # These are fitted only on probe_fit. Validation information must not
+    # influence either scaler.
+    feature_scaler = StandardScaler()
+    target_scaler = StandardScaler()
+
+    scaled_features_fit = feature_scaler.fit_transform(
+        features_fit
+    )
+    scaled_target_fit = target_scaler.fit_transform(
+        target_fit.reshape(-1, 1)
+    ).reshape(-1)
+
+    scaled_features_validation = feature_scaler.transform(
+        features_validation
+    )
+
+    estimator = MLPRegressor(
+        **MLP_PROBE_CONFIG,
+        random_state=seed,
+    )
+
+    try:
+        with warnings.catch_warnings(record=True) as caught:
+            warnings.simplefilter(
+                "always",
+                ConvergenceWarning,
+            )
+            estimator.fit(
+                scaled_features_fit,
+                scaled_target_fit,
+            )
+    except Exception as error:
+        raise ProbeFitError(
+            "mlp_fit_failed",
+            f"MLP candidate with seed {seed} failed: {error}",
+        ) from error
+
+    convergence_warnings = tuple(
+        str(item.message)
+        for item in caught
+        if issubclass(
+            item.category,
+            ConvergenceWarning,
+        )
+    )
+
+    _validate_fitted_mlp(estimator)
+
+    scaled_predictions = np.asarray(
+        estimator.predict(
+            scaled_features_validation
+        )
+    ).reshape(-1)
+
+    if (
+        scaled_predictions.shape[0]
+        != target_validation.shape[0]
+    ):
+        raise ProbeFitError(
+            "mlp_prediction_row_mismatch",
+            "MLP prediction and validation target counts differ.",
+        )
+
+    if not np.isfinite(scaled_predictions).all():
+        raise ProbeFitError(
+            "non_finite_mlp_predictions",
+            "The MLP produced non-finite predictions.",
+        )
+
+    predictions_gev = target_scaler.inverse_transform(
+        scaled_predictions.reshape(-1, 1)
+    ).reshape(-1)
+
+    inner_r2_raw = float(
+        r2_score(
+            target_validation,
+            predictions_gev,
+        )
+    )
+    inner_mae_gev = float(
+        mean_absolute_error(
+            target_validation,
+            predictions_gev,
+        )
+    )
+
+    if not np.isfinite(inner_r2_raw):
+        raise ProbeFitError(
+            "non_finite_inner_r2",
+            "The MLP produced a non-finite inner-validation R2.",
+        )
+
+    if not np.isfinite(inner_mae_gev):
+        raise ProbeFitError(
+            "non_finite_inner_mae",
+            "The MLP produced a non-finite inner-validation MAE.",
+        )
+
+    return MLPProbeCandidateResult(
+        seed=seed,
+        inner_r2_raw=inner_r2_raw,
+        inner_mae_gev=inner_mae_gev,
+        convergence_warnings=convergence_warnings,
+        n_iter=int(estimator.n_iter_),
+        final_loss=float(estimator.loss_),
+        feature_scaler=feature_scaler,
+        target_scaler=target_scaler,
+        estimator=estimator,
     )

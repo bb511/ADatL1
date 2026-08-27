@@ -921,3 +921,262 @@ def select_mlp_probe_seed(
         ),
         failed_candidates=failed_tuple,
     )
+
+
+@dataclass(frozen=True)
+class MLPProbeOuterResult:
+    """Fresh selected-seed MLP evaluated on outer validation."""
+
+    selected_seed: int
+    outer_r2_raw: float
+    outer_r2_clipped: float
+    outer_mae_gev: float
+    convergence_warnings: tuple[str, ...]
+    n_iter: int
+    final_loss: float
+    n_train: int
+    n_validation: int
+    feature_scaler: StandardScaler
+    target_scaler: StandardScaler
+    estimator: MLPRegressor
+
+def _validate_probe_dataset(
+    features: np.ndarray,
+    target: np.ndarray,
+    *,
+    split_name: str,
+) -> tuple[np.ndarray, np.ndarray]:
+    """Validate one complete train or outer-validation dataset."""
+
+    features = np.asarray(features)
+    target = np.asarray(target)
+
+    if features.ndim != 2 or features.shape[1] == 0:
+        raise ProbeFitError(
+            f"invalid_{split_name}_feature_shape",
+            f"{split_name} features must have shape "
+            f"[events, nonzero features], got {features.shape}.",
+        )
+
+    if target.ndim == 2 and target.shape[1] == 1:
+        target = target.reshape(-1)
+    elif target.ndim != 1:
+        raise ProbeFitError(
+            f"invalid_{split_name}_target_shape",
+            f"{split_name} target must have shape [events], "
+            f"got {target.shape}.",
+        )
+
+    if features.shape[0] != target.shape[0]:
+        raise ProbeFitError(
+            f"{split_name}_feature_target_row_mismatch",
+            f"{split_name} features and target have different "
+            f"event counts: {features.shape[0]} != "
+            f"{target.shape[0]}.",
+        )
+
+    if features.shape[0] < 2:
+        raise ProbeFitError(
+            f"{split_name}_too_small",
+            f"{split_name} requires at least two events.",
+        )
+
+    if not np.isfinite(features).all():
+        raise ProbeFitError(
+            f"non_finite_{split_name}_features",
+            f"{split_name} features contain NaN or infinity.",
+        )
+
+    if not np.isfinite(target).all():
+        raise ProbeFitError(
+            f"non_finite_{split_name}_target",
+            f"{split_name} target contains NaN or infinity.",
+        )
+
+    if np.unique(target).size < 2:
+        raise ProbeFitError(
+            f"constant_{split_name}_target",
+            f"{split_name} target is constant.",
+        )
+
+    return features, target
+
+def refit_selected_mlp_probe(
+    train_features: np.ndarray,
+    train_target: np.ndarray,
+    validation_features: np.ndarray,
+    validation_target: np.ndarray,
+    selection: MLPProbeSeedSelection,
+) -> MLPProbeOuterResult:
+    """Refit the selected seed on full AE train and score outer validation."""
+
+    selected_seed = selection.selected_seed
+
+    if selected_seed not in PROBE_INITIALIZATION_SEEDS:
+        raise ProbeFitError(
+            "invalid_selected_probe_seed",
+            f"Selected seed must be one of "
+            f"{PROBE_INITIALIZATION_SEEDS}, got {selected_seed}.",
+        )
+
+    if selection.selected_candidate.seed != selected_seed:
+        raise ProbeFitError(
+            "selected_candidate_seed_mismatch",
+            "Seed selection and selected candidate disagree: "
+            f"{selected_seed} != "
+            f"{selection.selected_candidate.seed}.",
+        )
+
+    train_features, train_target = _validate_probe_dataset(
+        train_features,
+        train_target,
+        split_name="full_train",
+    )
+    validation_features, validation_target = (
+        _validate_probe_dataset(
+            validation_features,
+            validation_target,
+            split_name="outer_validation",
+        )
+    )
+
+    if (
+        train_features.shape[1]
+        != validation_features.shape[1]
+    ):
+        raise ProbeFitError(
+            "probe_feature_dimension_mismatch",
+            "Training and outer-validation feature dimensions "
+            f"differ: {train_features.shape[1]} != "
+            f"{validation_features.shape[1]}.",
+        )
+
+    # These must be new objects. The candidate scalers were fitted on
+    # only probe_fit and must not be reused.
+    feature_scaler = StandardScaler()
+    target_scaler = StandardScaler()
+
+    scaled_train_features = feature_scaler.fit_transform(
+        train_features
+    )
+    scaled_train_target = target_scaler.fit_transform(
+        train_target.reshape(-1, 1)
+    ).reshape(-1)
+
+    scaled_validation_features = feature_scaler.transform(
+        validation_features
+    )
+
+    # This must also be a fresh estimator. Only the selected random seed
+    # is reused from the candidate-selection stage.
+    estimator = MLPRegressor(
+        **MLP_PROBE_CONFIG,
+        random_state=selected_seed,
+    )
+
+    try:
+        with warnings.catch_warnings(record=True) as caught:
+            warnings.simplefilter(
+                "always",
+                ConvergenceWarning,
+            )
+            estimator.fit(
+                scaled_train_features,
+                scaled_train_target,
+            )
+    except Exception as error:
+        raise ProbeFitError(
+            "mlp_refit_failed",
+            "Fresh MLP refit failed for selected seed "
+            f"{selected_seed}: {error}",
+        ) from error
+
+    convergence_warnings = tuple(
+        str(item.message)
+        for item in caught
+        if issubclass(
+            item.category,
+            ConvergenceWarning,
+        )
+    )
+
+    _validate_fitted_mlp(estimator)
+
+    try:
+        scaled_predictions = np.asarray(
+            estimator.predict(
+                scaled_validation_features
+            )
+        ).reshape(-1)
+    except Exception as error:
+        raise ProbeFitError(
+            "mlp_outer_prediction_failed",
+            f"Outer-validation prediction failed: {error}",
+        ) from error
+
+    if (
+        scaled_predictions.shape[0]
+        != validation_target.shape[0]
+    ):
+        raise ProbeFitError(
+            "mlp_outer_prediction_row_mismatch",
+            "Outer predictions and targets have different "
+            "event counts.",
+        )
+
+    if not np.isfinite(scaled_predictions).all():
+        raise ProbeFitError(
+            "non_finite_mlp_outer_predictions",
+            "The refitted MLP produced non-finite outer "
+            "predictions.",
+        )
+
+    predictions_gev = target_scaler.inverse_transform(
+        scaled_predictions.reshape(-1, 1)
+    ).reshape(-1)
+
+    if not np.isfinite(predictions_gev).all():
+        raise ProbeFitError(
+            "non_finite_mlp_outer_predictions_gev",
+            "Inverse-transformed outer predictions are non-finite.",
+        )
+
+    outer_r2_raw = float(
+        r2_score(
+            validation_target,
+            predictions_gev,
+        )
+    )
+    outer_mae_gev = float(
+        mean_absolute_error(
+            validation_target,
+            predictions_gev,
+        )
+    )
+
+    if not np.isfinite(outer_r2_raw):
+        raise ProbeFitError(
+            "non_finite_outer_r2",
+            "Outer-validation R2 is non-finite.",
+        )
+
+    if not np.isfinite(outer_mae_gev):
+        raise ProbeFitError(
+            "non_finite_outer_mae",
+            "Outer-validation MAE is non-finite.",
+        )
+
+    return MLPProbeOuterResult(
+        selected_seed=selected_seed,
+        outer_r2_raw=outer_r2_raw,
+        outer_r2_clipped=max(0.0, outer_r2_raw),
+        outer_mae_gev=outer_mae_gev,
+        convergence_warnings=convergence_warnings,
+        n_iter=int(estimator.n_iter_),
+        final_loss=float(estimator.loss_),
+        n_train=int(train_features.shape[0]),
+        n_validation=int(validation_features.shape[0]),
+        feature_scaler=feature_scaler,
+        target_scaler=target_scaler,
+        estimator=estimator,
+    )

@@ -22,7 +22,6 @@ from sklearn.preprocessing import StandardScaler
 PROBE_INNER_SPLIT_SEED = 12345
 PROBE_INNER_VALIDATION_FRACTION = 0.2
 PROBE_INITIALIZATION_SEEDS = (10, 123, 500)
-
 MLP_PROBE_CONFIG = MappingProxyType(
     {
         "hidden_layer_sizes": (64, 32),
@@ -41,6 +40,18 @@ MLP_PROBE_CONFIG = MappingProxyType(
         "beta_2": 0.999,
         "epsilon": 1e-8,
     }
+)
+PROBE_REPRESENTATION_METRIC_NAMES = MappingProxyType(
+    {
+        "latent_logits": "z_logits",
+        "reconstructed_data": "reconstruction",
+        "latent_sample": "z_sample",
+    }
+)
+
+PRIMARY_PROBE_REPRESENTATIONS = (
+    "latent_logits",
+    "reconstructed_data",
 )
 
 
@@ -1179,4 +1190,173 @@ def refit_selected_mlp_probe(
         feature_scaler=feature_scaler,
         target_scaler=target_scaler,
         estimator=estimator,
+    )
+
+@dataclass(frozen=True)
+class NamedMLPProbeResult:
+    """Complete MLP procedure for one named representation."""
+
+    representation_name: str
+    metric_name: str
+    feature_dimension: int
+    seed_selection: MLPProbeSeedSelection
+    outer_result: MLPProbeOuterResult
+
+
+@dataclass(frozen=True)
+class PrimaryMLPLeakageResult:
+    """Primary latent and reconstruction leakage measurement."""
+
+    latent_logits: NamedMLPProbeResult
+    reconstructed_data: NamedMLPProbeResult
+    inner_partition: ProbeInnerPartition
+    leakage_worst: float
+
+def evaluate_mlp_probe_representation(
+    train_representations: ProbeRepresentationSet,
+    validation_representations: ProbeRepresentationSet,
+    partition: ProbeInnerPartition,
+    *,
+    representation_name: str,
+) -> NamedMLPProbeResult:
+    """Run seed selection and outer scoring for one representation."""
+
+    if (
+        representation_name
+        not in PROBE_REPRESENTATION_METRIC_NAMES
+    ):
+        raise ProbeFitError(
+            "unknown_probe_representation",
+            f"Unknown probe representation "
+            f"{representation_name!r}. Expected one of "
+            f"{tuple(PROBE_REPRESENTATION_METRIC_NAMES)}.",
+        )
+
+    train_features = getattr(
+        train_representations,
+        representation_name,
+    )
+    validation_features = getattr(
+        validation_representations,
+        representation_name,
+    )
+
+    selection = select_mlp_probe_seed(
+        train_features,
+        train_representations.sensitive_target,
+        partition,
+    )
+
+    outer_result = refit_selected_mlp_probe(
+        train_features,
+        train_representations.sensitive_target,
+        validation_features,
+        validation_representations.sensitive_target,
+        selection,
+    )
+
+    return NamedMLPProbeResult(
+        representation_name=representation_name,
+        metric_name=PROBE_REPRESENTATION_METRIC_NAMES[
+            representation_name
+        ],
+        feature_dimension=int(train_features.shape[1]),
+        seed_selection=selection,
+        outer_result=outer_result,
+    )
+
+def evaluate_primary_mlp_probes(
+    train_representations: ProbeRepresentationSet,
+    validation_representations: ProbeRepresentationSet,
+) -> PrimaryMLPLeakageResult:
+    """Evaluate both primary probes for hyperparameter selection."""
+
+    if train_representations.split != "train":
+        raise ProbeFitError(
+            "invalid_probe_training_split",
+            "Primary probe fitting requires the AE train split, "
+            f"got {train_representations.split!r}.",
+        )
+
+    if validation_representations.split != "valid":
+        raise ProbeFitError(
+            "invalid_probe_outer_split",
+            "Hyperparameter-selection leakage must use the AE "
+            f"valid split, got "
+            f"{validation_representations.split!r}.",
+        )
+
+    if (
+        train_representations.n_events
+        != train_representations.sensitive_target.shape[0]
+    ):
+        raise ProbeFitError(
+            "train_event_count_mismatch",
+            "Recorded training event count does not match the "
+            "training target.",
+        )
+
+    if (
+        validation_representations.n_events
+        != validation_representations.sensitive_target.shape[0]
+    ):
+        raise ProbeFitError(
+            "validation_event_count_mismatch",
+            "Recorded validation event count does not match the "
+            "validation target.",
+        )
+
+    # Construct this once. Both primary representations must reuse
+    # precisely the same probe-fit and inner-validation memberships.
+    partition = make_probe_inner_partition(
+        train_representations.n_events
+    )
+
+    latent_result = evaluate_mlp_probe_representation(
+        train_representations,
+        validation_representations,
+        partition,
+        representation_name="latent_logits",
+    )
+
+    reconstruction_result = (
+        evaluate_mlp_probe_representation(
+            train_representations,
+            validation_representations,
+            partition,
+            representation_name="reconstructed_data",
+        )
+    )
+
+    # Defensive runtime check: these are scientifically independent
+    # probes and must never share fitted preprocessing or estimators.
+    latent_outer = latent_result.outer_result
+    reconstruction_outer = reconstruction_result.outer_result
+
+    shared_objects = (
+        latent_outer.estimator
+        is reconstruction_outer.estimator
+        or latent_outer.feature_scaler
+        is reconstruction_outer.feature_scaler
+        or latent_outer.target_scaler
+        is reconstruction_outer.target_scaler
+    )
+
+    if shared_objects:
+        raise ProbeFitError(
+            "primary_probe_state_shared",
+            "Latent and reconstruction probes unexpectedly share "
+            "an estimator or fitted scaler.",
+        )
+
+    leakage_worst = max(
+        latent_outer.outer_r2_clipped,
+        reconstruction_outer.outer_r2_clipped,
+    )
+
+    return PrimaryMLPLeakageResult(
+        latent_logits=latent_result,
+        reconstructed_data=reconstruction_result,
+        inner_partition=partition,
+        leakage_worst=float(leakage_worst),
     )

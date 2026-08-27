@@ -103,6 +103,8 @@ class L1ADDataModule(LightningDataModule):
         self.control_object_feature_map: dict[str, dict[str, list[int]]] | None = None
         self._model_keep_indices: list[int] | None = None
         self._model_excluded_indices: set[int] = set()
+        self._probe_split_name: str | None = None
+        self._probe_split: SplitTensors | None = None
 
     def prepare_data(self) -> None:
         """Get zero bias data and the simulated MC signal data."""
@@ -207,6 +209,70 @@ class L1ADDataModule(LightningDataModule):
         return self._make_eval_loaders(
             main_key="test", aux_key="test", main_name="normal"
         )
+
+    def setup_probe_split(self, split: str) -> None:
+        """Load one unshuffled main-background split for probe evaluation.
+
+        Only one probe split may be resident at a time. Auxiliary signal and
+        simulated-background datasets are deliberately not loaded.
+        """
+        allowed = {"train", "valid", "test"}
+        if split not in allowed:
+            raise ValueError(
+                f"Unknown probe split {split!r}. "
+                f"Expected one of: {sorted(allowed)}."
+            )
+
+        if self._probe_split is not None:
+            raise RuntimeError(
+                "A probe split is already loaded: "
+                f"{self._probe_split_name!r}. "
+                "Call release_probe_split() before loading another split."
+            )
+
+        if self.main_cache_folder is None:
+            raise RuntimeError(
+                "Cannot load a probe split because main_cache_folder is not set. "
+                "Did prepare_data() run?"
+            )
+
+        self._set_batch_size()
+        self.loader = self.hparams.data_awkward2torch
+
+        loaded = self._load_main_split(
+            self.main_cache_folder,
+            split,
+            label=0,
+        )
+
+        self._probe_split = loaded
+        self._probe_split_name = split
+
+    def probe_dataloader(self) -> DataLoader:
+        """Return an unshuffled loader for the currently loaded probe split."""
+        if self._probe_split is None or self._probe_split_name is None:
+            raise RuntimeError(
+                "No probe split is loaded. Call setup_probe_split() first."
+            )
+
+        return self._to_loader(
+            self._probe_split,
+            batch_size=self.batch_size_per_device,
+            max_b=None,
+        )
+
+    def release_probe_split(self) -> None:
+        """Release the currently resident probe split."""
+        self._probe_split = None
+        self._probe_split_name = None
+
+        gc.collect()
+
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
+
+        if torch.backends.mps.is_available():
+            torch.mps.empty_cache()
 
     def teardown(self, stage: str | None = None) -> None:
         # Drop references to large tensors so they become collectible

@@ -398,6 +398,12 @@ class CorrelationMatrixCallback(Callback):
                 plot_folder / "mean_correlations.json",
             )
 
+        # The source tables can contain millions of event values. They are no longer
+        # needed after the CSVs and summaries have been written, and retaining them
+        # here keeps the entire validation sample alive while the test split is loaded.
+        self._buffers.clear()
+        self._event_counts.clear()
+
     def _resolve_variables(self) -> list[dict]:
         """Resolve labels against model-input and full/control feature maps."""
         resolved = []

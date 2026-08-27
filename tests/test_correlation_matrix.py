@@ -139,6 +139,8 @@ def test_test_epoch_end_writes_method_folders_sources_means_and_sorted_matrices(
     assert summary["C"] == pytest.approx(
         max(max(0.0, expected_pearson), max(0.0, expected_spearman))
     )
+    assert callback._buffers == {}
+    assert callback._event_counts == {}
 
 
 def test_write_mean_correlations_uses_larger_absolute_mean_for_pareto_c(

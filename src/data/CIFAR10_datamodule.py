@@ -162,7 +162,7 @@ class CIFAR10DataModule(LightningDataModule):
 
     def teardown(self, stage: str | None = None) -> None:
         """Release cached tensors."""
-        if stage in ("fit", None):
+        if stage in ("fit", "validate", None):
             self._main.pop("train", None)
             self._main.pop("valid", None)
             self._aux.get("valid", {}).clear()
@@ -175,6 +175,8 @@ class CIFAR10DataModule(LightningDataModule):
         if torch.cuda.is_available():
             torch.cuda.empty_cache()
             torch.cuda.ipc_collect()
+        if torch.backends.mps.is_available():
+            torch.mps.empty_cache()
 
     def transfer_batch_to_device(self, batch, device, dataloader_idx):
         """Transfer 2-tuple CIFAR batches to device."""

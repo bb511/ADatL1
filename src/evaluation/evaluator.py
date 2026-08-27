@@ -219,6 +219,18 @@ class Evaluator:
         logging.getLogger("pytorch_lightning").setLevel(logging.ERROR)
         self.evaluator.test(model=model, dataloaders=test_loader, verbose=False)
 
+    def release_dataloaders(self) -> None:
+        """Drop Lightning's references to externally supplied evaluation loaders.
+
+        ``Trainer.test`` retains both its processed ``CombinedLoader`` and the original
+        dataloader source after returning. The physics evaluator reuses one Trainer for
+        validation and test, so keeping those references also keeps every validation
+        tensor in RAM while the held-out test split is loaded.
+        """
+        test_loop = self.evaluator.test_loop
+        test_loop._combined_loader = None
+        test_loop._data_source.instance = None
+
     def evaluate_last(self, run_folder: Path, model, test_loaders):
         """Evaluate the checkpoint taken at the last epoch."""
         self.evaluate_root_checkpoint(

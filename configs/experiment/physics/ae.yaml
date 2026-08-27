@@ -72,12 +72,12 @@ callbacks:
     name: losses
     log_raw_mlflow: true
 
-  # Keep the epoch with the smallest training objective
-  # loss_reco + mi_gamma * loss_mi next to last.ckpt.
+  # Keep the epoch with the smallest complete-epoch validation objective on the
+  # normal validation split: loss_reco + mi_gamma * loss_mi.
   loss_total_ckpt:
     _target_: pytorch_lightning.callbacks.ModelCheckpoint
     dirpath: '${paths.checkpoints_dir}/${experiment_name}/${run_name}'
-    monitor: 'checkpoint/train_loss_total'
+    monitor: 'val/loss_total'
     filename: 'loss_total'
     save_last: false
     save_top_k: 1
@@ -86,9 +86,8 @@ callbacks:
     enable_version_counter: false
     save_weights_only: false
     every_n_epochs: 1
-    # Save after validation so the checkpoint contains the operational threshold
-    # calibrated for this epoch. checkpoint/train_loss_total is the completed
-    # epoch's train/loss bridged through validation by ADLightningModule.
+    # Selection happens after validation, never from training or test metrics.
+    # This also preserves the operational threshold calibrated for this epoch.
     save_on_train_epoch_end: false
 
   anomaly_eff:
@@ -166,6 +165,9 @@ callbacks:
 evaluation:
   evaluator:
     ckpts:
+      # The default evaluation config enables last.ckpt. Disable it explicitly
+      # because Hydra merges nested dictionaries instead of replacing them.
+      last: false
       loss_total: true
 
   callbacks:

@@ -211,11 +211,13 @@ class L1ADDataModule(LightningDataModule):
     def teardown(self, stage: str | None = None) -> None:
         # Drop references to large tensors so they become collectible
         if stage in ("fit", None):
-            # free train/valid (+ aux valid)
             self._train_loader = None
-            self._val_loaders = None
-
             self._main.pop("train", None)
+
+        if stage in ("fit", "validate", None):
+            # Validation is also run by a separate evaluator with explicit loaders.
+            # It must be releasable before the held-out test tensors are loaded.
+            self._val_loaders = None
             self._main.pop("valid", None)
             self._aux.get("valid", {}).clear()
 
@@ -230,6 +232,8 @@ class L1ADDataModule(LightningDataModule):
         if torch.cuda.is_available():
             torch.cuda.empty_cache()
             torch.cuda.ipc_collect()
+        if torch.backends.mps.is_available():
+            torch.mps.empty_cache()
 
     def transfer_batch_to_device(self, batch, device, dataloader_idx):
         """Transfer custom dataset to gpu faster."""

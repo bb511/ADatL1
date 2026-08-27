@@ -66,6 +66,21 @@ def test_evaluate_root_checkpoint_requires_existing_checkpoint(
         )
 
 
+def test_release_dataloaders_drops_both_lightning_loader_references() -> None:
+    evaluator = Evaluator.__new__(Evaluator)
+    data_source = SimpleNamespace(instance={"normal": object()})
+    test_loop = SimpleNamespace(
+        _combined_loader=object(),
+        _data_source=data_source,
+    )
+    evaluator.evaluator = SimpleNamespace(test_loop=test_loop)
+
+    evaluator.release_dataloaders()
+
+    assert test_loop._combined_loader is None
+    assert data_source.instance is None
+
+
 def test_reconstruction_callback_supports_named_root_checkpoint() -> None:
     callback = ReconstructionPlots(
         warmup_batches=0.2,

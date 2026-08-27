@@ -124,7 +124,41 @@ class ADLightningModule(LightningModule):
         else:
             datasets = list(getattr(self.trainer, f"{stage}_dataloaders").keys())
             dataset_name = datasets[dataloader_idx]
-            logs = {f"{stage}/{dataset_name}/{k}": v / nsteps for k, v in logs.items()}
+            averaged_logs = {k: v / nsteps for k, v in logs.items()}
+            logs = {
+                f"{stage}/{dataset_name}/{k}": v
+                for k, v in averaged_logs.items()
+            }
+
+            # Checkpoint selection uses only the complete normal validation epoch.
+            # Build the total from the separately aggregated components using the
+            # exact same gamma stored on the model and used during training.
+            # Auxiliary validation datasets and test data never publish these keys.
+            if (
+                stage == "val"
+                and dataset_name == "normal"
+                and "loss_reco" in averaged_logs
+                and "loss_mi" in averaged_logs
+                and hasattr(self, "mi_gamma")
+            ):
+                validation_loss_reco = averaged_logs["loss_reco"]
+                validation_loss_mi = averaged_logs["loss_mi"]
+                validation_loss_total = (
+                    validation_loss_reco + float(self.mi_gamma) * validation_loss_mi
+                )
+                self.log_dict(
+                    {
+                        "val/loss_reco": validation_loss_reco,
+                        "val/loss_mi": validation_loss_mi,
+                        "val/loss_total": validation_loss_total,
+                    },
+                    on_step=False,
+                    on_epoch=True,
+                    logger=True,
+                    prog_bar=False,
+                    sync_dist=True,
+                    add_dataloader_idx=False,
+                )
 
         self.log_dict(
             logs,

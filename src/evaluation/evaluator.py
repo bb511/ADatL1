@@ -100,11 +100,19 @@ class Evaluator:
         log.info(Fore.MAGENTA + f"Evaluating run at {run_folder}...")
 
         for strategy_name in self.ckpts.keys():
-            if self.ckpts[strategy_name] is None or self.ckpts[strategy_name] is False:
+            strategy_config = self.ckpts[strategy_name]
+            if strategy_config is None or strategy_config is False:
                 continue
 
-            if strategy_name == "last":
-                self.evaluate_last(run_folder, model, test_loader)
+            # Boolean entries select checkpoints stored directly in the run folder,
+            # for example ``last: true`` or ``loss_total: true``.
+            if strategy_config is True:
+                self.evaluate_root_checkpoint(
+                    run_folder,
+                    model,
+                    test_loader,
+                    checkpoint_name=strategy_name,
+                )
                 continue
 
             strat_subdir = self._get_subdir(run_folder, strategy_name)
@@ -211,14 +219,48 @@ class Evaluator:
         logging.getLogger("pytorch_lightning").setLevel(logging.ERROR)
         self.evaluator.test(model=model, dataloaders=test_loader, verbose=False)
 
+    def release_dataloaders(self) -> None:
+        """Drop Lightning's references to externally supplied evaluation loaders.
+
+        ``Trainer.test`` retains both its processed ``CombinedLoader`` and the original
+        dataloader source after returning. The physics evaluator reuses one Trainer for
+        validation and test, so keeping those references also keeps every validation
+        tensor in RAM while the held-out test split is loaded.
+        """
+        test_loop = self.evaluator.test_loop
+        test_loop._combined_loader = None
+        test_loop._data_source.instance = None
+
     def evaluate_last(self, run_folder: Path, model, test_loaders):
         """Evaluate the checkpoint taken at the last epoch."""
-        log.info(Fore.GREEN + f"-> Evaluating strategy 'last'")
-        self.evaluator.strat_name = "last"
-        ckpt_path = run_folder / "last.ckpt"
+        self.evaluate_root_checkpoint(
+            run_folder,
+            model,
+            test_loaders,
+            checkpoint_name="last",
+        )
+
+    def evaluate_root_checkpoint(
+        self,
+        run_folder: Path,
+        model: LightningModule,
+        test_loaders: dict,
+        checkpoint_name: str,
+    ):
+        """Evaluate a named checkpoint stored directly in the run folder."""
+        log.info(Fore.GREEN + f"-> Evaluating strategy '{checkpoint_name}'")
+        self.evaluator.strat_name = checkpoint_name
+        self.evaluator.metric_name = None
+        self.evaluator.criterion_name = None
+        ckpt_path = run_folder / f"{checkpoint_name}.ckpt"
+        if not is_valid_ckpt(ckpt_path):
+            raise FileNotFoundError(f"Checkpoint not found: {ckpt_path}")
+
+        self.evaluator.ckpt_path_name = ckpt_path.name
         self.evaluate_ckpt(ckpt_path, model, test_loaders)
         self._get_optimized_metric(self.optimized_metric_config)
         self._make_criterion_summary_plots(run_folder)
+        self.evaluator.strat_name = None
 
     def _get_subdir(self, main_dir: Path, subdir: str):
         """Checks if a dir exists and returns it if true."""

@@ -112,9 +112,17 @@ def train(cfg: DictConfig) -> Tuple[Dict[str, Any], Dict[str, Any]]:
     log.info(Back.MAGENTA + 8 * "-" + "STARTING RUN VALIDATION" + 8 * "-")
     datamodule.setup("validate")
     val_loader = datamodule.val_dataloader()
-    evaluator.evaluate_run(
-        run_ckpts, algorithm, val_loader, "val", set_optimized_metric=True
-    )
+    try:
+        evaluator.evaluate_run(
+            run_ckpts, algorithm, val_loader, "val", set_optimized_metric=True
+        )
+    finally:
+        # The physics datamodule keeps every split in RAM. Release validation before
+        # setup("test") loads another full copy of the model/control tensors.
+        evaluator.release_dataloaders()
+        del val_loader
+        datamodule.teardown("validate")
+        gc.collect()
     object_dict.update({"evaluator": evaluator})
 
     # Evaluate once more on a held out test set for final performance.
@@ -122,7 +130,13 @@ def train(cfg: DictConfig) -> Tuple[Dict[str, Any], Dict[str, Any]]:
         log.info(Back.MAGENTA + 8 * "-" + "STARTING RUN TESTING" + 8 * "-")
         datamodule.setup("test")
         test_loader = datamodule.test_dataloader()
-        evaluator.evaluate_run(run_ckpts, algorithm, test_loader, "test")
+        try:
+            evaluator.evaluate_run(run_ckpts, algorithm, test_loader, "test")
+        finally:
+            evaluator.release_dataloaders()
+            del test_loader
+            datamodule.teardown("test")
+            gc.collect()
         object_dict.update({"evaluator": evaluator})
 
     metric_dict = {**train_metrics}

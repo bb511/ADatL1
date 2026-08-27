@@ -1,7 +1,7 @@
 import numpy as np
 import matplotlib.pyplot as plt
 from pathlib import Path
-from dataloader import DataLoader
+from src.analysis.dataloader import DataLoader
 from src.plot.twodplotter import TwoDPlotter
 
 if __name__ == "__main__":

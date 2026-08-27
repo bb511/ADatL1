@@ -104,6 +104,10 @@ def train(cfg: DictConfig) -> Tuple[Dict[str, Any], Dict[str, Any]]:
 
     train_metrics = trainer.callback_metrics
 
+    if cfg.get("train"):
+        log.info("Releasing fit dataloaders before run validation...")
+        _release_fit_dataloaders(trainer, datamodule)
+
     # Get validation report, and also set hp optimisation values.
     log.info(Fore.CYAN + "Instantiating evaluator...")
     evaluator = _get_evaluator(cfg, datamodule, logger)
@@ -141,6 +145,42 @@ def train(cfg: DictConfig) -> Tuple[Dict[str, Any], Dict[str, Any]]:
 
     metric_dict = {**train_metrics}
     return metric_dict, object_dict
+
+
+def _release_fit_dataloaders(
+    trainer: Trainer, datamodule: LightningDataModule
+) -> None:
+    """Release Lightning's train/validation loaders before standalone evaluation.
+
+    Lightning 2.6 keeps the processed ``CombinedLoader`` and original dataloader
+    source on both the fit loop and its nested validation loop after ``fit`` returns.
+    The physics datasets own multi-gigabyte in-memory tensors, so those references
+    must be cleared before ``datamodule.setup("validate")`` loads validation again.
+    """
+    fit_loop = trainer.fit_loop
+    fit_validation_loop = getattr(getattr(fit_loop, "epoch_loop", None), "val_loop", None)
+
+    for loop in (fit_loop, fit_validation_loop):
+        if loop is None:
+            continue
+
+        if hasattr(loop, "_combined_loader"):
+            loop._combined_loader = None
+
+        data_source = getattr(loop, "_data_source", None)
+        if data_source is not None:
+            data_source.instance = None
+
+    # Lightning calls teardown at the end of fit, but running it again after its
+    # loader references are gone lets project datamodules release any remaining
+    # split tensors. The repository datamodule teardown methods are idempotent.
+    datamodule.teardown("fit")
+    gc.collect()
+
+    if torch.cuda.is_available():
+        torch.cuda.empty_cache()
+    if torch.backends.mps.is_available():
+        torch.mps.empty_cache()
 
 
 def _worst_for(direction: str) -> float:

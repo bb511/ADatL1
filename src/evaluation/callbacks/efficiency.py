@@ -310,10 +310,15 @@ class AnomalyEfficiencyCallback(Callback):
             mean_efficiency = float(np.mean(signal_data))
             min_efficiency = float(np.min(signal_data))
             min_efficiency_dataset = min(per_signal, key=per_signal.get)
+            cvar25_count = max(1, int(np.ceil(0.25 * signal_data.size)))
+            cvar25_efficiency = float(
+                np.partition(signal_data, cvar25_count - 1)[:cvar25_count].mean()
+            )
         else:
-            mean_efficiency = 0.0
-            min_efficiency = 0.0
+            mean_efficiency = None
+            min_efficiency = None
             min_efficiency_dataset = None
+            cvar25_efficiency = None
 
         payload = {
             "checkpoint": checkpoint_name,
@@ -332,6 +337,7 @@ class AnomalyEfficiencyCallback(Callback):
             "mean_efficiency": mean_efficiency,
             "min_efficiency": min_efficiency,
             "min_efficiency_dataset": min_efficiency_dataset,
+            "cvar25_efficiency": cvar25_efficiency,
             "signal_efficiencies": per_signal,
         }
         output_path.write_text(

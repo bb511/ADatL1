@@ -793,3 +793,131 @@ def fit_mlp_probe_candidate(
         target_scaler=target_scaler,
         estimator=estimator,
     )
+
+@dataclass(frozen=True)
+class MLPProbeCandidateFailure:
+    """Recorded failure of one probe initialization."""
+
+    seed: int
+    reason: str
+    message: str
+
+
+@dataclass(frozen=True)
+class MLPProbeSeedSelection:
+    """Result of selecting one MLP initialization using inner R2."""
+
+    selected_seed: int
+    selected_candidate: MLPProbeCandidateResult
+    successful_candidates: tuple[MLPProbeCandidateResult, ...]
+    failed_candidates: tuple[MLPProbeCandidateFailure, ...]
+
+
+class AllMLPProbeCandidatesFailed(ProbeFitError):
+    """Raised when none of the frozen initialization seeds succeeds."""
+
+    def __init__(
+        self,
+        failed_candidates: tuple[
+            MLPProbeCandidateFailure,
+            ...,
+        ],
+    ) -> None:
+        self.failed_candidates = failed_candidates
+
+        failure_summary = "; ".join(
+            f"seed={failure.seed}: "
+            f"{failure.reason}: {failure.message}"
+            for failure in failed_candidates
+        )
+
+        super().__init__(
+            "all_mlp_candidates_failed",
+            "Every frozen MLP initialization failed. "
+            f"{failure_summary}",
+        )
+
+def select_mlp_probe_seed(
+    features: np.ndarray,
+    target: np.ndarray,
+    partition: ProbeInnerPartition,
+) -> MLPProbeSeedSelection:
+    """Fit every frozen seed and select the highest raw inner R2.
+
+    Exact ties are resolved by the order in
+    PROBE_INITIALIZATION_SEEDS.
+    """
+
+    successful_candidates: list[
+        MLPProbeCandidateResult
+    ] = []
+    failed_candidates: list[
+        MLPProbeCandidateFailure
+    ] = []
+
+    for seed in PROBE_INITIALIZATION_SEEDS:
+        try:
+            candidate = fit_mlp_probe_candidate(
+                features,
+                target,
+                partition,
+                seed=seed,
+            )
+        except ProbeFitError as error:
+            failed_candidates.append(
+                MLPProbeCandidateFailure(
+                    seed=seed,
+                    reason=error.reason,
+                    message=str(error),
+                )
+            )
+            continue
+
+        if candidate.seed != seed:
+            raise RuntimeError(
+                "MLP candidate returned a different seed than "
+                f"requested: requested {seed}, got "
+                f"{candidate.seed}."
+            )
+
+        if not np.isfinite(candidate.inner_r2_raw):
+            failed_candidates.append(
+                MLPProbeCandidateFailure(
+                    seed=seed,
+                    reason="non_finite_inner_r2",
+                    message=(
+                        "Candidate returned a non-finite "
+                        "inner-validation R2."
+                    ),
+                )
+            )
+            continue
+
+        successful_candidates.append(candidate)
+
+    failed_tuple = tuple(failed_candidates)
+
+    if not successful_candidates:
+        raise AllMLPProbeCandidatesFailed(
+            failed_tuple
+        )
+
+    # Start with the first successful candidate. Replacing it only when
+    # another score is strictly greater gives a deterministic tie rule.
+    selected_candidate = successful_candidates[0]
+
+    for candidate in successful_candidates[1:]:
+        if (
+            candidate.inner_r2_raw
+            > selected_candidate.inner_r2_raw
+        ):
+            selected_candidate = candidate
+
+    return MLPProbeSeedSelection(
+        selected_seed=selected_candidate.seed,
+        selected_candidate=selected_candidate,
+        successful_candidates=tuple(
+            successful_candidates
+        ),
+        failed_candidates=failed_tuple,
+    )

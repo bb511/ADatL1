@@ -304,6 +304,12 @@ The following diagnostics are enabled for every comparable run:
 
 These diagnostics do not enter `L`.
 
+The shuffled-target control uses a NumPy `RandomState` MT19937
+permutation with seed `12345`. The permutation is applied only to
+the complete autoencoder training target. The validation target is
+never shuffled. Both primary representations reuse the identical
+permuted training-target vector.
+
 ### 7.1 Shuffled-target guardrail
 
 For both primary representations, clipped shuffled-target validation leakage must be

@@ -18,6 +18,7 @@ from .constants import (
 )
 from .diagnostics import (
     enforce_shuffled_target_guardrail,
+    evaluate_latent_sample_mlp_diagnostic,
     evaluate_shuffled_target_mlp_controls,
     make_shuffled_training_target,
     shuffled_target_guardrail_failures,
@@ -143,4 +144,5 @@ __all__ = [
     "ShuffledTargetGuardrailError",
     "enforce_shuffled_target_guardrail",
     "shuffled_target_guardrail_failures",
+    "evaluate_latent_sample_mlp_diagnostic",
 ]

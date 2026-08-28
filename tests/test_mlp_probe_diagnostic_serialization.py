@@ -19,6 +19,8 @@ from src.evaluation.leakage_probe import (
     DummyBaselineOuterResult,
     NamedDummyBaselineResult,
     PrimaryDummyBaselineResult,
+    ShuffledTargetMLPResult,
+    four_probe_result_payload,
 )
 
 
@@ -156,6 +158,18 @@ def make_result(
             "reconstruction",
         ),
         dummy_baselines=make_dummy_baselines(),
+
+        # Add the field here:
+        shuffled_target_controls=ShuffledTargetMLPResult(
+            latent_logits=latent_mlp,
+            reconstructed_data=reconstruction_mlp,
+            inner_partition=Mock(),
+            shuffle_seed=12345,
+            permutation_manifest_hash=(
+                "test-shuffle-manifest"
+            ),
+        ),
+
         inner_partition=Mock(),
         worst_probe="mlp/z_logits",
         leakage_worst=0.4,

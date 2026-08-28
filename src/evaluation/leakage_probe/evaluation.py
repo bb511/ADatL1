@@ -5,6 +5,7 @@ from .errors import ProbeFitError
 from .linear import evaluate_primary_linear_probes
 from .mlp import evaluate_primary_mlp_probes
 from .types import FourProbeEvaluationResult, ProbeRepresentationSet
+from .diagnostics import evaluate_shuffled_target_mlp_controls
 
 def evaluate_four_leakage_probes(
     train_representations: ProbeRepresentationSet,
@@ -25,6 +26,13 @@ def evaluate_four_leakage_probes(
     dummy_baselines = evaluate_primary_dummy_baselines(
         train_representations,
         validation_representations,
+    )
+
+    shuffled_target_controls = (
+        evaluate_shuffled_target_mlp_controls(
+            train_representations,
+            validation_representations,
+        )
     )
 
     mlp_latent = mlp_result.latent_logits
@@ -90,6 +98,7 @@ def evaluate_four_leakage_probes(
         linear_latent_logits=linear_latent,
         linear_reconstructed_data=linear_reconstruction,
         dummy_baselines=dummy_baselines,
+        shuffled_target_controls=shuffled_target_controls,
         inner_partition=mlp_result.inner_partition,
         worst_probe=worst_probe,
         leakage_worst=float(leakage_worst),

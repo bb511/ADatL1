@@ -48,7 +48,10 @@ from .serialization import (
     four_probe_metric_values,
     four_probe_result_payload,
     log_four_probe_metrics,
+    log_shuffled_target_metrics,
+    shuffled_target_metric_values,
 )
+
 from .types import (
     DummyBaselineOuterResult,
     FourProbeEvaluationResult,
@@ -77,6 +80,7 @@ __all__ = [
     "LEAKAGE_PROBE_PROTOCOL_VERSION",
     "LeakageProbeRunOutcome",
     "LinearProbeOuterResult",
+    "log_shuffled_target_metrics",
     "MLPProbeCandidateFailure",
     "MLPProbeCandidateResult",
     "MLPProbeOuterResult",
@@ -99,6 +103,7 @@ __all__ = [
     "ProbeInnerPartition",
     "ProbePartitionError",
     "ProbeRepresentationSet",
+    "shuffled_target_metric_values",
     "ShuffledTargetMLPResult",
     "ShuffledTrainingTarget",
     "evaluate_and_record_loss_total_leakage_probes",

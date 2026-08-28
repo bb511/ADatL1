@@ -31,7 +31,11 @@ from src.evaluation.leakage_probe.persistence import (
     evaluate_and_record_loss_total_leakage_probes,
     log_leakage_probe_outcome_metadata,
 )
-from src.evaluation.leakage_probe.serialization import log_four_probe_metrics
+
+from src.evaluation.leakage_probe.serialization import (
+    log_four_probe_metrics,
+    log_shuffled_target_metrics,
+)
 
 from src.utils import RankedLogger
 from src.utils import extras
@@ -190,13 +194,26 @@ def train(cfg: DictConfig) -> Tuple[Dict[str, Any], Dict[str, Any]]:
                     "no four-probe result."
                 )
 
-            leakage_probe_metrics = (
+            primary_probe_metrics = (
                 log_four_probe_metrics(
                     leakage_probe_result,
                     logger,
                     step=trainer.global_step,
                 )
             )
+
+            shuffled_probe_metrics = (
+                log_shuffled_target_metrics(
+                    leakage_probe_result,
+                    logger,
+                    step=trainer.global_step,
+                )
+            )
+
+            leakage_probe_metrics = {
+                **primary_probe_metrics,
+                **shuffled_probe_metrics,
+            }
 
             post_training_metrics.update(
                 leakage_probe_metrics

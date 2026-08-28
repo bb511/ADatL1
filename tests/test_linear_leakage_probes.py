@@ -27,6 +27,8 @@ from src.evaluation.leakage_probe import (
     fit_linear_probe,
     make_probe_inner_partition,
     write_leakage_probe_results,
+    PROBE_TARGET_SHUFFLE_SEED,
+    ShuffledTargetMLPResult,
 )
 
 
@@ -161,6 +163,24 @@ def make_named_mlp(
         outer_result=outer,
     )
 
+def make_shuffled_controls() -> ShuffledTargetMLPResult:
+    return ShuffledTargetMLPResult(
+        latent_logits=make_named_mlp(
+            "latent_logits",
+            10,
+            0.0,
+        ),
+        reconstructed_data=make_named_mlp(
+            "reconstructed_data",
+            123,
+            0.0,
+        ),
+        inner_partition=make_probe_inner_partition(20),
+        shuffle_seed=PROBE_TARGET_SHUFFLE_SEED,
+        permutation_manifest_hash=(
+            "test-shuffle-manifest"
+        ),
+    )
 
 def make_named_linear(
     representation_name: str,
@@ -433,6 +453,13 @@ def test_each_of_four_probes_can_determine_leakage_worst(
         "evaluate_primary_linear_probes",
         Mock(return_value=linear_result),
     )
+    shuffled_controls = make_shuffled_controls()
+
+    monkeypatch.setattr(
+        leakage_probe_evaluation,
+        "evaluate_shuffled_target_mlp_controls",
+        Mock(return_value=shuffled_controls),
+    )
 
     result = evaluate_four_leakage_probes(
         train,
@@ -504,6 +531,13 @@ def test_four_probe_results_are_written_to_required_path(
         "evaluate_primary_linear_probes",
         Mock(return_value=linear_result),
     )
+    shuffled_controls = make_shuffled_controls()
+
+    monkeypatch.setattr(
+        leakage_probe_evaluation,
+        "evaluate_shuffled_target_mlp_controls",
+        Mock(return_value=shuffled_controls),
+    )
 
     result = evaluate_four_leakage_probes(
         train,
@@ -569,7 +603,16 @@ def test_four_probe_results_are_written_to_required_path(
     assert payload["rejection_message"] is None
 
     assert set(payload["diagnostics"]) == {
-        "dummy_baselines"
+        "dummy_baselines",
+        "shuffled_targets",
+    }
+    assert set(
+        payload["diagnostics"]["shuffled_targets"]
+    ) == {
+        "shuffle_seed",
+        "permutation_manifest_hash",
+        "z_logits",
+        "reconstruction",
     }
 
     assert set(

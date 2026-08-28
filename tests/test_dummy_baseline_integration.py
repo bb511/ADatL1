@@ -13,6 +13,7 @@ from src.evaluation.leakage_probe import (
     evaluate_four_leakage_probes,
     four_probe_metric_values,
     four_probe_result_payload,
+    ShuffledTargetMLPResult,
 )
 
 
@@ -92,6 +93,22 @@ def make_dummy_baselines() -> PrimaryDummyBaselineResult:
         ),
     )
 
+def make_shuffled_controls() -> ShuffledTargetMLPResult:
+    return ShuffledTargetMLPResult(
+        latent_logits=make_primary_probe(
+            "latent_logits",
+            0.0,
+        ),
+        reconstructed_data=make_primary_probe(
+            "reconstructed_data",
+            0.0,
+        ),
+        inner_partition=Mock(),
+        shuffle_seed=12345,
+        permutation_manifest_hash=(
+            "test-shuffle-manifest"
+        ),
+    )
 
 def test_four_probe_evaluation_attaches_dummy_diagnostics(
     monkeypatch,
@@ -142,6 +159,12 @@ def test_four_probe_evaluation_attaches_dummy_diagnostics(
     linear_evaluator = Mock(return_value=linear_result)
     dummy_evaluator = Mock(return_value=dummy_baselines)
 
+    shuffled_controls = make_shuffled_controls()
+
+    shuffled_evaluator = Mock(
+        return_value=shuffled_controls
+    )
+
     monkeypatch.setattr(
         leakage_probe,
         "evaluate_primary_mlp_probes",
@@ -156,6 +179,11 @@ def test_four_probe_evaluation_attaches_dummy_diagnostics(
         leakage_probe,
         "evaluate_primary_dummy_baselines",
         dummy_evaluator,
+    )
+    monkeypatch.setattr(
+        leakage_probe,
+        "evaluate_shuffled_target_mlp_controls",
+        shuffled_evaluator,
     )
 
     train_representations = Mock()
@@ -201,6 +229,7 @@ def test_dummy_baselines_are_serialized_under_diagnostics() -> None:
         inner_partition=Mock(),
         worst_probe="linear/reconstruction",
         leakage_worst=0.4,
+        shuffled_target_controls=make_shuffled_controls(),
     )
 
     payload = four_probe_result_payload(result)
@@ -212,35 +241,36 @@ def test_dummy_baselines_are_serialized_under_diagnostics() -> None:
         "linear/reconstruction",
     }
 
-    assert payload["diagnostics"] == {
-        "dummy_baselines": {
-            "z_logits": {
-                "representation_name": "latent_logits",
-                "metric_name": "z_logits",
-                "feature_dimension": 4,
-                "strategy": "mean",
-                "train_mean_gev": 95.0,
-                "r2_raw": -0.03,
-                "r2_clipped": 0.0,
-                "mae_gev": 12.0,
-                "n_train": 100,
-                "n_validation": 40,
-            },
-            "reconstruction": {
-                "representation_name": (
-                    "reconstructed_data"
-                ),
-                "metric_name": "reconstruction",
-                "feature_dimension": 4,
-                "strategy": "mean",
-                "train_mean_gev": 95.0,
-                "r2_raw": -0.03,
-                "r2_clipped": 0.0,
-                "mae_gev": 12.0,
-                "n_train": 100,
-                "n_validation": 40,
-            },
-        }
+    assert set(payload["diagnostics"]) == {
+        "dummy_baselines",
+        "shuffled_targets",
+    }
+
+    assert payload["diagnostics"]["dummy_baselines"] == {
+        "z_logits": {
+            "representation_name": "latent_logits",
+            "metric_name": "z_logits",
+            "feature_dimension": 4,
+            "strategy": "mean",
+            "train_mean_gev": 95.0,
+            "r2_raw": -0.03,
+            "r2_clipped": 0.0,
+            "mae_gev": 12.0,
+            "n_train": 100,
+            "n_validation": 40,
+        },
+        "reconstruction": {
+            "representation_name": "reconstructed_data",
+            "metric_name": "reconstruction",
+            "feature_dimension": 4,
+            "strategy": "mean",
+            "train_mean_gev": 95.0,
+            "r2_raw": -0.03,
+            "r2_clipped": 0.0,
+            "mae_gev": 12.0,
+            "n_train": 100,
+            "n_validation": 40,
+        },
     }
 
 
@@ -266,6 +296,7 @@ def test_dummy_baselines_are_excluded_from_logged_metrics() -> None:
         inner_partition=Mock(),
         worst_probe="linear/reconstruction",
         leakage_worst=0.4,
+        shuffled_target_controls=make_shuffled_controls(),
     )
 
     metrics = four_probe_metric_values(result)
@@ -278,3 +309,20 @@ def test_dummy_baselines_are_excluded_from_logged_metrics() -> None:
         for metric_name in metrics
     )
     assert len(metrics) == 13
+
+def make_shuffled_controls() -> ShuffledTargetMLPResult:
+    return ShuffledTargetMLPResult(
+        latent_logits=make_primary_probe(
+            "latent_logits",
+            0.0,
+        ),
+        reconstructed_data=make_primary_probe(
+            "reconstructed_data",
+            0.0,
+        ),
+        inner_partition=Mock(),
+        shuffle_seed=12345,
+        permutation_manifest_hash=(
+            "test-shuffle-manifest"
+        ),
+    )

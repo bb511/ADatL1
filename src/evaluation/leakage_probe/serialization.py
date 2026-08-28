@@ -18,6 +18,7 @@ from .types import (
     NamedDummyBaselineResult,
     NamedLinearProbeResult,
     NamedMLPProbeResult,
+    ShuffledTargetMLPResult,
 )
 
 def _successful_mlp_candidate_payload(
@@ -267,6 +268,11 @@ def four_probe_result_payload(
                     )
                 ),
             },
+            "shuffled_targets": (
+                _shuffled_target_controls_payload(
+                    result.shuffled_target_controls
+                )
+            ),
         },
     }
 
@@ -339,6 +345,80 @@ def log_four_probe_metrics(
     """Log all four primary probe results through Lightning loggers."""
 
     metrics = four_probe_metric_values(result)
+
+    for output_logger in loggers:
+        output_logger.log_metrics(
+            metrics,
+            step=step,
+        )
+
+    return metrics
+
+def _shuffled_target_controls_payload(
+    controls: ShuffledTargetMLPResult,
+) -> dict[str, Any]:
+    """Serialize both shuffled-training-target controls."""
+
+    return {
+        "shuffle_seed": int(
+            controls.shuffle_seed
+        ),
+        "permutation_manifest_hash": (
+            controls.permutation_manifest_hash
+        ),
+        "z_logits": _probe_result_payload(
+            controls.latent_logits
+        ),
+        "reconstruction": _probe_result_payload(
+            controls.reconstructed_data
+        ),
+    }
+
+def shuffled_target_metric_values(
+    result: FourProbeEvaluationResult,
+) -> dict[str, float]:
+    """Return the fixed shuffled-control MLflow metrics."""
+
+    controls = result.shuffled_target_controls
+
+    metrics = {
+        "probe/shuffled/z_logits/r2_raw": float(
+            controls.latent_logits
+            .outer_result.outer_r2_raw
+        ),
+        "probe/shuffled/reconstruction/r2_raw": float(
+            controls.reconstructed_data
+            .outer_result.outer_r2_raw
+        ),
+    }
+
+    non_finite_metrics = [
+        metric_name
+        for metric_name, metric_value in metrics.items()
+        if not np.isfinite(metric_value)
+    ]
+
+    if non_finite_metrics:
+        raise ProbeFitError(
+            "non_finite_shuffled_target_metric",
+            "Cannot log non-finite shuffled-target metrics: "
+            f"{non_finite_metrics}.",
+        )
+
+    return metrics
+
+
+def log_shuffled_target_metrics(
+    result: FourProbeEvaluationResult,
+    loggers: list[Any],
+    *,
+    step: int,
+) -> dict[str, float]:
+    """Log shuffled-target diagnostics separately."""
+
+    metrics = shuffled_target_metric_values(
+        result
+    )
 
     for output_logger in loggers:
         output_logger.log_metrics(

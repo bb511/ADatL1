@@ -545,6 +545,10 @@ def test_four_probe_results_are_written_to_required_path(
         "r2_clipped"
     ] == pytest.approx(0.3)
 
+    assert payload["probe_valid"] is True
+    assert payload["rejection_reason"] is None
+    assert payload["rejection_message"] is None
+
 
 def test_loss_total_orchestrator_loads_extracts_and_writes(
     monkeypatch,

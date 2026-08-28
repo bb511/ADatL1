@@ -1638,6 +1638,17 @@ class FourProbeEvaluationResult:
     leakage_worst: float
 
 
+@dataclass(frozen=True)
+class LeakageProbeRunOutcome:
+    """Recorded outcome of one complete leakage evaluation."""
+
+    probe_valid: bool
+    result: FourProbeEvaluationResult | None
+    output_path: Path
+    rejection_reason: str | None
+    rejection_message: str | None
+
+
 def evaluate_four_leakage_probes(
     train_representations: ProbeRepresentationSet,
     validation_representations: ProbeRepresentationSet,
@@ -1764,6 +1775,9 @@ def four_probe_result_payload(
         "leakage_probe_protocol_version": (
             LEAKAGE_PROBE_PROTOCOL_VERSION
         ),
+        "probe_valid": True,
+        "rejection_reason": None,
+        "rejection_message": None,
         "worst_probe": result.worst_probe,
         "leakage_worst": float(result.leakage_worst),
         "probes": {
@@ -1781,6 +1795,7 @@ def four_probe_result_payload(
             ),
         },
     }
+
 
 def four_probe_metric_values(
     result: FourProbeEvaluationResult,
@@ -1840,6 +1855,7 @@ def four_probe_metric_values(
 
     return metrics
 
+
 def log_four_probe_metrics(
     result: FourProbeEvaluationResult,
     loggers: list[Any],
@@ -1858,13 +1874,13 @@ def log_four_probe_metrics(
 
     return metrics
 
-def write_leakage_probe_results(
-    result: FourProbeEvaluationResult,
+
+def leakage_probe_output_path(
     run_folder: str | Path,
 ) -> Path:
-    """Write all four probe results below one checkpoint run."""
+    """Return the fixed leakage artifact path."""
 
-    output_path = (
+    return (
         Path(run_folder)
         / "plots"
         / "val"
@@ -1872,12 +1888,67 @@ def write_leakage_probe_results(
         / "probes"
         / "leakage_probes.json"
     )
+
+
+def write_leakage_probe_results(
+    result: FourProbeEvaluationResult,
+    run_folder: str | Path,
+) -> Path:
+    """Write all four probe results below one checkpoint run."""
+
+    output_path = leakage_probe_output_path(
+        run_folder
+    )
     output_path.parent.mkdir(
         parents=True,
         exist_ok=True,
     )
 
     payload = four_probe_result_payload(result)
+
+    output_path.write_text(
+        json.dumps(
+            payload,
+            indent=2,
+            sort_keys=True,
+            allow_nan=False,
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+    return output_path
+
+
+def write_invalid_leakage_probe_result(
+    run_folder: str | Path,
+    error: (
+        ProbeExtractionError
+        | ProbePartitionError
+        | ProbeFitError
+    ),
+) -> Path:
+    """Persist one expected protocol failure without a fake score."""
+
+    output_path = leakage_probe_output_path(
+        run_folder
+    )
+    output_path.parent.mkdir(
+        parents=True,
+        exist_ok=True,
+    )
+
+    payload = {
+        "leakage_probe_protocol_version": (
+            LEAKAGE_PROBE_PROTOCOL_VERSION
+        ),
+        "probe_valid": False,
+        "rejection_reason": error.reason,
+        "rejection_message": str(error),
+        "worst_probe": None,
+        "leakage_worst": None,
+        "probes": {},
+    }
 
     output_path.write_text(
         json.dumps(
@@ -1971,3 +2042,72 @@ def evaluate_and_write_loss_total_leakage_probes(
     )
 
     return result, output_path
+
+
+def evaluate_and_record_loss_total_leakage_probes(
+    model: Any,
+    datamodule: Any,
+    run_folder: str | Path,
+    *,
+    device: torch.device | str = "cpu",
+) -> LeakageProbeRunOutcome:
+    """Evaluate leakage and record expected protocol failures."""
+
+    try:
+        result, output_path = (
+            evaluate_and_write_loss_total_leakage_probes(
+                model,
+                datamodule,
+                run_folder,
+                device=device,
+            )
+        )
+    except (
+        ProbeExtractionError,
+        ProbePartitionError,
+        ProbeFitError,
+    ) as error:
+        output_path = write_invalid_leakage_probe_result(
+            run_folder,
+            error,
+        )
+
+        return LeakageProbeRunOutcome(
+            probe_valid=False,
+            result=None,
+            output_path=output_path,
+            rejection_reason=error.reason,
+            rejection_message=str(error),
+        )
+
+    return LeakageProbeRunOutcome(
+        probe_valid=True,
+        result=result,
+        output_path=output_path,
+        rejection_reason=None,
+        rejection_message=None,
+    )
+
+
+def log_leakage_probe_outcome_metadata(
+    outcome: LeakageProbeRunOutcome,
+    loggers: list[Any],
+) -> dict[str, Any]:
+    """Make probe validity queryable in the run table."""
+
+    metadata: dict[str, Any] = {
+        "leakage_probe_protocol_version": (
+            LEAKAGE_PROBE_PROTOCOL_VERSION
+        ),
+        "probe_valid": outcome.probe_valid,
+        "probe_rejection_reason": (
+            outcome.rejection_reason
+            if outcome.rejection_reason is not None
+            else "none"
+        ),
+    }
+
+    for output_logger in loggers:
+        output_logger.log_hyperparams(metadata)
+
+    return metadata

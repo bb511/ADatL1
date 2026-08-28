@@ -28,9 +28,11 @@ from src.utils.omegaconf import register_resolvers
 register_resolvers()
 
 from src.evaluation.leakage_probe import (
-    evaluate_and_write_loss_total_leakage_probes,
+    evaluate_and_record_loss_total_leakage_probes,
     log_four_probe_metrics,
+    log_leakage_probe_outcome_metadata,
 )
+
 from src.utils import RankedLogger
 from src.utils import extras
 from src.utils import get_metric_value
@@ -147,14 +149,89 @@ def train(cfg: DictConfig) -> Tuple[Dict[str, Any], Dict[str, Any]]:
             + "STARTING VALIDATION LEAKAGE PROBES"
             + 8 * "-"
         )
-        leakage_probe_result, leakage_probe_path = (
-            evaluate_and_write_loss_total_leakage_probes(
+        leakage_probe_outcome = (
+            evaluate_and_record_loss_total_leakage_probes(
                 algorithm,
                 datamodule,
                 run_ckpts,
                 device=algorithm.device,
             )
         )
+
+        leakage_probe_metadata = (
+            log_leakage_probe_outcome_metadata(
+                leakage_probe_outcome,
+                logger,
+            )
+        )
+
+        object_dict.update(
+            {
+                "leakage_probe_outcome": (
+                    leakage_probe_outcome
+                ),
+                "leakage_probe_path": (
+                    leakage_probe_outcome.output_path
+                ),
+                "leakage_probe_metadata": (
+                    leakage_probe_metadata
+                ),
+            }
+        )
+
+        if leakage_probe_outcome.probe_valid:
+            leakage_probe_result = (
+                leakage_probe_outcome.result
+            )
+
+            if leakage_probe_result is None:
+                raise RuntimeError(
+                    "A valid leakage-probe outcome has "
+                    "no four-probe result."
+                )
+
+            leakage_probe_metrics = (
+                log_four_probe_metrics(
+                    leakage_probe_result,
+                    logger,
+                    step=trainer.global_step,
+                )
+            )
+
+            post_training_metrics.update(
+                leakage_probe_metrics
+            )
+
+            object_dict.update(
+                {
+                    "leakage_probe_result": (
+                        leakage_probe_result
+                    ),
+                    "leakage_probe_metrics": (
+                        leakage_probe_metrics
+                    ),
+                }
+            )
+
+            log.info(
+                "Stored valid leakage probes at "
+                f"{leakage_probe_outcome.output_path}."
+            )
+        else:
+            object_dict.update(
+                {
+                    "leakage_probe_result": None,
+                    "leakage_probe_metrics": {},
+                }
+            )
+
+            log.error(
+                "Leakage-probe evaluation is invalid: "
+                f"{leakage_probe_outcome.rejection_reason}: "
+                f"{leakage_probe_outcome.rejection_message}. "
+                "The invalid result was stored at "
+                f"{leakage_probe_outcome.output_path}."
+            )
 
         leakage_probe_metrics = log_four_probe_metrics(
             leakage_probe_result,

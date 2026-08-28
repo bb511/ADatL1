@@ -235,10 +235,38 @@ def train(cfg: DictConfig) -> Tuple[Dict[str, Any], Dict[str, Any]]:
                 f"{leakage_probe_outcome.output_path}."
             )
         else:
+            diagnostic_probe_metrics: Dict[
+                str,
+                float,
+            ] = {}
+
+            diagnostic_result = (
+                leakage_probe_outcome
+                .diagnostic_result
+            )
+
+            if diagnostic_result is not None:
+                diagnostic_probe_metrics = (
+                    log_shuffled_target_metrics(
+                        diagnostic_result,
+                        logger,
+                        step=trainer.global_step,
+                    )
+                )
+
+                post_training_metrics.update(
+                    diagnostic_probe_metrics
+                )
+
             object_dict.update(
                 {
                     "leakage_probe_result": None,
-                    "leakage_probe_metrics": {},
+                    "leakage_probe_metrics": (
+                        diagnostic_probe_metrics
+                    ),
+                    "leakage_probe_diagnostic_result": (
+                        diagnostic_result
+                    ),
                 }
             )
 

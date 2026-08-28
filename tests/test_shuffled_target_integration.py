@@ -8,6 +8,7 @@ import src.evaluation.leakage_probe.evaluation as evaluation_module
 from src.evaluation.leakage_probe import (
     FourProbeEvaluationResult,
     ProbeFitError,
+    ShuffledTargetGuardrailError,
     ShuffledTargetMLPResult,
     evaluate_four_leakage_probes,
     four_probe_result_payload,
@@ -131,7 +132,7 @@ def make_complete_result() -> FourProbeEvaluationResult:
     )
 
 
-def test_four_probe_evaluation_attaches_shuffled_controls(
+def test_four_probe_evaluation_rejects_failed_shuffled_guardrail(
     monkeypatch,
 ) -> None:
     mlp_result = SimpleNamespace(
@@ -159,8 +160,8 @@ def test_four_probe_evaluation_attaches_shuffled_controls(
 
     dummy_baselines = make_dummy_baselines()
 
-    # Deliberately larger than every primary score. It must
-    # still remain outside leakage_worst.
+    # Both controls deliberately exceed the frozen 0.02
+    # guardrail threshold.
     shuffled_controls = make_shuffled_controls(
         latent_r2=0.98,
         reconstruction_r2=0.99,
@@ -194,25 +195,41 @@ def test_four_probe_evaluation_attaches_shuffled_controls(
     train = Mock()
     validation = Mock()
 
-    result = evaluate_four_leakage_probes(
-        train,
-        validation,
-    )
+    with pytest.raises(
+        ShuffledTargetGuardrailError
+    ) as error:
+        evaluate_four_leakage_probes(
+            train,
+            validation,
+        )
 
     shuffled_evaluator.assert_called_once_with(
         train,
         validation,
     )
 
+    assert error.value.failed_controls == (
+        "z_logits",
+        "reconstruction",
+    )
+
+    diagnostic_result = error.value.result
+
     assert (
-        result.shuffled_target_controls
+        diagnostic_result.shuffled_target_controls
         is shuffled_controls
     )
 
-    # Only the four primary probe values are aggregated.
-    assert result.worst_probe == "linear/reconstruction"
-    assert result.leakage_worst == pytest.approx(0.4)
-    assert result.leakage_worst != pytest.approx(0.99)
+    # The internal primary maximum remains available only for
+    # diagnostics; the caller must mark the measurement invalid.
+    assert (
+        diagnostic_result.worst_probe
+        == "linear/reconstruction"
+    )
+    assert (
+        diagnostic_result.leakage_worst
+        == pytest.approx(0.4)
+    )
 
 
 def test_shuffled_controls_are_serialized_as_diagnostics() -> None:

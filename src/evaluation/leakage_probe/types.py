@@ -215,4 +215,5 @@ class LeakageProbeRunOutcome:
     output_path: Path
     rejection_reason: str | None
     rejection_message: str | None
+    diagnostic_result: FourProbeEvaluationResult | None = None
 

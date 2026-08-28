@@ -5,10 +5,18 @@ import hashlib
 
 import numpy as np
 
-from .constants import PROBE_TARGET_SHUFFLE_SEED
-from .errors import ProbeFitError
 from .mlp import evaluate_primary_mlp_probes
+
+from .constants import (
+    PROBE_TARGET_SHUFFLE_SEED,
+    SHUFFLED_TARGET_R2_CLIPPED_MAX,
+)
+from .errors import (
+    ProbeFitError,
+    ShuffledTargetGuardrailError,
+)
 from .types import (
+    FourProbeEvaluationResult,
     ProbeRepresentationSet,
     ShuffledTargetMLPResult,
     ShuffledTrainingTarget,
@@ -176,3 +184,45 @@ def evaluate_shuffled_target_mlp_controls(
         ),
     )
 
+def shuffled_target_guardrail_failures(
+    result: FourProbeEvaluationResult,
+) -> tuple[str, ...]:
+    """Return shuffled controls exceeding the frozen threshold."""
+
+    controls = result.shuffled_target_controls
+
+    scores = (
+        (
+            "z_logits",
+            controls.latent_logits
+            .outer_result.outer_r2_clipped,
+        ),
+        (
+            "reconstruction",
+            controls.reconstructed_data
+            .outer_result.outer_r2_clipped,
+        ),
+    )
+
+    return tuple(
+        name
+        for name, score in scores
+        if float(score)
+        > SHUFFLED_TARGET_R2_CLIPPED_MAX
+    )
+
+
+def enforce_shuffled_target_guardrail(
+    result: FourProbeEvaluationResult,
+) -> None:
+    """Invalidate excessive shuffled-target validation leakage."""
+
+    failed_controls = (
+        shuffled_target_guardrail_failures(result)
+    )
+
+    if failed_controls:
+        raise ShuffledTargetGuardrailError(
+            result,
+            failed_controls,
+        )

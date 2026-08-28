@@ -9,7 +9,12 @@ from typing import Any
 import torch
 
 from .constants import LEAKAGE_PROBE_PROTOCOL_VERSION
-from .errors import ProbeExtractionError, ProbeFitError, ProbePartitionError
+from .errors import (
+    ProbeExtractionError,
+    ProbeFitError,
+    ProbePartitionError,
+    ShuffledTargetGuardrailError,
+)
 from .evaluation import evaluate_four_leakage_probes
 from .extraction import extract_probe_split
 from .serialization import four_probe_result_payload
@@ -78,17 +83,34 @@ def write_invalid_leakage_probe_result(
         exist_ok=True,
     )
 
-    payload = {
-        "leakage_probe_protocol_version": (
-            LEAKAGE_PROBE_PROTOCOL_VERSION
-        ),
-        "probe_valid": False,
-        "rejection_reason": error.reason,
-        "rejection_message": str(error),
-        "worst_probe": None,
-        "leakage_worst": None,
-        "probes": {},
-    }
+    if isinstance(
+        error,
+        ShuffledTargetGuardrailError,
+    ):
+        payload = four_probe_result_payload(
+            error.result
+        )
+        payload.update(
+            {
+                "probe_valid": False,
+                "rejection_reason": error.reason,
+                "rejection_message": str(error),
+                "worst_probe": None,
+                "leakage_worst": None,
+            }
+        )
+    else:
+        payload = {
+            "leakage_probe_protocol_version": (
+                LEAKAGE_PROBE_PROTOCOL_VERSION
+            ),
+            "probe_valid": False,
+            "rejection_reason": error.reason,
+            "rejection_message": str(error),
+            "worst_probe": None,
+            "leakage_worst": None,
+            "probes": {},
+        }
 
     output_path.write_text(
         json.dumps(
@@ -212,12 +234,22 @@ def evaluate_and_record_loss_total_leakage_probes(
             error,
         )
 
+        diagnostic_result = (
+            error.result
+            if isinstance(
+                error,
+                ShuffledTargetGuardrailError,
+            )
+            else None
+        )
+
         return LeakageProbeRunOutcome(
             probe_valid=False,
             result=None,
             output_path=output_path,
             rejection_reason=error.reason,
             rejection_message=str(error),
+            diagnostic_result=diagnostic_result,
         )
 
     return LeakageProbeRunOutcome(

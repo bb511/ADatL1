@@ -14,12 +14,20 @@ from .constants import (
     PROBE_INNER_VALIDATION_FRACTION,
     PROBE_REPRESENTATION_METRIC_NAMES,
     PROBE_TARGET_SHUFFLE_SEED,
+    SHUFFLED_TARGET_R2_CLIPPED_MAX,
 )
 from .diagnostics import (
+    enforce_shuffled_target_guardrail,
     evaluate_shuffled_target_mlp_controls,
     make_shuffled_training_target,
+    shuffled_target_guardrail_failures,
 )
-from .errors import ProbeExtractionError, ProbeFitError, ProbePartitionError
+from .errors import (
+    ProbeExtractionError,
+    ProbeFitError,
+    ProbePartitionError,
+    ShuffledTargetGuardrailError,
+)
 from .evaluation import evaluate_four_leakage_probes
 from .extraction import extract_probe_split
 from .linear import (
@@ -131,4 +139,8 @@ __all__ = [
     "select_mlp_probe_seed",
     "write_invalid_leakage_probe_result",
     "write_leakage_probe_results",
+    "SHUFFLED_TARGET_R2_CLIPPED_MAX",
+    "ShuffledTargetGuardrailError",
+    "enforce_shuffled_target_guardrail",
+    "shuffled_target_guardrail_failures",
 ]

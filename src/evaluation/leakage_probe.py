@@ -3,22 +3,24 @@
 from __future__ import annotations
 
 import hashlib
+import json
+import warnings
 from dataclasses import dataclass
+from pathlib import Path
+from types import MappingProxyType
 from typing import Any
 
 import numpy as np
 import torch
-
-from src.data.utils import unpack_batch
-
-import warnings
-from types import MappingProxyType
-
 from sklearn.exceptions import ConvergenceWarning
+from sklearn.linear_model import LinearRegression
 from sklearn.metrics import mean_absolute_error, r2_score
 from sklearn.neural_network import MLPRegressor
 from sklearn.preprocessing import StandardScaler
 
+from src.data.utils import unpack_batch
+
+LEAKAGE_PROBE_PROTOCOL_VERSION = "fet-et-four-probe-v2"
 PROBE_INNER_SPLIT_SEED = 12345
 PROBE_INNER_VALIDATION_FRACTION = 0.2
 PROBE_INITIALIZATION_SEEDS = (10, 123, 500)
@@ -1360,3 +1362,537 @@ def evaluate_primary_mlp_probes(
         inner_partition=partition,
         leakage_worst=float(leakage_worst),
     )
+
+
+@dataclass(frozen=True)
+class LinearProbeOuterResult:
+    """Linear regression evaluated on outer validation."""
+
+    outer_r2_raw: float
+    outer_r2_clipped: float
+    outer_mae_gev: float
+    n_train: int
+    n_validation: int
+    feature_scaler: StandardScaler
+    estimator: LinearRegression
+
+
+@dataclass(frozen=True)
+class NamedLinearProbeResult:
+    """Linear probe for one named AE representation."""
+
+    representation_name: str
+    metric_name: str
+    feature_dimension: int
+    outer_result: LinearProbeOuterResult
+
+
+@dataclass(frozen=True)
+class PrimaryLinearProbeResult:
+    """Independent latent and reconstruction linear probes."""
+
+    latent_logits: NamedLinearProbeResult
+    reconstructed_data: NamedLinearProbeResult
+
+
+def fit_linear_probe(
+    train_features: np.ndarray,
+    train_target: np.ndarray,
+    validation_features: np.ndarray,
+    validation_target: np.ndarray,
+) -> LinearProbeOuterResult:
+    """Fit a scaled linear probe on AE train and score AE validation."""
+
+    train_features, train_target = _validate_probe_dataset(
+        train_features,
+        train_target,
+        split_name="linear_full_train",
+    )
+    validation_features, validation_target = (
+        _validate_probe_dataset(
+            validation_features,
+            validation_target,
+            split_name="linear_outer_validation",
+        )
+    )
+
+    if (
+        train_features.shape[1]
+        != validation_features.shape[1]
+    ):
+        raise ProbeFitError(
+            "linear_feature_dimension_mismatch",
+            "Linear-probe training and validation feature "
+            f"dimensions differ: {train_features.shape[1]} != "
+            f"{validation_features.shape[1]}.",
+        )
+
+    # Only features need scaling for LinearRegression. The target
+    # remains in physical GeV.
+    feature_scaler = StandardScaler()
+
+    scaled_train_features = feature_scaler.fit_transform(
+        train_features
+    )
+    scaled_validation_features = feature_scaler.transform(
+        validation_features
+    )
+
+    estimator = LinearRegression()
+
+    try:
+        estimator.fit(
+            scaled_train_features,
+            train_target,
+        )
+    except Exception as error:
+        raise ProbeFitError(
+            "linear_fit_failed",
+            f"Linear probe fitting failed: {error}",
+        ) from error
+
+    coefficients = np.asarray(estimator.coef_)
+    intercept = np.asarray(estimator.intercept_)
+
+    if (
+        not np.isfinite(coefficients).all()
+        or not np.isfinite(intercept).all()
+    ):
+        raise ProbeFitError(
+            "non_finite_linear_parameters",
+            "The fitted linear probe contains non-finite "
+            "coefficients or intercepts.",
+        )
+
+    try:
+        predictions_gev = np.asarray(
+            estimator.predict(
+                scaled_validation_features
+            )
+        ).reshape(-1)
+    except Exception as error:
+        raise ProbeFitError(
+            "linear_outer_prediction_failed",
+            f"Linear outer prediction failed: {error}",
+        ) from error
+
+    if (
+        predictions_gev.shape[0]
+        != validation_target.shape[0]
+    ):
+        raise ProbeFitError(
+            "linear_outer_prediction_row_mismatch",
+            "Linear predictions and validation targets have "
+            "different event counts.",
+        )
+
+    if not np.isfinite(predictions_gev).all():
+        raise ProbeFitError(
+            "non_finite_linear_predictions",
+            "The linear probe produced non-finite predictions.",
+        )
+
+    outer_r2_raw = float(
+        r2_score(
+            validation_target,
+            predictions_gev,
+        )
+    )
+    outer_mae_gev = float(
+        mean_absolute_error(
+            validation_target,
+            predictions_gev,
+        )
+    )
+
+    if not np.isfinite(outer_r2_raw):
+        raise ProbeFitError(
+            "non_finite_linear_outer_r2",
+            "Linear outer-validation R2 is non-finite.",
+        )
+
+    if not np.isfinite(outer_mae_gev):
+        raise ProbeFitError(
+            "non_finite_linear_outer_mae",
+            "Linear outer-validation MAE is non-finite.",
+        )
+
+    return LinearProbeOuterResult(
+        outer_r2_raw=outer_r2_raw,
+        outer_r2_clipped=max(0.0, outer_r2_raw),
+        outer_mae_gev=outer_mae_gev,
+        n_train=int(train_features.shape[0]),
+        n_validation=int(validation_features.shape[0]),
+        feature_scaler=feature_scaler,
+        estimator=estimator,
+    )
+
+
+def evaluate_linear_probe_representation(
+    train_representations: ProbeRepresentationSet,
+    validation_representations: ProbeRepresentationSet,
+    *,
+    representation_name: str,
+) -> NamedLinearProbeResult:
+    """Fit one of the two allowed linear representation probes."""
+
+    if representation_name not in PRIMARY_PROBE_REPRESENTATIONS:
+        raise ProbeFitError(
+            "unknown_linear_probe_representation",
+            "Linear probes are defined only for "
+            f"{PRIMARY_PROBE_REPRESENTATIONS}, got "
+            f"{representation_name!r}.",
+        )
+
+    train_features = getattr(
+        train_representations,
+        representation_name,
+    )
+    validation_features = getattr(
+        validation_representations,
+        representation_name,
+    )
+
+    outer_result = fit_linear_probe(
+        train_features,
+        train_representations.sensitive_target,
+        validation_features,
+        validation_representations.sensitive_target,
+    )
+
+    return NamedLinearProbeResult(
+        representation_name=representation_name,
+        metric_name=PROBE_REPRESENTATION_METRIC_NAMES[
+            representation_name
+        ],
+        feature_dimension=int(train_features.shape[1]),
+        outer_result=outer_result,
+    )
+
+
+def evaluate_primary_linear_probes(
+    train_representations: ProbeRepresentationSet,
+    validation_representations: ProbeRepresentationSet,
+) -> PrimaryLinearProbeResult:
+    """Evaluate independent latent and reconstruction linear probes."""
+
+    if train_representations.split != "train":
+        raise ProbeFitError(
+            "invalid_linear_probe_training_split",
+            "Linear probes require the AE train split, got "
+            f"{train_representations.split!r}.",
+        )
+
+    if validation_representations.split != "valid":
+        raise ProbeFitError(
+            "invalid_linear_probe_outer_split",
+            "Linear probes require the held-out AE valid split, "
+            f"got {validation_representations.split!r}.",
+        )
+
+    latent_result = evaluate_linear_probe_representation(
+        train_representations,
+        validation_representations,
+        representation_name="latent_logits",
+    )
+
+    reconstruction_result = (
+        evaluate_linear_probe_representation(
+            train_representations,
+            validation_representations,
+            representation_name="reconstructed_data",
+        )
+    )
+
+    latent_outer = latent_result.outer_result
+    reconstruction_outer = reconstruction_result.outer_result
+
+    if (
+        latent_outer.estimator
+        is reconstruction_outer.estimator
+        or latent_outer.feature_scaler
+        is reconstruction_outer.feature_scaler
+    ):
+        raise ProbeFitError(
+            "linear_probe_state_shared",
+            "Latent and reconstruction linear probes share "
+            "fitted state.",
+        )
+
+    return PrimaryLinearProbeResult(
+        latent_logits=latent_result,
+        reconstructed_data=reconstruction_result,
+    )
+
+
+@dataclass(frozen=True)
+class FourProbeEvaluationResult:
+    """The four fitted representation probes and global leakage."""
+
+    mlp_latent_logits: NamedMLPProbeResult
+    mlp_reconstructed_data: NamedMLPProbeResult
+    linear_latent_logits: NamedLinearProbeResult
+    linear_reconstructed_data: NamedLinearProbeResult
+    inner_partition: ProbeInnerPartition
+    worst_probe: str
+    leakage_worst: float
+
+
+def evaluate_four_leakage_probes(
+    train_representations: ProbeRepresentationSet,
+    validation_representations: ProbeRepresentationSet,
+) -> FourProbeEvaluationResult:
+    """Evaluate two MLP and two linear probes."""
+
+    mlp_result = evaluate_primary_mlp_probes(
+        train_representations,
+        validation_representations,
+    )
+
+    linear_result = evaluate_primary_linear_probes(
+        train_representations,
+        validation_representations,
+    )
+
+    mlp_latent = mlp_result.latent_logits
+    mlp_reconstruction = mlp_result.reconstructed_data
+    linear_latent = linear_result.latent_logits
+    linear_reconstruction = (
+        linear_result.reconstructed_data
+    )
+
+    estimators = (
+        mlp_latent.outer_result.estimator,
+        mlp_reconstruction.outer_result.estimator,
+        linear_latent.outer_result.estimator,
+        linear_reconstruction.outer_result.estimator,
+    )
+
+    feature_scalers = (
+        mlp_latent.outer_result.feature_scaler,
+        mlp_reconstruction.outer_result.feature_scaler,
+        linear_latent.outer_result.feature_scaler,
+        linear_reconstruction.outer_result.feature_scaler,
+    )
+
+    if len({id(item) for item in estimators}) != 4:
+        raise ProbeFitError(
+            "four_probe_estimator_state_shared",
+            "The four probes do not have four independent "
+            "estimators.",
+        )
+
+    if len({id(item) for item in feature_scalers}) != 4:
+        raise ProbeFitError(
+            "four_probe_scaler_state_shared",
+            "The four probes do not have four independent "
+            "feature scalers.",
+        )
+
+    probe_scores = {
+        "mlp/z_logits": (
+            mlp_latent.outer_result.outer_r2_clipped
+        ),
+        "mlp/reconstruction": (
+            mlp_reconstruction.outer_result.outer_r2_clipped
+        ),
+        "linear/z_logits": (
+            linear_latent.outer_result.outer_r2_clipped
+        ),
+        "linear/reconstruction": (
+            linear_reconstruction.outer_result.outer_r2_clipped
+        ),
+    }
+
+    # Dictionary insertion order defines deterministic tie-breaking.
+    worst_probe = max(
+        probe_scores,
+        key=probe_scores.__getitem__,
+    )
+    leakage_worst = probe_scores[worst_probe]
+
+    return FourProbeEvaluationResult(
+        mlp_latent_logits=mlp_latent,
+        mlp_reconstructed_data=mlp_reconstruction,
+        linear_latent_logits=linear_latent,
+        linear_reconstructed_data=linear_reconstruction,
+        inner_partition=mlp_result.inner_partition,
+        worst_probe=worst_probe,
+        leakage_worst=float(leakage_worst),
+    )
+
+
+def _probe_result_payload(
+    probe: NamedMLPProbeResult | NamedLinearProbeResult,
+) -> dict[str, Any]:
+    """Convert one fitted probe result to JSON-safe values."""
+
+    outer = probe.outer_result
+
+    payload: dict[str, Any] = {
+        "representation_name": probe.representation_name,
+        "metric_name": probe.metric_name,
+        "feature_dimension": int(probe.feature_dimension),
+        "r2_raw": float(outer.outer_r2_raw),
+        "r2_clipped": float(outer.outer_r2_clipped),
+        "mae_gev": float(outer.outer_mae_gev),
+        "n_train": int(outer.n_train),
+        "n_validation": int(outer.n_validation),
+    }
+
+    if isinstance(probe, NamedMLPProbeResult):
+        payload.update(
+            {
+                "selected_seed": int(outer.selected_seed),
+                "convergence_warnings": list(
+                    outer.convergence_warnings
+                ),
+                "n_iter": int(outer.n_iter),
+                "final_loss": float(outer.final_loss),
+            }
+        )
+
+    return payload
+
+
+def four_probe_result_payload(
+    result: FourProbeEvaluationResult,
+) -> dict[str, Any]:
+    """Build the complete four-probe JSON payload."""
+
+    return {
+        "leakage_probe_protocol_version": (
+            LEAKAGE_PROBE_PROTOCOL_VERSION
+        ),
+        "worst_probe": result.worst_probe,
+        "leakage_worst": float(result.leakage_worst),
+        "probes": {
+            "mlp/z_logits": _probe_result_payload(
+                result.mlp_latent_logits
+            ),
+            "mlp/reconstruction": _probe_result_payload(
+                result.mlp_reconstructed_data
+            ),
+            "linear/z_logits": _probe_result_payload(
+                result.linear_latent_logits
+            ),
+            "linear/reconstruction": _probe_result_payload(
+                result.linear_reconstructed_data
+            ),
+        },
+    }
+
+
+def write_leakage_probe_results(
+    result: FourProbeEvaluationResult,
+    run_folder: str | Path,
+) -> Path:
+    """Write all four probe results below one checkpoint run."""
+
+    output_path = (
+        Path(run_folder)
+        / "plots"
+        / "val"
+        / "loss_total"
+        / "probes"
+        / "leakage_probes.json"
+    )
+    output_path.parent.mkdir(
+        parents=True,
+        exist_ok=True,
+    )
+
+    payload = four_probe_result_payload(result)
+
+    output_path.write_text(
+        json.dumps(
+            payload,
+            indent=2,
+            sort_keys=True,
+            allow_nan=False,
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+    return output_path
+
+
+def evaluate_and_write_loss_total_leakage_probes(
+    model: Any,
+    datamodule: Any,
+    run_folder: str | Path,
+    *,
+    device: torch.device | str = "cpu",
+) -> tuple[FourProbeEvaluationResult, Path]:
+    """Evaluate the frozen loss-total checkpoint and persist four probes.
+
+    The checkpoint is loaded explicitly and strictly. The datamodule's
+    probe-specific loader keeps only one full split resident at a time.
+    """
+
+    run_folder = Path(run_folder)
+    checkpoint_path = run_folder / "loss_total.ckpt"
+
+    if not checkpoint_path.is_file():
+        raise ProbeExtractionError(
+            "loss_total_checkpoint_missing",
+            f"Required checkpoint not found: {checkpoint_path}.",
+        )
+
+    try:
+        checkpoint = torch.load(
+            checkpoint_path,
+            weights_only=False,
+            map_location="cpu",
+        )
+    except Exception as error:
+        raise ProbeExtractionError(
+            "loss_total_checkpoint_load_failed",
+            f"Could not load {checkpoint_path}: {error}",
+        ) from error
+
+    if not isinstance(checkpoint, dict) or "state_dict" not in checkpoint:
+        raise ProbeExtractionError(
+            "loss_total_state_dict_missing",
+            f"Checkpoint {checkpoint_path} has no state_dict.",
+        )
+
+    state_dict = checkpoint["state_dict"]
+    try:
+        model.load_state_dict(
+            state_dict,
+            strict=True,
+        )
+    except Exception as error:
+        raise ProbeExtractionError(
+            "loss_total_state_dict_load_failed",
+            f"Could not restore {checkpoint_path} strictly: {error}",
+        ) from error
+    finally:
+        del state_dict
+        del checkpoint
+
+    train_representations = extract_probe_split(
+        model,
+        datamodule,
+        "train",
+        device=device,
+    )
+    validation_representations = extract_probe_split(
+        model,
+        datamodule,
+        "valid",
+        device=device,
+    )
+
+    result = evaluate_four_leakage_probes(
+        train_representations,
+        validation_representations,
+    )
+    output_path = write_leakage_probe_results(
+        result,
+        run_folder,
+    )
+
+    return result, output_path

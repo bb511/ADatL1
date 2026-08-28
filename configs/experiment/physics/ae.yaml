@@ -163,6 +163,11 @@ callbacks:
     save_on_train_epoch_end: false
 
 evaluation:
+  # Run the frozen post-training probes once on loss_total.ckpt. The evaluator
+  # writes plots/val/loss_total/probes/leakage_probes.json below this run.
+  leakage_probes:
+    enabled: true
+
   evaluator:
     ckpts:
       # The default evaluation config enables last.ckpt. Disable it explicitly

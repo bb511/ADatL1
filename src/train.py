@@ -27,6 +27,9 @@ from src.utils.omegaconf import register_resolvers
 
 register_resolvers()
 
+from src.evaluation.leakage_probe import (
+    evaluate_and_write_loss_total_leakage_probes,
+)
 from src.utils import RankedLogger
 from src.utils import extras
 from src.utils import get_metric_value
@@ -127,6 +130,36 @@ def train(cfg: DictConfig) -> Tuple[Dict[str, Any], Dict[str, Any]]:
         del val_loader
         datamodule.teardown("validate")
         gc.collect()
+
+    evaluation_cfg = cfg.get("evaluation")
+    leakage_probe_cfg = (
+        evaluation_cfg.get("leakage_probes")
+        if evaluation_cfg is not None
+        else None
+    )
+    if leakage_probe_cfg and leakage_probe_cfg.get("enabled", False):
+        log.info(
+            Back.MAGENTA
+            + 8 * "-"
+            + "STARTING VALIDATION LEAKAGE PROBES"
+            + 8 * "-"
+        )
+        leakage_probe_result, leakage_probe_path = (
+            evaluate_and_write_loss_total_leakage_probes(
+                algorithm,
+                datamodule,
+                run_ckpts,
+                device=algorithm.device,
+            )
+        )
+        object_dict.update(
+            {
+                "leakage_probe_result": leakage_probe_result,
+                "leakage_probe_path": leakage_probe_path,
+            }
+        )
+        log.info(f"Stored leakage probes at {leakage_probe_path}.")
+
     object_dict.update({"evaluator": evaluator})
 
     # Evaluate once more on a held out test set for final performance.

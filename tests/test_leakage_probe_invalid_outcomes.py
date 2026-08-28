@@ -4,7 +4,7 @@ from unittest.mock import Mock
 
 import pytest
 
-import src.evaluation.leakage_probe as leakage_probe
+import src.evaluation.leakage_probe.persistence as leakage_probe
 from src.evaluation.leakage_probe import (
     FourProbeEvaluationResult,
     LEAKAGE_PROBE_PROTOCOL_VERSION,

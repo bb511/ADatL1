@@ -27,11 +27,11 @@ from src.utils.omegaconf import register_resolvers
 
 register_resolvers()
 
-from src.evaluation.leakage_probe import (
+from src.evaluation.leakage_probe.persistence import (
     evaluate_and_record_loss_total_leakage_probes,
-    log_four_probe_metrics,
     log_leakage_probe_outcome_metadata,
 )
+from src.evaluation.leakage_probe.serialization import log_four_probe_metrics
 
 from src.utils import RankedLogger
 from src.utils import extras
@@ -232,27 +232,6 @@ def train(cfg: DictConfig) -> Tuple[Dict[str, Any], Dict[str, Any]]:
                 "The invalid result was stored at "
                 f"{leakage_probe_outcome.output_path}."
             )
-
-        leakage_probe_metrics = log_four_probe_metrics(
-            leakage_probe_result,
-            logger,
-            step=trainer.global_step,
-        )
-
-        post_training_metrics.update(
-            leakage_probe_metrics
-        )
-
-        object_dict.update(
-            {
-                "leakage_probe_result": leakage_probe_result,
-                "leakage_probe_path": leakage_probe_path,
-                "leakage_probe_metrics": (
-                    leakage_probe_metrics
-                ),
-            }
-        )
-        log.info(f"Stored leakage probes at {leakage_probe_path}.")
 
     object_dict.update({"evaluator": evaluator})
 

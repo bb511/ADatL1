@@ -4,7 +4,8 @@ from unittest.mock import Mock
 import numpy as np
 import pytest
 
-import src.evaluation.leakage_probe as leakage_probe
+import src.evaluation.leakage_probe.evaluation as leakage_probe_evaluation
+import src.evaluation.leakage_probe.persistence as leakage_probe_persistence
 from src.evaluation.leakage_probe import (
     PROBE_INITIALIZATION_SEEDS,
     FourProbeEvaluationResult,
@@ -423,12 +424,12 @@ def test_each_of_four_probes_can_determine_leakage_worst(
     )
 
     monkeypatch.setattr(
-        leakage_probe,
+        leakage_probe_evaluation,
         "evaluate_primary_mlp_probes",
         Mock(return_value=mlp_result),
     )
     monkeypatch.setattr(
-        leakage_probe,
+        leakage_probe_evaluation,
         "evaluate_primary_linear_probes",
         Mock(return_value=linear_result),
     )
@@ -494,12 +495,12 @@ def test_four_probe_results_are_written_to_required_path(
     )
 
     monkeypatch.setattr(
-        leakage_probe,
+        leakage_probe_evaluation,
         "evaluate_primary_mlp_probes",
         Mock(return_value=mlp_result),
     )
     monkeypatch.setattr(
-        leakage_probe,
+        leakage_probe_evaluation,
         "evaluate_primary_linear_probes",
         Mock(return_value=linear_result),
     )
@@ -620,19 +621,23 @@ def test_loss_total_orchestrator_loads_extracts_and_writes(
     evaluate_mock = Mock(return_value=expected_result)
     write_mock = Mock(return_value=expected_output_path)
 
-    monkeypatch.setattr(leakage_probe.torch, "load", load_mock)
     monkeypatch.setattr(
-        leakage_probe,
+        leakage_probe_persistence.torch,
+        "load",
+        load_mock,
+    )
+    monkeypatch.setattr(
+        leakage_probe_persistence,
         "extract_probe_split",
         extract_mock,
     )
     monkeypatch.setattr(
-        leakage_probe,
+        leakage_probe_persistence,
         "evaluate_four_leakage_probes",
         evaluate_mock,
     )
     monkeypatch.setattr(
-        leakage_probe,
+        leakage_probe_persistence,
         "write_leakage_probe_results",
         write_mock,
     )

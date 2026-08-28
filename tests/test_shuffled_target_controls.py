@@ -4,7 +4,7 @@ from unittest.mock import Mock
 import numpy as np
 import pytest
 
-import src.evaluation.leakage_probe as leakage_probe
+import src.evaluation.leakage_probe.diagnostics as leakage_probe
 from src.evaluation.leakage_probe import (
     PROBE_TARGET_SHUFFLE_SEED,
     ProbeFitError,

@@ -4,7 +4,7 @@ from unittest.mock import Mock
 import pytest
 from sklearn.dummy import DummyRegressor
 
-import src.evaluation.leakage_probe as leakage_probe
+import src.evaluation.leakage_probe.evaluation as leakage_probe
 from src.evaluation.leakage_probe import (
     DummyBaselineOuterResult,
     FourProbeEvaluationResult,

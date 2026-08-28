@@ -4,7 +4,7 @@ import numpy as np
 import pytest
 from sklearn.exceptions import ConvergenceWarning
 
-import src.evaluation.leakage_probe as leakage_probe
+import src.evaluation.leakage_probe.mlp as leakage_probe
 from src.evaluation.leakage_probe import (
     MLP_PROBE_CONFIG,
     PROBE_INITIALIZATION_SEEDS,

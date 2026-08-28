@@ -6,6 +6,7 @@ import pytest
 
 import src.evaluation.leakage_probe as leakage_probe
 from src.evaluation.leakage_probe import (
+    PROBE_INITIALIZATION_SEEDS,
     FourProbeEvaluationResult,
     LinearProbeOuterResult,
     MLPProbeCandidateResult,
@@ -88,22 +89,39 @@ def make_representation_set(
 
 
 def make_selection(seed: int) -> MLPProbeSeedSelection:
-    candidate = MLPProbeCandidateResult(
-        seed=seed,
-        inner_r2_raw=0.5,
-        inner_mae_gev=5.0,
-        convergence_warnings=(),
-        n_iter=5,
-        final_loss=0.1,
-        feature_scaler=Mock(),
-        target_scaler=Mock(),
-        estimator=Mock(),
+    candidates = tuple(
+        MLPProbeCandidateResult(
+            seed=candidate_seed,
+            inner_r2_raw=(
+                0.5
+                if candidate_seed == seed
+                else 0.1
+            ),
+            inner_mae_gev=(
+                5.0
+                if candidate_seed == seed
+                else 6.0
+            ),
+            convergence_warnings=(),
+            n_iter=5,
+            final_loss=0.1,
+            feature_scaler=Mock(),
+            target_scaler=Mock(),
+            estimator=Mock(),
+        )
+        for candidate_seed in PROBE_INITIALIZATION_SEEDS
+    )
+
+    selected_candidate = next(
+        candidate
+        for candidate in candidates
+        if candidate.seed == seed
     )
 
     return MLPProbeSeedSelection(
         selected_seed=seed,
-        selected_candidate=candidate,
-        successful_candidates=(candidate,),
+        selected_candidate=selected_candidate,
+        successful_candidates=candidates,
         failed_candidates=(),
     )
 

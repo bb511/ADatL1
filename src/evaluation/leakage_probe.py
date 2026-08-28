@@ -1732,6 +1732,145 @@ def evaluate_four_leakage_probes(
         leakage_worst=float(leakage_worst),
     )
 
+def _successful_mlp_candidate_payload(
+    candidate: MLPProbeCandidateResult,
+    *,
+    selected_seed: int,
+) -> dict[str, Any]:
+    """Serialize one successful inner-validation candidate."""
+
+    return {
+        "seed": int(candidate.seed),
+        "status": "successful",
+        "selected": candidate.seed == selected_seed,
+        "inner_r2_raw": float(candidate.inner_r2_raw),
+        "inner_mae_gev": float(candidate.inner_mae_gev),
+        "convergence_warnings": list(
+            candidate.convergence_warnings
+        ),
+        "n_iter": int(candidate.n_iter),
+        "final_loss": float(candidate.final_loss),
+    }
+
+def _failed_mlp_candidate_payload(
+    failure: MLPProbeCandidateFailure,
+) -> dict[str, Any]:
+    """Serialize one failed MLP initialization."""
+
+    return {
+        "seed": int(failure.seed),
+        "status": "failed",
+        "selected": False,
+        "reason": failure.reason,
+        "message": failure.message,
+    }
+
+def _mlp_seed_selection_payload(
+    selection: MLPProbeSeedSelection,
+) -> dict[str, Any]:
+    """Serialize every frozen MLP initialization exactly once."""
+
+    successful_by_seed: dict[
+        int,
+        MLPProbeCandidateResult,
+    ] = {}
+    failed_by_seed: dict[
+        int,
+        MLPProbeCandidateFailure,
+    ] = {}
+
+    for candidate in selection.successful_candidates:
+        seed = int(candidate.seed)
+
+        if (
+            seed not in PROBE_INITIALIZATION_SEEDS
+            or seed in successful_by_seed
+            or seed in failed_by_seed
+        ):
+            raise ProbeFitError(
+                "invalid_mlp_candidate_diagnostics",
+                "Successful MLP candidate diagnostics contain "
+                f"an unknown or duplicate seed: {seed}.",
+            )
+
+        successful_by_seed[seed] = candidate
+
+    for failure in selection.failed_candidates:
+        seed = int(failure.seed)
+
+        if (
+            seed not in PROBE_INITIALIZATION_SEEDS
+            or seed in successful_by_seed
+            or seed in failed_by_seed
+        ):
+            raise ProbeFitError(
+                "invalid_mlp_candidate_diagnostics",
+                "Failed MLP candidate diagnostics contain "
+                f"an unknown or duplicate seed: {seed}.",
+            )
+
+        failed_by_seed[seed] = failure
+
+    recorded_seeds = (
+        set(successful_by_seed)
+        | set(failed_by_seed)
+    )
+    expected_seeds = set(
+        PROBE_INITIALIZATION_SEEDS
+    )
+
+    if recorded_seeds != expected_seeds:
+        missing_seeds = sorted(
+            expected_seeds - recorded_seeds
+        )
+        extra_seeds = sorted(
+            recorded_seeds - expected_seeds
+        )
+
+        raise ProbeFitError(
+            "invalid_mlp_candidate_diagnostics",
+            "MLP candidate diagnostics must record every "
+            "frozen initialization exactly once. "
+            f"Missing={missing_seeds}, extra={extra_seeds}.",
+        )
+
+    if (
+        selection.selected_seed
+        not in successful_by_seed
+        or selection.selected_candidate.seed
+        != selection.selected_seed
+    ):
+        raise ProbeFitError(
+            "invalid_mlp_candidate_diagnostics",
+            "The selected MLP seed must identify the recorded "
+            "successful selected candidate.",
+        )
+
+    candidates: list[dict[str, Any]] = []
+
+    # Iterate over the frozen protocol order, not dictionary or
+    # completion order.
+    for seed in PROBE_INITIALIZATION_SEEDS:
+        if seed in successful_by_seed:
+            candidates.append(
+                _successful_mlp_candidate_payload(
+                    successful_by_seed[seed],
+                    selected_seed=selection.selected_seed,
+                )
+            )
+        else:
+            candidates.append(
+                _failed_mlp_candidate_payload(
+                    failed_by_seed[seed]
+                )
+            )
+
+    return {
+        "selected_seed": int(
+            selection.selected_seed
+        ),
+        "candidates": candidates,
+    }
 
 def _probe_result_payload(
     probe: NamedMLPProbeResult | NamedLinearProbeResult,
@@ -1760,6 +1899,11 @@ def _probe_result_payload(
                 ),
                 "n_iter": int(outer.n_iter),
                 "final_loss": float(outer.final_loss),
+                "seed_selection": (
+                    _mlp_seed_selection_payload(
+                        probe.seed_selection
+                    )
+                ),
             }
         )
 

@@ -29,6 +29,7 @@ register_resolvers()
 
 from src.evaluation.leakage_probe import (
     evaluate_and_write_loss_total_leakage_probes,
+    log_four_probe_metrics,
 )
 from src.utils import RankedLogger
 from src.utils import extras
@@ -107,6 +108,8 @@ def train(cfg: DictConfig) -> Tuple[Dict[str, Any], Dict[str, Any]]:
 
     train_metrics = trainer.callback_metrics
 
+    post_training_metrics: Dict[str, float] = {}
+
     if cfg.get("train"):
         log.info("Releasing fit dataloaders before run validation...")
         _release_fit_dataloaders(trainer, datamodule)
@@ -152,10 +155,24 @@ def train(cfg: DictConfig) -> Tuple[Dict[str, Any], Dict[str, Any]]:
                 device=algorithm.device,
             )
         )
+
+        leakage_probe_metrics = log_four_probe_metrics(
+            leakage_probe_result,
+            logger,
+            step=trainer.global_step,
+        )
+
+        post_training_metrics.update(
+            leakage_probe_metrics
+        )
+
         object_dict.update(
             {
                 "leakage_probe_result": leakage_probe_result,
                 "leakage_probe_path": leakage_probe_path,
+                "leakage_probe_metrics": (
+                    leakage_probe_metrics
+                ),
             }
         )
         log.info(f"Stored leakage probes at {leakage_probe_path}.")
@@ -176,7 +193,10 @@ def train(cfg: DictConfig) -> Tuple[Dict[str, Any], Dict[str, Any]]:
             gc.collect()
         object_dict.update({"evaluator": evaluator})
 
-    metric_dict = {**train_metrics}
+    metric_dict = {
+        **train_metrics,
+        **post_training_metrics,
+    }
     return metric_dict, object_dict
 
 

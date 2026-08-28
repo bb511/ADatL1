@@ -1782,6 +1782,81 @@ def four_probe_result_payload(
         },
     }
 
+def four_probe_metric_values(
+    result: FourProbeEvaluationResult,
+) -> dict[str, float]:
+    """Return the fixed primary leakage metrics for run logging."""
+
+    probe_results = (
+        (
+            "probe/mlp/z_logits",
+            result.mlp_latent_logits,
+        ),
+        (
+            "probe/mlp/reconstruction",
+            result.mlp_reconstructed_data,
+        ),
+        (
+            "probe/linear/z_logits",
+            result.linear_latent_logits,
+        ),
+        (
+            "probe/linear/reconstruction",
+            result.linear_reconstructed_data,
+        ),
+    )
+
+    metrics: dict[str, float] = {}
+
+    for metric_prefix, probe_result in probe_results:
+        outer = probe_result.outer_result
+
+        metrics[f"{metric_prefix}/r2_raw"] = float(
+            outer.outer_r2_raw
+        )
+        metrics[f"{metric_prefix}/r2_clipped"] = float(
+            outer.outer_r2_clipped
+        )
+        metrics[f"{metric_prefix}/mae_gev"] = float(
+            outer.outer_mae_gev
+        )
+
+    metrics["probe/leakage_worst"] = float(
+        result.leakage_worst
+    )
+
+    non_finite_metrics = [
+        metric_name
+        for metric_name, metric_value in metrics.items()
+        if not np.isfinite(metric_value)
+    ]
+
+    if non_finite_metrics:
+        raise ProbeFitError(
+            "non_finite_primary_probe_metric",
+            "Cannot log non-finite primary probe metrics: "
+            f"{non_finite_metrics}.",
+        )
+
+    return metrics
+
+def log_four_probe_metrics(
+    result: FourProbeEvaluationResult,
+    loggers: list[Any],
+    *,
+    step: int,
+) -> dict[str, float]:
+    """Log all four primary probe results through Lightning loggers."""
+
+    metrics = four_probe_metric_values(result)
+
+    for output_logger in loggers:
+        output_logger.log_metrics(
+            metrics,
+            step=step,
+        )
+
+    return metrics
 
 def write_leakage_probe_results(
     result: FourProbeEvaluationResult,

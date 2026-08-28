@@ -22,11 +22,12 @@ def make_probe(
     r2_raw: float,
     r2_clipped: float | None = None,
 ) -> SimpleNamespace:
-    metric_name = (
-        "z_logits"
-        if representation_name == "latent_logits"
-        else "reconstruction"
-    )
+    metric_names = {
+        "latent_logits": "z_logits",
+        "reconstructed_data": "reconstruction",
+        "latent_sample": "z_sample",
+    }
+    metric_name = metric_names[representation_name]
 
     if r2_clipped is None:
         r2_clipped = max(0.0, r2_raw)
@@ -126,6 +127,10 @@ def make_complete_result() -> FourProbeEvaluationResult:
         shuffled_target_controls=(
             make_shuffled_controls()
         ),
+        latent_sample_diagnostic=make_probe(
+            "latent_sample",
+            0.5,
+        ),
         inner_partition=Mock(),
         worst_probe="linear/reconstruction",
         leakage_worst=0.4,
@@ -190,6 +195,16 @@ def test_four_probe_evaluation_rejects_failed_shuffled_guardrail(
         evaluation_module,
         "evaluate_shuffled_target_mlp_controls",
         shuffled_evaluator,
+    )
+    monkeypatch.setattr(
+        evaluation_module,
+        "evaluate_latent_sample_mlp_diagnostic",
+        Mock(
+            return_value=make_probe(
+                "latent_sample",
+                0.95,
+            )
+        ),
     )
 
     train = Mock()

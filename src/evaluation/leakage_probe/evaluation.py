@@ -7,6 +7,7 @@ from .mlp import evaluate_primary_mlp_probes
 from .types import FourProbeEvaluationResult, ProbeRepresentationSet
 from .diagnostics import (
     enforce_shuffled_target_guardrail,
+    evaluate_latent_sample_mlp_diagnostic,
     evaluate_shuffled_target_mlp_controls,
 )
 
@@ -19,6 +20,14 @@ def evaluate_four_leakage_probes(
     mlp_result = evaluate_primary_mlp_probes(
         train_representations,
         validation_representations,
+    )
+
+    latent_sample_diagnostic = (
+        evaluate_latent_sample_mlp_diagnostic(
+            train_representations,
+            validation_representations,
+            mlp_result.inner_partition,
+        )
     )
 
     linear_result = evaluate_primary_linear_probes(
@@ -102,11 +111,11 @@ def evaluate_four_leakage_probes(
         linear_reconstructed_data=linear_reconstruction,
         dummy_baselines=dummy_baselines,
         shuffled_target_controls=shuffled_target_controls,
+        latent_sample_diagnostic=latent_sample_diagnostic,
         inner_partition=mlp_result.inner_partition,
         worst_probe=worst_probe,
         leakage_worst=float(leakage_worst),
     )
-
     enforce_shuffled_target_guardrail(result)
 
     return result

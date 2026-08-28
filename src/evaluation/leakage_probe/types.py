@@ -201,6 +201,7 @@ class FourProbeEvaluationResult:
     linear_reconstructed_data: NamedLinearProbeResult
     dummy_baselines: PrimaryDummyBaselineResult
     shuffled_target_controls: ShuffledTargetMLPResult
+    latent_sample_diagnostic: NamedMLPProbeResult
     inner_partition: ProbeInnerPartition
     worst_probe: str
     leakage_worst: float

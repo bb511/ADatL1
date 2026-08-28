@@ -21,11 +21,12 @@ def make_primary_probe(
     representation_name: str,
     clipped_r2: float,
 ) -> SimpleNamespace:
-    metric_name = (
-        "z_logits"
-        if representation_name == "latent_logits"
-        else "reconstruction"
-    )
+    metric_names = {
+        "latent_logits": "z_logits",
+        "reconstructed_data": "reconstruction",
+        "latent_sample": "z_sample",
+    }
+    metric_name = metric_names[representation_name]
 
     return SimpleNamespace(
         representation_name=representation_name,
@@ -185,6 +186,16 @@ def test_four_probe_evaluation_attaches_dummy_diagnostics(
         "evaluate_shuffled_target_mlp_controls",
         shuffled_evaluator,
     )
+    monkeypatch.setattr(
+        leakage_probe,
+        "evaluate_latent_sample_mlp_diagnostic",
+        Mock(
+            return_value=make_primary_probe(
+                "latent_sample",
+                0.95,
+            )
+        ),
+    )
 
     train_representations = Mock()
     validation_representations = Mock()
@@ -230,6 +241,10 @@ def test_dummy_baselines_are_serialized_under_diagnostics() -> None:
         worst_probe="linear/reconstruction",
         leakage_worst=0.4,
         shuffled_target_controls=make_shuffled_controls(),
+        latent_sample_diagnostic=make_primary_probe(
+            "latent_sample",
+            0.5,
+        ),
     )
 
     payload = four_probe_result_payload(result)
@@ -297,6 +312,10 @@ def test_dummy_baselines_are_excluded_from_logged_metrics() -> None:
         worst_probe="linear/reconstruction",
         leakage_worst=0.4,
         shuffled_target_controls=make_shuffled_controls(),
+        latent_sample_diagnostic=make_primary_probe(
+            "latent_sample",
+            0.5,
+        ),
     )
 
     metrics = four_probe_metric_values(result)

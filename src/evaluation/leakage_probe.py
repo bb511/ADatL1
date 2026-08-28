@@ -1883,12 +1883,13 @@ def evaluate_primary_linear_probes(
 
 @dataclass(frozen=True)
 class FourProbeEvaluationResult:
-    """The four fitted representation probes and global leakage."""
+    """Four primary probes, diagnostics, and global leakage."""
 
     mlp_latent_logits: NamedMLPProbeResult
     mlp_reconstructed_data: NamedMLPProbeResult
     linear_latent_logits: NamedLinearProbeResult
     linear_reconstructed_data: NamedLinearProbeResult
+    dummy_baselines: PrimaryDummyBaselineResult
     inner_partition: ProbeInnerPartition
     worst_probe: str
     leakage_worst: float
@@ -1917,6 +1918,11 @@ def evaluate_four_leakage_probes(
     )
 
     linear_result = evaluate_primary_linear_probes(
+        train_representations,
+        validation_representations,
+    )
+
+    dummy_baselines = evaluate_primary_dummy_baselines(
         train_representations,
         validation_representations,
     )
@@ -1983,6 +1989,7 @@ def evaluate_four_leakage_probes(
         mlp_reconstructed_data=mlp_reconstruction,
         linear_latent_logits=linear_latent,
         linear_reconstructed_data=linear_reconstruction,
+        dummy_baselines=dummy_baselines,
         inner_partition=mlp_result.inner_partition,
         worst_probe=worst_probe,
         leakage_worst=float(leakage_worst),
@@ -2165,6 +2172,35 @@ def _probe_result_payload(
 
     return payload
 
+def _dummy_baseline_payload(
+    baseline: NamedDummyBaselineResult,
+) -> dict[str, Any]:
+    """Serialize one target-mean diagnostic."""
+
+    outer = baseline.outer_result
+
+    return {
+        "representation_name": (
+            baseline.representation_name
+        ),
+        "metric_name": baseline.metric_name,
+        "feature_dimension": int(
+            baseline.feature_dimension
+        ),
+        "strategy": outer.estimator.strategy,
+        "train_mean_gev": float(
+            outer.train_mean_gev
+        ),
+        "r2_raw": float(outer.outer_r2_raw),
+        "r2_clipped": float(
+            outer.outer_r2_clipped
+        ),
+        "mae_gev": float(outer.outer_mae_gev),
+        "n_train": int(outer.n_train),
+        "n_validation": int(
+            outer.n_validation
+        ),
+    }
 
 def four_probe_result_payload(
     result: FourProbeEvaluationResult,
@@ -2193,6 +2229,19 @@ def four_probe_result_payload(
             "linear/reconstruction": _probe_result_payload(
                 result.linear_reconstructed_data
             ),
+        },
+        "diagnostics": {
+            "dummy_baselines": {
+                "z_logits": _dummy_baseline_payload(
+                    result.dummy_baselines.latent_logits
+                ),
+                "reconstruction": (
+                    _dummy_baseline_payload(
+                        result.dummy_baselines
+                        .reconstructed_data
+                    )
+                ),
+            },
         },
     }
 

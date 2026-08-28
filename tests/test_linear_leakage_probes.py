@@ -567,6 +567,20 @@ def test_four_probe_results_are_written_to_required_path(
     assert payload["rejection_reason"] is None
     assert payload["rejection_message"] is None
 
+    assert set(payload["diagnostics"]) == {
+        "dummy_baselines"
+    }
+
+    assert set(
+        payload["diagnostics"]["dummy_baselines"]
+    ) == {
+        "z_logits",
+        "reconstruction",
+    }
+
+    # Diagnostics must never be mixed into the four primary probes.
+    assert len(payload["probes"]) == 4
+
 
 def test_loss_total_orchestrator_loads_extracts_and_writes(
     monkeypatch,

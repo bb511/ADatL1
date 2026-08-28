@@ -2,6 +2,7 @@ import json
 from unittest.mock import Mock
 
 import pytest
+from sklearn.dummy import DummyRegressor
 
 from src.evaluation.leakage_probe import (
     FourProbeEvaluationResult,
@@ -15,6 +16,9 @@ from src.evaluation.leakage_probe import (
     PROBE_INITIALIZATION_SEEDS,
     ProbeFitError,
     four_probe_result_payload,
+    DummyBaselineOuterResult,
+    NamedDummyBaselineResult,
+    PrimaryDummyBaselineResult,
 )
 
 
@@ -80,6 +84,42 @@ def make_linear_probe(
         ),
     )
 
+def make_dummy_baselines() -> PrimaryDummyBaselineResult:
+    def make_baseline(
+        representation_name: str,
+        metric_name: str,
+        feature_dimension: int,
+    ) -> NamedDummyBaselineResult:
+        return NamedDummyBaselineResult(
+            representation_name=representation_name,
+            metric_name=metric_name,
+            feature_dimension=feature_dimension,
+            outer_result=DummyBaselineOuterResult(
+                outer_r2_raw=-0.01,
+                outer_r2_clipped=0.0,
+                outer_mae_gev=12.0,
+                train_mean_gev=95.0,
+                n_train=100,
+                n_validation=40,
+                estimator=DummyRegressor(
+                    strategy="mean"
+                ),
+            ),
+        )
+
+    return PrimaryDummyBaselineResult(
+        latent_logits=make_baseline(
+            "latent_logits",
+            "z_logits",
+            4,
+        ),
+        reconstructed_data=make_baseline(
+            "reconstructed_data",
+            "reconstruction",
+            8,
+        ),
+    )
+
 
 def make_result(
     selection: MLPProbeSeedSelection,
@@ -115,6 +155,7 @@ def make_result(
             "reconstructed_data",
             "reconstruction",
         ),
+        dummy_baselines=make_dummy_baselines(),
         inner_partition=Mock(),
         worst_probe="mlp/z_logits",
         leakage_worst=0.4,

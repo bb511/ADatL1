@@ -196,3 +196,5 @@ outputs
 *.csv
 *.tsv
 *.xlsx
+
+src/evaluation/leakage_probe/*

@@ -20,8 +20,9 @@ repo_id: podagiu/anomaly_detection_cmsl1t
 # is at this commit. null would follow the head of the record instead, leaving what a run
 # trained on decided by when it was launched. A bump can change the tensors: f00e4b8c
 # ordered each collection by ET, which the on-disk pipeline had to be taught to match,
-# and 85c2f1a9 widened the jet saturation cut from the 9-bit 511 to the 11-bit 2047.
-revision: 85c2f1a986d072562c32d2fd935db6520b5a7ec8
+# 85c2f1a9 widened the jet saturation cut from the 9-bit 511 to the 11-bit 2047, and
+# 77554db9 overlaid zero-bias pile-up onto haa-4b-ma15.
+revision: 77554db91147e16e545c03e5a1ff56b8e3dab42d
 
 # Mapped onto the record's paths.base_data_dir. Its extracted, processed and ml-ready
 # caches land under <cache_dir>/data_2025E+G/, beside the ones the raw route builds.

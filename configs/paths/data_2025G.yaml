@@ -28,6 +28,6 @@ signal:
   VBFHto2Tau_Par-MH-125: ${paths.raw_data_dir}/L1TNtupleRun3-142XWinter25/VBFHto2Tau_Par-MH-125_TuneCP5_13p6TeV_powheg-pythia8
   WtoTauto3Mu: ${paths.raw_data_dir}/L1TNtupleRun3-142XWinter25/WtoTauto3Mu_TuneCP5_13p6TeV_pythia8
   ggH-suep-decay: ${paths.raw_data_dir}/L1TNtupleRun3-142XWinter25/ggH-suep-decay-POWHEGnoISR
-  haa-4b-ma15: ${paths.raw_data_dir}/L1TNtupleRun3-142XWinter25/haa-4b-ma15-POWHEG
+  haa-4b-ma15: ${paths.raw_data_dir}/L1TNtupleRun3-142XWinter25/haa-4b-ma15-ZBoverlay
 background:
   SingleNeutrino_E-10-gun: ${paths.raw_data_dir}/L1TNtupleRun3-142XWinter25/SingleNeutrino_E-10-gun

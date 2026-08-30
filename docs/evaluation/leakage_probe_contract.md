@@ -278,6 +278,12 @@ L_{\mathrm{linear},\hat X}
 \right).
 \]
 
+The linear scores are included even though an adequately optimized MLP can represent
+linear relationships. The MLP has a finite architecture and non-convex training
+procedure, whereas ordinary least squares provides a deterministic check for directly
+recoverable linear signal. Including both families prevents a weak MLP fit from making
+the reported leakage artificially optimistic.
+
 Lower is better. The maximum is required because low leakage is required for both
 probe families at both locations; averaging the components is not permitted. Exact
 ties are resolved in the displayed order.

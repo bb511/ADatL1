@@ -2,7 +2,7 @@
 
 ## Status and scope
 
-**Protocol version:** `fet-et-four-probe-v3`
+**Protocol version:** `fet-et-four-probe-v4`
 
 **Status:** Frozen for the FET.Et proof-of-concept study.
 
@@ -115,14 +115,11 @@ appended to it:
 - MI bin labels;
 - run, luminosity, or event metadata.
 
-### 2.3 Secondary latent diagnostic
+### 2.3 Binary latent representation
 
 The deterministic hard Bernoulli code produced in evaluation mode is named
-`latent_sample`. It may be probed as a secondary diagnostic. Its score does not enter
-the primary leakage objective defined in Section 6.
-
-Collapse diagnostics also use `latent_sample`, but their definitions are outside this
-contract.
+`latent_sample`. It is consumed by the decoder and may be used by collapse diagnostics,
+whose definitions are outside this contract. It is not an input to a leakage probe.
 
 ## 3. Autoencoder checkpoint and inference behavior
 
@@ -240,7 +237,7 @@ Probe loaders must be unshuffled. If representations are subsampled, the evaluat
 must use a deterministic index manifest generated with sample seed `12345` and reuse
 the identical event positions for every autoencoder configuration and seed.
 
-For protocol version `fet-et-four-probe-v3`, `max_samples` is `null`: all available
+For protocol version `fet-et-four-probe-v4`, `max_samples` is `null`: all available
 events in the relevant split are used. Introducing a sample cap requires a new
 protocol version unless the cap is fixed before any comparable run is evaluated and
 all earlier runs are reevaluated with the same manifest.
@@ -298,8 +295,7 @@ The following diagnostics are enabled for every comparable run:
 
 1. the complete MLP procedure repeated with deterministically shuffled training
    targets;
-2. the MLP probe on `latent_sample`;
-3. convergence warning, iteration count, and final loss for every MLP initialization.
+2. convergence warning, iteration count, and final loss for every MLP initialization.
 
 These diagnostics do not enter `L`.
 
@@ -363,9 +359,6 @@ probe/leakage_worst
 
 probe/shuffled/z_logits/r2_raw
 probe/shuffled/reconstruction/r2_raw
-
-probe/mlp/z_sample/r2_raw
-probe/mlp/z_sample/r2_clipped
 ```
 
 The only leakage value supplied to the Pareto analysis is:
@@ -405,7 +398,7 @@ sample manifests, or outer split identities must not be aggregated together.
 
 ## 11. Definition of done
 
-An implementation conforms to `fet-et-four-probe-v3` only when all of the following
+An implementation conforms to `fet-et-four-probe-v4` only when all of the following
 are true:
 
 - both `latent_logits` and `reconstructed_data` are evaluated by independent primary
@@ -417,10 +410,9 @@ are true:
 - the test split is not evaluated during hyperparameter selection;
 - raw and clipped R2 plus MAE are stored for all four primary probes;
 - `L` is the maximum of all four clipped primary R2 values;
-- shuffled-target and hard-code diagnostics are stored separately and cannot
-  enter `L`;
+- shuffled-target diagnostics are stored separately and cannot enter `L`;
 - `leakage_probes.json` records all four results, `worst_probe`, and `leakage_worst` at
   the required checkpoint-relative path;
 - invalid measurements fail visibly and are never converted to zero;
 - event selection is identical across comparable autoencoder runs;
-- every output records protocol version `fet-et-four-probe-v3`.
+- every output records protocol version `fet-et-four-probe-v4`.

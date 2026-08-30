@@ -5,10 +5,7 @@ import hashlib
 
 import numpy as np
 
-from .mlp import (
-    evaluate_mlp_probe_representation,
-    evaluate_primary_mlp_probes,
-)
+from .mlp import evaluate_primary_mlp_probes
 
 from .constants import (
     PROBE_TARGET_SHUFFLE_SEED,
@@ -20,8 +17,6 @@ from .errors import (
 )
 from .types import (
     FourProbeEvaluationResult,
-    NamedMLPProbeResult,
-    ProbeInnerPartition,
     ProbeRepresentationSet,
     ShuffledTargetMLPResult,
     ShuffledTrainingTarget,
@@ -123,37 +118,6 @@ def make_shuffled_training_target(
         seed=PROBE_TARGET_SHUFFLE_SEED,
         manifest_hash=manifest.hexdigest(),
     )
-
-def evaluate_latent_sample_mlp_diagnostic(
-    train_representations: ProbeRepresentationSet,
-    validation_representations: ProbeRepresentationSet,
-    partition: ProbeInnerPartition,
-) -> NamedMLPProbeResult:
-    """Evaluate latent_sample with the frozen MLP procedure."""
-
-    if train_representations.split != "train":
-        raise ProbeFitError(
-            "invalid_latent_sample_diagnostic_training_split",
-            "The latent-sample diagnostic requires the AE "
-            f"train split, got "
-            f"{train_representations.split!r}.",
-        )
-
-    if validation_representations.split != "valid":
-        raise ProbeFitError(
-            "invalid_latent_sample_diagnostic_outer_split",
-            "The latent-sample diagnostic requires the held-out "
-            f"AE valid split, got "
-            f"{validation_representations.split!r}.",
-        )
-
-    return evaluate_mlp_probe_representation(
-        train_representations,
-        validation_representations,
-        partition,
-        representation_name="latent_sample",
-    )
-
 
 def evaluate_shuffled_target_mlp_controls(
     train_representations: ProbeRepresentationSet,

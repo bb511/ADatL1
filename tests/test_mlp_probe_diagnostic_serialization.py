@@ -105,16 +105,6 @@ def make_result(
         ),
     )
 
-    latent_sample_diagnostic = NamedMLPProbeResult(
-        representation_name="latent_sample",
-        metric_name="z_sample",
-        feature_dimension=4,
-        seed_selection=selection,
-        outer_result=make_mlp_outer_result(
-            selection.selected_seed
-        ),
-    )
-
     return FourProbeEvaluationResult(
         mlp_latent_logits=latent_mlp,
         mlp_reconstructed_data=reconstruction_mlp,
@@ -134,9 +124,6 @@ def make_result(
             permutation_manifest_hash=(
                 "test-shuffle-manifest"
             ),
-        ),
-        latent_sample_diagnostic=(
-            latent_sample_diagnostic
         ),
         inner_partition=Mock(),
         worst_probe="mlp/z_logits",

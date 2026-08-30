@@ -137,7 +137,6 @@ def make_named_mlp(
     metric_names = {
         "latent_logits": "z_logits",
         "reconstructed_data": "reconstruction",
-        "latent_sample": "z_sample",
     }
     metric_name = metric_names[representation_name]
 
@@ -461,18 +460,6 @@ def test_each_of_four_probes_can_determine_leakage_worst(
         "evaluate_shuffled_target_mlp_controls",
         Mock(return_value=shuffled_controls),
     )
-    monkeypatch.setattr(
-        leakage_probe_evaluation,
-        "evaluate_latent_sample_mlp_diagnostic",
-        Mock(
-            return_value=make_named_mlp(
-                "latent_sample",
-                500,
-                0.95,
-            )
-        ),
-    )
-
     result = evaluate_four_leakage_probes(
         train,
         validation,
@@ -550,18 +537,6 @@ def test_four_probe_results_are_written_to_required_path(
         "evaluate_shuffled_target_mlp_controls",
         Mock(return_value=shuffled_controls),
     )
-    monkeypatch.setattr(
-        leakage_probe_evaluation,
-        "evaluate_latent_sample_mlp_diagnostic",
-        Mock(
-            return_value=make_named_mlp(
-                "latent_sample",
-                500,
-                0.95,
-            )
-        ),
-    )
-
     result = evaluate_four_leakage_probes(
         train,
         validation,

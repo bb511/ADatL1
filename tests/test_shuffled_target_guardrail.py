@@ -24,7 +24,6 @@ def make_probe(
     metric_names = {
         "latent_logits": "z_logits",
         "reconstructed_data": "reconstruction",
-        "latent_sample": "z_sample",
     }
     metric_name = metric_names[representation_name]
 
@@ -82,10 +81,6 @@ def make_result(
             0.4,
         ),
         shuffled_target_controls=shuffled_controls,
-        latent_sample_diagnostic=make_probe(
-            "latent_sample",
-            0.5,
-        ),
         inner_partition=Mock(),
         worst_probe="linear/reconstruction",
         leakage_worst=0.4,

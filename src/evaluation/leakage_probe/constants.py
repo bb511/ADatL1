@@ -2,7 +2,7 @@
 
 from types import MappingProxyType
 
-LEAKAGE_PROBE_PROTOCOL_VERSION = "fet-et-four-probe-v3"
+LEAKAGE_PROBE_PROTOCOL_VERSION = "fet-et-four-probe-v4"
 PROBE_INNER_SPLIT_SEED = 12345
 PROBE_TARGET_SHUFFLE_SEED = 12345
 SHUFFLED_TARGET_R2_CLIPPED_MAX = 0.02
@@ -31,7 +31,6 @@ PROBE_REPRESENTATION_METRIC_NAMES = MappingProxyType(
     {
         "latent_logits": "z_logits",
         "reconstructed_data": "reconstruction",
-        "latent_sample": "z_sample",
     }
 )
 

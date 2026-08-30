@@ -25,7 +25,6 @@ def make_probe(
     metric_names = {
         "latent_logits": "z_logits",
         "reconstructed_data": "reconstruction",
-        "latent_sample": "z_sample",
     }
     metric_name = metric_names[representation_name]
 
@@ -89,10 +88,6 @@ def make_complete_result() -> FourProbeEvaluationResult:
         shuffled_target_controls=(
             make_shuffled_controls()
         ),
-        latent_sample_diagnostic=make_probe(
-            "latent_sample",
-            0.5,
-        ),
         inner_partition=Mock(),
         worst_probe="linear/reconstruction",
         leakage_worst=0.4,
@@ -150,17 +145,6 @@ def test_four_probe_evaluation_rejects_failed_shuffled_guardrail(
         "evaluate_shuffled_target_mlp_controls",
         shuffled_evaluator,
     )
-    monkeypatch.setattr(
-        evaluation_module,
-        "evaluate_latent_sample_mlp_diagnostic",
-        Mock(
-            return_value=make_probe(
-                "latent_sample",
-                0.95,
-            )
-        ),
-    )
-
     train = Mock()
     validation = Mock()
 

@@ -2,7 +2,7 @@
 
 ## Status and scope
 
-**Protocol version:** `fet-et-four-probe-v2`
+**Protocol version:** `fet-et-four-probe-v3`
 
 **Status:** Frozen for the FET.Et proof-of-concept study.
 
@@ -240,7 +240,7 @@ Probe loaders must be unshuffled. If representations are subsampled, the evaluat
 must use a deterministic index manifest generated with sample seed `12345` and reuse
 the identical event positions for every autoencoder configuration and seed.
 
-For protocol version `fet-et-four-probe-v2`, `max_samples` is `null`: all available
+For protocol version `fet-et-four-probe-v3`, `max_samples` is `null`: all available
 events in the relevant split are used. Introducing a sample cap requires a new
 protocol version unless the cap is fixed before any comparable run is evaluated and
 all earlier runs are reevaluated with the same manifest.
@@ -296,11 +296,10 @@ is not combined with R2 or with `L`.
 
 The following diagnostics are enabled for every comparable run:
 
-1. `DummyRegressor(strategy="mean")` for both primary representations;
-2. the complete MLP procedure repeated with deterministically shuffled training
+1. the complete MLP procedure repeated with deterministically shuffled training
    targets;
-3. the MLP probe on `latent_sample`;
-4. convergence warning, iteration count, and final loss for every MLP initialization.
+2. the MLP probe on `latent_sample`;
+3. convergence warning, iteration count, and final loss for every MLP initialization.
 
 These diagnostics do not enter `L`.
 
@@ -406,7 +405,7 @@ sample manifests, or outer split identities must not be aggregated together.
 
 ## 11. Definition of done
 
-An implementation conforms to `fet-et-four-probe-v2` only when all of the following
+An implementation conforms to `fet-et-four-probe-v3` only when all of the following
 are true:
 
 - both `latent_logits` and `reconstructed_data` are evaluated by independent primary
@@ -418,10 +417,10 @@ are true:
 - the test split is not evaluated during hyperparameter selection;
 - raw and clipped R2 plus MAE are stored for all four primary probes;
 - `L` is the maximum of all four clipped primary R2 values;
-- shuffled-target, dummy, and hard-code diagnostics are stored separately and cannot
+- shuffled-target and hard-code diagnostics are stored separately and cannot
   enter `L`;
 - `leakage_probes.json` records all four results, `worst_probe`, and `leakage_worst` at
   the required checkpoint-relative path;
 - invalid measurements fail visibly and are never converted to zero;
 - event selection is identical across comparable autoencoder runs;
-- every output records protocol version `fet-et-four-probe-v2`.
+- every output records protocol version `fet-et-four-probe-v3`.

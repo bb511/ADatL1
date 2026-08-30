@@ -15,7 +15,6 @@ from .types import (
     MLPProbeCandidateFailure,
     MLPProbeCandidateResult,
     MLPProbeSeedSelection,
-    NamedDummyBaselineResult,
     NamedLinearProbeResult,
     NamedMLPProbeResult,
     ShuffledTargetMLPResult,
@@ -198,36 +197,6 @@ def _probe_result_payload(
 
     return payload
 
-def _dummy_baseline_payload(
-    baseline: NamedDummyBaselineResult,
-) -> dict[str, Any]:
-    """Serialize one target-mean diagnostic."""
-
-    outer = baseline.outer_result
-
-    return {
-        "representation_name": (
-            baseline.representation_name
-        ),
-        "metric_name": baseline.metric_name,
-        "feature_dimension": int(
-            baseline.feature_dimension
-        ),
-        "strategy": outer.estimator.strategy,
-        "train_mean_gev": float(
-            outer.train_mean_gev
-        ),
-        "r2_raw": float(outer.outer_r2_raw),
-        "r2_clipped": float(
-            outer.outer_r2_clipped
-        ),
-        "mae_gev": float(outer.outer_mae_gev),
-        "n_train": int(outer.n_train),
-        "n_validation": int(
-            outer.n_validation
-        ),
-    }
-
 def four_probe_result_payload(
     result: FourProbeEvaluationResult,
 ) -> dict[str, Any]:
@@ -257,17 +226,6 @@ def four_probe_result_payload(
             ),
         },
         "diagnostics": {
-            "dummy_baselines": {
-                "z_logits": _dummy_baseline_payload(
-                    result.dummy_baselines.latent_logits
-                ),
-                "reconstruction": (
-                    _dummy_baseline_payload(
-                        result.dummy_baselines
-                        .reconstructed_data
-                    )
-                ),
-            },
             "shuffled_targets": (
                 _shuffled_target_controls_payload(
                     result.shuffled_target_controls
@@ -427,4 +385,3 @@ def log_shuffled_target_metrics(
         )
 
     return metrics
-

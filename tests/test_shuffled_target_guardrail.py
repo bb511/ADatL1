@@ -45,33 +45,6 @@ def make_probe(
     )
 
 
-def make_dummy(
-    representation_name: str,
-) -> SimpleNamespace:
-    metric_name = (
-        "z_logits"
-        if representation_name == "latent_logits"
-        else "reconstruction"
-    )
-
-    return SimpleNamespace(
-        representation_name=representation_name,
-        metric_name=metric_name,
-        feature_dimension=4,
-        outer_result=SimpleNamespace(
-            outer_r2_raw=-0.02,
-            outer_r2_clipped=0.0,
-            outer_mae_gev=12.0,
-            train_mean_gev=95.0,
-            n_train=100,
-            n_validation=40,
-            estimator=SimpleNamespace(
-                strategy="mean"
-            ),
-        ),
-    )
-
-
 def make_result(
     *,
     shuffled_latent: float,
@@ -107,14 +80,6 @@ def make_result(
         linear_reconstructed_data=make_probe(
             "reconstructed_data",
             0.4,
-        ),
-        dummy_baselines=SimpleNamespace(
-            latent_logits=make_dummy(
-                "latent_logits"
-            ),
-            reconstructed_data=make_dummy(
-                "reconstructed_data"
-            ),
         ),
         shuffled_target_controls=shuffled_controls,
         latent_sample_diagnostic=make_probe(

@@ -626,7 +626,6 @@ def test_four_probe_results_are_written_to_required_path(
     assert payload["rejection_message"] is None
 
     assert set(payload["diagnostics"]) == {
-        "dummy_baselines",
         "shuffled_targets",
     }
     assert set(
@@ -634,13 +633,6 @@ def test_four_probe_results_are_written_to_required_path(
     ) == {
         "shuffle_seed",
         "permutation_manifest_hash",
-        "z_logits",
-        "reconstruction",
-    }
-
-    assert set(
-        payload["diagnostics"]["dummy_baselines"]
-    ) == {
         "z_logits",
         "reconstruction",
     }

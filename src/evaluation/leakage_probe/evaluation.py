@@ -1,6 +1,5 @@
-"""Aggregate four primary probes and target-only diagnostics."""
+"""Aggregate four primary probes and secondary diagnostics."""
 
-from .baselines import evaluate_primary_dummy_baselines
 from .errors import ProbeFitError
 from .linear import evaluate_primary_linear_probes
 from .mlp import evaluate_primary_mlp_probes
@@ -31,11 +30,6 @@ def evaluate_four_leakage_probes(
     )
 
     linear_result = evaluate_primary_linear_probes(
-        train_representations,
-        validation_representations,
-    )
-
-    dummy_baselines = evaluate_primary_dummy_baselines(
         train_representations,
         validation_representations,
     )
@@ -109,7 +103,6 @@ def evaluate_four_leakage_probes(
         mlp_reconstructed_data=mlp_reconstruction,
         linear_latent_logits=linear_latent,
         linear_reconstructed_data=linear_reconstruction,
-        dummy_baselines=dummy_baselines,
         shuffled_target_controls=shuffled_target_controls,
         latent_sample_diagnostic=latent_sample_diagnostic,
         inner_partition=mlp_result.inner_partition,
@@ -119,4 +112,3 @@ def evaluate_four_leakage_probes(
     enforce_shuffled_target_guardrail(result)
 
     return result
-

@@ -6,7 +6,6 @@ from dataclasses import dataclass
 from pathlib import Path
 
 import numpy as np
-from sklearn.dummy import DummyRegressor
 from sklearn.linear_model import LinearRegression
 from sklearn.neural_network import MLPRegressor
 from sklearn.preprocessing import StandardScaler
@@ -161,37 +160,6 @@ class PrimaryLinearProbeResult:
     reconstructed_data: NamedLinearProbeResult
 
 @dataclass(frozen=True)
-class DummyBaselineOuterResult:
-    """Target-mean baseline evaluated on outer validation."""
-
-    outer_r2_raw: float
-    outer_r2_clipped: float
-    outer_mae_gev: float
-    train_mean_gev: float
-    n_train: int
-    n_validation: int
-    estimator: DummyRegressor
-
-
-@dataclass(frozen=True)
-class NamedDummyBaselineResult:
-    """Target-only baseline associated with one representation."""
-
-    representation_name: str
-    metric_name: str
-    feature_dimension: int
-    outer_result: DummyBaselineOuterResult
-
-
-@dataclass(frozen=True)
-class PrimaryDummyBaselineResult:
-    """Separate target-mean controls for both representations."""
-
-    latent_logits: NamedDummyBaselineResult
-    reconstructed_data: NamedDummyBaselineResult
-
-
-@dataclass(frozen=True)
 class FourProbeEvaluationResult:
     """Four primary probes, diagnostics, and global leakage."""
 
@@ -199,7 +167,6 @@ class FourProbeEvaluationResult:
     mlp_reconstructed_data: NamedMLPProbeResult
     linear_latent_logits: NamedLinearProbeResult
     linear_reconstructed_data: NamedLinearProbeResult
-    dummy_baselines: PrimaryDummyBaselineResult
     shuffled_target_controls: ShuffledTargetMLPResult
     latent_sample_diagnostic: NamedMLPProbeResult
     inner_partition: ProbeInnerPartition
@@ -217,4 +184,3 @@ class LeakageProbeRunOutcome:
     rejection_reason: str | None
     rejection_message: str | None
     diagnostic_result: FourProbeEvaluationResult | None = None
-

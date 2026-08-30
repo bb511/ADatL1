@@ -1,10 +1,5 @@
 """Public API for the leakage-probe evaluation package."""
 
-from .baselines import (
-    evaluate_dummy_baseline_representation,
-    evaluate_primary_dummy_baselines,
-    fit_dummy_baseline,
-)
 from .constants import (
     LEAKAGE_PROBE_PROTOCOL_VERSION,
     MLP_PROBE_CONFIG,
@@ -62,7 +57,6 @@ from .serialization import (
 )
 
 from .types import (
-    DummyBaselineOuterResult,
     FourProbeEvaluationResult,
     LeakageProbeRunOutcome,
     LinearProbeOuterResult,
@@ -70,10 +64,8 @@ from .types import (
     MLPProbeCandidateResult,
     MLPProbeOuterResult,
     MLPProbeSeedSelection,
-    NamedDummyBaselineResult,
     NamedLinearProbeResult,
     NamedMLPProbeResult,
-    PrimaryDummyBaselineResult,
     PrimaryLinearProbeResult,
     PrimaryMLPLeakageResult,
     ProbeInnerPartition,
@@ -84,7 +76,6 @@ from .types import (
 
 __all__ = [
     "AllMLPProbeCandidatesFailed",
-    "DummyBaselineOuterResult",
     "FourProbeEvaluationResult",
     "LEAKAGE_PROBE_PROTOCOL_VERSION",
     "LeakageProbeRunOutcome",
@@ -95,7 +86,6 @@ __all__ = [
     "MLPProbeOuterResult",
     "MLPProbeSeedSelection",
     "MLP_PROBE_CONFIG",
-    "NamedDummyBaselineResult",
     "NamedLinearProbeResult",
     "NamedMLPProbeResult",
     "PRIMARY_PROBE_REPRESENTATIONS",
@@ -104,7 +94,6 @@ __all__ = [
     "PROBE_INNER_VALIDATION_FRACTION",
     "PROBE_REPRESENTATION_METRIC_NAMES",
     "PROBE_TARGET_SHUFFLE_SEED",
-    "PrimaryDummyBaselineResult",
     "PrimaryLinearProbeResult",
     "PrimaryMLPLeakageResult",
     "ProbeExtractionError",
@@ -117,16 +106,13 @@ __all__ = [
     "ShuffledTrainingTarget",
     "evaluate_and_record_loss_total_leakage_probes",
     "evaluate_and_write_loss_total_leakage_probes",
-    "evaluate_dummy_baseline_representation",
     "evaluate_four_leakage_probes",
     "evaluate_linear_probe_representation",
     "evaluate_mlp_probe_representation",
-    "evaluate_primary_dummy_baselines",
     "evaluate_primary_linear_probes",
     "evaluate_primary_mlp_probes",
     "evaluate_shuffled_target_mlp_controls",
     "extract_probe_split",
-    "fit_dummy_baseline",
     "fit_linear_probe",
     "fit_mlp_probe_candidate",
     "four_probe_metric_values",

@@ -67,11 +67,6 @@ def test_four_probe_evaluation_attaches_latent_sample_diagnostic(
         ),
     )
 
-    dummy_baselines = SimpleNamespace(
-        latent_logits=object(),
-        reconstructed_data=object(),
-    )
-
     shuffled_target_controls = SimpleNamespace(
         latent_logits=make_probe(
             "latent_logits",
@@ -99,11 +94,6 @@ def test_four_probe_evaluation_attaches_latent_sample_diagnostic(
         evaluation_module,
         "evaluate_primary_linear_probes",
         Mock(return_value=linear_result),
-    )
-    monkeypatch.setattr(
-        evaluation_module,
-        "evaluate_primary_dummy_baselines",
-        Mock(return_value=dummy_baselines),
     )
     monkeypatch.setattr(
         evaluation_module,

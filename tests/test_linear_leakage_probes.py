@@ -606,6 +606,7 @@ def test_four_probe_results_are_written_to_required_path(
     assert set(
         payload["diagnostics"]["shuffled_targets"]
     ) == {
+        "enabled",
         "shuffle_seed",
         "permutation_manifest_hash",
         "z_logits",
@@ -616,9 +617,14 @@ def test_four_probe_results_are_written_to_required_path(
     assert len(payload["probes"]) == 4
 
 
+@pytest.mark.parametrize(
+    "run_shuffled_target_controls",
+    [False, True],
+)
 def test_loss_total_orchestrator_loads_extracts_and_writes(
     monkeypatch,
     tmp_path,
+    run_shuffled_target_controls: bool,
 ) -> None:
     checkpoint_path = tmp_path / "loss_total.ckpt"
     checkpoint_path.touch()
@@ -681,6 +687,9 @@ def test_loss_total_orchestrator_loads_extracts_and_writes(
             datamodule,
             tmp_path,
             device="cpu",
+            run_shuffled_target_controls=(
+                run_shuffled_target_controls
+            ),
         )
     )
 
@@ -715,6 +724,9 @@ def test_loss_total_orchestrator_loads_extracts_and_writes(
     evaluate_mock.assert_called_once_with(
         train_representations,
         validation_representations,
+        run_shuffled_target_controls=(
+            run_shuffled_target_controls
+        ),
     )
     write_mock.assert_called_once_with(
         expected_result,

@@ -189,6 +189,8 @@ def shuffled_target_guardrail_failures(
     """Return shuffled controls exceeding the frozen threshold."""
 
     controls = result.shuffled_target_controls
+    if controls is None:
+        return ()
 
     scores = (
         (

@@ -12,8 +12,10 @@ from .diagnostics import (
 def evaluate_four_leakage_probes(
     train_representations: ProbeRepresentationSet,
     validation_representations: ProbeRepresentationSet,
+    *,
+    run_shuffled_target_controls: bool = True,
 ) -> FourProbeEvaluationResult:
-    """Evaluate two MLP and two linear probes."""
+    """Evaluate four probes and optional shuffled-target controls."""
 
     mlp_result = evaluate_primary_mlp_probes(
         train_representations,
@@ -25,12 +27,14 @@ def evaluate_four_leakage_probes(
         validation_representations,
     )
 
-    shuffled_target_controls = (
-        evaluate_shuffled_target_mlp_controls(
-            train_representations,
-            validation_representations,
+    shuffled_target_controls = None
+    if run_shuffled_target_controls:
+        shuffled_target_controls = (
+            evaluate_shuffled_target_mlp_controls(
+                train_representations,
+                validation_representations,
+            )
         )
-    )
 
     mlp_latent = mlp_result.latent_logits
     mlp_reconstruction = mlp_result.reconstructed_data
@@ -99,6 +103,7 @@ def evaluate_four_leakage_probes(
         worst_probe=worst_probe,
         leakage_worst=float(leakage_worst),
     )
-    enforce_shuffled_target_guardrail(result)
+    if shuffled_target_controls is not None:
+        enforce_shuffled_target_guardrail(result)
 
     return result

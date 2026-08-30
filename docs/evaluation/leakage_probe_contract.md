@@ -2,7 +2,7 @@
 
 ## Status and scope
 
-**Protocol version:** `fet-et-four-probe-v4`
+**Protocol version:** `fet-et-four-probe-v5`
 
 **Status:** Frozen for the FET.Et proof-of-concept study.
 
@@ -237,7 +237,7 @@ Probe loaders must be unshuffled. If representations are subsampled, the evaluat
 must use a deterministic index manifest generated with sample seed `12345` and reuse
 the identical event positions for every autoencoder configuration and seed.
 
-For protocol version `fet-et-four-probe-v4`, `max_samples` is `null`: all available
+For protocol version `fet-et-four-probe-v5`, `max_samples` is `null`: all available
 events in the relevant split are used. Introducing a sample cap requires a new
 protocol version unless the cap is fixed before any comparable run is evaluated and
 all earlier runs are reevaluated with the same manifest.
@@ -289,15 +289,53 @@ independence.
 For all four primary probes, also report MAE in GeV. MAE is supporting information and
 is not combined with R2 or with `L`.
 
-## 7. Diagnostics and negative controls
+## 7. Diagnostics and optional negative controls
 
-The following diagnostics are enabled for every comparable run:
+Every primary MLP initialization records its convergence warning, iteration count, and
+final loss. Shuffled-target MLP controls are an optional audit mode rather than a
+requirement for every comparable run.
 
-1. the complete MLP procedure repeated with deterministically shuffled training
-   targets;
-2. convergence warning, iteration count, and final loss for every MLP initialization.
+### 7.1 Purpose, implementation, and use
 
-These diagnostics do not enter `L`.
+The shuffled-target controls are negative controls for the probe pipeline. They test
+whether an MLP can obtain suspiciously positive held-out R2 after the association
+between each training representation and its target has deliberately been destroyed.
+They can reveal problems such as train/validation overlap, target misalignment, or an
+unstable finite-sample result. Passing the controls supports the integrity of the
+measurement pipeline; it does not establish that the primary representations contain
+no sensitive information.
+
+The implementation is controlled by
+`evaluation.leakage_probes.run_shuffled_target_controls` in
+`configs/experiment/physics/ae.yaml` and propagated by `src/train.py` to the leakage
+evaluator. Its behavior is:
+
+- `false` (the physics default): run and persist the four primary probes, skip all
+  shuffled-target fits and metrics, record
+  `diagnostics.shuffled_targets.enabled=false`, and do not apply the shuffled-target
+  guardrail;
+- `true`: shuffle the complete training target deterministically, run the same MLP
+  seed-selection and refit procedure for both primary representations, persist the
+  control results separately, log the two `probe/shuffled/*` metrics, and apply the
+  guardrail below.
+
+One enabled control run adds eight MLP fits: three seed candidates plus one refit for
+each of the two representations. The controls never alter the four primary results or
+enter `probe/leakage_worst`.
+
+Use `false` for broad hyperparameter sweeps, where repeating this audit for every run
+adds substantial cost without changing the Pareto objective. Use `true`:
+
+- on an initial end-to-end run to validate the evaluation pipeline;
+- on a representative run after changes to data loading, event splitting, target
+  extraction, or probe fitting;
+- for the final selected configuration before reporting its leakage result.
+
+Enable audit mode by appending this Hydra override to the normal training command:
+
+```text
+evaluation.leakage_probes.run_shuffled_target_controls=true
+```
 
 The shuffled-target control uses a NumPy `RandomState` MT19937
 permutation with seed `12345`. The permutation is applied only to
@@ -305,7 +343,7 @@ the complete autoencoder training target. The validation target is
 never shuffled. Both primary representations reuse the identical
 permuted training-target vector.
 
-### 7.1 Shuffled-target guardrail
+### 7.2 Shuffled-target guardrail when enabled
 
 For both primary representations, clipped shuffled-target validation leakage must be
 at most 0.02. A larger value marks the probe measurement invalid and requires an audit
@@ -325,12 +363,12 @@ A leakage evaluation is invalid if any of the following occurs:
 - different autoencoder configurations use different outer-validation event samples;
 - every MLP initialization raises an exception or produces non-finite predictions;
 - the selected MLP has non-finite weights, loss, or predictions;
-- the shuffled-target guardrail fails;
+- the shuffled-target guardrail fails when the controls are enabled;
 - a required primary metric cannot be calculated.
 
 A scikit-learn `ConvergenceWarning` caused solely by reaching `max_iter=500` is logged
 but does not automatically invalidate the result if the fitted estimator and all
-metrics are finite and the shuffled-target guardrail passes.
+metrics are finite and, when enabled, the shuffled-target guardrail passes.
 
 Invalid evaluations remain in the run table with `probe_valid=false` and an explicit,
 machine-readable rejection reason. Missing or invalid scores must never be replaced by
@@ -357,8 +395,8 @@ probe/linear/reconstruction/mae_gev
 
 probe/leakage_worst
 
-probe/shuffled/z_logits/r2_raw
-probe/shuffled/reconstruction/r2_raw
+probe/shuffled/z_logits/r2_raw          # audit mode only
+probe/shuffled/reconstruction/r2_raw    # audit mode only
 ```
 
 The only leakage value supplied to the Pareto analysis is:
@@ -380,7 +418,9 @@ It contains at least:
 - the representation name and dimension for each of the four probes;
 - raw and clipped R2 plus MAE for each of the four probes;
 - train and validation event counts for each of the four probes;
-- the selected seed and convergence information for each MLP.
+- the selected seed and convergence information for each MLP;
+- `diagnostics.shuffled_targets.enabled`, plus the shuffled-control results when
+  audit mode is enabled.
 
 ## 10. Cross-run aggregation
 
@@ -398,7 +438,7 @@ sample manifests, or outer split identities must not be aggregated together.
 
 ## 11. Definition of done
 
-An implementation conforms to `fet-et-four-probe-v4` only when all of the following
+An implementation conforms to `fet-et-four-probe-v5` only when all of the following
 are true:
 
 - both `latent_logits` and `reconstructed_data` are evaluated by independent primary
@@ -410,9 +450,10 @@ are true:
 - the test split is not evaluated during hyperparameter selection;
 - raw and clipped R2 plus MAE are stored for all four primary probes;
 - `L` is the maximum of all four clipped primary R2 values;
-- shuffled-target diagnostics are stored separately and cannot enter `L`;
+- the artifact records whether shuffled-target controls ran; when enabled, their
+  diagnostics are stored separately and cannot enter `L`;
 - `leakage_probes.json` records all four results, `worst_probe`, and `leakage_worst` at
   the required checkpoint-relative path;
 - invalid measurements fail visibly and are never converted to zero;
 - event selection is identical across comparable autoencoder runs;
-- every output records protocol version `fet-et-four-probe-v4`.
+- every output records protocol version `fet-et-four-probe-v5`.

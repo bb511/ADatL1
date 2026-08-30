@@ -159,6 +159,12 @@ def train(cfg: DictConfig) -> Tuple[Dict[str, Any], Dict[str, Any]]:
                 datamodule,
                 run_ckpts,
                 device=algorithm.device,
+                run_shuffled_target_controls=bool(
+                    leakage_probe_cfg.get(
+                        "run_shuffled_target_controls",
+                        False,
+                    )
+                ),
             )
         )
 

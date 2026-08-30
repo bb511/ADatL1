@@ -132,6 +132,7 @@ def evaluate_and_write_loss_total_leakage_probes(
     run_folder: str | Path,
     *,
     device: torch.device | str = "cpu",
+    run_shuffled_target_controls: bool = True,
 ) -> tuple[FourProbeEvaluationResult, Path]:
     """Evaluate the frozen loss-total checkpoint and persist four probes.
 
@@ -197,6 +198,7 @@ def evaluate_and_write_loss_total_leakage_probes(
     result = evaluate_four_leakage_probes(
         train_representations,
         validation_representations,
+        run_shuffled_target_controls=run_shuffled_target_controls,
     )
     output_path = write_leakage_probe_results(
         result,
@@ -212,6 +214,7 @@ def evaluate_and_record_loss_total_leakage_probes(
     run_folder: str | Path,
     *,
     device: torch.device | str = "cpu",
+    run_shuffled_target_controls: bool = True,
 ) -> LeakageProbeRunOutcome:
     """Evaluate leakage and record expected protocol failures."""
 
@@ -222,6 +225,7 @@ def evaluate_and_record_loss_total_leakage_probes(
                 datamodule,
                 run_folder,
                 device=device,
+                run_shuffled_target_controls=run_shuffled_target_controls,
             )
         )
     except (
@@ -283,4 +287,3 @@ def log_leakage_probe_outcome_metadata(
         output_logger.log_hyperparams(metadata)
 
     return metadata
-

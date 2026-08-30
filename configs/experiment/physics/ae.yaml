@@ -167,6 +167,10 @@ evaluation:
   # writes plots/val/loss_total/probes/leakage_probes.json below this run.
   leakage_probes:
     enabled: true
+    # The shuffled-target controls add eight MLP fits per AE run. Keep them off
+    # during sweeps and enable them for audit/final runs with:
+    # evaluation.leakage_probes.run_shuffled_target_controls=true
+    run_shuffled_target_controls: false
 
   evaluator:
     ckpts:

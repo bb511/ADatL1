@@ -1,4 +1,5 @@
 import json
+from dataclasses import replace
 from types import SimpleNamespace
 from unittest.mock import Mock
 
@@ -118,6 +119,19 @@ def test_guardrail_accepts_scores_at_or_below_threshold(
         result
     ) == ()
 
+    enforce_shuffled_target_guardrail(result)
+
+
+def test_guardrail_is_a_noop_when_controls_are_disabled() -> None:
+    result = replace(
+        make_result(
+            shuffled_latent=0.0,
+            shuffled_reconstruction=0.0,
+        ),
+        shuffled_target_controls=None,
+    )
+
+    assert shuffled_target_guardrail_failures(result) == ()
     enforce_shuffled_target_guardrail(result)
 
 

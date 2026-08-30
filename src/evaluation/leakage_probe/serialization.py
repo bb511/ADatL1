@@ -312,12 +312,17 @@ def log_four_probe_metrics(
 
     return metrics
 
+
 def _shuffled_target_controls_payload(
-    controls: ShuffledTargetMLPResult,
+    controls: ShuffledTargetMLPResult | None,
 ) -> dict[str, Any]:
     """Serialize both shuffled-training-target controls."""
 
+    if controls is None:
+        return {"enabled": False}
+
     return {
+        "enabled": True,
         "shuffle_seed": int(
             controls.shuffle_seed
         ),
@@ -332,12 +337,15 @@ def _shuffled_target_controls_payload(
         ),
     }
 
+
 def shuffled_target_metric_values(
     result: FourProbeEvaluationResult,
 ) -> dict[str, float]:
     """Return the fixed shuffled-control MLflow metrics."""
 
     controls = result.shuffled_target_controls
+    if controls is None:
+        return {}
 
     metrics = {
         "probe/shuffled/z_logits/r2_raw": float(
@@ -378,10 +386,11 @@ def log_shuffled_target_metrics(
         result
     )
 
-    for output_logger in loggers:
-        output_logger.log_metrics(
-            metrics,
-            step=step,
-        )
+    if metrics:
+        for output_logger in loggers:
+            output_logger.log_metrics(
+                metrics,
+                step=step,
+            )
 
     return metrics

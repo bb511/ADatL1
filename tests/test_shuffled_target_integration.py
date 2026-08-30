@@ -1,3 +1,4 @@
+from dataclasses import replace
 from types import SimpleNamespace
 from unittest.mock import Mock
 
@@ -203,6 +204,7 @@ def test_shuffled_controls_are_serialized_as_diagnostics() -> None:
 
     shuffled = diagnostics["shuffled_targets"]
 
+    assert shuffled["enabled"] is True
     assert shuffled["shuffle_seed"] == 12345
     assert (
         shuffled["permutation_manifest_hash"]
@@ -228,6 +230,81 @@ def test_shuffled_controls_are_serialized_as_diagnostics() -> None:
         "shuffled" not in probe_name
         for probe_name in payload["probes"]
     )
+
+
+def test_shuffled_controls_can_be_disabled(
+    monkeypatch,
+) -> None:
+    mlp_result = SimpleNamespace(
+        latent_logits=make_probe(
+            "latent_logits",
+            0.1,
+        ),
+        reconstructed_data=make_probe(
+            "reconstructed_data",
+            0.2,
+        ),
+        inner_partition=Mock(),
+    )
+    linear_result = SimpleNamespace(
+        latent_logits=make_probe(
+            "latent_logits",
+            0.3,
+        ),
+        reconstructed_data=make_probe(
+            "reconstructed_data",
+            0.4,
+        ),
+    )
+    shuffled_evaluator = Mock()
+
+    monkeypatch.setattr(
+        evaluation_module,
+        "evaluate_primary_mlp_probes",
+        Mock(return_value=mlp_result),
+    )
+    monkeypatch.setattr(
+        evaluation_module,
+        "evaluate_primary_linear_probes",
+        Mock(return_value=linear_result),
+    )
+    monkeypatch.setattr(
+        evaluation_module,
+        "evaluate_shuffled_target_mlp_controls",
+        shuffled_evaluator,
+    )
+
+    result = evaluate_four_leakage_probes(
+        Mock(),
+        Mock(),
+        run_shuffled_target_controls=False,
+    )
+
+    shuffled_evaluator.assert_not_called()
+    assert result.shuffled_target_controls is None
+    assert result.worst_probe == "linear/reconstruction"
+    assert result.leakage_worst == pytest.approx(0.4)
+
+    payload = four_probe_result_payload(result)
+    assert payload["diagnostics"]["shuffled_targets"] == {
+        "enabled": False,
+    }
+
+
+def test_disabled_shuffled_controls_do_not_log_metrics() -> None:
+    result = replace(
+        make_complete_result(),
+        shuffled_target_controls=None,
+    )
+    logger = Mock()
+
+    assert shuffled_target_metric_values(result) == {}
+    assert log_shuffled_target_metrics(
+        result,
+        [logger],
+        step=31,
+    ) == {}
+    logger.log_metrics.assert_not_called()
 
 
 def test_shuffled_target_metric_names_are_exact() -> None:

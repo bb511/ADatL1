@@ -46,6 +46,12 @@ class ShuffledTargetGuardrailError(ProbeFitError):
         self.failed_controls = failed_controls
 
         controls = result.shuffled_target_controls
+        if controls is None:
+            raise ValueError(
+                "Cannot construct a shuffled-target guardrail error "
+                "when shuffled-target controls are disabled."
+            )
+
         scores = {
             "z_logits": float(
                 controls.latent_logits

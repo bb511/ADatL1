@@ -1,4 +1,5 @@
 import json
+from dataclasses import replace
 from unittest.mock import Mock
 
 import numpy as np
@@ -30,6 +31,7 @@ from src.evaluation.leakage_probe import (
     PROBE_TARGET_SHUFFLE_SEED,
     ShuffledTargetMLPResult,
 )
+from tests.helpers.leakage_probe import make_probe_run_metadata
 
 
 def make_arrays():
@@ -88,6 +90,9 @@ def make_representation_set(
         sample_seed=12345,
         max_samples=None,
         manifest_hash=f"{split}-manifest",
+        data_cache_id="test-cache",
+        data_cache_path="/test/cache",
+        source_splits=(split,),
     )
 
 
@@ -463,6 +468,7 @@ def test_each_of_four_probes_can_determine_leakage_worst(
     result = evaluate_four_leakage_probes(
         train,
         validation,
+        run_metadata=make_probe_run_metadata(),
     )
 
     assert isinstance(result, FourProbeEvaluationResult)
@@ -540,6 +546,7 @@ def test_four_probe_results_are_written_to_required_path(
     result = evaluate_four_leakage_probes(
         train,
         validation,
+        run_metadata=make_probe_run_metadata(),
     )
 
     run_folder = (
@@ -595,10 +602,27 @@ def test_four_probe_results_are_written_to_required_path(
     assert payload["probes"]["linear/reconstruction"][
         "r2_clipped"
     ] == pytest.approx(0.3)
+    assert payload["probes"]["mlp/z_logits"][
+        "n_development"
+    ] == 20
+    assert payload["probes"]["mlp/z_logits"][
+        "n_held_out"
+    ] == 10
 
     assert payload["probe_valid"] is True
     assert payload["rejection_reason"] is None
     assert payload["rejection_message"] is None
+    assert payload["run"] == {
+        "autoencoder_seed": 123,
+        "configuration_id": "test-configuration",
+    }
+    assert payload["evaluation"]["mode"] == "validation"
+    assert payload["evaluation"]["development_data"][
+        "source_splits"
+    ] == ["train"]
+    assert payload["evaluation"]["held_out_data"][
+        "source_splits"
+    ] == ["valid"]
 
     assert set(payload["diagnostics"]) == {
         "shuffled_targets",
@@ -641,6 +665,7 @@ def test_loss_total_orchestrator_loads_extracts_and_writes(
         10,
     )
     expected_result = Mock(spec=FourProbeEvaluationResult)
+    run_metadata = make_probe_run_metadata()
     expected_output_path = (
         tmp_path
         / "plots"
@@ -690,6 +715,8 @@ def test_loss_total_orchestrator_loads_extracts_and_writes(
             run_shuffled_target_controls=(
                 run_shuffled_target_controls
             ),
+            evaluation_mode="validation",
+            run_metadata=run_metadata,
         )
     )
 
@@ -727,6 +754,8 @@ def test_loss_total_orchestrator_loads_extracts_and_writes(
         run_shuffled_target_controls=(
             run_shuffled_target_controls
         ),
+        evaluation_mode="validation",
+        run_metadata=run_metadata,
     )
     write_mock.assert_called_once_with(
         expected_result,
@@ -745,3 +774,112 @@ def test_loss_total_orchestrator_requires_checkpoint(
         )
 
     assert error.value.reason == "loss_total_checkpoint_missing"
+
+
+def test_final_test_output_path_uses_test_stage(tmp_path) -> None:
+    assert leakage_probe_persistence.leakage_probe_output_path(
+        tmp_path,
+        evaluation_mode="final_test",
+    ) == (
+        tmp_path
+        / "plots"
+        / "test"
+        / "loss_total"
+        / "probes"
+        / "leakage_probes.json"
+    )
+
+
+def test_final_test_mode_fits_on_train_plus_valid_and_scores_test(
+    monkeypatch,
+    tmp_path,
+) -> None:
+    checkpoint_path = tmp_path / "loss_total.ckpt"
+    checkpoint_path.touch()
+    model = Mock()
+    datamodule = Mock()
+    train = make_representation_set("train", 20)
+    valid = make_representation_set("valid", 10)
+    test = make_representation_set("test", 12)
+    development = make_representation_set(
+        "train+valid",
+        30,
+    )
+    development = replace(
+        development,
+        source_splits=("train", "valid"),
+    )
+    expected_result = Mock(spec=FourProbeEvaluationResult)
+    expected_path = (
+        tmp_path
+        / "plots"
+        / "test"
+        / "loss_total"
+        / "probes"
+        / "leakage_probes.json"
+    )
+    run_metadata = make_probe_run_metadata()
+
+    monkeypatch.setattr(
+        leakage_probe_persistence.torch,
+        "load",
+        Mock(return_value={"state_dict": {}}),
+    )
+    extract_mock = Mock(side_effect=[train, valid, test])
+    combine_mock = Mock(return_value=development)
+    evaluate_mock = Mock(return_value=expected_result)
+    write_mock = Mock(return_value=expected_path)
+    monkeypatch.setattr(
+        leakage_probe_persistence,
+        "extract_probe_split",
+        extract_mock,
+    )
+    monkeypatch.setattr(
+        leakage_probe_persistence,
+        "concatenate_probe_representation_sets",
+        combine_mock,
+    )
+    monkeypatch.setattr(
+        leakage_probe_persistence,
+        "evaluate_four_leakage_probes",
+        evaluate_mock,
+    )
+    monkeypatch.setattr(
+        leakage_probe_persistence,
+        "write_leakage_probe_results",
+        write_mock,
+    )
+
+    result, output_path = (
+        evaluate_and_write_loss_total_leakage_probes(
+            model,
+            datamodule,
+            tmp_path,
+            evaluation_mode="final_test",
+            run_metadata=run_metadata,
+            run_shuffled_target_controls=False,
+        )
+    )
+
+    assert result is expected_result
+    assert output_path == expected_path
+    assert [call.args[2] for call in extract_mock.call_args_list] == [
+        "train",
+        "valid",
+        "test",
+    ]
+    combine_mock.assert_called_once_with(
+        (train, valid),
+        split="train+valid",
+    )
+    evaluate_mock.assert_called_once_with(
+        development,
+        test,
+        run_shuffled_target_controls=False,
+        evaluation_mode="final_test",
+        run_metadata=run_metadata,
+    )
+    write_mock.assert_called_once_with(
+        expected_result,
+        tmp_path,
+    )

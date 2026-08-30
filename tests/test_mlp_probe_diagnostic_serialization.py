@@ -18,6 +18,10 @@ from src.evaluation.leakage_probe import (
     ShuffledTargetMLPResult,
     four_probe_result_payload,
 )
+from tests.helpers.leakage_probe import (
+    make_probe_evaluation_context,
+    make_probe_run_metadata,
+)
 
 
 def make_candidate(
@@ -128,6 +132,8 @@ def make_result(
         inner_partition=Mock(),
         worst_probe="mlp/z_logits",
         leakage_worst=0.4,
+        evaluation_context=make_probe_evaluation_context(),
+        run_metadata=make_probe_run_metadata(),
     )
 
 

@@ -11,14 +11,60 @@ from .constants import (
 from .errors import ProbeFitError
 from .types import (
     FourProbeEvaluationResult,
-    LeakageProbeRunOutcome,
+    LeakageProbeRunMetadata,
     MLPProbeCandidateFailure,
     MLPProbeCandidateResult,
     MLPProbeSeedSelection,
     NamedLinearProbeResult,
     NamedMLPProbeResult,
+    ProbeEvaluationContext,
+    ProbeSplitProvenance,
     ShuffledTargetMLPResult,
 )
+
+
+def leakage_probe_run_metadata_payload(
+    metadata: LeakageProbeRunMetadata,
+) -> dict[str, Any]:
+    """Serialize the AE seed and seed-independent configuration identity."""
+
+    return {
+        "autoencoder_seed": metadata.autoencoder_seed,
+        "configuration_id": metadata.configuration_id,
+    }
+
+
+def _probe_split_provenance_payload(
+    provenance: ProbeSplitProvenance,
+) -> dict[str, Any]:
+    """Serialize one development or held-out data identity."""
+
+    return {
+        "split": provenance.split,
+        "source_splits": list(provenance.source_splits),
+        "n_events": int(provenance.n_events),
+        "sample_seed": int(provenance.sample_seed),
+        "max_samples": provenance.max_samples,
+        "event_manifest_hash": provenance.event_manifest_hash,
+        "data_cache_id": provenance.data_cache_id,
+        "data_cache_path": provenance.data_cache_path,
+    }
+
+
+def probe_evaluation_context_payload(
+    context: ProbeEvaluationContext,
+) -> dict[str, Any]:
+    """Serialize the probe split design and provenance."""
+
+    return {
+        "mode": context.mode,
+        "development_data": _probe_split_provenance_payload(
+            context.development_data
+        ),
+        "held_out_data": _probe_split_provenance_payload(
+            context.held_out_data
+        ),
+    }
 
 def _successful_mlp_candidate_payload(
     candidate: MLPProbeCandidateResult,
@@ -174,8 +220,8 @@ def _probe_result_payload(
         "r2_raw": float(outer.outer_r2_raw),
         "r2_clipped": float(outer.outer_r2_clipped),
         "mae_gev": float(outer.outer_mae_gev),
-        "n_train": int(outer.n_train),
-        "n_validation": int(outer.n_validation),
+        "n_development": int(outer.n_train),
+        "n_held_out": int(outer.n_validation),
     }
 
     if isinstance(probe, NamedMLPProbeResult):
@@ -209,6 +255,12 @@ def four_probe_result_payload(
         "probe_valid": True,
         "rejection_reason": None,
         "rejection_message": None,
+        "run": leakage_probe_run_metadata_payload(
+            result.run_metadata
+        ),
+        "evaluation": probe_evaluation_context_payload(
+            result.evaluation_context
+        ),
         "worst_probe": result.worst_probe,
         "leakage_worst": float(result.leakage_worst),
         "probes": {

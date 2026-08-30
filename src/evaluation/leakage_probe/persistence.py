@@ -8,7 +8,10 @@ from typing import Any
 
 import torch
 
-from .constants import LEAKAGE_PROBE_PROTOCOL_VERSION
+from .constants import (
+    LEAKAGE_PROBE_EVALUATION_MODES,
+    LEAKAGE_PROBE_PROTOCOL_VERSION,
+)
 from .errors import (
     ProbeExtractionError,
     ProbeFitError,
@@ -17,18 +20,41 @@ from .errors import (
 )
 from .evaluation import evaluate_four_leakage_probes
 from .extraction import extract_probe_split
-from .serialization import four_probe_result_payload
-from .types import FourProbeEvaluationResult, LeakageProbeRunOutcome
+from .provenance import concatenate_probe_representation_sets
+from .serialization import (
+    four_probe_result_payload,
+    leakage_probe_run_metadata_payload,
+)
+from .types import (
+    FourProbeEvaluationResult,
+    LeakageProbeRunMetadata,
+    LeakageProbeRunOutcome,
+)
 
 def leakage_probe_output_path(
     run_folder: str | Path,
+    *,
+    evaluation_mode: str = "validation",
 ) -> Path:
     """Return the fixed leakage artifact path."""
+
+    stage_folders = {
+        "validation": "val",
+        "final_test": "test",
+    }
+    try:
+        stage_folder = stage_folders[evaluation_mode]
+    except KeyError as error:
+        raise ValueError(
+            "Unknown leakage-probe evaluation mode "
+            f"{evaluation_mode!r}; expected one of "
+            f"{list(LEAKAGE_PROBE_EVALUATION_MODES)}."
+        ) from error
 
     return (
         Path(run_folder)
         / "plots"
-        / "val"
+        / stage_folder
         / "loss_total"
         / "probes"
         / "leakage_probes.json"
@@ -42,7 +68,8 @@ def write_leakage_probe_results(
     """Write all four probe results below one checkpoint run."""
 
     output_path = leakage_probe_output_path(
-        run_folder
+        run_folder,
+        evaluation_mode=result.evaluation_context.mode,
     )
     output_path.parent.mkdir(
         parents=True,
@@ -72,16 +99,26 @@ def write_invalid_leakage_probe_result(
         | ProbePartitionError
         | ProbeFitError
     ),
+    *,
+    evaluation_mode: str = "validation",
+    run_metadata: LeakageProbeRunMetadata | None = None,
 ) -> Path:
     """Persist one expected protocol failure without a fake score."""
 
     output_path = leakage_probe_output_path(
-        run_folder
+        run_folder,
+        evaluation_mode=evaluation_mode,
     )
     output_path.parent.mkdir(
         parents=True,
         exist_ok=True,
     )
+
+    if run_metadata is None:
+        run_metadata = LeakageProbeRunMetadata(
+            autoencoder_seed=None,
+            configuration_id=None,
+        )
 
     if isinstance(
         error,
@@ -107,6 +144,14 @@ def write_invalid_leakage_probe_result(
             "probe_valid": False,
             "rejection_reason": error.reason,
             "rejection_message": str(error),
+            "run": leakage_probe_run_metadata_payload(
+                run_metadata
+            ),
+            "evaluation": {
+                "mode": evaluation_mode,
+                "development_data": None,
+                "held_out_data": None,
+            },
             "worst_probe": None,
             "leakage_worst": None,
             "probes": {},
@@ -133,11 +178,14 @@ def evaluate_and_write_loss_total_leakage_probes(
     *,
     device: torch.device | str = "cpu",
     run_shuffled_target_controls: bool = True,
+    evaluation_mode: str = "validation",
+    run_metadata: LeakageProbeRunMetadata | None = None,
 ) -> tuple[FourProbeEvaluationResult, Path]:
     """Evaluate the frozen loss-total checkpoint and persist four probes.
 
-    The checkpoint is loaded explicitly and strictly. The datamodule's
-    probe-specific loader keeps only one full split resident at a time.
+    The checkpoint is loaded explicitly and strictly. Raw datamodule splits
+    are loaded and released one at a time; final-test mode then combines the
+    extracted train and validation representations in CPU memory.
     """
 
     run_folder = Path(run_folder)
@@ -182,23 +230,69 @@ def evaluate_and_write_loss_total_leakage_probes(
         del state_dict
         del checkpoint
 
-    train_representations = extract_probe_split(
-        model,
-        datamodule,
-        "train",
-        device=device,
-    )
-    validation_representations = extract_probe_split(
-        model,
-        datamodule,
-        "valid",
-        device=device,
-    )
+    if run_metadata is None:
+        run_metadata = LeakageProbeRunMetadata(
+            autoencoder_seed=None,
+            configuration_id=None,
+        )
+
+    if evaluation_mode == "validation":
+        development_representations = extract_probe_split(
+            model,
+            datamodule,
+            "train",
+            device=device,
+        )
+        held_out_representations = extract_probe_split(
+            model,
+            datamodule,
+            "valid",
+            device=device,
+        )
+    elif evaluation_mode == "final_test":
+        train_representations = extract_probe_split(
+            model,
+            datamodule,
+            "train",
+            device=device,
+        )
+        validation_representations = extract_probe_split(
+            model,
+            datamodule,
+            "valid",
+            device=device,
+        )
+        development_representations = (
+            concatenate_probe_representation_sets(
+                (
+                    train_representations,
+                    validation_representations,
+                ),
+                split="train+valid",
+            )
+        )
+        del train_representations
+        del validation_representations
+        held_out_representations = extract_probe_split(
+            model,
+            datamodule,
+            "test",
+            device=device,
+        )
+    else:
+        raise ProbeExtractionError(
+            "invalid_probe_evaluation_mode",
+            "Unknown leakage-probe evaluation mode "
+            f"{evaluation_mode!r}; expected one of "
+            f"{list(LEAKAGE_PROBE_EVALUATION_MODES)}.",
+        )
 
     result = evaluate_four_leakage_probes(
-        train_representations,
-        validation_representations,
+        development_representations,
+        held_out_representations,
         run_shuffled_target_controls=run_shuffled_target_controls,
+        evaluation_mode=evaluation_mode,
+        run_metadata=run_metadata,
     )
     output_path = write_leakage_probe_results(
         result,
@@ -215,8 +309,16 @@ def evaluate_and_record_loss_total_leakage_probes(
     *,
     device: torch.device | str = "cpu",
     run_shuffled_target_controls: bool = True,
+    evaluation_mode: str = "validation",
+    run_metadata: LeakageProbeRunMetadata | None = None,
 ) -> LeakageProbeRunOutcome:
     """Evaluate leakage and record expected protocol failures."""
+
+    if run_metadata is None:
+        run_metadata = LeakageProbeRunMetadata(
+            autoencoder_seed=None,
+            configuration_id=None,
+        )
 
     try:
         result, output_path = (
@@ -226,6 +328,8 @@ def evaluate_and_record_loss_total_leakage_probes(
                 run_folder,
                 device=device,
                 run_shuffled_target_controls=run_shuffled_target_controls,
+                evaluation_mode=evaluation_mode,
+                run_metadata=run_metadata,
             )
         )
     except (
@@ -236,6 +340,8 @@ def evaluate_and_record_loss_total_leakage_probes(
         output_path = write_invalid_leakage_probe_result(
             run_folder,
             error,
+            evaluation_mode=evaluation_mode,
+            run_metadata=run_metadata,
         )
 
         diagnostic_result = (
@@ -253,6 +359,8 @@ def evaluate_and_record_loss_total_leakage_probes(
             output_path=output_path,
             rejection_reason=error.reason,
             rejection_message=str(error),
+            evaluation_mode=evaluation_mode,
+            run_metadata=run_metadata,
             diagnostic_result=diagnostic_result,
         )
 
@@ -262,6 +370,8 @@ def evaluate_and_record_loss_total_leakage_probes(
         output_path=output_path,
         rejection_reason=None,
         rejection_message=None,
+        evaluation_mode=evaluation_mode,
+        run_metadata=run_metadata,
     )
 
 
@@ -280,6 +390,15 @@ def log_leakage_probe_outcome_metadata(
             outcome.rejection_reason
             if outcome.rejection_reason is not None
             else "none"
+        ),
+        "leakage_probe_evaluation_mode": (
+            outcome.evaluation_mode
+        ),
+        "autoencoder_seed": (
+            outcome.run_metadata.autoencoder_seed
+        ),
+        "leakage_probe_configuration_id": (
+            outcome.run_metadata.configuration_id
         ),
     }
 

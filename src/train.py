@@ -31,6 +31,9 @@ from src.evaluation.leakage_probe.persistence import (
     evaluate_and_record_loss_total_leakage_probes,
     log_leakage_probe_outcome_metadata,
 )
+from src.evaluation.leakage_probe.provenance import (
+    make_leakage_probe_run_metadata,
+)
 
 from src.evaluation.leakage_probe.serialization import (
     log_four_probe_metrics,
@@ -147,10 +150,21 @@ def train(cfg: DictConfig) -> Tuple[Dict[str, Any], Dict[str, Any]]:
         else None
     )
     if leakage_probe_cfg and leakage_probe_cfg.get("enabled", False):
+        leakage_probe_evaluation_mode = str(
+            leakage_probe_cfg.get("mode", "validation")
+        )
+        leakage_probe_run_metadata = (
+            make_leakage_probe_run_metadata(
+                autoencoder_seed=cfg.get("seed"),
+                algorithm_config=cfg.algorithm,
+            )
+        )
         log.info(
             Back.MAGENTA
             + 8 * "-"
-            + "STARTING VALIDATION LEAKAGE PROBES"
+            + "STARTING "
+            + leakage_probe_evaluation_mode.upper()
+            + " LEAKAGE PROBES"
             + 8 * "-"
         )
         leakage_probe_outcome = (
@@ -165,6 +179,8 @@ def train(cfg: DictConfig) -> Tuple[Dict[str, Any], Dict[str, Any]]:
                         False,
                     )
                 ),
+                evaluation_mode=leakage_probe_evaluation_mode,
+                run_metadata=leakage_probe_run_metadata,
             )
         )
 

@@ -8,6 +8,7 @@ import src.evaluation.leakage_probe.persistence as leakage_probe
 from src.evaluation.leakage_probe import (
     FourProbeEvaluationResult,
     LEAKAGE_PROBE_PROTOCOL_VERSION,
+    LeakageProbeRunMetadata,
     LeakageProbeRunOutcome,
     ProbeExtractionError,
     ProbeFitError,
@@ -15,6 +16,13 @@ from src.evaluation.leakage_probe import (
     evaluate_and_record_loss_total_leakage_probes,
     log_leakage_probe_outcome_metadata,
 )
+
+
+def empty_run_metadata() -> LeakageProbeRunMetadata:
+    return LeakageProbeRunMetadata(
+        autoencoder_seed=None,
+        configuration_id=None,
+    )
 
 
 def expected_output_path(run_folder: Path) -> Path:
@@ -97,6 +105,15 @@ def test_expected_probe_failure_is_persisted_as_invalid(
         "rejection_message": (
             "Synthetic expected probe failure."
         ),
+        "run": {
+            "autoencoder_seed": None,
+            "configuration_id": None,
+        },
+        "evaluation": {
+            "mode": "validation",
+            "development_data": None,
+            "held_out_data": None,
+        },
         "worst_probe": None,
         "leakage_worst": None,
         "probes": {},
@@ -142,6 +159,8 @@ def test_successful_probe_evaluation_returns_valid_outcome(
         output_path=output_path,
         rejection_reason=None,
         rejection_message=None,
+        evaluation_mode="validation",
+        run_metadata=empty_run_metadata(),
     )
 
     invalid_writer.assert_not_called()
@@ -185,6 +204,8 @@ def test_invalid_outcome_metadata_is_logged_without_leakage(
         output_path=expected_output_path(tmp_path),
         rejection_reason="constant_target",
         rejection_message="Target is constant.",
+        evaluation_mode="validation",
+        run_metadata=empty_run_metadata(),
     )
 
     metadata = log_leakage_probe_outcome_metadata(
@@ -198,6 +219,9 @@ def test_invalid_outcome_metadata_is_logged_without_leakage(
         ),
         "probe_valid": False,
         "probe_rejection_reason": "constant_target",
+        "leakage_probe_evaluation_mode": "validation",
+        "autoencoder_seed": None,
+        "leakage_probe_configuration_id": None,
     }
 
     logger.log_hyperparams.assert_called_once_with(metadata)
@@ -216,6 +240,8 @@ def test_valid_outcome_metadata_is_logged(
         output_path=expected_output_path(tmp_path),
         rejection_reason=None,
         rejection_message=None,
+        evaluation_mode="validation",
+        run_metadata=empty_run_metadata(),
     )
 
     metadata = log_leakage_probe_outcome_metadata(
@@ -229,6 +255,9 @@ def test_valid_outcome_metadata_is_logged(
         ),
         "probe_valid": True,
         "probe_rejection_reason": "none",
+        "leakage_probe_evaluation_mode": "validation",
+        "autoencoder_seed": None,
+        "leakage_probe_configuration_id": None,
     }
 
     logger.log_hyperparams.assert_called_once_with(metadata)

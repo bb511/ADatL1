@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from pathlib import Path
+
 import numpy as np
 import pytest
 import torch
@@ -70,6 +72,9 @@ class FakeProbeDataModule:
     ) -> None:
         self._batches = list(batches)
         self.normalizer = FakeNormalizer()
+        self.main_cache_folder = Path(
+            "/synthetic/probe-cache"
+        )
 
         if sensitive_in_model_input:
             self.object_feature_map = {
@@ -272,6 +277,11 @@ def test_extract_probe_split_collects_contract_arrays() -> None:
     assert result.sample_seed == 12345
     assert result.max_samples is None
     assert len(result.manifest_hash) == 64
+    assert len(result.data_cache_id) == 64
+    assert result.data_cache_path.endswith(
+        "/synthetic/probe-cache"
+    )
+    assert result.source_splits == ("train",)
 
     expected_x = torch.cat(
         [batch[0] for batch in batches],
@@ -340,6 +350,56 @@ def test_manifest_hash_is_reproducible_for_same_event_positions() -> None:
 
     assert first.n_events == second.n_events
     assert first.manifest_hash == second.manifest_hash
+
+
+def test_manifest_hash_changes_when_same_size_event_content_changes() -> None:
+    first = extract_probe_split(
+        RecordingProbeModel(),
+        FakeProbeDataModule(
+            [
+                make_batch(offset=0.0),
+                make_batch(offset=2.0),
+            ]
+        ),
+        "valid",
+    )
+    changed = extract_probe_split(
+        RecordingProbeModel(),
+        FakeProbeDataModule(
+            [
+                make_batch(offset=0.0),
+                make_batch(offset=3.0),
+            ]
+        ),
+        "valid",
+    )
+
+    assert first.n_events == changed.n_events
+    assert first.manifest_hash != changed.manifest_hash
+
+
+def test_manifest_hash_does_not_depend_on_batch_boundaries() -> None:
+    first_batch = make_batch(offset=0.0)
+    second_batch = make_batch(offset=2.0)
+    combined_batch = tuple(
+        torch.cat((first, second), dim=0)
+        for first, second in zip(first_batch, second_batch)
+    )
+
+    split_batches = extract_probe_split(
+        RecordingProbeModel(),
+        FakeProbeDataModule(
+            [first_batch, second_batch]
+        ),
+        "valid",
+    )
+    one_batch = extract_probe_split(
+        RecordingProbeModel(),
+        FakeProbeDataModule([combined_batch]),
+        "valid",
+    )
+
+    assert split_batches.manifest_hash == one_batch.manifest_hash
 
 
 @pytest.mark.parametrize(

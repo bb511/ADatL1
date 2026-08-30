@@ -31,7 +31,9 @@ trainer:
   min_epochs: 1
   max_epochs: 200
 
-test: true
+# Keep test untouched during validation-Pareto sweeps. For the one final selected
+# configuration, override both `test=true` and the leakage-probe mode below.
+test: false
 
 # Metrics to report to optuna for every checkpoint.
 optimized_metric_config:
@@ -164,9 +166,14 @@ callbacks:
 
 evaluation:
   # Run the frozen post-training probes once on loss_total.ckpt. The evaluator
-  # writes plots/val/loss_total/probes/leakage_probes.json below this run.
+  # writes below plots/{val,test}/loss_total/probes according to the mode.
   leakage_probes:
     enabled: true
+    # validation: fit probes on train and score valid during model selection.
+    # final_test: after selecting one configuration, fit on train+valid and score
+    # untouched test. Use only for the final report, for example:
+    # test=true evaluation.leakage_probes.mode=final_test
+    mode: validation
     # The shuffled-target controls add eight MLP fits per AE run. Keep them off
     # during sweeps and enable them for audit/final runs with:
     # evaluation.leakage_probes.run_shuffled_target_controls=true

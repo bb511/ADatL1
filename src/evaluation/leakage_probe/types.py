@@ -12,7 +12,7 @@ from sklearn.preprocessing import StandardScaler
 
 @dataclass(frozen=True)
 class ProbeRepresentationSet:
-    """Representations and physical sensitive targets for one AE split."""
+    """Representations and physical targets for one probe data pool."""
 
     split: str
     latent_logits: np.ndarray
@@ -23,11 +23,45 @@ class ProbeRepresentationSet:
     sample_seed: int
     max_samples: int | None
     manifest_hash: str
+    data_cache_id: str
+    data_cache_path: str
+    source_splits: tuple[str, ...]
+
+
+@dataclass(frozen=True)
+class ProbeSplitProvenance:
+    """Lightweight identity of one probe data pool."""
+
+    split: str
+    source_splits: tuple[str, ...]
+    n_events: int
+    sample_seed: int
+    max_samples: int | None
+    event_manifest_hash: str
+    data_cache_id: str
+    data_cache_path: str
+
+
+@dataclass(frozen=True)
+class ProbeEvaluationContext:
+    """Development and held-out data used by one probe evaluation."""
+
+    mode: str
+    development_data: ProbeSplitProvenance
+    held_out_data: ProbeSplitProvenance
+
+
+@dataclass(frozen=True)
+class LeakageProbeRunMetadata:
+    """Autoencoder-run identity required for paired-seed aggregation."""
+
+    autoencoder_seed: int | None
+    configuration_id: str | None
 
 
 @dataclass(frozen=True)
 class ProbeInnerPartition:
-    """Indices dividing AE training events into probe fit and validation."""
+    """Indices dividing development events into probe fit and validation."""
 
     fit_indices: np.ndarray
     validation_indices: np.ndarray
@@ -82,7 +116,7 @@ class MLPProbeSeedSelection:
 
 @dataclass(frozen=True)
 class MLPProbeOuterResult:
-    """Fresh selected-seed MLP evaluated on outer validation."""
+    """Fresh selected-seed MLP evaluated on held-out data."""
 
     selected_seed: int
     outer_r2_raw: float
@@ -131,7 +165,7 @@ class ShuffledTargetMLPResult:
 
 @dataclass(frozen=True)
 class LinearProbeOuterResult:
-    """Linear regression evaluated on outer validation."""
+    """Linear regression evaluated on held-out data."""
 
     outer_r2_raw: float
     outer_r2_clipped: float
@@ -171,6 +205,8 @@ class FourProbeEvaluationResult:
     inner_partition: ProbeInnerPartition
     worst_probe: str
     leakage_worst: float
+    evaluation_context: ProbeEvaluationContext
+    run_metadata: LeakageProbeRunMetadata
 
 
 @dataclass(frozen=True)
@@ -182,4 +218,6 @@ class LeakageProbeRunOutcome:
     output_path: Path
     rejection_reason: str | None
     rejection_message: str | None
+    evaluation_mode: str
+    run_metadata: LeakageProbeRunMetadata
     diagnostic_result: FourProbeEvaluationResult | None = None

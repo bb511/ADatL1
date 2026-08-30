@@ -1,6 +1,14 @@
 """Public API for the leakage-probe evaluation package."""
 
+from .aggregation import (
+    ProbeAggregationError,
+    aggregate_paired_seed_leakage,
+    write_paired_seed_leakage_aggregate,
+)
+
 from .constants import (
+    LEAKAGE_PROBE_EVALUATION_MODES,
+    LEAKAGE_PROBE_INVALID_RUN_POLICY,
     LEAKAGE_PROBE_PROTOCOL_VERSION,
     MLP_PROBE_CONFIG,
     PRIMARY_PROBE_REPRESENTATIONS,
@@ -39,6 +47,13 @@ from .mlp import (
     select_mlp_probe_seed,
 )
 from .partition import make_probe_inner_partition
+from .provenance import (
+    concatenate_probe_representation_sets,
+    leakage_probe_configuration_id,
+    make_leakage_probe_run_metadata,
+    make_probe_evaluation_context,
+    probe_split_provenance,
+)
 from .persistence import (
     evaluate_and_record_loss_total_leakage_probes,
     evaluate_and_write_loss_total_leakage_probes,
@@ -58,6 +73,7 @@ from .serialization import (
 from .types import (
     FourProbeEvaluationResult,
     LeakageProbeRunOutcome,
+    LeakageProbeRunMetadata,
     LinearProbeOuterResult,
     MLPProbeCandidateFailure,
     MLPProbeCandidateResult,
@@ -68,16 +84,23 @@ from .types import (
     PrimaryLinearProbeResult,
     PrimaryMLPLeakageResult,
     ProbeInnerPartition,
+    ProbeEvaluationContext,
     ProbeRepresentationSet,
+    ProbeSplitProvenance,
     ShuffledTargetMLPResult,
     ShuffledTrainingTarget,
 )
 
 __all__ = [
     "AllMLPProbeCandidatesFailed",
+    "ProbeAggregationError",
+    "aggregate_paired_seed_leakage",
     "FourProbeEvaluationResult",
     "LEAKAGE_PROBE_PROTOCOL_VERSION",
+    "LEAKAGE_PROBE_EVALUATION_MODES",
+    "LEAKAGE_PROBE_INVALID_RUN_POLICY",
     "LeakageProbeRunOutcome",
+    "LeakageProbeRunMetadata",
     "LinearProbeOuterResult",
     "log_shuffled_target_metrics",
     "MLPProbeCandidateFailure",
@@ -96,10 +119,12 @@ __all__ = [
     "PrimaryLinearProbeResult",
     "PrimaryMLPLeakageResult",
     "ProbeExtractionError",
+    "ProbeEvaluationContext",
     "ProbeFitError",
     "ProbeInnerPartition",
     "ProbePartitionError",
     "ProbeRepresentationSet",
+    "ProbeSplitProvenance",
     "shuffled_target_metric_values",
     "ShuffledTargetMLPResult",
     "ShuffledTrainingTarget",
@@ -112,6 +137,7 @@ __all__ = [
     "evaluate_primary_mlp_probes",
     "evaluate_shuffled_target_mlp_controls",
     "extract_probe_split",
+    "concatenate_probe_representation_sets",
     "fit_linear_probe",
     "fit_mlp_probe_candidate",
     "four_probe_metric_values",
@@ -119,11 +145,16 @@ __all__ = [
     "leakage_probe_output_path",
     "log_four_probe_metrics",
     "log_leakage_probe_outcome_metadata",
+    "leakage_probe_configuration_id",
+    "make_leakage_probe_run_metadata",
+    "make_probe_evaluation_context",
     "make_probe_inner_partition",
+    "probe_split_provenance",
     "make_shuffled_training_target",
     "refit_selected_mlp_probe",
     "select_mlp_probe_seed",
     "write_invalid_leakage_probe_result",
+    "write_paired_seed_leakage_aggregate",
     "write_leakage_probe_results",
     "SHUFFLED_TARGET_R2_CLIPPED_MAX",
     "ShuffledTargetGuardrailError",

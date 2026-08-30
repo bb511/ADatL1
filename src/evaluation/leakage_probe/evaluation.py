@@ -3,36 +3,54 @@
 from .errors import ProbeFitError
 from .linear import evaluate_primary_linear_probes
 from .mlp import evaluate_primary_mlp_probes
-from .types import FourProbeEvaluationResult, ProbeRepresentationSet
+from .provenance import make_probe_evaluation_context
+from .types import (
+    FourProbeEvaluationResult,
+    LeakageProbeRunMetadata,
+    ProbeRepresentationSet,
+)
 from .diagnostics import (
     enforce_shuffled_target_guardrail,
     evaluate_shuffled_target_mlp_controls,
 )
 
 def evaluate_four_leakage_probes(
-    train_representations: ProbeRepresentationSet,
-    validation_representations: ProbeRepresentationSet,
+    development_representations: ProbeRepresentationSet,
+    held_out_representations: ProbeRepresentationSet,
     *,
     run_shuffled_target_controls: bool = True,
+    evaluation_mode: str = "validation",
+    run_metadata: LeakageProbeRunMetadata | None = None,
 ) -> FourProbeEvaluationResult:
     """Evaluate four probes and optional shuffled-target controls."""
 
+    evaluation_context = make_probe_evaluation_context(
+        development_representations,
+        held_out_representations,
+        mode=evaluation_mode,
+    )
+    if run_metadata is None:
+        run_metadata = LeakageProbeRunMetadata(
+            autoencoder_seed=None,
+            configuration_id=None,
+        )
+
     mlp_result = evaluate_primary_mlp_probes(
-        train_representations,
-        validation_representations,
+        development_representations,
+        held_out_representations,
     )
 
     linear_result = evaluate_primary_linear_probes(
-        train_representations,
-        validation_representations,
+        development_representations,
+        held_out_representations,
     )
 
     shuffled_target_controls = None
     if run_shuffled_target_controls:
         shuffled_target_controls = (
             evaluate_shuffled_target_mlp_controls(
-                train_representations,
-                validation_representations,
+                development_representations,
+                held_out_representations,
             )
         )
 
@@ -102,6 +120,8 @@ def evaluate_four_leakage_probes(
         inner_partition=mlp_result.inner_partition,
         worst_probe=worst_probe,
         leakage_worst=float(leakage_worst),
+        evaluation_context=evaluation_context,
+        run_metadata=run_metadata,
     )
     if shuffled_target_controls is not None:
         enforce_shuffled_target_guardrail(result)

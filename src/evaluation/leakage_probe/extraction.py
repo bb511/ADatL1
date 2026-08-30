@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import hashlib
+import json
+from pathlib import Path
 from typing import Any
 
 import numpy as np
@@ -73,6 +75,80 @@ def _validate_finite(name: str, values: np.ndarray) -> None:
         )
 
 
+def _probe_cache_identity(
+    datamodule: Any,
+    control_object_feature_map: dict[str, Any],
+) -> tuple[str, str]:
+    """Return a stable identity for the concrete mlready cache."""
+
+    cache_folder = getattr(
+        datamodule,
+        "main_cache_folder",
+        None,
+    )
+    if cache_folder is None:
+        raise ProbeExtractionError(
+            "probe_cache_identity_missing",
+            "The datamodule does not expose main_cache_folder.",
+        )
+
+    cache_path = str(
+        Path(cache_folder).expanduser().resolve()
+    )
+    descriptor = {
+        "cache_path": cache_path,
+        "control_object_feature_map": (
+            control_object_feature_map
+        ),
+    }
+    canonical = json.dumps(
+        descriptor,
+        sort_keys=True,
+        separators=(",", ":"),
+    ).encode("utf-8")
+    return hashlib.sha256(canonical).hexdigest(), cache_path
+
+
+def _update_event_manifest(
+    manifests: dict[str, Any],
+    layouts: dict[str, tuple[Any, ...]],
+    name: str,
+    tensor: torch.Tensor | None,
+) -> None:
+    """Hash one cached tensor component independently of batching."""
+
+    manifest = manifests.setdefault(name, hashlib.sha256())
+    if tensor is None:
+        layout = ("none",)
+        if name in layouts and layouts[name] != layout:
+            raise ProbeExtractionError(
+                "probe_event_manifest_layout_changed",
+                f"Event identity component {name!r} changed layout.",
+            )
+        if name not in layouts:
+            layouts[name] = layout
+            manifest.update(b"none")
+        return
+
+    values = tensor.detach().cpu().contiguous().numpy()
+    layout = (
+        str(values.dtype),
+        *values.shape[1:],
+    )
+    if name in layouts and layouts[name] != layout:
+        raise ProbeExtractionError(
+            "probe_event_manifest_layout_changed",
+            f"Event identity component {name!r} changed layout.",
+        )
+    if name not in layouts:
+        layouts[name] = layout
+        manifest.update(str(values.dtype).encode("ascii"))
+        manifest.update(
+            np.asarray(values.shape[1:], dtype="<i8").tobytes()
+        )
+    manifest.update(values.tobytes(order="C"))
+
+
 def extract_probe_split(
     model,
     datamodule,
@@ -122,6 +198,11 @@ def extract_probe_split(
         model.object_feature_map = object_feature_map
         model.control_object_feature_map = control_object_feature_map
 
+        data_cache_id, data_cache_path = _probe_cache_identity(
+            datamodule,
+            control_object_feature_map,
+        )
+
         try:
             model._assert_sensitive_not_in_model_input()
         except RuntimeError as error:
@@ -140,16 +221,51 @@ def extract_probe_split(
         latent_sample_parts: list[np.ndarray] = []
         reconstruction_parts: list[np.ndarray] = []
         target_parts: list[np.ndarray] = []
+        event_component_manifests: dict[str, Any] = {}
+        event_component_layouts: dict[
+            str,
+            tuple[Any, ...],
+        ] = {}
 
         first_batch = True
 
         with torch.inference_mode():
             for batch in datamodule.probe_dataloader():
+                identity_batch_view = unpack_batch(batch)
                 device_batch = _move_to_device(
                     batch,
                     resolved_device,
                 )
                 batch_view = unpack_batch(device_batch)
+
+                identity_data = (
+                    identity_batch_view.control_x
+                    if identity_batch_view.control_x is not None
+                    else identity_batch_view.x
+                )
+                identity_mask = (
+                    identity_batch_view.control_mask
+                    if identity_batch_view.control_mask is not None
+                    else identity_batch_view.mask
+                )
+                _update_event_manifest(
+                    event_component_manifests,
+                    event_component_layouts,
+                    "cached_data",
+                    identity_data,
+                )
+                _update_event_manifest(
+                    event_component_manifests,
+                    event_component_layouts,
+                    "cached_mask",
+                    identity_mask,
+                )
+                _update_event_manifest(
+                    event_component_manifests,
+                    event_component_layouts,
+                    "l1bit",
+                    identity_batch_view.l1bit,
+                )
 
                 # This is the exact input layout used in AE.model_step().
                 model_input = torch.flatten(
@@ -316,14 +432,24 @@ def extract_probe_split(
             )
 
         n_events = int(target_array.shape[0])
-
-        event_positions = np.arange(
-            n_events,
-            dtype="<i8",
+        event_manifest = hashlib.sha256()
+        event_manifest.update(split.encode("utf-8"))
+        event_manifest.update(b"\0")
+        event_manifest.update(
+            np.asarray([n_events], dtype="<i8").tobytes()
         )
-        manifest_hash = hashlib.sha256(
-            event_positions.tobytes()
-        ).hexdigest()
+        for component_name in sorted(
+            event_component_manifests
+        ):
+            event_manifest.update(
+                component_name.encode("utf-8")
+            )
+            event_manifest.update(b"\0")
+            event_manifest.update(
+                event_component_manifests[
+                    component_name
+                ].digest()
+            )
 
         return ProbeRepresentationSet(
             split=split,
@@ -334,9 +460,11 @@ def extract_probe_split(
             n_events=n_events,
             sample_seed=12345,
             max_samples=None,
-            manifest_hash=manifest_hash,
+            manifest_hash=event_manifest.hexdigest(),
+            data_cache_id=data_cache_id,
+            data_cache_path=data_cache_path,
+            source_splits=(split,),
         )
 
     finally:
         datamodule.release_probe_split()
-

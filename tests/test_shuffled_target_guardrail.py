@@ -16,6 +16,10 @@ from src.evaluation.leakage_probe import (
     enforce_shuffled_target_guardrail,
     shuffled_target_guardrail_failures,
 )
+from tests.helpers.leakage_probe import (
+    make_probe_evaluation_context,
+    make_probe_run_metadata,
+)
 
 
 def make_probe(
@@ -85,6 +89,8 @@ def make_result(
         inner_partition=Mock(),
         worst_probe="linear/reconstruction",
         leakage_worst=0.4,
+        evaluation_context=make_probe_evaluation_context(),
+        run_metadata=make_probe_run_metadata(),
     )
 
 

@@ -16,6 +16,10 @@ from src.evaluation.leakage_probe import (
     log_shuffled_target_metrics,
     shuffled_target_metric_values,
 )
+from tests.helpers.leakage_probe import (
+    make_probe_evaluation_context,
+    make_probe_run_metadata,
+)
 
 
 def make_probe(
@@ -46,6 +50,22 @@ def make_probe(
             feature_scaler=object(),
             target_scaler=object(),
         ),
+    )
+
+
+def make_representation_identity(
+    split: str,
+    n_events: int,
+) -> SimpleNamespace:
+    return SimpleNamespace(
+        split=split,
+        source_splits=(split,),
+        n_events=n_events,
+        sample_seed=12345,
+        max_samples=None,
+        manifest_hash=f"{split}-manifest",
+        data_cache_id="test-cache",
+        data_cache_path="/test/cache",
     )
 
 
@@ -92,6 +112,8 @@ def make_complete_result() -> FourProbeEvaluationResult:
         inner_partition=Mock(),
         worst_probe="linear/reconstruction",
         leakage_worst=0.4,
+        evaluation_context=make_probe_evaluation_context(),
+        run_metadata=make_probe_run_metadata(),
     )
 
 
@@ -146,8 +168,8 @@ def test_four_probe_evaluation_rejects_failed_shuffled_guardrail(
         "evaluate_shuffled_target_mlp_controls",
         shuffled_evaluator,
     )
-    train = Mock()
-    validation = Mock()
+    train = make_representation_identity("train", 100)
+    validation = make_representation_identity("valid", 40)
 
     with pytest.raises(
         ShuffledTargetGuardrailError
@@ -274,9 +296,12 @@ def test_shuffled_controls_can_be_disabled(
         shuffled_evaluator,
     )
 
+    development = make_representation_identity("train", 100)
+    held_out = make_representation_identity("valid", 40)
+
     result = evaluate_four_leakage_probes(
-        Mock(),
-        Mock(),
+        development,
+        held_out,
         run_shuffled_target_controls=False,
     )
 

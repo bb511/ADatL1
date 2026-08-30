@@ -58,6 +58,9 @@ def make_representation_set(
         sample_seed=12345,
         max_samples=None,
         manifest_hash=f"{split}-manifest",
+        data_cache_id="test-cache",
+        data_cache_path="/test/cache",
+        source_splits=(split,),
     )
 
 

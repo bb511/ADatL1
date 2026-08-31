@@ -126,44 +126,66 @@ def train(cfg: DictConfig) -> Tuple[Dict[str, Any], Dict[str, Any]]:
 
     post_training_metrics: Dict[str, float] = {}
 
-    if train_enabled:
-        log.info("Releasing fit dataloaders before run validation...")
-        _release_fit_dataloaders(trainer, datamodule)
-
-    # Get validation report, and also set hp optimisation values.
-    log.info(Fore.CYAN + "Instantiating evaluator...")
-    evaluator = _get_evaluator(cfg, datamodule, logger)
-    run_ckpts = Path(cfg.paths.checkpoints_dir) / cfg.experiment_name / cfg.run_name
-
-    log.info(Back.MAGENTA + 8 * "-" + "STARTING RUN VALIDATION" + 8 * "-")
-    datamodule.setup("validate")
-    val_loader = datamodule.val_dataloader()
-    try:
-        evaluator.evaluate_run(
-            run_ckpts, algorithm, val_loader, "val", set_optimized_metric=True
-        )
-    finally:
-        # The physics datamodule keeps every split in RAM. Release validation before
-        # setup("test") loads another full copy of the model/control tensors.
-        evaluator.release_dataloaders()
-        del val_loader
-        datamodule.teardown("validate")
-        gc.collect()
-
     evaluation_cfg = cfg.get("evaluation")
     leakage_probe_cfg = (
         evaluation_cfg.get("leakage_probes")
         if evaluation_cfg is not None
         else None
     )
+    smoke_test_cfg = (
+        leakage_probe_cfg.get("smoke_test")
+        if leakage_probe_cfg is not None
+        else None
+    )
+    smoke_test_enabled = bool(
+        smoke_test_cfg is not None
+        and smoke_test_cfg.get("enabled", False)
+    )
+    checkpoint_only_smoke = _is_checkpoint_only_smoke_run(
+        train_enabled=train_enabled,
+        test_enabled=bool(cfg.get("test")),
+        probe_enabled=bool(
+            leakage_probe_cfg is not None
+            and leakage_probe_cfg.get("enabled", False)
+        ),
+        smoke_test_enabled=smoke_test_enabled,
+    )
+
+    if train_enabled:
+        log.info("Releasing fit dataloaders before run validation...")
+        _release_fit_dataloaders(trainer, datamodule)
+
+    run_ckpts = Path(cfg.paths.checkpoints_dir) / cfg.experiment_name / cfg.run_name
+    evaluator = None
+
+    if checkpoint_only_smoke:
+        log.info(
+            "Checkpoint-only smoke run: skipping the uncapped standard "
+            "validation evaluator and running capped leakage probes directly."
+        )
+    else:
+        # Get validation report, and also set hp optimisation values.
+        log.info(Fore.CYAN + "Instantiating evaluator...")
+        evaluator = _get_evaluator(cfg, datamodule, logger)
+
+        log.info(Back.MAGENTA + 8 * "-" + "STARTING RUN VALIDATION" + 8 * "-")
+        datamodule.setup("validate")
+        val_loader = datamodule.val_dataloader()
+        try:
+            evaluator.evaluate_run(
+                run_ckpts, algorithm, val_loader, "val", set_optimized_metric=True
+            )
+        finally:
+            # The physics datamodule keeps every split in RAM. Release validation before
+            # setup("test") loads another full copy of the model/control tensors.
+            evaluator.release_dataloaders()
+            del val_loader
+            datamodule.teardown("validate")
+            gc.collect()
+
     if leakage_probe_cfg and leakage_probe_cfg.get("enabled", False):
         leakage_probe_evaluation_mode = str(
             leakage_probe_cfg.get("mode", "validation")
-        )
-        smoke_test_cfg = leakage_probe_cfg.get("smoke_test")
-        smoke_test_enabled = bool(
-            smoke_test_cfg is not None
-            and smoke_test_cfg.get("enabled", False)
         )
         smoke_test_sample_caps = None
         if smoke_test_enabled:
@@ -406,6 +428,22 @@ def _prepare_data_for_checkpoint_only_evaluation(
     # location recorded by the datamodule.
     log.info("Preparing data for checkpoint-only evaluation...")
     datamodule.prepare_data()
+
+
+def _is_checkpoint_only_smoke_run(
+    *,
+    train_enabled: bool,
+    test_enabled: bool,
+    probe_enabled: bool,
+    smoke_test_enabled: bool,
+) -> bool:
+    """Return whether only capped validation probes should run."""
+    return (
+        not train_enabled
+        and not test_enabled
+        and probe_enabled
+        and smoke_test_enabled
+    )
 
 
 def _worst_for(direction: str) -> float:

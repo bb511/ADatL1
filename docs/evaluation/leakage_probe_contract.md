@@ -272,6 +272,11 @@ front, and is rejected by the paired-seed aggregator.
 Its four scores remain available in the smoke JSON but are not logged under the
 scientific `probe/*` MLflow metric names.
 
+A checkpoint-only smoke run (`train=false`, `test=false`) skips the ordinary uncapped
+validation evaluator and goes directly to capped probe extraction. This avoids loading
+the full validation and auxiliary collections for a wiring check. Trained runs and all
+non-smoke evaluations retain the ordinary validation stage.
+
 The event manifest is a SHA-256 hash of the actual ordered cached input, padding-mask,
 and L1-bit tensor content. It is independent of dataloader batch boundaries and detects
 a changed or reordered dataset even when the event count is unchanged. The evaluator

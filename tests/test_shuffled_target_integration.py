@@ -117,6 +117,37 @@ def make_complete_result() -> FourProbeEvaluationResult:
     )
 
 
+def test_smoke_payload_is_explicitly_non_reportable() -> None:
+    result = make_complete_result()
+    context = replace(
+        result.evaluation_context,
+        development_data=replace(
+            result.evaluation_context.development_data,
+            n_events=100,
+            max_samples=100,
+        ),
+        held_out_data=replace(
+            result.evaluation_context.held_out_data,
+            n_events=50,
+            max_samples=50,
+        ),
+    )
+
+    payload = four_probe_result_payload(
+        replace(result, evaluation_context=context)
+    )
+
+    assert payload["probe_valid"] is True
+    assert payload["evaluation"]["purpose"] == "smoke_test"
+    assert payload["evaluation"]["reporting_eligible"] is False
+    assert payload["evaluation"]["development_data"][
+        "max_samples"
+    ] == 100
+    assert payload["evaluation"]["held_out_data"][
+        "max_samples"
+    ] == 50
+
+
 def test_four_probe_evaluation_rejects_failed_shuffled_guardrail(
     monkeypatch,
 ) -> None:

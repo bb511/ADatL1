@@ -56,8 +56,15 @@ def probe_evaluation_context_payload(
 ) -> dict[str, Any]:
     """Serialize the probe split design and provenance."""
 
+    smoke_test = (
+        context.development_data.max_samples is not None
+        or context.held_out_data.max_samples is not None
+    )
+
     return {
         "mode": context.mode,
+        "purpose": "smoke_test" if smoke_test else "scientific",
+        "reporting_eligible": not smoke_test,
         "development_data": _probe_split_provenance_payload(
             context.development_data
         ),

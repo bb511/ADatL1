@@ -111,6 +111,8 @@ def test_expected_probe_failure_is_persisted_as_invalid(
         },
         "evaluation": {
             "mode": "validation",
+            "purpose": "scientific",
+            "reporting_eligible": True,
             "development_data": None,
             "held_out_data": None,
         },
@@ -220,6 +222,8 @@ def test_invalid_outcome_metadata_is_logged_without_leakage(
         "probe_valid": False,
         "probe_rejection_reason": "constant_target",
         "leakage_probe_evaluation_mode": "validation",
+        "leakage_probe_smoke_test": False,
+        "leakage_probe_reporting_eligible": True,
         "autoencoder_seed": None,
         "leakage_probe_configuration_id": None,
     }
@@ -256,6 +260,8 @@ def test_valid_outcome_metadata_is_logged(
         "probe_valid": True,
         "probe_rejection_reason": "none",
         "leakage_probe_evaluation_mode": "validation",
+        "leakage_probe_smoke_test": False,
+        "leakage_probe_reporting_eligible": True,
         "autoencoder_seed": None,
         "leakage_probe_configuration_id": None,
     }

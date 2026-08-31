@@ -103,14 +103,20 @@ class FakeProbeDataModule:
 
         self.active_split = None
         self.setup_calls = []
+        self.setup_options = []
         self.release_calls = 0
 
-    def setup_probe_split(self, split: str) -> None:
+    def setup_probe_split(
+        self,
+        split: str,
+        **options,
+    ) -> None:
         if self.active_split is not None:
             raise RuntimeError("A probe split is already active.")
 
         self.active_split = split
         self.setup_calls.append(split)
+        self.setup_options.append(options)
 
     def probe_dataloader(self):
         if self.active_split is None:
@@ -316,6 +322,41 @@ def test_extract_probe_split_collects_contract_arrays() -> None:
     assert model.inference_mode_flags
     assert all(model.inference_mode_flags)
     assert model.denormalization_flags == [True, True]
+    assert all(
+        normalizer is datamodule.normalizer
+        for normalizer in model.normalizers
+    )
+
+    assert datamodule.setup_calls == ["train"]
+    assert datamodule.release_calls == 1
+    assert datamodule.active_split is None
+
+
+def test_extract_probe_split_records_and_forwards_smoke_cap() -> None:
+    datamodule = FakeProbeDataModule(
+        [make_batch(offset=0.0)]
+    )
+    model = RecordingProbeModel()
+
+    result = extract_probe_split(
+        model,
+        datamodule,
+        "train",
+        max_samples=2,
+        sample_seed=987,
+    )
+
+    assert result.max_samples == 2
+    assert result.sample_seed == 987
+    assert datamodule.setup_options == [
+        {
+            "max_samples": 2,
+            "sample_seed": 987,
+        }
+    ]
+    assert model.inference_mode_flags
+    assert all(model.inference_mode_flags)
+    assert model.denormalization_flags == [True]
     assert all(
         normalizer is datamodule.normalizer
         for normalizer in model.normalizers

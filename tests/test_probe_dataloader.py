@@ -113,6 +113,28 @@ def test_setup_probe_split_rejects_unknown_split(
         datamodule.setup_probe_split("validation")
 
 
+def test_setup_probe_split_forwards_smoke_sample_cap(
+    tmp_path: Path,
+) -> None:
+    datamodule = make_datamodule(tmp_path)
+    split = make_split(num_events=3)
+    datamodule._load_main_split = Mock(return_value=split)
+
+    datamodule.setup_probe_split(
+        "train",
+        max_samples=3,
+        sample_seed=987,
+    )
+
+    datamodule._load_main_split.assert_called_once_with(
+        tmp_path,
+        "train",
+        label=0,
+        max_samples=3,
+        sample_seed=987,
+    )
+
+
 def test_setup_probe_split_requires_prepared_cache(
     tmp_path: Path,
 ) -> None:

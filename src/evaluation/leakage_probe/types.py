@@ -221,3 +221,4 @@ class LeakageProbeRunOutcome:
     evaluation_mode: str
     run_metadata: LeakageProbeRunMetadata
     diagnostic_result: FourProbeEvaluationResult | None = None
+    smoke_test: bool = False

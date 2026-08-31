@@ -13,6 +13,7 @@ import torch
 from src.data.utils import unpack_batch
 
 from .errors import ProbeExtractionError
+from .constants import PROBE_EVENT_SAMPLE_SEED
 from .types import ProbeRepresentationSet
 
 def _move_to_device(value: Any, device: torch.device) -> Any:
@@ -155,6 +156,8 @@ def extract_probe_split(
     split: str,
     *,
     device: torch.device | str = "cpu",
+    max_samples: int | None = None,
+    sample_seed: int = PROBE_EVENT_SAMPLE_SEED,
 ) -> ProbeRepresentationSet:
     """Extract frozen AE representations and physical FET.Et for one split.
 
@@ -162,7 +165,32 @@ def extract_probe_split(
     the split is released, including when extraction or validation fails.
     """
 
-    datamodule.setup_probe_split(split)
+    if (
+        max_samples is not None
+        and (
+            not isinstance(max_samples, int)
+            or isinstance(max_samples, bool)
+            or max_samples < 1
+        )
+    ):
+        raise ProbeExtractionError(
+            "invalid_probe_sample_cap",
+            "max_samples must be a positive integer or None.",
+        )
+    if not isinstance(sample_seed, int) or isinstance(sample_seed, bool):
+        raise ProbeExtractionError(
+            "invalid_probe_sample_seed",
+            "sample_seed must be an integer.",
+        )
+
+    if max_samples is None:
+        datamodule.setup_probe_split(split)
+    else:
+        datamodule.setup_probe_split(
+            split,
+            max_samples=max_samples,
+            sample_seed=sample_seed,
+        )
 
     try:
         object_feature_map = getattr(
@@ -458,8 +486,8 @@ def extract_probe_split(
             reconstructed_data=reconstruction_array,
             sensitive_target=target_array,
             n_events=n_events,
-            sample_seed=12345,
-            max_samples=None,
+            sample_seed=sample_seed,
+            max_samples=max_samples,
             manifest_hash=event_manifest.hexdigest(),
             data_cache_id=data_cache_id,
             data_cache_path=data_cache_path,

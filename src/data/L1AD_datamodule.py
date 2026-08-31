@@ -210,7 +210,13 @@ class L1ADDataModule(LightningDataModule):
             main_key="test", aux_key="test", main_name="normal"
         )
 
-    def setup_probe_split(self, split: str) -> None:
+    def setup_probe_split(
+        self,
+        split: str,
+        *,
+        max_samples: int | None = None,
+        sample_seed: int = 12345,
+    ) -> None:
         """Load one unshuffled main-background split for probe evaluation.
 
         Only one probe split may be resident at a time. Auxiliary signal and
@@ -239,10 +245,18 @@ class L1ADDataModule(LightningDataModule):
         self._set_batch_size()
         self.loader = self.hparams.data_awkward2torch
 
+        load_kwargs = {}
+        if max_samples is not None:
+            load_kwargs = {
+                "max_samples": max_samples,
+                "sample_seed": sample_seed,
+            }
+
         loaded = self._load_main_split(
             self.main_cache_folder,
             split,
             label=0,
+            **load_kwargs,
         )
 
         self._probe_split = loaded
@@ -320,10 +334,26 @@ class L1ADDataModule(LightningDataModule):
         return tuple(out)
 
     def _load_main_split(
-        self, data_dir: Path, split: str, label: int, flag: str | None = None
+        self,
+        data_dir: Path,
+        split: str,
+        label: int,
+        flag: str | None = None,
+        *,
+        max_samples: int | None = None,
+        sample_seed: int = 12345,
     ) -> SplitTensors:
         """Load main data splits: train, val, and test of ZB data."""
-        control_x, control_mask, l1bit = self.loader.load_folder(data_dir / split)
+        load_kwargs = {}
+        if max_samples is not None:
+            load_kwargs = {
+                "max_events": max_samples,
+                "sample_seed": sample_seed,
+            }
+        control_x, control_mask, l1bit = self.loader.load_folder(
+            data_dir / split,
+            **load_kwargs,
+        )
         self._configure_feature_views(self.loader.object_feature_map)
 
         x, mask = self._build_model_input_view(control_x, control_mask)

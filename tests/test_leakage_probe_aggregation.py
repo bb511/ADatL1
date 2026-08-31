@@ -18,6 +18,7 @@ def write_artifact(
     leakage: float | None,
     configuration_id: str = "configuration-a",
     valid_manifest: str = "valid-manifest",
+    smoke_test: bool = False,
 ) -> Path:
     valid = leakage is not None
     payload = {
@@ -38,6 +39,10 @@ def write_artifact(
         },
         "evaluation": {
             "mode": "validation",
+            "purpose": (
+                "smoke_test" if smoke_test else "scientific"
+            ),
+            "reporting_eligible": not smoke_test,
             "development_data": (
                 {
                     "source_splits": ["train"],
@@ -202,6 +207,24 @@ def test_different_configurations_cannot_be_aggregated(
     ):
         aggregate_paired_seed_leakage(
             [first, second],
+            expected_autoencoder_seeds=(10, 20),
+        )
+
+
+def test_smoke_artifacts_cannot_be_aggregated(tmp_path) -> None:
+    path = write_artifact(
+        tmp_path / "smoke.json",
+        seed=10,
+        leakage=0.1,
+        smoke_test=True,
+    )
+
+    with pytest.raises(
+        ProbeAggregationError,
+        match="non-reportable smoke-test",
+    ):
+        aggregate_paired_seed_leakage(
+            [path],
             expected_autoencoder_seeds=(10, 20),
         )
 

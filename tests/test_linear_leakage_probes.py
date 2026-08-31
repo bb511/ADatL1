@@ -617,6 +617,8 @@ def test_four_probe_results_are_written_to_required_path(
         "configuration_id": "test-configuration",
     }
     assert payload["evaluation"]["mode"] == "validation"
+    assert payload["evaluation"]["purpose"] == "scientific"
+    assert payload["evaluation"]["reporting_eligible"] is True
     assert payload["evaluation"]["development_data"][
         "source_splits"
     ] == ["train"]
@@ -788,6 +790,105 @@ def test_final_test_output_path_uses_test_stage(tmp_path) -> None:
         / "probes"
         / "leakage_probes.json"
     )
+
+
+def test_smoke_output_path_cannot_overwrite_scientific_artifact(
+    tmp_path,
+) -> None:
+    assert leakage_probe_persistence.leakage_probe_output_path(
+        tmp_path,
+        evaluation_mode="validation",
+        smoke_test=True,
+    ) == (
+        tmp_path
+        / "plots"
+        / "val"
+        / "loss_total"
+        / "probes"
+        / "leakage_probes_smoke.json"
+    )
+
+
+def test_validation_smoke_caps_are_forwarded_to_both_splits(
+    monkeypatch,
+    tmp_path,
+) -> None:
+    checkpoint_path = tmp_path / "loss_total.ckpt"
+    checkpoint_path.touch()
+    model = Mock()
+    datamodule = Mock()
+    train = replace(
+        make_representation_set("train", 20),
+        max_samples=100,
+    )
+    valid = replace(
+        make_representation_set("valid", 10),
+        max_samples=50,
+    )
+    expected_result = Mock(spec=FourProbeEvaluationResult)
+    expected_path = tmp_path / "leakage_probes_smoke.json"
+
+    monkeypatch.setattr(
+        leakage_probe_persistence.torch,
+        "load",
+        Mock(return_value={"state_dict": {}}),
+    )
+    extract_mock = Mock(side_effect=[train, valid])
+    monkeypatch.setattr(
+        leakage_probe_persistence,
+        "extract_probe_split",
+        extract_mock,
+    )
+    monkeypatch.setattr(
+        leakage_probe_persistence,
+        "evaluate_four_leakage_probes",
+        Mock(return_value=expected_result),
+    )
+    monkeypatch.setattr(
+        leakage_probe_persistence,
+        "write_leakage_probe_results",
+        Mock(return_value=expected_path),
+    )
+
+    result, output_path = (
+        evaluate_and_write_loss_total_leakage_probes(
+            model,
+            datamodule,
+            tmp_path,
+            run_shuffled_target_controls=False,
+            max_samples_by_split={
+                "train": 100,
+                "valid": 50,
+            },
+        )
+    )
+
+    assert result is expected_result
+    assert output_path == expected_path
+    assert extract_mock.call_args_list[0].kwargs == {
+        "device": "cpu",
+        "max_samples": 100,
+    }
+    assert extract_mock.call_args_list[1].kwargs == {
+        "device": "cpu",
+        "max_samples": 50,
+    }
+
+
+def test_smoke_caps_cannot_consume_final_test_split(tmp_path) -> None:
+    with pytest.raises(ProbeExtractionError) as error:
+        evaluate_and_write_loss_total_leakage_probes(
+            Mock(),
+            Mock(),
+            tmp_path,
+            evaluation_mode="final_test",
+            max_samples_by_split={
+                "train": 100,
+                "valid": 50,
+            },
+        )
+
+    assert error.value.reason == "smoke_test_final_test_forbidden"
 
 
 def test_final_test_mode_fits_on_train_plus_valid_and_scores_test(

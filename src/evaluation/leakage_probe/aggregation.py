@@ -121,6 +121,14 @@ def aggregate_paired_seed_leakage(
             "leakage_probe_protocol_version"
         )
         evaluation_mode = evaluation.get("mode")
+        evaluation_purpose = evaluation.get(
+            "purpose",
+            "scientific",
+        )
+        reporting_eligible = evaluation.get(
+            "reporting_eligible",
+            True,
+        )
 
         if not isinstance(seed, int) or isinstance(seed, bool):
             raise ProbeAggregationError(
@@ -138,6 +146,14 @@ def aggregate_paired_seed_leakage(
         if not isinstance(evaluation_mode, str):
             raise ProbeAggregationError(
                 f"Leakage artifact {path} has no evaluation mode."
+            )
+        if (
+            evaluation_purpose != "scientific"
+            or reporting_eligible is not True
+        ):
+            raise ProbeAggregationError(
+                f"Leakage artifact {path} is a non-reportable "
+                "smoke-test artifact and cannot be aggregated."
             )
         if seed in records_by_seed:
             raise ProbeAggregationError(

@@ -254,6 +254,24 @@ events in the relevant split are used. Introducing a sample cap requires a new
 protocol version unless the cap is fixed before any comparable run is evaluated and
 all earlier runs are reevaluated with the same manifest.
 
+The implementation also provides a deliberately non-reportable smoke-test cap for
+local pipeline verification:
+
+```text
+evaluation.leakage_probes.smoke_test.enabled=true
+```
+
+Its default caps are 100,000 deterministic training events and 50,000 deterministic
+validation events. Capped tensors are selected with seed `12345` from memory-mapped
+cache files and returned in original cache order. Smoke mode is allowed only with
+`mode=validation`; it cannot access `test`. Its JSON records
+`evaluation.purpose=smoke_test`, `evaluation.reporting_eligible=false`, and the actual
+sample caps and manifests. A smoke artifact checks wiring and memory behavior only: it
+does not conform to the uncapped v6 scientific measurement, cannot enter a Pareto
+front, and is rejected by the paired-seed aggregator.
+Its four scores remain available in the smoke JSON but are not logged under the
+scientific `probe/*` MLflow metric names.
+
 The event manifest is a SHA-256 hash of the actual ordered cached input, padding-mask,
 and L1-bit tensor content. It is independent of dataloader batch boundaries and detects
 a changed or reordered dataset even when the event count is unchanged. The evaluator
@@ -439,11 +457,19 @@ A final-test run writes the same schema at:
 plots/test/loss_total/probes/leakage_probes.json
 ```
 
+A capped validation smoke run uses a separate filename so it cannot overwrite an
+uncapped scientific result:
+
+```text
+plots/val/loss_total/probes/leakage_probes_smoke.json
+```
+
 It contains at least:
 
 - `leakage_probe_protocol_version`;
 - `run.autoencoder_seed` and the seed-independent `run.configuration_id`;
-- `evaluation.mode`, development-data provenance, and held-out-data provenance;
+- `evaluation.mode`, `evaluation.purpose`, `evaluation.reporting_eligible`,
+  development-data provenance, and held-out-data provenance;
 - `worst_probe` and `leakage_worst`;
 - the representation name and dimension for each of the four probes;
 - raw and clipped R2 plus MAE for each of the four probes;
@@ -469,6 +495,8 @@ For a complete valid seed set, report the mean, sample standard deviation, stand
 error, and normal-approximation 95% confidence interval of `leakage_worst`. The
 aggregation tool also rejects mixed protocol versions, configuration identities,
 evaluation modes, cache identities, event manifests, and sampling protocols.
+It rejects every artifact with `evaluation.reporting_eligible=false`, including all
+smoke-test artifacts.
 
 Run the aggregator with the explicitly predeclared autoencoder seeds:
 
@@ -506,6 +534,9 @@ are true:
 - invalid measurements fail visibly and are never converted to zero;
 - actual cached event content and selection are identical across comparable
   autoencoder runs;
+- scientific `leakage_probes.json` artifacts are uncapped; capped
+  `leakage_probes_smoke.json` artifacts are explicitly non-reportable and cannot be
+  aggregated;
 - paired-seed aggregation rejects the complete configuration when an expected seed is
   missing or invalid;
 - every output records protocol version `fet-et-four-probe-v6`.

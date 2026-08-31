@@ -8,6 +8,7 @@ from pytorch_lightning.callbacks import ModelCheckpoint
 from torch.utils.data import DataLoader, TensorDataset
 
 from src.algorithms import ADLightningModule
+from src.train import _prepare_data_for_checkpoint_only_evaluation
 
 
 class _TinyValidationLossModule(ADLightningModule):
@@ -41,6 +42,28 @@ class _TinyValidationLossModule(ADLightningModule):
 
     def configure_optimizers(self):
         return torch.optim.SGD(self.parameters(), lr=0.01)
+
+
+def test_checkpoint_only_evaluation_prepares_datamodule() -> None:
+    datamodule = Mock()
+
+    _prepare_data_for_checkpoint_only_evaluation(
+        datamodule,
+        train_enabled=False,
+    )
+
+    datamodule.prepare_data.assert_called_once_with()
+
+
+def test_trained_run_does_not_prepare_datamodule_twice() -> None:
+    datamodule = Mock()
+
+    _prepare_data_for_checkpoint_only_evaluation(
+        datamodule,
+        train_enabled=True,
+    )
+
+    datamodule.prepare_data.assert_not_called()
 
 
 def test_validation_total_loss_is_aggregated_from_the_normal_loader() -> None:

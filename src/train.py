@@ -27,6 +27,19 @@ from src.utils.omegaconf import register_resolvers
 
 register_resolvers()
 
+from src.evaluation.leakage_probe.persistence import (
+    evaluate_and_record_loss_total_leakage_probes,
+    log_leakage_probe_outcome_metadata,
+)
+from src.evaluation.leakage_probe.provenance import (
+    make_leakage_probe_run_metadata,
+)
+
+from src.evaluation.leakage_probe.serialization import (
+    log_four_probe_metrics,
+    log_shuffled_target_metrics,
+)
+
 from src.utils import RankedLogger
 from src.utils import extras
 from src.utils import get_metric_value
@@ -91,7 +104,9 @@ def train(cfg: DictConfig) -> Tuple[Dict[str, Any], Dict[str, Any]]:
         log.info("Logging hyperparameters!")
         log_hyperparameters(object_dict)
 
-    if cfg.get("train"):
+    train_enabled = bool(cfg.get("train"))
+
+    if train_enabled:
         log.info("Starting training!")
         resume_ckpt_path = cfg.get("ckpt_path")
 
@@ -102,31 +117,244 @@ def train(cfg: DictConfig) -> Tuple[Dict[str, Any], Dict[str, Any]]:
             weights_only=False if resume_ckpt_path is not None else None,
         )
 
+    _prepare_data_for_checkpoint_only_evaluation(
+        datamodule,
+        train_enabled=train_enabled,
+    )
+
     train_metrics = trainer.callback_metrics
 
-    if cfg.get("train"):
+    post_training_metrics: Dict[str, float] = {}
+
+    evaluation_cfg = cfg.get("evaluation")
+    leakage_probe_cfg = (
+        evaluation_cfg.get("leakage_probes")
+        if evaluation_cfg is not None
+        else None
+    )
+    smoke_test_cfg = (
+        leakage_probe_cfg.get("smoke_test")
+        if leakage_probe_cfg is not None
+        else None
+    )
+    smoke_test_enabled = bool(
+        smoke_test_cfg is not None
+        and smoke_test_cfg.get("enabled", False)
+    )
+    checkpoint_only_smoke = _is_checkpoint_only_smoke_run(
+        train_enabled=train_enabled,
+        test_enabled=bool(cfg.get("test")),
+        probe_enabled=bool(
+            leakage_probe_cfg is not None
+            and leakage_probe_cfg.get("enabled", False)
+        ),
+        smoke_test_enabled=smoke_test_enabled,
+    )
+
+    if train_enabled:
         log.info("Releasing fit dataloaders before run validation...")
         _release_fit_dataloaders(trainer, datamodule)
 
-    # Get validation report, and also set hp optimisation values.
-    log.info(Fore.CYAN + "Instantiating evaluator...")
-    evaluator = _get_evaluator(cfg, datamodule, logger)
     run_ckpts = Path(cfg.paths.checkpoints_dir) / cfg.experiment_name / cfg.run_name
+    evaluator = None
 
-    log.info(Back.MAGENTA + 8 * "-" + "STARTING RUN VALIDATION" + 8 * "-")
-    datamodule.setup("validate")
-    val_loader = datamodule.val_dataloader()
-    try:
-        evaluator.evaluate_run(
-            run_ckpts, algorithm, val_loader, "val", set_optimized_metric=True
+    if checkpoint_only_smoke:
+        log.info(
+            "Checkpoint-only smoke run: skipping the uncapped standard "
+            "validation evaluator and running capped leakage probes directly."
         )
-    finally:
-        # The physics datamodule keeps every split in RAM. Release validation before
-        # setup("test") loads another full copy of the model/control tensors.
-        evaluator.release_dataloaders()
-        del val_loader
-        datamodule.teardown("validate")
-        gc.collect()
+    else:
+        # Get validation report, and also set hp optimisation values.
+        log.info(Fore.CYAN + "Instantiating evaluator...")
+        evaluator = _get_evaluator(cfg, datamodule, logger)
+
+        log.info(Back.MAGENTA + 8 * "-" + "STARTING RUN VALIDATION" + 8 * "-")
+        datamodule.setup("validate")
+        val_loader = datamodule.val_dataloader()
+        try:
+            evaluator.evaluate_run(
+                run_ckpts, algorithm, val_loader, "val", set_optimized_metric=True
+            )
+        finally:
+            # The physics datamodule keeps every split in RAM. Release validation before
+            # setup("test") loads another full copy of the model/control tensors.
+            evaluator.release_dataloaders()
+            del val_loader
+            datamodule.teardown("validate")
+            gc.collect()
+
+    if leakage_probe_cfg and leakage_probe_cfg.get("enabled", False):
+        leakage_probe_evaluation_mode = str(
+            leakage_probe_cfg.get("mode", "validation")
+        )
+        smoke_test_sample_caps = None
+        if smoke_test_enabled:
+            smoke_test_sample_caps = OmegaConf.to_container(
+                smoke_test_cfg.get("max_events_per_split"),
+                resolve=True,
+            )
+        leakage_probe_run_metadata = (
+            make_leakage_probe_run_metadata(
+                autoencoder_seed=cfg.get("seed"),
+                algorithm_config=cfg.algorithm,
+            )
+        )
+        log.info(
+            Back.MAGENTA
+            + 8 * "-"
+            + "STARTING "
+            + ("SMOKE " if smoke_test_enabled else "")
+            + leakage_probe_evaluation_mode.upper()
+            + " LEAKAGE PROBES"
+            + 8 * "-"
+        )
+        leakage_probe_outcome = (
+            evaluate_and_record_loss_total_leakage_probes(
+                algorithm,
+                datamodule,
+                run_ckpts,
+                device=algorithm.device,
+                run_shuffled_target_controls=bool(
+                    leakage_probe_cfg.get(
+                        "run_shuffled_target_controls",
+                        False,
+                    )
+                ),
+                evaluation_mode=leakage_probe_evaluation_mode,
+                run_metadata=leakage_probe_run_metadata,
+                max_samples_by_split=smoke_test_sample_caps,
+            )
+        )
+
+        leakage_probe_metadata = (
+            log_leakage_probe_outcome_metadata(
+                leakage_probe_outcome,
+                logger,
+            )
+        )
+
+        object_dict.update(
+            {
+                "leakage_probe_outcome": (
+                    leakage_probe_outcome
+                ),
+                "leakage_probe_path": (
+                    leakage_probe_outcome.output_path
+                ),
+                "leakage_probe_metadata": (
+                    leakage_probe_metadata
+                ),
+            }
+        )
+
+        if leakage_probe_outcome.probe_valid:
+            leakage_probe_result = (
+                leakage_probe_outcome.result
+            )
+
+            if leakage_probe_result is None:
+                raise RuntimeError(
+                    "A valid leakage-probe outcome has "
+                    "no four-probe result."
+                )
+
+            if leakage_probe_outcome.smoke_test:
+                # Smoke scores remain in their explicitly non-reportable JSON.
+                # Do not publish them under the scientific MLflow metric names
+                # consumed by Pareto analysis.
+                leakage_probe_metrics = {}
+                log.info(
+                    "Smoke-test probe metrics are not logged as scientific "
+                    "probe metrics."
+                )
+            else:
+                primary_probe_metrics = (
+                    log_four_probe_metrics(
+                        leakage_probe_result,
+                        logger,
+                        step=trainer.global_step,
+                    )
+                )
+
+                shuffled_probe_metrics = (
+                    log_shuffled_target_metrics(
+                        leakage_probe_result,
+                        logger,
+                        step=trainer.global_step,
+                    )
+                )
+
+                leakage_probe_metrics = {
+                    **primary_probe_metrics,
+                    **shuffled_probe_metrics,
+                }
+
+            post_training_metrics.update(
+                leakage_probe_metrics
+            )
+
+            object_dict.update(
+                {
+                    "leakage_probe_result": (
+                        leakage_probe_result
+                    ),
+                    "leakage_probe_metrics": (
+                        leakage_probe_metrics
+                    ),
+                }
+            )
+
+            log.info(
+                "Stored valid leakage probes at "
+                f"{leakage_probe_outcome.output_path}."
+            )
+        else:
+            diagnostic_probe_metrics: Dict[
+                str,
+                float,
+            ] = {}
+
+            diagnostic_result = (
+                leakage_probe_outcome
+                .diagnostic_result
+            )
+
+            if (
+                diagnostic_result is not None
+                and not leakage_probe_outcome.smoke_test
+            ):
+                diagnostic_probe_metrics = (
+                    log_shuffled_target_metrics(
+                        diagnostic_result,
+                        logger,
+                        step=trainer.global_step,
+                    )
+                )
+
+                post_training_metrics.update(
+                    diagnostic_probe_metrics
+                )
+
+            object_dict.update(
+                {
+                    "leakage_probe_result": None,
+                    "leakage_probe_metrics": (
+                        diagnostic_probe_metrics
+                    ),
+                    "leakage_probe_diagnostic_result": (
+                        diagnostic_result
+                    ),
+                }
+            )
+
+            log.error(
+                "Leakage-probe evaluation is invalid: "
+                f"{leakage_probe_outcome.rejection_reason}: "
+                f"{leakage_probe_outcome.rejection_message}. "
+                "The invalid result was stored at "
+                f"{leakage_probe_outcome.output_path}."
+            )
+
     object_dict.update({"evaluator": evaluator})
 
     # Evaluate once more on a held out test set for final performance.
@@ -143,7 +371,10 @@ def train(cfg: DictConfig) -> Tuple[Dict[str, Any], Dict[str, Any]]:
             gc.collect()
         object_dict.update({"evaluator": evaluator})
 
-    metric_dict = {**train_metrics}
+    metric_dict = {
+        **train_metrics,
+        **post_training_metrics,
+    }
     return metric_dict, object_dict
 
 
@@ -181,6 +412,38 @@ def _release_fit_dataloaders(
         torch.cuda.empty_cache()
     if torch.backends.mps.is_available():
         torch.mps.empty_cache()
+
+
+def _prepare_data_for_checkpoint_only_evaluation(
+    datamodule: LightningDataModule,
+    *,
+    train_enabled: bool,
+) -> None:
+    """Initialize datamodule cache state when ``trainer.fit`` was skipped."""
+    if train_enabled:
+        return
+
+    # trainer.fit() normally invokes prepare_data(). Checkpoint-only runs skip fit,
+    # but the standalone evaluator and leakage probes still need the prepared cache
+    # location recorded by the datamodule.
+    log.info("Preparing data for checkpoint-only evaluation...")
+    datamodule.prepare_data()
+
+
+def _is_checkpoint_only_smoke_run(
+    *,
+    train_enabled: bool,
+    test_enabled: bool,
+    probe_enabled: bool,
+    smoke_test_enabled: bool,
+) -> bool:
+    """Return whether only capped validation probes should run."""
+    return (
+        not train_enabled
+        and not test_enabled
+        and probe_enabled
+        and smoke_test_enabled
+    )
 
 
 def _worst_for(direction: str) -> float:

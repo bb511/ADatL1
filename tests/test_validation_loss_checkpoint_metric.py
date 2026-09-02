@@ -8,6 +8,8 @@ from pytorch_lightning.callbacks import ModelCheckpoint
 from torch.utils.data import DataLoader, TensorDataset
 
 from src.algorithms import ADLightningModule
+from src.train import _is_checkpoint_only_smoke_run
+from src.train import _prepare_data_for_checkpoint_only_evaluation
 
 
 class _TinyValidationLossModule(ADLightningModule):
@@ -41,6 +43,60 @@ class _TinyValidationLossModule(ADLightningModule):
 
     def configure_optimizers(self):
         return torch.optim.SGD(self.parameters(), lr=0.01)
+
+
+def test_checkpoint_only_evaluation_prepares_datamodule() -> None:
+    datamodule = Mock()
+
+    _prepare_data_for_checkpoint_only_evaluation(
+        datamodule,
+        train_enabled=False,
+    )
+
+    datamodule.prepare_data.assert_called_once_with()
+
+
+def test_trained_run_does_not_prepare_datamodule_twice() -> None:
+    datamodule = Mock()
+
+    _prepare_data_for_checkpoint_only_evaluation(
+        datamodule,
+        train_enabled=True,
+    )
+
+    datamodule.prepare_data.assert_not_called()
+
+
+def test_checkpoint_only_smoke_skips_uncapped_standard_evaluation() -> None:
+    assert _is_checkpoint_only_smoke_run(
+        train_enabled=False,
+        test_enabled=False,
+        probe_enabled=True,
+        smoke_test_enabled=True,
+    )
+
+
+@pytest.mark.parametrize(
+    "options",
+    [
+        {"train_enabled": True},
+        {"test_enabled": True},
+        {"probe_enabled": False},
+        {"smoke_test_enabled": False},
+    ],
+)
+def test_standard_evaluation_is_retained_outside_checkpoint_only_smoke(
+    options,
+) -> None:
+    settings = {
+        "train_enabled": False,
+        "test_enabled": False,
+        "probe_enabled": True,
+        "smoke_test_enabled": True,
+    }
+    settings.update(options)
+
+    assert not _is_checkpoint_only_smoke_run(**settings)
 
 
 def test_validation_total_loss_is_aggregated_from_the_normal_loader() -> None:

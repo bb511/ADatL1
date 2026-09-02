@@ -214,8 +214,17 @@ class FixedQuantileSensitiveBinner:
         object_feature_map: dict,
         normalizer=None,
         mask: torch.Tensor | None = None,
+        *,
+        use_denormalized: bool | None = None,
     ) -> torch.Tensor:
-        """Extract one scalar sensitive value per event."""
+        """Extract one scalar sensitive value per event.
+
+        Args:
+            use_denormalized:
+                ``None`` preserves ``self.use_denormalized``.
+                ``True`` explicitly returns physical values.
+                ``False`` explicitly returns normalized values.
+        """
         x_flat = torch.flatten(x, start_dim=1)
 
         if mask is not None:
@@ -227,6 +236,7 @@ class FixedQuantileSensitiveBinner:
             x=x_flat,
             normalizer=normalizer,
             object_feature_map=object_feature_map,
+            use_denormalized=use_denormalized,
         )
 
         indices = self._resolve_indices(object_feature_map)
@@ -245,12 +255,30 @@ class FixedQuantileSensitiveBinner:
         x: torch.Tensor,
         normalizer,
         object_feature_map: dict,
+        *,
+        use_denormalized: bool | None = None,
     ) -> torch.Tensor:
-        if not self.use_denormalized:
+
+        should_denormalize = (
+            self.use_denormalized
+            if use_denormalized is None
+            else bool(use_denormalized)
+        )
+
+        if not should_denormalize:
             return x.detach()
 
-        if normalizer is None or not hasattr(normalizer, "denorm_1d_tensor"):
-            return x.detach()
+        if normalizer is None:
+            raise RuntimeError(
+                f"Cannot denormalize sensitive variable {self.variable!r}: "
+                "the datamodule normalizer is missing."
+            )
+
+        if not hasattr(normalizer, "denorm_1d_tensor"):
+            raise RuntimeError(
+                f"Cannot denormalize sensitive variable {self.variable!r}: "
+                "the configured normalizer does not provide denorm_1d_tensor()."
+            )
 
         x_phys = x.detach().clone()
 

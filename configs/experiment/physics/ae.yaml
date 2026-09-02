@@ -31,7 +31,9 @@ trainer:
   min_epochs: 1
   max_epochs: 200
 
-test: true
+# Keep test untouched during validation-Pareto sweeps. For the one final selected
+# configuration, override both `test=true` and the leakage-probe mode below.
+test: false
 
 # Metrics to report to optuna for every checkpoint.
 optimized_metric_config:
@@ -163,6 +165,30 @@ callbacks:
     save_on_train_epoch_end: false
 
 evaluation:
+  # Run the frozen post-training probes once on loss_total.ckpt. The evaluator
+  # writes below plots/{val,test}/loss_total/probes according to the mode.
+  leakage_probes:
+    enabled: true
+    # validation: fit probes on train and score valid during model selection.
+    # final_test: after selecting one configuration, fit on train+valid and score
+    # untouched test. Use only for the final report, for example:
+    # test=true evaluation.leakage_probes.mode=final_test
+    mode: validation
+    # The shuffled-target controls add eight MLP fits per AE run. Keep them off
+    # during sweeps and enable them for audit/final runs with:
+    # evaluation.leakage_probes.run_shuffled_target_controls=true
+    run_shuffled_target_controls: false
+
+    # Non-reportable local pipeline check. When enabled, probe cache tensors are
+    # memory-mapped and the same deterministic event subset (seed 12345) is used
+    # for every model. This is validation-only and writes leakage_probes_smoke.json.
+    # Never use the smoke score for Pareto selection or final reporting.
+    smoke_test:
+      enabled: false
+      max_events_per_split:
+        train: 100000
+        valid: 50000
+
   evaluator:
     ckpts:
       # The default evaluation config enables last.ckpt. Disable it explicitly

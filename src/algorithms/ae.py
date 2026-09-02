@@ -1,5 +1,5 @@
 # Vanilla auto-encoder model implementations
-from typing import Optional
+from typing import Optional, TypedDict
 
 import torch
 from torch import nn
@@ -12,6 +12,12 @@ from src.data.utils import unpack_batch
 from src.data.sensitive_binning import FixedQuantileSensitiveBinner
 from src.algorithms.components.bernoulli import BernoulliSampling
 
+class AERepresentations(TypedDict):
+    """Named intermediate representations produced by the autoencoder."""
+
+    latent_logits: torch.Tensor
+    latent_sample: torch.Tensor
+    reconstructed_data: torch.Tensor
 
 class AE(ADLightningModule):
     """Autoencoder module.
@@ -118,20 +124,44 @@ class AE(ADLightningModule):
     def target_fpr(self) -> float:
         return self.compute_target_fpr()
 
-    def forward(self, x: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
-        x = self.features(x)
+    def forward_with_representations(
+        self,
+        x: torch.Tensor,
+    ) -> AERepresentations:
+        """Run the AE and expose the representations required by evaluation.
 
-        # Pre-Bernoulli latent logits / activations.
-        # This is the tensor used for the MI estimator, matching hepinfo.
-        z = self.encoder(x)
+        ``latent_logits`` is the encoder output used by the MI estimator.
+        ``latent_sample`` is the straight-through Bernoulli bottleneck consumed
+        by the decoder.
+        ``reconstructed_data`` is the decoder output.
 
-        # Straight-through Bernoulli bottleneck.
-        # This is the tensor consumed by the decoder, matching hepinfo MiVAE.
-        z_sample = self.bernoulli(z)
+        This method intentionally preserves gradients. Detaching tensors and
+        moving them to CPU are responsibilities of the post-training evaluator.
+        """
+        model_input = self.features(x)
 
-        reconstruction = self.decoder(z_sample)
+        latent_logits = self.encoder(model_input)
+        latent_sample = self.bernoulli(latent_logits)
+        reconstructed_data = self.decoder(latent_sample)
 
-        return z, reconstruction
+        return {
+            "latent_logits": latent_logits,
+            "latent_sample": latent_sample,
+            "reconstructed_data": reconstructed_data,
+        }
+
+
+    def forward(
+        self,
+        x: torch.Tensor,
+    ) -> tuple[torch.Tensor, torch.Tensor]:
+        """Return the existing training-compatible AE outputs."""
+        representations = self.forward_with_representations(x)
+
+        return (
+            representations["latent_logits"],
+            representations["reconstructed_data"],
+        )
 
     def ascore(self, x: torch.Tensor, reconstruction: torch.Tensor, mask: torch.Tensor | None = None) -> torch.Tensor:
         """Compute per-event anomaly score: reconstruction error per observation."""
@@ -305,23 +335,41 @@ class AE(ADLightningModule):
             normalizer=normalizer,
         )
 
-    def extract_sensitive_values(self, batch) -> torch.Tensor:
-        """Extract the MI-sensitive values from a training batch before binning."""
+    def extract_sensitive_values(
+        self,
+        batch,
+        *,
+        use_denormalized: bool | None = None,
+        normalizer=None,
+    ) -> torch.Tensor:
+        """Extract one sensitive value per event before MI binning.
+
+        ``use_denormalized=None`` preserves the MI binner configuration.
+        The leakage-probe evaluator must pass ``use_denormalized=True`` so
+        the regression target is expressed in physical units.
+        """
         batch_view = unpack_batch(batch)
         control_x, control_mask = self._get_sensitive_inputs(batch_view)
-        trainer = getattr(self, "trainer", None)
-        datamodule = getattr(trainer, "datamodule", None) if trainer is not None else None
-        normalizer = (
-            getattr(datamodule, "normalizer", None)
-            if datamodule is not None
-            else None
-        )
+
+        if normalizer is None:
+            trainer = getattr(self, "_trainer", None)
+            datamodule = (
+                getattr(trainer, "datamodule", None)
+                if trainer is not None
+                else None
+            )
+            normalizer = (
+                getattr(datamodule, "normalizer", None)
+                if datamodule is not None
+                else None
+            )
 
         return self.sensitive_binner.extract_values(
             x=control_x,
             mask=control_mask,
             object_feature_map=self.control_object_feature_map,
             normalizer=normalizer,
+            use_denormalized=use_denormalized,
         )
 
     def _get_sensitive_inputs(self, batch_view):

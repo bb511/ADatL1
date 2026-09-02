@@ -34,6 +34,7 @@ dependencies = [
     "pyarrow (>=21,<23)",
     "datasets (>=4.8.4,<5.0.0)",
     "huggingface-hub (>=1.11.0,<2.0.0)",
+    "scikit-learn (>=1.7,<2.0)",
 ]
 
 [tool.poetry.dependencies]

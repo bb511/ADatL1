@@ -469,6 +469,20 @@ uncapped scientific result:
 plots/val/loss_total/probes/leakage_probes_smoke.json
 ```
 
+Every detailed artifact is accompanied by a compact score summary. Scientific
+validation and final-test runs write `leakage_probes_summary.json` in the same
+directory as `leakage_probes.json`; capped runs instead write
+`leakage_probes_smoke_summary.json`. The separate smoke name prevents a later wiring
+check from overwriting a reportable summary.
+
+The compact summary contains the protocol and summary-schema versions, source artifact,
+run identity, evaluation mode/purpose/reporting eligibility, development and held-out
+event-manifest hashes, validity and rejection reason, `worst_probe`, `leakage_worst`,
+and exactly four primary probe entries containing only `r2_clipped`. It deliberately
+omits MAE, raw R2, MLP histories, plot paths, and shuffled-target diagnostics. The
+detailed artifact remains the scientific source of truth and the input to paired-seed
+aggregation; the summary is a convenience for inspection and Pareto-table assembly.
+
 It contains at least:
 
 - `leakage_probe_protocol_version`;
@@ -482,6 +496,52 @@ It contains at least:
 - the selected seed and convergence information for each MLP;
 - `diagnostics.shuffled_targets.enabled`, plus the shuffled-control results when
   audit mode is enabled.
+
+### Observation-only loss plots and terminal progress
+
+Every completed probe entry now links to a PNG via `loss_plot.path`, relative to
+the JSON file. The plots are written automatically at the end of evaluation:
+
+```text
+leakage_probes_loss_plots/mlp_z_logits.png
+leakage_probes_loss_plots/mlp_reconstruction.png
+leakage_probes_loss_plots/linear_z_logits.png
+leakage_probes_loss_plots/linear_reconstruction.png
+```
+
+Smoke runs instead use `leakage_probes_smoke_loss_plots/`, so they cannot overwrite
+scientific plots. When shuffled-target controls are enabled, each control also gets
+a plot linked from its diagnostic JSON entry. A guardrail rejection preserves the
+available plots but still records invalid leakage. Plotting failures are explicit
+(`loss_plot.status=failed`, with an error and null path); they do not erase numerical
+results or change probe validity.
+
+For each MLP, `training_history` contains its fresh refit's epochs, training losses,
+and internal early-stopping validation R2 values. Each successful seed candidate has
+the same history under `seed_selection.candidates[].training_history`. The plot shows
+the candidate seeds and refit in separate panels, with the selected seed identified.
+The loss is sklearn's objective on standardized targets, including its L2 penalty;
+it is dimensionless, not a physical GeV-squared loss. Candidate and refit scalers use
+different fit pools, so their loss magnitudes are not directly comparable. The
+validation curves use only sklearn's internal early-stopping subset, not the held-out
+pool used for the final reported score. Sklearn restores the best internal-validation
+weights; the last recorded training loss need not equal the restored model's loss.
+
+LinearRegression uses a direct least-squares solve, not epoch-based optimization.
+Its plot therefore displays final development and held-out MSE in GeV-squared, with
+`loss_summary.epochs=null`; no epoch curve is invented. Development MSE is measured
+with bounded-size prediction batches. These diagnostics do not add another probe or
+change fitting, seed selection, early stopping, the four-probe maximum, or protocol v6.
+
+Terminal output reports the checkpoint, mode/caps, extraction progress (first batch,
+every 25 batches, and completion), representation dimensions, per-probe and per-seed
+fit starts, sklearn epoch loss/internal validation score, fit duration, convergence
+warnings, selected seeds, held-out scores, and saved PNG/JSON paths. Use these plots
+and logs to observe convergence and troubleshoot smoke/audit runs. Do not tune probe
+capacity or select AE configurations from final-test diagnostic behavior.
+
+Existing JSON files are not backfilled; rerun the same evaluation command to collect
+histories and create the new plot artifacts.
 
 ## 10. Cross-run aggregation
 
@@ -536,6 +596,8 @@ are true:
   diagnostics are stored separately and cannot enter `L`;
 - `leakage_probes.json` records all four results, `worst_probe`, and `leakage_worst` at
   the required checkpoint-relative path;
+- every detailed artifact has a compact, smoke-safe summary with the four clipped R2
+  components plus the worst probe and essential provenance;
 - invalid measurements fail visibly and are never converted to zero;
 - actual cached event content and selection are identical across comparable
   autoencoder runs;

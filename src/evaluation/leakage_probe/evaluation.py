@@ -1,5 +1,7 @@
 """Aggregate four primary probes and secondary diagnostics."""
 
+import logging
+
 from .errors import ProbeFitError
 from .linear import evaluate_primary_linear_probes
 from .mlp import evaluate_primary_mlp_probes
@@ -13,6 +15,8 @@ from .diagnostics import (
     enforce_shuffled_target_guardrail,
     evaluate_shuffled_target_mlp_controls,
 )
+
+log = logging.getLogger(__name__)
 
 def evaluate_four_leakage_probes(
     development_representations: ProbeRepresentationSet,
@@ -35,11 +39,13 @@ def evaluate_four_leakage_probes(
             configuration_id=None,
         )
 
+    log.info("Four-probe evaluation: starting the two primary MLP probes (1–2/4).")
     mlp_result = evaluate_primary_mlp_probes(
         development_representations,
         held_out_representations,
     )
 
+    log.info("Four-probe evaluation: starting the two primary linear probes (3–4/4).")
     linear_result = evaluate_primary_linear_probes(
         development_representations,
         held_out_representations,
@@ -47,12 +53,15 @@ def evaluate_four_leakage_probes(
 
     shuffled_target_controls = None
     if run_shuffled_target_controls:
+        log.info("Starting optional shuffled-target MLP controls (not primary probes).")
         shuffled_target_controls = (
             evaluate_shuffled_target_mlp_controls(
                 development_representations,
                 held_out_representations,
             )
         )
+    else:
+        log.info("Shuffled-target controls disabled.")
 
     mlp_latent = mlp_result.latent_logits
     mlp_reconstruction = mlp_result.reconstructed_data
@@ -126,4 +135,5 @@ def evaluate_four_leakage_probes(
     if shuffled_target_controls is not None:
         enforce_shuffled_target_guardrail(result)
 
+    log.info("Four-probe maximum: %s, clipped R2=%.6f.", worst_probe, leakage_worst)
     return result

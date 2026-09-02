@@ -93,6 +93,8 @@ class MLPProbeCandidateResult:
     feature_scaler: StandardScaler
     target_scaler: StandardScaler
     estimator: MLPRegressor
+    loss_curve: tuple[float, ...] = ()
+    early_stopping_validation_scores: tuple[float, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -130,6 +132,8 @@ class MLPProbeOuterResult:
     feature_scaler: StandardScaler
     target_scaler: StandardScaler
     estimator: MLPRegressor
+    loss_curve: tuple[float, ...] = ()
+    early_stopping_validation_scores: tuple[float, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -174,6 +178,8 @@ class LinearProbeOuterResult:
     n_validation: int
     feature_scaler: StandardScaler
     estimator: LinearRegression
+    train_mse_gev2: float | None = None
+    outer_mse_gev2: float | None = None
 
 
 @dataclass(frozen=True)

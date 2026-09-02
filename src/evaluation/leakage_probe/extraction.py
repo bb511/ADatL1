@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import hashlib
 import json
+import logging
+from time import perf_counter
 from pathlib import Path
 from typing import Any
 
@@ -15,6 +17,8 @@ from src.data.utils import unpack_batch
 from .errors import ProbeExtractionError
 from .constants import PROBE_EVENT_SAMPLE_SEED
 from .types import ProbeRepresentationSet
+
+log = logging.getLogger(__name__)
 
 def _move_to_device(value: Any, device: torch.device) -> Any:
     """Move tensors inside a supported batch structure to one device."""
@@ -183,6 +187,11 @@ def extract_probe_split(
             "sample_seed must be an integer.",
         )
 
+    started = perf_counter()
+    log.info(
+        "Extracting probe split=%s on %s: cap=%s, sample seed=%d; loading main background only.",
+        split, device, max_samples if max_samples is not None else "uncapped", sample_seed,
+    )
     if max_samples is None:
         datamodule.setup_probe_split(split)
     else:
@@ -256,9 +265,10 @@ def extract_probe_split(
         ] = {}
 
         first_batch = True
+        extracted_events = 0
 
         with torch.inference_mode():
-            for batch in datamodule.probe_dataloader():
+            for batch_index, batch in enumerate(datamodule.probe_dataloader(), start=1):
                 identity_batch_view = unpack_batch(batch)
                 device_batch = _move_to_device(
                     batch,
@@ -412,6 +422,12 @@ def extract_probe_split(
                 target_parts.append(
                     _to_numpy(sensitive_target)
                 )
+                extracted_events += batch_size
+                if batch_index == 1 or batch_index % 25 == 0:
+                    log.info(
+                        "Probe extraction %s: batch=%d, events=%d, elapsed=%.1fs.",
+                        split, batch_index, extracted_events, perf_counter() - started,
+                    )
 
         if not target_parts:
             raise ProbeExtractionError(
@@ -479,6 +495,13 @@ def extract_probe_split(
                 ].digest()
             )
 
+        log.info(
+            "Probe extraction %s finished in %.1fs: events=%d, latent features=%d, "
+            "reconstruction features=%d, physical target range=[%.6g, %.6g] GeV, manifest=%s.",
+            split, perf_counter() - started, n_events, latent_logits_array.shape[1],
+            reconstruction_array.shape[1], target_array.min(), target_array.max(),
+            event_manifest.hexdigest(),
+        )
         return ProbeRepresentationSet(
             split=split,
             latent_logits=latent_logits_array,

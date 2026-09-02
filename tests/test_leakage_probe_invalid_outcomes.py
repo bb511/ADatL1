@@ -124,6 +124,20 @@ def test_expected_probe_failure_is_persisted_as_invalid(
     # Invalid leakage must be absent/null, never represented as zero.
     assert payload["leakage_worst"] is None
 
+    summary_path = output_path.with_name("leakage_probes_summary.json")
+    summary = json.loads(summary_path.read_text(encoding="utf-8"))
+    assert summary["probe_valid"] is False
+    assert summary["rejection_reason"] == reason
+    assert summary["worst_probe"] is None
+    assert summary["leakage_worst"] is None
+    assert summary["source_artifact"] == "leakage_probes.json"
+    assert summary["probes"] == {
+        "mlp/z_logits": {"r2_clipped": None},
+        "mlp/reconstruction": {"r2_clipped": None},
+        "linear/z_logits": {"r2_clipped": None},
+        "linear/reconstruction": {"r2_clipped": None},
+    }
+
 
 def test_successful_probe_evaluation_returns_valid_outcome(
     monkeypatch,

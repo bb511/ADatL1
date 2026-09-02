@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import warnings
+import logging
+from time import perf_counter
 
 import numpy as np
 from sklearn.exceptions import ConvergenceWarning
@@ -27,6 +29,27 @@ from .types import (
     ProbeInnerPartition,
     ProbeRepresentationSet,
 )
+
+log = logging.getLogger(__name__)
+
+
+def _record_mlp_history(estimator: MLPRegressor) -> dict[str, tuple[float, ...]]:
+    """Copy sklearn's diagnostics without changing its optimizer/early stopping."""
+    return {
+        "loss_curve": tuple(float(value) for value in getattr(estimator, "loss_curve_", ())),
+        "early_stopping_validation_scores": tuple(
+            float(value) for value in (getattr(estimator, "validation_scores_", None) or ())
+        ),
+    }
+
+
+def _log_mlp_fit_result(label: str, estimator, elapsed: float, fit_warnings) -> None:
+    log.info(
+        "%s finished in %.1fs: epochs=%d, last training loss=%.6g.",
+        label, elapsed, estimator.n_iter_, estimator.loss_,
+    )
+    for message in fit_warnings:
+        log.warning("%s: %s", label, message)
 
 def _validate_candidate_inputs(
     features: np.ndarray,
@@ -196,8 +219,17 @@ def fit_mlp_probe_candidate(
     estimator = MLPRegressor(
         **MLP_PROBE_CONFIG,
         random_state=seed,
+        verbose=True,
     )
 
+    label = f"MLP candidate seed={seed}"
+    log.info(
+        "%s starting: fit=%d, inner validation=%d, features=%d; "
+        "epoch loss is in standardized target units. Sklearn validation scores "
+        "use its internal early-stopping subset, not the held-out split.",
+        label, len(target_fit), len(target_validation), features.shape[1],
+    )
+    started = perf_counter()
     try:
         with warnings.catch_warnings(record=True) as caught:
             warnings.simplefilter(
@@ -224,6 +256,7 @@ def fit_mlp_probe_candidate(
     )
 
     _validate_fitted_mlp(estimator)
+    _log_mlp_fit_result(label, estimator, perf_counter() - started, convergence_warnings)
 
     scaled_predictions = np.asarray(
         estimator.predict(
@@ -275,6 +308,7 @@ def fit_mlp_probe_candidate(
             "The MLP produced a non-finite inner-validation MAE.",
         )
 
+    log.info("%s inner score: R2=%.6f, MAE=%.6g GeV.", label, inner_r2_raw, inner_mae_gev)
     return MLPProbeCandidateResult(
         seed=seed,
         inner_r2_raw=inner_r2_raw,
@@ -285,6 +319,7 @@ def fit_mlp_probe_candidate(
         feature_scaler=feature_scaler,
         target_scaler=target_scaler,
         estimator=estimator,
+        **_record_mlp_history(estimator),
     )
 
 
@@ -339,6 +374,7 @@ def select_mlp_probe_seed(
                 seed=seed,
             )
         except ProbeFitError as error:
+            log.warning("MLP candidate seed=%d failed (%s): %s", seed, error.reason, error)
             failed_candidates.append(
                 MLPProbeCandidateFailure(
                     seed=seed,
@@ -356,6 +392,7 @@ def select_mlp_probe_seed(
             )
 
         if not np.isfinite(candidate.inner_r2_raw):
+            log.warning("MLP candidate seed=%d rejected: non-finite inner R2.", seed)
             failed_candidates.append(
                 MLPProbeCandidateFailure(
                     seed=seed,
@@ -388,6 +425,11 @@ def select_mlp_probe_seed(
         ):
             selected_candidate = candidate
 
+    log.info(
+        "Selected MLP seed=%d using highest raw inner R2=%.6f (%d successful, %d failed).",
+        selected_candidate.seed, selected_candidate.inner_r2_raw,
+        len(successful_candidates), len(failed_candidates),
+    )
     return MLPProbeSeedSelection(
         selected_seed=selected_candidate.seed,
         selected_candidate=selected_candidate,
@@ -530,8 +572,15 @@ def refit_selected_mlp_probe(
     estimator = MLPRegressor(
         **MLP_PROBE_CONFIG,
         random_state=selected_seed,
+        verbose=True,
     )
 
+    label = f"MLP fresh refit seed={selected_seed}"
+    log.info(
+        "%s starting: development=%d, held-out=%d, features=%d.",
+        label, len(train_target), len(validation_target), train_features.shape[1],
+    )
+    started = perf_counter()
     try:
         with warnings.catch_warnings(record=True) as caught:
             warnings.simplefilter(
@@ -559,6 +608,7 @@ def refit_selected_mlp_probe(
     )
 
     _validate_fitted_mlp(estimator)
+    _log_mlp_fit_result(label, estimator, perf_counter() - started, convergence_warnings)
 
     try:
         scaled_predictions = np.asarray(
@@ -624,6 +674,10 @@ def refit_selected_mlp_probe(
             "Outer-validation MAE is non-finite.",
         )
 
+    log.info(
+        "%s held-out score: R2=%.6f, clipped R2=%.6f, MAE=%.6g GeV.",
+        label, outer_r2_raw, max(0.0, outer_r2_raw), outer_mae_gev,
+    )
     return MLPProbeOuterResult(
         selected_seed=selected_seed,
         outer_r2_raw=outer_r2_raw,
@@ -637,6 +691,7 @@ def refit_selected_mlp_probe(
         feature_scaler=feature_scaler,
         target_scaler=target_scaler,
         estimator=estimator,
+        **_record_mlp_history(estimator),
     )
 
 
@@ -669,6 +724,12 @@ def evaluate_mlp_probe_representation(
         representation_name,
     )
 
+    log.info(
+        "Starting MLP probe for %s: %d features, development=%s (%d), held-out=%s (%d).",
+        representation_name, train_features.shape[1], train_representations.split,
+        train_representations.n_events, validation_representations.split,
+        validation_representations.n_events,
+    )
     selection = select_mlp_probe_seed(
         train_features,
         train_representations.sensitive_target,
@@ -788,4 +849,3 @@ def evaluate_primary_mlp_probes(
         inner_partition=partition,
         leakage_worst=float(leakage_worst),
     )
-

@@ -43,6 +43,8 @@ class RecordingRegressor:
         ]
         self.n_iter_ = 7
         self.loss_ = 0.02
+        self.loss_curve_ = [0.8, 0.5, 0.3, 0.2, 0.1, 0.04, 0.02]
+        self.validation_scores_ = [-0.2, 0.1, 0.2, 0.3, 0.5, 0.6, 0.7]
 
         return self
 
@@ -189,6 +191,7 @@ def test_refit_creates_fresh_scalers_and_estimator(
     assert result.estimator.kwargs == {
         **dict(MLP_PROBE_CONFIG),
         "random_state": 123,
+        "verbose": True,
     }
 
 
@@ -271,6 +274,8 @@ def test_outer_metrics_are_reported_in_physical_units(
     assert result.n_validation == 6
     assert result.n_iter == 7
     assert result.final_loss == pytest.approx(0.02)
+    assert result.loss_curve == tuple(result.estimator.loss_curve_)
+    assert result.early_stopping_validation_scores == tuple(result.estimator.validation_scores_)
 
 
 def test_negative_outer_r2_is_preserved_and_clipped(

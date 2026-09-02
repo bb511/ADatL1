@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import json
+import logging
+from time import perf_counter
 from collections.abc import Mapping
 from pathlib import Path
 from typing import Any
@@ -22,15 +24,20 @@ from .errors import (
 from .evaluation import evaluate_four_leakage_probes
 from .extraction import extract_probe_split
 from .provenance import concatenate_probe_representation_sets
+from .plotting import write_probe_loss_plots
 from .serialization import (
     four_probe_result_payload,
+    four_probe_summary_payload,
     leakage_probe_run_metadata_payload,
 )
+
 from .types import (
     FourProbeEvaluationResult,
     LeakageProbeRunMetadata,
     LeakageProbeRunOutcome,
 )
+
+log = logging.getLogger(__name__)
 
 def leakage_probe_output_path(
     run_folder: str | Path,
@@ -69,30 +76,28 @@ def leakage_probe_output_path(
     )
 
 
-def write_leakage_probe_results(
-    result: FourProbeEvaluationResult,
+def leakage_probe_summary_output_path(
     run_folder: str | Path,
+    *,
+    evaluation_mode: str = "validation",
+    smoke_test: bool = False,
 ) -> Path:
-    """Write all four probe results below one checkpoint run."""
+    """Return the compact summary path without mixing smoke and science."""
 
-    output_path = leakage_probe_output_path(
+    detailed_path = leakage_probe_output_path(
         run_folder,
-        evaluation_mode=result.evaluation_context.mode,
-        smoke_test=(
-            result.evaluation_context.development_data.max_samples
-            is not None
-            or result.evaluation_context.held_out_data.max_samples
-            is not None
-        ),
+        evaluation_mode=evaluation_mode,
+        smoke_test=smoke_test,
     )
-    output_path.parent.mkdir(
-        parents=True,
-        exist_ok=True,
+    return detailed_path.with_name(
+        "leakage_probes_smoke_summary.json"
+        if smoke_test
+        else "leakage_probes_summary.json"
     )
 
-    payload = four_probe_result_payload(result)
 
-    output_path.write_text(
+def _write_json_artifact(path: Path, payload: Mapping[str, Any]) -> None:
+    path.write_text(
         json.dumps(
             payload,
             indent=2,
@@ -103,6 +108,60 @@ def write_leakage_probe_results(
         encoding="utf-8",
     )
 
+
+def _write_leakage_probe_summary(
+    detailed_payload: Mapping[str, Any],
+    detailed_path: Path,
+    *,
+    smoke_test: bool,
+) -> Path:
+    summary_path = detailed_path.with_name(
+        "leakage_probes_smoke_summary.json"
+        if smoke_test
+        else "leakage_probes_summary.json"
+    )
+    summary_payload = four_probe_summary_payload(
+        detailed_payload,
+        source_artifact=detailed_path.name,
+    )
+    _write_json_artifact(summary_path, summary_payload)
+    log.info("Saved compact probe summary JSON: %s", summary_path)
+    return summary_path
+
+
+def write_leakage_probe_results(
+    result: FourProbeEvaluationResult,
+    run_folder: str | Path,
+) -> Path:
+    """Write all four probe results below one checkpoint run."""
+
+    smoke_test = (
+        result.evaluation_context.development_data.max_samples
+        is not None
+        or result.evaluation_context.held_out_data.max_samples
+        is not None
+    )
+    output_path = leakage_probe_output_path(
+        run_folder,
+        evaluation_mode=result.evaluation_context.mode,
+        smoke_test=smoke_test,
+    )
+    output_path.parent.mkdir(
+        parents=True,
+        exist_ok=True,
+    )
+
+    payload = four_probe_result_payload(result)
+    write_probe_loss_plots(payload, output_path)
+
+    _write_json_artifact(output_path, payload)
+    _write_leakage_probe_summary(
+        payload,
+        output_path,
+        smoke_test=smoke_test,
+    )
+
+    log.info("Saved four-probe JSON: %s", output_path)
     return output_path
 
 
@@ -152,6 +211,7 @@ def write_invalid_leakage_probe_result(
                 "leakage_worst": None,
             }
         )
+        write_probe_loss_plots(payload, output_path)
     else:
         payload = {
             "leakage_probe_protocol_version": (
@@ -177,17 +237,14 @@ def write_invalid_leakage_probe_result(
             "probes": {},
         }
 
-    output_path.write_text(
-        json.dumps(
-            payload,
-            indent=2,
-            sort_keys=True,
-            allow_nan=False,
-        )
-        + "\n",
-        encoding="utf-8",
+    _write_json_artifact(output_path, payload)
+    _write_leakage_probe_summary(
+        payload,
+        output_path,
+        smoke_test=smoke_test,
     )
 
+    log.error("Saved invalid probe JSON (%s): %s", error.reason, output_path)
     return output_path
 
 
@@ -263,6 +320,13 @@ def evaluate_and_write_loss_total_leakage_probes(
     run_folder = Path(run_folder)
     checkpoint_path = run_folder / "loss_total.ckpt"
 
+    started = perf_counter()
+    log.info(
+        "Leakage evaluation starting: mode=%s, sample caps=%s, shuffled controls=%s. "
+        "Loading checkpoint %s.",
+        evaluation_mode, sample_caps or "uncapped", run_shuffled_target_controls, checkpoint_path,
+    )
+
     if not checkpoint_path.is_file():
         raise ProbeExtractionError(
             "loss_total_checkpoint_missing",
@@ -301,6 +365,8 @@ def evaluate_and_write_loss_total_leakage_probes(
     finally:
         del state_dict
         del checkpoint
+
+    log.info("Frozen checkpoint restored; extracting development and held-out representations.")
 
     if run_metadata is None:
         run_metadata = LeakageProbeRunMetadata(
@@ -379,6 +445,12 @@ def evaluate_and_write_loss_total_leakage_probes(
     output_path = write_leakage_probe_results(
         result,
         run_folder,
+    )
+
+    log.info(
+        "Leakage evaluation finished in %.1fs; output=%s%s.",
+        perf_counter() - started, output_path,
+        " (SMOKE ONLY; not reportable)" if sample_caps else "",
     )
 
     return result, output_path

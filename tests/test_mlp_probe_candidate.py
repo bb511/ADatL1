@@ -39,6 +39,8 @@ class RecordingRegressor:
         ]
         self.n_iter_ = 5
         self.loss_ = 0.01
+        self.loss_curve_ = [0.6, 0.4, 0.2, 0.05, 0.01]
+        self.validation_scores_ = [-1.0, 0.0, 0.2, 0.5, 0.75]
 
         return self
 
@@ -120,6 +122,7 @@ def test_candidate_uses_frozen_mlp_configuration(
     assert result.estimator.kwargs == {
         **dict(MLP_PROBE_CONFIG),
         "random_state": 10,
+        "verbose": True,
     }
     assert (
         result.estimator.kwargs["hidden_layer_sizes"]
@@ -208,6 +211,8 @@ def test_candidate_scores_predictions_in_physical_units(
     )
     assert result.n_iter == 5
     assert result.final_loss == pytest.approx(0.01)
+    assert result.loss_curve == tuple(result.estimator.loss_curve_)
+    assert result.early_stopping_validation_scores == tuple(result.estimator.validation_scores_)
 
 
 def test_convergence_warning_is_recorded_but_not_rejected(

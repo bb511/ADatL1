@@ -791,6 +791,18 @@ def test_final_test_output_path_uses_test_stage(tmp_path) -> None:
         / "leakage_probes.json"
     )
 
+    assert leakage_probe_persistence.leakage_probe_summary_output_path(
+        tmp_path,
+        evaluation_mode="final_test",
+    ) == (
+        tmp_path
+        / "plots"
+        / "test"
+        / "loss_total"
+        / "probes"
+        / "leakage_probes_summary.json"
+    )
+
 
 def test_smoke_output_path_cannot_overwrite_scientific_artifact(
     tmp_path,
@@ -806,6 +818,19 @@ def test_smoke_output_path_cannot_overwrite_scientific_artifact(
         / "loss_total"
         / "probes"
         / "leakage_probes_smoke.json"
+    )
+
+    assert leakage_probe_persistence.leakage_probe_summary_output_path(
+        tmp_path,
+        evaluation_mode="validation",
+        smoke_test=True,
+    ) == (
+        tmp_path
+        / "plots"
+        / "val"
+        / "loss_total"
+        / "probes"
+        / "leakage_probes_smoke_summary.json"
     )
 
 

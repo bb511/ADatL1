@@ -178,7 +178,15 @@ def test_payload_contains_every_mlp_initialization() -> None:
     latent_payload = payload["probes"]["mlp/z_logits"]
     diagnostics = latent_payload["seed_selection"]
 
-    assert diagnostics == {
+    # The existing fields retain their meaning; numeric histories are additive.
+    without_histories = {
+        **diagnostics,
+        "candidates": [
+            {key: value for key, value in candidate.items() if key != "training_history"}
+            for candidate in diagnostics["candidates"]
+        ],
+    }
+    assert without_histories == {
         "selected_seed": 123,
         "candidates": [
             {

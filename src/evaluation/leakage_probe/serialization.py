@@ -1,5 +1,6 @@
 """Serialize and log leakage-probe results."""
 
+from collections.abc import Mapping
 from typing import Any
 
 import numpy as np
@@ -14,6 +15,7 @@ from .types import (
     LeakageProbeRunMetadata,
     MLPProbeCandidateFailure,
     MLPProbeCandidateResult,
+    MLPProbeOuterResult,
     MLPProbeSeedSelection,
     NamedLinearProbeResult,
     NamedMLPProbeResult,
@@ -21,6 +23,41 @@ from .types import (
     ProbeSplitProvenance,
     ShuffledTargetMLPResult,
 )
+
+
+SUMMARY_PROBE_NAMES = (
+    "mlp/z_logits",
+    "mlp/reconstruction",
+    "linear/z_logits",
+    "linear/reconstruction",
+)
+
+
+def _finite_or_none(value) -> float | None:
+    """Keep optional diagnostics JSON-safe, including unavailable history points."""
+    if value is None:
+        return None
+    value = float(value)
+    return value if np.isfinite(value) else None
+
+
+def _mlp_training_history_payload(
+    fit: MLPProbeCandidateResult | MLPProbeOuterResult,
+) -> dict[str, Any]:
+    return {
+        "epochs": list(range(1, len(fit.loss_curve) + 1)),
+        "loss": [_finite_or_none(value) for value in fit.loss_curve],
+        "loss_definition": "sklearn training objective on standardized targets, including L2 penalty",
+        "loss_units": "dimensionless",
+        "early_stopping_validation_r2": [
+            _finite_or_none(value) for value in fit.early_stopping_validation_scores
+        ],
+        "validation_scope": "internal early-stopping subset of the fit pool; not the held-out split",
+        "note": (
+            "Loss is recorded during optimization. Early stopping restores the best internal "
+            "validation weights, so final_loss is not necessarily the restored model's loss."
+        ),
+    }
 
 
 def leakage_probe_run_metadata_payload(
@@ -91,6 +128,7 @@ def _successful_mlp_candidate_payload(
         ),
         "n_iter": int(candidate.n_iter),
         "final_loss": float(candidate.final_loss),
+        "training_history": _mlp_training_history_payload(candidate),
     }
 
 def _failed_mlp_candidate_payload(
@@ -240,6 +278,7 @@ def _probe_result_payload(
                 ),
                 "n_iter": int(outer.n_iter),
                 "final_loss": float(outer.final_loss),
+                "training_history": _mlp_training_history_payload(outer),
                 "seed_selection": (
                     _mlp_seed_selection_payload(
                         probe.seed_selection
@@ -247,6 +286,14 @@ def _probe_result_payload(
                 ),
             }
         )
+    elif isinstance(probe, NamedLinearProbeResult):
+        payload["loss_summary"] = {
+            "method": "direct_least_squares",
+            "epochs": None,
+            "development_mse_gev2": _finite_or_none(outer.train_mse_gev2),
+            "held_out_mse_gev2": _finite_or_none(outer.outer_mse_gev2),
+            "note": "LinearRegression is a direct solve; no epoch loss history exists.",
+        }
 
     return payload
 
@@ -291,6 +338,67 @@ def four_probe_result_payload(
                 )
             ),
         },
+    }
+
+
+def four_probe_summary_payload(
+    detailed_payload: Mapping[str, Any],
+    *,
+    source_artifact: str,
+) -> dict[str, Any]:
+    """Build a compact, provenance-aware view of one detailed probe result."""
+
+    detailed_probes = detailed_payload.get("probes", {})
+    if not isinstance(detailed_probes, Mapping):
+        detailed_probes = {}
+
+    probes: dict[str, dict[str, float | None]] = {}
+    for name in SUMMARY_PROBE_NAMES:
+        detailed_probe = detailed_probes.get(name)
+        clipped_r2 = (
+            detailed_probe.get("r2_clipped")
+            if isinstance(detailed_probe, Mapping)
+            else None
+        )
+        probes[name] = {
+            "r2_clipped": _finite_or_none(clipped_r2),
+        }
+
+    evaluation = detailed_payload.get("evaluation", {})
+    if not isinstance(evaluation, Mapping):
+        evaluation = {}
+    development = evaluation.get("development_data")
+    held_out = evaluation.get("held_out_data")
+
+    def split_manifest(split: Any) -> str | None:
+        return (
+            split.get("event_manifest_hash")
+            if isinstance(split, Mapping)
+            else None
+        )
+
+    run = detailed_payload.get("run", {})
+    return {
+        "leakage_probe_summary_schema_version": 1,
+        "source_artifact": source_artifact,
+        "leakage_probe_protocol_version": detailed_payload.get(
+            "leakage_probe_protocol_version"
+        ),
+        "probe_valid": bool(detailed_payload.get("probe_valid", False)),
+        "rejection_reason": detailed_payload.get("rejection_reason"),
+        "run": dict(run) if isinstance(run, Mapping) else {},
+        "evaluation": {
+            "mode": evaluation.get("mode"),
+            "purpose": evaluation.get("purpose"),
+            "reporting_eligible": evaluation.get("reporting_eligible"),
+            "development_event_manifest_hash": split_manifest(development),
+            "held_out_event_manifest_hash": split_manifest(held_out),
+        },
+        "worst_probe": detailed_payload.get("worst_probe"),
+        "leakage_worst": _finite_or_none(
+            detailed_payload.get("leakage_worst")
+        ),
+        "probes": probes,
     }
 
 

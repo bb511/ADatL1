@@ -1,5 +1,8 @@
 """Linear leakage probes for latent and reconstructed features."""
 
+import logging
+from time import perf_counter
+
 import numpy as np
 from sklearn.linear_model import LinearRegression
 from sklearn.metrics import mean_absolute_error, r2_score
@@ -17,6 +20,19 @@ from .types import (
     PrimaryLinearProbeResult,
     ProbeRepresentationSet,
 )
+
+log = logging.getLogger(__name__)
+
+
+def _training_mse(estimator, features: np.ndarray, target: np.ndarray) -> float:
+    """Measure final training MSE with bounded diagnostic prediction memory."""
+    squared_error = 0.0
+    for start in range(0, len(target), 65536):
+        stop = min(start + 65536, len(target))
+        predictions = np.asarray(estimator.predict(features[start:stop]), dtype=np.float64)
+        residuals = predictions.reshape(-1) - target[start:stop]
+        squared_error += float(np.dot(residuals, residuals))
+    return squared_error / len(target)
 
 def fit_linear_probe(
     train_features: np.ndarray,
@@ -63,6 +79,12 @@ def fit_linear_probe(
 
     estimator = LinearRegression()
 
+    log.info(
+        "Linear least-squares fit starting: development=%d, held-out=%d, features=%d "
+        "(direct solve; no training epochs).",
+        len(train_target), len(validation_target), train_features.shape[1],
+    )
+    started = perf_counter()
     try:
         estimator.fit(
             scaled_train_features,
@@ -140,6 +162,15 @@ def fit_linear_probe(
             "Linear outer-validation MAE is non-finite.",
         )
 
+    train_mse = _training_mse(estimator, scaled_train_features, train_target)
+    residuals = predictions_gev.astype(np.float64) - validation_target
+    outer_mse = float(np.dot(residuals, residuals) / len(residuals))
+    log.info(
+        "Linear probe finished in %.1fs: held-out R2=%.6f, clipped R2=%.6f, "
+        "MAE=%.6g GeV; MSE development=%.6g, held-out=%.6g GeV^2.",
+        perf_counter() - started, outer_r2_raw, max(0.0, outer_r2_raw),
+        outer_mae_gev, train_mse, outer_mse,
+    )
     return LinearProbeOuterResult(
         outer_r2_raw=outer_r2_raw,
         outer_r2_clipped=max(0.0, outer_r2_raw),
@@ -148,6 +179,8 @@ def fit_linear_probe(
         n_validation=int(validation_features.shape[0]),
         feature_scaler=feature_scaler,
         estimator=estimator,
+        train_mse_gev2=train_mse,
+        outer_mse_gev2=outer_mse,
     )
 
 
@@ -176,6 +209,7 @@ def evaluate_linear_probe_representation(
         representation_name,
     )
 
+    log.info("Starting linear probe for %s.", representation_name)
     outer_result = fit_linear_probe(
         train_features,
         train_representations.sensitive_target,
@@ -246,4 +280,3 @@ def evaluate_primary_linear_probes(
         latent_logits=latent_result,
         reconstructed_data=reconstruction_result,
     )
-

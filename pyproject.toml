@@ -10,7 +10,7 @@ readme = "README.md"
 
 requires-python = ">=3.10"
 dependencies = [
-    "adl1t-datamaker @ git+https://github.com/bb511/adl1t_datamaker.git@e594a3d3ec3bc0ee46bdcad2d22565db9e152586",
+    "adl1t-datamaker @ git+https://github.com/bb511/adl1t_datamaker.git@30ac5c50ceb8f5b0a447824d35a3f51d1a14c65a",
     "torch (==2.*)",
     "torchvision (==0.*)",
     "pytorch-lightning (==2.*)",
@@ -32,6 +32,7 @@ dependencies = [
     "sqlalchemy (<2)",
     "optuna (==2.10.1)",
     "pyarrow (>=21,<23)",
+    "scikit-learn (>=1.7.2,<2.0.0)",
     "datasets (>=4.8.4,<5.0.0)",
     "huggingface-hub (>=1.11.0,<2.0.0)",
 ]

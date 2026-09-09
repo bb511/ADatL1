@@ -29,6 +29,13 @@ def test_pareto_fet_manifest_composes_and_freezes_protocol(
     assert cfg.evaluation.leakage_probes.smoke_test.max_events_per_split is None
     assert cfg.evaluation.evaluator.ckpts.last is False
     assert cfg.evaluation.evaluator.ckpts.loss_total is True
+    assert cfg.evaluation.callbacks.anomaly_auroc.ckpts.loss_total is True
+    assert cfg.evaluation.callbacks.anomaly_auroc.score_direction == (
+        "higher_score_is_more_anomalous"
+    )
+    assert float(
+        cfg.evaluation.callbacks.anomaly_auroc.max_false_positive_rate
+    ) == 0.25 / 28608.8064
     assert cfg.callbacks.loss_total_ckpt.monitor == "val/loss_total"
     assert cfg.callbacks.loss_total_ckpt.mode == "min"
     assert cfg.data.model_input_exclude_features == ["FET.Et"]

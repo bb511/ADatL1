@@ -65,6 +65,7 @@ def test_operational_efficiency_summary_is_written_for_named_checkpoint(
     }
     assert payload["num_signal_datasets"] == 3
     assert payload["mean_efficiency"] == pytest.approx(0.4)
+    assert payload["median_efficiency"] == pytest.approx(0.4)
     assert payload["min_efficiency"] == pytest.approx(0.1)
     assert payload["min_efficiency_dataset"] == "signal_a"
     assert payload["cvar25_efficiency"] == pytest.approx(0.1)
@@ -101,6 +102,34 @@ def test_efficiency_summary_cvar25_averages_five_worst_of_twenty_signals(
     assert payload["cvar25_efficiency"] == pytest.approx(0.03)
 
 
+def test_efficiency_summary_uses_the_signal_median_not_the_mean(
+    tmp_path: Path,
+) -> None:
+    callback = AnomalyEfficiencyCallback(
+        output_name="ascore/full",
+        ds=[],
+        log_raw_mlflow=False,
+    )
+    callback.base_rate_resolved = 28608.8064
+    output_path = tmp_path / "eff_summary.json"
+
+    callback._write_efficiency_summary(
+        output_path,
+        checkpoint_name="loss_total.ckpt",
+        split="val",
+        target_rate=0.25,
+        signal_efficiencies={
+            "signal_a": 0.1,
+            "signal_b": 0.2,
+            "signal_c": 0.9,
+        },
+    )
+
+    payload = json.loads(output_path.read_text(encoding="utf-8"))
+    assert payload["mean_efficiency"] == pytest.approx(0.4)
+    assert payload["median_efficiency"] == pytest.approx(0.2)
+
+
 def test_efficiency_summary_distinguishes_zero_efficiency_from_missing_signals(
     tmp_path: Path,
 ) -> None:
@@ -124,6 +153,7 @@ def test_efficiency_summary_distinguishes_zero_efficiency_from_missing_signals(
     measured = json.loads(measured_path.read_text(encoding="utf-8"))
     assert measured["num_signal_datasets"] == 1
     assert measured["mean_efficiency"] == pytest.approx(0.0)
+    assert measured["median_efficiency"] == pytest.approx(0.0)
     assert measured["min_efficiency"] == pytest.approx(0.0)
     assert measured["min_efficiency_dataset"] == "signal_zero"
     assert measured["cvar25_efficiency"] == pytest.approx(0.0)
@@ -142,6 +172,7 @@ def test_efficiency_summary_distinguishes_zero_efficiency_from_missing_signals(
     missing = json.loads(missing_path.read_text(encoding="utf-8"))
     assert missing["num_signal_datasets"] == 0
     assert missing["mean_efficiency"] is None
+    assert missing["median_efficiency"] is None
     assert missing["min_efficiency"] is None
     assert missing["min_efficiency_dataset"] is None
     assert missing["cvar25_efficiency"] is None

@@ -224,6 +224,20 @@ evaluation:
       cvar_summary: 0.25
       log_raw_mlflow: false
 
+    anomaly_auroc:
+      _target_: src.evaluation.callbacks.auroc.AnomalyAUROCCallback
+      output_name: 'ascore/full'
+      ds: ${evaluation.callbacks.anomaly_efficiency.ds}
+      # This is the same fixed operating region as the Pareto manifest:
+      # algorithm.target_rate / algorithm.base_rate.
+      max_false_positive_rate: ${div:${algorithm.target_rate},${algorithm.base_rate}}
+      pure_normal: false
+      score_direction: higher_score_is_more_anomalous
+      ckpts:
+        loss_total: true
+      log_raw_mlflow: false
+      name: auroc
+
     ascore_operational:
       _target_: src.evaluation.callbacks.output.OutputCallback
       name: ascore_operational

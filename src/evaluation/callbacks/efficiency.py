@@ -299,7 +299,7 @@ class AnomalyEfficiencyCallback(Callback):
         target_rate: float,
         signal_efficiencies: dict[str, float],
     ) -> None:
-        """Write mean/min signal efficiency at the operational point as JSON."""
+        """Write per-signal and summary efficiencies at the operational point."""
         per_signal = {
             str(dataset): float(efficiency)
             for dataset, efficiency in sorted(signal_efficiencies.items())
@@ -308,6 +308,7 @@ class AnomalyEfficiencyCallback(Callback):
 
         if signal_data.size:
             mean_efficiency = float(np.mean(signal_data))
+            median_efficiency = float(np.median(signal_data))
             min_efficiency = float(np.min(signal_data))
             min_efficiency_dataset = min(per_signal, key=per_signal.get)
             cvar25_count = max(1, int(np.ceil(0.25 * signal_data.size)))
@@ -316,6 +317,7 @@ class AnomalyEfficiencyCallback(Callback):
             )
         else:
             mean_efficiency = None
+            median_efficiency = None
             min_efficiency = None
             min_efficiency_dataset = None
             cvar25_efficiency = None
@@ -335,6 +337,7 @@ class AnomalyEfficiencyCallback(Callback):
             },
             "num_signal_datasets": len(per_signal),
             "mean_efficiency": mean_efficiency,
+            "median_efficiency": median_efficiency,
             "min_efficiency": min_efficiency,
             "min_efficiency_dataset": min_efficiency_dataset,
             "cvar25_efficiency": cvar25_efficiency,

@@ -29,6 +29,10 @@ def test_pareto_fet_manifest_composes_and_freezes_protocol(
     assert cfg.evaluation.leakage_probes.smoke_test.max_events_per_split is None
     assert cfg.evaluation.evaluator.ckpts.last is False
     assert cfg.evaluation.evaluator.ckpts.loss_total is True
+    assert cfg.evaluation.callbacks.latent_collapse.ckpts.loss_total is True
+    assert cfg.evaluation.callbacks.latent_collapse.dataset == "normal"
+    assert cfg.evaluation.callbacks.latent_collapse.evaluation_split == "val"
+    assert cfg.evaluation.callbacks.latent_collapse.source_split == "valid"
     assert cfg.evaluation.callbacks.anomaly_auroc.ckpts.loss_total is True
     assert cfg.evaluation.callbacks.anomaly_auroc.score_direction == (
         "higher_score_is_more_anomalous"

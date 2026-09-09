@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import hashlib
-import json
 import logging
 from time import perf_counter
 from pathlib import Path
@@ -13,6 +12,7 @@ import numpy as np
 import torch
 
 from src.data.utils import unpack_batch
+from src.evaluation.artifact_provenance import data_cache_identity
 
 from .errors import ProbeExtractionError
 from .constants import PROBE_EVENT_SAMPLE_SEED
@@ -85,33 +85,16 @@ def _probe_cache_identity(
     control_object_feature_map: dict[str, Any],
 ) -> tuple[str, str]:
     """Return a stable identity for the concrete mlready cache."""
-
-    cache_folder = getattr(
-        datamodule,
-        "main_cache_folder",
-        None,
-    )
-    if cache_folder is None:
+    if getattr(datamodule, "control_object_feature_map", None) is None:
+        datamodule.control_object_feature_map = control_object_feature_map
+    try:
+        identity = data_cache_identity(datamodule)
+    except RuntimeError as error:
         raise ProbeExtractionError(
             "probe_cache_identity_missing",
-            "The datamodule does not expose main_cache_folder.",
-        )
-
-    cache_path = str(
-        Path(cache_folder).expanduser().resolve()
-    )
-    descriptor = {
-        "cache_path": cache_path,
-        "control_object_feature_map": (
-            control_object_feature_map
-        ),
-    }
-    canonical = json.dumps(
-        descriptor,
-        sort_keys=True,
-        separators=(",", ":"),
-    ).encode("utf-8")
-    return hashlib.sha256(canonical).hexdigest(), cache_path
+            str(error),
+        ) from error
+    return identity["id"], identity["path"]
 
 
 def _update_event_manifest(

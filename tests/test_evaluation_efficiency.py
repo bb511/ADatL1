@@ -4,9 +4,11 @@ from types import SimpleNamespace
 from unittest.mock import Mock
 
 import pytest
+import torch
 
 from src.evaluation.callbacks import efficiency as efficiency_module
 from src.evaluation.callbacks.efficiency import AnomalyEfficiencyCallback
+from src.evaluation.artifact_provenance import EventManifest
 
 
 def test_operational_efficiency_summary_is_written_for_named_checkpoint(
@@ -16,6 +18,11 @@ def test_operational_efficiency_summary_is_written_for_named_checkpoint(
         output_name="ascore/full",
         ds=["signal_a", "signal_b", "signal_c"],
         log_raw_mlflow=False,
+        artifact_provenance={
+            "protocol_version": "fet-et-pareto-v1",
+            "configuration_id": "seed-independent-configuration",
+            "autoencoder_seed": 123,
+        },
     )
     callback.target_rates_resolved = [0.25]
     callback.operational_rate = 0.25
@@ -40,7 +47,26 @@ def test_operational_efficiency_summary_is_written_for_named_checkpoint(
     checkpoint_path = (
         tmp_path / "checkpoints" / "physics_ae_models" / "run_1" / "loss_total.ckpt"
     )
-    trainer = SimpleNamespace(split="val")
+    checkpoint_path.parent.mkdir(parents=True)
+    checkpoint_path.write_bytes(b"frozen checkpoint")
+    callback._event_manifest = EventManifest("valid")
+    for dataset in ("normal", "signal_a", "signal_b", "signal_c"):
+        batch = (
+            torch.zeros((1, 1)),
+            torch.ones((1, 1), dtype=torch.bool),
+            torch.zeros(1, dtype=torch.bool),
+            torch.ones(1),
+            torch.zeros((1, 1)),
+            torch.ones((1, 1), dtype=torch.bool),
+        )
+        callback._event_manifest.update_batch(dataset, batch)
+    trainer = SimpleNamespace(
+        split="val",
+        artifact_provenance_datamodule=SimpleNamespace(
+            main_cache_folder=tmp_path / "mlready-cache",
+            control_object_feature_map={"FET": {"Et": [0]}},
+        ),
+    )
     module = SimpleNamespace(_ckpt_path=checkpoint_path)
 
     callback.on_test_epoch_end(trainer, module)
@@ -74,6 +100,9 @@ def test_operational_efficiency_summary_is_written_for_named_checkpoint(
         "signal_b": pytest.approx(0.4),
         "signal_c": pytest.approx(0.7),
     }
+    assert payload["provenance"]["configuration_id"] == "seed-independent-configuration"
+    assert payload["provenance"]["evaluation_mode"] == "validation"
+    assert payload["metric_contract"]["efficiency"]["unit"] == "fraction"
 
 
 def test_efficiency_summary_cvar25_averages_five_worst_of_twenty_signals(

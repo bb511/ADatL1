@@ -50,14 +50,16 @@ def make_leakage_probe_run_metadata(
     *,
     autoencoder_seed: int | None,
     algorithm_config: Any | None,
+    configuration_id: str | None = None,
 ) -> LeakageProbeRunMetadata:
     """Construct run identity for persistence and aggregation."""
 
-    configuration_id = (
-        leakage_probe_configuration_id(algorithm_config)
-        if algorithm_config is not None
-        else None
-    )
+    if configuration_id is None:
+        configuration_id = (
+            leakage_probe_configuration_id(algorithm_config)
+            if algorithm_config is not None
+            else None
+        )
     return LeakageProbeRunMetadata(
         autoencoder_seed=(
             int(autoencoder_seed)

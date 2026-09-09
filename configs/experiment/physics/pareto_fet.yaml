@@ -35,6 +35,13 @@ pareto_study:
   # one hyperparameter configuration must aggregate under the same identifier.
   configuration_id: ${pareto_study.study_id}__gamma-${pareto_study.candidate.mi_gamma}__bins-${pareto_study.candidate.mi_sensitive_num_bins}__arch-${pareto_study.candidate.architecture_id}
 
+  # Every scientific artifact uses this same envelope so the Phase 2 collector
+  # can reject accidental cross-protocol, cross-seed, or cross-cache joins.
+  artifact_provenance:
+    protocol_version: ${pareto_study.protocol_version}
+    configuration_id: ${pareto_study.configuration_id}
+    autoencoder_seed: ${pareto_study.candidate.autoencoder_seed}
+
   paired_autoencoder_seeds: [123, 456, 789]
   seed_policy:
     pairing_required: true
@@ -171,6 +178,15 @@ algorithm:
 
 evaluation:
   callbacks:
+    anomaly_efficiency:
+      artifact_provenance: ${pareto_study.artifact_provenance}
+
+    anomaly_auroc:
+      artifact_provenance: ${pareto_study.artifact_provenance}
+
+    correlation_matrix:
+      artifact_provenance: ${pareto_study.artifact_provenance}
+
     latent_collapse:
       _target_: src.evaluation.callbacks.latent_collapse.LatentCollapseDiagnosticsCallback
       protocol_version: ${pareto_study.protocol_version}
@@ -185,3 +201,4 @@ evaluation:
       ckpts:
         loss_total: true
       name: latent_collapse
+      artifact_provenance: ${pareto_study.artifact_provenance}

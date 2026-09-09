@@ -33,6 +33,23 @@ def test_pareto_fet_manifest_composes_and_freezes_protocol(
     assert cfg.evaluation.callbacks.latent_collapse.dataset == "normal"
     assert cfg.evaluation.callbacks.latent_collapse.evaluation_split == "val"
     assert cfg.evaluation.callbacks.latent_collapse.source_split == "valid"
+    assert cfg.pareto_study.artifact_provenance.protocol_version == "fet-et-pareto-v1"
+    assert (
+        cfg.pareto_study.artifact_provenance.configuration_id
+        == cfg.pareto_study.configuration_id
+    )
+    assert cfg.evaluation.callbacks.anomaly_efficiency.artifact_provenance == (
+        cfg.pareto_study.artifact_provenance
+    )
+    assert cfg.evaluation.callbacks.anomaly_auroc.artifact_provenance == (
+        cfg.pareto_study.artifact_provenance
+    )
+    assert cfg.evaluation.callbacks.correlation_matrix.artifact_provenance == (
+        cfg.pareto_study.artifact_provenance
+    )
+    assert cfg.evaluation.callbacks.latent_collapse.artifact_provenance == (
+        cfg.pareto_study.artifact_provenance
+    )
     assert cfg.evaluation.callbacks.anomaly_auroc.ckpts.loss_total is True
     assert cfg.evaluation.callbacks.anomaly_auroc.score_direction == (
         "higher_score_is_more_anomalous"

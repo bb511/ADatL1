@@ -162,13 +162,23 @@ def test_latent_collapse_callback_writes_loss_total_validation_artifact(
 
     checkpoint_path = tmp_path / "loss_total.ckpt"
     checkpoint_path.write_bytes(b"checkpoint-contents")
-    callback = make_callback()
+    callback = make_callback(
+        artifact_provenance={
+            "protocol_version": "fet-et-pareto-v1",
+            "configuration_id": "candidate-configuration",
+            "autoencoder_seed": 123,
+        }
+    )
     trainer = SimpleNamespace(
         split="val",
         strat_name="loss_total",
         metric_name=None,
         criterion_name=None,
         test_dataloaders={"normal": object()},
+        artifact_provenance_datamodule=SimpleNamespace(
+            main_cache_folder=tmp_path / "mlready-cache",
+            control_object_feature_map={"FET": {"Et": [0]}},
+        ),
     )
     batch = (
         torch.tensor([[-1.0, -1.0], [1.0, 1.0]]),
@@ -204,6 +214,19 @@ def test_latent_collapse_callback_writes_loss_total_validation_artifact(
     assert payload["representation"]["bernoulli_probability_threshold"] == 0.5
     assert payload["metrics"]["joint_code_entropy_bits"] == pytest.approx(1.0)
     assert payload["decision"]["pass"] is True
+    assert payload["provenance"]["protocol_version"] == "fet-et-pareto-v1"
+    assert payload["provenance"]["configuration_id"] == "candidate-configuration"
+    assert payload["provenance"]["evaluation_mode"] == "validation"
+    assert payload["provenance"]["checkpoint"]["name"] == "loss_total.ckpt"
+    assert payload["provenance"]["data"]["event_manifest"]["datasets"] == {
+        "normal": {
+            "n_events": 2,
+            "event_manifest_hash": payload["evaluation"]["event_manifest_hash"],
+            "event_manifest_components": payload["evaluation"][
+                "event_manifest_components"
+            ],
+        }
+    }
 
 
 def test_latent_collapse_runs_only_for_loss_total_validation() -> None:

@@ -338,6 +338,26 @@ def four_probe_result_payload(
                 )
             ),
         },
+        "metric_contract": {
+            "r2_raw": {
+                "definition": "Held-out coefficient of determination without clipping.",
+                "unit": "dimensionless",
+            },
+            "r2_clipped": {
+                "definition": "max(0, held-out coefficient of determination).",
+                "unit": "dimensionless",
+                "range": [0.0, None],
+            },
+            "mae_gev": {
+                "definition": "Held-out mean absolute error on denormalized FET.Et.",
+                "unit": "GeV",
+            },
+            "leakage_worst": {
+                "definition": "Maximum clipped held-out R2 across all four probes.",
+                "unit": "dimensionless",
+                "range": [0.0, None],
+            },
+        },
     }
 
 
@@ -378,7 +398,7 @@ def four_probe_summary_payload(
         )
 
     run = detailed_payload.get("run", {})
-    return {
+    payload = {
         "leakage_probe_summary_schema_version": 1,
         "source_artifact": source_artifact,
         "leakage_probe_protocol_version": detailed_payload.get(
@@ -400,6 +420,10 @@ def four_probe_summary_payload(
         ),
         "probes": probes,
     }
+    if detailed_payload.get("provenance") is not None:
+        payload["metric_contract"] = detailed_payload.get("metric_contract")
+        payload["provenance"] = detailed_payload.get("provenance")
+    return payload
 
 
 def four_probe_metric_values(

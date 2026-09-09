@@ -16,6 +16,13 @@ import torch
 from pytorch_lightning.callbacks import Callback
 
 from src.data.utils import unpack_batch
+from src.evaluation.artifact_provenance import (
+    checkpoint_identity_from_trainer,
+    data_cache_identity_from_trainer,
+    evaluation_mode_from_trainer_split,
+    make_artifact_provenance,
+    normalize_artifact_identity,
+)
 
 
 class LatentCollapseDiagnosticsCallback(Callback):
@@ -40,6 +47,7 @@ class LatentCollapseDiagnosticsCallback(Callback):
         source_split: str = "valid",
         ckpts: dict | None = None,
         name: str = "latent_collapse",
+        artifact_provenance: dict | None = None,
     ) -> None:
         super().__init__()
 
@@ -79,6 +87,7 @@ class LatentCollapseDiagnosticsCallback(Callback):
         self.source_split = source_split
         self.ckpts = ckpts or {"loss_total": True}
         self.name = name
+        self.artifact_provenance = normalize_artifact_identity(artifact_provenance)
         self._active = False
 
     def on_test_epoch_start(self, trainer, pl_module) -> None:
@@ -184,7 +193,7 @@ class LatentCollapseDiagnosticsCallback(Callback):
         output_folder.mkdir(parents=True, exist_ok=True)
         self._write_summary(
             output_folder / "collapse_summary.json",
-            checkpoint=self._checkpoint_identity(ckpt_path),
+            checkpoint=checkpoint_identity_from_trainer(trainer, ckpt_path),
             trainer=trainer,
             pl_module=pl_module,
         )
@@ -359,7 +368,7 @@ class LatentCollapseDiagnosticsCallback(Callback):
         )
         bernoulli_threshold = self._bernoulli_threshold(pl_module)
         payload = {
-            "schema_version": 1,
+            "schema_version": 2,
             "protocol_version": self.protocol_version,
             "run": {
                 "configuration_id": self.configuration_id,
@@ -390,6 +399,22 @@ class LatentCollapseDiagnosticsCallback(Callback):
                 "paired_reference": "same_architecture_and_autoencoder_seed",
             },
             "metrics": metrics,
+            "metric_contract": {
+                "binary_entropy_bits": {
+                    "definition": "-p log2(p) - (1-p) log2(1-p) for each hard-code bit.",
+                    "unit": "bits",
+                    "range": [0.0, 1.0],
+                },
+                "joint_code_entropy_bits": {
+                    "definition": "Empirical Shannon entropy of complete hard binary codes.",
+                    "unit": "bits",
+                    "range": [0.0, float(self._latent_width)],
+                },
+                "effective_code_count": {
+                    "definition": "2 raised to joint_code_entropy_bits.",
+                    "unit": "count",
+                },
+            },
             "decision": {
                 "pass": absolute_pass,
                 "pass_scope": "absolute_joint_code_entropy_only",
@@ -403,9 +428,45 @@ class LatentCollapseDiagnosticsCallback(Callback):
                 "configuration_policy": "every_expected_seed_must_pass",
             },
         }
+        provenance = self._provenance_payload(
+            trainer,
+            checkpoint,
+            event_manifest_hash,
+            event_manifest_components,
+        )
+        if provenance is not None:
+            payload["provenance"] = provenance
         output_path.write_text(
             json.dumps(payload, indent=2, sort_keys=True, allow_nan=False) + "\n",
             encoding="utf-8",
+        )
+
+    def _provenance_payload(
+        self,
+        trainer: Any,
+        checkpoint: dict[str, Any],
+        event_manifest_hash: str,
+        event_manifest_components: dict[str, str],
+    ) -> dict[str, Any] | None:
+        if self.artifact_provenance is None:
+            return None
+        event_manifest = {
+            "source_split": self.source_split,
+            "event_manifest_hash": event_manifest_hash,
+            "datasets": {
+                self.dataset: {
+                    "n_events": self._n_events,
+                    "event_manifest_hash": event_manifest_hash,
+                    "event_manifest_components": event_manifest_components,
+                }
+            },
+        }
+        return make_artifact_provenance(
+            self.artifact_provenance,
+            checkpoint=checkpoint,
+            evaluation_mode=evaluation_mode_from_trainer_split(trainer.split),
+            data_cache=data_cache_identity_from_trainer(trainer),
+            event_manifest=event_manifest,
         )
 
     @staticmethod

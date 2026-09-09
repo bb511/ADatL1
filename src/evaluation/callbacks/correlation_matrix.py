@@ -10,6 +10,14 @@ from pytorch_lightning.callbacks import Callback
 
 from src.data.utils import unpack_batch
 from src.evaluation.callbacks import utils
+from src.evaluation.artifact_provenance import (
+    EventManifest,
+    checkpoint_identity_from_trainer,
+    data_cache_identity_from_trainer,
+    evaluation_mode_from_trainer_split,
+    make_artifact_provenance,
+    normalize_artifact_identity,
+)
 from src.plot import matrix
 
 
@@ -63,6 +71,7 @@ class CorrelationMatrixCallback(Callback):
         max_events: int | None = None,
         name: str = "correlation_matrix",
         log_raw_mlflow: bool = True,
+        artifact_provenance: dict | None = None,
     ):
         super().__init__()
         self.variables = variables or [
@@ -94,6 +103,7 @@ class CorrelationMatrixCallback(Callback):
         self.max_events = max_events
         self.name = name
         self.log_raw_mlflow = log_raw_mlflow
+        self.artifact_provenance = normalize_artifact_identity(artifact_provenance)
 
         if self.aggregate not in {"sum", "mean", "max", "first"}:
             raise ValueError(
@@ -150,6 +160,15 @@ class CorrelationMatrixCallback(Callback):
                 )
         self._buffers = {}
         self._event_counts = {}
+        self._event_manifest = (
+            EventManifest(
+                "valid"
+                if evaluation_mode_from_trainer_split(trainer.split) == "validation"
+                else "test"
+            )
+            if self.artifact_provenance is not None
+            else None
+        )
 
     def on_test_batch_end(
         self, trainer, pl_module, outputs, batch, batch_idx, dataloader_idx=0
@@ -196,6 +215,8 @@ class CorrelationMatrixCallback(Callback):
         n_keep = self._num_events_to_keep(dset_name, x.size(0))
         if n_keep <= 0:
             return
+        if self._event_manifest is not None:
+            self._event_manifest.update_batch(dset_name, batch, rows=n_keep)
 
         x = x[:n_keep]
         mask = None if mask is None else mask[:n_keep]
@@ -396,6 +417,7 @@ class CorrelationMatrixCallback(Callback):
             self._write_mean_correlations(
                 mean_correlations,
                 plot_folder / "mean_correlations.json",
+                provenance=self._provenance_payload(trainer, pl_module),
             )
 
         # The source tables can contain millions of event values. They are no longer
@@ -651,6 +673,7 @@ class CorrelationMatrixCallback(Callback):
         self,
         mean_correlations: dict[str, dict[str, dict[str, float | int]]],
         output_path: Path,
+        provenance: dict | None = None,
     ) -> None:
         """Write sensitive-variable means and reconstructed Pareto metric ``C``."""
         reconstruction = mean_correlations.get("reconstruction", {})
@@ -669,6 +692,7 @@ class CorrelationMatrixCallback(Callback):
         pareto_c = max(max(0.0, mean_pearson), max(0.0, mean_spearman))
 
         payload = {
+            "schema_version": 2,
             "sensitive_variable": self.sensitive_variable,
             "definition": (
                 "Arithmetic mean of absolute correlations between the sensitive "
@@ -678,14 +702,59 @@ class CorrelationMatrixCallback(Callback):
             "mean_pearson_correlation": mean_pearson,
             "mean_spearman_correlation": mean_spearman,
             "C": pareto_c,
+            "E": pareto_c,
             "C_definition": (
                 "max(max(0, mean_pearson_correlation), "
                 "max(0, mean_spearman_correlation)) using reconstruction means"
             ),
+            "E_definition": (
+                "Canonical Pareto residual-correlation objective; identical to C "
+                "for backwards-compatible artifacts."
+            ),
+            "metric_contract": {
+                "mean_pearson_correlation": {
+                    "definition": (
+                        "Mean absolute Pearson correlation of the sensitive variable "
+                        "with all other reconstructed variables."
+                    ),
+                    "unit": "dimensionless",
+                    "range": [0.0, 1.0],
+                },
+                "mean_spearman_correlation": {
+                    "definition": (
+                        "Mean absolute Spearman correlation of the sensitive variable "
+                        "with all other reconstructed variables."
+                    ),
+                    "unit": "dimensionless",
+                    "range": [0.0, 1.0],
+                },
+                "E": {
+                    "definition": "max(mean_pearson_correlation, mean_spearman_correlation)",
+                    "unit": "dimensionless",
+                    "range": [0.0, 1.0],
+                },
+            },
         }
+        if provenance is not None:
+            payload["provenance"] = provenance
         output_path.write_text(
             json.dumps(payload, indent=2, sort_keys=True, allow_nan=False) + "\n",
             encoding="utf-8",
+        )
+
+    def _provenance_payload(self, trainer, pl_module) -> dict | None:
+        if self.artifact_provenance is None:
+            return None
+        if self._event_manifest is None:
+            raise RuntimeError(
+                "Correlation provenance event manifest was not initialized."
+            )
+        return make_artifact_provenance(
+            self.artifact_provenance,
+            checkpoint=checkpoint_identity_from_trainer(trainer, pl_module._ckpt_path),
+            evaluation_mode=evaluation_mode_from_trainer_split(trainer.split),
+            data_cache=data_cache_identity_from_trainer(trainer),
+            event_manifest=self._event_manifest.payload(),
         )
 
     def _write_correlation_matrix_variants(

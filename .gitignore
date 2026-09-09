@@ -191,3 +191,8 @@ outputs
 
 # Aim logging
 .aim
+
+# Data Analysis Tools
+*.csv
+*.tsv
+*.xlsx

@@ -154,7 +154,7 @@ class RobustADDataModule(LightningDataModule):
 
     def teardown(self, stage: str | None = None) -> None:
         """Release cached tensors between stages."""
-        if stage in ("fit", None):
+        if stage in ("fit", "validate", None):
             self._main.pop("train", None)
             self._main.pop("valid", None)
             self._aux["valid"].clear()
@@ -165,6 +165,8 @@ class RobustADDataModule(LightningDataModule):
         if torch.cuda.is_available():
             torch.cuda.empty_cache()
             torch.cuda.ipc_collect()
+        if torch.backends.mps.is_available():
+            torch.mps.empty_cache()
 
     def transfer_batch_to_device(self, batch, device, dataloader_idx):
         """Move tuple batch tensors to device efficiently."""

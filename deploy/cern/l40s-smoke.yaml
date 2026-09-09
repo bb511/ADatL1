@@ -1,0 +1,43 @@
+apiVersion: batch/v1
+kind: Job
+metadata:
+  generateName: adl1t-l40s-smoke-
+  labels:
+    app.kubernetes.io/name: adl1t-l40s-smoke
+spec:
+  backoffLimit: 0
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: adl1t-l40s-smoke
+    spec:
+      restartPolicy: Never
+      nodeSelector:
+        nvidia.com/gpu.product: NVIDIA-L40S
+      containers:
+        - name: smoke
+          image: registry.cern.ch/adl1t/adl1t_lab@sha256:931d40d59a8640151bdc484720513935179bb04bebe53fe105d4877dfff351f2
+          imagePullPolicy: IfNotPresent
+          command: ["bash", "-lc"]
+          args:
+            - |
+              set -euo pipefail
+              echo "Python:"
+              python3 --version
+              echo "CUDA_VISIBLE_DEVICES=${CUDA_VISIBLE_DEVICES:-<unset>}"
+
+              if command -v nvidia-smi >/dev/null 2>&1; then
+                nvidia-smi
+              else
+                echo "nvidia-smi is absent; checking NVIDIA device injection."
+                test -e /dev/nvidiactl
+                ls -l /dev/nvidia*
+              fi
+          resources:
+            requests:
+              cpu: "1"
+              memory: 2Gi
+            limits:
+              cpu: "2"
+              memory: 4Gi
+              nvidia.com/gpu: "1"

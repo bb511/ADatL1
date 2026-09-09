@@ -32,26 +32,27 @@
 # CAP training
 # ------------------------------------------------------------------------
 # taskset -c 3-5 \
-# python3 src/train.py \
-#     experiment=cifar10/ae_agnostic \
-#     run_name=cap_t211 \
-#     callbacks.wasserstein_dist=null \
-#     callbacks.thres_drift=null \
-#     callbacks.wasserstein_dist_ema_ckpt=null \
-#     callbacks.thres_drift_ema_ckpt=null \
-#     ~evaluation.evaluator.ckpts.summary.operational_drift_ema \
-#     ~evaluation.evaluator.ckpts.summary.w1dist_ema_normal_vs_reference_normal \
-#     trainer.gradient_clip_val=1.0 \
-#     algorithm.delta=3.0 \
-#     algorithm.input_noise_std=0.0 \
-#     algorithm.encoder.nodes=[32,64,128] \
-#     algorithm.encoder.strides=[2,1] \
-#     algorithm.encoder.activation=gelu \
-#     algorithm.optimizer.lr=0.0028555698070213114 \
-#     algorithm.optimizer.betas=[0.9,0.99] \
-#     algorithm.optimizer.weight_decay=0.0001 \
-#     trainer=gpu \
-#     trainer.devices=[1]
+python3 src/train.py \
+    experiment=cifar10/ae_agnostic \
+    run_name=cap_t211 \
+    callbacks.wasserstein_dist=null \
+    callbacks.thres_drift=null \
+    callbacks.wasserstein_dist_ema_ckpt=null \
+    callbacks.thres_drift_ema_ckpt=null \
+    ~evaluation.evaluator.ckpts.summary.operational_drift_ema \
+    ~evaluation.evaluator.ckpts.summary.w1dist_ema_normal_vs_reference_normal \
+    trainer.gradient_clip_val=1.0 \
+    algorithm.delta=3.0 \
+    algorithm.input_noise_std=0.0 \
+    algorithm.encoder.nodes=[32,64,128] \
+    algorithm.encoder.strides=[2,1] \
+    algorithm.encoder.activation=gelu \
+    algorithm.optimizer.lr=0.0028555698070213114 \
+    algorithm.optimizer.betas=[0.9,0.99] \
+    algorithm.optimizer.weight_decay=0.0001 \
+    trainer.max_epochs=50 \
+    trainer=gpu \
+    trainer.devices=[0]
 
 # ------------------------------------------------------------------------
 # Stability training

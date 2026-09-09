@@ -7,8 +7,14 @@ from collections import defaultdict
 from tqdm import tqdm
 import pandas as pd
 
-import wandb
-from wandb.errors.errors import CommError
+try:
+    import wandb
+    from wandb.errors.errors import CommError
+except ModuleNotFoundError:
+    wandb = None
+
+    class CommError(Exception):
+        """Fallback used when the optional W&B dependency is unavailable."""
 
 
 def retrieve_from_history(run, keyname, max_retries=5):
@@ -40,6 +46,10 @@ def adatl1_wandb(
     dirname: str = "results",
     cache: bool = False,
 ) -> pd.DataFrame:
+    if wandb is None:
+        raise ModuleNotFoundError(
+            "adatl1_wandb requires the optional 'wandb' package to be installed."
+        )
 
     api = wandb.Api(timeout=100)
     config_filters = [
@@ -204,3 +214,40 @@ def adatl1_wandb(
             pickle.dump(df, file)
 
     return df, fpath
+
+
+if __name__ == "__main__":
+    class FakeHistoryRun:
+        def scan_history(self, keys):
+            key = keys[0]
+            return [{key: 0.9}, {key: None}, {key: 0.7}]
+
+    class FakeApi:
+        def __init__(self, timeout):
+            self.timeout = timeout
+
+        def runs(self, project, filters):
+            return []
+
+    history = retrieve_from_history(FakeHistoryRun(), "loss")
+    assert history == [0.9, 0.7]
+
+    repo_root = osp.abspath(osp.join(osp.dirname(__file__), "..", ".."))
+    output_dir = osp.join(repo_root, "logs", "plots", "retrieve_manual_test")
+    original_wandb = wandb
+    try:
+        class FakeWandb:
+            Api = FakeApi
+
+        wandb = FakeWandb()
+        frame, output_path = adatl1_wandb(
+            group="manual-test",
+            dirname=output_dir,
+            cache=False,
+        )
+    finally:
+        wandb = original_wandb
+
+    assert frame.empty
+    assert output_path.endswith(osp.join("manual-test", "joint.pkl"))
+    print("Manual retrieval tests passed without contacting W&B.")

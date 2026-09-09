@@ -19,27 +19,36 @@ class L1ADDataset(IterableDataset):
         batch_size: int,
         max_batches: int | None = None,
         shuffler: torch.Generator | None = None,
+        control_data: torch.Tensor | None = None,
+        control_mask: torch.Tensor | None = None,
     ):
         assert data.shape[0] == mask.shape[0]
         assert labels.shape[0] == data.shape[0]
 
+        if control_data is not None:
+            assert control_data.shape[0] == data.shape[0]
+
+        if control_mask is not None:
+            assert control_data is not None
+            assert control_mask.shape[0] == control_data.shape[0]
+
         self.data, self.mask, self.l1bit, self.labels = data, mask, l1bit, labels
+        self.control_data = control_data
+        self.control_mask = control_mask
         self.batch_size = batch_size
         self.shuffler = shuffler
 
         self.max_batches = max_batches
         self.n = data.shape[0]
         self.num_batches = (self.n + self.batch_size - 1) // self.batch_size
-        self.starts = (
-            torch.arange(self.num_batches, dtype=torch.int64) * self.batch_size
-        )
+        self.starts = torch.arange(self.num_batches, dtype=torch.int64) * self.batch_size
 
     def __len__(self):
         if self.max_batches is None:
             return self.num_batches
         return min(self.num_batches, int(self.max_batches))
 
-    def __iter__(self) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+    def __iter__(self):
         if self.shuffler:
             order = torch.randperm(self.num_batches, generator=self.shuffler)
             starts = self.starts[order]
@@ -65,7 +74,12 @@ class L1ADDataset(IterableDataset):
             l = self.l1bit[s:e]
             y = self.labels[s:e]
 
-            yield x, m, l, y
+            if self.control_data is None:
+                yield x, m, l, y
+            else:
+                cx = self.control_data[s:e]
+                cm = None if self.control_mask is None else self.control_mask[s:e]
+                yield x, m, l, y, cx, cm
 
             nb += 1
 

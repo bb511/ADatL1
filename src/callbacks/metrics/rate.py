@@ -53,8 +53,9 @@ class AnomalyRate(Metric):
         """Set threshold corresponding to the target FPR."""
         fpr = self._compute_target_fpr()
         q = 1.0 - fpr
+        threshold_input = bkg_score.detach().float().cpu()
         thr = torch.quantile(
-            bkg_score.float(),
+            threshold_input,
             q,
             interpolation="higher",
         ).to(self.threshold.device)

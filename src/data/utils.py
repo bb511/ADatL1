@@ -15,28 +15,49 @@ def load_object_feature_map(path: str) -> Dict[str, Dict[str, List[int]]]:
         for obj, feats in data.items()
     }
 
-
 @dataclass
 class BatchView:
+    # Model-input tensor used by the anomaly detector.
     x: torch.Tensor
     y: torch.Tensor
     mask: torch.Tensor | None = None
     l1bit: torch.Tensor | None = None
 
+    # Full/control tensor kept for variables that must not be reconstructed,
+    # e.g. FET.Et when it is used only as an MI decorrelation target.
+    control_x: torch.Tensor | None = None
+    control_mask: torch.Tensor | None = None
+
 
 def unpack_batch(batch: Any) -> BatchView:
     if isinstance(batch, (tuple, list)):
+        if len(batch) == 6:
+            x, mask, l1bit, y, control_x, control_mask = batch
+            return BatchView(
+                x=x,
+                y=y,
+                mask=mask,
+                l1bit=l1bit,
+                control_x=control_x,
+                control_mask=control_mask,
+            )
+
         if len(batch) == 4:
             x, mask, l1bit, y = batch
             return BatchView(x=x, y=y, mask=mask, l1bit=l1bit)
+
         if len(batch) == 2:
             x, y = batch
             return BatchView(x=x, y=y)
+
     if isinstance(batch, dict):
         return BatchView(
             x=batch["x"],
             y=batch["y"],
             mask=batch.get("mask"),
             l1bit=batch.get("l1bit"),
+            control_x=batch.get("control_x"),
+            control_mask=batch.get("control_mask"),
         )
+
     raise ValueError(f"Unsupported batch format: {type(batch)}")

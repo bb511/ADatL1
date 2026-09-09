@@ -199,22 +199,10 @@ def train(cfg: DictConfig) -> Tuple[Dict[str, Any], Dict[str, Any]]:
                 smoke_test_cfg.get("max_events_per_split"),
                 resolve=True,
             )
-        pareto_study_cfg = cfg.get("pareto_study")
-        pareto_artifact_provenance = (
-            pareto_study_cfg.get("artifact_provenance")
-            if pareto_study_cfg is not None
-            and pareto_study_cfg.get("enabled", False)
-            else None
-        )
         leakage_probe_run_metadata = (
             make_leakage_probe_run_metadata(
                 autoencoder_seed=cfg.get("seed"),
                 algorithm_config=cfg.algorithm,
-                configuration_id=(
-                    str(pareto_study_cfg.configuration_id)
-                    if pareto_artifact_provenance is not None
-                    else None
-                ),
             )
         )
         log.info(
@@ -241,7 +229,6 @@ def train(cfg: DictConfig) -> Tuple[Dict[str, Any], Dict[str, Any]]:
                 evaluation_mode=leakage_probe_evaluation_mode,
                 run_metadata=leakage_probe_run_metadata,
                 max_samples_by_split=smoke_test_sample_caps,
-                artifact_provenance=pareto_artifact_provenance,
             )
         )
 
@@ -493,11 +480,6 @@ def _get_evaluator(cfg: DictConfig, datamodule, logger):
         logger=logger,
         optimized_metric_config=cfg.get("optimized_metric_config"),
     )
-    # Standalone evaluator runs receive dataloaders directly, so Lightning does not
-    # own a datamodule reference. Keep this explicit reference for scientific
-    # artifact callbacks to fingerprint the concrete mlready cache they evaluate.
-    evaluator.evaluator.artifact_provenance_datamodule = datamodule
-
     return evaluator
 
 

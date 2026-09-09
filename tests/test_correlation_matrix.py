@@ -5,10 +5,8 @@ from types import SimpleNamespace
 import numpy as np
 import pandas as pd
 import pytest
-import torch
 
 from src.evaluation.callbacks.correlation_matrix import CorrelationMatrixCallback
-from src.evaluation.artifact_provenance import EventManifest
 
 
 def test_checkpoint_selection_supports_named_root_checkpoint() -> None:
@@ -65,11 +63,6 @@ def test_test_epoch_end_writes_method_folders_sources_means_and_sorted_matrices(
         variables=labels,
         correlation_methods=["pearson", "spearman"],
         sensitive_variable="a.Et",
-        artifact_provenance={
-            "protocol_version": "fet-et-pareto-v1",
-            "configuration_id": "seed-independent-configuration",
-            "autoencoder_seed": 123,
-        },
     )
     callback._active = True
     callback._resolved_variables = [{"label": label} for label in labels]
@@ -80,29 +73,13 @@ def test_test_epoch_end_writes_method_folders_sources_means_and_sorted_matrices(
         }
     }
     callback._event_counts = {"normal": len(input_table[labels[0]])}
-    callback._event_manifest = EventManifest("test")
-    provenance_batch = (
-        torch.zeros((len(input_table[labels[0]]), 1)),
-        torch.ones((len(input_table[labels[0]]), 1), dtype=torch.bool),
-        torch.zeros(len(input_table[labels[0]]), dtype=torch.bool),
-        torch.zeros(len(input_table[labels[0]])),
-        torch.zeros((len(input_table[labels[0]]), 1)),
-        torch.ones((len(input_table[labels[0]]), 1), dtype=torch.bool),
-    )
-    callback._event_manifest.update_batch("normal", provenance_batch)
     monkeypatch.setattr(callback, "_write_metadata", lambda *args, **kwargs: None)
 
     checkpoint_path = tmp_path / "last.ckpt"
     checkpoint_path.write_bytes(b"frozen checkpoint")
 
     callback.on_test_epoch_end(
-        trainer=SimpleNamespace(
-            split="test",
-            artifact_provenance_datamodule=SimpleNamespace(
-                main_cache_folder=tmp_path / "mlready-cache",
-                control_object_feature_map={"FET": {"Et": [0]}},
-            ),
-        ),
+        trainer=SimpleNamespace(split="test"),
         pl_module=SimpleNamespace(_ckpt_path=checkpoint_path),
     )
 
@@ -165,9 +142,6 @@ def test_test_epoch_end_writes_method_folders_sources_means_and_sorted_matrices(
     assert summary["C"] == pytest.approx(
         max(max(0.0, expected_pearson), max(0.0, expected_spearman))
     )
-    assert summary["E"] == pytest.approx(summary["C"])
-    assert summary["provenance"]["evaluation_mode"] == "final_test"
-    assert summary["metric_contract"]["E"]["unit"] == "dimensionless"
     assert callback._buffers == {}
     assert callback._event_counts == {}
 
@@ -197,6 +171,42 @@ def test_write_mean_correlations_uses_larger_absolute_mean_for_pareto_c(
     assert summary["mean_pearson_correlation"] == 0.4
     assert summary["mean_spearman_correlation"] == 0.25
     assert summary["C"] == 0.4
+
+
+def test_correlation_summary_can_omit_source_tables_and_plots(tmp_path: Path) -> None:
+    callback = CorrelationMatrixCallback(
+        variables=["a.Et", "b.Et"],
+        correlation_methods=["pearson", "spearman"],
+        sensitive_variable="a.Et",
+        write_details=False,
+    )
+    callback._active = True
+    callback._buffers = {
+        "normal": {
+            "input": [
+                {
+                    "a.Et": np.array([0.0, 1.0, 2.0]),
+                    "b.Et": np.array([2.0, 1.0, 0.0]),
+                }
+            ],
+            "reconstruction": [
+                {
+                    "a.Et": np.array([0.0, 1.0, 2.0]),
+                    "b.Et": np.array([0.0, 1.0, 2.0]),
+                }
+            ],
+        }
+    }
+    callback._event_counts = {"normal": 3}
+    checkpoint_path = tmp_path / "loss_total.ckpt"
+
+    callback.on_test_epoch_end(
+        trainer=SimpleNamespace(split="val"),
+        pl_module=SimpleNamespace(_ckpt_path=checkpoint_path),
+    )
+
+    output_dir = tmp_path / "plots/val/loss_total/correlation_matrix/normal"
+    assert {path.name for path in output_dir.iterdir()} == {"mean_correlations.json"}
 
 
 def test_sort_correlation_change_matrix_orders_both_axes_by_off_diagonal_mean() -> None:

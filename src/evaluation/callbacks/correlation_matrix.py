@@ -10,14 +10,6 @@ from pytorch_lightning.callbacks import Callback
 
 from src.data.utils import unpack_batch
 from src.evaluation.callbacks import utils
-from src.evaluation.artifact_provenance import (
-    EventManifest,
-    checkpoint_identity_from_trainer,
-    data_cache_identity_from_trainer,
-    evaluation_mode_from_trainer_split,
-    make_artifact_provenance,
-    normalize_artifact_identity,
-)
 from src.plot import matrix
 
 
@@ -54,6 +46,9 @@ class CorrelationMatrixCallback(Callback):
         small. None means use all events.
     :param name: Name of the callback and output subfolder.
     :param log_raw_mlflow: Whether to log generated image files to MLflow.
+    :param enabled: Whether to evaluate this callback for the current run.
+    :param write_details: Whether to write source tables, matrices, and plots in
+        addition to the compact Pearson/Spearman summary.
     """
 
     def __init__(
@@ -71,7 +66,8 @@ class CorrelationMatrixCallback(Callback):
         max_events: int | None = None,
         name: str = "correlation_matrix",
         log_raw_mlflow: bool = True,
-        artifact_provenance: dict | None = None,
+        enabled: bool = True,
+        write_details: bool = True,
     ):
         super().__init__()
         self.variables = variables or [
@@ -103,7 +99,8 @@ class CorrelationMatrixCallback(Callback):
         self.max_events = max_events
         self.name = name
         self.log_raw_mlflow = log_raw_mlflow
-        self.artifact_provenance = normalize_artifact_identity(artifact_provenance)
+        self.enabled = bool(enabled)
+        self.write_details = bool(write_details)
 
         if self.aggregate not in {"sum", "mean", "max", "first"}:
             raise ValueError(
@@ -121,7 +118,7 @@ class CorrelationMatrixCallback(Callback):
 
     def on_test_epoch_start(self, trainer, pl_module):
         """Determine whether to run and initialise per-dataset buffers."""
-        self._active = self._should_run_for_current_ckpt(trainer)
+        self._active = self.enabled and self._should_run_for_current_ckpt(trainer)
         if not self._active:
             return
 
@@ -160,15 +157,6 @@ class CorrelationMatrixCallback(Callback):
                 )
         self._buffers = {}
         self._event_counts = {}
-        self._event_manifest = (
-            EventManifest(
-                "valid"
-                if evaluation_mode_from_trainer_split(trainer.split) == "validation"
-                else "test"
-            )
-            if self.artifact_provenance is not None
-            else None
-        )
 
     def on_test_batch_end(
         self, trainer, pl_module, outputs, batch, batch_idx, dataloader_idx=0
@@ -215,8 +203,6 @@ class CorrelationMatrixCallback(Callback):
         n_keep = self._num_events_to_keep(dset_name, x.size(0))
         if n_keep <= 0:
             return
-        if self._event_manifest is not None:
-            self._event_manifest.update_batch(dset_name, batch, rows=n_keep)
 
         x = x[:n_keep]
         mask = None if mask is None else mask[:n_keep]
@@ -283,7 +269,8 @@ class CorrelationMatrixCallback(Callback):
                 ckpts_dir / "plots" / split / ckpt_name / self.name / dset_name
             )
             plot_folder.mkdir(parents=True, exist_ok=True)
-            self._write_metadata(plot_folder, dset_name)
+            if self.write_details:
+                self._write_metadata(plot_folder, dset_name)
             correlations: dict[tuple[str, str], pd.DataFrame] = {}
             space_dataframes: dict[str, pd.DataFrame] = {}
 
@@ -302,29 +289,26 @@ class CorrelationMatrixCallback(Callback):
 
                     correlations[(space_name, method)] = corr
 
-            # Keep one parent-level copy for existing analysis utilities and write a
-            # copy into every method folder so each correlation result is standalone.
-            self._write_correlation_source_tables(space_dataframes, plot_folder)
+            if self.write_details:
+                # Keep one parent-level copy for existing analysis utilities and write
+                # a copy into every method folder so each result is standalone.
+                self._write_correlation_source_tables(space_dataframes, plot_folder)
 
             mean_correlations: dict[str, dict[str, dict[str, float | int]]] = {}
             for method in self.correlation_methods:
                 method_name = method.capitalize()
                 method_folder = plot_folder / method_name
-                method_folder.mkdir(parents=True, exist_ok=True)
-                self._write_correlation_source_tables(
-                    space_dataframes,
-                    method_folder,
-                )
+                if self.write_details:
+                    method_folder.mkdir(parents=True, exist_ok=True)
+                    self._write_correlation_source_tables(
+                        space_dataframes,
+                        method_folder,
+                    )
 
                 for space_name in space_dataframes:
                     corr = correlations.get((space_name, method))
                     if corr is None:
                         continue
-
-                    corr.to_csv(
-                        method_folder
-                        / f"{space_name}_{method}_correlation_matrix.csv"
-                    )
 
                     mean_value, num_other_variables = (
                         self._mean_sensitive_variable_correlation(corr)
@@ -334,26 +318,35 @@ class CorrelationMatrixCallback(Callback):
                         "num_other_variables": num_other_variables,
                     }
 
-                    title = {
-                        "input": f"{method_name} correlation matrix before training",
-                        "reconstruction": (
-                            f"{method_name} correlation matrix after training"
-                        ),
-                    }.get(
-                        space_name,
-                        f"{method_name} correlation matrix: {space_name}",
-                    )
+                    if self.write_details:
+                        corr.to_csv(
+                            method_folder
+                            / f"{space_name}_{method}_correlation_matrix.csv"
+                        )
+                        title = {
+                            "input": f"{method_name} correlation matrix before training",
+                            "reconstruction": (
+                                f"{method_name} correlation matrix after training"
+                            ),
+                        }.get(
+                            space_name,
+                            f"{method_name} correlation matrix: {space_name}",
+                        )
 
-                    self._write_correlation_matrix_variants(
-                        corr=corr,
-                        plot_folder=method_folder,
-                        stem=f"{space_name}_{method}_correlation_matrix",
-                        title=title,
-                    )
+                        self._write_correlation_matrix_variants(
+                            corr=corr,
+                            plot_folder=method_folder,
+                            stem=f"{space_name}_{method}_correlation_matrix",
+                            title=title,
+                        )
 
                 corr_before = correlations.get(("input", method))
                 corr_after = correlations.get(("reconstruction", method))
-                if corr_before is not None and corr_after is not None:
+                if (
+                    self.write_details
+                    and corr_before is not None
+                    and corr_after is not None
+                ):
                     common_labels = [
                         label
                         for label in corr_before.index
@@ -405,19 +398,19 @@ class CorrelationMatrixCallback(Callback):
                             sort_ascending=ascending,
                         )
 
-                utils.mlflow.log_plots_to_mlflow(
-                    trainer,
-                    ckpt_name,
-                    f"{self.name}/{method_name}",
-                    method_folder,
-                    log_raw=self.log_raw_mlflow,
-                    gallery_name=f"{dset_name}_{self.name}_{method}",
-                )
+                if self.write_details:
+                    utils.mlflow.log_plots_to_mlflow(
+                        trainer,
+                        ckpt_name,
+                        f"{self.name}/{method_name}",
+                        method_folder,
+                        log_raw=self.log_raw_mlflow,
+                        gallery_name=f"{dset_name}_{self.name}_{method}",
+                    )
 
             self._write_mean_correlations(
                 mean_correlations,
                 plot_folder / "mean_correlations.json",
-                provenance=self._provenance_payload(trainer, pl_module),
             )
 
         # The source tables can contain millions of event values. They are no longer
@@ -673,9 +666,8 @@ class CorrelationMatrixCallback(Callback):
         self,
         mean_correlations: dict[str, dict[str, dict[str, float | int]]],
         output_path: Path,
-        provenance: dict | None = None,
     ) -> None:
-        """Write sensitive-variable means and reconstructed Pareto metric ``C``."""
+        """Write sensitive-variable Pearson/Spearman means and Pareto metric ``C``."""
         reconstruction = mean_correlations.get("reconstruction", {})
         required_methods = ("pearson", "spearman")
         missing = [
@@ -692,7 +684,7 @@ class CorrelationMatrixCallback(Callback):
         pareto_c = max(max(0.0, mean_pearson), max(0.0, mean_spearman))
 
         payload = {
-            "schema_version": 2,
+            "schema_version": 1,
             "sensitive_variable": self.sensitive_variable,
             "definition": (
                 "Arithmetic mean of absolute correlations between the sensitive "
@@ -702,59 +694,14 @@ class CorrelationMatrixCallback(Callback):
             "mean_pearson_correlation": mean_pearson,
             "mean_spearman_correlation": mean_spearman,
             "C": pareto_c,
-            "E": pareto_c,
             "C_definition": (
                 "max(max(0, mean_pearson_correlation), "
                 "max(0, mean_spearman_correlation)) using reconstruction means"
             ),
-            "E_definition": (
-                "Canonical Pareto residual-correlation objective; identical to C "
-                "for backwards-compatible artifacts."
-            ),
-            "metric_contract": {
-                "mean_pearson_correlation": {
-                    "definition": (
-                        "Mean absolute Pearson correlation of the sensitive variable "
-                        "with all other reconstructed variables."
-                    ),
-                    "unit": "dimensionless",
-                    "range": [0.0, 1.0],
-                },
-                "mean_spearman_correlation": {
-                    "definition": (
-                        "Mean absolute Spearman correlation of the sensitive variable "
-                        "with all other reconstructed variables."
-                    ),
-                    "unit": "dimensionless",
-                    "range": [0.0, 1.0],
-                },
-                "E": {
-                    "definition": "max(mean_pearson_correlation, mean_spearman_correlation)",
-                    "unit": "dimensionless",
-                    "range": [0.0, 1.0],
-                },
-            },
         }
-        if provenance is not None:
-            payload["provenance"] = provenance
         output_path.write_text(
             json.dumps(payload, indent=2, sort_keys=True, allow_nan=False) + "\n",
             encoding="utf-8",
-        )
-
-    def _provenance_payload(self, trainer, pl_module) -> dict | None:
-        if self.artifact_provenance is None:
-            return None
-        if self._event_manifest is None:
-            raise RuntimeError(
-                "Correlation provenance event manifest was not initialized."
-            )
-        return make_artifact_provenance(
-            self.artifact_provenance,
-            checkpoint=checkpoint_identity_from_trainer(trainer, pl_module._ckpt_path),
-            evaluation_mode=evaluation_mode_from_trainer_split(trainer.split),
-            data_cache=data_cache_identity_from_trainer(trainer),
-            event_manifest=self._event_manifest.payload(),
         )
 
     def _write_correlation_matrix_variants(

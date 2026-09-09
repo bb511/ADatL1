@@ -10,14 +10,6 @@ from pytorch_lightning.callbacks import Callback
 
 from src.evaluation.callbacks.metrics.rate import AnomalyRate
 from src.evaluation.callbacks import utils
-from src.evaluation.artifact_provenance import (
-    EventManifest,
-    checkpoint_identity_from_trainer,
-    data_cache_identity_from_trainer,
-    evaluation_mode_from_trainer_split,
-    make_artifact_provenance,
-    normalize_artifact_identity,
-)
 from src.plot import horizontal_bar
 from src.data.utils import unpack_batch
 
@@ -41,6 +33,8 @@ class AnomalyEfficiencyCallback(Callback):
     :param ds: List of dataset names to compute efficiencies on.
     :param cvar_summary: Fraction of worst efficiencies to average in the summary.
     :param log_raw_mlflow: Whether to log raw plots to mlflow.
+    :param write_pareto_summary: Whether to write the compact Pareto utility JSON.
+    :param write_plots: Whether to write per-signal plots and MLflow artifacts.
     :param name: Identifier used in plot folders and summaries.
     """
 
@@ -53,8 +47,9 @@ class AnomalyEfficiencyCallback(Callback):
         pure_thres: bool = False,
         cvar_summary: float = 0.25,
         log_raw_mlflow: bool = True,
+        write_pareto_summary: bool = False,
+        write_plots: bool = True,
         name: str = "eff",
-        artifact_provenance: dict | None = None,
     ):
         super().__init__()
         self.device = None
@@ -68,9 +63,10 @@ class AnomalyEfficiencyCallback(Callback):
         self.base_rate = base_rate
         self.pure_thres = pure_thres
         self.cvar_summary = cvar_summary
-        self.artifact_provenance = normalize_artifact_identity(artifact_provenance)
 
         self.log_raw_mlflow = log_raw_mlflow
+        self.write_pareto_summary = bool(write_pareto_summary)
+        self.write_plots = bool(write_plots)
         self.eff_summary = defaultdict(lambda: defaultdict(float))
         self.eff_min = defaultdict(lambda: defaultdict(float))
         self.eff_med = defaultdict(lambda: defaultdict(float))
@@ -96,15 +92,6 @@ class AnomalyEfficiencyCallback(Callback):
         self.sig_rates = defaultdict(lambda: defaultdict(AnomalyRate))
         self.bkg_rates = defaultdict(lambda: defaultdict(AnomalyRate))
         self.normal_score_data = []
-        self._event_manifest = (
-            EventManifest(
-                "valid"
-                if evaluation_mode_from_trainer_split(trainer.split) == "validation"
-                else "test"
-            )
-            if self.artifact_provenance is not None
-            else None
-        )
 
     def on_test_batch_end(
         self, trainer, pl_module, outputs, batch, batch_idx, dataloader_idx=0
@@ -118,21 +105,10 @@ class AnomalyEfficiencyCallback(Callback):
         labels = b.y
 
         if self.dataset_name == "normal":
-            if self._event_manifest is not None:
-                rows = None
-                if self.pure_thres:
-                    if l1bit is None:
-                        raise ValueError(
-                            "pure_thres=True requires l1bit to be present in the batch."
-                        )
-                    rows = ~l1bit
-                self._event_manifest.update_batch(self.dataset_name, batch, rows=rows)
             self._accumulate_normal_output(outputs, batch_idx, l1bit)
         else:
             if self.dataset_name not in self.ds:
                 return
-            if self._event_manifest is not None:
-                self._event_manifest.update_batch(self.dataset_name, batch)
             if batch_idx == 0:
                 self._initialize_rate_metric(labels)
             self._compute_batch_rate(outputs, labels)
@@ -161,36 +137,39 @@ class AnomalyEfficiencyCallback(Callback):
                 self.eff_med[trate][ckpt_ds] = 0.0
                 self.eff_min[trate][ckpt_ds] = 0.0
 
-            trate_label = self._target_label(trate)
-            ascore = f"anomaly score: {self.output_name}"
-            xlabel = f"efficiency at threshold: {trate_label}\n{ascore}"
-            self._plot(effs, xlabel, plot_folder, percent=True)
+            if self.write_plots:
+                trate_label = self._target_label(trate)
+                ascore = f"anomaly score: {self.output_name}"
+                xlabel = f"efficiency at threshold: {trate_label}\n{ascore}"
+                self._plot(effs, xlabel, plot_folder, percent=True)
             self._store_summary(sig_effs, bkg_effs, ckpt_name, trate)
 
             # The Pareto-front utility metrics use the model's fixed operational
             # point. Persist them next to the per-signal efficiency plot for this
             # exact checkpoint and split.
-            if self._is_operational(trate):
+            if self.write_pareto_summary and self._is_operational(trate):
                 self._write_efficiency_summary(
                     plot_folder / "eff_summary.json",
                     checkpoint_name=f"{ckpt_name}.ckpt",
                     split=split,
                     target_rate=trate,
                     signal_efficiencies=sig_effs,
-                    provenance=self._provenance_payload(trainer, pl_module),
                 )
 
-        utils.mlflow.log_plots_to_mlflow(
-            trainer,
-            ckpt_name,
-            eff_name,
-            plot_folder,
-            log_raw=self.log_raw_mlflow,
-            gallery_name=f"{eff_name}",
-        )
+        if self.write_plots:
+            utils.mlflow.log_plots_to_mlflow(
+                trainer,
+                ckpt_name,
+                eff_name,
+                plot_folder,
+                log_raw=self.log_raw_mlflow,
+                gallery_name=f"{eff_name}",
+            )
 
     def plot_summary(self, trainer, root_folder: Path):
         """Plot summary metrics accumulated across checkpoints and reset state."""
+        if not self.write_plots:
+            return
         eff_name = f"{self.name}_pure" if self.pure_thres else self.name
         split = trainer.split
         plot_folder = root_folder / "plots" / split / (eff_name + "_summary")
@@ -329,7 +308,6 @@ class AnomalyEfficiencyCallback(Callback):
         split: str,
         target_rate: float,
         signal_efficiencies: dict[str, float],
-        provenance: dict | None = None,
     ) -> None:
         """Write per-signal and summary efficiencies at the operational point."""
         per_signal = {
@@ -375,43 +353,10 @@ class AnomalyEfficiencyCallback(Callback):
             "min_efficiency_dataset": min_efficiency_dataset,
             "cvar25_efficiency": cvar25_efficiency,
             "signal_efficiencies": per_signal,
-            "metric_contract": {
-                "efficiency": {
-                    "definition": (
-                        "Fraction of events in each signal dataset with anomaly "
-                        "score above the fixed operational threshold."
-                    ),
-                    "unit": "fraction",
-                    "range": [0.0, 1.0],
-                },
-                "summary": {
-                    "median_efficiency": "median across signal datasets",
-                    "min_efficiency": "minimum across signal datasets",
-                    "cvar25_efficiency": (
-                        "mean of the lowest ceil(0.25 * number_of_signals) "
-                        "efficiencies"
-                    ),
-                },
-            },
         }
-        if provenance is not None:
-            payload["provenance"] = provenance
         output_path.write_text(
             json.dumps(payload, indent=2, sort_keys=True, allow_nan=False) + "\n",
             encoding="utf-8",
-        )
-
-    def _provenance_payload(self, trainer, pl_module) -> dict | None:
-        if self.artifact_provenance is None:
-            return None
-        if self._event_manifest is None:
-            raise RuntimeError("Efficiency provenance event manifest was not initialized.")
-        return make_artifact_provenance(
-            self.artifact_provenance,
-            checkpoint=checkpoint_identity_from_trainer(trainer, pl_module._ckpt_path),
-            evaluation_mode=evaluation_mode_from_trainer_split(trainer.split),
-            data_cache=data_cache_identity_from_trainer(trainer),
-            event_manifest=self._event_manifest.payload(),
         )
 
     def _get_thres(self, pl_module):

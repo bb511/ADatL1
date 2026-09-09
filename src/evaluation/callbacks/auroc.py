@@ -12,16 +12,6 @@ from pytorch_lightning.callbacks import Callback
 from sklearn.metrics import roc_auc_score, roc_curve
 
 from src.data.utils import unpack_batch
-from src.evaluation.callbacks import utils
-from src.evaluation.artifact_provenance import (
-    EventManifest,
-    checkpoint_identity_from_trainer,
-    data_cache_identity_from_trainer,
-    evaluation_mode_from_trainer_split,
-    make_artifact_provenance,
-    normalize_artifact_identity,
-)
-from src.plot import horizontal_bar
 
 
 class AnomalyAUROCCallback(Callback):
@@ -42,9 +32,7 @@ class AnomalyAUROCCallback(Callback):
         pure_normal: bool = False,
         score_direction: str = "higher_score_is_more_anomalous",
         ckpts: dict | None = None,
-        log_raw_mlflow: bool = True,
         name: str = "auroc",
-        artifact_provenance: dict | None = None,
     ) -> None:
         super().__init__()
 
@@ -69,9 +57,7 @@ class AnomalyAUROCCallback(Callback):
         self.pure_normal = bool(pure_normal)
         self.score_direction = score_direction
         self.ckpts = ckpts or {"loss_total": True}
-        self.log_raw_mlflow = log_raw_mlflow
         self.name = name
-        self.artifact_provenance = normalize_artifact_identity(artifact_provenance)
         self._active = False
 
     def on_test_start(self, trainer, pl_module) -> None:
@@ -87,15 +73,6 @@ class AnomalyAUROCCallback(Callback):
 
         self._normal_score_chunks: list[np.ndarray] = []
         self._signal_score_chunks = {dataset: [] for dataset in self.ds}
-        self._event_manifest = (
-            EventManifest(
-                "valid"
-                if evaluation_mode_from_trainer_split(trainer.split) == "validation"
-                else "test"
-            )
-            if self.artifact_provenance is not None
-            else None
-        )
 
     def on_test_batch_end(
         self,
@@ -119,13 +96,9 @@ class AnomalyAUROCCallback(Callback):
                 if batch_view.l1bit is None:
                     raise ValueError(
                         "pure_normal=True requires l1bit in normal batches."
-                    )
+                )
                 keep = ~batch_view.l1bit.detach().cpu().numpy().astype(bool)
                 scores = scores[keep]
-                if self._event_manifest is not None:
-                    self._event_manifest.update_batch(dataset, batch, rows=keep)
-            elif self._event_manifest is not None:
-                self._event_manifest.update_batch(dataset, batch)
             if scores.size:
                 self._normal_score_chunks.append(scores)
             return
@@ -139,8 +112,6 @@ class AnomalyAUROCCallback(Callback):
                 "AUROC callback requires every configured signal loader to contain "
                 f"only positive labels; dataset={dataset!r}."
             )
-        if self._event_manifest is not None:
-            self._event_manifest.update_batch(dataset, batch)
         if scores.size:
             self._signal_score_chunks[dataset].append(scores)
 
@@ -173,29 +144,6 @@ class AnomalyAUROCCallback(Callback):
             split=split,
             normal_event_count=int(normal_scores.size),
             per_signal=per_signal,
-            provenance=self._provenance_payload(trainer, pl_module),
-        )
-
-        self._plot(
-            {name: values["auroc"] for name, values in per_signal.items()},
-            "AUROC per signal",
-            plot_folder,
-        )
-        self._plot(
-            {
-                name: values["partial_auroc"]
-                for name, values in per_signal.items()
-            },
-            "Normalized partial AUROC per signal",
-            plot_folder,
-        )
-        utils.mlflow.log_plots_to_mlflow(
-            trainer,
-            ckpt_name,
-            self.name,
-            plot_folder,
-            log_raw=self.log_raw_mlflow,
-            gallery_name=self.name,
         )
 
     @staticmethod
@@ -282,7 +230,6 @@ class AnomalyAUROCCallback(Callback):
         split: str,
         normal_event_count: int,
         per_signal: dict[str, dict[str, float | int]],
-        provenance: dict | None = None,
     ) -> None:
         aurocs = np.fromiter(
             (float(values["auroc"]) for values in per_signal.values()),
@@ -323,55 +270,10 @@ class AnomalyAUROCCallback(Callback):
                 "median_partial_auroc": float(np.median(partial_aurocs)),
                 "min_partial_auroc": float(np.min(partial_aurocs)),
             },
-            "metric_contract": {
-                "auroc": {
-                    "definition": "Area under the full signal-versus-normal ROC curve.",
-                    "unit": "dimensionless",
-                    "range": [0.0, 1.0],
-                },
-                "partial_auroc": {
-                    "definition": (
-                        "Raw ROC area through the configured maximum false-positive "
-                        "rate, divided by that rate."
-                    ),
-                    "unit": "dimensionless",
-                    "range": [0.0, 1.0],
-                },
-            },
         }
-        if provenance is not None:
-            payload["provenance"] = provenance
         output_path.write_text(
             json.dumps(payload, indent=2, sort_keys=True, allow_nan=False) + "\n",
             encoding="utf-8",
-        )
-
-    def _provenance_payload(self, trainer, pl_module) -> dict | None:
-        if self.artifact_provenance is None:
-            return None
-        if self._event_manifest is None:
-            raise RuntimeError("AUROC provenance event manifest was not initialized.")
-        return make_artifact_provenance(
-            self.artifact_provenance,
-            checkpoint=checkpoint_identity_from_trainer(trainer, pl_module._ckpt_path),
-            evaluation_mode=evaluation_mode_from_trainer_split(trainer.split),
-            data_cache=data_cache_identity_from_trainer(trainer),
-            event_manifest=self._event_manifest.payload(),
-        )
-
-    @staticmethod
-    def _plot(
-        values: dict[str, float],
-        xlabel: str,
-        plot_folder: Path,
-    ) -> None:
-        horizontal_bar.plot_yright(
-            values,
-            values,
-            xlabel,
-            " ",
-            plot_folder,
-            percent=False,
         )
 
     def _should_run_for_current_ckpt(self, trainer) -> bool:

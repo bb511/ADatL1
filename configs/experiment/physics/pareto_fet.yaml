@@ -35,13 +35,6 @@ pareto_study:
   # one hyperparameter configuration must aggregate under the same identifier.
   configuration_id: ${pareto_study.study_id}__gamma-${pareto_study.candidate.mi_gamma}__bins-${pareto_study.candidate.mi_sensitive_num_bins}__arch-${pareto_study.candidate.architecture_id}
 
-  # Every scientific artifact uses this same envelope so the Phase 2 collector
-  # can reject accidental cross-protocol, cross-seed, or cross-cache joins.
-  artifact_provenance:
-    protocol_version: ${pareto_study.protocol_version}
-    configuration_id: ${pareto_study.configuration_id}
-    autoencoder_seed: ${pareto_study.candidate.autoencoder_seed}
-
   paired_autoencoder_seeds: [123, 456, 789]
   seed_policy:
     pairing_required: true
@@ -177,28 +170,35 @@ algorithm:
   mi_sensitive_num_bins: ${pareto_study.candidate.mi_sensitive_num_bins}
 
 evaluation:
+  leakage_probes:
+    enabled: true
+
   callbacks:
     anomaly_efficiency:
-      artifact_provenance: ${pareto_study.artifact_provenance}
-
-    anomaly_auroc:
-      artifact_provenance: ${pareto_study.artifact_provenance}
+      write_pareto_summary: true
+      write_plots: false
 
     correlation_matrix:
-      artifact_provenance: ${pareto_study.artifact_provenance}
+      enabled: true
+
+    anomaly_auroc:
+      _target_: src.evaluation.callbacks.auroc.AnomalyAUROCCallback
+      output_name: 'ascore/full'
+      ds: ${evaluation.callbacks.anomaly_efficiency.ds}
+      max_false_positive_rate: ${div:${algorithm.target_rate},${algorithm.base_rate}}
+      pure_normal: false
+      score_direction: higher_score_is_more_anomalous
+      ckpts:
+        loss_total: true
+      name: auroc
 
     latent_collapse:
       _target_: src.evaluation.callbacks.latent_collapse.LatentCollapseDiagnosticsCallback
-      protocol_version: ${pareto_study.protocol_version}
-      configuration_id: ${pareto_study.configuration_id}
-      autoencoder_seed: ${pareto_study.candidate.autoencoder_seed}
       architecture_id: ${pareto_study.candidate.architecture_id}
       minimum_joint_code_entropy_bits: ${pareto_study.collapse_constraint.seed_level_rule.minimum_joint_code_entropy_bits}
       minimum_fraction_of_paired_gamma_zero_joint_entropy: ${pareto_study.collapse_constraint.seed_level_rule.minimum_fraction_of_paired_gamma_zero_joint_entropy}
       dataset: normal
       evaluation_split: val
-      source_split: valid
       ckpts:
         loss_total: true
       name: latent_collapse
-      artifact_provenance: ${pareto_study.artifact_provenance}

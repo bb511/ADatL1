@@ -2,12 +2,10 @@
 
 from __future__ import annotations
 
-import hashlib
 import json
 import math
 from collections import Counter
 from collections.abc import Mapping, Sequence
-from numbers import Integral
 from pathlib import Path
 from typing import Any
 
@@ -16,52 +14,31 @@ import torch
 from pytorch_lightning.callbacks import Callback
 
 from src.data.utils import unpack_batch
-from src.evaluation.artifact_provenance import (
-    checkpoint_identity_from_trainer,
-    data_cache_identity_from_trainer,
-    evaluation_mode_from_trainer_split,
-    make_artifact_provenance,
-    normalize_artifact_identity,
-)
 
 
 class LatentCollapseDiagnosticsCallback(Callback):
-    """Measure diversity of deterministic hard Bernoulli codes on normal validation.
+    """Measure deterministic hard-Bernoulli code diversity on normal validation.
 
-    The callback is deliberately checkpoint-specific: it only runs for the selected
-    ``loss_total.ckpt`` and records the hard ``latent_sample`` consumed by the decoder.
-    It does not use continuous latent logits as a collapse proxy.
+    The callback runs only for the selected loss-total checkpoint. It measures
+    latent_sample, rather than continuous logits, because that is the representation
+    consumed by the decoder. The absolute entropy gate is decided per run; the paired
+    gamma-zero comparison is deliberately left for the Phase 2 collector.
     """
 
     def __init__(
         self,
         *,
-        protocol_version: str,
-        configuration_id: str,
-        autoencoder_seed: int,
         architecture_id: str,
         minimum_joint_code_entropy_bits: float,
         minimum_fraction_of_paired_gamma_zero_joint_entropy: float,
         dataset: str = "normal",
         evaluation_split: str = "val",
-        source_split: str = "valid",
         ckpts: dict | None = None,
         name: str = "latent_collapse",
-        artifact_provenance: dict | None = None,
     ) -> None:
         super().__init__()
-
-        if not protocol_version:
-            raise ValueError("protocol_version must be a non-empty string.")
-        if not configuration_id:
-            raise ValueError("configuration_id must be a non-empty string.")
         if not architecture_id:
             raise ValueError("architecture_id must be a non-empty string.")
-        if isinstance(autoencoder_seed, bool) or not isinstance(
-            autoencoder_seed,
-            Integral,
-        ):
-            raise ValueError("autoencoder_seed must be an integer.")
         if float(minimum_joint_code_entropy_bits) < 0.0:
             raise ValueError("minimum_joint_code_entropy_bits must be non-negative.")
         if not 0.0 <= float(
@@ -72,9 +49,6 @@ class LatentCollapseDiagnosticsCallback(Callback):
                 "in [0, 1]."
             )
 
-        self.protocol_version = protocol_version
-        self.configuration_id = configuration_id
-        self.autoencoder_seed = int(autoencoder_seed)
         self.architecture_id = architecture_id
         self.minimum_joint_code_entropy_bits = float(
             minimum_joint_code_entropy_bits
@@ -84,14 +58,11 @@ class LatentCollapseDiagnosticsCallback(Callback):
         )
         self.dataset = dataset
         self.evaluation_split = evaluation_split
-        self.source_split = source_split
         self.ckpts = ckpts or {"loss_total": True}
         self.name = name
-        self.artifact_provenance = normalize_artifact_identity(artifact_provenance)
         self._active = False
 
     def on_test_epoch_start(self, trainer, pl_module) -> None:
-        """Initialise streaming entropy and provenance state for one checkpoint."""
         self._active = (
             str(getattr(trainer, "split", "")) == self.evaluation_split
             and self._should_run_for_current_ckpt(trainer)
@@ -99,17 +70,13 @@ class LatentCollapseDiagnosticsCallback(Callback):
         if not self._active:
             return
         if bool(pl_module.training):
-            raise RuntimeError(
-                "Latent-collapse diagnostics require evaluation mode."
-            )
+            raise RuntimeError("Latent-collapse diagnostics require evaluation mode.")
 
         self._bit_sums: np.ndarray | None = None
         self._latent_width: int | None = None
         self._code_counts: Counter[bytes] = Counter()
         self._n_events = 0
         self._verified_determinism = False
-        self._event_component_manifests: dict[str, Any] = {}
-        self._event_layouts: dict[str, tuple[Any, ...]] = {}
 
     def on_test_batch_end(
         self,
@@ -120,7 +87,6 @@ class LatentCollapseDiagnosticsCallback(Callback):
         batch_idx,
         dataloader_idx: int = 0,
     ) -> None:
-        """Accumulate code counts and validate deterministic binary sampling."""
         if not self._active:
             return
 
@@ -128,22 +94,7 @@ class LatentCollapseDiagnosticsCallback(Callback):
         if dataset != self.dataset:
             return
 
-        batch_view = unpack_batch(batch)
-        identity_data = (
-            batch_view.control_x
-            if batch_view.control_x is not None
-            else batch_view.x
-        )
-        identity_mask = (
-            batch_view.control_mask
-            if batch_view.control_mask is not None
-            else batch_view.mask
-        )
-        self._update_event_manifest("cached_data", identity_data)
-        self._update_event_manifest("cached_mask", identity_mask)
-        self._update_event_manifest("l1bit", batch_view.l1bit)
-
-        model_input = torch.flatten(batch_view.x, start_dim=1)
+        model_input = torch.flatten(unpack_batch(batch).x, start_dim=1)
         with torch.inference_mode():
             representations = pl_module.forward_with_representations(model_input)
         latent_sample = self._binary_sample(
@@ -154,11 +105,13 @@ class LatentCollapseDiagnosticsCallback(Callback):
         if not self._verified_determinism:
             with torch.inference_mode():
                 repeated = pl_module.forward_with_representations(model_input)
-            repeated_sample = self._binary_sample(
-                repeated,
-                expected_batch_size=model_input.shape[0],
-            )
-            if not torch.equal(latent_sample, repeated_sample):
+            if not torch.equal(
+                latent_sample,
+                self._binary_sample(
+                    repeated,
+                    expected_batch_size=model_input.shape[0],
+                ),
+            ):
                 raise RuntimeError(
                     "Evaluation-time latent_sample is not deterministic on the "
                     "first normal validation batch."
@@ -168,7 +121,6 @@ class LatentCollapseDiagnosticsCallback(Callback):
         self._accumulate_latent_sample(latent_sample)
 
     def on_test_epoch_end(self, trainer, pl_module) -> None:
-        """Persist a finite, machine-readable collapse decision."""
         if not self._active:
             return
         if self._n_events == 0:
@@ -182,20 +134,19 @@ class LatentCollapseDiagnosticsCallback(Callback):
             )
 
         ckpt_path = Path(pl_module._ckpt_path)
-        ckpt_name = ckpt_path.stem
         output_folder = (
             ckpt_path.parent
             / "plots"
             / str(trainer.split)
-            / ckpt_name
+            / ckpt_path.stem
             / self.name
         )
         output_folder.mkdir(parents=True, exist_ok=True)
         self._write_summary(
             output_folder / "collapse_summary.json",
-            checkpoint=checkpoint_identity_from_trainer(trainer, ckpt_path),
-            trainer=trainer,
-            pl_module=pl_module,
+            checkpoint_name=ckpt_path.name,
+            split=str(trainer.split),
+            bernoulli_threshold=self._bernoulli_threshold(pl_module),
         )
 
     def _accumulate_latent_sample(self, latent_sample: torch.Tensor) -> None:
@@ -214,7 +165,6 @@ class LatentCollapseDiagnosticsCallback(Callback):
         assert self._bit_sums is not None
         self._bit_sums += values.sum(axis=0, dtype=np.int64)
         self._n_events += int(n_events)
-
         packed_codes = np.packbits(values, axis=1, bitorder="little")
         unique_codes, counts = np.unique(packed_codes, axis=0, return_counts=True)
         for code, count in zip(unique_codes, counts):
@@ -228,21 +178,18 @@ class LatentCollapseDiagnosticsCallback(Callback):
     ) -> torch.Tensor:
         if not isinstance(representations, Mapping):
             raise RuntimeError("forward_with_representations must return a mapping.")
-        if "latent_sample" not in representations:
-            raise RuntimeError(
-                "forward_with_representations did not return latent_sample."
-            )
-
-        sample = representations["latent_sample"]
+        sample = representations.get("latent_sample")
         if not isinstance(sample, torch.Tensor):
-            raise RuntimeError("latent_sample must be a torch.Tensor.")
+            raise RuntimeError(
+                "forward_with_representations must return a tensor latent_sample."
+            )
         if sample.ndim == 0:
             raise RuntimeError("latent_sample cannot be a scalar.")
-        if sample.ndim == 1:
-            sample = sample.unsqueeze(1)
-        else:
-            sample = torch.flatten(sample, start_dim=1)
-
+        sample = (
+            sample.unsqueeze(1)
+            if sample.ndim == 1
+            else torch.flatten(sample, start_dim=1)
+        )
         if sample.shape[0] != expected_batch_size:
             raise RuntimeError(
                 "latent_sample and normal-validation input have different event "
@@ -258,64 +205,8 @@ class LatentCollapseDiagnosticsCallback(Callback):
             )
         return sample
 
-    def _update_event_manifest(
-        self,
-        name: str,
-        tensor: torch.Tensor | None,
-    ) -> None:
-        """Hash cached event content independent of evaluation batch boundaries."""
-        manifest = self._event_component_manifests.setdefault(
-            name,
-            hashlib.sha256(),
-        )
-        if tensor is None:
-            layout = ("none",)
-            values = None
-        else:
-            values = tensor.detach().cpu().contiguous().numpy()
-            layout = (str(values.dtype), *values.shape[1:])
-
-        previous_layout = self._event_layouts.get(name)
-        if previous_layout is not None and previous_layout != layout:
-            raise RuntimeError(
-                f"Event identity component {name!r} changed layout."
-            )
-        if previous_layout is None:
-            self._event_layouts[name] = layout
-            if values is None:
-                manifest.update(b"none")
-            else:
-                manifest.update(str(values.dtype).encode("ascii"))
-                manifest.update(
-                    np.asarray(values.shape[1:], dtype="<i8").tobytes()
-                )
-
-        if values is not None:
-            manifest.update(values.tobytes(order="C"))
-
-    def _event_manifest(self) -> tuple[str, dict[str, str]]:
-        """Combine stable component digests into the validation-event identity."""
-        if not self._event_component_manifests:
-            raise RuntimeError("The validation-event manifest has no components.")
-
-        manifest = hashlib.sha256()
-        manifest.update(b"latent-collapse-event-manifest-v1\0")
-        manifest.update(self.source_split.encode("utf-8"))
-        manifest.update(b"\0")
-        manifest.update(np.asarray([self._n_events], dtype="<i8").tobytes())
-        component_hashes: dict[str, str] = {}
-        for name in sorted(self._event_component_manifests):
-            component_digest = self._event_component_manifests[name].digest()
-            component_hashes[name] = component_digest.hex()
-            manifest.update(name.encode("utf-8"))
-            manifest.update(b"\0")
-            manifest.update(component_digest)
-
-        return manifest.hexdigest(), component_hashes
-
     @staticmethod
     def _binary_entropy(probabilities: np.ndarray) -> np.ndarray:
-        """Return exact binary entropies in bits, including zero for p=0 or p=1."""
         entropy = np.zeros_like(probabilities, dtype=np.float64)
         nonzero = probabilities > 0.0
         below_one = probabilities < 1.0
@@ -329,12 +220,14 @@ class LatentCollapseDiagnosticsCallback(Callback):
     def _metrics(self) -> dict[str, Any]:
         assert self._bit_sums is not None
         assert self._latent_width is not None
-
         probabilities = self._bit_sums.astype(np.float64) / self._n_events
         bit_entropies = self._binary_entropy(probabilities)
-        counts = np.fromiter(self._code_counts.values(), dtype=np.float64)
-        code_probabilities = counts / self._n_events
-        joint_entropy = float(-np.sum(code_probabilities * np.log2(code_probabilities)))
+        code_probabilities = (
+            np.fromiter(self._code_counts.values(), dtype=np.float64) / self._n_events
+        )
+        joint_entropy = float(
+            -np.sum(code_probabilities * np.log2(code_probabilities))
+        )
 
         return {
             "latent_width": self._latent_width,
@@ -356,35 +249,20 @@ class LatentCollapseDiagnosticsCallback(Callback):
         self,
         output_path: Path,
         *,
-        checkpoint: dict[str, Any],
-        trainer: Any,
-        pl_module: Any,
+        checkpoint_name: str,
+        split: str,
+        bernoulli_threshold: float,
     ) -> None:
         metrics = self._metrics()
-        event_manifest_hash, event_manifest_components = self._event_manifest()
         absolute_pass = (
             metrics["joint_code_entropy_bits"]
             >= self.minimum_joint_code_entropy_bits
         )
-        bernoulli_threshold = self._bernoulli_threshold(pl_module)
         payload = {
-            "schema_version": 2,
-            "protocol_version": self.protocol_version,
-            "run": {
-                "configuration_id": self.configuration_id,
-                "autoencoder_seed": self.autoencoder_seed,
-                "architecture_id": self.architecture_id,
-            },
-            "checkpoint": checkpoint,
-            "evaluation": {
-                "mode": "validation",
-                "trainer_split": str(trainer.split),
-                "dataset": self.dataset,
-                "source_split": self.source_split,
-                "n_events": self._n_events,
-                "event_manifest_hash": event_manifest_hash,
-                "event_manifest_components": event_manifest_components,
-            },
+            "schema_version": 1,
+            "checkpoint": checkpoint_name,
+            "split": split,
+            "dataset": self.dataset,
             "representation": {
                 "name": "latent_sample",
                 "sampling": "deterministic_evaluation_time_hard_bernoulli",
@@ -393,86 +271,35 @@ class LatentCollapseDiagnosticsCallback(Callback):
             "thresholds": {
                 "entropy_unit": "bits",
                 "minimum_joint_code_entropy_bits": self.minimum_joint_code_entropy_bits,
+            },
+            "paired_baseline": {
+                "architecture_id": self.architecture_id,
                 "minimum_fraction_of_paired_gamma_zero_joint_entropy": (
                     self.minimum_fraction_of_paired_gamma_zero_joint_entropy
                 ),
                 "paired_reference": "same_architecture_and_autoencoder_seed",
+                "status": "requires_phase_2_aggregation",
             },
             "metrics": metrics,
-            "metric_contract": {
-                "binary_entropy_bits": {
-                    "definition": "-p log2(p) - (1-p) log2(1-p) for each hard-code bit.",
-                    "unit": "bits",
-                    "range": [0.0, 1.0],
-                },
-                "joint_code_entropy_bits": {
-                    "definition": "Empirical Shannon entropy of complete hard binary codes.",
-                    "unit": "bits",
-                    "range": [0.0, float(self._latent_width)],
-                },
-                "effective_code_count": {
-                    "definition": "2 raised to joint_code_entropy_bits.",
-                    "unit": "count",
-                },
-            },
             "decision": {
-                "pass": absolute_pass,
-                "pass_scope": "absolute_joint_code_entropy_only",
-                "absolute_joint_entropy_pass": absolute_pass,
+                "absolute_entropy_pass": absolute_pass,
+                "paired_baseline_entropy_pass": None,
+                "configuration_eligible": False if not absolute_pass else None,
                 "reason": (
-                    "passed_minimum_joint_code_entropy"
-                    if absolute_pass
-                    else "joint_code_entropy_below_minimum"
+                    "joint_code_entropy_below_minimum"
+                    if not absolute_pass
+                    else "awaiting_paired_gamma_zero_comparison"
                 ),
-                "paired_baseline_comparison": "deferred_to_phase_2_aggregation",
-                "configuration_policy": "every_expected_seed_must_pass",
             },
         }
-        provenance = self._provenance_payload(
-            trainer,
-            checkpoint,
-            event_manifest_hash,
-            event_manifest_components,
-        )
-        if provenance is not None:
-            payload["provenance"] = provenance
         output_path.write_text(
             json.dumps(payload, indent=2, sort_keys=True, allow_nan=False) + "\n",
             encoding="utf-8",
         )
 
-    def _provenance_payload(
-        self,
-        trainer: Any,
-        checkpoint: dict[str, Any],
-        event_manifest_hash: str,
-        event_manifest_components: dict[str, str],
-    ) -> dict[str, Any] | None:
-        if self.artifact_provenance is None:
-            return None
-        event_manifest = {
-            "source_split": self.source_split,
-            "event_manifest_hash": event_manifest_hash,
-            "datasets": {
-                self.dataset: {
-                    "n_events": self._n_events,
-                    "event_manifest_hash": event_manifest_hash,
-                    "event_manifest_components": event_manifest_components,
-                }
-            },
-        }
-        return make_artifact_provenance(
-            self.artifact_provenance,
-            checkpoint=checkpoint,
-            evaluation_mode=evaluation_mode_from_trainer_split(trainer.split),
-            data_cache=data_cache_identity_from_trainer(trainer),
-            event_manifest=event_manifest,
-        )
-
     @staticmethod
     def _bernoulli_threshold(pl_module: Any) -> float:
-        bernoulli = getattr(pl_module, "bernoulli", None)
-        threshold = getattr(bernoulli, "threshold", None)
+        threshold = getattr(getattr(pl_module, "bernoulli", None), "threshold", None)
         if not isinstance(threshold, torch.Tensor) or threshold.numel() != 1:
             raise RuntimeError(
                 "The model does not expose a scalar Bernoulli threshold."
@@ -482,38 +309,17 @@ class LatentCollapseDiagnosticsCallback(Callback):
             raise RuntimeError("The Bernoulli threshold must be in [0, 1].")
         return value
 
-    @staticmethod
-    def _checkpoint_identity(ckpt_path: Path) -> dict[str, Any]:
-        if not ckpt_path.is_file():
-            raise FileNotFoundError(
-                f"Latent-collapse checkpoint does not exist: {ckpt_path}."
-            )
-
-        digest = hashlib.sha256()
-        with ckpt_path.open("rb") as checkpoint_file:
-            for chunk in iter(lambda: checkpoint_file.read(1024 * 1024), b""):
-                digest.update(chunk)
-        return {
-            "name": ckpt_path.name,
-            "path": str(ckpt_path.resolve()),
-            "sha256": digest.hexdigest(),
-            "size_bytes": ckpt_path.stat().st_size,
-            "selection_metric": "val/loss_total",
-        }
-
     def _should_run_for_current_ckpt(self, trainer: Any) -> bool:
         strategy = getattr(trainer, "strat_name", None)
         metric = getattr(trainer, "metric_name", None)
         criterion = getattr(trainer, "criterion_name", None)
         if strategy is None:
             return False
-
         configured = self.ckpts.get(strategy)
         if isinstance(configured, bool):
             return configured
         if not isinstance(configured, Mapping) or metric is None or criterion is None:
             return False
-
         allowed_criteria = configured.get(metric)
         return (
             isinstance(allowed_criteria, Sequence)

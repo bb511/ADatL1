@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import json
-import hashlib
 import logging
 from time import perf_counter
 from collections.abc import Mapping
@@ -11,12 +10,6 @@ from pathlib import Path
 from typing import Any
 
 import torch
-
-from src.evaluation.artifact_provenance import (
-    checkpoint_identity,
-    data_cache_identity,
-    make_artifact_provenance,
-)
 
 from .constants import (
     LEAKAGE_PROBE_EVALUATION_MODES,
@@ -136,104 +129,9 @@ def _write_leakage_probe_summary(
     return summary_path
 
 
-def _probe_event_manifest(context: Any) -> dict[str, Any]:
-    """Convert the probe context into the common artifact event-manifest shape."""
-    datasets: dict[str, Any] = {}
-    for name, provenance in (
-        ("development", context.development_data),
-        ("held_out", context.held_out_data),
-    ):
-        datasets[name] = {
-            "n_events": int(provenance.n_events),
-            "event_manifest_hash": provenance.event_manifest_hash,
-            "source_splits": list(provenance.source_splits),
-            "sample_seed": int(provenance.sample_seed),
-            "max_samples": provenance.max_samples,
-        }
-
-    canonical = json.dumps(
-        datasets,
-        sort_keys=True,
-        separators=(",", ":"),
-    ).encode("utf-8")
-    return {
-        "source_split": "probe_evaluation_context",
-        "event_manifest_hash": hashlib.sha256(canonical).hexdigest(),
-        "datasets": datasets,
-    }
-
-
-def _probe_artifact_provenance(
-    result: FourProbeEvaluationResult,
-    run_folder: str | Path,
-    artifact_provenance: Mapping[str, Any] | None,
-) -> dict[str, Any] | None:
-    """Build the canonical Pareto envelope from frozen probe provenance."""
-    if artifact_provenance is None:
-        return None
-
-    context = result.evaluation_context
-    development = context.development_data
-    held_out = context.held_out_data
-    if (
-        development.data_cache_id != held_out.data_cache_id
-        or development.data_cache_path != held_out.data_cache_path
-    ):
-        raise RuntimeError("Leakage probe context contains incompatible data caches.")
-
-    return make_artifact_provenance(
-        artifact_provenance,
-        checkpoint=checkpoint_identity(Path(run_folder) / "loss_total.ckpt"),
-        evaluation_mode=context.mode,
-        data_cache={
-            "id": development.data_cache_id,
-            "path": development.data_cache_path,
-        },
-        event_manifest=_probe_event_manifest(context),
-    )
-
-
-def _invalid_probe_artifact_provenance(
-    run_folder: str | Path,
-    datamodule: Any,
-    evaluation_mode: str,
-    artifact_provenance: Mapping[str, Any] | None,
-) -> dict[str, Any] | None:
-    """Preserve a joinable invalid-run envelope without inventing measurements."""
-    if artifact_provenance is None:
-        return None
-
-    checkpoint_path = Path(run_folder) / "loss_total.ckpt"
-    if checkpoint_path.is_file():
-        checkpoint = checkpoint_identity(checkpoint_path)
-    else:
-        checkpoint = {
-            "name": checkpoint_path.name,
-            "path": str(checkpoint_path.resolve()),
-            "sha256": None,
-            "size_bytes": None,
-            "selection_metric": "val/loss_total",
-            "status": "unavailable",
-        }
-    try:
-        cache = data_cache_identity(datamodule)
-    except RuntimeError:
-        cache = {"id": None, "path": None, "status": "unavailable"}
-
-    return make_artifact_provenance(
-        artifact_provenance,
-        checkpoint=checkpoint,
-        evaluation_mode=evaluation_mode,
-        data_cache=cache,
-        event_manifest=None,
-    )
-
-
 def write_leakage_probe_results(
     result: FourProbeEvaluationResult,
     run_folder: str | Path,
-    *,
-    artifact_provenance: Mapping[str, Any] | None = None,
 ) -> Path:
     """Write all four probe results below one checkpoint run."""
 
@@ -254,13 +152,6 @@ def write_leakage_probe_results(
     )
 
     payload = four_probe_result_payload(result)
-    provenance = _probe_artifact_provenance(
-        result,
-        run_folder,
-        artifact_provenance,
-    )
-    if provenance is not None:
-        payload["provenance"] = provenance
     write_probe_loss_plots(payload, output_path)
 
     _write_json_artifact(output_path, payload)
@@ -285,8 +176,6 @@ def write_invalid_leakage_probe_result(
     evaluation_mode: str = "validation",
     run_metadata: LeakageProbeRunMetadata | None = None,
     smoke_test: bool = False,
-    datamodule: Any | None = None,
-    artifact_provenance: Mapping[str, Any] | None = None,
 ) -> Path:
     """Persist one expected protocol failure without a fake score."""
 
@@ -346,22 +235,6 @@ def write_invalid_leakage_probe_result(
             "worst_probe": None,
             "leakage_worst": None,
             "probes": {},
-        }
-
-    if artifact_provenance is not None:
-        if datamodule is None:
-            raise RuntimeError("Invalid leakage provenance requires the datamodule.")
-        payload["provenance"] = _invalid_probe_artifact_provenance(
-            run_folder,
-            datamodule,
-            evaluation_mode,
-            artifact_provenance,
-        )
-        payload["metric_contract"] = {
-            "leakage_worst": {
-                "definition": "Unavailable because probe evaluation was invalid.",
-                "unit": "dimensionless",
-            }
         }
 
     _write_json_artifact(output_path, payload)
@@ -431,7 +304,6 @@ def evaluate_and_write_loss_total_leakage_probes(
     evaluation_mode: str = "validation",
     run_metadata: LeakageProbeRunMetadata | None = None,
     max_samples_by_split: Mapping[str, int] | None = None,
-    artifact_provenance: Mapping[str, Any] | None = None,
 ) -> tuple[FourProbeEvaluationResult, Path]:
     """Evaluate the frozen loss-total checkpoint and persist four probes.
 
@@ -570,14 +442,7 @@ def evaluate_and_write_loss_total_leakage_probes(
         evaluation_mode=evaluation_mode,
         run_metadata=run_metadata,
     )
-    if artifact_provenance is None:
-        output_path = write_leakage_probe_results(result, run_folder)
-    else:
-        output_path = write_leakage_probe_results(
-            result,
-            run_folder,
-            artifact_provenance=artifact_provenance,
-        )
+    output_path = write_leakage_probe_results(result, run_folder)
 
     log.info(
         "Leakage evaluation finished in %.1fs; output=%s%s.",
@@ -598,7 +463,6 @@ def evaluate_and_record_loss_total_leakage_probes(
     evaluation_mode: str = "validation",
     run_metadata: LeakageProbeRunMetadata | None = None,
     max_samples_by_split: Mapping[str, int] | None = None,
-    artifact_provenance: Mapping[str, Any] | None = None,
 ) -> LeakageProbeRunOutcome:
     """Evaluate leakage and record expected protocol failures."""
 
@@ -619,7 +483,6 @@ def evaluate_and_record_loss_total_leakage_probes(
                 evaluation_mode=evaluation_mode,
                 run_metadata=run_metadata,
                 max_samples_by_split=max_samples_by_split,
-                artifact_provenance=artifact_provenance,
             )
         )
     except (
@@ -633,8 +496,6 @@ def evaluate_and_record_loss_total_leakage_probes(
             evaluation_mode=evaluation_mode,
             run_metadata=run_metadata,
             smoke_test=(max_samples_by_split is not None),
-            datamodule=datamodule,
-            artifact_provenance=artifact_provenance,
         )
 
         diagnostic_result = (

@@ -165,10 +165,10 @@ callbacks:
     save_on_train_epoch_end: false
 
 evaluation:
-  # Run the frozen post-training probes once on loss_total.ckpt. The evaluator
-  # writes below plots/{val,test}/loss_total/probes according to the mode.
+  # The expensive four-probe diagnostic is enabled by the dedicated Pareto
+  # experiment below, rather than by every ordinary AE evaluation.
   leakage_probes:
-    enabled: true
+    enabled: false
     # validation: fit probes on train and score valid during model selection.
     # final_test: after selecting one configuration, fit on train+valid and score
     # untouched test. Use only for the final report, for example:
@@ -223,20 +223,7 @@ evaluation:
         - haa-4b-ma15
       cvar_summary: 0.25
       log_raw_mlflow: false
-
-    anomaly_auroc:
-      _target_: src.evaluation.callbacks.auroc.AnomalyAUROCCallback
-      output_name: 'ascore/full'
-      ds: ${evaluation.callbacks.anomaly_efficiency.ds}
-      # This is the same fixed operating region as the Pareto manifest:
-      # algorithm.target_rate / algorithm.base_rate.
-      max_false_positive_rate: ${div:${algorithm.target_rate},${algorithm.base_rate}}
-      pure_normal: false
-      score_direction: higher_score_is_more_anomalous
-      ckpts:
-        loss_total: true
-      log_raw_mlflow: false
-      name: auroc
+      write_pareto_summary: false
 
     ascore_operational:
       _target_: src.evaluation.callbacks.output.OutputCallback
@@ -329,3 +316,5 @@ evaluation:
       max_events: null
       name: correlation_matrix
       log_raw_mlflow: false
+      enabled: false
+      write_details: false

@@ -124,46 +124,6 @@ def test_each_of_four_probes_links_a_real_plot_and_preserves_histories(tmp_path,
             assert summary[metric_key] == pytest.approx(mean_squared_error(pool.sensitive_target, predictions))
 
 
-def test_leakage_artifact_uses_the_shared_pareto_provenance_envelope(
-    tmp_path,
-    observed_result,
-):
-    result, _, _ = observed_result
-    run_folder = tmp_path / "run"
-    run_folder.mkdir()
-    (run_folder / "loss_total.ckpt").write_bytes(b"frozen checkpoint")
-
-    path = write_leakage_probe_results(
-        result,
-        run_folder,
-        artifact_provenance={
-            "protocol_version": "fet-et-pareto-v1",
-            "configuration_id": "seed-independent-configuration",
-            "autoencoder_seed": 123,
-        },
-    )
-    payload = json.loads(path.read_text())
-    summary = json.loads(path.with_name("leakage_probes_summary.json").read_text())
-
-    provenance = payload["provenance"]
-    assert provenance["protocol_version"] == "fet-et-pareto-v1"
-    assert provenance["configuration_id"] == "seed-independent-configuration"
-    assert provenance["autoencoder_seed"] == 123
-    assert provenance["checkpoint"]["name"] == "loss_total.ckpt"
-    assert provenance["evaluation_mode"] == "validation"
-    assert provenance["data"]["cache"] == {
-        "id": "test-cache",
-        "path": "/test/cache",
-    }
-    assert set(provenance["data"]["event_manifest"]["datasets"]) == {
-        "development",
-        "held_out",
-    }
-    assert payload["metric_contract"]["leakage_worst"]["unit"] == "dimensionless"
-    assert summary["provenance"] == provenance
-    assert summary["metric_contract"] == payload["metric_contract"]
-
-
 def test_smoke_plots_cannot_overwrite_scientific_plots(tmp_path, observed_result):
     result, _, _ = observed_result
     scientific_path = write_leakage_probe_results(result, tmp_path)

@@ -40,6 +40,8 @@ from src.evaluation.leakage_probe.serialization import (
     log_shuffled_target_metrics,
 )
 
+from src.utils.pareto_manifest import write_resolved_pareto_manifest
+
 from src.utils import RankedLogger
 from src.utils import extras
 from src.utils import get_metric_value
@@ -70,6 +72,10 @@ def train(cfg: DictConfig) -> Tuple[Dict[str, Any], Dict[str, Any]]:
     :param cfg: A DictConfig configuration composed by Hydra.
     :return: A tuple with metrics and dict with all instantiated objects.
     """
+    pareto_manifest_path = write_resolved_pareto_manifest(cfg)
+    if pareto_manifest_path is not None:
+        log.info("Saved resolved Pareto study manifest to %s", pareto_manifest_path)
+
     # set seed for random number generators in pytorch, numpy and python.random
     if cfg.get("seed"):
         pl.seed_everything(cfg.seed, workers=True)

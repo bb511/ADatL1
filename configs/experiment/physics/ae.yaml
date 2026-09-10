@@ -1,6 +1,7 @@
 # @package _global_
 
 defaults:
+  - /callbacks/main@callbacks.binning: binning
   - override /data: basis
   - override /algorithm: ae
   - override /callbacks: default
@@ -19,13 +20,20 @@ data:
   batch_size: 16384
   max_val_batches: 10
 
+  # Keep FET.Et in the loaded/control tensor for MI decorrelation, but remove it
+  # from the anomaly-detector reconstruction input.
+  model_input_exclude_features:
+    - FET.Et
+
 trainer:
   gradient_clip_algorithm: norm
   gradient_clip_val: 0.0
   min_epochs: 1
   max_epochs: 200
 
-test: true
+# Keep test untouched during validation-Pareto sweeps. For the one final selected
+# configuration, override both `test=true` and the leakage-probe mode below.
+test: false
 
 # Metrics to report to optuna for every checkpoint.
 optimized_metric_config:
@@ -48,7 +56,7 @@ algorithm:
   base_rate: 28608.8064
   # The basis data processing returns 117 features.
   encoder:
-    in_dim: 117
+    in_dim: 116
 
   optimizer:
     _partial_: true
@@ -60,6 +68,30 @@ algorithm:
 
 callbacks:
   log_data_mlflow: null
+  losses:
+    _target_: src.evaluation.callbacks.losses.LossesCallback
+    gamma: ${algorithm.mi_gamma}
+    name: losses
+    log_raw_mlflow: true
+
+  # Keep the epoch with the smallest complete-epoch validation objective on the
+  # normal validation split: loss_reco + mi_gamma * loss_mi.
+  loss_total_ckpt:
+    _target_: pytorch_lightning.callbacks.ModelCheckpoint
+    dirpath: '${paths.checkpoints_dir}/${experiment_name}/${run_name}'
+    monitor: 'val/loss_total'
+    filename: 'loss_total'
+    save_last: false
+    save_top_k: 1
+    mode: min
+    auto_insert_metric_name: false
+    enable_version_counter: false
+    save_weights_only: false
+    every_n_epochs: 1
+    # Selection happens after validation, never from training or test metrics.
+    # This also preserves the operational threshold calibrated for this epoch.
+    save_on_train_epoch_end: false
+
   anomaly_eff:
     _target_: src.callbacks.efficiency.AnomalyEfficiencyCallback
     output_name: 'ascore/full'
@@ -133,15 +165,36 @@ callbacks:
     save_on_train_epoch_end: false
 
 evaluation:
+  # The expensive four-probe diagnostic is enabled by the dedicated Pareto
+  # experiment below, rather than by every ordinary AE evaluation.
+  leakage_probes:
+    enabled: false
+    # validation: fit probes on train and score valid during model selection.
+    # final_test: after selecting one configuration, fit on train+valid and score
+    # untouched test. Use only for the final report, for example:
+    # test=true evaluation.leakage_probes.mode=final_test
+    mode: validation
+    # The shuffled-target controls add eight MLP fits per AE run. Keep them off
+    # during sweeps and enable them for audit/final runs with:
+    # evaluation.leakage_probes.run_shuffled_target_controls=true
+    run_shuffled_target_controls: false
+
+    # Non-reportable local pipeline check. When enabled, probe cache tensors are
+    # memory-mapped and the same deterministic event subset (seed 12345) is used
+    # for every model. This is validation-only and writes leakage_probes_smoke.json.
+    # Never use the smoke score for Pareto selection or final reporting.
+    smoke_test:
+      enabled: false
+      max_events_per_split:
+        train: 100000
+        valid: 50000
+
   evaluator:
     ckpts:
-      last: true
-      summary:
-        cvar25_ema: ['max']
-        cvar10_ema: ['max']
-      single:
-        ascore_operational: ['stable']
-        eff__ascore_full__brate_operational: ['max']
+      # The default evaluation config enables last.ckpt. Disable it explicitly
+      # because Hydra merges nested dictionaries instead of replacing them.
+      last: false
+      loss_total: true
 
   callbacks:
     anomaly_efficiency:
@@ -170,6 +223,7 @@ evaluation:
         - haa-4b-ma15
       cvar_summary: 0.25
       log_raw_mlflow: false
+      write_pareto_summary: false
 
     ascore_operational:
       _target_: src.evaluation.callbacks.output.OutputCallback
@@ -221,9 +275,46 @@ evaluation:
       warmup_batches: 0.2
       output_name: reconstructed_data
       ckpts:
-        last: true
+        loss_total: true
       datasets:
         - 'normal'
         - 'SingleNeutrino_E-10-gun'
       name: 'reco'
       log_raw_mlflow: false
+
+    correlation_matrix:
+      _target_: src.evaluation.callbacks.correlation_matrix.CorrelationMatrixCallback
+      variables:
+        - FET.phi
+        - egammas.phi
+        - jets.phi
+        - muons.phi
+        - taus.phi
+        - FET.eta
+        - egammas.eta
+        - jets.eta
+        - muons.eta
+        - taus.eta
+        - FET.Et
+        - egammas.Et
+        - jets.Et
+        - muons.Et
+        - taus.Et
+      datasets:
+        - normal
+      output_name: reconstructed_data
+      ckpts:
+        loss_total: true
+      aggregate: sum
+      correlation_methods:
+        - pearson
+        - spearman
+      sensitive_variable: ${algorithm.mi_sensitive_variable}
+      include_input: true
+      include_reconstruction: true
+      include_residual: false
+      max_events: null
+      name: correlation_matrix
+      log_raw_mlflow: false
+      enabled: false
+      write_details: false

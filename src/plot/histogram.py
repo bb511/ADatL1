@@ -1,10 +1,414 @@
-# Plot a streamed histogram.
+# Histogram and categorical count plotting helpers.
+import csv
+from collections.abc import Mapping, Sequence
 from pathlib import Path
-from pathvalidate import sanitize_filename
 
-import numpy as np
+import matplotlib
+
+matplotlib.use("Agg")
+
 import matplotlib.pyplot as plt
 import mplhep as hep
+import numpy as np
+from matplotlib.ticker import MaxNLocator
+from pathvalidate import sanitize_filename
+
+
+def plot_categorical_bin_counts(
+    counts: Sequence[int] | np.ndarray,
+    save_path: Path | str,
+    *,
+    title: str,
+    observed_label: str = "Observed minibatch counts",
+    expected_counts: Sequence[float] | np.ndarray | None = None,
+    expected_label: str = "Expected from full training-set proportions",
+    xlabel: str = "Bin ID",
+    ylabel: str = "Number of events in minibatch",
+    metadata: Mapping[str, object] | None = None,
+    y_axis_max: float | None = None,
+    annotate_clipped_values: bool = False,
+    integer_y_ticks: bool = False,
+) -> Path:
+    """Save observed categorical counts and an optional expected-count reference."""
+    observed = np.asarray(counts)
+    if observed.ndim != 1 or observed.size == 0:
+        raise ValueError("counts must be a non-empty one-dimensional array.")
+    if not np.all(np.isfinite(observed)) or np.any(observed < 0):
+        raise ValueError("counts must contain finite, non-negative values.")
+
+    expected = None
+    if expected_counts is not None:
+        expected = np.asarray(expected_counts, dtype=float)
+        if expected.shape != observed.shape:
+            raise ValueError(
+                "expected_counts must have the same shape as counts. "
+                f"Got {expected.shape} and {observed.shape}."
+            )
+        if not np.all(np.isfinite(expected)) or np.any(expected < 0):
+            raise ValueError(
+                "expected_counts must contain finite, non-negative values."
+            )
+    if y_axis_max is not None:
+        y_axis_max = float(y_axis_max)
+        if not np.isfinite(y_axis_max) or y_axis_max <= 0:
+            raise ValueError("y_axis_max must be finite and greater than zero.")
+
+    output_path = _png_output_path(save_path)
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    bin_ids = np.arange(observed.size)
+
+    with plt.style.context(hep.style.CMS):
+        fig, ax = plt.subplots(figsize=(16, 7))
+        fig.subplots_adjust(left=0.10, right=0.71, bottom=0.16, top=0.88)
+        try:
+            ax.bar(
+                bin_ids,
+                observed,
+                color="C0",
+                alpha=0.75,
+                label=observed_label,
+            )
+            if expected is not None:
+                ax.plot(
+                    bin_ids,
+                    expected,
+                    color="C1",
+                    linestyle="--",
+                    marker="o",
+                    linewidth=2,
+                    label=expected_label,
+                )
+
+            ax.set_title(title)
+            ax.set_xlabel(xlabel, fontsize=20, loc="center", labelpad=14)
+            ax.set_ylabel(ylabel, fontsize=20, loc="center", labelpad=14)
+            major_ticks = np.arange(0, observed.size, 5)
+            ax.set_xticks(major_ticks)
+            ax.set_xticks(bin_ids, minor=True)
+            ax.set_xlim(-0.6, observed.size - 0.4)
+            ax.tick_params(axis="x", labelsize=14, pad=8)
+
+            if y_axis_max is None:
+                maxima = [float(observed.max())]
+                if expected is not None:
+                    maxima.append(float(expected.max()))
+                y_max = max(max(maxima) * 1.22, 1.0)
+                ax.set_ylim(0, y_max)
+            else:
+                ax.set_ylim(0, y_axis_max)
+                if annotate_clipped_values:
+                    for bin_id, count in enumerate(observed):
+                        if float(count) <= y_axis_max:
+                            continue
+                        ax.text(
+                            bin_id,
+                            y_axis_max * 0.96,
+                            f"{float(count):g}",
+                            ha="center",
+                            va="top",
+                            color="black",
+                            fontsize=10,
+                            fontweight="bold",
+                            zorder=4,
+                        )
+            if integer_y_ticks:
+                ax.yaxis.set_major_locator(MaxNLocator(integer=True))
+
+            if metadata:
+                rows = [[str(label), str(value)] for label, value in metadata.items()]
+                table = ax.table(
+                    cellText=rows,
+                    cellLoc="left",
+                    bbox=[1.04, 0.54, 0.50, 0.34],
+                )
+                table.auto_set_font_size(False)
+                table.set_fontsize(10)
+                for row_idx in range(len(rows)):
+                    table[(row_idx, 0)].set_text_props(weight="bold")
+
+            ax.legend(
+                loc="upper left",
+                bbox_to_anchor=(1.03, 0.42),
+                borderaxespad=0,
+                fontsize=10,
+            )
+            fig.savefig(output_path, bbox_inches="tight")
+        finally:
+            plt.close(fig)
+
+    return output_path
+
+
+def plot_minibatch_scalar_histogram(
+    values: Sequence[int | float] | np.ndarray,
+    save_path: Path | str,
+    *,
+    title: str,
+    xlabel: str = "Minibatch number",
+    ylabel: str = "Number of unique FET.Et values",
+) -> Path:
+    """Plot one collected scalar per minibatch as contiguous histogram bars."""
+    scalar_values = np.asarray(values)
+    if scalar_values.ndim != 1 or scalar_values.size == 0:
+        raise ValueError("values must be a non-empty one-dimensional array.")
+    if not np.all(np.isfinite(scalar_values)):
+        raise ValueError("values must contain only finite scalars.")
+
+    output_path = _png_output_path(save_path)
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    minibatch_ids = np.arange(scalar_values.size)
+
+    with plt.style.context(hep.style.CMS):
+        fig, ax = plt.subplots(figsize=(12, 7))
+        fig.subplots_adjust(left=0.13, right=0.96, bottom=0.16, top=0.88)
+        try:
+            ax.bar(
+                minibatch_ids,
+                scalar_values,
+                color="C0",
+                width=1.0,
+                alpha=0.8,
+                linewidth=0,
+            )
+            ax.set_title(title)
+            ax.set_xlabel(xlabel, fontsize=20, loc="center", labelpad=14)
+            ax.set_ylabel(ylabel, fontsize=20, loc="center", labelpad=14)
+            ax.set_xlim(
+                -0.5,
+                max(float(scalar_values.size - 1) + 0.5, 0.5),
+            )
+            value_min = float(scalar_values.min())
+            value_max = float(scalar_values.max())
+            y_buffer = max((value_max - value_min) * 0.08, 1.0)
+            ax.set_ylim(
+                max(0.0, value_min - y_buffer),
+                value_max + y_buffer,
+            )
+            ax.grid(axis="both", alpha=0.25)
+            fig.savefig(output_path, bbox_inches="tight")
+        finally:
+            plt.close(fig)
+
+    return output_path
+
+
+def plot_fixed_bin_widths(
+    widths: Sequence[int | float] | np.ndarray,
+    save_path: Path | str,
+    *,
+    title: str,
+    xlabel: str = "Bin ID",
+    ylabel: str = "Bin width ΔFET.Et",
+) -> Path:
+    """Plot the numerical width covered by every fitted fixed MI bin."""
+    bin_widths = np.asarray(widths, dtype=float)
+    if bin_widths.ndim != 1 or bin_widths.size == 0:
+        raise ValueError("widths must be a non-empty one-dimensional array.")
+    if not np.all(np.isfinite(bin_widths)) or np.any(bin_widths < 0):
+        raise ValueError("widths must contain finite, non-negative values.")
+
+    output_path = _png_output_path(save_path)
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    bin_ids = np.arange(bin_widths.size)
+    histogram_edges = np.arange(bin_widths.size + 1) - 0.5
+
+    with plt.style.context(hep.style.CMS):
+        fig, ax = plt.subplots(figsize=(16, 7))
+        fig.subplots_adjust(left=0.11, right=0.96, bottom=0.16, top=0.88)
+        try:
+            ax.stairs(
+                bin_widths,
+                histogram_edges,
+                fill=True,
+                color="C0",
+                alpha=0.8,
+                linewidth=1.5,
+            )
+            ax.set_title(title)
+            ax.set_xlabel(xlabel, fontsize=20, loc="center", labelpad=14)
+            ax.set_ylabel(ylabel, fontsize=20, loc="center", labelpad=14)
+            ax.set_xticks(np.arange(0, bin_widths.size, 5))
+            ax.set_xticks(bin_ids, minor=True)
+            ax.set_xlim(-0.5, bin_widths.size - 0.5)
+            ax.set_ylim(0, max(float(bin_widths.max()) * 1.08, 1e-12))
+            ax.tick_params(axis="x", labelsize=14, pad=8)
+            ax.grid(axis="y", alpha=0.25)
+            fig.savefig(output_path, bbox_inches="tight")
+        finally:
+            plt.close(fig)
+
+    return output_path
+
+
+def plot_histogram_counts(
+    counts: Sequence[int | float] | np.ndarray,
+    edges: Sequence[int | float] | np.ndarray,
+    save_path: Path | str,
+    *,
+    title: str,
+    xlabel: str,
+    ylabel: str = "Number of events",
+    metadata: Mapping[str, object] | None = None,
+    label: str | None = None,
+    overlay_counts: Sequence[int | float] | np.ndarray | None = None,
+    overlay_edges: Sequence[int | float] | np.ndarray | None = None,
+    overlay_label: str | None = None,
+) -> Path:
+    """Plot precomputed histogram counts and an optional outline overlay."""
+    histogram_counts = np.asarray(counts)
+    histogram_edges = np.asarray(edges, dtype=float)
+    if histogram_counts.ndim != 1 or histogram_counts.size == 0:
+        raise ValueError("counts must be a non-empty one-dimensional array.")
+    if histogram_edges.shape != (histogram_counts.size + 1,):
+        raise ValueError("edges must contain exactly one more value than counts.")
+    if (
+        not np.all(np.isfinite(histogram_counts))
+        or np.any(histogram_counts < 0)
+    ):
+        raise ValueError("counts must contain finite, non-negative values.")
+    if (
+        not np.all(np.isfinite(histogram_edges))
+        or np.any(np.diff(histogram_edges) <= 0)
+    ):
+        raise ValueError("edges must be finite and strictly increasing.")
+
+    if (overlay_counts is None) != (overlay_edges is None):
+        raise ValueError("overlay_counts and overlay_edges must be provided together.")
+
+    overlay_histogram_counts = None
+    overlay_histogram_edges = None
+    if overlay_counts is not None and overlay_edges is not None:
+        overlay_histogram_counts = np.asarray(overlay_counts)
+        overlay_histogram_edges = np.asarray(overlay_edges, dtype=float)
+        if overlay_histogram_counts.ndim != 1 or overlay_histogram_counts.size == 0:
+            raise ValueError(
+                "overlay_counts must be a non-empty one-dimensional array."
+            )
+        if overlay_histogram_edges.shape != (overlay_histogram_counts.size + 1,):
+            raise ValueError(
+                "overlay_edges must contain exactly one more value than overlay_counts."
+            )
+        if (
+            not np.all(np.isfinite(overlay_histogram_counts))
+            or np.any(overlay_histogram_counts < 0)
+        ):
+            raise ValueError(
+                "overlay_counts must contain finite, non-negative values."
+            )
+        if (
+            not np.all(np.isfinite(overlay_histogram_edges))
+            or np.any(np.diff(overlay_histogram_edges) <= 0)
+        ):
+            raise ValueError(
+                "overlay_edges must be finite and strictly increasing."
+            )
+
+    output_path = _png_output_path(save_path)
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+
+    with plt.style.context(hep.style.CMS):
+        fig, ax = plt.subplots(figsize=(14, 7))
+        fig.subplots_adjust(left=0.11, right=0.76, bottom=0.16, top=0.88)
+        try:
+            ax.stairs(
+                histogram_counts,
+                histogram_edges,
+                fill=True,
+                color="C0",
+                alpha=0.8,
+                linewidth=1.5,
+                label=label,
+            )
+            if overlay_histogram_counts is not None:
+                ax.stairs(
+                    overlay_histogram_counts,
+                    overlay_histogram_edges,
+                    fill=False,
+                    color="C1",
+                    linewidth=2.0,
+                    label=overlay_label,
+                    zorder=3,
+                )
+            ax.set_title(title)
+            ax.set_xlabel(xlabel, fontsize=20, loc="center", labelpad=14)
+            ax.set_ylabel(ylabel, fontsize=20, loc="center", labelpad=14)
+            x_min = float(histogram_edges[0])
+            x_max = float(histogram_edges[-1])
+            y_maximum = float(histogram_counts.max())
+            if overlay_histogram_counts is not None:
+                x_min = min(x_min, float(overlay_histogram_edges[0]))
+                x_max = max(x_max, float(overlay_histogram_edges[-1]))
+                y_maximum = max(y_maximum, float(overlay_histogram_counts.max()))
+            ax.set_xlim(x_min, x_max)
+            ax.set_ylim(
+                0,
+                max(y_maximum * 1.12, 1.0),
+            )
+            ax.yaxis.set_major_locator(MaxNLocator(integer=True))
+            ax.grid(axis="y", alpha=0.25)
+
+            if metadata:
+                rows = [[str(label), str(value)] for label, value in metadata.items()]
+                table = ax.table(
+                    cellText=rows,
+                    cellLoc="left",
+                    bbox=[1.04, 0.36, 0.48, 0.52],
+                )
+                table.auto_set_font_size(False)
+                table.set_fontsize(10)
+                for row_idx in range(len(rows)):
+                    table[(row_idx, 0)].set_text_props(weight="bold")
+
+            if label is not None or overlay_label is not None:
+                ax.legend(loc="upper right")
+
+            fig.savefig(output_path, bbox_inches="tight")
+        finally:
+            plt.close(fig)
+
+    return output_path
+
+
+def save_plot_data_csv(
+    columns: Mapping[str, Sequence[object] | np.ndarray],
+    save_path: Path | str,
+) -> Path:
+    """Save equal-length columns containing the numerical data behind a plot."""
+    if not columns:
+        raise ValueError("columns must contain at least one named data column.")
+
+    arrays: dict[str, np.ndarray] = {}
+    expected_length: int | None = None
+    for name, values in columns.items():
+        array = np.asarray(values)
+        if array.ndim != 1:
+            raise ValueError(f"CSV column {name!r} must be one-dimensional.")
+        if expected_length is None:
+            expected_length = int(array.size)
+            if expected_length == 0:
+                raise ValueError("CSV data columns must not be empty.")
+        elif array.size != expected_length:
+            raise ValueError("All CSV data columns must have the same length.")
+        arrays[str(name)] = array
+
+    output_path = Path(save_path)
+    if output_path.suffix.lower() != ".csv":
+        raise ValueError(f"Plot data output must be a CSV file. Got {output_path}.")
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+
+    with output_path.open("w", encoding="utf-8", newline="") as csv_file:
+        writer = csv.writer(csv_file)
+        writer.writerow(arrays.keys())
+        writer.writerows(zip(*(array.tolist() for array in arrays.values())))
+
+    return output_path
+
+
+def _png_output_path(save_path: Path | str) -> Path:
+    output_path = Path(save_path)
+    if output_path.suffix.lower() != ".png":
+        raise ValueError(f"Plot output must be a PNG file. Got {output_path}.")
+    return output_path
 
 
 def plot_streamed(
@@ -57,3 +461,23 @@ def plot_streamed(
     fig.savefig(save_dir / f"{filename}.jpg", bbox_inches="tight")
     fig.clear()
     plt.close(fig)
+
+
+if __name__ == "__main__":
+    repo_root = Path(__file__).resolve().parents[2]
+    output_dir = repo_root / "logs" / "plots" / "histogram_manual_test"
+    output_dir.mkdir(parents=True, exist_ok=True)
+
+    sample_edges = np.linspace(0.0, 100.0, 11)
+    sample_counts = np.array([1, 3, 8, 15, 22, 18, 12, 7, 3, 1])
+    plot_streamed(
+        counts=sample_counts,
+        edges=sample_edges,
+        obj_name="jets",
+        feat_name="Et",
+        save_dir=output_dir,
+    )
+
+    output_path = output_dir / "jets_Et.jpg"
+    assert output_path.is_file(), f"Expected histogram at {output_path}"
+    print(f"Manual histogram test passed. Plot saved to {output_path}")

@@ -18,15 +18,15 @@ ENV PIP_DISABLE_PIP_VERSION_CHECK=1 \
     PATH=/opt/venv/bin:$PATH
 
 RUN apt-get update \
- && apt-get install -y --no-install-recommends \
-      git \
-      ca-certificates \
-      openssh-client \
- && rm -rf /var/lib/apt/lists/*
+    && apt-get install -y --no-install-recommends \
+    git \
+    ca-certificates \
+    openssh-client \
+    && rm -rf /var/lib/apt/lists/*
 
 RUN python -m venv /opt/venv \
- && pip install --upgrade pip setuptools wheel \
- && pip install "poetry==${POETRY_VERSION}"
+    && pip install --upgrade pip setuptools wheel \
+    && pip install "poetry==${POETRY_VERSION}"
 
 WORKDIR /deps
 COPY pyproject.toml poetry.lock* /deps/
@@ -45,21 +45,21 @@ ENV VIRTUAL_ENV=/opt/venv \
     PYTHONUNBUFFERED=1
 
 RUN apt-get update \
- && apt-get install -y --no-install-recommends \
-      bash \
-      vim \
-      less \
-      procps \
-      htop \
-      tmux \
-      openssh-client \
-      git \
-      rsync \
-      curl \
-      wget \
-      tini \
-      ca-certificates \
- && rm -rf /var/lib/apt/lists/*
+    && apt-get install -y --no-install-recommends \
+    bash \
+    vim \
+    less \
+    procps \
+    htop \
+    tmux \
+    openssh-client \
+    git \
+    rsync \
+    curl \
+    wget \
+    tini \
+    ca-certificates \
+    && rm -rf /var/lib/apt/lists/*
 
 COPY --from=builder /opt/venv /opt/venv
 

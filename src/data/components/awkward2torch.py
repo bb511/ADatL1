@@ -26,7 +26,11 @@ class L1DataAwkward2Torch:
         self.object_feature_map = None
 
     def load_folder(
-        self, folder_path: Path
+        self,
+        folder_path: Path,
+        *,
+        max_events: int | None = None,
+        sample_seed: int = 12345,
     ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
         """Loads folder of parquet files containing awkward arrays to a numpy array.
 
@@ -37,13 +41,13 @@ class L1DataAwkward2Torch:
         self.cache_maskpath = folder_path / "torch_mask.pt"
         self.cache_l1bitpath = folder_path / "torch_l1bit.pt"
         self.object_feature_map_fpath = folder_path.parent / "object_feature_map.json"
+        self._validate_sampling_request(max_events, sample_seed)
         if self._cache_exists():
             if self.object_feature_map is None:
                 self._set_obj_feat_map()
-            return (
-                torch.load(self.cache_filepath),
-                torch.load(self.cache_maskpath),
-                torch.load(self.cache_l1bitpath),
+            return self._load_cached_tensors(
+                max_events=max_events,
+                sample_seed=sample_seed,
             )
 
         self.cached_objects = set()
@@ -64,13 +68,119 @@ class L1DataAwkward2Torch:
             log.warn(f"L1bit not found in {folder_path}.")
             self._cache_l1bit(l1bit)
             return data, mask, l1bit
+            return self._select_event_subset(
+                (data, mask, l1bit),
+                max_events=max_events,
+                sample_seed=sample_seed,
+            )
 
         l1bit = ak.from_parquet(l1bit_path)
         l1bit = ak.to_numpy(ak.flatten(l1bit["L1bit"]))
         l1bit = torch.from_numpy(l1bit)
         self._cache_l1bit(l1bit)
 
-        return data, mask, l1bit
+        return self._select_event_subset(
+            (data, mask, l1bit),
+            max_events=max_events,
+            sample_seed=sample_seed,
+        )
+
+    @staticmethod
+    def _validate_sampling_request(
+        max_events: int | None,
+        sample_seed: int,
+    ) -> None:
+        if (
+            max_events is not None
+            and (
+                not isinstance(max_events, int)
+                or isinstance(max_events, bool)
+                or max_events < 1
+            )
+        ):
+            raise ValueError("max_events must be a positive integer or None.")
+        if not isinstance(sample_seed, int) or isinstance(sample_seed, bool):
+            raise ValueError("sample_seed must be an integer.")
+
+    def _load_cached_tensors(
+        self,
+        *,
+        max_events: int | None,
+        sample_seed: int,
+    ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+        """Load a complete cache or a deterministic memory-efficient subset."""
+
+        if max_events is None:
+            return (
+                torch.load(self.cache_filepath),
+                torch.load(self.cache_maskpath),
+                torch.load(self.cache_l1bitpath),
+            )
+
+        # Memory mapping is essential here: loading the multi-gigabyte source
+        # tensor before selecting a smoke-test subset would retain the original
+        # peak-memory failure that the cap is intended to avoid.
+        cached = (
+            torch.load(
+                self.cache_filepath,
+                map_location="cpu",
+                weights_only=True,
+                mmap=True,
+            ),
+            torch.load(
+                self.cache_maskpath,
+                map_location="cpu",
+                weights_only=True,
+                mmap=True,
+            ),
+            torch.load(
+                self.cache_l1bitpath,
+                map_location="cpu",
+                weights_only=True,
+                mmap=True,
+            ),
+        )
+
+        return self._select_event_subset(
+            cached,
+            max_events=max_events,
+            sample_seed=sample_seed,
+        )
+
+    @staticmethod
+    def _select_event_subset(
+        cached: tuple[torch.Tensor, torch.Tensor, torch.Tensor],
+        *,
+        max_events: int | None,
+        sample_seed: int,
+    ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+        if max_events is None:
+            return cached
+
+        row_counts = {int(tensor.shape[0]) for tensor in cached}
+        if len(row_counts) != 1:
+            raise RuntimeError(
+                "Cached data, mask, and L1-bit tensors have different row counts."
+            )
+
+        n_events = row_counts.pop()
+        if max_events >= n_events:
+            return cached
+
+        rng = np.random.default_rng(sample_seed)
+        sampled_indices = np.sort(
+            rng.choice(
+                n_events,
+                size=max_events,
+                replace=False,
+            )
+        )
+        index = torch.from_numpy(sampled_indices.astype(np.int64, copy=False))
+
+        return tuple(
+            tensor.index_select(dim=0, index=index)
+            for tensor in cached
+        )
 
     def _cache_exists(self) -> bool:
         """Check whether the cache exists."""

@@ -105,6 +105,7 @@ def make_gall(
         html_page = generate_gallery_header()
 
     html_page += write_gallery_section(sec_name, image_paths)
+    html_page += build_gallery_section(plots_dir, sec_name)
     html_page = "\n".join(html_page)
 
     mlflow_logger.experiment.log_text(
@@ -112,6 +113,18 @@ def make_gall(
     )
 
     return html_page
+
+
+def build_gallery_html(plots_dir: Path, section_name: str) -> str:
+    """Build a standalone HTML gallery containing every current image in a folder."""
+    html_page = generate_gallery_header()
+    html_page += build_gallery_section(plots_dir, section_name)
+    return "\n".join(html_page)
+
+
+def build_gallery_section(plots_dir: Path, section_name: str) -> list[str]:
+    """Build one gallery section from every current image in ``plots_dir``."""
+    return write_gallery_section(section_name, get_image_paths(plots_dir, section_name))
 
 
 def check_html_exists(mlflow_logger: Logger, gallery_dir: Path, fname: str) -> bool:

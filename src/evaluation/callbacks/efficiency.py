@@ -1,7 +1,8 @@
 # Callback that computes the anomaly efficiency.
+import json
+import pickle
 from collections import defaultdict
 from pathlib import Path
-import pickle
 
 import torch
 import numpy as np
@@ -32,6 +33,8 @@ class AnomalyEfficiencyCallback(Callback):
     :param ds: List of dataset names to compute efficiencies on.
     :param cvar_summary: Fraction of worst efficiencies to average in the summary.
     :param log_raw_mlflow: Whether to log raw plots to mlflow.
+    :param write_pareto_summary: Whether to write the compact Pareto utility JSON.
+    :param write_plots: Whether to write per-signal plots and MLflow artifacts.
     :param name: Identifier used in plot folders and summaries.
     """
 
@@ -44,6 +47,8 @@ class AnomalyEfficiencyCallback(Callback):
         pure_thres: bool = False,
         cvar_summary: float = 0.25,
         log_raw_mlflow: bool = True,
+        write_pareto_summary: bool = False,
+        write_plots: bool = True,
         name: str = "eff",
     ):
         super().__init__()
@@ -60,6 +65,8 @@ class AnomalyEfficiencyCallback(Callback):
         self.cvar_summary = cvar_summary
 
         self.log_raw_mlflow = log_raw_mlflow
+        self.write_pareto_summary = bool(write_pareto_summary)
+        self.write_plots = bool(write_plots)
         self.eff_summary = defaultdict(lambda: defaultdict(float))
         self.eff_min = defaultdict(lambda: defaultdict(float))
         self.eff_med = defaultdict(lambda: defaultdict(float))
@@ -131,10 +138,11 @@ class AnomalyEfficiencyCallback(Callback):
                 self.eff_med[trate][ckpt_ds] = 0.0
                 self.eff_min[trate][ckpt_ds] = 0.0
 
-            trate_label = self._target_label(trate)
-            ascore = f"anomaly score: {self.output_name}"
-            xlabel = f"efficiency at threshold: {trate_label}\n{ascore}"
-            self._plot(effs, xlabel, plot_folder, percent=True)
+            if self.write_plots:
+                trate_label = self._target_label(trate)
+                ascore = f"anomaly score: {self.output_name}"
+                xlabel = f"efficiency at threshold: {trate_label}\n{ascore}"
+                self._plot(effs, xlabel, plot_folder, percent=True)
             self._store_summary(sig_effs, bkg_effs, ckpt_name, trate)
             metrics[f"eff_{trate_label}"] = self.eff_summary[trate][ckpt_ds]
             metrics[f"eff_med_{trate_label}"] = self.eff_med[trate][ckpt_ds]
@@ -153,9 +161,32 @@ class AnomalyEfficiencyCallback(Callback):
             log_raw=self.log_raw_mlflow,
             gallery_name=f"{eff_name}",
         )
+            # The Pareto-front utility metrics use the model's fixed operational
+            # point. Persist them next to the per-signal efficiency plot for this
+            # exact checkpoint and split.
+            if self.write_pareto_summary and self._is_operational(trate):
+                self._write_efficiency_summary(
+                    plot_folder / "eff_summary.json",
+                    checkpoint_name=f"{ckpt_name}.ckpt",
+                    split=split,
+                    target_rate=trate,
+                    signal_efficiencies=sig_effs,
+                )
+
+        if self.write_plots:
+            utils.mlflow.log_plots_to_mlflow(
+                trainer,
+                ckpt_name,
+                eff_name,
+                plot_folder,
+                log_raw=self.log_raw_mlflow,
+                gallery_name=f"{eff_name}",
+            )
 
     def plot_summary(self, trainer, root_folder: Path):
         """Plot summary metrics accumulated across checkpoints and reset state."""
+        if not self.write_plots:
+            return
         eff_name = f"{self.name}_pure" if self.pure_thres else self.name
         split = trainer.split
         plot_folder = root_folder / "plots" / split / (eff_name + "_summary")
@@ -286,6 +317,65 @@ class AnomalyEfficiencyCallback(Callback):
         with open(cache_folder / "summary.pkl", "wb") as f:
             plain_dict = utils.misc.to_plain_dict(self.eff_summary)
             pickle.dump(plain_dict, f, protocol=pickle.HIGHEST_PROTOCOL)
+
+    def _write_efficiency_summary(
+        self,
+        output_path: Path,
+        *,
+        checkpoint_name: str,
+        split: str,
+        target_rate: float,
+        signal_efficiencies: dict[str, float],
+    ) -> None:
+        """Write per-signal and summary efficiencies at the operational point."""
+        per_signal = {
+            str(dataset): float(efficiency)
+            for dataset, efficiency in sorted(signal_efficiencies.items())
+        }
+        signal_data = np.fromiter(per_signal.values(), dtype=float)
+
+        if signal_data.size:
+            mean_efficiency = float(np.mean(signal_data))
+            median_efficiency = float(np.median(signal_data))
+            min_efficiency = float(np.min(signal_data))
+            min_efficiency_dataset = min(per_signal, key=per_signal.get)
+            cvar25_count = max(1, int(np.ceil(0.25 * signal_data.size)))
+            cvar25_efficiency = float(
+                np.partition(signal_data, cvar25_count - 1)[:cvar25_count].mean()
+            )
+        else:
+            mean_efficiency = None
+            median_efficiency = None
+            min_efficiency = None
+            min_efficiency_dataset = None
+            cvar25_efficiency = None
+
+        payload = {
+            "schema_version": 2,
+            "checkpoint": checkpoint_name,
+            "split": split,
+            "anomaly_score": self.output_name,
+            "operating_point": {
+                "label": "operational",
+                "target_rate": float(target_rate),
+                "base_rate": (
+                    None
+                    if self.base_rate_resolved is None
+                    else float(self.base_rate_resolved)
+                ),
+            },
+            "num_signal_datasets": len(per_signal),
+            "mean_efficiency": mean_efficiency,
+            "median_efficiency": median_efficiency,
+            "min_efficiency": min_efficiency,
+            "min_efficiency_dataset": min_efficiency_dataset,
+            "cvar25_efficiency": cvar25_efficiency,
+            "signal_efficiencies": per_signal,
+        }
+        output_path.write_text(
+            json.dumps(payload, indent=2, sort_keys=True, allow_nan=False) + "\n",
+            encoding="utf-8",
+        )
 
     def _get_thres(self, pl_module):
         """Load thresholds that were stored on the module at validation time."""

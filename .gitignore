@@ -203,3 +203,7 @@ outputs
 
 # Local archive of superseded notebook data (kept out of git).
 notebooks/archive/
+# Data Analysis Tools
+*.csv
+*.tsv
+*.xlsx

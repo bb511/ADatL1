@@ -5,6 +5,7 @@ from pathvalidate import sanitize_filename
 import numpy as np
 
 import matplotlib.pyplot as plt
+import matplotlib.colors as colors
 import mplhep as hep
 from mpl_toolkits.axes_grid1 import make_axes_locatable
 

@@ -120,11 +120,6 @@ class AE(ADLightningModule):
         inject_object_feature_map(self)
         self._assert_sensitive_not_in_model_input()
 
-    def forward(self, x: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
-        x = self.features(x)
-        z = self.encoder(x)
-        reconstruction = self.decoder(z)
-        return z, reconstruction
     @property
     def target_fpr(self) -> float:
         return self.compute_target_fpr()

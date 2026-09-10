@@ -128,6 +128,7 @@ class AnomalyEfficiencyCallback(Callback):
             sig_effs = self._compute_eff(self.sig_rates, trate)
             bkg_effs = self._compute_eff(self.bkg_rates, trate)
             effs = sig_effs | bkg_effs | main_eff
+            trate_label = self._target_label(trate)
 
             ckpt_ds = utils.misc.get_ckpt_ds_name(ckpt_name)
             sig_data = np.fromiter(sig_effs.values(), dtype=float)
@@ -139,7 +140,6 @@ class AnomalyEfficiencyCallback(Callback):
                 self.eff_min[trate][ckpt_ds] = 0.0
 
             if self.write_plots:
-                trate_label = self._target_label(trate)
                 ascore = f"anomaly score: {self.output_name}"
                 xlabel = f"efficiency at threshold: {trate_label}\n{ascore}"
                 self._plot(effs, xlabel, plot_folder, percent=True)
@@ -150,17 +150,6 @@ class AnomalyEfficiencyCallback(Callback):
             for ds_name, ds_eff in effs.items():
                 metrics[f"eff_{trate_label}_{ds_name}"] = ds_eff
 
-        utils.mlflow.log_metrics_to_mlflow(
-            trainer, metrics, ckpt_name=ckpt_name, cb_name=eff_name
-        )
-        utils.mlflow.log_plots_to_mlflow(
-            trainer,
-            ckpt_name,
-            eff_name,
-            plot_folder,
-            log_raw=self.log_raw_mlflow,
-            gallery_name=f"{eff_name}",
-        )
             # The Pareto-front utility metrics use the model's fixed operational
             # point. Persist them next to the per-signal efficiency plot for this
             # exact checkpoint and split.
@@ -172,6 +161,10 @@ class AnomalyEfficiencyCallback(Callback):
                     target_rate=trate,
                     signal_efficiencies=sig_effs,
                 )
+
+        utils.mlflow.log_metrics_to_mlflow(
+            trainer, metrics, ckpt_name=ckpt_name, cb_name=eff_name
+        )
 
         if self.write_plots:
             utils.mlflow.log_plots_to_mlflow(

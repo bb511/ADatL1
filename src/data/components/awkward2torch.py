@@ -67,7 +67,6 @@ class L1DataAwkward2Torch:
             l1bit = torch.ones(data.size(0), dtype=torch.bool, device=data.device)
             log.warn(f"L1bit not found in {folder_path}.")
             self._cache_l1bit(l1bit)
-            return data, mask, l1bit
             return self._select_event_subset(
                 (data, mask, l1bit),
                 max_events=max_events,

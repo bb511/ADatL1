@@ -4,7 +4,7 @@
 # evaluation wiring.  This manifest deliberately overrides every choice that is
 # material to the FET.Et validation Pareto study below.
 defaults:
-  - ae
+  - /experiment/physics/ae
   - _self_
 
 experiment_name: physics_pareto_fet_v1
@@ -172,6 +172,8 @@ algorithm:
 evaluation:
   leakage_probes:
     enabled: true
+    smoke_test:
+      max_events_per_split: null
 
   callbacks:
     anomaly_efficiency:

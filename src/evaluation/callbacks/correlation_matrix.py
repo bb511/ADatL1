@@ -101,6 +101,10 @@ class CorrelationMatrixCallback(Callback):
         self.log_raw_mlflow = log_raw_mlflow
         self.enabled = bool(enabled)
         self.write_details = bool(write_details)
+        # on_test_epoch_start replaces this with fully resolved tensor indices.
+        # The label-only fallback also lets summary-only callers operate on
+        # already collected tables without requiring a live data module.
+        self._resolved_variables = [{"label": variable} for variable in self.variables]
 
         if self.aggregate not in {"sum", "mean", "max", "first"}:
             raise ValueError(

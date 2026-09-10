@@ -66,7 +66,7 @@ def log_raw_imgs_to_mlflow(plot_folder: Path, logger: MLFlowLogger, arti: Path):
 
 def get_mlflow_logger(trainer) -> MLFlowLogger:
     """Extract the MLFlow logger from the trainer, if it is being used."""
-    logger = trainer.logger
+    logger = getattr(trainer, "logger", None)
     if isinstance(logger, MLFlowLogger):
         return logger
 
@@ -95,7 +95,6 @@ def make_gall(
         in the parent directory where the plots are stored.
     """
     plots_dir = plots_dir.resolve()
-    image_paths = get_image_paths(plots_dir)
 
     # Check if index file already exists.
     index_exists = check_html_exists(mlflow_logger, gallery_dir, f"{fname}.html")
@@ -104,7 +103,6 @@ def make_gall(
     else:
         html_page = generate_gallery_header()
 
-    html_page += write_gallery_section(sec_name, image_paths)
     html_page += build_gallery_section(plots_dir, sec_name)
     html_page = "\n".join(html_page)
 
@@ -124,7 +122,7 @@ def build_gallery_html(plots_dir: Path, section_name: str) -> str:
 
 def build_gallery_section(plots_dir: Path, section_name: str) -> list[str]:
     """Build one gallery section from every current image in ``plots_dir``."""
-    return write_gallery_section(section_name, get_image_paths(plots_dir, section_name))
+    return write_gallery_section(section_name, get_image_paths(plots_dir))
 
 
 def check_html_exists(mlflow_logger: Logger, gallery_dir: Path, fname: str) -> bool:

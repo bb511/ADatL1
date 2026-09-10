@@ -220,7 +220,7 @@ class AnomalyAUROCCallback(Callback):
             partial_fpr = np.append(partial_fpr, max_fpr)
             partial_tpr = np.append(partial_tpr, endpoint_tpr)
 
-        return float(np.trapz(partial_tpr, partial_fpr))
+        return float(np.trapezoid(partial_tpr, partial_fpr))
 
     def _write_summary(
         self,

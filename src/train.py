@@ -9,6 +9,7 @@ os.environ["KERAS_BACKEND"] = "torch"
 
 import hydra
 import pytorch_lightning as pl
+import torch
 
 from pytorch_lightning import Callback, LightningDataModule, LightningModule, Trainer
 from pytorch_lightning.loggers import Logger
@@ -132,22 +133,6 @@ def train(cfg: DictConfig) -> Tuple[Dict[str, Any], Dict[str, Any]]:
     train_metrics = trainer.callback_metrics
 
     post_training_metrics: Dict[str, float] = {}
-
-    if evaluator is not None:
-        log.info(Back.MAGENTA + 8 * "-" + "STARTING RUN VALIDATION" + 8 * "-")
-        datamodule.setup("validate")
-        val_loader = datamodule.val_dataloader()
-        evaluator.evaluate_run(
-            run_ckpts, algorithm, val_loader, "val", set_optimized_metric=True
-        )
-        object_dict.update({"evaluator": evaluator})
-
-        # Evaluate once more on a held out test set for final performance.
-        if cfg.get("test"):
-            log.info(Back.MAGENTA + 8 * "-" + "STARTING RUN TESTING" + 8 * "-")
-            datamodule.setup("test")
-            test_loader = datamodule.test_dataloader()
-            evaluator.evaluate_run(run_ckpts, algorithm, test_loader, "test")
 
     metric_dict = {**train_metrics}
     evaluation_cfg = cfg.get("evaluation")

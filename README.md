@@ -42,6 +42,23 @@ confirmation unless given `--force`.
 
 ## Data
 
+### Outputs on EOS / CERNBox
+
+Set these variables inside the LXPLUS container before running Python:
+
+```bash
+export PROJECT_ROOT=/eos/user/l/lbehrens/adl1t-stage
+export ADL1T_OUTPUT_ROOT=/eos/user/l/lbehrens/adl1t-stage/data/run-outputs
+```
+
+Input data remains under `$PROJECT_ROOT/data`. Checkpoints go under
+`$ADL1T_OUTPUT_ROOT/checkpoints`, and MLflow and Hydra run outputs under
+`$ADL1T_OUTPUT_ROOT/logs`. The raw-data path still needs its normal configuration.
+Without `ADL1T_OUTPUT_ROOT`, the existing output locations are preserved.
+`python test.py` writes `hello.txt` into this output directory to check EOS writes
+and CERNBox synchronization. These settings apply to training outputs using the
+central paths configuration; standalone analysis scripts may specify their own paths.
+
 The LHC L1 AD data is produced by [this code](https://github.com/bb511/adl1t_datamaker).
 See more details about it there.
 We recommend using the HuggingFace variant [`podagiu/anomaly_detection_cmsl1t`](https://huggingface.co/datasets/podagiu/anomaly_detection_cmsl1t) of the dataloader of the LHC L1 AD data.

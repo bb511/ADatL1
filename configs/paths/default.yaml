@@ -6,8 +6,11 @@ root_dir: ${oc.env:PROJECT_ROOT}
 # path to data directory
 base_data_dir: ${paths.root_dir}/data
 
+# Optional output location, independent of the input data root.
+output_root: ${oc.env:ADL1T_OUTPUT_ROOT,${paths.root_dir}}
+
 # path to logging directory
-log_dir: ${paths.root_dir}/logs/
+log_dir: ${paths.output_root}/logs/
 
 # path to output directory, created dynamically by hydra
 # path generation pattern is specified in `configs/hydra/default.yaml`
@@ -15,7 +18,7 @@ log_dir: ${paths.root_dir}/logs/
 output_dir: ${hydra:runtime.output_dir}
 
 # path to checkpoints directory
-checkpoints_dir: ${paths.root_dir}/checkpoints/
+checkpoints_dir: ${paths.output_root}/checkpoints/
 
 # path to working directory
 work_dir: ${hydra:runtime.cwd}

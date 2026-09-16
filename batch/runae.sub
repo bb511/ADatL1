@@ -19,14 +19,26 @@ request_gpus = 1
 # 16 cpus / 48000 MB (48 GB) also reaches the 42-node 16-core/118 GB fleet,
 # for ~75 machines total, and is still 3.4x the 14256 MB where job 329277 OOM'd.
 #
-# If this still shows 0 willing, cut the footprint rather than raising further:
-#   environment = "DATA_WORKERS=1"
-# with 4 cpus / 12000 MB puts you back on the 30-node 4-core fleet.
+# DATA_WORKERS does NOT help: job 329277 (3 workers) died at 14256 MB and
+# job 329286 (1 worker) died at 14289 MB. The allocation is in the main
+# process, not the awkward2torch workers, so memory must be requested.
+# Both were killed crossing the 12000 limit, so the true peak is still unknown.
+#
+# Fleet sizes by request (single GPU):
+#   4 cpus / 12000 MB -> ~136 machines, but too small: OOMs.
+#   13 cpus / 39000 MB -> ~92 machines (adds the 18x 16-core/39 GB nodes)
+#   16 cpus / 48000 MB -> ~74 machines
+#   22 cpus / 66000 MB -> ~32 machines
 #
 # Check the real peak once a run completes:
 #   condor_history -l <jobid> | grep -i memoryusage
-request_cpus   = 16
-request_memory = 48000
+# mlready is 14 GB and peak RSS tracks it almost exactly (OOM at 14256/14289 MB),
+# so the datamodule loads the whole set. Need ~14 GB + torch/training overhead.
+# 13 cpus / 39000 MB is the sweet spot: it is the LARGEST request that still
+# reaches the ~92-machine pool, because the binding fleet (18x 16-core/39 GB)
+# caps at exactly 13 cores and 39000 MB. Asking for less buys no extra machines.
+request_cpus   = 13
+request_memory = 39000
 request_disk   = 10GB
 
 # 2 h. test_container.sub used 600 s; 3 epochs needs more.

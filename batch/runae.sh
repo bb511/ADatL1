@@ -11,10 +11,17 @@ echo "Hostname: $(hostname)"
 echo "PWD:      $(pwd)"
 echo "User:     $(whoami)"
 
+# The dependencies live in a venv inside the image (see enter-container.sh).
+# runae.sh invokes python3, which otherwise resolves to the system interpreter.
+if [[ -d /opt/venv/bin ]]; then
+  export PATH="/opt/venv/bin:$PATH"
+fi
+
 echo
 echo "Python:"
-command -v python
-python --version
+command -v python3
+python3 --version
+python3 -c 'import torch; print("torch", torch.__version__, "cuda", torch.cuda.is_available())'
 
 echo
 echo "GPU:"

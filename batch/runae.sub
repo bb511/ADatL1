@@ -8,9 +8,15 @@ MY.SingularityImage = "/eos/user/l/lbehrens/containers/adl1t_lab-dev.sif"
 
 request_gpus = 1
 
-# No request_cpus / request_memory: a GPU slot at CERN comes as a fixed unit
-# (~22 cores, ~66 GB). Asking for 6 / 64 GB was silently rewritten to those
-# values anyway, so the lines only risk narrowing the set of matching slots.
+# These are required on the EosSubmit schedds. Without them HTCondor falls back
+# to 3000 MB and a 3 KB sandbox, and the job gets held for exceeding memory.
+# (The standard schedds rewrite these to a per-GPU unit; EosSubmit does not.)
+# l40s-job.yaml asked for 64 Gi; 32 GB is a starting point for a 3-epoch run.
+# Check actual usage afterwards with:
+#   condor_history -l <jobid> | grep -i memoryusage
+request_cpus   = 4
+request_memory = 32000
+request_disk   = 20000
 
 # 2 h. test_container.sub used 600 s; 3 epochs needs more.
 +MaxRuntime = 7200

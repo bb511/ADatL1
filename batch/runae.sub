@@ -1,0 +1,41 @@
+# =============================================================================
+# HTCondor submit file – AE training on LXPLUS (GPU, 3 epochs)
+# =============================================================================
+# Submit from the ADatL1 repo root:
+#   mkdir -p batch/logs
+#   condor_submit batch/runae.sub
+#
+# Monitor:
+#   condor_q
+#   condor_ssh_to_job -auto-retry <jobid>
+# =============================================================================
+
+executable = batch/runae.sh
+
+log    = batch/logs/runae.$(ClusterId).log
+output = batch/logs/runae.$(ClusterId).$(ProcId).out
+error  = batch/logs/runae.$(ClusterId).$(ProcId).err
+
+# ── Container ─────────────────────────────────────────────────────────────────
+# Same .sif image used by test_container.sub.
+MY.SingularityImage = "/eos/user/l/lbehrens/containers/adl1t_lab-dev.sif"
+
+# ── Compute resources ─────────────────────────────────────────────────────────
+# Matches the l40s-job.yaml (Kubernetes) spec: 6 CPUs, 64 Gi RAM, 1 GPU.
+request_cpus   = 6
+request_memory = 65536   # MiB == 64 Gi
+request_disk   = 10000   # MiB scratch space for checkpoints / tmp files
+request_gpus   = 1
+
+# Require ≥ 16 GB VRAM and CUDA compute capability ≥ 7.0 (Volta/Turing/Ampere).
+# Adjust gpus_minimum_memory if you need a larger card (e.g. 40GB for A100).
+gpus_minimum_memory     = 16GB
+gpus_minimum_capability = 7.0
+
+# ── Job flavour ───────────────────────────────────────────────────────────────
+# "workday"  = up to  8 h  (safe for a 3-epoch smoke test)
+# "tomorrow" = up to  1 day (full production runs)
+# "longlunch"= up to  2 h  (only if you are sure the job is short)
++JobFlavour = "workday"
+
+queue

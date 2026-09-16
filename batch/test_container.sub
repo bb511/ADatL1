@@ -1,0 +1,13 @@
+executable = batch/test_container.sh
+
+log    = batch/logs/test.$(ClusterId).log
+output = batch/logs/test.$(ClusterId).$(ProcId).out
+error  = batch/logs/test.$(ClusterId).$(ProcId).err
+
+MY.SingularityImage = "/eos/user/l/lbehrens/containers/adl1t_lab-dev.sif"
+
+request_cpus = 1
+
++MaxRuntime = 600
+
+queue

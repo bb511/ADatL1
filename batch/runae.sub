@@ -12,16 +12,21 @@ request_gpus = 1
 # request_memory: asking for 32000 forced 11 cores and dropped the matching
 # slots to zero. Keep memory == cpus * 3000 so nothing gets rescaled.
 # request_memory is in MiB; request_disk defaults to KiB, hence the explicit GB.
-# ~64 GB, matching l40s-job.yaml. CERN gives 3000 MB per core, so 64 GB implies
-# 22 cores (66000 MB); setting both explicitly stops HTCondor rescaling them.
-# NOTE: 22-core GPU slots are scarce - at 11 cores only 9 slots matched and none
-# were willing. If this never starts, cut the footprint instead: add
+# CERN caps memory at 3000 MB per core, so cpus and memory must stay in that
+# ratio or HTCondor rescales them.
+#
+# 22 cpus / 66000 MB (64 GB) matched only 32 machines, all busy - 0 willing.
+# 16 cpus / 48000 MB (48 GB) also reaches the 42-node 16-core/118 GB fleet,
+# for ~75 machines total, and is still 3.4x the 14256 MB where job 329277 OOM'd.
+#
+# If this still shows 0 willing, cut the footprint rather than raising further:
 #   environment = "DATA_WORKERS=1"
-# and drop back to 8 cpus / 24000 MB.
+# with 4 cpus / 12000 MB puts you back on the 30-node 4-core fleet.
+#
 # Check the real peak once a run completes:
 #   condor_history -l <jobid> | grep -i memoryusage
-request_cpus   = 22
-request_memory = 66000
+request_cpus   = 16
+request_memory = 48000
 request_disk   = 10GB
 
 # 2 h. test_container.sub used 600 s; 3 epochs needs more.

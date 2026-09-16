@@ -12,12 +12,16 @@ request_gpus = 1
 # request_memory: asking for 32000 forced 11 cores and dropped the matching
 # slots to zero. Keep memory == cpus * 3000 so nothing gets rescaled.
 # request_memory is in MiB; request_disk defaults to KiB, hence the explicit GB.
-# l40s-job.yaml asked for 64 Gi, but the dataset streams (L1ADDataset.__iter__)
-# so 12 GB should be ample for 3 epochs. If the job is held for memory, step up
-# to 6 cpus / 18000 MB. Check real usage with:
+# ~64 GB, matching l40s-job.yaml. CERN gives 3000 MB per core, so 64 GB implies
+# 22 cores (66000 MB); setting both explicitly stops HTCondor rescaling them.
+# NOTE: 22-core GPU slots are scarce - at 11 cores only 9 slots matched and none
+# were willing. If this never starts, cut the footprint instead: add
+#   environment = "DATA_WORKERS=1"
+# and drop back to 8 cpus / 24000 MB.
+# Check the real peak once a run completes:
 #   condor_history -l <jobid> | grep -i memoryusage
-request_cpus   = 4
-request_memory = 12000
+request_cpus   = 22
+request_memory = 66000
 request_disk   = 10GB
 
 # 2 h. test_container.sub used 600 s; 3 epochs needs more.

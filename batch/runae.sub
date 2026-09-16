@@ -6,42 +6,43 @@ error  = batch/logs/runae.$(ClusterId).$(ProcId).err
 
 MY.SingularityImage = "/eos/user/l/lbehrens/containers/adl1t_lab-dev.sif"
 
+# ---------------------------------------------------------------------------
+# Output transfer
+# ---------------------------------------------------------------------------
+# HTCondor only transfers back top-level files in the sandbox by default -
+# never subdirectories. Without this line the checkpoints and MLflow logs in
+# outputs/ are discarded when the job ends (job 329299 returned only 89 KB of
+# stdout/stderr). EosSubmit assumes preserve_relative_paths=True, so the tree
+# lands as outputs/ under the submit directory.
+transfer_output_files = outputs
+
+# ---------------------------------------------------------------------------
+# Resources
+# ---------------------------------------------------------------------------
 request_gpus = 1
 
-# CERN allocates 3000 MB of RAM per core and scales RequestCpus up to cover
-# request_memory: asking for 32000 forced 11 cores and dropped the matching
-# slots to zero. Keep memory == cpus * 3000 so nothing gets rescaled.
-# request_memory is in MiB; request_disk defaults to KiB, hence the explicit GB.
-# CERN caps memory at 3000 MB per core, so cpus and memory must stay in that
-# ratio or HTCondor rescales them.
+# CERN allocates 3000 MB of RAM per core and rescales request_cpus upward to
+# cover request_memory, so keep memory == cpus * 3000 or both get rewritten.
 #
-# 22 cpus / 66000 MB (64 GB) matched only 32 machines, all busy - 0 willing.
-# 16 cpus / 48000 MB (48 GB) also reaches the 42-node 16-core/118 GB fleet,
-# for ~75 machines total, and is still 3.4x the 14256 MB where job 329277 OOM'd.
+# Measured on job 329299 (succeeded, 3 epochs in 9 min):
+#   train model input   (12532307, 116) float32  ~5.8 GB
+#   train control tensor (12532307, 39, 3)       ~5.9 GB
+#   + validation and 20 signal datasets for evaluation
+# Peak RSS was 30265 MB with a 30000 MB request; it OOM'd at 12000 MB.
+# DATA_WORKERS does not change this (3 workers -> 14256 MB, 1 worker -> 14289).
 #
-# DATA_WORKERS does NOT help: job 329277 (3 workers) died at 14256 MB and
-# job 329286 (1 worker) died at 14289 MB. The allocation is in the main
-# process, not the awkward2torch workers, so memory must be requested.
-# Both were killed crossing the 12000 limit, so the true peak is still unknown.
-#
-# Fleet sizes by request (single GPU):
-#   4 cpus / 12000 MB -> ~136 machines, but too small: OOMs.
-#   13 cpus / 39000 MB -> ~92 machines (adds the 18x 16-core/39 GB nodes)
-#   16 cpus / 48000 MB -> ~74 machines
-#   22 cpus / 66000 MB -> ~32 machines
-#
-# Check the real peak once a run completes:
-#   condor_history -l <jobid> | grep -i memoryusage
-# mlready is 14 GB and peak RSS tracks it almost exactly (OOM at 14256/14289 MB),
-# so the datamodule loads the whole set. Need ~14 GB + torch/training overhead.
-# 13 cpus / 39000 MB is the sweet spot: it is the LARGEST request that still
-# reaches the ~92-machine pool, because the binding fleet (18x 16-core/39 GB)
-# caps at exactly 13 cores and 39000 MB. Asking for less buys no extra machines.
-request_cpus   = 13
-request_memory = 39000
+# Fleet sizes, single GPU:
+#   4 cpus / 12000 MB  -> ~136 machines, but OOMs
+#   10 cpus / 30000 MB -> ~92 machines, PROVEN to work
+#   13 cpus / 39000 MB -> ~92 machines (same pool, more headroom)
+#   22 cpus / 66000 MB -> ~32 machines, never scheduled
+request_cpus   = 10
+request_memory = 30000
 request_disk   = 10GB
 
-# 2 h. test_container.sub used 600 s; 3 epochs needs more.
+# 2 h. Job 329299 took 9 min wall: ~3.5 min data conversion, 33 s/epoch,
+# ~1.5 min evaluation. Subsequent runs skip the conversion because
+# torch_cache.pt is now cached on EOS.
 +MaxRuntime = 7200
 
 queue

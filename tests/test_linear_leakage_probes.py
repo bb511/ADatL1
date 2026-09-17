@@ -8,12 +8,11 @@ import pytest
 import src.evaluation.leakage_probe.evaluation as leakage_probe_evaluation
 import src.evaluation.leakage_probe.persistence as leakage_probe_persistence
 from src.evaluation.leakage_probe import (
-    PROBE_INITIALIZATION_SEEDS,
+    PROBE_INITIALIZATION_SEED,
+    four_probe_result_payload,
     FourProbeEvaluationResult,
     LinearProbeOuterResult,
-    MLPProbeCandidateResult,
     MLPProbeOuterResult,
-    MLPProbeSeedSelection,
     NamedLinearProbeResult,
     NamedMLPProbeResult,
     PrimaryLinearProbeResult,
@@ -26,7 +25,6 @@ from src.evaluation.leakage_probe import (
     evaluate_linear_probe_representation,
     evaluate_primary_linear_probes,
     fit_linear_probe,
-    make_probe_inner_partition,
     write_leakage_probe_results,
     PROBE_TARGET_SHUFFLE_SEED,
     ShuffledTargetMLPResult,
@@ -96,44 +94,6 @@ def make_representation_set(
     )
 
 
-def make_selection(seed: int) -> MLPProbeSeedSelection:
-    candidates = tuple(
-        MLPProbeCandidateResult(
-            seed=candidate_seed,
-            inner_r2_raw=(
-                0.5
-                if candidate_seed == seed
-                else 0.1
-            ),
-            inner_mae_gev=(
-                5.0
-                if candidate_seed == seed
-                else 6.0
-            ),
-            convergence_warnings=(),
-            n_iter=5,
-            final_loss=0.1,
-            feature_scaler=Mock(),
-            target_scaler=Mock(),
-            estimator=Mock(),
-        )
-        for candidate_seed in PROBE_INITIALIZATION_SEEDS
-    )
-
-    selected_candidate = next(
-        candidate
-        for candidate in candidates
-        if candidate.seed == seed
-    )
-
-    return MLPProbeSeedSelection(
-        selected_seed=seed,
-        selected_candidate=selected_candidate,
-        successful_candidates=candidates,
-        failed_candidates=(),
-    )
-
-
 def make_named_mlp(
     representation_name: str,
     seed: int,
@@ -146,7 +106,7 @@ def make_named_mlp(
     metric_name = metric_names[representation_name]
 
     outer = MLPProbeOuterResult(
-        selected_seed=seed,
+        seed=seed,
         outer_r2_raw=clipped_r2,
         outer_r2_clipped=clipped_r2,
         outer_mae_gev=5.0,
@@ -164,7 +124,6 @@ def make_named_mlp(
         representation_name=representation_name,
         metric_name=metric_name,
         feature_dimension=2,
-        seed_selection=make_selection(seed),
         outer_result=outer,
     )
 
@@ -172,7 +131,7 @@ def make_shuffled_controls() -> ShuffledTargetMLPResult:
     return ShuffledTargetMLPResult(
         latent_logits=make_named_mlp(
             "latent_logits",
-            10,
+            123,
             0.0,
         ),
         reconstructed_data=make_named_mlp(
@@ -180,7 +139,6 @@ def make_shuffled_controls() -> ShuffledTargetMLPResult:
             123,
             0.0,
         ),
-        inner_partition=make_probe_inner_partition(20),
         shuffle_seed=PROBE_TARGET_SHUFFLE_SEED,
         permutation_manifest_hash=(
             "test-shuffle-manifest"
@@ -415,7 +373,7 @@ def test_each_of_four_probes_can_determine_leakage_worst(
 
     mlp_latent = make_named_mlp(
         "latent_logits",
-        10,
+        123,
         mlp_latent_score,
     )
     mlp_reconstruction = make_named_mlp(
@@ -427,7 +385,6 @@ def test_each_of_four_probes_can_determine_leakage_worst(
     mlp_result = PrimaryMLPLeakageResult(
         latent_logits=mlp_latent,
         reconstructed_data=mlp_reconstruction,
-        inner_partition=make_probe_inner_partition(20),
         leakage_worst=max(
             mlp_latent_score,
             mlp_reconstruction_score,
@@ -493,6 +450,60 @@ def test_each_of_four_probes_can_determine_leakage_worst(
     assert result.leakage_worst == pytest.approx(max(scores))
 
 
+def test_mlp_payload_records_the_frozen_seed_and_no_selection_block(
+    monkeypatch,
+) -> None:
+    """The v8 artifact reports one fitted seed and carries no candidate stage."""
+
+    train = make_representation_set("train", 20)
+    validation = make_representation_set("valid", 10)
+
+    mlp_result = PrimaryMLPLeakageResult(
+        latent_logits=make_named_mlp("latent_logits", 123, 0.2),
+        reconstructed_data=make_named_mlp("reconstructed_data", 123, 0.7),
+        leakage_worst=0.7,
+    )
+    linear_result = PrimaryLinearProbeResult(
+        latent_logits=make_named_linear("latent_logits", 0.8),
+        reconstructed_data=make_named_linear("reconstructed_data", 0.3),
+    )
+
+    monkeypatch.setattr(
+        leakage_probe_evaluation,
+        "evaluate_primary_mlp_probes",
+        Mock(return_value=mlp_result),
+    )
+    monkeypatch.setattr(
+        leakage_probe_evaluation,
+        "evaluate_primary_linear_probes",
+        Mock(return_value=linear_result),
+    )
+    monkeypatch.setattr(
+        leakage_probe_evaluation,
+        "evaluate_shuffled_target_mlp_controls",
+        Mock(return_value=make_shuffled_controls()),
+    )
+
+    result = evaluate_four_leakage_probes(
+        train,
+        validation,
+        run_metadata=make_probe_run_metadata(),
+    )
+    payload = four_probe_result_payload(result)
+
+    for probe_name in ("mlp/z_logits", "mlp/reconstruction"):
+        probe = payload["probes"][probe_name]
+        assert probe["seed"] == PROBE_INITIALIZATION_SEED
+        assert "seed_selection" not in probe
+        assert "selected_seed" not in probe
+        assert "training_history" in probe
+
+    for probe_name in ("linear/z_logits", "linear/reconstruction"):
+        probe = payload["probes"][probe_name]
+        assert "seed" not in probe
+        assert "seed_selection" not in probe
+
+
 def test_four_probe_results_are_written_to_required_path(
     monkeypatch,
     tmp_path,
@@ -503,7 +514,7 @@ def test_four_probe_results_are_written_to_required_path(
     mlp_result = PrimaryMLPLeakageResult(
         latent_logits=make_named_mlp(
             "latent_logits",
-            10,
+            123,
             0.2,
         ),
         reconstructed_data=make_named_mlp(
@@ -511,7 +522,6 @@ def test_four_probe_results_are_written_to_required_path(
             123,
             0.7,
         ),
-        inner_partition=make_probe_inner_partition(20),
         leakage_worst=0.7,
     )
 

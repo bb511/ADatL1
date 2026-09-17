@@ -12,7 +12,6 @@ from src.evaluation.leakage_probe import (
     LeakageProbeRunOutcome,
     ProbeExtractionError,
     ProbeFitError,
-    ProbePartitionError,
     evaluate_and_record_loss_total_leakage_probes,
     log_leakage_probe_outcome_metadata,
 )
@@ -44,12 +43,8 @@ def expected_output_path(run_folder: Path) -> Path:
             "loss_total_checkpoint_missing",
         ),
         (
-            ProbePartitionError,
-            "inner_partition_too_small",
-        ),
-        (
             ProbeFitError,
-            "all_mlp_candidates_failed",
+            "mlp_fit_failed",
         ),
     ],
 )

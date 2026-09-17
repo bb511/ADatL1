@@ -2,7 +2,7 @@
 
 ## Status and scope
 
-**Protocol version:** `fet-et-four-probe-v6`
+**Protocol version:** `fet-et-four-probe-v8`
 
 **Status:** Frozen for the FET.Et proof-of-concept study.
 
@@ -178,7 +178,7 @@ The fixed MLP configuration is:
 | `beta_1` | `0.9` |
 | `beta_2` | `0.999` |
 | `epsilon` | `1e-8` |
-| Initialization seeds | `[10, 123, 500]` |
+| Initialization seed | `123` (single frozen seed) |
 
 Each probe uses a separate feature `StandardScaler` fitted only on its probe-training
 features. The MLP target is standardized using parameters fitted only on the
@@ -186,9 +186,12 @@ corresponding probe-training target. MLP predictions are inverse-transformed bef
 MAE is calculated. The linear probes fit the physical target directly. Consequently,
 MAE for all four probes remains in GeV.
 
-All four probes have separate scalers, estimators, and fitted parameters. The two MLPs
-also have independent seed selection. The probe families and MLP training budget are
-fixed measurement instruments and are not autoencoder Pareto hyperparameters.
+All four probes have separate scalers, estimators, and fitted parameters. Under this
+protocol version each MLP is fitted exactly once, with the frozen initialization seed
+`123`, on the complete probe-development pool. There is no candidate stage, no seed
+search and no inner partition, so an MLP probe has the same shape as a linear probe.
+The probe families and MLP training budget are fixed measurement instruments and are
+not autoencoder Pareto hyperparameters.
 
 ## 5. Data-splitting and model-selection protocol
 
@@ -205,8 +208,8 @@ evaluation modes:
 The validation split is held out from probe fitting during hyperparameter selection.
 After one autoencoder configuration has been selected, validation is no longer an
 unseen selection set and is added to the final probe-development pool. The test split
-remains untouched until that decision and is never used for scaling, MLP seed
-selection, early stopping, or any probe hyperparameter.
+remains untouched until that decision and is never used for scaling, the MLP
+inner-validation diagnostic, early stopping, or any probe hyperparameter.
 
 The physics sweep configuration fixes `test=false` and `mode=validation`. After the
 final configuration is selected, enable the complete final evaluation explicitly:
@@ -217,31 +220,28 @@ evaluation.leakage_probes.mode=final_test \
 evaluation.leakage_probes.run_shuffled_target_controls=true
 ```
 
-### 5.2 Inner probe split
+### 5.2 Probe fitting
 
-The active probe-development pool (`train` in validation mode and `train + valid` in
-final-test mode) is divided deterministically into:
-
-- 80% `probe_fit`;
-- 20% `probe_inner_validation`.
-
-The inner split seed is `12345`.
+There is no inner partition. The active probe-development pool (`train` in validation
+mode and `train + valid` in final-test mode) is used whole by every probe.
 
 For each primary representation independently, the MLP procedure is:
 
-1. fit one MLP for each frozen initialization seed on `probe_fit`;
-2. evaluate each candidate on `probe_inner_validation`;
-3. choose the seed with the highest raw inner-validation R2;
-4. refit that selected seed and unchanged MLP configuration on the complete active
+1. fit one MLP with the frozen initialization seed `123` on the complete active
    probe-development pool;
-5. evaluate the refitted probe once on the mode's held-out split.
+2. evaluate it once on the mode's held-out split.
 
-For each primary representation independently, fit one `LinearRegression` on the
-complete active probe-development pool and evaluate it once on the same held-out
-split. Linear regression has no probe-seed selection.
+For each primary representation independently, fit one `LinearRegression` on the same
+complete pool and evaluate it once on the same held-out split. Linear regression is a
+deterministic closed-form solve and has no probe seed at all.
 
-The active held-out target must not influence scaling, MLP seed selection, early
-stopping, or any probe hyperparameter.
+Each probe owns its scalers, which are fitted on the development pool only. Sklearn's
+`early_stopping=True` carves an internal 10% subset out of the MLP's own training data;
+that subset is an optimizer control, not a held-out score, and never touches the held-out
+split.
+
+The active held-out target must not influence scaling, early stopping, or any probe
+hyperparameter.
 
 ### 5.3 Event-set consistency
 
@@ -249,7 +249,7 @@ Probe loaders must be unshuffled. If representations are subsampled, the evaluat
 must use a deterministic index manifest generated with sample seed `12345` and reuse
 the identical event positions for every autoencoder configuration and seed.
 
-For protocol version `fet-et-four-probe-v6`, `max_samples` is `null`: all available
+For protocol version `fet-et-four-probe-v8`, `max_samples` is `null`: all available
 events in the relevant split are used. Introducing a sample cap requires a new
 protocol version unless the cap is fixed before any comparable run is evaluated and
 all earlier runs are reevaluated with the same manifest.
@@ -360,12 +360,11 @@ evaluator. Its behavior is:
   `diagnostics.shuffled_targets.enabled=false`, and do not apply the shuffled-target
   guardrail;
 - `true`: shuffle the complete training target deterministically, run the same MLP
-  seed-selection and refit procedure for both primary representations, persist the
+  single-seed fit procedure for both primary representations, persist the
   control results separately, log the two `probe/shuffled/*` metrics, and apply the
   guardrail below.
 
-One enabled control run adds eight MLP fits: three seed candidates plus one refit for
-each of the two representations. The controls never alter the four primary results or
+One enabled control run adds two MLP fits: one for each of the two representations. The controls never alter the four primary results or
 enter `probe/leakage_worst`.
 
 Use `false` for broad hyperparameter sweeps, where repeating this audit for every run
@@ -404,10 +403,9 @@ A leakage evaluation is invalid if any of the following occurs:
 - the target is constant or has fewer than two distinct finite values;
 - the requested physical target cannot be denormalized;
 - FET.Et or a direct transformation of it appears in either primary feature matrix;
-- the probe-fit, inner-validation, and held-out partitions overlap;
 - comparable autoencoder configurations use different held-out event samples;
-- every MLP initialization raises an exception or produces non-finite predictions;
-- the selected MLP has non-finite weights, loss, or predictions;
+- an MLP fit raises an exception or produces non-finite predictions;
+- a fitted MLP has non-finite weights, loss, or predictions;
 - the shuffled-target guardrail fails when the controls are enabled;
 - a required primary metric cannot be calculated.
 
@@ -493,7 +491,7 @@ It contains at least:
 - the representation name and dimension for each of the four probes;
 - raw and clipped R2 plus MAE for each of the four probes;
 - development and held-out event counts for each of the four probes;
-- the selected seed and convergence information for each MLP;
+- the frozen seed and convergence information for each MLP;
 - `diagnostics.shuffled_targets.enabled`, plus the shuffled-control results when
   audit mode is enabled.
 
@@ -516,13 +514,11 @@ available plots but still records invalid leakage. Plotting failures are explici
 (`loss_plot.status=failed`, with an error and null path); they do not erase numerical
 results or change probe validity.
 
-For each MLP, `training_history` contains its fresh refit's epochs, training losses,
-and internal early-stopping validation R2 values. Each successful seed candidate has
-the same history under `seed_selection.candidates[].training_history`. The plot shows
-the candidate seeds and refit in separate panels, with the selected seed identified.
+For each MLP, `training_history` contains that single fit's epochs, training losses,
+and internal early-stopping validation R2 values. The plot shows the training loss and
+the internal early-stopping curve side by side for the one fitted seed.
 The loss is sklearn's objective on standardized targets, including its L2 penalty;
-it is dimensionless, not a physical GeV-squared loss. Candidate and refit scalers use
-different fit pools, so their loss magnitudes are not directly comparable. The
+it is dimensionless, not a physical GeV-squared loss. The
 validation curves use only sklearn's internal early-stopping subset, not the held-out
 pool used for the final reported score. Sklearn restores the best internal-validation
 weights; the last recorded training loss need not equal the restored model's loss.
@@ -531,12 +527,12 @@ LinearRegression uses a direct least-squares solve, not epoch-based optimization
 Its plot therefore displays final development and held-out MSE in GeV-squared, with
 `loss_summary.epochs=null`; no epoch curve is invented. Development MSE is measured
 with bounded-size prediction batches. These diagnostics do not add another probe or
-change fitting, seed selection, early stopping, the four-probe maximum, or protocol v6.
+change fitting, early stopping, the four-probe maximum, or protocol v8.
 
 Terminal output reports the checkpoint, mode/caps, extraction progress (first batch,
 every 25 batches, and completion), representation dimensions, per-probe and per-seed
 fit starts, sklearn epoch loss/internal validation score, fit duration, convergence
-warnings, selected seeds, held-out scores, and saved PNG/JSON paths. Use these plots
+warnings, held-out scores, and saved PNG/JSON paths. Use these plots
 and logs to observe convergence and troubleshoot smoke/audit runs. Do not tune probe
 capacity or select AE configurations from final-test diagnostic behavior.
 
@@ -546,8 +542,8 @@ histories and create the new plot artifacts.
 ## 10. Cross-run aggregation
 
 The probe evaluator produces one primary `L` per trained autoencoder run and seed.
-Probe initialization seeds belong to the measurement procedure; they are not
-autoencoder replicates and must not be pooled with autoencoder seeds.
+The probe initialization seed belongs to the measurement procedure; it is not an
+autoencoder replicate and must not be pooled with autoencoder seeds.
 
 For a hyperparameter configuration, aggregate run-level leakage only across the
 predeclared paired autoencoder seeds. The frozen invalid-run policy is
@@ -578,14 +574,14 @@ sample manifests, or outer split identities must not be aggregated together.
 
 ## 11. Definition of done
 
-An implementation conforms to `fet-et-four-probe-v6` only when all of the following
+An implementation conforms to `fet-et-four-probe-v8` only when all of the following
 are true:
 
 - both `latent_logits` and `reconstructed_data` are evaluated by independent primary
   MLP and linear regressors, producing four independent fitted probes;
 - the target is denormalized FET.Et in GeV and is identical across all MI bin counts;
 - FET.Et is absent from both primary feature matrices;
-- validation-mode probe fitting and seed selection use only `train`;
+- validation-mode probe fitting uses only `train`;
 - reported Pareto leakage uses only the held-out autoencoder validation split;
 - the test split is not evaluated during hyperparameter selection;
 - final-test mode uses `train + valid` for probe development and untouched `test` for
@@ -606,4 +602,4 @@ are true:
   aggregated;
 - paired-seed aggregation rejects the complete configuration when an expected seed is
   missing or invalid;
-- every output records protocol version `fet-et-four-probe-v6`.
+- every output records protocol version `fet-et-four-probe-v8`.

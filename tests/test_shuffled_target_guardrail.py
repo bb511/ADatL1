@@ -63,7 +63,6 @@ def make_result(
             "reconstructed_data",
             shuffled_reconstruction,
         ),
-        inner_partition=Mock(),
         shuffle_seed=12345,
         permutation_manifest_hash="shuffle-manifest",
     )
@@ -86,7 +85,6 @@ def make_result(
             0.4,
         ),
         shuffled_target_controls=shuffled_controls,
-        inner_partition=Mock(),
         worst_probe="linear/reconstruction",
         leakage_worst=0.4,
         evaluation_context=make_probe_evaluation_context(),

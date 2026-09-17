@@ -162,8 +162,8 @@ def evaluate_shuffled_target_mlp_controls(
     )
 
     # This invokes the complete frozen procedure for both primary
-    # representations: inner split, three candidates, seed selection,
-    # full-training refit, and unchanged outer validation.
+    # representations: one frozen-seed fit on the development pool and
+    # unchanged outer validation.
     control_result = evaluate_primary_mlp_probes(
         shuffled_train_representations,
         validation_representations,
@@ -173,9 +173,6 @@ def evaluate_shuffled_target_mlp_controls(
         latent_logits=control_result.latent_logits,
         reconstructed_data=(
             control_result.reconstructed_data
-        ),
-        inner_partition=(
-            control_result.inner_partition
         ),
         shuffle_seed=shuffled_target.seed,
         permutation_manifest_hash=(

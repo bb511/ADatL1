@@ -196,12 +196,10 @@ def test_control_permutates_only_training_target(
 
     latent_result = object()
     reconstruction_result = object()
-    inner_partition = object()
 
     primary_result = SimpleNamespace(
         latent_logits=latent_result,
         reconstructed_data=reconstruction_result,
-        inner_partition=inner_partition,
     )
 
     primary_evaluator = Mock(
@@ -228,7 +226,6 @@ def test_control_permutates_only_training_target(
         result.reconstructed_data
         is reconstruction_result
     )
-    assert result.inner_partition is inner_partition
     assert (
         result.shuffle_seed
         == PROBE_TARGET_SHUFFLE_SEED
@@ -315,7 +312,6 @@ def test_both_controls_reuse_one_shuffled_target(
         return SimpleNamespace(
             latent_logits=Mock(),
             reconstructed_data=Mock(),
-            inner_partition=Mock(),
         )
 
     monkeypatch.setattr(

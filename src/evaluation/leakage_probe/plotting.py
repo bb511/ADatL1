@@ -39,47 +39,31 @@ def _finish_history_axis(axis) -> None:
 
 
 def _plot_mlp(probe: dict, title: str, scope: str) -> Figure:
-    figure = Figure(figsize=(11, 7.2))
+    figure = Figure(figsize=(11, 4.2))
     FigureCanvasAgg(figure)
-    axes = figure.subplots(2, 2)
-    figure.subplots_adjust(left=0.09, right=0.98, bottom=0.13, top=0.84, wspace=0.30, hspace=0.42)
+    axes = figure.subplots(1, 2)
+    figure.subplots_adjust(left=0.09, right=0.98, bottom=0.22, top=0.74, wspace=0.30)
     figure.suptitle(f"{title} | fitting diagnostics\n{scope}", fontsize=14, y=0.97)
 
-    _style_axis(axes[0, 0], "Candidate seeds — training loss", "Standardized objective")
-    _style_axis(axes[0, 1], "Selected-seed fresh refit — training loss", "Standardized objective")
-    _style_axis(axes[1, 0], "Candidates — internal early stopping", "Internal validation R²")
-    _style_axis(axes[1, 1], "Refit — internal early stopping", "Internal validation R²")
-
-    failed = []
-    for candidate in probe["seed_selection"]["candidates"]:
-        if candidate["status"] != "successful":
-            failed.append(str(candidate["seed"]))
-            continue
-        selected = candidate["selected"]
-        label = f"seed {candidate['seed']}" + (" (selected)" if selected else "")
-        history = candidate.get("training_history", {})
-        style = {"linewidth": 2.2 if selected else 1.3, "alpha": 1.0 if selected else 0.75}
-        _draw_history(axes[0, 0], history, "loss", label, **style)
-        _draw_history(axes[1, 0], history, "early_stopping_validation_r2", label, **style)
+    _style_axis(axes[0], "Training loss", "Standardized objective")
+    _style_axis(axes[1], "Internal early stopping", "Internal validation R²")
 
     history = probe.get("training_history", {})
-    refit_label = f"refit seed {probe['selected_seed']}"
-    _draw_history(axes[0, 1], history, "loss", refit_label, color="#0e7490", linewidth=2)
-    _draw_history(axes[1, 1], history, "early_stopping_validation_r2", refit_label, color="#0e7490", linewidth=2)
+    label = f"seed {probe['seed']}"
+    _draw_history(axes[0], history, "loss", label, color="#0e7490", linewidth=2)
+    _draw_history(axes[1], history, "early_stopping_validation_r2", label, color="#0e7490", linewidth=2)
     scores = np.asarray(history.get("early_stopping_validation_r2", []), dtype=float)
     if scores.size and np.isfinite(scores).any():
         best_epoch = int(np.nanargmax(scores)) + 1
-        for axis in axes[:, 1]:
+        for axis in axes:
             axis.axvline(best_epoch, color="#b45309", linestyle="--", linewidth=1, label=f"best internal R²: epoch {best_epoch}")
-    for axis in axes.flat:
+    for axis in axes:
         _finish_history_axis(axis)
-    if failed:
-        axes[0, 0].text(0.98, 0.98, "Failed seeds: " + ", ".join(failed), ha="right", va="top", transform=axes[0, 0].transAxes, fontsize=8)
 
     figure.text(
-        0.5, 0.03,
-        "Candidate and refit scalers/pools differ. Loss is dimensionless (includes L2), not GeV².\n"
-        "Internal validation curves are not held-out scores. Refit retains the best internal-validation weights.",
+        0.5, 0.04,
+        "One frozen-seed fit on the development pool. Loss is dimensionless (includes L2), not GeV².\n"
+        "The internal validation curve is sklearn's early-stopping split, not the held-out score.",
         ha="center", va="bottom", fontsize=9, color="#475569",
     )
     return figure

@@ -18,7 +18,6 @@ from .constants import (
 from .errors import (
     ProbeExtractionError,
     ProbeFitError,
-    ProbePartitionError,
     ShuffledTargetGuardrailError,
 )
 from .evaluation import evaluate_four_leakage_probes
@@ -167,11 +166,7 @@ def write_leakage_probe_results(
 
 def write_invalid_leakage_probe_result(
     run_folder: str | Path,
-    error: (
-        ProbeExtractionError
-        | ProbePartitionError
-        | ProbeFitError
-    ),
+    error: ProbeExtractionError | ProbeFitError,
     *,
     evaluation_mode: str = "validation",
     run_metadata: LeakageProbeRunMetadata | None = None,
@@ -487,7 +482,6 @@ def evaluate_and_record_loss_total_leakage_probes(
         )
     except (
         ProbeExtractionError,
-        ProbePartitionError,
         ProbeFitError,
     ) as error:
         output_path = write_invalid_leakage_probe_result(

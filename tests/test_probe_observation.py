@@ -12,13 +12,13 @@ from sklearn.metrics import mean_squared_error
 from sklearn.neural_network import MLPRegressor
 
 from src.evaluation.leakage_probe import (
+    PROBE_INITIALIZATION_SEED,
     MLP_PROBE_CONFIG,
     ShuffledTargetMLPResult,
     evaluate_four_leakage_probes,
     extract_probe_split,
-    fit_mlp_probe_candidate,
+    fit_mlp_probe,
     four_probe_result_payload,
-    make_probe_inner_partition,
     write_leakage_probe_results,
 )
 from src.evaluation.leakage_probe.diagnostics import enforce_shuffled_target_guardrail
@@ -83,7 +83,7 @@ def test_each_of_four_probes_links_a_real_plot_and_preserves_histories(tmp_path,
             "purpose": "scientific",
             "reporting_eligible": True,
         },
-        "leakage_probe_protocol_version": "fet-et-four-probe-v6",
+        "leakage_probe_protocol_version": "fet-et-four-probe-v7",
         "leakage_probe_summary_schema_version": 1,
         "leakage_worst": result.leakage_worst,
         "probe_valid": True,
@@ -111,8 +111,8 @@ def test_each_of_four_probes_links_a_real_plot_and_preserves_histories(tmp_path,
         assert history["early_stopping_validation_r2"] == probe.outer_result.estimator.validation_scores_
         assert history["loss_units"] == "dimensionless"
         assert "not the held-out split" in history["validation_scope"]
-        for candidate_payload, candidate in zip(payload["probes"][key]["seed_selection"]["candidates"], probe.seed_selection.successful_candidates):
-            assert candidate_payload["training_history"]["loss"] == candidate.estimator.loss_curve_
+        assert payload["probes"][key]["seed"] == PROBE_INITIALIZATION_SEED
+        assert "seed_selection" not in payload["probes"][key]
     for key, probe in [("linear/z_logits", result.linear_latent_logits), ("linear/reconstruction", result.linear_reconstructed_data)]:
         summary = payload["probes"][key]["loss_summary"]
         assert summary["method"] == "direct_least_squares"
@@ -198,19 +198,20 @@ def test_verbose_mlp_fit_is_numerically_identical_and_reports_progress(caplog, c
     rng = np.random.default_rng(42)
     features = rng.normal(size=(100, 3))
     target = 40 + 4 * features[:, 0]
-    partition = make_probe_inner_partition(len(target))
+    held_out_features = rng.normal(size=(40, 3))
+    held_out_target = 40 + 4 * held_out_features[:, 0]
     caplog.set_level(logging.INFO)
-    result = fit_mlp_probe_candidate(features, target, partition, seed=10)
-    quiet = MLPRegressor(**MLP_PROBE_CONFIG, random_state=10)
+    result = fit_mlp_probe(features, target, held_out_features, held_out_target)
+    quiet = MLPRegressor(**MLP_PROBE_CONFIG, random_state=PROBE_INITIALIZATION_SEED)
     quiet.fit(
-        result.feature_scaler.transform(features[partition.fit_indices]),
-        result.target_scaler.transform(target[partition.fit_indices, None]).reshape(-1),
+        result.feature_scaler.transform(features),
+        result.target_scaler.transform(target[:, None]).reshape(-1),
     )
     np.testing.assert_array_equal(result.loss_curve, quiet.loss_curve_)
     for recorded_weights, quiet_weights in zip(result.estimator.coefs_, quiet.coefs_):
         np.testing.assert_array_equal(recorded_weights, quiet_weights)
-    assert "MLP candidate seed=10 starting" in caplog.text
-    assert "epochs=" in caplog.text and "inner score: R2=" in caplog.text
+    assert "MLP probe seed=123 starting" in caplog.text
+    assert "epochs=" in caplog.text and "held-out score: R2=" in caplog.text
     stdout = capsys.readouterr().out
     assert "Iteration 1, loss =" in stdout
     assert "Validation score:" in stdout

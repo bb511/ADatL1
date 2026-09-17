@@ -5,15 +5,12 @@ import pytest
 
 import src.evaluation.leakage_probe.mlp as leakage_probe
 from src.evaluation.leakage_probe import (
-    MLPProbeCandidateResult,
     MLPProbeOuterResult,
-    MLPProbeSeedSelection,
     NamedMLPProbeResult,
     ProbeFitError,
     ProbeRepresentationSet,
     evaluate_mlp_probe_representation,
     evaluate_primary_mlp_probes,
-    make_probe_inner_partition,
 )
 
 
@@ -63,35 +60,12 @@ def make_representation_set(
     )
 
 
-def make_selection(
-    seed: int,
-) -> MLPProbeSeedSelection:
-    candidate = MLPProbeCandidateResult(
-        seed=seed,
-        inner_r2_raw=0.5,
-        inner_mae_gev=5.0,
-        convergence_warnings=(),
-        n_iter=5,
-        final_loss=0.1,
-        feature_scaler=Mock(),
-        target_scaler=Mock(),
-        estimator=Mock(),
-    )
-
-    return MLPProbeSeedSelection(
-        selected_seed=seed,
-        selected_candidate=candidate,
-        successful_candidates=(candidate,),
-        failed_candidates=(),
-    )
-
-
 def make_outer_result(
     seed: int,
     clipped_r2: float,
 ) -> MLPProbeOuterResult:
     return MLPProbeOuterResult(
-        selected_seed=seed,
+        seed=seed,
         outer_r2_raw=clipped_r2,
         outer_r2_clipped=clipped_r2,
         outer_mae_gev=10.0,
@@ -111,118 +85,86 @@ def test_named_probe_uses_requested_representation(
 ) -> None:
     train = make_representation_set("train", 20)
     validation = make_representation_set("valid", 10)
-    partition = make_probe_inner_partition(
-        train.n_events
-    )
 
-    selection = make_selection(seed=123)
     outer = make_outer_result(
         seed=123,
         clipped_r2=0.4,
     )
 
-    select_calls = []
-    refit_calls = []
+    fit_calls = []
 
-    def fake_select(features, target, received_partition):
-        select_calls.append(
-            (features, target, received_partition)
-        )
-        return selection
-
-    def fake_refit(
+    def fake_fit(
         train_features,
         train_target,
         validation_features,
         validation_target,
-        received_selection,
     ):
-        refit_calls.append(
+        fit_calls.append(
             (
                 train_features,
                 train_target,
                 validation_features,
                 validation_target,
-                received_selection,
             )
         )
         return outer
 
     monkeypatch.setattr(
         leakage_probe,
-        "select_mlp_probe_seed",
-        fake_select,
-    )
-    monkeypatch.setattr(
-        leakage_probe,
-        "refit_selected_mlp_probe",
-        fake_refit,
+        "fit_mlp_probe",
+        fake_fit,
     )
 
     result = evaluate_mlp_probe_representation(
         train,
         validation,
-        partition,
         representation_name="latent_logits",
     )
 
     assert result.representation_name == "latent_logits"
     assert result.metric_name == "z_logits"
     assert result.feature_dimension == 2
-    assert result.seed_selection is selection
     assert result.outer_result is outer
 
-    assert select_calls == [
-        (
-            train.latent_logits,
-            train.sensitive_target,
-            partition,
-        )
-    ]
-
-    assert refit_calls == [
+    assert fit_calls == [
         (
             train.latent_logits,
             train.sensitive_target,
             validation.latent_logits,
             validation.sensitive_target,
-            selection,
         )
     ]
 
 
-def test_primary_evaluator_uses_same_partition_for_both_probes(
+def test_primary_evaluator_evaluates_both_representations(
     monkeypatch,
 ) -> None:
     train = make_representation_set("train", 20)
     validation = make_representation_set("valid", 10)
 
-    received_partitions = []
+    received_representations = []
 
     def fake_evaluate(
         train_representations,
         validation_representations,
-        partition,
         *,
         representation_name,
     ):
-        received_partitions.append(partition)
+        received_representations.append(representation_name)
 
         if representation_name == "latent_logits":
             return NamedMLPProbeResult(
                 representation_name="latent_logits",
                 metric_name="z_logits",
                 feature_dimension=2,
-                seed_selection=make_selection(10),
-                outer_result=make_outer_result(10, 0.2),
+                outer_result=make_outer_result(123, 0.2),
             )
 
         return NamedMLPProbeResult(
             representation_name="reconstructed_data",
             metric_name="reconstruction",
             feature_dimension=3,
-            seed_selection=make_selection(500),
-            outer_result=make_outer_result(500, 0.7),
+            outer_result=make_outer_result(123, 0.7),
         )
 
     monkeypatch.setattr(
@@ -236,21 +178,12 @@ def test_primary_evaluator_uses_same_partition_for_both_probes(
         validation,
     )
 
-    assert len(received_partitions) == 2
-    assert (
-        received_partitions[0]
-        is received_partitions[1]
-    )
-    assert (
-        result.inner_partition
-        is received_partitions[0]
-    )
-
-    assert result.latent_logits.seed_selection.selected_seed == 10
-    assert (
-        result.reconstructed_data.seed_selection.selected_seed
-        == 500
-    )
+    assert received_representations == [
+        "latent_logits",
+        "reconstructed_data",
+    ]
+    assert result.latent_logits.outer_result.seed == 123
+    assert result.reconstructed_data.outer_result.seed == 123
 
 
 def test_worst_leakage_is_maximum_not_average(
@@ -262,7 +195,6 @@ def test_worst_leakage_is_maximum_not_average(
     def fake_evaluate(
         train_representations,
         validation_representations,
-        partition,
         *,
         representation_name,
     ):
@@ -281,7 +213,6 @@ def test_worst_leakage_is_maximum_not_average(
             representation_name=representation_name,
             metric_name=metric_name,
             feature_dimension=feature_dimension,
-            seed_selection=make_selection(seed),
             outer_result=make_outer_result(
                 seed,
                 clipped,
@@ -312,7 +243,6 @@ def test_primary_probes_do_not_share_fitted_state(
     def fake_evaluate(
         train_representations,
         validation_representations,
-        partition,
         *,
         representation_name,
     ):
@@ -338,7 +268,6 @@ def test_primary_probes_do_not_share_fitted_state(
             representation_name=representation_name,
             metric_name=metric_name,
             feature_dimension=feature_dimension,
-            seed_selection=make_selection(seed),
             outer_result=make_outer_result(
                 seed,
                 0.3,
@@ -383,7 +312,6 @@ def test_shared_primary_probe_state_is_rejected(
     def fake_evaluate(
         train_representations,
         validation_representations,
-        partition,
         *,
         representation_name,
     ):
@@ -404,7 +332,6 @@ def test_shared_primary_probe_state_is_rejected(
             representation_name=representation_name,
             metric_name=metric_name,
             feature_dimension=2,
-            seed_selection=make_selection(10),
             outer_result=outer,
         )
 
@@ -469,15 +396,11 @@ def test_primary_evaluator_enforces_outer_split_protocol(
 def test_unknown_representation_is_rejected() -> None:
     train = make_representation_set("train", 20)
     validation = make_representation_set("valid", 10)
-    partition = make_probe_inner_partition(
-        train.n_events
-    )
 
     with pytest.raises(ProbeFitError) as error:
         evaluate_mlp_probe_representation(
             train,
             validation,
-            partition,
             representation_name="control_x",
         )
 

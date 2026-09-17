@@ -82,7 +82,6 @@ def make_shuffled_controls(
             "reconstructed_data",
             reconstruction_r2,
         ),
-        inner_partition=Mock(),
         shuffle_seed=12345,
         permutation_manifest_hash="shuffle-manifest",
     )
@@ -109,7 +108,6 @@ def make_complete_result() -> FourProbeEvaluationResult:
         shuffled_target_controls=(
             make_shuffled_controls()
         ),
-        inner_partition=Mock(),
         worst_probe="linear/reconstruction",
         leakage_worst=0.4,
         evaluation_context=make_probe_evaluation_context(),
@@ -160,7 +158,6 @@ def test_four_probe_evaluation_rejects_failed_shuffled_guardrail(
             "reconstructed_data",
             0.2,
         ),
-        inner_partition=Mock(),
     )
 
     linear_result = SimpleNamespace(
@@ -297,7 +294,6 @@ def test_shuffled_controls_can_be_disabled(
             "reconstructed_data",
             0.2,
         ),
-        inner_partition=Mock(),
     )
     linear_result = SimpleNamespace(
         latent_logits=make_probe(

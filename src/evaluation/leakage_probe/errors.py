@@ -18,14 +18,6 @@ class ProbeExtractionError(RuntimeError):
         super().__init__(message)
 
 
-class ProbePartitionError(ValueError):
-    """Failure to construct the fixed inner probe partition."""
-
-    def __init__(self, reason: str, message: str) -> None:
-        self.reason = reason
-        super().__init__(message)
-
-
 class ProbeFitError(RuntimeError):
     """Failure while fitting or evaluating one probe candidate."""
 

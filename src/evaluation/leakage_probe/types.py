@@ -60,17 +60,6 @@ class LeakageProbeRunMetadata:
 
 
 @dataclass(frozen=True)
-class ProbeInnerPartition:
-    """Indices dividing development events into probe fit and validation."""
-
-    fit_indices: np.ndarray
-    validation_indices: np.ndarray
-    seed: int
-    validation_fraction: float
-    manifest_hash: str
-
-
-@dataclass(frozen=True)
 class ShuffledTrainingTarget:
     """One deterministic training-target permutation."""
 
@@ -81,46 +70,10 @@ class ShuffledTrainingTarget:
 
 
 @dataclass(frozen=True)
-class MLPProbeCandidateResult:
-    """Fitted MLP and its inner-validation diagnostics."""
-
-    seed: int
-    inner_r2_raw: float
-    inner_mae_gev: float
-    convergence_warnings: tuple[str, ...]
-    n_iter: int
-    final_loss: float
-    feature_scaler: StandardScaler
-    target_scaler: StandardScaler
-    estimator: MLPRegressor
-    loss_curve: tuple[float, ...] = ()
-    early_stopping_validation_scores: tuple[float, ...] = ()
-
-
-@dataclass(frozen=True)
-class MLPProbeCandidateFailure:
-    """Recorded failure of one probe initialization."""
-
-    seed: int
-    reason: str
-    message: str
-
-
-@dataclass(frozen=True)
-class MLPProbeSeedSelection:
-    """Result of selecting one MLP initialization using inner R2."""
-
-    selected_seed: int
-    selected_candidate: MLPProbeCandidateResult
-    successful_candidates: tuple[MLPProbeCandidateResult, ...]
-    failed_candidates: tuple[MLPProbeCandidateFailure, ...]
-
-
-@dataclass(frozen=True)
 class MLPProbeOuterResult:
-    """Fresh selected-seed MLP evaluated on held-out data."""
+    """Frozen-seed MLP fitted on the development pool and scored held-out."""
 
-    selected_seed: int
+    seed: int
     outer_r2_raw: float
     outer_r2_clipped: float
     outer_mae_gev: float
@@ -143,7 +96,6 @@ class NamedMLPProbeResult:
     representation_name: str
     metric_name: str
     feature_dimension: int
-    seed_selection: MLPProbeSeedSelection
     outer_result: MLPProbeOuterResult
 
 
@@ -153,7 +105,6 @@ class PrimaryMLPLeakageResult:
 
     latent_logits: NamedMLPProbeResult
     reconstructed_data: NamedMLPProbeResult
-    inner_partition: ProbeInnerPartition
     leakage_worst: float
 
 @dataclass(frozen=True)
@@ -162,7 +113,6 @@ class ShuffledTargetMLPResult:
 
     latent_logits: NamedMLPProbeResult
     reconstructed_data: NamedMLPProbeResult
-    inner_partition: ProbeInnerPartition
     shuffle_seed: int
     permutation_manifest_hash: str
 
@@ -208,7 +158,6 @@ class FourProbeEvaluationResult:
     linear_latent_logits: NamedLinearProbeResult
     linear_reconstructed_data: NamedLinearProbeResult
     shuffled_target_controls: ShuffledTargetMLPResult | None
-    inner_partition: ProbeInnerPartition
     worst_probe: str
     leakage_worst: float
     evaluation_context: ProbeEvaluationContext

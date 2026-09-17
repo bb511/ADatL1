@@ -2,18 +2,19 @@
 
 from types import MappingProxyType
 
-LEAKAGE_PROBE_PROTOCOL_VERSION = "fet-et-four-probe-v6"
+LEAKAGE_PROBE_PROTOCOL_VERSION = "fet-et-four-probe-v8"
 LEAKAGE_PROBE_EVALUATION_MODES = (
     "validation",
     "final_test",
 )
 LEAKAGE_PROBE_INVALID_RUN_POLICY = "reject_configuration"
-PROBE_INNER_SPLIT_SEED = 12345
 PROBE_EVENT_SAMPLE_SEED = 12345
 PROBE_TARGET_SHUFFLE_SEED = 12345
 SHUFFLED_TARGET_R2_CLIPPED_MAX = 0.02
-PROBE_INNER_VALIDATION_FRACTION = 0.2
-PROBE_INITIALIZATION_SEEDS = (10, 123, 500)
+# One frozen MLP initialization. There is no seed search and no inner
+# partition: each MLP probe is fitted once on the development pool and scored
+# once on held-out data, exactly like the linear probes.
+PROBE_INITIALIZATION_SEED = 123
 MLP_PROBE_CONFIG = MappingProxyType(
     {
         "hidden_layer_sizes": (64, 32),

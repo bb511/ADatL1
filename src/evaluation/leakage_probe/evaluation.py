@@ -126,7 +126,6 @@ def evaluate_four_leakage_probes(
         linear_latent_logits=linear_latent,
         linear_reconstructed_data=linear_reconstruction,
         shuffled_target_controls=shuffled_target_controls,
-        inner_partition=mlp_result.inner_partition,
         worst_probe=worst_probe,
         leakage_worst=float(leakage_worst),
         evaluation_context=evaluation_context,

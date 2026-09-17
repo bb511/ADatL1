@@ -1,5 +1,4 @@
 import warnings
-from unittest.mock import Mock
 
 import numpy as np
 import pytest
@@ -8,15 +7,14 @@ from sklearn.exceptions import ConvergenceWarning
 import src.evaluation.leakage_probe.mlp as leakage_probe
 from src.evaluation.leakage_probe import (
     MLP_PROBE_CONFIG,
-    MLPProbeCandidateResult,
-    MLPProbeSeedSelection,
+    PROBE_INITIALIZATION_SEED,
     ProbeFitError,
-    refit_selected_mlp_probe,
+    fit_mlp_probe,
 )
 
 
 class RecordingRegressor:
-    """Fast estimator double for checking refit behavior."""
+    """Fast estimator double for checking probe-fit behavior."""
 
     instances = []
 
@@ -88,30 +86,7 @@ class FailingRegressor(RecordingRegressor):
         features: np.ndarray,
         target: np.ndarray,
     ):
-        raise RuntimeError("synthetic refit failure")
-
-
-def make_selection(
-    seed: int = 123,
-) -> MLPProbeSeedSelection:
-    candidate = MLPProbeCandidateResult(
-        seed=seed,
-        inner_r2_raw=0.5,
-        inner_mae_gev=5.0,
-        convergence_warnings=(),
-        n_iter=4,
-        final_loss=0.1,
-        feature_scaler=Mock(name="candidate_feature_scaler"),
-        target_scaler=Mock(name="candidate_target_scaler"),
-        estimator=Mock(name="candidate_estimator"),
-    )
-
-    return MLPProbeSeedSelection(
-        selected_seed=seed,
-        selected_candidate=candidate,
-        successful_candidates=(candidate,),
-        failed_candidates=(),
-    )
+        raise RuntimeError("synthetic fit failure")
 
 
 def make_data():
@@ -153,7 +128,7 @@ def make_data():
     )
 
 
-def test_refit_creates_fresh_scalers_and_estimator(
+def test_fit_creates_fresh_scalers_and_estimator(
     monkeypatch,
 ) -> None:
     RecordingRegressor.instances.clear()
@@ -164,29 +139,11 @@ def test_refit_creates_fresh_scalers_and_estimator(
         RecordingRegressor,
     )
 
-    data = make_data()
-    selection = make_selection(seed=123)
-
-    result = refit_selected_mlp_probe(
-        *data,
-        selection,
-    )
+    result = fit_mlp_probe(*make_data())
 
     assert len(RecordingRegressor.instances) == 1
     assert result.estimator is RecordingRegressor.instances[0]
-
-    assert (
-        result.estimator
-        is not selection.selected_candidate.estimator
-    )
-    assert (
-        result.feature_scaler
-        is not selection.selected_candidate.feature_scaler
-    )
-    assert (
-        result.target_scaler
-        is not selection.selected_candidate.target_scaler
-    )
+    assert result.feature_scaler is not result.target_scaler
 
     assert result.estimator.kwargs == {
         **dict(MLP_PROBE_CONFIG),
@@ -195,7 +152,7 @@ def test_refit_creates_fresh_scalers_and_estimator(
     }
 
 
-def test_refit_scalers_use_complete_training_only(
+def test_scalers_use_complete_development_pool_only(
     monkeypatch,
 ) -> None:
     monkeypatch.setattr(
@@ -211,12 +168,11 @@ def test_refit_scalers_use_complete_training_only(
         validation_target,
     ) = make_data()
 
-    result = refit_selected_mlp_probe(
+    result = fit_mlp_probe(
         train_features,
         train_target,
         validation_features,
         validation_target,
-        make_selection(),
     )
 
     np.testing.assert_allclose(
@@ -258,12 +214,9 @@ def test_outer_metrics_are_reported_in_physical_units(
         RecordingRegressor,
     )
 
-    result = refit_selected_mlp_probe(
-        *make_data(),
-        make_selection(seed=500),
-    )
+    result = fit_mlp_probe(*make_data())
 
-    assert result.selected_seed == 500
+    assert result.seed == PROBE_INITIALIZATION_SEED
     assert result.outer_r2_raw == pytest.approx(1.0)
     assert result.outer_r2_clipped == pytest.approx(1.0)
     assert result.outer_mae_gev == pytest.approx(
@@ -287,17 +240,14 @@ def test_negative_outer_r2_is_preserved_and_clipped(
         MeanPredictionRegressor,
     )
 
-    result = refit_selected_mlp_probe(
-        *make_data(),
-        make_selection(),
-    )
+    result = fit_mlp_probe(*make_data())
 
     assert result.outer_r2_raw < 0.0
     assert result.outer_r2_clipped == 0.0
     assert result.outer_mae_gev > 0.0
 
 
-def test_refit_convergence_warning_is_recorded(
+def test_convergence_warning_is_recorded(
     monkeypatch,
 ) -> None:
     monkeypatch.setattr(
@@ -306,10 +256,7 @@ def test_refit_convergence_warning_is_recorded(
         WarningRegressor,
     )
 
-    result = refit_selected_mlp_probe(
-        *make_data(),
-        make_selection(),
-    )
+    result = fit_mlp_probe(*make_data())
 
     assert len(result.convergence_warnings) == 1
     assert (
@@ -318,7 +265,7 @@ def test_refit_convergence_warning_is_recorded(
     )
 
 
-def test_refit_failure_is_wrapped(
+def test_fit_failure_is_wrapped(
     monkeypatch,
 ) -> None:
     monkeypatch.setattr(
@@ -328,12 +275,9 @@ def test_refit_failure_is_wrapped(
     )
 
     with pytest.raises(ProbeFitError) as error:
-        refit_selected_mlp_probe(
-            *make_data(),
-            make_selection(),
-        )
+        fit_mlp_probe(*make_data())
 
-    assert error.value.reason == "mlp_refit_failed"
+    assert error.value.reason == "mlp_fit_failed"
 
 
 def test_train_validation_feature_dimension_mismatch_is_rejected() -> None:
@@ -347,12 +291,11 @@ def test_train_validation_feature_dimension_mismatch_is_rejected() -> None:
     validation_features = validation_features[:, :1]
 
     with pytest.raises(ProbeFitError) as error:
-        refit_selected_mlp_probe(
+        fit_mlp_probe(
             train_features,
             train_target,
             validation_features,
             validation_target,
-            make_selection(),
         )
 
     assert (
@@ -374,12 +317,11 @@ def test_constant_outer_validation_target_is_rejected() -> None:
     )
 
     with pytest.raises(ProbeFitError) as error:
-        refit_selected_mlp_probe(
+        fit_mlp_probe(
             train_features,
             train_target,
             validation_features,
             validation_target,
-            make_selection(),
         )
 
     assert (
@@ -388,31 +330,66 @@ def test_constant_outer_validation_target_is_rejected() -> None:
     )
 
 
-def test_selected_candidate_seed_mismatch_is_rejected() -> None:
-    selection = make_selection(seed=10)
+@pytest.mark.parametrize(
+    "seed",
+    [0, 10, 42, 500, 999],
+)
+def test_unregistered_probe_seed_is_rejected(seed: int) -> None:
+    with pytest.raises(ProbeFitError) as error:
+        fit_mlp_probe(*make_data(), seed=seed)
 
-    inconsistent_selection = MLPProbeSeedSelection(
-        selected_seed=123,
-        selected_candidate=selection.selected_candidate,
-        successful_candidates=(
-            selection.selected_candidate,
-        ),
-        failed_candidates=(),
-    )
+    assert error.value.reason == "invalid_probe_seed"
+    assert seed != PROBE_INITIALIZATION_SEED
+
+
+def test_feature_target_row_mismatch_is_rejected() -> None:
+    (
+        train_features,
+        train_target,
+        validation_features,
+        validation_target,
+    ) = make_data()
 
     with pytest.raises(ProbeFitError) as error:
-        refit_selected_mlp_probe(
-            *make_data(),
-            inconsistent_selection,
+        fit_mlp_probe(
+            train_features,
+            train_target[:-1],
+            validation_features,
+            validation_target,
         )
 
     assert (
         error.value.reason
-        == "selected_candidate_seed_mismatch"
+        == "full_train_feature_target_row_mismatch"
     )
 
 
-def test_real_refit_smoke_test() -> None:
+def test_non_finite_features_are_rejected() -> None:
+    (
+        train_features,
+        train_target,
+        validation_features,
+        validation_target,
+    ) = make_data()
+
+    train_features = train_features.copy()
+    train_features[0, 0] = np.nan
+
+    with pytest.raises(ProbeFitError) as error:
+        fit_mlp_probe(
+            train_features,
+            train_target,
+            validation_features,
+            validation_target,
+        )
+
+    assert (
+        error.value.reason
+        == "non_finite_full_train_features"
+    )
+
+
+def test_real_fit_smoke_test() -> None:
     random_state = np.random.RandomState(17)
 
     train_features = random_state.normal(
@@ -441,12 +418,11 @@ def test_real_refit_smoke_test() -> None:
         )
     )
 
-    result = refit_selected_mlp_probe(
+    result = fit_mlp_probe(
         train_features,
         train_target,
         validation_features,
         validation_target,
-        make_selection(seed=10),
     )
 
     assert np.isfinite(result.outer_r2_raw)

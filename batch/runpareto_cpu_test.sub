@@ -39,8 +39,8 @@ request_gpus   = 0
 
 # Memory unchanged: peak RSS is set by the data, which is loaded whole
 # regardless of device.
-request_cpus   = 10
-request_memory = 30000
+request_cpus   = 8
+request_memory = 24000
 request_disk   = 10GB
 
 # 1 h. One run at 3 epochs is ~6.3 min of data loading plus 3 epochs.

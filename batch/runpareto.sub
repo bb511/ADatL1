@@ -1,0 +1,90 @@
+executable = batch/runpareto.sh
+
+log    = batch/logs/runpareto.$(ClusterId).log
+output = batch/logs/runpareto.$(ClusterId).$(ProcId).out
+error  = batch/logs/runpareto.$(ClusterId).$(ProcId).err
+
+MY.SingularityImage = "/eos/user/l/lbehrens/containers/adl1t_lab-dev.sif"
+
+# ---------------------------------------------------------------------------
+# Parallelism
+# ---------------------------------------------------------------------------
+# The study is split into interleaved slices, one job each, so it runs across
+# the fleet instead of occupying a single machine for two days. The runner takes
+# --shard <i>/<n> with a 1-based index, and the stride is interleaved, so every
+# shard gets a mix of architectures and gammas rather than a whole arm.
+#
+# Verified an exact partition: 12 shards x 8 runs = 96, no duplicates, no gaps.
+#
+# The shard list is written out rather than derived from $(ProcId), which is
+# 0-based and would need submit-file arithmetic. To change the shard count,
+# edit this list; the runner validates i <= n and refuses a malformed value.
+#
+# In-job concurrency is deliberately NOT used. Each training loads the full
+# dataset into host memory (~30 GB), so two at once needs ~60 GB and 20 cpus,
+# which the runbook's fleet map puts at ~32 machines that never schedule.
+# Parallelism belongs across jobs, not inside one.
+environment = "PARETO_SHARD=$(SHARD) PARETO_ACTION=--run MAX_EPOCHS=30"
+
+# ---------------------------------------------------------------------------
+# Output transfer
+# ---------------------------------------------------------------------------
+# HTCondor transfers back only top-level files in the sandbox, never
+# subdirectories, so without this line every checkpoint and probe artifact is
+# discarded. EosSubmit assumes preserve_relative_paths, so each shard's tree
+# lands as outputs/ under the submit directory.
+#
+# Shards write disjoint subpaths (checkpoints/<experiment>/<run_name>/ and
+# manifests/<run_name>/ are unique per run), so the returned trees merge by
+# union into one complete study.
+transfer_output_files = outputs
+
+# ---------------------------------------------------------------------------
+# Resources
+# ---------------------------------------------------------------------------
+# Identical sizing to batch/runae.sub, which is proven on this fleet. Peak RSS
+# is set by the data, which is loaded whole and is the same for every run, so a
+# shard running several trainings in sequence does not raise the ceiling.
+#
+# CERN allocates 3000 MB per core and rescales request_cpus upward to cover
+# request_memory, so keep memory == cpus * 3000 or both get rewritten.
+#   4 cpus / 12000 MB  -> ~136 machines, but OOMs
+#   10 cpus / 30000 MB -> ~92 machines, PROVEN to work
+#   22 cpus / 66000 MB -> ~32 machines, never scheduled
+request_gpus   = 1
+request_cpus   = 10
+request_memory = 30000
+
+# request_disk defaults to KiB, so the unit is mandatory. One shard holds only
+# its own 8 runs, so this stays close to the single-run value in runae.sub.
+request_disk   = 10GB
+
+# ---------------------------------------------------------------------------
+# Runtime
+# ---------------------------------------------------------------------------
+# Per run on an H100 MIG 2g.24gb slice: ~3.5 min data load for fit, ~40 s per
+# epoch, ~2.3 min data load for evaluation, ~0.5 min evaluation. So roughly
+# 6.3 min fixed + epochs*40 s; at MAX_EPOCHS=30 that is ~26.3 min per run.
+#
+#   96 runs / 12 shards = 8 runs per shard * 26.3 min ~= 3.5 h
+#
+# 8 h leaves headroom for a slower slice and keeps the request inside a widely
+# available flavour, which matters on surplus-only quota. Re-check with
+# `bash scripts/physics/run_pareto_fet_ngt.sh --plan` after editing the grid in
+# configs/experiment/physics/pareto_fet.yaml: the run count is derived from it.
++MaxRuntime = 28800
+
+queue SHARD in (
+  1/12
+  2/12
+  3/12
+  4/12
+  5/12
+  6/12
+  7/12
+  8/12
+  9/12
+  10/12
+  11/12
+  12/12
+)

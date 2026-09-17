@@ -32,6 +32,8 @@ readonly EXPERIMENT_NAME="physics_pareto_fet_v1"
 
 ACTION=""
 RERUN_INCOMPLETE=0
+SHARD_INDEX=1
+SHARD_COUNT=1
 
 usage() {
   cat <<EOF
@@ -44,6 +46,11 @@ Actions:
   --all               Equivalent to --run followed by --collect.
 
 Options:
+  --shard <i>/<n>     Run only every n-th grid member starting at i (1-based).
+                      Interleaved, so each shard gets a mix of architectures and
+                      gammas rather than one shard taking all of one arm. Use it
+                      to spread the study over n batch jobs. Collection is a
+                      separate step once every shard has finished.
   --rerun-incomplete  Permit overwriting a run directory that exists but lacks a
                        complete, reportable artifact set.  This is explicit because
                        the training callback clears the checkpoint directory on start.
@@ -54,6 +61,10 @@ Environment variables:
   CODE_DIR             ADatL1 checkout (default: repository containing this script).
   RAW_DATA_DIR         Raw parquet root (default: \$PROJECT_ROOT/raw/parquet_files).
   DATA_WORKERS         Loader and BLAS thread count (default: 3).
+  ADL1T_OUTPUT_ROOT    Where the study writes (default: \$PROJECT_ROOT). Point this
+                       at the job sandbox on a batch worker.
+  MAX_EPOCHS           Override trainer.max_epochs for every run (default: the
+                       manifest's inherited value).
   MPLCONFIGDIR         Matplotlib cache, preferably on /scratch.
   ALLOW_DIRTY_GIT=1    Allow a study from a checkout with uncommitted changes.
 
@@ -76,6 +87,13 @@ while (($#)); do
     --plan|--run|--collect|--all)
       [[ -z "$ACTION" ]] || die "Choose exactly one action."
       ACTION="${1#--}"
+      ;;
+    --shard)
+      [[ "${2:-}" =~ ^([1-9][0-9]*)/([1-9][0-9]*)$ ]] || die "--shard needs <i>/<n>, got '\''${2:-}'\''."
+      SHARD_INDEX="${BASH_REMATCH[1]}"
+      SHARD_COUNT="${BASH_REMATCH[2]}"
+      ((SHARD_INDEX <= SHARD_COUNT)) || die "--shard index $SHARD_INDEX exceeds count $SHARD_COUNT."
+      shift
       ;;
     --rerun-incomplete)
       RERUN_INCOMPLETE=1
@@ -101,16 +119,23 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 : "${CODE_DIR:=$(cd "$SCRIPT_DIR/../.." && pwd)}"
 : "${RAW_DATA_DIR:=$PROJECT_ROOT/raw/parquet_files}"
 : "${DATA_WORKERS:=3}"
+: "${MAX_EPOCHS:=}"
 : "${MPLCONFIGDIR:=/scratch/adatl1/matplotlib}"
+# Where the study writes. configs/paths/default.yaml resolves
+# paths.output_root to ${oc.env:ADL1T_OUTPUT_ROOT,${paths.root_dir}}, so this
+# must be the same value or the checkpoint paths in the study map will not be
+# where training actually wrote. Defaults to PROJECT_ROOT (unchanged on NGT);
+# on a batch worker point it at the job sandbox.
+: "${ADL1T_OUTPUT_ROOT:=$PROJECT_ROOT}"
 
-readonly PROJECT_ROOT CODE_DIR RAW_DATA_DIR DATA_WORKERS MPLCONFIGDIR
-export PROJECT_ROOT RAW_DATA_DIR MPLCONFIGDIR
+readonly PROJECT_ROOT CODE_DIR RAW_DATA_DIR DATA_WORKERS MPLCONFIGDIR ADL1T_OUTPUT_ROOT
+export PROJECT_ROOT RAW_DATA_DIR MPLCONFIGDIR ADL1T_OUTPUT_ROOT
 export NUMEXPR_MAX_THREADS="$DATA_WORKERS"
 export NUMEXPR_NUM_THREADS="$DATA_WORKERS"
 export OMP_NUM_THREADS="$DATA_WORKERS"
 export MKL_NUM_THREADS="$DATA_WORKERS"
 export OPENBLAS_NUM_THREADS="$DATA_WORKERS"
-readonly STUDY_ROOT="$PROJECT_ROOT/pareto_studies/$STUDY_ID"
+readonly STUDY_ROOT="$ADL1T_OUTPUT_ROOT/pareto_studies/$STUDY_ID"
 readonly MANIFEST_ROOT="$STUDY_ROOT/manifests"
 readonly STUDY_MAP="$STUDY_ROOT/study_map.yaml"
 readonly RUN_PLAN="$STUDY_ROOT/run_plan.tsv"
@@ -119,11 +144,40 @@ readonly STUDY_METADATA="$STUDY_ROOT/study_metadata"
 readonly PHASE2_OUTPUT="$STUDY_ROOT/phase2"
 readonly PHASE3_OUTPUT="$STUDY_ROOT/phase3"
 
-readonly -a PAIRED_SEEDS=(123 456 789)
-readonly -a ARCHITECTURE_IDS=(h64_32 h128_64 h64_64_32)
-readonly -a ARCHITECTURE_NODES=('[64,32,8]' '[128,64,8]' '[64,64,32,8]')
-readonly -a REGULARIZED_GAMMAS=(0.05 0.1 0.15 0.2 0.25 0.3 0.35 0.4 0.45 0.5)
-readonly -a TRAINING_BINS=(10 20 30 40 50 60 70 80 90 100)
+readonly PARETO_MANIFEST="$CODE_DIR/configs/experiment/physics/pareto_fet.yaml"
+
+# The grid is read from the experiment manifest so there is exactly one
+# predeclared source of truth. Hardcoding it here would drift: a seed list that
+# disagrees with the manifest makes the collector reject every run.
+read_grid_from_manifest() {
+  [[ -f "$PARETO_MANIFEST" ]] || die "Missing Pareto manifest: $PARETO_MANIFEST"
+  python3 - "$PARETO_MANIFEST" <<'PYEOF'
+import sys, yaml
+with open(sys.argv[1]) as handle:
+    study = yaml.safe_load(handle)["pareto_study"]
+space = study["search_space"]
+reg, base = space["regularized"], space["gamma_zero_baseline"]
+if list(reg["architectures"]) != list(base["architectures"]):
+    raise SystemExit("regularized and gamma_zero_baseline architectures differ")
+nodes = lambda n: "[" + ",".join(str(v) for v in n) + "]"
+emit = lambda name, vals: print(f"{name}=({' '.join(vals)})")
+emit("PAIRED_SEEDS", [str(s) for s in study["paired_autoencoder_seeds"]])
+emit("ARCHITECTURE_IDS", list(reg["architectures"]))
+emit("ARCHITECTURE_NODES", [f"'{nodes(v)}'" for v in reg["architectures"].values()])
+emit("REGULARIZED_GAMMAS", [str(g) for g in reg["mi_gamma"]])
+emit("TRAINING_BINS", [str(b) for b in reg["mi_sensitive_num_bins"]])
+print(f"BASELINE_GAMMA={base['mi_gamma']}")
+print(f"BASELINE_BINS={base['mi_sensitive_num_bins']}")
+PYEOF
+}
+
+grid_definition="$(read_grid_from_manifest)" || die "Could not read the grid from $PARETO_MANIFEST"
+eval "$grid_definition"
+unset grid_definition
+readonly -a PAIRED_SEEDS ARCHITECTURE_IDS ARCHITECTURE_NODES REGULARIZED_GAMMAS TRAINING_BINS
+readonly BASELINE_GAMMA BASELINE_BINS
+
+((${#PAIRED_SEEDS[@]} >= 2)) || die "The manifest declares ${#PAIRED_SEEDS[@]} paired seed(s); aggregation requires at least two."
 
 configuration_id() {
   local gamma="$1"
@@ -146,7 +200,8 @@ manifest_dir_for_run() {
 
 checkpoint_dir_for_run() {
   local run="$1"
-  printf '%s/checkpoints/%s/%s' "$PROJECT_ROOT" "$EXPERIMENT_NAME" "$run"
+  # Mirrors paths.checkpoints_dir = ${paths.output_root}/checkpoints/.
+  printf '%s/checkpoints/%s/%s' "$ADL1T_OUTPUT_ROOT" "$EXPERIMENT_NAME" "$run"
 }
 
 for_each_run() {
@@ -160,10 +215,11 @@ for_each_run() {
     nodes="${ARCHITECTURE_NODES[$architecture_index]}"
 
     # A single canonical gamma-zero baseline is required per architecture.
-    configuration="$(configuration_id 0.0 50 "$architecture_id")"
+    configuration="$(configuration_id "$BASELINE_GAMMA" "$BASELINE_BINS" "$architecture_id")"
     for seed in "${PAIRED_SEEDS[@]}"; do
       run="$(run_name "$configuration" "$seed")"
-      "$callback" "$configuration" "$seed" 0.0 50 "$architecture_id" "$nodes" "$run"
+      "$callback" "$configuration" "$seed" "$BASELINE_GAMMA" "$BASELINE_BINS" \
+        "$architecture_id" "$nodes" "$run"
     done
 
     for gamma in "${REGULARIZED_GAMMAS[@]}"; do
@@ -292,7 +348,7 @@ write_study_map_and_plan() {
 schema_version: 1
 study_id: $STUDY_ID
 protocol_version: $PROTOCOL_VERSION
-expected_autoencoder_seeds: [123, 456, 789]
+expected_autoencoder_seeds: [$(IFS=,; echo "${PAIRED_SEEDS[*]}")]
 runs:
 EOF
   for_each_run write_map_entry >> "$map_tmp"
@@ -371,6 +427,11 @@ run_one() {
     "hydra.run.dir=$manifest_dir"
   )
 
+  # Unset keeps the manifest's inherited trainer.max_epochs.
+  if [[ -n "$MAX_EPOCHS" ]]; then
+    command+=("trainer.max_epochs=$MAX_EPOCHS")
+  fi
+
   if HYDRA_FULL_ERROR=1 "${command[@]}" 2>&1 | tee "$log_file"; then
     if is_complete_reportable_run "$run"; then
       note "DONE $run"
@@ -398,13 +459,26 @@ run_grid() {
   fi
 
   local failures=0
+  local position=0
+  local selected=0
   run_one_counted() {
+    # Interleaved stride so every shard sees a mix of the grid.
+    if (( position % SHARD_COUNT != SHARD_INDEX - 1 )); then
+      position=$((position + 1))
+      return 0
+    fi
+    position=$((position + 1))
+    selected=$((selected + 1))
     if ! run_one "$@"; then
       failures=$((failures + 1))
     fi
   }
+  if (( SHARD_COUNT > 1 )); then
+    note "Shard $SHARD_INDEX/$SHARD_COUNT of this grid."
+  fi
   for_each_run run_one_counted
   unset -f run_one_counted
+  note "This invocation handled $selected run(s)."
 
   if (( failures )); then
     note "$failures run(s) were not complete. The collector will retain them as invalid."
@@ -414,7 +488,10 @@ run_grid() {
 }
 
 collect_and_select() {
-  [[ -f "$STUDY_MAP" ]] || die "Missing $STUDY_MAP. Run --run first."
+  # Rewrite rather than require. The map is fully determined by the manifest and
+  # ADL1T_OUTPUT_ROOT, and a map written inside a batch sandbox records paths
+  # that no longer exist once the outputs have been transferred elsewhere.
+  write_study_map_and_plan
   note "Collecting paired-seed metrics."
   (
     cd "$CODE_DIR"
@@ -444,11 +521,13 @@ case "$ACTION" in
     run_grid
     ;;
   collect)
+    (( SHARD_COUNT == 1 )) || die "--shard applies to --run, not --collect."
     check_ngt_environment
     archive_study_metadata
     collect_and_select
     ;;
   all)
+    (( SHARD_COUNT == 1 )) || die "--shard needs --run; collect separately once all shards finish."
     check_ngt_environment
     archive_study_metadata
     write_study_map_and_plan

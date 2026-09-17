@@ -14,7 +14,7 @@ MY.SingularityImage = "/eos/user/l/lbehrens/containers/adl1t_lab-dev.sif"
 # --shard <i>/<n> with a 1-based index, and the stride is interleaved, so every
 # shard gets a mix of architectures and gammas rather than a whole arm.
 #
-# Verified an exact partition: 12 shards x 8 runs = 96, no duplicates, no gaps.
+# Verified an exact partition: 32 shards x 3 runs = 96, no duplicates, no gaps.
 #
 # The shard list is written out rather than derived from $(ProcId), which is
 # 0-based and would need submit-file arithmetic. To change the shard count,
@@ -55,8 +55,8 @@ request_gpus   = 1
 request_cpus   = 10
 request_memory = 30000
 
-# request_disk defaults to KiB, so the unit is mandatory. One shard holds only
-# its own 8 runs, so this stays close to the single-run value in runae.sub.
+# request_disk defaults to KiB, so the unit is mandatory. Kept identical to
+# runae.sub; disk is not the binding constraint on matching here.
 request_disk   = 10GB
 
 # ---------------------------------------------------------------------------
@@ -66,25 +66,20 @@ request_disk   = 10GB
 # epoch, ~2.3 min data load for evaluation, ~0.5 min evaluation. So roughly
 # 6.3 min fixed + epochs*40 s; at MAX_EPOCHS=30 that is ~26.3 min per run.
 #
-#   96 runs / 12 shards = 8 runs per shard * 26.3 min ~= 3.5 h
+#   96 runs / 32 shards = 3 runs per shard * 26.3 min ~= 1.3 h
 #
-# 8 h leaves headroom for a slower slice and keeps the request inside a widely
-# available flavour, which matters on surplus-only quota. Re-check with
-# `bash scripts/physics/run_pareto_fet_ngt.sh --plan` after editing the grid in
-# configs/experiment/physics/pareto_fet.yaml: the run count is derived from it.
-+MaxRuntime = 28800
+# Re-check with `bash scripts/physics/run_pareto_fet_ngt.sh --plan` after
+# editing the grid in configs/experiment/physics/pareto_fet.yaml: the run count
+# is derived from it, so the shard list here must be resized to match.
+# 2 h, the value proven by batch/runae.sub. This is a scheduling decision as
+# much as a correctness one: on surplus-only quota a short job can backfill a
+# drain window that a long one cannot, so many short shards start far sooner
+# than few long ones. 3 runs at ~26.3 min is ~1.3 h, leaving ~40 min of slack.
++MaxRuntime = 7200
 
 queue SHARD in (
-  1/12
-  2/12
-  3/12
-  4/12
-  5/12
-  6/12
-  7/12
-  8/12
-  9/12
-  10/12
-  11/12
-  12/12
+  1/32   2/32   3/32   4/32   5/32   6/32   7/32   8/32
+  9/32  10/32  11/32  12/32  13/32  14/32  15/32  16/32
+ 17/32  18/32  19/32  20/32  21/32  22/32  23/32  24/32
+ 25/32  26/32  27/32  28/32  29/32  30/32  31/32  32/32
 )

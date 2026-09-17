@@ -60,9 +60,14 @@ command -v python3
 python3 --version
 python3 -c 'import torch; print("torch", torch.__version__, "cuda", torch.cuda.is_available())'
 
-echo
-echo "GPU:"
-nvidia-smi || echo "nvidia-smi unavailable"
+# gpu or cpu; see the note in scripts/physics/run_pareto_fet_ngt.sh.
+: "${PARETO_ACCELERATOR:=gpu}"
+
+if [[ "$PARETO_ACCELERATOR" == "gpu" ]]; then
+  echo
+  echo "GPU:"
+  nvidia-smi || echo "nvidia-smi unavailable"
+fi
 
 # ---------------------------------------------------------------------------
 # Paths
@@ -102,7 +107,7 @@ SCRATCH="${_CONDOR_SCRATCH_DIR:-$PWD}"
 : "${PARETO_SHARD:=}"
 
 export CODE_DIR PROJECT_ROOT RAW_DATA_DIR ADL1T_OUTPUT_ROOT MPLCONFIGDIR
-export DATA_WORKERS MAX_EPOCHS ALLOW_DIRTY_GIT
+export DATA_WORKERS MAX_EPOCHS ALLOW_DIRTY_GIT PARETO_ACCELERATOR
 
 mkdir -p "$ADL1T_OUTPUT_ROOT" "$MPLCONFIGDIR"
 
@@ -115,6 +120,7 @@ echo "DATA_WORKERS:      $DATA_WORKERS"
 echo "MAX_EPOCHS:        $MAX_EPOCHS"
 echo "PARETO_ACTION:     $PARETO_ACTION"
 echo "PARETO_SHARD:      ${PARETO_SHARD:-<whole grid>}"
+echo "ACCELERATOR:       $PARETO_ACCELERATOR"
 
 echo
 echo "Study plan:"

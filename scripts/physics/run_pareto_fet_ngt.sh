@@ -63,6 +63,7 @@ Environment variables:
   DATA_WORKERS         Loader and BLAS thread count (default: 3).
   ADL1T_OUTPUT_ROOT    Where the study writes (default: \$PROJECT_ROOT). Point this
                        at the job sandbox on a batch worker.
+  PARETO_ACCELERATOR   gpu (default) or cpu.
   MAX_EPOCHS           Override trainer.max_epochs for every run (default: the
                        manifest's inherited value).
   MPLCONFIGDIR         Matplotlib cache, preferably on /scratch.
@@ -120,6 +121,11 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 : "${RAW_DATA_DIR:=$PROJECT_ROOT/raw/parquet_files}"
 : "${DATA_WORKERS:=3}"
 : "${MAX_EPOCHS:=}"
+# gpu or cpu. The model is ~20k parameters and the measured 40 s/epoch on an
+# H100 MIG slice is ~60x its compute ceiling, so training is bound by host-side
+# data movement rather than the GPU. CPU is therefore competitive, and the CPU
+# pool on a shared batch system is far larger than the GPU pool.
+: "${PARETO_ACCELERATOR:=gpu}"
 : "${MPLCONFIGDIR:=/scratch/adatl1/matplotlib}"
 # Where the study writes. configs/paths/default.yaml resolves
 # paths.output_root to ${oc.env:ADL1T_OUTPUT_ROOT,${paths.root_dir}}, so this
@@ -275,8 +281,10 @@ check_ngt_environment() {
   command -v python3 >/dev/null || die "python3 is not available."
   python3 -c 'import hydra, omegaconf, pandas, pyarrow, sklearn, torch' || \
     die "The active image lacks one or more ADatL1 dependencies."
-  command -v nvidia-smi >/dev/null || die "nvidia-smi is unavailable; request an NVIDIA GPU pod."
-  nvidia-smi >/dev/null || die "The requested GPU is not usable in this pod."
+  if [[ "$PARETO_ACCELERATOR" == "gpu" ]]; then
+    command -v nvidia-smi >/dev/null || die "nvidia-smi is unavailable; request an NVIDIA GPU pod."
+    nvidia-smi >/dev/null || die "The requested GPU is not usable in this pod."
+  fi
 
   if [[ "${ALLOW_DIRTY_GIT:-0}" != "1" ]] && [[ -n "$(git -C "$CODE_DIR" status --porcelain)" ]]; then
     die "The checkout is dirty. Commit/stash it, or explicitly set ALLOW_DIRTY_GIT=1."
@@ -296,7 +304,10 @@ archive_study_metadata() {
   git -C "$CODE_DIR" status --short > "$STUDY_METADATA/git_status.txt"
   python3 --version > "$STUDY_METADATA/python_version.txt"
   python3 -m pip freeze > "$STUDY_METADATA/pip_freeze.txt"
-  nvidia-smi > "$STUDY_METADATA/nvidia_smi.txt"
+  if [[ "$PARETO_ACCELERATOR" == "gpu" ]]; then
+    nvidia-smi > "$STUDY_METADATA/nvidia_smi.txt"
+  fi
+  printf '%s\n' "$PARETO_ACCELERATOR" > "$STUDY_METADATA/accelerator.txt"
   cp "$CODE_DIR/configs/experiment/physics/pareto_fet.yaml" \
     "$STUDY_METADATA/pareto_fet.yaml"
   cp "$CODE_DIR/poetry.lock" "$STUDY_METADATA/poetry.lock"
@@ -422,10 +433,14 @@ run_one() {
     "pareto_study.candidate.architecture_id=$architecture_id"
     "pareto_study.candidate.encoder_nodes=$nodes"
     "data.data_awkward2torch.workers=$DATA_WORKERS"
-    trainer=gpu
-    'trainer.devices=[0]'
     "hydra.run.dir=$manifest_dir"
   )
+
+  case "$PARETO_ACCELERATOR" in
+    gpu) command+=(trainer=gpu 'trainer.devices=[0]') ;;
+    cpu) command+=(trainer=cpu 'trainer.devices=1') ;;
+    *)   die "PARETO_ACCELERATOR must be gpu or cpu, got '\''$PARETO_ACCELERATOR'\''." ;;
+  esac
 
   # Unset keeps the manifest's inherited trainer.max_epochs.
   if [[ -n "$MAX_EPOCHS" ]]; then

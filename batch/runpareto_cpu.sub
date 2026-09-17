@@ -1,0 +1,103 @@
+# CPU variant of batch/runpareto.sub. Same study, same shards, no GPU.
+#
+# Why this exists: the model is ~20k parameters, and the runbook's measured
+# 40 s/epoch on an H100 MIG slice is roughly 60x that model's compute ceiling
+# on such a device. Training is bound by host-side data movement, not by the
+# GPU, so CPU throughput is comparable - while the eligible pool grows from
+# ~50 GPU slots to ~5200. On a contended cluster that is the difference between
+# waiting for a drain window and starting immediately.
+#
+# Verify before trusting it: let one shard run and compare the per-epoch time
+# in its log against the ~40 s/epoch GPU baseline. If it is much worse, go back
+# to batch/runpareto.sub.
+
+executable = batch/runpareto.sh
+
+log    = batch/logs/runpareto_cpu.$(ClusterId).log
+output = batch/logs/runpareto_cpu.$(ClusterId).$(ProcId).out
+error  = batch/logs/runpareto_cpu.$(ClusterId).$(ProcId).err
+
+MY.SingularityImage = "/eos/user/l/lbehrens/containers/adl1t_lab-dev.sif"
+
+# ---------------------------------------------------------------------------
+# Parallelism
+# ---------------------------------------------------------------------------
+# The study is split into interleaved slices, one job each, so it runs across
+# the fleet instead of occupying a single machine for two days. The runner takes
+# --shard <i>/<n> with a 1-based index, and the stride is interleaved, so every
+# shard gets a mix of architectures and gammas rather than a whole arm.
+#
+# Verified an exact partition: 32 shards x 3 runs = 96, no duplicates, no gaps.
+#
+# The shard list is written out rather than derived from $(ProcId), which is
+# 0-based and would need submit-file arithmetic. To change the shard count,
+# edit this list; the runner validates i <= n and refuses a malformed value.
+#
+# In-job concurrency is deliberately NOT used. Each training loads the full
+# dataset into host memory (~30 GB), so two at once needs ~60 GB and 20 cpus,
+# which the runbook's fleet map puts at ~32 machines that never schedule.
+# Parallelism belongs across jobs, not inside one.
+environment = "PARETO_SHARD=$(SHARD) PARETO_ACTION=--run MAX_EPOCHS=30 PARETO_ACCELERATOR=cpu"
+
+# ---------------------------------------------------------------------------
+# Output transfer
+# ---------------------------------------------------------------------------
+# HTCondor transfers back only top-level files in the sandbox, never
+# subdirectories, so without this line every checkpoint and probe artifact is
+# discarded. EosSubmit assumes preserve_relative_paths, so each shard's tree
+# lands as outputs/ under the submit directory.
+#
+# Shards write disjoint subpaths (checkpoints/<experiment>/<run_name>/ and
+# manifests/<run_name>/ are unique per run), so the returned trees merge by
+# union into one complete study.
+transfer_output_files = outputs
+
+# ---------------------------------------------------------------------------
+# Resources
+# ---------------------------------------------------------------------------
+# Identical sizing to batch/runae.sub, which is proven on this fleet. Peak RSS
+# is set by the data, which is loaded whole and is the same for every run, so a
+# shard running several trainings in sequence does not raise the ceiling.
+#
+# CERN allocates 3000 MB per core and rescales request_cpus upward to cover
+# request_memory, so keep memory == cpus * 3000 or both get rewritten.
+#   4 cpus / 12000 MB  -> ~136 machines, but OOMs
+#   10 cpus / 30000 MB -> ~92 machines, PROVEN to work
+#   22 cpus / 66000 MB -> ~32 machines, never scheduled
+# No GPU. This also drops CERN's GPU-hostgroup constraint, which is what
+# restricts the GPU submit file to ~50 slots.
+request_gpus   = 0
+request_cpus   = 10
+request_memory = 30000
+
+# request_disk defaults to KiB, so the unit is mandatory. Kept identical to
+# runae.sub; disk is not the binding constraint on matching here.
+request_disk   = 10GB
+
+# ---------------------------------------------------------------------------
+# Runtime
+# ---------------------------------------------------------------------------
+# Per run on an H100 MIG 2g.24gb slice: ~3.5 min data load for fit, ~40 s per
+# epoch, ~2.3 min data load for evaluation, ~0.5 min evaluation. So roughly
+# 6.3 min fixed + epochs*40 s; at MAX_EPOCHS=30 that is ~26.3 min per run.
+#
+#   96 runs / 32 shards = 3 runs per shard * 26.3 min ~= 1.3 h
+#
+# Re-check with `bash scripts/physics/run_pareto_fet_ngt.sh --plan` after
+# editing the grid in configs/experiment/physics/pareto_fet.yaml: the run count
+# is derived from it, so the shard list here must be resized to match.
+# 4 h. Doubled against the GPU file because per-epoch time on CPU is the
+# unknown here, and the CPU pool is large enough that a longer request costs
+# far less in scheduling than it does on the GPU pool.
+# Originally: 2 h, the value proven by batch/runae.sub. This is a scheduling decision as
+# much as a correctness one: on surplus-only quota a short job can backfill a
+# drain window that a long one cannot, so many short shards start far sooner
+# than few long ones. 3 runs at ~26.3 min is ~1.3 h, leaving ~40 min of slack.
++MaxRuntime = 14400
+
+queue SHARD in (
+  1/32   2/32   3/32   4/32   5/32   6/32   7/32   8/32
+  9/32  10/32  11/32  12/32  13/32  14/32  15/32  16/32
+ 17/32  18/32  19/32  20/32  21/32  22/32  23/32  24/32
+ 25/32  26/32  27/32  28/32  29/32  30/32  31/32  32/32
+)

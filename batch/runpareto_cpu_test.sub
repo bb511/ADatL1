@@ -1,0 +1,49 @@
+# One-run CPU probe. NOT part of the study - a measurement.
+#
+# Purpose: find out whether the effective-priority penalty (factor 100000,
+# surplus only) blocks you everywhere, or only on the 50-slot GPU pool. If this
+# starts within minutes, the CPU pool is reachable and a CPU study is a real
+# option. If it also sits idle, the penalty is pool-independent and the only
+# remaining fix is an accounting-group mapping - worth knowing before waiting
+# another night.
+#
+# It is deliberately cheap and inert:
+#   --shard 1/96   exactly ONE training run, not a 3-run shard
+#   MAX_EPOCHS=3   enough to measure seconds/epoch; compare against the ~40 s
+#                  GPU baseline in the runbook
+#   no output transfer, so it cannot collide with cluster 329533's artifacts
+#
+#   condor_submit batch/runpareto_cpu_test.sub
+#   condor_q -global
+#
+# Read the result once it finishes (~15-20 min):
+#   grep -E "Epoch|s/it|it/s" batch/logs/runpareto_cputest.<cluster>.0.out | tail
+
+executable = batch/runpareto.sh
+
+log    = batch/logs/runpareto_cputest.$(ClusterId).log
+output = batch/logs/runpareto_cputest.$(ClusterId).$(ProcId).out
+error  = batch/logs/runpareto_cputest.$(ClusterId).$(ProcId).err
+
+MY.SingularityImage = "/eos/user/l/lbehrens/containers/adl1t_lab-dev.sif"
+
+environment = "PARETO_SHARD=1/96 PARETO_ACTION=--run MAX_EPOCHS=3 PARETO_ACCELERATOR=cpu"
+
+# Discard the study tree. Only stdout/stderr come back, which is all a timing
+# probe needs, and nothing can overwrite artifacts the GPU cluster may produce.
+transfer_output_files = ""
+
+# No GPU - this is the whole point. Dropping request_gpus also drops CERN's
+# GPU-hostgroup constraint, which is what limits the GPU file to ~50 slots.
+request_gpus   = 0
+
+# Memory unchanged: peak RSS is set by the data, which is loaded whole
+# regardless of device.
+request_cpus   = 10
+request_memory = 30000
+request_disk   = 10GB
+
+# 1 h. One run at 3 epochs is ~6.3 min of data loading plus 3 epochs.
++MaxRuntime = 3600
+
+queue 1

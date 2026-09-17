@@ -168,7 +168,7 @@ evaluation:
   # The expensive four-probe diagnostic is enabled by the dedicated Pareto
   # experiment below, rather than by every ordinary AE evaluation.
   leakage_probes:
-    enabled: false
+    enabled: true
     # validation: fit probes on train and score valid during model selection.
     # final_test: after selecting one configuration, fit on train+valid and score
     # untouched test. Use only for the final report, for example:

@@ -14,6 +14,13 @@ pareto_study:
   enabled: true
   protocol_version: fet-et-pareto-v1
   study_id: fet-et-pareto-v1
+  # The selection protocol above and the probe protocol below are versioned
+  # separately. This records which probe protocol produced L, because its
+  # definition changed at v8 (one frozen seed, no inner split, no seed search).
+  # It must track LEAKAGE_PROBE_PROTOCOL_VERSION in
+  # src/evaluation/leakage_probe/constants.py; the aggregator rejects artifacts
+  # whose own recorded version does not match that constant.
+  leakage_probe_protocol_version: fet-et-four-probe-v8
   sensitive_variable:
     raw_target: FET.Et
     training_target: quantile-binned FET.Et
@@ -35,7 +42,7 @@ pareto_study:
   # one hyperparameter configuration must aggregate under the same identifier.
   configuration_id: ${pareto_study.study_id}__gamma-${pareto_study.candidate.mi_gamma}__bins-${pareto_study.candidate.mi_sensitive_num_bins}__arch-${pareto_study.candidate.architecture_id}
 
-  paired_autoencoder_seeds: [123, 456, 789]
+  paired_autoencoder_seeds: [123, 500]
   seed_policy:
     pairing_required: true
     required_seeds: ${pareto_study.paired_autoencoder_seeds}
@@ -51,8 +58,8 @@ pareto_study:
       - algorithm.mi_sensitive_num_bins
       - algorithm.encoder.nodes
     regularized:
-      mi_gamma: [0.05, 0.1, 0.15, 0.2, 0.25, 0.3, 0.35, 0.4, 0.45, 0.5]
-      mi_sensitive_num_bins: [10, 20, 30, 40, 50, 60, 70, 80, 90, 100]
+      mi_gamma: [0.05, 0.1, 0.15, 0.2, 0.25]
+      mi_sensitive_num_bins: [40, 50, 60]
       architectures:
         h64_32: [64, 32, 8]
         h128_64: [128, 64, 8]
@@ -151,7 +158,7 @@ pareto_study:
       residual_correlation: 0.3333333333333333
       signal_utility: 0.3333333333333333
     deterministic_tie_break: configuration_id_ascending
-    uncertainty_policy: flag_rankings_with_overlapping_paired_seed_95_percent_confidence_intervals
+    uncertainty_policy: flag_selected_vs_front_members_with_overlapping_marginal_95_percent_cis
 
   resolved_manifest:
     filename: pareto_manifest.resolved.yaml

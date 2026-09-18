@@ -3,7 +3,7 @@
 set -euo pipefail
 
 echo "========================================"
-echo "AE training (GPU) on HTCondor"
+echo "AE training on HTCondor"
 echo "========================================"
 
 echo "Date:     $(date)"
@@ -23,9 +23,19 @@ command -v python3
 python3 --version
 python3 -c 'import torch; print("torch", torch.__version__, "cuda", torch.cuda.is_available())'
 
-echo
-echo "GPU:"
-nvidia-smi || echo "nvidia-smi unavailable"
+# gpu or cpu. The cluster runs CPU-only by default (supervisor decision,
+# 2026-09-18) and the workload suits it: the AE is ~20k parameters, so the
+# measured 40 s/epoch on an H100 MIG slice sat far below the card's compute
+# ceiling - the run is bound by host-side data movement, not by the GPU.
+# The practical gain is scheduling: ~5200 shared CPU slots against ~50 GPU
+# slots, and no "Hostgroup == gpu" requirement to satisfy.
+: "${TRAINER:=cpu}"
+
+if [[ "$TRAINER" == "gpu" ]]; then
+  echo
+  echo "GPU:"
+  nvidia-smi || echo "nvidia-smi unavailable"
+fi
 
 # ---------------------------------------------------------------------------
 # scripts/physics/runae.sh needs these. Its own defaults point at the NGT
@@ -52,7 +62,13 @@ SCRATCH="${_CONDOR_SCRATCH_DIR:-$PWD}"
 # (measured: 3 workers 14256 MB, 1 worker 14289 MB). Keep it <= request_cpus.
 : "${DATA_WORKERS:=3}"
 
-export CODE_DIR PROJECT_ROOT ADL1T_OUTPUT_ROOT MPLCONFIGDIR RUN_NAME MAX_EPOCHS DATA_WORKERS
+# Intra-op thread budget for the CPU trainer. Must match request_cpus in the
+# submit file: nproc inside the sandbox reports the whole machine, not the
+# slot, so a wrong value here either wastes cores or oversubscribes them.
+: "${CPU_THREADS:=10}"  # keep equal to request_cpus in batch/runae.sub
+
+export CODE_DIR PROJECT_ROOT ADL1T_OUTPUT_ROOT MPLCONFIGDIR RUN_NAME MAX_EPOCHS
+export DATA_WORKERS TRAINER CPU_THREADS
 
 mkdir -p "$ADL1T_OUTPUT_ROOT" "$MPLCONFIGDIR"
 
@@ -63,6 +79,8 @@ echo "ADL1T_OUTPUT_ROOT: $ADL1T_OUTPUT_ROOT"
 echo "RUN_NAME:          $RUN_NAME"
 echo "MAX_EPOCHS:        $MAX_EPOCHS"
 echo "DATA_WORKERS:      $DATA_WORKERS"
+echo "TRAINER:           $TRAINER"
+echo "CPU_THREADS:       $CPU_THREADS"
 
 # Baseline for sizing future jobs. The run logs [phase] and [mem] lines
 # throughout (src/utils/instrumentation.py); grep them out of the .out file:

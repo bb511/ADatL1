@@ -69,7 +69,7 @@ python3 --version
 python3 -c 'import torch; print("torch", torch.__version__, "cuda", torch.cuda.is_available())'
 
 # gpu or cpu; see the note in scripts/physics/run_pareto_fet_ngt.sh.
-: "${PARETO_ACCELERATOR:=gpu}"
+: "${PARETO_ACCELERATOR:=cpu}"
 
 if [[ "$PARETO_ACCELERATOR" == "gpu" ]]; then
   echo

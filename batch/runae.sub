@@ -19,7 +19,11 @@ transfer_output_files = outputs
 # ---------------------------------------------------------------------------
 # Resources
 # ---------------------------------------------------------------------------
-request_gpus = 1
+# CPU-only (supervisor decision, 2026-09-18). Dropping request_gpus also drops
+# CERN's "Hostgroup == bi/condor/gridworker/gpu" requirement, which is what
+# confined this job to a handful of slots: at 30000/10 the whole GPU pool
+# offered 9 slots that could ever host it. The shared CPU pool is ~5200 slots.
+request_gpus = 0
 
 # CERN allocates 3000 MB of RAM per core and rescales request_cpus upward to
 # cover request_memory, so keep memory == cpus * 3000 or both get rewritten.
@@ -60,6 +64,10 @@ request_disk   = 10GB
 # This run exists to replace those extrapolations with a measurement. The job
 # logs per-phase wall time and peak RSS, so the next sizing decision can be
 # made from data rather than inference.
-+MaxRuntime = 10800
+# CPU is expected to be slower per epoch than the H100 MIG baseline; how much
+# slower is exactly what this run measures. 4 h leaves room for a bad surprise,
+# since an over-runtime job is evicted silently - no hold, no reason, it simply
+# leaves the queue.
++MaxRuntime = 14400
 
 queue

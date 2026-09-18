@@ -19,6 +19,16 @@ set -euo pipefail
 : "${MI_GAMMA:=0.1}"
 : "${MI_NUM_BINS:=50}"
 : "${DATA_WORKERS:=3}"
+# gpu or cpu. CPU is the cluster default: the model is ~20k parameters, so
+# training is bound by host-side data movement rather than compute, and the
+# shared CPU pool is ~5200 slots against ~50 for GPU.
+: "${TRAINER:=cpu}"
+# Intra-op thread budget. This must track request_cpus, NOT DATA_WORKERS:
+# DATA_WORKERS only sizes the awkward->torch conversion, while OMP/MKL threads
+# decide how fast the CPU forward/backward runs. Leaving these at 3 on an
+# 8-core slot wastes five cores. nproc reports the machine, not the slot, so
+# the value is passed in explicitly by batch/runae.sh.
+: "${CPU_THREADS:=${DATA_WORKERS}}"
 : "${CKPT_PATH:=}"
 : "${MPLCONFIGDIR:=/scratch/adatl1/matplotlib}"
 
@@ -51,11 +61,12 @@ for dir in extracted processed mlready; do
 done
 
 export PROJECT_ROOT ADL1T_OUTPUT_ROOT MPLCONFIGDIR
-export NUMEXPR_MAX_THREADS="$DATA_WORKERS"
-export NUMEXPR_NUM_THREADS="$DATA_WORKERS"
-export OMP_NUM_THREADS="$DATA_WORKERS"
-export MKL_NUM_THREADS="$DATA_WORKERS"
-export OPENBLAS_NUM_THREADS="$DATA_WORKERS"
+export NUMEXPR_MAX_THREADS="$CPU_THREADS"
+export NUMEXPR_NUM_THREADS="$CPU_THREADS"
+export OMP_NUM_THREADS="$CPU_THREADS"
+export MKL_NUM_THREADS="$CPU_THREADS"
+export OPENBLAS_NUM_THREADS="$CPU_THREADS"
+echo "Trainer: $TRAINER, CPU threads: $CPU_THREADS, data workers: $DATA_WORKERS"
 mkdir -p "$MPLCONFIGDIR"
 
 test -d "${CODE_DIR}/src" || {
@@ -92,8 +103,7 @@ exec python3 src/train.py \
   algorithm.input_noise_std=0.0 \
   data.data_awkward2torch.workers="$DATA_WORKERS" \
   trainer.max_epochs="$MAX_EPOCHS" \
-  trainer=gpu \
-  trainer.devices='[0]' \
+  trainer="$TRAINER" \
   "${resume_args[@]}"
 
 

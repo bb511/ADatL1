@@ -24,7 +24,7 @@ MY.SingularityImage = "/eos/user/l/lbehrens/containers/adl1t_lab-dev.sif"
 # dataset into host memory (~30 GB), so two at once needs ~60 GB and 20 cpus,
 # which the runbook's fleet map puts at ~32 machines that never schedule.
 # Parallelism belongs across jobs, not inside one.
-environment = "PARETO_SHARD=$(SHARD) PARETO_ACTION=--run MAX_EPOCHS=30"
+environment = "PARETO_SHARD=$(SHARD) PARETO_ACTION=--run MAX_EPOCHS=30 PARETO_ACCELERATOR=cpu"
 
 # ---------------------------------------------------------------------------
 # Output transfer
@@ -62,7 +62,7 @@ transfer_output_files = outputs
 #                         in the whole pool satisfy it (condor_q -better-analyze,
 #                         2026-09-17), so the queue never matched.
 #   22 cpus / 66000 MB -> ~32 machines, never scheduled
-request_gpus   = 1
+request_gpus   = 0
 request_cpus   = 8
 request_memory = 24000
 
@@ -86,7 +86,11 @@ request_disk   = 10GB
 # much as a correctness one: on surplus-only quota a short job can backfill a
 # drain window that a long one cannot, so many short shards start far sooner
 # than few long ones. 3 runs at ~26.3 min is ~1.3 h, leaving ~40 min of slack.
-+MaxRuntime = 7200
+# A shard runs 3 runs of 30 epochs. On GPU one run took ~50 min (cluster
+# 333089), so 3 runs already exceeded the old 2 h limit before the CPU switch.
+# 4 h is a provisional figure: replace it with 3x the per-run time measured by
+# the instrumented runae job rather than leaving this as a guess.
++MaxRuntime = 14400
 
 queue SHARD in (
   1/32   2/32   3/32   4/32   5/32   6/32   7/32   8/32

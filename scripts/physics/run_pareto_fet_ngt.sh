@@ -125,7 +125,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # H100 MIG slice is ~60x its compute ceiling, so training is bound by host-side
 # data movement rather than the GPU. CPU is therefore competitive, and the CPU
 # pool on a shared batch system is far larger than the GPU pool.
-: "${PARETO_ACCELERATOR:=gpu}"
+: "${PARETO_ACCELERATOR:=cpu}"
 : "${MPLCONFIGDIR:=/scratch/adatl1/matplotlib}"
 # Where the study writes. configs/paths/default.yaml resolves
 # paths.output_root to ${oc.env:ADL1T_OUTPUT_ROOT,${paths.root_dir}}, so this

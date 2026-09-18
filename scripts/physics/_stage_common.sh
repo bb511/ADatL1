@@ -34,6 +34,18 @@ set -euo pipefail
 # Default to the local checkout layout used on the laptop; the batch wrappers in
 # batch/ override all of these.
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+
+# Run from the checkout. Every stage invokes `python3 src/...` by a relative
+# path, but on a worker node the working directory is the Condor sandbox
+# (/srv), not the repo -- job 333899 died with "can't open file
+# '/srv/src/train.py'". CODE_DIR is the bind-mounted checkout on the cluster
+# and REPO_ROOT is the same thing locally.
+: "${CODE_DIR:=$REPO_ROOT}"
+[[ -d "$CODE_DIR/src" ]] || {
+  echo "FATAL: no src/ directory under CODE_DIR=$CODE_DIR" >&2
+  exit 2
+}
+cd "$CODE_DIR"
 : "${RAW_DATA_DIR:=${REPO_ROOT}/../../03_Data/adl1t_data/parquet_files}"
 : "${PROJECT_ROOT:=${REPO_ROOT}}"
 # configs/paths/default.yaml reads this from the environment, not from an

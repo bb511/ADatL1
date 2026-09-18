@@ -23,14 +23,28 @@
 
 source "$(dirname "${BASH_SOURCE[0]}")/_stage_common.sh"
 
-: "${MAX_EPOCHS:=30}"
+# Unset means "whatever the composed experiment says". physics/ae inherits 200,
+# which is not a batch-sized run, so set MAX_EPOCHS for an ad-hoc training; the
+# Pareto study's training overlay carries its agreed 30 in the config itself.
+: "${MAX_EPOCHS:=}"
 # Resume an interrupted run from a checkpoint. Leave empty to start fresh.
 : "${CKPT_PATH:=}"
 
-[[ "$MAX_EPOCHS" =~ ^[1-9][0-9]*$ ]] || {
-  echo "MAX_EPOCHS must be a positive integer." >&2
-  exit 2
-}
+epoch_args=()
+if [[ -n "$MAX_EPOCHS" ]]; then
+  [[ "$MAX_EPOCHS" =~ ^[1-9][0-9]*$ ]] || {
+    echo "MAX_EPOCHS must be a positive integer." >&2
+    exit 2
+  }
+  epoch_args=("trainer.max_epochs=$MAX_EPOCHS")
+fi
+
+# Gradient clipping is a config value like any other; only override it when the
+# caller explicitly asks.
+clip_args=()
+if [[ -n ${GRAD_CLIP+x} ]]; then
+  clip_args=("trainer.gradient_clip_val=$GRAD_CLIP")
+fi
 if [[ -n "$CKPT_PATH" && ! -f "$CKPT_PATH" ]]; then
   echo "Checkpoint not found: $CKPT_PATH" >&2
   exit 2
@@ -43,11 +57,11 @@ if [[ -n "$CKPT_PATH" ]]; then
   resume_args=("ckpt_path=$CKPT_PATH" "callbacks.clear_ckpts=null")
 fi
 
-stage_banner "STAGE 1/4  TRAIN  (max_epochs=$MAX_EPOCHS)"
+stage_banner "STAGE 1/4  TRAIN  (max_epochs=${MAX_EPOCHS:-from config})"
 
 exec python3 src/train.py \
   "${COMMON_ARGS[@]}" \
   "${ALGO_ARGS[@]}" \
-  trainer.gradient_clip_val="$GRAD_CLIP" \
-  trainer.max_epochs="$MAX_EPOCHS" \
+  "${clip_args[@]}" \
+  "${epoch_args[@]}" \
   "${resume_args[@]}"

@@ -41,15 +41,12 @@ export SEED MI_GAMMA MI_NUM_BINS ARCHITECTURE_ID ENCODER_NODES
 
 source "$(dirname "$0")/_stage_env.sh"
 
-: "${MAX_EPOCHS:=30}"
-export MAX_EPOCHS
-
 echo "SEED:              $SEED"
 echo "MI_GAMMA:          $MI_GAMMA"
 echo "MI_NUM_BINS:       $MI_NUM_BINS"
 echo "ARCHITECTURE_ID:   $ARCHITECTURE_ID"
 echo "ENCODER_NODES:     $ENCODER_NODES"
-echo "MAX_EPOCHS:        $MAX_EPOCHS"
+echo "max_epochs:        from configs/experiment/physics/pareto_fet_train.yaml"
 echo
 echo "Running scripts/physics/runae.sh ..."
 exec bash "${CODE_DIR}/scripts/physics/runae.sh"

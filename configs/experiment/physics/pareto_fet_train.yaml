@@ -30,6 +30,13 @@ defaults:
   - /experiment/physics/pareto_fet
   - _self_
 
+# The manifest inherits trainer.max_epochs=200 from physics/ae, which no batch
+# job finishes. 30 is the agreed ceiling for the study, and it belongs here so
+# the resolved manifest records what was actually trained rather than leaving it
+# to a submit file that the manifest never sees.
+trainer:
+  max_epochs: 30
+
 data:
   load_aux_in_fit: false
 

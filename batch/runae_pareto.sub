@@ -21,7 +21,7 @@ error  = batch/logs/runae_pareto.$(ClusterId).$(ProcId).err
 
 MY.SingularityImage = "/eos/user/l/lbehrens/containers/adl1t_lab-dev.sif"
 
-environment = "SEED=$(SEED) MI_GAMMA=$(GAMMA) MI_NUM_BINS=$(BINS) ARCHITECTURE_ID=$(ARCH) ENCODER_NODES_US=$(NODES) RUN_NAME=$(RUN_NAME) EXPERIMENT=physics/pareto_fet_train EXPERIMENT_NAME=Pareto_Front_260918 MAX_EPOCHS=30 TRAINER=cpu CPU_THREADS=5 DATA_WORKERS=3"
+environment = "SEED=$(SEED) MI_GAMMA=$(GAMMA) MI_NUM_BINS=$(BINS) ARCHITECTURE_ID=$(ARCH) ENCODER_NODES_US=$(NODES) RUN_NAME=$(RUN_NAME) EXPERIMENT=physics/pareto_fet_train EXPERIMENT_NAME=Pareto_Front_260918 TRAINER=cpu CPU_THREADS=5 DATA_WORKERS=3"
 
 # ---------------------------------------------------------------------------
 # Output transfer

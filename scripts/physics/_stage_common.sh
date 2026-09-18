@@ -93,39 +93,54 @@ if [[ -n "$EXPERIMENT_NAME" ]]; then
 fi
 
 # --- model hyperparameters --------------------------------------------------
-# These MUST be identical in every stage. The checkpoint carries weights but not
-# the config, and both the evaluator and the probe loader do a strict
-# load_state_dict, so a divergence here is caught -- but only after the data has
-# been loaded, which on this dataset costs minutes. Keeping them in one place
-# means stage 2 and 3 cannot drift from the stage 1 that produced the weights.
-: "${LR:=0.0019859329798336714}"
-: "${DELTA:=1.0}"
-: "${MI_GAMMA:=0.1}"
-: "${MI_TEMPERATURE:=6.0}"
-: "${MI_NUM_BINS:=50}"
-: "${ENCODER_NODES:=[64,32,8]}"
-: "${INPUT_NOISE_STD:=0.0}"
-: "${GRAD_CLIP:=5.0}"
-: "${WEIGHT_DECAY:=1e-06}"
-: "${BETAS:=[0.9,0.999]}"
+# The configs are the source of truth. Nothing is passed on the command line
+# unless it is explicitly set in the environment, so an unset variable means
+# "whatever the composed experiment says" rather than a literal buried in this
+# script silently overriding it.
+#
+# This matters beyond tidiness. The resolved manifest each run writes is the
+# scientific record of what was trained, and Phase 2 validates runs against it;
+# a script-level default that disagrees with the config produces a record that
+# does not describe the model. Until 2026-09-18 this file did exactly that,
+# shadowing five of them:
+#
+#   lr 0.0019859329798336714 vs 0.0013029941778430407   weight_decay 1e-06 vs 0.001
+#   delta 1.0 vs 3.0         input_noise_std 0.0 vs 1e-04   grad clip 5.0 vs 0.0
+#
+# To change a hyperparameter, change the config. To try one ad hoc, set the
+# variable for that invocation -- and set the same one for stages 2 and 3, or
+# the run_manifest fingerprint check will stop them.
+: "${PARETO_CANDIDATE:=0}"
 
-[[ "$MI_NUM_BINS" =~ ^[1-9][0-9]*$ ]] && (( MI_NUM_BINS >= 2 )) || {
-  echo "MI_NUM_BINS must be an integer of at least 2." >&2
-  exit 2
+_maybe() {
+  # _maybe VARNAME hydra.key  -> append the override only if VARNAME is set
+  local name="$1" key="$2"
+  [[ -n ${!name+x} ]] && ALGO_ARGS+=("${key}=${!name}")
+  return 0
 }
 
-# A Pareto-study run is parameterised through pareto_study.candidate, NOT through
-# algorithm.*: the study experiment derives algorithm.mi_gamma and the rest FROM
-# the candidate, and it is the candidate that configuration_id is built from.
-# Overriding algorithm.mi_gamma directly would train the right model and then
-# file it under the wrong grid point, which Phase 2 catches only at the very end.
-# Everything outside the candidate is frozen by the study manifest and is
-# deliberately NOT passed here.
-: "${PARETO_CANDIDATE:=0}"
-: "${SEED:=123}"
-: "${ARCHITECTURE_ID:=h64_32}"
+if [[ -n ${MI_NUM_BINS+x} ]]; then
+  [[ "$MI_NUM_BINS" =~ ^[1-9][0-9]*$ ]] && (( MI_NUM_BINS >= 2 )) || {
+    echo "MI_NUM_BINS must be an integer of at least 2." >&2
+    exit 2
+  }
+fi
+
+ALGO_ARGS=()
 
 if (( PARETO_CANDIDATE )); then
+  # A Pareto-study run is parameterised through pareto_study.candidate, NOT
+  # through algorithm.*: the study experiment derives algorithm.mi_gamma and the
+  # rest FROM the candidate, and it is the candidate that configuration_id is
+  # built from. Overriding algorithm.mi_gamma directly would train the right
+  # model and then file it under the wrong grid point, which Phase 2 catches only
+  # at the very end. These five are the searched parameters, so they are required
+  # rather than optional.
+  : "${SEED:?PARETO_CANDIDATE=1 requires SEED}"
+  : "${MI_GAMMA:?PARETO_CANDIDATE=1 requires MI_GAMMA}"
+  : "${MI_NUM_BINS:?PARETO_CANDIDATE=1 requires MI_NUM_BINS}"
+  : "${ARCHITECTURE_ID:?PARETO_CANDIDATE=1 requires ARCHITECTURE_ID}"
+  : "${ENCODER_NODES:?PARETO_CANDIDATE=1 requires ENCODER_NODES}"
   ALGO_ARGS=(
     pareto_study.candidate.autoencoder_seed="$SEED"
     pareto_study.candidate.mi_gamma="$MI_GAMMA"
@@ -134,17 +149,16 @@ if (( PARETO_CANDIDATE )); then
     pareto_study.candidate.encoder_nodes="$ENCODER_NODES"
   )
 else
-  ALGO_ARGS=(
-    algorithm.optimizer.lr="$LR"
-    algorithm.optimizer.weight_decay="$WEIGHT_DECAY"
-    algorithm.optimizer.betas="$BETAS"
-    algorithm.delta="$DELTA"
-    algorithm.mi_gamma="$MI_GAMMA"
-    algorithm.mi_temperature="$MI_TEMPERATURE"
-    algorithm.mi_sensitive_num_bins="$MI_NUM_BINS"
-    algorithm.encoder.nodes="$ENCODER_NODES"
-    algorithm.input_noise_std="$INPUT_NOISE_STD"
-  )
+  _maybe SEED             seed
+  _maybe LR               algorithm.optimizer.lr
+  _maybe WEIGHT_DECAY     algorithm.optimizer.weight_decay
+  _maybe BETAS            algorithm.optimizer.betas
+  _maybe DELTA            algorithm.delta
+  _maybe MI_GAMMA         algorithm.mi_gamma
+  _maybe MI_TEMPERATURE   algorithm.mi_temperature
+  _maybe MI_NUM_BINS      algorithm.mi_sensitive_num_bins
+  _maybe ENCODER_NODES    algorithm.encoder.nodes
+  _maybe INPUT_NOISE_STD  algorithm.input_noise_std
 fi
 
 stage_banner() {

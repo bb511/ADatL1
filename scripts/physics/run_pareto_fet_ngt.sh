@@ -545,6 +545,10 @@ case "$ACTION" in
     ;;
   collect)
     (( SHARD_COUNT == 1 )) || die "--shard applies to --run, not --collect."
+    # Phase 2 and 3 are pandas over the per-run JSON artifacts and never build a
+    # model. Requiring a GPU here would make it impossible to run the analysis
+    # on lxplus, which is the only place all shards' outputs meet.
+    PARETO_ACCELERATOR=cpu
     check_ngt_environment
     archive_study_metadata
     collect_and_select

@@ -49,7 +49,15 @@ transfer_output_files = outputs
 # CERN allocates 3000 MB per core and rescales request_cpus upward to cover
 # request_memory, so keep memory == cpus * 3000 or both get rewritten.
 #   4 cpus / 12000 MB  -> ~136 machines, but OOMs
-#   8 cpus / 24000 MB  -> current: ~20 GB measured peak plus ~4 GB headroom
+#   8 cpus / 24000 MB  -> CURRENT, and a DELIBERATE UNDER-REQUEST. Measured
+#                         peak is ~30-33 GB (cluster 333089, 2026-09-18:
+#                         MemoryUsage 30007 -> 31739 against a 24000 MB
+#                         allocation, no hold, no eviction), so CERN's
+#                         cgroup limit on this pool is soft. Chosen because
+#                         it fits the 24600 MB / 8 cpu slot shape that
+#                         30000 MB misses: 30000/10 waited 18 h unscheduled,
+#                         24000/8 matched an A100 in 70 s. If shards start
+#                         being evicted for memory, go to 11 cpus / 33000 MB.
 #   10 cpus / 30000 MB -> ~92 machines, PROVEN to work, but only 9 GPU slots
 #                         in the whole pool satisfy it (condor_q -better-analyze,
 #                         2026-09-17), so the queue never matched.

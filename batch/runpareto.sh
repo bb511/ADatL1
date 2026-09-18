@@ -27,10 +27,18 @@
 # their outputs/ trees have merged under the submit directory, run the analysis
 # once on lxplus (it is CPU-only and takes minutes):
 #
+# It must run INSIDE the container: the dependencies live in /opt/venv in the
+# image, and a bare lxplus shell has no hydra, torch or pandas. lxplus also has
+# no GPU, which is why the runner forces PARETO_ACCELERATOR=cpu for --collect.
+#
 #   cd /eos/user/l/lbehrens/adatl1/ADatL1
-#   ADL1T_OUTPUT_ROOT=$PWD/outputs \
-#   PROJECT_ROOT=/eos/user/l/lbehrens/adl1t-stage \
-#     bash scripts/physics/run_pareto_fet_ngt.sh --collect
+#   apptainer exec --bind /eos:/eos \
+#     /eos/user/l/lbehrens/containers/adl1t_lab-dev.sif \
+#     bash -c 'export PATH=/opt/venv/bin:$PATH; \
+#       ADL1T_OUTPUT_ROOT=/eos/user/l/lbehrens/adatl1/ADatL1/outputs \
+#       PROJECT_ROOT=/eos/user/l/lbehrens/adl1t-stage \
+#       ALLOW_DIRTY_GIT=1 \
+#       bash scripts/physics/run_pareto_fet_ngt.sh --collect'
 #
 # --collect rewrites the study map from the manifest first, so it picks up the
 # merged location rather than the sandbox paths recorded during training.

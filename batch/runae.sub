@@ -35,20 +35,26 @@ request_gpus = 0
 # Peak RSS was 30265 MB with a 30000 MB request; it OOM'd at 12000 MB.
 # DATA_WORKERS does not change this (3 workers -> 14256 MB, 1 worker -> 14289).
 #
-# 30000/10 is kept here deliberately, unlike batch/runpareto.sub which runs an
-# under-request of 24000/8 to reach the 24600 MB slot shape. This job's purpose
-# is to measure true peak RSS, so it must not be constrained by its own limit:
-# a job that is killed, or that adapts to pressure, measures the limit rather
-# than the requirement. Read the measured peak from the [mem] lines afterwards
-# and size everything else from that.
+# That measurement is now superseded. Job 333170 confirmed VmHWM = 29724 MiB
+# (99.1% of the 30000 request), and the cause was control_x duplicating x: the
+# datamodule materialised a second copy of the same columns. Since 2026-09-18
+# the model input is a strided VIEW of the control tensor, verified locally by
+# storage dedup (data_ptr):
+#   setup(fit):      LOGICAL 28155.8 MiB -> RESIDENT 14138.3 MiB (saved 13.7 GiB)
+#   setup(validate): LOGICAL 14232.1 MiB -> RESIDENT  7146.6 MiB (saved  6.9 GiB)
+# 29724 - 14017 ~= 15.7 GB, so 21000/7 is a ~30% headroom PREDICTION, not yet a
+# measurement on Linux (the local figure came from a macOS run, where ru_maxrss
+# hides compression and swap and is not comparable). The next job logs its own
+# VmHWM; if it lands near 16 GB this can go to 18000/6, and if it OOMs the
+# previous known-good setting is 30000/10.
 #
 # Fleet sizes, single GPU:
 #   4 cpus / 12000 MB  -> ~136 machines, but OOMs
 #   10 cpus / 30000 MB -> ~92 machines, PROVEN to work
 #   13 cpus / 39000 MB -> ~92 machines (same pool, more headroom)
 #   22 cpus / 66000 MB -> ~32 machines, never scheduled
-request_cpus   = 10
-request_memory = 30000
+request_cpus   = 7
+request_memory = 21000
 request_disk   = 10GB
 
 # 3 h for a 30-epoch run.

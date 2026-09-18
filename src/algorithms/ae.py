@@ -375,23 +375,22 @@ class AE(ADLightningModule):
 
         stats = self.sensitive_binner.fit_stats
 
-        print(f"[MI] Fixed sensitive variable: {self.sensitive_binner.variable}")
-        print(f"[MI] Requested bins: {stats['num_bins_requested']}")
-        print(f"[MI] Effective bins: {stats['num_bins_effective']}")
-        print(f"[MI] Values used: {stats['num_values']}")
-        print(
+        # Everything goes through the logger only. Batch jobs capture stdout and
+        # the log stream into the same file, so a bare print() next to a
+        # log.info() of the same text appears twice, unordered and untimestamped.
+        log.info(f"[MI] Fixed sensitive variable: {self.sensitive_binner.variable}")
+        log.info(f"[MI] Requested bins: {stats['num_bins_requested']}")
+        log.info(f"[MI] Effective bins: {stats['num_bins_effective']}")
+        log.info(f"[MI] Values used: {stats['num_values']}")
+        log.info(
             "[MI] Value stats: "
             f"min={stats['min']:.6g}, "
             f"max={stats['max']:.6g}, "
             f"mean={stats['mean']:.6g}, "
             f"std={stats['std']:.6g}"
         )
-        log.info(f"[MI] Fixed sensitive variable: {self.sensitive_binner.variable}")
-        log.info(f"[MI] Requested bins: {stats['num_bins_requested']}")
-        log.info(f"[MI] Effective bins: {stats['num_bins_effective']}")
-        log.info(f"[MI] Values used: {stats['num_values']}")
-        print(f"[MI] Bin edges: {stats['edges']}")
-        print(f"[MI] Bin counts: {stats['counts']}")
+        log.info(f"[MI] Bin edges: {stats['edges']}")
+        log.info(f"[MI] Bin counts: {stats['counts']}")
 
         self._store_sensitive_bin_edges()
 

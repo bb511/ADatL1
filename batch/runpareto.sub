@@ -49,22 +49,25 @@ transfer_output_files = outputs
 # CERN allocates 3000 MB per core and rescales request_cpus upward to cover
 # request_memory, so keep memory == cpus * 3000 or both get rewritten.
 #   4 cpus / 12000 MB  -> ~136 machines, but OOMs
-#   8 cpus / 24000 MB  -> CURRENT, and a DELIBERATE UNDER-REQUEST. Measured
-#                         peak is ~30-33 GB (cluster 333089, 2026-09-18:
-#                         MemoryUsage 30007 -> 31739 against a 24000 MB
-#                         allocation, no hold, no eviction), so CERN's
-#                         cgroup limit on this pool is soft. Chosen because
-#                         it fits the 24600 MB / 8 cpu slot shape that
-#                         30000 MB misses: 30000/10 waited 18 h unscheduled,
-#                         24000/8 matched an A100 in 70 s. If shards start
-#                         being evicted for memory, go to 11 cpus / 33000 MB.
+#    7 cpus / 21000 MB -> CURRENT. Superseded 24000/8, which was a deliberate
+#                         under-request against a then-measured ~30-33 GB peak
+#                         (cluster 333089, 2026-09-18: MemoryUsage 30007 ->
+#                         31739 against 24000 MB, no hold, no eviction, so the
+#                         cgroup limit on this pool is soft). Since 2026-09-18
+#                         the model input is a strided view of the control
+#                         tensor instead of a second copy, which removes
+#                         ~14 GB of resident data (see batch/runae.sub for the
+#                         verified LOGICAL vs RESIDENT figures), so the real
+#                         requirement should be ~16 GB. This is a prediction
+#                         from a macOS run, not a Linux measurement: if shards
+#                         are evicted for memory, fall back to 24000/8.
 #   10 cpus / 30000 MB -> ~92 machines, PROVEN to work, but only 9 GPU slots
 #                         in the whole pool satisfy it (condor_q -better-analyze,
 #                         2026-09-17), so the queue never matched.
 #   22 cpus / 66000 MB -> ~32 machines, never scheduled
 request_gpus   = 0
-request_cpus   = 8
-request_memory = 24000
+request_cpus   = 7
+request_memory = 21000
 
 # request_disk defaults to KiB, so the unit is mandatory. Kept identical to
 # runae.sub; disk is not the binding constraint on matching here.

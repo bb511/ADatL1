@@ -65,7 +65,7 @@ SCRATCH="${_CONDOR_SCRATCH_DIR:-$PWD}"
 # Intra-op thread budget for the CPU trainer. Must match request_cpus in the
 # submit file: nproc inside the sandbox reports the whole machine, not the
 # slot, so a wrong value here either wastes cores or oversubscribes them.
-: "${CPU_THREADS:=10}"  # keep equal to request_cpus in batch/runae.sub
+: "${CPU_THREADS:=7}"   # keep equal to request_cpus in batch/runae.sub
 
 export CODE_DIR PROJECT_ROOT ADL1T_OUTPUT_ROOT MPLCONFIGDIR RUN_NAME MAX_EPOCHS
 export DATA_WORKERS TRAINER CPU_THREADS

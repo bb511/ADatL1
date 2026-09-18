@@ -174,31 +174,59 @@ class L1ADDataModule(LightningDataModule):
     def _log_tensor_footprint(self, stage: str | None) -> None:
         """Report how much RAM the loaded splits actually occupy.
 
-        The datamodule keeps every loaded split resident, and `setup("fit")`
-        loads the training split, the normal validation split *and* every
-        auxiliary (signal) dataset. Peak RSS is what decides which batch slots
-        a job can match, so it is worth being able to attribute it to named
-        splits from the job log rather than inferring it from a Condor sample.
+        Two numbers, because they differ and only one of them is the memory
+        the process pays for:
+
+        * logical - element_size * nelement per tensor. This is what a naive
+          sum reports, and it DOUBLE-COUNTS views. The model input is a view of
+          the control tensor (see _build_model_input_view), so a logical sum
+          shows x and control_x at ~5.5 GiB each when between them they own one
+          5.5 GiB allocation.
+        * resident - the unique underlying storages, deduplicated by data_ptr.
+          This is the real footprint and the number to size request_memory
+          against.
 
         Failures here are swallowed: instrumentation must never break a run.
         """
         try:
             mib = 1024.0 * 1024.0
-            total = 0.0
-            rows: list[tuple[str, str, float]] = []
+            logical_total = 0.0
+            rows: list[tuple[str, str, float, bool]] = []
+            seen_storages: dict[int, float] = {}
 
             def measure(group: str, name: str, container) -> None:
-                nonlocal total
+                nonlocal logical_total
+
                 if container is None:
                     return
+
                 for field in ("x", "mask", "control_x", "control_mask"):
                     tensor = getattr(container, field, None)
+
                     if tensor is None or not hasattr(tensor, "element_size"):
                         continue
-                    size = tensor.element_size() * tensor.nelement() / mib
-                    total += size
+
+                    logical = tensor.element_size() * tensor.nelement() / mib
+                    logical_total += logical
+
+                    try:
+                        storage = tensor.untyped_storage()
+                        pointer = storage.data_ptr()
+                        storage_mib = storage.nbytes() / mib
+                    except Exception:  # noqa: BLE001 - older torch, or a fake tensor
+                        pointer = id(tensor)
+                        storage_mib = logical
+
+                    shared = pointer in seen_storages
+                    seen_storages.setdefault(pointer, storage_mib)
+
                     rows.append(
-                        (f"{group}/{name}", f"{field}{tuple(tensor.shape)}", size)
+                        (
+                            f"{group}/{name}",
+                            f"{field}{tuple(tensor.shape)}",
+                            logical,
+                            shared,
+                        )
                     )
 
             for name, split in sorted(self._main.items()):
@@ -211,13 +239,29 @@ class L1ADDataModule(LightningDataModule):
                 else:
                     measure("aux", name, split)
 
+            resident_total = sum(seen_storages.values())
+
             log.info(f"[data] resident tensors after setup({stage}):")
-            for label, shape, size in rows:
-                log.info(f"[data]   {label:<42} {shape:<34} {size:9.1f} MiB")
+            for label, shape, size, shared in rows:
+                marker = "  (view, shares storage)" if shared else ""
+                log.info(f"[data]   {label:<42} {shape:<34} {size:9.1f} MiB{marker}")
+
             log.info(
-                f"[data]   {'TOTAL':<42} {'':<34} {total:9.1f} MiB "
-                f"({total / 1024.0:.1f} GiB) across {len(rows)} tensor(s)"
+                f"[data]   {'LOGICAL TOTAL':<42} {'(double-counts views)':<34} "
+                f"{logical_total:9.1f} MiB ({logical_total / 1024.0:.1f} GiB) "
+                f"across {len(rows)} tensor(s)"
             )
+            log.info(
+                f"[data]   {'RESIDENT TOTAL':<42} {'(unique storages)':<34} "
+                f"{resident_total:9.1f} MiB ({resident_total / 1024.0:.1f} GiB) "
+                f"across {len(seen_storages)} allocation(s)"
+            )
+            saved = logical_total - resident_total
+            if saved > 1.0:
+                log.info(
+                    f"[data]   {'SAVED BY VIEWS':<42} {'':<34} "
+                    f"{saved:9.1f} MiB ({saved / 1024.0:.1f} GiB)"
+                )
             log_memory(f"datamodule.setup({stage})")
         except Exception as error:  # noqa: BLE001 - diagnostics must not break runs
             log.warning(f"Could not compute tensor footprint: {error}")
@@ -406,8 +450,12 @@ class L1ADDataModule(LightningDataModule):
         x, mask = self._build_model_input_view(control_x, control_mask)
 
         y = torch.full((x.size(0),), label, dtype=torch.int64)
-        x = x.contiguous()
-        mask = mask.contiguous()
+        # Not .contiguous() when the model input is a view of the control
+        # tensor: materialising it here is exactly the ~14 GiB duplication
+        # this avoids. See _build_model_input_view.
+        if not getattr(self, '_model_input_is_view', False):
+            x = x.contiguous()
+            mask = mask.contiguous()
         l1bit = l1bit.contiguous()
         y = y.contiguous()
 
@@ -459,8 +507,12 @@ class L1ADDataModule(LightningDataModule):
             x, mask = self._build_model_input_view(control_x, control_mask)
 
             y = torch.full((x.size(0),), label, dtype=torch.int64)
-            x = x.contiguous()
-            mask = mask.contiguous()
+            # Not .contiguous() when the model input is a view of the control
+            # tensor: materialising it here is exactly the ~14 GiB duplication
+            # this avoids. See _build_model_input_view.
+            if not getattr(self, '_model_input_is_view', False):
+                x = x.contiguous()
+                mask = mask.contiguous()
             l1bit = l1bit.contiguous()
             y = y.contiguous()
 
@@ -602,26 +654,97 @@ class L1ADDataModule(LightningDataModule):
             )
 
 
+    def _keep_indices_are_contiguous_run(self) -> bool:
+        """True when the kept features form one unbroken ascending range.
+
+        This is the condition under which the model input can be a *view* of
+        the control tensor instead of a second copy of it. With the current
+        configuration - excluding only FET.Et, which sits at raw index 0 - the
+        kept indices are 1..116, so the view path applies.
+        """
+        keep = self._model_keep_indices
+
+        if not keep:
+            return False
+
+        return keep == list(range(keep[0], keep[-1] + 1))
+
     def _build_model_input_view(
         self,
         x: torch.Tensor,
         mask: torch.Tensor,
     ) -> tuple[torch.Tensor, torch.Tensor]:
-        """Return the anomaly-detector input view while keeping raw/control data intact."""
+        """Return the anomaly-detector input view while keeping control data intact.
+
+        The model input is the control tensor minus the excluded (sensitive)
+        features, so materialising both costs almost exactly twice the memory
+        of the data itself. Measured 2026-09-18: setup("fit") held 27.5 GiB, of
+        which ~14 GiB was this duplication - for the train split alone, x was
+        5545.6 MiB against control_x at 5593.4 MiB for the same numbers.
+
+        When the kept features form one contiguous run, basic slicing returns a
+        *view* of the control tensor rather than a copy, so the model input
+        costs nothing. The view is strided rather than contiguous. Batching
+        slices rows (L1ADDataset does data[s:e]), which preserves the view, and
+        any per-batch copy PyTorch makes inside the first Linear is ~7.6 MB at
+        batch_size 16384 - irrelevant beside gigabytes of resident tensor.
+
+        Two invariants follow, both true today: the caller must NOT call
+        .contiguous() on the result, which would reinstate the copy, and the
+        control tensor must outlive the model input, since it now owns the
+        storage.
+
+        index_select remains the fallback for a non-contiguous keep set,
+        because it is the only correct option there. That path still copies.
+        """
         if self._model_keep_indices is None:
             raise RuntimeError("Feature views are not configured yet.")
 
         if not self._model_excluded_indices:
+            self._model_input_is_view = False
             return x, mask
+
+        x_flat = torch.flatten(x, start_dim=1)
+        mask_flat = torch.flatten(mask, start_dim=1)
+
+        if self._keep_indices_are_contiguous_run():
+            first = self._model_keep_indices[0]
+            last = self._model_keep_indices[-1] + 1
+            x_view = x_flat[:, first:last]
+
+            # Cheap equivalence guard on a handful of rows. The slice and the
+            # index_select must agree exactly; if a future exclusion set makes
+            # the arithmetic wrong, this fails loudly at load time instead of
+            # silently training on the wrong columns - including, potentially,
+            # on the sensitive variable the protocol forbids in the input.
+            probe_rows = min(8, x_view.shape[0])
+            if probe_rows:
+                keep_probe = torch.as_tensor(
+                    self._model_keep_indices, device=x.device, dtype=torch.long
+                )
+                if not torch.equal(
+                    x_view[:probe_rows],
+                    x_flat[:probe_rows].index_select(dim=1, index=keep_probe),
+                ):
+                    raise RuntimeError(
+                        "Contiguous-run model-input view does not match the "
+                        "index_select result. Refusing to continue: this would "
+                        "feed the wrong feature columns to the model."
+                    )
+
+            self._model_input_is_view = True
+            log.info(
+                f"Model input is a view of the control tensor "
+                f"(columns {first}:{last}); no second copy is materialised."
+            )
+            return x_view, mask_flat[:, first:last]
 
         keep = torch.as_tensor(
             self._model_keep_indices,
             device=x.device,
             dtype=torch.long,
         )
-
-        x_flat = torch.flatten(x, start_dim=1)
-        mask_flat = torch.flatten(mask, start_dim=1)
+        self._model_input_is_view = False
 
         return (
             x_flat.index_select(dim=1, index=keep),

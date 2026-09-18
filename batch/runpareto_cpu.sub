@@ -78,8 +78,8 @@ transfer_output_files = outputs
 # No GPU. This also drops CERN's GPU-hostgroup constraint, which is what
 # restricts the GPU submit file to ~50 slots.
 request_gpus   = 0
-request_cpus   = 8
-request_memory = 24000
+request_cpus   = 7
+request_memory = 21000
 
 # request_disk defaults to KiB, so the unit is mandatory. Kept identical to
 # runae.sub; disk is not the binding constraint on matching here.

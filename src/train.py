@@ -13,7 +13,7 @@ import torch
 
 from pytorch_lightning import Callback, LightningDataModule, LightningModule, Trainer
 from pytorch_lightning.loggers import Logger
-from omegaconf import OmegaConf, DictConfig
+from omegaconf import OmegaConf, DictConfig, open_dict
 from colorama import Fore, Back
 from math import inf
 from hydra.core.hydra_config import HydraConfig
@@ -543,6 +543,21 @@ def main(cfg: DictConfig) -> Optional[float]:
     :param cfg: DictConfig configuration composed by Hydra.
     :return: Optional[float] with optimized metric value.
     """
+    # A numeric run_name (RUN_NAME=7) is resolved by OmegaConf as an int, and
+    # MLflow's protobuf run_name field only accepts str, so create_run dies with
+    # "TypeError: bad argument type for built-in operation" long before training
+    # starts. A numeric run name is legitimate user input, so coerce it here --
+    # once, before anything reads it -- rather than making the user rename runs.
+    # Doing it on the config (not on the logger) keeps run_name consistent across
+    # the checkpoint dirpaths, the binning plot dirs and the MLflow run.
+    if "run_name" in cfg and not isinstance(cfg.run_name, str):
+        coerced = str(cfg.run_name)
+        with open_dict(cfg):
+            cfg.run_name = coerced
+        log.warning(
+            f"run_name was not a string; coerced to {coerced!r} for MLflow compatibility."
+        )
+
     # apply extra utilities
     # (e.g. ask for tags if none are provided in cfg, print cfg tree, etc.)
     extras(cfg)

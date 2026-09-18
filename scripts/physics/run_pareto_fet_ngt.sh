@@ -269,7 +269,15 @@ check_ngt_environment() {
   [[ -f "$CODE_DIR/scripts/collect_pareto_study.py" ]] || die "Missing Pareto collector in $CODE_DIR."
   [[ -f "$CODE_DIR/scripts/select_pareto_front.py" ]] || die "Missing Pareto selector in $CODE_DIR."
   [[ "$DATA_WORKERS" =~ ^[1-9][0-9]*$ ]] || die "DATA_WORKERS must be a positive integer."
-  [[ -d "$RAW_DATA_DIR" ]] || die "Missing RAW_DATA_DIR: $RAW_DATA_DIR"
+  # Raw parquet is only read when a dataset is absent from the extracted cache.
+  # On the EOS deployment the raw tree was never staged, and batch/runae.sh runs
+  # the same pipeline without it, so a missing RAW_DATA_DIR is not by itself a
+  # reason to refuse the study. The real precondition is the staged cache
+  # checked immediately below; if that is complete, extraction short-circuits
+  # and paths.raw_data_dir is never dereferenced. Warn so the cause is still
+  # visible in the job log if a cache miss does occur later.
+  [[ -d "$RAW_DATA_DIR" ]] || \
+    note "RAW_DATA_DIR does not exist: $RAW_DATA_DIR. Continuing, because the extracted cache below is what training reads. A cache miss will fail at data-load time and point back here."
 
   local data_dir
   for data_dir in extracted processed mlready; do

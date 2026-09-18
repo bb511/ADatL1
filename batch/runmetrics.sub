@@ -1,0 +1,52 @@
+# STAGE 3 of 4 -- the remaining Pareto metrics, one job per run.
+#
+# Submit with a list of run names, one per line, in batch/runs.txt:
+#   condor_submit batch/runmetrics.sub
+#
+# May be submitted at the same time as batch/runprobes.sub.
+
+executable = batch/runmetrics.sh
+
+log    = batch/logs/runmetrics.$(ClusterId).log
+output = batch/logs/runmetrics.$(ClusterId).$(ProcId).out
+error  = batch/logs/runmetrics.$(ClusterId).$(ProcId).err
+
+MY.SingularityImage = "/eos/user/l/lbehrens/containers/adl1t_lab-dev.sif"
+
+# RUN_NAME is per-job and comes from the queue statement at the bottom.
+# EXPERIMENT must be the overlay that enables the four summary callbacks;
+# physics/ae alone leaves the correlation matrix disabled and defines no auroc
+# or latent_collapse callback, so the job would succeed and write nothing.
+environment = "RUN_NAME=$(RUN_NAME) EXPERIMENT=physics/ae_metrics"
+
+# ---------------------------------------------------------------------------
+# Output transfer
+# ---------------------------------------------------------------------------
+# Deliberately absent, for the same reason as batch/runprobes.sub: this job
+# writes its summary JSONs directly into the existing checkpoint tree on EOS.
+
+# ---------------------------------------------------------------------------
+# Resources
+# ---------------------------------------------------------------------------
+request_gpus = 0
+
+# CERN allocates 3000 MB of RAM per core and rescales request_cpus upward to
+# cover request_memory, so keep memory == cpus * 3000 or both get rewritten.
+#
+# This is the memory-hungry analysis stage: it holds the validation split plus
+# all 21 auxiliary signal datasets at once. Measured locally after the
+# control-tensor view change:
+#   setup(validate)  LOGICAL 14232.1 MiB -> RESIDENT 7146.6 MiB (saved 6.9 GiB)
+# so the data itself is ~7 GiB and the rest is the callbacks' own buffers (the
+# correlation matrix and AUROC callbacks each accumulate per-dataset arrays).
+# 21000 is the stage-1 shape, kept until this stage has logged a real VmHWM.
+request_cpus   = 7
+request_memory = 21000
+request_disk   = 10GB
+
+# Measured locally: 96 s for the validation pass with the plain AE callbacks.
+# This stage adds the correlation matrix, AUROC and latent-collapse callbacks,
+# which each walk the same 22 loaders again, so budget several times that.
++MaxRuntime = 7200
+
+queue RUN_NAME from batch/runs.txt

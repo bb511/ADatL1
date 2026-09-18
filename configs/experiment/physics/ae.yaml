@@ -8,6 +8,11 @@ defaults:
   - override /trainer: cpu
   - override /evaluation: default
   - override /evaluation/callbacks: default
+  # Carry the Pareto study's identity and policy on an ordinary AE run, so a
+  # directory of individually trained autoencoders can be collected and have
+  # the front computed over it. The `adhoc` variant reads the grid point from
+  # the algorithm config instead of holding its own literals.
+  - override /pareto_study: fet_et_adhoc
   - override /logger: mlflow
 
 seed: 123

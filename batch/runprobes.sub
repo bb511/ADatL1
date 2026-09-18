@@ -1,0 +1,59 @@
+# STAGE 2 of 4 -- the four leakage probes, one job per run.
+#
+# Submit with a list of run names, one per line, in batch/runs.txt:
+#   condor_submit batch/runprobes.sub
+#
+# Stage 2 and stage 3 read the same checkpoint and write into disjoint
+# subdirectories, so both may be submitted at the same time.
+
+executable = batch/runprobes.sh
+
+log    = batch/logs/runprobes.$(ClusterId).log
+output = batch/logs/runprobes.$(ClusterId).$(ProcId).out
+error  = batch/logs/runprobes.$(ClusterId).$(ProcId).err
+
+MY.SingularityImage = "/eos/user/l/lbehrens/containers/adl1t_lab-dev.sif"
+
+# RUN_NAME is per-job and comes from the queue statement at the bottom.
+environment = "RUN_NAME=$(RUN_NAME) EXPERIMENT=physics/ae PROBE_MODE=validation"
+
+# ---------------------------------------------------------------------------
+# Output transfer
+# ---------------------------------------------------------------------------
+# Deliberately absent. This job reads an existing checkpoint tree on EOS and
+# writes its JSON and PNGs straight back into it, so there is nothing in the
+# sandbox to bring home. Adding transfer_output_files = outputs here would
+# return an empty directory and, worse, invite a later merge that overwrites
+# the very tree this job just wrote into.
+
+# ---------------------------------------------------------------------------
+# Resources
+# ---------------------------------------------------------------------------
+# CPU-only; the probes are sklearn, which never touches the GPU at all.
+request_gpus = 0
+
+# CERN allocates 3000 MB of RAM per core and rescales request_cpus upward to
+# cover request_memory, so keep memory == cpus * 3000 or both get rewritten.
+#
+# NOT YET MEASURED ON LINUX. Kept at the stage-1 shape as a deliberately safe
+# starting point. What this stage holds is different from training: it loads the
+# train split (about 6.9 GiB resident after the control-tensor view change) and
+# then materialises the extracted probe features on top of it -- 12.5M events x
+# 116 reconstruction floats is another ~5.8 GB, plus the 8 latent floats, plus
+# whatever sklearn copies internally during the MLP fit. The macOS run peaked at
+# 8254 MiB for the whole process, but ru_maxrss there counts only resident pages
+# and hides compression and swap, so it is not a bound for Linux.
+# The job logs its own [mem] lines; size the next submission from those.
+request_cpus   = 7
+request_memory = 21000
+request_disk   = 10GB
+
+# Measured locally: 1605 s (26.8 min) for the probe phase itself, dominated by
+# the two MLP probes (296 s on z_logits, 370 s on reconstruction) and the
+# 116-feature linear solve (178 s). Data loading adds a few minutes. This cost
+# is fixed per run: it does not scale with trainer.max_epochs.
+# 2 h leaves room for a slower node without risking eviction, which is silent -
+# an evicted job leaves no hold reason, it simply disappears from the queue.
++MaxRuntime = 7200
+
+queue RUN_NAME from batch/runs.txt

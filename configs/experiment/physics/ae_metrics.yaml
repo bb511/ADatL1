@@ -1,0 +1,83 @@
+# @package _global_
+
+# Stage 3 overlay for a plain AE run.
+#
+# Use with src/run_eval_metrics.py to produce the four Pareto summary artifacts
+# for an autoencoder that was trained by scripts/physics/runae.sh (that is, by
+# `experiment=physics/ae`, NOT by the Pareto study):
+#
+#   plots/val/loss_total/eff/eff_summary.json                  signal efficiency
+#   plots/val/loss_total/correlation_matrix/normal/
+#                                        mean_correlations.json objective E
+#   plots/val/loss_total/latent_collapse/collapse_summary.json  feasibility
+#   plots/val/loss_total/auroc/auroc_summary.json               diagnostic
+#
+# It inherits physics/ae unchanged, so the algorithm, data and checkpoint paths
+# match the trained run exactly -- which matters, because the evaluator does a
+# strict load_state_dict and an architecture mismatch must fail loudly rather
+# than silently measure a different model.
+#
+# The Pareto study does NOT use this file: experiment=physics/pareto_fet already
+# defines the same four callbacks, wired to ${pareto_study.*} instead of the
+# literals below. This overlay exists so a single ad-hoc AE can be analysed
+# without pretending to be a study candidate.
+
+defaults:
+  - /experiment/physics/ae
+  - _self_
+
+tags: ["ae", "signal", "metrics"]
+
+# Stage 3 never fits. src/run_eval_metrics.py does not read these, but they keep
+# the composed config honest for anyone printing it.
+train: false
+test: false
+
+evaluation:
+  callbacks:
+    # The efficiency callback already runs in stage 1 for its plots. Here it
+    # additionally writes the machine-readable summary the Pareto aggregation
+    # consumes; the plots are suppressed because stage 1 made them.
+    anomaly_efficiency:
+      write_pareto_summary: true
+      write_plots: false
+
+    # Off in physics/ae because it is expensive and only the study needs it.
+    correlation_matrix:
+      enabled: true
+
+    anomaly_auroc:
+      _target_: src.evaluation.callbacks.auroc.AnomalyAUROCCallback
+      output_name: 'ascore/full'
+      ds: ${evaluation.callbacks.anomaly_efficiency.ds}
+      max_false_positive_rate: ${div:${algorithm.target_rate},${algorithm.base_rate}}
+      pure_normal: false
+      score_direction: higher_score_is_more_anomalous
+      ckpts:
+        loss_total: true
+      name: auroc
+
+    latent_collapse:
+      _target_: src.evaluation.callbacks.latent_collapse.LatentCollapseDiagnosticsCallback
+      # A standalone AE has no study grid, so the architecture needs a label of
+      # its own. Override it (architecture_id=...) whenever you compare several
+      # encoder shapes, because this string is what pairs a candidate with its
+      # gamma=0 baseline downstream.
+      architecture_id: ae_standalone
+      # Same thresholds as the study's seed-level rule
+      # (pareto_study.collapse_constraint.seed_level_rule in pareto_fet.yaml),
+      # repeated as literals so this overlay does not depend on that block.
+      minimum_joint_code_entropy_bits: 1.0
+      minimum_fraction_of_paired_gamma_zero_joint_entropy: 0.5
+      dataset: normal
+      evaluation_split: val
+      ckpts:
+        loss_total: true
+      name: latent_collapse
+
+    # Stage 1 already wrote these; re-running them would only overwrite the same
+    # plots with the same numbers and cost another pass over 22 loaders.
+    reco: null
+    ascore_operational: null
+    thres_drift: null
+    wasserstein: null

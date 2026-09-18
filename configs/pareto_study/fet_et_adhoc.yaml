@@ -1,0 +1,39 @@
+# @package pareto_study
+
+# The same study policy as fet_et, but for an autoencoder trained on its own
+# rather than as a point of a launched grid.
+#
+# The only difference is the direction of the link between `candidate` and
+# `algorithm`:
+#
+#   fet_et        candidate holds the literals; physics/pareto_fet.yaml sets
+#                 algorithm.mi_gamma: ${pareto_study.candidate.mi_gamma}
+#   fet_et_adhoc  algorithm holds the literals (from the command line, or the
+#                 experiment defaults); candidate reads them back
+#
+# The two cannot live in one file, and physics/ae.yaml cannot simply add the
+# interpolations on top of fet_et: physics/pareto_fet.yaml inherits physics/ae,
+# so its `algorithm.mi_gamma: ${pareto_study.candidate.mi_gamma}` would then meet
+# a `candidate.mi_gamma: ${algorithm.mi_gamma}` inherited from the base and
+# OmegaConf would raise on the interpolation cycle. Selecting a different value
+# of this config group avoids that entirely: pareto_fet overrides the group back
+# to fet_et, so the file below is never loaded for a study run.
+#
+# Everything else -- constraints, objectives, selection policy, protocol
+# versions -- is inherited unchanged, which is the point: a run trained through
+# scripts/physics/runae.sh is judged by exactly the same rules as a grid run.
+
+defaults:
+  - fet_et
+  - _self_
+
+candidate:
+  autoencoder_seed: ${seed}
+  mi_gamma: ${algorithm.mi_gamma}
+  mi_sensitive_num_bins: ${algorithm.mi_sensitive_num_bins}
+  # An ad-hoc run has no grid, so the architecture is labelled by its encoder
+  # shape. This string is what pairs a candidate with its gamma=0 baseline
+  # downstream, so override it (pareto_study.candidate.architecture_id=...)
+  # if you want a different grouping.
+  architecture_id: h64_32
+  encoder_nodes: ${algorithm.encoder.nodes}

@@ -1,3 +1,15 @@
+# STAGE 1 of 4 -- train the autoencoder.
+#
+# Produces outputs/checkpoints/<experiment_name>/<RUN_NAME>/loss_total.ckpt.
+# The analysis stages read that checkpoint and are submitted separately, after
+# these outputs have been merged onto EOS:
+#
+#   condor_submit batch/runprobes.sub    # stage 2, the leakage probes
+#   condor_submit batch/runmetrics.sub   # stage 3, the remaining Pareto metrics
+#   condor_submit batch/runcollect.sub   # stage 4, the Pareto front
+#
+# Stages 2 and 3 are independent of each other and may be submitted together.
+
 executable = batch/runae.sh
 
 log    = batch/logs/runae.$(ClusterId).log
@@ -57,7 +69,12 @@ request_cpus   = 7
 request_memory = 21000
 request_disk   = 10GB
 
-# 3 h for a 30-epoch run.
+# 4 h for a 30-epoch run.
+#
+# Since 2026-09-18 this job no longer runs the leakage probes: they are stage 2
+# (batch/runprobes.sub) and cost a measured 1605 s per run on their own. The
+# budget below therefore covers fit plus the ordinary AE evaluation callbacks
+# only, and has roughly 27 min more slack than it did when it was written.
 #
 # Job 329299 did 3 epochs in 9 min wall: ~3.5 min data conversion, 33 s/epoch,
 # ~1.5 min evaluation. Extrapolating the epochs alone gives ~5 min fixed

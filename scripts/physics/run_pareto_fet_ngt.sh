@@ -126,6 +126,11 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # data movement rather than the GPU. CPU is therefore competitive, and the CPU
 # pool on a shared batch system is far larger than the GPU pool.
 : "${PARETO_ACCELERATOR:=cpu}"
+
+# Which of the per-run stages to execute, in order, comma separated. The default
+# reproduces the old single-process behaviour. Split it to train everything
+# first and analyse afterwards; see the comment in run_one().
+: "${PARETO_STAGES:=train,metrics,probes}"
 : "${MPLCONFIGDIR:=/scratch/adatl1/matplotlib}"
 # Where the study writes. configs/paths/default.yaml resolves
 # paths.output_root to ${oc.env:ADL1T_OUTPUT_ROOT,${paths.root_dir}}, so this
@@ -266,6 +271,8 @@ EOF
 
 check_ngt_environment() {
   [[ -f "$CODE_DIR/src/train.py" ]] || die "Missing $CODE_DIR/src/train.py. Set CODE_DIR."
+  [[ -f "$CODE_DIR/src/run_eval_metrics.py" ]] || die "Missing stage-3 entrypoint in $CODE_DIR."
+  [[ -f "$CODE_DIR/src/run_probes.py" ]] || die "Missing stage-2 entrypoint in $CODE_DIR."
   [[ -f "$CODE_DIR/scripts/collect_pareto_study.py" ]] || die "Missing Pareto collector in $CODE_DIR."
   [[ -f "$CODE_DIR/scripts/select_pareto_front.py" ]] || die "Missing Pareto selector in $CODE_DIR."
   [[ "$DATA_WORKERS" =~ ^[1-9][0-9]*$ ]] || die "DATA_WORKERS must be a positive integer."
@@ -429,8 +436,23 @@ run_one() {
   timestamp="$(date --iso-8601=seconds)"
   printf '%s\t%s\t%s\t%s\n' "$timestamp" "$run" started "$log_file" >> "$RUN_STATUS"
 
-  local -a command=(
-    python3 src/train.py
+  # Since 2026-09-18 the pipeline is split into separate entrypoints, so one
+  # study run is three processes rather than one. The stage overrides below are
+  # identical apart from the entrypoint, which matters: the checkpoint stores
+  # weights but not the config, and stages 2 and 3 load it with strict=True.
+  #
+  # They are run in sequence here so that `is_complete_reportable_run` still
+  # means the same thing it always did. To run all the training first and only
+  # then analyse it -- the reason the split exists -- set PARETO_STAGES:
+  #
+  #   PARETO_STAGES=train    ./run_pareto_fet_ngt.sh --run      # every AE
+  #   PARETO_STAGES=metrics,probes ./run_pareto_fet_ngt.sh --run --rerun-incomplete
+  #
+  # A train-only pass leaves every run "incomplete", which is accurate: the
+  # analysis has not happened yet. --rerun-incomplete is then required for the
+  # analysis pass, and is safe for it because no stage-2/3 entrypoint clears the
+  # checkpoint directory -- only the stage-1 training callback does that.
+  local -a shared_overrides=(
     "paths.root_dir=$PROJECT_ROOT"
     "paths.raw_data_dir=$RAW_DATA_DIR"
     experiment=physics/pareto_fet
@@ -441,37 +463,77 @@ run_one() {
     "pareto_study.candidate.architecture_id=$architecture_id"
     "pareto_study.candidate.encoder_nodes=$nodes"
     "data.data_awkward2torch.workers=$DATA_WORKERS"
-    "hydra.run.dir=$manifest_dir"
   )
 
   case "$PARETO_ACCELERATOR" in
-    gpu) command+=(trainer=gpu 'trainer.devices=[0]') ;;
-    cpu) command+=(trainer=cpu 'trainer.devices=1') ;;
+    gpu) shared_overrides+=(trainer=gpu 'trainer.devices=[0]') ;;
+    cpu) shared_overrides+=(trainer=cpu 'trainer.devices=1') ;;
     *)   die "PARETO_ACCELERATOR must be gpu or cpu, got '\''$PARETO_ACCELERATOR'\''." ;;
   esac
 
   # Unset keeps the manifest's inherited trainer.max_epochs.
   if [[ -n "$MAX_EPOCHS" ]]; then
-    command+=("trainer.max_epochs=$MAX_EPOCHS")
+    shared_overrides+=("trainer.max_epochs=$MAX_EPOCHS")
   fi
 
-  if HYDRA_FULL_ERROR=1 "${command[@]}" 2>&1 | tee "$log_file"; then
+  local stage stage_status=0
+  local -a requested_stages=()
+  IFS=, read -r -a requested_stages <<< "$PARETO_STAGES"
+
+  # Truncate the log once, then append each stage, so one run keeps one log.
+  : > "$log_file"
+
+  for stage in "${requested_stages[@]}"; do
+    local -a command=()
+    case "$stage" in
+      train)
+        # Only stage 1 carries hydra.run.dir: that directory is where the
+        # resolved manifest lands, and pointing a later stage at it would
+        # overwrite the manifest that recorded the training configuration.
+        command=(python3 src/train.py "${shared_overrides[@]}" "hydra.run.dir=$manifest_dir")
+        ;;
+      metrics) command=(python3 src/run_eval_metrics.py "${shared_overrides[@]}") ;;
+      probes)  command=(python3 src/run_probes.py "${shared_overrides[@]}") ;;
+      *)       die "PARETO_STAGES entries must be train, metrics or probes; got '\''$stage'\''." ;;
+    esac
+
+    note "  stage '\''$stage'\'' for $run"
+    echo "===== stage $stage =====" >> "$log_file"
+    if ! HYDRA_FULL_ERROR=1 "${command[@]}" 2>&1 | tee -a "$log_file"; then
+      stage_status=${PIPESTATUS[0]}
+      # src/run_probes.py exits 3 when the probes ran to completion but the
+      # protocol rejected the result. That is a scientific outcome, not a
+      # failure: the invalid result IS written to disk, and
+      # is_complete_reportable_run already refuses it because it checks for
+      # "probe_valid": true. Treat it as incomplete rather than failed, so the
+      # run_status.tsv distinction between "the job broke" and "the
+      # configuration was rejected" survives.
+      if [[ "$stage" == probes && "$stage_status" -eq 3 ]]; then
+        note "  stage '\''$stage'\'' produced an invalid (non-reportable) result for $run"
+        stage_status=0
+        continue
+      fi
+      note "  stage '\''$stage'\'' failed (exit $stage_status) for $run"
+      break
+    fi
+  done
+
+  if (( stage_status == 0 )); then
     if is_complete_reportable_run "$run"; then
       note "DONE $run"
       printf '%s\t%s\t%s\t%s\n' "$(date --iso-8601=seconds)" "$run" completed "$log_file" >> "$RUN_STATUS"
       return 0
     fi
-    note "INCOMPLETE $run after a zero exit status; inspect $log_file"
+    # A zero exit with an incomplete artifact set is expected and correct when
+    # PARETO_STAGES did not include every stage: a train-only pass has simply
+    # not produced the analysis yet.
+    note "INCOMPLETE $run after a zero exit status (stages run: $PARETO_STAGES); inspect $log_file"
     printf '%s\t%s\t%s\t%s\n' "$(date --iso-8601=seconds)" "$run" incomplete_after_success "$log_file" >> "$RUN_STATUS"
     return 1
-  else
-    # This assignment must be the first command in `else`; later logging
-    # commands would overwrite the failed pipeline status in `$?`.
-    status=$?
   fi
 
-  note "FAILED $run (exit $status); continuing with remaining runs."
-  printf '%s\t%s\t%s\t%s\n' "$(date --iso-8601=seconds)" "$run" "failed_exit_$status" "$log_file" >> "$RUN_STATUS"
+  note "FAILED $run (exit $stage_status); continuing with remaining runs."
+  printf '%s\t%s\t%s\t%s\n' "$(date --iso-8601=seconds)" "$run" "failed_exit_$stage_status" "$log_file" >> "$RUN_STATUS"
   return 1
 }
 

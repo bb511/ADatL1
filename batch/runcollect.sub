@@ -1,0 +1,39 @@
+# STAGE 4 of 4 -- aggregate every run and build the Pareto front.
+#
+#   condor_submit batch/runcollect.sub
+#
+# A single job for the whole study: no RUN_NAME, no queue list. Run it only once
+# every run has a complete artifact set, otherwise the collector records the
+# missing ones as rejected configurations rather than waiting for them.
+
+executable = batch/runcollect.sh
+
+log    = batch/logs/runcollect.$(ClusterId).log
+output = batch/logs/runcollect.$(ClusterId).$(ProcId).out
+error  = batch/logs/runcollect.$(ClusterId).$(ProcId).err
+
+MY.SingularityImage = "/eos/user/l/lbehrens/containers/adl1t_lab-dev.sif"
+
+# Leave EXPERIMENT_NAME empty to consume a study map the runner declared;
+# set it to build the map from checkpoints/<EXPERIMENT_NAME>/ instead.
+environment = "STUDY_ID=fet-et-pareto-v1 EXPERIMENT_NAME="
+
+# No transfer_output_files: phase2/ and phase3/ are written into the study tree
+# on EOS in place.
+
+# ---------------------------------------------------------------------------
+# Resources
+# ---------------------------------------------------------------------------
+# Pure pandas/numpy over a few hundred small JSON files, then an O(n^2)
+# non-dominance scan over at most 48 configurations and one matplotlib figure.
+# Nothing here loads the physics data or torch, so this needs a fraction of what
+# the other stages do -- and a small request matches far more slots, which
+# matters because this is the step you wait on interactively.
+request_gpus   = 0
+request_cpus   = 2
+request_memory = 6000
+request_disk   = 2GB
+
++MaxRuntime = 1800
+
+queue

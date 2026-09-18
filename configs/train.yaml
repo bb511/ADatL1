@@ -10,6 +10,7 @@ defaults:
   - trainer: default
   - evaluation: null
   - evaluation/callbacks: null
+  - pareto_study: null
   - paths: default
   - extras: default
   - hydra: default
@@ -46,6 +47,11 @@ test: True
 
 # simply provide checkpoint path to resume training
 ckpt_path: null
+
+# Stages 2-4 refuse to analyse a checkpoint whose run_manifest.yaml does not
+# match the composed config. Set false for runs trained before manifests
+# existed; the stage then warns instead of stopping.
+manifest_strict: true
 
 # seed for random number generators in pytorch, numpy and python.random
 seed: null

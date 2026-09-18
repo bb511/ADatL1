@@ -15,7 +15,7 @@
 STAGE_LABEL="AE evaluation metrics (stage 3/4)"
 export STAGE_LABEL
 
-: "${ADL1T_OUTPUT_ROOT:=/eos/user/l/lbehrens/adatl1/outputs}"
+: "${ADL1T_OUTPUT_ROOT:=/eos/user/l/lbehrens/adatl1/ADatL1/outputs}"
 : "${EXPERIMENT:=physics/ae_metrics}"
 export ADL1T_OUTPUT_ROOT EXPERIMENT
 

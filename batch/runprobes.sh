@@ -14,7 +14,7 @@
 STAGE_LABEL="AE leakage probes (stage 2/4)"
 export STAGE_LABEL
 
-: "${ADL1T_OUTPUT_ROOT:=/eos/user/l/lbehrens/adatl1/outputs}"
+: "${ADL1T_OUTPUT_ROOT:=/eos/user/l/lbehrens/adatl1/ADatL1/outputs}"
 export ADL1T_OUTPUT_ROOT
 
 source "$(dirname "$0")/_stage_env.sh"

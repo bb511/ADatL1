@@ -23,7 +23,7 @@ fi
 python3 --version
 
 : "${CODE_DIR:=/eos/user/l/lbehrens/adatl1/ADatL1}"
-: "${ADL1T_OUTPUT_ROOT:=/eos/user/l/lbehrens/adatl1/outputs}"
+: "${ADL1T_OUTPUT_ROOT:=/eos/user/l/lbehrens/adatl1/ADatL1/outputs}"
 : "${STUDY_ID:=fet-et-pareto-v1}"
 : "${STUDY_ROOT:=${ADL1T_OUTPUT_ROOT}/pareto_studies/${STUDY_ID}}"
 

@@ -199,9 +199,25 @@ class LatentCollapseDiagnosticsCallback(Callback):
             raise RuntimeError("latent_sample must contain at least one bit.")
         if not bool(torch.isfinite(sample).all().item()):
             raise RuntimeError("latent_sample contains NaN or infinity.")
-        if not bool(torch.all((sample == 0) | (sample == 1)).item()):
+        binary = (sample == 0) | (sample == 1)
+        if not bool(torch.all(binary).item()):
+            # Report the offending values. Without them this failure is
+            # undiagnosable after the fact: it aborts a run that has already
+            # spent its full epoch budget, and the batch sandbox holding the
+            # model is deleted when the job ends. Values in {0, 0.1, ..., 1.0}
+            # mean the module was left in training mode; values a few ulps off
+            # 0 or 1 mean straight-through rounding.
+            offending = sample[~binary]
+            examples = ", ".join(
+                f"{float(v):.17g}" for v in offending.flatten()[:8].tolist()
+            )
             raise RuntimeError(
-                "Evaluation-time latent_sample must contain only hard zero/one codes."
+                "Evaluation-time latent_sample must contain only hard zero/one "
+                f"codes. dtype={sample.dtype}, shape={tuple(sample.shape)}, "
+                f"non-binary={offending.numel()} of {sample.numel()}, "
+                f"min={float(sample.min()):.17g}, max={float(sample.max()):.17g}, "
+                f"distinct non-binary values={int(torch.unique(offending).numel())}, "
+                f"examples=[{examples}]"
             )
         return sample
 

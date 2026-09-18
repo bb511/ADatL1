@@ -11,6 +11,9 @@ from src.algorithms.utils.object_feature_map_loader import inject_object_feature
 from src.data.utils import unpack_batch
 from src.data.sensitive_binning import FixedQuantileSensitiveBinner
 from src.algorithms.components.bernoulli import BernoulliSampling
+from src.utils import pylogger
+
+log = pylogger.RankedLogger(__name__)
 
 class AERepresentations(TypedDict):
     """Named intermediate representations produced by the autoencoder."""
@@ -110,6 +113,31 @@ class AE(ADLightningModule):
         self.sensitive_binner = FixedQuantileSensitiveBinner(variable=mi_sensitive_variable, num_bins=mi_sensitive_num_bins, 
                                                              reduction=mi_sensitive_reduction, use_denormalized=mi_sensitive_use_denormalization)
 
+        # The sensitive binner is a dataclass, not an nn.Module, so its fitted
+        # ``bin_edges`` are invisible to ``state_dict`` and would be lost the
+        # moment training ends. Mirror them into buffers so the checkpoint is
+        # self-contained and a later, separate evaluation job reproduces the
+        # *same* binning rather than re-deriving it. Re-deriving would be a
+        # scientific error as well as an inconvenience: MI and the correlation
+        # diagnostics are only comparable across runs if S_bin is identical.
+        #
+        # ``fit`` collapses duplicate quantile edges, so the number of edges is
+        # at most num_bins - 1 but may be fewer. The buffer is allocated at the
+        # maximum width (known at construction, so every checkpoint has the same
+        # shape and ``load_state_dict(strict=True)`` always matches) and the
+        # valid prefix length is carried alongside it. A count of -1 means the
+        # binner was never fitted.
+        self.register_buffer(
+            "sensitive_bin_edges",
+            torch.zeros(max(int(mi_sensitive_num_bins) - 1, 0), dtype=torch.float32),
+            persistent=True,
+        )
+        self.register_buffer(
+            "sensitive_bin_edges_count",
+            torch.tensor(-1, dtype=torch.int64),
+            persistent=True,
+        )
+
     def on_fit_start(self):
         inject_object_feature_map(self)
         self._assert_sensitive_not_in_model_input()
@@ -119,6 +147,9 @@ class AE(ADLightningModule):
     def on_test_start(self):
         inject_object_feature_map(self)
         self._assert_sensitive_not_in_model_input()
+        # A checkpoint-only evaluation never runs on_fit_start, so the binner
+        # arrives unfitted. Its edges come from the checkpoint instead.
+        self._restore_sensitive_bin_edges()
 
     @property
     def target_fpr(self) -> float:
@@ -255,6 +286,59 @@ class AE(ADLightningModule):
             "ascore_operational": outdict.get("ascore/operational"),
         }
     
+    def _store_sensitive_bin_edges(self) -> None:
+        """Copy the fitted bin edges into the checkpointed buffers."""
+        edges = self.sensitive_binner.bin_edges
+
+        if edges is None:
+            self.sensitive_bin_edges_count.fill_(-1)
+            return
+
+        edges = edges.detach().to(device="cpu", dtype=torch.float32).flatten()
+        capacity = int(self.sensitive_bin_edges.numel())
+
+        if edges.numel() > capacity:
+            raise RuntimeError(
+                f"Sensitive binner produced {edges.numel()} edges, but the "
+                f"checkpoint buffer holds at most {capacity}. This means "
+                "mi_sensitive_num_bins changed after the model was constructed."
+            )
+
+        self.sensitive_bin_edges.zero_()
+        self.sensitive_bin_edges[: edges.numel()] = edges.to(
+            self.sensitive_bin_edges.device
+        )
+        self.sensitive_bin_edges_count.fill_(int(edges.numel()))
+        log.info(
+            "Stored %d sensitive bin edge(s) in the checkpoint buffers.",
+            int(edges.numel()),
+        )
+
+    def _restore_sensitive_bin_edges(self) -> None:
+        """Rehydrate the binner from the checkpoint when fit was skipped."""
+        if self.sensitive_binner.is_fitted:
+            return
+
+        count = int(self.sensitive_bin_edges_count.item())
+
+        if count < 0:
+            raise RuntimeError(
+                "The sensitive binner is unfitted and the checkpoint carries no "
+                "bin edges. An evaluation-only run (train=false) requires a "
+                "checkpoint written by a training run that fitted the binner. "
+                "Checkpoints produced before sensitive_bin_edges was persisted "
+                "do not qualify and must be retrained."
+            )
+
+        self.sensitive_binner.bin_edges = (
+            self.sensitive_bin_edges[:count].detach().to(device="cpu").clone()
+        )
+        log.info(
+            "Restored %d sensitive bin edge(s) from the checkpoint; "
+            "evaluation will use the binning fitted during training.",
+            count,
+        )
+
     def _fit_sensitive_binner(self) -> None:
         """Compute fixed sensitive-variable bin edges from the full training split."""
         if self.sensitive_binner.is_fitted:
@@ -303,8 +387,14 @@ class AE(ADLightningModule):
             f"mean={stats['mean']:.6g}, "
             f"std={stats['std']:.6g}"
         )
+        log.info("[MI] Fixed sensitive variable: %s", self.sensitive_binner.variable)
+        log.info("[MI] Requested bins: %s", stats["num_bins_requested"])
+        log.info("[MI] Effective bins: %s", stats["num_bins_effective"])
+        log.info("[MI] Values used: %s", stats["num_values"])
         print(f"[MI] Bin edges: {stats['edges']}")
         print(f"[MI] Bin counts: {stats['counts']}")
+
+        self._store_sensitive_bin_edges()
 
     def _compute_sensitive_bins(
         self,

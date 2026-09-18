@@ -43,6 +43,7 @@ from src.evaluation.leakage_probe.serialization import (
 from src.utils.pareto_manifest import write_resolved_pareto_manifest
 
 from src.utils import RankedLogger
+from src.utils.instrumentation import log_memory, log_phase, peak_rss_mib
 from src.utils import extras
 from src.utils import instantiate_callbacks
 from src.utils import instantiate_loggers
@@ -111,18 +112,31 @@ def train(cfg: DictConfig) -> Tuple[Dict[str, Any], Dict[str, Any]]:
 
     train_enabled = bool(cfg.get("train"))
 
-    if train_enabled:
-        log.info("Starting training!")
-        trainer.fit(model=algorithm, datamodule=datamodule)
-    else:
-        datamodule.prepare_data()
-        resume_ckpt_path = cfg.get("ckpt_path")
+    resume_ckpt_path = cfg.get("ckpt_path")
 
-        trainer.fit(
-            model=algorithm,
-            datamodule=datamodule,
-            ckpt_path=resume_ckpt_path,
-            weights_only=False if resume_ckpt_path is not None else None,
+    if train_enabled:
+        log.info(
+            "Starting training (max_epochs=%s, resume=%s)",
+            getattr(trainer, "max_epochs", "?"),
+            resume_ckpt_path or "none",
+        )
+        with log_phase("fit"):
+            trainer.fit(
+                model=algorithm,
+                datamodule=datamodule,
+                ckpt_path=resume_ckpt_path,
+                weights_only=False if resume_ckpt_path is not None else None,
+            )
+    else:
+        # train=false means evaluate checkpoints that already exist on disk. It
+        # must NOT call trainer.fit: with ckpt_path unset that silently trains a
+        # fresh model from scratch, which is what this branch used to do and is
+        # the opposite of what the flag says. The evaluator loads each
+        # checkpoint's weights itself (Evaluator.evaluate_ckpt does an explicit
+        # load_state_dict), so the model passed through here only has to be
+        # correctly shaped, not trained.
+        log.info(
+            "Skipping training (train=false): evaluating checkpoints already on disk."
         )
 
     _prepare_data_for_checkpoint_only_evaluation(
@@ -162,7 +176,8 @@ def train(cfg: DictConfig) -> Tuple[Dict[str, Any], Dict[str, Any]]:
 
     if train_enabled:
         log.info("Releasing fit dataloaders before run validation...")
-        _release_fit_dataloaders(trainer, datamodule)
+        with log_phase("release fit dataloaders", collect=True):
+            _release_fit_dataloaders(trainer, datamodule)
 
     run_ckpts = Path(cfg.paths.checkpoints_dir) / cfg.experiment_name / cfg.run_name
     evaluator = None
@@ -178,19 +193,26 @@ def train(cfg: DictConfig) -> Tuple[Dict[str, Any], Dict[str, Any]]:
         evaluator = _get_evaluator(cfg, datamodule, logger)
 
         log.info(Back.MAGENTA + 8 * "-" + "STARTING RUN VALIDATION" + 8 * "-")
-        datamodule.setup("validate")
-        val_loader = datamodule.val_dataloader()
-        try:
-            evaluator.evaluate_run(
-                run_ckpts, algorithm, val_loader, "val", set_optimized_metric=True
+        with log_phase("load validation split"):
+            datamodule.setup("validate")
+            val_loader = datamodule.val_dataloader()
+            log.info(
+                "Validation loaders: %s", sorted(val_loader.keys())
+                if hasattr(val_loader, "keys") else type(val_loader).__name__
             )
+        try:
+            with log_phase("run validation"):
+                evaluator.evaluate_run(
+                    run_ckpts, algorithm, val_loader, "val", set_optimized_metric=True
+                )
         finally:
             # The physics datamodule keeps every split in RAM. Release validation before
             # setup("test") loads another full copy of the model/control tensors.
-            evaluator.release_dataloaders()
-            del val_loader
-            datamodule.teardown("validate")
-            gc.collect()
+            with log_phase("release validation split", collect=True):
+                evaluator.release_dataloaders()
+                del val_loader
+                datamodule.teardown("validate")
+                gc.collect()
 
     if leakage_probe_cfg and leakage_probe_cfg.get("enabled", False):
         leakage_probe_evaluation_mode = str(
@@ -217,6 +239,8 @@ def train(cfg: DictConfig) -> Tuple[Dict[str, Any], Dict[str, Any]]:
             + " LEAKAGE PROBES"
             + 8 * "-"
         )
+        probe_phase = log_phase("leakage probes")
+        probe_phase.__enter__()
         leakage_probe_outcome = (
             evaluate_and_record_loss_total_leakage_probes(
                 algorithm,
@@ -234,6 +258,7 @@ def train(cfg: DictConfig) -> Tuple[Dict[str, Any], Dict[str, Any]]:
                 max_samples_by_split=smoke_test_sample_caps,
             )
         )
+        probe_phase.__exit__(None, None, None)
 
         leakage_probe_metadata = (
             log_leakage_probe_outcome_metadata(

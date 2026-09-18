@@ -81,13 +81,23 @@ class BernoulliSampling(nn.Module):
                 out = out + q
 
             out = out / float(self.num_samples)
-        else:
-            threshold = self.threshold.to(device=inputs.device, dtype=inputs.dtype)
-            out = torch.where(p >= threshold, torch.ones_like(p), torch.zeros_like(p))
+            # TensorFlow equivalent:
+            #   out = inputs + tf.stop_gradient(-inputs + out)
+            return inputs + (out - inputs).detach()
 
-        # TensorFlow equivalent:
-        #   out = inputs + tf.stop_gradient(-inputs + out)
-        return inputs + (out - inputs).detach()
+        threshold = self.threshold.to(device=inputs.device, dtype=inputs.dtype)
+        out = torch.where(p >= threshold, torch.ones_like(p), torch.zeros_like(p))
+
+        # Return the hard code itself rather than routing it through the
+        # straight-through identity. At evaluation there is no gradient to pass
+        # back to ``inputs``, so the identity buys nothing, while
+        # ``inputs + (out - inputs)`` equals ``out`` only in real arithmetic.
+        # In float32 it holds while |inputs| < 2**24 and silently stops holding
+        # above that. Downstream consumers (latent-collapse diagnostics,
+        # leakage-probe extraction) assert hard zero/one codes and abort the run
+        # after training has already completed, so this removes an entire class
+        # of late failure at no cost.
+        return out
 
     def _quantized_hard_sigmoid(self, x: torch.Tensor) -> torch.Tensor:
         """Closest PyTorch equivalent of hepinfo/qkerasV3.py quantized_sigmoid."""

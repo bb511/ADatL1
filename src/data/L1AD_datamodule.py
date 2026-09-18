@@ -10,6 +10,7 @@ from pytorch_lightning import LightningDataModule
 from torch.utils.data import Dataset, DataLoader
 
 from src.utils import pylogger
+from src.utils.instrumentation import log_memory
 from colorama import Fore, Back
 from src.data.components.dataset import L1ADDataset
 from src.data.components.normalization import L1DataNormalizer
@@ -168,6 +169,62 @@ class L1ADDataModule(LightningDataModule):
             raise ValueError("The predict dataloader is not implemented yet.")
 
         self._data_summary(stage)
+        self._log_tensor_footprint(stage)
+
+    def _log_tensor_footprint(self, stage: str | None) -> None:
+        """Report how much RAM the loaded splits actually occupy.
+
+        The datamodule keeps every loaded split resident, and `setup("fit")`
+        loads the training split, the normal validation split *and* every
+        auxiliary (signal) dataset. Peak RSS is what decides which batch slots
+        a job can match, so it is worth being able to attribute it to named
+        splits from the job log rather than inferring it from a Condor sample.
+
+        Failures here are swallowed: instrumentation must never break a run.
+        """
+        try:
+            mib = 1024.0 * 1024.0
+            total = 0.0
+            rows: list[tuple[str, str, float]] = []
+
+            def measure(group: str, name: str, container) -> None:
+                nonlocal total
+                if container is None:
+                    return
+                for field in ("x", "mask", "control_x", "control_mask"):
+                    tensor = getattr(container, field, None)
+                    if tensor is None or not hasattr(tensor, "element_size"):
+                        continue
+                    size = tensor.element_size() * tensor.nelement() / mib
+                    total += size
+                    rows.append(
+                        (f"{group}/{name}", f"{field}{tuple(tensor.shape)}", size)
+                    )
+
+            for name, split in sorted(self._main.items()):
+                measure("main", name, split)
+
+            for name, split in sorted(getattr(self, "_aux", {}).items()):
+                if isinstance(split, dict):
+                    for sub_name, sub_split in sorted(split.items()):
+                        measure("aux", f"{name}/{sub_name}", sub_split)
+                else:
+                    measure("aux", name, split)
+
+            log.info("[data] resident tensors after setup(%s):", stage)
+            for label, shape, size in rows:
+                log.info("[data]   %-42s %-34s %9.1f MiB", label, shape, size)
+            log.info(
+                "[data]   %-42s %-34s %9.1f MiB (%.1f GiB) across %d tensor(s)",
+                "TOTAL",
+                "",
+                total,
+                total / 1024.0,
+                len(rows),
+            )
+            log_memory(f"datamodule.setup({stage})")
+        except Exception as error:  # noqa: BLE001 - diagnostics must not break runs
+            log.warning("Could not compute tensor footprint: %s", error)
 
     def train_dataloader(self) -> Dataset:
         """Create and return the training dataloader.

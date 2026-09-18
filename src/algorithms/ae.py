@@ -310,8 +310,8 @@ class AE(ADLightningModule):
         )
         self.sensitive_bin_edges_count.fill_(int(edges.numel()))
         log.info(
-            "Stored %d sensitive bin edge(s) in the checkpoint buffers.",
-            int(edges.numel()),
+            f"Stored {int(edges.numel())} sensitive bin edge(s) in the "
+            "checkpoint buffers."
         )
 
     def _restore_sensitive_bin_edges(self) -> None:
@@ -334,9 +334,8 @@ class AE(ADLightningModule):
             self.sensitive_bin_edges[:count].detach().to(device="cpu").clone()
         )
         log.info(
-            "Restored %d sensitive bin edge(s) from the checkpoint; "
-            "evaluation will use the binning fitted during training.",
-            count,
+            f"Restored {count} sensitive bin edge(s) from the checkpoint; "
+            "evaluation will use the binning fitted during training."
         )
 
     def _fit_sensitive_binner(self) -> None:
@@ -387,10 +386,10 @@ class AE(ADLightningModule):
             f"mean={stats['mean']:.6g}, "
             f"std={stats['std']:.6g}"
         )
-        log.info("[MI] Fixed sensitive variable: %s", self.sensitive_binner.variable)
-        log.info("[MI] Requested bins: %s", stats["num_bins_requested"])
-        log.info("[MI] Effective bins: %s", stats["num_bins_effective"])
-        log.info("[MI] Values used: %s", stats["num_values"])
+        log.info(f"[MI] Fixed sensitive variable: {self.sensitive_binner.variable}")
+        log.info(f"[MI] Requested bins: {stats['num_bins_requested']}")
+        log.info(f"[MI] Effective bins: {stats['num_bins_effective']}")
+        log.info(f"[MI] Values used: {stats['num_values']}")
         print(f"[MI] Bin edges: {stats['edges']}")
         print(f"[MI] Bin counts: {stats['counts']}")
 

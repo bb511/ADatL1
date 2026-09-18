@@ -50,19 +50,41 @@ def current_rss_mib() -> float:
     try:
         with open("/proc/self/statm", "r", encoding="utf-8") as handle:
             pages = int(handle.read().split()[1])
+        return pages * os.sysconf("SC_PAGE_SIZE") / _BYTES_PER_MIB
     except (OSError, IndexError, ValueError):
-        return float("nan")
+        pass
 
-    return pages * os.sysconf("SC_PAGE_SIZE") / _BYTES_PER_MIB
+    # macOS has no /proc. Fall back to `ps`, so local runs report a number
+    # rather than nan. Note that on macOS this is *resident* memory only:
+    # memory compression and swap mean a working set far larger than physical
+    # RAM still shows a modest RSS, which is exactly why a 16 GB laptop can
+    # run a job that needs ~30 GB on a Linux batch node with a hard cgroup.
+    try:
+        import subprocess
+
+        output = subprocess.run(
+            ["ps", "-o", "rss=", "-p", str(os.getpid())],
+            capture_output=True,
+            text=True,
+            timeout=5,
+            check=True,
+        )
+        return int(output.stdout.strip()) / 1024.0
+    except Exception:  # noqa: BLE001 - diagnostics must never break a run
+        return float("nan")
 
 
 def log_memory(label: str) -> None:
     """Emit a single memory reading under ``label``."""
+    # NOTE: src.utils.pylogger.RankedLogger.log has the signature
+    # (level, msg, rank=None, *args), so the first positional argument after the
+    # message is swallowed as `rank`. %-style lazy formatting therefore either
+    # prints the raw placeholder or, when rank_zero_only is False, drops the
+    # record entirely. Every log call in this file uses f-strings for that
+    # reason - do not "modernise" them back to % args.
     log.info(
-        "[mem] %-38s current=%8.0f MiB  peak=%8.0f MiB",
-        label,
-        current_rss_mib(),
-        peak_rss_mib(),
+        f"[mem] {label:<38} current={current_rss_mib():8.0f} MiB  "
+        f"peak={peak_rss_mib():8.0f} MiB"
     )
 
 
@@ -76,7 +98,7 @@ def log_phase(name: str, *, collect: bool = False) -> Iterator[None]:
         line reflects what was actually freed rather than what is merely
         unreachable. It costs a full collection, so it is off by default.
     """
-    log.info("[phase] ---- BEGIN %s ----", name)
+    log.info(f"[phase] ---- BEGIN {name} ----")
     log_memory(f"{name}: begin")
     started = time.monotonic()
     failed = False
@@ -93,10 +115,8 @@ def log_phase(name: str, *, collect: bool = False) -> Iterator[None]:
             gc.collect()
 
         log_memory(f"{name}: end")
+        status = "FAILED" if failed else "ok"
         log.info(
-            "[phase] ---- END %s (%s) in %.1f s (%.1f min) ----",
-            name,
-            "FAILED" if failed else "ok",
-            elapsed,
-            elapsed / 60.0,
+            f"[phase] ---- END {name} ({status}) in {elapsed:.1f} s "
+            f"({elapsed / 60.0:.1f} min) ----"
         )

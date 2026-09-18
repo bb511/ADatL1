@@ -211,20 +211,16 @@ class L1ADDataModule(LightningDataModule):
                 else:
                     measure("aux", name, split)
 
-            log.info("[data] resident tensors after setup(%s):", stage)
+            log.info(f"[data] resident tensors after setup({stage}):")
             for label, shape, size in rows:
-                log.info("[data]   %-42s %-34s %9.1f MiB", label, shape, size)
+                log.info(f"[data]   {label:<42} {shape:<34} {size:9.1f} MiB")
             log.info(
-                "[data]   %-42s %-34s %9.1f MiB (%.1f GiB) across %d tensor(s)",
-                "TOTAL",
-                "",
-                total,
-                total / 1024.0,
-                len(rows),
+                f"[data]   {'TOTAL':<42} {'':<34} {total:9.1f} MiB "
+                f"({total / 1024.0:.1f} GiB) across {len(rows)} tensor(s)"
             )
             log_memory(f"datamodule.setup({stage})")
         except Exception as error:  # noqa: BLE001 - diagnostics must not break runs
-            log.warning("Could not compute tensor footprint: %s", error)
+            log.warning(f"Could not compute tensor footprint: {error}")
 
     def train_dataloader(self) -> Dataset:
         """Create and return the training dataloader.

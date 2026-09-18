@@ -74,7 +74,10 @@ def train(cfg: DictConfig) -> Tuple[Dict[str, Any], Dict[str, Any]]:
     """
     pareto_manifest_path = write_resolved_pareto_manifest(cfg)
     if pareto_manifest_path is not None:
-        log.info("Saved resolved Pareto study manifest to %s", pareto_manifest_path)
+        # f-string, not %-args: RankedLogger.log binds the first positional
+        # argument after the message to `rank`, so %-style lazy formatting is
+        # silently broken throughout this codebase (see src/utils/pylogger.py).
+        log.info(f"Saved resolved Pareto study manifest to {pareto_manifest_path}")
 
     # set seed for random number generators in pytorch, numpy and python.random
     if cfg.get("seed"):
@@ -116,9 +119,8 @@ def train(cfg: DictConfig) -> Tuple[Dict[str, Any], Dict[str, Any]]:
 
     if train_enabled:
         log.info(
-            "Starting training (max_epochs=%s, resume=%s)",
-            getattr(trainer, "max_epochs", "?"),
-            resume_ckpt_path or "none",
+            f"Starting training (max_epochs={getattr(trainer, 'max_epochs', '?')}, "
+            f"resume={resume_ckpt_path or 'none'})"
         )
         with log_phase("fit"):
             trainer.fit(
@@ -196,10 +198,12 @@ def train(cfg: DictConfig) -> Tuple[Dict[str, Any], Dict[str, Any]]:
         with log_phase("load validation split"):
             datamodule.setup("validate")
             val_loader = datamodule.val_dataloader()
-            log.info(
-                "Validation loaders: %s", sorted(val_loader.keys())
-                if hasattr(val_loader, "keys") else type(val_loader).__name__
+            loader_names = (
+                sorted(val_loader.keys())
+                if hasattr(val_loader, "keys")
+                else type(val_loader).__name__
             )
+            log.info(f"Validation loaders ({len(loader_names)}): {loader_names}")
         try:
             with log_phase("run validation"):
                 evaluator.evaluate_run(

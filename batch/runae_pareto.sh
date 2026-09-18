@@ -39,7 +39,22 @@ export PARETO_CANDIDATE
 ENCODER_NODES="[${ENCODER_NODES_US//_/,}]"
 export SEED MI_GAMMA MI_NUM_BINS ARCHITECTURE_ID ENCODER_NODES
 
-source "$(dirname "$0")/_stage_env.sh"
+# HTCondor copies the executable into the sandbox and renames it
+# condor_exec.exe, so "$(dirname "$0")" is the scratch directory, not the repo.
+# Nothing else is transferred, so a relative source silently finds nothing: the
+# job then runs on with CODE_DIR unset and dies at the final exec with status
+# 127 (cluster 333803, 2026-09-18). Resolve it through CODE_DIR, the
+# bind-mounted checkout, exactly as the final exec already does.
+: "${CODE_DIR:=/eos/user/l/lbehrens/adatl1/ADatL1}"
+export CODE_DIR
+
+STAGE_ENV="${CODE_DIR}/batch/_stage_env.sh"
+[[ -r "$STAGE_ENV" ]] || {
+  echo "FATAL: cannot read $STAGE_ENV" >&2
+  echo "       CODE_DIR=$CODE_DIR -- is the checkout bind-mounted here?" >&2
+  exit 2
+}
+source "$STAGE_ENV"
 
 echo "SEED:              $SEED"
 echo "MI_GAMMA:          $MI_GAMMA"

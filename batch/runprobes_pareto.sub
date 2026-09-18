@@ -1,0 +1,37 @@
+# STAGE 2 of the Pareto study -- the four leakage probes, one job per grid point.
+#
+#   condor_submit batch/runprobes_pareto.sub
+#
+# Submit only after the stage-1 outputs have been merged onto EOS. May be
+# submitted at the same time as batch/runmetrics_pareto.sub: the two read the
+# same checkpoint and write into disjoint subdirectories of it.
+
+executable = batch/runprobes_pareto.sh
+
+log    = batch/logs/runprobes_pareto.$(ClusterId).log
+output = batch/logs/runprobes_pareto.$(ClusterId).$(ProcId).out
+error  = batch/logs/runprobes_pareto.$(ClusterId).$(ProcId).err
+
+MY.SingularityImage = "/eos/user/l/lbehrens/containers/adl1t_lab-dev.sif"
+
+environment = "SEED=$(SEED) MI_GAMMA=$(GAMMA) MI_NUM_BINS=$(BINS) ARCHITECTURE_ID=$(ARCH) ENCODER_NODES_US=$(NODES) RUN_NAME=$(RUN_NAME) EXPERIMENT_NAME=Pareto_Front_260918 TRAINER=cpu CPU_THREADS=7 DATA_WORKERS=3"
+
+# No transfer_output_files: this job writes its JSON and PNGs straight into the
+# existing checkpoint tree on EOS, so there is nothing in the sandbox to return.
+
+request_gpus = 0
+
+# Not yet measured on Linux. The probes load the train split (~6.9 GiB resident)
+# and then materialise the extracted features on top of it -- 12.5M events x 116
+# reconstruction floats is another ~5.8 GB, before sklearn's own copies during
+# the MLP fit. Kept at the pre-view-change shape until a job logs a real VmHWM.
+request_cpus   = 7
+request_memory = 21000
+request_disk   = 10GB
+
+# Measured locally: 1605 s for the probe phase, dominated by the two MLP probes
+# (296 s and 370 s) and the 116-feature linear solve (178 s). Fixed per run: it
+# does not scale with trainer.max_epochs.
++MaxRuntime = 7200
+
+queue SEED,GAMMA,BINS,ARCH,NODES,RUN_NAME from batch/pareto_runs.txt

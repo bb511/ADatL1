@@ -1,0 +1,37 @@
+# STAGE 3 of the Pareto study -- efficiency, correlation, collapse and AUROC,
+# one job per grid point.
+#
+#   condor_submit batch/runmetrics_pareto.sub
+#
+# Submit after the stage-1 outputs have been merged onto EOS. May be submitted at
+# the same time as batch/runprobes_pareto.sub.
+
+executable = batch/runmetrics_pareto.sh
+
+log    = batch/logs/runmetrics_pareto.$(ClusterId).log
+output = batch/logs/runmetrics_pareto.$(ClusterId).$(ProcId).out
+error  = batch/logs/runmetrics_pareto.$(ClusterId).$(ProcId).err
+
+MY.SingularityImage = "/eos/user/l/lbehrens/containers/adl1t_lab-dev.sif"
+
+environment = "SEED=$(SEED) MI_GAMMA=$(GAMMA) MI_NUM_BINS=$(BINS) ARCHITECTURE_ID=$(ARCH) ENCODER_NODES_US=$(NODES) RUN_NAME=$(RUN_NAME) EXPERIMENT_NAME=Pareto_Front_260918 TRAINER=cpu CPU_THREADS=7 DATA_WORKERS=3"
+
+# No transfer_output_files: the summary JSONs are written into the existing
+# checkpoint tree on EOS.
+
+request_gpus = 0
+
+# This stage DOES need the auxiliary datasets that stage 1 no longer loads: the
+# efficiency, AUROC and correlation callbacks all walk the 21 signal loaders.
+# Measured resident after setup("validate"): 7146.6 MiB of data, plus each
+# callback's own per-dataset accumulators. Kept at the stage-1 shape until
+# measured.
+request_cpus   = 7
+request_memory = 21000
+request_disk   = 10GB
+
+# Locally the plain validation pass was 96 s; this stage adds three callbacks
+# that each walk the same 22 loaders again.
++MaxRuntime = 7200
+
+queue SEED,GAMMA,BINS,ARCH,NODES,RUN_NAME from batch/pareto_runs.txt

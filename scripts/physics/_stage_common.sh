@@ -24,6 +24,12 @@ set -euo pipefail
 # ae_metrics overlay both use physics_ae_models.
 : "${EXPERIMENT:=physics/ae}"
 
+# Overrides the experiment's own experiment_name, which is the directory every
+# stage addresses: checkpoints/<experiment_name>/<run_name>. Set it to give one
+# study its own directory, e.g. EXPERIMENT_NAME=Pareto_Front_260918. Leave empty
+# to keep the experiment's default. Must be identical in every stage of a run.
+: "${EXPERIMENT_NAME:=}"
+
 # --- paths ------------------------------------------------------------------
 # Default to the local checkout layout used on the laptop; the batch wrappers in
 # batch/ override all of these.
@@ -82,6 +88,9 @@ COMMON_ARGS=(
   data.data_awkward2torch.workers="$DATA_WORKERS"
   "${TRAINER_ARGS[@]}"
 )
+if [[ -n "$EXPERIMENT_NAME" ]]; then
+  COMMON_ARGS+=(experiment_name="$EXPERIMENT_NAME")
+fi
 
 # --- model hyperparameters --------------------------------------------------
 # These MUST be identical in every stage. The checkpoint carries weights but not
@@ -105,17 +114,38 @@ COMMON_ARGS=(
   exit 2
 }
 
-ALGO_ARGS=(
-  algorithm.optimizer.lr="$LR"
-  algorithm.optimizer.weight_decay="$WEIGHT_DECAY"
-  algorithm.optimizer.betas="$BETAS"
-  algorithm.delta="$DELTA"
-  algorithm.mi_gamma="$MI_GAMMA"
-  algorithm.mi_temperature="$MI_TEMPERATURE"
-  algorithm.mi_sensitive_num_bins="$MI_NUM_BINS"
-  algorithm.encoder.nodes="$ENCODER_NODES"
-  algorithm.input_noise_std="$INPUT_NOISE_STD"
-)
+# A Pareto-study run is parameterised through pareto_study.candidate, NOT through
+# algorithm.*: the study experiment derives algorithm.mi_gamma and the rest FROM
+# the candidate, and it is the candidate that configuration_id is built from.
+# Overriding algorithm.mi_gamma directly would train the right model and then
+# file it under the wrong grid point, which Phase 2 catches only at the very end.
+# Everything outside the candidate is frozen by the study manifest and is
+# deliberately NOT passed here.
+: "${PARETO_CANDIDATE:=0}"
+: "${SEED:=123}"
+: "${ARCHITECTURE_ID:=h64_32}"
+
+if (( PARETO_CANDIDATE )); then
+  ALGO_ARGS=(
+    pareto_study.candidate.autoencoder_seed="$SEED"
+    pareto_study.candidate.mi_gamma="$MI_GAMMA"
+    pareto_study.candidate.mi_sensitive_num_bins="$MI_NUM_BINS"
+    pareto_study.candidate.architecture_id="$ARCHITECTURE_ID"
+    pareto_study.candidate.encoder_nodes="$ENCODER_NODES"
+  )
+else
+  ALGO_ARGS=(
+    algorithm.optimizer.lr="$LR"
+    algorithm.optimizer.weight_decay="$WEIGHT_DECAY"
+    algorithm.optimizer.betas="$BETAS"
+    algorithm.delta="$DELTA"
+    algorithm.mi_gamma="$MI_GAMMA"
+    algorithm.mi_temperature="$MI_TEMPERATURE"
+    algorithm.mi_sensitive_num_bins="$MI_NUM_BINS"
+    algorithm.encoder.nodes="$ENCODER_NODES"
+    algorithm.input_noise_std="$INPUT_NOISE_STD"
+  )
+fi
 
 stage_banner() {
   echo "==============================================================="

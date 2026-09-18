@@ -1,0 +1,51 @@
+# @package _global_
+
+# Stage 1 of the Pareto study: train one grid point and nothing else.
+#
+# Inherits physics/pareto_fet unchanged -- same algorithm, same pareto_study
+# block, same identity -- and only strips what a training job does not need.
+#
+# The study consumes exactly one checkpoint, loss_total.ckpt, which is selected on
+# val/loss_total over the normal validation split. Everything else physics/ae
+# trains alongside it selects on signal efficiency, which means loading the 21
+# auxiliary signal and simulated-background datasets into the fit-time validation
+# loop. Measured on 2026-09-18 with storage-deduplicated accounting:
+#
+#   setup("fit") resident        14138 MiB
+#     of which train x + mask     6932 MiB   needed
+#     of which valid x + mask     2310 MiB   needed (val/loss_total)
+#     of which 21 aux datasets    4896 MiB   NOT needed by loss_total
+#
+# Condor measured 15273 MB peak for the whole job, so dropping the auxiliary sets
+# should land around 10.4 GB. That is what lets this job request 15000 MB instead
+# of 21000 and so fit the 16000 MB slots, which are the most common shape in the
+# pool and were previously unreachable. Given a priority factor of 100000, the
+# number of slots a job can match matters more for wall-clock than anything else.
+#
+# Stages 2 and 3 load the auxiliary datasets for themselves, so nothing is lost:
+# the efficiency, AUROC, correlation and collapse numbers are all produced there,
+# from this checkpoint.
+
+defaults:
+  - /experiment/physics/pareto_fet
+  - _self_
+
+data:
+  load_aux_in_fit: false
+
+callbacks:
+  # Computes per-signal efficiency during the fit validation loop. It is the sole
+  # reason the auxiliary datasets have to be resident while training.
+  anomaly_eff: null
+
+  # These three select checkpoints on metrics derived from that callback, so they
+  # cannot outlive it -- and a ModelCheckpoint whose monitor never appears is a
+  # hard error in Lightning, not a warning.
+  max_rate_ckpt: null
+  cvar25_ema_ckpt: null
+  cvar10_ema_ckpt: null
+
+  # Selects on ascore_operational over the normal split only, so it needs no
+  # auxiliary data. Dropped anyway because the study never reads its checkpoint
+  # and writing it costs a second full copy of the model per improvement.
+  stable_ascore_operational_ckpt: null

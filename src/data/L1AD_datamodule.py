@@ -59,6 +59,7 @@ class L1ADDataModule(LightningDataModule):
         max_val_batches: int = -1,
         seed: int = 42,
         model_input_exclude_features: list[str] | None = None,
+        load_aux_in_fit: bool = True,
     ) -> None:
         """Prepare the L1 data for using it to train and validate ML models.
 
@@ -75,6 +76,13 @@ class L1ADDataModule(LightningDataModule):
         :param max_val_batches: Batches to keep per auxiliary val/test set. -1 keeps all.
         :param seed: Seeds the training batch order only. The train/valid/test split is
             seeded separately by data_mlready.
+        :param load_aux_in_fit: Whether setup("fit") also loads the auxiliary signal
+            and simulated-background validation sets. They are needed only by the
+            callbacks that select checkpoints on signal efficiency; the loss_total
+            checkpoint is chosen on val/loss_total over the normal split alone.
+            Measured: they are 4896 MiB of the 14138 MiB resident after setup("fit").
+            Set false for a training job whose only output is loss_total.ckpt. The
+            evaluation stages load them for themselves either way.
         """
 
         super().__init__()
@@ -145,9 +153,19 @@ class L1ADDataModule(LightningDataModule):
             self._main.setdefault(
                 "valid", self._load_main_split(data_dir, "valid", label=0)
             )
-            self._aux["valid"] = self._aux["valid"] or self._load_aux_split(
-                data_dir, "valid"
-            )
+            if self.hparams.load_aux_in_fit:
+                self._aux["valid"] = self._aux["valid"] or self._load_aux_split(
+                    data_dir, "valid"
+                )
+            else:
+                # _make_eval_loaders iterates self._aux, so leaving it empty yields a
+                # validation loader holding only the normal split. That is everything
+                # val/loss_total needs, and it is the only metric the checkpoint this
+                # job exists to produce is selected on.
+                log.info(
+                    "Skipping auxiliary validation datasets during fit "
+                    "(data.load_aux_in_fit=false)."
+                )
 
         if stage in (None, "validate"):
             self._main.setdefault(

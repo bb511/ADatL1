@@ -165,6 +165,43 @@ def train(cfg: DictConfig) -> Tuple[Dict[str, Any], Dict[str, Any]]:
 
     run_ckpts = run_checkpoint_dir(cfg)
 
+    # Write the manifest as soon as the checkpoint exists, not at the end of the
+    # script. It is written after fit rather than before because
+    # ClearRunCheckpointDir wipes the run directory when a fit starts; it is
+    # written before the evaluation below because that evaluation is optional,
+    # and a failure in it must not make a perfectly good 30-epoch checkpoint
+    # look like a run that never happened (cluster 333975, 2026-09-19: 93 runs
+    # trained to completion and then lost their manifest to an evaluator crash).
+    manifest_path = write_run_manifest(
+        cfg,
+        run_ckpts,
+        mlflow_run_id=_mlflow_run_id(logger),
+    )
+    write_stage_status(
+        run_ckpts,
+        stage_name="train",
+        ok=True,
+        detail=f"max_epochs={getattr(trainer, 'max_epochs', '?')}",
+        artifacts=[str(run_ckpts / "loss_total.ckpt"), str(manifest_path)],
+    )
+    object_dict.update({"run_manifest_path": manifest_path})
+
+    # The post-fit evaluation is optional. For the Pareto study it is stage 3
+    # (src/run_eval_metrics.py), which loads the auxiliary datasets and the
+    # checkpoint for itself; running it here as well would duplicate the work,
+    # and cannot succeed anyway once data.load_aux_in_fit is false, because the
+    # efficiency callback needs both those datasets and the operational
+    # threshold that the dropped anomaly_eff training callback used to leave on
+    # the module. physics/pareto_fet_train therefore sets run_validation=false.
+    evaluator = None
+    if not bool(cfg.get("run_validation", True)):
+        log.info(
+            "Skipping post-fit validation (run_validation=false). "
+            "The checkpoint is the output of this stage; evaluation is stage 3."
+        )
+        object_dict.update({"evaluator": evaluator})
+        return dict(train_metrics), object_dict
+
     # Get validation report, and also set hp optimisation values.
     log.info(Fore.CYAN + "Instantiating evaluator...")
     evaluator = get_evaluator(cfg, logger)
@@ -202,28 +239,8 @@ def train(cfg: DictConfig) -> Tuple[Dict[str, Any], Dict[str, Any]]:
 
     object_dict.update({"evaluator": evaluator})
 
-    # The per-run manifest is written here, at the end, for two reasons. The
-    # training callback ClearRunCheckpointDir wipes the run directory when a fit
-    # starts, so anything written earlier would not survive it; and a manifest
-    # present is then a truthful claim that stage 1 got this far, which is what
-    # stage 4 relies on when it reads an experiment directory instead of a
-    # pre-declared plan.
-    manifest_path = write_run_manifest(
-        cfg,
-        run_ckpts,
-        mlflow_run_id=_mlflow_run_id(logger),
-    )
-    write_stage_status(
-        run_ckpts,
-        stage_name="train",
-        ok=True,
-        detail=f"max_epochs={getattr(trainer, 'max_epochs', '?')}",
-        artifacts=[str(run_ckpts / "loss_total.ckpt"), str(manifest_path)],
-    )
-    object_dict.update({"run_manifest_path": manifest_path})
-
     # Evaluate once more on a held out test set for final performance.
-    if cfg.get("test"):
+    if cfg.get("test") and evaluator is not None:
         log.info(Back.MAGENTA + 8 * "-" + "STARTING RUN TESTING" + 8 * "-")
         datamodule.setup("test")
         test_loader = datamodule.test_dataloader()

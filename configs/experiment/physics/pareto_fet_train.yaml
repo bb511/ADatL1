@@ -1,30 +1,31 @@
 # @package _global_
 
-# Stage 1 of the Pareto study: train one grid point and nothing else.
+# Stage 1 of the Pareto study.
 #
-# Inherits physics/pareto_fet unchanged -- same algorithm, same pareto_study
-# block, same identity -- and only strips what a training job does not need.
+# Deliberately a thin overlay: it inherits physics/pareto_fet unchanged and
+# caps the epochs. Stage 1 does exactly what an ordinary AE run has always
+# done -- fit, then replay the validation split through the new checkpoint and
+# run the usual evaluation callbacks -- and additionally leaves a
+# run_manifest.yaml and resolved_config.yaml beside loss_total.ckpt so the
+# later stages and the study-map builder can find the run.
 #
-# The study consumes exactly one checkpoint, loss_total.ckpt, which is selected on
-# val/loss_total over the normal validation split. Everything else physics/ae
-# trains alongside it selects on signal efficiency, which means loading the 21
-# auxiliary signal and simulated-background datasets into the fit-time validation
-# loop. Measured on 2026-09-18 with storage-deduplicated accounting:
+# An earlier version of this file also stripped the training callbacks that
+# need the auxiliary signal datasets, and set data.load_aux_in_fit=false, to get
+# the job from 15.3 GB down to 10.3 GB. That is reverted, for two reasons.
 #
-#   setup("fit") resident        14138 MiB
-#     of which train x + mask     6932 MiB   needed
-#     of which valid x + mask     2310 MiB   needed (val/loss_total)
-#     of which 21 aux datasets    4896 MiB   NOT needed by loss_total
+#   1. The evaluation that follows fit needs those datasets and, more subtly,
+#      needs the operational threshold that src/callbacks/efficiency.py
+#      (anomaly_eff) computes during the fit-time validation loop and stores on
+#      the module with _set_thres_on_module. Without it the evaluator raises
+#      "Threshold has not been set" (cluster 333975, 2026-09-19, 93 runs).
+#   2. That threshold is saved INTO the checkpoint. A checkpoint trained without
+#      anomaly_eff therefore carries no thres_operational, so stage 3 would have
+#      inherited the same failure later, from a checkpoint that could not be
+#      fixed without retraining.
 #
-# Condor measured 15273 MB peak for the whole job, so dropping the auxiliary sets
-# should land around 10.4 GB. That is what lets this job request 15000 MB instead
-# of 21000 and so fit the 16000 MB slots, which are the most common shape in the
-# pool and were previously unreachable. Given a priority factor of 100000, the
-# number of slots a job can match matters more for wall-clock than anything else.
-#
-# Stages 2 and 3 load the auxiliary datasets for themselves, so nothing is lost:
-# the efficiency, AUROC, correlation and collapse numbers are all produced there,
-# from this checkpoint.
+# data.load_aux_in_fit still exists in the datamodule and still works; it is
+# simply not what this study wants. Anything using it must also drop the
+# evaluation that depends on the threshold.
 
 defaults:
   - /experiment/physics/pareto_fet
@@ -36,23 +37,3 @@ defaults:
 # to a submit file that the manifest never sees.
 trainer:
   max_epochs: 30
-
-data:
-  load_aux_in_fit: false
-
-callbacks:
-  # Computes per-signal efficiency during the fit validation loop. It is the sole
-  # reason the auxiliary datasets have to be resident while training.
-  anomaly_eff: null
-
-  # These three select checkpoints on metrics derived from that callback, so they
-  # cannot outlive it -- and a ModelCheckpoint whose monitor never appears is a
-  # hard error in Lightning, not a warning.
-  max_rate_ckpt: null
-  cvar25_ema_ckpt: null
-  cvar10_ema_ckpt: null
-
-  # Selects on ascore_operational over the normal split only, so it needs no
-  # auxiliary data. Dropped anyway because the study never reads its checkpoint
-  # and writing it costs a second full copy of the model per improvement.
-  stable_ascore_operational_ckpt: null

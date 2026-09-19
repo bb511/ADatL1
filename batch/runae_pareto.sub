@@ -21,7 +21,7 @@ error  = batch/logs/runae_pareto.$(ClusterId).$(ProcId).err
 
 MY.SingularityImage = "/eos/user/l/lbehrens/containers/adl1t_lab-dev.sif"
 
-environment = "SEED=$(SEED) MI_GAMMA=$(GAMMA) MI_NUM_BINS=$(BINS) ARCHITECTURE_ID=$(ARCH) ENCODER_NODES_US=$(NODES) RUN_NAME=$(RUN_NAME) EXPERIMENT=physics/pareto_fet_train EXPERIMENT_NAME=Pareto_Front_260918 TRAINER=cpu CPU_THREADS=5 DATA_WORKERS=3"
+environment = "SEED=$(SEED) MI_GAMMA=$(GAMMA) MI_NUM_BINS=$(BINS) ARCHITECTURE_ID=$(ARCH) ENCODER_NODES_US=$(NODES) RUN_NAME=$(RUN_NAME) EXPERIMENT=physics/pareto_fet_train EXPERIMENT_NAME=Pareto_Front_260918 TRAINER=cpu CPU_THREADS=6 DATA_WORKERS=3"
 
 # ---------------------------------------------------------------------------
 # Output transfer
@@ -43,21 +43,20 @@ request_gpus = 0
 # Sizing chain, each step measured rather than assumed:
 #   29724 MiB  job 333170, before the control-tensor view change
 #   15273 MB   job 333797, after it (ResidentSetSize 15,638,908 KB)
-# Of the 14138 MiB resident after setup("fit"), storage-deduplicated accounting
-# attributes 4896 MiB to the 21 auxiliary signal datasets, which this stage no
-# longer loads: experiment=physics/pareto_fet_train sets data.load_aux_in_fit
-# false and drops the callbacks that needed them. Predicted peak is therefore
-# about 10.4 GB, and 15000 leaves ~44% headroom on that prediction.
+#   10336 MiB  cluster 333975, with the auxiliary datasets dropped from fit
 #
-# 15000/5 is chosen over a tighter 12000/4 for one reason beyond safety: 15000 MB
-# is the largest request that still fits the 16000 MB / 8 cpu slots, the most
-# common shape in the pool and previously unreachable at any of our requests.
-# With a priority factor of 100000, the size of the matchable slot set governs
-# wall-clock far more than the per-job resources do.
+# That last configuration is reverted: stage 1 runs the full post-fit evaluation
+# again, which needs the auxiliary datasets AND the operational threshold that
+# the anomaly_eff training callback stores on the module (and hence into the
+# checkpoint, which stage 3 later depends on). So the working set is the 15273 MB
+# figure, not 10336, and 18000 gives about 18% headroom on a measurement.
 #
-# If jobs OOM, the known-good fallback is 21000/7, which job 333797 ran at 73%.
-request_cpus   = 5
-request_memory = 15000
+# 18000/6 still reaches far more of the pool than the 21000/7 it replaces, and
+# unlike 15000/5 it is not below the measured peak. A request under the real
+# working set does not fail cleanly here -- CERN's cgroup limit on this pool is
+# soft, so the job runs on and is evicted silently much later.
+request_cpus   = 6
+request_memory = 18000
 request_disk   = 10GB
 
 # 30 epochs. Job 333797 reached the end of data loading and into training in

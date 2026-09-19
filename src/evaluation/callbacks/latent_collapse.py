@@ -258,7 +258,10 @@ class LatentCollapseDiagnosticsCallback(Callback):
             "summed_marginal_bit_entropy_bits": float(bit_entropies.sum()),
             "joint_code_entropy_bits": joint_entropy,
             "observed_code_count": int(len(self._code_counts)),
-            "effective_code_count": float(math.exp2(joint_entropy)),
+            # 2 ** H rather than math.exp2(H): math.exp2 is Python 3.11+ and the
+            # lxplus container runs 3.10.21, where this raised AttributeError
+            # after a full 30-epoch run (cluster 334375, 2026-09-19).
+            "effective_code_count": float(2.0 ** joint_entropy),
         }
 
     def _write_summary(

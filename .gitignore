@@ -207,3 +207,18 @@ notebooks/archive/
 *.csv
 *.tsv
 *.xlsx
+
+# Per-submission scratch for the Pareto grid. batch/pareto_runs.txt and
+# batch/runs.txt ARE tracked -- they are generated from the study manifest and
+# every stage reads them. The files below are throwaway subsets made on lxplus
+# with head/grep/sed for a smoke test or a partial resubmission. Tracking them
+# makes `git pull` on the cluster abort with "untracked working tree files
+# would be overwritten by merge", which is exactly how a fix sat undeployed
+# through two full 45-minute runs (2026-09-19).
+batch/pareto_runs_smoke.txt
+batch/pareto_runs_rest.txt
+batch/pareto_runs_seed*.txt
+batch/runae_pareto_smoke.sub
+batch/runae_pareto_rest.sub
+batch/runae_pareto_debug.sub
+batch/runae_pareto_seed*.sub

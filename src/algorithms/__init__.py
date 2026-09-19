@@ -64,8 +64,16 @@ class ADLightningModule(LightningModule):
             self._log_on_epoch_end("train")
             garbage_collection_cuda()
 
-    def on_validation_batch_end(self, outputs, batch, batch_idx, dataloader_idx):
-        """Log quantities at the end of the last validation epoch."""
+    def on_validation_batch_end(self, outputs, batch, batch_idx, dataloader_idx=0):
+        """Log quantities at the end of the last validation epoch.
+
+        dataloader_idx needs its default: Lightning inspects the signature and
+        refuses to pass the argument when there is only ONE validation loader,
+        raising rather than defaulting it. That is the normal case since
+        data.load_aux_in_fit=false, which leaves the fit-time validation loop
+        with the normal split alone instead of 22 loaders (cluster 333972,
+        2026-09-19). validation_step and test_step already declared it.
+        """
         is_last = (batch_idx + 1) == self.trainer.num_val_batches[dataloader_idx]
         if is_last:
             self._log_on_epoch_end("val", dataloader_idx=dataloader_idx)

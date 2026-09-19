@@ -92,7 +92,26 @@ fi
 
 # Every stage shares these, so an accidental divergence between stage 1 and the
 # stages that read its checkpoint is impossible.
+# Staged data pre-flight. The extractor falls back to reading raw parquet when
+# it finds no cache, and the raw tree is not staged on EOS, so a wrong root_dir
+# surfaces as a FileNotFoundError on a zerobias folder about a minute in
+# (cluster 333904, all 96 jobs, 2026-09-19). One second here instead.
+for _d in extracted processed mlready; do
+  [[ -d "${PROJECT_ROOT}/data/data_2025E+G/${_d}" ]] || {
+    echo "FATAL: missing staged data ${PROJECT_ROOT}/data/data_2025E+G/${_d}" >&2
+    echo "       PROJECT_ROOT=$PROJECT_ROOT -- is it the staging area, not the checkout?" >&2
+    exit 1
+  }
+done
+
 COMMON_ARGS=(
+  # Pass root_dir explicitly rather than leaving it to
+  # paths.root_dir: ${oc.env:PROJECT_ROOT}. rootutils.setup_root loads the
+  # repo's .env at import time and can override the exported value, which is
+  # how cluster 333904 ended up with root_dir pointing at the checkout and
+  # looking for the data cache there. An override on the command line wins over
+  # both, so the data location is decided in exactly one place.
+  paths.root_dir="$PROJECT_ROOT"
   paths.raw_data_dir="$RAW_DATA_DIR"
   experiment="$EXPERIMENT"
   run_name="$RUN_NAME"

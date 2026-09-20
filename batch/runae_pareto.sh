@@ -17,8 +17,7 @@ export STAGE_LABEL
 # The study experiment, minus the training callbacks that need the auxiliary
 # signal datasets resident during fit. See the config for the measured saving.
 : "${EXPERIMENT:=physics/pareto_fet_train}"
-: "${EXPERIMENT_NAME:=Pareto_Front_260918}"
-export EXPERIMENT EXPERIMENT_NAME
+export EXPERIMENT
 
 # Parameterise through pareto_study.candidate, not algorithm.*: the candidate is
 # what configuration_id is built from, and therefore what pairs the two seeds of
@@ -55,6 +54,12 @@ STAGE_ENV="${CODE_DIR}/batch/_stage_env.sh"
   exit 2
 }
 source "$STAGE_ENV"
+
+# Resolved from PARETO_EXPERIMENT_NAME in batch/_stage_env.sh, so every stage of
+# the study addresses the same checkpoints/<experiment_name>/ directory.
+: "${EXPERIMENT_NAME:=$PARETO_EXPERIMENT_NAME}"
+export EXPERIMENT_NAME
+echo "EXPERIMENT_NAME:   $EXPERIMENT_NAME"
 
 echo "SEED:              $SEED"
 echo "MI_GAMMA:          $MI_GAMMA"

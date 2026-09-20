@@ -15,9 +15,8 @@ STAGE_LABEL="Pareto stage 3/4"
 export STAGE_LABEL
 
 : "${EXPERIMENT:=physics/pareto_fet}"
-: "${EXPERIMENT_NAME:=Pareto_Front_260918}"
 : "${PARETO_CANDIDATE:=1}"
-export EXPERIMENT EXPERIMENT_NAME PARETO_CANDIDATE
+export EXPERIMENT PARETO_CANDIDATE
 
 # Read the merged stage-1 tree in place on EOS, not the empty job sandbox.
 : "${ADL1T_OUTPUT_ROOT:=/eos/user/l/lbehrens/adatl1/ADatL1/outputs}"
@@ -49,6 +48,12 @@ STAGE_ENV="${CODE_DIR}/batch/_stage_env.sh"
   exit 2
 }
 source "$STAGE_ENV"
+
+# Resolved from PARETO_EXPERIMENT_NAME in batch/_stage_env.sh, so every stage of
+# the study addresses the same checkpoints/<experiment_name>/ directory.
+: "${EXPERIMENT_NAME:=$PARETO_EXPERIMENT_NAME}"
+export EXPERIMENT_NAME
+echo "EXPERIMENT_NAME:   $EXPERIMENT_NAME"
 
 echo "SEED / GAMMA / BINS / ARCH: $SEED / $MI_GAMMA / $MI_NUM_BINS / $ARCHITECTURE_ID"
 echo

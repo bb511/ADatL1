@@ -26,7 +26,7 @@ set -euo pipefail
 
 # Overrides the experiment's own experiment_name, which is the directory every
 # stage addresses: checkpoints/<experiment_name>/<run_name>. Set it to give one
-# study its own directory, e.g. EXPERIMENT_NAME=Pareto_Front_260918. Leave empty
+# study its own directory, e.g. EXPERIMENT_NAME=Pareto_Front_092026. Leave empty
 # to keep the experiment's default. Must be identical in every stage of a run.
 : "${EXPERIMENT_NAME:=}"
 

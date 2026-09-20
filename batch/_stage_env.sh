@@ -42,6 +42,20 @@ if [[ "$TRAINER" == "gpu" ]]; then
   python3 -c 'import torch; print("torch", torch.__version__, "cuda", torch.cuda.is_available())'
 fi
 
+# ---------------------------------------------------------------------------
+# The Pareto study's experiment directory -- THE single place this name lives.
+# ---------------------------------------------------------------------------
+# Every stage must agree on it: stage 1 writes
+# checkpoints/<name>/<run_name>/, and stages 2-4 read exactly that path. It
+# used to be repeated in six files, so a rename could leave stage 1 writing one
+# directory while stage 3 looked in another -- a failure that only shows up as
+# "Missing loss_total.ckpt" after the data has loaded. Change it here, nowhere
+# else. No spaces: this becomes a directory name, an MLflow experiment name and
+# a value passed through HTCondor's environment string into several shell
+# layers before Hydra sees it.
+: "${PARETO_EXPERIMENT_NAME:=Pareto_Front_092026}"
+export PARETO_EXPERIMENT_NAME
+
 # Code: the EOS checkout that test_container.sh runs from.
 : "${CODE_DIR:=/eos/user/l/lbehrens/adatl1/ADatL1}"
 

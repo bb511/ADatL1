@@ -16,6 +16,7 @@ from .constants import (
     MLP_PROBE_CONFIG,
     PROBE_INITIALIZATION_SEED,
     PROBE_REPRESENTATION_METRIC_NAMES,
+    PROBE_STREAM_CHUNK_ROWS,
 )
 from .errors import ProbeFitError
 from .types import (
@@ -78,6 +79,22 @@ def _validate_fitted_mlp(estimator: MLPRegressor) -> None:
         )
 
 
+def _all_finite(values: np.ndarray) -> bool:
+    """Finiteness over row blocks.
+
+    ``np.isfinite(a).all()`` materialises a boolean array the size of ``a``:
+    1.45 GB for a 12.5M x 116 development matrix, allocated immediately before
+    a fit that is already the memory high-water mark of the job.
+    """
+
+    flat = values.reshape(len(values), -1) if values.ndim > 1 else values
+    for start in range(0, len(flat), PROBE_STREAM_CHUNK_ROWS):
+        block = flat[start:start + PROBE_STREAM_CHUNK_ROWS]
+        if not np.isfinite(block).all():
+            return False
+    return True
+
+
 def _validate_probe_dataset(
     features: np.ndarray,
     target: np.ndarray,
@@ -119,19 +136,21 @@ def _validate_probe_dataset(
             f"{split_name} requires at least two events.",
         )
 
-    if not np.isfinite(features).all():
+    if not _all_finite(features):
         raise ProbeFitError(
             f"non_finite_{split_name}_features",
             f"{split_name} features contain NaN or infinity.",
         )
 
-    if not np.isfinite(target).all():
+    if not _all_finite(target):
         raise ProbeFitError(
             f"non_finite_{split_name}_target",
             f"{split_name} target contains NaN or infinity.",
         )
 
-    if np.unique(target).size < 2:
+    # min == max is the constant test. np.unique sorts a full copy of the
+    # target to answer the same question.
+    if float(target.min()) == float(target.max()):
         raise ProbeFitError(
             f"constant_{split_name}_target",
             f"{split_name} target is constant.",
@@ -195,10 +214,8 @@ def fit_mlp_probe(
         train_target.reshape(-1, 1)
     ).reshape(-1)
 
-    scaled_validation_features = feature_scaler.transform(
-        validation_features
-    )
-
+    # The held-out matrix is scaled and predicted one row block at a time
+    # further down, so no scaled copy of it is ever held.
     estimator = MLPRegressor(
         **MLP_PROBE_CONFIG,
         random_state=seed,
@@ -240,11 +257,26 @@ def fit_mlp_probe(
     _log_mlp_fit_result(label, estimator, perf_counter() - started, convergence_warnings)
 
     try:
-        scaled_predictions = np.asarray(
-            estimator.predict(
-                scaled_validation_features
+        scaled_predictions = np.empty(
+            validation_target.shape[0],
+            dtype=np.float64,
+        )
+        for start in range(
+            0,
+            validation_target.shape[0],
+            PROBE_STREAM_CHUNK_ROWS,
+        ):
+            stop = min(
+                start + PROBE_STREAM_CHUNK_ROWS,
+                validation_target.shape[0],
             )
-        ).reshape(-1)
+            scaled_predictions[start:stop] = np.asarray(
+                estimator.predict(
+                    feature_scaler.transform(
+                        validation_features[start:stop]
+                    )
+                )
+            ).reshape(-1)
     except Exception as error:
         raise ProbeFitError(
             "mlp_outer_prediction_failed",

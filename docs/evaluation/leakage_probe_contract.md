@@ -2,7 +2,7 @@
 
 ## Status and scope
 
-**Protocol version:** `fet-et-four-probe-v8`
+**Protocol version:** `fet-et-four-probe-v9`
 
 **Status:** Frozen for the FET.Et proof-of-concept study.
 
@@ -249,7 +249,7 @@ Probe loaders must be unshuffled. If representations are subsampled, the evaluat
 must use a deterministic index manifest generated with sample seed `12345` and reuse
 the identical event positions for every autoencoder configuration and seed.
 
-For protocol version `fet-et-four-probe-v8`, `max_samples` is `null`: all available
+For protocol version `fet-et-four-probe-v9`, `max_samples` is `null`: all available
 events in the relevant split are used. Introducing a sample cap requires a new
 protocol version unless the cap is fixed before any comparable run is evaluated and
 all earlier runs are reevaluated with the same manifest.
@@ -523,11 +523,28 @@ validation curves use only sklearn's internal early-stopping subset, not the hel
 pool used for the final reported score. Sklearn restores the best internal-validation
 weights; the last recorded training loss need not equal the restored model's loss.
 
-LinearRegression uses a direct least-squares solve, not epoch-based optimization.
+The v9 MLP uses a fixed batch size of 16,384 events, equal to the physics AE batch
+size. This is a protocol choice: it changes the optimizer trajectory relative to
+sklearn's 200-event default. The four probes run sequentially, and each retains its
+own estimator and independently fitted feature scaler. No scaled feature array is
+shared across probes.
+
+The hard `latent_sample` is checked as binary and deterministic while representations
+are extracted, but it is not retained afterward because none of the four leakage
+probes consumes it. Production extraction preallocates the final representation arrays
+from the probe loader's event count, rather than holding all batch arrays and then
+concatenating them. These are memory-lifetime changes, not a change in the examples or
+event order used by the probes.
+
+The v9 linear probe uses a streamed, float64 QR least-squares solve on standardized
+features and predicts the held-out split in bounded row blocks. It is the same
+unregularized linear model, with a separate scaler fitted only on its development pool;
+the streamed implementation avoids full development and held-out scaled matrices.
+Linear regression has no epoch-based optimization.
 Its plot therefore displays final development and held-out MSE in GeV-squared, with
 `loss_summary.epochs=null`; no epoch curve is invented. Development MSE is measured
 with bounded-size prediction batches. These diagnostics do not add another probe or
-change fitting, early stopping, the four-probe maximum, or protocol v8.
+change the four-probe maximum or the defined outer split.
 
 Terminal output reports the checkpoint, mode/caps, extraction progress (first batch,
 every 25 batches, and completion), representation dimensions, per-probe and per-seed
@@ -574,11 +591,13 @@ sample manifests, or outer split identities must not be aggregated together.
 
 ## 11. Definition of done
 
-An implementation conforms to `fet-et-four-probe-v8` only when all of the following
+An implementation conforms to `fet-et-four-probe-v9` only when all of the following
 are true:
 
 - both `latent_logits` and `reconstructed_data` are evaluated by independent primary
   MLP and linear regressors, producing four independent fitted probes;
+- each MLP uses the frozen 16,384-event batch size, and all probes run sequentially;
+- every probe owns an independently fitted feature scaler; no scaled array is shared;
 - the target is denormalized FET.Et in GeV and is identical across all MI bin counts;
 - FET.Et is absent from both primary feature matrices;
 - validation-mode probe fitting uses only `train`;
@@ -602,4 +621,4 @@ are true:
   aggregated;
 - paired-seed aggregation rejects the complete configuration when an expected seed is
   missing or invalid;
-- every output records protocol version `fet-et-four-probe-v8`.
+- every output records protocol version `fet-et-four-probe-v9`.

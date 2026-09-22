@@ -48,7 +48,7 @@ def test_pareto_fet_manifest_composes_and_freezes_protocol(
     assert cfg.callbacks.loss_total_ckpt.mode == "min"
     assert cfg.data.model_input_exclude_features == ["FET.Et"]
     assert cfg.algorithm.encoder.nodes[-1] == 8
-    assert cfg.pareto_study.paired_autoencoder_seeds == [123, 456, 789]
+    assert cfg.pareto_study.paired_autoencoder_seeds == [123, 500]
     assert cfg.pareto_study.search_space.gamma_zero_baseline.mi_gamma == 0.0
     assert (
         cfg.pareto_study.collapse_constraint.seed_level_rule.minimum_joint_code_entropy_bits

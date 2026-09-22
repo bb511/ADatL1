@@ -79,6 +79,22 @@ def _validate_finite(name: str, values: np.ndarray) -> None:
         )
 
 
+def _probe_loader_event_count(loader: Any) -> int | None:
+    """Return the exact event count exposed by the project probe loader.
+
+    ``L1ADDataset`` is an ``IterableDataset`` whose ``len`` is a batch count,
+    so using ``len(loader)`` here would under-allocate by a factor of the batch
+    size.  Its ``n`` attribute is the number of events.  Keep a conservative
+    fallback for small test or third-party loaders that do not expose it.
+    """
+
+    dataset = getattr(loader, "dataset", None)
+    n_events = getattr(dataset, "n", None)
+    if isinstance(n_events, (int, np.integer)) and n_events > 0:
+        return int(n_events)
+    return None
+
+
 def _probe_cache_identity(
     datamodule: Any,
     control_object_feature_map: dict[str, Any],
@@ -244,8 +260,16 @@ def extract_probe_split(
         model.eval()
         model.requires_grad_(False)
 
+        probe_loader = datamodule.probe_dataloader()
+        expected_events = _probe_loader_event_count(probe_loader)
+        # The production L1 loader exposes its exact row count.  Allocate the
+        # final arrays immediately instead of retaining every batch and then
+        # materialising a second complete copy with np.concatenate().  The
+        # parts fallback preserves compatibility with simple external loaders.
+        latent_logits_array: np.ndarray | None = None
+        reconstruction_array: np.ndarray | None = None
+        target_array: np.ndarray | None = None
         latent_logits_parts: list[np.ndarray] = []
-        latent_sample_parts: list[np.ndarray] = []
         reconstruction_parts: list[np.ndarray] = []
         target_parts: list[np.ndarray] = []
         event_component_manifests: dict[str, Any] = {}
@@ -258,7 +282,7 @@ def extract_probe_split(
         extracted_events = 0
 
         with torch.inference_mode():
-            for batch_index, batch in enumerate(datamodule.probe_dataloader(), start=1):
+            for batch_index, batch in enumerate(probe_loader, start=1):
                 identity_batch_view = unpack_batch(batch)
                 device_batch = _move_to_device(
                     batch,
@@ -400,18 +424,41 @@ def extract_probe_split(
 
                     first_batch = False
 
-                latent_logits_parts.append(
-                    _to_numpy(latent_logits)
-                )
-                latent_sample_parts.append(
-                    _to_numpy(latent_sample)
-                )
-                reconstruction_parts.append(
-                    _to_numpy(reconstructed_data)
-                )
-                target_parts.append(
-                    _to_numpy(sensitive_target)
-                )
+                latent_logits_values = _to_numpy(latent_logits)
+                reconstruction_values = _to_numpy(reconstructed_data)
+                target_values = _to_numpy(sensitive_target)
+                _validate_finite("latent_logits", latent_logits_values)
+                _validate_finite("reconstructed_data", reconstruction_values)
+                _validate_finite("sensitive_target", target_values)
+
+                if expected_events is not None:
+                    if latent_logits_array is None:
+                        latent_logits_array = np.empty(
+                            (expected_events, latent_logits_values.shape[1]),
+                            dtype=latent_logits_values.dtype,
+                        )
+                        reconstruction_array = np.empty(
+                            (expected_events, reconstruction_values.shape[1]),
+                            dtype=reconstruction_values.dtype,
+                        )
+                        target_array = np.empty(
+                            expected_events,
+                            dtype=target_values.dtype,
+                        )
+                    next_event = extracted_events + batch_size
+                    if next_event > expected_events:
+                        raise ProbeExtractionError(
+                            "probe_loader_event_count_mismatch",
+                            "Probe loader yielded more events than its dataset reports: "
+                            f"{next_event} > {expected_events}.",
+                        )
+                    latent_logits_array[extracted_events:next_event] = latent_logits_values
+                    reconstruction_array[extracted_events:next_event] = reconstruction_values
+                    target_array[extracted_events:next_event] = target_values
+                else:
+                    latent_logits_parts.append(latent_logits_values)
+                    reconstruction_parts.append(reconstruction_values)
+                    target_parts.append(target_values)
                 extracted_events += batch_size
                 if batch_index == 1 or batch_index % 25 == 0:
                     log.info(
@@ -419,47 +466,30 @@ def extract_probe_split(
                         split, batch_index, extracted_events, perf_counter() - started,
                     )
 
-        if not target_parts:
+        if extracted_events == 0:
             raise ProbeExtractionError(
                 "empty_split",
                 f"Probe split {split!r} did not yield any events.",
             )
 
-        latent_logits_array = np.concatenate(
-            latent_logits_parts,
-            axis=0,
-        )
-        latent_sample_array = np.concatenate(
-            latent_sample_parts,
-            axis=0,
-        )
-        reconstruction_array = np.concatenate(
-            reconstruction_parts,
-            axis=0,
-        )
-        target_array = np.concatenate(
-            target_parts,
-            axis=0,
-        )
+        if expected_events is not None:
+            if extracted_events != expected_events:
+                raise ProbeExtractionError(
+                    "probe_loader_event_count_mismatch",
+                    "Probe loader yielded fewer events than its dataset reports: "
+                    f"{extracted_events} != {expected_events}.",
+                )
+            assert latent_logits_array is not None
+            assert reconstruction_array is not None
+            assert target_array is not None
+        else:
+            latent_logits_array = np.concatenate(latent_logits_parts, axis=0)
+            reconstruction_array = np.concatenate(reconstruction_parts, axis=0)
+            target_array = np.concatenate(target_parts, axis=0)
 
-        _validate_finite(
-            "latent_logits",
-            latent_logits_array,
-        )
-        _validate_finite(
-            "latent_sample",
-            latent_sample_array,
-        )
-        _validate_finite(
-            "reconstructed_data",
-            reconstruction_array,
-        )
-        _validate_finite(
-            "sensitive_target",
-            target_array,
-        )
-
-        if np.unique(target_array).size < 2:
+        # min == max answers the constant-target question without sorting and
+        # copying the full array, unlike np.unique(target_array).
+        if float(target_array.min()) == float(target_array.max()):
             raise ProbeExtractionError(
                 "constant_target",
                 "The sensitive target has fewer than two distinct values.",
@@ -495,7 +525,9 @@ def extract_probe_split(
         return ProbeRepresentationSet(
             split=split,
             latent_logits=latent_logits_array,
-            latent_sample=latent_sample_array,
+            # Extraction verifies that this is a deterministic binary tensor;
+            # the four leakage probes do not consume it, so do not retain it.
+            latent_sample=None,
             reconstructed_data=reconstruction_array,
             sensitive_target=target_array,
             n_events=n_events,

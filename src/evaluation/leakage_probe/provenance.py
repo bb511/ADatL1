@@ -169,7 +169,6 @@ def concatenate_probe_representation_sets(
 
     array_names = (
         "latent_logits",
-        "latent_sample",
         "reconstructed_data",
         "sensitive_target",
     )
@@ -184,6 +183,18 @@ def concatenate_probe_representation_sets(
                 f"Cannot combine {array_name} arrays with trailing "
                 f"shapes {sorted(trailing_shapes)}.",
             )
+
+    latent_samples = tuple(part.latent_sample for part in parts)
+    if any(sample is None for sample in latent_samples):
+        if not all(sample is None for sample in latent_samples):
+            raise ProbeExtractionError(
+                "probe_latent_sample_availability_mismatch",
+                "Cannot combine probe splits that disagree on whether they retain "
+                "latent_sample.",
+            )
+        latent_sample = None
+    else:
+        latent_sample = np.concatenate(latent_samples, axis=0)
 
     source_splits = tuple(
         source_split
@@ -211,10 +222,7 @@ def concatenate_probe_representation_sets(
             [part.latent_logits for part in parts],
             axis=0,
         ),
-        latent_sample=np.concatenate(
-            [part.latent_sample for part in parts],
-            axis=0,
-        ),
+        latent_sample=latent_sample,
         reconstructed_data=np.concatenate(
             [part.reconstructed_data for part in parts],
             axis=0,

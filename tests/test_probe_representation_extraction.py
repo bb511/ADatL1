@@ -122,11 +122,26 @@ class FakeProbeDataModule:
         if self.active_split is None:
             raise RuntimeError("No probe split is active.")
 
-        return self._batches
+        return FakeProbeLoader(self._batches)
 
     def release_probe_split(self) -> None:
         self.active_split = None
         self.release_calls += 1
+
+
+class FakeProbeLoader:
+    """Mimic the production iterable loader's exact event-count contract."""
+
+    def __init__(self, batches) -> None:
+        self._batches = batches
+        self.dataset = type(
+            "ProbeDataset",
+            (),
+            {"n": sum(batch[0].shape[0] for batch in batches)},
+        )()
+
+    def __iter__(self):
+        return iter(self._batches)
 
 
 class RecordingProbeModel(nn.Module):
@@ -298,10 +313,9 @@ def test_extract_probe_split_collects_contract_arrays() -> None:
         result.latent_logits,
         expected_x * 2.0,
     )
-    np.testing.assert_allclose(
-        result.latent_sample,
-        (expected_x >= 0).astype(np.float32),
-    )
+    # The hard sample was checked for determinism and binary values during
+    # extraction, then deliberately released: no leakage probe consumes it.
+    assert result.latent_sample is None
     np.testing.assert_allclose(
         result.reconstructed_data,
         expected_x + 0.5,

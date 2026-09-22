@@ -16,7 +16,10 @@ class ProbeRepresentationSet:
 
     split: str
     latent_logits: np.ndarray
-    latent_sample: np.ndarray
+    # The hard sample is checked batch-by-batch during extraction, but leakage
+    # probes never consume it.  Retaining a full float matrix for it would keep
+    # another ~0.5 GiB resident for the physics train+valid pools.
+    latent_sample: np.ndarray | None
     reconstructed_data: np.ndarray
     sensitive_target: np.ndarray
     n_events: int

@@ -15,7 +15,7 @@ error  = batch/logs/runprobes.$(ClusterId).$(ProcId).err
 MY.SingularityImage = "/eos/user/l/lbehrens/containers/adl1t_lab-dev.sif"
 
 # RUN_NAME is per-job and comes from the queue statement at the bottom.
-environment = "RUN_NAME=$(RUN_NAME) EXPERIMENT=physics/ae PROBE_MODE=validation"
+environment = "RUN_NAME=$(RUN_NAME) EXPERIMENT=physics/ae PROBE_MODE=validation CPU_THREADS=8"
 
 # ---------------------------------------------------------------------------
 # Output transfer
@@ -35,25 +35,15 @@ request_gpus = 0
 # CERN allocates 3000 MB of RAM per core and rescales request_cpus upward to
 # cover request_memory, so keep memory == cpus * 3000 or both get rewritten.
 #
-# NOT YET MEASURED ON LINUX. Kept at the stage-1 shape as a deliberately safe
-# starting point. What this stage holds is different from training: it loads the
-# train split (about 6.9 GiB resident after the control-tensor view change) and
-# then materialises the extracted probe features on top of it -- 12.5M events x
-# 116 reconstruction floats is another ~5.8 GB, plus the 8 latent floats, plus
-# whatever sklearn copies internally during the MLP fit. The macOS run peaked at
-# 8254 MiB for the whole process, but ru_maxrss there counts only resident pages
-# and hides compression and swap, so it is not a bound for Linux.
-# The job logs its own [mem] lines; size the next submission from those.
-request_cpus   = 7
-request_memory = 21000
+# v9 removes the full-matrix linear-solve and held-out-prediction copies.  The
+# reconstruction MLP's early-stopping split is now the binding allocation.
+# CERN maps 24 GB to an 8-core slot at 3 GB/core; keep these values aligned.
+request_cpus   = 8
+request_memory = 24000
 request_disk   = 10GB
 
-# Measured locally: 1605 s (26.8 min) for the probe phase itself, dominated by
-# the two MLP probes (296 s on z_logits, 370 s on reconstruction) and the
-# 116-feature linear solve (178 s). Data loading adds a few minutes. This cost
-# is fixed per run: it does not scale with trainer.max_epochs.
-# 2 h leaves room for a slower node without risking eviction, which is silent -
-# an evicted job leaves no hold reason, it simply disappears from the queue.
-+MaxRuntime = 7200
+# The 16,384-row MLP batch is a protocol change and needs a fresh timing run;
+# four hours retains enough headroom for a slow worker while that is measured.
++MaxRuntime = 14400
 
 queue RUN_NAME from batch/runs.txt

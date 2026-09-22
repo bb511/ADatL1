@@ -4,6 +4,8 @@ from unittest.mock import Mock
 
 import numpy as np
 import pytest
+from sklearn.linear_model import LinearRegression
+from sklearn.preprocessing import StandardScaler
 
 import src.evaluation.leakage_probe.evaluation as leakage_probe_evaluation
 import src.evaluation.leakage_probe.persistence as leakage_probe_persistence
@@ -29,6 +31,7 @@ from src.evaluation.leakage_probe import (
     PROBE_TARGET_SHUFFLE_SEED,
     ShuffledTargetMLPResult,
 )
+from src.evaluation.leakage_probe.constants import MLP_PROBE_CONFIG
 from tests.helpers.leakage_probe import make_probe_run_metadata
 
 
@@ -215,6 +218,45 @@ def test_linear_probe_reports_physical_outer_metrics() -> None:
     )
     assert result.n_train == 20
     assert result.n_validation == 6
+
+
+def test_streamed_linear_fit_matches_full_matrix_least_squares() -> None:
+    """The bounded-memory QR solve preserves the ordinary OLS measurement."""
+
+    random = np.random.RandomState(41)
+    train_features = random.normal(size=(500, 7)).astype(np.float32)
+    validation_features = random.normal(size=(120, 7)).astype(np.float32)
+    coefficients = np.array([0.2, -1.1, 0.3, 0.0, 0.7, -0.4, 0.9])
+    train_target = train_features @ coefficients + 5.0
+    validation_target = validation_features @ coefficients + 5.0
+
+    result = fit_linear_probe(
+        train_features,
+        train_target,
+        validation_features,
+        validation_target,
+    )
+
+    scaler = StandardScaler().fit(train_features)
+    scaled_train = scaler.transform(train_features).astype(np.float64)
+    scaled_validation = scaler.transform(validation_features).astype(np.float64)
+    reference = LinearRegression().fit(
+        scaled_train,
+        train_target,
+    )
+    reference_predictions = reference.predict(scaled_validation)
+
+    np.testing.assert_allclose(
+        result.estimator.predict(scaled_validation),
+        reference_predictions,
+        rtol=1e-10,
+        atol=1e-10,
+    )
+    assert result.outer_r2_raw == pytest.approx(1.0, abs=1e-12)
+
+
+def test_mlp_probe_uses_the_frozen_ae_batch_size() -> None:
+    assert MLP_PROBE_CONFIG["batch_size"] == 16384
 
 
 def test_negative_linear_r2_is_preserved_and_clipped() -> None:
@@ -453,7 +495,7 @@ def test_each_of_four_probes_can_determine_leakage_worst(
 def test_mlp_payload_records_the_frozen_seed_and_no_selection_block(
     monkeypatch,
 ) -> None:
-    """The v8 artifact reports one fitted seed and carries no candidate stage."""
+    """The v9 artifact reports one fitted seed and carries no candidate stage."""
 
     train = make_representation_set("train", 20)
     validation = make_representation_set("valid", 10)

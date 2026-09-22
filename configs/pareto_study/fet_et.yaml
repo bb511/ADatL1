@@ -23,11 +23,12 @@ protocol_version: fet-et-pareto-v1
 study_id: fet-et-pareto-v1
 # The selection protocol above and the probe protocol below are versioned
 # separately. This records which probe protocol produced L, because its
-# definition changed at v8 (one frozen seed, no inner split, no seed search).
+# definition changed at v9 (16,384-row MLP batches and memory-bounded linear
+# fitting/prediction while preserving all four independent probes).
 # It must track LEAKAGE_PROBE_PROTOCOL_VERSION in
 # src/evaluation/leakage_probe/constants.py; the aggregator rejects artifacts
 # whose own recorded version does not match that constant.
-leakage_probe_protocol_version: fet-et-four-probe-v8
+leakage_probe_protocol_version: fet-et-four-probe-v9
 sensitive_variable:
   raw_target: FET.Et
   training_target: quantile-binned FET.Et

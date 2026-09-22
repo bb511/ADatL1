@@ -5,7 +5,10 @@ from typing import Any
 
 import numpy as np
 
-from .constants import LEAKAGE_PROBE_PROTOCOL_VERSION
+from .constants import (
+    LEAKAGE_PROBE_PROTOCOL_VERSION,
+    LINEAR_PROBE_MAX_MSE_INFLATION,
+)
 from .errors import ProbeFitError
 from .types import (
     FourProbeEvaluationResult,
@@ -135,11 +138,31 @@ def _probe_result_payload(
             }
         )
     elif isinstance(probe, NamedLinearProbeResult):
+        payload["solver"] = {
+            "method": "streamed_float64_qr_svd",
+            "lapack_driver": "gelsd",
+            "effective_rank": outer.effective_rank,
+            "development_rows": outer.n_train,
+            "design_columns": int(probe.feature_dimension) + 1,
+            "rank_cutoff": _finite_or_none(outer.rank_cutoff),
+            "raw_condition_number": _finite_or_none(
+                outer.condition_number
+            ),
+            "retained_condition_number": _finite_or_none(
+                outer.retained_condition_number
+            ),
+        }
         payload["loss_summary"] = {
             "method": "direct_least_squares",
             "epochs": None,
             "development_mse_gev2": _finite_or_none(outer.train_mse_gev2),
             "held_out_mse_gev2": _finite_or_none(outer.outer_mse_gev2),
+            "held_out_mse_inflation": _finite_or_none(
+                outer.mse_inflation
+            ),
+            "maximum_allowed_mse_inflation": (
+                LINEAR_PROBE_MAX_MSE_INFLATION
+            ),
             "note": "LinearRegression is a direct solve; no epoch loss history exists.",
         }
 

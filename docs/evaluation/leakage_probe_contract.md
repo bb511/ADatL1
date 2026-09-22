@@ -2,7 +2,7 @@
 
 ## Status and scope
 
-**Protocol version:** `fet-et-four-probe-v9`
+**Protocol version:** `fet-et-four-probe-v10`
 
 **Status:** Frozen for the FET.Et proof-of-concept study.
 
@@ -249,7 +249,7 @@ Probe loaders must be unshuffled. If representations are subsampled, the evaluat
 must use a deterministic index manifest generated with sample seed `12345` and reuse
 the identical event positions for every autoencoder configuration and seed.
 
-For protocol version `fet-et-four-probe-v9`, `max_samples` is `null`: all available
+For protocol version `fet-et-four-probe-v10`, `max_samples` is `null`: all available
 events in the relevant split are used. Introducing a sample cap requires a new
 protocol version unless the cap is fixed before any comparable run is evaluated and
 all earlier runs are reevaluated with the same manifest.
@@ -267,7 +267,7 @@ cache files and returned in original cache order. Smoke mode is allowed only wit
 `mode=validation`; it cannot access `test`. Its JSON records
 `evaluation.purpose=smoke_test`, `evaluation.reporting_eligible=false`, and the actual
 sample caps and manifests. A smoke artifact checks wiring and memory behavior only: it
-does not conform to the uncapped v6 scientific measurement, cannot enter a Pareto
+does not conform to the uncapped v10 scientific measurement, cannot enter a Pareto
 front, and is rejected by the paired-seed aggregator.
 Its four scores remain available in the smoke JSON but are not logged under the
 scientific `probe/*` MLflow metric names.
@@ -406,6 +406,9 @@ A leakage evaluation is invalid if any of the following occurs:
 - comparable autoencoder configurations use different held-out event samples;
 - an MLP fit raises an exception or produces non-finite predictions;
 - a fitted MLP has non-finite weights, loss, or predictions;
+- a linear probe produces non-finite parameters, predictions, or loss values;
+- a linear probe's held-out MSE exceeds one million times both its development MSE
+  and the held-out-target variance scale;
 - the shuffled-target guardrail fails when the controls are enabled;
 - a required primary metric cannot be calculated.
 
@@ -523,7 +526,7 @@ validation curves use only sklearn's internal early-stopping subset, not the hel
 pool used for the final reported score. Sklearn restores the best internal-validation
 weights; the last recorded training loss need not equal the restored model's loss.
 
-The v9 MLP uses a fixed batch size of 16,384 events, equal to the physics AE batch
+Since v9, the MLP uses a fixed batch size of 16,384 events, equal to the physics AE batch
 size. This is a protocol choice: it changes the optimizer trajectory relative to
 sklearn's 200-event default. The four probes run sequentially, and each retains its
 own estimator and independently fitted feature scaler. No scaled feature array is
@@ -536,11 +539,19 @@ from the probe loader's event count, rather than holding all batch arrays and th
 concatenating them. These are memory-lifetime changes, not a change in the examples or
 event order used by the probes.
 
-The v9 linear probe uses a streamed, float64 QR least-squares solve on standardized
+The linear probe uses a streamed, float64 QR least-squares solve on standardized
 features and predicts the held-out split in bounded row blocks. It is the same
 unregularized linear model, with a separate scaler fitted only on its development pool;
 the streamed implementation avoids full development and held-out scaled matrices.
 Linear regression has no epoch-based optimization.
+In v10, its SVD rank threshold is fixed to
+`float64_epsilon * max(number_of_development_rows, number_of_design_columns)` and
+is applied explicitly with LAPACK's `gelsd` driver. Computing the threshold from the
+original development matrix, rather than the small triangle produced by streamed QR,
+removes numerically unresolved decoder directions consistently with a conventional
+full-matrix least-squares solve. The artifact records the threshold, effective rank,
+raw and retained condition numbers, observed held-out MSE inflation, and its maximum
+allowed value.
 Its plot therefore displays final development and held-out MSE in GeV-squared, with
 `loss_summary.epochs=null`; no epoch curve is invented. Development MSE is measured
 with bounded-size prediction batches. These diagnostics do not add another probe or
@@ -591,7 +602,7 @@ sample manifests, or outer split identities must not be aggregated together.
 
 ## 11. Definition of done
 
-An implementation conforms to `fet-et-four-probe-v9` only when all of the following
+An implementation conforms to `fet-et-four-probe-v10` only when all of the following
 are true:
 
 - both `latent_logits` and `reconstructed_data` are evaluated by independent primary
@@ -614,6 +625,8 @@ are true:
 - every detailed artifact has a compact, smoke-safe summary with the four clipped R2
   components plus the worst probe and essential provenance;
 - invalid measurements fail visibly and are never converted to zero;
+- linear solves use the original development-matrix dimensions for their explicit
+  SVD rank cutoff and reject catastrophic held-out MSE inflation;
 - actual cached event content and selection are identical across comparable
   autoencoder runs;
 - scientific `leakage_probes.json` artifacts are uncapped; capped
@@ -621,4 +634,4 @@ are true:
   aggregated;
 - paired-seed aggregation rejects the complete configuration when an expected seed is
   missing or invalid;
-- every output records protocol version `fet-et-four-probe-v9`.
+- every output records protocol version `fet-et-four-probe-v10`.

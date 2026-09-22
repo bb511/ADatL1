@@ -33,6 +33,10 @@ def test_pareto_fet_manifest_composes_and_freezes_protocol(
     assert cfg.evaluation.callbacks.latent_collapse.dataset == "normal"
     assert cfg.evaluation.callbacks.latent_collapse.evaluation_split == "val"
     assert cfg.evaluation.leakage_probes.enabled is True
+    assert (
+        cfg.pareto_study.leakage_probe_protocol_version
+        == "fet-et-four-probe-v10"
+    )
     assert cfg.evaluation.callbacks.anomaly_efficiency.write_pareto_summary is True
     assert cfg.evaluation.callbacks.anomaly_efficiency.write_plots is False
     assert cfg.evaluation.callbacks.correlation_matrix.enabled is True

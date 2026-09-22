@@ -133,6 +133,11 @@ class LinearProbeOuterResult:
     estimator: LinearRegression
     train_mse_gev2: float | None = None
     outer_mse_gev2: float | None = None
+    effective_rank: int | None = None
+    rank_cutoff: float | None = None
+    condition_number: float | None = None
+    retained_condition_number: float | None = None
+    mse_inflation: float | None = None
 
 
 @dataclass(frozen=True)

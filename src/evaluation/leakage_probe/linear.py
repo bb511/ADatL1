@@ -10,6 +10,7 @@ from sklearn.metrics import mean_absolute_error, r2_score
 from sklearn.preprocessing import StandardScaler
 
 from .constants import (
+    LINEAR_PROBE_MAX_MSE_INFLATION,
     PRIMARY_PROBE_REPRESENTATIONS,
     PROBE_REPRESENTATION_METRIC_NAMES,
     PROBE_STREAM_CHUNK_ROWS,
@@ -75,17 +76,16 @@ def _solve_streamed_least_squares(
     feature_scaler: StandardScaler,
     features: np.ndarray,
     target: np.ndarray,
-) -> tuple[np.ndarray, float, int, np.ndarray]:
+) -> tuple[np.ndarray, float, int, np.ndarray, float]:
     """Least squares on a development matrix that is never materialised.
 
     A blocked Householder QR reduces ``[X | 1 | y]`` to a small upper triangle
-    one row block at a time.  That triangle carries exactly the singular values
-    of the augmented development matrix, so the SVD solve below returns the same
-    minimum-norm least-squares solution ``scipy.linalg.lstsq`` gives for the
-    whole matrix.  Normal equations would be cheaper still but square the
-    condition number; measured on decoder-shaped features they disagreed with
-    the reference solution by 8e-4 in R^2, which is the size of the effects this
-    study has to resolve.
+    one row block at a time.  The left part of that triangle carries the
+    singular values of the original standardized design matrix.  The SVD solve
+    therefore uses a cutoff computed from the *original* matrix dimensions,
+    not the roughly 117-row compressed triangle.  This is essential for
+    decoder outputs with numerically unresolved, nearly collinear directions.
+    Normal equations would be cheaper still but square the condition number.
 
     The accumulation is float64 on purpose.  Reconstruction features are a
     deterministic function of an 8-bit latent and therefore strongly collinear
@@ -126,11 +126,17 @@ def _solve_streamed_least_squares(
             "The linear probe received no development rows.",
         )
 
+    design_columns = n_features + 1
+    rank_cutoff = (
+        np.finfo(np.float64).eps
+        * max(len(target), design_columns)
+    )
     solution, _, rank, singular_values = lstsq(
         triangle[:, : n_features + 1],
         triangle[:, n_features + 1],
-        cond=None,
+        cond=rank_cutoff,
         check_finite=False,
+        lapack_driver="gelsd",
     )
 
     return (
@@ -138,7 +144,31 @@ def _solve_streamed_least_squares(
         float(solution[n_features]),
         int(rank),
         np.asarray(singular_values, dtype=np.float64),
+        float(rank_cutoff),
     )
+
+
+def _linear_mse_inflation(
+    train_mse: float,
+    outer_mse: float,
+    validation_target: np.ndarray,
+) -> float:
+    """Return held-out MSE relative to legitimate problem scales."""
+
+    centered_target = (
+        validation_target
+        - float(np.mean(validation_target, dtype=np.float64))
+    )
+    target_variance = float(
+        np.dot(centered_target, centered_target)
+        / len(centered_target)
+    )
+    reference_mse = max(
+        train_mse,
+        target_variance,
+        np.finfo(np.float64).tiny,
+    )
+    return outer_mse / reference_mse
 
 
 def fit_linear_probe(
@@ -191,6 +221,7 @@ def fit_linear_probe(
             intercept,
             rank,
             singular_values,
+            rank_cutoff,
         ) = _solve_streamed_least_squares(
             feature_scaler,
             train_features,
@@ -216,9 +247,17 @@ def fit_linear_probe(
         if positive_singular_values.size
         else float("inf")
     )
+    retained_condition_number = (
+        float(singular_values[0] / singular_values[rank - 1])
+        if rank > 0
+        else float("inf")
+    )
     log.info(
-        "Linear solve conditioning: effective rank=%d of %d, condition number=%.4g.",
-        rank, coefficients.shape[0] + 1, condition_number,
+        "Linear solve conditioning: effective rank=%d of %d, "
+        "rank cutoff=%.4g, raw condition number=%.4g, "
+        "retained condition number=%.4g.",
+        rank, coefficients.shape[0] + 1, rank_cutoff,
+        condition_number, retained_condition_number,
     )
 
     if (
@@ -305,11 +344,37 @@ def fit_linear_probe(
     )
     residuals = predictions_gev - validation_target
     outer_mse = float(np.dot(residuals, residuals) / len(residuals))
+    if not np.isfinite(train_mse) or not np.isfinite(outer_mse):
+        raise ProbeFitError(
+            "non_finite_linear_mse",
+            "The linear probe produced non-finite development or "
+            "held-out MSE.",
+        )
+
+    mse_inflation = _linear_mse_inflation(
+        train_mse,
+        outer_mse,
+        validation_target,
+    )
+    if (
+        not np.isfinite(mse_inflation)
+        or mse_inflation > LINEAR_PROBE_MAX_MSE_INFLATION
+    ):
+        raise ProbeFitError(
+            "catastrophic_linear_generalization",
+            "Linear held-out MSE is catastrophically larger than "
+            "the development/target-variance reference scale: "
+            f"inflation={mse_inflation:.6g}, maximum="
+            f"{LINEAR_PROBE_MAX_MSE_INFLATION:.6g}, "
+            f"development_mse={train_mse:.6g}, "
+            f"held_out_mse={outer_mse:.6g} GeV^2.",
+        )
     log.info(
         "Linear probe finished in %.1fs: held-out R2=%.6f, clipped R2=%.6f, "
-        "MAE=%.6g GeV; MSE development=%.6g, held-out=%.6g GeV^2.",
+        "MAE=%.6g GeV; MSE development=%.6g, held-out=%.6g GeV^2, "
+        "inflation=%.6g.",
         perf_counter() - started, outer_r2_raw, max(0.0, outer_r2_raw),
-        outer_mae_gev, train_mse, outer_mse,
+        outer_mae_gev, train_mse, outer_mse, mse_inflation,
     )
     return LinearProbeOuterResult(
         outer_r2_raw=outer_r2_raw,
@@ -321,6 +386,11 @@ def fit_linear_probe(
         estimator=estimator,
         train_mse_gev2=train_mse,
         outer_mse_gev2=outer_mse,
+        effective_rank=rank,
+        rank_cutoff=rank_cutoff,
+        condition_number=condition_number,
+        retained_condition_number=retained_condition_number,
+        mse_inflation=mse_inflation,
     )
 
 

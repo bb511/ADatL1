@@ -21,8 +21,10 @@ environment = "SEED=$(SEED) MI_GAMMA=$(GAMMA) MI_NUM_BINS=$(BINS) ARCHITECTURE_I
 
 request_gpus = 0
 
-# v9 streams linear least squares and all held-out predictions, verifies the
-# binary latent sample without retaining it, and preallocates extraction arrays.
+# Since v9, linear least squares and held-out predictions are streamed, the
+# binary latent sample is verified without being retained, and extraction
+# arrays are preallocated. v10 truncates numerically unresolved linear
+# directions using the original development-matrix dimensions.
 # The binding MLP fit still retains its own early-stopping split of the 116-wide
 # train representation.  24 GB gives that fit headroom; CERN's 3 GB/core rule
 # therefore requires an 8-core slot.  Probes remain deliberately sequential.

@@ -12,6 +12,7 @@ from sklearn.metrics import mean_squared_error
 from sklearn.neural_network import MLPRegressor
 
 from src.evaluation.leakage_probe import (
+    LEAKAGE_PROBE_PROTOCOL_VERSION,
     PROBE_INITIALIZATION_SEED,
     MLP_PROBE_CONFIG,
     ShuffledTargetMLPResult,
@@ -83,7 +84,9 @@ def test_each_of_four_probes_links_a_real_plot_and_preserves_histories(tmp_path,
             "purpose": "scientific",
             "reporting_eligible": True,
         },
-        "leakage_probe_protocol_version": "fet-et-four-probe-v7",
+        "leakage_probe_protocol_version": (
+            LEAKAGE_PROBE_PROTOCOL_VERSION
+        ),
         "leakage_probe_summary_schema_version": 1,
         "leakage_worst": result.leakage_worst,
         "probe_valid": True,
@@ -159,7 +162,6 @@ def test_guardrail_rejection_keeps_all_probe_and_control_plots(tmp_path, observe
     result = replace(result, shuffled_target_controls=ShuffledTargetMLPResult(
         latent_logits=control,
         reconstructed_data=result.mlp_reconstructed_data,
-        inner_partition=result.inner_partition,
         shuffle_seed=12345,
         permutation_manifest_hash="test-permutation",
     ))

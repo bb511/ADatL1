@@ -35,7 +35,8 @@ request_gpus = 0
 # CERN allocates 3000 MB of RAM per core and rescales request_cpus upward to
 # cover request_memory, so keep memory == cpus * 3000 or both get rewritten.
 #
-# v9 removes the full-matrix linear-solve and held-out-prediction copies.  The
+# Since v9, the full-matrix linear-solve and held-out-prediction copies are
+# removed. v10 also truncates numerically unresolved linear directions. The
 # reconstruction MLP's early-stopping split is now the binding allocation.
 # CERN maps 24 GB to an 8-core slot at 3 GB/core; keep these values aligned.
 request_cpus   = 8

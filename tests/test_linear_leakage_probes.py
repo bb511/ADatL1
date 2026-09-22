@@ -4,10 +4,11 @@ from unittest.mock import Mock
 
 import numpy as np
 import pytest
-from sklearn.linear_model import LinearRegression
+from scipy.linalg import lstsq
 from sklearn.preprocessing import StandardScaler
 
 import src.evaluation.leakage_probe.evaluation as leakage_probe_evaluation
+import src.evaluation.leakage_probe.linear as leakage_probe_linear
 import src.evaluation.leakage_probe.persistence as leakage_probe_persistence
 from src.evaluation.leakage_probe import (
     PROBE_INITIALIZATION_SEED,
@@ -240,11 +241,19 @@ def test_streamed_linear_fit_matches_full_matrix_least_squares() -> None:
     scaler = StandardScaler().fit(train_features)
     scaled_train = scaler.transform(train_features).astype(np.float64)
     scaled_validation = scaler.transform(validation_features).astype(np.float64)
-    reference = LinearRegression().fit(
-        scaled_train,
-        train_target,
+    reference_design = np.column_stack(
+        [scaled_train, np.ones(len(scaled_train))]
     )
-    reference_predictions = reference.predict(scaled_validation)
+    reference_solution = lstsq(
+        reference_design,
+        train_target,
+        cond=result.rank_cutoff,
+        lapack_driver="gelsd",
+    )[0]
+    reference_predictions = (
+        scaled_validation @ reference_solution[:-1]
+        + reference_solution[-1]
+    )
 
     np.testing.assert_allclose(
         result.estimator.predict(scaled_validation),
@@ -253,6 +262,82 @@ def test_streamed_linear_fit_matches_full_matrix_least_squares() -> None:
         atol=1e-10,
     )
     assert result.outer_r2_raw == pytest.approx(1.0, abs=1e-12)
+
+
+def test_streamed_linear_fit_truncates_near_null_directions() -> None:
+    """The original design size, not compressed QR size, sets rank."""
+
+    random = np.random.RandomState(73)
+    n_train = 5000
+    base = random.normal(size=n_train)
+    independent = random.normal(size=n_train)
+    train_features = np.column_stack(
+        [
+            base,
+            base + 1e-14 * random.normal(size=n_train),
+            independent,
+        ]
+    )
+    train_target = 4.0 * base - 2.0 * independent + 3.0
+
+    validation_base = random.normal(size=400)
+    validation_independent = random.normal(size=400)
+    validation_features = np.column_stack(
+        [
+            validation_base,
+            validation_base,
+            validation_independent,
+        ]
+    )
+    validation_target = (
+        4.0 * validation_base
+        - 2.0 * validation_independent
+        + 3.0
+    )
+
+    result = fit_linear_probe(
+        train_features,
+        train_target,
+        validation_features,
+        validation_target,
+    )
+
+    expected_cutoff = (
+        np.finfo(np.float64).eps
+        * max(n_train, train_features.shape[1] + 1)
+    )
+    assert result.rank_cutoff == pytest.approx(expected_cutoff)
+    assert result.effective_rank == 3
+    assert result.estimator.rank_ == 3
+    assert result.outer_r2_raw == pytest.approx(1.0, abs=1e-12)
+    assert result.mse_inflation is not None
+    assert result.mse_inflation < 1.0
+
+
+def test_catastrophic_linear_generalization_is_rejected(
+    monkeypatch,
+) -> None:
+    """Finite numerical explosions must not be clipped into zero leakage."""
+
+    arrays = make_arrays()
+    validation_size = len(arrays[3])
+    monkeypatch.setattr(
+        leakage_probe_linear,
+        "_streamed_predictions",
+        lambda *args, **kwargs: np.full(
+            validation_size,
+            1e9,
+            dtype=np.float64,
+        ),
+    )
+
+    with pytest.raises(ProbeFitError) as error:
+        fit_linear_probe(*arrays)
+
+    assert (
+        error.value.reason
+        == "catastrophic_linear_generalization"
+    )
 
 
 def test_mlp_probe_uses_the_frozen_ae_batch_size() -> None:
@@ -495,7 +580,7 @@ def test_each_of_four_probes_can_determine_leakage_worst(
 def test_mlp_payload_records_the_frozen_seed_and_no_selection_block(
     monkeypatch,
 ) -> None:
-    """The v9 artifact reports one fitted seed and carries no candidate stage."""
+    """The v10 artifact reports one fitted seed and carries no candidate stage."""
 
     train = make_representation_set("train", 20)
     validation = make_representation_set("valid", 10)
@@ -544,6 +629,13 @@ def test_mlp_payload_records_the_frozen_seed_and_no_selection_block(
         probe = payload["probes"][probe_name]
         assert "seed" not in probe
         assert "seed_selection" not in probe
+        assert probe["solver"]["method"] == "streamed_float64_qr_svd"
+        assert probe["solver"]["lapack_driver"] == "gelsd"
+        assert "held_out_mse_inflation" in probe["loss_summary"]
+        assert (
+            probe["loss_summary"]["maximum_allowed_mse_inflation"]
+            == 1_000_000.0
+        )
 
 
 def test_four_probe_results_are_written_to_required_path(

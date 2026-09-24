@@ -10,6 +10,13 @@ encoder:
   in_dim: 117
   nodes: [64, 32, 8]
   activation: relu
+  # Bound the latent to [-1, 1]. The latent forks to the Bernoulli sampler and to
+  # the MI estimator, and the estimator evaluates sigmoid(mi_temperature * z):
+  # without a bound the encoder drives |z| far past the responsive band, the
+  # gradient factor 4*sigma*(1-sigma) underflows, and the MI penalty stops
+  # reaching the encoder however large mi_gamma is. hepinfo bounds the same
+  # tensor with tanh (BinaryMI.activation_nonbinary).
+  latent_activation: tanh
 
 decoder:
   _target_: src.algorithms.components.decoder.Decoder

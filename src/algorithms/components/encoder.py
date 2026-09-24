@@ -17,6 +17,16 @@ class Encoder(nn.Module):
     :param activation: Pytorch module that defines the activation function.
     :param init_weight: Callable method to initialize the weights of the encoder nodes.
     :param init_bias: Callable method to initialize the biases of the encoder nodes.
+    :param latent_activation: Name of the activation applied to the encoder output,
+        i.e. to the latent itself. "identity" (the default) reproduces the original
+        unbounded behaviour and is correct for a plain autoencoder. "tanh" bounds the
+        latent to [-1, 1] and is required whenever the latent feeds a Bernoulli /
+        mutual-information bottleneck: that estimator evaluates sigmoid(T * z), whose
+        gradient factor 4 * sigma * (1 - sigma) falls below 1% of its maximum already
+        at |z| = 1 and reaches ~1e-31 by |z| = 12, at which point the MI term can no
+        longer move the encoder at all. hepinfo bounds the same tensor either with a
+        tanh (BinaryMI, via activation_nonbinary) or with a KL term plus an activity
+        regulariser (MiVAE); this port previously bounded it with nothing.
     """
 
     def __init__(
@@ -24,6 +34,7 @@ class Encoder(nn.Module):
         in_dim: int,
         nodes: list[int],
         activation: str = "relu",
+        latent_activation: str = "identity",
         bias: bool = True,
         batchnorm: bool = False,
         affine: bool = True,
@@ -45,8 +56,34 @@ class Encoder(nn.Module):
             init_bias=init_bias,
         )
 
-    def forward(self, x: torch.Tensor) -> tuple[torch.Tensor]:
-        return self.net(x)
+        # Applied to the encoder output, after MLP's own (absent) final activation.
+        # This is the single tensor that forks to the MI estimator and to the
+        # Bernoulli sampler, so bounding it here bounds both branches at once.
+        self.output_activation = self._get_latent_activation(latent_activation)
+
+    @staticmethod
+    def _get_latent_activation(name: str) -> nn.Module:
+        """Return the activation applied to the latent itself.
+
+        Deliberately separate from ``MLP.final_activation``, which reuses the
+        hidden-layer activation: with ``activation="relu"`` that flag would put a
+        ReLU on the latent, which is unbounded above and therefore useless as a
+        guard against sigmoid saturation.
+        """
+        key = str(name).lower()
+
+        if key in {"identity", "none", "linear"}:
+            return nn.Identity()
+        if key == "tanh":
+            return nn.Tanh()
+
+        raise ValueError(
+            f"Unsupported latent activation: {name!r}. "
+            "Expected one of 'identity', 'none', 'linear', 'tanh'."
+        )
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        return self.output_activation(self.net(x))
 
 
 class VariationalEncoder(nn.Module):

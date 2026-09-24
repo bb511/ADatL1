@@ -1,0 +1,8 @@
+123,0,50,h64_32,64_32_8,Seed123_Gamma_0_Bins_50_architecture_h64_32_Run01
+123,0.2,50,h64_32,64_32_8,Seed123_Gamma_0.2_Bins_50_architecture_h64_32_Run01
+123,0.5,50,h64_32,64_32_8,Seed123_Gamma_0.5_Bins_50_architecture_h64_32_Run01
+123,1,50,h64_32,64_32_8,Seed123_Gamma_1_Bins_50_architecture_h64_32_Run01
+500,0,50,h64_32,64_32_8,Seed500_Gamma_0_Bins_50_architecture_h64_32_Run01
+500,0.2,50,h64_32,64_32_8,Seed500_Gamma_0.2_Bins_50_architecture_h64_32_Run01
+500,0.5,50,h64_32,64_32_8,Seed500_Gamma_0.5_Bins_50_architecture_h64_32_Run01
+500,1,50,h64_32,64_32_8,Seed500_Gamma_1_Bins_50_architecture_h64_32_Run01

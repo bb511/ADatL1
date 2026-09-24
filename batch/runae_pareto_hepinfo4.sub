@@ -1,0 +1,80 @@
+# STAGE 1 of the post-fix validation study -- 8 jobs, gamma alone.
+#
+#   python3 scripts/physics/make_pareto_grid.py \
+#       --grid configs/pareto_study/fet_et_hepinfo4.yaml \
+#       --output batch/pareto_runs_hepinfo4.txt \
+#       --runs-output batch/runs_hepinfo4.txt
+#   condor_submit batch/runae_pareto_hepinfo4.sub            # 8 jobs
+#
+# The grid is gamma in {0, 0.2, 0.5, 1} x seed in {123, 500}, at the single
+# architecture h64_32 and the canonical 50 bins. Its purpose is to answer one
+# question that the 96-run grid cannot: now that commit 320ab47 bounds the latent
+# with tanh, does loss_mi actually fall across training instead of rebounding
+# after epoch 0?
+#
+# These runs write to their own experiment directory (PARETO_EXPERIMENT_NAME
+# below). That is not tidiness: the gamma=0 baselines here carry exactly the run
+# names the fet-et-pareto-v1 baselines already occupy, and the two were trained
+# with different code.
+#
+# To retrain a failure, regenerate with a new attempt counter -- it is part of
+# the run name, so the first attempt's directories survive:
+#
+#   python3 scripts/physics/make_pareto_grid.py --attempt 02 \
+#       --grid configs/pareto_study/fet_et_hepinfo4.yaml \
+#       --output batch/pareto_runs_hepinfo4.txt \
+#       --runs-output batch/runs_hepinfo4.txt --only Seed500
+
+executable = batch/runae_pareto.sh
+
+log    = batch/logs/runae_pareto_hepinfo4.$(ClusterId).log
+output = batch/logs/runae_pareto_hepinfo4.$(ClusterId).$(ProcId).out
+error  = batch/logs/runae_pareto_hepinfo4.$(ClusterId).$(ProcId).err
+
+MY.SingularityImage = "/eos/user/l/lbehrens/containers/adl1t_lab-dev.sif"
+
+environment = "SEED=$(SEED) MI_GAMMA=$(GAMMA) MI_NUM_BINS=$(BINS) ARCHITECTURE_ID=$(ARCH) ENCODER_NODES_US=$(NODES) RUN_NAME=$(RUN_NAME) EXPERIMENT=physics/pareto_fet_hepinfo4 PARETO_EXPERIMENT_NAME=Pareto-Front-200924-hepinfo4 TRAINER=cpu CPU_THREADS=6 DATA_WORKERS=3"
+
+# ---------------------------------------------------------------------------
+# Output transfer
+# ---------------------------------------------------------------------------
+# Required: HTCondor returns only top-level sandbox files, never subdirectories.
+# Each job writes a disjoint path, checkpoints/<experiment_name>/<run_name>/, so
+# the 8 returned trees merge by union into one experiment directory -- which is
+# exactly what stage 4 then reads, via the run_manifest.yaml each one carries.
+transfer_output_files = outputs
+
+# ---------------------------------------------------------------------------
+# Resources
+# ---------------------------------------------------------------------------
+request_gpus = 0
+
+# CERN allocates 3000 MB per core and rescales request_cpus upward to cover
+# request_memory, so keep memory == cpus * 3000 or both get rewritten.
+#
+# Sizing chain, each step measured rather than assumed:
+#   29724 MiB  job 333170, before the control-tensor view change
+#   15273 MB   job 333797, after it (ResidentSetSize 15,638,908 KB)
+#   10336 MiB  cluster 333975, with the auxiliary datasets dropped from fit
+#
+# That last configuration is reverted: stage 1 runs the full post-fit evaluation
+# again, which needs the auxiliary datasets AND the operational threshold that
+# the anomaly_eff training callback stores on the module (and hence into the
+# checkpoint, which stage 3 later depends on). So the working set is the 15273 MB
+# figure, not 10336, and 18000 gives about 18% headroom on a measurement.
+#
+# 18000/6 still reaches far more of the pool than the 21000/7 it replaces, and
+# unlike 15000/5 it is not below the measured peak. A request under the real
+# working set does not fail cleanly here -- CERN's cgroup limit on this pool is
+# soft, so the job runs on and is evicted silently much later.
+request_cpus   = 6
+request_memory = 18000
+request_disk   = 10GB
+
+# 30 epochs. Job 333797 reached the end of data loading and into training in
+# 15 minutes at 7 cpus; this stage no longer runs the probes (1605 s) or the
+# Pareto callbacks, so 4 h is generous. An over-runtime job is evicted silently:
+# no hold, no reason, it simply leaves the queue.
++MaxRuntime = 14400
+
+queue SEED,GAMMA,BINS,ARCH,NODES,RUN_NAME from batch/pareto_runs_hepinfo4.txt

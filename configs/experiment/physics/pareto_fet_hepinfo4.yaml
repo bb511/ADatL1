@@ -1,0 +1,29 @@
+# @package _global_
+
+# Stage 1 of the post-fix validation study (branch dev/leon-hepinfo4).
+#
+# Identical to physics/pareto_fet_train in every training respect -- same data,
+# same optimiser, same 30-epoch ceiling, same evaluation callbacks -- and differs
+# only in which pareto_study block it carries. That block is what the Phase 2
+# collector validates each run against, so pointing it at fet_et_hepinfo4 is what
+# keeps these eight runs from being collected into fet-et-pareto-v1, whose runs
+# were trained with an unbounded latent and are not comparable.
+#
+# The encoder change itself is not here: configs/algorithm/ae.yaml sets
+# encoder.latent_activation=tanh, and this experiment inherits it through
+# physics/pareto_fet -> physics/ae. It therefore lands in the resolved manifest,
+# which is where it belongs -- the manifest is the record of what was trained.
+
+defaults:
+  - /experiment/physics/pareto_fet_train
+  - override /pareto_study: fet_et_hepinfo4
+  - _self_
+
+# Deliberately the same string as PARETO_EXPERIMENT_NAME in
+# batch/runae_pareto_hepinfo4.sub. The batch environment overrides this value
+# anyway, but if the two disagree then a run launched any other way -- an ad-hoc
+# training, a re-evaluation from the laptop -- writes to a different directory
+# than the batch jobs, and stage 2 then looks for checkpoints that are not there.
+# One name, whichever path you come in by.
+experiment_name: Pareto-Front-200924-hepinfo4
+tags: ["physics", "pareto", "fet-et", "hepinfo4", "mi-fix-validation"]

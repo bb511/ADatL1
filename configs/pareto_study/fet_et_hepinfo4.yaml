@@ -1,0 +1,204 @@
+# @package pareto_study
+
+# ---------------------------------------------------------------------------
+# Post-fix validation study: does the MI penalty train once the latent is bounded?
+# ---------------------------------------------------------------------------
+# fet-et-pareto-v1 trained an encoder that ended in a bare nn.Linear, so the
+# latent was unbounded, sigmoid(mi_temperature * z) was saturated, and the MI
+# term delivered no gradient at any gamma (see docs/pareto_study_report.md and
+# the latent-saturation diagnostic: 100% / 99.6% of logits below 1% gradient
+# strength, median |z| past the 12.0 histogram range). Commit 320ab47 bounds the
+# latent with tanh, matching hepinfo's BinaryMI.activation_nonbinary.
+#
+# This study is the cheap check that the fix works before the full grid is
+# re-run. It varies gamma alone -- one architecture, one binning, the same two
+# paired seeds -- so the only thing that can move loss_mi is the penalty itself.
+#
+# It is a SEPARATE study_id on purpose. The runs are not comparable with
+# fet-et-pareto-v1 (different code), and identical run names would otherwise
+# collide in the same checkpoints directory; batch/runae_pareto_hepinfo4.sub
+# therefore also sets its own PARETO_EXPERIMENT_NAME.
+#
+# This file is a standalone copy of fet_et.yaml rather than a defaults overlay:
+# an overlay merges `architectures` as a union, so the three architectures of
+# the parent would survive an attempt to narrow the grid to one. Everything
+# below except study_id, protocol_version and search_space is byte-identical to
+# fet_et.yaml, and any change to the gates or the selection policy belongs in
+# both files or in neither.
+
+# The FET.Et validation Pareto study: its identity, its search space, its
+# constraints and its selection policy.
+#
+# This lives in its own config group rather than inside
+# configs/experiment/physics/pareto_fet.yaml because the Phase 2 collector
+# (src/evaluation/pareto_aggregation.py) validates every run's resolved manifest
+# against this block -- study_id, protocol_version, configuration_id, candidate,
+# paired_autoencoder_seeds, sensitive_variable, collapse_constraint and the rest.
+# A run that carries no such block is rejected outright. Keeping the block here
+# lets an ordinary AE run (configs/experiment/physics/ae.yaml, via the `adhoc`
+# variant) carry exactly the same policy, so autoencoders trained one at a time
+# can later be collected into an experiment directory and have the Pareto front
+# computed over them.
+#
+# `candidate` below holds literal values. The `adhoc` variant replaces them with
+# interpolations from the algorithm config; see fet_et_adhoc.yaml for why the two
+# cannot be combined in one file.
+
+enabled: true
+protocol_version: fet-et-hepinfo4-v1
+study_id: fet-et-hepinfo4-v1
+# The selection protocol above and the probe protocol below are versioned
+# separately. This records which probe protocol produced L, because its
+# definition changed at v9 (16,384-row MLP batches and memory-bounded linear
+# fitting/prediction) and v10 (dimension-aware rank truncation plus a
+# catastrophic-generalization guard for the linear probes).
+# It must track LEAKAGE_PROBE_PROTOCOL_VERSION in
+# src/evaluation/leakage_probe/constants.py; the aggregator rejects artifacts
+# whose own recorded version does not match that constant.
+leakage_probe_protocol_version: fet-et-four-probe-v10
+sensitive_variable:
+  raw_target: FET.Et
+  training_target: quantile-binned FET.Et
+  target_type: ordered_continuous
+  raw_target_used_by: [leakage_probes, correlation_diagnostic]
+  binned_target_used_by: [mi_loss]
+
+# `candidate` is the sole source of the three searched AE parameters and the
+# paired replicate seed.  Launch tooling may vary only these fields; all other
+# training fields are frozen below and captured in the resolved manifest.
+candidate:
+  autoencoder_seed: 123
+  mi_gamma: 0.0
+  mi_sensitive_num_bins: 50
+  architecture_id: h64_32
+  encoder_nodes: [64, 32, 8]
+
+# This ID deliberately excludes autoencoder_seed: all three paired seed runs of
+# one hyperparameter configuration must aggregate under the same identifier.
+configuration_id: ${pareto_study.study_id}__gamma-${pareto_study.candidate.mi_gamma}__bins-${pareto_study.candidate.mi_sensitive_num_bins}__arch-${pareto_study.candidate.architecture_id}
+
+paired_autoencoder_seeds: [123, 500]
+seed_policy:
+  pairing_required: true
+  required_seeds: ${pareto_study.paired_autoencoder_seeds}
+  missing_or_invalid_seed: reject_configuration
+  aggregate_model_weights: false
+
+# Gamma-zero is a reference for every architecture and seed.  Binning is
+# irrelevant when gamma is zero, so one canonical 50-bin reference avoids
+# redundant baselines while retaining the normal MI code path.
+search_space:
+  # gamma is the only searched parameter here. Binning is pinned at the study's
+  # canonical 50 and the architecture at h64_32 -- the one the saturation
+  # diagnostic was run on, so the before/after comparison is like for like.
+  #
+  # The gamma values are hepinfo's, not fet-et-pareto-v1's. That study swept
+  # [0.05 .. 0.25]; hepinfo's own BinaryMI grid used {1, 10, 100} and its MiVAE
+  # notebook linspace(0, 1, 10). With a working gradient the old range was
+  # probably an order of magnitude too small to show anything, so this sweep
+  # brackets 1 from below.
+  searched_parameters:
+    - algorithm.mi_gamma
+  regularized:
+    mi_gamma: [0.2, 0.5, 1.0]
+    mi_sensitive_num_bins: [50]
+    architectures:
+      h64_32: [64, 32, 8]
+  gamma_zero_baseline:
+    mi_gamma: 0.0
+    mi_sensitive_num_bins: 50
+    architectures:
+      h64_32: [64, 32, 8]
+    paired_seeds: ${pareto_study.paired_autoencoder_seeds}
+  fixed_latent_width: 8
+  candidate_architecture_contract: encoder_nodes[-1] == 8
+
+evaluation:
+  train_probe_split: train
+  held_out_probe_split: valid
+  probe_data: uncapped
+  fixed_operating_point:
+    target_rate_khz: ${algorithm.target_rate}
+    base_rate_khz: ${algorithm.base_rate}
+    background_false_positive_rate: ${div:${algorithm.target_rate},${algorithm.base_rate}}
+    score_direction: higher_score_is_more_anomalous
+
+collapse_constraint:
+  representation: latent_sample
+  dataset: normal_validation
+  entropy_unit: bits
+  statistics:
+    - marginal_bit_entropy
+    - joint_code_entropy
+    - observed_code_count
+    - effective_code_count
+  seed_level_rule:
+    minimum_joint_code_entropy_bits: 1.0
+    minimum_fraction_of_paired_gamma_zero_joint_entropy: 0.5
+    paired_reference: same_architecture_and_autoencoder_seed
+    baseline_below_minimum_entropy: reject_baseline_and_dependent_candidates
+  configuration_level_rule:
+    required_seed_pass_fraction: 1.0
+    failed_seed: reject_configuration
+    include_rejected_configurations_in_results: true
+
+minimum_efficiency_constraint:
+  metric: min_signal_efficiency
+  comparison: paired_gamma_zero_baseline
+  paired_reference: same_architecture_and_autoencoder_seed
+  max_relative_degradation: 0.05
+  seed_level_rule: candidate >= 0.95 * paired_gamma_zero_baseline
+  configuration_level_rule: every_expected_seed_must_pass
+
+# E is intentionally a third Pareto objective, not merely a dashboard
+# safeguard.  It remains the maximum of mean absolute Pearson and Spearman
+# reconstruction correlations, so both components are already in [0, 1].
+objectives:
+  leakage:
+    symbol: L
+    direction: minimize
+    definition: max(clipped_held_out_r2_of_mlp_and_linear_probes_on_z_logits_and_reconstruction)
+  residual_correlation:
+    symbol: E
+    role: pareto_objective
+    direction: minimize
+    definition: max(mean_absolute_pearson_reconstruction, mean_absolute_spearman_reconstruction)
+  signal_utility:
+    symbol: epsilon_median
+    direction: maximize
+    definition: median_per_signal_efficiency_at_fixed_operating_point
+
+partial_auroc:
+  role: diagnostic_only
+  positive_class: signal
+  score_direction: higher_score_is_more_anomalous
+  max_false_positive_rate: ${pareto_study.evaluation.fixed_operating_point.background_false_positive_rate}
+  raw_definition: integral_0_to_max_fpr_of_tpr_as_a_function_of_fpr
+  endpoint_rule: linearly_interpolate_tpr_at_max_false_positive_rate
+  normalization: raw_partial_auc / max_false_positive_rate
+  normalized_range: [0.0, 1.0]
+  random_ranking_reference: 0.5
+  per_signal_summary: [minimum, median]
+
+# All objective terms are naturally bounded in [0, 1], avoiding
+# candidate-set-dependent min-max scaling.  The ranking is only applied to
+# feasible, non-dominated validation configurations.
+ideal_point_ranking:
+  eligible_candidates: feasible_non_dominated_validation_configurations
+  normalized_costs:
+    leakage: L
+    residual_correlation: E
+    signal_utility: 1 - epsilon_median
+  ideal_point: [0.0, 0.0, 0.0]
+  distance: weighted_euclidean
+  weights:
+    leakage: 0.3333333333333333
+    residual_correlation: 0.3333333333333333
+    signal_utility: 0.3333333333333333
+  deterministic_tie_break: configuration_id_ascending
+  uncertainty_policy: flag_selected_vs_front_members_with_overlapping_marginal_95_percent_cis
+
+resolved_manifest:
+  filename: pareto_manifest.resolved.yaml
+  includes_full_resolved_hydra_config: true
+  write_before_training: true

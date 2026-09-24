@@ -7,8 +7,8 @@
 #
 #   phase2/  pareto_metrics.csv, pareto_metrics.parquet,
 #            <configuration_id>/pareto_metrics.json
-#   phase3/  pareto_front.csv, pareto_candidates.csv,
-#            pareto_selection.json, pareto_projection.png
+#   phase3/  pareto_front.csv, pareto_candidates.csv, pareto_selection.json
+#   phase4/  the figures, drawn from the phase3 tables and nothing else
 #
 # Unlike stages 1-3 this is a whole-study step, not a per-run one, so it takes no
 # RUN_NAME. It is pure pandas/numpy: no torch, no GPU, minutes not hours.
@@ -44,6 +44,7 @@ REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 : "${STUDY_MAP:=${STUDY_ROOT}/study_map.yaml}"
 : "${PHASE2_OUTPUT:=${STUDY_ROOT}/phase2}"
 : "${PHASE3_OUTPUT:=${STUDY_ROOT}/phase3}"
+: "${PHASE4_OUTPUT:=${STUDY_ROOT}/phase4}"
 
 : "${EXPERIMENT_NAME:=}"
 : "${CHECKPOINTS_DIR:=${ADL1T_OUTPUT_ROOT}/checkpoints}"
@@ -81,6 +82,7 @@ echo " STAGE 4/4  COLLECT + SELECT"
 echo "   study map: $STUDY_MAP"
 echo "   phase 2:   $PHASE2_OUTPUT"
 echo "   phase 3:   $PHASE3_OUTPUT"
+echo "   phase 4:   $PHASE4_OUTPUT"
 echo "==============================================================="
 
 echo "--- phase 2: aggregating per-run artifacts ---"
@@ -93,7 +95,14 @@ python3 scripts/select_pareto_front.py \
   --input-table "${PHASE2_OUTPUT}/pareto_metrics.parquet" \
   --output-dir "$PHASE3_OUTPUT"
 
+echo "--- phase 4: drawing the figures ---"
+# Reads only the phase 3 tables, so what is drawn is exactly what was selected.
+python3 scripts/plot_pareto_study.py \
+  --candidates "${PHASE3_OUTPUT}/pareto_candidates.csv" \
+  --front "${PHASE3_OUTPUT}/pareto_front.csv" \
+  --output-dir "$PHASE4_OUTPUT"
+
 echo
 echo "Front:     ${PHASE3_OUTPUT}/pareto_front.csv"
 echo "Selection: ${PHASE3_OUTPUT}/pareto_selection.json"
-echo "Plot:      ${PHASE3_OUTPUT}/pareto_projection.png"
+echo "Figures:   ${PHASE4_OUTPUT}/"

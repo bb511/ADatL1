@@ -153,7 +153,53 @@ def test_csv_cli_path_writes_all_lean_outputs(tmp_path: Path) -> None:
     assert read_phase2_table(input_path).equals(pd.read_csv(input_path))
     assert (selection_dir / "pareto_candidates.csv").is_file()
     assert (selection_dir / "pareto_front.csv").is_file()
-    assert (selection_dir / "pareto_projection.png").is_file()
     report = json.loads((selection_dir / "pareto_selection.json").read_text())
     assert report["selected_configuration_id"] == "a"
     assert report["counts"]["pareto_front_configurations"] == 1
+
+
+def test_report_records_paths_relative_to_itself(tmp_path: Path) -> None:
+    """The report must survive the study tree being copied off EOS.
+
+    Phase 2 and phase 3 are siblings under the study root, so the recorded
+    provenance is ../phase2/pareto_metrics.csv and the outputs are bare
+    filenames. An absolute path here would be correct only on the machine that
+    produced it.
+    """
+
+    phase2 = tmp_path / "phase2"
+    phase3 = tmp_path / "phase3"
+    phase2.mkdir()
+    input_path = phase2 / "pareto_metrics.csv"
+    _table(
+        _row("a", leakage=0.1, correlation=0.1, efficiency=0.9),
+        _row("b", leakage=0.2, correlation=0.2, efficiency=0.8),
+    ).to_csv(input_path, index=False)
+
+    select_and_write_pareto_front(input_path, output_dir=phase3)
+    report = json.loads((phase3 / "pareto_selection.json").read_text())
+
+    assert report["input_table"] == str(Path("..") / "phase2" / "pareto_metrics.csv")
+    assert report["output_paths"] == {
+        "candidates_csv": "pareto_candidates.csv",
+        "front_csv": "pareto_front.csv",
+        "selection_json": "pareto_selection.json",
+    }
+    for relative in report["output_paths"].values():
+        assert not Path(relative).is_absolute()
+        assert (phase3 / relative).is_file()
+    assert (phase3 / report["input_table"]).resolve() == input_path.resolve()
+
+
+def test_selection_writes_no_figures(tmp_path: Path) -> None:
+    """Phase 3 computes; phase 4 draws. Selection must emit no images."""
+
+    input_path = tmp_path / "pareto_metrics.csv"
+    _table(
+        _row("a", leakage=0.1, correlation=0.1, efficiency=0.9),
+        _row("b", leakage=0.2, correlation=0.2, efficiency=0.8),
+    ).to_csv(input_path, index=False)
+
+    select_and_write_pareto_front(input_path, output_dir=tmp_path / "phase3")
+
+    assert not list((tmp_path / "phase3").glob("*.png"))

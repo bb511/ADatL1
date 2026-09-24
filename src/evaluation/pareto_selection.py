@@ -11,6 +11,7 @@ from __future__ import annotations
 import argparse
 import json
 import math
+import os
 from pathlib import Path
 from typing import Any
 
@@ -368,89 +369,6 @@ def read_phase2_table(path: str | Path) -> pd.DataFrame:
     raise ParetoSelectionError("Input must be a .csv, .parquet, or .pq Phase 2 table.")
 
 
-def write_pareto_projection(
-    candidates: pd.DataFrame, front: pd.DataFrame, *, output_path: str | Path
-) -> None:
-    """Write the lean L-versus-median-efficiency projection as a PNG."""
-
-    import matplotlib
-
-    matplotlib.use("Agg")
-    import matplotlib.pyplot as plt
-
-    destination = Path(output_path)
-    figure, axis = plt.subplots(figsize=(8, 6), constrained_layout=True)
-    eligible = candidates.loc[candidates[VALID_COLUMN] & candidates[FEASIBLE_COLUMN]]
-    dominated = eligible.loc[~eligible[_PARETO_FRONT_COLUMN]]
-    if not dominated.empty:
-        axis.scatter(
-            dominated[LEAKAGE_COLUMN],
-            dominated[EFFICIENCY_COLUMN],
-            color="0.70",
-            label="Feasible, dominated",
-            zorder=1,
-        )
-
-    if not front.empty:
-        x_error = np.vstack(
-            (
-                front[LEAKAGE_COLUMN] - front[LEAKAGE_COLUMN.replace("_mean", "_ci95_low")],
-                front[LEAKAGE_COLUMN.replace("_mean", "_ci95_high")] - front[LEAKAGE_COLUMN],
-            )
-        )
-        y_error = np.vstack(
-            (
-                front[EFFICIENCY_COLUMN]
-                - front[EFFICIENCY_COLUMN.replace("_mean", "_ci95_low")],
-                front[EFFICIENCY_COLUMN.replace("_mean", "_ci95_high")]
-                - front[EFFICIENCY_COLUMN],
-            )
-        )
-        axis.errorbar(
-            front[LEAKAGE_COLUMN],
-            front[EFFICIENCY_COLUMN],
-            xerr=x_error,
-            yerr=y_error,
-            fmt="none",
-            ecolor="0.35",
-            capsize=2,
-            zorder=2,
-        )
-        points = axis.scatter(
-            front[LEAKAGE_COLUMN],
-            front[EFFICIENCY_COLUMN],
-            c=front[CORRELATION_COLUMN],
-            cmap="viridis",
-            edgecolor="black",
-            label="Pareto front",
-            zorder=3,
-        )
-        colorbar = figure.colorbar(points, ax=axis)
-        colorbar.set_label("Residual correlation E (lower is better)")
-        selected = front.iloc[0]
-        axis.scatter(
-            [selected[LEAKAGE_COLUMN]],
-            [selected[EFFICIENCY_COLUMN]],
-            marker="*",
-            s=180,
-            color="crimson",
-            edgecolor="black",
-            label="Selected",
-            zorder=4,
-        )
-
-    axis.set_xlabel("Leakage L (lower is better)")
-    axis.set_ylabel("Median signal efficiency (higher is better)")
-    axis.set_xlim(left=0.0, right=1.0)
-    axis.set_ylim(bottom=0.0, top=1.0)
-    axis.set_title("Validation Pareto projection")
-    handles, labels = axis.get_legend_handles_labels()
-    if handles:
-        axis.legend(handles, labels, loc="best")
-    figure.savefig(destination, dpi=200)
-    plt.close(figure)
-
-
 def write_selection_outputs(
     candidates: pd.DataFrame,
     front: pd.DataFrame,
@@ -458,23 +376,31 @@ def write_selection_outputs(
     *,
     output_dir: str | Path,
 ) -> dict[str, Path]:
-    """Persist the lean Phase 3 tables, report, and projection."""
+    """Persist the lean Phase 3 tables and report.
+
+    No figures: Phase 4 (src/evaluation/pareto_plots.py) draws them from these
+    tables. Selection and drawing are separate so a figure can be restyled
+    without re-running selection, and selection cannot be changed by a
+    plotting edit.
+    """
 
     destination = Path(output_dir)
     destination.mkdir(parents=True, exist_ok=True)
     candidate_path = destination / "pareto_candidates.csv"
     front_path = destination / "pareto_front.csv"
     report_path = destination / "pareto_selection.json"
-    plot_path = destination / "pareto_projection.png"
 
     candidates.to_csv(candidate_path, index=False)
     front.to_csv(front_path, index=False)
-    write_pareto_projection(candidates, front, output_path=plot_path)
+    # Recorded relative to this report, not as absolute paths. The study tree
+    # is written on EOS and read after being copied elsewhere; an absolute
+    # /eos/user/... string in the artifact is wrong everywhere but the machine
+    # that produced it. All four outputs sit beside the report, so these are
+    # bare filenames.
     selection["output_paths"] = {
-        "candidates_csv": str(candidate_path),
-        "front_csv": str(front_path),
-        "selection_json": str(report_path),
-        "projection_png": str(plot_path),
+        "candidates_csv": candidate_path.name,
+        "front_csv": front_path.name,
+        "selection_json": report_path.name,
     }
     report_path.write_text(
         json.dumps(selection, indent=2, sort_keys=True, allow_nan=False) + "\n",
@@ -484,7 +410,6 @@ def write_selection_outputs(
         "candidates_csv": candidate_path,
         "front_csv": front_path,
         "selection_json": report_path,
-        "projection_png": plot_path,
     }
 
 
@@ -494,17 +419,22 @@ def select_and_write_pareto_front(
     """Read one Phase 2 table, select the front, and write the lean artifacts."""
 
     source = Path(input_path)
+    destination = Path(output_dir)
     candidates, front, selection = select_pareto_front(read_phase2_table(source))
-    selection["input_table"] = str(source.resolve())
-    selection["output_paths"] = {
-        name: str(path)
-        for name, path in write_selection_outputs(
-            candidates,
-            front,
-            selection,
-            output_dir=output_dir,
-        ).items()
-    }
+    # Relative to the output directory, so the recorded provenance survives the
+    # study tree being moved: phase 2 and phase 3 are siblings, which makes this
+    # the familiar ../phase2/pareto_metrics.parquet. os.path.relpath rather than
+    # Path.relative_to, which cannot walk upwards before Python 3.12.
+    selection["input_table"] = os.path.relpath(
+        source.resolve(),
+        destination.resolve(),
+    )
+    write_selection_outputs(
+        candidates,
+        front,
+        selection,
+        output_dir=destination,
+    )
     return selection
 
 

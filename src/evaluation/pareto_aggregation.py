@@ -19,6 +19,7 @@ from typing import Any
 import numpy as np
 import pandas as pd
 from omegaconf import OmegaConf
+from scipy.stats import t as student_t
 
 from src.evaluation.leakage_probe.aggregation import (
     ProbeAggregationError,
@@ -575,18 +576,35 @@ def _collect_run(
 
 
 def _summary(values: Sequence[float]) -> dict[str, float | int]:
+    """Aggregate one metric over the paired seeds.
+
+    The interval uses Student's t at n-1 degrees of freedom, not 1.96. With two
+    paired seeds there is one degree of freedom and t(0.975, 1) = 12.71, so the
+    normal quantile understates the interval by a factor of 6.5 -- enough to make
+    a selection look decisive when the seeds alone do not support it.
+
+    seed_min and seed_max record what was actually observed. At n = 2 the
+    standard error happens to equal half the gap between the two seeds, so
+    mean +/- standard_error lands exactly on them; that coincidence does not
+    survive a third seed, and the recorded extremes do.
+    """
+
     array = np.asarray(values, dtype=np.float64)
     if array.size < 2 or not np.isfinite(array).all():
         raise ParetoCollectionError("Metric aggregation requires at least two finite seed values.")
     sample_std = float(np.std(array, ddof=1))
     standard_error = sample_std / math.sqrt(array.size)
-    ci_half_width = 1.96 * standard_error
+    critical_value = float(student_t.ppf(0.975, array.size - 1))
+    ci_half_width = critical_value * standard_error
     mean = float(np.mean(array))
     return {
         "n_seeds": int(array.size),
         "mean": mean,
         "sample_std": sample_std,
         "standard_error": standard_error,
+        "seed_min": float(array.min()),
+        "seed_max": float(array.max()),
+        "ci95_critical_value": critical_value,
         "ci95_low": mean - ci_half_width,
         "ci95_high": mean + ci_half_width,
     }

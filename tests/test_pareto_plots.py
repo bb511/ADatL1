@@ -46,6 +46,11 @@ def _row(
         ("median_efficiency", efficiency),
     ):
         row[f"{column}_mean"] = value
+        row[f"{column}_n_seeds"] = 2
+        row[f"{column}_sample_std"] = 0.008
+        row[f"{column}_standard_error"] = 0.008 / 2 ** 0.5
+        row[f"{column}_seed_min"] = value - 0.004
+        row[f"{column}_seed_max"] = value + 0.004
         row[f"{column}_ci95_low"] = value - 0.01
         row[f"{column}_ci95_high"] = value + 0.01
     return row
@@ -123,3 +128,20 @@ def test_missing_column_is_reported_rather_than_crashing_matplotlib(tmp_path: Pa
         write_pareto_figures(
             candidates.drop(columns=["architecture_id"]), front, output_dir=tmp_path
         )
+
+
+def test_bars_are_the_seed_spread_not_a_confidence_interval(tmp_path: Path) -> None:
+    """The drawn bar must come from sample_std, never from the ci95 columns.
+
+    Two seeds cannot support an inferential claim, so a bar sized from a 95%
+    interval would overstate what the study knows.
+    """
+
+    from src.evaluation.pareto_plots import _spread_bounds
+
+    candidates, _ = _study()
+    bounds = _spread_bounds(candidates, "leakage_worst_mean")
+
+    assert bounds.shape == (2, len(candidates))
+    assert (bounds[0] == bounds[1]).all()
+    assert (bounds[0] == candidates["leakage_worst_sample_std"].to_numpy()).all()

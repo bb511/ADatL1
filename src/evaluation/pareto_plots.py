@@ -7,6 +7,10 @@ and selection cannot be silently changed by a plotting edit.
 Every figure reads the two Phase 3 tables and nothing else, so what is drawn is
 exactly what was selected.
 
+Bars are the sample standard deviation across the paired seeds, not a
+confidence interval: with two seeds there is one degree of freedom, and a bar
+labelled "95% CI" invites a significance reading the data cannot support.
+
 Colour follows the data-viz palette. Gamma is an ordered factor with five
 regularised levels, so it takes a validated five-step single-hue ordinal ramp
 (all four ordinal checks pass on the light surface). Gamma zero is deliberately
@@ -51,7 +55,13 @@ SEQUENTIAL_BLUE = (
     "#cde2fb", "#b7d3f6", "#9ec5f4", "#86b6ef", "#6da7ec", "#5598e7",
     "#3987e5", "#2a78d6", "#256abf", "#1c5cab", "#184f95", "#104281", "#0d366b",
 )
+#: Neutral ink for size swatches and other non-identity chrome.
 BASELINE_INK = "#52514e"
+#: The gamma-zero baseline: categorical red, a square, never part of the blue
+#: ordinal ramp. 3.85:1 on the chart surface, so a thin open edge stays
+#: legible, and deliberately not the reserved "critical" status token.
+BASELINE_MARK = "#e34948"
+BASELINE_MARKER = "s"
 EXCLUDED_INK = "#bdbcb5"
 GRID_INK = "#e8e7e3"
 TEXT_PRIMARY = "#0b0b0b"
@@ -63,6 +73,20 @@ SURFACE = "#fcfcfb"
 #: FET.Et collapse, so the effective bin count is lower than the requested one.
 BINS_AREA = {40: 34.0, 50: 86.0, 60: 170.0}
 _DEFAULT_AREA = 86.0
+
+#: Area range for a size-encoded ordered factor. Area is a weak channel, so the
+#: ends are far apart and the number of levels is kept small.
+SIZE_AREA_RANGE = (36.0, 210.0)
+
+#: What a size encoding is allowed to carry, and how its levels are ordered.
+#: Architecture is nominal -- area implies a magnitude it does not have -- so it
+#: is ordered by the study's own declared sequence and labelled as a key rather
+#: than a scale.
+SIZE_ENCODINGS = {
+    "gamma": (GAMMA_COLUMN, r"$\gamma$", None),
+    "bins": (BINS_COLUMN, "requested bins", None),
+    "architecture": (ARCHITECTURE_COLUMN, "architecture", ARCHITECTURE_ORDER),
+}
 
 AXIS_LABELS = {
     LEAKAGE_COLUMN: "Leakage $L$ (worst of four probes, held-out $R^2$)",
@@ -86,12 +110,16 @@ def _as_bool(series: pd.Series, *, label: str) -> pd.Series:
     return mapped.astype(bool)
 
 
-def _ci_bounds(frame: pd.DataFrame, column: str) -> np.ndarray:
-    """Asymmetric error-bar offsets from the stored interval."""
+def _spread_bounds(frame: pd.DataFrame, column: str) -> np.ndarray:
+    """Bar offsets: the sample standard deviation across the paired seeds.
 
-    low = frame[column.replace("_mean", "_ci95_low")]
-    high = frame[column.replace("_mean", "_ci95_high")]
-    return np.vstack(((frame[column] - low).to_numpy(), (high - frame[column]).to_numpy()))
+    Deliberately the observed spread and not a confidence interval. Two seeds
+    cannot support an inferential claim, and a bar labelled "95% CI" invites one;
+    this says only how far apart the seeds of one configuration landed.
+    """
+
+    spread = frame[column.replace("_mean", "_sample_std")].to_numpy()
+    return np.vstack((spread, spread))
 
 
 def _gamma_levels(frame: pd.DataFrame) -> list[float]:
@@ -119,6 +147,36 @@ def _areas(frame: pd.DataFrame) -> np.ndarray:
          for value in frame[BINS_COLUMN]],
         dtype=float,
     )
+
+
+def _size_levels(frame: pd.DataFrame, column: str, order: Sequence[Any] | None):
+    """Ordered distinct values of a size-encoded column."""
+
+    present = [value for value in frame[column].dropna().unique()]
+    if order is not None:
+        ranked = [value for value in order if value in present]
+        return ranked + sorted(value for value in present if value not in order)
+    return sorted(present)
+
+
+def _size_areas(frame: pd.DataFrame, column: str, levels: Sequence[Any]) -> np.ndarray:
+    lookup = dict(zip(levels, np.linspace(*SIZE_AREA_RANGE, num=max(len(levels), 1))))
+    return np.array(
+        [lookup.get(value, np.mean(SIZE_AREA_RANGE)) for value in frame[column]],
+        dtype=float,
+    )
+
+
+def _size_legend_handles(levels: Sequence[Any], title: str):
+    from matplotlib.lines import Line2D
+
+    areas = np.linspace(*SIZE_AREA_RANGE, num=max(len(levels), 1))
+    return [
+        Line2D([], [], marker="o", linestyle="none", markersize=float(np.sqrt(area)),
+               markerfacecolor=BASELINE_INK, markeredgecolor="none",
+               label=f"{title} = {level}")
+        for level, area in zip(levels, areas)
+    ]
 
 
 def _style_axis(axis, *, x_column: str, y_column: str) -> None:
@@ -162,13 +220,13 @@ def _draw_excluded(axis, excluded: pd.DataFrame, x_column: str, y_column: str) -
 
 
 def _draw_front_rings(axis, front: pd.DataFrame, x_column: str, y_column: str) -> None:
-    """Open rings plus the 95% intervals: the front is a claim with uncertainty."""
+    """Open rings plus the seed spread: the front is a claim with a scatter."""
 
     if front.empty:
         return
     axis.errorbar(
         front[x_column], front[y_column],
-        xerr=_ci_bounds(front, x_column), yerr=_ci_bounds(front, y_column),
+        xerr=_spread_bounds(front, x_column), yerr=_spread_bounds(front, y_column),
         fmt="none", ecolor=TEXT_SECONDARY, elinewidth=0.9, capsize=2, zorder=3,
     )
     axis.scatter(
@@ -192,9 +250,9 @@ def _gamma_legend_handles(
     handles = []
     if has_baseline:
         handles.append(
-            Line2D([], [], marker="s", linestyle="none", markersize=8,
-                   markerfacecolor=BASELINE_INK if baseline_filled else "none",
-                   markeredgecolor=BASELINE_INK, markeredgewidth=1.4,
+            Line2D([], [], marker=BASELINE_MARKER, linestyle="none", markersize=8,
+                   markerfacecolor=BASELINE_MARK if baseline_filled else "none",
+                   markeredgecolor=BASELINE_MARK, markeredgewidth=1.6,
                    label=r"$\gamma = 0$  (baseline)")
         )
     handles.extend(
@@ -225,7 +283,8 @@ def _scatter_by_gamma(axis, frame: pd.DataFrame, x_column: str, y_column: str,
     if not baseline.empty:
         axis.scatter(
             baseline[x_column], baseline[y_column], s=_areas(baseline),
-            facecolors="none", edgecolors=BASELINE_INK, linewidths=1.4, zorder=2,
+            marker=BASELINE_MARKER, facecolors="none", edgecolors=BASELINE_MARK,
+            linewidths=1.6, zorder=2,
         )
     regularised = frame.loc[frame[GAMMA_COLUMN] != 0.0]
     if not regularised.empty:
@@ -285,6 +344,7 @@ def faceted_figure(candidates: pd.DataFrame, *, y_column: str, output_path: Path
     )
     handles += _bins_legend_handles(eligible)
     handles += _ring_legend_handle()
+    handles += _spread_legend_handle(eligible)
     if any_excluded:
         handles += _excluded_legend_handle()
     figure.legend(
@@ -316,6 +376,24 @@ def _ring_legend_handle():
                    markeredgewidth=1.5, label="On the Pareto front")]
 
 
+def _spread_legend_handle(frame: pd.DataFrame):
+    """Name the bar for what it is, with n, so it is never read as a CI."""
+
+    from matplotlib.lines import Line2D
+
+    seed_columns = [column for column in frame.columns if column.endswith("_n_seeds")]
+    seeds = sorted({int(value) for column in seed_columns
+                    for value in frame[column].dropna()})
+    if not seeds:
+        count = "?"
+    elif len(seeds) == 1:
+        count = str(seeds[0])
+    else:
+        count = f"{min(seeds)}-{max(seeds)}"
+    return [Line2D([], [], color=TEXT_SECONDARY, linewidth=1.0,
+                   label=f"mean $\\pm$ std over {count} seeds")]
+
+
 def _excluded_legend_handle():
     from matplotlib.lines import Line2D
 
@@ -324,7 +402,13 @@ def _excluded_legend_handle():
                    markeredgewidth=0.9, label="Invalid or infeasible")]
 
 
-def third_objective_figure(candidates: pd.DataFrame, *, output_path: Path) -> Path:
+def third_objective_figure(
+    candidates: pd.DataFrame,
+    *,
+    output_path: Path,
+    annotate_front: bool = True,
+    size_by: str | None = None,
+) -> Path:
     """L against efficiency with residual correlation as the colour.
 
     The companion to the faceted figures and, for reading the front, the more
@@ -332,6 +416,13 @@ def third_objective_figure(candidates: pd.DataFrame, *, output_path: Path) -> Pa
     point can sit inside the cloud of a two-dimensional projection purely
     because it wins on the axis that projection dropped. Here that axis is the
     colour.
+
+    ``annotate_front=False`` drops the front rings and the seed-spread bars,
+    leaving the bare cloud. Useful when the point is the shape of the sweep
+    rather than which configurations survived the comparison.
+
+    ``size_by`` adds one of SIZE_ENCODINGS as mark area, so a grid axis can be
+    read off the same cloud without faceting it.
     """
 
     import matplotlib
@@ -350,15 +441,30 @@ def third_objective_figure(candidates: pd.DataFrame, *, output_path: Path) -> Pa
     figure, axis = plt.subplots(figsize=(7.5, 5.8), constrained_layout=True)
     figure.patch.set_facecolor(SURFACE)
     any_excluded = _draw_excluded(axis, excluded, LEAKAGE_COLUMN, EFFICIENCY_COLUMN)
+    size_handles: list = []
+    if size_by is None:
+        areas: float | np.ndarray = 90.0
+    else:
+        if size_by not in SIZE_ENCODINGS:
+            raise ParetoPlotError(
+                f"Unknown size encoding {size_by!r}; expected one of "
+                f"{sorted(SIZE_ENCODINGS)}."
+            )
+        size_column, size_title, size_order = SIZE_ENCODINGS[size_by]
+        levels = _size_levels(eligible, size_column, size_order)
+        areas = _size_areas(eligible, size_column, levels)
+        size_handles = _size_legend_handles(levels, size_title)
+
     points = axis.scatter(
         eligible[LEAKAGE_COLUMN], eligible[EFFICIENCY_COLUMN],
         c=eligible[CORRELATION_COLUMN], cmap=colormap,
-        s=90.0, edgecolors=SURFACE, linewidths=0.8, zorder=2,
+        s=areas, edgecolors=SURFACE, linewidths=0.8, zorder=2,
     )
-    _draw_front_rings(
-        axis, eligible.loc[_as_bool(eligible[FRONT_COLUMN], label=FRONT_COLUMN)],
-        LEAKAGE_COLUMN, EFFICIENCY_COLUMN,
-    )
+    if annotate_front:
+        _draw_front_rings(
+            axis, eligible.loc[_as_bool(eligible[FRONT_COLUMN], label=FRONT_COLUMN)],
+            LEAKAGE_COLUMN, EFFICIENCY_COLUMN,
+        )
     _style_axis(axis, x_column=LEAKAGE_COLUMN, y_column=EFFICIENCY_COLUMN)
 
     colorbar = figure.colorbar(points, ax=axis)
@@ -367,8 +473,11 @@ def third_objective_figure(candidates: pd.DataFrame, *, output_path: Path) -> Pa
     colorbar.ax.tick_params(colors=TEXT_SECONDARY, labelsize=9)
     colorbar.outline.set_edgecolor(GRID_INK)
 
-    handles = _ring_legend_handle() + (_excluded_legend_handle() if any_excluded else [])
-    axis.legend(handles=handles, frameon=False, labelcolor=TEXT_SECONDARY, fontsize=9)
+    handles = (_ring_legend_handle() + _spread_legend_handle(eligible)) if annotate_front else []
+    handles += size_handles
+    handles += _excluded_legend_handle() if any_excluded else []
+    if handles:
+        axis.legend(handles=handles, frameon=False, labelcolor=TEXT_SECONDARY, fontsize=9)
     axis.set_title("All three objectives at once", color=TEXT_PRIMARY, fontsize=12)
     figure.savefig(output_path, dpi=200, facecolor=SURFACE)
     plt.close(figure)
@@ -463,7 +572,7 @@ def front_parallel_coordinates(front: pd.DataFrame, *, output_path: Path) -> Pat
         gamma = float(ordered.iloc[row][GAMMA_COLUMN])
         axis.plot(
             positions, normalised[row],
-            color=BASELINE_INK if gamma == 0.0 else gamma_colors[gamma],
+            color=BASELINE_MARK if gamma == 0.0 else gamma_colors[gamma],
             linewidth=1.0, alpha=0.35, zorder=1, solid_capstyle="round",
         )
 
@@ -472,8 +581,9 @@ def front_parallel_coordinates(front: pd.DataFrame, *, output_path: Path) -> Pat
         gamma = float(configuration[GAMMA_COLUMN])
         axis.plot(
             positions, normalised[row],
-            color=BASELINE_INK if gamma == 0.0 else gamma_colors[gamma],
-            linewidth=2.2, marker="o", markersize=8, markeredgecolor=SURFACE,
+            color=BASELINE_MARK if gamma == 0.0 else gamma_colors[gamma],
+            linewidth=2.2, marker=BASELINE_MARKER if gamma == 0.0 else "o",
+            markersize=8, markeredgecolor=SURFACE,
             markeredgewidth=0.8, zorder=3, solid_capstyle="round",
         )
 
@@ -540,6 +650,14 @@ FIGURE_FILENAMES = {
     "leakage_vs_efficiency_by_architecture": "pareto_L_vs_efficiency_by_architecture.png",
     "leakage_vs_correlation_by_architecture": "pareto_L_vs_correlation_by_architecture.png",
     "leakage_vs_efficiency_by_correlation": "pareto_L_vs_efficiency_coloured_by_E.png",
+    "leakage_vs_efficiency_by_correlation_plain":
+        "pareto_L_vs_efficiency_coloured_by_E_plain.png",
+    "leakage_vs_efficiency_by_correlation_size_gamma":
+        "pareto_L_vs_efficiency_coloured_by_E_size_gamma.png",
+    "leakage_vs_efficiency_by_correlation_size_bins":
+        "pareto_L_vs_efficiency_coloured_by_E_size_bins.png",
+    "leakage_vs_efficiency_by_correlation_size_architecture":
+        "pareto_L_vs_efficiency_coloured_by_E_size_architecture.png",
     "front_parallel_coordinates": "pareto_front_parallel_coordinates.png",
 }
 
@@ -575,6 +693,20 @@ def write_pareto_figures(
         candidates,
         output_path=destination / FIGURE_FILENAMES["leakage_vs_efficiency_by_correlation"],
     )
+    written["leakage_vs_efficiency_by_correlation_plain"] = third_objective_figure(
+        candidates,
+        annotate_front=False,
+        output_path=destination
+        / FIGURE_FILENAMES["leakage_vs_efficiency_by_correlation_plain"],
+    )
+    for size_by in SIZE_ENCODINGS:
+        key = f"leakage_vs_efficiency_by_correlation_size_{size_by}"
+        written[key] = third_objective_figure(
+            candidates,
+            annotate_front=False,
+            size_by=size_by,
+            output_path=destination / FIGURE_FILENAMES[key],
+        )
     if not front.empty:
         written["front_parallel_coordinates"] = front_parallel_coordinates(
             front,

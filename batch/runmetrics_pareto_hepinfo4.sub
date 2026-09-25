@@ -1,0 +1,48 @@
+# STAGE 3 of the post-fix validation study -- efficiency, residual correlation,
+# latent collapse and AUROC. 8 jobs, one per grid point.
+#
+#   condor_submit batch/runmetrics_pareto_hepinfo4.sub          # 8 jobs
+#
+# Independent of stage 2: the probes write leakage_probe artifacts, this stage
+# writes the efficiency / correlation / collapse / AUROC summaries, both into
+# the same checkpoint tree. Either order, or both at once.
+#
+# Two things differ from batch/runmetrics_pareto.sub, and both matter. EXPERIMENT
+# points at the hepinfo4 evaluation overlay, so the artifacts are validated
+# against study fet-et-hepinfo4-v1. And PARETO_EXPERIMENT_NAME points at this
+# study's own checkpoint tree -- without it the jobs would read the
+# fet-et-pareto-v1 checkpoints, whose gamma=0 runs carry exactly these names.
+#
+# Expect the collapse gate to be the interesting one here. gamma=1 costs 24%
+# reconstruction against the gamma=0 baseline, so if any configuration trips
+# minimum_joint_code_entropy_bits or the 5% efficiency floor, that is the one.
+
+executable = batch/runmetrics_pareto.sh
+
+log    = batch/logs/runmetrics_pareto_hepinfo4.$(ClusterId).log
+output = batch/logs/runmetrics_pareto_hepinfo4.$(ClusterId).$(ProcId).out
+error  = batch/logs/runmetrics_pareto_hepinfo4.$(ClusterId).$(ProcId).err
+
+MY.SingularityImage = "/eos/user/l/lbehrens/containers/adl1t_lab-dev.sif"
+
+environment = "SEED=$(SEED) MI_GAMMA=$(GAMMA) MI_NUM_BINS=$(BINS) ARCHITECTURE_ID=$(ARCH) ENCODER_NODES_US=$(NODES) RUN_NAME=$(RUN_NAME) EXPERIMENT=physics/pareto_fet_hepinfo4_eval PARETO_EXPERIMENT_NAME=Pareto-Front-200924-hepinfo4 TRAINER=cpu CPU_THREADS=7 DATA_WORKERS=3"
+
+# No transfer_output_files: the summary JSONs are written into the existing
+# checkpoint tree on EOS.
+
+request_gpus = 0
+
+# This stage DOES need the auxiliary datasets that stage 1 no longer loads: the
+# efficiency, AUROC and correlation callbacks all walk the 21 signal loaders.
+# Measured resident after setup("validate"): 7146.6 MiB of data, plus each
+# callback's own per-dataset accumulators. Kept at the stage-1 shape until
+# measured.
+request_cpus   = 7
+request_memory = 21000
+request_disk   = 10GB
+
+# Locally the plain validation pass was 96 s; this stage adds three callbacks
+# that each walk the same 22 loaders again.
++MaxRuntime = 7200
+
+queue SEED,GAMMA,BINS,ARCH,NODES,RUN_NAME from batch/pareto_runs_hepinfo4.txt

@@ -1,0 +1,52 @@
+# STAGE 2 of the post-fix validation study -- the four leakage probes, 8 jobs.
+#
+#   condor_submit batch/runprobes_pareto_hepinfo4.sub          # 8 jobs
+#
+# Takes the SAME job list as stage 1 rather than a list of run names: the probes
+# reproduce the algorithm exactly so the run_manifest fingerprint check passes,
+# and the candidate values are what reproduce it.
+#
+# Two things differ from batch/runprobes_pareto.sub, and both matter. EXPERIMENT
+# points at the hepinfo4 evaluation overlay, so the pareto_study block the
+# artifacts are validated against is fet-et-hepinfo4-v1. And
+# PARETO_EXPERIMENT_NAME points at this study's own checkpoint tree -- without
+# it the jobs would read the fet-et-pareto-v1 checkpoints, whose gamma=0 runs
+# carry exactly these run names.
+#
+# Prerequisite: the stage-1 outputs must be merged under ADL1T_OUTPUT_ROOT
+# (/eos/user/l/lbehrens/adatl1/ADatL1/outputs by default in
+# batch/runprobes_pareto.sh). Check before submitting:
+#
+#   ls outputs/checkpoints/Pareto-Front-200924-hepinfo4/*/loss_total.ckpt | wc -l   # expect 8
+
+executable = batch/runprobes_pareto.sh
+
+log    = batch/logs/runprobes_pareto_hepinfo4.$(ClusterId).log
+output = batch/logs/runprobes_pareto_hepinfo4.$(ClusterId).$(ProcId).out
+error  = batch/logs/runprobes_pareto_hepinfo4.$(ClusterId).$(ProcId).err
+
+MY.SingularityImage = "/eos/user/l/lbehrens/containers/adl1t_lab-dev.sif"
+
+environment = "SEED=$(SEED) MI_GAMMA=$(GAMMA) MI_NUM_BINS=$(BINS) ARCHITECTURE_ID=$(ARCH) ENCODER_NODES_US=$(NODES) RUN_NAME=$(RUN_NAME) EXPERIMENT=physics/pareto_fet_hepinfo4_eval PARETO_EXPERIMENT_NAME=Pareto-Front-200924-hepinfo4 TRAINER=cpu CPU_THREADS=8 DATA_WORKERS=3"
+
+# No transfer_output_files: this job writes its JSON and PNGs straight into the
+# existing checkpoint tree on EOS, so there is nothing in the sandbox to return.
+
+request_gpus = 0
+
+# Since v9, linear least squares and held-out predictions are streamed, the
+# binary latent sample is verified without being retained, and extraction
+# arrays are preallocated. v10 truncates numerically unresolved linear
+# directions using the original development-matrix dimensions.
+# The binding MLP fit still retains its own early-stopping split of the 116-wide
+# train representation.  24 GB gives that fit headroom; CERN's 3 GB/core rule
+# therefore requires an 8-core slot.  Probes remain deliberately sequential.
+request_cpus   = 8
+request_memory = 24000
+request_disk   = 10GB
+
+# The first smoke used 6,649 s of a 7,200 s cap.  The larger MLP batch changes
+# the optimization trajectory and a slow worker can still exceed two hours.
++MaxRuntime = 14400
+
+queue SEED,GAMMA,BINS,ARCH,NODES,RUN_NAME from batch/pareto_runs_hepinfo4.txt

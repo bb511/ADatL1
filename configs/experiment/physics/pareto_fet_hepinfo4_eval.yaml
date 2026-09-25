@@ -1,0 +1,25 @@
+# @package _global_
+
+# Stages 2-4 of the post-fix validation study (branch dev/leon-hepinfo4).
+#
+# Mirrors the parent split exactly: stage 1 runs physics/pareto_fet_hepinfo4
+# (which inherits the _train overlay and its 30-epoch cap), stages 2-4 run this
+# one, which inherits plain physics/pareto_fet. The two differ only in
+# trainer.max_epochs, which is not part of the algorithm block the run_manifest
+# fingerprint covers, so a checkpoint trained by stage 1 loads here cleanly.
+#
+# The one thing that must NOT be inherited from the parent is the pareto_study
+# block: the Phase 2 collector validates every artifact against it, and these
+# runs belong to fet-et-hepinfo4-v1, not fet-et-pareto-v1.
+
+defaults:
+  - /experiment/physics/pareto_fet
+  - override /pareto_study: fet_et_hepinfo4
+  - _self_
+
+# Same string as PARETO_EXPERIMENT_NAME in the submit files. Every stage must
+# address the same checkpoints/<experiment_name>/ directory; keeping the value
+# here as well means a run launched outside the batch wrappers still lands in
+# the right place instead of silently writing a parallel tree.
+experiment_name: Pareto-Front-200924-hepinfo4
+tags: ["physics", "pareto", "fet-et", "hepinfo4", "mi-fix-validation"]

@@ -82,7 +82,7 @@ def test_floor_vanishes_for_constant_latent_and_is_maximal_when_saturated():
 def test_diagnostic_does_not_touch_global_rng_or_gradients():
     latent = torch.randn(512, 4, requires_grad=True)
     sensitive = torch.randint(0, 5, (512,))
-    loss = BernoulliMILoss(use_quantized_sigmoid=True).train()
+    loss = BernoulliMILoss().train()
 
     state = torch.get_rng_state()
     null = loss.permutation_null(latent, sensitive, 3, generator=torch.Generator().manual_seed(0))

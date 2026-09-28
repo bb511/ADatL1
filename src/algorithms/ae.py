@@ -51,8 +51,6 @@ class AE(ADLightningModule):
         mi_bernoulli_num_samples: int = 10,
         mi_bernoulli_std: float = 1.0,
         mi_bernoulli_threshold: float = 0.5,
-        mi_use_quantized_sigmoid: bool = False,
-        mi_bits_bernoulli_sigmoid: int = 8,
         mi_use_float64_entropy: bool = True,
         mi_sensitive_variable: str = "FET.Et",
         mi_sensitive_num_bins: int = 10,
@@ -98,16 +96,12 @@ class AE(ADLightningModule):
             std=mi_bernoulli_std,
             threshold=mi_bernoulli_threshold,
             temperature=mi_temperature,
-            use_quantized=mi_use_quantized_sigmoid,
-            bits_bernoulli_sigmoid=mi_bits_bernoulli_sigmoid,
         )
 
         self.mi_loss = PileupMIAELoss(
             mi_temperature=mi_temperature,
             input_is_logits=True,
             use_float64=mi_use_float64_entropy,
-            use_quantized_sigmoid=mi_use_quantized_sigmoid,
-            bits_bernoulli_sigmoid=mi_bits_bernoulli_sigmoid,
         )
 
         self.mi_gamma = float(mi_gamma)

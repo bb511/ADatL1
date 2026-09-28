@@ -9,8 +9,6 @@ from joblib import dump, load
 
 from keras.api import ops
 
-from hepinfo.models.qkerasV3 import quantized_sigmoid
-
 from sklearn.model_selection import train_test_split
 from sklearn.preprocessing import StandardScaler
 from sklearn.metrics import roc_curve, auc

@@ -31,6 +31,10 @@ class LossesCallback(Callback):
     :param include_loss_total: Include the total training objective.
     :param gamma: Gamma value shown in the title. If omitted, read ``mi_gamma`` from
         the Lightning module.
+    :param include_mi_null: Also plot the MI loss against its permutation noise
+        floor (``loss_mi_permuted``) and the analytic floor, for train and the
+        normal validation split, when those metrics were logged. Skipped
+        silently if the AE ran with ``mi_num_permutations=0``.
     :param name: Callback output folder and MLflow artifact folder.
     :param log_raw_mlflow: Whether to upload the generated PNG to MLflow.
     """
@@ -40,6 +44,7 @@ class LossesCallback(Callback):
         include_loss_mi: bool = True,
         include_loss_reco: bool = True,
         include_loss_total: bool = True,
+        include_mi_null: bool = True,
         gamma: float | None = None,
         name: str = "losses",
         log_raw_mlflow: bool = True,
@@ -48,6 +53,7 @@ class LossesCallback(Callback):
         self.include_loss_mi = include_loss_mi
         self.include_loss_reco = include_loss_reco
         self.include_loss_total = include_loss_total
+        self.include_mi_null = include_mi_null
         self.gamma = gamma
         self.name = name
         self.log_raw_mlflow = log_raw_mlflow
@@ -151,6 +157,11 @@ class LossesCallback(Callback):
             ),
         ]
 
+        if self.include_mi_null:
+            mi_null_path = self._plot_mi_null(mlflow_logger, plot_folder)
+            if mi_null_path is not None:
+                plot_paths.append(mi_null_path)
+
         if self.log_raw_mlflow:
             for plot_path in plot_paths:
                 mlflow_logger.experiment.log_artifact(
@@ -158,6 +169,62 @@ class LossesCallback(Callback):
                     local_path=str(plot_path),
                     artifact_path=self.name,
                 )
+
+    # Legend label -> (MLflow metric key, colour, line opacity)
+    MI_NULL_SERIES = (
+        ("Loss_mi (train)", "train/loss_mi", "blue", 1.0),
+        ("Loss_mi_permuted (train)", "train/loss_mi_permuted", "blue", 0.45),
+        ("Analytic floor (train)", "train/loss_mi_floor_analytic", "black", 0.45),
+        ("Loss_mi (val)", "val/normal/loss_mi", "darkorange", 1.0),
+        ("Loss_mi_permuted (val)", "val/normal/loss_mi_permuted", "darkorange", 0.45),
+    )
+
+    def _plot_mi_null(self, mlflow_logger, plot_folder: Path) -> Path | None:
+        """Plot MI next to its permutation noise floor; None if not logged."""
+        permuted = self._optional_history(mlflow_logger, "train/loss_mi_permuted")
+        if permuted is None:
+            log.info(
+                "No 'train/loss_mi_permuted' history (mi_num_permutations=0?); "
+                "skipping the MI noise-floor plot."
+            )
+            return None
+
+        data, colors, alphas = {}, {}, {}
+        for label, key, color, alpha in self.MI_NULL_SERIES:
+            history = self._optional_history(mlflow_logger, key)
+            if history is None:
+                continue
+            data[label] = {
+                epoch: value
+                for epoch, value in enumerate(history.values(), start=1)
+            }
+            colors[label] = color
+            alphas[label] = alpha
+
+        return scatter.plot_lines(
+            data=data,
+            xlabel="Epoch",
+            ylabel="MI [bits]",
+            title="MI loss vs. permutation noise floor",
+            save_dir=plot_folder,
+            colors=colors,
+            filename="mi_vs_permuted_null.png",
+            alphas=alphas,
+        )
+
+    def _optional_history(self, mlflow_logger, key: str) -> dict[int, float] | None:
+        """Step-aligned history of ``key``, or None if absent or not finite."""
+        history = mlflow_logger.experiment.get_metric_history(
+            mlflow_logger.run_id,
+            key,
+        )
+        if not history:
+            return None
+        try:
+            return self._history_by_step(history)
+        except ValueError:
+            log.warning(f"MLflow metric '{key}' has non-finite values; not plotted.")
+            return None
 
     def _configured_metrics(self) -> tuple[tuple[str, str, bool], ...]:
         """Map stored MLflow metric names to the labels shown in the plot."""

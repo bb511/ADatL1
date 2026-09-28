@@ -70,3 +70,26 @@ class PileupMIAELoss(ADLoss):
 
     def forward(self, latent: torch.Tensor, sensitive: torch.Tensor) -> torch.Tensor:
         return self.mi_loss(latent=latent, sensitive=sensitive)
+
+    def permutation_null(
+        self,
+        latent: torch.Tensor,
+        sensitive: torch.Tensor,
+        num_permutations: int,
+        generator: torch.Generator | None = None,
+    ) -> torch.Tensor:
+        """Diagnostic: MI against permuted sensitive labels (see BernoulliMILoss)."""
+        return self.mi_loss.permutation_null(
+            latent=latent,
+            sensitive=sensitive,
+            num_permutations=num_permutations,
+            generator=generator,
+        )
+
+    def analytic_null_floor(
+        self,
+        latent: torch.Tensor,
+        sensitive: torch.Tensor,
+    ) -> torch.Tensor:
+        """Diagnostic: analytic MI noise floor (see BernoulliMILoss)."""
+        return self.mi_loss.analytic_null_floor(latent=latent, sensitive=sensitive)

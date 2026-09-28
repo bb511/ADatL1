@@ -44,3 +44,10 @@ mi_sensitive_use_denormalization: false
 
 # Safety check: the MI target must not leak into the AE input feature map.
 forbid_sensitive_variable_in_input: true
+
+# Diagnostic only (no gradient, not in the loss): MI against within-batch
+# permuted sensitive bins = the MI estimator's noise floor. Logged as
+# loss_mi_permuted(_std), loss_mi_minus_permuted, loss_mi_floor_analytic.
+# 0 disables it.
+mi_num_permutations: 5
+mi_permutation_seed: 0

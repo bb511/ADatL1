@@ -59,6 +59,8 @@ class AE(ADLightningModule):
         mi_sensitive_reduction: str = "First",
         mi_sensitive_use_denormalization: bool = False,
         forbid_sensitive_variable_in_input: bool = True,
+        mi_num_permutations: int = 5,
+        mi_permutation_seed: int = 0,
         **kwargs,
     ):
         # Only forward keys expected by ADLightningModule.__init__.
@@ -109,6 +111,20 @@ class AE(ADLightningModule):
         )
 
         self.mi_gamma = float(mi_gamma)
+
+        # Diagnostic only: MI against within-batch permuted sensitive labels,
+        # i.e. the estimator's noise floor. 0 disables it. The permutations come
+        # from a private CPU generator so enabling the diagnostic does not shift
+        # the global RNG streams (Bernoulli sampling, input noise, shuffling).
+        # The generator is not checkpointed; after a resume the permutation
+        # sequence restarts, which is irrelevant for a noise-floor estimate.
+        if int(mi_num_permutations) < 0:
+            raise ValueError(
+                f"mi_num_permutations must be >= 0, got {mi_num_permutations}."
+            )
+        self.mi_num_permutations = int(mi_num_permutations)
+        self._mi_permutation_generator = torch.Generator(device="cpu")
+        self._mi_permutation_generator.manual_seed(int(mi_permutation_seed))
         self.forbid_sensitive_variable_in_input = forbid_sensitive_variable_in_input
         self.sensitive_binner = FixedQuantileSensitiveBinner(variable=mi_sensitive_variable, num_bins=mi_sensitive_num_bins, 
                                                              reduction=mi_sensitive_reduction, use_denormalized=mi_sensitive_use_denormalization)
@@ -225,9 +241,7 @@ class AE(ADLightningModule):
         sensitive = self._compute_sensitive_bins(x=control_x, mask=control_mask)
 
         mi_loss = self.mi_loss(latent=z, sensitive=sensitive)
-        with torch.no_grad():
-            perm = torch.randperm(sensitive.shape[0], device=sensitive.device)
-            sensitive_perm = sensitive[perm]
+        mi_null = self._mi_null_diagnostics(latent=z, sensitive=sensitive, mi_loss=mi_loss)
         gamma_mi_loss = self.mi_gamma * mi_loss
 
         total_loss = reco_loss.mean() + gamma_mi_loss
@@ -271,6 +285,9 @@ class AE(ADLightningModule):
                 "loss/full": reco_loss.detach(),
                 "ascore/full": ascore.detach(),
                 "reconstructed_data": reconstruction.detach(),
+
+                # MI noise-floor diagnostics (empty when disabled):
+                **mi_null,
             }
 
     def outlog(self, outdict: dict) -> dict:
@@ -284,6 +301,57 @@ class AE(ADLightningModule):
 
             # Existing anomaly-score logging:
             "ascore_operational": outdict.get("ascore/operational"),
+
+            # MI noise-floor diagnostics. None when disabled; _log_dict skips it.
+            "loss_mi_permuted": outdict.get("loss/mi_permuted"),
+            "loss_mi_permuted_std": outdict.get("loss/mi_permuted_std"),
+            "loss_mi_minus_permuted": outdict.get("loss/mi_minus_permuted"),
+            "loss_mi_floor_analytic": outdict.get("loss/mi_floor_analytic"),
+        }
+
+    @torch.no_grad()
+    def _mi_null_diagnostics(
+        self,
+        latent: torch.Tensor,
+        sensitive: torch.Tensor,
+        mi_loss: torch.Tensor,
+    ) -> dict[str, torch.Tensor]:
+        """Estimate the MI estimator's noise floor for this batch.
+
+        ``loss/mi_permuted`` is the mean MI over ``mi_num_permutations``
+        within-batch shuffles of the sensitive bins: the value the MI loss would
+        take if the latent carried no information about the sensitive variable.
+        ``loss/mi_minus_permuted`` is the bias-corrected leakage; values
+        compatible with zero (compare with ``loss/mi_permuted_std``) mean the MI
+        loss is already at its noise floor. ``loss/mi_floor_analytic`` is a
+        second-order approximation of the same floor.
+
+        None of these enter the objective or carry gradients.
+        """
+        if self.mi_num_permutations == 0:
+            return {}
+
+        mi_permuted = self.mi_loss.permutation_null(
+            latent=latent,
+            sensitive=sensitive,
+            num_permutations=self.mi_num_permutations,
+            generator=self._mi_permutation_generator,
+        )
+        mi_permuted_mean = mi_permuted.mean()
+        mi_permuted_std = (
+            mi_permuted.std(unbiased=True)
+            if mi_permuted.numel() > 1
+            else mi_permuted.new_zeros(())
+        )
+
+        return {
+            "loss/mi_permuted": mi_permuted_mean,
+            "loss/mi_permuted_std": mi_permuted_std,
+            "loss/mi_minus_permuted": mi_loss.detach().float() - mi_permuted_mean,
+            "loss/mi_floor_analytic": self.mi_loss.analytic_null_floor(
+                latent=latent,
+                sensitive=sensitive,
+            ),
         }
     
     def _store_sensitive_bin_edges(self) -> None:

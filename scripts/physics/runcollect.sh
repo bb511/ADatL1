@@ -31,7 +31,7 @@
 # two runs differing only in seed aggregate together automatically.
 #
 # Usage:
-#   EXPERIMENT_NAME=physics_ae_models bash scripts/physics/runcollect.sh
+#   EXPERIMENT_NAME=physics_ae_pareto bash scripts/physics/runcollect.sh
 #   STUDY_ROOT=/path/to/pareto_studies/fet-et-pareto-v1 bash scripts/physics/runcollect.sh
 
 set -euo pipefail
@@ -57,7 +57,7 @@ if [[ ! -f "$STUDY_MAP" ]]; then
     echo >&2
     echo "Either point STUDY_ROOT at a study the runner created, or set" >&2
     echo "EXPERIMENT_NAME to build the map from a directory of trained runs:" >&2
-    echo "  EXPERIMENT_NAME=physics_ae_models bash scripts/physics/runcollect.sh" >&2
+    echo "  EXPERIMENT_NAME=physics_ae_pareto bash scripts/physics/runcollect.sh" >&2
     exit 2
   }
 

@@ -34,7 +34,8 @@ data:
 
 trainer:
   gradient_clip_algorithm: norm
-  gradient_clip_val: 0.0
+  # cvar25_t169 (pre-MI reference AE, 2026-05-20)
+  gradient_clip_val: 5.0
   min_epochs: 1
   max_epochs: 200
 
@@ -61,15 +62,22 @@ algorithm:
   # What rate is the AD algorithm supposed to work at, in kHz.
   target_rate: 0.25
   base_rate: 28608.8064
-  # The basis data processing returns 117 features.
+  # The basis data processing returns 117 features; excluding FET.* (Et, eta,
+  # phi -- see data.model_input_exclude_features) leaves 114 for the AE input.
   encoder:
-    in_dim: 116
+    in_dim: 114
+    nodes: [64, 32, 8]
+
+  # Hyperparameters of the Optuna trial cvar25_t169 (pre-MI reference AE,
+  # 2026-05-20, MLflow run 33886d9c).
+  delta: 10.0
+  input_noise_std: 0.0
 
   optimizer:
     _partial_: true
     _target_: torch.optim.AdamW
-    lr: 0.0013029941778430407
-    weight_decay: 0.001
+    lr: 0.0019859329798336714
+    weight_decay: 1.0e-06
     betas: [0.9, 0.999]
     eps: 1e-8
 

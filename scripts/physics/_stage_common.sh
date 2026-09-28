@@ -21,7 +21,7 @@ set -euo pipefail
 : "${RUN_NAME:?Set RUN_NAME to the run you are training or analysing, e.g. RUN_NAME=AE_30ep_gamma0.1}"
 
 # Must match the composed experiment's experiment_name. physics/ae and its
-# ae_metrics overlay both use physics_ae_models.
+# ae_metrics overlay both use physics_ae_pareto.
 : "${EXPERIMENT:=physics/ae}"
 
 # Overrides the experiment's own experiment_name, which is the directory every
@@ -133,10 +133,10 @@ fi
 # scientific record of what was trained, and Phase 2 validates runs against it;
 # a script-level default that disagrees with the config produces a record that
 # does not describe the model. Until 2026-09-18 this file did exactly that,
-# shadowing five of them:
-#
-#   lr 0.0019859329798336714 vs 0.0013029941778430407   weight_decay 1e-06 vs 0.001
-#   delta 1.0 vs 3.0         input_noise_std 0.0 vs 1e-04   grad clip 5.0 vs 0.0
+# shadowing five of them. Since 2026-09-28 configs/experiment/physics/ae.yaml
+# itself carries the cvar25_t169 values (lr 0.0019859329798336714,
+# weight_decay 1e-06, betas [0.9, 0.999], delta 10.0, input_noise_std 0.0,
+# gradient_clip_val 5.0), so the config and the record agree again.
 #
 # To change a hyperparameter, change the config. To try one ad hoc, set the
 # variable for that invocation -- and set the same one for stages 2 and 3, or

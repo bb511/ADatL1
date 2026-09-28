@@ -17,8 +17,6 @@ class BernoulliMILoss(nn.Module):
 
         p = sigmoid(temperature * latent)
 
-    unless input_is_logits=False.
-
     The returned dtype intentionally follows hepinfo and is float32.
     """
 
@@ -26,14 +24,12 @@ class BernoulliMILoss(nn.Module):
         self,
         temperature: float = 6.0,
         eps: float = 1e-20,
-        input_is_logits: bool = True,
         use_float64: bool = True,
     ) -> None:
         super().__init__()
 
         self.temperature = float(temperature)
         self.eps = float(eps)
-        self.input_is_logits = bool(input_is_logits)
         self.use_float64 = bool(use_float64)
 
     def forward(self, latent: torch.Tensor, sensitive: torch.Tensor) -> torch.Tensor:
@@ -230,9 +226,6 @@ class BernoulliMILoss(nn.Module):
         return sensitive_flat[:, 0].to(device=device, dtype=torch.long)
 
     def _bernoulli_probs(self, latent: torch.Tensor) -> torch.Tensor:
-        if not self.input_is_logits:
-            return latent
-
         return torch.sigmoid(self.temperature * latent)
 
     def _log2(self, x: torch.Tensor) -> torch.Tensor:

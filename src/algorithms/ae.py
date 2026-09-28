@@ -1,11 +1,12 @@
 # Vanilla auto-encoder model implementations
-from typing import Optional, TypedDict
+from typing import TypedDict
 
 import torch
 from torch import nn
 
 from src.algorithms import ADLightningModule
-from src.algorithms.losses.ae import HuberAELoss, PileupMIAELoss
+from src.algorithms.losses.ae import HuberAELoss
+from src.algorithms.losses.components.bernoulli_mi import BernoulliMILoss
 from src.algorithms.losses.components.reconstruction import MSEReconstructionLoss
 from src.algorithms.utils.object_feature_map_loader import inject_object_feature_map
 from src.data.utils import unpack_batch
@@ -100,9 +101,8 @@ class AE(ADLightningModule):
             temperature=mi_temperature,
         )
 
-        self.mi_loss = PileupMIAELoss(
-            mi_temperature=mi_temperature,
-            input_is_logits=True,
+        self.mi_loss = BernoulliMILoss(
+            temperature=mi_temperature,
             use_float64=mi_use_float64_entropy,
         )
 
@@ -250,19 +250,7 @@ class AE(ADLightningModule):
 
         total_loss = reco_loss.mean() + gamma_mi_loss
 
-        with torch.no_grad():
-
-            reco_loss_mean = reco_loss.mean().detach()
-
-        # The anomaly score is expected to be a distribution over events.
-        # Allow subclasses to override `ascore`; otherwise fall back to
-        # the reconstruction loss per observation for robustness.
-        ascore_fn = getattr(self, "ascore", None)
-        if callable(ascore_fn):
-            ascore = ascore_fn(x, reconstruction, m)
-        else:
-            ascore = reco_loss
-
+        ascore = self.ascore(x, reconstruction, m)
         if ascore.ndim != 1:
             raise ValueError(f"Expected per-event ascores, got {tuple(ascore.shape)}.")
 
@@ -434,7 +422,7 @@ class AE(ADLightningModule):
         train_split = train_splits["train"]
         normalizer = getattr(datamodule, "normalizer", None)
 
-        edges = self.sensitive_binner.fit(
+        self.sensitive_binner.fit(
             x=train_split.control_x if train_split.control_x is not None else train_split.x,
             mask=(
                 train_split.control_mask
@@ -472,20 +460,17 @@ class AE(ADLightningModule):
         mask: torch.Tensor | None,
     ) -> torch.Tensor:
         """Compute batch sensitive labels from fixed precomputed bin edges."""
-        trainer = getattr(self, "trainer", None)
-        datamodule = getattr(trainer, "datamodule", None) if trainer is not None else None
-        normalizer = (
-            getattr(datamodule, "normalizer", None)
-            if datamodule is not None
-            else None
-        )
-
         return self.sensitive_binner.transform(
             x=x,
             mask=mask,
             object_feature_map=self.control_object_feature_map,
-            normalizer=normalizer,
+            normalizer=self._datamodule_normalizer(),
         )
+
+    def _datamodule_normalizer(self):
+        """The attached datamodule's normalizer, or None outside a Trainer."""
+        datamodule = getattr(getattr(self, "_trainer", None), "datamodule", None)
+        return getattr(datamodule, "normalizer", None)
 
     def extract_sensitive_values(
         self,
@@ -504,17 +489,7 @@ class AE(ADLightningModule):
         control_x, control_mask = self._get_sensitive_inputs(batch_view)
 
         if normalizer is None:
-            trainer = getattr(self, "_trainer", None)
-            datamodule = (
-                getattr(trainer, "datamodule", None)
-                if trainer is not None
-                else None
-            )
-            normalizer = (
-                getattr(datamodule, "normalizer", None)
-                if datamodule is not None
-                else None
-            )
+            normalizer = self._datamodule_normalizer()
 
         return self.sensitive_binner.extract_values(
             x=control_x,

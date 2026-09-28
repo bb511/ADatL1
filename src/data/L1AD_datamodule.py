@@ -448,7 +448,6 @@ class L1ADDataModule(LightningDataModule):
         data_dir: Path,
         split: str,
         label: int,
-        flag: str | None = None,
         *,
         max_samples: int | None = None,
         sample_seed: int = 12345,
@@ -494,9 +493,7 @@ class L1ADDataModule(LightningDataModule):
             control_mask=control_mask,
         )
 
-    def _load_aux_split(
-        self, data_dir: Path, split: str, flag: str | None = None
-    ) -> dict[str, SplitTensors]:
+    def _load_aux_split(self, data_dir: Path, split: str) -> dict[str, SplitTensors]:
         """Load a split of auxiliary data, either val or test.
 
         The auxiliary data is not used at training time, since it consists of
@@ -877,83 +874,6 @@ class L1ADDataModule(LightningDataModule):
                 f"{self.model_input_exclude_features}. Reindexed positions: {leaked}."
             )
 
-
-    def get_extra(
-        self, normalizer: L1DataNormalizer, extra_feats: dict, stage: str, flag: str
-    ):
-        """Hook for callbacks to get additional data.
-
-        The data provided through this hook should not be already included in the
-        training data. Otherwise, no point in calling this hook.
-
-        :param normalizer: Normalizer object for the additional data.
-        :param extra_feats: Dictionary containing the object and the features to be
-            extracted from that object.
-        :param flag: String specifying subdirectory to put the extra feature parquet
-            files in so they don't get mixed up at training time.
-        """
-        log.info(Back.GREEN + f"Extracting additional features: {extra_feats}...")
-        self.hparams.data_mlready.prepare(normalizer, extra_feats, flag)
-        data_dir: Path = self.hparams.data_mlready.cache_folder
-
-        if stage == "train":
-            split = self._load_main_split(data_dir, "train", label=0, flag=flag)
-
-            dataset = L1ADDataset(
-                split.x,
-                split.mask,
-                split.l1bit,
-                split.y,
-                batch_size=self.batch_size_per_device,
-                shuffler=self.shuffler,
-                control_data=split.control_x,
-                control_mask=split.control_mask,
-            )
-
-            return self._attach_object_feature_map(dataset)
-
-        if stage not in {"val", "test"}:
-            raise ValueError(
-                f"Unknown stage '{stage}'. Expected one of: 'train', 'val', 'test'."
-            )
-
-        split_name = "valid" if stage == "val" else "test"
-        main_key = "normal"
-
-        # Main split. Keep this first in the returned dict.
-        main = self._load_main_split(data_dir, split_name, label=0, flag=flag)
-
-        main_dataset = L1ADDataset(
-            main.x,
-            main.mask,
-            main.l1bit,
-            main.y,
-            batch_size=self.batch_size_per_device,
-            control_data=main.control_x,
-            control_mask=main.control_mask,
-        )
-
-        out: dict[str, L1ADDataset] = {
-            main_key: self._attach_object_feature_map(main_dataset)
-        }
-
-        # Auxiliary signal/background splits.
-        aux = self._load_aux_split(data_dir, split_name, flag=flag)
-
-        for name, split in aux.items():
-            dataset = L1ADDataset(
-                split.x,
-                split.mask,
-                split.l1bit,
-                split.y,
-                batch_size=self.batch_size_per_device,
-                control_data=split.control_x,
-                control_mask=split.control_mask,
-            )
-
-            out[name] = self._attach_object_feature_map(dataset)
-
-        return out
 
     def _attach_object_feature_map(self, ds: Dataset) -> Dataset:
         if self.object_feature_map is not None:

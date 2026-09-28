@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import json
-import math
 from collections import Counter
 from collections.abc import Mapping, Sequence
 from pathlib import Path

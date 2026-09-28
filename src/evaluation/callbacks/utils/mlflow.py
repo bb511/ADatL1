@@ -9,7 +9,6 @@ from io import StringIO
 
 from PIL import Image
 import io
-from urllib.parse import quote
 
 import mlflow
 import logging
@@ -169,7 +168,7 @@ def generate_gallery_header():
     html_header = [
         "<!doctype html>",
         "<meta charset='utf-8'>",
-        f"<title>PLOTS</title>",
+        "<title>PLOTS</title>",
         "<style>",
         "body{font:14px/1.4 system-ui,Segoe UI,Roboto,Arial,sans-serif;margin:20px}",
         "h1{font-size:20px;margin:0 0 12px}",
@@ -202,7 +201,7 @@ def generate_gallery_header():
         "  <span id='lightbox-close' onclick='closeLightbox()'>&times;</span>",
         "  <img id='lightbox-img' src='' onclick='event.stopPropagation()'>",
         "</div>",
-        f"<h1>PLOTS</h1>",
+        "<h1>PLOTS</h1>",
     ]
 
     return html_header

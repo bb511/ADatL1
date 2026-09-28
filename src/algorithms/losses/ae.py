@@ -2,7 +2,6 @@
 import torch
 
 from src.algorithms.losses.components import ADLoss
-from src.algorithms.losses.components.bernoulli_mi import BernoulliMILoss
 from src.algorithms.losses.components.reconstruction import MSEReconstructionLoss
 from src.algorithms.losses.components.reconstruction import HuberReconstructionLoss
 
@@ -40,52 +39,3 @@ class HuberAELoss(ADLoss):
         reco_loss = self.reco_loss(target, reco, mask)
 
         return reco_loss
-
-class PileupMIAELoss(ADLoss):
-    """BinaryMI-style Bernoulli mutual-information regulariser for the AE.
-
-    This wrapper computes only the MI term. Reconstruction loss is computed
-    separately in AE.model_step.
-    """
-
-    def __init__(
-        self,
-        mi_temperature: float = 6.0,
-        input_is_logits: bool = True,
-        eps: float = 1e-20,
-        use_float64: bool = True,
-    ) -> None:
-        super().__init__(scale=1.0, reduction="none")
-
-        self.mi_loss = BernoulliMILoss(
-            temperature=mi_temperature,
-            eps=eps,
-            input_is_logits=input_is_logits,
-            use_float64=use_float64,
-        )
-
-    def forward(self, latent: torch.Tensor, sensitive: torch.Tensor) -> torch.Tensor:
-        return self.mi_loss(latent=latent, sensitive=sensitive)
-
-    def permutation_null(
-        self,
-        latent: torch.Tensor,
-        sensitive: torch.Tensor,
-        num_permutations: int,
-        generator: torch.Generator | None = None,
-    ) -> torch.Tensor:
-        """Diagnostic: MI against permuted sensitive labels (see BernoulliMILoss)."""
-        return self.mi_loss.permutation_null(
-            latent=latent,
-            sensitive=sensitive,
-            num_permutations=num_permutations,
-            generator=generator,
-        )
-
-    def analytic_null_floor(
-        self,
-        latent: torch.Tensor,
-        sensitive: torch.Tensor,
-    ) -> torch.Tensor:
-        """Diagnostic: analytic MI noise floor (see BernoulliMILoss)."""
-        return self.mi_loss.analytic_null_floor(latent=latent, sensitive=sensitive)

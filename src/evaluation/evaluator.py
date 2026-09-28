@@ -3,15 +3,13 @@
 from typing import Optional
 from pathlib import Path
 import logging
-import operator
 
 import torch
-import numpy as np
 import pytorch_lightning
 from pytorch_lightning.loggers import Logger
 from pytorch_lightning import LightningModule
 from pytorch_lightning.callbacks import Callback
-from colorama import Fore, Back, Style
+from colorama import Fore
 
 from src.utils import pylogger
 

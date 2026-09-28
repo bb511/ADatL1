@@ -235,12 +235,6 @@ class LossesCallback(Callback):
         )
 
     @staticmethod
-    def _history_values(metric_history) -> np.ndarray:
-        """Sort MLflow history by step and keep the last value for each step."""
-        values_by_step = LossesCallback._history_by_step(metric_history)
-        return np.asarray(list(values_by_step.values()), dtype=float)
-
-    @staticmethod
     def _history_by_step(metric_history) -> dict[int, float]:
         """Return a finite, step-aligned MLflow history with duplicates resolved."""
         values_by_step = {}

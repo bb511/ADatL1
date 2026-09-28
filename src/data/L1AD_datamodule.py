@@ -14,6 +14,7 @@ from src.utils.instrumentation import log_memory
 from colorama import Fore, Back
 from src.data.components.dataset import L1ADDataset
 from src.data.components.normalization import L1DataNormalizer
+from src.data.feature_refs import resolve_feature_refs
 
 log = pylogger.RankedLogger(__name__)
 
@@ -677,8 +678,8 @@ class L1ADDataModule(LightningDataModule):
 
         This is the condition under which the model input can be a *view* of
         the control tensor instead of a second copy of it. With the current
-        configuration - excluding only FET.Et, which sits at raw index 0 - the
-        kept indices are 1..116, so the view path applies.
+        configuration - excluding FET.*, i.e. FET.Et, FET.eta and FET.phi at raw
+        indices 0..2 - the kept indices are 3..116, so the view path applies.
         """
         keep = self._model_keep_indices
 
@@ -802,33 +803,17 @@ class L1ADDataModule(LightningDataModule):
         object_feature_map: dict,
         feature_refs: list[str],
     ) -> list[int]:
-        excluded: list[int] = []
+        """Flattened indices of every feature named by ``feature_refs``.
 
-        for feature_ref in feature_refs:
-            if "." not in feature_ref:
-                raise ValueError(
-                    "model_input_exclude_features entries must have format "
-                    f"'<object>.<feature>', got {feature_ref!r}."
-                )
-
-            object_name, feature_name = feature_ref.split(".", maxsplit=1)
-
-            object_key = self._find_case_insensitive_key(
-                object_feature_map,
-                object_name,
-                "object",
-            )
-
-            feature_map = object_feature_map[object_key]
-
-            feature_key = self._find_case_insensitive_key(
-                feature_map,
-                feature_name,
-                f"feature for object {object_key!r}",
-            )
-
-            excluded.extend(int(idx) for idx in feature_map[feature_key])
-
+        Entries are '<object>.<feature>' and may use wildcards, so 'FET.*'
+        removes every FET feature. A reference that matches nothing raises
+        KeyError.
+        """
+        excluded = [
+            idx
+            for _, _, indices in resolve_feature_refs(object_feature_map, feature_refs)
+            for idx in indices
+        ]
         return sorted(set(excluded))
 
 
@@ -872,13 +857,19 @@ class L1ADDataModule(LightningDataModule):
         if not self.model_input_exclude_features:
             return
 
-        try:
-            leaked = self._resolve_feature_indices(
-                self.object_feature_map,
-                self.model_input_exclude_features,
-            )
-        except KeyError:
-            leaked = []
+        # Non-strict: an excluded object that vanished entirely from the model
+        # map is exactly the desired outcome, not an error.
+        leaked = sorted(
+            {
+                idx
+                for _, _, indices in resolve_feature_refs(
+                    self.object_feature_map,
+                    self.model_input_exclude_features,
+                    strict=False,
+                )
+                for idx in indices
+            }
+        )
 
         if leaked:
             raise RuntimeError(
@@ -886,21 +877,6 @@ class L1ADDataModule(LightningDataModule):
                 f"{self.model_input_exclude_features}. Reindexed positions: {leaked}."
             )
 
-
-    def _find_case_insensitive_key(
-        self,
-        mapping: dict,
-        requested_key: str,
-        kind: str,
-    ) -> str:
-        for key in mapping.keys():
-            if str(key).lower() == requested_key.lower():
-                return key
-
-        raise KeyError(
-            f"Could not find {kind} {requested_key!r}. "
-            f"Available keys: {list(mapping.keys())}"
-        )
 
     def get_extra(
         self, normalizer: L1DataNormalizer, extra_feats: dict, stage: str, flag: str

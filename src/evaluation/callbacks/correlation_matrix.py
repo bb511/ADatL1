@@ -8,6 +8,7 @@ import pandas as pd
 import torch
 from pytorch_lightning.callbacks import Callback
 
+from src.data.feature_refs import label_matches_any
 from src.data.utils import unpack_batch
 from src.evaluation.callbacks import utils
 from src.plot import matrix
@@ -38,6 +39,11 @@ class CorrelationMatrixCallback(Callback):
         ['pearson'] or ['pearson', 'spearman'].
     :param sensitive_variable: Variable whose mean correlation with every other
         configured variable is written for Pareto-front construction.
+    :param sensitive_group: Further sensitive variables ('<object>.<feature>',
+        wildcards allowed, e.g. 'FET.*') that are left out of that mean. They are
+        control-only (never reconstructed), so their correlation with the
+        sensitive variable is the same before and after training and would only
+        dilute ``C``. They are still shown in the correlation matrices.
     :param include_input: Whether to save/plot correlations of input variables.
     :param include_reconstruction: Whether to save/plot correlations of reconstructed
         variables. This is the gamma-dependent table for an autoencoder.
@@ -60,6 +66,7 @@ class CorrelationMatrixCallback(Callback):
         aggregate: str = "sum",
         correlation_methods: list[str] | None = None,
         sensitive_variable: str = "FET.Et",
+        sensitive_group: list[str] | None = None,
         include_input: bool = True,
         include_reconstruction: bool = True,
         include_residual: bool = False,
@@ -93,6 +100,7 @@ class CorrelationMatrixCallback(Callback):
         self.aggregate = aggregate.lower()
         self.correlation_methods = correlation_methods or ["pearson"]
         self.sensitive_variable = sensitive_variable
+        self.sensitive_group = list(sensitive_group or [])
         self.include_input = include_input
         self.include_reconstruction = include_reconstruction
         self.include_residual = include_residual
@@ -176,12 +184,12 @@ class CorrelationMatrixCallback(Callback):
         b = unpack_batch(batch)
 
         # Model-input tensor: this is what the AE actually sees.
-        # After the FET.Et exclusion, this should have 116 flattened features.
+        # After the FET.* exclusion, this should have 114 flattened features.
         x = torch.flatten(b.x, start_dim=1)
         mask = None if b.mask is None else torch.flatten(b.mask, start_dim=1).bool()
 
         # Control tensor: this is the full raw/control tensor.
-        # It should still contain FET.Et, so correlation_matrix can still use FET.Et.
+        # It still contains FET.*, so correlation_matrix can still use them.
         needs_control_x = any(
             item["model_indices"] is None for item in self._resolved_variables
         )
@@ -236,7 +244,7 @@ class CorrelationMatrixCallback(Callback):
                 )
 
             # Reconstruction tensor: output of the AE.
-            # This has the same layout as the 116-feature model input.
+            # This has the same layout as the 114-feature model input.
             yhat = outputs[self.output_name]
             yhat = torch.flatten(yhat, start_dim=1)[:n_keep]
 
@@ -614,6 +622,7 @@ class CorrelationMatrixCallback(Callback):
             f"aggregate: {self.aggregate}",
             f"max_events: {self.max_events}",
             f"sensitive_variable: {self.sensitive_variable}",
+            f"sensitive_group (excluded from mean correlation): {self.sensitive_group}",
             "variables:",
         ]
         for item in self._resolved_variables:
@@ -651,7 +660,12 @@ class CorrelationMatrixCallback(Callback):
             )
 
         sensitive_label = matching_labels[0]
-        other_labels = [label for label in corr.columns if label != sensitive_label]
+        other_labels = [
+            label
+            for label in corr.columns
+            if label != sensitive_label
+            and not label_matches_any(str(label), self.sensitive_group)
+        ]
         if not other_labels:
             raise ValueError(
                 "At least one non-sensitive variable is required to calculate the "
@@ -690,9 +704,11 @@ class CorrelationMatrixCallback(Callback):
         payload = {
             "schema_version": 1,
             "sensitive_variable": self.sensitive_variable,
+            "sensitive_group": self.sensitive_group,
             "definition": (
                 "Arithmetic mean of absolute correlations between the sensitive "
-                "variable and every other variable; self-correlation is excluded."
+                "variable and every other variable; self-correlation and the "
+                "other sensitive_group variables are excluded."
             ),
             "spaces": mean_correlations,
             "mean_pearson_correlation": mean_pearson,

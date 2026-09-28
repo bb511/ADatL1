@@ -40,8 +40,13 @@ mi_sensitive_num_bins: 50
 mi_sensitive_reduction: first
 mi_sensitive_use_denormalization: false
 
-# Safety check: the MI target must not leak into the AE input feature map.
+# Safety check: no sensitive feature may leak into the AE input feature map.
+# All FET features count as sensitive (the MI loss still uses only
+# mi_sensitive_variable); wildcards are allowed. Keep in sync with
+# data.model_input_exclude_features.
 forbid_sensitive_variable_in_input: true
+sensitive_input_features:
+  - FET.*
 
 # Diagnostic only (no gradient, not in the loss): MI against within-batch
 # permuted sensitive bins = the MI estimator's noise floor. Logged as

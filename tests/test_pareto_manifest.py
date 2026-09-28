@@ -50,7 +50,8 @@ def test_pareto_fet_manifest_composes_and_freezes_protocol(
     ) == 0.25 / 28608.8064
     assert cfg.callbacks.loss_total_ckpt.monitor == "val/loss_total"
     assert cfg.callbacks.loss_total_ckpt.mode == "min"
-    assert cfg.data.model_input_exclude_features == ["FET.Et"]
+    assert cfg.data.model_input_exclude_features == ["FET.*"]
+    assert cfg.algorithm.sensitive_input_features == ["FET.*"]
     assert cfg.algorithm.encoder.nodes[-1] == 8
     assert cfg.pareto_study.paired_autoencoder_seeds == [123, 500]
     assert cfg.pareto_study.search_space.gamma_zero_baseline.mi_gamma == 0.0

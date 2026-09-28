@@ -10,6 +10,7 @@ from src.algorithms.losses.components.reconstruction import MSEReconstructionLos
 from src.algorithms.utils.object_feature_map_loader import inject_object_feature_map
 from src.data.utils import unpack_batch
 from src.data.sensitive_binning import FixedQuantileSensitiveBinner
+from src.data.feature_refs import resolve_feature_refs
 from src.algorithms.components.bernoulli import BernoulliSampling
 from src.utils import pylogger
 
@@ -57,6 +58,7 @@ class AE(ADLightningModule):
         mi_sensitive_reduction: str = "First",
         mi_sensitive_use_denormalization: bool = False,
         forbid_sensitive_variable_in_input: bool = True,
+        sensitive_input_features: list[str] | None = None,
         mi_num_permutations: int = 5,
         mi_permutation_seed: int = 0,
         **kwargs,
@@ -120,6 +122,14 @@ class AE(ADLightningModule):
         self._mi_permutation_generator = torch.Generator(device="cpu")
         self._mi_permutation_generator.manual_seed(int(mi_permutation_seed))
         self.forbid_sensitive_variable_in_input = forbid_sensitive_variable_in_input
+        # Every feature that counts as sensitive and must therefore be absent
+        # from the AE input ('<object>.<feature>', wildcards allowed, e.g.
+        # 'FET.*'). The MI loss itself still uses only mi_sensitive_variable.
+        # None keeps the pre-FET.* behaviour (only the MI target is guarded), so
+        # checkpoints whose hparams predate this argument still evaluate.
+        self.sensitive_input_features = list(
+            dict.fromkeys([mi_sensitive_variable, *(sensitive_input_features or [])])
+        )
         self.sensitive_binner = FixedQuantileSensitiveBinner(variable=mi_sensitive_variable, num_bins=mi_sensitive_num_bins, 
                                                              reduction=mi_sensitive_reduction, use_denormalized=mi_sensitive_use_denormalization)
 
@@ -555,7 +565,7 @@ class AE(ADLightningModule):
         return control_x, control_mask
 
     def _assert_sensitive_not_in_model_input(self) -> None:
-        """Fail fast if the MI target leaks into the AE input feature map."""
+        """Fail fast if any sensitive feature leaks into the AE input feature map."""
         if not self.forbid_sensitive_variable_in_input:
             return
 
@@ -564,22 +574,23 @@ class AE(ADLightningModule):
         if object_feature_map is None:
             return
 
-        object_name, feature_name = self.sensitive_binner.variable.split(".", maxsplit=1)
+        leaked = resolve_feature_refs(
+            object_feature_map,
+            self.sensitive_input_features,
+            strict=False,
+        )
 
-        for obj_key, feature_map in object_feature_map.items():
-            if str(obj_key).lower() != object_name.lower():
-                continue
+        if leaked:
+            leaked_labels = [f"{obj}.{feat}" for obj, feat, _ in leaked]
+            raise RuntimeError(
+                f"Sensitive feature(s) {leaked_labels} (sensitive set: "
+                f"{self.sensitive_input_features}) are still present in "
+                "pl_module.object_feature_map, which is the anomaly-detector input "
+                "map. Configure data.model_input_exclude_features to remove them "
+                "from the model input while keeping them in "
+                "control_object_feature_map."
+            )
 
-            for feat_key in feature_map.keys():
-                if str(feat_key).lower() == feature_name.lower():
-                    raise RuntimeError(
-                        f"Sensitive MI variable {self.sensitive_binner.variable!r} is "
-                        "still present in pl_module.object_feature_map, which is the "
-                        "anomaly-detector input map. Configure "
-                        "data.model_input_exclude_features to remove it from the model "
-                        "input while keeping it in control_object_feature_map."
-                    )
-                
     @staticmethod
     def _num_flat_features_from_map(object_feature_map: dict | None) -> int | None:
         if object_feature_map is None:

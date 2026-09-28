@@ -25,10 +25,12 @@ data:
   batch_size: 16384
   max_val_batches: 10
 
-  # Keep FET.Et in the loaded/control tensor for MI decorrelation, but remove it
-  # from the anomaly-detector reconstruction input.
+  # All FET features (Et, eta, phi) are sensitive: keep them in the loaded/control
+  # tensor for MI decorrelation and diagnostics, but remove them from the
+  # anomaly-detector reconstruction input. Wildcards are resolved against the
+  # object_feature_map.
   model_input_exclude_features:
-    - FET.Et
+    - FET.*
 
 trainer:
   gradient_clip_algorithm: norm
@@ -315,6 +317,10 @@ evaluation:
         - pearson
         - spearman
       sensitive_variable: ${algorithm.mi_sensitive_variable}
+      # Other sensitive (control-only) variables, left out of the mean
+      # correlation C: they are never reconstructed, so their correlation with
+      # the sensitive variable does not depend on the model.
+      sensitive_group: ${algorithm.sensitive_input_features}
       include_input: true
       include_reconstruction: true
       include_residual: false

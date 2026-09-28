@@ -53,14 +53,15 @@ def test_pareto_fet_manifest_composes_and_freezes_protocol(
     assert cfg.data.model_input_exclude_features == ["FET.*"]
     assert cfg.algorithm.sensitive_input_features == ["FET.*"]
     assert cfg.algorithm.encoder.nodes[-1] == 8
-    assert cfg.pareto_study.paired_autoencoder_seeds == [123, 500]
+    assert "paired_autoencoder_seeds" not in cfg.pareto_study
+    assert cfg.pareto_study.candidate.autoencoder_seed == 180524
     assert cfg.pareto_study.search_space.gamma_zero_baseline.mi_gamma == 0.0
     assert (
-        cfg.pareto_study.collapse_constraint.seed_level_rule.minimum_joint_code_entropy_bits
+        cfg.pareto_study.collapse_constraint.rule.minimum_joint_code_entropy_bits
         == 1.0
     )
     assert (
-        cfg.pareto_study.collapse_constraint.seed_level_rule.minimum_fraction_of_paired_gamma_zero_joint_entropy
+        cfg.pareto_study.collapse_constraint.rule.minimum_fraction_of_paired_gamma_zero_joint_entropy
         == 0.5
     )
     assert cfg.pareto_study.minimum_efficiency_constraint.max_relative_degradation == 0.05

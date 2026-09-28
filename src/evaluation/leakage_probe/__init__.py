@@ -1,14 +1,7 @@
 """Public API for the leakage-probe evaluation package."""
 
-from .aggregation import (
-    ProbeAggregationError,
-    aggregate_paired_seed_leakage,
-    write_paired_seed_leakage_aggregate,
-)
-
 from .constants import (
     LEAKAGE_PROBE_EVALUATION_MODES,
-    LEAKAGE_PROBE_INVALID_RUN_POLICY,
     LEAKAGE_PROBE_PROTOCOL_VERSION,
     LINEAR_PROBE_MAX_MSE_INFLATION,
     MLP_PROBE_CONFIG,
@@ -85,12 +78,9 @@ from .types import (
 )
 
 __all__ = [
-    "ProbeAggregationError",
-    "aggregate_paired_seed_leakage",
     "FourProbeEvaluationResult",
     "LEAKAGE_PROBE_PROTOCOL_VERSION",
     "LEAKAGE_PROBE_EVALUATION_MODES",
-    "LEAKAGE_PROBE_INVALID_RUN_POLICY",
     "LINEAR_PROBE_MAX_MSE_INFLATION",
     "LeakageProbeRunOutcome",
     "LeakageProbeRunMetadata",
@@ -140,7 +130,6 @@ __all__ = [
     "probe_split_provenance",
     "make_shuffled_training_target",
     "write_invalid_leakage_probe_result",
-    "write_paired_seed_leakage_aggregate",
     "write_leakage_probe_results",
     "SHUFFLED_TARGET_R2_CLIPPED_MAX",
     "ShuffledTargetGuardrailError",

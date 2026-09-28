@@ -20,8 +20,8 @@ export STAGE_LABEL
 export EXPERIMENT
 
 # Parameterise through pareto_study.candidate, not algorithm.*: the candidate is
-# what configuration_id is built from, and therefore what pairs the two seeds of
-# one grid point together downstream.
+# what configuration_id is built from, and therefore what identifies the grid
+# point downstream.
 : "${PARETO_CANDIDATE:=1}"
 export PARETO_CANDIDATE
 

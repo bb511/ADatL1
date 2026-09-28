@@ -13,9 +13,10 @@ Run names are
 
     Seed<seed>_Gamma_<gamma>_Bins_<bins>_architecture_<arch>_Run<attempt>
 
-with the seed first so a directory listing sorts by seed, and a trailing attempt
-counter so a failed configuration can be retrained as _Run02 without colliding
-with the remains of the first attempt.
+The study is single-seed: every configuration is trained once, with the seed
+in pareto_study.candidate.autoencoder_seed. A trailing attempt counter lets a
+failed configuration be retrained as _Run02 without colliding with the remains
+of the first attempt.
 
 Output columns, comma separated for HTCondor's `queue ... from`:
 
@@ -45,33 +46,28 @@ def _format_gamma(value: float) -> str:
     return str(int(value)) if value.is_integer() else repr(value)
 
 
-def iter_runs(grid: Dict[str, Any], seeds: List[int]) -> Iterator[Tuple[Any, ...]]:
-    """Yield (seed, gamma, bins, architecture_id, nodes) for every run.
-
-    Ordered seed-major so that the generated file, and therefore the submitted
-    cluster, runs the seeds in blocks rather than interleaved.
-    """
+def iter_runs(grid: Dict[str, Any], seed: int) -> Iterator[Tuple[Any, ...]]:
+    """Yield (seed, gamma, bins, architecture_id, nodes) for every run."""
     search = grid["search_space"]
     regularized = search["regularized"]
     baseline = search["gamma_zero_baseline"]
 
-    for seed in seeds:
-        # One gamma-zero baseline per architecture. Binning is irrelevant at
-        # gamma=0, so the study fixes it at the canonical 50 rather than
-        # training three identical baselines.
-        for architecture_id, nodes in baseline["architectures"].items():
-            yield (
-                seed,
-                float(baseline["mi_gamma"]),
-                int(baseline["mi_sensitive_num_bins"]),
-                architecture_id,
-                list(nodes),
-            )
+    # One gamma-zero baseline per architecture. Binning is irrelevant at
+    # gamma=0, so the study fixes it at the canonical 50 rather than training
+    # three identical baselines.
+    for architecture_id, nodes in baseline["architectures"].items():
+        yield (
+            seed,
+            float(baseline["mi_gamma"]),
+            int(baseline["mi_sensitive_num_bins"]),
+            architecture_id,
+            list(nodes),
+        )
 
-        for architecture_id, nodes in regularized["architectures"].items():
-            for gamma in regularized["mi_gamma"]:
-                for bins in regularized["mi_sensitive_num_bins"]:
-                    yield (seed, float(gamma), int(bins), architecture_id, list(nodes))
+    for architecture_id, nodes in regularized["architectures"].items():
+        for gamma in regularized["mi_gamma"]:
+            for bins in regularized["mi_sensitive_num_bins"]:
+                yield (seed, float(gamma), int(bins), architecture_id, list(nodes))
 
 
 def run_name(seed: int, gamma: float, bins: int, architecture_id: str, attempt: str) -> str:
@@ -87,14 +83,14 @@ def run_name(seed: int, gamma: float, bins: int, architecture_id: str, attempt: 
 def build_rows(grid_path: Path, attempt: str) -> List[Dict[str, Any]]:
     grid = OmegaConf.to_container(OmegaConf.load(grid_path), resolve=False)
 
-    seeds = grid.get("paired_autoencoder_seeds")
-    if not seeds:
-        raise SystemExit(f"{grid_path} declares no paired_autoencoder_seeds.")
-    seeds = [int(s) for s in seeds]
+    seed = grid.get("candidate", {}).get("autoencoder_seed")
+    if seed is None:
+        raise SystemExit(f"{grid_path} declares no candidate.autoencoder_seed.")
+    seed = int(seed)
 
     contract = grid["search_space"].get("fixed_latent_width")
     rows: List[Dict[str, Any]] = []
-    for seed, gamma, bins, architecture_id, nodes in iter_runs(grid, seeds):
+    for seed, gamma, bins, architecture_id, nodes in iter_runs(grid, seed):
         if contract is not None and int(nodes[-1]) != int(contract):
             # The study fixes the latent width; a candidate that violates it is
             # rejected downstream, so refuse to generate it in the first place.
@@ -134,17 +130,11 @@ def main(argv=None) -> int:
         help="Job list for batch/runae_pareto.sub.",
     )
     parser.add_argument(
-        "--runs-output",
-        type=Path,
-        default=REPO_ROOT / "batch" / "runs.txt",
-        help="Run names only, for the stage 2 and stage 3 submit files.",
-    )
-    parser.add_argument(
         "--only",
         default=None,
         help=(
             "Substring filter on the run name, for retraining a subset. "
-            "E.g. --only Seed500, or --only architecture_h128_64."
+            "E.g. --only Gamma_0.1_."
         ),
     )
     args = parser.parse_args(argv)
@@ -164,19 +154,9 @@ def main(argv=None) -> int:
         ),
         encoding="utf-8",
     )
-    args.runs_output.write_text(
-        "".join(f"{r['run_name']}\n" for r in rows), encoding="utf-8"
-    )
-
-    seeds = sorted({r["seed"] for r in rows})
-    configurations = {
-        (r["gamma"], r["bins"], r["architecture_id"]) for r in rows
-    }
-    print(f"runs           : {len(rows)}")
-    print(f"configurations : {len(configurations)}")
-    print(f"seeds          : {seeds}")
+    print(f"runs           : {len(rows)} (one per configuration)")
+    print(f"seed           : {rows[0]['seed']}")
     print(f"wrote          : {args.output}")
-    print(f"wrote          : {args.runs_output}")
     print()
     print("first and last lines:")
     lines = args.output.read_text().splitlines()

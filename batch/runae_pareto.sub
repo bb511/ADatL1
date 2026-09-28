@@ -8,7 +8,7 @@
 # run is validated against cannot drift apart. To retrain a subset after a
 # failure, regenerate with a new attempt counter and a filter:
 #
-#   python3 scripts/physics/make_pareto_grid.py --attempt 02 --only Seed500
+#   python3 scripts/physics/make_pareto_grid.py --attempt 02 --only Gamma_0.1_
 #
 # which leaves the first attempt's directories untouched, because the attempt
 # counter is part of the run name.

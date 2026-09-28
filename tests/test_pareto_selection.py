@@ -26,7 +26,6 @@ def _row(
     valid: bool = True,
     feasible: bool = True,
     rejection_reasons: str = "",
-    ci_half_width: float = 0.02,
 ) -> dict[str, object]:
     values = {
         "leakage_worst": leakage,
@@ -35,16 +34,13 @@ def _row(
     }
     row: dict[str, object] = {
         "study_id": "synthetic-study",
-        "protocol_version": "fet-et-pareto-v1",
+        "protocol_version": "fet-et-pareto-v2",
         "configuration_id": configuration_id,
         "configuration_valid": valid,
         "feasible": feasible,
         "rejection_reasons": rejection_reasons,
+        **values,
     }
-    for name, mean in values.items():
-        row[f"{name}_mean"] = mean
-        row[f"{name}_ci95_low"] = mean - ci_half_width
-        row[f"{name}_ci95_high"] = mean + ci_half_width
     return row
 
 
@@ -86,21 +82,16 @@ def test_invalid_and_infeasible_configurations_are_retained_but_not_ranked() -> 
         "invalid",
         valid=False,
         feasible=False,
-        rejection_reasons="missing_autoencoder_seeds:[456]",
+        rejection_reasons="invalid_probe",
     )
-    for column in (
-        "leakage_worst_mean",
-        "leakage_worst_ci95_low",
-        "leakage_worst_ci95_high",
-    ):
-        invalid[column] = np.nan
+    invalid["leakage_worst"] = np.nan
     candidates, front, _ = select_pareto_front(
         _table(
             _row("selected", leakage=0.1, correlation=0.1, efficiency=0.9),
             _row(
                 "collapsed",
                 feasible=False,
-                rejection_reasons="paired_constraints_failed_seeds:[123]",
+                rejection_reasons="paired_constraints_failed:['relative_entropy_pass']",
             ),
             invalid,
         )
@@ -113,30 +104,16 @@ def test_invalid_and_infeasible_configurations_are_retained_but_not_ranked() -> 
         "selected": "pareto_front",
     }
     assert list(front["configuration_id"]) == ["selected"]
-    assert "missing_autoencoder_seeds" in candidates.loc[
+    assert "invalid_probe" in candidates.loc[
         candidates["configuration_id"] == "invalid", "rejection_reasons"
     ].item()
 
 
-def test_uncertainty_flags_front_alternative_with_all_overlapping_intervals() -> None:
-    _, _, selection = select_pareto_front(
-        _table(
-            _row("a", leakage=0.1, correlation=0.1, efficiency=0.9, ci_half_width=0.03),
-            _row("b", leakage=0.09, correlation=0.11, efficiency=0.89, ci_half_width=0.03),
-        )
-    )
-
-    assert selection["selected_configuration_id"] == "a"
-    assert selection["uncertainty"]["selection_uncertain"] is True
-    assert selection["uncertainty"]["comparisons"][0]["configuration_id"] == "b"
-    assert selection["uncertainty"]["comparisons"][0]["all_objective_intervals_overlap"]
-
-
 def test_eligible_nonfinite_objective_is_rejected() -> None:
     broken = _row("broken")
-    broken["median_efficiency_mean"] = np.nan
+    broken["median_efficiency"] = np.nan
 
-    with pytest.raises(ParetoSelectionError, match="finite median_efficiency_mean"):
+    with pytest.raises(ParetoSelectionError, match="finite median_efficiency"):
         select_pareto_front(_table(broken))
 
 

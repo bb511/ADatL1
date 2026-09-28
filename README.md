@@ -188,9 +188,9 @@ configuration. The invalid result is still written to disk.
 
 A **configuration** is a point on the Pareto grid: `(mi_gamma,
 mi_sensitive_num_bins, architecture)`. A **run** is one training of an
-autoencoder at that configuration with a particular seed. Several runs share a
-configuration when they differ only by seed, and that is what lets the
-aggregation report a mean and a confidence interval.
+autoencoder at that configuration. The study is single-seed
+(`pareto_study.candidate.autoencoder_seed`), so every configuration is exactly
+one run and Phase 2 reports that run's metrics directly.
 
 At the end of stage 1 every run records itself:
 
@@ -219,8 +219,8 @@ read-modify-write from two processes on EOS loses one of the updates.
 
 ### Stage 4 over an experiment directory
 
-Stage 4 consumes a study map listing every configuration and seed. There are two
-ways to get one.
+Stage 4 consumes a study map listing the one run of every configuration. There
+are two ways to get one.
 
 The study runner declares the whole grid up front, at
 `STUDY_ROOT/study_map.yaml`. If that file exists it is used as is.
@@ -233,11 +233,10 @@ EXPERIMENT_NAME=physics_ae_models bash scripts/physics/runcollect.sh
 ```
 
 That is the path for autoencoders trained one at a time, whenever and wherever
-there was capacity, and collected afterwards. Runs pair into configurations by
-`configuration_id`, which excludes the seed, so two runs differing only in seed
-aggregate together automatically. The builder prints which configurations are
-missing an expected seed — those are rejected by Phase 2 rather than silently
-dropped, so that list is the to-do list of runs still to train.
+there was capacity, and collected afterwards. The builder refuses a directory
+that holds more than one run of the same `configuration_id` (a retrain, or a
+leftover second seed) and names them, so the front never depends on which of
+two runs happened to be picked.
 
 `scripts/build_study_map.py` can also be run on its own. The collector itself is
 untouched: it still validates every claim in the map against each run's resolved

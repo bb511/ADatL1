@@ -2,8 +2,8 @@
 # ===========================================================================
 # STAGE 4 of 4 -- aggregate every run and build the Pareto front
 # ===========================================================================
-# Reads the per-run artifacts that stages 2 and 3 wrote, aggregates them over
-# paired seeds, applies the feasibility constraints, and selects the front.
+# Reads the per-run artifacts that stages 2 and 3 wrote (one run per
+# configuration), applies the feasibility constraints, and selects the front.
 #
 #   phase2/  pareto_metrics.csv, pareto_metrics.parquet,
 #            <configuration_id>/pareto_metrics.json
@@ -13,8 +13,8 @@
 # Unlike stages 1-3 this is a whole-study step, not a per-run one, so it takes no
 # RUN_NAME. It is pure pandas/numpy: no torch, no GPU, minutes not hours.
 #
-# This stage consumes a study map: an explicit list of every configuration and
-# seed with its resolved manifest. There are two ways to get one.
+# This stage consumes a study map: an explicit list of the one run of every
+# configuration, with its resolved manifest. There are two ways to get one.
 #
 #   1. The study runner wrote it. scripts/physics/run_pareto_fet_ngt.sh --run
 #      declares the whole grid up front, at STUDY_ROOT/study_map.yaml. If that
@@ -27,8 +27,8 @@
 #      autoencoders trained one at a time, whenever and wherever there was
 #      capacity, and collected afterwards.
 #
-# Runs pair into configurations by configuration_id, which excludes the seed, so
-# two runs differing only in seed aggregate together automatically.
+# The study is single-seed: a directory holding two runs of one configuration
+# is refused, with the duplicates named.
 #
 # Usage:
 #   EXPERIMENT_NAME=physics_ae_pareto bash scripts/physics/runcollect.sh
@@ -68,9 +68,6 @@ if [[ ! -f "$STUDY_MAP" ]]; then
   }
 
   echo "--- building the study map from $EXPERIMENT_DIR ---"
-  # Reports which configurations are missing an expected seed. Those are
-  # rejected by Phase 2 rather than silently dropped, so read that list: it is
-  # the to-do list of runs still to train.
   python3 scripts/build_study_map.py \
     --experiment-dir "$EXPERIMENT_DIR" \
     --output "$STUDY_MAP"

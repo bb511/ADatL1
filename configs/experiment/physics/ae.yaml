@@ -15,7 +15,7 @@ defaults:
   - override /pareto_study: fet_et_adhoc
   - override /logger: mlflow
 
-seed: 123
+seed: 180524
 tags: ["ae", "signal"]
 
 experiment_name: physics_ae_models

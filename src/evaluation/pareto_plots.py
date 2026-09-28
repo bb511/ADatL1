@@ -7,9 +7,7 @@ and selection cannot be silently changed by a plotting edit.
 Every figure reads the two Phase 3 tables and nothing else, so what is drawn is
 exactly what was selected.
 
-Bars are the sample standard deviation across the paired seeds, not a
-confidence interval: with two seeds there is one degree of freedom, and a bar
-labelled "95% CI" invites a significance reading the data cannot support.
+Each configuration is a single training run, so points carry no error bars.
 
 Colour follows the data-viz palette. Gamma is an ordered factor with five
 regularised levels, so it takes a validated five-step single-hue ordinal ramp
@@ -110,18 +108,6 @@ def _as_bool(series: pd.Series, *, label: str) -> pd.Series:
     return mapped.astype(bool)
 
 
-def _spread_bounds(frame: pd.DataFrame, column: str) -> np.ndarray:
-    """Bar offsets: the sample standard deviation across the paired seeds.
-
-    Deliberately the observed spread and not a confidence interval. Two seeds
-    cannot support an inferential claim, and a bar labelled "95% CI" invites one;
-    this says only how far apart the seeds of one configuration landed.
-    """
-
-    spread = frame[column.replace("_mean", "_sample_std")].to_numpy()
-    return np.vstack((spread, spread))
-
-
 def _gamma_levels(frame: pd.DataFrame) -> list[float]:
     return sorted({float(value) for value in frame[GAMMA_COLUMN].dropna() if float(value) > 0.0})
 
@@ -220,15 +206,10 @@ def _draw_excluded(axis, excluded: pd.DataFrame, x_column: str, y_column: str) -
 
 
 def _draw_front_rings(axis, front: pd.DataFrame, x_column: str, y_column: str) -> None:
-    """Open rings plus the seed spread: the front is a claim with a scatter."""
+    """Open rings around the Pareto-front configurations."""
 
     if front.empty:
         return
-    axis.errorbar(
-        front[x_column], front[y_column],
-        xerr=_spread_bounds(front, x_column), yerr=_spread_bounds(front, y_column),
-        fmt="none", ecolor=TEXT_SECONDARY, elinewidth=0.9, capsize=2, zorder=3,
-    )
     axis.scatter(
         front[x_column], front[y_column],
         s=_areas(front) + 150.0, facecolors="none", edgecolors=TEXT_PRIMARY,
@@ -344,7 +325,6 @@ def faceted_figure(candidates: pd.DataFrame, *, y_column: str, output_path: Path
     )
     handles += _bins_legend_handles(eligible)
     handles += _ring_legend_handle()
-    handles += _spread_legend_handle(eligible)
     if any_excluded:
         handles += _excluded_legend_handle()
     figure.legend(
@@ -376,24 +356,6 @@ def _ring_legend_handle():
                    markeredgewidth=1.5, label="On the Pareto front")]
 
 
-def _spread_legend_handle(frame: pd.DataFrame):
-    """Name the bar for what it is, with n, so it is never read as a CI."""
-
-    from matplotlib.lines import Line2D
-
-    seed_columns = [column for column in frame.columns if column.endswith("_n_seeds")]
-    seeds = sorted({int(value) for column in seed_columns
-                    for value in frame[column].dropna()})
-    if not seeds:
-        count = "?"
-    elif len(seeds) == 1:
-        count = str(seeds[0])
-    else:
-        count = f"{min(seeds)}-{max(seeds)}"
-    return [Line2D([], [], color=TEXT_SECONDARY, linewidth=1.0,
-                   label=f"mean $\\pm$ std over {count} seeds")]
-
-
 def _excluded_legend_handle():
     from matplotlib.lines import Line2D
 
@@ -417,7 +379,7 @@ def third_objective_figure(
     because it wins on the axis that projection dropped. Here that axis is the
     colour.
 
-    ``annotate_front=False`` drops the front rings and the seed-spread bars,
+    ``annotate_front=False`` drops the front rings,
     leaving the bare cloud. Useful when the point is the shape of the sweep
     rather than which configurations survived the comparison.
 
@@ -473,7 +435,7 @@ def third_objective_figure(
     colorbar.ax.tick_params(colors=TEXT_SECONDARY, labelsize=9)
     colorbar.outline.set_edgecolor(GRID_INK)
 
-    handles = (_ring_legend_handle() + _spread_legend_handle(eligible)) if annotate_front else []
+    handles = _ring_legend_handle() if annotate_front else []
     handles += size_handles
     handles += _excluded_legend_handle() if any_excluded else []
     if handles:

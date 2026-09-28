@@ -1,7 +1,7 @@
 """Build a Phase 2 study map by reading an experiment directory.
 
 The Pareto collector consumes a study map: an explicit list of every
-configuration and seed, each pointing at its resolved manifest and its
+configuration's single run, each pointing at its resolved manifest and its
 checkpoint directory. The study runner writes that list up front, from the grid
 it is about to launch.
 
@@ -35,7 +35,7 @@ import sys
 from omegaconf import OmegaConf
 
 #: Matches docs/evaluation/pareto_study_map.example.yaml.
-STUDY_MAP_SCHEMA_VERSION = 1
+STUDY_MAP_SCHEMA_VERSION = 2
 
 RUN_MANIFEST_FILENAME = "run_manifest.yaml"
 
@@ -106,8 +106,7 @@ def build_study_map(
     skipped: List[str] = []
     study_ids: set[str] = set()
     protocol_versions: set[str] = set()
-    expected_seeds: set[Tuple[int, ...]] = set()
-    seeds_by_configuration: Dict[str, List[int]] = defaultdict(list)
+    runs_by_configuration: Dict[str, List[str]] = defaultdict(list)
 
     for run_dir, manifest in discovered:
         run_name = str(manifest.get("run_name") or run_dir.name)
@@ -136,9 +135,7 @@ def build_study_map(
 
         study_ids.add(str(study.get("study_id")))
         protocol_versions.add(str(study.get("protocol_version")))
-        paired = study.get("paired_autoencoder_seeds") or []
-        expected_seeds.add(tuple(int(s) for s in paired))
-        seeds_by_configuration[configuration_id].append(seed)
+        runs_by_configuration[configuration_id].append(run_name)
 
         runs.append(
             {
@@ -164,54 +161,39 @@ def build_study_map(
         raise StudyMapError(
             f"Runs disagree on protocol_version: {sorted(protocol_versions)}"
         )
-    if len(expected_seeds) != 1:
+    # The study is single-seed: one run per configuration. Two runs of the same
+    # configuration (a retrain, or a second seed) would make the front depend on
+    # which one the collector happened to see, so refuse and name them.
+    duplicates = {
+        configuration: sorted(names)
+        for configuration, names in runs_by_configuration.items()
+        if len(names) > 1
+    }
+    if duplicates:
         raise StudyMapError(
-            "Runs disagree on paired_autoencoder_seeds: "
-            f"{sorted(expected_seeds)}"
+            "Configurations with more than one run; keep exactly one each:\n  "
+            + "\n  ".join(
+                f"{configuration}: {names}"
+                for configuration, names in sorted(duplicates.items())
+            )
         )
 
     study_map = {
         "schema_version": STUDY_MAP_SCHEMA_VERSION,
         "study_id": study_ids.pop(),
         "protocol_version": protocol_versions.pop(),
-        "expected_autoencoder_seeds": list(expected_seeds.pop()),
-        "runs": sorted(
-            runs, key=lambda r: (r["configuration_id"], r["autoencoder_seed"])
-        ),
+        "runs": sorted(runs, key=lambda r: r["configuration_id"]),
     }
-    return {
-        "study_map": study_map,
-        "skipped": skipped,
-        "seeds_by_configuration": dict(seeds_by_configuration),
-    }
+    return {"study_map": study_map, "skipped": skipped}
 
 
 def report(result: Mapping[str, Any], *, stream=sys.stdout) -> None:
     """Print what went into the map, and what will happen to what did not."""
     study_map = result["study_map"]
-    expected = study_map["expected_autoencoder_seeds"]
-    seeds_by_configuration = result["seeds_by_configuration"]
 
     print(f"study_id          : {study_map['study_id']}", file=stream)
     print(f"protocol_version  : {study_map['protocol_version']}", file=stream)
-    print(f"expected seeds    : {expected}", file=stream)
     print(f"runs in the map   : {len(study_map['runs'])}", file=stream)
-    print(f"configurations    : {len(seeds_by_configuration)}", file=stream)
-
-    # The aggregation needs at least two seeds per configuration to report a mean
-    # and a confidence interval, and the feasibility rule requires every expected
-    # seed. Saying so here turns a silent downstream rejection into a to-do list.
-    incomplete = {
-        configuration: sorted(seeds)
-        for configuration, seeds in seeds_by_configuration.items()
-        if set(seeds) != set(expected)
-    }
-    if incomplete:
-        print("\nconfigurations missing an expected seed (they will be "
-              "rejected by Phase 2):", file=stream)
-        for configuration, seeds in sorted(incomplete.items()):
-            missing = sorted(set(expected) - set(seeds))
-            print(f"  {configuration}: have {seeds}, missing {missing}", file=stream)
 
     if result["skipped"]:
         print("\nskipped:", file=stream)

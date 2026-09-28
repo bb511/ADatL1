@@ -222,3 +222,4 @@ batch/runae_pareto_smoke.sub
 batch/runae_pareto_rest.sub
 batch/runae_pareto_debug.sub
 batch/runae_pareto_seed*.sub
+outputs/

@@ -11,8 +11,8 @@ defaults:
   - override /pareto_study: fet_et
   - _self_
 
-experiment_name: physics_pareto_fet_v1
-tags: ["physics", "pareto", "fet-et", "validation", "protocol-v1"]
+experiment_name: Pareto-Front-260928
+tags: ["physics", "pareto", "fet-et", "validation", "protocol-v2"]
 
 
 # The seed and the three search variables are the only runtime overrides to the

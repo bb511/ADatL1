@@ -31,7 +31,7 @@
 # is refused, with the duplicates named.
 #
 # Usage:
-#   EXPERIMENT_NAME=physics_ae_pareto bash scripts/physics/runcollect.sh
+#   bash scripts/physics/runcollect.sh    # EXPERIMENT_NAME defaults to Pareto-Front-260928
 #   STUDY_ROOT=/path/to/pareto_studies/fet-et-pareto-v1 bash scripts/physics/runcollect.sh
 
 set -euo pipefail
@@ -40,13 +40,15 @@ REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 
 : "${ADL1T_OUTPUT_ROOT:=${REPO_ROOT}}"
 : "${STUDY_ID:=fet-et-pareto-v1}"
-: "${STUDY_ROOT:=${ADL1T_OUTPUT_ROOT}/pareto_studies/${STUDY_ID}}"
+# One study tree per experiment directory, so a new study never picks up (or
+# overwrites) the study map and phase outputs of an earlier one.
+: "${EXPERIMENT_NAME:=Pareto-Front-260928}"
+: "${STUDY_ROOT:=${ADL1T_OUTPUT_ROOT}/pareto_studies/${EXPERIMENT_NAME}}"
 : "${STUDY_MAP:=${STUDY_ROOT}/study_map.yaml}"
 : "${PHASE2_OUTPUT:=${STUDY_ROOT}/phase2}"
 : "${PHASE3_OUTPUT:=${STUDY_ROOT}/phase3}"
 : "${PHASE4_OUTPUT:=${STUDY_ROOT}/phase4}"
 
-: "${EXPERIMENT_NAME:=}"
 : "${CHECKPOINTS_DIR:=${ADL1T_OUTPUT_ROOT}/checkpoints}"
 
 cd "$REPO_ROOT"
@@ -57,7 +59,7 @@ if [[ ! -f "$STUDY_MAP" ]]; then
     echo >&2
     echo "Either point STUDY_ROOT at a study the runner created, or set" >&2
     echo "EXPERIMENT_NAME to build the map from a directory of trained runs:" >&2
-    echo "  EXPERIMENT_NAME=physics_ae_pareto bash scripts/physics/runcollect.sh" >&2
+    echo "  EXPERIMENT_NAME=Pareto-Front-260928 bash scripts/physics/runcollect.sh" >&2
     exit 2
   }
 

@@ -4,12 +4,13 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import numpy as np
 import pandas as pd
 import pytest
 
 from src.evaluation.pareto_plots import (
     FIGURE_FILENAMES,
-    GAMMA_RAMP,
+    _gamma_colors,
     ParetoPlotError,
     front_parallel_coordinates,
     write_pareto_figures,
@@ -94,18 +95,25 @@ def test_infeasible_configuration_is_not_treated_as_a_competitor(tmp_path: Path)
     write_pareto_figures(candidates, front, output_dir=tmp_path)
 
 
-def test_more_gamma_levels_than_ramp_steps_is_refused(tmp_path: Path) -> None:
-    """Never cycle or generate a hue past the validated ramp."""
+def test_eleven_gamma_levels_over_four_decades_are_drawn(tmp_path: Path) -> None:
+    """The study grid: gamma from 0.01 to 100 and bins from 10 to 500."""
 
-    rows = [
-        _row(f"g{index}", gamma=0.05 * (index + 1), bins=50, architecture="h64_32",
-             leakage=0.1 - 0.001 * index, correlation=0.2, efficiency=0.8)
-        for index in range(len(GAMMA_RAMP) + 1)
+    gammas = (0.01, 0.1, 0.2, 0.3, 0.5, 0.8, 1, 5, 10, 50, 100)
+    bins = (10, 20, 30, 40, 50, 60, 80, 150, 300, 500)
+    rows = [_row("baseline", gamma=0.0, bins=50, architecture="h64_32",
+                 leakage=0.2, correlation=0.3, efficiency=0.9)]
+    rows += [
+        _row(f"g{gamma}-b{nbins}", gamma=gamma, bins=nbins, architecture="h64_32",
+             leakage=0.2 / (1 + gamma) + 0.0001 * nbins, correlation=0.3 / (1 + gamma),
+             efficiency=0.9 - 0.02 * np.log10(gamma * 100 + 1))
+        for gamma in gammas for nbins in bins
     ]
     candidates, front, _ = select_pareto_front(pd.DataFrame(rows))
-    with pytest.raises(ParetoPlotError, match="ordinal ramp"):
-        write_pareto_figures(candidates, front, output_dir=tmp_path)
+    written = write_pareto_figures(candidates, front, output_dir=tmp_path)
 
+    assert set(written) == set(FIGURE_FILENAMES)
+    colors = _gamma_colors(candidates)
+    assert len(colors) == len(gammas) and len(set(colors.values())) == len(gammas)
 
 def test_empty_front_refuses_the_parallel_coordinates_figure(tmp_path: Path) -> None:
     candidates, _ = _study()

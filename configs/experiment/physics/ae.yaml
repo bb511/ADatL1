@@ -18,7 +18,7 @@ defaults:
 seed: 180524
 tags: ["ae", "signal"]
 
-experiment_name: physics_ae_models
+experiment_name: Pareto-Front-260928
 run_name: ${short_hash:${hydra:runtime.output_dir},12}
 
 data:

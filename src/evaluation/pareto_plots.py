@@ -9,10 +9,11 @@ exactly what was selected.
 
 Each configuration is a single training run, so points carry no error bars.
 
-Colour follows the data-viz palette. Gamma is an ordered factor with five
-regularised levels, so it takes a validated five-step single-hue ordinal ramp
-(all four ordinal checks pass on the light surface). Gamma zero is deliberately
-NOT the lightest step of that ramp: it is the unregularised baseline that every
+Colour follows the data-viz palette. Gamma spans four decades (0.01 to 100),
+which is a magnitude rather than a handful of categories, so it takes the
+sequential blue ramp on a logarithmic scale, read off a colourbar. A discrete
+ordinal ramp cannot hold eleven single-hue steps that stay visibly apart.
+Gamma zero is deliberately NOT the lightest step of that ramp: it is the unregularised baseline that every
 feasibility constraint is measured against, a reference rather than a little bit
 of regularisation, so it is drawn as a neutral open marker with its own legend
 entry. Residual correlation is continuous magnitude and takes the sequential
@@ -45,14 +46,14 @@ BINS_COLUMN = "mi_sensitive_num_bins"
 ARCHITECTURE_COLUMN = "architecture_id"
 FRONT_COLUMN = "is_pareto_front"
 
-#: Validated ordinal ramp for the five regularised gamma levels: one hue,
-#: monotone lightness, every adjacent gap >= 0.06, light end 2.06:1 on #fcfcfb.
-GAMMA_RAMP = ("#86b6ef", "#5598e7", "#2a78d6", "#1c5cab", "#0d366b")
 #: Sequential blue, 100 -> 700, for continuous residual correlation.
 SEQUENTIAL_BLUE = (
     "#cde2fb", "#b7d3f6", "#9ec5f4", "#86b6ef", "#6da7ec", "#5598e7",
     "#3987e5", "#2a78d6", "#256abf", "#1c5cab", "#184f95", "#104281", "#0d366b",
 )
+#: Gamma ramp: sequential blue from step 250, whose light end still clears the
+#: surface at 2.06:1, so the weakest regularisation stays visible as a mark.
+GAMMA_RAMP = SEQUENTIAL_BLUE[3:]
 #: Neutral ink for size swatches and other non-identity chrome.
 BASELINE_INK = "#52514e"
 #: The gamma-zero baseline: categorical red, a square, never part of the blue
@@ -66,11 +67,13 @@ TEXT_PRIMARY = "#0b0b0b"
 TEXT_SECONDARY = "#52514e"
 SURFACE = "#fcfcfb"
 
-#: Bins is a three-level ordered factor; area is a weak channel, so the steps are
-#: widely separated. The label says "requested" on purpose: quantile edges on
-#: FET.Et collapse, so the effective bin count is lower than the requested one.
-BINS_AREA = {40: 34.0, 50: 86.0, 60: 170.0}
-_DEFAULT_AREA = 86.0
+#: Bins run from 10 to 500, so area follows log2(bins): every doubling adds the
+#: same area. Area is a weak channel -- read it as "few vs many bins", with the
+#: exact value in the legend. The label says "requested" on purpose: quantile
+#: edges on FET.Et collapse, so the effective bin count is lower.
+BINS_AREA_AT_10 = 30.0
+BINS_AREA_PER_DOUBLING = 42.0
+BINS_AREA_MAX = 270.0
 
 #: Area range for a size-encoded ordered factor. Area is a weak channel, so the
 #: ends are far apart and the number of levels is kept small.
@@ -112,27 +115,44 @@ def _gamma_levels(frame: pd.DataFrame) -> list[float]:
     return sorted({float(value) for value in frame[GAMMA_COLUMN].dropna() if float(value) > 0.0})
 
 
+def _gamma_norm(levels: Sequence[float]):
+    """Logarithmic colour scale over the regularised gamma levels."""
+
+    from matplotlib.colors import LogNorm
+
+    low, high = min(levels), max(levels)
+    if low == high:
+        low, high = low / 10.0, high * 10.0
+    return LogNorm(vmin=low, vmax=high)
+
+
+def _gamma_colormap():
+    from matplotlib.colors import LinearSegmentedColormap
+
+    return LinearSegmentedColormap.from_list("gamma_sequential_blue", list(GAMMA_RAMP))
+
+
 def _gamma_colors(frame: pd.DataFrame) -> dict[float, str]:
-    """Map regularised gamma levels onto the ordinal ramp, darkest = strongest."""
+    """Map regularised gamma levels onto the log-scaled ramp, darkest = strongest."""
+
+    from matplotlib.colors import to_hex
 
     levels = _gamma_levels(frame)
-    if len(levels) > len(GAMMA_RAMP):
-        raise ParetoPlotError(
-            f"{len(levels)} regularised gamma levels exceed the {len(GAMMA_RAMP)}-step "
-            "validated ordinal ramp. Re-validate a longer ramp rather than cycling hues."
-        )
-    if len(levels) == 1:
-        return {levels[0]: GAMMA_RAMP[-1]}
-    indices = np.linspace(0, len(GAMMA_RAMP) - 1, num=len(levels)).round().astype(int)
-    return {level: GAMMA_RAMP[index] for level, index in zip(levels, indices)}
+    if not levels:
+        return {}
+    norm, colormap = _gamma_norm(levels), _gamma_colormap()
+    return {level: to_hex(colormap(norm(level))) for level in levels}
+
+
+def _bins_area(bins: Any) -> float:
+    if pd.isna(bins) or float(bins) <= 0.0:
+        return BINS_AREA_AT_10
+    area = BINS_AREA_AT_10 + BINS_AREA_PER_DOUBLING * np.log2(float(bins) / 10.0)
+    return float(np.clip(area, BINS_AREA_AT_10, BINS_AREA_MAX))
 
 
 def _areas(frame: pd.DataFrame) -> np.ndarray:
-    return np.array(
-        [BINS_AREA.get(int(value), _DEFAULT_AREA) if pd.notna(value) else _DEFAULT_AREA
-         for value in frame[BINS_COLUMN]],
-        dtype=float,
-    )
+    return np.array([_bins_area(value) for value in frame[BINS_COLUMN]], dtype=float)
 
 
 def _size_levels(frame: pd.DataFrame, column: str, order: Sequence[Any] | None):
@@ -249,9 +269,13 @@ def _bins_legend_handles(frame: pd.DataFrame):
     from matplotlib.lines import Line2D
 
     present = sorted({int(value) for value in frame[BINS_COLUMN].dropna()})
+    # Area is read as "few vs many bins"; four reference sizes spanning the grid
+    # say that, while ten near-identical swatches would only suggest precision.
+    if len(present) > 4:
+        present = [present[i] for i in np.linspace(0, len(present) - 1, 4).round().astype(int)]
     return [
         Line2D([], [], marker="o", linestyle="none",
-               markersize=float(np.sqrt(BINS_AREA.get(bins, _DEFAULT_AREA))),
+               markersize=float(np.sqrt(_bins_area(bins))),
                markerfacecolor=BASELINE_INK, markeredgecolor="none",
                label=f"{bins} bins")
         for bins in present
@@ -320,15 +344,27 @@ def faceted_figure(candidates: pd.DataFrame, *, y_column: str, output_path: Path
     for axis in axes[1:]:
         axis.set_ylabel("")
 
+    levels = _gamma_levels(eligible if not eligible.empty else candidates)
+    if levels:
+        from matplotlib.cm import ScalarMappable
+
+        colorbar = figure.colorbar(
+            ScalarMappable(norm=_gamma_norm(levels), cmap=_gamma_colormap()),
+            ax=list(axes), location="bottom", shrink=0.6, aspect=40,
+        )
+        colorbar.set_label(r"MI weight $\gamma$ (log scale)", color=TEXT_PRIMARY)
+        colorbar.ax.tick_params(colors=TEXT_SECONDARY, labelsize=9)
+        colorbar.outline.set_edgecolor(GRID_INK)
+
     handles = _gamma_legend_handles(
-        gamma_colors, has_baseline=bool((eligible[GAMMA_COLUMN] == 0.0).any())
+        {}, has_baseline=bool((eligible[GAMMA_COLUMN] == 0.0).any())
     )
     handles += _bins_legend_handles(eligible)
     handles += _ring_legend_handle()
     if any_excluded:
         handles += _excluded_legend_handle()
     figure.legend(
-        handles=handles, loc="outside right upper", frameon=False,
+        handles=handles, loc="outside right center", frameon=False,
         labelcolor=TEXT_SECONDARY, fontsize=9,
     )
     figure.suptitle(
@@ -588,15 +624,27 @@ def front_parallel_coordinates(front: pd.DataFrame, *, output_path: Path) -> Pat
         spine.set_visible(False)
     axis.tick_params(length=0)
 
+    levels = _gamma_levels(ordered)
+    if levels:
+        from matplotlib.cm import ScalarMappable
+
+        colorbar = figure.colorbar(
+            ScalarMappable(norm=_gamma_norm(levels), cmap=_gamma_colormap()),
+            ax=axis, location="bottom", shrink=0.5, aspect=40, pad=0.02,
+        )
+        colorbar.set_label(r"MI weight $\gamma$ (log scale)", color=TEXT_PRIMARY)
+        colorbar.ax.tick_params(colors=TEXT_SECONDARY, labelsize=9)
+        colorbar.outline.set_edgecolor(GRID_INK)
     handles = _gamma_legend_handles(
-        gamma_colors,
+        {},
         has_baseline=bool((ordered[GAMMA_COLUMN] == 0.0).any()),
         baseline_filled=True,
     )
-    figure.legend(
-        handles=handles, loc="outside lower center", frameon=False,
-        labelcolor=TEXT_SECONDARY, fontsize=9, ncol=len(handles),
-    )
+    if handles:
+        figure.legend(
+            handles=handles, loc="outside lower center", frameon=False,
+            labelcolor=TEXT_SECONDARY, fontsize=9, ncol=len(handles),
+        )
     hidden = len(ordered) - emphasised
     subtitle = f", {emphasised} best-ranked named" if hidden else ""
     axis.set_title(

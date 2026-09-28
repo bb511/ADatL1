@@ -20,8 +20,8 @@ set -euo pipefail
 # run's checkpoint.
 : "${RUN_NAME:?Set RUN_NAME to the run you are training or analysing, e.g. RUN_NAME=AE_30ep_gamma0.1}"
 
-# Must match the composed experiment's experiment_name. physics/ae and its
-# ae_metrics overlay both use physics_ae_pareto.
+# Must match the composed experiment's experiment_name. physics/ae, its
+# ae_metrics overlay and physics/pareto_fet(_train) all use Pareto-Front-260928.
 : "${EXPERIMENT:=physics/ae}"
 
 # Overrides the experiment's own experiment_name, which is the directory every

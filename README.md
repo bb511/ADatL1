@@ -142,7 +142,7 @@ that differs between the stage-1 wrapper and the others.
 only switches on the four summary callbacks. The plain `physics/ae` experiment
 leaves the correlation matrix disabled and defines no AUROC or latent-collapse
 callback at all, so stage 3 composed with it would exit zero and write nothing.
-Both experiments resolve to `experiment_name: physics_ae_models` and therefore
+Both experiments resolve to `experiment_name: Pareto-Front-260928` and therefore
 address the same checkpoint directory. For a Pareto-study run use the study's own
 experiment instead: `EXPERIMENT=physics/pareto_fet`.
 
@@ -229,7 +229,7 @@ Otherwise the map is **built from an experiment directory**, using the
 `run_manifest.yaml` each run carries:
 
 ```bash
-EXPERIMENT_NAME=physics_ae_models bash scripts/physics/runcollect.sh
+EXPERIMENT_NAME=Pareto-Front-260928 bash scripts/physics/runcollect.sh
 ```
 
 That is the path for autoencoders trained one at a time, whenever and wherever

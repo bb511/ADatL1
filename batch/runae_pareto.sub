@@ -59,10 +59,12 @@ request_cpus   = 6
 request_memory = 18000
 request_disk   = 10GB
 
-# 30 epochs. Job 333797 reached the end of data loading and into training in
+# 50 epochs. Job 333797 reached the end of data loading and into training in
 # 15 minutes at 7 cpus; this stage no longer runs the probes (1605 s) or the
-# Pareto callbacks, so 4 h is generous. An over-runtime job is evicted silently:
-# no hold, no reason, it simply leaves the queue.
-+MaxRuntime = 14400
+# Pareto callbacks. The CPU time per epoch has not been measured for the 300-
+# and 500-bin runs, whose MI loss loops over every bin each step, so this allows
+# 8 h. An over-runtime job is evicted silently: no hold, no reason, it simply
+# leaves the queue.
++MaxRuntime = 28800
 
 queue SEED,GAMMA,BINS,ARCH,NODES,RUN_NAME from batch/pareto_runs.txt

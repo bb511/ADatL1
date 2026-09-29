@@ -104,7 +104,16 @@ for _d in extracted processed mlready; do
   }
 done
 
+# Hydra's default run directory is logs/<task>/runs/<date>_<HH-MM-SS>. Stages 2
+# and 3 write it on EOS, shared by every job, so two jobs starting in the same
+# second collide: FileExistsError on the directory or .hydra/config.yaml
+# (clusters 354142 and 354543, 2026-09-29). Append the run name plus host and
+# PID so each process gets its own directory. Hydra still resolves the date,
+# time, log_dir and task_name itself.
+_HYDRA_UNIQ="${RUN_NAME}_$(hostname -s 2>/dev/null || echo host)-$$"
+
 COMMON_ARGS=(
+  "hydra.run.dir=\${paths.log_dir}/\${task_name}/runs/\${now:%Y-%m-%d}_\${now:%H-%M-%S}_${_HYDRA_UNIQ}"
   # Pass root_dir explicitly rather than leaving it to
   # paths.root_dir: ${oc.env:PROJECT_ROOT}. rootutils.setup_root loads the
   # repo's .env at import time and can override the exported value, which is

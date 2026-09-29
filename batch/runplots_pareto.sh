@@ -52,9 +52,14 @@ echo "Checkpoint:        $CKPT"
 # Builds COMMON_ARGS / ALGO_ARGS from the environment above (cd's into CODE_DIR).
 source "${CODE_DIR}/scripts/physics/_stage_common.sh"
 
+# optimized_metric_config=null: the evaluator's Optuna bookkeeping looks up the
+# ascore_operational callback as its secondary metric. That callback is switched
+# off below, so without this the job wrote every plot and then exited 1 with
+# "Callback ascore_operational not available" (cluster 354142, 2026-09-29).
 exec python3 src/run_eval_metrics.py \
   "${COMMON_ARGS[@]}" \
   "${ALGO_ARGS[@]}" \
+  optimized_metric_config=null \
   evaluation.callbacks.reco=null \
   evaluation.callbacks.ascore_operational=null \
   evaluation.callbacks.thres_drift=null \

@@ -34,4 +34,10 @@ request_disk   = 10GB
 # that each walk the same 22 loaders again.
 +MaxRuntime = 7200
 
+# Retry failed jobs automatically, up to 3 starts in total. EOS returns
+# transient "Input/output error" (errno 5/121) under load when many jobs read
+# the data or write logs at once; all such failures in clusters 354142/354543
+# succeeded on a plain rerun. Success is exit code 0.
+on_exit_remove = (ExitBySignal == False && ExitCode == 0) || (NumJobStarts >= 3)
+
 queue SEED,GAMMA,BINS,ARCH,NODES,RUN_NAME from batch/pareto_runs.txt

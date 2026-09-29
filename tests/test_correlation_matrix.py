@@ -294,3 +294,52 @@ def test_sort_correlation_change_matrix_rejects_misaligned_labels() -> None:
             correlation_change,
             ascending=False,
         )
+
+
+def test_details_without_source_tables_write_matrices_and_plots(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    labels = ["a.Et", "b.Et", "c.Et"]
+    table = {
+        "a.Et": np.array([0.0, 1.0, 2.0, 3.0, 4.0]),
+        "b.Et": np.array([1.0, 0.0, 3.0, 2.0, 4.0]),
+        "c.Et": np.array([4.0, 2.0, 3.0, 0.0, 1.0]),
+    }
+    plot_paths = []
+    monkeypatch.setattr(
+        "src.evaluation.callbacks.correlation_matrix.matrix.plot",
+        lambda **kwargs: plot_paths.append(
+            Path(kwargs["save_dir"]) / kwargs["filename"]
+        ),
+    )
+    monkeypatch.setattr(
+        "src.evaluation.callbacks.correlation_matrix.utils.mlflow.log_plots_to_mlflow",
+        lambda *args, **kwargs: None,
+    )
+    callback = CorrelationMatrixCallback(
+        variables=labels,
+        correlation_methods=["pearson", "spearman"],
+        sensitive_variable="a.Et",
+        write_details=True,
+        write_source_tables=False,
+    )
+    callback._active = True
+    callback._resolved_variables = [{"label": label} for label in labels]
+    callback._buffers = {"normal": {"input": [table], "reconstruction": [table]}}
+    callback._event_counts = {"normal": 5}
+    monkeypatch.setattr(callback, "_write_metadata", lambda *args, **kwargs: None)
+
+    callback.on_test_epoch_end(
+        trainer=SimpleNamespace(split="val"),
+        pl_module=SimpleNamespace(_ckpt_path=tmp_path / "loss_total.ckpt"),
+    )
+
+    output_dir = tmp_path / "plots/val/loss_total/correlation_matrix/normal"
+    assert not list(output_dir.rglob("*_variables.csv"))
+    assert (output_dir / "mean_correlations.json").is_file()
+    for method in ("pearson", "spearman"):
+        method_dir = output_dir / method.capitalize()
+        assert (method_dir / f"reconstruction_{method}_correlation_matrix.csv").is_file()
+        assert method_dir / f"reconstruction_{method}_correlation_matrix.png" in plot_paths
+        assert method_dir / f"input_{method}_correlation_matrix_et_only.png" in plot_paths

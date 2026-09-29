@@ -42,7 +42,7 @@ evaluation:
       write_pareto_summary: true
       write_plots: false
 
-    # Off in physics/ae because it is expensive and only the study needs it.
+    # Inherited from physics/ae (enabled, with plots, no per-event tables).
     correlation_matrix:
       enabled: true
 

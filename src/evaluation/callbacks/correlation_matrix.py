@@ -55,6 +55,13 @@ class CorrelationMatrixCallback(Callback):
     :param enabled: Whether to evaluate this callback for the current run.
     :param write_details: Whether to write source tables, matrices, and plots in
         addition to the compact Pearson/Spearman summary.
+    :param write_source_tables: Whether ``write_details`` also writes the
+        per-event ``input_variables.csv`` / ``reconstruction_variables.csv``
+        (one parent-level copy plus one per correlation method). These hold one
+        row per validation event, so on the full split they cost gigabytes per
+        run; set False to keep the correlation-matrix CSVs and PNGs without them.
+        Only ``src/analysis/scripts/recreate_sorted_correlation_matrices.py``
+        needs them.
     """
 
     def __init__(
@@ -75,6 +82,7 @@ class CorrelationMatrixCallback(Callback):
         log_raw_mlflow: bool = True,
         enabled: bool = True,
         write_details: bool = True,
+        write_source_tables: bool = True,
     ):
         super().__init__()
         self.variables = variables or [
@@ -109,6 +117,7 @@ class CorrelationMatrixCallback(Callback):
         self.log_raw_mlflow = log_raw_mlflow
         self.enabled = bool(enabled)
         self.write_details = bool(write_details)
+        self.write_source_tables = bool(write_source_tables)
         # on_test_epoch_start replaces this with fully resolved tensor indices.
         # The label-only fallback also lets summary-only callers operate on
         # already collected tables without requiring a live data module.
@@ -301,7 +310,7 @@ class CorrelationMatrixCallback(Callback):
 
                     correlations[(space_name, method)] = corr
 
-            if self.write_details:
+            if self.write_details and self.write_source_tables:
                 # Keep one parent-level copy for existing analysis utilities and write
                 # a copy into every method folder so each result is standalone.
                 self._write_correlation_source_tables(space_dataframes, plot_folder)
@@ -312,10 +321,11 @@ class CorrelationMatrixCallback(Callback):
                 method_folder = plot_folder / method_name
                 if self.write_details:
                     method_folder.mkdir(parents=True, exist_ok=True)
-                    self._write_correlation_source_tables(
-                        space_dataframes,
-                        method_folder,
-                    )
+                    if self.write_source_tables:
+                        self._write_correlation_source_tables(
+                            space_dataframes,
+                            method_folder,
+                        )
 
                 for space_name in space_dataframes:
                     corr = correlations.get((space_name, method))

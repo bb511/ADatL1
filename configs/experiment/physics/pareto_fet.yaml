@@ -32,32 +32,7 @@ evaluation:
     smoke_test:
       max_events_per_split: null
 
-  callbacks:
-    anomaly_efficiency:
-      write_pareto_summary: true
-      write_plots: false
-
-    correlation_matrix:
-      enabled: true
-
-    anomaly_auroc:
-      _target_: src.evaluation.callbacks.auroc.AnomalyAUROCCallback
-      output_name: 'ascore/full'
-      ds: ${evaluation.callbacks.anomaly_efficiency.ds}
-      max_false_positive_rate: ${div:${algorithm.target_rate},${algorithm.base_rate}}
-      pure_normal: false
-      score_direction: higher_score_is_more_anomalous
-      ckpts:
-        loss_total: true
-      name: auroc
-
-    latent_collapse:
-      _target_: src.evaluation.callbacks.latent_collapse.LatentCollapseDiagnosticsCallback
-      architecture_id: ${pareto_study.candidate.architecture_id}
-      minimum_joint_code_entropy_bits: ${pareto_study.collapse_constraint.rule.minimum_joint_code_entropy_bits}
-      minimum_fraction_of_paired_gamma_zero_joint_entropy: ${pareto_study.collapse_constraint.rule.minimum_fraction_of_paired_gamma_zero_joint_entropy}
-      dataset: normal
-      evaluation_split: val
-      ckpts:
-        loss_total: true
-      name: latent_collapse
+  # evaluation.callbacks is inherited from physics/ae unchanged: stage 1 of the
+  # study runs exactly the evaluation every AE run gets (efficiency with plots
+  # and Pareto summary, correlation matrices with plots, AUROC, latent collapse,
+  # reco, threshold drift, Wasserstein). Only the probes (stage 2) differ.

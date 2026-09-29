@@ -38,9 +38,14 @@ def test_pareto_fet_manifest_composes_and_freezes_protocol(
         == "fet-et-four-probe-v10"
     )
     assert cfg.evaluation.callbacks.anomaly_efficiency.write_pareto_summary is True
-    assert cfg.evaluation.callbacks.anomaly_efficiency.write_plots is False
+    # Stage 1 of the study produces the full evaluation (everything but the
+    # probes): efficiency plots and correlation-matrix plots included, without
+    # the multi-GB per-event correlation source tables.
+    assert cfg.evaluation.callbacks.anomaly_efficiency.write_plots is True
     assert cfg.evaluation.callbacks.correlation_matrix.enabled is True
-    assert cfg.evaluation.callbacks.correlation_matrix.write_details is False
+    assert cfg.evaluation.callbacks.correlation_matrix.write_details is True
+    assert cfg.evaluation.callbacks.correlation_matrix.write_source_tables is False
+    assert cfg.evaluation.callbacks.anomaly_auroc.ckpts.loss_total is True
     assert cfg.evaluation.callbacks.anomaly_auroc.ckpts.loss_total is True
     assert cfg.evaluation.callbacks.anomaly_auroc.score_direction == (
         "higher_score_is_more_anomalous"

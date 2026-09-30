@@ -49,7 +49,6 @@ def _format_gamma(value: float) -> str:
 def iter_runs(grid: Dict[str, Any], seed: int) -> Iterator[Tuple[Any, ...]]:
     """Yield (seed, gamma, bins, architecture_id, nodes) for every run."""
     search = grid["search_space"]
-    regularized = search["regularized"]
     baseline = search["gamma_zero_baseline"]
 
     # One gamma-zero baseline per architecture. Binning is irrelevant at
@@ -64,10 +63,22 @@ def iter_runs(grid: Dict[str, Any], seed: int) -> Iterator[Tuple[Any, ...]]:
             list(nodes),
         )
 
-    for architecture_id, nodes in regularized["architectures"].items():
-        for gamma in regularized["mi_gamma"]:
-            for bins in regularized["mi_sensitive_num_bins"]:
-                yield (seed, float(gamma), int(bins), architecture_id, list(nodes))
+    # `regularized` first, then the optional `refinement` block. The order keeps
+    # the lines (and so the HTCondor ProcIds) of earlier submissions stable when
+    # a refinement is appended. A grid point listed in both is emitted once.
+    seen = set()
+    for group in ("regularized", "refinement"):
+        block = search.get(group)
+        if not block:
+            continue
+        for architecture_id, nodes in block["architectures"].items():
+            for gamma in block["mi_gamma"]:
+                for bins in block["mi_sensitive_num_bins"]:
+                    key = (float(gamma), int(bins), architecture_id)
+                    if key in seen:
+                        continue
+                    seen.add(key)
+                    yield (seed, float(gamma), int(bins), architecture_id, list(nodes))
 
 
 def run_name(seed: int, gamma: float, bins: int, architecture_id: str, attempt: str) -> str:
@@ -137,9 +148,27 @@ def main(argv=None) -> int:
             "E.g. --only Gamma_0.1_."
         ),
     )
+    parser.add_argument(
+        "--exclude",
+        type=Path,
+        default=None,
+        help=(
+            "Existing job list; its run names are left out. E.g. write only the "
+            "runs a refinement added: --exclude batch/pareto_runs.txt."
+        ),
+    )
     args = parser.parse_args(argv)
 
     rows = build_rows(args.grid, args.attempt)
+    if args.exclude:
+        existing = {
+            line.rsplit(",", 1)[-1].strip()
+            for line in args.exclude.read_text(encoding="utf-8").splitlines()
+            if line.strip()
+        }
+        rows = [row for row in rows if row["run_name"] not in existing]
+        if not rows:
+            raise SystemExit(f"Every run is already listed in {args.exclude}.")
     if args.only:
         rows = [row for row in rows if args.only in row["run_name"]]
         if not rows:

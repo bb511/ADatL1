@@ -65,6 +65,16 @@ search_space:
     mi_sensitive_num_bins: [10, 20, 30, 40, 50, 60, 80, 150, 300, 500]
     architectures:
       h64_32: [64, 32, 8]
+  # Refinement of the collapse transition, added 2026-09-30 after the first 111
+  # runs showed the latent collapsing from gamma ~0.8 (earlier at high bin
+  # counts). Same study, same architecture; scripts/physics/make_pareto_grid.py
+  # expands it after `regularized` and drops grid points already listed there
+  # (gamma 0.5 x bins 10-60). run_pareto_fet_ngt.sh does not read this block.
+  refinement:
+    mi_gamma: [0.15, 0.25, 0.35, 0.4, 0.45, 0.5, 0.55, 0.6, 0.65, 0.7, 0.75, 0.85, 0.9, 0.95]
+    mi_sensitive_num_bins: [10, 20, 30, 40, 50, 60]
+    architectures:
+      h64_32: [64, 32, 8]
   gamma_zero_baseline:
     mi_gamma: 0.0
     mi_sensitive_num_bins: 50

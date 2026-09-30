@@ -73,4 +73,10 @@ request_disk   = 10GB
 # succeeded on a plain rerun. Success is exit code 0.
 on_exit_remove = (ExitBySignal == False && ExitCode == 0) || (NumJobStarts >= 3)
 
-queue SEED,GAMMA,BINS,ARCH,NODES,RUN_NAME from batch/pareto_runs.txt
+# Hold code 12 = output transfer to EOS failed (kXR_write / "Unable to store
+# file", cluster 353645: 5 of 111 jobs). Release such jobs automatically; the
+# job retrains from scratch and transfers again. At most 3 starts.
+periodic_release = (HoldReasonCode == 12) && (NumJobStarts < 3)
+
+# Subset: condor_submit RUNS=batch/pareto_runs_refine.txt batch/runae_pareto.sub
+queue SEED,GAMMA,BINS,ARCH,NODES,RUN_NAME from $(RUNS:batch/pareto_runs.txt)

@@ -32,10 +32,13 @@ class LatentCollapseDiagnosticsCallback(Callback):
         minimum_fraction_of_paired_gamma_zero_joint_entropy: float,
         dataset: str = "normal",
         evaluation_split: str = "val",
+        paired_reference: str = "same_architecture",
         ckpts: dict | None = None,
         name: str = "latent_collapse",
     ) -> None:
         super().__init__()
+        # Recorded only; the paired comparison itself happens in stage 4.
+        self.paired_reference = str(paired_reference)
         if not architecture_id:
             raise ValueError("architecture_id must be a non-empty string.")
         if float(minimum_joint_code_entropy_bits) < 0.0:
@@ -295,7 +298,7 @@ class LatentCollapseDiagnosticsCallback(Callback):
                 "minimum_fraction_of_paired_gamma_zero_joint_entropy": (
                     self.minimum_fraction_of_paired_gamma_zero_joint_entropy
                 ),
-                "paired_reference": "same_architecture",
+                "paired_reference": self.paired_reference,
                 "status": "requires_phase_2_aggregation",
             },
             "metrics": metrics,

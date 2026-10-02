@@ -11,7 +11,7 @@ defaults:
   - override /pareto_study: fet_et
   - _self_
 
-experiment_name: Pareto-Front-260928
+experiment_name: Pareto-Front-261002
 tags: ["physics", "pareto", "fet-et", "validation", "protocol-v2"]
 
 

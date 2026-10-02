@@ -54,7 +54,7 @@ fi
 # else. No spaces: this becomes a directory name, an MLflow experiment name and
 # a value passed through HTCondor's environment string into several shell
 # layers before Hydra sees it.
-: "${PARETO_EXPERIMENT_NAME:=Pareto-Front-260928}"
+: "${PARETO_EXPERIMENT_NAME:=Pareto-Front-261002}"
 export PARETO_EXPERIMENT_NAME
 
 # Code: the EOS checkout the jobs run from.

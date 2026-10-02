@@ -40,4 +40,4 @@ request_disk   = 10GB
 # succeeded on a plain rerun. Success is exit code 0.
 on_exit_remove = (ExitBySignal == False && ExitCode == 0) || (NumJobStarts >= 3)
 
-queue SEED,GAMMA,BINS,ARCH,NODES,RUN_NAME from batch/pareto_runs.txt
+queue SEED,GAMMA,BINS,ARCH,NODES,RUN_NAME from $(RUNS:batch/pareto_runs.txt)

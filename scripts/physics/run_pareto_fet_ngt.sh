@@ -28,7 +28,7 @@ readonly SCRIPT_NAME="$(basename "$0")"
 readonly DEFAULT_PROJECT_ROOT="/shared/adatl1"
 readonly STUDY_ID="fet-et-pareto-v1"
 readonly PROTOCOL_VERSION="fet-et-pareto-v2"
-readonly EXPERIMENT_NAME="Pareto-Front-260928"
+readonly EXPERIMENT_NAME="Pareto-Front-261002"
 
 ACTION=""
 RERUN_INCOMPLETE=0

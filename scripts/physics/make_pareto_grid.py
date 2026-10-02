@@ -54,31 +54,47 @@ def iter_runs(grid: Dict[str, Any], seed: int) -> Iterator[Tuple[Any, ...]]:
     # One gamma-zero baseline per architecture. Binning is irrelevant at
     # gamma=0, so the study fixes it at the canonical 50 rather than training
     # three identical baselines.
+    baseline_bins = baseline["mi_sensitive_num_bins"]
+    if not isinstance(baseline_bins, (list, tuple)):
+        baseline_bins = [baseline_bins]
     for architecture_id, nodes in baseline["architectures"].items():
-        yield (
-            seed,
-            float(baseline["mi_gamma"]),
-            int(baseline["mi_sensitive_num_bins"]),
-            architecture_id,
-            list(nodes),
-        )
+        for bins in baseline_bins:
+            yield (seed, float(baseline["mi_gamma"]), int(bins), architecture_id, list(nodes))
 
-    # `regularized` first, then the optional `refinement` block. The order keeps
-    # the lines (and so the HTCondor ProcIds) of earlier submissions stable when
-    # a refinement is appended. A grid point listed in both is emitted once.
+    # Every grid point once, in file order, so the lines (and the HTCondor
+    # ProcIds) are reproducible. Supported layouts, per group in
+    # ("regularized", "refinement"):
+    #   - a product:  mi_gamma: [...] and mi_sensitive_num_bins: [...]
+    #   - blocks:     a list of products and/or {points: [[gamma, bins], ...]}
     seen = set()
+
+    def emit(gamma, bins, architecture_id, nodes):
+        key = (float(gamma), int(bins), architecture_id)
+        if key in seen:
+            return None
+        seen.add(key)
+        return (seed, float(gamma), int(bins), architecture_id, list(nodes))
+
     for group in ("regularized", "refinement"):
         block = search.get(group)
         if not block:
             continue
+        parts = list(block.get("blocks") or [])
+        if "mi_gamma" in block:
+            parts.insert(0, {"mi_gamma": block["mi_gamma"],
+                             "mi_sensitive_num_bins": block["mi_sensitive_num_bins"]})
+        if not parts:
+            raise SystemExit(f"search_space.{group} declares no grid points.")
         for architecture_id, nodes in block["architectures"].items():
-            for gamma in block["mi_gamma"]:
-                for bins in block["mi_sensitive_num_bins"]:
-                    key = (float(gamma), int(bins), architecture_id)
-                    if key in seen:
-                        continue
-                    seen.add(key)
-                    yield (seed, float(gamma), int(bins), architecture_id, list(nodes))
+            for part in parts:
+                if "points" in part:
+                    pairs = [(g, b) for g, b in part["points"]]
+                else:
+                    pairs = [(g, b) for g in part["mi_gamma"] for b in part["mi_sensitive_num_bins"]]
+                for gamma, bins in pairs:
+                    row = emit(gamma, bins, architecture_id, nodes)
+                    if row is not None:
+                        yield row
 
 
 def run_name(seed: int, gamma: float, bins: int, architecture_id: str, attempt: str) -> str:
@@ -119,6 +135,18 @@ def build_rows(grid_path: Path, attempt: str) -> List[Dict[str, Any]]:
                 "run_name": run_name(seed, gamma, bins, architecture_id, attempt),
             }
         )
+
+    rule = (grid.get("collapse_constraint") or {}).get("rule") or {}
+    if rule.get("paired_reference") == "same_architecture_and_bins":
+        baselines = {(r["architecture_id"], int(r["bins"])) for r in rows if float(r["gamma"]) == 0.0}
+        missing = sorted({(r["architecture_id"], int(r["bins"])) for r in rows
+                          if float(r["gamma"]) != 0.0} - baselines)
+        if missing:
+            raise SystemExit(
+                "collapse_constraint.rule.paired_reference is same_architecture_and_bins, "
+                f"but these (architecture, bins) have no gamma-zero baseline: {missing}. "
+                "Add the bin counts to search_space.gamma_zero_baseline.mi_sensitive_num_bins."
+            )
 
     names = [row["run_name"] for row in rows]
     if len(set(names)) != len(names):

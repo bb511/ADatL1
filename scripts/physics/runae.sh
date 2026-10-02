@@ -23,7 +23,7 @@
 #   python3 src/train.py \
 #       paths.raw_data_dir=/path/to/adl1t_data/parquet_files \
 #       experiment=physics/ae \
-#       experiment_name=Pareto-Front-260928 \
+#       experiment_name=Pareto-Front-261002 \
 #       run_name=cvar25_t169 \
 #       algorithm.encoder.nodes='[64,32,8]' \
 #       algorithm.input_noise_std=0.0 \

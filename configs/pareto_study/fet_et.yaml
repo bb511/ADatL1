@@ -60,24 +60,51 @@ search_space:
     - algorithm.mi_sensitive_num_bins
   # One fixed architecture (the cvar25_t169 encoder). The collector rejects any
   # run whose architecture is not listed here.
+  #
+  # Pareto-Front-261002 (200 epochs). The grid is a union of blocks, not one
+  # gamma x bins product. Each block is either a product (mi_gamma x
+  # mi_sensitive_num_bins) or an explicit list of [gamma, bins] points;
+  # scripts/physics/make_pareto_grid.py expands them in order and emits a point
+  # listed in several blocks once. The previous study (Pareto-Front-260928:
+  # 111-run product + 78-run refinement) is in git history and in every one of
+  # its runs' resolved_config.yaml. run_pareto_fet_ngt.sh only understands a
+  # single product and refuses this layout.
   regularized:
-    mi_gamma: [0.01, 0.1, 0.2, 0.3, 0.5, 0.8, 1, 5, 10, 50, 100]
-    mi_sensitive_num_bins: [10, 20, 30, 40, 50, 60, 80, 150, 300, 500]
     architectures:
       h64_32: [64, 32, 8]
-  # Refinement of the collapse transition, added 2026-09-30 after the first 111
-  # runs showed the latent collapsing from gamma ~0.8 (earlier at high bin
-  # counts). Same study, same architecture; scripts/physics/make_pareto_grid.py
-  # expands it after `regularized` and drops grid points already listed there
-  # (gamma 0.5 x bins 10-60). run_pareto_fet_ngt.sh does not read this block.
-  refinement:
-    mi_gamma: [0.15, 0.25, 0.35, 0.4, 0.45, 0.5, 0.55, 0.6, 0.65, 0.7, 0.75, 0.85, 0.9, 0.95]
-    mi_sensitive_num_bins: [10, 20, 30, 40, 50, 60]
-    architectures:
-      h64_32: [64, 32, 8]
+    blocks:
+      - name: bins_scan_gamma_0.1
+        mi_gamma: [0.1]
+        mi_sensitive_num_bins: [10, 20, 30, 40, 50, 60, 70, 80, 90, 100]
+      - name: gamma_scan_50_bins
+        mi_gamma: [0.05, 0.1, 0.15, 0.2, 0.25, 0.3, 0.35, 0.4, 0.45, 0.5,
+                   0.55, 0.6, 0.65, 0.7, 0.75, 0.8, 0.85, 0.9, 0.95, 1]
+        mi_sensitive_num_bins: [50]
+      # Pareto-Front-260928 front, ranks 1-14 (ideal-point ranking), retrained
+      # for 200 epochs. Points already in the blocks above are not repeated.
+      - name: front_260928_rank_1_to_14
+        points:
+          - [0.1, 80]   # 1
+          - [0.25, 60]  # 2
+          - [0.25, 10]  # 3
+          - [0.35, 10]  # 4
+          - [0.2, 60]   # 5
+          - [0.1, 10]   # 6
+          - [0.35, 50]  # 7
+          - [0.2, 80]   # 8
+          - [0.6, 20]   # 9
+          - [0.7, 10]   # 10
+          - [0.2, 50]   # 11
+          - [0.15, 40]  # 12
+          - [0.8, 40]   # 13
+          - [0.5, 30]   # 14
+  # One gamma-zero reference per bin count used anywhere in `regularized`, so
+  # the collapse rule can pair every run with the baseline of its own bin count
+  # (collapse_constraint.rule.paired_reference: same_architecture_and_bins).
+  # make_pareto_grid.py refuses a grid whose bin counts are not all covered.
   gamma_zero_baseline:
     mi_gamma: 0.0
-    mi_sensitive_num_bins: 50
+    mi_sensitive_num_bins: [10, 20, 30, 40, 50, 60, 70, 80, 90, 100]
     architectures:
       h64_32: [64, 32, 8]
   fixed_latent_width: 8
@@ -105,7 +132,9 @@ collapse_constraint:
   rule:
     minimum_joint_code_entropy_bits: 1.0
     minimum_fraction_of_paired_gamma_zero_joint_entropy: 0.5
-    paired_reference: same_architecture
+    # same_architecture_and_bins: compare with gamma 0 at the SAME bin count.
+    # same_architecture: compare with the single gamma 0 / 50-bin baseline (old).
+    paired_reference: same_architecture_and_bins
     baseline_below_minimum_entropy: reject_baseline_and_dependent_candidates
   include_rejected_configurations_in_results: true
 

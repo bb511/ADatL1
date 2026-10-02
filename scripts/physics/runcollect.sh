@@ -31,7 +31,7 @@
 # is refused, with the duplicates named.
 #
 # Usage:
-#   bash scripts/physics/runcollect.sh    # EXPERIMENT_NAME defaults to Pareto-Front-260928
+#   bash scripts/physics/runcollect.sh    # EXPERIMENT_NAME defaults to Pareto-Front-261002
 #   STUDY_ROOT=/path/to/pareto_studies/fet-et-pareto-v1 bash scripts/physics/runcollect.sh
 
 set -euo pipefail
@@ -42,7 +42,7 @@ REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 : "${STUDY_ID:=fet-et-pareto-v1}"
 # One study tree per experiment directory, so a new study never picks up (or
 # overwrites) the study map and phase outputs of an earlier one.
-: "${EXPERIMENT_NAME:=Pareto-Front-260928}"
+: "${EXPERIMENT_NAME:=Pareto-Front-261002}"
 : "${STUDY_ROOT:=${ADL1T_OUTPUT_ROOT}/pareto_studies/${EXPERIMENT_NAME}}"
 : "${STUDY_MAP:=${STUDY_ROOT}/study_map.yaml}"
 : "${PHASE2_OUTPUT:=${STUDY_ROOT}/phase2}"
@@ -53,17 +53,29 @@ REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 
 cd "$REPO_ROOT"
 
+# Rebuild a map that was built from the checkpoint folder when runs were added
+# since: a stale map silently collects only the old runs (2026-10-01: 111 of
+# 189 after the refinement grid). A map without a matching checkpoint folder
+# (e.g. one written by the NGT runner) is left alone.
+EXPERIMENT_DIR="${CHECKPOINTS_DIR}/${EXPERIMENT_NAME}"
+if [[ -f "$STUDY_MAP" && -n "$EXPERIMENT_NAME" && -d "$EXPERIMENT_DIR" ]]; then
+  if [[ -n "$(find "$EXPERIMENT_DIR" -mindepth 2 -maxdepth 2 -name run_manifest.yaml -newer "$STUDY_MAP" -print -quit)" ]]; then
+    stale="${STUDY_MAP%.yaml}.stale-$(date +%Y%m%d-%H%M%S).yaml"
+    echo "--- study map is older than some runs; moving it to $stale and rebuilding ---"
+    mv "$STUDY_MAP" "$stale"
+  fi
+fi
+
 if [[ ! -f "$STUDY_MAP" ]]; then
   [[ -n "$EXPERIMENT_NAME" ]] || {
     echo "Missing study map: $STUDY_MAP" >&2
     echo >&2
     echo "Either point STUDY_ROOT at a study the runner created, or set" >&2
     echo "EXPERIMENT_NAME to build the map from a directory of trained runs:" >&2
-    echo "  EXPERIMENT_NAME=Pareto-Front-260928 bash scripts/physics/runcollect.sh" >&2
+    echo "  EXPERIMENT_NAME=Pareto-Front-261002 bash scripts/physics/runcollect.sh" >&2
     exit 2
   }
 
-  EXPERIMENT_DIR="${CHECKPOINTS_DIR}/${EXPERIMENT_NAME}"
   [[ -d "$EXPERIMENT_DIR" ]] || {
     echo "No such experiment directory: $EXPERIMENT_DIR" >&2
     exit 2

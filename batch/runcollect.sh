@@ -27,7 +27,7 @@ python3 --version
 : "${STUDY_ID:=fet-et-pareto-v1}"
 # The study map is built from checkpoints/<EXPERIMENT_NAME>/ and every output
 # lands in pareto_studies/<EXPERIMENT_NAME>/, so each study keeps its own tree.
-: "${EXPERIMENT_NAME:=Pareto-Front-260928}"
+: "${EXPERIMENT_NAME:=Pareto-Front-261002}"
 : "${STUDY_ROOT:=${ADL1T_OUTPUT_ROOT}/pareto_studies/${EXPERIMENT_NAME}}"
 export ADL1T_OUTPUT_ROOT STUDY_ID STUDY_ROOT EXPERIMENT_NAME
 

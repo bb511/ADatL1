@@ -66,7 +66,7 @@ echo "MI_GAMMA:          $MI_GAMMA"
 echo "MI_NUM_BINS:       $MI_NUM_BINS"
 echo "ARCHITECTURE_ID:   $ARCHITECTURE_ID"
 echo "ENCODER_NODES:     $ENCODER_NODES"
-echo "max_epochs:        from configs/experiment/physics/pareto_fet_train.yaml"
+echo "max_epochs:        ${MAX_EPOCHS:-from configs/experiment/physics/pareto_fet_train.yaml}"
 echo
 echo "Running scripts/physics/runae.sh ..."
 exec bash "${CODE_DIR}/scripts/physics/runae.sh"

@@ -55,6 +55,7 @@ from src.utils.instrumentation import log_phase
 from src.utils.run_manifest import write_stage_status
 from src.utils.stage import (
     build_stage_context,
+    finish_stage_loggers,
     get_evaluator,
     release_accelerator_cache,
 )
@@ -132,6 +133,7 @@ def run_eval_metrics(cfg: DictConfig) -> Tuple[Dict[str, Any], Dict[str, Any]]:
     )
 
     log.info(f"Evaluation artifacts written under {context.run_ckpts / 'plots'}.")
+    finish_stage_loggers(context)
     return metric_dict, context.object_dict
 
 

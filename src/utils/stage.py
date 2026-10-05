@@ -37,13 +37,14 @@ import hydra
 import pytorch_lightning as pl
 import torch
 
-from omegaconf import DictConfig, OmegaConf
+from omegaconf import DictConfig, OmegaConf, open_dict
 from pytorch_lightning import LightningDataModule, LightningModule, Trainer
 from pytorch_lightning.loggers import Logger
 
 from src.utils import RankedLogger
 from src.utils import instantiate_callbacks
 from src.utils import instantiate_loggers
+from src.utils.mlflow_stage_run import find_stage1_run_id, tolerate_param_conflicts
 from src.utils.run_manifest import verify_against_manifest
 
 log = RankedLogger(__name__, rank_zero_only=True)
@@ -66,6 +67,8 @@ class StageContext:
     #: The manifest stage 1 wrote for this run, when there is one.
     manifest: Optional[Dict[str, Any]] = None
     object_dict: Dict[str, Any] = field(default_factory=dict)
+    #: The stage-1 MLflow run this stage logs into, or None when it opened its own.
+    reused_mlflow_run_id: Optional[str] = None
 
 
 def run_checkpoint_dir(cfg: DictConfig) -> Path:
@@ -76,6 +79,55 @@ def run_checkpoint_dir(cfg: DictConfig) -> Path:
     output directory and the stages that read it can never drift apart.
     """
     return Path(cfg.paths.checkpoints_dir) / cfg.experiment_name / cfg.run_name
+
+
+def reuse_stage1_mlflow_run(cfg: DictConfig, stage_name: str) -> Optional[str]:
+    """Point the MLflow logger at the stage-1 run of this checkpoint.
+
+    Without this every stage opens a new MLflow run with the same run name, so
+    one checkpoint ends up with several runs and the training run (curves and
+    artifacts) never receives the analysis metrics. With it, a checkpoint keeps
+    one run, as before the pipeline was split. Falls back to a new run when no
+    stage-1 run exists (e.g. a checkpoint copied in without its MLflow store).
+    """
+    logger_cfg = cfg.get("logger")
+    if not logger_cfg or "mlflow" not in logger_cfg or logger_cfg.mlflow is None:
+        return None
+    mlflow_cfg = logger_cfg.mlflow
+    if mlflow_cfg.get("run_id"):
+        return str(mlflow_cfg.run_id)
+    try:
+        run_id = find_stage1_run_id(
+            mlflow_cfg.get("tracking_uri"), str(cfg.experiment_name), str(cfg.run_name)
+        )
+    except Exception as err:  # never let bookkeeping kill an analysis job
+        log.warning(f"[{stage_name}] Could not look up the stage-1 MLflow run: {err}")
+        return None
+    if run_id is None:
+        log.warning(
+            f"[{stage_name}] No stage-1 MLflow run for "
+            f"{cfg.experiment_name}/{cfg.run_name}; this stage opens a new run."
+        )
+        return None
+    with open_dict(mlflow_cfg):
+        mlflow_cfg.run_id = run_id
+    log.info(f"[{stage_name}] Logging into the stage-1 MLflow run {run_id}.")
+    return run_id
+
+
+def finish_stage_loggers(context: "StageContext", status: str = "success") -> None:
+    """Close an MLflow run this stage opened itself.
+
+    A reopened stage-1 run keeps the status stage 1 gave it. Only a run created
+    here is terminated, so it no longer stays RUNNING forever.
+    """
+    if context.reused_mlflow_run_id:
+        return
+    for logger in context.logger or []:
+        try:
+            logger.finalize(status)
+        except Exception as err:
+            log.warning(f"Could not finalize logger {type(logger).__name__}: {err}")
 
 
 def require_loss_total_checkpoint(run_ckpts: Path) -> Path:
@@ -139,8 +191,11 @@ def build_stage_context(
     log.info(f"Instantiating algorithm <{cfg.algorithm._target_}>")
     algorithm: LightningModule = hydra.utils.instantiate(cfg.algorithm)
 
+    reused_run_id = reuse_stage1_mlflow_run(cfg, stage_name)
     log.info("Instantiating loggers...")
     logger: List[Logger] = instantiate_loggers(cfg.get("logger"))
+    if reused_run_id:
+        tolerate_param_conflicts(logger)
 
     # trainer.fit() normally calls prepare_data(). These stages skip fit, but the
     # evaluator and the probes still need the prepared cache location recorded by
@@ -166,6 +221,7 @@ def build_stage_context(
         run_ckpts=run_ckpts,
         manifest=manifest,
         object_dict=object_dict,
+        reused_mlflow_run_id=reused_run_id,
     )
 
 

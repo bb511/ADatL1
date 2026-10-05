@@ -18,7 +18,10 @@ defaults:
 seed: 180524
 tags: ["ae", "signal"]
 
-experiment_name: Pareto-Front-261002
+# Ad-hoc AE runs (scripts/physics/runae.sh) log to physics_ae_models, as before
+# 2026-09-28. Pareto studies set their own experiment_name in pareto_fet.yaml
+# and the batch wrappers pass EXPERIMENT_NAME, so they are unaffected.
+experiment_name: physics_ae_models
 run_name: ${short_hash:${hydra:runtime.output_dir},12}
 
 data:

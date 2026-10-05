@@ -113,7 +113,18 @@ python3 scripts/plot_pareto_study.py \
   --front "${PHASE3_OUTPUT}/pareto_front.csv" \
   --output-dir "$PHASE4_OUTPUT"
 
+echo "--- phase 4b: gamma x bins matrices, one per metric ---"
+# Also reads only phase 3 (plus the study map, for the collapse rule in the
+# footer). Rejected configurations hatched, the front outlined.
+python3 scripts/plot_pareto_matrices.py \
+  --candidates "${PHASE3_OUTPUT}/pareto_candidates.csv" \
+  --selection "${PHASE3_OUTPUT}/pareto_selection.json" \
+  --study-map "$STUDY_MAP" \
+  --checkpoints-root "$CHECKPOINTS_DIR" \
+  --output-dir "${PHASE4_OUTPUT}/matrices"
+
 echo
 echo "Front:     ${PHASE3_OUTPUT}/pareto_front.csv"
 echo "Selection: ${PHASE3_OUTPUT}/pareto_selection.json"
 echo "Figures:   ${PHASE4_OUTPUT}/"
+echo "Matrices:  ${PHASE4_OUTPUT}/matrices/"

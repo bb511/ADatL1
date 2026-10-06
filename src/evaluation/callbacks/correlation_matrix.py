@@ -11,7 +11,7 @@ from pytorch_lightning.callbacks import Callback
 from src.data.feature_refs import label_matches_any
 from src.data.utils import unpack_batch
 from src.evaluation.callbacks import utils
-from src.plot import matrix
+from src.plot import correlation_matrix as corr_plot
 
 
 CORRELATION_SOURCE_FILENAMES = {
@@ -38,7 +38,10 @@ class CorrelationMatrixCallback(Callback):
     :param correlation_methods: Pandas correlation methods to save/plot, e.g.
         ['pearson'] or ['pearson', 'spearman'].
     :param sensitive_variable: Variable whose mean correlation with every other
-        configured variable is written for Pareto-front construction.
+        configured variable is written for Pareto-front construction. Its row is
+        framed in every correlation-matrix plot, and its entries are printed in green
+        where |r| <= 0.1 in the matrix itself (before/after matrices) or in the
+        reconstruction matrix (change matrices); see src/plot/correlation_matrix.py.
     :param sensitive_group: Further sensitive variables ('<object>.<feature>',
         wildcards allowed, e.g. 'FET.*') that are left out of that mean. They are
         control-only (never reconstructed), so their correlation with the
@@ -341,25 +344,21 @@ class CorrelationMatrixCallback(Callback):
                     }
 
                     if self.write_details:
-                        corr.to_csv(
-                            method_folder
-                            / f"{space_name}_{method}_correlation_matrix.csv"
-                        )
-                        title = {
-                            "input": f"{method_name} correlation matrix before training",
-                            "reconstruction": (
-                                f"{method_name} correlation matrix after training"
-                            ),
-                        }.get(
-                            space_name,
-                            f"{method_name} correlation matrix: {space_name}",
-                        )
-
+                        stem = corr_plot.correlation_matrix_stem(space_name, method)
+                        corr.to_csv(method_folder / f"{stem}.csv")
                         self._write_correlation_matrix_variants(
                             corr=corr,
                             plot_folder=method_folder,
-                            stem=f"{space_name}_{method}_correlation_matrix",
-                            title=title,
+                            stem=stem,
+                            title=corr_plot.correlation_matrix_title(
+                                space_name,
+                                method,
+                            ),
+                            decorrelation_reference=(
+                                corr
+                                if space_name in {"input", "reconstruction"}
+                                else None
+                            ),
                         )
 
                 corr_before = correlations.get(("input", method))
@@ -391,33 +390,25 @@ class CorrelationMatrixCallback(Callback):
                     if correlation_change.empty:
                         continue
 
-                    change_stem = (
-                        f"abs_reconstruction_minus_input_{method}_correlation_matrix"
-                    )
-
                     self._write_correlation_matrix_variants(
                         corr=correlation_change,
                         plot_folder=method_folder,
-                        stem=change_stem,
-                        title=(
-                            f"Change in {method_name} correlation: "
-                            "|corr_after| - |corr_before|"
-                        ),
+                        stem=corr_plot.correlation_change_stem(method),
+                        title=corr_plot.correlation_change_title(method),
+                        decorrelation_reference=corr_after,
                     )
 
-                    for direction, ascending in (
-                        ("increase", False),
-                        ("decrease", True),
-                    ):
+                    for direction, ascending in corr_plot.SORT_DIRECTIONS.items():
                         self._write_correlation_matrix_variants(
                             corr=correlation_change,
                             plot_folder=method_folder,
-                            stem=f"{change_stem}_sorted_by_{direction}",
-                            title=(
-                                f"Change in {method_name} correlation: "
-                                f"variables sorted by mean {direction}"
+                            stem=corr_plot.correlation_change_stem(method, direction),
+                            title=corr_plot.correlation_change_title(
+                                method,
+                                direction,
                             ),
                             sort_ascending=ascending,
+                            decorrelation_reference=corr_after,
                         )
 
                 if self.write_details:
@@ -741,66 +732,31 @@ class CorrelationMatrixCallback(Callback):
         stem: str,
         title: str,
         sort_ascending: bool | None = None,
+        decorrelation_reference: pd.DataFrame | None = None,
     ) -> None:
-        """Save full-variable and ``*.Et``-only PNG correlation matrices."""
-        variants = [("", corr, 1.0)]
+        """Save full-variable and ``*.Et``-only PNG correlation matrices.
 
-        et_labels = [label for label in corr.columns if str(label).endswith(".Et")]
-        if not et_labels:
-            raise RuntimeError(
-                "Cannot create the required *.Et-only correlation matrix because "
-                "the configured correlation variables contain no labels ending in '.Et'."
-            )
-
-        et_corr = corr.loc[et_labels, et_labels]
-        variants.append(("_et_only", et_corr, 0.6))
-
-        for suffix, variant, figure_scale in variants:
-            if sort_ascending is not None:
-                variant = self._sort_correlation_change_matrix(
-                    variant,
-                    ascending=sort_ascending,
-                )
-
-            variant_stem = f"{stem}{suffix}"
-            matrix.plot(
-                data=variant.to_dict(orient="index"),
-                value_name=title,
-                save_dir=plot_folder,
-                cmap="coolwarm",
-                vmin=-1.0,
-                vmax=1.0,
-                filename=f"{variant_stem}.png",
-                figure_scale=figure_scale,
-            )
+        The sensitive variable's row is framed in both. Its entries are printed in
+        green where |r| <= 0.1 in ``decorrelation_reference``: pass the matrix itself
+        for a before/after matrix and the reconstruction matrix for a change matrix.
+        """
+        corr_plot.write_correlation_matrix_variants(
+            corr,
+            plot_folder=plot_folder,
+            stem=stem,
+            title=title,
+            sort_ascending=sort_ascending,
+            highlight_variable=self.sensitive_variable,
+            decorrelation_reference=decorrelation_reference,
+        )
 
     @staticmethod
     def _sort_correlation_change_matrix(
         corr: pd.DataFrame,
         ascending: bool,
     ) -> pd.DataFrame:
-        """Order both axes by each variable's mean off-diagonal correlation change.
-
-        Positive scores mean that a variable became more strongly correlated on
-        average after reconstruction; negative scores mean that it became less
-        strongly correlated. The diagonal is excluded because self-correlation does
-        not describe a relationship between variables.
-        """
-        if list(corr.index) != list(corr.columns):
-            raise ValueError(
-                "Cannot sort a correlation-change matrix whose row and column "
-                "labels differ."
-            )
-
-        off_diagonal = corr.copy()
-        np.fill_diagonal(off_diagonal.values, np.nan)
-        mean_change = off_diagonal.mean(axis=1).fillna(0.0)
-        ordered_labels = mean_change.sort_values(
-            ascending=ascending,
-            kind="stable",
-        ).index
-
-        return corr.loc[ordered_labels, ordered_labels]
+        """Order both axes by each variable's mean off-diagonal correlation change."""
+        return corr_plot.sort_correlation_change_matrix(corr, ascending=ascending)
 
     @staticmethod
     def _write_correlation_source_tables(

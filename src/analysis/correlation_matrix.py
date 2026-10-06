@@ -15,6 +15,11 @@ except ImportError:
 
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
+# Same rule as src/plot/correlation_matrix.py (kept local: this module must not need
+# matplotlib). Highlighted-row entries whose reconstructed |r| is at most this are
+# printed in bold green.
+DECORRELATED_ABS_THRESHOLD = 0.1
+DECORRELATED_TEXT_COLOR = "#008000"
 DEFAULT_MATRIX_DIR = (
     REPO_ROOT
     / "checkpoints"
@@ -33,6 +38,9 @@ class CorrelationMatrixSpecs:
     input_path: str | Path
     reconstruction_path: str | Path
     label: str = "reconstruction_minus_input"
+    # Row framed with a bold black border, as in src/plot/correlation_matrix.py. Its
+    # entries are printed green where the reconstruction |r| <= 0.1.
+    highlight_variable: str | None = "FET.Et"
 
 
 class CorrelationMatrixPlotter:
@@ -63,6 +71,7 @@ class CorrelationMatrixPlotter:
             corr=delta_corr,
             save_path=png_path,
             title=title or "Absolute correlation change",
+            decorrelation_reference=reconstruction_corr,
         )
 
         print(f"Saved delta correlation matrix CSV to {csv_path}.")
@@ -101,6 +110,38 @@ class CorrelationMatrixPlotter:
         matrix = CheckpointLoader(path).load_matrix()
         return matrix.apply(pd.to_numeric, errors="raise")
 
+    def _highlight_index(self, labels: list) -> int | None:
+        """Row index of the highlighted variable; exact match before case-insensitive."""
+        target = self.specs.highlight_variable
+        if target is None:
+            return None
+        names = [str(label) for label in labels]
+        if target in names:
+            return names.index(target)
+        lowered = [name.lower() for name in names]
+        if target.lower() in lowered:
+            return lowered.index(target.lower())
+        return None
+
+    def _decorrelated_columns(
+        self,
+        labels: list,
+        reference: pd.DataFrame | None,
+    ) -> set[int]:
+        """Column indices whose reconstructed |r| with the highlighted variable is small."""
+        if reference is None:
+            return set()
+        row = self._highlight_index(list(reference.index))
+        if row is None:
+            return set()
+        values = pd.to_numeric(reference.iloc[row], errors="coerce")
+        small = {
+            str(label)
+            for label, value in values.items()
+            if np.isfinite(value) and abs(value) <= DECORRELATED_ABS_THRESHOLD
+        }
+        return {index for index, label in enumerate(labels) if str(label) in small}
+
     def _resolve_output_dir(self, output_dir: str | Path | None) -> Path:
         if output_dir is not None:
             return Path(output_dir)
@@ -111,14 +152,28 @@ class CorrelationMatrixPlotter:
 
         return REPO_ROOT / "logs" / "plots"
 
-    def _plot_heatmap(self, corr: pd.DataFrame, save_path: Path, title: str) -> None:
+    def _plot_heatmap(
+        self,
+        corr: pd.DataFrame,
+        save_path: Path,
+        title: str,
+        decorrelation_reference: pd.DataFrame | None = None,
+    ) -> None:
         try:
             import matplotlib.pyplot as plt
+            from matplotlib.patches import Rectangle
         except ModuleNotFoundError:
-            self._plot_heatmap_with_pillow(corr=corr, save_path=save_path, title=title)
+            self._plot_heatmap_with_pillow(
+                corr=corr,
+                save_path=save_path,
+                title=title,
+                decorrelation_reference=decorrelation_reference,
+            )
             return
 
         labels = list(corr.columns)
+        highlight_index = self._highlight_index(labels)
+        green_columns = self._decorrelated_columns(labels, decorrelation_reference)
         mat = corr.to_numpy(dtype=float)
         n = len(labels)
         fig_size = max(6, 0.9 * n)
@@ -144,13 +199,42 @@ class CorrelationMatrixPlotter:
         for i in range(n):
             for j in range(n):
                 value = mat[i, j]
+                weight = "normal"
                 if np.isnan(value):
                     text = "nan"
                     color = "black"
+                elif i == highlight_index and j in green_columns:
+                    text = f"{value:.2f}"
+                    color = DECORRELATED_TEXT_COLOR
+                    weight = "bold"
                 else:
                     text = f"{value:.2f}"
                     color = "white" if abs(value) > 0.55 * color_limit else "black"
-                ax.text(j, i, text, ha="center", va="center", color=color, fontsize=10)
+                ax.text(
+                    j,
+                    i,
+                    text,
+                    ha="center",
+                    va="center",
+                    color=color,
+                    fontsize=10,
+                    fontweight=weight,
+                )
+
+        if highlight_index is not None:
+            ax.add_patch(
+                Rectangle(
+                    (-0.5, highlight_index - 0.5),
+                    n,
+                    1,
+                    fill=False,
+                    edgecolor="black",
+                    linewidth=3.0,
+                    joinstyle="miter",
+                    clip_on=False,
+                    zorder=5,
+                )
+            )
 
         cbar = fig.colorbar(im, ax=ax)
         cbar.set_label("|corr after| - |corr before|")
@@ -164,6 +248,7 @@ class CorrelationMatrixPlotter:
         corr: pd.DataFrame,
         save_path: Path,
         title: str,
+        decorrelation_reference: pd.DataFrame | None = None,
     ) -> None:
         try:
             from PIL import Image, ImageDraw, ImageFont
@@ -175,6 +260,8 @@ class CorrelationMatrixPlotter:
         labels = list(corr.columns)
         mat = corr.to_numpy(dtype=float)
         n = len(labels)
+        highlight_index = self._highlight_index(labels)
+        green_columns = self._decorrelated_columns(labels, decorrelation_reference)
 
         finite_values = mat[np.isfinite(mat)]
         max_abs = float(np.max(np.abs(finite_values))) if finite_values.size else 1.0
@@ -215,6 +302,8 @@ class CorrelationMatrixPlotter:
 
                 text = "nan" if np.isnan(value) else f"{value:.2f}"
                 text_color = "white" if abs(value) > 0.55 * color_limit else "black"
+                if i == highlight_index and j in green_columns and not np.isnan(value):
+                    text_color = DECORRELATED_TEXT_COLOR
                 draw.text(
                     ((x0 + x1) // 2, (y0 + y1) // 2),
                     text,
@@ -222,6 +311,14 @@ class CorrelationMatrixPlotter:
                     font=font,
                     anchor="mm",
                 )
+
+        if highlight_index is not None:
+            y0 = top_margin + highlight_index * cell_size
+            draw.rectangle(
+                (left_margin, y0, left_margin + n * cell_size, y0 + cell_size),
+                outline="black",
+                width=5,
+            )
 
         legend_x = left_margin + n * cell_size + 35
         legend_y = top_margin

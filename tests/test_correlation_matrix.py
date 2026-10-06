@@ -49,7 +49,7 @@ def test_test_epoch_end_writes_method_folders_sources_means_and_sorted_matrices(
     gallery_folders = []
 
     monkeypatch.setattr(
-        "src.evaluation.callbacks.correlation_matrix.matrix.plot",
+        "src.plot.matrix.plot",
         lambda **kwargs: plot_paths.append(
             Path(kwargs["save_dir"]) / kwargs["filename"]
         ),
@@ -254,7 +254,7 @@ def test_write_correlation_matrix_variants_sorts_full_and_et_matrices_without_cs
         plot_calls.append(kwargs)
 
     monkeypatch.setattr(
-        "src.evaluation.callbacks.correlation_matrix.matrix.plot",
+        "src.plot.matrix.plot",
         capture_plot,
     )
 
@@ -308,7 +308,7 @@ def test_details_without_source_tables_write_matrices_and_plots(
     }
     plot_paths = []
     monkeypatch.setattr(
-        "src.evaluation.callbacks.correlation_matrix.matrix.plot",
+        "src.plot.matrix.plot",
         lambda **kwargs: plot_paths.append(
             Path(kwargs["save_dir"]) / kwargs["filename"]
         ),

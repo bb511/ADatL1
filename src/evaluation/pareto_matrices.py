@@ -3,8 +3,16 @@
 Reads only the Phase 3 table ``pareto_candidates.csv`` (plus, optionally,
 ``pareto_selection.json`` and the study map), so what is drawn is exactly what
 Phase 3 selected. Every cell is one configuration: rejected configurations are
-hatched red, the Pareto front is outlined in black with its value in bold, and
-grid points that were never trained stay empty.
+white, hatched and framed red, the Pareto front is outlined in black with its value
+in bold, and grid points that were never trained stay empty.
+
+Colour scale: it runs from the lowest to the highest value of the feasible
+cells; rejected cells take no colour (they would otherwise stretch the scale, e.g.
+collapsed runs at leakage 0). The worst value of a metric is always dark blue and
+the best value always pale blue, so the direction flips with ``better`` (lower- or
+higher-is-better). The scale is a framed colour bar the full height of the matrix
+right next to it, as in the correlation matrices (``src/plot/matrix.py``); its
+tick scale always shows the minimum and maximum value.
 
 Generalised from the one-off ``make_matrices.py`` written for
 Pareto-Front-260928:
@@ -39,18 +47,23 @@ from typing import Any, Dict, List, Mapping, Optional, Sequence
 import numpy as np
 import pandas as pd
 
-# Reference palette (dataviz skill): sequential blue 100 -> 700, text ink,
-# surface, status critical. Rejected cells carry a hatch texture and a legend
-# entry as well, so status is never colour alone.
+# Reference palette (dataviz skill): sequential blue 100 -> 700 (pale -> dark), text
+# ink, surface, status critical. Rejected cells carry a hatch texture and a legend
+# entry as well, so status is never colour alone. BLUE[0] marks the best value of a
+# metric and BLUE[-1] the worst.
 BLUE = ["#cde2fb", "#b7d3f6", "#9ec5f4", "#86b6ef", "#6da7ec", "#5598e7", "#3987e5",
         "#2a78d6", "#256abf", "#1c5cab", "#184f95", "#104281", "#0d366b"]
 SURFACE, INK, INK2, MUTED = "#fcfcfb", "#0b0b0b", "#52514e", "#e6e5e0"
 CRITICAL = "#c62828"
-STATUS_COLOURS = ["#f0efec", "#9ec5f4", "#1c5cab"]  # rejected, dominated, front
+REJECTED_FILL = "#ffffff"  # rejected cells: white, red hatch and red frame
+STATUS_COLOURS = [REJECTED_FILL, "#9ec5f4", "#1c5cab"]  # rejected, dominated, front
 
 GAMMA, BINS = "mi_gamma", "mi_sensitive_num_bins"
 
-# (column, title, unit/meaning, better, number format)
+# (column, title, unit/meaning, better, number format). ``better`` ("lower" or
+# "higher") decides which end of the colour scale is pale (best) and which is dark
+# (worst). Diagnostics (not Pareto objectives) carry a direction too: more code
+# entropy / more used codes means less collapse, less redundancy is better.
 METRICS = [
     ("leakage_worst", "Leakage L", "worst of four probes, held-out R²", "lower", "{:.3f}"),
     ("residual_correlation", "Residual correlation E", "max(mean |Pearson|, mean |Spearman|)", "lower", "{:.3f}"),
@@ -61,12 +74,18 @@ METRICS = [
     ("median_auroc", "Median AUROC", "over signal samples", "higher", "{:.4f}"),
     ("min_auroc", "Minimum AUROC", "worst signal sample", "higher", "{:.3f}"),
     ("median_partial_auroc", "Median partial AUROC", "×10⁻³ in cells", "higher", "x1e3"),
-    ("joint_code_entropy_bits", "Joint code entropy H(L)", "bits, 0–8; collapse rule uses this", "context", "{:.2f}"),
-    ("summed_marginal_bit_entropy_bits", "Summed marginal bit entropy Σ h(θⱼ)", "bits, 0–8", "context", "{:.2f}"),
-    ("redundancy_bits", "Redundancy Σ h(θⱼ) − H(L)", "bits, derived", "context", "{:.2f}"),
-    ("effective_code_count", "Effective code count 2^H", "equally used codes", "context", "{:.2f}"),
-    ("observed_code_count", "Observed code count", "distinct codes on normal validation", "context", "{:.0f}"),
+    ("joint_code_entropy_bits", "Joint code entropy H(L)", "bits, 0–8; collapse rule uses this", "higher", "{:.2f}"),
+    ("summed_marginal_bit_entropy_bits", "Summed marginal bit entropy Σ h(θⱼ)", "bits, 0–8", "higher", "{:.2f}"),
+    ("redundancy_bits", "Redundancy Σ h(θⱼ) − H(L)", "bits, derived", "lower", "{:.2f}"),
+    ("effective_code_count", "Effective code count 2^H", "equally used codes", "higher", "{:.2f}"),
+    ("observed_code_count", "Observed code count", "distinct codes on normal validation", "higher", "{:.0f}"),
 ]
+DIAGNOSTICS = {
+    "joint_code_entropy_bits", "summed_marginal_bit_entropy_bits", "redundancy_bits",
+    "effective_code_count", "observed_code_count",
+}
+# Unit shown in the colour-bar label of the metrics printed ×10^k in the cells.
+SCALE_UNIT = {"x1e3": "×10⁻³", "x1e2": "×10⁻²", "x1e4": "×10⁻⁴"}
 SCALE = {"x1e3": 1e3, "x1e2": 1e2, "x1e4": 1e4}
 STATUS_FILENAME = "00_selection_status.png"
 
@@ -210,6 +229,7 @@ def _grid(table: pd.DataFrame, gammas: List[float], bins: List[int], column: str
 
 
 def _draw_cells(ax, values, rejected, front, cmap, norm, f, gammas, bins):
+    from matplotlib.colors import to_rgba
     from matplotlib.patches import Rectangle
 
     ny, nx = values.shape
@@ -219,7 +239,8 @@ def _draw_cells(ax, values, rejected, front, cmap, norm, f, gammas, bins):
             if np.isnan(v):
                 ax.add_patch(Rectangle((j, i), 1, 1, facecolor=SURFACE, edgecolor=MUTED, lw=0.6))
                 continue
-            c = cmap(norm(v))
+            # Rejected cells are outside the colour scale: white, hatched and framed red.
+            c = REJECTED_FILL if rejected[i, j] else cmap(norm(v))
             ax.add_patch(Rectangle((j + 0.04, i + 0.04), 0.92, 0.92, facecolor=c, edgecolor="none"))
             if rejected[i, j]:
                 ax.add_patch(Rectangle((j + 0.04, i + 0.04), 0.92, 0.92, facecolor="none",
@@ -232,7 +253,7 @@ def _draw_cells(ax, values, rejected, front, cmap, norm, f, gammas, bins):
             txt = fmt(v, f)
             if txt:
                 ax.text(j + 0.5, i + 0.52, txt, ha="center", va="center", fontsize=7.2,
-                        color=_ink_for(c), fontweight="bold" if front[i, j] else "normal",
+                        color=_ink_for(to_rgba(c)), fontweight="bold" if front[i, j] else "normal",
                         bbox=dict(boxstyle="round,pad=0.12", fc=c, ec="none", alpha=0.85)
                         if rejected[i, j] else None)
     ax.set_xlim(0, nx)
@@ -244,6 +265,74 @@ def _draw_cells(ax, values, rejected, front, cmap, norm, f, gammas, bins):
     ax.tick_params(length=0)
     for spine in ax.spines.values():
         spine.set_visible(False)
+
+
+def metric_colormap(better: str):
+    """Pale blue at the best end of a metric, dark blue at the worst end."""
+    from matplotlib.colors import LinearSegmentedColormap
+
+    if better not in {"lower", "higher"}:
+        raise ParetoMatrixError(f"better must be 'lower' or 'higher', got {better!r}")
+    # The colormap runs from the low to the high value.
+    colours = BLUE if better == "lower" else BLUE[::-1]
+    return LinearSegmentedColormap.from_list(f"blue_best_{better}", colours)
+
+
+def colorbar_ticks(lo: float, hi: float, nbins: int = 6) -> List[float]:
+    """Ticks from ``lo`` to ``hi``: both ends plus round values that do not crowd them."""
+    from matplotlib.ticker import MaxNLocator
+
+    if hi - lo < 1e-12:
+        return [lo]
+    margin = 0.07 * (hi - lo)
+    inner = [float(t) for t in MaxNLocator(nbins=nbins).tick_values(lo, hi)
+             if lo + margin < t < hi - margin]
+    return [lo, *inner, hi]
+
+
+def tick_labels(ticks: Sequence[float], f: Optional[str]) -> List[str]:
+    """Labels in the cells' number format, with more decimals if two would coincide."""
+    mult = SCALE.get(f, 1.0)
+    if f in SCALE:
+        decimals = 2
+    elif f and f.startswith("{:.") and f.endswith("f}"):
+        decimals = int(f[3:-2])
+    else:
+        decimals = 3
+    while True:
+        labels = [f"{t * mult:.{decimals}f}" for t in ticks]
+        if len(set(labels)) == len(labels) or decimals >= 6:
+            return labels
+        decimals += 1
+
+
+def draw_colorbar(fig, ax, norm, cmap, *, label: str, f: Optional[str],
+                  value_range: tuple[float, float]):
+    """Colour bar in the style of the correlation matrices, from min to max.
+
+    Like ``src/plot/matrix.py``: appended to the right of the matrix with the same
+    height (5 % wide, 0.15 in gap), framed in black, no extension arrows, no minor
+    ticks. The tick scale starts at the lowest and ends at the highest value drawn
+    (``value_range``), both labelled in the number format of the cells.
+    """
+    import matplotlib.pyplot as plt
+    from matplotlib.ticker import FixedFormatter, FixedLocator
+    from mpl_toolkits.axes_grid1 import make_axes_locatable
+
+    cax = make_axes_locatable(ax).append_axes("right", size="5%", pad=0.15)
+    cb = fig.colorbar(plt.cm.ScalarMappable(norm=norm, cmap=cmap), cax=cax)
+    cb.outline.set_visible(True)
+    cb.outline.set_edgecolor(INK)
+    cb.outline.set_linewidth(1.6)
+    cb.ax.minorticks_off()
+    ticks = colorbar_ticks(*value_range)
+    cb.locator = FixedLocator(ticks)
+    cb.formatter = FixedFormatter(tick_labels(ticks, f))
+    cb.update_ticks()
+    cb.ax.tick_params(which="major", direction="out", length=4, width=1.0,
+                      colors=INK, labelcolor=INK, labelsize=9.5)
+    cb.set_label(label, fontsize=10, color=INK, labelpad=8)
+    return cb
 
 
 def _figure():
@@ -300,9 +389,8 @@ def draw_matrices(table: pd.DataFrame, output_dir: Path, ctx: StudyContext,
     import matplotlib
     matplotlib.use("Agg")
     import matplotlib.pyplot as plt
-    from matplotlib.colors import BoundaryNorm, LinearSegmentedColormap, ListedColormap, Normalize
+    from matplotlib.colors import BoundaryNorm, ListedColormap, Normalize
     from matplotlib.patches import Patch, Rectangle
-    from matplotlib.ticker import FuncFormatter
 
     _style()
     output_dir.mkdir(parents=True, exist_ok=True)
@@ -310,10 +398,10 @@ def draw_matrices(table: pd.DataFrame, output_dir: Path, ctx: StudyContext,
     table, n_seeds = _collapse_duplicate_cells(table)
     gammas = sorted(table[GAMMA].unique())
     bins = sorted(table[BINS].unique())
-    seq = LinearSegmentedColormap.from_list("seq_blue", BLUE)
     foot = _footer(table, ctx, architecture, n_seeds, runs=runs)
     legend = [
-        Patch(facecolor=SURFACE, edgecolor=CRITICAL, hatch="////", lw=1.6, label="Rejected (collapse rule)"),
+        Patch(facecolor=REJECTED_FILL, edgecolor=CRITICAL, hatch="////", lw=1.6,
+              label="Rejected (collapse rule, not on the colour scale)"),
         Patch(facecolor=SURFACE, edgecolor=INK, lw=2.0, label="Pareto front (bold value)"),
         Patch(facecolor=SURFACE, edgecolor=MUTED, lw=0.6, label="Not trained"),
     ]
@@ -323,28 +411,26 @@ def draw_matrices(table: pd.DataFrame, output_dir: Path, ctx: StudyContext,
         if col not in table or table[col].isna().all():
             continue
         values, rejected, front = _grid(table, gammas, bins, col)
-        feasible_values = values[~rejected & ~np.isnan(values)]
-        pool = feasible_values if feasible_values.size else values[~np.isnan(values)]
-        lo, hi = np.nanpercentile(pool, 2), np.nanpercentile(pool, 98)
-        if hi - lo < 1e-12:
-            lo, hi = np.nanmin(values), np.nanmax(values)
-        if hi - lo < 1e-12:
-            lo, hi = lo - 0.5, hi + 0.5
-        norm = Normalize(lo, hi, clip=True)
+        # The colour scale runs from the lowest to the highest feasible value; rejected
+        # cells are drawn white. Without feasible cells, all values set the range.
+        feasible = values[~rejected & ~np.isnan(values)]
+        pool = feasible if feasible.size else values[~np.isnan(values)]
+        lo, hi = float(pool.min()), float(pool.max())
+        # A constant metric sits mid-scale on a +-0.5 range; its value is the only tick.
+        norm = Normalize(lo, hi) if hi - lo >= 1e-12 else Normalize(lo - 0.5, hi + 0.5)
+        cmap = metric_colormap(better)
         fig, ax = _figure()
-        _draw_cells(ax, values, rejected, front, seq, norm, f, gammas, bins)
-        verdict = {"lower": "lower is better", "higher": "higher is better", "context": "diagnostic"}[better]
+        _draw_cells(ax, values, rejected, front, cmap, norm, f, gammas, bins)
+        verdict = f"{better} is better"
+        if col in DIAGNOSTICS:
+            verdict = f"diagnostic, {verdict}"
         fig.text(0.1, 0.955, title, fontsize=14, fontweight="bold", color=INK)
         fig.text(0.1, 0.932, f"{sub} · {verdict} · {_baseline_text(table, col, f)}", fontsize=9, color=INK2)
-        fig.text(0.1, 0.913, "Colour scale spans the 2nd–98th percentile of feasible runs; "
-                 "values outside are clipped to the ends.", fontsize=8, color=INK2)
-        cax = fig.add_axes([0.885, 0.3, 0.022, 0.45])
-        cb = fig.colorbar(plt.cm.ScalarMappable(norm=norm, cmap=seq), cax=cax, extend="both")
-        cb.outline.set_visible(False)
-        cb.ax.tick_params(labelsize=8, colors=INK2, length=0)
-        if f in SCALE:
-            mult = SCALE[f]
-            cb.ax.yaxis.set_major_formatter(FuncFormatter(lambda v, _, m=mult: f"{v * m:.2f}"))
+        fig.text(0.1, 0.913, "Colour scale runs from the lowest to the highest feasible value; "
+                 "pale blue = best, dark blue = worst; rejected cells are white.",
+                 fontsize=8, color=INK2)
+        unit = f" [{SCALE_UNIT[f]}]" if f in SCALE_UNIT else ""
+        draw_colorbar(fig, ax, norm, cmap, label=f"{title}{unit}", f=f, value_range=(lo, hi))
         ax.legend(handles=legend, loc="upper center", bbox_to_anchor=(0.5, -0.045), ncol=3,
                   frameon=False, fontsize=8.5, handlelength=1.6, handleheight=1.2)
         fig.text(0.1, 0.022, foot, fontsize=7.2, color=INK2)

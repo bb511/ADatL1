@@ -9,6 +9,8 @@
 #            <configuration_id>/pareto_metrics.json
 #   phase3/  pareto_front.csv, pareto_candidates.csv, pareto_selection.json
 #   phase4/  the figures, drawn from the phase3 tables and nothing else
+#   <run>/plots/.../correlation_matrix/<dataset>/<Method>/comparison_gamma0/
+#            every run's reconstruction correlations vs its gamma = 0 run
 #
 # Unlike stages 1-3 this is a whole-study step, not a per-run one, so it takes no
 # RUN_NAME. It is pure pandas/numpy: no torch, no GPU, minutes not hours.
@@ -122,6 +124,19 @@ python3 scripts/plot_pareto_matrices.py \
   --study-map "$STUDY_MAP" \
   --checkpoints-root "$CHECKPOINTS_DIR" \
   --output-dir "${PHASE4_OUTPUT}/matrices"
+
+echo "--- phase 4c: correlation matrices vs the gamma = 0 run ---"
+# |r_reco(run)| - |r_reco(gamma = 0 run)| into each run's
+# correlation_matrix/<dataset>/<Method>/comparison_gamma0/. The reference is a
+# gamma = 0 run of the same experiment with the same seed, architecture and
+# epochs (the bin count does not matter). It needs every run finished, which is
+# why it runs here and not in the per-run evaluator. Existing comparisons are
+# kept; a missing MLflow store only skips the HTML galleries.
+: "${MLRUNS_ROOT:=${ADL1T_OUTPUT_ROOT}/logs/mlflow/mlruns}"
+python3 scripts/plot_correlation_gamma0.py \
+  --study-map "$STUDY_MAP" \
+  --checkpoints-root "$CHECKPOINTS_DIR" \
+  --mlruns-root "$MLRUNS_ROOT"
 
 echo
 echo "Front:     ${PHASE3_OUTPUT}/pareto_front.csv"

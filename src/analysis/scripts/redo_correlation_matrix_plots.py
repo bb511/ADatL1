@@ -7,7 +7,9 @@ Walks a checkpoint tree for the correlation-matrix PNGs written by
 matrices next to it, then refreshes the thumbnails of the matching MLflow HTML
 galleries. Only PNGs that already exist are rewritten; no new variants are added.
 
-Source of each PNG (all in the PNG's own folder):
+Source of each PNG (the PNG's own folder; for PNGs in a ``self_improvement/`` or
+``comparison_gamma0/`` subfolder, the input/reconstruction CSVs of the method folder
+above it):
 
 * The CSV with the PNG's own stem, when it exists. Older evaluator versions wrote
   one per variant; it holds exactly the matrix that was plotted (labels, order and
@@ -17,6 +19,10 @@ Source of each PNG (all in the PNG's own folder):
   ``abs_reconstruction_minus_input_{method}_correlation_matrix``
   ``[_sorted_by_{increase,decrease}][_et_only].png`` from ``|reconstruction| -
   |input|`` of those two CSVs, computed, cropped and sorted as the callback does.
+* ``abs_reconstruction_minus_gamma0_reconstruction_...`` in ``comparison_gamma0/``:
+  ``|reconstruction| - |gamma = 0 reconstruction|`` from the method folder's
+  reconstruction CSV and the copy ``gamma0_reconstruction_{method}_correlation_matrix.csv``
+  next to the PNG (see src/analysis/correlation_gamma0_comparison.py).
 
 The subtitle under each title gives the run's MI hyperparameters (γ, requested
 and effective FET.Et bins), read from the checkpoint run folder by
@@ -24,7 +30,10 @@ and effective FET.Et bins), read from the checkpoint run folder by
 
 Green FET.Et-row entries (``|r| <= 0.1``) are decided by the plotted matrix for the
 before/after PNGs and by ``reconstruction_{method}_correlation_matrix.csv`` for the
-change PNGs (legacy delta PNGs: method from the file name, default pearson).
+self-improvement change PNGs (legacy delta PNGs: method from the file name, default
+pearson). In the ``comparison_gamma0/`` PNGs an entry is green if and only if the
+run's reconstructed |r| is strictly smaller than the gamma = 0 run's
+(``corr_plot.closer_to_zero_columns``).
 
 PNGs without their source CSVs are reported and left untouched. Each PNG is
 written to a temporary file first and then swapped in, so an interrupted run never
@@ -84,11 +93,16 @@ _CHANGE_PNG = re.compile(
     r"^abs_reconstruction_minus_input_(?P<method>[a-z]+)_correlation_matrix"
     r"(?:_sorted_by_(?P<direction>increase|decrease))?(?P<suffix>_et_only)?\.png$"
 )
+_GAMMA0_PNG = re.compile(
+    r"^abs_reconstruction_minus_gamma0_reconstruction_(?P<method>[a-z]+)_correlation_matrix"
+    r"(?:_sorted_by_(?P<direction>increase|decrease))?(?P<suffix>_et_only)?\.png$"
+)
 _LEGACY_PNG = re.compile(
     r"^(?:.+_)?abs_correlation_delta(?:_(?P<method>pearson|spearman|kendall))?(?:_.+)?\.png$"
 )
 _GALLERY_HTML = re.compile(
-    r"^(?P<dataset>.+)_(?P<callback>correlation_matrix)(?:_(?P<method>[a-z]+))?\.html$"
+    r"^(?P<dataset>.+?)_(?P<callback>correlation_matrix)"
+    r"(?:_(?P<method>[a-z]+)(?:_(?P<subfolder>self_improvement|comparison_gamma0))?)?\.html$"
 )
 _GALLERY_CARD_IMG = re.compile(r"<img loading='lazy' src='(?P<src>[^']*)' alt='(?P<alt>[^']*)'")
 
@@ -133,6 +147,15 @@ def classify_png(png: Path) -> PlotJob | None:
             direction=match["direction"],
             suffix=match["suffix"] or "",
         )
+    match = _GAMMA0_PNG.match(name)
+    if match:
+        return PlotJob(
+            png=png,
+            kind="gamma0",
+            method=match["method"],
+            direction=match["direction"],
+            suffix=match["suffix"] or "",
+        )
     match = _LEGACY_PNG.match(name)
     if match:
         return PlotJob(png=png, kind="legacy", method=match["method"] or "pearson")
@@ -152,40 +175,24 @@ def discover_plot_jobs(root: Path) -> dict[Path, list[PlotJob]]:
     return dict(sorted(jobs.items()))
 
 
-def _load_matrix(path: Path) -> pd.DataFrame:
-    corr = pd.read_csv(path, index_col=0).apply(pd.to_numeric, errors="raise")
-    if corr.empty or list(corr.index) != list(corr.columns):
-        raise ValueError(f"Not a labelled square matrix: {path}")
-    return corr
-
-
-def _exclude_nan_variables(corr: pd.DataFrame) -> pd.DataFrame:
-    """Same rule as ``CorrelationMatrixCallback._exclude_nan_variables``."""
-    corr = corr.replace([float("inf"), float("-inf")], float("nan"))
-    while corr.isna().to_numpy().any():
-        nan_counts = corr.isna().sum(axis=0) + corr.isna().sum(axis=1)
-        label = nan_counts.idxmax()
-        corr = corr.drop(index=label, columns=label)
-    return corr
-
-
-def correlation_change(corr_before: pd.DataFrame, corr_after: pd.DataFrame) -> pd.DataFrame:
-    """``|after| - |before|`` on the common variables, as in the callback."""
-    common = [label for label in corr_before.index if label in corr_after.index]
-    if not common:
-        raise ValueError("Input and reconstruction matrices share no variables.")
-    change = corr_after.loc[common, common].abs() - corr_before.loc[common, common].abs()
-    change = _exclude_nan_variables(change)
-    if change.empty:
-        raise ValueError("Correlation-change matrix is empty.")
-    return change
+# Shared with the callback and the gamma = 0 comparison (src/plot/correlation_matrix.py).
+_load_matrix = corr_plot.load_correlation_matrix_csv
+_exclude_nan_variables = corr_plot.exclude_nan_variables
+correlation_change = corr_plot.abs_correlation_change
 
 
 class _MatrixSources:
-    """Lazily loaded CSV matrices of one folder, plus its run's MI subtitle."""
+    """Lazily loaded CSV matrices of one folder, plus its run's MI subtitle.
+
+    PNGs in a ``self_improvement/`` or ``comparison_gamma0/`` subfolder take the
+    input/reconstruction matrices from the method folder above it.
+    """
 
     def __init__(self, directory: Path) -> None:
         self.directory = directory
+        self.matrix_dir = (
+            directory.parent if directory.name in corr_plot.SUBFOLDERS else directory
+        )
         self._cache: dict[str, pd.DataFrame] = {}
         self._subtitle: str | None | bool = False
 
@@ -200,7 +207,7 @@ class _MatrixSources:
     def space(self, space: str, method: str) -> pd.DataFrame:
         stem = corr_plot.correlation_matrix_stem(space, method)
         if stem not in self._cache:
-            path = self.directory / f"{stem}.csv"
+            path = self.matrix_dir / f"{stem}.csv"
             if not path.is_file():
                 raise FileNotFoundError(f"missing {path.name}")
             self._cache[stem] = _load_matrix(path)
@@ -211,6 +218,26 @@ class _MatrixSources:
         if key not in self._cache:
             self._cache[key] = correlation_change(
                 self.space("input", method),
+                self.space("reconstruction", method),
+            )
+        return self._cache[key]
+
+    def gamma0_reconstruction(self, method: str) -> pd.DataFrame:
+        """The gamma = 0 reconstruction matrix copied into a comparison folder."""
+        key = f"gamma0_reconstruction:{method}"
+        if key not in self._cache:
+            path = self.directory / corr_plot.gamma0_reference_csv_name(method)
+            if not path.is_file():
+                raise FileNotFoundError(f"missing {path.name}")
+            self._cache[key] = _load_matrix(path)
+        return self._cache[key]
+
+    def gamma0_change(self, method: str) -> pd.DataFrame:
+        """``|reconstruction| - |gamma = 0 reconstruction|`` of a comparison folder."""
+        key = f"gamma0:{method}"
+        if key not in self._cache:
+            self._cache[key] = correlation_change(
+                self.gamma0_reconstruction(method),
                 self.space("reconstruction", method),
             )
         return self._cache[key]
@@ -230,6 +257,8 @@ def plotted_matrix(job: PlotJob, sources: _MatrixSources) -> pd.DataFrame:
 
     if job.kind == "space":
         corr = sources.space(job.space, job.method)
+    elif job.kind == "gamma0":
+        corr = sources.gamma0_change(job.method)
     else:
         corr = sources.change(job.method)
     variant = corr_plot.select_variant(corr, job.suffix)
@@ -246,16 +275,36 @@ def decorrelation_reference(
     sources: _MatrixSources,
     plotted: pd.DataFrame,
 ) -> pd.DataFrame | None:
-    """Matrix whose ``|r| <= 0.1`` entries are printed green in the FET.Et row."""
+    """Matrix whose ``|r| <= 0.1`` entries are printed green in the FET.Et row.
+
+    ``None`` for the ``comparison_gamma0/`` PNGs, which use :func:`green_columns`.
+    """
     if job.kind == "space":
         return plotted if job.space in {"input", "reconstruction"} else None
+    if job.kind == "gamma0":
+        return None
     return sources.space("reconstruction", job.method)
+
+
+def green_columns(job: PlotJob, sources: _MatrixSources) -> list[str] | None:
+    """Green FET.Et-row columns of a ``comparison_gamma0/`` PNG, else ``None``.
+
+    Green where the run's reconstructed |r| is strictly closer to 0 than the
+    gamma = 0 run's.
+    """
+    if job.kind != "gamma0":
+        return None
+    return corr_plot.closer_to_zero_columns(
+        sources.space("reconstruction", job.method),
+        sources.gamma0_reconstruction(job.method),
+    )
 
 
 def _draw(job: PlotJob, sources: _MatrixSources, target: Path) -> None:
     """Draw ``job`` into ``target`` (same folder as the job's PNG)."""
     variant = plotted_matrix(job, sources)
     reference = decorrelation_reference(job, sources, variant)
+    green = green_columns(job, sources)
 
     if job.kind == "legacy":
         from src.analysis.correlation_matrix import (
@@ -280,6 +329,8 @@ def _draw(job: PlotJob, sources: _MatrixSources, target: Path) -> None:
 
     if job.kind == "space":
         title = corr_plot.correlation_matrix_title(job.space, job.method)
+    elif job.kind == "gamma0":
+        title = corr_plot.gamma0_comparison_title(job.method, job.direction)
     else:
         title = corr_plot.correlation_change_title(job.method, job.direction)
     corr_plot.plot_correlation_matrix(
@@ -289,6 +340,7 @@ def _draw(job: PlotJob, sources: _MatrixSources, target: Path) -> None:
         title=title,
         figure_scale=corr_plot.VARIANT_FIGURE_SCALES[job.suffix],
         decorrelation_reference=reference,
+        green_columns=green,
         subtitle=sources.subtitle,
     )
 
@@ -310,6 +362,7 @@ def redraw_directory(
         try:
             if dry_run:
                 decorrelation_reference(job, sources, plotted_matrix(job, sources))
+                green_columns(job, sources)
             else:
                 _draw(job, sources, target)
                 os.replace(target, job.png)
@@ -453,6 +506,8 @@ def gallery_plot_dir(gallery: Path, run_dir: Path, checkpoint_dir: Path) -> Path
     )
     if match["method"]:
         plot_dir = plot_dir / match["method"].capitalize()
+    if match["subfolder"]:
+        plot_dir = plot_dir / match["subfolder"]
     return plot_dir
 
 
@@ -511,7 +566,7 @@ def refresh_galleries(
 ) -> list[GalleryResult]:
     """Refresh every correlation-matrix gallery of an active primary run."""
     if thumbnail is None:
-        from src.evaluation.callbacks.utils.mlflow import generate_thumbnail as thumbnail
+        from src.plot.gallery import generate_thumbnail as thumbnail
 
     redrawn = {Path(path).resolve() for path in redrawn}
     checkpoints_root = checkpoints_root.resolve()

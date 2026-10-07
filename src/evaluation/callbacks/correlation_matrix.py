@@ -394,9 +394,14 @@ class CorrelationMatrixCallback(Callback):
                     if correlation_change.empty:
                         continue
 
+                    # |after| - |before| ("self improvement") in its own subfolder;
+                    # the method folder keeps the input/reconstruction matrices and
+                    # comparison_gamma0/ is filled by the post-processing backfill.
+                    self_folder = method_folder / corr_plot.SELF_IMPROVEMENT_DIR
+                    self_folder.mkdir(parents=True, exist_ok=True)
                     self._write_correlation_matrix_variants(
                         corr=correlation_change,
-                        plot_folder=method_folder,
+                        plot_folder=self_folder,
                         stem=corr_plot.correlation_change_stem(method),
                         title=corr_plot.correlation_change_title(method),
                         decorrelation_reference=corr_after,
@@ -406,7 +411,7 @@ class CorrelationMatrixCallback(Callback):
                     for direction, ascending in corr_plot.SORT_DIRECTIONS.items():
                         self._write_correlation_matrix_variants(
                             corr=correlation_change,
-                            plot_folder=method_folder,
+                            plot_folder=self_folder,
                             stem=corr_plot.correlation_change_stem(method, direction),
                             title=corr_plot.correlation_change_title(
                                 method,
@@ -424,8 +429,23 @@ class CorrelationMatrixCallback(Callback):
                         f"{self.name}/{method_name}",
                         method_folder,
                         log_raw=self.log_raw_mlflow,
-                        gallery_name=f"{dset_name}_{self.name}_{method}",
+                        gallery_name=corr_plot.gallery_name(dset_name, self.name, method),
                     )
+                    self_folder = method_folder / corr_plot.SELF_IMPROVEMENT_DIR
+                    if self_folder.is_dir():
+                        utils.mlflow.log_plots_to_mlflow(
+                            trainer,
+                            ckpt_name,
+                            f"{self.name}/{method_name}/{corr_plot.SELF_IMPROVEMENT_DIR}",
+                            self_folder,
+                            log_raw=self.log_raw_mlflow,
+                            gallery_name=corr_plot.gallery_name(
+                                dset_name,
+                                self.name,
+                                method,
+                                corr_plot.SELF_IMPROVEMENT_DIR,
+                            ),
+                        )
 
             self._write_mean_correlations(
                 mean_correlations,

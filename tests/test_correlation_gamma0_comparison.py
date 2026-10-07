@@ -30,8 +30,22 @@ def _png(path: Path) -> None:
     Image.new("RGB", (4, 4), "white").save(path)
 
 
+MEANS_JSON = "plots/val/loss_total/correlation_matrix/normal/mean_correlations.json"
+
+
+def _means_payload(pearson: float, spearman: float) -> dict:
+    """A mean_correlations.json as the evaluator writes it."""
+    space = lambda p, s: {"pearson": {"mean_correlation": p, "num_other_variables": 12},  # noqa: E731
+                          "spearman": {"mean_correlation": s, "num_other_variables": 12}}
+    return {"schema_version": 1, "sensitive_variable": "FET.Et", "sensitive_group": ["FET.*"],
+            "mean_pearson_correlation": pearson, "mean_spearman_correlation": spearman,
+            "C": max(pearson, spearman), "spaces": {"input": space(0.05, 0.04),
+                                                     "reconstruction": space(pearson, spearman)}}
+
+
 def _run(experiment: Path, name: str, *, gamma: float, seed: int = 1, epochs: int = 50,
-         bins: int = 50, reco: pd.DataFrame | None = None, old_layout: bool = False) -> Path:
+         bins: int = 50, reco: pd.DataFrame | None = None, old_layout: bool = False,
+         means: tuple[float, float] | None = None) -> Path:
     run = experiment / name
     run.mkdir(parents=True)
     (run / "resolved_config.yaml").write_text(
@@ -49,6 +63,8 @@ def _run(experiment: Path, name: str, *, gamma: float, seed: int = 1, epochs: in
         target = method_dir if old_layout else method_dir / "self_improvement"
         for suffix in ("", "_et_only", "_sorted_by_increase", "_sorted_by_decrease_et_only"):
             _png(target / f"{stem}{suffix}.png")
+    if means is not None:
+        (run / MEANS_JSON).write_text(json.dumps(_means_payload(*means), indent=2, sort_keys=True))
     return run
 
 
@@ -67,11 +83,12 @@ def plot_calls(monkeypatch):
 @pytest.fixture
 def experiment(tmp_path):
     exp = tmp_path / "checkpoints" / "Exp"
-    _run(exp, "G0_bins10", gamma=0.0, bins=10, reco=_corr(0.4, 0.2))
-    _run(exp, "G0_bins50", gamma=0.0, bins=50, reco=_corr(0.4, 0.2))
-    _run(exp, "G0_local3ep", gamma=0.0, epochs=3, reco=_corr(0.9, 0.9))
-    _run(exp, "RunA", gamma=0.1, bins=80, reco=_corr(0.3, -0.6), old_layout=True)
-    _run(exp, "RunOtherSeed", gamma=0.1, seed=2, reco=_corr(0.1, 0.1))
+    _run(exp, "G0_bins10", gamma=0.0, bins=10, reco=_corr(0.4, 0.2), means=(0.2, 0.1))
+    _run(exp, "G0_bins50", gamma=0.0, bins=50, reco=_corr(0.4, 0.2), means=(0.2, 0.1))
+    _run(exp, "G0_local3ep", gamma=0.0, epochs=3, reco=_corr(0.9, 0.9), means=(0.9, 0.9))
+    _run(exp, "RunA", gamma=0.1, bins=80, reco=_corr(0.3, -0.6), old_layout=True,
+         means=(0.15, 0.12))
+    _run(exp, "RunOtherSeed", gamma=0.1, seed=2, reco=_corr(0.1, 0.1), means=(0.3, 0.3))
     return exp
 
 
@@ -219,3 +236,54 @@ def test_green_columns_override_the_decorrelation_reference(plot_calls, tmp_path
     corr_plot.plot_correlation_matrix(corr, tmp_path, "z.png", "t", decorrelation_reference=corr,
                                       green_columns=[])
     assert [c["text_highlight_columns"] for c in plot_calls] == [["jets.phi"], ["jets.Et"], []]
+
+
+def test_mean_correlations_gain_the_gamma0_means_and_the_improvement(experiment, plot_calls):
+    before = {name: (experiment / name / MEANS_JSON).read_text()
+              for name in ("G0_bins10", "G0_bins50", "G0_local3ep", "RunOtherSeed")}
+    report = cmp.process_experiment(experiment)
+
+    payload = json.loads((experiment / "RunA" / MEANS_JSON).read_text())
+    spaces = payload["spaces"]
+    # The γ = 0 run's reconstruction means (same seed/architecture/epochs, bins ignored).
+    assert spaces["reconstruction_gamma0"] == {
+        "pearson": {"mean_correlation": 0.2, "num_other_variables": 12},
+        "spearman": {"mean_correlation": 0.1, "num_other_variables": 12}}
+    key = "mean increase compared to gamma = 0"
+    assert spaces["reconstruction"]["pearson"][key] == pytest.approx(25.0)    # 1 - 0.15/0.2
+    assert spaces["reconstruction"]["spearman"][key] == pytest.approx(-20.0)  # 1 - 0.12/0.1
+    assert spaces["reconstruction"]["pearson"]["mean_correlation"] == 0.15
+    assert key not in spaces["input"]["pearson"]
+    # Everything the aggregator reads is unchanged.
+    assert (payload["C"], payload["mean_pearson_correlation"], payload["schema_version"]) == (0.15, 0.15, 1)
+
+    assert report.means == [(experiment / "RunA" / MEANS_JSON, "G0_bins10")]
+    assert report.skipped["mean_correlations.json: no γ = 0 run with the same seed, "
+                          "architecture and epochs"] == 1
+    for name, text in before.items():  # γ = 0 runs and runs without a reference: untouched
+        assert (experiment / name / MEANS_JSON).read_text() == text
+
+
+def test_mean_correlations_are_refreshed_even_when_the_plots_exist(experiment, plot_calls):
+    cmp.process_experiment(experiment)
+    path = experiment / "RunA" / MEANS_JSON
+    path.write_text(json.dumps(_means_payload(0.05, 0.1)))  # a stage 3 rerun
+    again = cmp.process_experiment(experiment)
+    assert again.skipped["comparison exists (use --force)"] == 1
+    spaces = json.loads(path.read_text())["spaces"]
+    key = "mean increase compared to gamma = 0"
+    assert spaces["reconstruction"]["pearson"][key] == pytest.approx(75.0)
+    assert spaces["reconstruction"]["spearman"][key] == pytest.approx(0.0)
+    assert "reconstruction_gamma0" in spaces
+
+
+def test_improvement_is_null_without_a_gamma0_mean(tmp_path):
+    run, reference = tmp_path / "run.json", tmp_path / "g0.json"
+    run.write_text(json.dumps(_means_payload(0.1, 0.1)))
+    reference.write_text(json.dumps(_means_payload(0.0, 0.2)))
+    spaces = cmp.add_gamma0_means(run, reference)["spaces"]
+    key = "mean increase compared to gamma = 0"
+    assert spaces["reconstruction"]["pearson"][key] is None
+    assert spaces["reconstruction"]["spearman"][key] == pytest.approx(50.0)
+    assert json.loads(run.read_text())["spaces"]["reconstruction"]["pearson"][key] is None
+    assert cmp.improvement_percent(0.1, None) is None

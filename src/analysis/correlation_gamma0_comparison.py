@@ -20,6 +20,20 @@ this writes into ``<Method>/comparison_gamma0/``:
   reference matrix, so the plots can be redrawn from this folder alone;
 * ``reference.json``: which run was used and why.
 
+It also extends each run's ``<run>/plots/<split>/<ckpt>/correlation_matrix/<dataset>/
+mean_correlations.json`` (written by the evaluator in stage 3) with
+
+* ``spaces.reconstruction_gamma0``: the γ = 0 run's reconstruction means, copied
+  from its own ``mean_correlations.json`` (``pearson`` / ``spearman``, each with
+  ``mean_correlation`` and ``num_other_variables``);
+* ``spaces.reconstruction.{pearson,spearman}["mean increase compared to gamma = 0"]``:
+  ``100 * (1 - mean_run / mean_γ0)`` in percent, i.e. by how much the run's mean
+  |r(FET.Et, ·)| is lower than the γ = 0 run's (negative: higher). ``null`` when the
+  γ = 0 mean is 0 or missing.
+
+These are rewritten on every pass, also when the comparison plots exist, so a
+stage 3 rerun (which writes the file afresh) is picked up by the next stage 4.
+
 **Reference.** A γ = 0 run of the *same experiment* with the same seed, encoder
 architecture and number of epochs; the number of FET.Et bins does not matter
 (without the MI term the binning does not enter training; in Pareto-Front-261002
@@ -55,6 +69,13 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 CALLBACK = "correlation_matrix"
 IDENTICAL_ATOL = 1e-9
 
+MEAN_CORRELATIONS = "mean_correlations.json"
+#: ``spaces`` entry with the γ = 0 run's reconstruction means.
+GAMMA0_SPACE = "reconstruction_gamma0"
+#: Added to ``spaces.reconstruction.<method>``: ``100 * (1 - mean_run / mean_γ0)``.
+IMPROVEMENT_KEY = "mean increase compared to gamma = 0"
+MEAN_METHODS = ("pearson", "spearman")
+
 
 @dataclass(frozen=True)
 class RunInfo:
@@ -86,6 +107,7 @@ class Report:
     details: list = field(default_factory=list)          # (method_dir, reason)
     moved: int = 0
     galleries: int = 0
+    means: list = field(default_factory=list)            # (mean_correlations.json, reference run)
 
     def skip(self, method_dir: Path, reason: str) -> None:
         self.skipped[reason] += 1
@@ -164,6 +186,90 @@ def find_reference(run: RunInfo, key: tuple, gamma0_runs: Sequence[RunInfo],
            for _, other in with_csv[1:]):
         note = f"γ = 0 runs disagree; used {ref.name}"
     return ref, csv, note
+
+
+# --------------------------------------------------------- mean_correlations.json
+def mean_correlation_files(run_dir: Path, callback: str = CALLBACK) -> dict[tuple, Path]:
+    """``(split, ckpt, dataset) -> mean_correlations.json`` of a run."""
+    files = {}
+    for path in sorted(run_dir.glob(f"plots/*/*/{callback}/*/{MEAN_CORRELATIONS}")):
+        split, ckpt, _, dataset, _ = path.relative_to(run_dir / "plots").parts
+        files[(split, ckpt, dataset)] = path
+    return files
+
+
+def _read_json(path: Path) -> dict:
+    try:
+        payload = json.loads(Path(path).read_text())
+    except (OSError, ValueError):
+        return {}
+    return payload if isinstance(payload, dict) else {}
+
+
+def _reconstruction_means(payload: dict) -> dict:
+    """``spaces.reconstruction`` of a mean_correlations.json payload."""
+    return ((payload.get("spaces") or {}).get("reconstruction") or {})
+
+
+def find_mean_reference(run: RunInfo, key: tuple, gamma0_runs: Sequence[RunInfo],
+                        callback: str = CALLBACK) -> tuple[Optional[RunInfo], Optional[Path], str]:
+    """γ = 0 run (and its mean_correlations.json) for one ``(split, ckpt, dataset)`` of ``run``."""
+    split, ckpt, dataset = key
+    candidates = [
+        ref for ref in gamma0_runs
+        if ref.run_dir != run.run_dir and ref.match_key == run.match_key
+    ]
+    if not candidates:
+        return None, None, "no γ = 0 run with the same seed, architecture and epochs"
+    usable = []
+    for ref in sorted(candidates, key=lambda r: r.name):
+        path = ref.run_dir / "plots" / split / ckpt / callback / dataset / MEAN_CORRELATIONS
+        means = _reconstruction_means(_read_json(path))
+        if all(_finite_mean(means, method) is not None for method in MEAN_METHODS):
+            usable.append((ref, path, means))
+    if not usable:
+        return None, None, f"γ = 0 run has no reconstruction means for {split}/{ckpt}/{dataset}"
+    ref, path, means = usable[0]
+    note = ""
+    if any(abs(_finite_mean(means, m) - _finite_mean(other, m)) > IDENTICAL_ATOL
+           for _, _, other in usable[1:] for m in MEAN_METHODS):
+        note = f"γ = 0 runs disagree; used {ref.name}"
+    return ref, path, note
+
+
+def _finite_mean(means: dict, method: str) -> Optional[float]:
+    value = (means.get(method) or {}).get("mean_correlation")
+    try:
+        value = float(value)
+    except (TypeError, ValueError):
+        return None
+    return value if np.isfinite(value) else None
+
+
+def improvement_percent(run_mean: Optional[float], gamma0_mean: Optional[float]) -> Optional[float]:
+    """``100 * (1 - run_mean / gamma0_mean)``; ``None`` if undefined."""
+    if run_mean is None or gamma0_mean is None or gamma0_mean == 0.0:
+        return None
+    return 100.0 * (1.0 - run_mean / gamma0_mean)
+
+
+def add_gamma0_means(path: Path, reference_path: Path) -> dict:
+    """Write the γ = 0 means and the improvement into one mean_correlations.json."""
+    payload = _read_json(path)
+    if not payload:
+        raise ValueError(f"unreadable {path}")
+    gamma0 = _reconstruction_means(_read_json(reference_path))
+    spaces = payload.setdefault("spaces", {})
+    reconstruction = spaces.get("reconstruction") or {}
+    spaces[GAMMA0_SPACE] = {method: dict(gamma0[method]) for method in MEAN_METHODS if method in gamma0}
+    for method in MEAN_METHODS:
+        if method in reconstruction:
+            reconstruction[method][IMPROVEMENT_KEY] = improvement_percent(
+                _finite_mean(reconstruction, method), _finite_mean(gamma0, method))
+    temporary = path.with_name(f".{path.name}.tmp")
+    temporary.write_text(json.dumps(payload, indent=2, sort_keys=True, allow_nan=False) + "\n")
+    temporary.replace(path)
+    return payload
 
 
 def migrate_layout(method_dir: Path) -> int:
@@ -297,6 +403,17 @@ def process_experiment(experiment_dir: Path, *, runs: Optional[Iterable[Path]] =
     for run in all_runs:
         if wanted is not None and run.run_dir.resolve() not in wanted:
             continue
+        if run.identified and run.gamma != 0.0:
+            for key, path in mean_correlation_files(run.run_dir, callback).items():
+                reference, reference_path, note = find_mean_reference(run, key, gamma0_runs, callback)
+                if reference is None:
+                    report.skip(path, f"{MEAN_CORRELATIONS}: {note}")
+                    continue
+                if not dry_run:
+                    add_gamma0_means(path, reference_path)
+                report.means.append((path, reference.name))
+                if note:
+                    report.details.append((path, note))
         folders = method_folders(run.run_dir, callback)
         if not folders:
             continue
@@ -375,7 +492,8 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
                                     dry_run=args.dry_run, callback=args.callback_name)
         print(f"{experiment_dir.name}: {len(report.written)} method folders compared"
               f"{' (dry run)' if args.dry_run else ''}, {report.moved} files moved to "
-              f"{corr_plot.SELF_IMPROVEMENT_DIR}/, {report.galleries} galleries written")
+              f"{corr_plot.SELF_IMPROVEMENT_DIR}/, {report.galleries} galleries written, "
+              f"{len(report.means)} {MEAN_CORRELATIONS} extended")
         for reason, count in sorted(report.skipped.items()):
             print(f"  skipped {count}: {reason}")
         for method_dir, note in report.details:

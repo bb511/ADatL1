@@ -11,6 +11,9 @@
 #   phase4/  the figures, drawn from the phase3 tables and nothing else
 #   <run>/plots/.../correlation_matrix/<dataset>/<Method>/comparison_gamma0/
 #            every run's reconstruction correlations vs its gamma = 0 run
+#   <run>/plots/.../correlation_matrix/<dataset>/mean_correlations.json
+#            + spaces.reconstruction_gamma0 and, per method, the
+#            "mean increase compared to gamma = 0" in percent
 #
 # Unlike stages 1-3 this is a whole-study step, not a per-run one, so it takes no
 # RUN_NAME. It is pure pandas/numpy: no torch, no GPU, minutes not hours.
@@ -131,7 +134,10 @@ echo "--- phase 4c: correlation matrices vs the gamma = 0 run ---"
 # gamma = 0 run of the same experiment with the same seed, architecture and
 # epochs (the bin count does not matter). It needs every run finished, which is
 # why it runs here and not in the per-run evaluator. Existing comparisons are
-# kept; a missing MLflow store only skips the HTML galleries.
+# kept; a missing MLflow store only skips the HTML galleries. Each run's
+# mean_correlations.json gets the gamma = 0 run's reconstruction means
+# (spaces.reconstruction_gamma0) and 100 * (1 - mean_run / mean_gamma0) per
+# method; that part is rewritten on every pass.
 : "${MLRUNS_ROOT:=${ADL1T_OUTPUT_ROOT}/logs/mlflow/mlruns}"
 python3 scripts/plot_correlation_gamma0.py \
   --study-map "$STUDY_MAP" \

@@ -143,8 +143,12 @@ def read_run_info(run_dir: Path) -> RunInfo:
     )
 
 
-def method_folders(run_dir: Path, callback: str = CALLBACK) -> dict[tuple, Path]:
-    """``(split, ckpt, dataset, Method) -> folder`` of every folder with a reconstruction CSV."""
+def method_folders(run_dir: Path, callback: str = CALLBACK,
+                   splits: Optional[Sequence[str]] = None) -> dict[tuple, Path]:
+    """``(split, ckpt, dataset, Method) -> folder`` of every folder with a reconstruction CSV.
+
+    ``splits`` (e.g. ``["val"]``) keeps only those splits; ``None`` keeps all.
+    """
     folders = {}
     for csv in sorted(run_dir.glob(f"plots/*/*/{callback}/*/*/reconstruction_*_correlation_matrix.csv")):
         folder = csv.parent
@@ -152,6 +156,8 @@ def method_folders(run_dir: Path, callback: str = CALLBACK) -> dict[tuple, Path]
         if csv.name != f"{corr_plot.correlation_matrix_stem('reconstruction', method)}.csv":
             continue
         split, ckpt, _, dataset, method_name = folder.relative_to(run_dir / "plots").parts
+        if splits is not None and split not in splits:
+            continue
         folders[(split, ckpt, dataset, method_name)] = folder
     return folders
 
@@ -189,11 +195,14 @@ def find_reference(run: RunInfo, key: tuple, gamma0_runs: Sequence[RunInfo],
 
 
 # --------------------------------------------------------- mean_correlations.json
-def mean_correlation_files(run_dir: Path, callback: str = CALLBACK) -> dict[tuple, Path]:
-    """``(split, ckpt, dataset) -> mean_correlations.json`` of a run."""
+def mean_correlation_files(run_dir: Path, callback: str = CALLBACK,
+                           splits: Optional[Sequence[str]] = None) -> dict[tuple, Path]:
+    """``(split, ckpt, dataset) -> mean_correlations.json`` of a run (``splits`` as above)."""
     files = {}
     for path in sorted(run_dir.glob(f"plots/*/*/{callback}/*/{MEAN_CORRELATIONS}")):
         split, ckpt, _, dataset, _ = path.relative_to(run_dir / "plots").parts
+        if splits is not None and split not in splits:
+            continue
         files[(split, ckpt, dataset)] = path
     return files
 
@@ -389,8 +398,14 @@ def write_galleries(mlflow_run_dirs: Iterable[Path], key: tuple, method_dir: Pat
 def process_experiment(experiment_dir: Path, *, runs: Optional[Iterable[Path]] = None,
                        mlruns_root: Optional[Path] = None, migrate: bool = False,
                        force: bool = False, dry_run: bool = False,
-                       callback: str = CALLBACK) -> Report:
-    """Write the γ = 0 comparisons of every run (or of ``runs``) in one experiment."""
+                       callback: str = CALLBACK,
+                       splits: Optional[Sequence[str]] = None) -> Report:
+    """Write the γ = 0 comparisons of every run (or of ``runs``) in one experiment.
+
+    ``splits`` restricts the work to those evaluation splits (stage 4: ``["val"]``;
+    scripts/physics/runae_test_comparison.sh: ``["test"]``). The reference must
+    have outputs for the same split.
+    """
     import matplotlib
 
     matplotlib.use("Agg")
@@ -404,7 +419,7 @@ def process_experiment(experiment_dir: Path, *, runs: Optional[Iterable[Path]] =
         if wanted is not None and run.run_dir.resolve() not in wanted:
             continue
         if run.identified and run.gamma != 0.0:
-            for key, path in mean_correlation_files(run.run_dir, callback).items():
+            for key, path in mean_correlation_files(run.run_dir, callback, splits).items():
                 reference, reference_path, note = find_mean_reference(run, key, gamma0_runs, callback)
                 if reference is None:
                     report.skip(path, f"{MEAN_CORRELATIONS}: {note}")
@@ -414,7 +429,7 @@ def process_experiment(experiment_dir: Path, *, runs: Optional[Iterable[Path]] =
                 report.means.append((path, reference.name))
                 if note:
                     report.details.append((path, note))
-        folders = method_folders(run.run_dir, callback)
+        folders = method_folders(run.run_dir, callback, splits)
         if not folders:
             continue
         mlflow_dirs = mlflow_runs(mlruns_root, experiment_dir.name, run.name) if mlruns_root else []
@@ -468,6 +483,11 @@ def _parse_args(argv: Optional[Sequence[str]] = None) -> argparse.Namespace:
     where.add_argument("--study-map", type=Path,
                        help="study_map.yaml; only its runs (references still come from their experiment).")
     parser.add_argument("--checkpoints-root", type=Path, help="With --study-map: local checkpoints/ dir.")
+    parser.add_argument("--split", action="append", dest="splits",
+                        help="Only this evaluation split (val, test). Repeatable; default: all.")
+    parser.add_argument("--run-name", action="append", dest="run_names",
+                        help="Only this run of the experiment(s). Repeatable; references still "
+                             "come from the whole experiment.")
     parser.add_argument("--mlruns-root", type=Path, help="MLflow file store; writes the HTML galleries.")
     parser.add_argument("--migrate-layout", action="store_true",
                         help="Move |after| - |before| PNGs left in the method folder into self_improvement/.")
@@ -487,9 +507,17 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         targets = {Path(d): None for d in args.experiment_dir}
     mlruns = args.mlruns_root if args.mlruns_root and Path(args.mlruns_root).is_dir() else None
     for experiment_dir, runs in targets.items():
+        if args.run_names:
+            names = set(args.run_names)
+            candidates = runs if runs is not None else [d for d in Path(experiment_dir).iterdir()]
+            runs = [Path(r) for r in candidates if Path(r).name in names]
+            if not runs:
+                print(f"{Path(experiment_dir).name}: no run named {sorted(names)}")
+                continue
         report = process_experiment(experiment_dir, runs=runs, mlruns_root=mlruns,
                                     migrate=args.migrate_layout, force=args.force,
-                                    dry_run=args.dry_run, callback=args.callback_name)
+                                    dry_run=args.dry_run, callback=args.callback_name,
+                                    splits=args.splits)
         print(f"{experiment_dir.name}: {len(report.written)} method folders compared"
               f"{' (dry run)' if args.dry_run else ''}, {report.moved} files moved to "
               f"{corr_plot.SELF_IMPROVEMENT_DIR}/, {report.galleries} galleries written, "

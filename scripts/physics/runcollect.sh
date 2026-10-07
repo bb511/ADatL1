@@ -139,7 +139,10 @@ echo "--- phase 4c: correlation matrices vs the gamma = 0 run ---"
 # (spaces.reconstruction_gamma0) and 100 * (1 - mean_run / mean_gamma0) per
 # method; that part is rewritten on every pass.
 : "${MLRUNS_ROOT:=${ADL1T_OUTPUT_ROOT}/logs/mlflow/mlruns}"
+# --split val: the test outputs (scripts/physics/runae_test.sh) are compared by
+# scripts/physics/runae_test_comparison.sh, never by the Pareto study.
 python3 scripts/plot_correlation_gamma0.py \
+  --split val \
   --study-map "$STUDY_MAP" \
   --checkpoints-root "$CHECKPOINTS_DIR" \
   --mlruns-root "$MLRUNS_ROOT"

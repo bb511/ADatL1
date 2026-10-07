@@ -1,0 +1,42 @@
+# TEST evaluation of finished runs: loss_total.ckpt on the held-out test split,
+# one job per run name (scripts/physics/runae_test.sh via batch/runae_test.sh).
+#
+#   condor_submit batch/runae_test.sub                         # runs in batch/test_runs.txt
+#   condor_submit RUNS=batch/my_runs.txt batch/runae_test.sub
+#   condor_submit RUNS=batch/my_runs.txt EXPERIMENT_NAME=Pareto-Front-260928 batch/runae_test.sub
+#
+# RUNS lists one run name per line, nothing else (no comments). EXPERIMENT_NAME
+# defaults to PARETO_EXPERIMENT_NAME in batch/_stage_env.sh.
+#
+# Only for the configuration(s) selected on validation, plus the gamma = 0 runs
+# they are compared with (scripts/physics/runae_test_comparison.sh needs their
+# test outputs too). Test results must never feed back into the selection.
+
+executable = batch/runae_test.sh
+
+log    = batch/logs/runae_test.$(ClusterId).log
+output = batch/logs/runae_test.$(ClusterId).$(ProcId).out
+error  = batch/logs/runae_test.$(ClusterId).$(ProcId).err
+
+MY.SingularityImage = "/eos/user/l/lbehrens/containers/adl1t_lab-dev.sif"
+
+environment = "RUN_NAME=$(RUN_NAME) EXPERIMENT_NAME=$(EXPERIMENT_NAME) TRAINER=cpu CPU_THREADS=7 DATA_WORKERS=3"
+
+# No transfer_output_files: the plots are written into the existing checkpoint
+# tree on EOS.
+
+request_gpus = 0
+
+# Same shape as stage 3 (batch/runmetrics_pareto.sub): the test split holds the
+# zero-bias test part (20 %, the size of valid) plus the test part of every
+# auxiliary set (40 %, smaller than their 60 % validation part).
+request_cpus   = 7
+request_memory = 21000
+request_disk   = 10GB
+
++MaxRuntime = 7200
+
+# Retry transient EOS I/O errors, up to 3 starts in total (see runmetrics_pareto.sub).
+on_exit_remove = (ExitBySignal == False && ExitCode == 0) || (NumJobStarts >= 3)
+
+queue RUN_NAME from $(RUNS:batch/test_runs.txt)

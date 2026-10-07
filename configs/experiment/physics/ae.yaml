@@ -43,7 +43,10 @@ trainer:
   max_epochs: 200
 
 # Keep test untouched during validation-Pareto sweeps. For the one final selected
-# configuration, override both `test=true` and the leakage-probe mode below.
+# configuration, evaluate the trained loss_total.ckpt on test with
+# scripts/physics/runae_test.sh (batch/runae_test.sub) and run the probes with
+# the final_test leakage-probe mode below. `test=true` here would instead test
+# straight after training, inside stage 1.
 test: false
 
 # Metrics to report to optuna for every checkpoint.

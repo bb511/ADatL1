@@ -287,3 +287,49 @@ def test_improvement_is_null_without_a_gamma0_mean(tmp_path):
     assert spaces["reconstruction"]["spearman"][key] == pytest.approx(50.0)
     assert json.loads(run.read_text())["spaces"]["reconstruction"]["pearson"][key] is None
     assert cmp.improvement_percent(0.1, None) is None
+
+
+def _copy_to_test(run_dir: Path) -> None:
+    """Pretend scripts/physics/runae_test.sh ran: the val outputs again under plots/test."""
+    import shutil
+
+    shutil.copytree(run_dir / "plots" / "val", run_dir / "plots" / "test")
+
+
+def test_splits_are_compared_separately(experiment, plot_calls):
+    _copy_to_test(experiment / "RunA")
+    test_method = experiment / "RunA" / METHOD_DIR.replace("/val/", "/test/")
+    val_method = experiment / "RunA" / METHOD_DIR
+
+    # Stage 4 (--split val) never touches test.
+    cmp.process_experiment(experiment, splits=["val"])
+    assert (val_method / "comparison_gamma0").is_dir()
+    assert not (test_method / "comparison_gamma0").exists()
+    test_means = experiment / "RunA" / MEANS_JSON.replace("/val/", "/test/")
+    assert "reconstruction_gamma0" not in json.loads(test_means.read_text())["spaces"]
+
+    # Test needs a TESTED γ = 0 run.
+    report = cmp.process_experiment(experiment, splits=["test"])
+    assert not (test_method / "comparison_gamma0").exists()
+    assert report.skipped["γ = 0 run has no Pearson matrix for test/loss_total/normal"] == 1
+
+    _copy_to_test(experiment / "G0_bins10")
+    report = cmp.process_experiment(experiment, splits=["test"])
+    assert [ref for _, ref in report.written] == ["G0_bins10"]
+    assert (test_method / "comparison_gamma0" / "reference.json").is_file()
+    assert "reconstruction_gamma0" in json.loads(test_means.read_text())["spaces"]
+    assert report.means == [(test_means, "G0_bins10")]
+
+
+def test_cli_run_name_and_split_filters(experiment, plot_calls, capsys):
+    _copy_to_test(experiment / "RunA")
+    _copy_to_test(experiment / "G0_bins10")
+    assert cmp.main(["--experiment-dir", str(experiment), "--split", "test",
+                     "--run-name", "RunOtherSeed"]) == 0
+    assert not (experiment / "RunA" / METHOD_DIR.replace("/val/", "/test/") / "comparison_gamma0").exists()
+    assert cmp.main(["--experiment-dir", str(experiment), "--split", "test",
+                     "--run-name", "RunA"]) == 0
+    assert (experiment / "RunA" / METHOD_DIR.replace("/val/", "/test/") / "comparison_gamma0").is_dir()
+    assert not (experiment / "RunA" / METHOD_DIR / "comparison_gamma0").exists()
+    assert cmp.main(["--experiment-dir", str(experiment), "--run-name", "nope"]) == 0
+    assert "no run named ['nope']" in capsys.readouterr().out

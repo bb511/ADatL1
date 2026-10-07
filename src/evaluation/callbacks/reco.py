@@ -3,16 +3,46 @@ from collections.abc import Mapping, Sequence
 from pathlib import Path
 
 import numpy as np
+import pandas as pd
 import torch
+from pathvalidate import sanitize_filename
 from pytorch_lightning.callbacks import Callback
 
 from src.evaluation.callbacks import utils
 from src.plot import overlaid_hist
 from src.data.utils import unpack_batch
 
+#: Subfolder of reco/<dataset>/ with the histogram data behind the plots.
+DATA_DIR = "data"
+
+
+def counts_with_flow(values: np.ndarray, edges: np.ndarray) -> np.ndarray:
+    """``[underflow, counts per bin..., overflow]`` of ``values`` in ``edges``."""
+    counts = np.histogram(values, bins=edges)[0]
+    under = np.count_nonzero(values < edges[0])
+    over = np.count_nonzero(values > edges[-1])
+    return np.concatenate([[under], counts, [over]]).astype(np.float64)
+
+
+def histogram_frame(edges: np.ndarray, input_counts: np.ndarray, reco_counts: np.ndarray) -> pd.DataFrame:
+    """One row per bin, plus an underflow row first and an overflow row last."""
+    low = np.concatenate([[-np.inf], edges])
+    high = np.concatenate([edges, [np.inf]])
+    return pd.DataFrame({"bin_low": low, "bin_high": high,
+                         "input": input_counts, "reco": reco_counts})
+
 
 class ReconstructionPlots(Callback):
     """Stream overlaid histograms of input vs reconstruction.
+
+    Besides the plots, every histogram is written as data to
+    ``reco/<dataset>/data/<object>_<feature>.csv`` (``bin_low``, ``bin_high``,
+    ``input``, ``reco``; first row underflow, last row overflow). Those use their
+    own binning: Doane edges of the INPUT values of the warmup batches only, so two
+    models evaluated on the same split get identical bins and can be overlaid and
+    subtracted (src/analysis/test_gamma0_comparison.py). They count every event,
+    warmup batches included. The plots keep their edges from input and
+    reconstruction together.
 
     :param output_name: String specifying the key in the output dictionary of the
         output you'd like to plot.
@@ -67,6 +97,10 @@ class ReconstructionPlots(Callback):
         self._hist_input = {}
         self._hist_output = {}
         self._batch_counts = {}
+        # Histogram data with run-independent (input-only) binning.
+        self._data_edges = {}
+        self._data_input = {}
+        self._data_output = {}
 
     def on_test_batch_end(
         self, trainer, pl_module, outputs, batch, batch_idx, dataloader_idx=0
@@ -132,6 +166,7 @@ class ReconstructionPlots(Callback):
                     label1="input",
                     label2="reco",
                 )
+                self._write_histogram_data(plot_folder, dset_name, key)
 
             utils.mlflow.log_plots_to_mlflow(
                 trainer,
@@ -141,6 +176,21 @@ class ReconstructionPlots(Callback):
                 log_raw=self.log_raw_mlflow,
                 gallery_name=f"{dset_name}_reco",
             )
+
+    def _write_histogram_data(self, plot_folder: Path, dset_name: str, key) -> None:
+        """Write the run-independent histogram of ``key`` beside its plot."""
+        edges = self._data_edges.get(dset_name, {}).get(key)
+        if edges is None:
+            return
+        obj_name, feat_name = key
+        filename = sanitize_filename(f"{obj_name}_{feat_name}").replace(" ", "_")
+        folder = plot_folder / DATA_DIR
+        folder.mkdir(parents=True, exist_ok=True)
+        histogram_frame(
+            edges,
+            self._data_input[dset_name][key],
+            self._data_output[dset_name][key],
+        ).to_csv(folder / f"{filename}.csv", index=False)
 
     def _warmup_n(self, trainer, dset_name):
         """Get the number of batches to use in determining the range of the histogram."""
@@ -156,6 +206,9 @@ class ReconstructionPlots(Callback):
         self._hist_input.setdefault(dset_name, {})
         self._hist_output.setdefault(dset_name, {})
         self._batch_counts.setdefault(dset_name, {})
+        self._data_edges.setdefault(dset_name, {})
+        self._data_input.setdefault(dset_name, {})
+        self._data_output.setdefault(dset_name, {})
 
         if key not in self._batch_counts[dset_name]:
             self._batch_counts[dset_name][key] = 0
@@ -169,12 +222,14 @@ class ReconstructionPlots(Callback):
         if key not in self._edges[dset_name]:
 
             self._buffers[dset_name].setdefault(key, [])
-            self._buffers[dset_name][key].append(np.concatenate([x1, x2]))
+            self._buffers[dset_name][key].append((x1, x2))
             self._batch_counts[dset_name][key] += 1
 
             if self._batch_counts[dset_name][key] >= self._warmup_n(trainer, dset_name):
 
-                vals = np.concatenate(self._buffers[dset_name][key])
+                warm_input = np.concatenate([a for a, _ in self._buffers[dset_name][key]])
+                warm_output = np.concatenate([b for _, b in self._buffers[dset_name][key]])
+                vals = np.concatenate([warm_input, warm_output])
                 edges = np.histogram_bin_edges(vals, bins="doane")
 
                 self._edges[dset_name][key] = edges
@@ -185,6 +240,12 @@ class ReconstructionPlots(Callback):
                 self._hist_input[dset_name][key] = c1.astype(np.float64)
                 self._hist_output[dset_name][key] = c2.astype(np.float64)
 
+                if warm_input.size:
+                    data_edges = np.histogram_bin_edges(warm_input, bins="doane")
+                    self._data_edges[dset_name][key] = data_edges
+                    self._data_input[dset_name][key] = counts_with_flow(warm_input, data_edges)
+                    self._data_output[dset_name][key] = counts_with_flow(warm_output, data_edges)
+
                 self._buffers[dset_name][key] = []
 
         else:
@@ -193,6 +254,11 @@ class ReconstructionPlots(Callback):
 
             self._hist_input[dset_name][key] += np.histogram(x1, bins=edges)[0]
             self._hist_output[dset_name][key] += np.histogram(x2, bins=edges)[0]
+
+            data_edges = self._data_edges[dset_name].get(key)
+            if data_edges is not None:
+                self._data_input[dset_name][key] += counts_with_flow(x1, data_edges)
+                self._data_output[dset_name][key] += counts_with_flow(x2, data_edges)
 
     def _update_objects(self, trainer, dset_name, x, yhat, m):
         """If the inputs are from object_feature_map, use that to label the hist."""

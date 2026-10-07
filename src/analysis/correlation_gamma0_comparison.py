@@ -34,12 +34,14 @@ mean_correlations.json`` (written by the evaluator in stage 3) with
 These are rewritten on every pass, also when the comparison plots exist, so a
 stage 3 rerun (which writes the file afresh) is picked up by the next stage 4.
 
-**Reference.** A γ = 0 run of the *same experiment* with the same seed, encoder
-architecture and number of epochs; the number of FET.Et bins does not matter
-(without the MI term the binning does not enter training; in Pareto-Front-261002
-all ten γ = 0 runs give bit-identical matrices). It must have a reconstruction
-matrix for the same split, checkpoint, dataset and method. γ = 0 runs themselves
-are skipped. Runs without a matching reference are reported, not guessed.
+**Reference.** The γ = 0 / 50-bin run of the *same experiment* with the same
+seed, encoder architecture and number of epochs: the single baseline every run is
+compared with (``src/evaluation/pareto_baseline.py``, also used by the Pareto
+constraints). γ = 0 runs at other bin counts are never used (Pareto-Front-261002
+trained ten, bit-identical). It must have outputs for the same split, checkpoint,
+dataset and method. γ = 0 runs themselves are skipped. Runs without a matching
+reference are reported, not guessed. ``find_baseline_runs`` is shared with
+``src/analysis/test_gamma0_comparison.py``.
 
 ``migrate_layout`` moves ``|after| - |before|`` PNGs that older evaluator versions
 left in the method folder into ``<Method>/self_improvement/``, the layout the
@@ -63,6 +65,7 @@ import numpy as np
 import yaml
 
 from src.analysis.run_mi_hyperparameters import read_mi_hyperparameters
+from src.evaluation.pareto_baseline import GAMMA_ZERO_BASELINE_BINS
 from src.plot import correlation_matrix as corr_plot
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -86,6 +89,7 @@ class RunInfo:
     seed: Optional[int]
     architecture: Optional[tuple]
     epochs: Optional[int]
+    bins: Optional[int] = None
 
     @property
     def name(self) -> str:
@@ -98,6 +102,11 @@ class RunInfo:
     @property
     def identified(self) -> bool:
         return None not in (self.gamma, self.seed, self.architecture, self.epochs)
+
+    @property
+    def is_baseline(self) -> bool:
+        """The γ = 0 / 50-bin run, the only one ever used as a reference."""
+        return self.identified and self.gamma == 0.0 and self.bins == GAMMA_ZERO_BASELINE_BINS
 
 
 @dataclass
@@ -131,6 +140,7 @@ def read_run_info(run_dir: Path) -> RunInfo:
     seed = config.get("seed", manifest.get("autoencoder_seed"))
     nodes = (algorithm.get("encoder") or {}).get("nodes") or candidate.get("encoder_nodes")
     epochs = (config.get("trainer") or {}).get("max_epochs")
+    bins = algorithm.get("mi_sensitive_num_bins", candidate.get("mi_sensitive_num_bins"))
     gamma = algorithm.get("mi_gamma", candidate.get("mi_gamma"))
     if gamma is None:
         gamma = read_mi_hyperparameters(run_dir).gamma
@@ -140,6 +150,20 @@ def read_run_info(run_dir: Path) -> RunInfo:
         seed=None if seed is None else int(seed),
         architecture=None if not nodes else tuple(int(n) for n in nodes),
         epochs=None if epochs is None else int(epochs),
+        bins=None if bins is None else int(bins),
+    )
+
+
+NO_BASELINE = (f"no γ = 0 / {GAMMA_ZERO_BASELINE_BINS}-bin run with the same seed, "
+               "architecture and epochs")
+
+
+def find_baseline_runs(run: RunInfo, all_runs: Sequence[RunInfo]) -> list[RunInfo]:
+    """γ = 0 / 50-bin runs that can serve as ``run``'s reference, sorted by name."""
+    return sorted(
+        (ref for ref in all_runs
+         if ref.is_baseline and ref.run_dir != run.run_dir and ref.match_key == run.match_key),
+        key=lambda r: r.name,
     )
 
 
@@ -171,14 +195,11 @@ def find_reference(run: RunInfo, key: tuple, gamma0_runs: Sequence[RunInfo],
                    callback: str = CALLBACK) -> tuple[Optional[RunInfo], Optional[Path], str]:
     """γ = 0 run (and its reconstruction CSV) for one method folder of ``run``."""
     method = key[3].lower()
-    candidates = [
-        ref for ref in gamma0_runs
-        if ref.run_dir != run.run_dir and ref.match_key == run.match_key
-    ]
+    candidates = find_baseline_runs(run, gamma0_runs)
     if not candidates:
-        return None, None, "no γ = 0 run with the same seed, architecture and epochs"
+        return None, None, NO_BASELINE
     with_csv = []
-    for ref in sorted(candidates, key=lambda r: r.name):
+    for ref in candidates:
         csv = (ref.run_dir / "plots" / key[0] / key[1] / callback / key[2] / key[3]
                / f"{corr_plot.correlation_matrix_stem('reconstruction', method)}.csv")
         if csv.is_file():
@@ -224,14 +245,11 @@ def find_mean_reference(run: RunInfo, key: tuple, gamma0_runs: Sequence[RunInfo]
                         callback: str = CALLBACK) -> tuple[Optional[RunInfo], Optional[Path], str]:
     """γ = 0 run (and its mean_correlations.json) for one ``(split, ckpt, dataset)`` of ``run``."""
     split, ckpt, dataset = key
-    candidates = [
-        ref for ref in gamma0_runs
-        if ref.run_dir != run.run_dir and ref.match_key == run.match_key
-    ]
+    candidates = find_baseline_runs(run, gamma0_runs)
     if not candidates:
-        return None, None, "no γ = 0 run with the same seed, architecture and epochs"
+        return None, None, NO_BASELINE
     usable = []
-    for ref in sorted(candidates, key=lambda r: r.name):
+    for ref in candidates:
         path = ref.run_dir / "plots" / split / ckpt / callback / dataset / MEAN_CORRELATIONS
         means = _reconstruction_means(_read_json(path))
         if all(_finite_mean(means, method) is not None for method in MEAN_METHODS):
@@ -327,9 +345,9 @@ def write_comparison(method_dir: Path, reference: RunInfo, reference_csv: Path, 
         # Relative to the experiment folder, so the record stays valid when the
         # checkpoints are copied from EOS to another machine.
         "reference_csv": str(Path(reference_csv).relative_to(reference.run_dir.parent)),
-        "matched_on": {"gamma": 0.0, "seed": reference.seed,
-                       "encoder_nodes": list(reference.architecture), "max_epochs": reference.epochs},
-        "bins_ignored": True,
+        "matched_on": {"gamma": 0.0, "mi_sensitive_num_bins": reference.bins,
+                       "seed": reference.seed, "encoder_nodes": list(reference.architecture),
+                       "max_epochs": reference.epochs},
         "note": note,
         "written_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
     }, indent=2) + "\n")
@@ -411,7 +429,7 @@ def process_experiment(experiment_dir: Path, *, runs: Optional[Iterable[Path]] =
     matplotlib.use("Agg")
     experiment_dir = Path(experiment_dir)
     all_runs = [read_run_info(d) for d in sorted(experiment_dir.iterdir()) if (d / "plots").is_dir()]
-    gamma0_runs = [r for r in all_runs if r.identified and r.gamma == 0.0]
+    gamma0_runs = [r for r in all_runs if r.is_baseline]
     wanted = None if runs is None else {Path(r).resolve() for r in runs}
     report = Report()
 

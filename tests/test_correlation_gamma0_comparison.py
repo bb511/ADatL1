@@ -83,7 +83,8 @@ def plot_calls(monkeypatch):
 @pytest.fixture
 def experiment(tmp_path):
     exp = tmp_path / "checkpoints" / "Exp"
-    _run(exp, "G0_bins10", gamma=0.0, bins=10, reco=_corr(0.4, 0.2), means=(0.2, 0.1))
+    # γ = 0 at another bin count: never the reference (its values would show up below).
+    _run(exp, "G0_bins10", gamma=0.0, bins=10, reco=_corr(0.9, 0.9), means=(0.5, 0.5))
     _run(exp, "G0_bins50", gamma=0.0, bins=50, reco=_corr(0.4, 0.2), means=(0.2, 0.1))
     _run(exp, "G0_local3ep", gamma=0.0, epochs=3, reco=_corr(0.9, 0.9), means=(0.9, 0.9))
     _run(exp, "RunA", gamma=0.1, bins=80, reco=_corr(0.3, -0.6), old_layout=True,
@@ -102,9 +103,10 @@ def test_comparison_uses_a_gamma0_run_with_same_seed_architecture_and_epochs(exp
         for s in ("", "_et_only")
     )
     reference = json.loads((out / "reference.json").read_text())
-    assert reference["reference_run"] == "G0_bins10"  # bins ignored, first by name
-    assert reference["reference_csv"] == f"G0_bins10/{METHOD_DIR}/reconstruction_pearson_correlation_matrix.csv"
-    assert reference["matched_on"] == {"gamma": 0.0, "seed": 1, "encoder_nodes": [64, 32, 8],
+    assert reference["reference_run"] == "G0_bins50"  # the γ = 0 / 50-bin baseline
+    assert reference["reference_csv"] == f"G0_bins50/{METHOD_DIR}/reconstruction_pearson_correlation_matrix.csv"
+    assert reference["matched_on"] == {"gamma": 0.0, "mi_sensitive_num_bins": 50, "seed": 1,
+                                       "encoder_nodes": [64, 32, 8],
                                        "max_epochs": 50}
     copy = pd.read_csv(out / "gamma0_reconstruction_pearson_correlation_matrix.csv", index_col=0)
     assert np.allclose(copy.to_numpy(), _corr(0.4, 0.2).to_numpy())
@@ -119,9 +121,9 @@ def test_comparison_uses_a_gamma0_run_with_same_seed_architecture_and_epochs(exp
     assert full["value_name"].startswith("Change vs γ = 0 in Pearson correlation")
     assert full["subtitle"] == "MI: γ = 0.1 · requested bins = 80 · effective bins = n/a"
 
-    assert [run for _, run in report.written] == ["G0_bins10"]
+    assert [run for _, run in report.written] == ["G0_bins50"]
     assert report.skipped["γ = 0 run"] == 3
-    assert report.skipped["no γ = 0 run with the same seed, architecture and epochs"] == 1
+    assert report.skipped["no γ = 0 / 50-bin run with the same seed, architecture and epochs"] == 1
     for name in ("G0_bins10", "G0_bins50", "RunOtherSeed"):
         assert not (experiment / name / METHOD_DIR / "comparison_gamma0").exists()
 
@@ -169,10 +171,10 @@ def test_galleries_follow_the_evaluator_layout(experiment, plot_calls, tmp_path)
 
 
 def test_reference_disagreement_is_reported(experiment, plot_calls):
-    (_corr(0.41, 0.2)).to_csv(
-        experiment / "G0_bins50" / METHOD_DIR / "reconstruction_pearson_correlation_matrix.csv")
+    # A second γ = 0 / 50-bin run (e.g. a retraining) with a different matrix.
+    _run(experiment, "G0_bins50_Run02", gamma=0.0, bins=50, reco=_corr(0.41, 0.2))
     report = cmp.process_experiment(experiment)
-    assert any("γ = 0 runs disagree; used G0_bins10" in note for _, note in report.details)
+    assert any("γ = 0 runs disagree; used G0_bins50" in note for _, note in report.details)
 
 
 def test_redo_redraws_comparison_plots_from_their_folder(experiment, plot_calls):
@@ -245,7 +247,7 @@ def test_mean_correlations_gain_the_gamma0_means_and_the_improvement(experiment,
 
     payload = json.loads((experiment / "RunA" / MEANS_JSON).read_text())
     spaces = payload["spaces"]
-    # The γ = 0 run's reconstruction means (same seed/architecture/epochs, bins ignored).
+    # The γ = 0 / 50-bin run's reconstruction means (same seed/architecture/epochs).
     assert spaces["reconstruction_gamma0"] == {
         "pearson": {"mean_correlation": 0.2, "num_other_variables": 12},
         "spearman": {"mean_correlation": 0.1, "num_other_variables": 12}}
@@ -257,8 +259,8 @@ def test_mean_correlations_gain_the_gamma0_means_and_the_improvement(experiment,
     # Everything the aggregator reads is unchanged.
     assert (payload["C"], payload["mean_pearson_correlation"], payload["schema_version"]) == (0.15, 0.15, 1)
 
-    assert report.means == [(experiment / "RunA" / MEANS_JSON, "G0_bins10")]
-    assert report.skipped["mean_correlations.json: no γ = 0 run with the same seed, "
+    assert report.means == [(experiment / "RunA" / MEANS_JSON, "G0_bins50")]
+    assert report.skipped["mean_correlations.json: no γ = 0 / 50-bin run with the same seed, "
                           "architecture and epochs"] == 1
     for name, text in before.items():  # γ = 0 runs and runs without a reference: untouched
         assert (experiment / name / MEANS_JSON).read_text() == text
@@ -313,17 +315,17 @@ def test_splits_are_compared_separately(experiment, plot_calls):
     assert not (test_method / "comparison_gamma0").exists()
     assert report.skipped["γ = 0 run has no Pearson matrix for test/loss_total/normal"] == 1
 
-    _copy_to_test(experiment / "G0_bins10")
+    _copy_to_test(experiment / "G0_bins50")
     report = cmp.process_experiment(experiment, splits=["test"])
-    assert [ref for _, ref in report.written] == ["G0_bins10"]
+    assert [ref for _, ref in report.written] == ["G0_bins50"]
     assert (test_method / "comparison_gamma0" / "reference.json").is_file()
     assert "reconstruction_gamma0" in json.loads(test_means.read_text())["spaces"]
-    assert report.means == [(test_means, "G0_bins10")]
+    assert report.means == [(test_means, "G0_bins50")]
 
 
 def test_cli_run_name_and_split_filters(experiment, plot_calls, capsys):
     _copy_to_test(experiment / "RunA")
-    _copy_to_test(experiment / "G0_bins10")
+    _copy_to_test(experiment / "G0_bins50")
     assert cmp.main(["--experiment-dir", str(experiment), "--split", "test",
                      "--run-name", "RunOtherSeed"]) == 0
     assert not (experiment / "RunA" / METHOD_DIR.replace("/val/", "/test/") / "comparison_gamma0").exists()

@@ -24,6 +24,7 @@ from src.evaluation.leakage_probe.constants import (
 from src.evaluation.leakage_probe.provenance import (
     leakage_probe_configuration_id,
 )
+from src.evaluation.pareto_baseline import GAMMA_ZERO_BASELINE_BINS
 
 
 PARETO_METRICS_SCHEMA_VERSION = 2
@@ -323,25 +324,8 @@ def _manifest_info(
                 efficiency_constraint.get("max_relative_degradation"),
                 label="manifest efficiency degradation",
             ),
-            "paired_reference": _paired_reference(collapse_rule),
         },
     }
-
-
-_PAIRED_REFERENCES = ("same_architecture", "same_architecture_and_bins")
-#: Bin count of the single gamma-zero reference under ``same_architecture``.
-_CANONICAL_BASELINE_BINS = 50
-
-
-def _paired_reference(collapse_rule: Mapping[str, Any]) -> str:
-    """Which gamma-zero run a candidate is compared with (default: the old rule)."""
-    reference = str(collapse_rule.get("paired_reference", "same_architecture"))
-    if reference not in _PAIRED_REFERENCES:
-        raise ParetoCollectionError(
-            f"Unknown collapse_constraint.rule.paired_reference {reference!r}; "
-            f"expected one of {_PAIRED_REFERENCES}."
-        )
-    return reference
 
 
 def _validate_leakage_artifact(
@@ -656,22 +640,16 @@ def _apply_paired_constraints(configurations: list[dict[str, Any]]) -> None:
 
         gamma = float(candidate["mi_gamma"])
         architecture_id = str(candidate["architecture_id"])
-        reference = configuration["run"]["manifest"]["constraints"].get(
-            "paired_reference", "same_architecture"
-        )
-        # same_architecture_and_bins: the gamma-zero run with the candidate's own
-        # bin count; same_architecture: the single 50-bin gamma-zero run.
-        baseline_bins = (
-            int(candidate["mi_sensitive_num_bins"])
-            if reference == "same_architecture_and_bins"
-            else _CANONICAL_BASELINE_BINS
-        )
+        # Every candidate, whatever its bin count, is compared with the single
+        # gamma-zero / 50-bin run of its architecture. Manifests of
+        # Pareto-Front-261002 still say paired_reference: same_architecture_and_bins;
+        # that per-bin pairing no longer exists and is not read.
         baselines = [
             item
             for item in by_architecture[architecture_id]
             if isinstance(item.get("candidate"), Mapping)
             and float(item["candidate"]["mi_gamma"]) == 0.0
-            and int(item["candidate"]["mi_sensitive_num_bins"]) == baseline_bins
+            and int(item["candidate"]["mi_sensitive_num_bins"]) == GAMMA_ZERO_BASELINE_BINS
             and item["candidate"]["encoder_nodes"] == candidate["encoder_nodes"]
         ]
         baseline = configuration if gamma == 0.0 else None
@@ -715,8 +693,6 @@ def _apply_paired_constraints(configurations: list[dict[str, Any]]) -> None:
         configuration["constraints"] = {
             "passed": passed,
             "paired_gamma_zero_configuration_id": baseline["configuration_id"],
-            "paired_reference": reference,
-            "paired_gamma_zero_bins": int(baseline["candidate"]["mi_sensitive_num_bins"]),
             "entropy_fraction_required": entropy_fraction,
             "minimum_efficiency_fraction_required": min_efficiency_fraction,
             **checks,

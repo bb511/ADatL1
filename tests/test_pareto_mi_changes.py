@@ -90,7 +90,9 @@ def test_sweeps_hold_the_other_parameter_fixed():
     assert "48 effective" in gamma_sweep.fixed_text
     assert list(bin_sweep.table[EFFECTIVE_BINS]) == [10, 48, 64]
     assert set(bin_sweep.table["mi_gamma"]) == {0.1}
-    assert list(bin_sweep.baseline["mi_gamma"]) == [0.0, 0.0, 0.0]
+    # Both sweeps share the single γ = 0 / 50-bin baseline.
+    for sweep in (gamma_sweep, bin_sweep):
+        assert list(sweep.baseline["configuration_id"]) == [_cid(0.0, 50)]
     assert bin_mapping_text(bin_sweep) == "Nominal → effective bins: 10→10, 50→48, 100→64"
 
 

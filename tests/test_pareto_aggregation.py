@@ -23,9 +23,9 @@ STUDY_ID = "synthetic-fet-study"
 PROTOCOL_VERSION = "fet-et-pareto-v2"
 
 
-def _configuration_id(gamma: float, architecture_id: str = "h64_32") -> str:
+def _configuration_id(gamma: float, architecture_id: str = "h64_32", bins: int = 50) -> str:
     return (
-        f"{STUDY_ID}__gamma-{gamma}__bins-50__arch-{architecture_id}"
+        f"{STUDY_ID}__gamma-{gamma}__bins-{bins}__arch-{architecture_id}"
     )
 
 
@@ -35,13 +35,21 @@ def _manifest(
     gamma: float,
     seed: int,
     architecture_id: str = "h64_32",
+    bins: int = 50,
+    paired_reference: str | None = None,
 ) -> dict[str, Any]:
+    rule: dict[str, Any] = {
+        "minimum_joint_code_entropy_bits": 1.0,
+        "minimum_fraction_of_paired_gamma_zero_joint_entropy": 0.5,
+    }
+    if paired_reference is not None:
+        rule["paired_reference"] = paired_reference
     return {
         "seed": seed,
         "test": False,
         "algorithm": {
             "mi_gamma": gamma,
-            "mi_sensitive_num_bins": 50,
+            "mi_sensitive_num_bins": bins,
             "encoder": {"nodes": [64, 32, 8]},
         },
         "evaluation": {
@@ -64,16 +72,11 @@ def _manifest(
             "candidate": {
                 "autoencoder_seed": seed,
                 "mi_gamma": gamma,
-                "mi_sensitive_num_bins": 50,
+                "mi_sensitive_num_bins": bins,
                 "architecture_id": architecture_id,
                 "encoder_nodes": [64, 32, 8],
             },
-            "collapse_constraint": {
-                "rule": {
-                    "minimum_joint_code_entropy_bits": 1.0,
-                    "minimum_fraction_of_paired_gamma_zero_joint_entropy": 0.5,
-                }
-            },
+            "collapse_constraint": {"rule": rule},
             "minimum_efficiency_constraint": {
                 "max_relative_degradation": 0.05,
             },
@@ -96,12 +99,19 @@ def _write_run(
     collapsed: bool = False,
     median_efficiency: float = 0.7,
     min_efficiency: float = 0.5,
+    bins: int = 50,
+    joint_entropy: float | None = None,
+    paired_reference: str | None = None,
 ) -> dict[str, str | int]:
     manifest = _manifest(
         configuration_id=configuration_id,
         gamma=gamma,
         seed=seed,
+        bins=bins,
+        paired_reference=paired_reference,
     )
+    if joint_entropy is None:
+        joint_entropy = 0.8 if collapsed else 2.0
     manifest_path = tmp_path / "hydra" / configuration_id / str(seed) / "pareto_manifest.resolved.yaml"
     _write_json(manifest_path, manifest)
 
@@ -175,7 +185,7 @@ def _write_run(
             "dataset": "normal",
             "representation": {"name": "latent_sample"},
             "metrics": {
-                "joint_code_entropy_bits": 0.8 if collapsed else 2.0,
+                "joint_code_entropy_bits": joint_entropy,
                 "summed_marginal_bit_entropy_bits": 3.0,
                 "effective_code_count": 4.0,
                 "observed_code_count": 4,
@@ -266,6 +276,54 @@ def test_collects_baseline_and_candidate_and_writes_tables(tmp_path: Path) -> No
     assert row["feasible"].item()
     assert row["leakage_worst"].item() == pytest.approx(0.1)
     assert not any(column.endswith(("_mean", "_ci95_low", "_n_seeds")) for column in table.columns)
+
+
+def test_every_bin_count_is_paired_with_the_single_50_bin_baseline(tmp_path: Path) -> None:
+    """One gamma-zero / 50-bin baseline serves all bin counts.
+
+    A gamma-zero run at the candidate's own bin count is ignored, also when the
+    manifests still carry Pareto-Front-261002's paired_reference:
+    same_architecture_and_bins. Against the 10-bin gamma-zero run (entropy 4.0,
+    min efficiency 0.8) the candidate would fail both paired checks; against the
+    50-bin baseline (2.0, 0.5) it passes them.
+    """
+    legacy = "same_architecture_and_bins"
+    baseline_id = _configuration_id(0.0)
+    other_zero_id = _configuration_id(0.0, bins=10)
+    candidate_id = _configuration_id(0.1, bins=10)
+    runs = [
+        _write_run(tmp_path, configuration_id=baseline_id, gamma=0.0, paired_reference=legacy),
+        _write_run(tmp_path, configuration_id=other_zero_id, gamma=0.0, bins=10,
+                   joint_entropy=4.0, min_efficiency=0.8, paired_reference=legacy),
+        _write_run(tmp_path, configuration_id=candidate_id, gamma=0.1, bins=10,
+                   joint_entropy=1.5, min_efficiency=0.49, paired_reference=legacy),
+    ]
+
+    collection = collect_pareto_study(_study_map(runs))
+    candidate = _configuration(collection, candidate_id)
+    constraints = candidate["constraints"]
+    assert constraints["paired_gamma_zero_configuration_id"] == baseline_id
+    assert constraints["baseline_joint_code_entropy_bits"] == pytest.approx(2.0)
+    assert constraints["baseline_min_efficiency"] == pytest.approx(0.5)
+    assert constraints["relative_entropy_pass"] is True
+    assert constraints["minimum_efficiency_pass"] is True
+    assert candidate["feasible"] is True
+    assert "paired_reference" not in constraints
+    # A gamma-zero run is its own reference, at any bin count.
+    other_zero = _configuration(collection, other_zero_id)
+    assert other_zero["constraints"]["paired_gamma_zero_configuration_id"] == other_zero_id
+
+
+def test_candidate_without_the_50_bin_baseline_is_rejected(tmp_path: Path) -> None:
+    candidate_id = _configuration_id(0.1, bins=10)
+    runs = [
+        _write_run(tmp_path, configuration_id=_configuration_id(0.0, bins=10), gamma=0.0, bins=10),
+        _write_run(tmp_path, configuration_id=candidate_id, gamma=0.1, bins=10),
+    ]
+
+    candidate = _configuration(collect_pareto_study(_study_map(runs)), candidate_id)
+    assert candidate["feasible"] is False
+    assert candidate["constraints"]["reason"] == "missing_paired_gamma_zero_baseline"
 
 
 def test_two_runs_of_one_configuration_are_refused(tmp_path: Path) -> None:

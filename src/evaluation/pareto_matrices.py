@@ -20,8 +20,8 @@ Pareto-Front-260928:
 - the study name, run count, seeds and architectures come from the table;
 - the collapse rule shown in the footer is read from the study's resolved
   config (``pareto_study.collapse_constraint.rule``) when the study map points
-  at one, so a per-bin paired baseline (Pareto-Front-261002) is described as
-  such;
+  at one; the paired run is always the single γ = 0 / 50-bin baseline
+  (``src/evaluation/pareto_baseline.py``), which every subtitle also quotes;
 - the selected configuration comes from ``pareto_selection.json``, not a
   hard-coded label;
 - several architectures are drawn into one sub-directory each, because the
@@ -46,6 +46,8 @@ from typing import Any, Dict, List, Mapping, Optional, Sequence
 
 import numpy as np
 import pandas as pd
+
+from src.evaluation.pareto_baseline import GAMMA_ZERO_BASELINE_BINS
 
 # Reference palette (dataviz skill): sequential blue 100 -> 700 (pale -> dark), text
 # ink, surface, status critical. Rejected cells carry a hatch texture and a legend
@@ -176,30 +178,21 @@ def collapse_rule_text(study_map: Optional[Path], checkpoints_root: Optional[Pat
                 continue
             absolute = rule.get("minimum_joint_code_entropy_bits")
             fraction = rule.get("minimum_fraction_of_paired_gamma_zero_joint_entropy")
-            reference = {
-                "same_architecture_and_bins": "the γ=0 run with the same bins",
-                "same_architecture": "the γ=0 baseline",
-            }.get(str(rule.get("paired_reference")), "the paired γ=0 run")
             parts = []
             if absolute is not None:
                 parts.append(f"H(L) < {float(absolute):g} bit")
             if fraction is not None:
-                parts.append(f"< {float(fraction):g} × H(L) of {reference}")
+                parts.append(f"< {float(fraction):g} × H(L) of the γ=0 baseline")
             return " or ".join(parts) if parts else None
     return None
 
 
 def _baseline_text(table: pd.DataFrame, column: str, fmt_spec: str) -> str:
-    base = table[table[GAMMA] == 0]
+    """The metric of the γ = 0 / 50-bin run every configuration is compared with."""
+    base = table[(table[GAMMA] == 0) & (table[BINS] == GAMMA_ZERO_BASELINE_BINS)]
     if base.empty or column not in base or base[column].isna().all():
         return "baseline γ=0: n/a"
-    values = base[column].dropna().to_numpy(dtype=float)
-    lo, hi = float(values.min()), float(values.max())
-    if base[BINS].nunique() == 1:
-        return f"baseline γ=0: {fmt(lo, fmt_spec)}"
-    if fmt(lo, fmt_spec) == fmt(hi, fmt_spec):  # equal at the precision shown
-        return f"baseline γ=0: {fmt(lo, fmt_spec)} (same at every bin count)"
-    return f"baseline γ=0: {fmt(lo, fmt_spec)}–{fmt(hi, fmt_spec)} across bin counts"
+    return f"baseline γ=0: {fmt(float(base[column].dropna().iloc[0]), fmt_spec)}"
 
 
 # ---------------------------------------------------------------------- drawing

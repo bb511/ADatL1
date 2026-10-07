@@ -78,7 +78,17 @@ def test_collapse_rule_read_from_resolved_config(tmp_path):
     study_map.write_text("runs:\n- manifest_path: /eos/x/checkpoints/Exp/Run01/resolved_config.yaml\n"
                          "  checkpoint_run_dir: /eos/x/checkpoints/Exp/Run01\n")
     text = collapse_rule_text(study_map, tmp_path / "checkpoints")
-    assert text == "H(L) < 1 bit or < 0.5 × H(L) of the γ=0 run with the same bins"
+    # Pareto-Front-261002's per-bin pairing is gone: always the single baseline.
+    assert text == "H(L) < 1 bit or < 0.5 × H(L) of the γ=0 baseline"
+
+
+def test_subtitle_quotes_the_single_50_bin_baseline():
+    from src.evaluation.pareto_matrices import _baseline_text
+
+    table = _candidates()  # γ = 0 at 10 bins: 0.11, at 50 bins: 0.15
+    assert _baseline_text(table, "leakage_worst", "{:.2f}") == "baseline γ=0: 0.15"
+    without = table[~((table["mi_gamma"] == 0) & (table["mi_sensitive_num_bins"] == 50))]
+    assert _baseline_text(without, "leakage_worst", "{:.2f}") == "baseline γ=0: n/a"
 
 
 def test_every_metric_has_a_best_end():

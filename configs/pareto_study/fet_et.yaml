@@ -98,13 +98,15 @@ search_space:
           - [0.15, 40]  # 12
           - [0.8, 40]   # 13
           - [0.5, 30]   # 14
-  # One gamma-zero reference per bin count used anywhere in `regularized`, so
-  # the collapse rule can pair every run with the baseline of its own bin count
-  # (collapse_constraint.rule.paired_reference: same_architecture_and_bins).
-  # make_pareto_grid.py refuses a grid whose bin counts are not all covered.
+  # ONE gamma-zero reference per architecture, at the canonical 50 bins
+  # (GAMMA_ZERO_BASELINE_BINS in src/evaluation/pareto_baseline.py). Every run,
+  # whatever its bin count, is compared with it. Binning does not enter training
+  # at gamma = 0, so baselines at other bin counts would be identical
+  # (Pareto-Front-261002 trained ten and they agree bit for bit).
+  # make_pareto_grid.py refuses anything but a single 50.
   gamma_zero_baseline:
     mi_gamma: 0.0
-    mi_sensitive_num_bins: [10, 20, 30, 40, 50, 60, 70, 80, 90, 100]
+    mi_sensitive_num_bins: 50
     architectures:
       h64_32: [64, 32, 8]
   fixed_latent_width: 8
@@ -132,9 +134,9 @@ collapse_constraint:
   rule:
     minimum_joint_code_entropy_bits: 1.0
     minimum_fraction_of_paired_gamma_zero_joint_entropy: 0.5
-    # same_architecture_and_bins: compare with gamma 0 at the SAME bin count.
-    # same_architecture: compare with the single gamma 0 / 50-bin baseline (old).
-    paired_reference: same_architecture_and_bins
+    # The single gamma 0 / 50-bin run of the same architecture, for every bin
+    # count. (Pareto-Front-261002 paired per bin count; that option is gone.)
+    paired_reference: same_architecture
     baseline_below_minimum_entropy: reject_baseline_and_dependent_candidates
   include_rejected_configurations_in_results: true
 

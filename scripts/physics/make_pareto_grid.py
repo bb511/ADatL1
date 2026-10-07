@@ -37,6 +37,11 @@ import sys
 from omegaconf import OmegaConf
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
+if str(REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT))
+
+from src.evaluation.pareto_baseline import GAMMA_ZERO_BASELINE_BINS  # noqa: E402
+
 DEFAULT_GRID = REPO_ROOT / "configs" / "pareto_study" / "fet_et.yaml"
 
 
@@ -53,13 +58,19 @@ def iter_runs(grid: Dict[str, Any], seed: int) -> Iterator[Tuple[Any, ...]]:
 
     # One gamma-zero baseline per architecture. Binning is irrelevant at
     # gamma=0, so the study fixes it at the canonical 50 rather than training
-    # three identical baselines.
+    # identical baselines; every run, at any bin count, is compared with it
+    # (src/evaluation/pareto_aggregation.py).
     baseline_bins = baseline["mi_sensitive_num_bins"]
-    if not isinstance(baseline_bins, (list, tuple)):
-        baseline_bins = [baseline_bins]
+    if isinstance(baseline_bins, (list, tuple)) or int(baseline_bins) != GAMMA_ZERO_BASELINE_BINS:
+        raise SystemExit(
+            "search_space.gamma_zero_baseline.mi_sensitive_num_bins must be the single "
+            f"value {GAMMA_ZERO_BASELINE_BINS}: every run is compared with the one "
+            f"gamma-zero / {GAMMA_ZERO_BASELINE_BINS}-bin baseline, got {baseline_bins!r}."
+        )
+    if float(baseline["mi_gamma"]) != 0.0:
+        raise SystemExit("search_space.gamma_zero_baseline.mi_gamma must be 0.")
     for architecture_id, nodes in baseline["architectures"].items():
-        for bins in baseline_bins:
-            yield (seed, float(baseline["mi_gamma"]), int(bins), architecture_id, list(nodes))
+        yield (seed, 0.0, GAMMA_ZERO_BASELINE_BINS, architecture_id, list(nodes))
 
     # Every grid point once, in file order, so the lines (and the HTCondor
     # ProcIds) are reproducible. Supported layouts, per group in
@@ -135,18 +146,6 @@ def build_rows(grid_path: Path, attempt: str) -> List[Dict[str, Any]]:
                 "run_name": run_name(seed, gamma, bins, architecture_id, attempt),
             }
         )
-
-    rule = (grid.get("collapse_constraint") or {}).get("rule") or {}
-    if rule.get("paired_reference") == "same_architecture_and_bins":
-        baselines = {(r["architecture_id"], int(r["bins"])) for r in rows if float(r["gamma"]) == 0.0}
-        missing = sorted({(r["architecture_id"], int(r["bins"])) for r in rows
-                          if float(r["gamma"]) != 0.0} - baselines)
-        if missing:
-            raise SystemExit(
-                "collapse_constraint.rule.paired_reference is same_architecture_and_bins, "
-                f"but these (architecture, bins) have no gamma-zero baseline: {missing}. "
-                "Add the bin counts to search_space.gamma_zero_baseline.mi_sensitive_num_bins."
-            )
 
     names = [row["run_name"] for row in rows]
     if len(set(names)) != len(names):

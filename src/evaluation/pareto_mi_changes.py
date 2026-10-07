@@ -19,8 +19,9 @@ an overview grid per sweep and the plotted table as CSV::
 
 Marks: feasible runs are joined by a line, which breaks at rejected runs; rejected
 runs (collapse rule) are open red markers; Pareto-front runs carry a black ring; the
-γ = 0 baseline is a dashed grey reference (in the bin sweep: the γ = 0 run at each
-bin count).
+γ = 0 baseline is a dashed grey horizontal reference in both sweeps: the single
+γ = 0 / 50-bin run every configuration is compared with
+(``src/evaluation/pareto_baseline.py``).
 
 Usage::
 
@@ -42,6 +43,7 @@ import numpy as np
 import pandas as pd
 
 from src.analysis.decorrelation import load_effective_bin_count
+from src.evaluation.pareto_baseline import GAMMA_ZERO_BASELINE_BINS
 from src.evaluation.pareto_matrices import (
     BINS,
     CRITICAL,
@@ -80,7 +82,7 @@ class Sweep:
     x_label: str
     fixed_text: str      # what is held fixed, for the subtitle
     table: pd.DataFrame  # one row per configuration, sorted by x
-    baseline: pd.DataFrame  # γ = 0 rows to draw as reference (x_column, metrics)
+    baseline: pd.DataFrame  # the γ = 0 / 50-bin run, drawn as a horizontal reference
 
 
 # ------------------------------------------------------------------ effective bins
@@ -135,6 +137,10 @@ def build_sweeps(table: pd.DataFrame, *, bins_for_gamma: int = 50, gamma_for_bin
         table[EFFECTIVE_BINS] = table["configuration_id"].map(effective_bins)
     table, _ = _collapse_duplicate_cells(table)
 
+    # The one γ = 0 / 50-bin run, whatever bin count or γ a sweep is taken at.
+    baseline = table[_close(table[GAMMA], 0) & _close(table[BINS], GAMMA_ZERO_BASELINE_BINS)]
+    baseline = baseline.reset_index(drop=True)
+
     gamma_rows = table[_close(table[BINS], bins_for_gamma)].sort_values(GAMMA)
     if len(gamma_rows) < 2:
         raise ParetoMiChangeError(f"Fewer than two runs with {bins_for_gamma} bins to sweep γ over.")
@@ -146,19 +152,18 @@ def build_sweeps(table: pd.DataFrame, *, bins_for_gamma: int = 50, gamma_for_bin
         name=SWEEP_GAMMA, x_column=GAMMA, x_label="MI weight γ (mi_gamma)",
         fixed_text=f"{int(bins_for_gamma)} FET.Et bins{eff_text}",
         table=gamma_rows.reset_index(drop=True),
-        baseline=gamma_rows[_close(gamma_rows[GAMMA], 0)].reset_index(drop=True),
+        baseline=baseline,
     )]
 
     if effective_bins is not None:
         bin_rows = table[_close(table[GAMMA], gamma_for_bins)].sort_values(EFFECTIVE_BINS)
         if len(bin_rows) < 2:
             raise ParetoMiChangeError(f"Fewer than two runs with γ = {gamma_for_bins:g} to sweep bins over.")
-        baseline = table[_close(table[GAMMA], 0) & table[BINS].isin(bin_rows[BINS])]
         sweeps.append(Sweep(
             name=SWEEP_BINS, x_column=EFFECTIVE_BINS, x_label="Effective number of FET.Et bins",
             fixed_text=f"γ = {gamma_for_bins:g}",
             table=bin_rows.reset_index(drop=True),
-            baseline=baseline.sort_values(EFFECTIVE_BINS).reset_index(drop=True),
+            baseline=baseline,
         ))
     return sweeps
 
@@ -194,20 +199,16 @@ def draw_metric(ax, sweep: Sweep, column: str, better: str, f: Optional[str], *,
     front = rows["is_pareto_front"].to_numpy(dtype=bool)
     marker = 5.5 if compact else 8.5
 
-    # γ = 0 reference.
+    # γ = 0 reference: the single γ = 0 / 50-bin baseline.
     base = sweep.baseline
     if len(base) and column in base and base[column].notna().any():
-        if sweep.name == SWEEP_GAMMA or base[column].nunique() == 1:
-            value = float(base[column].dropna().iloc[0])
-            ax.axhline(value, color=BASELINE, lw=1.1, ls=(0, (4, 3)), zorder=1)
-            if not compact:
-                ax.annotate(f"γ = 0 baseline: {fmt(value, f)}", xy=(1, value),
-                            xycoords=("axes fraction", "data"), xytext=(-4, 4),
-                            textcoords="offset points", ha="right", va="bottom",
-                            fontsize=8, color=INK2)
-        else:
-            ax.plot(base[sweep.x_column], base[column], color=BASELINE, lw=1.1, ls=(0, (4, 3)),
-                    marker="o", ms=3.5, zorder=1)
+        value = float(base[column].dropna().iloc[0])
+        ax.axhline(value, color=BASELINE, lw=1.1, ls=(0, (4, 3)), zorder=1)
+        if not compact:
+            ax.annotate(f"γ = 0 baseline: {fmt(value, f)}", xy=(1, value),
+                        xycoords=("axes fraction", "data"), xytext=(-4, 4),
+                        textcoords="offset points", ha="right", va="bottom",
+                        fontsize=8, color=INK2)
 
     # Feasible runs: one line, broken at rejected runs.
     ax.plot(x, np.where(feasible, y, np.nan), color=SERIES, lw=2, solid_capstyle="round",

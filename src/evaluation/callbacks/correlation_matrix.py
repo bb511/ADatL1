@@ -8,6 +8,7 @@ import pandas as pd
 import torch
 from pytorch_lightning.callbacks import Callback
 
+from src.analysis.run_mi_hyperparameters import MiHyperparameters
 from src.data.feature_refs import label_matches_any
 from src.data.utils import unpack_batch
 from src.evaluation.callbacks import utils
@@ -287,6 +288,8 @@ class CorrelationMatrixCallback(Callback):
         ckpts_dir = Path(pl_module._ckpt_path).parent
         ckpt_name = Path(pl_module._ckpt_path).stem
         split = trainer.split
+        mi = self._mi_hyperparameters(pl_module)
+        subtitle = mi.text() if mi.known else None
 
         for dset_name, space_buffers in self._buffers.items():
             plot_folder = (
@@ -359,6 +362,7 @@ class CorrelationMatrixCallback(Callback):
                                 if space_name in {"input", "reconstruction"}
                                 else None
                             ),
+                            subtitle=subtitle,
                         )
 
                 corr_before = correlations.get(("input", method))
@@ -396,6 +400,7 @@ class CorrelationMatrixCallback(Callback):
                         stem=corr_plot.correlation_change_stem(method),
                         title=corr_plot.correlation_change_title(method),
                         decorrelation_reference=corr_after,
+                        subtitle=subtitle,
                     )
 
                     for direction, ascending in corr_plot.SORT_DIRECTIONS.items():
@@ -409,6 +414,7 @@ class CorrelationMatrixCallback(Callback):
                             ),
                             sort_ascending=ascending,
                             decorrelation_reference=corr_after,
+                            subtitle=subtitle,
                         )
 
                 if self.write_details:
@@ -733,12 +739,14 @@ class CorrelationMatrixCallback(Callback):
         title: str,
         sort_ascending: bool | None = None,
         decorrelation_reference: pd.DataFrame | None = None,
+        subtitle: str | None = None,
     ) -> None:
         """Save full-variable and ``*.Et``-only PNG correlation matrices.
 
         The sensitive variable's row is framed in both. Its entries are printed in
         green where |r| <= 0.1 in ``decorrelation_reference``: pass the matrix itself
         for a before/after matrix and the reconstruction matrix for a change matrix.
+        ``subtitle`` (the MI hyperparameters) is printed below the title.
         """
         corr_plot.write_correlation_matrix_variants(
             corr,
@@ -748,6 +756,25 @@ class CorrelationMatrixCallback(Callback):
             sort_ascending=sort_ascending,
             highlight_variable=self.sensitive_variable,
             decorrelation_reference=decorrelation_reference,
+            subtitle=subtitle,
+        )
+
+    @staticmethod
+    def _mi_hyperparameters(pl_module) -> MiHyperparameters:
+        """γ, requested and effective FET.Et bins of the evaluated model.
+
+        Effective bins are the fitted (or checkpoint-restored) quantile edges + 1;
+        models without an MI binner give an empty record and no subtitle.
+        """
+        gamma = getattr(pl_module, "mi_gamma", None)
+        binner = getattr(pl_module, "sensitive_binner", None)
+        requested = getattr(binner, "num_bins", None)
+        edges = getattr(binner, "bin_edges", None)
+        effective = None if edges is None else int(edges.numel()) + 1
+        return MiHyperparameters(
+            gamma=None if gamma is None else float(gamma),
+            requested_bins=None if requested is None else int(requested),
+            effective_bins=effective,
         )
 
     @staticmethod

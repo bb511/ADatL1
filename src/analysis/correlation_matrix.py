@@ -10,8 +10,10 @@ import pandas as pd
 
 try:
     from src.analysis.checkpointloader import CheckpointLoader
+    from src.analysis.run_mi_hyperparameters import read_mi_hyperparameters, run_dir_of
 except ImportError:
     from .checkpointloader import CheckpointLoader
+    from .run_mi_hyperparameters import read_mi_hyperparameters, run_dir_of
 
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -54,7 +56,10 @@ class CorrelationMatrixPlotter:
         title: str | None = None,
         output_dir: str | Path | None = None,
         output_stem: str | None = None,
+        subtitle: str | None = None,
     ) -> Path:
+        """Write the delta CSV and PNG. ``subtitle`` defaults to the MI hyperparameters
+        of the checkpoint run that holds ``input_path``."""
         input_corr = self._load_matrix(self.specs.input_path)
         reconstruction_corr = self._load_matrix(self.specs.reconstruction_path)
         delta_corr = self.compute_delta(input_corr, reconstruction_corr)
@@ -72,6 +77,7 @@ class CorrelationMatrixPlotter:
             save_path=png_path,
             title=title or "Absolute correlation change",
             decorrelation_reference=reconstruction_corr,
+            subtitle=subtitle if subtitle is not None else self.mi_subtitle(),
         )
 
         print(f"Saved delta correlation matrix CSV to {csv_path}.")
@@ -109,6 +115,14 @@ class CorrelationMatrixPlotter:
     def _load_matrix(self, path: str | Path) -> pd.DataFrame:
         matrix = CheckpointLoader(path).load_matrix()
         return matrix.apply(pd.to_numeric, errors="raise")
+
+    def mi_subtitle(self) -> str | None:
+        """MI hyperparameters of the run that holds the input matrix, if any are on disk."""
+        run_dir = run_dir_of(Path(self.specs.input_path).resolve())
+        if run_dir is None:
+            return None
+        mi = read_mi_hyperparameters(run_dir)
+        return mi.text() if mi.known else None
 
     def _highlight_index(self, labels: list) -> int | None:
         """Row index of the highlighted variable; exact match before case-insensitive."""
@@ -158,6 +172,7 @@ class CorrelationMatrixPlotter:
         save_path: Path,
         title: str,
         decorrelation_reference: pd.DataFrame | None = None,
+        subtitle: str | None = None,
     ) -> None:
         try:
             import matplotlib.pyplot as plt
@@ -168,6 +183,7 @@ class CorrelationMatrixPlotter:
                 save_path=save_path,
                 title=title,
                 decorrelation_reference=decorrelation_reference,
+                subtitle=subtitle,
             )
             return
 
@@ -194,7 +210,13 @@ class CorrelationMatrixPlotter:
         ax.set_yticks(range(n))
         ax.set_xticklabels(labels, rotation=45, ha="right")
         ax.set_yticklabels(labels)
-        ax.set_title(title)
+        if subtitle:
+            ax.annotate(subtitle, xy=(0.5, 1.0), xycoords="axes fraction", xytext=(0, 6),
+                        textcoords="offset points", ha="center", va="bottom",
+                        fontsize=10, color="#333333", annotation_clip=False)
+            ax.set_title(title, pad=24)
+        else:
+            ax.set_title(title)
 
         for i in range(n):
             for j in range(n):
@@ -249,6 +271,7 @@ class CorrelationMatrixPlotter:
         save_path: Path,
         title: str,
         decorrelation_reference: pd.DataFrame | None = None,
+        subtitle: str | None = None,
     ) -> None:
         try:
             from PIL import Image, ImageDraw, ImageFont
@@ -280,6 +303,8 @@ class CorrelationMatrixPlotter:
         font = ImageFont.load_default()
 
         draw.text((left_margin, 24), title, fill="black", font=font)
+        if subtitle:
+            draw.text((left_margin, 48), subtitle, fill=(51, 51, 51), font=font)
 
         for index, label in enumerate(labels):
             x = left_margin + index * cell_size + cell_size // 2

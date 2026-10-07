@@ -26,6 +26,7 @@ def plot(
     text_highlight_max_abs: float | None = None,
     text_highlight_columns: Iterable[str] | None = None,
     text_highlight_color: str = "green",
+    subtitle: str | None = None,
 ):
     """Plot the data as a labelled matrix.
 
@@ -47,6 +48,7 @@ def plot(
     is at most this threshold in bold ``text_highlight_color``; ``None`` disables it.
     ``text_highlight_columns`` does the same for the entries of that row in the named
     columns, whatever their value (e.g. chosen from another matrix).
+    ``subtitle`` is printed in a smaller font between the title and the matrix.
     """
     if figure_scale <= 0:
         raise ValueError(f"figure_scale must be greater than zero, got {figure_scale}.")
@@ -77,7 +79,23 @@ def plot(
         [str(c) for c in cols], rotation=90, fontsize=label_fontsize
     )
     ax.set_yticklabels([str(r) for r in rows], fontsize=label_fontsize)
-    ax.set_title(value_name, pad=20)
+    if subtitle:
+        subtitle_size = 18
+        ax.annotate(
+            subtitle,
+            xy=(0.5, 1.0),
+            xycoords="axes fraction",
+            xytext=(0, 10),
+            textcoords="offset points",
+            ha="center",
+            va="bottom",
+            fontsize=subtitle_size,
+            color="#333333",
+            annotation_clip=False,
+        )
+        ax.set_title(value_name, pad=10 + 1.4 * subtitle_size + 10)
+    else:
+        ax.set_title(value_name, pad=20)
     ax.tick_params(
         axis="both",
         which="both",

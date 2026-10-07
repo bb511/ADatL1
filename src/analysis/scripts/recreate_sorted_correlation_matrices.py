@@ -23,6 +23,7 @@ from src.evaluation.callbacks.correlation_matrix import (
     CORRELATION_SOURCE_FILENAMES,
     CorrelationMatrixCallback,
 )
+from src.analysis.run_mi_hyperparameters import read_mi_hyperparameters, run_dir_of
 from src.evaluation.callbacks.utils.mlflow import build_gallery_html
 from src.plot import correlation_matrix as corr_plot
 
@@ -261,6 +262,15 @@ def expected_output_paths(matrix_dir: Path, method: str) -> tuple[Path, ...]:
     )
 
 
+def mi_subtitle(matrix_dir: Path) -> str | None:
+    """MI hyperparameters of the checkpoint run that holds ``matrix_dir``."""
+    run_dir = run_dir_of(Path(matrix_dir))
+    if run_dir is None:
+        return None
+    mi = read_mi_hyperparameters(run_dir, REPO_ROOT)
+    return mi.text() if mi.known else None
+
+
 def recreate_target(matrix_dir: Path, method: str) -> tuple[Path, ...]:
     """Write sorted increase/decrease matrices into one callback output directory."""
     corr_before, corr_after = load_correlation_matrices(matrix_dir, method)
@@ -279,6 +289,7 @@ def recreate_target(matrix_dir: Path, method: str) -> tuple[Path, ...]:
             title=corr_plot.correlation_change_title(method, direction),
             sort_ascending=ascending,
             decorrelation_reference=corr_after,
+            subtitle=mi_subtitle(matrix_dir),
         )
 
     return expected_output_paths(matrix_dir, method)

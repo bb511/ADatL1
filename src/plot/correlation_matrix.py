@@ -162,8 +162,12 @@ def plot_correlation_matrix(
     figure_scale: float = 1.0,
     highlight_variable: str | None = HIGHLIGHT_VARIABLE,
     decorrelation_reference: pd.DataFrame | None = None,
+    subtitle: str | None = None,
 ) -> None:
     """Draw one correlation matrix with the highlighted-variable row framed.
+
+    :param subtitle: Line below the title, e.g. the MI hyperparameters
+        (``MiHyperparameters.text()`` in ``src/analysis/run_mi_hyperparameters.py``).
 
     :param decorrelation_reference: Correlation matrix that decides which entries of
         the highlighted row are printed in green (``|r| <= DECORRELATED_ABS_THRESHOLD``):
@@ -186,6 +190,7 @@ def plot_correlation_matrix(
             highlight_variable,
         ),
         text_highlight_color=DECORRELATED_TEXT_COLOR,
+        subtitle=subtitle,
     )
 
 
@@ -198,10 +203,12 @@ def write_correlation_matrix_variants(
     sort_ascending: bool | None = None,
     highlight_variable: str | None = HIGHLIGHT_VARIABLE,
     decorrelation_reference: pd.DataFrame | None = None,
+    subtitle: str | None = None,
 ) -> None:
     """Save the full-variable and ``*.Et``-only PNG of one correlation matrix.
 
-    ``decorrelation_reference`` is passed on to :func:`plot_correlation_matrix`.
+    ``decorrelation_reference`` and ``subtitle`` are passed on to
+    :func:`plot_correlation_matrix`.
 
     With ``sort_ascending`` set, each variant is ordered by
     :func:`sort_correlation_change_matrix` after the ``*.Et`` selection.
@@ -224,4 +231,5 @@ def write_correlation_matrix_variants(
             figure_scale=figure_scale,
             highlight_variable=highlight_variable,
             decorrelation_reference=decorrelation_reference,
+            subtitle=subtitle,
         )

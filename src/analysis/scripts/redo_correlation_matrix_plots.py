@@ -18,6 +18,10 @@ Source of each PNG (all in the PNG's own folder):
   ``[_sorted_by_{increase,decrease}][_et_only].png`` from ``|reconstruction| -
   |input|`` of those two CSVs, computed, cropped and sorted as the callback does.
 
+The subtitle under each title gives the run's MI hyperparameters (γ, requested
+and effective FET.Et bins), read from the checkpoint run folder by
+``src/analysis/run_mi_hyperparameters.py``; values not on disk show as n/a.
+
 Green FET.Et-row entries (``|r| <= 0.1``) are decided by the plotted matrix for the
 before/after PNGs and by ``reconstruction_{method}_correlation_matrix.csv`` for the
 change PNGs (legacy delta PNGs: method from the file name, default pearson).
@@ -61,6 +65,10 @@ import matplotlib  # noqa: E402
 
 matplotlib.use("Agg")
 
+from src.analysis.run_mi_hyperparameters import (  # noqa: E402
+    read_mi_hyperparameters,
+    run_dir_of,
+)
 from src.plot import correlation_matrix as corr_plot  # noqa: E402
 
 
@@ -174,11 +182,20 @@ def correlation_change(corr_before: pd.DataFrame, corr_after: pd.DataFrame) -> p
 
 
 class _MatrixSources:
-    """Lazily loaded CSV matrices of one folder."""
+    """Lazily loaded CSV matrices of one folder, plus its run's MI subtitle."""
 
     def __init__(self, directory: Path) -> None:
         self.directory = directory
         self._cache: dict[str, pd.DataFrame] = {}
+        self._subtitle: str | None | bool = False
+
+    @property
+    def subtitle(self) -> str | None:
+        if self._subtitle is False:
+            run_dir = run_dir_of(Path(self.directory).resolve())
+            mi = read_mi_hyperparameters(run_dir, REPO_ROOT) if run_dir else None
+            self._subtitle = mi.text() if mi is not None and mi.known else None
+        return self._subtitle
 
     def space(self, space: str, method: str) -> pd.DataFrame:
         stem = corr_plot.correlation_matrix_stem(space, method)
@@ -257,6 +274,7 @@ def _draw(job: PlotJob, sources: _MatrixSources, target: Path) -> None:
                 save_path=target,
                 title=LEGACY_DELTA_TITLE,
                 decorrelation_reference=reference,
+                subtitle=sources.subtitle,
             )
         return
 
@@ -271,6 +289,7 @@ def _draw(job: PlotJob, sources: _MatrixSources, target: Path) -> None:
         title=title,
         figure_scale=corr_plot.VARIANT_FIGURE_SCALES[job.suffix],
         decorrelation_reference=reference,
+        subtitle=sources.subtitle,
     )
 
 

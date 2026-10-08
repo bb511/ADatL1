@@ -27,11 +27,12 @@ environment = "RUN_NAME=$(RUN_NAME) EXPERIMENT_NAME=$(EXPERIMENT_NAME) TRAINER=c
 
 request_gpus = 0
 
-# Same shape as stage 3 (batch/runmetrics_pareto.sub): the test split holds the
-# zero-bias test part (20 %, the size of valid) plus the test part of every
-# auxiliary set (40 %, smaller than their 60 % validation part).
+# Measured (cluster 402220, gamma 0 / 50 bins, 2026-10-07): peak RSS 9513 MiB
+# (test split + 21 auxiliary sets loaded: 8421 MiB; during the evaluation:
+# 9513 MiB), HTCondor MemoryUsage 7342 MB, 8.5 min wall. 12000 MB leaves ~25 %
+# headroom and matches more slots than the 21000 MB of stage 3.
 request_cpus   = 7
-request_memory = 21000
+request_memory = 12000
 request_disk   = 10GB
 
 +MaxRuntime = 7200

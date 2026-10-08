@@ -25,11 +25,18 @@
 #   - +MaxRuntime of one day instead of one week (see below).
 #   - its own log file names.
 #
-# Caveat, loss_total.ckpt: the sandbox path differs between jobs, so Lightning's
-# ModelCheckpoint does not restore best_model_score ("dirpath has changed").
-# loss_total.ckpt of this job is the best epoch AFTER the resume point only.
-# Compare its val/loss_total with the loss_total.ckpt copied next to the resume
-# checkpoint, and keep the better one before stage 2.
+# loss_total.ckpt: Apptainer mounts every sandbox at /srv, so the checkpoint
+# dirpath (/srv/outputs/checkpoints/...) is the same in every job and Lightning
+# restores ModelCheckpoint's best_model_score from last.ckpt. loss_total.ckpt is
+# therefore rewritten only if an epoch after the resume point beats the best one
+# before it. If this job returns no loss_total.ckpt, the overall best is the
+# loss_total.ckpt copied next to the resume checkpoint; copy that one in.
+#
+# Do not git pull on EOS while this job runs. CODE_DIR is the live checkout:
+# Hydra composes the config at the start, but the evaluation callbacks are
+# imported only after fit. Cluster 401253 (2026-10-07) trained to epoch 1000 and
+# then failed instantiating LatentCollapseDiagnosticsCallback, whose
+# paired_reference argument a2cf5ba had removed in the meantime.
 #
 # Caveat, MLflow: this job logs a new MLflow run with the epochs after the
 # resume point only. Epochs before it are in the sandbox copy taken with the

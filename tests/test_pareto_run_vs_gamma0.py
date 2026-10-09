@@ -1,4 +1,4 @@
-"""src/analysis/run_vs_gamma0_comparison.py: test outputs of a run vs its γ = 0 / 50-bin run."""
+"""src/evaluation/pareto/run_vs_gamma0.py: test outputs of a run vs its γ = 0 / 50-bin run."""
 
 from __future__ import annotations
 
@@ -14,7 +14,7 @@ import numpy as np  # noqa: E402
 import pandas as pd  # noqa: E402
 import pytest  # noqa: E402
 
-from src.analysis import run_vs_gamma0_comparison as cmp  # noqa: E402
+from src.evaluation.pareto import run_vs_gamma0 as cmp  # noqa: E402
 
 SIGNALS = ("sigA", "sigB", "sigC")
 EDGES = np.array([0.0, 1.0, 2.0, 3.0])

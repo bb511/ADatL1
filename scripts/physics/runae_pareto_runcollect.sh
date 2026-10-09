@@ -86,7 +86,7 @@ if [[ ! -f "$STUDY_MAP" ]]; then
   }
 
   echo "--- building the study map from $EXPERIMENT_DIR ---"
-  python3 scripts/build_study_map.py \
+  python3 -m src.evaluation.pareto.study_map \
     --experiment-dir "$EXPERIMENT_DIR" \
     --output "$STUDY_MAP"
   echo
@@ -101,18 +101,18 @@ echo "   phase 4:   $PHASE4_OUTPUT"
 echo "==============================================================="
 
 echo "--- phase 2: aggregating per-run artifacts ---"
-python3 scripts/collect_pareto_study.py \
+python3 -m src.evaluation.pareto.aggregation \
   --study-map "$STUDY_MAP" \
   --output-dir "$PHASE2_OUTPUT"
 
 echo "--- phase 3: selecting the Pareto front ---"
-python3 scripts/select_pareto_front.py \
+python3 -m src.evaluation.pareto.selection \
   --input-table "${PHASE2_OUTPUT}/pareto_metrics.parquet" \
   --output-dir "$PHASE3_OUTPUT"
 
 echo "--- phase 4: drawing the figures ---"
 # Reads only the phase 3 tables, so what is drawn is exactly what was selected.
-python3 scripts/plot_pareto_study.py \
+python3 -m src.evaluation.pareto.plots \
   --candidates "${PHASE3_OUTPUT}/pareto_candidates.csv" \
   --front "${PHASE3_OUTPUT}/pareto_front.csv" \
   --output-dir "$PHASE4_OUTPUT"
@@ -120,7 +120,7 @@ python3 scripts/plot_pareto_study.py \
 echo "--- phase 4b: gamma x bins matrices, one per metric ---"
 # Also reads only phase 3 (plus the study map, for the collapse rule in the
 # footer). Rejected configurations hatched, the front outlined.
-python3 scripts/plot_pareto_matrices.py \
+python3 -m src.evaluation.pareto.matrices \
   --candidates "${PHASE3_OUTPUT}/pareto_candidates.csv" \
   --selection "${PHASE3_OUTPUT}/pareto_selection.json" \
   --study-map "$STUDY_MAP" \
@@ -140,7 +140,7 @@ echo "--- phase 4c: correlation matrices vs the gamma = 0 run ---"
 : "${MLRUNS_ROOT:=${ADL1T_OUTPUT_ROOT}/logs/mlflow/mlruns}"
 # --split val: the test outputs (scripts/physics/runae_test.sh) are compared by
 # scripts/physics/runae_test_comparison.sh, never by the Pareto study.
-python3 scripts/plot_correlation_gamma0.py \
+python3 -m src.evaluation.pareto.correlation_gamma0 \
   --split val \
   --study-map "$STUDY_MAP" \
   --checkpoints-root "$CHECKPOINTS_DIR" \

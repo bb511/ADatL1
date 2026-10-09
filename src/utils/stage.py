@@ -1,12 +1,13 @@
-"""Shared construction for the four pipeline stages.
+"""Shared construction for the three pipeline stages.
 
-The pipeline is deliberately split into four executable stages so that every
+The pipeline is deliberately split into three executable stages so that every
 autoencoder can be trained before anything is analysed, and so that each stage
 can be scheduled with the resources it actually needs:
 
     stage 1  src/train.py             fit + the ordinary AE plots -> loss_total.ckpt
     stage 2  src/run_probes.py        four leakage probes on that checkpoint
-    stage 3  scripts/collect_pareto_study.py + scripts/select_pareto_front.py
+    stage 3  src/evaluation/pareto/   collect + select + figures
+             (scripts/physics/runae_pareto_runcollect.sh)
 
     (not a stage) src/run_eval_metrics.py  re-evaluation of a checkpoint without
                                            training, e.g. on the test split

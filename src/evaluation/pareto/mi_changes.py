@@ -25,7 +25,7 @@ runs (collapse rule) are open red markers; Pareto-front runs carry a black ring;
 
 Usage::
 
-    python3 scripts/plot_pareto_mi_changes.py \\
+    python3 -m src.evaluation.pareto.mi_changes \\
         --candidates       <STUDY_ROOT>/phase3/pareto_candidates.csv \\
         --study-map        <STUDY_ROOT>/study_map.yaml \\
         --checkpoints-root checkpoints \\

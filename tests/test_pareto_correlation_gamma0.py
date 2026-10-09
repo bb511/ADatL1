@@ -12,7 +12,7 @@ import pandas as pd  # noqa: E402
 import pytest  # noqa: E402
 from PIL import Image  # noqa: E402
 
-from src.analysis import correlation_gamma0_comparison as cmp  # noqa: E402
+from src.evaluation.pareto import correlation_gamma0 as cmp  # noqa: E402
 
 LABELS = ["jets.phi", "FET.Et", "jets.Et"]
 METHOD_DIR = "plots/val/loss_total/correlation_matrix/normal/Pearson"

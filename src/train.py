@@ -13,7 +13,8 @@ The rest of the Pareto study runs in its own entrypoints, so that every
 autoencoder can be trained before the slow analysis starts:
 
     stage 2  src/run_probes.py        the four leakage probes  (slow: ~27 min)
-    stage 3  scripts/collect_pareto_study.py + scripts/select_pareto_front.py
+    stage 3  src/evaluation/pareto/   collect + select + figures
+             (scripts/physics/runae_pareto_runcollect.sh)
 
 Stage 2 must compose the same config as the stage-1 run that produced the
 checkpoint. ``src/run_eval_metrics.py`` re-evaluates a checkpoint without

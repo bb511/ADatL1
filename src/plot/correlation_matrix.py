@@ -46,7 +46,7 @@ ET_ONLY_SUFFIX = "_et_only"
 # Pearson/): the input and reconstruction matrices sit in the method folder itself,
 # |reconstruction| - |input| ("self improvement") in SELF_IMPROVEMENT_DIR, and
 # |reconstruction| - |reconstruction of the gamma = 0 run| in COMPARISON_GAMMA0_DIR
-# (written afterwards by src/analysis/correlation_gamma0_comparison.py).
+# (written afterwards by src/evaluation/pareto/correlation_gamma0.py).
 SELF_IMPROVEMENT_DIR = "self_improvement"
 COMPARISON_GAMMA0_DIR = "comparison_gamma0"
 SUBFOLDERS = (SELF_IMPROVEMENT_DIR, COMPARISON_GAMMA0_DIR)

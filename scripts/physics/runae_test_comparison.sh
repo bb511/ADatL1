@@ -6,7 +6,7 @@
 # reference), two steps on the TEST outputs of scripts/physics/runae_test.sh:
 #
 # 1. Correlation matrices, as stage 3 phase 4c does for val
-#    (src/analysis/correlation_gamma0_comparison.py):
+#    (src/evaluation/pareto/correlation_gamma0.py):
 #      plots/test/loss_total/correlation_matrix/<dataset>/<Method>/comparison_gamma0/
 #          |r_reco(run)| - |r_reco(gamma = 0)|, 6 PNGs, the gamma = 0 CSV copy and
 #          reference.json (FET.Et row green where the run is closer to 0)
@@ -15,7 +15,7 @@
 #    plus their MLflow galleries.
 #
 # 2. Everything else the test evaluation produces
-#    (src/analysis/run_vs_gamma0_comparison.py):
+#    (src/evaluation/pareto/run_vs_gamma0.py):
 #      plots/test/loss_total/comparison/
 #          summary.{csv,json,png}   efficiency median/min/mean/CVaR25, threshold
 #                                   drift, Wasserstein: run, gamma = 0, difference,
@@ -93,12 +93,12 @@ for run in "${runs[@]}"; do
   run_args+=(--run-name "$run")
 done
 
-correlation=(python3 scripts/plot_correlation_gamma0.py
+correlation=(python3 -m src.evaluation.pareto.correlation_gamma0
   --experiment-dir "$EXPERIMENT_DIR" --split test --mlruns-root "$MLRUNS_ROOT" "${run_args[@]}")
 if [[ "${FORCE:-0}" == 1 ]]; then
   correlation+=(--force)
 fi
-metrics=(python3 scripts/compare_with_gamma0.py
+metrics=(python3 -m src.evaluation.pareto.run_vs_gamma0
   --experiment-dir "$EXPERIMENT_DIR" --split test --ckpt loss_total "${run_args[@]}")
 
 cd "$CODE_DIR"

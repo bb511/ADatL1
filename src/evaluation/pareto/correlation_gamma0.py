@@ -41,7 +41,7 @@ constraints). γ = 0 runs at other bin counts are never used (Pareto-Front-26100
 trained ten, bit-identical). It must have outputs for the same split, checkpoint,
 dataset and method. γ = 0 runs themselves are skipped. Runs without a matching
 reference are reported, not guessed. ``find_baseline_runs`` is shared with
-``src/analysis/test_gamma0_comparison.py``.
+``src/evaluation/pareto/run_vs_gamma0.py``.
 
 ``migrate_layout`` moves ``|after| - |before|`` PNGs that older evaluator versions
 left in the method folder into ``<Method>/self_improvement/``, the layout the

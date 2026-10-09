@@ -29,7 +29,7 @@ Pareto-Front-260928:
 
 Usage (run by scripts/physics/runae_pareto_runcollect.sh after phase 4)::
 
-    python3 scripts/plot_pareto_matrices.py \\
+    python3 -m src.evaluation.pareto.matrices \\
         --candidates  <STUDY_ROOT>/phase3/pareto_candidates.csv \\
         --selection   <STUDY_ROOT>/phase3/pareto_selection.json \\
         --study-map   <STUDY_ROOT>/study_map.yaml \\

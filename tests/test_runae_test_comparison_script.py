@@ -39,8 +39,8 @@ def _runs(command: list[str]) -> list[str]:
 
 def test_runs_from_the_command_line(tmp_path):
     correlation, metrics = _commands(_dry_run(tmp_path, "RunA", "RunB"))
-    assert correlation[1] == "scripts/plot_correlation_gamma0.py"
-    assert metrics[1] == "scripts/compare_with_gamma0.py"
+    assert correlation[1:3] == ["-m", "src.evaluation.pareto.correlation_gamma0"]
+    assert metrics[1:3] == ["-m", "src.evaluation.pareto.run_vs_gamma0"]
     for command in (correlation, metrics):
         assert _runs(command) == ["RunA", "RunB"]
         assert command[command.index("--split") + 1] == "test"

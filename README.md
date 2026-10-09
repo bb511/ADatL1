@@ -112,7 +112,7 @@ own; **v3 runs need a new experiment name** (`EXPERIMENT_NAME`, below).
 |---|---|---|---|---|---|
 | 1 | train + validation evaluation | `src/train.py` | `scripts/physics/runae.sh` | `batch/runae_pareto.sub` | `loss_total.ckpt`, `run_manifest.yaml`, and under `plots/val/loss_total/`: `eff/`, `correlation_matrix/` (E), `latent_collapse/`, `auroc/` and the usual AE plots |
 | 2 | leakage probes | `src/run_probes.py` | `scripts/physics/runae_pareto_runprobes.sh` | `batch/runprobes_pareto.sub` | `plots/val/loss_total/probes/leakage_probes.json` (L) |
-| 3 | collect + select | `scripts/collect_pareto_study.py`, `scripts/select_pareto_front.py`, `scripts/plot_*.py` | `scripts/physics/runae_pareto_runcollect.sh` | `batch/runcollect.sub` | `pareto_studies/<experiment>/phase2/`, `phase3/` (`pareto_front.csv`, `pareto_selection.json`), `phase4/` figures |
+| 3 | collect + select | `src/evaluation/pareto/` (`aggregation`, `selection`, `plots`, `matrices`, `correlation_gamma0`) | `scripts/physics/runae_pareto_runcollect.sh` | `batch/runcollect.sub` | `pareto_studies/<experiment>/phase2/`, `phase3/` (`pareto_front.csv`, `pareto_selection.json`), `phase4/` figures |
 
 - Stages 1 and 2 run once per grid point and stage 3 once per study. Stage 2 needs
   only the checkpoint of stage 1; stage 3 needs stages 1 and 2 of every run.
@@ -122,7 +122,11 @@ own; **v3 runs need a new experiment name** (`EXPERIMENT_NAME`, below).
 - The grid lives only in `configs/pareto_study/fet_et.yaml`.
   `scripts/physics/runae_pareto_makegrid.sh` turns it into the job list
   `batch/pareto_runs.txt` (`SEED,GAMMA,BINS,ARCH,NODES,RUN_NAME`) that stages 1
-  and 2 read on HTCondor. The code of the study is in `src/evaluation/pareto/`.
+  and 2 read on HTCondor. The code of the study is in `src/evaluation/pareto/`,
+  one module per phase; each runs on its own as
+  `python3 -m src.evaluation.pareto.<module> --help` from the repository root.
+  The metric-vs-γ and metric-vs-bins sweeps (`mi_changes`) are not part of
+  stage 3 and are only run by hand.
 - After the study, for the selected configuration only (and its γ = 0 run):
   `scripts/physics/runae_test.sh` evaluates `loss_total.ckpt` on the test split,
   `scripts/physics/runae_test_comparison.sh` compares those test outputs with the
@@ -290,7 +294,7 @@ that holds more than one run of the same `configuration_id` (a retrain, or a
 leftover second seed) and names them, so the front never depends on which of
 two runs happened to be picked.
 
-`scripts/build_study_map.py` can also be run on its own. The collector itself is
+`python3 -m src.evaluation.pareto.study_map` can also be run on its own. The collector itself is
 untouched: it still validates every claim in the map against each run's resolved
 manifest and artifacts.
 

@@ -1,4 +1,4 @@
-"""The per-run manifest that links the four pipeline stages together.
+"""The per-run manifest that links the three pipeline stages together.
 
 Stage 1 writes one of these into every run's own checkpoint directory:
 

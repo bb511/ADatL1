@@ -22,7 +22,7 @@ above it):
 * ``abs_reconstruction_minus_gamma0_reconstruction_...`` in ``comparison_gamma0/``:
   ``|reconstruction| - |gamma = 0 reconstruction|`` from the method folder's
   reconstruction CSV and the copy ``gamma0_reconstruction_{method}_correlation_matrix.csv``
-  next to the PNG (see src/analysis/correlation_gamma0_comparison.py).
+  next to the PNG (see src/evaluation/pareto/correlation_gamma0.py).
 
 The subtitle under each title gives the run's MI hyperparameters (γ, requested
 and effective FET.Et bins), read from the checkpoint run folder by

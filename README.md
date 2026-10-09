@@ -140,27 +140,39 @@ own; **v3 runs need a new experiment name** (`EXPERIMENT_NAME`, below).
 Needs the staged data under `$PROJECT_ROOT/data/data_2025E+G/{extracted,processed,mlready}`
 (default `PROJECT_ROOT` is the checkout; run `bash scripts/setup.sh` once). Every
 setting is an environment variable read by `scripts/physics/_stage_common.sh`.
-One grid point:
+Stage 1 has local defaults, so one grid point is just
 
 ```bash
-export EXPERIMENT_NAME=Pareto-Front-local            # checkpoints/<experiment>/, one per study
-export PARETO_CANDIDATE=1                            # parameterise through pareto_study.candidate
-export SEED=180524 MI_GAMMA=0.1 MI_NUM_BINS=40 ARCHITECTURE_ID=h64_32 ENCODER_NODES='[64,32,8]'
-export RUN_NAME=Seed180524_Gamma_0.1_Bins_40_architecture_h64_32_Run01
-
-EXPERIMENT=physics/pareto_fet_train bash scripts/physics/runae.sh            # stage 1 (MAX_EPOCHS=2 for a smoke run)
-EXPERIMENT=physics/pareto_fet bash scripts/physics/runae_pareto_runprobes.sh # stage 2, ~27 min
+bash scripts/physics/runae.sh          # 3 epochs; MAX_EPOCHS= (empty) for the config's 200
 ```
 
-Repeat for every grid point, with the run names `runae_pareto_makegrid.sh`
-writes, then once for the whole experiment:
+It trains seed 180524, γ = 0.1, 40 bins and architecture h64_32 (`[64,32,8]`)
+for 3 epochs as a Pareto candidate (`physics/pareto_fet_train`) into `checkpoints/local-ae/`.
+The run name follows the grid's pattern and is numbered past the runs of that
+grid point already there: `Seed180524_Gamma_0.1_Bins_40_architecture_h64_32_Run01`,
+then `_Run02`, and so on, so a second call never overwrites the first. The banner
+prints it. Override any default for one call, e.g.
+`MI_GAMMA=0.3 MI_NUM_BINS=50 bash scripts/physics/runae.sh`; the full list is at
+the top of `scripts/physics/runae.sh`. Variables already exported in the shell
+win over the defaults, so `unset RUN_NAME` to get the automatic numbering back.
+
+Stage 2 has no defaults. Give it the stage-1 run name and the same grid point:
 
 ```bash
-EXPERIMENT_NAME=Pareto-Front-local bash scripts/physics/runae_pareto_runcollect.sh   # stage 3
+export EXPERIMENT_NAME=local-ae PARETO_CANDIDATE=1
+export SEED=180524 MI_GAMMA=0.1 MI_NUM_BINS=40 ARCHITECTURE_ID=h64_32 ENCODER_NODES='[64,32,8]'
+RUN_NAME=Seed180524_Gamma_0.1_Bins_40_architecture_h64_32_Run01 \
+  EXPERIMENT=physics/pareto_fet bash scripts/physics/runae_pareto_runprobes.sh   # stage 2, ~27 min
+```
+
+Then once for the whole experiment:
+
+```bash
+EXPERIMENT_NAME=local-ae bash scripts/physics/runae_pareto_runcollect.sh   # stage 3
 ```
 
 Stage 3 is pandas only (no torch, no data) and takes minutes. Its outputs land
-in `pareto_studies/Pareto-Front-local/`.
+in `pareto_studies/local-ae/`.
 
 ### Running the stages on lxplus (HTCondor)
 

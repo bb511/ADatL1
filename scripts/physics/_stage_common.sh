@@ -210,9 +210,10 @@ stage_banner() {
   echo " $1"
   echo "   run_name:    $RUN_NAME"
   echo "   experiment:  $EXPERIMENT"
+  echo "   exp. name:   ${EXPERIMENT_NAME:-<from the $EXPERIMENT config>}"
   echo "   trainer:     $TRAINER  (threads=$CPU_THREADS, workers=$DATA_WORKERS)"
   echo "   raw data:    $RAW_DATA_DIR"
   echo "   output root: $ADL1T_OUTPUT_ROOT"
-  echo "   checkpoints: $ADL1T_OUTPUT_ROOT/checkpoints/<experiment_name>/$RUN_NAME"
+  echo "   checkpoints: $ADL1T_OUTPUT_ROOT/checkpoints/${EXPERIMENT_NAME:-<experiment_name>}/$RUN_NAME"
   echo "==============================================================="
 }

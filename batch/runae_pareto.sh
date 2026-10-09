@@ -38,6 +38,12 @@ export PARETO_CANDIDATE
 ENCODER_NODES="[${ENCODER_NODES_US//_/,}]"
 export SEED MI_GAMMA MI_NUM_BINS ARCHITECTURE_ID ENCODER_NODES
 
+# Empty = the epochs of configs/experiment/physics/pareto_fet_train.yaml. Set
+# explicitly (possibly empty) because scripts/physics/runae.sh turns an UNSET
+# MAX_EPOCHS into its local default of 3.
+: "${MAX_EPOCHS:=}"
+export MAX_EPOCHS
+
 # HTCondor copies the executable into the sandbox and renames it
 # condor_exec.exe, so "$(dirname "$0")" is the scratch directory, not the repo.
 # Nothing else is transferred, so a relative source silently finds nothing: the

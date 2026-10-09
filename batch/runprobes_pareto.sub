@@ -1,10 +1,12 @@
 # STAGE 2 of the Pareto study -- the four leakage probes, one job per grid point.
 #
 #   condor_submit batch/runprobes_pareto.sub
+#   condor_submit EXPERIMENT_NAME=<experiment> RUNS=batch/my_runs.txt batch/runprobes_pareto.sub
 #
-# Submit only after the stage-1 outputs have been merged onto EOS. May be
-# submitted at the same time as batch/runmetrics_pareto.sub: the two read the
-# same checkpoint and write into disjoint subdirectories of it.
+# EXPERIMENT_NAME (empty: PARETO_EXPERIMENT_NAME in batch/_stage_env.sh) must be
+# the one stage 1 was submitted with.
+# Submit only after the stage-1 outputs have been merged onto EOS. It reads the
+# checkpoint and writes into its own subdirectory (probes/) beside it.
 
 executable = batch/runprobes_pareto.sh
 
@@ -14,7 +16,7 @@ error  = batch/logs/runprobes_pareto.$(ClusterId).$(ProcId).err
 
 MY.SingularityImage = "/eos/user/l/lbehrens/containers/adl1t_lab-dev.sif"
 
-environment = "SEED=$(SEED) MI_GAMMA=$(GAMMA) MI_NUM_BINS=$(BINS) ARCHITECTURE_ID=$(ARCH) ENCODER_NODES_US=$(NODES) RUN_NAME=$(RUN_NAME) TRAINER=cpu CPU_THREADS=8 DATA_WORKERS=3"
+environment = "SEED=$(SEED) MI_GAMMA=$(GAMMA) MI_NUM_BINS=$(BINS) ARCHITECTURE_ID=$(ARCH) ENCODER_NODES_US=$(NODES) RUN_NAME=$(RUN_NAME) EXPERIMENT_NAME=$(EXPERIMENT_NAME) TRAINER=cpu CPU_THREADS=8 DATA_WORKERS=3"
 
 # No transfer_output_files: this job writes its JSON and PNGs straight into the
 # existing checkpoint tree on EOS, so there is nothing in the sandbox to return.

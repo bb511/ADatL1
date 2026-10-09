@@ -12,7 +12,7 @@ defaults:
   - _self_
 
 experiment_name: Pareto-Front-261002
-tags: ["physics", "pareto", "fet-et", "validation", "protocol-v2"]
+tags: ["physics", "pareto", "fet-et", "validation", "protocol-v3"]
 
 
 # The seed and the three search variables are the only runtime overrides to the

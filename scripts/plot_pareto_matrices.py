@@ -1,4 +1,4 @@
-"""CLI for the Phase 4b gamma x bins matrices. See src/evaluation/pareto_matrices.py."""
+"""CLI for the Phase 4b gamma x bins matrices. See src/evaluation/pareto/matrices.py."""
 
 import rootutils
 
@@ -8,7 +8,7 @@ rootutils.setup_root(
     pythonpath=True,
 )
 
-from src.evaluation.pareto_matrices import main
+from src.evaluation.pareto.matrices import main
 
 
 if __name__ == "__main__":

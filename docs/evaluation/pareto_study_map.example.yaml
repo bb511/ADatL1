@@ -3,11 +3,11 @@
 # does not infer identity from directory names or scan checkpoint folders.
 schema_version: 2
 study_id: fet-et-pareto-v1
-protocol_version: fet-et-pareto-v2
+protocol_version: fet-et-pareto-v3
 
 runs:
   - configuration_id: fet-et-pareto-v1__gamma-0.0__bins-50__arch-h64_32
-    autoencoder_seed: 123
+    autoencoder_seed: 180524
     # The resolved manifest is under Hydra's output directory.
     manifest_path: /absolute/path/to/logs/train/runs/.../pareto_manifest.resolved.yaml
     # Checkpoints and compact evaluation artifacts are stored separately.

@@ -11,7 +11,7 @@
 # record of what was trained; a command-line override that disagrees with it is
 # exactly the divergence that record exists to prevent.
 
-STAGE_LABEL="Pareto stage 1/4: train one grid point"
+STAGE_LABEL="Pareto stage 1: train one grid point + val evaluation"
 export STAGE_LABEL
 
 # The study experiment, minus the training callbacks that need the auxiliary

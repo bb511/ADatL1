@@ -108,7 +108,7 @@ callbacks:
   # (src/callbacks/checkpointing/collapse_guard.py)
   loss_total_ckpt:
     _target_: src.callbacks.checkpointing.collapse_guard.CollapseGuardedModelCheckpoint
-    # Full collapse only (one code for ~99.5% of events). Stage 4 still applies
+    # Full collapse only (one code for ~99.5% of events). Stage 3 still applies
     # pareto_study.collapse_constraint (>= 1 bit, >= 0.5 x gamma-0) afterwards.
     min_joint_code_entropy_bits: 0.05
     dataset: normal
@@ -366,7 +366,7 @@ evaluation:
       # on the full validation split; only the matrices and plots are kept.
       write_source_tables: false
 
-    # These two used to exist only in the Pareto study / stage-3 overlays.
+    # These two used to exist only in the Pareto-study overlays.
     # They live here so that every stage-1 run, wherever it is launched,
     # produces the complete evaluation (everything except the leakage probes,
     # which stay in stage 2).

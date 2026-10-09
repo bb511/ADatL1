@@ -5,7 +5,7 @@
 # For every gamma != 0 run in the list (gamma = 0 entries are skipped: they are the
 # reference), two steps on the TEST outputs of scripts/physics/runae_test.sh:
 #
-# 1. Correlation matrices, as stage 4 phase 4c does for val
+# 1. Correlation matrices, as stage 3 phase 4c does for val
 #    (src/analysis/correlation_gamma0_comparison.py):
 #      plots/test/loss_total/correlation_matrix/<dataset>/<Method>/comparison_gamma0/
 #          |r_reco(run)| - |r_reco(gamma = 0)|, 6 PNGs, the gamma = 0 CSV copy and

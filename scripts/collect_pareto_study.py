@@ -8,7 +8,7 @@ rootutils.setup_root(
     pythonpath=True,
 )
 
-from src.evaluation.pareto_aggregation import main
+from src.evaluation.pareto.aggregation import main
 
 
 if __name__ == "__main__":

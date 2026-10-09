@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 # ===========================================================================
-# STAGE 4 of 4 -- aggregate every run and build the Pareto front
+# STAGE 3 -- aggregate every run and build the Pareto front
 # ===========================================================================
-# Reads the per-run artifacts that stages 2 and 3 wrote (one run per
+# Reads the per-run artifacts that stages 1 and 2 wrote (one run per
 # configuration), applies the feasibility constraints, and selects the front.
 #
 #   phase2/  pareto_metrics.csv, pareto_metrics.parquet,
@@ -15,15 +15,15 @@
 #            + spaces.reconstruction_gamma0 and, per method, the
 #            "mean increase compared to gamma = 0" in percent
 #
-# Unlike stages 1-3 this is a whole-study step, not a per-run one, so it takes no
+# Unlike stages 1 and 2 this is a whole-study step, not a per-run one, so it takes no
 # RUN_NAME. It is pure pandas/numpy: no torch, no GPU, minutes not hours.
 #
 # This stage consumes a study map: an explicit list of the one run of every
 # configuration, with its resolved manifest. There are two ways to get one.
 #
-#   1. The study runner wrote it. scripts/physics/run_pareto_fet_ngt.sh --run
-#      declares the whole grid up front, at STUDY_ROOT/study_map.yaml. If that
-#      file exists it is used as is.
+#   1. An existing STUDY_ROOT/study_map.yaml (e.g. one edited by hand to leave a
+#      run out) is used as is, unless runs were added to the experiment directory
+#      since it was written; then it is moved aside and rebuilt (see below).
 #
 #   2. Built from an experiment directory. Every run trained by stage 1 leaves a
 #      run_manifest.yaml beside its checkpoint, so a directory of autoencoders
@@ -36,15 +36,14 @@
 # is refused, with the duplicates named.
 #
 # Usage:
-#   bash scripts/physics/runcollect.sh    # EXPERIMENT_NAME defaults to Pareto-Front-261002
-#   STUDY_ROOT=/path/to/pareto_studies/fet-et-pareto-v1 bash scripts/physics/runcollect.sh
+#   bash scripts/physics/runae_pareto_runcollect.sh    # EXPERIMENT_NAME defaults to Pareto-Front-261002
+#   STUDY_ROOT=/path/to/pareto_studies/<experiment> bash scripts/physics/runae_pareto_runcollect.sh
 
 set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 
 : "${ADL1T_OUTPUT_ROOT:=${REPO_ROOT}}"
-: "${STUDY_ID:=fet-et-pareto-v1}"
 # One study tree per experiment directory, so a new study never picks up (or
 # overwrites) the study map and phase outputs of an earlier one.
 : "${EXPERIMENT_NAME:=Pareto-Front-261002}"
@@ -61,7 +60,7 @@ cd "$REPO_ROOT"
 # Rebuild a map that was built from the checkpoint folder when runs were added
 # since: a stale map silently collects only the old runs (2026-10-01: 111 of
 # 189 after the refinement grid). A map without a matching checkpoint folder
-# (e.g. one written by the NGT runner) is left alone.
+# (e.g. one written by hand for runs stored elsewhere) is left alone.
 EXPERIMENT_DIR="${CHECKPOINTS_DIR}/${EXPERIMENT_NAME}"
 if [[ -f "$STUDY_MAP" && -n "$EXPERIMENT_NAME" && -d "$EXPERIMENT_DIR" ]]; then
   if [[ -n "$(find "$EXPERIMENT_DIR" -mindepth 2 -maxdepth 2 -name run_manifest.yaml -newer "$STUDY_MAP" -print -quit)" ]]; then
@@ -75,9 +74,9 @@ if [[ ! -f "$STUDY_MAP" ]]; then
   [[ -n "$EXPERIMENT_NAME" ]] || {
     echo "Missing study map: $STUDY_MAP" >&2
     echo >&2
-    echo "Either point STUDY_ROOT at a study the runner created, or set" >&2
+    echo "Either point STUDY_ROOT at a folder holding a study_map.yaml, or set" >&2
     echo "EXPERIMENT_NAME to build the map from a directory of trained runs:" >&2
-    echo "  EXPERIMENT_NAME=Pareto-Front-261002 bash scripts/physics/runcollect.sh" >&2
+    echo "  EXPERIMENT_NAME=Pareto-Front-261002 bash scripts/physics/runae_pareto_runcollect.sh" >&2
     exit 2
   }
 
@@ -94,7 +93,7 @@ if [[ ! -f "$STUDY_MAP" ]]; then
 fi
 
 echo "==============================================================="
-echo " STAGE 4/4  COLLECT + SELECT"
+echo " STAGE 3  COLLECT + SELECT"
 echo "   study map: $STUDY_MAP"
 echo "   phase 2:   $PHASE2_OUTPUT"
 echo "   phase 3:   $PHASE3_OUTPUT"

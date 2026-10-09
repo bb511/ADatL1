@@ -1,27 +1,31 @@
 #!/usr/bin/env bash
-# Shared settings for the four pipeline stages. Sourced, never executed.
+# Shared settings for the per-run pipeline scripts. Sourced, never executed.
 #
-#   stage 1  runae.sh       train the AE            -> loss_total.ckpt
-#   stage 2  runprobes.sh   four leakage probes     -> leakage_probes.json
-#   stage 3  runmetrics.sh  remaining Pareto metrics-> eff/correlation/collapse/auroc
-#   stage 4  runcollect.sh  aggregate + Pareto front
+#   stage 1  runae.sh                    train the AE + full val evaluation
+#                                        -> loss_total.ckpt, eff/correlation/collapse/auroc
+#   stage 2  runae_pareto_runprobes.sh   four leakage probes -> leakage_probes.json
+#   stage 3  runae_pareto_runcollect.sh  aggregate + Pareto front (does not source this)
 #
-# Stages 2 and 3 read only the checkpoint stage 1 wrote, so they are independent
-# of each other and may run at the same time. Both must be given the SAME
-# EXPERIMENT, RUN_NAME and algorithm overrides as the stage-1 run: the checkpoint
-# stores weights but not the config, and both loaders use strict=True, so a
-# mismatched architecture fails loudly instead of measuring the wrong model.
+# After the study, for the selected configuration only:
+#            runae_test.sh               test-split evaluation of a selected run
+#            runae_test_comparison.sh    test outputs vs the gamma = 0 run
+#
+# Stage 2 and runae_test.sh read only the checkpoint stage 1 wrote. They must be
+# given the SAME EXPERIMENT, RUN_NAME and algorithm overrides as the stage-1 run:
+# the checkpoint stores weights but not the config, and the loaders use
+# strict=True, so a mismatched architecture fails loudly instead of measuring the
+# wrong model.
 
 set -euo pipefail
 
 # --- identity ---------------------------------------------------------------
-# RUN_NAME is the only thing that links the four stages together. It is required
+# RUN_NAME is the only thing that links the stages together. It is required
 # rather than defaulted, because a wrong default would silently analyse another
 # run's checkpoint.
 : "${RUN_NAME:?Set RUN_NAME to the run you are training or analysing, e.g. RUN_NAME=AE_30ep_gamma0.1}"
 
-# Must match the composed experiment's experiment_name. physics/ae, its
-# ae_metrics overlay and physics/pareto_fet(_train) all use Pareto-Front-261002.
+# Must match the composed experiment's experiment_name. physics/ae and
+# physics/pareto_fet(_train) all use Pareto-Front-261002.
 : "${EXPERIMENT:=physics/ae}"
 
 # Overrides the experiment's own experiment_name, which is the directory every
@@ -148,7 +152,7 @@ fi
 # gradient_clip_val 5.0), so the config and the record agree again.
 #
 # To change a hyperparameter, change the config. To try one ad hoc, set the
-# variable for that invocation -- and set the same one for stages 2 and 3, or
+# variable for that invocation -- and set the same one for stage 2 and runae_test.sh, or
 # the run_manifest fingerprint check will stop them.
 : "${PARETO_CANDIDATE:=0}"
 

@@ -48,22 +48,23 @@ test: True
 # simply provide checkpoint path to resume training
 ckpt_path: null
 
-# Run the post-fit evaluator in stage 1. True keeps the ordinary AE behaviour:
-# fit, then replay the validation split through the new checkpoint to produce
-# the usual plots. Set false when evaluation is a separate stage, as it is for
-# the Pareto study -- stage 1 then produces only the checkpoint and its
-# manifest, which is both faster and the only thing that works once
-# data.load_aux_in_fit is false.
+# Run the post-fit evaluator in stage 1: fit, then replay the validation split
+# through the new checkpoint with every evaluation callback. For the Pareto
+# study this IS the evaluation (efficiencies, correlation matrices / E, latent
+# collapse, AUROC); no later stage repeats it. Set false only
+# for quick runs, or with data.load_aux_in_fit=false, where it cannot work; the
+# checkpoint can then be evaluated later with src/run_eval_metrics.py.
 run_validation: true
 
 # Split replayed by the evaluation-only entrypoint src/run_eval_metrics.py:
-# val (stage 3) or test (scripts/physics/runae_test.sh, only for configurations
-# already selected on validation). src/train.py does not read it.
+# val (re-evaluation / backfill of a validation run) or test
+# (scripts/physics/runae_test.sh, only for configurations already selected on
+# validation). src/train.py does not read it.
 eval_split: val
 
-# Stages 2-4 refuse to analyse a checkpoint whose run_manifest.yaml does not
-# match the composed config. Set false for runs trained before manifests
-# existed; the stage then warns instead of stopping.
+# Stage 2 and src/run_eval_metrics.py refuse to analyse a checkpoint whose
+# run_manifest.yaml does not match the composed config. Set false for runs
+# trained before manifests existed; the stage then warns instead of stopping.
 manifest_strict: true
 
 # seed for random number generators in pytorch, numpy and python.random

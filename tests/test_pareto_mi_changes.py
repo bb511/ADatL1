@@ -10,8 +10,8 @@ import pytest
 
 pytest.importorskip("matplotlib")
 
-from src.evaluation.pareto_matrices import METRICS  # noqa: E402
-from src.evaluation.pareto_mi_changes import (  # noqa: E402
+from src.evaluation.pareto.matrices import METRICS  # noqa: E402
+from src.evaluation.pareto.mi_changes import (  # noqa: E402
     EFFECTIVE_BINS,
     ParetoMiChangeError,
     bin_mapping_text,
@@ -126,8 +126,8 @@ def test_rejected_runs_break_the_line_and_are_open_red(tmp_path):
     import matplotlib.pyplot as plt
     from matplotlib.colors import to_rgba
 
-    from src.evaluation.pareto_matrices import CRITICAL
-    from src.evaluation.pareto_mi_changes import SERIES, draw_metric
+    from src.evaluation.pareto.matrices import CRITICAL
+    from src.evaluation.pareto.mi_changes import SERIES, draw_metric
 
     (gamma_sweep,) = build_sweeps(_candidates(), bins_for_gamma=50)
     fig, ax = plt.subplots()

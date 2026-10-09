@@ -1,6 +1,6 @@
 """Compare each run's reconstruction correlations with those of its γ = 0 run.
 
-Post-processing (stage 4) step: on the cluster the runs of a study evaluate in
+Post-processing (stage 3) step: on the cluster the runs of a study evaluate in
 parallel, so the γ = 0 run is usually not finished when another run is evaluated.
 For every run of an experiment and every correlation-matrix method folder
 
@@ -21,7 +21,7 @@ this writes into ``<Method>/comparison_gamma0/``:
 * ``reference.json``: which run was used and why.
 
 It also extends each run's ``<run>/plots/<split>/<ckpt>/correlation_matrix/<dataset>/
-mean_correlations.json`` (written by the evaluator in stage 3) with
+mean_correlations.json`` (written by the post-fit evaluation in stage 1) with
 
 * ``spaces.reconstruction_gamma0``: the γ = 0 run's reconstruction means, copied
   from its own ``mean_correlations.json`` (``pearson`` / ``spearman``, each with
@@ -32,11 +32,11 @@ mean_correlations.json`` (written by the evaluator in stage 3) with
   γ = 0 mean is 0 or missing.
 
 These are rewritten on every pass, also when the comparison plots exist, so a
-stage 3 rerun (which writes the file afresh) is picked up by the next stage 4.
+re-evaluation (which writes the file afresh) is picked up by the next stage 3.
 
 **Reference.** The γ = 0 / 50-bin run of the *same experiment* with the same
 seed, encoder architecture and number of epochs: the single baseline every run is
-compared with (``src/evaluation/pareto_baseline.py``, also used by the Pareto
+compared with (``src/evaluation/pareto/baseline.py``, also used by the Pareto
 constraints). γ = 0 runs at other bin counts are never used (Pareto-Front-261002
 trained ten, bit-identical). It must have outputs for the same split, checkpoint,
 dataset and method. γ = 0 runs themselves are skipped. Runs without a matching
@@ -65,7 +65,7 @@ import numpy as np
 import yaml
 
 from src.analysis.run_mi_hyperparameters import read_mi_hyperparameters
-from src.evaluation.pareto_baseline import GAMMA_ZERO_BASELINE_BINS
+from src.evaluation.pareto.baseline import GAMMA_ZERO_BASELINE_BINS
 from src.plot import correlation_matrix as corr_plot
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -420,7 +420,7 @@ def process_experiment(experiment_dir: Path, *, runs: Optional[Iterable[Path]] =
                        splits: Optional[Sequence[str]] = None) -> Report:
     """Write the γ = 0 comparisons of every run (or of ``runs``) in one experiment.
 
-    ``splits`` restricts the work to those evaluation splits (stage 4: ``["val"]``;
+    ``splits`` restricts the work to those evaluation splits (stage 3: ``["val"]``;
     scripts/physics/runae_test_comparison.sh: ``["test"]``). The reference must
     have outputs for the same split.
     """
@@ -483,7 +483,7 @@ def process_experiment(experiment_dir: Path, *, runs: Optional[Iterable[Path]] =
 
 
 def _experiment_dirs_from_study_map(study_map: Path, checkpoints_root: Path) -> dict[Path, list[Path]]:
-    from src.evaluation.pareto_mi_changes import _local_run_dir
+    from src.evaluation.pareto.mi_changes import _local_run_dir
 
     grouped: dict[Path, list[Path]] = {}
     for run in (_read_yaml(study_map).get("runs") or []):

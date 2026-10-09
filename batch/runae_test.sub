@@ -30,14 +30,14 @@ request_gpus = 0
 # Measured (cluster 402220, gamma 0 / 50 bins, 2026-10-07): peak RSS 9513 MiB
 # (test split + 21 auxiliary sets loaded: 8421 MiB; during the evaluation:
 # 9513 MiB), HTCondor MemoryUsage 7342 MB, 8.5 min wall. 12000 MB leaves ~25 %
-# headroom and matches more slots than the 21000 MB of stage 3.
+# headroom and matches more slots than a 21000 MB request would.
 request_cpus   = 7
 request_memory = 12000
 request_disk   = 10GB
 
 +MaxRuntime = 7200
 
-# Retry transient EOS I/O errors, up to 3 starts in total (see runmetrics_pareto.sub).
+# Retry transient EOS I/O errors, up to 3 starts in total (see runae_pareto.sub).
 on_exit_remove = (ExitBySignal == False && ExitCode == 0) || (NumJobStarts >= 3)
 
 queue RUN_NAME from $(RUNS:batch/test_runs.txt)

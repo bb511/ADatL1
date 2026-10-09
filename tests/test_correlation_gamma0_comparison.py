@@ -269,7 +269,7 @@ def test_mean_correlations_gain_the_gamma0_means_and_the_improvement(experiment,
 def test_mean_correlations_are_refreshed_even_when_the_plots_exist(experiment, plot_calls):
     cmp.process_experiment(experiment)
     path = experiment / "RunA" / MEANS_JSON
-    path.write_text(json.dumps(_means_payload(0.05, 0.1)))  # a stage 3 rerun
+    path.write_text(json.dumps(_means_payload(0.05, 0.1)))  # a re-evaluation
     again = cmp.process_experiment(experiment)
     assert again.skipped["comparison exists (use --force)"] == 1
     spaces = json.loads(path.read_text())["spaces"]
@@ -303,7 +303,7 @@ def test_splits_are_compared_separately(experiment, plot_calls):
     test_method = experiment / "RunA" / METHOD_DIR.replace("/val/", "/test/")
     val_method = experiment / "RunA" / METHOD_DIR
 
-    # Stage 4 (--split val) never touches test.
+    # Stage 3 (--split val) never touches test.
     cmp.process_experiment(experiment, splits=["val"])
     assert (val_method / "comparison_gamma0").is_dir()
     assert not (test_method / "comparison_gamma0").exists()

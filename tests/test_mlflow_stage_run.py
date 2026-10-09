@@ -1,4 +1,4 @@
-"""Stages 2/3 must log into the stage-1 MLflow run instead of opening a new one."""
+"""Stage 2 and run_eval_metrics must log into the stage-1 MLflow run instead of opening a new one."""
 
 from __future__ import annotations
 

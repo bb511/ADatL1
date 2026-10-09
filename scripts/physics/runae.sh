@@ -1,18 +1,19 @@
 #!/usr/bin/env bash
 # ===========================================================================
-# STAGE 1 of 4 -- train the autoencoder
+# STAGE 1 -- train the autoencoder and evaluate it on the validation split
 # ===========================================================================
-# Fits the model and runs the ordinary AE evaluation callbacks (reconstruction
-# plots, anomaly score, Wasserstein, threshold drift). Its scientific output is
-# the checkpoint:
+# Fits the model, then (run_validation: true) replays the validation split
+# through the best checkpoint and runs every evaluation callback: efficiencies,
+# correlation matrices (objective E), latent collapse, AUROC, reconstruction
+# plots, anomaly score, Wasserstein and threshold drift, all under
+# .../<RUN_NAME>/plots/val/loss_total/. The checkpoint itself is
 #
 #   checkpoints/<experiment_name>/<RUN_NAME>/loss_total.ckpt
 #
-# Nothing here computes a Pareto metric. The analysis is stages 2-4:
+# What remains for the Pareto study:
 #
-#   RUN_NAME=$RUN_NAME bash scripts/physics/runprobes.sh    # leakage L
-#   RUN_NAME=$RUN_NAME bash scripts/physics/runmetrics.sh   # eff / E / collapse / auroc
-#   bash scripts/physics/runcollect.sh                      # Pareto front
+#   RUN_NAME=$RUN_NAME bash scripts/physics/runae_pareto_runprobes.sh   # stage 2, leakage L
+#   bash scripts/physics/runae_pareto_runcollect.sh                     # stage 3, Pareto front
 #
 # Usage:
 #   bash scripts/physics/runae.sh                      # cvar25_t169 on GPU 0
@@ -36,14 +37,14 @@
 #       trainer.devices=[0]
 #
 # The hyperparameters live in configs/experiment/physics/ae.yaml (and
-# experiment_name there), not here, so stages 2 and 3 see the same model.
+# experiment_name there), not here, so stage 2 and the test evaluation see the same model.
 # Only the run name and the trainer are defaulted in this script. NOTE: a new
 # training clears checkpoints/<experiment_name>/<RUN_NAME>, so set RUN_NAME for
 # anything you want to keep next to an existing cvar25_t169.
 #
 # Every knob is an environment variable; see scripts/physics/_stage_common.sh
 # for the shared ones (EXPERIMENT, TRAINER, CPU_THREADS, RAW_DATA_DIR and the
-# model hyperparameters, which MUST match in stages 2 and 3).
+# model hyperparameters, which MUST match in stage 2 and runae_test.sh).
 
 : "${RUN_NAME:=cvar25_t169}"
 # The batch wrappers export their own TRAINER (cpu on the cluster), which wins.
@@ -86,7 +87,7 @@ if [[ -n "$CKPT_PATH" ]]; then
   resume_args=("ckpt_path=$CKPT_PATH" "callbacks.clear_ckpts=null")
 fi
 
-stage_banner "STAGE 1/4  TRAIN  (max_epochs=${MAX_EPOCHS:-from config})"
+stage_banner "STAGE 1  TRAIN + VAL EVALUATION  (max_epochs=${MAX_EPOCHS:-from config})"
 
 exec python3 src/train.py \
   "${COMMON_ARGS[@]}" \

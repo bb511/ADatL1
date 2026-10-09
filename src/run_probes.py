@@ -1,4 +1,4 @@
-"""Stage 2 of 4: the four leakage probes on an already-trained checkpoint.
+"""Stage 2: the four leakage probes on an already-trained checkpoint.
 
 Reads ``<checkpoints_dir>/<experiment_name>/<run_name>/loss_total.ckpt``, which
 stage 1 (src/train.py) wrote, and produces

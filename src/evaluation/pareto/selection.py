@@ -1,7 +1,7 @@
 """Lean, deterministic Phase 3 Pareto-front selection.
 
 This module deliberately consumes only the configuration-level CSV or Parquet
-table written by :mod:`src.evaluation.pareto_aggregation`.  It neither reads
+table written by :mod:`src.evaluation.pareto.aggregation`.  It neither reads
 individual run artifacts nor reruns any metric, so validation-set selection is
 kept separate from training and final-test evaluation.
 """
@@ -297,7 +297,7 @@ def write_selection_outputs(
 ) -> dict[str, Path]:
     """Persist the lean Phase 3 tables and report.
 
-    No figures: Phase 4 (src/evaluation/pareto_plots.py) draws them from these
+    No figures: Phase 4 (src/evaluation/pareto/plots.py) draws them from these
     tables. Selection and drawing are separate so a figure can be restyled
     without re-running selection, and selection cannot be changed by a
     plotting edit.

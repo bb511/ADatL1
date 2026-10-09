@@ -8,7 +8,7 @@ bottleneck no longer carries information about the event.
 This callback measures, after every fit-time validation epoch, the joint entropy of
 the hard evaluation codes on the normal validation split, logs it, and lets only the
 epochs with ``H(L) >= min_joint_code_entropy_bits`` compete for the monitored
-checkpoint. The statistic is the one stage 4 applies to ``loss_total.ckpt``
+checkpoint. The statistic is the one stage 3 applies to ``loss_total.ckpt``
 (``src/evaluation/callbacks/latent_collapse.py``):
 
     H(L) = - sum_c p(c) log2 p(c),   c = ([p_j >= threshold])_j,   in bits,
@@ -20,8 +20,8 @@ it only changes WHICH epoch ends up in the checkpoint.
 
 When no epoch qualifies, the best collapsed epoch (by the monitored metric) is kept
 as a fallback and moved to the monitored filename at the end of training, and the
-report says so (status ``no_non_collapsed_epoch``). Stages 1-4 then still run, and
-stage 4 rejects the run through its own collapse rule.
+report says so (status ``no_non_collapsed_epoch``). Stages 1-3 then still run, and
+stage 3 rejects the run through its own collapse rule.
 
 Files next to the checkpoint (``<name>`` = ``filename``, e.g. ``loss_total``):
 
@@ -112,7 +112,7 @@ class CollapseGuardedModelCheckpoint(ModelCheckpoint):
     :param min_joint_code_entropy_bits: An epoch is eligible only when the joint code
         entropy of the normal validation split is at least this many bits. The
         default 0.05 bits blocks full collapse only (one code for ~99.5% of events);
-        stage 4 still applies its own, stricter feasibility rule afterwards.
+        stage 3 still applies its own, stricter feasibility rule afterwards.
     :param dataset: Name of the validation dataloader the codes are read from.
     :param latent_code_key: Key of the hard codes in the validation_step output.
     :param log_entropy: Log ``val/latent_joint_code_entropy_bits`` and

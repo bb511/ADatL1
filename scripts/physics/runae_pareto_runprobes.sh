@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # ===========================================================================
-# STAGE 2 of 4 -- the four leakage probes
+# STAGE 2 -- the four leakage probes
 # ===========================================================================
 # Loads the loss_total.ckpt that stage 1 wrote and measures objective L: the
 # maximum clipped held-out R^2 over {MLP, linear} x {z_logits, reconstruction}
@@ -12,10 +12,10 @@
 #   leakage_probes_loss_plots/    one PNG per probe
 #
 # This is the slow stage: ~27 min per run, independent of epoch count, dominated
-# by the two MLP probes. It is independent of stage 3 and may run alongside it.
+# by the two MLP probes. It needs only the checkpoint stage 1 wrote.
 #
 # Usage:
-#   RUN_NAME=AE_30ep bash scripts/physics/runprobes.sh
+#   RUN_NAME=AE_30ep bash scripts/physics/runae_pareto_runprobes.sh
 #
 # Exit codes: 0 valid, 2 bad arguments, 3 the probes ran but the protocol
 # rejected the result (an invalid result IS written to disk -- the run is
@@ -30,7 +30,7 @@ source "$(dirname "${BASH_SOURCE[0]}")/_stage_common.sh"
 # because they roughly double the stage's runtime.
 : "${PROBE_SHUFFLED_CONTROLS:=false}"
 
-stage_banner "STAGE 2/4  LEAKAGE PROBES  (mode=$PROBE_MODE)"
+stage_banner "STAGE 2  LEAKAGE PROBES  (mode=$PROBE_MODE)"
 
 exec python3 src/run_probes.py \
   "${COMMON_ARGS[@]}" \

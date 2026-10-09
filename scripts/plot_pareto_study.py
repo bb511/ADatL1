@@ -8,7 +8,7 @@ rootutils.setup_root(
     pythonpath=True,
 )
 
-from src.evaluation.pareto_plots import main
+from src.evaluation.pareto.plots import main
 
 
 if __name__ == "__main__":

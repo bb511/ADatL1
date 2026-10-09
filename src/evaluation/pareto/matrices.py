@@ -21,13 +21,13 @@ Pareto-Front-260928:
 - the collapse rule shown in the footer is read from the study's resolved
   config (``pareto_study.collapse_constraint.rule``) when the study map points
   at one; the paired run is always the single γ = 0 / 50-bin baseline
-  (``src/evaluation/pareto_baseline.py``), which every subtitle also quotes;
+  (``src/evaluation/pareto/baseline.py``), which every subtitle also quotes;
 - the selected configuration comes from ``pareto_selection.json``, not a
   hard-coded label;
 - several architectures are drawn into one sub-directory each, because the
   matrix axes are gamma and bins only.
 
-Usage (run by scripts/physics/runcollect.sh after phase 4)::
+Usage (run by scripts/physics/runae_pareto_runcollect.sh after phase 4)::
 
     python3 scripts/plot_pareto_matrices.py \\
         --candidates  <STUDY_ROOT>/phase3/pareto_candidates.csv \\
@@ -47,7 +47,7 @@ from typing import Any, Dict, List, Mapping, Optional, Sequence
 import numpy as np
 import pandas as pd
 
-from src.evaluation.pareto_baseline import GAMMA_ZERO_BASELINE_BINS
+from src.evaluation.pareto.baseline import GAMMA_ZERO_BASELINE_BINS
 
 # Reference palette (dataviz skill): sequential blue 100 -> 700 (pale -> dark), text
 # ink, surface, status critical. Rejected cells carry a hatch texture and a legend
@@ -154,7 +154,7 @@ def _resolved_config_candidates(run: Mapping[str, Any], checkpoints_root: Option
     paths = []
     if run.get("manifest_path"):
         paths.append(Path(run["manifest_path"]))
-    # The study map records the paths of wherever stage 4 ran (EOS on lxplus).
+    # The study map records the paths of wherever stage 3 ran (EOS on lxplus).
     # On another machine, look for the same run under the local checkpoints dir.
     run_dir = str(run.get("checkpoint_run_dir") or "")
     if checkpoints_root is not None and "/checkpoints/" in run_dir:

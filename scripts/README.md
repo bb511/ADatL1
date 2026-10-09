@@ -8,12 +8,32 @@ Run everything from the repository root.
 
 | Directory | What lives there |
 | --- | --- |
-| `physics/` `cifar10/` `robustad/` | The **command catalogues** — one file per model, per domain. Not runnable scripts; see below. |
+| `physics/` `cifar10/` `robustad/` | The **command catalogues** — one file per model, per domain. Not runnable scripts; see below. `physics/` also holds the live scripts of the FET.Et Pareto study (next section). |
 | `cluster/` | Submitting those catalogues to slurm (clariden), to an NGT pod, and checking what is still missing. |
 | `optuna/` | Reading the Optuna study databases: Pareto fronts out, retraining catalogues in. |
 | `analysis/` | Turning finished MLflow runs and the notebooks into the paper's numbers and figures. |
 | `runtime_study/` | Rebuilding `tab:compute_resources`. Self-contained — see [its README](runtime_study/README.md). |
 | `setup.sh` `symbolink.sh` | One-time bootstrap. `setup.sh` is required before anything composes. |
+
+## The FET.Et Pareto study (`physics/runae*.sh`, top-level `*.py`)
+
+These are live scripts, not catalogues. How to run them, locally and on lxplus, is
+in the [main README](../README.md#the-fetet-pareto-study). Selection protocol
+`fet-et-pareto-v3`, study id `fet-et-pareto-v1`, probe protocol
+`fet-et-four-probe-v10`.
+
+| Script | Stage |
+| --- | --- |
+| `physics/runae_pareto_makegrid.sh` | job list `batch/pareto_runs.txt` from `configs/pareto_study/fet_et.yaml` |
+| `physics/runae.sh` | 1: train + validation evaluation |
+| `physics/runae_pareto_runprobes.sh` | 2: leakage probes |
+| `physics/runae_pareto_runcollect.sh` | 3: collect + select + figures (calls `collect_pareto_study.py`, `select_pareto_front.py`, `plot_pareto_study.py`, `plot_pareto_matrices.py`, `plot_correlation_gamma0.py`) |
+| `physics/runae_test.sh`, `physics/runae_test_comparison.sh` | after the study: test split of the selected run, compared with its γ = 0 run (`compare_with_gamma0.py`) |
+| `physics/_stage_common.sh` | settings shared by the per-run scripts (sourced) |
+| `build_study_map.py`, `plot_pareto_mi_changes.py` | stand-alone helpers of stage 3 |
+
+`physics/runae_pareto.sh` and `physics/runae_q99_pareto.sh` are unrelated: they
+are Optuna retraining catalogues (below).
 
 ## The catalogues are documentation, not programs
 

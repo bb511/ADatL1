@@ -6,11 +6,13 @@ can be scheduled with the resources it actually needs:
 
     stage 1  src/train.py             fit + the ordinary AE plots -> loss_total.ckpt
     stage 2  src/run_probes.py        four leakage probes on that checkpoint
-    stage 3  src/run_eval_metrics.py  the remaining Pareto metrics on that checkpoint
-    stage 4  scripts/collect_pareto_study.py + scripts/select_pareto_front.py
+    stage 3  scripts/collect_pareto_study.py + scripts/select_pareto_front.py
 
-Stages 2 and 3 are independent of each other: both consume only
-``<checkpoints_dir>/<experiment_name>/<run_name>/loss_total.ckpt`` and both write
+    (not a stage) src/run_eval_metrics.py  re-evaluation of a checkpoint without
+                                           training, e.g. on the test split
+
+Stage 2 and src/run_eval_metrics.py consume only
+``<checkpoints_dir>/<experiment_name>/<run_name>/loss_total.ckpt`` and write
 into disjoint subdirectories of that run folder, so they may run concurrently.
 
 Every stage must compose the SAME Hydra config as the stage-1 run it analyses.
@@ -160,7 +162,7 @@ def build_stage_context(
     """Instantiate the objects an analysis stage needs from an existing run.
 
     Deliberately does NOT build a Trainer or the training callbacks: stage 2 and
-    stage 3 never fit, and the training callbacks include ModelCheckpoint
+    run_eval_metrics never fit, and the training callbacks include ModelCheckpoint
     instances whose ``dirpath`` is the run folder. ClearRunCheckpointDir in
     particular would wipe the very checkpoint this stage is here to read.
     """

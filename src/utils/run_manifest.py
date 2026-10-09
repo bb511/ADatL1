@@ -8,7 +8,7 @@ It records what was trained -- the grid point, the seed, the architecture, a
 fingerprint of the resolved algorithm config -- so that the later stages do not
 have to be told again, and so that an experiment directory is self-describing:
 drop however many trained runs into it, whenever and from wherever they were
-produced, and stage 4 can read the directory rather than a pre-declared plan.
+produced, and stage 3 can read the directory rather than a pre-declared plan.
 
 Why one file per run instead of one file per experiment: many runs finish at
 once (32 HTCondor shards, say) and appending to a shared file on EOS has no
@@ -56,7 +56,7 @@ RUN_MANIFEST_FILENAME = "run_manifest.yaml"
 #: folder under logs/ that does not travel with the checkpoint.
 RESOLVED_CONFIG_FILENAME = "resolved_config.yaml"
 
-#: Stages 2 and 3 may run concurrently, so each records its own completion in its
+#: The stages after training may run concurrently, so each records its own completion in its
 #: own file rather than updating the shared manifest.
 STAGE_STATUS_DIRNAME = "stage_status"
 
@@ -128,7 +128,7 @@ def _format_number(value: float) -> str:
 def derive_configuration_id(cfg: DictConfig, configuration: Mapping[str, Any]) -> str:
     """Return the identifier of the grid point this run sits on.
 
-    A Pareto-study run already carries one, assigned by the study runner, and it
+    A Pareto-study run already carries one (pareto_study.configuration_id), and it
     is used verbatim -- Phase 2 compares it against the study map, so deriving a
     different string here would reject every run.
 
@@ -295,10 +295,11 @@ def write_stage_status(
 ) -> Path:
     """Record that a stage finished, in a file only that stage writes.
 
-    Stages 2 and 3 are independent and may run at the same time, so neither may
+    The stages after training (probes, evaluation of a checkpoint) are independent
+    and may run at the same time, so neither may
     update the shared manifest: a read-modify-write from two processes loses one
     of the updates, and on EOS there is no lock to prevent it. One file per stage
-    has no such interaction, and stage 4 reads them together.
+    has no such interaction, and stage 3 reads them together.
     """
     status_dir = Path(run_ckpts) / STAGE_STATUS_DIRNAME
     status_dir.mkdir(parents=True, exist_ok=True)

@@ -166,7 +166,7 @@ def write_latent_saturation(summary: Mapping[str, Any], *, output_dir: str | Pat
     matplotlib.use("Agg")
     import matplotlib.pyplot as plt
 
-    from src.evaluation.pareto_plots import (
+    from src.evaluation.pareto.plots import (
         BASELINE_MARK, GRID_INK, SURFACE, TEXT_PRIMARY, TEXT_SECONDARY,
     )
 

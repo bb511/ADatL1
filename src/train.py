@@ -1,22 +1,23 @@
-"""Stage 1 of 4: train the autoencoder.
+"""Stage 1: train the autoencoder and evaluate it on the validation split.
 
-This script fits the model and runs the ordinary evaluation callbacks composed
-into ``evaluation.callbacks`` -- for ``experiment=physics/ae`` that is the plain
-AE's usual plots (reconstruction, anomaly score, Wasserstein, threshold drift).
-Its scientific output is the checkpoint:
+This script fits the model and then (``run_validation: true``) replays the
+validation split through the checkpoint with every callback composed into
+``evaluation.callbacks``. For ``experiment=physics/ae`` and the Pareto study that
+is the full evaluation: efficiencies, correlation matrices (objective E), latent
+collapse, AUROC, reconstruction, anomaly score, Wasserstein, threshold drift.
+The checkpoint is
 
     <checkpoints_dir>/<experiment_name>/<run_name>/loss_total.ckpt
 
-The analysis that used to follow training in this same process now lives in its
-own entrypoints, so that every autoencoder can be trained before anything is
-analysed, and so each step can be scheduled with the resources it needs:
+The rest of the Pareto study runs in its own entrypoints, so that every
+autoencoder can be trained before the slow analysis starts:
 
     stage 2  src/run_probes.py        the four leakage probes  (slow: ~27 min)
-    stage 3  src/run_eval_metrics.py  the remaining Pareto metrics (memory-hungry)
-    stage 4  scripts/collect_pareto_study.py + scripts/select_pareto_front.py
+    stage 3  scripts/collect_pareto_study.py + scripts/select_pareto_front.py
 
-Stages 2 and 3 are independent of each other and may run concurrently. Both must
-compose the same config as the stage-1 run that produced the checkpoint.
+Stage 2 must compose the same config as the stage-1 run that produced the
+checkpoint. ``src/run_eval_metrics.py`` re-evaluates a checkpoint without
+training, e.g. on the test split (scripts/physics/runae_test.sh).
 """
 from typing import Any, Dict, List, Optional, Tuple
 import gc
@@ -44,7 +45,7 @@ from src.utils.omegaconf import register_resolvers
 
 register_resolvers()
 
-from src.utils.pareto_manifest import write_resolved_pareto_manifest
+from src.evaluation.pareto.manifest import write_resolved_pareto_manifest
 from src.utils.run_manifest import write_run_manifest, write_stage_status
 from src.utils.stage import (
     get_evaluator,
@@ -186,18 +187,17 @@ def train(cfg: DictConfig) -> Tuple[Dict[str, Any], Dict[str, Any]]:
     )
     object_dict.update({"run_manifest_path": manifest_path})
 
-    # The post-fit evaluation is optional. For the Pareto study it is stage 3
-    # (src/run_eval_metrics.py), which loads the auxiliary datasets and the
-    # checkpoint for itself; running it here as well would duplicate the work,
-    # and cannot succeed anyway once data.load_aux_in_fit is false, because the
-    # efficiency callback needs both those datasets and the operational
-    # threshold that the dropped anomaly_eff training callback used to leave on
-    # the module. physics/pareto_fet_train therefore sets run_validation=false.
+    # The post-fit evaluation (run_validation, default true in configs/train.yaml)
+    # is where the Pareto metrics come from since 2026-09-29: it loads the
+    # validation split and the auxiliary signal sets after the fit and runs every
+    # evaluation callback on loss_total.ckpt. run_validation=false skips it, e.g.
+    # for a quick smoke run; src/run_eval_metrics.py can then evaluate the
+    # checkpoint later without retraining.
     evaluator = None
     if not bool(cfg.get("run_validation", True)):
         log.info(
             "Skipping post-fit validation (run_validation=false). "
-            "The checkpoint is the output of this stage; evaluation is stage 3."
+            "Evaluate the checkpoint later with src/run_eval_metrics.py."
         )
         object_dict.update({"evaluator": evaluator})
         return dict(train_metrics), object_dict

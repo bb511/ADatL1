@@ -196,13 +196,23 @@ At the end of stage 1 every run records itself:
 
 ```
 checkpoints/<experiment_name>/<run_name>/
-    loss_total.ckpt
+    loss_total.ckpt          best val/loss_total among epochs whose latent has not collapsed
+    loss_total_guard.json    per-epoch latent code entropy H(L) and the guard's decision
     run_manifest.yaml        identity, grid point, algorithm fingerprint, mlflow run id
     resolved_config.yaml     the fully resolved config, travelling with the checkpoint
     stage_status/train.yaml
 ```
 
-It is written after training rather than before, because `ClearRunCheckpointDir`
+`loss_total.ckpt` comes from `CollapseGuardedModelCheckpoint`
+(`src/callbacks/checkpointing/collapse_guard.py`). After every validation epoch it
+computes the joint entropy H(L) of the hard latent codes on the normal validation
+split (logged as `val/latent_joint_code_entropy_bits`). Epochs with H(L) below
+`min_joint_code_entropy_bits` (0.05 bits, i.e. full collapse) cannot become
+`loss_total.ckpt`, however low their `val/loss_total`. If every epoch collapsed,
+the best collapsed epoch is kept and `loss_total_guard.json` reports
+`status: no_non_collapsed_epoch`; stage 4's collapse rule then rejects the run.
+
+The manifest is written after training rather than before, because `ClearRunCheckpointDir`
 wipes the run directory when a fit starts — and because a manifest present is
 then a truthful claim that stage 1 finished.
 

@@ -96,9 +96,22 @@ callbacks:
     log_raw_mlflow: true
 
   # Keep the epoch with the smallest complete-epoch validation objective on the
-  # normal validation split: loss_reco + mi_gamma * loss_mi.
+  # normal validation split: loss_reco + mi_gamma * loss_mi, among the epochs
+  # whose latent has NOT fully collapsed. A collapsing latent lowers the MI term
+  # and can therefore look like the best epoch (Pareto-Front-261002: the selected
+  # epochs of gamma 1.0 / 50 bins and 0.9 / 50 bins had H(L) = 0.0000 and 0.0025
+  # bits). The guard measures the joint entropy of the hard codes on normal
+  # validation every epoch, logs it as val/latent_joint_code_entropy_bits and
+  # skips epochs below the minimum. If no
+  # epoch qualifies, the best collapsed one becomes loss_total.ckpt and
+  # loss_total_guard.json says status: no_non_collapsed_epoch.
+  # (src/callbacks/checkpointing/collapse_guard.py)
   loss_total_ckpt:
-    _target_: pytorch_lightning.callbacks.ModelCheckpoint
+    _target_: src.callbacks.checkpointing.collapse_guard.CollapseGuardedModelCheckpoint
+    # Full collapse only (one code for ~99.5% of events). Stage 4 still applies
+    # pareto_study.collapse_constraint (>= 1 bit, >= 0.5 x gamma-0) afterwards.
+    min_joint_code_entropy_bits: 0.05
+    dataset: normal
     dirpath: '${paths.checkpoints_dir}/${experiment_name}/${run_name}'
     monitor: 'val/loss_total'
     filename: 'loss_total'

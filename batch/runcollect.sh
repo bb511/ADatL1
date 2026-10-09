@@ -25,12 +25,10 @@ python3 --version
 : "${CODE_DIR:=/eos/user/l/lbehrens/adatl1/ADatL1}"
 : "${ADL1T_OUTPUT_ROOT:=/eos/user/l/lbehrens/adatl1/ADatL1/outputs}"
 : "${STUDY_ID:=fet-et-pareto-v1}"
-: "${STUDY_ROOT:=${ADL1T_OUTPUT_ROOT}/pareto_studies/${STUDY_ID}}"
-
-# Set EXPERIMENT_NAME to build the study map from a directory of individually
-# trained runs instead of expecting one the study runner declared up front. The
-# submit file passes it through the environment.
-: "${EXPERIMENT_NAME:=}"
+# The study map is built from checkpoints/<EXPERIMENT_NAME>/ and every output
+# lands in pareto_studies/<EXPERIMENT_NAME>/, so each study keeps its own tree.
+: "${EXPERIMENT_NAME:=Pareto-Front-261002}"
+: "${STUDY_ROOT:=${ADL1T_OUTPUT_ROOT}/pareto_studies/${EXPERIMENT_NAME}}"
 export ADL1T_OUTPUT_ROOT STUDY_ID STUDY_ROOT EXPERIMENT_NAME
 
 echo "CODE_DIR:        $CODE_DIR"

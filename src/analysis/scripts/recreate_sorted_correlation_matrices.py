@@ -23,7 +23,9 @@ from src.evaluation.callbacks.correlation_matrix import (
     CORRELATION_SOURCE_FILENAMES,
     CorrelationMatrixCallback,
 )
+from src.analysis.run_mi_hyperparameters import read_mi_hyperparameters, run_dir_of
 from src.evaluation.callbacks.utils.mlflow import build_gallery_html
+from src.plot import correlation_matrix as corr_plot
 
 
 DEFAULT_MLRUNS_ROOT = REPO_ROOT / "logs" / "mlflow" / "mlruns"
@@ -207,8 +209,11 @@ def correlation_source_description(matrix_dir: Path, method: str) -> str | None:
     return None
 
 
-def load_correlation_change(matrix_dir: Path, method: str) -> pd.DataFrame:
-    """Recompute ``|corr_reconstruction| - |corr_input|`` from available sources."""
+def load_correlation_matrices(
+    matrix_dir: Path,
+    method: str,
+) -> tuple[pd.DataFrame, pd.DataFrame]:
+    """Return the input and reconstruction correlation matrices of one folder."""
     try:
         input_variables, reconstruction_variables = _load_variable_spaces(matrix_dir)
     except FileNotFoundError:
@@ -221,7 +226,16 @@ def load_correlation_change(matrix_dir: Path, method: str) -> pd.DataFrame:
     else:
         corr_before = _correlate_variables(input_variables, method)
         corr_after = _correlate_variables(reconstruction_variables, method)
+    return corr_before, corr_after
 
+
+def load_correlation_change(
+    matrix_dir: Path,
+    method: str,
+    matrices: tuple[pd.DataFrame, pd.DataFrame] | None = None,
+) -> pd.DataFrame:
+    """Recompute ``|corr_reconstruction| - |corr_input|`` from available sources."""
+    corr_before, corr_after = matrices or load_correlation_matrices(matrix_dir, method)
     common_labels = [label for label in corr_before.index if label in corr_after.index]
     if not common_labels:
         raise ValueError(
@@ -241,31 +255,41 @@ def load_correlation_change(matrix_dir: Path, method: str) -> pd.DataFrame:
 
 def expected_output_paths(matrix_dir: Path, method: str) -> tuple[Path, ...]:
     """Return the full and ``Et``-only PNG paths produced for both sort orders."""
-    stem = f"abs_reconstruction_minus_input_{method}_correlation_matrix"
     return tuple(
-        matrix_dir / f"{stem}_sorted_by_{direction}{suffix}.png"
-        for direction in ("increase", "decrease")
-        for suffix in ("", "_et_only")
+        matrix_dir / f"{corr_plot.correlation_change_stem(method, direction)}{suffix}.png"
+        for direction in corr_plot.SORT_DIRECTIONS
+        for suffix in corr_plot.VARIANT_FIGURE_SCALES
     )
+
+
+def mi_subtitle(matrix_dir: Path) -> str | None:
+    """MI hyperparameters of the checkpoint run that holds ``matrix_dir``."""
+    run_dir = run_dir_of(Path(matrix_dir))
+    if run_dir is None:
+        return None
+    mi = read_mi_hyperparameters(run_dir, REPO_ROOT)
+    return mi.text() if mi.known else None
 
 
 def recreate_target(matrix_dir: Path, method: str) -> tuple[Path, ...]:
     """Write sorted increase/decrease matrices into one callback output directory."""
-    correlation_change = load_correlation_change(matrix_dir, method)
+    corr_before, corr_after = load_correlation_matrices(matrix_dir, method)
+    correlation_change = load_correlation_change(
+        matrix_dir,
+        method,
+        matrices=(corr_before, corr_after),
+    )
     callback = CorrelationMatrixCallback(correlation_methods=[method])
-    change_stem = f"abs_reconstruction_minus_input_{method}_correlation_matrix"
-    method_name = method.capitalize()
 
-    for direction, ascending in (("increase", False), ("decrease", True)):
+    for direction, ascending in corr_plot.SORT_DIRECTIONS.items():
         callback._write_correlation_matrix_variants(
             corr=correlation_change,
             plot_folder=matrix_dir,
-            stem=f"{change_stem}_sorted_by_{direction}",
-            title=(
-                f"Change in {method_name} correlation: "
-                f"variables sorted by mean {direction}"
-            ),
+            stem=corr_plot.correlation_change_stem(method, direction),
+            title=corr_plot.correlation_change_title(method, direction),
             sort_ascending=ascending,
+            decorrelation_reference=corr_after,
+            subtitle=mi_subtitle(matrix_dir),
         )
 
     return expected_output_paths(matrix_dir, method)

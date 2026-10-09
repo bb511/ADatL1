@@ -1,0 +1,44 @@
+# STAGE 2 for the single 1000-epoch run of batch/runae_ep1000.sub.
+#
+#   condor_submit batch/runprobes_ep1000.sub
+#
+# Identical to batch/runprobes_pareto.sub except for the one-line run list.
+# Submit only after the stage-1 job has finished and its outputs are on EOS.
+
+executable = batch/runprobes_pareto.sh
+
+log    = batch/logs/runprobes_ep1000.$(ClusterId).log
+output = batch/logs/runprobes_ep1000.$(ClusterId).$(ProcId).out
+error  = batch/logs/runprobes_ep1000.$(ClusterId).$(ProcId).err
+
+MY.SingularityImage = "/eos/user/l/lbehrens/containers/adl1t_lab-dev.sif"
+
+environment = "SEED=$(SEED) MI_GAMMA=$(GAMMA) MI_NUM_BINS=$(BINS) ARCHITECTURE_ID=$(ARCH) ENCODER_NODES_US=$(NODES) RUN_NAME=$(RUN_NAME) TRAINER=cpu CPU_THREADS=8 DATA_WORKERS=3"
+
+# No transfer_output_files: this job writes its JSON and PNGs straight into the
+# existing checkpoint tree on EOS, so there is nothing in the sandbox to return.
+
+request_gpus = 0
+
+# Since v9, linear least squares and held-out predictions are streamed, the
+# binary latent sample is verified without being retained, and extraction
+# arrays are preallocated. v10 truncates numerically unresolved linear
+# directions using the original development-matrix dimensions.
+# The binding MLP fit still retains its own early-stopping split of the 116-wide
+# train representation.  24 GB gives that fit headroom; CERN's 3 GB/core rule
+# therefore requires an 8-core slot.  Probes remain deliberately sequential.
+request_cpus   = 8
+request_memory = 24000
+request_disk   = 10GB
+
+# The first smoke used 6,649 s of a 7,200 s cap.  The larger MLP batch changes
+# the optimization trajectory and a slow worker can still exceed two hours.
++MaxRuntime = 14400
+
+# Retry failed jobs automatically, up to 3 starts in total. EOS returns
+# transient "Input/output error" (errno 5/121) under load when many jobs read
+# the data or write logs at once; all such failures in clusters 354142/354543
+# succeeded on a plain rerun. Success is exit code 0 or 3 (3 = probes ran, protocol rejected the result: a valid outcome, not retried).
+on_exit_remove = (ExitBySignal == False && (ExitCode == 0 || ExitCode == 3)) || (NumJobStarts >= 3)
+
+queue SEED,GAMMA,BINS,ARCH,NODES,RUN_NAME from batch/pareto_runs_ep1000.txt

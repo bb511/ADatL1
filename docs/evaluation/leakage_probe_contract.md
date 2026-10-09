@@ -268,7 +268,7 @@ cache files and returned in original cache order. Smoke mode is allowed only wit
 `evaluation.purpose=smoke_test`, `evaluation.reporting_eligible=false`, and the actual
 sample caps and manifests. A smoke artifact checks wiring and memory behavior only: it
 does not conform to the uncapped v10 scientific measurement, cannot enter a Pareto
-front, and is rejected by the paired-seed aggregator.
+front, and is rejected by the Phase 2 collector.
 Its four scores remain available in the smoke JSON but are not logged under the
 scientific `probe/*` MLflow metric names.
 
@@ -281,8 +281,7 @@ The event manifest is a SHA-256 hash of the actual ordered cached input, padding
 and L1-bit tensor content. It is independent of dataloader batch boundaries and detects
 a changed or reordered dataset even when the event count is unchanged. The evaluator
 also records the resolved cache identity, source split names, event count, sample seed,
-and sample cap for both the development and held-out pools. Paired autoencoder seeds
-may be aggregated only when these comparable provenance fields are identical.
+and sample cap for both the development and held-out pools.
 
 ## 6. Primary leakage metrics
 
@@ -481,8 +480,8 @@ run identity, evaluation mode/purpose/reporting eligibility, development and hel
 event-manifest hashes, validity and rejection reason, `worst_probe`, `leakage_worst`,
 and exactly four primary probe entries containing only `r2_clipped`. It deliberately
 omits MAE, raw R2, MLP histories, plot paths, and shuffled-target diagnostics. The
-detailed artifact remains the scientific source of truth and the input to paired-seed
-aggregation; the summary is a convenience for inspection and Pareto-table assembly.
+detailed artifact remains the scientific source of truth and the input to the Phase 2
+collector; the summary is a convenience for inspection and Pareto-table assembly.
 
 It contains at least:
 
@@ -567,38 +566,19 @@ capacity or select AE configurations from final-test diagnostic behavior.
 Existing JSON files are not backfilled; rerun the same evaluation command to collect
 histories and create the new plot artifacts.
 
-## 10. Cross-run aggregation
+## 10. From run to Pareto table
 
-The probe evaluator produces one primary `L` per trained autoencoder run and seed.
-The probe initialization seed belongs to the measurement procedure; it is not an
-autoencoder replicate and must not be pooled with autoencoder seeds.
+The probe evaluator produces one primary `L` per trained autoencoder run. The Pareto
+study is single-seed, so every hyperparameter configuration is exactly one run and its
+`leakage_worst` enters the Phase 2 table directly
+(`src/evaluation/pareto_aggregation.py`). The probe initialization seed belongs to the
+measurement procedure and is unrelated to the autoencoder seed.
 
-For a hyperparameter configuration, aggregate run-level leakage only across the
-predeclared paired autoencoder seeds. The frozen invalid-run policy is
-`reject_configuration`: if any expected autoencoder seed is missing or has
-`probe_valid=false`, the configuration has no aggregate leakage score and cannot enter
-the Pareto front. Individual valid and invalid run records remain in the aggregate
-artifact; an invalid score is never replaced with zero or averaged away.
-
-For a complete valid seed set, report the mean, sample standard deviation, standard
-error, and normal-approximation 95% confidence interval of `leakage_worst`. The
-aggregation tool also rejects mixed protocol versions, configuration identities,
-evaluation modes, cache identities, event manifests, and sampling protocols.
-It rejects every artifact with `evaluation.reporting_eligible=false`, including all
-smoke-test artifacts.
-
-Run the aggregator with the explicitly predeclared autoencoder seeds:
-
-```text
-python scripts/aggregate_leakage_probes.py \
-  --expected-seeds <seed-1> <seed-2> ... \
-  --output <configuration>/leakage_probe_aggregate.json \
-  <run-1>/plots/val/loss_total/probes/leakage_probes.json \
-  <run-2>/plots/val/loss_total/probes/leakage_probes.json ...
-```
-
-Runs with different `leakage_probe_protocol_version` values, target definitions,
-sample manifests, or outer split identities must not be aggregated together.
+A run with `probe_valid=false` has no leakage score and its configuration cannot enter
+the Pareto front; an invalid score is never replaced with zero. The collector also
+rejects artifacts with a different protocol version, configuration identity, or
+evaluation mode, and every artifact with `evaluation.reporting_eligible=false`,
+including all smoke-test artifacts.
 
 ## 11. Definition of done
 
@@ -632,6 +612,6 @@ are true:
 - scientific `leakage_probes.json` artifacts are uncapped; capped
   `leakage_probes_smoke.json` artifacts are explicitly non-reportable and cannot be
   aggregated;
-- paired-seed aggregation rejects the complete configuration when an expected seed is
-  missing or invalid;
+- a configuration whose single run is missing or has an invalid probe result is
+  rejected;
 - every output records protocol version `fet-et-four-probe-v10`.

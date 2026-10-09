@@ -15,11 +15,40 @@
 #   bash scripts/physics/runcollect.sh                      # Pareto front
 #
 # Usage:
+#   bash scripts/physics/runae.sh                      # cvar25_t169 on GPU 0
 #   RUN_NAME=AE_30ep MAX_EPOCHS=30 bash scripts/physics/runae.sh
+#
+# Defaults reproduce the cvar25_t169 reference training:
+#
+#   python3 src/train.py \
+#       paths.raw_data_dir=/path/to/adl1t_data/parquet_files \
+#       experiment=physics/ae \
+#       experiment_name=Pareto-Front-261002 \
+#       run_name=cvar25_t169 \
+#       algorithm.encoder.nodes='[64,32,8]' \
+#       algorithm.input_noise_std=0.0 \
+#       algorithm.delta=10.0 \
+#       algorithm.optimizer.betas='[0.9,0.999]' \
+#       algorithm.optimizer.lr=0.0019859329798336714 \
+#       algorithm.optimizer.weight_decay=1e-06 \
+#       trainer.gradient_clip_val=5.0 \
+#       trainer=gpu \
+#       trainer.devices=[0]
+#
+# The hyperparameters live in configs/experiment/physics/ae.yaml (and
+# experiment_name there), not here, so stages 2 and 3 see the same model.
+# Only the run name and the trainer are defaulted in this script. NOTE: a new
+# training clears checkpoints/<experiment_name>/<RUN_NAME>, so set RUN_NAME for
+# anything you want to keep next to an existing cvar25_t169.
 #
 # Every knob is an environment variable; see scripts/physics/_stage_common.sh
 # for the shared ones (EXPERIMENT, TRAINER, CPU_THREADS, RAW_DATA_DIR and the
 # model hyperparameters, which MUST match in stages 2 and 3).
+
+: "${RUN_NAME:=cvar25_t169}"
+# The batch wrappers export their own TRAINER (cpu on the cluster), which wins.
+: "${TRAINER:=gpu}"
+export RUN_NAME TRAINER
 
 source "$(dirname "${BASH_SOURCE[0]}")/_stage_common.sh"
 

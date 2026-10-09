@@ -38,9 +38,14 @@ def test_pareto_fet_manifest_composes_and_freezes_protocol(
         == "fet-et-four-probe-v10"
     )
     assert cfg.evaluation.callbacks.anomaly_efficiency.write_pareto_summary is True
-    assert cfg.evaluation.callbacks.anomaly_efficiency.write_plots is False
+    # Stage 1 of the study produces the full evaluation (everything but the
+    # probes): efficiency plots and correlation-matrix plots included, without
+    # the multi-GB per-event correlation source tables.
+    assert cfg.evaluation.callbacks.anomaly_efficiency.write_plots is True
     assert cfg.evaluation.callbacks.correlation_matrix.enabled is True
-    assert cfg.evaluation.callbacks.correlation_matrix.write_details is False
+    assert cfg.evaluation.callbacks.correlation_matrix.write_details is True
+    assert cfg.evaluation.callbacks.correlation_matrix.write_source_tables is False
+    assert cfg.evaluation.callbacks.anomaly_auroc.ckpts.loss_total is True
     assert cfg.evaluation.callbacks.anomaly_auroc.ckpts.loss_total is True
     assert cfg.evaluation.callbacks.anomaly_auroc.score_direction == (
         "higher_score_is_more_anomalous"
@@ -50,16 +55,18 @@ def test_pareto_fet_manifest_composes_and_freezes_protocol(
     ) == 0.25 / 28608.8064
     assert cfg.callbacks.loss_total_ckpt.monitor == "val/loss_total"
     assert cfg.callbacks.loss_total_ckpt.mode == "min"
-    assert cfg.data.model_input_exclude_features == ["FET.Et"]
+    assert cfg.data.model_input_exclude_features == ["FET.*"]
+    assert cfg.algorithm.sensitive_input_features == ["FET.*"]
     assert cfg.algorithm.encoder.nodes[-1] == 8
-    assert cfg.pareto_study.paired_autoencoder_seeds == [123, 500]
+    assert "paired_autoencoder_seeds" not in cfg.pareto_study
+    assert cfg.pareto_study.candidate.autoencoder_seed == 180524
     assert cfg.pareto_study.search_space.gamma_zero_baseline.mi_gamma == 0.0
     assert (
-        cfg.pareto_study.collapse_constraint.seed_level_rule.minimum_joint_code_entropy_bits
+        cfg.pareto_study.collapse_constraint.rule.minimum_joint_code_entropy_bits
         == 1.0
     )
     assert (
-        cfg.pareto_study.collapse_constraint.seed_level_rule.minimum_fraction_of_paired_gamma_zero_joint_entropy
+        cfg.pareto_study.collapse_constraint.rule.minimum_fraction_of_paired_gamma_zero_joint_entropy
         == 0.5
     )
     assert cfg.pareto_study.minimum_efficiency_constraint.max_relative_degradation == 0.05

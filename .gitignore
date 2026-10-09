@@ -222,3 +222,6 @@ batch/runae_pareto_smoke.sub
 batch/runae_pareto_rest.sub
 batch/runae_pareto_debug.sub
 batch/runae_pareto_seed*.sub
+outputs/
+# Pareto study outputs (phase2-4), local copies of $ADL1T_OUTPUT_ROOT/pareto_studies
+/pareto_studies/

@@ -19,16 +19,16 @@
 #   bash scripts/physics/run_pareto_fet_ngt.sh --plan
 #   bash scripts/physics/run_pareto_fet_ngt.sh --all
 #
-# `--all` runs the complete frozen study: 303 configurations x 3 paired AE
-# seeds = 909 uncapped validation runs.  It never enables test data.
+# `--all` runs the complete frozen study: one uncapped validation run per
+# configuration, all with the study's single seed.  It never enables test data.
 
 set -uo pipefail
 
 readonly SCRIPT_NAME="$(basename "$0")"
 readonly DEFAULT_PROJECT_ROOT="/shared/adatl1"
 readonly STUDY_ID="fet-et-pareto-v1"
-readonly PROTOCOL_VERSION="fet-et-pareto-v1"
-readonly EXPERIMENT_NAME="physics_pareto_fet_v1"
+readonly PROTOCOL_VERSION="fet-et-pareto-v2"
+readonly EXPERIMENT_NAME="Pareto-Front-261002"
 
 ACTION=""
 RERUN_INCOMPLETE=0
@@ -146,7 +146,7 @@ export NUMEXPR_NUM_THREADS="$DATA_WORKERS"
 export OMP_NUM_THREADS="$DATA_WORKERS"
 export MKL_NUM_THREADS="$DATA_WORKERS"
 export OPENBLAS_NUM_THREADS="$DATA_WORKERS"
-readonly STUDY_ROOT="$ADL1T_OUTPUT_ROOT/pareto_studies/$STUDY_ID"
+readonly STUDY_ROOT="$ADL1T_OUTPUT_ROOT/pareto_studies/$EXPERIMENT_NAME"
 readonly MANIFEST_ROOT="$STUDY_ROOT/manifests"
 readonly STUDY_MAP="$STUDY_ROOT/study_map.yaml"
 readonly RUN_PLAN="$STUDY_ROOT/run_plan.tsv"
@@ -155,24 +155,24 @@ readonly STUDY_METADATA="$STUDY_ROOT/study_metadata"
 readonly PHASE2_OUTPUT="$STUDY_ROOT/phase2"
 readonly PHASE3_OUTPUT="$STUDY_ROOT/phase3"
 
-readonly PARETO_MANIFEST="$CODE_DIR/configs/experiment/physics/pareto_fet.yaml"
+readonly PARETO_MANIFEST="$CODE_DIR/configs/pareto_study/fet_et.yaml"
 
 # The grid is read from the experiment manifest so there is exactly one
-# predeclared source of truth. Hardcoding it here would drift: a seed list that
+# predeclared source of truth. Hardcoding it here would drift: a grid that
 # disagrees with the manifest makes the collector reject every run.
 read_grid_from_manifest() {
   [[ -f "$PARETO_MANIFEST" ]] || die "Missing Pareto manifest: $PARETO_MANIFEST"
   python3 - "$PARETO_MANIFEST" <<'PYEOF'
 import sys, yaml
 with open(sys.argv[1]) as handle:
-    study = yaml.safe_load(handle)["pareto_study"]
+    study = yaml.safe_load(handle)  # configs/pareto_study/fet_et.yaml: the block itself
 space = study["search_space"]
 reg, base = space["regularized"], space["gamma_zero_baseline"]
 if list(reg["architectures"]) != list(base["architectures"]):
     raise SystemExit("regularized and gamma_zero_baseline architectures differ")
 nodes = lambda n: "[" + ",".join(str(v) for v in n) + "]"
 emit = lambda name, vals: print(f"{name}=({' '.join(vals)})")
-emit("PAIRED_SEEDS", [str(s) for s in study["paired_autoencoder_seeds"]])
+print(f"SEED={int(study['candidate']['autoencoder_seed'])}")
 emit("ARCHITECTURE_IDS", list(reg["architectures"]))
 emit("ARCHITECTURE_NODES", [f"'{nodes(v)}'" for v in reg["architectures"].values()])
 emit("REGULARIZED_GAMMAS", [str(g) for g in reg["mi_gamma"]])
@@ -185,10 +185,9 @@ PYEOF
 grid_definition="$(read_grid_from_manifest)" || die "Could not read the grid from $PARETO_MANIFEST"
 eval "$grid_definition"
 unset grid_definition
-readonly -a PAIRED_SEEDS ARCHITECTURE_IDS ARCHITECTURE_NODES REGULARIZED_GAMMAS TRAINING_BINS
-readonly BASELINE_GAMMA BASELINE_BINS
+readonly -a ARCHITECTURE_IDS ARCHITECTURE_NODES REGULARIZED_GAMMAS TRAINING_BINS
+readonly SEED BASELINE_GAMMA BASELINE_BINS
 
-((${#PAIRED_SEEDS[@]} >= 2)) || die "The manifest declares ${#PAIRED_SEEDS[@]} paired seed(s); aggregation requires at least two."
 
 configuration_id() {
   local gamma="$1"
@@ -219,7 +218,7 @@ for_each_run() {
   # Invoke the supplied callback with:
   # configuration_id seed gamma bins architecture_id encoder_nodes run_name
   local callback="$1"
-  local architecture_index architecture_id nodes seed gamma bins configuration run
+  local architecture_index architecture_id nodes gamma bins configuration run
 
   for architecture_index in "${!ARCHITECTURE_IDS[@]}"; do
     architecture_id="${ARCHITECTURE_IDS[$architecture_index]}"
@@ -227,20 +226,16 @@ for_each_run() {
 
     # A single canonical gamma-zero baseline is required per architecture.
     configuration="$(configuration_id "$BASELINE_GAMMA" "$BASELINE_BINS" "$architecture_id")"
-    for seed in "${PAIRED_SEEDS[@]}"; do
-      run="$(run_name "$configuration" "$seed")"
-      "$callback" "$configuration" "$seed" "$BASELINE_GAMMA" "$BASELINE_BINS" \
-        "$architecture_id" "$nodes" "$run"
-    done
+    run="$(run_name "$configuration" "$SEED")"
+    "$callback" "$configuration" "$SEED" "$BASELINE_GAMMA" "$BASELINE_BINS" \
+      "$architecture_id" "$nodes" "$run"
 
     for gamma in "${REGULARIZED_GAMMAS[@]}"; do
       for bins in "${TRAINING_BINS[@]}"; do
         configuration="$(configuration_id "$gamma" "$bins" "$architecture_id")"
-        for seed in "${PAIRED_SEEDS[@]}"; do
-          run="$(run_name "$configuration" "$seed")"
-          "$callback" "$configuration" "$seed" "$gamma" "$bins" \
-            "$architecture_id" "$nodes" "$run"
-        done
+        run="$(run_name "$configuration" "$SEED")"
+        "$callback" "$configuration" "$SEED" "$gamma" "$bins" \
+          "$architecture_id" "$nodes" "$run"
       done
     done
   done
@@ -250,14 +245,14 @@ print_plan() {
   local regularized_count=$(( ${#ARCHITECTURE_IDS[@]} * ${#REGULARIZED_GAMMAS[@]} * ${#TRAINING_BINS[@]} ))
   local baseline_count=${#ARCHITECTURE_IDS[@]}
   local configuration_count=$((regularized_count + baseline_count))
-  local run_count=$((configuration_count * ${#PAIRED_SEEDS[@]}))
+  local run_count=$configuration_count
 
   cat <<EOF
 Frozen FET.Et Pareto study
   study ID:        $STUDY_ID
   protocol:        $PROTOCOL_VERSION
   configurations:  $configuration_count ($baseline_count gamma-zero + $regularized_count regularized)
-  paired seeds:    ${PAIRED_SEEDS[*]}
+  seed:            $SEED (one run per configuration)
   total runs:      $run_count, sequentially on the pod's GPU
   study root:      $STUDY_ROOT
   source checkout: $CODE_DIR
@@ -371,10 +366,9 @@ write_study_map_and_plan() {
   local plan_tmp="$RUN_PLAN.tmp"
 
   cat > "$map_tmp" <<EOF
-schema_version: 1
+schema_version: 2
 study_id: $STUDY_ID
 protocol_version: $PROTOCOL_VERSION
-expected_autoencoder_seeds: [$(IFS=,; echo "${PAIRED_SEEDS[*]}")]
 runs:
 EOF
   for_each_run write_map_entry >> "$map_tmp"
@@ -577,7 +571,7 @@ collect_and_select() {
   # ADL1T_OUTPUT_ROOT, and a map written inside a batch sandbox records paths
   # that no longer exist once the outputs have been transferred elsewhere.
   write_study_map_and_plan
-  note "Collecting paired-seed metrics."
+  note "Collecting per-configuration metrics."
   (
     cd "$CODE_DIR"
     python3 scripts/collect_pareto_study.py \

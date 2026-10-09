@@ -20,8 +20,8 @@ export STAGE_LABEL
 export EXPERIMENT
 
 # Parameterise through pareto_study.candidate, not algorithm.*: the candidate is
-# what configuration_id is built from, and therefore what pairs the two seeds of
-# one grid point together downstream.
+# what configuration_id is built from, and therefore what identifies the grid
+# point downstream.
 : "${PARETO_CANDIDATE:=1}"
 export PARETO_CANDIDATE
 
@@ -66,7 +66,7 @@ echo "MI_GAMMA:          $MI_GAMMA"
 echo "MI_NUM_BINS:       $MI_NUM_BINS"
 echo "ARCHITECTURE_ID:   $ARCHITECTURE_ID"
 echo "ENCODER_NODES:     $ENCODER_NODES"
-echo "max_epochs:        from configs/experiment/physics/pareto_fet_train.yaml"
+echo "max_epochs:        ${MAX_EPOCHS:-from configs/experiment/physics/pareto_fet_train.yaml}"
 echo
 echo "Running scripts/physics/runae.sh ..."
 exec bash "${CODE_DIR}/scripts/physics/runae.sh"

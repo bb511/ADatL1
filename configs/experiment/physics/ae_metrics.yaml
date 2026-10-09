@@ -42,7 +42,7 @@ evaluation:
       write_pareto_summary: true
       write_plots: false
 
-    # Off in physics/ae because it is expensive and only the study needs it.
+    # Inherited from physics/ae (enabled, with plots, no per-event tables).
     correlation_matrix:
       enabled: true
 
@@ -64,8 +64,8 @@ evaluation:
       # encoder shapes, because this string is what pairs a candidate with its
       # gamma=0 baseline downstream.
       architecture_id: ae_standalone
-      # Same thresholds as the study's seed-level rule
-      # (pareto_study.collapse_constraint.seed_level_rule in pareto_fet.yaml),
+      # Same thresholds as the study's collapse rule
+      # (pareto_study.collapse_constraint.rule in pareto_fet.yaml),
       # repeated as literals so this overlay does not depend on that block.
       minimum_joint_code_entropy_bits: 1.0
       minimum_fraction_of_paired_gamma_zero_joint_entropy: 0.5

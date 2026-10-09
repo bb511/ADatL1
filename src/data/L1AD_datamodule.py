@@ -14,6 +14,7 @@ from src.utils.instrumentation import log_memory
 from colorama import Fore, Back
 from src.data.components.dataset import L1ADDataset
 from src.data.components.normalization import L1DataNormalizer
+from src.data.feature_refs import resolve_feature_refs
 
 log = pylogger.RankedLogger(__name__)
 
@@ -447,7 +448,6 @@ class L1ADDataModule(LightningDataModule):
         data_dir: Path,
         split: str,
         label: int,
-        flag: str | None = None,
         *,
         max_samples: int | None = None,
         sample_seed: int = 12345,
@@ -493,9 +493,7 @@ class L1ADDataModule(LightningDataModule):
             control_mask=control_mask,
         )
 
-    def _load_aux_split(
-        self, data_dir: Path, split: str, flag: str | None = None
-    ) -> dict[str, SplitTensors]:
+    def _load_aux_split(self, data_dir: Path, split: str) -> dict[str, SplitTensors]:
         """Load a split of auxiliary data, either val or test.
 
         The auxiliary data is not used at training time, since it consists of
@@ -677,8 +675,8 @@ class L1ADDataModule(LightningDataModule):
 
         This is the condition under which the model input can be a *view* of
         the control tensor instead of a second copy of it. With the current
-        configuration - excluding only FET.Et, which sits at raw index 0 - the
-        kept indices are 1..116, so the view path applies.
+        configuration - excluding FET.*, i.e. FET.Et, FET.eta and FET.phi at raw
+        indices 0..2 - the kept indices are 3..116, so the view path applies.
         """
         keep = self._model_keep_indices
 
@@ -802,33 +800,17 @@ class L1ADDataModule(LightningDataModule):
         object_feature_map: dict,
         feature_refs: list[str],
     ) -> list[int]:
-        excluded: list[int] = []
+        """Flattened indices of every feature named by ``feature_refs``.
 
-        for feature_ref in feature_refs:
-            if "." not in feature_ref:
-                raise ValueError(
-                    "model_input_exclude_features entries must have format "
-                    f"'<object>.<feature>', got {feature_ref!r}."
-                )
-
-            object_name, feature_name = feature_ref.split(".", maxsplit=1)
-
-            object_key = self._find_case_insensitive_key(
-                object_feature_map,
-                object_name,
-                "object",
-            )
-
-            feature_map = object_feature_map[object_key]
-
-            feature_key = self._find_case_insensitive_key(
-                feature_map,
-                feature_name,
-                f"feature for object {object_key!r}",
-            )
-
-            excluded.extend(int(idx) for idx in feature_map[feature_key])
-
+        Entries are '<object>.<feature>' and may use wildcards, so 'FET.*'
+        removes every FET feature. A reference that matches nothing raises
+        KeyError.
+        """
+        excluded = [
+            idx
+            for _, _, indices in resolve_feature_refs(object_feature_map, feature_refs)
+            for idx in indices
+        ]
         return sorted(set(excluded))
 
 
@@ -872,13 +854,19 @@ class L1ADDataModule(LightningDataModule):
         if not self.model_input_exclude_features:
             return
 
-        try:
-            leaked = self._resolve_feature_indices(
-                self.object_feature_map,
-                self.model_input_exclude_features,
-            )
-        except KeyError:
-            leaked = []
+        # Non-strict: an excluded object that vanished entirely from the model
+        # map is exactly the desired outcome, not an error.
+        leaked = sorted(
+            {
+                idx
+                for _, _, indices in resolve_feature_refs(
+                    self.object_feature_map,
+                    self.model_input_exclude_features,
+                    strict=False,
+                )
+                for idx in indices
+            }
+        )
 
         if leaked:
             raise RuntimeError(
@@ -886,98 +874,6 @@ class L1ADDataModule(LightningDataModule):
                 f"{self.model_input_exclude_features}. Reindexed positions: {leaked}."
             )
 
-
-    def _find_case_insensitive_key(
-        self,
-        mapping: dict,
-        requested_key: str,
-        kind: str,
-    ) -> str:
-        for key in mapping.keys():
-            if str(key).lower() == requested_key.lower():
-                return key
-
-        raise KeyError(
-            f"Could not find {kind} {requested_key!r}. "
-            f"Available keys: {list(mapping.keys())}"
-        )
-
-    def get_extra(
-        self, normalizer: L1DataNormalizer, extra_feats: dict, stage: str, flag: str
-    ):
-        """Hook for callbacks to get additional data.
-
-        The data provided through this hook should not be already included in the
-        training data. Otherwise, no point in calling this hook.
-
-        :param normalizer: Normalizer object for the additional data.
-        :param extra_feats: Dictionary containing the object and the features to be
-            extracted from that object.
-        :param flag: String specifying subdirectory to put the extra feature parquet
-            files in so they don't get mixed up at training time.
-        """
-        log.info(Back.GREEN + f"Extracting additional features: {extra_feats}...")
-        self.hparams.data_mlready.prepare(normalizer, extra_feats, flag)
-        data_dir: Path = self.hparams.data_mlready.cache_folder
-
-        if stage == "train":
-            split = self._load_main_split(data_dir, "train", label=0, flag=flag)
-
-            dataset = L1ADDataset(
-                split.x,
-                split.mask,
-                split.l1bit,
-                split.y,
-                batch_size=self.batch_size_per_device,
-                shuffler=self.shuffler,
-                control_data=split.control_x,
-                control_mask=split.control_mask,
-            )
-
-            return self._attach_object_feature_map(dataset)
-
-        if stage not in {"val", "test"}:
-            raise ValueError(
-                f"Unknown stage '{stage}'. Expected one of: 'train', 'val', 'test'."
-            )
-
-        split_name = "valid" if stage == "val" else "test"
-        main_key = "normal"
-
-        # Main split. Keep this first in the returned dict.
-        main = self._load_main_split(data_dir, split_name, label=0, flag=flag)
-
-        main_dataset = L1ADDataset(
-            main.x,
-            main.mask,
-            main.l1bit,
-            main.y,
-            batch_size=self.batch_size_per_device,
-            control_data=main.control_x,
-            control_mask=main.control_mask,
-        )
-
-        out: dict[str, L1ADDataset] = {
-            main_key: self._attach_object_feature_map(main_dataset)
-        }
-
-        # Auxiliary signal/background splits.
-        aux = self._load_aux_split(data_dir, split_name, flag=flag)
-
-        for name, split in aux.items():
-            dataset = L1ADDataset(
-                split.x,
-                split.mask,
-                split.l1bit,
-                split.y,
-                batch_size=self.batch_size_per_device,
-                control_data=split.control_x,
-                control_mask=split.control_mask,
-            )
-
-            out[name] = self._attach_object_feature_map(dataset)
-
-        return out
 
     def _attach_object_feature_map(self, ds: Dataset) -> Dataset:
         if self.object_feature_map is not None:

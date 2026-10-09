@@ -1,6 +1,7 @@
 #!/bin/bash
 # Shared HTCondor-side environment for the four pipeline stages. Sourced by
-# batch/runae.sh, batch/runprobes.sh, batch/runmetrics.sh, batch/runcollect.sh.
+# batch/runae_pareto.sh, batch/runprobes_pareto.sh, batch/runmetrics_pareto.sh
+# and batch/runcollect.sh.
 #
 # Its job is to translate the lxplus/EOS layout into the environment variables
 # the scripts/physics/* stage scripts expect, whose own defaults point at the
@@ -53,10 +54,10 @@ fi
 # else. No spaces: this becomes a directory name, an MLflow experiment name and
 # a value passed through HTCondor's environment string into several shell
 # layers before Hydra sees it.
-: "${PARETO_EXPERIMENT_NAME:=Pareto_Front_092026}"
+: "${PARETO_EXPERIMENT_NAME:=Pareto-Front-261002}"
 export PARETO_EXPERIMENT_NAME
 
-# Code: the EOS checkout that test_container.sh runs from.
+# Code: the EOS checkout the jobs run from.
 : "${CODE_DIR:=/eos/user/l/lbehrens/adatl1/ADatL1}"
 
 # Data: the stage scripts read ${PROJECT_ROOT}/data/data_2025E+G/{extracted,processed,mlready}

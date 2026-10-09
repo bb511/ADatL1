@@ -1,0 +1,37 @@
+# Backfill the evaluation plots (correlation matrices, per-signal efficiency)
+# for already trained Pareto runs. One job per line of the queue file; each job
+# only reads its loss_total.ckpt and writes plots beside it on EOS.
+#
+#   cd /eos/user/l/lbehrens/adatl1/ADatL1
+#   module load lxbatch/eossubmit
+#   condor_submit batch/runplots_pareto.sub
+#
+# To backfill only some runs, put their lines in another file and submit with
+#   condor_submit RUNS=batch/my_runs.txt batch/runplots_pareto.sub
+
+executable = batch/runplots_pareto.sh
+
+log    = batch/logs/runplots_pareto.$(ClusterId).log
+output = batch/logs/runplots_pareto.$(ClusterId).$(ProcId).out
+error  = batch/logs/runplots_pareto.$(ClusterId).$(ProcId).err
+
+MY.SingularityImage = "/eos/user/l/lbehrens/containers/adl1t_lab-dev.sif"
+
+environment = "SEED=$(SEED) MI_GAMMA=$(GAMMA) MI_NUM_BINS=$(BINS) ARCHITECTURE_ID=$(ARCH) ENCODER_NODES_US=$(NODES) RUN_NAME=$(RUN_NAME) TRAINER=cpu CPU_THREADS=7 DATA_WORKERS=3"
+
+# Same footprint as stage 3: the full validation split plus the 20 signal sets.
+request_gpus   = 0
+request_cpus   = 7
+request_memory = 21000
+request_disk   = 10GB
+
+# Data loading ~12 min plus one evaluation pass; no training.
++MaxRuntime = 7200
+
+# Retry failed jobs automatically, up to 3 starts in total. EOS returns
+# transient "Input/output error" (errno 5/121) under load when many jobs read
+# the data or write logs at once; all such failures in clusters 354142/354543
+# succeeded on a plain rerun. Success is exit code 0.
+on_exit_remove = (ExitBySignal == False && ExitCode == 0) || (NumJobStarts >= 3)
+
+queue SEED,GAMMA,BINS,ARCH,NODES,RUN_NAME from $(RUNS:batch/pareto_runs.txt)

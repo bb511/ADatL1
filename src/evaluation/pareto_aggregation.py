@@ -1,4 +1,4 @@
-"""Phase 2 collection of paired-seed Pareto-study metrics.
+"""Phase 2 collection of Pareto-study metrics, one run per configuration.
 
 This module deliberately consumes an explicit study map.  Hydra output folders
 contain the resolved study manifests whereas checkpoints and compact evaluation
@@ -16,25 +16,19 @@ from collections.abc import Mapping, Sequence
 from pathlib import Path
 from typing import Any
 
-import numpy as np
 import pandas as pd
 from omegaconf import OmegaConf
-from scipy.stats import t as student_t
-
-from src.evaluation.leakage_probe.aggregation import (
-    ProbeAggregationError,
-    aggregate_paired_seed_leakage,
-)
 from src.evaluation.leakage_probe.constants import (
     LEAKAGE_PROBE_PROTOCOL_VERSION,
 )
 from src.evaluation.leakage_probe.provenance import (
     leakage_probe_configuration_id,
 )
+from src.evaluation.pareto_baseline import GAMMA_ZERO_BASELINE_BINS
 
 
-PARETO_METRICS_SCHEMA_VERSION = 1
-STUDY_MAP_SCHEMA_VERSION = 1
+PARETO_METRICS_SCHEMA_VERSION = 2
+STUDY_MAP_SCHEMA_VERSION = 2
 
 _ARTIFACT_PATHS = {
     "leakage": Path("plots/val/loss_total/probes/leakage_probes.json"),
@@ -46,7 +40,7 @@ _ARTIFACT_PATHS = {
     "auroc": Path("plots/val/loss_total/auroc/auroc_summary.json"),
 }
 
-_SUMMARY_METRICS = (
+_METRICS = (
     "leakage_worst",
     "residual_correlation",
     "mean_pearson_correlation",
@@ -133,20 +127,6 @@ def _resolve_path(value: str, *, base_dir: Path) -> Path:
     return path if path.is_absolute() else base_dir / path
 
 
-def _expected_seeds(value: Any, *, label: str) -> tuple[int, ...]:
-    if not isinstance(value, Sequence) or isinstance(value, (str, bytes)):
-        raise ParetoCollectionError(f"{label} must be a sequence of seeds.")
-    seeds = tuple(
-        _finite_int(seed, label=f"{label}[{index}]")
-        for index, seed in enumerate(value)
-    )
-    if len(seeds) < 2:
-        raise ParetoCollectionError(f"{label} requires at least two seeds.")
-    if len(set(seeds)) != len(seeds):
-        raise ParetoCollectionError(f"{label} must contain unique seeds.")
-    return seeds
-
-
 def load_study_map(path: str | Path) -> tuple[Mapping[str, Any], Path]:
     """Load one YAML/JSON study map and return it with its directory."""
 
@@ -166,7 +146,7 @@ def load_study_map(path: str | Path) -> tuple[Mapping[str, Any], Path]:
 
 def _validate_study_map(
     study_map: Mapping[str, Any],
-) -> tuple[str, str, tuple[int, ...], Sequence[Mapping[str, Any]]]:
+) -> tuple[str, str, Sequence[Mapping[str, Any]]]:
     schema_version = _require_int(study_map, "schema_version", label="study map")
     if schema_version != STUDY_MAP_SCHEMA_VERSION:
         raise ParetoCollectionError(
@@ -180,14 +160,10 @@ def _validate_study_map(
         "protocol_version",
         label="study map",
     )
-    expected_seeds = _expected_seeds(
-        study_map.get("expected_autoencoder_seeds"),
-        label="study map.expected_autoencoder_seeds",
-    )
     runs = study_map.get("runs")
     if not isinstance(runs, Sequence) or isinstance(runs, (str, bytes)) or not runs:
         raise ParetoCollectionError("study map.runs must be a non-empty sequence.")
-    return study_id, protocol_version, expected_seeds, [
+    return study_id, protocol_version, [
         _require_mapping(run, label=f"study map.runs[{index}]")
         for index, run in enumerate(runs)
     ]
@@ -198,7 +174,6 @@ def _manifest_info(
     *,
     map_study_id: str,
     map_protocol_version: str,
-    map_expected_seeds: tuple[int, ...],
     mapped_configuration_id: str,
     mapped_seed: int,
 ) -> dict[str, Any]:
@@ -241,13 +216,6 @@ def _manifest_info(
         raise ParetoCollectionError("Manifest seed does not match the study-map entry.")
     if manifest.get("seed") != seed:
         raise ParetoCollectionError("Manifest top-level seed does not match candidate seed.")
-    if _expected_seeds(
-        study.get("paired_autoencoder_seeds"),
-        label="manifest.pareto_study.paired_autoencoder_seeds",
-    ) != map_expected_seeds:
-        raise ParetoCollectionError(
-            "Manifest paired_autoencoder_seeds does not match the study map."
-        )
     if manifest.get("test") is not False:
         raise ParetoCollectionError("Phase 2 accepts validation runs only (test=false).")
     if probes.get("enabled") is not True or probes.get("mode") != "validation":
@@ -291,6 +259,24 @@ def _manifest_info(
         raise ParetoCollectionError("Manifest algorithm encoder nodes must be a sequence.")
     if tuple(int(node) for node in algorithm_nodes) != encoder_nodes:
         raise ParetoCollectionError("Manifest algorithm encoder nodes disagree with candidate.")
+    search_space = _require_mapping(
+        study.get("search_space"), label="manifest.pareto_study.search_space"
+    )
+    allowed_architectures = {
+        str(name): tuple(int(node) for node in nodes)
+        for group in ("regularized", "gamma_zero_baseline")
+        for name, nodes in _require_mapping(
+            _require_mapping(search_space.get(group), label=f"search_space.{group}").get(
+                "architectures"
+            ),
+            label=f"search_space.{group}.architectures",
+        ).items()
+    }
+    if allowed_architectures.get(architecture_id) != encoder_nodes:
+        raise ParetoCollectionError(
+            f"Architecture {architecture_id} {list(encoder_nodes)} is not part of the "
+            f"study's search space {allowed_architectures}."
+        )
 
     sensitive = _require_mapping(
         study.get("sensitive_variable"),
@@ -301,9 +287,9 @@ def _manifest_info(
         study.get("collapse_constraint"),
         label="manifest.pareto_study.collapse_constraint",
     )
-    collapse_seed_rule = _require_mapping(
-        collapse.get("seed_level_rule"),
-        label="manifest collapse seed rule",
+    collapse_rule = _require_mapping(
+        collapse.get("rule"),
+        label="manifest collapse rule",
     )
     efficiency_constraint = _require_mapping(
         study.get("minimum_efficiency_constraint"),
@@ -325,11 +311,11 @@ def _manifest_info(
         },
         "constraints": {
             "minimum_joint_code_entropy_bits": _finite_float(
-                collapse_seed_rule.get("minimum_joint_code_entropy_bits"),
+                collapse_rule.get("minimum_joint_code_entropy_bits"),
                 label="manifest collapse minimum entropy",
             ),
             "minimum_fraction_of_paired_gamma_zero_joint_entropy": _finite_float(
-                collapse_seed_rule.get(
+                collapse_rule.get(
                     "minimum_fraction_of_paired_gamma_zero_joint_entropy"
                 ),
                 label="manifest collapse baseline fraction",
@@ -347,7 +333,8 @@ def _validate_leakage_artifact(
     *,
     info: Mapping[str, Any],
     seed: int,
-) -> tuple[bool, str | None]:
+) -> tuple[bool, str | None, float | None]:
+    """Validate one run's leakage artifact; return (valid, reason, leakage_worst)."""
     if payload.get("leakage_probe_protocol_version") != LEAKAGE_PROBE_PROTOCOL_VERSION:
         raise ParetoCollectionError("Leakage artifact has an unsupported protocol version.")
     run = _require_mapping(payload.get("run"), label="leakage artifact.run")
@@ -369,7 +356,12 @@ def _validate_leakage_artifact(
         raise ParetoCollectionError("Leakage artifact is not a reportable validation result.")
     valid = payload.get("probe_valid") is True
     reason = payload.get("rejection_reason")
-    return valid, reason if isinstance(reason, str) else None
+    leakage_worst = (
+        _finite_float(payload.get("leakage_worst"), label="leakage_worst")
+        if valid
+        else None
+    )
+    return valid, reason if isinstance(reason, str) else None, leakage_worst
 
 
 def _validate_efficiency_artifact(payload: Mapping[str, Any]) -> dict[str, Any]:
@@ -487,9 +479,8 @@ def _collect_run(
     base_dir: Path,
     study_id: str,
     protocol_version: str,
-    expected_seeds: tuple[int, ...],
 ) -> dict[str, Any]:
-    """Collect one mapped seed run without allowing a bad run to abort the study."""
+    """Collect one mapped run without allowing a bad run to abort the study."""
 
     configuration_id = _require_string(entry, "configuration_id", label="study map run")
     seed = _require_int(entry, "autoencoder_seed", label="study map run")
@@ -519,7 +510,6 @@ def _collect_run(
             _read_manifest(manifest_path),
             map_study_id=study_id,
             map_protocol_version=protocol_version,
-            map_expected_seeds=expected_seeds,
             mapped_configuration_id=configuration_id,
             mapped_seed=seed,
         )
@@ -536,11 +526,13 @@ def _collect_run(
 
     if info is not None and "leakage" in payloads:
         try:
-            probe_valid, probe_reason = _validate_leakage_artifact(
+            probe_valid, probe_reason, leakage_worst = _validate_leakage_artifact(
                 payloads["leakage"], info=info, seed=seed
             )
             record["probe_valid"] = probe_valid
-            if not probe_valid:
+            if probe_valid:
+                record["metrics"]["leakage_worst"] = leakage_worst
+            else:
                 _append_reason(
                     record,
                     "invalid_probe" if probe_reason is None else f"invalid_probe:{probe_reason}",
@@ -575,52 +567,6 @@ def _collect_run(
     return record
 
 
-def _summary(values: Sequence[float]) -> dict[str, float | int]:
-    """Aggregate one metric over the paired seeds.
-
-    The interval uses Student's t at n-1 degrees of freedom, not 1.96. With two
-    paired seeds there is one degree of freedom and t(0.975, 1) = 12.71, so the
-    normal quantile understates the interval by a factor of 6.5 -- enough to make
-    a selection look decisive when the seeds alone do not support it.
-
-    seed_min and seed_max record what was actually observed. At n = 2 the
-    standard error happens to equal half the gap between the two seeds, so
-    mean +/- standard_error lands exactly on them; that coincidence does not
-    survive a third seed, and the recorded extremes do.
-    """
-
-    array = np.asarray(values, dtype=np.float64)
-    if array.size < 2 or not np.isfinite(array).all():
-        raise ParetoCollectionError("Metric aggregation requires at least two finite seed values.")
-    sample_std = float(np.std(array, ddof=1))
-    standard_error = sample_std / math.sqrt(array.size)
-    critical_value = float(student_t.ppf(0.975, array.size - 1))
-    ci_half_width = critical_value * standard_error
-    mean = float(np.mean(array))
-    return {
-        "n_seeds": int(array.size),
-        "mean": mean,
-        "sample_std": sample_std,
-        "standard_error": standard_error,
-        "seed_min": float(array.min()),
-        "seed_max": float(array.max()),
-        "ci95_critical_value": critical_value,
-        "ci95_low": mean - ci_half_width,
-        "ci95_high": mean + ci_half_width,
-    }
-
-
-def _configuration_contract(records: Sequence[dict[str, Any]]) -> dict[str, Any] | None:
-    manifests = [record.get("manifest") for record in records if record.get("manifest")]
-    if not manifests:
-        return None
-    first = manifests[0]
-    fields = ("candidate", "constraints", "leakage_algorithm_hash", "raw_target")
-    if any(any(manifest[field] != first[field] for field in fields) for manifest in manifests[1:]):
-        return None
-    return first
-
-
 def _collect_configuration(
     configuration_id: str,
     entries: Sequence[Mapping[str, Any]],
@@ -628,102 +574,48 @@ def _collect_configuration(
     base_dir: Path,
     study_id: str,
     protocol_version: str,
-    expected_seeds: tuple[int, ...],
 ) -> dict[str, Any]:
-    records = [
-        _collect_run(
-            entry,
-            base_dir=base_dir,
-            study_id=study_id,
-            protocol_version=protocol_version,
-            expected_seeds=expected_seeds,
+    """Collect the single run of one configuration into its Phase 2 record."""
+
+    if len(entries) != 1:
+        raise ParetoCollectionError(
+            f"Configuration {configuration_id} maps {len(entries)} runs; the study "
+            "is single-seed, so every configuration must map exactly one run."
         )
-        for entry in entries
-    ]
-    records.sort(key=lambda record: record["autoencoder_seed"])
-    rejection_reasons: list[str] = []
+    run = _collect_run(
+        entries[0],
+        base_dir=base_dir,
+        study_id=study_id,
+        protocol_version=protocol_version,
+    )
+    rejection_reasons = list(run["rejection_reasons"])
 
-    def add_reason(reason: str) -> None:
-        if reason not in rejection_reasons:
-            rejection_reasons.append(reason)
-
-    records_by_seed: dict[int, dict[str, Any]] = {}
-    for record in records:
-        seed = record["autoencoder_seed"]
-        if seed in records_by_seed:
-            add_reason(f"duplicate_study_mapping_seed:{seed}")
-            continue
-        records_by_seed[seed] = record
-        for reason in record["rejection_reasons"]:
-            add_reason(f"seed_{seed}:{reason}")
-
-    contract = _configuration_contract(records)
-    if contract is None:
-        add_reason("manifest_contract_mismatch_or_missing")
-
-    leakage_paths = [
-        record["artifact_paths"]["leakage"]
-        for record in records
-        if Path(record["artifact_paths"]["leakage"]).is_file()
-    ]
-    leakage_aggregate: dict[str, Any] | None = None
-    try:
-        leakage_aggregate = aggregate_paired_seed_leakage(
-            leakage_paths,
-            expected_autoencoder_seeds=expected_seeds,
-        )
-        for run in leakage_aggregate["runs"]:
-            record = records_by_seed.get(run["autoencoder_seed"])
-            if record is not None:
-                record["metrics"]["leakage_worst"] = run["leakage_worst"]
-        if not leakage_aggregate["configuration_valid"]:
-            for reason in leakage_aggregate["rejection_reasons"]:
-                add_reason(f"leakage_{reason}")
-    except ProbeAggregationError as error:
-        add_reason(f"leakage_aggregation_failed:{error}")
-
-    if set(records_by_seed) != set(expected_seeds):
-        missing = [seed for seed in expected_seeds if seed not in records_by_seed]
-        if missing:
-            add_reason(f"missing_study_mapping_seeds:{missing}")
-
-    configuration_valid = not rejection_reasons
-    aggregates: dict[str, dict[str, float | int]] | None = None
-    if configuration_valid:
+    metrics: dict[str, float] | None = None
+    if not rejection_reasons:
         try:
-            aggregates = {
-                metric: _summary(
-                    [
-                        _finite_float(
-                            records_by_seed[seed]["metrics"].get(metric),
-                            label=f"seed {seed} {metric}",
-                        )
-                        for seed in expected_seeds
-                    ]
-                )
-                for metric in _SUMMARY_METRICS
+            metrics = {
+                metric: _finite_float(run["metrics"].get(metric), label=metric)
+                for metric in _METRICS
             }
         except ParetoCollectionError as error:
-            add_reason(f"metric_aggregation_failed:{error}")
-            configuration_valid = False
-            aggregates = None
+            rejection_reasons.append(f"metric_missing:{error}")
 
+    manifest = run.get("manifest")
     return {
         "schema_version": PARETO_METRICS_SCHEMA_VERSION,
         "study_id": study_id,
         "protocol_version": protocol_version,
         "configuration_id": configuration_id,
-        "expected_autoencoder_seeds": list(expected_seeds),
-        "candidate": None if contract is None else contract["candidate"],
+        "autoencoder_seed": run["autoencoder_seed"],
+        "candidate": None if manifest is None else manifest["candidate"],
         "leakage_algorithm_hash": (
-            None if contract is None else contract["leakage_algorithm_hash"]
+            None if manifest is None else manifest["leakage_algorithm_hash"]
         ),
-        "configuration_valid": configuration_valid,
+        "configuration_valid": not rejection_reasons,
         "feasible": False,
         "rejection_reasons": rejection_reasons,
-        "runs": records,
-        "leakage_aggregate": leakage_aggregate,
-        "aggregates": aggregates,
+        "run": run,
+        "metrics": metrics,
         "constraints": None,
     }
 
@@ -748,12 +640,16 @@ def _apply_paired_constraints(configurations: list[dict[str, Any]]) -> None:
 
         gamma = float(candidate["mi_gamma"])
         architecture_id = str(candidate["architecture_id"])
+        # Every candidate, whatever its bin count, is compared with the single
+        # gamma-zero / 50-bin run of its architecture. Manifests of
+        # Pareto-Front-261002 still say paired_reference: same_architecture_and_bins;
+        # that per-bin pairing no longer exists and is not read.
         baselines = [
             item
             for item in by_architecture[architecture_id]
             if isinstance(item.get("candidate"), Mapping)
             and float(item["candidate"]["mi_gamma"]) == 0.0
-            and item["candidate"]["mi_sensitive_num_bins"] == 50
+            and int(item["candidate"]["mi_sensitive_num_bins"]) == GAMMA_ZERO_BASELINE_BINS
             and item["candidate"]["encoder_nodes"] == candidate["encoder_nodes"]
         ]
         baseline = configuration if gamma == 0.0 else None
@@ -773,74 +669,42 @@ def _apply_paired_constraints(configurations: list[dict[str, Any]]) -> None:
             _append_reason(configuration, reason)
             continue
 
-        policy = configuration["runs"][0]["manifest"]["constraints"]
+        policy = configuration["run"]["manifest"]["constraints"]
         entropy_fraction = policy[
             "minimum_fraction_of_paired_gamma_zero_joint_entropy"
         ]
         min_efficiency_fraction = 1.0 - policy["max_relative_efficiency_degradation"]
-        candidate_runs = {
-            run["autoencoder_seed"]: run for run in configuration["runs"]
-        }
-        baseline_runs = {run["autoencoder_seed"]: run for run in baseline["runs"]}
-        per_seed: list[dict[str, Any]] = []
-        all_pass = True
+        candidate_metrics = configuration["run"]["metrics"]
+        baseline_metrics = baseline["run"]["metrics"]
 
-        for seed in configuration["expected_autoencoder_seeds"]:
-            candidate_run = candidate_runs[seed]
-            baseline_run = baseline_runs[seed]
-            candidate_metrics = candidate_run["metrics"]
-            baseline_metrics = baseline_run["metrics"]
-            candidate_absolute_pass = candidate_metrics["absolute_entropy_pass"]
-            baseline_absolute_pass = baseline_metrics["absolute_entropy_pass"]
-            relative_entropy_pass = (
+        checks = {
+            "candidate_absolute_entropy_pass": candidate_metrics["absolute_entropy_pass"],
+            "baseline_absolute_entropy_pass": baseline_metrics["absolute_entropy_pass"],
+            "relative_entropy_pass": (
                 candidate_metrics["joint_code_entropy_bits"]
                 >= entropy_fraction * baseline_metrics["joint_code_entropy_bits"]
-            )
-            minimum_efficiency_pass = (
+            ),
+            "minimum_efficiency_pass": (
                 candidate_metrics["min_efficiency"]
                 >= min_efficiency_fraction * baseline_metrics["min_efficiency"]
-            )
-            seed_pass = (
-                candidate_absolute_pass
-                and baseline_absolute_pass
-                and relative_entropy_pass
-                and minimum_efficiency_pass
-            )
-            all_pass = all_pass and seed_pass
-            per_seed.append(
-                {
-                    "autoencoder_seed": seed,
-                    "candidate_absolute_entropy_pass": candidate_absolute_pass,
-                    "baseline_absolute_entropy_pass": baseline_absolute_pass,
-                    "relative_entropy_pass": relative_entropy_pass,
-                    "minimum_efficiency_pass": minimum_efficiency_pass,
-                    "candidate_joint_code_entropy_bits": candidate_metrics[
-                        "joint_code_entropy_bits"
-                    ],
-                    "baseline_joint_code_entropy_bits": baseline_metrics[
-                        "joint_code_entropy_bits"
-                    ],
-                    "candidate_min_efficiency": candidate_metrics["min_efficiency"],
-                    "baseline_min_efficiency": baseline_metrics["min_efficiency"],
-                }
-            )
-
-        failed_seeds = [item["autoencoder_seed"] for item in per_seed if not (
-            item["candidate_absolute_entropy_pass"]
-            and item["baseline_absolute_entropy_pass"]
-            and item["relative_entropy_pass"]
-            and item["minimum_efficiency_pass"]
-        )]
+            ),
+        }
+        passed = all(checks.values())
         configuration["constraints"] = {
-            "passed": all_pass,
+            "passed": passed,
             "paired_gamma_zero_configuration_id": baseline["configuration_id"],
             "entropy_fraction_required": entropy_fraction,
             "minimum_efficiency_fraction_required": min_efficiency_fraction,
-            "per_seed": per_seed,
+            **checks,
+            "candidate_joint_code_entropy_bits": candidate_metrics["joint_code_entropy_bits"],
+            "baseline_joint_code_entropy_bits": baseline_metrics["joint_code_entropy_bits"],
+            "candidate_min_efficiency": candidate_metrics["min_efficiency"],
+            "baseline_min_efficiency": baseline_metrics["min_efficiency"],
         }
-        configuration["feasible"] = all_pass
-        if not all_pass:
-            _append_reason(configuration, f"paired_constraints_failed_seeds:{failed_seeds}")
+        configuration["feasible"] = passed
+        if not passed:
+            failed = [name for name, ok in checks.items() if not ok]
+            _append_reason(configuration, f"paired_constraints_failed:{failed}")
 
 
 def collect_pareto_study(
@@ -848,7 +712,7 @@ def collect_pareto_study(
 ) -> dict[str, Any]:
     """Collect a full mapped study into configuration-level Phase 2 records."""
 
-    study_id, protocol_version, expected_seeds, entries = _validate_study_map(study_map)
+    study_id, protocol_version, entries = _validate_study_map(study_map)
     grouped_entries: dict[str, list[Mapping[str, Any]]] = defaultdict(list)
     for entry in entries:
         configuration_id = _require_string(entry, "configuration_id", label="study map run")
@@ -861,7 +725,6 @@ def collect_pareto_study(
             base_dir=Path(base_dir),
             study_id=study_id,
             protocol_version=protocol_version,
-            expected_seeds=expected_seeds,
         )
         for configuration_id in sorted(grouped_entries)
     ]
@@ -870,7 +733,6 @@ def collect_pareto_study(
         "schema_version": PARETO_METRICS_SCHEMA_VERSION,
         "study_id": study_id,
         "protocol_version": protocol_version,
-        "expected_autoencoder_seeds": list(expected_seeds),
         "configurations": configurations,
     }
 
@@ -883,6 +745,7 @@ def _flat_study_rows(collection: Mapping[str, Any]) -> list[dict[str, Any]]:
             "study_id": collection["study_id"],
             "protocol_version": collection["protocol_version"],
             "configuration_id": configuration["configuration_id"],
+            "autoencoder_seed": configuration.get("autoencoder_seed"),
             "mi_gamma": candidate.get("mi_gamma"),
             "mi_sensitive_num_bins": candidate.get("mi_sensitive_num_bins"),
             "architecture_id": candidate.get("architecture_id"),
@@ -892,10 +755,7 @@ def _flat_study_rows(collection: Mapping[str, Any]) -> list[dict[str, Any]]:
             "feasible": configuration["feasible"],
             "rejection_reasons": ";".join(configuration["rejection_reasons"]),
         }
-        aggregates = configuration.get("aggregates") or {}
-        for metric, summary in aggregates.items():
-            for name, value in summary.items():
-                row[f"{metric}_{name}"] = value
+        row.update(configuration.get("metrics") or {})
         rows.append(row)
     return rows
 
@@ -941,13 +801,13 @@ def collect_and_write_pareto_study(
 
 def _parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
-        description="Collect Phase 2 paired-seed Pareto-study metrics."
+        description="Collect Phase 2 Pareto-study metrics (one run per configuration)."
     )
     parser.add_argument(
         "--study-map",
         type=Path,
         required=True,
-        help="Explicit YAML/JSON mapping of configuration/seed runs to artifact paths.",
+        help="Explicit YAML/JSON mapping of configuration runs to artifact paths.",
     )
     parser.add_argument(
         "--output-dir",

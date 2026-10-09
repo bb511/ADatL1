@@ -1,11 +1,13 @@
 # Matrix plot.
 
+from collections.abc import Iterable
 from pathlib import Path
 from pathvalidate import sanitize_filename
 import numpy as np
 
 import matplotlib.pyplot as plt
 import matplotlib.colors as colors
+import matplotlib.patches as patches
 import mplhep as hep
 from mpl_toolkits.axes_grid1 import make_axes_locatable
 
@@ -19,6 +21,12 @@ def plot(
     vmax: float | None = None,
     filename: str | None = None,
     figure_scale: float = 1.0,
+    outline_row: str | None = None,
+    outline_linewidth: float = 3.0,
+    text_highlight_max_abs: float | None = None,
+    text_highlight_columns: Iterable[str] | None = None,
+    text_highlight_color: str = "green",
+    subtitle: str | None = None,
 ):
     """Plot the data as a labelled matrix.
 
@@ -32,6 +40,15 @@ def plot(
     ``vmin`` and ``vmax`` optionally fix the color scale. ``filename`` overrides the
     default filename derived from ``value_name`` and may select a format by extension.
     ``figure_scale`` scales the complete figure, including the matrix cells.
+
+    ``outline_row`` names one row label (exact match first, then case-insensitive)
+    that is framed by a bold black border of ``outline_linewidth`` points. A label
+    that is not among the rows is ignored, so callers can always pass it.
+    ``text_highlight_max_abs`` prints every value of that row whose absolute value
+    is at most this threshold in bold ``text_highlight_color``; ``None`` disables it.
+    ``text_highlight_columns`` does the same for the entries of that row in the named
+    columns, whatever their value (e.g. chosen from another matrix).
+    ``subtitle`` is printed in a smaller font between the title and the matrix.
     """
     if figure_scale <= 0:
         raise ValueError(f"figure_scale must be greater than zero, got {figure_scale}.")
@@ -43,6 +60,8 @@ def plot(
 
     mat = np.array([[data[r][c] for c in cols] for r in rows], dtype=float)
     n_rows, n_cols = mat.shape
+    outline_index = _find_row(rows, outline_row)
+    highlight_columns = {str(column) for column in text_highlight_columns or ()}
 
     cell_size = 0.72  # 20% larger than the previous 0.6-inch cells
     fig_size_max = 9.6
@@ -60,7 +79,23 @@ def plot(
         [str(c) for c in cols], rotation=90, fontsize=label_fontsize
     )
     ax.set_yticklabels([str(r) for r in rows], fontsize=label_fontsize)
-    ax.set_title(value_name, pad=20)
+    if subtitle:
+        subtitle_size = 18
+        ax.annotate(
+            subtitle,
+            xy=(0.5, 1.0),
+            xycoords="axes fraction",
+            xytext=(0, 10),
+            textcoords="offset points",
+            ha="center",
+            va="bottom",
+            fontsize=subtitle_size,
+            color="#333333",
+            annotation_clip=False,
+        )
+        ax.set_title(value_name, pad=10 + 1.4 * subtitle_size + 10)
+    else:
+        ax.set_title(value_name, pad=20)
     ax.tick_params(
         axis="both",
         which="both",
@@ -79,9 +114,20 @@ def plot(
     for i in range(n_rows):
         for j in range(n_cols):
             val = mat[i, j]
+            fontweight = "normal"
             if np.isnan(val):
                 text = "NaN"
                 txt_color = "black"
+            elif i == outline_index and (
+                str(cols[j]) in highlight_columns
+                or (
+                    text_highlight_max_abs is not None
+                    and abs(val) <= text_highlight_max_abs
+                )
+            ):
+                text = fmt.format(val)
+                txt_color = text_highlight_color
+                fontweight = "bold"
             else:
                 text = fmt.format(val)
                 red, green, blue, _ = im.cmap(norm(val))
@@ -96,8 +142,26 @@ def plot(
                 va="center",
                 fontsize=fontsize,
                 color=txt_color,
+                fontweight=fontweight,
                 clip_on=True,  # ensures nothing bleeds outside the axes
             )
+
+    if outline_index is not None:
+        # Drawn unclipped and above the spines so the border is equally thick on
+        # all four sides, also where it coincides with the axes edge.
+        ax.add_patch(
+            patches.Rectangle(
+                (-0.5, outline_index - 0.5),
+                n_cols,
+                1,
+                fill=False,
+                edgecolor="black",
+                linewidth=outline_linewidth,
+                joinstyle="miter",
+                clip_on=False,
+                zorder=5,
+            )
+        )
 
     # colorbar
     divider = make_axes_locatable(ax)
@@ -112,6 +176,20 @@ def plot(
     fig.savefig(save_dir / filename, bbox_inches="tight")
     fig.clear()
     plt.close(fig)
+
+
+def _find_row(rows: list, label: str | None) -> int | None:
+    """Index of ``label`` among ``rows``; exact match wins over case-insensitive."""
+    if label is None:
+        return None
+    for index, row in enumerate(rows):
+        if str(row) == label:
+            return index
+    lowered = label.lower()
+    for index, row in enumerate(rows):
+        if str(row).lower() == lowered:
+            return index
+    return None
 
 
 
@@ -160,6 +238,8 @@ if __name__ == "__main__":
         sample_data,
         value_name="Manual correlation matrix",
         save_dir=output_dir,
+        outline_row="FET.Et",
+        text_highlight_max_abs=0.1,
     )
     plot(
         sample_data,
@@ -169,6 +249,8 @@ if __name__ == "__main__":
         vmin=-1.0,
         vmax=1.0,
         filename="Manual_correlation_matrix_coolwarm.jpg",
+        outline_row="FET.Et",
+        text_highlight_max_abs=0.1,
     )
 
     expected_paths = [

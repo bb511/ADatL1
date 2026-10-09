@@ -26,9 +26,9 @@ VALID_COLUMN = "configuration_valid"
 FEASIBLE_COLUMN = "feasible"
 REJECTION_REASONS_COLUMN = "rejection_reasons"
 
-LEAKAGE_COLUMN = "leakage_worst_mean"
-CORRELATION_COLUMN = "residual_correlation_mean"
-EFFICIENCY_COLUMN = "median_efficiency_mean"
+LEAKAGE_COLUMN = "leakage_worst"
+CORRELATION_COLUMN = "residual_correlation"
+EFFICIENCY_COLUMN = "median_efficiency"
 
 OBJECTIVES = (
     ("leakage", LEAKAGE_COLUMN, "minimize"),
@@ -43,15 +43,7 @@ _REQUIRED_COLUMNS = {
     VALID_COLUMN,
     FEASIBLE_COLUMN,
     REJECTION_REASONS_COLUMN,
-    *(
-        column
-        for _, mean_column, _ in OBJECTIVES
-        for column in (
-            mean_column,
-            mean_column.replace("_mean", "_ci95_low"),
-            mean_column.replace("_mean", "_ci95_high"),
-        )
-    ),
+    *(column for _, column, _ in OBJECTIVES),
 }
 
 _SELECTION_STATUS_COLUMN = "selection_status"
@@ -62,13 +54,6 @@ _DISTANCE_COLUMN = "ideal_point_distance"
 
 class ParetoSelectionError(ValueError):
     """The Phase 2 table cannot be used for deterministic selection."""
-
-
-def _ci_columns(mean_column: str) -> tuple[str, str]:
-    return (
-        mean_column.replace("_mean", "_ci95_low"),
-        mean_column.replace("_mean", "_ci95_high"),
-    )
 
 
 def _as_boolean(series: pd.Series, *, label: str) -> pd.Series:
@@ -101,8 +86,8 @@ def validate_phase2_table(table: pd.DataFrame) -> pd.DataFrame:
     """Validate and normalize a Phase 2 configuration-level study table.
 
     Failed configurations may have undefined objective values.  Those values are
-    preserved rather than imputed; finite objectives and CIs are required only
-    for configurations that Phase 2 marked valid and feasible.
+    preserved rather than imputed; finite objectives are required only for
+    configurations that Phase 2 marked valid and feasible.
     """
 
     missing_columns = sorted(_REQUIRED_COLUMNS.difference(table.columns))
@@ -139,27 +124,15 @@ def validate_phase2_table(table: pd.DataFrame) -> pd.DataFrame:
     )
 
     eligible = validated[VALID_COLUMN] & validated[FEASIBLE_COLUMN]
-    for _, mean_column, _ in OBJECTIVES:
-        ci_low_column, ci_high_column = _ci_columns(mean_column)
-        for column in (mean_column, ci_low_column, ci_high_column):
-            validated[column] = pd.to_numeric(validated[column], errors="coerce")
-        values = validated.loc[eligible, [mean_column, ci_low_column, ci_high_column]]
+    for _, column, _ in OBJECTIVES:
+        validated[column] = pd.to_numeric(validated[column], errors="coerce")
+        values = validated.loc[eligible, column]
         if not np.isfinite(values.to_numpy(dtype=float)).all():
             raise ParetoSelectionError(
-                f"Eligible configurations require finite {mean_column} values and 95% CIs."
+                f"Eligible configurations require finite {column} values."
             )
-        if not values.empty:
-            means = values[mean_column]
-            lows = values[ci_low_column]
-            highs = values[ci_high_column]
-            if ((means < 0.0) | (means > 1.0)).any():
-                raise ParetoSelectionError(
-                    f"Eligible {mean_column} values must lie in [0, 1]."
-                )
-            if ((lows > means) | (means > highs)).any():
-                raise ParetoSelectionError(
-                    f"Eligible {mean_column} confidence intervals must contain their mean."
-                )
+        if ((values < 0.0) | (values > 1.0)).any():
+            raise ParetoSelectionError(f"Eligible {column} values must lie in [0, 1].")
 
     return validated.sort_values(CONFIGURATION_ID_COLUMN, kind="stable").reset_index(drop=True)
 
@@ -181,7 +154,7 @@ def _dominates(left: pd.Series, right: pd.Series) -> bool:
 
 
 def pareto_front_mask(eligible: pd.DataFrame) -> pd.Series:
-    """Compute a non-dominance mask for feasible configuration means.
+    """Compute a non-dominance mask for feasible configurations.
 
     Equal objective triples intentionally remain on the front; the frozen
     configuration-ID tie-break applies only when ranking them afterwards.
@@ -208,58 +181,6 @@ def _ideal_point_distance(row: pd.Series) -> float:
         1.0 - float(row[EFFICIENCY_COLUMN]),
     )
     return math.sqrt(sum(cost * cost for cost in costs) / len(costs))
-
-
-def _intervals_overlap(
-    left_low: float, left_high: float, right_low: float, right_high: float
-) -> bool:
-    return max(left_low, right_low) <= min(left_high, right_high)
-
-
-def _uncertainty_report(front: pd.DataFrame) -> dict[str, Any]:
-    """Annotate selected-vs-front-member marginal 95% CI overlap.
-
-    The source table contains a CI per configuration, not a paired-difference
-    CI.  This deliberately reports overlap as a warning heuristic and does not
-    turn it into a significance claim.
-    """
-
-    if front.empty:
-        return {
-            "policy": "flag_selected_vs_front_members_with_overlapping_marginal_95_percent_cis",
-            "selected_configuration_id": None,
-            "selection_uncertain": False,
-            "comparisons": [],
-        }
-
-    selected = front.iloc[0]
-    comparisons: list[dict[str, Any]] = []
-    for _, alternative in front.iloc[1:].iterrows():
-        overlap: dict[str, bool] = {}
-        for objective_name, mean_column, _ in OBJECTIVES:
-            low_column, high_column = _ci_columns(mean_column)
-            overlap[objective_name] = _intervals_overlap(
-                float(selected[low_column]),
-                float(selected[high_column]),
-                float(alternative[low_column]),
-                float(alternative[high_column]),
-            )
-        comparisons.append(
-            {
-                "configuration_id": str(alternative[CONFIGURATION_ID_COLUMN]),
-                "ci95_overlap": overlap,
-                "all_objective_intervals_overlap": bool(all(overlap.values())),
-            }
-        )
-
-    return {
-        "policy": "flag_selected_vs_front_members_with_overlapping_marginal_95_percent_cis",
-        "selected_configuration_id": str(selected[CONFIGURATION_ID_COLUMN]),
-        "selection_uncertain": any(
-            comparison["all_objective_intervals_overlap"] for comparison in comparisons
-        ),
-        "comparisons": comparisons,
-    }
 
 
 def select_pareto_front(
@@ -319,7 +240,6 @@ def select_pareto_front(
     )
     front = candidates.loc[candidates[_PARETO_FRONT_COLUMN]].copy()
     front = front.sort_values(_RANK_COLUMN, kind="stable").reset_index(drop=True)
-    uncertainty = _uncertainty_report(front)
 
     selected_configuration_id = (
         None if front.empty else str(front.iloc[0][CONFIGURATION_ID_COLUMN])
@@ -353,7 +273,6 @@ def select_pareto_front(
             "pareto_front_configurations": int(len(front)),
         },
         "selected_configuration_id": selected_configuration_id,
-        "uncertainty": uncertainty,
     }
     return candidates, front, selection
 

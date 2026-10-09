@@ -8,7 +8,7 @@
 # run is validated against cannot drift apart. To retrain a subset after a
 # failure, regenerate with a new attempt counter and a filter:
 #
-#   python3 scripts/physics/make_pareto_grid.py --attempt 02 --only Seed500
+#   python3 scripts/physics/make_pareto_grid.py --attempt 02 --only Gamma_0.1_
 #
 # which leaves the first attempt's directories untouched, because the attempt
 # counter is part of the run name.
@@ -59,10 +59,24 @@ request_cpus   = 6
 request_memory = 18000
 request_disk   = 10GB
 
-# 30 epochs. Job 333797 reached the end of data loading and into training in
-# 15 minutes at 7 cpus; this stage no longer runs the probes (1605 s) or the
-# Pareto callbacks, so 4 h is generous. An over-runtime job is evicted silently:
-# no hold, no reason, it simply leaves the queue.
-+MaxRuntime = 14400
+# 50 epochs on 6 CPUs. Measured on job 353645.0 (gamma 0, 50 bins,
+# 2026-09-28): data loading ~12 min, a one-off ~21 min until the first epoch's
+# checkpoint, then ~2.2 min per epoch -- roughly 2.5-3 h per run in total. The
+# 300- and 500-bin runs loop over more bins every step and are slower, so this
+# allows 12 h. An over-runtime job is evicted silently: no hold, no reason, it
+# simply leaves the queue.
++MaxRuntime = 43200
 
-queue SEED,GAMMA,BINS,ARCH,NODES,RUN_NAME from batch/pareto_runs.txt
+# Retry failed jobs automatically, up to 3 starts in total. EOS returns
+# transient "Input/output error" (errno 5/121) under load when many jobs read
+# the data or write logs at once; all such failures in clusters 354142/354543
+# succeeded on a plain rerun. Success is exit code 0.
+on_exit_remove = (ExitBySignal == False && ExitCode == 0) || (NumJobStarts >= 3)
+
+# Hold code 12 = output transfer to EOS failed (kXR_write / "Unable to store
+# file", cluster 353645: 5 of 111 jobs). Release such jobs automatically; the
+# job retrains from scratch and transfers again. At most 3 starts.
+periodic_release = (HoldReasonCode == 12) && (NumJobStarts < 3)
+
+# Subset: condor_submit RUNS=batch/pareto_runs_refine.txt batch/runae_pareto.sub
+queue SEED,GAMMA,BINS,ARCH,NODES,RUN_NAME from $(RUNS:batch/pareto_runs.txt)

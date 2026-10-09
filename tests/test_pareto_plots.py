@@ -4,12 +4,13 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import numpy as np
 import pandas as pd
 import pytest
 
 from src.evaluation.pareto_plots import (
     FIGURE_FILENAMES,
-    GAMMA_RAMP,
+    _gamma_colors,
     ParetoPlotError,
     front_parallel_coordinates,
     write_pareto_figures,
@@ -45,14 +46,7 @@ def _row(
         ("residual_correlation", correlation),
         ("median_efficiency", efficiency),
     ):
-        row[f"{column}_mean"] = value
-        row[f"{column}_n_seeds"] = 2
-        row[f"{column}_sample_std"] = 0.008
-        row[f"{column}_standard_error"] = 0.008 / 2 ** 0.5
-        row[f"{column}_seed_min"] = value - 0.004
-        row[f"{column}_seed_max"] = value + 0.004
-        row[f"{column}_ci95_low"] = value - 0.01
-        row[f"{column}_ci95_high"] = value + 0.01
+        row[column] = value
     return row
 
 
@@ -101,18 +95,25 @@ def test_infeasible_configuration_is_not_treated_as_a_competitor(tmp_path: Path)
     write_pareto_figures(candidates, front, output_dir=tmp_path)
 
 
-def test_more_gamma_levels_than_ramp_steps_is_refused(tmp_path: Path) -> None:
-    """Never cycle or generate a hue past the validated ramp."""
+def test_eleven_gamma_levels_over_four_decades_are_drawn(tmp_path: Path) -> None:
+    """The study grid: gamma from 0.01 to 100 and bins from 10 to 500."""
 
-    rows = [
-        _row(f"g{index}", gamma=0.05 * (index + 1), bins=50, architecture="h64_32",
-             leakage=0.1 - 0.001 * index, correlation=0.2, efficiency=0.8)
-        for index in range(len(GAMMA_RAMP) + 1)
+    gammas = (0.01, 0.1, 0.2, 0.3, 0.5, 0.8, 1, 5, 10, 50, 100)
+    bins = (10, 20, 30, 40, 50, 60, 80, 150, 300, 500)
+    rows = [_row("baseline", gamma=0.0, bins=50, architecture="h64_32",
+                 leakage=0.2, correlation=0.3, efficiency=0.9)]
+    rows += [
+        _row(f"g{gamma}-b{nbins}", gamma=gamma, bins=nbins, architecture="h64_32",
+             leakage=0.2 / (1 + gamma) + 0.0001 * nbins, correlation=0.3 / (1 + gamma),
+             efficiency=0.9 - 0.02 * np.log10(gamma * 100 + 1))
+        for gamma in gammas for nbins in bins
     ]
     candidates, front, _ = select_pareto_front(pd.DataFrame(rows))
-    with pytest.raises(ParetoPlotError, match="ordinal ramp"):
-        write_pareto_figures(candidates, front, output_dir=tmp_path)
+    written = write_pareto_figures(candidates, front, output_dir=tmp_path)
 
+    assert set(written) == set(FIGURE_FILENAMES)
+    colors = _gamma_colors(candidates)
+    assert len(colors) == len(gammas) and len(set(colors.values())) == len(gammas)
 
 def test_empty_front_refuses_the_parallel_coordinates_figure(tmp_path: Path) -> None:
     candidates, _ = _study()
@@ -128,20 +129,3 @@ def test_missing_column_is_reported_rather_than_crashing_matplotlib(tmp_path: Pa
         write_pareto_figures(
             candidates.drop(columns=["architecture_id"]), front, output_dir=tmp_path
         )
-
-
-def test_bars_are_the_seed_spread_not_a_confidence_interval(tmp_path: Path) -> None:
-    """The drawn bar must come from sample_std, never from the ci95 columns.
-
-    Two seeds cannot support an inferential claim, so a bar sized from a 95%
-    interval would overstate what the study knows.
-    """
-
-    from src.evaluation.pareto_plots import _spread_bounds
-
-    candidates, _ = _study()
-    bounds = _spread_bounds(candidates, "leakage_worst_mean")
-
-    assert bounds.shape == (2, len(candidates))
-    assert (bounds[0] == bounds[1]).all()
-    assert (bounds[0] == candidates["leakage_worst_sample_std"].to_numpy()).all()

@@ -15,9 +15,12 @@ defaults:
   - override /pareto_study: fet_et_adhoc
   - override /logger: mlflow
 
-seed: 123
+seed: 180524
 tags: ["ae", "signal"]
 
+# Ad-hoc AE runs (scripts/physics/runae.sh) log to physics_ae_models, as before
+# 2026-09-28. Pareto studies set their own experiment_name in pareto_fet.yaml
+# and the batch wrappers pass EXPERIMENT_NAME, so they are unaffected.
 experiment_name: physics_ae_models
 run_name: ${short_hash:${hydra:runtime.output_dir},12}
 
@@ -25,19 +28,25 @@ data:
   batch_size: 16384
   max_val_batches: 10
 
-  # Keep FET.Et in the loaded/control tensor for MI decorrelation, but remove it
-  # from the anomaly-detector reconstruction input.
+  # All FET features (Et, eta, phi) are sensitive: keep them in the loaded/control
+  # tensor for MI decorrelation and diagnostics, but remove them from the
+  # anomaly-detector reconstruction input. Wildcards are resolved against the
+  # object_feature_map.
   model_input_exclude_features:
-    - FET.Et
+    - FET.*
 
 trainer:
   gradient_clip_algorithm: norm
-  gradient_clip_val: 0.0
+  # cvar25_t169 (pre-MI reference AE, 2026-05-20)
+  gradient_clip_val: 5.0
   min_epochs: 1
   max_epochs: 200
 
 # Keep test untouched during validation-Pareto sweeps. For the one final selected
-# configuration, override both `test=true` and the leakage-probe mode below.
+# configuration, evaluate the trained loss_total.ckpt on test with
+# scripts/physics/runae_test.sh (batch/runae_test.sub) and run the probes with
+# the final_test leakage-probe mode below. `test=true` here would instead test
+# straight after training, inside stage 1.
 test: false
 
 # Metrics to report to optuna for every checkpoint.
@@ -59,15 +68,22 @@ algorithm:
   # What rate is the AD algorithm supposed to work at, in kHz.
   target_rate: 0.25
   base_rate: 28608.8064
-  # The basis data processing returns 117 features.
+  # The basis data processing returns 117 features; excluding FET.* (Et, eta,
+  # phi -- see data.model_input_exclude_features) leaves 114 for the AE input.
   encoder:
-    in_dim: 116
+    in_dim: 114
+    nodes: [64, 32, 8]
+
+  # Hyperparameters of the Optuna trial cvar25_t169 (pre-MI reference AE,
+  # 2026-05-20, MLflow run 33886d9c).
+  delta: 10.0
+  input_noise_std: 0.0
 
   optimizer:
     _partial_: true
     _target_: torch.optim.AdamW
-    lr: 0.0013029941778430407
-    weight_decay: 0.001
+    lr: 0.0019859329798336714
+    weight_decay: 1.0e-06
     betas: [0.9, 0.999]
     eps: 1e-8
 
@@ -80,9 +96,22 @@ callbacks:
     log_raw_mlflow: true
 
   # Keep the epoch with the smallest complete-epoch validation objective on the
-  # normal validation split: loss_reco + mi_gamma * loss_mi.
+  # normal validation split: loss_reco + mi_gamma * loss_mi, among the epochs
+  # whose latent has NOT fully collapsed. A collapsing latent lowers the MI term
+  # and can therefore look like the best epoch (Pareto-Front-261002: the selected
+  # epochs of gamma 1.0 / 50 bins and 0.9 / 50 bins had H(L) = 0.0000 and 0.0025
+  # bits). The guard measures the joint entropy of the hard codes on normal
+  # validation every epoch, logs it as val/latent_joint_code_entropy_bits and
+  # skips epochs below the minimum. If no
+  # epoch qualifies, the best collapsed one becomes loss_total.ckpt and
+  # loss_total_guard.json says status: no_non_collapsed_epoch.
+  # (src/callbacks/checkpointing/collapse_guard.py)
   loss_total_ckpt:
-    _target_: pytorch_lightning.callbacks.ModelCheckpoint
+    _target_: src.callbacks.checkpointing.collapse_guard.CollapseGuardedModelCheckpoint
+    # Full collapse only (one code for ~99.5% of events). Stage 4 still applies
+    # pareto_study.collapse_constraint (>= 1 bit, >= 0.5 x gamma-0) afterwards.
+    min_joint_code_entropy_bits: 0.05
+    dataset: normal
     dirpath: '${paths.checkpoints_dir}/${experiment_name}/${run_name}'
     monitor: 'val/loss_total'
     filename: 'loss_total'
@@ -228,7 +257,10 @@ evaluation:
         - haa-4b-ma15
       cvar_summary: 0.25
       log_raw_mlflow: false
-      write_pareto_summary: false
+      # Full evaluation in stage 1: per-signal plots AND the machine-readable
+      # eff_summary.json that the Pareto aggregation reads.
+      write_plots: true
+      write_pareto_summary: true
 
     ascore_operational:
       _target_: src.evaluation.callbacks.output.OutputCallback
@@ -315,11 +347,49 @@ evaluation:
         - pearson
         - spearman
       sensitive_variable: ${algorithm.mi_sensitive_variable}
+      # Other sensitive (control-only) variables, left out of the mean
+      # correlation C: they are never reconstructed, so their correlation with
+      # the sensitive variable does not depend on the model.
+      sensitive_group: ${algorithm.sensitive_input_features}
       include_input: true
       include_reconstruction: true
       include_residual: false
       max_events: null
       name: correlation_matrix
       log_raw_mlflow: false
-      enabled: false
-      write_details: false
+      # Always on, with plots: mean_correlations.json (objective E) plus the
+      # Pearson/Spearman matrices as CSV and PNG under
+      # plots/val/loss_total/correlation_matrix/normal/{Pearson,Spearman}/.
+      enabled: true
+      write_details: true
+      # The per-event input/reconstruction tables would be several GB per run
+      # on the full validation split; only the matrices and plots are kept.
+      write_source_tables: false
+
+    # These two used to exist only in the Pareto study / stage-3 overlays.
+    # They live here so that every stage-1 run, wherever it is launched,
+    # produces the complete evaluation (everything except the leakage probes,
+    # which stay in stage 2).
+    anomaly_auroc:
+      _target_: src.evaluation.callbacks.auroc.AnomalyAUROCCallback
+      output_name: 'ascore/full'
+      ds: ${evaluation.callbacks.anomaly_efficiency.ds}
+      max_false_positive_rate: ${div:${algorithm.target_rate},${algorithm.base_rate}}
+      pure_normal: false
+      score_direction: higher_score_is_more_anomalous
+      ckpts:
+        loss_total: true
+      name: auroc
+
+    latent_collapse:
+      _target_: src.evaluation.callbacks.latent_collapse.LatentCollapseDiagnosticsCallback
+      # physics/ae selects pareto_study=fet_et_adhoc, physics/pareto_fet selects
+      # fet_et; both define the candidate and the collapse rule used here.
+      architecture_id: ${pareto_study.candidate.architecture_id}
+      minimum_joint_code_entropy_bits: ${pareto_study.collapse_constraint.rule.minimum_joint_code_entropy_bits}
+      minimum_fraction_of_paired_gamma_zero_joint_entropy: ${pareto_study.collapse_constraint.rule.minimum_fraction_of_paired_gamma_zero_joint_entropy}
+      dataset: normal
+      evaluation_split: val
+      ckpts:
+        loss_total: true
+      name: latent_collapse

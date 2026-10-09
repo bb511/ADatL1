@@ -1,15 +1,17 @@
 # Vanilla auto-encoder model implementations
-from typing import Optional, TypedDict
+from typing import TypedDict
 
 import torch
 from torch import nn
 
 from src.algorithms import ADLightningModule
-from src.algorithms.losses.ae import HuberAELoss, PileupMIAELoss
+from src.algorithms.losses.ae import HuberAELoss
+from src.algorithms.losses.components.bernoulli_mi import BernoulliMILoss
 from src.algorithms.losses.components.reconstruction import MSEReconstructionLoss
 from src.algorithms.utils.object_feature_map_loader import inject_object_feature_map
 from src.data.utils import unpack_batch
 from src.data.sensitive_binning import FixedQuantileSensitiveBinner
+from src.data.feature_refs import resolve_feature_refs
 from src.algorithms.components.bernoulli import BernoulliSampling
 from src.utils import pylogger
 
@@ -51,14 +53,15 @@ class AE(ADLightningModule):
         mi_bernoulli_num_samples: int = 10,
         mi_bernoulli_std: float = 1.0,
         mi_bernoulli_threshold: float = 0.5,
-        mi_use_quantized_sigmoid: bool = False,
-        mi_bits_bernoulli_sigmoid: int = 8,
         mi_use_float64_entropy: bool = True,
         mi_sensitive_variable: str = "FET.Et",
         mi_sensitive_num_bins: int = 10,
         mi_sensitive_reduction: str = "First",
         mi_sensitive_use_denormalization: bool = False,
         forbid_sensitive_variable_in_input: bool = True,
+        sensitive_input_features: list[str] | None = None,
+        mi_num_permutations: int = 5,
+        mi_permutation_seed: int = 0,
         **kwargs,
     ):
         # Only forward keys expected by ADLightningModule.__init__.
@@ -96,20 +99,37 @@ class AE(ADLightningModule):
             std=mi_bernoulli_std,
             threshold=mi_bernoulli_threshold,
             temperature=mi_temperature,
-            use_quantized=mi_use_quantized_sigmoid,
-            bits_bernoulli_sigmoid=mi_bits_bernoulli_sigmoid,
         )
 
-        self.mi_loss = PileupMIAELoss(
-            mi_temperature=mi_temperature,
-            input_is_logits=True,
+        self.mi_loss = BernoulliMILoss(
+            temperature=mi_temperature,
             use_float64=mi_use_float64_entropy,
-            use_quantized_sigmoid=mi_use_quantized_sigmoid,
-            bits_bernoulli_sigmoid=mi_bits_bernoulli_sigmoid,
         )
 
         self.mi_gamma = float(mi_gamma)
+
+        # Diagnostic only: MI against within-batch permuted sensitive labels,
+        # i.e. the estimator's noise floor. 0 disables it. The permutations come
+        # from a private CPU generator so enabling the diagnostic does not shift
+        # the global RNG streams (Bernoulli sampling, input noise, shuffling).
+        # The generator is not checkpointed; after a resume the permutation
+        # sequence restarts, which is irrelevant for a noise-floor estimate.
+        if int(mi_num_permutations) < 0:
+            raise ValueError(
+                f"mi_num_permutations must be >= 0, got {mi_num_permutations}."
+            )
+        self.mi_num_permutations = int(mi_num_permutations)
+        self._mi_permutation_generator = torch.Generator(device="cpu")
+        self._mi_permutation_generator.manual_seed(int(mi_permutation_seed))
         self.forbid_sensitive_variable_in_input = forbid_sensitive_variable_in_input
+        # Every feature that counts as sensitive and must therefore be absent
+        # from the AE input ('<object>.<feature>', wildcards allowed, e.g.
+        # 'FET.*'). The MI loss itself still uses only mi_sensitive_variable.
+        # None keeps the pre-FET.* behaviour (only the MI target is guarded), so
+        # checkpoints whose hparams predate this argument still evaluate.
+        self.sensitive_input_features = list(
+            dict.fromkeys([mi_sensitive_variable, *(sensitive_input_features or [])])
+        )
         self.sensitive_binner = FixedQuantileSensitiveBinner(variable=mi_sensitive_variable, num_bins=mi_sensitive_num_bins, 
                                                              reduction=mi_sensitive_reduction, use_denormalized=mi_sensitive_use_denormalization)
 
@@ -222,29 +242,24 @@ class AE(ADLightningModule):
         z, reconstruction = self.forward(x_noisy)
         reco_loss = self.reco_loss(target=x, reco=reconstruction, mask=m)
 
+        # Hard evaluation codes for the collapse guard on loss_total.ckpt
+        # (src/callbacks/checkpointing/collapse_guard.py). Outside training only:
+        # eval-mode BernoulliSampling is a deterministic threshold that draws no
+        # random numbers, so this never perturbs the training RNG stream.
+        latent_code = None
+        if not self.training:
+            with torch.no_grad():
+                latent_code = self.bernoulli(z.detach()).to(torch.uint8)
+
         sensitive = self._compute_sensitive_bins(x=control_x, mask=control_mask)
 
         mi_loss = self.mi_loss(latent=z, sensitive=sensitive)
-        with torch.no_grad():
-            perm = torch.randperm(sensitive.shape[0], device=sensitive.device)
-            sensitive_perm = sensitive[perm]
+        mi_null = self._mi_null_diagnostics(latent=z, sensitive=sensitive, mi_loss=mi_loss)
         gamma_mi_loss = self.mi_gamma * mi_loss
 
         total_loss = reco_loss.mean() + gamma_mi_loss
 
-        with torch.no_grad():
-
-            reco_loss_mean = reco_loss.mean().detach()
-
-        # The anomaly score is expected to be a distribution over events.
-        # Allow subclasses to override `ascore`; otherwise fall back to
-        # the reconstruction loss per observation for robustness.
-        ascore_fn = getattr(self, "ascore", None)
-        if callable(ascore_fn):
-            ascore = ascore_fn(x, reconstruction, m)
-        else:
-            ascore = reco_loss
-
+        ascore = self.ascore(x, reconstruction, m)
         if ascore.ndim != 1:
             raise ValueError(f"Expected per-event ascores, got {tuple(ascore.shape)}.")
 
@@ -271,6 +286,12 @@ class AE(ADLightningModule):
                 "loss/full": reco_loss.detach(),
                 "ascore/full": ascore.detach(),
                 "reconstructed_data": reconstruction.detach(),
+
+                # MI noise-floor diagnostics (empty when disabled):
+                **mi_null,
+
+                # Hard 0/1 latent codes, validation/test only (collapse guard):
+                **({"latent_code": latent_code} if latent_code is not None else {}),
             }
 
     def outlog(self, outdict: dict) -> dict:
@@ -284,6 +305,57 @@ class AE(ADLightningModule):
 
             # Existing anomaly-score logging:
             "ascore_operational": outdict.get("ascore/operational"),
+
+            # MI noise-floor diagnostics. None when disabled; _log_dict skips it.
+            "loss_mi_permuted": outdict.get("loss/mi_permuted"),
+            "loss_mi_permuted_std": outdict.get("loss/mi_permuted_std"),
+            "loss_mi_minus_permuted": outdict.get("loss/mi_minus_permuted"),
+            "loss_mi_floor_analytic": outdict.get("loss/mi_floor_analytic"),
+        }
+
+    @torch.no_grad()
+    def _mi_null_diagnostics(
+        self,
+        latent: torch.Tensor,
+        sensitive: torch.Tensor,
+        mi_loss: torch.Tensor,
+    ) -> dict[str, torch.Tensor]:
+        """Estimate the MI estimator's noise floor for this batch.
+
+        ``loss/mi_permuted`` is the mean MI over ``mi_num_permutations``
+        within-batch shuffles of the sensitive bins: the value the MI loss would
+        take if the latent carried no information about the sensitive variable.
+        ``loss/mi_minus_permuted`` is the bias-corrected leakage; values
+        compatible with zero (compare with ``loss/mi_permuted_std``) mean the MI
+        loss is already at its noise floor. ``loss/mi_floor_analytic`` is a
+        second-order approximation of the same floor.
+
+        None of these enter the objective or carry gradients.
+        """
+        if self.mi_num_permutations == 0:
+            return {}
+
+        mi_permuted = self.mi_loss.permutation_null(
+            latent=latent,
+            sensitive=sensitive,
+            num_permutations=self.mi_num_permutations,
+            generator=self._mi_permutation_generator,
+        )
+        mi_permuted_mean = mi_permuted.mean()
+        mi_permuted_std = (
+            mi_permuted.std(unbiased=True)
+            if mi_permuted.numel() > 1
+            else mi_permuted.new_zeros(())
+        )
+
+        return {
+            "loss/mi_permuted": mi_permuted_mean,
+            "loss/mi_permuted_std": mi_permuted_std,
+            "loss/mi_minus_permuted": mi_loss.detach().float() - mi_permuted_mean,
+            "loss/mi_floor_analytic": self.mi_loss.analytic_null_floor(
+                latent=latent,
+                sensitive=sensitive,
+            ),
         }
     
     def _store_sensitive_bin_edges(self) -> None:
@@ -362,7 +434,7 @@ class AE(ADLightningModule):
         train_split = train_splits["train"]
         normalizer = getattr(datamodule, "normalizer", None)
 
-        edges = self.sensitive_binner.fit(
+        self.sensitive_binner.fit(
             x=train_split.control_x if train_split.control_x is not None else train_split.x,
             mask=(
                 train_split.control_mask
@@ -400,20 +472,17 @@ class AE(ADLightningModule):
         mask: torch.Tensor | None,
     ) -> torch.Tensor:
         """Compute batch sensitive labels from fixed precomputed bin edges."""
-        trainer = getattr(self, "trainer", None)
-        datamodule = getattr(trainer, "datamodule", None) if trainer is not None else None
-        normalizer = (
-            getattr(datamodule, "normalizer", None)
-            if datamodule is not None
-            else None
-        )
-
         return self.sensitive_binner.transform(
             x=x,
             mask=mask,
             object_feature_map=self.control_object_feature_map,
-            normalizer=normalizer,
+            normalizer=self._datamodule_normalizer(),
         )
+
+    def _datamodule_normalizer(self):
+        """The attached datamodule's normalizer, or None outside a Trainer."""
+        datamodule = getattr(getattr(self, "_trainer", None), "datamodule", None)
+        return getattr(datamodule, "normalizer", None)
 
     def extract_sensitive_values(
         self,
@@ -432,17 +501,7 @@ class AE(ADLightningModule):
         control_x, control_mask = self._get_sensitive_inputs(batch_view)
 
         if normalizer is None:
-            trainer = getattr(self, "_trainer", None)
-            datamodule = (
-                getattr(trainer, "datamodule", None)
-                if trainer is not None
-                else None
-            )
-            normalizer = (
-                getattr(datamodule, "normalizer", None)
-                if datamodule is not None
-                else None
-            )
+            normalizer = self._datamodule_normalizer()
 
         return self.sensitive_binner.extract_values(
             x=control_x,
@@ -493,7 +552,7 @@ class AE(ADLightningModule):
         return control_x, control_mask
 
     def _assert_sensitive_not_in_model_input(self) -> None:
-        """Fail fast if the MI target leaks into the AE input feature map."""
+        """Fail fast if any sensitive feature leaks into the AE input feature map."""
         if not self.forbid_sensitive_variable_in_input:
             return
 
@@ -502,22 +561,23 @@ class AE(ADLightningModule):
         if object_feature_map is None:
             return
 
-        object_name, feature_name = self.sensitive_binner.variable.split(".", maxsplit=1)
+        leaked = resolve_feature_refs(
+            object_feature_map,
+            self.sensitive_input_features,
+            strict=False,
+        )
 
-        for obj_key, feature_map in object_feature_map.items():
-            if str(obj_key).lower() != object_name.lower():
-                continue
+        if leaked:
+            leaked_labels = [f"{obj}.{feat}" for obj, feat, _ in leaked]
+            raise RuntimeError(
+                f"Sensitive feature(s) {leaked_labels} (sensitive set: "
+                f"{self.sensitive_input_features}) are still present in "
+                "pl_module.object_feature_map, which is the anomaly-detector input "
+                "map. Configure data.model_input_exclude_features to remove them "
+                "from the model input while keeping them in "
+                "control_object_feature_map."
+            )
 
-            for feat_key in feature_map.keys():
-                if str(feat_key).lower() == feature_name.lower():
-                    raise RuntimeError(
-                        f"Sensitive MI variable {self.sensitive_binner.variable!r} is "
-                        "still present in pl_module.object_feature_map, which is the "
-                        "anomaly-detector input map. Configure "
-                        "data.model_input_exclude_features to remove it from the model "
-                        "input while keeping it in control_object_feature_map."
-                    )
-                
     @staticmethod
     def _num_flat_features_from_map(object_feature_map: dict | None) -> int | None:
         if object_feature_map is None:

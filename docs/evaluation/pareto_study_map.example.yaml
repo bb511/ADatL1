@@ -1,10 +1,9 @@
 # Phase 2 input. Paths may be absolute or relative to this file.
-# List every planned configuration/seed run explicitly; the collector does not
-# infer identity from directory names or scan checkpoint folders.
-schema_version: 1
+# List the single run of every planned configuration explicitly; the collector
+# does not infer identity from directory names or scan checkpoint folders.
+schema_version: 2
 study_id: fet-et-pareto-v1
-protocol_version: fet-et-pareto-v1
-expected_autoencoder_seeds: [123, 456, 789]
+protocol_version: fet-et-pareto-v2
 
 runs:
   - configuration_id: fet-et-pareto-v1__gamma-0.0__bins-50__arch-h64_32
@@ -14,7 +13,7 @@ runs:
     # Checkpoints and compact evaluation artifacts are stored separately.
     checkpoint_run_dir: /absolute/path/to/checkpoints/physics_pareto_fet_v1/...
 
-  # Add one entry for every other paired seed and every other candidate.
+  # Add one entry for every other configuration (exactly one run each).
   # The collector validates this map against the manifest and artifacts, then
   # writes <output-dir>/<configuration-id>/pareto_metrics.json plus study-wide
   # pareto_metrics.csv and pareto_metrics.parquet.

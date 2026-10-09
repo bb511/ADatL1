@@ -20,11 +20,10 @@ Vocabulary, fixed here so the rest of the code can stop guessing:
 
     configuration   a point on the Pareto grid: (mi_gamma, mi_sensitive_num_bins,
                     architecture). Identified by ``configuration_id``.
-    run             one training of an autoencoder at that configuration with a
-                    particular seed. Identified by ``run_name``.
+    run             one training of an autoencoder at that configuration.
+                    Identified by ``run_name``.
 
-Several runs share a configuration when they differ only by seed; that is what
-lets the Phase 2 aggregation compute a mean and a confidence interval.
+The study is single-seed, so every configuration has exactly one run.
 
 The manifest is written AFTER training, not before. ClearRunCheckpointDir wipes
 the run directory when a fit starts, so anything written earlier would not
@@ -133,10 +132,9 @@ def derive_configuration_id(cfg: DictConfig, configuration: Mapping[str, Any]) -
     is used verbatim -- Phase 2 compares it against the study map, so deriving a
     different string here would reject every run.
 
-    For an ad-hoc run the id is built from the coordinates themselves. That is
-    deliberate: two runs that differ only by seed then land on the same
-    configuration automatically and can be aggregated as paired seeds, which is
-    the whole point of separating the two words.
+    For an ad-hoc run the id is built from the coordinates themselves, without
+    the seed, so a retrain of the same grid point lands on the same
+    configuration and the study-map builder can flag the duplicate.
     """
     study = cfg.get("pareto_study")
     if study is not None and study.get("configuration_id"):

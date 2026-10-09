@@ -49,7 +49,7 @@ def test_test_epoch_end_writes_method_folders_sources_means_and_sorted_matrices(
     gallery_folders = []
 
     monkeypatch.setattr(
-        "src.evaluation.callbacks.correlation_matrix.matrix.plot",
+        "src.plot.matrix.plot",
         lambda **kwargs: plot_paths.append(
             Path(kwargs["save_dir"]) / kwargs["filename"]
         ),
@@ -94,11 +94,20 @@ def test_test_epoch_end_writes_method_folders_sources_means_and_sorted_matrices(
         change_stem = (
             f"abs_reconstruction_minus_input_{method}_correlation_matrix"
         )
+        self_dir = method_dir / "self_improvement"
         expected_sorted_plots = {
-            method_dir / f"{change_stem}_sorted_by_increase.png",
-            method_dir / f"{change_stem}_sorted_by_increase_et_only.png",
-            method_dir / f"{change_stem}_sorted_by_decrease.png",
-            method_dir / f"{change_stem}_sorted_by_decrease_et_only.png",
+            self_dir / f"{change_stem}_sorted_by_increase.png",
+            self_dir / f"{change_stem}_sorted_by_increase_et_only.png",
+            self_dir / f"{change_stem}_sorted_by_decrease.png",
+            self_dir / f"{change_stem}_sorted_by_decrease_et_only.png",
+            self_dir / f"{change_stem}.png",
+            self_dir / f"{change_stem}_et_only.png",
+        }
+        # The method folder itself keeps only the input/reconstruction matrices.
+        assert {p for p in plot_paths if p.parent == method_dir} == {
+            method_dir / f"{space}_{method}_correlation_matrix{suffix}.png"
+            for space in ("input", "reconstruction")
+            for suffix in ("", "_et_only")
         }
 
         input_variables = pd.read_csv(method_dir / "input_variables.csv")
@@ -120,7 +129,12 @@ def test_test_epoch_end_writes_method_folders_sources_means_and_sorted_matrices(
         assert list(reconstruction_correlation.index) == labels
         assert expected_sorted_plots <= set(plot_paths)
 
-    assert gallery_folders == [output_dir / "Pearson", output_dir / "Spearman"]
+    assert gallery_folders == [
+        output_dir / "Pearson",
+        output_dir / "Pearson" / "self_improvement",
+        output_dir / "Spearman",
+        output_dir / "Spearman" / "self_improvement",
+    ]
 
     summary = json.loads((output_dir / "mean_correlations.json").read_text())
     reconstructed = pd.DataFrame(reconstruction_table)
@@ -254,7 +268,7 @@ def test_write_correlation_matrix_variants_sorts_full_and_et_matrices_without_cs
         plot_calls.append(kwargs)
 
     monkeypatch.setattr(
-        "src.evaluation.callbacks.correlation_matrix.matrix.plot",
+        "src.plot.matrix.plot",
         capture_plot,
     )
 
@@ -294,3 +308,52 @@ def test_sort_correlation_change_matrix_rejects_misaligned_labels() -> None:
             correlation_change,
             ascending=False,
         )
+
+
+def test_details_without_source_tables_write_matrices_and_plots(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    labels = ["a.Et", "b.Et", "c.Et"]
+    table = {
+        "a.Et": np.array([0.0, 1.0, 2.0, 3.0, 4.0]),
+        "b.Et": np.array([1.0, 0.0, 3.0, 2.0, 4.0]),
+        "c.Et": np.array([4.0, 2.0, 3.0, 0.0, 1.0]),
+    }
+    plot_paths = []
+    monkeypatch.setattr(
+        "src.plot.matrix.plot",
+        lambda **kwargs: plot_paths.append(
+            Path(kwargs["save_dir"]) / kwargs["filename"]
+        ),
+    )
+    monkeypatch.setattr(
+        "src.evaluation.callbacks.correlation_matrix.utils.mlflow.log_plots_to_mlflow",
+        lambda *args, **kwargs: None,
+    )
+    callback = CorrelationMatrixCallback(
+        variables=labels,
+        correlation_methods=["pearson", "spearman"],
+        sensitive_variable="a.Et",
+        write_details=True,
+        write_source_tables=False,
+    )
+    callback._active = True
+    callback._resolved_variables = [{"label": label} for label in labels]
+    callback._buffers = {"normal": {"input": [table], "reconstruction": [table]}}
+    callback._event_counts = {"normal": 5}
+    monkeypatch.setattr(callback, "_write_metadata", lambda *args, **kwargs: None)
+
+    callback.on_test_epoch_end(
+        trainer=SimpleNamespace(split="val"),
+        pl_module=SimpleNamespace(_ckpt_path=tmp_path / "loss_total.ckpt"),
+    )
+
+    output_dir = tmp_path / "plots/val/loss_total/correlation_matrix/normal"
+    assert not list(output_dir.rglob("*_variables.csv"))
+    assert (output_dir / "mean_correlations.json").is_file()
+    for method in ("pearson", "spearman"):
+        method_dir = output_dir / method.capitalize()
+        assert (method_dir / f"reconstruction_{method}_correlation_matrix.csv").is_file()
+        assert method_dir / f"reconstruction_{method}_correlation_matrix.png" in plot_paths
+        assert method_dir / f"input_{method}_correlation_matrix_et_only.png" in plot_paths

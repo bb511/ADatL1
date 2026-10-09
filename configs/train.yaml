@@ -56,6 +56,11 @@ ckpt_path: null
 # data.load_aux_in_fit is false.
 run_validation: true
 
+# Split replayed by the evaluation-only entrypoint src/run_eval_metrics.py:
+# val (stage 3) or test (scripts/physics/runae_test.sh, only for configurations
+# already selected on validation). src/train.py does not read it.
+eval_split: val
+
 # Stages 2-4 refuse to analyse a checkpoint whose run_manifest.yaml does not
 # match the composed config. Set false for runs trained before manifests
 # existed; the stage then warns instead of stopping.

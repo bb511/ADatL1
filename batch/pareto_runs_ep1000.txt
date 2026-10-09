@@ -1,0 +1,1 @@
+180524,0.1,80,h64_32,64_32_8,Seed180524_Gamma_0.1_Bins_80_architecture_h64_32_Ep1000_Run01

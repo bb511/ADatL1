@@ -14,9 +14,9 @@ error  = batch/logs/runcollect.$(ClusterId).$(ProcId).err
 
 MY.SingularityImage = "/eos/user/l/lbehrens/containers/adl1t_lab-dev.sif"
 
-# Leave EXPERIMENT_NAME empty to consume a study map the runner declared;
-# set it to build the map from checkpoints/<EXPERIMENT_NAME>/ instead.
-environment = "STUDY_ID=fet-et-pareto-v1 EXPERIMENT_NAME="
+# The study map is built from checkpoints/<EXPERIMENT_NAME>/, and the phase 2-4
+# outputs land in pareto_studies/<EXPERIMENT_NAME>/.
+environment = "STUDY_ID=fet-et-pareto-v1 EXPERIMENT_NAME=Pareto-Front-261002"
 
 # No transfer_output_files: phase2/ and phase3/ are written into the study tree
 # on EOS in place.

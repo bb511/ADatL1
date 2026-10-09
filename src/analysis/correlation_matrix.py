@@ -10,11 +10,18 @@ import pandas as pd
 
 try:
     from src.analysis.checkpointloader import CheckpointLoader
+    from src.analysis.run_mi_hyperparameters import read_mi_hyperparameters, run_dir_of
 except ImportError:
     from .checkpointloader import CheckpointLoader
+    from .run_mi_hyperparameters import read_mi_hyperparameters, run_dir_of
 
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
+# Same rule as src/plot/correlation_matrix.py (kept local: this module must not need
+# matplotlib). Highlighted-row entries whose reconstructed |r| is at most this are
+# printed in bold green.
+DECORRELATED_ABS_THRESHOLD = 0.1
+DECORRELATED_TEXT_COLOR = "#008000"
 DEFAULT_MATRIX_DIR = (
     REPO_ROOT
     / "checkpoints"
@@ -33,6 +40,9 @@ class CorrelationMatrixSpecs:
     input_path: str | Path
     reconstruction_path: str | Path
     label: str = "reconstruction_minus_input"
+    # Row framed with a bold black border, as in src/plot/correlation_matrix.py. Its
+    # entries are printed green where the reconstruction |r| <= 0.1.
+    highlight_variable: str | None = "FET.Et"
 
 
 class CorrelationMatrixPlotter:
@@ -46,7 +56,10 @@ class CorrelationMatrixPlotter:
         title: str | None = None,
         output_dir: str | Path | None = None,
         output_stem: str | None = None,
+        subtitle: str | None = None,
     ) -> Path:
+        """Write the delta CSV and PNG. ``subtitle`` defaults to the MI hyperparameters
+        of the checkpoint run that holds ``input_path``."""
         input_corr = self._load_matrix(self.specs.input_path)
         reconstruction_corr = self._load_matrix(self.specs.reconstruction_path)
         delta_corr = self.compute_delta(input_corr, reconstruction_corr)
@@ -63,6 +76,8 @@ class CorrelationMatrixPlotter:
             corr=delta_corr,
             save_path=png_path,
             title=title or "Absolute correlation change",
+            decorrelation_reference=reconstruction_corr,
+            subtitle=subtitle if subtitle is not None else self.mi_subtitle(),
         )
 
         print(f"Saved delta correlation matrix CSV to {csv_path}.")
@@ -101,6 +116,46 @@ class CorrelationMatrixPlotter:
         matrix = CheckpointLoader(path).load_matrix()
         return matrix.apply(pd.to_numeric, errors="raise")
 
+    def mi_subtitle(self) -> str | None:
+        """MI hyperparameters of the run that holds the input matrix, if any are on disk."""
+        run_dir = run_dir_of(Path(self.specs.input_path).resolve())
+        if run_dir is None:
+            return None
+        mi = read_mi_hyperparameters(run_dir)
+        return mi.text() if mi.known else None
+
+    def _highlight_index(self, labels: list) -> int | None:
+        """Row index of the highlighted variable; exact match before case-insensitive."""
+        target = self.specs.highlight_variable
+        if target is None:
+            return None
+        names = [str(label) for label in labels]
+        if target in names:
+            return names.index(target)
+        lowered = [name.lower() for name in names]
+        if target.lower() in lowered:
+            return lowered.index(target.lower())
+        return None
+
+    def _decorrelated_columns(
+        self,
+        labels: list,
+        reference: pd.DataFrame | None,
+    ) -> set[int]:
+        """Column indices whose reconstructed |r| with the highlighted variable is small."""
+        if reference is None:
+            return set()
+        row = self._highlight_index(list(reference.index))
+        if row is None:
+            return set()
+        values = pd.to_numeric(reference.iloc[row], errors="coerce")
+        small = {
+            str(label)
+            for label, value in values.items()
+            if np.isfinite(value) and abs(value) <= DECORRELATED_ABS_THRESHOLD
+        }
+        return {index for index, label in enumerate(labels) if str(label) in small}
+
     def _resolve_output_dir(self, output_dir: str | Path | None) -> Path:
         if output_dir is not None:
             return Path(output_dir)
@@ -111,14 +166,30 @@ class CorrelationMatrixPlotter:
 
         return REPO_ROOT / "logs" / "plots"
 
-    def _plot_heatmap(self, corr: pd.DataFrame, save_path: Path, title: str) -> None:
+    def _plot_heatmap(
+        self,
+        corr: pd.DataFrame,
+        save_path: Path,
+        title: str,
+        decorrelation_reference: pd.DataFrame | None = None,
+        subtitle: str | None = None,
+    ) -> None:
         try:
             import matplotlib.pyplot as plt
+            from matplotlib.patches import Rectangle
         except ModuleNotFoundError:
-            self._plot_heatmap_with_pillow(corr=corr, save_path=save_path, title=title)
+            self._plot_heatmap_with_pillow(
+                corr=corr,
+                save_path=save_path,
+                title=title,
+                decorrelation_reference=decorrelation_reference,
+                subtitle=subtitle,
+            )
             return
 
         labels = list(corr.columns)
+        highlight_index = self._highlight_index(labels)
+        green_columns = self._decorrelated_columns(labels, decorrelation_reference)
         mat = corr.to_numpy(dtype=float)
         n = len(labels)
         fig_size = max(6, 0.9 * n)
@@ -139,18 +210,53 @@ class CorrelationMatrixPlotter:
         ax.set_yticks(range(n))
         ax.set_xticklabels(labels, rotation=45, ha="right")
         ax.set_yticklabels(labels)
-        ax.set_title(title)
+        if subtitle:
+            ax.annotate(subtitle, xy=(0.5, 1.0), xycoords="axes fraction", xytext=(0, 6),
+                        textcoords="offset points", ha="center", va="bottom",
+                        fontsize=10, color="#333333", annotation_clip=False)
+            ax.set_title(title, pad=24)
+        else:
+            ax.set_title(title)
 
         for i in range(n):
             for j in range(n):
                 value = mat[i, j]
+                weight = "normal"
                 if np.isnan(value):
                     text = "nan"
                     color = "black"
+                elif i == highlight_index and j in green_columns:
+                    text = f"{value:.2f}"
+                    color = DECORRELATED_TEXT_COLOR
+                    weight = "bold"
                 else:
                     text = f"{value:.2f}"
                     color = "white" if abs(value) > 0.55 * color_limit else "black"
-                ax.text(j, i, text, ha="center", va="center", color=color, fontsize=10)
+                ax.text(
+                    j,
+                    i,
+                    text,
+                    ha="center",
+                    va="center",
+                    color=color,
+                    fontsize=10,
+                    fontweight=weight,
+                )
+
+        if highlight_index is not None:
+            ax.add_patch(
+                Rectangle(
+                    (-0.5, highlight_index - 0.5),
+                    n,
+                    1,
+                    fill=False,
+                    edgecolor="black",
+                    linewidth=3.0,
+                    joinstyle="miter",
+                    clip_on=False,
+                    zorder=5,
+                )
+            )
 
         cbar = fig.colorbar(im, ax=ax)
         cbar.set_label("|corr after| - |corr before|")
@@ -164,6 +270,8 @@ class CorrelationMatrixPlotter:
         corr: pd.DataFrame,
         save_path: Path,
         title: str,
+        decorrelation_reference: pd.DataFrame | None = None,
+        subtitle: str | None = None,
     ) -> None:
         try:
             from PIL import Image, ImageDraw, ImageFont
@@ -175,6 +283,8 @@ class CorrelationMatrixPlotter:
         labels = list(corr.columns)
         mat = corr.to_numpy(dtype=float)
         n = len(labels)
+        highlight_index = self._highlight_index(labels)
+        green_columns = self._decorrelated_columns(labels, decorrelation_reference)
 
         finite_values = mat[np.isfinite(mat)]
         max_abs = float(np.max(np.abs(finite_values))) if finite_values.size else 1.0
@@ -193,6 +303,8 @@ class CorrelationMatrixPlotter:
         font = ImageFont.load_default()
 
         draw.text((left_margin, 24), title, fill="black", font=font)
+        if subtitle:
+            draw.text((left_margin, 48), subtitle, fill=(51, 51, 51), font=font)
 
         for index, label in enumerate(labels):
             x = left_margin + index * cell_size + cell_size // 2
@@ -215,6 +327,8 @@ class CorrelationMatrixPlotter:
 
                 text = "nan" if np.isnan(value) else f"{value:.2f}"
                 text_color = "white" if abs(value) > 0.55 * color_limit else "black"
+                if i == highlight_index and j in green_columns and not np.isnan(value):
+                    text_color = DECORRELATED_TEXT_COLOR
                 draw.text(
                     ((x0 + x1) // 2, (y0 + y1) // 2),
                     text,
@@ -222,6 +336,14 @@ class CorrelationMatrixPlotter:
                     font=font,
                     anchor="mm",
                 )
+
+        if highlight_index is not None:
+            y0 = top_margin + highlight_index * cell_size
+            draw.rectangle(
+                (left_margin, y0, left_margin + n * cell_size, y0 + cell_size),
+                outline="black",
+                width=5,
+            )
 
         legend_x = left_margin + n * cell_size + 35
         legend_y = top_margin

@@ -8,9 +8,11 @@ import pandas as pd
 import torch
 from pytorch_lightning.callbacks import Callback
 
+from src.analysis.run_mi_hyperparameters import MiHyperparameters
+from src.data.feature_refs import label_matches_any
 from src.data.utils import unpack_batch
 from src.evaluation.callbacks import utils
-from src.plot import matrix
+from src.plot import correlation_matrix as corr_plot
 
 
 CORRELATION_SOURCE_FILENAMES = {
@@ -37,7 +39,15 @@ class CorrelationMatrixCallback(Callback):
     :param correlation_methods: Pandas correlation methods to save/plot, e.g.
         ['pearson'] or ['pearson', 'spearman'].
     :param sensitive_variable: Variable whose mean correlation with every other
-        configured variable is written for Pareto-front construction.
+        configured variable is written for Pareto-front construction. Its row is
+        framed in every correlation-matrix plot, and its entries are printed in green
+        where |r| <= 0.1 in the matrix itself (before/after matrices) or in the
+        reconstruction matrix (change matrices); see src/plot/correlation_matrix.py.
+    :param sensitive_group: Further sensitive variables ('<object>.<feature>',
+        wildcards allowed, e.g. 'FET.*') that are left out of that mean. They are
+        control-only (never reconstructed), so their correlation with the
+        sensitive variable is the same before and after training and would only
+        dilute ``C``. They are still shown in the correlation matrices.
     :param include_input: Whether to save/plot correlations of input variables.
     :param include_reconstruction: Whether to save/plot correlations of reconstructed
         variables. This is the gamma-dependent table for an autoencoder.
@@ -49,6 +59,13 @@ class CorrelationMatrixCallback(Callback):
     :param enabled: Whether to evaluate this callback for the current run.
     :param write_details: Whether to write source tables, matrices, and plots in
         addition to the compact Pearson/Spearman summary.
+    :param write_source_tables: Whether ``write_details`` also writes the
+        per-event ``input_variables.csv`` / ``reconstruction_variables.csv``
+        (one parent-level copy plus one per correlation method). These hold one
+        row per validation event, so on the full split they cost gigabytes per
+        run; set False to keep the correlation-matrix CSVs and PNGs without them.
+        Only ``src/analysis/scripts/recreate_sorted_correlation_matrices.py``
+        needs them.
     """
 
     def __init__(
@@ -60,6 +77,7 @@ class CorrelationMatrixCallback(Callback):
         aggregate: str = "sum",
         correlation_methods: list[str] | None = None,
         sensitive_variable: str = "FET.Et",
+        sensitive_group: list[str] | None = None,
         include_input: bool = True,
         include_reconstruction: bool = True,
         include_residual: bool = False,
@@ -68,6 +86,7 @@ class CorrelationMatrixCallback(Callback):
         log_raw_mlflow: bool = True,
         enabled: bool = True,
         write_details: bool = True,
+        write_source_tables: bool = True,
     ):
         super().__init__()
         self.variables = variables or [
@@ -93,6 +112,7 @@ class CorrelationMatrixCallback(Callback):
         self.aggregate = aggregate.lower()
         self.correlation_methods = correlation_methods or ["pearson"]
         self.sensitive_variable = sensitive_variable
+        self.sensitive_group = list(sensitive_group or [])
         self.include_input = include_input
         self.include_reconstruction = include_reconstruction
         self.include_residual = include_residual
@@ -101,6 +121,7 @@ class CorrelationMatrixCallback(Callback):
         self.log_raw_mlflow = log_raw_mlflow
         self.enabled = bool(enabled)
         self.write_details = bool(write_details)
+        self.write_source_tables = bool(write_source_tables)
         # on_test_epoch_start replaces this with fully resolved tensor indices.
         # The label-only fallback also lets summary-only callers operate on
         # already collected tables without requiring a live data module.
@@ -176,12 +197,12 @@ class CorrelationMatrixCallback(Callback):
         b = unpack_batch(batch)
 
         # Model-input tensor: this is what the AE actually sees.
-        # After the FET.Et exclusion, this should have 116 flattened features.
+        # After the FET.* exclusion, this should have 114 flattened features.
         x = torch.flatten(b.x, start_dim=1)
         mask = None if b.mask is None else torch.flatten(b.mask, start_dim=1).bool()
 
         # Control tensor: this is the full raw/control tensor.
-        # It should still contain FET.Et, so correlation_matrix can still use FET.Et.
+        # It still contains FET.*, so correlation_matrix can still use them.
         needs_control_x = any(
             item["model_indices"] is None for item in self._resolved_variables
         )
@@ -236,7 +257,7 @@ class CorrelationMatrixCallback(Callback):
                 )
 
             # Reconstruction tensor: output of the AE.
-            # This has the same layout as the 116-feature model input.
+            # This has the same layout as the 114-feature model input.
             yhat = outputs[self.output_name]
             yhat = torch.flatten(yhat, start_dim=1)[:n_keep]
 
@@ -267,6 +288,8 @@ class CorrelationMatrixCallback(Callback):
         ckpts_dir = Path(pl_module._ckpt_path).parent
         ckpt_name = Path(pl_module._ckpt_path).stem
         split = trainer.split
+        mi = self._mi_hyperparameters(pl_module)
+        subtitle = mi.text() if mi.known else None
 
         for dset_name, space_buffers in self._buffers.items():
             plot_folder = (
@@ -293,7 +316,7 @@ class CorrelationMatrixCallback(Callback):
 
                     correlations[(space_name, method)] = corr
 
-            if self.write_details:
+            if self.write_details and self.write_source_tables:
                 # Keep one parent-level copy for existing analysis utilities and write
                 # a copy into every method folder so each result is standalone.
                 self._write_correlation_source_tables(space_dataframes, plot_folder)
@@ -304,10 +327,11 @@ class CorrelationMatrixCallback(Callback):
                 method_folder = plot_folder / method_name
                 if self.write_details:
                     method_folder.mkdir(parents=True, exist_ok=True)
-                    self._write_correlation_source_tables(
-                        space_dataframes,
-                        method_folder,
-                    )
+                    if self.write_source_tables:
+                        self._write_correlation_source_tables(
+                            space_dataframes,
+                            method_folder,
+                        )
 
                 for space_name in space_dataframes:
                     corr = correlations.get((space_name, method))
@@ -323,25 +347,22 @@ class CorrelationMatrixCallback(Callback):
                     }
 
                     if self.write_details:
-                        corr.to_csv(
-                            method_folder
-                            / f"{space_name}_{method}_correlation_matrix.csv"
-                        )
-                        title = {
-                            "input": f"{method_name} correlation matrix before training",
-                            "reconstruction": (
-                                f"{method_name} correlation matrix after training"
-                            ),
-                        }.get(
-                            space_name,
-                            f"{method_name} correlation matrix: {space_name}",
-                        )
-
+                        stem = corr_plot.correlation_matrix_stem(space_name, method)
+                        corr.to_csv(method_folder / f"{stem}.csv")
                         self._write_correlation_matrix_variants(
                             corr=corr,
                             plot_folder=method_folder,
-                            stem=f"{space_name}_{method}_correlation_matrix",
-                            title=title,
+                            stem=stem,
+                            title=corr_plot.correlation_matrix_title(
+                                space_name,
+                                method,
+                            ),
+                            decorrelation_reference=(
+                                corr
+                                if space_name in {"input", "reconstruction"}
+                                else None
+                            ),
+                            subtitle=subtitle,
                         )
 
                 corr_before = correlations.get(("input", method))
@@ -373,33 +394,32 @@ class CorrelationMatrixCallback(Callback):
                     if correlation_change.empty:
                         continue
 
-                    change_stem = (
-                        f"abs_reconstruction_minus_input_{method}_correlation_matrix"
-                    )
-
+                    # |after| - |before| ("self improvement") in its own subfolder;
+                    # the method folder keeps the input/reconstruction matrices and
+                    # comparison_gamma0/ is filled by the post-processing backfill.
+                    self_folder = method_folder / corr_plot.SELF_IMPROVEMENT_DIR
+                    self_folder.mkdir(parents=True, exist_ok=True)
                     self._write_correlation_matrix_variants(
                         corr=correlation_change,
-                        plot_folder=method_folder,
-                        stem=change_stem,
-                        title=(
-                            f"Change in {method_name} correlation: "
-                            "|corr_after| - |corr_before|"
-                        ),
+                        plot_folder=self_folder,
+                        stem=corr_plot.correlation_change_stem(method),
+                        title=corr_plot.correlation_change_title(method),
+                        decorrelation_reference=corr_after,
+                        subtitle=subtitle,
                     )
 
-                    for direction, ascending in (
-                        ("increase", False),
-                        ("decrease", True),
-                    ):
+                    for direction, ascending in corr_plot.SORT_DIRECTIONS.items():
                         self._write_correlation_matrix_variants(
                             corr=correlation_change,
-                            plot_folder=method_folder,
-                            stem=f"{change_stem}_sorted_by_{direction}",
-                            title=(
-                                f"Change in {method_name} correlation: "
-                                f"variables sorted by mean {direction}"
+                            plot_folder=self_folder,
+                            stem=corr_plot.correlation_change_stem(method, direction),
+                            title=corr_plot.correlation_change_title(
+                                method,
+                                direction,
                             ),
                             sort_ascending=ascending,
+                            decorrelation_reference=corr_after,
+                            subtitle=subtitle,
                         )
 
                 if self.write_details:
@@ -409,8 +429,23 @@ class CorrelationMatrixCallback(Callback):
                         f"{self.name}/{method_name}",
                         method_folder,
                         log_raw=self.log_raw_mlflow,
-                        gallery_name=f"{dset_name}_{self.name}_{method}",
+                        gallery_name=corr_plot.gallery_name(dset_name, self.name, method),
                     )
+                    self_folder = method_folder / corr_plot.SELF_IMPROVEMENT_DIR
+                    if self_folder.is_dir():
+                        utils.mlflow.log_plots_to_mlflow(
+                            trainer,
+                            ckpt_name,
+                            f"{self.name}/{method_name}/{corr_plot.SELF_IMPROVEMENT_DIR}",
+                            self_folder,
+                            log_raw=self.log_raw_mlflow,
+                            gallery_name=corr_plot.gallery_name(
+                                dset_name,
+                                self.name,
+                                method,
+                                corr_plot.SELF_IMPROVEMENT_DIR,
+                            ),
+                        )
 
             self._write_mean_correlations(
                 mean_correlations,
@@ -614,6 +649,7 @@ class CorrelationMatrixCallback(Callback):
             f"aggregate: {self.aggregate}",
             f"max_events: {self.max_events}",
             f"sensitive_variable: {self.sensitive_variable}",
+            f"sensitive_group (excluded from mean correlation): {self.sensitive_group}",
             "variables:",
         ]
         for item in self._resolved_variables:
@@ -651,7 +687,12 @@ class CorrelationMatrixCallback(Callback):
             )
 
         sensitive_label = matching_labels[0]
-        other_labels = [label for label in corr.columns if label != sensitive_label]
+        other_labels = [
+            label
+            for label in corr.columns
+            if label != sensitive_label
+            and not label_matches_any(str(label), self.sensitive_group)
+        ]
         if not other_labels:
             raise ValueError(
                 "At least one non-sensitive variable is required to calculate the "
@@ -690,9 +731,11 @@ class CorrelationMatrixCallback(Callback):
         payload = {
             "schema_version": 1,
             "sensitive_variable": self.sensitive_variable,
+            "sensitive_group": self.sensitive_group,
             "definition": (
                 "Arithmetic mean of absolute correlations between the sensitive "
-                "variable and every other variable; self-correlation is excluded."
+                "variable and every other variable; self-correlation and the "
+                "other sensitive_group variables are excluded."
             ),
             "spaces": mean_correlations,
             "mean_pearson_correlation": mean_pearson,
@@ -715,66 +758,52 @@ class CorrelationMatrixCallback(Callback):
         stem: str,
         title: str,
         sort_ascending: bool | None = None,
+        decorrelation_reference: pd.DataFrame | None = None,
+        subtitle: str | None = None,
     ) -> None:
-        """Save full-variable and ``*.Et``-only PNG correlation matrices."""
-        variants = [("", corr, 1.0)]
+        """Save full-variable and ``*.Et``-only PNG correlation matrices.
 
-        et_labels = [label for label in corr.columns if str(label).endswith(".Et")]
-        if not et_labels:
-            raise RuntimeError(
-                "Cannot create the required *.Et-only correlation matrix because "
-                "the configured correlation variables contain no labels ending in '.Et'."
-            )
+        The sensitive variable's row is framed in both. Its entries are printed in
+        green where |r| <= 0.1 in ``decorrelation_reference``: pass the matrix itself
+        for a before/after matrix and the reconstruction matrix for a change matrix.
+        ``subtitle`` (the MI hyperparameters) is printed below the title.
+        """
+        corr_plot.write_correlation_matrix_variants(
+            corr,
+            plot_folder=plot_folder,
+            stem=stem,
+            title=title,
+            sort_ascending=sort_ascending,
+            highlight_variable=self.sensitive_variable,
+            decorrelation_reference=decorrelation_reference,
+            subtitle=subtitle,
+        )
 
-        et_corr = corr.loc[et_labels, et_labels]
-        variants.append(("_et_only", et_corr, 0.6))
+    @staticmethod
+    def _mi_hyperparameters(pl_module) -> MiHyperparameters:
+        """γ, requested and effective FET.Et bins of the evaluated model.
 
-        for suffix, variant, figure_scale in variants:
-            if sort_ascending is not None:
-                variant = self._sort_correlation_change_matrix(
-                    variant,
-                    ascending=sort_ascending,
-                )
-
-            variant_stem = f"{stem}{suffix}"
-            matrix.plot(
-                data=variant.to_dict(orient="index"),
-                value_name=title,
-                save_dir=plot_folder,
-                cmap="coolwarm",
-                vmin=-1.0,
-                vmax=1.0,
-                filename=f"{variant_stem}.png",
-                figure_scale=figure_scale,
-            )
+        Effective bins are the fitted (or checkpoint-restored) quantile edges + 1;
+        models without an MI binner give an empty record and no subtitle.
+        """
+        gamma = getattr(pl_module, "mi_gamma", None)
+        binner = getattr(pl_module, "sensitive_binner", None)
+        requested = getattr(binner, "num_bins", None)
+        edges = getattr(binner, "bin_edges", None)
+        effective = None if edges is None else int(edges.numel()) + 1
+        return MiHyperparameters(
+            gamma=None if gamma is None else float(gamma),
+            requested_bins=None if requested is None else int(requested),
+            effective_bins=effective,
+        )
 
     @staticmethod
     def _sort_correlation_change_matrix(
         corr: pd.DataFrame,
         ascending: bool,
     ) -> pd.DataFrame:
-        """Order both axes by each variable's mean off-diagonal correlation change.
-
-        Positive scores mean that a variable became more strongly correlated on
-        average after reconstruction; negative scores mean that it became less
-        strongly correlated. The diagonal is excluded because self-correlation does
-        not describe a relationship between variables.
-        """
-        if list(corr.index) != list(corr.columns):
-            raise ValueError(
-                "Cannot sort a correlation-change matrix whose row and column "
-                "labels differ."
-            )
-
-        off_diagonal = corr.copy()
-        np.fill_diagonal(off_diagonal.values, np.nan)
-        mean_change = off_diagonal.mean(axis=1).fillna(0.0)
-        ordered_labels = mean_change.sort_values(
-            ascending=ascending,
-            kind="stable",
-        ).index
-
-        return corr.loc[ordered_labels, ordered_labels]
+        """Order both axes by each variable's mean off-diagonal correlation change."""
+        return corr_plot.sort_correlation_change_matrix(corr, ascending=ascending)
 
     @staticmethod
     def _write_correlation_source_tables(

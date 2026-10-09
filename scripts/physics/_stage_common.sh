@@ -20,8 +20,8 @@ set -euo pipefail
 # run's checkpoint.
 : "${RUN_NAME:?Set RUN_NAME to the run you are training or analysing, e.g. RUN_NAME=AE_30ep_gamma0.1}"
 
-# Must match the composed experiment's experiment_name. physics/ae and its
-# ae_metrics overlay both use physics_ae_models.
+# Must match the composed experiment's experiment_name. physics/ae, its
+# ae_metrics overlay and physics/pareto_fet(_train) all use Pareto-Front-261002.
 : "${EXPERIMENT:=physics/ae}"
 
 # Overrides the experiment's own experiment_name, which is the directory every
@@ -104,7 +104,16 @@ for _d in extracted processed mlready; do
   }
 done
 
+# Hydra's default run directory is logs/<task>/runs/<date>_<HH-MM-SS>. Stages 2
+# and 3 write it on EOS, shared by every job, so two jobs starting in the same
+# second collide: FileExistsError on the directory or .hydra/config.yaml
+# (clusters 354142 and 354543, 2026-09-29). Append the run name plus host and
+# PID so each process gets its own directory. Hydra still resolves the date,
+# time, log_dir and task_name itself.
+_HYDRA_UNIQ="${RUN_NAME}_$(hostname -s 2>/dev/null || echo host)-$$"
+
 COMMON_ARGS=(
+  "hydra.run.dir=\${paths.log_dir}/\${task_name}/runs/\${now:%Y-%m-%d}_\${now:%H-%M-%S}_${_HYDRA_UNIQ}"
   # Pass root_dir explicitly rather than leaving it to
   # paths.root_dir: ${oc.env:PROJECT_ROOT}. rootutils.setup_root loads the
   # repo's .env at import time and can override the exported value, which is
@@ -133,10 +142,10 @@ fi
 # scientific record of what was trained, and Phase 2 validates runs against it;
 # a script-level default that disagrees with the config produces a record that
 # does not describe the model. Until 2026-09-18 this file did exactly that,
-# shadowing five of them:
-#
-#   lr 0.0019859329798336714 vs 0.0013029941778430407   weight_decay 1e-06 vs 0.001
-#   delta 1.0 vs 3.0         input_noise_std 0.0 vs 1e-04   grad clip 5.0 vs 0.0
+# shadowing five of them. Since 2026-09-28 configs/experiment/physics/ae.yaml
+# itself carries the cvar25_t169 values (lr 0.0019859329798336714,
+# weight_decay 1e-06, betas [0.9, 0.999], delta 10.0, input_noise_std 0.0,
+# gradient_clip_val 5.0), so the config and the record agree again.
 #
 # To change a hyperparameter, change the config. To try one ad hoc, set the
 # variable for that invocation -- and set the same one for stages 2 and 3, or

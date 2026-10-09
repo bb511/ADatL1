@@ -1,0 +1,3 @@
+Seed180524_Gamma_0.1_Bins_40_architecture_h64_32_Run01
+Seed180524_Gamma_0.1_Bins_80_architecture_h64_32_Run01
+Seed180524_Gamma_0_Bins_50_architecture_h64_32_Run01

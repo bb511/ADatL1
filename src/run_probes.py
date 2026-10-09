@@ -62,7 +62,7 @@ from src.utils import extras
 from src.utils import task_wrapper
 from src.utils.instrumentation import log_phase
 from src.utils.run_manifest import write_stage_status
-from src.utils.stage import build_stage_context, release_accelerator_cache
+from src.utils.stage import build_stage_context, finish_stage_loggers, release_accelerator_cache
 
 log = RankedLogger(__name__, rank_zero_only=True)
 
@@ -215,6 +215,7 @@ def run_probes(cfg: DictConfig) -> Tuple[Dict[str, Any], Dict[str, Any]]:
 
     context.datamodule.teardown("validate")
     release_accelerator_cache()
+    finish_stage_loggers(context)
 
     return metrics, context.object_dict
 

@@ -102,7 +102,7 @@ def test_recreate_experiment_writes_each_checkpoint_target_once(
         )
 
     monkeypatch.setattr(
-        "src.evaluation.callbacks.correlation_matrix.matrix.plot",
+        "src.plot.matrix.plot",
         write_plot,
     )
 

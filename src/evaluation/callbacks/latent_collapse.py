@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import json
-import math
 from collections import Counter
 from collections.abc import Mapping, Sequence
 from pathlib import Path
@@ -296,7 +295,7 @@ class LatentCollapseDiagnosticsCallback(Callback):
                 "minimum_fraction_of_paired_gamma_zero_joint_entropy": (
                     self.minimum_fraction_of_paired_gamma_zero_joint_entropy
                 ),
-                "paired_reference": "same_architecture_and_autoencoder_seed",
+                "paired_reference": "same_architecture",
                 "status": "requires_phase_2_aggregation",
             },
             "metrics": metrics,

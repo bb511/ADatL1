@@ -7,7 +7,7 @@
 # configs/experiment/physics/pareto_fet.yaml because the Phase 2 collector
 # (src/evaluation/pareto_aggregation.py) validates every run's resolved manifest
 # against this block -- study_id, protocol_version, configuration_id, candidate,
-# paired_autoencoder_seeds, sensitive_variable, collapse_constraint and the rest.
+# sensitive_variable, collapse_constraint and the rest.
 # A run that carries no such block is rejected outright. Keeping the block here
 # lets an ordinary AE run (configs/experiment/physics/ae.yaml, via the `adhoc`
 # variant) carry exactly the same policy, so autoencoders trained one at a time
@@ -19,7 +19,8 @@
 # cannot be combined in one file.
 
 enabled: true
-protocol_version: fet-et-pareto-v1
+# v2: single-seed study -- every configuration is exactly one training run.
+protocol_version: fet-et-pareto-v2
 study_id: fet-et-pareto-v1
 # The selection protocol above and the probe protocol below are versioned
 # separately. This records which probe protocol produced L, because its
@@ -38,49 +39,76 @@ sensitive_variable:
   binned_target_used_by: [mi_loss]
 
 # `candidate` is the sole source of the three searched AE parameters and the
-# paired replicate seed.  Launch tooling may vary only these fields; all other
+# training seed.  Launch tooling may vary only the searched fields; all other
 # training fields are frozen below and captured in the resolved manifest.
 candidate:
-  autoencoder_seed: 123
+  autoencoder_seed: 180524
   mi_gamma: 0.0
   mi_sensitive_num_bins: 50
   architecture_id: h64_32
   encoder_nodes: [64, 32, 8]
 
-# This ID deliberately excludes autoencoder_seed: all three paired seed runs of
-# one hyperparameter configuration must aggregate under the same identifier.
+# One run per configuration, so the ID is the hyperparameters alone.
 configuration_id: ${pareto_study.study_id}__gamma-${pareto_study.candidate.mi_gamma}__bins-${pareto_study.candidate.mi_sensitive_num_bins}__arch-${pareto_study.candidate.architecture_id}
 
-paired_autoencoder_seeds: [123, 500]
-seed_policy:
-  pairing_required: true
-  required_seeds: ${pareto_study.paired_autoencoder_seeds}
-  missing_or_invalid_seed: reject_configuration
-  aggregate_model_weights: false
-
-# Gamma-zero is a reference for every architecture and seed.  Binning is
+# Gamma-zero is a reference for every architecture.  Binning is
 # irrelevant when gamma is zero, so one canonical 50-bin reference avoids
 # redundant baselines while retaining the normal MI code path.
 search_space:
   searched_parameters:
     - algorithm.mi_gamma
     - algorithm.mi_sensitive_num_bins
-    - algorithm.encoder.nodes
+  # One fixed architecture (the cvar25_t169 encoder). The collector rejects any
+  # run whose architecture is not listed here.
+  #
+  # Pareto-Front-261002 (200 epochs). The grid is a union of blocks, not one
+  # gamma x bins product. Each block is either a product (mi_gamma x
+  # mi_sensitive_num_bins) or an explicit list of [gamma, bins] points;
+  # scripts/physics/make_pareto_grid.py expands them in order and emits a point
+  # listed in several blocks once. The previous study (Pareto-Front-260928:
+  # 111-run product + 78-run refinement) is in git history and in every one of
+  # its runs' resolved_config.yaml. run_pareto_fet_ngt.sh only understands a
+  # single product and refuses this layout.
   regularized:
-    mi_gamma: [0.05, 0.1, 0.15, 0.2, 0.25]
-    mi_sensitive_num_bins: [40, 50, 60]
     architectures:
       h64_32: [64, 32, 8]
-      h128_64: [128, 64, 8]
-      h64_64_32: [64, 64, 32, 8]
+    blocks:
+      - name: bins_scan_gamma_0.1
+        mi_gamma: [0.1]
+        mi_sensitive_num_bins: [10, 20, 30, 40, 50, 60, 70, 80, 90, 100]
+      - name: gamma_scan_50_bins
+        mi_gamma: [0.05, 0.1, 0.15, 0.2, 0.25, 0.3, 0.35, 0.4, 0.45, 0.5,
+                   0.55, 0.6, 0.65, 0.7, 0.75, 0.8, 0.85, 0.9, 0.95, 1]
+        mi_sensitive_num_bins: [50]
+      # Pareto-Front-260928 front, ranks 1-14 (ideal-point ranking), retrained
+      # for 200 epochs. Points already in the blocks above are not repeated.
+      - name: front_260928_rank_1_to_14
+        points:
+          - [0.1, 80]   # 1
+          - [0.25, 60]  # 2
+          - [0.25, 10]  # 3
+          - [0.35, 10]  # 4
+          - [0.2, 60]   # 5
+          - [0.1, 10]   # 6
+          - [0.35, 50]  # 7
+          - [0.2, 80]   # 8
+          - [0.6, 20]   # 9
+          - [0.7, 10]   # 10
+          - [0.2, 50]   # 11
+          - [0.15, 40]  # 12
+          - [0.8, 40]   # 13
+          - [0.5, 30]   # 14
+  # ONE gamma-zero reference per architecture, at the canonical 50 bins
+  # (GAMMA_ZERO_BASELINE_BINS in src/evaluation/pareto_baseline.py). Every run,
+  # whatever its bin count, is compared with it. Binning does not enter training
+  # at gamma = 0, so baselines at other bin counts would be identical
+  # (Pareto-Front-261002 trained ten and they agree bit for bit).
+  # make_pareto_grid.py refuses anything but a single 50.
   gamma_zero_baseline:
     mi_gamma: 0.0
     mi_sensitive_num_bins: 50
     architectures:
       h64_32: [64, 32, 8]
-      h128_64: [128, 64, 8]
-      h64_64_32: [64, 64, 32, 8]
-    paired_seeds: ${pareto_study.paired_autoencoder_seeds}
   fixed_latent_width: 8
   candidate_architecture_contract: encoder_nodes[-1] == 8
 
@@ -103,23 +131,21 @@ collapse_constraint:
     - joint_code_entropy
     - observed_code_count
     - effective_code_count
-  seed_level_rule:
+  rule:
     minimum_joint_code_entropy_bits: 1.0
     minimum_fraction_of_paired_gamma_zero_joint_entropy: 0.5
-    paired_reference: same_architecture_and_autoencoder_seed
+    # The single gamma 0 / 50-bin run of the same architecture, for every bin
+    # count. (Pareto-Front-261002 paired per bin count; that option is gone.)
+    paired_reference: same_architecture
     baseline_below_minimum_entropy: reject_baseline_and_dependent_candidates
-  configuration_level_rule:
-    required_seed_pass_fraction: 1.0
-    failed_seed: reject_configuration
-    include_rejected_configurations_in_results: true
+  include_rejected_configurations_in_results: true
 
 minimum_efficiency_constraint:
   metric: min_signal_efficiency
   comparison: paired_gamma_zero_baseline
-  paired_reference: same_architecture_and_autoencoder_seed
+  paired_reference: same_architecture
   max_relative_degradation: 0.05
-  seed_level_rule: candidate >= 0.95 * paired_gamma_zero_baseline
-  configuration_level_rule: every_expected_seed_must_pass
+  rule: candidate >= 0.95 * paired_gamma_zero_baseline
 
 # E is intentionally a third Pareto objective, not merely a dashboard
 # safeguard.  It remains the maximum of mean absolute Pearson and Spearman
@@ -167,7 +193,6 @@ ideal_point_ranking:
     residual_correlation: 0.3333333333333333
     signal_utility: 0.3333333333333333
   deterministic_tie_break: configuration_id_ascending
-  uncertainty_policy: flag_selected_vs_front_members_with_overlapping_marginal_95_percent_cis
 
 resolved_manifest:
   filename: pareto_manifest.resolved.yaml

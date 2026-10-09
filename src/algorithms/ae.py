@@ -242,6 +242,15 @@ class AE(ADLightningModule):
         z, reconstruction = self.forward(x_noisy)
         reco_loss = self.reco_loss(target=x, reco=reconstruction, mask=m)
 
+        # Hard evaluation codes for the collapse guard on loss_total.ckpt
+        # (src/callbacks/checkpointing/collapse_guard.py). Outside training only:
+        # eval-mode BernoulliSampling is a deterministic threshold that draws no
+        # random numbers, so this never perturbs the training RNG stream.
+        latent_code = None
+        if not self.training:
+            with torch.no_grad():
+                latent_code = self.bernoulli(z.detach()).to(torch.uint8)
+
         sensitive = self._compute_sensitive_bins(x=control_x, mask=control_mask)
 
         mi_loss = self.mi_loss(latent=z, sensitive=sensitive)
@@ -280,6 +289,9 @@ class AE(ADLightningModule):
 
                 # MI noise-floor diagnostics (empty when disabled):
                 **mi_null,
+
+                # Hard 0/1 latent codes, validation/test only (collapse guard):
+                **({"latent_code": latent_code} if latent_code is not None else {}),
             }
 
     def outlog(self, outdict: dict) -> dict:

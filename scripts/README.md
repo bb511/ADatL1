@@ -8,12 +8,37 @@ Run everything from the repository root.
 
 | Directory | What lives there |
 | --- | --- |
-| `physics/` `cifar10/` `robustad/` | The **command catalogues** — one file per model, per domain. Not runnable scripts; see below. |
+| `physics/` `cifar10/` `robustad/` | The **command catalogues** — one file per model, per domain. Not runnable scripts; see below. `physics/` also holds the live scripts of the FET.Et Pareto study (next section). |
 | `cluster/` | Submitting those catalogues to slurm (clariden), to an NGT pod, and checking what is still missing. |
 | `optuna/` | Reading the Optuna study databases: Pareto fronts out, retraining catalogues in. |
 | `analysis/` | Turning finished MLflow runs and the notebooks into the paper's numbers and figures. |
 | `runtime_study/` | Rebuilding `tab:compute_resources`. Self-contained — see [its README](runtime_study/README.md). |
 | `setup.sh` `symbolink.sh` | One-time bootstrap. `setup.sh` is required before anything composes. |
+
+## The FET.Et Pareto study (`physics/runae*.sh`)
+
+These are live scripts, not catalogues. How to run them, locally and on lxplus, is
+in the [main README](../README.md#the-fetet-pareto-study). Selection protocol
+`fet-et-pareto-v3`, study id `fet-et-pareto-v1`, probe protocol
+`fet-et-four-probe-v10`.
+
+| Script | Stage |
+| --- | --- |
+| `physics/runae_pareto_makegrid.sh` | job list `batch/pareto_runs.txt` from `configs/pareto_study/fet_et.yaml` |
+| `physics/runae.sh` | 1: train + validation evaluation |
+| `physics/runae_pareto_runprobes.sh` | 2: leakage probes |
+| `physics/runae_pareto_runcollect.sh` | 3: collect + select + figures (runs `study_map`, `aggregation`, `selection`, `plots`, `matrices` and `correlation_gamma0` of `src/evaluation/pareto/`) |
+| `physics/runae_test.sh`, `physics/runae_test_comparison.sh` | after the study: test split of the selected run, compared with its γ = 0 run (`correlation_gamma0`, `run_vs_gamma0`) |
+| `physics/_stage_common.sh` | settings shared by the per-run scripts (sourced) |
+
+The Python code of the study is not in `scripts/`: every phase is a module of
+`src/evaluation/pareto/`, which the scripts above run as
+`python3 -m src.evaluation.pareto.<module>`. The same works by hand, e.g.
+`python3 -m src.evaluation.pareto.mi_changes --help` for the metric-vs-γ and
+metric-vs-bins sweeps that stage 3 does not draw.
+
+`physics/runae_pareto.sh` and `physics/runae_q99_pareto.sh` are unrelated: they
+are Optuna retraining catalogues (below).
 
 ## The catalogues are documentation, not programs
 

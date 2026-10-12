@@ -6,7 +6,7 @@ from hydra import compose, initialize
 from omegaconf import OmegaConf
 
 from src.utils.omegaconf import register_resolvers
-from src.utils.pareto_manifest import write_resolved_pareto_manifest
+from src.evaluation.pareto.manifest import write_resolved_pareto_manifest
 
 
 def test_pareto_fet_manifest_composes_and_freezes_protocol(

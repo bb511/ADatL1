@@ -21,11 +21,11 @@ Marks: feasible runs are joined by a line, which breaks at rejected runs; reject
 runs (collapse rule) are open red markers; Pareto-front runs carry a black ring; the
 γ = 0 baseline is a dashed grey horizontal reference in both sweeps: the single
 γ = 0 / 50-bin run every configuration is compared with
-(``src/evaluation/pareto_baseline.py``).
+(``src/evaluation/pareto/baseline.py``).
 
 Usage::
 
-    python3 scripts/plot_pareto_mi_changes.py \\
+    python3 -m src.evaluation.pareto.mi_changes \\
         --candidates       <STUDY_ROOT>/phase3/pareto_candidates.csv \\
         --study-map        <STUDY_ROOT>/study_map.yaml \\
         --checkpoints-root checkpoints \\
@@ -43,8 +43,8 @@ import numpy as np
 import pandas as pd
 
 from src.analysis.decorrelation import load_effective_bin_count
-from src.evaluation.pareto_baseline import GAMMA_ZERO_BASELINE_BINS
-from src.evaluation.pareto_matrices import (
+from src.evaluation.pareto.baseline import GAMMA_ZERO_BASELINE_BINS
+from src.evaluation.pareto.matrices import (
     BINS,
     CRITICAL,
     DIAGNOSTICS,

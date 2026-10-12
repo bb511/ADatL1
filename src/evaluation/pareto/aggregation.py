@@ -24,7 +24,7 @@ from src.evaluation.leakage_probe.constants import (
 from src.evaluation.leakage_probe.provenance import (
     leakage_probe_configuration_id,
 )
-from src.evaluation.pareto_baseline import GAMMA_ZERO_BASELINE_BINS
+from src.evaluation.pareto.baseline import GAMMA_ZERO_BASELINE_BINS
 
 
 PARETO_METRICS_SCHEMA_VERSION = 2

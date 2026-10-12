@@ -1,5 +1,5 @@
 #!/bin/bash
-# STAGE 4 of 4 on HTCondor -- aggregate every run and build the Pareto front.
+# STAGE 3 on HTCondor -- aggregate every run and build the Pareto front.
 #
 # A whole-study step, not a per-run one: a single job, no RUN_NAME, no queue
 # list. Pure pandas/numpy - no torch, no GPU, minutes rather than hours.
@@ -11,7 +11,7 @@
 set -euo pipefail
 
 echo "========================================"
-echo "Pareto collect + select (stage 4/4)"
+echo "Pareto collect + select (stage 3)"
 echo "========================================"
 echo "Date:     $(date)"
 echo "Hostname: $(hostname)"
@@ -24,16 +24,15 @@ python3 --version
 
 : "${CODE_DIR:=/eos/user/l/lbehrens/adatl1/ADatL1}"
 : "${ADL1T_OUTPUT_ROOT:=/eos/user/l/lbehrens/adatl1/ADatL1/outputs}"
-: "${STUDY_ID:=fet-et-pareto-v1}"
 # The study map is built from checkpoints/<EXPERIMENT_NAME>/ and every output
 # lands in pareto_studies/<EXPERIMENT_NAME>/, so each study keeps its own tree.
 : "${EXPERIMENT_NAME:=Pareto-Front-261002}"
 : "${STUDY_ROOT:=${ADL1T_OUTPUT_ROOT}/pareto_studies/${EXPERIMENT_NAME}}"
-export ADL1T_OUTPUT_ROOT STUDY_ID STUDY_ROOT EXPERIMENT_NAME
+export ADL1T_OUTPUT_ROOT STUDY_ROOT EXPERIMENT_NAME
 
 echo "CODE_DIR:        $CODE_DIR"
 echo "STUDY_ROOT:      $STUDY_ROOT"
 echo "EXPERIMENT_NAME: ${EXPERIMENT_NAME:-<using an existing study map>}"
 echo
 
-exec bash "${CODE_DIR}/scripts/physics/runcollect.sh"
+exec bash "${CODE_DIR}/scripts/physics/runae_pareto_runcollect.sh"

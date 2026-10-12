@@ -1,9 +1,15 @@
-#!/usr/bin/env python3
 """Expand the Pareto grid into one line per training run.
 
-The grid lives in configs/pareto_study/fet_et.yaml and nowhere else. This script
+The grid lives in configs/pareto_study/fet_et.yaml and nowhere else. This module
 reads it and writes the job list that batch/runae_pareto.sub consumes, so a
 single condor_submit fans the whole study out as independent stage-1 jobs.
+
+Run it through its wrapper, from anywhere:
+
+    bash scripts/physics/runae_pareto_makegrid.sh                      # batch/pareto_runs.txt
+    bash scripts/physics/runae_pareto_makegrid.sh --attempt 02 --only Gamma_0.1_
+
+or directly from the repository root: ``python3 -m src.evaluation.pareto.make_grid``.
 
 Generating the list rather than maintaining it by hand is not tidiness: Phase 2
 validates every run against the manifest, so a hand-written list that drifts from
@@ -36,11 +42,11 @@ import sys
 
 from omegaconf import OmegaConf
 
-REPO_ROOT = Path(__file__).resolve().parents[2]
+REPO_ROOT = Path(__file__).resolve().parents[3]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
-from src.evaluation.pareto_baseline import GAMMA_ZERO_BASELINE_BINS  # noqa: E402
+from src.evaluation.pareto.baseline import GAMMA_ZERO_BASELINE_BINS  # noqa: E402
 
 DEFAULT_GRID = REPO_ROOT / "configs" / "pareto_study" / "fet_et.yaml"
 
@@ -59,7 +65,7 @@ def iter_runs(grid: Dict[str, Any], seed: int) -> Iterator[Tuple[Any, ...]]:
     # One gamma-zero baseline per architecture. Binning is irrelevant at
     # gamma=0, so the study fixes it at the canonical 50 rather than training
     # identical baselines; every run, at any bin count, is compared with it
-    # (src/evaluation/pareto_aggregation.py).
+    # (src/evaluation/pareto/aggregation.py).
     baseline_bins = baseline["mi_sensitive_num_bins"]
     if isinstance(baseline_bins, (list, tuple)) or int(baseline_bins) != GAMMA_ZERO_BASELINE_BINS:
         raise SystemExit(

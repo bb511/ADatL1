@@ -1,11 +1,11 @@
 #!/bin/bash
-# Shared HTCondor-side environment for the four pipeline stages. Sourced by
-# batch/runae_pareto.sh, batch/runprobes_pareto.sh, batch/runmetrics_pareto.sh
-# and batch/runcollect.sh.
+# Shared HTCondor-side environment for the pipeline jobs. Sourced by
+# batch/runae_pareto.sh, batch/runprobes_pareto.sh and the batch/runae_test*.sh
+# wrappers.
 #
 # Its job is to translate the lxplus/EOS layout into the environment variables
 # the scripts/physics/* stage scripts expect, whose own defaults point at the
-# NGT cluster (/shared/adatl1, /scratch/...) and do not exist here.
+# local layout (03_Data next to the checkout) and do not exist here.
 
 set -euo pipefail
 
@@ -47,9 +47,9 @@ fi
 # The Pareto study's experiment directory -- THE single place this name lives.
 # ---------------------------------------------------------------------------
 # Every stage must agree on it: stage 1 writes
-# checkpoints/<name>/<run_name>/, and stages 2-4 read exactly that path. It
+# checkpoints/<name>/<run_name>/, and stages 2 and 3 read exactly that path. It
 # used to be repeated in six files, so a rename could leave stage 1 writing one
-# directory while stage 3 looked in another -- a failure that only shows up as
+# directory while a later stage looked in another -- a failure that only shows up as
 # "Missing loss_total.ckpt" after the data has loaded. Change it here, nowhere
 # else. No spaces: this becomes a directory name, an MLflow experiment name and
 # a value passed through HTCondor's environment string into several shell
@@ -80,7 +80,7 @@ SCRATCH="${_CONDOR_SCRATCH_DIR:-$PWD}"
 
 # Every stage in this pipeline shares one identity and one architecture. If any
 # of these differ from the stage-1 run that produced the checkpoint, the strict
-# load_state_dict in stage 2 and 3 fails.
+# load_state_dict in stage 2 (and in the test evaluation) fails.
 : "${EXPERIMENT:=physics/ae}"
 : "${RUN_NAME:?Set RUN_NAME, e.g. via the queue statement in the submit file}"
 

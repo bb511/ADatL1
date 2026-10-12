@@ -2,8 +2,7 @@
 
 The Pareto collector consumes a study map: an explicit list of every
 configuration's single run, each pointing at its resolved manifest and its
-checkpoint directory. The study runner writes that list up front, from the grid
-it is about to launch.
+checkpoint directory. It can be written by hand (e.g. to leave a run out).
 
 This module produces the same file the other way round, from what is actually on
 disk. Stage 1 leaves a ``run_manifest.yaml`` in every run's checkpoint directory

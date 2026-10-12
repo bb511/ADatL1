@@ -1,7 +1,7 @@
 """Compare a run's test outputs with those of its γ = 0 / 50-bin run.
 
 The counterpart of the correlation-matrix comparison
-(``src/analysis/correlation_gamma0_comparison.py``) for everything else the old
+(``src/evaluation/pareto/correlation_gamma0.py``) for everything else the old
 test evaluation produced. For each γ ≠ 0 run it writes
 
     <run>/plots/<split>/<ckpt>/comparison/          (default plots/test/loss_total/)
@@ -42,13 +42,13 @@ histograms, 0 = identical) of each reconstruction to the input (lower is better)
 and between the two reconstructions.
 
 The reference is the γ = 0 / 50-bin run of the same experiment with the same seed,
-architecture and epochs (``correlation_gamma0_comparison.find_baseline_runs``),
+architecture and epochs (``correlation_gamma0.find_baseline_runs``),
 and it must have been evaluated on the same split. γ = 0 runs are skipped.
 Quantities missing on either side are left out and listed in ``summary.json``.
 
 Usage::
 
-    python3 scripts/compare_with_gamma0.py --experiment-dir checkpoints/Pareto-Front-261002 \\
+    python3 -m src.evaluation.pareto.run_vs_gamma0 --experiment-dir checkpoints/Pareto-Front-261002 \\
         [--run-name <run> ...] [--split test] [--ckpt loss_total]
 """
 
@@ -66,7 +66,7 @@ from typing import Any, Iterable, Optional, Sequence
 import numpy as np
 import pandas as pd
 
-from src.analysis.correlation_gamma0_comparison import (
+from src.evaluation.pareto.correlation_gamma0 import (
     NO_BASELINE,
     RunInfo,
     find_baseline_runs,

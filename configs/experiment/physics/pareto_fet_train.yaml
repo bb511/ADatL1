@@ -19,9 +19,10 @@
 #      the module with _set_thres_on_module. Without it the evaluator raises
 #      "Threshold has not been set" (cluster 333975, 2026-09-19, 93 runs).
 #   2. That threshold is saved INTO the checkpoint. A checkpoint trained without
-#      anomaly_eff therefore carries no thres_operational, so stage 3 would have
-#      inherited the same failure later, from a checkpoint that could not be
-#      fixed without retraining.
+#      anomaly_eff therefore carries no thres_operational, so every later
+#      re-evaluation (src/run_eval_metrics.py, e.g. the test split) would have
+#      inherited the same failure, from a checkpoint that could not be fixed
+#      without retraining.
 #
 # data.load_aux_in_fit still exists in the datamodule and still works; it is
 # simply not what this study wants. Anything using it must also drop the

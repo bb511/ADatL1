@@ -11,7 +11,7 @@
 # record of what was trained; a command-line override that disagrees with it is
 # exactly the divergence that record exists to prevent.
 
-STAGE_LABEL="Pareto stage 1/4: train one grid point"
+STAGE_LABEL="Pareto stage 1: train one grid point + val evaluation"
 export STAGE_LABEL
 
 # The study experiment, minus the training callbacks that need the auxiliary
@@ -37,6 +37,12 @@ export PARETO_CANDIDATE
 # torn into three fields.
 ENCODER_NODES="[${ENCODER_NODES_US//_/,}]"
 export SEED MI_GAMMA MI_NUM_BINS ARCHITECTURE_ID ENCODER_NODES
+
+# Empty = the epochs of configs/experiment/physics/pareto_fet_train.yaml. Set
+# explicitly (possibly empty) because scripts/physics/runae.sh turns an UNSET
+# MAX_EPOCHS into its local default of 3.
+: "${MAX_EPOCHS:=}"
+export MAX_EPOCHS
 
 # HTCondor copies the executable into the sandbox and renames it
 # condor_exec.exe, so "$(dirname "$0")" is the scratch directory, not the repo.

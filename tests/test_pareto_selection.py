@@ -9,7 +9,7 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from src.evaluation.pareto_selection import (
+from src.evaluation.pareto.selection import (
     ParetoSelectionError,
     read_phase2_table,
     select_and_write_pareto_front,
@@ -34,7 +34,7 @@ def _row(
     }
     row: dict[str, object] = {
         "study_id": "synthetic-study",
-        "protocol_version": "fet-et-pareto-v2",
+        "protocol_version": "fet-et-pareto-v3",
         "configuration_id": configuration_id,
         "configuration_valid": valid,
         "feasible": feasible,

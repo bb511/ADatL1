@@ -28,7 +28,7 @@ from typing import Any, Mapping, Sequence
 import numpy as np
 import pandas as pd
 
-from .pareto_selection import (
+from .selection import (
     CONFIGURATION_ID_COLUMN,
     CORRELATION_COLUMN,
     EFFICIENCY_COLUMN,

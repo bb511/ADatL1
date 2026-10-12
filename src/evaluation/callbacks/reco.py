@@ -40,7 +40,7 @@ class ReconstructionPlots(Callback):
     ``input``, ``reco``; first row underflow, last row overflow). Those use their
     own binning: Doane edges of the INPUT values of the warmup batches only, so two
     models evaluated on the same split get identical bins and can be overlaid and
-    subtracted (src/analysis/test_gamma0_comparison.py). They count every event,
+    subtracted (src/evaluation/pareto/run_vs_gamma0.py). They count every event,
     warmup batches included. The plots keep their edges from input and
     reconstruction together.
 

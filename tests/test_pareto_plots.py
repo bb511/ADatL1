@@ -8,14 +8,14 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from src.evaluation.pareto_plots import (
+from src.evaluation.pareto.plots import (
     FIGURE_FILENAMES,
     _gamma_colors,
     ParetoPlotError,
     front_parallel_coordinates,
     write_pareto_figures,
 )
-from src.evaluation.pareto_selection import select_pareto_front
+from src.evaluation.pareto.selection import select_pareto_front
 
 
 def _row(

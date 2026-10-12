@@ -38,7 +38,7 @@
 #   - Pareto-study runs (tag "pareto"): experiment=physics/pareto_fet plus the
 #     run's pareto_study.candidate (seed, gamma, bins, architecture, encoder nodes);
 #   - other runs: experiment=physics/ae plus the run's algorithm hyperparameters.
-# The stage-3 fingerprint check (run_manifest.yaml) then stops the job before any
+# The fingerprint check in src/run_eval_metrics.py (run_manifest.yaml) then stops the job before any
 # data is loaded if the composed model is not the one in the checkpoint. Runs
 # without run_manifest.yaml (trained before 2026-09-18) are refused.
 #

@@ -1,6 +1,7 @@
-# STAGE 4 of 4 -- aggregate every run and build the Pareto front.
+# STAGE 3 -- aggregate every run and build the Pareto front.
 #
-#   condor_submit batch/runcollect.sub
+#   condor_submit batch/runcollect.sub                              # Pareto-Front-261002
+#   condor_submit EXPERIMENT_NAME=<experiment> batch/runcollect.sub
 #
 # A single job for the whole study: no RUN_NAME, no queue list. Run it only once
 # every run has a complete artifact set, otherwise the collector records the
@@ -15,8 +16,9 @@ error  = batch/logs/runcollect.$(ClusterId).$(ProcId).err
 MY.SingularityImage = "/eos/user/l/lbehrens/containers/adl1t_lab-dev.sif"
 
 # The study map is built from checkpoints/<EXPERIMENT_NAME>/, and the phase 2-4
-# outputs land in pareto_studies/<EXPERIMENT_NAME>/.
-environment = "STUDY_ID=fet-et-pareto-v1 EXPERIMENT_NAME=Pareto-Front-261002"
+# outputs land in pareto_studies/<EXPERIMENT_NAME>/. Empty means the default in
+# batch/runcollect.sh.
+environment = "EXPERIMENT_NAME=$(EXPERIMENT_NAME)"
 
 # No transfer_output_files: phase2/ and phase3/ are written into the study tree
 # on EOS in place.

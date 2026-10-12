@@ -571,7 +571,7 @@ histories and create the new plot artifacts.
 The probe evaluator produces one primary `L` per trained autoencoder run. The Pareto
 study is single-seed, so every hyperparameter configuration is exactly one run and its
 `leakage_worst` enters the Phase 2 table directly
-(`src/evaluation/pareto_aggregation.py`). The probe initialization seed belongs to the
+(`src/evaluation/pareto/aggregation.py`). The probe initialization seed belongs to the
 measurement procedure and is unrelated to the autoencoder seed.
 
 A run with `probe_valid=false` has no leakage score and its configuration cannot enter

@@ -11,7 +11,7 @@
 # fingerprint still matches -- while this stage does need the evaluation
 # callbacks the training overlay strips.
 
-STAGE_LABEL="Pareto stage 2/4"
+STAGE_LABEL="Pareto stage 2"
 export STAGE_LABEL
 
 : "${EXPERIMENT:=physics/pareto_fet}"
@@ -57,5 +57,5 @@ echo "EXPERIMENT_NAME:   $EXPERIMENT_NAME"
 
 echo "SEED / GAMMA / BINS / ARCH: $SEED / $MI_GAMMA / $MI_NUM_BINS / $ARCHITECTURE_ID"
 echo
-echo "Running scripts/physics/runprobes.sh ..."
-exec bash "${CODE_DIR}/scripts/physics/runprobes.sh"
+echo "Running scripts/physics/runae_pareto_runprobes.sh ..."
+exec bash "${CODE_DIR}/scripts/physics/runae_pareto_runprobes.sh"

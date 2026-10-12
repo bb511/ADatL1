@@ -1,4 +1,13 @@
-"""Stage 3 of 4: the remaining Pareto metrics on an already-trained checkpoint.
+"""Re-evaluate an already-trained checkpoint, without training.
+
+This used to be a separate stage of the Pareto pipeline, until stage 1 took
+over the full validation evaluation (2026-09-29); its wrappers were removed on
+2026-10-09. The entrypoint stays for two uses:
+
+* ``eval_split=test``: the test-split evaluation of a selected run
+  (scripts/physics/runae_test.sh, batch/runae_test.sub);
+* re-running the validation evaluation of a run whose post-fit evaluation in
+  stage 1 failed, without retraining (by hand, see the example below).
 
 Reads ``<checkpoints_dir>/<experiment_name>/<run_name>/loss_total.ckpt``, which
 stage 1 (src/train.py) wrote, replays the validation split through it, and lets
@@ -11,22 +20,20 @@ the evaluation callbacks write their summary artifacts:
     <run>/plots/val/loss_total/auroc/auroc_summary.json              diagnostic
 
 Which of these actually appear is decided entirely by ``evaluation.callbacks``
-in the composed experiment. ``experiment=physics/ae`` gives the ordinary AE
-plots; ``experiment=physics/ae_metrics`` and ``experiment=physics/pareto_fet``
-add the four artifacts above. This stage does not force any of them on, so that
-one entrypoint serves both the plain-AE workflow and the Pareto study.
+in the composed experiment; ``experiment=physics/ae`` and
+``experiment=physics/pareto_fet`` enable all four. This entrypoint does not force
+any of them on.
 
 Compose the same config as the stage-1 run. Example:
 
     python3 src/run_eval_metrics.py \\
-        experiment=physics/ae_metrics \\
+        experiment=physics/ae \\
         run_name=AE_LXPLUS_30ep \\
         paths.raw_data_dir=... \\
         trainer=cpu
 
-This stage holds the validation split plus all 21 auxiliary signal datasets in
-memory at once, so it is the memory-hungry analysis stage; the probes are the
-slow one.
+It holds the validation split plus all 21 auxiliary signal datasets in memory
+at once.
 
 ``eval_split=test`` replays the held-out TEST split instead (zero-bias test part
 plus the test part of every auxiliary set) and writes the same artifacts under
@@ -38,8 +45,8 @@ for configurations already selected on validation. On test:
 * no optimized metric is set: test must never feed back into model selection;
 * efficiencies use the operating threshold stored in the checkpoint, which was
   fixed on validation data during training;
-* the stage status is ``stage_status/metrics_test.yaml``, so the validation
-  record of stage 3 is left alone.
+* the stage status is ``stage_status/metrics_test.yaml``, so a validation
+  record (``stage_status/metrics.yaml``) is left alone.
 """
 
 from typing import Any, Dict, List, Tuple
@@ -83,7 +90,7 @@ EVAL_SPLITS = {
 
 
 def resolve_eval_split(cfg: DictConfig) -> str:
-    """The split this invocation replays: ``val`` (stage 3) or ``test``."""
+    """The split this invocation replays: ``val`` (default) or ``test``."""
     split = str(cfg.get("eval_split", "val"))
     if split not in EVAL_SPLITS:
         raise ValueError(
@@ -125,7 +132,7 @@ def run_eval_metrics(cfg: DictConfig) -> Tuple[Dict[str, Any], Dict[str, Any]]:
     if cfg.get("evaluation") is None:
         raise ValueError(
             "No evaluation config. Compose the same experiment as the stage-1 "
-            "run, for example experiment=physics/ae_metrics."
+            "run, for example experiment=physics/ae or experiment=physics/pareto_fet."
         )
 
     split = resolve_eval_split(cfg)
@@ -141,7 +148,7 @@ def run_eval_metrics(cfg: DictConfig) -> Tuple[Dict[str, Any], Dict[str, Any]]:
     )
 
     log.info(
-        Back.MAGENTA + 8 * "-" + f"STAGE 3: EVALUATION METRICS ({split})" + 8 * "-"
+        Back.MAGENTA + 8 * "-" + f"CHECKPOINT EVALUATION ({split})" + 8 * "-"
     )
     evaluator = get_evaluator(cfg, context.logger)
     if evaluator is None:
@@ -201,7 +208,7 @@ def run_eval_metrics(cfg: DictConfig) -> Tuple[Dict[str, Any], Dict[str, Any]]:
 
 @hydra.main(version_base="1.3", config_path="../configs", config_name="train.yaml")
 def main(cfg: DictConfig) -> None:
-    """Entry point for stage 3 (and, with eval_split=test, the test evaluation)."""
+    """Entry point for re-evaluating a checkpoint (val by default, or eval_split=test)."""
     if "run_name" in cfg and not isinstance(cfg.run_name, str):
         # See the same coercion in src/train.py.
         from omegaconf import open_dict

@@ -11,7 +11,7 @@ import pytest
 
 from src.evaluation.leakage_probe.constants import LEAKAGE_PROBE_PROTOCOL_VERSION
 from src.evaluation.leakage_probe.provenance import leakage_probe_configuration_id
-from src.evaluation.pareto_aggregation import (
+from src.evaluation.pareto.aggregation import (
     ParetoCollectionError,
     collect_and_write_pareto_study,
     collect_pareto_study,
@@ -20,7 +20,7 @@ from src.evaluation.pareto_aggregation import (
 
 SEED = 10
 STUDY_ID = "synthetic-fet-study"
-PROTOCOL_VERSION = "fet-et-pareto-v2"
+PROTOCOL_VERSION = "fet-et-pareto-v3"
 
 
 def _configuration_id(gamma: float, architecture_id: str = "h64_32", bins: int = 50) -> str:

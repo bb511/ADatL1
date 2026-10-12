@@ -10,7 +10,7 @@ import pytest
 
 pytest.importorskip("matplotlib")
 
-from src.evaluation.pareto_matrices import (  # noqa: E402
+from src.evaluation.pareto.matrices import (  # noqa: E402
     BLUE,
     METRICS,
     STATUS_FILENAME,
@@ -83,7 +83,7 @@ def test_collapse_rule_read_from_resolved_config(tmp_path):
 
 
 def test_subtitle_quotes_the_single_50_bin_baseline():
-    from src.evaluation.pareto_matrices import _baseline_text
+    from src.evaluation.pareto.matrices import _baseline_text
 
     table = _candidates()  # γ = 0 at 10 bins: 0.11, at 50 bins: 0.15
     assert _baseline_text(table, "leakage_worst", "{:.2f}") == "baseline γ=0: 0.15"
@@ -180,7 +180,7 @@ def test_colour_scale_looks_like_the_correlation_matrices(tmp_path, saved_figure
 
 
 def test_colorbar_ticks_keep_both_ends_and_unique_labels():
-    from src.evaluation.pareto_matrices import colorbar_ticks, tick_labels
+    from src.evaluation.pareto.matrices import colorbar_ticks, tick_labels
 
     ticks = colorbar_ticks(0.1053, 0.1142)
     assert ticks[0] == 0.1053 and ticks[-1] == 0.1142

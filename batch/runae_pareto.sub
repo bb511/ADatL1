@@ -1,14 +1,18 @@
 # STAGE 1 of the Pareto study -- the whole grid, one job per run.
 #
-#   python3 scripts/physics/make_pareto_grid.py    # regenerate the job list
-#   condor_submit batch/runae_pareto.sub           # 96 jobs
+#   bash scripts/physics/runae_pareto_makegrid.sh        # regenerate the job list
+#   condor_submit EXPERIMENT_NAME=<experiment> batch/runae_pareto.sub
+#
+# EXPERIMENT_NAME is the checkpoints/<experiment>/ folder of the study. Empty
+# means PARETO_EXPERIMENT_NAME in batch/_stage_env.sh. Give every new study its
+# own name: stage 3 refuses a folder whose runs carry different protocol versions.
 #
 # The job list is batch/pareto_runs.txt, generated from
 # configs/pareto_study/fet_et.yaml so the submitted grid and the manifest every
 # run is validated against cannot drift apart. To retrain a subset after a
 # failure, regenerate with a new attempt counter and a filter:
 #
-#   python3 scripts/physics/make_pareto_grid.py --attempt 02 --only Gamma_0.1_
+#   bash scripts/physics/runae_pareto_makegrid.sh --attempt 02 --only Gamma_0.1_
 #
 # which leaves the first attempt's directories untouched, because the attempt
 # counter is part of the run name.
@@ -21,7 +25,7 @@ error  = batch/logs/runae_pareto.$(ClusterId).$(ProcId).err
 
 MY.SingularityImage = "/eos/user/l/lbehrens/containers/adl1t_lab-dev.sif"
 
-environment = "SEED=$(SEED) MI_GAMMA=$(GAMMA) MI_NUM_BINS=$(BINS) ARCHITECTURE_ID=$(ARCH) ENCODER_NODES_US=$(NODES) RUN_NAME=$(RUN_NAME) EXPERIMENT=physics/pareto_fet_train TRAINER=cpu CPU_THREADS=6 DATA_WORKERS=3"
+environment = "SEED=$(SEED) MI_GAMMA=$(GAMMA) MI_NUM_BINS=$(BINS) ARCHITECTURE_ID=$(ARCH) ENCODER_NODES_US=$(NODES) RUN_NAME=$(RUN_NAME) EXPERIMENT_NAME=$(EXPERIMENT_NAME) MAX_EPOCHS=$(MAX_EPOCHS) EXPERIMENT=physics/pareto_fet_train TRAINER=cpu CPU_THREADS=6 DATA_WORKERS=3"
 
 # ---------------------------------------------------------------------------
 # Output transfer
@@ -29,7 +33,7 @@ environment = "SEED=$(SEED) MI_GAMMA=$(GAMMA) MI_NUM_BINS=$(BINS) ARCHITECTURE_I
 # Required: HTCondor returns only top-level sandbox files, never subdirectories.
 # Each job writes a disjoint path, checkpoints/<experiment_name>/<run_name>/, so
 # the 96 returned trees merge by union into one experiment directory -- which is
-# exactly what stage 4 then reads, via the run_manifest.yaml each one carries.
+# exactly what stage 3 then reads, via the run_manifest.yaml each one carries.
 transfer_output_files = outputs
 
 # ---------------------------------------------------------------------------
@@ -48,7 +52,7 @@ request_gpus = 0
 # That last configuration is reverted: stage 1 runs the full post-fit evaluation
 # again, which needs the auxiliary datasets AND the operational threshold that
 # the anomaly_eff training callback stores on the module (and hence into the
-# checkpoint, which stage 3 later depends on). So the working set is the 15273 MB
+# checkpoint, which any later re-evaluation depends on). So the working set is the 15273 MB
 # figure, not 10336, and 18000 gives about 18% headroom on a measurement.
 #
 # 18000/6 still reaches far more of the pool than the 21000/7 it replaces, and
@@ -78,5 +82,5 @@ on_exit_remove = (ExitBySignal == False && ExitCode == 0) || (NumJobStarts >= 3)
 # job retrains from scratch and transfers again. At most 3 starts.
 periodic_release = (HoldReasonCode == 12) && (NumJobStarts < 3)
 
-# Subset: condor_submit RUNS=batch/pareto_runs_refine.txt batch/runae_pareto.sub
+# Subset: condor_submit RUNS=batch/my_runs.txt batch/runae_pareto.sub
 queue SEED,GAMMA,BINS,ARCH,NODES,RUN_NAME from $(RUNS:batch/pareto_runs.txt)

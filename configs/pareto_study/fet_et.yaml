@@ -5,7 +5,7 @@
 #
 # This lives in its own config group rather than inside
 # configs/experiment/physics/pareto_fet.yaml because the Phase 2 collector
-# (src/evaluation/pareto_aggregation.py) validates every run's resolved manifest
+# (src/evaluation/pareto/aggregation.py) validates every run's resolved manifest
 # against this block -- study_id, protocol_version, configuration_id, candidate,
 # sensitive_variable, collapse_constraint and the rest.
 # A run that carries no such block is rejected outright. Keeping the block here
@@ -19,8 +19,25 @@
 # cannot be combined in one file.
 
 enabled: true
-# v2: single-seed study -- every configuration is exactly one training run.
-protocol_version: fet-et-pareto-v2
+# Selection-protocol history. Every run records this value in its manifest, and
+# the study-map builder refuses to put runs of different versions into one
+# study, so bump it whenever the rules that produce or select a run change.
+#   v1  multi-seed study (seeds 123 and 500), several architectures, 30 epochs.
+#   v2  2026-09-28: single seed (180524), one architecture (h64_32); every
+#       configuration is exactly one training run. Pareto-Front-260928 and
+#       Pareto-Front-261002 were trained under v2.
+#   v3  2026-10-09:
+#       - one gamma = 0 / 50-bin baseline per architecture; the collapse and
+#         minimum-efficiency rules pair every bin count with it
+#         (paired_reference: same_architecture);
+#       - loss_total.ckpt is selected by CollapseGuardedModelCheckpoint, which
+#         skips fully collapsed epochs (joint code entropy < 0.05 bits);
+#       - three-stage pipeline: 1 train + validation evaluation, 2 leakage
+#         probes, 3 collect + select.
+protocol_version: fet-et-pareto-v3
+# The study family. It is the prefix of every configuration_id and stays
+# fet-et-pareto-v1 across protocol versions, so configuration ids remain
+# comparable between studies.
 study_id: fet-et-pareto-v1
 # The selection protocol above and the probe protocol below are versioned
 # separately. This records which probe protocol produced L, because its
@@ -64,11 +81,10 @@ search_space:
   # Pareto-Front-261002 (200 epochs). The grid is a union of blocks, not one
   # gamma x bins product. Each block is either a product (mi_gamma x
   # mi_sensitive_num_bins) or an explicit list of [gamma, bins] points;
-  # scripts/physics/make_pareto_grid.py expands them in order and emits a point
+  # src/evaluation/pareto/make_grid.py expands them in order and emits a point
   # listed in several blocks once. The previous study (Pareto-Front-260928:
   # 111-run product + 78-run refinement) is in git history and in every one of
-  # its runs' resolved_config.yaml. run_pareto_fet_ngt.sh only understands a
-  # single product and refuses this layout.
+  # its runs' resolved_config.yaml.
   regularized:
     architectures:
       h64_32: [64, 32, 8]
@@ -99,11 +115,11 @@ search_space:
           - [0.8, 40]   # 13
           - [0.5, 30]   # 14
   # ONE gamma-zero reference per architecture, at the canonical 50 bins
-  # (GAMMA_ZERO_BASELINE_BINS in src/evaluation/pareto_baseline.py). Every run,
+  # (GAMMA_ZERO_BASELINE_BINS in src/evaluation/pareto/baseline.py). Every run,
   # whatever its bin count, is compared with it. Binning does not enter training
   # at gamma = 0, so baselines at other bin counts would be identical
   # (Pareto-Front-261002 trained ten and they agree bit for bit).
-  # make_pareto_grid.py refuses anything but a single 50.
+  # make_grid.py refuses anything but a single 50.
   gamma_zero_baseline:
     mi_gamma: 0.0
     mi_sensitive_num_bins: 50

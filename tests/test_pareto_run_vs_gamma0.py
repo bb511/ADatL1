@@ -73,6 +73,19 @@ def experiment(tmp_path):
     return exp
 
 
+EFF_STEM = "efficiency_at_threshold_operational__anomaly_score_ascorefull"
+#: The bar charts mirror plots/test/: same folder, same file stem.
+MIRRORED_PLOTS = {
+    f"eff/{EFF_STEM}.jpg",
+    "ascore_operational_summary/ascore_operational.jpg",
+    "eff_summary/25%_CVaR_at_threshold_operational__anomaly_score_ascorefull.jpg",
+    "eff_summary/med_eff_at_operational__anomaly_score_ascorefull.jpg",
+    "eff_summary/min_eff_at_operational__anomaly_score_ascorefull.jpg",
+    "thres_drift_summary/split-transfer_drift_at_threshold_operational__log((p̂+ε)(FPR+ε)).jpg",
+    "wasserstein_summary/W1(normal,__SingleNeutrino_E-10-gun).jpg",
+}
+
+
 def _summary(experiment, run="RunA"):
     out = experiment / run / "plots" / "test" / "loss_total" / "comparison"
     return out, pd.read_csv(out / "summary.csv").set_index("quantity")
@@ -93,16 +106,16 @@ def test_quantities_are_compared_with_the_50_bin_gamma0_run(experiment):
     assert w1["change_percent"] == pytest.approx(20.0) and str(w1["better"]) == "False"
     assert np.isnan(summary.loc["min_efficiency", "change_percent"])  # 0 vs 0: undefined
 
-    per_signal = pd.read_csv(out / "efficiency" / "efficiency_per_signal.csv").set_index("quantity")
+    per_signal = pd.read_csv(out / "eff" / f"{EFF_STEM}.csv").set_index("quantity")
     assert per_signal.loc["sigA", "change_percent"] == pytest.approx(20.0)
     assert str(per_signal.loc["sigA", "better"]) == "True"
-    ascore = pd.read_csv(out / "ascore_operational" / "mean_ascore_per_dataset.csv").set_index("quantity")
+    ascore = pd.read_csv(out / "ascore_operational_summary" / "ascore_operational.csv").set_index("quantity")
     assert ascore.loc["sigA", "change_percent"] == pytest.approx(20.0)
     assert ascore["direction"].isna().all() and ascore["better"].isna().all()  # no better/worse
+    cvar = pd.read_csv(out / "eff_summary" / "25%_CVaR_at_threshold_operational__anomaly_score_ascorefull.csv")
+    assert list(cvar["quantity"]) == ["loss_total"]  # one bar pair per checkpoint, as in /test/
 
-    for png in ("summary.png", "efficiency/efficiency_per_signal.png",
-                "ascore_operational/mean_ascore_per_dataset.png", "reco/normal/jets_Et.png"):
-        assert (out / png).stat().st_size > 0, png
+    assert (out / "reco" / "normal" / "jets_Et.png").stat().st_size > 0
     reference = json.loads((out / "reference.json").read_text())
     assert reference["reference_run"] == "G0_bins50"
     assert reference["matched_on"]["mi_sensitive_num_bins"] == 50
@@ -169,3 +182,72 @@ def test_cli(experiment, capsys):
     printed = capsys.readouterr().out
     assert "1 run(s) compared" in printed and "RunA vs G0_bins50" in printed
     assert "skipped G0_bins50: γ = 0 run (the reference)" in printed
+
+
+def test_bar_charts_mirror_the_test_plots_and_replace_the_old_layout(experiment):
+    out = experiment / "RunA" / "plots" / "test" / "loss_total" / "comparison"
+    (out / "efficiency").mkdir(parents=True)
+    (out / "efficiency" / "efficiency_per_signal.png").write_bytes(b"old")
+    (out / "summary.png").write_bytes(b"old")
+    cmp.process_experiment(experiment, run_names=["RunA"])
+    charts = {str(p.relative_to(out)) for p in out.rglob("*.jpg")}
+    assert charts == MIRRORED_PLOTS
+    assert all((out / chart).stat().st_size > 0 for chart in charts)
+    assert all((out / chart).with_suffix(".csv").is_file() for chart in charts)
+    assert not (out / "summary.png").exists() and not (out / "efficiency").exists()
+
+
+def test_bar_charts_get_gamma_and_bins_in_the_legend(experiment, monkeypatch):
+    from src.plot import horizontal_bar
+
+    calls = []
+
+    def fake_plot_comparison(reference, run, xlabel, save_dir, **kwargs):
+        calls.append({"reference": reference, "run": run, "xlabel": xlabel, **kwargs})
+        path = Path(save_dir) / f"{kwargs.get('filename') or horizontal_bar.filename_from_label(xlabel)}.jpg"
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_bytes(b"x")
+        return path
+
+    monkeypatch.setattr(horizontal_bar, "plot_comparison", fake_plot_comparison)
+    cmp.process_experiment(experiment, run_names=["RunA"])
+    # RunA and G0_bins50 carry no Gamma_/Bins_ in their names: read from the config.
+    assert {c["run_label"] for c in calls} == {r"$\gamma$ = 0.1, bins = 40"}
+    assert {c["reference_label"] for c in calls} == {r"$\gamma$ = 0, bins = 50"}
+    eff = next(c for c in calls if c["xlabel"].startswith("efficiency at threshold"))
+    assert eff["run"] == {"sigA": 0.12, "sigB": 0.01, "sigC": 0.0}
+    assert eff["reference"] == {"sigA": 0.1, "sigB": 0.02, "sigC": 0.0}
+    assert eff["percent"] and eff["title"].startswith("Signal efficiency at the operating point\nRunA  vs  G0_bins50")
+
+
+def test_model_label_is_read_from_the_run_name(tmp_path):
+    run = cmp.RunInfo(run_dir=tmp_path / "Seed180524_Gamma_0.15_Bins_80_architecture_h64_32_Run02",
+                      gamma=0.3, seed=1, architecture=(64, 32, 8), epochs=3, bins=10)
+    assert cmp.model_label(run) == r"$\gamma$ = 0.15, bins = 80"
+    baseline = cmp.RunInfo(run_dir=tmp_path / "Seed180524_Gamma_0_Bins_50_architecture_h64_32_Run01",
+                           gamma=0.0, seed=1, architecture=(64, 32, 8), epochs=3, bins=50)
+    assert cmp.model_label(baseline) == r"$\gamma$ = 0, bins = 50"
+
+
+def test_reco_legend_names_both_models(experiment, monkeypatch):
+    import matplotlib.pyplot as plt
+
+    legends, titles, ylabels = [], [], []
+    close = plt.close
+
+    def keep(fig=None):
+        if fig is not None and fig.axes and fig.axes[0].get_legend() is not None:
+            legends.append([t.get_text() for t in fig.axes[0].get_legend().get_texts()])
+            titles.append(fig.axes[0].get_title())
+            ylabels.append(fig.axes[-1].get_ylabel())
+        close(fig)
+
+    monkeypatch.setattr(plt, "close", keep)
+    cmp.process_experiment(experiment, run_names=["RunA"])
+    assert [r"reco, $\gamma$ = 0, bins = 50", r"reco, $\gamma$ = 0.1, bins = 40"] in [
+        legend[-2:] for legend in legends]
+    assert not any("this run" in text for legend in legends for text in legend)
+    reco = [i for i, legend in enumerate(legends) if legend[0] == "input"]
+    assert reco and all(titles[i] == "normal: jets_Et" for i in reco)  # no TVD line
+    assert all(ylabels[i] == "run - gamma0" for i in reco)
+

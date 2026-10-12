@@ -8,11 +8,23 @@ test evaluation produced. For each γ ≠ 0 run it writes
         reference.json                   which γ = 0 run, matched on what
         summary.csv / summary.json       every quantity: run, γ = 0, difference,
                                          change in %, direction, better
-        summary.png                      the scalar quantities, run vs γ = 0
-        efficiency/efficiency_per_signal.{csv,png}
-        ascore_operational/mean_ascore_per_dataset.{csv,png}
+        eff/<stem>.{jpg,csv}             efficiency per signal at the operating point
+        ascore_operational_summary/ascore_operational.{jpg,csv}
+                                         mean anomaly score per dataset
+        eff_summary/<stem>.{jpg,csv}     25% CVaR, median and minimum efficiency
+        thres_drift_summary/<stem>.{jpg,csv}   one per target rate
+        wasserstein_summary/<stem>.{jpg,csv}
         reco/<dataset>/<object>_<feature>.{csv,png}
         reco/reco_summary.csv
+
+Every bar chart mirrors one plot of ``plots/<split>/`` (same folder, same file
+stem, same x label) and is drawn by ``src/plot/horizontal_bar.plot_comparison`` in
+the style of the test plots: per key an orange bar for the γ = 0 run (legend
+"γ = 0, bins = 50") above a blue bar for the run (legend "γ = <γ>, bins = <bins>",
+read from the run name), values at the bar ends, and on the right a gray panel
+"Change" with ``100 * (run - γ0) / γ0``. Whether a change is better or worse is
+not coloured; ``summary.csv`` keeps the direction for reference. The mean
+efficiency is only in ``summary.csv``, as it has no plot in ``plots/<split>/``.
 
 from the outputs of the evaluation callbacks (scripts/physics/runae_test.sh):
 
@@ -58,6 +70,8 @@ import argparse
 import json
 import math
 import pickle
+import re
+import shutil
 from dataclasses import asdict, dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
@@ -76,10 +90,18 @@ from src.evaluation.pareto.correlation_gamma0 import (
 COMPARISON_DIR = "comparison"
 RECO_DATA_DIR = "data"  # src/evaluation/callbacks/reco.py: DATA_DIR
 
-# Reference palette (dataviz skill): categorical slots 1/2 for the two models,
-# status good/critical for better/worse (always with a text label), inks, surface.
+# Folders of plots/<split>/ the bar charts mirror (one comparison plot per plot there).
+EFF_DIR = "eff"
+ASCORE_SUMMARY_DIR = "ascore_operational_summary"
+EFF_SUMMARY_DIR = "eff_summary"
+DRIFT_SUMMARY_DIR = "thres_drift_summary"
+WASSERSTEIN_SUMMARY_DIR = "wasserstein_summary"
+#: Outputs of the previous layout, removed when a run is compared again.
+LEGACY_OUTPUTS = ("summary.png", "efficiency", "ascore_operational")
+
+# Colours of the reconstruction plots (the bar charts take theirs from
+# src/plot/horizontal_bar.py, which uses the same orange and blue).
 RUN_COLOR, GAMMA0_COLOR = "#2a78d6", "#eb6834"
-GOOD, CRITICAL, NEUTRAL = "#0ca30c", "#d03b3b", "#8a8984"
 INK, INK2, MUTED, SURFACE = "#0b0b0b", "#52514e", "#e6e5e0", "#fcfcfb"
 INPUT_FILL = "#d7d6d0"
 
@@ -257,116 +279,104 @@ def _style():
     return plt
 
 
-def _fmt(value: Optional[float]) -> str:
-    if value is None:
-        return "n/a"
-    if value == 0:
-        return "0"
-    magnitude = abs(value)
-    return f"{value:.3g}" if 1e-3 <= magnitude < 1e4 else f"{value:.2e}"
+def model_label(run: RunInfo) -> str:
+    """Legend label ``γ = <γ>, bins = <bins>``, read from the run name.
+
+    The name carries both (``..._Gamma_0.1_Bins_40_...``); a run named otherwise
+    falls back to its resolved config.
+    """
+    gamma = re.search(r"Gamma_([0-9]+(?:\.[0-9]+)?(?:[eE][-+]?[0-9]+)?)", run.name)
+    bins = re.search(r"Bins_([0-9]+)", run.name)
+    gamma_text = gamma.group(1) if gamma else ("n/a" if run.gamma is None else f"{run.gamma:g}")
+    bins_text = bins.group(1) if bins else ("n/a" if run.bins is None else str(run.bins))
+    return rf"$\gamma$ = {gamma_text}, bins = {bins_text}"
 
 
-def _verdict(q: Quantity) -> str:
-    return {True: "better", False: "worse", None: ""}[q.better]
+def _drift_display(rate: str) -> str:
+    # As src/evaluation/callbacks/thres_drift.ThresholdDrift.plot_summary.
+    return "operational" if rate == "operational" else str(rate).replace("trate", "").replace("kHz", "")
 
 
-def _change_color(q: Quantity) -> str:
-    return {True: GOOD, False: CRITICAL, None: NEUTRAL}[q.better]
+@dataclass
+class BarPlot:
+    """One comparison bar chart: where it goes and what it shows."""
+
+    folder: str                # sub-folder of comparison/, as in plots/<split>/
+    xlabel: str                # the x label of the mirrored plot
+    title: str
+    quantities: list           # Quantity per key; the key is Quantity.name
+    percent: bool = False
+    filename: Optional[str] = None  # default: the stem horizontal_bar derives from xlabel
 
 
-def _legend(fig, *, with_status: bool, y: float) -> None:
-    from matplotlib.patches import Patch
+def bar_plots(run_out: Outputs, ref_out: Outputs, ckpt: str) -> list[BarPlot]:
+    """The comparison charts, one per plot of plots/<split>/ that both runs have."""
+    plots = []
+    efficiency = run_out.efficiency or {}
+    point = (efficiency.get("operating_point") or {}).get("label") or "operational"
+    score = f"anomaly score: {efficiency.get('anomaly_score') or 'ascore/full'}"
 
-    handles = [Patch(color=GAMMA0_COLOR, label="γ = 0 (50 bins)"), Patch(color=RUN_COLOR, label="this run")]
-    if with_status:
-        handles += [Patch(color=GOOD, label="change: better"), Patch(color=CRITICAL, label="change: worse")]
-    else:
-        handles += [Patch(color=NEUTRAL, label="change (no better/worse)")]
-    fig.legend(handles=handles, loc="upper center", ncol=len(handles), frameon=False,
-               bbox_to_anchor=(0.5, y))
+    per_signal = per_key_quantities(
+        "efficiency_per_signal", efficiency.get("signal_efficiencies"),
+        (ref_out.efficiency or {}).get("signal_efficiencies"), "higher")
+    if per_signal:
+        plots.append(BarPlot(EFF_DIR, f"efficiency at threshold: {point}\n{score}",
+                             "Signal efficiency at the operating point", per_signal, percent=True))
 
+    ascore = per_key_quantities("mean_ascore", run_out.ascore, ref_out.ascore, None)
+    if ascore:
+        plots.append(BarPlot(ASCORE_SUMMARY_DIR, "ascore/operational",
+                             "Mean anomaly score (ascore/operational) per dataset", ascore,
+                             filename="ascore_operational"))
 
-def plot_paired_bars(quantities: Sequence[Quantity], path: Path, *, title: str, value_label: str,
-                     log_values: bool = False) -> None:
-    """Run vs γ = 0 per key (left) and the change in % (right): one axis each."""
-    plt = _style()
-    n = len(quantities)
-    height = 0.36 * n + 2.2
-    fig = plt.figure(figsize=(11, height))
-    grid = fig.add_gridspec(1, 2, width_ratios=[3, 2], top=1 - 1.05 / height,
-                            bottom=0.7 / height, wspace=0.06)
-    ax_values = fig.add_subplot(grid[0])
-    ax_change = fig.add_subplot(grid[1], sharey=ax_values)
+    if run_out.efficiency and ref_out.efficiency:
+        for name, label, title in (
+            ("cvar25_efficiency", f"25% CVaR at threshold: {point}\n{score}",
+             "25% CVaR of the signal efficiencies"),
+            ("median_efficiency", f"med eff at: {point}\n{score}", "Median signal efficiency"),
+            ("min_efficiency", f"min eff at: {point}\n{score}", "Minimum signal efficiency"),
+        ):
+            q = _pair("efficiency", ckpt, run_out.efficiency.get(name),
+                      ref_out.efficiency.get(name), "higher")
+            if q is not None:
+                plots.append(BarPlot(EFF_SUMMARY_DIR, label, title, [q], percent=True))
 
-    y = np.arange(n)
-    bar = 0.38
-    gamma0 = [q.gamma0 for q in quantities]
-    runs = [q.run for q in quantities]
-    ax_values.barh(y - bar / 2, gamma0, height=bar - 0.04, color=GAMMA0_COLOR)
-    ax_values.barh(y + bar / 2, runs, height=bar - 0.04, color=RUN_COLOR)
-    if log_values:
-        positive = [v for v in gamma0 + runs if v > 0]
-        if positive and len(positive) == len(gamma0 + runs):
-            ax_values.set_xscale("log")
-        elif positive:  # zeros (e.g. an efficiency of 0) stay visible as empty bars
-            ax_values.set_xscale("symlog", linthresh=min(positive))
-    ax_values.set_yticks(y, [q.name for q in quantities])
-    ax_values.invert_yaxis()
-    ax_values.set_xlabel(value_label)
-    ax_values.grid(axis="x")
+    if run_out.thres_drift and ref_out.thres_drift:
+        for rate in sorted(set(run_out.thres_drift) & set(ref_out.thres_drift), key=str):
+            display = _drift_display(rate)
+            q = _pair("thres_drift", ckpt, run_out.thres_drift[rate], ref_out.thres_drift[rate], "lower")
+            if q is not None:
+                plots.append(BarPlot(
+                    DRIFT_SUMMARY_DIR,
+                    f"split-transfer drift at threshold: {display}\nlog((p̂+ε)/(FPR+ε))",
+                    f"Split-transfer threshold drift ({display})", [q]))
 
-    changes = [q.change_percent if q.change_percent is not None else 0.0 for q in quantities]
-    ax_change.barh(y, changes, height=0.6, color=[_change_color(q) for q in quantities])
-    ax_change.axvline(0, color=INK2, lw=0.8)
-    ax_change.set_xlabel("change vs γ = 0 [%]")
-    ax_change.grid(axis="x")
-    ax_change.tick_params(axis="y", left=False, labelleft=False)
-    span = max([abs(c) for c in changes] + [1.0])
-    ax_change.set_xlim(-1.45 * span, 1.45 * span)
-    for yi, q, c in zip(y, quantities, changes):
-        label = "n/a" if q.change_percent is None else f"{c:+.1f} %"
-        ax_change.annotate(label, xy=(c, yi), xytext=(4 if c >= 0 else -4, 0),
-                           textcoords="offset points", ha="left" if c >= 0 else "right",
-                           va="center", fontsize=8, color=INK2)
-    fig.suptitle(title, y=1 - 0.08 / height, va="top", fontsize=12, fontweight="bold")
-    _legend(fig, with_status=any(q.direction for q in quantities), y=1 - 0.62 / height)
-    path.parent.mkdir(parents=True, exist_ok=True)
-    fig.savefig(path, dpi=150, bbox_inches="tight")
-    plt.close(fig)
+    if run_out.wasserstein is not None and ref_out.wasserstein is not None:
+        q = _pair("wasserstein", ckpt, run_out.wasserstein, ref_out.wasserstein, "lower")
+        if q is not None:
+            plots.append(BarPlot(WASSERSTEIN_SUMMARY_DIR, "W1(normal,\nSingleNeutrino_E-10-gun)",
+                                 "Wasserstein distance W1(normal, SingleNeutrino_E-10-gun)", [q]))
+    return plots
 
 
-def plot_scalars(quantities: Sequence[Quantity], path: Path, *, title: str) -> None:
-    """One small panel per scalar quantity (scales differ): γ = 0 and run bars."""
-    plt = _style()
-    n = len(quantities)
-    cols = min(n, 3)
-    rows = math.ceil(n / cols)
-    fig, axes = plt.subplots(rows, cols, figsize=(4.2 * cols, 2.3 * rows + 0.8), squeeze=False)
-    for ax, q in zip(axes.flat, quantities):
-        ax.barh([0, 1], [q.gamma0, q.run], height=0.62, color=[GAMMA0_COLOR, RUN_COLOR])
-        ax.set_yticks([0, 1], ["γ = 0", "run"])
-        ax.invert_yaxis()
-        largest = max(abs(q.gamma0), abs(q.run))
-        if largest == 0:
-            ax.set_xlim(0, 1)
-            ax.set_xticks([])
-        else:
-            ax.set_xlim(min(0.0, 1.3 * min(q.gamma0, q.run)), 1.3 * max(q.gamma0, q.run, 0.0) or largest)
-        for yi, value in ((0, q.gamma0), (1, q.run)):
-            ax.annotate(_fmt(value), xy=(value, yi), xytext=(4, 0), textcoords="offset points",
-                        va="center", fontsize=9, color=INK2)
-        change = "n/a" if q.change_percent is None else f"{q.change_percent:+.1f} %"
-        verdict = _verdict(q)
-        mark = {"better": "  ▲ better", "worse": "  ▼ worse"}.get(verdict, "")
-        ax.set_title(f"{q.name}\nΔ = {_fmt(q.difference)} ({change}){mark}", fontsize=9, color=INK)
-        ax.grid(axis="x")
-    for ax in list(axes.flat)[n:]:
-        ax.set_visible(False)
-    fig.suptitle(title, fontsize=12, fontweight="bold")
-    fig.tight_layout()
-    path.parent.mkdir(parents=True, exist_ok=True)
-    fig.savefig(path, dpi=150, bbox_inches="tight")
-    plt.close(fig)
+def draw_bar_plot(plot: BarPlot, out: Path, *, run_label: str, reference_label: str,
+                  subtitle: str) -> Path:
+    """Draw ``plot`` into ``out/<folder>/`` and write its table next to it."""
+    from src.plot import horizontal_bar
+
+    path = horizontal_bar.plot_comparison(
+        {q.name: q.gamma0 for q in plot.quantities},
+        {q.name: q.run for q in plot.quantities},
+        plot.xlabel,
+        out / plot.folder,
+        reference_label=reference_label,
+        run_label=run_label,
+        title=f"{plot.title}\n{subtitle}",
+        percent=plot.percent,
+        filename=plot.filename,
+    )
+    _write_table(plot.quantities, path.with_suffix(".csv"))
+    return path
 
 
 def _is_et(feature: str) -> bool:
@@ -374,16 +384,22 @@ def _is_et(feature: str) -> bool:
     return ("Et" in feature or "ETTEM" in feature) and "Eta" not in feature
 
 
-def plot_reco(table: pd.DataFrame, path: Path, *, dataset: str, feature: str) -> None:
-    """Input (reference fill) and both reconstructions; their difference below."""
+def plot_reco(table: pd.DataFrame, path: Path, *, dataset: str, feature: str,
+              run_label: str, reference_label: str) -> None:
+    """Input (reference fill) and both reconstructions; their difference below.
+
+    ``run_label`` / ``reference_label`` name the two models in the legend
+    (:func:`model_label`, e.g. ``γ = 0.1, bins = 40`` and ``γ = 0, bins = 50``).
+    """
     plt = _style()
     inner = table.iloc[1:-1]  # under/overflow rows are reported, not drawn
     edges = np.concatenate([inner["bin_low"].to_numpy(), inner["bin_high"].to_numpy()[-1:]])
     fig, (ax, ax_diff) = plt.subplots(2, 1, figsize=(7, 6), sharex=True,
                                       gridspec_kw={"height_ratios": [3, 1.3], "hspace": 0.06})
     ax.stairs(inner["input_fraction"], edges, fill=True, color=INPUT_FILL, label="input")
-    ax.stairs(inner["reco_gamma0_fraction"], edges, color=GAMMA0_COLOR, lw=2, label="reco, γ = 0 (50 bins)")
-    ax.stairs(inner["reco_run_fraction"], edges, color=RUN_COLOR, lw=2, label="reco, this run")
+    ax.stairs(inner["reco_gamma0_fraction"], edges, color=GAMMA0_COLOR, lw=2,
+              label=f"reco, {reference_label}")
+    ax.stairs(inner["reco_run_fraction"], edges, color=RUN_COLOR, lw=2, label=f"reco, {run_label}")
     if _is_et(feature):
         ax.set_yscale("log")
     ax.set_ylabel("fraction of entries")
@@ -395,29 +411,24 @@ def plot_reco(table: pd.DataFrame, path: Path, *, dataset: str, feature: str) ->
     ax_diff.bar(edges[:-1], difference, width=widths, align="edge", color=RUN_COLOR, alpha=0.85,
                 edgecolor=SURFACE, linewidth=0.5)
     ax_diff.axhline(0, color=INK2, lw=0.8)
-    ax_diff.set_ylabel("run − γ = 0")
+    ax_diff.set_ylabel("run - gamma0")
     ax_diff.set_xlabel(feature)
     ax_diff.grid(axis="y")
 
-    tvd_runs = tvd(table["reco_run"].to_numpy(), table["reco_gamma0"].to_numpy())
-    flow = table.iloc[[0, -1]][["reco_run", "reco_gamma0"]].to_numpy()
-    note = f"TVD(run, γ = 0) = {_fmt(tvd_runs)}"
-    if flow.sum() > 0:
-        note += (f"   outside the bins: run {int(flow[:, 0].sum())}, "
-                 f"γ = 0 {int(flow[:, 1].sum())} entries")
-    ax.set_title(f"{dataset}: {feature}\n{note}", fontsize=10)
+    # The TVD and the entries outside the bins are in reco_summary.csv / the CSV.
+    ax.set_title(f"{dataset}: {feature}", fontsize=10)
     path.parent.mkdir(parents=True, exist_ok=True)
     fig.savefig(path, dpi=150, bbox_inches="tight")
     plt.close(fig)
 
 
 def plot_reco_overlay(run_hist: pd.DataFrame, ref_hist: pd.DataFrame, path: Path, *,
-                      dataset: str, feature: str) -> None:
+                      dataset: str, feature: str, run_label: str, reference_label: str) -> None:
     """Fallback when the bins differ: both reconstructions, no difference panel."""
     plt = _style()
     fig, ax = plt.subplots(figsize=(7, 4.5))
-    for hist, color, label in ((ref_hist, GAMMA0_COLOR, "reco, γ = 0 (50 bins)"),
-                               (run_hist, RUN_COLOR, "reco, this run")):
+    for hist, color, label in ((ref_hist, GAMMA0_COLOR, f"reco, {reference_label}"),
+                               (run_hist, RUN_COLOR, f"reco, {run_label}")):
         inner = hist.iloc[1:-1]
         edges = np.concatenate([inner["bin_low"].to_numpy(), inner["bin_high"].to_numpy()[-1:]])
         ax.stairs(inner["reco"] / max(float(hist["reco"].sum()), 1.0), edges, color=color, lw=2, label=label)
@@ -449,6 +460,12 @@ def compare_run(run: RunInfo, reference: RunInfo, *, split: str = "test", ckpt: 
     """Write ``<run>/plots/<split>/<ckpt>/comparison/`` and return its summary."""
     out = run.run_dir / "plots" / split / ckpt / COMPARISON_DIR
     out.mkdir(parents=True, exist_ok=True)
+    for legacy in LEGACY_OUTPUTS:  # the previous layout of this folder
+        legacy_path = out / legacy
+        if legacy_path.is_dir():
+            shutil.rmtree(legacy_path)
+        elif legacy_path.exists():
+            legacy_path.unlink()
     run_out, ref_out = load_outputs(run.run_dir, split, ckpt), load_outputs(reference.run_dir, split, ckpt)
     missing = []
 
@@ -465,18 +482,10 @@ def compare_run(run: RunInfo, reference: RunInfo, *, split: str = "test", ckpt: 
             missing.append(label)
 
     subtitle = f"{run.name}  vs  {reference.name}  ({split}, {ckpt})"
-    if scalars:
-        plot_scalars(scalars, out / "summary.png", title=f"Run vs γ = 0: summaries\n{subtitle}")
-    if efficiency:
-        _write_table(efficiency, out / "efficiency" / "efficiency_per_signal.csv")
-        plot_paired_bars(efficiency, out / "efficiency" / "efficiency_per_signal.png",
-                         title=f"Signal efficiency at the operating point\n{subtitle}",
-                         value_label="efficiency (log scale)", log_values=True)
-    if ascore:
-        _write_table(ascore, out / "ascore_operational" / "mean_ascore_per_dataset.csv")
-        plot_paired_bars(ascore, out / "ascore_operational" / "mean_ascore_per_dataset.png",
-                         title=f"Mean anomaly score (ascore/operational) per dataset\n{subtitle}",
-                         value_label="mean anomaly score")
+    run_label, reference_label = model_label(run), model_label(reference)
+    for plot in bar_plots(run_out, ref_out, ckpt):
+        draw_bar_plot(plot, out, run_label=run_label, reference_label=reference_label,
+                      subtitle=subtitle)
 
     reco_rows = []
     for dataset in sorted(set(run_out.reco) & set(ref_out.reco)):
@@ -485,12 +494,14 @@ def compare_run(run: RunInfo, reference: RunInfo, *, split: str = "test", ckpt: 
             folder = out / "reco" / dataset
             table = reco_comparison(run_hist, ref_hist)
             if table is None:
-                plot_reco_overlay(run_hist, ref_hist, folder / f"{feature}.png", dataset=dataset, feature=feature)
+                plot_reco_overlay(run_hist, ref_hist, folder / f"{feature}.png", dataset=dataset,
+                                  feature=feature, run_label=run_label, reference_label=reference_label)
                 reco_rows.append({"dataset": dataset, "feature": feature, "same_bins": False})
                 continue
             folder.mkdir(parents=True, exist_ok=True)
             table.to_csv(folder / f"{feature}.csv", index=False)
-            plot_reco(table, folder / f"{feature}.png", dataset=dataset, feature=feature)
+            plot_reco(table, folder / f"{feature}.png", dataset=dataset, feature=feature,
+                      run_label=run_label, reference_label=reference_label)
             reco_rows.append({
                 "dataset": dataset, "feature": feature, "same_bins": True,
                 "tvd_reco_run_vs_input": tvd(table["reco_run"].to_numpy(), table["input"].to_numpy()),

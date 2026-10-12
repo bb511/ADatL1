@@ -17,14 +17,20 @@
 # 2. Everything else the test evaluation produces
 #    (src/evaluation/pareto/run_vs_gamma0.py):
 #      plots/test/loss_total/comparison/
-#          summary.{csv,json,png}   efficiency median/min/mean/CVaR25, threshold
-#                                   drift, Wasserstein: run, gamma = 0, difference,
-#                                   change in %, better/worse
-#          efficiency/              efficiency per signal
-#          ascore_operational/      mean anomaly score per dataset
+#          summary.{csv,json}       every quantity: run, gamma = 0, difference,
+#                                   change in %, direction
+#          eff/                     efficiency per signal
+#          ascore_operational_summary/  mean anomaly score per dataset
+#          eff_summary/             25% CVaR, median and minimum efficiency
+#          thres_drift_summary/     split-transfer threshold drift
+#          wasserstein_summary/     W1(normal, SingleNeutrino_E-10-gun)
 #          reco/<dataset>/          input and both reconstructions in one plot,
 #                                   their difference below (+ reco_summary.csv)
 #          reference.json
+#      Each bar chart (.jpg + .csv) has the folder and file name of the plots/test/
+#      plot it compares and is drawn in the same CMS style: orange
+#      "gamma = 0, bins = 50", blue "gamma = <g>, bins = <b>" (from the run name),
+#      and a gray "Change" panel on the right (100 * (run - gamma0) / gamma0).
 #
 # The reference is the gamma = 0 / 50-bin run of the same experiment with the
 # same seed, architecture and epochs; it must have been TESTED as well (keep it in

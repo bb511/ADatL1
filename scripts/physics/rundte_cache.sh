@@ -1,26 +1,28 @@
 #!/usr/bin/env bash
 # ========================================================================
-# DTE -- default parameters, physics
+# DTE -- default parameters, physics, raw route
 # ========================================================================
-# One DTE training at the config defaults, two epochs. Run it on olqti.
+# One DTE training at the config defaults, two epochs, reading the raw parquet
+# files through data=basis, the experiment's default. Run it on olqti.
 #
-# Besides being a sanity run, this is what builds the caches the sweeps need.
-# configs/experiment/physics/dte*.yaml override /data/data_normalizer to
-# `standard`, and nothing else in the repo uses that normalizer, so its cache
-# tree has to be built once from scratch. Doing it here, up front, is what keeps
-# the six concurrent sweep drivers on clariden from racing on the same directory
-# and leaving partial parquet behind.
+# Besides being a sanity run, this builds the raw-route caches DTE needs.
+# configs/experiment/physics/dte.yaml overrides /data/data_normalizer to
+# `standard`, and no other physics experiment uses that normalizer, so its cache
+# tree has to be built once from scratch. Doing it here, before concurrent DTE
+# runs on the raw route, keeps them from racing on the same directory and
+# leaving partial parquet behind.
 #
 # The evaluator runs too (test=true, the config default) and that is deliberate:
 # the test split and the ~20 auxiliary signal datasets only get their torch
 # caches written when something actually reads them.
 #
-# This one run covers all four physics configs -- physics/dte,
-# physics/dte_agnostic and both q99 variants read the same cache tree, because
-# target_rate/base_rate change the metric, not the data.
+# The one cache tree serves both rate tiers of physics/dte, because
+# target_rate/base_rate change the metric, not the data. The pool drivers in
+# scripts/physics/rundte_search.sh read the published record instead
+# (data=basis_hf), whose caches sit under data/hf/ and are not built here.
 #
-# Afterwards, copy these to clariden, keeping the paths relative to the repo
-# root, and launch scripts/physics/rundte_search.sh:
+# A machine that runs DTE on the raw route needs these trees, at the same paths
+# relative to the repo root:
 #
 #   data/data_2025E+G/extracted                                        ~3.0G
 #   data/data_2025E+G/processed                                        ~3.1G

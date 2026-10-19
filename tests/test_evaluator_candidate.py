@@ -7,11 +7,24 @@ from pytorch_lightning.callbacks import Callback
 
 from src.evaluation.evaluator import Evaluator
 
-# (main, sec) per checkpoint stem. The non-candidate drift_ema and last beat the
-# candidate cap_ema on both objectives, so any rule that compares checkpoints
-# would report them instead.
-VALUES = {"cap_ema": (-0.3, 0.2), "drift_ema": (-0.1, 0.1), "last": (-0.05, 0.05)}
-CKPTS = {"summary": {"cap_ema": ["max"], "drift_ema": ["min"]}}
+# (main, sec) per checkpoint stem. The non-candidates drift_ema, loss and last beat
+# the candidate cap_ema on both objectives, so any rule that compares checkpoints
+# would report one of them instead.
+VALUES = {
+    "cap_ema": (-0.3, 0.2),
+    "drift_ema": (-0.1, 0.1),
+    "loss": (-0.2, 0.15),
+    "last": (-0.05, 0.05),
+}
+CKPTS = {
+    "summary": {"cap_ema": ["max"], "drift_ema": ["min"]},
+    "normal": {"loss": ["min"]},
+}
+FOLDERS = [
+    ("summary", "cap_ema", "max"),
+    ("summary", "drift_ema", "min"),
+    ("normal", "loss", "min"),
+]
 
 
 class _Summary(Callback):
@@ -71,8 +84,10 @@ def _evaluator(tmp_path: Path, ckpts: dict, values: dict):
         default_root_dir=str(tmp_path),
     )
     evaluator.values = values
+    evaluator.evaluated = []
 
     def evaluate_ckpt(ckpt_path: Path, model, test_loader):
+        evaluator.evaluated.append(ckpt_path.stem)
         for cb in evaluator.callbacks:
             cb.summary[ckpt_path.stem] = evaluator.values[ckpt_path.stem][cb.index]
 
@@ -83,8 +98,8 @@ def _evaluator(tmp_path: Path, ckpts: dict, values: dict):
 @pytest.fixture
 def run_folder(tmp_path: Path) -> Path:
     root = tmp_path / "run"
-    for metric, criterion in [("cap_ema", "max"), ("drift_ema", "min")]:
-        folder = root / "summary" / metric / criterion
+    for strategy, metric, criterion in FOLDERS:
+        folder = root / strategy / metric / criterion
         folder.mkdir(parents=True)
         (folder / f"{metric}.ckpt").write_bytes(b"")
     (root / "last.ckpt").write_bytes(b"")
@@ -119,3 +134,10 @@ def test_non_finite_pair_is_not_reported(tmp_path, run_folder, pair):
 
     assert evaluator.optimized_metric is None
     assert evaluator.optimized_ckpt_name is None
+
+
+def test_every_listed_checkpoint_is_evaluated(tmp_path, run_folder):
+    evaluator = _evaluator(tmp_path, CKPTS, VALUES)
+    evaluator.evaluate_run(run_folder, None, {}, "val", set_optimized_metric=True)
+
+    assert sorted(evaluator.evaluated) == ["cap_ema", "drift_ema", "loss"]

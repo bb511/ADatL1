@@ -1,17 +1,26 @@
 #!/usr/bin/env bash
 # ========================================================================
-# VAE HYPERPARAMETER SEARCH COMMANDS
+# VAE POOL COMMANDS
 # ========================================================================
+# The random pool of robustad/vae: 100 trials, drawn by four drivers that
+# share the Optuna study `pool` and differ only in their sampler seed. Every
+# trial is a full 200-epoch training, evaluated at the checkpoint of each
+# validation strategy, and the strategies then select from the pool.
 #
-# One driver per strategy: hydra.sweeper.n_jobs=6 runs six trials at a time as
-# slurm jobs, so the whole 600-trial study completes in a single invocation.
+# The random sampler replays its draws from the seed, so a driver that stops
+# early is relaunched with a fresh seed, not its own, which would repeat the
+# configurations already trained. scripts/cluster/sweep_status.py prints
+# such a relaunch.
+#
+# Each driver keeps six trials queued as slurm jobs
+# (hydra.sweeper.n_jobs=6).
 
 
 # ========================================================================
-# HYPERPARAMETER SEARCHES
+# POOL DRIVERS
 # ========================================================================
 # ------------------------------------------------------------------------
-# Semi-supervised search (cvar25)
+# Driver 1 of 4
 # ------------------------------------------------------------------------
 # python3 src/train.py \
 #     -m \
@@ -19,160 +28,61 @@
 #     hydra.launcher.timeout_min=200 \
 #     hydra.sweeper.n_jobs=6 \
 #     experiment=robustad/vae \
-#     experiment_name=robustad_vae_cvar25_vs_kl_search \
-#     callbacks.max_rate_ckpt=null \
-#     callbacks.cvar10_ema_ckpt=null \
-#     ~evaluation.evaluator.ckpts.single.eff__ascore_full__brate_operational \
-#     ~evaluation.evaluator.ckpts.summary.cvar10_ema \
-#     evaluation.callbacks.thres_drift=null \
-#     evaluation.callbacks.wasserstein=null \
-#     logger=none \
+#     logger=mlflow \
 #     hparams_search=robustad/vae_optuna \
-#     hydra.sweeper.study_name=cvar25eff_vs_kl \
-#     hydra.sweeper.n_trials=600 \
-#     hydra.sweeper.sampler.n_startup_trials=150 \
+#     hydra.sweeper.n_trials=25 \
+#     hydra.sweeper.sampler.seed=3021 \
 #     trainer=gpu \
-#     trainer.max_epochs=50 \
+#     trainer.max_epochs=200 \
 #     trainer.devices=[0]
 
 # ------------------------------------------------------------------------
-# CAP search
+# Driver 2 of 4
 # ------------------------------------------------------------------------
 # python3 src/train.py \
 #     -m \
 #     hydra/launcher=submitit_slurm_clariden \
 #     hydra.launcher.timeout_min=200 \
 #     hydra.sweeper.n_jobs=6 \
-#     experiment=robustad/vae_agnostic \
-#     experiment_name=robustad_vae_agnostic_cap_vs_kl_search \
-#     callbacks.anomaly_eff=null \
-#     callbacks.thres_drift=null \
-#     callbacks.wasserstein_dist=null \
-#     callbacks.thres_drift_ema_ckpt=null \
-#     callbacks.wasserstein_dist_ema_ckpt=null \
-#     callbacks.consistency_sn_zb=null \
-#     callbacks.consistency_sn_zb_ema_ckpt=null \
-#     ~evaluation.evaluator.ckpts.summary.operational_drift_ema \
-#     ~evaluation.evaluator.ckpts.summary.w1dist_ema_normal_vs_shifted_normal_all \
-#     ~evaluation.evaluator.ckpts.summary.consistency_ema_normal_vs_shifted_normal_all \
-#     evaluation.callbacks.anomaly_efficiency=null \
-#     evaluation.callbacks.thres_drift=null \
-#     evaluation.callbacks.wasserstein=null \
-#     evaluation.callbacks.consistency_sn_zb=null \
-#     logger=none \
+#     experiment=robustad/vae \
+#     logger=mlflow \
 #     hparams_search=robustad/vae_optuna \
-#     hydra.sweeper.study_name=cap_vs_kl \
-#     hydra.sweeper.n_trials=600 \
-#     hydra.sweeper.sampler.n_startup_trials=150 \
+#     hydra.sweeper.n_trials=25 \
+#     hydra.sweeper.sampler.seed=3022 \
 #     trainer=gpu \
-#     trainer.max_epochs=50 \
+#     trainer.max_epochs=200 \
 #     trainer.devices=[0]
 
 # ------------------------------------------------------------------------
-# Stability search
+# Driver 3 of 4
 # ------------------------------------------------------------------------
 # python3 src/train.py \
 #     -m \
 #     hydra/launcher=submitit_slurm_clariden \
 #     hydra.launcher.timeout_min=200 \
 #     hydra.sweeper.n_jobs=6 \
-#     experiment=robustad/vae_agnostic \
-#     experiment_name=robustad_vae_agnostic_drift_vs_kl_search \
-#     callbacks.anomaly_eff=null \
-#     callbacks.cap_sn_zb=null \
-#     callbacks.wasserstein_dist=null \
-#     callbacks.wasserstein_dist_ema_ckpt=null \
-#     callbacks.cap_sn_zb_ema_ckpt=null \
-#     callbacks.consistency_sn_zb=null \
-#     callbacks.consistency_sn_zb_ema_ckpt=null \
-#     ~evaluation.evaluator.ckpts.summary.w1dist_ema_normal_vs_shifted_normal_all \
-#     ~evaluation.evaluator.ckpts.summary.cap_ema_normal_vs_shifted_normal_all \
-#     ~evaluation.evaluator.ckpts.summary.consistency_ema_normal_vs_shifted_normal_all \
-#     evaluation.callbacks.anomaly_efficiency=null \
-#     evaluation.callbacks.cap_sn_zb=null \
-#     evaluation.callbacks.wasserstein=null \
-#     evaluation.callbacks.consistency_sn_zb=null \
-#     logger=none \
+#     experiment=robustad/vae \
+#     logger=mlflow \
 #     hparams_search=robustad/vae_optuna \
-#     optimized_metric_config.main_metric.callback.name=thres_drift \
-#     optimized_metric_config.main_metric.direction=minimize \
-#     hydra.sweeper.study_name=drift_vs_kl \
-#     hydra.sweeper.direction='[minimize, minimize]' \
-#     hydra.sweeper.n_trials=600 \
-#     hydra.sweeper.sampler.n_startup_trials=150 \
+#     hydra.sweeper.n_trials=25 \
+#     hydra.sweeper.sampler.seed=3023 \
 #     trainer=gpu \
-#     trainer.max_epochs=50 \
+#     trainer.max_epochs=200 \
 #     trainer.devices=[0]
 
-
 # ------------------------------------------------------------------------
-# Wasserstein search
+# Driver 4 of 4
 # ------------------------------------------------------------------------
 # python3 src/train.py \
 #     -m \
 #     hydra/launcher=submitit_slurm_clariden \
 #     hydra.launcher.timeout_min=200 \
 #     hydra.sweeper.n_jobs=6 \
-#     experiment=robustad/vae_agnostic \
-#     experiment_name=robustad_vae_agnostic_wasserstein_vs_kl_search \
-#     callbacks.anomaly_eff=null \
-#     callbacks.cap_sn_zb=null \
-#     callbacks.thres_drift=null \
-#     callbacks.thres_drift_ema_ckpt=null \
-#     callbacks.cap_sn_zb_ema_ckpt=null \
-#     callbacks.consistency_sn_zb=null \
-#     callbacks.consistency_sn_zb_ema_ckpt=null \
-#     ~evaluation.evaluator.ckpts.summary.operational_drift_ema \
-#     ~evaluation.evaluator.ckpts.summary.cap_ema_normal_vs_shifted_normal_all \
-#     ~evaluation.evaluator.ckpts.summary.consistency_ema_normal_vs_shifted_normal_all \
-#     evaluation.callbacks.anomaly_efficiency=null \
-#     evaluation.callbacks.cap_sn_zb=null \
-#     evaluation.callbacks.thres_drift=null \
-#     evaluation.callbacks.consistency_sn_zb=null \
-#     logger=none \
+#     experiment=robustad/vae \
+#     logger=mlflow \
 #     hparams_search=robustad/vae_optuna \
-#     optimized_metric_config.main_metric.callback.name=wasserstein \
-#     optimized_metric_config.main_metric.direction=minimize \
-#     hydra.sweeper.study_name=wasserstein_vs_kl \
-#     hydra.sweeper.direction='[minimize, minimize]' \
-#     hydra.sweeper.n_trials=600 \
-#     hydra.sweeper.sampler.n_startup_trials=150 \
+#     hydra.sweeper.n_trials=25 \
+#     hydra.sweeper.sampler.seed=3024 \
 #     trainer=gpu \
-#     trainer.max_epochs=50 \
-#     trainer.devices=[0]
-
-# ------------------------------------------------------------------------
-# Consistency search
-# ------------------------------------------------------------------------
-# Consistency-only CAP: the beta-free limit of CAP's posterior log-cosine,
-# i.e. CAP with the informative (posterior-norm) component removed.
-# python3 src/train.py \
-#     -m \
-#     hydra/launcher=submitit_slurm_clariden \
-#     hydra.launcher.timeout_min=200 \
-#     hydra.sweeper.n_jobs=6 \
-#     experiment=robustad/vae_agnostic \
-#     experiment_name=robustad_vae_agnostic_consistency_vs_kl_search \
-#     callbacks.anomaly_eff=null \
-#     callbacks.thres_drift=null \
-#     callbacks.wasserstein_dist=null \
-#     callbacks.thres_drift_ema_ckpt=null \
-#     callbacks.wasserstein_dist_ema_ckpt=null \
-#     callbacks.cap_sn_zb=null \
-#     callbacks.cap_sn_zb_ema_ckpt=null \
-#     ~evaluation.evaluator.ckpts.summary.operational_drift_ema \
-#     ~evaluation.evaluator.ckpts.summary.w1dist_ema_normal_vs_shifted_normal_all \
-#     ~evaluation.evaluator.ckpts.summary.cap_ema_normal_vs_shifted_normal_all \
-#     evaluation.callbacks.anomaly_efficiency=null \
-#     evaluation.callbacks.thres_drift=null \
-#     evaluation.callbacks.wasserstein=null \
-#     evaluation.callbacks.cap_sn_zb=null \
-#     logger=none \
-#     hparams_search=robustad/vae_optuna \
-#     optimized_metric_config.main_metric.callback.name=consistency \
-#     hydra.sweeper.study_name=consistency_vs_kl \
-#     hydra.sweeper.n_trials=600 \
-#     hydra.sweeper.sampler.n_startup_trials=150 \
-#     trainer=gpu \
-#     trainer.max_epochs=50 \
+#     trainer.max_epochs=200 \
 #     trainer.devices=[0]

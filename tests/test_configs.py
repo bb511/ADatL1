@@ -14,6 +14,7 @@ EXPERIMENTS = sorted(
     for domain in ("physics", "cifar10", "robustad")
     for path in (CONFIGS / "experiment" / domain).glob("*.yaml")
 )
+MODEL_CHECKPOINT = "pytorch_lightning.callbacks.ModelCheckpoint"
 
 
 @pytest.fixture(scope="module", autouse=True)
@@ -49,15 +50,51 @@ def experiments() -> dict[str, dict]:
         }
 
 
+def _saved_folders(callbacks: dict) -> dict[tuple[str, ...], dict]:
+    # The evaluator reads <run>/<strategy>/<metric>/<criterion>; the last-epoch
+    # checkpoint sits in <run> itself and is never evaluated.
+    folders = {}
+    for cb in callbacks.values():
+        if isinstance(cb, dict) and cb.get("_target_") == MODEL_CHECKPOINT:
+            below_run = cb["dirpath"].split("${run_name}")[1].strip("/")
+            if below_run:
+                folders[tuple(below_run.split("/"))] = cb
+    return folders
+
+
 @pytest.mark.parametrize("experiment", EXPERIMENTS)
-def test_only_the_candidate_is_evaluated(experiments, experiment):
+def test_every_saved_checkpoint_is_evaluated(experiments, experiment):
     cfg = experiments[experiment]
     ckpts = cfg["evaluation"]["evaluator"]["ckpts"]
     candidate = cfg["optimized_metric_config"]["candidate"]
-
-    assert candidate["criterion"] in ckpts[candidate["strategy"]][candidate["metric"]]
     assert "single" not in ckpts
     assert "last" not in ckpts
-    assert ckpts == {
-        candidate["strategy"]: {candidate["metric"]: [candidate["criterion"]]}
+
+    listed = {
+        (strategy, metric, criterion)
+        for strategy, metrics in ckpts.items()
+        for metric, criteria in metrics.items()
+        for criterion in criteria
     }
+    saved = _saved_folders(cfg["callbacks"])
+
+    chosen = (candidate["strategy"], candidate["metric"], candidate["criterion"])
+    assert chosen in listed
+    assert listed == saved.keys()
+    for (_, metric, criterion), cb in saved.items():
+        assert cb["mode"] == criterion
+        assert cb["filename"] == metric
+
+
+@pytest.mark.parametrize("experiment", EXPERIMENTS)
+def test_cap_parameters_come_from_the_cap_group(experiments, experiment):
+    cfg = experiments[experiment]
+    blocks = [
+        cb["cap_metric_config"]
+        for group in (cfg["callbacks"], cfg["evaluation"]["callbacks"])
+        for cb in group.values()
+        if isinstance(cb, dict) and "cap_metric_config" in cb
+    ]
+
+    assert blocks == ["${cap}"] * 4
+    assert {"beta_min", "beta_max", "n_beta"} <= cfg["cap"].keys()

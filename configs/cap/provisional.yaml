@@ -1,0 +1,18 @@
+# @package cap
+
+# The CAP metric parameters, shared by the training and evaluation CAP and consistency
+# callbacks of every experiment through cap_metric_config: ${cap}, so that the Causal
+# Chamber freeze (subplan 3) replaces this one file. Provisional until then.
+beta_min: 0.01
+beta_max: 1000.0
+n_beta: 200
+normalization_type: sigmoid
+normalization_params: null
+energy_type: adaptive
+energy_params:
+  scale: 0.5
+regularization_type: none
+regularization_params: null
+binary: True
+process_group: null
+dist_sync_fn: null

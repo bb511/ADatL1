@@ -1,218 +1,102 @@
 #!/usr/bin/env bash
 # ========================================================================
-# DTE HYPERPARAMETER SEARCH COMMANDS
+# DTE POOL COMMANDS
 # ========================================================================
-# These are the running commands for the 250 Hz background rate study.
+# The random pool of physics/dte: 90 trials, drawn by four drivers that
+# share the Optuna study `pool` and differ only in their sampler seed. Every
+# trial is a full 200-epoch training, evaluated at the checkpoint of each
+# validation strategy, at both background-rate tiers, and the strategies
+# then select from the pool.
 #
-# One driver per strategy: hydra.sweeper.n_jobs=6 runs six trials at a time as
-# slurm jobs, so the whole 600-trial study completes in a single invocation.
+# The random sampler replays its draws from the seed, so a driver that stops
+# early is relaunched with a fresh seed, not its own, which would repeat the
+# configurations already trained. scripts/cluster/sweep_status.py prints
+# such a relaunch.
 #
-# BEFORE THE FIRST LAUNCH the processed data must already exist on clariden.
-# configs/experiment/physics/dte*.yaml override /data/data_normalizer to
-# `standard`, which has its own cache tree that nothing else in the repo builds.
-# Build it on olqti with scripts/physics/rundte_cache.sh and copy the trees
-# listed there; six drivers starting against a missing cache race on the same
-# directory and leave partial parquet behind. Then run one trial
-# (hydra.sweeper.n_trials=1) to confirm 720 minutes is enough.
+# Each driver keeps six trials queued as slurm jobs
+# (hydra.sweeper.n_jobs=6). The clariden launcher defaults to
+# timeout_min=60, far too short for physics, hence the explicit 720, which
+# is exactly the `normal` partition cap, so a trial that needs longer is
+# killed rather than requeued.
+#
+# BEFORE THE FIRST LAUNCH build the data cache: experiment=physics/dte
+# selects the `standard` normaliser, whose cache tree under data/hf/ the
+# other physics models do not use. One plain training of
+# experiment=physics/dte data=basis_hf builds it; drivers starting against a
+# missing cache race on the same directory and leave partial files behind.
 
 
 # ========================================================================
-# HYPERPARAMETER SEARCHES
+# POOL DRIVERS
 # ========================================================================
 # ------------------------------------------------------------------------
-# Semi-supervised search (cvar25)
+# Driver 1 of 4
 # ------------------------------------------------------------------------
 # python3 src/train.py \
 #     -m \
 #     hydra/launcher=submitit_slurm_clariden \
 #     hydra.launcher.timeout_min=720 \
 #     hydra.sweeper.n_jobs=6 \
-#     paths.raw_data_dir=/path/to/adl1t_data/parquet_files \
+#     data=basis_hf \
 #     experiment=physics/dte \
-#     experiment_name=dte_cvar25_vs_ascore_search \
-#     callbacks.max_rate_ckpt=null \
-#     callbacks.cvar10_ema_ckpt=null \
-#     ~evaluation.evaluator.ckpts.single.eff__ascore_full__brate_operational \
-#     ~evaluation.evaluator.ckpts.summary.cvar10_ema \
-#     evaluation.callbacks.thres_drift=null \
-#     evaluation.callbacks.wasserstein=null \
-#     logger=none \
+#     logger=mlflow \
 #     hparams_search=physics/dte_optuna \
-#     hydra.sweeper.study_name=cvar25eff_vs_ascore \
-#     hydra.sweeper.n_trials=600 \
-#     hydra.sweeper.sampler.n_startup_trials=150 \
+#     hydra.sweeper.n_trials=23 \
+#     hydra.sweeper.sampler.seed=1061 \
 #     trainer=gpu \
-#     trainer.max_epochs=50 \
+#     trainer.max_epochs=200 \
 #     trainer.devices=[0]
 
 # ------------------------------------------------------------------------
-# Semi-supervised search (cvar10)
+# Driver 2 of 4
 # ------------------------------------------------------------------------
 # python3 src/train.py \
 #     -m \
 #     hydra/launcher=submitit_slurm_clariden \
 #     hydra.launcher.timeout_min=720 \
 #     hydra.sweeper.n_jobs=6 \
-#     paths.raw_data_dir=/path/to/adl1t_data/parquet_files \
+#     data=basis_hf \
 #     experiment=physics/dte \
-#     experiment_name=dte_cvar10_vs_ascore_search \
-#     callbacks.max_rate_ckpt=null \
-#     callbacks.cvar25_ema_ckpt=null \
-#     ~evaluation.evaluator.ckpts.single.eff__ascore_full__brate_operational \
-#     ~evaluation.evaluator.ckpts.summary.cvar25_ema \
-#     evaluation.callbacks.thres_drift=null \
-#     evaluation.callbacks.wasserstein=null \
-#     evaluation.callbacks.anomaly_efficiency.cvar_summary=0.10 \
-#     logger=none \
+#     logger=mlflow \
 #     hparams_search=physics/dte_optuna \
-#     hydra.sweeper.study_name=cvar10eff_vs_ascore \
-#     hydra.sweeper.n_trials=600 \
-#     hydra.sweeper.sampler.n_startup_trials=150 \
+#     hydra.sweeper.n_trials=23 \
+#     hydra.sweeper.sampler.seed=1062 \
 #     trainer=gpu \
-#     trainer.max_epochs=50 \
+#     trainer.max_epochs=200 \
 #     trainer.devices=[0]
 
 # ------------------------------------------------------------------------
-# CAP search
+# Driver 3 of 4
 # ------------------------------------------------------------------------
 # python3 src/train.py \
 #     -m \
 #     hydra/launcher=submitit_slurm_clariden \
 #     hydra.launcher.timeout_min=720 \
 #     hydra.sweeper.n_jobs=6 \
-#     paths.raw_data_dir=/path/to/adl1t_data/parquet_files \
-#     experiment=physics/dte_agnostic \
-#     experiment_name=dte_agnostic_cap_vs_ascore_search \
-#     callbacks.anomaly_eff=null \
-#     callbacks.wasserstein_dist=null \
-#     callbacks.thres_drift=null \
-#     callbacks.wasserstein_dist_ema_ckpt=null \
-#     callbacks.thres_drift_ema_ckpt=null \
-#     callbacks.consistency_sn_zb=null \
-#     callbacks.consistency_sn_zb_ema_ckpt=null \
-#     ~evaluation.evaluator.ckpts.summary.operational_drift_ema \
-#     ~evaluation.evaluator.ckpts.summary.w1dist_ema_normal_vs_SingleNeutrino_E-10-gun \
-#     ~evaluation.evaluator.ckpts.summary.consistency_ema_normal_vs_SingleNeutrino_E-10-gun \
-#     evaluation.callbacks.anomaly_efficiency=null \
-#     evaluation.callbacks.thres_drift=null \
-#     evaluation.callbacks.wasserstein=null \
-#     evaluation.callbacks.consistency_sn_zb=null \
-#     logger=none \
+#     data=basis_hf \
+#     experiment=physics/dte \
+#     logger=mlflow \
 #     hparams_search=physics/dte_optuna \
-#     hydra.sweeper.study_name=cap_vs_ascore \
-#     hydra.sweeper.n_trials=600 \
-#     hydra.sweeper.sampler.n_startup_trials=150 \
+#     hydra.sweeper.n_trials=22 \
+#     hydra.sweeper.sampler.seed=1063 \
 #     trainer=gpu \
-#     trainer.max_epochs=50 \
+#     trainer.max_epochs=200 \
 #     trainer.devices=[0]
 
 # ------------------------------------------------------------------------
-# Stability search
+# Driver 4 of 4
 # ------------------------------------------------------------------------
 # python3 src/train.py \
 #     -m \
 #     hydra/launcher=submitit_slurm_clariden \
 #     hydra.launcher.timeout_min=720 \
 #     hydra.sweeper.n_jobs=6 \
-#     paths.raw_data_dir=/path/to/adl1t_data/parquet_files \
-#     experiment=physics/dte_agnostic \
-#     experiment_name=dte_agnostic_drift_vs_ascore_search \
-#     callbacks.anomaly_eff=null \
-#     callbacks.wasserstein_dist=null \
-#     callbacks.cap_sn_zb=null \
-#     callbacks.wasserstein_dist_ema_ckpt=null \
-#     callbacks.cap_sn_zb_ema_ckpt=null \
-#     callbacks.consistency_sn_zb=null \
-#     callbacks.consistency_sn_zb_ema_ckpt=null \
-#     ~evaluation.evaluator.ckpts.summary.w1dist_ema_normal_vs_SingleNeutrino_E-10-gun \
-#     ~evaluation.evaluator.ckpts.summary.cap_ema_normal_vs_SingleNeutrino_E-10-gun \
-#     ~evaluation.evaluator.ckpts.summary.consistency_ema_normal_vs_SingleNeutrino_E-10-gun \
-#     evaluation.callbacks.anomaly_efficiency=null \
-#     evaluation.callbacks.cap_sn_zb=null \
-#     evaluation.callbacks.wasserstein=null \
-#     evaluation.callbacks.consistency_sn_zb=null \
-#     logger=none \
+#     data=basis_hf \
+#     experiment=physics/dte \
+#     logger=mlflow \
 #     hparams_search=physics/dte_optuna \
-#     optimized_metric_config.main_metric.callback.name=thres_drift \
-#     optimized_metric_config.main_metric.direction=minimize \
-#     hydra.sweeper.study_name=drift_vs_ascore \
-#     hydra.sweeper.direction='[minimize, minimize]' \
-#     hydra.sweeper.n_trials=600 \
-#     hydra.sweeper.sampler.n_startup_trials=150 \
+#     hydra.sweeper.n_trials=22 \
+#     hydra.sweeper.sampler.seed=1064 \
 #     trainer=gpu \
-#     trainer.max_epochs=50 \
-#     trainer.devices=[0]
-
-# ------------------------------------------------------------------------
-# Wasserstein search
-# ------------------------------------------------------------------------
-# python3 src/train.py \
-#     -m \
-#     hydra/launcher=submitit_slurm_clariden \
-#     hydra.launcher.timeout_min=720 \
-#     hydra.sweeper.n_jobs=6 \
-#     paths.raw_data_dir=/path/to/adl1t_data/parquet_files \
-#     experiment=physics/dte_agnostic \
-#     experiment_name=dte_agnostic_wasserstein_vs_ascore_search \
-#     callbacks.anomaly_eff=null \
-#     callbacks.thres_drift=null \
-#     callbacks.cap_sn_zb=null \
-#     callbacks.thres_drift_ema_ckpt=null \
-#     callbacks.cap_sn_zb_ema_ckpt=null \
-#     callbacks.consistency_sn_zb=null \
-#     callbacks.consistency_sn_zb_ema_ckpt=null \
-#     ~evaluation.evaluator.ckpts.summary.operational_drift_ema \
-#     ~evaluation.evaluator.ckpts.summary.cap_ema_normal_vs_SingleNeutrino_E-10-gun \
-#     ~evaluation.evaluator.ckpts.summary.consistency_ema_normal_vs_SingleNeutrino_E-10-gun \
-#     evaluation.callbacks.anomaly_efficiency=null \
-#     evaluation.callbacks.cap_sn_zb=null \
-#     evaluation.callbacks.thres_drift=null \
-#     evaluation.callbacks.consistency_sn_zb=null \
-#     logger=none \
-#     hparams_search=physics/dte_optuna \
-#     optimized_metric_config.main_metric.callback.name=wasserstein \
-#     optimized_metric_config.main_metric.direction=minimize \
-#     hydra.sweeper.study_name=wasserstein_vs_ascore \
-#     hydra.sweeper.direction='[minimize, minimize]' \
-#     hydra.sweeper.n_trials=600 \
-#     hydra.sweeper.sampler.n_startup_trials=150 \
-#     trainer=gpu \
-#     trainer.max_epochs=50 \
-#     trainer.devices=[0]
-
-# ------------------------------------------------------------------------
-# Consistency search
-# ------------------------------------------------------------------------
-# Consistency-only CAP: the beta-free limit of CAP's posterior log-cosine,
-# i.e. CAP with the informative (posterior-norm) component removed.
-# python3 src/train.py \
-#     -m \
-#     hydra/launcher=submitit_slurm_clariden \
-#     hydra.launcher.timeout_min=720 \
-#     hydra.sweeper.n_jobs=6 \
-#     paths.raw_data_dir=/path/to/adl1t_data/parquet_files \
-#     experiment=physics/dte_agnostic \
-#     experiment_name=dte_agnostic_consistency_vs_ascore_search \
-#     callbacks.anomaly_eff=null \
-#     callbacks.wasserstein_dist=null \
-#     callbacks.thres_drift=null \
-#     callbacks.wasserstein_dist_ema_ckpt=null \
-#     callbacks.cap_sn_zb=null \
-#     callbacks.cap_sn_zb_ema_ckpt=null \
-#     callbacks.thres_drift_ema_ckpt=null \
-#     ~evaluation.evaluator.ckpts.summary.operational_drift_ema \
-#     ~evaluation.evaluator.ckpts.summary.w1dist_ema_normal_vs_SingleNeutrino_E-10-gun \
-#     ~evaluation.evaluator.ckpts.summary.cap_ema_normal_vs_SingleNeutrino_E-10-gun \
-#     evaluation.callbacks.anomaly_efficiency=null \
-#     evaluation.callbacks.thres_drift=null \
-#     evaluation.callbacks.wasserstein=null \
-#     evaluation.callbacks.cap_sn_zb=null \
-#     logger=none \
-#     hparams_search=physics/dte_optuna \
-#     optimized_metric_config.main_metric.callback.name=consistency \
-#     hydra.sweeper.study_name=consistency_vs_ascore \
-#     hydra.sweeper.n_trials=600 \
-#     hydra.sweeper.sampler.n_startup_trials=150 \
-#     trainer=gpu \
-#     trainer.max_epochs=50 \
+#     trainer.max_epochs=200 \
 #     trainer.devices=[0]

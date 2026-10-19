@@ -1,11 +1,9 @@
 #!/bin/bash
-# Helpers shared by submit_search.sh, submit_pareto.sh and submit_pareto_ngt.sh.
+# Helpers for submit_search.sh.
 #
-# The block parser below is the one piece that must stay in step with
-# scripts/optuna/make_pareto_scripts.py: it defines what a "command" in a
-# run*_{search,pareto}.sh file is. It used to be copy-pasted into all three
-# submitters, which meant a change to the generated layout had to be made in
-# three places or one submitter would silently stop finding commands.
+# The block parser below defines what a "command" in a run*_search.sh file is,
+# so a change to the catalogue layout has to be mirrored here, or the submitter
+# silently stops finding commands.
 #
 # Source it as:  . "$(dirname "${BASH_SOURCE[0]}")/lib.sh"
 
@@ -59,19 +57,6 @@ selected() {
 # created there too, so refuse to run from anywhere else.
 require_repo_root() {
     [ -f .project-root ] || { echo "run this from the repository root" >&2; exit 1; }
-}
-
-# The generated blocks carry a literal '/path/to/adl1t_data/parquet_files'
-# placeholder that each submitter rewrites with the real location. Catching a
-# survivor here is what stops a whole batch from failing one job at a time.
-# $1 = assembled command, $2 = label for the message, $3 = how to fix it.
-assert_no_placeholder() {
-    case "$1" in
-        *"/path/to/"*)
-            echo "error: $2 still contains a '/path/to/...' placeholder." >&2
-            [ -z "${3:-}" ] || echo "       $3" >&2
-            exit 1 ;;
-    esac
 }
 
 # Preflight: the drivers are nohup'd, so an unimportable dependency shows up

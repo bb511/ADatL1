@@ -1,6 +1,7 @@
 # @package _global_
 
 defaults:
+  - /cap: provisional
   - override /data: cifar10
   - override /algorithm: image_realnvp
   - override /callbacks: default
@@ -10,9 +11,9 @@ defaults:
   - override /logger: mlflow
 
 seed: 123
-tags: ["realnvp", "cifar10", "signal"]
+tags: ["realnvp", "pool"]
 
-experiment_name: cifar10_realnvp_models
+experiment_name: cifar10_realnvp_pool
 run_name: ${short_hash:${hydra:runtime.output_dir},12}
 
 data:
@@ -69,6 +70,37 @@ callbacks:
     output_name: 'ascore/full'
     ema_weight: 0.9
 
+  thres_drift:
+    _target_: src.callbacks.thres_drift.ThresholdDriftCallback
+    output_name: 'ascore/full'
+    calibration_fraction: 0.5
+    split_seed: 12345
+    ema_weight: 0.9
+
+  wasserstein_dist:
+    _target_: src.callbacks.wasserstein.WassersteinCallback
+    output_name: 'ascore/full'
+    dataset_1: normal
+    dataset_2: reference_normal
+    apply_log1p: true
+    ema_weight: 0.9
+
+  cap_sn_zb:
+    _target_: src.callbacks.cap.CAPCallback
+    output_name: 'ascore/full'
+    dataset_1: normal
+    dataset_2: reference_normal
+    pairing_type: cdf
+    cap_metric_config: ${cap}
+
+  consistency_sn_zb:
+    _target_: src.callbacks.consistency.PosteriorConsistencyCallback
+    output_name: 'ascore/full'
+    dataset_1: normal
+    dataset_2: reference_normal
+    pairing_type: cdf
+    cap_metric_config: ${cap}
+
   cvar25_ema_ckpt:
     _target_: pytorch_lightning.callbacks.ModelCheckpoint
     dirpath: '${paths.checkpoints_dir}/${experiment_name}/${run_name}/summary/cvar25_ema/max'
@@ -95,11 +127,84 @@ callbacks:
     every_n_epochs: 1
     save_on_train_epoch_end: false
 
+  thres_drift_ema_ckpt:
+    _target_: pytorch_lightning.callbacks.ModelCheckpoint
+    dirpath: '${paths.checkpoints_dir}/${experiment_name}/${run_name}/summary/operational_drift_ema/min'
+    monitor: 'val/summary/operational_drift_ema'
+    filename: 'operational_drift_ema'
+    save_last: false
+    save_top_k: 1
+    mode: "min"
+    auto_insert_metric_name: False
+    save_weights_only: False
+    every_n_epochs: 1
+    save_on_train_epoch_end: false
+
+  wasserstein_dist_ema_ckpt:
+    _target_: pytorch_lightning.callbacks.ModelCheckpoint
+    dirpath: '${paths.checkpoints_dir}/${experiment_name}/${run_name}/summary/w1dist_ema_normal_vs_reference_normal/min'
+    monitor: 'val/summary/w1dist_ema_normal_vs_reference_normal'
+    filename: 'w1dist_ema_normal_vs_reference_normal'
+    save_last: false
+    save_top_k: 1
+    mode: "min"
+    auto_insert_metric_name: False
+    save_weights_only: False
+    every_n_epochs: 1
+    save_on_train_epoch_end: false
+
+  cap_sn_zb_ema_ckpt:
+    _target_: pytorch_lightning.callbacks.ModelCheckpoint
+    dirpath: '${paths.checkpoints_dir}/${experiment_name}/${run_name}/summary/cap_ema_normal_vs_reference_normal/max'
+    monitor: 'val/summary/cap_ema_normal_vs_reference_normal'
+    filename: 'cap_ema_normal_vs_reference_normal'
+    save_last: false
+    save_top_k: 1
+    mode: "max"
+    auto_insert_metric_name: False
+    save_weights_only: False
+    every_n_epochs: 1
+    save_on_train_epoch_end: false
+
+  consistency_sn_zb_ema_ckpt:
+    _target_: pytorch_lightning.callbacks.ModelCheckpoint
+    dirpath: '${paths.checkpoints_dir}/${experiment_name}/${run_name}/summary/consistency_ema_normal_vs_reference_normal/max'
+    monitor: 'val/summary/consistency_ema_normal_vs_reference_normal'
+    filename: 'consistency_ema_normal_vs_reference_normal'
+    save_last: false
+    save_top_k: 1
+    mode: "max"
+    auto_insert_metric_name: False
+    save_weights_only: False
+    every_n_epochs: 1
+    save_on_train_epoch_end: false
+
+  # The loss baseline: the model's own objective on normal validation data, logged
+  # without the EMA that the other strategies' metrics carry.
+  loss_ckpt:
+    _target_: pytorch_lightning.callbacks.ModelCheckpoint
+    dirpath: '${paths.checkpoints_dir}/${experiment_name}/${run_name}/summary/loss/min'
+    monitor: 'val/normal/loss'
+    filename: 'loss'
+    save_last: false
+    save_top_k: 1
+    mode: "min"
+    auto_insert_metric_name: False
+    save_weights_only: False
+    every_n_epochs: 1
+    save_on_train_epoch_end: false
+
 evaluation:
   evaluator:
     ckpts:
       summary:
         cvar25_ema: ['max']
+        cvar10_ema: ['max']
+        operational_drift_ema: ['min']
+        w1dist_ema_normal_vs_reference_normal: ['min']
+        cap_ema_normal_vs_reference_normal: ['max']
+        consistency_ema_normal_vs_reference_normal: ['max']
+        loss: ['min']
 
   callbacks:
     anomaly_efficiency:
@@ -117,6 +222,25 @@ evaluation:
         - '9'
       cvar_summary: 0.25
       log_raw_mlflow: false
+
+    cap_sn_zb:
+      _target_: src.evaluation.callbacks.cap.CAP
+      output_name: 'ascore/full'
+      dataset_1: normal
+      dataset_2: reference_normal
+      log_raw_mlflow: false
+      pairing_type: cdf
+      cap_metric_config: ${cap}
+
+    consistency_sn_zb:
+      _target_: src.evaluation.callbacks.consistency.PosteriorConsistency
+      name: consistency
+      output_name: 'ascore/full'
+      dataset_1: normal
+      dataset_2: reference_normal
+      log_raw_mlflow: false
+      pairing_type: cdf
+      cap_metric_config: ${cap}
 
     ascore_operational:
       _target_: src.evaluation.callbacks.output.OutputCallback

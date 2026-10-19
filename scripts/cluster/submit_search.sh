@@ -1,38 +1,33 @@
 #!/bin/bash
-# Submit the hyperparameter-search drivers of a run*_search.sh file on clariden.
+# Submit the pool drivers of a run*_search.sh file.
 #
-# This is the sibling of submit_pareto.sh, and the difference matters. A
-# run*_pareto.sh file holds bare single-training commands, so submit_pareto.sh
-# has to prepend '-m hydra/launcher=... timeout_min=...'. A run*_search.sh block
-# already carries '-m' and its own launcher settings. So this script runs each
-# block as written and adds only what the file cannot know: the raw data path
-# and a private sweep directory.
+# A run*_search.sh block already carries '-m' and its own launcher settings, so
+# this script runs each block as written and adds only what the file cannot
+# know: a private sweep directory.
 #
 # Which launcher a block carries is a property of the block, not of this script.
-# The physics ae/dsae/dsvae/realnvp/vae searches (both tiers) were run with
-# hydra/launcher=submitit_local on olqti and still say so; only dte/svdd and the
-# whole of cifar10/robustad carry submitit_slurm_clariden + n_jobs=6. Submitting
-# a submitit_local block on clariden starts a local driver that never reaches
-# slurm -- check the block with --list/--dry-run before launching it there.
+# The physics ae/dsae/realnvp/vae drivers carry hydra/launcher=submitit_local;
+# physics dte/svdd and the whole of cifar10/robustad carry
+# submitit_slurm_clariden + n_jobs=6. Submitting a submitit_local block on
+# clariden starts a local driver that never reaches slurm -- check the block
+# with --list/--dry-run before launching it there.
 #
 # Each block is one long-lived Optuna driver: it keeps n_jobs trials in the
-# queue and stays alive until its study reaches n_trials. Drivers are therefore
-# nohup'd and this command returns as soon as they are all up.
+# queue and stays alive until it has run its own n_trials, while the four
+# drivers of a catalogue fill one shared study. Drivers are therefore nohup'd
+# and this command returns as soon as they are all up.
 #
-# Usage (from the repository root, on clariden):
+# Usage (from the repository root):
 #   bash scripts/cluster/submit_search.sh --list    scripts/physics/runsvdd_search.sh
 #   bash scripts/cluster/submit_search.sh --dry-run scripts/physics/runsvdd_search.sh
 #   bash scripts/cluster/submit_search.sh           scripts/physics/runsvdd_search.sh
-#   bash scripts/cluster/submit_search.sh --only cap,consistency scripts/physics/rundte_search.sh
+#   bash scripts/cluster/submit_search.sh --only 1,3 scripts/physics/rundte_search.sh
 #
 #   --list              list the drivers in the file (with their launcher) and exit
 #   --dry-run           print the full commands without running anything; works
-#                       off the cluster, so it needs neither the env nor the data
+#                       off the cluster, since it needs no training env
 #   --only <sel>        comma-separated study names (substring) or 1-based
 #                       indices; default is every driver in the file
-#   --raw-data-dir <p>  value for paths.raw_data_dir; defaults to
-#                       $SCRATCH/adl1t_data/parquet_files when $SCRATCH is set.
-#                       Only applied to files that reference it (the physics ones).
 #
 # Any extra hydra overrides after the file name are appended to every driver.
 # Hydra takes the last of a duplicated override, so appending wins over the
@@ -45,23 +40,19 @@ set -eu
 only=""
 dry=0
 list=0
-# Empty when neither is set, so the "no raw data path given" branch below is
-# reachable -- '${SCRATCH:-}/adl1t_data/...' would silently yield '/adl1t_data/...'.
-raw_data_dir="${RAW_DATA_DIR:-${SCRATCH:+$SCRATCH/adl1t_data/parquet_files}}"
 
 while [ $# -gt 0 ]; do
     case "$1" in
         --dry-run) dry=1; shift ;;
         --list) list=1; shift ;;
         --only) only="${2:?--only needs a value}"; shift 2 ;;
-        --raw-data-dir) raw_data_dir="${2:?--raw-data-dir needs a path}"; shift 2 ;;
         --) shift; break ;;
         -*) echo "unknown option: $1" >&2; exit 2 ;;
         *) break ;;
     esac
 done
 
-usage="usage: submit_search.sh [--list|--dry-run] [--only sel] [--raw-data-dir p]"
+usage="usage: submit_search.sh [--list|--dry-run] [--only sel]"
 usage="$usage <run*_search.sh> [overrides...]"
 file=${1:?$usage}
 shift || true
@@ -73,19 +64,33 @@ require_repo_root
 # Parsed once; every loop below reads from this list.
 cmds=$(extract_cmds "$file")
 
+# $1 = command, $2 = key. The value of a sweeper key in the hparams_search
+# config the command selects, e.g. 'storage' or 'study_name'.
+from_config() {
+    local hp
+    hp=$(field "$1" 'hparams_search')
+    if [ -n "$hp" ] && [ -f "configs/hparams_search/${hp}.yaml" ]; then
+        grep -oE "^[[:space:]]*$2:[[:space:]]*\S+" "configs/hparams_search/${hp}.yaml" |
+            head -1 | awk '{print $2}'
+    fi
+}
+
 # Optuna storage a driver will use: an explicit hydra.sweeper.storage override
 # if the block carries one, else the value in the hparams_search config it
 # selects. No block carries one today, so in practice it is always the config.
 storage_of() {
-    local s hp
+    local s
     s=$(printf "%s" "$1" | grep -oE "hydra\.sweeper\.storage='[^']+'" | head -1 | sed "s/.*='//;s/'\$//")
-    if [ -z "$s" ]; then
-        hp=$(field "$1" 'hparams_search')
-        if [ -n "$hp" ] && [ -f "configs/hparams_search/${hp}.yaml" ]; then
-            s=$(grep -oE "^[[:space:]]*storage:[[:space:]]*\S+" "configs/hparams_search/${hp}.yaml" |
-                head -1 | awk '{print $2}')
-        fi
-    fi
+    [ -n "$s" ] || s=$(from_config "$1" storage)
+    printf "%s" "$s"
+}
+
+# The study a driver fills, found the same way. The pool blocks leave it to the
+# config, which names one study for all four drivers of a catalogue.
+study_of() {
+    local s
+    s=$(field "$1" 'hydra\.sweeper\.study_name')
+    [ -n "$s" ] || s=$(from_config "$1" study_name)
     printf "%s" "$s"
 }
 
@@ -96,13 +101,14 @@ if [ "$n_total" -eq 0 ]; then
 fi
 
 if [ "$list" -eq 1 ]; then
-    printf "%-3s %-26s %-34s %-24s %s\n" "#" "study" "experiment_name" "launcher" "n_trials"
+    printf "%-3s %-10s %-20s %-6s %-24s %s\n" "#" "study" "experiment" "seed" "launcher" "n_trials"
     i=0
     while IFS= read -r cmd; do
         i=$((i + 1))
-        printf "%-3s %-26s %-34s %-24s %s\n" "$i" \
-            "$(field "$cmd" 'hydra\.sweeper\.study_name')" \
-            "$(field "$cmd" 'experiment_name')" \
+        printf "%-3s %-10s %-20s %-6s %-24s %s\n" "$i" \
+            "$(study_of "$cmd")" \
+            "$(field "$cmd" 'experiment')" \
+            "$(field "$cmd" 'hydra\.sweeper\.sampler\.seed')" \
             "$(field "$cmd" 'hydra/launcher')" \
             "$(field "$cmd" 'hydra\.sweeper\.n_trials')"
     done <<EOF
@@ -157,41 +163,14 @@ i=0
 n_sub=0
 while IFS= read -r cmd; do
     i=$((i + 1))
-    study=$(field "$cmd" 'hydra\.sweeper\.study_name')
+    study=$(study_of "$cmd")
     selected "$i" "$study" || continue
-
-    # Only files that already reference the raw data path need it rewritten; the
-    # cifar10/robustad searches read data/ relative to the repo root. Rewritten
-    # in place rather than appended, so the command carries exactly one value and
-    # the placeholder check below stays meaningful.
-    if printf "%s" "$cmd" | grep -q 'paths\.raw_data_dir='; then
-        if [ -z "$raw_data_dir" ]; then
-            echo "error: $file needs paths.raw_data_dir but none was given." >&2
-            echo "       pass --raw-data-dir <path> (or set RAW_DATA_DIR/SCRATCH)" >&2
-            exit 1
-        fi
-        # Existence is enforced only for a real run: --dry-run is for inspecting
-        # the commands, and is routinely done off the machine that holds the data.
-        if [ ! -d "$raw_data_dir" ]; then
-            if [ "$dry" -eq 1 ]; then
-                echo "note: '$raw_data_dir' not present here (fine for --dry-run)" >&2
-            else
-                echo "error: raw data dir '$raw_data_dir' does not exist." >&2
-                exit 1
-            fi
-        fi
-        cmd=$(printf "%s" "$cmd" |
-              sed -E "s#paths\.raw_data_dir=[^ ]+#paths.raw_data_dir=${raw_data_dir}#")
-    fi
 
     # Private sweep dir per driver: hydra's default second-resolution timestamp
     # collides when several drivers start together, merging their outputs (and
     # the clariden launcher nests submitit_folder under hydra.sweep.dir).
     sweep=" hydra.sweep.dir=logs/train/multiruns/${sweep_ts}_${stem}_j$i"
     full="$PYTHON src/train.py$cmd$sweep${extra:+ $extra}"
-
-    assert_no_placeholder "$full" "driver $i ($study)" \
-        "pass --raw-data-dir <real path>."
 
     if [ "$dry" -eq 1 ]; then
         echo "[$i/$n_total] $full"

@@ -1,221 +1,102 @@
 #!/usr/bin/env bash
 # ========================================================================
-# VAE HYPERPARAMETER SEARCH COMMANDS
+# VAE POOL COMMANDS
 # ========================================================================
-# These are the running commands for the 250 Hz background rate study.
+# The random pool of physics/vae: 150 trials, drawn by four drivers that
+# share the Optuna study `pool` and differ only in their sampler seed. Every
+# trial is a full 200-epoch training, evaluated at the checkpoint of each
+# validation strategy, at both background-rate tiers, and the strategies
+# then select from the pool.
+#
+# The random sampler replays its draws from the seed, so a driver that stops
+# early is relaunched with a fresh seed, not its own, which would repeat the
+# configurations already trained. scripts/cluster/sweep_status.py prints
+# such a relaunch.
+#
+# Each driver runs one trial at a time through submitit_local, whose default
+# timeout of 60 minutes is shorter than 200 epochs of the slower models,
+# hence timeout_min=200.
 
 
 # ========================================================================
-# HYPERPARAMETER SEARCHES
+# POOL DRIVERS
 # ========================================================================
 # ------------------------------------------------------------------------
-# Semi-supervised search (cvar25)
+# Driver 1 of 4
 # ------------------------------------------------------------------------
 # taskset -c 0-2 \
 # python3 src/train.py \
 #     -m \
 #     hydra/launcher=submitit_local \
-#     hydra.launcher.cpus_per_task=1 \
-#     hydra.launcher.gpus_per_node=4 \
-#     paths.raw_data_dir=/path/to/adl1t_data/parquet_files \
-#     experiment=physics/vae \
-#     experiment_name=vae_cvar25_vs_kl_search \
-#     callbacks.max_rate_ckpt=null \
-#     callbacks.cvar10_ema_ckpt=null \
-#     ~evaluation.evaluator.ckpts.single.eff__ascore_full__brate_operational \
-#     ~evaluation.evaluator.ckpts.summary.cvar10_ema \
-#     evaluation.callbacks.thres_drift=null \
-#     evaluation.callbacks.wasserstein=null \
-#     evaluation.callbacks.reco=null \
-#     logger=none \
-#     hparams_search=physics/vae_optuna \
-#     hydra.sweeper.study_name=cvar25eff_vs_kl \
-#     hydra.sweeper.n_trials=100 \
-#     hydra.sweeper.sampler.n_startup_trials=150 \
-#     trainer=gpu \
-#     trainer.max_epochs=50 \
-#     trainer.devices=[0]
-
-# ------------------------------------------------------------------------
-# Semi-supervised search (cvar10)
-# ------------------------------------------------------------------------
-# taskset -c 0-2 \
-# python3 src/train.py \
-#     -m \
-#     hydra/launcher=submitit_local \
-#     hydra.launcher.cpus_per_task=1 \
-#     hydra.launcher.gpus_per_node=4 \
-#     paths.raw_data_dir=/path/to/adl1t_data/parquet_files \
-#     experiment=physics/vae \
-#     experiment_name=vae_cvar10_vs_kl_search \
-#     callbacks.max_rate_ckpt=null \
-#     callbacks.cvar25_ema_ckpt=null \
-#     ~evaluation.evaluator.ckpts.single.eff__ascore_full__brate_operational \
-#     ~evaluation.evaluator.ckpts.summary.cvar25_ema \
-#     evaluation.callbacks.thres_drift=null \
-#     evaluation.callbacks.wasserstein=null \
-#     evaluation.callbacks.reco=null \
-#     evaluation.callbacks.anomaly_efficiency.cvar_summary=0.10 \
-#     logger=none \
-#     hparams_search=physics/vae_optuna \
-#     hydra.sweeper.study_name=cvar10eff_vs_kl \
-#     hydra.sweeper.n_trials=100 \
-#     hydra.sweeper.sampler.n_startup_trials=150 \
-#     trainer=gpu \
-#     trainer.max_epochs=50 \
-#     trainer.devices=[0]
-
-# ------------------------------------------------------------------------
-# CAP search
-# ------------------------------------------------------------------------
-# taskset -c 0-2 \
-# python3 src/train.py \
-#     -m \
-#     hydra/launcher=submitit_local \
-#     hydra.launcher.cpus_per_task=1 \
 #     hydra.launcher.timeout_min=200 \
+#     hydra.launcher.cpus_per_task=1 \
 #     hydra.launcher.gpus_per_node=4 \
-#     paths.raw_data_dir=/path/to/adl1t_data/parquet_files \
-#     experiment=physics/vae_agnostic \
-#     experiment_name=vae_agnostic_cap_vs_kl_search \
-#     callbacks.anomaly_eff=null \
-#     callbacks.wasserstein_dist=null \
-#     callbacks.thres_drift=null \
-#     callbacks.wasserstein_dist_ema_ckpt=null \
-#     callbacks.thres_drift_ema_ckpt=null \
-#     callbacks.consistency_sn_zb=null \
-#     callbacks.consistency_sn_zb_ema_ckpt=null \
-#     ~evaluation.evaluator.ckpts.summary.operational_drift_ema \
-#     ~evaluation.evaluator.ckpts.summary.w1dist_ema_normal_vs_SingleNeutrino_E-10-gun \
-#     ~evaluation.evaluator.ckpts.summary.consistency_ema_normal_vs_SingleNeutrino_E-10-gun \
-#     evaluation.callbacks.anomaly_efficiency=null \
-#     evaluation.callbacks.thres_drift=null \
-#     evaluation.callbacks.wasserstein=null \
-#     evaluation.callbacks.consistency_sn_zb=null \
-#     evaluation.callbacks.reco=null \
-#     logger=none \
+#     data=basis_hf \
+#     experiment=physics/vae \
+#     logger=mlflow \
 #     hparams_search=physics/vae_optuna \
-#     hydra.sweeper.study_name=cap_vs_kl \
-#     hydra.sweeper.n_trials=100 \
-#     hydra.sweeper.sampler.n_startup_trials=150 \
+#     hydra.sweeper.n_trials=38 \
+#     hydra.sweeper.sampler.seed=1021 \
 #     trainer=gpu \
-#     trainer.max_epochs=50 \
+#     trainer.max_epochs=200 \
 #     trainer.devices=[0]
 
 # ------------------------------------------------------------------------
-# Stability search
+# Driver 2 of 4
 # ------------------------------------------------------------------------
 # taskset -c 0-2 \
 # python3 src/train.py \
 #     -m \
 #     hydra/launcher=submitit_local \
-#     hydra.launcher.cpus_per_task=1 \
-#     hydra.launcher.gpus_per_node=4 \
-#     paths.raw_data_dir=/path/to/adl1t_data/parquet_files \
-#     experiment=physics/vae_agnostic \
-#     experiment_name=vae_agnostic_drift_vs_kl_search \
-#     callbacks.anomaly_eff=null \
-#     callbacks.wasserstein_dist=null \
-#     callbacks.cap_sn_zb=null \
-#     callbacks.wasserstein_dist_ema_ckpt=null \
-#     callbacks.cap_sn_zb_ema_ckpt=null \
-#     callbacks.consistency_sn_zb=null \
-#     callbacks.consistency_sn_zb_ema_ckpt=null \
-#     ~evaluation.evaluator.ckpts.summary.w1dist_ema_normal_vs_SingleNeutrino_E-10-gun \
-#     ~evaluation.evaluator.ckpts.summary.cap_ema_normal_vs_SingleNeutrino_E-10-gun \
-#     ~evaluation.evaluator.ckpts.summary.consistency_ema_normal_vs_SingleNeutrino_E-10-gun \
-#     evaluation.callbacks.anomaly_efficiency=null \
-#     evaluation.callbacks.cap_sn_zb=null \
-#     evaluation.callbacks.wasserstein=null \
-#     evaluation.callbacks.consistency_sn_zb=null \
-#     evaluation.callbacks.reco=null \
-#     logger=none \
-#     hparams_search=physics/vae_optuna \
-#     optimized_metric_config.main_metric.callback.name=thres_drift \
-#     optimized_metric_config.main_metric.direction=minimize \
-#     hydra.sweeper.study_name=drift_vs_kl \
-#     hydra.sweeper.direction='[minimize, minimize]' \
-#     hydra.sweeper.n_trials=100 \
-#     hydra.sweeper.sampler.n_startup_trials=150 \
-#     trainer=gpu \
-#     trainer.max_epochs=50 \
-#     trainer.devices=[0]
-
-# ------------------------------------------------------------------------
-# Wasserstein search
-# ------------------------------------------------------------------------
-# taskset -c 0-2 \
-# python3 src/train.py \
-#     -m \
-#     hydra/launcher=submitit_local \
-#     hydra.launcher.cpus_per_task=1 \
-#     hydra.launcher.gpus_per_node=4 \
-#     paths.raw_data_dir=/path/to/adl1t_data/parquet_files \
-#     experiment=physics/vae_agnostic \
-#     experiment_name=vae_agnostic_wasserstein_vs_kl_search \
-#     callbacks.anomaly_eff=null \
-#     callbacks.thres_drift=null \
-#     callbacks.cap_sn_zb=null \
-#     callbacks.thres_drift_ema_ckpt=null \
-#     callbacks.cap_sn_zb_ema_ckpt=null \
-#     callbacks.consistency_sn_zb=null \
-#     callbacks.consistency_sn_zb_ema_ckpt=null \
-#     ~evaluation.evaluator.ckpts.summary.operational_drift_ema \
-#     ~evaluation.evaluator.ckpts.summary.cap_ema_normal_vs_SingleNeutrino_E-10-gun \
-#     ~evaluation.evaluator.ckpts.summary.consistency_ema_normal_vs_SingleNeutrino_E-10-gun \
-#     evaluation.callbacks.anomaly_efficiency=null \
-#     evaluation.callbacks.cap_sn_zb=null \
-#     evaluation.callbacks.thres_drift=null \
-#     evaluation.callbacks.consistency_sn_zb=null \
-#     evaluation.callbacks.reco=null \
-#     logger=none \
-#     hparams_search=physics/vae_optuna \
-#     optimized_metric_config.main_metric.callback.name=wasserstein \
-#     optimized_metric_config.main_metric.direction=minimize \
-#     hydra.sweeper.study_name=wasserstein_vs_kl \
-#     hydra.sweeper.direction='[minimize, minimize]' \
-#     hydra.sweeper.n_trials=100 \
-#     hydra.sweeper.sampler.n_startup_trials=150 \
-#     trainer=gpu \
-#     trainer.max_epochs=50 \
-#     trainer.devices=[0]
-
-# ------------------------------------------------------------------------
-# Consistency search
-# ------------------------------------------------------------------------
-# Consistency-only CAP: the beta-free limit of CAP's posterior log-cosine,
-# i.e. CAP with the informative (posterior-norm) component removed.
-# taskset -c 0-2 \
-# python3 src/train.py \
-#     -m \
-#     hydra/launcher=submitit_local \
-#     hydra.launcher.cpus_per_task=1 \
 #     hydra.launcher.timeout_min=200 \
+#     hydra.launcher.cpus_per_task=1 \
 #     hydra.launcher.gpus_per_node=4 \
-#     paths.raw_data_dir=/path/to/adl1t_data/parquet_files \
-#     experiment=physics/vae_agnostic \
-#     experiment_name=vae_agnostic_consistency_vs_kl_b16k_search \
-#     callbacks.anomaly_eff=null \
-#     callbacks.wasserstein_dist=null \
-#     callbacks.thres_drift=null \
-#     callbacks.wasserstein_dist_ema_ckpt=null \
-#     callbacks.cap_sn_zb=null \
-#     callbacks.cap_sn_zb_ema_ckpt=null \
-#     callbacks.thres_drift_ema_ckpt=null \
-#     ~evaluation.evaluator.ckpts.summary.operational_drift_ema \
-#     ~evaluation.evaluator.ckpts.summary.w1dist_ema_normal_vs_SingleNeutrino_E-10-gun \
-#     ~evaluation.evaluator.ckpts.summary.cap_ema_normal_vs_SingleNeutrino_E-10-gun \
-#     evaluation.callbacks.anomaly_efficiency=null \
-#     evaluation.callbacks.thres_drift=null \
-#     evaluation.callbacks.wasserstein=null \
-#     evaluation.callbacks.cap_sn_zb=null \
-#     evaluation.callbacks.reco=null \
-#     logger=none \
+#     data=basis_hf \
+#     experiment=physics/vae \
+#     logger=mlflow \
 #     hparams_search=physics/vae_optuna \
-#     optimized_metric_config.main_metric.callback.name=consistency \
-#     hydra.sweeper.study_name=consistency_vs_kl_b16k \
-#     hydra.sweeper.n_trials=100 \
-#     hydra.sweeper.sampler.n_startup_trials=150 \
+#     hydra.sweeper.n_trials=38 \
+#     hydra.sweeper.sampler.seed=1022 \
 #     trainer=gpu \
-#     trainer.max_epochs=50 \
+#     trainer.max_epochs=200 \
+#     trainer.devices=[0]
+
+# ------------------------------------------------------------------------
+# Driver 3 of 4
+# ------------------------------------------------------------------------
+# taskset -c 0-2 \
+# python3 src/train.py \
+#     -m \
+#     hydra/launcher=submitit_local \
+#     hydra.launcher.timeout_min=200 \
+#     hydra.launcher.cpus_per_task=1 \
+#     hydra.launcher.gpus_per_node=4 \
+#     data=basis_hf \
+#     experiment=physics/vae \
+#     logger=mlflow \
+#     hparams_search=physics/vae_optuna \
+#     hydra.sweeper.n_trials=37 \
+#     hydra.sweeper.sampler.seed=1023 \
+#     trainer=gpu \
+#     trainer.max_epochs=200 \
+#     trainer.devices=[0]
+
+# ------------------------------------------------------------------------
+# Driver 4 of 4
+# ------------------------------------------------------------------------
+# taskset -c 0-2 \
+# python3 src/train.py \
+#     -m \
+#     hydra/launcher=submitit_local \
+#     hydra.launcher.timeout_min=200 \
+#     hydra.launcher.cpus_per_task=1 \
+#     hydra.launcher.gpus_per_node=4 \
+#     data=basis_hf \
+#     experiment=physics/vae \
+#     logger=mlflow \
+#     hparams_search=physics/vae_optuna \
+#     hydra.sweeper.n_trials=37 \
+#     hydra.sweeper.sampler.seed=1024 \
+#     trainer=gpu \
+#     trainer.max_epochs=200 \
 #     trainer.devices=[0]

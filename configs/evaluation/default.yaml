@@ -9,5 +9,5 @@ evaluator:
   enable_checkpointing: false
 
   # Checkpoints to evaluate, as {strategy: {metric: [criterion, ...]}}; each
-  # experiment lists its candidate checkpoint here.
+  # experiment lists the checkpoint of every validation strategy here.
   ckpts: {}

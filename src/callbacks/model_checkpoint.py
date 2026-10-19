@@ -13,7 +13,6 @@ class SingleDatasetModelCheckpoint(DatasetAwareModelCheckpoint):
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
         self.dirpath = self.dirpath / "single" / self.monitor / self.criterion.name
-        self.create_checkpoint_dir()
 
     def _process_metric_across_datasets(self, trainer, pl_module, ds_metrics: dict):
         """Process the metric for each data set separately."""
@@ -32,7 +31,6 @@ class LeaveOneOutModelCheckpoint(DatasetAwareModelCheckpoint):
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
         self.dirpath = self.dirpath / "loo" / self.monitor / self.criterion.name
-        self.create_checkpoint_dir()
 
     def _process_metric_across_datasets(self, trainer, pl_module, ds_metrics: dict):
         """Process the metric according to a leave one out strategy."""
@@ -54,7 +52,6 @@ class LeaveKOutModelCheckpoint(DatasetAwareModelCheckpoint):
         super().__init__(**kwargs)
         self.selected_datasets = selected_datasets
         self.dirpath = self.dirpath / "lko" / self.monitor / self.criterion.name
-        self.create_checkpoint_dir()
 
     def on_train_start(self, trainer, pl_module):
         """Initialize the criterion object for each dataset at the start of training."""

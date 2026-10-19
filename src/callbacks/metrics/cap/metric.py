@@ -1,23 +1,24 @@
 # Approximation Capacity implementation. Based on the work of Victor Jimenez.
-from typing import Optional, Any, Callable
 import gc
+import math
+from typing import Any, Callable, Optional
 
 import torch
-from torch import Tensor, optim
-from torch.utils.data import TensorDataset, DataLoader
+from torch import Tensor
 from torchmetrics import Metric
 
-from src.callbacks.metrics.cap.kernel import ApproximationCapacityKernel
+from src.callbacks.metrics.cap.binary import get_energy_fn as get_energy_fn_binary
 from src.callbacks.metrics.cap.binary import (
     get_normalizer_fn as get_normalizer_fn_binary,
-    get_energy_fn as get_energy_fn_binary,
+)
+from src.callbacks.metrics.cap.binary import (
     get_regularizer_fn as get_regularizer_fn_binary,
 )
+from src.callbacks.metrics.cap.kernel import posterior_agreement_curve
 
 
 class ApproximationCapacity(Metric):
-    """
-    Approximation Capacity (CAP) Metric for classification tasks.
+    """Approximation Capacity (CAP) Metric for classification tasks.
 
     The metric maximizes the mutual information between two sets of classification
     scores (e.g. log-probabilities, reconstruction losses, ...) parametrizing their
@@ -28,6 +29,12 @@ class ApproximationCapacity(Metric):
 
     Where Z_i are partition functions over the set of clustering assignments, computed
     using different energy functions and constraints.
+
+    The maximum over beta is taken on `n_beta` logarithmically spaced points between
+    `beta_min` and `beta_max`, where the mean kernel is evaluated exactly over all
+    pairs in float64. After `update`, `betas` and `curve` hold the grid and the mean
+    kernel on it, `beta_star` the maximising beta, and `at_bound` whether that is
+    `beta_max`, in which case the maximum over all beta may lie beyond the grid.
 
     Functions that are imported:
     - Energy: Determines the probability of a specific clustering assignment.
@@ -44,8 +51,10 @@ class ApproximationCapacity(Metric):
         Options: "none", "threshold_max", "threshold_mean", "threshold_zero",
     :param binary: Whether to use binary (anomaly/normal) or multi-class classification.
         Currently only binary=True is supported.
-    :param lr: Learning rate for the beta parameter optimization.
-    :param n_epochs: Number of optimization epochs for the beta parameter learning.
+    :param beta_min: Smallest inverse temperature of the grid.
+    :param beta_max: Largest inverse temperature of the grid.
+    :param n_beta: Number of grid points.
+    :param device: Device on which the curve is evaluated.
     """
 
     is_differentiable = True
@@ -54,7 +63,6 @@ class ApproximationCapacity(Metric):
 
     def __init__(
         self,
-        beta0: Optional[float] = 1.0,
         normalization_type: Optional[str] = "minmax",
         normalization_params: Optional[dict] = None,
         energy_type: Optional[str] = "baseline",
@@ -62,17 +70,15 @@ class ApproximationCapacity(Metric):
         regularization_type: Optional[str] = "none",
         regularization_params: Optional[dict] = None,
         binary: Optional[bool] = True,
-        lr: Optional[float] = 0.01,
-        n_epochs: Optional[int] = 5,
-        batch_size: Optional[int] = 64,
+        beta_min: float = 0.01,
+        beta_max: float = 1000.0,
+        n_beta: int = 200,
         device: Optional[str] = "cpu",
-        normalize_gradients: Optional[bool] = False,
         process_group: Optional[Any] = None,
         dist_sync_fn: Optional[Callable] = None,
     ):
-        self.beta0 = beta0
-        if self.beta0 < 0.0:
-            raise ValueError("'beta' must be non-negative.")
+        if not 0.0 < beta_min <= beta_max:
+            raise ValueError("The beta grid needs 0 < beta_min <= beta_max.")
 
         super().__init__(
             dist_sync_on_step=False,
@@ -85,19 +91,23 @@ class ApproximationCapacity(Metric):
         self.normalization_type = normalization_type
         self.normalization_params = normalization_params or {}
         self.energy_type = energy_type
-        self.energy_params = energy_params or {}
+        # Copied, since update writes the mean and std of the scores into it.
+        self.energy_params = dict(energy_params or {})
         self.regularization_type = regularization_type
         self.regularization_params = regularization_params or {}
 
-        # Learning parameters:
         self.dev = device
-        self.n_epochs = n_epochs
-        self.learning_rate = lr
-        self.batch_size = batch_size
-        self.normalize_gradients = normalize_gradients
+        self.betas = torch.logspace(
+            math.log10(beta_min), math.log10(beta_max), n_beta, dtype=torch.float64
+        )
+        self.curve = None
+        self.beta_star = None
+        self.at_bound = None
 
         # Initialize CAP:
-        self.add_state("cap", default=torch.tensor(0.0), dist_reduce_fx="sum")
+        self.add_state(
+            "cap", default=torch.tensor(0.0, dtype=torch.float64), dist_reduce_fx="sum"
+        )
 
         # Normalizer of the loss:
         self.normalizer_fn = self._get_normalizer_fn()
@@ -130,79 +140,38 @@ class ApproximationCapacity(Metric):
 
         return regularizer_fn
 
-    def update(self, logits1: Tensor, logits2: Tensor, **kwargs):
-        """Optimize beta parameter over multiple epochs."""
-        self.reset()
-
-        # Normalize the logits
-        logits1, logits2 = self.normalizer_fn(logits1, logits2)
-
-        # Add mean and std to the energy parameters
-        combined = torch.cat([logits1, logits2], dim=0)
+    def _energy_gaps(self, prob1: Tensor, prob2: Tensor) -> tuple[Tensor, Tensor]:
+        """Return the energy gaps D_k = E_k(1) - E_k(0) of the normalised pairs."""
+        combined = torch.cat([prob1, prob2], dim=0)
         self.energy_params.update(
             {
                 "mean": combined.mean().item(),
                 "std": combined.std().item(),
             }
         )
-        del combined
+        energy_fn = self._get_energy_fn()
+        ones = torch.ones_like(prob1)
+        zeros = torch.zeros_like(prob1)
+        gap1 = energy_fn(prob1, ones) - energy_fn(prob1, zeros)
+        gap2 = energy_fn(prob2, ones) - energy_fn(prob2, zeros)
+        return gap1, gap2
 
-        # Initialize kernel with updated energy function
-        kernel = ApproximationCapacityKernel(
-            beta0=self.beta0,
-            energy_fn=self._get_energy_fn(),
-            normalize_gradients=self.normalize_gradients,
-        ).to(self.dev)
-
-        optimizer = optim.Adam([kernel.beta], lr=self.learning_rate)
-
-        use_cuda = str(self.dev).startswith("cuda")
-        inputs_on_cpu = logits1.device.type == "cpu" and logits2.device.type == "cpu"
-        use_pin_memory = use_cuda and inputs_on_cpu
-
-        dataloader = DataLoader(
-            TensorDataset(logits1, logits2),
-            batch_size=self.batch_size,
-            shuffle=True,
-            num_workers=0,
-            pin_memory=use_pin_memory,
-            drop_last=False,
-        )
-
-        best_beta = kernel.beta.clone().detach()
-        best_cap = -float("inf")
-
-        for _ in range(self.n_epochs):
-            kernel.reset()
-
-            with torch.set_grad_enabled(True):
-                for batch in dataloader:
-                    batch_logits1 = batch[0].to(self.dev, non_blocking=use_pin_memory)
-                    batch_logits2 = batch[1].to(self.dev, non_blocking=use_pin_memory)
-
-                    optimizer.zero_grad(set_to_none=True)
-                    loss = -kernel(batch_logits1, batch_logits2)
-                    loss.backward()
-                    optimizer.step()
-
-            current_cap = kernel.cap.item()
-
-            if current_cap > best_cap:
-                best_cap = current_cap
-                best_beta = kernel.beta.clone().detach()
-
-        # Final evaluation with the best beta
+    def update(self, logits1: Tensor, logits2: Tensor, **kwargs):
+        """Evaluate the mean kernel on the beta grid and keep its maximum."""
         with torch.no_grad():
-            kernel.reset()
-            for batch in dataloader:
-                batch_logits1 = batch[0].to(self.dev, non_blocking=use_pin_memory)
-                batch_logits2 = batch[1].to(self.dev, non_blocking=use_pin_memory)
-                _ = kernel.evaluate(batch_logits1, batch_logits2, beta=best_beta)
+            prob1, prob2 = self.normalizer_fn(logits1, logits2)
+            gap1, gap2 = self._energy_gaps(
+                prob1.to(self.dev, torch.float64), prob2.to(self.dev, torch.float64)
+            )
+            curve = posterior_agreement_curve(gap1, gap2, self.betas.to(self.dev))
 
-            self.cap.fill_(kernel.capacity.item())
-
-        kernel.to("cpu")
-        del kernel
+        self.curve = curve.cpu()
+        best = int(torch.argmax(self.curve))
+        cap = self.curve[best].item()
+        # On a curve made NaN by a non-finite score, argmax returns the first NaN.
+        self.beta_star = self.betas[best].item() if math.isfinite(cap) else math.nan
+        self.at_bound = best == len(self.betas) - 1
+        self.cap.fill_(cap)
 
     def compute(self) -> Tensor:
         """Return the computed CAP value."""
@@ -239,38 +208,18 @@ class PosteriorConsistency(ApproximationCapacity):
     identical energy gaps), and requires no inner optimisation at all.
 
     The normalisation and energy front-end is inherited from CAP unchanged, so
-    the same `cap_metric_config` block can be reused verbatim. The `beta0`,
-    `lr`, `n_epochs`, `batch_size` and `normalize_gradients` entries of that
-    config are accepted for drop-in compatibility and have no effect here.
+    the same `cap_metric_config` block can be reused verbatim. The `beta_min`,
+    `beta_max` and `n_beta` entries of that config are accepted for drop-in
+    compatibility and have no effect here; `curve`, `beta_star` and `at_bound`
+    stay None.
     """
 
     def update(self, logits1: Tensor, logits2: Tensor, **kwargs):
         """Compute the beta-free consistency limit over the paired scores."""
-        self.reset()
-
         with torch.no_grad():
-            # Normalize the logits, exactly as CAP does.
-            logits1, logits2 = self.normalizer_fn(logits1, logits2)
-
-            # Add mean and std to the energy parameters
-            combined = torch.cat([logits1, logits2], dim=0)
-            self.energy_params.update(
-                {
-                    "mean": combined.mean().item(),
-                    "std": combined.std().item(),
-                }
-            )
-            del combined
-
-            # Per-sample energy gaps D_k = E_k(1) - E_k(0). The labels must be
-            # float here: they are combined with the (float) scores inside every
-            # energy function.
-            energy_fn = self._get_energy_fn()
-            ones = torch.ones_like(logits1)
-            zeros = torch.zeros_like(logits1)
-            gap1 = energy_fn(logits1, ones) - energy_fn(logits1, zeros)
-            gap2 = energy_fn(logits2, ones) - energy_fn(logits2, zeros)
-
+            # In the dtype of the normalised scores rather than CAP's float64, so that
+            # the consistency values of earlier runs are reproduced bit for bit.
+            gap1, gap2 = self._energy_gaps(*self.normalizer_fn(logits1, logits2))
             self.cap.fill_((-torch.mean((gap1 - gap2) ** 2)).item())
 
     def compute(self) -> Tensor:

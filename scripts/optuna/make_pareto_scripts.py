@@ -7,13 +7,16 @@ Reads the per-study CSVs produced by ``scripts/optuna/fetch_optuna_pareto.py`` (
 ``run<model>_q99_pareto.sh`` for the physics q99 studies) containing a full
 training command for every point on each strategy's Pareto front.
 
-The command templates mirror the original hand-written run scripts exactly:
-same experiment configs, same strategy-specific callback overrides, same
+The command templates mirror the original hand-written run scripts: same
+experiment configs, same strategy-specific callback overrides, same
 hyperparameter override keys (the Optuna ``algorithm.loss.*`` param names are
 remapped to the current config paths, validated against the original scripts'
-worked examples). Runs are named ``<strategy>_t<trial>`` and grouped into a
-dedicated MLflow experiment ``<domain>_<model>[_q99]_pareto`` so they cannot
-collide with the original submission's checkpoints.
+worked examples). Each block also names its strategy's EMA checkpoint as the
+evaluated candidate and its validation quantity as the main metric, so the pair
+logged as ``optimized_main``/``optimized_sec`` is the strategy's own. Runs are
+named ``<strategy>_t<trial>`` and grouped into a dedicated MLflow experiment
+``<domain>_<model>[_q99]_pareto`` so they cannot collide with the original
+submission's checkpoints.
 
 Annotations: each command carries its Pareto quantities, and the point that was
 picked in the original scripts (``ORIGINAL PICK``), the best primary-objective
@@ -91,15 +94,29 @@ DOMAINS = {
 }
 
 # Strategy templates keyed by the study's first objective. ``nulls`` are the
-# training callbacks disabled for that agnostic strategy; ``evals`` are the
-# evaluator checkpoint groups deleted (``<REF>`` -> domain reference dataset).
+# training callbacks the strategy's search block disables, except anomaly_eff,
+# which retrainings keep because it stores the efficiency thresholds in the
+# checkpoint; ``candidate`` is the strategy's EMA checkpoint folder (metric,
+# criterion) and ``main`` its evaluation callback and direction (``<REF>`` ->
+# domain reference dataset).
 STRATEGIES = {
-    "cvar25eff": {"title": "CVAR25", "prefix": "cvar25", "agnostic": False, "extras": []},
+    "cvar25eff": {
+        "title": "CVAR25",
+        "prefix": "cvar25",
+        "agnostic": False,
+        "extras": [],
+        "nulls": ["cvar10_ema_ckpt"],
+        "candidate": ("cvar25_ema", "max"),
+        "main": ("eff", "maximize"),
+    },
     "cvar10eff": {
         "title": "CVAR10",
         "prefix": "cvar10",
         "agnostic": False,
         "extras": ["evaluation.callbacks.anomaly_efficiency.cvar_summary=0.10"],
+        "nulls": ["cvar25_ema_ckpt"],
+        "candidate": ("cvar10_ema", "max"),
+        "main": ("eff", "maximize"),
     },
     "cap": {
         "title": "CAP",
@@ -113,11 +130,8 @@ STRATEGIES = {
             "thres_drift_ema_ckpt",
             "consistency_sn_zb_ema_ckpt",
         ],
-        "evals": [
-            "operational_drift_ema",
-            "w1dist_ema_normal_vs_<REF>",
-            "consistency_ema_normal_vs_<REF>",
-        ],
+        "candidate": ("cap_ema_normal_vs_<REF>", "max"),
+        "main": ("cap", "maximize"),
     },
     "consistency": {
         "title": "CONSISTENCY",
@@ -131,11 +145,8 @@ STRATEGIES = {
             "thres_drift_ema_ckpt",
             "cap_sn_zb_ema_ckpt",
         ],
-        "evals": [
-            "operational_drift_ema",
-            "w1dist_ema_normal_vs_<REF>",
-            "cap_ema_normal_vs_<REF>",
-        ],
+        "candidate": ("consistency_ema_normal_vs_<REF>", "max"),
+        "main": ("consistency", "maximize"),
     },
     "drift": {
         "title": "STABILITY",
@@ -149,11 +160,8 @@ STRATEGIES = {
             "cap_sn_zb_ema_ckpt",
             "consistency_sn_zb_ema_ckpt",
         ],
-        "evals": [
-            "w1dist_ema_normal_vs_<REF>",
-            "cap_ema_normal_vs_<REF>",
-            "consistency_ema_normal_vs_<REF>",
-        ],
+        "candidate": ("operational_drift_ema", "min"),
+        "main": ("thres_drift", "minimize"),
     },
     "wasserstein": {
         "title": "WASSERSTEIN",
@@ -167,13 +175,13 @@ STRATEGIES = {
             "cap_sn_zb_ema_ckpt",
             "consistency_sn_zb_ema_ckpt",
         ],
-        "evals": [
-            "operational_drift_ema",
-            "cap_ema_normal_vs_<REF>",
-            "consistency_ema_normal_vs_<REF>",
-        ],
+        "candidate": ("w1dist_ema_normal_vs_<REF>", "min"),
+        "main": ("wasserstein", "minimize"),
     },
 }
+# The candidate each experiment file lists in evaluation.evaluator.ckpts.summary,
+# keyed by whether the file is the agnostic one.
+DEFAULT_CANDIDATE = {False: "cvar25_ema", True: "cap_ema_normal_vs_<REF>"}
 STRATEGY_ORDER = ["cvar25eff", "cvar10eff", "cap", "consistency", "drift", "wasserstein"]
 
 # The first objective is maximised for these strategies (minimised otherwise);
@@ -410,6 +418,25 @@ def select_around_knee(
     return sorted(window)
 
 
+def _selection_tokens(strategy: dict, ref_ds: str) -> list[str]:
+    """Overrides that make the strategy's EMA checkpoint the evaluated candidate."""
+    metric, criterion = (s.replace("<REF>", ref_ds) for s in strategy["candidate"])
+    default = DEFAULT_CANDIDATE[strategy["agnostic"]].replace("<REF>", ref_ds)
+    name, direction = strategy["main"]
+    tokens = [
+        f"optimized_metric_config.candidate.metric={metric}",
+        f"optimized_metric_config.candidate.criterion={criterion}",
+        f"optimized_metric_config.main_metric.callback.name={name}",
+        f"optimized_metric_config.main_metric.direction={direction}",
+    ]
+    if metric != default:
+        tokens += [
+            f"~evaluation.evaluator.ckpts.summary.{default}",
+            f"+evaluation.evaluator.ckpts.summary.{metric}={quote(f'[{criterion}]')}",
+        ]
+    return tokens
+
+
 def _command_body(
     domain: str,
     model: str,
@@ -433,12 +460,8 @@ def _command_body(
     if tier == "q99":
         body += ["algorithm.target_rate=0.01", "algorithm.base_rate=null"]
     body += strategy.get("extras", [])
-    if strategy["agnostic"]:
-        body += [f"callbacks.{cb}=null" for cb in strategy["nulls"]]
-        body += [
-            f"~evaluation.evaluator.ckpts.summary.{ev.replace('<REF>', dom['ref_ds'])}"
-            for ev in strategy["evals"]
-        ]
+    body += [f"callbacks.{cb}=null" for cb in strategy["nulls"]]
+    body += _selection_tokens(strategy, dom["ref_ds"])
     body += dom["fixed_per_model"].get(model, [])
     for col in sorted(row):
         if col.startswith("params_") and row[col] != "":

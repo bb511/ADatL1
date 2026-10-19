@@ -39,6 +39,21 @@ class SplitTensors:
     y: torch.Tensor
 
 
+def _aux_labels(names: list[str], background: dict) -> dict[str, int]:
+    """Number background sets down from -1 and the rest up from 1, in list order."""
+    labels = {}
+    n_background = n_signal = 0
+    for name in names:
+        if name in background:
+            n_background += 1
+            labels[name] = -n_background
+        else:
+            n_signal += 1
+            labels[name] = n_signal
+
+    return labels
+
+
 class L1ADDataModule(LightningDataModule):
     def __init__(
         self,
@@ -82,7 +97,8 @@ class L1ADDataModule(LightningDataModule):
 
         self._main: dict[str, SplitTensors] = {}
         self._aux: dict[str, dict[str, SplitTensors]] = {"valid": {}, "test": {}}
-        # seed=None means 'do not seed', matching train.py's `if cfg.get("seed")`.
+        # seed=None leaves torch's fixed default seed (one batch order for every run),
+        # and seed=0 still seeds it although train.py then skips seed_everything.
         self.shuffler = torch.Generator()
         if seed is not None:
             self.shuffler.manual_seed(seed)
@@ -246,22 +262,14 @@ class L1ADDataModule(LightningDataModule):
         aux_dir = data_dir / "aux"
         out: dict[str, SplitTensors] = {}
 
-        label_signal = 0
-        label_background = 0
-
-        for dataset_path in sorted(
+        dataset_paths = sorted(
             p for p in aux_dir.iterdir() if p.is_dir() and not p.name.startswith("._")
-        ):
+        )
+        labels = _aux_labels([p.stem for p in dataset_paths], self.hparams.background)
+        for dataset_path in dataset_paths:
             name = dataset_path.stem
-            if "SingleNeutrino" in name:
-                label_background -= 1
-                label = label_background
-            else:
-                label_signal += 1
-                label = label_signal
-
             x, mask, l1bit = self.loader.load_folder(dataset_path / split)
-            y = torch.full((x.size(0),), label, dtype=torch.int64)
+            y = torch.full((x.size(0),), labels[name], dtype=torch.int64)
             x = x.contiguous()
             mask = mask.contiguous()
             l1bit = l1bit.contiguous()

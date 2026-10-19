@@ -8,6 +8,7 @@ import torch
 from pytorch_lightning import Callback
 
 from src.evaluation.callbacks import utils
+from src.evaluation.callbacks.metrics.rate import compute_tie_weight, count_exceedances
 from src.plot import horizontal_bar
 from src.utils import pylogger
 
@@ -26,8 +27,10 @@ class ThresholdDriftCallback(Callback):
             L = log((p_hat + eps) / (FPR + eps)),
             drift = abs(L),
 
-    where p_hat is the empirical exceedance rate on the evaluation subset,
-    FPR is obtained from target_rate and base_rate, and eps = 0.5 / N_eval.
+    where p_hat is the empirical exceedance rate on the evaluation subset, FPR is
+    obtained from target_rate and base_rate, and eps = 0.5 / N_eval. Scores equal to the
+    threshold count with the fraction that brings the calibration subset's exceedance
+    rate to the FPR.
 
     The module target rate is always included and is treated as the operational rate.
     Additional target rates may be passed through the callback config.
@@ -129,7 +132,8 @@ class ThresholdDriftCallback(Callback):
             fpr = self._compute_target_fpr(trate)
             thr = self._compute_threshold(cal_scores, exceedance_prob=fpr)
 
-            fp = int((eval_scores >= thr).sum().item())
+            tie_weight = compute_tie_weight(cal_scores, thr, fpr)
+            fp = count_exceedances(eval_scores, thr, tie_weight).item()
             p_hat = fp / float(n_eval)
 
             drift_metric = abs(math.log((p_hat + eps) / (fpr + eps)))
@@ -241,6 +245,8 @@ class ThresholdDriftCallback(Callback):
 
         sorted_scores, _ = torch.sort(scores)  # ascending
         q = 1.0 - exceedance_prob
+        # The ceil(q n)-th smallest score: floor(exceedance_prob n) + 1 distinct scores
+        # lie at or above it, up to the float rounding of q n.
         idx = int(math.ceil(q * n) - 1)
         idx = max(0, min(n - 1, idx))
         return sorted_scores[idx]

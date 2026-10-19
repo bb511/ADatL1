@@ -27,8 +27,12 @@ trainer:
 
 test: true
 
-# Metrics to report to optuna for every checkpoint.
+# Metrics reported to optuna, read at the candidate checkpoint.
 optimized_metric_config:
+  candidate:
+    strategy: summary
+    metric: cvar25_ema
+    criterion: max
   main_metric:
     callback:
       name: eff
@@ -65,36 +69,6 @@ callbacks:
     output_name: 'ascore/full'
     beta: 0.9
 
-  max_rate_ckpt:
-    _target_: src.callbacks.model_checkpoint.SingleDatasetModelCheckpoint
-    dirpath: '${paths.checkpoints_dir}/${experiment_name}/${run_name}'
-    monitor: eff__ascore_full__brate_operational
-    criterion:
-      _target_: src.callbacks.checkpointing.criterion.Max
-      top_k: 1
-    ds:
-      - '1'
-      - '2'
-      - '3'
-      - '4'
-      - '5'
-      - '6'
-      - '7'
-      - '8'
-      - '9'
-
-  stable_ascore_operational_ckpt:
-    _target_: src.callbacks.model_checkpoint.SingleDatasetModelCheckpoint
-    dirpath: '${paths.checkpoints_dir}/${experiment_name}/${run_name}'
-    monitor: ascore_operational
-    criterion:
-      _target_: src.callbacks.checkpointing.criterion.Stable
-      top_k: 1
-      threshold: 0.05
-      patience: 10
-    ds:
-      - normal
-
   cvar25_ema_ckpt:
     _target_: pytorch_lightning.callbacks.ModelCheckpoint
     dirpath: '${paths.checkpoints_dir}/${experiment_name}/${run_name}/summary/cvar25_ema/max'
@@ -124,13 +98,8 @@ callbacks:
 evaluation:
   evaluator:
     ckpts:
-      last: true
       summary:
         cvar25_ema: ['max']
-        cvar10_ema: ['max']
-      single:
-        ascore_operational: ['stable']
-        eff__ascore_full__brate_operational: ['max']
 
   callbacks:
     anomaly_efficiency:

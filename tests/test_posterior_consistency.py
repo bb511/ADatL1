@@ -28,7 +28,6 @@ from src.evaluation.callbacks.metrics.cap.metric import (
 def _metric_config(**overrides) -> dict:
     """The production front-end (joint sigmoid + adaptive energy), no beta loop."""
     cfg = {
-        "beta0": 1.0,
         "normalization_type": "sigmoid",
         "normalization_params": None,
         "energy_type": "adaptive",
@@ -36,10 +35,9 @@ def _metric_config(**overrides) -> dict:
         "regularization_type": "none",
         "regularization_params": None,
         "binary": True,
-        "lr": 0.01,
-        "n_epochs": 0,
-        "batch_size": 64,
-        "normalize_gradients": True,
+        "beta_min": 0.01,
+        "beta_max": 1000.0,
+        "n_beta": 200,
     }
     cfg.update(overrides)
     return cfg
@@ -142,17 +140,15 @@ def test_consistency_is_negative_for_differing_scores():
     assert value < 0.0
 
 
-def test_consistency_ignores_the_beta_optimisation_hyperparameters():
-    """beta0/lr/n_epochs/batch_size/normalize_gradients must have no effect."""
+def test_consistency_ignores_the_beta_grid():
+    """beta_min/beta_max/n_beta must have no effect."""
     scores_1, scores_2 = _scores()
 
     baseline = PosteriorConsistency(**_metric_config())
     baseline.update(scores_1, scores_2)
 
     other = PosteriorConsistency(
-        **_metric_config(
-            beta0=7.5, lr=0.5, n_epochs=13, batch_size=8, normalize_gradients=False
-        )
+        **_metric_config(beta_min=0.5, beta_max=7.5, n_beta=13)
     )
     other.update(scores_1, scores_2)
 
@@ -177,14 +173,19 @@ def test_consistency_is_deterministic():
 def test_cap_still_computes_the_kernel_partition_ratio():
     """Pins CAP's own value against an independent reimplementation.
 
-    With `n_epochs=0` no beta optimisation runs, so CAP is evaluated at `beta0`
-    and reduces to the mean of log(Z_12 / (Z_1 * Z_2)) over paired samples.
+    On a one-point beta grid CAP is the kernel at that beta, and reduces to the
+    mean of log(Z_12 / (Z_1 * Z_2)) over paired samples.
     """
     scores_1, scores_2 = _scores(n=128)
     beta = 1.5
     metric = ApproximationCapacity(
         **_metric_config(
-            beta0=beta, normalization_type="none", energy_type="baseline", energy_params=None
+            beta_min=beta,
+            beta_max=beta,
+            n_beta=1,
+            normalization_type="none",
+            energy_type="baseline",
+            energy_params=None,
         )
     )
     metric.update(scores_1, scores_2)

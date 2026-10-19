@@ -1,8 +1,16 @@
+import math
+from pathlib import Path
+
+import numpy as np
 import torch
 from pytorch_lightning import Callback
+from pytorch_lightning.loggers import MLFlowLogger
 
-from src.callbacks.metrics.cap.metric import ApproximationCapacity
 from src.callbacks.metrics.cap.binary import get_pairing_fn
+from src.callbacks.metrics.cap.metric import ApproximationCapacity
+from src.utils import pylogger
+
+log = pylogger.RankedLogger(__name__)
 
 
 class CAPCallback(Callback):
@@ -15,6 +23,12 @@ class CAPCallback(Callback):
         - dataset_2
 
     This is appropriate as a validation-side proxy objective for HPO.
+
+    Beside the EMA, every epoch logs the maximising beta and whether it sits at the
+    upper bound of the beta grid, and adds its CAP(beta) curve to
+    `<default_root_dir>/cap_curves_<dataset_1>_vs_<dataset_2>.npz` (arrays `betas`,
+    `epochs`, `curves`), which is logged as an MLflow artifact at the end of the fit.
+    Metrics without a beta curve, such as PosteriorConsistency, log only the EMA.
 
     Subclasses select a different metric by overriding `metric_cls`, and a
     different logged key by overriding `metric_key`; see
@@ -46,6 +60,9 @@ class CAPCallback(Callback):
         self.output_name = output_name
         self.dataset_1_name = dataset_1
         self.dataset_2_name = dataset_2
+        ds1 = dataset_1.replace("/", "_")
+        ds2 = dataset_2.replace("/", "_")
+        self.pair_name = f"{ds1}_vs_{ds2}"
         self.cap_metric_config = cap_metric_config
         self.pairing_fn = get_pairing_fn(pairing_type)
         self.beta = beta
@@ -61,7 +78,9 @@ class CAPCallback(Callback):
 
     def on_fit_start(self, trainer, pl_module):
         """Instantiate useful quantities."""
-        self.cap_ema = None
+        self.cap_ema = math.nan
+        self.curve_epochs = []
+        self.curves = []
 
     def on_validation_epoch_start(self, trainer, pl_module):
         """Set device, validate dataloaders, and initialize metric state."""
@@ -82,9 +101,7 @@ class CAPCallback(Callback):
         self.dataset_1_scores = []
         self.dataset_2_scores = []
 
-        self.capmetric = self.metric_cls(
-            **self.cap_metric_config, device=self.device
-        )
+        self.capmetric = self.metric_cls(**self.cap_metric_config, device=self.device)
         self.capmetric.to(self.device)
 
     def on_validation_batch_end(
@@ -119,17 +136,39 @@ class CAPCallback(Callback):
             )
 
         cap_value = self._compute_cap()
-
-        ds1 = self.dataset_1_name.replace("/", "_")
-        ds2 = self.dataset_2_name.replace("/", "_")
         self._compute_cap_ema(cap_value)
 
-        pl_module.log_dict(
-            {
-                f"val/summary/{self.metric_key}_ema_{ds1}_vs_{ds2}": self.cap_ema,
-            },
-            **self.log_kwargs,
+        metrics = {f"val/summary/{self.metric_key}_ema_{self.pair_name}": self.cap_ema}
+        if self.capmetric.curve is not None:
+            metrics |= self._store_curve(trainer)
+        pl_module.log_dict(metrics, **self.log_kwargs)
+
+    def on_fit_end(self, trainer, pl_module):
+        """Log the file of CAP(beta) curves to MLflow, if the run logs there."""
+        if self.curves and isinstance(trainer.logger, MLFlowLogger):
+            trainer.logger.experiment.log_artifact(
+                trainer.logger.run_id, str(self._curves_path(trainer))
+            )
+
+    def _curves_path(self, trainer) -> Path:
+        name = f"{self.metric_key}_curves_{self.pair_name}.npz"
+        return Path(trainer.default_root_dir) / name
+
+    def _store_curve(self, trainer) -> dict:
+        """Rewrite the curve file with this epoch's curve; return what to log."""
+        self.curve_epochs.append(trainer.current_epoch)
+        self.curves.append(self.capmetric.curve.numpy())
+        np.savez(
+            self._curves_path(trainer),
+            betas=self.capmetric.betas.numpy(),
+            epochs=np.array(self.curve_epochs),
+            curves=np.stack(self.curves),
         )
+        prefix = f"val/summary/{self.metric_key}"
+        return {
+            f"{prefix}_beta_star_{self.pair_name}": self.capmetric.beta_star,
+            f"{prefix}_at_bound_{self.pair_name}": float(self.capmetric.at_bound),
+        }
 
     def _compute_cap(self):
         """Compute the metric between the two data sets."""
@@ -160,8 +199,10 @@ class CAPCallback(Callback):
         return float(cap_value)
 
     def _compute_cap_ema(self, cap: float):
-        """Compute the cvar estimated moving average."""
-        if self.cap_ema is None:
+        """Update the exponential moving average, which skips a non-finite value."""
+        if not math.isfinite(cap):
+            log.warning(f"Non-finite {self.metric_key} {cap} left out of its EMA.")
+        elif math.isnan(self.cap_ema):
             self.cap_ema = float(cap)
         else:
             self.cap_ema = self.beta * self.cap_ema + (1 - self.beta) * float(cap)

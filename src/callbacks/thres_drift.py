@@ -1,9 +1,10 @@
 # Threshold drift callback.
-from collections import defaultdict
 import math
 
 import torch
 from pytorch_lightning import Callback
+
+from src.callbacks.metrics.rate import compute_tie_weight, count_exceedances
 
 
 class ThresholdDriftCallback(Callback):
@@ -23,7 +24,9 @@ class ThresholdDriftCallback(Callback):
             drift = abs(L)
 
     where:
-        - p_hat is the empirical exceedance rate on the evaluation subset
+        - p_hat is the empirical exceedance rate on the evaluation subset, with
+          scores equal to the threshold weighted by the fraction that brings the
+          calibration subset's exceedance rate to the FPR
         - FPR = target_rate / base_rate
         - eps = 0.5 / N_eval
 
@@ -70,7 +73,7 @@ class ThresholdDriftCallback(Callback):
 
     def on_fit_start(self, trainer, pl_module):
         """Instantiate useful quantities."""
-        self.drift_ema = defaultdict(float)
+        self.drift_ema = {}
 
     def on_validation_epoch_start(self, trainer, pl_module):
         """Set the device and make sure the normal data is in the used data sets."""
@@ -124,7 +127,8 @@ class ThresholdDriftCallback(Callback):
             fpr = self._compute_target_fpr(trate)
             thr = self._compute_threshold(cal_scores, exceedance_prob=fpr)
 
-            fp = int((eval_scores >= thr).sum().item())
+            tie_weight = compute_tie_weight(cal_scores, thr, fpr)
+            fp = count_exceedances(eval_scores, thr, tie_weight).item()
             p_hat = fp / float(n_eval)
 
             L = math.log((p_hat + eps) / (fpr + eps))
@@ -146,7 +150,7 @@ class ThresholdDriftCallback(Callback):
 
     def _compute_drift_ema(self, trate_name: str, drift: float):
         """Compute the cvar estimated moving average."""
-        if self.drift_ema[trate_name] == 0.0:
+        if trate_name not in self.drift_ema:
             self.drift_ema[trate_name] = float(drift)
         else:
             self.drift_ema[trate_name] = self.beta * self.drift_ema[trate_name] + (
@@ -189,6 +193,8 @@ class ThresholdDriftCallback(Callback):
 
         sorted_scores, _ = torch.sort(scores)
         q = 1.0 - exceedance_prob
+        # The ceil(q n)-th smallest score: floor(exceedance_prob n) + 1 distinct scores
+        # lie at or above it, up to the float rounding of q n.
         idx = int(math.ceil(q * n) - 1)
         idx = max(0, min(n - 1, idx))
         return sorted_scores[idx]

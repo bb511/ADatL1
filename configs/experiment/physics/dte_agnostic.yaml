@@ -28,8 +28,12 @@ trainer:
 
 test: true
 
-# Metrics to report for each checkpoint.
+# Metrics reported to optuna, read at the candidate checkpoint.
 optimized_metric_config:
+  candidate:
+    strategy: summary
+    metric: cap_ema_normal_vs_SingleNeutrino_E-10-gun
+    criterion: max
   main_metric:
     callback:
       name: cap
@@ -89,7 +93,10 @@ callbacks:
     dataset_2: SingleNeutrino_E-10-gun
     pairing_type: cdf
     cap_metric_config:
-      beta0: 1.0
+      beta_min: 0.01
+      # Provisional until the Causal Chamber freeze (subplan 3).
+      beta_max: 1000.0
+      n_beta: 200
       normalization_type: sigmoid
       normalization_params: null
       energy_type: adaptive
@@ -98,10 +105,6 @@ callbacks:
       regularization_type: none
       regularization_params: null
       binary: True
-      lr: 0.01
-      n_epochs: 20
-      batch_size: 8192
-      normalize_gradients: True
       process_group: null
       dist_sync_fn: null
 
@@ -112,10 +115,13 @@ callbacks:
     dataset_2: SingleNeutrino_E-10-gun
     pairing_type: cdf
     cap_metric_config:
-      # beta0/lr/n_epochs/batch_size/normalize_gradients are unused by the
+      # beta_min/beta_max/n_beta are unused by the
       # beta-free consistency metric; the block is kept identical to the CAP
       # one so both strategies share the same normalisation/energy front-end.
-      beta0: 1.0
+      beta_min: 0.01
+      # Provisional until the Causal Chamber freeze (subplan 3).
+      beta_max: 1000.0
+      n_beta: 200
       normalization_type: sigmoid
       normalization_params: null
       energy_type: adaptive
@@ -124,24 +130,8 @@ callbacks:
       regularization_type: none
       regularization_params: null
       binary: True
-      lr: 0.01
-      n_epochs: 20
-      batch_size: 8192
-      normalize_gradients: True
       process_group: null
       dist_sync_fn: null
-
-  stable_ascore_operational_ckpt:
-    _target_: src.callbacks.model_checkpoint.SingleDatasetModelCheckpoint
-    dirpath: '${paths.checkpoints_dir}/${experiment_name}/${run_name}'
-    monitor: ascore_operational
-    criterion:
-      _target_: src.callbacks.checkpointing.criterion.Stable
-      top_k: 1
-      threshold: 0.05
-      patience: 10
-    ds:
-      - normal
 
   thres_drift_ema_ckpt:
     _target_: pytorch_lightning.callbacks.ModelCheckpoint
@@ -198,14 +188,8 @@ callbacks:
 evaluation:
   evaluator:
     ckpts:
-      last: true
       summary:
-        operational_drift_ema: ['min']
-        w1dist_ema_normal_vs_SingleNeutrino_E-10-gun: ['min']
         cap_ema_normal_vs_SingleNeutrino_E-10-gun: ['max']
-        consistency_ema_normal_vs_SingleNeutrino_E-10-gun: ['max']
-      single:
-        ascore_operational: ['stable']
 
   callbacks:
     anomaly_efficiency:
@@ -243,7 +227,10 @@ evaluation:
       log_raw_mlflow: false
       pairing_type: cdf
       cap_metric_config:
-        beta0: 1.0
+        beta_min: 0.01
+        # Provisional until the Causal Chamber freeze (subplan 3).
+        beta_max: 1000.0
+        n_beta: 200
         normalization_type: sigmoid
         normalization_params: null
         energy_type: adaptive
@@ -252,10 +239,6 @@ evaluation:
         regularization_type: none
         regularization_params: null
         binary: True
-        lr: 0.01
-        n_epochs: 20
-        batch_size: 8192
-        normalize_gradients: True
         process_group: null
         dist_sync_fn: null
 
@@ -268,10 +251,13 @@ evaluation:
       log_raw_mlflow: false
       pairing_type: cdf
       cap_metric_config:
-        # beta0/lr/n_epochs/batch_size/normalize_gradients are unused by the
+        # beta_min/beta_max/n_beta are unused by the
         # beta-free consistency metric; the block is kept identical to the CAP
         # one so both strategies share the same normalisation/energy front-end.
-        beta0: 1.0
+        beta_min: 0.01
+        # Provisional until the Causal Chamber freeze (subplan 3).
+        beta_max: 1000.0
+        n_beta: 200
         normalization_type: sigmoid
         normalization_params: null
         energy_type: adaptive
@@ -280,10 +266,6 @@ evaluation:
         regularization_type: none
         regularization_params: null
         binary: True
-        lr: 0.01
-        n_epochs: 20
-        batch_size: 8192
-        normalize_gradients: True
         process_group: null
         dist_sync_fn: null
 

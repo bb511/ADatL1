@@ -3,6 +3,7 @@
 from typing import Optional
 from pathlib import Path
 import logging
+import math
 import operator
 
 import torch
@@ -20,7 +21,12 @@ log = pylogger.RankedLogger(__name__)
 from src.utils.checkpoints import is_valid_ckpt
 from src.evaluation.callbacks.utils import mlflow as eval_mlflow
 
-MAIN_METRIC_WEIGHT = 1.25
+
+def _lists_candidate(ckpts: dict, candidate: dict) -> bool:
+    metrics = ckpts.get(candidate["strategy"])
+    if not hasattr(metrics, "get"):
+        return False
+    return candidate["criterion"] in (metrics.get(candidate["metric"]) or [])
 
 
 class Evaluator:
@@ -39,6 +45,10 @@ class Evaluator:
     :param callbacks: List of pl.Callback objects that compute evaluation metrics on
         the test data and do all the handling of these, including plotting.
     :param logger: pl.Logger object that handles the logging for this evaluation stage.
+    :param optimized_metric_config: Dictionary naming what is reported to optuna. Its
+        'candidate' entry (strategy, metric, criterion) names the one criterion
+        folder of ckpts at which 'main_metric' and, if present, 'sec_metric' are
+        read; raises ValueError if the candidate is not among ckpts.
     :param trainer_kwargs: The other arguments that are given to the trainer object,
         kept the same as the training, e.g., which device to run the computations on.
     """
@@ -54,6 +64,13 @@ class Evaluator:
         self.ckpts = ckpts or {}
         self.callbacks = callbacks or []
         self.optimized_metric_config = optimized_metric_config or None
+        if self.optimized_metric_config is not None:
+            candidate = self.optimized_metric_config.get("candidate")
+            if candidate is None or not _lists_candidate(self.ckpts, candidate):
+                raise ValueError(
+                    f"Candidate checkpoint {candidate} is not among the evaluated "
+                    f"ckpts {self.ckpts}."
+                )
 
         # Build a *real* Trainer under the hood
         self.evaluator = pytorch_lightning.Trainer(
@@ -200,7 +217,8 @@ class Evaluator:
         # specific criterion.
         ckpts = list(criterion_folder.glob("*.ckpt"))
         if ckpts != []:
-            self._get_optimized_metric(self.optimized_metric_config)
+            if self._is_candidate(criterion_name):
+                self._get_optimized_metric(self.optimized_metric_config)
             self._make_criterion_summary_plots(criterion_folder)
 
         self.evaluator.criterion_name = None
@@ -240,8 +258,8 @@ class Evaluator:
         self.evaluator.strat_name = "last"
         ckpt_path = run_folder / "last.ckpt"
         self.evaluate_ckpt(ckpt_path, model, test_loaders)
-        self._get_optimized_metric(self.optimized_metric_config)
         self._make_criterion_summary_plots(run_folder)
+        self.evaluator.strat_name = None
 
     def _get_subdir(self, main_dir: Path, subdir: str):
         """Checks if a dir exists and returns it if true."""
@@ -259,53 +277,40 @@ class Evaluator:
 
         return False
 
-    def _get_optimized_metric(self, optimized_metric_config: dict | None):
-        """Get one metric across all the checkpoints in a run to optimize for.
+    def _is_candidate(self, criterion_name: str) -> bool:
+        if self.optimized_metric_config is None or not self.set_optimized_metric:
+            return False
+        candidate = self.optimized_metric_config["candidate"]
+        return (self.strategy_name, self.metric_name, criterion_name) == (
+            candidate["strategy"],
+            candidate["metric"],
+            candidate["criterion"],
+        )
 
-        This is used for hyperparameter optimization.
-        The 'optimized_metric_config' dictionary contains the name of a callback in the
-        evaluator. This callback should have 'get_optimized_metric' method implemented.
-        This method returns what is considered the best metric, according to its own
-        definition, across all the checkpoints within a checkpointing criterion.
-        The optimized_metric_config should also contain all the hyperparameters required
-        by the 'get_optimized_metric' method.
-        Finally, it should contain a direction along which to pick from best checkpoints
-        given by different criteria.
+    def _get_optimized_metric(self, optimized_metric_config: dict):
+        """Set the metric reported to optuna from the candidate criterion folder.
+
+        The 'main_metric' entry names an evaluator callback that implements
+        'get_optimized_metric' together with its parameters; that callback picks the
+        checkpoint within the folder, and 'sec_metric', if given, is read at the same
+        checkpoint. A missing or non-finite value leaves optimized_metric None.
         """
-        if optimized_metric_config is None or self.set_optimized_metric is False:
-            return
-
         main_cfg = optimized_metric_config["main_metric"]
         main_cb_name = main_cfg["callback"]["name"]
         main_cb_params = main_cfg["callback"]["params"]
-        main_optim_dir = main_cfg["direction"]
         ckpt_name, main_metric = self._get_metric(main_cb_name, main_cb_params)
 
-        if main_metric is None:
-            log.warn("Main metric is None. Optimized HP metric not updated this strat.")
-            return
-        elif optimized_metric_config.get("sec_metric") is not None:
-            sec_cfg = optimized_metric_config["sec_metric"]
-            sec_metric, sec_optim_dir = self._get_secondary_metric(sec_cfg, ckpt_name)
-            optimized_metrics = [main_metric, sec_metric]
-            optim_directions = [main_optim_dir, sec_optim_dir]
-        else:
-            self._set_best_across_crit(
-                main_metric,
-                ckpt_name=ckpt_name,
-                direction=main_optim_dir,
-            )
+        metrics = [main_metric]
+        sec_cfg = optimized_metric_config.get("sec_metric")
+        if sec_cfg is not None:
+            metrics.append(self._get_secondary_metric(sec_cfg, ckpt_name)[0])
+
+        if not all(m is not None and math.isfinite(m) for m in metrics):
+            log.warn(f"Optimized metric {metrics} at {ckpt_name} is not finite.")
             return
 
-        if sec_metric is None:
-            log.warn("Sec metric is None. Optimized HP metric not updated this strat.")
-            return
-
-        self._comp_best_across_crit(
-            optimized_metrics,
-            ckpt_name=ckpt_name,
-            directions=optim_directions,
-        )
+        self.optimized_metric = metrics if sec_cfg is not None else main_metric
+        self.optimized_ckpt_name = ckpt_name
 
     def _get_metric(self, callback_name: str, callback_params: dict):
         """Get callback corresponding to metric and optim direction."""
@@ -338,57 +343,6 @@ class Evaluator:
 
         _, sec_metric = self._get_metric(sec_cb_name, sec_cb_params)
         return sec_metric, sec_optim_dir
-
-    def _set_best_across_crit(self, value: float, *, ckpt_name: str, direction: str):
-        """Set the best optimized metric values across all ckpt criteria."""
-        if self.optimized_metric is None:
-            self.optimized_metric = value
-            self.optimized_ckpt_name = ckpt_name
-            return
-
-        if direction == "maximize":
-            if value > self.optimized_metric:
-                self.optimized_metric = value
-                self.optimized_ckpt_name = ckpt_name
-            return
-
-        if direction == "minimize":
-            if value < self.optimized_metric:
-                self.optimized_metric = value
-                self.optimized_ckpt_name = ckpt_name
-            return
-
-        raise ValueError("Optimized metric direction must be 'maximize' or 'minimize'.")
-
-    def _comp_best_across_crit(
-        self, values: list[float], *, ckpt_name: str, directions: list[str]
-    ):
-        """Update best composite metric across checkpoint criteria.
-
-        This is computing the relative change for the main metric and secondary metric.
-        If the sum of the relative changes is positive, i.e., a metric's improvement
-        is larger than the other metric's worsening, then save this as the new best
-        across checkpointing criteria. The main metric is weighted 25% above the
-        secondary one in this sum.
-        """
-        if any(v is None for v in values):
-            return
-
-        if self.optimized_metric is None:
-            self.optimized_metric = values
-            self.optimized_ckpt_name = ckpt_name
-            return
-
-        rel_changes = [
-            ((v - b) if d == "maximize" else (b - v)) / max(abs(b), 1e-12)
-            for v, b, d in zip(values, self.optimized_metric, directions)
-        ]
-        weights = [MAIN_METRIC_WEIGHT, 1.0]
-        score = sum(w * rc for w, rc in zip(weights, rel_changes))
-
-        if score > 0:
-            self.optimized_metric = values
-            self.optimized_ckpt_name = ckpt_name
 
     def get_optimized_ckpt_name(self):
         return self.optimized_ckpt_name

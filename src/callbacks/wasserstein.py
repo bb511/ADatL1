@@ -5,28 +5,36 @@ import torch
 from pytorch_lightning import Callback
 
 
+def _wasserstein_1d(x: torch.Tensor, y: torch.Tensor) -> float:
+    """Return the exact W1 between the empirical distributions of x and y, the
+    integral of |F_x - F_y| over the merged sorted values, in float64."""
+    if x.numel() == 0 or y.numel() == 0:
+        raise RuntimeError("Cannot compute Wasserstein distance with an empty set.")
+
+    x = torch.sort(x.double()).values
+    y = torch.sort(y.double()).values
+    merged = torch.sort(torch.cat([x, y])).values
+    cdf_x = torch.searchsorted(x, merged[:-1], right=True).double() / x.numel()
+    cdf_y = torch.searchsorted(y, merged[:-1], right=True).double() / y.numel()
+    return torch.sum(torch.abs(cdf_x - cdf_y) * torch.diff(merged)).item()
+
+
 class WassersteinCallback(Callback):
     """Compute a validation Wasserstein distance between two dataloaders.
 
-    This callback collects all scores from two validation dataloaders and computes
-    the empirical 1D Wasserstein-1 distance between their score distributions.
+    This callback collects all scores from two validation dataloaders and computes the
+    exact empirical 1D Wasserstein-1 distance between their score distributions, the
+    integral of the absolute difference of their empirical CDFs.
 
-    For the two empirical score samples:
-        - x from dataset_1
-        - y from dataset_2
+    Optionally, the scores are mapped through sign(x) log1p(|x|) before the distance
+    computation, which equals log1p(x) for non-negative scores.
 
-    the Wasserstein distance is computed by:
-        1) sorting both samples
-        2) averaging absolute quantile differences
-        3) interpolating onto a common quantile grid if sample sizes differ
-
-    Optionally, a log1p transform is applied before the distance computation.
-
-    :param output_name: Key in outputs dict containing per-event anomaly scores / losses.
+    :param output_name: Key in outputs dict containing per-event anomaly scores /
+        losses.
     :param dataset_1: Name of the first validation dataloader.
     :param dataset_2: Name of the second validation dataloader.
-    :param apply_log1p: Whether to apply log1p transform before distance computation.
-    :beta: Float that sets parameter of EMA metrics compute here.
+    :param apply_log1p: Whether to map scores through sign(x) log1p(|x|) first.
+    :param beta: Float that sets parameter of EMA metrics compute here.
     """
 
     def __init__(
@@ -124,52 +132,13 @@ class WassersteinCallback(Callback):
         y = torch.cat(self.dataset_2_scores, dim=0).view(-1).cpu().float()
 
         if self.apply_log1p:
-            x = torch.log1p(torch.clamp(x, min=0.0))
-            y = torch.log1p(torch.clamp(y, min=0.0))
+            # Sign-preserving because RealNVP's negative log-likelihood is unbounded
+            # below: log1p is undefined below -1, and a clamp at zero would merge
+            # every negative score into 0.
+            x = torch.sign(x) * torch.log1p(torch.abs(x))
+            y = torch.sign(y) * torch.log1p(torch.abs(y))
 
-        return self._wasserstein_1d_sorted(x, y)
-
-    def _wasserstein_1d_sorted(self, x: torch.Tensor, y: torch.Tensor) -> float:
-        """Compute empirical 1D Wasserstein-1 distance."""
-        x = torch.sort(x).values
-        y = torch.sort(y).values
-
-        nx = int(x.numel())
-        ny = int(y.numel())
-
-        if nx == 0 or ny == 0:
-            raise RuntimeError("Cannot compute Wasserstein distance with an empty set.")
-
-        if nx == ny:
-            return torch.mean(torch.abs(x - y)).item()
-
-        n = min(nx, ny)
-        q = torch.linspace(0.0, 1.0, n, dtype=torch.float32)
-
-        xq = self._interp_quantiles(x, q)
-        yq = self._interp_quantiles(y, q)
-
-        return torch.mean(torch.abs(xq - yq)).item()
-
-    def _interp_quantiles(
-        self, sorted_vals: torch.Tensor, q: torch.Tensor
-    ) -> torch.Tensor:
-        """Interpolate sorted samples at quantiles q in [0, 1]."""
-        sorted_vals = sorted_vals.view(-1)
-        n = int(sorted_vals.numel())
-
-        if n == 0:
-            raise RuntimeError("Cannot interpolate quantiles from an empty tensor.")
-
-        if n == 1:
-            return sorted_vals.repeat(len(q))
-
-        pos = q * (n - 1)
-        lo = torch.floor(pos).long()
-        hi = torch.ceil(pos).long()
-        w = pos - lo.float()
-
-        return (1.0 - w) * sorted_vals[lo] + w * sorted_vals[hi]
+        return _wasserstein_1d(x, y)
 
     def _compute_w1dist_ema(self, w1dist: float):
         """Compute the cvar estimated moving average."""

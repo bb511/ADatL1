@@ -1,0 +1,92 @@
+import filecmp
+import importlib.util
+from pathlib import Path
+
+import numpy as np
+import pytest
+
+SCRIPT = Path(__file__).resolve().parents[1] / "scripts/data/era_splits.py"
+N_EVENTS, N_FIRST = 20, 8
+
+
+def _load_script():
+    spec = importlib.util.spec_from_file_location("era_splits", SCRIPT)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+era_splits = _load_script()
+
+
+@pytest.fixture
+def merged(tmp_path):
+    merged_dir = tmp_path / "merged"
+    merged_dir.mkdir()
+    permutation = np.random.default_rng(0).permutation(N_EVENTS)
+    arrays = dict(zip(era_splits.SPLITS, np.split(permutation, [12, 16])))
+    np.savez(merged_dir / "zerobias.npz", **arrays)
+    for seed, name in enumerate(("aux__a", "aux__b")):
+        aux = np.random.default_rng(seed).permutation(10)
+        np.savez(merged_dir / f"{name}.npz", ivalid=aux[:6], itest=aux[6:])
+
+    return merged_dir, arrays
+
+
+def _run(merged_dir, era_dir, era, *extra):
+    argv = ["--merged-splits", str(merged_dir), "--era-splits", str(era_dir)]
+    return era_splits.main([*argv, "--era", era, "--n-first-run", str(N_FIRST), *extra])
+
+
+@pytest.mark.parametrize(
+    "era, keep, n_era",
+    [
+        ("E", lambda i: i[i < N_FIRST], N_FIRST),
+        ("G", lambda i: i[i >= N_FIRST] - N_FIRST, N_EVENTS - N_FIRST),
+    ],
+)
+def test_era_zerobias_is_the_shifted_restriction(merged, tmp_path, era, keep, n_era):
+    merged_dir, arrays = merged
+    _run(merged_dir, tmp_path / "era", era)
+
+    with np.load(tmp_path / "era" / "zerobias.npz") as written:
+        splits = [written[k] for k in era_splits.SPLITS]
+    for split, key in zip(splits, era_splits.SPLITS):
+        assert split.dtype == arrays[key].dtype
+        assert np.array_equal(split, keep(arrays[key]))
+    joined = np.concatenate(splits)
+    assert len(joined) == len(set(joined.tolist())) == n_era
+    assert sorted(joined.tolist()) == list(range(n_era))
+
+
+def test_aux_splits_are_copied_unchanged(merged, tmp_path):
+    merged_dir, _ = merged
+    _run(merged_dir, tmp_path / "era", "G")
+
+    for name in ("aux__a.npz", "aux__b.npz"):
+        assert filecmp.cmp(merged_dir / name, tmp_path / "era" / name, shallow=False)
+
+
+def test_refuses_to_overwrite(merged, tmp_path):
+    merged_dir, _ = merged
+    era_dir = tmp_path / "era"
+    era_dir.mkdir()
+    (era_dir / "aux__b.npz").write_bytes(b"keep")
+
+    with pytest.raises(SystemExit, match="refusing to overwrite"):
+        _run(merged_dir, era_dir, "E")
+
+    assert sorted(p.name for p in era_dir.iterdir()) == ["aux__b.npz"]
+    assert (era_dir / "aux__b.npz").read_bytes() == b"keep"
+
+
+def test_dry_run_writes_nothing(merged, tmp_path, capsys):
+    merged_dir, arrays = merged
+    _run(merged_dir, tmp_path / "era", "E", "--dry-run")
+
+    assert not (tmp_path / "era").exists()
+    sizes = [len(i[i < N_FIRST]) for i in arrays.values()]
+    expected = f"train {sizes[0]:,}, valid {sizes[1]:,}, test {sizes[2]:,}"
+    out = capsys.readouterr().out
+    assert expected in out
+    assert out.count("would write") == 3

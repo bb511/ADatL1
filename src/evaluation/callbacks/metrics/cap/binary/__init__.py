@@ -1,17 +1,17 @@
-from typing import Optional, Callable, Tuple, Literal
 import functools
+from typing import Callable, Literal, Optional, Tuple
+
 import torch
 from torch import Tensor
-
 
 __all__ = ["get_pairing_fn", "get_normalizer_fn", "get_energy_fn", "get_regularizer_fn"]
 
 
 from src.evaluation.callbacks.metrics.cap.binary.pairing import (
-    random,
-    label,
     absolute,
     cdf,
+    label,
+    random,
 )
 
 
@@ -43,12 +43,13 @@ def get_pairing_fn(
 
 
 from src.evaluation.callbacks.metrics.cap.binary.normalization import (
-    minmax,
-    sigmoid,
     log_sigmoid,
-    softmax,
+    minmax,
     rank,
     rank_mid,
+    sigmoid,
+    sigmoid_robust,
+    softmax,
 )
 
 
@@ -57,7 +58,10 @@ def get_normalizer_fn(
 ):
     """Get the normalization function based on type."""
 
-    normalization_params = normalization_params or {}
+    # Copied: the CAP callbacks rebuild their metric from one shared config at every
+    # epoch or checkpoint, so popping mode from the caller's dict would leave every
+    # metric after the first in joint mode.
+    normalization_params = dict(normalization_params or {})
     if normalization_type == "none":
         return lambda x, y: (x, y)
 
@@ -69,6 +73,9 @@ def get_normalizer_fn(
 
     elif normalization_type == "sigmoid":
         normalizer_fn = functools.partial(sigmoid, **normalization_params)
+
+    elif normalization_type == "sigmoid_robust":
+        normalizer_fn = functools.partial(sigmoid_robust, **normalization_params)
 
     elif normalization_type == "softmax":
         normalizer_fn = softmax
@@ -91,7 +98,6 @@ def get_normalizer_fn(
         normalizer_fn: Callable,
         mode: Literal["split", "joint"] = "joint",
     ) -> Tuple[Tensor, Tensor]:
-
         if mode == "joint":
             combined = torch.cat([tensor1, tensor2], dim=0)
             normalized_combined = normalizer_fn(combined)
@@ -106,12 +112,12 @@ def get_normalizer_fn(
 
 
 from src.evaluation.callbacks.metrics.cap.binary.energy import (
+    adaptive,
     baseline,
+    contrastive,
     exponential,
     focal,
-    contrastive,
     margin,
-    adaptive,
 )
 
 
@@ -142,9 +148,9 @@ def get_energy_fn(energy_type: str, energy_params: Optional[dict] = None):
 
 
 from src.evaluation.callbacks.metrics.cap.binary.regularization import (
-    threshold,
-    smooth,
     percentile,
+    smooth,
+    threshold,
 )
 
 

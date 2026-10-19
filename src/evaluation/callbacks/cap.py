@@ -1,17 +1,15 @@
 # Compute the approximation capacity metric.
+import pickle
 from collections import defaultdict
 from pathlib import Path
-import pickle
 
-import torch
 import numpy as np
-
+import torch
 from pytorch_lightning.callbacks import Callback
 
-from src.evaluation.callbacks.metrics.cap.metric import ApproximationCapacity
-from src.evaluation.callbacks.metrics.cap.binary import get_pairing_fn
-
 from src.evaluation.callbacks import utils
+from src.evaluation.callbacks.metrics.cap.binary import get_pairing_fn
+from src.evaluation.callbacks.metrics.cap.metric import ApproximationCapacity
 from src.plot import horizontal_bar
 
 
@@ -25,6 +23,11 @@ class CAP(Callback):
         - dataset_2
 
     This is appropriate as a validation-side proxy objective for HPO.
+
+    For every checkpoint the CAP(beta) curve is written to `cap_curve.npz` (arrays
+    `betas`, `curve`) in the checkpoint's plot folder, and the maximising beta and
+    whether it sits at the upper bound of the grid are logged beside CAP. Metrics
+    without a beta curve, such as PosteriorConsistency, log only their value.
 
     Subclasses select a different metric by overriding `metric_cls`, and a
     different plot label by overriding `metric_label`; see
@@ -77,9 +80,7 @@ class CAP(Callback):
         """Initialise useful quantities."""
         self.dataset_1_scores = []
         self.dataset_2_scores = []
-        self.capmetric = self.metric_cls(
-            **self.cap_metric_config, device=self.device
-        )
+        self.capmetric = self.metric_cls(**self.cap_metric_config, device=self.device)
         self.capmetric.to(self.device)
 
     def on_test_batch_end(
@@ -87,8 +88,9 @@ class CAP(Callback):
     ):
         """Cache the data to compute approximation capacity on.
 
-        The two data sets need to be paired and going through two data sets at once in not
-        compatible with the lightning workflow, and hence we cache the whole data sets here.
+        The two data sets need to be paired and going through two data sets at once in
+        not compatible with the lightning workflow, and hence we cache the whole data
+        sets here.
         """
         self.dataset_name = list(trainer.test_dataloaders.keys())[dataloader_idx]
         if self.dataset_name == self.dataset_1_name:
@@ -123,18 +125,34 @@ class CAP(Callback):
 
         ckpt_ds = utils.misc.get_ckpt_ds_name(ckpt_name)
         self._store_summary(cap_metric_value, ckpt_ds)
+        metrics = {self.name: self.cap_summary[ckpt_ds]}
+        if self.capmetric.curve is not None:
+            metrics |= self._store_curve(trainer, pl_module)
         utils.mlflow.log_metrics_to_mlflow(
-            trainer,
-            {self.name: self.cap_summary[ckpt_ds]},
-            ckpt_name=ckpt_name,
-            cb_name=self.name,
+            trainer, metrics, ckpt_name=ckpt_name, cb_name=self.name
         )
+
+    def _store_curve(self, trainer, pl_module) -> dict:
+        """Save the checkpoint's curve; return its maximising beta and bound flag."""
+        ckpt_path = Path(pl_module._ckpt_path)
+        plot_folder = ckpt_path.parent / "plots" / trainer.split / ckpt_path.stem
+        plot_folder = plot_folder / self.name
+        plot_folder.mkdir(parents=True, exist_ok=True)
+        np.savez(
+            plot_folder / "cap_curve.npz",
+            betas=self.capmetric.betas.numpy(),
+            curve=self.capmetric.curve.numpy(),
+        )
+        return {
+            f"{self.name}_beta_star": self.capmetric.beta_star,
+            f"{self.name}_at_bound": float(self.capmetric.at_bound),
+        }
 
     def _store_summary(self, cap_metric_value: float, ckpt_ds: str):
         """Store the summary statistic for the cap for one checkpoint.
 
-        Here, it is the metric itself, but this is implemented to be consistent with
-        the other evaluation callbacks.
+        Here, it is the metric itself, but this is implemented to be consistent with the
+        other evaluation callbacks.
         """
         self.cap_summary[ckpt_ds] = cap_metric_value
 
@@ -159,8 +177,8 @@ class CAP(Callback):
     def get_optimized_metric(self):
         """Get one number that one should optimize on this callback.
 
-        Here, it's the maximum of the summary metric across checkpoints corresponding
-        to a certain checkpointing criterion.
+        Here, it's the maximum of the summary metric across checkpoints corresponding to
+        a certain checkpointing criterion.
         """
         max_ckpt_ds = max(self.cap_summary, key=self.cap_summary.get)
         max_metric_value = self.cap_summary[max_ckpt_ds]

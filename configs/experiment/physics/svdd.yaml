@@ -27,8 +27,12 @@ trainer:
 
 test: true
 
-# Metrics to report to optuna for every checkpoint.
+# Metrics reported to optuna, read at the candidate checkpoint.
 optimized_metric_config:
+  candidate:
+    strategy: summary
+    metric: cvar25_ema
+    criterion: max
   main_metric:
     callback:
       name: eff
@@ -65,47 +69,6 @@ callbacks:
     output_name: 'ascore/full'
     beta: 0.9
 
-  max_rate_ckpt:
-    _target_: src.callbacks.model_checkpoint.SingleDatasetModelCheckpoint
-    dirpath: '${paths.checkpoints_dir}/${experiment_name}/${run_name}'
-    monitor: eff__ascore_full__brate_operational
-    criterion:
-      _target_: src.callbacks.checkpointing.criterion.Max
-      top_k: 1
-    ds:
-      - GluGluHTo2B_Par-MH-125
-      - GluGluHto2G_Par-MH-125
-      - GluGluHto2G_Par-MH-90
-      - GluGluHto2Tau_Par-MH-125
-      - GluGlutoHHto2B2WtoLNu2Q_Par-c2-0-kl-1-kt-1
-      - HHHto4B2Tau_Par-c3-0-d4-0
-      - HHHto6B_Par-c3-0-d4-0
-      - SUSYGluGluToBBHTo2B_Par-M-1200
-      - SUSYGluGluToBBHToBB_Par-M-120
-      - SUSYGluGluToBBHToBB_Par-M-350
-      - SUSYGluGluToBBHToBB_Par-M-600
-      - TTHTo2C_Par-MH-125
-      - TTHto2B_Par-MH-125
-      - VBFHTo2C_Par-MH-125
-      - VBFHto2B_Par-MH-125
-      - VBFHto2Tau_Par-MH-125
-      - WtoTauto3Mu
-      - ggH-suep-decay
-      - smj-case-A
-      - haa-4b-ma15
-
-  stable_ascore_operational_ckpt:
-    _target_: src.callbacks.model_checkpoint.SingleDatasetModelCheckpoint
-    dirpath: '${paths.checkpoints_dir}/${experiment_name}/${run_name}'
-    monitor: ascore_operational
-    criterion:
-      _target_: src.callbacks.checkpointing.criterion.Stable
-      top_k: 1
-      threshold: 0.05
-      patience: 10
-    ds:
-      - normal
-
   cvar25_ema_ckpt:
     _target_: pytorch_lightning.callbacks.ModelCheckpoint
     dirpath: '${paths.checkpoints_dir}/${experiment_name}/${run_name}/summary/cvar25_ema/max'
@@ -135,13 +98,8 @@ callbacks:
 evaluation:
   evaluator:
     ckpts:
-      last: true
       summary:
         cvar25_ema: ['max']
-        cvar10_ema: ['max']
-      single:
-        ascore_operational: ['stable']
-        eff__ascore_full__brate_operational: ['max']
 
   callbacks:
     anomaly_efficiency:

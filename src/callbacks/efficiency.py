@@ -10,6 +10,13 @@ from src.callbacks.metrics.rate import AnomalyRate
 from src.data.utils import unpack_batch
 
 
+def _set_buffer(pl_module, name: str, value: torch.Tensor):
+    if name not in dict(pl_module.named_buffers()):
+        pl_module.register_buffer(name, value.detach().clone(), persistent=True)
+    else:
+        getattr(pl_module, name).data.copy_(value.detach())
+
+
 class AnomalyEfficiencyCallback(Callback):
     """Calculates the fraction of anomalies detected given a certain bkg rate.
 
@@ -177,8 +184,7 @@ class AnomalyEfficiencyCallback(Callback):
             rate = AnomalyRate(target_rate, self.base_rate).to(self.device)
             rate.set_threshold(self.normal_score_data)
             rate.update(self.normal_score_data)
-            thres = rate.threshold
-            self._set_thres_on_module(pl_module, target_rate, thres)
+            self._set_thres_on_module(pl_module, target_rate, rate)
             self.main_rate[target_rate][self.dataset_name] = rate
 
     def _initialize_rate_metric(self, labels: torch.Tensor):
@@ -255,19 +261,11 @@ class AnomalyEfficiencyCallback(Callback):
             and abs(float(target_rate) - float(self.module_target_rate)) < 1e-12
         )
 
-    def _set_thres_on_module(self, pl_module, target_rate: float, thres: torch.Tensor):
-        """Pass the threshold to the module so it ends up in the checkpoint."""
-        if self._is_operational_rate(target_rate):
-            name = "thres_operational"
-        else:
-            trate_name = f"{target_rate}".replace(".", "_")
-            name = f"thres_{trate_name}kHz"
-
-        if name not in dict(pl_module.named_buffers()):
-            pl_module.register_buffer(name, thres.detach().clone(), persistent=True)
-        else:
-            buf = getattr(pl_module, name)
-            buf.data.copy_(thres.detach())
+    def _set_thres_on_module(self, pl_module, target_rate: float, rate: AnomalyRate):
+        """Pass the threshold and its tie weight to the module for the checkpoint."""
+        suffix = self._rate_log_suffix(target_rate)
+        _set_buffer(pl_module, f"thres_{suffix}", rate.threshold)
+        _set_buffer(pl_module, f"tie_{suffix}", rate.tie_weight)
 
     def _resolve_rate_config(self, pl_module) -> tuple[list[float], float | None]:
         """Resolve target rates and base rate from module + callback config."""

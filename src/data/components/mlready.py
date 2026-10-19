@@ -1,4 +1,6 @@
 # Splits the data into train, validation, test... And all the auxiliary data.
+import os
+import tempfile
 from collections import defaultdict
 from dataclasses import dataclass
 from pathlib import Path
@@ -16,6 +18,23 @@ from . import plots
 from .normalization import L1DataNormalizer
 
 log = pylogger.RankedLogger(__name__)
+
+
+def _savez_atomic(cache_file: Path, arrays: dict[str, np.ndarray]) -> None:
+    # np.savez writes in place, so a job loading the split while another writes it
+    # could read a truncated archive. os.replace is atomic within one directory.
+    # mkstemp creates the file 0600, hence the chmod.
+    fd, partial = tempfile.mkstemp(
+        dir=cache_file.parent, prefix=f".{cache_file.stem}.", suffix=".part"
+    )
+    try:
+        with os.fdopen(fd, "wb") as f:
+            np.savez(f, **arrays)
+        os.chmod(partial, 0o644)
+        os.replace(partial, cache_file)
+    except BaseException:
+        os.unlink(partial)
+        raise
 
 
 @dataclass
@@ -75,7 +94,9 @@ class L1DataMLReady:
 
         if cache_file.is_file():
             with np.load(cache_file) as frozen:
-                loaded = tuple(frozen[f"i{k}"] for k in ("train", "valid", "test")[-len(drawn):])
+                loaded = tuple(
+                    frozen[f"i{k}"] for k in ("train", "valid", "test")[-len(drawn) :]
+                )
             if sum(len(i) for i in loaded) != sum(len(i) for i in drawn):
                 raise ValueError(
                     f"Frozen split {cache_file} covers {sum(len(i) for i in loaded)} events "
@@ -83,8 +104,8 @@ class L1DataMLReady:
                 )
             return loaded
 
-        keys = ("train", "valid", "test")[-len(drawn):]
-        np.savez(cache_file, **{f"i{k}": i for k, i in zip(keys, drawn)})
+        keys = ("train", "valid", "test")[-len(drawn) :]
+        _savez_atomic(cache_file, {f"i{k}": i for k, i in zip(keys, drawn)})
         log.info(Fore.GREEN + f"Froze the {name} split at: {cache_file}")
 
         return drawn

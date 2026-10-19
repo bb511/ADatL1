@@ -52,6 +52,14 @@ class DatasetAwareModelCheckpoint(Callback):
         self.checkpoints = defaultdict(list)
         self.ds_criterion = None
 
+    def on_fit_start(self, trainer, pl_module):
+        """Empty the checkpoint directory before training writes to it.
+
+        This is not done at construction because evaluation-only runs (train=false)
+        construct the callback too and must keep the checkpoints they evaluate.
+        """
+        self.create_checkpoint_dir()
+
     def on_validation_start(self, trainer, pl_module):
         """Initialize the criterion object for each dataset at the start of training."""
         if not self.ds_criterion is None:

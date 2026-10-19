@@ -10,6 +10,21 @@ from src.evaluation.callbacks import utils
 from src.plot import horizontal_bar
 
 
+def _wasserstein_1d(x: torch.Tensor, y: torch.Tensor) -> float:
+    """Return the exact W1 between the empirical distributions of x and y, the
+    integral of |F_x - F_y| over the merged sorted values, in float64; NaN when
+    either is empty."""
+    if x.numel() == 0 or y.numel() == 0:
+        return float("nan")
+
+    x = torch.sort(x.double()).values
+    y = torch.sort(y.double()).values
+    merged = torch.sort(torch.cat([x, y])).values
+    cdf_x = torch.searchsorted(x, merged[:-1], right=True).double() / x.numel()
+    cdf_y = torch.searchsorted(y, merged[:-1], right=True).double() / y.numel()
+    return torch.sum(torch.abs(cdf_x - cdf_y) * torch.diff(merged)).item()
+
+
 class Wasserstein(Callback):
     """Evaluate the Wasserstein distance between two score distributions.
 
@@ -20,7 +35,8 @@ class Wasserstein(Callback):
     :param output_name: Name of the model output metric used as anomaly score.
     :param dataset_1: Name of the first dataset.
     :param dataset_2: Name of the second dataset.
-    :param apply_log1p: Whether to apply log1p transform before distance computation.
+    :param apply_log1p: Whether to map scores through sign(x) log1p(|x|), which equals
+        log1p(x) for non-negative scores, before distance computation.
     :param log_raw_mlflow: Whether to log raw plots to mlflow.
     :param name: Callback name.
     """
@@ -65,55 +81,13 @@ class Wasserstein(Callback):
         y = torch.cat(self.dataset_2_scores, dim=0).detach().flatten().cpu().float()
 
         if self.apply_log1p:
-            # Scores should be non-negative; clamp for safety.
-            x = torch.log1p(torch.clamp(x, min=0.0))
-            y = torch.log1p(torch.clamp(y, min=0.0))
+            # Sign-preserving because RealNVP's negative log-likelihood is unbounded
+            # below: log1p is undefined below -1, and a clamp at zero would merge
+            # every negative score into 0.
+            x = torch.sign(x) * torch.log1p(torch.abs(x))
+            y = torch.sign(y) * torch.log1p(torch.abs(y))
 
-        return self._wasserstein_1d_sorted(x, y)
-
-    def _wasserstein_1d_sorted(self, x: torch.Tensor, y: torch.Tensor) -> float:
-        """Compute empirical 1D Wasserstein-1 distance.
-
-        For two empirical 1D distributions, the Wasserstein distance can be
-        computed by sorting both samples and averaging absolute quantile gaps.
-        If sample sizes differ, the larger sample is downsampled by quantile
-        interpolation onto the smaller sample size.
-        """
-        x = torch.sort(x).values
-        y = torch.sort(y).values
-
-        nx = x.numel()
-        ny = y.numel()
-
-        if nx == 0 or ny == 0:
-            return float("nan")
-
-        if nx == ny:
-            return torch.mean(torch.abs(x - y)).item()
-
-        # Interpolate both distributions onto a common quantile grid
-        n = min(nx, ny)
-        q = torch.linspace(0.0, 1.0, n, dtype=torch.float32)
-
-        xq = self._interp_quantiles(x, q)
-        yq = self._interp_quantiles(y, q)
-
-        return torch.mean(torch.abs(xq - yq)).item()
-
-    def _interp_quantiles(
-        self, sorted_vals: torch.Tensor, q: torch.Tensor
-    ) -> torch.Tensor:
-        """Interpolate sorted samples at quantiles q in [0, 1]."""
-        n = sorted_vals.numel()
-        if n == 1:
-            return sorted_vals.repeat(len(q))
-
-        pos = q * (n - 1)
-        lo = torch.floor(pos).long()
-        hi = torch.ceil(pos).long()
-        w = pos - lo.float()
-
-        return (1.0 - w) * sorted_vals[lo] + w * sorted_vals[hi]
+        return _wasserstein_1d(x, y)
 
     def on_test_epoch_end(self, trainer, pl_module):
         """Compute and store Wasserstein distance for the current checkpoint."""

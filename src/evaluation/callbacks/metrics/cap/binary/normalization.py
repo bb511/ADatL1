@@ -1,7 +1,8 @@
-from typing import Tuple, Optional, Literal, Dict
+from typing import Dict, Literal, Optional, Tuple
+
 import torch
-from torch import Tensor
 import torch.nn.functional as F
+from torch import Tensor
 
 
 def minmax(
@@ -55,6 +56,32 @@ def sigmoid(
     return torch.sigmoid((tensor - center) / scale)
 
 
+def sigmoid_robust(
+    tensor: Tensor, center: Optional[float] = None, scale: Optional[float] = None
+) -> Tensor:
+    """
+    Robust sigmoid normalization: sigmoid with a median-absolute-deviation scale.
+
+    Rationale: Same mapping as sigmoid, but no single extreme score sets its steepness.
+
+    Args:
+        tensor: Input tensor to normalize
+        center: Center point for sigmoid (uses median if None)
+        scale: Scale parameter (uses 1.4826 * MAD / 4 if None)
+    """
+    median = tensor.median().item()
+    if center is None:
+        center = median
+    if scale is None:
+        # 1.4826 MAD estimates the std of Gaussian scores, so this equals sigmoid's
+        # std / 4 for them, while one extreme score no longer sets the scale.
+        scale = 1.4826 * (tensor - median).abs().median().item() / 4.0
+        if scale < 1e-8:
+            scale = 1.0
+
+    return torch.sigmoid((tensor - center) / scale)
+
+
 def softmax(
     tensor: Tensor,
 ) -> Tensor:
@@ -69,6 +96,13 @@ def softmax(
     return F.softmax(tensor, dim=-1)
 
 
+def _tied_ranks(tensor: Tensor) -> Tensor:
+    """Return the zero-based rank of every element, averaged over tied values."""
+    _, inverse, counts = torch.unique(tensor, return_inverse=True, return_counts=True)
+    first = torch.cumsum(counts, dim=0) - counts
+    return (first + (counts - 1) / 2).to(torch.float)[inverse]
+
+
 def rank(
     tensor: Tensor,
 ) -> Tensor:
@@ -78,7 +112,7 @@ def rank(
     Rationale:
         Robust to heavy-tailed distributions and extreme outliers.
         Preserves ordering of anomaly scores while ensuring a uniform
-        distribution over [0, 1].
+        distribution over [0, 1]. Tied values share their mean rank.
 
     Args:
         tensor: Input tensor to normalize
@@ -91,24 +125,18 @@ def rank(
     if n <= 1:
         return torch.full_like(tensor, 0.5)
 
-    # Compute ranks
-    sorted_indices = torch.argsort(tensor)
-    ranks = torch.empty_like(sorted_indices, dtype=torch.float)
-    ranks[sorted_indices] = torch.arange(n, device=tensor.device, dtype=torch.float)
-
-    # Normalize ranks to [0, 1]
-    return ranks / (n - 1)
+    return _tied_ranks(tensor) / (n - 1)
 
 
 def rank_mid(
     tensor: Tensor,
 ) -> Tensor:
-    """
-    Rank normalization using mid-ranks.
+    """Rank normalization using mid-ranks.
 
     Rationale:
         Same as rank normalization but avoids exact 0 and 1, which
         can improve numerical stability in exponential kernels.
+        Tied values share their mean rank.
 
     Args:
         tensor: Input tensor to normalize
@@ -121,18 +149,14 @@ def rank_mid(
     if n <= 1:
         return torch.full_like(tensor, 0.5)
 
-    sorted_indices = torch.argsort(tensor)
-    ranks = torch.empty_like(sorted_indices, dtype=torch.float)
-    ranks[sorted_indices] = torch.arange(n, device=tensor.device, dtype=torch.float)
-
-    return (ranks + 0.5) / n
+    return (_tied_ranks(tensor) + 0.5) / n
 
 
 def log_sigmoid(
     tensor: Tensor,
     center: Optional[float] = None,
     scale: Optional[float] = None,
-    eps: Optional[float] = 1e-8,
+    eps: Optional[float] = None,
 ) -> Tensor:
     """
     Log-sigmoid normalization: applies a log1p transform followed by sigmoid mapping.
@@ -148,12 +172,15 @@ def log_sigmoid(
             (uses median of transformed tensor if None)
         scale: Scale parameter after log1p transform
             (uses std/4 of transformed tensor if None for reasonable steepness)
-        eps: Small value to ensure numerical stability for non-positive inputs
+        eps: Inputs below -1 + eps are clamped there before log1p (uses the machine
+            epsilon of the tensor's dtype if None, so that -1 + eps differs from -1
+            in that dtype)
 
     Returns:
         Normalized tensor in (0, 1) range
     """
-    # Ensure numerical stability if tensor contains very small negative values
+    if eps is None:
+        eps = torch.finfo(tensor.dtype).eps
     transformed = torch.log1p(torch.clamp(tensor, min=-1.0 + eps))
 
     if center is None:

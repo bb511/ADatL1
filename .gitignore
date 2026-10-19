@@ -19,6 +19,7 @@ CLAUDE.md
 # Ignore sublime text editor configuration.
 .sublime
 sftp-config.json
+remote-sync-config.json
 
 # Ignore notebook data.
 notebooks/mlflow_data
@@ -203,3 +204,6 @@ outputs
 
 # Local archive of superseded notebook data (kept out of git).
 notebooks/archive/
+
+# Co-author context notes, not part of the code base.
+victor_fugazi/

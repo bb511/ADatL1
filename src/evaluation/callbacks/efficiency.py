@@ -17,6 +17,17 @@ from src.utils import pylogger
 log = pylogger.RankedLogger(__name__)
 
 
+def _stored_tie_weight(pl_module, name: str) -> torch.Tensor | float:
+    tie_weight = getattr(pl_module, name, None)
+    if tie_weight is None:
+        log.info(
+            f"The checkpoint has no {name} buffer: every score equal to the "
+            "threshold passes it (tie weight 1, the behaviour before October 2026)."
+        )
+        return 1.0
+    return tie_weight
+
+
 class AnomalyEfficiencyCallback(Callback):
     """Calculates the fraction of anomalies detected at one or more target rates.
 
@@ -73,7 +84,7 @@ class AnomalyEfficiencyCallback(Callback):
             self.base_rate_resolved,
         ) = self._resolve_rate_config(pl_module)
 
-        self.thresholds = self._get_thres(pl_module)
+        self.thresholds, self.tie_weights = self._get_thres(pl_module)
 
         first_test_dset_key = list(trainer.test_dataloaders.keys())[0]
         if first_test_dset_key != "normal":
@@ -252,7 +263,9 @@ class AnomalyEfficiencyCallback(Callback):
         """Compute the requested rates on the normal test dataset."""
         for target_rate in self.target_rates_resolved:
             rate = AnomalyRate(target_rate, self.base_rate_resolved).to(self.device)
-            rate.apply_threshold(self.thresholds[target_rate])
+            rate.apply_threshold(
+                self.thresholds[target_rate], self.tie_weights[target_rate]
+            )
             rate.update(self.normal_score_data)
             self.main_rate[target_rate][self.dataset_name] = rate
 
@@ -260,7 +273,9 @@ class AnomalyEfficiencyCallback(Callback):
         """Initialize the rate metric for a signal/background dataset."""
         for target_rate in self.target_rates_resolved:
             rate = AnomalyRate(target_rate, self.base_rate_resolved).to(self.device)
-            rate.apply_threshold(self.thresholds[target_rate])
+            rate.apply_threshold(
+                self.thresholds[target_rate], self.tie_weights[target_rate]
+            )
             if torch.all(labels < 0):
                 self.bkg_rates[target_rate][self.dataset_name] = rate
             if torch.all(labels > 0):
@@ -288,18 +303,20 @@ class AnomalyEfficiencyCallback(Callback):
             pickle.dump(plain_dict, f, protocol=pickle.HIGHEST_PROTOCOL)
 
     def _get_thres(self, pl_module):
-        """Load thresholds that were stored on the module at validation time."""
+        """Load thresholds and tie weights stored on the module at validation time."""
         thresholds = defaultdict(float)
+        tie_weights = {}
         valid_rates = []
 
         for target_rate in self.target_rates_resolved:
             # --- NEW: operational handling ---
             if self._is_operational(target_rate):
-                thres = getattr(pl_module, "thres_operational", None)
                 trate_name = "operational"
+                suffix = "operational"
             else:
                 trate_name = str(target_rate).replace(".", "_")
-                thres = getattr(pl_module, f"thres_{trate_name}kHz", None)
+                suffix = f"{trate_name}kHz"
+            thres = getattr(pl_module, f"thres_{suffix}", None)
 
             if thres is None:
                 log.warn(
@@ -309,10 +326,11 @@ class AnomalyEfficiencyCallback(Callback):
                 continue
 
             thresholds[target_rate] = thres
+            tie_weights[target_rate] = _stored_tie_weight(pl_module, f"tie_{suffix}")
             valid_rates.append(target_rate)
 
         self.target_rates_resolved = valid_rates
-        return thresholds
+        return thresholds, tie_weights
 
     def _resolve_rate_config(
         self, pl_module

@@ -3,7 +3,7 @@
 # Reference only: not selected by any defaults list.
 _target_: src.evaluation.callbacks.output.HistogramOutputCallback
 output_name: loss/total/full
-ds: ['main_test']
+ds: ["main_test"]
 ckpts:
   last: true
 bins: 10

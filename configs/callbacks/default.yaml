@@ -12,6 +12,6 @@ model_summary:
   max_depth: -1
 
 last_epoch_ckpt:
-  dirpath: '${paths.checkpoints_dir}/${experiment_name}/${run_name}/'
+  dirpath: "${paths.checkpoints_dir}/${experiment_name}/${run_name}/"
   save_top_k: 0
   save_last: true

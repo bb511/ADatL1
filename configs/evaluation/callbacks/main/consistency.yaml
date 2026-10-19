@@ -2,7 +2,7 @@
 
 # Reference only: not selected by any defaults list.
 _target_: src.evaluation.callbacks.consistency.PosteriorConsistency
-output_name: 'ascore/full'
+output_name: "ascore/full"
 dataset_1: ???
 dataset_2: ???
 pairing_type: cdf
@@ -28,4 +28,4 @@ cap_metric_config:
   process_group: null
   dist_sync_fn: null
 
-name: 'consistency'
+name: "consistency"

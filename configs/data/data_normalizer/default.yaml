@@ -11,4 +11,4 @@ hyperparams: null
 # Use robust normalization between the 95, 5 quantiles.
 # name: robust
 # hyperparams:
-  # percentiles: [0.05, 0.95]
+# percentiles: [0.05, 0.95]

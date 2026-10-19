@@ -3,7 +3,7 @@ defaults:
 
 _target_: src.algorithms.realnvp.RealNVP
 features: null
-ckpt: ''
+ckpt: ""
 
 target_rate: 0.25 # nominal rate
 base_rate: 28608.8064 # bunch crossing rate in kHz

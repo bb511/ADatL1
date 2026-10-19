@@ -8,7 +8,7 @@ features: null
 target_rate: 0.25 # nominal rate
 base_rate: 28608.8064 # bunch crossing rate in kHz
 
-ckpt: ''
+ckpt: ""
 
 encoder:
   _target_: src.algorithms.components.encoder.VariationalEncoder

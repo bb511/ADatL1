@@ -67,7 +67,7 @@ callbacks:
   log_data_mlflow: null
   anomaly_eff:
     _target_: src.callbacks.efficiency.AnomalyEfficiencyCallback
-    output_name: 'ascore/full'
+    output_name: "ascore/full"
     # 286.088064 kHz = 0.01 x base_rate is the q = 0.99 tier, which the old q99 runs set
     # as target_rate=0.01 with base_rate=null; here base_rate applies to every rate.
     target_rates: [0.25, 286.088064]
@@ -75,7 +75,7 @@ callbacks:
 
   thres_drift:
     _target_: src.callbacks.thres_drift.ThresholdDriftCallback
-    output_name: 'ascore/full'
+    output_name: "ascore/full"
     target_rates: [0.25, 286.088064]
     calibration_fraction: 0.5
     split_seed: 12345
@@ -83,7 +83,7 @@ callbacks:
 
   wasserstein_dist:
     _target_: src.callbacks.wasserstein.WassersteinCallback
-    output_name: 'ascore/full'
+    output_name: "ascore/full"
     dataset_1: normal
     dataset_2: SingleNeutrino_E-10-gun
     apply_log1p: true
@@ -91,7 +91,7 @@ callbacks:
 
   cap_sn_zb:
     _target_: src.callbacks.cap.CAPCallback
-    output_name: 'ascore/full'
+    output_name: "ascore/full"
     dataset_1: normal
     dataset_2: SingleNeutrino_E-10-gun
     pairing_type: cdf
@@ -99,7 +99,7 @@ callbacks:
 
   consistency_sn_zb:
     _target_: src.callbacks.consistency.PosteriorConsistencyCallback
-    output_name: 'ascore/full'
+    output_name: "ascore/full"
     dataset_1: normal
     dataset_2: SingleNeutrino_E-10-gun
     pairing_type: cdf
@@ -107,9 +107,9 @@ callbacks:
 
   cvar25_ema_ckpt:
     _target_: pytorch_lightning.callbacks.ModelCheckpoint
-    dirpath: '${paths.checkpoints_dir}/${experiment_name}/${run_name}/summary/cvar25_ema/max'
-    monitor: 'val/summary/eff_cvar25_ema_operational'
-    filename: 'cvar25_ema'
+    dirpath: "${paths.checkpoints_dir}/${experiment_name}/${run_name}/summary/cvar25_ema/max"
+    monitor: "val/summary/eff_cvar25_ema_operational"
+    filename: "cvar25_ema"
     save_last: false
     save_top_k: 1
     mode: "max"
@@ -120,9 +120,9 @@ callbacks:
 
   cvar10_ema_ckpt:
     _target_: pytorch_lightning.callbacks.ModelCheckpoint
-    dirpath: '${paths.checkpoints_dir}/${experiment_name}/${run_name}/summary/cvar10_ema/max'
-    monitor: 'val/summary/eff_cvar10_ema_operational'
-    filename: 'cvar10_ema'
+    dirpath: "${paths.checkpoints_dir}/${experiment_name}/${run_name}/summary/cvar10_ema/max"
+    monitor: "val/summary/eff_cvar10_ema_operational"
+    filename: "cvar10_ema"
     save_last: false
     save_top_k: 1
     mode: "max"
@@ -133,9 +133,9 @@ callbacks:
 
   cvar25_ema_286_088064_ckpt:
     _target_: pytorch_lightning.callbacks.ModelCheckpoint
-    dirpath: '${paths.checkpoints_dir}/${experiment_name}/${run_name}/summary/cvar25_ema_286_088064/max'
-    monitor: 'val/summary/eff_cvar25_ema_286_088064'
-    filename: 'cvar25_ema_286_088064'
+    dirpath: "${paths.checkpoints_dir}/${experiment_name}/${run_name}/summary/cvar25_ema_286_088064/max"
+    monitor: "val/summary/eff_cvar25_ema_286_088064"
+    filename: "cvar25_ema_286_088064"
     save_last: false
     save_top_k: 1
     mode: "max"
@@ -146,9 +146,9 @@ callbacks:
 
   cvar10_ema_286_088064_ckpt:
     _target_: pytorch_lightning.callbacks.ModelCheckpoint
-    dirpath: '${paths.checkpoints_dir}/${experiment_name}/${run_name}/summary/cvar10_ema_286_088064/max'
-    monitor: 'val/summary/eff_cvar10_ema_286_088064'
-    filename: 'cvar10_ema_286_088064'
+    dirpath: "${paths.checkpoints_dir}/${experiment_name}/${run_name}/summary/cvar10_ema_286_088064/max"
+    monitor: "val/summary/eff_cvar10_ema_286_088064"
+    filename: "cvar10_ema_286_088064"
     save_last: false
     save_top_k: 1
     mode: "max"
@@ -159,9 +159,9 @@ callbacks:
 
   thres_drift_ema_ckpt:
     _target_: pytorch_lightning.callbacks.ModelCheckpoint
-    dirpath: '${paths.checkpoints_dir}/${experiment_name}/${run_name}/summary/operational_drift_ema/min'
-    monitor: 'val/summary/operational_drift_ema'
-    filename: 'operational_drift_ema'
+    dirpath: "${paths.checkpoints_dir}/${experiment_name}/${run_name}/summary/operational_drift_ema/min"
+    monitor: "val/summary/operational_drift_ema"
+    filename: "operational_drift_ema"
     save_last: false
     save_top_k: 1
     mode: "min"
@@ -172,9 +172,9 @@ callbacks:
 
   thres_drift_286_088064_ema_ckpt:
     _target_: pytorch_lightning.callbacks.ModelCheckpoint
-    dirpath: '${paths.checkpoints_dir}/${experiment_name}/${run_name}/summary/trate286_088064kHz_drift_ema/min'
-    monitor: 'val/summary/trate286_088064kHz_drift_ema'
-    filename: 'trate286_088064kHz_drift_ema'
+    dirpath: "${paths.checkpoints_dir}/${experiment_name}/${run_name}/summary/trate286_088064kHz_drift_ema/min"
+    monitor: "val/summary/trate286_088064kHz_drift_ema"
+    filename: "trate286_088064kHz_drift_ema"
     save_last: false
     save_top_k: 1
     mode: "min"
@@ -185,9 +185,9 @@ callbacks:
 
   wasserstein_dist_ema_ckpt:
     _target_: pytorch_lightning.callbacks.ModelCheckpoint
-    dirpath: '${paths.checkpoints_dir}/${experiment_name}/${run_name}/summary/w1dist_ema_normal_vs_SingleNeutrino_E-10-gun/min'
-    monitor: 'val/summary/w1dist_ema_normal_vs_SingleNeutrino_E-10-gun'
-    filename: 'w1dist_ema_normal_vs_SingleNeutrino_E-10-gun'
+    dirpath: "${paths.checkpoints_dir}/${experiment_name}/${run_name}/summary/w1dist_ema_normal_vs_SingleNeutrino_E-10-gun/min"
+    monitor: "val/summary/w1dist_ema_normal_vs_SingleNeutrino_E-10-gun"
+    filename: "w1dist_ema_normal_vs_SingleNeutrino_E-10-gun"
     save_last: false
     save_top_k: 1
     mode: "min"
@@ -198,9 +198,9 @@ callbacks:
 
   cap_sn_zb_ema_ckpt:
     _target_: pytorch_lightning.callbacks.ModelCheckpoint
-    dirpath: '${paths.checkpoints_dir}/${experiment_name}/${run_name}/summary/cap_ema_normal_vs_SingleNeutrino_E-10-gun/max'
-    monitor: 'val/summary/cap_ema_normal_vs_SingleNeutrino_E-10-gun'
-    filename: 'cap_ema_normal_vs_SingleNeutrino_E-10-gun'
+    dirpath: "${paths.checkpoints_dir}/${experiment_name}/${run_name}/summary/cap_ema_normal_vs_SingleNeutrino_E-10-gun/max"
+    monitor: "val/summary/cap_ema_normal_vs_SingleNeutrino_E-10-gun"
+    filename: "cap_ema_normal_vs_SingleNeutrino_E-10-gun"
     save_last: false
     save_top_k: 1
     mode: "max"
@@ -211,9 +211,9 @@ callbacks:
 
   consistency_sn_zb_ema_ckpt:
     _target_: pytorch_lightning.callbacks.ModelCheckpoint
-    dirpath: '${paths.checkpoints_dir}/${experiment_name}/${run_name}/summary/consistency_ema_normal_vs_SingleNeutrino_E-10-gun/max'
-    monitor: 'val/summary/consistency_ema_normal_vs_SingleNeutrino_E-10-gun'
-    filename: 'consistency_ema_normal_vs_SingleNeutrino_E-10-gun'
+    dirpath: "${paths.checkpoints_dir}/${experiment_name}/${run_name}/summary/consistency_ema_normal_vs_SingleNeutrino_E-10-gun/max"
+    monitor: "val/summary/consistency_ema_normal_vs_SingleNeutrino_E-10-gun"
+    filename: "consistency_ema_normal_vs_SingleNeutrino_E-10-gun"
     save_last: false
     save_top_k: 1
     mode: "max"
@@ -224,9 +224,9 @@ callbacks:
 
   loss_ckpt:
     _target_: pytorch_lightning.callbacks.ModelCheckpoint
-    dirpath: '${paths.checkpoints_dir}/${experiment_name}/${run_name}/normal/loss/min'
-    monitor: 'val/normal/loss'
-    filename: 'loss'
+    dirpath: "${paths.checkpoints_dir}/${experiment_name}/${run_name}/normal/loss/min"
+    monitor: "val/normal/loss"
+    filename: "loss"
     save_last: false
     save_top_k: 1
     mode: "min"
@@ -239,22 +239,22 @@ evaluation:
   evaluator:
     ckpts:
       summary:
-        cvar25_ema: ['max']
-        cvar10_ema: ['max']
-        cvar25_ema_286_088064: ['max']
-        cvar10_ema_286_088064: ['max']
-        operational_drift_ema: ['min']
-        trate286_088064kHz_drift_ema: ['min']
-        w1dist_ema_normal_vs_SingleNeutrino_E-10-gun: ['min']
-        cap_ema_normal_vs_SingleNeutrino_E-10-gun: ['max']
-        consistency_ema_normal_vs_SingleNeutrino_E-10-gun: ['max']
+        cvar25_ema: ["max"]
+        cvar10_ema: ["max"]
+        cvar25_ema_286_088064: ["max"]
+        cvar10_ema_286_088064: ["max"]
+        operational_drift_ema: ["min"]
+        trate286_088064kHz_drift_ema: ["min"]
+        w1dist_ema_normal_vs_SingleNeutrino_E-10-gun: ["min"]
+        cap_ema_normal_vs_SingleNeutrino_E-10-gun: ["max"]
+        consistency_ema_normal_vs_SingleNeutrino_E-10-gun: ["max"]
       normal:
-        loss: ['min']
+        loss: ["min"]
 
   callbacks:
     anomaly_efficiency:
       _target_: src.evaluation.callbacks.efficiency.AnomalyEfficiencyCallback
-      output_name: 'ascore/full'
+      output_name: "ascore/full"
       ds:
         - GluGluHTo2B_Par-MH-125
         - GluGluHto2G_Par-MH-125
@@ -282,7 +282,7 @@ evaluation:
 
     cap_sn_zb:
       _target_: src.evaluation.callbacks.cap.CAP
-      output_name: 'ascore/full'
+      output_name: "ascore/full"
       dataset_1: normal
       dataset_2: SingleNeutrino_E-10-gun
       log_raw_mlflow: false
@@ -292,7 +292,7 @@ evaluation:
     consistency_sn_zb:
       _target_: src.evaluation.callbacks.consistency.PosteriorConsistency
       name: consistency
-      output_name: 'ascore/full'
+      output_name: "ascore/full"
       dataset_1: normal
       dataset_2: SingleNeutrino_E-10-gun
       log_raw_mlflow: false
@@ -302,7 +302,7 @@ evaluation:
     ascore_operational:
       _target_: src.evaluation.callbacks.output.OutputCallback
       name: ascore_operational
-      output_name: 'ascore/operational'
+      output_name: "ascore/operational"
       ds:
         - normal
         - GluGluHTo2B_Par-MH-125
@@ -329,7 +329,7 @@ evaluation:
 
     thres_drift:
       _target_: src.evaluation.callbacks.thres_drift.ThresholdDriftCallback
-      output_name: 'ascore/full'
+      output_name: "ascore/full"
       target_rates: [0.25, 286.088064]
       calibration_fraction: 0.5
       split_seed: 12345
@@ -338,7 +338,7 @@ evaluation:
 
     wasserstein:
       _target_: src.evaluation.callbacks.wasserstein.Wasserstein
-      output_name: 'ascore/full'
+      output_name: "ascore/full"
       dataset_1: normal
       dataset_2: SingleNeutrino_E-10-gun
       apply_log1p: true

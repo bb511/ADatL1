@@ -2,7 +2,7 @@
 
 # Reference only: not selected by any defaults list.
 _target_: src.evaluation.callbacks.cap.CAP
-output_name: 'loss/total/full'
+output_name: "loss/total/full"
 dataset_1: ???
 dataset_2: ???
 pairing_type: cdf
@@ -23,4 +23,4 @@ cap_metric_config:
   process_group: null
   dist_sync_fn: null
 
-name: 'cap'
+name: "cap"

@@ -68,19 +68,19 @@ callbacks:
 
   anomaly_eff:
     _target_: src.callbacks.efficiency.AnomalyEfficiencyCallback
-    output_name: 'ascore/full'
+    output_name: "ascore/full"
     ema_weight: 0.9
 
   thres_drift:
     _target_: src.callbacks.thres_drift.ThresholdDriftCallback
-    output_name: 'ascore/full'
+    output_name: "ascore/full"
     calibration_fraction: 0.5
     split_seed: 12345
     ema_weight: 0.9
 
   wasserstein_dist:
     _target_: src.callbacks.wasserstein.WassersteinCallback
-    output_name: 'ascore/full'
+    output_name: "ascore/full"
     dataset_1: normal
     dataset_2: reference_normal
     apply_log1p: true
@@ -88,7 +88,7 @@ callbacks:
 
   cap_sn_zb:
     _target_: src.callbacks.cap.CAPCallback
-    output_name: 'ascore/full'
+    output_name: "ascore/full"
     dataset_1: normal
     dataset_2: reference_normal
     pairing_type: cdf
@@ -96,7 +96,7 @@ callbacks:
 
   consistency_sn_zb:
     _target_: src.callbacks.consistency.PosteriorConsistencyCallback
-    output_name: 'ascore/full'
+    output_name: "ascore/full"
     dataset_1: normal
     dataset_2: reference_normal
     pairing_type: cdf
@@ -104,9 +104,9 @@ callbacks:
 
   cvar25_ema_ckpt:
     _target_: pytorch_lightning.callbacks.ModelCheckpoint
-    dirpath: '${paths.checkpoints_dir}/${experiment_name}/${run_name}/summary/cvar25_ema/max'
-    monitor: 'val/summary/eff_cvar25_ema_operational'
-    filename: 'cvar25_ema'
+    dirpath: "${paths.checkpoints_dir}/${experiment_name}/${run_name}/summary/cvar25_ema/max"
+    monitor: "val/summary/eff_cvar25_ema_operational"
+    filename: "cvar25_ema"
     save_last: false
     save_top_k: 1
     mode: "max"
@@ -117,9 +117,9 @@ callbacks:
 
   cvar10_ema_ckpt:
     _target_: pytorch_lightning.callbacks.ModelCheckpoint
-    dirpath: '${paths.checkpoints_dir}/${experiment_name}/${run_name}/summary/cvar10_ema/max'
-    monitor: 'val/summary/eff_cvar10_ema_operational'
-    filename: 'cvar10_ema'
+    dirpath: "${paths.checkpoints_dir}/${experiment_name}/${run_name}/summary/cvar10_ema/max"
+    monitor: "val/summary/eff_cvar10_ema_operational"
+    filename: "cvar10_ema"
     save_last: false
     save_top_k: 1
     mode: "max"
@@ -130,9 +130,9 @@ callbacks:
 
   thres_drift_ema_ckpt:
     _target_: pytorch_lightning.callbacks.ModelCheckpoint
-    dirpath: '${paths.checkpoints_dir}/${experiment_name}/${run_name}/summary/operational_drift_ema/min'
-    monitor: 'val/summary/operational_drift_ema'
-    filename: 'operational_drift_ema'
+    dirpath: "${paths.checkpoints_dir}/${experiment_name}/${run_name}/summary/operational_drift_ema/min"
+    monitor: "val/summary/operational_drift_ema"
+    filename: "operational_drift_ema"
     save_last: false
     save_top_k: 1
     mode: "min"
@@ -143,9 +143,9 @@ callbacks:
 
   wasserstein_dist_ema_ckpt:
     _target_: pytorch_lightning.callbacks.ModelCheckpoint
-    dirpath: '${paths.checkpoints_dir}/${experiment_name}/${run_name}/summary/w1dist_ema_normal_vs_reference_normal/min'
-    monitor: 'val/summary/w1dist_ema_normal_vs_reference_normal'
-    filename: 'w1dist_ema_normal_vs_reference_normal'
+    dirpath: "${paths.checkpoints_dir}/${experiment_name}/${run_name}/summary/w1dist_ema_normal_vs_reference_normal/min"
+    monitor: "val/summary/w1dist_ema_normal_vs_reference_normal"
+    filename: "w1dist_ema_normal_vs_reference_normal"
     save_last: false
     save_top_k: 1
     mode: "min"
@@ -156,9 +156,9 @@ callbacks:
 
   cap_sn_zb_ema_ckpt:
     _target_: pytorch_lightning.callbacks.ModelCheckpoint
-    dirpath: '${paths.checkpoints_dir}/${experiment_name}/${run_name}/summary/cap_ema_normal_vs_reference_normal/max'
-    monitor: 'val/summary/cap_ema_normal_vs_reference_normal'
-    filename: 'cap_ema_normal_vs_reference_normal'
+    dirpath: "${paths.checkpoints_dir}/${experiment_name}/${run_name}/summary/cap_ema_normal_vs_reference_normal/max"
+    monitor: "val/summary/cap_ema_normal_vs_reference_normal"
+    filename: "cap_ema_normal_vs_reference_normal"
     save_last: false
     save_top_k: 1
     mode: "max"
@@ -169,9 +169,9 @@ callbacks:
 
   consistency_sn_zb_ema_ckpt:
     _target_: pytorch_lightning.callbacks.ModelCheckpoint
-    dirpath: '${paths.checkpoints_dir}/${experiment_name}/${run_name}/summary/consistency_ema_normal_vs_reference_normal/max'
-    monitor: 'val/summary/consistency_ema_normal_vs_reference_normal'
-    filename: 'consistency_ema_normal_vs_reference_normal'
+    dirpath: "${paths.checkpoints_dir}/${experiment_name}/${run_name}/summary/consistency_ema_normal_vs_reference_normal/max"
+    monitor: "val/summary/consistency_ema_normal_vs_reference_normal"
+    filename: "consistency_ema_normal_vs_reference_normal"
     save_last: false
     save_top_k: 1
     mode: "max"
@@ -184,11 +184,11 @@ callbacks:
   # without the EMA that the other strategies' metrics carry.
   loss_ckpt:
     _target_: pytorch_lightning.callbacks.ModelCheckpoint
-    dirpath: '${paths.checkpoints_dir}/${experiment_name}/${run_name}/normal/loss/min'
+    dirpath: "${paths.checkpoints_dir}/${experiment_name}/${run_name}/normal/loss/min"
     # The distance term alone: the SVDD loss adds the network's weight regulariser,
     # which a loss-only pick would otherwise reward.
-    monitor: 'val/normal/loss_distance_raw'
-    filename: 'loss'
+    monitor: "val/normal/loss_distance_raw"
+    filename: "loss"
     save_last: false
     save_top_k: 1
     mode: "min"
@@ -201,35 +201,35 @@ evaluation:
   evaluator:
     ckpts:
       summary:
-        cvar25_ema: ['max']
-        cvar10_ema: ['max']
-        operational_drift_ema: ['min']
-        w1dist_ema_normal_vs_reference_normal: ['min']
-        cap_ema_normal_vs_reference_normal: ['max']
-        consistency_ema_normal_vs_reference_normal: ['max']
+        cvar25_ema: ["max"]
+        cvar10_ema: ["max"]
+        operational_drift_ema: ["min"]
+        w1dist_ema_normal_vs_reference_normal: ["min"]
+        cap_ema_normal_vs_reference_normal: ["max"]
+        consistency_ema_normal_vs_reference_normal: ["max"]
       normal:
-        loss: ['min']
+        loss: ["min"]
 
   callbacks:
     anomaly_efficiency:
       _target_: src.evaluation.callbacks.efficiency.AnomalyEfficiencyCallback
-      output_name: 'ascore/full'
+      output_name: "ascore/full"
       ds:
-        - '1'
-        - '2'
-        - '3'
-        - '4'
-        - '5'
-        - '6'
-        - '7'
-        - '8'
-        - '9'
+        - "1"
+        - "2"
+        - "3"
+        - "4"
+        - "5"
+        - "6"
+        - "7"
+        - "8"
+        - "9"
       cvar_summary: 0.25
       log_raw_mlflow: false
 
     cap_sn_zb:
       _target_: src.evaluation.callbacks.cap.CAP
-      output_name: 'ascore/full'
+      output_name: "ascore/full"
       dataset_1: normal
       dataset_2: reference_normal
       log_raw_mlflow: false
@@ -239,7 +239,7 @@ evaluation:
     consistency_sn_zb:
       _target_: src.evaluation.callbacks.consistency.PosteriorConsistency
       name: consistency
-      output_name: 'ascore/full'
+      output_name: "ascore/full"
       dataset_1: normal
       dataset_2: reference_normal
       log_raw_mlflow: false
@@ -249,23 +249,23 @@ evaluation:
     ascore_operational:
       _target_: src.evaluation.callbacks.output.OutputCallback
       name: ascore_operational
-      output_name: 'ascore/operational'
+      output_name: "ascore/operational"
       ds:
         - normal
-        - '1'
-        - '2'
-        - '3'
-        - '4'
-        - '5'
-        - '6'
-        - '7'
-        - '8'
-        - '9'
+        - "1"
+        - "2"
+        - "3"
+        - "4"
+        - "5"
+        - "6"
+        - "7"
+        - "8"
+        - "9"
       log_raw_mlflow: false
 
     thres_drift:
       _target_: src.evaluation.callbacks.thres_drift.ThresholdDriftCallback
-      output_name: 'ascore/full'
+      output_name: "ascore/full"
       calibration_fraction: 0.5
       split_seed: 12345
       log_raw_mlflow: false
@@ -273,7 +273,7 @@ evaluation:
 
     wasserstein:
       _target_: src.evaluation.callbacks.wasserstein.Wasserstein
-      output_name: 'ascore/full'
+      output_name: "ascore/full"
       dataset_1: normal
       dataset_2: reference_normal
       apply_log1p: true
@@ -282,17 +282,17 @@ evaluation:
 
     anomaly_auprc:
       _target_: src.evaluation.callbacks.auprc.AnomalyAUPRCCallback
-      output_name: 'ascore/full'
+      output_name: "ascore/full"
       ds:
-        - '1'
-        - '2'
-        - '3'
-        - '4'
-        - '5'
-        - '6'
-        - '7'
-        - '8'
-        - '9'
+        - "1"
+        - "2"
+        - "3"
+        - "4"
+        - "5"
+        - "6"
+        - "7"
+        - "8"
+        - "9"
       pure_normal: false
       log_raw_mlflow: false
       name: auprc

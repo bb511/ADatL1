@@ -2,4 +2,4 @@
 
 # Log the data to mlflow artifacts.
 _target_: src.callbacks.utils.clear_ckpts.ClearRunCheckpointDir
-run_ckpts_dir: '${paths.checkpoints_dir}/${experiment_name}/${run_name}'
+run_ckpts_dir: "${paths.checkpoints_dir}/${experiment_name}/${run_name}"

@@ -3,7 +3,7 @@ defaults:
   - _self_
 
 _target_: src.algorithms.ae.AE
-features: null 
+features: null
 
 encoder:
   _target_: src.algorithms.components.encoder.Encoder

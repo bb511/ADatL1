@@ -2,6 +2,6 @@
 
 # Reference only: not selected by any defaults list.
 _target_: src.evaluation.callbacks.output.OutputCallback
-output_name: 'loss'
+output_name: "loss"
 log_raw_mlflow: true
 ds: ???

@@ -6,6 +6,6 @@ output_name: reconstructed_data
 warmup_batches: 0.2
 ckpts:
   last: true
-datasets: ['main_test']
+datasets: ["main_test"]
 log_raw_mlflow: true
-name: 'reco'
+name: "reco"

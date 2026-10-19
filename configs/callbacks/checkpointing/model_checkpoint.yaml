@@ -1,5 +1,5 @@
 _target_: pytorch_lightning.callbacks.ModelCheckpoint
-dirpath: '${paths.checkpoints_dir}/${experiment_name}/${run_name}'
+dirpath: "${paths.checkpoints_dir}/${experiment_name}/${run_name}"
 monitor: null
 filename: null # checkpoint filename
 verbose: False # verbosity mode

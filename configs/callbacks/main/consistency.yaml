@@ -2,7 +2,7 @@
 
 # Reference only: not selected by any defaults list.
 _target_: src.callbacks.consistency.PosteriorConsistencyCallback
-output_name: 'ascore/full'
+output_name: "ascore/full"
 dataset_1: ???
 dataset_2: ???
 pairing_type: cdf

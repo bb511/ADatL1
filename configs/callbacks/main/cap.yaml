@@ -2,7 +2,7 @@
 
 # Reference only: not selected by any defaults list.
 _target_: src.callbacks.cap.CAPCallback
-output_name: 'loss/total/full'
+output_name: "loss/total/full"
 dataset_1: ???
 dataset_2: ???
 pairing_type: cdf

@@ -5,23 +5,30 @@
 _target_: src.data.components.extraction.L1DataExtractor
 # Default configuration includes all objects and features available in the data atm.
 select_features:
-  muons: [
-    'muonIPhiAtVtx', 'muonIEt', 'muonQual',
-    'muonIEtaAtVtx', 'muonChg', 'muonTfMuonIdx',
-    'muonIPhi', 'muonIEta', 'muonIEtUnconstrained'
-  ]
-  jets: ['jetIEt', 'jetIEta', 'jetIPhi', 'jetHwQual', 'jetRawEt']
-  egammas: ['egIEt', 'egIEta', 'egIPhi', 'egIso']
-  taus: ['tauIEt', 'tauIEta', 'tauIPhi', 'tauIso']
-  ET: ['Et', 'ETTEM']
-  HT: ['Et', 'tower_count']
-  MET: ['Et', 'phi']
-  MHT: ['Et', 'phi']
-  FET: ['Et', 'phi']
-  FHT: ['Et', 'phi']
-  cicada: ['CICADAScore']
-  event_info: 'none'
-  seeds: 'none'
+  muons:
+    [
+      "muonIPhiAtVtx",
+      "muonIEt",
+      "muonQual",
+      "muonIEtaAtVtx",
+      "muonChg",
+      "muonTfMuonIdx",
+      "muonIPhi",
+      "muonIEta",
+      "muonIEtUnconstrained",
+    ]
+  jets: ["jetIEt", "jetIEta", "jetIPhi", "jetHwQual", "jetRawEt"]
+  egammas: ["egIEt", "egIEta", "egIPhi", "egIso"]
+  taus: ["tauIEt", "tauIEta", "tauIPhi", "tauIso"]
+  ET: ["Et", "ETTEM"]
+  HT: ["Et", "tower_count"]
+  MET: ["Et", "phi"]
+  MHT: ["Et", "phi"]
+  FET: ["Et", "phi"]
+  FHT: ["Et", "phi"]
+  cicada: ["CICADAScore"]
+  event_info: "none"
+  seeds: "none"
 
 # Change the field names for easier access when processing.
 feat_name_map:
@@ -51,7 +58,6 @@ feat_name_map:
     tauIPhi: phi
     tauIEta: eta
     tauIso: iso
-
 
 cache_root_dir: ${paths.data_dir}
 name: default

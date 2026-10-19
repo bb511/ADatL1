@@ -6,18 +6,17 @@
 # This adds taus to the minimal configuration and replaces the MET with FET, which is
 # the a MET object that also contains information from the forward calorimeters.
 
-
 _target_: src.data.components.extraction.L1DataExtractor
 select_features:
-  muons: ['muonIEt', 'muonIPhi', 'muonIEta']
-  jets: ['jetIEt', 'jetIEta', 'jetIPhi']
-  egammas: ['egIEt', 'egIEta', 'egIPhi']
-  taus: ['tauIEt', 'tauIEta', 'tauIPhi']
-  ET: ['Et']
-  FET: ['Et', 'phi']
-  HT: ['Et']
-  event_info: ['nPV_True']
-  seeds: ['L1bit']
+  muons: ["muonIEt", "muonIPhi", "muonIEta"]
+  jets: ["jetIEt", "jetIEta", "jetIPhi"]
+  egammas: ["egIEt", "egIEta", "egIPhi"]
+  taus: ["tauIEt", "tauIEta", "tauIPhi"]
+  ET: ["Et"]
+  FET: ["Et", "phi"]
+  HT: ["Et"]
+  event_info: ["nPV_True"]
+  seeds: ["L1bit"]
 
 # Change the field names for easier access when processing.
 feat_name_map:

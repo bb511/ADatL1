@@ -8,14 +8,14 @@
 
 _target_: src.data.components.extraction.L1DataExtractor
 select_features:
-  muons: ['muonIEt', 'muonIPhi', 'muonIEta']
-  jets: ['jetIEt', 'jetIEta', 'jetIPhi']
-  egammas: ['egIEt', 'egIEta', 'egIPhi']
-  ET: ['Et']
-  MET: ['Et', 'phi']
-  HT: ['Et']
-  event_info: ['nPV_True']
-  seeds: ['L1bit']
+  muons: ["muonIEt", "muonIPhi", "muonIEta"]
+  jets: ["jetIEt", "jetIEta", "jetIPhi"]
+  egammas: ["egIEt", "egIEta", "egIPhi"]
+  ET: ["Et"]
+  MET: ["Et", "phi"]
+  HT: ["Et"]
+  event_info: ["nPV_True"]
+  seeds: ["L1bit"]
 
 # Change the field names for easier access when processing.
 feat_name_map:

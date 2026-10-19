@@ -160,7 +160,7 @@ def main() -> None:
         "--model",
         nargs="*",
         default=None,
-        help="Restrict --all to these model tags (db stems), e.g. ae dsvae realnvp.",
+        help="Restrict --all to these model tags (db stems), e.g. ae dsae realnvp.",
     )
     parser.add_argument(
         "--studies",

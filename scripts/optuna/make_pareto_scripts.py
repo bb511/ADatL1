@@ -74,7 +74,7 @@ PARAM_REMAP = {
 
 DOMAINS = {
     "physics": {
-        "models": ["ae", "vae", "dsae", "dsvae", "svdd", "realnvp", "dte"],
+        "models": ["ae", "vae", "dsae", "svdd", "realnvp", "dte"],
         "ref_ds": "SingleNeutrino_E-10-gun",
         "fixed": ["paths.raw_data_dir=/path/to/adl1t_data/parquet_files"],
         "fixed_per_model": {},
@@ -238,14 +238,6 @@ ORIGINAL_PICKS = {
     ("physics", "dsae", "q99", "cvar25eff"): (417, "ok"),
     ("physics", "dsae", "q99", "drift"): (362, "ok"),
     ("physics", "dsae", "q99", "wasserstein"): (551, "ok"),
-    ("physics", "dsvae", "250", "cap"): (324, "ok"),
-    ("physics", "dsvae", "250", "cvar25eff"): (372, "ok"),
-    ("physics", "dsvae", "250", "drift"): (445, "ok"),
-    ("physics", "dsvae", "250", "wasserstein"): (503, "ok"),
-    ("physics", "dsvae", "q99", "cap"): (595, "ok"),
-    ("physics", "dsvae", "q99", "cvar25eff"): (192, "ok"),  # see PICK_CAVEATS
-    ("physics", "dsvae", "q99", "drift"): (565, "ok"),
-    ("physics", "dsvae", "q99", "wasserstein"): (357, "ok"),
     ("physics", "realnvp", "250", "cap"): (376, "ok"),
     ("physics", "realnvp", "250", "cvar25eff"): (523, "ok"),
     ("physics", "realnvp", "250", "drift"): (505, "ok"),
@@ -292,12 +284,6 @@ ORIGINAL_PICKS = {
 # exactly one hyperparameter (transcription slip or manual tweak in the old
 # script); marked as ORIGINAL PICK with this caveat attached.
 PICK_CAVEATS = {
-    (
-        "physics",
-        "dsvae",
-        "q99",
-        "cvar25eff",
-    ): "old script had algorithm.encoder.activation=relu; db trial 192 has gelu",
     (
         "physics",
         "vae",

@@ -134,7 +134,10 @@ class ApproximationCapacity(Metric):
         # On a curve made NaN by a non-finite score, argmax returns the first NaN.
         self.beta_star = self.betas[best].item() if math.isfinite(cap) else math.nan
         self.at_bound = best == len(self.betas) - 1
-        self.cap.fill_(cap)
+        # Assigned rather than filled in place: the evaluator constructs the metric
+        # under Lightning's inference mode, which makes the state an inference tensor
+        # that no in-place update may touch outside that mode.
+        self.cap = torch.full_like(self.cap, cap)
 
     def compute(self) -> Tensor:
         """Return the computed CAP value."""
@@ -183,7 +186,9 @@ class PosteriorConsistency(ApproximationCapacity):
             # In the dtype of the normalised scores rather than CAP's float64, so that
             # the consistency values of earlier runs are reproduced bit for bit.
             gap1, gap2 = self._energy_gaps(*self.normalizer_fn(logits1, logits2))
-            self.cap.fill_((-torch.mean((gap1 - gap2) ** 2)).item())
+            consistency = (-torch.mean((gap1 - gap2) ** 2)).item()
+            # Assigned, not filled in place, for the reason given in ApproximationCapacity.update.
+            self.cap = torch.full_like(self.cap, consistency)
 
     def compute(self) -> Tensor:
         """Return the computed consistency value."""

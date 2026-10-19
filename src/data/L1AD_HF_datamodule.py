@@ -1,5 +1,5 @@
 # Lightning data module for the record published at:
-# https://huggingface.co/datasets/podagiu/anomaly_detection_cmsl1t
+# https://huggingface.co/datasets/CERN/anomaly_detection_cmsl1t
 import gc
 import sys
 import warnings
@@ -104,7 +104,7 @@ class L1ADHFDataModule(LightningDataModule):
 
     def __init__(
         self,
-        repo_id: str = "podagiu/anomaly_detection_cmsl1t",
+        repo_id: str = "CERN/anomaly_detection_cmsl1t",
         revision: str | None = None,
         cache_dir: str | None = None,
         data_normalizer: "L1DataNormalizer" = None,

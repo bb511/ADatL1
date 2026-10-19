@@ -39,5 +39,7 @@ def test_basis_hf_instantiates_without_reaching_the_hub(tmp_path):
     datamodule = instantiate(cfg.data)
 
     assert datamodule.record is None and datamodule.loader is None
-    assert datamodule.hparams.repo_id == "podagiu/anomaly_detection_cmsl1t"
-    assert datamodule.hparams.cache_dir == f"{tmp_path}/data/hf"
+    assert datamodule.hparams.repo_id == "CERN/anomaly_detection_cmsl1t"
+    # The cache is keyed by the pinned commit, so a bump cannot reuse a stale tree.
+    revision = datamodule.hparams.revision[:8]
+    assert datamodule.hparams.cache_dir == f"{tmp_path}/data/hf/{revision}"

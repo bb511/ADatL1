@@ -53,7 +53,6 @@ HARDWARE = {
     ("physics", "ae"): ("L40S", 3),
     ("physics", "vae"): ("L40S", 3),
     ("physics", "dsae"): ("L40S", 3),
-    ("physics", "dsvae"): ("H100", 2),
     ("physics", "realnvp"): ("H100", 2),
     ("physics", "svdd"): ("L40S", 3),
     ("cifar10", "ae"): ("gh200", 1),
@@ -67,7 +66,7 @@ HARDWARE = {
 }
 
 DOMAINS = [
-    ("physics", "LHC L1 AD", ["ae", "vae", "dsae", "dsvae", "realnvp", "svdd"]),
+    ("physics", "LHC L1 AD", ["ae", "vae", "dsae", "realnvp", "svdd"]),
     ("cifar10", "CIFAR-10", ["ae", "vae", "realnvp", "svdd"]),
     ("robustad", "RobustAD", ["ae", "vae", "realnvp", "svdd"]),
 ]
@@ -76,7 +75,6 @@ MODEL_LABEL = {
     "ae": "AE",
     "vae": "VAE",
     "dsae": "DSAE",
-    "dsvae": "DSVAE",
     "realnvp": "RealNVP",
     "svdd": "SVDD",
 }

@@ -14,19 +14,24 @@ defaults:
 
 _target_: src.data.L1AD_HF_datamodule.L1ADHFDataModule
 
-repo_id: podagiu/anomaly_detection_cmsl1t
+# The record moved to the CERN organisation; the old name podagiu/... redirects to it.
+repo_id: CERN/anomaly_detection_cmsl1t
 
 # The record ships the pipeline as well as the data, so a run reads and executes whatever
 # is at this commit. null would follow the head of the record instead, leaving what a run
 # trained on decided by when it was launched. A bump can change the tensors: f00e4b8c
 # ordered each collection by ET, which the on-disk pipeline had to be taught to match,
 # 85c2f1a9 widened the jet saturation cut from the 9-bit 511 to the 11-bit 2047, and
-# 77554db9 overlaid zero-bias pile-up onto haa-4b-ma15.
-revision: 77554db91147e16e545c03e5a1ff56b8e3dab42d
+# 77554db9 overlaid zero-bias pile-up onto haa-4b-ma15. 1ac2b91f lowered the simulation's
+# orbit sentinel, a column the extractor does not select, so the tensors did not change.
+revision: 1ac2b91f12ee4d0f6d88e024da36ab7aeaf7e214
 
 # Mapped onto the record's paths.base_data_dir. Its extracted, processed and ml-ready
-# caches land under <cache_dir>/data_2025E+G/, beside the ones the raw route builds.
-cache_dir: ${paths.base_data_dir}/hf
+# caches land under <cache_dir>/data_2025E+G/, beside the ones the raw route builds. The
+# commit is part of the path, kept in step with revision, because every stage tests for
+# its cache by existence alone: a bump that reused the directory would read the tensors
+# of the commit before it.
+cache_dir: ${paths.base_data_dir}/hf/1ac2b91f
 
 # Anything else to override when composing the record's configuration. An element
 # carries an = and a /, so hydra needs it quoted:

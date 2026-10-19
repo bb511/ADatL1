@@ -13,9 +13,8 @@
 # such a relaunch.
 #
 # The blocks name no launcher: the venue appends one at submission, with a
-# timeout of 27 minutes per trial for this model (200 epochs at up to 4.5 s
-# each on an H100, plus about 3 minutes of evaluation, and half again as
-# margin).
+# timeout of 27 minutes per trial for this model (200 epochs at up to 4.5 s each on an H100, plus about 3 minutes of
+# evaluation, and half again as margin).
 #
 # On clariden, each driver keeps six trials queued as slurm jobs:
 #   bash scripts/cluster/submit_search.sh scripts/cifar10/runae_search.sh \

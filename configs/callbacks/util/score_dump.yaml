@@ -1,0 +1,11 @@
+# package callbacks.util
+
+# Per-event scores of every validation, test and auxiliary set at every
+# validation epoch, read by scripts/cchamber/offline_select.py. Pulled into an
+# experiment with `- /callbacks/util@callbacks.score_dump: score_dump`.
+_target_: src.callbacks.score_dump.ScoreDumpCallback
+dirpath: ${paths.output_dir}/scores
+keys: ["ascore/full", "ascore/mse", "ascore/kl", "ascore/residual_oas"]
+aux_seed: 0
+aux_size: 10000
+aux_batch_size: 1024

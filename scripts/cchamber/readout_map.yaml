@@ -1,0 +1,1324 @@
+# Intervention -> directly affected readout map for the Causal Chamber light tunnel,
+# dataset lt_interventions_standard_v1. Drafted 2026-10-07 from primary documentation only;
+# see NOTES.md in this directory for sources, status rules and every point of doubt.
+#
+# Top-level keys are exactly the 58 interventions of intervention_target_clusters.csv.
+# Fields requested: parameter, reference_value, intervened_value, affected_readouts,
+# direction, status, source. Fields added: parameter_symbol, parameter_meaning,
+# value_source, data_check, graph_edges, direction_inferred, direction_basis,
+# effects_outside_model_inputs, notes.
+#
+# direction holds only what the documentation states or shows, per readout:
+#   increase | decrease          shift of the readout's level
+#   variance_decrease            higher precision; no mean shift documented
+#   saturation                   reading clips over part of the range; sign of the shift not stated
+#   constant_reading             fully saturated, the reading no longer varies
+#   unknown                      no stated or shown direction
+# direction_inferred is my inference, given only where direction is unknown or incomplete,
+# with the reasoning in direction_basis or notes. It is not documentation.
+#
+# Quotes are verbatim from pandoc's plain-text rendering of the arXiv HTML (pandoc 3.12),
+# with non-breaking and other Unicode spaces normalised to ASCII spaces. Inline mathematics
+# therefore appears in pandoc's notation (e.g. D_(j)^(I) for D^I_j, Ĩ₃ for tilde I_3).
+# Each quote sits on one line inside the cited paragraph, caption or table cell.
+# YAML anchors (&name) define a source once; later entries reuse it by alias (*name).
+#
+# Readout symbols (variables.csv): current = C̃, angle_j = θ̃_j, ir_j = Ĩ_j, vis_j = Ṽ_j.
+# v_board and v_reg appear in no edge of the published graph (see NOTES.md).
+
+uniform_blue_mid:
+  parameter: blue
+  parameter_symbol: B
+  parameter_meaning: brightness setting of the blue LEDs of the main light source
+  reference_value: "Unif{0,...,85}"
+  intervened_value: "Unif{86,...,170}"
+  value_source: &v_blue
+    url: https://github.com/juangamella/causal-chamber/blob/0c8a77ea14bd4437b1fdd79adc1aa91ac2342569/datasets/lt_interventions_standard_v1/generators/uniform.py#L45
+    quote: |-
+      "blue": [(0, 85), (86, 170), (171, 255)],
+  data_check: "blue in [86, 170] in all 1000 rows; every other manipulable column within its reference range"
+  affected_readouts: [current, ir_1, vis_1, ir_2, vis_2, ir_3, vis_3]
+  graph_edges: &e_blue
+    - "B → C̃ (Fig. 3a; Table 5 p-value 1.9 × 10⁻¹⁴)"
+    - "B → Ĩ₁ (Fig. 3a; Table 5 p-value 1.9 × 10⁻¹⁴)"
+    - "B → Ṽ₁ (Fig. 3a; Table 5 p-value 1.9 × 10⁻¹⁴)"
+    - "B → Ĩ₂ (Fig. 3a; Table 5 p-value 1.9 × 10⁻¹⁴)"
+    - "B → Ṽ₂ (Fig. 3a; Table 5 p-value 1.9 × 10⁻¹⁴)"
+    - "B → Ĩ₃ (Fig. 3a; Table 5 p-value 1.9 × 10⁻¹⁴)"
+    - "B → Ṽ₃ (Fig. 3a; Table 5 p-value 1.9 × 10⁻¹⁴)"
+  direction:
+    &d_rgb {
+      current: increase,
+      ir_1: increase,
+      vis_1: unknown,
+      ir_2: unknown,
+      vis_2: unknown,
+      ir_3: unknown,
+      vis_3: unknown,
+    }
+  direction_inferred:
+    &di_rgb {
+      vis_1: increase,
+      ir_2: increase,
+      vis_2: increase,
+      ir_3: increase,
+      vis_3: increase,
+    }
+  direction_basis: &db_rgb "current and ir_1: Fig. 4d plots Ĩ₁ and C̃ against R, G and B separately, and every series rises (read by eye; blue has the smallest slope on Ĩ₁). Other readouts: the text gives an approximately linear effect whose slope depends on the colour's wavelength and the sensor's spectral sensitivity, and Table 2 says higher settings mean higher brightness, but no sign is stated or plotted for vis_1, ir_2, vis_2, ir_3 or vis_3."
+  status: documented
+  effects_outside_model_inputs: &o_rgb
+    - "Ĩm (camera image): the edge (R, G, B) → Ĩm exists only in the camera configuration (Fig. 3b). This dataset uses the standard configuration, in which the camera is off, so no such readout exists here."
+  source: &s_rgb
+    - &q_rgb_light
+      url: https://arxiv.org/html/2404.11341v2#A2.SS0.SSS0.Px1
+      heading: |-
+        {R, G, B} → {Ĩ₁, Ĩ₂, Ĩ₃, Ṽ₁, Ṽ₂, Ṽ₃}
+      quote: |-
+        The brightness settings of the light-source colors (R, G, B) affect the readings of all light-intensity sensors. The effect of each color is approximately linear with heteroscedastic noise (Fig. 4d), with the slope determined by its typical wavelength and the spectral sensitivity of the sensor (see light_source and light_sensor components in App. VI).
+    - &q_rgb_current
+      url: https://arxiv.org/html/2404.11341v2#A2.SS0.SSS0.Px2
+      heading: |-
+        {R, G, B} → C̃
+      quote: |-
+        The brightness settings also affect the electric current drawn by the light source. The effect is again approximately linear with roughly the same slope for each channel (see Fig. 4d).
+    - &q_rgb_table
+      url: https://arxiv.org/html/2404.11341v2#Ax8.T2
+      quote: |-
+        The brightness setting of the red, green, and blue LEDs on the main light source. Higher values correspond to higher brightness.
+    - &q_fig4
+      url: https://arxiv.org/html/2404.11341v2#S4.F4
+      quote: |-
+        (b,c) numerical data from the light tunnel illustrating the effect of LED brightness (L₁₁, L₁₂) and polarizer angles (θ₁, θ₂) on the light-intensity readings (Ĩ₁, Ĩ₂, Ĩ₃). (d) Effect of the light source setting (R, G, B) on the light intensity reading of the first sensor (Ĩ₁) and drawn current (C̃).
+    - &q_table5
+      url: https://arxiv.org/html/2404.11341v2#A1.T5
+      quote: |-
+        Table 5: Results of the validation procedure for the edges of the standard-configuration graph of the light tunnel (Fig. 3a). For each edge, we show the p-value resulting from the Kolmogorov-Smirnov [52] test computed in step 5 of the procedure. All p-values are below 10⁻¹¹.
+  notes: &n_rgb "The size of the shift is not documented per readout and should differ across them (slopes set by wavelength and spectral sensitivity). ir_3 and vis_3 also depend on the polarizers, whose settings stay at reference. The light readings have the documented range 0:2¹⁶ − 1; saturation of the light sensors is not discussed anywhere in the documentation. Inference only: Fig. 13 shows Ĩ₁ near 4.7 × 10⁴ at R = 255 with G = B = 0 under the reference sensor settings (D = 2, T = 3), so the strong colour interventions may approach that ceiling on sensor 1; not checked."
+
+uniform_blue_strong:
+  parameter: blue
+  parameter_symbol: B
+  parameter_meaning: brightness setting of the blue LEDs of the main light source
+  reference_value: "Unif{0,...,85}"
+  intervened_value: "Unif{171,...,255}"
+  value_source: *v_blue
+  data_check: "blue in [171, 255] in all 1000 rows; every other manipulable column within its reference range"
+  affected_readouts: [current, ir_1, vis_1, ir_2, vis_2, ir_3, vis_3]
+  graph_edges: *e_blue
+  direction: *d_rgb
+  direction_inferred: *di_rgb
+  direction_basis: *db_rgb
+  status: documented
+  effects_outside_model_inputs: *o_rgb
+  source: *s_rgb
+  notes: *n_rgb
+
+uniform_diode_ir_1_mid:
+  parameter: diode_ir_1
+  parameter_symbol: "D^I_1"
+  parameter_meaning: photodiode used by light sensor 1 (before the polarizers) for its infrared measurement; 0 small, 1 medium, 2 large
+  reference_value: 2
+  intervened_value: 1
+  value_source: &v_diode_ir_1
+    url: https://github.com/juangamella/causal-chamber/blob/0c8a77ea14bd4437b1fdd79adc1aa91ac2342569/datasets/lt_interventions_standard_v1/generators/uniform.py#L60
+    quote: |-
+      "diode_ir_1": [2, 1, 0],
+  data_check: "diode_ir_1 = 1 in all 1000 rows; every other manipulable column within its reference range"
+  affected_readouts: [ir_1]
+  graph_edges: ["D₁^(I) → Ĩ₁ (Fig. 3a; Table 5 p-value 3 × 10⁻¹⁴)"]
+  direction: { ir_1: decrease }
+  direction_basis: &db_diode_ir "Stated: larger photodiodes increase the sensitivity, and Table 2 maps 0, 1, 2 to small, medium, large, so a smaller photodiode lowers the reading. Shown for Ĩ₁ in Fig. 13 (left): at R = 255, Ĩ₁ is roughly 4.7 × 10⁴, 2.3 × 10⁴ and 1.2 × 10⁴ for D = 2, 1, 0 (read by eye, G = B = 0)."
+  status: documented
+  source: &s_diode_ir
+    - &q_sensor_params
+      url: https://arxiv.org/html/2404.11341v2#A2.SS0.SSS0.Px4
+      heading: |-
+        {D_(j)^(I), T_(j)^(I)} → Ĩ_(j), {D_(j)^(V), T_(j)^(V)} → Ṽ_(j)
+      quote: |-
+        The measurements of each light sensor are affected by the choice of photodiode (D_(j)^(I), D_(j)^(V)) and gain (T_(j)^(I), T_(j)^(V)) used to perform the infrared (Ĩ_(j)) and visible-light (Ṽ_(j)) readings. Larger photodiodes collect light over a larger area, increasing the sensitivity of the sensor (Fig. 13, left). Higher exposure times achieve a similar effect by increasing the reading duration, which also has an effect on the conditional distribution of the measurements given the light source brightness (Fig. 13, right).
+    - &q_table_diode_ir
+      url: https://arxiv.org/html/2404.11341v2#Ax8.T2
+      quote: |-
+        The photodiodes used by the light sensors to take infrared measurements, corresponding to the small (D_(j)^(I) = 0), medium (D_(j)^(I) = 1) and large (D_(j)^(I) = 2) infrared photodiodes onboard.
+    - &q_fig13_sens
+      url: https://arxiv.org/html/2404.11341v2#A2.F13
+      quote: |-
+        Increasing the photodiode size (left) or exposure time (center) both increase the sensitivity of the sensor. Due to an interplay between the exposure time and the pulse-width-modulation frequency of the light source, changes in the exposure time also affect the conditional distribution of the measurements given the light-source intensity (R, G, B).
+    - *q_table5
+
+uniform_diode_ir_1_strong:
+  parameter: diode_ir_1
+  parameter_symbol: "D^I_1"
+  parameter_meaning: photodiode used by light sensor 1 (before the polarizers) for its infrared measurement; 0 small, 1 medium, 2 large
+  reference_value: 2
+  intervened_value: 0
+  value_source: *v_diode_ir_1
+  data_check: "diode_ir_1 = 0 in all 1000 rows; every other manipulable column within its reference range"
+  affected_readouts: [ir_1]
+  graph_edges: ["D₁^(I) → Ĩ₁ (Fig. 3a; Table 5 p-value 3 × 10⁻¹⁴)"]
+  direction: { ir_1: decrease }
+  direction_basis: *db_diode_ir
+  status: documented
+  source: *s_diode_ir
+
+uniform_diode_ir_2_mid:
+  parameter: diode_ir_2
+  parameter_symbol: "D^I_2"
+  parameter_meaning: photodiode used by light sensor 2 (between the polarizers) for its infrared measurement; 0 small, 1 medium, 2 large
+  reference_value: 2
+  intervened_value: 1
+  value_source: &v_diode_ir_2
+    url: https://github.com/juangamella/causal-chamber/blob/0c8a77ea14bd4437b1fdd79adc1aa91ac2342569/datasets/lt_interventions_standard_v1/generators/uniform.py#L61
+    quote: |-
+      "diode_ir_2": [2, 1, 0],
+  data_check: "diode_ir_2 = 1 in all 1000 rows; every other manipulable column within its reference range"
+  affected_readouts: [ir_2]
+  graph_edges: ["D₂^(I) → Ĩ₂ (Fig. 3a; Table 5 p-value 1.6 × 10⁻¹⁴)"]
+  direction: { ir_2: decrease }
+  direction_basis: *db_diode_ir
+  status: documented
+  source: *s_diode_ir
+  notes: &n_diode_j "Fig. 13 shows sensor 1 only; the direction for sensors 2 and 3 rests on the text, which is stated for a generic sensor j."
+
+uniform_diode_ir_2_strong:
+  parameter: diode_ir_2
+  parameter_symbol: "D^I_2"
+  parameter_meaning: photodiode used by light sensor 2 (between the polarizers) for its infrared measurement; 0 small, 1 medium, 2 large
+  reference_value: 2
+  intervened_value: 0
+  value_source: *v_diode_ir_2
+  data_check: "diode_ir_2 = 0 in all 1000 rows; every other manipulable column within its reference range"
+  affected_readouts: [ir_2]
+  graph_edges: ["D₂^(I) → Ĩ₂ (Fig. 3a; Table 5 p-value 1.6 × 10⁻¹⁴)"]
+  direction: { ir_2: decrease }
+  direction_basis: *db_diode_ir
+  status: documented
+  source: *s_diode_ir
+  notes: *n_diode_j
+
+uniform_diode_ir_3_mid:
+  parameter: diode_ir_3
+  parameter_symbol: "D^I_3"
+  parameter_meaning: photodiode used by light sensor 3 (after both polarizers) for its infrared measurement; 0 small, 1 medium, 2 large
+  reference_value: 2
+  intervened_value: 1
+  value_source: &v_diode_ir_3
+    url: https://github.com/juangamella/causal-chamber/blob/0c8a77ea14bd4437b1fdd79adc1aa91ac2342569/datasets/lt_interventions_standard_v1/generators/uniform.py#L62
+    quote: |-
+      "diode_ir_3": [2, 1, 0],
+  data_check: "diode_ir_3 = 1 in all 1000 rows; every other manipulable column within its reference range"
+  affected_readouts: [ir_3]
+  graph_edges: ["D₃^(I) → Ĩ₃ (Fig. 3a; Table 5 p-value 4.2 × 10⁻¹⁴)"]
+  direction: { ir_3: decrease }
+  direction_basis: *db_diode_ir
+  status: documented
+  source: *s_diode_ir
+  notes: *n_diode_j
+
+uniform_diode_ir_3_strong:
+  parameter: diode_ir_3
+  parameter_symbol: "D^I_3"
+  parameter_meaning: photodiode used by light sensor 3 (after both polarizers) for its infrared measurement; 0 small, 1 medium, 2 large
+  reference_value: 2
+  intervened_value: 0
+  value_source: *v_diode_ir_3
+  data_check: "diode_ir_3 = 0 in all 1000 rows; every other manipulable column within its reference range"
+  affected_readouts: [ir_3]
+  graph_edges: ["D₃^(I) → Ĩ₃ (Fig. 3a; Table 5 p-value 4.2 × 10⁻¹⁴)"]
+  direction: { ir_3: decrease }
+  direction_basis: *db_diode_ir
+  status: documented
+  source: *s_diode_ir
+  notes: *n_diode_j
+
+uniform_diode_vis_1_mid:
+  parameter: diode_vis_1
+  parameter_symbol: "D^V_1"
+  parameter_meaning: photodiode used by light sensor 1 (before the polarizers) for its visible-light measurement; 0 small, 1 large
+  reference_value: 1
+  intervened_value: 0
+  value_source:
+    url: https://github.com/juangamella/causal-chamber/blob/0c8a77ea14bd4437b1fdd79adc1aa91ac2342569/datasets/lt_interventions_standard_v1/generators/uniform.py#L63
+    quote: |-
+      "diode_vis_1": [1, 0],
+  data_check: "diode_vis_1 = 0 in all 1000 rows; every other manipulable column within its reference range"
+  affected_readouts: [vis_1]
+  graph_edges: ["D₁^(V) → Ṽ₁ (Fig. 3a; Table 5 p-value 1.9 × 10⁻¹⁴)"]
+  direction: { vis_1: decrease }
+  direction_basis: &db_diode_vis "Stated: larger photodiodes increase the sensitivity, and Table 2 maps 0, 1 to small, large, so the small photodiode lowers the reading. Fig. 13 plots only the infrared channel of sensor 1; its caption says the visible-light measurements follow the same principles."
+  status: documented
+  source: &s_diode_vis
+    - *q_sensor_params
+    - &q_table_diode_vis
+      url: https://arxiv.org/html/2404.11341v2#Ax8.T2
+      quote: |-
+        The photodiodes used by the light sensors to take visible-light measurements, corresponding to the small (D_(j)^(V) = 0) and large (D_(j)^(V) = 1) photodiodes onboard.
+    - *q_fig13_sens
+    - &q_fig13_vis
+      url: https://arxiv.org/html/2404.11341v2#A2.F13
+      quote: |-
+        The effects on the visible-light measurements Ṽ₁ follow the same principles and are not shown.
+    - *q_table5
+
+uniform_diode_vis_2_mid:
+  parameter: diode_vis_2
+  parameter_symbol: "D^V_2"
+  parameter_meaning: photodiode used by light sensor 2 (between the polarizers) for its visible-light measurement; 0 small, 1 large
+  reference_value: 1
+  intervened_value: 0
+  value_source:
+    url: https://github.com/juangamella/causal-chamber/blob/0c8a77ea14bd4437b1fdd79adc1aa91ac2342569/datasets/lt_interventions_standard_v1/generators/uniform.py#L64
+    quote: |-
+      "diode_vis_2": [1, 0],
+  data_check: "diode_vis_2 = 0 in all 1000 rows; every other manipulable column within its reference range"
+  affected_readouts: [vis_2]
+  graph_edges: ["D₂^(V) → Ṽ₂ (Fig. 3a; Table 5 p-value 8.9 × 10⁻¹³)"]
+  direction: { vis_2: decrease }
+  direction_basis: *db_diode_vis
+  status: documented
+  source: *s_diode_vis
+  notes: *n_diode_j
+
+uniform_diode_vis_3_mid:
+  parameter: diode_vis_3
+  parameter_symbol: "D^V_3"
+  parameter_meaning: photodiode used by light sensor 3 (after both polarizers) for its visible-light measurement; 0 small, 1 large
+  reference_value: 1
+  intervened_value: 0
+  value_source:
+    url: https://github.com/juangamella/causal-chamber/blob/0c8a77ea14bd4437b1fdd79adc1aa91ac2342569/datasets/lt_interventions_standard_v1/generators/uniform.py#L65
+    quote: |-
+      "diode_vis_3": [1, 0],
+  data_check: "diode_vis_3 = 0 in all 1000 rows; every other manipulable column within its reference range"
+  affected_readouts: [vis_3]
+  graph_edges: ["D₃^(V) → Ṽ₃ (Fig. 3a; Table 5 p-value 2.3 × 10⁻¹⁴)"]
+  direction: { vis_3: decrease }
+  direction_basis: *db_diode_vis
+  status: documented
+  source: *s_diode_vis
+  notes: *n_diode_j
+
+uniform_green_mid:
+  parameter: green
+  parameter_symbol: G
+  parameter_meaning: brightness setting of the green LEDs of the main light source
+  reference_value: "Unif{0,...,85}"
+  intervened_value: "Unif{86,...,170}"
+  value_source: &v_green
+    url: https://github.com/juangamella/causal-chamber/blob/0c8a77ea14bd4437b1fdd79adc1aa91ac2342569/datasets/lt_interventions_standard_v1/generators/uniform.py#L44
+    quote: |-
+      "green": [(0, 85), (86, 170), (171, 255)],
+  data_check: "green in [86, 170] in all 1000 rows; every other manipulable column within its reference range"
+  affected_readouts: [current, ir_1, vis_1, ir_2, vis_2, ir_3, vis_3]
+  graph_edges: &e_green
+    - "G → C̃ (Fig. 3a; Table 5 p-value 1.6 × 10⁻¹⁴)"
+    - "G → Ĩ₁ (Fig. 3a; Table 5 p-value 1.6 × 10⁻¹⁴)"
+    - "G → Ṽ₁ (Fig. 3a; Table 5 p-value 1.6 × 10⁻¹⁴)"
+    - "G → Ĩ₂ (Fig. 3a; Table 5 p-value 1.6 × 10⁻¹⁴)"
+    - "G → Ṽ₂ (Fig. 3a; Table 5 p-value 1.6 × 10⁻¹⁴)"
+    - "G → Ĩ₃ (Fig. 3a; Table 5 p-value 1.6 × 10⁻¹⁴)"
+    - "G → Ṽ₃ (Fig. 3a; Table 5 p-value 1.6 × 10⁻¹⁴)"
+  direction: *d_rgb
+  direction_inferred: *di_rgb
+  direction_basis: *db_rgb
+  status: documented
+  effects_outside_model_inputs: *o_rgb
+  source: *s_rgb
+  notes: *n_rgb
+
+uniform_green_strong:
+  parameter: green
+  parameter_symbol: G
+  parameter_meaning: brightness setting of the green LEDs of the main light source
+  reference_value: "Unif{0,...,85}"
+  intervened_value: "Unif{171,...,255}"
+  value_source: *v_green
+  data_check: "green in [171, 255] in all 1000 rows; every other manipulable column within its reference range"
+  affected_readouts: [current, ir_1, vis_1, ir_2, vis_2, ir_3, vis_3]
+  graph_edges: *e_green
+  direction: *d_rgb
+  direction_inferred: *di_rgb
+  direction_basis: *db_rgb
+  status: documented
+  effects_outside_model_inputs: *o_rgb
+  source: *s_rgb
+  notes: *n_rgb
+
+uniform_l_11_mid:
+  parameter: l_11
+  parameter_symbol: "L_11"
+  parameter_meaning: brightness (rheostat wiper position) of the first of the two LEDs placed by light sensor 1
+  reference_value: "Unif{0,...,170}"
+  intervened_value: "Unif{171,...,255}"
+  value_source:
+    url: https://github.com/juangamella/causal-chamber/blob/0c8a77ea14bd4437b1fdd79adc1aa91ac2342569/datasets/lt_interventions_standard_v1/generators/uniform.py#L54
+    quote: |-
+      "l_11": [(0, 170), (171, 255)],
+  data_check: "l_11 in [171, 255] in all 1000 rows; every other manipulable column within its reference range"
+  affected_readouts: [ir_1, vis_1]
+  graph_edges:
+    [
+      "L₁₁ → Ĩ₁ (Fig. 3a; Table 5 p-value 1.6 × 10⁻¹⁴)",
+      "L₁₁ → Ṽ₁ (Fig. 3a; Table 5 p-value 1.6 × 10⁻¹⁴)",
+    ]
+  direction: { ir_1: increase, vis_1: unknown }
+  direction_inferred: { vis_1: increase }
+  direction_basis: &db_l_1 "ir_1: Fig. 4b plots Ĩ₁ against L₁₁ and L₁₂ and shows it rising, steeply only near the top of the range (roughly above 190, read by eye); Ĩ₂ and Ĩ₃ stay flat. vis_1: not plotted; the text says only that the readings follow an exponential function of the setting and Table 2 that higher settings mean higher brightness."
+  status: documented
+  source: &s_led
+    - &q_led_text
+      url: https://arxiv.org/html/2404.11341v2#A2.SS0.SSS0.Px8
+      heading: |-
+        {L_(j1), L_(j1)} → Ĩ_(j), Ṽ_(j)
+      quote: |-
+        Besides the light source, two additional LEDs placed by each light sensor (see Fig. 2d) have an effect on its reading. To avoid affecting the measurements of the other light sensors, the LEDs only turn on when their corresponding sensor is taking a measurement.
+    - &q_led_exp
+      url: https://arxiv.org/html/2404.11341v2#A2.SS0.SSS0.Px8
+      quote: |-
+        The settings L_(j1), L_(j2) correspond to the wiper position of each rheostat. The relationship between the setting and the intensity readings follows an exponential function (Fig. 4b), resulting from the LED’s voltage-current characteristic, luminosity response and typical wavelength, and the spectral sensitivity of the sensor. The brightness of the LEDs is much lower than that of the light source (Fig. 15).
+    - &q_table_led
+      url: https://arxiv.org/html/2404.11341v2#Ax8.T2
+      quote: |-
+        The brightness of LEDs placed by each light-intensity sensor, where L_(i1), L_(i2) correspond to the two LEDs placed by the i^(th) sensor (Ĩ_(i), Ṽ_(i)). The value corresponds to the wiper position of a digital rheostat, which controls the current flowing to the LED. Higher values correspond to increased brightness.
+    - *q_fig4
+    - &q_fig15
+      url: https://arxiv.org/html/2404.11341v2#A2.F15
+      quote: |-
+        Because the brightness of the LEDs is very small when compared to that of the light source, their effect on the intensity reading Ĩ₃ is barely noticeable when looking at all observations (left), but becomes apparent, for example, when the polarizers are close to orthogonal (right) and block most of the light emanating from the light source.
+    - *q_table5
+  notes: &n_led "Expected to be a weak shift: the documentation says the LEDs are much dimmer than the light source and that their effect is barely noticeable across all observations. In the reference distribution the polarizers stay close to aligned (mean cos²(pol_1 − pol_2) = 0.929 over the recorded settings), so the main light source dominates every sensor. The edge heading in the paper reads {L_(j1), L_(j1)} (a typo, also in the LaTeX alt-text); the body text names L_(j1) and L_(j2)."
+
+uniform_l_12_mid:
+  parameter: l_12
+  parameter_symbol: "L_12"
+  parameter_meaning: brightness (rheostat wiper position) of the second of the two LEDs placed by light sensor 1
+  reference_value: "Unif{0,...,170}"
+  intervened_value: "Unif{171,...,255}"
+  value_source:
+    url: https://github.com/juangamella/causal-chamber/blob/0c8a77ea14bd4437b1fdd79adc1aa91ac2342569/datasets/lt_interventions_standard_v1/generators/uniform.py#L55
+    quote: |-
+      "l_12": [(0, 170), (171, 255)],
+  data_check: "l_12 in [171, 255] in all 1000 rows; every other manipulable column within its reference range"
+  affected_readouts: [ir_1, vis_1]
+  graph_edges:
+    [
+      "L₁₂ → Ĩ₁ (Fig. 3a; Table 5 p-value 2.3 × 10⁻¹⁴)",
+      "L₁₂ → Ṽ₁ (Fig. 3a; Table 5 p-value 2.3 × 10⁻¹⁴)",
+    ]
+  direction: { ir_1: increase, vis_1: unknown }
+  direction_inferred: { vis_1: increase }
+  direction_basis: *db_l_1
+  status: documented
+  source: *s_led
+  notes: *n_led
+
+uniform_l_21_mid:
+  parameter: l_21
+  parameter_symbol: "L_21"
+  parameter_meaning: brightness (rheostat wiper position) of the first of the two LEDs placed by light sensor 2
+  reference_value: "Unif{0,...,170}"
+  intervened_value: "Unif{171,...,255}"
+  value_source:
+    url: https://github.com/juangamella/causal-chamber/blob/0c8a77ea14bd4437b1fdd79adc1aa91ac2342569/datasets/lt_interventions_standard_v1/generators/uniform.py#L56
+    quote: |-
+      "l_21": [(0, 170), (171, 255)],
+  data_check: "l_21 in [171, 255] in all 1000 rows; every other manipulable column within its reference range"
+  affected_readouts: [ir_2, vis_2]
+  graph_edges:
+    [
+      "L₂₁ → Ĩ₂ (Fig. 3a; Table 5 p-value 4.2 × 10⁻¹⁴)",
+      "L₂₁ → Ṽ₂ (Fig. 3a; Table 5 p-value 4.2 × 10⁻¹⁴)",
+    ]
+  direction: &d_l_2 { ir_2: unknown, vis_2: unknown }
+  direction_inferred: &di_l_2 { ir_2: increase, vis_2: increase }
+  direction_basis: &db_l_2 "No figure covers sensor 2's LEDs and no sign is stated; the text says only that the readings follow an exponential function of the setting, and Table 2 that higher settings mean higher brightness. The inferred increase rests on Fig. 4b, which shows the rise for sensor 1."
+  status: documented
+  source: *s_led
+  notes: *n_led
+
+uniform_l_22_mid:
+  parameter: l_22
+  parameter_symbol: "L_22"
+  parameter_meaning: brightness (rheostat wiper position) of the second of the two LEDs placed by light sensor 2
+  reference_value: "Unif{0,...,170}"
+  intervened_value: "Unif{171,...,255}"
+  value_source:
+    url: https://github.com/juangamella/causal-chamber/blob/0c8a77ea14bd4437b1fdd79adc1aa91ac2342569/datasets/lt_interventions_standard_v1/generators/uniform.py#L57
+    quote: |-
+      "l_22": [(0, 170), (171, 255)],
+  data_check: "l_22 in [171, 255] in all 1000 rows; every other manipulable column within its reference range"
+  affected_readouts: [ir_2, vis_2]
+  graph_edges:
+    [
+      "L₂₂ → Ĩ₂ (Fig. 3a; Table 5 p-value 6.6 × 10⁻¹⁴)",
+      "L₂₂ → Ṽ₂ (Fig. 3a; Table 5 p-value 1.3 × 10⁻¹²)",
+    ]
+  direction: *d_l_2
+  direction_inferred: *di_l_2
+  direction_basis: *db_l_2
+  status: documented
+  source: *s_led
+  notes: *n_led
+
+uniform_l_31_mid:
+  parameter: l_31
+  parameter_symbol: "L_31"
+  parameter_meaning: brightness (rheostat wiper position) of the first of the two LEDs placed by light sensor 3
+  reference_value: "Unif{0,...,170}"
+  intervened_value: "Unif{171,...,255}"
+  value_source:
+    url: https://github.com/juangamella/causal-chamber/blob/0c8a77ea14bd4437b1fdd79adc1aa91ac2342569/datasets/lt_interventions_standard_v1/generators/uniform.py#L58
+    quote: |-
+      "l_31": [(0, 170), (171, 255)],
+  data_check: "l_31 in [171, 255] in all 1000 rows; every other manipulable column within its reference range"
+  affected_readouts: [ir_3, vis_3]
+  graph_edges:
+    [
+      "L₃₁ → Ĩ₃ (Fig. 3a; Table 5 p-value 2.3 × 10⁻¹⁴)",
+      "L₃₁ → Ṽ₃ (Fig. 3a; Table 5 p-value 6.8 × 10⁻¹²)",
+    ]
+  direction: { ir_3: increase, vis_3: unknown }
+  direction_inferred: { vis_3: increase }
+  direction_basis: "ir_3: Fig. 15 (right) plots Ĩ₃ against L₃₁ for observations with the polarizers near orthogonal (|θ₁ − θ₂| in [85, 95]) and shows it rising near the top of the range (read by eye); that figure uses data from lt_walks_v1, not this dataset. vis_3: not plotted; no sign stated."
+  status: documented
+  source: *s_led
+  notes: *n_led
+
+uniform_l_32_mid:
+  parameter: l_32
+  parameter_symbol: "L_32"
+  parameter_meaning: brightness (rheostat wiper position) of the second of the two LEDs placed by light sensor 3
+  reference_value: "Unif{0,...,170}"
+  intervened_value: "Unif{171,...,255}"
+  value_source:
+    url: https://github.com/juangamella/causal-chamber/blob/0c8a77ea14bd4437b1fdd79adc1aa91ac2342569/datasets/lt_interventions_standard_v1/generators/uniform.py#L59
+    quote: |-
+      "l_32": [(0, 170), (171, 255)],
+  data_check: "l_32 in [171, 255] in all 1000 rows; every other manipulable column within its reference range"
+  affected_readouts: [ir_3, vis_3]
+  graph_edges:
+    [
+      "L₃₂ → Ĩ₃ (Fig. 3a; Table 5 p-value 4.2 × 10⁻¹⁴)",
+      "L₃₂ → Ṽ₃ (Fig. 3a; Table 5 p-value 4.2 × 10⁻¹⁴)",
+    ]
+  direction: { ir_3: unknown, vis_3: unknown }
+  direction_inferred: { ir_3: increase, vis_3: increase }
+  direction_basis: "No sign stated. Fig. 15 encodes L₃₂ only as marker size, from which I could not read a direction. The inferred increase rests on Fig. 4b (sensor 1) and on Table 2 (higher setting, higher brightness)."
+  status: documented
+  source: *s_led
+  notes: *n_led
+
+uniform_osr_angle_1_mid:
+  parameter: osr_angle_1
+  parameter_symbol: "O_1"
+  parameter_meaning: oversampling rate of the sensor measuring the angle of polarizer 1 (number of readings averaged per measurement)
+  reference_value: 1
+  intervened_value: 4
+  value_source: &v_osr_angle_1
+    url: https://github.com/juangamella/causal-chamber/blob/0c8a77ea14bd4437b1fdd79adc1aa91ac2342569/datasets/lt_interventions_standard_v1/generators/uniform.py#L50
+    quote: |-
+      "osr_angle_1": [1, 2, 4, 8],
+  data_check: "osr_angle_1 = 4 in all 1000 rows; every other manipulable column within its reference range"
+  affected_readouts: [angle_1]
+  graph_edges: ["O₁ → θ̃₁ (Fig. 3a; Table 5 p-value 8.3 × 10⁻¹⁰¹)"]
+  direction: { angle_1: variance_decrease }
+  direction_basis: &db_osr_angle "Stated: increasing the oversampling rate increases the precision of the angle sensor (Fig. 14 caption; same principles for θ̃₂). No shift of the mean is stated; Fig. 14 (right) shows the densities for O = 1, 2, 8 all near θ̃₁ ≈ 507 at θ₁ = 0 (read by eye)."
+  status: documented
+  source: &s_osr_angle
+    - &q_angle_osr
+      url: https://arxiv.org/html/2404.11341v2#A2.SS0.SSS0.Px5
+      heading: |-
+        {θ_(j), R_(j), O_(j)} → θ̃_(j)
+      quote: |-
+        The oversampling rates (O₁, O₂) determine the number of readings that are averaged to produce a single measurement, affecting its precision (Fig. 14, right).
+    - &q_fig14_osr
+      url: https://arxiv.org/html/2404.11341v2#A2.F14
+      quote: |-
+        The stochasticity of the measurement is due to electrical noise in the voltage measurement—increasing the oversampling rate O₁ increases the precision of the sensor. The same principles apply to the measurements θ̃₂ of the second angle sensor.
+    - &q_table_osr
+      url: https://arxiv.org/html/2404.11341v2#Ax8.T2
+      quote: |-
+        The oversampling rate of the sensors used to measure the current (C̃) and polarizer angles (θ̃₁, θ̃₂), respectively. To avoid affecting the overall measurement time, the chambers always take the maximum number of readings (8) and discard excess readings accordingly.
+    - *q_table5
+  notes: &n_osr "Inference, not documentation: a measurement that averages O integer ADC readings lies on a grid of step 1/O. Fig. 14 (right) is consistent with this for θ̃₁ (O = 1 at integers, O = 2 at half-integers, O = 8 on a finer grid). An oversampling intervention may therefore be detectable from the readout's quantisation pattern as well as from its spread. The dataset README lists these experiments as uniform_osr_1_* and uniform_osr_2_*; the generator and the data files use uniform_osr_angle_1_* and uniform_osr_angle_2_*."
+
+uniform_osr_angle_1_strong:
+  parameter: osr_angle_1
+  parameter_symbol: "O_1"
+  parameter_meaning: oversampling rate of the sensor measuring the angle of polarizer 1 (number of readings averaged per measurement)
+  reference_value: 1
+  intervened_value: 8
+  value_source: *v_osr_angle_1
+  data_check: "osr_angle_1 = 8 in all 1000 rows; every other manipulable column within its reference range"
+  affected_readouts: [angle_1]
+  graph_edges: ["O₁ → θ̃₁ (Fig. 3a; Table 5 p-value 8.3 × 10⁻¹⁰¹)"]
+  direction: { angle_1: variance_decrease }
+  direction_basis: *db_osr_angle
+  status: documented
+  source: *s_osr_angle
+  notes: *n_osr
+
+uniform_osr_angle_1_weak:
+  parameter: osr_angle_1
+  parameter_symbol: "O_1"
+  parameter_meaning: oversampling rate of the sensor measuring the angle of polarizer 1 (number of readings averaged per measurement)
+  reference_value: 1
+  intervened_value: 2
+  value_source: *v_osr_angle_1
+  data_check: "osr_angle_1 = 2 in all 1000 rows; every other manipulable column within its reference range"
+  affected_readouts: [angle_1]
+  graph_edges: ["O₁ → θ̃₁ (Fig. 3a; Table 5 p-value 8.3 × 10⁻¹⁰¹)"]
+  direction: { angle_1: variance_decrease }
+  direction_basis: *db_osr_angle
+  status: documented
+  source: *s_osr_angle
+  notes: *n_osr
+
+uniform_osr_angle_2_mid:
+  parameter: osr_angle_2
+  parameter_symbol: "O_2"
+  parameter_meaning: oversampling rate of the sensor measuring the angle of polarizer 2 (number of readings averaged per measurement)
+  reference_value: 1
+  intervened_value: 4
+  value_source: &v_osr_angle_2
+    url: https://github.com/juangamella/causal-chamber/blob/0c8a77ea14bd4437b1fdd79adc1aa91ac2342569/datasets/lt_interventions_standard_v1/generators/uniform.py#L51
+    quote: |-
+      "osr_angle_2": [1, 2, 4, 8],
+  data_check: "osr_angle_2 = 4 in all 1000 rows; every other manipulable column within its reference range"
+  affected_readouts: [angle_2]
+  graph_edges: ["O₂ → θ̃₂ (Fig. 3a; Table 5 p-value 3.4 × 10⁻⁶⁷)"]
+  direction: { angle_2: variance_decrease }
+  direction_basis: *db_osr_angle
+  status: documented
+  source: *s_osr_angle
+  notes: *n_osr
+
+uniform_osr_angle_2_strong:
+  parameter: osr_angle_2
+  parameter_symbol: "O_2"
+  parameter_meaning: oversampling rate of the sensor measuring the angle of polarizer 2 (number of readings averaged per measurement)
+  reference_value: 1
+  intervened_value: 8
+  value_source: *v_osr_angle_2
+  data_check: "osr_angle_2 = 8 in all 1000 rows; every other manipulable column within its reference range"
+  affected_readouts: [angle_2]
+  graph_edges: ["O₂ → θ̃₂ (Fig. 3a; Table 5 p-value 3.4 × 10⁻⁶⁷)"]
+  direction: { angle_2: variance_decrease }
+  direction_basis: *db_osr_angle
+  status: documented
+  source: *s_osr_angle
+  notes: *n_osr
+
+uniform_osr_angle_2_weak:
+  parameter: osr_angle_2
+  parameter_symbol: "O_2"
+  parameter_meaning: oversampling rate of the sensor measuring the angle of polarizer 2 (number of readings averaged per measurement)
+  reference_value: 1
+  intervened_value: 2
+  value_source: *v_osr_angle_2
+  data_check: "osr_angle_2 = 2 in all 1000 rows; every other manipulable column within its reference range"
+  affected_readouts: [angle_2]
+  graph_edges: ["O₂ → θ̃₂ (Fig. 3a; Table 5 p-value 3.4 × 10⁻⁶⁷)"]
+  direction: { angle_2: variance_decrease }
+  direction_basis: *db_osr_angle
+  status: documented
+  source: *s_osr_angle
+  notes: *n_osr
+
+uniform_osr_c_mid:
+  parameter: osr_c
+  parameter_symbol: "O_C"
+  parameter_meaning: oversampling rate of the sensor measuring the current drawn by the light source
+  reference_value: 1
+  intervened_value: 4
+  value_source: &v_osr_c
+    url: https://github.com/juangamella/causal-chamber/blob/0c8a77ea14bd4437b1fdd79adc1aa91ac2342569/datasets/lt_interventions_standard_v1/generators/uniform.py#L46
+    quote: |-
+      "osr_c": [1, 2, 4, 8],
+  data_check: "osr_c = 4 in all 1000 rows; every other manipulable column within its reference range"
+  affected_readouts: [current]
+  graph_edges: ["O_(C) → C̃ (Fig. 3a; Table 5 p-value 6 × 10⁻²⁴)"]
+  direction: { current: variance_decrease }
+  direction_basis: &db_osr_c "The text says only that the oversampling rate affects the precision of the current measurement, without a sign. Fig. 12 (left) shows the density of C̃ narrowing from O_C = 1 to 2 to 8 around the same centre, about 122 (read by eye, at fixed R, G, B). The wind-tunnel text states the sign for the barometers ('A higher oversampling rate increases the precision'). No shift of the mean is stated."
+  status: documented
+  source: &s_osr_c
+    - &q_cur_osr
+      url: https://arxiv.org/html/2404.11341v2#A2.SS0.SSS0.Px3
+      heading: |-
+        {R_(C), O_(C)} → C̃
+      quote: |-
+        The oversampling rate (O_(C)) determines the number of readings that are averaged to produce a single measurement, affecting its precision (Fig. 12, left).
+    - &q_fig12_osr
+      url: https://arxiv.org/html/2404.11341v2#A2.F12
+      quote: |-
+        The oversampling rate determines the amount of readings that are averaged to produce a single measurement, affecting the precision of the sensor (left).
+    - *q_table_osr
+    - *q_table5
+  notes: &n_osr_c "Same quantisation inference as for the angle sensors: averaging O integer readings puts C̃ on a grid of step 1/O. Fig. 12 (left) shows smoothed densities, so it neither confirms nor refutes this for C̃. The README's experiment names (uniform_osr_c_*) match the data files."
+
+uniform_osr_c_strong:
+  parameter: osr_c
+  parameter_symbol: "O_C"
+  parameter_meaning: oversampling rate of the sensor measuring the current drawn by the light source
+  reference_value: 1
+  intervened_value: 8
+  value_source: *v_osr_c
+  data_check: "osr_c = 8 in all 1000 rows; every other manipulable column within its reference range"
+  affected_readouts: [current]
+  graph_edges: ["O_(C) → C̃ (Fig. 3a; Table 5 p-value 6 × 10⁻²⁴)"]
+  direction: { current: variance_decrease }
+  direction_basis: *db_osr_c
+  status: documented
+  source: *s_osr_c
+  notes: *n_osr_c
+
+uniform_osr_c_weak:
+  parameter: osr_c
+  parameter_symbol: "O_C"
+  parameter_meaning: oversampling rate of the sensor measuring the current drawn by the light source
+  reference_value: 1
+  intervened_value: 2
+  value_source: *v_osr_c
+  data_check: "osr_c = 2 in all 1000 rows; every other manipulable column within its reference range"
+  affected_readouts: [current]
+  graph_edges: ["O_(C) → C̃ (Fig. 3a; Table 5 p-value 6 × 10⁻²⁴)"]
+  direction: { current: variance_decrease }
+  direction_basis: *db_osr_c
+  status: documented
+  source: *s_osr_c
+  notes: *n_osr_c
+
+uniform_pol_1_mid:
+  parameter: pol_1
+  parameter_symbol: "θ_1"
+  parameter_meaning: stepper-motor setting of the angle of polarizer 1, in degrees
+  reference_value: "Unif{-15,-14.9,...,25} (generator: np.arange(-15, 25 + 0.1, 0.1)); recorded settings are the integers -15..24, see notes"
+  intervened_value: "Unif{26,26.1,...,65} (generator: np.arange(26, 65 + 0.1, 0.1)); recorded settings are the integers 26..65, see notes"
+  value_source: &v_pol_1
+    url: https://github.com/juangamella/causal-chamber/blob/0c8a77ea14bd4437b1fdd79adc1aa91ac2342569/datasets/lt_interventions_standard_v1/generators/uniform.py#L48
+    quote: |-
+      "pol_1": [(-15, 25), (26, 65), (66, 105)],
+  data_check: "pol_1 in [25.9875, 65.025] (40 distinct values) in all 1000 rows; every other manipulable column within its reference range"
+  affected_readouts: [angle_1, ir_3, vis_3]
+  graph_edges:
+    [
+      "θ₁ → θ̃₁ (Fig. 3a; Table 5 p-value 3 × 10⁻¹⁴)",
+      "θ₁ → Ĩ₃ (Fig. 3a; Table 5 p-value 3 × 10⁻¹⁴)",
+      "θ₁ → Ṽ₃ (Fig. 3a; Table 5 p-value 3 × 10⁻¹⁴)",
+    ]
+  direction: { angle_1: increase, ir_3: unknown, vis_3: unknown }
+  direction_inferred: { ir_3: decrease, vis_3: decrease }
+  direction_basis: &db_pol "angle_j: Fig. 14 (left) shows the calibrated angle following the motor setting θ₁ along the identity line at R₁ = 5 (read by eye), and the Table 2 calibration rises with θ̃_j, so a larger setting gives a larger raw reading; the caption extends the principles to θ̃₂. ir_3, vis_3: no sign is stated for these setting ranges. Inference from model E1 (I₃ = I₀[(T^(p) − T^(c))cos²(θ₁ − θ₂) + T^(c)], increasing in cos²) and the recorded settings: mean cos²(pol_1 − pol_2) is 0.929 in uniform_reference, 0.574 and 0.586 in pol_1_mid and pol_2_mid, 0.094 and 0.105 in pol_1_strong and pol_2_strong. Fig. 4c shows Ĩ₃ at its maximum for relative angle 0 and its minimum near ±90° (read by eye)."
+  status: documented
+  effects_outside_model_inputs: &o_pol
+    - "Ĩm (camera image): the edges θ₁ → Ĩm and θ₂ → Ĩm exist only in the camera configuration (Fig. 3b). This dataset uses the standard configuration, in which the camera is off, so no such readout exists here."
+  source: &s_pol
+    - &q_angle_motor
+      url: https://arxiv.org/html/2404.11341v2#A2.SS0.SSS0.Px5
+      heading: |-
+        {θ_(j), R_(j), O_(j)} → θ̃_(j)
+      quote: |-
+        The motor settings θ₁, θ₂ determine the positions of the polarizer frames. The positions are encoded into a voltage by means of rotary potentiometers, resulting in the measurements θ̃₁, θ̃₂.
+    - &q_pol_light
+      url: https://arxiv.org/html/2404.11341v2#A2.SS0.SSS0.Px6
+      heading: |-
+        $\{\theta_{1},\theta_{2}\}\to\{\tilde{I}_{3},\tilde{V}_{3},\tilde{\textmd{I}}\textmd{m}\}$
+      quote: |-
+        The position of the polarizers affects the intensity and spectral composition (i.e., color) of the light passing through them, affecting the readings (Ĩ₃, Ṽ₃) of the third light sensor (see Fig. 4c and Fig. 17) and the images ($\tilde{\textmd{I}}\textmd{m}$) captured by the camera (see Fig. 4e). The effect is described by Malus’ law—see Section IV.2.1 for more details.
+    - &q_malus
+      url: https://arxiv.org/html/2404.11341v2#A2.SS1
+      quote: |-
+        Depending on their angle, the linear polarizers dim the light passing through them.
+    - &q_model_e1
+      url: https://arxiv.org/html/2404.11341v2#A2.SS1
+      quote: |-
+        I₃ = I₀[(T^(p) − T^(c))cos²(θ₁ − θ₂) + T^(c)],
+    - &q_table_angle
+      url: https://arxiv.org/html/2404.11341v2#Ax8.T2
+      quote: |-
+        $$(\tilde{\theta}_{j}-Z_{j})\times\frac{720}{1023}\times\frac{\text{vref}(R_{j})}{5}\;\text{ degrees},$$
+    - &q_table_pol
+      url: https://arxiv.org/html/2404.11341v2#Ax8.T2
+      quote: |-
+        The setting of the stepper motors that control the angle of the polarizer frames, which can be set in increments of 0.1 degrees. Because the mechanism functions without feedback, the actual angle of the polarizers may slightly deviate from this setting due to the imperfect coupling of the mechanical pieces.
+    - &q_fig14_same
+      url: https://arxiv.org/html/2404.11341v2#A2.F14
+      quote: |-
+        The same principles apply to the measurements θ̃₂ of the second angle sensor.
+    - *q_fig4
+    - *q_table5
+  notes: &n_pol "Several readouts: angle_j directly and both sensor-3 readouts through Malus' law. Sensor 2 sits between the polarizers and has no edge from θ₁ (Fig. 3a). The strong range puts |pol_1 − pol_2| in [42°, 118°], across 90°, so the transmission is not monotone within it; only its mean falls. Settings: the README and the generator specify a 0.1° grid, but the recorded pol columns take one value per integer degree (40 distinct values in the reference, e.g. -14.9625 for -15 and 23.9625 for 24; 25 never occurs in 10,000 rows; 0 is about twice as frequent and -15 about a tenth as frequent as the other integers). My reading of the generator, not executed: rng.choice returns numpy.float64, which fails type(value) == float, so the value is written with %d and truncated towards zero. The recorded values sit within about 0.05° of the integers, presumably the motor's step quantisation (not documented)."
+
+uniform_pol_1_strong:
+  parameter: pol_1
+  parameter_symbol: "θ_1"
+  parameter_meaning: stepper-motor setting of the angle of polarizer 1, in degrees
+  reference_value: "Unif{-15,-14.9,...,25} (generator: np.arange(-15, 25 + 0.1, 0.1)); recorded settings are the integers -15..24, see notes"
+  intervened_value: "Unif{66,66.1,...,105} (generator: np.arange(66, 105 + 0.1, 0.1)); recorded settings are the integers 66..104, see notes"
+  value_source: *v_pol_1
+  data_check: "pol_1 in [66.0375, 103.95] (39 distinct values) in all 1000 rows; every other manipulable column within its reference range"
+  affected_readouts: [angle_1, ir_3, vis_3]
+  graph_edges:
+    [
+      "θ₁ → θ̃₁ (Fig. 3a; Table 5 p-value 3 × 10⁻¹⁴)",
+      "θ₁ → Ĩ₃ (Fig. 3a; Table 5 p-value 3 × 10⁻¹⁴)",
+      "θ₁ → Ṽ₃ (Fig. 3a; Table 5 p-value 3 × 10⁻¹⁴)",
+    ]
+  direction: { angle_1: increase, ir_3: unknown, vis_3: unknown }
+  direction_inferred: { ir_3: decrease, vis_3: decrease }
+  direction_basis: *db_pol
+  status: documented
+  effects_outside_model_inputs: *o_pol
+  source: *s_pol
+  notes: *n_pol
+
+uniform_pol_2_mid:
+  parameter: pol_2
+  parameter_symbol: "θ_2"
+  parameter_meaning: stepper-motor setting of the angle of polarizer 2, in degrees
+  reference_value: "Unif{-15,-14.9,...,25} (generator: np.arange(-15, 25 + 0.1, 0.1)); recorded settings are the integers -15..24, see notes"
+  intervened_value: "Unif{26,26.1,...,65} (generator: np.arange(26, 65 + 0.1, 0.1)); recorded settings are the integers 26..65, see notes"
+  value_source: &v_pol_2
+    url: https://github.com/juangamella/causal-chamber/blob/0c8a77ea14bd4437b1fdd79adc1aa91ac2342569/datasets/lt_interventions_standard_v1/generators/uniform.py#L49
+    quote: |-
+      "pol_2": [(-15, 25), (26, 65), (66, 105)],
+  data_check: "pol_2 in [25.9875, 65.025] (40 distinct values) in all 1000 rows; every other manipulable column within its reference range"
+  affected_readouts: [angle_2, ir_3, vis_3]
+  graph_edges:
+    [
+      "θ₂ → θ̃₂ (Fig. 3a; Table 5 p-value 6.6 × 10⁻¹⁴)",
+      "θ₂ → Ĩ₃ (Fig. 3a; Table 5 p-value 6.6 × 10⁻¹⁴)",
+      "θ₂ → Ṽ₃ (Fig. 3a; Table 5 p-value 6.6 × 10⁻¹⁴)",
+    ]
+  direction: { angle_2: increase, ir_3: unknown, vis_3: unknown }
+  direction_inferred: { ir_3: decrease, vis_3: decrease }
+  direction_basis: *db_pol
+  status: documented
+  effects_outside_model_inputs: *o_pol
+  source: *s_pol
+  notes: *n_pol
+
+uniform_pol_2_strong:
+  parameter: pol_2
+  parameter_symbol: "θ_2"
+  parameter_meaning: stepper-motor setting of the angle of polarizer 2, in degrees
+  reference_value: "Unif{-15,-14.9,...,25} (generator: np.arange(-15, 25 + 0.1, 0.1)); recorded settings are the integers -15..24, see notes"
+  intervened_value: "Unif{66,66.1,...,105} (generator: np.arange(66, 105 + 0.1, 0.1)); recorded settings are the integers 66..104, see notes"
+  value_source: *v_pol_2
+  data_check: "pol_2 in [66.0375, 103.95] (39 distinct values) in all 1000 rows; every other manipulable column within its reference range"
+  affected_readouts: [angle_2, ir_3, vis_3]
+  graph_edges:
+    [
+      "θ₂ → θ̃₂ (Fig. 3a; Table 5 p-value 6.6 × 10⁻¹⁴)",
+      "θ₂ → Ĩ₃ (Fig. 3a; Table 5 p-value 6.6 × 10⁻¹⁴)",
+      "θ₂ → Ṽ₃ (Fig. 3a; Table 5 p-value 6.6 × 10⁻¹⁴)",
+    ]
+  direction: { angle_2: increase, ir_3: unknown, vis_3: unknown }
+  direction_inferred: { ir_3: decrease, vis_3: decrease }
+  direction_basis: *db_pol
+  status: documented
+  effects_outside_model_inputs: *o_pol
+  source: *s_pol
+  notes: *n_pol
+
+uniform_red_mid:
+  parameter: red
+  parameter_symbol: R
+  parameter_meaning: brightness setting of the red LEDs of the main light source
+  reference_value: "Unif{0,...,85}"
+  intervened_value: "Unif{86,...,170}"
+  value_source: &v_red
+    url: https://github.com/juangamella/causal-chamber/blob/0c8a77ea14bd4437b1fdd79adc1aa91ac2342569/datasets/lt_interventions_standard_v1/generators/uniform.py#L43
+    quote: |-
+      "red": [(0, 85), (86, 170), (171, 255)],
+  data_check: "red in [86, 170] in all 1000 rows; every other manipulable column within its reference range"
+  affected_readouts: [current, ir_1, vis_1, ir_2, vis_2, ir_3, vis_3]
+  graph_edges: &e_red
+    - "R → C̃ (Fig. 3a; Table 5 p-value 2.3 × 10⁻¹⁴)"
+    - "R → Ĩ₁ (Fig. 3a; Table 5 p-value 2.3 × 10⁻¹⁴)"
+    - "R → Ṽ₁ (Fig. 3a; Table 5 p-value 2.3 × 10⁻¹⁴)"
+    - "R → Ĩ₂ (Fig. 3a; Table 5 p-value 2.3 × 10⁻¹⁴)"
+    - "R → Ṽ₂ (Fig. 3a; Table 5 p-value 2.3 × 10⁻¹⁴)"
+    - "R → Ĩ₃ (Fig. 3a; Table 5 p-value 2.3 × 10⁻¹⁴)"
+    - "R → Ṽ₃ (Fig. 3a; Table 5 p-value 2.3 × 10⁻¹⁴)"
+  direction: *d_rgb
+  direction_inferred: *di_rgb
+  direction_basis: *db_rgb
+  status: documented
+  effects_outside_model_inputs: *o_rgb
+  source: *s_rgb
+  notes: *n_rgb
+
+uniform_red_strong:
+  parameter: red
+  parameter_symbol: R
+  parameter_meaning: brightness setting of the red LEDs of the main light source
+  reference_value: "Unif{0,...,85}"
+  intervened_value: "Unif{171,...,255}"
+  value_source: *v_red
+  data_check: "red in [171, 255] in all 1000 rows; every other manipulable column within its reference range"
+  affected_readouts: [current, ir_1, vis_1, ir_2, vis_2, ir_3, vis_3]
+  graph_edges: *e_red
+  direction: *d_rgb
+  direction_inferred: *di_rgb
+  direction_basis: *db_rgb
+  status: documented
+  effects_outside_model_inputs: *o_rgb
+  source: *s_rgb
+  notes: *n_rgb
+
+uniform_t_ir_1_mid:
+  parameter: t_ir_1
+  parameter_symbol: "T^I_1"
+  parameter_meaning: exposure time of the photodiode for the infrared measurement of light sensor 1 (before the polarizers)
+  reference_value: 3
+  intervened_value: 1
+  value_source: &v_t_ir_1
+    url: https://github.com/juangamella/causal-chamber/blob/0c8a77ea14bd4437b1fdd79adc1aa91ac2342569/datasets/lt_interventions_standard_v1/generators/uniform.py#L66
+    quote: |-
+      "t_ir_1": [3, 2, 1, 0],
+  data_check: "t_ir_1 = 1 in all 1000 rows; every other manipulable column within its reference range"
+  affected_readouts: [ir_1]
+  graph_edges: ["T₁^(I) → Ĩ₁ (Fig. 3a; Table 5 p-value 1.9 × 10⁻¹⁴)"]
+  direction: { ir_1: decrease }
+  direction_basis: &db_t "Stated: higher exposure times increase the sensitivity, as larger photodiodes do. The ordering of the codes is stated only in arXiv v1 Table 2 ('Higher values correspond to longer exposure times and increased sensitivity.'); v2 and the journal's Supplementary Information dropped that sentence. Fig. 13 (centre, v1 and v2) shows the ordering for T₁^(I): at R = 255, Ĩ₁ is roughly 4.7 × 10⁴, 2.3 × 10⁴, 1.2 × 10⁴ and 0.6 × 10⁴ for T = 3, 2, 1, 0 (read by eye, G = B = 0). Also stated: the exposure time changes the conditional distribution (the spread) of the reading given the light-source brightness."
+  status: documented
+  source: &s_t
+    - *q_sensor_params
+    - &q_table_t_v2
+      url: https://arxiv.org/html/2404.11341v2#Ax8.T2
+      quote: |-
+        The exposure time of the photodiode during a light-intensity measurement.
+    - &q_table_t_v1
+      url: https://arxiv.org/html/2404.11341v1#Ax8.T2
+      quote: |-
+        The exposure time of the photodiode during a light-intensity measurement. Higher values correspond to longer exposure times and increased sensitivity.
+    - *q_fig13_sens
+    - *q_fig13_vis
+    - *q_table5
+  notes: &n_t "The text calls T_j 'gain' in one clause and 'exposure time' elsewhere; Table 2 and Fig. 13 call it exposure time. Fig. 13 covers only the infrared channel of sensor 1; its caption extends the principles to Ṽ₁, and the text states the effect for a generic sensor j."
+
+uniform_t_ir_1_strong:
+  parameter: t_ir_1
+  parameter_symbol: "T^I_1"
+  parameter_meaning: exposure time of the photodiode for the infrared measurement of light sensor 1 (before the polarizers)
+  reference_value: 3
+  intervened_value: 0
+  value_source: *v_t_ir_1
+  data_check: "t_ir_1 = 0 in all 1000 rows; every other manipulable column within its reference range"
+  affected_readouts: [ir_1]
+  graph_edges: ["T₁^(I) → Ĩ₁ (Fig. 3a; Table 5 p-value 1.9 × 10⁻¹⁴)"]
+  direction: { ir_1: decrease }
+  direction_basis: *db_t
+  status: documented
+  source: *s_t
+  notes: *n_t
+
+uniform_t_ir_1_weak:
+  parameter: t_ir_1
+  parameter_symbol: "T^I_1"
+  parameter_meaning: exposure time of the photodiode for the infrared measurement of light sensor 1 (before the polarizers)
+  reference_value: 3
+  intervened_value: 2
+  value_source: *v_t_ir_1
+  data_check: "t_ir_1 = 2 in all 1000 rows; every other manipulable column within its reference range"
+  affected_readouts: [ir_1]
+  graph_edges: ["T₁^(I) → Ĩ₁ (Fig. 3a; Table 5 p-value 1.9 × 10⁻¹⁴)"]
+  direction: { ir_1: decrease }
+  direction_basis: *db_t
+  status: documented
+  source: *s_t
+  notes: *n_t
+
+uniform_t_ir_2_mid:
+  parameter: t_ir_2
+  parameter_symbol: "T^I_2"
+  parameter_meaning: exposure time of the photodiode for the infrared measurement of light sensor 2 (between the polarizers)
+  reference_value: 3
+  intervened_value: 1
+  value_source: &v_t_ir_2
+    url: https://github.com/juangamella/causal-chamber/blob/0c8a77ea14bd4437b1fdd79adc1aa91ac2342569/datasets/lt_interventions_standard_v1/generators/uniform.py#L67
+    quote: |-
+      "t_ir_2": [3, 2, 1, 0],
+  data_check: "t_ir_2 = 1 in all 1000 rows; every other manipulable column within its reference range"
+  affected_readouts: [ir_2]
+  graph_edges: ["T₂^(I) → Ĩ₂ (Fig. 3a; Table 5 p-value 1.9 × 10⁻¹⁴)"]
+  direction: { ir_2: decrease }
+  direction_basis: *db_t
+  status: documented
+  source: *s_t
+  notes: *n_t
+
+uniform_t_ir_2_strong:
+  parameter: t_ir_2
+  parameter_symbol: "T^I_2"
+  parameter_meaning: exposure time of the photodiode for the infrared measurement of light sensor 2 (between the polarizers)
+  reference_value: 3
+  intervened_value: 0
+  value_source: *v_t_ir_2
+  data_check: "t_ir_2 = 0 in all 1000 rows; every other manipulable column within its reference range"
+  affected_readouts: [ir_2]
+  graph_edges: ["T₂^(I) → Ĩ₂ (Fig. 3a; Table 5 p-value 1.9 × 10⁻¹⁴)"]
+  direction: { ir_2: decrease }
+  direction_basis: *db_t
+  status: documented
+  source: *s_t
+  notes: *n_t
+
+uniform_t_ir_2_weak:
+  parameter: t_ir_2
+  parameter_symbol: "T^I_2"
+  parameter_meaning: exposure time of the photodiode for the infrared measurement of light sensor 2 (between the polarizers)
+  reference_value: 3
+  intervened_value: 2
+  value_source: *v_t_ir_2
+  data_check: "t_ir_2 = 2 in all 1000 rows; every other manipulable column within its reference range"
+  affected_readouts: [ir_2]
+  graph_edges: ["T₂^(I) → Ĩ₂ (Fig. 3a; Table 5 p-value 1.9 × 10⁻¹⁴)"]
+  direction: { ir_2: decrease }
+  direction_basis: *db_t
+  status: documented
+  source: *s_t
+  notes: *n_t
+
+uniform_t_ir_3_mid:
+  parameter: t_ir_3
+  parameter_symbol: "T^I_3"
+  parameter_meaning: exposure time of the photodiode for the infrared measurement of light sensor 3 (after both polarizers)
+  reference_value: 3
+  intervened_value: 1
+  value_source: &v_t_ir_3
+    url: https://github.com/juangamella/causal-chamber/blob/0c8a77ea14bd4437b1fdd79adc1aa91ac2342569/datasets/lt_interventions_standard_v1/generators/uniform.py#L68
+    quote: |-
+      "t_ir_3": [3, 2, 1, 0],
+  data_check: "t_ir_3 = 1 in all 1000 rows; every other manipulable column within its reference range"
+  affected_readouts: [ir_3]
+  graph_edges: ["T₃^(I) → Ĩ₃ (Fig. 3a; Table 5 p-value 2.3 × 10⁻¹⁴)"]
+  direction: { ir_3: decrease }
+  direction_basis: *db_t
+  status: documented
+  source: *s_t
+  notes: *n_t
+
+uniform_t_ir_3_strong:
+  parameter: t_ir_3
+  parameter_symbol: "T^I_3"
+  parameter_meaning: exposure time of the photodiode for the infrared measurement of light sensor 3 (after both polarizers)
+  reference_value: 3
+  intervened_value: 0
+  value_source: *v_t_ir_3
+  data_check: "t_ir_3 = 0 in all 1000 rows; every other manipulable column within its reference range"
+  affected_readouts: [ir_3]
+  graph_edges: ["T₃^(I) → Ĩ₃ (Fig. 3a; Table 5 p-value 2.3 × 10⁻¹⁴)"]
+  direction: { ir_3: decrease }
+  direction_basis: *db_t
+  status: documented
+  source: *s_t
+  notes: "This is the case in the previous write-up. Its three factual claims check out: the strong condition sets t_ir_3 from 3 to 0 (generator and data); Table 2 places Ĩ₃ after the polarizers; App. III.2 states that the exposure time affects the infrared reading. In the published graph θ̃₂ (angle_2) has only θ₂, R₂ and O₂ as parents, so no documented edge links t_ir_3 to angle_2. The text calls T_j 'gain' in one clause and 'exposure time' elsewhere; the code ordering is shown for sensor 1 only (Fig. 13) and stated only in arXiv v1."
+
+uniform_t_ir_3_weak:
+  parameter: t_ir_3
+  parameter_symbol: "T^I_3"
+  parameter_meaning: exposure time of the photodiode for the infrared measurement of light sensor 3 (after both polarizers)
+  reference_value: 3
+  intervened_value: 2
+  value_source: *v_t_ir_3
+  data_check: "t_ir_3 = 2 in all 1000 rows; every other manipulable column within its reference range"
+  affected_readouts: [ir_3]
+  graph_edges: ["T₃^(I) → Ĩ₃ (Fig. 3a; Table 5 p-value 2.3 × 10⁻¹⁴)"]
+  direction: { ir_3: decrease }
+  direction_basis: *db_t
+  status: documented
+  source: *s_t
+  notes: *n_t
+
+uniform_t_vis_1_mid:
+  parameter: t_vis_1
+  parameter_symbol: "T^V_1"
+  parameter_meaning: exposure time of the photodiode for the visible-light measurement of light sensor 1 (before the polarizers)
+  reference_value: 3
+  intervened_value: 1
+  value_source: &v_t_vis_1
+    url: https://github.com/juangamella/causal-chamber/blob/0c8a77ea14bd4437b1fdd79adc1aa91ac2342569/datasets/lt_interventions_standard_v1/generators/uniform.py#L69
+    quote: |-
+      "t_vis_1": [3, 2, 1, 0],
+  data_check: "t_vis_1 = 1 in all 1000 rows; every other manipulable column within its reference range"
+  affected_readouts: [vis_1]
+  graph_edges: ["T₁^(V) → Ṽ₁ (Fig. 3a; Table 5 p-value 1.9 × 10⁻¹⁴)"]
+  direction: { vis_1: decrease }
+  direction_basis: *db_t
+  status: documented
+  source: *s_t
+  notes: *n_t
+
+uniform_t_vis_1_strong:
+  parameter: t_vis_1
+  parameter_symbol: "T^V_1"
+  parameter_meaning: exposure time of the photodiode for the visible-light measurement of light sensor 1 (before the polarizers)
+  reference_value: 3
+  intervened_value: 0
+  value_source: *v_t_vis_1
+  data_check: "t_vis_1 = 0 in all 1000 rows; every other manipulable column within its reference range"
+  affected_readouts: [vis_1]
+  graph_edges: ["T₁^(V) → Ṽ₁ (Fig. 3a; Table 5 p-value 1.9 × 10⁻¹⁴)"]
+  direction: { vis_1: decrease }
+  direction_basis: *db_t
+  status: documented
+  source: *s_t
+  notes: *n_t
+
+uniform_t_vis_1_weak:
+  parameter: t_vis_1
+  parameter_symbol: "T^V_1"
+  parameter_meaning: exposure time of the photodiode for the visible-light measurement of light sensor 1 (before the polarizers)
+  reference_value: 3
+  intervened_value: 2
+  value_source: *v_t_vis_1
+  data_check: "t_vis_1 = 2 in all 1000 rows; every other manipulable column within its reference range"
+  affected_readouts: [vis_1]
+  graph_edges: ["T₁^(V) → Ṽ₁ (Fig. 3a; Table 5 p-value 1.9 × 10⁻¹⁴)"]
+  direction: { vis_1: decrease }
+  direction_basis: *db_t
+  status: documented
+  source: *s_t
+  notes: *n_t
+
+uniform_t_vis_2_mid:
+  parameter: t_vis_2
+  parameter_symbol: "T^V_2"
+  parameter_meaning: exposure time of the photodiode for the visible-light measurement of light sensor 2 (between the polarizers)
+  reference_value: 3
+  intervened_value: 1
+  value_source: &v_t_vis_2
+    url: https://github.com/juangamella/causal-chamber/blob/0c8a77ea14bd4437b1fdd79adc1aa91ac2342569/datasets/lt_interventions_standard_v1/generators/uniform.py#L70
+    quote: |-
+      "t_vis_2": [3, 2, 1, 0],
+  data_check: "t_vis_2 = 1 in all 1000 rows; every other manipulable column within its reference range"
+  affected_readouts: [vis_2]
+  graph_edges: ["T₂^(V) → Ṽ₂ (Fig. 3a; Table 5 p-value 1.6 × 10⁻¹⁴)"]
+  direction: { vis_2: decrease }
+  direction_basis: *db_t
+  status: documented
+  source: *s_t
+  notes: *n_t
+
+uniform_t_vis_2_strong:
+  parameter: t_vis_2
+  parameter_symbol: "T^V_2"
+  parameter_meaning: exposure time of the photodiode for the visible-light measurement of light sensor 2 (between the polarizers)
+  reference_value: 3
+  intervened_value: 0
+  value_source: *v_t_vis_2
+  data_check: "t_vis_2 = 0 in all 1000 rows; every other manipulable column within its reference range"
+  affected_readouts: [vis_2]
+  graph_edges: ["T₂^(V) → Ṽ₂ (Fig. 3a; Table 5 p-value 1.6 × 10⁻¹⁴)"]
+  direction: { vis_2: decrease }
+  direction_basis: *db_t
+  status: documented
+  source: *s_t
+  notes: *n_t
+
+uniform_t_vis_2_weak:
+  parameter: t_vis_2
+  parameter_symbol: "T^V_2"
+  parameter_meaning: exposure time of the photodiode for the visible-light measurement of light sensor 2 (between the polarizers)
+  reference_value: 3
+  intervened_value: 2
+  value_source: *v_t_vis_2
+  data_check: "t_vis_2 = 2 in all 1000 rows; every other manipulable column within its reference range"
+  affected_readouts: [vis_2]
+  graph_edges: ["T₂^(V) → Ṽ₂ (Fig. 3a; Table 5 p-value 1.6 × 10⁻¹⁴)"]
+  direction: { vis_2: decrease }
+  direction_basis: *db_t
+  status: documented
+  source: *s_t
+  notes: *n_t
+
+uniform_t_vis_3_mid:
+  parameter: t_vis_3
+  parameter_symbol: "T^V_3"
+  parameter_meaning: exposure time of the photodiode for the visible-light measurement of light sensor 3 (after both polarizers)
+  reference_value: 3
+  intervened_value: 1
+  value_source: &v_t_vis_3
+    url: https://github.com/juangamella/causal-chamber/blob/0c8a77ea14bd4437b1fdd79adc1aa91ac2342569/datasets/lt_interventions_standard_v1/generators/uniform.py#L71
+    quote: |-
+      "t_vis_3": [3, 2, 1, 0],
+  data_check: "t_vis_3 = 1 in all 1000 rows; every other manipulable column within its reference range"
+  affected_readouts: [vis_3]
+  graph_edges: ["T₃^(V) → Ṽ₃ (Fig. 3a; Table 5 p-value 1.9 × 10⁻¹⁴)"]
+  direction: { vis_3: decrease }
+  direction_basis: *db_t
+  status: documented
+  source: *s_t
+  notes: *n_t
+
+uniform_t_vis_3_strong:
+  parameter: t_vis_3
+  parameter_symbol: "T^V_3"
+  parameter_meaning: exposure time of the photodiode for the visible-light measurement of light sensor 3 (after both polarizers)
+  reference_value: 3
+  intervened_value: 0
+  value_source: *v_t_vis_3
+  data_check: "t_vis_3 = 0 in all 1000 rows; every other manipulable column within its reference range"
+  affected_readouts: [vis_3]
+  graph_edges: ["T₃^(V) → Ṽ₃ (Fig. 3a; Table 5 p-value 1.9 × 10⁻¹⁴)"]
+  direction: { vis_3: decrease }
+  direction_basis: *db_t
+  status: documented
+  source: *s_t
+  notes: *n_t
+
+uniform_t_vis_3_weak:
+  parameter: t_vis_3
+  parameter_symbol: "T^V_3"
+  parameter_meaning: exposure time of the photodiode for the visible-light measurement of light sensor 3 (after both polarizers)
+  reference_value: 3
+  intervened_value: 2
+  value_source: *v_t_vis_3
+  data_check: "t_vis_3 = 2 in all 1000 rows; every other manipulable column within its reference range"
+  affected_readouts: [vis_3]
+  graph_edges: ["T₃^(V) → Ṽ₃ (Fig. 3a; Table 5 p-value 1.9 × 10⁻¹⁴)"]
+  direction: { vis_3: decrease }
+  direction_basis: *db_t
+  status: documented
+  source: *s_t
+  notes: *n_t
+
+uniform_v_angle_1_mid:
+  parameter: v_angle_1
+  parameter_symbol: "R_1"
+  parameter_meaning: reference voltage (V) of the ADC reading the angle sensor of polarizer 1; actual values 5, 2.55, 1.09 (Table 3)
+  reference_value: 5
+  intervened_value: 2.56
+  value_source: &v_v_angle_1
+    url: https://github.com/juangamella/causal-chamber/blob/0c8a77ea14bd4437b1fdd79adc1aa91ac2342569/datasets/lt_interventions_standard_v1/generators/uniform.py#L52
+    quote: |-
+      "v_angle_1": [5, 2.56, 1.1],
+  data_check: "v_angle_1 = 2.56 in all 1000 rows; every other manipulable column within its reference range"
+  affected_readouts: [angle_1]
+  graph_edges: ["R₁ → θ̃₁ (Fig. 3a; Table 5 p-value 1.6 × 10⁻¹⁴)"]
+  direction: { angle_1: saturation }
+  direction_inferred: { angle_1: increase }
+  direction_basis: &db_v_angle_mid "Stated: lowering the reference voltage changes the resolution and saturates the angle sensor. Fig. 14 (left) shows the R₁ = 2.56 curve flat for settings above roughly +10° (read by eye), inside the reference range of pol_j, so part of the readings saturate. The sign of the raw shift is not stated for θ̃_j. Inference: the Fig. 12 caption says the current-sensor principles apply to θ̃₁ and θ̃₂, and Fig. 12 (middle) shows the raw reading rising as the reference voltage falls (the ADC maps [0, R] volts to [0, 1023]), so the raw angle reading should rise and clip at the ADC maximum."
+  status: documented
+  source: &s_v_angle
+    - &q_angle_vref
+      url: https://arxiv.org/html/2404.11341v2#A2.SS0.SSS0.Px5
+      heading: |-
+        {θ_(j), R_(j), O_(j)} → θ̃_(j)
+      quote: |-
+        Changes in the reference voltages R₁, R₂ affect the resolution of the measurements, but can also cause the sensor to saturate (see Fig. 14, left).
+    - &q_fig14_vref
+      url: https://arxiv.org/html/2404.11341v2#A2.F14
+      quote: |-
+        Lowering the reference voltage R₁ results in a saturation of the sensor, being completely saturated (i.e., returning a constant reading) at R₁ = 1.1.
+    - *q_fig14_same
+    - &q_fig12_vref
+      url: https://arxiv.org/html/2404.11341v2#A2.F12
+      quote: |-
+        For a constant oversampling rate (O_(C) = 1), changing the reference voltage results in a shift of the sensor output (middle) and an increase in the resolution of the calibrated measurement (right). While the plots show the current measurement C̃ in the light-tunnel, the same principles apply for the other sensors which encode their measurement as voltage (θ̃₁, θ̃₂, M̃, S̃₁, S̃₂) and for the wind-tunnel barometers (P̃_(dw), P̃_(up), P̃_(amb), P̃_(int)), which also allow for varying oversampling rates (O_(dw), O_(up), O_(amb), O_(int)).
+    - &q_table_vref
+      url: https://arxiv.org/html/2404.11341v2#Ax8.T2
+      quote: |-
+        The reference voltage, in volts, of the sensors used to measure the current (C̃) and polarizer angles (θ̃₁, θ̃₂), respectively. The values differ slightly from the actual reference voltages used by the sensors, which can be found in Table 3.
+    - *q_table5
+  notes: &n_v_angle "Inference, flagged as doubt: the Table 2 calibration (θ̃_j − Z_j) × 720/1023 × vref(R_j)/5 does not reproduce the curves of Fig. 14 (left). The form (θ̃_j × vref(R_j)/5 − Z_j) × 720/1023 does: it gives the identity line at R₁ = 5, clipping near +10° at R₁ = 2.56 when θ̃₁ = 1023, and the constant near −200° at R₁ = 1.1 when θ̃₁ = 1023. This suggests the printed formula is misstated and that the saturated raw value is 1023, but neither point is documented."
+
+uniform_v_angle_1_strong:
+  parameter: v_angle_1
+  parameter_symbol: "R_1"
+  parameter_meaning: reference voltage (V) of the ADC reading the angle sensor of polarizer 1; actual values 5, 2.55, 1.09 (Table 3)
+  reference_value: 5
+  intervened_value: 1.1
+  value_source: *v_v_angle_1
+  data_check: "v_angle_1 = 1.1 in all 1000 rows; every other manipulable column within its reference range"
+  affected_readouts: [angle_1]
+  graph_edges: ["R₁ → θ̃₁ (Fig. 3a; Table 5 p-value 1.6 × 10⁻¹⁴)"]
+  direction: { angle_1: constant_reading }
+  direction_inferred: { angle_1: increase }
+  direction_basis: &db_v_angle_strong "Stated: at R₁ = 1.1 the angle sensor is completely saturated and returns a constant reading (Fig. 14 caption; same principles for θ̃₂), so the readout loses its dependence on pol_j. The constant's value is not stated; the inference that it is the ADC maximum (1023) is in notes."
+  status: documented
+  source: *s_v_angle
+  notes: *n_v_angle
+
+uniform_v_angle_2_mid:
+  parameter: v_angle_2
+  parameter_symbol: "R_2"
+  parameter_meaning: reference voltage (V) of the ADC reading the angle sensor of polarizer 2; actual values 5, 2.55, 1.09 (Table 3)
+  reference_value: 5
+  intervened_value: 2.56
+  value_source: &v_v_angle_2
+    url: https://github.com/juangamella/causal-chamber/blob/0c8a77ea14bd4437b1fdd79adc1aa91ac2342569/datasets/lt_interventions_standard_v1/generators/uniform.py#L53
+    quote: |-
+      "v_angle_2": [5, 2.56, 1.1],
+  data_check: "v_angle_2 = 2.56 in all 1000 rows; every other manipulable column within its reference range"
+  affected_readouts: [angle_2]
+  graph_edges: ["R₂ → θ̃₂ (Fig. 3a; Table 5 p-value 2.3 × 10⁻¹⁴)"]
+  direction: { angle_2: saturation }
+  direction_inferred: { angle_2: increase }
+  direction_basis: *db_v_angle_mid
+  status: documented
+  source: *s_v_angle
+  notes: *n_v_angle
+
+uniform_v_angle_2_strong:
+  parameter: v_angle_2
+  parameter_symbol: "R_2"
+  parameter_meaning: reference voltage (V) of the ADC reading the angle sensor of polarizer 2; actual values 5, 2.55, 1.09 (Table 3)
+  reference_value: 5
+  intervened_value: 1.1
+  value_source: *v_v_angle_2
+  data_check: "v_angle_2 = 1.1 in all 1000 rows; every other manipulable column within its reference range"
+  affected_readouts: [angle_2]
+  graph_edges: ["R₂ → θ̃₂ (Fig. 3a; Table 5 p-value 2.3 × 10⁻¹⁴)"]
+  direction: { angle_2: constant_reading }
+  direction_inferred: { angle_2: increase }
+  direction_basis: *db_v_angle_strong
+  status: documented
+  source: *s_v_angle
+  notes: *n_v_angle
+
+uniform_v_c_mid:
+  parameter: v_c
+  parameter_symbol: "R_C"
+  parameter_meaning: reference voltage (V) of the ADC reading the current sensor of the light source; actual values 5, 2.55, 1.09 (Table 3)
+  reference_value: 5
+  intervened_value: 2.56
+  value_source: &v_v_c
+    url: https://github.com/juangamella/causal-chamber/blob/0c8a77ea14bd4437b1fdd79adc1aa91ac2342569/datasets/lt_interventions_standard_v1/generators/uniform.py#L47
+    quote: |-
+      "v_c": [5, 2.56, 1.1],
+  data_check: "v_c = 2.56 in all 1000 rows; every other manipulable column within its reference range"
+  affected_readouts: [current]
+  graph_edges: ["R_(C) → C̃ (Fig. 3a; Table 5 p-value 1.9 × 10⁻¹⁴)"]
+  direction: { current: increase }
+  direction_basis: &db_v_c "Stated: the ADC maps [0, R_C] volts to [0, 1023], so lowering R_C raises the raw count for a given current, and the caption says the reference voltage shifts the sensor output. Fig. 12 (middle) shows the raw C̃ near 65, 122 and 288 for R_C = 5.00, 2.56 and 1.10 at fixed R, G, B (read by eye)."
+  status: documented
+  source: &s_v_c
+    - &q_cur_map
+      url: https://arxiv.org/html/2404.11341v2#A2.SS0.SSS0.Px3
+      heading: |-
+        {R_(C), O_(C)} → C̃
+      quote: |-
+        This voltage is then read by the onboard computer, linearly mapping the range of [0, R_(C)] volts to [0, 1023]. Thus, reducing the reference voltage R_(C) increases the resolution of the current measurements (see Fig. 12, right).
+    - *q_fig12_vref
+    - *q_table_vref
+    - *q_table5
+  notes: &n_v_c "Saturation of C̃ is not mentioned for the light tunnel (the wind-tunnel text mentions it for its current sensors). Whether any reading in this experiment clips at 1023 is not documented."
+
+uniform_v_c_strong:
+  parameter: v_c
+  parameter_symbol: "R_C"
+  parameter_meaning: reference voltage (V) of the ADC reading the current sensor of the light source; actual values 5, 2.55, 1.09 (Table 3)
+  reference_value: 5
+  intervened_value: 1.1
+  value_source: *v_v_c
+  data_check: "v_c = 1.1 in all 1000 rows; every other manipulable column within its reference range"
+  affected_readouts: [current]
+  graph_edges: ["R_(C) → C̃ (Fig. 3a; Table 5 p-value 1.9 × 10⁻¹⁴)"]
+  direction: { current: increase }
+  direction_basis: *db_v_c
+  status: documented
+  source: *s_v_c
+  notes: *n_v_c

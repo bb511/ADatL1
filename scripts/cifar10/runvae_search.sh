@@ -2,9 +2,9 @@
 # ========================================================================
 # VAE POOL COMMANDS
 # ========================================================================
-# The random pool of cifar10/vae: 110 trials, drawn by four drivers that
-# share the Optuna study `pool` and differ only in their sampler seed. Every
-# trial is a full 200-epoch training, evaluated at the checkpoint of each
+# The random pool of cifar10/vae: 90 trials, drawn by four drivers that share
+# the Optuna study `pool` and differ only in their sampler seed. Every trial
+# is a full 200-epoch training, evaluated at the checkpoint of each
 # validation strategy, and the strategies then select from the pool.
 #
 # The random sampler replays its draws from the seed, so a driver that stops
@@ -13,9 +13,8 @@
 # such a relaunch.
 #
 # The blocks name no launcher: the venue appends one at submission, with a
-# timeout of 27 minutes per trial for this model (200 epochs at up to 4.5 s
-# each on an H100, plus about 3 minutes of evaluation, and half again as
-# margin).
+# timeout of 27 minutes per trial for this model (200 epochs at up to 4.5 s each on an H100, plus about 3 minutes of
+# evaluation, and half again as margin).
 #
 # On clariden, each driver keeps six trials queued as slurm jobs:
 #   bash scripts/cluster/submit_search.sh scripts/cifar10/runvae_search.sh \
@@ -44,7 +43,7 @@
 #     experiment=cifar10/vae \
 #     logger=mlflow \
 #     hparams_search=cifar10/vae_optuna \
-#     hydra.sweeper.n_trials=28 \
+#     hydra.sweeper.n_trials=23 \
 #     hydra.sweeper.sampler.seed=2021 \
 #     trainer=gpu \
 #     trainer.max_epochs=200 \
@@ -58,7 +57,7 @@
 #     experiment=cifar10/vae \
 #     logger=mlflow \
 #     hparams_search=cifar10/vae_optuna \
-#     hydra.sweeper.n_trials=28 \
+#     hydra.sweeper.n_trials=23 \
 #     hydra.sweeper.sampler.seed=2022 \
 #     trainer=gpu \
 #     trainer.max_epochs=200 \
@@ -72,7 +71,7 @@
 #     experiment=cifar10/vae \
 #     logger=mlflow \
 #     hparams_search=cifar10/vae_optuna \
-#     hydra.sweeper.n_trials=27 \
+#     hydra.sweeper.n_trials=22 \
 #     hydra.sweeper.sampler.seed=2023 \
 #     trainer=gpu \
 #     trainer.max_epochs=200 \
@@ -86,7 +85,7 @@
 #     experiment=cifar10/vae \
 #     logger=mlflow \
 #     hparams_search=cifar10/vae_optuna \
-#     hydra.sweeper.n_trials=27 \
+#     hydra.sweeper.n_trials=22 \
 #     hydra.sweeper.sampler.seed=2024 \
 #     trainer=gpu \
 #     trainer.max_epochs=200 \

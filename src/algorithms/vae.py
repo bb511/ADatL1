@@ -5,16 +5,41 @@ import torch
 from torch import nn
 
 from src.algorithms import ADLightningModule
+from src.algorithms.components.decoder import Decoder
+from src.algorithms.components.encoder import VariationalEncoder
 from src.algorithms.losses.vae import ClassicVAELoss
 from src.algorithms.schedulers.linear import LinearWarmup
-from src.algorithms.utils.weight_loader import load_weights
 from src.algorithms.utils.object_feature_map_loader import inject_object_feature_map
-from src.algorithms.components.encoder import VariationalEncoder
-from src.algorithms.components.decoder import Decoder
+from src.algorithms.utils.weight_loader import load_weights
 from src.data.utils import unpack_batch
 from src.utils import pylogger
 
 log = pylogger.RankedLogger(__name__)
+
+
+def _unfitted_residual_state(dim: int) -> dict[str, torch.Tensor]:
+    return {
+        "residual_oas_location": torch.zeros(dim),
+        "residual_oas_precision": torch.eye(dim),
+        "residual_oas_ready": torch.tensor(False),
+    }
+
+
+def _whitened_energy(
+    residual: torch.Tensor,
+    location: torch.Tensor,
+    precision: torch.Tensor,
+    mask: torch.Tensor | None,
+) -> torch.Tensor:
+    """Mahalanobis energy of the centred residual per observed feature.
+
+    The residual and mask have shape (batch, features) and the result (batch,).
+    Unobserved features are zeroed before the quadratic form.
+    """
+    mask = torch.ones_like(residual) if mask is None else mask.to(residual.dtype)
+    centred = (residual - location) * mask
+    n_observed = mask.sum(dim=1).clamp_min(1.0)
+    return torch.einsum("bi,ij,bj->b", centred, precision, centred) / n_observed
 
 
 class VAE(ADLightningModule):
@@ -26,6 +51,10 @@ class VAE(ADLightningModule):
     :param kl_scale: Float pertaining to the scaling factor before the KL divergence.
     :param features: Optional nn module applied to the flattened input.
     :param ckpt: Optional checkpoint path to resume weights from.
+    :param anomaly_score: Score emitted as 'ascore/full' in validation and test:
+        'kl', the raw KL divergence, or 'residual_oas', the whitened residual of the
+        posterior-mean reconstruction, which needs the state set by
+        src.callbacks.residual_state.ResidualStateCallback.
     :param target_rate: Target background rate or FPR.
     :param base_rate: Base rate used to convert target_rate into an FPR.
         If None, target_rate is interpreted directly as an FPR.
@@ -39,14 +68,13 @@ class VAE(ADLightningModule):
         kl_scale: float = 1.0,
         features: Optional[nn.Module] = None,
         ckpt: str = "",
+        anomaly_score: str = "kl",
         target_rate: float = 0.25,
         base_rate: float | None = None,
         **kwargs,
     ):
         super().__init__(model=None, **kwargs)
-        self.save_hyperparameters(
-            ignore=["model", "features", "encoder", "decoder"]
-        )
+        self.save_hyperparameters(ignore=["model", "features", "encoder", "decoder"])
 
         self.ckpt_path = ckpt
         self.encoder = encoder
@@ -56,6 +84,13 @@ class VAE(ADLightningModule):
         self.kl_warmup_frac = kl_warmup_frac
 
         self.loss = ClassicVAELoss(kl_scale=kl_scale, reduction="none")
+
+        if anomaly_score not in ("kl", "residual_oas"):
+            raise ValueError(f"Unknown VAE anomaly_score {anomaly_score!r}.")
+        self.anomaly_score = anomaly_score
+        # Buffers, so that every checkpoint carries the state fitted at its epoch.
+        for name, value in _unfitted_residual_state(decoder.out_dim).items():
+            self.register_buffer(name, value)
 
     def on_fit_start(self):
         inject_object_feature_map(self)
@@ -74,11 +109,39 @@ class VAE(ADLightningModule):
             # warmup value does not depend on total_steps.
             self._setup_kl_annealing(self.kl_warmup_frac, 1)
 
+    def load_state_dict(self, state_dict, strict: bool = True, assign: bool = False):
+        # Checkpoints written before the residual state existed load as unfitted.
+        if "residual_oas_ready" not in state_dict:
+            dim = self.residual_oas_location.numel()
+            state_dict = {**state_dict, **_unfitted_residual_state(dim)}
+        return super().load_state_dict(state_dict, strict=strict, assign=assign)
+
     def forward(self, x: torch.Tensor) -> tuple[torch.Tensor, ...]:
         x = self.features(x)
         z_mean, z_log_var, z = self.encoder(x)
         reconstruction = self.decoder(z)
         return z_mean, z_log_var, z, reconstruction
+
+    def residuals(self, x: torch.Tensor) -> torch.Tensor:
+        """Residual x - x̂ of a flattened input, x̂ decoded from the posterior mean."""
+        z_mean, _, _ = self.encoder(self.features(x))
+        return x - self.decoder(z_mean)
+
+    def set_residual_state(self, location: torch.Tensor, precision: torch.Tensor):
+        self.residual_oas_location.copy_(location)
+        self.residual_oas_precision.copy_(precision)
+        self.residual_oas_ready.fill_(True)
+
+    def residual_oas_score(
+        self, residual: torch.Tensor, mask: torch.Tensor | None = None
+    ) -> torch.Tensor:
+        if not bool(self.residual_oas_ready):
+            raise RuntimeError(
+                "The residual_oas score needs a fitted residual state: add the "
+                "residual_state callback, or load a checkpoint written with it."
+            )
+        location, precision = self.residual_oas_location, self.residual_oas_precision
+        return _whitened_energy(residual, location, precision, mask)
 
     def model_step(self, batch: torch.Tensor) -> dict[str, torch.Tensor]:
         b = unpack_batch(batch)
@@ -100,12 +163,10 @@ class VAE(ADLightningModule):
             kl_scale=kl_current_scale,
         )
 
-        # The operational anomaly score is hard-configured to the raw KL.
-        ascore = kl_raw
+        scores = self._anomaly_scores(x, z_mean, kl_raw, m)
+        ascore = scores["kl"] if self.training else scores[self.anomaly_score]
         if ascore.ndim != 1:
-            raise ValueError(
-                f"Expected per-event ascores, got {tuple(ascore.shape)}."
-            )
+            raise ValueError(f"Expected per-event ascores, got {tuple(ascore.shape)}.")
 
         loss = self._add_hgq_loss(loss)
 
@@ -142,9 +203,30 @@ class VAE(ADLightningModule):
             "loss/reco/full": reco_loss.detach(),
             "loss/kl_raw/full": kl_raw.detach(),
             "ascore/full": ascore.detach(),
+            **{f"ascore/{name}": score.detach() for name, score in scores.items()},
             "z_mean_squared/full": z_mean_squared.detach(),
             "reconstructed_data": reconstruction.detach(),
         }
+
+    def _anomaly_scores(
+        self,
+        x: torch.Tensor,
+        z_mean: torch.Tensor,
+        kl_raw: torch.Tensor,
+        mask: torch.Tensor | None,
+    ) -> dict[str, torch.Tensor]:
+        """Per-event scores by name, the residual one outside training only.
+
+        The residual decodes the posterior mean, so it carries no sampling noise. The
+        residual state is refitted at the start of every validation epoch, so during
+        training it is stale, or unfitted in the first epoch.
+        """
+        scores = {"kl": kl_raw}
+        fitted = bool(self.residual_oas_ready)
+        if not self.training and (fitted or self.anomaly_score == "residual_oas"):
+            residual = x - self.decoder(z_mean)
+            scores["residual_oas"] = self.residual_oas_score(residual, mask)
+        return scores
 
     def outlog(self, outdict: dict) -> dict:
         return {
@@ -165,7 +247,7 @@ class VAE(ADLightningModule):
         if hasattr(self.loss, "kl_scale_final"):
             fin_scale = float(self.loss.kl_scale_final)
         elif kl_warmup_frac > 0:
-            log.warn(
+            log.warning(
                 f"Given kl_warmup_frac > 0 but loss {type(self.loss).__name__} "
                 "does not have attribute 'kl_scale_final'. "
                 "Annealing of the KL scale is disabled."
@@ -201,10 +283,9 @@ class VAE(ADLightningModule):
         add_loss = 0.0
 
         if hasattr(self.encoder, "losses") and len(self.encoder.losses) > 0:
-            add_loss = add_loss + torch.stack([l for l in self.encoder.losses]).sum()
+            add_loss = add_loss + torch.stack(list(self.encoder.losses)).sum()
 
         if hasattr(self.decoder, "losses") and len(self.decoder.losses) > 0:
-            add_loss = add_loss + torch.stack([l for l in self.decoder.losses]).sum()
+            add_loss = add_loss + torch.stack(list(self.decoder.losses)).sum()
 
         return loss + add_loss
-

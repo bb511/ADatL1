@@ -30,15 +30,18 @@ hydra:
 
     # define hyperparameter search space. Assumes using torch.optim.AdamW
     # RobustAD space
-    params:
-      algorithm.optimizer.lr: tag(log, interval(3e-5, 1e-3))
-      trainer.gradient_clip_val: choice(0.0, 0.5, 1.0, 2.0)
-      algorithm.optimizer.betas: choice([0.9, 0.999], [0.9, 0.99])
-      algorithm.optimizer.weight_decay: choice(0.0, 1e-6, 1e-5, 1e-4)
 
+    # Space of the shared pool after the review of the submitted version's
+    # searches (19 Oct 2026). The Adam betas, weight decay and the input noise
+    # had no measurable effect on the image sets and take the experiment's
+    # values. Clipping stays as on or off: without it the log-likelihood
+    # diverges in a share of trials. hidden_dim loses the 384 level between
+    # 256 and 512; the learning-rate range is the flows'.
+    params:
       algorithm.flow.n_flows: choice(4, 6)
-      algorithm.flow.hidden_dim: choice(128, 256, 384, 512)
+      algorithm.flow.hidden_dim: choice(128, 256, 512)
       algorithm.flow.n_hidden_layers: choice(1, 2)
       algorithm.flow.activation: choice(relu, gelu, silu)
-      algorithm.flow.noise_scale: choice(0.0, 1e-4, 1e-3, 1e-2)
       algorithm.flow.scale_clamp: choice(3.0, 5.0)
+      trainer.gradient_clip_val: choice(0.0, 1.0)
+      algorithm.optimizer.lr: tag(log, interval(3e-5, 3e-3))

@@ -49,15 +49,18 @@ hydra:
     # hidden_dims stops well below the paper's [256, 512, 256]: every other model
     # in this comparison is sized for L1 trigger deployment, so DTE is held at
     # comparable capacity rather than allowed to win on parameter count.
+
+    # Space of the shared pool after the review of the submitted version's
+    # searches (19 Oct 2026). Clipping, the Adam betas and weight decay had no
+    # measurable effect and take the experiment's values; the learning-rate
+    # ceiling is raised because the old fronts pressed 3e-3. n_bins and the
+    # widths lose their near-duplicate levels (7 and 15; [32,16] and
+    # [64,32,32]); the activation keeps all three levels, its effect differing
+    # by strategy.
     params:
-      algorithm.optimizer.lr: tag(log, interval(3e-5, 3e-3))
-      trainer.gradient_clip_val: choice(0.0, 0.5, 1.0, 2.0)
-      algorithm.optimizer.betas: choice([0.9, 0.999], [0.9, 0.99])
-      algorithm.optimizer.weight_decay: choice(0.0, 1e-6, 1e-5, 1e-4, 1e-3)
-
       algorithm.beta_end: tag(log, interval(1e-3, 1e-1))
-      algorithm.n_bins: choice(5, 7, 10, 15, 20, 30)
-
-      algorithm.predictor.hidden_dims: choice([32,16], [64,32], [64,32,16], [64,32,32], [128,64], [128,64,32])
-      algorithm.predictor.dropout: choice(0.0, 0.1, 0.25, 0.5)
+      algorithm.n_bins: choice(5, 10, 20, 30)
+      algorithm.predictor.hidden_dims: choice([64,32], [64,32,16], [128,64], [128,64,32])
+      algorithm.predictor.dropout: choice(0.0, 0.25, 0.5)
       algorithm.predictor.activation: choice(relu, gelu, silu)
+      algorithm.optimizer.lr: tag(log, interval(3e-5, 1e-2))

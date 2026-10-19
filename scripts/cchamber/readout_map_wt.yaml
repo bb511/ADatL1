@@ -1,0 +1,376 @@
+# Intervention -> directly affected readout map for the Causal Chamber wind tunnel,
+# dataset wt_walks_v1, experiment regime_jumps_single. Drafted 2026-10-18 from primary
+# documentation (commit 0c8a77ea), then checked on the downloaded data on 2026-10-18; sources, counts and every point of doubt are in
+# wt_metadata_notes.md beside this file.
+#
+# Repository files cited at commit 0c8a77ea14bd4437b1fdd79adc1aa91ac2342569 of
+# github.com/juangamella/causal-chamber. Paper: arXiv:2404.11341v2 (HTML). Quotes are verbatim;
+# paper quotes are rendered from the arXiv HTML with each inline formula replaced by its LaTeX
+# alttext (not pandoc's notation, unlike scripts/cchamber/readout_map.yaml).
+#
+# status:
+#   documented   the edge is stated in the App. III.1 text, appears in Fig. 3c and is listed in
+#                Table 6 (validated); all three hold for every edge below
+#   graph_only   the edge appears in Fig. 3c or Table 6 but no text states it (none here)
+#   undocumented no source states or draws the edge (none here)
+# direction holds only what the documentation states, per readout:
+#   variance_increase   lower precision, no mean shift documented
+#   resolution_decrease coarser quantisation of the reading
+#   unknown             no stated direction
+# direction_inferred is my inference, with its basis; it is not documentation.
+#
+# The paper's caveat applies to every entry (Sec. 3.1, #S3.SS1): "Under our interpretation, the
+# absence of an edge between two variables does not preclude the existence of a causal effect
+# between them."
+
+dataset: wt_walks_v1
+experiment: regime_jumps_single
+zip:
+  url: https://causalchamber.s3.eu-central-1.amazonaws.com/downloadables/wt_walks_v1.zip
+  content_length_bytes: 46471335
+  md5_documented: 19bb4e92cbe0b8dff49299b9b509ac36
+  md5_verified: true # checked on the downloaded zip, 2026-10-18
+
+# Fixed order: four pressures, microphone, two fan speeds, two currents, two signals.
+readouts:
+  - pressure_upwind # P̃_up
+  - pressure_downwind # P̃_dw
+  - pressure_ambient # P̃_amb
+  - pressure_intake # P̃_int
+  - mic # M̃
+  - rpm_in # ω̃_in
+  - rpm_out # ω̃_out
+  - current_in # C̃_in
+  - current_out # C̃_out
+  - signal_1 # S̃_1
+  - signal_2 # S̃_2
+readouts_source:
+  url: https://arxiv.org/html/2404.11341v2#S2.SS1
+  quote: |-
+    The tunnel provides data from 32 numerical and categorical variables (see Fig. 4a for some examples), of which 11 are sensor measurements, and 21 correspond to actuators and sensor parameters that can be manipulated.
+
+regime_column: flag # regime index 0..31; `intervention` is 1 on every row (checked)
+rows_per_regime: 10000 # protocol value, confirmed on the data for all 32 regimes
+reference_regime: 0
+null_regimes: [2, 8, 20, 24, 26] # no intervention, same base setting as regime 0
+
+base_setting:
+  fixed_values:
+    hatch: 0
+    res_in: 1
+    res_out: 1
+    osr_upwind: 8
+    osr_downwind: 8
+    osr_ambient: 8
+    osr_intake: 8
+    v_in: 1.1
+    v_out: 1.1
+    v_1: 5
+    v_2: 5
+    osr_1: 1
+    osr_2: 1
+    osr_mic: 1
+    osr_in: 8
+    osr_out: 8
+    v_mic: 5
+  random_walk_actuators:
+    # One reflected walk of 320000 steps spans all regimes, the reference included.
+    load_in: { range: [0, 1], resolution: 0.01, max_step: 0.05 }
+    load_out: { range: [0, 1], resolution: 0.01, max_step: 0.05 }
+    pot_1: { range: [0, 255], resolution: 1, max_step: 5 }
+    pot_2: { range: [0, 255], resolution: 1, max_step: 5 }
+  source:
+    - url: https://github.com/juangamella/causal-chamber/blob/0c8a77ea14bd4437b1fdd79adc1aa91ac2342569/datasets/wt_walks_v1/generators/regime_jumps.py
+      quote: |-
+        sensor_parameters = {
+            "v_1": 5,
+            "osr_1": 1,
+            "v_2": 5,
+            "osr_2": 1,
+            "v_in": 1.1,
+            "osr_in": 8,
+            "v_out": 1.1,
+            "osr_out": 8,
+            "v_mic": 5,
+            "osr_mic": 1,
+            "osr_upwind": 8,
+            "osr_intake": 8,
+            "osr_ambient": 8,
+            "osr_downwind": 8,
+            "res_in": 1,
+            "res_out": 1,
+        }
+    - url: https://github.com/juangamella/causal-chamber/blob/0c8a77ea14bd4437b1fdd79adc1aa91ac2342569/datasets/wt_walks_v1/README.md
+      quote: |-
+        At the end of the regime the target is returned to its _base_ value, i.e., its value in the first regime (first 10K observations), which contains no interventions and serves as reference.
+  doubt: >-
+    The actuators load_in, load_out, pot_1 and pot_2 are not fixed in the reference regime; whether
+    a documented random-walk process satisfies "one documented setting" is the user's decision.
+
+targets_source:
+  url: https://github.com/juangamella/causal-chamber/blob/0c8a77ea14bd4437b1fdd79adc1aa91ac2342569/datasets/wt_walks_v1/regimes_targets.py
+  note: "targets_single[i] is the target of the regime with flag == i; quoted in full in wt_metadata_notes.md"
+values_source:
+  url: https://github.com/juangamella/causal-chamber/blob/0c8a77ea14bd4437b1fdd79adc1aa91ac2342569/datasets/wt_walks_v1/generators/regime_jumps.py
+  quote: |-
+    intervention_targets = {
+        "hatch": [0, 45],
+        "res_in": [1, 0],
+        "res_out": [1, 0],
+        "osr_upwind": [8, 1],
+        "osr_downwind": [8, 1],
+        "osr_ambient": [8, 1],
+        "osr_intake": [8, 1],
+        "v_in": [1.1, 5],
+        "v_out": [1.1, 5],
+        "v_1": [5, 2.56],
+        "v_2": [5, 2.56],
+    }
+
+targets:
+  hatch:
+    symbol: H
+    type: actuator
+    meaning: hatch position in degrees, closed at 0, fully open at 45
+    reference_value: 0
+    intervened_value: 45
+    regimes: [5, 18]
+    affected_readouts:
+      [
+        pressure_upwind,
+        pressure_downwind,
+        pressure_intake,
+        mic,
+        rpm_in,
+        rpm_out,
+      ]
+    not_affected_per_graph:
+      [pressure_ambient, current_in, current_out, signal_1, signal_2]
+    graph_edges:
+      - "H → P̃_up (Fig. 3c; Table 6 p-value 3 × 10⁻¹⁴)"
+      - "H → P̃_dw (Fig. 3c; Table 6 p-value 3 × 10⁻¹⁴)"
+      - "H → P̃_int (Fig. 3c; Table 6 p-value 8.8 × 10⁻¹¹)"
+      - "H → M̃ (Fig. 3c; Table 6 p-value 5.7 × 10⁻¹⁶)"
+      - "H → ω̃_in (Fig. 3c; Table 6 p-value 1.5 × 10⁻¹⁷)"
+      - "H → ω̃_out (Fig. 3c; Table 6 p-value 4 × 10⁻⁵⁸)"
+    direction:
+      {
+        pressure_upwind: unknown,
+        pressure_downwind: unknown,
+        pressure_intake: unknown,
+        mic: unknown,
+        rpm_in: unknown,
+        rpm_out: unknown,
+      }
+    direction_inferred:
+      pressure_downwind: "|P̃_dw − P̃_amb| decreases"
+    direction_basis: >-
+      pressure_downwind: Model C3 (App. IV.1.2) writes P_dw = P_amb + S_r(H)(ω_in) − S_r(H)(ω_out)
+      and states that opening the hatch lowers the static pressure produced by the fans, so both fan
+      terms shrink; the sign of the net shift depends on the loads. mic: Fig. 10 states the sign of
+      the airflow change depends on the loads. rpm: the hatch modulates the coupling between the
+      fans; no sign is stated.
+    status: documented
+    source:
+      - url: https://arxiv.org/html/2404.11341v2#A1.SS0.SSS0.Px5
+        heading: '$\{L_{\textnormal{in}},L_{\textnormal{out}},H\}\to\{\tilde{P}_{\textnormal{up}},\tilde{P}_{\textnormal{dw}}\}$'
+        quote: |-
+          By controlling the size of the additional opening to the outside, the hatch position ($H$) also affects the pressure inside the tunnel (Fig. 7).
+      - url: https://arxiv.org/html/2404.11341v2#A1.SS0.SSS0.Px6
+        heading: '$\{L_{\textnormal{in}},L_{\textnormal{out}},H\}\to\tilde{P}_{\textnormal{int}}$'
+        quote: |-
+          The fan loads and hatch position also affect the airflow and air pressure at the intake of the tunnel.
+      - url: https://arxiv.org/html/2404.11341v2#A1.SS0.SSS0.Px12
+        heading: '$\{L_{\textnormal{in}},L_{\textnormal{out}},H\}\to\tilde{M}$'
+        quote: |-
+          The position of the hatch ($H$) affects the amount of air flowing through the exhaust and over the microphone, also affecting its reading (Fig. 10, center).
+      - url: https://arxiv.org/html/2404.11341v2#A1.F10
+        heading: Figure 10 caption
+        quote: |-
+          The effect of opening the hatch ($H=45$) is dependent on the loads of the fans, decreasing the airflow when $L_{\text{in}}=1,L_{\text{out}}=0$ and increasing it when $L_{\text{in}}=0,L_{\text{out}}=1$.
+      - url: https://arxiv.org/html/2404.11341v2#A1.SS0.SSS0.Px2
+        heading: '$\{L_{\textnormal{in}},L_{\textnormal{out}},H\}\to\{\tilde{\omega}_{\textnormal{in}},\tilde{\omega}_{\textnormal{out}}\}$'
+        quote: |-
+          Each fan drives the flow of air through the wind tunnel, in turn making it easier or harder for the other fan to rotate. Thus, the speeds of the fans are coupled, and the strength of the coupling is affected by the hatch position (see Fig. 7, center).
+      - url: https://arxiv.org/html/2404.11341v2#A1a
+        heading: IV.1.2, Model C3
+        quote: |-
+          Opening the hatch lowers the system impedance and, thus, the static pressure produced by the fans.
+    notes: >-
+      The only actuator among the targets. The hatch is driven by a stepper motor; travel time at a
+      regime boundary is not documented.
+
+  res_in:
+    symbol: T_in
+    type: sensor_parameter
+    meaning: tachometer timer resolution of the intake fan, 1 = microseconds, 0 = milliseconds
+    reference_value: 1
+    intervened_value: 0
+    regimes: [12, 21, 31]
+    affected_readouts: [rpm_in]
+    graph_edges: ["T_in → ω̃_in (Fig. 3c; Table 6 p-value 1.4 × 10⁻¹⁵²)"]
+    direction: { rpm_in: resolution_decrease }
+    status: documented
+    source: &s_tach
+      - url: https://arxiv.org/html/2404.11341v2#A1.SS0.SSS0.Px4
+        heading: '$T_{\textnormal{in}}\to\tilde{\omega}_{\textnormal{in}},T_{\textnormal{out}}\to\tilde{\omega}_{\textnormal{out}}$'
+        quote: |-
+          Changing the resolution ($T_{\textnormal{in}},T_{\textnormal{out}}$) of the timers used in the fan tachometers also changes the resolution of the resulting speed measurement ($\tilde{\omega}_{\textnormal{in}},\tilde{\omega}_{\textnormal{out}}$). Using a resolution of microseconds (e.g., $T_{\textnormal{in}}=1$) allows measuring smaller changes in the fan speed, with the difference being more noticeable at higher speeds (see Fig. 8, left).
+    notes: "Effect size depends on the fan speed, hence on the random-walk load (text: more noticeable at higher speeds)."
+
+  res_out:
+    symbol: T_out
+    type: sensor_parameter
+    meaning: tachometer timer resolution of the exhaust fan, 1 = microseconds, 0 = milliseconds
+    reference_value: 1
+    intervened_value: 0
+    regimes: [3, 14]
+    affected_readouts: [rpm_out]
+    graph_edges: ["T_out → ω̃_out (Fig. 3c; Table 6 p-value 8.3 × 10⁻¹²²)"]
+    direction: { rpm_out: resolution_decrease }
+    status: documented
+    source: *s_tach
+
+  osr_upwind:
+    symbol: O_up
+    type: sensor_parameter
+    meaning: oversampling rate of the upwind barometer
+    reference_value: 8
+    intervened_value: 1
+    regimes: [7, 9, 13, 19, 27]
+    affected_readouts: [pressure_upwind]
+    graph_edges: ["O_up → P̃_up (Fig. 3c; Table 6 p-value 8 × 10⁻⁷)"]
+    direction: { pressure_upwind: variance_increase }
+    status: documented
+    source: &s_osr_baro
+      - url: https://arxiv.org/html/2404.11341v2#A1.SS0.SSS0.Px7
+        heading: '$O_{\textnormal{up}}\to\tilde{P}_{\textnormal{up}},O_{\textnormal{dw}}\to\tilde{P}_{\textnormal{dw}},O_{\textnormal{amb}}\to\tilde{P}_{\textnormal{amb}},O_{\textnormal{int}}\to\tilde{P}_{\textnormal{int}}$'
+        quote: |-
+          The oversampling rate determines how many barometric readings are averaged to produce a single measurement of the air pressure. A higher oversampling rate increases the precision of the barometers, reducing the noise in their measurements (see Fig. 8, right).
+
+  osr_downwind:
+    symbol: O_dw
+    type: sensor_parameter
+    meaning: oversampling rate of the downwind barometer
+    reference_value: 8
+    intervened_value: 1
+    regimes: [15]
+    affected_readouts: [pressure_downwind]
+    graph_edges: ["O_dw → P̃_dw (Fig. 3c; Table 6 p-value 1.7 × 10⁻⁵)"]
+    direction: { pressure_downwind: variance_increase }
+    status: documented
+    source: *s_osr_baro
+
+  osr_ambient:
+    symbol: O_amb
+    type: sensor_parameter
+    meaning: oversampling rate of the ambient (outer) barometer
+    reference_value: 8
+    intervened_value: 1
+    regimes: [16, 29]
+    affected_readouts: [pressure_ambient]
+    graph_edges: ["O_amb → P̃_amb (Fig. 3c; Table 6 p-value 1.5 × 10⁻²⁸⁴)"]
+    direction: { pressure_ambient: variance_increase }
+    status: documented
+    source: *s_osr_baro
+
+  osr_intake:
+    symbol: O_int
+    type: sensor_parameter
+    meaning: oversampling rate of the intake barometer
+    reference_value: 8
+    intervened_value: 1
+    regimes: [23, 28]
+    affected_readouts: [pressure_intake]
+    graph_edges: ["O_int → P̃_int (Fig. 3c; Table 6 p-value 1.1 × 10⁻²³)"]
+    direction: { pressure_intake: variance_increase }
+    status: documented
+    source: *s_osr_baro
+
+  v_in:
+    symbol: R_in
+    type: sensor_parameter
+    meaning: reference voltage of the intake-fan current sensor (calibrated vref 1.1 -> 1.16 V, 5 -> 5 V, Table 3)
+    reference_value: 1.1
+    intervened_value: 5
+    regimes: [17, 30]
+    affected_readouts: [current_in]
+    graph_edges: ["R_in → C̃_in (Fig. 3c; Table 6 p-value 2.8 × 10⁻⁵⁹)"]
+    direction: { current_in: resolution_decrease }
+    direction_inferred:
+      current_in: "raw level scales by about 1.16/5 ≈ 0.23 for an unchanged current; any saturation present at 1.1 V is removed"
+    direction_basis: >-
+      App. II gives the calibrated current as C̃_in × vref(R_in)/(1023 × 5) × 2.5, so the raw C̃_in
+      is inversely proportional to vref for a fixed physical current; the text says lowering R
+      raises resolution and can saturate, so raising it from 1.1 to 5 does the reverse.
+    status: documented
+    source: &s_ref_current
+      - url: https://arxiv.org/html/2404.11341v2#A1.SS0.SSS0.Px8
+        heading: '$\{R_{\textnormal{out}},O_{\textnormal{out}}\}\to\tilde{C}_{\textnormal{out}},\{R_{\textnormal{in}},O_{\textnormal{in}}\}\to\tilde{C}_{\textnormal{in}}$'
+        quote: |-
+          The current sensors encode their reading of the current as a voltage between 0 and 5 volts. This voltage is then read by the onboard computer, linearly mapping the range of $[0,R_{\text{in}}]$ ($[0,R_{\text{out}}]$) volts to $[0,1023]$. Thus, reducing the reference voltages $R_{\text{in}},R_{\text{out}}$ increases the resolution of the current measurements (see Fig. 12, right), but can also cause the measurements to saturate if the voltage surpasses the reference voltage.
+      - url: https://arxiv.org/html/2404.11341v2#Ax7
+        heading: Table 1, row C̃_in, C̃_out
+        quote: |-
+          $\tilde{C}_{\text{in}}\times\frac{\text{vref}(R_{\text{in}})}{1023\times 5}\times 2.5\;\text{ and }\;\tilde{C}_{\text{out}}\times\frac{\text{vref}(R_{\text{out}})}{1023\times 5}\times 2.5,$
+    notes: "The Fig. 12 cited in the quote shows the light-tunnel current sensor, not the wind tunnel's."
+
+  v_out:
+    symbol: R_out
+    type: sensor_parameter
+    meaning: reference voltage of the exhaust-fan current sensor (calibrated vref 1.1 -> 1.16 V, 5 -> 5 V, Table 3)
+    reference_value: 1.1
+    intervened_value: 5
+    regimes: [4, 10]
+    affected_readouts: [current_out]
+    graph_edges: ["R_out → C̃_out (Fig. 3c; Table 6 p-value 5 × 10⁻⁵⁹)"]
+    direction: { current_out: resolution_decrease }
+    direction_inferred:
+      current_out: "raw level scales by about 1.16/5 ≈ 0.23 for an unchanged current; any saturation present at 1.1 V is removed"
+    direction_basis: "As for v_in, from the Table 1 calibration formula."
+    status: documented
+    source: *s_ref_current
+
+  v_1:
+    symbol: R_1
+    type: sensor_parameter
+    meaning: reference voltage of the sensor reading the amplifier signal after the first potentiometer (calibrated vref 5 -> 5 V, 2.56 -> 2.65 V, Table 3)
+    reference_value: 5
+    intervened_value: 2.56
+    regimes: [6, 11, 22, 25]
+    affected_readouts: [signal_1]
+    graph_edges: ["R_1 → S̃_1 (Fig. 3c; Table 6 p-value 2.8 × 10⁻⁵⁹)"]
+    direction: { signal_1: unknown }
+    direction_inferred:
+      signal_1: "raw level scales by about 5/2.65 ≈ 1.9 with finer resolution, clipping at 1023 where the signal exceeds about 2.65 V"
+    direction_basis: >-
+      App. II gives the calibrated amplitude as S̃_1 × vref(R_1)/1023; App. III.1 says the reference
+      voltages act on S̃ "as for the current measurements", whose text links a lower reference voltage
+      to higher resolution and possible saturation. The saturation threshold depends on pot_1, which
+      random-walks.
+    status: documented
+    source: &s_ref_signal
+      - url: https://arxiv.org/html/2404.11341v2#A1.SS0.SSS0.Px10
+        heading: '$\{R_{1},O_{1}\}\to\tilde{S}_{1},\{R_{2},O_{2}\}\to\tilde{S}_{2}$'
+        quote: |-
+          As for the current measurements, the reference voltages $R_{1},R_{2}$ and oversampling rates $O_{1},O_{2}$ have an effect on the resulting measurements $\tilde{S}_{1},\tilde{S}_{2}$.
+      - url: https://arxiv.org/html/2404.11341v2#Ax7
+        heading: Table 1, row S̃_1, S̃_2
+        quote: |-
+          $\tilde{S}_{1}\times\frac{\text{vref}(R_{1})}{1023}\;\text{ and }\;\tilde{S}_{2}\times\frac{\text{vref}(R_{2})}{1023},$
+
+  v_2:
+    symbol: R_2
+    type: sensor_parameter
+    meaning: reference voltage of the sensor reading the amplifier signal after the second potentiometer (calibrated vref 5 -> 5 V, 2.56 -> 2.65 V, Table 3)
+    reference_value: 5
+    intervened_value: 2.56
+    regimes: [1]
+    affected_readouts: [signal_2]
+    graph_edges: ["R_2 → S̃_2 (Fig. 3c; Table 6 p-value 6 × 10⁻⁵⁹)"]
+    direction: { signal_2: unknown }
+    direction_inferred:
+      signal_2: "raw level scales by about 5/2.65 ≈ 1.9 with finer resolution, clipping at 1023 where the signal exceeds about 2.65 V"
+    direction_basis: "As for v_1; the threshold depends on pot_1 and pot_2, both random-walking."
+    status: documented
+    source: *s_ref_signal

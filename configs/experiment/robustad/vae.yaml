@@ -54,6 +54,10 @@ algorithm:
   encoder:
     in_channels: 3
     input_size: ${data.image_size}
+    # One convolutional stage: the pool's width lists are [conv, hidden, latent],
+    # and the encoder needs len(nodes) - 2 strides. The algorithm default [2, 2]
+    # fits the four-entry CIFAR-10 lists only.
+    strides: [2]
 
   optimizer:
     _partial_: true

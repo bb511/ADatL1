@@ -1,0 +1,893 @@
+# Registration of the Causal Chamber CAP design study (subplan 1, step C).
+# Fixed before any pool efficiency or selection result is read; the B axis follows
+# the read-only check of 19 Oct on the pool's CAP(beta) curves. Nothing is scored
+# until the user has reviewed and committed this file; its SHA-256 at that commit
+# identifies it.
+version: 1
+drafted: 2026-10-07
+# CAP becomes the maximum over a beta sweep in place of the optimiser's end point,
+# with the sweep's upper bound B as the grid axis in place of beta0; sigmoid_robust
+# enters, softmax and exponential leave; each run yields one candidate; scores tied
+# with the threshold count fractionally.
+amended: 2026-10-19
+
+system:
+  dataset: lt_interventions_standard_v1
+  md5: 476664d024f88e8b7640998bb5e9ee33
+  data_config: configs/data/cchamber.yaml
+  split_seed: 314159
+  # Rows of uniform_reference.csv; each evaluation split is halved into
+  # normal and reference_normal.
+  rows: { train: 6000, validation: 2000, test: 2000 }
+  interventions: 58
+  intervention_rows: { validation: 600, test: 400 }
+  readouts:
+    [
+      current,
+      angle_1,
+      angle_2,
+      ir_1,
+      vis_1,
+      ir_2,
+      vis_2,
+      ir_3,
+      vis_3,
+      v_board,
+      v_reg,
+    ]
+  # Robust per-readout normalisation fitted on the training rows only.
+  normalisation:
+    { location: median, scale: q95 - q05, scale_floor: 1.0e-6, clip: 10.0 }
+
+# Declared before any selection result is read; they apply to every criterion.
+families:
+  ae:
+    experiment: cchamber/ae_agnostic
+    score: residual_oas
+    comparison_score: mse
+  vae:
+    experiment: cchamber/vae_agnostic
+    score: residual_oas
+    comparison_score: kl
+  svdd:
+    experiment: cchamber/svdd_agnostic
+    score: native
+    # Victor's campaign started from a pretrained AE encoder; here from scratch,
+    # encoder nodes [128, 64, 16] (user, 18 Oct).
+    initialisation: from scratch
+  realnvp:
+    experiment: cchamber/realnvp_agnostic
+    score: native
+# residual_oas: (r - mu)^T P (r - mu) / n_observed, r = x - reconstruction
+# (VAE: decoder of the posterior mean), mu and P the mean and OAS-shrunk
+# precision of r on the 6,000 training normals, refitted at every validation
+# epoch (src/callbacks/residual_state.py).
+
+pool:
+  seeds: [101, 202, 303]
+  # A seed sets the initialisation, the input noise and the batch order
+  # (data.train_seed follows it); the split stays with split_seed (user, 18 Oct).
+  epochs: 150
+  batch_size: 1024
+  # 4 families x 17 candidates x 3 seeds = 204 fits. Candidates are copied
+  # verbatim from Victor's panel: candidate 000 is the baseline, 001-016 are
+  # scrambled Sobol draws from the per-family spaces (POOL_SEED 1729).
+  source: >-
+    logs/victor_results/cchamber-data/results/cchamber-pairings-v1/panel.yaml
+    (olgpu, read-only), sha256
+    e572f3e6ed059004e9ee55641137f1ea8da2ab13aac532527effbbed3e438dfa
+  stored_per_epoch: >-
+    every validation and test set, both scores for AE and VAE, the two
+    auxiliary input sets, and the weights (src/callbacks/score_dump.py)
+  score_dump:
+    keys: [ascore/full, ascore/mse, ascore/kl, ascore/residual_oas]
+    # 10,000 standard-normal and 10,000 uniform points over the training bounding
+    # box, in normalised input space, for subplan 4.
+    aux_seed: 0
+    aux_size: 10000
+
+# CAP between validation normal and reference_normal, rank (cdf) pairing fixed.
+design_space:
+  fixed:
+    pairing_type: cdf
+    regularization_type: none
+    binary: true
+    # CAP is the maximum of the mean posterior agreement over n_beta inverse
+    # temperatures log-spaced in [beta_min, beta_max], evaluated exactly on all pairs
+    # in float64; the curve and its maximiser beta* are stored, and a maximum at the
+    # bound is flagged.
+    beta_min: 0.01
+    n_beta: 200
+  normalization_type:
+    [sigmoid, sigmoid_robust, log_sigmoid, minmax, rank, rank_mid]
+  normalization_mode: [joint, split]
+  # Energy parameters other than the adaptive scale stay at their defaults in
+  # src/callbacks/metrics/cap/binary/energy.py.
+  energy:
+    - { energy_type: baseline }
+    - { energy_type: adaptive, scale: 0.5 }
+    - { energy_type: adaptive, scale: 0.25 }
+    - { energy_type: adaptive, scale: 1.0 }
+    - { energy_type: focal }
+    - { energy_type: margin }
+    - { energy_type: contrastive }
+  # Fixed after the curve check of 19 Oct on light-tunnel pool scores: all 9,072
+  # curves are single-peaked, joint normalisations peak at beta* of about 10-100,
+  # split-mode rank configurations at the bound, and the ordering of the candidates
+  # depends on the temperature.
+  beta_max: [1, 10, 100, 1000]
+  # 6 normalisations x 2 modes x 7 energies x 4 B.
+  n_configurations: 336
+  torch_seed: 20261007
+
+selection:
+  # The pipeline's chain, reproduced offline by scripts/cchamber/offline_select.py.
+  per_run_candidate: >-
+    the epoch at which the EMA (weight 0.9) of the CAP is best, its first strict
+    maximum, which is the checkpoint ModelCheckpoint(save_top_k=1) keeps
+  per_run_rule: >-
+    Q' = CAP recomputed on validation at that epoch, Q'' = ascore_operational of
+    normal at the same epoch; no composite rule, no Stable, no last epoch
+  across_candidates: >-
+    per family and seed, the candidate with the largest Q'; ties broken by the
+    lower candidate id
+
+criterion:
+  primary: >-
+    efficiency of the CAP-selected model at the 1 % false-positive threshold
+    (quantile 0.99 of the validation normal scores, interpolation "higher"),
+    averaged over the 58 validation interventions, then the 3 seeds, then the
+    4 families with equal weight; an event whose score equals the threshold counts
+    with the fraction gamma, fixed on the validation normals so that their rate is
+    exactly 1 %
+  beside: >-
+    mean AUPRC on the validation interventions, tabulated for every
+    configuration; a disagreement with the primary is stated, never used to choose
+  descriptive: test-split efficiency and AUPRC; threshold-drift and Wasserstein rows
+  # With rank pairing, rank and rank_mid in split mode give every pair the same
+  # values whatever the model, so their CAP cannot rank candidates (user, 18 Oct).
+  eligibility: >-
+    a configuration whose selected-checkpoint CAP does not vary across the 17
+    candidates of any family (relative spread below 1e-6) is reported in the
+    design table but cannot be frozen
+  rule: >-
+    the simplest eligible configuration whose criterion is at least the best
+    eligible criterion minus one standard error of the best is frozen
+  standard_error:
+    method: crossed bootstrap
+    # Seeds and the 29 intervention target clusters are resampled
+    # independently, with replacement; every intervention of a drawn cluster
+    # enters with the cluster's multiplicity. Selection is not rerun.
+    units: { seeds: 3, target_clusters: 29 }
+    clusters: >-
+      logs/victor_results/cchamber-data/results/cchamber-pairings-v1/analysis/intervention_target_clusters.csv
+    replicates: 2000
+    seed: 271828
+    estimate: standard deviation of the best configuration's replicated criterion
+  # Lexicographic: energy first, then normalisation, mode, beta_max, adaptive scale.
+  simplicity_order:
+    energy_type: [baseline, adaptive, focal, margin, contrastive]
+    normalization_type:
+      [sigmoid, sigmoid_robust, log_sigmoid, minmax, rank, rank_mid]
+    normalization_mode: [joint, split]
+    beta_max: [1, 10, 100, 1000]
+    adaptive_scale: [0.5, 0.25, 1.0]
+
+outputs:
+  - design table (configuration x family; criterion, AUPRC, standard errors; drift and Wasserstein rows; the untrained-model reference row)
+  - configs/cap/frozen.yaml (the cap config group) and its SHA-256 in configs/cap/frozen.sha256
+  - native-score table for AE and VAE under the frozen configuration
+  - ranking-validity table and figure per endpoint, with the pairing comparison
+  - wind-tunnel test table (held_out_test)
+
+limit_experiments: scripts/cchamber/registration_limits.yaml
+secondary: scripts/cchamber/registration_limits.yaml (section secondary)
+
+# Step F.17, run on the downloaded data on 2026-10-18, before this commit.
+held_out_test:
+  rule: >-
+    a reference block of at least 5,000 rows under one documented setting; at
+    least ten intervention blocks of at least 400 rows whose intervened variable
+    is documented in the dataset's own metadata; the same eleven sensor readouts
+    in every block
+  accepted:
+    dataset: wt_walks_v1
+    md5: 19bb4e92cbe0b8dff49299b9b509ac36
+    experiment: regime_jumps_single
+    rows: 320000
+    regimes: 32, flag 0..31, 10,000 rows each (confirmed on the data)
+    reference_regime: 0
+    intervened_regimes: >-
+      26, targets from datasets/wt_walks_v1/regimes_targets.py of the
+      causal-chamber repository (commit 0c8a77ea); all 32 regimes confirmed
+      against the manipulable columns of the data
+    null_regimes: [2, 8, 20, 24, 26]
+    readouts:
+      [
+        pressure_upwind,
+        pressure_downwind,
+        pressure_ambient,
+        pressure_intake,
+        mic,
+        rpm_in,
+        rpm_out,
+        current_in,
+        current_out,
+        signal_1,
+        signal_2,
+      ]
+    # The four actuators load_in, load_out, pot_1 and pot_2 follow one random walk
+    # through every regime, the reference included. The user (18 Oct) reads this
+    # as the system's normal variation, so regime 0 is one documented setting.
+    splits: >-
+      reference regime 60/20/20 with each evaluation part halved into normal and
+      reference_normal; each intervened regime 60/40 validation/test; the null
+      regimes as extra label-0 sets (false-positive check under the walk)
+    readout_map: scripts/cchamber/readout_map_wt.yaml
+  rejected:
+    dataset: wt_validate_v1
+    md5: bde214eb50abc801307bf7d4aadcafc9
+    reasons: >-
+      largest arm 4,045 rows (validate_osr_ambient); seven experiments with arms of
+      at least 400 rows; no designated control arm; base settings differ between
+      experiments
+  fallback: not triggered
+  rules: >-
+    no CAP parameter is read from the wind tunnel; the wind-tunnel pool may be
+    trained before configs/cap/frozen.yaml exists, but no wind-tunnel score is
+    read before its hash is recorded; the frozen configuration and the
+    light-tunnel selection chain apply unchanged
+
+# Copied from the panel (lines 15-356 and 699-1006), families ae, vae, svdd, realnvp:
+# the values are verbatim, the indentation is prettier's.
+pool_candidates:
+  ae:
+    - id: ae_000
+      overrides:
+        - trainer.gradient_clip_val=0.0
+        - algorithm.delta=1.0
+        - algorithm.input_noise_std=0.0
+        - algorithm.encoder.nodes=[32,16,4]
+        - algorithm.optimizer.lr=0.001
+        - algorithm.optimizer.betas=[0.9,0.999]
+        - algorithm.optimizer.weight_decay=0.0001
+    - id: ae_001
+      overrides:
+        - trainer.gradient_clip_val=2.0
+        - algorithm.delta=7.0
+        - algorithm.input_noise_std=0.01
+        - algorithm.encoder.nodes=[48,24,16]
+        - algorithm.optimizer.lr=0.0006878288046075946
+        - algorithm.optimizer.betas=[0.9,0.999]
+        - algorithm.optimizer.weight_decay=0.001
+    - id: ae_002
+      overrides:
+        - trainer.gradient_clip_val=0.0
+        - algorithm.delta=3.0
+        - algorithm.input_noise_std=0.0003
+        - algorithm.encoder.nodes=[24,8]
+        - algorithm.optimizer.lr=0.0002791522974769971
+        - algorithm.optimizer.betas=[0.9,0.99]
+        - algorithm.optimizer.weight_decay=1e-06
+    - id: ae_003
+      overrides:
+        - trainer.gradient_clip_val=0.5
+        - algorithm.delta=7.0
+        - algorithm.input_noise_std=0.001
+        - algorithm.encoder.nodes=[48,24,8]
+        - algorithm.optimizer.lr=6.234724815738976e-05
+        - algorithm.optimizer.betas=[0.9,0.99]
+        - algorithm.optimizer.weight_decay=1e-05
+    - id: ae_004
+      overrides:
+        - trainer.gradient_clip_val=5.0
+        - algorithm.delta=0.5
+        - algorithm.input_noise_std=0.0
+        - algorithm.encoder.nodes=[32,16]
+        - algorithm.optimizer.lr=0.0028659557136659253
+        - algorithm.optimizer.betas=[0.9,0.999]
+        - algorithm.optimizer.weight_decay=0.0
+    - id: ae_005
+      overrides:
+        - trainer.gradient_clip_val=5.0
+        - algorithm.delta=5.0
+        - algorithm.input_noise_std=0.0003
+        - algorithm.encoder.nodes=[32,16,4]
+        - algorithm.optimizer.lr=0.0009984227894259362
+        - algorithm.optimizer.betas=[0.9,0.999]
+        - algorithm.optimizer.weight_decay=0.0001
+    - id: ae_006
+      overrides:
+        - trainer.gradient_clip_val=1.0
+        - algorithm.delta=0.5
+        - algorithm.input_noise_std=0.003
+        - algorithm.encoder.nodes=[32,16,8]
+        - algorithm.optimizer.lr=4.539977669975835e-05
+        - algorithm.optimizer.betas=[0.9,0.99]
+        - algorithm.optimizer.weight_decay=0.0
+    - id: ae_007
+      overrides:
+        - trainer.gradient_clip_val=0.0
+        - algorithm.delta=10.0
+        - algorithm.input_noise_std=0.0
+        - algorithm.encoder.nodes=[16,8]
+        - algorithm.optimizer.lr=0.00010261664300182372
+        - algorithm.optimizer.betas=[0.9,0.99]
+        - algorithm.optimizer.weight_decay=0.001
+    - id: ae_008
+      overrides:
+        - trainer.gradient_clip_val=1.0
+        - algorithm.delta=1.0
+        - algorithm.input_noise_std=0.003
+        - algorithm.encoder.nodes=[64,32,16]
+        - algorithm.optimizer.lr=0.00041106982517951843
+        - algorithm.optimizer.betas=[0.9,0.999]
+        - algorithm.optimizer.weight_decay=1e-06
+    - id: ae_009
+      overrides:
+        - trainer.gradient_clip_val=2.0
+        - algorithm.delta=7.0
+        - algorithm.input_noise_std=0.0
+        - algorithm.encoder.nodes=[32,16,8]
+        - algorithm.optimizer.lr=0.00021660175925904113
+        - algorithm.optimizer.betas=[0.9,0.999]
+        - algorithm.optimizer.weight_decay=0.0001
+    - id: ae_010
+      overrides:
+        - trainer.gradient_clip_val=0.0
+        - algorithm.delta=0.5
+        - algorithm.input_noise_std=0.003
+        - algorithm.encoder.nodes=[32,16,4]
+        - algorithm.optimizer.lr=0.0008249726950408964
+        - algorithm.optimizer.betas=[0.9,0.99]
+        - algorithm.optimizer.weight_decay=0.0
+    - id: ae_011
+      overrides:
+        - trainer.gradient_clip_val=0.5
+        - algorithm.delta=10.0
+        - algorithm.input_noise_std=0.0003
+        - algorithm.encoder.nodes=[64,32,16]
+        - algorithm.optimizer.lr=0.0020722451064405225
+        - algorithm.optimizer.betas=[0.9,0.99]
+        - algorithm.optimizer.weight_decay=0.001
+    - id: ae_012
+      overrides:
+        - trainer.gradient_clip_val=5.0
+        - algorithm.delta=3.0
+        - algorithm.input_noise_std=0.01
+        - algorithm.encoder.nodes=[16,8]
+        - algorithm.optimizer.lr=9.266713793330292e-05
+        - algorithm.optimizer.betas=[0.9,0.999]
+        - algorithm.optimizer.weight_decay=1e-05
+    - id: ae_013
+      overrides:
+        - trainer.gradient_clip_val=2.0
+        - algorithm.delta=10.0
+        - algorithm.input_noise_std=0.001
+        - algorithm.encoder.nodes=[24,8]
+        - algorithm.optimizer.lr=3.058680806756754e-05
+        - algorithm.optimizer.betas=[0.9,0.999]
+        - algorithm.optimizer.weight_decay=0.0001
+    - id: ae_014
+      overrides:
+        - trainer.gradient_clip_val=0.5
+        - algorithm.delta=3.0
+        - algorithm.input_noise_std=0.0001
+        - algorithm.encoder.nodes=[48,24,16]
+        - algorithm.optimizer.lr=0.0013791580314947032
+        - algorithm.optimizer.betas=[0.9,0.99]
+        - algorithm.optimizer.weight_decay=1e-06
+    - id: ae_015
+      overrides:
+        - trainer.gradient_clip_val=0.5
+        - algorithm.delta=5.0
+        - algorithm.input_noise_std=0.01
+        - algorithm.encoder.nodes=[32,16]
+        - algorithm.optimizer.lr=0.00034395590773988354
+        - algorithm.optimizer.betas=[0.9,0.99]
+        - algorithm.optimizer.weight_decay=1e-05
+    - id: ae_016
+      overrides:
+        - trainer.gradient_clip_val=2.0
+        - algorithm.delta=1.0
+        - algorithm.input_noise_std=0.0001
+        - algorithm.encoder.nodes=[48,24,8]
+        - algorithm.optimizer.lr=0.00013179858143844
+        - algorithm.optimizer.betas=[0.9,0.999]
+        - algorithm.optimizer.weight_decay=0.0
+  vae:
+    - id: vae_000
+      overrides:
+        - trainer.gradient_clip_val=0.0
+        - algorithm.encoder.clamp_zlogvar_range=[-10,6]
+        - algorithm.optimizer.lr=0.001
+        - algorithm.optimizer.betas=[0.9,0.999]
+        - algorithm.optimizer.weight_decay=0.0001
+        - algorithm.kl_scale=0.1
+        - algorithm.kl_warmup_frac=0.1
+        - algorithm.encoder.nodes=[32,16,4]
+        - algorithm.encoder.activation="relu"
+    - id: vae_001
+      overrides:
+        - trainer.gradient_clip_val=1.0
+        - algorithm.encoder.clamp_zlogvar_range=[-20,10]
+        - algorithm.optimizer.lr=0.0009193840405904561
+        - algorithm.optimizer.betas=[0.9,0.999]
+        - algorithm.optimizer.weight_decay=0.001
+        - algorithm.kl_scale=0.0003
+        - algorithm.kl_warmup_frac=0.3
+        - algorithm.encoder.nodes=[64,32,16]
+        - algorithm.encoder.activation="gelu"
+    - id: vae_002
+      overrides:
+        - trainer.gradient_clip_val=0.0
+        - algorithm.encoder.clamp_zlogvar_range=[-8,6]
+        - algorithm.optimizer.lr=0.00012931365787652847
+        - algorithm.optimizer.betas=[0.9,0.99]
+        - algorithm.optimizer.weight_decay=1e-06
+        - algorithm.kl_scale=0.01
+        - algorithm.kl_warmup_frac=0.05
+        - algorithm.encoder.nodes=[16,8]
+        - algorithm.encoder.activation="gelu"
+    - id: vae_003
+      overrides:
+        - trainer.gradient_clip_val=0.5
+        - algorithm.encoder.clamp_zlogvar_range=[-10,6]
+        - algorithm.optimizer.lr=0.0003482057867383393
+        - algorithm.optimizer.betas=[0.9,0.999]
+        - algorithm.optimizer.weight_decay=1e-06
+        - algorithm.kl_scale=0.03
+        - algorithm.kl_warmup_frac=0.1
+        - algorithm.encoder.nodes=[32,16,4]
+        - algorithm.encoder.activation="silu"
+    - id: vae_004
+      overrides:
+        - trainer.gradient_clip_val=2.0
+        - algorithm.encoder.clamp_zlogvar_range=[-6,4]
+        - algorithm.optimizer.lr=5.769361826539951e-05
+        - algorithm.optimizer.betas=[0.9,0.99]
+        - algorithm.optimizer.weight_decay=0.0001
+        - algorithm.kl_scale=0.0001
+        - algorithm.kl_warmup_frac=0.0
+        - algorithm.encoder.nodes=[48,24,8]
+        - algorithm.encoder.activation="relu"
+    - id: vae_005
+      overrides:
+        - trainer.gradient_clip_val=2.0
+        - algorithm.encoder.clamp_zlogvar_range=[-10,6]
+        - algorithm.optimizer.lr=0.00020375331673623087
+        - algorithm.optimizer.betas=[0.9,0.99]
+        - algorithm.optimizer.weight_decay=0.0001
+        - algorithm.kl_scale=0.001
+        - algorithm.kl_warmup_frac=0.2
+        - algorithm.encoder.nodes=[24,8]
+        - algorithm.encoder.activation="silu"
+    - id: vae_006
+      overrides:
+        - trainer.gradient_clip_val=0.5
+        - algorithm.encoder.clamp_zlogvar_range=[-6,4]
+        - algorithm.optimizer.lr=0.0005833110991423795
+        - algorithm.optimizer.betas=[0.9,0.999]
+        - algorithm.optimizer.weight_decay=0.0
+        - algorithm.kl_scale=0.002
+        - algorithm.kl_warmup_frac=0.05
+        - algorithm.encoder.nodes=[32,16,8]
+        - algorithm.encoder.activation="relu"
+    - id: vae_007
+      overrides:
+        - trainer.gradient_clip_val=0.0
+        - algorithm.encoder.clamp_zlogvar_range=[-20,10]
+        - algorithm.optimizer.lr=7.711182126641017e-05
+        - algorithm.optimizer.betas=[0.9,0.99]
+        - algorithm.optimizer.weight_decay=1e-05
+        - algorithm.kl_scale=0.1
+        - algorithm.kl_warmup_frac=0.3
+        - algorithm.encoder.nodes=[48,24,16]
+        - algorithm.encoder.activation="relu"
+    - id: vae_008
+      overrides:
+        - trainer.gradient_clip_val=1.0
+        - algorithm.encoder.clamp_zlogvar_range=[-8,6]
+        - algorithm.optimizer.lr=0.0002600585115338955
+        - algorithm.optimizer.betas=[0.9,0.999]
+        - algorithm.optimizer.weight_decay=0.001
+        - algorithm.kl_scale=3e-05
+        - algorithm.kl_warmup_frac=0.1
+        - algorithm.encoder.nodes=[16,4]
+        - algorithm.encoder.activation="gelu"
+    - id: vae_009
+      overrides:
+        - trainer.gradient_clip_val=1.0
+        - algorithm.encoder.clamp_zlogvar_range=[-10,6]
+        - algorithm.optimizer.lr=9.433242246288862e-05
+        - algorithm.optimizer.betas=[0.9,0.999]
+        - algorithm.optimizer.weight_decay=1e-06
+        - algorithm.kl_scale=0.0001
+        - algorithm.kl_warmup_frac=0.2
+        - algorithm.encoder.nodes=[24,8]
+        - algorithm.encoder.activation="silu"
+    - id: vae_010
+      overrides:
+        - trainer.gradient_clip_val=0.0
+        - algorithm.encoder.clamp_zlogvar_range=[-6,4]
+        - algorithm.optimizer.lr=0.00032465356386429835
+        - algorithm.optimizer.betas=[0.9,0.99]
+        - algorithm.optimizer.weight_decay=0.001
+        - algorithm.kl_scale=0.03
+        - algorithm.kl_warmup_frac=0.0
+        - algorithm.encoder.nodes=[32,16,8]
+        - algorithm.encoder.activation="relu"
+    - id: vae_011
+      overrides:
+        - trainer.gradient_clip_val=0.5
+        - algorithm.encoder.clamp_zlogvar_range=[-20,10]
+        - algorithm.optimizer.lr=0.0001753309465173481
+        - algorithm.optimizer.betas=[0.9,0.999]
+        - algorithm.optimizer.weight_decay=1e-05
+        - algorithm.kl_scale=0.01
+        - algorithm.kl_warmup_frac=0.3
+        - algorithm.encoder.nodes=[48,24,16]
+        - algorithm.encoder.activation="relu"
+    - id: vae_012
+      overrides:
+        - trainer.gradient_clip_val=2.0
+        - algorithm.encoder.clamp_zlogvar_range=[-8,6]
+        - algorithm.optimizer.lr=0.0004888157195114583
+        - algorithm.optimizer.betas=[0.9,0.99]
+        - algorithm.optimizer.weight_decay=0.0
+        - algorithm.kl_scale=0.0003
+        - algorithm.kl_warmup_frac=0.1
+        - algorithm.encoder.nodes=[16,4]
+        - algorithm.encoder.activation="gelu"
+    - id: vae_013
+      overrides:
+        - trainer.gradient_clip_val=2.0
+        - algorithm.encoder.clamp_zlogvar_range=[-20,10]
+        - algorithm.optimizer.lr=0.0004250477375205697
+        - algorithm.optimizer.betas=[0.9,0.99]
+        - algorithm.optimizer.weight_decay=0.0
+        - algorithm.kl_scale=3e-05
+        - algorithm.kl_warmup_frac=0.2
+        - algorithm.encoder.nodes=[64,32,16]
+        - algorithm.encoder.activation="gelu"
+    - id: vae_014
+      overrides:
+        - trainer.gradient_clip_val=0.5
+        - algorithm.encoder.clamp_zlogvar_range=[-8,6]
+        - algorithm.optimizer.lr=7.187024544747285e-05
+        - algorithm.optimizer.betas=[0.9,0.999]
+        - algorithm.optimizer.weight_decay=0.0001
+        - algorithm.kl_scale=0.1
+        - algorithm.kl_warmup_frac=0.05
+        - algorithm.encoder.nodes=[16,8]
+        - algorithm.encoder.activation="silu"
+    - id: vae_015
+      overrides:
+        - trainer.gradient_clip_val=0.0
+        - algorithm.encoder.clamp_zlogvar_range=[-10,6]
+        - algorithm.optimizer.lr=0.0007906028904785851
+        - algorithm.optimizer.betas=[0.9,0.99]
+        - algorithm.optimizer.weight_decay=0.0001
+        - algorithm.kl_scale=0.002
+        - algorithm.kl_warmup_frac=0.1
+        - algorithm.encoder.nodes=[32,16,4]
+        - algorithm.encoder.activation="silu"
+    - id: vae_016
+      overrides:
+        - trainer.gradient_clip_val=1.0
+        - algorithm.encoder.clamp_zlogvar_range=[-6,4]
+        - algorithm.optimizer.lr=0.00010828949183031497
+        - algorithm.optimizer.betas=[0.9,0.999]
+        - algorithm.optimizer.weight_decay=1e-06
+        - algorithm.kl_scale=0.001
+        - algorithm.kl_warmup_frac=0.0
+        - algorithm.encoder.nodes=[48,24,8]
+        - algorithm.encoder.activation="relu"
+  svdd:
+    - id: svdd_000
+      overrides:
+        - algorithm.optimizer.lr=0.001
+        - trainer.gradient_clip_val=0.0
+        - algorithm.optimizer.betas=[0.9,0.999]
+        - algorithm.network_weight_decay=1e-06
+    - id: svdd_001
+      overrides:
+        - algorithm.optimizer.lr=0.0002765339631654571
+        - trainer.gradient_clip_val=2.0
+        - algorithm.optimizer.betas=[0.9,0.999]
+        - algorithm.network_weight_decay=1e-07
+    - id: svdd_002
+      overrides:
+        - algorithm.optimizer.lr=0.001455091526319041
+        - trainer.gradient_clip_val=0.0
+        - algorithm.optimizer.betas=[0.9,0.99]
+        - algorithm.network_weight_decay=0.0
+    - id: svdd_003
+      overrides:
+        - algorithm.optimizer.lr=0.00036579790970411695
+        - trainer.gradient_clip_val=1.0
+        - algorithm.optimizer.betas=[0.9,0.999]
+        - algorithm.network_weight_decay=1e-05
+    - id: svdd_004
+      overrides:
+        - algorithm.optimizer.lr=6.130499286463933e-05
+        - trainer.gradient_clip_val=0.5
+        - algorithm.optimizer.betas=[0.9,0.99]
+        - algorithm.network_weight_decay=1e-08
+    - id: svdd_005
+      overrides:
+        - algorithm.optimizer.lr=3.506182631000125e-05
+        - trainer.gradient_clip_val=1.0
+        - algorithm.optimizer.betas=[0.9,0.99]
+        - algorithm.network_weight_decay=1e-07
+    - id: svdd_006
+      overrides:
+        - algorithm.optimizer.lr=0.0005741508101127631
+        - trainer.gradient_clip_val=0.5
+        - algorithm.optimizer.betas=[0.9,0.999]
+        - algorithm.network_weight_decay=1e-05
+    - id: svdd_007
+      overrides:
+        - algorithm.optimizer.lr=0.0026375853113904772
+        - trainer.gradient_clip_val=2.0
+        - algorithm.optimizer.betas=[0.9,0.99]
+        - algorithm.network_weight_decay=0.0
+    - id: svdd_008
+      overrides:
+        - algorithm.optimizer.lr=0.0001369486109055302
+        - trainer.gradient_clip_val=0.0
+        - algorithm.optimizer.betas=[0.9,0.999]
+        - algorithm.network_weight_decay=1e-06
+    - id: svdd_009
+      overrides:
+        - algorithm.optimizer.lr=0.0001195547486487114
+        - trainer.gradient_clip_val=1.0
+        - algorithm.optimizer.betas=[0.9,0.99]
+        - algorithm.network_weight_decay=1e-06
+    - id: svdd_010
+      overrides:
+        - algorithm.optimizer.lr=0.0016990131156774879
+        - trainer.gradient_clip_val=0.5
+        - algorithm.optimizer.betas=[0.9,0.999]
+        - algorithm.network_weight_decay=1e-07
+    - id: svdd_011
+      overrides:
+        - algorithm.optimizer.lr=0.000893206560694353
+        - trainer.gradient_clip_val=2.0
+        - algorithm.optimizer.betas=[0.9,0.99]
+        - algorithm.network_weight_decay=1e-06
+    - id: svdd_012
+      overrides:
+        - algorithm.optimizer.lr=4.0078403963205326e-05
+        - trainer.gradient_clip_val=0.0
+        - algorithm.optimizer.betas=[0.9,0.999]
+        - algorithm.network_weight_decay=0.0
+    - id: svdd_013
+      overrides:
+        - algorithm.optimizer.lr=9.32381308802209e-05
+        - trainer.gradient_clip_val=2.0
+        - algorithm.optimizer.betas=[0.9,0.999]
+        - algorithm.network_weight_decay=1e-08
+    - id: svdd_014
+      overrides:
+        - algorithm.optimizer.lr=0.00042770291897817185
+        - trainer.gradient_clip_val=0.0
+        - algorithm.optimizer.betas=[0.9,0.99]
+        - algorithm.network_weight_decay=1e-07
+    - id: svdd_015
+      overrides:
+        - algorithm.optimizer.lr=0.0012527297407563761
+        - trainer.gradient_clip_val=1.0
+        - algorithm.optimizer.betas=[0.9,0.999]
+        - algorithm.network_weight_decay=1e-08
+    - id: svdd_016
+      overrides:
+        - algorithm.optimizer.lr=0.00018062652707762496
+        - trainer.gradient_clip_val=0.5
+        - algorithm.optimizer.betas=[0.9,0.99]
+        - algorithm.network_weight_decay=1e-05
+  realnvp:
+    - id: realnvp_000
+      overrides:
+        - algorithm.optimizer.lr=0.001
+        - trainer.gradient_clip_val=0.0
+        - algorithm.optimizer.betas=[0.9,0.999]
+        - algorithm.optimizer.weight_decay=0.0001
+        - algorithm.flow.n_flows=6
+        - algorithm.flow.hidden_dim=32
+        - algorithm.flow.n_hidden_layers=2
+        - algorithm.flow.activation="relu"
+        - algorithm.flow.noise_scale=0.0
+        - algorithm.flow.scale_clamp=5.0
+    - id: realnvp_001
+      overrides:
+        - algorithm.optimizer.lr=0.00017513510839285972
+        - trainer.gradient_clip_val=0.5
+        - algorithm.optimizer.betas=[0.9,0.99]
+        - algorithm.optimizer.weight_decay=0.0
+        - algorithm.flow.n_flows=6
+        - algorithm.flow.hidden_dim=48
+        - algorithm.flow.n_hidden_layers=1
+        - algorithm.flow.activation="relu"
+        - algorithm.flow.noise_scale=0.001
+        - algorithm.flow.scale_clamp=3.0
+    - id: realnvp_002
+      overrides:
+        - algorithm.optimizer.lr=0.00137100017537297
+        - trainer.gradient_clip_val=1.0
+        - algorithm.optimizer.betas=[0.9,0.999]
+        - algorithm.optimizer.weight_decay=0.0001
+        - algorithm.flow.n_flows=6
+        - algorithm.flow.hidden_dim=32
+        - algorithm.flow.n_hidden_layers=2
+        - algorithm.flow.activation="gelu"
+        - algorithm.flow.noise_scale=0.0
+        - algorithm.flow.scale_clamp=5.0
+    - id: realnvp_003
+      overrides:
+        - algorithm.optimizer.lr=0.0004283154623163623
+        - trainer.gradient_clip_val=0.0
+        - algorithm.optimizer.betas=[0.9,0.99]
+        - algorithm.optimizer.weight_decay=1e-05
+        - algorithm.flow.n_flows=4
+        - algorithm.flow.hidden_dim=24
+        - algorithm.flow.n_hidden_layers=1
+        - algorithm.flow.activation="gelu"
+        - algorithm.flow.noise_scale=0.0001
+        - algorithm.flow.scale_clamp=5.0
+    - id: realnvp_004
+      overrides:
+        - algorithm.optimizer.lr=5.906226385533375e-05
+        - trainer.gradient_clip_val=2.0
+        - algorithm.optimizer.betas=[0.9,0.999]
+        - algorithm.optimizer.weight_decay=0.0001
+        - algorithm.flow.n_flows=8
+        - algorithm.flow.hidden_dim=64
+        - algorithm.flow.n_hidden_layers=2
+        - algorithm.flow.activation="relu"
+        - algorithm.flow.noise_scale=0.01
+        - algorithm.flow.scale_clamp=3.0
+    - id: realnvp_005
+      overrides:
+        - algorithm.optimizer.lr=3.070047378146412e-05
+        - trainer.gradient_clip_val=0.0
+        - algorithm.optimizer.betas=[0.9,0.999]
+        - algorithm.optimizer.weight_decay=0.0001
+        - algorithm.flow.n_flows=8
+        - algorithm.flow.hidden_dim=48
+        - algorithm.flow.n_hidden_layers=1
+        - algorithm.flow.activation="gelu"
+        - algorithm.flow.noise_scale=0.0001
+        - algorithm.flow.scale_clamp=5.0
+    - id: realnvp_006
+      overrides:
+        - algorithm.optimizer.lr=0.0008089723270643222
+        - trainer.gradient_clip_val=2.0
+        - algorithm.optimizer.betas=[0.9,0.99]
+        - algorithm.optimizer.weight_decay=1e-06
+        - algorithm.flow.n_flows=4
+        - algorithm.flow.hidden_dim=32
+        - algorithm.flow.n_hidden_layers=2
+        - algorithm.flow.activation="relu"
+        - algorithm.flow.noise_scale=0.01
+        - algorithm.flow.scale_clamp=3.0
+    - id: realnvp_007
+      overrides:
+        - algorithm.optimizer.lr=0.0022737889198751813
+        - trainer.gradient_clip_val=0.5
+        - algorithm.optimizer.betas=[0.9,0.999]
+        - algorithm.optimizer.weight_decay=0.001
+        - algorithm.flow.n_flows=6
+        - algorithm.flow.hidden_dim=24
+        - algorithm.flow.n_hidden_layers=1
+        - algorithm.flow.activation="relu"
+        - algorithm.flow.noise_scale=0.001
+        - algorithm.flow.scale_clamp=3.0
+    - id: realnvp_008
+      overrides:
+        - algorithm.optimizer.lr=0.00010756146087895636
+        - trainer.gradient_clip_val=1.0
+        - algorithm.optimizer.betas=[0.9,0.99]
+        - algorithm.optimizer.weight_decay=0.0
+        - algorithm.flow.n_flows=6
+        - algorithm.flow.hidden_dim=64
+        - algorithm.flow.n_hidden_layers=2
+        - algorithm.flow.activation="gelu"
+        - algorithm.flow.noise_scale=0.0
+        - algorithm.flow.scale_clamp=5.0
+    - id: realnvp_009
+      overrides:
+        - algorithm.optimizer.lr=0.00015899165016318727
+        - trainer.gradient_clip_val=0.0
+        - algorithm.optimizer.betas=[0.9,0.999]
+        - algorithm.optimizer.weight_decay=1e-06
+        - algorithm.flow.n_flows=4
+        - algorithm.flow.hidden_dim=64
+        - algorithm.flow.n_hidden_layers=1
+        - algorithm.flow.activation="gelu"
+        - algorithm.flow.noise_scale=0.0001
+        - algorithm.flow.scale_clamp=3.0
+    - id: realnvp_010
+      overrides:
+        - algorithm.optimizer.lr=0.0020505384764612105
+        - trainer.gradient_clip_val=2.0
+        - algorithm.optimizer.betas=[0.9,0.99]
+        - algorithm.optimizer.weight_decay=0.0001
+        - algorithm.flow.n_flows=6
+        - algorithm.flow.hidden_dim=24
+        - algorithm.flow.n_hidden_layers=2
+        - algorithm.flow.activation="relu"
+        - algorithm.flow.noise_scale=0.01
+        - algorithm.flow.scale_clamp=5.0
+    - id: realnvp_011
+      overrides:
+        - algorithm.optimizer.lr=0.0006791500126551843
+        - trainer.gradient_clip_val=0.5
+        - algorithm.optimizer.betas=[0.9,0.999]
+        - algorithm.optimizer.weight_decay=0.0
+        - algorithm.flow.n_flows=8
+        - algorithm.flow.hidden_dim=32
+        - algorithm.flow.n_hidden_layers=1
+        - algorithm.flow.activation="relu"
+        - algorithm.flow.noise_scale=0.001
+        - algorithm.flow.scale_clamp=5.0
+    - id: realnvp_012
+      overrides:
+        - algorithm.optimizer.lr=4.878389767413207e-05
+        - trainer.gradient_clip_val=1.0
+        - algorithm.optimizer.betas=[0.9,0.99]
+        - algorithm.optimizer.weight_decay=0.001
+        - algorithm.flow.n_flows=4
+        - algorithm.flow.hidden_dim=48
+        - algorithm.flow.n_hidden_layers=2
+        - algorithm.flow.activation="gelu"
+        - algorithm.flow.noise_scale=0.0
+        - algorithm.flow.scale_clamp=3.0
+    - id: realnvp_013
+      overrides:
+        - algorithm.optimizer.lr=9.471298801795526e-05
+        - trainer.gradient_clip_val=0.5
+        - algorithm.optimizer.betas=[0.9,0.99]
+        - algorithm.optimizer.weight_decay=0.001
+        - algorithm.flow.n_flows=4
+        - algorithm.flow.hidden_dim=64
+        - algorithm.flow.n_hidden_layers=1
+        - algorithm.flow.activation="relu"
+        - algorithm.flow.noise_scale=0.001
+        - algorithm.flow.scale_clamp=5.0
+    - id: realnvp_014
+      overrides:
+        - algorithm.optimizer.lr=0.0003560103076282228
+        - trainer.gradient_clip_val=1.0
+        - algorithm.optimizer.betas=[0.9,0.999]
+        - algorithm.optimizer.weight_decay=1e-06
+        - algorithm.flow.n_flows=8
+        - algorithm.flow.hidden_dim=24
+        - algorithm.flow.n_hidden_layers=2
+        - algorithm.flow.activation="gelu"
+        - algorithm.flow.noise_scale=0.0
+        - algorithm.flow.scale_clamp=3.0
+    - id: realnvp_015
+      overrides:
+        - algorithm.optimizer.lr=0.0012251485411804435
+        - trainer.gradient_clip_val=0.0
+        - algorithm.optimizer.betas=[0.9,0.99]
+        - algorithm.optimizer.weight_decay=1e-05
+        - algorithm.flow.n_flows=8
+        - algorithm.flow.hidden_dim=32
+        - algorithm.flow.n_hidden_layers=1
+        - algorithm.flow.activation="gelu"
+        - algorithm.flow.noise_scale=0.0001
+        - algorithm.flow.scale_clamp=3.0
+    - id: realnvp_016
+      overrides:
+        - algorithm.optimizer.lr=0.00026147164825687027
+        - trainer.gradient_clip_val=2.0
+        - algorithm.optimizer.betas=[0.9,0.999]
+        - algorithm.optimizer.weight_decay=1e-05
+        - algorithm.flow.n_flows=6
+        - algorithm.flow.hidden_dim=48
+        - algorithm.flow.n_hidden_layers=2
+        - algorithm.flow.activation="relu"
+        - algorithm.flow.noise_scale=0.01
+        - algorithm.flow.scale_clamp=5.0

@@ -30,20 +30,18 @@ hydra:
 
     # define hyperparameter search space. Assumes using torch.optim.AdamW
     # RobustAD space
+
+    # Space of the shared pool after the review of the submitted version's
+    # searches (19 Oct 2026). Gradient clipping, the Adam betas, weight decay,
+    # the input noise, the Huber delta, the activation and batch normalisation
+    # had no measurable effect on any strategy's objective and take the
+    # experiment's values; the learning-rate range is the one shared by every
+    # MLP and convolutional family.
+    # The log-variance clamp and the KL warm-up had no effect either and take
+    # the algorithm's values. The KL ladder is kept: its CAP front sat on the
+    # bottom and its Wasserstein front on the top. The lists are
+    # [conv..., hidden, latent].
     params:
-      trainer.gradient_clip_val: choice(0.0, 0.5, 1.0)
-
-      algorithm.encoder.clamp_zlogvar_range: choice([-10, 6], [-8, 6], [-6, 4])
-
-      algorithm.optimizer.lr: tag(log, interval(3e-5, 1e-3))
-      algorithm.optimizer.betas: choice([0.9, 0.999], [0.9, 0.99])
-      algorithm.optimizer.weight_decay: choice(0.0, 1e-6, 1e-5, 1e-4, 1e-3)
-
+      algorithm.encoder.nodes: choice([8, 16, 16], [8, 16, 32], [16, 32, 32], [16, 32, 64], [32, 64, 64], [32, 64, 128])
       algorithm.kl_scale: choice(1e-5, 3e-5, 1e-4, 3e-4, 1e-3)
-      algorithm.kl_warmup_frac: choice(0.0, 0.1, 0.2, 0.3)
-
-      algorithm.encoder.nodes: choice([8, 16, 16],[8, 16, 32],[16, 32, 32],[16, 32, 64],[32, 64, 64],[32, 64, 128])
-      algorithm.encoder.strides: choice([2])
-
-      algorithm.encoder.activation: choice(relu, gelu, silu)
-      algorithm.encoder.batchnorm: choice(false, true)
+      algorithm.optimizer.lr: tag(log, interval(3e-5, 1e-2))

@@ -11,7 +11,7 @@ from src.utils.omegaconf import register_resolvers
 CONFIGS = Path(__file__).resolve().parents[1] / "configs"
 EXPERIMENTS = sorted(
     f"{domain}/{path.stem}"
-    for domain in ("physics", "cifar10", "robustad")
+    for domain in ("physics", "cifar10", "robustad", "cchamber", "cchamber_wt")
     for path in (CONFIGS / "experiment" / domain).glob("*.yaml")
 )
 MODEL_CHECKPOINT = "pytorch_lightning.callbacks.ModelCheckpoint"

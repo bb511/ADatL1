@@ -1,0 +1,122 @@
+# Registration of the three chamber limit experiments (subplan 1, step E.15).
+# Companion to registration.yaml; fixed and committed with it before anything below
+# is run. Every experiment uses the frozen CAP configuration (configs/cap/frozen.yaml)
+# and the validation split; test-split numbers are reported descriptively only.
+version: 1
+drafted: 2026-10-07
+readout_map: scripts/cchamber/readout_map.yaml
+
+blind_direction:
+  question: >-
+    Does CAP, choosing among scores on normal data alone, pick a score that is
+    blind to a shift documented in another readout?
+  candidates: >-
+    the 22 signed native readouts, +r and -r for each of the 11 normalised
+    readouts of the data module, used directly as anomaly scores (larger is more
+    anomalous); no training, so no checkpoint chain
+  selection: >-
+    CAP between validation normal and reference_normal for every candidate; the
+    largest CAP is selected; ties broken by readout order (data module order),
+    then + before -
+  comparators: >-
+    for each intervention and each affected readout r of the readout map: +r if
+    the documented direction is increase, -r if decrease. Readouts whose direction
+    is unknown use direction_inferred and are reported in a separate block marked
+    as inferred. Readouts with variance_decrease, saturation or constant_reading
+    have no signed comparator and are listed as cases no signed readout can detect
+  outcomes: >-
+    per intervention and comparator: efficiency at the 1 % threshold
+    (quantile 0.99 of the validation normal scores, interpolation "higher") and
+    AUPRC, for the selected readout and for the comparator, on the 600 validation
+    rows; the same on the 400 test rows, descriptively
+  report: >-
+    the full table over all 58 interventions, the number of interventions for
+    which the selected readout is one of the comparators, and the efficiency and
+    AUPRC gaps; no single case is singled out
+
+sensitivity:
+  question: >-
+    Does each criterion respond more strongly to interventions that move the
+    data further from the reference?
+  models: >-
+    the CAP-selected checkpoint of every family and seed under the frozen
+    configuration (12 models), held fixed
+  interventions:
+    # The weak level exists only for the oversampling and exposure targets.
+    primary:
+      [
+        uniform_osr_angle_1_weak,
+        uniform_osr_angle_2_weak,
+        uniform_osr_c_weak,
+        uniform_t_ir_1_weak,
+        uniform_t_ir_2_weak,
+        uniform_t_ir_3_weak,
+        uniform_t_vis_1_weak,
+        uniform_t_vis_2_weak,
+        uniform_t_vis_3_weak,
+      ]
+    secondary: all 27 weak, mid and strong interventions of the osr and t targets
+  shift_size: >-
+    energy distance between the intervention's validation inputs and the
+    validation reference_normal inputs, in the normalised 11-dimensional input
+    space, model-free
+  response: >-
+    for each criterion c in {CAP, threshold drift, Wasserstein}: c computed with
+    the intervention's validation scores in place of reference_normal, minus c
+    with reference_normal, both with the second set subsampled to 600 rows by a
+    fixed seed; the sign is set so that a larger response means a larger
+    departure from normal
+  statistic: >-
+    Spearman rank correlation between response and shift size over the
+    interventions, per model; reported per family and averaged over the 12 models
+  seed: 4242
+
+# Added 7 Oct (user-approved), from Victor's candidate-ranking claim: the whitened
+# residual score of an untrained model already reaches AUPRC 0.76 in his data.
+secondary:
+  reference_row:
+    what: >-
+      the whitened residual score of an untrained model: the Mahalanobis energy
+      of the normalised inputs, (x - mu)^T P (x - mu) / 11, with mu and P the
+      mean and OAS-shrunk precision of the 6,000 training normals; no training
+    use: >-
+      scored like a candidate in every chamber table (efficiency at 1 %, AUPRC,
+      per split); never selectable
+    check: >-
+      the number of pool candidates per family whose declared score equals it to
+      float tolerance at the selected checkpoint is reported, not assumed
+  ranking_validity:
+    criteria:
+      [
+        cap_frozen,
+        drift,
+        wasserstein,
+        cap_frozen_nearest_neighbour,
+        cap_frozen_random,
+      ]
+    value: each criterion at the checkpoint its own chain selects, per run
+    unit: the 17 candidates of a family, each averaged over the 3 seeds
+    endpoints: { headline: efficiency at 1 %, beside: AUPRC }
+    statistic: Spearman rank correlation of criterion value and endpoint over the 17 candidates
+    p_value: { method: permutation, permutations: 10000, seed: 4242 }
+    correction: Holm over one family of criteria x families (5 x 4 = 20 tests) per endpoint
+    robustness:
+      - drop the three candidates with the lowest endpoint and recompute
+      - partial Spearman with the selected epoch partialled out of both variables
+    output: one table and one figure per endpoint
+
+pairing:
+  question: >-
+    Does the choice of rank (cdf) pairing matter for the selection?
+  variants:
+    cdf: the registered pairing
+    nearest_neighbour: >-
+      one-to-one matching of validation normal to reference_normal rows that
+      minimises the total Euclidean distance in the normalised input space
+      (Hungarian assignment), computed once and used at every epoch
+    random: a fixed random permutation of reference_normal, drawn once
+  random_seed: 4242
+  outcomes: >-
+    the registered criterion (efficiency at 1 %, equal family weight), mean
+    AUPRC and the crossed-bootstrap standard error, per variant and per family,
+    with the selection chain rerun under each pairing

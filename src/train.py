@@ -1,23 +1,21 @@
 # Main training script.
-from typing import Any, Dict, List, Optional, Tuple
-from pathlib import Path
 import gc
-
 import os
+from pathlib import Path
+from typing import Any, Dict, List, Optional, Tuple
 
 os.environ["KERAS_BACKEND"] = "torch"
 
+from math import inf
+
 import hydra
 import pytorch_lightning as pl
-
+import rootutils
+from colorama import Back, Fore
+from hydra.core.hydra_config import HydraConfig
+from omegaconf import DictConfig, OmegaConf
 from pytorch_lightning import Callback, LightningDataModule, LightningModule, Trainer
 from pytorch_lightning.loggers import Logger
-from omegaconf import OmegaConf, DictConfig
-from colorama import Fore, Back
-from math import inf
-from hydra.core.hydra_config import HydraConfig
-
-import rootutils
 
 rootutils.setup_root(__file__, indicator=".project-root", pythonpath=True)
 
@@ -26,12 +24,14 @@ from src.utils.omegaconf import register_resolvers
 
 register_resolvers()
 
-from src.utils import RankedLogger
-from src.utils import extras
-from src.utils import instantiate_callbacks
-from src.utils import instantiate_loggers
-from src.utils import log_hyperparameters
-from src.utils import task_wrapper
+from src.utils import (
+    RankedLogger,
+    extras,
+    instantiate_callbacks,
+    instantiate_loggers,
+    log_hyperparameters,
+    task_wrapper,
+)
 
 log = RankedLogger(__name__, rank_zero_only=True)
 
@@ -46,11 +46,11 @@ warnings.filterwarnings(
 
 @task_wrapper
 def train(cfg: DictConfig) -> Tuple[Dict[str, Any], Dict[str, Any]]:
-    """Trains the model. Can additionally evaluate on a testset, using best weights obtained during
-    training.
+    """Trains the model. Can additionally evaluate on a testset, using best weights
+    obtained during training.
 
-    This method is wrapped in optional @task_wrapper decorator, that controls the behavior during
-    failure. Useful for multiruns, saving info about the crash, etc.
+    This method is wrapped in optional @task_wrapper decorator, that controls the
+    behavior during failure. Useful for multiruns, saving info about the crash, etc.
 
     :param cfg: A DictConfig configuration composed by Hydra.
     :return: A tuple with metrics and dict with all instantiated objects.
@@ -128,7 +128,9 @@ def _worst_for(direction: str) -> float:
 
 def _get_evaluator(cfg: DictConfig, datamodule, logger):
     """Configure the evaluator object and return it."""
-    if cfg.get("evaluation") is None:
+    # `~evaluation` leaves an empty node behind when an experiment sets the group's
+    # keys inline, and an empty node cannot build an evaluator either.
+    if not cfg.get("evaluation"):
         log.info(Back.YELLOW + "No evaluation config found... Skipping testing")
         return
 

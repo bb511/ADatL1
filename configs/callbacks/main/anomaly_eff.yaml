@@ -1,8 +1,0 @@
-# @package callbacks.main
-
-# Reference only: not selected by any defaults list.
-_target_: src.callbacks.efficiency.AnomalyEfficiencyCallback
-output_name: "loss/total/full"
-target_rates: [0.01, 0.1, 0.25, 0.5, 1]
-base_rate: 28608.8064
-ema_weight: 0.9

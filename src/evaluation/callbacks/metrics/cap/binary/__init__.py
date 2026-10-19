@@ -4,36 +4,22 @@ from typing import Callable, Literal, Optional, Tuple
 import torch
 from torch import Tensor
 
-__all__ = ["get_pairing_fn", "get_normalizer_fn", "get_energy_fn", "get_regularizer_fn"]
+__all__ = ["get_pairing_fn", "get_normalizer_fn", "get_energy_fn"]
 
 
-from src.evaluation.callbacks.metrics.cap.binary.pairing import (
-    absolute,
-    cdf,
-    label,
-    random,
-)
+from src.evaluation.callbacks.metrics.cap.binary.pairing import cdf
 
 
 def get_pairing_fn(
     pairing_type: str,
 ):
-    """Get the regularization function based on type."""
+    """Get the pairing function based on type."""
 
     if pairing_type == "none":  # get the first elements
         return lambda tensor1, tensor2: (
             torch.arange(min(len(tensor1), len(tensor2))),
             torch.arange(min(len(tensor1), len(tensor2))),
         )
-
-    elif pairing_type == "random":
-        return random
-
-    elif pairing_type == "label":
-        return label
-
-    elif pairing_type == "absolute":
-        return absolute
 
     elif pairing_type == "cdf":
         return cdf
@@ -122,7 +108,7 @@ from src.evaluation.callbacks.metrics.cap.binary.energy import (
 
 
 def get_energy_fn(energy_type: str, energy_params: Optional[dict] = None):
-    """Get the regularization function based on type."""
+    """Get the energy function based on type."""
     energy_params = energy_params or {}
 
     if energy_type == "baseline":
@@ -145,47 +131,3 @@ def get_energy_fn(energy_type: str, energy_params: Optional[dict] = None):
 
     else:
         raise ValueError(f"Unknown energy type: {energy_type}")
-
-
-from src.evaluation.callbacks.metrics.cap.binary.regularization import (
-    percentile,
-    smooth,
-    threshold,
-)
-
-
-def get_regularizer_fn(
-    regularization_type: str, regularization_params: Optional[dict] = None
-):
-    """Get the regularization function based on type."""
-
-    regularization_params = regularization_params or {}
-    if regularization_type == "none":
-        return lambda x: x
-
-    elif regularization_type == "threshold_max":
-        return functools.partial(threshold, **regularization_params, mode="max")
-
-    elif regularization_type == "threshold_mean":
-        return functools.partial(threshold, **regularization_params, mode="mean")
-
-    elif regularization_type == "threshold_zero":
-        return functools.partial(threshold, **regularization_params, mode="zero")
-
-    elif regularization_type == "smooth_sigmoid":
-        return functools.partial(smooth, **regularization_params, mode="sigmoid")
-
-    elif regularization_type == "smooth_exponential":
-        return functools.partial(smooth, **regularization_params, mode="exponential")
-
-    elif regularization_type == "smooth_linear":
-        return functools.partial(smooth, **regularization_params, mode="linear")
-
-    elif regularization_type == "percentile":
-        return functools.partial(
-            percentile,
-            **regularization_params,
-        )
-
-    else:
-        raise ValueError(f"Unknown regularization type: {regularization_type}")

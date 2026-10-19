@@ -56,6 +56,11 @@ algorithm:
   encoder:
     in_dim: 117
 
+  # No KL warm-up: the pool review found none of the old warm-up fractions
+  # changed any objective, and a constant KL weight keeps the validation loss
+  # comparable across epochs for the loss-only checkpoint.
+  kl_warmup_frac: 0.0
+
   optimizer:
     _partial_: true
     _target_: torch.optim.AdamW

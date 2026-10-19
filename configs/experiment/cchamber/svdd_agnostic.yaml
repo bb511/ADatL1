@@ -1,0 +1,246 @@
+# @package _global_
+
+defaults:
+  - /cap: provisional
+  - /callbacks/util@callbacks.score_dump: score_dump
+  - override /data: cchamber
+  - override /algorithm: svdd
+  - override /callbacks: default
+  - override /trainer: cpu
+  - override /evaluation: default
+  - override /evaluation/callbacks: default
+  - override /logger: mlflow
+
+seed: 123
+tags: ["deepsvdd", "cchamber", "agnostic"]
+
+experiment_name: cchamber_svdd_models
+run_name: ${short_hash:${hydra:runtime.output_dir},12}
+
+data:
+  batch_size: 1024
+  max_val_batches: -1
+
+trainer:
+  gradient_clip_algorithm: norm
+  gradient_clip_val: 0.0
+  min_epochs: 1
+  max_epochs: 150
+
+test: true
+
+# Metrics reported to optuna, read at the candidate checkpoint.
+optimized_metric_config:
+  candidate:
+    strategy: summary
+    metric: cap_ema_normal_vs_reference_normal
+    criterion: max
+  main_metric:
+    callback:
+      name: cap
+      params: {}
+    direction: maximize
+  sec_metric:
+    callback:
+      name: ascore_operational
+      params:
+        ckpt_name: null
+        test_ds: normal
+    direction: minimize
+
+# Candidate 000 of the chamber panel. The panel leaves the encoder widths to its
+# base configuration, which sets [128, 64, 16].
+algorithm:
+  target_rate: 0.01
+  base_rate: null
+  network_weight_decay: 1.0e-6
+
+  encoder:
+    in_dim: 11
+    nodes: [128, 64, 16]
+
+  optimizer:
+    _partial_: true
+    _target_: torch.optim.Adam
+    lr: 1.0e-3
+    weight_decay: 0.0
+    betas: [0.9, 0.999]
+    eps: 1e-8
+
+callbacks:
+  log_data_mlflow: null
+
+  anomaly_eff:
+    _target_: src.callbacks.efficiency.AnomalyEfficiencyCallback
+    output_name: "ascore/full"
+    ema_weight: 0.9
+
+  thres_drift:
+    _target_: src.callbacks.thres_drift.ThresholdDriftCallback
+    output_name: "ascore/full"
+    calibration_fraction: 0.5
+    split_seed: 12345
+    ema_weight: 0.9
+
+  wasserstein_dist:
+    _target_: src.callbacks.wasserstein.WassersteinCallback
+    output_name: "ascore/full"
+    dataset_1: normal
+    dataset_2: reference_normal
+    apply_log1p: true
+    ema_weight: 0.9
+
+  cap_sn_zb:
+    _target_: src.callbacks.cap.CAPCallback
+    output_name: "ascore/full"
+    dataset_1: normal
+    dataset_2: reference_normal
+    pairing_type: cdf
+    cap_metric_config: ${cap}
+
+  consistency_sn_zb:
+    _target_: src.callbacks.consistency.PosteriorConsistencyCallback
+    output_name: "ascore/full"
+    dataset_1: normal
+    dataset_2: reference_normal
+    pairing_type: cdf
+    cap_metric_config: ${cap}
+
+  cap_sn_zb_ema_ckpt:
+    _target_: pytorch_lightning.callbacks.ModelCheckpoint
+    dirpath: "${paths.checkpoints_dir}/${experiment_name}/${run_name}/summary/cap_ema_normal_vs_reference_normal/max"
+    monitor: "val/summary/cap_ema_normal_vs_reference_normal"
+    filename: "cap_ema_normal_vs_reference_normal"
+    save_last: false
+    save_top_k: 1
+    mode: "max"
+    auto_insert_metric_name: False
+    save_weights_only: False
+    every_n_epochs: 1
+    save_on_train_epoch_end: false
+
+evaluation:
+  evaluator:
+    ckpts:
+      summary:
+        cap_ema_normal_vs_reference_normal: ["max"]
+
+  callbacks:
+    anomaly_efficiency:
+      _target_: src.evaluation.callbacks.efficiency.AnomalyEfficiencyCallback
+      output_name: "ascore/full"
+      ds: ${data.signal_experiments}
+      cvar_summary: 0.25
+      log_raw_mlflow: false
+
+    cap_sn_zb:
+      _target_: src.evaluation.callbacks.cap.CAP
+      output_name: "ascore/full"
+      dataset_1: normal
+      dataset_2: reference_normal
+      log_raw_mlflow: false
+      pairing_type: cdf
+      cap_metric_config: ${cap}
+
+    consistency_sn_zb:
+      _target_: src.evaluation.callbacks.consistency.PosteriorConsistency
+      name: consistency
+      output_name: "ascore/full"
+      dataset_1: normal
+      dataset_2: reference_normal
+      log_raw_mlflow: false
+      pairing_type: cdf
+      cap_metric_config: ${cap}
+
+    # Written out because an interpolation of data.signal_experiments cannot
+    # prepend normal.
+    ascore_operational:
+      _target_: src.evaluation.callbacks.output.OutputCallback
+      name: ascore_operational
+      output_name: "ascore/operational"
+      ds:
+        - normal
+        - uniform_blue_mid
+        - uniform_blue_strong
+        - uniform_diode_ir_1_mid
+        - uniform_diode_ir_1_strong
+        - uniform_diode_ir_2_mid
+        - uniform_diode_ir_2_strong
+        - uniform_diode_ir_3_mid
+        - uniform_diode_ir_3_strong
+        - uniform_diode_vis_1_mid
+        - uniform_diode_vis_2_mid
+        - uniform_diode_vis_3_mid
+        - uniform_green_mid
+        - uniform_green_strong
+        - uniform_l_11_mid
+        - uniform_l_12_mid
+        - uniform_l_21_mid
+        - uniform_l_22_mid
+        - uniform_l_31_mid
+        - uniform_l_32_mid
+        - uniform_osr_angle_1_mid
+        - uniform_osr_angle_1_strong
+        - uniform_osr_angle_1_weak
+        - uniform_osr_angle_2_mid
+        - uniform_osr_angle_2_strong
+        - uniform_osr_angle_2_weak
+        - uniform_osr_c_mid
+        - uniform_osr_c_strong
+        - uniform_osr_c_weak
+        - uniform_pol_1_mid
+        - uniform_pol_1_strong
+        - uniform_pol_2_mid
+        - uniform_pol_2_strong
+        - uniform_red_mid
+        - uniform_red_strong
+        - uniform_t_ir_1_mid
+        - uniform_t_ir_1_strong
+        - uniform_t_ir_1_weak
+        - uniform_t_ir_2_mid
+        - uniform_t_ir_2_strong
+        - uniform_t_ir_2_weak
+        - uniform_t_ir_3_mid
+        - uniform_t_ir_3_strong
+        - uniform_t_ir_3_weak
+        - uniform_t_vis_1_mid
+        - uniform_t_vis_1_strong
+        - uniform_t_vis_1_weak
+        - uniform_t_vis_2_mid
+        - uniform_t_vis_2_strong
+        - uniform_t_vis_2_weak
+        - uniform_t_vis_3_mid
+        - uniform_t_vis_3_strong
+        - uniform_t_vis_3_weak
+        - uniform_v_angle_1_mid
+        - uniform_v_angle_1_strong
+        - uniform_v_angle_2_mid
+        - uniform_v_angle_2_strong
+        - uniform_v_c_mid
+        - uniform_v_c_strong
+      log_raw_mlflow: false
+
+    thres_drift:
+      _target_: src.evaluation.callbacks.thres_drift.ThresholdDriftCallback
+      output_name: "ascore/full"
+      calibration_fraction: 0.5
+      split_seed: 12345
+      log_raw_mlflow: false
+      name: thres_drift
+
+    wasserstein:
+      _target_: src.evaluation.callbacks.wasserstein.Wasserstein
+      output_name: "ascore/full"
+      dataset_1: normal
+      dataset_2: reference_normal
+      apply_log1p: true
+      log_raw_mlflow: false
+      name: wasserstein
+
+    anomaly_auprc:
+      _target_: src.evaluation.callbacks.auprc.AnomalyAUPRCCallback
+      output_name: "ascore/full"
+      ds: ${data.signal_experiments}
+      pure_normal: false
+      log_raw_mlflow: false
+      name: auprc

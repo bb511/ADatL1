@@ -34,17 +34,18 @@ hydra:
     # the comment in physics/dte_optuna.yaml for why, and for why searching
     # n_bins is only sound because ImageDTE normalises the anomaly score by
     # n_bins-1.
+
+    # Space of the shared pool after the review of the submitted version's
+    # searches (19 Oct 2026). Clipping, the Adam betas and weight decay had no
+    # measurable effect and take the experiment's values; the learning-rate
+    # range is the one shared by every MLP and convolutional family. n_bins
+    # and the dropout lose their near-duplicate levels; batch normalisation
+    # and the activation stay, their effects differing by strategy.
     params:
-      algorithm.optimizer.lr: tag(log, interval(3e-5, 1e-3))
-      trainer.gradient_clip_val: choice(0.0, 0.5, 1.0)
-      algorithm.optimizer.betas: choice([0.9, 0.999], [0.9, 0.99])
-      algorithm.optimizer.weight_decay: choice(0.0, 1e-6, 1e-5, 1e-4)
-
       algorithm.beta_end: tag(log, interval(1e-3, 1e-1))
-      algorithm.n_bins: choice(5, 7, 10, 15, 20, 30)
-
+      algorithm.n_bins: choice(5, 10, 20, 30)
       algorithm.predictor.nodes: choice([8, 16, 32], [16, 32, 64], [32, 64, 128])
-      algorithm.predictor.strides: choice([2, 2])
-      algorithm.predictor.dropout: choice(0.0, 0.1, 0.25, 0.5)
+      algorithm.predictor.dropout: choice(0.0, 0.25, 0.5)
       algorithm.predictor.activation: choice(relu, gelu, silu)
       algorithm.predictor.batchnorm: choice(false, true)
+      algorithm.optimizer.lr: tag(log, interval(3e-5, 1e-2))

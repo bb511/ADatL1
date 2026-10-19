@@ -30,17 +30,13 @@ hydra:
 
     # define hyperparameter search space. Assumes using torch.optim.AdamW
     # RobustAD search space.
+
+    # Space of the shared pool after the review of the submitted version's
+    # searches (19 Oct 2026). Gradient clipping, the Adam betas, weight decay,
+    # the input noise, the Huber delta, the activation and batch normalisation
+    # had no measurable effect on any strategy's objective and take the
+    # experiment's values; the learning-rate range is the one shared by every
+    # MLP and convolutional family.
     params:
-      trainer.gradient_clip_val: choice(0.0, 0.5, 1.0)
-
-      algorithm.delta: choice(0.5, 1.0, 2.0, 3.0, 5.0)
-      algorithm.input_noise_std: choice(0.0, 0.005, 0.01, 0.03)
-
       algorithm.encoder.nodes: choice([8, 16, 32], [16, 32, 64], [32, 64, 128])
-      algorithm.encoder.strides: choice([2, 2])
-      algorithm.encoder.activation: choice(relu, gelu, silu)
-      algorithm.encoder.batchnorm: choice(false, true)
-
-      algorithm.optimizer.lr: tag(log, interval(3e-5, 1e-3))
-      algorithm.optimizer.betas: choice([0.9, 0.999], [0.9, 0.99])
-      algorithm.optimizer.weight_decay: choice(0.0, 1e-5, 1e-4, 1e-3)
+      algorithm.optimizer.lr: tag(log, interval(3e-5, 1e-2))

@@ -1,0 +1,90 @@
+# @package data
+
+defaults:
+  - _self_
+
+_target_: src.data.CausalChamber_datamodule.CausalChamberBlockDataModule
+
+data_dir: ${paths.base_data_dir}/causal_chamber
+dataset_name: wt_walks_v1
+url: https://causalchamber.s3.eu-central-1.amazonaws.com/downloadables/wt_walks_v1.zip
+md5: 19bb4e92cbe0b8dff49299b9b509ac36
+
+batch_size: 1024
+max_val_batches: -1
+num_workers: 0
+
+# The reference regime is split into train, validation and test (the remainder);
+# every other regime into validation and test.
+train_fraction: 0.6
+val_fraction: 0.2
+signal_val_fraction: 0.6
+
+robust_quantiles: [0.05, 0.95]
+clip_value: 10.0
+
+# Fixed apart from the training seed, so that every run sees the same rows.
+seed: 314159
+# The batch order follows the global training seed.
+train_seed: ${seed}
+
+# The eleven sensor readouts of the wind tunnel, in the order of
+# scripts/cchamber/readout_map_wt.yaml. The other 26 columns (actuators, sensor
+# parameters and run metadata) are never model inputs.
+readouts:
+  - pressure_upwind
+  - pressure_downwind
+  - pressure_ambient
+  - pressure_intake
+  - mic
+  - rpm_in
+  - rpm_out
+  - current_in
+  - current_out
+  - signal_1
+  - signal_2
+
+# regime_jumps_single.csv holds 32 regimes of 10,000 rows, numbered 0-31 by its flag
+# column. Regime 0 has no intervention and is the dataset's own reference; the
+# intervention targets and the null regimes are those of
+# scripts/cchamber/readout_map_wt.yaml.
+block_file: regime_jumps_single
+block_column: flag
+normal_block: 0
+# regime_<index>_<intervention target>: regime index. The labels 1-26 follow this
+# order.
+signal_blocks:
+  regime_01_v_2: 1
+  regime_03_res_out: 3
+  regime_04_v_out: 4
+  regime_05_hatch: 5
+  regime_06_v_1: 6
+  regime_07_osr_upwind: 7
+  regime_09_osr_upwind: 9
+  regime_10_v_out: 10
+  regime_11_v_1: 11
+  regime_12_res_in: 12
+  regime_13_osr_upwind: 13
+  regime_14_res_out: 14
+  regime_15_osr_downwind: 15
+  regime_16_osr_ambient: 16
+  regime_17_v_in: 17
+  regime_18_hatch: 18
+  regime_19_osr_upwind: 19
+  regime_21_res_in: 21
+  regime_22_v_1: 22
+  regime_23_osr_intake: 23
+  regime_25_v_1: 25
+  regime_27_osr_upwind: 27
+  regime_28_osr_intake: 28
+  regime_29_osr_ambient: 29
+  regime_30_v_in: 30
+  regime_31_res_in: 31
+# Regimes without intervention, with label 0: a check of the false-positive rate
+# under the random walk of the actuators.
+null_blocks:
+  null_regime_02: 2
+  null_regime_08: 8
+  null_regime_20: 20
+  null_regime_24: 24
+  null_regime_26: 26

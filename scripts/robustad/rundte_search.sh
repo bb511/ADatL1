@@ -2,9 +2,9 @@
 # ========================================================================
 # DTE POOL COMMANDS
 # ========================================================================
-# The random pool of robustad/dte: 100 trials, drawn by four drivers that
-# share the Optuna study `pool` and differ only in their sampler seed. Every
-# trial is a full 200-epoch training, evaluated at the checkpoint of each
+# The random pool of robustad/dte: 90 trials, drawn by four drivers that share
+# the Optuna study `pool` and differ only in their sampler seed. Every trial
+# is a full 200-epoch training, evaluated at the checkpoint of each
 # validation strategy, and the strategies then select from the pool.
 #
 # The random sampler replays its draws from the seed, so a driver that stops
@@ -13,9 +13,8 @@
 # such a relaunch.
 #
 # The blocks name no launcher: the venue appends one at submission, with a
-# timeout of 17 minutes per trial for this model (200 epochs at up to 2.5 s
-# each on an H100, plus about 3 minutes of evaluation, and half again as
-# margin).
+# timeout of 17 minutes per trial for this model (200 epochs at up to 2.5 s each on an H100, plus about 3 minutes of
+# evaluation, and half again as margin).
 #
 # On clariden, each driver keeps six trials queued as slurm jobs:
 #   bash scripts/cluster/submit_search.sh scripts/robustad/rundte_search.sh \
@@ -31,14 +30,6 @@
 #       hydra.launcher.timeout_min=17
 # submitit_local shows a trial GPUs 0 to gpus_per_node-1 only, none when it
 # is unset, and trainer.devices picks among them.
-#
-# BEFORE THE FIRST LAUNCH the processed data must already exist where the
-# trials run. Build it with rundte_cache.sh in this directory and copy the
-# trees listed there.
-#
-# The search space is configs/hparams_search/robustad/dte_optuna.yaml and
-# holds the RobustAD ranges only. Its CIFAR-10 counterpart is a separate
-# file under configs/hparams_search/cifar10/.
 
 
 # ========================================================================
@@ -52,7 +43,7 @@
 #     experiment=robustad/dte \
 #     logger=mlflow \
 #     hparams_search=robustad/dte_optuna \
-#     hydra.sweeper.n_trials=25 \
+#     hydra.sweeper.n_trials=23 \
 #     hydra.sweeper.sampler.seed=3061 \
 #     trainer=gpu \
 #     trainer.max_epochs=200 \
@@ -66,7 +57,7 @@
 #     experiment=robustad/dte \
 #     logger=mlflow \
 #     hparams_search=robustad/dte_optuna \
-#     hydra.sweeper.n_trials=25 \
+#     hydra.sweeper.n_trials=23 \
 #     hydra.sweeper.sampler.seed=3062 \
 #     trainer=gpu \
 #     trainer.max_epochs=200 \
@@ -80,7 +71,7 @@
 #     experiment=robustad/dte \
 #     logger=mlflow \
 #     hparams_search=robustad/dte_optuna \
-#     hydra.sweeper.n_trials=25 \
+#     hydra.sweeper.n_trials=22 \
 #     hydra.sweeper.sampler.seed=3063 \
 #     trainer=gpu \
 #     trainer.max_epochs=200 \
@@ -94,7 +85,7 @@
 #     experiment=robustad/dte \
 #     logger=mlflow \
 #     hparams_search=robustad/dte_optuna \
-#     hydra.sweeper.n_trials=25 \
+#     hydra.sweeper.n_trials=22 \
 #     hydra.sweeper.sampler.seed=3064 \
 #     trainer=gpu \
 #     trainer.max_epochs=200 \

@@ -60,6 +60,10 @@ algorithm:
       muons: 3
       taus: 3
 
+  # Huber delta as for the physics AE: the searched values 3 to 10 did not differ
+  # on any objective, and the algorithm default of 1.0 was never tested.
+  delta: 3.0
+
   optimizer:
     _partial_: true
     _target_: torch.optim.AdamW

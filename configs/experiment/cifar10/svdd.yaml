@@ -184,7 +184,7 @@ callbacks:
   # without the EMA that the other strategies' metrics carry.
   loss_ckpt:
     _target_: pytorch_lightning.callbacks.ModelCheckpoint
-    dirpath: '${paths.checkpoints_dir}/${experiment_name}/${run_name}/summary/loss/min'
+    dirpath: '${paths.checkpoints_dir}/${experiment_name}/${run_name}/normal/loss/min'
     # The distance term alone: the SVDD loss adds the network's weight regulariser,
     # which a loss-only pick would otherwise reward.
     monitor: 'val/normal/loss_distance_raw'
@@ -207,6 +207,7 @@ evaluation:
         w1dist_ema_normal_vs_reference_normal: ['min']
         cap_ema_normal_vs_reference_normal: ['max']
         consistency_ema_normal_vs_reference_normal: ['max']
+      normal:
         loss: ['min']
 
   callbacks:

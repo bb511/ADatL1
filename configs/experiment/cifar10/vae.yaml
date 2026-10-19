@@ -184,7 +184,7 @@ callbacks:
   # without the EMA that the other strategies' metrics carry.
   loss_ckpt:
     _target_: pytorch_lightning.callbacks.ModelCheckpoint
-    dirpath: '${paths.checkpoints_dir}/${experiment_name}/${run_name}/summary/loss/min'
+    dirpath: '${paths.checkpoints_dir}/${experiment_name}/${run_name}/normal/loss/min'
     monitor: 'val/normal/loss'
     filename: 'loss'
     save_last: false
@@ -205,6 +205,7 @@ evaluation:
         w1dist_ema_normal_vs_reference_normal: ['min']
         cap_ema_normal_vs_reference_normal: ['max']
         consistency_ema_normal_vs_reference_normal: ['max']
+      normal:
         loss: ['min']
 
   callbacks:

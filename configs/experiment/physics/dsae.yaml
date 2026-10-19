@@ -1,7 +1,7 @@
 # @package _global_
 
 defaults:
-  - /cap: provisional
+  - /cap: frozen
   - override /data: basis
   - override /algorithm: dsae
   - override /callbacks: default

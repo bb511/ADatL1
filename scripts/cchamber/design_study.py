@@ -35,6 +35,12 @@ frozen configuration is the first eligible one in ``simplicity_order`` whose cri
 is at least the best eligible criterion minus the standard error of that best
 configuration.
 
+``--held-out`` marks the inputs of the wind-tunnel test (``held_out_test``): the
+clusters file need not hold the registered counts of interventions and target
+clusters, and ``table`` scores the CAP configurations that the selection files hold,
+by name and without a simplicity rank, in place of the design space; no configuration
+is frozen and no frozen file is written.
+
 Usage
 -----
     python scripts/cchamber/design_study.py configs --out design/configs
@@ -45,6 +51,12 @@ Usage
             reference_out/metrics.csv \\
         --clusters intervention_target_clusters.csv --out design \\
         --frozen configs/cap/frozen.yaml
+    python scripts/cchamber/design_study.py table --held-out \\
+        --selection wt_frozen/selection.csv wt_baselines/selection.csv \\
+            wt_reference/selection.csv \\
+        --metrics wt_frozen/metrics.csv wt_baselines/metrics.csv \\
+            wt_reference/metrics.csv \\
+        --clusters scripts/cchamber/wt_target_clusters.csv --out wt_table
     python scripts/cchamber/design_study.py native \\
         --selection native_*/selection.csv reference_out/selection.csv \\
         --metrics native_*/metrics.csv reference_out/metrics.csv \\
@@ -221,13 +233,19 @@ def _metric_index(paths: list[Path]) -> dict[tuple, dict[str, dict]]:
     return dict(index)
 
 
-def _clusters(path: Path, registration: dict) -> tuple[list[str], np.ndarray]:
-    """Interventions in file order and the index of each one's target cluster."""
+def _clusters(
+    path: Path, registration: dict, held_out: bool
+) -> tuple[list[str], np.ndarray]:
+    """Interventions in file order and the index of each one's target cluster.
+
+    Unless the file belongs to the held-out test, its counts must be the registered ones
+    of the light tunnel.
+    """
     rows = _read_rows([path])
     names = sorted({row["target_cluster"] for row in rows})
     units = registration["criterion"]["standard_error"]["units"]
     expected = (registration["system"]["interventions"], units["target_clusters"])
-    if (len(rows), len(names)) != expected:
+    if not held_out and (len(rows), len(names)) != expected:
         raise SystemExit(f"{path}: {len(rows)} interventions in {len(names)} clusters.")
     cluster_of = [names.index(row["target_cluster"]) for row in rows]
     return [row["intervention"] for row in rows], np.array(cluster_of)
@@ -366,13 +384,35 @@ def _attach_errors(pairs: list[tuple], se: dict, data: SimpleNamespace) -> None:
         row.update({f"se_{f}": e for f, e in zip(data.families, family_errors)})
 
 
-def _scored_rows(registration: dict, data: SimpleNamespace) -> list[dict]:
-    """CAP rows in the registration's order, then drift, w1 and the reference."""
+def _ranked_design(registration: dict) -> list[tuple[dict, int]]:
+    """Every configuration of the design space, in the registration's order, with its
+    simplicity rank."""
     design = _design(registration["design_space"])
     order = registration["criterion"]["simplicity_order"]
     ranked = sorted(design, key=lambda entry: _simplicity(entry, order))
     rank = {entry["config"]: i for i, entry in enumerate(ranked)}
-    pairs = [_cap_row(entry, rank[entry["config"]], data) for entry in design]
+    return [(entry, rank[entry["config"]]) for entry in design]
+
+
+def _held_out_configs(data: SimpleNamespace) -> list[tuple[dict, None]]:
+    """The CAP configurations of the selection files by name, which carry no simplicity
+    rank."""
+    names = sorted({config for config, strategy in data.groups if strategy == "cap"})
+    if not names:
+        raise SystemExit("No cap rows in the selection files.")
+    return [({"config": name}, None) for name in names]
+
+
+def _scored_rows(
+    registration: dict, data: SimpleNamespace, held_out: bool
+) -> list[dict]:
+    """CAP rows, then drift, w1 and the reference.
+
+    The CAP rows are those of the registered design or, in the held-out test, those of
+    the configurations the selection files hold.
+    """
+    configs = _held_out_configs(data) if held_out else _ranked_design(registration)
+    pairs = [_cap_row(entry, rank, data) for entry, rank in configs]
     pairs += [_baseline_row(strategy, data) for strategy in BASELINES]
     pairs.append(_reference_row(data))
     _attach_errors(pairs, registration["criterion"]["standard_error"], data)
@@ -435,19 +475,22 @@ def _write_frozen(registration: dict, args, summary: dict) -> None:
 
 
 def _by_criterion(row: dict) -> tuple[float, int]:
-    return -row["criterion"], row["simplicity_rank"]
+    # Held-out configurations have no simplicity rank, so a tie keeps their order.
+    rank = row["simplicity_rank"]
+    return -row["criterion"], -1 if rank is None else rank
 
 
 def table(registration: dict, data: SimpleNamespace, args) -> None:
-    rows = _scored_rows(registration, data)
+    rows = _scored_rows(registration, data, args.held_out)
     cap = sorted((row for row in rows if row["strategy"] == "cap"), key=_by_criterion)
-    best, frozen, n_within = _freeze(cap)
+    if not args.held_out:
+        best, frozen, n_within = _freeze(cap)
+        summary = {"best": best, "frozen": frozen, "n_within": n_within}
+        _write_frozen(registration, args, summary)
     rows = cap + [row for row in rows if row["strategy"] != "cap"]
     per_family = [f"{q}_{f}" for f in data.families for q in PER_FAMILY]
     _write_csv(args.out / "design_table.csv", rows, COLUMNS + per_family)
     (args.out / "design_table.md").write_text(_markdown(rows))
-    summary = {"best": best, "frozen": frozen, "n_within": n_within}
-    _write_frozen(registration, args, summary)
 
 
 def _native_row(family: str, spec: dict, cap: list[dict], data: SimpleNamespace):
@@ -478,7 +521,7 @@ def native(registration: dict, data: SimpleNamespace, out: Path) -> None:
 
 def _load(args, registration: dict) -> SimpleNamespace:
     """The inputs of table and native."""
-    interventions, cluster_of = _clusters(args.clusters, registration)
+    interventions, cluster_of = _clusters(args.clusters, registration, args.held_out)
     families, selection = list(registration["families"]), _selection(args.selection)
     return SimpleNamespace(
         selection=selection,
@@ -502,7 +545,10 @@ def _parse_args(argv: list[str] | None) -> argparse.Namespace:
         command.add_argument("--selection", nargs="+", type=Path, required=True)
         command.add_argument("--metrics", nargs="+", type=Path, required=True)
         command.add_argument("--clusters", type=Path, required=True)
-    commands.choices["table"].add_argument("--frozen", type=Path, default=FROZEN)
+    commands.choices["native"].add_argument("--held-out", action="store_true")
+    output = commands.choices["table"].add_mutually_exclusive_group()
+    output.add_argument("--frozen", type=Path, default=FROZEN)
+    output.add_argument("--held-out", action="store_true")
     return parser.parse_args(argv)
 
 

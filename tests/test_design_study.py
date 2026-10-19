@@ -69,10 +69,10 @@ def write_registration(tmp_path):
     return path, reg
 
 
-def write_clusters(tmp_path):
+def write_clusters(tmp_path, clusters=CLUSTERS):
     rows = [
         {"intervention": name, "target_cluster": c, "family": c, "strength": "mid"}
-        for name, c in CLUSTERS.items()
+        for name, c in clusters.items()
     ]
     return write_csv(tmp_path / "clusters.csv", rows)
 
@@ -127,21 +127,25 @@ def write_reference(path, level):
     return selection_path, write_csv(path / "metrics.csv", metrics)
 
 
+def input_args(tmp_path, levels, q_main=None):
+    files = [
+        write_outputs(tmp_path / "pool", levels, q_main),
+        write_reference(tmp_path / "reference", 0.33),
+    ]
+    selection = ["--selection", *(str(s) for s, _ in files)]
+    return selection + ["--metrics", *(str(m) for _, m in files)]
+
+
 def run_table(tmp_path, q_main=None):
     registration, reg = write_registration(tmp_path)
     names = [entry["config"] for entry in design._design(reg["design_space"])]
     levels = {(name, "cap"): 0.30 + 0.01 * i for i, name in enumerate(names)}
     levels |= {("none", "drift"): 0.25, ("none", "w1"): 0.20}
-    files = [
-        write_outputs(tmp_path / "pool", levels, q_main),
-        write_reference(tmp_path / "reference", 0.33),
-    ]
     out = tmp_path / "design"
     design.main(
         ["table", "--registration", str(registration), "--out", str(out)]
         + ["--frozen", str(out / "frozen.yaml")]
-        + ["--selection", *(str(s) for s, _ in files)]
-        + ["--metrics", *(str(m) for _, m in files)]
+        + input_args(tmp_path, levels, q_main)
         + ["--clusters", str(write_clusters(tmp_path))]
     )
     return out, registration, levels
@@ -214,6 +218,39 @@ def test_constant_cap_is_ineligible_and_skipped(tmp_path):
     assert f"of the best: {len(within)}\n" in header
     markdown = (out / "design_table.md").read_text()
     assert frozen["config"] in markdown and "| reference |" in markdown
+
+
+def test_held_out_table_scores_the_given_configurations(tmp_path, monkeypatch):
+    monkeypatch.setattr(design, "FROZEN", tmp_path / "default_frozen.yaml")
+    registration, _ = write_registration(tmp_path)
+    # Equal levels tie the two criteria, which have no simplicity rank to break it.
+    levels = {("frozen", "cap"): 0.30, ("frozen_pairs_random", "cap"): 0.30}
+    levels |= {("none", "drift"): 0.25, ("none", "w1"): 0.20}
+    # Four target clusters where the registration holds two.
+    clusters = write_clusters(tmp_path, {name: name for name in CLUSTERS})
+    out = tmp_path / "held_out"
+    argv = ["--registration", str(registration), "--out", str(out)]
+    argv += input_args(tmp_path, levels) + ["--clusters", str(clusters)]
+    design.main(["table", "--held-out", *argv])
+
+    rows = table_rows(out)
+    assert list(rows) == ["frozen", "frozen_pairs_random", "drift", "w1", "reference"]
+    frozen = rows["frozen"]
+    assert float(frozen["criterion"]) == pytest.approx(0.30 + OFFSETS.mean())
+    assert frozen["simplicity_rank"] == frozen["within_one_se"] == ""
+    assert float(frozen["se"]) > 0
+    assert sorted(path.name for path in out.iterdir()) == [
+        "design_table.csv",
+        "design_table.md",
+    ]
+    assert not design.FROZEN.exists()
+
+    with pytest.raises(SystemExit, match="4 interventions in 4 clusters"):
+        design.main(["table", *argv])
+    assert not design.FROZEN.exists()
+    with pytest.raises(SystemExit) as error:
+        design.main(["table", "--held-out", *argv, "--frozen", str(design.FROZEN)])
+    assert error.value.code == 2
 
 
 def test_one_standard_error_rule():

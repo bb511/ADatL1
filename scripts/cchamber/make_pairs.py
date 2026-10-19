@@ -14,7 +14,8 @@ Each is written to ``--out`` as ``pairs_<name>.pt``, a dict of two index tensors
 ``normal`` and ``reference_normal``, both (n,), and the ``seed`` (None for the
 assignment). The indices count rows in loader order, which is the order in which
 ``src/callbacks/score_dump.py`` stores the scores; ``offline_select.py --pairs`` reads
-the files.
+the files. ``--data`` names the data config group: ``cchamber``, the light tunnel, by
+default, or ``cchamber_wt``, the wind tunnel.
 
 Usage
 -----
@@ -37,9 +38,11 @@ ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT))
 
 
-def load_inputs(data_dir: str) -> dict[str, dict[str, torch.Tensor]]:
+def load_inputs(
+    data_dir: str, data: str = "cchamber"
+) -> dict[str, dict[str, torch.Tensor]]:
     """Normalised inputs of every validation and test set, (n, 11) in loader order."""
-    overrides = ["data=cchamber", f"data.data_dir={data_dir}"]
+    overrides = [f"data={data}", f"data.data_dir={data_dir}"]
     with initialize_config_dir(config_dir=str(ROOT / "configs"), version_base="1.3"):
         cfg = compose(config_name="train.yaml", overrides=overrides)
     datamodule = instantiate(cfg.data)
@@ -68,6 +71,7 @@ def random_pairs(n: int, seed: int) -> tuple[torch.Tensor, torch.Tensor]:
 
 def _parse_args(argv: list[str] | None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
+    parser.add_argument("--data", default="cchamber")
     parser.add_argument("--data-dir", required=True)
     parser.add_argument("--seed", type=int, required=True)
     parser.add_argument("--out", type=Path, required=True)
@@ -76,7 +80,7 @@ def _parse_args(argv: list[str] | None) -> argparse.Namespace:
 
 def main(argv: list[str] | None = None) -> None:
     args = _parse_args(argv)
-    val = load_inputs(args.data_dir)["val"]
+    val = load_inputs(args.data_dir, args.data)["val"]
     x_normal, x_reference = val["normal"], val["reference_normal"]
     pairs = {
         "nearest_neighbour": (*nearest_neighbour(x_normal, x_reference), None),

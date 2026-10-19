@@ -181,7 +181,9 @@ def main() -> None:
 
     if args.all:
         if args.output:
-            parser.error("--output is single-study mode only; --all derives its filenames")
+            parser.error(
+                "--output is single-study mode only; --all derives its filenames"
+            )
         root = Path(args.root) if args.root else repo / "logs" / "optuna"
         dbs = find_dbs(root, args.domain, args.model)
         if not dbs:

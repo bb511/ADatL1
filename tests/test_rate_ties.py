@@ -9,9 +9,8 @@ from src.callbacks.metrics import rate as train_rate
 from src.evaluation.callbacks.efficiency import (
     AnomalyEfficiencyCallback as EvalEfficiency,
 )
-from src.evaluation.callbacks.metrics import rate as eval_rate
 
-RATES = [train_rate.AnomalyRate, eval_rate.AnomalyRate]
+RATES = [train_rate.AnomalyRate]
 # fpr: threshold, validation count and test efficiency of the code before October
 # 2026 on the `scores` fixture; fpr N = 36.5 at 3.65e-4, as at the physics point.
 REGRESSION = {

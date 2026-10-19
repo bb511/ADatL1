@@ -182,7 +182,14 @@ STRATEGIES = {
 # The candidate each experiment file lists in evaluation.evaluator.ckpts.summary,
 # keyed by whether the file is the agnostic one.
 DEFAULT_CANDIDATE = {False: "cvar25_ema", True: "cap_ema_normal_vs_<REF>"}
-STRATEGY_ORDER = ["cvar25eff", "cvar10eff", "cap", "consistency", "drift", "wasserstein"]
+STRATEGY_ORDER = [
+    "cvar25eff",
+    "cvar10eff",
+    "cap",
+    "consistency",
+    "drift",
+    "wasserstein",
+]
 
 # The first objective is maximised for these strategies (minimised otherwise);
 # the second objective (reconstruction/kl/logp/dist) is always minimised.
@@ -285,13 +292,25 @@ ORIGINAL_PICKS = {
 # exactly one hyperparameter (transcription slip or manual tweak in the old
 # script); marked as ORIGINAL PICK with this caveat attached.
 PICK_CAVEATS = {
-    ("physics", "dsvae", "q99", "cvar25eff"):
-        "old script had algorithm.encoder.activation=relu; db trial 192 has gelu",
-    ("physics", "vae", "250", "cvar25eff"):
-        "old script had algorithm.optimizer.lr=5.236233832409967e-05; "
-        "db trial 345 has 5.008239492340467e-05",
-    ("physics", "vae", "q99", "cvar25eff"):
-        "old script had algorithm.encoder.nodes=[64,32,32]; db trial 275 has [64,32,24]",
+    (
+        "physics",
+        "dsvae",
+        "q99",
+        "cvar25eff",
+    ): "old script had algorithm.encoder.activation=relu; db trial 192 has gelu",
+    (
+        "physics",
+        "vae",
+        "250",
+        "cvar25eff",
+    ): "old script had algorithm.optimizer.lr=5.236233832409967e-05; "
+    "db trial 345 has 5.008239492340467e-05",
+    (
+        "physics",
+        "vae",
+        "q99",
+        "cvar25eff",
+    ): "old script had algorithm.encoder.nodes=[64,32,32]; db trial 275 has [64,32,24]",
 }
 
 # Handpicked commands with no matching trial in the current study dbs, carried
@@ -447,7 +466,9 @@ def _command_body(
     """The override tokens shared by both launch variants of one command."""
     dom = DOMAINS[domain]
     exp = f"{domain}/{model}_agnostic" if strategy["agnostic"] else f"{domain}/{model}"
-    exp_name = f"{domain}_{model}_pareto" if tier == "250" else f"{domain}_{model}_q99_pareto"
+    exp_name = (
+        f"{domain}_{model}_pareto" if tier == "250" else f"{domain}_{model}_q99_pareto"
+    )
     run_name = f"{strategy['prefix']}_t{row['number']}"
 
     # The "fixed" tokens are written verbatim, unlike the Optuna params below,
@@ -465,7 +486,7 @@ def _command_body(
     body += dom["fixed_per_model"].get(model, [])
     for col in sorted(row):
         if col.startswith("params_") and row[col] != "":
-            key = PARAM_REMAP.get(col[len("params_"):], col[len("params_"):])
+            key = PARAM_REMAP.get(col[len("params_") :], col[len("params_") :])
             body.append(f"{key}={quote(row[col])}")
     return body
 
@@ -484,9 +505,9 @@ def command_lines(
 ) -> list[str]:
     """Local run variant (olqti): taskset pinning + cycling GPU devices.
 
-    For slurm submission on clariden, the submit command at the bottom of each
-    generated file feeds these same blocks through scripts/cluster/submit_pareto.sh,
-    which swaps the taskset/device pinning for the submitit launcher.
+    For slurm submission on clariden, the submit command at the bottom of each generated
+    file feeds these same blocks through scripts/cluster/submit_pareto.sh, which swaps
+    the taskset/device pinning for the submitit launcher.
     """
     body = _command_body(domain, model, strategy, tier, row)
     body += ["trainer=gpu", f"trainer.devices=[{device}]"]
@@ -618,7 +639,9 @@ def generate_file(
                 f"  << ORIGINAL PICK ({vb['note']})",
                 SEP,
             ]
-            cmd = command_lines(domain, model, strategy, tier, row, len(selected) % N_GPUS)
+            cmd = command_lines(
+                domain, model, strategy, tier, row, len(selected) % N_GPUS
+            )
             out += [f"# {l}" for l in cmd]
             out.append("")
             n_cmds += 1
@@ -676,7 +699,9 @@ def main() -> None:
 
     repo = find_repo_root(Path(__file__).resolve().parent)
     default_paretos = repo / "notebooks" / "paretos"
-    paretos = Path(args.paretos_dir).expanduser() if args.paretos_dir else default_paretos
+    paretos = (
+        Path(args.paretos_dir).expanduser() if args.paretos_dir else default_paretos
+    )
     out_root = Path(args.out_root).expanduser() if args.out_root else repo / "scripts"
 
     def show(p: Path) -> str:

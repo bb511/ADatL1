@@ -1,15 +1,15 @@
 # Load and convert mlready parquet files to numpy arrays.
-from typing import Union
-import os
 import json
+import os
+import pickle
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from pathlib import Path
-from concurrent.futures import ThreadPoolExecutor
+from typing import Union
 
-import torch
-import numpy as np
 import awkward as ak
-import pickle
+import numpy as np
+import torch
 
 from src.utils import pylogger
 
@@ -61,7 +61,7 @@ class L1DataAwkward2Torch:
         l1bit_path = folder_path / "L1bit.parquet"
         if not l1bit_path.is_file():
             l1bit = torch.ones(data.size(0), dtype=torch.bool, device=data.device)
-            log.warn(f"L1bit not found in {folder_path}.")
+            log.warning(f"L1bit not found in {folder_path}.")
             self._cache_l1bit(l1bit)
             return data, mask, l1bit
 
@@ -83,7 +83,7 @@ class L1DataAwkward2Torch:
         )
         if files_exist and self._check_cache_integrity():
             if self.verbose:
-                log.warn(
+                log.warning(
                     "Loading data from torch cache. If the features in the parquets "
                     f"in {self.cache_filepath.parent} changed, this is not caught."
                 )
@@ -254,8 +254,8 @@ class L1DataAwkward2Torch:
         Namely, map each feature within an object to its position in a flattened data
         array. The obj_offset applies an offset to indices, if one wants to process
         multiple objects. This is done because most torch tensors are flattened when
-        they are passed to a neural network and the metadata info is important for
-        some of the neural networks developed here.
+        they are passed to a neural network and the metadata info is important for some
+        of the neural networks developed here.
         """
         nconst, nfeats = data.shape[-2:]
         feats_to_idxs = {feat_name: [] for feat_name in feat_names}
@@ -274,8 +274,8 @@ class L1DataAwkward2Torch:
         """Get index mapping of the processed torch tensor.
 
         Get the feature to index in torch array map. The torch array is generated with
-        this class. This is important for in-place denomarlisation for some of the
-        model workflows.
+        this class. This is important for in-place denomarlisation for some of the model
+        workflows.
         """
         with open(self.object_feature_map_fpath, "r") as file:
             self.object_feature_map = json.load(file)

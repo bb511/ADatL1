@@ -1,6 +1,4 @@
 # Wasserstein callback.
-import math
-
 import torch
 from pytorch_lightning import Callback
 
@@ -34,7 +32,7 @@ class WassersteinCallback(Callback):
     :param dataset_1: Name of the first validation dataloader.
     :param dataset_2: Name of the second validation dataloader.
     :param apply_log1p: Whether to map scores through sign(x) log1p(|x|) first.
-    :param beta: Float that sets parameter of EMA metrics compute here.
+    :param ema_weight: Weight of the previous value in the exponential moving average.
     """
 
     def __init__(
@@ -43,14 +41,14 @@ class WassersteinCallback(Callback):
         dataset_1: str,
         dataset_2: str,
         apply_log1p: bool = True,
-        beta: float = 0.9,
+        ema_weight: float = 0.9,
     ):
         super().__init__()
         self.output_name = output_name
         self.dataset_1_name = dataset_1
         self.dataset_2_name = dataset_2
         self.apply_log1p = bool(apply_log1p)
-        self.beta = beta
+        self.ema_weight = ema_weight
 
         self.log_kwargs = dict(
             prog_bar=False,
@@ -66,9 +64,7 @@ class WassersteinCallback(Callback):
         self.w1dist_ema = None
 
     def on_validation_epoch_start(self, trainer, pl_module):
-        """Set the device and check that both required dataloaders are present."""
-        self.device = pl_module.device
-
+        """Check that both required dataloaders are present."""
         dset_names = list(trainer.val_dataloaders.keys())
         missing = [
             dset_name
@@ -141,10 +137,10 @@ class WassersteinCallback(Callback):
         return _wasserstein_1d(x, y)
 
     def _compute_w1dist_ema(self, w1dist: float):
-        """Compute the cvar estimated moving average."""
+        """Update the exponential moving average of the W1 distance."""
         if self.w1dist_ema is None:
             self.w1dist_ema = float(w1dist)
         else:
-            self.w1dist_ema = self.beta * self.w1dist_ema + (1 - self.beta) * float(
-                w1dist
-            )
+            self.w1dist_ema = self.ema_weight * self.w1dist_ema + (
+                1 - self.ema_weight
+            ) * float(w1dist)

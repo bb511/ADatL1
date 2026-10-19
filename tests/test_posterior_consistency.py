@@ -53,9 +53,9 @@ def _scores(n=256, seed=1234):
 def _mean_log_cosine(metric, scores_1, scores_2, beta):
     """Exact mean log-cosine of the two Gibbs posteriors at inverse temperature beta.
 
-    Reproduces CAP's front-end (joint normalisation, injected mean/std, energy
-    function) and then forms the posteriors explicitly, so this is an
-    independent reference for the quantity the metric approximates.
+    Reproduces CAP's front-end (joint normalisation, injected mean/std, energy function)
+    and then forms the posteriors explicitly, so this is an independent reference for
+    the quantity the metric approximates.
     """
     prob1, prob2 = metric.normalizer_fn(scores_1, scores_2)
     combined = torch.cat([prob1, prob2], dim=0)
@@ -66,8 +66,12 @@ def _mean_log_cosine(metric, scores_1, scores_2, beta):
 
     ones = torch.ones_like(prob1)
     zeros = torch.zeros_like(prob1)
-    log_w1 = torch.stack((-beta * energy_fn(prob1, zeros), -beta * energy_fn(prob1, ones)))
-    log_w2 = torch.stack((-beta * energy_fn(prob2, zeros), -beta * energy_fn(prob2, ones)))
+    log_w1 = torch.stack(
+        (-beta * energy_fn(prob1, zeros), -beta * energy_fn(prob1, ones))
+    )
+    log_w2 = torch.stack(
+        (-beta * energy_fn(prob2, zeros), -beta * energy_fn(prob2, ones))
+    )
     log_p1 = log_w1 - torch.logsumexp(log_w1, dim=0, keepdim=True)
     log_p2 = log_w2 - torch.logsumexp(log_w2, dim=0, keepdim=True)
 
@@ -93,7 +97,9 @@ def test_consistency_is_the_beta_zero_limit_of_log_cosine():
 
     errors = {}
     for beta in (1e-2, 1e-3):
-        approximation = 8.0 * _mean_log_cosine(metric, scores_1, scores_2, beta) / beta**2
+        approximation = (
+            8.0 * _mean_log_cosine(metric, scores_1, scores_2, beta) / beta**2
+        )
         errors[beta] = abs(approximation - value) / abs(value)
 
     assert errors[1e-3] < 1e-4
@@ -173,8 +179,8 @@ def test_consistency_is_deterministic():
 def test_cap_still_computes_the_kernel_partition_ratio():
     """Pins CAP's own value against an independent reimplementation.
 
-    On a one-point beta grid CAP is the kernel at that beta, and reduces to the
-    mean of log(Z_12 / (Z_1 * Z_2)) over paired samples.
+    On a one-point beta grid CAP is the kernel at that beta, and reduces to the mean of
+    log(Z_12 / (Z_1 * Z_2)) over paired samples.
     """
     scores_1, scores_2 = _scores(n=128)
     beta = 1.5
@@ -193,9 +199,7 @@ def test_cap_still_computes_the_kernel_partition_ratio():
     # E(p, 0) = p and E(p, 1) = 1 - p for the baseline energy.
     e1_0, e1_1 = scores_1, 1.0 - scores_1
     e2_0, e2_1 = scores_2, 1.0 - scores_2
-    num = torch.log(
-        torch.exp(-beta * (e1_0 + e2_0)) + torch.exp(-beta * (e1_1 + e2_1))
-    )
+    num = torch.log(torch.exp(-beta * (e1_0 + e2_0)) + torch.exp(-beta * (e1_1 + e2_1)))
     den = torch.log(
         (torch.exp(-beta * e1_0) + torch.exp(-beta * e1_1))
         * (torch.exp(-beta * e2_0) + torch.exp(-beta * e2_1))
@@ -211,7 +215,9 @@ def test_cap_still_computes_the_kernel_partition_ratio():
 
 
 def test_training_callback_is_a_drop_in_cap_replacement():
-    assert inspect.signature(PosteriorConsistencyCallback) == inspect.signature(CAPCallback)
+    assert inspect.signature(PosteriorConsistencyCallback) == inspect.signature(
+        CAPCallback
+    )
     assert PosteriorConsistencyCallback.metric_cls is PosteriorConsistency
     assert PosteriorConsistencyCallback.metric_key == "consistency"
     assert CAPCallback.metric_cls is ApproximationCapacity
@@ -242,7 +248,7 @@ def test_compute_cap_returns_a_single_value():
         cap_metric_config=_metric_config(),
     )
     callback.device = "cpu"
-    callback.capmetric = callback.metric_cls(**callback.cap_metric_config, device="cpu")
+    callback.capmetric = callback.metric_cls(**callback.cap_metric_config)
     callback.dataset_1_scores = [torch.tensor([0.1, 0.3, 0.8])]
     callback.dataset_2_scores = [torch.tensor([0.1, 0.3, 0.8])]
 
@@ -256,4 +262,6 @@ def test_rank_correlation_is_no_longer_computed():
     """It was identically 1 under cdf pairing, which sorts both paired sides."""
     for cls in (CAPCallback, EvaluationCAP, PosteriorConsistencyCallback):
         assert not hasattr(cls, "_spearman_corr")
-    assert not hasattr(EvaluationCAP("a", "b", "c", "none", _metric_config()), "rankcorr_summary")
+    assert not hasattr(
+        EvaluationCAP("a", "b", "c", "none", _metric_config()), "rankcorr_summary"
+    )

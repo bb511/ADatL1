@@ -75,12 +75,12 @@ def find_repo_root(start: Path) -> Path:
 def catalogue_run_names(repo: Path) -> dict:
     """experiment_name -> {run_name} over every checked-in Pareto catalogue.
 
-    An experiment accumulates runs forever, so a front that was re-fetched after
-    its Optuna study changed leaves the *previous* front's retrainings behind in
-    the same MLflow experiment (the pre-bugfix svdd fronts are the live case:
-    126 superseded run names across the four svdd experiments). Harvesting those
-    silently mixes superseded models into the fronts, so --restrict-to-catalogues
-    keeps only what the current catalogue actually asks for.
+    An experiment accumulates runs forever, so a front that was re-fetched after its
+    Optuna study changed leaves the *previous* front's retrainings behind in the same
+    MLflow experiment (the pre-bugfix svdd fronts are the live case: 126 superseded run
+    names across the four svdd experiments). Harvesting those silently mixes superseded
+    models into the fronts, so --restrict-to-catalogues keeps only what the current
+    catalogue actually asks for.
     """
     allowed: dict = {}
     for path in sorted(repo.glob("scripts/*/run*_pareto.sh")):
@@ -100,7 +100,9 @@ def history_values(client: MlflowClient, run_id: str, key: str) -> list:
 def monitored_key(metric_keys: list, prefix: str, direction: str):
     """Find the summary curve a strategy checkpoint monitored."""
     if direction == "min_drift":
-        cands = [k for k in metric_keys if k.startswith(prefix) and k.endswith("_drift_ema")]
+        cands = [
+            k for k in metric_keys if k.startswith(prefix) and k.endswith("_drift_ema")
+        ]
     else:
         cands = [k for k in metric_keys if k.startswith(prefix)]
     return cands[0] if cands else None
@@ -119,34 +121,45 @@ def harvest_experiment(client, exp, bkg_re, outdir, allowed=None):
         dropped = {r.info.run_name for r in runs} - allowed
         runs = [r for r in runs if r.info.run_name in allowed]
         if dropped:
-            print(f"  restricted to catalogue: dropped {len(dropped)} superseded "
-                  f"run name(s), e.g. {sorted(dropped)[:3]}")
+            print(
+                f"  restricted to catalogue: dropped {len(dropped)} superseded "
+                f"run name(s), e.g. {sorted(dropped)[:3]}"
+            )
     # Newest run with training histories per run name.
     by_name = {}
     for run in runs:
         if any(EFF_KEY_RE.match(k) for k in run.data.metrics):
             by_name[run.info.run_name] = run  # ascending start_time: last wins
         else:
-            print(f"  note: {run.info.run_name} ({run.info.run_id[:8]}) has no "
-                  "training eff histories (eval-only?), skipped")
+            print(
+                f"  note: {run.info.run_name} ({run.info.run_id[:8]}) has no "
+                "training eff histories (eval-only?), skipped"
+            )
 
-    all_ds = sorted({
-        EFF_KEY_RE.match(k).group(1)
-        for run in by_name.values()
-        for k in run.data.metrics
-        if EFF_KEY_RE.match(k)
-    })
+    all_ds = sorted(
+        {
+            EFF_KEY_RE.match(k).group(1)
+            for run in by_name.values()
+            for k in run.data.metrics
+            if EFF_KEY_RE.match(k)
+        }
+    )
     sig_ds = [d for d in all_ds if not bkg_re.search(d)]
     if not sig_ds:
-        print(f"  warn: every dataset matches the background regex "
-              f"{bkg_re.pattern!r}, mean_sig_eff will be empty")
+        print(
+            f"  warn: every dataset matches the background regex "
+            f"{bkg_re.pattern!r}, mean_sig_eff will be empty"
+        )
 
     rows = []
     for run_name, run in sorted(by_name.items()):
         keys = list(run.data.metrics)
-        eff_keys = {EFF_KEY_RE.match(k).group(1): k for k in keys if EFF_KEY_RE.match(k)}
-        histories = {ds: history_values(client, run.info.run_id, k)
-                     for ds, k in eff_keys.items()}
+        eff_keys = {
+            EFF_KEY_RE.match(k).group(1): k for k in keys if EFF_KEY_RE.match(k)
+        }
+        histories = {
+            ds: history_values(client, run.info.run_id, k) for ds, k in eff_keys.items()
+        }
         # by_name only holds runs with at least one eff history, so this is
         # non-empty in practice -- but a run whose only history is empty would
         # otherwise crash the whole harvest on max() of an empty sequence.
@@ -171,8 +184,7 @@ def harvest_experiment(client, exp, bkg_re, outdir, allowed=None):
 
         for ckpt_kind, epoch in sorted(targets.items()):
             effs = {
-                ds: (h[epoch] if epoch < len(h) else "")
-                for ds, h in histories.items()
+                ds: (h[epoch] if epoch < len(h) else "") for ds, h in histories.items()
             }
             sig_vals = [effs[d] for d in sig_ds if effs.get(d) != ""]
             row = {
@@ -189,8 +201,16 @@ def harvest_experiment(client, exp, bkg_re, outdir, allowed=None):
             rows.append(row)
 
     out = outdir / f"{exp.name}.csv"
-    header = ["run_name", "strategy", "ckpt", "epoch", "optimized_main",
-              "optimized_sec", "mean_sig_eff", "n_signals"] + all_ds
+    header = [
+        "run_name",
+        "strategy",
+        "ckpt",
+        "epoch",
+        "optimized_main",
+        "optimized_sec",
+        "mean_sig_eff",
+        "n_signals",
+    ] + all_ds
     with open(out, "w", newline="") as fh:
         writer = csv.DictWriter(fh, fieldnames=header)
         writer.writeheader()
@@ -212,8 +232,10 @@ def harvest_experiment_eval(client, exp, outdir, allowed=None):
         dropped = {r.info.run_name for r in runs} - allowed
         runs = [r for r in runs if r.info.run_name in allowed]
         if dropped:
-            print(f"  restricted to catalogue: dropped {len(dropped)} superseded "
-                  f"run name(s), e.g. {sorted(dropped)[:3]}")
+            print(
+                f"  restricted to catalogue: dropped {len(dropped)} superseded "
+                f"run name(s), e.g. {sorted(dropped)[:3]}"
+            )
     # Per run name, prefer the newest entry with per-signal eval keys (the
     # patched eval-only rerun), else the newest with any eval metrics.
     by_name = {}
@@ -231,8 +253,10 @@ def harvest_experiment_eval(client, exp, outdir, allowed=None):
     leaves = set()
     for run_name, (run, has_per_signal) in sorted(by_name.items()):
         if not has_per_signal:
-            print(f"  note: {run_name}: no per-signal eval keys "
-                  "(eval-only pass not run with patched callback?)")
+            print(
+                f"  note: {run_name}: no per-signal eval keys "
+                "(eval-only pass not run with patched callback?)"
+            )
         for key, value in run.data.metrics.items():
             if not key.startswith("eval/"):
                 continue
@@ -256,8 +280,10 @@ def harvest_experiment_eval(client, exp, outdir, allowed=None):
         writer = csv.DictWriter(fh, fieldnames=header)
         writer.writeheader()
         writer.writerows(rows_by_key[k] for k in sorted(rows_by_key))
-    print(f"  wrote {out} ({len(rows_by_key)} rows, {len(leaves)} scalar columns, "
-          f"{len(by_name)} runs)")
+    print(
+        f"  wrote {out} ({len(rows_by_key)} rows, {len(leaves)} scalar columns, "
+        f"{len(by_name)} runs)"
+    )
 
 
 def main():

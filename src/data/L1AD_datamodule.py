@@ -1,18 +1,18 @@
 # Lightning data module for loading parquet data produced with:
 # https://github.com/bb511/adl1t_datamaker
-from dataclasses import dataclass
-from pathlib import Path
 import gc
 import warnings
+from dataclasses import dataclass
+from pathlib import Path
 
 import torch
+from colorama import Back, Fore
 from pytorch_lightning import LightningDataModule
-from torch.utils.data import Dataset, DataLoader
+from torch.utils.data import DataLoader, Dataset
 
-from src.utils import pylogger
-from colorama import Fore, Back
 from src.data.components.dataset import L1ADDataset
 from src.data.components.normalization import L1DataNormalizer
+from src.utils import pylogger
 
 log = pylogger.RankedLogger(__name__)
 
@@ -83,7 +83,8 @@ class L1ADDataModule(LightningDataModule):
         :param l1_scales: Hardware-to-physical unit factors, kept for the pure-rate
             calculation. That is not implemented yet, so nothing applies them today and
             the tensors stay in integer hardware units.
-        :param max_val_batches: Batches to keep per auxiliary val/test set. -1 keeps all.
+        :param max_val_batches: Batches to keep per auxiliary val/test set. -1 keeps
+            all.
         :param seed: Seeds the training batch order only. The train/valid/test split is
             seeded separately by data_mlready.
         """
@@ -175,8 +176,8 @@ class L1ADDataModule(LightningDataModule):
         """Create and return the training dataloader.
 
         This dataloader is based on a custom dataset class from components/dataset.py,
-        which basically makes the loading of numpy arrays that are already in memory
-        a bit faster.
+        which basically makes the loading of numpy arrays that are already in memory a
+        bit faster.
         """
         split = self._main["train"]
         dataset = L1ADDataset(

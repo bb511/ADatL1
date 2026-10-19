@@ -135,7 +135,11 @@ def _patch_stale_enum_names(script):
     for rev in script.walk_revisions():
         model = getattr(getattr(rev, "module", None), "IntermediateValueModel", None)
         enum_cls = getattr(model, "TrialIntermediateValueType", None)
-        if model is not None and enum_cls is not None and not hasattr(model, "FloatTypeEnum"):
+        if (
+            model is not None
+            and enum_cls is not None
+            and not hasattr(model, "FloatTypeEnum")
+        ):
             model.FloatTypeEnum = enum_cls
             patched.append(rev.revision)
     return patched
@@ -173,8 +177,10 @@ def downgrade(src, dst):
     if before[0] == TARGET:
         print("already at %s, nothing to do" % TARGET)
         return 0
-    print("before: alembic=%s  trial_params=%d  trial_values=%d"
-          % (before[0], before[2], before[3]))
+    print(
+        "before: alembic=%s  trial_params=%d  trial_values=%d"
+        % (before[0], before[2], before[3])
+    )
     for name, n in before[1].items():
         print("        %-32s %d trials" % (name, n))
 
@@ -200,13 +206,18 @@ def downgrade(src, dst):
     storage.engine.dispose()
 
     after = _counts(dst)
-    print("\nafter:  alembic=%s  trial_params=%d  trial_values=%d"
-          % (after[0], after[2], after[3]))
+    print(
+        "\nafter:  alembic=%s  trial_params=%d  trial_values=%d"
+        % (after[0], after[2], after[3])
+    )
     for name, n in after[1].items():
         print("        %-32s %d trials" % (name, n))
 
     ok = after[0] == TARGET and after[1] == before[1] and after[2:] == before[2:]
-    print("\n%s" % ("OK: schema at %s, no rows lost" % TARGET if ok else "MISMATCH - do not use"))
+    print(
+        "\n%s"
+        % ("OK: schema at %s, no rows lost" % TARGET if ok else "MISMATCH - do not use")
+    )
     return 0 if ok else 1
 
 
@@ -216,7 +227,9 @@ def main():
     )
     ap.add_argument("src", help="source .db (never modified), or the db to digest")
     ap.add_argument("dst", nargs="?", help="destination .db (must not exist)")
-    ap.add_argument("--digest", action="store_true", help="print a digest of src and exit")
+    ap.add_argument(
+        "--digest", action="store_true", help="print a digest of src and exit"
+    )
     args = ap.parse_args()
 
     if args.digest:

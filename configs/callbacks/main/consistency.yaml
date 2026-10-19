@@ -6,7 +6,7 @@ output_name: 'ascore/full'
 dataset_1: ???
 dataset_2: ???
 pairing_type: cdf
-beta: 0.9
+ema_weight: 0.9
 cap_metric_config:
   # Front-end shared with CAP so the two strategies stay comparable. beta0, lr,
   # n_epochs, batch_size and normalize_gradients are accepted for drop-in

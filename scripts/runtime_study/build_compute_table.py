@@ -72,8 +72,14 @@ DOMAINS = [
     ("robustad", "RobustAD", ["ae", "vae", "realnvp", "svdd"]),
 ]
 
-MODEL_LABEL = {"ae": "AE", "vae": "VAE", "dsae": "DSAE", "dsvae": "DSVAE",
-               "realnvp": "RealNVP", "svdd": "SVDD"}
+MODEL_LABEL = {
+    "ae": "AE",
+    "vae": "VAE",
+    "dsae": "DSAE",
+    "dsvae": "DSVAE",
+    "realnvp": "RealNVP",
+    "svdd": "SVDD",
+}
 
 TIER = "250"
 SEARCH_EPOCHS = 50  # trainer.max_epochs in every run*_search.sh
@@ -131,9 +137,9 @@ def load_sweeps(indir: Path) -> dict:
 def load_retrains(indir: Path) -> tuple[dict, dict]:
     """Retraining times, and per-epoch medians split by tier for the diagnostic.
 
-    The first mapping holds (per-epoch seconds, total seconds) per run of the
-    250 Hz tier; the second holds per-epoch seconds for every tier, used only
-    to show that the excluded q99 runs would have given the same answer.
+    The first mapping holds (per-epoch seconds, total seconds) per run of the 250 Hz
+    tier; the second holds per-epoch seconds for every tier, used only to show that the
+    excluded q99 runs would have given the same answer.
     """
     retrains: dict = {}
     by_tier: dict = {}
@@ -161,13 +167,17 @@ def build_summary(sweeps: dict, retrains: dict) -> list[dict]:
                 bulk, outliers = split_outliers(trials)
 
                 row = {
-                    "domain": domain, "model": model, "strategy": study_strategy,
-                    "column": label, "sweep_gpu": gpu, "sweep_conc": conc,
+                    "domain": domain,
+                    "model": model,
+                    "strategy": study_strategy,
+                    "column": label,
+                    "sweep_gpu": gpu,
+                    "sweep_conc": conc,
                     "n_trials": len(trials),
-                    "trial_median_min":
-                        round(statistics.median(bulk), 3) if bulk else "",
-                    "trial_p10_min":
-                        round(percentile(bulk, 0.10), 3) if bulk else "",
+                    "trial_median_min": round(statistics.median(bulk), 3)
+                    if bulk
+                    else "",
+                    "trial_p10_min": round(percentile(bulk, 0.10), 3) if bulk else "",
                     "trial_sum_h": round(sum(trials) / 60, 2) if trials else 0,
                     "n_outliers": len(outliers),
                     "outlier_h": round(sum(outliers) / 60, 2) if outliers else 0,
@@ -205,13 +215,14 @@ def domain_totals(cell: dict) -> dict:
                 sweep_h += r["trial_sum_h"] / conc
                 retrain_h += r["retrain_sum_h"]
                 if r["sec_per_epoch"] != "":
-                    equiv_h += (
-                        r["n_trials"] * SEARCH_EPOCHS * r["sec_per_epoch"] / 3600
-                    )
+                    equiv_h += r["n_trials"] * SEARCH_EPOCHS * r["sec_per_epoch"] / 3600
         totals[domain] = {
-            "sweep_h": sweep_h, "retrain_h": retrain_h,
-            "total_h": sweep_h + retrain_h, "equiv_h": equiv_h,
-            "n_trials": n_trials, "n_runs": n_runs,
+            "sweep_h": sweep_h,
+            "retrain_h": retrain_h,
+            "total_h": sweep_h + retrain_h,
+            "equiv_h": equiv_h,
+            "n_trials": n_trials,
+            "n_runs": n_runs,
         }
     return totals
 
@@ -258,8 +269,10 @@ def latex_table(cell: dict, totals: dict) -> str:
     ]
     for i, (domain, title, models) in enumerate(DOMAINS):
         t = totals[domain]
-        header = (f"\\textbf{{{title}}} --- {num(t['n_trials'])} sweep trials + "
-                  f"{num(t['n_runs'])} retrainings, {num(t['total_h'])} GPU-h")
+        header = (
+            f"\\textbf{{{title}}} --- {num(t['n_trials'])} sweep trials + "
+            f"{num(t['n_runs'])} retrainings, {num(t['total_h'])} GPU-h"
+        )
         lines.append(f"  \\multicolumn{{5}}{{l}}{{{header}}} \\\\")
         lines.append(r"  \specialrule{0.08em}{0.15em}{0.15em}")
         for model in models:
@@ -306,13 +319,17 @@ def print_totals(totals: dict) -> None:
     print("\n" + "=" * 78)
     print("TOTALS  (sweep GPU-h = summed trial wall-clock / concurrency)")
     print("=" * 78)
-    print(f"{'domain':<10}{'trials':>8}{'sweep h':>10}{'runs':>7}"
-          f"{'retrain h':>11}{'TOTAL h':>10}{'GH200-equiv':>13}")
+    print(
+        f"{'domain':<10}{'trials':>8}{'sweep h':>10}{'runs':>7}"
+        f"{'retrain h':>11}{'TOTAL h':>10}{'GH200-equiv':>13}"
+    )
     for domain, _, _ in DOMAINS:
         t = totals[domain]
-        print(f"{domain:<10}{t['n_trials']:>8,}{t['sweep_h']:>10,.1f}"
-              f"{t['n_runs']:>7,}{t['retrain_h']:>11,.1f}"
-              f"{t['total_h']:>10,.1f}{t['equiv_h']:>13,.1f}")
+        print(
+            f"{domain:<10}{t['n_trials']:>8,}{t['sweep_h']:>10,.1f}"
+            f"{t['n_runs']:>7,}{t['retrain_h']:>11,.1f}"
+            f"{t['total_h']:>10,.1f}{t['equiv_h']:>13,.1f}"
+        )
     grand = sum(t["total_h"] for t in totals.values())
     print(f"{'ALL':<10}{'':>8}{'':>10}{'':>7}{'':>11}{grand:>10,.1f}")
     print(f"\nGH200-equiv = n_trials x {SEARCH_EPOCHS} epochs x measured GH200")
@@ -334,8 +351,10 @@ def print_spread(rows: list[dict]) -> None:
     print("them apart: the Pareto retrainings span an equally diverse set of")
     print("hyperparameters on a dedicated GPU, so if their per-epoch spread is just")
     print("as wide, the variation is the search space, not contention.")
-    print(f"\n{'domain':<9}{'model':<9}{'strat':<12}{'n':>6}{'p10':>8}{'med':>8}"
-          f"{'med/p10':>9}{'outl':>6}{'out h':>8}{'GH200 iqr/med':>15}")
+    print(
+        f"\n{'domain':<9}{'model':<9}{'strat':<12}{'n':>6}{'p10':>8}{'med':>8}"
+        f"{'med/p10':>9}{'outl':>6}{'out h':>8}{'GH200 iqr/med':>15}"
+    )
     for r in rows:
         if not r["n_trials"]:
             continue
@@ -345,14 +364,18 @@ def print_spread(rows: list[dict]) -> None:
         else:
             rel = f"{'--':>15}"
         flag = "  <-- wide" if ratio > 1.5 else ""
-        print(f"{r['domain']:<9}{r['model']:<9}{r['strategy']:<12}{r['n_trials']:>6}"
-              f"{r['trial_p10_min']:>8.2f}{r['trial_median_min']:>8.2f}{ratio:>9.2f}"
-              f"{r['n_outliers']:>6}{r['outlier_h']:>8.1f}{rel}{flag}")
+        print(
+            f"{r['domain']:<9}{r['model']:<9}{r['strategy']:<12}{r['n_trials']:>6}"
+            f"{r['trial_p10_min']:>8.2f}{r['trial_median_min']:>8.2f}{ratio:>9.2f}"
+            f"{r['n_outliers']:>6}{r['outlier_h']:>8.1f}{rel}{flag}"
+        )
 
 
 def print_cross_check(rows: list[dict]) -> None:
     print("\n" + "=" * 78)
-    print(f"CROSS-CHECK  original-hardware trial vs GH200 fit, same {SEARCH_EPOCHS} epochs")
+    print(
+        f"CROSS-CHECK  original-hardware trial vs GH200 fit, same {SEARCH_EPOCHS} epochs"
+    )
     print("=" * 78)
     print("Two independent measurements of the same 50 epochs. They are not")
     print("expected to be equal -- the trial also carries setup and its own")
@@ -361,16 +384,20 @@ def print_cross_check(rows: list[dict]) -> None:
     print("CONSISTENCY, not for closeness to 1. Roughly constant across the three")
     print("cheap strategies within a model means both sources agree; a cell far")
     print("off its neighbours is the one to distrust.")
-    print(f"\n{'domain':<9}{'model':<9}{'strat':<12}{'p10 min':>9}"
-          f"{'GH200 min':>11}{'ratio':>8}{'n_runs':>8}")
+    print(
+        f"\n{'domain':<9}{'model':<9}{'strat':<12}{'p10 min':>9}"
+        f"{'GH200 min':>11}{'ratio':>8}{'n_runs':>8}"
+    )
     for r in rows:
         if not r["n_trials"] or r["sec_per_epoch"] == "":
             continue
         gh200_min = SEARCH_EPOCHS * r["sec_per_epoch"] / 60
         flag = "  <-- thin" if r["n_runs"] < THIN_CELL_RUNS else ""
-        print(f"{r['domain']:<9}{r['model']:<9}{r['strategy']:<12}"
-              f"{r['trial_p10_min']:>9.2f}{gh200_min:>11.2f}"
-              f"{r['trial_p10_min'] / gh200_min:>8.2f}{r['n_runs']:>8}{flag}")
+        print(
+            f"{r['domain']:<9}{r['model']:<9}{r['strategy']:<12}"
+            f"{r['trial_p10_min']:>9.2f}{gh200_min:>11.2f}"
+            f"{r['trial_p10_min'] / gh200_min:>8.2f}{r['n_runs']:>8}{flag}"
+        )
 
 
 def print_tier_check(by_tier: dict) -> None:
@@ -379,8 +406,15 @@ def print_tier_check(by_tier: dict) -> None:
     for (domain, model, strategy, tier), eps in by_tier.items():
         other = by_tier.get((domain, model, strategy, "q99"))
         if tier == TIER and other:
-            pairs.append((domain, model, strategy,
-                          statistics.median(eps), statistics.median(other)))
+            pairs.append(
+                (
+                    domain,
+                    model,
+                    strategy,
+                    statistics.median(eps),
+                    statistics.median(other),
+                )
+            )
     if not pairs:
         return
     print("\n" + "=" * 78)
@@ -392,8 +426,10 @@ def print_tier_check(by_tier: dict) -> None:
     print(f"\n{'domain':<9}{'model':<9}{'strat':<12}{TIER:>9}{'q99':>9}{'ratio':>8}")
     for domain, model, strategy, a, b in sorted(pairs):
         flag = "  <-- differs" if a and abs(b / a - 1) > 0.15 else ""
-        print(f"{domain:<9}{model:<9}{strategy:<12}{a:>9.2f}{b:>9.2f}"
-              f"{b / a if a else 0:>8.2f}{flag}")
+        print(
+            f"{domain:<9}{model:<9}{strategy:<12}{a:>9.2f}{b:>9.2f}"
+            f"{b / a if a else 0:>8.2f}{flag}"
+        )
 
 
 def print_thin_cells(rows: list[dict], cell: dict) -> None:
@@ -407,36 +443,51 @@ def print_thin_cells(rows: list[dict], cell: dict) -> None:
     print("sanity-checked against the same model's other cheap strategies (CAP is")
     print("excluded from the reference -- it is the one that genuinely costs more).")
     print(f"'ok' means it sits within {THIN_CELL_TOLERANCE:.0%} of them.")
-    print(f"\n{'domain':<9}{'model':<9}{'strat':<12}{'n':>3}{'value':>8}"
-          f"{'siblings':>10}{'dev':>8}   verdict")
+    print(
+        f"\n{'domain':<9}{'model':<9}{'strat':<12}{'n':>3}{'value':>8}"
+        f"{'siblings':>10}{'dev':>8}   verdict"
+    )
     for r in thin:
         peers = [
             c["sec_per_epoch"]
             for (d, m, s), c in cell.items()
-            if d == r["domain"] and m == r["model"]
-            and s not in (r["strategy"], "cap") and c["sec_per_epoch"] != ""
+            if d == r["domain"]
+            and m == r["model"]
+            and s not in (r["strategy"], "cap")
+            and c["sec_per_epoch"] != ""
         ]
         if not peers or r["strategy"] == "cap":
-            print(f"  {r['domain']}/{r['model']} {r['strategy']}: "
-                  f"n={r['n_runs']}, {r['sec_per_epoch']} s (no reference)")
+            print(
+                f"  {r['domain']}/{r['model']} {r['strategy']}: "
+                f"n={r['n_runs']}, {r['sec_per_epoch']} s (no reference)"
+            )
             continue
         ref = statistics.median(peers)
         dev = r["sec_per_epoch"] / ref - 1
-        verdict = ("ok" if abs(dev) <= THIN_CELL_TOLERANCE
-                   else "SUSPECT -- check before quoting")
-        print(f"{r['domain']:<9}{r['model']:<9}{r['strategy']:<12}"
-              f"{r['n_runs']:>3}{r['sec_per_epoch']:>8.2f}{ref:>10.2f}"
-              f"{dev * 100:>+7.0f}%   {verdict}")
+        verdict = (
+            "ok"
+            if abs(dev) <= THIN_CELL_TOLERANCE
+            else "SUSPECT -- check before quoting"
+        )
+        print(
+            f"{r['domain']:<9}{r['model']:<9}{r['strategy']:<12}"
+            f"{r['n_runs']:>3}{r['sec_per_epoch']:>8.2f}{ref:>10.2f}"
+            f"{dev * 100:>+7.0f}%   {verdict}"
+        )
 
 
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
-    parser.add_argument("--indir", default=None,
-                        help="Dir holding the harvested CSVs "
-                             "(default: <repo>/notebooks/run_times).")
-    parser.add_argument("--outdir", default=None,
-                        help="Where to write the summary and tables "
-                             "(default: same as --indir).")
+    parser.add_argument(
+        "--indir",
+        default=None,
+        help="Dir holding the harvested CSVs " "(default: <repo>/notebooks/run_times).",
+    )
+    parser.add_argument(
+        "--outdir",
+        default=None,
+        help="Where to write the summary and tables " "(default: same as --indir).",
+    )
     args = parser.parse_args()
 
     repo = find_repo_root(Path(__file__).resolve().parent)
@@ -462,8 +513,11 @@ def main() -> None:
     tex, md = latex_table(cell, totals), markdown_table(cell, totals)
     (outdir / "compute_resources_table.tex").write_text(tex + "\n")
     (outdir / "compute_resources_table.md").write_text(md + "\n")
-    for name in ("compute_summary.csv", "compute_resources_table.tex",
-                 "compute_resources_table.md"):
+    for name in (
+        "compute_summary.csv",
+        "compute_resources_table.tex",
+        "compute_resources_table.md",
+    ):
         print(f"wrote {outdir / name}")
 
     print()

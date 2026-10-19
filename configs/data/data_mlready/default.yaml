@@ -4,11 +4,10 @@ _target_: src.data.components.mlready.L1DataMLReady
 
 processed_datapath: ${data.data_processor.cache_root_dir}/processed/${data.data_processor.name}
 
-# Split the zerobias into 60% training, 20% validation, 20% test.
+# Split the zero bias into 60% training and 20% validation; the remainder is the test split.
 split:
   train: 0.6
   valid: 0.2
-  test: 0.2
 
 # Split the auxiliary data into 60-40.
 split_aux: 0.6

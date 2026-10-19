@@ -1,10 +1,10 @@
 # Simple scatter plot of x, y values.
 
 from pathlib import Path
-from pathvalidate import sanitize_filename
 
 import matplotlib.pyplot as plt
 import mplhep as hep
+from pathvalidate import sanitize_filename
 
 
 def plot(data: dict, xlabel: str, ylabel: str, title: str, save_dir: Path):

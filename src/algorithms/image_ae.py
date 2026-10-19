@@ -13,16 +13,16 @@ from src.data.utils import unpack_batch
 class ImageAE(ADLightningModule):
     """Autoencoder module for image data.
 
-    This module follows the same training and logging contract as the tabular AE, but
-    it operates directly on image tensors of shape [B, C, H, W]. No flattening is
-    applied before the encoder.
+    This module follows the same training and logging contract as the tabular AE, but it
+    operates directly on image tensors of shape [B, C, H, W]. No flattening is applied
+    before the encoder.
 
     :param encoder: PyTorch module of the encoder.
     :param decoder: PyTorch module of the decoder.
-    :param features: Optional PyTorch module to apply to the data before feeding it
-        to the autoencoder.
-    :param input_noise_std: Float specifying how much Gaussian noise to add to the
-        input images before feeding them to the AE.
+    :param features: Optional PyTorch module to apply to the data before feeding it to
+        the autoencoder.
+    :param input_noise_std: Float specifying how much Gaussian noise to add to the input
+        images before feeding them to the AE.
     :param delta: Float defining how close the loss is to L1 or L2, i.e., how much
         importance is given to tail examples. Parameter in the HuberLoss.
     :param target_rate: Float of the target background rate or FPR for the AE.

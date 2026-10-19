@@ -38,7 +38,7 @@ class ThresholdDriftCallback(Callback):
     :param calibration_fraction: Fraction of normal scores used for calibration.
         The remainder is used for evaluation.
     :param split_seed: Seed used for deterministic random splitting.
-    :beta: Float that sets parameter of EMA metrics compute here.
+    :param ema_weight: Weight of the previous value in the exponential moving average.
     """
 
     def __init__(
@@ -48,16 +48,18 @@ class ThresholdDriftCallback(Callback):
         base_rate: float | None = None,
         calibration_fraction: float = 0.5,
         split_seed: int = 12345,
-        beta: float = 0.9,
+        ema_weight: float = 0.9,
     ):
         super().__init__()
         self.output_name = output_name
-        self.target_rates = None if target_rates is None else sorted(float(x) for x in target_rates)
+        self.target_rates = (
+            None if target_rates is None else sorted(float(x) for x in target_rates)
+        )
         self.base_rate = base_rate
 
         self.calibration_fraction = float(calibration_fraction)
         self.split_seed = int(split_seed)
-        self.beta = beta
+        self.ema_weight = ema_weight
 
         self.log_kwargs = dict(
             prog_bar=False,
@@ -76,8 +78,7 @@ class ThresholdDriftCallback(Callback):
         self.drift_ema = {}
 
     def on_validation_epoch_start(self, trainer, pl_module):
-        """Set the device and make sure the normal data is in the used data sets."""
-        self.device = pl_module.device
+        """Make sure the normal data is in the used data sets."""
         self.target_rates, self.base_rate = self._resolve_rate_config(pl_module)
 
         dset_names = list(trainer.val_dataloaders.keys())
@@ -149,16 +150,16 @@ class ThresholdDriftCallback(Callback):
             )
 
     def _compute_drift_ema(self, trate_name: str, drift: float):
-        """Compute the cvar estimated moving average."""
+        """Update the exponential moving average of the drift."""
         if trate_name not in self.drift_ema:
             self.drift_ema[trate_name] = float(drift)
         else:
-            self.drift_ema[trate_name] = self.beta * self.drift_ema[trate_name] + (
-                1 - self.beta
-            ) * float(drift)
+            self.drift_ema[trate_name] = self.ema_weight * self.drift_ema[
+                trate_name
+            ] + (1 - self.ema_weight) * float(drift)
 
     def _split_scores(self, scores: torch.Tensor):
-        """Split the anoamly score in a seeded way."""
+        """Split the anomaly score in a seeded way."""
         scores = scores.view(-1)
         n = int(scores.numel())
 

@@ -39,10 +39,7 @@ class CAP(Callback):
     :param pairing_type: Pairing scheme name passed to get_pairing_fn.
     :param cap_metric_config: Keyword arguments used to instantiate
         ApproximationCapacity.
-    :param log_raw_mlflow: Boolean to decide whether to log the raw plots produced by
-        this callback to mlflow artifacts. Default is True. An html gallery of all the
-        plots is made by default, so if this is set to false, one can still view the
-        plots produced with this callback in the gallery.
+    :param log_raw_mlflow: Unused, accepted for config compatibility.
     :param name: String specifying the name of the callback for identification in
         later methods that manipulate callbacks.
     """
@@ -67,7 +64,6 @@ class CAP(Callback):
         self.dataset_2_name = dataset_2
         self.cap_metric_config = cap_metric_config
         self.pairing_fn = get_pairing_fn(pairing_type)
-        self.log_raw_mlflow = log_raw_mlflow
         self.name = name
 
         self.cap_summary = defaultdict(float)
@@ -80,7 +76,7 @@ class CAP(Callback):
         """Initialise useful quantities."""
         self.dataset_1_scores = []
         self.dataset_2_scores = []
-        self.capmetric = self.metric_cls(**self.cap_metric_config, device=self.device)
+        self.capmetric = self.metric_cls(**self.cap_metric_config)
         self.capmetric.to(self.device)
 
     def on_test_batch_end(
@@ -140,7 +136,7 @@ class CAP(Callback):
         plot_folder.mkdir(parents=True, exist_ok=True)
         np.savez(
             plot_folder / "cap_curve.npz",
-            betas=self.capmetric.betas.numpy(),
+            betas=self.capmetric.betas.cpu().numpy(),
             curve=self.capmetric.curve.numpy(),
         )
         return {

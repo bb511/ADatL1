@@ -1,7 +1,7 @@
 # Import model to use its output as features for training another model.
-from pytorch_lightning import LightningModule
 import torch
 import torch.nn as nn
+from pytorch_lightning import LightningModule
 
 
 class FeaturesFromCkpt(nn.Module):

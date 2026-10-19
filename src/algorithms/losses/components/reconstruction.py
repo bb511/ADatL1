@@ -1,4 +1,5 @@
 from typing import Literal
+
 import torch
 import torch.nn.functional as F
 
@@ -14,6 +15,7 @@ class MSEReconstructionLoss(ADLoss):
     :param reduction: String of the reduction method to apply to the batch of samples
         given to this loss.
     """
+
     name: str = "mse_reco"
 
     def __init__(self, scale: float = 1.0, reduction: str = "none"):
@@ -44,6 +46,7 @@ class HuberReconstructionLoss(ADLoss):
     :param reduction: String of the reduction method to apply to the batch of samples
         given to this loss.
     """
+
     name: str = "huber_reco"
 
     def __init__(self, scale: float = 1.0, delta: float = 1.0, reduction: str = "none"):
@@ -73,6 +76,7 @@ class CylPtPzReconstructionLoss(MSEReconstructionLoss):
     cylindrical coordinates. This is because for axov4, the training would not converge
     otherwise. This trick should not be used in the future.
     """
+
     name: str = "cylreco"
 
     def __init__(self, scale: float = 1.0, reduction: str = "none"):
@@ -105,7 +109,6 @@ class CylPtPzReconstructionLoss(MSEReconstructionLoss):
         reco: torch.Tensor,
         mask: torch.Tensor | None = None,
     ) -> torch.Tensor:
-
         if self.pt_idxs is None:
             raise RuntimeError("object_feature_map not set.")
 

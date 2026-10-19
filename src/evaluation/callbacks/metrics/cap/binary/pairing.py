@@ -1,12 +1,11 @@
 from typing import Tuple
+
 import torch
 from torch import Tensor
 
 
 def _get_small_large(tensor1: Tensor, tensor2: Tensor) -> Tuple[Tensor, Tensor]:
-    """
-    Helper function to return tensors in (small, large) order.
-    """
+    """Helper function to return tensors in (small, large) order."""
     if len(tensor1) <= len(tensor2):
         return tensor1, tensor2, False
     else:

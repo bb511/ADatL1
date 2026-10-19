@@ -42,9 +42,7 @@ class DeepSetsAE(ADLightningModule):
         **kwargs,
     ):
         super().__init__(model=None, **kwargs)
-        self.save_hyperparameters(
-            ignore=["model", "features", "encoder", "decoder"]
-        )
+        self.save_hyperparameters(ignore=["model", "features", "encoder", "decoder"])
 
         self.features = features if features is not None else nn.Identity()
         self.features.eval()
@@ -97,9 +95,7 @@ class DeepSetsAE(ADLightningModule):
         ascore = self.ascore(x_flat, reconstruction, m_flat)
 
         if ascore.ndim != 1:
-            raise ValueError(
-                f"Expected per-event ascores, got {tuple(ascore.shape)}."
-            )
+            raise ValueError(f"Expected per-event ascores, got {tuple(ascore.shape)}.")
 
         del x_flat, z
 

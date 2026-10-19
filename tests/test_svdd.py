@@ -104,7 +104,9 @@ def test_soft_boundary_loss_is_stateless() -> None:
 def test_network_regularization_uses_weights_not_latents() -> None:
     model = _model(network_weight_decay=0.2)
     expected = 0.1 * sum(
-        parameter.square().sum() for parameter in model.encoder.parameters() if parameter.ndim > 1
+        parameter.square().sum()
+        for parameter in model.encoder.parameters()
+        if parameter.ndim > 1
     )
 
     actual = model._network_regularization()
@@ -118,9 +120,7 @@ def test_existing_ckpt_parameter_loads_matching_ae_encoder_weights(tmp_path) -> 
         for parameter in source.parameters():
             parameter.fill_(0.125)
     checkpoint = tmp_path / "ae.ckpt"
-    state_dict = {
-        f"encoder.{key}": value for key, value in source.state_dict().items()
-    }
+    state_dict = {f"encoder.{key}": value for key, value in source.state_dict().items()}
     state_dict["decoder.unused"] = torch.tensor(1.0)
     torch.save(
         {"state_dict": state_dict},

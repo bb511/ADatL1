@@ -46,7 +46,9 @@ def sanitize_filename(name: str) -> str:
     return name[:200] or "unnamed"
 
 
-def get_experiment(client: MlflowClient, experiment_name: str | None, experiment_id: str | None):
+def get_experiment(
+    client: MlflowClient, experiment_name: str | None, experiment_id: str | None
+):
     if experiment_id is not None:
         exp = client.get_experiment(experiment_id)
         if exp is None:
@@ -91,7 +93,9 @@ def list_all_runs(
     return runs
 
 
-def fetch_metric_history_df(client: MlflowClient, run_id: str, metric_name: str) -> pd.DataFrame:
+def fetch_metric_history_df(
+    client: MlflowClient, run_id: str, metric_name: str
+) -> pd.DataFrame:
     history = client.get_metric_history(run_id, metric_name)
     rows = [
         {"key": m.key, "value": m.value, "step": m.step, "timestamp": m.timestamp}
@@ -155,7 +159,9 @@ def export_metrics_for_run(
     save_run_info(run, run_dir / "run_info.json")
 
     selected_metrics = select_metric_names(run, include_patterns, exclude_patterns)
-    (run_dir / "selected_metrics.json").write_text(json.dumps(selected_metrics, indent=2))
+    (run_dir / "selected_metrics.json").write_text(
+        json.dumps(selected_metrics, indent=2)
+    )
 
     for metric_name in selected_metrics:
         df = fetch_metric_history_df(client, run.info.run_id, metric_name)
@@ -224,7 +230,9 @@ def main() -> None:
         return
 
     include_patterns = compile_patterns(args.include_regex)
-    exclude_patterns = compile_patterns(args.exclude_regex) if args.exclude_regex else None
+    exclude_patterns = (
+        compile_patterns(args.exclude_regex) if args.exclude_regex else None
+    )
 
     print(f"Experiment: {exp.name} ({exp.experiment_id})")
     print(f"Runs found: {len(runs)}")

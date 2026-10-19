@@ -1,13 +1,13 @@
+from typing import Literal, Optional
+
 import torch
 from torch import Tensor
-from typing import Literal, Optional
 
 
 def threshold(
     prob: Tensor, maxcount: int, mode: Literal["max", "mean", "zero"] = "max", **kwargs
 ) -> Tensor:
-    """
-    Regularize probabilities to naturally enforce maxcount positive classifications.
+    """Regularize probabilities to naturally enforce maxcount positive classifications.
 
     Sets the smallest (N - maxcount) probabilities to reduce their anomaly likelihood.
 
@@ -52,8 +52,7 @@ def smooth(
     mode: Literal["sigmoid", "exponential", "linear"] = "sigmoid",
     **kwargs,
 ) -> Tensor:
-    """
-    Smooth regularization that gradually suppresses smallest probabilities.
+    """Smooth regularization that gradually suppresses smallest probabilities.
 
     Args:
         prob: Normalized probability values [batch_size]
@@ -117,8 +116,7 @@ def percentile(
     enhancement_percentile: Optional[float] = 0.9,
     **kwargs,
 ) -> Tensor:
-    """
-    Regularization based on percentile thresholds.
+    """Regularization based on percentile thresholds.
 
     Maps probability values to create clear separation between anomaly and normal regions
     using percentile-based transformations.

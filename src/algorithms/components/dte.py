@@ -13,9 +13,9 @@ from src.algorithms.components.mlp import ImageMLP
 class DTEPredictor(nn.Module):
     """Paper-style MLP used to predict an ordered diffusion-time bin.
 
-    The official DTE implementation applies dropout after every hidden layer except the first one.
-    Keeping this component separate makes the algorithm usable with a different predictor without
-    changing the corruption or scoring contract.
+    The official DTE implementation applies dropout after every hidden layer except the
+    first one. Keeping this component separate makes the algorithm usable with a
+    different predictor without changing the corruption or scoring contract.
     """
 
     def __init__(
@@ -61,9 +61,13 @@ class DTEPredictor(nn.Module):
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         if x.ndim != 2:
-            raise ValueError(f"DTEPredictor expects [batch, features], got {tuple(x.shape)}.")
+            raise ValueError(
+                f"DTEPredictor expects [batch, features], got {tuple(x.shape)}."
+            )
         if x.shape[1] != self.in_dim:
-            raise ValueError(f"DTEPredictor expected {self.in_dim} features, got {x.shape[1]}.")
+            raise ValueError(
+                f"DTEPredictor expected {self.in_dim} features, got {x.shape[1]}."
+            )
         return self.net(x)
 
 

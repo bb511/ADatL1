@@ -1,8 +1,9 @@
 # Different modes on how to checkpoint a model based on the values of the metric
 # that is being tracked.
 
-import numpy as np
 from collections import deque
+
+import numpy as np
 
 
 class Criterion(object):
@@ -152,22 +153,3 @@ class Stable(Criterion):
                 "Patience given in stability checkpoint callback needs to be a "
                 f"number strictly larger than 0. Given value is {self.patience}."
             )
-
-
-class Last(Criterion):
-    """Save the last value of the metric.
-
-    Note: this criterion is meant to be handled specially by the checkpoint callback
-    (save at fit end). check() never requests a save.
-    """
-
-    def __init__(self, top_k: int = 1):
-        super().__init__(top_k=1)
-        self.top_k_values.fill(np.nan)
-        self.name = "last"
-
-    def check(self, metric_value: float) -> bool:
-        metric_value = float(metric_value)
-        self.last_ranking_value = metric_value if np.isfinite(metric_value) else None
-        self.top_k_values[0] = metric_value
-        return False

@@ -1,13 +1,12 @@
-from typing import Optional
 import inspect
+from typing import Optional
 
 import torch
-from torch import nn, optim
-
-from omegaconf import OmegaConf, DictConfig
+from omegaconf import DictConfig, OmegaConf
 from pytorch_lightning import LightningModule
 from pytorch_lightning.core.optimizer import LightningOptimizer
 from pytorch_lightning.utilities.memory import garbage_collection_cuda
+from torch import nn, optim
 
 
 class ADLightningModule(LightningModule):
@@ -32,7 +31,10 @@ class ADLightningModule(LightningModule):
         return self.model(x)
 
     def model_step(self, batch) -> dict[str, torch.Tensor]:
-        """Run one model step. Must be implemented by subclasses."""
+        """Run one model step.
+
+        Must be implemented by subclasses.
+        """
         raise NotImplementedError(
             f"{self.__class__.__name__} must implement `model_step`."
         )
@@ -56,8 +58,8 @@ class ADLightningModule(LightningModule):
     def on_train_batch_end(self, outputs, batch, batch_idx):
         """Log metrics and clean up memory.
 
-        For some reason on_train_epoch_end executes after on_validation_epoch_end
-        so I have to do this hack to do things right at the end of the training.
+        For some reason on_train_epoch_end executes after on_validation_epoch_end so I
+        have to do this hack to do things right at the end of the training.
         """
         is_last = (batch_idx + 1) == self.trainer.num_training_batches
         if is_last:
@@ -233,14 +235,14 @@ class ADLightningModule(LightningModule):
 
         return fpr
 
-    def compute_threshold_quantile(self) -> float:
-        return 1.0 - self.compute_target_fpr()
-
     def compute_operational_ascore(self, ascore: torch.Tensor) -> float:
         """Anomaly score at the operational point, i.e. at the target FPR.
 
-        A single quantile is too noisy when the operational tail holds fewer than 10
-        events, so below that the top-k mean is used instead.
+        With k = int(target_fpr * n) < 10 events beyond the target FPR in a batch of n,
+        the mean of the 10 largest scores replaces the (1 - target_fpr) quantile, which
+        is too noisy there. At the physics point (target 0.25 kHz over 28608.8 kHz, FPR
+        8.7e-6) every batch below about 1.1 million events is in this regime, so the
+        per-batch value is the mean of the 10 largest scores.
         """
         n = ascore.numel()
         k = max(1, int(self.target_fpr * n))

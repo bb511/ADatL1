@@ -7,30 +7,21 @@ from pathlib import Path
 import torch
 from pytorch_lightning import Callback
 
+from src.callbacks.metrics.rate import compute_tie_weight, count_exceedances
 from src.evaluation.callbacks import utils
-from src.evaluation.callbacks.metrics.rate import compute_tie_weight, count_exceedances
 from src.plot import horizontal_bar
-from src.utils import pylogger
-
-log = pylogger.RankedLogger(__name__)
 
 
 class ThresholdDriftCallback(Callback):
     """Compute a split-transfer threshold drift metric from the normal dataset.
 
-    This callback collects anomaly scores from the 'normal' dataloader, splits them
-    internally into calibration and evaluation subsets, and for each target rate:
-        1) computes a threshold on the calibration subset,
-        2) applies that threshold on the evaluation subset,
-        3) measures drift via
-
-            L = log((p_hat + eps) / (FPR + eps)),
-            drift = abs(L),
-
-    where p_hat is the empirical exceedance rate on the evaluation subset, FPR is
-    obtained from target_rate and base_rate, and eps = 0.5 / N_eval. Scores equal to the
-    threshold count with the fraction that brings the calibration subset's exceedance
-    rate to the FPR.
+    This callback collects the anomaly scores of the 'normal' dataloader and splits them
+    into a calibration and an evaluation subset. For each target rate, a threshold is
+    set on the calibration subset and applied on the evaluation subset. The drift is
+    then |log((p_hat+eps)/(FPR+eps))|, where p_hat is the empirical exceedance rate on
+    the evaluation subset, FPR is obtained from target_rate and base_rate, and eps is
+    0.5/N_eval. Scores equal to the threshold count with the fraction that brings the
+    calibration subset's exceedance rate to the FPR.
 
     The module target rate is always included and is treated as the operational rate.
     Additional target rates may be passed through the callback config.
@@ -55,7 +46,6 @@ class ThresholdDriftCallback(Callback):
         name: str = "thres_transfer",
     ):
         super().__init__()
-        self.device = None
         self.output_name = output_name
         self.target_rates = (
             None if target_rates is None else sorted(float(x) for x in target_rates)
@@ -72,7 +62,6 @@ class ThresholdDriftCallback(Callback):
         self.transfer_summary = defaultdict(dict)
 
     def on_test_epoch_start(self, trainer, pl_module):
-        self.device = pl_module.device
         (
             self.target_rates_resolved,
             self.operational_rate,
@@ -147,7 +136,7 @@ class ThresholdDriftCallback(Callback):
 
             xlabel = (
                 f"Split-transfer drift at threshold: {display_name}\n"
-                f"log((p̂+ε)/(FPR+ε))"
+                f"|log((p̂+ε)/(FPR+ε))|"
             )
             self._plot({"normal": drift_metric}, xlabel, plot_folder, percent=False)
             self._store_summary(drift_metric, ckpt_name, trate_key)
@@ -300,7 +289,7 @@ class ThresholdDriftCallback(Callback):
 
             xlabel = (
                 f"split-transfer drift at threshold: {display_name}\n"
-                f"log((p̂+ε)/(FPR+ε))"
+                f"|log((p̂+ε)/(FPR+ε))|"
             )
             self._plot(smet, xlabel, plot_folder, percent=False)
 

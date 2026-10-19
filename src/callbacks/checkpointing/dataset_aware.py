@@ -1,16 +1,15 @@
 # Different ways of doing model checkpointing.
-import os
-from typing import Optional
-from collections import defaultdict
-from pathvalidate import sanitize_filename
-import importlib.util
-
-from weakref import proxy
-from pathlib import Path
 import copy
+import importlib.util
+import os
 import shutil
-import numpy as np
+from collections import defaultdict
+from pathlib import Path
+from typing import Optional
+from weakref import proxy
 
+import numpy as np
+from pathvalidate import sanitize_filename
 from pytorch_lightning.callbacks import Callback
 
 from src.callbacks.checkpointing.criterion import Criterion
@@ -23,8 +22,8 @@ log = pylogger.RankedLogger(__name__)
 class DatasetAwareModelCheckpoint(Callback):
     """ModelCheckpoint class to store dataset-specific checkpoints.
 
-    :param monitor: String name of the metric key in the metrics log dictionary, this
-        is what comes after the dataset name.
+    :param monitor: String name of the metric key in the metrics log dictionary, this is
+        what comes after the dataset name.
     :param mode: Callable method that takes the value of the metric at one epoch and
         decides whether to create a checkpoint or not.
     :param dirpath: String to dir path where to save the checkpoints.
@@ -46,7 +45,6 @@ class DatasetAwareModelCheckpoint(Callback):
         self.criterion = criterion
         self.topk = len(criterion.top_k_values)
         self.ds = ds
-        self.save_last = self.criterion.name == "last"
         self.weights_only = weights_only
 
         self.checkpoints = defaultdict(list)
@@ -107,7 +105,7 @@ class DatasetAwareModelCheckpoint(Callback):
             else:
                 return float(metric_value)
 
-        log.warn(
+        log.warning(
             f"Checkpoint for metric '{self.monitor}' not found in logged metrics. "
             f"Did you call `log('{self.monitor}')` in the LightningModule "
             f"for {dataset_name}?",
@@ -177,26 +175,8 @@ class DatasetAwareModelCheckpoint(Callback):
         self.dirpath.mkdir(parents=True, exist_ok=True)
 
     def on_fit_end(self, trainer, pl_module):
-        """Plot results. Save the models obtained at the end of the training."""
+        """Plot the epochs at which the top-k checkpoints were saved."""
         self._plot_epochs()
-        if not self.save_last:
-            return
-
-        self._ckpt_last_epoch(trainer, pl_module)
-
-    def _ckpt_last_epoch(self, trainer, pl_module):
-        """Checkpoint the model at the last epoch of the training."""
-        ds_metrics = {}
-        for ds_name in self.ds:
-            metric_value = self._get_metric(trainer.callback_metrics, ds_name)
-            ds_metrics[ds_name] = metric_value
-
-        plot_folder = self.dirpath / "plots"
-        plot_folder.mkdir(parents=True, exist_ok=True)
-        xlabel = f"{self.monitor}"
-        horizontal_bar.plot(ds_metrics, xlabel, plot_folder)
-
-        self._save_checkpoint(trainer, pl_module, self.dirpath / "last_epoch.ckpt")
 
     def _configure_filepath(self, trainer, ds_name: str, metric_val: float) -> Path:
         """Construct the filename out of the given properties of the checkpoint."""
@@ -228,7 +208,7 @@ class DatasetAwareModelCheckpoint(Callback):
         for k in range(self.topk):
             for dataset_name in self.checkpoints.keys():
                 if not self.checkpoints[dataset_name]:
-                    log.warn(
+                    log.warning(
                         f"No checkpoints made for  {self.criterion.__dict__} "
                         f"on dataset {dataset_name}."
                     )

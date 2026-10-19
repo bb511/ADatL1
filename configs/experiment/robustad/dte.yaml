@@ -68,7 +68,7 @@ callbacks:
   anomaly_eff:
     _target_: src.callbacks.efficiency.AnomalyEfficiencyCallback
     output_name: 'ascore/full'
-    beta: 0.9
+    ema_weight: 0.9
 
   cvar25_ema_ckpt:
     _target_: pytorch_lightning.callbacks.ModelCheckpoint

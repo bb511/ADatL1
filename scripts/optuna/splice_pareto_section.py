@@ -113,7 +113,10 @@ def insertion_point(lines: list[str], title: str) -> int:
 def splice(
     generated: Path, target: Path, title: str, dry: bool, replace: bool = False
 ) -> tuple[str, str]:
-    """Splice one section in. Returns ('ok'|'skip'|'fail', message)."""
+    """Splice one section in.
+
+    Returns ('ok'|'skip'|'fail', message).
+    """
     gen_lines = generated.read_text().splitlines()
     tgt_lines = target.read_text().splitlines()
 
@@ -179,22 +182,37 @@ def splice(
 
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
-    ap.add_argument("--generated-root", required=True,
-                    help="tree written by make_pareto_scripts.py --out-root")
-    ap.add_argument("--strategy-title", required=True,
-                    help="section title to move, e.g. CONSISTENCY")
-    ap.add_argument("--exclude", action="append", default=[],
-                    help="glob of generated filenames to skip (repeatable)")
-    ap.add_argument("--replace", action="store_true",
-                    help="replace an existing section of this title instead of "
-                         "skipping the file (use after re-fetching fronts from "
-                         "a study that gained trials)")
+    ap.add_argument(
+        "--generated-root",
+        required=True,
+        help="tree written by make_pareto_scripts.py --out-root",
+    )
+    ap.add_argument(
+        "--strategy-title",
+        required=True,
+        help="section title to move, e.g. CONSISTENCY",
+    )
+    ap.add_argument(
+        "--exclude",
+        action="append",
+        default=[],
+        help="glob of generated filenames to skip (repeatable)",
+    )
+    ap.add_argument(
+        "--replace",
+        action="store_true",
+        help="replace an existing section of this title instead of "
+        "skipping the file (use after re-fetching fronts from "
+        "a study that gained trials)",
+    )
     ap.add_argument("--dry-run", action="store_true")
     args = ap.parse_args()
 
     if args.strategy_title not in TITLE_ORDER:
-        ap.error("unknown section title %r; known: %s"
-                 % (args.strategy_title, ", ".join(TITLE_ORDER)))
+        ap.error(
+            "unknown section title %r; known: %s"
+            % (args.strategy_title, ", ".join(TITLE_ORDER))
+        )
 
     repo = find_repo_root(Path(__file__).resolve().parent)
     root = Path(args.generated_root).expanduser()
@@ -214,15 +232,18 @@ def main() -> int:
             print("%-42s SKIP (no target: %s)" % (rel, target))
             skipped += 1
             continue
-        status, msg = splice(gen, target, args.strategy_title, args.dry_run,
-                             replace=args.replace)
+        status, msg = splice(
+            gen, target, args.strategy_title, args.dry_run, replace=args.replace
+        )
         print("%-42s %-4s %s" % (rel, status.upper(), msg))
         ok += status == "ok"
         skipped += status == "skip"
         failed += status == "fail"
 
-    print("\n%d spliced, %d skipped, %d failed%s"
-          % (ok, skipped, failed, "  (dry run)" if args.dry_run else ""))
+    print(
+        "\n%d spliced, %d skipped, %d failed%s"
+        % (ok, skipped, failed, "  (dry run)" if args.dry_run else "")
+    )
     return 1 if failed else 0
 
 

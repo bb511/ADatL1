@@ -1,11 +1,10 @@
 # Encoder models.
-from typing import Optional, Callable
+from typing import Callable, Optional
 
 import torch
 import torch.nn as nn
 
-from src.algorithms.components.mlp import MLP
-from src.algorithms.components.mlp import ImageMLP
+from src.algorithms.components.mlp import MLP, ImageMLP
 
 
 class Encoder(nn.Module):
@@ -159,7 +158,9 @@ class DeepSetsEncoder(nn.Module):
 
         for obj_name in self.object_types:
             if obj_name not in object_phi_nodes:
-                raise ValueError(f"Missing phi configuration for object type '{obj_name}'.")
+                raise ValueError(
+                    f"Missing phi configuration for object type '{obj_name}'."
+                )
 
             phi_nodes = object_phi_nodes[obj_name]
             if len(phi_nodes) < 1:
@@ -492,7 +493,9 @@ class ImageVariationalEncoder(nn.Module):
             if self.z_log_var.bias is not None:
                 init_bias(self.z_log_var.bias)
 
-    def forward(self, x: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+    def forward(
+        self, x: torch.Tensor
+    ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
         x = self.net(x)
         x = torch.flatten(x, start_dim=1)
         x = self.proj(x)

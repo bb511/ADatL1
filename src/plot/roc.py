@@ -1,9 +1,9 @@
 # ROC curve plots.
 from pathlib import Path
-from pathvalidate import sanitize_filename
 
 import matplotlib.pyplot as plt
 import mplhep as hep
+from pathvalidate import sanitize_filename
 
 
 def plot(roc: dict, auroc: dict, metric: str, save_dir: Path):

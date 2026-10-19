@@ -2,11 +2,11 @@
 
 from pathlib import Path
 
-import numpy as np
 import awkward as ak
 import matplotlib
 import matplotlib.pyplot as plt
 import mplhep as hep
+import numpy as np
 
 # Plot configuration.
 matplotlib.rcParams.update(matplotlib.rcParamsDefault)

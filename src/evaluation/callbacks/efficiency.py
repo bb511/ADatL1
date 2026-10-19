@@ -1,17 +1,16 @@
 # Callback that computes the anomaly efficiency.
+import pickle
 from collections import defaultdict
 from pathlib import Path
-import pickle
 
-import torch
 import numpy as np
+import torch
 from pytorch_lightning.callbacks import Callback
 
-from src.evaluation.callbacks.metrics.rate import AnomalyRate
+from src.callbacks.metrics.rate import AnomalyRate
+from src.data.utils import unpack_batch
 from src.evaluation.callbacks import utils
 from src.plot import horizontal_bar
-from src.data.utils import unpack_batch
-
 from src.utils import pylogger
 
 log = pylogger.RankedLogger(__name__)
@@ -39,7 +38,8 @@ class AnomalyEfficiencyCallback(Callback):
     :param base_rate: Optional override for the module base rate. If None, the module
         base_rate is used.
     :param output_name: Name of the output dict entry used as anomaly score.
-    :param pure_thres: Whether to threshold only on events with l1bit == False.
+    :param pure_thres: Whether to measure the normal exceedance rate on l1bit False
+        events only; the thresholds are the module's validation-time buffers.
     :param ds: List of dataset names to compute efficiencies on.
     :param cvar_summary: Fraction of worst efficiencies to average in the summary.
     :param log_raw_mlflow: Whether to log raw plots to mlflow.
@@ -194,21 +194,16 @@ class AnomalyEfficiencyCallback(Callback):
         self.eff_med.clear()
         self.eff_min.clear()
 
-    def get_optimized_metric(self, target_rate: float | None = None):
-        """Return the best summary metric across checkpoints for one target rate.
-
-        If target_rate is None, the operational rate is used.
-        """
-        if target_rate is None:
-            target_rate = self.operational_rate
-
-        if target_rate not in self.eff_summary:
+    def get_optimized_metric(self):
+        """Return the best summary metric across checkpoints at the operational rate."""
+        if self.operational_rate not in self.eff_summary:
             raise ValueError(
                 f"Efficiency callback for metric {self.output_name} did not calculate "
-                f"eff at target rate {target_rate}. Choose {list(self.eff_summary.keys())}."
+                f"eff at target rate {self.operational_rate}. "
+                f"Choose {list(self.eff_summary.keys())}."
             )
 
-        metric_across_ckpts = self.eff_summary[target_rate]
+        metric_across_ckpts = self.eff_summary[self.operational_rate]
         max_ckpt_name = max(metric_across_ckpts, key=metric_across_ckpts.get)
         # Scaled by 1e3 for Optuna resolution; summary.pkl stores the unscaled value.
         max_metric_value = 1e3 * metric_across_ckpts[max_ckpt_name]
@@ -309,7 +304,6 @@ class AnomalyEfficiencyCallback(Callback):
         valid_rates = []
 
         for target_rate in self.target_rates_resolved:
-            # --- NEW: operational handling ---
             if self._is_operational(target_rate):
                 trate_name = "operational"
                 suffix = "operational"
@@ -319,7 +313,7 @@ class AnomalyEfficiencyCallback(Callback):
             thres = getattr(pl_module, f"thres_{suffix}", None)
 
             if thres is None:
-                log.warn(
+                log.warning(
                     f"No threshold was set for target rate {trate_name}. "
                     "Skipping efficiency computation for this threshold."
                 )

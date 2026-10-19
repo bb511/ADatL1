@@ -1,14 +1,15 @@
 # Extracts the data from the raw parquet files.
-from pathlib import Path
 from dataclasses import dataclass
+from pathlib import Path
 
 import awkward as ak
 import pyarrow.parquet as parquet
-from omegaconf import OmegaConf
-from colorama import Fore
-
 from adl1t_datamaker.loader import Parquet2Awkward
+from colorama import Fore
+from omegaconf import OmegaConf
+
 from src.utils import pylogger
+
 from . import plots
 
 log = pylogger.RankedLogger(__name__, rank_zero_only=True)
@@ -26,21 +27,21 @@ class L1DataExtractor(object):
     adl1t_datamaker package. This reader reads folders of parquet files generated with
     the adl1t_datamaker package. The folder structure is fixed.
 
-    Each subfolder within a dataset folder corresponds to an object, e.g.,
-    muons, egammas, etc., each with multiple parquet files. This class merges all the
-    parquet files corresponding to an object into one parquet file corresponding to that
-    object for easier reading down the line. This merging is done sequentially and does
-    not bloat the memory.
+    Each subfolder within a dataset folder corresponds to an object, e.g., muons,
+    egammas, etc., each with multiple parquet files. This class merges all the parquet
+    files corresponding to an object into one parquet file corresponding to that object
+    for easier reading down the line. This merging is done sequentially and does not
+    bloat the memory.
 
-    :param select_features: Dictionary with which features to extract from the
-        parquet file (keys), and the corresponding features to get from the object.
-        If a key corresponds to 'none' or is missing from this dictionary but is
-        present in the data, then do not load that object.
+    :param select_features: Dictionary with which features to extract from the parquet
+        file (keys), and the corresponding features to get from the object. If a key
+        corresponds to 'none' or is missing from this dictionary but is present in the
+        data, then do not load that object.
     :param feat_name_map: Dictionary that maps original field names for each object in
         the parquet files to new ones for easier readability and access.
     :param cache_root_dir: String specifying path to where to store the data.
-    :param name: String used to name a specific method of doing the extraction of
-        the data, e.g., "default", "axov4".
+    :param name: String used to name a specific method of doing the extraction of the
+        data, e.g., "default", "axov4".
     """
 
     select_features: dict
@@ -84,7 +85,7 @@ class L1DataExtractor(object):
             log.info(Fore.YELLOW + f"Extracted data exists in {self.cache_folder}!")
 
         if self.existence_warn_trigger:
-            log.warn(
+            log.warning(
                 "The code only checks if there exist parquet files with the names of "
                 "objects specified in the data/data_extractor config. If you are "
                 "unsure whether the features are as expected, double check this."
@@ -184,7 +185,7 @@ def _et_ordered(data: ak.Array) -> ak.Array:
     already arrive ordered come out untouched.
     """
     if "Et" not in data.fields:
-        log.warn(f"No Et among {data.fields}, so the raw readout order is kept.")
+        log.warning(f"No Et among {data.fields}, so the raw readout order is kept.")
         return data
 
     return data[ak.argsort(data["Et"], axis=-1, ascending=False, stable=True)]

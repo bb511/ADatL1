@@ -1,6 +1,6 @@
+import math
 from typing import Optional, Tuple
 
-import math
 import torch
 import torch.nn as nn
 
@@ -64,9 +64,8 @@ class CouplingLayer(nn.Module):
     def forward(self, x: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor]:
         """Forward transform x -> z.
 
-        The masked part of x is passed unchanged.
-        The unmasked part is transformed using an affine function whose parameters
-        are predicted from the masked part.
+        The masked part of x is passed unchanged. The unmasked part is transformed using
+        an affine function whose parameters are predicted from the masked part.
         """
         x_masked = x * self.mask
 
@@ -117,9 +116,9 @@ class CouplingLayer(nn.Module):
 class RealNVP(nn.Module):
     """RealNVP operating on a dense latent vector.
 
-    This flow models the distribution of latent representations produced by the
-    DS-VAE encoder. It learns an invertible mapping between the latent space and
-    a simple Gaussian base distribution.
+    This flow models the distribution of latent representations produced by the DS-VAE
+    encoder. It learns an invertible mapping between the latent space and a simple
+    Gaussian base distribution.
 
     :param input_dim: Int with the number of input dimensions.
     :param n_flows: Int with the number of flows that should be used.

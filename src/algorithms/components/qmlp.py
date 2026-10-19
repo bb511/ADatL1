@@ -1,10 +1,9 @@
 # Make a quantised MLP using HGQ2.
 import keras
-from keras import layers
-
-from hgq.layers import QDense
 from hgq.config import LayerConfigScope, QuantizerConfigScope
 from hgq.constraints import Constant
+from hgq.layers import QDense
+from keras import layers
 
 
 def hgq_mlp(

@@ -1,16 +1,16 @@
+import gc
 from dataclasses import dataclass
 from pathlib import Path
-import gc
 
 import numpy as np
 import torch
+from colorama import Back, Fore
 from datasets import load_dataset
 from pytorch_lightning import LightningDataModule
 from torch.utils.data import DataLoader, TensorDataset, random_split
 
-from src.utils import pylogger
-from colorama import Fore, Back
 from src.data.components.dataset import CIFARADDataset
+from src.utils import pylogger
 
 log = pylogger.RankedLogger(__name__)
 
@@ -229,8 +229,7 @@ class CIFAR10DataModule(LightningDataModule):
 
         for idx in normal_indices:
             x = (
-                torch.as_tensor(dataset.data[idx], dtype=torch.float32)
-                .permute(2, 0, 1)
+                torch.as_tensor(dataset.data[idx], dtype=torch.float32).permute(2, 0, 1)
                 / 255.0
             )
             xs.append(x)
@@ -256,7 +255,9 @@ class CIFAR10DataModule(LightningDataModule):
         normal_indices = self._get_class_indices(
             train_ds.targets, self.hparams.normal_classes
         )
-        normal_data, normal_labels = self._extract_subset(train_ds, normal_indices, label=0)
+        normal_data, normal_labels = self._extract_subset(
+            train_ds, normal_indices, label=0
+        )
 
         n_total = normal_data.size(0)
         n_valid = max(2, int(round(self.hparams.val_fraction * n_total)))
@@ -360,7 +361,7 @@ class CIFAR10DataModule(LightningDataModule):
             )
 
         background_label = 0
-        for cls in (self.hparams.background_classes or []):
+        for cls in self.hparams.background_classes or []:
             background_label -= 1
             indices = self._get_class_indices(dataset.targets, [cls])
             x, y = self._extract_subset(dataset, indices, label=background_label)
@@ -427,8 +428,7 @@ class CIFAR10DataModule(LightningDataModule):
         xs = []
         for idx in indices:
             x = (
-                torch.as_tensor(dataset.data[idx], dtype=torch.float32)
-                .permute(2, 0, 1)
+                torch.as_tensor(dataset.data[idx], dtype=torch.float32).permute(2, 0, 1)
                 / 255.0
             )
             if self.hparams.normalize:

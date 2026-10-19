@@ -5,15 +5,15 @@ from collections import defaultdict
 from dataclasses import dataclass
 from pathlib import Path
 
-import numpy as np
 import awkward as ak
-
+import numpy as np
 import pyarrow
 import pyarrow.dataset
-from omegaconf import OmegaConf
 from colorama import Fore
+from omegaconf import OmegaConf
 
 from src.utils import pylogger
+
 from . import plots
 from .normalization import L1DataNormalizer
 
@@ -47,18 +47,13 @@ class L1DataMLReady:
     seed: int = 42
     verbose: bool = False
 
-    def prepare(self, normalizer: L1DataNormalizer, select_feats: dict, flag: str = ""):
+    def prepare(self, normalizer: L1DataNormalizer, select_feats: dict):
         """Makes train set, validation set, test set, and auxiliary data.
 
         Imports the processed data. Applies normalization through the normalizer object.
         See normalizer.py for the definition of this object and how to use it.
         Additionally, if an object is missing a feature that another object has, this
         feature is added to the object that is missing it and padded with None values.
-
-        The flag is used in case one wants to store the mlready data in a new
-        subdirectory inside the already established train/test/valid/aux subdirs.
-        This is useful when, for example, one wants to process additional features from
-        the data that are not used in the training data.
         """
         self.normalizer = normalizer
 
@@ -69,7 +64,6 @@ class L1DataMLReady:
         # and shared by every normalizer variant.
         self.splits_dir = self.cache_folder / "splits"
         self.cache_folder /= normalizer.name
-        self.flag = flag
 
         self.select_feats = select_feats
         if OmegaConf.is_config(self.select_feats):
@@ -129,7 +123,7 @@ class L1DataMLReady:
         obj_paths = self._get_files_per_object(self.processed_datapath / "zerobias")
         obj_names = [obj_name for obj_name, _ in obj_paths.items()]
         if not set(self.select_feats.keys()) <= set(obj_paths.keys()):
-            log.warn(
+            log.warning(
                 "Some objects you're trying to select are not in the extracted data\n"
                 f"selected objects = {self.select_feats.keys()}\n"
                 f"available = {obj_names}"
@@ -167,7 +161,7 @@ class L1DataMLReady:
     def _compute_main_split(self, obj_paths: dict):
         """Get the indexes of the training, validation, and test events.
 
-        This is computed on one object paruqet files and then applied to all other
+        This is computed on one object parquet files and then applied to all other
         objects in the data. The assumption is that you have the same number of events
         for each object.
         """
@@ -188,7 +182,7 @@ class L1DataMLReady:
 
     def _cache_train_data(self, obj_data, obj_name: str, idxs: list):
         """Get the training data split, normalize it, and then cache it."""
-        train_folder = self.cache_folder / "train" / self.flag
+        train_folder = self.cache_folder / "train"
         train_folder.mkdir(parents=True, exist_ok=True)
         cache_file = train_folder / f"{obj_name}.parquet"
 
@@ -210,7 +204,7 @@ class L1DataMLReady:
 
     def _cache_valid_data(self, obj_data, obj_name: str, idxs: list):
         """Get the validation data split, normalize it, and then cache it."""
-        valid_folder = self.cache_folder / "valid" / self.flag
+        valid_folder = self.cache_folder / "valid"
         valid_folder.mkdir(parents=True, exist_ok=True)
         cache_file = valid_folder / f"{obj_name}.parquet"
         if self._check_data_exists(cache_file):
@@ -229,7 +223,7 @@ class L1DataMLReady:
 
     def _cache_test_data(self, obj_data, obj_name: str, idxs: list):
         """Get the test data split, normalize it, and then cache it."""
-        test_folder = self.cache_folder / "test" / self.flag
+        test_folder = self.cache_folder / "test"
         test_folder.mkdir(parents=True, exist_ok=True)
         cache_file = test_folder / f"{obj_name}.parquet"
         if self._check_data_exists(cache_file):
@@ -249,14 +243,14 @@ class L1DataMLReady:
     def _cache_l1bit(
         self, obj_paths: list[Path], cache_dir: Path, idxs: list, type: str
     ):
-        """Cache the training data l1bit.
+        """Cache the l1bit of the split that type names.
 
         This is used later down the pipeline to compute things such as the pure rate,
         i.e., how much better our algorithm is compared to the standard trigger one.
         """
         if not "seeds" in obj_paths.keys():
-            log.warn("seeds object is not in the processed data. Skipping l1bit...")
-            log.warn("It will not be possible to compute pure rates etc.")
+            log.warning("seeds object is not in the processed data. Skipping l1bit...")
+            log.warning("It will not be possible to compute pure rates etc.")
             return
 
         folder = cache_dir / type
@@ -345,7 +339,7 @@ class L1DataMLReady:
 
     def _cache_aux_valid(self, obj_data, cache_dir: Path, obj_name: str, idxs: list):
         """Normalize and cache the validation split of an aux dataset."""
-        valid_folder = cache_dir / "valid" / self.flag
+        valid_folder = cache_dir / "valid"
         valid_folder.mkdir(parents=True, exist_ok=True)
         cache_file = valid_folder / f"{obj_name}.parquet"
         if self._check_data_exists(cache_file):
@@ -363,7 +357,7 @@ class L1DataMLReady:
 
     def _cache_aux_test(self, obj_data, cache_dir: Path, obj_name: str, idxs: list):
         """Normalize and cache the test split of an aux dataset."""
-        test_folder = cache_dir / "test" / self.flag
+        test_folder = cache_dir / "test"
         test_folder.mkdir(parents=True, exist_ok=True)
         cache_file = test_folder / f"{obj_name}.parquet"
         if self._check_data_exists(cache_file):
@@ -406,11 +400,11 @@ class L1DataMLReady:
     def _get_files_per_object(self, processed_path: Path, level: int = 2) -> dict:
         """Get path to parquet files per object in the processed data folder.
 
-        :param processed_path: Path that points to a dir or parent dir where the
-            parquet files are.
-        :param level: Int that points how far down from processed_path the script
-            should look to find the parquet files. This is useful for gathering
-            and merging multiple data sets.
+        :param processed_path: Path that points to a dir or parent dir where the parquet
+            files are.
+        :param level: Int that points how far down from processed_path the script should
+            look to find the parquet files. This is useful for gathering and merging
+            multiple data sets.
         """
         obj_paths = defaultdict(list)
         for file_path in sorted(
@@ -432,8 +426,8 @@ class L1DataMLReady:
         """Load normalization parameters into normalizer.
 
         Check if the normalization parameters do not exist for the normalizer and if
-        that is the case, load them from existing pkl file. This might happen when
-        the execution of this class is interrupted.
+        that is the case, load them from existing pkl file. This might happen when the
+        execution of this class is interrupted.
         """
         if obj_name in self.normalizer.norm_params.keys():
             return

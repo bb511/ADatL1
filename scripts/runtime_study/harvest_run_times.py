@@ -146,8 +146,10 @@ def harvest_experiment(name, exp_dirs, expected_epochs, outdir) -> int:
                 continue
             if expected_epochs and times["n_epochs"] != expected_epochs:
                 skipped_short += 1
-                print(f"  note: {meta['run_name']} ran {times['n_epochs']} epochs "
-                      f"(expected {expected_epochs}), skipped")
+                print(
+                    f"  note: {meta['run_name']} ran {times['n_epochs']} epochs "
+                    f"(expected {expected_epochs}), skipped"
+                )
                 continue
 
             run_name = meta["run_name"]
@@ -162,20 +164,22 @@ def harvest_experiment(name, exp_dirs, expected_epochs, outdir) -> int:
 
     rows = []
     for run_name, (_, meta, times) in sorted(kept.items()):
-        rows.append({
-            "domain": domain,
-            "model": model,
-            "tier": tier,
-            "strategy": strategy_of(run_name) or "",
-            "run_name": run_name,
-            "run_id": meta["run_id"],
-            "n_epochs": times["n_epochs"],
-            "sec_per_epoch": f"{times['sec_per_epoch']:.4f}",
-            "setup_s": f"{times['setup_s']:.2f}",
-            "fit_s": f"{times['fit_s']:.2f}",
-            "post_fit_s": f"{times['post_fit_s']:.2f}",
-            "total_s": f"{times['total_s']:.2f}",
-        })
+        rows.append(
+            {
+                "domain": domain,
+                "model": model,
+                "tier": tier,
+                "strategy": strategy_of(run_name) or "",
+                "run_name": run_name,
+                "run_id": meta["run_id"],
+                "n_epochs": times["n_epochs"],
+                "sec_per_epoch": f"{times['sec_per_epoch']:.4f}",
+                "setup_s": f"{times['setup_s']:.2f}",
+                "fit_s": f"{times['fit_s']:.2f}",
+                "post_fit_s": f"{times['post_fit_s']:.2f}",
+                "total_s": f"{times['total_s']:.2f}",
+            }
+        )
 
     out_path = outdir / f"{name}.csv"
     with open(out_path, "w", newline="") as fh:
@@ -191,21 +195,33 @@ def harvest_experiment(name, exp_dirs, expected_epochs, outdir) -> int:
 
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
-    parser.add_argument("experiments", nargs="*",
-                        help="MLflow experiment names (default: every *_pareto one).")
-    parser.add_argument("--tracking-uri", default=None,
-                        help="MLflow store, 'file:<path>' or a plain path "
-                             "(default: file:<repo>/logs/mlflow/mlruns).")
-    parser.add_argument("--outdir", default=None,
-                        help="Output dir for CSVs (default: <repo>/notebooks/run_times).")
-    parser.add_argument("--expected-epochs", type=int, default=200,
-                        help="Drop runs that did not complete this many epochs "
-                             "(0 to keep all).")
+    parser.add_argument(
+        "experiments",
+        nargs="*",
+        help="MLflow experiment names (default: every *_pareto one).",
+    )
+    parser.add_argument(
+        "--tracking-uri",
+        default=None,
+        help="MLflow store, 'file:<path>' or a plain path "
+        "(default: file:<repo>/logs/mlflow/mlruns).",
+    )
+    parser.add_argument(
+        "--outdir",
+        default=None,
+        help="Output dir for CSVs (default: <repo>/notebooks/run_times).",
+    )
+    parser.add_argument(
+        "--expected-epochs",
+        type=int,
+        default=200,
+        help="Drop runs that did not complete this many epochs " "(0 to keep all).",
+    )
     args = parser.parse_args()
 
     repo = find_repo_root(Path(__file__).resolve().parent)
     uri = args.tracking_uri or f"file:{repo / 'logs' / 'mlflow' / 'mlruns'}"
-    root = Path(uri[len("file:"):] if uri.startswith("file:") else uri)
+    root = Path(uri[len("file:") :] if uri.startswith("file:") else uri)
     if not root.is_dir():
         raise SystemExit(f"mlruns store not found: {root}")
     outdir = Path(args.outdir) if args.outdir else repo / "notebooks" / "run_times"

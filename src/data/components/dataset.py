@@ -5,9 +5,8 @@ from torch.utils.data import IterableDataset
 class L1ADDataset(IterableDataset):
     """Custom Dataset for loading anomaly detection numpy data.
 
-    The data is assumed to be already loaded in memory.
-    The shuffler permutes the batch order only; batch membership is fixed at
-    construction.
+    The data is assumed to be already loaded in memory. The shuffler permutes the batch
+    order only; batch membership is fixed at construction.
     """
 
     def __init__(
@@ -15,7 +14,7 @@ class L1ADDataset(IterableDataset):
         data: torch.Tensor,
         mask: torch.Tensor,
         l1bit: torch.Tensor,
-        labels: torch.Tensor | None,
+        labels: torch.Tensor,
         batch_size: int,
         max_batches: int | None = None,
         shuffler: torch.Generator | None = None,
@@ -53,7 +52,11 @@ class L1ADDataset(IterableDataset):
         for s in starts:
             s = int(s)
 
-            if self.max_batches is not None and self.max_batches >= 0 and nb >= self.max_batches:
+            if (
+                self.max_batches is not None
+                and self.max_batches >= 0
+                and nb >= self.max_batches
+            ):
                 break
 
             e = s + bs
@@ -79,6 +82,7 @@ class CIFARADDataset(IterableDataset):
     The shuffler permutes the batch order only; batch membership is fixed at
     construction.
     """
+
     def __init__(
         self,
         data: torch.Tensor,
@@ -98,7 +102,9 @@ class CIFARADDataset(IterableDataset):
 
         self.n = data.shape[0]
         self.num_batches = (self.n + self.batch_size - 1) // self.batch_size
-        self.starts = torch.arange(self.num_batches, dtype=torch.int64) * self.batch_size
+        self.starts = (
+            torch.arange(self.num_batches, dtype=torch.int64) * self.batch_size
+        )
 
     def __len__(self):
         if self.max_batches is None or self.max_batches < 0:
@@ -119,7 +125,11 @@ class CIFARADDataset(IterableDataset):
         for s in starts:
             s = int(s)
 
-            if self.max_batches is not None and self.max_batches >= 0 and nb >= self.max_batches:
+            if (
+                self.max_batches is not None
+                and self.max_batches >= 0
+                and nb >= self.max_batches
+            ):
                 break
 
             e = min(s + bs, n)
@@ -136,6 +146,7 @@ class RobustADDataset(IterableDataset):
     The shuffler permutes the batch order only; batch membership is fixed at
     construction.
     """
+
     def __init__(
         self,
         data: torch.Tensor,
@@ -158,7 +169,9 @@ class RobustADDataset(IterableDataset):
         self.max_batches = max_batches
         self.n = data.shape[0]
         self.num_batches = (self.n + self.batch_size - 1) // self.batch_size
-        self.starts = torch.arange(self.num_batches, dtype=torch.int64) * self.batch_size
+        self.starts = (
+            torch.arange(self.num_batches, dtype=torch.int64) * self.batch_size
+        )
 
     def __len__(self):
         if self.max_batches is None or self.max_batches == -1:
@@ -179,7 +192,11 @@ class RobustADDataset(IterableDataset):
         for s in starts:
             s = int(s)
 
-            if self.max_batches is not None and self.max_batches != -1 and nb >= self.max_batches:
+            if (
+                self.max_batches is not None
+                and self.max_batches != -1
+                and nb >= self.max_batches
+            ):
                 break
 
             e = min(s + bs, n)

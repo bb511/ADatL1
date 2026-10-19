@@ -1,18 +1,18 @@
+import gc
 from dataclasses import dataclass
 from pathlib import Path
-import gc
 
-import torch
 import numpy as np
-from PIL import Image
+import torch
+from colorama import Back, Fore
 from datasets import load_dataset
 from huggingface_hub import snapshot_download
+from PIL import Image
 from pytorch_lightning import LightningDataModule
 from torch.utils.data import DataLoader, TensorDataset, random_split
 
-from src.utils import pylogger
-from colorama import Fore, Back
 from src.data.components.dataset import CIFARADDataset
+from src.utils import pylogger
 
 log = pylogger.RankedLogger(__name__)
 
@@ -20,6 +20,7 @@ log = pylogger.RankedLogger(__name__)
 @dataclass(frozen=True)
 class SplitTensors:
     """Simple container for one in-memory split."""
+
     x: torch.Tensor
     y: torch.Tensor
 
@@ -245,7 +246,9 @@ class RobustADDataModule(LightningDataModule):
         nt = max(2, round(self.hparams.test_fraction * n))
         nt = min(nt, n - nv - 1)
         ds = TensorDataset(source.x, source.y)
-        parts = random_split(ds, [n - nv - nt, nv, nt], generator=self._split_generator())
+        parts = random_split(
+            ds, [n - nv - nt, nv, nt], generator=self._split_generator()
+        )
         return tuple(self._tensor_subset_to_split(p) for p in parts)
 
     def _tensor_subset_to_split(self, subset) -> SplitTensors:
@@ -276,7 +279,9 @@ class RobustADDataModule(LightningDataModule):
             out["shifted_normal_all"] = self._concat_balanced(shifted)
         return out
 
-    def _masked_split(self, split: SplitTensors, mask: torch.Tensor, label: int) -> SplitTensors:
+    def _masked_split(
+        self, split: SplitTensors, mask: torch.Tensor, label: int
+    ) -> SplitTensors:
         """Select a subset of a split and overwrite all labels with one value."""
         x = split.x[mask].contiguous()
         y = torch.full((x.size(0),), label, dtype=torch.int64)
@@ -294,7 +299,9 @@ class RobustADDataModule(LightningDataModule):
             y=torch.cat(ys).contiguous(),
         )
 
-    def _load_split(self, split_name: str, apply_normalize: bool = True) -> SplitTensors:
+    def _load_split(
+        self, split_name: str, apply_normalize: bool = True
+    ) -> SplitTensors:
         cache_path = self._cache_path(split_name, normalized=apply_normalize)
         if cache_path.exists():
             data = torch.load(cache_path, map_location="cpu")
@@ -305,7 +312,9 @@ class RobustADDataModule(LightningDataModule):
             data = torch.load(raw_cache_path, map_location="cpu")
             split = SplitTensors(x=data["x"], y=data["y"])
         else:
-            ds = load_dataset("imagefolder", data_dir=str(self._split_dir(split_name)), split="train")
+            ds = load_dataset(
+                "imagefolder", data_dir=str(self._split_dir(split_name)), split="train"
+            )
             rows = [self._row_to_tensors(r, apply_normalize=False) for r in ds]
             xs, ys = zip(*rows)
             split = SplitTensors(
@@ -352,10 +361,14 @@ class RobustADDataModule(LightningDataModule):
         """Construct eval dataloaders with normal first, then aux datasets."""
         loaders = {"normal": self._loader(self._main[key], shuffle=False)}
         for name, split in self._aux[key].items():
-            loaders[name] = self._loader(split, shuffle=False, max_b=self.hparams.max_val_batches)
+            loaders[name] = self._loader(
+                split, shuffle=False, max_b=self.hparams.max_val_batches
+            )
         return loaders
 
-    def _loader(self, split: SplitTensors, shuffle: bool, max_b: int | None = None) -> DataLoader:
+    def _loader(
+        self, split: SplitTensors, shuffle: bool, max_b: int | None = None
+    ) -> DataLoader:
         """Wrap one in-memory split in the iterable dataset and DataLoader."""
         ds = CIFARADDataset(
             split.x,
@@ -380,7 +393,9 @@ class RobustADDataModule(LightningDataModule):
             return
         ws = self.trainer.world_size
         if self.hparams.batch_size % ws != 0:
-            raise RuntimeError(f"Batch size {self.hparams.batch_size} not divisible by {ws}.")
+            raise RuntimeError(
+                f"Batch size {self.hparams.batch_size} not divisible by {ws}."
+            )
         self.batch_size_per_device = self.hparams.batch_size // ws
 
     def _data_summary(self, stage: str | None) -> None:
@@ -411,7 +426,11 @@ class RobustADDataModule(LightningDataModule):
         )
 
     def _cache_path(self, split_name: str, normalized: bool) -> Path:
-        size = "orig" if self.hparams.image_size is None else "x".join(map(str, self.hparams.image_size))
+        size = (
+            "orig"
+            if self.hparams.image_size is None
+            else "x".join(map(str, self.hparams.image_size))
+        )
         norm = "norm" if normalized else "raw"
         name = f"{self.hparams.subset}_{split_name}_{size}_{norm}.pt"
         return self._subset_dir() / "tensor_cache" / name

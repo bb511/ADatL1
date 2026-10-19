@@ -1,6 +1,6 @@
 # Custom weight loader that works for both HGQ and torch models.
-import torch
 import numpy as np
+import torch
 
 
 def load_weights(model, state_dict: dict, module_key: str, has_bn: bool = False):

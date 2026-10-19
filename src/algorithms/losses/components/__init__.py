@@ -1,4 +1,5 @@
-from typing import Literal, Optional, List
+from typing import List, Literal, Optional
+
 import torch
 import torch.nn as nn
 
@@ -7,8 +8,8 @@ class ADLoss(nn.Module):
     """Base class for all loss functions.
 
     :param scale: Scaling factor for the loss.
-    :param reduction: Reduction method to apply to the loss.
-        Options are 'none', 'mean', 'sum'.
+    :param reduction: Reduction method to apply to the loss. Options are 'none', 'mean',
+        'sum'.
     """
 
     name: str = "total"  # name for the logs

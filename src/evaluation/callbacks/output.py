@@ -1,7 +1,7 @@
 # Callback that plots histograms of the model output.
-from pathlib import Path
-from collections import defaultdict
 import pickle
+from collections import defaultdict
+from pathlib import Path
 
 import numpy as np
 import torch
@@ -9,9 +9,8 @@ from pytorch_lightning.callbacks import Callback
 from torchmetrics.aggregation import MeanMetric
 
 from src.evaluation.callbacks import utils
+from src.plot import horizontal_bar, matrix
 from src.plot.histogram import plot_streamed
-from src.plot import horizontal_bar
-from src.plot import matrix
 from src.utils import pylogger
 
 log = pylogger.RankedLogger(__name__)
@@ -27,8 +26,8 @@ class OutputCallback(Callback):
         this callback to mlflow artifacts. Default is True. An html gallery of all the
         plots is made by default, so if this is set to false, one can still view the
         plots produced with this callback in the gallery.
-    :param name: String specifying the name of the callback for identification in
-        later methods that manipulate callbacks.
+    :param name: String specifying the name of the callback for identification in later
+        methods that manipulate callbacks.
     """
 
     def __init__(
@@ -119,17 +118,12 @@ class OutputCallback(Callback):
         self.loss_summary.clear()
 
     def get_optimized_metric(self, ckpt_name: str, test_ds: str):
-        """Get one number that one should optimize on this callback.
+        """Return `ckpt_name` and its stored mean of `output_name` on `test_ds`.
 
-        Here it is the value of the self.output_name at the given ckpt_name which is
-        evaluated at the give test_ds.
-        If the loss_summary dictionary only has 'last' as a key, then the criterion is
-        'last', i.e., only checkpoint on the last epoch. This is trated as a special
-        case and the ckpt_name that is given to this method is returned, along with the
-        loss in the last epoch.
+        An unknown `ckpt_name` logs a warning and returns `(ckpt_name, None)`.
         """
         if not ckpt_name in self.loss_summary.keys():
-            log.warn(
+            log.warning(
                 f"Checkpoint with name '{ckpt_name}' not found for this strategy. "
                 f"Available ckpt names: {list(self.loss_summary.keys())}"
             )
@@ -148,8 +142,8 @@ class OutputCallback(Callback):
 class HistogramOutputCallback(Callback):
     """Stream model outputs into histograms with automatic bin detection.
 
-    :param output_name: String specifying the key in the output dictionary of the
-        output you'd like to plot.
+    :param output_name: String specifying the key in the output dictionary of the output
+        you'd like to plot.
     :param ds: List of strings specifying the datasets that you'd like to make the
         histogram for.
     :param ckpts: Dictionary of the checkpoints that you'd like to plot the histograms

@@ -1,19 +1,18 @@
 # MLFflow logging utilities.
-from pathlib import Path
 import base64
 import html
+import io
+import logging
 import math
 import re
 from contextlib import redirect_stdout
 from io import StringIO
-
-from PIL import Image
-import io
+from pathlib import Path
 from urllib.parse import quote
 
 import mlflow
-import logging
-from pytorch_lightning.loggers import MLFlowLogger, Logger
+from PIL import Image
+from pytorch_lightning.loggers import Logger, MLFlowLogger
 
 from src.utils import pylogger
 
@@ -45,7 +44,7 @@ def log_plots_to_mlflow(
         _ = make_gall(mlflow_logger, plot_folder, gallery_dir, ckpt_name, gallery_name)
 
     if not log_raw and not gallery_name:
-        log.warn(
+        log.warning(
             f"log_plots_to_mlflow was called with log_raw={log_raw} and "
             f"gallery_name={gallery_name}. Hence, nothing is logged to mlflow for the "
             f"callback that tracks {cb_name}."
@@ -85,8 +84,8 @@ def make_gall(
 ) -> str:
     """Makes an index html file in mlflow and adds the plots in plots_dir to it.
 
-    If index.html already exists at the given gallery_dir path, then append the plots
-    to it rather than generate the file from scratch.
+    If index.html already exists at the given gallery_dir path, then append the plots to
+    it rather than generate the file from scratch.
 
     :param mlflow_logger: The mlflow logger object used in the current run.
     :param plots_dir: The directory where the plots to be put in the html page are.
@@ -292,19 +291,19 @@ def log_metrics_to_mlflow(
     """Log per-checkpoint evaluation summary scalars as MLflow metrics.
 
     Keys are namespaced as 'eval/<split>/<strat>/<cb>/<metric>/<criterion>/
-    <ckpt_ds>/<scalar>', mirroring the artifact layout of resolve_arti_dir
-    (None segments are skipped). Each key holds exactly one value per run, so
-    no step is logged and mlflow.search_runs exposes it as a plain column.
+    <ckpt_ds>/<scalar>', mirroring the artifact layout of resolve_arti_dir (None
+    segments are skipped). Each key holds exactly one value per run, so no step is
+    logged and mlflow.search_runs exposes it as a plain column.
 
-    No-ops when no MLflow logger is attached. Never raises: a failure to log
-    one value emits a warning and continues.
+    No-ops when no MLflow logger is attached. Never raises: a failure to log one value
+    emits a warning and continues.
 
     :param trainer: The evaluation trainer, which carries the split/strategy/
         metric/criterion context attributes set by the Evaluator.
-    :param metrics: Mapping from scalar name to value. Values may be python
-        floats or 0-dim tensors; None and non-finite values are skipped.
-    :param ckpt_name: Stem of the evaluated checkpoint file; reduced to its
-        dataset name for the key, like the artifact directories.
+    :param metrics: Mapping from scalar name to value. Values may be python floats or
+        0-dim tensors; None and non-finite values are skipped.
+    :param ckpt_name: Stem of the evaluated checkpoint file; reduced to its dataset name
+        for the key, like the artifact directories.
     :param cb_name: Name of the callback logging the metrics.
     """
     mlflow_logger = get_mlflow_logger(trainer)
@@ -324,10 +323,10 @@ def log_metrics_to_mlflow(
                 value = value.item()
             value = float(value)
             if not math.isfinite(value):
-                log.warn(f"Skipping non-finite eval metric '{scalar_name}'.")
+                log.warning(f"Skipping non-finite eval metric '{scalar_name}'.")
                 continue
             key = _ILLEGAL_METRIC_KEY_CHARS.sub("_", (prefix / scalar_name).as_posix())
             key = key[:_MAX_METRIC_KEY_LEN]
             mlflow_logger.experiment.log_metric(mlflow_logger.run_id, key, value)
         except Exception as exc:
-            log.warn(f"Failed to log eval metric '{scalar_name}' to mlflow: {exc}")
+            log.warning(f"Failed to log eval metric '{scalar_name}' to mlflow: {exc}")

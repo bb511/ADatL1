@@ -1,6 +1,7 @@
 import functools
-from hydra.utils import get_method as original_get_method
+
 from hydra.utils import get_class as original_get_class
+from hydra.utils import get_method as original_get_method
 from hydra.utils import get_object as original_get_object
 
 

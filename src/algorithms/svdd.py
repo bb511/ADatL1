@@ -111,17 +111,23 @@ class DeepSVDD(ADLightningModule):
         count = 0
         try:
             for batch_idx, batch in enumerate(train_dataloader):
-                if self.center_max_batches is not None and batch_idx >= self.center_max_batches:
+                if (
+                    self.center_max_batches is not None
+                    and batch_idx >= self.center_max_batches
+                ):
                     break
                 x = self._prepare_input(batch).to(self.device)
                 z = self.forward(x)
                 if z.ndim != 2:
                     raise ValueError(
-                        "SVDD encoder must return [batch, latent_dim], got " f"{tuple(z.shape)}."
+                        "SVDD encoder must return [batch, latent_dim], got "
+                        f"{tuple(z.shape)}."
                     )
                 batch_sum = z.detach().sum(dim=0)
                 representation_sum = (
-                    batch_sum if representation_sum is None else representation_sum + batch_sum
+                    batch_sum
+                    if representation_sum is None
+                    else representation_sum + batch_sum
                 )
                 count += z.shape[0]
         finally:
@@ -129,7 +135,9 @@ class DeepSVDD(ADLightningModule):
             self.features.train(features_were_training)
 
         if representation_sum is None or count == 0:
-            raise RuntimeError("Cannot initialize the SVDD center from an empty loader.")
+            raise RuntimeError(
+                "Cannot initialize the SVDD center from an empty loader."
+            )
 
         count_tensor = representation_sum.new_tensor(float(count))
         if dist.is_available() and dist.is_initialized():
@@ -213,9 +221,9 @@ class DeepSVDD(ADLightningModule):
                 gathered = gathered_objects
             if not distributed or dist.get_rank() == 0:
                 all_distances = torch.cat(gathered)
-                new_radius = torch.quantile(torch.sqrt(all_distances), 1.0 - self.loss.nu).to(
-                    self.radius.device
-                )
+                new_radius = torch.quantile(
+                    torch.sqrt(all_distances), 1.0 - self.loss.nu
+                ).to(self.radius.device)
                 self.radius.copy_(new_radius)
             if distributed:
                 dist.broadcast(self.radius, src=0)
@@ -256,7 +264,10 @@ class DeepSVDD(ADLightningModule):
         error_msgs,
     ) -> None:
         center_key = prefix + "center"
-        if center_key in state_dict and self.center.shape != state_dict[center_key].shape:
+        if (
+            center_key in state_dict
+            and self.center.shape != state_dict[center_key].shape
+        ):
             self.center = torch.empty_like(state_dict[center_key])
         super()._load_from_state_dict(
             state_dict,
@@ -271,7 +282,10 @@ class DeepSVDD(ADLightningModule):
     def _add_hgq_loss(self, loss: torch.Tensor) -> torch.Tensor:
         if hasattr(self.encoder, "losses") and len(self.encoder.losses) > 0:
             extra = torch.stack(
-                [torch.as_tensor(value, device=loss.device) for value in self.encoder.losses]
+                [
+                    torch.as_tensor(value, device=loss.device)
+                    for value in self.encoder.losses
+                ]
             ).sum()
             return loss + extra
         return loss

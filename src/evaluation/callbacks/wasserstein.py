@@ -1,9 +1,8 @@
+import pickle
 from collections import defaultdict
 from pathlib import Path
-import pickle
 
 import torch
-
 from pytorch_lightning.callbacks import Callback
 
 from src.evaluation.callbacks import utils
@@ -28,16 +27,15 @@ def _wasserstein_1d(x: torch.Tensor, y: torch.Tensor) -> float:
 class Wasserstein(Callback):
     """Evaluate the Wasserstein distance between two score distributions.
 
-    This is a signal-agnostic distribution-similarity baseline. Unlike CAP,
-    it does not use pairing and compares the marginal score distributions
-    directly.
+    This is a signal-agnostic distribution-similarity baseline. Unlike CAP, it does not
+    use pairing and compares the marginal score distributions directly.
 
     :param output_name: Name of the model output metric used as anomaly score.
     :param dataset_1: Name of the first dataset.
     :param dataset_2: Name of the second dataset.
     :param apply_log1p: Whether to map scores through sign(x) log1p(|x|), which equals
         log1p(x) for non-negative scores, before distance computation.
-    :param log_raw_mlflow: Whether to log raw plots to mlflow.
+    :param log_raw_mlflow: Unused, accepted for config compatibility.
     :param name: Callback name.
     """
 
@@ -55,7 +53,6 @@ class Wasserstein(Callback):
         self.dataset_1_name = dataset_1
         self.dataset_2_name = dataset_2
         self.apply_log1p = apply_log1p
-        self.log_raw_mlflow = log_raw_mlflow
         self.name = name
 
         self.wasserstein_summary = defaultdict(float)

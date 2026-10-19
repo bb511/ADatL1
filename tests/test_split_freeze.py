@@ -26,7 +26,18 @@ def test_seeded_permutation_is_stable():
     The whole split rests on this. A NumPy change here would silently repartition the
     data, so it is worth a test that fails loudly rather than a comment.
     """
-    assert np.random.default_rng(42).permutation(10).tolist() == [5, 6, 0, 7, 3, 2, 4, 9, 1, 8]
+    assert np.random.default_rng(42).permutation(10).tolist() == [
+        5,
+        6,
+        0,
+        7,
+        3,
+        2,
+        4,
+        9,
+        1,
+        8,
+    ]
 
 
 def _mlready(tmp_path, seed=42):
@@ -72,7 +83,9 @@ def test_frozen_split_refuses_a_stale_file(tmp_path):
     ready._frozen_split("zerobias", tuple(np.array_split(np.arange(100), 3)))
 
     with pytest.raises(ValueError, match="covers"):
-        _mlready(tmp_path)._frozen_split("zerobias", tuple(np.array_split(np.arange(50), 3)))
+        _mlready(tmp_path)._frozen_split(
+            "zerobias", tuple(np.array_split(np.arange(50), 3))
+        )
 
 
 def test_aux_split_freezes_two_way(tmp_path):

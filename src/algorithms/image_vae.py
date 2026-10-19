@@ -24,8 +24,8 @@ class ImageVAE(ADLightningModule):
     :param features: Optional nn module applied to the image input.
     :param ckpt: Optional checkpoint path to resume weights from.
     :param target_rate: Target background rate or FPR.
-    :param base_rate: Base rate used to convert target_rate into an FPR.
-        If None, target_rate is interpreted directly as an FPR.
+    :param base_rate: Base rate used to convert target_rate into an FPR. If None,
+        target_rate is interpreted directly as an FPR.
     """
 
     def __init__(
@@ -41,9 +41,7 @@ class ImageVAE(ADLightningModule):
         **kwargs,
     ):
         super().__init__(model=None, **kwargs)
-        self.save_hyperparameters(
-            ignore=["model", "features", "encoder", "decoder"]
-        )
+        self.save_hyperparameters(ignore=["model", "features", "encoder", "decoder"])
 
         self.ckpt_path = ckpt
         self.encoder = encoder
@@ -98,9 +96,7 @@ class ImageVAE(ADLightningModule):
         # The operational anomaly score is hard-configured to the raw KL.
         ascore = kl_raw
         if ascore.ndim != 1:
-            raise ValueError(
-                f"Expected per-event ascores, got {tuple(ascore.shape)}."
-            )
+            raise ValueError(f"Expected per-event ascores, got {tuple(ascore.shape)}.")
 
         loss = self._add_hgq_loss(loss)
 
@@ -160,7 +156,7 @@ class ImageVAE(ADLightningModule):
         if hasattr(self.loss, "kl_scale_final"):
             fin_scale = float(self.loss.kl_scale_final)
         elif kl_warmup_frac > 0:
-            log.warn(
+            log.warning(
                 f"Given kl_warmup_frac > 0 but loss {type(self.loss).__name__} "
                 "does not have attribute 'kl_scale_final'. "
                 "Annealing of the KL scale is disabled."
@@ -208,4 +204,3 @@ class ImageVAE(ADLightningModule):
             add_loss = add_loss + torch.stack([l for l in self.decoder.losses]).sum()
 
         return loss + add_loss
-        

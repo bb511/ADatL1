@@ -42,9 +42,7 @@ class DeepSetsVAE(ADLightningModule):
         **kwargs,
     ):
         super().__init__(model=None, **kwargs)
-        self.save_hyperparameters(
-            ignore=["model", "features", "encoder", "decoder"]
-        )
+        self.save_hyperparameters(ignore=["model", "features", "encoder", "decoder"])
 
         self.encoder = encoder
         self.decoder = decoder
@@ -110,9 +108,7 @@ class DeepSetsVAE(ADLightningModule):
         # The anomaly score is expected to be a distribution over events.
         ascore = kl_raw
         if ascore.ndim != 1:
-            raise ValueError(
-                f"Expected per-event ascores, got {tuple(ascore.shape)}."
-            )
+            raise ValueError(f"Expected per-event ascores, got {tuple(ascore.shape)}.")
 
         loss = self._add_hgq_loss(loss)
 

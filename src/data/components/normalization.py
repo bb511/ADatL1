@@ -1,11 +1,10 @@
-from pathlib import Path
-from dataclasses import dataclass
-
-import numpy as np
-import awkward as ak
 import pickle
+from dataclasses import dataclass
+from pathlib import Path
+
+import awkward as ak
+import numpy as np
 from colorama import Fore
-import torch
 
 from src.utils import pylogger
 
@@ -19,8 +18,6 @@ class L1DataNormalizer:
 
     def __post_init__(self):
         self.norm_params = {}
-        self.scale_tensor = None
-        self.shift_tensor = None
 
     def fit(self, data: ak.Array, obj_name: str) -> None:
         """Fit the normalization to data to determine normalization params."""
@@ -37,26 +34,6 @@ class L1DataNormalizer:
         """Normalize the data using the hyperparameters from previously fitted data."""
         norm_method = getattr(self, "_" + self.name)
         data = norm_method(data, obj_name)
-        return data
-
-    def denorm_1d_tensor(self, data: torch.Tensor):
-        """Denormalize the data using the hyperparameters from previously fitted data."""
-        if self.scale_tensor is None or self.shift_tensor is None:
-            raise ValueError("Run setup_1d_denorm before denorm_1d_tensor.")
-        self.scale_tensor = self.scale_tensor.to(device=data.device, dtype=data.dtype)
-        self.shift_tensor = self.shift_tensor.to(device=data.device, dtype=data.dtype)
-        data.mul_(self.scale_tensor).add_(self.shift_tensor)
-
-        return data
-
-    def norm_1d_tensor(self, data: torch.Tensor):
-        """Denormalize the data using the hyperparameters from previously fitted data."""
-        if self.scale_tensor is None or self.shift_tensor is None:
-            raise ValueError("Run setup_1d_denorm before norm_1d_tensor.")
-        self.scale_tensor = self.scale_tensor.to(device=data.device, dtype=data.dtype)
-        self.shift_tensor = self.shift_tensor.to(device=data.device, dtype=data.dtype)
-        data.sub_(self.shift_tensor).div_(self.scale_tensor)
-
         return data
 
     def _unnormalized(self, data: ak.Array, obj_name: str) -> ak.Array:
@@ -79,14 +56,14 @@ class L1DataNormalizer:
         return result
 
     def _robust(self, data: ak.Array, obj_name: str) -> ak.Array:
-        """Robust normalization, i.e., shift by median and divide by IQ range."""
+        """Robust normalization: shift by the median, divide by the quantile range."""
         return self._affine(data, obj_name)
 
     def _robust_fit(self, data: ak.Array, percentiles: list):
         """Determines the parameters for robust normalisation.
 
-        Namely, it determines the interquantile (iqr) range and the median of the data
-        for each feature distribution separately.
+        For each feature, the shift is the median and the scale is the range between the
+        two quantiles given in percentiles, e.g. 0.05 and 0.95.
         """
         self.norm_params[self.obj_name] = {}
         for feat in ak.fields(data):
@@ -170,29 +147,3 @@ class L1DataNormalizer:
 
         with norm_filepath.open("wb") as params_file:
             pickle.dump(self.norm_params[obj_name], params_file)
-
-    def setup_1d_denorm(self, object_feature_map: dict):
-        """Sets up class attributes to perform denormalisation of 1D tensor."""
-        self.object_feature_map = object_feature_map
-        tensor_length = self._get_1d_tensor_length()
-        self.scale_tensor = torch.ones(tensor_length, dtype=torch.float32)
-        self.shift_tensor = torch.zeros(tensor_length, dtype=torch.float32)
-
-        for obj_name, feature_map in self.object_feature_map.items():
-            obj_norm_params = self.norm_params.get(obj_name, {})
-            if not obj_norm_params:
-                raise ValueError(f"Missing norm params for {obj_name} object.")
-
-            for feat, idxs in feature_map.items():
-                feat_norm_params = obj_norm_params.get(feat, {})
-                self.scale_tensor[idxs] = float(feat_norm_params.get("scale", 1.0))
-                self.shift_tensor[idxs] = float(feat_norm_params.get("shift", 0.0))
-
-    def _get_1d_tensor_length(self):
-        """Get 1D tensor length corresponding to object feature map."""
-        tensor_length = 0
-        for feature_map in self.object_feature_map.values():
-            for idxs in feature_map.values():
-                tensor_length += len(idxs)
-
-        return tensor_length

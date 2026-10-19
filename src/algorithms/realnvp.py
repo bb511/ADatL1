@@ -30,9 +30,7 @@ class RealNVP(ADLightningModule):
         **kwargs,
     ):
         super().__init__(model=None, **kwargs)
-        self.save_hyperparameters(
-            ignore=["model", "features", "flow"]
-        )
+        self.save_hyperparameters(ignore=["model", "features", "flow"])
 
         self.flow = flow
         self.features = features if features is not None else nn.Identity()
@@ -60,9 +58,7 @@ class RealNVP(ADLightningModule):
         ascore = -log_prob
 
         if ascore.ndim != 1:
-            raise ValueError(
-                f"Expected per-event ascores, got {tuple(ascore.shape)}."
-            )
+            raise ValueError(f"Expected per-event ascores, got {tuple(ascore.shape)}.")
 
         with torch.no_grad():
             operational_ascore = self.compute_operational_ascore(ascore)

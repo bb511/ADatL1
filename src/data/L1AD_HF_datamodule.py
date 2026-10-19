@@ -6,17 +6,17 @@ import warnings
 from pathlib import Path
 
 import torch
+from colorama import Back, Fore
+from huggingface_hub import snapshot_download
 from hydra import compose, initialize_config_dir
 from hydra.core.global_hydra import GlobalHydra
 from hydra.utils import instantiate
-from huggingface_hub import snapshot_download
 from omegaconf import DictConfig
 from pytorch_lightning import LightningDataModule
-from torch.utils.data import Dataset, DataLoader
+from torch.utils.data import DataLoader, Dataset
 
-from src.utils import pylogger
-from colorama import Fore, Back
 from src.data.components.dataset import L1ADDataset
+from src.utils import pylogger
 
 log = pylogger.RankedLogger(__name__)
 
@@ -45,7 +45,8 @@ warnings.filterwarnings(
 
 
 def _record_normalizer(name: str) -> str:
-    """The record's configuration name for one of this project's normalisation schemes."""
+    """The record's configuration name for one of this project's normalisation
+    schemes."""
     if name not in RECORD_NORMALIZERS:
         raise ValueError(
             f"The record has no normalisation called {name}. It carries "
@@ -61,13 +62,15 @@ def compose_record_config(root: str, overrides: list) -> DictConfig:
     initialize_config_dir refuses to run while a global Hydra is live, which it is
     inside any hydra.main application, and it restores only the state it saw at its own
     entry, which is the state after the clear below. The running application's Hydra is
-    therefore set aside here and put back by hand. Composing outside an application,
-    as the comparison script does, takes the same path with nothing to restore.
+    therefore set aside here and put back by hand. Composing outside an application, as
+    the comparison script does, takes the same path with nothing to restore.
     """
     outer = GlobalHydra.instance().hydra
     GlobalHydra.instance().clear()
     try:
-        with initialize_config_dir(config_dir=str(Path(root) / "configs"), version_base=None):
+        with initialize_config_dir(
+            config_dir=str(Path(root) / "configs"), version_base=None
+        ):
             return compose("config", overrides=overrides)
     finally:
         GlobalHydra.instance().clear()
@@ -81,8 +84,8 @@ class L1ADHFDataModule(LightningDataModule):
     The record carries its own pipeline under loader/ and the configuration tree that
     drives it under configs/, so no stage of this project runs here: the record is
     downloaded, its own configuration is composed, and this class wraps the tensors it
-    hands back in the dataloaders the rest of the project expects. L1ADDataModule is
-    the parallel route, reading the raw files with this project's own stages.
+    hands back in the dataloaders the rest of the project expects. L1ADDataModule is the
+    parallel route, reading the raw files with this project's own stages.
 
     :param repo_id: The data set repository on the HuggingFace hub.
     :param revision: A commit of that repository to pin, or None to follow its head.
@@ -126,7 +129,10 @@ class L1ADHFDataModule(LightningDataModule):
         self.max_val_batches = max_val_batches
 
     def prepare_data(self) -> None:
-        """Download the record and run its pipeline. Cached, so reruns are cheap."""
+        """Download the record and run its pipeline.
+
+        Cached, so reruns are cheap.
+        """
         log.info(Back.GREEN + f"Preparing {self.hparams.repo_id}...")
         self._ensure_record().prepare()
 
@@ -194,8 +200,8 @@ class L1ADHFDataModule(LightningDataModule):
         """Create and return the training dataloader.
 
         This dataloader is based on a custom dataset class from components/dataset.py,
-        which basically makes the loading of numpy arrays that are already in memory
-        a bit faster.
+        which basically makes the loading of numpy arrays that are already in memory a
+        bit faster.
         """
         split = self._main["train"]
         dataset = L1ADDataset(

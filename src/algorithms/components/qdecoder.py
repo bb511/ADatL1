@@ -1,8 +1,8 @@
 # Quantised decoder models implemented with HGQv2.
 import keras
-from keras import layers
+from hgq.config import LayerConfigScope, QuantizerConfigScope
 from hgq.layers import QDense
-from hgq.config import QuantizerConfigScope, LayerConfigScope
+from keras import layers
 
 from src.algorithms.components.qmlp import hgq_mlp
 

@@ -3,16 +3,10 @@ from pathlib import Path
 import pytest
 
 from src.callbacks.checkpointing.criterion import Max
-from src.callbacks.model_checkpoint import (
-    LeaveKOutModelCheckpoint,
-    LeaveOneOutModelCheckpoint,
-    SingleDatasetModelCheckpoint,
-)
+from src.callbacks.model_checkpoint import SingleDatasetModelCheckpoint
 
 CALLBACKS = {
     "single": (SingleDatasetModelCheckpoint, {}),
-    "loo": (LeaveOneOutModelCheckpoint, {}),
-    "lko": (LeaveKOutModelCheckpoint, {"selected_datasets": ["normal"]}),
 }
 
 

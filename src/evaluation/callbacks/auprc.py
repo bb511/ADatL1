@@ -1,26 +1,22 @@
+import pickle
 from collections import defaultdict
 from pathlib import Path
-import pickle
 
-import torch
 import numpy as np
+import torch
 from pytorch_lightning.callbacks import Callback
 from torchmetrics.classification import BinaryAveragePrecision
 
+from src.data.utils import unpack_batch
 from src.evaluation.callbacks import utils
 from src.plot import horizontal_bar
-from src.data.utils import unpack_batch
-
-from src.utils import pylogger
-
-log = pylogger.RankedLogger(__name__)
 
 
 class AnomalyAUPRCCallback(Callback):
     """Calculates the AUPRC for each signal dataset against normal data.
 
-    Normal events are treated as class 0 and signal events as class 1.
-    The anomaly score is expected to increase with anomalousness.
+    Normal events are treated as class 0 and signal events as class 1. The anomaly score
+    is expected to increase with anomalousness.
 
     :param output_name: Name of the output dict entry used as anomaly score.
     :param ds: List of dataset names to compute AUPRC on.
@@ -38,7 +34,6 @@ class AnomalyAUPRCCallback(Callback):
         name: str = "auprc",
     ):
         super().__init__()
-        self.device = None
         self.name = name
 
         self.output_name = output_name
@@ -52,8 +47,6 @@ class AnomalyAUPRCCallback(Callback):
 
     def on_test_start(self, trainer, pl_module):
         """Verify expected dataloaders are present."""
-        self.device = pl_module.device
-
         first_test_dset_key = list(trainer.test_dataloaders.keys())[0]
         if first_test_dset_key != "normal":
             raise ValueError("AUPRC callback needs normal data first in the data dict!")

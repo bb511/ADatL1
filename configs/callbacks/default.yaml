@@ -13,5 +13,5 @@ model_summary:
 
 last_epoch_ckpt:
   dirpath: '${paths.checkpoints_dir}/${experiment_name}/${run_name}/'
-  filename: last
+  save_top_k: 0
   save_last: true

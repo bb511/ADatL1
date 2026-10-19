@@ -2,15 +2,17 @@
 import torch
 
 from src.algorithms.losses.components import ADLoss
-from src.algorithms.losses.components.reconstruction import MSEReconstructionLoss
-from src.algorithms.losses.components.reconstruction import CylPtPzReconstructionLoss
 from src.algorithms.losses.components.kl import KLDivergenceLoss
+from src.algorithms.losses.components.reconstruction import (
+    CylPtPzReconstructionLoss,
+    MSEReconstructionLoss,
+)
 
 
 class ClassicVAELoss(ADLoss):
     """The conventional variational AE loss.
 
-        L = MSE + scale*KL_div
+    L = MSE + scale*KL_div
 
     :param scale: Float to scale the total loss with.
     :param kl_scale: Float to scale the kl_scale with. IF kl_scale is set dynamically
@@ -66,4 +68,6 @@ class AxoV4Loss(ClassicVAELoss):
         super().__init__(
             scale=scale, reco_scale=reco_scale, kl_scale=kl_scale, reduction=reduction
         )
-        self.reco_loss = CylPtPzReconstructionLoss(scale=reco_scale, reduction=reduction)
+        self.reco_loss = CylPtPzReconstructionLoss(
+            scale=reco_scale, reduction=reduction
+        )

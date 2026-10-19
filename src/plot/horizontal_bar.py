@@ -1,9 +1,9 @@
 # Horizontal bar plots.
 from pathlib import Path
-from pathvalidate import sanitize_filename
 
 import matplotlib.pyplot as plt
 import mplhep as hep
+from pathvalidate import sanitize_filename
 
 
 def plot(data: dict, xlabel: str, save_dir: Path):

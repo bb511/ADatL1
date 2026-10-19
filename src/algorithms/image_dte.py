@@ -69,7 +69,9 @@ class ImageDTE(ADLightningModule):
 
         predictor_out = getattr(predictor, "out_dim", None)
         if predictor_out is not None and int(predictor_out) != int(n_bins):
-            raise ValueError(f"predictor out_dim={predictor_out} does not match n_bins={n_bins}.")
+            raise ValueError(
+                f"predictor out_dim={predictor_out} does not match n_bins={n_bins}."
+            )
 
         self.save_hyperparameters(ignore=["model", "predictor", "features", "loss"])
         self.predictor = predictor
@@ -106,7 +108,8 @@ class ImageDTE(ADLightningModule):
         if timesteps.ndim != 1:
             raise ValueError("timesteps must be a one-dimensional tensor.")
         if timesteps.numel() and (
-            timesteps.min().item() < 0 or timesteps.max().item() >= int(self.hparams.n_steps)
+            timesteps.min().item() < 0
+            or timesteps.max().item() >= int(self.hparams.n_steps)
         ):
             raise ValueError("timesteps must lie in [0, n_steps).")
         bins = torch.div(
@@ -125,8 +128,8 @@ class ImageDTE(ADLightningModule):
     ) -> torch.Tensor:
         """Apply the paper's additive diffusion corruption.
 
-        Masked-out pixels are preserved exactly. The mask is an explicit data contract; zero-
-        valued active pixels are never mistaken for padding.
+        Masked-out pixels are preserved exactly. The mask is an explicit data contract;
+        zero- valued active pixels are never mistaken for padding.
         """
         if x.ndim != 4:
             raise ValueError(
@@ -134,7 +137,9 @@ class ImageDTE(ADLightningModule):
                 f"got {tuple(x.shape)}."
             )
         if timesteps.shape != (x.shape[0],):
-            raise ValueError(f"Expected one timestep per event, got {tuple(timesteps.shape)}.")
+            raise ValueError(
+                f"Expected one timestep per event, got {tuple(timesteps.shape)}."
+            )
         self.time_to_bin(timesteps)
 
         if noise is None:
@@ -186,7 +191,9 @@ class ImageDTE(ADLightningModule):
         with torch.no_grad():
             ascore = self.anomaly_score(self.forward(x))
             if ascore.ndim != 1:
-                raise ValueError(f"Expected per-event ascores, got {tuple(ascore.shape)}.")
+                raise ValueError(
+                    f"Expected per-event ascores, got {tuple(ascore.shape)}."
+                )
 
             operational_ascore = self.compute_operational_ascore(ascore)
             q50, q99 = self.compute_score_quantiles(ascore)
@@ -229,8 +236,8 @@ class ImageDTE(ADLightningModule):
         """Correlate the score with how many pixels an event actually populates.
 
         The image datamodules carry no mask, so this is normally inert; it exists so the
-        two DTE classes stay in step. Returns None when there is no mask, leaving the key
-        absent from the logs.
+        two DTE classes stay in step. Returns None when there is no mask, leaving the
+        key absent from the logs.
         """
         if mask is None:
             return None

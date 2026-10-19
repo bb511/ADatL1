@@ -1,11 +1,11 @@
 from typing import Optional
+
 import torch
 from torch import Tensor
 
 
 def baseline(prob: Tensor, y: Tensor, **kwargs) -> Tensor:
-    """
-    Baseline energy penalizing misalignment between predictions and labels.
+    """Baseline energy penalizing misalignment between predictions and labels.
 
     Rationale: Proportional penalization of misclassifications.
 
@@ -19,8 +19,7 @@ def baseline(prob: Tensor, y: Tensor, **kwargs) -> Tensor:
 def exponential(
     prob: Tensor, y: Tensor, gamma: Optional[float] = 2.0, **kwargs
 ) -> Tensor:
-    """
-    Exponential energy applying heavy penalties for misalignments.
+    """Exponential energy applying heavy penalties for misalignments.
 
     Rationale: Heavier penalization of misclassifications.
 
@@ -36,8 +35,7 @@ def exponential(
 
 
 def focal(prob: Tensor, y: Tensor, gamma: Optional[float] = 2.0, **kwargs) -> Tensor:
-    """
-    Focal energy emphasizing hard-to-classify examples.
+    """Focal energy emphasizing hard-to-classify examples.
 
     Rationale: Focus penalization on hard examples.
 
@@ -60,8 +58,7 @@ def contrastive(
     margin: Optional[float] = 0.1,
     **kwargs,
 ) -> Tensor:
-    """
-    Contrastive energy promoting class separation.
+    """Contrastive energy promoting class separation.
 
     Rationale: Favor class separation.
 
@@ -92,8 +89,7 @@ def margin(
     threshold: Optional[float] = 0.5,
     **kwargs,
 ) -> Tensor:
-    """
-    Margin-based energy enforcing clear decision boundaries.
+    """Margin-based energy enforcing clear decision boundaries.
 
     Rationale: Favor confident classification.
 
@@ -123,9 +119,8 @@ def adaptive(
     scale: Optional[float] = 0.5,
     **kwargs,
 ) -> Tensor:
-    """
-    Adaptive margin energy with data-driven thresholds.
-    Requires external statistics to maintain consistency across batches.
+    """Adaptive margin energy with data-driven thresholds. Requires external statistics
+    to maintain consistency across batches.
 
     Rationale: Favor confident classification adaptively.
 

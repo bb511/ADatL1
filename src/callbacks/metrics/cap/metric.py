@@ -1,5 +1,4 @@
 # Approximation Capacity implementation. Based on the work of Victor Jimenez.
-import gc
 import math
 from typing import Any, Callable, Optional
 
@@ -7,14 +6,9 @@ import torch
 from torch import Tensor
 from torchmetrics import Metric
 
-from src.callbacks.metrics.cap.binary import get_energy_fn as get_energy_fn_binary
-from src.callbacks.metrics.cap.binary import (
-    get_normalizer_fn as get_normalizer_fn_binary,
-)
-from src.callbacks.metrics.cap.binary import (
-    get_regularizer_fn as get_regularizer_fn_binary,
-)
-from src.callbacks.metrics.cap.kernel import posterior_agreement_curve
+from .binary import get_energy_fn as get_energy_fn_binary
+from .binary import get_normalizer_fn as get_normalizer_fn_binary
+from .kernel import posterior_agreement_curve
 
 
 class ApproximationCapacity(Metric):
@@ -43,18 +37,20 @@ class ApproximationCapacity(Metric):
         delimit a feasible clustering assignments. For instance, by limiting
         the number of observations assigned to a specific cluster.
 
+    The beta grid is a non-persistent buffer that follows the metric's device, while
+    `curve`, `beta_star` and `at_bound` are kept on the CPU after each update.
+
     :param normalization_type: Method to normalize reconstruction losses to [0,1].
-        Options: "minmax", "quantile", "sigmoid" (default: "minmax")
+        Options: "none", "minmax", "sigmoid", "sigmoid_robust", "softmax", "rank",
+        "rank_mid", "log_sigmoid" (default: "minmax")
     :param energy_type: Energy function for Gibbs distribution over anomaly assignments.
         Options: "baseline", "focal", "exponential", "margin", "contrastive", "adaptive"
     :param regularization_type: Method to enforce anomaly count constraints.
         Options: "none", "threshold_max", "threshold_mean", "threshold_zero",
-    :param binary: Whether to use binary (anomaly/normal) or multi-class classification.
-        Currently only binary=True is supported.
+    :param binary: Accepted for config compatibility and unused.
     :param beta_min: Smallest inverse temperature of the grid.
     :param beta_max: Largest inverse temperature of the grid.
     :param n_beta: Number of grid points.
-    :param device: Device on which the curve is evaluated.
     """
 
     is_differentiable = True
@@ -73,7 +69,6 @@ class ApproximationCapacity(Metric):
         beta_min: float = 0.01,
         beta_max: float = 1000.0,
         n_beta: int = 200,
-        device: Optional[str] = "cpu",
         process_group: Optional[Any] = None,
         dist_sync_fn: Optional[Callable] = None,
     ):
@@ -96,10 +91,10 @@ class ApproximationCapacity(Metric):
         self.regularization_type = regularization_type
         self.regularization_params = regularization_params or {}
 
-        self.dev = device
-        self.betas = torch.logspace(
+        betas = torch.logspace(
             math.log10(beta_min), math.log10(beta_max), n_beta, dtype=torch.float64
         )
+        self.register_buffer("betas", betas, persistent=False)
         self.curve = None
         self.beta_star = None
         self.at_bound = None
@@ -113,32 +108,12 @@ class ApproximationCapacity(Metric):
         self.normalizer_fn = self._get_normalizer_fn()
 
     def _get_normalizer_fn(self):
-        if self.binary:
-            normalizer_fn = get_normalizer_fn_binary(
-                self.normalization_type, self.normalization_params
-            )
-        else:
-            raise NotImplementedError("Non-binary support is not implemented yet.")
-
-        return normalizer_fn
+        return get_normalizer_fn_binary(
+            self.normalization_type, self.normalization_params
+        )
 
     def _get_energy_fn(self):
-        if self.binary:
-            energy_fn = get_energy_fn_binary(self.energy_type, self.energy_params)
-        else:
-            raise NotImplementedError("Non-binary support is not implemented yet.")
-
-        return energy_fn
-
-    def _get_regularizer_fn(self):
-        if self.binary:
-            regularizer_fn = get_regularizer_fn_binary(
-                self.regularization_type, self.regularization_params
-            )
-        else:
-            raise NotImplementedError("Non-binary support is not implemented yet.")
-
-        return regularizer_fn
+        return get_energy_fn_binary(self.energy_type, self.energy_params)
 
     def _energy_gaps(self, prob1: Tensor, prob2: Tensor) -> tuple[Tensor, Tensor]:
         """Return the energy gaps D_k = E_k(1) - E_k(0) of the normalised pairs."""
@@ -161,9 +136,9 @@ class ApproximationCapacity(Metric):
         with torch.no_grad():
             prob1, prob2 = self.normalizer_fn(logits1, logits2)
             gap1, gap2 = self._energy_gaps(
-                prob1.to(self.dev, torch.float64), prob2.to(self.dev, torch.float64)
+                prob1.to(torch.float64), prob2.to(torch.float64)
             )
-            curve = posterior_agreement_curve(gap1, gap2, self.betas.to(self.dev))
+            curve = posterior_agreement_curve(gap1, gap2, self.betas.to(gap1.device))
 
         self.curve = curve.cpu()
         best = int(torch.argmax(self.curve))

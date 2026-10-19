@@ -1,15 +1,14 @@
 # Misc methods for the evaluation callbacks.
-from pathlib import Path
 from collections import defaultdict
+from pathlib import Path
 
 
 def get_ckpt_ds_name(ckpt_name: str):
     """Gets the data set name from the checkpoint name.
 
     The format of the checkpoint name is specified in
-        callbacks/checkpointing/dataset_aware.py
-    and this method expects exactly that format. If the format changes, this method
-    will stop working.
+    callbacks/checkpointing/dataset_aware.py and this method expects exactly that
+    format. If the format changes, this method will stop working.
     """
     ckpt_ds = ckpt_name.split("ds=")
     if len(ckpt_ds) > 1:

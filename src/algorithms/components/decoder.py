@@ -1,12 +1,11 @@
 # Decoder models.
-from typing import Optional, Callable
 import math
+from typing import Callable, Optional
 
 import torch
 import torch.nn as nn
 
-from src.algorithms.components.mlp import MLP
-from src.algorithms.components.mlp import ImageMLP
+from src.algorithms.components.mlp import MLP, ImageMLP
 
 
 class Decoder(MLP):
@@ -17,7 +16,8 @@ class Decoder(MLP):
     :param activation: Pytorch module that defines the activation function.
     :param init_weight: Callable method to initialize the weights of the decoder nodes.
     :param init_bias: Callable method to initialize the biases of the decoder nodes.
-    :param init_last_weight: Callable method to initialize the weights of the last layer.
+    :param init_last_weight: Callable method to initialize the weights of the last
+        layer.
     :param init_last_bias: Callable method to initialize the biases of the last layer.
     :param batchnorm: Whether to use batch normalization or not.
     """
@@ -167,7 +167,9 @@ class ImageDecoder(nn.Module):
 
     def forward(self, z: torch.Tensor) -> torch.Tensor:
         if z.ndim != 2:
-            raise ValueError(f"Expected latent tensor of shape [B, D], got {tuple(z.shape)}.")
+            raise ValueError(
+                f"Expected latent tensor of shape [B, D], got {tuple(z.shape)}."
+            )
 
         if z.shape[1] != self.latent_dim:
             raise ValueError(

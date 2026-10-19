@@ -1,7 +1,7 @@
 # Callback that computes the anomaly rate during training.
-from collections import defaultdict
 import math
 import statistics
+from collections import defaultdict
 
 import torch
 from pytorch_lightning.callbacks import Callback
@@ -24,15 +24,15 @@ class AnomalyEfficiencyCallback(Callback):
     :param target_rates: Background rates in kHz to evaluate at. Defaults to the
         module's own target_rate.
     :param base_rate: Overrides the module base_rate when set.
-    :param beta: Decay of the EMA summaries computed here.
+    :param ema_weight: Weight of the previous value in the exponential moving average.
     """
 
     def __init__(
         self,
         output_name: str,
-        target_rates: list[int] | None = None,
+        target_rates: list[float] | None = None,
         base_rate: float | None = None,
-        beta: float = 0.9,
+        ema_weight: float = 0.9,
     ):
         super().__init__()
         self.device = None
@@ -41,7 +41,7 @@ class AnomalyEfficiencyCallback(Callback):
             None if target_rates is None else sorted(float(x) for x in target_rates)
         )
         self.base_rate = base_rate
-        self.beta = beta
+        self.ema_weight = ema_weight
 
         self.log_kwargs = dict(
             prog_bar=False,
@@ -83,10 +83,10 @@ class AnomalyEfficiencyCallback(Callback):
 
         First, the desired metrics are computed on the normal_data and accummulated
         across batches. The full metric distribution is used to set a threshold that
-        will give a target rate or set of rates, specified by the user.
-        These thresholds are then applied on all other data sets used for validation
-        to determine, by using the threshold computed on normal, what would the rate
-        be on these other data sets.
+        will give a target rate or set of rates, specified by the user. These thresholds
+        are then applied on all other data sets used for validation to determine, by
+        using the threshold computed on normal, what would the rate be on these other
+        data sets.
         """
         self.dataset_name = list(trainer.val_dataloaders.keys())[dataloader_idx]
         self.total_batches = trainer.num_val_batches[dataloader_idx]
@@ -154,16 +154,16 @@ class AnomalyEfficiencyCallback(Callback):
         if target_rate not in ema:
             ema[target_rate] = float(value)
         else:
-            ema[target_rate] = (
-                self.beta * ema[target_rate] + (1 - self.beta) * float(value)
-            )
+            ema[target_rate] = self.ema_weight * ema[target_rate] + (
+                1 - self.ema_weight
+            ) * float(value)
 
     def _accumulate_normal_output(self, outputs: dict, batch_idx: int, pl_module):
         """Accummulates the specified metric data across batches.
 
-        Used if currently processing the normal data set, accummulate the values of
-        each metric across batches. The whole metric output distribution is needed to
-        set a treshold that gives a certain rate.
+        Used if currently processing the normal data set, accummulate the values of each
+        metric across batches. The whole metric output distribution is needed to set a
+        treshold that gives a certain rate.
         """
         batch_output = outputs[self.output_name]
         if batch_output.ndim == 0:
@@ -191,8 +191,8 @@ class AnomalyEfficiencyCallback(Callback):
         """Initializes the rate metric for a dataset for each given target rate.
 
         The anomaly rate metric object is initialised. Then, the threshold is computed
-        given the normal metric distribution. This threshold is then used to compute
-        the rate on the other data sets differing from normal.
+        given the normal metric distribution. This threshold is then used to compute the
+        rate on the other data sets differing from normal.
         """
         for target_rate in self.target_rates:
             rate = AnomalyRate(target_rate, self.base_rate).to(self.device)

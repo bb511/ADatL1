@@ -1,25 +1,25 @@
 # Evaluator object definition. Produces the desired evaluation plots for given model
 # checkpoints saved during the training of a model.
-from typing import Optional
-from pathlib import Path
 import logging
 import math
 import operator
+from pathlib import Path
+from typing import Optional
 
-import torch
 import numpy as np
 import pytorch_lightning
-from pytorch_lightning.loggers import Logger
+import torch
+from colorama import Back, Fore, Style
 from pytorch_lightning import LightningModule
 from pytorch_lightning.callbacks import Callback
-from colorama import Fore, Back, Style
+from pytorch_lightning.loggers import Logger
 
 from src.utils import pylogger
 
 log = pylogger.RankedLogger(__name__)
 
-from src.utils.checkpoints import is_valid_ckpt
 from src.evaluation.callbacks.utils import mlflow as eval_mlflow
+from src.utils.checkpoints import is_valid_ckpt
 
 
 def _lists_candidate(ckpts: dict, candidate: dict) -> bool:
@@ -79,14 +79,12 @@ class Evaluator:
             **trainer_kwargs,
         )
 
-        self.evaluator.object_feature_map_1d = None
         self.evaluator.split = None
         self.evaluator.strat_name = None
         self.evaluator.metric_name = None
         self.evaluator.criterion_name = None
         self.optimized_metric = None
         self.optimized_ckpt_name = None
-        self.evaluator.ckpt_path_name = None
 
     def evaluate_run(
         self,
@@ -103,12 +101,12 @@ class Evaluator:
         :param run_folder: Path to the folder where the checkpoints for a particular run
             are stored.
         :param model: LightningModule object pertaining to the model to evaulate.
-        :param test_loader: The test data loaders. Can correspond to multiple test
-            data sets.
+        :param test_loader: The test data loaders. Can correspond to multiple test data
+            sets.
         :param split: String specifying which split of the data you are currently eval
             on, either 'val', or 'test'.
-        :param set_optimized_metric: Bool whether to set the optimized metric during
-            the evaluation procedure or leave it. This is useful when evaluating on
+        :param set_optimized_metric: Bool whether to set the optimized metric during the
+            evaluation procedure or leave it. This is useful when evaluating on
             validation, in which case this should be set to report to optuna. This
             should not be set when evaluating on a test data set.
         """
@@ -210,7 +208,6 @@ class Evaluator:
             if not is_valid_ckpt(ckpt_path):
                 continue
 
-            self.evaluator.ckpt_path_name = ckpt_path.name
             self.evaluate_ckpt(ckpt_path, model, test_loader)
 
         # Skip getting an optimized metric if no checkpoints were made for that
@@ -226,14 +223,14 @@ class Evaluator:
     def evaluate_ckpt(self, ckpt_path: Path, model, test_loader: dict):
         """Run test loops on given a model and a datamodule.
 
-        This runs all the callbacks that were given to it on the test data in the
-        given datamodule. The callbacks themselves are responsible for plotting their
-        output if this is to be plotted.
+        This runs all the callbacks that were given to it on the test data in the given
+        datamodule. The callbacks themselves are responsible for plotting their output
+        if this is to be plotted.
 
         :param ckpt_path: Path to a specific checkopint file, must end in '.ckpt'.
         :param model: LightningModule object pertaining to the model to evaulate.
-        :param test_loader: The test data loaders. Can correspond to multiple test
-            data sets.
+        :param test_loader: The test data loaders. Can correspond to multiple test data
+            sets.
         """
         log.info(f"-> -> -> -> Evaluating checkpoint at {ckpt_path}.")
 
@@ -272,7 +269,9 @@ class Evaluator:
     def _check_conditions(self) -> bool:
         """Checks if the criteria for running the evaluation are met."""
         if not self.callbacks:
-            log.warn(Fore.MAGENTA + "No eval callbacks given. Skipping evaluation...")
+            log.warning(
+                Fore.MAGENTA + "No eval callbacks given. Skipping evaluation..."
+            )
             return True
 
         return False
@@ -306,7 +305,7 @@ class Evaluator:
             metrics.append(self._get_secondary_metric(sec_cfg, ckpt_name)[0])
 
         if not all(m is not None and math.isfinite(m) for m in metrics):
-            log.warn(f"Optimized metric {metrics} at {ckpt_name} is not finite.")
+            log.warning(f"Optimized metric {metrics} at {ckpt_name} is not finite.")
             return
 
         self.optimized_metric = metrics if sec_cfg is not None else main_metric
@@ -344,14 +343,11 @@ class Evaluator:
         _, sec_metric = self._get_metric(sec_cb_name, sec_cb_params)
         return sec_metric, sec_optim_dir
 
-    def get_optimized_ckpt_name(self):
-        return self.optimized_ckpt_name
-
     def _make_criterion_summary_plots(self, plot_folder: Path):
         """Make summary plots for each callback.
 
-        Check if any of the callbacks have 'plot_summary' method and if they do
-        call it and store result in given folder.
+        Check if any of the callbacks have 'plot_summary' method and if they do call it
+        and store result in given folder.
         """
         # Make summary plots for callback across evaluated checkpoints.
         for cb in self.evaluator.callbacks:

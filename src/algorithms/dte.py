@@ -69,7 +69,9 @@ class DTE(ADLightningModule):
 
         predictor_out = getattr(predictor, "out_dim", None)
         if predictor_out is not None and int(predictor_out) != int(n_bins):
-            raise ValueError(f"predictor out_dim={predictor_out} does not match n_bins={n_bins}.")
+            raise ValueError(
+                f"predictor out_dim={predictor_out} does not match n_bins={n_bins}."
+            )
 
         self.save_hyperparameters(ignore=["model", "predictor", "features", "loss"])
         self.predictor = predictor
@@ -106,7 +108,8 @@ class DTE(ADLightningModule):
         if timesteps.ndim != 1:
             raise ValueError("timesteps must be a one-dimensional tensor.")
         if timesteps.numel() and (
-            timesteps.min().item() < 0 or timesteps.max().item() >= int(self.hparams.n_steps)
+            timesteps.min().item() < 0
+            or timesteps.max().item() >= int(self.hparams.n_steps)
         ):
             raise ValueError("timesteps must lie in [0, n_steps).")
         bins = torch.div(
@@ -135,9 +138,13 @@ class DTE(ADLightningModule):
         far that goes.
         """
         if x.ndim != 2:
-            raise ValueError(f"DTE corruption expects [batch, features], got {tuple(x.shape)}.")
+            raise ValueError(
+                f"DTE corruption expects [batch, features], got {tuple(x.shape)}."
+            )
         if timesteps.shape != (x.shape[0],):
-            raise ValueError(f"Expected one timestep per event, got {tuple(timesteps.shape)}.")
+            raise ValueError(
+                f"Expected one timestep per event, got {tuple(timesteps.shape)}."
+            )
         self.time_to_bin(timesteps)
 
         if noise is None:
@@ -189,7 +196,9 @@ class DTE(ADLightningModule):
         with torch.no_grad():
             ascore = self.anomaly_score(self.forward(x))
             if ascore.ndim != 1:
-                raise ValueError(f"Expected per-event ascores, got {tuple(ascore.shape)}.")
+                raise ValueError(
+                    f"Expected per-event ascores, got {tuple(ascore.shape)}."
+                )
 
             operational_ascore = self.compute_operational_ascore(ascore)
             q50, q99 = self.compute_score_quantiles(ascore)

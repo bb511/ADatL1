@@ -1,10 +1,10 @@
 # Overlaid histogram plot.
 from pathlib import Path
-from pathvalidate import sanitize_filename
 
-import numpy as np
 import matplotlib.pyplot as plt
 import mplhep as hep
+import numpy as np
+from pathvalidate import sanitize_filename
 
 
 # Currently unused; kept for interactive/notebook plotting.
@@ -19,8 +19,8 @@ def plot_1d(
 ):
     """Plots 1d overalid histogram of data1 and data2.
 
-    Expects that data1 and data2 are one dimensional tensors, containing a feature
-    with the name feat_name.
+    Expects that data1 and data2 are one dimensional tensors, containing a feature with
+    the name feat_name.
     """
     plt.style.use(hep.style.CMS)
 

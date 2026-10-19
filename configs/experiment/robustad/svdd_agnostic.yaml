@@ -68,14 +68,14 @@ callbacks:
   anomaly_eff:
     _target_: src.callbacks.efficiency.AnomalyEfficiencyCallback
     output_name: 'ascore/full'
-    beta: 0.9
+    ema_weight: 0.9
 
   thres_drift:
     _target_: src.callbacks.thres_drift.ThresholdDriftCallback
     output_name: 'ascore/full'
     calibration_fraction: 0.5
     split_seed: 12345
-    beta: 0.9
+    ema_weight: 0.9
 
   wasserstein_dist:
     _target_: src.callbacks.wasserstein.WassersteinCallback
@@ -83,7 +83,7 @@ callbacks:
     dataset_1: normal
     dataset_2: shifted_normal_all
     apply_log1p: true
-    beta: 0.9
+    ema_weight: 0.9
 
   cap_sn_zb:
     _target_: src.callbacks.cap.CAPCallback

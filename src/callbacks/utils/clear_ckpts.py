@@ -1,7 +1,7 @@
 # Clear the directory where the checkpoints were stored if it exists.
 import os
-from pathlib import Path
 import shutil
+from pathlib import Path
 
 from pytorch_lightning.callbacks import Callback
 

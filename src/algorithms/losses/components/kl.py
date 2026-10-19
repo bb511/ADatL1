@@ -1,4 +1,5 @@
 from typing import Literal
+
 import torch
 
 from src.algorithms.losses.components import ADLoss

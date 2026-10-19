@@ -5,12 +5,11 @@ import torch
 
 
 class CosineWithWarmup(torch.optim.lr_scheduler.LambdaLR):
-    """
-    Step-based linear warmup -> cosine decay scheduler.
+    """Step-based linear warmup -> cosine decay scheduler.
 
-    Uses warmup_ratio in [0, 1) to derive warmup_steps from total_steps.
-    Designed to be stepped every optimizer step (Lightning: interval="step").
-    Returns a multiplicative factor applied to each param group's base LR.
+    Uses warmup_ratio in [0, 1) to derive warmup_steps from total_steps. Designed to be
+    stepped every optimizer step (Lightning: interval="step"). Returns a multiplicative
+    factor applied to each param group's base LR.
     """
 
     def __init__(

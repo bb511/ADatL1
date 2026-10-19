@@ -1,11 +1,11 @@
 # Matrix plot.
 
 from pathlib import Path
-from pathvalidate import sanitize_filename
-import numpy as np
 
 import matplotlib.pyplot as plt
 import mplhep as hep
+import numpy as np
+from pathvalidate import sanitize_filename
 
 
 def plot(data: dict[dict], value_name: str, save_dir: Path):

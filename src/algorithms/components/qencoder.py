@@ -1,9 +1,8 @@
 # Quantised encoder architectures using HGQv2.
 import keras
-from keras import layers
-from keras import ops
+from hgq.config import LayerConfigScope, QuantizerConfigScope
 from hgq.layers import QDense
-from hgq.config import QuantizerConfigScope, LayerConfigScope
+from keras import layers, ops
 
 from src.algorithms.components.qmlp import hgq_mlp
 
@@ -17,7 +16,7 @@ def hgq_variational_encoder(
     ebops: bool = False,
     name: str = "hgq_var_encoder",
 ):
-    """Variational Encoder in HGQv2
+    """Variational Encoder in HGQv2.
 
     :param in_dim: Int specifying input dimension.
     :param nodes: List of ints, each int specifying the width of a layer.

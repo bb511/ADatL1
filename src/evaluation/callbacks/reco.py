@@ -5,16 +5,16 @@ import numpy as np
 import torch
 from pytorch_lightning.callbacks import Callback
 
+from src.data.utils import unpack_batch
 from src.evaluation.callbacks import utils
 from src.plot import overlaid_hist
-from src.data.utils import unpack_batch
 
 
 class ReconstructionPlots(Callback):
     """Stream overlaid histograms of input vs reconstruction.
 
-    :param output_name: String specifying the key in the output dictionary of the
-        output you'd like to plot.
+    :param output_name: String specifying the key in the output dictionary of the output
+        you'd like to plot.
     :param datasets: List of strings specifying the datasets that you'd like to make the
         histogram for.
     :param ckpts: Dictionary of the checkpoints that you'd like to plot the histograms
@@ -142,7 +142,8 @@ class ReconstructionPlots(Callback):
             )
 
     def _warmup_n(self, trainer, dset_name):
-        """Get the number of batches to use in determining the range of the histogram."""
+        """Get the number of batches to use in determining the range of the
+        histogram."""
         if isinstance(self.warmup_batches, float):
             total = len(trainer.test_dataloaders[dset_name])
             return max(1, int(self.warmup_batches * total))
@@ -166,13 +167,11 @@ class ReconstructionPlots(Callback):
         x2 = x2[np.isfinite(x2)]
 
         if key not in self._edges[dset_name]:
-
             self._buffers[dset_name].setdefault(key, [])
             self._buffers[dset_name][key].append(np.concatenate([x1, x2]))
             self._batch_counts[dset_name][key] += 1
 
             if self._batch_counts[dset_name][key] >= self._warmup_n(trainer, dset_name):
-
                 vals = np.concatenate(self._buffers[dset_name][key])
                 edges = np.histogram_bin_edges(vals, bins="doane")
 
@@ -187,7 +186,6 @@ class ReconstructionPlots(Callback):
                 self._buffers[dset_name][key] = []
 
         else:
-
             edges = self._edges[dset_name][key]
 
             self._hist_input[dset_name][key] += np.histogram(x1, bins=edges)[0]
@@ -197,7 +195,6 @@ class ReconstructionPlots(Callback):
         """If the inputs are from object_feature_map, use that to label the hist."""
         for object_name, feature_map in self.object_feature_map.items():
             for feat_name, feat_idxs in feature_map.items():
-
                 x_feat = x[:, feat_idxs]
                 y_feat = yhat[:, feat_idxs]
 
@@ -217,7 +214,6 @@ class ReconstructionPlots(Callback):
     def _update_features(self, trainer, dset_name, x, yhat):
         """If the inputs are some contrastive space, use that to label the hist."""
         for feat_idx in range(x.size(-1)):
-
             self._update_hist_pair(
                 trainer,
                 dset_name,

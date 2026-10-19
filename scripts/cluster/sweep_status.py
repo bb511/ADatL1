@@ -55,7 +55,7 @@ def find_repo_root(start: Path) -> Path:
 
 
 def blocks(script):
-    """study -> (index, n_trials) for each driver block in a run*_search.sh."""
+    """Study -> (index, n_trials) for each driver block in a run*_search.sh."""
     out = {}
     if not os.path.exists(script):
         return out
@@ -78,7 +78,9 @@ def classify(log):
     with open(log, errors="replace") as fh:
         lines = [l for l in fh.read().splitlines() if l.strip()]
     tail = "\n".join(lines[-TAIL:])
-    age = (datetime.now() - datetime.fromtimestamp(os.path.getmtime(log))).total_seconds() / 60
+    age = (
+        datetime.now() - datetime.fromtimestamp(os.path.getmtime(log))
+    ).total_seconds() / 60
     if ERR.search(tail):
         return "DEAD", age
     if FINISHED.search(tail):
@@ -100,11 +102,14 @@ def complete_of(db, study, writable=False):
     mode = "" if writable else "?mode=ro"
     con = sqlite3.connect("file:%s%s" % (db, mode), uri=True, timeout=60)
     con.execute("pragma busy_timeout=60000")
-    row = con.execute("select study_id from studies where study_name=?", (study,)).fetchone()
+    row = con.execute(
+        "select study_id from studies where study_name=?", (study,)
+    ).fetchone()
     n = 0
     if row:
         n = con.execute(
-            "select count(*) from trials where study_id=? and state='COMPLETE'", (row[0],)
+            "select count(*) from trials where study_id=? and state='COMPLETE'",
+            (row[0],),
         ).fetchone()[0]
     con.close()
     return n
@@ -112,16 +117,23 @@ def complete_of(db, study, writable=False):
 
 def launch_command(row):
     """The submit_search.sh invocation that tops this study up to its target."""
-    return ("bash scripts/cluster/submit_search.sh --only %s %s "
-            "hydra.sweeper.n_trials=%d"
-            % (row["study"], row["script"], row["target"] - row["done"]))
+    return (
+        "bash scripts/cluster/submit_search.sh --only %s %s "
+        "hydra.sweeper.n_trials=%d"
+        % (row["study"], row["script"], row["target"] - row["done"])
+    )
 
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("--commands", action="store_true", help="print only the launch commands")
-    ap.add_argument("--db-root", help="read DBs from here instead of logs/optuna (use copies "
-                                      "when a crashed driver left a hot -journal)")
+    ap.add_argument(
+        "--commands", action="store_true", help="print only the launch commands"
+    )
+    ap.add_argument(
+        "--db-root",
+        help="read DBs from here instead of logs/optuna (use copies "
+        "when a crashed driver left a hot -journal)",
+    )
     args = ap.parse_args()
 
     # Anchored on .project-root rather than the CWD: globbing 'scripts/*' from
@@ -133,7 +145,7 @@ def main():
     for path in sorted(repo.glob("scripts/*/run*_search.sh")):
         script = str(path.relative_to(repo))
         domain = path.parent.name
-        stem = path.stem                                          # runsvdd_q99_search
+        stem = path.stem  # runsvdd_q99_search
         m = STEM_RE.match(stem)
         if not m:
             print("skipping unrecognised file name: %s" % script, file=sys.stderr)
@@ -148,7 +160,9 @@ def main():
         has_db = os.path.exists(db)
         for study, (idx, target) in blocks(script).items():
             done = complete_of(db, study, writable=bool(args.db_root)) if has_db else 0
-            state, age = classify("logs/searches/%s_%s/%d_%s.log" % (domain, stem, idx, study))
+            state, age = classify(
+                "logs/searches/%s_%s/%d_%s.log" % (domain, stem, idx, study)
+            )
             if not has_db:
                 status = "elsewhere"
             elif done >= target:
@@ -156,19 +170,42 @@ def main():
             elif state == "alive":
                 status = "running"
             elif state == "no-log":
-                status = "migrated"   # data came from olqti; no driver ever ran here
+                status = "migrated"  # data came from olqti; no driver ever ran here
             elif state == "FINISHED":
-                status = "short"      # driver exited cleanly but below target
+                status = "short"  # driver exited cleanly but below target
             else:
-                status = "LAUNCH"     # driver crashed
-            rows.append(dict(domain=domain, model=model, study=study, script=script,
-                             target=target, done=done, status=status, state=state, age=age))
+                status = "LAUNCH"  # driver crashed
+            rows.append(
+                dict(
+                    domain=domain,
+                    model=model,
+                    study=study,
+                    script=script,
+                    target=target,
+                    done=done,
+                    status=status,
+                    state=state,
+                    age=age,
+                )
+            )
 
     rows.sort(key=lambda r: (r["domain"], r["model"], r["study"]))
 
     if not args.commands:
         hdr = "%-9s %-8s %-24s %6s %8s %6s  %-8s %s"
-        print(hdr % ("domain", "model", "study", "target", "complete", "todo", "status", "driver"))
+        print(
+            hdr
+            % (
+                "domain",
+                "model",
+                "study",
+                "target",
+                "complete",
+                "todo",
+                "status",
+                "driver",
+            )
+        )
         print("-" * 104)
         for r in rows:
             if r["status"] in ("DONE", "elsewhere"):
@@ -177,8 +214,19 @@ def main():
             drv = r["state"]
             if r["age"] is not None:
                 drv += " (%dm)" % r["age"]
-            print(hdr % (r["domain"], r["model"], r["study"], r["target"], r["done"],
-                         todo or "", r["status"], drv))
+            print(
+                hdr
+                % (
+                    r["domain"],
+                    r["model"],
+                    r["study"],
+                    r["target"],
+                    r["done"],
+                    todo or "",
+                    r["status"],
+                    drv,
+                )
+            )
         tally = {}
         for r in rows:
             tally[r["status"]] = tally.get(r["status"], 0) + 1
@@ -191,17 +239,29 @@ def main():
         print("# nothing to launch - every study is DONE or has a live driver")
         return 0
     if migrated:
-        print("# %d study(ies) carried over from olqti sit below target; "
-              "top up only if you want" % len(migrated))
+        print(
+            "# %d study(ies) carried over from olqti sit below target; "
+            "top up only if you want" % len(migrated)
+        )
         for r in migrated:
-            print("#   %-9s %-8s %-24s %d/%d   (%s)"
-                  % (r["domain"], r["model"], r["study"], r["done"], r["target"],
-                     launch_command(r)))
+            print(
+                "#   %-9s %-8s %-24s %d/%d   (%s)"
+                % (
+                    r["domain"],
+                    r["model"],
+                    r["study"],
+                    r["done"],
+                    r["target"],
+                    launch_command(r),
+                )
+            )
         print()
     print("# %d study(ies) to launch  (run from the repository root)" % len(need))
     for r in need:
-        print("# %-9s %-8s %-24s %d/%d complete"
-              % (r["domain"], r["model"], r["study"], r["done"], r["target"]))
+        print(
+            "# %-9s %-8s %-24s %d/%d complete"
+            % (r["domain"], r["model"], r["study"], r["done"], r["target"])
+        )
         print(launch_command(r))
     return 0
 

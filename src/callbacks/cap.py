@@ -40,7 +40,7 @@ class CAPCallback(Callback):
     :param pairing_type: Pairing scheme name passed to get_pairing_fn.
     :param cap_metric_config: Keyword arguments used to instantiate
         ApproximationCapacity.
-    :beta: Float that sets parameter of EMA metrics compute here.
+    :param ema_weight: Weight of the previous value in the exponential moving average.
     """
 
     metric_cls = ApproximationCapacity
@@ -53,7 +53,7 @@ class CAPCallback(Callback):
         dataset_2: str,
         pairing_type: str,
         cap_metric_config: dict,
-        beta: float = 0.9,
+        ema_weight: float = 0.9,
     ):
         super().__init__()
         self.device = None
@@ -65,7 +65,7 @@ class CAPCallback(Callback):
         self.pair_name = f"{ds1}_vs_{ds2}"
         self.cap_metric_config = cap_metric_config
         self.pairing_fn = get_pairing_fn(pairing_type)
-        self.beta = beta
+        self.ema_weight = ema_weight
 
         self.log_kwargs = dict(
             prog_bar=False,
@@ -101,7 +101,7 @@ class CAPCallback(Callback):
         self.dataset_1_scores = []
         self.dataset_2_scores = []
 
-        self.capmetric = self.metric_cls(**self.cap_metric_config, device=self.device)
+        self.capmetric = self.metric_cls(**self.cap_metric_config)
         self.capmetric.to(self.device)
 
     def on_validation_batch_end(
@@ -160,7 +160,7 @@ class CAPCallback(Callback):
         self.curves.append(self.capmetric.curve.numpy())
         np.savez(
             self._curves_path(trainer),
-            betas=self.capmetric.betas.numpy(),
+            betas=self.capmetric.betas.cpu().numpy(),
             epochs=np.array(self.curve_epochs),
             curves=np.stack(self.curves),
         )
@@ -205,4 +205,6 @@ class CAPCallback(Callback):
         elif math.isnan(self.cap_ema):
             self.cap_ema = float(cap)
         else:
-            self.cap_ema = self.beta * self.cap_ema + (1 - self.beta) * float(cap)
+            self.cap_ema = self.ema_weight * self.cap_ema + (
+                1 - self.ema_weight
+            ) * float(cap)

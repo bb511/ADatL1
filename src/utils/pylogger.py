@@ -13,9 +13,11 @@ class RankedLogger(logging.LoggerAdapter):
         rank_zero_only: bool = False,
         extra: Optional[Mapping[str, object]] = None,
     ) -> None:
-        """Initializes a logger that prefixes each message with the rank it is logged from.
+        """Initializes a logger that prefixes each message with the rank it is logged
+        from.
 
-        :param rank_zero_only: Whether to force all logs to only occur on the rank zero process.
+        :param rank_zero_only: Whether to force all logs to only occur on the rank zero
+            process.
         :param extra: A dict-like object which provides contextual information.
         """
         logger = logging.getLogger(name)
@@ -25,7 +27,8 @@ class RankedLogger(logging.LoggerAdapter):
     def log(
         self, level: int, msg: str, rank: Optional[int] = None, *args, **kwargs
     ) -> None:
-        """Log through the underlying logger, prefixing the message with the process rank.
+        """Log through the underlying logger, prefixing the message with the process
+        rank.
 
         :param rank: If given, only log on that rank/process.
         """

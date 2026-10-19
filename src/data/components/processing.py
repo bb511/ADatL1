@@ -1,13 +1,14 @@
 # Processes the data.
-from dataclasses import dataclass
-from pathlib import Path
 import functools
 import operator
+from dataclasses import dataclass
+from pathlib import Path
 
 import awkward as ak
 from colorama import Fore
 
 from src.utils import pylogger
+
 from . import plots
 
 log = pylogger.RankedLogger(__name__)
@@ -66,7 +67,7 @@ class L1DataProcessor:
             log.info(Fore.YELLOW + f"Data partially exists in {self.cache_folder}!")
 
         if self.existence_warn_trigger:
-            log.warn(
+            log.warning(
                 "The code only checks if there exist parquet files with the names of "
                 "objects specified in the data/data_extractor config for the filters. "
                 "If you are unsure the actual applied filters for each object are the "
@@ -131,10 +132,9 @@ class L1DataProcessor:
     def _cache(self, extracted_dataset: Path):
         """Processes the data and caches it.
 
-        First, this applies the event-level mask generated previously to the data.
-        Then, a mask is generated for the per-object cuts, cached to disk, and applied
-        to the data as well.
-        The result of this two operations is then cached to disk.
+        First, this applies the event-level mask generated previously to the data. Then,
+        a mask is generated for the per-object cuts, cached to disk, and applied to the
+        data as well. The result of this two operations is then cached to disk.
         """
         event_mask = ak.from_parquet(self.event_masks_folder / "intersection.parquet")
         self.object_masks_folder.mkdir(parents=True, exist_ok=True)
@@ -165,13 +165,11 @@ class L1DataProcessor:
         return obj_mask
 
     def _check_data_exists(self) -> set[str]:
-        """Check if a specific data set was already processed.
+        """Return the objects of this data set that were already processed.
 
-        Also check if the same event filters and object masks were applied in their
-        processing. Return a list of existing objects, which have already been processed
-        and have a mask corresponding mask file, if they're supposed to be masked.
-        If the event filters differ from the ones provided in the config, redo the
-        processing for all the objects.
+        These are the objects with a processed parquet file in the dataset folder, less
+        those whose object-mask file named in the config is missing. The set is empty if
+        the folder is empty or an event-mask file named in the config is missing.
         """
         if self.dataset_folder.is_dir():
             dataset_files = [
@@ -233,9 +231,8 @@ class L1DataProcessor:
         return existing_objs
 
     def _plot(self, data: ak.Array, obj_name: str):
-        """Read and then plot the processed data."""
+        """Plot each field of the processed data."""
         plots_dir = self.dataset_folder / "PLOTS"
-        object_file = self.dataset_folder / f"{obj_name}.parquet"
         obj_folder = plots_dir / obj_name
         obj_folder.mkdir(parents=True, exist_ok=True)
 

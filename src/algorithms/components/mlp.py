@@ -1,6 +1,6 @@
 # MLP model class to build algorithms out of.
-from typing import Optional, Callable
 import functools
+from typing import Callable, Optional
 
 import torch
 from torch import nn
@@ -235,6 +235,9 @@ class ImageMLP(nn.Module):
         return None
 
     def _init_bias_wrapper(self, layer: nn.Module):
-        if isinstance(layer, (nn.Conv2d, nn.ConvTranspose2d)) and layer.bias is not None:
+        if (
+            isinstance(layer, (nn.Conv2d, nn.ConvTranspose2d))
+            and layer.bias is not None
+        ):
             self.init_bias(layer.bias)
         return None

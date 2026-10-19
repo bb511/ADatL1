@@ -1,12 +1,12 @@
 # Log data set metadata to artifacts in mlflow.
+from colorama import Fore
+from pytorch_lightning import LightningModule, Trainer
 from pytorch_lightning.callbacks import Callback
-from pytorch_lightning.loggers import MLFlowLogger, Logger
-from pytorch_lightning import Trainer, LightningModule
-
-from .utils import mlflow_plot_gallery
+from pytorch_lightning.loggers import Logger, MLFlowLogger
 
 from src.utils import pylogger
-from colorama import Fore
+
+from .utils import mlflow_plot_gallery
 
 log = pylogger.RankedLogger(__name__)
 
@@ -14,9 +14,9 @@ log = pylogger.RankedLogger(__name__)
 class LogDataInfoMlFlow(Callback):
     """Logs the figures pertaining to the data feature distributions to mlflow.
 
-    This logs the feature distributions for each of the used data sets as artifacts
-    in MLFlow. The data is logged at each step, i.e., extraction, processing, mlready.
-    See the data module for more details about what each of these steps does.
+    This logs the feature distributions for each of the used data sets as artifacts in
+    MLFlow. The data is logged at each step, i.e., extraction, processing, mlready. See
+    the data module for more details about what each of these steps does.
     """
 
     def __init__(self):
@@ -41,7 +41,9 @@ class LogDataInfoMlFlow(Callback):
         """Log the data information into MLFlow at the start of the training."""
         mlflow_logger = self._get_mlflow_logger(trainer)
         if mlflow_logger is None:
-            log.warn(Fore.YELLOW + "No MLFlow logger but using LogDataMlFlow callback!")
+            log.warning(
+                Fore.YELLOW + "No MLFlow logger but using LogDataMlFlow callback!"
+            )
             return
 
         self._setup_data_paths(trainer)

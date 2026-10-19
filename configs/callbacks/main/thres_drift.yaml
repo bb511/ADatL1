@@ -7,4 +7,4 @@ target_rates: [0.25]
 base_rate: 28608.8064
 calibration_fraction: 0.5
 split_seed: 12345
-beta: 0.9
+ema_weight: 0.9

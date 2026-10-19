@@ -1,8 +1,8 @@
 # Make an html gallery of a folder of html images, including all images in subfolders.
 
-from pathlib import Path
 import base64
 import html
+from pathlib import Path
 
 
 def build_html(root_dir: Path, title: str = "Plots Gallery") -> Path:

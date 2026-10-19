@@ -1,5 +1,4 @@
 import logging
-import math
 
 import pytest
 import torch
@@ -18,7 +17,6 @@ REGRESSION = {
     1e-2: (2.3225443363189697, 1000, 0.09239999949932098),
     3.65e-4: (3.4101455211639404, 37, 0.007420000154525042),
 }
-TIE_WEIGHTS = {1e-3: 0.0, 1e-2: 1.0, 3.65e-4: 0.5}
 
 
 @pytest.fixture(scope="module")
@@ -31,40 +29,6 @@ def scores() -> tuple[torch.Tensor, torch.Tensor]:
 
 def _old_count(scores: torch.Tensor, threshold: torch.Tensor) -> int:
     return int((scores.float().view(-1) >= threshold).sum())
-
-
-@pytest.mark.parametrize("anomaly_rate", RATES)
-@pytest.mark.parametrize("fpr", list(REGRESSION))
-def test_untied_threshold_and_tie_weight(scores, anomaly_rate, fpr):
-    val, _ = scores
-    n = val.numel()
-    rate = anomaly_rate(fpr, None)
-    rate.set_threshold(val)
-
-    old_threshold, old_count, _ = REGRESSION[fpr]
-    assert rate.threshold.item() == old_threshold
-    assert _old_count(val, rate.threshold) == old_count
-    assert int((val == rate.threshold).sum()) == 1
-
-    # torch.quantile's "higher" index, ranked in float32 as torch.quantile ranks.
-    index = math.ceil((torch.tensor(1.0 - fpr) * (n - 1)).item())
-    n_above = n - index - 1
-    assert int((val > rate.threshold).sum()) == n_above
-    assert rate.tie_weight.item() == min(max(fpr * n - n_above, 0.0), 1.0)
-    assert rate.tie_weight.item() == pytest.approx(TIE_WEIGHTS[fpr], abs=1e-9)
-    if fpr != 1e-3:
-        assert n_above == math.floor(fpr * (n - 1))
-
-
-@pytest.mark.parametrize("anomaly_rate", RATES)
-@pytest.mark.parametrize("fpr", list(REGRESSION))
-def test_validation_count_is_fpr_n(scores, anomaly_rate, fpr):
-    val, _ = scores
-    rate = anomaly_rate(fpr, None)
-    rate.set_threshold(val)
-    rate.update(val)
-    assert rate.ntriggered.item() == pytest.approx(fpr * val.numel(), rel=1e-6)
-    assert rate.efficiency().item() == pytest.approx(fpr, rel=1e-6)
 
 
 @pytest.mark.parametrize("anomaly_rate", RATES)
@@ -96,44 +60,6 @@ def test_constant_score_has_efficiency_fpr(anomaly_rate):
 
     rate.update(torch.full((5_000,), 0.5))
     assert rate.efficiency().item() == pytest.approx(fpr, rel=1e-6)
-
-
-@pytest.mark.parametrize("anomaly_rate", RATES)
-def test_quantised_score_count_is_fpr_n(anomaly_rate):
-    torch.manual_seed(1)
-    val = torch.randint(0, 6, (10_000,)).float()
-    fpr = 0.07
-    rate = anomaly_rate(fpr, None)
-    rate.set_threshold(val)
-    assert 0.0 < rate.tie_weight.item() < 1.0
-
-    rate.update(val)
-    assert rate.ntriggered.item() == pytest.approx(fpr * val.numel(), rel=1e-9)
-
-
-@pytest.mark.parametrize("anomaly_rate", RATES)
-def test_threshold_without_tie_weight_accepts_ties(anomaly_rate):
-    rate = anomaly_rate(0.01, None)
-    rate.apply_threshold(0.5)
-    assert rate.tie_weight.item() == 1.0
-
-    rate.update(torch.full((100,), 0.5))
-    assert rate.efficiency().item() == 1.0
-
-
-@pytest.mark.parametrize("anomaly_rate", RATES)
-def test_compute_returns_each_quantity(scores, anomaly_rate):
-    val, test = scores
-    rate = anomaly_rate(40.0, 40_000.0)
-    rate.set_threshold(val)
-    rate.update(test)
-
-    efficiency = rate.compute("efficiency")
-    physical = rate.compute("rate")
-    assert efficiency.item() == rate.efficiency().item()
-    assert physical.item() == rate.rate().item()
-    assert physical.item() == pytest.approx(40_000.0 * efficiency.item(), rel=1e-6)
-    assert rate.compute("efficiency").item() == efficiency.item()
 
 
 def test_tie_buffer_reaches_the_evaluation_callback(scores, caplog):

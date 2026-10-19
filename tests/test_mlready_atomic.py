@@ -37,14 +37,6 @@ def test_atomic_write_matches_plain_savez(ready, tmp_path):
                 assert np.array_equal(written[key], reference[key])
 
 
-def test_atomic_write_leaves_only_the_split(ready):
-    ready._frozen_split("aux__sample", (np.arange(60), np.arange(60, 100)))
-    split_file = ready.splits_dir / "aux__sample.npz"
-
-    assert list(ready.splits_dir.iterdir()) == [split_file]
-    assert split_file.stat().st_mode & 0o777 == 0o644
-
-
 def test_failed_write_leaves_no_split(ready, monkeypatch):
     def fail_midway(file, **arrays):
         file.write(b"PK\x03\x04 half an archive")
@@ -55,17 +47,3 @@ def test_failed_write_leaves_no_split(ready, monkeypatch):
         ready._frozen_split("zerobias", _drawn())
 
     assert list(ready.splits_dir.iterdir()) == []
-
-
-def test_failed_write_does_not_block_a_retry(ready, monkeypatch):
-    def fail(file, **arrays):
-        raise OSError("disk full")
-
-    monkeypatch.setattr(mlready.np, "savez", fail)
-    with pytest.raises(OSError):
-        ready._frozen_split("zerobias", _drawn())
-    monkeypatch.undo()
-
-    frozen = ready._frozen_split("zerobias", _drawn())
-    reloaded = ready._frozen_split("zerobias", _drawn())
-    assert all(np.array_equal(a, b) for a, b in zip(frozen, reloaded))

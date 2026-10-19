@@ -163,7 +163,7 @@ class AnomalyEfficiencyCallback(Callback):
 
         Used if currently processing the normal data set, accummulate the values of each
         metric across batches. The whole metric output distribution is needed to set a
-        treshold that gives a certain rate.
+        threshold that gives a certain rate.
         """
         batch_output = outputs[self.output_name]
         if batch_output.ndim == 0:

@@ -41,7 +41,7 @@ class Evaluator:
             'metric_1':
                 'criterion_1': ['min', 'max', etc.]
         ...
-        This is used for speciyfing which checkpoints to actually evaluate.
+        This is used for specifying which checkpoints to actually evaluate.
     :param callbacks: List of pl.Callback objects that compute evaluation metrics on
         the test data and do all the handling of these, including plotting.
     :param logger: pl.Logger object that handles the logging for this evaluation stage.
@@ -100,7 +100,7 @@ class Evaluator:
 
         :param run_folder: Path to the folder where the checkpoints for a particular run
             are stored.
-        :param model: LightningModule object pertaining to the model to evaulate.
+        :param model: LightningModule object pertaining to the model to evaluate.
         :param test_loader: The test data loaders. Can correspond to multiple test data
             sets.
         :param split: String specifying which split of the data you are currently eval
@@ -228,7 +228,7 @@ class Evaluator:
         if this is to be plotted.
 
         :param ckpt_path: Path to a specific checkopint file, must end in '.ckpt'.
-        :param model: LightningModule object pertaining to the model to evaulate.
+        :param model: LightningModule object pertaining to the model to evaluate.
         :param test_loader: The test data loaders. Can correspond to multiple test data
             sets.
         """

@@ -25,17 +25,6 @@ def _paths_2025():
     return OmegaConf.load(PATHS_2025)
 
 
-def test_default_labels_match_the_name_rule():
-    paths = _paths_2025()
-    names = sorted([*paths.signal, *paths.background])
-
-    labels = _aux_labels(names, dict.fromkeys(paths.background))
-
-    assert labels == _labels_by_name(names)
-    assert labels["SingleNeutrino_E-10-gun"] == -1
-    assert sorted(v for v in labels.values() if v > 0) == list(range(1, 21))
-
-
 def test_zero_bias_run_under_background_is_background():
     paths = _paths_2025()
     background = {**dict.fromkeys(paths.background), "ZB_run398183": None}

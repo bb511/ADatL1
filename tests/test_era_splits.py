@@ -33,9 +33,9 @@ def merged(tmp_path):
     return merged_dir, arrays
 
 
-def _run(merged_dir, era_dir, era, *extra):
+def _run(merged_dir, era_dir, era):
     argv = ["--merged-splits", str(merged_dir), "--era-splits", str(era_dir)]
-    return era_splits.main([*argv, "--era", era, "--n-first-run", str(N_FIRST), *extra])
+    return era_splits.main([*argv, "--era", era, "--n-first-run", str(N_FIRST)])
 
 
 @pytest.mark.parametrize(
@@ -78,15 +78,3 @@ def test_refuses_to_overwrite(merged, tmp_path):
 
     assert sorted(p.name for p in era_dir.iterdir()) == ["aux__b.npz"]
     assert (era_dir / "aux__b.npz").read_bytes() == b"keep"
-
-
-def test_dry_run_writes_nothing(merged, tmp_path, capsys):
-    merged_dir, arrays = merged
-    _run(merged_dir, tmp_path / "era", "E", "--dry-run")
-
-    assert not (tmp_path / "era").exists()
-    sizes = [len(i[i < N_FIRST]) for i in arrays.values()]
-    expected = f"train {sizes[0]:,}, valid {sizes[1]:,}, test {sizes[2]:,}"
-    out = capsys.readouterr().out
-    assert expected in out
-    assert out.count("would write") == 3

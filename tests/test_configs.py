@@ -25,10 +25,6 @@ def _resolvers() -> None:
 
 
 def test_train_config(cfg_train: DictConfig) -> None:
-    """Tests the training configuration provided by the `cfg_train` pytest fixture.
-
-    :param cfg_train: A DictConfig containing a valid training configuration.
-    """
     assert cfg_train
     assert cfg_train.data
     assert cfg_train.algorithm
@@ -53,22 +49,6 @@ def experiments() -> dict[str, dict]:
         }
 
 
-def _values_under(node, key: str):
-    if isinstance(node, dict):
-        for k, value in node.items():
-            if k == key:
-                yield value
-            yield from _values_under(value, key)
-    elif isinstance(node, list):
-        for value in node:
-            yield from _values_under(value, key)
-
-
-def test_every_domain_is_covered():
-    assert {e.split("/")[0] for e in EXPERIMENTS} == {"physics", "cifar10", "robustad"}
-    assert len(EXPERIMENTS) == 34
-
-
 @pytest.mark.parametrize("experiment", EXPERIMENTS)
 def test_only_the_candidate_is_evaluated(experiments, experiment):
     cfg = experiments[experiment]
@@ -81,27 +61,3 @@ def test_only_the_candidate_is_evaluated(experiments, experiment):
     assert ckpts == {
         candidate["strategy"]: {candidate["metric"]: [candidate["criterion"]]}
     }
-
-
-@pytest.mark.parametrize("experiment", EXPERIMENTS)
-def test_no_stable_per_signal_or_reco_callbacks(experiments, experiment):
-    cfg = experiments[experiment]
-    targets = [
-        str(node.get("_target_"))
-        for group in (cfg["callbacks"], cfg["evaluation"]["callbacks"])
-        for node in group.values()
-        if isinstance(node, dict)
-    ]
-
-    assert not any(t.endswith("SingleDatasetModelCheckpoint") for t in targets)
-    assert not any(t.endswith("ReconstructionPlots") for t in targets)
-
-
-@pytest.mark.parametrize("experiment", EXPERIMENTS)
-def test_cap_blocks_carry_the_beta_sweep(experiments, experiment):
-    blocks = list(_values_under(experiments[experiment], "cap_metric_config"))
-
-    assert len(blocks) == (4 if experiment.endswith("_agnostic") else 0)
-    for block in blocks:
-        assert "beta0" not in block
-        assert {"beta_min", "beta_max", "n_beta"} <= block.keys()

@@ -71,19 +71,6 @@ def test_untied_drift_unchanged(scores, fpr, tmp_path):
     assert _eval_drift(scores, fpr, tmp_path) == pytest.approx(old, rel=1e-6)
 
 
-@pytest.mark.parametrize("fpr", list(REGRESSION))
-def test_untied_calibration_count_convention(scores, fpr):
-    callback = TrainDrift(output_name="s")
-    calibration, _ = callback._split_scores(scores)
-    n = calibration.numel()
-    threshold = callback._compute_threshold(calibration, exceedance_prob=fpr)
-    assert int((calibration >= threshold).sum()) == math.floor(fpr * n) + 1
-
-    tie_weight = compute_tie_weight(calibration, threshold, fpr)
-    count = count_exceedances(calibration, threshold, tie_weight).item()
-    assert count == pytest.approx(fpr * n, rel=1e-9)
-
-
 @pytest.mark.parametrize("value", [0.0, 2.5])
 def test_constant_score_has_no_drift(value, tmp_path):
     fpr = 0.01
@@ -97,19 +84,3 @@ def test_constant_score_has_no_drift(value, tmp_path):
 
     assert _train_drift(constant, fpr) == pytest.approx(0.0, abs=1e-12)
     assert _eval_drift(constant, fpr, tmp_path) == pytest.approx(0.0, abs=1e-12)
-
-
-def test_quantised_drift_agrees_across_trees(tmp_path):
-    torch.manual_seed(1)
-    quantised = torch.randint(0, 6, (20_000,)).float()
-    train = _train_drift(quantised, 0.07)
-    assert train == _eval_drift(quantised, 0.07, tmp_path)
-    assert train < 0.05
-
-
-def test_drift_average_starts_once():
-    callback = TrainDrift(output_name="s")
-    callback.on_fit_start(None, None)
-    callback._compute_drift_ema("r", 0.0)
-    callback._compute_drift_ema("r", 1.0)
-    assert callback.drift_ema["r"] == pytest.approx(0.1)

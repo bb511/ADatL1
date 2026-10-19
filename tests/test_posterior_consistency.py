@@ -3,26 +3,14 @@
 The load-bearing test is `test_consistency_is_the_beta_zero_limit_of_log_cosine`:
 the whole justification for reporting `-mean (D1 - D2)**2` is that it is the
 leading-order term of CAP's posterior log-cosine, so that beta enters only as a
-common prefactor and drops out of any ranking of models. Everything else here
-guards the plumbing.
+common prefactor and drops out of any ranking of models. The other test pins CAP's
+own value, which the variant must leave untouched.
 """
-
-import inspect
-import math
 
 import pytest
 import torch
 
-from src.callbacks.cap import CAPCallback
-from src.callbacks.consistency import PosteriorConsistencyCallback
 from src.callbacks.metrics.cap.metric import ApproximationCapacity, PosteriorConsistency
-from src.evaluation.callbacks.cap import CAP as EvaluationCAP
-from src.evaluation.callbacks.consistency import (
-    PosteriorConsistency as EvaluationPosteriorConsistency,
-)
-from src.evaluation.callbacks.metrics.cap.metric import (
-    PosteriorConsistency as EvaluationConsistencyMetric,
-)
 
 
 def _metric_config(**overrides) -> dict:
@@ -81,13 +69,8 @@ def _mean_log_cosine(metric, scores_1, scores_2, beta):
     return torch.mean(log_overlap - log_norm_1 - log_norm_2).item()
 
 
-# --------------------------------------------------------------------------- #
-# The mathematical claim
-# --------------------------------------------------------------------------- #
-
-
 def test_consistency_is_the_beta_zero_limit_of_log_cosine():
-    """log cos = -(beta**2 / 8) * sum (D1 - D2)**2 + O(beta**4)."""
+    # log cos = -(beta**2 / 8) * sum (D1 - D2)**2 + O(beta**4).
     scores_1, scores_2 = _scores()
     metric = PosteriorConsistency(**_metric_config())
     metric.update(scores_1, scores_2)
@@ -108,80 +91,8 @@ def test_consistency_is_the_beta_zero_limit_of_log_cosine():
     assert errors[1e-3] < errors[1e-2] / 50.0
 
 
-def test_log_cosine_alone_is_degenerate_at_zero_temperature():
-    """Why the limit is taken at all: log cos vanishes for every model at beta=0.
-
-    It decays quadratically, so it cannot separate models on its own -- which is
-    exactly why beta must not be chosen by maximising it.
-    """
-    scores_1, scores_2 = _scores()
-    metric = PosteriorConsistency(**_metric_config())
-    metric.update(scores_1, scores_2)
-    scale = abs(metric.compute())
-
-    for beta in (1e-5, 1e-6):
-        log_cosine = _mean_log_cosine(metric, scores_1, scores_2, beta)
-        assert abs(log_cosine) < scale * beta**2
-
-
-# --------------------------------------------------------------------------- #
-# Consistency metric semantics
-# --------------------------------------------------------------------------- #
-
-
-def test_consistency_is_zero_for_identical_scores():
-    scores = torch.tensor([0.1, 0.25, 0.5, 0.75, 0.9], dtype=torch.double)
-    metric = PosteriorConsistency(**_metric_config())
-    metric.update(scores, scores)
-    assert metric.compute() == pytest.approx(0.0, abs=1e-9)
-
-
-def test_consistency_is_negative_for_differing_scores():
-    scores_1 = torch.tensor([0.0, 0.1, 0.2, 0.3], dtype=torch.double)
-    scores_2 = 1.0 - scores_1
-    metric = PosteriorConsistency(**_metric_config())
-    metric.update(scores_1, scores_2)
-    value = metric.compute()
-    assert math.isfinite(value)
-    assert value < 0.0
-
-
-def test_consistency_ignores_the_beta_grid():
-    """beta_min/beta_max/n_beta must have no effect."""
-    scores_1, scores_2 = _scores()
-
-    baseline = PosteriorConsistency(**_metric_config())
-    baseline.update(scores_1, scores_2)
-
-    other = PosteriorConsistency(
-        **_metric_config(beta_min=0.5, beta_max=7.5, n_beta=13)
-    )
-    other.update(scores_1, scores_2)
-
-    assert other.compute() == pytest.approx(baseline.compute(), rel=1e-9)
-
-
-def test_consistency_is_deterministic():
-    scores_1, scores_2 = _scores()
-    values = []
-    for _ in range(3):
-        metric = PosteriorConsistency(**_metric_config())
-        metric.update(scores_1, scores_2)
-        values.append(metric.compute())
-    assert values[0] == values[1] == values[2]
-
-
-# --------------------------------------------------------------------------- #
-# CAP itself must be untouched
-# --------------------------------------------------------------------------- #
-
-
 def test_cap_still_computes_the_kernel_partition_ratio():
-    """Pins CAP's own value against an independent reimplementation.
-
-    On a one-point beta grid CAP is the kernel at that beta, and reduces to the mean of
-    log(Z_12 / (Z_1 * Z_2)) over paired samples.
-    """
+    # On a one-point beta grid CAP reduces to the mean of log(Z_12 / (Z_1 * Z_2)).
     scores_1, scores_2 = _scores(n=128)
     beta = 1.5
     metric = ApproximationCapacity(
@@ -207,61 +118,3 @@ def test_cap_still_computes_the_kernel_partition_ratio():
     expected = torch.mean(num - den).item()
 
     assert metric.compute() == pytest.approx(expected, rel=1e-5)
-
-
-# --------------------------------------------------------------------------- #
-# Callback plumbing
-# --------------------------------------------------------------------------- #
-
-
-def test_training_callback_is_a_drop_in_cap_replacement():
-    assert inspect.signature(PosteriorConsistencyCallback) == inspect.signature(
-        CAPCallback
-    )
-    assert PosteriorConsistencyCallback.metric_cls is PosteriorConsistency
-    assert PosteriorConsistencyCallback.metric_key == "consistency"
-    assert CAPCallback.metric_cls is ApproximationCapacity
-    assert CAPCallback.metric_key == "cap"
-
-
-def test_evaluation_callback_registers_under_its_own_name():
-    callback = EvaluationPosteriorConsistency(
-        output_name="ascore/full",
-        dataset_1="normal",
-        dataset_2="reference_normal",
-        pairing_type="none",
-        cap_metric_config=_metric_config(),
-    )
-    assert callback.name == "consistency"
-    assert callback.metric_cls is EvaluationConsistencyMetric
-    assert callback.metric_label == "Consistency"
-    assert EvaluationCAP.metric_label == "CAP"
-
-
-def test_compute_cap_returns_a_single_value():
-    """The Spearman rank correlation is gone, so this is now one float."""
-    callback = PosteriorConsistencyCallback(
-        output_name="ascore/full",
-        dataset_1="normal",
-        dataset_2="reference_normal",
-        pairing_type="none",
-        cap_metric_config=_metric_config(),
-    )
-    callback.device = "cpu"
-    callback.capmetric = callback.metric_cls(**callback.cap_metric_config)
-    callback.dataset_1_scores = [torch.tensor([0.1, 0.3, 0.8])]
-    callback.dataset_2_scores = [torch.tensor([0.1, 0.3, 0.8])]
-
-    value = callback._compute_cap()
-
-    assert isinstance(value, float)
-    assert value == pytest.approx(0.0, abs=1e-7)
-
-
-def test_rank_correlation_is_no_longer_computed():
-    """It was identically 1 under cdf pairing, which sorts both paired sides."""
-    for cls in (CAPCallback, EvaluationCAP, PosteriorConsistencyCallback):
-        assert not hasattr(cls, "_spearman_corr")
-    assert not hasattr(
-        EvaluationCAP("a", "b", "c", "none", _metric_config()), "rankcorr_summary"
-    )

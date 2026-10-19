@@ -12,8 +12,25 @@
 # configurations already trained. scripts/cluster/sweep_status.py prints
 # such a relaunch.
 #
-# Each driver keeps six trials queued as slurm jobs
-# (hydra.sweeper.n_jobs=6).
+# The blocks name no launcher: the venue appends one at submission, with a
+# timeout of 27 minutes per trial for this model (200 epochs at up to 4.5 s
+# each on an H100, plus about 3 minutes of evaluation, and half again as
+# margin).
+#
+# On clariden, each driver keeps six trials queued as slurm jobs:
+#   bash scripts/cluster/submit_search.sh scripts/cifar10/rundte_search.sh \
+#       hydra/launcher=submitit_slurm_clariden hydra.sweeper.n_jobs=6 \
+#       hydra.launcher.timeout_min=27
+#
+# On a local GPU host or an NGT pod, Hydra's basic launcher runs a driver's
+# trials in-process, one after another:
+#   bash scripts/cluster/submit_search.sh scripts/cifar10/rundte_search.sh
+# or, with each trial in its own process and under the timeout:
+#   bash scripts/cluster/submit_search.sh scripts/cifar10/rundte_search.sh \
+#       hydra/launcher=submitit_local hydra.launcher.gpus_per_node=1 \
+#       hydra.launcher.timeout_min=27
+# submitit_local shows a trial GPUs 0 to gpus_per_node-1 only, none when it
+# is unset, and trainer.devices picks among them.
 #
 # BEFORE THE FIRST LAUNCH the processed data must already exist where the
 # trials run. Build it with rundte_cache.sh in this directory and copy the
@@ -32,9 +49,6 @@
 # ------------------------------------------------------------------------
 # python3 src/train.py \
 #     -m \
-#     hydra/launcher=submitit_slurm_clariden \
-#     hydra.launcher.timeout_min=240 \
-#     hydra.sweeper.n_jobs=6 \
 #     experiment=cifar10/dte \
 #     logger=mlflow \
 #     hparams_search=cifar10/dte_optuna \
@@ -49,9 +63,6 @@
 # ------------------------------------------------------------------------
 # python3 src/train.py \
 #     -m \
-#     hydra/launcher=submitit_slurm_clariden \
-#     hydra.launcher.timeout_min=240 \
-#     hydra.sweeper.n_jobs=6 \
 #     experiment=cifar10/dte \
 #     logger=mlflow \
 #     hparams_search=cifar10/dte_optuna \
@@ -66,9 +77,6 @@
 # ------------------------------------------------------------------------
 # python3 src/train.py \
 #     -m \
-#     hydra/launcher=submitit_slurm_clariden \
-#     hydra.launcher.timeout_min=240 \
-#     hydra.sweeper.n_jobs=6 \
 #     experiment=cifar10/dte \
 #     logger=mlflow \
 #     hparams_search=cifar10/dte_optuna \
@@ -83,9 +91,6 @@
 # ------------------------------------------------------------------------
 # python3 src/train.py \
 #     -m \
-#     hydra/launcher=submitit_slurm_clariden \
-#     hydra.launcher.timeout_min=240 \
-#     hydra.sweeper.n_jobs=6 \
 #     experiment=cifar10/dte \
 #     logger=mlflow \
 #     hparams_search=cifar10/dte_optuna \

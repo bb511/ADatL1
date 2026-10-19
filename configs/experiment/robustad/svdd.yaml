@@ -185,7 +185,9 @@ callbacks:
   loss_ckpt:
     _target_: pytorch_lightning.callbacks.ModelCheckpoint
     dirpath: '${paths.checkpoints_dir}/${experiment_name}/${run_name}/summary/loss/min'
-    monitor: 'val/normal/loss'
+    # The distance term alone: the SVDD loss adds the network's weight regulariser,
+    # which a loss-only pick would otherwise reward.
+    monitor: 'val/normal/loss_distance_raw'
     filename: 'loss'
     save_last: false
     save_top_k: 1

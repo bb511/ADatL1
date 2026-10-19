@@ -13,9 +13,24 @@
 # configurations already trained. scripts/cluster/sweep_status.py prints
 # such a relaunch.
 #
-# Each driver runs one trial at a time through submitit_local, whose default
-# timeout of 60 minutes is shorter than 200 epochs of the slower models,
-# hence timeout_min=200.
+# The blocks name no launcher: the venue appends one at submission, with a
+# timeout of 110 minutes per trial for this model (200 epochs at 21 s each
+# on an H100, plus about 3 minutes of evaluation, and half again as margin).
+#
+# On clariden, each driver keeps six trials queued as slurm jobs:
+#   bash scripts/cluster/submit_search.sh scripts/physics/runrealnvp_search.sh \
+#       hydra/launcher=submitit_slurm_clariden hydra.sweeper.n_jobs=6 \
+#       hydra.launcher.timeout_min=110
+#
+# On a local GPU host or an NGT pod, Hydra's basic launcher runs a driver's
+# trials in-process, one after another:
+#   bash scripts/cluster/submit_search.sh scripts/physics/runrealnvp_search.sh
+# or, with each trial in its own process and under the timeout:
+#   bash scripts/cluster/submit_search.sh scripts/physics/runrealnvp_search.sh \
+#       hydra/launcher=submitit_local hydra.launcher.gpus_per_node=1 \
+#       hydra.launcher.timeout_min=110
+# submitit_local shows a trial GPUs 0 to gpus_per_node-1 only, none when it
+# is unset, and trainer.devices picks among them.
 
 
 # ========================================================================
@@ -24,13 +39,8 @@
 # ------------------------------------------------------------------------
 # Driver 1 of 4
 # ------------------------------------------------------------------------
-# taskset -c 0-2 \
 # python3 src/train.py \
 #     -m \
-#     hydra/launcher=submitit_local \
-#     hydra.launcher.timeout_min=200 \
-#     hydra.launcher.cpus_per_task=1 \
-#     hydra.launcher.gpus_per_node=4 \
 #     data=basis_hf \
 #     experiment=physics/realnvp \
 #     logger=mlflow \
@@ -44,13 +54,8 @@
 # ------------------------------------------------------------------------
 # Driver 2 of 4
 # ------------------------------------------------------------------------
-# taskset -c 0-2 \
 # python3 src/train.py \
 #     -m \
-#     hydra/launcher=submitit_local \
-#     hydra.launcher.timeout_min=200 \
-#     hydra.launcher.cpus_per_task=1 \
-#     hydra.launcher.gpus_per_node=4 \
 #     data=basis_hf \
 #     experiment=physics/realnvp \
 #     logger=mlflow \
@@ -64,13 +69,8 @@
 # ------------------------------------------------------------------------
 # Driver 3 of 4
 # ------------------------------------------------------------------------
-# taskset -c 0-2 \
 # python3 src/train.py \
 #     -m \
-#     hydra/launcher=submitit_local \
-#     hydra.launcher.timeout_min=200 \
-#     hydra.launcher.cpus_per_task=1 \
-#     hydra.launcher.gpus_per_node=4 \
 #     data=basis_hf \
 #     experiment=physics/realnvp \
 #     logger=mlflow \
@@ -84,13 +84,8 @@
 # ------------------------------------------------------------------------
 # Driver 4 of 4
 # ------------------------------------------------------------------------
-# taskset -c 0-2 \
 # python3 src/train.py \
 #     -m \
-#     hydra/launcher=submitit_local \
-#     hydra.launcher.timeout_min=200 \
-#     hydra.launcher.cpus_per_task=1 \
-#     hydra.launcher.gpus_per_node=4 \
 #     data=basis_hf \
 #     experiment=physics/realnvp \
 #     logger=mlflow \

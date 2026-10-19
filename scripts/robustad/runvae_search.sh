@@ -12,8 +12,25 @@
 # configurations already trained. scripts/cluster/sweep_status.py prints
 # such a relaunch.
 #
-# Each driver keeps six trials queued as slurm jobs
-# (hydra.sweeper.n_jobs=6).
+# The blocks name no launcher: the venue appends one at submission, with a
+# timeout of 17 minutes per trial for this model (200 epochs at up to 2.5 s
+# each on an H100, plus about 3 minutes of evaluation, and half again as
+# margin).
+#
+# On clariden, each driver keeps six trials queued as slurm jobs:
+#   bash scripts/cluster/submit_search.sh scripts/robustad/runvae_search.sh \
+#       hydra/launcher=submitit_slurm_clariden hydra.sweeper.n_jobs=6 \
+#       hydra.launcher.timeout_min=17
+#
+# On a local GPU host or an NGT pod, Hydra's basic launcher runs a driver's
+# trials in-process, one after another:
+#   bash scripts/cluster/submit_search.sh scripts/robustad/runvae_search.sh
+# or, with each trial in its own process and under the timeout:
+#   bash scripts/cluster/submit_search.sh scripts/robustad/runvae_search.sh \
+#       hydra/launcher=submitit_local hydra.launcher.gpus_per_node=1 \
+#       hydra.launcher.timeout_min=17
+# submitit_local shows a trial GPUs 0 to gpus_per_node-1 only, none when it
+# is unset, and trainer.devices picks among them.
 
 
 # ========================================================================
@@ -24,9 +41,6 @@
 # ------------------------------------------------------------------------
 # python3 src/train.py \
 #     -m \
-#     hydra/launcher=submitit_slurm_clariden \
-#     hydra.launcher.timeout_min=200 \
-#     hydra.sweeper.n_jobs=6 \
 #     experiment=robustad/vae \
 #     logger=mlflow \
 #     hparams_search=robustad/vae_optuna \
@@ -41,9 +55,6 @@
 # ------------------------------------------------------------------------
 # python3 src/train.py \
 #     -m \
-#     hydra/launcher=submitit_slurm_clariden \
-#     hydra.launcher.timeout_min=200 \
-#     hydra.sweeper.n_jobs=6 \
 #     experiment=robustad/vae \
 #     logger=mlflow \
 #     hparams_search=robustad/vae_optuna \
@@ -58,9 +69,6 @@
 # ------------------------------------------------------------------------
 # python3 src/train.py \
 #     -m \
-#     hydra/launcher=submitit_slurm_clariden \
-#     hydra.launcher.timeout_min=200 \
-#     hydra.sweeper.n_jobs=6 \
 #     experiment=robustad/vae \
 #     logger=mlflow \
 #     hparams_search=robustad/vae_optuna \
@@ -75,9 +83,6 @@
 # ------------------------------------------------------------------------
 # python3 src/train.py \
 #     -m \
-#     hydra/launcher=submitit_slurm_clariden \
-#     hydra.launcher.timeout_min=200 \
-#     hydra.sweeper.n_jobs=6 \
 #     experiment=robustad/vae \
 #     logger=mlflow \
 #     hparams_search=robustad/vae_optuna \

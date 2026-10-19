@@ -5,12 +5,12 @@
 # this script runs each block as written and adds only what the file cannot
 # know: a private sweep directory.
 #
-# Which launcher a block carries is a property of the block, not of this script.
-# The physics ae/dsae/realnvp/vae drivers carry hydra/launcher=submitit_local;
-# physics dte/svdd and the whole of cifar10/robustad carry
-# submitit_slurm_clariden + n_jobs=6. Submitting a submitit_local block on
-# clariden starts a local driver that never reaches slurm -- check the block
-# with --list/--dry-run before launching it there.
+# The pool blocks name no launcher: the venue appends one after the file name,
+# as each catalogue's header shows (submitit_slurm_clariden + n_jobs=6 on
+# clariden; nothing, or submitit_local, on a GPU host). Without one, Hydra's
+# basic launcher runs the trials inside the driver, which on clariden means on
+# the login node and never reaches slurm -- check with --list/--dry-run before
+# launching there.
 #
 # Each block is one long-lived Optuna driver: it keeps n_jobs trials in the
 # queue and stays alive until it has run its own n_trials, while the four
@@ -94,6 +94,16 @@ study_of() {
     printf "%s" "$s"
 }
 
+# The launcher a driver runs under. Hydra takes the last hydra/launcher
+# override, so an appended one wins over the block's; with neither, Hydra's
+# basic launcher runs the trials in-process.
+launcher_of() {
+    local l
+    l=$(printf "%s %s" "$1" "$extra" | grep -oE "hydra/launcher=[^ ]+" |
+        tail -1 | cut -d= -f2-)
+    printf "%s" "${l:-basic}"
+}
+
 n_total=$(printf "%s\n" "$cmds" | grep -c . || true)
 if [ "$n_total" -eq 0 ]; then
     echo "No search commands found in $file" >&2
@@ -109,7 +119,7 @@ if [ "$list" -eq 1 ]; then
             "$(study_of "$cmd")" \
             "$(field "$cmd" 'experiment')" \
             "$(field "$cmd" 'hydra\.sweeper\.sampler\.seed')" \
-            "$(field "$cmd" 'hydra/launcher')" \
+            "$(launcher_of "$cmd")" \
             "$(field "$cmd" 'hydra\.sweeper\.n_trials')"
     done <<EOF
 $cmds

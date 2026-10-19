@@ -13,11 +13,24 @@
 # configurations already trained. scripts/cluster/sweep_status.py prints
 # such a relaunch.
 #
-# Each driver keeps six trials queued as slurm jobs
-# (hydra.sweeper.n_jobs=6). The clariden launcher defaults to
-# timeout_min=60, far too short for physics, hence the explicit 720, which
-# is exactly the `normal` partition cap, so a trial that needs longer is
-# killed rather than requeued.
+# The blocks name no launcher: the venue appends one at submission, with a
+# timeout of 70 minutes per trial for this model (200 epochs at 13 s each on
+# an H100, plus about 3 minutes of evaluation, and half again as margin).
+#
+# On clariden, each driver keeps six trials queued as slurm jobs:
+#   bash scripts/cluster/submit_search.sh scripts/physics/rundte_search.sh \
+#       hydra/launcher=submitit_slurm_clariden hydra.sweeper.n_jobs=6 \
+#       hydra.launcher.timeout_min=70
+#
+# On a local GPU host or an NGT pod, Hydra's basic launcher runs a driver's
+# trials in-process, one after another:
+#   bash scripts/cluster/submit_search.sh scripts/physics/rundte_search.sh
+# or, with each trial in its own process and under the timeout:
+#   bash scripts/cluster/submit_search.sh scripts/physics/rundte_search.sh \
+#       hydra/launcher=submitit_local hydra.launcher.gpus_per_node=1 \
+#       hydra.launcher.timeout_min=70
+# submitit_local shows a trial GPUs 0 to gpus_per_node-1 only, none when it
+# is unset, and trainer.devices picks among them.
 #
 # BEFORE THE FIRST LAUNCH build the data cache: experiment=physics/dte
 # selects the `standard` normaliser, whose cache tree under data/hf/ the
@@ -34,9 +47,6 @@
 # ------------------------------------------------------------------------
 # python3 src/train.py \
 #     -m \
-#     hydra/launcher=submitit_slurm_clariden \
-#     hydra.launcher.timeout_min=720 \
-#     hydra.sweeper.n_jobs=6 \
 #     data=basis_hf \
 #     experiment=physics/dte \
 #     logger=mlflow \
@@ -52,9 +62,6 @@
 # ------------------------------------------------------------------------
 # python3 src/train.py \
 #     -m \
-#     hydra/launcher=submitit_slurm_clariden \
-#     hydra.launcher.timeout_min=720 \
-#     hydra.sweeper.n_jobs=6 \
 #     data=basis_hf \
 #     experiment=physics/dte \
 #     logger=mlflow \
@@ -70,9 +77,6 @@
 # ------------------------------------------------------------------------
 # python3 src/train.py \
 #     -m \
-#     hydra/launcher=submitit_slurm_clariden \
-#     hydra.launcher.timeout_min=720 \
-#     hydra.sweeper.n_jobs=6 \
 #     data=basis_hf \
 #     experiment=physics/dte \
 #     logger=mlflow \
@@ -88,9 +92,6 @@
 # ------------------------------------------------------------------------
 # python3 src/train.py \
 #     -m \
-#     hydra/launcher=submitit_slurm_clariden \
-#     hydra.launcher.timeout_min=720 \
-#     hydra.sweeper.n_jobs=6 \
 #     data=basis_hf \
 #     experiment=physics/dte \
 #     logger=mlflow \

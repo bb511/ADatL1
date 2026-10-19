@@ -241,6 +241,7 @@ def print_new(rows: list[dict]) -> None:
     new = [r for r in rows if r["status"] == "new"]
     if new:
         print("# %d study(ies) never launched on this machine:" % len(new))
+        print("# (append the venue's launcher overrides from the catalogue header)")
         for r in new:
             print("#   bash scripts/cluster/submit_search.sh %s" % r["script"])
         print()
@@ -252,6 +253,7 @@ def print_topups(rows: list[dict]) -> None:
         print("# nothing to top up - every study is DONE, running or new")
         return
     print("# %d study(ies) to top up  (run from the repository root)" % len(need))
+    print("# append the venue's launcher overrides from the catalogue header")
     for r in need:
         print(
             "# %-9s %-8s %-10s %d/%d complete"

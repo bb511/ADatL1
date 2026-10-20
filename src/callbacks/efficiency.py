@@ -102,6 +102,8 @@ class AnomalyEfficiencyCallback(Callback):
 
     def on_validation_epoch_end(self, trainer, pl_module) -> None:
         """Log the anomaly rates computed on each of the data sets."""
+        if trainer.sanity_checking:
+            return
         for target_rate in self.target_rates:
             rate_suffix = self._rate_log_suffix(target_rate)
 

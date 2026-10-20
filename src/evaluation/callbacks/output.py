@@ -58,9 +58,12 @@ class OutputCallback(Callback):
         """Accummulate the mean loss of a batch, over batches.
 
         CAREFUL: this expects the batch_output to be a torch tensor of dimension 1,ie,
-        the mean loss over that batch.
+        the mean loss over that batch. A dataset outside ds is skipped before its
+        outputs are read, since it need not carry output_name.
         """
         dset_name = list(trainer.test_dataloaders.keys())[dataloader_idx]
+        if dset_name not in self.ds:
+            return
         batch_output = outputs[self.output_name]
 
         self.dset_losses[dset_name].update(batch_output)
@@ -71,7 +74,7 @@ class OutputCallback(Callback):
         ckpt_name = Path(pl_module._ckpt_path).stem
         split = trainer.split
         plot_folder = ckpts_dir / "plots" / split / ckpt_name / self.name
-        plot_folder.mkdir(parents=True, exist_ok=True)
+        plots = getattr(trainer, "plot_checkpoints", True)
 
         losses = {
             dset_name: loss.compute().item()
@@ -80,12 +83,16 @@ class OutputCallback(Callback):
         }
         xlabel = f"{self.output_name}"
         ylabel = " "
-        horizontal_bar.plot_yright(losses, losses, xlabel, ylabel, plot_folder)
+        if plots:
+            plot_folder.mkdir(parents=True, exist_ok=True)
+            horizontal_bar.plot_yright(losses, losses, xlabel, ylabel, plot_folder)
         self._store_summary(losses, ckpt_name)
         utils.mlflow.log_metrics_to_mlflow(
             trainer, losses, ckpt_name=ckpt_name, cb_name=self.name
         )
 
+        if not plots:
+            return
         utils.mlflow.log_plots_to_mlflow(
             trainer,
             ckpt_name,

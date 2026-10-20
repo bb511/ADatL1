@@ -102,6 +102,59 @@ callbacks:
     pairing_type: cdf
     cap_metric_config: ${cap}
 
+  # Label-free criteria (user, 20 Oct 2026): entropy on a seeded 100,000-row subset of the
+  # training rows; SDS from 10,000 distinct rows, also on validation normal as sds_val.
+  npd:
+    _target_: src.callbacks.autouad.NPDCallback
+    output_name: "ascore/full"
+    ema_weight: 0.9
+
+  rtm:
+    _target_: src.callbacks.autouad.RTMCallback
+    output_name: "ascore/full"
+    ema_weight: 0.9
+
+  eag:
+    _target_: src.callbacks.autouad.EAGCallback
+    output_name: "ascore/full"
+    ema_weight: 0.9
+
+  excess_mass:
+    _target_: src.callbacks.goix.ExcessMassCallback
+    output_name: "ascore/full"
+    ema_weight: 0.9
+
+  mass_volume:
+    _target_: src.callbacks.goix.MassVolumeCallback
+    output_name: "ascore/full"
+    ema_weight: 0.9
+
+  loss_entropy:
+    _target_: src.callbacks.entropy.LossEntropyCallback
+    output_name: "loss/full"
+    max_rows: 100000
+    ema_weight: 0.9
+
+  sds:
+    _target_: src.callbacks.sds.SDSCallback
+    output_name: "ascore/full"
+    source: train
+    max_rows: 10000
+    ema_weight: 0.9
+
+  sds_val:
+    _target_: src.callbacks.sds.SDSCallback
+    name: sds_val
+    output_name: "ascore/full"
+    source: normal
+    max_rows: 10000
+    ema_weight: 0.9
+
+  operational_score:
+    _target_: src.callbacks.operational.OperationalScoreCallback
+    output_name: "ascore/operational"
+    ema_weight: 0.9
+
   cvar25_ema_ckpt:
     _target_: pytorch_lightning.callbacks.ModelCheckpoint
     dirpath: "${paths.checkpoints_dir}/${experiment_name}/${run_name}/summary/cvar25_ema/max"
@@ -219,6 +272,123 @@ callbacks:
     every_n_epochs: 1
     save_on_train_epoch_end: false
 
+  npd_ema_ckpt:
+    _target_: pytorch_lightning.callbacks.ModelCheckpoint
+    dirpath: "${paths.checkpoints_dir}/${experiment_name}/${run_name}/summary/npd_ema/max"
+    monitor: "val/summary/npd_ema"
+    filename: "npd_ema"
+    save_last: false
+    save_top_k: 1
+    mode: "max"
+    auto_insert_metric_name: False
+    save_weights_only: False
+    every_n_epochs: 1
+    save_on_train_epoch_end: false
+
+  rtm_ema_ckpt:
+    _target_: pytorch_lightning.callbacks.ModelCheckpoint
+    dirpath: "${paths.checkpoints_dir}/${experiment_name}/${run_name}/summary/rtm_ema/max"
+    monitor: "val/summary/rtm_ema"
+    filename: "rtm_ema"
+    save_last: false
+    save_top_k: 1
+    mode: "max"
+    auto_insert_metric_name: False
+    save_weights_only: False
+    every_n_epochs: 1
+    save_on_train_epoch_end: false
+
+  eag_ema_ckpt:
+    _target_: pytorch_lightning.callbacks.ModelCheckpoint
+    dirpath: "${paths.checkpoints_dir}/${experiment_name}/${run_name}/summary/eag_ema/max"
+    monitor: "val/summary/eag_ema"
+    filename: "eag_ema"
+    save_last: false
+    save_top_k: 1
+    mode: "max"
+    auto_insert_metric_name: False
+    save_weights_only: False
+    every_n_epochs: 1
+    save_on_train_epoch_end: false
+
+  em_ema_ckpt:
+    _target_: pytorch_lightning.callbacks.ModelCheckpoint
+    dirpath: "${paths.checkpoints_dir}/${experiment_name}/${run_name}/summary/em_ema/max"
+    monitor: "val/summary/em_ema"
+    filename: "em_ema"
+    save_last: false
+    save_top_k: 1
+    mode: "max"
+    auto_insert_metric_name: False
+    save_weights_only: False
+    every_n_epochs: 1
+    save_on_train_epoch_end: false
+
+  mv_ema_ckpt:
+    _target_: pytorch_lightning.callbacks.ModelCheckpoint
+    dirpath: "${paths.checkpoints_dir}/${experiment_name}/${run_name}/summary/mv_ema/min"
+    monitor: "val/summary/mv_ema"
+    filename: "mv_ema"
+    save_last: false
+    save_top_k: 1
+    mode: "min"
+    auto_insert_metric_name: False
+    save_weights_only: False
+    every_n_epochs: 1
+    save_on_train_epoch_end: false
+
+  entropy_ema_ckpt:
+    _target_: pytorch_lightning.callbacks.ModelCheckpoint
+    dirpath: "${paths.checkpoints_dir}/${experiment_name}/${run_name}/summary/entropy_ema/min"
+    monitor: "val/summary/entropy_ema"
+    filename: "entropy_ema"
+    save_last: false
+    save_top_k: 1
+    mode: "min"
+    auto_insert_metric_name: False
+    save_weights_only: False
+    every_n_epochs: 1
+    save_on_train_epoch_end: false
+
+  sds_ema_ckpt:
+    _target_: pytorch_lightning.callbacks.ModelCheckpoint
+    dirpath: "${paths.checkpoints_dir}/${experiment_name}/${run_name}/summary/sds_ema/min"
+    monitor: "val/summary/sds_ema"
+    filename: "sds_ema"
+    save_last: false
+    save_top_k: 1
+    mode: "min"
+    auto_insert_metric_name: False
+    save_weights_only: False
+    every_n_epochs: 1
+    save_on_train_epoch_end: false
+
+  sds_val_ema_ckpt:
+    _target_: pytorch_lightning.callbacks.ModelCheckpoint
+    dirpath: "${paths.checkpoints_dir}/${experiment_name}/${run_name}/summary/sds_val_ema/min"
+    monitor: "val/summary/sds_val_ema"
+    filename: "sds_val_ema"
+    save_last: false
+    save_top_k: 1
+    mode: "min"
+    auto_insert_metric_name: False
+    save_weights_only: False
+    every_n_epochs: 1
+    save_on_train_epoch_end: false
+
+  ascore_operational_ema_ckpt:
+    _target_: pytorch_lightning.callbacks.ModelCheckpoint
+    dirpath: "${paths.checkpoints_dir}/${experiment_name}/${run_name}/summary/ascore_operational_ema/min"
+    monitor: "val/summary/ascore_operational_ema"
+    filename: "ascore_operational_ema"
+    save_last: false
+    save_top_k: 1
+    mode: "min"
+    auto_insert_metric_name: False
+    save_weights_only: False
+    every_n_epochs: 1
+    save_on_train_epoch_end: false
+
   loss_ckpt:
     _target_: pytorch_lightning.callbacks.ModelCheckpoint
     dirpath: "${paths.checkpoints_dir}/${experiment_name}/${run_name}/normal/loss/min"
@@ -245,6 +415,15 @@ evaluation:
         w1dist_ema_normal_vs_SingleNeutrino_E-10-gun: ["min"]
         cap_ema_normal_vs_SingleNeutrino_E-10-gun: ["max"]
         consistency_ema_normal_vs_SingleNeutrino_E-10-gun: ["max"]
+        npd_ema: ["max"]
+        rtm_ema: ["max"]
+        eag_ema: ["max"]
+        em_ema: ["max"]
+        mv_ema: ["min"]
+        entropy_ema: ["min"]
+        sds_ema: ["min"]
+        sds_val_ema: ["min"]
+        ascore_operational_ema: ["min"]
       normal:
         loss: ["min"]
 

@@ -4,7 +4,7 @@ import numpy as np
 import pytest
 from scipy.stats import spearmanr
 
-from scripts.analysis import label_free_criteria as lfc
+from src.callbacks.metrics import label_free as lfc
 
 # The hand example of lit/criteria/REPORT.md, Sec. 2(g): normality scores s = -a.
 A_NORMAL = -np.array([6.0, 5.0, 4.0, 3.0, 2.0, 1.0])
@@ -40,6 +40,30 @@ def test_eag_hand_example():
     assert lfc.eag(scores, eps=0.0) == pytest.approx((gap_1 + gap_2) / 2)
 
 
+def eag_loop(normal, eps=lfc.EPS):
+    # The O(N^2) form: every split recomputed with np.mean and the two-pass np.var.
+    s = np.sort(np.asarray(normal, dtype=np.float64))[::-1]
+    count = min(lfc._top_count(lfc.EAG_TOP_PERCENT, s.size), s.size - 1)
+    gaps = []
+    for k in range(1, count + 1):
+        high, low = s[:k], s[k:]
+        w1, w0 = k / s.size, (s.size - k) / s.size
+        gap = w0 * w1 * (low.mean() - high.mean()) ** 2
+        gaps.append(gap / (w0 * low.var() + w1 * high.var() + eps))
+    return float(np.mean(gaps))
+
+
+@pytest.mark.parametrize("seed", range(5))
+def test_eag_matches_the_loop(seed):
+    rng = np.random.default_rng(seed)
+    # Integer scores tie across the split points; the offset heavy tail checks the
+    # running variances where the scores are large against their spread.
+    tied = rng.integers(0, 12, size=997).astype(float)
+    heavy = 1e3 + rng.lognormal(0.0, 2.0, size=503)
+    for scores in (tied, heavy, np.concatenate([tied, heavy])):
+        assert lfc.eag(scores) == pytest.approx(eag_loop(scores), rel=1e-9)
+
+
 def test_em_port_reproduces_the_hand_example():
     t = np.array([0.0, 1 / 6, 1 / 3, 1 / 2])
     for t_max, area in ((0.9, 1 / 9), (0.2, 5 / 36)):
@@ -62,6 +86,17 @@ def test_mass_volume_hand_example():
     grid = np.arange(0.9, 0.999, 0.001)
     assert lfc.mass_volume(A_NORMAL, A_UNIFORM, VOLUME, grid) == pytest.approx(0.294)
     assert lfc.mass_volume(A_NORMAL, A_UNIFORM, VOLUME) == pytest.approx(0.2967)
+
+
+def test_goix_needs_a_finite_positive_volume():
+    assert lfc.box_volume([0.0, 1.0], [2.0, 4.0]) == 6.0
+    assert lfc.box_volume(np.zeros(200), np.full(200, 1e3)) == math.inf
+    for volume in (math.inf, 0.0):
+        with pytest.warns(UserWarning, match="volume"):
+            area, reached = lfc.excess_mass(A_NORMAL, A_UNIFORM, volume)
+        assert math.isnan(area) and not reached
+        with pytest.warns(UserWarning, match="volume"):
+            assert math.isnan(lfc.mass_volume(A_NORMAL, A_UNIFORM, volume))
 
 
 def test_loss_entropy_matches_the_paper_and_the_code():

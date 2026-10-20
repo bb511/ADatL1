@@ -107,6 +107,8 @@ class ThresholdDriftCallback(Callback):
 
     def on_validation_epoch_end(self, trainer, pl_module):
         """Compute and log the threshold drift metric across the two data sets."""
+        if trainer.sanity_checking:
+            return
         if not self.normal_scores:
             raise RuntimeError("No normal validation scores were collected.")
 

@@ -31,7 +31,7 @@ def _module(fpr: float, **kwargs) -> SimpleNamespace:
 def _train_drift(scores: torch.Tensor, fpr: float) -> float:
     logged = {}
     module = _module(fpr, log_dict=lambda metrics, **_: logged.update(metrics))
-    trainer = SimpleNamespace(val_dataloaders={"normal": None})
+    trainer = SimpleNamespace(val_dataloaders={"normal": None}, sanity_checking=False)
     callback = TrainDrift(output_name="s")
     callback.on_fit_start(trainer, module)
     callback.on_validation_epoch_start(trainer, module)

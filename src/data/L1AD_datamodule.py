@@ -8,7 +8,7 @@ from pathlib import Path
 import torch
 from colorama import Back, Fore
 from pytorch_lightning import LightningDataModule
-from torch.utils.data import DataLoader, Dataset
+from torch.utils.data import DataLoader, Dataset, TensorDataset
 
 from src.data.components.dataset import L1ADDataset
 from src.data.components.normalization import L1DataNormalizer
@@ -171,6 +171,18 @@ class L1ADDataModule(LightningDataModule):
             raise ValueError("The predict dataloader is not implemented yet.")
 
         self._data_summary(stage)
+
+    @property
+    def data_train(self) -> TensorDataset | None:
+        """The training split as (x, mask, l1bit, y), in the order unpack_batch reads.
+
+        The rows keep their stored order and the tensors their stored dtypes (the
+        training loader casts x and y to float). None before setup and after teardown.
+        """
+        split = self._main.get("train")
+        if split is None:
+            return None
+        return TensorDataset(split.x, split.mask, split.l1bit, split.y)
 
     def train_dataloader(self) -> Dataset:
         """Create and return the training dataloader.

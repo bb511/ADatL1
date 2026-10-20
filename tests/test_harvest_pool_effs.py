@@ -236,3 +236,42 @@ def test_eval_tables_hold_their_tier(outdir):
     eff = test_cap.query("context == 'summary/eff/cap_ema_normal_vs_ref/max'")
     expected = _eff(1, 3, 1, "test", "operational")
     assert eff["eff_operational_sigB"].item() == pytest.approx(expected)
+
+
+def test_label_free_criteria_read_q_prime_from_the_history(tmp_path):
+    client = MlflowClient(f"file:{tmp_path / 'mlruns'}")
+    run_id = client.create_run(client.create_experiment("x")).info.run_id
+    now = int(time.time() * 1000)
+    histories = {
+        "val/summary/npd_ema": [0.1, 0.5, 0.3],
+        "val/summary/npd": [0.2, 0.9, 0.1],
+    }
+    metrics = [
+        Metric(key, value, now + epoch, epoch)
+        for key, values in histories.items()
+        for epoch, value in enumerate(values)
+    ]
+    client.log_batch(run_id, metrics=metrics)
+    ckpt = harvest.Checkpoint(
+        ("summary", "npd_ema", "max"), "val/summary/npd_ema", True
+    )
+    strategy = harvest._strategy(ckpt, 0.25, 28608.8064)
+    assert (strategy.label, strategy.q_history) == ("npd", "val/summary/npd")
+    epoch, monitored = harvest._best_epoch(client, run_id, ckpt)
+    raw = harvest._value_at(client, run_id, strategy.q_history, epoch)
+    assert (epoch, monitored, raw) == (1, 0.5, 0.9)
+    assert harvest._q_main(strategy, {}, {}, (epoch, monitored, raw)) == (
+        0.9,
+        "history",
+    )
+
+
+def test_q_sec_strategy_reads_the_operational_score():
+    monitor = "val/summary/ascore_operational_ema"
+    ckpt = harvest.Checkpoint(
+        ("summary", "ascore_operational_ema", "min"), monitor, False
+    )
+    strategy = harvest._strategy(ckpt, 0.25, 28608.8064)
+    assert strategy.label == "q_sec"
+    val = {"normal": 1.5, "eff_operational_sigA": 0.2}
+    assert harvest._q_main(strategy, val, {}, (3, 1.4, None)) == (1.5, "eval")

@@ -135,7 +135,7 @@ class _Collector:
         }
 
 
-def _moments(x_train: torch.Tensor) -> dict[str, torch.Tensor]:
+def input_moments(x_train: torch.Tensor) -> dict[str, torch.Tensor]:
     """Per-feature bounds, mean and standard deviation (ddof 0) over the rows."""
     return {
         "aux_lower": x_train.min(dim=0).values,
@@ -211,11 +211,11 @@ def _score_loaders(trainer, pl_module, loaders: dict, keys: list[str]) -> _Colle
     return collector
 
 
-def _score_in_eval_mode(trainer, pl_module, loaders: dict, keys: list[str]):
+def score_in_eval_mode(trainer, pl_module, loaders: dict, keys: list[str]):
     """Score extra loaders in eval mode, leaving the module's mode as it was.
 
     Iterating a DataLoader, or a model that samples, draws from the global RNG; the
-    forked streams keep the training trajectory identical to a run without the dump.
+    forked streams keep the training trajectory identical to a run without this pass.
     """
     was_training = pl_module.training
     devices = [pl_module.device] if pl_module.device.type == "cuda" else []
@@ -294,7 +294,7 @@ class ScoreDumpCallback(Callback):
         self._stored = self._stored_names(list(datamodule.val_dataloader()), list(test))
         self._test_layout = _layout(test)
         aux_meta = {"aux_seed": self.aux_seed, "aux_size": self.aux_size}
-        aux_meta.update(_moments(datamodule.data_train.tensors[0]))
+        aux_meta.update(input_moments(datamodule.data_train.tensors[0]))
         self._loaders = self._build_loaders(datamodule.data_train, test, aux_meta)
         self._meta = self._run_meta(pl_module, aux_meta)
         _make_dump_dir(self.dirpath, self.run_dir)
@@ -352,7 +352,7 @@ class ScoreDumpCallback(Callback):
         collectors = {"val": self._val}
         for split, loaders in self._loaders.items():
             keys = TRAIN_KEYS if split == "train" else self.keys
-            collectors[split] = _score_in_eval_mode(trainer, pl_module, loaders, keys)
+            collectors[split] = score_in_eval_mode(trainer, pl_module, loaders, keys)
 
         epoch = -1 if trainer.sanity_checking else trainer.current_epoch
         record = {split: c.scores() for split, c in collectors.items()}

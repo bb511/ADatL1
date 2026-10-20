@@ -8,9 +8,9 @@ from torch.utils.data import DataLoader, TensorDataset
 from src.algorithms import ADLightningModule
 from src.callbacks.score_dump import (
     ScoreDumpCallback,
-    _moments,
-    _score_in_eval_mode,
     aux_inputs,
+    input_moments,
+    score_in_eval_mode,
 )
 
 N_FEATURES = 4
@@ -315,7 +315,7 @@ def test_aux_sets_depend_only_on_the_seed(tmp_path):
 
 
 def test_aux_sets_take_the_input_shape():
-    meta = {**_moments(torch.randn(64, 3, 4, 4)), "aux_seed": 0, "aux_size": 10}
+    meta = {**input_moments(torch.randn(64, 3, 4, 4)), "aux_seed": 0, "aux_size": 10}
     for inputs in aux_inputs(meta).values():
         assert inputs.shape == (10, 3, 4, 4)
 
@@ -327,7 +327,7 @@ def test_scoring_pass_restores_mode_and_rng():
         strategy=SimpleNamespace(batch_to_device=lambda batch, device, idx: batch)
     )
     rng = torch.get_rng_state()
-    _score_in_eval_mode(trainer, module, ToyDataModule().loaders("test"), KEYS)
+    score_in_eval_mode(trainer, module, ToyDataModule().loaders("test"), KEYS)
     assert module.training
     assert torch.equal(torch.get_rng_state(), rng)
 

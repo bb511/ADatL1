@@ -97,7 +97,7 @@ class AnomalyAUPRCCallback(Callback):
         ckpt_name = Path(pl_module._ckpt_path).stem
         split = trainer.split
         plot_folder = ckpts_dir / "plots" / split / ckpt_name / auprc_name
-        plot_folder.mkdir(parents=True, exist_ok=True)
+        plots = getattr(trainer, "plot_checkpoints", True)
 
         auprcs = self._compute_auprcs()
 
@@ -113,6 +113,9 @@ class AnomalyAUPRCCallback(Callback):
             self.auprc_med[ckpt_ds] = 0.0
             self.auprc_min[ckpt_ds] = 0.0
 
+        if not plots:
+            return
+        plot_folder.mkdir(parents=True, exist_ok=True)
         ascore = f"anomaly score: {self.output_name}"
         xlabel = f"AUPRC per signal\n{ascore}"
         self._plot(auprcs, xlabel, plot_folder, percent=False)

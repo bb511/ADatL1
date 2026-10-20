@@ -128,6 +128,7 @@ def _fit(callback, root: Path, epochs: list[tuple]) -> list[dict]:
         default_root_dir=str(root),
         current_epoch=0,
         logger=None,
+        sanity_checking=False,
     )
     module = _Module()
     logged = []

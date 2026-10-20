@@ -20,7 +20,9 @@ use, to the rate tier, and to the evaluation scalar that recomputes Q′ on the
 validation split; Q′ of a CVaR strategy is the CVaR itself, not the 10³-scaled value the
 search reports to Optuna. A key outside ``FAMILIES`` (the validation loss) keeps the
 checkpoint's metric folder as its label and its best monitored value as Q′, which
-``q_source`` records.
+``q_source`` records. The label-free criteria of ``HISTORY_FAMILIES`` have no evaluation
+scalar on the LHC; their Q′ is the raw value the training callback logs beside the EMA,
+read at the checkpoint's epoch.
 
 The files keep the schema that ``notebooks/lib/effs_data.wl`` reads, one pair per tier:
 ``<experiment>.csv`` and ``<experiment>_eval.csv`` for the operational rate, and
@@ -64,6 +66,12 @@ FAMILIES = [
     (r"w1dist_ema_.+", "wasserstein", "w1dist"),
     (r"cap_ema_.+", "cap", "cap"),
     (r"consistency_ema_.+", "consistency", "consistency"),
+    (r"ascore_operational_ema", "q_sec", SEC_SCALAR),
+]
+# The label-free criteria have no evaluation scalar on the LHC: Q′ is the raw value the
+# training callback logs beside its EMA, read at the checkpoint's epoch.
+HISTORY_FAMILIES = [
+    (r"(?P<name>npd|rtm|eag|em|mv|entropy|sds|sds_val)_ema", "{name}"),
 ]
 
 OLD_COLUMNS = [
@@ -119,6 +127,7 @@ class Strategy(NamedTuple):
     tier: Tier | None  # None for a rate-free strategy
     q_scalar: str | None
     alpha: float | None  # CVaR tail fraction
+    q_history: str | None = None  # training key of the raw Q′
 
 
 def _checkpoints(params: dict[str, str]) -> list[Checkpoint]:
@@ -185,6 +194,18 @@ def _strategy(ckpt: Checkpoint, target: float, base_rate: float | None) -> Strat
         alpha = int(groups["pct"]) / 100 if "pct" in groups else None
         q_scalar = scalar.format(**groups) if scalar else None
         return Strategy(ckpt, label.format(**groups), tier, q_scalar, alpha)
+    return _history_strategy(ckpt)
+
+
+def _history_strategy(ckpt: Checkpoint) -> Strategy:
+    """A rate-free strategy whose Q′ is read from the training history, or the
+    checkpoint's metric folder as label for a key outside every family."""
+    for pattern, label in HISTORY_FAMILIES:
+        match = re.fullmatch(f"val/summary/{pattern}", ckpt.monitor)
+        if match is not None:
+            raw = ckpt.monitor.removesuffix("_ema")
+            name = label.format(**match.groupdict())
+            return Strategy(ckpt, name, None, None, None, raw)
     return Strategy(ckpt, ckpt.folder[1], None, None, None)
 
 
@@ -196,13 +217,27 @@ def _best_epoch(
     ModelCheckpoint keeps the first epoch with the best finite value, and the history
     holds one value per validation epoch.
     """
-    history = client.get_metric_history(run_id, ckpt.monitor)
-    values = [m.value for m in sorted(history, key=lambda m: (m.step, m.timestamp))]
+    values = _history(client, run_id, ckpt.monitor)
     finite = [v for v in values if math.isfinite(v)]
     if not finite:
         return None, None
     best = max(finite) if ckpt.maximize else min(finite)
     return values.index(best), best
+
+
+def _history(client: MlflowClient, run_id: str, key: str) -> list[float]:
+    """The values of a per-epoch key in epoch order."""
+    history = client.get_metric_history(run_id, key)
+    return [m.value for m in sorted(history, key=lambda m: (m.step, m.timestamp))]
+
+
+def _value_at(
+    client: MlflowClient, run_id: str, key: str | None, epoch: int | None
+) -> float | None:
+    if key is None or epoch is None:
+        return None
+    values = _history(client, run_id, key)
+    return values[epoch] if epoch < len(values) else None
 
 
 def _scalars(contexts: dict[str, dict[str, float]]) -> dict[str, float]:
@@ -248,6 +283,18 @@ def _q_eval(
     return val.get(strategy.q_scalar)
 
 
+def _q_main(
+    strategy: Strategy, val: dict[str, float], val_effs: dict[str, float], best: tuple
+) -> tuple[float | None, str]:
+    """Q′ of a row and its source: the training history, the evaluation or the monitored
+    value."""
+    if strategy.q_history is not None:
+        return best[2], "history"
+    if strategy.alpha is not None or strategy.q_scalar is not None:
+        return _q_eval(strategy, val, val_effs), "eval"
+    return best[1], "monitor"
+
+
 def _row(
     run: Run,
     strategy: Strategy,
@@ -260,13 +307,13 @@ def _row(
     val, test = _scalars(evals.get("val", {})), _scalars(evals.get("test", {}))
     val_effs = _signal_effs(val, tier, bkg_re)
     test_effs = _signal_effs(test, tier, bkg_re)
-    recomputed = strategy.alpha is not None or strategy.q_scalar is not None
+    q_main, q_source = _q_main(strategy, val, val_effs, best)
     return {
         "run_name": f"{strategy.label}_{run.info.run_name}",
         "strategy": strategy.label,
         "ckpt": "strategy",
         "epoch": best[0],
-        "optimized_main": _q_eval(strategy, val, val_effs) if recomputed else best[1],
+        "optimized_main": q_main,
         "optimized_sec": _sec(evals.get("val", {})),
         "mean_sig_eff": _mean(val_effs),
         "n_signals": len(val_effs),
@@ -276,7 +323,7 @@ def _row(
         "monitor": strategy.ckpt.monitor,
         "maximize": strategy.ckpt.maximize,
         "monitor_value": best[1],
-        "q_source": "eval" if recomputed else "monitor",
+        "q_source": q_source,
         "test_mean_sig_eff": _mean(test_effs),
         "test_n_signals": len(test_effs),
         "_label": tier.label,
@@ -294,7 +341,9 @@ def _run_rows(client: MlflowClient, run: Run, bkg_re: re.Pattern) -> list[dict]:
     tiers = sorted({s.tier for s in strategies if s.tier}) or operational
     rows = []
     for s in strategies:
-        best = _best_epoch(client, run.info.run_id, s.ckpt)
+        epoch, monitored = _best_epoch(client, run.info.run_id, s.ckpt)
+        raw = _value_at(client, run.info.run_id, s.q_history, epoch)
+        best = (epoch, monitored, raw)
         for tier in [s.tier] if s.tier else tiers:
             rows.append(_row(run, s, tier, index[s.ckpt.folder], best, bkg_re))
     return rows

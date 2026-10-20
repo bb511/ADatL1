@@ -126,6 +126,8 @@ class CAPCallback(Callback):
 
     def on_validation_epoch_end(self, trainer, pl_module):
         """Compute and log the metric across the two data sets."""
+        if trainer.sanity_checking:
+            return
         if not self.dataset_1_scores:
             raise RuntimeError(
                 f"No validation scores were collected for '{self.dataset_1_name}'."

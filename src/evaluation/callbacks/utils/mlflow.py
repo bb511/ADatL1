@@ -282,6 +282,20 @@ _ILLEGAL_METRIC_KEY_CHARS = re.compile(r"[^A-Za-z0-9_.\-/ ]")
 _MAX_METRIC_KEY_LEN = 250
 
 
+def _as_float(value) -> float:
+    if value is None:
+        return math.nan
+    return float(value.item() if hasattr(value, "item") else value)
+
+
+def _record_metrics(trainer, metrics: dict, cb_name: str | None) -> None:
+    records = getattr(trainer, "metric_records", None)
+    if not isinstance(records, dict):
+        return
+    for scalar_name, value in metrics.items():
+        records[f"{cb_name}/{scalar_name}"] = _as_float(value)
+
+
 def log_metrics_to_mlflow(
     trainer,
     metrics: dict,
@@ -295,6 +309,11 @@ def log_metrics_to_mlflow(
     segments are skipped). Each key holds exactly one value per run, so no step is
     logged and mlflow.search_runs exposes it as a plain column.
 
+    When the trainer carries a dict ``metric_records``, every scalar, finite or not
+    (None as NaN), is first written into it under '<cb_name>/<scalar>', with or
+    without an MLflow logger; the dump path of the Evaluator reads the dict after each
+    pass.
+
     No-ops when no MLflow logger is attached. Never raises: a failure to log one value
     emits a warning and continues.
 
@@ -306,6 +325,7 @@ def log_metrics_to_mlflow(
         for the key, like the artifact directories.
     :param cb_name: Name of the callback logging the metrics.
     """
+    _record_metrics(trainer, metrics, cb_name)
     mlflow_logger = get_mlflow_logger(trainer)
     if mlflow_logger is None:
         return

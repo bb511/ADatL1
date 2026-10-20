@@ -124,3 +124,38 @@ def test_cap_parameters_come_from_the_cap_group(experiments, experiment):
 
     assert blocks == ["${cap}"] * (4 if experiment in PHYSICS else 0)
     assert {"beta_min", "beta_max", "n_beta"} <= cfg["cap"].keys()
+
+
+# checkpoint key: (callback target, mode, name of the block under callbacks)
+CRITERIA = {
+    "npd": ("src.callbacks.autouad.NPDCallback", "max", "npd"),
+    "rtm": ("src.callbacks.autouad.RTMCallback", "max", "rtm"),
+    "eag": ("src.callbacks.autouad.EAGCallback", "max", "eag"),
+    "em": ("src.callbacks.goix.ExcessMassCallback", "max", "excess_mass"),
+    "mv": ("src.callbacks.goix.MassVolumeCallback", "min", "mass_volume"),
+    "entropy": ("src.callbacks.entropy.LossEntropyCallback", "min", "loss_entropy"),
+    "sds": ("src.callbacks.sds.SDSCallback", "min", "sds"),
+    "sds_val": ("src.callbacks.sds.SDSCallback", "min", "sds_val"),
+    "ascore_operational": (
+        "src.callbacks.operational.OperationalScoreCallback",
+        "min",
+        "operational_score",
+    ),
+}
+
+
+@pytest.mark.parametrize("experiment", PHYSICS)
+def test_label_free_criteria_are_logged_checkpointed_and_evaluated(
+    experiments, experiment
+):
+    cfg = experiments[experiment]
+    callbacks = cfg["callbacks"]
+    saved = {cb["monitor"]: cb for cb in _saved_folders(callbacks).values()}
+    summary = cfg["evaluation"]["evaluator"]["ckpts"]["summary"]
+    for key, (target, mode, block) in CRITERIA.items():
+        assert callbacks[block]["_target_"] == target
+        assert saved[f"val/summary/{key}_ema"]["mode"] == mode
+        assert summary[f"{key}_ema"] == [mode]
+    assert callbacks["sds_val"]["source"] == "normal"
+    assert callbacks["sds"]["source"] == "train"
+    assert not {"npd", "sds"} & cfg["evaluation"]["callbacks"].keys()

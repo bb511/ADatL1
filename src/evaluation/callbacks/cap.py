@@ -25,9 +25,10 @@ class CAP(Callback):
     This is appropriate as a validation-side proxy objective for HPO.
 
     For every checkpoint the CAP(beta) curve is written to `cap_curve.npz` (arrays
-    `betas`, `curve`) in the checkpoint's plot folder, and the maximising beta and
-    whether it sits at the upper bound of the grid are logged beside CAP. Metrics
-    without a beta curve, such as PosteriorConsistency, log only their value.
+    `betas`, `curve`) in the checkpoint's plot folder, unless the trainer's
+    `plot_checkpoints` is False, and the maximising beta and whether it sits at the
+    upper bound of the grid are logged beside CAP. Metrics without a beta curve, such
+    as PosteriorConsistency, log only their value.
 
     Subclasses select a different metric by overriding `metric_cls`, and a
     different plot label by overriding `metric_label`; see
@@ -133,12 +134,13 @@ class CAP(Callback):
         ckpt_path = Path(pl_module._ckpt_path)
         plot_folder = ckpt_path.parent / "plots" / trainer.split / ckpt_path.stem
         plot_folder = plot_folder / self.name
-        plot_folder.mkdir(parents=True, exist_ok=True)
-        np.savez(
-            plot_folder / "cap_curve.npz",
-            betas=self.capmetric.betas.cpu().numpy(),
-            curve=self.capmetric.curve.numpy(),
-        )
+        if getattr(trainer, "plot_checkpoints", True):
+            plot_folder.mkdir(parents=True, exist_ok=True)
+            np.savez(
+                plot_folder / "cap_curve.npz",
+                betas=self.capmetric.betas.cpu().numpy(),
+                curve=self.capmetric.curve.numpy(),
+            )
         return {
             f"{self.name}_beta_star": self.capmetric.beta_star,
             f"{self.name}_at_bound": float(self.capmetric.at_bound),

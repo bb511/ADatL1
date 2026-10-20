@@ -97,7 +97,9 @@ class ThresholdDriftCallback(Callback):
         ckpts_dir = Path(pl_module._ckpt_path).parent
         split = getattr(trainer, "split", "test")
         plot_folder = ckpts_dir / "plots" / split / ckpt_name / self.name
-        plot_folder.mkdir(parents=True, exist_ok=True)
+        plots = getattr(trainer, "plot_checkpoints", True)
+        if plots:
+            plot_folder.mkdir(parents=True, exist_ok=True)
 
         if not self.normal_scores:
             raise RuntimeError("No normal scores were collected.")
@@ -138,13 +140,16 @@ class ThresholdDriftCallback(Callback):
                 f"Split-transfer drift at threshold: {display_name}\n"
                 f"|log((p̂+ε)/(FPR+ε))|"
             )
-            self._plot({"normal": drift_metric}, xlabel, plot_folder, percent=False)
+            if plots:
+                self._plot({"normal": drift_metric}, xlabel, plot_folder, percent=False)
             self._store_summary(drift_metric, ckpt_name, trate_key)
             metrics[f"drift_{trate_key}"] = drift_metric
 
         utils.mlflow.log_metrics_to_mlflow(
             trainer, metrics, ckpt_name=ckpt_name, cb_name=self.name
         )
+        if not plots:
+            return
         utils.mlflow.log_plots_to_mlflow(
             trainer,
             ckpt_name,

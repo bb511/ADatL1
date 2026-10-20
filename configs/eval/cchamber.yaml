@@ -1,0 +1,193 @@
+# @package _global_
+
+# The light tunnel: every validation and test set is stored in the dump.
+
+defaults:
+  - /cap: provisional
+
+evaluation:
+  evaluator:
+    _target_: src.evaluation.evaluator.Evaluator
+    # The callback configs pass through uninstantiated: every run builds its own.
+    _recursive_: false
+    accelerator: cpu
+    devices: 1
+    logger: false
+    enable_progress_bar: false
+    enable_model_summary: false
+
+    # The callbacks of the validation pass; the test pass runs test_callbacks.
+    dump_callbacks:
+      anomaly_efficiency:
+        _target_: src.evaluation.callbacks.efficiency.AnomalyEfficiencyCallback
+        output_name: ascore/full
+        ds: null
+        null_ds: []
+        cvar_summary: 0.25
+        log_raw_mlflow: false
+      thres_drift:
+        _target_: src.evaluation.callbacks.thres_drift.ThresholdDriftCallback
+        output_name: ascore/full
+        calibration_fraction: 0.5
+        split_seed: 12345
+        log_raw_mlflow: false
+        name: thres_drift
+      wasserstein:
+        _target_: src.evaluation.callbacks.wasserstein.Wasserstein
+        output_name: ascore/full
+        dataset_1: normal
+        dataset_2: reference_normal
+        apply_log1p: true
+        log_raw_mlflow: false
+        name: wasserstein
+      cap:
+        _target_: src.evaluation.callbacks.cap.CAP
+        output_name: ascore/full
+        dataset_1: normal
+        dataset_2: reference_normal
+        pairing_type: cdf
+        cap_metric_config: ${cap}
+        log_raw_mlflow: false
+        name: cap
+      consistency:
+        _target_: src.evaluation.callbacks.consistency.PosteriorConsistency
+        output_name: ascore/full
+        dataset_1: normal
+        dataset_2: reference_normal
+        pairing_type: cdf
+        cap_metric_config: ${cap}
+        log_raw_mlflow: false
+        name: consistency
+      ascore_operational:
+        _target_: src.evaluation.callbacks.output.OutputCallback
+        output_name: ascore/operational
+        ds: [normal]
+        log_raw_mlflow: false
+        name: ascore_operational
+      npd:
+        _target_: src.evaluation.callbacks.autouad.NPD
+        name: npd
+      rtm:
+        _target_: src.evaluation.callbacks.autouad.RTM
+        name: rtm
+      eag:
+        _target_: src.evaluation.callbacks.autouad.EAG
+        name: eag
+      em:
+        _target_: src.evaluation.callbacks.goix.ExcessMass
+        name: em
+      mv:
+        _target_: src.evaluation.callbacks.goix.MassVolume
+        name: mv
+      entropy:
+        _target_: src.evaluation.callbacks.entropy.LossEntropy
+        name: entropy
+      sds:
+        _target_: src.evaluation.callbacks.sds.SDS
+        name: sds
+    test_callbacks: [anomaly_efficiency]
+
+    # The sets the validation pass appends: the three auxiliary sets, the training
+    # set and the SDS pseudo-sets of at most max_rows distinct training rows.
+    extra_sets:
+      aux: true
+      train: true
+      sds:
+        max_rows: 10000
+        row_seed: 0
+
+    selection: ${selection}
+
+# The registry of strategies: per criterion its column in val.csv, its mode and its
+# MLflow keys, the keys the training callbacks log.
+selection:
+  criteria:
+    drift:
+      column: thres_drift/drift_operational
+      mode: min
+      key: val/summary/operational_drift_ema
+    w1:
+      column: wasserstein/w1dist
+      mode: min
+      key: val/summary/w1dist_ema_normal_vs_reference_normal
+    cap:
+      column: cap/cap
+      mode: max
+      key: val/summary/cap_ema_normal_vs_reference_normal
+      skip_nonfinite: true
+    consistency:
+      column: consistency/consistency
+      mode: max
+      key: val/summary/consistency_ema_normal_vs_reference_normal
+      skip_nonfinite: true
+    npd:
+      column: npd/npd
+      mode: max
+      key: val/summary/npd_ema
+      raw_key: val/summary/npd
+    rtm:
+      column: rtm/rtm
+      mode: max
+      key: val/summary/rtm_ema
+      raw_key: val/summary/rtm
+    eag:
+      column: eag/eag
+      mode: max
+      key: val/summary/eag_ema
+      raw_key: val/summary/eag
+    em:
+      column: em/em
+      mode: max
+      key: val/summary/em_ema
+      raw_key: val/summary/em
+    mv:
+      column: mv/mv
+      mode: min
+      key: val/summary/mv_ema
+      raw_key: val/summary/mv
+    entropy:
+      column: entropy/entropy
+      mode: min
+      key: val/summary/entropy_ema
+      raw_key: val/summary/entropy
+    sds:
+      column: sds/sds
+      mode: min
+      key: val/summary/sds_ema
+      raw_key: val/summary/sds
+  q_sec:
+    column: ascore_operational/normal
+    key: val/summary/ascore_operational_ema
+    raw_key: val/normal/ascore_operational
+  # Q' alone, from the per-set validation efficiencies of the signal sets.
+  labelled:
+    oracle:
+      statistic: mean
+      key: val/summary/eff_mean_ema_operational
+      raw_key: val/summary/eff_mean_operational
+    cvar25:
+      statistic: cvar
+      alpha: 0.25
+      key: val/summary/eff_cvar25_ema_operational
+      raw_key: val/summary/eff_cvar25_operational
+    cvar10:
+      statistic: cvar
+      alpha: 0.10
+      key: val/summary/eff_cvar10_ema_operational
+      raw_key: val/summary/eff_cvar10_operational
+  # The prefix of the per-set efficiency columns.
+  efficiency: eff/eff_operational_
+  # Columns intervention and target_cluster; null makes every set its own cluster.
+  clusters: ${paths.root_dir}/scripts/cchamber/lt_target_clusters.csv
+  lattice_criteria:
+    udr: max
+    mc: max
+  # The known limit of each strategy, for the tables.
+  limits:
+    em: degenerate above about eight input dimensions (Goix); the chamber has eleven
+    mv: degenerate above about eight input dimensions (Goix); the chamber has eleven
+    entropy: on RealNVP undefined, its per-sample loss can be negative
+    sds: in-sample, the pseudo-sets come from the training inputs
+    udr: selects the untrained model where its scores do not depend on the seed
+    mc: selects the untrained model where its scores do not depend on the seed
+    q_sec: on SVDD the distance has no fixed scale across a lattice

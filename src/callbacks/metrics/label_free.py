@@ -1,14 +1,21 @@
 """Label-free model-selection criteria for anomaly detectors, as functions of scores.
 
+The criteria of a single run are computed with these functions by the training
+callbacks of src/callbacks (autouad, goix, entropy, sds) and by their evaluation
+mirrors in src/evaluation/callbacks; udr and model_centrality compare runs and serve
+the lattice step of the evaluation stage.
+
 Every function takes anomaly scores, higher meaning more anomalous, as anything that
 ``np.asarray`` accepts (CPU torch tensors included), and computes in float64. Each
 implements one published criterion, checked against the authors' public code where it
 exists; the docstrings give the source and fix every convention the source leaves open.
+A criterion that is undefined for its input returns NaN with a warning.
 
     npd                normalised pseudo discrepancy (AutoUAD), higher is better
     rtm, eag           relative top-median and expected anomaly gap (AutoUAD), higher
     excess_mass        excess-mass area (Goix), higher
     mass_volume        mass-volume area (Goix), lower
+    box_volume         the volume of the uniform box that both take
     loss_entropy       loss entropy (EntropyStop), lower
     entropy_stop       the offline stopping rule of EntropyStop
     udr                seed agreement, UDR as adapted by Ma et al., higher
@@ -90,11 +97,18 @@ def rtm(normal, eps: float = EPS) -> float:
     return float((s[s >= threshold].mean() - median) / (median + eps))
 
 
-def _anomaly_gap(high: np.ndarray, low: np.ndarray, eps: float) -> float:
-    """The anomaly gap of AutoUAD, equation (5), with population variances."""
-    w1, w0 = high.size / (high.size + low.size), low.size / (high.size + low.size)
-    gap = w0 * w1 * (low.mean() - high.mean()) ** 2
-    return gap / (w0 * low.var() + w1 * high.var() + eps)
+def _prefix_moments(x: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
+    """Mean and population variance of x[:j] for every j = 1, ..., n, (n,) each.
+
+    The sum of squared deviations grows by Welford's term (j - 1) / j (x_j -
+    mean_{j-1})^2, which is non-negative, so its cumulative sum does not cancel as the
+    difference of the sums of x^2 and of x does when the scores are large against their
+    spread.
+    """
+    j = np.arange(1, x.size + 1)
+    mean = np.cumsum(x) / j
+    terms = j[:-1] / j[1:] * (x[1:] - mean[:-1]) ** 2
+    return mean, np.concatenate([[0.0], np.cumsum(terms)]) / j
 
 
 def eag(normal, eps: float = EPS) -> float:
@@ -108,11 +122,32 @@ def eag(normal, eps: float = EPS) -> float:
     variances of the empirical distribution that Eq. (5) implies. Algorithm 1 adds eps
     as eps / N in the units of Eq. (5), and Algorithm 2 uses sample variances; both
     differ from Eq. (5) only for small k or near-constant groups.
+
+    The moments of every split come from running moments of the descending scores
+    (the k largest) and of the ascending ones (the N - k smallest), in O(N log N).
     """
-    s = np.sort(_scores(normal))[::-1]
-    count = min(_top_count(EAG_TOP_PERCENT, s.size), s.size - 1)
-    gaps = [_anomaly_gap(s[:k], s[k:], eps) for k in range(1, count + 1)]
-    return float(np.mean(gaps))
+    ascending = np.sort(_scores(normal))
+    n = ascending.size
+    k = np.arange(1, min(_top_count(EAG_TOP_PERCENT, n), n - 1) + 1)
+    mean_high, var_high = (m[k - 1] for m in _prefix_moments(ascending[::-1]))
+    mean_low, var_low = (m[n - k - 1] for m in _prefix_moments(ascending))
+    w1, w0 = k / n, (n - k) / n
+    gaps = w0 * w1 * (mean_low - mean_high) ** 2
+    return float(np.mean(gaps / (w0 * var_low + w1 * var_high + eps)))
+
+
+def box_volume(lower, upper) -> float:
+    """Volume of the axis-aligned box [lower, upper], in float64; inf on overflow."""
+    with np.errstate(over="ignore"):
+        sides = np.asarray(upper, np.float64) - np.asarray(lower, np.float64)
+        return float(np.prod(sides))
+
+
+def _is_volume(volume: float) -> bool:
+    if math.isfinite(volume) and volume > 0:
+        return True
+    warnings.warn(f"The box volume {volume} is not finite and positive; returning NaN.")
+    return False
 
 
 def _em(t: np.ndarray, t_max: float, volume: float, s_unif, s_x) -> tuple[float, bool]:
@@ -146,8 +181,12 @@ def excess_mass(
     #{s(U) > u} / n_uniform. The conventions are the code's: the strict ">" in both
     counts (the paper has ">="), EM(0) = 1, the grid t = arange(0, 100 / volume,
     0.01 / volume) of em_bench.py, and the area truncated at the first t with
-    EM(t) <= t_max. Return the area and whether t_max was reached.
+    EM(t) <= t_max. Return the area and whether t_max was reached; (NaN, False) with a
+    warning when the volume is not finite and positive, as for a box in many
+    dimensions.
     """
+    if not _is_volume(volume):
+        return math.nan, False
     t = np.arange(0, 100 / volume, 0.01 / volume)
     return _em(t, t_max, volume, -_scores(a_uniform), -_scores(a_normal))
 
@@ -174,7 +213,10 @@ def mass_volume(a_normal, a_uniform, volume: float, alphas=MV_ALPHAS) -> float:
     holds a fraction alpha of ``a_normal``, with Leb(s >= u) estimated as volume
     #{s(U) >= u} / n_uniform (the code's ">=", as in the paper); the curve is
     integrated over ``alphas``, by default em_bench.py's arange(0.9, 0.999, 0.0001).
+    NaN is returned with a warning when the volume is not finite and positive.
     """
+    if not _is_volume(volume):
+        return math.nan
     alphas = np.asarray(alphas, dtype=np.float64)
     return _mv(alphas, volume, -_scores(a_uniform), -_scores(a_normal))
 

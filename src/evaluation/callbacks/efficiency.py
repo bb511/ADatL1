@@ -40,7 +40,10 @@ class AnomalyEfficiencyCallback(Callback):
     :param output_name: Name of the output dict entry used as anomaly score.
     :param pure_thres: Whether to measure the normal exceedance rate on l1bit False
         events only; the thresholds are the module's validation-time buffers.
-    :param ds: List of dataset names to compute efficiencies on.
+    :param ds: List of dataset names to compute efficiencies on; None takes every
+        dataset whose labels are all non-zero.
+    :param null_ds: Datasets of label 0 whose pass rate at each target rate is reported
+        as 'eff_<rate>_<dataset>', like the efficiencies, and kept out of the summary.
     :param cvar_summary: Fraction of worst efficiencies to average in the summary.
     :param log_raw_mlflow: Whether to log raw plots to mlflow.
     :param name: Identifier used in plot folders and summaries.
@@ -49,7 +52,8 @@ class AnomalyEfficiencyCallback(Callback):
     def __init__(
         self,
         output_name: str,
-        ds: list[str],
+        ds: list[str] | None,
+        null_ds: list[str] | None = None,
         target_rates: list[float] | None = None,
         base_rate: float | None = None,
         pure_thres: bool = False,
@@ -62,7 +66,8 @@ class AnomalyEfficiencyCallback(Callback):
         self.name = name
 
         self.output_name = output_name
-        self.ds = set(ds)
+        self.ds = None if ds is None else set(ds)
+        self.null_ds = list(null_ds or [])
         self.target_rates = (
             None if target_rates is None else [float(x) for x in target_rates]
         )
@@ -95,6 +100,7 @@ class AnomalyEfficiencyCallback(Callback):
         self.main_rate = defaultdict(lambda: defaultdict(AnomalyRate))
         self.sig_rates = defaultdict(lambda: defaultdict(AnomalyRate))
         self.bkg_rates = defaultdict(lambda: defaultdict(AnomalyRate))
+        self.null_rates = defaultdict(dict)
         self.normal_score_data = []
 
     def on_test_batch_end(
@@ -110,8 +116,10 @@ class AnomalyEfficiencyCallback(Callback):
 
         if self.dataset_name == "normal":
             self._accumulate_normal_output(outputs, batch_idx, l1bit)
+        elif self.dataset_name in self.null_ds:
+            self._update_null_rate(outputs, batch_idx, labels)
         else:
-            if self.dataset_name not in self.ds:
+            if self.ds is not None and self.dataset_name not in self.ds:
                 return
             if batch_idx == 0:
                 self._initialize_rate_metric(labels)
@@ -124,14 +132,17 @@ class AnomalyEfficiencyCallback(Callback):
         ckpt_name = Path(pl_module._ckpt_path).stem
         split = trainer.split
         plot_folder = ckpts_dir / "plots" / split / ckpt_name / eff_name
-        plot_folder.mkdir(parents=True, exist_ok=True)
+        plots = getattr(trainer, "plot_checkpoints", True)
+        if plots:
+            plot_folder.mkdir(parents=True, exist_ok=True)
 
         metrics = {}
         for trate in self.target_rates_resolved:
             main_eff = self._compute_eff(self.main_rate, trate)
             sig_effs = self._compute_eff(self.sig_rates, trate)
             bkg_effs = self._compute_eff(self.bkg_rates, trate)
-            effs = sig_effs | bkg_effs | main_eff
+            null_effs = self._compute_eff(self.null_rates, trate)
+            effs = sig_effs | bkg_effs | null_effs | main_eff
 
             ckpt_ds = utils.misc.get_ckpt_ds_name(ckpt_name)
             sig_data = np.fromiter(sig_effs.values(), dtype=float)
@@ -145,7 +156,8 @@ class AnomalyEfficiencyCallback(Callback):
             trate_label = self._target_label(trate)
             ascore = f"anomaly score: {self.output_name}"
             xlabel = f"efficiency at threshold: {trate_label}\n{ascore}"
-            self._plot(effs, xlabel, plot_folder, percent=True)
+            if plots:
+                self._plot(effs, xlabel, plot_folder, percent=True)
             self._store_summary(sig_effs, bkg_effs, ckpt_name, trate)
             metrics[f"eff_{trate_label}"] = self.eff_summary[trate][ckpt_ds]
             metrics[f"eff_med_{trate_label}"] = self.eff_med[trate][ckpt_ds]
@@ -156,6 +168,8 @@ class AnomalyEfficiencyCallback(Callback):
         utils.mlflow.log_metrics_to_mlflow(
             trainer, metrics, ckpt_name=ckpt_name, cb_name=eff_name
         )
+        if not plots:
+            return
         utils.mlflow.log_plots_to_mlflow(
             trainer,
             ckpt_name,
@@ -263,6 +277,20 @@ class AnomalyEfficiencyCallback(Callback):
             )
             rate.update(self.normal_score_data)
             self.main_rate[target_rate][self.dataset_name] = rate
+
+    def _update_null_rate(self, outputs: dict, batch_idx: int, labels: torch.Tensor):
+        """Count the scores of a null dataset that pass each threshold."""
+        if torch.any(labels != 0):
+            raise ValueError(f"Null dataset {self.dataset_name} has non-zero labels.")
+        for target_rate in self.target_rates_resolved:
+            if batch_idx == 0:
+                rate = AnomalyRate(target_rate, self.base_rate_resolved).to(self.device)
+                rate.apply_threshold(
+                    self.thresholds[target_rate], self.tie_weights[target_rate]
+                )
+                self.null_rates[target_rate][self.dataset_name] = rate
+            rate = self.null_rates[target_rate][self.dataset_name]
+            rate.update(outputs[self.output_name])
 
     def _initialize_rate_metric(self, labels: torch.Tensor):
         """Initialize the rate metric for a signal/background dataset."""

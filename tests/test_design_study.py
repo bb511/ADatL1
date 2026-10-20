@@ -253,6 +253,22 @@ def test_held_out_table_scores_the_given_configurations(tmp_path, monkeypatch):
     assert error.value.code == 2
 
 
+def test_table_adds_every_other_strategy_but_last(tmp_path):
+    registration, _ = write_registration(tmp_path)
+    levels = {("frozen", "cap"): 0.30, ("none", "drift"): 0.25, ("none", "w1"): 0.20}
+    levels |= {("none", "npd"): 0.22, ("none", "mc"): 0.21, ("none", "last"): 0.40}
+    out = tmp_path / "held_out"
+    argv = ["--registration", str(registration), "--out", str(out)]
+    argv += input_args(tmp_path, levels) + ["--clusters", str(write_clusters(tmp_path))]
+    design.main(["table", "--held-out", *argv])
+
+    rows = table_rows(out)
+    assert list(rows) == ["frozen", "drift", "w1", "mc", "npd", "reference"]
+    for strategy in ("mc", "npd"):
+        criterion = levels[("none", strategy)] + OFFSETS.mean()
+        assert float(rows[strategy]["criterion"]) == pytest.approx(criterion)
+
+
 def test_one_standard_error_rule():
     def row(config, criterion, se, eligible, rank):
         return dict(

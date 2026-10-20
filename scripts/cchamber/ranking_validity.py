@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Ranking validity of the frozen CAP configuration, threshold drift and Wasserstein.
+"""Ranking validity of the frozen CAP configuration and of other label-free criteria.
 
 The secondary analysis ``ranking_validity`` of ``registration_limits.yaml``: does the
 value a criterion takes at the checkpoint its own chain selects rank the candidates of
@@ -11,6 +11,13 @@ and the configuration:
     cap_frozen_nearest_neighbour  strategy cap, --pairs pairs_nearest_neighbour.pt
     cap_frozen_random             strategy cap, --pairs pairs_random.pt
     drift, wasserstein            strategies drift and w1
+    npd, excess_mass, mass_volume, rtm, eag, udr, mc, sds, entropy
+                                  strategies npd, em, mv, rtm, eag, udr, mc, sds,
+                                  entropy
+
+The strategy last, every run at its last epoch, is not a criterion. ``--criteria``
+names the criteria tested, by default the five of the registration; rows of other
+criteria are left out, and the Holm family is the tested criteria times the families.
 
 Per criterion, a candidate's value is ``q_main`` of its selected row and its endpoint
 is ``efficiency_val_mean`` (efficiency at 1 %, the headline) or ``auprc_val_mean`` of
@@ -27,9 +34,9 @@ the same row, both averaged over the seeds. Over the candidates of each family:
                  correlation of the residuals of the value and endpoint ranks after a
                  least-squares line on the epoch ranks
 
-Values are not re-signed: CAP is maximised and drift and Wasserstein are minimised, so
-a valid ranking gives a positive rho for the CAP criteria and a negative one for the
-other two.
+Values are not re-signed: a valid ranking gives a positive rho for the maximised
+criteria (CAP, npd, excess_mass, rtm, eag, udr, mc) and a negative one for the
+minimised criteria (drift, wasserstein, mass_volume, sds, entropy).
 
 Outputs, in ``--out``: ``ranking_validity_<endpoint>.csv`` and a figure
 ``ranking_validity_<endpoint>.pdf`` with one panel per criterion and family.
@@ -39,6 +46,10 @@ Usage
     python scripts/cchamber/ranking_validity.py --selection \\
         frozen/selection.csv nn/selection.csv random/selection.csv \\
         baselines/selection.csv --out ranking
+    python scripts/cchamber/ranking_validity.py --selection \\
+        frozen/selection.csv baselines/selection.csv criteria/selection.csv \\
+        --criteria cap_frozen drift wasserstein npd excess_mass mass_volume rtm eag \\
+            udr mc sds --out ranking_criteria
 """
 
 from __future__ import annotations
@@ -62,7 +73,21 @@ CRITERIA = [
 ]
 ENDPOINTS = {"efficiency": "efficiency_val_mean", "auprc": "auprc_val_mean"}
 COLUMNS = {"value": "q_main", "epoch": "selected_epoch"}
-STRATEGIES = {"drift": "drift", "w1": "wasserstein"}
+STRATEGIES = {
+    "drift": "drift",
+    "w1": "wasserstein",
+    "npd": "npd",
+    "em": "excess_mass",
+    "mv": "mass_volume",
+    "rtm": "rtm",
+    "eag": "eag",
+    "udr": "udr",
+    "mc": "mc",
+    "sds": "sds",
+    "entropy": "entropy",
+}
+# Selects the last epoch of every run, so its value does not rank the candidates.
+NOT_A_CRITERION = "last"
 PERMUTATIONS, PERMUTATION_SEED, DROPPED = 10000, 4242, 3
 FIELDS = ["criterion", "family", "rho", "p", "p_holm", "rho_drop3", "rho_partial", "n"]
 
@@ -72,7 +97,9 @@ def pairing_of(config: str) -> str:
     return config.partition("_pairs_")[2] or "cdf"
 
 
-def _criterion(row: dict) -> str:
+def _criterion(row: dict) -> str | None:
+    if row["strategy"] == NOT_A_CRITERION:
+        return None
     if row["strategy"] != "cap":
         return STRATEGIES[row["strategy"]]
 
@@ -80,25 +107,26 @@ def _criterion(row: dict) -> str:
     return "cap_frozen" if pairing == "cdf" else f"cap_frozen_{pairing}"
 
 
-def _check_rows(rows: list[dict]) -> None:
+def _check_rows(rows: list[dict], criteria: list[str]) -> None:
     keys = [(r["criterion"], r["family"], r["candidate"], r["seed"]) for r in rows]
     if len(set(keys)) != len(keys):
         raise SystemExit(
             "Two rows share a criterion and run: pass one CAP configuration, with "
             "--strategies cap for the pairing runs."
         )
-    missing = set(CRITERIA) - {r["criterion"] for r in rows}
+    missing = set(criteria) - {r["criterion"] for r in rows}
     if missing:
         raise SystemExit(f"No selection rows for {sorted(missing)}.")
 
 
-def _read_rows(paths: list[Path]) -> list[dict]:
+def _read_rows(paths: list[Path], criteria: list[str]) -> list[dict]:
     rows = []
     for path in paths:
         with open(path, newline="") as file:
             rows += [{**r, "criterion": _criterion(r)} for r in csv.DictReader(file)]
 
-    _check_rows(rows)
+    rows = [row for row in rows if row["criterion"] in criteria]
+    _check_rows(rows, criteria)
     return rows
 
 
@@ -174,12 +202,12 @@ def _test_row(criterion: str, family: str, arrays: dict) -> dict:
     }
 
 
-def _table(rows: list[dict], endpoint: str) -> tuple[list[dict], dict]:
+def _table(rows: list[dict], endpoint: str, criteria: list[str]) -> tuple[list, dict]:
     """Test rows of one endpoint, Holm-adjusted together, and the arrays behind them."""
     columns = {**COLUMNS, "endpoint": ENDPOINTS[endpoint]}
     means = {name: _candidate_means(rows, col) for name, col in columns.items()}
     families = sorted({row["family"] for row in rows})
-    arrays = {(c, f): _family_arrays(means, c, f) for c in CRITERIA for f in families}
+    arrays = {(c, f): _family_arrays(means, c, f) for c in criteria for f in families}
     table = [_test_row(c, f, a) for (c, f), a in arrays.items()]
     for row, p_holm in zip(table, _holm(np.array([r["p"] for r in table]))):
         row["p_holm"] = float(p_holm)
@@ -187,17 +215,17 @@ def _table(rows: list[dict], endpoint: str) -> tuple[list[dict], dict]:
     return table, arrays
 
 
-def _plot(arrays: dict, endpoint: str, path: Path) -> None:
+def _plot(arrays: dict, endpoint: str, path: Path, criteria: list[str]) -> None:
     """Endpoint against criterion value, a row per criterion and a column per family.
 
     The criteria differ in scale and units, so each panel has its own x-axis.
     """
     families = sorted({family for _, family in arrays})
-    shape = (len(CRITERIA), len(families))
+    shape = (len(criteria), len(families))
     size = (2.6 * shape[1], 2.0 * shape[0])
     fig, axes = plt.subplots(*shape, figsize=size, sharey="col", squeeze=False)
     for (i, criterion), (j, family) in itertools.product(
-        enumerate(CRITERIA), enumerate(families)
+        enumerate(criteria), enumerate(families)
     ):
         values = arrays[criterion, family]
         axes[i, j].scatter(values["value"], values["endpoint"], s=12, color="0.2")
@@ -220,18 +248,20 @@ def _write_csv(path: Path, rows: list[dict]) -> None:
 def _parse_args(argv: list[str] | None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("--selection", nargs="+", type=Path, required=True)
+    parser.add_argument("--criteria", nargs="+", default=CRITERIA)
     parser.add_argument("--out", type=Path, required=True)
     return parser.parse_args(argv)
 
 
 def main(argv: list[str] | None = None) -> None:
     args = _parse_args(argv)
-    rows = _read_rows(args.selection)
+    rows = _read_rows(args.selection, args.criteria)
     args.out.mkdir(parents=True, exist_ok=True)
     for endpoint in ENDPOINTS:
-        table, arrays = _table(rows, endpoint)
+        table, arrays = _table(rows, endpoint, args.criteria)
         _write_csv(args.out / f"ranking_validity_{endpoint}.csv", table)
-        _plot(arrays, endpoint, args.out / f"ranking_validity_{endpoint}.pdf")
+        path = args.out / f"ranking_validity_{endpoint}.pdf"
+        _plot(arrays, endpoint, path, args.criteria)
 
 
 if __name__ == "__main__":

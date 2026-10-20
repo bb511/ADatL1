@@ -75,6 +75,7 @@ class ToyAE(ADLightningModule):
         score = err.mean(dim=1).detach()
         return {
             "loss": err.mean(),
+            "loss/full": err.mean(dim=1).detach(),
             "ascore/full": score,
             "ascore/mse": err.sum(dim=1).detach(),
             "ascore/operational": self.compute_operational_ascore(score),
@@ -109,10 +110,9 @@ def fit(root, callbacks, epochs=2, seed=0, module=None, **trainer_kwargs):
     return module, datamodule
 
 
-def dump_callback(path, aux_seed=7):
-    return ScoreDumpCallback(
-        dirpath=str(path), keys=KEYS, aux_seed=aux_seed, aux_size=50, aux_batch_size=16
-    )
+def dump_callback(path, aux_seed=7, **kwargs):
+    sizes = {"aux_size": 50, "aux_batch_size": 16, **kwargs}
+    return ScoreDumpCallback(dirpath=str(path), keys=KEYS, aux_seed=aux_seed, **sizes)
 
 
 def test_files_keys_and_shapes(tmp_path):
@@ -136,10 +136,11 @@ def test_files_keys_and_shapes(tmp_path):
             for scores in record[split][name].values():
                 assert scores.shape == (len(x),) and scores.dtype == torch.float32
 
-    for name in ("gaussian", "uniform"):
+    for name in ("gaussian", "uniform", "autouad"):
         assert meta["aux_inputs"][name].shape == (50, N_FEATURES)
         assert record["aux"][name]["ascore/full"].shape == (50,)
     assert set(record["state_dict"]) == set(module.state_dict())
+    assert "train" not in record and "train" not in meta
 
 
 def test_scores_come_from_the_epoch_weights(tmp_path):
@@ -194,3 +195,57 @@ def test_scoring_pass_restores_mode_and_rng():
     _score_in_eval_mode(trainer, module, ToyDataModule().loaders("test"), KEYS)
     assert module.training
     assert torch.equal(torch.get_rng_state(), rng)
+
+
+def assert_identical(a, b):
+    if isinstance(a, dict):
+        assert a.keys() == b.keys()
+        for key in a:
+            assert_identical(a[key], b[key])
+    elif isinstance(a, torch.Tensor):
+        assert torch.equal(a, b)
+    else:
+        assert a == b
+
+
+def test_train_loss_is_stored_without_changing_the_rest(tmp_path):
+    paths = {flag: tmp_path / f"train_loss_{flag}" for flag in (False, True)}
+    for flag, path in paths.items():
+        _, datamodule = fit(tmp_path, [dump_callback(path, train_loss=flag)])
+    meta = {f: torch.load(p / "meta.pt", weights_only=True) for f, p in paths.items()}
+    assert meta[True].pop("train")["keys"] == ["loss/full"]
+    assert_identical(meta[True], meta[False])
+
+    x_train = datamodule.data_train.tensors[0]
+    for epoch in (0, 1):
+        name = f"epoch_{epoch:04d}.pt"
+        records = {f: torch.load(p / name, weights_only=True) for f, p in paths.items()}
+        stored = records[True].pop("train")
+        assert_identical(records[True], records[False])
+        module = ToyAE()
+        module.load_state_dict(records[True]["state_dict"])
+        module.eval()
+        with torch.no_grad():
+            expected = module.model_step((x_train, None))["loss/full"]
+        assert list(stored) == ["train"] and list(stored["train"]) == ["loss/full"]
+        torch.testing.assert_close(stored["train"]["loss/full"], expected)
+
+
+def test_autouad_set_follows_the_training_moments(tmp_path):
+    size = 4000
+    fit(tmp_path, [dump_callback(tmp_path / "scores", aux_size=size)], epochs=1)
+    meta = torch.load(tmp_path / "scores" / "meta.pt", weights_only=True)
+    x_train = toy_sets()["train"][0]
+    mean, std = x_train.mean(dim=0), x_train.std(dim=0, correction=0)
+    assert torch.equal(meta["aux_mean"], mean) and torch.equal(meta["aux_std"], std)
+    autouad = meta["aux_inputs"]["autouad"]
+    torch.testing.assert_close(autouad.mean(dim=0), mean, atol=0.1, rtol=0.0)
+    torch.testing.assert_close(autouad.std(dim=0), std, atol=0.1, rtol=0.0)
+
+    # The two sets as the dump drew them before the autouad set existed.
+    gen = torch.Generator().manual_seed(7)
+    lower, upper = x_train.min(dim=0).values, x_train.max(dim=0).values
+    gaussian = torch.randn((size, N_FEATURES), generator=gen)
+    uniform = lower + (upper - lower) * torch.rand((size, N_FEATURES), generator=gen)
+    assert torch.equal(meta["aux_inputs"]["gaussian"], gaussian)
+    assert torch.equal(meta["aux_inputs"]["uniform"], uniform)

@@ -5,18 +5,27 @@ checkpoint selection on them without retraining. Layout of ``dirpath``:
 
     meta.pt            written once, after the first validation epoch
         target_rate, base_rate, target_fpr, module
-        val, test, aux: {"names": [...], "keys": [...],
-                         "batch_sizes": {name: [int]}, "labels": {name: [int]}}
-        aux_seed, aux_lower, aux_upper: (d,) bounds of the training inputs
-        aux_inputs: {"gaussian", "uniform"}: (aux_size, d), normalised input space
+        val, test, aux[, train]: {"names": [...], "keys": [...],
+                                  "batch_sizes": {name: [int]},
+                                  "labels": {name: [int]}}
+        aux_seed
+        aux_lower, aux_upper: (d,) bounds of the training inputs
+        aux_mean, aux_std: (d,) mean and standard deviation (ddof 0) of the same
+        aux_inputs: (aux_size, d) sets in the normalised input space, "gaussian"
+                    N(0, I), "uniform" over the bounds, "autouad"
+                    N(aux_mean, diag aux_std^2)
     epoch_<nnnn>.pt    one per validation epoch, the sanity check excluded
         epoch
         val, test, aux: {name: {key: (n,) scores in loader order}}
+        train: {"train": {"loss/full": (n_train,)}}, with train_loss only
         state_dict: the module's weights and buffers, on CPU
 
 The validation scores are the ``outputs`` the other callbacks receive in
-``on_validation_batch_end``. The test and auxiliary sets are scored by a separate pass
-through ``model_step`` at the end of each validation epoch.
+``on_validation_batch_end``. The test and auxiliary sets, and with ``train_loss`` the
+training set in its stored order, are scored by a separate pass through ``model_step``
+in eval mode at the end of each validation epoch. The per-sample training loss feeds
+the loss entropy of EntropyStop (Huang et al., KDD 2024), and the ``autouad`` set the
+noise of AutoUAD's NPD (Dai and Fan, ICLR 2025).
 """
 
 import os
@@ -27,6 +36,9 @@ from pytorch_lightning import Callback
 from torch.utils.data import DataLoader, TensorDataset
 
 from src.data.utils import unpack_batch
+
+# The per-sample loss, the only quantity stored for the training set.
+TRAIN_KEYS = ["loss/full"]
 
 
 def _per_event(score, key: str, n: int) -> torch.Tensor:
@@ -80,16 +92,28 @@ class _Collector:
         }
 
 
-def _aux_inputs(
-    lower: torch.Tensor, upper: torch.Tensor, size: int, seed: int
-) -> dict[str, torch.Tensor]:
+def _moments(x_train: torch.Tensor) -> dict[str, torch.Tensor]:
+    """Per-feature bounds, mean and standard deviation (ddof 0) of the inputs, (d,)."""
+    return {
+        "aux_lower": x_train.min(dim=0).values,
+        "aux_upper": x_train.max(dim=0).values,
+        "aux_mean": x_train.mean(dim=0),
+        "aux_std": x_train.std(dim=0, correction=0),
+    }
+
+
+def _aux_inputs(moments: dict, size: int, seed: int) -> dict[str, torch.Tensor]:
     # A private generator keeps the sets identical across epochs and across runs
-    # that share the seed and the training data.
+    # that share the seed and the training data. The autouad set is drawn last, so
+    # that gaussian and uniform are those of the dumps written before it existed.
     gen = torch.Generator().manual_seed(seed)
+    lower, upper = moments["aux_lower"], moments["aux_upper"]
     shape = (size, *lower.shape)
     gaussian = torch.randn(shape, generator=gen)
     uniform = lower + (upper - lower) * torch.rand(shape, generator=gen)
-    return {"gaussian": gaussian, "uniform": uniform}
+    noise = torch.randn(shape, generator=gen)
+    autouad = moments["aux_mean"] + moments["aux_std"] * noise
+    return {"gaussian": gaussian, "uniform": uniform, "autouad": autouad}
 
 
 def _aux_loaders(inputs: dict[str, torch.Tensor], batch_size: int) -> dict:
@@ -147,9 +171,12 @@ class ScoreDumpCallback(Callback):
         must not already hold epoch files, so that two runs are never mixed.
     :param keys: Per-event output keys to store; keys a module does not emit are
         skipped.
-    :param aux_seed: Seed of the two auxiliary input sets.
+    :param aux_seed: Seed of the auxiliary input sets.
     :param aux_size: Number of points in each auxiliary set.
-    :param aux_batch_size: Batch size of the pass over the auxiliary sets.
+    :param aux_batch_size: Batch size of the pass over the auxiliary sets, and over
+        the training set with ``train_loss``.
+    :param train_loss: Also store the per-sample loss of the training set at every
+        validation epoch.
     """
 
     def __init__(
@@ -159,6 +186,7 @@ class ScoreDumpCallback(Callback):
         aux_seed: int,
         aux_size: int = 10000,
         aux_batch_size: int = 1024,
+        train_loss: bool = False,
     ):
         super().__init__()
         self.dirpath = Path(dirpath)
@@ -166,25 +194,33 @@ class ScoreDumpCallback(Callback):
         self.aux_seed = aux_seed
         self.aux_size = aux_size
         self.aux_batch_size = aux_batch_size
+        self.train_loss = train_loss
         self._val = _Collector(self.keys)
         self._meta_written = False
 
     def on_fit_start(self, trainer, pl_module):
-        """Build the test and auxiliary loaders, once per run."""
+        """Build the test, auxiliary and training loaders, once per run."""
         if trainer.world_size > 1:
             raise RuntimeError("ScoreDumpCallback sees one rank's batches only.")
         if any(self.dirpath.glob("epoch_*.pt")):
             raise RuntimeError(f"{self.dirpath} already holds a score dump.")
 
-        x_train = trainer.datamodule.data_train.tensors[0]
-        lower, upper = x_train.min(dim=0).values, x_train.max(dim=0).values
-        inputs = _aux_inputs(lower, upper, self.aux_size, self.aux_seed)
-        aux = _aux_loaders(inputs, self.aux_batch_size)
-        self._loaders = {"test": _test_loaders(trainer.datamodule), "aux": aux}
-        self._meta = self._run_meta(pl_module, inputs, lower, upper)
+        moments = _moments(trainer.datamodule.data_train.tensors[0])
+        inputs = _aux_inputs(moments, self.aux_size, self.aux_seed)
+        self._loaders = self._build_loaders(trainer.datamodule, inputs)
+        self._meta = self._run_meta(pl_module, inputs, moments)
         self.dirpath.mkdir(parents=True, exist_ok=True)
 
-    def _run_meta(self, pl_module, inputs: dict, lower, upper) -> dict:
+    def _build_loaders(self, datamodule, inputs: dict) -> dict:
+        aux = _aux_loaders(inputs, self.aux_batch_size)
+        loaders = {"test": _test_loaders(datamodule), "aux": aux}
+        if self.train_loss:
+            # Unshuffled, so that the losses follow the rows of data_train.
+            train = DataLoader(datamodule.data_train, batch_size=self.aux_batch_size)
+            loaders["train"] = {"train": train}
+        return loaders
+
+    def _run_meta(self, pl_module, inputs: dict, moments: dict) -> dict:
         module_cls = type(pl_module)
         return {
             "target_rate": pl_module.hparams.target_rate,
@@ -192,8 +228,7 @@ class ScoreDumpCallback(Callback):
             "target_fpr": pl_module.compute_target_fpr(),
             "module": f"{module_cls.__module__}.{module_cls.__qualname__}",
             "aux_seed": self.aux_seed,
-            "aux_lower": lower,
-            "aux_upper": upper,
+            **moments,
             "aux_inputs": inputs,
         }
 
@@ -210,15 +245,14 @@ class ScoreDumpCallback(Callback):
         self._val.add(name, outputs, batch)
 
     def on_validation_epoch_end(self, trainer, pl_module):
-        """Score the test and auxiliary sets, then write the epoch's file."""
+        """Score the test, auxiliary and training sets, then write the epoch's file."""
         if trainer.sanity_checking:
             return
 
         collectors = {"val": self._val}
         for split, loaders in self._loaders.items():
-            collectors[split] = _score_in_eval_mode(
-                trainer, pl_module, loaders, self.keys
-            )
+            keys = TRAIN_KEYS if split == "train" else self.keys
+            collectors[split] = _score_in_eval_mode(trainer, pl_module, loaders, keys)
 
         epoch = trainer.current_epoch
         record = {split: c.scores() for split, c in collectors.items()}

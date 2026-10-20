@@ -24,13 +24,14 @@ Outputs, in ``--out``:
                    candidate, seed, score_key, torch_seed, strategy, selected_ckpt,
                    selected_epoch, q_main (Q'), q_sec (Q''), beta_star and at_bound
                    (CAP's maximising beta and grid-bound flag at the selected epoch,
-                   empty for drift and w1), efficiency_val_mean, auprc_val_mean,
-                   efficiency_test_mean, auprc_test_mean (means over the signal
-                   sets), pareto, best
+                   empty for the other strategies), efficiency_val_mean,
+                   auprc_val_mean, efficiency_test_mean, auprc_test_mean (means over
+                   the signal sets), pareto, best
     metrics.csv    one row per (run, selected epoch, split, dataset): threshold,
                    tie_weight, efficiency, AUPRC
     trace.csv      one row per (configuration, run, epoch): every quantity of step 1,
-                   with CAP's cap_beta_star and cap_at_bound
+                   with CAP's cap_beta_star and cap_at_bound, and the value, the
+                   EMA and the traced columns of every replay strategy
 
 A run directory maps to (family, candidate, seed) through ``--run-pattern``, a regular
 expression with those named groups searched in the directory path; the default reads
@@ -50,6 +51,32 @@ skip it, so it would enter their averages, while the dump does not store it.
 ``make_pairs.py`` stores, and appends the file's stem to every configuration name, as
 in ``frozen_pairs_random``.
 
+Beside the three strategies of the training callbacks, the replay selects with the
+label-free criteria of ``scripts/analysis/label_free_criteria.py``, each computed per
+epoch on the declared score and selected through the same EMA as drift and w1 (first
+value raw, then 0.9 ema + 0.1 raw, no value skipped) and the same checkpoint rule.
+Their keys, ``val/summary/<strategy>_ema``, are the replay's own: no training callback
+logs them. Strategy (mode): what it reads beside validation ``normal``.
+
+    npd (max)      aux autouad, the dump's own set when the dump holds one, else the
+                   side-car's; traced with npd_stored (against the dump's gaussian
+                   set) and npd_gap (mean of autouad minus mean of normal)
+    em (max)       aux uniform and the dump's box volume; traced with em_100k (against
+                   uniform_100k) and em_reached (1 when EM reaches t_max)
+    mv (min)       aux uniform; traced with mv_100k
+    rtm, eag (max) nothing else
+    udr, mc (max)  the values of the consensus side-car
+    sds (min)      aux sds_targets and sds_outliers, at the epoch's operational
+                   threshold and tie weight
+    entropy (min)  the per-sample training loss train/train/loss/full
+    last (max)     nothing: the value is the epoch, so the last epoch is selected
+
+The sets and values that a dump lacks come from the side-car roots of
+``pool_sidecars.py``, given with ``--sidecar`` (repeatable): ``<root>/<run_name>/``,
+where ``run_name`` is the parent of the score directory, holds one file per epoch whose
+sets and values are added to the epoch's record. A strategy whose inputs are missing
+raises with the run's path.
+
 Usage
 -----
     python scripts/cchamber/offline_select.py pool/*/scores \\
@@ -60,6 +87,10 @@ Usage
         --torch-seed 20261007 --out frozen_out --workers 48
     python scripts/cchamber/offline_select.py pool/*/scores \\
         --strategies drift w1 --torch-seed 20261007 --out baselines_out
+    python scripts/cchamber/offline_select.py pool/*/scores \\
+        --strategies npd em mv rtm eag udr mc sds last --torch-seed 20261007 \\
+        --sidecar sidecars/rescore --sidecar sidecars/consensus \\
+        --out criteria_out --workers 16
 """
 
 from __future__ import annotations
@@ -83,6 +114,7 @@ from torchmetrics.classification import BinaryAveragePrecision
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
+from scripts.analysis import label_free_criteria as lfc  # noqa: E402
 from src.algorithms import ADLightningModule  # noqa: E402
 from src.callbacks.cap import CAPCallback  # noqa: E402
 from src.callbacks.metrics.rate import AnomalyRate  # noqa: E402
@@ -102,6 +134,35 @@ MONITORS = {
     "drift": ("val/summary/operational_drift_ema", "min"),
     "w1": ("val/summary/w1dist_ema_normal_vs_reference_normal", "min"),
 }
+# The replay-only strategies: (EMA key, mode), keys that no training callback logs.
+REPLAY_MONITORS = {
+    "npd": ("val/summary/npd_ema", "max"),
+    "em": ("val/summary/em_ema", "max"),
+    "mv": ("val/summary/mv_ema", "min"),
+    "rtm": ("val/summary/rtm_ema", "max"),
+    "eag": ("val/summary/eag_ema", "max"),
+    "udr": ("val/summary/udr_ema", "max"),
+    "mc": ("val/summary/mc_ema", "max"),
+    "sds": ("val/summary/sds_ema", "min"),
+    "entropy": ("val/summary/entropy_ema", "min"),
+    "last": ("val/summary/last_ema", "max"),
+}
+STRATEGIES = {**MONITORS, **REPLAY_MONITORS}
+# The (part, name) entries of an epoch's record that a replay strategy reads beside
+# validation normal.
+INPUTS = {
+    "npd": [("aux", "autouad"), ("aux", "gaussian")],
+    "em": [("aux", "uniform"), ("aux", "uniform_100k")],
+    "mv": [("aux", "uniform"), ("aux", "uniform_100k")],
+    "udr": [("values", "udr")],
+    "mc": [("values", "mc")],
+    "sds": [("aux", "sds_targets"), ("aux", "sds_outliers")],
+    "entropy": [("train", "train")],
+}
+# The weight of the previous value in the EMA of the training callbacks.
+EMA_WEIGHT = 0.9
+# The per-sample loss that the dump stores for the training set.
+TRAIN_KEY = "loss/full"
 # The runs that compete for selection: candidates of one family and seed.
 GROUP = ("config", "strategy", "family", "seed")
 DEFAULT_PATTERN = r"(?P<family>[a-z]+)_(?P<candidate>\d+)_s(?P<seed>\d+)"
@@ -180,7 +241,7 @@ def _callbacks(strategies: list[str], key: str, cap_cfg: dict) -> dict:
         "drift": lambda: _Drift(output_name=key, **DRIFT_KWARGS),
         "w1": lambda: _W1(output_name=key, **PAIR, **W1_KWARGS),
     }
-    callbacks = {strategy: make[strategy]() for strategy in strategies}
+    callbacks = {s: make[s]() for s in strategies if s in make}
     for callback in callbacks.values():
         callback.on_fit_start(None, None)
 
@@ -240,15 +301,95 @@ def _strategy_values(callbacks: dict, module: _Module, val: dict, key: str, seed
     return row
 
 
+def _volume(meta: dict) -> float:
+    """Volume of the box of the dump's uniform set."""
+    return float(torch.prod((meta["aux_upper"] - meta["aux_lower"]).double()))
+
+
+def _npd(scores: dict, meta: dict, epoch: int) -> dict:
+    normal, aux = scores["val"]["normal"], scores["aux"]
+    row = {"npd": lfc.npd(normal, aux["autouad"])}
+    row["npd_stored"] = lfc.npd(normal, aux["gaussian"])
+    row["npd_gap"] = (aux["autouad"].double().mean() - normal.double().mean()).item()
+    return row
+
+
+def _em(scores: dict, meta: dict, epoch: int) -> dict:
+    normal, aux, volume = scores["val"]["normal"], scores["aux"], _volume(meta)
+    em, reached = lfc.excess_mass(normal, aux["uniform"], volume)
+    em_100k, _ = lfc.excess_mass(normal, aux["uniform_100k"], volume)
+    return {"em": em, "em_100k": em_100k, "em_reached": float(reached)}
+
+
+def _mv(scores: dict, meta: dict, epoch: int) -> dict:
+    normal, aux, volume = scores["val"]["normal"], scores["aux"], _volume(meta)
+    mv_100k = lfc.mass_volume(normal, aux["uniform_100k"], volume)
+    return {"mv": lfc.mass_volume(normal, aux["uniform"], volume), "mv_100k": mv_100k}
+
+
+def _sds(scores: dict, meta: dict, epoch: int) -> dict:
+    # The operational cut of the epoch, as _epoch_metrics sets it.
+    rate = AnomalyRate(meta["target_rate"], meta["base_rate"])
+    rate.set_threshold(scores["val"]["normal"])
+    cut = (rate.threshold.item(), rate.tie_weight.item())
+    aux = scores["aux"]
+    return {"sds": lfc.sds_error(aux["sds_targets"], aux["sds_outliers"], *cut)}
+
+
+# Strategy: the trace columns of one epoch, the strategy's own value under its name.
+REPLAY_VALUES = {
+    "npd": _npd,
+    "em": _em,
+    "mv": _mv,
+    "rtm": lambda scores, meta, epoch: {"rtm": lfc.rtm(scores["val"]["normal"])},
+    "eag": lambda scores, meta, epoch: {"eag": lfc.eag(scores["val"]["normal"])},
+    "udr": lambda scores, meta, epoch: {"udr": scores["values"]["udr"]},
+    "mc": lambda scores, meta, epoch: {"mc": scores["values"]["mc"]},
+    "sds": _sds,
+    "entropy": lambda scores, meta, epoch: {
+        "entropy": lfc.loss_entropy(scores["train"]["train"])
+    },
+    "last": lambda scores, meta, epoch: {"last": float(epoch)},
+}
+
+
+class _Criterion:
+    """A replay-only strategy, with the EMA of ThresholdDriftCallback and
+    WassersteinCallback: the first value as it is, then w ema + (1 - w) value, a
+    non-finite value included."""
+
+    def __init__(self, strategy: str):
+        self.strategy = strategy
+        self.ema = None
+
+    def update(self, scores: dict, meta: dict, epoch: int) -> dict:
+        row = REPLAY_VALUES[self.strategy](scores, meta, epoch)
+        value = float(row[self.strategy])
+        if self.ema is None:
+            self.ema = value
+        else:
+            self.ema = EMA_WEIGHT * self.ema + (1 - EMA_WEIGHT) * value
+        return {**row, f"{self.strategy}_ema": self.ema}
+
+
+def _replay_values(criteria: list[_Criterion], scores: dict, meta: dict, epoch: int):
+    row = {}
+    for criterion in criteria:
+        row.update(criterion.update(scores, meta, epoch))
+    return row
+
+
 def _trace(run: dict, strategies: list[str], key: str, cap_cfg: dict, seed: int):
     """Per-epoch values of one run, as training computes and logs them."""
     meta, callbacks = run["meta"], _callbacks(strategies, key, cap_cfg)
+    criteria = [_Criterion(s) for s in strategies if s in REPLAY_MONITORS]
     module, sizes = _Module(meta), meta["val"]["batch_sizes"]["normal"]
     rows = []
     for epoch, scores in enumerate(run["epochs"]):
         val = scores["val"]
         operational = _operational(val["normal"], sizes, meta["target_fpr"])
         values = _strategy_values(callbacks, module, val, key, seed)
+        values.update(_replay_values(criteria, scores, meta, epoch))
         rows.append({"epoch": epoch, **operational, **values})
 
     return rows
@@ -274,7 +415,7 @@ def _checkpoint_epoch(values: list[float], mode: str) -> int:
 
 def _select(trace: list[dict], strategy: str) -> dict:
     """The one candidate of a strategy: the epoch its ModelCheckpoint keeps."""
-    monitor, mode = MONITORS[strategy]
+    monitor, mode = STRATEGIES[strategy]
     emas = [_as_logged(row[f"{strategy}_ema"], 1) for row in trace]
     epoch = _checkpoint_epoch(emas, mode)
     row, cap = trace[epoch], strategy == "cap"
@@ -350,25 +491,74 @@ def _means(rows: list[dict]) -> dict[str, float]:
     return means
 
 
-def _epoch_scores(path: Path, key: str, epoch: int) -> dict:
+def _keyed(sets: dict, key: str) -> dict:
+    return {name: scores[key] for name, scores in sets.items()}
+
+
+def _merge(scores: dict, path: Path, key: str, epoch: int) -> None:
+    """Add the sets and values of a side-car epoch file to an epoch's scores.
+
+    A name already present raises, so that no stored set is replaced.
+    """
+    sidecar = torch.load(path, weights_only=True)
+    if sidecar["epoch"] != epoch:
+        raise RuntimeError(f"{path} holds epoch {sidecar['epoch']}, not {epoch}.")
+    new = {"aux": _keyed(sidecar["aux"], key), "values": sidecar["values"]}
+    for part, entries in new.items():
+        repeated = sorted(set(entries) & set(scores[part]))
+        if repeated:
+            raise ValueError(f"{path} repeats {part} entries {repeated}.")
+        scores[part].update(entries)
+
+
+def _epoch_scores(path: Path, key: str, epoch: int, sidecars: tuple[Path, ...] = ()):
+    """Scores of one key in every split of an epoch's record, the training losses, and
+    the sets and values of the side-car files of that epoch."""
     record = torch.load(path, weights_only=True)
     if record["epoch"] != epoch:
         raise RuntimeError(f"{path.parent}: epoch {epoch} is missing.")
     if key not in record["val"]["normal"]:
         raise KeyError(f"{path.parent} stores {sorted(record['val']['normal'])}.")
 
-    return {s: {n: v[key] for n, v in record[s].items()} for s in ("val", "test")}
+    scores = {s: _keyed(record.get(s, {}), key) for s in ("val", "test", "aux")}
+    scores.update(train=_keyed(record.get("train", {}), TRAIN_KEY), values={})
+    for sidecar in sidecars:
+        _merge(scores, sidecar, key, epoch)
+    return scores
 
 
-def _load_run(run_dir: Path, key: str) -> dict:
-    """Meta and the per-epoch validation and test scores of one key."""
+def _sidecar_paths(directory: Path, n_epochs: int) -> list[Path]:
+    """A run's side-car epoch files under one root, none if the root lacks the run."""
+    if not directory.is_dir():
+        return []
+    paths = sorted(directory.glob("epoch_*.pt"))
+    if len(paths) != n_epochs:
+        raise RuntimeError(f"{directory}: {len(paths)} files for {n_epochs} epochs.")
+    return paths
+
+
+def _load_run(run_dir: Path, key: str, sidecars: tuple[Path, ...] = ()) -> dict:
+    """Meta and the per-epoch scores of one key, with the side-cars merged in."""
     paths = sorted(run_dir.glob("epoch_*.pt"))
     if not paths:
         raise RuntimeError(f"{run_dir} holds no epoch files.")
 
-    epochs = [_epoch_scores(path, key, epoch) for epoch, path in enumerate(paths)]
+    name, n = run_dir.parent.name, len(paths)
+    extra = [_sidecar_paths(root / name, n) for root in sidecars]
+    extra = [[files[e] for files in extra if files] for e in range(n)]
+    epochs = [_epoch_scores(path, key, e, extra[e]) for e, path in enumerate(paths)]
     meta = torch.load(run_dir / "meta.pt", weights_only=True)
     return {"meta": meta, "epochs": epochs}
+
+
+def _check_inputs(run: dict, strategies: list[str], run_dir: str) -> None:
+    for strategy in strategies:
+        for part, name in INPUTS.get(strategy, ()):
+            if any(name not in scores[part] for scores in run["epochs"]):
+                raise ValueError(
+                    f"{run_dir}: {strategy} needs {part}/{name}, which neither the "
+                    "dump nor a side-car holds."
+                )
 
 
 def _units(run: dict, trace: list[dict], strategies: list[str], head: dict):
@@ -386,8 +576,9 @@ def _units(run: dict, trace: list[dict], strategies: list[str], head: dict):
 
 def _score_task(task: tuple) -> dict:
     """Trace, selection and metrics of one run under one CAP configuration."""
-    identity, config, cap_cfg, strategies, key, seed = task
-    run = _load_run(Path(identity["run"]), key)
+    identity, config, cap_cfg, strategies, key, seed, sidecars = task
+    run = _load_run(Path(identity["run"]), key, sidecars)
+    _check_inputs(run, strategies, identity["run"])
     trace = _trace(run, strategies, key, cap_cfg, seed)
     head = {"config": config, **identity, "score_key": key, "torch_seed": seed}
     units, metrics = _units(run, trace, strategies, head)
@@ -480,7 +671,7 @@ def _dominates(a: tuple[float, float], b: tuple[float, float]) -> bool:
 def _flag_group(group: list[dict]) -> None:
     """Mark the Pareto front over (Q', Q'') and the best-Q' run, ties to the lower
     id."""
-    maximise = MONITORS[group[0]["strategy"]][1] == "max"
+    maximise = STRATEGIES[group[0]["strategy"]][1] == "max"
     points = [
         (_badness(u["q_main"], maximise), _badness(u["q_sec"], False)) for u in group
     ]
@@ -522,10 +713,11 @@ def _parse_args(argv: list[str] | None) -> argparse.Namespace:
     parser.add_argument("--torch-seed", type=int, required=True)
     parser.add_argument("--score-key", default="ascore/full")
     parser.add_argument(
-        "--strategies", nargs="+", default=list(MONITORS), choices=list(MONITORS)
+        "--strategies", nargs="+", default=list(MONITORS), choices=list(STRATEGIES)
     )
     parser.add_argument("--run-pattern", default=DEFAULT_PATTERN)
     parser.add_argument("--pairs", type=Path)
+    parser.add_argument("--sidecar", action="append", default=[], type=Path)
     parser.add_argument("--out", type=Path, required=True)
     parser.add_argument("--workers", type=int, default=1)
     return parser.parse_args(argv)
@@ -559,7 +751,7 @@ def _tasks(args: argparse.Namespace) -> list[tuple]:
     if len({(r["family"], r["candidate"], r["seed"]) for r in runs}) != len(runs):
         raise SystemExit("Two run directories map to the same run key.")
 
-    fixed = (args.strategies, args.score_key, args.torch_seed)
+    fixed = (args.strategies, args.score_key, args.torch_seed, tuple(args.sidecar))
     configs = configs or [("none", {})]
     return [(run, name, cfg, *fixed) for run in runs for name, cfg in configs]
 

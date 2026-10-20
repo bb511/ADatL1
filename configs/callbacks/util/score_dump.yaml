@@ -9,3 +9,4 @@ keys: ["ascore/full", "ascore/mse", "ascore/kl", "ascore/residual_oas"]
 aux_seed: 0
 aux_size: 10000
 aux_batch_size: 1024
+train_loss: false

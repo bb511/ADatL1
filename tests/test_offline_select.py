@@ -11,6 +11,7 @@ from pytorch_lightning import Callback
 from pytorch_lightning.callbacks import ModelCheckpoint
 from sklearn.metrics import average_precision_score
 
+from scripts.analysis import label_free_criteria as lfc
 from scripts.cchamber import offline_select as offline
 from src.callbacks.cap import CAPCallback
 from src.callbacks.metrics.rate import AnomalyRate
@@ -375,3 +376,104 @@ def test_main_writes_consistent_tables(tmp_path):
             for form in ("nested", "flat")
         ]
         assert lines[0] == lines[1]
+
+
+def write_criteria_run(root, epochs=6):
+    # A dump with auxiliary and training sets, and a rescore and a consensus side-car.
+    gen = torch.Generator().manual_seed(11)
+    run = write_run(root / "pool" / "ae_000_s1" / "scores", epochs=epochs)
+    meta = torch.load(run / "meta.pt", weights_only=True)
+    bounds = {"aux_lower": torch.zeros(3), "aux_upper": torch.tensor([1.0, 2.0, 3.0])}
+    torch.save({**meta, **bounds}, run / "meta.pt")
+    roots = [root / "rescore", root / "consensus"]
+    arrays = []
+    for epoch in range(epochs):
+        path = run / f"epoch_{epoch:04d}.pt"
+        record = torch.load(path, weights_only=True)
+        sets = {
+            "gaussian": torch.rand(80, generator=gen) + 0.1,
+            "uniform": 2.0 * torch.rand(200, generator=gen) + 0.2,
+            "autouad": 1.5 * torch.rand(60, generator=gen) + 0.3,
+            "uniform_100k": 2.0 * torch.rand(500, generator=gen) + 0.2,
+            "sds_targets": torch.rand(40, generator=gen),
+            "sds_outliers": torch.rand(20, generator=gen) + 0.5,
+        }
+        train = torch.rand(30, generator=gen) + 0.1
+        values = {"udr": torch.rand(1, generator=gen).item(), "mc": 0.5 - 0.01 * epoch}
+        record["aux"] = {n: {KEY: sets[n]} for n in ("gaussian", "uniform")}
+        record["train"] = {"train": {"loss/full": train}}
+        torch.save(record, path)
+        rescored = {n: {KEY: v} for n, v in sets.items() if n not in record["aux"]}
+        files = [{"aux": rescored, "values": {}}, {"aux": {}, "values": values}]
+        for directory, content in zip(roots, files):
+            (directory / "ae_000_s1").mkdir(parents=True, exist_ok=True)
+            torch.save({"epoch": epoch, **content}, directory / "ae_000_s1" / path.name)
+        normal = record["val"]["normal"][KEY]
+        arrays.append({"normal": normal, **sets, "train": train, **values})
+    return run, roots, arrays
+
+
+def expected_values(a, epoch):
+    rate = AnomalyRate(META["target_rate"], META["base_rate"])
+    rate.set_threshold(a["normal"])
+    cut = (rate.threshold.item(), rate.tie_weight.item())
+    em, reached = lfc.excess_mass(a["normal"], a["uniform"], 6.0)
+    return {
+        "npd": lfc.npd(a["normal"], a["autouad"]),
+        "npd_stored": lfc.npd(a["normal"], a["gaussian"]),
+        "npd_gap": (a["autouad"].double().mean() - a["normal"].double().mean()).item(),
+        "em": em,
+        "em_reached": float(reached),
+        "em_100k": lfc.excess_mass(a["normal"], a["uniform_100k"], 6.0)[0],
+        "mv": lfc.mass_volume(a["normal"], a["uniform"], 6.0),
+        "mv_100k": lfc.mass_volume(a["normal"], a["uniform_100k"], 6.0),
+        "rtm": lfc.rtm(a["normal"]),
+        "eag": lfc.eag(a["normal"]),
+        "udr": a["udr"],
+        "mc": a["mc"],
+        "sds": lfc.sds_error(a["sds_targets"], a["sds_outliers"], *cut),
+        "entropy": lfc.loss_entropy(a["train"]),
+        "last": float(epoch),
+    }
+
+
+def test_replay_criteria_follow_the_functions(tmp_path):
+    run, roots, arrays = write_criteria_run(tmp_path)
+    strategies = list(offline.REPLAY_MONITORS)
+    argv = [str(run), "--strategies", *strategies, "--torch-seed", str(SEED)]
+    argv += ["--sidecar", str(roots[0]), "--sidecar", str(roots[1])]
+    offline.main([*argv, "--out", str(tmp_path / "out")])
+
+    trace = read_csv(tmp_path / "out" / "trace.csv")
+    for epoch, (row, a) in enumerate(zip(trace, arrays)):
+        for column, value in expected_values(a, epoch).items():
+            assert float(row[column]) == pytest.approx(value, rel=1e-12, abs=1e-15)
+
+    selection = read_csv(tmp_path / "out" / "selection.csv")
+    assert list(selection[0]) == SELECTION_COLUMNS
+    for unit in selection:
+        strategy = unit["strategy"]
+        values = [float(row[strategy]) for row in trace]
+        emas = [values[0]]
+        for value in values[1:]:
+            emas.append(0.9 * emas[-1] + (1 - 0.9) * value)
+        assert [float(row[f"{strategy}_ema"]) for row in trace] == emas
+        logged = [offline._as_logged(e, 1) for e in emas]
+        epoch = offline._checkpoint_epoch(logged, offline.REPLAY_MONITORS[strategy][1])
+        assert int(unit["selected_epoch"]) == epoch
+        assert float(unit["q_main"]) == values[epoch]
+        assert unit["selected_ckpt"] == f"{strategy}_ema"
+        assert unit["beta_star"] == unit["at_bound"] == ""
+    (last,) = (u for u in selection if u["strategy"] == "last")
+    assert int(last["selected_epoch"]) == len(arrays) - 1
+
+
+def test_replay_inputs_are_present_once(tmp_path):
+    run, roots, _ = write_criteria_run(tmp_path)
+    argv = [str(run), "--torch-seed", str(SEED), "--out", str(tmp_path / "out")]
+    with pytest.raises(ValueError, match="udr needs values/udr") as error:
+        offline.main([*argv, "--strategies", "udr", "--sidecar", str(roots[0])])
+    assert str(run) in str(error.value)
+    twice = ["--sidecar", str(roots[0]), "--sidecar", str(roots[0])]
+    with pytest.raises(ValueError, match="repeats aux entries"):
+        offline.main([*argv, "--strategies", "rtm", *twice])

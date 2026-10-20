@@ -11,11 +11,12 @@ commands:
              mode, energy (with the adaptive scale) and the upper bound B of the beta
              sweep, e.g. ``sigmoid-joint-adaptive0.5-B10``
     table    design_table.csv and design_table.md in ``--out``, from the cap strategy
-             over every configuration, the drift and w1 strategies, and the run of
-             ``reference_row.py``, all with the declared score ``ascore/full``; the
-             frozen configuration goes to ``--frozen`` (default
-             ``configs/cap/frozen.yaml``) as a flat ``cap`` config group like
-             ``configs/cap/provisional.yaml``, with its SHA-256 beside it in
+             over every configuration, the drift and w1 strategies, every other
+             strategy of the selection files but ``last`` (in sorted order), and
+             the run of ``reference_row.py``, all with the declared score
+             ``ascore/full``; the frozen configuration goes to ``--frozen``
+             (default ``configs/cap/frozen.yaml``) as a flat ``cap`` config group
+             like ``configs/cap/provisional.yaml``, with its SHA-256 beside it in
              ``<stem>.sha256``
     native   native_table.csv: per family with a ``comparison_score``, the declared
              and the native score (``ascore/mse``, ``ascore/kl``) side by side, from
@@ -87,6 +88,9 @@ DECLARED_KEY = "ascore/full"
 # Family of the run that reference_row.py dumps, reference_000_s0.
 REFERENCE = "reference"
 BASELINES = ("drift", "w1")
+# Strategies of the selection files without a baseline row: CAP has a row per
+# configuration, the reference one of its own, and last selects no candidate.
+NOT_BASELINES = ("cap", REFERENCE, "last")
 # The registration's eligibility threshold on the relative spread of Q'.
 MIN_SPREAD = 1e-6
 # Axes of the design grid, in the registration's order.
@@ -332,6 +336,14 @@ def _baseline_row(strategy: str, data: SimpleNamespace) -> tuple[dict, np.ndarra
     return {**row, **_summary(cells, data.families)}, cells
 
 
+def _baseline_rows(data: SimpleNamespace) -> list[tuple[dict, np.ndarray]]:
+    """Drift and w1, which must be present, then every other strategy of the selection
+    files in sorted order."""
+    present = {strategy for _, strategy in data.groups}
+    others = sorted(present - {*BASELINES, *NOT_BASELINES})
+    return [_baseline_row(strategy, data) for strategy in (*BASELINES, *others)]
+
+
 def _reference_row(data: SimpleNamespace) -> tuple[dict, np.ndarray]:
     units = [u for u in data.selection if u["family"] == REFERENCE]
     units = [u for u in units if u["score_key"] == DECLARED_KEY]
@@ -406,14 +418,14 @@ def _held_out_configs(data: SimpleNamespace) -> list[tuple[dict, None]]:
 def _scored_rows(
     registration: dict, data: SimpleNamespace, held_out: bool
 ) -> list[dict]:
-    """CAP rows, then drift, w1 and the reference.
+    """CAP rows, then the baselines and the reference.
 
     The CAP rows are those of the registered design or, in the held-out test, those of
     the configurations the selection files hold.
     """
     configs = _held_out_configs(data) if held_out else _ranked_design(registration)
     pairs = [_cap_row(entry, rank, data) for entry, rank in configs]
-    pairs += [_baseline_row(strategy, data) for strategy in BASELINES]
+    pairs += _baseline_rows(data)
     pairs.append(_reference_row(data))
     _attach_errors(pairs, registration["criterion"]["standard_error"], data)
     return [row for row, _ in pairs]
@@ -450,7 +462,7 @@ def _cell(value) -> str:
 
 
 def _markdown(rows: list[dict]) -> str:
-    """The top configurations by criterion, the frozen one, drift, w1 and the
+    """The top configurations by criterion, the frozen one, the baselines and the
     reference."""
     cap = [row for row in rows if row["strategy"] == "cap"]
     shown = [(i + 1, row) for i, row in enumerate(cap) if i < TOP or row["frozen"]]

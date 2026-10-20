@@ -130,6 +130,11 @@ class CausalChamberDataModule(LightningDataModule):
 
     :param max_val_batches: Batch cap on every evaluation loader but ``normal``; -1
         means no cap.
+    :param train_fold: When set, keep only every ``n_train_folds``-th row of the
+        training part, starting at this position, so that the folds are disjoint halves
+        (thirds, ...) of the same training permutation and the evaluation splits are
+        unchanged; the normalisation is fitted on the fold alone. ``None`` keeps every
+        training row.
     :param robust_quantiles: Lower and upper quantile whose difference sets the scale.
     :param train_seed: Seed of the training batch order; ``seed`` when None.
     """
@@ -153,6 +158,8 @@ class CausalChamberDataModule(LightningDataModule):
         num_workers: int = 0,
         readouts: list[str] = READOUTS,
         null_experiments: list[str] | None = None,
+        train_fold: int | None = None,
+        n_train_folds: int = 2,
     ) -> None:
         super().__init__()
         self.save_hyperparameters(logger=False)
@@ -218,6 +225,8 @@ class CausalChamberDataModule(LightningDataModule):
     def _build_splits(self) -> None:
         reference = self._read_reference()
         train_idx, valid_idx, test_idx = self._reference_indices(reference.size(0))
+        if self.hparams.train_fold is not None:
+            train_idx = train_idx[self.hparams.train_fold :: self.hparams.n_train_folds]
         self._fit_normalization(reference[train_idx])
         reference = self._normalize(reference)
         y_train = torch.zeros(train_idx.numel(), dtype=torch.int64)

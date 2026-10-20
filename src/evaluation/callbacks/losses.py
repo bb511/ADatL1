@@ -1,12 +1,10 @@
 # Plot the training loss histories together and log the PNG to MLflow.
 from pathlib import Path
 
-import numpy as np
 from pytorch_lightning.callbacks import Callback
 
 from src.evaluation.callbacks import utils
-from src.plot import scatter
-from src.plot.lossplotter import LOSS_COLORS
+from src.plot import loss_curves
 from src.utils import pylogger
 
 log = pylogger.RankedLogger(__name__, rank_zero_only=True)
@@ -24,7 +22,8 @@ class LossesCallback(Callback):
     MLflow run artifacts. ``train/loss`` is labelled ``Loss_total`` because it is the
     total objective used for backpropagation. The callback also logs the minimum MI
     loss and its same-step reconstruction loss, plus the minimum reconstruction loss
-    and its same-step MI loss, as scalar MLflow metrics.
+    and its same-step MI loss, as scalar MLflow metrics. The figures themselves are
+    drawn by ``src.plot.loss_curves``, which ``redo_loss_plots.py`` also uses.
 
     :param include_loss_mi: Include the mutual-information loss.
     :param include_loss_reco: Include the reconstruction loss.
@@ -77,13 +76,8 @@ class LossesCallback(Callback):
             return
 
         gamma = self._resolve_gamma(pl_module)
-        gamma_title = f"{gamma:g}"
-        raw_histories = {}
-        normalized_histories = {}
-        raw_colors = {}
-        normalized_colors = {}
         step_histories = {}
-        for metric_name, label, enabled in self._configured_metrics():
+        for metric_name, _, enabled in self._configured_metrics():
             if not enabled:
                 continue
 
@@ -96,22 +90,7 @@ class LossesCallback(Callback):
                     f"MLflow metric 'train/{metric_name}' has no history. "
                     "Cannot create the combined training-loss plot."
                 )
-
-            step_history = self._history_by_step(metric_history)
-            step_histories[metric_name] = step_history
-            values = np.asarray(list(step_history.values()), dtype=float)
-            normalized = self._normalize(values)
-            raw_label = "Loss_mi * gamma" if metric_name == "loss_mi" else label
-            raw_values = values * gamma if metric_name == "loss_mi" else values
-            raw_histories[raw_label] = {
-                epoch: float(value) for epoch, value in enumerate(raw_values, start=1)
-            }
-            normalized_histories[label] = {
-                epoch: float(value)
-                for epoch, value in enumerate(normalized, start=1)
-            }
-            raw_colors[raw_label] = LOSS_COLORS[label]
-            normalized_colors[label] = LOSS_COLORS[label]
+            step_histories[metric_name] = self._history_by_step(metric_history)
 
         if self.include_loss_mi and self.include_loss_reco:
             minimum_metrics, final_step = self._paired_minimum_metrics(
@@ -121,41 +100,9 @@ class LossesCallback(Callback):
             mlflow_logger.log_metrics(minimum_metrics, step=final_step)
 
         plot_folder = self._resolve_plot_folder(trainer)
-        raw_component_histories = {
-            label: history
-            for label, history in raw_histories.items()
-            if label != "Loss_total"
-        }
-        raw_total_history = {
-            label: history
-            for label, history in raw_histories.items()
-            if label == "Loss_total"
-        }
-        plot_paths = [
-            scatter.plot_lines(
-                data=normalized_histories,
-                xlabel="Epoch",
-                ylabel="Normalized loss",
-                title=f"Normalized training losses (gamma = {gamma_title})",
-                save_dir=plot_folder,
-                colors=normalized_colors,
-                filename="training_losses.png",
-                alphas={"Loss_total": 0.8},
-            ),
-            scatter.plot_lines(
-                data=raw_component_histories,
-                xlabel="Epoch",
-                ylabel="Loss_mi * gamma & Loss_reco",
-                title=f"Unnormalized training losses (gamma = {gamma_title})",
-                save_dir=plot_folder,
-                colors=raw_colors,
-                filename="training_losses_unnormalized.png",
-                right_axis_data=raw_total_history,
-                right_ylabel="Loss_total",
-                alphas={"Loss_total": 0.8},
-                ylabel_fontsize=14,
-            ),
-        ]
+        plot_paths = loss_curves.plot_training_losses(
+            step_histories, gamma, plot_folder
+        )
 
         if self.include_mi_null:
             mi_null_path = self._plot_mi_null(mlflow_logger, plot_folder)
@@ -171,46 +118,20 @@ class LossesCallback(Callback):
                 )
 
     # Legend label -> (MLflow metric key, colour, line opacity)
-    MI_NULL_SERIES = (
-        ("Loss_mi (train)", "train/loss_mi", "blue", 1.0),
-        ("Loss_mi_permuted (train)", "train/loss_mi_permuted", "blue", 0.45),
-        ("Analytic floor (train)", "train/loss_mi_floor_analytic", "black", 0.45),
-        ("Loss_mi (val)", "val/normal/loss_mi", "darkorange", 1.0),
-        ("Loss_mi_permuted (val)", "val/normal/loss_mi_permuted", "darkorange", 0.45),
-    )
+    MI_NULL_SERIES = loss_curves.MI_NULL_SERIES
 
     def _plot_mi_null(self, mlflow_logger, plot_folder: Path) -> Path | None:
         """Plot MI next to its permutation noise floor; None if not logged."""
-        permuted = self._optional_history(mlflow_logger, "train/loss_mi_permuted")
-        if permuted is None:
+        path = loss_curves.plot_mi_null(
+            lambda key: self._optional_history(mlflow_logger, key),
+            plot_folder,
+        )
+        if path is None:
             log.info(
                 "No 'train/loss_mi_permuted' history (mi_num_permutations=0?); "
                 "skipping the MI noise-floor plot."
             )
-            return None
-
-        data, colors, alphas = {}, {}, {}
-        for label, key, color, alpha in self.MI_NULL_SERIES:
-            history = self._optional_history(mlflow_logger, key)
-            if history is None:
-                continue
-            data[label] = {
-                epoch: value
-                for epoch, value in enumerate(history.values(), start=1)
-            }
-            colors[label] = color
-            alphas[label] = alpha
-
-        return scatter.plot_lines(
-            data=data,
-            xlabel="Epoch",
-            ylabel="MI [bits]",
-            title="MI loss vs. permutation noise floor",
-            save_dir=plot_folder,
-            colors=colors,
-            filename="mi_vs_permuted_null.png",
-            alphas=alphas,
-        )
+        return path
 
     def _optional_history(self, mlflow_logger, key: str) -> dict[int, float] | None:
         """Step-aligned history of ``key``, or None if absent or not finite."""
@@ -234,20 +155,7 @@ class LossesCallback(Callback):
             ("loss", "Loss_total", self.include_loss_total),
         )
 
-    @staticmethod
-    def _history_by_step(metric_history) -> dict[int, float]:
-        """Return a finite, step-aligned MLflow history with duplicates resolved."""
-        values_by_step = {}
-        for point in sorted(
-            metric_history,
-            key=lambda item: (item.step, item.timestamp),
-        ):
-            values_by_step[int(point.step)] = float(point.value)
-
-        values = np.asarray(list(values_by_step.values()), dtype=float)
-        if values.size == 0 or not np.all(np.isfinite(values)):
-            raise ValueError("Loss histories must contain finite numeric values.")
-        return values_by_step
+    _history_by_step = staticmethod(loss_curves.history_by_step)
 
     @staticmethod
     def _paired_minimum_metrics(
@@ -283,17 +191,7 @@ class LossesCallback(Callback):
             ordered_steps[-1],
         )
 
-    @staticmethod
-    def _normalize(values: np.ndarray) -> np.ndarray:
-        """Normalize a loss history to [0, 1], including constant histories."""
-        if values.size == 0 or not np.all(np.isfinite(values)):
-            raise ValueError("Loss histories must contain finite numeric values.")
-
-        minimum = values.min()
-        span = values.max() - minimum
-        if span == 0:
-            return np.zeros_like(values)
-        return (values - minimum) / span
+    _normalize = staticmethod(loss_curves.normalize)
 
     def _resolve_gamma(self, pl_module) -> float:
         """Resolve gamma for the weighted MI curve and plot titles."""

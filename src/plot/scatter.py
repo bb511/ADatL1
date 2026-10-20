@@ -81,6 +81,7 @@ def plot_lines(
     right_ylabel: str | None = None,
     alphas: dict[str, float] | None = None,
     ylabel_fontsize: float | None = None,
+    legend_max_columns: int = 3,
 ) -> Path:
     """Plot multiple labelled series as lines without point markers.
 
@@ -88,13 +89,17 @@ def plot_lines(
     maps those same labels to Matplotlib colors. ``right_axis_data`` optionally maps
     lines to a secondary y-axis, labelled with ``right_ylabel``. ``alphas``
     optionally maps labels to line opacities. ``ylabel_fontsize`` can override the
-    left-axis title size for plots with long labels. The plot is saved as a PNG and
+    left-axis title size for plots with long labels. The legend sits outside the
+    axes, centred below the x-axis title, with at most ``legend_max_columns``
+    entries per row, so it never covers a curve. The plot is saved as a PNG and
     the resulting path is returned to the caller.
     """
     if not data and not right_axis_data:
         raise ValueError("Cannot plot an empty collection of lines.")
     if right_axis_data and right_ylabel is None:
         raise ValueError("A right y-axis label is required for secondary-axis data.")
+    if legend_max_columns < 1:
+        raise ValueError("legend_max_columns must be at least 1.")
 
     plt.style.use(hep.style.CMS)
     save_dir = Path(save_dir)
@@ -128,13 +133,13 @@ def plot_lines(
     else:
         ax.set_ylabel(ylabel, fontsize=ylabel_fontsize)
     ax.set_title(title, pad=20)
-    if right_ax is None:
-        ax.legend()
-    else:
+    handles, labels = ax.get_legend_handles_labels()
+    if right_ax is not None:
         right_ax.set_ylabel(right_ylabel)
-        left_handles, left_labels = ax.get_legend_handles_labels()
         right_handles, right_labels = right_ax.get_legend_handles_labels()
-        ax.legend(left_handles + right_handles, left_labels + right_labels)
+        handles += right_handles
+        labels += right_labels
+    _legend_below_xaxis(fig, ax, handles, labels, legend_max_columns)
 
     if filename is None:
         filename = sanitize_filename(title).replace(" ", "_")
@@ -146,6 +151,40 @@ def plot_lines(
     fig.clear()
     plt.close(fig)
     return save_path
+
+
+def _legend_below_xaxis(fig, ax, handles, labels, max_columns: int):
+    """Put the legend outside ``ax``, centred under its x-axis title.
+
+    The figure is drawn once to measure the x-axis (tick labels and title), so
+    the legend starts right below its lowest text for any figure size or style.
+    ``savefig(bbox_inches="tight")`` then grows the image to include it.
+
+    Entries are read row by row in the order given (Matplotlib fills columns
+    first, so they are reordered), e.g. the train series in the first row and the
+    validation series in the second. The font is one step smaller than the CMS
+    default and the column gap halved, so three long labels per row stay about as
+    wide as the axes.
+    """
+    columns = min(len(labels), max_columns)
+    row_major = [
+        index
+        for column in range(columns)
+        for index in range(column, len(labels), columns)
+    ]
+    fig.canvas.draw()
+    xaxis_box = ax.xaxis.get_tightbbox(fig.canvas.get_renderer())
+    _, xaxis_bottom = ax.transAxes.inverted().transform((0.0, xaxis_box.y0))
+    return ax.legend(
+        [handles[index] for index in row_major],
+        [labels[index] for index in row_major],
+        loc="upper center",
+        bbox_to_anchor=(0.5, xaxis_bottom),
+        ncol=columns,
+        frameon=False,
+        fontsize="x-small",
+        columnspacing=1.0,
+    )
 
 
 if __name__ == "__main__":

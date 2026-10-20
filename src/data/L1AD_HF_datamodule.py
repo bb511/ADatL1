@@ -62,8 +62,8 @@ def compose_record_config(root: str, overrides: list) -> DictConfig:
     initialize_config_dir refuses to run while a global Hydra is live, which it is
     inside any hydra.main application, and it restores only the state it saw at its own
     entry, which is the state after the clear below. The running application's Hydra is
-    therefore set aside here and put back by hand. Composing outside an application, as
-    the comparison script does, takes the same path with nothing to restore.
+    therefore set aside here and put back by hand. Composing outside an application
+    takes the same path with nothing to restore.
     """
     outer = GlobalHydra.instance().hydra
     GlobalHydra.instance().clear()

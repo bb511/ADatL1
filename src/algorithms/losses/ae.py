@@ -1,32 +1,8 @@
 # Loss functions that work with the vanilla AE.
-from typing import Literal
-
 import torch
 
 from src.algorithms.losses.components import ADLoss
-from src.algorithms.losses.components.reconstruction import (
-    HuberReconstructionLoss,
-    MSEReconstructionLoss,
-)
-
-
-class ClassicAELoss(ADLoss):
-    """The classic AE loss, i.e., reconstruction loss between input and output."""
-
-    def __init__(self, reduction: str = "none"):
-        super().__init__(scale=None, reduction=reduction)
-        self.reconstruction_loss = MSEReconstructionLoss(reduction=reduction)
-
-    def forward(
-        self,
-        target: torch.Tensor,
-        reco: torch.Tensor,
-        mask: torch.Tensor | None,
-    ) -> torch.Tensor:
-        # Get the reconstruction loss with the corersponding reduction applied.
-        reco_loss = self.reconstruction_loss(target, reco, mask)
-
-        return reco_loss
+from src.algorithms.losses.components.reconstruction import HuberReconstructionLoss
 
 
 class HuberAELoss(ADLoss):

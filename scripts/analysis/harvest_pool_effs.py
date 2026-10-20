@@ -1,13 +1,15 @@
 #!/usr/bin/env python3
 """Harvest the shared-pool runs into one row per evaluated checkpoint.
 
-Every run of a pool experiment (``<domain>_<model>_pool``) saves one checkpoint per
-selection strategy, and the evaluator scores each checkpoint on the validation and test
-splits. For every (run, evaluated checkpoint, rate tier) this writes the strategy label,
-the strategy's own validation quantity Q′ (``optimized_main``) and the second objective
-Q″ (``optimized_sec``) at the checkpoint, the mean signal efficiency on both splits, the
-parameters that vary across the pool (``hp/...``), and ``is_pareto``: whether the row is
-non-dominated in (Q′, Q″) among its strategy's rows at that tier.
+Every run of a physics pool experiment (``physics_<model>_pool``) saves one checkpoint
+per selection strategy, and the evaluator scores each checkpoint on the validation and
+test splits. For every (run, evaluated checkpoint, rate tier) this writes the strategy
+label, the strategy's own validation quantity Q′ (``optimized_main``) and the second
+objective Q″ (``optimized_sec``) at the checkpoint, the mean signal efficiency on both
+splits, the parameters that vary across the pool (``hp/...``), and ``is_pareto``:
+whether the row is non-dominated in (Q′, Q″) among its strategy's rows at that tier. The
+pools of the other domains keep no checkpoint; ``src/evaluation/lattice.py`` writes
+their tables in this schema.
 
 The checkpoints are read off the run. Each ``callbacks/<name>/monitor`` parameter
 belongs to a checkpoint callback whose ``dirpath`` ends in the
@@ -53,7 +55,7 @@ from mlflow.tracking import MlflowClient
 
 REPO = Path(__file__).resolve().parents[2]
 
-# Q″ is read as optimized_metric_config.sec_metric reads it in every experiment.
+# Q″ is read as optimized_metric_config.sec_metric reads it in every physics experiment.
 SEC_CALLBACK, SEC_SCALAR = "ascore_operational", "normal"
 
 # Validation keys of src/callbacks (after "val/summary/"), the strategy label of the

@@ -1,5 +1,6 @@
 # package callbacks.util
 
-# Log the data to mlflow artifacts.
+# Empty the run's checkpoint directory when fitting starts, so that a rerun under the
+# same run_name keeps no checkpoint of an earlier run.
 _target_: src.callbacks.utils.clear_ckpts.ClearRunCheckpointDir
 run_ckpts_dir: "${paths.checkpoints_dir}/${experiment_name}/${run_name}"

@@ -1,4 +1,5 @@
-# Plotting of the features that are stored in the converted h5s.
+# Histograms of the features of the awkward arrays at the extraction, processing and
+# ML-ready stages of the pipeline.
 
 from pathlib import Path
 

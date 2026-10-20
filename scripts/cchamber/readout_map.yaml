@@ -1,8 +1,10 @@
 # Intervention -> directly affected readout map for the Causal Chamber light tunnel,
 # dataset lt_interventions_standard_v1. Drafted 2026-10-07 from primary documentation only;
-# see NOTES.md in this directory for sources, status rules and every point of doubt.
+# the drafting notes on its sources, status rules and points of doubt are not in the
+# repository.
 #
-# Top-level keys are exactly the 58 interventions of intervention_target_clusters.csv.
+# Top-level keys are exactly the 58 interventions of lt_target_clusters.csv in this
+# directory.
 # Fields requested: parameter, reference_value, intervened_value, affected_readouts,
 # direction, status, source. Fields added: parameter_symbol, parameter_meaning,
 # value_source, data_check, graph_edges, direction_inferred, direction_basis,
@@ -24,7 +26,7 @@
 # YAML anchors (&name) define a source once; later entries reuse it by alias (*name).
 #
 # Readout symbols (variables.csv): current = C̃, angle_j = θ̃_j, ir_j = Ĩ_j, vis_j = Ṽ_j.
-# v_board and v_reg appear in no edge of the published graph (see NOTES.md).
+# v_board and v_reg appear in no edge of the published graph (Fig. 3a, Table 5).
 
 uniform_blue_mid:
   parameter: blue

@@ -6,9 +6,8 @@ from pathlib import Path
 def get_ckpt_ds_name(ckpt_name: str):
     """Gets the data set name from the checkpoint name.
 
-    The format of the checkpoint name is specified in
-    callbacks/checkpointing/dataset_aware.py and this method expects exactly that
-    format. If the format changes, this method will stop working.
+    Returns the part of the name between 'ds=' and the next '__', or the whole name when
+    it carries no 'ds=', as no current checkpoint or dump epoch does.
     """
     ckpt_ds = ckpt_name.split("ds=")
     if len(ckpt_ds) > 1:

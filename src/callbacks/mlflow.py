@@ -42,7 +42,7 @@ class LogDataInfoMlFlow(Callback):
         mlflow_logger = self._get_mlflow_logger(trainer)
         if mlflow_logger is None:
             log.warning(
-                Fore.YELLOW + "No MLFlow logger but using LogDataMlFlow callback!"
+                Fore.YELLOW + "No MLFlow logger but using LogDataInfoMlFlow callback!"
             )
             return
 

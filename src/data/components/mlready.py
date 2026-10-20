@@ -51,7 +51,7 @@ class L1DataMLReady:
         """Makes train set, validation set, test set, and auxiliary data.
 
         Imports the processed data. Applies normalization through the normalizer object.
-        See normalizer.py for the definition of this object and how to use it.
+        See src/data/components/normalization.py for this object and how to use it.
         Additionally, if an object is missing a feature that another object has, this
         feature is added to the object that is missing it and padded with None values.
         """

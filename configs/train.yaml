@@ -40,8 +40,8 @@ tags: ["dev"]
 # set False to skip model training
 train: True
 
-# evaluate on test set, using best model weights achieved during training
-# lightning chooses best weights based on the metric specified in checkpoint callback
+# also evaluate the checkpoints of evaluation.evaluator.ckpts on the test set
+# a run without an evaluation config (the dump regime) evaluates nothing
 test: True
 
 # simply provide checkpoint path to resume training

@@ -80,7 +80,9 @@ MODEL_LABEL = {
 }
 
 TIER = "250"
-SEARCH_EPOCHS = 50  # trainer.max_epochs in every run*_search.sh
+# trainer.max_epochs of the submitted version's run*_search.sh (git history only);
+# the current physics and image catalogues set 200.
+SEARCH_EPOCHS = 50
 OUTLIER_IQR_FACTOR = 5.0
 THIN_CELL_RUNS = 3  # below this, a cell is one hyperparameter draw, not a mean
 THIN_CELL_TOLERANCE = 0.25  # deviation from sibling strategies still called ok

@@ -114,18 +114,19 @@ class CouplingLayer(nn.Module):
 
 
 class RealNVP(nn.Module):
-    """RealNVP operating on a dense latent vector.
+    """RealNVP operating on a dense vector.
 
-    This flow models the distribution of latent representations produced by the DS-VAE
-    encoder. It learns an invertible mapping between the latent space and a simple
-    Gaussian base distribution.
+    This flow models the distribution of the flattened events or images given to
+    src.algorithms.realnvp.RealNVP. It learns an invertible mapping between the input
+    space and a simple Gaussian base distribution.
 
     :param input_dim: Int with the number of input dimensions.
     :param n_flows: Int with the number of flows that should be used.
     :param hidden_dim: Int with the number of nodes in the MLP.
     :param n_hidden_layers: Int with the number of hidden layers in the MLP.
     :param activation: String with the activation to use in the MLP.
-    :param scale_clamp: Float for the scale of the noise added to data.
+    :param noise_scale: Float with the standard deviation of the Gaussian noise added to
+        the inputs in training mode.
     :param scale_clamp: Float with the clamp factor, for numerical stability.
     """
 

@@ -46,8 +46,10 @@ warnings.filterwarnings(
 
 @task_wrapper
 def train(cfg: DictConfig) -> Tuple[Dict[str, Any], Dict[str, Any]]:
-    """Trains the model. Can additionally evaluate on a testset, using best weights
-    obtained during training.
+    """Trains the model, then evaluates its strategy checkpoints.
+
+    The checkpoints are evaluated on the validation set and, with cfg.test, on the test
+    set. A run without an evaluation config (the dump regime) only trains.
 
     This method is wrapped in optional @task_wrapper decorator, that controls the
     behavior during failure. Useful for multiruns, saving info about the crash, etc.

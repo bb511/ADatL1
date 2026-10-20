@@ -22,7 +22,7 @@ class ApproximationCapacity(Metric):
         CAP ∝ log(Z_12 / (Z_1 * Z_2))
 
     Where Z_i are partition functions over the set of clustering assignments, computed
-    using different energy functions and constraints.
+    using different energy functions.
 
     The maximum over beta is taken on `n_beta` logarithmically spaced points between
     `beta_min` and `beta_max`, where the mean kernel is evaluated exactly over all
@@ -33,9 +33,6 @@ class ApproximationCapacity(Metric):
     Functions that are imported:
     - Energy: Determines the probability of a specific clustering assignment.
     - Normalization: Normalizes model outputs (logits, loss...) to [0,1] range.
-    - Regularization: Enforces constraints on the hypothesis space to implicitly
-        delimit a feasible clustering assignments. For instance, by limiting
-        the number of observations assigned to a specific cluster.
 
     The beta grid is a non-persistent buffer that follows the metric's device, while
     `curve`, `beta_star` and `at_bound` are kept on the CPU after each update.
@@ -69,7 +66,7 @@ class ApproximationCapacity(Metric):
             dist_sync_fn=dist_sync_fn,
         )
 
-        # Parameters for energy and regularization functions:
+        # Parameters for the normalization and energy functions:
         self.binary = binary
         self.normalization_type = normalization_type
         self.normalization_params = normalization_params or {}

@@ -5,7 +5,6 @@ defaults:
   - override /hydra/sweeper/sampler: random
 
 # here we define Optuna hyperparameter search
-# it optimizes for value returned from function with @hydra.main decorator
 # docs: https://hydra.cc/docs/next/plugins/optuna_sweeper
 hydra:
   mode: "MULTIRUN" # set hydra to multirun by default if this config is attached
@@ -18,7 +17,8 @@ hydra:
     # number of parallel workers
     n_jobs: 1
 
-    # 'minimize' or 'maximize' the objective
+    # A placeholder objective: the run only trains and dumps, so it reports the worst
+    # value of each direction to Optuna, and the random sampler never reads it.
     direction: [maximize, minimize]
 
     # total number of runs that will be executed

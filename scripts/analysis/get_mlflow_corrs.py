@@ -13,7 +13,7 @@ Usage (from the repository root, wherever the tracking store lives)::
 
     python scripts/analysis/get_mlflow_corrs.py \\
         --tracking-uri file:logs/mlflow/mlruns \\
-        --experiment-name physics_ae_pareto
+        --experiment-name physics_ae_pool
 """
 from __future__ import annotations
 

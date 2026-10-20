@@ -13,8 +13,11 @@
 # such a relaunch.
 #
 # The blocks name no launcher: the venue appends one at submission, with a
-# timeout of 17 minutes per trial for this model (200 epochs at up to 2.5 s each on an H100, plus about 3 minutes of
-# evaluation, and half again as margin).
+# timeout of 17 minutes per trial for this model (200 epochs at up to 2.5 s
+# each on an H100, plus about 3 minutes of evaluation, and half again as
+# margin). These times were measured before the score dump: the end-of-run
+# evaluation no longer runs, and the dump's per-epoch pass over the test,
+# auxiliary and training sets is not in them.
 #
 # On clariden, each driver keeps six trials queued as slurm jobs:
 #   bash scripts/cluster/submit_search.sh scripts/robustad/runsvdd_search.sh \

@@ -1,9 +1,8 @@
 #!/bin/bash
 # Submit the pool drivers of a run*_search.sh file.
 #
-# A run*_search.sh block already carries '-m' and its own launcher settings, so
-# this script runs each block as written and adds only what the file cannot
-# know: a private sweep directory.
+# A run*_search.sh block already carries '-m', so this script runs each block as
+# written and adds only what the file cannot know: a private sweep directory.
 #
 # The pool blocks name no launcher: the venue appends one after the file name,
 # as each catalogue's header shows (submitit_slurm_clariden + n_jobs=6 on
@@ -13,9 +12,10 @@
 # launching there.
 #
 # Each block is one long-lived Optuna driver: it keeps n_jobs trials in the
-# queue and stays alive until it has run its own n_trials, while the four
-# drivers of a catalogue fill one shared study. Drivers are therefore nohup'd
-# and this command returns as soon as they are all up.
+# queue and stays alive until it has run its own n_trials, while the live
+# drivers of a catalogue (four, or eight in the two waves of a physics file)
+# fill one shared study. Drivers are therefore nohup'd and this command returns
+# as soon as they are all up.
 #
 # Usage (from the repository root):
 #   bash scripts/cluster/submit_search.sh --list    scripts/physics/runsvdd_search.sh
@@ -85,8 +85,9 @@ storage_of() {
     printf "%s" "$s"
 }
 
-# The study a driver fills, found the same way. The pool blocks leave it to the
-# config, which names one study for all four drivers of a catalogue.
+# The study a driver fills, found the same way. The live blocks leave it to the
+# config, which names one study for all of them; the dormant blocks of a lattice
+# catalogue name their own.
 study_of() {
     local s
     s=$(field "$1" 'hydra\.sweeper\.study_name')

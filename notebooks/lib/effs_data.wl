@@ -16,8 +16,9 @@ ClearAll[bkgDatasetQ, originalPicks, numOrMissing, strategyContextQ, perSignalCo
 bkgDatasetQ[ds_String] :=
   StringContainsQ[ds, "normal" | "SingleNeutrino" | "ZB_" | "reference"];
 
-(* Original 250 Hz picks, from ORIGINAL_PICKS/VERBATIM_FALLBACKS in
-   scripts/optuna/make_pareto_scripts.py (cvar25eff -> cvar25, drift -> stability). *)
+(* Original 250 Hz picks, from ORIGINAL_PICKS/VERBATIM_FALLBACKS in the submitted
+   version's scripts/optuna/make_pareto_scripts.py (git history only; cvar25eff ->
+   cvar25, drift -> stability). *)
 originalPicks = <|
    "physics" -> <|
      "ae" -> <|"cap" -> 175, "cvar25" -> 169, "stability" -> 564, "wasserstein" -> 584|>,

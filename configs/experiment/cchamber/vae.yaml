@@ -34,7 +34,8 @@ trainer:
 
 test: false
 
-# Candidate 000 of the chamber panel.
+# Candidate 000 of Victor's chamber panel, on olgpu at
+# logs/victor_results/cchamber-data/results/cchamber-pairings-v1/panel.yaml.
 algorithm:
   target_rate: 0.01
   base_rate: null

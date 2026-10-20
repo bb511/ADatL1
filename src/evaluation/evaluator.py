@@ -496,8 +496,7 @@ class Evaluator:
                     logger.run_id, "optimized_ckpt_name", self.optimized_ckpt_name
                 )
             # Log the exact (main, sec) pair reported to Optuna as metrics, so
-            # retrained runs are directly comparable to the search-time
-            # objective values.
+            # that the objective recorded in the study can also be read from MLflow.
             vals = self.optimized_metric
             pair = list(vals) if isinstance(vals, (list, tuple)) else [vals]
             eval_mlflow.log_metrics_to_mlflow(
@@ -509,10 +508,9 @@ class Evaluator:
     def _evaluate_strategy(self, strategy_folder: Path, model, test_loader: dict):
         """Evaluate all the checkpoints corresponding to a certain strategy.
 
-        Strategy here means the strategy used to checkpoint, i.e., either a checkpoint
-        for each of the datasets, or a single checkpoint at the end of the training...
-        Expect that every subdir of a strategy folder corresponds to a certain metric
-        that was tracked during that run.
+        The first folder level of a run's checkpoints is the strategy: `summary` for the
+        strategy metrics, `normal` for the loss baseline. Every subdirectory of a
+        strategy folder is a metric tracked during that run.
         """
         self.strategy_name = strategy_folder.name
         self.evaluator.strat_name = self.strategy_name
@@ -553,8 +551,8 @@ class Evaluator:
     def _evaluate_criterion(self, criterion_folder: Path, model, test_loader: dict):
         """Evaluate all checkpoints associated with a given criterion.
 
-        Expect that the folder is filled with .ckpt files corresponding to checkpoints
-        on different datasets, for example.
+        The folder holds the .ckpt its ModelCheckpoint keeps (save_top_k=1), and every
+        .ckpt in it is evaluated.
         """
         criterion_name = criterion_folder.name
         self.evaluator.criterion_name = criterion_name

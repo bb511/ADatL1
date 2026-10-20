@@ -195,16 +195,11 @@ def test_metrics_are_recorded_finite_or_not():
 
 def test_the_switch_drops_plots_and_files_only(dump, chamber, tmp_path):
     keys = ["anomaly_efficiency", "thres_drift", "cap", "ascore_operational"]
-    auprc = {
-        "_target_": "src.evaluation.callbacks.auprc.AnomalyAUPRCCallback",
-        "output_name": "ascore/full",
-        "ds": ["sig_a", "sig_b"],
-    }
     records = {}
     for plots in (True, False):
         out = tmp_path / str(plots)
         replay = _replay(dump, "epoch_0000.pt", out)
-        configs = [chamber.dump_callbacks[key] for key in keys] + [auprc]
+        configs = [chamber.dump_callbacks[key] for key in keys]
         callbacks = [hydra.utils.instantiate(config) for config in configs]
         loaders = ToyDataModule().loaders("test")
         records[plots] = _test(replay, "test", loaders, callbacks, plots)

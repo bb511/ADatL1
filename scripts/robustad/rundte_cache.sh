@@ -6,8 +6,9 @@
 #
 # Besides being a sanity run, this materialises the decoded image tensors and
 # the channel stats for the `pcb` subset -- the only subset any experiment
-# config uses. The evaluator runs too (test=true, the config default), which is
-# what pulls in every shifted normal and shifted anomaly split.
+# config uses. The experiment sets test: false and has no evaluator, but the
+# score dump builds and scores every test set (stored_sets: null), which is what
+# pulls in every shifted normal and shifted anomaly split.
 #
 # Afterwards, copy this to clariden, keeping the path relative to the repo root,
 # and launch scripts/robustad/rundte_search.sh:

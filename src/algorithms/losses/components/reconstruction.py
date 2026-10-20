@@ -1,5 +1,3 @@
-from typing import Literal
-
 import torch
 import torch.nn.functional as F
 
@@ -67,65 +65,3 @@ class HuberReconstructionLoss(ADLoss):
             huber_per_observation = (huber_flat * mask_flat).sum(dim=1) / nreal_feats
 
         return self.scale * self.reduce(huber_per_observation)
-
-
-class CylPtPzReconstructionLoss(MSEReconstructionLoss):
-    """Convert the pT, eta, phi input into pT, pz and compute loss there.
-
-    Although the initial space is not in cylindrical coordinates, the reco is done in
-    cylindrical coordinates. This is because for axov4, the training would not converge
-    otherwise. This trick should not be used in the future.
-    """
-
-    name: str = "cylreco"
-
-    def __init__(self, scale: float = 1.0, reduction: str = "none"):
-        super().__init__(scale=scale, reduction=reduction)
-        self.pt_idxs = None
-        self.eta_idxs = None
-        self.met_phi_idxs = None
-
-    def set_object_feature_map(self, object_feature_map: dict):
-        pt_idxs = []
-        eta_idxs = []
-        met_phi_idxs = []
-        for obj_name, feature_map in object_feature_map.items():
-            if "Et" in feature_map:
-                pt_idxs.extend(feature_map["Et"])
-
-            if "eta" in feature_map:
-                eta_idxs.extend(feature_map["eta"])
-
-            if obj_name.lower() == "met" and "phi" in feature_map:
-                met_phi_idxs.extend(feature_map["phi"])
-
-        self.pt_idxs = pt_idxs
-        self.eta_idxs = eta_idxs
-        self.met_phi_idxs = met_phi_idxs
-
-    def forward(
-        self,
-        target: torch.Tensor,
-        reco: torch.Tensor,
-        mask: torch.Tensor | None = None,
-    ) -> torch.Tensor:
-        if self.pt_idxs is None:
-            raise RuntimeError("object_feature_map not set.")
-
-        # build cylindrical representation
-        pt = target[:, self.pt_idxs]
-        eta = target[:, self.eta_idxs]
-        pz = pt * torch.sinh(eta)
-
-        pt_pred = reco[:, self.pt_idxs]
-        pz_pred = pt_pred * torch.sinh(eta)
-
-        met_phi = target[:, self.met_phi_idxs]
-        met_phi_pred = reco[:, self.met_phi_idxs]
-
-        # concatenate features used for loss
-        target_cyl = torch.cat([pt, pz, met_phi], dim=1)
-        reco_cyl = torch.cat([pt_pred, pz_pred, met_phi_pred], dim=1)
-
-        # reuse parent implementation
-        return super().forward(target_cyl, reco_cyl, mask=None)

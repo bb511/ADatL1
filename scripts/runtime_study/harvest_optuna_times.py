@@ -1,11 +1,12 @@
 #!/usr/bin/env python3
 """Harvest per-trial wall-clock durations from the Optuna study databases.
 
-``scripts/optuna/fetch_optuna_pareto.py`` exports the trials' objective values and
-parameters but drops their timing (its ``attrs=`` omits ``duration`` and
-``datetime_*``). The sweeps were run with ``logger=none``, so the study
-databases are the *only* record of how long a hyperparameter-search trial took,
-and hence the only way to price the sweeps for the paper's compute table.
+The submitted version's ``scripts/optuna/fetch_optuna_pareto.py`` (git history only)
+exported the trials' objective values and parameters but dropped their timing (its
+``attrs=`` omitted ``duration`` and ``datetime_*``). The sweeps were run with
+``logger=none``, so the study databases are the *only* record of how long a
+hyperparameter-search trial took, and hence the only way to price the sweeps for the
+paper's compute table.
 
 One row per completed trial is written to
 ``notebooks/run_times/optuna_<domain>_<model>.csv``::
@@ -14,8 +15,8 @@ One row per completed trial is written to
 
 ``strategy`` and ``tier`` are parsed from the study name, which follows
 ``<strategy>_vs_<objective>[q99]_b16k``: the tier is ``q99`` when the second
-objective carries that marker and ``250`` otherwise -- the same rule
-``make_pareto_scripts.py`` uses.
+objective carries that marker and ``250`` otherwise -- the same rule the submitted
+version's ``make_pareto_scripts.py`` (git history only) used.
 
 Timing is read with raw ``sqlite3`` over the ``trials`` table rather than
 through the Optuna API, so the databases' 4.7.0 schema does not have to match
@@ -40,7 +41,8 @@ import sqlite3
 from pathlib import Path
 
 # Study-name prefix -> the column it fills in the paper's table. Matches
-# STRATEGIES in scripts/optuna/make_pareto_scripts.py.
+# STRATEGIES in the submitted version's scripts/optuna/make_pareto_scripts.py (git
+# history only).
 TABLE_STRATEGIES = ["cvar25eff", "drift", "wasserstein", "cap"]
 
 # Databases holding side studies rather than the model/strategy sweeps.

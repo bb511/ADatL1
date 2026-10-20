@@ -1,7 +1,8 @@
 # Intervention -> directly affected readout map for the Causal Chamber wind tunnel,
 # dataset wt_walks_v1, experiment regime_jumps_single. Drafted 2026-10-18 from primary
-# documentation (commit 0c8a77ea), then checked on the downloaded data on 2026-10-18; sources, counts and every point of doubt are in
-# wt_metadata_notes.md beside this file.
+# documentation (commit 0c8a77ea), then checked on the downloaded data on 2026-10-18;
+# the drafting notes on its sources, counts and points of doubt are not in the
+# repository.
 #
 # Repository files cited at commit 0c8a77ea14bd4437b1fdd79adc1aa91ac2342569 of
 # github.com/juangamella/causal-chamber. Paper: arXiv:2404.11341v2 (HTML). Quotes are verbatim;
@@ -109,7 +110,7 @@ base_setting:
 
 targets_source:
   url: https://github.com/juangamella/causal-chamber/blob/0c8a77ea14bd4437b1fdd79adc1aa91ac2342569/datasets/wt_walks_v1/regimes_targets.py
-  note: "targets_single[i] is the target of the regime with flag == i; quoted in full in wt_metadata_notes.md"
+  note: "targets_single[i] is the target of the regime with flag == i"
 values_source:
   url: https://github.com/juangamella/causal-chamber/blob/0c8a77ea14bd4437b1fdd79adc1aa91ac2342569/datasets/wt_walks_v1/generators/regime_jumps.py
   quote: |-

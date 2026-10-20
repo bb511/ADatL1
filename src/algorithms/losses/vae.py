@@ -3,10 +3,7 @@ import torch
 
 from src.algorithms.losses.components import ADLoss
 from src.algorithms.losses.components.kl import KLDivergenceLoss
-from src.algorithms.losses.components.reconstruction import (
-    CylPtPzReconstructionLoss,
-    MSEReconstructionLoss,
-)
+from src.algorithms.losses.components.reconstruction import MSEReconstructionLoss
 
 
 class ClassicVAELoss(ADLoss):
@@ -53,21 +50,3 @@ class ClassicVAELoss(ADLoss):
         total_loss = self.scale * (reco_loss + kl_scaled)
 
         return reco_loss, kl_raw, kl_scaled, total_loss
-
-
-class AxoV4Loss(ClassicVAELoss):
-    """The conventional VAE loss, but the reconstruction is done in a special way."""
-
-    def __init__(
-        self,
-        scale: float = 1.0,
-        reco_scale: float = 1.0,
-        kl_scale: float = 1.0,
-        reduction: str = "none",
-    ):
-        super().__init__(
-            scale=scale, reco_scale=reco_scale, kl_scale=kl_scale, reduction=reduction
-        )
-        self.reco_loss = CylPtPzReconstructionLoss(
-            scale=reco_scale, reduction=reduction
-        )

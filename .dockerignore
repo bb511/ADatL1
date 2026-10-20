@@ -1,20 +1,9 @@
-# Ignore trigger models directory.
-/trigger_models
-/qmodel_analysis
-
-# Ignore optuna
-/optuna_logs
-
 # Ignore MAC stuff.
 .DS_Store
 
 # Ignore sublime text editor configuration.
 .sublime
 sftp-config.json
-
-# Ignore notebook data.
-notebooks/mlflow_data
-notebooks/plots
 
 # Byte-compiled / optimized / DLL files
 __pycache__/

@@ -33,8 +33,9 @@ trainer:
 
 test: false
 
-# Candidate 000 of the chamber panel. The panel leaves the encoder widths to its
-# base configuration, which sets [128, 64, 16].
+# Candidate 000 of Victor's chamber panel, on olgpu at
+# logs/victor_results/cchamber-data/results/cchamber-pairings-v1/panel.yaml. The
+# panel leaves the encoder widths to its base configuration, which sets [128, 64, 16].
 algorithm:
   target_rate: 0.01
   base_rate: null

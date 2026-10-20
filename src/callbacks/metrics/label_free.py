@@ -2,8 +2,8 @@
 
 The criteria of a single run are computed with these functions by the training
 callbacks of src/callbacks (autouad, goix, entropy, sds) and by their evaluation
-mirrors in src/evaluation/callbacks; udr and model_centrality compare runs and serve
-the lattice step of the evaluation stage.
+mirrors in src/evaluation/callbacks; udr and model_centrality compare runs and are the
+reference against which the vectorised forms in src/evaluation/lattice.py are tested.
 
 Every function takes anomaly scores, higher meaning more anomalous, as anything that
 ``np.asarray`` accepts (CPU torch tensors included), and computes in float64. Each

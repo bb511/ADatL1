@@ -58,10 +58,21 @@ architecture and epochs (``correlation_gamma0.find_baseline_runs``),
 and it must have been evaluated on the same split. γ = 0 runs are skipped.
 Quantities missing on either side are left out and listed in ``summary.json``.
 
+MLflow: with ``--mlruns-root`` the comparison is also put into the run's MLflow
+artifacts, under ``<split>/<ckpt>/comparison/`` next to the evaluator's plots:
+per plot folder the images and a gallery page beside it (``<folder>.html``,
+``<dataset>_reco.html`` for ``reco/<dataset>``, as in ``<split>/<ckpt>/``), plus
+``summary.csv``, ``reference.json`` and ``reco/reco_summary.csv``. The files are
+written straight into the file store, like the correlation galleries of
+``correlation_gamma0``: the run's ``artifact_uri`` can be the sandbox of the job
+that trained it (``/srv/outputs/...``), where MLflow's own logging would lose them.
+``--mlflow-only`` rewrites just these artifacts from the existing comparison folders.
+
 Usage::
 
     python3 -m src.evaluation.pareto.run_vs_gamma0 --experiment-dir checkpoints/Pareto-Front-261002 \\
-        [--run-name <run> ...] [--split test] [--ckpt loss_total]
+        [--run-name <run> ...] [--split test] [--ckpt loss_total] \\
+        [--mlruns-root logs/mlflow/mlruns [--mlflow-only]]
 """
 
 from __future__ import annotations
@@ -84,6 +95,7 @@ from src.evaluation.pareto.correlation_gamma0 import (
     NO_BASELINE,
     RunInfo,
     find_baseline_runs,
+    mlflow_runs,
     read_run_info,
 )
 
@@ -534,14 +546,84 @@ def compare_run(run: RunInfo, reference: RunInfo, *, split: str = "test", ckpt: 
     return summary
 
 
+#: Tables of the comparison folder that also go to MLflow (shown there as tables).
+MLFLOW_TABLES = ("summary.csv", "reference.json", "reco/reco_summary.csv")
+MLFLOW_IMAGE_SUFFIXES = {".png", ".jpg", ".jpeg"}
+
+
+def mlflow_artifacts(out: Path) -> dict[str, tuple[str, Path]]:
+    """What the comparison folder ``out`` becomes in MLflow.
+
+    Maps each artifact path, relative to ``<split>/<ckpt>/comparison/``, to
+    ``("copy", file)`` or ``("gallery", image folder)``. As the evaluator's
+    ``log_plots_to_mlflow`` does it: per plot folder the images and a gallery page
+    beside the folder, named ``<dataset>_reco.html`` for ``reco/<dataset>``.
+    """
+    files: dict[str, tuple[str, Path]] = {}
+    images = [p for p in out.rglob("*") if p.is_file() and p.suffix.lower() in MLFLOW_IMAGE_SUFFIXES]
+    for folder in sorted({p.parent for p in images}):
+        rel = folder.relative_to(out)
+        for image in sorted(p for p in images if p.parent == folder):
+            files[(rel / image.name).as_posix()] = ("copy", image)
+        if len(rel.parts) == 2 and rel.parts[0] == "reco":
+            gallery = f"{rel.parts[1]}_reco.html"
+        else:
+            gallery = f"{rel.as_posix() if rel.parts else 'plots'}.html"
+        files[gallery] = ("gallery", folder)
+    for table in MLFLOW_TABLES:
+        if (out / table).is_file():
+            files[table] = ("copy", out / table)
+    return files
+
+
+def write_mlflow_artifacts(run_dir: Path, mlflow_run_dirs: Iterable[Path], *, split: str = "test",
+                           ckpt: str = "loss_total") -> int:
+    """Put ``run_dir``'s comparison into ``<mlflow run>/artifacts/<split>/<ckpt>/comparison/``.
+
+    The previous comparison artifacts are replaced, as ``compare_run`` replaces the
+    folder itself. Returns the number of files written per MLflow run.
+    """
+    from src.plot.gallery import build_gallery_html
+
+    files = mlflow_artifacts(run_dir / "plots" / split / ckpt / COMPARISON_DIR)
+    galleries = {rel: build_gallery_html(source, ckpt)
+                 for rel, (kind, source) in files.items() if kind == "gallery"}
+    for mlflow_run in mlflow_run_dirs:
+        target = Path(mlflow_run) / "artifacts" / split / ckpt / COMPARISON_DIR
+        staging = target.with_name(f".{COMPARISON_DIR}.tmp")
+        if staging.exists():
+            shutil.rmtree(staging)
+        for rel, (kind, source) in files.items():
+            path = staging / rel
+            path.parent.mkdir(parents=True, exist_ok=True)
+            if kind == "gallery":
+                path.write_text(galleries[rel], encoding="utf-8")
+            else:
+                shutil.copyfile(source, path)
+        if target.exists():
+            shutil.rmtree(target)
+        if files:
+            staging.replace(target)
+    return len(files)
+
+
 @dataclass
 class Report:
     written: list = field(default_factory=list)   # (run name, reference name, missing)
     skipped: list = field(default_factory=list)   # (run name, reason)
+    mlflow: dict = field(default_factory=dict)    # run name -> (MLflow runs, files per run)
 
 
 def process_experiment(experiment_dir: Path, *, run_names: Optional[Iterable[str]] = None,
-                       split: str = "test", ckpt: str = "loss_total") -> Report:
+                       split: str = "test", ckpt: str = "loss_total",
+                       mlruns_root: Optional[Path] = None, mlflow_only: bool = False) -> Report:
+    """Compare every listed run with its γ = 0 run; with ``mlruns_root`` also fill MLflow.
+
+    ``mlflow_only`` skips the comparison and only rewrites the MLflow artifacts from
+    the comparison folders that already exist.
+    """
+    if mlflow_only and mlruns_root is None:
+        raise ValueError("mlflow_only needs mlruns_root")
     experiment_dir = Path(experiment_dir)
     all_runs = [read_run_info(d) for d in sorted(experiment_dir.iterdir()) if (d / "plots").is_dir()]
     by_name = {run.name: run for run in all_runs}
@@ -558,6 +640,15 @@ def process_experiment(experiment_dir: Path, *, run_names: Optional[Iterable[str
         if run.gamma == 0.0:
             report.skipped.append((name, "γ = 0 run (the reference)"))
             continue
+        if mlflow_only:
+            out = run.run_dir / "plots" / split / ckpt / COMPARISON_DIR
+            reference = _read_json(out / "reference.json")
+            if reference is None:
+                report.skipped.append((name, f"no {split} comparison yet (run without --mlflow-only)"))
+                continue
+            report.written.append((name, reference.get("reference_run", "?"), []))
+            _fill_mlflow(report, run, experiment_dir, mlruns_root, split, ckpt)
+            continue
         if load_outputs(run.run_dir, split, ckpt).empty:
             report.skipped.append((name, f"no {split} outputs"))
             continue
@@ -571,7 +662,16 @@ def process_experiment(experiment_dir: Path, *, run_names: Optional[Iterable[str
         note = f"several γ = 0 / 50-bin runs; used {candidates[0].name}" if len(candidates) > 1 else ""
         summary = compare_run(run, candidates[0], split=split, ckpt=ckpt, note=note)
         report.written.append((name, candidates[0].name, summary["missing"]))
+        if mlruns_root is not None:
+            _fill_mlflow(report, run, experiment_dir, mlruns_root, split, ckpt)
     return report
+
+
+def _fill_mlflow(report: Report, run: RunInfo, experiment_dir: Path, mlruns_root: Path,
+                 split: str, ckpt: str) -> None:
+    runs = mlflow_runs(mlruns_root, experiment_dir.name, run.name)
+    files = write_mlflow_artifacts(run.run_dir, runs, split=split, ckpt=ckpt) if runs else 0
+    report.mlflow[run.name] = (len(runs), files)
 
 
 def main(argv: Optional[Sequence[str]] = None) -> int:
@@ -581,16 +681,28 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
                         help="Only this run. Repeatable; default: every run with outputs.")
     parser.add_argument("--split", default="test")
     parser.add_argument("--ckpt", default="loss_total")
+    parser.add_argument("--mlruns-root", type=Path, default=None,
+                        help="MLflow file store; also put the comparison into each run's artifacts "
+                             "under <split>/<ckpt>/comparison/.")
+    parser.add_argument("--mlflow-only", action="store_true",
+                        help="Only rewrite the MLflow artifacts from the existing comparison folders.")
     args = parser.parse_args(argv)
+    if args.mlflow_only and args.mlruns_root is None:
+        parser.error("--mlflow-only needs --mlruns-root")
     import matplotlib
 
     matplotlib.use("Agg")
     report = process_experiment(args.experiment_dir, run_names=args.run_names,
-                                split=args.split, ckpt=args.ckpt)
-    print(f"{args.experiment_dir.name}: {len(report.written)} run(s) compared with γ = 0 "
-          f"({args.split}, {args.ckpt})")
+                                split=args.split, ckpt=args.ckpt,
+                                mlruns_root=args.mlruns_root, mlflow_only=args.mlflow_only)
+    verb = "copied to MLflow" if args.mlflow_only else "compared with γ = 0"
+    print(f"{args.experiment_dir.name}: {len(report.written)} run(s) {verb} ({args.split}, {args.ckpt})")
     for name, reference, missing in report.written:
         extra = f"; missing: {', '.join(missing)}" if missing else ""
+        if name in report.mlflow:
+            n_runs, n_files = report.mlflow[name]
+            extra += (f"; MLflow: {n_files} files in {n_runs} run(s)" if n_runs
+                      else f"; MLflow: no run named {name} in {args.experiment_dir.name}")
         print(f"  {name} vs {reference}{extra}")
     for name, reason in report.skipped:
         print(f"  skipped {name}: {reason}")

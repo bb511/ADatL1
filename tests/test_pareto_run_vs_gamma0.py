@@ -251,3 +251,72 @@ def test_reco_legend_names_both_models(experiment, monkeypatch):
     assert reco and all(titles[i] == "normal: jets_Et" for i in reco)  # no TVD line
     assert all(ylabels[i] == "run - gamma0" for i in reco)
 
+
+
+def _mlruns(tmp_path, run_name="RunA"):
+    """A file store with experiment Exp: a primary run and another training attempt of run_name."""
+    mlruns = tmp_path / "mlruns"
+    (mlruns / "7").mkdir(parents=True)
+    (mlruns / "7" / "meta.yaml").write_text("name: Exp\n")
+    for run_id, role in (("a" * 32, "primary training run of checkpoint"),
+                         ("b" * 32, "other training attempt (checkpoint belongs to a)")):
+        tags = mlruns / "7" / run_id / "tags"
+        tags.mkdir(parents=True)
+        (tags / "mlflow.runName").write_text(run_name)
+        (tags / "link.role").write_text(role)
+        (tags.parent / "meta.yaml").write_text("lifecycle_stage: active\n")
+    return mlruns, mlruns / "7" / ("a" * 32) / "artifacts" / "test" / "loss_total" / "comparison"
+
+
+def _cards(page: Path) -> int:
+    return page.read_text().count("<div class='card'>")
+
+
+def test_comparison_goes_into_the_mlflow_run(experiment, tmp_path):
+    mlruns, artifacts = _mlruns(tmp_path)
+    report = cmp.process_experiment(experiment, run_names=["RunA"], mlruns_root=mlruns)
+
+    assert report.mlflow["RunA"][0] == 1
+    # every chart, in its plots/test/ folder, with a gallery page beside each folder
+    assert {p.relative_to(artifacts).as_posix() for p in artifacts.rglob("*.jpg")} == MIRRORED_PLOTS
+    for folder, charts in (("eff", 1), ("eff_summary", 3), ("ascore_operational_summary", 1),
+                           ("thres_drift_summary", 1), ("wasserstein_summary", 1)):
+        assert _cards(artifacts / f"{folder}.html") == charts
+    assert (artifacts / "reco" / "normal" / "jets_Et.png").is_file()
+    assert _cards(artifacts / "normal_reco.html") == 1
+    assert "<summary>loss_total (3)</summary>" in (artifacts / "eff_summary.html").read_text()
+    # the tables, but not the per-chart csv files
+    for table in ("summary.csv", "reference.json", "reco/reco_summary.csv"):
+        assert (artifacts / table).is_file()
+    assert not list((artifacts / "eff").glob("*.csv"))
+    # only the primary run, and nothing half-written left behind
+    assert not (mlruns / "7" / ("b" * 32) / "artifacts").exists()
+    assert not list(artifacts.parent.glob(".*.tmp"))
+
+
+def test_mlflow_only_copies_the_existing_comparison_without_recomputing(experiment, tmp_path, monkeypatch):
+    cmp.process_experiment(experiment, run_names=["RunA"])
+    mlruns, artifacts = _mlruns(tmp_path)
+    (artifacts).mkdir(parents=True)
+    (artifacts / "stale.html").write_text("from an older comparison")
+
+    def no_recompute(*args, **kwargs):
+        raise AssertionError("compare_run must not run with mlflow_only")
+
+    monkeypatch.setattr(cmp, "compare_run", no_recompute)
+    report = cmp.process_experiment(experiment, run_names=["RunA", "G0_bins50", "RunOtherSeed"],
+                                    mlruns_root=mlruns, mlflow_only=True)
+
+    assert [w[:2] for w in report.written] == [("RunA", "G0_bins50")]
+    assert dict(report.skipped)["G0_bins50"] == "γ = 0 run (the reference)"
+    assert "no test comparison yet" in dict(report.skipped)["RunOtherSeed"]
+    assert (artifacts / "eff.html").is_file() and not (artifacts / "stale.html").exists()
+
+
+def test_cli_mlflow_options(experiment, tmp_path, capsys):
+    with pytest.raises(SystemExit):
+        cmp.main(["--experiment-dir", str(experiment), "--mlflow-only"])
+    mlruns, artifacts = _mlruns(tmp_path)
+    assert cmp.main(["--experiment-dir", str(experiment), "--run-name", "RunA",
+                     "--mlruns-root", str(mlruns)]) == 0
+    assert "MLflow: " in capsys.readouterr().out and (artifacts / "summary.csv").is_file()

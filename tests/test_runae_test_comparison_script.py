@@ -46,6 +46,9 @@ def test_runs_from_the_command_line(tmp_path):
         assert command[command.index("--split") + 1] == "test"
         assert command[command.index("--experiment-dir") + 1] == str(tmp_path / "out" / "checkpoints" / "Exp")
     assert "--force" not in correlation
+    mlruns = str(tmp_path / "out" / "logs" / "mlflow" / "mlruns")
+    for command in (correlation, metrics):
+        assert command[command.index("--mlruns-root") + 1] == mlruns
 
 
 def test_runs_from_a_file_skip_comments_and_blank_lines(tmp_path):

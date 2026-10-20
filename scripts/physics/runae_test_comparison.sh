@@ -31,6 +31,11 @@
 #      plot it compares and is drawn in the same CMS style: orange
 #      "gamma = 0, bins = 50", blue "gamma = <g>, bins = <b>" (from the run name),
 #      and a gray "Change" panel on the right (100 * (run - gamma0) / gamma0).
+#    plus the run's MLflow artifacts test/loss_total/comparison/: the images, one
+#    gallery page per folder (<folder>.html, <dataset>_reco.html) and the tables.
+#
+# Both steps write into the MLflow file store $MLRUNS_ROOT directly (default
+# $ADL1T_OUTPUT_ROOT/logs/mlflow/mlruns), next to the plots the test job logged.
 #
 # The reference is the gamma = 0 / 50-bin run of the same experiment with the
 # same seed, architecture and epochs; it must have been TESTED as well (keep it in
@@ -105,7 +110,8 @@ if [[ "${FORCE:-0}" == 1 ]]; then
   correlation+=(--force)
 fi
 metrics=(python3 -m src.evaluation.pareto.run_vs_gamma0
-  --experiment-dir "$EXPERIMENT_DIR" --split test --ckpt loss_total "${run_args[@]}")
+  --experiment-dir "$EXPERIMENT_DIR" --split test --ckpt loss_total --mlruns-root "$MLRUNS_ROOT"
+  "${run_args[@]}")
 
 cd "$CODE_DIR"
 echo "==============================================================="

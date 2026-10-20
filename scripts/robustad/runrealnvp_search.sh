@@ -4,8 +4,8 @@
 # ========================================================================
 # The random pool of robustad/realnvp: 90 trials, drawn by four drivers that share
 # the Optuna study `pool` and differ only in their sampler seed. Every trial
-# is a full 200-epoch training, evaluated at the checkpoint of each
-# validation strategy, and the strategies then select from the pool.
+# is a full 200-epoch training that dumps its scores and weights at every
+# epoch and selects nothing; the criteria are evaluated on the dumps offline.
 #
 # The random sampler replays its draws from the seed, so a driver that stops
 # early is relaunched with a fresh seed, not its own, which would repeat the

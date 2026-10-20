@@ -6,10 +6,33 @@ import torch
 from torch.utils.data import DataLoader, TensorDataset
 
 from src.algorithms import ADLightningModule
-from src.callbacks.score_dump import ScoreDumpCallback, _score_in_eval_mode
+from src.callbacks.score_dump import (
+    ScoreDumpCallback,
+    _moments,
+    _score_in_eval_mode,
+    aux_inputs,
+)
 
 N_FEATURES = 4
 KEYS = ["ascore/full", "ascore/mse", "ascore/kl"]
+PASSES = ["initial.pt", "epoch_0000.pt", "epoch_0001.pt"]
+META_KEYS = {
+    "target_rate",
+    "base_rate",
+    "target_fpr",
+    "module",
+    "stored",
+    "aux_seed",
+    "aux_size",
+    "aux_lower",
+    "aux_upper",
+    "aux_mean",
+    "aux_std",
+    "val",
+    "test",
+    "aux",
+    "train",
+}
 
 
 def _block(gen, n, shift, label):
@@ -31,6 +54,16 @@ def toy_sets(seed: int = 0) -> dict:
     return sets
 
 
+class CountingLoader(DataLoader):
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.passes = 0
+
+    def __iter__(self):
+        self.passes += 1
+        return super().__iter__()
+
+
 class ToyDataModule(pl.LightningDataModule):
     def __init__(self, seed: int = 0, batch_size: int = 32):
         super().__init__()
@@ -48,11 +81,12 @@ class ToyDataModule(pl.LightningDataModule):
         return self.loaders("val")
 
     def test_dataloader(self):
-        return self.loaders("test")
+        self.test_loaders = self.loaders("test")
+        return self.test_loaders
 
     def loaders(self, split):
         return {
-            name: DataLoader(TensorDataset(*xy), batch_size=self.batch_size)
+            name: CountingLoader(TensorDataset(*xy), batch_size=self.batch_size)
             for name, xy in self.sets[split].items()
         }
 
@@ -104,65 +138,161 @@ def fit(root, callbacks, epochs=2, seed=0, module=None, **trainer_kwargs):
         enable_model_summary=False,
         callbacks=callbacks,
         default_root_dir=root,
-        **{"enable_checkpointing": False, "num_sanity_val_steps": 2, **trainer_kwargs},
+        **{"enable_checkpointing": False, "num_sanity_val_steps": -1, **trainer_kwargs},
     )
     trainer.fit(module, datamodule=datamodule)
     return module, datamodule
 
 
-def dump_callback(path, aux_seed=7, **kwargs):
+def dump_callback(path, aux_seed=7, run_dir=None, **kwargs):
     sizes = {"aux_size": 50, "aux_batch_size": 16, **kwargs}
-    return ScoreDumpCallback(dirpath=str(path), keys=KEYS, aux_seed=aux_seed, **sizes)
+    return ScoreDumpCallback(
+        dirpath=str(path),
+        run_dir=str(path.parent if run_dir is None else run_dir),
+        keys=KEYS,
+        aux_seed=aux_seed,
+        **sizes,
+    )
+
+
+def load(path):
+    return torch.load(path, weights_only=True)
+
+
+def assert_identical(a, b):
+    if isinstance(a, dict):
+        assert a.keys() == b.keys()
+        for key in a:
+            assert_identical(a[key], b[key])
+    elif isinstance(a, torch.Tensor):
+        assert torch.equal(a, b)
+    else:
+        assert a == b
 
 
 def test_files_keys_and_shapes(tmp_path):
     module, datamodule = fit(tmp_path, [dump_callback(tmp_path / "scores")])
     files = sorted(p.name for p in (tmp_path / "scores").iterdir())
-    assert files == ["epoch_0000.pt", "epoch_0001.pt", "meta.pt"]
+    assert files == ["epoch_0000.pt", "epoch_0001.pt", "initial.pt", "meta.pt"]
 
-    meta = torch.load(tmp_path / "scores" / "meta.pt", weights_only=True)
-    record = torch.load(tmp_path / "scores" / "epoch_0001.pt", weights_only=True)
-    assert record["epoch"] == 1
+    meta = load(tmp_path / "scores" / "meta.pt")
+    assert set(meta) == META_KEYS
     assert meta["target_fpr"] == pytest.approx(0.1)
     assert meta["module"].endswith("ToyAE")
+    assert meta["aux_seed"] == 7 and meta["aux_size"] == 50
     for split in ("val", "test"):
+        assert meta["stored"][split] == list(datamodule.sets[split])
         assert meta[split]["names"] == list(datamodule.sets[split])
         assert meta[split]["keys"] == ["ascore/full", "ascore/mse"]
         for name, (x, y) in datamodule.sets[split].items():
             sizes = [32] * (len(x) // 32) + ([len(x) % 32] if len(x) % 32 else [])
             assert meta[split]["batch_sizes"][name] == sizes
             assert meta[split]["labels"][name] == sorted(set(y.tolist()))
-            assert set(record[split][name]) == {"ascore/full", "ascore/mse"}
-            for scores in record[split][name].values():
-                assert scores.shape == (len(x),) and scores.dtype == torch.float32
+    assert meta["aux"]["names"] == ["gaussian", "uniform", "autouad"]
+    assert meta["aux"]["batch_sizes"]["gaussian"] == [16, 16, 16, 2]
+    assert meta["train"]["names"] == ["train"]
+    assert meta["train"]["keys"] == ["loss/full"]
 
-    for name in ("gaussian", "uniform", "autouad"):
-        assert meta["aux_inputs"][name].shape == (50, N_FEATURES)
-        assert record["aux"][name]["ascore/full"].shape == (50,)
-    assert set(record["state_dict"]) == set(module.state_dict())
-    assert "train" not in record and "train" not in meta
+    for epoch, name in zip([-1, 0, 1], PASSES):
+        record = load(tmp_path / "scores" / name)
+        assert set(record) == {"epoch", "val", "test", "aux", "train", "state_dict"}
+        assert record["epoch"] == epoch
+        for split in ("val", "test"):
+            for set_name, (x, _) in datamodule.sets[split].items():
+                assert set(record[split][set_name]) == {"ascore/full", "ascore/mse"}
+                for scores in record[split][set_name].values():
+                    assert scores.shape == (len(x),) and scores.dtype == torch.float32
+        for set_name in ("gaussian", "uniform", "autouad"):
+            assert record["aux"][set_name]["ascore/full"].shape == (50,)
+        assert record["train"]["train"]["loss/full"].shape == (96,)
+        assert set(record["state_dict"]) == set(module.state_dict())
 
 
-def test_scores_come_from_the_epoch_weights(tmp_path):
+def test_initial_state_holds_the_untrained_weights(tmp_path):
+    module, _ = fit(tmp_path, [dump_callback(tmp_path / "scores")], epochs=1)
+    pl.seed_everything(0)
+    untrained = ToyAE().state_dict()
+    initial = load(tmp_path / "scores" / "initial.pt")
+    assert initial["epoch"] == -1
+    assert_identical(initial["state_dict"], untrained)
+    trained = load(tmp_path / "scores" / "epoch_0000.pt")["state_dict"]
+    assert_identical(trained, module.state_dict())
+    assert not torch.equal(trained["net.weight"], untrained["net.weight"])
+
+
+def test_scores_come_from_the_stored_weights(tmp_path):
     _, datamodule = fit(tmp_path, [dump_callback(tmp_path / "scores")])
-    meta = torch.load(tmp_path / "scores" / "meta.pt", weights_only=True)
+    meta = load(tmp_path / "scores" / "meta.pt")
     aux = {
         name: DataLoader(TensorDataset(x, torch.zeros(len(x))), batch_size=16)
-        for name, x in meta["aux_inputs"].items()
+        for name, x in aux_inputs(meta).items()
     }
-    for epoch in (0, 1):
-        path = tmp_path / "scores" / f"epoch_{epoch:04d}.pt"
-        record = torch.load(path, weights_only=True)
+    train = {"train": DataLoader(datamodule.data_train, batch_size=16)}
+    for name in PASSES:
+        record = load(tmp_path / "scores" / name)
         module = ToyAE()
         module.load_state_dict(record["state_dict"])
         module.eval()
         loaders = {"val": datamodule.loaders("val"), "test": datamodule.loaders("test")}
-        for split, split_loaders in {**loaders, "aux": aux}.items():
-            for name, loader in split_loaders.items():
+        for split, split_loaders in {**loaders, "aux": aux, "train": train}.items():
+            key = "loss/full" if split == "train" else "ascore/full"
+            for set_name, loader in split_loaders.items():
                 with torch.no_grad():
-                    scores = [module.model_step(b)["ascore/full"] for b in loader]
-                expected = record[split][name]["ascore/full"]
+                    scores = [module.model_step(b)[key] for b in loader]
+                expected = record[split][set_name][key]
                 torch.testing.assert_close(torch.cat(scores), expected)
+
+
+def test_stored_sets_restrict_val_and_test(tmp_path):
+    stored = ["normal", "reference_normal"]
+    paths = {"all": tmp_path / "all", "some": tmp_path / "some"}
+    _, full = fit(tmp_path, [dump_callback(paths["all"])])
+    _, datamodule = fit(tmp_path, [dump_callback(paths["some"], stored_sets=stored)])
+    meta = {k: load(p / "meta.pt") for k, p in paths.items()}
+    assert meta["some"].pop("stored") == {"val": stored, "test": stored}
+    meta["all"].pop("stored")
+    assert_identical(meta["some"], meta["all"])
+
+    for name in PASSES:
+        records = {k: load(p / name) for k, p in paths.items()}
+        for split in ("val", "test"):
+            some, every = records["some"].pop(split), records["all"].pop(split)
+            assert_identical(some, {n: every[n] for n in stored})
+        assert_identical(records["some"], records["all"])
+
+    # The layout pass at fit start, then the initial pass and one per epoch.
+    for name, loader in datamodule.test_loaders.items():
+        assert loader.passes == (4 if name in stored else 1)
+    assert all(loader.passes == 4 for loader in full.test_loaders.values())
+
+
+def test_unknown_stored_set_raises(tmp_path):
+    callback = dump_callback(tmp_path / "scores", stored_sets=["normal", "sig_c"])
+    with pytest.raises(ValueError, match="sig_c"):
+        fit(tmp_path, [callback], epochs=1)
+
+
+def test_partial_sanity_check_raises(tmp_path):
+    with pytest.raises(RuntimeError, match="num_sanity_val_steps"):
+        fit(tmp_path, [dump_callback(tmp_path / "scores")], num_sanity_val_steps=2)
+
+
+def test_existing_dump_raises(tmp_path):
+    fit(tmp_path, [dump_callback(tmp_path / "scores")], epochs=1)
+    with pytest.raises(RuntimeError, match="already holds"):
+        fit(tmp_path, [dump_callback(tmp_path / "scores")], epochs=1)
+
+
+def test_hydra_files_are_copied(tmp_path):
+    hydra_dir = tmp_path / "run" / ".hydra"
+    hydra_dir.mkdir(parents=True)
+    for name in ("config.yaml", "overrides.yaml", "hydra.yaml"):
+        (hydra_dir / name).write_text(f"{name}: 1\n")
+    callback = dump_callback(tmp_path / "scores", run_dir=tmp_path / "run")
+    fit(tmp_path, [callback], epochs=1)
+    for name in ("config.yaml", "overrides.yaml"):
+        assert (tmp_path / "scores" / name).read_text() == f"{name}: 1\n"
+    assert not (tmp_path / "scores" / "hydra.yaml").exists()
 
 
 def test_aux_sets_depend_only_on_the_seed(tmp_path):
@@ -170,19 +300,24 @@ def test_aux_sets_depend_only_on_the_seed(tmp_path):
     for run, (seed, aux_seed) in enumerate([(0, 7), (1, 7), (0, 8)]):
         path = tmp_path / f"run{run}"
         fit(tmp_path, [dump_callback(path, aux_seed)], epochs=1, seed=seed)
-        metas.append(torch.load(path / "meta.pt", weights_only=True))
+        metas.append(load(path / "meta.pt"))
 
     x_train = toy_sets()["train"][0]
     lower, upper = x_train.min(dim=0).values, x_train.max(dim=0).values
-    uniform = metas[0]["aux_inputs"]["uniform"]
+    inputs = [aux_inputs(meta) for meta in metas]
+    uniform = inputs[0]["uniform"]
     assert torch.equal(metas[0]["aux_lower"], lower)
     assert torch.equal(metas[0]["aux_upper"], upper)
     assert bool(((uniform >= lower) & (uniform <= upper)).all())
     for name in ("gaussian", "uniform"):
-        assert torch.equal(metas[0]["aux_inputs"][name], metas[1]["aux_inputs"][name])
-        assert not torch.equal(
-            metas[0]["aux_inputs"][name], metas[2]["aux_inputs"][name]
-        )
+        assert torch.equal(inputs[0][name], inputs[1][name])
+        assert not torch.equal(inputs[0][name], inputs[2][name])
+
+
+def test_aux_sets_take_the_input_shape():
+    meta = {**_moments(torch.randn(64, 3, 4, 4)), "aux_seed": 0, "aux_size": 10}
+    for inputs in aux_inputs(meta).values():
+        assert inputs.shape == (10, 3, 4, 4)
 
 
 def test_scoring_pass_restores_mode_and_rng():
@@ -197,55 +332,21 @@ def test_scoring_pass_restores_mode_and_rng():
     assert torch.equal(torch.get_rng_state(), rng)
 
 
-def assert_identical(a, b):
-    if isinstance(a, dict):
-        assert a.keys() == b.keys()
-        for key in a:
-            assert_identical(a[key], b[key])
-    elif isinstance(a, torch.Tensor):
-        assert torch.equal(a, b)
-    else:
-        assert a == b
-
-
-def test_train_loss_is_stored_without_changing_the_rest(tmp_path):
-    paths = {flag: tmp_path / f"train_loss_{flag}" for flag in (False, True)}
-    for flag, path in paths.items():
-        _, datamodule = fit(tmp_path, [dump_callback(path, train_loss=flag)])
-    meta = {f: torch.load(p / "meta.pt", weights_only=True) for f, p in paths.items()}
-    assert meta[True].pop("train")["keys"] == ["loss/full"]
-    assert_identical(meta[True], meta[False])
-
-    x_train = datamodule.data_train.tensors[0]
-    for epoch in (0, 1):
-        name = f"epoch_{epoch:04d}.pt"
-        records = {f: torch.load(p / name, weights_only=True) for f, p in paths.items()}
-        stored = records[True].pop("train")
-        assert_identical(records[True], records[False])
-        module = ToyAE()
-        module.load_state_dict(records[True]["state_dict"])
-        module.eval()
-        with torch.no_grad():
-            expected = module.model_step((x_train, None))["loss/full"]
-        assert list(stored) == ["train"] and list(stored["train"]) == ["loss/full"]
-        torch.testing.assert_close(stored["train"]["loss/full"], expected)
-
-
 def test_autouad_set_follows_the_training_moments(tmp_path):
     size = 4000
     fit(tmp_path, [dump_callback(tmp_path / "scores", aux_size=size)], epochs=1)
-    meta = torch.load(tmp_path / "scores" / "meta.pt", weights_only=True)
+    meta = load(tmp_path / "scores" / "meta.pt")
     x_train = toy_sets()["train"][0]
     mean, std = x_train.mean(dim=0), x_train.std(dim=0, correction=0)
     assert torch.equal(meta["aux_mean"], mean) and torch.equal(meta["aux_std"], std)
-    autouad = meta["aux_inputs"]["autouad"]
-    torch.testing.assert_close(autouad.mean(dim=0), mean, atol=0.1, rtol=0.0)
-    torch.testing.assert_close(autouad.std(dim=0), std, atol=0.1, rtol=0.0)
+    inputs = aux_inputs(meta)
+    torch.testing.assert_close(inputs["autouad"].mean(dim=0), mean, atol=0.1, rtol=0.0)
+    torch.testing.assert_close(inputs["autouad"].std(dim=0), std, atol=0.1, rtol=0.0)
 
     # The two sets as the dump drew them before the autouad set existed.
     gen = torch.Generator().manual_seed(7)
     lower, upper = x_train.min(dim=0).values, x_train.max(dim=0).values
     gaussian = torch.randn((size, N_FEATURES), generator=gen)
     uniform = lower + (upper - lower) * torch.rand((size, N_FEATURES), generator=gen)
-    assert torch.equal(meta["aux_inputs"]["gaussian"], gaussian)
-    assert torch.equal(meta["aux_inputs"]["uniform"], uniform)
+    assert torch.equal(inputs["gaussian"], gaussian)
+    assert torch.equal(inputs["uniform"], uniform)

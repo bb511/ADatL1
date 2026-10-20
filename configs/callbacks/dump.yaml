@@ -1,0 +1,12 @@
+# @package callbacks
+
+# The dump regime: no checkpoint is kept, since selection reads the per-epoch scores
+# and weights of the score dump offline.
+defaults:
+  - util@model_summary: model_summary
+  - util@rich_progress_bar: rich_progress_bar
+  - util@score_dump: score_dump
+  - _self_
+
+model_summary:
+  max_depth: -1

@@ -3,7 +3,7 @@
 defaults:
   - _self_
 
-_target_: src.data.CausalChamber_datamodule.CausalChamberBlockDataModule
+_target_: src.data.CausalChamber_datamodule.CausalChamberDataModule
 
 data_dir: ${paths.base_data_dir}/causal_chamber
 dataset_name: wt_walks_v1
@@ -27,6 +27,10 @@ clip_value: 10.0
 seed: 314159
 # The batch order follows the global training seed.
 train_seed: ${seed}
+# A training half: keep every n_train_folds-th training row from train_fold on
+# (the halves instances of the lattice catalogues); null keeps every row.
+train_fold: null
+n_train_folds: 2
 
 # The eleven sensor readouts of the wind tunnel, in the order of
 # scripts/cchamber/readout_map_wt.yaml. The other 26 columns (actuators, sensor
@@ -45,46 +49,43 @@ readouts:
   - signal_2
 
 # regime_jumps_single.csv holds 32 regimes of 10,000 rows, numbered 0-31 by its flag
-# column. Regime 0 has no intervention and is the dataset's own reference; the
-# intervention targets and the null regimes are those of
+# column, and a set is the rows of one regime. Regime 0 has no intervention and is the
+# dataset's own reference; the intervention targets and the null regimes are those of
 # scripts/cchamber/readout_map_wt.yaml.
-block_file: regime_jumps_single
-block_column: flag
-normal_block: 0
-# regime_<index>_<intervention target>: regime index. The labels 1-26 follow this
-# order.
-signal_blocks:
-  regime_01_v_2: 1
-  regime_03_res_out: 3
-  regime_04_v_out: 4
-  regime_05_hatch: 5
-  regime_06_v_1: 6
-  regime_07_osr_upwind: 7
-  regime_09_osr_upwind: 9
-  regime_10_v_out: 10
-  regime_11_v_1: 11
-  regime_12_res_in: 12
-  regime_13_osr_upwind: 13
-  regime_14_res_out: 14
-  regime_15_osr_downwind: 15
-  regime_16_osr_ambient: 16
-  regime_17_v_in: 17
-  regime_18_hatch: 18
-  regime_19_osr_upwind: 19
-  regime_21_res_in: 21
-  regime_22_v_1: 22
-  regime_23_osr_intake: 23
-  regime_25_v_1: 25
-  regime_27_osr_upwind: 27
-  regime_28_osr_intake: 28
-  regime_29_osr_ambient: 29
-  regime_30_v_in: 30
-  regime_31_res_in: 31
+reference: { file: regime_jumps_single, where: { flag: 0 } }
+# regime_<index>_<intervention target>. The labels 1-26 follow this order.
+signals:
+  regime_01_v_2: { file: regime_jumps_single, where: { flag: 1 } }
+  regime_03_res_out: { file: regime_jumps_single, where: { flag: 3 } }
+  regime_04_v_out: { file: regime_jumps_single, where: { flag: 4 } }
+  regime_05_hatch: { file: regime_jumps_single, where: { flag: 5 } }
+  regime_06_v_1: { file: regime_jumps_single, where: { flag: 6 } }
+  regime_07_osr_upwind: { file: regime_jumps_single, where: { flag: 7 } }
+  regime_09_osr_upwind: { file: regime_jumps_single, where: { flag: 9 } }
+  regime_10_v_out: { file: regime_jumps_single, where: { flag: 10 } }
+  regime_11_v_1: { file: regime_jumps_single, where: { flag: 11 } }
+  regime_12_res_in: { file: regime_jumps_single, where: { flag: 12 } }
+  regime_13_osr_upwind: { file: regime_jumps_single, where: { flag: 13 } }
+  regime_14_res_out: { file: regime_jumps_single, where: { flag: 14 } }
+  regime_15_osr_downwind: { file: regime_jumps_single, where: { flag: 15 } }
+  regime_16_osr_ambient: { file: regime_jumps_single, where: { flag: 16 } }
+  regime_17_v_in: { file: regime_jumps_single, where: { flag: 17 } }
+  regime_18_hatch: { file: regime_jumps_single, where: { flag: 18 } }
+  regime_19_osr_upwind: { file: regime_jumps_single, where: { flag: 19 } }
+  regime_21_res_in: { file: regime_jumps_single, where: { flag: 21 } }
+  regime_22_v_1: { file: regime_jumps_single, where: { flag: 22 } }
+  regime_23_osr_intake: { file: regime_jumps_single, where: { flag: 23 } }
+  regime_25_v_1: { file: regime_jumps_single, where: { flag: 25 } }
+  regime_27_osr_upwind: { file: regime_jumps_single, where: { flag: 27 } }
+  regime_28_osr_intake: { file: regime_jumps_single, where: { flag: 28 } }
+  regime_29_osr_ambient: { file: regime_jumps_single, where: { flag: 29 } }
+  regime_30_v_in: { file: regime_jumps_single, where: { flag: 30 } }
+  regime_31_res_in: { file: regime_jumps_single, where: { flag: 31 } }
 # Regimes without intervention, with label 0: a check of the false-positive rate
 # under the random walk of the actuators.
-null_blocks:
-  null_regime_02: 2
-  null_regime_08: 8
-  null_regime_20: 20
-  null_regime_24: 24
-  null_regime_26: 26
+nulls:
+  null_regime_02: { file: regime_jumps_single, where: { flag: 2 } }
+  null_regime_08: { file: regime_jumps_single, where: { flag: 8 } }
+  null_regime_20: { file: regime_jumps_single, where: { flag: 20 } }
+  null_regime_24: { file: regime_jumps_single, where: { flag: 24 } }
+  null_regime_26: { file: regime_jumps_single, where: { flag: 26 } }

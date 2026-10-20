@@ -91,6 +91,10 @@ def drivers(script: Path) -> list[dict]:
     text = script.read_text()
     out = []
     for i, block in enumerate(re.split(r"^# python3 src/train\.py", text, flags=re.M)):
+        # A block ends with its first line without a trailing backslash: the dormant
+        # blocks of a lattice catalogue (opened by "## python3", which lib.sh skips)
+        # would otherwise be read as part of the last driver.
+        block = re.match(r"(?:.*\\\n)*.*", block).group(0)
         b = block.replace("\\\n", " ").replace("#", " ")
         study, storage = setting(b, "study_name"), setting(b, "storage")
         n, seed = setting(b, "n_trials"), setting(b, "sampler.seed") or 0

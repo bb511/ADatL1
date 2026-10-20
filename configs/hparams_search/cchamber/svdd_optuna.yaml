@@ -1,0 +1,30 @@
+# @package _global_
+
+# Placeholder space: the svdd entry of SPACES in Victor's campaign script
+# (logs/victor_results/cchamber-data/scripts/cchamber_campaign.py on olgpu), every
+# dimension copied unchanged, until the spaces chat settles the chamber spaces
+# (item 5a of the redesign). The configs of the two tunnels differ only in their
+# storage. The space has no width dimension: the encoder keeps the experiment's
+# [128, 64, 16] and is trained from scratch, without Victor's pretrained
+# initialisation.
+
+defaults:
+  - override /hydra/sweeper: optuna
+  - override /hydra/sweeper/sampler: random
+
+hydra:
+  mode: "MULTIRUN"
+  sweeper:
+    _target_: hydra_plugins.hydra_optuna_sweeper.optuna_sweeper.OptunaSweeper
+    study_name: pool
+    n_jobs: 1
+    # A placeholder objective: the run only trains and dumps, so it reports +inf
+    # to Optuna, and the random sampler never reads the value.
+    direction: minimize
+    n_trials: 50
+    storage: sqlite:///logs/optuna/cchamber/svdd_pool.db?timeout=600
+    params:
+      algorithm.optimizer.lr: tag(log, interval(3e-5, 3e-3))
+      trainer.gradient_clip_val: choice(0.0, 0.5, 1.0, 2.0)
+      algorithm.optimizer.betas: choice([0.9, 0.999], [0.9, 0.99])
+      algorithm.network_weight_decay: choice(0.0, 1e-8, 1e-7, 1e-6, 1e-5)

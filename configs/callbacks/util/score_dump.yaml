@@ -1,12 +1,16 @@
 # package callbacks.util
 
-# Per-event scores of every validation, test and auxiliary set at every
-# validation epoch, read by scripts/cchamber/offline_select.py. Pulled into an
-# experiment with `- /callbacks/util@callbacks.score_dump: score_dump`.
+# Per-event scores and weights of every validation pass, the sanity check included,
+# for the offline evaluation; the docstring of src/callbacks/score_dump.py gives the
+# layout of the files. Pulled in by configs/callbacks/dump.yaml, and it needs
+# trainer.num_sanity_val_steps: -1.
 _target_: src.callbacks.score_dump.ScoreDumpCallback
-dirpath: ${paths.output_dir}/scores
+dirpath: ${paths.log_dir}/scores/${experiment_name}/${run_name}
+run_dir: ${paths.output_dir}
 keys: ["ascore/full", "ascore/mse", "ascore/kl", "ascore/residual_oas"]
+# Validation and test sets whose scores are stored; null stores every set, and the
+# others are rescored offline from the stored weights.
+stored_sets: null
 aux_seed: 0
 aux_size: 10000
 aux_batch_size: 1024
-train_loss: false

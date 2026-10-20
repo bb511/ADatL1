@@ -8,6 +8,8 @@ from urllib.request import urlretrieve
 from zipfile import ZipFile
 
 import numpy as np
+import pyarrow as pa
+import pyarrow.compute as pc
 import torch
 from colorama import Back, Fore
 from pyarrow import csv as pa_csv
@@ -19,23 +21,6 @@ from src.utils import pylogger
 
 log = pylogger.RankedLogger(__name__)
 
-# The sensor readouts of the light tunnel, in model-input order. The other columns of
-# every CSV are run metadata and the actuator settings that the interventions change,
-# and a model must never see them.
-READOUTS = [
-    "current",
-    "angle_1",
-    "angle_2",
-    "ir_1",
-    "vis_1",
-    "ir_2",
-    "vis_2",
-    "ir_3",
-    "vis_3",
-    "v_board",
-    "v_reg",
-]
-
 
 @dataclass(frozen=True)
 class SplitTensors:
@@ -43,10 +28,20 @@ class SplitTensors:
     y: torch.Tensor
 
 
-def _read_readouts(path: Path, readouts: list[str] = READOUTS) -> torch.Tensor:
-    """Return the given columns of one CSV, (nrows, len(readouts)) in float32."""
-    options = pa_csv.ConvertOptions(include_columns=readouts)
-    table = pa_csv.read_csv(path, convert_options=options)
+def _select(table: pa.Table, where: dict[str, int | float | str]) -> pa.Table:
+    """Keep the rows, in file order, where every named column equals its value.
+
+    Each column is compared in the type inferred for it from the CSV, before any cast to
+    float32 (the wind tunnel's ``flag`` is written as 0.0 to 31.0 and read as float64).
+    """
+    for column, value in where.items():
+        table = table.filter(pc.equal(table[column], value))
+
+    return table
+
+
+def _to_tensor(table: pa.Table, readouts: list[str]) -> torch.Tensor:
+    """Return the given columns of a table, (nrows, len(readouts)) in float32."""
     columns = [table.column(name).to_numpy() for name in readouts]
 
     return torch.as_tensor(np.stack(columns, axis=1), dtype=torch.float32)
@@ -105,28 +100,31 @@ def _to_device(t: torch.Tensor, device: torch.device) -> torch.Tensor:
 
 
 class CausalChamberDataModule(LightningDataModule):
-    """Causal Chamber light-tunnel data (arXiv:2404.11341) for anomaly detection.
+    """Causal Chamber data (arXiv:2404.11341) for anomaly detection.
 
-    The normal rows of ``uniform_reference`` are split into train, validation and test
-    by ``train_fraction`` and ``val_fraction``, and each evaluation part is halved into
-    ``normal`` and ``reference_normal``, both labeled 0. Every experiment in
-    ``signal_experiments`` is split into validation and test by
-    ``signal_val_fraction`` and labeled by its 1-based position in that list. Those in
-    ``null_experiments``, which carry no intervention, are split in the same way and
-    labeled 0. Each permutation comes from a fresh generator, seeded with ``seed`` for
-    the reference split and with ``seed + n`` for the halving and the experiment splits
-    (n being the number of rows permuted); this reproduces the row sets of the original
-    chamber study. The splits do not depend on the training seed; only the batch order
-    of the training loader does.
+    A set is a mapping ``{file: <csv stem>, where: {<column>: <value>, ...}}``: the rows
+    of ``<file>.csv`` in which every column named in the optional ``where`` equals its
+    value, in file order. The light tunnel has one CSV per experiment and needs no
+    ``where``; the regimes of the wind tunnel are blocks of one CSV, selected by its
+    ``flag`` column.
 
-    The model inputs are the ``readouts``, by default the eleven of the light tunnel
-    (``READOUTS``). Each is centered on its median over the training rows, divided by
-    the spread between the two ``robust_quantiles`` of those rows and clipped at
-    ``clip_value``.
+    The rows of the ``reference`` set are split into train, validation and test by
+    ``train_fraction`` and ``val_fraction``, and each evaluation part is halved into
+    ``normal`` and ``reference_normal``, both labeled 0. Every set in ``signals`` is
+    split into validation and test by ``signal_val_fraction`` and labeled by its
+    1-based position in that mapping. Those in ``nulls``, which carry no intervention,
+    are split in the same way and labeled 0. Each permutation comes from a fresh
+    generator, seeded with ``seed`` for the reference split and with ``seed + n`` for
+    the halving and the set splits (n being the number of rows permuted); this
+    reproduces the row sets of the original chamber study. The splits do not depend on
+    the training seed; only the batch order of the training loader does.
+
+    The model inputs are the ``readouts``, in the given order. Each is centered on its
+    median over the training rows, divided by the spread between the two
+    ``robust_quantiles`` of those rows and clipped at ``clip_value``.
 
     Validation and test loaders are dictionaries ordered ``normal``,
-    ``reference_normal``, the experiments in ``signal_experiments`` order, then those
-    in ``null_experiments`` order.
+    ``reference_normal``, the sets of ``signals`` in order, then those of ``nulls``.
 
     :param max_val_batches: Batch cap on every evaluation loader but ``normal``; -1
         means no cap.
@@ -145,7 +143,10 @@ class CausalChamberDataModule(LightningDataModule):
         dataset_name: str,
         url: str,
         md5: str,
-        signal_experiments: list[str],
+        readouts: list[str],
+        reference: dict,
+        signals: dict[str, dict],
+        nulls: dict[str, dict] | None = None,
         batch_size: int = 1024,
         max_val_batches: int = -1,
         train_fraction: float = 0.6,
@@ -156,8 +157,6 @@ class CausalChamberDataModule(LightningDataModule):
         seed: int = 314159,
         train_seed: int | None = None,
         num_workers: int = 0,
-        readouts: list[str] = READOUTS,
-        null_experiments: list[str] | None = None,
         train_fold: int | None = None,
         n_train_folds: int = 2,
     ) -> None:
@@ -181,6 +180,8 @@ class CausalChamberDataModule(LightningDataModule):
         self.data_train: TensorDataset | None = None
         self._main: dict[str, SplitTensors] = {}
         self._aux: dict[str, dict[str, SplitTensors]] = {}
+        # Raw tables by CSV stem, held only while the splits are built.
+        self._tables: dict[str, pa.Table] = {}
 
     def prepare_data(self) -> None:
         """Download, verify and extract the archive unless the CSVs are in place."""
@@ -199,6 +200,7 @@ class CausalChamberDataModule(LightningDataModule):
         self._set_batch_size()
         if self.data_train is None:
             self._build_splits()
+            self._tables.clear()
             self._data_summary()
 
     def train_dataloader(self) -> DataLoader:
@@ -216,14 +218,27 @@ class CausalChamberDataModule(LightningDataModule):
     ) -> tuple[torch.Tensor, ...]:
         return tuple(_to_device(t, device) for t in batch)
 
-    def _read_reference(self) -> torch.Tensor:
-        return self._read_experiment("uniform_reference")
+    def _read_set(self, spec: dict) -> torch.Tensor:
+        stem = spec["file"]
+        if stem not in self._tables:
+            self._tables[stem] = self._read_table(stem)
+        table = _select(self._tables[stem], spec.get("where") or {})
 
-    def _read_experiment(self, name: str) -> torch.Tensor:
-        return _read_readouts(self.dataset_dir / f"{name}.csv", self.hparams.readouts)
+        return _to_tensor(table, self.hparams.readouts)
+
+    def _read_table(self, stem: str) -> pa.Table:
+        """Read the readouts of one CSV and every column that a set filters it on."""
+        nulls = self.hparams.nulls or {}
+        sets = [self.hparams.reference, *self.hparams.signals.values(), *nulls.values()]
+        where = [c for s in sets if s["file"] == stem for c in s.get("where") or {}]
+        columns = list(dict.fromkeys([*self.hparams.readouts, *where]))
+        options = pa_csv.ConvertOptions(include_columns=columns)
+        path = self.dataset_dir / f"{stem}.csv"
+
+        return pa_csv.read_csv(path, convert_options=options)
 
     def _build_splits(self) -> None:
-        reference = self._read_reference()
+        reference = self._read_set(self.hparams.reference)
         train_idx, valid_idx, test_idx = self._reference_indices(reference.size(0))
         if self.hparams.train_fold is not None:
             train_idx = train_idx[self.hparams.train_fold :: self.hparams.n_train_folds]
@@ -273,10 +288,10 @@ class CausalChamberDataModule(LightningDataModule):
         return SplitTensors(x[main], y), SplitTensors(x[ref], y)
 
     def _add_interventions(self) -> None:
-        signals = enumerate(self.hparams.signal_experiments, start=1)
-        nulls = [(0, name) for name in self.hparams.null_experiments or []]
-        for label, name in [*signals, *nulls]:
-            x = self._normalize(self._read_experiment(name))
+        signals = enumerate(self.hparams.signals.items(), start=1)
+        nulls = [(0, item) for item in (self.hparams.nulls or {}).items()]
+        for label, (name, spec) in [*signals, *nulls]:
+            x = self._normalize(self._read_set(spec))
             n = x.size(0)
             n_valid = round(self.hparams.signal_val_fraction * n)
             perm = _permutation(n, self.hparams.seed + n)
@@ -340,47 +355,3 @@ class CausalChamberDataModule(LightningDataModule):
             log.info(f"normal: {tuple(self._main[split].x.shape)}")
             for name, part in aux.items():
                 log.info(f"{name}: {tuple(part.x.shape)}")
-
-
-class CausalChamberBlockDataModule(CausalChamberDataModule):
-    """Causal Chamber data whose experiments are blocks of rows in one CSV.
-
-    Written for the wind-tunnel experiment ``regime_jumps_single`` of ``wt_walks_v1``,
-    whose 32 regimes are numbered by its ``flag`` column. The rows of ``block_file``
-    are grouped by the value of ``block_column``: ``normal_block`` takes the place of
-    ``uniform_reference``, while ``signal_blocks`` and ``null_blocks`` map experiment
-    names to blocks, the signal labels following the order of ``signal_blocks``. A
-    block keeps the row order of the file, so every split is drawn as in the parent
-    class. The remaining arguments are the parent's.
-    """
-
-    def __init__(
-        self,
-        block_file: str,
-        block_column: str,
-        normal_block: int,
-        signal_blocks: dict[str, int],
-        null_blocks: dict[str, int],
-        **kwargs,
-    ) -> None:
-        super().__init__(
-            signal_experiments=list(signal_blocks),
-            null_experiments=list(null_blocks),
-            **kwargs,
-        )
-        self._blocks = {**signal_blocks, **null_blocks}
-        self._table: torch.Tensor | None = None
-
-    def _read_reference(self) -> torch.Tensor:
-        return self._read_block(self.hparams.normal_block)
-
-    def _read_experiment(self, name: str) -> torch.Tensor:
-        return self._read_block(self._blocks[name])
-
-    def _read_block(self, block: int) -> torch.Tensor:
-        if self._table is None:
-            path = self.dataset_dir / f"{self.hparams.block_file}.csv"
-            columns = [*self.hparams.readouts, self.hparams.block_column]
-            self._table = _read_readouts(path, columns)
-        # The block ids are small integers, so the float32 comparison is exact.
-        return self._table[self._table[:, -1] == block, :-1]

@@ -14,7 +14,7 @@ batch_size: 1024
 max_val_batches: -1
 num_workers: 0
 
-# uniform_reference is split into train, validation and test (the remainder); each
+# The reference set is split into train, validation and test (the remainder); each
 # intervention into validation and test.
 train_fraction: 0.6
 val_fraction: 0.2
@@ -27,63 +27,86 @@ clip_value: 10.0
 seed: 314159
 # The batch order follows the global training seed.
 train_seed: ${seed}
+# A training half: keep every n_train_folds-th training row from train_fold on
+# (the halves instances of the lattice catalogues); null keeps every row.
+train_fold: null
+n_train_folds: 2
 
-signal_experiments:
-  - uniform_blue_mid
-  - uniform_blue_strong
-  - uniform_diode_ir_1_mid
-  - uniform_diode_ir_1_strong
-  - uniform_diode_ir_2_mid
-  - uniform_diode_ir_2_strong
-  - uniform_diode_ir_3_mid
-  - uniform_diode_ir_3_strong
-  - uniform_diode_vis_1_mid
-  - uniform_diode_vis_2_mid
-  - uniform_diode_vis_3_mid
-  - uniform_green_mid
-  - uniform_green_strong
-  - uniform_l_11_mid
-  - uniform_l_12_mid
-  - uniform_l_21_mid
-  - uniform_l_22_mid
-  - uniform_l_31_mid
-  - uniform_l_32_mid
-  - uniform_osr_angle_1_mid
-  - uniform_osr_angle_1_strong
-  - uniform_osr_angle_1_weak
-  - uniform_osr_angle_2_mid
-  - uniform_osr_angle_2_strong
-  - uniform_osr_angle_2_weak
-  - uniform_osr_c_mid
-  - uniform_osr_c_strong
-  - uniform_osr_c_weak
-  - uniform_pol_1_mid
-  - uniform_pol_1_strong
-  - uniform_pol_2_mid
-  - uniform_pol_2_strong
-  - uniform_red_mid
-  - uniform_red_strong
-  - uniform_t_ir_1_mid
-  - uniform_t_ir_1_strong
-  - uniform_t_ir_1_weak
-  - uniform_t_ir_2_mid
-  - uniform_t_ir_2_strong
-  - uniform_t_ir_2_weak
-  - uniform_t_ir_3_mid
-  - uniform_t_ir_3_strong
-  - uniform_t_ir_3_weak
-  - uniform_t_vis_1_mid
-  - uniform_t_vis_1_strong
-  - uniform_t_vis_1_weak
-  - uniform_t_vis_2_mid
-  - uniform_t_vis_2_strong
-  - uniform_t_vis_2_weak
-  - uniform_t_vis_3_mid
-  - uniform_t_vis_3_strong
-  - uniform_t_vis_3_weak
-  - uniform_v_angle_1_mid
-  - uniform_v_angle_1_strong
-  - uniform_v_angle_2_mid
-  - uniform_v_angle_2_strong
-  - uniform_v_c_mid
-  - uniform_v_c_strong
+# The eleven sensor readouts of the light tunnel, in model-input order. The other
+# columns of every CSV are run metadata and the actuator settings that the
+# interventions change, and are never model inputs.
+readouts:
+  - current
+  - angle_1
+  - angle_2
+  - ir_1
+  - vis_1
+  - ir_2
+  - vis_2
+  - ir_3
+  - vis_3
+  - v_board
+  - v_reg
+
+# One CSV per experiment, so a set is the whole file. The labels 1-58 follow the order
+# of the signals.
+reference: { file: uniform_reference }
+signals:
+  uniform_blue_mid: { file: uniform_blue_mid }
+  uniform_blue_strong: { file: uniform_blue_strong }
+  uniform_diode_ir_1_mid: { file: uniform_diode_ir_1_mid }
+  uniform_diode_ir_1_strong: { file: uniform_diode_ir_1_strong }
+  uniform_diode_ir_2_mid: { file: uniform_diode_ir_2_mid }
+  uniform_diode_ir_2_strong: { file: uniform_diode_ir_2_strong }
+  uniform_diode_ir_3_mid: { file: uniform_diode_ir_3_mid }
+  uniform_diode_ir_3_strong: { file: uniform_diode_ir_3_strong }
+  uniform_diode_vis_1_mid: { file: uniform_diode_vis_1_mid }
+  uniform_diode_vis_2_mid: { file: uniform_diode_vis_2_mid }
+  uniform_diode_vis_3_mid: { file: uniform_diode_vis_3_mid }
+  uniform_green_mid: { file: uniform_green_mid }
+  uniform_green_strong: { file: uniform_green_strong }
+  uniform_l_11_mid: { file: uniform_l_11_mid }
+  uniform_l_12_mid: { file: uniform_l_12_mid }
+  uniform_l_21_mid: { file: uniform_l_21_mid }
+  uniform_l_22_mid: { file: uniform_l_22_mid }
+  uniform_l_31_mid: { file: uniform_l_31_mid }
+  uniform_l_32_mid: { file: uniform_l_32_mid }
+  uniform_osr_angle_1_mid: { file: uniform_osr_angle_1_mid }
+  uniform_osr_angle_1_strong: { file: uniform_osr_angle_1_strong }
+  uniform_osr_angle_1_weak: { file: uniform_osr_angle_1_weak }
+  uniform_osr_angle_2_mid: { file: uniform_osr_angle_2_mid }
+  uniform_osr_angle_2_strong: { file: uniform_osr_angle_2_strong }
+  uniform_osr_angle_2_weak: { file: uniform_osr_angle_2_weak }
+  uniform_osr_c_mid: { file: uniform_osr_c_mid }
+  uniform_osr_c_strong: { file: uniform_osr_c_strong }
+  uniform_osr_c_weak: { file: uniform_osr_c_weak }
+  uniform_pol_1_mid: { file: uniform_pol_1_mid }
+  uniform_pol_1_strong: { file: uniform_pol_1_strong }
+  uniform_pol_2_mid: { file: uniform_pol_2_mid }
+  uniform_pol_2_strong: { file: uniform_pol_2_strong }
+  uniform_red_mid: { file: uniform_red_mid }
+  uniform_red_strong: { file: uniform_red_strong }
+  uniform_t_ir_1_mid: { file: uniform_t_ir_1_mid }
+  uniform_t_ir_1_strong: { file: uniform_t_ir_1_strong }
+  uniform_t_ir_1_weak: { file: uniform_t_ir_1_weak }
+  uniform_t_ir_2_mid: { file: uniform_t_ir_2_mid }
+  uniform_t_ir_2_strong: { file: uniform_t_ir_2_strong }
+  uniform_t_ir_2_weak: { file: uniform_t_ir_2_weak }
+  uniform_t_ir_3_mid: { file: uniform_t_ir_3_mid }
+  uniform_t_ir_3_strong: { file: uniform_t_ir_3_strong }
+  uniform_t_ir_3_weak: { file: uniform_t_ir_3_weak }
+  uniform_t_vis_1_mid: { file: uniform_t_vis_1_mid }
+  uniform_t_vis_1_strong: { file: uniform_t_vis_1_strong }
+  uniform_t_vis_1_weak: { file: uniform_t_vis_1_weak }
+  uniform_t_vis_2_mid: { file: uniform_t_vis_2_mid }
+  uniform_t_vis_2_strong: { file: uniform_t_vis_2_strong }
+  uniform_t_vis_2_weak: { file: uniform_t_vis_2_weak }
+  uniform_t_vis_3_mid: { file: uniform_t_vis_3_mid }
+  uniform_t_vis_3_strong: { file: uniform_t_vis_3_strong }
+  uniform_t_vis_3_weak: { file: uniform_t_vis_3_weak }
+  uniform_v_angle_1_mid: { file: uniform_v_angle_1_mid }
+  uniform_v_angle_1_strong: { file: uniform_v_angle_1_strong }
+  uniform_v_angle_2_mid: { file: uniform_v_angle_2_mid }
+  uniform_v_angle_2_strong: { file: uniform_v_angle_2_strong }
+  uniform_v_c_mid: { file: uniform_v_c_mid }
+  uniform_v_c_strong: { file: uniform_v_c_strong }

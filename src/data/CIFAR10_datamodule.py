@@ -140,6 +140,15 @@ class CIFAR10DataModule(LightningDataModule):
 
         self._data_summary(stage)
 
+    @property
+    def data_train(self) -> TensorDataset | None:
+        """The training split as (x, y), where the dump and residual callbacks read it.
+
+        None before setup.
+        """
+        split = self._main.get("train")
+        return None if split is None else TensorDataset(split.x, split.y)
+
     def train_dataloader(self):
         """Create and return the training dataloader."""
         split = self._main["train"]

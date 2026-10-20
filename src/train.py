@@ -157,7 +157,8 @@ def _get_evaluator(cfg: DictConfig, datamodule, logger):
 
 
 def _get_directions(cfg):
-    # 1) Our own config: present in any composable run, so 2) below is a dead fallback.
+    # 1) Our own config, present in every run with an evaluator; a dump-only run has
+    #    none and reports the worst value of the sweeper direction through 2).
     if "optimized_metric_config" in cfg:
         # multi-objective if sec_metric exists
         main_dir = cfg.optimized_metric_config.main_metric.direction

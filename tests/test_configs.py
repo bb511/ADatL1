@@ -14,7 +14,11 @@ EXPERIMENTS = sorted(
     for domain in ("physics", "cifar10", "robustad", "cchamber", "cchamber_wt")
     for path in (CONFIGS / "experiment" / domain).glob("*.yaml")
 )
+# The LHC keeps the checkpoint regime; every other domain trains and dumps its scores.
+PHYSICS = [e for e in EXPERIMENTS if e.startswith("physics/")]
+DUMPED = [e for e in EXPERIMENTS if not e.startswith("physics/")]
 MODEL_CHECKPOINT = "pytorch_lightning.callbacks.ModelCheckpoint"
+SCORE_DUMP = "src.callbacks.score_dump.ScoreDumpCallback"
 
 
 @pytest.fixture(scope="module", autouse=True)
@@ -62,7 +66,7 @@ def _saved_folders(callbacks: dict) -> dict[tuple[str, ...], dict]:
     return folders
 
 
-@pytest.mark.parametrize("experiment", EXPERIMENTS)
+@pytest.mark.parametrize("experiment", PHYSICS)
 def test_every_saved_checkpoint_is_evaluated(experiments, experiment):
     cfg = experiments[experiment]
     ckpts = cfg["evaluation"]["evaluator"]["ckpts"]
@@ -86,15 +90,37 @@ def test_every_saved_checkpoint_is_evaluated(experiments, experiment):
         assert cb["filename"] == metric
 
 
+@pytest.mark.parametrize("experiment", DUMPED)
+def test_dumped_runs_train_and_dump_only(experiments, experiment):
+    cfg = experiments[experiment]
+    callbacks = cfg["callbacks"]
+    domain, model = experiment.split("/")
+
+    targets = [cb.get("_target_") for cb in callbacks.values() if isinstance(cb, dict)]
+    assert MODEL_CHECKPOINT not in targets
+    assert not cfg.get("evaluation")
+    assert "optimized_metric_config" not in cfg
+    assert callbacks["score_dump"]["_target_"] == SCORE_DUMP
+    assert cfg["trainer"]["num_sanity_val_steps"] == -1
+    assert cfg["trainer"]["enable_checkpointing"] is False
+    assert cfg["test"] is False
+
+    stored_sets = ["normal", "reference_normal"] if domain == "cchamber_wt" else None
+    assert callbacks["score_dump"]["stored_sets"] == stored_sets
+    residual = domain.startswith("cchamber") and model in ("ae", "vae")
+    assert ("residual_state" in callbacks) == residual
+
+
 @pytest.mark.parametrize("experiment", EXPERIMENTS)
 def test_cap_parameters_come_from_the_cap_group(experiments, experiment):
     cfg = experiments[experiment]
+    evaluation_callbacks = cfg.get("evaluation", {}).get("callbacks", {})
     blocks = [
         cb["cap_metric_config"]
-        for group in (cfg["callbacks"], cfg["evaluation"]["callbacks"])
+        for group in (cfg["callbacks"], evaluation_callbacks)
         for cb in group.values()
         if isinstance(cb, dict) and "cap_metric_config" in cb
     ]
 
-    assert blocks == ["${cap}"] * 4
+    assert blocks == ["${cap}"] * (4 if experiment in PHYSICS else 0)
     assert {"beta_min", "beta_max", "n_beta"} <= cfg["cap"].keys()

@@ -1,0 +1,59 @@
+# @package _global_
+
+# Train and dump only: the run stores its per-epoch scores and weights and its
+# resolved configuration, and selection and evaluation happen offline.
+
+defaults:
+  - /cap: provisional
+  - override /data: cchamber_wt
+  - override /algorithm: svdd
+  - override /callbacks: dump
+  - override /trainer: cpu
+  - override /logger: mlflow
+
+seed: 123
+tags: ["svdd", "cchamber_wt", "pool"]
+
+experiment_name: cchamber_wt_svdd_pool
+run_name: ${short_hash:${hydra:runtime.output_dir},12}
+
+data:
+  batch_size: 1024
+  max_val_batches: -1
+
+trainer:
+  gradient_clip_algorithm: norm
+  gradient_clip_val: 0.0
+  min_epochs: 1
+  max_epochs: 150
+  # The full sanity pass is the untrained state the dump stores; disabling
+  # checkpointing drops the ModelCheckpoint that Lightning adds by default.
+  num_sanity_val_steps: -1
+  enable_checkpointing: false
+
+test: false
+
+# Candidate 000 of the chamber panel. The panel leaves the encoder widths to its
+# base configuration, which sets [128, 64, 16].
+algorithm:
+  target_rate: 0.01
+  base_rate: null
+  network_weight_decay: 1.0e-6
+
+  encoder:
+    in_dim: 11
+    nodes: [128, 64, 16]
+
+  optimizer:
+    _partial_: true
+    _target_: torch.optim.Adam
+    lr: 1.0e-3
+    weight_decay: 0.0
+    betas: [0.9, 0.999]
+    eps: 1e-8
+
+# Only the two normal sets are stored per epoch; the regimes are rescored
+# offline from the dumped weights.
+callbacks:
+  score_dump:
+    stored_sets: [normal, reference_normal]

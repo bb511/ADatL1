@@ -23,8 +23,7 @@ trainer:
   gradient_clip_val: 0.0
   min_epochs: 1
   max_epochs: 200
-  # The full sanity pass is the untrained state the dump stores; disabling
-  # checkpointing drops the ModelCheckpoint that Lightning adds by default.
+  # The full sanity pass is the untrained state the dump stores; no checkpoint is kept.
   num_sanity_val_steps: -1
   enable_checkpointing: false
 

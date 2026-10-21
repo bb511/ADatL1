@@ -1,7 +1,6 @@
 # @package _global_
 
-# Train and dump only: the run stores its per-epoch scores and weights and its
-# resolved configuration, and selection and evaluation happen offline.
+# Train and dump only; selection and evaluation run offline.
 
 defaults:
   - /cap: provisional
@@ -27,21 +26,19 @@ trainer:
   gradient_clip_val: 0.0
   min_epochs: 1
   max_epochs: 150
-  # The full sanity pass is the untrained state the dump stores; disabling
-  # checkpointing drops the ModelCheckpoint that Lightning adds by default.
+  # The full sanity pass is the untrained state the dump stores; no checkpoint is kept.
   num_sanity_val_steps: -1
   enable_checkpointing: false
 
 test: false
 
-# Candidate 000 of Victor's chamber panel, on olgpu at
-# logs/victor_results/cchamber-data/results/cchamber-pairings-v1/panel.yaml.
+# Candidate 000 of Victor's chamber panel, with a constant KL weight.
 algorithm:
   target_rate: 0.01
   base_rate: null
   anomaly_score: residual_oas
   kl_scale: 0.1
-  kl_warmup_frac: 0.1
+  kl_warmup_frac: 0.0
 
   encoder:
     in_dim: 11

@@ -27,14 +27,11 @@ clip_value: 10.0
 seed: 314159
 # The batch order follows the global training seed.
 train_seed: ${seed}
-# A training half: keep every n_train_folds-th training row from train_fold on
-# (the halves instances of the lattice catalogues); null keeps every row.
+# A training half (the halves instances of the catalogues); null keeps every row.
 train_fold: null
 n_train_folds: 2
 
-# The eleven sensor readouts of the wind tunnel, in the order of
-# scripts/cchamber/readout_map_wt.yaml. The other 26 columns (actuators, sensor
-# parameters and run metadata) are never model inputs.
+# The wind tunnel's eleven sensor readouts, in the order of readout_map_wt.yaml.
 readouts:
   - pressure_upwind
   - pressure_downwind
@@ -48,10 +45,7 @@ readouts:
   - signal_1
   - signal_2
 
-# regime_jumps_single.csv holds 32 regimes of 10,000 rows, numbered 0-31 by its flag
-# column, and a set is the rows of one regime. Regime 0 has no intervention and is the
-# dataset's own reference; the intervention targets and the null regimes are those of
-# scripts/cchamber/readout_map_wt.yaml.
+# A set is one regime (its flag) of regime_jumps_single.csv; regime 0 is the reference.
 reference: { file: regime_jumps_single, where: { flag: 0 } }
 # regime_<index>_<intervention target>. The labels 1-26 follow this order.
 signals:
@@ -81,8 +75,7 @@ signals:
   regime_29_osr_ambient: { file: regime_jumps_single, where: { flag: 29 } }
   regime_30_v_in: { file: regime_jumps_single, where: { flag: 30 } }
   regime_31_res_in: { file: regime_jumps_single, where: { flag: 31 } }
-# Regimes without intervention, with label 0: a check of the false-positive rate
-# under the random walk of the actuators.
+# Null regimes, label 0: the false-positive rate under the actuator walk.
 nulls:
   null_regime_02: { file: regime_jumps_single, where: { flag: 2 } }
   null_regime_08: { file: regime_jumps_single, where: { flag: 8 } }

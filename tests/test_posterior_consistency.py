@@ -10,7 +10,10 @@ own value, which the variant must leave untouched.
 import pytest
 import torch
 
-from src.callbacks.metrics.cap.metric import ApproximationCapacity, PosteriorConsistency
+from src.callbacks.components.cap.metric import (
+    ApproximationCapacity,
+    PosteriorConsistency,
+)
 
 
 def _metric_config(**overrides) -> dict:

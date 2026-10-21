@@ -4,7 +4,7 @@ import math
 import torch
 from pytorch_lightning import Callback
 
-from src.callbacks.metrics.rate import compute_tie_weight, count_exceedances
+from src.callbacks.components.rate import compute_tie_weight, count_exceedances
 
 
 class ThresholdDriftCallback(Callback):

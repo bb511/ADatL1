@@ -2,9 +2,9 @@ import pytest
 import torch
 from omegaconf import OmegaConf
 
-from src.callbacks.metrics.cap.binary.normalization import minmax
-from src.callbacks.metrics.cap.metric import ApproximationCapacity
-from src.evaluation.callbacks.metrics.cap.metric import (
+from src.callbacks.components.cap.binary.normalization import minmax
+from src.callbacks.components.cap.metric import ApproximationCapacity
+from src.evaluation.callbacks.components.cap.metric import (
     ApproximationCapacity as EvaluationApproximationCapacity,
 )
 

@@ -7,7 +7,7 @@ import numpy as np
 import torch
 from pytorch_lightning.callbacks import Callback
 
-from src.callbacks.metrics.rate import AnomalyRate
+from src.callbacks.components.rate import AnomalyRate
 from src.data.utils import unpack_batch
 from src.evaluation.callbacks import utils
 from src.plot import horizontal_bar

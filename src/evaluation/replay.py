@@ -16,7 +16,7 @@ import torch
 from pytorch_lightning import LightningModule
 from torch.utils.data import DataLoader, TensorDataset
 
-from src.callbacks.metrics.rate import AnomalyRate
+from src.callbacks.components.rate import AnomalyRate
 from src.callbacks.score_dump import aux_inputs
 from src.data.utils import unpack_batch
 

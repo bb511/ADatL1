@@ -7,7 +7,7 @@ from torch import Tensor
 __all__ = ["get_pairing_fn", "get_normalizer_fn", "get_energy_fn"]
 
 
-from src.evaluation.callbacks.metrics.cap.binary.pairing import cdf
+from src.evaluation.callbacks.components.cap.binary.pairing import cdf
 
 
 def get_pairing_fn(
@@ -28,7 +28,7 @@ def get_pairing_fn(
         raise ValueError(f"Unknown pairing type: {pairing_type}")
 
 
-from src.evaluation.callbacks.metrics.cap.binary.normalization import (
+from src.evaluation.callbacks.components.cap.binary.normalization import (
     log_sigmoid,
     minmax,
     rank,
@@ -97,7 +97,7 @@ def get_normalizer_fn(
     return functools.partial(_normalize, normalizer_fn=normalizer_fn, mode=mode)
 
 
-from src.evaluation.callbacks.metrics.cap.binary.energy import (
+from src.evaluation.callbacks.components.cap.binary.energy import (
     adaptive,
     baseline,
     contrastive,

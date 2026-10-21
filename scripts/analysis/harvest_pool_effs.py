@@ -8,7 +8,7 @@ label, the strategy's own validation quantity Q′ (``optimized_main``) and the 
 objective Q″ (``optimized_sec``) at the checkpoint, the mean signal efficiency on both
 splits, the parameters that vary across the pool (``hp/...``), and ``is_pareto``:
 whether the row is non-dominated in (Q′, Q″) among its strategy's rows at that tier. The
-pools of the other domains keep no checkpoint; ``src/evaluation/lattice.py`` writes
+pools of the other domains keep no checkpoint; ``src/evaluation/harvest.py`` writes
 their tables in this schema.
 
 The checkpoints are read off the run. Each ``callbacks/<name>/monitor`` parameter

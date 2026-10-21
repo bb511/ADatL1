@@ -17,8 +17,7 @@ hydra:
     # number of parallel workers
     n_jobs: 1
 
-    # A placeholder objective: the run only trains and dumps, so it reports the worst
-    # value of each direction to Optuna, and the random sampler never reads it.
+    # Placeholder: a dump-only run reports the worst value of each direction.
     direction: [maximize, minimize]
 
     # total number of runs that will be executed
@@ -30,18 +29,9 @@ hydra:
 
     # define hyperparameter search space. Assumes using torch.optim.AdamW
     # CIFAR-10 space
-
-    # Space of the shared pool after the review of the submitted version's
-    # searches (19 Oct 2026). Gradient clipping, the Adam betas, weight decay,
-    # the input noise, the Huber delta, the activation and batch normalisation
-    # had no measurable effect on any strategy's objective and take the
-    # experiment's values; the learning-rate range is the one shared by every
-    # MLP and convolutional family.
-    # The log-variance clamp, the KL warm-up and the strides had no effect
-    # either and take the algorithm's values. The KL ladder moves one decade
-    # up because the CAP and cvar25 fronts sat on its old top, 2e-3. The lists
-    # are [conv..., hidden, latent]; the latent-only variants are dropped.
     params:
-      algorithm.encoder.nodes: choice([16, 32, 64, 16], [24, 48, 96, 32], [32, 64, 128, 32], [48, 96, 192, 64], [64, 128, 256, 64])
-      algorithm.kl_scale: choice(1e-4, 3e-4, 1e-3, 3e-3, 1e-2)
       algorithm.optimizer.lr: tag(log, interval(3e-5, 1e-2))
+      trainer.gradient_clip_val: choice(0.0, 0.5, 1.0, 2.0)
+      # The lists are [conv..., hidden, latent].
+      algorithm.encoder.nodes: choice([16, 32, 64, 16], [24, 48, 96, 32], [32, 64, 128, 32], [48, 96, 192, 64], [64, 128, 256, 64])
+      algorithm.kl_scale: choice(3e-5, 1e-4, 3e-4, 1e-3, 3e-3, 1e-2, 3e-2, 1e-1)

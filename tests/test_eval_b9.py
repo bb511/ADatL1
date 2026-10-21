@@ -14,11 +14,11 @@ from pytorch_lightning.loggers import MLFlowLogger
 
 from src.callbacks.autouad import EAGCallback, NPDCallback, RTMCallback
 from src.callbacks.cap import CAPCallback
+from src.callbacks.components.selection import W_STEPS
 from src.callbacks.consistency import PosteriorConsistencyCallback
 from src.callbacks.efficiency import AnomalyEfficiencyCallback
 from src.callbacks.entropy import LossEntropyCallback
 from src.callbacks.goix import ExcessMassCallback, MassVolumeCallback
-from src.callbacks.metrics.selection import W_STEPS
 from src.callbacks.operational import OperationalScoreCallback
 from src.callbacks.sds import SDSCallback
 from src.callbacks.thres_drift import ThresholdDriftCallback

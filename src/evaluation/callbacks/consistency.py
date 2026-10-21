@@ -5,12 +5,12 @@ exactly the same constructor arguments, including the same ``cap_metric_config``
 block, and differs only in the metric it evaluates and the name it registers
 under for checkpoint selection and MLflow logging.
 
-See :class:`src.evaluation.callbacks.metrics.cap.metric.PosteriorConsistency`
+See :class:`src.evaluation.callbacks.components.cap.metric.PosteriorConsistency`
 for what the metric is and why it is taken in the beta-free limit.
 """
 
 from src.evaluation.callbacks.cap import CAP
-from src.evaluation.callbacks.metrics.cap.metric import (
+from src.evaluation.callbacks.components.cap.metric import (
     PosteriorConsistency as PosteriorConsistencyMetric,
 )
 

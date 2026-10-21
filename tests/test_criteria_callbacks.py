@@ -8,18 +8,23 @@ from pytorch_lightning import Callback
 from torch.utils.data import DataLoader, TensorDataset
 
 import tests.test_score_dump as score_dump_tests
-from src.callbacks.autouad import EAGCallback, NPDCallback, RTMCallback
+from src.callbacks.autouad import EAGCallback, NPDCallback, RTMCallback, eag, npd, rtm
 from src.callbacks.cap import CAPCallback
+from src.callbacks.components import selection
+from src.callbacks.components.rate import AnomalyRate
+from src.callbacks.components.utils import row_subset
 from src.callbacks.consistency import PosteriorConsistencyCallback
-from src.callbacks.criterion import row_subset
 from src.callbacks.efficiency import AnomalyEfficiencyCallback
-from src.callbacks.entropy import LossEntropyCallback
-from src.callbacks.goix import ExcessMassCallback, MassVolumeCallback
-from src.callbacks.metrics import label_free as lfc
-from src.callbacks.metrics import selection
-from src.callbacks.metrics.rate import AnomalyRate
+from src.callbacks.entropy import LossEntropyCallback, loss_entropy
+from src.callbacks.goix import (
+    ExcessMassCallback,
+    MassVolumeCallback,
+    box_volume,
+    excess_mass,
+    mass_volume,
+)
 from src.callbacks.operational import OperationalScoreCallback
-from src.callbacks.sds import SDSCallback, sds_inputs
+from src.callbacks.sds import SDSCallback, sds_error, sds_inputs, sds_pseudo_sets
 from src.callbacks.thres_drift import ThresholdDriftCallback
 from src.callbacks.wasserstein import WassersteinCallback
 from src.evaluation.callbacks.autouad import EAG, NPD, RTM
@@ -91,16 +96,16 @@ def expected_sds(module, normal, pseudo_sets):
         score(module, torch.from_numpy(p).float()) for p in pseudo_sets
     )
     cut = rate.threshold.item(), rate.tie_weight.item()
-    return lfc.sds_error(targets, outliers, *cut)
+    return sds_error(targets, outliers, *cut)
 
 
 def expected_values(dump_dir):
     meta = load(dump_dir / "meta.pt")
-    volume = lfc.box_volume(meta["aux_lower"], meta["aux_upper"])
+    volume = box_volume(meta["aux_lower"], meta["aux_upper"])
     sets = toy_sets()
     pseudo = {
-        "sds": lfc.sds_pseudo_sets(sets["train"][0].double().numpy()),
-        "sds_val": lfc.sds_pseudo_sets(sets["val"]["normal"][0].double().numpy()),
+        "sds": sds_pseudo_sets(sets["train"][0].double().numpy()),
+        "sds_val": sds_pseudo_sets(sets["val"]["normal"][0].double().numpy()),
     }
     rows = []
     for epoch in range(EPOCHS):
@@ -112,12 +117,12 @@ def expected_values(dump_dir):
         operational = [module.compute_operational_ascore(b) for b in normal.split(32)]
         rows.append(
             {
-                "npd": lfc.npd(normal, aux["autouad"]),
-                "rtm": lfc.rtm(normal),
-                "eag": lfc.eag(normal),
-                "em": lfc.excess_mass(normal, aux["uniform"], volume)[0],
-                "mv": lfc.mass_volume(normal, aux["uniform"], volume),
-                "entropy": lfc.loss_entropy(record["train"]["train"]["loss/full"]),
+                "npd": npd(normal, aux["autouad"]),
+                "rtm": rtm(normal),
+                "eag": eag(normal),
+                "em": excess_mass(normal, aux["uniform"], volume)[0],
+                "mv": mass_volume(normal, aux["uniform"], volume),
+                "entropy": loss_entropy(record["train"]["train"]["loss/full"]),
                 "sds": expected_sds(module, normal, pseudo["sds"]),
                 "sds_val": expected_sds(module, normal, pseudo["sds_val"]),
                 "ascore_operational": float(np.mean(operational)),
@@ -165,7 +170,7 @@ def test_loss_entropy_reads_a_seeded_subset(tmp_path):
     assert len(rows) == 40 and rows.tolist() == sorted(set(rows.tolist()))
     assert row_subset(96, 96, 3) is None and row_subset(96, None, 3) is None
     losses = load(tmp_path / "scores" / "epoch_0000.pt")["train"]["train"]["loss/full"]
-    expected = lfc.loss_entropy(losses[rows])
+    expected = loss_entropy(losses[rows])
     assert recorder.epochs[0]["val/summary/entropy"] == approx(expected)
 
 
@@ -173,7 +178,7 @@ def test_sds_inputs_take_distinct_rows_in_the_input_shape():
     x = torch.randn(40, 2, 3, generator=torch.Generator().manual_seed(1))
     sets = sds_inputs(torch.cat([x, x[:5]]), None, 0)
     rows = torch.unique(x.reshape(40, -1), dim=0).double().numpy()
-    for points, expected in zip(sets.values(), lfc.sds_pseudo_sets(rows)):
+    for points, expected in zip(sets.values(), sds_pseudo_sets(rows)):
         assert points.shape == (len(expected), 2, 3) and points.dtype == x.dtype
         flat = points.reshape(len(expected), -1)
         assert torch.equal(flat, torch.from_numpy(expected).float())
@@ -263,16 +268,16 @@ def test_mirrors_return_the_criteria(tmp_path):
     cut = scores["normal"].quantile(0.9), torch.tensor(0.5, dtype=torch.float64)
     module.register_buffer("thres_operational", cut[0])
     module.register_buffer("tie_operational", cut[1])
-    volume = lfc.box_volume(module.aux_lower, module.aux_upper)
+    volume = box_volume(module.aux_lower, module.aux_upper)
     normal, uniform = scores["normal"], scores["uniform"]
     expected = {
-        NPD(): lfc.npd(normal, scores["autouad"]),
-        RTM(): lfc.rtm(normal),
-        EAG(): lfc.eag(normal),
-        ExcessMass(): lfc.excess_mass(normal, uniform, volume)[0],
-        MassVolume(): lfc.mass_volume(normal, uniform, volume),
-        LossEntropy(): lfc.loss_entropy(score(module, inputs["train"], "loss/full")),
-        SDS(): lfc.sds_error(
+        NPD(): npd(normal, scores["autouad"]),
+        RTM(): rtm(normal),
+        EAG(): eag(normal),
+        ExcessMass(): excess_mass(normal, uniform, volume)[0],
+        MassVolume(): mass_volume(normal, uniform, volume),
+        LossEntropy(): loss_entropy(score(module, inputs["train"], "loss/full")),
+        SDS(): sds_error(
             scores["sds_targets"], scores["sds_outliers"], cut[0].item(), 0.5
         ),
     }

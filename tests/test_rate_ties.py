@@ -3,8 +3,8 @@ import logging
 import pytest
 import torch
 
+from src.callbacks.components import rate as train_rate
 from src.callbacks.efficiency import AnomalyEfficiencyCallback as TrainEfficiency
-from src.callbacks.metrics import rate as train_rate
 from src.evaluation.callbacks.efficiency import (
     AnomalyEfficiencyCallback as EvalEfficiency,
 )

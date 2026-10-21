@@ -4,12 +4,12 @@ Drop-in replacement for :class:`src.callbacks.cap.CAPCallback`: it takes exactly
 the same constructor arguments, including the same ``cap_metric_config`` block,
 and differs only in the metric it evaluates and the key it logs under.
 
-See :class:`src.callbacks.metrics.cap.metric.PosteriorConsistency` for what the
+See :class:`src.callbacks.components.cap.metric.PosteriorConsistency` for what the
 metric is and why it is taken in the beta-free limit.
 """
 
 from src.callbacks.cap import CAPCallback
-from src.callbacks.metrics.cap.metric import PosteriorConsistency
+from src.callbacks.components.cap.metric import PosteriorConsistency
 
 
 class PosteriorConsistencyCallback(CAPCallback):

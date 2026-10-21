@@ -93,3 +93,81 @@
 #     trainer=gpu \
 #     trainer.max_epochs=200 \
 #     trainer.devices=[0]
+
+# The dormant blocks below repeat the four sampler seeds, and therefore the
+# points of every live driver that ran without a relaunch, under another
+# training seed. They run only on the user's allocation and only if the
+# theory's Formulation I is claimed on the image sets. A block opens with
+# `## python3`, which scripts/cluster/lib.sh does not parse; removing the extra
+# `#` activates it, and --only with its index submits it alone.
+
+# ========================================================================
+# DORMANT: SECOND TRAINING SEED
+# ========================================================================
+# ------------------------------------------------------------------------
+# Seed 456, driver 1 of 4
+# ------------------------------------------------------------------------
+## python3 src/train.py \
+#     -m \
+#     experiment=cifar10/vae \
+#     logger=mlflow \
+#     hparams_search=cifar10/vae_optuna \
+#     hydra.sweeper.study_name=pool_seed456 \
+#     hydra.sweeper.n_trials=23 \
+#     hydra.sweeper.sampler.seed=2021 \
+#     seed=456 \
+#     experiment_name=cifar10_vae_pool_seed456 \
+#     trainer=gpu \
+#     trainer.max_epochs=200 \
+#     trainer.devices=[0]
+
+# ------------------------------------------------------------------------
+# Seed 456, driver 2 of 4
+# ------------------------------------------------------------------------
+## python3 src/train.py \
+#     -m \
+#     experiment=cifar10/vae \
+#     logger=mlflow \
+#     hparams_search=cifar10/vae_optuna \
+#     hydra.sweeper.study_name=pool_seed456 \
+#     hydra.sweeper.n_trials=23 \
+#     hydra.sweeper.sampler.seed=2022 \
+#     seed=456 \
+#     experiment_name=cifar10_vae_pool_seed456 \
+#     trainer=gpu \
+#     trainer.max_epochs=200 \
+#     trainer.devices=[0]
+
+# ------------------------------------------------------------------------
+# Seed 456, driver 3 of 4
+# ------------------------------------------------------------------------
+## python3 src/train.py \
+#     -m \
+#     experiment=cifar10/vae \
+#     logger=mlflow \
+#     hparams_search=cifar10/vae_optuna \
+#     hydra.sweeper.study_name=pool_seed456 \
+#     hydra.sweeper.n_trials=22 \
+#     hydra.sweeper.sampler.seed=2023 \
+#     seed=456 \
+#     experiment_name=cifar10_vae_pool_seed456 \
+#     trainer=gpu \
+#     trainer.max_epochs=200 \
+#     trainer.devices=[0]
+
+# ------------------------------------------------------------------------
+# Seed 456, driver 4 of 4
+# ------------------------------------------------------------------------
+## python3 src/train.py \
+#     -m \
+#     experiment=cifar10/vae \
+#     logger=mlflow \
+#     hparams_search=cifar10/vae_optuna \
+#     hydra.sweeper.study_name=pool_seed456 \
+#     hydra.sweeper.n_trials=22 \
+#     hydra.sweeper.sampler.seed=2024 \
+#     seed=456 \
+#     experiment_name=cifar10_vae_pool_seed456 \
+#     trainer=gpu \
+#     trainer.max_epochs=200 \
+#     trainer.devices=[0]

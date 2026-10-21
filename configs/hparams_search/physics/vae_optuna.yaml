@@ -26,19 +26,9 @@ hydra:
     n_trials: 40
 
     # define hyperparameter search space. Assumes using torch.optim.AdamW
-
-    # Space of the shared pool after the review of the submitted version's
-    # searches (19 Oct 2026). Gradient clipping, the Adam betas, weight decay,
-    # the input noise and the Huber delta had no measurable effect on any
-    # strategy's objective in 90 studies and take the experiment's values; the
-    # learning-rate ceiling is raised because the old fronts pressed 3e-3, and
-    # the floor is kept because the Wasserstein and drift fronts select there.
-    # The activation, the log-variance clamp and the KL warm-up had no effect
-    # and take the values the quantised encoder hard-codes (relu, (-20, 10)) or
-    # the experiment sets (no warm-up). The KL ladder moves one decade up
-    # because every CAP and cvar25 front sat on its old top, 2e-3. The last
-    # entry of each width list is the latent width.
     params:
-      algorithm.encoder.nodes: choice([16,4], [16,8], [32,8], [32,16], [24,8,4], [32,16,4], [32,16,8], [32,16,16], [48,24,8], [48,24,16], [64,32,16], [64,32,32])
-      algorithm.kl_scale: choice(1e-4, 3e-4, 1e-3, 3e-3, 1e-2)
       algorithm.optimizer.lr: tag(log, interval(3e-5, 1e-2))
+      trainer.gradient_clip_val: choice(0.0, 0.5, 1.0, 2.0)
+      # The last entry of each width list is the latent width.
+      algorithm.encoder.nodes: choice([16,4], [16,8], [32,8], [32,16], [24,8,4], [32,16,4], [32,16,8], [32,16,16], [48,24,8], [48,24,16], [64,32,16], [64,32,32])
+      algorithm.kl_scale: choice(3e-5, 1e-4, 3e-4, 1e-3, 3e-3, 1e-2, 3e-2, 1e-1)

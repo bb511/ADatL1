@@ -17,8 +17,7 @@ hydra:
     # number of parallel workers
     n_jobs: 1
 
-    # A placeholder objective: the run only trains and dumps, so it reports the worst
-    # value of each direction to Optuna, and the random sampler never reads it.
+    # Placeholder: a dump-only run reports the worst value of each direction.
     direction: [maximize, minimize]
 
     # total number of runs that will be executed
@@ -30,13 +29,7 @@ hydra:
 
     # Bias-free one-class Deep SVDD search space.
     # RobustAD space
-
-    # Space of the shared pool after the review of the submitted version's
-    # searches (19 Oct 2026). Gradient clipping, the Adam betas, weight decay,
-    # the input noise, the Huber delta, the activation and batch normalisation
-    # had no measurable effect on any strategy's objective and take the
-    # experiment's values; the learning-rate range is the one shared by every
-    # MLP and convolutional family.
     params:
-      algorithm.encoder.nodes: choice([8, 16, 32], [16, 32, 64], [32, 64, 128])
       algorithm.optimizer.lr: tag(log, interval(3e-5, 1e-2))
+      trainer.gradient_clip_val: choice(0.0, 0.5, 1.0, 2.0)
+      algorithm.encoder.nodes: choice([8, 16, 32], [16, 32, 64], [32, 64, 128])

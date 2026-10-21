@@ -6,8 +6,7 @@
 # four drivers of 50 trials that share the Optuna study `pool` and differ only
 # in their sampler seed. Every trial is a full 150-epoch training that dumps its
 # scores and weights at every epoch and selects nothing; the criteria are
-# evaluated on the dumps offline. The space is a placeholder copied from
-# Victor's campaign until the spaces chat settles it:
+# evaluated on the dumps offline. The space is
 #   configs/hparams_search/cchamber/vae_optuna.yaml
 #
 # The random sampler replays its draws from the seed, so a driver that stops
@@ -41,12 +40,13 @@
 # sampler seeds and therefore the points of every live driver that ran without
 # a relaunch. The second-training-seed blocks train every point again from
 # another initialisation (seed=456, study pool_seed456); the training-halves
-# blocks train it on one half of the training rows each, with the experiment's
-# seed (studies half0 and half1, data.train_fold 0 and 1). A dormant block opens with
-# `## python3`, which scripts/cluster/lib.sh does not parse, and removing the
-# extra `#` of that line activates it. Submit an activated block with --only
-# and its index, since a submission without --only launches the four live
-# drivers again.
+# blocks train it on one half of the training rows each, half 0 with the
+# experiment's seed and half 1 with seed 456, so that the two halves differ in
+# seed and rows alike (studies half0 and half1, data.train_fold 0 and 1). A
+# dormant block opens with `## python3`, which scripts/cluster/lib.sh does not
+# parse, and removing the extra `#` of that line activates it. Submit an
+# activated block with --only and its index, since a submission without --only
+# launches the four live drivers again.
 
 
 # ========================================================================
@@ -262,6 +262,7 @@
 #     hydra.sweeper.n_trials=50 \
 #     hydra.sweeper.sampler.seed=4021 \
 #     data.train_fold=1 \
+#     seed=456 \
 #     experiment_name=cchamber_vae_half1 \
 #     trainer=gpu \
 #     trainer.max_epochs=150 \
@@ -279,6 +280,7 @@
 #     hydra.sweeper.n_trials=50 \
 #     hydra.sweeper.sampler.seed=4022 \
 #     data.train_fold=1 \
+#     seed=456 \
 #     experiment_name=cchamber_vae_half1 \
 #     trainer=gpu \
 #     trainer.max_epochs=150 \
@@ -296,6 +298,7 @@
 #     hydra.sweeper.n_trials=50 \
 #     hydra.sweeper.sampler.seed=4023 \
 #     data.train_fold=1 \
+#     seed=456 \
 #     experiment_name=cchamber_vae_half1 \
 #     trainer=gpu \
 #     trainer.max_epochs=150 \
@@ -313,6 +316,7 @@
 #     hydra.sweeper.n_trials=50 \
 #     hydra.sweeper.sampler.seed=4024 \
 #     data.train_fold=1 \
+#     seed=456 \
 #     experiment_name=cchamber_vae_half1 \
 #     trainer=gpu \
 #     trainer.max_epochs=150 \

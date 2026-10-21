@@ -7,7 +7,7 @@ from pytorch_lightning import Callback
 from pytorch_lightning.callbacks import ModelCheckpoint
 
 from src.callbacks.cap import CAPCallback
-from src.callbacks.metrics import selection
+from src.callbacks.components import selection
 from src.callbacks.thres_drift import ThresholdDriftCallback
 from tests.test_score_dump import fit
 

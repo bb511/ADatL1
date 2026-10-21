@@ -1,65 +1,21 @@
 """Per-event scores and weights of a training run, written at every validation pass.
 
-The files are the whole record of a run trained in the dump regime, which keeps no
-checkpoint: an offline evaluation reads the stored scores and rescores from the stored
-weights every set whose scores the files do not hold. Layout of ``dirpath``, by default
-``logs/scores/<experiment_name>/<run_name>``::
+Generate a dump after a run finishes with all the details necessary to replay the
+evaluation on top of it:
 
-    config.yaml, overrides.yaml
-        copies of the run's Hydra files, when <run_dir>/.hydra exists
-    meta.pt            written once, after the first validation pass
-        target_rate, base_rate  the module's hparams; base_rate may be None
-        target_fpr              float, the module's compute_target_fpr()
-        module                  "<module>.<class>" of the LightningModule
-        val, test, aux, train   layout of every loader of the split, stored or not
-            names               [name], in loader order
-            keys                [key] whose scores the files hold for the split
-            batch_sizes         {name: [int]}, one entry per batch
-            labels              {name: [int]}, the distinct labels, sorted
-        stored                  {"val": [name], "test": [name]}, the sets whose
-                                scores the files hold, in loader order
-        aux_seed, aux_size      int
-        aux_lower, aux_upper    (*s,) per-feature min and max of the training inputs
-        aux_mean, aux_std       (*s,) per-feature mean and standard deviation (ddof 0)
-    initial.pt         the validation pass of the sanity check, on the untrained weights
-    epoch_<nnnn>.pt    one per validation epoch, nnnn = trainer.current_epoch
-        epoch                   int, -1 in initial.pt
-        val, test               {name: {key: (n,)}} for the names in stored
-        aux                     {"gaussian", "uniform", "autouad": {key: (aux_size,)}}
-        train                   {"train": {"loss/full": (n_train,)}}
-        state_dict              the module's weights and buffers, on CPU
-
-Here (*s,) is the shape of one input: (d,) for vectors, (3, 32, 32) for images. A score
-vector concatenates the batches of its loader in loader order, and ``batch_sizes``
-splits it back into batches. A key the module does not emit is absent. The auxiliary
-sets carry the placeholder label 0.
-
-The validation scores are the ``outputs`` the other callbacks receive in
-``on_validation_batch_end``; Lightning scores every validation set, and the sets
-outside ``stored_sets`` are dropped. The stored test sets, the auxiliary sets and the
-training set are scored by a separate pass through ``model_step`` in eval mode at the
-end of each validation pass, the training set unshuffled, in the row order of
-``trainer.datamodule.data_train``. The test sets outside ``stored_sets`` are iterated
-once at fit start for their layout and never scored. Rescoring a set offline takes the
-``state_dict`` of a file and the loaders of the run's datamodule; ``aux_inputs(meta)``
-regenerates the auxiliary sets. The ``state_dict`` holds the buffers too, so a module
-with a residual state carries the one fitted for that pass by ResidualStateCallback.
-
-The sanity check must run the whole validation set (``num_sanity_val_steps=-1``):
-``initial.pt`` stores it, with the weights before the first optimisation step.
-
-The operational score is not stored. It is a per-batch statistic of ``ascore/full``
-(``compute_operational_ascore``), recomputable from that score, ``batch_sizes`` and
-``target_fpr``.
-
-A VAE builds its KL schedule in ``on_fit_start``, so a VAE loaded from a stored
-``state_dict`` must call ``module._setup_kl_annealing(module.kl_warmup_frac, 1)``
-before ``model_step``. Its ``loss/full`` carries the KL weight of the global step at
-which it was scored, which a rescoring outside the trainer (step 0) does not reproduce
-under a warm-up; the anomaly scores do not depend on that weight.
-
-The per-sample training loss feeds the loss entropy of EntropyStop (Huang et al., KDD
-2024), and the ``autouad`` set the noise of AutoUAD's NPD (Dai and Fan, ICLR 2025).
+- ``config.yaml``, ``overrides.yaml``: the run's Hydra files.
+- ``meta.pt``: ``target_rate``, ``base_rate``, ``target_fpr`` and ``module`` (the class
+  of the LightningModule); for each split (``val``, ``test``, ``aux``, ``train``) the
+  ``names`` of its loaders, the ``keys`` the files hold, and the ``batch_sizes`` and
+  ``labels`` of every set; ``stored``, the val and test sets whose scores are kept;
+  ``aux_seed``, ``aux_size`` and the training moments ``aux_lower``, ``aux_upper``,
+  ``aux_mean``, ``aux_std``, each of the shape of one input.
+- ``initial.pt``: the sanity pass on the untrained weights (``epoch: -1``), which must
+  cover the whole validation set (``num_sanity_val_steps=-1``).
+- ``epoch_<nnnn>.pt``: ``epoch``; ``val`` and ``test``, ``{set: {key: (n,)}}`` for the
+  stored sets; ``aux``, the scores of ``gaussian``, ``uniform`` and ``autouad``;
+  ``train``, the per-sample ``loss/full`` in the row order of ``data_train``;
+  ``state_dict``, every weight and buffer on CPU.
 """
 
 import os
@@ -68,8 +24,9 @@ from pathlib import Path
 
 import torch
 from pytorch_lightning import Callback
-from torch.utils.data import DataLoader, TensorDataset
+from torch.utils.data import DataLoader
 
+from src.callbacks.components.utils import placeholder_loader
 from src.data.utils import unpack_batch
 
 # The per-sample loss, the only quantity stored for the training set.
@@ -85,15 +42,14 @@ def _per_event(score, key: str, n: int) -> torch.Tensor:
 
 
 class _Collector:
-    """Layout of the datasets of one split and per-batch scores of the stored ones.
+    """Per-batch scores of the stored sets of one split, and the layout of every set.
 
-    A dataset outside ``stored`` adds its batch sizes and labels only; None stores
-    every dataset.
+    ``stored`` None stores every set; a set outside it contributes its batch sizes and
+    labels only.
     """
 
     def __init__(self, keys: list[str], stored: list[str] | None = None):
-        self.keys = keys
-        self.stored = stored
+        self.keys, self.stored = keys, stored
         self.chunks: dict[str, dict[str, list[torch.Tensor]]] = {}
         self.batch_sizes: dict[str, list[int]] = {}
         self.labels: dict[str, set[int]] = {}
@@ -107,24 +63,20 @@ class _Collector:
         chunks = self.chunks.setdefault(name, {})
         for key in self.keys:
             if key in outputs:
-                score = _per_event(outputs[key], key, len(y))
-                chunks.setdefault(key, []).append(score)
+                chunks.setdefault(key, []).append(_per_event(outputs[key], key, len(y)))
 
     def present_keys(self) -> list[str]:
         return [k for k in self.keys if any(k in c for c in self.chunks.values())]
 
     def scores(self) -> dict[str, dict[str, torch.Tensor]]:
-        """Concatenate the batches; a key is in every batch of the split or in none."""
+        """Concatenate the batches; a key is in every batch of a set or in none."""
         keys = self.present_keys()
         for name, chunks in self.chunks.items():
-            for key in keys:
-                if len(chunks.get(key, [])) != len(self.batch_sizes[name]):
-                    raise ValueError(f"'{key}' is missing from batches of '{name}'.")
-
-        return {
-            name: {key: torch.cat(chunks[key]) for key in keys}
-            for name, chunks in self.chunks.items()
-        }
+            n_batches = len(self.batch_sizes[name])
+            short = [k for k in keys if len(chunks.get(k, [])) != n_batches]
+            if short:
+                raise ValueError(f"{short} are missing from batches of '{name}'.")
+        return {n: {k: torch.cat(c[k]) for k in keys} for n, c in self.chunks.items()}
 
     def layout(self) -> dict:
         return {
@@ -148,40 +100,20 @@ def input_moments(x_train: torch.Tensor) -> dict[str, torch.Tensor]:
 def aux_inputs(meta: dict) -> dict[str, torch.Tensor]:
     """Draw the auxiliary input sets of a dump from its ``meta.pt``.
 
-    Reads ``aux_seed``, ``aux_size`` and the moments ``aux_lower``, ``aux_upper``,
-    ``aux_mean`` and ``aux_std``, all of which ``meta.pt`` holds. Each set has shape
-    (aux_size, *input shape) and lies in the normalised input space of ``data_train``:
-    ``gaussian`` is N(0, I), ``uniform`` is uniform over the bounds and ``autouad`` is
-    N(aux_mean, diag aux_std^2). The draws reproduce those of the run under the same
-    PyTorch version, since PyTorch does not guarantee its CPU generator stream across
+    Each set has shape (aux_size, *input shape) in the normalised input space:
+    ``gaussian`` is N(0, I), ``uniform`` is uniform over the training bounds and
+    ``autouad`` is N(aux_mean, diag aux_std^2). The draws reproduce the run's under the
+    same PyTorch version only, since the CPU generator stream is not fixed across
     releases.
     """
-    # The autouad set is drawn last, so that gaussian and uniform are those of the
-    # dumps written before it existed.
+    # autouad is drawn last, so that gaussian and uniform match older dumps.
     gen = torch.Generator().manual_seed(meta["aux_seed"])
     lower, upper = meta["aux_lower"], meta["aux_upper"]
     shape = (meta["aux_size"], *lower.shape)
     gaussian = torch.randn(shape, generator=gen)
     uniform = lower + (upper - lower) * torch.rand(shape, generator=gen)
-    noise = torch.randn(shape, generator=gen)
-    autouad = meta["aux_mean"] + meta["aux_std"] * noise
+    autouad = meta["aux_mean"] + meta["aux_std"] * torch.randn(shape, generator=gen)
     return {"gaussian": gaussian, "uniform": uniform, "autouad": autouad}
-
-
-def _aux_loaders(inputs: dict[str, torch.Tensor], batch_size: int) -> dict:
-    # The labels are placeholders: model_step reads only the inputs.
-    return {
-        name: DataLoader(
-            TensorDataset(x, torch.zeros(len(x), dtype=torch.long)),
-            batch_size=batch_size,
-        )
-        for name, x in inputs.items()
-    }
-
-
-def _test_loaders(datamodule) -> dict:
-    datamodule.setup("test")
-    return datamodule.test_dataloader()
 
 
 def _layout(loaders: dict) -> dict:
@@ -195,19 +127,12 @@ def _layout(loaders: dict) -> dict:
     return collector.layout()
 
 
-def _select(names: list[str], stored_sets: list[str] | None) -> list[str]:
-    if stored_sets is None:
-        return list(names)
-    return [name for name in names if name in stored_sets]
-
-
 def _score_loaders(trainer, pl_module, loaders: dict, keys: list[str]) -> _Collector:
     collector = _Collector(keys)
     for idx, (name, loader) in enumerate(loaders.items()):
         for batch in loader:
             batch = trainer.strategy.batch_to_device(batch, pl_module.device, idx)
             collector.add(name, pl_module.model_step(batch), batch)
-
     return collector
 
 
@@ -233,35 +158,19 @@ def _save_atomic(obj: dict, path: Path) -> None:
     os.replace(tmp, path)
 
 
-def _cpu_state_dict(module) -> dict[str, torch.Tensor]:
-    return {k: v.detach().cpu() for k, v in module.state_dict().items()}
-
-
-def _make_dump_dir(dirpath: Path, run_dir: Path) -> None:
-    """Create dirpath and copy the run's Hydra files into it, those that exist."""
-    dirpath.mkdir(parents=True, exist_ok=True)
-    for name in HYDRA_FILES:
-        source = run_dir / ".hydra" / name
-        if source.exists():
-            shutil.copy(source, dirpath / name)
-
-
 class ScoreDumpCallback(Callback):
     """Store the per-event scores and the weights at every validation pass.
 
     The module docstring gives the layout of the files.
 
-    :param dirpath: Directory of the files. It must not already hold ``initial.pt`` or
-        epoch files, so that two runs are never mixed.
-    :param run_dir: Hydra output directory of the run, whose ``.hydra/config.yaml``
-        and ``.hydra/overrides.yaml`` are copied into ``dirpath``.
+    :param dirpath: Directory of the files; it must not already hold a dump.
+    :param run_dir: Hydra output directory of the run, whose ``.hydra`` files are
+        copied into ``dirpath``.
     :param keys: Per-event output keys to store; keys a module does not emit are
         skipped.
-    :param aux_seed: Seed of the auxiliary input sets.
-    :param stored_sets: Names of the validation and test sets whose scores are stored;
-        None stores every set. The auxiliary sets, the training loss and the weights
-        are always stored.
-    :param aux_size: Number of points in each auxiliary set.
+    :param stored_sets: Validation and test sets whose scores are stored; None stores
+        every set. The auxiliary sets, the training loss and the weights are always
+        stored.
     :param aux_batch_size: Batch size of the passes over the auxiliary sets and the
         training set.
     """
@@ -287,47 +196,39 @@ class ScoreDumpCallback(Callback):
         self._meta_written = False
 
     def on_fit_start(self, trainer, pl_module):
-        """Check the run, copy its configuration and build the extra loaders."""
-        self._check_run(trainer)
+        """Check the run, copy its Hydra files and build the extra loaders."""
+        self._prepare_dir(trainer)
         datamodule = trainer.datamodule
-        test = _test_loaders(datamodule)
+        datamodule.setup("test")
+        test = datamodule.test_dataloader()
         self._stored = self._stored_names(list(datamodule.val_dataloader()), list(test))
         self._test_layout = _layout(test)
-        aux_meta = {"aux_seed": self.aux_seed, "aux_size": self.aux_size}
-        aux_meta.update(input_moments(datamodule.data_train.tensors[0]))
-        self._loaders = self._build_loaders(datamodule.data_train, test, aux_meta)
-        self._meta = self._run_meta(pl_module, aux_meta)
-        _make_dump_dir(self.dirpath, self.run_dir)
+        self._meta = self._run_meta(pl_module, datamodule.data_train)
+        self._loaders = self._build_loaders(datamodule.data_train, test)
 
-    def _check_run(self, trainer) -> None:
+    def _prepare_dir(self, trainer) -> None:
         if trainer.world_size > 1:
             raise RuntimeError("ScoreDumpCallback sees one rank's batches only.")
-        # Lightning stores num_sanity_val_steps=-1 as inf.
-        if trainer.num_sanity_val_steps != float("inf"):
+        if trainer.num_sanity_val_steps != float("inf"):  # Lightning stores -1 as inf
             raise RuntimeError("ScoreDumpCallback needs num_sanity_val_steps=-1.")
-        dumped = [*self.dirpath.glob("initial.pt"), *self.dirpath.glob("epoch_*.pt")]
-        if dumped:
+        if any(self.dirpath.glob("initial.pt")) or any(self.dirpath.glob("epoch_*.pt")):
             raise RuntimeError(f"{self.dirpath} already holds a score dump.")
+        self.dirpath.mkdir(parents=True, exist_ok=True)
+        for source in (self.run_dir / ".hydra" / name for name in HYDRA_FILES):
+            if source.exists():
+                shutil.copy(source, self.dirpath / source.name)
 
     def _stored_names(self, val: list[str], test: list[str]) -> dict[str, list[str]]:
         missing = set(self.stored_sets or []) - {*val, *test}
         if missing:
             raise ValueError(f"No validation or test loader carries {sorted(missing)}.")
+        stored = self.stored_sets
         return {
-            "val": _select(val, self.stored_sets),
-            "test": _select(test, self.stored_sets),
+            "val": [n for n in val if stored is None or n in stored],
+            "test": [n for n in test if stored is None or n in stored],
         }
 
-    def _build_loaders(self, data_train, test: dict, aux_meta: dict) -> dict:
-        # Unshuffled, so that the losses follow the rows of data_train.
-        train = DataLoader(data_train, batch_size=self.aux_batch_size)
-        return {
-            "test": {name: test[name] for name in self._stored["test"]},
-            "aux": _aux_loaders(aux_inputs(aux_meta), self.aux_batch_size),
-            "train": {"train": train},
-        }
-
-    def _run_meta(self, pl_module, aux_meta: dict) -> dict:
+    def _run_meta(self, pl_module, data_train) -> dict:
         module_cls = type(pl_module)
         return {
             "target_rate": pl_module.hparams.target_rate,
@@ -335,7 +236,21 @@ class ScoreDumpCallback(Callback):
             "target_fpr": pl_module.compute_target_fpr(),
             "module": f"{module_cls.__module__}.{module_cls.__qualname__}",
             "stored": self._stored,
-            **aux_meta,
+            "aux_seed": self.aux_seed,
+            "aux_size": self.aux_size,
+            **input_moments(data_train.tensors[0]),
+        }
+
+    def _build_loaders(self, data_train, test: dict) -> dict:
+        batch_size = self.aux_batch_size
+        return {
+            "test": {name: test[name] for name in self._stored["test"]},
+            "aux": {
+                n: placeholder_loader(x, batch_size)
+                for n, x in aux_inputs(self._meta).items()
+            },
+            # Unshuffled, so that the losses follow the rows of data_train.
+            "train": {"train": DataLoader(data_train, batch_size=batch_size)},
         }
 
     def on_validation_epoch_start(self, trainer, pl_module):
@@ -353,18 +268,16 @@ class ScoreDumpCallback(Callback):
         for split, loaders in self._loaders.items():
             keys = TRAIN_KEYS if split == "train" else self.keys
             collectors[split] = score_in_eval_mode(trainer, pl_module, loaders, keys)
-
         epoch = -1 if trainer.sanity_checking else trainer.current_epoch
         record = {split: c.scores() for split, c in collectors.items()}
-        record["state_dict"] = _cpu_state_dict(pl_module)
-        name = "initial.pt" if epoch < 0 else f"epoch_{epoch:04d}.pt"
-        _save_atomic({"epoch": epoch, **record}, self.dirpath / name)
+        state = {k: v.detach().cpu() for k, v in pl_module.state_dict().items()}
+        path = self.dirpath / ("initial.pt" if epoch < 0 else f"epoch_{epoch:04d}.pt")
+        _save_atomic({"epoch": epoch, **record, "state_dict": state}, path)
         self._write_meta(collectors)
 
     def _write_meta(self, collectors: dict) -> None:
         if self._meta_written:
             return
-
         layouts = {split: c.layout() for split, c in collectors.items()}
         # Only the stored test sets are scored, so the layout is that of the data pass.
         layouts["test"] = {**self._test_layout, "keys": layouts["test"]["keys"]}

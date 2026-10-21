@@ -1,8 +1,8 @@
 import pytest
 import torch
 
-from src.callbacks.metrics.cap.binary import normalization
-from src.evaluation.callbacks.metrics.cap.binary import (
+from src.callbacks.components.cap.binary import normalization
+from src.evaluation.callbacks.components.cap.binary import (
     normalization as evaluation_normalization,
 )
 

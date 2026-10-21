@@ -1,10 +1,7 @@
 # @package cap
 
-# The CAP metric parameters. The training and evaluation CAP and consistency callbacks
-# of the physics experiments and the evaluation callbacks of configs/eval/<domain>.yaml
-# share them through cap_metric_config: ${cap}, so that the freeze decided in the
-# Causal Chamber analysis replaces this file with configs/cap/frozen.yaml. Provisional
-# until then.
+# The CAP metric parameters, shared by every CAP and consistency callback through
+# cap_metric_config: ${cap}; the chamber freeze replaces this file with frozen.yaml.
 beta_min: 0.01
 beta_max: 1000.0
 n_beta: 200

@@ -5,7 +5,7 @@ from types import SimpleNamespace
 import pytest
 import torch
 
-from src.callbacks.metrics.rate import compute_tie_weight, count_exceedances
+from src.callbacks.components.rate import compute_tie_weight, count_exceedances
 from src.callbacks.thres_drift import ThresholdDriftCallback as TrainDrift
 from src.evaluation.callbacks.thres_drift import ThresholdDriftCallback as EvalDrift
 

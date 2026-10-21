@@ -1,7 +1,6 @@
 # @package callbacks
 
-# The dump regime: no checkpoint is kept, since selection reads the per-epoch scores
-# and weights of the score dump offline.
+# The dump regime: no checkpoint; selection reads the score dump offline.
 defaults:
   - util@model_summary: model_summary
   - util@rich_progress_bar: rich_progress_bar

@@ -16,11 +16,12 @@ from omegaconf import OmegaConf
 from pytorch_lightning.callbacks import Callback
 from torch.utils.data import DataLoader, TensorDataset
 
-from src.callbacks.metrics.rate import AnomalyRate
-from src.callbacks.metrics.selection import W_STEPS, best_epoch, ema, smoothed
+from src.callbacks.components.rate import AnomalyRate
+from src.callbacks.components.selection import W_STEPS, best_epoch, ema, smoothed
 from src.evaluation.callbacks.efficiency import AnomalyEfficiencyCallback
 from src.evaluation.callbacks.utils.mlflow import log_metrics_to_mlflow
-from src.evaluation.evaluator import Evaluator, hyperpoint
+from src.evaluation.dump import hyperpoint
+from src.evaluation.evaluator import Evaluator
 from src.evaluation.replay import ReplayModule
 from src.utils.omegaconf import register_resolvers
 from tests.test_score_dump import PASSES, ToyAE, ToyDataModule, dump_callback, fit, load
@@ -46,8 +47,6 @@ SMOKE_OVERRIDES = [
     "algorithm.input_noise_std=0.001",
     "algorithm.encoder.nodes=[32,16]",
     "algorithm.optimizer.lr=0.000748389282753007",
-    "algorithm.optimizer.betas=[0.9,0.99]",
-    "algorithm.optimizer.weight_decay=1e-06",
     "experiment=cchamber/ae",
     "hparams_search=cchamber/ae_optuna",
     "trainer=gpu",
@@ -328,8 +327,6 @@ def test_hyperpoint_takes_the_swept_overrides(tmp_path):
         "algorithm.input_noise_std": "0.001",
         "algorithm.encoder.nodes": "[32,16]",
         "algorithm.optimizer.lr": "0.000748389282753007",
-        "algorithm.optimizer.betas": "[0.9,0.99]",
-        "algorithm.optimizer.weight_decay": "1e-06",
     }
     outside = [o for o in SMOKE_OVERRIDES if not o.startswith("hparams_search")]
     (tmp_path / "overrides.yaml").write_text(yaml.safe_dump(outside))

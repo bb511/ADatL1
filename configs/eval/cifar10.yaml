@@ -88,8 +88,7 @@ evaluation:
         name: sds
     test_callbacks: [anomaly_efficiency]
 
-    # The sets the validation pass appends: the three auxiliary sets, the training
-    # set and the SDS pseudo-sets of at most max_rows distinct training rows.
+    # The sets the validation pass appends after the validation loaders.
     extra_sets:
       aux: true
       train: true
@@ -99,8 +98,7 @@ evaluation:
 
     selection: ${selection}
 
-# The registry of strategies: per criterion its column in val.csv, its mode and its
-# MLflow keys, the keys the training callbacks log.
+# The registry of strategies: column in val.csv, mode and MLflow keys per criterion.
 selection:
   criteria:
     drift:

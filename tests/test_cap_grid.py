@@ -7,14 +7,17 @@ import pytest
 import torch
 
 from src.callbacks.cap import CAPCallback
-from src.callbacks.metrics.cap import kernel
-from src.callbacks.metrics.cap.binary import get_pairing_fn
-from src.callbacks.metrics.cap.metric import ApproximationCapacity, PosteriorConsistency
-from src.evaluation.callbacks.metrics.cap import kernel as evaluation_kernel
-from src.evaluation.callbacks.metrics.cap.metric import (
+from src.callbacks.components.cap import kernel
+from src.callbacks.components.cap.binary import get_pairing_fn
+from src.callbacks.components.cap.metric import (
+    ApproximationCapacity,
+    PosteriorConsistency,
+)
+from src.evaluation.callbacks.components.cap import kernel as evaluation_kernel
+from src.evaluation.callbacks.components.cap.metric import (
     ApproximationCapacity as EvaluationCapacity,
 )
-from src.evaluation.callbacks.metrics.cap.metric import (
+from src.evaluation.callbacks.components.cap.metric import (
     PosteriorConsistency as EvaluationConsistency,
 )
 

@@ -26,18 +26,11 @@ hydra:
     n_trials: 40
 
     # define hyperparameter search space. Assumes using torch.optim.AdamW
-
-    # Space of the shared pool after the review of the submitted version's
-    # searches (19 Oct 2026). The Adam betas, weight decay and the activation
-    # had no measurable effect and take the experiment's values. Clipping
-    # stays as on or off: without it the log-likelihood diverges in a share of
-    # trials. The learning-rate range is kept because the flows' fronts were
-    # interior; hidden_dim extends to 96 because they sat on 64, the old top.
     params:
+      algorithm.optimizer.lr: tag(log, interval(3e-5, 3e-3))
+      trainer.gradient_clip_val: choice(0.0, 0.5, 1.0, 2.0)
       algorithm.flow.n_flows: choice(4, 6, 8)
       algorithm.flow.hidden_dim: choice(32, 48, 64, 96)
       algorithm.flow.n_hidden_layers: choice(1, 2)
-      algorithm.flow.noise_scale: choice(0.0, 1e-4, 1e-3, 1e-2)
-      algorithm.flow.scale_clamp: choice(3.0, 5.0)
-      trainer.gradient_clip_val: choice(0.0, 1.0)
-      algorithm.optimizer.lr: tag(log, interval(3e-5, 3e-3))
+      algorithm.flow.activation: choice(relu, gelu, silu)
+      algorithm.flow.noise_scale: choice(0.0, 1e-3, 1e-2, 3e-2)

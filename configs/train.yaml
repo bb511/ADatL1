@@ -40,8 +40,7 @@ tags: ["dev"]
 # set False to skip model training
 train: True
 
-# also evaluate the checkpoints of evaluation.evaluator.ckpts on the test set
-# a run without an evaluation config (the dump regime) evaluates nothing
+# also evaluate the checkpoints on the test set; a dump-regime run evaluates nothing
 test: True
 
 # simply provide checkpoint path to resume training

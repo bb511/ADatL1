@@ -1,6 +1,5 @@
 # package callbacks.util
 
-# Fits the whitened residual score's state (AE, VAE with anomaly_score residual_oas)
-# on the training normals before every validation epoch.
+# Fits the whitened residual score's state on the training normals before validation.
 _target_: src.callbacks.residual_state.ResidualStateCallback
 batch_size: 8192

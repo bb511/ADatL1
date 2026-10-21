@@ -2,8 +2,6 @@
 
 # The offline evaluation of one lattice of the dump regime, then the selection on it:
 #   python src/eval.py eval=<domain> lattice=<experiment_name> [partner=<lattice>]
-# where <domain> is a file of configs/eval/ and <experiment_name> a directory of
-# ${scores_dir}.
 
 defaults:
   - _self_
@@ -18,8 +16,7 @@ tags: ["eval"]
 
 # The lattice, the directory ${scores_dir}/${lattice} of its dumps.
 lattice: ???
-# The lattice paired with this one by hyperpoint for UDR (another seed, the other
-# training half); null leaves UDR out.
+# The lattice paired by hyperpoint for UDR (another seed or half); null leaves UDR out.
 partner: null
 scores_dir: ${paths.log_dir}/scores
 out_dir: ${paths.log_dir}/eval/${lattice}

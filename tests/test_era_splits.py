@@ -1,22 +1,11 @@
 import filecmp
-import importlib.util
-from pathlib import Path
 
 import numpy as np
 import pytest
 
-SCRIPT = Path(__file__).resolve().parents[1] / "scripts/data/era_splits.py"
+from src.data.components import era_splits
+
 N_EVENTS, N_FIRST = 20, 8
-
-
-def _load_script():
-    spec = importlib.util.spec_from_file_location("era_splits", SCRIPT)
-    module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
-    return module
-
-
-era_splits = _load_script()
 
 
 @pytest.fixture
@@ -33,9 +22,9 @@ def merged(tmp_path):
     return merged_dir, arrays
 
 
-def _run(merged_dir, era_dir, era):
-    argv = ["--merged-splits", str(merged_dir), "--era-splits", str(era_dir)]
-    return era_splits.main([*argv, "--era", era, "--n-first-run", str(N_FIRST)])
+def _derive(merged_dir, era_dir, era):
+    zerobias, aux = era_splits.plan_era_splits(merged_dir, era_dir, era, N_FIRST)
+    era_splits.write_era_splits(era_dir, zerobias, aux)
 
 
 @pytest.mark.parametrize(
@@ -47,7 +36,7 @@ def _run(merged_dir, era_dir, era):
 )
 def test_era_zerobias_is_the_shifted_restriction(merged, tmp_path, era, keep, n_era):
     merged_dir, arrays = merged
-    _run(merged_dir, tmp_path / "era", era)
+    _derive(merged_dir, tmp_path / "era", era)
 
     with np.load(tmp_path / "era" / "zerobias.npz") as written:
         splits = [written[k] for k in era_splits.SPLITS]
@@ -61,7 +50,7 @@ def test_era_zerobias_is_the_shifted_restriction(merged, tmp_path, era, keep, n_
 
 def test_aux_splits_are_copied_unchanged(merged, tmp_path):
     merged_dir, _ = merged
-    _run(merged_dir, tmp_path / "era", "G")
+    _derive(merged_dir, tmp_path / "era", "G")
 
     for name in ("aux__a.npz", "aux__b.npz"):
         assert filecmp.cmp(merged_dir / name, tmp_path / "era" / name, shallow=False)
@@ -73,8 +62,8 @@ def test_refuses_to_overwrite(merged, tmp_path):
     era_dir.mkdir()
     (era_dir / "aux__b.npz").write_bytes(b"keep")
 
-    with pytest.raises(SystemExit, match="refusing to overwrite"):
-        _run(merged_dir, era_dir, "E")
+    with pytest.raises(FileExistsError, match="refusing to overwrite"):
+        _derive(merged_dir, era_dir, "E")
 
     assert sorted(p.name for p in era_dir.iterdir()) == ["aux__b.npz"]
     assert (era_dir / "aux__b.npz").read_bytes() == b"keep"

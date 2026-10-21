@@ -1,41 +1,24 @@
 # @package data
 
-# The same basis data as configs/data/basis.yaml, built by the loader that ships inside
-# the published record rather than by this project's own stages. The record carries the
-# configuration tree that drives it, so the objects, features, filters, split and
-# normalization are all fixed there, and only the wrapper is configured here.
+# The basis data, built by the loader that ships inside the published record.
 
 defaults:
-  # Selected here only so that an experiment overriding /data/data_normalizer composes
-  # against this config too. The name picks the matching scheme inside the record, which
-  # runs its own normalizer over its own data.
+  # Lets an experiment override /data/data_normalizer; the record runs its own.
   - data_normalizer: robust
   - _self_
 
 _target_: src.data.L1AD_HF_datamodule.L1ADHFDataModule
 
-# The record moved to the CERN organisation; the old name podagiu/... redirects to it.
+# The former podagiu/... name redirects here.
 repo_id: CERN/anomaly_detection_cmsl1t
 
-# The record ships the pipeline as well as the data, so a run reads and executes whatever
-# is at this commit. null would follow the head of the record instead, leaving what a run
-# trained on decided by when it was launched. A bump can change the tensors: f00e4b8c
-# ordered each collection by ET, which the on-disk pipeline had to be taught to match,
-# 85c2f1a9 widened the jet saturation cut from the 9-bit 511 to the 11-bit 2047, and
-# 77554db9 overlaid zero-bias pile-up onto haa-4b-ma15. 1ac2b91f lowered the simulation's
-# orbit sentinel, a column the extractor does not select, so the tensors did not change.
+# The record ships the pipeline too, so the revision pins the data and the code.
 revision: 1ac2b91f12ee4d0f6d88e024da36ab7aeaf7e214
 
-# Mapped onto the record's paths.base_data_dir. Its extracted, processed and ml-ready
-# caches land under <cache_dir>/data_2025E+G/, beside the ones the raw route builds. The
-# commit is part of the path, kept in step with revision, because every stage tests for
-# its cache by existence alone: a bump that reused the directory would read the tensors
-# of the commit before it.
+# Keyed by the commit, since every stage tests for its cache by existence alone.
 cache_dir: ${paths.base_data_dir}/hf/1ac2b91f
 
-# Anything else to override when composing the record's configuration. An element
-# carries an = and a /, so hydra needs it quoted:
-# data.overrides='["data/data_awkward2torch=minimal"]'.
+# Extra overrides for the record's configuration; quote an element with = and /.
 overrides: []
 
 # The batch size of the data.

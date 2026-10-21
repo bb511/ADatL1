@@ -1,10 +1,6 @@
 # @package _global_
 
-# Placeholder space: the vae entry of SPACES in Victor's campaign script
-# (logs/victor_results/cchamber-data/scripts/cchamber_campaign.py on olgpu), every
-# dimension copied unchanged, until the spaces chat settles the chamber spaces
-# (item 5a of the redesign). The configs of the two tunnels differ only in their
-# storage.
+# The VAE lattice space, the same on both tunnels; the rationale is in the plan.
 
 defaults:
   - override /hydra/sweeper: optuna
@@ -16,18 +12,12 @@ hydra:
     _target_: hydra_plugins.hydra_optuna_sweeper.optuna_sweeper.OptunaSweeper
     study_name: pool
     n_jobs: 1
-    # A placeholder objective: the run only trains and dumps, so it reports +inf
-    # to Optuna, and the random sampler never reads the value.
+    # Placeholder: a dump-only run reports the worst value of each direction.
     direction: minimize
     n_trials: 50
     storage: sqlite:///logs/optuna/cchamber/vae_pool.db?timeout=600
     params:
+      algorithm.optimizer.lr: tag(log, interval(3e-5, 3e-3))
       trainer.gradient_clip_val: choice(0.0, 0.5, 1.0, 2.0)
-      algorithm.encoder.clamp_zlogvar_range: choice([-20, 10], [-10, 6], [-8, 6], [-6, 4])
-      algorithm.optimizer.lr: tag(log, interval(5e-5, 1e-3))
-      algorithm.optimizer.betas: choice([0.9, 0.999], [0.9, 0.99])
-      algorithm.optimizer.weight_decay: choice(0.0, 1e-6, 1e-5, 1e-4, 1e-3)
-      algorithm.kl_scale: choice(3e-5, 1e-4, 3e-4, 1e-3, 2e-3, 1e-2, 3e-2, 1e-1)
-      algorithm.kl_warmup_frac: choice(0.0, 0.05, 0.1, 0.2, 0.3)
       algorithm.encoder.nodes: choice([16, 4], [16, 8], [24, 8], [32, 16, 4], [32, 16, 8], [48, 24, 8], [48, 24, 16], [64, 32, 16])
-      algorithm.encoder.activation: choice(relu, gelu, silu)
+      algorithm.kl_scale: choice(3e-5, 1e-4, 3e-4, 1e-3, 3e-3, 1e-2, 3e-2, 1e-1)

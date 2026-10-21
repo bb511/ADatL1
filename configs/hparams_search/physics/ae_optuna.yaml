@@ -29,15 +29,9 @@ hydra:
     n_trials: 15
 
     # define hyperparameter search space. Assumes using torch.optim.AdamW
-
-    # Space of the shared pool after the review of the submitted version's
-    # searches (19 Oct 2026). Gradient clipping, the Adam betas, weight decay,
-    # the input noise and the Huber delta had no measurable effect on any
-    # strategy's objective in 90 studies and take the experiment's values; the
-    # learning-rate ceiling is raised because the old fronts pressed 3e-3, and
-    # the floor is kept because the Wasserstein and drift fronts select there.
-    # The width list keeps first layers of 16 to 64 with a bottleneck of 8 at
-    # every width; nine of the old twenty entries never reached a front.
     params:
-      algorithm.encoder.nodes: choice([16,8], [32,8], [32,16], [48,8], [24,8,4], [32,16,8], [48,24,8], [48,24,16], [64,32,8], [64,32,16], [64,32,24], [64,32,32])
       algorithm.optimizer.lr: tag(log, interval(3e-5, 1e-2))
+      trainer.gradient_clip_val: choice(0.0, 0.5, 1.0, 2.0)
+      algorithm.encoder.nodes: choice([16,8], [32,8], [32,16], [48,8], [24,8,4], [32,16,8], [48,24,8], [48,24,16], [64,32,8], [64,32,16], [64,32,24], [64,32,32])
+      algorithm.delta: choice(0.5, 1.0, 3.0, 5.0, 7.0, 10.0)
+      algorithm.input_noise_std: choice(0.0, 0.01, 0.03, 0.1)

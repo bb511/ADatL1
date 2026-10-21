@@ -24,8 +24,7 @@ trainer:
   gradient_clip_val: 0.0
   min_epochs: 1
   max_epochs: 200
-  # The full sanity pass is the untrained state the dump stores; disabling
-  # checkpointing drops the ModelCheckpoint that Lightning adds by default.
+  # The full sanity pass is the untrained state the dump stores; no checkpoint is kept.
   num_sanity_val_steps: -1
   enable_checkpointing: false
 
@@ -38,10 +37,7 @@ algorithm:
   encoder:
     in_channels: 3
     input_size: ${data.image_size}
-    # One convolutional stage: the pool's width lists are [conv, hidden, latent],
-    # and the encoder needs len(nodes) - 2 strides. The algorithm default [2, 2]
-    # fits the four-entry CIFAR-10 lists only. The default widths follow the same
-    # three-entry form, so the bare experiment instantiates like every pool draw.
+    # One convolutional stage, as in the pool: the lists are [conv, hidden, latent].
     nodes: [16, 32, 64]
     strides: [2]
 

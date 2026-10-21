@@ -1,7 +1,6 @@
 # @package data.data_extractor
 
-# Configuration of what features and objects to extract from the L1T data parquet
-# files.
+# Which objects and features to extract from the L1T parquet files.
 
 _target_: src.data.components.extraction.L1DataExtractor
 # Default configuration includes all objects and features available in the data atm.

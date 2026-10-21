@@ -6,8 +6,8 @@ import torch
 from pytorch_lightning import Callback
 from pytorch_lightning.loggers import MLFlowLogger
 
-from src.callbacks.metrics.cap.binary import get_pairing_fn
-from src.callbacks.metrics.cap.metric import ApproximationCapacity
+from src.callbacks.components.cap.binary import get_pairing_fn
+from src.callbacks.components.cap.metric import ApproximationCapacity
 from src.utils import pylogger
 
 log = pylogger.RankedLogger(__name__)

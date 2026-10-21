@@ -11,7 +11,8 @@ import torch
 import yaml
 from scipy.stats import rankdata, spearmanr
 
-from src.callbacks.metrics import label_free, selection
+from src.callbacks.components import selection
+from src.evaluation import harvest as src_harvest
 from src.evaluation import lattice
 
 HARVEST = Path(__file__).resolve().parents[1] / "scripts/analysis/harvest_pool_effs.py"
@@ -223,7 +224,13 @@ def test_pair_runs_matches_equal_hyperpoints():
         lattice.pair_runs({**own, "c": {"lr": "0.4", "nodes": "[8,4]"}}, partner)
 
 
-def test_consensus_is_label_free_udr_and_mc(tmp_path):
+def _rho(a, b):
+    # UOMS (UDR.py, MC.py): nan_to_num before ranking, an undefined rho counts as 0.
+    rho = spearmanr(np.nan_to_num(a), np.nan_to_num(b))[0]
+    return 0.0 if math.isnan(rho) else float(rho)
+
+
+def test_consensus_is_udr_and_mc_of_uoms(tmp_path):
     spec = _spec()
     # A constant score, whose rho is undefined, and an infinite one.
     spec.normal[1, 2] = 1.0
@@ -237,8 +244,8 @@ def test_consensus_is_label_free_udr_and_mc(tmp_path):
         others = np.delete(spec.normal, i, axis=0)
         for j in range(spec.epochs + 1):
             own = spec.normal[i, j]
-            udr = label_free.udr(own, spec.partner[i, j][None])
-            mc = label_free.model_centrality(own, others[:, j])
+            udr = _rho(own, spec.partner[i, j])
+            mc = np.mean([_rho(own, other) for other in others[:, j]])
             assert rows["udr"].iloc[j] == pytest.approx(udr, abs=1e-12)
             assert rows["mc"].iloc[j] == pytest.approx(mc, abs=1e-12)
         for name in ("udr", "mc"):
@@ -517,12 +524,12 @@ def _harvest_module():
 
 def test_harvest_schema(tmp_path):
     harvest = _harvest_module()
-    assert lattice.OLD_COLUMNS == harvest.OLD_COLUMNS
-    assert lattice.NEW_COLUMNS == harvest.NEW_COLUMNS
-    assert lattice.EVAL_COLUMNS == harvest.EVAL_COLUMNS
+    assert src_harvest.OLD_COLUMNS == harvest.OLD_COLUMNS
+    assert src_harvest.NEW_COLUMNS == harvest.NEW_COLUMNS
+    assert src_harvest.EVAL_COLUMNS == harvest.EVAL_COLUMNS
     for rate, base_rate in ((0.01, None), (0.1, None), (0.25, 28608.8)):
         expected = harvest._tier_name(rate, True, base_rate)
-        assert lattice._tier_name(rate, base_rate) == expected
+        assert src_harvest._tier_name(rate, base_rate) == expected
 
     spec = _spec()
     out_dir = _run(tmp_path, spec)

@@ -27,14 +27,11 @@ clip_value: 10.0
 seed: 314159
 # The batch order follows the global training seed.
 train_seed: ${seed}
-# A training half: keep every n_train_folds-th training row from train_fold on
-# (the halves instances of the lattice catalogues); null keeps every row.
+# A training half (the halves instances of the catalogues); null keeps every row.
 train_fold: null
 n_train_folds: 2
 
-# The eleven sensor readouts of the light tunnel, in model-input order. The other
-# columns of every CSV are run metadata and the actuator settings that the
-# interventions change, and are never model inputs.
+# The light tunnel's eleven sensor readouts, in model-input order.
 readouts:
   - current
   - angle_1
@@ -48,8 +45,7 @@ readouts:
   - v_board
   - v_reg
 
-# One CSV per experiment, so a set is the whole file. The labels 1-58 follow the order
-# of the signals.
+# One CSV per experiment; the labels 1-58 follow the order of the signals.
 reference: { file: uniform_reference }
 signals:
   uniform_blue_mid: { file: uniform_blue_mid }

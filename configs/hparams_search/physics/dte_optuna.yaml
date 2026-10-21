@@ -29,38 +29,13 @@ hydra:
     n_trials: 40
 
     # define hyperparameter search space. Assumes using torch.optim.AdamW
-    #
-    # n_bins IS searched. It sets how finely the predictor can resolve the noise
-    # level: at n_steps=300 and beta_end=0.01, bin 0 spans noise sigma up to 0.17
-    # of each standardised feature's own std at n_bins=7, but only 0.06 at
-    # n_bins=20 -- and the low-noise end is where a mildly anomalous event sits.
-    # This is only sound because DTE normalises the score by n_bins-1, so it lands
-    # in [0, 1] for every n_bins. Without that normalisation the score would scale
-    # with n_bins while the second objective (ascore_operational) is minimised, and
-    # the front would collapse onto the smallest n_bins on offer.
-    #
-    # n_steps and beta_start are deliberately NOT searched:
-    #   - the bin->noise ladder depends only on the product beta_end * n_steps,
-    #     so searching both wastes the sampler's budget on a flat direction, and
-    #     n_steps sets the shape of persistent buffers loaded with strict=True;
-    #   - beta_start > beta_end raises in DTE.__init__, and optuna cannot
-    #     express that constraint, so invalid draws would become crashed trials.
-    #
-    # hidden_dims stops well below the paper's [256, 512, 256]: every other model
-    # in this comparison is sized for L1 trigger deployment, so DTE is held at
-    # comparable capacity rather than allowed to win on parameter count.
-
-    # Space of the shared pool after the review of the submitted version's
-    # searches (19 Oct 2026). Clipping, the Adam betas and weight decay had no
-    # measurable effect and take the experiment's values; the learning-rate
-    # ceiling is raised because the old fronts pressed 3e-3. n_bins and the
-    # widths lose their near-duplicate levels (7 and 15; [32,16] and
-    # [64,32,32]); the activation keeps all three levels, its effect differing
-    # by strategy.
+    # n_bins is searched; n_steps and beta_start are not, since the noise ladder depends
+    # only on beta_end * n_steps and beta_start > beta_end is a constructor error.
     params:
+      algorithm.optimizer.lr: tag(log, interval(3e-5, 1e-2))
+      trainer.gradient_clip_val: choice(0.0, 0.5, 1.0, 2.0)
       algorithm.beta_end: tag(log, interval(1e-3, 1e-1))
       algorithm.n_bins: choice(5, 10, 20, 30)
       algorithm.predictor.hidden_dims: choice([64,32], [64,32,16], [128,64], [128,64,32])
       algorithm.predictor.dropout: choice(0.0, 0.25, 0.5)
       algorithm.predictor.activation: choice(relu, gelu, silu)
-      algorithm.optimizer.lr: tag(log, interval(3e-5, 1e-2))

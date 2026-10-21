@@ -67,8 +67,7 @@ callbacks:
   anomaly_eff:
     _target_: src.callbacks.efficiency.AnomalyEfficiencyCallback
     output_name: "ascore/full"
-    # 286.088064 kHz = 0.01 x base_rate is the q = 0.99 tier, which the old q99 runs set
-    # as target_rate=0.01 with base_rate=null; here base_rate applies to every rate.
+    # 286.088064 kHz = 0.01 x base_rate, the q = 0.99 tier.
     target_rates: [0.25, 286.088064]
     ema_weight: 0.9
 
@@ -104,8 +103,7 @@ callbacks:
     pairing_type: cdf
     cap_metric_config: ${cap}
 
-  # Label-free criteria (user, 20 Oct 2026): entropy on a seeded 100,000-row subset of the
-  # training rows; SDS from 10,000 distinct rows, also on validation normal as sds_val.
+  # Label-free criteria: entropy on 100,000 training rows, SDS on 10,000 distinct rows.
   npd:
     _target_: src.callbacks.autouad.NPDCallback
     output_name: "ascore/full"
@@ -394,8 +392,7 @@ callbacks:
   loss_ckpt:
     _target_: pytorch_lightning.callbacks.ModelCheckpoint
     dirpath: "${paths.checkpoints_dir}/${experiment_name}/${run_name}/normal/loss/min"
-    # The distance term alone: the SVDD loss adds the network's weight regulariser,
-    # which a loss-only pick would otherwise reward.
+    # The distance term alone, without the weight regulariser the SVDD loss adds.
     monitor: "val/normal/loss_distance_raw"
     filename: "loss"
     save_last: false

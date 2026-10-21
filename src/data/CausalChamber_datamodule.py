@@ -1,22 +1,18 @@
-import hashlib
-import os
-import tempfile
 from dataclasses import dataclass
 from pathlib import Path
 from types import SimpleNamespace
-from urllib.request import urlretrieve
-from zipfile import ZipFile
 
 import numpy as np
 import pyarrow as pa
 import pyarrow.compute as pc
 import torch
-from colorama import Back, Fore
+from colorama import Fore
 from pyarrow import csv as pa_csv
 from pytorch_lightning import LightningDataModule
 from torch.utils.data import DataLoader, TensorDataset
 
 from src.data.components.dataset import CIFARADDataset
+from src.data.utils import check_md5, download, extract, seeded_permutation, to_device
 from src.utils import pylogger
 
 log = pylogger.RankedLogger(__name__)
@@ -45,58 +41,6 @@ def _to_tensor(table: pa.Table, readouts: list[str]) -> torch.Tensor:
     columns = [table.column(name).to_numpy() for name in readouts]
 
     return torch.as_tensor(np.stack(columns, axis=1), dtype=torch.float32)
-
-
-def _permutation(n: int, seed: int) -> torch.Tensor:
-    return torch.randperm(n, generator=torch.Generator().manual_seed(seed))
-
-
-def _check_md5(path: Path, expected: str) -> None:
-    digest = hashlib.md5(path.read_bytes(), usedforsecurity=False).hexdigest()
-    if digest != expected:
-        raise RuntimeError(
-            f"MD5 of {path} is {digest}, expected {expected}. Delete the file to "
-            "download it again."
-        )
-
-
-def _download(url: str, archive: Path) -> None:
-    """Download to a process-specific name and rename it into place once complete.
-
-    Runs started together on a cold data directory download concurrently, and the rename
-    keeps any of them from reading another's partial file.
-    """
-    archive.parent.mkdir(parents=True, exist_ok=True)
-    log.info(Back.GREEN + f"Downloading {url}...")
-    partial = archive.with_name(f"{archive.name}.{os.getpid()}")
-    urlretrieve(url, partial)  # nosec B310, URL from the data config
-    partial.replace(archive)
-
-
-def _extract(archive: Path, target: Path) -> None:
-    """Extract into a staging directory and move the dataset into place whole.
-
-    The archive holds a single top-level directory named like ``target``. When a
-    concurrent run has moved its copy first, the rename fails and that copy is kept.
-    """
-    with tempfile.TemporaryDirectory(dir=target.parent) as staging:
-        with ZipFile(archive) as zf:
-            zf.extractall(staging)
-        try:
-            (Path(staging) / target.name).rename(target)
-        except OSError:
-            if not target.exists():
-                raise
-
-
-def _to_device(t: torch.Tensor, device: torch.device) -> torch.Tensor:
-    """Pin CPU tensors before an asynchronous CUDA copy."""
-    if device.type != "cuda":
-        return t.to(device)
-    if t.device.type == "cpu" and not t.is_pinned():
-        t = t.pin_memory()
-
-    return t.to(device, non_blocking=True)
 
 
 class CausalChamberDataModule(LightningDataModule):
@@ -189,9 +133,9 @@ class CausalChamberDataModule(LightningDataModule):
             return
         archive = self.dataset_dir.parent / f"{self.hparams.dataset_name}.zip"
         if not archive.exists():
-            _download(self.hparams.url, archive)
-        _check_md5(archive, self.hparams.md5)
-        _extract(archive, self.dataset_dir)
+            download(self.hparams.url, archive)
+        check_md5(archive, self.hparams.md5)
+        extract(archive, self.dataset_dir)
 
     def setup(self, stage: str | None = None) -> None:
         """Build every split on the first call, for any stage; later calls reuse it."""
@@ -216,7 +160,7 @@ class CausalChamberDataModule(LightningDataModule):
     def transfer_batch_to_device(
         self, batch: tuple[torch.Tensor, ...], device: torch.device, dataloader_idx: int
     ) -> tuple[torch.Tensor, ...]:
-        return tuple(_to_device(t, device) for t in batch)
+        return tuple(to_device(t, device) for t in batch)
 
     def _read_set(self, spec: dict) -> torch.Tensor:
         stem = spec["file"]
@@ -256,7 +200,7 @@ class CausalChamberDataModule(LightningDataModule):
     ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
         n_train = round(self.hparams.train_fraction * n)
         n_valid = round(self.hparams.val_fraction * n)
-        perm = _permutation(n, self.hparams.seed)
+        perm = seeded_permutation(n, self.hparams.seed)
         train, rest = perm[:n_train], perm[n_train:]
 
         return train, rest[:n_valid], rest[n_valid:]
@@ -281,7 +225,7 @@ class CausalChamberDataModule(LightningDataModule):
         """
         n = x.size(0)
         half = n // 2
-        order = _permutation(n, self.hparams.seed + n)
+        order = seeded_permutation(n, self.hparams.seed + n)
         main, ref = order[:half], order[half : 2 * half]
         y = torch.zeros(half, dtype=torch.int64)
 
@@ -294,7 +238,7 @@ class CausalChamberDataModule(LightningDataModule):
             x = self._normalize(self._read_set(spec))
             n = x.size(0)
             n_valid = round(self.hparams.signal_val_fraction * n)
-            perm = _permutation(n, self.hparams.seed + n)
+            perm = seeded_permutation(n, self.hparams.seed + n)
             y = torch.full((n,), label, dtype=torch.int64)
             self._aux["valid"][name] = SplitTensors(x[perm[:n_valid]], y[:n_valid])
             self._aux["test"][name] = SplitTensors(x[perm[n_valid:]], y[n_valid:])

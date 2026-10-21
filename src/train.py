@@ -13,7 +13,7 @@ import pytorch_lightning as pl
 import rootutils
 from colorama import Back, Fore
 from hydra.core.hydra_config import HydraConfig
-from omegaconf import DictConfig, OmegaConf
+from omegaconf import DictConfig, ListConfig, OmegaConf
 from pytorch_lightning import Callback, LightningDataModule, LightningModule, Trainer
 from pytorch_lightning.loggers import Logger
 
@@ -175,7 +175,8 @@ def _get_directions(cfg):
         dirs = getattr(hydra_cfg.sweeper, "direction", None)
         if dirs is None:
             return None
-        return list(dirs) if isinstance(dirs, (list, tuple)) else [dirs]
+        # Hydra hands the sweeper's list of directions over as a ListConfig.
+        return list(dirs) if isinstance(dirs, (list, tuple, ListConfig)) else [dirs]
     except Exception:
         return None
 

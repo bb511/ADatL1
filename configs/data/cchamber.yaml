@@ -45,20 +45,12 @@ readouts:
   - v_board
   - v_reg
 
-# One CSV per experiment; the labels 1-58 follow the order of the signals.
+# One CSV per experiment.
 reference: { file: uniform_reference }
+# The 16 actuator interventions (light source, polarizers, LEDs); labels 1-16 in order.
 signals:
   uniform_blue_mid: { file: uniform_blue_mid }
   uniform_blue_strong: { file: uniform_blue_strong }
-  uniform_diode_ir_1_mid: { file: uniform_diode_ir_1_mid }
-  uniform_diode_ir_1_strong: { file: uniform_diode_ir_1_strong }
-  uniform_diode_ir_2_mid: { file: uniform_diode_ir_2_mid }
-  uniform_diode_ir_2_strong: { file: uniform_diode_ir_2_strong }
-  uniform_diode_ir_3_mid: { file: uniform_diode_ir_3_mid }
-  uniform_diode_ir_3_strong: { file: uniform_diode_ir_3_strong }
-  uniform_diode_vis_1_mid: { file: uniform_diode_vis_1_mid }
-  uniform_diode_vis_2_mid: { file: uniform_diode_vis_2_mid }
-  uniform_diode_vis_3_mid: { file: uniform_diode_vis_3_mid }
   uniform_green_mid: { file: uniform_green_mid }
   uniform_green_strong: { file: uniform_green_strong }
   uniform_l_11_mid: { file: uniform_l_11_mid }
@@ -67,42 +59,45 @@ signals:
   uniform_l_22_mid: { file: uniform_l_22_mid }
   uniform_l_31_mid: { file: uniform_l_31_mid }
   uniform_l_32_mid: { file: uniform_l_32_mid }
-  uniform_osr_angle_1_mid: { file: uniform_osr_angle_1_mid }
-  uniform_osr_angle_1_strong: { file: uniform_osr_angle_1_strong }
-  uniform_osr_angle_1_weak: { file: uniform_osr_angle_1_weak }
-  uniform_osr_angle_2_mid: { file: uniform_osr_angle_2_mid }
-  uniform_osr_angle_2_strong: { file: uniform_osr_angle_2_strong }
-  uniform_osr_angle_2_weak: { file: uniform_osr_angle_2_weak }
-  uniform_osr_c_mid: { file: uniform_osr_c_mid }
-  uniform_osr_c_strong: { file: uniform_osr_c_strong }
-  uniform_osr_c_weak: { file: uniform_osr_c_weak }
   uniform_pol_1_mid: { file: uniform_pol_1_mid }
   uniform_pol_1_strong: { file: uniform_pol_1_strong }
   uniform_pol_2_mid: { file: uniform_pol_2_mid }
   uniform_pol_2_strong: { file: uniform_pol_2_strong }
   uniform_red_mid: { file: uniform_red_mid }
   uniform_red_strong: { file: uniform_red_strong }
-  uniform_t_ir_1_mid: { file: uniform_t_ir_1_mid }
-  uniform_t_ir_1_strong: { file: uniform_t_ir_1_strong }
-  uniform_t_ir_1_weak: { file: uniform_t_ir_1_weak }
-  uniform_t_ir_2_mid: { file: uniform_t_ir_2_mid }
-  uniform_t_ir_2_strong: { file: uniform_t_ir_2_strong }
-  uniform_t_ir_2_weak: { file: uniform_t_ir_2_weak }
-  uniform_t_ir_3_mid: { file: uniform_t_ir_3_mid }
-  uniform_t_ir_3_strong: { file: uniform_t_ir_3_strong }
-  uniform_t_ir_3_weak: { file: uniform_t_ir_3_weak }
-  uniform_t_vis_1_mid: { file: uniform_t_vis_1_mid }
-  uniform_t_vis_1_strong: { file: uniform_t_vis_1_strong }
-  uniform_t_vis_1_weak: { file: uniform_t_vis_1_weak }
-  uniform_t_vis_2_mid: { file: uniform_t_vis_2_mid }
-  uniform_t_vis_2_strong: { file: uniform_t_vis_2_strong }
-  uniform_t_vis_2_weak: { file: uniform_t_vis_2_weak }
-  uniform_t_vis_3_mid: { file: uniform_t_vis_3_mid }
-  uniform_t_vis_3_strong: { file: uniform_t_vis_3_strong }
-  uniform_t_vis_3_weak: { file: uniform_t_vis_3_weak }
-  uniform_v_angle_1_mid: { file: uniform_v_angle_1_mid }
-  uniform_v_angle_1_strong: { file: uniform_v_angle_1_strong }
-  uniform_v_angle_2_mid: { file: uniform_v_angle_2_mid }
-  uniform_v_angle_2_strong: { file: uniform_v_angle_2_strong }
-  uniform_v_c_mid: { file: uniform_v_c_mid }
-  uniform_v_c_strong: { file: uniform_v_c_strong }
+# The second typical domain, label 0: the nine sensor parameters, each changed alone
+# with the actuators at reference, pooled per grade. A member is split as a signal is.
+nulls:
+  sensor_weak:
+    members:
+      - { file: uniform_osr_angle_1_weak }
+      - { file: uniform_osr_angle_2_weak }
+      - { file: uniform_osr_c_weak }
+      - { file: uniform_t_ir_1_weak }
+      - { file: uniform_t_ir_2_weak }
+      - { file: uniform_t_ir_3_weak }
+      - { file: uniform_t_vis_1_weak }
+      - { file: uniform_t_vis_2_weak }
+      - { file: uniform_t_vis_3_weak }
+  sensor_mid:
+    members:
+      - { file: uniform_osr_angle_1_mid }
+      - { file: uniform_osr_angle_2_mid }
+      - { file: uniform_osr_c_mid }
+      - { file: uniform_t_ir_1_mid }
+      - { file: uniform_t_ir_2_mid }
+      - { file: uniform_t_ir_3_mid }
+      - { file: uniform_t_vis_1_mid }
+      - { file: uniform_t_vis_2_mid }
+      - { file: uniform_t_vis_3_mid }
+  sensor_strong:
+    members:
+      - { file: uniform_osr_angle_1_strong }
+      - { file: uniform_osr_angle_2_strong }
+      - { file: uniform_osr_c_strong }
+      - { file: uniform_t_ir_1_strong }
+      - { file: uniform_t_ir_2_strong }
+      - { file: uniform_t_ir_3_strong }
+      - { file: uniform_t_vis_1_strong }
+      - { file: uniform_t_vis_2_strong }
+      - { file: uniform_t_vis_3_strong }

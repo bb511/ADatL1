@@ -202,11 +202,49 @@ def test_blocks_are_partitioned_and_labeled(wt_datamodule, cchamber_wt_data):
         assert torch.equal(index.sort().values, torch.arange(len(raw)))
 
 
+def _pool(blocks: list[int]) -> dict:
+    return {"members": [_regime(b) for b in blocks]}
+
+
+def test_a_pool_concatenates_its_members_split_as_plain_sets(cchamber_wt_data):
+    members = {"signal_pool": [3, 4], "null_pool": [5, 2]}
+    signals = {f"regime_{b}": _regime(b) for b in range(1, 6)}
+    plain = _wt_datamodule(cchamber_wt_data, signals=signals, nulls=None)
+    pooled = _wt_datamodule(
+        cchamber_wt_data,
+        signals={"regime_1": _regime(1), "signal_pool": _pool(members["signal_pool"])},
+        nulls={"null_pool": _pool(members["null_pool"])},
+    )
+    plain.setup("fit")
+    pooled.setup("fit")
+
+    order = ["normal", "reference_normal", "regime_1", "signal_pool", "null_pool"]
+    labels = {"regime_1": 1, "signal_pool": 2, "null_pool": 0}
+    for split in ("val_dataloader", "test_dataloader"):
+        expected, loaders = getattr(plain, split)(), getattr(pooled, split)()
+        assert list(loaders) == order
+        for name in ("normal", "reference_normal", "regime_1"):
+            assert torch.equal(_batches(loaders[name])[0], _batches(expected[name])[0])
+        for name, blocks in members.items():
+            x = torch.cat([_batches(expected[f"regime_{b}"])[0] for b in blocks])
+            assert torch.equal(_batches(loaders[name])[0], x)
+        for name, label in labels.items():
+            assert _batches(loaders[name])[1].unique().tolist() == [label]
+
+
 def test_registered_set_counts():
     # Pinned, since a config edit that dropped a set would change the benchmark
     # silently.
     lt, wt = _compose("cchamber"), _compose("cchamber_wt")
-    assert len(lt.signals) == 58 and not lt.get("nulls")
-    assert len(wt.signals) == 26 and len(wt.nulls) == 5
-    sets = [wt.reference, *wt.signals.values(), *wt.nulls.values()]
+    lt_pools = {name: len(pool.members) for name, pool in lt.nulls.items()}
+    assert len(lt.signals) == 16
+    assert lt_pools == {"sensor_weak": 9, "sensor_mid": 9, "sensor_strong": 9}
+    files = [s.file for s in lt.signals.values()]
+    files += [m.file for pool in lt.nulls.values() for m in pool.members]
+    assert len(set(files)) == 16 + 27
+
+    wt_pools = {name: len(pool.members) for name, pool in wt.nulls.items()}
+    assert len(wt.signals) == 16 and wt_pools == {"sensor_osr": 10, "walk_null": 5}
+    members = [m for pool in wt.nulls.values() for m in pool.members]
+    sets = [wt.reference, *wt.signals.values(), *members]
     assert sorted(s.where.flag for s in sets) == list(range(32))

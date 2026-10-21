@@ -140,7 +140,8 @@ def cchamber_wt_data(tmp_path: Path) -> SimpleNamespace:
     root = tmp_path / "causal_chamber"
     dataset_dir = root / "wt_walks_v1"
     dataset_dir.mkdir(parents=True)
-    sizes = {0: 100} | {block: 50 for block in range(1, 6)}
+    # Unequal, so that the split of every block is seeded differently (seed + n).
+    sizes = {0: 100} | {block: 45 + 5 * block for block in range(1, 6)}
     flag = CCHAMBER_WT_COLUMNS.index("flag")
     blocks = []
     for block, n in sizes.items():

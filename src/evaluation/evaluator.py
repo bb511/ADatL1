@@ -389,13 +389,21 @@ class Evaluator:
         out_dir: Path,
         lattice: str,
         data_dir: str | None = None,
+        sets: str | None = None,
         workers: int = 1,
         tracking_uri: str | None = None,
     ) -> list[dict]:
         """Evaluate every run of a lattice by ``dump.evaluate_lattice``."""
         settings = self._dump_settings()
         return dump.evaluate_lattice(
-            scores_dir, out_dir, lattice, settings, data_dir, workers, tracking_uri
+            scores_dir,
+            out_dir,
+            lattice,
+            settings,
+            data_dir,
+            sets,
+            workers,
+            tracking_uri,
         )
 
     def evaluate_dump(

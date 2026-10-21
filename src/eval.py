@@ -37,6 +37,7 @@ def main(cfg: DictConfig) -> None:
         out_dir=cfg.out_dir,
         lattice=cfg.lattice,
         data_dir=cfg.data_dir,
+        sets=cfg.sets,
         workers=cfg.workers,
         tracking_uri=cfg.tracking_uri,
     )

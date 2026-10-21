@@ -47,38 +47,45 @@ readouts:
 
 # A set is one regime (its flag) of regime_jumps_single.csv; regime 0 is the reference.
 reference: { file: regime_jumps_single, where: { flag: 0 } }
-# regime_<index>_<intervention target>. The labels 1-26 follow this order.
+# regime_<index>_<intervention target>. The labels 1-16 follow this order.
 signals:
   regime_01_v_2: { file: regime_jumps_single, where: { flag: 1 } }
   regime_03_res_out: { file: regime_jumps_single, where: { flag: 3 } }
   regime_04_v_out: { file: regime_jumps_single, where: { flag: 4 } }
   regime_05_hatch: { file: regime_jumps_single, where: { flag: 5 } }
   regime_06_v_1: { file: regime_jumps_single, where: { flag: 6 } }
-  regime_07_osr_upwind: { file: regime_jumps_single, where: { flag: 7 } }
-  regime_09_osr_upwind: { file: regime_jumps_single, where: { flag: 9 } }
   regime_10_v_out: { file: regime_jumps_single, where: { flag: 10 } }
   regime_11_v_1: { file: regime_jumps_single, where: { flag: 11 } }
   regime_12_res_in: { file: regime_jumps_single, where: { flag: 12 } }
-  regime_13_osr_upwind: { file: regime_jumps_single, where: { flag: 13 } }
   regime_14_res_out: { file: regime_jumps_single, where: { flag: 14 } }
-  regime_15_osr_downwind: { file: regime_jumps_single, where: { flag: 15 } }
-  regime_16_osr_ambient: { file: regime_jumps_single, where: { flag: 16 } }
   regime_17_v_in: { file: regime_jumps_single, where: { flag: 17 } }
   regime_18_hatch: { file: regime_jumps_single, where: { flag: 18 } }
-  regime_19_osr_upwind: { file: regime_jumps_single, where: { flag: 19 } }
   regime_21_res_in: { file: regime_jumps_single, where: { flag: 21 } }
   regime_22_v_1: { file: regime_jumps_single, where: { flag: 22 } }
-  regime_23_osr_intake: { file: regime_jumps_single, where: { flag: 23 } }
   regime_25_v_1: { file: regime_jumps_single, where: { flag: 25 } }
-  regime_27_osr_upwind: { file: regime_jumps_single, where: { flag: 27 } }
-  regime_28_osr_intake: { file: regime_jumps_single, where: { flag: 28 } }
-  regime_29_osr_ambient: { file: regime_jumps_single, where: { flag: 29 } }
   regime_30_v_in: { file: regime_jumps_single, where: { flag: 30 } }
   regime_31_res_in: { file: regime_jumps_single, where: { flag: 31 } }
-# Null regimes, label 0: the false-positive rate under the actuator walk.
+# Pools of regimes, label 0; a member is split as a signal is.
 nulls:
-  null_regime_02: { file: regime_jumps_single, where: { flag: 2 } }
-  null_regime_08: { file: regime_jumps_single, where: { flag: 8 } }
-  null_regime_20: { file: regime_jumps_single, where: { flag: 20 } }
-  null_regime_24: { file: regime_jumps_single, where: { flag: 24 } }
-  null_regime_26: { file: regime_jumps_single, where: { flag: 26 } }
+  # The second typical domain: one barometer reads with oversampling 1 instead of 8, the
+  # actuators on the walk.
+  sensor_osr:
+    members:
+      - { file: regime_jumps_single, where: { flag: 7 } }
+      - { file: regime_jumps_single, where: { flag: 9 } }
+      - { file: regime_jumps_single, where: { flag: 13 } }
+      - { file: regime_jumps_single, where: { flag: 15 } }
+      - { file: regime_jumps_single, where: { flag: 16 } }
+      - { file: regime_jumps_single, where: { flag: 19 } }
+      - { file: regime_jumps_single, where: { flag: 23 } }
+      - { file: regime_jumps_single, where: { flag: 27 } }
+      - { file: regime_jumps_single, where: { flag: 28 } }
+      - { file: regime_jumps_single, where: { flag: 29 } }
+  # The regimes without intervention: the false-positive rate under the actuator walk.
+  walk_null:
+    members:
+      - { file: regime_jumps_single, where: { flag: 2 } }
+      - { file: regime_jumps_single, where: { flag: 8 } }
+      - { file: regime_jumps_single, where: { flag: 20 } }
+      - { file: regime_jumps_single, where: { flag: 24 } }
+      - { file: regime_jumps_single, where: { flag: 26 } }

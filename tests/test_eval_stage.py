@@ -12,7 +12,7 @@ import torch
 import yaml
 from hydra import compose, initialize_config_dir
 from mlflow.tracking import MlflowClient
-from omegaconf import OmegaConf
+from omegaconf import OmegaConf, open_dict
 from pytorch_lightning.callbacks import Callback
 from torch.utils.data import DataLoader, TensorDataset
 
@@ -20,6 +20,7 @@ from src.callbacks.components.rate import AnomalyRate
 from src.callbacks.components.selection import W_STEPS, best_epoch, ema, smoothed
 from src.evaluation.callbacks.efficiency import AnomalyEfficiencyCallback
 from src.evaluation.callbacks.utils.mlflow import log_metrics_to_mlflow
+from src.evaluation.callbacks.wasserstein import _wasserstein_1d
 from src.evaluation.dump import hyperpoint
 from src.evaluation.evaluator import Evaluator
 from src.evaluation.replay import ReplayModule
@@ -28,6 +29,16 @@ from tests.test_score_dump import PASSES, ToyAE, ToyDataModule, dump_callback, f
 
 CONFIGS = Path(__file__).resolve().parents[1] / "configs"
 DOMAINS = ["cchamber", "cchamber_wt", "cifar10", "robustad"]
+# The sets of the toy dump, which has none of the chamber's null pools.
+TOY_SETS = {"normal", "reference_normal", "sig_a", "sig_b"}
+# Two of the light tunnel's single interventions, pooled under the override.
+POOL = ["uniform_t_ir_3_strong", "uniform_osr_c_weak"]
+EFF = "eff/eff_operational_"
+# The columns that summarise the signal or null sets, which the override changes.
+SUMMARIES = set(
+    "oracle cvar25 cvar10 ema/oracle ema/cvar25 ema/cvar10 eff/eff_operational "
+    "eff/eff_med_operational eff/eff_min_operational test_mean_eff null_rate".split()
+)
 TABLES = ["picks.csv", "run.json", "test.csv", "val.csv"]
 RUN_KEYS = {
     "run",
@@ -66,9 +77,31 @@ def _compose(domain: str):
         return compose(config_name="eval", overrides=[f"eval={domain}", "lattice=x"])
 
 
+def drop_absent_sets(cfg, sets: set[str]) -> None:
+    # A pairing with a set the loaders lack has no scores to compare and raises.
+    callbacks = cfg.evaluation.evaluator.dump_callbacks
+    criteria = cfg.selection.criteria
+    paired = {name: c.get("dataset_2", "normal") for name, c in callbacks.items()}
+    absent = [name for name, other in paired.items() if other not in sets]
+    with open_dict(cfg):
+        for name in absent:
+            del callbacks[name]
+        for name, spec in list(criteria.items()):
+            if spec.column.split("/")[0] in absent:
+                del criteria[name]
+        nulls = callbacks.anomaly_efficiency.null_ds
+        callbacks.anomaly_efficiency.null_ds = [name for name in nulls if name in sets]
+
+
+def _evaluator(sets: set[str]) -> Evaluator:
+    cfg = _compose("cchamber")
+    drop_absent_sets(cfg, sets)
+    return hydra.utils.instantiate(cfg.evaluation.evaluator)
+
+
 @pytest.fixture(scope="module")
 def chamber() -> Evaluator:
-    return hydra.utils.instantiate(_compose("cchamber").evaluation.evaluator)
+    return _evaluator(TOY_SETS)
 
 
 @pytest.fixture(scope="module")
@@ -113,6 +146,10 @@ def _replay(dump, epoch_file: str, out: Path, record=None) -> ReplayModule:
     record = load(dump.path / epoch_file) if record is None else record
     replay.load_epoch(record, out / epoch_file)
     return replay
+
+
+def _signed_log1p(x: torch.Tensor) -> torch.Tensor:
+    return torch.sign(x) * torch.log1p(torch.abs(x))
 
 
 def _read_csv(path: Path) -> list[dict]:
@@ -349,4 +386,77 @@ def test_eval_configs_build_the_evaluator(domain):
     reference = "shifted_normal_all" if domain == "robustad" else "reference_normal"
     assert configs["cap"]["dataset_2"] == reference
     null_ds = configs["anomaly_efficiency"]["null_ds"]
-    assert len(null_ds) == (5 if domain == "cchamber_wt" else 0)
+    assert len(null_ds) == {"cchamber": 3, "cchamber_wt": 2}.get(domain, 0)
+
+
+@pytest.mark.parametrize("domain", ["cchamber", "cchamber_wt"])
+def test_pairings_copy_the_control(domain):
+    evaluator = hydra.utils.instantiate(_compose(domain).evaluation.evaluator)
+    configs, criteria = evaluator.dump_callbacks, evaluator.selection["criteria"]
+    specs = {spec["column"].split("/")[0]: spec for spec in criteria.values()}
+    pairings = [name for name, config in configs.items() if "dataset_2" in config]
+    assert len(pairings) == 3 * (4 if domain == "cchamber" else 3)
+    for name in pairings:
+        config, spec = configs[name], specs[name]
+        control = configs[name.split("_")[0]]
+        control_spec = specs[control["name"]]
+        renamed = {**config, "name": control["name"], "dataset_2": "reference_normal"}
+        assert renamed == control
+        assert spec["column"].split("/")[1] in (name, "w1dist")
+        assert spec["key"].endswith(f"_ema_normal_vs_{config['dataset_2']}")
+        assert spec["mode"] == control_spec["mode"]
+        assert spec.get("skip_nonfinite") == control_spec.get("skip_nonfinite")
+
+
+def test_sets_replace_the_lists_of_a_dump(cchamber_data, monkeypatch, tmp_path):
+    path = tmp_path / "scores" / "lt" / "run"
+    data = {
+        "_target_": "src.data.CausalChamber_datamodule.CausalChamberDataModule",
+        "data_dir": str(cchamber_data.data_dir),
+        "dataset_name": "lt_interventions_standard_v1",
+        "url": "",
+        "md5": "",
+        "readouts": ["current", "angle_1", "angle_2", "ir_1"],
+        "reference": {"file": "uniform_reference"},
+        "signals": {name: {"file": name} for name in cchamber_data.signals},
+        "batch_size": 16,
+    }
+    fit(tmp_path, [dump_callback(path)], datamodule=hydra.utils.instantiate(data))
+    config = {"data": data, "algorithm": {"_target_": "tests.test_score_dump.ToyAE"}}
+    (path / "config.yaml").write_text(yaml.safe_dump(config))
+    sets = {
+        "signals": {"uniform_red_mid": {"file": "uniform_red_mid"}},
+        "nulls": {"sensor_weak": {"members": [{"file": name} for name in POOL]}},
+    }
+    (tmp_path / "pooled.yaml").write_text(yaml.safe_dump(sets))
+    monkeypatch.setattr("src.evaluation.dump.DATA_CONFIGS", tmp_path)
+
+    before = {"normal", "reference_normal", *cchamber_data.signals}
+    after = {"normal", "reference_normal", "uniform_red_mid", "sensor_weak"}
+    scores = tmp_path / "scores"
+    old = _evaluator(before).evaluate_lattice(scores, tmp_path / "old", "lt")
+    new_evaluator = _evaluator(after)
+    new = new_evaluator.evaluate_lattice(scores, tmp_path / "new", "lt", sets="pooled")
+    assert old[0]["signals"] == cchamber_data.signals
+    assert new[0]["signals"] == ["uniform_red_mid"]
+    assert new[0]["nulls"] == ["sensor_weak"]
+    for split in ("val", "test"):
+        old_rows = _read_csv(tmp_path / "old" / "runs" / "run" / f"{split}.csv")
+        new_rows = _read_csv(tmp_path / "new" / "runs" / "run" / f"{split}.csv")
+        for old_row, new_row in zip(old_rows, new_rows):
+            kept = (old_row.keys() & new_row.keys()) - SUMMARIES
+            assert {key: new_row[key] for key in kept} == {k: old_row[k] for k in kept}
+            members = [float(old_row[EFF + name]) for name in POOL]
+            pooled = float(new_row[EFF + "sensor_weak"])
+            assert pooled == pytest.approx(sum(members) / 2)
+
+    # The stored scores of the members against the pool rescored from the weights.
+    # The pool is scored in other batches than its members were, which moves the
+    # float32 rounding of its scores.
+    val = _read_csv(tmp_path / "new" / "runs" / "run" / "val.csv")
+    for row, name in zip(val, PASSES):
+        stored = load(path / name)["val"]
+        normal = stored["normal"]["ascore/full"]
+        pool = torch.cat([stored[member]["ascore/full"] for member in POOL])
+        w1 = _wasserstein_1d(_signed_log1p(normal), _signed_log1p(pool))
+        assert float(row["wasserstein_weak/w1dist"]) == pytest.approx(w1, rel=1e-5)

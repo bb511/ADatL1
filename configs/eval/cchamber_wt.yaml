@@ -1,10 +1,13 @@
 # @package _global_
 
 # The wind tunnel: the dump stores normal and reference_normal, and the regimes are
-# rescored from the weights of every epoch.
+# rescored from the weights of every epoch. Every run is evaluated on the sets of
+# data/cchamber_wt.yaml, whatever lists it was trained with.
 
 defaults:
   - /cap: provisional
+
+sets: cchamber_wt
 
 evaluation:
   evaluator:
@@ -23,14 +26,10 @@ evaluation:
         _target_: src.evaluation.callbacks.efficiency.AnomalyEfficiencyCallback
         output_name: ascore/full
         ds: null
-        # The regimes without intervention: their pass rate checks the false-positive
-        # rate under the random walk of the actuators.
-        null_ds:
-          - null_regime_02
-          - null_regime_08
-          - null_regime_20
-          - null_regime_24
-          - null_regime_26
+        # Pass rates on the second typical domain (one barometer at another oversampling)
+        # and on the regimes without intervention, the false-positive rate under the
+        # random walk of the actuators.
+        null_ds: [sensor_osr, walk_null]
         cvar_summary: 0.25
         log_raw_mlflow: false
       thres_drift:
@@ -66,6 +65,60 @@ evaluation:
         cap_metric_config: ${cap}
         log_raw_mlflow: false
         name: consistency
+      # The pairings of normal with sensor_osr (one barometer at another oversampling)
+      # and with walk_null (another stretch of the walk), copies of the three above.
+      wasserstein_osr:
+        _target_: src.evaluation.callbacks.wasserstein.Wasserstein
+        output_name: ascore/full
+        dataset_1: normal
+        dataset_2: sensor_osr
+        apply_log1p: true
+        log_raw_mlflow: false
+        name: wasserstein_osr
+      cap_osr:
+        _target_: src.evaluation.callbacks.cap.CAP
+        output_name: ascore/full
+        dataset_1: normal
+        dataset_2: sensor_osr
+        pairing_type: cdf
+        cap_metric_config: ${cap}
+        log_raw_mlflow: false
+        name: cap_osr
+      consistency_osr:
+        _target_: src.evaluation.callbacks.consistency.PosteriorConsistency
+        output_name: ascore/full
+        dataset_1: normal
+        dataset_2: sensor_osr
+        pairing_type: cdf
+        cap_metric_config: ${cap}
+        log_raw_mlflow: false
+        name: consistency_osr
+      wasserstein_walk:
+        _target_: src.evaluation.callbacks.wasserstein.Wasserstein
+        output_name: ascore/full
+        dataset_1: normal
+        dataset_2: walk_null
+        apply_log1p: true
+        log_raw_mlflow: false
+        name: wasserstein_walk
+      cap_walk:
+        _target_: src.evaluation.callbacks.cap.CAP
+        output_name: ascore/full
+        dataset_1: normal
+        dataset_2: walk_null
+        pairing_type: cdf
+        cap_metric_config: ${cap}
+        log_raw_mlflow: false
+        name: cap_walk
+      consistency_walk:
+        _target_: src.evaluation.callbacks.consistency.PosteriorConsistency
+        output_name: ascore/full
+        dataset_1: normal
+        dataset_2: walk_null
+        pairing_type: cdf
+        cap_metric_config: ${cap}
+        log_raw_mlflow: false
+        name: consistency_walk
       ascore_operational:
         _target_: src.evaluation.callbacks.output.OutputCallback
         output_name: ascore/operational
@@ -125,6 +178,34 @@ selection:
       column: consistency/consistency
       mode: max
       key: val/summary/consistency_ema_normal_vs_reference_normal
+      skip_nonfinite: true
+    w1_osr:
+      column: wasserstein_osr/w1dist
+      mode: min
+      key: val/summary/w1dist_ema_normal_vs_sensor_osr
+    cap_osr:
+      column: cap_osr/cap_osr
+      mode: max
+      key: val/summary/cap_ema_normal_vs_sensor_osr
+      skip_nonfinite: true
+    consistency_osr:
+      column: consistency_osr/consistency_osr
+      mode: max
+      key: val/summary/consistency_ema_normal_vs_sensor_osr
+      skip_nonfinite: true
+    w1_walk:
+      column: wasserstein_walk/w1dist
+      mode: min
+      key: val/summary/w1dist_ema_normal_vs_walk_null
+    cap_walk:
+      column: cap_walk/cap_walk
+      mode: max
+      key: val/summary/cap_ema_normal_vs_walk_null
+      skip_nonfinite: true
+    consistency_walk:
+      column: consistency_walk/consistency_walk
+      mode: max
+      key: val/summary/consistency_ema_normal_vs_walk_null
       skip_nonfinite: true
     npd:
       column: npd/npd

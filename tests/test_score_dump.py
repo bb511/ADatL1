@@ -125,10 +125,12 @@ class ToyAE(ADLightningModule):
         return torch.optim.SGD(self.parameters(), lr=self.hparams.lr)
 
 
-def fit(root, callbacks, epochs=2, seed=0, module=None, **trainer_kwargs):
+def fit(
+    root, callbacks, epochs=2, seed=0, module=None, datamodule=None, **trainer_kwargs
+):
     pl.seed_everything(seed)
     module = ToyAE() if module is None else module
-    datamodule = ToyDataModule()
+    datamodule = ToyDataModule() if datamodule is None else datamodule
     trainer = pl.Trainer(
         max_epochs=epochs,
         accelerator="cpu",

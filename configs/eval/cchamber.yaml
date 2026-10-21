@@ -1,9 +1,14 @@
 # @package _global_
 
-# The light tunnel: every validation and test set is stored in the dump.
+# The light tunnel: the dump stores every validation and test set. Every run is evaluated
+# on the sets of data/cchamber.yaml, whatever lists it was trained with; a dump of the
+# older list (58 single interventions) has its three sensor pools rescored from the
+# weights of every epoch.
 
 defaults:
   - /cap: provisional
+
+sets: cchamber
 
 evaluation:
   evaluator:
@@ -22,7 +27,9 @@ evaluation:
         _target_: src.evaluation.callbacks.efficiency.AnomalyEfficiencyCallback
         output_name: ascore/full
         ds: null
-        null_ds: []
+        # The sensor pools: their pass rates are the false-positive rates on the second
+        # typical domain, one per grade.
+        null_ds: [sensor_weak, sensor_mid, sensor_strong]
         cvar_summary: 0.25
         log_raw_mlflow: false
       thres_drift:
@@ -58,6 +65,85 @@ evaluation:
         cap_metric_config: ${cap}
         log_raw_mlflow: false
         name: consistency
+      # The pairings of normal with each sensor pool, copies of the three above.
+      wasserstein_weak:
+        _target_: src.evaluation.callbacks.wasserstein.Wasserstein
+        output_name: ascore/full
+        dataset_1: normal
+        dataset_2: sensor_weak
+        apply_log1p: true
+        log_raw_mlflow: false
+        name: wasserstein_weak
+      cap_weak:
+        _target_: src.evaluation.callbacks.cap.CAP
+        output_name: ascore/full
+        dataset_1: normal
+        dataset_2: sensor_weak
+        pairing_type: cdf
+        cap_metric_config: ${cap}
+        log_raw_mlflow: false
+        name: cap_weak
+      consistency_weak:
+        _target_: src.evaluation.callbacks.consistency.PosteriorConsistency
+        output_name: ascore/full
+        dataset_1: normal
+        dataset_2: sensor_weak
+        pairing_type: cdf
+        cap_metric_config: ${cap}
+        log_raw_mlflow: false
+        name: consistency_weak
+      wasserstein_mid:
+        _target_: src.evaluation.callbacks.wasserstein.Wasserstein
+        output_name: ascore/full
+        dataset_1: normal
+        dataset_2: sensor_mid
+        apply_log1p: true
+        log_raw_mlflow: false
+        name: wasserstein_mid
+      cap_mid:
+        _target_: src.evaluation.callbacks.cap.CAP
+        output_name: ascore/full
+        dataset_1: normal
+        dataset_2: sensor_mid
+        pairing_type: cdf
+        cap_metric_config: ${cap}
+        log_raw_mlflow: false
+        name: cap_mid
+      consistency_mid:
+        _target_: src.evaluation.callbacks.consistency.PosteriorConsistency
+        output_name: ascore/full
+        dataset_1: normal
+        dataset_2: sensor_mid
+        pairing_type: cdf
+        cap_metric_config: ${cap}
+        log_raw_mlflow: false
+        name: consistency_mid
+      wasserstein_strong:
+        _target_: src.evaluation.callbacks.wasserstein.Wasserstein
+        output_name: ascore/full
+        dataset_1: normal
+        dataset_2: sensor_strong
+        apply_log1p: true
+        log_raw_mlflow: false
+        name: wasserstein_strong
+      cap_strong:
+        _target_: src.evaluation.callbacks.cap.CAP
+        output_name: ascore/full
+        dataset_1: normal
+        dataset_2: sensor_strong
+        pairing_type: cdf
+        cap_metric_config: ${cap}
+        log_raw_mlflow: false
+        name: cap_strong
+      consistency_strong:
+        _target_: src.evaluation.callbacks.consistency.PosteriorConsistency
+        output_name: ascore/full
+        dataset_1: normal
+        dataset_2: sensor_strong
+        pairing_type: cdf
+        cap_metric_config: ${cap}
+        log_raw_mlflow: false
+        name: consistency_strong
       ascore_operational:
         _target_: src.evaluation.callbacks.output.OutputCallback
         output_name: ascore/operational
@@ -117,6 +203,48 @@ selection:
       column: consistency/consistency
       mode: max
       key: val/summary/consistency_ema_normal_vs_reference_normal
+      skip_nonfinite: true
+    w1_weak:
+      column: wasserstein_weak/w1dist
+      mode: min
+      key: val/summary/w1dist_ema_normal_vs_sensor_weak
+    cap_weak:
+      column: cap_weak/cap_weak
+      mode: max
+      key: val/summary/cap_ema_normal_vs_sensor_weak
+      skip_nonfinite: true
+    consistency_weak:
+      column: consistency_weak/consistency_weak
+      mode: max
+      key: val/summary/consistency_ema_normal_vs_sensor_weak
+      skip_nonfinite: true
+    w1_mid:
+      column: wasserstein_mid/w1dist
+      mode: min
+      key: val/summary/w1dist_ema_normal_vs_sensor_mid
+    cap_mid:
+      column: cap_mid/cap_mid
+      mode: max
+      key: val/summary/cap_ema_normal_vs_sensor_mid
+      skip_nonfinite: true
+    consistency_mid:
+      column: consistency_mid/consistency_mid
+      mode: max
+      key: val/summary/consistency_ema_normal_vs_sensor_mid
+      skip_nonfinite: true
+    w1_strong:
+      column: wasserstein_strong/w1dist
+      mode: min
+      key: val/summary/w1dist_ema_normal_vs_sensor_strong
+    cap_strong:
+      column: cap_strong/cap_strong
+      mode: max
+      key: val/summary/cap_ema_normal_vs_sensor_strong
+      skip_nonfinite: true
+    consistency_strong:
+      column: consistency_strong/consistency_strong
+      mode: max
+      key: val/summary/consistency_ema_normal_vs_sensor_strong
       skip_nonfinite: true
     npd:
       column: npd/npd

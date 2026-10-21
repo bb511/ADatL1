@@ -34,6 +34,7 @@ from src.callbacks.components.selection import (
     epoch_pick,
     smoothed,
 )
+from src.callbacks.score_dump import _layout
 from src.callbacks.sds import sds_inputs
 from src.evaluation.callbacks.efficiency import AnomalyEfficiencyCallback
 from src.evaluation.replay import ReplayModule, extra_loaders
@@ -41,6 +42,7 @@ from src.utils.omegaconf import register_resolvers
 
 ROOT = Path(__file__).resolve().parents[2]
 SEARCH_DIR = ROOT / "configs" / "hparams_search"
+DATA_CONFIGS = ROOT / "configs" / "data"
 # The key of the training efficiency callback for one set's validation efficiency.
 SET_EFFICIENCY_KEY = "val/{}/eff__ascore_full__brate_operational"
 # The most metrics MLflow accepts in one log_batch call.
@@ -88,11 +90,18 @@ def _load_record(path: Path, epoch: int) -> dict:
     return record
 
 
-def _rebuild(run_dir: Path, data_dir: str | None) -> tuple:
-    """The run's module and datamodule, instantiated from its ``config.yaml``."""
+def _rebuild(run_dir: Path, data_dir: str | None, sets: str | None = None) -> tuple:
+    """The run's module and datamodule, instantiated from its ``config.yaml``.
+
+    With ``sets``, the ``signals`` and ``nulls`` of ``configs/data/<sets>.yaml`` replace
+    the run's; the rest of the run's data configuration is kept.
+    """
     cfg = OmegaConf.load(run_dir / "config.yaml")
     if data_dir is not None:
         cfg.data.data_dir = str(data_dir)
+    if sets is not None:
+        lists = OmegaConf.load(DATA_CONFIGS / f"{sets}.yaml")
+        cfg.data.signals, cfg.data.nulls = lists.signals, lists.get("nulls")
     return hydra.utils.instantiate(cfg.algorithm), hydra.utils.instantiate(cfg.data)
 
 
@@ -117,6 +126,12 @@ def _cached_sds(x_train: torch.Tensor, max_rows: int, row_seed: int) -> dict:
 def _signal_sets(layout: dict) -> list[str]:
     """The sets whose labels are all positive, the efficiency callback's signals."""
     return [name for name in layout["names"] if min(layout["labels"][name]) > 0]
+
+
+def _loader_layouts(datamodule: LightningDataModule) -> dict[str, dict]:
+    """The validation and test layouts of a set-up datamodule, in meta.pt's form."""
+    loaders = {"val": datamodule.val_dataloader(), "test": datamodule.test_dataloader()}
+    return {split: _layout(split_loaders) for split, split_loaders in loaders.items()}
 
 
 def _null_sets(callbacks: list) -> list[str]:
@@ -163,7 +178,11 @@ class RunEvaluation:
     fresh callbacks and no plots: the validation loaders followed by the extra sets
     under every evaluation callback, then the test loaders under the test callbacks.
     The scalars the callbacks record, named '<callback>/<scalar>', make the rows of the
-    run's tables. The keyword-only arguments are the Evaluator's of the same names.
+    run's tables. The keyword-only arguments are the Evaluator's of the same names,
+    apart from ``sets``, the data config whose signals and nulls replaced the run's in
+    ``datamodule`` (``_rebuild``). With it, the signal sets are read from the
+    datamodule's loaders instead of ``meta.pt``: a stored set outside the new lists is
+    never served, and a set the dump does not store is rescored from the weights.
     """
 
     def __init__(
@@ -176,6 +195,7 @@ class RunEvaluation:
         test_callbacks: list[str],
         extra_sets: dict,
         selection: dict,
+        sets: str | None = None,
     ):
         self.run_dir = Path(run_dir)
         self.meta = torch.load(self.run_dir / "meta.pt", weights_only=True)
@@ -185,7 +205,8 @@ class RunEvaluation:
         self.passes = {"val": list(dump_callbacks), "test": test_callbacks}
         self.trainers = {split: self._trainer(split) for split in self.passes}
         self.loaders = self._loaders(datamodule)
-        self.signals = {split: _signal_sets(self.meta[split]) for split in self.passes}
+        layouts = self.meta if sets is None else _loader_layouts(datamodule)
+        self.signals = {split: _signal_sets(layouts[split]) for split in self.passes}
         self.nulls = _null_sets(self.trainers["test"].callbacks)
 
     def evaluate(
@@ -375,9 +396,9 @@ def _init_worker(sds_cache: dict | None = None) -> None:
 
 
 def _evaluate_task(task: tuple) -> dict:
-    run_dir, out_dir, lattice, data_dir, tracking_uri, settings = task
-    module, datamodule = _rebuild(run_dir, data_dir)
-    run = RunEvaluation(run_dir, module, datamodule, **settings)
+    run_dir, out_dir, lattice, data_dir, sets, tracking_uri, settings = task
+    module, datamodule = _rebuild(run_dir, data_dir, sets)
+    run = RunEvaluation(run_dir, module, datamodule, sets=sets, **settings)
     return run.evaluate(out_dir, lattice, tracking_uri)
 
 
@@ -386,9 +407,10 @@ class LatticeEvaluation:
 
     The runs are the directories of ``<scores_dir>/<lattice>`` that hold a ``meta.pt``,
     in name order. Each run's module and datamodule are rebuilt from its
-    ``config.yaml``, with ``data.data_dir`` replaced by ``data_dir`` when given, in a
-    spawn pool of ``workers`` single-threaded processes (in this process for one).
-    ``settings`` holds the keyword-only arguments of ``evaluate_dump``.
+    ``config.yaml``, with ``data.data_dir`` replaced by ``data_dir`` and the signals
+    and nulls by those of ``configs/data/<sets>.yaml`` when given, in a spawn pool of
+    ``workers`` single-threaded processes (in this process for one). ``settings``
+    holds the keyword-only arguments of ``evaluate_dump``.
     """
 
     def __init__(
@@ -397,11 +419,12 @@ class LatticeEvaluation:
         lattice: str,
         settings: dict,
         data_dir: str | None = None,
+        sets: str | None = None,
         workers: int = 1,
         tracking_uri: str | None = None,
     ):
         self.lattice, self.settings, self.data_dir = lattice, settings, data_dir
-        self.workers, self.tracking_uri = workers, tracking_uri
+        self.sets, self.workers, self.tracking_uri = sets, workers, tracking_uri
         paths = (Path(scores_dir) / lattice).iterdir()
         self.runs = sorted(p for p in paths if (p / "meta.pt").is_file())
 
@@ -413,8 +436,8 @@ class LatticeEvaluation:
             _experiment_id(MlflowClient(self.tracking_uri), f"{self.lattice}_eval")
         # The run configs read ${oc.env:PROJECT_ROOT}; spawned workers inherit it.
         os.environ.setdefault("PROJECT_ROOT", str(ROOT))
-        task = (out_dir, self.lattice, self.data_dir, self.tracking_uri, self.settings)
-        return self._map([(run, *task) for run in self.runs])
+        task = (out_dir, self.lattice, self.data_dir, self.sets, self.tracking_uri)
+        return self._map([(run, *task, self.settings) for run in self.runs])
 
     def _map(self, tasks: list[tuple]) -> list[dict]:
         if self.workers <= 1:
@@ -436,7 +459,7 @@ class LatticeEvaluation:
             return
         if not OmegaConf.has_resolver("reverse"):
             register_resolvers()
-        datamodule = _rebuild(self.runs[0], self.data_dir)[1]
+        datamodule = _rebuild(self.runs[0], self.data_dir, self.sets)[1]
         datamodule.setup("fit")
         _cached_sds(datamodule.data_train.tensors[0], sds["max_rows"], sds["row_seed"])
 
@@ -447,12 +470,13 @@ def evaluate_lattice(
     lattice: str,
     settings: dict,
     data_dir: str | None = None,
+    sets: str | None = None,
     workers: int = 1,
     tracking_uri: str | None = None,
 ) -> list[dict]:
     """Evaluate every run of a lattice; return their run.json, in name order."""
     evaluation = LatticeEvaluation(
-        scores_dir, lattice, settings, data_dir, workers, tracking_uri
+        scores_dir, lattice, settings, data_dir, sets, workers, tracking_uri
     )
     return evaluation.evaluate(out_dir)
 

@@ -23,6 +23,7 @@ from src.callbacks.operational import OperationalScoreCallback
 from src.callbacks.sds import SDSCallback
 from src.callbacks.thres_drift import ThresholdDriftCallback
 from src.callbacks.wasserstein import WassersteinCallback
+from tests.test_eval_stage import TOY_SETS, drop_absent_sets
 from tests.test_score_dump import ToyAE, ToyDataModule, dump_callback
 
 CONFIGS = Path(__file__).resolve().parents[1] / "configs"
@@ -53,6 +54,7 @@ def _stage_config():
     cfg.cap = OmegaConf.load(CONFIGS / "cap" / "provisional.yaml")
     # paths is not composed here, and evaluate_dump does not read the cluster file.
     cfg.selection.clusters = None
+    drop_absent_sets(cfg, TOY_SETS)
     OmegaConf.resolve(cfg)
     return cfg
 

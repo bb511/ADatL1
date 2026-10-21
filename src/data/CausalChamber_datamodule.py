@@ -46,22 +46,25 @@ def _to_tensor(table: pa.Table, readouts: list[str]) -> torch.Tensor:
 class CausalChamberDataModule(LightningDataModule):
     """Causal Chamber data (arXiv:2404.11341) for anomaly detection.
 
-    A set is a mapping ``{file: <csv stem>, where: {<column>: <value>, ...}}``: the rows
-    of ``<file>.csv`` in which every column named in the optional ``where`` equals its
-    value, in file order. The light tunnel has one CSV per experiment and needs no
-    ``where``; the regimes of the wind tunnel are blocks of one CSV, selected by its
-    ``flag`` column.
+    A plain set is a mapping ``{file: <csv stem>, where: {<column>: <value>, ...}}``:
+    the rows of ``<file>.csv`` in which every column named in the optional ``where``
+    equals its value, in file order. The light tunnel has one CSV per experiment and
+    needs no ``where``; the regimes of the wind tunnel are blocks of one CSV, selected
+    by its ``flag`` column. A set in ``signals`` or ``nulls`` may also be a pool
+    ``{members: [<plain set>, ...]}``.
 
     The rows of the ``reference`` set are split into train, validation and test by
     ``train_fraction`` and ``val_fraction``, and each evaluation part is halved into
     ``normal`` and ``reference_normal``, both labeled 0. Every set in ``signals`` is
     split into validation and test by ``signal_val_fraction`` and labeled by its
-    1-based position in that mapping. Those in ``nulls``, which carry no intervention,
-    are split in the same way and labeled 0. Each permutation comes from a fresh
-    generator, seeded with ``seed`` for the reference split and with ``seed + n`` for
-    the halving and the set splits (n being the number of rows permuted); this
-    reproduces the row sets of the original chamber study. The splits do not depend on
-    the training seed; only the batch order of the training loader does.
+    1-based position in that mapping. Those in ``nulls``, which hold no anomaly, are
+    split in the same way and labeled 0. Each member of a pool is split as a plain set
+    of its own, and the validation (test) rows of the pool are those of its members,
+    concatenated in member order. Each permutation comes from a fresh generator, seeded
+    with ``seed`` for the reference split and with ``seed + n`` for the halving and the
+    set splits (n being the number of rows permuted); this reproduces the row sets of
+    the original chamber study. The splits do not depend on the training seed; only the
+    batch order of the training loader does.
 
     The model inputs are the ``readouts``, in the given order. Each is centered on its
     median over the training rows, divided by the spread between the two
@@ -174,7 +177,8 @@ class CausalChamberDataModule(LightningDataModule):
         """Read the readouts of one CSV and every column that a set filters it on."""
         nulls = self.hparams.nulls or {}
         sets = [self.hparams.reference, *self.hparams.signals.values(), *nulls.values()]
-        where = [c for s in sets if s["file"] == stem for c in s.get("where") or {}]
+        plain = [m for s in sets for m in s.get("members") or [s]]
+        where = [c for s in plain if s["file"] == stem for c in s.get("where") or {}]
         columns = list(dict.fromkeys([*self.hparams.readouts, *where]))
         options = pa_csv.ConvertOptions(include_columns=columns)
         path = self.dataset_dir / f"{stem}.csv"
@@ -235,13 +239,20 @@ class CausalChamberDataModule(LightningDataModule):
         signals = enumerate(self.hparams.signals.items(), start=1)
         nulls = [(0, item) for item in (self.hparams.nulls or {}).items()]
         for label, (name, spec) in [*signals, *nulls]:
-            x = self._normalize(self._read_set(spec))
-            n = x.size(0)
-            n_valid = round(self.hparams.signal_val_fraction * n)
-            perm = seeded_permutation(n, self.hparams.seed + n)
-            y = torch.full((n,), label, dtype=torch.int64)
-            self._aux["valid"][name] = SplitTensors(x[perm[:n_valid]], y[:n_valid])
-            self._aux["test"][name] = SplitTensors(x[perm[n_valid:]], y[n_valid:])
+            parts = [self._split_set(m) for m in spec.get("members") or [spec]]
+            for split, xs in zip(("valid", "test"), zip(*parts)):
+                x = torch.cat(xs)
+                y = torch.full((x.size(0),), label, dtype=torch.int64)
+                self._aux[split][name] = SplitTensors(x, y)
+
+    def _split_set(self, spec: dict) -> tuple[torch.Tensor, torch.Tensor]:
+        """Return the validation and test rows of a plain set."""
+        x = self._normalize(self._read_set(spec))
+        n = x.size(0)
+        n_valid = round(self.hparams.signal_val_fraction * n)
+        perm = seeded_permutation(n, self.hparams.seed + n)
+
+        return x[perm[:n_valid]], x[perm[n_valid:]]
 
     def _make_eval_loaders(self, split: str) -> dict[str, DataLoader]:
         """Return the loaders of one split with normal first, as the callbacks need."""

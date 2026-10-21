@@ -22,5 +22,7 @@ scores_dir: ${paths.log_dir}/scores
 out_dir: ${paths.log_dir}/eval/${lattice}
 # Replaces data.data_dir of every run's configuration; null keeps it.
 data_dir: null
+# Replaces every run's signals and nulls by those of data/<sets>.yaml; null keeps them.
+sets: null
 workers: 1
 tracking_uri: file:${paths.log_dir}/mlflow/mlruns

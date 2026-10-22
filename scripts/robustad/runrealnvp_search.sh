@@ -2,41 +2,23 @@
 # ========================================================================
 # RealNVP POOL COMMANDS
 # ========================================================================
-# The random pool of robustad/realnvp: 90 trials, drawn by four drivers that share
-# the Optuna study `pool` and differ only in their sampler seed. Every trial
-# is a full 200-epoch training that dumps its scores and weights at every
-# epoch and selects nothing; the criteria are evaluated on the dumps offline.
-#
-# The random sampler replays its draws from the seed, so a driver that stops
-# early is relaunched with a fresh seed, not its own, which would repeat the
-# configurations already trained. scripts/cluster/sweep_status.py prints
-# such a relaunch.
-#
-# The blocks name no launcher: the venue appends one at submission, with a
-# timeout of 17 minutes per trial for this model (200 epochs at up to 2.5 s
-# each on an H100, plus about 3 minutes of evaluation, and half again as
-# margin). These times were measured before the score dump: the end-of-run
-# evaluation no longer runs, and the dump's per-epoch pass over the test,
-# auxiliary and training sets is not in them.
-#
-# On clariden, one job holds a whole node and runs the four drivers on its
-# four GPUs, with no per-trial timeout:
-#   sbatch scripts/cluster/clariden_node.sbatch scripts/robustad/runrealnvp_search.sh
-# or, at a whole node per one-GPU trial, each driver keeps six trials queued
-# as slurm jobs:
-#   bash scripts/cluster/submit_search.sh scripts/robustad/runrealnvp_search.sh \
-#       hydra/launcher=submitit_slurm_clariden hydra.sweeper.n_jobs=6 \
-#       hydra.launcher.timeout_min=17
-#
-# On a local GPU host or an NGT pod, Hydra's basic launcher runs a driver's
-# trials in-process, one after another:
-#   bash scripts/cluster/submit_search.sh scripts/robustad/runrealnvp_search.sh
-# or, with each trial in its own process and under the timeout:
-#   bash scripts/cluster/submit_search.sh scripts/robustad/runrealnvp_search.sh \
-#       hydra/launcher=submitit_local hydra.launcher.gpus_per_node=1 \
-#       hydra.launcher.timeout_min=17
-# submitit_local shows a trial GPUs 0 to gpus_per_node-1 only, none when it
-# is unset, and trainer.devices picks among them.
+# - Random pool of robustad/realnvp: 90 trials of 200 epochs, in the Optuna
+#   study `pool` over configs/hparams_search/robustad/realnvp_optuna.yaml.
+# - Four drivers of 23, 23, 22 and 22 trials.
+# - Each trial dumps its scores and weights at every epoch and selects nothing;
+#   src/eval.py evaluates the dumps offline.
+# - Timeout per trial: 11 min, measured on an idle V100 on 22 Oct (half again 200
+#   epochs, plus start-up); epochs ran 4.5 times slower on a host at load 125.
+# - A driver that stops early is relaunched with a fresh seed, which
+#   scripts/cluster/sweep_status.py prints.
+# - The blocks name no launcher; scripts/cluster/submit_search.sh appends the
+#   venue's to every driver, e.g. one process per trial on a GPU host:
+#     bash scripts/cluster/submit_search.sh scripts/robustad/runrealnvp_search.sh \
+#         hydra/launcher=submitit_local hydra.launcher.gpus_per_node=1 \
+#         hydra.launcher.timeout_min=11
+# - Dormant `## python3` blocks repeat the live sampler seeds under a second
+#   training seed (456).
+# - To run a dormant block, delete one `#` and submit it with --only <index>.
 
 
 # ========================================================================
@@ -97,13 +79,6 @@
 #     trainer=gpu \
 #     trainer.max_epochs=200 \
 #     trainer.devices=[0]
-
-# The dormant blocks below repeat the four sampler seeds, and therefore the
-# points of every live driver that ran without a relaunch, under another
-# training seed. They run only on the user's allocation and only if the
-# theory's Formulation I is claimed on the image sets. A block opens with
-# `## python3`, which scripts/cluster/lib.sh does not parse; removing the extra
-# `#` activates it, and --only with its index submits it alone.
 
 # ========================================================================
 # DORMANT: SECOND TRAINING SEED

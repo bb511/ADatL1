@@ -71,9 +71,10 @@ FAMILIES = [
     (r"ascore_operational_ema", "q_sec", SEC_SCALAR),
 ]
 # The label-free criteria have no evaluation scalar on the LHC: Q′ is the raw value the
-# training callback logs beside its EMA, read at the checkpoint's epoch.
+# training callback logs beside its EMA, read at the checkpoint's epoch. SDS cut at a
+# rate other than the operational one carries the rate token in its key.
 HISTORY_FAMILIES = [
-    (r"(?P<name>npd|rtm|eag|em|mv|entropy|sds|sds_val)_ema", "{name}"),
+    (r"(?P<name>npd|rtm|eag|entropy|sds|sds_val)(_(?P<tier>\d+_\d+))?_ema", "{name}"),
 ]
 
 OLD_COLUMNS = [
@@ -196,18 +197,23 @@ def _strategy(ckpt: Checkpoint, target: float, base_rate: float | None) -> Strat
         alpha = int(groups["pct"]) / 100 if "pct" in groups else None
         q_scalar = scalar.format(**groups) if scalar else None
         return Strategy(ckpt, label.format(**groups), tier, q_scalar, alpha)
-    return _history_strategy(ckpt)
+    return _history_strategy(ckpt, target, base_rate)
 
 
-def _history_strategy(ckpt: Checkpoint) -> Strategy:
-    """A rate-free strategy whose Q′ is read from the training history, or the
-    checkpoint's metric folder as label for a key outside every family."""
+def _history_strategy(
+    ckpt: Checkpoint, target: float, base_rate: float | None
+) -> Strategy:
+    """A strategy whose Q′ is read from the training history, rate-free unless its key
+    carries a rate token, or the checkpoint's metric folder as label for a key outside
+    every family."""
     for pattern, label in HISTORY_FAMILIES:
         match = re.fullmatch(f"val/summary/{pattern}", ckpt.monitor)
         if match is not None:
             raw = ckpt.monitor.removesuffix("_ema")
-            name = label.format(**match.groupdict())
-            return Strategy(ckpt, name, None, None, None, raw)
+            groups = match.groupdict()
+            token = groups.get("tier")
+            tier = None if token is None else _tier(token, target, base_rate)
+            return Strategy(ckpt, label.format(**groups), tier, None, None, raw)
     return Strategy(ckpt, ckpt.folder[1], None, None, None)
 
 

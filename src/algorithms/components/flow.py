@@ -14,6 +14,12 @@ class CouplingLayer(nn.Module):
       - unmasked dimensions: affinely transformed using parameters predicted
         from the masked dimensions.
 
+    The optional ``present`` of forward() and inverse() is a data mask shaped like the
+    input, 1 where a coordinate holds data and 0 where it is padding, unrelated to the
+    alternating ``mask``. Padded coordinates are copied through unchanged, with log-det
+    0, and the conditioner reads them as zeros, so that their values reach neither the
+    other coordinates nor the log-det.
+
     :param input_dim: Int with number of input dimensions to the layer.
     :param hidden_dim: Int with the number of nodes in the hidden layer.
     :param mask: Torch tensor for input mask.
@@ -70,56 +76,48 @@ class CouplingLayer(nn.Module):
             return nn.SiLU()
         raise ValueError(f"Unsupported activation: {activation}")
 
-    def forward(self, x: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor]:
+    def _shift_log_scale(
+        self, x: torch.Tensor, present: torch.Tensor | None
+    ) -> Tuple[torch.Tensor, torch.Tensor]:
+        """Shift and log-scale, zero on every coordinate copied through untouched."""
+        x_masked = x * self.mask
+        if present is not None:
+            x_masked = x_masked * present
+        shift, log_scale = torch.chunk(self.net(x_masked), 2, dim=1)
+
+        active = 1.0 - self.mask
+        if present is not None:
+            active = active * present
+        # Bound the log-scale for numerical stability.
+        log_scale = torch.tanh(log_scale) * self.scale_clamp
+        return shift * active, log_scale * active
+
+    def forward(
+        self, x: torch.Tensor, present: torch.Tensor | None = None
+    ) -> Tuple[torch.Tensor, torch.Tensor]:
         """Forward transform x -> z.
 
         The masked part of x is passed unchanged. The unmasked part is transformed using
         an affine function whose parameters are predicted from the masked part.
         """
-        x_masked = x * self.mask
-
-        shift_logscale = self.net(x_masked)
-        shift, log_scale = torch.chunk(shift_logscale, 2, dim=1)
-
-        inv_mask = 1.0 - self.mask
-
-        # Zero out parameters on masked dimensions so they are copied through untouched.
-        shift = shift * inv_mask
-
-        # Bound the log-scale for numerical stability, then apply only to transformed dims.
-        log_scale = torch.tanh(log_scale) * self.scale_clamp
-        log_scale = log_scale * inv_mask
-
-        # RealNVP affine coupling transform:
-        # masked dims: copied through
-        # unmasked dims: x * exp(log_scale) + shift
-        z = x_masked + inv_mask * (x * torch.exp(log_scale) + shift)
+        shift, log_scale = self._shift_log_scale(x, present)
+        z = x * self.mask + (1.0 - self.mask) * (x * torch.exp(log_scale) + shift)
 
         # Jacobian is triangular, so log|det J| is just the sum of log-scales
         # over transformed dimensions.
-        log_det = log_scale.sum(dim=1)
-        return z, log_det
+        return z, log_scale.sum(dim=1)
 
-    def inverse(self, z: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor]:
+    def inverse(
+        self, z: torch.Tensor, present: torch.Tensor | None = None
+    ) -> Tuple[torch.Tensor, torch.Tensor]:
         """Inverse transform z -> x.
 
         Uses the same masked conditioning mechanism as forward(), but analytically
         inverts the affine transformation on the unmasked coordinates.
         """
-        z_masked = z * self.mask
-
-        shift_logscale = self.net(z_masked)
-        shift, log_scale = torch.chunk(shift_logscale, 2, dim=1)
-
-        inv_mask = 1.0 - self.mask
-        shift = shift * inv_mask
-        log_scale = torch.tanh(log_scale) * self.scale_clamp
-        log_scale = log_scale * inv_mask
-
-        x = z_masked + inv_mask * (z - shift) * torch.exp(-log_scale)
-
-        log_det = (-log_scale).sum(dim=1)
-        return x, log_det
+        shift, log_scale = self._shift_log_scale(z, present)
+        x = z * self.mask + (1.0 - self.mask) * (z - shift) * torch.exp(-log_scale)
+        return x, (-log_scale).sum(dim=1)
 
 
 class RealNVP(nn.Module):
@@ -185,44 +183,61 @@ class RealNVP(nn.Module):
             mask = 1.0 - mask
         return mask
 
-    def encode(self, x: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor]:
+    def encode(
+        self, x: torch.Tensor, present: torch.Tensor | None = None
+    ) -> Tuple[torch.Tensor, torch.Tensor]:
         """Transform data x into base-space z."""
         log_det_sum = torch.zeros(x.shape[0], device=x.device)
         z = x
 
         for flow in self.flows:
-            z, log_det = flow(z)
+            z, log_det = flow(z, present)
             log_det_sum += log_det
 
         return z, log_det_sum
 
-    def decode(self, z: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor]:
+    def decode(
+        self, z: torch.Tensor, present: torch.Tensor | None = None
+    ) -> Tuple[torch.Tensor, torch.Tensor]:
         """Transform from base-space z back to data-space x."""
         log_det_sum = torch.zeros(z.shape[0], device=z.device)
         x = z
 
         for flow in reversed(self.flows):
-            x, log_det = flow.inverse(x)
+            x, log_det = flow.inverse(x, present)
             log_det_sum += log_det
 
         return x, log_det_sum
 
-    def log_prob(self, x: torch.Tensor) -> torch.Tensor:
-        """Compute log probability under the flow model."""
-        if self.training and self.noise_scale > 0.0:
-            x = x + torch.randn_like(x) * self.noise_scale
-
-        z, log_det = self.encode(x)
-
-        # Log-probability under a diagonal Gaussian base distribution.
-        log_pz = -0.5 * (
+    def _base_log_prob(
+        self, z: torch.Tensor, present: torch.Tensor | None
+    ) -> torch.Tensor:
+        """Log-probability under a diagonal Gaussian base distribution."""
+        terms = (
             ((z - self.base_mean) ** 2) / torch.exp(2 * self.base_log_std)
             + 2 * self.base_log_std
             + math.log(2 * math.pi)
-        ).sum(dim=1)
+        )
+        if present is not None:
+            terms = terms * present
+        return -0.5 * terms.sum(dim=1)
+
+    def log_prob(
+        self, x: torch.Tensor, present: torch.Tensor | None = None
+    ) -> torch.Tensor:
+        """Compute log probability under the flow model.
+
+        With a data mask ``present`` (see CouplingLayer), the padded coordinates add
+        nothing to the base log-density or the log-det, so that the result is the
+        log-density of the present coordinates alone.
+        """
+        if self.training and self.noise_scale > 0.0:
+            x = x + torch.randn_like(x) * self.noise_scale
+
+        z, log_det = self.encode(x, present)
 
         # Change-of-variables formula.
-        return log_pz + log_det
+        return self._base_log_prob(z, present) + log_det
 
     def sample(self, n_samples: int) -> torch.Tensor:
         """Sample from the learned flow distribution."""

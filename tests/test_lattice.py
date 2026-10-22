@@ -1,5 +1,6 @@
 import importlib.util
 import json
+import logging
 import math
 from pathlib import Path
 from types import SimpleNamespace
@@ -9,13 +10,17 @@ import pandas as pd
 import pytest
 import torch
 import yaml
+from hydra import compose, initialize_config_dir
 from scipy.stats import rankdata, spearmanr
 
 from src.callbacks.components import selection
 from src.evaluation import harvest as src_harvest
 from src.evaluation import lattice
+from src.evaluation.components import pairing, statistics, tables
 
-HARVEST = Path(__file__).resolve().parents[1] / "scripts/analysis/harvest_pool_effs.py"
+ROOT = Path(__file__).resolve().parents[1]
+HARVEST = ROOT / "scripts/analysis/harvest_pool_effs.py"
+EVAL = ROOT / "src" / "eval.py"
 EFF = "eff/eff_operational_"
 # Batch sizes of validation normal, and the target FPR of every run.
 LAYOUT = [16, 16, 8]
@@ -90,6 +95,7 @@ def _spec(names=NAMES, epochs=4, signals=("sig_a", "sig_b", "sig_c"), seed=0):
     picks = {(s, k): rng.integers(epochs, size=size) for s in CRITERIA for k in ks}
     picks.update({(s, None): rng.integers(epochs, size=size) for s in ONCE})
     normal = rng.normal(size=(*shape, sum(LAYOUT))).astype(np.float32)
+    hyperpoints = [{"algorithm.lr": f"{0.001 * (i + 1):g}"} for i in range(size)]
     return SimpleNamespace(
         names=list(names),
         epochs=epochs,
@@ -100,7 +106,9 @@ def _spec(names=NAMES, epochs=4, signals=("sig_a", "sig_b", "sig_c"), seed=0):
         normal=normal,
         # The scores of each run's partner, aligned with the runs.
         partner=rng.normal(size=normal.shape).astype(np.float32),
-        hyperpoints=[{"algorithm.lr": f"{0.001 * (i + 1):g}"} for i in range(size)],
+        hyperpoints=hyperpoints,
+        # Those of each run's partner dump, equal unless a test unpairs a run.
+        partner_hyperpoints=list(hyperpoints),
     )
 
 
@@ -144,7 +152,13 @@ def _write_run(run_dir: Path, spec, i: int) -> None:
     (run_dir / "run.json").write_text(json.dumps(info))
 
 
-def _run(root: Path, spec, partner: bool = True, config: dict = SELECTION) -> Path:
+def _run(
+    root: Path,
+    spec,
+    partner: bool = True,
+    config: dict = SELECTION,
+    drop_unpaired: bool = False,
+) -> Path:
     out_dir, scores_dir, size = root / "eval" / "lat", root / "scores", len(spec.names)
     for i, name in enumerate(spec.names):
         _write_run(out_dir / "runs" / name, spec, i)
@@ -152,10 +166,10 @@ def _run(root: Path, spec, partner: bool = True, config: dict = SELECTION) -> Pa
         _write_dump(scores_dir / "lat" / name, spec.normal[i], overrides)
         # Other names, in the reverse order: only the hyperpoint pairs the runs.
         partner_dir = scores_dir / "partner" / f"p{size - i}"
-        overrides = _overrides(spec.hyperpoints[i], 456)
+        overrides = _overrides(spec.partner_hyperpoints[i], 456)
         _write_dump(partner_dir, spec.partner[i], overrides)
     name = "partner" if partner else None
-    lattice.select_lattice(out_dir, config, scores_dir, "lat", name)
+    lattice.select_lattice(out_dir, config, scores_dir, "lat", name, drop_unpaired)
     return out_dir
 
 
@@ -187,7 +201,7 @@ def _at(values: np.ndarray, epochs: np.ndarray) -> np.ndarray:
 def test_load_scores_reads_every_stored_set_with_initial_as_minus_one(tmp_path):
     spec = _spec()
     _write_dump(tmp_path / "run", spec.normal[0], [])
-    scores = lattice.load_scores(tmp_path / "run")
+    scores = tables.load_scores(tmp_path / "run")
     assert list(scores) == [-1, 0, 1, 2, 3]
     for epoch, record in scores.items():
         assert set(record) == {"val", "test", "aux", "train"}
@@ -199,14 +213,14 @@ def test_load_scores_reads_every_stored_set_with_initial_as_minus_one(tmp_path):
 
     (tmp_path / "run" / "epoch_0001.pt").unlink()
     with pytest.raises(ValueError, match="epochs -1 to 2"):
-        lattice.load_scores(tmp_path / "run")
+        tables.load_scores(tmp_path / "run")
 
 
 def test_dump_hyperpoint_keeps_the_sweep_parameters(tmp_path):
     overrides = ["algorithm.lr=0.001", "algorithm.encoder.nodes=[32,16]", "seed=456"]
     (tmp_path / "overrides.yaml").write_text(yaml.safe_dump(overrides))
     keys = {"algorithm.lr", "algorithm.encoder.nodes", "algorithm.delta"}
-    point = lattice.dump_hyperpoint(tmp_path, keys)
+    point = pairing.dump_hyperpoint(tmp_path, keys)
     assert point == {"algorithm.lr": "0.001", "algorithm.encoder.nodes": "[32,16]"}
 
 
@@ -217,11 +231,76 @@ def test_pair_runs_matches_equal_hyperpoints():
         "y": {"lr": "0.1", "nodes": "[8,4]"},
         "z": {"lr": "0.3", "nodes": "[8,4]"},
     }
-    assert lattice.pair_runs(own, partner) == {"a": "y", "b": "x"}
+    assert pairing.pair_runs(own, partner) == {"a": "y", "b": "x"}
     with pytest.raises(ValueError, match="share"):
-        lattice.pair_runs(own, {**partner, "w": {"lr": "0.1", "nodes": "[8,4]"}})
+        pairing.pair_runs(own, {**partner, "w": {"lr": "0.1", "nodes": "[8,4]"}})
     with pytest.raises(ValueError, match="No partner run"):
-        lattice.pair_runs({**own, "c": {"lr": "0.4", "nodes": "[8,4]"}}, partner)
+        pairing.pair_runs({**own, "c": {"lr": "0.4", "nodes": "[8,4]"}}, partner)
+    alone = {**own, "c": {"lr": "0.4", "nodes": "[8,4]"}}
+    assert pairing.pair_runs(alone, partner, drop_unpaired=True) == {"a": "y", "b": "x"}
+    assert pairing.pair_runs(own, partner, drop_unpaired=True) == {"a": "y", "b": "x"}
+    with pytest.raises(ValueError, match="share"):
+        shared = {**partner, "w": {"lr": "0.1", "nodes": "[8,4]"}}
+        pairing.pair_runs(own, shared, drop_unpaired=True)
+
+
+def _write_sweep(scores_dir: Path, name: str, deltas: list[str], seed: int) -> None:
+    # Dumps of a sweep, without run.json: the overrides name the sweep, whose
+    # parameters are the keys of the hyperpoint.
+    normal = np.zeros((2, sum(LAYOUT)), dtype=np.float32)
+    for i, delta in enumerate(deltas):
+        overrides = ["hparams_search=cchamber/ae_optuna", f"algorithm.delta={delta}"]
+        run_dir = scores_dir / name / f"{name[0]}{i}"
+        _write_dump(run_dir, normal, [*overrides, f"seed={seed}"])
+
+
+def test_pairing_is_checked_on_the_dumps_alone(tmp_path, caplog):
+    scores_dir = tmp_path / "scores"
+    _write_sweep(scores_dir, "lat", ["1.0", "3.0", "5.0"], 123)
+    _write_sweep(scores_dir, "partner", ["5.0", "1.0", "3.0", "7.0"], 456)
+    _write_sweep(scores_dir, "other", ["5.0", "1.0"], 456)
+    pairs = pairing.check_pairing(scores_dir, "lat", "partner")
+    assert pairs == {"l0": "p1", "l1": "p2", "l2": "p0"}
+    with pytest.raises(ValueError, match=r"hyperpoint of \['l1'\]"):
+        pairing.check_pairing(scores_dir, "lat", "other")
+    caplog.set_level(logging.WARNING, logger=pairing.__name__)
+    pairs = pairing.check_pairing(scores_dir, "lat", "other", drop_unpaired=True)
+    assert pairs == {"l0": "o1", "l2": "o0"} and "['l1']" in caplog.text
+
+
+class _Replay(Exception):
+    pass
+
+
+def _eval_entry(monkeypatch):
+    # src/eval.py registers the resolvers on import, which raises once they exist.
+    monkeypatch.setattr("src.utils.omegaconf.register_resolvers", lambda: None)
+    module_spec = importlib.util.spec_from_file_location("eval_entry", EVAL)
+    module = importlib.util.module_from_spec(module_spec)
+    module_spec.loader.exec_module(module)
+    return module
+
+
+def test_the_entry_point_pairs_before_the_replay(tmp_path, monkeypatch):
+    scores_dir = tmp_path / "scores"
+    _write_sweep(scores_dir, "lat", ["1.0", "3.0"], 123)
+    _write_sweep(scores_dir, "partner", ["1.0", "7.0"], 456)
+    overrides = ["eval=cchamber", "lattice=lat", "partner=partner", "~extras"]
+    with initialize_config_dir(version_base="1.3", config_dir=str(ROOT / "configs")):
+        cfg = compose("eval", overrides=[*overrides, f"scores_dir={scores_dir}"])
+    assert cfg.drop_unpaired is False
+    entry = _eval_entry(monkeypatch)
+
+    def replay(*args, **kwargs):
+        raise _Replay
+
+    # Building the evaluator is the first step of the replay.
+    monkeypatch.setattr("hydra.utils.instantiate", replay)
+    with pytest.raises(ValueError, match=r"hyperpoint of \['l1'\]"):
+        entry.main(cfg)
+    cfg.drop_unpaired = True
+    with pytest.raises(_Replay):
+        entry.main(cfg)
 
 
 def _rho(a, b):
@@ -259,6 +338,28 @@ def test_without_a_partner_udr_is_left_out(tmp_path):
     assert _read(out_dir, "consensus.csv")["udr"].isna().all()
     strategies = set(_read(out_dir, "selection.csv")["strategy"])
     assert strategies == {*CRITERIA, "mc", *ONCE}
+
+
+def test_unpaired_runs_raise_or_are_left_out_of_udr(tmp_path, caplog):
+    spec = _spec()
+    paired = _read(_run(tmp_path / "paired", spec), "consensus.csv")
+    dropping = _run(tmp_path / "dropping", spec, drop_unpaired=True)
+    pd.testing.assert_frame_equal(_read(dropping, "consensus.csv"), paired)
+    # r2's partner dump has another hyperpoint, so that no partner run pairs with r2.
+    spec.partner_hyperpoints[2] = {"algorithm.lr": "1"}
+    with pytest.raises(ValueError, match=r"hyperpoint of \['r2'\]"):
+        _run(tmp_path / "raising", spec)
+    caplog.set_level(logging.WARNING, logger=pairing.__name__)
+    out_dir = _run(tmp_path / "unpaired", spec, drop_unpaired=True)
+    assert "['r2']" in caplog.text
+    table, alone = _read(out_dir, "consensus.csv"), paired["run"] == "r2"
+    assert table.loc[alone, ["udr", "ema/udr"]].isna().all().all()
+    pd.testing.assert_frame_equal(table[~alone], paired[~alone])
+    pd.testing.assert_frame_equal(table[["mc", "ema/mc"]], paired[["mc", "ema/mc"]])
+    selected = _read(out_dir, "selection.csv")
+    assert set(selected["strategy"]) == {*CRITERIA, "udr", "mc", *ONCE}
+    udr = selected[(selected["strategy"] == "udr") & (selected["k"] == 10)]
+    assert udr["point"].item() != "r2"
 
 
 def test_every_pick_is_the_two_level_rule(tmp_path):
@@ -416,9 +517,9 @@ def _ranking_value(spec, consensus, strategy: str, k):
 
 def _permutation_p(x: np.ndarray, y: np.ndarray) -> float:
     rx, ry = rankdata(x) - rankdata(x).mean(), rankdata(y) - rankdata(y).mean()
-    rng = np.random.default_rng(lattice.PERMUTATION_SEED)
-    null = rng.permuted(np.tile(ry, (lattice.PERMUTATIONS, 1)), axis=1) @ rx
-    return (1 + (np.abs(null) >= abs(rx @ ry)).sum()) / (1 + lattice.PERMUTATIONS)
+    rng = np.random.default_rng(statistics.PERMUTATION_SEED)
+    null = rng.permuted(np.tile(ry, (statistics.PERMUTATIONS, 1)), axis=1) @ rx
+    return (1 + (np.abs(null) >= abs(rx @ ry)).sum()) / (1 + statistics.PERMUTATIONS)
 
 
 def test_validity_is_spearman_of_the_ranking_value(tmp_path):

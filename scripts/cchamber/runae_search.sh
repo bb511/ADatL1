@@ -2,55 +2,23 @@
 # ========================================================================
 # AE LATTICE COMMANDS (LIGHT TUNNEL)
 # ========================================================================
-# The random lattice of cchamber/ae has 200 points, drawn by
-# four drivers of 50 trials that share the Optuna study `pool` and differ only
-# in their sampler seed. Every trial is a full 150-epoch training that dumps its
-# scores and weights at every epoch and selects nothing; the criteria are
-# evaluated on the dumps offline. The space is
-#   configs/hparams_search/cchamber/ae_optuna.yaml
-#
-# The random sampler replays its draws from the seed, so a driver that stops
-# early is relaunched with a fresh seed, not its own, which would repeat the
-# configurations already trained. scripts/cluster/sweep_status.py prints
-# such a relaunch.
-#
-# The blocks name no launcher: the venue appends one at submission, with a
-# timeout of 30 minutes per trial. The timeout is an estimate from the pools of
-# 19 Oct, whose 204 light-tunnel fits took 80 minutes at 16 concurrent fits on
-# two H100s (about 6 minutes per fit on average), and leaves a wide margin.
-#
-# On clariden, one job holds a whole node and runs the four drivers on its
-# four GPUs, with no per-trial timeout:
-#   sbatch scripts/cluster/clariden_node.sbatch scripts/cchamber/runae_search.sh
-# or, at a whole node per one-GPU trial, each driver keeps six trials queued
-# as slurm jobs:
-#   bash scripts/cluster/submit_search.sh scripts/cchamber/runae_search.sh \
-#       hydra/launcher=submitit_slurm_clariden hydra.sweeper.n_jobs=6 \
-#       hydra.launcher.timeout_min=30
-#
-# On a local GPU host or an NGT pod, Hydra's basic launcher runs a driver's
-# trials in-process, one after another:
-#   bash scripts/cluster/submit_search.sh scripts/cchamber/runae_search.sh
-# or, with each trial in its own process and under the timeout:
-#   bash scripts/cluster/submit_search.sh scripts/cchamber/runae_search.sh \
-#       hydra/launcher=submitit_local hydra.launcher.gpus_per_node=1 \
-#       hydra.launcher.timeout_min=30
-# submitit_local shows a trial GPUs 0 to gpus_per_node-1 only, none when it
-# is unset, and trainer.devices picks among them.
-#
-# The dormant blocks after the drivers are further instances of the same
-# lattice, run only on the user's allocation and only if the theory asks for
-# pairings across training seeds or data instances. They repeat the four
-# sampler seeds and therefore the points of every live driver that ran without
-# a relaunch. The second-training-seed blocks train every point again from
-# another initialisation (seed=456, study pool_seed456); the training-halves
-# blocks train it on one half of the training rows each, half 0 with the
-# experiment's seed and half 1 with seed 456, so that the two halves differ in
-# seed and rows alike (studies half0 and half1, data.train_fold 0 and 1). A
-# dormant block opens with `## python3`, which scripts/cluster/lib.sh does not
-# parse, and removing the extra `#` of that line activates it. Submit an
-# activated block with --only and its index, since a submission without --only
-# launches the four live drivers again.
+# - Random lattice of cchamber/ae: 200 trials of 150 epochs, in the Optuna
+#   study `pool` over configs/hparams_search/cchamber/ae_optuna.yaml.
+# - Four drivers of 50 trials each.
+# - Each trial dumps its scores and weights at every epoch and selects nothing;
+#   src/eval.py evaluates the dumps offline.
+# - Timeout per trial: 30 min, an estimate with a wide margin (the 19 Oct pools took
+#   about 6 min per fit, at 16 concurrent fits on two H100s).
+# - A driver that stops early is relaunched with a fresh seed, which
+#   scripts/cluster/sweep_status.py prints.
+# - The blocks name no launcher; scripts/cluster/submit_search.sh appends the
+#   venue's to every driver, e.g. one process per trial on a GPU host:
+#     bash scripts/cluster/submit_search.sh scripts/cchamber/runae_search.sh \
+#         hydra/launcher=submitit_local hydra.launcher.gpus_per_node=1 \
+#         hydra.launcher.timeout_min=30
+# - Dormant `## python3` blocks repeat the live sampler seeds under a second
+#   training seed (456) and on the two training halves (half 1 at seed 456).
+# - To run a dormant block, delete one `#` and submit it with --only <index>.
 
 
 # ========================================================================

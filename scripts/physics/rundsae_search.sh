@@ -2,47 +2,23 @@
 # ========================================================================
 # DeepSets AE POOL COMMANDS
 # ========================================================================
-# The random pool of physics/dsae: 190 trials in two waves, drawn by eight
-# drivers that share the Optuna study `pool` and differ only in their
-# sampler seed. Wave 1 (drivers 1 to 4, 90 trials) is the pool as sized by the
-# rule of subplan 8; wave 2 (drivers 5 to 8, 100 trials, fresh seeds) is
-# launched after wave 1 completes, and the selector tables are read only
-# once the wave that closes the pool is harvested. Every trial is a full
-# 200-epoch training, evaluated at the checkpoint of each validation
-# strategy, at both background-rate tiers, and the strategies then select
-# from the pool.
-#
-# The random sampler replays its draws from the seed, so a driver that stops
-# early is relaunched with a fresh seed, not its own, which would repeat the
-# configurations already trained. scripts/cluster/sweep_status.py prints
-# such a relaunch. Between the waves it reports this study short by 100
-# trials and offers a top-up of driver 1; the wave-2 blocks are launched
-# instead, with --only 5,6,7,8.
-#
-# The blocks name no launcher: the venue appends one at submission, with a
-# timeout of 145 minutes per trial for this model (200 epochs at 28 s each on an H100, plus about 3 minutes of
-# evaluation, and half again as margin).
-#
-# On clariden, one job holds a whole node and runs the four drivers of a wave
-# on its four GPUs, with no per-trial timeout:
-#   sbatch scripts/cluster/clariden_node.sbatch --only 1,2,3,4 \
-#       scripts/physics/rundsae_search.sh
-# At the epoch times above a driver needs about 37 hours, beyond the job's
-# 12, so a wave on this route ends short of its trials. Otherwise, at a whole
-# node per one-GPU trial, each driver keeps six trials queued as slurm jobs:
-#   bash scripts/cluster/submit_search.sh --only 1,2,3,4 scripts/physics/rundsae_search.sh \
-#       hydra/launcher=submitit_slurm_clariden hydra.sweeper.n_jobs=6 \
-#       hydra.launcher.timeout_min=145
-#
-# On a local GPU host or an NGT pod, Hydra's basic launcher runs a driver's
-# trials in-process, one after another:
-#   bash scripts/cluster/submit_search.sh --only 1,2,3,4 scripts/physics/rundsae_search.sh
-# or, with each trial in its own process and under the timeout:
-#   bash scripts/cluster/submit_search.sh --only 1,2,3,4 scripts/physics/rundsae_search.sh \
-#       hydra/launcher=submitit_local hydra.launcher.gpus_per_node=1 \
-#       hydra.launcher.timeout_min=145
-# submitit_local shows a trial GPUs 0 to gpus_per_node-1 only, none when it
-# is unset, and trainer.devices picks among them.
+# - Random pool of physics/dsae: 190 trials of 200 epochs, in the Optuna
+#   study `pool` over configs/hparams_search/physics/dsae_optuna.yaml.
+# - Wave 1 is drivers 1 to 4 (23, 23, 22 and 22 trials); wave 2, drivers 5 to 8
+#   (25 trials each, fresh seeds), is launched after it with --only 5,6,7,8.
+# - Each trial checkpoints every validation strategy at both rate tiers and is
+#   evaluated at those checkpoints.
+# - Timeout per trial: 148 min, measured on an idle V100 at the largest configuration
+#   (half again 200 epochs of 27.6 s, plus 2.3 min of start-up and 7.7 of evaluation).
+# - Per driver: 3 threads (OMP_NUM_THREADS, MKL_NUM_THREADS, OPENBLAS_NUM_THREADS,
+#   NUMEXPR_NUM_THREADS = 3) and about 31 GiB of RAM.
+# - A driver that stops early is relaunched with a fresh seed, which
+#   scripts/cluster/sweep_status.py prints.
+# - The blocks name no launcher; scripts/cluster/submit_search.sh appends the
+#   venue's to every driver, e.g. one process per trial on a GPU host:
+#     bash scripts/cluster/submit_search.sh --only 1,2,3,4 \
+#         scripts/physics/rundsae_search.sh hydra/launcher=submitit_local \
+#         hydra.launcher.gpus_per_node=1 hydra.launcher.timeout_min=148
 
 
 # ========================================================================

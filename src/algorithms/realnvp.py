@@ -7,6 +7,13 @@ from src.algorithms import ADLightningModule
 from src.data.utils import unpack_batch
 
 
+def _present(mask: torch.Tensor | None, x: torch.Tensor) -> torch.Tensor:
+    """The batch's data mask as 1 (data) and 0 (padding), flattened like x."""
+    if mask is None:
+        raise ValueError("mask_aware=True needs batches that carry the data mask.")
+    return torch.flatten(mask, start_dim=1).to(x.dtype)
+
+
 class RealNVP(ADLightningModule):
     """RealNVP on flattened input data.
 
@@ -18,6 +25,9 @@ class RealNVP(ADLightningModule):
     :param target_rate: Target background rate or FPR.
     :param base_rate: Base rate used to convert target_rate into an FPR. If None,
         target_rate is interpreted directly as an FPR.
+    :param mask_aware: Whether the coordinates that the batch's data mask marks as
+        padding are left out of the NLL, which is then the NLL of the present
+        coordinates alone. Only the L1AD batches carry a mask.
     """
 
     def __init__(
@@ -27,6 +37,7 @@ class RealNVP(ADLightningModule):
         ckpt: str = "",
         target_rate: float = 0.25,
         base_rate: float | None = None,
+        mask_aware: bool = False,
         **kwargs,
     ):
         super().__init__(model=None, **kwargs)
@@ -36,6 +47,7 @@ class RealNVP(ADLightningModule):
         self.features = features if features is not None else nn.Identity()
         self.features.eval()
         self.ckpt_path = ckpt
+        self.mask_aware = mask_aware
 
     def on_fit_start(self):
         """Move features to device and optionally load checkpoint."""
@@ -44,17 +56,20 @@ class RealNVP(ADLightningModule):
         if self.ckpt_path:
             self._load_checkpoint()
 
-    def forward(self, x: torch.Tensor) -> torch.Tensor:
+    def forward(
+        self, x: torch.Tensor, present: torch.Tensor | None = None
+    ) -> torch.Tensor:
         """Run the flow and return the log-probability of the input."""
         x = self.features(x)
-        return self.flow.log_prob(x)
+        return self.flow.log_prob(x, present)
 
     def model_step(self, batch: torch.Tensor) -> dict[str, torch.Tensor]:
         """Shared train/val/test step."""
         b = unpack_batch(batch)
         x = torch.flatten(b.x, start_dim=1)
+        present = _present(b.mask, x) if self.mask_aware else None
 
-        log_prob = self.forward(x)
+        log_prob = self.forward(x, present)
         ascore = -log_prob
 
         if ascore.ndim != 1:

@@ -52,6 +52,7 @@ class Evaluator:
                 'criterion_1': ['min', 'max', etc.]
         ...
         This is used for specifying which checkpoints to actually evaluate.
+
     :param callbacks: List of pl.Callback objects that compute evaluation metrics on
         the test data and do all the handling of these, including plotting.
     :param logger: pl.Logger object that handles the logging for this evaluation stage.

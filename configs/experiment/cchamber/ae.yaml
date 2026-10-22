@@ -41,7 +41,7 @@ algorithm:
   input_noise_std: 0.0
 
   encoder:
-    in_dim: 11
+    in_dim: 10
     nodes: [32, 16, 4]
 
   optimizer:

@@ -58,6 +58,9 @@ class VAE(ADLightningModule):
     :param target_rate: Target background rate or FPR.
     :param base_rate: Base rate used to convert target_rate into an FPR.
         If None, target_rate is interpreted directly as an FPR.
+    :param eval_mean: Whether the decoder reads the posterior mean instead of a sample
+        in eval mode, which makes the reconstruction and the loss deterministic there.
+        The sample is drawn either way, so the random stream is the same.
     """
 
     def __init__(
@@ -71,6 +74,7 @@ class VAE(ADLightningModule):
         anomaly_score: str = "kl",
         target_rate: float = 0.25,
         base_rate: float | None = None,
+        eval_mean: bool = False,
         **kwargs,
     ):
         super().__init__(model=None, **kwargs)
@@ -82,6 +86,7 @@ class VAE(ADLightningModule):
         self.features = features if features is not None else nn.Identity()
         self.features.eval()
         self.kl_warmup_frac = kl_warmup_frac
+        self.eval_mean = eval_mean
 
         self.loss = ClassicVAELoss(kl_scale=kl_scale, reduction="none")
 
@@ -119,7 +124,8 @@ class VAE(ADLightningModule):
     def forward(self, x: torch.Tensor) -> tuple[torch.Tensor, ...]:
         x = self.features(x)
         z_mean, z_log_var, z = self.encoder(x)
-        reconstruction = self.decoder(z)
+        decoded = z_mean if self.eval_mean and not self.training else z
+        reconstruction = self.decoder(decoded)
         return z_mean, z_log_var, z, reconstruction
 
     def residuals(self, x: torch.Tensor) -> torch.Tensor:

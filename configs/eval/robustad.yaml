@@ -73,6 +73,8 @@ evaluation:
 
 # The registry of strategies: column in val.csv, mode and MLflow keys per criterion.
 selection:
+  # CAP and consistency are left out until CAP is redefined, and EM and MV because
+  # they are degenerate on images: NaN on CIFAR-10, float32 overflow on RobustAD.
   criteria:
     drift:
       column: thres_drift/drift_operational
@@ -102,6 +104,7 @@ selection:
       mode: min
       key: val/summary/entropy_ema
       raw_key: val/summary/entropy
+      skip_nonfinite: true
     sds:
       column: sds/sds
       mode: min
@@ -136,7 +139,9 @@ selection:
     mc: max
   # The known limit of each strategy, for the tables.
   limits:
-    entropy: on RealNVP undefined, its per-sample loss can be negative
+    w1: favours a small score spread; a constant score gives 0, its best value
+    rtm: on RealNVP its sign carries no meaning where the median NLL is at or below zero
+    entropy: on RealNVP undefined, its per-sample loss can be negative; its RealNVP picks can fall on epochs where it is NaN
     sds: in-sample, the pseudo-sets come from the training inputs
     udr: selects the untrained model where its scores do not depend on the seed
     mc: selects the untrained model where its scores do not depend on the seed

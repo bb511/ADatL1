@@ -8,6 +8,28 @@ from src.algorithms import ADLightningModule
 from src.algorithms.losses.svdd import SVDDLoss
 from src.data.utils import unpack_batch
 
+# (failed, message) pairs over the saved hyperparameters, checked in this order.
+_HPARAM_CHECKS = (
+    (
+        lambda hp: hp.center_init_method != "mean",
+        "Deep SVDD requires center_init_method='mean'; a zero center permits "
+        "the trivial all-zero solution.",
+    ),
+    (lambda hp: hp.center_eps < 0.0, "center_eps must be non-negative."),
+    (
+        lambda hp: hp.center_max_batches is not None and hp.center_max_batches <= 0,
+        "center_max_batches must be positive or None.",
+    ),
+    (
+        lambda hp: hp.network_weight_decay < 0.0,
+        "network_weight_decay must be non-negative.",
+    ),
+    (
+        lambda hp: hp.radius_warmup_epochs < 0,
+        "radius_warmup_epochs must be non-negative.",
+    ),
+)
+
 
 class DeepSVDD(ADLightningModule):
     """Deep SVDD with a fixed nominal-data center."""
@@ -31,29 +53,11 @@ class DeepSVDD(ADLightningModule):
     ):
         super().__init__(model=None, **kwargs)
         self.save_hyperparameters(ignore=["model", "features", "encoder"])
-
-        if center_init_method != "mean":
-            raise ValueError(
-                "Deep SVDD requires center_init_method='mean'; a zero center permits "
-                "the trivial all-zero solution."
-            )
-        if center_eps < 0.0:
-            raise ValueError("center_eps must be non-negative.")
-        if center_max_batches is not None and center_max_batches <= 0:
-            raise ValueError("center_max_batches must be positive or None.")
-        if network_weight_decay < 0.0:
-            raise ValueError("network_weight_decay must be non-negative.")
-        if radius_warmup_epochs < 0:
-            raise ValueError("radius_warmup_epochs must be non-negative.")
+        self._check_hparams()
 
         inferred_objective = "soft_boundary" if soft_boundary else "one_class"
         if objective is None:
             objective = inferred_objective
-        elif soft_boundary and objective != "soft_boundary":
-            raise ValueError(
-                "soft_boundary=True conflicts with objective="
-                f"{objective!r}; use objective='soft_boundary'."
-            )
 
         self.encoder = encoder
         self.features = features if features is not None else nn.Identity()
@@ -289,3 +293,14 @@ class DeepSVDD(ADLightningModule):
             ).sum()
             return loss + extra
         return loss
+
+    def _check_hparams(self) -> None:
+        hp = self.hparams
+        for failed, message in _HPARAM_CHECKS:
+            if failed(hp):
+                raise ValueError(message)
+        if hp.soft_boundary and hp.objective not in (None, "soft_boundary"):
+            raise ValueError(
+                "soft_boundary=True conflicts with objective="
+                f"{hp.objective!r}; use objective='soft_boundary'."
+            )

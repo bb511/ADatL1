@@ -3,10 +3,7 @@
 # The light tunnel: the dump stores every validation and test set. Every run is evaluated
 # on the sets of data/cchamber.yaml, whatever lists it was trained with; a dump of the
 # older list (58 single interventions) has its three sensor pools rescored from the
-# weights of every epoch.
-
-defaults:
-  - /cap: provisional
+# weights of every epoch, and serves its six LED sets, now nulls, from the store.
 
 sets: cchamber
 
@@ -28,8 +25,18 @@ evaluation:
         output_name: ascore/full
         ds: null
         # The sensor pools: their pass rates are the false-positive rates on the second
-        # typical domain, one per grade.
-        null_ds: [sensor_weak, sensor_mid, sensor_strong]
+        # typical domain, one per grade. The six LEDs follow, each at chance for every
+        # trivial baseline.
+        null_ds:
+          - sensor_weak
+          - sensor_mid
+          - sensor_strong
+          - uniform_l_11_mid
+          - uniform_l_12_mid
+          - uniform_l_21_mid
+          - uniform_l_22_mid
+          - uniform_l_31_mid
+          - uniform_l_32_mid
         cvar_summary: 0.25
         log_raw_mlflow: false
       thres_drift:
@@ -47,25 +54,7 @@ evaluation:
         apply_log1p: true
         log_raw_mlflow: false
         name: wasserstein
-      cap:
-        _target_: src.evaluation.callbacks.cap.CAP
-        output_name: ascore/full
-        dataset_1: normal
-        dataset_2: reference_normal
-        pairing_type: cdf
-        cap_metric_config: ${cap}
-        log_raw_mlflow: false
-        name: cap
-      consistency:
-        _target_: src.evaluation.callbacks.consistency.PosteriorConsistency
-        output_name: ascore/full
-        dataset_1: normal
-        dataset_2: reference_normal
-        pairing_type: cdf
-        cap_metric_config: ${cap}
-        log_raw_mlflow: false
-        name: consistency
-      # The pairings of normal with each sensor pool, copies of the three above.
+      # The pairings of normal with each sensor pool, copies of wasserstein.
       wasserstein_weak:
         _target_: src.evaluation.callbacks.wasserstein.Wasserstein
         output_name: ascore/full
@@ -74,24 +63,6 @@ evaluation:
         apply_log1p: true
         log_raw_mlflow: false
         name: wasserstein_weak
-      cap_weak:
-        _target_: src.evaluation.callbacks.cap.CAP
-        output_name: ascore/full
-        dataset_1: normal
-        dataset_2: sensor_weak
-        pairing_type: cdf
-        cap_metric_config: ${cap}
-        log_raw_mlflow: false
-        name: cap_weak
-      consistency_weak:
-        _target_: src.evaluation.callbacks.consistency.PosteriorConsistency
-        output_name: ascore/full
-        dataset_1: normal
-        dataset_2: sensor_weak
-        pairing_type: cdf
-        cap_metric_config: ${cap}
-        log_raw_mlflow: false
-        name: consistency_weak
       wasserstein_mid:
         _target_: src.evaluation.callbacks.wasserstein.Wasserstein
         output_name: ascore/full
@@ -100,24 +71,6 @@ evaluation:
         apply_log1p: true
         log_raw_mlflow: false
         name: wasserstein_mid
-      cap_mid:
-        _target_: src.evaluation.callbacks.cap.CAP
-        output_name: ascore/full
-        dataset_1: normal
-        dataset_2: sensor_mid
-        pairing_type: cdf
-        cap_metric_config: ${cap}
-        log_raw_mlflow: false
-        name: cap_mid
-      consistency_mid:
-        _target_: src.evaluation.callbacks.consistency.PosteriorConsistency
-        output_name: ascore/full
-        dataset_1: normal
-        dataset_2: sensor_mid
-        pairing_type: cdf
-        cap_metric_config: ${cap}
-        log_raw_mlflow: false
-        name: consistency_mid
       wasserstein_strong:
         _target_: src.evaluation.callbacks.wasserstein.Wasserstein
         output_name: ascore/full
@@ -126,24 +79,6 @@ evaluation:
         apply_log1p: true
         log_raw_mlflow: false
         name: wasserstein_strong
-      cap_strong:
-        _target_: src.evaluation.callbacks.cap.CAP
-        output_name: ascore/full
-        dataset_1: normal
-        dataset_2: sensor_strong
-        pairing_type: cdf
-        cap_metric_config: ${cap}
-        log_raw_mlflow: false
-        name: cap_strong
-      consistency_strong:
-        _target_: src.evaluation.callbacks.consistency.PosteriorConsistency
-        output_name: ascore/full
-        dataset_1: normal
-        dataset_2: sensor_strong
-        pairing_type: cdf
-        cap_metric_config: ${cap}
-        log_raw_mlflow: false
-        name: consistency_strong
       ascore_operational:
         _target_: src.evaluation.callbacks.output.OutputCallback
         output_name: ascore/operational
@@ -159,9 +94,6 @@ evaluation:
       eag:
         _target_: src.evaluation.callbacks.autouad.EAG
         name: eag
-      em:
-        _target_: src.evaluation.callbacks.goix.ExcessMass
-        name: em
       mv:
         _target_: src.evaluation.callbacks.goix.MassVolume
         name: mv
@@ -185,6 +117,8 @@ evaluation:
 
 # The registry of strategies: column in val.csv, mode and MLflow keys per criterion.
 selection:
+  # CAP and consistency are left out until CAP is redefined, and EM because it is
+  # degenerate on both tunnels: em_reached is 0 in every AE, VAE and SVDD run.
   criteria:
     drift:
       column: thres_drift/drift_operational
@@ -194,58 +128,18 @@ selection:
       column: wasserstein/w1dist
       mode: min
       key: val/summary/w1dist_ema_normal_vs_reference_normal
-    cap:
-      column: cap/cap
-      mode: max
-      key: val/summary/cap_ema_normal_vs_reference_normal
-      skip_nonfinite: true
-    consistency:
-      column: consistency/consistency
-      mode: max
-      key: val/summary/consistency_ema_normal_vs_reference_normal
-      skip_nonfinite: true
     w1_weak:
       column: wasserstein_weak/w1dist
       mode: min
       key: val/summary/w1dist_ema_normal_vs_sensor_weak
-    cap_weak:
-      column: cap_weak/cap_weak
-      mode: max
-      key: val/summary/cap_ema_normal_vs_sensor_weak
-      skip_nonfinite: true
-    consistency_weak:
-      column: consistency_weak/consistency_weak
-      mode: max
-      key: val/summary/consistency_ema_normal_vs_sensor_weak
-      skip_nonfinite: true
     w1_mid:
       column: wasserstein_mid/w1dist
       mode: min
       key: val/summary/w1dist_ema_normal_vs_sensor_mid
-    cap_mid:
-      column: cap_mid/cap_mid
-      mode: max
-      key: val/summary/cap_ema_normal_vs_sensor_mid
-      skip_nonfinite: true
-    consistency_mid:
-      column: consistency_mid/consistency_mid
-      mode: max
-      key: val/summary/consistency_ema_normal_vs_sensor_mid
-      skip_nonfinite: true
     w1_strong:
       column: wasserstein_strong/w1dist
       mode: min
       key: val/summary/w1dist_ema_normal_vs_sensor_strong
-    cap_strong:
-      column: cap_strong/cap_strong
-      mode: max
-      key: val/summary/cap_ema_normal_vs_sensor_strong
-      skip_nonfinite: true
-    consistency_strong:
-      column: consistency_strong/consistency_strong
-      mode: max
-      key: val/summary/consistency_ema_normal_vs_sensor_strong
-      skip_nonfinite: true
     npd:
       column: npd/npd
       mode: max
@@ -261,11 +155,6 @@ selection:
       mode: max
       key: val/summary/eag_ema
       raw_key: val/summary/eag
-    em:
-      column: em/em
-      mode: max
-      key: val/summary/em_ema
-      raw_key: val/summary/em
     mv:
       column: mv/mv
       mode: min
@@ -276,6 +165,7 @@ selection:
       mode: min
       key: val/summary/entropy_ema
       raw_key: val/summary/entropy
+      skip_nonfinite: true
     sds:
       column: sds/sds
       mode: min
@@ -310,10 +200,15 @@ selection:
     mc: max
   # The known limit of each strategy, for the tables.
   limits:
-    em: degenerate above about eight input dimensions (Goix); the chamber has eleven
-    mv: degenerate above about eight input dimensions (Goix); the chamber has eleven
-    entropy: on RealNVP undefined, its per-sample loss can be negative
+    drift: distribution-free on i.i.d. normal rows, split with a fixed seed; a dozen or so distinct values, so ties decide its picks
+    w1: favours a small score spread; a constant score gives 0, its best value
+    w1_weak: favours a small score spread; a constant score gives 0, its best value
+    w1_mid: favours a small score spread; a constant score gives 0, its best value
+    w1_strong: favours a small score spread; a constant score gives 0, its best value
+    rtm: on RealNVP its sign carries no meaning where the median NLL is at or below zero
+    mv: degenerate above about eight input dimensions (Goix); the chamber has ten; exactly zero, the floor of its Monte Carlo volume estimate, in some RealNVP epochs
+    entropy: on RealNVP undefined, its per-sample loss can be negative; its RealNVP picks can fall on epochs where it is NaN
     sds: in-sample, the pseudo-sets come from the training inputs
-    udr: selects the untrained model where its scores do not depend on the seed
-    mc: selects the untrained model where its scores do not depend on the seed
+    udr: selects the untrained model where its scores do not depend on the seed; on the chamber the barely trained AE and VAE (epoch 0 or 1)
+    mc: selects the untrained model where its scores do not depend on the seed; on the chamber the barely trained AE and VAE (epoch 0 or 1)
     q_sec: on SVDD the distance has no fixed scale across a lattice

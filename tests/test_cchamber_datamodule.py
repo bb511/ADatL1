@@ -1,11 +1,13 @@
 import csv
+import shutil
 from pathlib import Path
 from types import SimpleNamespace
 
+import numpy as np
 import pytest
 import torch
 from hydra import compose, initialize_config_dir
-from omegaconf import DictConfig
+from omegaconf import DictConfig, OmegaConf
 
 from src.algorithms import ADLightningModule
 from src.algorithms.utils.object_feature_map_loader import maybe_get_object_feature_map
@@ -121,7 +123,7 @@ def test_normalization_is_fitted_on_the_training_rows_and_clipped(
 
 
 def test_readouts_and_object_feature_map(datamodule, lt_readouts):
-    names = "current angle_1 angle_2 ir_1 vis_1 ir_2 vis_2 ir_3 vis_3 v_board v_reg"
+    names = "current angle_1 angle_2 ir_1 vis_1 ir_2 vis_2 ir_3 vis_3 v_reg"
     assert lt_readouts == names.split()
 
     fit = SimpleNamespace(trainer=SimpleNamespace(datamodule=datamodule))
@@ -232,19 +234,142 @@ def test_a_pool_concatenates_its_members_split_as_plain_sets(cchamber_wt_data):
             assert _batches(loaders[name])[1].unique().tolist() == [label]
 
 
+def _to_tensor_before(table, readouts: list[str], relative_to) -> torch.Tensor:
+    # _to_tensor before relative_to existed.
+    columns = [table.column(name).to_numpy() for name in readouts]
+    return torch.as_tensor(np.stack(columns, axis=1), dtype=torch.float32)
+
+
+def _tensors(dm: CausalChamberDataModule) -> list[torch.Tensor]:
+    loaders = [*dm.val_dataloader().values(), *dm.test_dataloader().values()]
+    return [dm.data_train.tensors[0], *(_batches(dl)[0] for dl in loaders)]
+
+
+def test_relative_to_off_leaves_every_tensor_unchanged(cchamber_wt_data, monkeypatch):
+    current = [_wt_datamodule(cchamber_wt_data, relative_to=r) for r in (None, {})]
+    for dm in current:
+        dm.setup("fit")
+    monkeypatch.setattr(
+        "src.data.CausalChamber_datamodule._to_tensor", _to_tensor_before
+    )
+    before = _wt_datamodule(cchamber_wt_data)
+    before.setup("fit")
+
+    for dm in current:
+        assert torch.equal(dm.median, before.median)
+        assert torch.equal(dm.scale, before.scale)
+        for x, x_before in zip(_tensors(dm), _tensors(before), strict=True):
+            assert torch.equal(x, x_before)
+
+
+def test_relative_to_subtracts_the_column_in_float64(cchamber_wt_data):
+    ambient = "pressure_ambient"
+    readouts = [name for name in cchamber_wt_data.readouts if name != ambient]
+    relative_to = {"pressure_upwind": ambient, "pressure_intake": ambient}
+    dm = _wt_datamodule(cchamber_wt_data, readouts=readouts, relative_to=relative_to)
+    plain = _wt_datamodule(cchamber_wt_data, readouts=readouts)
+    assert ambient in dm._read_table("regime_jumps_single").column_names
+    assert ambient not in plain._read_table("regime_jumps_single").column_names
+
+    x, x_plain = dm._read_set(_regime(0)), plain._read_set(_regime(0))
+    with (dm.dataset_dir / "regime_jumps_single.csv").open() as f:
+        rows = [row for row in csv.DictReader(f) if float(row["flag"]) == 0]
+    for i, name in enumerate(readouts):
+        if name not in relative_to:
+            assert torch.equal(x[:, i], x_plain[:, i])
+            continue
+        values = np.array([[float(row[name]), float(row[ambient])] for row in rows])
+        expected = torch.from_numpy(values[:, 0] - values[:, 1]).float()
+        assert torch.equal(x[:, i], expected)
+        # Subtracting after the cast to float32 gives other values.
+        values = torch.from_numpy(values).float()
+        assert not torch.equal(x[:, i], values[:, 0] - values[:, 1])
+
+    dm.setup("fit")
+    assert dm.data_train.tensors[0].shape[1] == len(readouts)
+    assert list(dm.loader.object_feature_map["chamber"]) == readouts
+    with pytest.raises(ValueError, match="non-readout"):
+        _wt_datamodule(
+            cchamber_wt_data, readouts=readouts, relative_to={ambient: "mic"}
+        )
+
+
+# The registered lists, in the order of configs/data/cchamber{,_wt}.yaml.
+LT_SIGNALS = [
+    f"uniform_{target}_{grade}"
+    for target in ("blue", "green", "pol_1", "pol_2", "red")
+    for grade in ("mid", "strong")
+]
+LT_POOLS = ["sensor_weak", "sensor_mid", "sensor_strong"]
+LT_LEDS = [f"uniform_l_{led}_mid" for led in (11, 12, 21, 22, 31, 32)]
+WT_BAROMETERS = ["pressure_upwind", "pressure_downwind", "pressure_intake"]
+CHAMBER_EXPERIMENTS = [
+    f"{tunnel}/{model}"
+    for tunnel in ("cchamber", "cchamber_wt")
+    for model in ("ae", "realnvp", "svdd", "vae")
+]
+
+
+def _plain_sets(sets: dict) -> list[dict]:
+    return [m for spec in sets.values() for m in spec.get("members") or [spec]]
+
+
 def test_registered_set_counts():
     # Pinned, since a config edit that dropped a set would change the benchmark
     # silently.
-    lt, wt = _compose("cchamber"), _compose("cchamber_wt")
-    lt_pools = {name: len(pool.members) for name, pool in lt.nulls.items()}
-    assert len(lt.signals) == 16
-    assert lt_pools == {"sensor_weak": 9, "sensor_mid": 9, "sensor_strong": 9}
-    files = [s.file for s in lt.signals.values()]
-    files += [m.file for pool in lt.nulls.values() for m in pool.members]
-    assert len(set(files)) == 16 + 27
+    lt, wt = (OmegaConf.to_container(_compose(d)) for d in ("cchamber", "cchamber_wt"))
+    lt_nulls = {name: len(_plain_sets({name: s})) for name, s in lt["nulls"].items()}
+    assert len(lt["readouts"]) == 10 and list(lt["signals"]) == LT_SIGNALS
+    assert lt_nulls == {name: 9 for name in LT_POOLS} | {name: 1 for name in LT_LEDS}
+    files = [s["file"] for s in _plain_sets(lt["signals"] | lt["nulls"])]
+    assert len(set(files)) == 10 + 27 + 6
 
-    wt_pools = {name: len(pool.members) for name, pool in wt.nulls.items()}
-    assert len(wt.signals) == 16 and wt_pools == {"sensor_osr": 10, "walk_null": 5}
-    members = [m for pool in wt.nulls.values() for m in pool.members]
-    sets = [wt.reference, *wt.signals.values(), *members]
-    assert sorted(s.where.flag for s in sets) == list(range(32))
+    assert len(wt["readouts"]) == 10 and "pressure_ambient" not in wt["readouts"]
+    assert wt["relative_to"] == {name: "pressure_ambient" for name in WT_BAROMETERS}
+    wt_pools = {name: len(pool["members"]) for name, pool in wt["nulls"].items()}
+    assert len(wt["signals"]) == 7 and wt_pools == {"sensor_osr": 10, "walk_null": 5}
+    sets = [wt["reference"], *_plain_sets(wt["signals"] | wt["nulls"])]
+    left_out = {3, 6, 11, 12, 14, 21, 22, 25, 31}
+    flags = [flag for flag in range(32) if flag not in left_out]
+    assert sorted(s["where"]["flag"] for s in sets) == flags
+
+
+def test_registered_lt_sets_are_labeled_in_order(cchamber_data):
+    lt = OmegaConf.to_container(_compose("cchamber"))
+    dataset_dir = cchamber_data.data_dir / DATASET
+    for spec in _plain_sets(lt["signals"] | lt["nulls"]):
+        path = dataset_dir / f"{spec['file']}.csv"
+        if not path.exists():
+            shutil.copy(dataset_dir / "uniform_red_mid.csv", path)
+    dm = _datamodule(
+        cchamber_data, lt["readouts"], signals=lt["signals"], nulls=lt["nulls"]
+    )
+    dm.setup("fit")
+
+    assert dm.data_train.tensors[0].shape[1] == 10
+    expected = {"normal": [0], "reference_normal": [0]}
+    expected |= {name: [i] for i, name in enumerate(LT_SIGNALS, start=1)}
+    expected |= {name: [0] for name in LT_POOLS + LT_LEDS}
+    for loaders in (dm.val_dataloader(), dm.test_dataloader()):
+        labels = {name: _batches(dl)[1] for name, dl in loaders.items()}
+        assert list(labels) == list(expected)
+        assert {name: y.unique().tolist() for name, y in labels.items()} == expected
+
+
+def _experiment(name: str) -> DictConfig:
+    overrides = [f"experiment={name}", "paths.raw_data_dir=/x", "run_name=dbg"]
+    with initialize_config_dir(version_base="1.3", config_dir=str(CONFIGS)):
+        return compose("train", overrides=overrides)
+
+
+@pytest.mark.parametrize("experiment", CHAMBER_EXPERIMENTS)
+def test_the_models_take_one_input_per_readout(experiment):
+    cfg = _experiment(experiment)
+    algorithm = cfg.algorithm
+    dim = algorithm.flow.input_dim if "flow" in algorithm else algorithm.encoder.in_dim
+    assert dim == len(cfg.data.readouts) == 10
+
+
+@pytest.mark.parametrize("tunnel", ["cchamber", "cchamber_wt"])
+def test_the_vae_decodes_the_posterior_mean_in_eval_mode(tunnel):
+    assert _experiment(f"{tunnel}/vae").algorithm.eval_mean is True

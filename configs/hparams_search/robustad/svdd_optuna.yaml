@@ -30,6 +30,7 @@ hydra:
     # Bias-free one-class Deep SVDD search space.
     # RobustAD space
     params:
-      algorithm.optimizer.lr: tag(log, interval(3e-5, 1e-2))
+      # From lr 3e-3 up the network dies within two epochs and scores every image alike.
+      algorithm.optimizer.lr: tag(log, interval(3e-5, 1e-3))
       trainer.gradient_clip_val: choice(0.0, 0.5, 1.0, 2.0)
       algorithm.encoder.nodes: choice([8, 16, 32], [16, 32, 64], [32, 64, 128])

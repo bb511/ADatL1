@@ -1,4 +1,5 @@
 import math
+from types import SimpleNamespace
 
 import numpy as np
 import pytest
@@ -8,6 +9,8 @@ from pytorch_lightning import Callback
 from torch.utils.data import DataLoader, TensorDataset
 
 import tests.test_score_dump as score_dump_tests
+from src.algorithms.components.flow import RealNVP
+from src.algorithms.realnvp import RealNVP as RealNVPModule
 from src.callbacks.autouad import EAGCallback, NPDCallback, RTMCallback, eag, npd, rtm
 from src.callbacks.cap import CAPCallback
 from src.callbacks.components import selection
@@ -24,9 +27,17 @@ from src.callbacks.goix import (
     mass_volume,
 )
 from src.callbacks.operational import OperationalScoreCallback
-from src.callbacks.sds import SDSCallback, sds_error, sds_inputs, sds_pseudo_sets
+from src.callbacks.score_dump import aux_inputs, input_moments
+from src.callbacks.sds import (
+    SDS_SETS,
+    SDSCallback,
+    sds_error,
+    sds_inputs,
+    sds_pseudo_sets,
+)
 from src.callbacks.thres_drift import ThresholdDriftCallback
 from src.callbacks.wasserstein import WassersteinCallback
+from src.data.utils import unpack_batch
 from src.evaluation.callbacks.autouad import EAG, NPD, RTM
 from src.evaluation.callbacks.entropy import LossEntropy
 from src.evaluation.callbacks.goix import ExcessMass, MassVolume
@@ -89,8 +100,9 @@ def score(module, x, key=KEY):
         return torch.cat([module.model_step(batch)[key] for batch in batches])
 
 
-def expected_sds(module, normal, pseudo_sets):
-    rate = AnomalyRate(module.hparams.target_rate, None)
+def expected_sds(module, normal, pseudo_sets, target_rate=None):
+    target_rate = module.hparams.target_rate if target_rate is None else target_rate
+    rate = AnomalyRate(target_rate, None)
     rate.set_threshold(normal)
     targets, outliers = (
         score(module, torch.from_numpy(p).float()) for p in pseudo_sets
@@ -154,6 +166,31 @@ def test_callbacks_log_the_criteria_and_their_ema(tmp_path):
                 assert key not in logged
             else:
                 assert logged[key] == approx(raw[epoch])
+
+
+def test_sds_cuts_at_its_target_rate(tmp_path):
+    recorder = Recorder()
+    callbacks = [
+        dump_callback(tmp_path / "scores"),
+        SDSCallback(batch_size=16, target_rate=0.3),
+        SDSCallback(name="sds_val", source="normal", batch_size=16, target_rate=0.3),
+        recorder,
+    ]
+    fit(tmp_path, callbacks, epochs=EPOCHS)
+    sets = toy_sets()
+    pseudo = {
+        "sds_0_3": sds_pseudo_sets(sets["train"][0].double().numpy()),
+        "sds_val_0_3": sds_pseudo_sets(sets["val"]["normal"][0].double().numpy()),
+    }
+    for epoch, logged in enumerate(recorder.epochs):
+        record = load(tmp_path / "scores" / f"epoch_{epoch:04d}.pt")
+        module = ToyAE()
+        module.load_state_dict(record["state_dict"])
+        normal = record["val"]["normal"][KEY]
+        for name, pseudo_sets in pseudo.items():
+            value = expected_sds(module, normal, pseudo_sets, target_rate=0.3)
+            assert logged[f"val/summary/{name}"] == approx(value)
+        assert "val/summary/sds" not in logged
 
 
 def test_callbacks_leave_the_training_trajectory_unchanged(tmp_path):
@@ -288,11 +325,29 @@ def test_mirrors_return_the_criteria(tmp_path):
         assert callback.get_optimized_metric() == (CKPT, callback.summary[CKPT])
 
 
+def test_sds_mirror_cuts_at_its_target_rate(tmp_path):
+    inputs = mirror_inputs()
+    # No operational buffers: the cut at a target rate must not read them.
+    module = ToyAE()
+    scores = {name: score(module, x) for name, x in inputs.items()}
+    rate = AnomalyRate(0.3, None)
+    rate.set_threshold(scores["normal"])
+    cut = rate.threshold.item(), rate.tie_weight.item()
+    expected = sds_error(scores["sds_targets"], scores["sds_outliers"], *cut)
+    callback = SDS(target_rate=0.3)
+    evaluate(tmp_path, module, inputs, [callback])
+    assert callback.name == "sds_0_3"
+    assert callback.summary == {CKPT: pytest.approx(expected, rel=1e-12)}
+
+
 def test_mirror_needs_its_loaders(tmp_path):
     inputs = mirror_inputs()
     del inputs["autouad"]
     with pytest.raises(ValueError, match="autouad"):
         evaluate(tmp_path, ToyAE(), inputs, [NPD()])
+    del inputs["normal"]
+    with pytest.raises(ValueError, match="normal"):
+        evaluate(tmp_path, ToyAE(), inputs, [SDS(target_rate=0.3)])
 
 
 def test_mirrors_give_nan_for_undefined_criteria(tmp_path):
@@ -304,3 +359,148 @@ def test_mirrors_give_nan_for_undefined_criteria(tmp_path):
         evaluate(tmp_path, module, inputs, callbacks)
     for callback in callbacks:
         assert math.isnan(callback.summary[CKPT])
+
+
+def physics_rows(n: int = 96, seed: int = 5) -> tuple[torch.Tensor, torch.Tensor]:
+    # Four objects of three features in the layout of the L1AD data: the first never
+    # carries its second feature, as the FET carries no eta, and padding is +0.
+    gen = torch.Generator().manual_seed(seed)
+    mask = (torch.rand(n, 4, 1, generator=gen) < 0.6).expand(n, 4, 3).clone()
+    mask[:, 0, 1] = False
+    x = torch.where(mask, torch.randn(n, 4, 3, generator=gen), torch.zeros(n, 4, 3))
+    return x, mask
+
+
+def fit_start(callback, *tensors) -> dict[str, DataLoader]:
+    labels = torch.zeros(len(tensors[0]), dtype=torch.long)
+    data_train = TensorDataset(*tensors, labels)
+    trainer = SimpleNamespace(datamodule=SimpleNamespace(data_train=data_train))
+    callback.on_fit_start(trainer, None)
+    return callback.loaders
+
+
+def maskless_loader(x, batch_size):
+    # placeholder_loader as at a10184b.
+    labels = torch.zeros(len(x), dtype=torch.long)
+    return DataLoader(TensorDataset(x, labels), batch_size=batch_size)
+
+
+def maskless_sds_inputs(x, max_rows, row_seed):
+    # sds_inputs as at a10184b.
+    rows = torch.unique(x.reshape(len(x), -1), dim=0)
+    subset = row_subset(len(rows), max_rows, row_seed)
+    rows = rows if subset is None else rows[subset]
+    sets = sds_pseudo_sets(rows.double().numpy())
+    return {
+        name: torch.from_numpy(points).to(x.dtype).reshape(-1, *x.shape[1:])
+        for name, points in zip(SDS_SETS, sets)
+    }
+
+
+def assert_same_loaders(loaders, expected):
+    assert list(loaders) == list(expected)
+    for name, loader in loaders.items():
+        tensors, reference = loader.dataset.tensors, expected[name].dataset.tensors
+        assert loader.batch_size == expected[name].batch_size
+        assert len(tensors) == len(reference)
+        for a, b in zip(tensors, reference):
+            assert a.dtype == b.dtype and torch.equal(a, b)
+
+
+def autouad_points(x):
+    seeds = {"aux_seed": AUX["aux_seed"], "aux_size": AUX["aux_size"]}
+    return aux_inputs({**input_moments(x), **seeds})["autouad"]
+
+
+def test_maskless_made_up_loaders_are_unchanged():
+    x = toy_sets()["train"][0]
+    npd_loaders = fit_start(NPDCallback(**AUX), x)
+    expected = {"autouad": maskless_loader(autouad_points(x), AUX["batch_size"])}
+    assert_same_loaders(npd_loaders, expected)
+    for max_rows in (None, 40):
+        sds_loaders = fit_start(SDSCallback(max_rows=max_rows, batch_size=16), x)
+        inputs = maskless_sds_inputs(x, max_rows, 0)
+        expected = {name: maskless_loader(p, 16) for name, p in inputs.items()}
+        assert_same_loaders(sds_loaders, expected)
+
+
+def test_sds_pseudo_points_take_the_mask_of_their_source_row():
+    x, mask = physics_rows()
+    x, mask = torch.cat([x, x[:5]]), torch.cat([mask, mask[:5]])
+    inputs = sds_inputs(x, None, 0, mask)
+    flat = x.reshape(len(x), -1)
+    rows = torch.unique(flat, dim=0)
+    _, _, *sources = sds_pseudo_sets(rows.double().numpy(), return_rows=True)
+    maskless = sds_inputs(x, None, 0)
+    for name, source in zip(SDS_SETS, sources):
+        first = [int((flat == rows[i]).all(dim=1).nonzero()[0]) for i in source]
+        assert torch.equal(inputs[f"{name}_mask"], mask[first])
+        assert torch.equal(inputs[name], maskless[name])
+    subset = sds_inputs(x, 40, 0, mask)
+    for name in SDS_SETS:
+        assert subset[f"{name}_mask"].shape == subset[name].shape
+
+
+def test_made_up_loaders_take_the_l1ad_layout_with_zero_padding():
+    x, mask = physics_rows()
+    l1bit = torch.ones(len(x), dtype=torch.bool)
+    loaders = {
+        **fit_start(NPDCallback(**AUX), x, mask, l1bit),
+        **fit_start(SDSCallback(batch_size=16), x, mask, l1bit),
+    }
+    train_masks = {tuple(m.flatten().tolist()) for m in mask}
+    for loader in loaders.values():
+        assert all(len(batch) == 4 for batch in loader)
+        batches = [unpack_batch(batch) for batch in loader]
+        points = torch.cat([b.x for b in batches])
+        masks = torch.cat([b.mask for b in batches])
+        assert {tuple(m.flatten().tolist()) for m in masks} <= train_masks
+        assert not points[~masks].any() and not points[~masks].signbit().any()
+        assert not torch.cat([b.l1bit for b in batches]).any()
+    autouad = loaders["autouad"].dataset.tensors
+    present = autouad[1]
+    assert torch.equal(autouad[0][present], autouad_points(x)[present])
+
+
+def test_sds_on_validation_normal_takes_its_masks(monkeypatch):
+    monkeypatch.setattr(SDSCallback, "_compute_sds", lambda self, trainer, m: 0.0)
+    x, mask = physics_rows()
+    module = SimpleNamespace(log_dict=lambda *args, **kwargs: None)
+    trainer = SimpleNamespace(val_dataloaders={"normal": None}, sanity_checking=False)
+    for masked in (False, True):
+        callback = SDSCallback(source="normal", batch_size=16)
+        callback.on_fit_start(trainer, module)
+        callback.on_validation_epoch_start(trainer, module)
+        for i, (xb, mb) in enumerate(zip(x.split(32), mask.split(32))):
+            y = torch.zeros(len(xb))
+            batch = (xb, mb, y.bool(), y) if masked else (xb, y)
+            callback.on_validation_batch_end(trainer, module, {KEY: y}, batch, i)
+        callback.on_validation_epoch_end(trainer, module)
+        inputs = sds_inputs(x, 10000, 0, mask if masked else None)
+        for name, loader in callback.loaders.items():
+            tensors, expected = loader.dataset.tensors, inputs[name]
+            assert len(tensors) == (4 if masked else 2)
+            if masked:
+                rows_mask = inputs[f"{name}_mask"]
+                expected = torch.where(rows_mask, expected, torch.zeros_like(expected))
+                assert torch.equal(tensors[1], rows_mask)
+            assert torch.equal(tensors[0], expected)
+
+
+def test_mask_aware_realnvp_scores_the_made_up_loaders():
+    x, mask = physics_rows()
+    l1bit = torch.zeros(len(x), dtype=torch.bool)
+    loaders = {
+        **fit_start(NPDCallback(**AUX), x, mask, l1bit),
+        **fit_start(SDSCallback(batch_size=16), x, mask, l1bit),
+    }
+    torch.manual_seed(0)
+    flow = RealNVP(input_dim=12, n_flows=4, hidden_dim=16, n_hidden_layers=2)
+    module = RealNVPModule(flow=flow, target_rate=0.01, mask_aware=True).eval()
+    maskless = fit_start(NPDCallback(**AUX), x)["autouad"]
+    with torch.no_grad():
+        for loader in loaders.values():
+            for batch in loader:
+                assert torch.isfinite(module.model_step(batch)["ascore/full"]).all()
+        with pytest.raises(ValueError, match="data mask"):
+            module.model_step(next(iter(maskless)))

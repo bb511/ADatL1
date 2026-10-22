@@ -118,7 +118,8 @@ CCHAMBER_WT_COLUMNS = (
     "signal_2"
 ).split(",")
 
-# In the order of configs/data/cchamber_wt.yaml, which is not the column order.
+# The eleven readout columns of the published file; configs/data/cchamber_wt.yaml reads
+# ten of them.
 CCHAMBER_WT_READOUTS = [
     "pressure_upwind",
     "pressure_downwind",

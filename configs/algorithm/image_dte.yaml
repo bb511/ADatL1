@@ -23,6 +23,6 @@ predictor:
 # n_bins is searched; n_steps and beta_start are not, since the noise ladder depends
 # only on beta_end * n_steps and beta_start > beta_end is a constructor error.
 n_steps: 300
-n_bins: 7
+n_bins: 5
 beta_start: 0.0
 beta_end: 0.01

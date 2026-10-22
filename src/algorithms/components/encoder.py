@@ -131,6 +131,8 @@ class DeepSetsEncoder(nn.Module):
         to the pooled event representation.
     :param init_weight: Callable method to initialize the weights of the encoder nodes.
     :param init_bias: Callable method to initialize the biases of the encoder nodes.
+    :param rho_final_activation: Bool whether rho ends with the activation; False
+        leaves the event representation linear.
     """
 
     def __init__(
@@ -143,6 +145,7 @@ class DeepSetsEncoder(nn.Module):
         add_counts: bool = False,
         init_weight: Optional[Callable] = None,
         init_bias: Optional[Callable] = None,
+        rho_final_activation: bool = True,
     ):
         super().__init__()
 
@@ -189,7 +192,7 @@ class DeepSetsEncoder(nn.Module):
             out_dim=rho_nodes[-1],
             batchnorm=False,
             activation=activation,
-            final_activation=True,
+            final_activation=rho_final_activation,
             init_weight=init_weight,
             init_bias=init_bias,
         )

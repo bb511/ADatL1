@@ -38,7 +38,7 @@ algorithm:
   network_weight_decay: 1.0e-6
 
   encoder:
-    in_dim: 11
+    in_dim: 10
     nodes: [64, 32, 16]
 
   optimizer:

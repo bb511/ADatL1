@@ -18,6 +18,9 @@ tags: ["eval"]
 lattice: ???
 # The lattice paired by hyperpoint for UDR (another seed or half); null leaves UDR out.
 partner: null
+# Whether a run whose hyperpoint the partner lacks is logged and left out of UDR (its
+# UDR NaN); false raises before the replay.
+drop_unpaired: false
 scores_dir: ${paths.log_dir}/scores
 out_dir: ${paths.log_dir}/eval/${lattice}
 # Replaces data.data_dir of every run's configuration; null keeps it.

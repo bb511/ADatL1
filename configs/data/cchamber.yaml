@@ -31,7 +31,9 @@ train_seed: ${seed}
 train_fold: null
 n_train_folds: 2
 
-# The light tunnel's eleven sensor readouts, in model-input order.
+# The light tunnel's ten sensor readouts, in model-input order. v_board is left out: it
+# reads 1022 or 1023 only, so its robust scale sits at the floor and its 1022 rows alone
+# fill the top 1 % of every whitened score.
 readouts:
   - current
   - angle_1
@@ -42,32 +44,27 @@ readouts:
   - vis_2
   - ir_3
   - vis_3
-  - v_board
   - v_reg
 
 # One CSV per experiment.
 reference: { file: uniform_reference }
-# The 16 actuator interventions (light source, polarizers, LEDs); labels 1-16 in order.
+# The ten actuator interventions on the light source and the polarizers; labels 1-10 in
+# order.
 signals:
   uniform_blue_mid: { file: uniform_blue_mid }
   uniform_blue_strong: { file: uniform_blue_strong }
   uniform_green_mid: { file: uniform_green_mid }
   uniform_green_strong: { file: uniform_green_strong }
-  uniform_l_11_mid: { file: uniform_l_11_mid }
-  uniform_l_12_mid: { file: uniform_l_12_mid }
-  uniform_l_21_mid: { file: uniform_l_21_mid }
-  uniform_l_22_mid: { file: uniform_l_22_mid }
-  uniform_l_31_mid: { file: uniform_l_31_mid }
-  uniform_l_32_mid: { file: uniform_l_32_mid }
   uniform_pol_1_mid: { file: uniform_pol_1_mid }
   uniform_pol_1_strong: { file: uniform_pol_1_strong }
   uniform_pol_2_mid: { file: uniform_pol_2_mid }
   uniform_pol_2_strong: { file: uniform_pol_2_strong }
   uniform_red_mid: { file: uniform_red_mid }
   uniform_red_strong: { file: uniform_red_strong }
-# The second typical domain, label 0: the nine sensor parameters, each changed alone
-# with the actuators at reference, pooled per grade. A member is split as a signal is.
+# Label 0; a set is split as a signal is, a pool member by member.
 nulls:
+  # The second typical domain: the nine sensor parameters, each changed alone with the
+  # actuators at reference, pooled per grade.
   sensor_weak:
     members:
       - { file: uniform_osr_angle_1_weak }
@@ -101,3 +98,12 @@ nulls:
       - { file: uniform_t_vis_1_strong }
       - { file: uniform_t_vis_2_strong }
       - { file: uniform_t_vis_3_strong }
+  # The six LEDs beside the light sensors, each brightened alone. Every baseline and
+  # every untrained model scores them at chance: they differ from the reference only
+  # through the drift of v_reg with recording order.
+  uniform_l_11_mid: { file: uniform_l_11_mid }
+  uniform_l_12_mid: { file: uniform_l_12_mid }
+  uniform_l_21_mid: { file: uniform_l_21_mid }
+  uniform_l_22_mid: { file: uniform_l_22_mid }
+  uniform_l_31_mid: { file: uniform_l_31_mid }
+  uniform_l_32_mid: { file: uniform_l_32_mid }

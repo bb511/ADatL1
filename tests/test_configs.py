@@ -131,17 +131,23 @@ CRITERIA = {
     "npd": ("src.callbacks.autouad.NPDCallback", "max", "npd"),
     "rtm": ("src.callbacks.autouad.RTMCallback", "max", "rtm"),
     "eag": ("src.callbacks.autouad.EAGCallback", "max", "eag"),
-    "em": ("src.callbacks.goix.ExcessMassCallback", "max", "excess_mass"),
-    "mv": ("src.callbacks.goix.MassVolumeCallback", "min", "mass_volume"),
     "entropy": ("src.callbacks.entropy.LossEntropyCallback", "min", "loss_entropy"),
-    "sds": ("src.callbacks.sds.SDSCallback", "min", "sds"),
-    "sds_val": ("src.callbacks.sds.SDSCallback", "min", "sds_val"),
+    "sds_286_088064": ("src.callbacks.sds.SDSCallback", "min", "sds"),
+    "sds_val_286_088064": ("src.callbacks.sds.SDSCallback", "min", "sds_val"),
     "ascore_operational": (
         "src.callbacks.operational.OperationalScoreCallback",
         "min",
         "operational_score",
     ),
 }
+# Criteria left out per experiment. A negative log-likelihood can be negative: entropy
+# is then undefined, and the sign of RTM meaningless. The training losses of SVDD reach
+# 0, where entropy is undefined too.
+SKIPPED = {"physics/realnvp": {"rtm", "entropy"}, "physics/svdd": {"entropy"}}
+GOIX = (
+    "src.callbacks.goix.ExcessMassCallback",
+    "src.callbacks.goix.MassVolumeCallback",
+)
 
 
 @pytest.mark.parametrize("experiment", PHYSICS)
@@ -152,10 +158,20 @@ def test_label_free_criteria_are_logged_checkpointed_and_evaluated(
     callbacks = cfg["callbacks"]
     saved = {cb["monitor"]: cb for cb in _saved_folders(callbacks).values()}
     summary = cfg["evaluation"]["evaluator"]["ckpts"]["summary"]
+    skipped = SKIPPED.get(experiment, set())
     for key, (target, mode, block) in CRITERIA.items():
+        if key in skipped:
+            assert block not in callbacks and f"{key}_ema" not in summary
+            continue
         assert callbacks[block]["_target_"] == target
         assert saved[f"val/summary/{key}_ema"]["mode"] == mode
         assert summary[f"{key}_ema"] == [mode]
+    assert len(saved) == 17 - len(skipped)
+    targets = {cb.get("_target_") for cb in callbacks.values() if isinstance(cb, dict)}
+    assert not targets & set(GOIX)
+    for block in ("sds", "sds_val"):
+        sds = hydra.utils.instantiate(callbacks[block])
+        assert f"val/summary/{sds.name}_ema" in saved
     assert callbacks["sds_val"]["source"] == "normal"
     assert callbacks["sds"]["source"] == "train"
     assert not {"npd", "sds"} & cfg["evaluation"]["callbacks"].keys()

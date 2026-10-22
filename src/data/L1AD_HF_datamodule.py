@@ -13,7 +13,7 @@ from hydra.core.global_hydra import GlobalHydra
 from hydra.utils import instantiate
 from omegaconf import DictConfig
 from pytorch_lightning import LightningDataModule
-from torch.utils.data import DataLoader, Dataset
+from torch.utils.data import DataLoader, Dataset, TensorDataset
 
 from src.data.components.dataset import L1ADDataset
 from src.utils import pylogger
@@ -195,6 +195,19 @@ class L1ADHFDataModule(LightningDataModule):
             overrides.append(f"data/data_normalizer={scheme}")
 
         return overrides + [str(o) for o in (self.hparams.overrides or [])]
+
+    @property
+    def data_train(self) -> TensorDataset | None:
+        """The training split as (x, mask, l1bit, y), in the order unpack_batch reads.
+
+        The rows keep the record's order and the tensors the dtypes its loader hands
+        back (the training loader casts x and y to float). None before setup and after
+        teardown.
+        """
+        split = self._main.get("train")
+        if split is None:
+            return None
+        return TensorDataset(split.x, split.mask, split.l1bit, split.y)
 
     def train_dataloader(self) -> Dataset:
         """Create and return the training dataloader.

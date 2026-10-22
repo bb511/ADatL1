@@ -9,32 +9,41 @@ from torch import nn
 from src.algorithms import ADLightningModule
 from src.data.utils import unpack_batch
 
+# (failed, message) pairs over the saved hyperparameters, checked in this order.
+_HPARAM_CHECKS = (
+    (lambda hp: hp.n_steps < 2, "n_steps must be at least 2."),
+    (lambda hp: hp.n_bins < 2, "n_bins must be at least 2."),
+    (lambda hp: hp.n_bins > hp.n_steps, "n_bins cannot exceed n_steps."),
+    (lambda hp: not 0.0 <= hp.beta_start < 1.0, "beta_start must lie in [0, 1)."),
+    (lambda hp: not 0.0 < hp.beta_end < 1.0, "beta_end must lie in (0, 1)."),
+    (lambda hp: hp.beta_start > hp.beta_end, "beta_start cannot exceed beta_end."),
+)
+
+
+def _multiplicity_correlation(
+    ascore: torch.Tensor, mask: torch.Tensor | None
+) -> float | None:
+    """Correlate the score with how many features an event actually populates.
+
+    A large magnitude means the score tracks occupancy rather than anomalousness, which
+    is the failure mode masked corruption can produce. Returns None when the data
+    carries no mask, so the key is simply absent from the logs.
+    """
+    if mask is None:
+        return None
+
+    n_active = torch.flatten(mask, start_dim=1).sum(dim=1).to(ascore.dtype)
+    centred_score = ascore - ascore.mean()
+    centred_count = n_active - n_active.mean()
+    denominator = centred_score.norm() * centred_count.norm()
+    if denominator <= 0:
+        return 0.0
+
+    return float(torch.dot(centred_score, centred_count) / denominator)
+
 
 class DTE(ADLightningModule):
-    """Categorical Diffusion Time Estimation (DTE-C).
-
-    Training adds a sampled amount of Gaussian noise to nominal observations and
-    predicts its ordered time bin. Evaluation is clean and deterministic: the
-    anomaly score is the expected predicted bin, normalised onto ``[0, 1]`` so that
-    it means the same thing for every ``n_bins``.
-
-    The implementation follows the additive corruption used by the DTE training
-    algorithm, ``x_t = x_0 + sqrt(1 - alpha_bar_t) * epsilon``. It deliberately
-    does not apply the signal-scaling term from conventional forward diffusion.
-
-    Three further deviations from the reference implementation (vicliv/DTE) are
-    deliberate and should not be "fixed" back:
-
-    - ``beta_start`` defaults to 0 rather than 1e-4, so ``noise_scales[0]`` is
-      exactly 0. The uncorrupted event is then something the predictor sees during
-      training, which is what makes scoring a clean event well posed.
-    - The predictor emits raw logits, and the softmax is applied exactly once: by
-      ``F.cross_entropy`` when computing the loss, by :meth:`anomaly_score` when
-      scoring. The reference softmaxes inside the model and then hands the result
-      to ``nn.CrossEntropyLoss``, applying it twice and squashing the gradients.
-    - Noise is masked on padded coordinates, so a padded slot is never a free
-      readout of the noise level. See :meth:`corrupt`.
-    """
+    """Categorical Diffusion Time Estimation (DTE-C)."""
 
     def __init__(
         self,
@@ -54,27 +63,9 @@ class DTE(ADLightningModule):
                 "DTE does not accept an encoder; configure algorithm.predictor instead."
             )
         super().__init__(model=None, **kwargs)
-        if n_steps < 2:
-            raise ValueError("n_steps must be at least 2.")
-        if n_bins < 2:
-            raise ValueError("n_bins must be at least 2.")
-        if n_bins > n_steps:
-            raise ValueError("n_bins cannot exceed n_steps.")
-        if not 0.0 <= beta_start < 1.0:
-            raise ValueError("beta_start must lie in [0, 1).")
-        if not 0.0 < beta_end < 1.0:
-            raise ValueError("beta_end must lie in (0, 1).")
-        if beta_start > beta_end:
-            raise ValueError("beta_start cannot exceed beta_end.")
-
-        predictor_out = getattr(predictor, "out_dim", None)
-        if predictor_out is not None and int(predictor_out) != int(n_bins):
-            raise ValueError(
-                f"predictor out_dim={predictor_out} does not match n_bins={n_bins}."
-            )
-
         self.save_hyperparameters(ignore=["model", "predictor", "features", "loss"])
         self.predictor = predictor
+        self._check_hparams()
         self.features = features if features is not None else nn.Identity()
         self.features.eval()
 
@@ -137,24 +128,10 @@ class DTE(ADLightningModule):
         posterior toward the prior and so its score upward. ``ascore/mult_corr`` measures how
         far that goes.
         """
-        if x.ndim != 2:
-            raise ValueError(
-                f"DTE corruption expects [batch, features], got {tuple(x.shape)}."
-            )
-        if timesteps.shape != (x.shape[0],):
-            raise ValueError(
-                f"Expected one timestep per event, got {tuple(timesteps.shape)}."
-            )
-        self.time_to_bin(timesteps)
-
+        self._validate_corruption_inputs(x, timesteps, mask, noise)
         if noise is None:
             noise = torch.randn_like(x)
-        elif noise.shape != x.shape:
-            raise ValueError(f"noise shape {tuple(noise.shape)} does not match x.")
-
         if mask is not None:
-            if mask.shape != x.shape:
-                raise ValueError(f"mask shape {tuple(mask.shape)} does not match x.")
             noise = noise * mask.to(device=x.device, dtype=x.dtype)
 
         scale = self.noise_scales[timesteps.long()].to(dtype=x.dtype).unsqueeze(1)
@@ -202,7 +179,7 @@ class DTE(ADLightningModule):
 
             operational_ascore = self.compute_operational_ascore(ascore)
             q50, q99 = self.compute_score_quantiles(ascore)
-            mult_corr = self._multiplicity_correlation(ascore, mask)
+            mult_corr = _multiplicity_correlation(ascore, mask)
         if was_training:
             self.predictor.train()
 
@@ -234,27 +211,33 @@ class DTE(ADLightningModule):
             "ascore_mult_corr": outdict.get("ascore/mult_corr"),
         }
 
-    @staticmethod
-    def _multiplicity_correlation(
-        ascore: torch.Tensor, mask: torch.Tensor | None
-    ) -> float | None:
-        """Correlate the score with how many features an event actually populates.
+    def _check_hparams(self) -> None:
+        hp = self.hparams
+        for failed, message in _HPARAM_CHECKS:
+            if failed(hp):
+                raise ValueError(message)
+        predictor_out = getattr(self.predictor, "out_dim", None)
+        if predictor_out is not None and int(predictor_out) != int(hp.n_bins):
+            raise ValueError(
+                f"predictor out_dim={predictor_out} does not match n_bins={hp.n_bins}."
+            )
 
-        A large magnitude means the score tracks occupancy rather than anomalousness,
-        which is the failure mode masked corruption can produce. Returns None when the
-        data carries no mask, so the key is simply absent from the logs.
-        """
-        if mask is None:
-            return None
-
-        n_active = torch.flatten(mask, start_dim=1).sum(dim=1).to(ascore.dtype)
-        centred_score = ascore - ascore.mean()
-        centred_count = n_active - n_active.mean()
-        denominator = centred_score.norm() * centred_count.norm()
-        if denominator <= 0:
-            return 0.0
-
-        return float(torch.dot(centred_score, centred_count) / denominator)
+    def _validate_corruption_inputs(
+        self,
+        x: torch.Tensor,
+        timesteps: torch.Tensor,
+        mask: torch.Tensor | None,
+        noise: torch.Tensor | None,
+    ) -> None:
+        shape, steps_shape = tuple(x.shape), tuple(timesteps.shape)
+        if x.ndim != 2:
+            raise ValueError(f"DTE corruption expects [batch, features], got {shape}.")
+        if steps_shape != (x.shape[0],):
+            raise ValueError(f"Expected one timestep per event, got {steps_shape}.")
+        self.time_to_bin(timesteps)
+        for name, arg in (("noise", noise), ("mask", mask)):
+            if arg is not None and arg.shape != x.shape:
+                raise ValueError(f"{name} shape {tuple(arg.shape)} does not match x.")
 
     def _validate_logits(self, logits: torch.Tensor, batch_size: int) -> None:
         expected = (int(batch_size), int(self.hparams.n_bins))

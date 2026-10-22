@@ -31,11 +31,14 @@ train_seed: ${seed}
 train_fold: null
 n_train_folds: 2
 
-# The wind tunnel's eleven sensor readouts, in the order of readout_map_wt.yaml.
+# The wind tunnel's ten sensor readouts, in the order of readout_map_wt.yaml. The
+# absolute pressures follow the weather over the 30 h of the file, so that their level
+# dates a regime; their differences to the ambient pressure stay put. The three other
+# barometers are therefore read relative to pressure_ambient, which carries the weather
+# and is left out.
 readouts:
   - pressure_upwind
   - pressure_downwind
-  - pressure_ambient
   - pressure_intake
   - mic
   - rpm_in
@@ -44,27 +47,24 @@ readouts:
   - current_out
   - signal_1
   - signal_2
+relative_to:
+  pressure_upwind: pressure_ambient
+  pressure_downwind: pressure_ambient
+  pressure_intake: pressure_ambient
 
 # A set is one regime (its flag) of regime_jumps_single.csv; regime 0 is the reference.
 reference: { file: regime_jumps_single, where: { flag: 0 } }
-# regime_<index>_<intervention target>. The labels 1-16 follow this order.
+# regime_<index>_<intervention target>. The labels 1-7 follow this order. The nine
+# res_in, res_out and v_1 regimes are left out: they stand apart from the reference no
+# more than the regimes without an intervention do.
 signals:
   regime_01_v_2: { file: regime_jumps_single, where: { flag: 1 } }
-  regime_03_res_out: { file: regime_jumps_single, where: { flag: 3 } }
   regime_04_v_out: { file: regime_jumps_single, where: { flag: 4 } }
   regime_05_hatch: { file: regime_jumps_single, where: { flag: 5 } }
-  regime_06_v_1: { file: regime_jumps_single, where: { flag: 6 } }
   regime_10_v_out: { file: regime_jumps_single, where: { flag: 10 } }
-  regime_11_v_1: { file: regime_jumps_single, where: { flag: 11 } }
-  regime_12_res_in: { file: regime_jumps_single, where: { flag: 12 } }
-  regime_14_res_out: { file: regime_jumps_single, where: { flag: 14 } }
   regime_17_v_in: { file: regime_jumps_single, where: { flag: 17 } }
   regime_18_hatch: { file: regime_jumps_single, where: { flag: 18 } }
-  regime_21_res_in: { file: regime_jumps_single, where: { flag: 21 } }
-  regime_22_v_1: { file: regime_jumps_single, where: { flag: 22 } }
-  regime_25_v_1: { file: regime_jumps_single, where: { flag: 25 } }
   regime_30_v_in: { file: regime_jumps_single, where: { flag: 30 } }
-  regime_31_res_in: { file: regime_jumps_single, where: { flag: 31 } }
 # Pools of regimes, label 0; a member is split as a signal is.
 nulls:
   # The second typical domain: one barometer reads with oversampling 1 instead of 8, the

@@ -37,13 +37,16 @@ algorithm:
   base_rate: null
 
   flow:
-    input_dim: 11
+    input_dim: 10
     n_flows: 6
     hidden_dim: 32
     n_hidden_layers: 2
     activation: relu
     noise_scale: 0.0
     scale_clamp: 5.0
+    # Without it the untrained flow scores validation normal at an NLL of 1e3 or more in
+    # 333 of the 400 runs of the first lattice, up to 3e16.
+    identity_init: true
 
   optimizer:
     _partial_: true

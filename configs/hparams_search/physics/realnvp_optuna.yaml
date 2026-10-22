@@ -27,7 +27,8 @@ hydra:
 
     # define hyperparameter search space. Assumes using torch.optim.AdamW
     params:
-      algorithm.optimizer.lr: tag(log, interval(3e-5, 3e-3))
+      # At lr 1e-3, 8 couplings of one 96-wide hidden layer diverge within 200 epochs.
+      algorithm.optimizer.lr: tag(log, interval(3e-5, 3e-4))
       trainer.gradient_clip_val: choice(0.0, 0.5, 1.0, 2.0)
       algorithm.flow.n_flows: choice(4, 6, 8)
       algorithm.flow.hidden_dim: choice(32, 48, 64, 96)

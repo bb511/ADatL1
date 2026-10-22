@@ -37,11 +37,14 @@ algorithm:
   target_rate: 0.01
   base_rate: null
   anomaly_score: residual_oas
-  kl_scale: 0.1
+  kl_scale: 1.0e-2
   kl_warmup_frac: 0.0
+  # The decoder reads the posterior mean in eval mode, so that loss/full, which the
+  # entropy criterion reads, is deterministic.
+  eval_mean: true
 
   encoder:
-    in_dim: 11
+    in_dim: 10
     nodes: [32, 16, 4]
     activation: relu
     clamp_zlogvar_range: [-10.0, 6.0]

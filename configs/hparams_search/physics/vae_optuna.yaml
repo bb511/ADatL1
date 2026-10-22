@@ -31,4 +31,5 @@ hydra:
       trainer.gradient_clip_val: choice(0.0, 0.5, 1.0, 2.0)
       # The last entry of each width list is the latent width.
       algorithm.encoder.nodes: choice([16,4], [16,8], [32,8], [32,16], [24,8,4], [32,16,4], [32,16,8], [32,16,16], [48,24,8], [48,24,16], [64,32,16], [64,32,32])
-      algorithm.kl_scale: choice(3e-5, 1e-4, 3e-4, 1e-3, 3e-3, 1e-2, 3e-2, 1e-1)
+      # The posterior and its KL score collapse at 1e-1, and often at 3e-2 from lr 3e-3.
+      algorithm.kl_scale: choice(3e-5, 1e-4, 3e-4, 1e-3, 3e-3, 1e-2)

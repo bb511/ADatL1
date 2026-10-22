@@ -36,9 +36,25 @@ def _select(table: pa.Table, where: dict[str, int | float | str]) -> pa.Table:
     return table
 
 
-def _to_tensor(table: pa.Table, readouts: list[str]) -> torch.Tensor:
+def _column(table: pa.Table, name: str, subtracted: str | None) -> np.ndarray:
+    """Return a column of a table, less the column ``subtracted`` when one is named.
+
+    The difference is taken in float64, before the cast to float32, so that the level
+    the two columns share cancels without float32 rounding.
+    """
+    column = table.column(name).to_numpy()
+    if subtracted is None:
+        return column
+    offset = table.column(subtracted).to_numpy().astype(np.float64)
+
+    return column.astype(np.float64) - offset
+
+
+def _to_tensor(
+    table: pa.Table, readouts: list[str], relative_to: dict[str, str]
+) -> torch.Tensor:
     """Return the given columns of a table, (nrows, len(readouts)) in float32."""
-    columns = [table.column(name).to_numpy() for name in readouts]
+    columns = [_column(table, name, relative_to.get(name)) for name in readouts]
 
     return torch.as_tensor(np.stack(columns, axis=1), dtype=torch.float32)
 
@@ -53,22 +69,10 @@ class CausalChamberDataModule(LightningDataModule):
     by its ``flag`` column. A set in ``signals`` or ``nulls`` may also be a pool
     ``{members: [<plain set>, ...]}``.
 
-    The rows of the ``reference`` set are split into train, validation and test by
-    ``train_fraction`` and ``val_fraction``, and each evaluation part is halved into
-    ``normal`` and ``reference_normal``, both labeled 0. Every set in ``signals`` is
-    split into validation and test by ``signal_val_fraction`` and labeled by its
-    1-based position in that mapping. Those in ``nulls``, which hold no anomaly, are
-    split in the same way and labeled 0. Each member of a pool is split as a plain set
-    of its own, and the validation (test) rows of the pool are those of its members,
-    concatenated in member order. Each permutation comes from a fresh generator, seeded
-    with ``seed`` for the reference split and with ``seed + n`` for the halving and the
-    set splits (n being the number of rows permuted); this reproduces the row sets of
-    the original chamber study. The splits do not depend on the training seed; only the
-    batch order of the training loader does.
-
-    The model inputs are the ``readouts``, in the given order. Each is centered on its
-    median over the training rows, divided by the spread between the two
-    ``robust_quantiles`` of those rows and clipped at ``clip_value``.
+    The model inputs are the ``readouts``, in the given order. A readout named in
+    ``relative_to`` is first replaced by its difference to the CSV column it maps to.
+    Each is then centered on its median over the training rows, divided by the spread
+    between the two ``robust_quantiles`` of those rows and clipped at ``clip_value``.
 
     Validation and test loaders are dictionaries ordered ``normal``,
     ``reference_normal``, the sets of ``signals`` in order, then those of ``nulls``.
@@ -82,6 +86,9 @@ class CausalChamberDataModule(LightningDataModule):
         training row.
     :param robust_quantiles: Lower and upper quantile whose difference sets the scale.
     :param train_seed: Seed of the training batch order; ``seed`` when None.
+    :param relative_to: ``{readout: column}``, the CSV column subtracted from each
+        readout named, in float64 before the cast to float32; the column is read even
+        when it is not a readout. None or empty takes every readout as it is.
     """
 
     def __init__(
@@ -106,18 +113,19 @@ class CausalChamberDataModule(LightningDataModule):
         num_workers: int = 0,
         train_fold: int | None = None,
         n_train_folds: int = 2,
+        relative_to: dict[str, str] | None = None,
     ) -> None:
         super().__init__()
         self.save_hyperparameters(logger=False)
         self.dataset_dir = Path(data_dir) / dataset_name
+        self.relative_to = dict(relative_to or {})
+        if not set(self.relative_to) <= set(readouts):
+            raise ValueError(f"relative_to names a non-readout: {self.relative_to}.")
         # inject_object_feature_map looks for the map on datamodule.loader during fit.
         # One object holds every readout, in the {object: {feature: [flat index]}}
         # layout that ADLightningModule._split_by_type_from_flat reads.
         feature_map = {"chamber": {name: [i] for i, name in enumerate(readouts)}}
         self.loader = SimpleNamespace(object_feature_map=feature_map)
-        # Advanced once per epoch by the training loader to reorder its batches. The
-        # training seed drives it, so that seeds differ in batch order and not only in
-        # the initialization, while the split stays with the data seed.
         self.shuffler = torch.Generator().manual_seed(
             seed if train_seed is None else train_seed
         )
@@ -171,15 +179,19 @@ class CausalChamberDataModule(LightningDataModule):
             self._tables[stem] = self._read_table(stem)
         table = _select(self._tables[stem], spec.get("where") or {})
 
-        return _to_tensor(table, self.hparams.readouts)
+        return _to_tensor(table, self.hparams.readouts, self.relative_to)
 
     def _read_table(self, stem: str) -> pa.Table:
-        """Read the readouts of one CSV and every column that a set filters it on."""
+        """Read the readouts of one CSV and every column that a set filters it on.
+
+        The columns that ``relative_to`` subtracts from the readouts are read too.
+        """
         nulls = self.hparams.nulls or {}
         sets = [self.hparams.reference, *self.hparams.signals.values(), *nulls.values()]
         plain = [m for s in sets for m in s.get("members") or [s]]
         where = [c for s in plain if s["file"] == stem for c in s.get("where") or {}]
-        columns = list(dict.fromkeys([*self.hparams.readouts, *where]))
+        subtracted = self.relative_to.values()
+        columns = list(dict.fromkeys([*self.hparams.readouts, *subtracted, *where]))
         options = pa_csv.ConvertOptions(include_columns=columns)
         path = self.dataset_dir / f"{stem}.csv"
 

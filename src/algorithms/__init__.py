@@ -162,7 +162,11 @@ class ADLightningModule(LightningModule):
         x_flat: torch.Tensor,
         m_flat: torch.Tensor | None,
     ) -> tuple[dict[str, torch.Tensor], dict[str, torch.Tensor]]:
-        """Build per-type tensors from flattened inputs using object_feature_map."""
+        """Build per-type tensors from flattened inputs using object_feature_map.
+
+        An object is present when any of its features is unmasked, since some objects
+        never carry every feature (the FET has no eta).
+        """
         object_feature_map = getattr(self, "object_feature_map", None)
         if object_feature_map is None:
             raise RuntimeError(
@@ -204,7 +208,7 @@ class ADLightningModule(LightningModule):
                 m_obj = torch.index_select(m_flat, dim=1, index=idx_tensor)
 
                 obj_features.append(x_obj)
-                obj_masks.append(m_obj.all(dim=1))
+                obj_masks.append(m_obj.any(dim=1))
 
             x_by_type[obj_name] = torch.stack(obj_features, dim=1)
             m_by_type[obj_name] = torch.stack(obj_masks, dim=1)

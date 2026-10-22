@@ -30,7 +30,8 @@ hydra:
     # define hyperparameter search space. Assumes using torch.optim.AdamW
     # n_bins is searched; n_steps and beta_start are not (see physics/dte_optuna.yaml).
     params:
-      algorithm.optimizer.lr: tag(log, interval(3e-5, 1e-2))
+      # From lr 5e-3 up the logits turn uniform in one epoch: every image scores alike.
+      algorithm.optimizer.lr: tag(log, interval(3e-5, 3e-3))
       trainer.gradient_clip_val: choice(0.0, 0.5, 1.0, 2.0)
       algorithm.beta_end: tag(log, interval(1e-3, 1e-1))
       algorithm.n_bins: choice(5, 10, 20, 30)

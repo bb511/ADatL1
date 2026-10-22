@@ -9,7 +9,8 @@ from pathlib import Path
 import pandas as pd
 
 from src.callbacks.components.selection import W_STEPS
-from src.evaluation.lattice import SPLITS, Lattice, Strategy
+from src.evaluation.components.tables import SPLITS
+from src.evaluation.lattice import Lattice, Strategy
 
 # The harvest's labels where they differ from the strategy names.
 LABELS = {"drift": "stability", "w1": "wasserstein"}

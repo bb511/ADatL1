@@ -43,6 +43,11 @@ CKPTS = {
         "val/summary/w1dist_ema_normal_vs_ref",
         "min",
     ),
+    "sds_q99_ckpt": (
+        "summary/sds_286_088064_ema/min",
+        "val/summary/sds_286_088064_ema",
+        "min",
+    ),
 }
 EVALUATED = [
     "cvar25_ema_ckpt",
@@ -50,6 +55,7 @@ EVALUATED = [
     "drift_q99_ckpt",
     "cap_ckpt",
     "loss_ckpt",
+    "sds_q99_ckpt",
 ]
 CAP = [0.1, 0.2, 0.3]
 SEC = [1.0, 0.5, 2.0]
@@ -117,6 +123,8 @@ def _log_run(client, experiment_id, run):
     metrics += [Metric("eval/val/optimized/optimized_main", 500.0, now, 0)]
     for _, monitor, _ in CKPTS.values():
         metrics += [Metric(monitor, v, now + e, e) for e, v in enumerate(HISTORY[run])]
+    sds = "val/summary/sds_286_088064"
+    metrics += [Metric(sds, 2 * v, now + e, e) for e, v in enumerate(HISTORY[run])]
     params = [Param(k, v) for k, v in _params(run).items()]
     client.log_batch(run_id, metrics=metrics, params=params)
     client.set_terminated(run_id)
@@ -171,6 +179,7 @@ def test_rows_per_tier_and_strategy(outdir):
         "stability": 3,
         "cap": 3,
         "loss": 3,
+        "sds": 3,
     }
     assert set(main["tier"]) == {"250"} and set(q99["tier"]) == {"q99"}
     assert main["run_name"].is_unique and q99["run_name"].is_unique
@@ -264,6 +273,20 @@ def test_label_free_criteria_read_q_prime_from_the_history(tmp_path):
         0.9,
         "history",
     )
+
+
+def test_sds_at_a_rate_lands_in_its_tier_only(outdir):
+    q99 = _read(outdir, "physics_toy_q99_pool")
+    sds = _row(q99, "sds", 0)
+    assert sds["tier"] == "q99" and sds["q_source"] == "history"
+    assert sds["epoch"] == 1 and sds["optimized_main"] == pytest.approx(0.8)
+    for name in ("sds", "sds_val"):
+        metric = f"{name}_286_088064_ema"
+        monitor = f"val/summary/{metric}"
+        ckpt = harvest.Checkpoint(("summary", metric, "min"), monitor, False)
+        strategy = harvest._strategy(ckpt, 0.25, 28608.8064)
+        assert (strategy.label, strategy.tier.label) == (name, Q99)
+        assert strategy.q_history == monitor.removesuffix("_ema")
 
 
 def test_q_sec_strategy_reads_the_operational_score():

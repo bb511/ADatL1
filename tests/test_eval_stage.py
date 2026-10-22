@@ -21,7 +21,7 @@ from src.callbacks.components.selection import W_STEPS, best_epoch, ema, smoothe
 from src.evaluation.callbacks.efficiency import AnomalyEfficiencyCallback
 from src.evaluation.callbacks.utils.mlflow import log_metrics_to_mlflow
 from src.evaluation.callbacks.wasserstein import _wasserstein_1d
-from src.evaluation.dump import hyperpoint
+from src.evaluation.components.pairing import hyperpoint
 from src.evaluation.evaluator import Evaluator
 from src.evaluation.replay import ReplayModule
 from src.utils.omegaconf import register_resolvers
@@ -231,11 +231,24 @@ def test_metrics_are_recorded_finite_or_not():
 
 def test_the_switch_drops_plots_and_files_only(dump, chamber, tmp_path):
     keys = ["anomaly_efficiency", "thres_drift", "cap", "ascore_operational"]
+    # The chamber's evaluation has no CAP: its config is built as the chamber's was.
+    cap_metric = OmegaConf.load(CONFIGS / "cap" / "provisional.yaml")
+    cap = {
+        "_target_": "src.evaluation.callbacks.cap.CAP",
+        "output_name": "ascore/full",
+        "dataset_1": "normal",
+        "dataset_2": "reference_normal",
+        "pairing_type": "cdf",
+        "cap_metric_config": OmegaConf.to_container(cap_metric),
+        "log_raw_mlflow": False,
+        "name": "cap",
+    }
+    available = {**chamber.dump_callbacks, "cap": cap}
     records = {}
     for plots in (True, False):
         out = tmp_path / str(plots)
         replay = _replay(dump, "epoch_0000.pt", out)
-        configs = [chamber.dump_callbacks[key] for key in keys]
+        configs = [available[key] for key in keys]
         callbacks = [hydra.utils.instantiate(config) for config in configs]
         loaders = ToyDataModule().loaders("test")
         records[plots] = _test(replay, "test", loaders, callbacks, plots)
@@ -386,7 +399,7 @@ def test_eval_configs_build_the_evaluator(domain):
     reference = "shifted_normal_all" if domain == "robustad" else "reference_normal"
     assert configs["wasserstein"]["dataset_2"] == reference
     null_ds = configs["anomaly_efficiency"]["null_ds"]
-    assert len(null_ds) == {"cchamber": 3, "cchamber_wt": 2}.get(domain, 0)
+    assert len(null_ds) == {"cchamber": 9, "cchamber_wt": 2}.get(domain, 0)
 
 
 @pytest.mark.parametrize("domain", ["cchamber", "cchamber_wt"])
@@ -395,7 +408,7 @@ def test_pairings_copy_the_control(domain):
     configs, criteria = evaluator.dump_callbacks, evaluator.selection["criteria"]
     specs = {spec["column"].split("/")[0]: spec for spec in criteria.values()}
     pairings = [name for name, config in configs.items() if "dataset_2" in config]
-    assert len(pairings) == 3 * (4 if domain == "cchamber" else 3)
+    assert len(pairings) == (4 if domain == "cchamber" else 3)
     for name in pairings:
         config, spec = configs[name], specs[name]
         control = configs[name.split("_")[0]]
@@ -429,7 +442,7 @@ def test_sets_replace_the_lists_of_a_dump(cchamber_data, monkeypatch, tmp_path):
         "nulls": {"sensor_weak": {"members": [{"file": name} for name in POOL]}},
     }
     (tmp_path / "pooled.yaml").write_text(yaml.safe_dump(sets))
-    monkeypatch.setattr("src.evaluation.dump.DATA_CONFIGS", tmp_path)
+    monkeypatch.setattr("src.evaluation.components.rebuild.DATA_CONFIGS", tmp_path)
 
     before = {"normal", "reference_normal", *cchamber_data.signals}
     after = {"normal", "reference_normal", "uniform_red_mid", "sensor_weak"}

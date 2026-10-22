@@ -5,7 +5,7 @@ encoder:
   _target_: src.algorithms.components.encoder.ImageVariationalEncoder
   in_channels: 3
   input_size: [32, 32]
-  nodes: [32, 64, 128, 64]
+  nodes: [32, 64, 128, 32]
   strides: [2, 2]
   activation: relu
   batchnorm: false
@@ -22,7 +22,7 @@ decoder:
   final_activation: null
 
 kl_warmup_frac: 0.0
-kl_scale: 1.0
+kl_scale: 1.0e-3
 
 target_rate: 0.01
 base_rate: null

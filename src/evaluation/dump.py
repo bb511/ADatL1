@@ -1,14 +1,5 @@
-"""Evaluate the per-epoch score dumps of a lattice, one run at a time.
+"""Evaluate the per-epoch score dumps of a lattice, one run at a time."""
 
-``RunEvaluation`` replays the epoch files of one run (``src/callbacks/score_dump.py``
-gives the layout) through the evaluation callbacks and writes the run's tables, on
-which ``src.evaluation.lattice`` selects; ``LatticeEvaluation`` maps it over the runs
-of a lattice.
-"""
-
-import csv
-import hashlib
-import json
 import logging
 import math
 import multiprocessing
@@ -21,7 +12,6 @@ import hydra
 import numpy as np
 import pytorch_lightning
 import torch
-import yaml
 from mlflow.entities import Metric, Param
 from mlflow.tracking import MlflowClient
 from omegaconf import OmegaConf
@@ -34,15 +24,20 @@ from src.callbacks.components.selection import (
     epoch_pick,
     smoothed,
 )
-from src.callbacks.score_dump import _layout
-from src.callbacks.sds import sds_inputs
-from src.evaluation.callbacks.efficiency import AnomalyEfficiencyCallback
+from src.evaluation.components.pairing import hyperpoint
+from src.evaluation.components.rebuild import (
+    ROOT,
+    SDS_CACHE,
+    cached_sds,
+    loader_layouts,
+    null_sets,
+    rebuild,
+    signal_sets,
+)
+from src.evaluation.components.tables import load_record, write_outputs
 from src.evaluation.replay import ReplayModule, extra_loaders
 from src.utils.omegaconf import register_resolvers
 
-ROOT = Path(__file__).resolve().parents[2]
-SEARCH_DIR = ROOT / "configs" / "hparams_search"
-DATA_CONFIGS = ROOT / "configs" / "data"
 # The key of the training efficiency callback for one set's validation efficiency.
 SET_EFFICIENCY_KEY = "val/{}/eff__ascore_full__brate_operational"
 # The most metrics MLflow accepts in one log_batch call.
@@ -55,88 +50,6 @@ REPLAY_TRAINER = {
     "enable_model_summary": False,
     "enable_checkpointing": False,
 }
-
-
-def _override(text: str) -> tuple[str, str]:
-    key, _, value = text.partition("=")
-    return key.lstrip("+~"), value
-
-
-def hyperpoint(run_dir: Path, search_dir: Path = SEARCH_DIR) -> dict[str, str]:
-    """The sampled hyperparameters of a run, as its ``overrides.yaml`` spells them.
-
-    These are the overrides whose key is a parameter of the sweep that the run's
-    ``hparams_search=<name>`` override names, read from ``<search_dir>/<name>.yaml``
-    (``hydra.sweeper.params``); a run outside a sweep, or without ``overrides.yaml``,
-    has none. The values stay strings as Hydra wrote them, so that the runs of two
-    lattices drawn with the same sampler seed pair by plain equality.
-    """
-    path = Path(run_dir) / "overrides.yaml"
-    if not path.exists():
-        return {}
-    overrides = dict(_override(text) for text in yaml.safe_load(path.read_text()))
-    search = overrides.get("hparams_search")
-    if search is None:
-        return {}
-    config = yaml.safe_load((Path(search_dir) / f"{search}.yaml").read_text())
-    params = config["hydra"]["sweeper"]["params"]
-    return {key: overrides[key] for key in params if key in overrides}
-
-
-def _load_record(path: Path, epoch: int) -> dict:
-    record = torch.load(path, weights_only=True)
-    if record["epoch"] != epoch:
-        raise RuntimeError(f"{path} holds epoch {record['epoch']}, not {epoch}.")
-    return record
-
-
-def _rebuild(run_dir: Path, data_dir: str | None, sets: str | None = None) -> tuple:
-    """The run's module and datamodule, instantiated from its ``config.yaml``.
-
-    With ``sets``, the ``signals`` and ``nulls`` of ``configs/data/<sets>.yaml`` replace
-    the run's; the rest of the run's data configuration is kept.
-    """
-    cfg = OmegaConf.load(run_dir / "config.yaml")
-    if data_dir is not None:
-        cfg.data.data_dir = str(data_dir)
-    if sets is not None:
-        lists = OmegaConf.load(DATA_CONFIGS / f"{sets}.yaml")
-        cfg.data.signals, cfg.data.nulls = lists.signals, lists.get("nulls")
-    return hydra.utils.instantiate(cfg.algorithm), hydra.utils.instantiate(cfg.data)
-
-
-# One entry, kept across the runs a worker evaluates: the runs of a lattice share their
-# training inputs, and building the pseudo-sets costs a nearest-neighbour search (on
-# CIFAR-10, 75 s and 6 GB), so LatticeEvaluation builds them once in the parent and the
-# pool's initialiser copies them into every worker. A module global, since it outlives
-# each RunEvaluation of a worker and the initialiser, pickled by name, reaches no
-# instance.
-_SDS_CACHE: dict = {}
-
-
-def _cached_sds(x_train: torch.Tensor, max_rows: int, row_seed: int) -> dict:
-    digest = hashlib.sha1(x_train.contiguous().numpy().tobytes()).hexdigest()
-    key = (digest, tuple(x_train.shape), max_rows, row_seed)
-    if key not in _SDS_CACHE:
-        _SDS_CACHE.clear()
-        _SDS_CACHE[key] = sds_inputs(x_train, max_rows, row_seed)
-    return _SDS_CACHE[key]
-
-
-def _signal_sets(layout: dict) -> list[str]:
-    """The sets whose labels are all positive, the efficiency callback's signals."""
-    return [name for name in layout["names"] if min(layout["labels"][name]) > 0]
-
-
-def _loader_layouts(datamodule: LightningDataModule) -> dict[str, dict]:
-    """The validation and test layouts of a set-up datamodule, in meta.pt's form."""
-    loaders = {"val": datamodule.val_dataloader(), "test": datamodule.test_dataloader()}
-    return {split: _layout(split_loaders) for split, split_loaders in loaders.items()}
-
-
-def _null_sets(callbacks: list) -> list[str]:
-    efficiency = [cb for cb in callbacks if isinstance(cb, AnomalyEfficiencyCallback)]
-    return list(efficiency[0].null_ds) if efficiency else []
 
 
 def _strategies(selection: dict) -> dict[str, dict]:
@@ -159,17 +72,6 @@ def _experiment_id(client: MlflowClient, name: str) -> str:
     return client.create_experiment(name)
 
 
-def _write_outputs(out: Path, tables: dict[str, list[dict]], run: dict) -> None:
-    out.mkdir(parents=True, exist_ok=True)
-    for name, rows in tables.items():
-        columns = list(dict.fromkeys(key for row in rows for key in row))
-        with open(out / f"{name}.csv", "w", newline="") as file:
-            writer = csv.DictWriter(file, fieldnames=columns)
-            writer.writeheader()
-            writer.writerows(rows)
-    (out / "run.json").write_text(json.dumps(run, indent=2) + "\n")
-
-
 class RunEvaluation:
     """The replay of one dumped run through the evaluation callbacks, and its tables.
 
@@ -180,7 +82,7 @@ class RunEvaluation:
     The scalars the callbacks record, named '<callback>/<scalar>', make the rows of the
     run's tables. The keyword-only arguments are the Evaluator's of the same names,
     apart from ``sets``, the data config whose signals and nulls replaced the run's in
-    ``datamodule`` (``_rebuild``). With it, the signal sets are read from the
+    ``datamodule`` (``rebuild``). With it, the signal sets are read from the
     datamodule's loaders instead of ``meta.pt``: a stored set outside the new lists is
     never served, and a set the dump does not store is rescored from the weights.
     """
@@ -205,9 +107,9 @@ class RunEvaluation:
         self.passes = {"val": list(dump_callbacks), "test": test_callbacks}
         self.trainers = {split: self._trainer(split) for split in self.passes}
         self.loaders = self._loaders(datamodule)
-        layouts = self.meta if sets is None else _loader_layouts(datamodule)
-        self.signals = {split: _signal_sets(layouts[split]) for split in self.passes}
-        self.nulls = _null_sets(self.trainers["test"].callbacks)
+        layouts = self.meta if sets is None else loader_layouts(datamodule)
+        self.signals = {split: signal_sets(layouts[split]) for split in self.passes}
+        self.nulls = null_sets(self.trainers["test"].callbacks)
 
     def evaluate(
         self, out_dir: Path, lattice: str | None = None, tracking_uri: str | None = None
@@ -221,7 +123,7 @@ class RunEvaluation:
         run, tables = self._summary(lattice), self._tables(rows)
         if tracking_uri is not None:
             run["mlflow_run_id"] = self._log_mlflow(tracking_uri, tables["val"], run)
-        _write_outputs(out, tables, run)
+        write_outputs(out, tables, run)
         return run
 
     def _trainer(self, split: str) -> pytorch_lightning.Trainer:
@@ -239,7 +141,7 @@ class RunEvaluation:
         val, data_train = datamodule.val_dataloader(), datamodule.data_train
         sds = self.extra_sets.get("sds")
         if sds:
-            sds = _cached_sds(data_train.tensors[0], sds["max_rows"], sds["row_seed"])
+            sds = cached_sds(data_train.tensors[0], sds["max_rows"], sds["row_seed"])
         train = data_train if self.extra_sets.get("train") else None
         aux = bool(self.extra_sets.get("aux"))
         val = {**val, **extra_loaders(self.meta, train, sds, aux=aux)}
@@ -253,7 +155,7 @@ class RunEvaluation:
         """The rows of both passes over every epoch file, -1 first."""
         rows = {split: [] for split in self.trainers}
         for epoch, path in enumerate(self._epoch_files(), start=-1):
-            self.replay.load_epoch(_load_record(path, epoch), out / path.name)
+            self.replay.load_epoch(load_record(path, epoch), out / path.name)
             for split in self.trainers:
                 rows[split].append(self._row(split, epoch))
         return rows
@@ -384,7 +286,7 @@ class RunEvaluation:
 
 
 def _init_worker(sds_cache: dict | None = None) -> None:
-    _SDS_CACHE.update(sds_cache or {})
+    SDS_CACHE.update(sds_cache or {})
     torch.set_num_threads(1)
     # The run configs call ${reverse:...} and the like; a second registration raises.
     if not OmegaConf.has_resolver("reverse"):
@@ -397,7 +299,7 @@ def _init_worker(sds_cache: dict | None = None) -> None:
 
 def _evaluate_task(task: tuple) -> dict:
     run_dir, out_dir, lattice, data_dir, sets, tracking_uri, settings = task
-    module, datamodule = _rebuild(run_dir, data_dir, sets)
+    module, datamodule = rebuild(run_dir, data_dir, sets)
     run = RunEvaluation(run_dir, module, datamodule, sets=sets, **settings)
     return run.evaluate(out_dir, lattice, tracking_uri)
 
@@ -447,7 +349,7 @@ class LatticeEvaluation:
         # Spawned, not forked: torch's thread pools do not survive a fork once the
         # parent has used them.
         context = multiprocessing.get_context("spawn")
-        initargs = (dict(_SDS_CACHE),)
+        initargs = (dict(SDS_CACHE),)
         with context.Pool(
             self.workers, initializer=_init_worker, initargs=initargs
         ) as pool:
@@ -459,9 +361,9 @@ class LatticeEvaluation:
             return
         if not OmegaConf.has_resolver("reverse"):
             register_resolvers()
-        datamodule = _rebuild(self.runs[0], self.data_dir, self.sets)[1]
+        datamodule = rebuild(self.runs[0], self.data_dir, self.sets)[1]
         datamodule.setup("fit")
-        _cached_sds(datamodule.data_train.tensors[0], sds["max_rows"], sds["row_seed"])
+        cached_sds(datamodule.data_train.tensors[0], sds["max_rows"], sds["row_seed"])
 
 
 def evaluate_lattice(

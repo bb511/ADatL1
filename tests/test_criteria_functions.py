@@ -137,6 +137,44 @@ def test_sds_shifts_along_the_local_normal():
     np.testing.assert_allclose(radii[1], 1.0 + shift)
 
 
+def reference_pseudo_sets(x, threshold=sds.SDS_THRESHOLD):
+    # sds_pseudo_sets as at a10184b, with its _pseudo_targets inlined.
+    x = np.asarray(x, dtype=np.float64)
+    k = math.ceil(5 * math.log10(len(x)))
+    offsets = x[:, None, :] - x[sds._neighbours(x, k)]
+    distances = np.linalg.norm(offsets, axis=2)
+    v = offsets / distances[:, :, None]
+    normal = v.sum(axis=1)
+    unit = normal / np.linalg.norm(normal, axis=1, keepdims=True)
+    edge = sds._edge_patterns(v, threshold)
+    outliers = x[edge] + unit[edge] * distances[edge].mean(axis=1).mean()
+    lam = np.einsum("id,ikd->ik", unit, offsets)
+    shift = np.where(lam > 0, lam, np.inf).min(axis=1)
+    keep = np.isfinite(shift)
+    return x[keep] - shift[keep, None] * unit[keep], outliers
+
+
+def test_sds_pseudo_sets_are_unchanged_and_return_their_source_rows():
+    x = np.random.default_rng(3).normal(size=(60, 5))
+    expected = reference_pseudo_sets(x)
+    plain = sds.sds_pseudo_sets(x)
+    with_rows = sds.sds_pseudo_sets(x, return_rows=True)
+    assert len(plain) == 2 and len(with_rows) == 4
+    for points in (plain, with_rows[:2]):
+        assert all(np.array_equal(a, b) for a, b in zip(points, expected))
+
+    # On the circle every pseudo-point lies on the radius of the row it came from.
+    x = circle()
+    targets, outliers, target_rows, outlier_rows = sds.sds_pseudo_sets(
+        x, return_rows=True
+    )
+    centre = x.mean(axis=0)
+    for points, rows in ((targets, target_rows), (outliers, outlier_rows)):
+        offsets = points - centre
+        direction = offsets / np.linalg.norm(offsets, axis=1, keepdims=True)
+        np.testing.assert_allclose(direction, x[rows] - centre, atol=1e-9)
+
+
 def test_sds_error_counts_ties_with_the_weight():
     x = circle()
     targets, outliers = sds.sds_pseudo_sets(x)

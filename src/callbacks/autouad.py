@@ -14,8 +14,9 @@ import torch
 from pytorch_lightning import Callback
 
 from src.callbacks.components.selection import EMA_WEIGHT, ema_update
-from src.callbacks.components.utils import as_scores, placeholder_loader
+from src.callbacks.components.utils import as_scores, drawn_masks, placeholder_loader
 from src.callbacks.score_dump import aux_inputs, input_moments, score_in_eval_mode
+from src.data.utils import unpack_batch
 
 # AutoUAD, App. G, p. 23: "For all eps, we set it as 1 x 10^-9".
 EPS = 1e-9
@@ -101,15 +102,18 @@ class NPDCallback(Callback):
     """Compute the normalised pseudo discrepancy of the validation normal scores.
 
     The pseudo-anomalies are the auxiliary set ``autouad`` of the score dump, N(mu, diag
-    sigma^2) with the per-feature moments of the training inputs. It is drawn once at
-    fit start by ``aux_inputs``, so that the dump and the callback score the same
-    points, and scored every epoch in eval mode under forked RNG streams, so that the
-    training trajectory is that of a run without the callback.
+    sigma^2) with the per-feature moments of the training inputs, padding included. It
+    is drawn once at fit start by ``aux_inputs``, so that the dump and the callback
+    score the same points, and scored every epoch in eval mode under forked RNG streams,
+    so that the training trajectory is that of a run without the callback. When the
+    training set carries a data mask (the L1AD data), every point takes the mask of a
+    training row drawn with ``aux_seed`` and is zero where it is padded.
 
     :param name: Name in the logged keys; None takes "npd".
     :param output_name: Key in outputs dict containing per-event anomaly scores.
     :param ema_weight: Weight of the previous value in the exponential moving average.
-    :param aux_seed: Seed of the auxiliary sets, as ScoreDumpCallback's.
+    :param aux_seed: Seed of the auxiliary sets, as ScoreDumpCallback's, and of the
+        training rows whose masks the points take.
     :param aux_size: Number of points in each auxiliary set.
     :param batch_size: Batch size of the pass over the auxiliary set.
     """
@@ -144,10 +148,13 @@ class NPDCallback(Callback):
     def on_fit_start(self, trainer, pl_module):
         """Instantiate useful quantities and draw the autouad set."""
         self.npd_ema = None
-        moments = input_moments(trainer.datamodule.data_train.tensors[0])
+        train = unpack_batch(trainer.datamodule.data_train.tensors)
+        moments = input_moments(train.x)
         meta = {"aux_seed": self.aux_seed, "aux_size": self.aux_size, **moments}
         autouad = aux_inputs(meta)["autouad"]
-        self.loaders = {"autouad": placeholder_loader(autouad, self.batch_size)}
+        mask = drawn_masks(train.mask, len(autouad), self.aux_seed)
+        loader = placeholder_loader(autouad, self.batch_size, mask)
+        self.loaders = {"autouad": loader}
 
     def on_validation_epoch_start(self, trainer, pl_module):
         """Make sure the normal data is in the used data sets."""

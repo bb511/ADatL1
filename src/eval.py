@@ -14,6 +14,7 @@ from src.utils.omegaconf import register_resolvers
 
 register_resolvers()
 
+from src.evaluation.components.pairing import check_pairing
 from src.evaluation.lattice import select_lattice
 from src.utils import RankedLogger, extras
 
@@ -27,6 +28,11 @@ def main(cfg: DictConfig) -> None:
     :param cfg: DictConfig configuration composed by Hydra.
     """
     extras(cfg)
+
+    # Paired before the replay, which takes hours on a full lattice.
+    if cfg.partner is not None:
+        log.info(f"Pairing the runs of {cfg.lattice} with those of {cfg.partner}")
+        check_pairing(cfg.scores_dir, cfg.lattice, cfg.partner, cfg.drop_unpaired)
 
     log.info(f"Instantiating evaluator <{cfg.evaluation.evaluator._target_}>")
     evaluator = hydra.utils.instantiate(cfg.evaluation.evaluator)
@@ -49,6 +55,7 @@ def main(cfg: DictConfig) -> None:
         scores_dir=cfg.scores_dir,
         lattice=cfg.lattice,
         partner=cfg.partner,
+        drop_unpaired=cfg.drop_unpaired,
     )
 
 

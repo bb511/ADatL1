@@ -16,7 +16,7 @@ export STAGE_LABEL
 
 # The study experiment, minus the training callbacks that need the auxiliary
 # signal datasets resident during fit. See the config for the measured saving.
-: "${EXPERIMENT:=physics/pareto_fet_train}"
+: "${EXPERIMENT:=physics/pareto_train}"
 export EXPERIMENT
 
 # Parameterise through pareto_study.candidate, not algorithm.*: the candidate is

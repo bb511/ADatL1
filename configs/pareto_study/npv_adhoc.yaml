@@ -1,0 +1,11 @@
+# @package pareto_study
+defaults:
+  - npv
+  - _self_
+
+candidate:
+  autoencoder_seed: ${seed}
+  mi_gamma: ${algorithm.mi_gamma}
+  mi_sensitive_num_bins: ${algorithm.mi_sensitive_num_bins}
+  architecture_id: h64_32
+  encoder_nodes: ${algorithm.encoder.nodes}

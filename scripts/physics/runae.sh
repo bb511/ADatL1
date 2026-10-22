@@ -25,7 +25,7 @@
 #                                               means the config's value (200 for
 #                                               physics/pareto_fet_train)
 #   PARETO_CANDIDATE  1                         parameterise through pareto_study.candidate
-#   EXPERIMENT        physics/pareto_fet_train
+#   EXPERIMENT        physics/pareto_train
 #   SEED              180524
 #   MI_GAMMA          0.1
 #   MI_NUM_BINS       40
@@ -63,7 +63,7 @@
 : "${MAX_EPOCHS=3}"
 : "${PARETO_CANDIDATE:=1}"
 if [[ "$PARETO_CANDIDATE" == 1 ]]; then
-  : "${EXPERIMENT:=physics/pareto_fet_train}"
+  : "${EXPERIMENT:=physics/pareto_train}"
   : "${SEED:=180524}"
   : "${MI_GAMMA:=0.1}"
   : "${MI_NUM_BINS:=40}"

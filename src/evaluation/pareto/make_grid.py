@@ -48,7 +48,7 @@ if str(REPO_ROOT) not in sys.path:
 
 from src.evaluation.pareto.baseline import GAMMA_ZERO_BASELINE_BINS  # noqa: E402
 
-DEFAULT_GRID = REPO_ROOT / "configs" / "pareto_study" / "fet_et.yaml"
+DEFAULT_GRID = REPO_ROOT / "configs" / "pareto_study" / "npv.yaml"
 
 
 def _format_gamma(value: float) -> str:

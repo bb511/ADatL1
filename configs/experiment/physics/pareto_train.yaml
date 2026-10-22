@@ -29,7 +29,7 @@
 # evaluation that depends on the threshold.
 
 defaults:
-  - /experiment/physics/pareto_fet
+  - /experiment/physics/pareto
   - _self_
 
 # The manifest inherits trainer.max_epochs=200 from physics/ae, which no batch

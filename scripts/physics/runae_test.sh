@@ -104,7 +104,7 @@ for key, expected in (("experiment_name", experiment_name), ("run_name", run_nam
 
 algorithm = config.get("algorithm") or {}
 pareto = "pareto" in (config.get("tags") or [])
-emit("MANIFEST_EXPERIMENT", "physics/pareto_fet" if pareto else "physics/ae")
+emit("MANIFEST_EXPERIMENT", "physics/pareto" if pareto else "physics/ae")
 emit("MANIFEST_PARETO", int(pareto))
 if pareto:
     candidate = (config.get("pareto_study") or {}).get("candidate") or {}

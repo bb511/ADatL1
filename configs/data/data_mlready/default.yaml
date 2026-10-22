@@ -14,5 +14,5 @@ split:
 split_aux: 0.6
 
 cache_root_dir: ${paths.data_dir}
-name: ${data.data_processor.name}_default
+name: ${data.data_processor.name}_npv
 seed: 42

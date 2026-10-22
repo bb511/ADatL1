@@ -28,6 +28,7 @@ train_features:
   egammas: ['Et', 'eta', 'phi']
   taus: ['Et', 'eta', 'phi']
   FET: ['Et', 'phi']
+  event_info: ['nPV_True']
 
 # The batch size of the data.
 batch_size: 16384

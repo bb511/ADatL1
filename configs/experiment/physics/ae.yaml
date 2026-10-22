@@ -12,7 +12,7 @@ defaults:
   # directory of individually trained autoencoders can be collected and have
   # the front computed over it. The `adhoc` variant reads the grid point from
   # the algorithm config instead of holding its own literals.
-  - override /pareto_study: fet_et_adhoc
+  - override /pareto_study: npv_adhoc
   - override /logger: mlflow
 
 seed: 180524
@@ -33,7 +33,8 @@ data:
   # anomaly-detector reconstruction input. Wildcards are resolved against the
   # object_feature_map.
   model_input_exclude_features:
-    - FET.*
+    - event_info.*
+    - '*.nPV_True'
 
 trainer:
   gradient_clip_algorithm: norm
@@ -71,7 +72,7 @@ algorithm:
   # The basis data processing returns 117 features; excluding FET.* (Et, eta,
   # phi -- see data.model_input_exclude_features) leaves 114 for the AE input.
   encoder:
-    in_dim: 114
+    in_dim: 117
     nodes: [64, 32, 8]
 
   # Hyperparameters of the Optuna trial cvar25_t169 (pre-MI reference AE,
@@ -337,6 +338,8 @@ evaluation:
         - jets.Et
         - muons.Et
         - taus.Et
+        - event_info.nPV_True
+        
       datasets:
         - normal
       output_name: reconstructed_data

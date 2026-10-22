@@ -1,0 +1,43 @@
+# @package pareto_study
+
+# nPV validation Pareto study. Inherits every rule of fet_et (constraints,
+# objectives, selection policy, probe protocol) and changes only the study
+# identity, the sensitive variable and the grid.
+
+defaults:
+  - fet_et
+  - _self_
+
+protocol_version: npv-protocol-v1
+study_id: npv-pareto-v1
+
+sensitive_variable:
+  raw_target: event_info.nPV_True
+  training_target: quantil-binned event_info.nPV_True
+  target_type: ordered_discrete
+
+candidate:
+  autoencoder_seed: 180524
+  mi_gamma: 0.0
+  mi_sensitive_num_bins: 50
+  architecture_id: h64_32
+  encoder_nodes: [64, 32, 8]
+
+search_space:
+  searched_parameters:
+    - algorithm.mi_gamma
+    - algorithm.mi_sensitive_num_bins
+  regularized:
+    architectures:
+      h64_32: [64, 32, 8]
+    blocks:
+      - name: bins_scan
+        mi_gamma: [0.01, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7]
+        mi_sensitive_num_bins: [5, 8, 10, 15, 20, 25, 30, 40, 50]
+  gamma_zero_baseline:
+    mi_gamma: 0.0
+    mi_sensitive_num_bins: 50
+    architectures:
+      h64_32: [64, 32, 8]
+  fixed_latent_width: 8
+  candidate_architecture_contract: encoder_nodes[-1] == 8

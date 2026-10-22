@@ -14,7 +14,7 @@
 STAGE_LABEL="Pareto stage 2"
 export STAGE_LABEL
 
-: "${EXPERIMENT:=physics/pareto_fet}"
+: "${EXPERIMENT:=physics/pareto}"
 : "${PARETO_CANDIDATE:=1}"
 export EXPERIMENT PARETO_CANDIDATE
 

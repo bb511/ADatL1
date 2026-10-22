@@ -8,7 +8,7 @@ defaults:
   # Back to the literal candidate. physics/ae selects fet_et_adhoc, whose
   # candidate interpolates FROM algorithm; the algorithm overrides below
   # interpolate the other way, and the two together would be a cycle.
-  - override /pareto_study: fet_et
+  - override /pareto_study: npv
   - _self_
 
 experiment_name: Pareto-Front-261002

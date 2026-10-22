@@ -17,22 +17,20 @@ tick scale always shows the minimum and maximum value.
 Generalised from the one-off ``make_matrices.py`` written for
 Pareto-Front-260928:
 
-- the study name, run count, seeds and architectures come from the table;
-- the collapse rule shown in the footer is read from the study's resolved
-  config (``pareto_study.collapse_constraint.rule``) when the study map points
-  at one; the paired run is always the single γ = 0 / 50-bin baseline
-  (``src/evaluation/pareto/baseline.py``), which every subtitle also quotes;
+- every subtitle quotes the single γ = 0 / 50-bin baseline
+  (``src/evaluation/pareto/baseline.py``);
 - the selected configuration comes from ``pareto_selection.json``, not a
   hard-coded label;
 - several architectures are drawn into one sub-directory each, because the
   matrix axes are gamma and bins only.
+
+The figures have no footer; the study is the folder they are written to.
 
 Usage (run by scripts/physics/runae_pareto_runcollect.sh after phase 4)::
 
     python3 -m src.evaluation.pareto.matrices \\
         --candidates  <STUDY_ROOT>/phase3/pareto_candidates.csv \\
         --selection   <STUDY_ROOT>/phase3/pareto_selection.json \\
-        --study-map   <STUDY_ROOT>/study_map.yaml \\
         --output-dir  <STUDY_ROOT>/phase4/matrices
 """
 
@@ -42,7 +40,7 @@ import argparse
 import json
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Dict, List, Mapping, Optional, Sequence
+from typing import Any, Dict, List, Optional, Sequence
 
 import numpy as np
 import pandas as pd
@@ -69,6 +67,7 @@ GAMMA, BINS = "mi_gamma", "mi_sensitive_num_bins"
 METRICS = [
     ("leakage_worst", "Leakage L", "worst of four probes, held-out R²", "lower", "{:.3f}"),
     ("residual_correlation", "Residual correlation E", "max(mean |Pearson|, mean |Spearman|)", "lower", "{:.3f}"),
+    ("mean_pearson_correlation", "Mean Pearson correlation", "FET.Et vs reconstruction", "lower", "{:.3f}"),
     ("mean_spearman_correlation", "Mean Spearman correlation", "FET.Et vs reconstruction", "lower", "{:.3f}"),
     ("median_efficiency", "Median signal efficiency", "at 0.25 kHz, ×10⁻³ in cells", "higher", "x1e3"),
     ("mean_efficiency", "Mean signal efficiency", "at 0.25 kHz, ×10⁻² in cells", "higher", "x1e2"),
@@ -98,10 +97,7 @@ class ParetoMatrixError(ValueError):
 
 @dataclass
 class StudyContext:
-    study_name: str
-    rule_text: str
     selected_configuration_id: Optional[str]
-    source_label: str
 
 
 # --------------------------------------------------------------------------- data
@@ -148,43 +144,6 @@ def _read_yaml(path: Path) -> Any:
 
     with open(path, encoding="utf-8") as handle:
         return yaml.safe_load(handle)
-
-
-def _resolved_config_candidates(run: Mapping[str, Any], checkpoints_root: Optional[Path]) -> List[Path]:
-    paths = []
-    if run.get("manifest_path"):
-        paths.append(Path(run["manifest_path"]))
-    # The study map records the paths of wherever stage 3 ran (EOS on lxplus).
-    # On another machine, look for the same run under the local checkpoints dir.
-    run_dir = str(run.get("checkpoint_run_dir") or "")
-    if checkpoints_root is not None and "/checkpoints/" in run_dir:
-        tail = run_dir.split("/checkpoints/", 1)[1]
-        paths.append(Path(checkpoints_root) / tail / "resolved_config.yaml")
-    return paths
-
-
-def collapse_rule_text(study_map: Optional[Path], checkpoints_root: Optional[Path]) -> Optional[str]:
-    """Describe pareto_study.collapse_constraint.rule of the study, if it can be found."""
-    if study_map is None or not Path(study_map).is_file():
-        return None
-    runs = (_read_yaml(study_map) or {}).get("runs") or []
-    for run in runs:
-        for path in _resolved_config_candidates(run, checkpoints_root):
-            if not path.is_file():
-                continue
-            rule = (((_read_yaml(path) or {}).get("pareto_study") or {})
-                    .get("collapse_constraint") or {}).get("rule") or {}
-            if not rule:
-                continue
-            absolute = rule.get("minimum_joint_code_entropy_bits")
-            fraction = rule.get("minimum_fraction_of_paired_gamma_zero_joint_entropy")
-            parts = []
-            if absolute is not None:
-                parts.append(f"H(L) < {float(absolute):g} bit")
-            if fraction is not None:
-                parts.append(f"< {float(fraction):g} × H(L) of the γ=0 baseline")
-            return " or ".join(parts) if parts else None
-    return None
 
 
 def _baseline_text(table: pd.DataFrame, column: str, fmt_spec: str) -> str:
@@ -346,24 +305,6 @@ def _style():
     })
 
 
-def _footer(table: pd.DataFrame, ctx: StudyContext, architecture: Optional[str], n_seeds_per_cell: int,
-            runs: Optional[pd.DataFrame] = None) -> str:
-    n_feas, n_rej = int(table.feasible.sum()), int((~table.feasible).sum())
-    runs = table if runs is None else runs  # per-run rows, before seeds are averaged
-    seeds = sorted({int(s) for s in runs["autoencoder_seed"].dropna()}) if "autoencoder_seed" in runs else []
-    archs = [architecture] if architecture else (
-        sorted(table["architecture_id"].dropna().unique()) if "architecture_id" in table else [])
-    who = ", ".join(filter(None, [
-        f"seed{'s' if len(seeds) > 1 else ''} {', '.join(map(str, seeds))}" if seeds else "",
-        ", ".join(archs),
-    ]))
-    mean_note = f" · cells average {n_seeds_per_cell} seeds" if n_seeds_per_cell > 1 else ""
-    rule = f"Rejected if {ctx.rule_text} · " if ctx.rule_text else ""
-    return (f"{ctx.study_name} · {len(table)} configurations{', ' + who if who else ''} · "
-            f"{n_feas} feasible, {n_rej} rejected{mean_note}\n"
-            f"{rule}Axes are categorical, not to scale · Source: {ctx.source_label}")
-
-
 def _selected_label(table: pd.DataFrame, ctx: StudyContext) -> str:
     row = None
     if ctx.selected_configuration_id and "configuration_id" in table:
@@ -387,11 +328,9 @@ def draw_matrices(table: pd.DataFrame, output_dir: Path, ctx: StudyContext,
 
     _style()
     output_dir.mkdir(parents=True, exist_ok=True)
-    runs = table
-    table, n_seeds = _collapse_duplicate_cells(table)
+    table, _ = _collapse_duplicate_cells(table)
     gammas = sorted(table[GAMMA].unique())
     bins = sorted(table[BINS].unique())
-    foot = _footer(table, ctx, architecture, n_seeds, runs=runs)
     legend = [
         Patch(facecolor=REJECTED_FILL, edgecolor=CRITICAL, hatch="////", lw=1.6,
               label="Rejected (collapse rule, not on the colour scale)"),
@@ -414,19 +353,15 @@ def draw_matrices(table: pd.DataFrame, output_dir: Path, ctx: StudyContext,
         cmap = metric_colormap(better)
         fig, ax = _figure()
         _draw_cells(ax, values, rejected, front, cmap, norm, f, gammas, bins)
-        verdict = f"{better} is better"
-        if col in DIAGNOSTICS:
-            verdict = f"diagnostic, {verdict}"
+        # Diagnostics are not Pareto objectives; which end is best is shown by the
+        # colours only (pale = best), not written out.
+        kind = " · diagnostic" if col in DIAGNOSTICS else ""
         fig.text(0.1, 0.955, title, fontsize=14, fontweight="bold", color=INK)
-        fig.text(0.1, 0.932, f"{sub} · {verdict} · {_baseline_text(table, col, f)}", fontsize=9, color=INK2)
-        fig.text(0.1, 0.913, "Colour scale runs from the lowest to the highest feasible value; "
-                 "pale blue = best, dark blue = worst; rejected cells are white.",
-                 fontsize=8, color=INK2)
+        fig.text(0.1, 0.932, f"{sub}{kind} · {_baseline_text(table, col, f)}", fontsize=9, color=INK2)
         unit = f" [{SCALE_UNIT[f]}]" if f in SCALE_UNIT else ""
         draw_colorbar(fig, ax, norm, cmap, label=f"{title}{unit}", f=f, value_range=(lo, hi))
         ax.legend(handles=legend, loc="upper center", bbox_to_anchor=(0.5, -0.045), ncol=3,
                   frameon=False, fontsize=8.5, handlelength=1.6, handleheight=1.2)
-        fig.text(0.1, 0.022, foot, fontsize=7.2, color=INK2)
         path = output_dir / f"{k:02d}_{col}.png"
         fig.savefig(path, dpi=170)
         plt.close(fig)
@@ -457,16 +392,14 @@ def draw_matrices(table: pd.DataFrame, output_dir: Path, ctx: StudyContext,
             if s == 2 and not np.isnan(rank[i, j]):
                 ax.text(j + 0.5, i + 0.52, f"#{int(rank[i, j])}", ha="center", va="center",
                         fontsize=8, color="#ffffff", fontweight="bold")
-    n_front, n_dom, n_rej = int((status == 2).sum()), int((status == 1).sum()), int((status == 0).sum())
     fig.text(0.1, 0.955, "Selection status", fontsize=14, fontweight="bold", color=INK)
-    fig.text(0.1, 0.932, f"#n = rank on the Pareto front by ideal-point distance{_selected_label(table, ctx)} · "
-             f"{n_front} front, {n_dom} dominated, {n_rej} rejected", fontsize=9, color=INK2)
+    fig.text(0.1, 0.932, f"#n = rank on the Pareto front by ideal-point distance{_selected_label(table, ctx)}",
+             fontsize=9, color=INK2)
     handles = [Patch(facecolor=STATUS_COLOURS[2], label="Pareto front"),
                Patch(facecolor=STATUS_COLOURS[1], label="Feasible, dominated"),
                Patch(facecolor=STATUS_COLOURS[0], edgecolor=CRITICAL, hatch="////", lw=1.6, label="Rejected (collapse rule)"),
                Patch(facecolor=SURFACE, edgecolor=MUTED, lw=0.6, label="Not trained")]
     ax.legend(handles=handles, loc="upper center", bbox_to_anchor=(0.5, -0.045), ncol=4, frameon=False, fontsize=8.5)
-    fig.text(0.1, 0.022, foot, fontsize=7.2, color=INK2)
     path = output_dir / STATUS_FILENAME
     fig.savefig(path, dpi=170)
     plt.close(fig)
@@ -474,9 +407,8 @@ def draw_matrices(table: pd.DataFrame, output_dir: Path, ctx: StudyContext,
     return written
 
 
-def write_pareto_matrices(candidates: Path, output_dir: Path, *, selection: Optional[Path] = None,
-                          study_map: Optional[Path] = None, checkpoints_root: Optional[Path] = None,
-                          study_name: Optional[str] = None) -> List[Path]:
+def write_pareto_matrices(candidates: Path, output_dir: Path, *,
+                          selection: Optional[Path] = None) -> List[Path]:
     candidates = Path(candidates)
     table = load_candidates(candidates)
     if table.empty:
@@ -484,14 +416,7 @@ def write_pareto_matrices(candidates: Path, output_dir: Path, *, selection: Opti
     selected = None
     if selection is not None and Path(selection).is_file():
         selected = json.loads(Path(selection).read_text()).get("selected_configuration_id")
-    # <study_root>/phase3/pareto_candidates.csv -> study name = <study_root>.name
-    name = study_name or candidates.resolve().parent.parent.name
-    ctx = StudyContext(
-        study_name=name,
-        rule_text=collapse_rule_text(study_map, checkpoints_root) or "",
-        selected_configuration_id=selected,
-        source_label=f"{candidates.parent.name}/{candidates.name}",
-    )
+    ctx = StudyContext(selected_configuration_id=selected)
     output_dir = Path(output_dir)
     archs = sorted(table["architecture_id"].dropna().unique()) if "architecture_id" in table else []
     if len(archs) <= 1:
@@ -507,18 +432,12 @@ def _parse_args(argv: Optional[Sequence[str]] = None) -> argparse.Namespace:
     parser.add_argument("--candidates", type=Path, required=True, help="Phase 3 pareto_candidates.csv.")
     parser.add_argument("--output-dir", type=Path, required=True, help="Directory for the PNGs.")
     parser.add_argument("--selection", type=Path, help="Phase 3 pareto_selection.json (selected configuration).")
-    parser.add_argument("--study-map", type=Path, help="study_map.yaml, used to read the collapse rule.")
-    parser.add_argument("--checkpoints-root", type=Path,
-                        help="Local checkpoints/ dir, to find resolved configs when the map holds paths of another machine.")
-    parser.add_argument("--study-name", help="Name in the footer (default: the study root's directory name).")
     return parser.parse_args(argv)
 
 
 def main(argv: Optional[Sequence[str]] = None) -> None:
     args = _parse_args(argv)
-    for path in write_pareto_matrices(args.candidates, args.output_dir, selection=args.selection,
-                                      study_map=args.study_map, checkpoints_root=args.checkpoints_root,
-                                      study_name=args.study_name):
+    for path in write_pareto_matrices(args.candidates, args.output_dir, selection=args.selection):
         print(path)
 
 

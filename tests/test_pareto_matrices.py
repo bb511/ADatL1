@@ -14,7 +14,6 @@ from src.evaluation.pareto.matrices import (  # noqa: E402
     BLUE,
     METRICS,
     STATUS_FILENAME,
-    collapse_rule_text,
     metric_colormap,
     write_pareto_matrices,
 )
@@ -56,6 +55,36 @@ def test_one_png_per_metric_plus_status(tmp_path):
     assert STATUS_FILENAME in names
     assert len(written) == len(METRICS) + 1
     assert all(p.is_file() and p.stat().st_size > 10_000 for p in written)
+    assert "03_mean_pearson_correlation.png" in names
+
+
+def test_figures_have_no_footer_counts_verdict_or_colour_scale_note(tmp_path, monkeypatch):
+    from matplotlib.figure import Figure
+
+    texts = {}
+    original = Figure.savefig
+
+    def savefig(self, fname, *args, **kwargs):
+        texts[Path(fname).name] = [t.get_text() for t in self.texts]
+        return original(self, fname, *args, **kwargs)
+
+    monkeypatch.setattr(Figure, "savefig", savefig)
+    phase3 = _study_root(tmp_path, _candidates())
+    write_pareto_matrices(phase3 / "pareto_candidates.csv", tmp_path / "matrices",
+                          selection=phase3 / "pareto_selection.json")
+
+    status = texts[STATUS_FILENAME]
+    assert status[0] == "Selection status"
+    assert status[1] == ("#n = rank on the Pareto front by ideal-point distance"
+                         " (#1 = selected: γ 0.1, 10 bins)")
+    for name, figure_texts in texts.items():
+        joined = " ".join(figure_texts)
+        assert "Pareto-Front-Test" not in joined, name  # no footer
+        assert "configurations" not in joined, name
+        assert "Colour scale runs" not in joined, name
+        assert "dominated," not in joined, name
+        assert "is better" not in joined, name
+        assert len(figure_texts) == 2, name  # title and one subtitle line
 
 
 def test_architectures_get_one_directory_each(tmp_path):
@@ -63,23 +92,6 @@ def test_architectures_get_one_directory_each(tmp_path):
     out = tmp_path / "matrices"
     written = write_pareto_matrices(phase3 / "pareto_candidates.csv", out)
     assert {p.parent.name for p in written} == {"h64_32", "h128_64"}
-
-
-def test_collapse_rule_read_from_resolved_config(tmp_path):
-    run_dir = tmp_path / "checkpoints" / "Exp" / "Run01"
-    run_dir.mkdir(parents=True)
-    (run_dir / "resolved_config.yaml").write_text(
-        "pareto_study:\n  collapse_constraint:\n    rule:\n"
-        "      minimum_joint_code_entropy_bits: 1.0\n"
-        "      minimum_fraction_of_paired_gamma_zero_joint_entropy: 0.5\n"
-        "      paired_reference: same_architecture_and_bins\n")
-    study_map = tmp_path / "study_map.yaml"
-    # Paths of another machine: found again under the local checkpoints root.
-    study_map.write_text("runs:\n- manifest_path: /eos/x/checkpoints/Exp/Run01/resolved_config.yaml\n"
-                         "  checkpoint_run_dir: /eos/x/checkpoints/Exp/Run01\n")
-    text = collapse_rule_text(study_map, tmp_path / "checkpoints")
-    # Pareto-Front-261002's per-bin pairing is gone: always the single baseline.
-    assert text == "H(L) < 1 bit or < 0.5 × H(L) of the γ=0 baseline"
 
 
 def test_subtitle_quotes_the_single_50_bin_baseline():
@@ -148,7 +160,7 @@ def test_colour_scale_looks_like_the_correlation_matrices(tmp_path, saved_figure
     # Feasible min 0.11 at (gamma 0, 10 bins) = cell (0, 0), feasible max 0.61 at
     # (gamma 0.5, 10 bins) = cell (0, 2). The rejected (0.5, 50) cell holds 0.65.
     for name, higher_is_better in (("01_leakage_worst.png", False),
-                                   ("04_median_efficiency.png", True)):
+                                   ("05_median_efficiency.png", True)):
         figure = saved_figures[name]
         matrix_ax, bar_ax = figure["axes"]
         (colorbar,) = figure["colorbars"]
@@ -165,7 +177,7 @@ def test_colour_scale_looks_like_the_correlation_matrices(tmp_path, saved_figure
         assert bar_ax["yticks"][0] == pytest.approx(0.11)
         assert bar_ax["yticks"][-1] == pytest.approx(0.61)
         labels = bar_ax["yticklabels"]
-        if name.startswith("04"):  # printed x1e3
+        if name.startswith("05"):  # printed x1e3
             assert (labels[0], labels[-1]) == ("110.00", "610.00")
         else:
             assert (labels[0], labels[-1]) == ("0.110", "0.610")

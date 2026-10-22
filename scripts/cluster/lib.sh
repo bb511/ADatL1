@@ -7,8 +7,10 @@
 #
 # Source it as:  . "$(dirname "${BASH_SOURCE[0]}")/lib.sh"
 
-# Where the training env lives on clariden; quoted in the preflight message.
+# Where the training env lives on clariden; quoted in the preflight message and
+# activated by clariden_node.sbatch from the conda install below.
 CLARIDEN_ENV=${CLARIDEN_ENV:-/users/podagiu/.conda/envs/adl1t}
+CLARIDEN_CONDA=${CLARIDEN_CONDA:-/users/podagiu/miniconda}
 
 # A block opens at the commented 'python3 src/train.py' line and runs to the
 # first line without a trailing continuation. Emits one flat command per block,

@@ -20,7 +20,9 @@ A log is classified by scanning its tail:
   * anything else                            -> alive
 Checking only the final line is not enough: a Hydra config error ends with
 'Set the environment variable HYDRA_FULL_ERROR=1 ...', several lines below the
-actual exception.
+actual exception. A 'stopped: signal' line anywhere in the log also means DEAD:
+submit_search.sh --wait writes it when a signal, such as a slurm time limit,
+stops the driver, which can keep printing for a while after it.
 
 A study below target with no live driver is topped up by relaunching its first
 driver for the shortfall. The random sampler replays its draws from the seed,
@@ -51,6 +53,7 @@ ERR = re.compile(
     re.M,
 )
 FINISHED = re.compile(r"\[HYDRA\]\s+(Best|Value)", re.M)
+STOPPED = "stopped: signal"
 
 
 def find_repo_root(start: Path) -> Path:
@@ -121,7 +124,7 @@ def classify(log):
     age = (
         datetime.now() - datetime.fromtimestamp(os.path.getmtime(log))
     ).total_seconds() / 60
-    if ERR.search(tail):
+    if ERR.search(tail) or any(line.startswith(STOPPED) for line in lines):
         return "DEAD", age
     if FINISHED.search(tail):
         return "FINISHED", age

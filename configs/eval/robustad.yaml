@@ -3,9 +3,6 @@
 # RobustAD: every validation and test set is stored in the dump; the shifted normal
 # sets (labels below 0) are the background, the shifted anomalies the signals.
 
-defaults:
-  - /cap: provisional
-
 evaluation:
   evaluator:
     _target_: src.evaluation.evaluator.Evaluator
@@ -41,24 +38,6 @@ evaluation:
         apply_log1p: true
         log_raw_mlflow: false
         name: wasserstein
-      cap:
-        _target_: src.evaluation.callbacks.cap.CAP
-        output_name: ascore/full
-        dataset_1: normal
-        dataset_2: shifted_normal_all
-        pairing_type: cdf
-        cap_metric_config: ${cap}
-        log_raw_mlflow: false
-        name: cap
-      consistency:
-        _target_: src.evaluation.callbacks.consistency.PosteriorConsistency
-        output_name: ascore/full
-        dataset_1: normal
-        dataset_2: shifted_normal_all
-        pairing_type: cdf
-        cap_metric_config: ${cap}
-        log_raw_mlflow: false
-        name: consistency
       ascore_operational:
         _target_: src.evaluation.callbacks.output.OutputCallback
         output_name: ascore/operational
@@ -74,12 +53,6 @@ evaluation:
       eag:
         _target_: src.evaluation.callbacks.autouad.EAG
         name: eag
-      em:
-        _target_: src.evaluation.callbacks.goix.ExcessMass
-        name: em
-      mv:
-        _target_: src.evaluation.callbacks.goix.MassVolume
-        name: mv
       entropy:
         _target_: src.evaluation.callbacks.entropy.LossEntropy
         name: entropy
@@ -109,16 +82,6 @@ selection:
       column: wasserstein/w1dist
       mode: min
       key: val/summary/w1dist_ema_normal_vs_shifted_normal_all
-    cap:
-      column: cap/cap
-      mode: max
-      key: val/summary/cap_ema_normal_vs_shifted_normal_all
-      skip_nonfinite: true
-    consistency:
-      column: consistency/consistency
-      mode: max
-      key: val/summary/consistency_ema_normal_vs_shifted_normal_all
-      skip_nonfinite: true
     npd:
       column: npd/npd
       mode: max
@@ -134,16 +97,6 @@ selection:
       mode: max
       key: val/summary/eag_ema
       raw_key: val/summary/eag
-    em:
-      column: em/em
-      mode: max
-      key: val/summary/em_ema
-      raw_key: val/summary/em
-    mv:
-      column: mv/mv
-      mode: min
-      key: val/summary/mv_ema
-      raw_key: val/summary/mv
     entropy:
       column: entropy/entropy
       mode: min
@@ -183,8 +136,6 @@ selection:
     mc: max
   # The known limit of each strategy, for the tables.
   limits:
-    em: degenerate above about eight input dimensions (Goix); the images have 3,072
-    mv: degenerate above about eight input dimensions (Goix); the images have 3,072
     entropy: on RealNVP undefined, its per-sample loss can be negative
     sds: in-sample, the pseudo-sets come from the training inputs
     udr: selects the untrained model where its scores do not depend on the seed

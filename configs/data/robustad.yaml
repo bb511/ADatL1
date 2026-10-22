@@ -23,4 +23,7 @@ val_fraction: 0.1
 test_fraction: 0.1
 
 num_workers: 0
-seed: ${seed}
+# Fixed apart from the training seed, so that every run sees the same images.
+seed: 314159
+# The batch order follows the global training seed.
+train_seed: ${seed}

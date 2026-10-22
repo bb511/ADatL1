@@ -25,6 +25,17 @@ class SplitTensors:
     y: torch.Tensor
 
 
+def _first_copies(x: torch.Tensor) -> torch.Tensor:
+    """Return the index of the first copy of every distinct image in x, in order.
+
+    The PCB anomalies hold exact copies: two pairs in test1 and one in test4.
+    """
+    first: dict[bytes, int] = {}
+    for i, image in enumerate(x):
+        first.setdefault(image.numpy().tobytes(), i)
+    return torch.tensor(list(first.values()), dtype=torch.int64)
+
+
 class RobustADDataModule(LightningDataModule):
     """Lightning DataModule for RobustAD anomaly detection experiments.
 
@@ -49,6 +60,11 @@ class RobustADDataModule(LightningDataModule):
       - "shifted_normal_0", "shifted_normal_1", ... are per-shift normal subsets
       - "shifted_anomaly_0", "shifted_anomaly_1", ... are per-shift anomaly subsets
 
+    Every shifted normal and anomaly set is halved into disjoint validation and test
+    sets by a permutation seeded with ``seed``, after exact copies of an image are
+    dropped; the validation half takes the odd image. "shifted_normal_all" is drawn
+    from the halves of its own part.
+
     :param data_dir: Root directory containing RobustAD subset folders.
     :param subset: One of {"pcb", "metal_parts", "piled_bags"}.
     :param image_size: Optional resize target as [H, W]. If None, keeps original size.
@@ -58,9 +74,12 @@ class RobustADDataModule(LightningDataModule):
     :param val_fraction: Fraction of source normal reserved for validation.
     :param test_fraction: Fraction of source normal reserved for held-out main test.
     :param normalize: Whether to apply standard normalization.
-    :param seed: Random seed used for splitting and shuffling.
+    :param seed: Seed of every split, fixed apart from the training seed so that every
+        run sees the same images.
+    :param train_seed: Seed of the training batch order; ``seed`` when None.
     :param num_workers: Number of DataLoader workers.
-    :param stats_file: Filename used to cache normalization statistics.
+    :param stats_file: Filename used to cache normalization statistics; None names it
+        by subset, image size and seed.
     """
 
     # Number of shifted test domains per subset.
@@ -87,7 +106,8 @@ class RobustADDataModule(LightningDataModule):
         val_fraction: float = 0.1,
         test_fraction: float = 0.1,
         normalize: bool = True,
-        seed: int = 42,
+        seed: int = 314159,
+        train_seed: int | None = None,
         num_workers: int = 0,
         stats_file: str | None = None,
     ) -> None:
@@ -96,10 +116,13 @@ class RobustADDataModule(LightningDataModule):
         self.save_hyperparameters(logger=False)
         self._main = {}
         self._aux = {"valid": {}, "test": {}}
-        # seed=None means 'do not seed', matching train.py's `if cfg.get("seed")`.
+        # Advanced once per epoch by the training loader to reorder its batches. The
+        # training seed drives it, so that seeds differ in batch order while the splits
+        # stay with the data seed; None for both leaves torch's default seed.
+        order_seed = seed if train_seed is None else train_seed
         self.shuffler = torch.Generator()
-        if seed is not None:
-            self.shuffler.manual_seed(seed)
+        if order_seed is not None:
+            self.shuffler.manual_seed(order_seed)
         self.mean, self.std = None, None
         self._validate_init()
 
@@ -201,22 +224,37 @@ class RobustADDataModule(LightningDataModule):
         stem = f"{self.hparams.subset}_data_dir_{split_name}"
         return self._subset_dir() / stem
 
+    def _size_tag(self) -> str:
+        size = self.hparams.image_size
+        return "orig" if size is None else "x".join(map(str, size))
+
     def _stats_path(self) -> Path:
-        """Return the cached normalization-stats file path."""
-        name = self.hparams.stats_file or f"{self.hparams.subset}_normal_stats.pt"
+        """Return the cached normalization-stats file path.
+
+        The stats depend on the seed through the training part it draws. The name does
+        not carry val_fraction and test_fraction, which change that part too.
+        """
+        default = f"{self.hparams.subset}_{self._size_tag()}_seed{self.hparams.seed}"
+        name = self.hparams.stats_file or f"{default}_normal_stats.pt"
         return self._subset_dir() / name
 
     def _load_or_compute_stats(self) -> None:
-        """Load cached channel stats or compute them from source train normal."""
+        """Load cached channel stats or compute them from the training normals.
+
+        The stats cover the training part of the source normals alone, not their
+        validation and test parts.
+        """
         path = self._stats_path()
         if path.exists():
             stats = torch.load(path, map_location="cpu")
             self.mean, self.std = stats["mean"].float(), stats["std"].float()
             return
         source = self._load_split("train", apply_normalize=False)
-        source = self._keep_only_normal(source)
-        self.mean = source.x.mean(dim=(0, 2, 3))
-        self.std = source.x.std(dim=(0, 2, 3)).clamp_min(1e-8)
+        # The split draws on the image count alone, so the raw normals give the same
+        # training part as the normalized ones that setup() splits.
+        train, _, _ = self._split_source_normal(self._keep_only_normal(source))
+        self.mean = train.x.mean(dim=(0, 2, 3))
+        self.std = train.x.std(dim=(0, 2, 3)).clamp_min(1e-8)
         path.parent.mkdir(parents=True, exist_ok=True)
         torch.save({"mean": self.mean, "std": self.std}, path)
 
@@ -227,7 +265,7 @@ class RobustADDataModule(LightningDataModule):
         self._main.setdefault("valid", valid_ds)
         self._main.setdefault("test", test_ds)
         if not self._aux["valid"]:
-            self._aux["valid"] = self._build_shift_aux()
+            self._aux["valid"] = self._build_shift_aux("valid")
 
     def _setup_test(self, source: SplitTensors) -> None:
         """Ensure held-out source test and shifted-domain test aux data exist."""
@@ -235,7 +273,7 @@ class RobustADDataModule(LightningDataModule):
             _, _, test_ds = self._split_source_normal(source)
             self._main["test"] = test_ds
         if not self._aux["test"]:
-            self._aux["test"] = self._build_shift_aux()
+            self._aux["test"] = self._build_shift_aux("test")
 
     def _split_generator(self) -> torch.Generator:
         """Fresh generator for the splits, deliberately not self.shuffler.
@@ -268,8 +306,8 @@ class RobustADDataModule(LightningDataModule):
             y=torch.stack(ys).contiguous(),
         )
 
-    def _build_shift_aux(self) -> dict[str, SplitTensors]:
-        """Build shifted normal/anomaly aux datasets for all target domains."""
+    def _build_shift_aux(self, part: str) -> dict[str, SplitTensors]:
+        """Build one half, "valid" or "test", of every shifted set."""
         out, shifted = {}, []
         neg, pos = 0, 0
         for i, split_name in enumerate(self.SHIFT_MAP[self.hparams.subset]):
@@ -277,22 +315,38 @@ class RobustADDataModule(LightningDataModule):
             nmask, amask = split.y == 0, split.y == 1
             if nmask.any():
                 neg -= 1
-                sn = self._masked_split(split, nmask, neg)
+                rows = self._shift_half(split.x, nmask, part)
+                sn = self._masked_split(split, rows, neg)
                 out[f"shifted_normal_{i}"] = sn
                 shifted.append(sn)
             if amask.any():
                 pos += 1
-                out[f"shifted_anomaly_{i}"] = self._masked_split(split, amask, pos)
+                rows = self._shift_half(split.x, amask, part)
+                out[f"shifted_anomaly_{i}"] = self._masked_split(split, rows, pos)
 
         if shifted:
             out["shifted_normal_all"] = self._concat_balanced(shifted)
         return out
 
+    def _shift_half(
+        self, x: torch.Tensor, mask: torch.Tensor, part: str
+    ) -> torch.Tensor:
+        """Return the rows under mask that fall in one part, "valid" or "test".
+
+        Exact copies are dropped first, so that no image reaches both parts; the
+        distinct images are then halved, the odd one going to "valid".
+        """
+        rows = torch.nonzero(mask).flatten()
+        rows = rows[_first_copies(x[rows])]
+        perm = torch.randperm(rows.numel(), generator=self._split_generator())
+        n_valid = (rows.numel() + 1) // 2
+        return rows[perm[:n_valid]] if part == "valid" else rows[perm[n_valid:]]
+
     def _masked_split(
-        self, split: SplitTensors, mask: torch.Tensor, label: int
+        self, split: SplitTensors, rows: torch.Tensor, label: int
     ) -> SplitTensors:
-        """Select a subset of a split and overwrite all labels with one value."""
-        x = split.x[mask].contiguous()
+        """Select rows of a split (mask or indices) and give them all one label."""
+        x = split.x[rows].contiguous()
         y = torch.full((x.size(0),), label, dtype=torch.int64)
         return SplitTensors(x=x, y=y)
 
@@ -435,11 +489,11 @@ class RobustADDataModule(LightningDataModule):
         )
 
     def _cache_path(self, split_name: str, normalized: bool) -> Path:
-        size = (
-            "orig"
-            if self.hparams.image_size is None
-            else "x".join(map(str, self.hparams.image_size))
-        )
-        norm = "norm" if normalized else "raw"
-        name = f"{self.hparams.subset}_{split_name}_{size}_{norm}.pt"
+        """Return the tensor cache of one split.
+
+        The raw cache holds the resized pixels alone; the normalized one also depends on
+        the stats and carries the key of their file.
+        """
+        key = f"seed{self.hparams.seed}_norm" if normalized else "raw"
+        name = f"{self.hparams.subset}_{split_name}_{self._size_tag()}_{key}.pt"
         return self._subset_dir() / "tensor_cache" / name

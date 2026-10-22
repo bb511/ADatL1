@@ -20,7 +20,7 @@ data:
 
 trainer:
   gradient_clip_algorithm: norm
-  gradient_clip_val: 0.0
+  gradient_clip_val: 1.0
   min_epochs: 1
   max_epochs: 200
   # The full sanity pass is the untrained state the dump stores; no checkpoint is kept.
@@ -39,7 +39,7 @@ algorithm:
   optimizer:
     _partial_: true
     _target_: torch.optim.AdamW
-    lr: 1.0e-3
+    lr: 3.0e-4
     weight_decay: 1.0e-4
     betas: [0.9, 0.999]
     eps: 1e-8

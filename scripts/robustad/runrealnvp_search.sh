@@ -19,7 +19,11 @@
 # evaluation no longer runs, and the dump's per-epoch pass over the test,
 # auxiliary and training sets is not in them.
 #
-# On clariden, each driver keeps six trials queued as slurm jobs:
+# On clariden, one job holds a whole node and runs the four drivers on its
+# four GPUs, with no per-trial timeout:
+#   sbatch scripts/cluster/clariden_node.sbatch scripts/robustad/runrealnvp_search.sh
+# or, at a whole node per one-GPU trial, each driver keeps six trials queued
+# as slurm jobs:
 #   bash scripts/cluster/submit_search.sh scripts/robustad/runrealnvp_search.sh \
 #       hydra/launcher=submitit_slurm_clariden hydra.sweeper.n_jobs=6 \
 #       hydra.launcher.timeout_min=17

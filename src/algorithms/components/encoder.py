@@ -342,7 +342,8 @@ class ImageVariationalEncoder(nn.Module):
           - nodes[-1]: latent dimension
     :param strides: List of strides for the convolutional body. Must have length
         len(nodes) - 2.
-    :param activation: Activation function name.
+    :param activation: Activation function name, applied after every convolution and
+        after the hidden projection.
     :param init_weight: Callable method to initialize the encoder weights.
     :param init_bias: Callable method to initialize the encoder biases.
     :param batchnorm: Whether to use batch normalization or not.
@@ -410,6 +411,7 @@ class ImageVariationalEncoder(nn.Module):
         self.feature_dim = conv_nodes[-1] * h * w
 
         self.proj = nn.Linear(self.feature_dim, hidden_dim)
+        self.head_activation = self.net.activation
         self.z_mean = nn.Linear(hidden_dim, latent_dim)
         self.z_log_var = nn.Linear(hidden_dim, latent_dim)
 
@@ -431,7 +433,7 @@ class ImageVariationalEncoder(nn.Module):
     ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
         x = self.net(x)
         x = torch.flatten(x, start_dim=1)
-        x = self.proj(x)
+        x = self.head_activation(self.proj(x))
 
         z_mean = self.z_mean(x)
         z_log_var = self.z_log_var(x).clamp(*self.clamp_zlogvar_range)

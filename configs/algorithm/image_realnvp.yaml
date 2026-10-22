@@ -17,3 +17,5 @@ flow:
   activation: relu
   noise_scale: 0.0
   scale_clamp: 5.0
+  # Without it the untrained 3072-dim flow already has NLL tails beyond 1e11.
+  identity_init: true

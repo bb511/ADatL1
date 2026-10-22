@@ -28,9 +28,9 @@ hydra:
     storage: sqlite:///logs/optuna/robustad/realnvp_pool.db?timeout=600
 
     # define hyperparameter search space. Assumes using torch.optim.AdamW
-    # RobustAD space
+    # RobustAD space. Above lr 5e-4 the larger flows diverge even with identity_init.
     params:
-      algorithm.optimizer.lr: tag(log, interval(3e-5, 3e-3))
+      algorithm.optimizer.lr: tag(log, interval(3e-5, 5e-4))
       trainer.gradient_clip_val: choice(0.0, 0.5, 1.0, 2.0)
       algorithm.flow.n_flows: choice(4, 6)
       algorithm.flow.hidden_dim: choice(128, 256, 512)

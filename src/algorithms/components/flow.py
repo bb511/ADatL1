@@ -20,6 +20,8 @@ class CouplingLayer(nn.Module):
     :param n_hidden_layers: Int with the number of MLP layers in a coupling layer.
     :param activation: String with the activation used in the MLP.
     :param scale_clamp: Float with the clamp factor, for numerical stability.
+    :param identity_init: Bool, whether to zero the weight and bias of the last MLP
+        layer, so that the untrained layer is the identity map with log-det 0.
     """
 
     def __init__(
@@ -30,6 +32,7 @@ class CouplingLayer(nn.Module):
         n_hidden_layers: int = 2,
         activation: str = "relu",
         scale_clamp: float = 5.0,
+        identity_init: bool = False,
     ):
         super().__init__()
 
@@ -49,6 +52,12 @@ class CouplingLayer(nn.Module):
             mlp_in = hidden_dim
         layers.append(nn.Linear(mlp_in, out_dim))
         self.net = nn.Sequential(*layers)
+
+        # Zeroed after the default init rather than instead of it, so that the RNG
+        # draws, and every other parameter, match those of a flow without the flag.
+        if identity_init:
+            nn.init.zeros_(self.net[-1].weight)
+            nn.init.zeros_(self.net[-1].bias)
 
     def _get_activation(self, activation: str) -> nn.Module:
         """Map activation name to torch module."""
@@ -128,6 +137,8 @@ class RealNVP(nn.Module):
     :param noise_scale: Float with the standard deviation of the Gaussian noise added to
         the inputs in training mode.
     :param scale_clamp: Float with the clamp factor, for numerical stability.
+    :param identity_init: Bool, whether every coupling layer starts as the identity map,
+        so that the untrained flow is the base Gaussian.
     """
 
     def __init__(
@@ -139,6 +150,7 @@ class RealNVP(nn.Module):
         activation: str = "relu",
         noise_scale: float = 0.0,
         scale_clamp: float = 5.0,
+        identity_init: bool = False,
     ):
         super().__init__()
 
@@ -158,6 +170,7 @@ class RealNVP(nn.Module):
                     n_hidden_layers=n_hidden_layers,
                     activation=activation,
                     scale_clamp=scale_clamp,
+                    identity_init=identity_init,
                 )
             )
 

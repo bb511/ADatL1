@@ -23,7 +23,13 @@
 # timeout of 110 minutes per trial for this model (200 epochs at 21 s each on an H100, plus about 3 minutes of
 # evaluation, and half again as margin).
 #
-# On clariden, each driver keeps six trials queued as slurm jobs:
+# On clariden, one job holds a whole node and runs the four drivers of a wave
+# on its four GPUs, with no per-trial timeout:
+#   sbatch scripts/cluster/clariden_node.sbatch --only 1,2,3,4 \
+#       scripts/physics/runrealnvp_search.sh
+# At the epoch times above a driver needs about 28 hours, beyond the job's
+# 12, so a wave on this route ends short of its trials. Otherwise, at a whole
+# node per one-GPU trial, each driver keeps six trials queued as slurm jobs:
 #   bash scripts/cluster/submit_search.sh --only 1,2,3,4 scripts/physics/runrealnvp_search.sh \
 #       hydra/launcher=submitit_slurm_clariden hydra.sweeper.n_jobs=6 \
 #       hydra.launcher.timeout_min=110

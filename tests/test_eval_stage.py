@@ -384,7 +384,7 @@ def test_eval_configs_build_the_evaluator(domain):
     columns += [selection["q_sec"]["column"], selection["efficiency"]]
     assert {column.split("/")[0] for column in columns} <= names
     reference = "shifted_normal_all" if domain == "robustad" else "reference_normal"
-    assert configs["cap"]["dataset_2"] == reference
+    assert configs["wasserstein"]["dataset_2"] == reference
     null_ds = configs["anomaly_efficiency"]["null_ds"]
     assert len(null_ds) == {"cchamber": 3, "cchamber_wt": 2}.get(domain, 0)
 

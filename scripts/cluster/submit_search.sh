@@ -15,19 +15,27 @@
 # queue and stays alive until it has run its own n_trials, while the live
 # drivers of a catalogue (four, or eight in the two waves of a physics file)
 # fill one shared study. Drivers are therefore nohup'd and this command returns
-# as soon as they are all up.
+# as soon as they are all up, unless --wait is given.
 #
 # Usage (from the repository root):
 #   bash scripts/cluster/submit_search.sh --list    scripts/physics/runsvdd_search.sh
 #   bash scripts/cluster/submit_search.sh --dry-run scripts/physics/runsvdd_search.sh
 #   bash scripts/cluster/submit_search.sh           scripts/physics/runsvdd_search.sh
 #   bash scripts/cluster/submit_search.sh --only 1,3 scripts/physics/rundte_search.sh
+#   bash scripts/cluster/submit_search.sh --gpus 4 --wait scripts/cifar10/runae_search.sh
 #
 #   --list              list the drivers in the file (with their launcher) and exit
 #   --dry-run           print the full commands without running anything; works
 #                       off the cluster, since it needs no training env
 #   --only <sel>        comma-separated study names (substring) or 1-based
 #                       indices; default is every driver in the file
+#   --gpus <n>          run the k-th driver started on GPU (k-1) mod n of this
+#                       host, through CUDA_VISIBLE_DEVICES, so that the blocks'
+#                       trainer.devices=[0] picks it; default: every driver sees
+#                       every GPU
+#   --wait              stay in the foreground until every driver started here
+#                       has exited, and fail if any failed: a slurm job ends,
+#                       killing its drivers, when its script returns
 #
 # Any extra hydra overrides after the file name are appended to every driver.
 # Hydra takes the last of a duplicated override, so appending wins over the
@@ -40,12 +48,16 @@ set -eu
 only=""
 dry=0
 list=0
+gpus=0
+wait_all=0
 
 while [ $# -gt 0 ]; do
     case "$1" in
         --dry-run) dry=1; shift ;;
         --list) list=1; shift ;;
         --only) only="${2:?--only needs a value}"; shift 2 ;;
+        --gpus) gpus="${2:?--gpus needs a value}"; shift 2 ;;
+        --wait) wait_all=1; shift ;;
         --) shift; break ;;
         -*) echo "unknown option: $1" >&2; exit 2 ;;
         *) break ;;
@@ -170,6 +182,27 @@ if [ "$dry" -eq 0 ]; then
     done
 fi
 
+# slurm sends SIGTERM to a job that reaches its time limit, and a driver killed
+# by a signal leaves no traceback, so its log would read as alive to
+# sweep_status.py. Each driver still running, or dead by a signal, is marked
+# before the TERM is passed on, without waiting: slurm kills whatever is left
+# once the batch shell exits.
+pids=()
+logs=()
+mark_stopped() {
+    local k st
+    for k in "${!pids[@]}"; do
+        if kill -0 "${pids[k]}" 2>/dev/null; then
+            st=143
+        else
+            wait "${pids[k]}" && st=0 || st=$?
+        fi
+        if [ "$st" -gt 128 ]; then echo "stopped: signal $((st - 128))" >> "${logs[k]}"; fi
+    done
+    kill -TERM "${pids[@]}" 2>/dev/null || true
+}
+if [ "$dry" -eq 0 ] && [ "$wait_all" -eq 1 ]; then trap 'mark_stopped; exit 143' TERM; fi
+
 i=0
 n_sub=0
 while IFS= read -r cmd; do
@@ -182,6 +215,7 @@ while IFS= read -r cmd; do
     # the clariden launcher nests submitit_folder under hydra.sweep.dir).
     sweep=" hydra.sweep.dir=logs/train/multiruns/${sweep_ts}_${stem}_j$i"
     full="$PYTHON src/train.py$cmd$sweep${extra:+ $extra}"
+    if [ "$gpus" -gt 0 ]; then full="CUDA_VISIBLE_DEVICES=$((n_sub % gpus)) $full"; fi
 
     if [ "$dry" -eq 1 ]; then
         echo "[$i/$n_total] $full"
@@ -194,7 +228,11 @@ while IFS= read -r cmd; do
     # to re-run this script, and truncating would destroy the evidence of why.
     log="$logdir/${i}_${study}.log"
     if [ -f "$log" ]; then mv "$log" "$log.$(date +%Y%m%d-%H%M%S)"; fi
-    nohup bash -c "$full" > "$log" 2>&1 &
+    # Appending, although the log is new: a driver writing at its own offset
+    # would overwrite the line mark_stopped adds.
+    nohup bash -c "$full" >> "$log" 2>&1 &
+    pids+=("$!")
+    logs+=("$log")
     n_sub=$((n_sub + 1))
     # Drivers sharing one sqlite file still contend while creating their study
     # rows; stagger them rather than starting six in the same second.
@@ -208,7 +246,16 @@ if [ "$n_sub" -eq 0 ]; then
     exit 1
 fi
 
-if [ "$dry" -eq 0 ]; then
+if [ "$dry" -eq 0 ] && [ "$wait_all" -eq 1 ]; then
+    echo
+    echo "$n_sub driver(s) running (logs: $logdir); waiting for them."
+    failed=0
+    for pid in "${pids[@]}"; do
+        if ! wait "$pid"; then failed=$((failed + 1)); fi
+    done
+    echo "all drivers exited, $failed failed"
+    [ "$failed" -eq 0 ]
+elif [ "$dry" -eq 0 ]; then
     echo
     echo "$n_sub driver(s) running detached (logs: $logdir)."
     echo "Trials run as slurm jobs; drivers are nohup'd, safe to log out."

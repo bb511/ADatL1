@@ -7,7 +7,7 @@ import torch
 from colorama import Back, Fore
 from datasets import load_dataset
 from pytorch_lightning import LightningDataModule
-from torch.utils.data import DataLoader, TensorDataset, random_split
+from torch.utils.data import DataLoader, Subset, TensorDataset, random_split
 
 from src.data.components.dataset import CIFARADDataset
 from src.utils import pylogger
@@ -57,8 +57,9 @@ class CIFAR10DataModule(LightningDataModule):
       - the remaining auxiliary datasets are keyed by their original CIFAR class id
         converted to string, e.g. ``"1"``, ``"7"``, etc.
 
-    Standard image normalization is computed from the training split of the normal
-    classes only, then applied to all splits.
+    Standard image normalization is computed from the training part of the normal
+    classes only, without the validation images drawn from the CIFAR training split,
+    then applied to all splits.
 
     :param background_classes: Optional list of class indices treated as auxiliary
         background datasets.
@@ -69,6 +70,11 @@ class CIFAR10DataModule(LightningDataModule):
     :param reference_fraction: Fraction of normal validation/test data reserved for the
         auxiliary ``reference_normal`` split. The remainder becomes the main
         ``normal`` split.
+    :param seed: Seed of every split, fixed apart from the training seed so that every
+        run sees the same images.
+    :param train_seed: Seed of the training batch order; ``seed`` when None.
+    :param stats_file: Filename used to cache normalization statistics; None names it
+        by normal classes and seed.
     """
 
     def __init__(
@@ -81,20 +87,24 @@ class CIFAR10DataModule(LightningDataModule):
         max_val_batches: int = -1,
         val_fraction: float = 0.1,
         reference_fraction: float = 0.5,
-        seed: int = 42,
+        seed: int = 314159,
+        train_seed: int | None = None,
         num_workers: int = 0,
         normalize: bool = True,
-        stats_file: str = "cifar10_normal_stats.pt",
+        stats_file: str | None = None,
     ) -> None:
         super().__init__()
         self.save_hyperparameters(logger=False)
 
         self._main: dict[str, SplitTensors] = {}
         self._aux: dict[str, dict[str, SplitTensors]] = {"valid": {}, "test": {}}
-        # seed=None means 'do not seed', matching train.py's `if cfg.get("seed")`.
+        # Advanced once per epoch by the training loader to reorder its batches. The
+        # training seed drives it, so that seeds differ in batch order while the splits
+        # stay with the data seed; None for both leaves torch's default seed.
+        order_seed = seed if train_seed is None else train_seed
         self.shuffler = torch.Generator()
-        if seed is not None:
-            self.shuffler.manual_seed(seed)
+        if order_seed is not None:
+            self.shuffler.manual_seed(order_seed)
         self.max_val_batches = max_val_batches
 
         self.mean: torch.Tensor | None = None
@@ -213,9 +223,19 @@ class CIFAR10DataModule(LightningDataModule):
 
         return x.to(device, non_blocking=True), y.to(device, non_blocking=True)
 
+    def _stats_path(self) -> Path:
+        """Return the normalization-stats file path.
+
+        The stats depend on the seed through the training part it draws. The name does
+        not carry val_fraction, which changes that part too.
+        """
+        classes = "-".join(map(str, sorted(self.hparams.normal_classes)))
+        default = f"cifar10_normal{classes}_seed{self.hparams.seed}_stats.pt"
+        return Path(self.hparams.data_dir) / (self.hparams.stats_file or default)
+
     def _load_or_compute_stats(self) -> None:
         """Load cached normalization stats or compute them from normal train data."""
-        stats_path = Path(self.hparams.data_dir) / self.hparams.stats_file
+        stats_path = self._stats_path()
 
         if stats_path.exists():
             stats = torch.load(stats_path, map_location="cpu")
@@ -230,13 +250,18 @@ class CIFAR10DataModule(LightningDataModule):
         log.info(f"Saved CIFAR10 normalization stats to {stats_path}")
 
     def _compute_normalization(self, dataset: CIFARSplit) -> None:
-        """Compute mean/std using only the normal-class training samples."""
+        """Compute mean/std over the training part of the normal-class images.
+
+        The validation part, which holds ``normal`` and ``reference_normal``, is left
+        out.
+        """
         normal_indices = self._get_class_indices(
             dataset.targets, self.hparams.normal_classes
         )
+        train_positions, _ = self._normal_split(len(normal_indices))
         xs = []
 
-        for idx in normal_indices:
+        for idx in (normal_indices[i] for i in train_positions):
             x = (
                 torch.as_tensor(dataset.data[idx], dtype=torch.float32).permute(2, 0, 1)
                 / 255.0
@@ -259,6 +284,18 @@ class CIFAR10DataModule(LightningDataModule):
         seed = self.hparams.seed if self.hparams.seed is not None else 42
         return torch.Generator().manual_seed(seed)
 
+    def _normal_split(self, n: int) -> list[list[int]]:
+        """Return the train and validation positions among n normal training images.
+
+        The draw depends on n alone, so the stats and the split agree on the training
+        part before any image is normalized.
+        """
+        n_valid = max(2, int(round(self.hparams.val_fraction * n)))
+        if n - n_valid <= 0:
+            raise RuntimeError("Validation split too large; no training data remains.")
+        parts = random_split(range(n), [n - n_valid, n_valid], self._split_generator())
+        return [list(part) for part in parts]
+
     def _setup_fit_validate(self, train_ds: CIFARSplit) -> None:
         """Prepare train and validation splits from the CIFAR train set."""
         normal_indices = self._get_class_indices(
@@ -268,18 +305,10 @@ class CIFAR10DataModule(LightningDataModule):
             train_ds, normal_indices, label=0
         )
 
-        n_total = normal_data.size(0)
-        n_valid = max(2, int(round(self.hparams.val_fraction * n_total)))
-        n_train = n_total - n_valid
-        if n_train <= 0:
-            raise RuntimeError("Validation split too large; no training data remains.")
-
         full_normal = TensorDataset(normal_data, normal_labels)
-        train_subset, valid_subset = random_split(
-            full_normal,
-            [n_train, n_valid],
-            generator=self._split_generator(),
-        )
+        train_positions, valid_positions = self._normal_split(normal_data.size(0))
+        train_subset = Subset(full_normal, train_positions)
+        valid_subset = Subset(full_normal, valid_positions)
 
         if "train" not in self._main:
             x_train, y_train = self._tensor_dataset_to_tensors(train_subset)

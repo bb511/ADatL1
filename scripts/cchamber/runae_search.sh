@@ -19,7 +19,11 @@
 # 19 Oct, whose 204 light-tunnel fits took 80 minutes at 16 concurrent fits on
 # two H100s (about 6 minutes per fit on average), and leaves a wide margin.
 #
-# On clariden, each driver keeps six trials queued as slurm jobs:
+# On clariden, one job holds a whole node and runs the four drivers on its
+# four GPUs, with no per-trial timeout:
+#   sbatch scripts/cluster/clariden_node.sbatch scripts/cchamber/runae_search.sh
+# or, at a whole node per one-GPU trial, each driver keeps six trials queued
+# as slurm jobs:
 #   bash scripts/cluster/submit_search.sh scripts/cchamber/runae_search.sh \
 #       hydra/launcher=submitit_slurm_clariden hydra.sweeper.n_jobs=6 \
 #       hydra.launcher.timeout_min=30

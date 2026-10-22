@@ -69,6 +69,9 @@ class ImageDecoder(nn.Module):
       - `nodes[1:]` are the output channels of the transpose-convolutional stack,
       - `input_size` and `strides` are used to infer the starting spatial size.
 
+    The activation follows the projection and every transposed convolution. The
+    output convolution is linear unless `final_activation` is set.
+
     :param nodes: List of ints specifying the decoder widths. The first entry is the
         latent dimension. The remaining entries define the transpose-convolutional
         stack.
@@ -76,7 +79,8 @@ class ImageDecoder(nn.Module):
     :param input_size: Final spatial image size as (height, width).
     :param strides: List of strides for the transpose-convolutional body. Must have
         length len(nodes) - 1.
-    :param activation: Activation function name.
+    :param activation: Activation function name, applied after the projection and
+        after every transposed convolution.
     :param init_weight: Callable method to initialize decoder weights.
     :param init_bias: Callable method to initialize decoder biases.
     :param batchnorm: Whether to use batch normalization or not.
@@ -129,7 +133,11 @@ class ImageDecoder(nn.Module):
             init_weight(self.proj.weight)
         if init_bias is not None and self.proj.bias is not None:
             init_bias(self.proj.bias)
+        self.proj_activation = self._get_activation(activation)
 
+        # The stack ends on an activation because the output convolution follows;
+        # without it, the last transposed convolution and the output convolution
+        # compose to one linear map.
         self.net = ImageMLP(
             in_channels=c0,
             nodes=hidden_nodes,
@@ -137,7 +145,7 @@ class ImageDecoder(nn.Module):
             transpose=True,
             batchnorm=batchnorm,
             activation=activation,
-            final_activation=False,
+            final_activation=True,
             init_weight=init_weight,
             init_bias=init_bias,
         )
@@ -176,7 +184,7 @@ class ImageDecoder(nn.Module):
                 f"Expected latent dimension {self.latent_dim}, got {z.shape[1]}."
             )
 
-        x = self.proj(z)
+        x = self.proj_activation(self.proj(z))
         c, h, w = self.feature_shape
         x = x.view(z.shape[0], c, h, w)
         x = self.net(x)

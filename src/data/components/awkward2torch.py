@@ -21,6 +21,10 @@ class L1DataAwkward2Torch:
     workers: int
     nconst: dict
     verbose: bool = False
+    # Control-only objects placed after every other object in the tensor, so the
+    # excluded columns form one block at the end and the model input stays a
+    # view of the control tensor (L1ADDataModule._build_model_input_view).
+    trailing_objects: tuple = ("event_info",)
 
     def __post_init__(self):
         self.object_feature_map = None
@@ -54,11 +58,19 @@ class L1DataAwkward2Torch:
         procd_folder = self._process_folder(folder_path)
 
         self._make_feature_map(procd_folder)
-        data = np.concatenate([darr for _, _, darr, _ in procd_folder], axis=1)
+        # Flatten every object to (events, nconst * nfeats) before joining them, so
+        # objects may carry different features (event_info has only nPV_True). The
+        # column order is the one _make_feature_map records, and every consumer
+        # flattens the tensor anyway.
+        data = np.concatenate(
+            [darr.reshape(darr.shape[0], -1) for _, _, darr, _ in procd_folder], axis=1
+        )
         data = torch.from_numpy(data)
         self._cache_data(data)
 
-        mask = np.concatenate([marr for _, _, _, marr in procd_folder], axis=1)
+        mask = np.concatenate(
+            [marr.reshape(marr.shape[0], -1) for _, _, _, marr in procd_folder], axis=1
+        )
         mask = torch.from_numpy(mask)
         self._cache_mask(mask)
 
@@ -323,13 +335,17 @@ class L1DataAwkward2Torch:
         return existing_obj_names == previously_cached_objects
 
     def _get_parquet_fpaths(self, folder: Path) -> list[Path]:
-        """Get the parquet files in a folder while avoiding system files."""
+        """Get the parquet files in a folder while avoiding system files.
+
+        Sorted by path, except that ``trailing_objects`` come last.
+        """
         parquet_file_paths = sorted(
             [
                 fpath
                 for fpath in folder.glob("*.parquet")
                 if fpath.is_file() and not "L1bit" in fpath.name
-            ]
+            ],
+            key=lambda fpath: (fpath.stem in self.trailing_objects, fpath),
         )
 
         return parquet_file_paths

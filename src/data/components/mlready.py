@@ -27,6 +27,10 @@ class L1DataMLReady:
     name: str = "default"
     seed: int = 42
     verbose: bool = False
+    # Objects with one record of per-event values (e.g. event_info.nPV_True)
+    # instead of a list of physics objects. They are kept out of the unified
+    # schema in both directions; see _unify_schema.
+    event_level_objects: tuple = ("event_info",)
 
     def prepare(self, normalizer: L1DataNormalizer, select_feats: dict, flag: str = ""):
         """Makes train set, validation set, test set, and auxiliary data.
@@ -90,9 +94,18 @@ class L1DataMLReady:
         return drawn
 
     def _unify_schema(self):
-        """Each object should have the same features for easier casting to numpy."""
+        """Each object should have the same features for easier casting to numpy.
+
+        Event-level objects (``event_level_objects``) are left out in both
+        directions: their fields are not added to the physics objects, and the
+        physics features are not added to them. ak.with_field cannot add an empty
+        field inside a list of records (muons, jets, ...), and the extra columns
+        would only be padding.
+        """
         unified_schema = []
-        for feat_list in self.select_feats.values():
+        for obj_name, feat_list in self.select_feats.items():
+            if obj_name in self.event_level_objects:
+                continue
             unified_schema.append(feat_list)
 
         return set().union(*unified_schema)
@@ -182,7 +195,7 @@ class L1DataMLReady:
         self._cache_norm_params(obj_name)
         train_data = self.normalizer.norm(train_data, obj_name)
 
-        train_data = self._add_missing_feats(train_data)
+        train_data = self._add_missing_feats(train_data, obj_name)
         self._plot(train_data, obj_name, train_folder)
         ak.to_parquet(train_data, cache_file)
         log.info(Fore.GREEN + f"Cached mlready train {obj_name} data at: {cache_file}")
@@ -201,7 +214,7 @@ class L1DataMLReady:
         valid_data = valid_data[self.select_feats[obj_name]]
         valid_data = self.normalizer.norm(valid_data, obj_name)
 
-        valid_data = self._add_missing_feats(valid_data)
+        valid_data = self._add_missing_feats(valid_data, obj_name)
         ak.to_parquet(valid_data, cache_file)
         self._plot(valid_data, obj_name, valid_folder)
         log.info(Fore.GREEN + f"Cached mlready valid {obj_name} data at: {cache_file}")
@@ -220,7 +233,7 @@ class L1DataMLReady:
         test_data = test_data[self.select_feats[obj_name]]
         test_data = self.normalizer.norm(test_data, obj_name)
 
-        test_data = self._add_missing_feats(test_data)
+        test_data = self._add_missing_feats(test_data, obj_name)
         ak.to_parquet(test_data, cache_file)
         self._plot(test_data, obj_name, test_folder)
         log.info(Fore.GREEN + f"Cached mlready test {obj_name} data at: {cache_file}")
@@ -336,7 +349,7 @@ class L1DataMLReady:
         valid_data = valid_data[self.select_feats[obj_name]]
         valid_data = self.normalizer.norm(valid_data, obj_name)
 
-        valid_data = self._add_missing_feats(valid_data)
+        valid_data = self._add_missing_feats(valid_data, obj_name)
         ak.to_parquet(valid_data, cache_file)
         self._plot(valid_data, obj_name, valid_folder)
 
@@ -354,15 +367,19 @@ class L1DataMLReady:
         test_data = test_data[self.select_feats[obj_name]]
         test_data = self.normalizer.norm(test_data, obj_name)
 
-        test_data = self._add_missing_feats(test_data)
+        test_data = self._add_missing_feats(test_data, obj_name)
         ak.to_parquet(test_data, cache_file)
         self._plot(test_data, obj_name, test_folder)
 
-    def _add_missing_feats(self, data: ak.Array):
+    def _add_missing_feats(self, data: ak.Array, obj_name: str):
         """If an array is missing a field present in the unified schema, add it.
 
-        This field will be filled with None.
+        This field will be filled with None. Event-level objects are returned
+        unchanged (see _unify_schema).
         """
+        if obj_name in self.event_level_objects:
+            return data
+
         # Create an empty list for missing features.
         empty_list = ak.Array([[]] * len(data))
 

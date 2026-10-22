@@ -127,5 +127,113 @@ def test_missing_column_is_reported_rather_than_crashing_matplotlib(tmp_path: Pa
     candidates, front = _study()
     with pytest.raises(ParetoPlotError, match="missing columns"):
         write_pareto_figures(
-            candidates.drop(columns=["architecture_id"]), front, output_dir=tmp_path
+            candidates.drop(columns=["median_efficiency"]), front, output_dir=tmp_path
         )
+
+
+def _figures_on_save(monkeypatch) -> dict[str, object]:
+    """Every figure as it is saved, keyed by file name."""
+
+    from matplotlib.figure import Figure
+
+    saved: dict[str, object] = {}
+    original = Figure.savefig
+
+    def savefig(self, fname, *args, **kwargs):
+        saved[Path(fname).name] = {
+            "axes": [
+                {
+                    "xscale": ax.get_xscale(),
+                    "xlabel": ax.get_xlabel(),
+                    "ylabel": ax.get_ylabel(),
+                    "xticklabels": [t.get_text() for t in ax.get_xticklabels()],
+                    "collections": [
+                        {
+                            "n": len(c.get_offsets()),
+                            "facecolors": {tuple(np.round(f, 4)) for f in c.get_facecolors()},
+                            "has_array": c.get_array() is not None,
+                        }
+                        for c in ax.collections
+                    ],
+                }
+                for ax in self.axes
+            ],
+        }
+        return original(self, fname, *args, **kwargs)
+
+    monkeypatch.setattr(Figure, "savefig", savefig)
+    return saved
+
+
+def test_pairs_are_one_colour_without_front_or_architecture_marks(tmp_path, monkeypatch):
+    from matplotlib.colors import to_rgba
+
+    from src.evaluation.pareto.plots import POINT_COLOR
+
+    saved = _figures_on_save(monkeypatch)
+    candidates, front = _study()
+    write_pareto_figures(candidates, front, output_dir=tmp_path)
+
+    pairs = {name: fig for name, fig in saved.items()
+             if name.startswith("pareto_") and "coloured" not in name and "parallel" not in name}
+    assert set(pairs) == {
+        "pareto_L_vs_E.png",
+        "pareto_L_vs_1_minus_eff.png", "pareto_L_vs_1_minus_eff_log.png",
+        "pareto_E_vs_1_minus_eff.png", "pareto_E_vs_1_minus_eff_log.png",
+    }
+    n_eligible = int((candidates["configuration_valid"] & candidates["feasible"]).sum())
+    for name, figure in pairs.items():
+        (axis,) = figure["axes"]  # one panel: no architecture facets
+        filled = [c for c in axis["collections"] if c["facecolors"] and c["n"] == n_eligible]
+        assert len(filled) == 1, name  # no front rings or other overlays
+        assert filled[0]["facecolors"] == {tuple(np.round(to_rgba(POINT_COLOR), 4))}, name
+        # The collapsed run is the only other mark: hollow.
+        others = [c for c in axis["collections"] if c is not filled[0]]
+        assert [c["n"] for c in others] == [1] and others[0]["facecolors"] == set(), name
+
+
+def test_efficiency_is_drawn_as_one_minus_eff_linear_and_log(tmp_path, monkeypatch):
+    saved = _figures_on_save(monkeypatch)
+    candidates, front = _study()
+    write_pareto_figures(candidates, front, output_dir=tmp_path)
+
+    for stem in ("pareto_L_vs_1_minus_eff", "pareto_E_vs_1_minus_eff"):
+        (linear,) = saved[f"{stem}.png"]["axes"]
+        (log,) = saved[f"{stem}_log.png"]["axes"]
+        assert linear["xscale"] == "linear" and log["xscale"] == "log"
+        assert linear["xlabel"].startswith("$1 - ")
+        assert log["xlabel"].endswith("(log scale)")
+        # Readable ticks even though the data span less than a decade.
+        assert len([t for t in log["xticklabels"] if t]) >= 2
+
+
+def test_log_axis_labels_values_close_to_one(tmp_path, monkeypatch):
+    """1 - eff within 0.1 % of 1, as in the real studies: ticks must still show."""
+
+    saved = _figures_on_save(monkeypatch)
+    rows = [
+        _row(f"g{gamma}", gamma=gamma, bins=50, architecture="h64_32",
+             leakage=0.11 - 0.001 * step, correlation=0.10 - 0.005 * step,
+             efficiency=0.00477 + 0.0001 * step)
+        for step, gamma in enumerate((0.0, 0.01, 0.1, 0.5, 0.8))
+    ]
+    candidates, front, _ = select_pareto_front(pd.DataFrame(rows))
+    write_pareto_figures(candidates, front, output_dir=tmp_path)
+
+    (log,) = saved["pareto_L_vs_1_minus_eff_log.png"]["axes"]
+    labels = [t for t in log["xticklabels"] if t]
+    assert len(labels) >= 2
+    assert all(0.99 < float(t) < 1.0 for t in labels)
+
+
+def test_three_objective_figure_puts_l_up_e_across_and_efficiency_in_colour(tmp_path, monkeypatch):
+    saved = _figures_on_save(monkeypatch)
+    candidates, front = _study()
+    write_pareto_figures(candidates, front, output_dir=tmp_path)
+
+    matrix_ax, colorbar_ax = saved["pareto_L_vs_E_coloured_by_eff.png"]["axes"]
+    assert matrix_ax["ylabel"].startswith("Leakage")
+    assert matrix_ax["xlabel"].startswith("Residual correlation")
+    assert any(c["has_array"] for c in matrix_ax["collections"])  # coloured by a value
+    assert colorbar_ax["ylabel"].startswith("Signal efficiency")
+

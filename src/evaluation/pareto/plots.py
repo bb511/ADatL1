@@ -5,19 +5,28 @@ Keeping them apart means a figure can be restyled without re-running selection,
 and selection cannot be silently changed by a plotting edit.
 
 Every figure reads the two Phase 3 tables and nothing else, so what is drawn is
-exactly what was selected.
+exactly what was selected. Each configuration is a single training run, so
+points carry no error bars.
 
-Each configuration is a single training run, so points carry no error bars.
+The figures:
 
-Colour follows the data-viz palette. Gamma spans four decades (0.01 to 100),
-which is a magnitude rather than a handful of categories, so it takes the
-sequential blue ramp on a logarithmic scale, read off a colourbar. A discrete
-ordinal ramp cannot hold eleven single-hue steps that stay visibly apart.
-Gamma zero is deliberately NOT the lightest step of that ramp: it is the unregularised baseline that every
-feasibility constraint is measured against, a reference rather than a little bit
-of regularisation, so it is drawn as a neutral open marker with its own legend
-entry. Residual correlation is continuous magnitude and takes the sequential
-blue ramp, labelled on its colourbar.
+* One scatter per pair of objectives: L against E, L against 1 - efficiency and
+  E against 1 - efficiency. Efficiency enters as the cost ``1 - eff``, so lower
+  is better on both axes of every pair and the best corner is bottom left. The
+  two pairs with ``1 - eff`` are drawn twice, with a linear and with a
+  logarithmic ``1 - eff`` axis. Every configuration gets the same mark: no
+  channel for architecture, gamma or front membership, only position.
+* All three objectives at once: L (y) against E (x), coloured by the median
+  signal efficiency.
+* The Pareto front in parallel coordinates, coloured by gamma: gamma spans four
+  decades (0.01 to 100), a magnitude rather than a handful of categories, so it
+  takes the sequential blue ramp on a logarithmic scale, read off a colourbar.
+  Gamma zero is deliberately NOT the lightest step of that ramp: it is the
+  unregularised baseline every feasibility constraint is measured against, so
+  it is drawn as a red square with its own legend entry.
+
+Invalid and infeasible configurations are drawn hollow and grey in the scatters,
+so a collapsed run is never mistaken for one that competed.
 """
 
 from __future__ import annotations
@@ -37,16 +46,11 @@ from .selection import (
     VALID_COLUMN,
 )
 
-#: Panels read in capacity order rather than alphabetically, which would put
-#: h128_64 before h64_32. Anything unrecognised is appended, sorted.
-ARCHITECTURE_ORDER = ("h64_32", "h128_64", "h64_64_32")
-
 GAMMA_COLUMN = "mi_gamma"
-BINS_COLUMN = "mi_sensitive_num_bins"
-ARCHITECTURE_COLUMN = "architecture_id"
-FRONT_COLUMN = "is_pareto_front"
+#: Derived column: the efficiency cost 1 - median efficiency.
+INEFFICIENCY_COLUMN = "one_minus_median_efficiency"
 
-#: Sequential blue, 100 -> 700, for continuous residual correlation.
+#: Sequential blue, 100 -> 700.
 SEQUENTIAL_BLUE = (
     "#cde2fb", "#b7d3f6", "#9ec5f4", "#86b6ef", "#6da7ec", "#5598e7",
     "#3987e5", "#2a78d6", "#256abf", "#1c5cab", "#184f95", "#104281", "#0d366b",
@@ -54,8 +58,8 @@ SEQUENTIAL_BLUE = (
 #: Gamma ramp: sequential blue from step 250, whose light end still clears the
 #: surface at 2.06:1, so the weakest regularisation stays visible as a mark.
 GAMMA_RAMP = SEQUENTIAL_BLUE[3:]
-#: Neutral ink for size swatches and other non-identity chrome.
-BASELINE_INK = "#52514e"
+#: The one colour of every configuration in the pairwise scatters.
+POINT_COLOR = SEQUENTIAL_BLUE[9]
 #: The gamma-zero baseline: categorical red, a square, never part of the blue
 #: ordinal ramp. 3.85:1 on the chart surface, so a thin open edge stays
 #: legible, and deliberately not the reserved "critical" status token.
@@ -67,33 +71,19 @@ TEXT_PRIMARY = "#0b0b0b"
 TEXT_SECONDARY = "#52514e"
 SURFACE = "#fcfcfb"
 
-#: Bins run from 10 to 500, so area follows log2(bins): every doubling adds the
-#: same area. Area is a weak channel -- read it as "few vs many bins", with the
-#: exact value in the legend. The label says "requested" on purpose: quantile
-#: edges on FET.Et collapse, so the effective bin count is lower.
-BINS_AREA_AT_10 = 30.0
-BINS_AREA_PER_DOUBLING = 42.0
-BINS_AREA_MAX = 270.0
-
-#: Area range for a size-encoded ordered factor. Area is a weak channel, so the
-#: ends are far apart and the number of levels is kept small.
-SIZE_AREA_RANGE = (36.0, 210.0)
-
-#: What a size encoding is allowed to carry, and how its levels are ordered.
-#: Architecture is nominal -- area implies a magnitude it does not have -- so it
-#: is ordered by the study's own declared sequence and labelled as a key rather
-#: than a scale.
-SIZE_ENCODINGS = {
-    "gamma": (GAMMA_COLUMN, r"$\gamma$", None),
-    "bins": (BINS_COLUMN, "requested bins", None),
-    "architecture": (ARCHITECTURE_COLUMN, "architecture", ARCHITECTURE_ORDER),
-}
-
 AXIS_LABELS = {
     LEAKAGE_COLUMN: "Leakage $L$ (worst of four probes, held-out $R^2$)",
     EFFICIENCY_COLUMN: r"Signal efficiency $\epsilon_{\mathrm{median}}$",
     CORRELATION_COLUMN: "Residual correlation $E$",
+    INEFFICIENCY_COLUMN: r"$1 - \epsilon_{\mathrm{median}}$",
 }
+
+#: (y, x) of the pairwise scatters, and whether a log-x version is drawn too.
+PAIRS = (
+    (LEAKAGE_COLUMN, CORRELATION_COLUMN, False),
+    (LEAKAGE_COLUMN, INEFFICIENCY_COLUMN, True),
+    (CORRELATION_COLUMN, INEFFICIENCY_COLUMN, True),
+)
 
 
 class ParetoPlotError(ValueError):
@@ -144,47 +134,6 @@ def _gamma_colors(frame: pd.DataFrame) -> dict[float, str]:
     return {level: to_hex(colormap(norm(level))) for level in levels}
 
 
-def _bins_area(bins: Any) -> float:
-    if pd.isna(bins) or float(bins) <= 0.0:
-        return BINS_AREA_AT_10
-    area = BINS_AREA_AT_10 + BINS_AREA_PER_DOUBLING * np.log2(float(bins) / 10.0)
-    return float(np.clip(area, BINS_AREA_AT_10, BINS_AREA_MAX))
-
-
-def _areas(frame: pd.DataFrame) -> np.ndarray:
-    return np.array([_bins_area(value) for value in frame[BINS_COLUMN]], dtype=float)
-
-
-def _size_levels(frame: pd.DataFrame, column: str, order: Sequence[Any] | None):
-    """Ordered distinct values of a size-encoded column."""
-
-    present = [value for value in frame[column].dropna().unique()]
-    if order is not None:
-        ranked = [value for value in order if value in present]
-        return ranked + sorted(value for value in present if value not in order)
-    return sorted(present)
-
-
-def _size_areas(frame: pd.DataFrame, column: str, levels: Sequence[Any]) -> np.ndarray:
-    lookup = dict(zip(levels, np.linspace(*SIZE_AREA_RANGE, num=max(len(levels), 1))))
-    return np.array(
-        [lookup.get(value, np.mean(SIZE_AREA_RANGE)) for value in frame[column]],
-        dtype=float,
-    )
-
-
-def _size_legend_handles(levels: Sequence[Any], title: str):
-    from matplotlib.lines import Line2D
-
-    areas = np.linspace(*SIZE_AREA_RANGE, num=max(len(levels), 1))
-    return [
-        Line2D([], [], marker="o", linestyle="none", markersize=float(np.sqrt(area)),
-               markerfacecolor=BASELINE_INK, markeredgecolor="none",
-               label=f"{title} = {level}")
-        for level, area in zip(levels, areas)
-    ]
-
-
 def _style_axis(axis, *, x_column: str, y_column: str) -> None:
     axis.set_facecolor(SURFACE)
     axis.set_xlabel(AXIS_LABELS[x_column], color=TEXT_PRIMARY)
@@ -225,18 +174,6 @@ def _draw_excluded(axis, excluded: pd.DataFrame, x_column: str, y_column: str) -
     return True
 
 
-def _draw_front_rings(axis, front: pd.DataFrame, x_column: str, y_column: str) -> None:
-    """Open rings around the Pareto-front configurations."""
-
-    if front.empty:
-        return
-    axis.scatter(
-        front[x_column], front[y_column],
-        s=_areas(front) + 150.0, facecolors="none", edgecolors=TEXT_PRIMARY,
-        linewidths=1.5, zorder=4,
-    )
-
-
 def _gamma_legend_handles(
     gamma_colors: Mapping[float, str], *, has_baseline: bool, baseline_filled: bool = False
 ):
@@ -265,131 +202,14 @@ def _gamma_legend_handles(
     return handles
 
 
-def _bins_legend_handles(frame: pd.DataFrame):
-    from matplotlib.lines import Line2D
-
-    present = sorted({int(value) for value in frame[BINS_COLUMN].dropna()})
-    # Area is read as "few vs many bins"; four reference sizes spanning the grid
-    # say that, while ten near-identical swatches would only suggest precision.
-    if len(present) > 4:
-        present = [present[i] for i in np.linspace(0, len(present) - 1, 4).round().astype(int)]
-    return [
-        Line2D([], [], marker="o", linestyle="none",
-               markersize=float(np.sqrt(_bins_area(bins))),
-               markerfacecolor=BASELINE_INK, markeredgecolor="none",
-               label=f"{bins} bins")
-        for bins in present
-    ]
-
-
-def _scatter_by_gamma(axis, frame: pd.DataFrame, x_column: str, y_column: str,
-                      gamma_colors: Mapping[float, str]) -> None:
-    baseline = frame.loc[frame[GAMMA_COLUMN] == 0.0]
-    if not baseline.empty:
-        axis.scatter(
-            baseline[x_column], baseline[y_column], s=_areas(baseline),
-            marker=BASELINE_MARKER, facecolors="none", edgecolors=BASELINE_MARK,
-            linewidths=1.6, zorder=2,
-        )
-    regularised = frame.loc[frame[GAMMA_COLUMN] != 0.0]
-    if not regularised.empty:
-        axis.scatter(
-            regularised[x_column], regularised[y_column], s=_areas(regularised),
-            c=[gamma_colors[float(value)] for value in regularised[GAMMA_COLUMN]],
-            edgecolors=SURFACE, linewidths=0.8, zorder=2,
-        )
-
-
-def faceted_figure(candidates: pd.DataFrame, *, y_column: str, output_path: Path) -> Path:
-    """L against one objective, one panel per architecture, shared axes.
-
-    Faceting rather than a marker-shape channel: position, colour and area are
-    already three encodings, and three interleaved symbol shapes on top of them
-    is more than a reader can decode at once. Side-by-side panels answer "does
-    the architecture matter" directly.
-    """
-
-    import matplotlib
-    matplotlib.use("Agg")
-    import matplotlib.pyplot as plt
-
-    eligible, excluded = _split(candidates)
-    present = {str(value) for value in candidates[ARCHITECTURE_COLUMN].dropna()}
-    architectures = [name for name in ARCHITECTURE_ORDER if name in present]
-    architectures += sorted(present - set(ARCHITECTURE_ORDER))
-    if not architectures:
-        raise ParetoPlotError("No architecture_id values to facet on.")
-    gamma_colors = _gamma_colors(eligible if not eligible.empty else candidates)
-
-    figure, axes = plt.subplots(
-        1, len(architectures), figsize=(5.2 * len(architectures), 5.0),
-        sharex=True, sharey=True, constrained_layout=True,
-    )
-    axes = np.atleast_1d(axes)
-    figure.patch.set_facecolor(SURFACE)
-    any_excluded = False
-
-    for axis, architecture in zip(axes, architectures):
-        panel = eligible.loc[eligible[ARCHITECTURE_COLUMN] == architecture]
-        panel_excluded = excluded.loc[excluded[ARCHITECTURE_COLUMN] == architecture]
-        any_excluded |= _draw_excluded(axis, panel_excluded, LEAKAGE_COLUMN, y_column)
-        _scatter_by_gamma(axis, panel, LEAKAGE_COLUMN, y_column, gamma_colors)
-        _draw_front_rings(
-            axis, panel.loc[_as_bool(panel[FRONT_COLUMN], label=FRONT_COLUMN)],
-            LEAKAGE_COLUMN, y_column,
-        )
-        _style_axis(axis, x_column=LEAKAGE_COLUMN, y_column=y_column)
-        axis.set_title(architecture, color=TEXT_PRIMARY, fontsize=11)
-
-    for axis in axes[1:]:
-        axis.set_ylabel("")
-
-    levels = _gamma_levels(eligible if not eligible.empty else candidates)
-    if levels:
-        from matplotlib.cm import ScalarMappable
-
-        colorbar = figure.colorbar(
-            ScalarMappable(norm=_gamma_norm(levels), cmap=_gamma_colormap()),
-            ax=list(axes), location="bottom", shrink=0.6, aspect=40,
-        )
-        colorbar.set_label(r"MI weight $\gamma$ (log scale)", color=TEXT_PRIMARY)
-        colorbar.ax.tick_params(colors=TEXT_SECONDARY, labelsize=9)
-        colorbar.outline.set_edgecolor(GRID_INK)
-
-    handles = _gamma_legend_handles(
-        {}, has_baseline=bool((eligible[GAMMA_COLUMN] == 0.0).any())
-    )
-    handles += _bins_legend_handles(eligible)
-    handles += _ring_legend_handle()
-    if any_excluded:
-        handles += _excluded_legend_handle()
-    figure.legend(
-        handles=handles, loc="outside right center", frameon=False,
-        labelcolor=TEXT_SECONDARY, fontsize=9,
-    )
-    figure.suptitle(
-        f"Validation Pareto study: $L$ against {_plain(y_column)}",
-        color=TEXT_PRIMARY, fontsize=13,
-    )
-    figure.savefig(output_path, dpi=200, facecolor=SURFACE)
-    plt.close(figure)
-    return output_path
-
 
 def _plain(column: str) -> str:
     return {
         EFFICIENCY_COLUMN: r"$\epsilon_{\mathrm{median}}$",
+        INEFFICIENCY_COLUMN: r"$1 - \epsilon_{\mathrm{median}}$",
         CORRELATION_COLUMN: "$E$",
         LEAKAGE_COLUMN: "$L$",
     }[column]
-
-
-def _ring_legend_handle():
-    from matplotlib.lines import Line2D
-
-    return [Line2D([], [], marker="o", linestyle="none", markersize=11,
-                   markerfacecolor="none", markeredgecolor=TEXT_PRIMARY,
-                   markeredgewidth=1.5, label="On the Pareto front")]
 
 
 def _excluded_legend_handle():
@@ -400,27 +220,108 @@ def _excluded_legend_handle():
                    markeredgewidth=0.9, label="Invalid or infeasible")]
 
 
-def third_objective_figure(
+
+def _with_inefficiency(candidates: pd.DataFrame) -> pd.DataFrame:
+    frame = candidates.copy()
+    frame[INEFFICIENCY_COLUMN] = 1.0 - frame[EFFICIENCY_COLUMN].astype(float)
+    return frame
+
+
+def _plain_ticks(axis) -> None:
+    """Full numbers on a linear axis: no offset ("+9.947e-1") and no 1e-3 factor."""
+
+    axis.set_major_formatter(_number_formatter())
+
+
+def _number_formatter():
+    """Plain decimals, the same number of them on every tick of an axis."""
+
+    from matplotlib.ticker import ScalarFormatter
+
+    formatter = ScalarFormatter(useOffset=False)
+    formatter.set_scientific(False)
+    return formatter
+
+
+def _log_axis(axis, values: np.ndarray) -> None:
+    """Log scale whose ticks stay readable when the data span less than a decade.
+
+    1 - efficiency lies within 0.5 % of 1, so the decade ticks of a log axis are
+    all outside the data and matplotlib would label nothing. Within one decade
+    the ticks are placed at round values instead; across decades the usual log
+    ticks are kept.
+    """
+
+    from matplotlib.ticker import FixedLocator, MaxNLocator, NullLocator
+
+    if axis is axis.axes.xaxis:
+        axis.axes.set_xscale("log")
+    else:
+        axis.axes.set_yscale("log")
+    finite = values[np.isfinite(values) & (values > 0.0)]
+    if finite.size == 0:
+        return
+    low, high = float(finite.min()), float(finite.max())
+    if high / low >= 10.0:
+        return
+    ticks = [float(t) for t in MaxNLocator(nbins=5).tick_values(low, high) if low <= t <= high]
+    axis.set_major_locator(FixedLocator(ticks or [low, high]))
+    axis.set_minor_locator(NullLocator())
+    axis.set_major_formatter(_number_formatter())
+
+
+def pair_figure(
     candidates: pd.DataFrame,
     *,
+    y_column: str,
+    x_column: str,
     output_path: Path,
-    annotate_front: bool = True,
-    size_by: str | None = None,
+    log_x: bool = False,
 ) -> Path:
-    """L against efficiency with residual correlation as the colour.
+    """One objective against another, every configuration in the same colour.
 
-    The companion to the faceted figures and, for reading the front, the more
-    honest of the two: dominance is decided in three dimensions, so a ringed
-    point can sit inside the cloud of a two-dimensional projection purely
-    because it wins on the axis that projection dropped. Here that axis is the
-    colour.
+    ``x_column`` / ``y_column`` may be INEFFICIENCY_COLUMN (1 - median
+    efficiency), which is derived here. ``log_x`` puts the x axis on a log scale.
+    """
 
-    ``annotate_front=False`` drops the front rings,
-    leaving the bare cloud. Useful when the point is the shape of the sweep
-    rather than which configurations survived the comparison.
+    import matplotlib
+    matplotlib.use("Agg")
+    import matplotlib.pyplot as plt
 
-    ``size_by`` adds one of SIZE_ENCODINGS as mark area, so a grid axis can be
-    read off the same cloud without faceting it.
+    frame = _with_inefficiency(candidates)
+    eligible, excluded = _split(frame)
+
+    figure, axis = plt.subplots(figsize=(7.0, 5.6), constrained_layout=True)
+    figure.patch.set_facecolor(SURFACE)
+    any_excluded = _draw_excluded(axis, excluded, x_column, y_column)
+    axis.scatter(
+        eligible[x_column], eligible[y_column],
+        s=70.0, c=POINT_COLOR, edgecolors=SURFACE, linewidths=0.8, zorder=2,
+    )
+    _style_axis(axis, x_column=x_column, y_column=y_column)
+    _plain_ticks(axis.yaxis)
+    if log_x:
+        _log_axis(axis.xaxis, frame[x_column].to_numpy(dtype=float))
+        axis.set_xlabel(AXIS_LABELS[x_column] + "  (log scale)", color=TEXT_PRIMARY)
+    else:
+        _plain_ticks(axis.xaxis)
+    if any_excluded:
+        axis.legend(handles=_excluded_legend_handle(), frameon=False,
+                    labelcolor=TEXT_SECONDARY, fontsize=9)
+    axis.set_title(f"{_plain(y_column)} against {_plain(x_column)}",
+                   color=TEXT_PRIMARY, fontsize=12)
+    figure.savefig(output_path, dpi=200, facecolor=SURFACE)
+    plt.close(figure)
+    return output_path
+
+
+def three_objective_figure(candidates: pd.DataFrame, *, output_path: Path) -> Path:
+    """All three objectives at once: L (y) against E (x), coloured by efficiency.
+
+    Dominance is decided in three dimensions, so this is the scatter in which the
+    front can actually be read: a point that looks beaten in L and E can still
+    win on the efficiency carried by its colour. Darker means a higher median
+    efficiency.
     """
 
     import matplotlib
@@ -429,54 +330,36 @@ def third_objective_figure(
     from matplotlib.colors import LinearSegmentedColormap
 
     eligible, excluded = _split(candidates)
-    # The 100-150 steps of the sequential ramp are specified to recede toward
-    # the surface, which suits a heatmap and not an 8px mark. Marks start at
-    # step 200 so the lowest-E points stay visible.
+    # The 100-150 steps of the sequential ramp recede toward the surface, which
+    # suits a heatmap and not an 8px mark. Marks start at step 200 so the lowest
+    # efficiencies stay visible.
     colormap = LinearSegmentedColormap.from_list(
         "sequential_blue_marks", list(SEQUENTIAL_BLUE[2:])
     )
 
     figure, axis = plt.subplots(figsize=(7.5, 5.8), constrained_layout=True)
     figure.patch.set_facecolor(SURFACE)
-    any_excluded = _draw_excluded(axis, excluded, LEAKAGE_COLUMN, EFFICIENCY_COLUMN)
-    size_handles: list = []
-    if size_by is None:
-        areas: float | np.ndarray = 90.0
-    else:
-        if size_by not in SIZE_ENCODINGS:
-            raise ParetoPlotError(
-                f"Unknown size encoding {size_by!r}; expected one of "
-                f"{sorted(SIZE_ENCODINGS)}."
-            )
-        size_column, size_title, size_order = SIZE_ENCODINGS[size_by]
-        levels = _size_levels(eligible, size_column, size_order)
-        areas = _size_areas(eligible, size_column, levels)
-        size_handles = _size_legend_handles(levels, size_title)
-
+    any_excluded = _draw_excluded(axis, excluded, CORRELATION_COLUMN, LEAKAGE_COLUMN)
     points = axis.scatter(
-        eligible[LEAKAGE_COLUMN], eligible[EFFICIENCY_COLUMN],
-        c=eligible[CORRELATION_COLUMN], cmap=colormap,
-        s=areas, edgecolors=SURFACE, linewidths=0.8, zorder=2,
+        eligible[CORRELATION_COLUMN], eligible[LEAKAGE_COLUMN],
+        c=eligible[EFFICIENCY_COLUMN], cmap=colormap,
+        s=90.0, edgecolors=SURFACE, linewidths=0.8, zorder=2,
     )
-    if annotate_front:
-        _draw_front_rings(
-            axis, eligible.loc[_as_bool(eligible[FRONT_COLUMN], label=FRONT_COLUMN)],
-            LEAKAGE_COLUMN, EFFICIENCY_COLUMN,
-        )
-    _style_axis(axis, x_column=LEAKAGE_COLUMN, y_column=EFFICIENCY_COLUMN)
+    _style_axis(axis, x_column=CORRELATION_COLUMN, y_column=LEAKAGE_COLUMN)
+    _plain_ticks(axis.xaxis)
+    _plain_ticks(axis.yaxis)
 
     colorbar = figure.colorbar(points, ax=axis)
-    colorbar.set_label(AXIS_LABELS[CORRELATION_COLUMN] + "  (lower is better)",
-                       color=TEXT_PRIMARY)
+    colorbar.set_label(AXIS_LABELS[EFFICIENCY_COLUMN], color=TEXT_PRIMARY)
+    colorbar.ax.yaxis.set_major_formatter(_number_formatter())
     colorbar.ax.tick_params(colors=TEXT_SECONDARY, labelsize=9)
     colorbar.outline.set_edgecolor(GRID_INK)
 
-    handles = _ring_legend_handle() if annotate_front else []
-    handles += size_handles
-    handles += _excluded_legend_handle() if any_excluded else []
-    if handles:
-        axis.legend(handles=handles, frameon=False, labelcolor=TEXT_SECONDARY, fontsize=9)
-    axis.set_title("All three objectives at once", color=TEXT_PRIMARY, fontsize=12)
+    if any_excluded:
+        axis.legend(handles=_excluded_legend_handle(), frameon=False,
+                    labelcolor=TEXT_SECONDARY, fontsize=9)
+    axis.set_title(r"All three objectives: $L$ against $E$, coloured by $\epsilon_{\mathrm{median}}$",
+                   color=TEXT_PRIMARY, fontsize=12)
     figure.savefig(output_path, dpi=200, facecolor=SURFACE)
     plt.close(figure)
     return output_path
@@ -656,24 +539,30 @@ def front_parallel_coordinates(front: pd.DataFrame, *, output_path: Path) -> Pat
     return output_path
 
 
+def _pair_key(y_column: str, x_column: str, log_x: bool) -> str:
+    names = {LEAKAGE_COLUMN: "leakage", CORRELATION_COLUMN: "correlation",
+             INEFFICIENCY_COLUMN: "inefficiency"}
+    return f"{names[y_column]}_vs_{names[x_column]}" + ("_log" if log_x else "")
+
+
+def _pair_filename(y_column: str, x_column: str, log_x: bool) -> str:
+    names = {LEAKAGE_COLUMN: "L", CORRELATION_COLUMN: "E",
+             INEFFICIENCY_COLUMN: "1_minus_eff"}
+    return f"pareto_{names[y_column]}_vs_{names[x_column]}" + ("_log" if log_x else "") + ".png"
+
+
 FIGURE_FILENAMES = {
-    "leakage_vs_efficiency_by_architecture": "pareto_L_vs_efficiency_by_architecture.png",
-    "leakage_vs_correlation_by_architecture": "pareto_L_vs_correlation_by_architecture.png",
-    "leakage_vs_efficiency_by_correlation": "pareto_L_vs_efficiency_coloured_by_E.png",
-    "leakage_vs_efficiency_by_correlation_plain":
-        "pareto_L_vs_efficiency_coloured_by_E_plain.png",
-    "leakage_vs_efficiency_by_correlation_size_gamma":
-        "pareto_L_vs_efficiency_coloured_by_E_size_gamma.png",
-    "leakage_vs_efficiency_by_correlation_size_bins":
-        "pareto_L_vs_efficiency_coloured_by_E_size_bins.png",
-    "leakage_vs_efficiency_by_correlation_size_architecture":
-        "pareto_L_vs_efficiency_coloured_by_E_size_architecture.png",
+    **{
+        _pair_key(y, x, log_x): _pair_filename(y, x, log_x)
+        for y, x, with_log in PAIRS
+        for log_x in ((False, True) if with_log else (False,))
+    },
+    "three_objectives": "pareto_L_vs_E_coloured_by_eff.png",
     "front_parallel_coordinates": "pareto_front_parallel_coordinates.png",
 }
 
 _REQUIRED_COLUMNS = (
-    CONFIGURATION_ID_COLUMN, GAMMA_COLUMN, BINS_COLUMN, ARCHITECTURE_COLUMN,
-    VALID_COLUMN, FEASIBLE_COLUMN, FRONT_COLUMN,
+    CONFIGURATION_ID_COLUMN, GAMMA_COLUMN, VALID_COLUMN, FEASIBLE_COLUMN,
     LEAKAGE_COLUMN, CORRELATION_COLUMN, EFFICIENCY_COLUMN,
 )
 
@@ -691,32 +580,16 @@ def write_pareto_figures(
     destination.mkdir(parents=True, exist_ok=True)
     written: dict[str, Path] = {}
 
-    written["leakage_vs_efficiency_by_architecture"] = faceted_figure(
-        candidates, y_column=EFFICIENCY_COLUMN,
-        output_path=destination / FIGURE_FILENAMES["leakage_vs_efficiency_by_architecture"],
+    for y_column, x_column, with_log in PAIRS:
+        for log_x in (False, True) if with_log else (False,):
+            key = _pair_key(y_column, x_column, log_x)
+            written[key] = pair_figure(
+                candidates, y_column=y_column, x_column=x_column, log_x=log_x,
+                output_path=destination / FIGURE_FILENAMES[key],
+            )
+    written["three_objectives"] = three_objective_figure(
+        candidates, output_path=destination / FIGURE_FILENAMES["three_objectives"],
     )
-    written["leakage_vs_correlation_by_architecture"] = faceted_figure(
-        candidates, y_column=CORRELATION_COLUMN,
-        output_path=destination / FIGURE_FILENAMES["leakage_vs_correlation_by_architecture"],
-    )
-    written["leakage_vs_efficiency_by_correlation"] = third_objective_figure(
-        candidates,
-        output_path=destination / FIGURE_FILENAMES["leakage_vs_efficiency_by_correlation"],
-    )
-    written["leakage_vs_efficiency_by_correlation_plain"] = third_objective_figure(
-        candidates,
-        annotate_front=False,
-        output_path=destination
-        / FIGURE_FILENAMES["leakage_vs_efficiency_by_correlation_plain"],
-    )
-    for size_by in SIZE_ENCODINGS:
-        key = f"leakage_vs_efficiency_by_correlation_size_{size_by}"
-        written[key] = third_objective_figure(
-            candidates,
-            annotate_front=False,
-            size_by=size_by,
-            output_path=destination / FIGURE_FILENAMES[key],
-        )
     if not front.empty:
         written["front_parallel_coordinates"] = front_parallel_coordinates(
             front,

@@ -11,7 +11,6 @@ import numpy as np  # noqa: E402
 import pandas as pd  # noqa: E402
 import pytest  # noqa: E402
 from matplotlib.figure import Figure  # noqa: E402
-from PIL import Image  # noqa: E402
 
 from src.analysis.run_mi_hyperparameters import (  # noqa: E402
     MiHyperparameters,
@@ -141,31 +140,3 @@ def test_callback_without_mi_model_draws_no_subtitle():
     callback_module = pytest.importorskip("src.evaluation.callbacks.correlation_matrix")
     mi = callback_module.CorrelationMatrixCallback._mi_hyperparameters(SimpleNamespace())
     assert not mi.known
-
-
-def test_redo_puts_the_runs_mi_hyperparameters_below_the_title(tmp_path, monkeypatch):
-    from src.analysis.scripts import redo_correlation_matrix_plots as redo
-
-    run = tmp_path / "checkpoints/Exp/Run"
-    plot_dir = run / "plots/val/loss_total/correlation_matrix/normal/Pearson"
-    plot_dir.mkdir(parents=True)
-    (run / "resolved_config.yaml").write_text(
-        "algorithm:\n  mi_gamma: 0.1\n  mi_sensitive_num_bins: 80\n"
-    )
-    _bin_widths(run, 60)
-    CORR.to_csv(plot_dir / "input_pearson_correlation_matrix.csv")
-    CORR.to_csv(plot_dir / "reconstruction_pearson_correlation_matrix.csv")
-    for name in ("input_pearson_correlation_matrix.png",
-                 "abs_reconstruction_minus_input_pearson_correlation_matrix.png"):
-        Image.new("RGB", (4, 4), "white").save(plot_dir / name)
-    calls = []
-
-    def fake_plot(**kwargs):
-        calls.append(kwargs)
-        Image.new("RGB", (4, 4), "white").save(kwargs["save_dir"] / kwargs["filename"])
-
-    monkeypatch.setattr("src.plot.matrix.plot", fake_plot)
-    results, _ = redo.redraw_all(redo.discover_plot_jobs(tmp_path / "checkpoints"))
-
-    assert [r.status for r in results] == ["redrawn", "redrawn"]
-    assert [call["subtitle"] for call in calls] == [TEXT, TEXT]

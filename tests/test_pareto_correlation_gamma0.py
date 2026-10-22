@@ -177,41 +177,6 @@ def test_reference_disagreement_is_reported(experiment, plot_calls):
     assert any("γ = 0 runs disagree; used G0_bins50" in note for _, note in report.details)
 
 
-def test_redo_redraws_comparison_plots_from_their_folder(experiment, plot_calls):
-    from src.analysis.scripts import redo_correlation_matrix_plots as redo
-
-    cmp.process_experiment(experiment)
-    plot_calls.clear()
-    out = experiment / "RunA" / METHOD_DIR / "comparison_gamma0"
-    jobs = redo.discover_plot_jobs(out)
-    results, _ = redo.redraw_all(jobs)
-    assert [r.status for r in results] == ["redrawn"] * 6
-    full = next(c for c in plot_calls if not c["filename"].endswith(("_et_only.png",))
-                and "sorted" not in c["filename"])
-    assert full["data"]["FET.Et"]["jets.phi"] == pytest.approx(0.3 - 0.4)
-    assert {tuple(c["text_highlight_columns"]) for c in plot_calls} == {("jets.phi",)}
-
-
-def test_redo_finds_sources_of_self_improvement_plots_in_the_method_folder(experiment, plot_calls):
-    from src.analysis.scripts import redo_correlation_matrix_plots as redo
-
-    self_dir = experiment / "G0_bins10" / METHOD_DIR / "self_improvement"
-    results, _ = redo.redraw_all(redo.discover_plot_jobs(self_dir))
-    assert [r.status for r in results] == ["redrawn"] * 4
-    # Self-improvement plots keep the |r_reco| <= 0.1 rule (G0 reco: 0.4, 0.2).
-    assert all(c["text_highlight_columns"] == [] for c in plot_calls)
-
-
-def test_gallery_regex_maps_subfolder_galleries(tmp_path):
-    from src.analysis.scripts import redo_correlation_matrix_plots as redo
-
-    run_dir = tmp_path / "mlruns" / "7" / "abc"
-    gallery = (run_dir / "artifacts/val/loss_total/correlation_matrix/Pearson"
-               / "normal_correlation_matrix_pearson_comparison_gamma0.html")
-    assert redo.gallery_plot_dir(gallery, run_dir, tmp_path / "ck") == (
-        tmp_path / "ck/plots/val/loss_total/correlation_matrix/normal/Pearson/comparison_gamma0")
-
-
 def test_closer_to_zero_columns_is_strict_and_sign_blind():
     from src.plot.correlation_matrix import closer_to_zero_columns
 

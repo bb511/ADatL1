@@ -38,6 +38,9 @@ class CorrelationMatrixCallback(Callback):
         'sum', 'mean', 'max', 'first'.
     :param correlation_methods: Pandas correlation methods to save/plot, e.g.
         ['pearson'] or ['pearson', 'spearman'].
+    :param abs_correlation_methods: Methods whose input/reconstruction matrices are
+        also drawn as |r| (0 to 1) into ``<Method>/abs-correlation/``. Default
+        ``['pearson']``; ``[]`` turns it off.
     :param sensitive_variable: Variable whose mean correlation with every other
         configured variable is written for Pareto-front construction. Its row is
         framed in every correlation-matrix plot, and its entries are printed in green
@@ -76,6 +79,7 @@ class CorrelationMatrixCallback(Callback):
         ckpts: dict | None = None,
         aggregate: str = "sum",
         correlation_methods: list[str] | None = None,
+        abs_correlation_methods: list[str] | None = None,
         sensitive_variable: str = "FET.Et",
         sensitive_group: list[str] | None = None,
         include_input: bool = True,
@@ -111,6 +115,7 @@ class CorrelationMatrixCallback(Callback):
         self.ckpts = ckpts or {"last": True}
         self.aggregate = aggregate.lower()
         self.correlation_methods = correlation_methods or ["pearson"]
+        self.abs_correlation_methods = (["pearson"] if abs_correlation_methods is None else list(abs_correlation_methods))
         self.sensitive_variable = sensitive_variable
         self.sensitive_group = list(sensitive_group or [])
         self.include_input = include_input
@@ -348,22 +353,27 @@ class CorrelationMatrixCallback(Callback):
 
                     if self.write_details:
                         stem = corr_plot.correlation_matrix_stem(space_name, method)
+                        title = corr_plot.correlation_matrix_title(space_name, method)
+                        reference = (corr if space_name in {"input", "reconstruction"} else None)
                         corr.to_csv(method_folder / f"{stem}.csv")
                         self._write_correlation_matrix_variants(
                             corr=corr,
                             plot_folder=method_folder,
                             stem=stem,
-                            title=corr_plot.correlation_matrix_title(
-                                space_name,
-                                method,
-                            ),
-                            decorrelation_reference=(
-                                corr
-                                if space_name in {"input", "reconstruction"}
-                                else None
-                            ),
+                            title=title,
+                            decorrelation_reference=reference,
                             subtitle=subtitle,
                         )
+                        if method in self.abs_correlation_methods:
+                            corr_plot.write_abs_correlation_matrix(
+                                corr,
+                                plot_folder=method_folder,
+                                stem=stem,
+                                title=title,
+                                highlight_variable=self.sensitive_variable,
+                                decorrelation_reference=reference,
+                                subtitle=subtitle
+                            )
 
                 corr_before = correlations.get(("input", method))
                 corr_after = correlations.get(("reconstruction", method))
@@ -444,6 +454,22 @@ class CorrelationMatrixCallback(Callback):
                                 self.name,
                                 method,
                                 corr_plot.SELF_IMPROVEMENT_DIR,
+                            ),
+                        )
+
+                    abs_folder = method_folder / corr_plot.ABS_CORRELATION_DIR
+                    if abs_folder.is_dir():
+                        utils.mlflow.log_plots_to_mlflow(
+                            trainer,
+                            ckpt_name,
+                            f"{self.name}/{method_name}/{corr_plot.ABS_CORRELATION_DIR}",
+                            abs_folder,
+                            log_raw=self.log_raw_mlflow,
+                            gallery_name=corr_plot.gallery_name(
+                                dset_name,
+                                self.name,
+                                method,
+                                corr_plot.ABS_CORRELATION_DIR
                             ),
                         )
 

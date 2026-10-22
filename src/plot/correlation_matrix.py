@@ -49,6 +49,7 @@ ET_ONLY_SUFFIX = "_et_only"
 # (written afterwards by src/evaluation/pareto/correlation_gamma0.py).
 SELF_IMPROVEMENT_DIR = "self_improvement"
 COMPARISON_GAMMA0_DIR = "comparison_gamma0"
+ABS_CORRELATION_DIR = "abs-correlation"
 SUBFOLDERS = (SELF_IMPROVEMENT_DIR, COMPARISON_GAMMA0_DIR)
 #: Filename suffix -> figure scale of each plotted variant.
 VARIANT_FIGURE_SCALES = {"": 1.0, ET_ONLY_SUFFIX: 0.6}
@@ -313,6 +314,53 @@ def plot_correlation_matrix(
         subtitle=subtitle,
     )
 
+def plot_abs_correlation_matrix(
+    corr: pd.DataFrame,
+    save_dir: Path,
+    filename: str,
+    title: str,
+    *,
+    figure_scale: float = 1.0,
+    highlight_variable: str | None = HIGHLIGHT_VARIABLE,
+    decorrelation_reference: pd.DataFrame | None = None,
+    green_columns: Sequence[str] | None = None,
+    subtitle: str | None = None,
+    ) -> None:
+    """Draw one correlation matrix with the highlighted-variable row framed.
+
+    :param subtitle: Line below the title, e.g. the MI hyperparameters
+        (``MiHyperparameters.text()`` in ``src/analysis/run_mi_hyperparameters.py``).
+
+    :param decorrelation_reference: Correlation matrix that decides which entries of
+        the highlighted row are printed in green (``|r| <= DECORRELATED_ABS_THRESHOLD``):
+        ``corr`` itself for a before/after matrix, the reconstruction matrix for a
+        change matrix. ``None`` colours nothing.
+    :param green_columns: Columns of the highlighted row to print in green, used
+        instead of ``decorrelation_reference`` when given (the ``comparison_gamma0/``
+        rule, :func:`closer_to_zero_columns`).
+    """
+
+    abs_dir = Path(save_dir) / ABS_CORRELATION_DIR
+    abs_dir.mkdir(parents=True, exist_ok=True)
+
+    if green_columns is None:
+        green_columns = decorrelated_columns(decorrelation_reference, highlight_variable)
+    matrix.plot(
+        data=corr.abs().to_dict(orient="index"),
+        value_name=f"{title} (absolute)",
+        save_dir=abs_dir,
+        cmap="Reds",
+        vmin=0,
+        vmax=1,
+        filename=filename,
+        figure_scale=figure_scale,
+        outline_row=highlight_variable,
+        outline_linewidth=HIGHLIGHT_LINEWIDTH,
+        text_highlight_columns=list(green_columns),
+        text_highlight_color=DECORRELATED_TEXT_COLOR,
+        subtitle=subtitle,
+    )
+
 
 def write_correlation_matrix_variants(
     corr: pd.DataFrame,
@@ -345,6 +393,45 @@ def write_correlation_matrix_variants(
             variant = sort_correlation_change_matrix(variant, ascending=sort_ascending)
 
         plot_correlation_matrix(
+            variant,
+            save_dir=plot_folder,
+            filename=f"{stem}{suffix}.png",
+            title=title,
+            figure_scale=figure_scale,
+            highlight_variable=highlight_variable,
+            decorrelation_reference=decorrelation_reference,
+            green_columns=green_columns,
+            subtitle=subtitle,
+        )
+
+
+def write_abs_correlation_matrix(
+    corr: pd.DataFrame,
+    plot_folder: Path,
+    stem: str,
+    title: str,
+    *,
+    highlight_variable: str | None = HIGHLIGHT_VARIABLE,
+    decorrelation_reference: pd.DataFrame | None = None,
+    green_columns: Sequence[str] | None = None,
+    subtitle: str | None = None,
+) -> None:
+    """Save the full-variable and ``*.Et``-only |r| PNG of one before/after matrix.
+
+    The PNGs go to ``plot_folder/ABS_CORRELATION_DIR`` with the same file names as
+    the signed ones. Not for change matrices: their sign is the result.
+    Parameters as in :func:`write_correlation_matrix_variants`.
+    """
+
+    # Build every variant first so a missing *.Et label fails before any plot.
+    variants = [
+        (suffix, select_variant(corr, suffix), scale)
+        for suffix, scale in VARIANT_FIGURE_SCALES.items()
+    ]
+
+    for suffix, variant, figure_scale in variants:
+
+        plot_abs_correlation_matrix(
             variant,
             save_dir=plot_folder,
             filename=f"{stem}{suffix}.png",

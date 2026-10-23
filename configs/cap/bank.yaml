@@ -16,9 +16,9 @@ beta_min: 0.01
 beta_max: 1000.0
 n_beta: 200
 # tanh(beta q / 2) = 0.9 at q, the lattice median of the 95th percentile of |z| on
-# validation normal at the last epoch (scripts/analysis/cap_beta_fix.py). rank is exact
-# by construction; std and sq are placeholders, the values of standard Gaussian scores.
-beta_fix: { std: 1.5023, rank: 3.0994, sq: 6.4826 }
+# validation normal at the last epoch (scripts/analysis/cap_beta_fix.py), over the 800
+# runs of the four light-tunnel lattices trained at dd9486e.
+beta_fix: { std: 0.9781, rank: 3.0992, sq: 4.6247 }
 null_bins: 256
 n_permutations: 200
 permutation_seed: 0

@@ -17,6 +17,7 @@ from src.evaluation.callbacks.components.cap.bank import cap_bank
 from src.evaluation.callbacks.components.cap.binary import pairing
 from src.evaluation.callbacks.components.cap.binary.pairing import CDFCoupling, cdf
 from src.evaluation.callbacks.components.cap.metric import ApproximationCapacity
+from src.evaluation.replay import ReplayModule
 from src.utils.omegaconf import register_resolvers
 from tests.test_eval_b9 import (
     AUX,
@@ -29,8 +30,8 @@ from tests.test_eval_b9 import (
     _stage_config,
     _train,
 )
-from tests.test_eval_stage import TOY_SETS, _compose, _evaluator
-from tests.test_score_dump import ToyAE, ToyDataModule, dump_callback, fit
+from tests.test_eval_stage import TOY_SETS, _compose, _evaluator, _test
+from tests.test_score_dump import ToyAE, ToyDataModule, dump_callback, fit, load
 
 CONFIGS = Path(__file__).resolve().parents[1] / "configs"
 BANK = OmegaConf.to_container(OmegaConf.load(CONFIGS / "cap" / "bank.yaml"))
@@ -122,6 +123,10 @@ def _columns(row: dict, name: str) -> dict[str, float]:
     }
 
 
+def _written(row: dict, name: str) -> dict[str, str]:
+    return {key: value for key, value in row.items() if key.startswith(f"{name}/")}
+
+
 def _paired_cap(scores_1: torch.Tensor, scores_2: torch.Tensor):
     # As src/evaluation/callbacks/cap.py pairs them: cdf, then the shorter length.
     index_1, index_2 = cdf(scores_1, scores_2)
@@ -154,12 +159,39 @@ def test_bank_callbacks_copy_the_control():
 
 def test_stage_writes_finite_bank_columns(stage):
     assert [row["epoch"] for row in stage.val] == ["-1", "0", "1"]
+    # At the initial state disp's evidence is zero, and its correlation 0 / 0.
+    undefined = {f"{p}_disp_D-lim" for p in BANK["pairings"]}
     for row in stage.val:
         values = _columns(row, CONTROL)
         assert values.keys() == _bank_keys(BANK)
-        assert [key for key, value in values.items() if not math.isfinite(value)] == []
+        nonfinite = {key for key, value in values.items() if not math.isfinite(value)}
+        assert nonfinite == (undefined if row["epoch"] == "-1" else set())
         for name, beta in BANK["beta_fix"].items():
             assert values[f"{name}_beta_fix"] == beta
+
+
+def test_disp_is_zero_at_the_initial_state_and_moves_after(stage):
+    initial, *trained = (_columns(row, CONTROL) for row in stage.val)
+    for name in BANK["pairings"]:
+        for statistic in ("A-fix", "D-fix", "A-lim"):
+            key = f"{name}_disp_{statistic}"
+            assert initial[key] == pytest.approx(0.0, abs=1e-12)
+            assert all(values[key] != 0.0 for values in trained), key
+
+
+def test_disp_is_nan_without_an_initial_checkpoint(stage, tmp_path):
+    replay = ReplayModule(ToyAE(), load(stage.path / "meta.pt"))
+    replay.load_epoch(load(stage.path / "epoch_0001.pt"), tmp_path / "epoch_0001.pt")
+    callback = hydra.utils.instantiate(stage.control)
+    records = _test(replay, "val", ToyDataModule().loaders("val"), [callback])
+
+    values, logged = _columns(records, CONTROL), _columns(stage.val[2], CONTROL)
+    assert values.keys() == logged.keys()
+    for key, value in values.items():
+        if "_disp_" in key:
+            assert math.isnan(value), key
+        else:
+            assert value == pytest.approx(logged[key], rel=1e-12, abs=1e-12), key
 
 
 def test_legacy_corner_is_the_old_cap_on_the_same_pass(stage):
@@ -185,14 +217,17 @@ def test_second_stage_reads_the_cached_couplings(stage, monkeypatch):
         monkeypatch.setitem(pairing.COUPLINGS, name, _fail)
     stage.evaluator.evaluate_dump(stage.path, ToyAE(), ToyDataModule(), stage.out)
     again = _read_csv(stage.out / "runs" / "run_a" / "val.csv")
-    expected = [_columns(row, CONTROL) for row in stage.val]
-    assert [_columns(row, CONTROL) for row in again] == expected
+    # As written, so that the NaN of disp's D-lim at epoch -1 compares equal.
+    expected = [_written(row, CONTROL) for row in stage.val]
+    assert [_written(row, CONTROL) for row in again] == expected
     assert sorted(path.name for path in cache.iterdir()) == names
 
 
 def test_training_logs_the_stage_values(trained):
-    groups = ("pairings", "maps", "statistics")
-    assert len(trained.keys) == math.prod(len(BANK[group]) for group in groups)
+    # Every map but disp, which needs the initial state's scores.
+    maps = [name for name in BANK["maps"] if name != "disp"]
+    expected = len(BANK["pairings"]) * len(maps) * len(BANK["statistics"])
+    assert len(trained.keys) == expected
     key = "val/summary/cap_ot_std_A-sup_ema_reference_normal_vs_normal"
     assert trained.keys["ot_std_A-sup"] == key
     for name, key in trained.keys.items():
@@ -206,11 +241,13 @@ def test_training_logs_the_stage_values(trained):
 @pytest.mark.skipif(REAL_DUMP is None, reason="ADL1T_CAP_DUMP names no real run.")
 def test_legacy_corner_is_the_old_cap_on_a_real_run():
     files = sorted(Path(REAL_DUMP).glob("epoch_*.pt"))
+    initial = torch.load(Path(REAL_DUMP) / "initial.pt", weights_only=True)["val"]
+    initial = [initial[name]["ascore/full"] for name in ("normal", "reference_normal")]
     for path in (files[0], files[len(files) // 2], files[-1]):
         val = torch.load(path, weights_only=True)["val"]
         normal = val["normal"]["ascore/full"]
         reference = val["reference_normal"]["ascore/full"]
-        values = cap_bank(normal, reference, CDFCoupling(), BANK)
+        values = cap_bank(normal, reference, CDFCoupling(), BANK, *initial)
         old = _paired_cap(normal, reference)
         legacy = values["legacy_A-sup"] - LOG_2
         assert legacy == pytest.approx(old.compute(), rel=0, abs=1e-10)

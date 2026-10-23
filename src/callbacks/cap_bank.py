@@ -3,7 +3,7 @@ import math
 import torch
 from pytorch_lightning import Callback
 
-from src.callbacks.components.cap.bank import build_couplings
+from src.callbacks.components.cap.bank import INITIAL_MAPS, build_couplings
 from src.callbacks.components.cap.metric import CAPBank
 from src.callbacks.components.selection import EMA_WEIGHT, ema_update
 from src.data.utils import unpack_batch
@@ -39,7 +39,7 @@ class CAPBankCallback(Callback):
     two sets and of the nn caliper's reference set are collected too, flattened to
     [n, d], in the same batch order as the scores; that epoch's end builds the couplings
     of ``bank_config["pairings"]`` once, in memory, and drops the inputs. Every epoch
-    then logs, for each registered pairing, evidence map and statistic,
+    then logs, for each registered pairing, evidence map but ``disp`` and statistic,
     ``val/summary/cap_<pairing>_<map>_<statistic>_ema_<dataset_1>_vs_<dataset_2>``,
     averaged as CAPCallback averages: a non-finite value leaves the average unchanged.
 
@@ -63,8 +63,10 @@ class CAPBankCallback(Callback):
         super().__init__()
         self.output_name, self.ema_weight = output_name, ema_weight
         self.datasets, self.reference = (dataset_1, dataset_2), reference
-        self.bank_config = bank_config
-        self.keys = _logged_keys(bank_config, dataset_1, dataset_2)
+        # disp needs the scores of the run's initial state, which this callback lacks.
+        maps = {k: v for k, v in bank_config["maps"].items() if k not in INITIAL_MAPS}
+        self.bank_config = {**bank_config, "maps": maps}
+        self.keys = _logged_keys(self.bank_config, dataset_1, dataset_2)
         self.log_kwargs = dict(
             prog_bar=False,
             on_step=False,

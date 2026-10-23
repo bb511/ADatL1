@@ -1,3 +1,4 @@
+import math
 from typing import Dict, Literal, Optional, Tuple
 
 import torch
@@ -245,3 +246,16 @@ def sq_evidence(scores: Tensor, c: float = 2.0) -> Tensor:
     scores = scores.to(torch.float64)
     median, scale = _centre_scale(scores)
     return torch.tanh((scores - median) / (2.0 * c * scale))
+
+
+def disp_evidence(scores: Tensor, initial: Tensor) -> Tensor:
+    """Return the evidence 2 (r(s) - r(s0)) / N of one side's scores, in float64.
+
+    r is the tied rank of `_tied_ranks` within the side, of the candidate's scores s
+    and of its initial state's scores s0 on the same N events, so that the evidence lies
+    in (-2, 2) and is zero on every event whose rank training left unchanged. A NaN in
+    s or s0, which has no rank, gives NaN evidence on its event.
+    """
+    shift = _tied_ranks(scores).to(torch.float64) - _tied_ranks(initial)
+    z = 2.0 * shift / scores.numel()
+    return z.masked_fill(scores.isnan() | initial.isnan(), math.nan)

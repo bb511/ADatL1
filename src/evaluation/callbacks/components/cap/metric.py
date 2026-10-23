@@ -226,13 +226,24 @@ class CAPBank(Metric):
             "values", default=torch.zeros(0, dtype=torch.float64), dist_reduce_fx="cat"
         )
 
-    def update(self, scores_1: Tensor, scores_2: Tensor, couplings: dict) -> None:
-        """Evaluate the bank under every coupling, keyed by its pairing name."""
+    def update(
+        self,
+        scores_1: Tensor,
+        scores_2: Tensor,
+        couplings: dict,
+        initial_1: Tensor | None = None,
+        initial_2: Tensor | None = None,
+    ) -> None:
+        """Evaluate the bank under every coupling, keyed by its pairing name; the
+        initial state's scores of the two sets are those `bank.cap_bank` takes."""
         maps = self.bank_config["maps"]
         values = {f"{m}_beta_fix": self.bank_config["beta_fix"][m] for m in maps}
+        initial = (initial_1, initial_2)
         with torch.no_grad():
             for pairing, coupling in couplings.items():
-                bank = cap_bank(scores_1, scores_2, coupling, self.bank_config)
+                bank = cap_bank(
+                    scores_1, scores_2, coupling, self.bank_config, *initial
+                )
                 values |= {
                     f"{pairing}_{key}": value
                     for key, value in bank.items()

@@ -1,3 +1,4 @@
+import math
 from pathlib import Path
 
 import torch
@@ -25,7 +26,11 @@ class CAPBankCallback(Callback):
     in the same batch order as the scores. When the trainer carries ``out_dir``, as the
     dump stage's trainers do, they are cached in ``<out_dir>/cap_bank`` (see
     ``bank.build_couplings``), so that the runs of a lattice served the same inputs
-    share them; otherwise they are kept in memory only. Nothing is plotted.
+    share them; otherwise they are kept in memory only. The scores of the two sets at
+    the checkpoint named ``initial``, which the dump stage replays first, are kept:
+    ``disp`` reads them as the initial state's at that checkpoint and every later one.
+    Before such a checkpoint they are NaN, and so are disp's values. Nothing is
+    plotted.
 
     :param output_name: Name of the model output used as anomaly score.
     :param dataset_1: Name of the test dataloader of X1.
@@ -52,6 +57,7 @@ class CAPBankCallback(Callback):
         self.bank_config = bank_config
         self.name = name
         self.couplings = None
+        self.initial = None
 
     def on_test_epoch_start(self, trainer, pl_module):
         """Reset the scores and, until the couplings exist, the inputs."""
@@ -76,11 +82,20 @@ class CAPBankCallback(Callback):
         ckpt_name = Path(pl_module._ckpt_path).stem
         if self.couplings is None:
             self.couplings = self._build_couplings(trainer)
+        scores = [torch.cat(self.scores[name]) for name in self.datasets]
+        if ckpt_name == "initial":
+            self.initial = scores
         bank = CAPBank(**self.bank_config)
-        bank.update(*(torch.cat(self.scores[n]) for n in self.datasets), self.couplings)
+        bank.update(*scores, self.couplings, *self._initial(scores))
         utils.mlflow.log_metrics_to_mlflow(
             trainer, bank.compute(), ckpt_name=ckpt_name, cb_name=self.name
         )
+
+    def _initial(self, scores: list[torch.Tensor]) -> list[torch.Tensor]:
+        # NaN initial scores give disp NaN values under its usual keys.
+        if self.initial is None:
+            return [torch.full_like(s, math.nan) for s in scores]
+        return self.initial
 
     def _build_couplings(self, trainer) -> dict:
         """Build or read the couplings of the collected inputs, which are then

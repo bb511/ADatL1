@@ -78,6 +78,26 @@ def test_nn_caliper_discards_the_far_events_and_partners_repeat(module):
     assert diagnostics["mean_distance"] == pytest.approx((0.1 + 0.08 + 0.25) / 3)
 
 
+@pytest.mark.parametrize("module", PAIRINGS)
+def test_ot_and_nn_nulls_relabel_the_rows_of_x2(module):
+    x_1, x_2, x_ref = _randn(100, 2), _randn(120, 2, seed=1), _randn(100, 2, seed=2)
+    ot = module.ot_coupling(x_1, x_2, n_subsamples=3)
+    nn = module.nn_coupling(x_1, x_2[:30], x_ref)
+    for coupling, n_2 in ((ot, 120), (nn, 30)):
+        pairs = coupling.pairs(None, None)
+        partners = torch.cat([p.index_2 for p in pairs]).tolist()
+        assert len(set(partners)) < len(partners)
+        generator = torch.Generator().manual_seed(0)
+        for draw in coupling.null_draws(None, torch.zeros(n_2), 20, generator):
+            relabel = {}
+            for observed, drawn in zip(pairs, draw, strict=True):
+                assert torch.equal(drawn.index_1, observed.index_1)
+                for j, k in zip(observed.index_2.tolist(), drawn.index_2.tolist()):
+                    assert relabel.setdefault(j, k) == k
+            assert len(set(relabel.values())) == len(relabel)
+            assert any(j != k for j, k in relabel.items())
+
+
 def _mahalanobis(x):
     centred = x - x.mean(dim=0)
     covariance = centred.T @ centred / (len(x) - 1)

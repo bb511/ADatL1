@@ -91,6 +91,30 @@ def null_agreement_curve(
     return torch.stack(curve)
 
 
+def sample_agreement(
+    gap1: Tensor, gap2: Tensor, beta: float, weight1: Tensor | None = None
+) -> Tensor:
+    """Return the mean kernel of every event of gap2 against the sample gap1.
+
+    The mean is weighted by weight1, normalised here, as in null_agreement_curve.
+
+    Args:
+        gap1: Energy gaps of the sample [N1]
+        gap2: Energy gaps of the events [N2]
+        beta: Inverse temperature
+        weight1: Masses of the sample's events [N1]
+
+    Returns:
+        sum_i weight1[i] k(gap1[i], gap2[j]; beta) for every j [N2]
+    """
+    weight1 = _unit_mass(weight1, gap1)
+    x, y = 0.5 * beta * gap1, 0.5 * beta * gap2
+    rows = max(1, _BLOCK_ELEMENTS // max(1, y.numel()))
+    blocks = zip(x.split(rows), weight1.split(rows))
+    joint = sum(w @ _log_2cosh(xb[:, None] + y) for xb, w in blocks)
+    return joint - weight1 @ _log_2cosh(x) - _log_2cosh(y)
+
+
 def indexed_agreement(gap1: Tensor, gap2: Tensor, index: Tensor, beta: float) -> Tensor:
     """Return the mean kernel of gap1 against gap2[index[r]] for every row r of index.
 

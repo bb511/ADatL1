@@ -78,6 +78,22 @@ def _permuted_partners(
     ]
 
 
+def _relabelled_partners(
+    pairs: list[Pairs], n_2: int, n: int, generator: torch.Generator
+) -> list[list[Pairs]]:
+    """Return n draws of the pairs, each relabelling X2's n_2 rows by one permutation.
+
+    The draw's permutation relabels the partners of every subsample, so that a row that
+    several subsamples share, or that several X1 events take as partner, stays one row.
+    """
+    perms = _permutations(n, n_2, generator)
+    partners = [perms[:, p.index_2] for p in pairs]
+    return [
+        [Pairs(p.index_1, rows[draw]) for p, rows in zip(pairs, partners)]
+        for draw in range(n)
+    ]
+
+
 def _distances(x: Tensor, y: Tensor) -> Tensor:
     # Exact differences: the matrix-product form loses digits to cancellation.
     return torch.cdist(
@@ -94,12 +110,15 @@ def _nearest(x: Tensor, y: Tensor) -> tuple[Tensor, Tensor]:
     return torch.cat([b.values for b in blocks]), torch.cat([b.indices for b in blocks])
 
 
+# A coupling's `null` names the permutation null of bank.cap_bank: "product", every
+# pair of the two paired columns; "relabel", X2's rows permuted under the pairs;
+# "draws", the pairs of the coupling's null draws.
 @dataclass
 class CDFCoupling:
     """Rank pairing of the two score samples, the coupling of the NeurIPS CAP."""
 
     name: ClassVar[str] = "cdf"
-    exact_null: ClassVar[bool] = True
+    null: ClassVar[str] = "product"
 
     def pairs(self, scores_1: Tensor, scores_2: Tensor) -> list[Pairs]:
         return [Pairs(*cdf(scores_1, scores_2))]
@@ -127,7 +146,7 @@ class OTCoupling:
     n_1: int
     mean_distance: float
     name: ClassVar[str] = "ot"
-    exact_null: ClassVar[bool] = True
+    null: ClassVar[str] = "relabel"
 
     def pairs(self, scores_1: Tensor, scores_2: Tensor) -> list[Pairs]:
         return [Pairs(i_1, i_2) for i_1, i_2 in zip(self.index_1, self.index_2)]
@@ -135,7 +154,8 @@ class OTCoupling:
     def null_draws(
         self, scores_1: Tensor, scores_2: Tensor, n: int, generator: torch.Generator
     ) -> list[list[Pairs]]:
-        return _permuted_partners(self.pairs(scores_1, scores_2), n, generator)
+        pairs = self.pairs(scores_1, scores_2)
+        return _relabelled_partners(pairs, len(scores_2), n, generator)
 
     def diagnostics(self) -> dict:
         discarded = 1.0 - self.index_1.shape[1] / self.n_1
@@ -203,7 +223,7 @@ class NNCoupling:
     caliper_distance: float
     mean_distance: float
     name: ClassVar[str] = "nn"
-    exact_null: ClassVar[bool] = True
+    null: ClassVar[str] = "relabel"
 
     def pairs(self, scores_1: Tensor, scores_2: Tensor) -> list[Pairs]:
         return [Pairs(self.index_1, self.index_2)]
@@ -211,7 +231,8 @@ class NNCoupling:
     def null_draws(
         self, scores_1: Tensor, scores_2: Tensor, n: int, generator: torch.Generator
     ) -> list[list[Pairs]]:
-        return _permuted_partners(self.pairs(scores_1, scores_2), n, generator)
+        pairs = self.pairs(scores_1, scores_2)
+        return _relabelled_partners(pairs, len(scores_2), n, generator)
 
     def diagnostics(self) -> dict:
         return {
@@ -278,7 +299,7 @@ class StratCoupling:
     strata_2: Tensor
     n_strata: int
     name: ClassVar[str] = "strat"
-    exact_null: ClassVar[bool] = False
+    null: ClassVar[str] = "draws"
 
     def pairs(self, scores_1: Tensor, scores_2: Tensor) -> list[Pairs]:
         index_1, index_2 = self._paired(self.strata_2[None], scores_1, scores_2)

@@ -191,3 +191,57 @@ def log_sigmoid(
             scale = 1.0
 
     return torch.sigmoid((transformed - center) / scale)
+
+
+# 1.4826 MAD and (q95 - q05) / 3.2897, with 3.2897 = 2 Phi^-1(0.95), both estimate the
+# standard deviation of Gaussian scores.
+_MAD_TO_SIGMA = 1.4826
+_Q05_Q95_TO_SIGMA = 3.2897
+
+
+def _centre_scale(scores: Tensor) -> tuple[Tensor, Tensor]:
+    """Return the median and the robust standard deviation of float64 scores.
+
+    The scale is 1.4826 MAD or, if the MAD is zero, (q95 - q05) / 3.2897. If that is
+    zero too it stays zero, so that an exactly constant score gives non-finite evidence
+    and NaN statistics: such a score carries no evidence.
+    """
+    median = scores.median()
+    scale = _MAD_TO_SIGMA * (scores - median).abs().median()
+    if scale == 0:
+        levels = torch.tensor([0.05, 0.95], dtype=scores.dtype)
+        q05, q95 = torch.quantile(scores, levels)
+        scale = (q95 - q05) / _Q05_Q95_TO_SIGMA
+    return median, scale
+
+
+def std_evidence(scores: Tensor) -> Tensor:
+    """Return the evidence (s - median) / sigma of one side's scores, in float64."""
+    scores = scores.to(torch.float64)
+    median, scale = _centre_scale(scores)
+    return (scores - median) / scale
+
+
+def rank_evidence(scores: Tensor) -> Tensor:
+    """Return the evidence 2 r - 1 of one side's scores, in float64.
+
+    r is the tied rank of `rank` over N - 1, so that the evidence lies in [-1, 1] and
+    is zero at the median.
+    """
+    n = scores.numel()
+    if n <= 1:
+        return torch.zeros_like(scores, dtype=torch.float64)
+    # The tied ranks are half-integers, exact in the float32 of _tied_ranks; the
+    # division is the step that needs float64.
+    return 2.0 * _tied_ranks(scores).to(torch.float64) / (n - 1) - 1.0
+
+
+def sq_evidence(scores: Tensor, c: float = 2.0) -> Tensor:
+    """Return the evidence tanh((s - median) / (2 c sigma)) of one side's scores.
+
+    This is 2 sigmoid((s - median) / (c sigma)) - 1, the NeurIPS squash per side at the
+    resolution c, in float64.
+    """
+    scores = scores.to(torch.float64)
+    median, scale = _centre_scale(scores)
+    return torch.tanh((scores - median) / (2.0 * c * scale))

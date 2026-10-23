@@ -12,6 +12,7 @@ from omegaconf import DictConfig, OmegaConf
 from src.algorithms import ADLightningModule
 from src.algorithms.utils.object_feature_map_loader import maybe_get_object_feature_map
 from src.data.CausalChamber_datamodule import CausalChamberDataModule
+from src.data.components.chamber_columns import read_columns
 
 CONFIGS = Path(__file__).resolve().parents[1] / "configs"
 DATASET = "lt_interventions_standard_v1"
@@ -232,6 +233,42 @@ def test_a_pool_concatenates_its_members_split_as_plain_sets(cchamber_wt_data):
             assert torch.equal(_batches(loaders[name])[0], x)
         for name, label in labels.items():
             assert _batches(loaders[name])[1].unique().tolist() == [label]
+
+
+def _assert_reads_the_served_rows(
+    dm: CausalChamberDataModule, names: list[str]
+) -> None:
+    clip = dm.hparams.clip_value
+    loaders = {"valid": dm.val_dataloader(), "test": dm.test_dataloader()}
+    for split in loaders:
+        for name in names:
+            raw = read_columns(dm, name, split, list(dm.hparams.readouts))
+            assert raw.dtype == torch.float64
+            x = ((raw.float() - dm.median) / dm.scale).clamp(-clip, clip)
+            assert torch.equal(x, _batches(loaders[split][name])[0])
+
+
+def test_read_columns_follows_the_loader_order(cchamber_data, lt_readouts):
+    pool = {"members": [{"file": name} for name in cchamber_data.signals[1:]]}
+    dm = _datamodule(cchamber_data, lt_readouts, nulls={"pool": pool})
+    dm.setup("fit")
+    _assert_reads_the_served_rows(
+        dm, ["normal", "reference_normal", "uniform_red_mid", "pool"]
+    )
+
+    with (dm.dataset_dir / "uniform_red_mid.csv").open() as f:
+        rows = list(csv.DictReader(f))
+    red = {tuple(float(r[k]) for k in lt_readouts): float(r["red"]) for r in rows}
+    x = read_columns(dm, "uniform_red_mid", "test", [*lt_readouts, "red"])
+    assert x[:, -1].tolist() == [red[tuple(row)] for row in x[:, :-1].tolist()]
+
+
+def test_read_columns_filters_as_the_datamodule_filters(cchamber_wt_data):
+    dm = _wt_datamodule(cchamber_wt_data, nulls={"null_pool": _pool([5, 2])})
+    dm.setup("fit")
+    _assert_reads_the_served_rows(
+        dm, ["normal", "reference_normal", "regime_03_b", "null_pool"]
+    )
 
 
 def _to_tensor_before(table, readouts: list[str], relative_to) -> torch.Tensor:

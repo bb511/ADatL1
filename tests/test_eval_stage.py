@@ -93,9 +93,20 @@ def drop_absent_sets(cfg, sets: set[str]) -> None:
         callbacks.anomaly_efficiency.null_ds = [name for name in nulls if name in sets]
 
 
+def toy_bank(cfg) -> None:
+    # ot assigns X1 to subsamples of X2 of X1's size, so it needs N2 >= N1, and the
+    # toy's normal (70 rows) outnumbers its reference_normal (40): the control is
+    # paired the other way round, with the nn caliper set on normal.
+    control = cfg.evaluation.evaluator.dump_callbacks.cap_bank_reference_normal
+    control.dataset_1, control.dataset_2 = "reference_normal", "normal"
+    control.reference = "normal"
+
+
 def _evaluator(sets: set[str]) -> Evaluator:
     cfg = _compose("cchamber")
     drop_absent_sets(cfg, sets)
+    if sets == TOY_SETS:
+        toy_bank(cfg)
     return hydra.utils.instantiate(cfg.evaluation.evaluator)
 
 
@@ -407,7 +418,7 @@ def test_pairings_copy_the_control(domain):
     evaluator = hydra.utils.instantiate(_compose(domain).evaluation.evaluator)
     configs, criteria = evaluator.dump_callbacks, evaluator.selection["criteria"]
     specs = {spec["column"].split("/")[0]: spec for spec in criteria.values()}
-    pairings = [name for name, config in configs.items() if "dataset_2" in config]
+    pairings = [n for n, c in configs.items() if "dataset_2" in c and n in specs]
     assert len(pairings) == (4 if domain == "cchamber" else 3)
     for name in pairings:
         config, spec = configs[name], specs[name]

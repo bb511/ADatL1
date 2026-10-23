@@ -181,6 +181,7 @@ logs
 outputs
 /results/
 /checkpoints/
+/lattices/
 .env
 
 # Fix exceptions
@@ -191,6 +192,7 @@ outputs
 /data
 /logs
 /checkpoints
+/lattices
 
 # Untrack SLURM outputs:
 *.out

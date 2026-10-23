@@ -80,11 +80,13 @@ class RunEvaluation:
     fresh callbacks and no plots: the validation loaders followed by the extra sets
     under every evaluation callback, then the test loaders under the test callbacks.
     The scalars the callbacks record, named '<callback>/<scalar>', make the rows of the
-    run's tables. The keyword-only arguments are the Evaluator's of the same names,
-    apart from ``sets``, the data config whose signals and nulls replaced the run's in
-    ``datamodule`` (``rebuild``). With it, the signal sets are read from the
-    datamodule's loaders instead of ``meta.pt``: a stored set outside the new lists is
-    never served, and a set the dump does not store is rescored from the weights.
+    run's tables. Both trainers carry ``out_dir``, the evaluation directory, where a
+    callback may cache what the runs share. The keyword-only arguments are the
+    Evaluator's of the same names, apart from ``sets``, the data config whose signals
+    and nulls replaced the run's in ``datamodule`` (``rebuild``). With it, the signal
+    sets are read from the datamodule's loaders instead of ``meta.pt``: a stored set
+    outside the new lists is never served, and a set the dump does not store is
+    rescored from the weights.
     """
 
     def __init__(
@@ -119,6 +121,8 @@ class RunEvaluation:
         With ``tracking_uri``, the run is also logged to MLflow, as ``<lattice>_eval``.
         """
         out = Path(out_dir) / "runs" / self.run_dir.name
+        for trainer in self.trainers.values():
+            trainer.out_dir = Path(out_dir)
         rows = self._replay(out)
         run, tables = self._summary(lattice), self._tables(rows)
         if tracking_uri is not None:

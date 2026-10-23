@@ -5,6 +5,10 @@
 # older list (58 single interventions) has its three sensor pools rescored from the
 # weights of every epoch, and serves its six LED sets, now nulls, from the store.
 
+defaults:
+  - /cap: bank
+  - _self_
+
 sets: cchamber
 
 evaluation:
@@ -79,6 +83,44 @@ evaluation:
         apply_log1p: true
         log_raw_mlflow: false
         name: wasserstein_strong
+      # The CAP bank of normal against the control and each sensor pool: every pairing,
+      # evidence map and statistic of cap/bank.yaml, the nn caliper set on the control.
+      cap_bank_reference_normal:
+        _target_: src.evaluation.callbacks.cap_bank.CAPBankCallback
+        output_name: ascore/full
+        dataset_1: normal
+        dataset_2: reference_normal
+        reference: reference_normal
+        bank_config: ${cap_bank}
+        log_raw_mlflow: false
+        name: cap_bank_reference_normal
+      cap_bank_sensor_weak:
+        _target_: src.evaluation.callbacks.cap_bank.CAPBankCallback
+        output_name: ascore/full
+        dataset_1: normal
+        dataset_2: sensor_weak
+        reference: reference_normal
+        bank_config: ${cap_bank}
+        log_raw_mlflow: false
+        name: cap_bank_sensor_weak
+      cap_bank_sensor_mid:
+        _target_: src.evaluation.callbacks.cap_bank.CAPBankCallback
+        output_name: ascore/full
+        dataset_1: normal
+        dataset_2: sensor_mid
+        reference: reference_normal
+        bank_config: ${cap_bank}
+        log_raw_mlflow: false
+        name: cap_bank_sensor_mid
+      cap_bank_sensor_strong:
+        _target_: src.evaluation.callbacks.cap_bank.CAPBankCallback
+        output_name: ascore/full
+        dataset_1: normal
+        dataset_2: sensor_strong
+        reference: reference_normal
+        bank_config: ${cap_bank}
+        log_raw_mlflow: false
+        name: cap_bank_sensor_strong
       ascore_operational:
         _target_: src.evaluation.callbacks.output.OutputCallback
         output_name: ascore/operational
@@ -117,7 +159,8 @@ evaluation:
 
 # The registry of strategies: column in val.csv, mode and MLflow keys per criterion.
 selection:
-  # CAP and consistency are left out until CAP is redefined, and EM because it is
+  # The CAP bank enters no criterion until the test bed registers its admissible
+  # statistics; consistency is left out until CAP is redefined, and EM because it is
   # degenerate on both tunnels: em_reached is 0 in every AE, VAE and SVDD run.
   criteria:
     drift:

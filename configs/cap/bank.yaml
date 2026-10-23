@@ -1,0 +1,30 @@
+# @package cap_bank
+
+# The CAP bank's registered combinations, passed to every bank callback through
+# bank_config: ${cap_bank}; src/callbacks/components/cap/bank.py defines each quantity.
+pairings:
+  cdf: {}
+  ot: { n_subsamples: 5, seed: 0, discard: 0.05 }
+  nn: { caliper: 0.95 }
+  strat: { n_strata: 10 }
+maps:
+  std: {}
+  rank: {}
+  sq: { c: 2.0 }
+statistics: [A-sup, A-fix, A-lim, D-fix, D-lim]
+beta_min: 0.01
+beta_max: 1000.0
+n_beta: 200
+# tanh(beta q / 2) = 0.9 at q, the lattice median of the 95th percentile of |z| on
+# validation normal at the last epoch (scripts/analysis/cap_beta_fix.py). rank is exact
+# by construction; std and sq are placeholders, the values of standard Gaussian scores.
+beta_fix: { std: 1.5023, rank: 3.0994, sq: 6.4826 }
+null_bins: 256
+n_permutations: 200
+permutation_seed: 0
+# The NeurIPS CAP, the corner the regression guard compares with ApproximationCapacity.
+legacy:
+  normalization_type: sigmoid
+  normalization_params: null
+  energy_type: adaptive
+  energy_params: { scale: 0.5 }

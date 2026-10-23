@@ -6,6 +6,7 @@ import torch
 from torch import Tensor
 from torchmetrics import Metric
 
+from .bank import cap_bank
 from .binary import get_energy_fn as get_energy_fn_binary
 from .binary import get_normalizer_fn as get_normalizer_fn_binary
 from .kernel import posterior_agreement_curve
@@ -190,3 +191,58 @@ class PosteriorConsistency(ApproximationCapacity):
     def compute(self) -> Tensor:
         """Return the computed consistency value."""
         return self.cap.item()
+
+
+class CAPBank(Metric):
+    """The CAP bank of two score samples under several couplings.
+
+    `update` evaluates `bank.cap_bank` once per coupling, and `compute` returns one
+    flat dict of floats: `<pairing>_<key>` for every key of `cap_bank` except
+    `<map>_beta_fix`, which depends on the configuration alone and is returned once
+    per map; the legacy corner thus appears as `cdf_legacy_A-sup`,
+    `cdf_legacy_beta_star` and `cdf_legacy_at_bound`. Everything is computed in
+    float64 on the CPU, whatever the device of the scores.
+
+    :param bank_config: The bank's configuration, as in configs/cap/bank.yaml.
+    """
+
+    is_differentiable = False
+    full_state_update = False
+
+    def __init__(
+        self,
+        process_group: Any | None = None,
+        dist_sync_fn: Callable | None = None,
+        **bank_config,
+    ):
+        super().__init__(
+            dist_sync_on_step=False,
+            process_group=process_group,
+            dist_sync_fn=dist_sync_fn,
+        )
+        self.bank_config = bank_config
+        self.names: list[str] = []
+        self.add_state(
+            "values", default=torch.zeros(0, dtype=torch.float64), dist_reduce_fx="cat"
+        )
+
+    def update(self, scores_1: Tensor, scores_2: Tensor, couplings: dict) -> None:
+        """Evaluate the bank under every coupling, keyed by its pairing name."""
+        maps = self.bank_config["maps"]
+        values = {f"{m}_beta_fix": self.bank_config["beta_fix"][m] for m in maps}
+        with torch.no_grad():
+            for pairing, coupling in couplings.items():
+                bank = cap_bank(scores_1, scores_2, coupling, self.bank_config)
+                values |= {
+                    f"{pairing}_{key}": value
+                    for key, value in bank.items()
+                    if not key.endswith("_beta_fix")
+                }
+        self.names = list(values)
+        # Assigned, not filled in place: see ApproximationCapacity.update.
+        self.values = torch.tensor(
+            [float(v) for v in values.values()], dtype=torch.float64
+        )
+
+    def compute(self) -> dict[str, float]:
+        return dict(zip(self.names, self.values.tolist()))

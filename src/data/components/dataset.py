@@ -1,3 +1,5 @@
+from collections.abc import Iterator
+
 import torch
 from torch.utils.data import IterableDataset
 
@@ -138,3 +140,48 @@ class CIFARADDataset(IterableDataset):
 
             yield x, y
             nb += 1
+
+
+class CausalChamberDataset(IterableDataset):
+    """Causal Chamber rows already in memory, served as (x, y) batches.
+
+    Without a shuffler, batch i holds rows i * batch_size to (i + 1) * batch_size, the
+    last batch fewer. With one, every iteration draws a fresh permutation of the rows
+    from it and cuts the permutation into batches in order, so that batch membership
+    changes from epoch to epoch and the sequence of batches is fixed by the generator's
+    seed. With ``max_batches`` None or negative every batch is served, otherwise the
+    first ``max_batches``.
+    """
+
+    def __init__(
+        self,
+        data: torch.Tensor,
+        labels: torch.Tensor,
+        batch_size: int,
+        max_batches: int | None = None,
+        shuffler: torch.Generator | None = None,
+    ):
+        if data.shape[0] != labels.shape[0]:
+            raise ValueError("data and labels must have the same first dimension.")
+        self.data, self.labels = data, labels
+        self.batch_size = batch_size
+        self.max_batches = max_batches
+        self.shuffler = shuffler
+        self.num_batches = (data.shape[0] + batch_size - 1) // batch_size
+
+    def __len__(self) -> int:
+        if self.max_batches is None or self.max_batches < 0:
+            return self.num_batches
+        return min(self.num_batches, int(self.max_batches))
+
+    def __iter__(self) -> Iterator[tuple[torch.Tensor, torch.Tensor]]:
+        if self.shuffler is None:
+            batches = [
+                slice(i * self.batch_size, (i + 1) * self.batch_size)
+                for i in range(self.num_batches)
+            ]
+        else:
+            perm = torch.randperm(self.data.shape[0], generator=self.shuffler)
+            batches = perm.split(self.batch_size)
+        for rows in batches[: len(self)]:
+            yield self.data[rows], self.labels[rows]

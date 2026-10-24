@@ -10,7 +10,9 @@ dataset_name: wt_walks_v1
 url: https://causalchamber.s3.eu-central-1.amazonaws.com/downloadables/wt_walks_v1.zip
 md5: 19bb4e92cbe0b8dff49299b9b509ac36
 
-batch_size: 1024
+batch_size: 64
+# Apart from batch_size: Q'' averages per-batch quantiles; small batches are slow.
+eval_batch_size: 1024
 max_val_batches: -1
 num_workers: 0
 
@@ -25,7 +27,7 @@ clip_value: 10.0
 
 # Fixed apart from the training seed, so that every run sees the same rows.
 seed: 314159
-# The batch order follows the global training seed.
+# The training batches follow the global training seed.
 train_seed: ${seed}
 # A training half (the halves instances of the catalogues); null keeps every row.
 train_fold: null

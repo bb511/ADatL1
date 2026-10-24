@@ -11,7 +11,7 @@ from pyarrow import csv as pa_csv
 from pytorch_lightning import LightningDataModule
 from torch.utils.data import DataLoader, TensorDataset
 
-from src.data.components.dataset import CIFARADDataset
+from src.data.components.dataset import CausalChamberDataset
 from src.data.utils import check_md5, download, extract, seeded_permutation, to_device
 from src.utils import pylogger
 
@@ -77,6 +77,9 @@ class CausalChamberDataModule(LightningDataModule):
     Validation and test loaders are dictionaries ordered ``normal``,
     ``reference_normal``, the sets of ``signals`` in order, then those of ``nulls``.
 
+    :param eval_batch_size: Batch size of the validation and test loaders, divided
+        across devices as ``batch_size`` is; ``batch_size`` when None. Q'' is a mean of
+        per-batch scores over validation normal, so this size sets its statistic.
     :param max_val_batches: Batch cap on every evaluation loader but ``normal``; -1
         means no cap.
     :param train_fold: When set, keep only every ``n_train_folds``-th row of the
@@ -85,7 +88,7 @@ class CausalChamberDataModule(LightningDataModule):
         unchanged; the normalisation is fitted on the fold alone. ``None`` keeps every
         training row.
     :param robust_quantiles: Lower and upper quantile whose difference sets the scale.
-    :param train_seed: Seed of the training batch order; ``seed`` when None.
+    :param train_seed: Seed of the training batches; ``seed`` when None.
     :param relative_to: ``{readout: column}``, the CSV column subtracted from each
         readout named, in float64 before the cast to float32; the column is read even
         when it is not a readout. None or empty takes every readout as it is.
@@ -102,6 +105,7 @@ class CausalChamberDataModule(LightningDataModule):
         signals: dict[str, dict],
         nulls: dict[str, dict] | None = None,
         batch_size: int = 1024,
+        eval_batch_size: int | None = None,
         max_val_batches: int = -1,
         train_fraction: float = 0.6,
         val_fraction: float = 0.2,
@@ -160,7 +164,9 @@ class CausalChamberDataModule(LightningDataModule):
 
     def train_dataloader(self) -> DataLoader:
         x, y = self.data_train.tensors
-        return self._to_loader(SplitTensors(x, y), shuffler=self.shuffler)
+        return self._to_loader(
+            SplitTensors(x, y), self.batch_size_per_device, shuffler=self.shuffler
+        )
 
     def val_dataloader(self) -> dict[str, DataLoader]:
         return self._make_eval_loaders("valid")
@@ -268,22 +274,25 @@ class CausalChamberDataModule(LightningDataModule):
 
     def _make_eval_loaders(self, split: str) -> dict[str, DataLoader]:
         """Return the loaders of one split with normal first, as the callbacks need."""
-        loaders = {"normal": self._to_loader(self._main[split])}
+        batch_size = self.eval_batch_size_per_device
+        max_batches = self.hparams.max_val_batches
+        loaders = {"normal": self._to_loader(self._main[split], batch_size)}
         for name, part in self._aux[split].items():
-            loaders[name] = self._to_loader(part, self.hparams.max_val_batches)
+            loaders[name] = self._to_loader(part, batch_size, max_batches)
 
         return loaders
 
     def _to_loader(
         self,
         split: SplitTensors,
+        batch_size: int,
         max_batches: int | None = None,
         shuffler: torch.Generator | None = None,
     ) -> DataLoader:
-        dataset = CIFARADDataset(
+        dataset = CausalChamberDataset(
             split.x,
             split.y,
-            batch_size=self.batch_size_per_device,
+            batch_size=batch_size,
             max_batches=max_batches,
             shuffler=shuffler,
         )
@@ -300,18 +309,24 @@ class CausalChamberDataModule(LightningDataModule):
         )
 
     def _set_batch_size(self) -> None:
-        """Set the batch size per device if multiple devices are available."""
+        """Set the training and evaluation batch sizes per device."""
+        eval_batch_size = self.hparams.eval_batch_size
+        if eval_batch_size is None:
+            eval_batch_size = self.hparams.batch_size
+        self.batch_size_per_device = self._per_device(self.hparams.batch_size)
+        self.eval_batch_size_per_device = self._per_device(eval_batch_size)
+
+    def _per_device(self, batch_size: int) -> int:
         if self.trainer is None:
-            self.batch_size_per_device = self.hparams.batch_size
-            return
+            return batch_size
 
         world_size = self.trainer.world_size
-        if self.hparams.batch_size % world_size != 0:
+        if batch_size % world_size != 0:
             raise RuntimeError(
-                f"Batch size ({self.hparams.batch_size}) not divisible by the num of "
+                f"Batch size ({batch_size}) not divisible by the num of "
                 f"devices ({world_size})."
             )
-        self.batch_size_per_device = self.hparams.batch_size // world_size
+        return batch_size // world_size
 
     def _data_summary(self) -> None:
         log.info(Fore.MAGENTA + "-" * 5 + " Data Summary " + "-" * 5)

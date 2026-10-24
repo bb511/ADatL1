@@ -140,7 +140,7 @@ EOF
     exit 0
 fi
 
-# Domain-prefixed stem: the three domains share file stems, and a bare stem
+# Domain-prefixed stem: the domains share file stems, and a bare stem
 # makes concurrent submissions clobber each other's driver logs.
 stem="$(basename "$(dirname "$file")")_$(basename "$file" .sh)"
 logdir="logs/searches/$stem"

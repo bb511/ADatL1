@@ -170,7 +170,6 @@ def test_mask_aware_needs_the_mask_in_the_batch():
     "experiment, identity_init, mask_aware",
     [
         ("cifar10/realnvp", True, False),
-        ("robustad/realnvp", True, False),
         ("physics/realnvp", True, True),
         ("cchamber/realnvp", True, False),
         ("cchamber_wt/realnvp", True, False),

@@ -61,6 +61,61 @@ def test_ot_needs_the_larger_second_sample(module):
         module.ot_coupling(_randn(20, 2), _randn(10, 2))
 
 
+def _copies(x_1, blocks, extra=0):
+    # X2 as blocks, each X1's rows followed by `extra` far rows.
+    far = [_randn(extra, x_1.shape[1], seed=10 + k) + 5.0 for k in range(blocks)]
+    return torch.cat([torch.cat([x_1, rows]) for rows in far])
+
+
+@pytest.mark.parametrize("module", PAIRINGS)
+def test_ot_blocks_recover_the_identity_on_copies_of_x1(module):
+    x_1 = _randn(100, 4)
+    coupling = module.ot_coupling(x_1, _copies(x_1, 3, extra=20), blocks=3)
+
+    for k, pairs in enumerate(coupling.pairs(None, None)):
+        assert len(pairs.index_1) == 95
+        assert torch.equal(pairs.index_2, pairs.index_1 + 120 * k)
+    diagnostics = coupling.diagnostics()
+    assert diagnostics["blocks"] == 3
+    assert diagnostics["identity_fraction"] == [1.0, 1.0, 1.0]
+
+
+@pytest.mark.parametrize("module", PAIRINGS)
+def test_nn_identity_fraction_counts_every_block(module):
+    x_1 = _randn(100, 4)
+    coupling = module.nn_coupling(x_1, x_1.repeat(3, 1), x_1, blocks=3)
+
+    fraction = coupling.diagnostics()["identity_fraction"]
+    assert len(fraction) == 3 and sum(fraction) == pytest.approx(1.0)
+
+
+@pytest.mark.parametrize("module", PAIRINGS)
+def test_identity_fraction_falls_to_chance_when_the_blocks_are_shuffled(module):
+    x_1, generator = _randn(100, 4), torch.Generator().manual_seed(2)
+    shuffle = [torch.randperm(100, generator=generator) + 100 * k for k in range(3)]
+    shuffle = torch.cat(shuffle)
+    x_2 = x_1.repeat(3, 1)[shuffle]
+    ot = module.ot_coupling(x_1, x_2, discard=0.0, blocks=3)
+    nn = module.nn_coupling(x_1, x_2, x_1, blocks=3)
+
+    # Every event still meets its own copy, at a shuffled row.
+    for k, pairs in enumerate(ot.pairs(None, None)):
+        assert torch.equal(shuffle[pairs.index_2], pairs.index_1 + 100 * k)
+    assert max(ot.diagnostics()["identity_fraction"]) < 0.1
+    assert sum(nn.diagnostics()["identity_fraction"]) < 0.1
+
+
+@pytest.mark.parametrize("module", PAIRINGS)
+def test_blocks_must_cut_x2_into_equal_blocks_of_at_least_n1_rows(module):
+    x_1 = _randn(10, 2)
+    with pytest.raises(ValueError):
+        module.ot_coupling(x_1, _randn(25, 2), blocks=2)
+    with pytest.raises(ValueError):
+        module.ot_coupling(x_1, _randn(36, 2), blocks=4)
+    with pytest.raises(ValueError):
+        module.nn_coupling(x_1, _randn(18, 2), x_1, blocks=2)
+
+
 @pytest.mark.parametrize("module", PAIRINGS)
 def test_nn_caliper_discards_the_far_events_and_partners_repeat(module):
     x_1 = torch.tensor([[0.0], [0.02], [10.0], [20.0], [30.0]], dtype=torch.float64)
@@ -206,6 +261,25 @@ def test_coupling_cache_round_trip(module, tmp_path, monkeypatch):
         assert all(torch.equal(a, b) for p, q in zip(old, new) for a, b in zip(p, q))
     with pytest.raises(AssertionError):
         module.build_couplings(x_1, x_2 + 1.0, x_ref, PAIRING_CONFIG, tmp_path, label)
+
+
+@pytest.mark.parametrize("module", BANKS)
+def test_blocks_enter_the_parameters_and_hashes_of_ot_and_nn_alone(module, tmp_path):
+    x_1, _, x_ref = _inputs()
+    x_2 = _copies(x_1, 3)
+    plain = module.build_couplings(x_1, x_2, x_ref, PAIRING_CONFIG, tmp_path / "a")
+    blocked = module.build_couplings(
+        x_1, x_2, x_ref, PAIRING_CONFIG, tmp_path / "b", blocks=3
+    )
+
+    names = [{path.name for path in (tmp_path / d).iterdir()} for d in ("a", "b")]
+    assert {name.split("_")[0] for name in names[0] & names[1]} == {"strat"}
+    for name in ("ot", "nn"):
+        record = json.loads(next((tmp_path / "b").glob(f"{name}_*.json")).read_text())
+        assert record["parameters"] == PAIRING_CONFIG[name] | {"blocks": 3}
+        assert record["diagnostics"]["blocks"] == 3
+        assert "blocks" not in plain[name].diagnostics()
+    assert blocked["ot"].diagnostics()["identity_fraction"] == [1.0, 1.0, 1.0]
 
 
 @pytest.mark.parametrize("module", BANKS)

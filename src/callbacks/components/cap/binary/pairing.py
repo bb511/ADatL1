@@ -110,6 +110,39 @@ def _nearest(x: Tensor, y: Tensor) -> tuple[Tensor, Tensor]:
     return torch.cat([b.values for b in blocks]), torch.cat([b.indices for b in blocks])
 
 
+def _block_size(n_1: int, n_2: int, blocks: int) -> int:
+    if n_2 % blocks or n_2 // blocks < n_1:
+        raise ValueError(
+            f"blocks = {blocks} must cut N2 = {n_2} into equal blocks of at least "
+            f"N1 = {n_1} rows."
+        )
+    return n_2 // blocks
+
+
+def _identity_fraction(
+    index_1: Tensor, index_2: Tensor, n_1: int, n_2: int, blocks: int | None
+) -> list[float] | None:
+    """Return per block of X2 the fraction of the pairs whose partner is X1's own row.
+
+    X2's rows are read as `blocks` equal consecutive blocks, row i of each the
+    counterpart of X1's row i. index_1 and index_2 are [..., n_pairs], and every
+    fraction is over n_pairs: the pairs of one ot subsample, which lie in one block, or
+    all of nn's pairs, which spread over every block. None without blocks.
+    """
+    if blocks is None:
+        return None
+    size = _block_size(n_1, n_2, blocks)
+    own = index_2 % size == index_1
+    counts = torch.bincount(index_2[own] // size, minlength=blocks)
+    return (counts.to(torch.float64) / index_1.shape[-1]).tolist()
+
+
+def _block_diagnostics(identity_fraction: list[float] | None) -> dict:
+    if identity_fraction is None:
+        return {}
+    return {"blocks": len(identity_fraction), "identity_fraction": identity_fraction}
+
+
 # A coupling's `null` names the permutation null of bank.cap_bank: "product", every
 # pair of the two paired columns; "relabel", X2's rows permuted under the pairs;
 # "draws", the pairs of the coupling's null draws.
@@ -138,13 +171,16 @@ class OTCoupling:
     """Exact optimal-transport assignments of X1 to subsamples of X2.
 
     Row k of index_1 and index_2 [n_subsamples, n_kept] holds the pairs kept from
-    subsample k; mean_distance is the mean Euclidean distance of the kept pairs.
+    subsample k; mean_distance is the mean Euclidean distance of the kept pairs. With
+    X2 cut into blocks, identity_fraction holds per block the fraction of the kept
+    pairs whose partner is X1's own row of the block (``ot_coupling``); None otherwise.
     """
 
     index_1: Tensor
     index_2: Tensor
     n_1: int
     mean_distance: float
+    identity_fraction: list[float] | None = None
     name: ClassVar[str] = "ot"
     null: ClassVar[str] = "relabel"
 
@@ -159,7 +195,8 @@ class OTCoupling:
 
     def diagnostics(self) -> dict:
         discarded = 1.0 - self.index_1.shape[1] / self.n_1
-        return {"discarded": discarded, "mean_distance": self.mean_distance}
+        values = {"discarded": discarded, "mean_distance": self.mean_distance}
+        return values | _block_diagnostics(self.identity_fraction)
 
 
 def _ot_subsample(
@@ -177,36 +214,51 @@ def _ot_subsample(
     return rows[keep], subsample[cols[keep]], pair_cost[keep].sqrt()
 
 
+def _subsamples(
+    n_1: int, n_2: int, n_subsamples: int, seed: int, blocks: int | None
+) -> list[Tensor]:
+    """Return X2's rows of every subsample: n_subsamples random draws of N1 rows from
+    one generator seeded once with `seed`, or, with blocks, X2's blocks."""
+    if blocks is not None:
+        return list(torch.arange(n_2).split(_block_size(n_1, n_2, blocks)))
+    generator = torch.Generator().manual_seed(seed)
+    return [torch.randperm(n_2, generator=generator)[:n_1] for _ in range(n_subsamples)]
+
+
 def ot_coupling(
     x_1: Tensor,
     x_2: Tensor,
     n_subsamples: int = 5,
     seed: int = 0,
     discard: float = 0.05,
+    blocks: int | None = None,
 ) -> OTCoupling:
-    """Assign X1 [N1, d] exactly to n_subsamples random N1-row subsamples of X2.
+    """Assign X1 [N1, d] exactly to subsamples of X2 [N2, d].
 
-    The subsamples are drawn from one generator seeded once with `seed`; in each,
-    the round(discard * N1) pairs of largest cost are dropped.
+    The subsamples are n_subsamples random draws of N1 rows or, with `blocks`, X2's
+    rows cut into that many equal consecutive blocks, which n_subsamples and seed then
+    leave unused: a pool whose members are concatenated in order, each a copy of X1
+    under one change, gives one assignment per member. A block longer than N1 takes
+    a rectangular assignment, in which every X1 row has a partner. In each subsample
+    the round(discard * N1) pairs of largest cost are dropped. With blocks, the
+    coupling records per block the fraction of the kept pairs whose partner is X1's
+    own row of the block, row i of X1 with row i of the block.
 
     Raises:
-        ValueError: If X2 has fewer rows than X1.
+        ValueError: If X2 has fewer rows than X1, or blocks do not cut X2 into equal
+            blocks of at least N1 rows.
     """
     if len(x_2) < len(x_1):
         raise ValueError(f"ot needs N2 >= N1; got N1 = {len(x_1)}, N2 = {len(x_2)}.")
-    generator = torch.Generator().manual_seed(seed)
     n_kept = len(x_1) - round(discard * len(x_1))
-    subsamples = [
-        torch.randperm(len(x_2), generator=generator)[: len(x_1)]
-        for _ in range(n_subsamples)
-    ]
+    subsamples = _subsamples(len(x_1), len(x_2), n_subsamples, seed, blocks)
     index_1, index_2, distance = zip(
         *(_ot_subsample(x_1, x_2, s, n_kept) for s in subsamples)
     )
+    index_1, index_2 = torch.stack(index_1), torch.stack(index_2)
+    fraction = _identity_fraction(index_1, index_2, len(x_1), len(x_2), blocks)
     mean_distance = torch.stack(distance).mean().item()
-    return OTCoupling(
-        torch.stack(index_1), torch.stack(index_2), len(x_1), mean_distance
-    )
+    return OTCoupling(index_1, index_2, len(x_1), mean_distance, fraction)
 
 
 @dataclass
@@ -214,7 +266,9 @@ class NNCoupling:
     """Nearest X2 neighbour of every X1 event within the caliper; partners may repeat.
 
     caliper_distance is the largest Euclidean distance at which a pair is kept, and
-    mean_distance the mean distance of the kept pairs.
+    mean_distance the mean distance of the kept pairs. With X2 cut into blocks,
+    identity_fraction holds per block the fraction of the kept pairs whose partner is
+    X1's own row of that block (``nn_coupling``); None otherwise.
     """
 
     index_1: Tensor
@@ -222,6 +276,7 @@ class NNCoupling:
     n_1: int
     caliper_distance: float
     mean_distance: float
+    identity_fraction: list[float] | None = None
     name: ClassVar[str] = "nn"
     null: ClassVar[str] = "relabel"
 
@@ -235,26 +290,37 @@ class NNCoupling:
         return _relabelled_partners(pairs, len(scores_2), n, generator)
 
     def diagnostics(self) -> dict:
-        return {
+        values = {
             "discarded": 1.0 - len(self.index_1) / self.n_1,
             "mean_distance": self.mean_distance,
             "caliper": self.caliper_distance,
         }
+        return values | _block_diagnostics(self.identity_fraction)
 
 
 def nn_coupling(
-    x_1: Tensor, x_2: Tensor, x_ref: Tensor, caliper: float = 0.95
+    x_1: Tensor,
+    x_2: Tensor,
+    x_ref: Tensor,
+    caliper: float = 0.95,
+    blocks: int | None = None,
 ) -> NNCoupling:
     """Pair every X1 row with its nearest X2 row, if no farther than the caliper.
 
     The caliper distance is the `caliper` quantile of the nearest-neighbour distances
-    from X1 to the reference sample x_ref.
+    from X1 to the reference sample x_ref. With `blocks`, X2's rows are read as that
+    many equal consecutive blocks, and the coupling records per block the fraction of
+    the kept pairs whose partner is X1's own row of the block; the pairs are the same.
+
+    Raises:
+        ValueError: If blocks do not cut X2 into equal blocks of at least N1 rows.
     """
     distance, partner = _nearest(x_1, x_2)
     limit = torch.quantile(_nearest(x_1, x_ref)[0], caliper).item()
     kept = torch.nonzero(distance <= limit).flatten()
     mean_distance = distance[kept].mean().item()
-    return NNCoupling(kept, partner[kept], len(x_1), limit, mean_distance)
+    fraction = _identity_fraction(kept, partner[kept], len(x_1), len(x_2), blocks)
+    return NNCoupling(kept, partner[kept], len(x_1), limit, mean_distance, fraction)
 
 
 def _stratified_order(labels: Tensor, scores: Tensor) -> Tensor:

@@ -498,7 +498,7 @@ def _parse_args(argv: list[str] | None) -> argparse.Namespace:
     parser.add_argument(
         "--bkg-regex",
         type=re.compile,
-        default="normal|SingleNeutrino|ZB_|reference|shifted_normal",
+        default="normal|SingleNeutrino|ZB_|reference",
         help="Datasets matching this regex are not signals.",
     )
     return parser.parse_args(argv)

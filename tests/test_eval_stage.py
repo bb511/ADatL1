@@ -22,13 +22,14 @@ from src.evaluation.callbacks.efficiency import AnomalyEfficiencyCallback
 from src.evaluation.callbacks.utils.mlflow import log_metrics_to_mlflow
 from src.evaluation.callbacks.wasserstein import _wasserstein_1d
 from src.evaluation.components.pairing import hyperpoint
+from src.evaluation.components.rebuild import null_sets, signal_sets
 from src.evaluation.evaluator import Evaluator
 from src.evaluation.replay import ReplayModule
 from src.utils.omegaconf import register_resolvers
 from tests.test_score_dump import PASSES, ToyAE, ToyDataModule, dump_callback, fit, load
 
 CONFIGS = Path(__file__).resolve().parents[1] / "configs"
-DOMAINS = ["cchamber", "cchamber_wt", "cifar10", "robustad"]
+DOMAINS = ["cchamber", "cchamber_wt", "cifar10"]
 # The sets of the toy dump, which has none of the chamber's null pools.
 TOY_SETS = {"normal", "reference_normal", "sig_a", "sig_b"}
 # Two of the light tunnel's single interventions, pooled under the override.
@@ -297,6 +298,39 @@ def test_efficiency_takes_signals_by_label_and_reports_nulls(dump, tmp_path):
         run(ds=None, null_ds=["sig_a"])
 
 
+def test_efficiency_reports_a_background_set_outside_the_signal_statistics(
+    dump, tmp_path
+):
+    replay = _replay(dump, "epoch_0001.pt", tmp_path)
+    x, _ = ToyDataModule().sets["test"]["sig_a"]
+    background = TensorDataset(x, torch.full((len(x),), -1))
+    efficiency = dict(output_name="ascore/full", ds=None, null_ds=["reference_normal"])
+
+    def run(with_background: bool) -> dict:
+        loaders = ToyDataModule().loaders("test")
+        if with_background:
+            loaders["bkg_a"] = DataLoader(background, batch_size=32)
+        return _test(replay, "test", loaders, [AnomalyEfficiencyCallback(**efficiency)])
+
+    plain, records = run(False), run(True)
+    key, summary = "eff/eff_operational_bkg_a", "eff/eff_operational"
+    assert set(records) - set(plain) == {key}
+    rate = AnomalyRate(0.1, None)
+    rate.apply_threshold(replay.thres_operational, replay.tie_operational)
+    with torch.no_grad():
+        rate.update(replay.module.model_step(background.tensors)["ascore/full"])
+    assert records[key] == pytest.approx(rate.compute("efficiency").item())
+    # The medians, minima and null rates are untouched; only the callback's own
+    # summary takes the background in, as the signals' CVaR minus its pass rate.
+    unchanged = [name for name in plain if name != summary]
+    assert {k: records[k] for k in unchanged} == {k: plain[k] for k in unchanged}
+    assert records[summary] == pytest.approx(plain[summary] - records[key])
+    labels = {"normal": [0], "sig_a": [1], "reference_normal": [0], "bkg_a": [-1]}
+    assert signal_sets({"names": list(labels), "labels": labels}) == ["sig_a"]
+    nulls = null_sets([AnomalyEfficiencyCallback(**efficiency)])
+    assert nulls == ["reference_normal"]
+
+
 def _check_val(val: list[dict], selection: dict) -> None:
     for name, spec in selection["criteria"].items():
         values = _floats(val[1:], spec["column"])
@@ -407,10 +441,9 @@ def test_eval_configs_build_the_evaluator(domain):
     columns = [spec["column"] for spec in selection["criteria"].values()]
     columns += [selection["q_sec"]["column"], selection["efficiency"]]
     assert {column.split("/")[0] for column in columns} <= names
-    reference = "shifted_normal_all" if domain == "robustad" else "reference_normal"
-    assert configs["wasserstein"]["dataset_2"] == reference
+    assert configs["wasserstein"]["dataset_2"] == "reference_normal"
     null_ds = configs["anomaly_efficiency"]["null_ds"]
-    assert len(null_ds) == {"cchamber": 9, "cchamber_wt": 2}.get(domain, 0)
+    assert len(null_ds) == {"cchamber": 9, "cchamber_wt": 2, "cifar10": 3}[domain]
 
 
 @pytest.mark.parametrize("domain", ["cchamber", "cchamber_wt"])

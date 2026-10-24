@@ -259,7 +259,7 @@ def main():
     )
     parser.add_argument(
         "--bkg-regex",
-        default="normal|SingleNeutrino|ZB_|reference|shifted_normal",
+        default="normal|SingleNeutrino|ZB_|reference",
         help="Datasets matching this regex are excluded from mean_sig_eff.",
     )
     parser.add_argument(

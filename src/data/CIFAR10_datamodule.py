@@ -1,4 +1,6 @@
 import gc
+import hashlib
+import os
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -9,6 +11,7 @@ from datasets import load_dataset
 from pytorch_lightning import LightningDataModule
 from torch.utils.data import DataLoader, Subset, TensorDataset, random_split
 
+from src.data.components.corruptions import corrupt
 from src.data.components.dataset import CIFARADDataset
 from src.utils import pylogger
 
@@ -17,6 +20,9 @@ log = pylogger.RankedLogger(__name__)
 # The data set as published on the HuggingFace hub, which names its two columns img and
 # label. Both splits are held whole in memory, as the whole of CIFAR-10 is 180 MB.
 HF_REPO_ID = "uoft-cs/cifar10"
+# Below zero, so that the efficiency callback reports each member set as a background
+# set, outside null_rate and the statistics over the signals.
+MEMBER_SET_LABEL = -1
 
 
 @dataclass(frozen=True)
@@ -37,6 +43,35 @@ class CIFARSplit:
     targets: list[int]
 
 
+def _member_rng(
+    shift_seed: int, pool: str, member: str, split: str
+) -> np.random.Generator:
+    """Return the generator of one pool member's noise, the same in every process.
+
+    The names enter through sha256, since Python's own string hash is salted per
+    process.
+    """
+    digest = hashlib.sha256(f"{pool}/{member}/{split}".encode()).digest()
+    return np.random.default_rng([shift_seed, int.from_bytes(digest[:8], "big")])
+
+
+def _read_cache(path: Path, key: dict) -> np.ndarray | None:
+    """Return the cached images, or None if the file is absent or holds another key."""
+    if not path.exists():
+        return None
+    cached = torch.load(path, map_location="cpu")
+    return cached["images"].numpy() if cached["key"] == key else None
+
+
+def _write_cache(path: Path, key: dict, images: np.ndarray) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    # Saved under a process-specific name and renamed into place, so that runs started
+    # together on a cold data directory never read each other's partial file.
+    partial = path.with_name(f"{path.name}.{os.getpid()}")
+    torch.save({"key": key, "images": torch.from_numpy(images)}, partial)
+    partial.replace(path)
+
+
 class CIFAR10DataModule(LightningDataModule):
     """Lightning DataModule for CIFAR-10 anomaly detection experiments.
 
@@ -49,17 +84,34 @@ class CIFAR10DataModule(LightningDataModule):
     Labeling convention:
       - normal classes are assigned label 0,
       - signal/anomalous classes are assigned labels > 0,
-      - optional background classes are assigned labels < 0.
+      - optional background classes are assigned labels < 0, and every member set of
+        ``member_sets`` label -1; the pools of ``shifts`` keep label 0.
 
     Validation and test dataloaders are returned as dictionaries where:
       - ``"normal"`` is always the first/main dataset,
       - ``"reference_normal"`` is part of the auxiliary datasets,
       - the remaining auxiliary datasets are keyed by their original CIFAR class id
-        converted to string, e.g. ``"1"``, ``"7"``, etc.
+        converted to string, e.g. ``"1"``, ``"7"``, etc.,
+      - the pools of ``shifts`` come last, in config order.
 
     Standard image normalization is computed from the training part of the normal
     classes only, without the validation images drawn from the CIFAR training split,
     then applied to all splits.
+
+    A pool of ``shifts`` has the split's ``normal`` images under camera-like
+    corruptions (``src/data/components/corruptions.py``), label 0: one block of rows
+    per member in config order, row i of every block the corruption of row i of
+    ``normal``. The raw 0-255 images are corrupted before the normalization. Each
+    member's uint8 images are cached in ``data_dir`` under a name carrying the split,
+    the pool, the member, the severity and both seeds; the file also holds a hash of
+    the source images and is read only if its whole key matches. The key carries no
+    code version, so a change to ``corruptions.py`` needs those caches deleted or a
+    fresh data directory. With ``member_sets``, every block is also served as a set of
+    its own, ``<pool>_<member>``, a view of the pool's rows placed after the pools in
+    pool and member order. The member sets carry label -1, so the efficiency callback
+    reports each per set and leaves it out of ``null_rate`` and of the statistics over
+    the signals; only the callback's own ``eff_<rate>`` summary subtracts their mean
+    pass rate.
 
     :param background_classes: Optional list of class indices treated as auxiliary
         background datasets.
@@ -75,6 +127,11 @@ class CIFAR10DataModule(LightningDataModule):
     :param train_seed: Seed of the training batch order; ``seed`` when None.
     :param stats_file: Filename used to cache normalization statistics; None names it
         by normal classes and seed.
+    :param shifts: The corruption pools, ``{name: {severity: int, members: [kind,
+        ...]}}`` with the kinds of ``CORRUPTIONS``; None or empty builds none.
+    :param shift_seed: Seed of the pools' noise, combined with the names of the pool,
+        the member and the split; ``seed`` when None.
+    :param member_sets: Whether each member's block of a pool is also served as a set.
     """
 
     def __init__(
@@ -92,6 +149,9 @@ class CIFAR10DataModule(LightningDataModule):
         num_workers: int = 0,
         normalize: bool = True,
         stats_file: str | None = None,
+        shifts: dict[str, dict] | None = None,
+        shift_seed: int | None = None,
+        member_sets: bool = False,
     ) -> None:
         super().__init__()
         self.save_hyperparameters(logger=False)
@@ -324,6 +384,8 @@ class CIFAR10DataModule(LightningDataModule):
 
             aux_valid = self._build_aux_split(train_ds)
             aux_valid["reference_normal"] = ref_valid
+            sources = [normal_indices[i] for i in valid_positions]
+            aux_valid |= self._build_pools(train_ds, sources, "valid")
             self._aux["valid"] = aux_valid
 
     def _setup_test(self, test_ds: CIFARSplit) -> None:
@@ -345,15 +407,11 @@ class CIFAR10DataModule(LightningDataModule):
                 x=ref_test.x.contiguous(),
                 y=ref_test.y.contiguous(),
             )
+            aux_test |= self._build_pools(test_ds, normal_indices, "test")
             self._aux["test"] = aux_test
 
-    def _split_main_and_reference(
-        self,
-        x: torch.Tensor,
-        y: torch.Tensor,
-    ) -> tuple[SplitTensors, SplitTensors]:
-        """Split a normal dataset into main normal and reference normal subsets."""
-        n = x.size(0)
+    def _reference_split(self, n: int) -> tuple[torch.Tensor, torch.Tensor]:
+        """Return the main and reference positions among n normal evaluation images."""
         if n < 2:
             raise RuntimeError(
                 f"Need at least 2 normal samples to create reference_normal, got {n}."
@@ -362,11 +420,16 @@ class CIFAR10DataModule(LightningDataModule):
         n_ref = max(1, int(round(self.hparams.reference_fraction * n)))
         n_ref = min(n_ref, n - 1)
 
-        gen = self._split_generator()
-        perm = torch.randperm(n, generator=gen)
+        perm = torch.randperm(n, generator=self._split_generator())
+        return perm[n_ref:], perm[:n_ref]
 
-        ref_idx = perm[:n_ref]
-        main_idx = perm[n_ref:]
+    def _split_main_and_reference(
+        self,
+        x: torch.Tensor,
+        y: torch.Tensor,
+    ) -> tuple[SplitTensors, SplitTensors]:
+        """Split a normal dataset into main normal and reference normal subsets."""
+        main_idx, ref_idx = self._reference_split(x.size(0))
 
         main = SplitTensors(
             x=x[main_idx].contiguous(),
@@ -409,6 +472,90 @@ class CIFAR10DataModule(LightningDataModule):
             )
 
         return out
+
+    def _build_pools(
+        self, dataset: CIFARSplit, sources: list[int], split: str
+    ) -> dict[str, SplitTensors]:
+        """Build the corruption pools of a split from the raw images of its ``normal``.
+
+        :param sources: Dataset indices of the split's normal evaluation images, in the
+            row order ``_split_main_and_reference`` receives them.
+        """
+        if not self.hparams.shifts:
+            return {}
+        main_positions, _ = self._reference_split(len(sources))
+        raw = dataset.data[[sources[i] for i in main_positions.tolist()]]
+        pools = {
+            pool: self._build_pool(raw, split, pool, spec)
+            for pool, spec in self.hparams.shifts.items()
+        }
+        if self.hparams.member_sets:
+            pools |= self._member_sets(pools, len(raw))
+        return pools
+
+    def _member_sets(
+        self, pools: dict[str, SplitTensors], n: int
+    ) -> dict[str, SplitTensors]:
+        """Split every pool into its member blocks of n rows, named ``<pool>_<member>``.
+
+        The images are views of the pool's tensor and add no memory; the labels are
+        ``MEMBER_SET_LABEL``.
+        """
+        y = torch.full((n,), MEMBER_SET_LABEL, dtype=torch.int64)
+        sets = {}
+        for pool, spec in self.hparams.shifts.items():
+            blocks = pools[pool].x.split(n)
+            for member, x in zip(spec["members"], blocks, strict=True):
+                sets[f"{pool}_{member}"] = SplitTensors(x=x, y=y.clone())
+        return sets
+
+    def _build_pool(
+        self, raw: np.ndarray, split: str, pool: str, spec: dict
+    ) -> SplitTensors:
+        """Corrupt ``raw`` by every member of one pool and normalize the blocks."""
+        blocks = [
+            self._corrupted(raw, split, pool, member, spec["severity"])
+            for member in spec["members"]
+        ]
+        images = np.concatenate(blocks)
+        # Through _extract_subset, so that a pool is normalized exactly as normal is.
+        x, y = self._extract_subset(
+            CIFARSplit(images, [0] * len(images)), list(range(len(images))), label=0
+        )
+        return SplitTensors(x=x.contiguous(), y=y.contiguous())
+
+    def _corrupted(
+        self, raw: np.ndarray, split: str, pool: str, member: str, severity: int
+    ) -> np.ndarray:
+        """Return ``raw`` under one pool member, from its cache if the key matches."""
+        path, key = self._shift_cache(raw, split, pool, member, severity)
+        images = _read_cache(path, key)
+        if images is not None:
+            log.info(f"Loaded CIFAR10 {split} {pool}/{member} from {path}")
+            return images
+        rng = _member_rng(key["shift_seed"], pool, member, split)
+        images = corrupt(raw, member, severity, rng)
+        _write_cache(path, key, images)
+        log.info(f"Saved CIFAR10 {split} {pool}/{member} to {path}")
+        return images
+
+    def _shift_cache(
+        self, raw: np.ndarray, split: str, pool: str, member: str, severity: int
+    ) -> tuple[Path, dict]:
+        """Return the cache path of one pool member and the key its file must hold.
+
+        The key adds a hash of the source images to the fields of the name, so that a
+        file built from another ``normal`` (another val_fraction, say) is never read.
+        """
+        seed, shift_seed = self.hparams.seed, self.hparams.shift_seed
+        shift_seed = seed if shift_seed is None else shift_seed
+        source = hashlib.sha256(raw.tobytes()).hexdigest()
+        key = dict(split=split, pool=pool, member=member, severity=severity)
+        key |= dict(shift_seed=shift_seed, seed=seed, source=source)
+        classes = "-".join(map(str, sorted(self.hparams.normal_classes)))
+        name = f"cifar10_normal{classes}_seed{seed}_shift{shift_seed}"
+        name += f"_{split}_{pool}_{member}_severity{severity}.pt"
+        return Path(self.hparams.data_dir) / name, key
 
     def _make_eval_loaders(
         self,

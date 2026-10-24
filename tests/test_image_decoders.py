@@ -7,8 +7,8 @@ from src.algorithms.components.encoder import ImageVariationalEncoder
 
 ACTIVATIONS = {"relu": "ReLU", "gelu": "GELU", "silu": "SiLU"}
 
-# Pool defaults: the CIFAR-10 AE decoder and the CIFAR-10 and RobustAD VAE. The
-# activations carry no parameters, so the counts are those of the affine maps alone.
+# Pool defaults: the CIFAR-10 AE decoder and the CIFAR-10 VAE. The activations carry
+# no parameters, so the counts are those of the affine maps alone.
 PARAMETER_COUNTS = {
     "cifar10_ae_decoder": (ImageDecoder, ([128, 64, 32], 3, (32, 32), [2, 2]), 1149891),
     "cifar10_vae_encoder": (
@@ -17,12 +17,6 @@ PARAMETER_COUNTS = {
         560320,
     ),
     "cifar10_vae_decoder": (ImageDecoder, ([64, 64, 32], 3, (32, 32), [2, 2]), 322499),
-    "robustad_vae_encoder": (
-        ImageVariationalEncoder,
-        (3, (32, 32), [16, 32, 64], [2]),
-        135776,
-    ),
-    "robustad_vae_decoder": (ImageDecoder, ([64, 16], 3, (32, 32), [2]), 1074627),
 }
 
 

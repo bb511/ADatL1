@@ -74,6 +74,8 @@ MAPS = {
 # The maps that read the scores of the run's initial state beside the candidate's.
 INITIAL_MAPS = ("disp",)
 STATISTICS = ("A-sup", "A-fix", "A-lim", "D-fix", "D-lim")
+# The pairings that match X1's rows to X2's own rows, and so read X2's blocks.
+BLOCK_PAIRINGS = ("ot", "nn")
 _LOG_2 = math.log(2.0)
 _LEGACY_KEYS = ("legacy_A-sup", "legacy_beta_star", "legacy_at_bound")
 
@@ -343,9 +345,13 @@ def cap_bank(
     return values
 
 
-def _input_hash(name: str, params: dict, inputs: tuple[Tensor, ...]) -> str:
-    """Return 16 hex digits of the SHA-256 of the pairing, its parameters and inputs."""
-    digest = hashlib.sha256(json.dumps([name, params], sort_keys=True).encode())
+def _input_hash(
+    name: str, params: dict, inputs: tuple[Tensor, ...], representation: dict | None
+) -> str:
+    """Return 16 hex digits of the SHA-256 of the pairing, its parameters, the
+    representation unless it is None, and the inputs."""
+    key = [name, params] if representation is None else [name, params, representation]
+    digest = hashlib.sha256(json.dumps(key, sort_keys=True).encode())
     for x in inputs:
         x = x.detach().cpu().contiguous()
         digest.update(f"{tuple(x.shape)} {x.dtype}".encode())
@@ -377,16 +383,34 @@ def _stored_coupling(name: str, params: dict, inputs: tuple, path: Path, label):
     return coupling
 
 
-def _coupling(name: str, params: dict, x_1, x_2, x_ref, cache_dir, label):
+def _coupling(
+    name: str, params: dict, x_1, x_2, x_ref, cache_dir, label, representation
+):
     if name == "cdf":
         return COUPLINGS[name](**params)
     inputs = (x_1, x_2, x_ref) if name == "nn" else (x_1, x_2)
     if cache_dir is None:
         return COUPLINGS[name](*inputs, **params)
-    path = Path(cache_dir) / f"{name}_{_input_hash(name, params, inputs)}.pt"
+    digest = _input_hash(name, params, inputs, representation)
+    path = Path(cache_dir) / f"{name}_{digest}.pt"
     if path.exists():
         return COUPLING_TYPES[name](**torch.load(path, weights_only=True))
     return _stored_coupling(name, params, inputs, path, label)
+
+
+def _check_pairings(pairings, x_ref: Tensor | None) -> None:
+    unknown = sorted(set(pairings) - set(COUPLINGS))
+    if unknown:
+        raise ValueError(f"Unknown pairings: {unknown}.")
+    if "nn" in pairings and x_ref is None:
+        raise ValueError("The nn coupling needs the caliper's reference x_ref.")
+
+
+def _parameters(name: str, params, blocks: int | None) -> dict:
+    params = dict(params or {})
+    if blocks is not None and name in BLOCK_PAIRINGS:
+        params["blocks"] = blocks
+    return params
 
 
 def build_couplings(
@@ -396,6 +420,8 @@ def build_couplings(
     pairings: dict,
     cache_dir: Path | None = None,
     label: dict | None = None,
+    blocks: int | None = None,
+    representation: dict | None = None,
 ) -> dict:
     """Return the registered couplings of X1 [N1, d] and X2 [N2, d], by pairing name.
 
@@ -406,15 +432,24 @@ def build_couplings(
     which must be JSON-serialisable (the names of the sets, say). The hash is that of
     the input bytes, x_ref's for nn included, and of the pairing and its parameters.
 
+    With `blocks`, X2's rows are read as that many equal consecutive blocks, row i of
+    each the counterpart of X1's row i (the members of a pool of changed copies of
+    X1): ot takes every block as one subsample, and ot and nn record per block the
+    fraction of their pairs whose partner is X1's own row of the block. ``blocks``
+    enters the parameters of the pairings of ``BLOCK_PAIRINGS``, and so their hash.
+    `representation`, the name and parameters of the map that produced the inputs
+    from the sets' own, enters every hash and the label, under 'representation'; None,
+    for the identity, adds nothing to either.
+
     Raises:
-        ValueError: If a pairing is unknown, or nn is registered without x_ref.
+        ValueError: If a pairing is unknown, nn is registered without x_ref, or blocks
+            do not cut X2 into equal blocks of at least N1 rows.
     """
-    unknown = sorted(set(pairings) - set(COUPLINGS))
-    if unknown:
-        raise ValueError(f"Unknown pairings: {unknown}.")
-    if "nn" in pairings and x_ref is None:
-        raise ValueError("The nn coupling needs the caliper's reference x_ref.")
+    _check_pairings(pairings, x_ref)
+    if representation is not None:
+        label = {**(label or {}), "representation": representation}
+    params = {name: _parameters(name, p, blocks) for name, p in pairings.items()}
     return {
-        name: _coupling(name, dict(params or {}), x_1, x_2, x_ref, cache_dir, label)
-        for name, params in pairings.items()
+        name: _coupling(name, p, x_1, x_2, x_ref, cache_dir, label, representation)
+        for name, p in params.items()
     }

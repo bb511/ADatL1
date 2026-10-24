@@ -20,7 +20,9 @@ evaluation:
         _target_: src.evaluation.callbacks.efficiency.AnomalyEfficiencyCallback
         output_name: ascore/full
         ds: null
-        null_ds: []
+        # The corruption pools: their pass rates are the false-positive rates on the
+        # second typical domain, one per grade.
+        null_ds: [sensor_weak, sensor_mid, sensor_strong]
         cvar_summary: 0.25
         log_raw_mlflow: false
       thres_drift:
@@ -74,7 +76,7 @@ evaluation:
 # The registry of strategies: column in val.csv, mode and MLflow keys per criterion.
 selection:
   # CAP and consistency are left out until CAP is redefined, and EM and MV because
-  # they are degenerate on images: NaN on CIFAR-10, float32 overflow on RobustAD.
+  # they are degenerate on images (NaN on CIFAR-10).
   criteria:
     drift:
       column: thres_drift/drift_operational

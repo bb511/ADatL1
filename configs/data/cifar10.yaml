@@ -22,3 +22,41 @@ num_workers: 0
 seed: 314159
 # The batch order follows the global training seed.
 train_seed: ${seed}
+
+# The second typical domain: the normal images of each split under camera-like
+# corruptions (CIFAR-10-C's functions and severities), one pool per grade, label 0.
+# Every member corrupts every normal image, so each block of a pool pairs row by row
+# with normal; null or {} builds no pool.
+shifts:
+  sensor_weak:
+    severity: 1
+    members:
+      - gaussian_noise
+      - shot_noise
+      - gaussian_blur
+      - brightness
+      - contrast
+      - jpeg_compression
+  sensor_mid:
+    severity: 3
+    members:
+      - gaussian_noise
+      - shot_noise
+      - gaussian_blur
+      - brightness
+      - contrast
+      - jpeg_compression
+  sensor_strong:
+    severity: 5
+    members:
+      - gaussian_noise
+      - shot_noise
+      - gaussian_blur
+      - brightness
+      - contrast
+      - jpeg_compression
+# The seed of the noise members, combined with the pool, member and split names.
+shift_seed: ${data.seed}
+# Each member's block of a pool also served as its own set, <pool>_<member>, for
+# per-member pass rates: within a pool the members grade in opposite directions.
+member_sets: true

@@ -20,7 +20,7 @@ GPU-hours divide the summed trial wall-clock by the concurrency: three trials
 sharing one GPU for an hour cost one GPU-hour, not three.
 
 Only the 250 Hz tier is used, so that the physics rows rest on the same amount
-of data as CIFAR-10 and RobustAD, which have no q99 counterpart. The diagnostics
+of data as CIFAR-10, which has no q99 counterpart. The diagnostics
 print what the excluded tier would have said.
 
 Writes ``compute_summary.csv`` (one row per table cell), the table itself as
@@ -59,16 +59,11 @@ HARDWARE = {
     ("cifar10", "vae"): ("gh200", 1),
     ("cifar10", "realnvp"): ("gh200", 1),
     ("cifar10", "svdd"): ("gh200", 1),
-    ("robustad", "ae"): ("L40S", 3),
-    ("robustad", "vae"): ("L40S", 3),
-    ("robustad", "realnvp"): ("L40S", 3),
-    ("robustad", "svdd"): ("L40S", 3),
 }
 
 DOMAINS = [
     ("physics", "LHC L1 AD", ["ae", "vae", "dsae", "realnvp", "svdd"]),
     ("cifar10", "CIFAR-10", ["ae", "vae", "realnvp", "svdd"]),
-    ("robustad", "RobustAD", ["ae", "vae", "realnvp", "svdd"]),
 ]
 
 MODEL_LABEL = {
@@ -255,7 +250,7 @@ def latex_table(cell: dict, totals: dict) -> str:
         r"  hyperparameter sweep plus the Pareto retrainings, in GPU-hours, taken",
         r"  from the recorded duration of every trial and every retraining and",
         r"  divided by the number of training processes sharing each GPU.",
-        f"  The three studies together account for {num(grand)} GPU-hours.",
+        f"  The two studies together account for {num(grand)} GPU-hours.",
         r"  }",
         r"  \label{tab:compute_resources}",
         r"  \centering",
@@ -297,7 +292,7 @@ def markdown_table(cell: dict, totals: dict) -> str:
         "Each domain heading gives that study's total: the hyperparameter sweep",
         "plus the Pareto retrainings, in GPU-hours, from the recorded duration of",
         "every trial and retraining divided by the training processes sharing each",
-        f"GPU. All three together account for **{grand:,.0f} GPU-hours**.",
+        f"GPU. Both together account for **{grand:,.0f} GPU-hours**.",
         "",
         "| Model | " + " | ".join(c[2] for c in COLUMNS) + " |",
         "|:--|" + "--:|" * len(COLUMNS),

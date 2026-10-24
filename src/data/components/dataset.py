@@ -145,8 +145,9 @@ class CIFARADDataset(IterableDataset):
 class CausalChamberDataset(IterableDataset):
     """Causal Chamber rows already in memory, served as (x, y) batches.
 
-    Without a shuffler, batch i holds rows i * batch_size to (i + 1) * batch_size, the
-    last batch fewer. With one, every iteration draws a fresh permutation of the rows
+    Without a shuffler, batch i has rows i * batch_size to (i + 1) * batch_size, the
+    last batch fewer.
+    With one, every iteration draws a fresh permutation of the rows
     from it and cuts the permutation into batches in order, so that batch membership
     changes from epoch to epoch and the sequence of batches is fixed by the generator's
     seed. With ``max_batches`` None or negative every batch is served, otherwise the

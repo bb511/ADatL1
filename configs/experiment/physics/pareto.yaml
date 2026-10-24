@@ -11,8 +11,8 @@ defaults:
   - override /pareto_study: npv
   - _self_
 
-experiment_name: Pareto-Front-261002
-tags: ["physics", "pareto", "fet-et", "validation", "protocol-v3"]
+experiment_name: Pareto-Front-nPV-261023
+tags: ["physics", "pareto", "nPV_True", "validation", "npv-protocol-v1"]
 
 
 # The seed and the three search variables are the only runtime overrides to the

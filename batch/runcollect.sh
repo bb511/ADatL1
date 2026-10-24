@@ -26,7 +26,7 @@ python3 --version
 : "${ADL1T_OUTPUT_ROOT:=/eos/user/l/lbehrens/adatl1/ADatL1/outputs}"
 # The study map is built from checkpoints/<EXPERIMENT_NAME>/ and every output
 # lands in pareto_studies/<EXPERIMENT_NAME>/, so each study keeps its own tree.
-: "${EXPERIMENT_NAME:=Pareto-Front-261002}"
+: "${EXPERIMENT_NAME:=Pareto-Front-nPV-261023}"
 : "${STUDY_ROOT:=${ADL1T_OUTPUT_ROOT}/pareto_studies/${EXPERIMENT_NAME}}"
 export ADL1T_OUTPUT_ROOT STUDY_ROOT EXPERIMENT_NAME
 

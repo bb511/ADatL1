@@ -2,6 +2,11 @@
 # ========================================================================
 # NAE LATTICE COMMANDS (LIGHT TUNNEL)
 # ========================================================================
+# - Not for launch (25 Oct): the sampler failed the label-free check here. The
+#   unadjusted chains kept every configuration but [16, 8] level at training seed
+#   123 and collapsed at the default and at neg_energy_weight 0.1 with seed 456; the
+#   Metropolis-adjusted ones failed at each setting tried. The four drivers are
+#   therefore dormant, like the blocks of the second seed and the halves.
 # - Random lattice of cchamber/nae: 200 trials of 150 epochs, in the Optuna
 #   study `pool` over configs/hparams_search/cchamber/nae_optuna.yaml.
 # - Four drivers of 50 trials each.
@@ -28,7 +33,7 @@
 # ------------------------------------------------------------------------
 # Driver 1 of 4
 # ------------------------------------------------------------------------
-# python3 src/train.py \
+## python3 src/train.py \
 #     -m \
 #     experiment=cchamber/nae \
 #     logger=mlflow \
@@ -42,7 +47,7 @@
 # ------------------------------------------------------------------------
 # Driver 2 of 4
 # ------------------------------------------------------------------------
-# python3 src/train.py \
+## python3 src/train.py \
 #     -m \
 #     experiment=cchamber/nae \
 #     logger=mlflow \
@@ -56,7 +61,7 @@
 # ------------------------------------------------------------------------
 # Driver 3 of 4
 # ------------------------------------------------------------------------
-# python3 src/train.py \
+## python3 src/train.py \
 #     -m \
 #     experiment=cchamber/nae \
 #     logger=mlflow \
@@ -70,7 +75,7 @@
 # ------------------------------------------------------------------------
 # Driver 4 of 4
 # ------------------------------------------------------------------------
-# python3 src/train.py \
+## python3 src/train.py \
 #     -m \
 #     experiment=cchamber/nae \
 #     logger=mlflow \

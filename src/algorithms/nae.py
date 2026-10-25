@@ -1,7 +1,12 @@
 """Normalized Autoencoder (NAE).
 
-S. Yoon, Y.-K. Noh and F. C. Park, "Autoencoding Under Normalization Constraints",
-ICML 2021, arXiv:2105.05735.
+S. Yoon, Y.-K. Noh and F. C. Park, "Autoencoding Under Normalization Constraints", ICML
+2021, arXiv:2105.05735.
+
+The energy-phase loss and the sampler are adapted from
+github.com/swyoon/normalized-autoencoders, commit 77e1987, under its MIT licence:
+Copyright (c) 2021 Sangwoong Yoon. The permission notice and the warranty disclaimer of
+that licence apply to those parts.
 """
 
 import math
@@ -210,7 +215,7 @@ def _nn_two_sample_accuracy(a: torch.Tensor, b: torch.Tensor) -> float:
 
 
 class NAE(ADLightningModule):
-    """Normalized Autoencoder; the module docstring describes the model and sampler.
+    """Normalized Autoencoder with negatives from on-manifold Langevin chains.
 
     Args:
         encoder: Network whose output, projected onto the unit sphere, is the code.

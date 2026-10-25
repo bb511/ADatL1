@@ -3,10 +3,11 @@
 # NAE LATTICE COMMANDS (WIND TUNNEL)
 # ========================================================================
 # - Not for launch (25 Oct): the sampler failed the label-free check here. Of 30
-#   full-length calibration runs, unadjusted or Metropolis-adjusted, one met the
-#   criteria. The others failed mostly because a classifier told the negatives from
-#   validation normal (MLP AUROC up to 0.96): they cross the floors at which
-#   signal_1, signal_2 and mic sit. NAE runs on the light tunnel alone.
+#   full-length calibration runs with the separate energy-phase rate, unadjusted or
+#   Metropolis-adjusted, one met the criteria. The others failed mostly because a
+#   classifier told the negatives from validation normal (MLP AUROC up to 0.96):
+#   they cross the floors at which signal_1, signal_2 and mic sit. The four drivers
+#   are therefore dormant, like the blocks of the second seed and the halves.
 # - Random lattice of cchamber_wt/nae: 200 trials of 150 epochs, in the Optuna
 #   study `pool` over configs/hparams_search/cchamber_wt/nae_optuna.yaml.
 # - Four drivers of 50 trials each.
@@ -33,7 +34,7 @@
 # ------------------------------------------------------------------------
 # Driver 1 of 4
 # ------------------------------------------------------------------------
-# python3 src/train.py \
+## python3 src/train.py \
 #     -m \
 #     experiment=cchamber_wt/nae \
 #     logger=mlflow \
@@ -47,7 +48,7 @@
 # ------------------------------------------------------------------------
 # Driver 2 of 4
 # ------------------------------------------------------------------------
-# python3 src/train.py \
+## python3 src/train.py \
 #     -m \
 #     experiment=cchamber_wt/nae \
 #     logger=mlflow \
@@ -61,7 +62,7 @@
 # ------------------------------------------------------------------------
 # Driver 3 of 4
 # ------------------------------------------------------------------------
-# python3 src/train.py \
+## python3 src/train.py \
 #     -m \
 #     experiment=cchamber_wt/nae \
 #     logger=mlflow \
@@ -75,7 +76,7 @@
 # ------------------------------------------------------------------------
 # Driver 4 of 4
 # ------------------------------------------------------------------------
-# python3 src/train.py \
+## python3 src/train.py \
 #     -m \
 #     experiment=cchamber_wt/nae \
 #     logger=mlflow \

@@ -47,6 +47,15 @@ input_step_size: 3.0e-4
 input_grad_clip: null
 # The chamber's clip_value; the decoded starts and the input chain stay in the data box.
 input_bound: 10.0
+# Metropolis-adjusted chains (true) were calibrated on both tunnels on 25 Oct and are
+# off. On the light tunnel, at each of five settings (latent steps 1e-4 to 1e-3, input
+# steps 1e-3 to 2e-3, 10 or 20 input steps, energy_lr 1e-4 or 3e-5), at least one
+# configuration besides [16, 8] collapsed, its chains freezing (acceptance near 0.1)
+# while the negative energies ran away, or let the negative energy drift above 1.5
+# times the positive one; on the wind tunnel no setting gave negatives that a classifier
+# could not tell from validation normal. The unadjusted chains kept every light-tunnel
+# configuration but [16, 8] level at training seed 123, and collapsed at the default and
+# at neg_energy_weight 0.1 with seed 456.
 metropolis: false
 buffer_size: 10000
 replay_ratio: 0.95

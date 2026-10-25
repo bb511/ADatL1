@@ -2,8 +2,9 @@
 
 # The NAE lattice space, the same on both tunnels; the rationale is in the plan. The grids
 # of temperature and neg_energy_weight passed the label-free sampler check on the light
-# tunnel. Not for launch: the sampler failed that check on this tunnel (see the header of
-# scripts/cchamber_wt/runnae_search.sh).
+# tunnel at training seed 123; at seed 456 the default and neg_energy_weight 0.1
+# collapsed (25 Oct). Not for launch: the sampler failed that check on this tunnel (see
+# the header of scripts/cchamber_wt/runnae_search.sh).
 
 defaults:
   - override /hydra/sweeper: optuna

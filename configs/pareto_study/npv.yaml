@@ -34,6 +34,10 @@ search_space:
       - name: bins_scan
         mi_gamma: [0.01, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7]
         mi_sensitive_num_bins: [5, 8, 10, 15, 20, 25, 30, 40, 50]
+      - name: bins_scan_large_gamma
+        mi_gamma: [0.8, 0.9, 1, 1.2, 1.4, 1.6, 1.8, 2, 3, 4, 5, 10, 15, 20, 30, 50, 100]
+        mi_sensitive_num_bins: [5, 8, 10, 15, 20, 25, 30, 40, 50]
+
   gamma_zero_baseline:
     mi_gamma: 0.0
     mi_sensitive_num_bins: 50

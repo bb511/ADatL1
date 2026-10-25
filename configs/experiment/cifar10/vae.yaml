@@ -32,6 +32,9 @@ test: false
 algorithm:
   target_rate: 0.01
   base_rate: null
+  # The decoder reads the posterior mean in eval mode, so that loss/full, which the
+  # entropy criterion reads, and fit/full, which Q'' averages, are deterministic.
+  eval_mean: true
 
   encoder:
     in_channels: 3

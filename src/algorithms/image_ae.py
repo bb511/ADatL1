@@ -101,6 +101,7 @@ class ImageAE(ADLightningModule):
             # Used for callbacks:
             "loss/full": loss.detach(),
             "ascore/full": ascore.detach(),
+            "fit/full": ascore.detach(),
             "reconstructed_data": reconstruction.detach(),
         }
 

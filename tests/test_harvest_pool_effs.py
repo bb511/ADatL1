@@ -89,7 +89,7 @@ def _eval_metrics(run, ckpt):
                 metrics[f"{prefix.format('eff')}/eff_{label}_{dataset}"] = eff
             metrics[f"{prefix.format('eff')}/eff_{label}"] = 0.5
             metrics[f"{prefix.format('eff')}/eff_med_{label}"] = 0.5
-        metrics[f"{prefix.format('ascore_operational')}/normal"] = SEC[run]
+        metrics[f"{prefix.format('fit')}/normal"] = SEC[run]
         metrics[f"{prefix.format('thres_drift')}/drift_operational"] = 0.3 + run
         drift_q99 = f"{prefix.format('thres_drift')}/drift_trate286_088064kHz"
         metrics[drift_q99] = 0.6 + run
@@ -240,7 +240,7 @@ def test_eval_tables_hold_their_tier(outdir):
     test_cap = main.query("run_name == 'cap_run1' and split == 'test'")
     assert set(test_cap["context"]) == {
         f"summary/{cb}/cap_ema_normal_vs_ref/max"
-        for cb in ("eff", "ascore_operational", "thres_drift", "cap")
+        for cb in ("eff", "fit", "thres_drift", "cap")
     }
     eff = test_cap.query("context == 'summary/eff/cap_ema_normal_vs_ref/max'")
     expected = _eff(1, 3, 1, "test", "operational")
@@ -289,11 +289,9 @@ def test_sds_at_a_rate_lands_in_its_tier_only(outdir):
         assert strategy.q_history == monitor.removesuffix("_ema")
 
 
-def test_q_sec_strategy_reads_the_operational_score():
-    monitor = "val/summary/ascore_operational_ema"
-    ckpt = harvest.Checkpoint(
-        ("summary", "ascore_operational_ema", "min"), monitor, False
-    )
+def test_q_sec_strategy_reads_the_fit():
+    monitor = "val/summary/fit_ema"
+    ckpt = harvest.Checkpoint(("summary", "fit_ema", "min"), monitor, False)
     strategy = harvest._strategy(ckpt, 0.25, 28608.8064)
     assert strategy.label == "q_sec"
     val = {"normal": 1.5, "eff_operational_sigA": 0.2}

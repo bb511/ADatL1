@@ -1,0 +1,48 @@
+# @package _global_
+
+# Train and dump only; selection and evaluation run offline.
+
+defaults:
+  - /cap: provisional
+  - override /data: cchamber
+  - override /algorithm: nae
+  - override /callbacks: dump
+  - override /trainer: cpu
+  - override /logger: mlflow
+
+seed: 123
+tags: ["nae", "cchamber", "pool"]
+
+experiment_name: cchamber_nae_pool
+run_name: ${short_hash:${hydra:runtime.output_dir},12}
+
+data:
+  max_val_batches: -1
+
+trainer:
+  gradient_clip_algorithm: norm
+  gradient_clip_val: 0.0
+  min_epochs: 1
+  max_epochs: 150
+  # The full sanity pass is the untrained state the dump stores; no checkpoint is kept.
+  num_sanity_val_steps: -1
+  enable_checkpointing: false
+
+test: false
+
+# The optimiser of the chamber AE; the sampler and the phases are those of the template.
+algorithm:
+  target_rate: 0.01
+  base_rate: null
+
+  encoder:
+    in_dim: 10
+    nodes: [32, 16, 8]
+
+  optimizer:
+    _partial_: true
+    _target_: torch.optim.AdamW
+    lr: 1.0e-3
+    weight_decay: 1.0e-4
+    betas: [0.9, 0.999]
+    eps: 1e-8

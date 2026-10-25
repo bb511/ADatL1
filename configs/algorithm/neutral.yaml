@@ -1,0 +1,28 @@
+# Template NeuTraL AD configuration.
+defaults:
+  - _self_
+
+_target_: src.algorithms.neutral.NeuTraLAD
+
+target_rate: 0.25 # nominal rate
+base_rate: 28608.8064 # bunch crossing rate in kHz
+
+# The input width, read by the transformations and the encoder.
+in_dim: 117
+
+encoder:
+  _target_: src.algorithms.components.encoder.Encoder
+  in_dim: ${algorithm.in_dim}
+  # The last width is the embedding dimension.
+  nodes: [32, 16, 8]
+  activation: relu
+
+n_transforms: 11
+transform_type: residual
+temperature: 0.1
+
+optimizer:
+  _partial_: true
+  _target_: torch.optim.AdamW
+  lr: 1.0e-3
+  weight_decay: 1.0e-4

@@ -56,7 +56,7 @@ from mlflow.tracking import MlflowClient
 REPO = Path(__file__).resolve().parents[2]
 
 # Q″ is read as optimized_metric_config.sec_metric reads it in every physics experiment.
-SEC_CALLBACK, SEC_SCALAR = "ascore_operational", "normal"
+SEC_CALLBACK, SEC_SCALAR = "fit", "normal"
 
 # Validation keys of src/callbacks (after "val/summary/"), the strategy label of the
 # effs notebooks, and the evaluation scalar that recomputes the quantity. CVaR has no
@@ -68,7 +68,7 @@ FAMILIES = [
     (r"w1dist_ema_.+", "wasserstein", "w1dist"),
     (r"cap_ema_.+", "cap", "cap"),
     (r"consistency_ema_.+", "consistency", "consistency"),
-    (r"ascore_operational_ema", "q_sec", SEC_SCALAR),
+    (r"fit_ema", "q_sec", SEC_SCALAR),
 ]
 # The label-free criteria have no evaluation scalar on the LHC: Q′ is the raw value the
 # training callback logs beside its EMA, read at the checkpoint's epoch. SDS cut at a

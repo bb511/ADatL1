@@ -7,6 +7,7 @@ import torch.nn.functional as F
 from torch import nn
 
 from src.algorithms import ADLightningModule
+from src.algorithms.components.dte import eval_corruption
 from src.data.utils import unpack_batch
 
 # (failed, message) pairs over the saved hyperparameters, checked in this order.
@@ -172,13 +173,12 @@ class ImageDTE(ADLightningModule):
                     f"input {tuple(x.shape)}."
                 )
 
-        timesteps = torch.randint(
-            0,
-            int(self.hparams.n_steps),
-            (x.shape[0],),
-            device=x.device,
-        )
-        noisy_x = self.corrupt(x, timesteps, mask=mask)
+        n_steps, noise = int(self.hparams.n_steps), None
+        if self.training:
+            timesteps = torch.randint(0, n_steps, (x.shape[0],), device=x.device)
+        else:
+            timesteps, noise = eval_corruption(x, n_steps)
+        noisy_x = self.corrupt(x, timesteps, mask=mask, noise=noise)
         noisy_logits = self.forward(noisy_x)
         targets = self.time_to_bin(timesteps)
         loss_full = F.cross_entropy(noisy_logits, targets, reduction="none")
@@ -212,6 +212,7 @@ class ImageDTE(ADLightningModule):
             # Used for callbacks:
             "loss/full": loss_full.detach(),
             "ascore/full": ascore,
+            "fit/full": loss_full.detach(),
         }
         if mult_corr is not None:
             outdict["ascore/mult_corr"] = mult_corr

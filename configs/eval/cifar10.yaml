@@ -40,12 +40,16 @@ evaluation:
         apply_log1p: true
         log_raw_mlflow: false
         name: wasserstein
+      # The operational score of normal, a diagnostic column beside Q'', the fit.
       ascore_operational:
         _target_: src.evaluation.callbacks.output.OutputCallback
         output_name: ascore/operational
         ds: [normal]
         log_raw_mlflow: false
         name: ascore_operational
+      fit:
+        _target_: src.evaluation.callbacks.fit.Fit
+        name: fit
       npd:
         _target_: src.evaluation.callbacks.autouad.NPD
         name: npd
@@ -112,10 +116,12 @@ selection:
       mode: min
       key: val/summary/sds_ema
       raw_key: val/summary/sds
+  # Q'', the mean fit of validation normal, minimised; se is the gate's standard error.
   q_sec:
-    column: ascore_operational/normal
-    key: val/summary/ascore_operational_ema
-    raw_key: val/normal/ascore_operational
+    column: fit/normal
+    se: fit/normal_se
+    key: val/summary/fit_ema
+    raw_key: val/summary/fit
   # Q' alone, from the per-set validation efficiencies of the signal sets.
   labelled:
     oracle:
@@ -147,4 +153,4 @@ selection:
     sds: in-sample, the pseudo-sets come from the training inputs
     udr: selects the untrained model where its scores do not depend on the seed
     mc: selects the untrained model where its scores do not depend on the seed
-    q_sec: on SVDD the distance has no fixed scale across a lattice
+    q_sec: on AE valid as an epoch rule and invalid as a hyperpoint rule on the retrained light tunnel (rho -0.26 at both epochs), and expected so on NAE, scored by the same reconstruction error; the SVDD distance is taken per latent coordinate, since its sum grows with the latent width

@@ -32,8 +32,10 @@ COLUMNS = {
     "oracle": "oracle",
     "cvar25": "cvar25",
     "cvar10": "cvar10",
-    "q_sec": "ascore_operational/normal",
+    "q_sec": "fit/normal",
 }
+# The standard error of Q'' that the gate reads.
+SE = "fit/normal_se"
 MODES = {"cap": "max", "drift": "min", "q_sec": "min", "udr": "max", "mc": "max"}
 SELECTION = {
     "criteria": {
@@ -50,9 +52,10 @@ SELECTION = {
         },
     },
     "q_sec": {
-        "column": "ascore_operational/normal",
-        "key": "val/summary/ascore_operational_ema",
-        "raw_key": "val/normal/ascore_operational",
+        "column": "fit/normal",
+        "se": SE,
+        "key": "val/summary/fit_ema",
+        "raw_key": "val/summary/fit",
     },
     "labelled": {
         "oracle": {"statistic": "mean", "key": "val/summary/eff_mean_ema_operational"},
@@ -83,6 +86,7 @@ def _spec(names=NAMES, epochs=4, signals=("sig_a", "sig_b", "sig_c"), seed=0):
     val["cap/cap_beta_star"] = rng.uniform(size=shape)
     val[COLUMNS["drift"]] = rng.uniform(size=shape)
     val[COLUMNS["q_sec"]] = rng.uniform(1, 2, size=shape)
+    val[SE] = np.zeros(shape)
     val.update({EFF + name: rng.uniform(size=shape) for name in sets})
     signal_effs = np.stack([val[EFF + name] for name in signals])
     val["oracle"] = signal_effs.mean(axis=0)
@@ -388,7 +392,7 @@ def _hand_spec():
     nan = math.nan
     spec.val["cap/cap"] = np.array([[nan, 0.2, 0.5], [nan, 0.4, 0.9], [nan, 0.7, 0.3]])
     q_sec = [[9.0, 3.0, 2.0], [9.0, 2.0, 4.0], [9.0, 2.5, 1.5]]
-    spec.val["ascore_operational/normal"] = np.array(q_sec)
+    spec.val[COLUMNS["q_sec"]] = np.array(q_sec)
     oracle = [[nan, 0.6, 0.65], [nan, 0.5, 0.8], [nan, 0.55, 0.7]]
     spec.val["oracle"] = np.array(oracle)
     for k in range(11):
@@ -549,23 +553,23 @@ def test_validity_is_spearman_of_the_ranking_value(tmp_path):
     np.testing.assert_allclose(table["p_holm"], holm)
 
 
-def _grid_spec(spread_at_best: float):
+def _grid_spec(se_at_best: float):
     spec = _spec(names=["a", "b", "c", "d"], epochs=2, signals=("s1", "s2"))
     # At epoch 0 the ranks of Q' are (1, 4, 2, 3) and of Q'' (4, 1, 2, 3): the rank sums
     # 4 - 3w, 1 + 3w, 2 and 3 make c the pick for w in (1/3, 2/3) alone.
     spec.val["cap/cap"][:, 1] = [0.9, 0.1, 0.7, 0.4]
-    spec.val["ascore_operational/normal"][:, 1] = [4.0, 1.0, 2.0, 3.0]
+    spec.val[COLUMNS["q_sec"]][:, 1] = [4.0, 1.0, 2.0, 3.0]
     for key in spec.picks:
         spec.picks[key] = np.zeros(4, dtype=int)
-    # b is the best Q'': constant scores give a standard error of 0, spread ones a
-    # standard error far above the range of Q''.
-    spec.normal[1, 1] = spread_at_best * spec.normal[1, 1] + 1.0
+    # b is the best Q'': a standard error of 0 keeps it alone within the bound, one far
+    # above the range of Q'' admits every run.
+    spec.val[SE][1, 1] = se_at_best
     return spec
 
 
-@pytest.mark.parametrize("spread, gate", [(0.0, "b"), (1000.0, "a")])
-def test_tradeoff_grid_gate_and_joint_only(tmp_path, spread, gate):
-    spec = _grid_spec(spread)
+@pytest.mark.parametrize("se, gate", [(0.0, "b"), (1000.0, "a")])
+def test_tradeoff_grid_gate_and_joint_only(tmp_path, se, gate):
+    spec = _grid_spec(se)
     table = _read(_run(tmp_path, spec, partner=False), "tradeoff.csv")
     assert len(table) == len(["cap", "drift", "mc"]) * 11 * 12
     cap = table[table["strategy"] == "cap"]
@@ -662,7 +666,7 @@ def test_harvest_schema(tmp_path):
 
     evals = _read(out_dir, "lat_eval.csv")
     assert list(evals.columns[: len(harvest.EVAL_COLUMNS)]) == harvest.EVAL_COLUMNS
-    contexts = {"val": {"cap", "thres_drift", "ascore_operational", "eff"}}
+    contexts = {"val": {"cap", "thres_drift", "fit", "eff"}}
     contexts["test"] = {"eff"}
     assert len(evals) == len(table) * 5
     for split, names in contexts.items():

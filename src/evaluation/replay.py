@@ -5,9 +5,11 @@ scores of the stored sets and the weights (``src/callbacks/score_dump.py`` gives
 layout). ``ReplayModule`` wraps the run's own LightningModule, loads the weights of
 one epoch at a time, and answers ``trainer.test`` batch by batch: with the stored
 scores of a set the files hold, and with ``model_step`` of the loaded weights for any
-other set, so that every evaluation callback runs unchanged over both. The extra sets
-of the validation pass (the auxiliary sets, the training set and the SDS pseudo-sets)
-are wrapped here in the loaders that pass appends to the validation loaders.
+other set, so that every evaluation callback runs unchanged over both. A key of
+``RESCORED_KEYS`` that a stored set lacks is rescored from the weights as well. The
+extra sets of the validation pass (the auxiliary sets, the training set and the SDS
+pseudo-sets) are wrapped here in the loaders that pass appends to the validation
+loaders.
 """
 
 from pathlib import Path
@@ -23,6 +25,10 @@ from src.data.utils import unpack_batch
 # The parts of an epoch's record that each pass serves; the loader names of one pass
 # are unique across its parts.
 PASS_PARTS = {"val": ("val", "aux", "train"), "test": ("test",)}
+# The keys rescored from the weights, by part and stored set, where the dump lacks them,
+# as dumps written before fit/full joined the dump keys do: the fit callback reads
+# validation normal alone.
+RESCORED_KEYS = {"val": {"normal": ("fit/full",)}}
 
 
 def _load_weights(module: LightningModule, state_dict: dict) -> None:
@@ -43,6 +49,22 @@ def _offsets(batch_sizes: list[int]) -> list[int]:
     for size in batch_sizes:
         offsets.append(offsets[-1] + size)
     return offsets
+
+
+def _missing_keys(record: dict, parts: tuple[str, ...]) -> dict[str, list[str]]:
+    """The keys of ``RESCORED_KEYS`` that each stored set of ``parts`` lacks."""
+    return {
+        name: [k for k in RESCORED_KEYS.get(part, {}).get(name, ()) if k not in scores]
+        for part in parts
+        for name, scores in record[part].items()
+    }
+
+
+def _rescored(module: LightningModule, batch, keys: list[str]) -> dict:
+    if not keys:
+        return {}
+    outputs = module.model_step(batch)
+    return {key: outputs[key] for key in keys}
 
 
 def operational_cut(scores: torch.Tensor, meta: dict) -> tuple[torch.Tensor, ...]:
@@ -108,6 +130,7 @@ class ReplayModule(LightningModule):
             for name, sizes in self.meta[part]["batch_sizes"].items()
         }
         self._offsets = {name: _offsets(self._sizes[name]) for name in self._served}
+        self._missing = _missing_keys(self.record, parts)
 
     def test_step(self, batch, batch_idx: int, dataloader_idx: int = 0) -> dict:
         name = list(self.trainer.test_dataloaders)[dataloader_idx]
@@ -118,6 +141,7 @@ class ReplayModule(LightningModule):
         self._check_batch(name, batch_idx, n, dataloader_idx)
         start = self._offsets[name][batch_idx]
         out = {key: s[start : start + n] for key, s in self._served[name].items()}
+        out.update(_rescored(self.module, batch, self._missing[name]))
         if "ascore/full" in out:
             ascore = self.compute_operational_ascore(out["ascore/full"])
             out["ascore/operational"] = ascore

@@ -1,0 +1,38 @@
+# @package _global_
+
+defaults:
+  - override /hydra/sweeper: optuna
+  - override /hydra/sweeper/sampler: random
+
+# here we define Optuna hyperparameter search
+# it optimizes for value returned from function with @hydra.main decorator
+# docs: https://hydra.cc/docs/next/plugins/optuna_sweeper
+hydra:
+  mode: "MULTIRUN" # set hydra to multirun by default if this config is attached
+  sweeper:
+    _target_: hydra_plugins.hydra_optuna_sweeper.optuna_sweeper.OptunaSweeper
+
+    # storage URL to persist optimization results
+    # for example, you can use SQLite if you set 'sqlite:///example.db'
+    storage: sqlite:///logs/optuna/physics/neutral_pool.db?timeout=600
+
+    # name of the study to persist optimization results
+    study_name: pool
+
+    # number of parallel workers
+    n_jobs: 1
+
+    # 'minimize' or 'maximize' the objective
+    direction: [maximize, minimize]
+
+    # total number of runs that will be executed
+    n_trials: 15
+
+    # define hyperparameter search space. Assumes using torch.optim.AdamW
+    params:
+      algorithm.optimizer.lr: tag(log, interval(3e-5, 1e-2))
+      trainer.gradient_clip_val: choice(0.0, 0.5, 1.0, 2.0)
+      algorithm.encoder.nodes: choice([16,8], [32,8], [32,16], [48,8], [24,8,4], [32,16,8], [48,24,8], [48,24,16], [64,32,8], [64,32,16], [64,32,24], [64,32,32])
+      algorithm.n_transforms: choice(6, 8, 11, 16)
+      algorithm.temperature: choice(0.05, 0.1, 0.25, 0.5, 1.0)
+      algorithm.transform_type: choice(residual, multiplicative)

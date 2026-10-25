@@ -1,7 +1,7 @@
 """The epoch rule and the hyperpoint rule of the selection protocol.
 
-A strategy picks among candidates by two quantities, its own Q' and the operational
-score Q'' of validation normal, minimising
+A strategy picks among candidates by two quantities, its own Q' and the fit Q'' of
+validation normal (the module's ``fit/full`` averaged over its rows), minimising
 
     w rank(Q') + (1 - w) rank(Q''),    w = k / W_STEPS, k = 0, ..., W_STEPS,
 

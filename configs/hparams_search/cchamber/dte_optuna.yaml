@@ -1,0 +1,30 @@
+# @package _global_
+
+# The DTE lattice space, the same on both tunnels; the rationale is in the plan.
+# n_steps and beta_start are fixed (configs/algorithm/dte.yaml); the widths are the AE and
+# SVDD list, for capacity parity with the other chamber families.
+
+defaults:
+  - override /hydra/sweeper: optuna
+  - override /hydra/sweeper/sampler: random
+
+hydra:
+  mode: "MULTIRUN"
+  sweeper:
+    _target_: hydra_plugins.hydra_optuna_sweeper.optuna_sweeper.OptunaSweeper
+    study_name: pool
+    n_jobs: 1
+    # Placeholder: a dump-only run reports the worst value of each direction.
+    direction: minimize
+    n_trials: 50
+    storage: sqlite:///logs/optuna/cchamber/dte_pool.db?timeout=600
+    params:
+      algorithm.optimizer.lr: tag(log, interval(3e-5, 1e-2))
+      trainer.gradient_clip_val: choice(0.0, 0.5, 1.0, 2.0)
+      algorithm.beta_end: tag(log, interval(1e-3, 1e-1))
+      algorithm.n_bins: choice(5, 10, 20, 30)
+      algorithm.predictor.hidden_dims: choice([16, 8], [24, 8], [32, 16], [32, 16, 4], [32, 16, 8], [48, 24, 8], [48, 24, 16], [64, 32, 16])
+      algorithm.predictor.dropout: choice(0.0, 0.25, 0.5)
+      # ReLU is left out: its last hidden layer can switch off on typical rows, which then
+      # tie at one score, every validation-normal row at lr 3e-3 and 5e-3 by epoch 2.
+      algorithm.predictor.activation: choice(gelu, silu)

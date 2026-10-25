@@ -1,7 +1,6 @@
 import math
 from types import SimpleNamespace
 
-import numpy as np
 import pytest
 import pytorch_lightning as pl
 import torch
@@ -26,7 +25,7 @@ from src.callbacks.goix import (
     excess_mass,
     mass_volume,
 )
-from src.callbacks.operational import OperationalScoreCallback
+from src.callbacks.operational import FitCallback
 from src.callbacks.score_dump import aux_inputs, input_moments
 from src.callbacks.sds import (
     SDS_SETS,
@@ -89,7 +88,7 @@ def criteria():
         LossEntropyCallback(batch_size=16),
         SDSCallback(batch_size=16),
         SDSCallback(name="sds_val", source="normal", batch_size=16),
-        OperationalScoreCallback(),
+        FitCallback(),
     ]
 
 
@@ -126,7 +125,6 @@ def expected_values(dump_dir):
         module.load_state_dict(record["state_dict"])
         normal = record["val"]["normal"][KEY]
         aux = {name: scores[KEY] for name, scores in record["aux"].items()}
-        operational = [module.compute_operational_ascore(b) for b in normal.split(32)]
         rows.append(
             {
                 "npd": npd(normal, aux["autouad"]),
@@ -137,7 +135,7 @@ def expected_values(dump_dir):
                 "entropy": loss_entropy(record["train"]["train"]["loss/full"]),
                 "sds": expected_sds(module, normal, pseudo["sds"]),
                 "sds_val": expected_sds(module, normal, pseudo["sds_val"]),
-                "ascore_operational": float(np.mean(operational)),
+                "fit": record["val"]["normal"]["fit/full"].double().mean().item(),
             }
         )
     return rows
@@ -156,16 +154,12 @@ def test_callbacks_log_the_criteria_and_their_ema(tmp_path):
 
     assert not [key for key in recorder.sanity if key.startswith("val/summary/")]
     assert len(recorder.epochs) == EPOCHS
-    for name in [*NAMES, "ascore_operational"]:
+    for name in [*NAMES, "fit"]:
         raw = [row[name] for row in rows]
         for epoch, logged in enumerate(recorder.epochs):
             key = f"val/summary/{name}"
             assert logged[f"{key}_ema"] == approx(selection.ema(raw)[epoch])
-            if name == "ascore_operational":
-                assert logged["val/normal/ascore_operational"] == approx(raw[epoch])
-                assert key not in logged
-            else:
-                assert logged[key] == approx(raw[epoch])
+            assert logged[key] == approx(raw[epoch])
 
 
 def test_sds_cuts_at_its_target_rate(tmp_path):

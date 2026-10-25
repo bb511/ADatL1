@@ -1,13 +1,39 @@
-"""Predictor components for categorical Diffusion Time Estimation."""
+"""Predictor components for categorical Diffusion Time Estimation, and the corruption of
+its eval-mode passes."""
 
 from __future__ import annotations
 
-from typing import Callable, Optional
+from typing import Callable
 
 import torch
 from torch import nn
 
 from src.algorithms.components.mlp import ImageMLP
+
+# The seed of the eval-mode corruption, the same in every module and every run.
+EVAL_CORRUPTION_SEED = 20261025
+
+
+def eval_corruption(x: torch.Tensor, n_steps: int) -> tuple[torch.Tensor, torch.Tensor]:
+    """Return the diffusion times, shape (batch,), and the noise, the shape of ``x``, of
+    an eval-mode pass.
+
+    The time of an event is a fixed pseudo-random function of its input, t = floor(u
+    n_steps) with u = frac(<x_flat, w>) and w ~ U[0, 1)^features drawn from
+    ``EVAL_CORRUPTION_SEED``, the dot product in float64 on CPU. The noise is the next
+    draw of the same generator, so it is fixed per position in the batch, not per event.
+    Every epoch and every replay then evaluate the same corruption (common random
+    numbers): the differences the epoch rule reads carry no Monte Carlo noise and a
+    rescoring reproduces, without a global seed or a buffer that old state dicts lack.
+    """
+    generator = torch.Generator().manual_seed(EVAL_CORRUPTION_SEED)
+    flat = x.detach().flatten(start_dim=1).to("cpu", torch.float64)
+    weights = torch.rand(flat.shape[1], generator=generator, dtype=torch.float64)
+    # remainder rather than frac, which keeps the sign of a negative projection.
+    u = torch.remainder((flat * weights).sum(dim=1), 1.0)
+    timesteps = (u * n_steps).long().clamp(0, n_steps - 1)
+    noise = torch.randn(x.shape, generator=generator, dtype=x.dtype)
+    return timesteps.to(x.device), noise.to(x.device)
 
 
 class DTEPredictor(nn.Module):
@@ -99,12 +125,12 @@ class ImageDTEPredictor(nn.Module):
         nodes: list[int],
         out_dim: int,
         input_size: tuple[int, int] = (32, 32),
-        strides: Optional[list[int]] = None,
+        strides: list[int] | None = None,
         activation: str = "relu",
         dropout: float = 0.0,
         batchnorm: bool = False,
-        init_weight: Optional[Callable] = None,
-        init_bias: Optional[Callable] = None,
+        init_weight: Callable | None = None,
+        init_bias: Callable | None = None,
     ) -> None:
         super().__init__()
         if in_channels <= 0:

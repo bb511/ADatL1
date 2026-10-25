@@ -165,6 +165,7 @@ class AE(ADLightningModule):
             "loss/full": loss.detach(),
             "ascore/full": ascore.detach(),
             **{f"ascore/{name}": score.detach() for name, score in scores.items()},
+            "fit/full": scores["mse"].detach(),
             "reconstructed_data": reconstruction.detach(),
         }
 

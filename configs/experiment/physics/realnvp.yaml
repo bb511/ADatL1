@@ -41,10 +41,9 @@ optimized_metric_config:
     direction: maximize
   sec_metric:
     callback:
-      name: ascore_operational
+      name: fit
       params:
         ckpt_name: null
-        test_ds: normal
     direction: minimize
 
 algorithm:
@@ -141,9 +140,9 @@ callbacks:
     ema_weight: 0.9
     target_rate: 286.088064
 
-  operational_score:
-    _target_: src.callbacks.operational.OperationalScoreCallback
-    output_name: "ascore/operational"
+  fit:
+    _target_: src.callbacks.operational.FitCallback
+    output_name: "fit/full"
     ema_weight: 0.9
 
   cvar25_ema_ckpt:
@@ -315,11 +314,11 @@ callbacks:
     every_n_epochs: 1
     save_on_train_epoch_end: false
 
-  ascore_operational_ema_ckpt:
+  fit_ema_ckpt:
     _target_: pytorch_lightning.callbacks.ModelCheckpoint
-    dirpath: "${paths.checkpoints_dir}/${experiment_name}/${run_name}/summary/ascore_operational_ema/min"
-    monitor: "val/summary/ascore_operational_ema"
-    filename: "ascore_operational_ema"
+    dirpath: "${paths.checkpoints_dir}/${experiment_name}/${run_name}/summary/fit_ema/min"
+    monitor: "val/summary/fit_ema"
+    filename: "fit_ema"
     save_last: false
     save_top_k: 1
     mode: "min"
@@ -358,7 +357,7 @@ evaluation:
         eag_ema: ["max"]
         sds_286_088064_ema: ["min"]
         sds_val_286_088064_ema: ["min"]
-        ascore_operational_ema: ["min"]
+        fit_ema: ["min"]
       normal:
         loss: ["min"]
 
@@ -410,33 +409,9 @@ evaluation:
       pairing_type: cdf
       cap_metric_config: ${cap}
 
-    ascore_operational:
-      _target_: src.evaluation.callbacks.output.OutputCallback
-      name: ascore_operational
-      output_name: "ascore/operational"
-      ds:
-        - normal
-        - GluGluHTo2B_Par-MH-125
-        - GluGluHto2G_Par-MH-125
-        - GluGluHto2G_Par-MH-90
-        - GluGluHto2Tau_Par-MH-125
-        - GluGlutoHHto2B2WtoLNu2Q_Par-c2-0-kl-1-kt-1
-        - HHHto4B2Tau_Par-c3-0-d4-0
-        - HHHto6B_Par-c3-0-d4-0
-        - SUSYGluGluToBBHTo2B_Par-M-1200
-        - SUSYGluGluToBBHToBB_Par-M-120
-        - SUSYGluGluToBBHToBB_Par-M-350
-        - SUSYGluGluToBBHToBB_Par-M-600
-        - TTHTo2C_Par-MH-125
-        - TTHto2B_Par-MH-125
-        - VBFHTo2C_Par-MH-125
-        - VBFHto2B_Par-MH-125
-        - VBFHto2Tau_Par-MH-125
-        - WtoTauto3Mu
-        - ggH-suep-decay
-        - smj-case-A
-        - haa-4b-ma15
-      log_raw_mlflow: false
+    fit:
+      _target_: src.evaluation.callbacks.fit.Fit
+      name: fit
 
     thres_drift:
       _target_: src.evaluation.callbacks.thres_drift.ThresholdDriftCallback

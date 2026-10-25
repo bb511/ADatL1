@@ -11,7 +11,8 @@ url: https://causalchamber.s3.eu-central-1.amazonaws.com/downloadables/wt_walks_
 md5: 19bb4e92cbe0b8dff49299b9b509ac36
 
 batch_size: 64
-# Apart from batch_size: Q'' averages per-batch quantiles; small batches are slow.
+# Apart from batch_size: the operational score, a diagnostic, averages per-batch
+# quantiles over validation normal (Q'', the fit, does not); small batches are slow.
 eval_batch_size: 1024
 max_val_batches: -1
 num_workers: 0

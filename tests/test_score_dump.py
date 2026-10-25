@@ -14,7 +14,7 @@ from src.callbacks.score_dump import (
 )
 
 N_FEATURES = 4
-KEYS = ["ascore/full", "ascore/mse", "ascore/kl"]
+KEYS = ["ascore/full", "ascore/mse", "ascore/kl", "fit/full"]
 PASSES = ["initial.pt", "epoch_0000.pt", "epoch_0001.pt"]
 META_KEYS = {
     "target_rate",
@@ -113,6 +113,7 @@ class ToyAE(ADLightningModule):
             "ascore/full": score,
             "ascore/mse": err.sum(dim=1).detach(),
             "ascore/operational": self.compute_operational_ascore(score),
+            "fit/full": score,
         }
 
     def outlog(self, outdict):
@@ -185,7 +186,7 @@ def test_files_keys_and_shapes(tmp_path):
     for split in ("val", "test"):
         assert meta["stored"][split] == list(datamodule.sets[split])
         assert meta[split]["names"] == list(datamodule.sets[split])
-        assert meta[split]["keys"] == ["ascore/full", "ascore/mse"]
+        assert meta[split]["keys"] == ["ascore/full", "ascore/mse", "fit/full"]
         for name, (x, y) in datamodule.sets[split].items():
             sizes = [32] * (len(x) // 32) + ([len(x) % 32] if len(x) % 32 else [])
             assert meta[split]["batch_sizes"][name] == sizes
@@ -201,7 +202,8 @@ def test_files_keys_and_shapes(tmp_path):
         assert record["epoch"] == epoch
         for split in ("val", "test"):
             for set_name, (x, _) in datamodule.sets[split].items():
-                assert set(record[split][set_name]) == {"ascore/full", "ascore/mse"}
+                stored = {"ascore/full", "ascore/mse", "fit/full"}
+                assert set(record[split][set_name]) == stored
                 for scores in record[split][set_name].values():
                     assert scores.shape == (len(x),) and scores.dtype == torch.float32
         for set_name in ("gaussian", "uniform", "autouad"):

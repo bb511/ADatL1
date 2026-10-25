@@ -1,0 +1,56 @@
+# @package _global_
+
+# Train and dump only; selection and evaluation run offline.
+
+defaults:
+  - /cap: provisional
+  - override /data: cchamber
+  - override /algorithm: dte
+  - override /callbacks: dump
+  - override /trainer: cpu
+  - override /logger: mlflow
+
+seed: 123
+tags: ["dte", "cchamber", "pool"]
+
+experiment_name: cchamber_dte_pool
+run_name: ${short_hash:${hydra:runtime.output_dir},12}
+
+data:
+  max_val_batches: -1
+
+trainer:
+  gradient_clip_algorithm: norm
+  gradient_clip_val: 0.0
+  min_epochs: 1
+  max_epochs: 150
+  # The full sanity pass is the untrained state the dump stores; no checkpoint is kept.
+  num_sanity_val_steps: -1
+  enable_checkpointing: false
+
+test: false
+
+# The optimiser of the other chamber families and a level of the AE and SVDD width list,
+# every value inside the space; dropout keeps the algorithm's default.
+algorithm:
+  target_rate: 0.01
+  base_rate: null
+  n_bins: 5
+  # The noise is added to the chamber's own normalisation (median 0, 5-95 % spread 1, a
+  # standard deviation of about 0.31 per readout), so beta_end sets the noise on that
+  # scale: the last step's standard deviation is 0.37, 0.88 and 1.0 at beta_end 1e-3,
+  # 1e-2 and 1e-1.
+  beta_end: 0.01
+
+  predictor:
+    in_dim: 10
+    hidden_dims: [32, 16, 8]
+    activation: gelu
+
+  optimizer:
+    _partial_: true
+    _target_: torch.optim.AdamW
+    lr: 1.0e-3
+    weight_decay: 1.0e-4
+    betas: [0.9, 0.999]
+    eps: 1e-8

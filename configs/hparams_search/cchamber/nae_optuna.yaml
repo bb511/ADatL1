@@ -1,0 +1,26 @@
+# @package _global_
+
+# The NAE lattice space, the same on both tunnels; the rationale is in the plan. The grids
+# of temperature and neg_energy_weight passed the label-free sampler check on the light
+# tunnel.
+
+defaults:
+  - override /hydra/sweeper: optuna
+  - override /hydra/sweeper/sampler: random
+
+hydra:
+  mode: "MULTIRUN"
+  sweeper:
+    _target_: hydra_plugins.hydra_optuna_sweeper.optuna_sweeper.OptunaSweeper
+    study_name: pool
+    n_jobs: 1
+    # Placeholder: a dump-only run reports the worst value of each direction.
+    direction: minimize
+    n_trials: 50
+    storage: sqlite:///logs/optuna/cchamber/nae_pool.db?timeout=600
+    params:
+      algorithm.optimizer.lr: tag(log, interval(3e-5, 3e-3))
+      trainer.gradient_clip_val: choice(0.0, 0.5, 1.0, 2.0)
+      algorithm.encoder.nodes: choice([16, 8], [24, 8], [32, 16], [32, 16, 4], [32, 16, 8], [48, 24, 8], [48, 24, 16], [64, 32, 16])
+      algorithm.temperature: choice(5.0e-4, 1.0e-3)
+      algorithm.neg_energy_weight: choice(0.1, 0.3, 1.0, 3.0)

@@ -208,6 +208,8 @@ class DeepSVDD(ADLightningModule):
             "radius": self.radius.detach(),
             "loss/full": data_loss.detach(),
             "ascore/full": ascore.detach(),
+            # Per latent coordinate, since the squared distance sums over them.
+            "fit/full": (ascore / z.shape[1]).detach(),
         }
 
     def on_train_epoch_end(self) -> None:

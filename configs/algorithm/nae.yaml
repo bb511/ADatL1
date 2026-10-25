@@ -1,0 +1,52 @@
+# Template Normalized Autoencoder configuration (src/algorithms/nae.py).
+defaults:
+  - _self_
+
+_target_: src.algorithms.nae.NAE
+
+target_rate: 0.25 # nominal rate
+base_rate: 28608.8064 # bunch crossing rate in kHz
+
+encoder:
+  _target_: src.algorithms.components.encoder.Encoder
+  in_dim: 117
+  # The last entry is the dimension of the code, which lives on the unit sphere.
+  nodes: [32, 16, 8]
+  activation: relu
+
+decoder:
+  _target_: src.algorithms.components.decoder.Decoder
+  nodes: ${reverse:${algorithm.encoder.nodes}} # nodes of the encoder, but in reverse
+  activation: relu
+  out_dim: ${algorithm.encoder.in_dim}
+
+# Epoch 38 is the first at which the median relative improvement of the validation
+# energy per epoch, over ten epochs, falls below 1 % in the light tunnel's plain AE
+# phase (the default, the three corners and the learning-rate quartiles).
+pretrain_epochs: 40
+# The learning rate from epoch pretrain_epochs on; the searched optimiser lr governs the
+# plain AE phase alone. Of 1e-5 (every published NAE phase), 3e-5 and 1e-4, measured at
+# full length on both tunnels, 1e-4 kept the negatives fair and uncollapsed in the most
+# light-tunnel configurations; at the AE rate of 1e-3 the sampler collapsed off the
+# default point.
+energy_lr: 1.0e-4
+
+# The sampler and the default temperature were calibrated without labels on the light
+# tunnel (ten readouts) at the chamber default, from the end-of-training negatives
+# against validation normal and the energies of every epoch. An input step of 1e-3
+# drove the negative energies to the ceiling 1/(2 gamma) within 15 energy epochs, with
+# or without a gradient clip of 0.1, and with the energy phase at 1e-3 temperatures of
+# 2e-3 and above did so in three of five full-length runs. Other inputs need their own
+# calibration.
+temperature: 1.0e-3
+neg_energy_weight: 1.0
+latent_steps: 5
+latent_step_size: 1.0e-3
+input_steps: 10
+input_step_size: 3.0e-4
+input_grad_clip: null
+# The chamber's clip_value; the decoded starts and the input chain stay in the data box.
+input_bound: 10.0
+metropolis: false
+buffer_size: 10000
+replay_ratio: 0.95

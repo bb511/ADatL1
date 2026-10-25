@@ -7,7 +7,7 @@ from torch import nn
 from src.algorithms import ADLightningModule
 from src.algorithms.components.decoder import Decoder
 from src.algorithms.components.encoder import VariationalEncoder
-from src.algorithms.losses.vae import ClassicVAELoss
+from src.algorithms.losses.vae import ClassicVAELoss, gaussian_neg_elbo
 from src.algorithms.schedulers.linear import LinearWarmup
 from src.algorithms.utils.object_feature_map_loader import inject_object_feature_map
 from src.algorithms.utils.weight_loader import load_weights
@@ -173,6 +173,8 @@ class VAE(ADLightningModule):
         ascore = scores["kl"] if self.training else scores[self.anomaly_score]
         if ascore.ndim != 1:
             raise ValueError(f"Expected per-event ascores, got {tuple(ascore.shape)}.")
+        beta = getattr(self.loss, "kl_scale_final", self.hparams.kl_scale)
+        fit = gaussian_neg_elbo(reco_loss, kl_raw, beta, x, m)
 
         loss = self._add_hgq_loss(loss)
 
@@ -210,6 +212,7 @@ class VAE(ADLightningModule):
             "loss/kl_raw/full": kl_raw.detach(),
             "ascore/full": ascore.detach(),
             **{f"ascore/{name}": score.detach() for name, score in scores.items()},
+            "fit/full": fit.detach(),
             "z_mean_squared/full": z_mean_squared.detach(),
             "reconstructed_data": reconstruction.detach(),
         }

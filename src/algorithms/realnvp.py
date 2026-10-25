@@ -93,6 +93,7 @@ class RealNVP(ADLightningModule):
             # Used for callbacks:
             "loss/full": ascore.detach(),
             "ascore/full": ascore.detach(),
+            "fit/full": ascore.detach(),
         }
 
     def outlog(self, outdict: dict) -> dict:

@@ -134,11 +134,7 @@ CRITERIA = {
     "entropy": ("src.callbacks.entropy.LossEntropyCallback", "min", "loss_entropy"),
     "sds_286_088064": ("src.callbacks.sds.SDSCallback", "min", "sds"),
     "sds_val_286_088064": ("src.callbacks.sds.SDSCallback", "min", "sds_val"),
-    "ascore_operational": (
-        "src.callbacks.operational.OperationalScoreCallback",
-        "min",
-        "operational_score",
-    ),
+    "fit": ("src.callbacks.operational.FitCallback", "min", "fit"),
 }
 # Criteria left out per experiment. A negative log-likelihood can be negative: entropy
 # is then undefined, and the sign of RTM meaningless. The training losses of SVDD reach

@@ -26,7 +26,6 @@ lattice, the lattice criteria and the statistics of the tables are in
 import functools
 import json
 import math
-from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -35,7 +34,7 @@ import pandas as pd
 
 from src.callbacks.components.selection import W_STEPS, ema, epoch_pick, pick, ranks
 from src.evaluation.components.pairing import partner_scores
-from src.evaluation.components.statistics import at, operational_se, spearman_test
+from src.evaluation.components.statistics import at, spearman_test
 from src.evaluation.components.tables import (
     SPLITS,
     load_lattice,
@@ -109,10 +108,10 @@ class Strategy:
 
     def gate(self, k_epoch: int, lattice: "Lattice") -> tuple[int, int]:
         """(run index, epoch) of the best Q' among the runs whose Q'' lies within one
-        bootstrap standard error of the best Q''."""
+        standard error (s/√n) of the best Q''."""
         epochs, q_main, q_sec = self.candidates(k_epoch)
         best = pick(q_main, q_sec, 0, self.mode)
-        bound = q_sec[best] + lattice.gate_se(best, int(epochs[best]))
+        bound = q_sec[best] + lattice.q_sec_se[best, epochs[best] + 1]
         within = np.union1d(np.flatnonzero(q_sec <= bound), [best])
         point = int(within[pick(q_main[within], q_sec[within], W_STEPS, self.mode)])
         return point, int(epochs[point])
@@ -329,17 +328,9 @@ class Lattice:
         return self.test_eff[point, epoch + 1]
 
     @functools.cached_property
-    def gate_se(self) -> Callable[[int, int], float]:
-        """Bootstrap standard error of Q'' by (run index, epoch), computed once each."""
-
-        @functools.cache
-        def standard_error(point: int, epoch: int) -> float:
-            meta = self.metas[point]
-            layout = meta["val"]["batch_sizes"]["normal"]
-            scores = self.normal[point, epoch + 1]
-            return operational_se(scores, layout, meta["target_fpr"])
-
-        return standard_error
+    def q_sec_se(self) -> np.ndarray:
+        """The standard error of Q'' that the gate reads, the column ``se`` of q_sec."""
+        return self.column("val", self.selection["q_sec"]["se"])
 
     @functools.cached_property
     def bootstrap_draws(self) -> np.ndarray:

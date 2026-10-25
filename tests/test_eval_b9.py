@@ -19,7 +19,7 @@ from src.callbacks.consistency import PosteriorConsistencyCallback
 from src.callbacks.efficiency import AnomalyEfficiencyCallback
 from src.callbacks.entropy import LossEntropyCallback
 from src.callbacks.goix import ExcessMassCallback, MassVolumeCallback
-from src.callbacks.operational import OperationalScoreCallback
+from src.callbacks.operational import FitCallback
 from src.callbacks.sds import SDSCallback
 from src.callbacks.thres_drift import ThresholdDriftCallback
 from src.callbacks.wasserstein import WassersteinCallback
@@ -42,11 +42,10 @@ PAIR = {
 EFFICIENCY_KEY = "val/{}/eff__ascore_full__brate_operational"
 # The labelled rows that the training efficiency callback logs; the oracle has no key.
 LABELLED = ["cvar25", "cvar10"]
-# Q'' of an epoch is the mean of per-batch values. The module sums them in float64 and
-# logs the mean v from the hook of the last batch of normal, so that Lightning infers
-# that batch's size n and logs fl(fl(n v) / n); the stage averages them with a float32
-# MeanMetric. The raw value and its EMA differ by up to 2 float32 ulps on the toy.
-MAX_ULP = {"val/normal/ascore_operational": 2, "val/summary/ascore_operational_ema": 2}
+# The keys whose logged and staged values may differ by float32 ulps; none does, since
+# the dump stores fit/full as the validation pass computed it, and both sides average
+# it in float64.
+MAX_ULP = {}
 
 
 def _stage_config():
@@ -90,7 +89,7 @@ def _strategy_callbacks(cap: dict) -> list:
         MassVolumeCallback(**aux),
         LossEntropyCallback(batch_size=BATCH),
         SDSCallback(source="train", batch_size=BATCH),
-        OperationalScoreCallback(),
+        FitCallback(),
     ]
 
 

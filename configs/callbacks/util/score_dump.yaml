@@ -5,7 +5,8 @@
 _target_: src.callbacks.score_dump.ScoreDumpCallback
 dirpath: ${paths.log_dir}/scores/${experiment_name}/${run_name}
 run_dir: ${paths.output_dir}
-keys: ["ascore/full", "ascore/mse", "ascore/kl", "ascore/residual_oas"]
+keys:
+  ["ascore/full", "ascore/mse", "ascore/kl", "ascore/residual_oas", "fit/full"]
 # Sets whose scores are stored; null stores every set, the rest are rescored offline.
 stored_sets: null
 aux_seed: 0

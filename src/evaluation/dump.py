@@ -35,7 +35,7 @@ from src.evaluation.components.rebuild import (
     signal_sets,
 )
 from src.evaluation.components.tables import load_record, write_outputs
-from src.evaluation.replay import ReplayModule, extra_loaders
+from src.evaluation.replay import ReplayModule, as_typical, extra_loaders
 from src.utils.omegaconf import register_resolvers
 
 # The key of the training efficiency callback for one set's validation efficiency.
@@ -100,10 +100,11 @@ class RunEvaluation:
         extra_sets: dict,
         selection: dict,
         sets: str | None = None,
+        typical: str | None = None,
     ):
         self.run_dir = Path(run_dir)
         self.meta = torch.load(self.run_dir / "meta.pt", weights_only=True)
-        self.replay = ReplayModule(module, self.meta)
+        self.replay = ReplayModule(module, self.meta, typical)
         self.dump_callbacks, self.extra_sets = dump_callbacks, extra_sets
         self.selection, self.strategies = selection, _strategies(selection)
         self.passes = {"val": list(dump_callbacks), "test": test_callbacks}
@@ -148,6 +149,7 @@ class RunEvaluation:
             sds = cached_sds(data_train.tensors[0], sds["max_rows"], sds["row_seed"])
         train = data_train if self.extra_sets.get("train") else None
         aux = bool(self.extra_sets.get("aux"))
+        val = as_typical(val, self.replay.typical)
         val = {**val, **extra_loaders(self.meta, train, sds, aux=aux)}
         datamodule.setup("test")
         return {"val": val, "test": datamodule.test_dataloader()}
@@ -252,6 +254,7 @@ class RunEvaluation:
             "signals": self.signals["val"],
             "nulls": self.nulls,
             "stored": self.meta["stored"],
+            "typical": self.replay.typical,
         }
 
     def _mlflow_columns(self) -> list[tuple[str, str]]:
@@ -399,6 +402,7 @@ def evaluate_dump(
     test_callbacks: list[str],
     extra_sets: dict,
     selection: dict,
+    typical: str | None = None,
 ) -> dict:
     """Evaluate every epoch of one dumped run; write its four files, return run.json.
 
@@ -411,7 +415,7 @@ def evaluate_dump(
     - ``picks.csv``: ``strategy``, ``k`` (0..W_STEPS for a criterion, else empty),
       ``epoch``.
     - ``run.json``: ``run``, ``lattice``, ``dump``, ``hyperpoint``, ``mlflow_run_id``,
-      ``epochs``, ``module``, ``signals``, ``nulls``, ``stored``.
+      ``epochs``, ``module``, ``signals``, ``nulls``, ``stored``, ``typical``.
 
     With ``tracking_uri``, the run is also logged to MLflow, as ``<lattice>_eval``.
     The keyword-only arguments are the Evaluator's of the same names.
@@ -424,5 +428,6 @@ def evaluate_dump(
         test_callbacks=test_callbacks,
         extra_sets=extra_sets,
         selection=selection,
+        typical=typical,
     )
     return run.evaluate(out_dir, lattice, tracking_uri)

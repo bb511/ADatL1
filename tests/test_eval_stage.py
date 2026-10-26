@@ -23,15 +23,18 @@ from src.evaluation.callbacks.utils.mlflow import log_metrics_to_mlflow
 from src.evaluation.callbacks.wasserstein import _wasserstein_1d
 from src.evaluation.components.pairing import hyperpoint
 from src.evaluation.components.rebuild import null_sets, signal_sets
+from src.evaluation.dump import RunEvaluation
 from src.evaluation.evaluator import Evaluator
-from src.evaluation.replay import ReplayModule
+from src.evaluation.replay import ReplayModule, as_typical
 from src.utils.omegaconf import register_resolvers
 from tests.test_score_dump import PASSES, ToyAE, ToyDataModule, dump_callback, fit, load
 
 CONFIGS = Path(__file__).resolve().parents[1] / "configs"
-DOMAINS = ["cchamber", "cchamber_wt", "cifar10"]
+DOMAINS = ["cchamber", "cchamber_typical", "cchamber_wt", "cifar10"]
 # The sets of the toy dump, which has none of the chamber's null pools.
 TOY_SETS = {"normal", "reference_normal", "sig_a", "sig_b"}
+# The toy's one stored set of label 0 besides normal, served as the typical set.
+TYPICAL = "reference_normal"
 # Two of the light tunnel's single interventions, pooled under the override.
 POOL = ["uniform_t_ir_3_strong", "uniform_osr_c_weak"]
 EFF = "eff/eff_operational_"
@@ -52,6 +55,7 @@ RUN_KEYS = {
     "signals",
     "nulls",
     "stored",
+    "typical",
 }
 SMOKE_OVERRIDES = [
     "trainer.gradient_clip_val=2.0",
@@ -387,6 +391,7 @@ def test_evaluate_dump_writes_the_four_files(dump, chamber, tmp_path):
     assert json.loads((out / "run.json").read_text()) == run
     assert set(run) == RUN_KEYS and run["epochs"] == 2 and run["hyperpoint"] == {}
     assert run["signals"] == ["sig_a", "sig_b"] and run["nulls"] == []
+    assert run["typical"] is None
 
     val, test = _read_csv(out / "val.csv"), _read_csv(out / "test.csv")
     selection = chamber.selection
@@ -403,6 +408,52 @@ def test_evaluate_dump_writes_the_four_files(dump, chamber, tmp_path):
         assert row["null_rate"] == ""
     _check_picks(_read_csv(out / "picks.csv"), val, selection)
     _check_mlflow(uri, run, val)
+
+
+def test_typical_serves_a_stored_set_as_normal(dump, tmp_path):
+    record = load(dump.path / "epoch_0001.pt")
+    replay = ReplayModule(ToyAE(), dump.meta, TYPICAL)
+    replay.load_epoch(record, tmp_path / "epoch_0001.pt")
+    capture = Capture()
+    loaders = as_typical(ToyDataModule().loaders("val"), TYPICAL)
+    _test(replay, "val", loaders, [capture])
+
+    stored, served = record["val"][TYPICAL], capture.outputs["normal"]
+    assert list(capture.outputs) == ["normal", "sig_a", "sig_b"]
+    sizes = dump.meta["val"]["batch_sizes"][TYPICAL]
+    assert [len(out["ascore/full"]) for out in served] == sizes
+    for key, values in stored.items():
+        assert torch.equal(torch.cat([out[key] for out in served]), values)
+    rate = AnomalyRate(0.1, None)
+    rate.set_threshold(stored["ascore/full"])
+    assert torch.equal(replay.thres_operational, rate.threshold)
+    assert torch.equal(replay.tie_operational, rate.tie_weight)
+
+
+def test_evaluate_dump_with_a_typical_set(dump, tmp_path):
+    cfg = _compose("cchamber_typical")
+    drop_absent_sets(cfg, TOY_SETS - {TYPICAL})
+    evaluator = hydra.utils.instantiate(cfg.evaluation.evaluator, typical=TYPICAL)
+    settings = evaluator._dump_settings()
+    run = RunEvaluation(dump.path, ToyAE(), ToyDataModule(), **settings)
+    assert list(run.loaders["val"])[:3] == ["normal", "sig_a", "sig_b"]
+    rows = sum(dump.meta["val"]["batch_sizes"][TYPICAL])
+    assert len(run.loaders["val"]["normal"].dataset) == rows
+    info = run.evaluate(tmp_path, "toy")
+    out = tmp_path / "runs" / "run_a"
+    assert info["typical"] == TYPICAL
+    assert json.loads((out / "run.json").read_text()) == info
+
+    # Q'' and the efficiency of sig_a at the cut, both from the typical set's scores.
+    for row, name in zip(_read_csv(out / "val.csv"), PASSES):
+        stored = load(dump.path / name)["val"]
+        fits = stored[TYPICAL]["fit/full"].double()
+        assert float(row["fit/normal"]) == pytest.approx(fits.mean().item())
+        rate = AnomalyRate(0.1, None)
+        rate.set_threshold(stored[TYPICAL]["ascore/full"])
+        rate.update(stored["sig_a"]["ascore/full"])
+        efficiency = rate.compute("efficiency").item()
+        assert float(row[EFF + "sig_a"]) == pytest.approx(efficiency)
 
 
 def test_evaluate_lattice_rebuilds_each_run(chamber, tmp_path):
@@ -453,7 +504,8 @@ def test_eval_configs_build_the_evaluator(domain):
     assert {column.split("/")[0] for column in columns} <= names
     assert configs["wasserstein"]["dataset_2"] == "reference_normal"
     null_ds = configs["anomaly_efficiency"]["null_ds"]
-    assert len(null_ds) == {"cchamber": 9, "cchamber_wt": 2, "cifar10": 3}[domain]
+    sizes = {"cchamber": 9, "cchamber_typical": 9, "cchamber_wt": 2, "cifar10": 3}
+    assert len(null_ds) == sizes[domain]
 
 
 @pytest.mark.parametrize("domain", ["cchamber", "cchamber_wt"])

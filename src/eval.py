@@ -35,7 +35,7 @@ def main(cfg: DictConfig) -> None:
         check_pairing(cfg.scores_dir, cfg.lattice, cfg.partner, cfg.drop_unpaired)
 
     log.info(f"Instantiating evaluator <{cfg.evaluation.evaluator._target_}>")
-    evaluator = hydra.utils.instantiate(cfg.evaluation.evaluator)
+    evaluator = hydra.utils.instantiate(cfg.evaluation.evaluator, typical=cfg.typical)
 
     log.info(f"Evaluating the runs of {cfg.scores_dir}/{cfg.lattice}")
     evaluator.evaluate_lattice(

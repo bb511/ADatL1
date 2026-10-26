@@ -67,6 +67,24 @@ def _rescored(module: LightningModule, batch, keys: list[str]) -> dict:
     return {key: outputs[key] for key in keys}
 
 
+def as_typical(sets: dict, typical: str | None) -> dict:
+    """``sets`` with the set ``typical`` renamed ``normal`` and placed first, the
+    original ``normal`` left out; ``sets`` itself for ``typical`` None."""
+    if typical is None:
+        return sets
+    rest = {name: s for name, s in sets.items() if name not in ("normal", typical)}
+    return {"normal": sets[typical], **rest}
+
+
+def _typical_meta(meta: dict, typical: str | None) -> dict:
+    if typical is None:
+        return meta
+    sizes = as_typical(meta["val"]["batch_sizes"], typical)
+    labels = as_typical(meta["val"]["labels"], typical)
+    val = {**meta["val"], "names": list(sizes), "batch_sizes": sizes, "labels": labels}
+    return {**meta, "val": val}
+
+
 def operational_cut(scores: torch.Tensor, meta: dict) -> tuple[torch.Tensor, ...]:
     """Threshold and tie weight at the run's target rate, as the training efficiency
     callback sets them on validation normal."""
@@ -87,14 +105,17 @@ class ReplayModule(LightningModule):
 
     :param module: The run's LightningModule, freshly built from its configuration.
     :param meta: The dump's ``meta.pt``.
+    :param typical: A stored validation set served as ``normal`` in place of the
+        dump's, which the validation pass then leaves out; the cut and the rescored
+        keys of ``normal`` follow it. None serves the dump's ``normal``.
     """
 
-    def __init__(self, module: LightningModule, meta: dict):
+    def __init__(self, module: LightningModule, meta: dict, typical: str | None = None):
         super().__init__()
         rates = {"target_rate": meta["target_rate"], "base_rate": meta["base_rate"]}
         self.save_hyperparameters(rates, logger=False)
         self.module = module
-        self.meta = meta
+        self.typical, self.meta = typical, _typical_meta(meta, typical)
         self.aux_lower, self.aux_upper = meta["aux_lower"], meta["aux_upper"]
         # The VAE builds its KL schedule at fit start; its scores do not depend on it.
         if hasattr(module, "_setup_kl_annealing"):
@@ -111,6 +132,7 @@ class ReplayModule(LightningModule):
         """Load an epoch's weights and scores; ``ckpt_path`` names the epoch to the
         callbacks, which take ``initial`` or ``epoch_<nnnn>`` from its stem."""
         _load_weights(self.module, record["state_dict"])
+        record = {**record, "val": as_typical(record["val"], self.typical)}
         self.record = record
         self._ckpt_path = Path(ckpt_path)
         if "normal" not in record["val"]:

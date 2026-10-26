@@ -27,5 +27,10 @@ out_dir: ${paths.log_dir}/eval/${lattice}
 data_dir: null
 # Replaces every run's signals and nulls by those of data/<sets>.yaml; null keeps them.
 sets: null
+# A stored validation set (a sensor pool, say) served as normal in place of every run's,
+# the operational cut included; null keeps normal. The columns still say normal, so give
+# each set its own out_dir, and pass tracking_uri=null: MLflow would add runs of the
+# same names to <lattice>_eval.
+typical: null
 workers: 1
 tracking_uri: file:${paths.log_dir}/mlflow/mlruns

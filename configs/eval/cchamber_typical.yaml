@@ -1,0 +1,185 @@
+# @package _global_
+
+# The light tunnel with a sensor pool as the typical set, for the reading of P2 on every
+# label-free criterion: run with typical=sensor_<grade>, one out_dir per grade and
+# tracking_uri=null. Only the validation typical set is replaced: the probes of NPD and
+# MV, the SDS pseudo-sets and the training losses that entropy reads still come from the
+# training set, so entropy is the same at every grade. Left out of cchamber.yaml are W1
+# against each sensor pool, the CAP bank and the threshold posterior: each pairs normal
+# with a sensor pool, so the evaluation of cchamber.yaml already reads them across the
+# grades, and with a pool as normal one of the pairings would set the pool against
+# itself.
+
+sets: cchamber
+
+evaluation:
+  evaluator:
+    _target_: src.evaluation.evaluator.Evaluator
+    # The callback configs pass through uninstantiated: every run builds its own.
+    _recursive_: false
+    accelerator: cpu
+    devices: 1
+    logger: false
+    enable_progress_bar: false
+    enable_model_summary: false
+
+    # The callbacks of the validation pass; the test pass runs test_callbacks.
+    dump_callbacks:
+      anomaly_efficiency:
+        _target_: src.evaluation.callbacks.efficiency.AnomalyEfficiencyCallback
+        output_name: ascore/full
+        ds: null
+        # The sensor pools: their pass rates are the false-positive rates on the second
+        # typical domain, one per grade. The six LEDs follow, each at chance for every
+        # trivial baseline. The validation pass lacks the pool served as normal.
+        null_ds:
+          - sensor_weak
+          - sensor_mid
+          - sensor_strong
+          - uniform_l_11_mid
+          - uniform_l_12_mid
+          - uniform_l_21_mid
+          - uniform_l_22_mid
+          - uniform_l_31_mid
+          - uniform_l_32_mid
+        cvar_summary: 0.25
+        log_raw_mlflow: false
+      thres_drift:
+        _target_: src.evaluation.callbacks.thres_drift.ThresholdDriftCallback
+        output_name: ascore/full
+        calibration_fraction: 0.5
+        split_seed: 12345
+        log_raw_mlflow: false
+        name: thres_drift
+      wasserstein:
+        _target_: src.evaluation.callbacks.wasserstein.Wasserstein
+        output_name: ascore/full
+        dataset_1: normal
+        dataset_2: reference_normal
+        apply_log1p: true
+        log_raw_mlflow: false
+        name: wasserstein
+      # The operational score of normal, a diagnostic column beside Q'', the fit.
+      ascore_operational:
+        _target_: src.evaluation.callbacks.output.OutputCallback
+        output_name: ascore/operational
+        ds: [normal]
+        log_raw_mlflow: false
+        name: ascore_operational
+      fit:
+        _target_: src.evaluation.callbacks.fit.Fit
+        name: fit
+      npd:
+        _target_: src.evaluation.callbacks.autouad.NPD
+        name: npd
+      rtm:
+        _target_: src.evaluation.callbacks.autouad.RTM
+        name: rtm
+      eag:
+        _target_: src.evaluation.callbacks.autouad.EAG
+        name: eag
+      mv:
+        _target_: src.evaluation.callbacks.goix.MassVolume
+        name: mv
+      entropy:
+        _target_: src.evaluation.callbacks.entropy.LossEntropy
+        name: entropy
+      sds:
+        _target_: src.evaluation.callbacks.sds.SDS
+        name: sds
+    test_callbacks: [anomaly_efficiency]
+
+    # The sets the validation pass appends after the validation loaders.
+    extra_sets:
+      aux: true
+      train: true
+      sds:
+        max_rows: 10000
+        row_seed: 0
+
+    selection: ${selection}
+
+# The registry of strategies: column in val.csv, mode and MLflow keys per criterion.
+selection:
+  # Consistency and EM are left out as in cchamber.yaml; w1 compares the pool served as
+  # normal with the control.
+  criteria:
+    drift:
+      column: thres_drift/drift_operational
+      mode: min
+      key: val/summary/operational_drift_ema
+    w1:
+      column: wasserstein/w1dist
+      mode: min
+      key: val/summary/w1dist_ema_normal_vs_reference_normal
+    npd:
+      column: npd/npd
+      mode: max
+      key: val/summary/npd_ema
+      raw_key: val/summary/npd
+    rtm:
+      column: rtm/rtm
+      mode: max
+      key: val/summary/rtm_ema
+      raw_key: val/summary/rtm
+    eag:
+      column: eag/eag
+      mode: max
+      key: val/summary/eag_ema
+      raw_key: val/summary/eag
+    mv:
+      column: mv/mv
+      mode: min
+      key: val/summary/mv_ema
+      raw_key: val/summary/mv
+    entropy:
+      column: entropy/entropy
+      mode: min
+      key: val/summary/entropy_ema
+      raw_key: val/summary/entropy
+      skip_nonfinite: true
+    sds:
+      column: sds/sds
+      mode: min
+      key: val/summary/sds_ema
+      raw_key: val/summary/sds
+  # Q'', the mean fit of validation normal, minimised; se is the gate's standard error.
+  q_sec:
+    column: fit/normal
+    se: fit/normal_se
+    key: val/summary/fit_ema
+    raw_key: val/summary/fit
+  # Q' alone, from the per-set validation efficiencies of the signal sets.
+  labelled:
+    oracle:
+      statistic: mean
+      key: val/summary/eff_mean_ema_operational
+      raw_key: val/summary/eff_mean_operational
+    cvar25:
+      statistic: cvar
+      alpha: 0.25
+      key: val/summary/eff_cvar25_ema_operational
+      raw_key: val/summary/eff_cvar25_operational
+    cvar10:
+      statistic: cvar
+      alpha: 0.10
+      key: val/summary/eff_cvar10_ema_operational
+      raw_key: val/summary/eff_cvar10_operational
+  # The prefix of the per-set efficiency columns.
+  efficiency: eff/eff_operational_
+  # Columns intervention and target_cluster; null makes every set its own cluster.
+  clusters: ${paths.root_dir}/scripts/cchamber/lt_target_clusters.csv
+  lattice_criteria:
+    udr: max
+    mc: max
+  # The known limit of each strategy, for the tables.
+  limits:
+    drift: distribution-free on i.i.d. normal rows, split with a fixed seed; a dozen or so distinct values, so ties decide its picks
+    w1: favours a small score spread; a constant score gives 0, its best value
+    rtm: on RealNVP its sign carries no meaning where the median NLL is at or below zero
+    mv: degenerate above about eight input dimensions (Goix); the chamber has ten; exactly zero, the floor of its Monte Carlo volume estimate, in some RealNVP epochs
+    entropy: on RealNVP undefined, its per-sample loss can be negative; its RealNVP picks can fall on epochs where it is NaN
+    sds: in-sample, the pseudo-sets come from the training inputs
+    udr: selects the untrained model where its scores do not depend on the seed; on the chamber the barely trained AE and VAE (epoch 0 or 1)
+    mc: selects the untrained model where its scores do not depend on the seed; on the chamber the barely trained AE and VAE (epoch 0 or 1)
+    q_sec: on AE valid as an epoch rule and invalid as a hyperpoint rule on the retrained light tunnel (rho -0.26 at both epochs), and expected so on NAE, scored by the same reconstruction error; the SVDD distance is taken per latent coordinate, since its sum grows with the latent width

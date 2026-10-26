@@ -44,7 +44,7 @@ class Evaluator:
     The callbacks used here are different from the callbacks used at training time and
     are contained in src/evaluation/callbacks. The dump path (evaluate_lattice,
     evaluate_dump) runs in src/evaluation/dump.py on dump_callbacks, test_callbacks,
-    extra_sets and selection alone.
+    extra_sets, selection and typical alone.
 
     :param ckpts: Dictionary with the following structure:
         'strategy_1':
@@ -70,6 +70,9 @@ class Evaluator:
         training set; 'sds' ({max_rows, row_seed} or None), the SDS pseudo-sets.
     :param selection: The registry of strategies of the dump path ('criteria',
         'q_sec', 'labelled', 'efficiency', as in configs/eval/<domain>.yaml).
+    :param typical: A stored validation set that the dump path serves as 'normal' in
+        place of the run's, the operational cut included (src.evaluation.replay); None
+        keeps 'normal'.
     :param trainer_kwargs: The other arguments that are given to the trainer object,
         kept the same as the training, e.g., which device to run the computations on.
     """
@@ -84,6 +87,7 @@ class Evaluator:
         test_callbacks: Sequence[str] = ("anomaly_efficiency",),
         extra_sets: dict | None = None,
         selection: dict | None = None,
+        typical: str | None = None,
         **trainer_kwargs,
     ):
         self.ckpts = ckpts or {}
@@ -91,7 +95,7 @@ class Evaluator:
         self.dump_callbacks = _container(dump_callbacks) or {}
         self.test_callbacks = list(test_callbacks)
         self.extra_sets = _container(extra_sets) or {}
-        self.selection = _container(selection)
+        self.selection, self.typical = _container(selection), typical
         self.optimized_metric_config = optimized_metric_config or None
         if self.optimized_metric_config is not None:
             candidate = self.optimized_metric_config.get("candidate")
@@ -430,4 +434,5 @@ class Evaluator:
             "test_callbacks": self.test_callbacks,
             "extra_sets": self.extra_sets,
             "selection": self.selection,
+            "typical": self.typical,
         }

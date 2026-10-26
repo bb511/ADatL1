@@ -5,15 +5,17 @@
 # data/cchamber_wt.yaml, whatever lists it was trained with.
 
 defaults:
-  - /cap: posterior
+  - /cap: bank
   - _self_
 
 sets: cchamber_wt
 
-# The wind tunnel's beta_fix are declared on its own lattices before the read, by the
-# light tunnel's rule; null until then, so that they are never the light tunnel's.
-cap_posterior:
-  beta_fix: { autouad: null, uniform: null, gaussian: null }
+# The bank's beta_fix, declared on the wind tunnel's own lattices by the light tunnel's
+# rule (scripts/analysis/cap_beta_fix.py over the six b64 lattices, 1,200 runs; 08_tests.md,
+# the declaration of 26 Oct 2026), so that they are never the light tunnel's; a null entry
+# makes a bank callback raise at its first computation.
+cap_bank:
+  beta_fix: { std: 0.6785, rank: 3.0992, sq: 3.7036, disp: 2.3154 }
 
 evaluation:
   evaluator:
@@ -71,22 +73,27 @@ evaluation:
         apply_log1p: true
         log_raw_mlflow: false
         name: wasserstein_walk
-      # The threshold posterior of normal against the control and sensor_osr, for
-      # every probe of cap/posterior.yaml; walk_null is not paired.
-      posterior_reference_normal:
-        _target_: src.evaluation.callbacks.threshold_posterior.ThresholdPosterior
+      # The CAP bank of normal against the control and sensor_osr: every pairing,
+      # evidence map and statistic of cap/bank.yaml, the nn caliper set on the control;
+      # walk_null is not paired.
+      cap_bank_reference_normal:
+        _target_: src.evaluation.callbacks.cap_bank.CAPBankCallback
         output_name: ascore/full
         dataset_1: normal
         dataset_2: reference_normal
-        posterior_config: ${cap_posterior}
-        name: posterior_reference_normal
-      posterior_sensor_osr:
-        _target_: src.evaluation.callbacks.threshold_posterior.ThresholdPosterior
+        reference: reference_normal
+        bank_config: ${cap_bank}
+        log_raw_mlflow: false
+        name: cap_bank_reference_normal
+      cap_bank_sensor_osr:
+        _target_: src.evaluation.callbacks.cap_bank.CAPBankCallback
         output_name: ascore/full
         dataset_1: normal
         dataset_2: sensor_osr
-        posterior_config: ${cap_posterior}
-        name: posterior_sensor_osr
+        reference: reference_normal
+        bank_config: ${cap_bank}
+        log_raw_mlflow: false
+        name: cap_bank_sensor_osr
       # The operational score of normal, a diagnostic column beside Q'', the fit.
       ascore_operational:
         _target_: src.evaluation.callbacks.output.OutputCallback
@@ -129,8 +136,9 @@ evaluation:
 
 # The registry of strategies: column in val.csv, mode and MLflow keys per criterion.
 selection:
-  # CAP and consistency are left out until CAP is redefined, and EM because it is
-  # degenerate on both tunnels: em_reached is 0 in every AE, VAE and SVDD run.
+  # The CAP bank enters no criterion: the reading takes its columns directly.
+  # Consistency is left out until CAP is redefined, and EM because it is degenerate on
+  # both tunnels: em_reached is 0 in every AE, VAE and SVDD run.
   criteria:
     drift:
       column: thres_drift/drift_operational
@@ -179,40 +187,8 @@ selection:
       mode: min
       key: val/summary/sds_ema
       raw_key: val/summary/sds
-    # Track 2's candidates on the wind tunnel, registered by 08_tests.md (amendment of
-    # 26 Oct, 02:25): A-fix and D-fix of the threshold posterior per probe against
-    # sensor_osr, averaged as the training callback averages them. The control,
-    # posterior_reference_normal, is reported and enters no criterion.
-    posterior_autouad_afix_osr:
-      column: posterior_sensor_osr/autouad_A-fix
-      mode: max
-      key: val/summary/posterior_autouad_A-fix_ema_normal_vs_sensor_osr
-      skip_nonfinite: true
-    posterior_autouad_dfix_osr:
-      column: posterior_sensor_osr/autouad_D-fix
-      mode: max
-      key: val/summary/posterior_autouad_D-fix_ema_normal_vs_sensor_osr
-      skip_nonfinite: true
-    posterior_uniform_afix_osr:
-      column: posterior_sensor_osr/uniform_A-fix
-      mode: max
-      key: val/summary/posterior_uniform_A-fix_ema_normal_vs_sensor_osr
-      skip_nonfinite: true
-    posterior_uniform_dfix_osr:
-      column: posterior_sensor_osr/uniform_D-fix
-      mode: max
-      key: val/summary/posterior_uniform_D-fix_ema_normal_vs_sensor_osr
-      skip_nonfinite: true
-    posterior_gaussian_afix_osr:
-      column: posterior_sensor_osr/gaussian_A-fix
-      mode: max
-      key: val/summary/posterior_gaussian_A-fix_ema_normal_vs_sensor_osr
-      skip_nonfinite: true
-    posterior_gaussian_dfix_osr:
-      column: posterior_sensor_osr/gaussian_D-fix
-      mode: max
-      key: val/summary/posterior_gaussian_D-fix_ema_normal_vs_sensor_osr
-      skip_nonfinite: true
+    # Track 2, the threshold posterior, left the wind tunnel on 26 Oct, closed by the
+    # register's decision of 17:56: no candidate was admissible on the light tunnel.
   # Q'', the mean fit of validation normal, minimised; se is the gate's standard error.
   q_sec:
     column: fit/normal

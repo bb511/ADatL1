@@ -80,6 +80,17 @@ _LOG_2 = math.log(2.0)
 _LEGACY_KEYS = ("legacy_A-sup", "legacy_beta_star", "legacy_at_bound")
 
 
+def _check_declared(config) -> None:
+    betas = config["beta_fix"]
+    undeclared = [name for name in config["maps"] if betas.get(name) is None]
+    if undeclared:
+        raise ValueError(
+            f"beta_fix of the maps {undeclared} is null. The test bed declares it, by "
+            "the rule of scripts/analysis/cap_beta_fix.py, before any label is read; "
+            "set it under cap_bank.beta_fix."
+        )
+
+
 def _check_config(config, initial_1, initial_2) -> None:
     unknown_maps = set(config["maps"]) - set(MAPS)
     unknown_statistics = set(config["statistics"]) - set(STATISTICS)
@@ -89,6 +100,7 @@ def _check_config(config, initial_1, initial_2) -> None:
     needing = [name for name in config["maps"] if name in INITIAL_MAPS]
     if needing and (initial_1 is None or initial_2 is None):
         raise ValueError(f"The maps {needing} need the initial scores of both sets.")
+    _check_declared(config)
 
 
 def _evidence(name: str, params, scores: Tensor, initial: Tensor | None) -> Tensor:
@@ -330,8 +342,9 @@ def cap_bank(
         initial_2: Scores of X2 under the run's initial state [N2]
 
     Raises:
-        ValueError: If an evidence map or a statistic is unknown, or if disp is
-            registered without the initial scores of both sets.
+        ValueError: If an evidence map or a statistic is unknown, if disp is
+            registered without the initial scores of both sets, or if a
+            registered map's beta_fix is null.
     """
     _check_config(config, initial_1, initial_2)
     scores = scores_1.detach().cpu(), scores_2.detach().cpu()

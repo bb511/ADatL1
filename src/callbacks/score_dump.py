@@ -1,5 +1,10 @@
 """Per-event scores and weights of a training run, written at every validation pass.
 
+The files of a run sit by default in ``lattices/<domain>/<lattice>/<run>/`` under the
+project root: ``<domain>`` is the name of the data config, ``<lattice>`` the experiment
+name and ``<run>`` the run name. ``src/eval.py`` reads ``lattices/<domain>`` as its
+``scores_dir``.
+
 Generate a dump after a run finishes with all the details necessary to replay the
 evaluation on top of it:
 

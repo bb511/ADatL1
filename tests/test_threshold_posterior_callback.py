@@ -189,17 +189,12 @@ def test_stage_writes_every_control_column(trained):
     "domain, sets",
     [
         ("cchamber", ["sensor_weak", "sensor_mid", "sensor_strong"]),
-        ("cchamber_wt", ["sensor_osr"]),
     ],
 )
 def test_posterior_instances_copy_the_control_and_feed_the_registry(domain, sets):
     cfg = _compose(domain)
     posterior = OmegaConf.to_container(cfg.cap_posterior)
-    # The wind tunnel never inherits the light tunnel's declaration.
-    if domain == "cchamber_wt":
-        assert posterior == POSTERIOR | {"beta_fix": dict.fromkeys(PROBES)}
-    else:
-        assert posterior == POSTERIOR
+    assert posterior == POSTERIOR
     callbacks = cfg.evaluation.evaluator.dump_callbacks
     callbacks = OmegaConf.to_container(callbacks, resolve=True)
     control = callbacks[CONTROL]

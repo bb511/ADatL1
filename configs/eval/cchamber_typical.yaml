@@ -11,6 +11,8 @@
 # itself.
 
 sets: cchamber
+# The lattices are the light tunnel's.
+scores_dir: ${paths.root_dir}/lattices/cchamber
 
 evaluation:
   evaluator:

@@ -21,7 +21,9 @@ partner: null
 # Whether a run whose hyperpoint the partner lacks is logged and left out of UDR (its
 # UDR NaN); false raises before the replay.
 drop_unpaired: false
-scores_dir: ${paths.log_dir}/scores
+# The root of the dumps, lattices/<domain> with <domain> the name of the eval config;
+# cchamber_typical sets the light tunnel's.
+scores_dir: ${paths.root_dir}/lattices/${hydra:runtime.choices.eval}
 out_dir: ${paths.log_dir}/eval/${lattice}
 # Replaces data.data_dir of every run's configuration; null keeps it.
 data_dir: null

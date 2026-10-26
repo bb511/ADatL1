@@ -12,7 +12,7 @@ label and no efficiency is read.
 
 Usage::
 
-    python scripts/analysis/cap_beta_fix.py logs/scores/<lattice> [...]
+    python scripts/analysis/cap_beta_fix.py lattices/<domain>/<lattice> [...]
 """
 import argparse
 import math
@@ -86,7 +86,9 @@ def report(values: dict[str, list[float]]) -> str:
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="Print the CAP bank's fixed betas.")
-    parser.add_argument("lattices", type=Path, nargs="+", help="logs/scores/<lattice>")
+    parser.add_argument(
+        "lattices", type=Path, nargs="+", help="lattices/<domain>/<lattice>"
+    )
     runs = _runs(parser.parse_args().lattices)
     print(report(quantiles(runs, OmegaConf.load(BANK)["maps"])))
 

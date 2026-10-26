@@ -35,6 +35,8 @@ from tests.test_score_dump import ToyAE, ToyDataModule, dump_callback, fit, load
 
 CONFIGS = Path(__file__).resolve().parents[1] / "configs"
 BANK = OmegaConf.to_container(OmegaConf.load(CONFIGS / "cap" / "bank.yaml"))
+# Wind-tunnel declaration; rank is the light tunnel's: 1,000 distribution-free ranks.
+WIND_TUNNEL_BETA_FIX = {"std": 0.6785, "rank": 3.0992, "sq": 3.7036, "disp": 2.3154}
 PROVISIONAL = OmegaConf.to_container(
     OmegaConf.load(CONFIGS / "cap" / "provisional.yaml")
 )
@@ -141,20 +143,45 @@ def _fail(*args, **kwargs):
     raise AssertionError("A cached coupling was built again.")
 
 
-def test_bank_callbacks_copy_the_control():
-    cfg = _compose("cchamber")
-    assert "cap" not in cfg and OmegaConf.to_container(cfg.cap_bank) == BANK
+@pytest.mark.parametrize(
+    "domain, sensors", [("cchamber", SENSORS), ("cchamber_wt", ["sensor_osr"])]
+)
+def test_bank_callbacks_copy_the_control(domain, sensors):
+    cfg = _compose(domain)
+    bank = OmegaConf.to_container(cfg.cap_bank)
+    assert "cap" not in cfg
+    # The wind tunnel never inherits the light tunnel's declaration.
+    if domain == "cchamber_wt":
+        assert bank == BANK | {"beta_fix": WIND_TUNNEL_BETA_FIX}
+        light, wind = BANK["beta_fix"], WIND_TUNNEL_BETA_FIX
+        assert [m for m in light if wind[m] != light[m]] == ["std", "sq", "disp"]
+    else:
+        assert bank == BANK
     callbacks = cfg.evaluation.evaluator.dump_callbacks
     callbacks = OmegaConf.to_container(callbacks, resolve=True)
     control = callbacks[CONTROL]
-    assert control["bank_config"] == BANK
+    assert control["bank_config"] == bank
     assert control["dataset_1"] == "normal"
     assert control["dataset_2"] == control["reference"] == "reference_normal"
-    for sensor in SENSORS:
+    for sensor in sensors:
         name = f"cap_bank_{sensor}"
         assert callbacks[name] == {**control, "dataset_2": sensor, "name": name}
     columns = [spec.column for spec in cfg.selection.criteria.values()]
     assert not [column for column in columns if column.startswith("cap_bank")]
+
+
+def test_a_null_beta_fix_raises_at_the_first_computation(stage, tmp_path):
+    undeclared = BANK | {"beta_fix": BANK["beta_fix"] | {"rank": None}}
+    callback = hydra.utils.instantiate({**stage.control, "bank_config": undeclared})
+    replay = ReplayModule(ToyAE(), load(stage.path / "meta.pt"))
+    replay.load_epoch(load(stage.path / "initial.pt"), tmp_path / "initial.pt")
+    with pytest.raises(ValueError, match=r"\['rank'\].*declares it"):
+        _test(replay, "val", ToyDataModule().loaders("val"), [callback])
+
+    # The toy's control order, as in the stage: ot needs N2 >= N1.
+    args = ("ascore/full", "reference_normal", "normal", "normal", undeclared)
+    with pytest.raises(ValueError, match="before any label"):
+        fit(tmp_path, [CAPBankCallback(*args)], epochs=1)
 
 
 def test_stage_writes_finite_bank_columns(stage):

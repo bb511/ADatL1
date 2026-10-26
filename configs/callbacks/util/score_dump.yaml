@@ -3,7 +3,9 @@
 # Per-event scores and weights of every validation pass, laid out as the docstring of
 # src/callbacks/score_dump.py says; needs trainer.num_sanity_val_steps: -1.
 _target_: src.callbacks.score_dump.ScoreDumpCallback
-dirpath: ${paths.log_dir}/scores/${experiment_name}/${run_name}
+# lattices/<domain>/<lattice>/<run>: <domain> is the name of the data config (cchamber,
+# cchamber_wt, cifar10), <lattice> the experiment name.
+dirpath: ${paths.root_dir}/lattices/${hydra:runtime.choices.data}/${experiment_name}/${run_name}
 run_dir: ${paths.output_dir}
 keys:
   ["ascore/full", "ascore/mse", "ascore/kl", "ascore/residual_oas", "fit/full"]

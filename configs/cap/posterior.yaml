@@ -1,0 +1,18 @@
+# @package cap_posterior
+
+# Track 2 of the CAP test bed, the threshold posterior with a probe, passed to every
+# posterior callback through posterior_config: ${cap_posterior};
+# src/callbacks/threshold_posterior.py defines each quantity.
+levels: 400
+beta_min: 0.01
+beta_max: 1000.0
+n_beta: 200
+# One per probe, declared by the test bed before any label is read: the median over
+# the trained runs of the six light-tunnel lattices, pooled over the three sensor
+# grades, of the beta at which the entropy of p_1 at the last epoch is half of log|T|
+# (scripts/analysis/posterior_beta_fix.py; 08_tests.md, declaration of 26 Oct 04:00).
+# A null raises at the first computation.
+beta_fix: { autouad: 383.518, uniform: 1105.27, gaussian: 3088.01 }
+n_draws: 200
+seed: 0
+probes: [autouad, uniform, gaussian]

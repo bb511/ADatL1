@@ -103,9 +103,19 @@ def toy_bank(cfg) -> None:
     control.reference = "normal"
 
 
+# Placeholders for the beta_fix that the test bed declares, without which every
+# posterior callback raises; one per probe, so that a probe read at another's shows.
+TOY_BETA_FIX = {"autouad": 3.0, "uniform": 12.0, "gaussian": 40.0}
+
+
+def toy_posterior(cfg) -> None:
+    cfg.cap_posterior.beta_fix = TOY_BETA_FIX
+
+
 def _evaluator(sets: set[str]) -> Evaluator:
     cfg = _compose("cchamber")
     drop_absent_sets(cfg, sets)
+    toy_posterior(cfg)
     if sets == TOY_SETS:
         toy_bank(cfg)
     return hydra.utils.instantiate(cfg.evaluation.evaluator)
@@ -451,7 +461,13 @@ def test_pairings_copy_the_control(domain):
     evaluator = hydra.utils.instantiate(_compose(domain).evaluation.evaluator)
     configs, criteria = evaluator.dump_callbacks, evaluator.selection["criteria"]
     specs = {spec["column"].split("/")[0]: spec for spec in criteria.values()}
-    pairings = [n for n, c in configs.items() if "dataset_2" in c and n in specs]
+    # The posterior's pairings copy a control that no criterion registers; their test
+    # is in test_threshold_posterior_callback.py.
+    pairings = [
+        n
+        for n, c in configs.items()
+        if "dataset_2" in c and n in specs and not n.startswith("posterior_")
+    ]
     assert len(pairings) == (4 if domain == "cchamber" else 3)
     for name in pairings:
         config, spec = configs[name], specs[name]

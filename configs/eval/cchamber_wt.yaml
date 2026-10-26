@@ -4,7 +4,16 @@
 # rescored from the weights of every epoch. Every run is evaluated on the sets of
 # data/cchamber_wt.yaml, whatever lists it was trained with.
 
+defaults:
+  - /cap: posterior
+  - _self_
+
 sets: cchamber_wt
+
+# The wind tunnel's beta_fix are declared on its own lattices before the read, by the
+# light tunnel's rule; null until then, so that they are never the light tunnel's.
+cap_posterior:
+  beta_fix: { autouad: null, uniform: null, gaussian: null }
 
 evaluation:
   evaluator:
@@ -62,6 +71,22 @@ evaluation:
         apply_log1p: true
         log_raw_mlflow: false
         name: wasserstein_walk
+      # The threshold posterior of normal against the control and sensor_osr, for
+      # every probe of cap/posterior.yaml; walk_null is not paired.
+      posterior_reference_normal:
+        _target_: src.evaluation.callbacks.threshold_posterior.ThresholdPosterior
+        output_name: ascore/full
+        dataset_1: normal
+        dataset_2: reference_normal
+        posterior_config: ${cap_posterior}
+        name: posterior_reference_normal
+      posterior_sensor_osr:
+        _target_: src.evaluation.callbacks.threshold_posterior.ThresholdPosterior
+        output_name: ascore/full
+        dataset_1: normal
+        dataset_2: sensor_osr
+        posterior_config: ${cap_posterior}
+        name: posterior_sensor_osr
       # The operational score of normal, a diagnostic column beside Q'', the fit.
       ascore_operational:
         _target_: src.evaluation.callbacks.output.OutputCallback
@@ -154,6 +179,40 @@ selection:
       mode: min
       key: val/summary/sds_ema
       raw_key: val/summary/sds
+    # Track 2's candidates on the wind tunnel, registered by 08_tests.md (amendment of
+    # 26 Oct, 02:25): A-fix and D-fix of the threshold posterior per probe against
+    # sensor_osr, averaged as the training callback averages them. The control,
+    # posterior_reference_normal, is reported and enters no criterion.
+    posterior_autouad_afix_osr:
+      column: posterior_sensor_osr/autouad_A-fix
+      mode: max
+      key: val/summary/posterior_autouad_A-fix_ema_normal_vs_sensor_osr
+      skip_nonfinite: true
+    posterior_autouad_dfix_osr:
+      column: posterior_sensor_osr/autouad_D-fix
+      mode: max
+      key: val/summary/posterior_autouad_D-fix_ema_normal_vs_sensor_osr
+      skip_nonfinite: true
+    posterior_uniform_afix_osr:
+      column: posterior_sensor_osr/uniform_A-fix
+      mode: max
+      key: val/summary/posterior_uniform_A-fix_ema_normal_vs_sensor_osr
+      skip_nonfinite: true
+    posterior_uniform_dfix_osr:
+      column: posterior_sensor_osr/uniform_D-fix
+      mode: max
+      key: val/summary/posterior_uniform_D-fix_ema_normal_vs_sensor_osr
+      skip_nonfinite: true
+    posterior_gaussian_afix_osr:
+      column: posterior_sensor_osr/gaussian_A-fix
+      mode: max
+      key: val/summary/posterior_gaussian_A-fix_ema_normal_vs_sensor_osr
+      skip_nonfinite: true
+    posterior_gaussian_dfix_osr:
+      column: posterior_sensor_osr/gaussian_D-fix
+      mode: max
+      key: val/summary/posterior_gaussian_D-fix_ema_normal_vs_sensor_osr
+      skip_nonfinite: true
   # Q'', the mean fit of validation normal, minimised; se is the gate's standard error.
   q_sec:
     column: fit/normal

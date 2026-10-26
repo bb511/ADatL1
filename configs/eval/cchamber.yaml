@@ -6,7 +6,7 @@
 # weights of every epoch, and serves its six LED sets, now nulls, from the store.
 
 defaults:
-  - /cap: bank
+  - /cap: [bank, posterior]
   - _self_
 
 sets: cchamber
@@ -121,6 +121,36 @@ evaluation:
         bank_config: ${cap_bank}
         log_raw_mlflow: false
         name: cap_bank_sensor_strong
+      # The threshold posterior of normal against the control and each sensor pool,
+      # for every probe of cap/posterior.yaml.
+      posterior_reference_normal:
+        _target_: src.evaluation.callbacks.threshold_posterior.ThresholdPosterior
+        output_name: ascore/full
+        dataset_1: normal
+        dataset_2: reference_normal
+        posterior_config: ${cap_posterior}
+        name: posterior_reference_normal
+      posterior_sensor_weak:
+        _target_: src.evaluation.callbacks.threshold_posterior.ThresholdPosterior
+        output_name: ascore/full
+        dataset_1: normal
+        dataset_2: sensor_weak
+        posterior_config: ${cap_posterior}
+        name: posterior_sensor_weak
+      posterior_sensor_mid:
+        _target_: src.evaluation.callbacks.threshold_posterior.ThresholdPosterior
+        output_name: ascore/full
+        dataset_1: normal
+        dataset_2: sensor_mid
+        posterior_config: ${cap_posterior}
+        name: posterior_sensor_mid
+      posterior_sensor_strong:
+        _target_: src.evaluation.callbacks.threshold_posterior.ThresholdPosterior
+        output_name: ascore/full
+        dataset_1: normal
+        dataset_2: sensor_strong
+        posterior_config: ${cap_posterior}
+        name: posterior_sensor_strong
       # The operational score of normal, a diagnostic column beside Q'', the fit.
       ascore_operational:
         _target_: src.evaluation.callbacks.output.OutputCallback
@@ -218,6 +248,100 @@ selection:
       mode: min
       key: val/summary/sds_ema
       raw_key: val/summary/sds
+    # Track 2's candidates, registered by 08_tests.md (amendment of 26 Oct, 02:25):
+    # A-fix and D-fix of the threshold posterior per probe and sensor grade, averaged
+    # as the training callback averages them. The control, posterior_reference_normal,
+    # is reported and enters no criterion.
+    posterior_autouad_afix_weak:
+      column: posterior_sensor_weak/autouad_A-fix
+      mode: max
+      key: val/summary/posterior_autouad_A-fix_ema_normal_vs_sensor_weak
+      skip_nonfinite: true
+    posterior_autouad_dfix_weak:
+      column: posterior_sensor_weak/autouad_D-fix
+      mode: max
+      key: val/summary/posterior_autouad_D-fix_ema_normal_vs_sensor_weak
+      skip_nonfinite: true
+    posterior_uniform_afix_weak:
+      column: posterior_sensor_weak/uniform_A-fix
+      mode: max
+      key: val/summary/posterior_uniform_A-fix_ema_normal_vs_sensor_weak
+      skip_nonfinite: true
+    posterior_uniform_dfix_weak:
+      column: posterior_sensor_weak/uniform_D-fix
+      mode: max
+      key: val/summary/posterior_uniform_D-fix_ema_normal_vs_sensor_weak
+      skip_nonfinite: true
+    posterior_gaussian_afix_weak:
+      column: posterior_sensor_weak/gaussian_A-fix
+      mode: max
+      key: val/summary/posterior_gaussian_A-fix_ema_normal_vs_sensor_weak
+      skip_nonfinite: true
+    posterior_gaussian_dfix_weak:
+      column: posterior_sensor_weak/gaussian_D-fix
+      mode: max
+      key: val/summary/posterior_gaussian_D-fix_ema_normal_vs_sensor_weak
+      skip_nonfinite: true
+    posterior_autouad_afix_mid:
+      column: posterior_sensor_mid/autouad_A-fix
+      mode: max
+      key: val/summary/posterior_autouad_A-fix_ema_normal_vs_sensor_mid
+      skip_nonfinite: true
+    posterior_autouad_dfix_mid:
+      column: posterior_sensor_mid/autouad_D-fix
+      mode: max
+      key: val/summary/posterior_autouad_D-fix_ema_normal_vs_sensor_mid
+      skip_nonfinite: true
+    posterior_uniform_afix_mid:
+      column: posterior_sensor_mid/uniform_A-fix
+      mode: max
+      key: val/summary/posterior_uniform_A-fix_ema_normal_vs_sensor_mid
+      skip_nonfinite: true
+    posterior_uniform_dfix_mid:
+      column: posterior_sensor_mid/uniform_D-fix
+      mode: max
+      key: val/summary/posterior_uniform_D-fix_ema_normal_vs_sensor_mid
+      skip_nonfinite: true
+    posterior_gaussian_afix_mid:
+      column: posterior_sensor_mid/gaussian_A-fix
+      mode: max
+      key: val/summary/posterior_gaussian_A-fix_ema_normal_vs_sensor_mid
+      skip_nonfinite: true
+    posterior_gaussian_dfix_mid:
+      column: posterior_sensor_mid/gaussian_D-fix
+      mode: max
+      key: val/summary/posterior_gaussian_D-fix_ema_normal_vs_sensor_mid
+      skip_nonfinite: true
+    posterior_autouad_afix_strong:
+      column: posterior_sensor_strong/autouad_A-fix
+      mode: max
+      key: val/summary/posterior_autouad_A-fix_ema_normal_vs_sensor_strong
+      skip_nonfinite: true
+    posterior_autouad_dfix_strong:
+      column: posterior_sensor_strong/autouad_D-fix
+      mode: max
+      key: val/summary/posterior_autouad_D-fix_ema_normal_vs_sensor_strong
+      skip_nonfinite: true
+    posterior_uniform_afix_strong:
+      column: posterior_sensor_strong/uniform_A-fix
+      mode: max
+      key: val/summary/posterior_uniform_A-fix_ema_normal_vs_sensor_strong
+      skip_nonfinite: true
+    posterior_uniform_dfix_strong:
+      column: posterior_sensor_strong/uniform_D-fix
+      mode: max
+      key: val/summary/posterior_uniform_D-fix_ema_normal_vs_sensor_strong
+      skip_nonfinite: true
+    posterior_gaussian_afix_strong:
+      column: posterior_sensor_strong/gaussian_A-fix
+      mode: max
+      key: val/summary/posterior_gaussian_A-fix_ema_normal_vs_sensor_strong
+      skip_nonfinite: true
+    posterior_gaussian_dfix_strong:
+      column: posterior_sensor_strong/gaussian_D-fix
+      mode: max
+      key: val/summary/posterior_gaussian_D-fix_ema_normal_vs_sensor_strong
+      skip_nonfinite: true
   # Q'', the mean fit of validation normal, minimised; se is the gate's standard error.
   q_sec:
     column: fit/normal

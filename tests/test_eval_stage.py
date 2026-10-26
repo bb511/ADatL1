@@ -30,7 +30,7 @@ from src.utils.omegaconf import register_resolvers
 from tests.test_score_dump import PASSES, ToyAE, ToyDataModule, dump_callback, fit, load
 
 CONFIGS = Path(__file__).resolve().parents[1] / "configs"
-DOMAINS = ["cchamber", "cchamber_typical", "cchamber_wt", "cifar10"]
+DOMAINS = ["cchamber", "cchamber_typical", "cchamber_wt", "cifar10", "mscct"]
 # The sets of the toy dump, which has none of the chamber's null pools.
 TOY_SETS = {"normal", "reference_normal", "sig_a", "sig_b"}
 # The toy's one stored set of label 0 besides normal, served as the typical set.
@@ -504,7 +504,13 @@ def test_eval_configs_build_the_evaluator(domain):
     assert {column.split("/")[0] for column in columns} <= names
     assert configs["wasserstein"]["dataset_2"] == "reference_normal"
     null_ds = configs["anomaly_efficiency"]["null_ds"]
-    sizes = {"cchamber": 9, "cchamber_typical": 9, "cchamber_wt": 2, "cifar10": 3}
+    sizes = {
+        "cchamber": 9,
+        "cchamber_typical": 9,
+        "cchamber_wt": 2,
+        "cifar10": 3,
+        "mscct": 4,
+    }
     assert len(null_ds) == sizes[domain]
 
 

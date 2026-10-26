@@ -11,7 +11,7 @@ from src.utils.omegaconf import register_resolvers
 CONFIGS = Path(__file__).resolve().parents[1] / "configs"
 EXPERIMENTS = sorted(
     f"{domain}/{path.stem}"
-    for domain in ("physics", "cifar10", "cchamber", "cchamber_wt")
+    for domain in ("physics", "cifar10", "mscct", "cchamber", "cchamber_wt")
     for path in (CONFIGS / "experiment" / domain).glob("*.yaml")
 )
 # The LHC keeps the checkpoint regime; every other domain trains and dumps its scores.

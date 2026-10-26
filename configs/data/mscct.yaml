@@ -1,0 +1,42 @@
+# @package data
+
+defaults:
+  - _self_
+
+_target_: src.data.MSCCT_datamodule.MSCCTDataModule
+
+# The record's 220 scans, scc.json and the API's record.json; the patch caches are
+# written to patches/ beside them.
+data_dir: ${paths.base_data_dir}/mscct
+
+# X1, the scanner every model trains on, and X2, the other four as delivered: four
+# shifts with no order claimed among them.
+reference_scanner: cs2
+shift_scanners: [nz20, nz210, p1000, gt450]
+# Tissue classes of scc.json: normal is label 0, the signals 1, 2, ..., the
+# backgrounds -1, -2, ... (reported per set, outside the efficiency oracle).
+normal_classes: [dermis]
+signal_classes: [tumour]
+background_classes: [inflammation_necrosis]
+
+# Slides of the training, validation and test parts, cut in order from
+# default_rng(seed).permutation of the sorted slide numbers.
+split_sizes: [24, 10, 10]
+# Page 1 of the pyramid, nominal 8 um/px (CS2 8.00; the others 6.97-8.31).
+level: 1
+patch_size: 32
+# The tissue filter: a patch is dropped when at least white_share of its pixels are
+# exactly white, or when every channel's standard deviation is below flat_sd.
+white_share: 0.5
+flat_sd: 2.0
+
+batch_size: 256
+max_val_batches: -1
+normalize: True
+# normal and reference_normal are random halves, by patch, of a part's normal patches.
+reference_fraction: 0.5
+num_workers: 0
+# Fixed apart from the training seed, so that every run sees the same patches.
+seed: 314159
+# The batch order follows the global training seed.
+train_seed: ${seed}

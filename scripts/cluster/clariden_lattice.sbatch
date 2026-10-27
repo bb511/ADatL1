@@ -3,6 +3,9 @@
 #SBATCH --partition=normal
 #SBATCH --nodes=1
 #SBATCH --time=12:00:00
+# Without it clariden gives a job 450 GiB; its MaxMemPerNode is 850000 MB, so --mem=0
+# (the node's 870 GB) is refused (27 Oct).
+#SBATCH --mem=820G
 #SBATCH --job-name=lattice-node
 #SBATCH --output=logs/clariden_lattice_%j.out
 # The lattices of one or more dump-regime run*_search.sh files on one whole clariden
@@ -40,8 +43,9 @@
 # catalogue's driver commands, target, epochs, lattice and replay, runs nothing and
 # needs no env. From the environment: REPLAY=0 ends each chain after its check and
 # prints the replay instead of running it, TOPUP=0 does the same for the relaunch of a
-# short study, REPLAY_WORKERS sets the replay's workers and MONITOR_S the interval, in
-# seconds, of the load samples in logs/clariden_lattice_<job>/monitor.log.
+# short study, REPLAY_WORKERS sets the replay's workers, REPLAY_LIMIT its time limit
+# (timeout's syntax) and MONITOR_S the interval, in seconds, of the load samples in
+# logs/clariden_lattice_<job>/monitor.log.
 set -eu
 cd "${SLURM_SUBMIT_DIR:?submit this with sbatch}" || exit 1
 . scripts/cluster/lib.sh
@@ -49,6 +53,9 @@ cd "${SLURM_SUBMIT_DIR:?submit this with sbatch}" || exit 1
 # One worker per run of a 90-run lattice, about 600 GB beside the drivers of the
 # chains still training (856 GB per node); the smoke measures both and sets it.
 REPLAY_WORKERS=${REPLAY_WORKERS:-90}
+# A replay whose worker died stays blocked in the pool (the smoke of 27 Oct held its node
+# 45 min that way), so each replay is stopped at a limit well above its expected time.
+REPLAY_LIMIT=${REPLAY_LIMIT:-4h}
 MONITOR_S=${MONITOR_S:-300}
 # Single-threaded replay workers; the malloc settings spare them the trim and mmap
 # churn of their many short-lived tensors (much faster on an NGT CPU pod, tables
@@ -203,7 +210,8 @@ replay() {
         return
     fi
     say "$stem: queued for the replay lock"
-    if ! run_step flock "$logdir/replay.lock" env "${REPLAY_ENV[@]}" "${cmd[@]}" \
+    if ! run_step flock "$logdir/replay.lock" timeout -k 60 "$REPLAY_LIMIT" \
+        env "${REPLAY_ENV[@]}" "${cmd[@]}" \
         > "$logdir/replay_$lattice.log" 2>&1; then
         say "$stem: replay failed, see $logdir/replay_$lattice.log"
         return 1

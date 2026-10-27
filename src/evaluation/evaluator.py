@@ -396,6 +396,7 @@ class Evaluator:
         data_dir: str | None = None,
         sets: str | None = None,
         workers: int = 1,
+        threads: int = 1,
         tracking_uri: str | None = None,
     ) -> list[dict]:
         """Evaluate every run of a lattice by ``dump.evaluate_lattice``."""
@@ -408,6 +409,7 @@ class Evaluator:
             data_dir,
             sets,
             workers,
+            threads,
             tracking_uri,
         )
 

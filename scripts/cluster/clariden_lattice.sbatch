@@ -43,8 +43,9 @@
 # catalogue's driver commands, target, epochs, lattice and replay, runs nothing and
 # needs no env. From the environment: REPLAY=0 ends each chain after its check and
 # prints the replay instead of running it, TOPUP=0 does the same for the relaunch of a
-# short study, REPLAY_WORKERS sets the replay's workers, REPLAY_LIMIT its time limit
-# (timeout's syntax) and MONITOR_S the interval, in seconds, of the load samples in
+# short study, REPLAY_WORKERS sets the replay's workers, REPLAY_THREADS the threads of
+# each (1, the reference, by default), REPLAY_LIMIT its time limit (timeout's syntax)
+# and MONITOR_S the interval, in seconds, of the load samples in
 # logs/clariden_lattice_<job>/monitor.log.
 set -eu
 cd "${SLURM_SUBMIT_DIR:?submit this with sbatch}" || exit 1
@@ -57,10 +58,13 @@ REPLAY_WORKERS=${REPLAY_WORKERS:-90}
 # 45 min that way), so each replay is stopped at a limit well above its expected time.
 REPLAY_LIMIT=${REPLAY_LIMIT:-4h}
 MONITOR_S=${MONITOR_S:-300}
-# Single-threaded replay workers; the malloc settings spare them the trim and mmap
-# churn of their many short-lived tensors (much faster on an NGT CPU pod, tables
-# bitwise unchanged).
-REPLAY_ENV=(OMP_NUM_THREADS=1 MKL_NUM_THREADS=1 OPENBLAS_NUM_THREADS=1
+# The torch, OpenMP and BLAS threads of every replay worker (worker_threads of
+# src/eval.py; more than one may change float32 results in the last bits).
+REPLAY_THREADS=${REPLAY_THREADS:-1}
+# The malloc settings spare the replay workers the trim and mmap churn of their many
+# short-lived tensors (much faster on an NGT CPU pod, tables bitwise unchanged).
+REPLAY_ENV=(OMP_NUM_THREADS=$REPLAY_THREADS MKL_NUM_THREADS=$REPLAY_THREADS
+    OPENBLAS_NUM_THREADS=$REPLAY_THREADS
     MALLOC_MMAP_THRESHOLD_=33554432 MALLOC_TRIM_THRESHOLD_=17179869184
     MALLOC_TOP_PAD_=268435456)
 
@@ -199,7 +203,7 @@ top_up() {
 
 replay() {
     local cmd=(python src/eval.py "eval=$domain" "lattice=$lattice"
-        "workers=$REPLAY_WORKERS")
+        "workers=$REPLAY_WORKERS" "worker_threads=$REPLAY_THREADS")
     if [ "${REPLAY:-1}" = 0 ]; then
         say "$stem: REPLAY=0, not run: ${cmd[*]}"
         return
@@ -246,7 +250,7 @@ dry_run() {
         "hydra.sweeper.n_trials=<$target - COMPLETE>" \
         "hydra.sweeper.sampler.seed=<1000 * $seed0 + COMPLETE>"
     echo "   replay: python src/eval.py eval=$domain lattice=$lattice" \
-        "workers=$REPLAY_WORKERS"
+        "workers=$REPLAY_WORKERS worker_threads=$REPLAY_THREADS"
     echo
 }
 

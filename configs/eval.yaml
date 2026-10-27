@@ -35,4 +35,8 @@ sets: null
 # same names to <lattice>_eval.
 typical: null
 workers: 1
+# The torch threads of each worker when workers > 1 (one worker replays in this process
+# on one thread). One thread is the reference: more may change float32 results in the
+# last bits, the class of difference accepted between platforms on 26 Oct 2026.
+worker_threads: 1
 tracking_uri: file:${paths.log_dir}/mlflow/mlruns

@@ -25,7 +25,7 @@ from src.evaluation.callbacks.utils.mlflow import log_metrics_to_mlflow
 from src.evaluation.callbacks.wasserstein import _wasserstein_1d
 from src.evaluation.components.pairing import hyperpoint
 from src.evaluation.components.rebuild import null_sets, signal_sets
-from src.evaluation.dump import RunEvaluation
+from src.evaluation.dump import RunEvaluation, _init_worker
 from src.evaluation.evaluator import Evaluator
 from src.evaluation.lattice import select_lattice
 from src.evaluation.replay import ReplayModule, as_typical
@@ -518,12 +518,12 @@ def lattices(tmp_path_factory) -> SimpleNamespace:
     return SimpleNamespace(full=root / "full", stripped=root / "stripped")
 
 
-def _evaluate_and_select(scores_dir: Path, out: Path, *overrides: str) -> None:
+def _evaluate_and_select(scores_dir: Path, out: Path, *overrides: str, **pool) -> None:
     # The two steps of src/eval.py, on the CIFAR-10 evaluation.
     cfg = _compose("cifar10", *overrides)
     drop_absent_sets(cfg, TOY_SETS)
     evaluator = hydra.utils.instantiate(cfg.evaluation.evaluator)
-    evaluator.evaluate_lattice(scores_dir, out, "toy")
+    evaluator.evaluate_lattice(scores_dir, out, "toy", **pool)
     selection = OmegaConf.to_container(cfg.selection, resolve=True)
     select_lattice(out, selection, scores_dir, "toy", None)
 
@@ -567,6 +567,28 @@ def test_a_scores_only_copy_raises_where_a_score_is_rescored(lattices, tmp_path)
         message = f"Rescoring {rescored} needs the weights, which run_a/epoch_0001.pt"
         with pytest.raises(RuntimeError, match=re.escape(message)):
             _test(replay, split, ToyDataModule().loaders(split), [])
+
+
+def test_the_worker_initialiser_sets_the_thread_count():
+    before = torch.get_num_threads()
+    try:
+        _init_worker(threads=3)
+        assert torch.get_num_threads() == 3
+    finally:
+        torch.set_num_threads(before)
+
+
+def test_worker_threads_leave_the_tables_unchanged(lattices, tmp_path):
+    # The toy's tensors sit below torch's parallel grain, so equal tables here show
+    # the plumbing, not the bitwise equality of a real lattice's threaded replay.
+    outputs = {}
+    for threads in (1, 2):
+        out = tmp_path / f"threads_{threads}"
+        _evaluate_and_select(lattices.full, out, workers=2, threads=threads)
+        outputs[threads] = _outputs(out)
+    assert set(outputs[1]) == set(outputs[2])
+    for path, content in outputs[1].items():
+        assert outputs[2][path] == content, path
 
 
 def test_hyperpoint_takes_the_swept_overrides(tmp_path):

@@ -292,9 +292,9 @@ class RunEvaluation:
         return run_id
 
 
-def _init_worker(sds_cache: dict | None = None) -> None:
+def _init_worker(sds_cache: dict | None = None, threads: int = 1) -> None:
     SDS_CACHE.update(sds_cache or {})
-    torch.set_num_threads(1)
+    torch.set_num_threads(threads)
     # The run configs call ${reverse:...} and the like; a second registration raises.
     if not OmegaConf.has_resolver("reverse"):
         register_resolvers()
@@ -318,8 +318,10 @@ class LatticeEvaluation:
     in name order. Each run's module and datamodule are rebuilt from its
     ``config.yaml``, with ``data.data_dir`` replaced by ``data_dir`` and the signals
     and nulls by those of ``configs/data/<sets>.yaml`` when given, in a spawn pool of
-    ``workers`` single-threaded processes (in this process for one). ``settings``
-    holds the keyword-only arguments of ``evaluate_dump``.
+    ``workers`` processes of ``threads`` torch threads each (in this process, on one
+    thread, for one worker). One thread is the reference: more may change float32
+    results in the last bits. ``settings`` holds the keyword-only arguments of
+    ``evaluate_dump``.
     """
 
     def __init__(
@@ -330,10 +332,12 @@ class LatticeEvaluation:
         data_dir: str | None = None,
         sets: str | None = None,
         workers: int = 1,
+        threads: int = 1,
         tracking_uri: str | None = None,
     ):
         self.lattice, self.settings, self.data_dir = lattice, settings, data_dir
         self.sets, self.workers, self.tracking_uri = sets, workers, tracking_uri
+        self.threads = threads
         paths = (Path(scores_dir) / lattice).iterdir()
         self.runs = sorted(p for p in paths if (p / "meta.pt").is_file())
 
@@ -356,7 +360,7 @@ class LatticeEvaluation:
         # Spawned, not forked: torch's thread pools do not survive a fork once the
         # parent has used them.
         context = multiprocessing.get_context("spawn")
-        initargs = (dict(SDS_CACHE),)
+        initargs = (dict(SDS_CACHE), self.threads)
         with context.Pool(
             self.workers, initializer=_init_worker, initargs=initargs
         ) as pool:
@@ -381,11 +385,12 @@ def evaluate_lattice(
     data_dir: str | None = None,
     sets: str | None = None,
     workers: int = 1,
+    threads: int = 1,
     tracking_uri: str | None = None,
 ) -> list[dict]:
     """Evaluate every run of a lattice; return their run.json, in name order."""
     evaluation = LatticeEvaluation(
-        scores_dir, lattice, settings, data_dir, sets, workers, tracking_uri
+        scores_dir, lattice, settings, data_dir, sets, workers, threads, tracking_uri
     )
     return evaluation.evaluate(out_dir)
 

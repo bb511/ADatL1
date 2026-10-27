@@ -107,8 +107,25 @@ def test_dumped_runs_train_and_dump_only(experiments, experiment):
 
     stored_sets = ["normal", "reference_normal"] if domain == "cchamber_wt" else None
     assert callbacks["score_dump"]["stored_sets"] == stored_sets
+    assert not {"initial_sets", "train_pass"} & callbacks["score_dump"].keys()
     residual = domain.startswith("cchamber") and model in ("ae", "vae")
     assert ("residual_state" in callbacks) == residual
+
+
+@pytest.mark.parametrize("experiment", PHYSICS)
+def test_physics_runs_dump_the_weights_and_the_probes(experiments, experiment):
+    cfg = experiments[experiment]
+    config = {**cfg["callbacks"]["score_dump"], "dirpath": "d", "run_dir": "r"}
+    dump = hydra.utils.instantiate(config)
+    npd = hydra.utils.instantiate(cfg["callbacks"]["npd"])
+    assert config["_target_"] == SCORE_DUMP
+    assert cfg["trainer"]["num_sanity_val_steps"] == -1
+    assert dump.keys == ["ascore/full", "fit/full"]
+    assert dump.stored_sets == []
+    assert dump.initial_sets == ["normal", "SingleNeutrino_E-10-gun"]
+    assert dump.train_pass is False
+    assert (dump.aux_seed, dump.aux_size) == (npd.aux_seed, npd.aux_size)
+    assert dump.aux_batch_size == npd.batch_size
 
 
 @pytest.mark.parametrize("experiment", EXPERIMENTS)

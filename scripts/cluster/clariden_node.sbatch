@@ -35,6 +35,8 @@ source "$CLARIDEN_CONDA/etc/profile.d/conda.sh"
 conda activate "$CLARIDEN_ENV"
 # Torch starts one thread per core (288) in every driver without a cap.
 export OMP_NUM_THREADS=${OMP_NUM_THREADS:-8} MKL_NUM_THREADS=${MKL_NUM_THREADS:-8}
+export OPENBLAS_NUM_THREADS=${OPENBLAS_NUM_THREADS:-8}
+export NUMEXPR_NUM_THREADS=${NUMEXPR_NUM_THREADS:-8}
 
 opts=()
 if [ "${1:-}" = --only ]; then opts=(--only "${2:?--only needs a value}"); shift 2; fi

@@ -1,6 +1,8 @@
 import csv
 import json
 import math
+import re
+import shutil
 from collections import defaultdict
 from pathlib import Path
 from types import SimpleNamespace
@@ -25,6 +27,7 @@ from src.evaluation.components.pairing import hyperpoint
 from src.evaluation.components.rebuild import null_sets, signal_sets
 from src.evaluation.dump import RunEvaluation
 from src.evaluation.evaluator import Evaluator
+from src.evaluation.lattice import select_lattice
 from src.evaluation.replay import ReplayModule, as_typical
 from src.utils.omegaconf import register_resolvers
 from tests.test_score_dump import PASSES, ToyAE, ToyDataModule, dump_callback, fit, load
@@ -57,6 +60,27 @@ RUN_KEYS = {
     "stored",
     "typical",
 }
+# The overrides of a replay from a scores-only copy of a dump, which leaves SDS out:
+# its pseudo-sets are not stored, so they would be rescored from the weights.
+SCORES_ONLY = [
+    "evaluation.evaluator.extra_sets.sds=null",
+    "~evaluation.evaluator.dump_callbacks.sds",
+    "~selection.criteria.sds",
+]
+SELECTION_TABLES = {
+    "consensus.csv",
+    "selection.csv",
+    "validity.csv",
+    "tradeoff.csv",
+    "oracle_position.csv",
+    "interventions.csv",
+    "toy.csv",
+    "toy_eval.csv",
+}
+TOY_RUN_CONFIG = {
+    "data": {"_target_": "tests.test_score_dump.ToyDataModule"},
+    "algorithm": {"_target_": "tests.test_score_dump.ToyAE"},
+}
 SMOKE_OVERRIDES = [
     "trainer.gradient_clip_val=2.0",
     "algorithm.delta=5.0",
@@ -77,9 +101,10 @@ def _resolvers() -> None:
         register_resolvers()
 
 
-def _compose(domain: str):
+def _compose(domain: str, *overrides: str):
     with initialize_config_dir(version_base="1.3", config_dir=str(CONFIGS)):
-        return compose(config_name="eval", overrides=[f"eval={domain}", "lattice=x"])
+        overrides = [f"eval={domain}", "lattice=x", *overrides]
+        return compose(config_name="eval", overrides=overrides)
 
 
 def drop_absent_sets(cfg, sets: set[str]) -> None:
@@ -472,6 +497,76 @@ def test_evaluate_lattice_rebuilds_each_run(chamber, tmp_path):
     assert [run["run"] for run in runs] == ["run_b"]
     assert runs[0]["hyperpoint"] == {"algorithm.delta": "5.0"}
     assert sorted(p.name for p in (out / "runs" / "run_b").iterdir()) == TABLES
+
+
+def _strip_weights(src: Path, dst: Path) -> None:
+    shutil.copytree(src, dst)
+    for path in dst.glob("*/epoch_*.pt"):
+        record = load(path)
+        del record["state_dict"]
+        torch.save(record, path)
+
+
+@pytest.fixture(scope="module")
+def lattices(tmp_path_factory) -> SimpleNamespace:
+    root = tmp_path_factory.mktemp("lattices")
+    for seed, run in enumerate(["run_a", "run_b"]):
+        path = root / "full" / "toy" / run
+        fit(root, [dump_callback(path)], seed=seed)
+        (path / "config.yaml").write_text(yaml.safe_dump(TOY_RUN_CONFIG))
+    _strip_weights(root / "full" / "toy", root / "stripped" / "toy")
+    return SimpleNamespace(full=root / "full", stripped=root / "stripped")
+
+
+def _evaluate_and_select(scores_dir: Path, out: Path, *overrides: str) -> None:
+    # The two steps of src/eval.py, on the CIFAR-10 evaluation.
+    cfg = _compose("cifar10", *overrides)
+    drop_absent_sets(cfg, TOY_SETS)
+    evaluator = hydra.utils.instantiate(cfg.evaluation.evaluator)
+    evaluator.evaluate_lattice(scores_dir, out, "toy")
+    selection = OmegaConf.to_container(cfg.selection, resolve=True)
+    select_lattice(out, selection, scores_dir, "toy", None)
+
+
+def _outputs(out: Path) -> dict[str, bytes]:
+    paths = [path for path in out.rglob("*") if path.is_file()]
+    return {str(path.relative_to(out)): path.read_bytes() for path in paths}
+
+
+def test_a_scores_only_copy_replays_to_the_same_tables(lattices, tmp_path):
+    stripped = load(lattices.stripped / "toy" / "run_a" / "epoch_0000.pt")
+    initial = load(lattices.stripped / "toy" / "run_a" / "initial.pt")
+    assert "state_dict" not in stripped and "state_dict" in initial
+    outputs = {}
+    for name in ("full", "stripped"):
+        _evaluate_and_select(getattr(lattices, name), tmp_path / name, *SCORES_ONLY)
+        outputs[name] = _outputs(tmp_path / name)
+
+    runs = [f"runs/{run}/{table}" for run in ("run_a", "run_b") for table in TABLES]
+    assert set(outputs["full"]) == set(runs) | SELECTION_TABLES
+    for path, content in outputs["full"].items():
+        if not path.endswith("run.json"):
+            assert outputs["stripped"][path] == content, path
+            continue
+        info = {n: json.loads(outputs[n][path]) for n in outputs}
+        assert {**info["full"], "dump": None} == {**info["stripped"], "dump": None}
+    assert b"sds/" not in outputs["full"]["runs/run_a/val.csv"]
+
+
+def test_a_scores_only_copy_raises_where_a_score_is_rescored(lattices, tmp_path):
+    message = "Rescoring 'sds_targets' needs the weights, which run_a/epoch_0000.pt"
+    with pytest.raises(RuntimeError, match=re.escape(message)):
+        _evaluate_and_select(lattices.stripped, tmp_path)
+
+    run_dir = lattices.stripped / "toy" / "run_a"
+    replay = ReplayModule(ToyAE(), load(run_dir / "meta.pt"))
+    record = load(run_dir / "epoch_0001.pt")
+    del record["test"]["sig_a"], record["val"]["normal"]["fit/full"]
+    replay.load_epoch(record, tmp_path / "run_a" / "epoch_0001.pt")
+    for split, rescored in [("test", "'sig_a'"), ("val", "['fit/full'] of 'normal'")]:
+        message = f"Rescoring {rescored} needs the weights, which run_a/epoch_0001.pt"
+        with pytest.raises(RuntimeError, match=re.escape(message)):
+            _test(replay, split, ToyDataModule().loaders(split), [])
 
 
 def test_hyperpoint_takes_the_swept_overrides(tmp_path):

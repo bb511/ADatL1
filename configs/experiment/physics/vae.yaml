@@ -2,6 +2,7 @@
 
 defaults:
   - /cap: provisional
+  - /callbacks/util@callbacks.score_dump: score_dump
   - override /data: basis
   - override /algorithm: vae
   - override /callbacks: default
@@ -25,6 +26,8 @@ trainer:
   gradient_clip_val: 0.0
   min_epochs: 1
   max_epochs: 200
+  # The full sanity pass, which the score dump stores as the untrained state.
+  num_sanity_val_steps: -1
 
 test: true
 
@@ -121,6 +124,17 @@ callbacks:
     _target_: src.callbacks.autouad.NPDCallback
     output_name: "ascore/full"
     ema_weight: 0.9
+
+  # The weights and the three probes' scores at every epoch, for CAP read offline, and
+  # validation normal and the single-neutrino gun at the sanity pass alone. aux_seed,
+  # aux_size and aux_batch_size keep npd's aux_seed, aux_size and batch_size (0,
+  # 10,000, 1,024), so that the dumped autouad scores are NPD's: DTE fixes its
+  # evaluation noise per position in a batch.
+  score_dump:
+    keys: ["ascore/full", "fit/full"]
+    stored_sets: []
+    initial_sets: [normal, SingleNeutrino_E-10-gun]
+    train_pass: false
 
   rtm:
     _target_: src.callbacks.autouad.RTMCallback

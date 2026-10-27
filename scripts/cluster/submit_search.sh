@@ -13,9 +13,9 @@
 #
 # Each block is one long-lived Optuna driver: it keeps n_jobs trials in the
 # queue and stays alive until it has run its own n_trials, while the live
-# drivers of a catalogue (four, or eight in the two waves of a physics file)
-# fill one shared study. Drivers are therefore nohup'd and this command returns
-# as soon as they are all up, unless --wait is given.
+# drivers of a catalogue fill one study, kept in one shared sqlite file or, on
+# physics, in one file per driver. Drivers are therefore nohup'd and this
+# command returns as soon as they are all up, unless --wait is given.
 #
 # Usage (from the repository root):
 #   bash scripts/cluster/submit_search.sh --list    scripts/physics/runsvdd_search.sh
@@ -88,8 +88,8 @@ from_config() {
 }
 
 # Optuna storage a driver will use: an explicit hydra.sweeper.storage override
-# if the block carries one, else the value in the hparams_search config it
-# selects. No block carries one today, so in practice it is always the config.
+# if the block carries one (a physics driver names its own file), else the
+# value in the hparams_search config it selects.
 storage_of() {
     local s
     s=$(printf "%s" "$1" | grep -oE "hydra\.sweeper\.storage='[^']+'" | head -1 | sed "s/.*='//;s/'\$//")
@@ -156,15 +156,27 @@ PYTHON=${PYTHON:-python3}
     "conda activate $CLARIDEN_ENV" \
     "(or re-run with PYTHON=$CLARIDEN_ENV/bin/python3)"
 
-# Create each sqlite study database, serially, before any driver starts.
-# Drivers launched together against a not-yet-existing file all run optuna's
-# alembic bootstrap at once and lose the race -- observed as
+# The storage of every driver --only selects, one per line.
+selected_storages() {
+    local i=0 c
+    while IFS= read -r c; do
+        i=$((i + 1))
+        if selected "$i" "$(study_of "$c")"; then storage_of "$c"; echo; fi
+    done <<EOF
+$cmds
+EOF
+}
+
+# Create each sqlite study database of the selected drivers, serially, before
+# any driver starts. Drivers launched together against a not-yet-existing file
+# all run optuna's alembic bootstrap at once and lose the race -- observed as
 # 'UNIQUE constraint failed: alembic_version.version_num' and 'database is
 # locked', which kills the driver seconds in. Doing it once here removes it.
-# Idempotent: on an existing database this only opens and closes it.
+# Idempotent: on an existing database this only opens and closes it. The
+# unselected drivers' files are left alone, since another job of the same
+# catalogue (another --only) may be creating them at this moment.
 if [ "$dry" -eq 0 ]; then
-    printf "%s\n" "$cmds" | while IFS= read -r c; do storage_of "$c"; echo; done |
-        sort -u | grep -v '^$' | while IFS= read -r url; do
+    selected_storages | sort -u | grep -v '^$' | while IFS= read -r url; do
         case "$url" in
             sqlite:///*)
                 path=${url#sqlite:///}

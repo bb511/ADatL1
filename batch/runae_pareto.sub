@@ -25,7 +25,11 @@ error  = batch/logs/runae_pareto.$(ClusterId).$(ProcId).err
 
 MY.SingularityImage = "/eos/user/l/lbehrens/containers/adl1t_lab-dev.sif"
 
-environment = "SEED=$(SEED) MI_GAMMA=$(GAMMA) MI_NUM_BINS=$(BINS) ARCHITECTURE_ID=$(ARCH) ENCODER_NODES_US=$(NODES) RUN_NAME=$(RUN_NAME) EXPERIMENT_NAME=$(EXPERIMENT_NAME) MAX_EPOCHS=$(MAX_EPOCHS) EXPERIMENT=physics/pareto_fet_train TRAINER=cpu CPU_THREADS=6 DATA_WORKERS=3"
+# DATA_SPLIT_SEED: empty = the original data split (42). Another split needs its
+# cache built first (condor_submit batch/prepare_split.sub) and an EXPERIMENT_NAME
+# naming it, e.g.
+#   condor_submit EXPERIMENT_NAME=Pareto-Front-261015-split666 DATA_SPLIT_SEED=666 batch/runae_pareto.sub
+environment = "SEED=$(SEED) MI_GAMMA=$(GAMMA) MI_NUM_BINS=$(BINS) ARCHITECTURE_ID=$(ARCH) ENCODER_NODES_US=$(NODES) RUN_NAME=$(RUN_NAME) EXPERIMENT_NAME=$(EXPERIMENT_NAME) DATA_SPLIT_SEED=$(DATA_SPLIT_SEED) MAX_EPOCHS=$(MAX_EPOCHS) EXPERIMENT=physics/pareto_fet_train TRAINER=cpu CPU_THREADS=6 DATA_WORKERS=3"
 
 # ---------------------------------------------------------------------------
 # Output transfer

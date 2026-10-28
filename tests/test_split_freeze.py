@@ -84,3 +84,63 @@ def test_aux_split_freezes_two_way(tmp_path):
 
     assert len(frozen) == 2
     assert all(np.array_equal(a, b) for a, b in zip(frozen, reloaded))
+
+
+# --- the split record (seed and fractions) ------------------------------------
+
+from types import SimpleNamespace  # noqa: E402
+
+from src.data.components import split_info as split_record  # noqa: E402
+
+
+def test_frozen_split_records_seed_and_fractions(tmp_path):
+    ready = _mlready(tmp_path, seed=666)
+    ready._frozen_split("zerobias", tuple(np.array_split(np.arange(100), 3)))
+
+    with np.load(tmp_path / "splits" / "zerobias.npz") as frozen:
+        assert split_record.stored_settings(frozen) == {
+            "seed": 666, "train": 0.6, "valid": 0.2, "test": 0.2, "split_aux": 0.6,
+        }
+
+
+def test_frozen_split_refuses_another_seed_under_the_same_name(tmp_path):
+    """The silent reuse this guards against: same cache name, different seed."""
+    _mlready(tmp_path, seed=666)._frozen_split("zerobias", tuple(np.array_split(np.arange(100), 3)))
+
+    with pytest.raises(split_record.SplitMismatchError, match="seed 666.*seed 1"):
+        _mlready(tmp_path, seed=1)._frozen_split("zerobias", tuple(np.array_split(np.arange(100), 3)))
+
+
+def test_frozen_split_refuses_other_fractions(tmp_path):
+    _mlready(tmp_path)._frozen_split("zerobias", tuple(np.array_split(np.arange(100), 3)))
+    other = _mlready(tmp_path)
+    other.split = {"train": 0.6, "valid": 0.25, "test": 0.15}
+
+    with pytest.raises(split_record.SplitMismatchError, match="0.6/0.25/0.15"):
+        other._frozen_split("zerobias", tuple(np.array_split(np.arange(100), 3)))
+
+
+def _legacy_file(tmp_path):
+    """A frozen split as written before the record existed: indices only."""
+    (tmp_path / "splits").mkdir()
+    parts = np.array_split(np.arange(100), 3)
+    np.savez(tmp_path / "splits" / "zerobias.npz", itrain=parts[0], ivalid=parts[1], itest=parts[2])
+    return tuple(parts)
+
+
+def test_legacy_frozen_split_is_the_original_seed_42_split(tmp_path):
+    drawn = _legacy_file(tmp_path)
+    loaded = _mlready(tmp_path, seed=42)._frozen_split("zerobias", drawn)
+    assert all(np.array_equal(a, b) for a, b in zip(loaded, drawn))
+
+    with pytest.raises(split_record.SplitMismatchError, match="predates the split record"):
+        _mlready(tmp_path, seed=666)._frozen_split("zerobias", drawn)
+
+
+def test_required_split_info_stops_a_job_on_an_unprepared_cache(tmp_path):
+    ready = _mlready(tmp_path, seed=666)
+    ready.require_split_info = True
+    ready.name = "cache_split666"
+
+    with pytest.raises(split_record.SplitNotPreparedError, match="prepare_split.sh"):
+        ready.prepare(SimpleNamespace(name="robust"), {})

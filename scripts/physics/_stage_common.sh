@@ -94,6 +94,60 @@ else
   TRAINER_ARGS=(trainer=cpu trainer.devices=1)
 fi
 
+# --- data split ---------------------------------------------------------------
+# DATA_SPLIT_SEED chooses the train/valid/test split of the zerobias data and the
+# valid/test split of the 21 auxiliary samples. Unset, empty or 42 is the original
+# split of every study before 2026-10-28 (cache <processor>_default). Any other
+# seed reads its own cache, <processor>_default_split<seed>, which
+# scripts/physics/prepare_split.sh must have built and checked first: with
+# require_split_info=true a job refuses to build or half-build a cache itself.
+# The weight seed (SEED) is a separate thing and is not touched by this.
+#
+# The split must be the same in every stage of a run, so two checks:
+#   * the study folder names its split: for a non-default seed EXPERIMENT_NAME
+#     must contain "split<seed>", and it must never name another split;
+#   * a run that already exists (stage 2, runae_test.sh, a resume) must have been
+#     trained on this split, as recorded in its resolved_config.yaml.
+: "${DATA_SPLIT_SEED:=}"
+[[ -n "$DATA_SPLIT_SEED" ]] || DATA_SPLIT_SEED=42
+[[ "$DATA_SPLIT_SEED" =~ ^[0-9]+$ ]] || {
+  echo "DATA_SPLIT_SEED must be a non-negative integer, got '$DATA_SPLIT_SEED'." >&2
+  exit 2
+}
+DATA_SPLIT_SEED=$((10#$DATA_SPLIT_SEED))
+export DATA_SPLIT_SEED
+
+if [[ "$EXPERIMENT_NAME" =~ split([0-9]+) ]]; then
+  _named_split=$((10#${BASH_REMATCH[1]}))
+else
+  _named_split=42
+fi
+if (( _named_split != DATA_SPLIT_SEED )); then
+  echo "FATAL: EXPERIMENT_NAME='${EXPERIMENT_NAME}' does not match DATA_SPLIT_SEED=${DATA_SPLIT_SEED}." >&2
+  echo "       A study on another data split lives in its own folder named after it," >&2
+  echo "       e.g. EXPERIMENT_NAME=Pareto-Front-261015-split${DATA_SPLIT_SEED}; the original" >&2
+  echo "       split (42) is the default and needs no DATA_SPLIT_SEED." >&2
+  exit 2
+fi
+
+_run_record="${ADL1T_OUTPUT_ROOT}/checkpoints/${EXPERIMENT_NAME}/${RUN_NAME}/resolved_config.yaml"
+if [[ -n "$EXPERIMENT_NAME" && -f "$_run_record" ]]; then
+  _trained_split="$(python3 -c '
+import sys, yaml
+config = yaml.safe_load(open(sys.argv[1])) or {}
+print(int(((config.get("data") or {}).get("data_mlready") or {}).get("seed", 42)))
+' "$_run_record")" || {
+    echo "FATAL: could not read the data split of $_run_record" >&2
+    exit 2
+  }
+  if (( _trained_split != DATA_SPLIT_SEED )); then
+    echo "FATAL: $RUN_NAME was trained on data split $_trained_split, but DATA_SPLIT_SEED=$DATA_SPLIT_SEED." >&2
+    echo "       Every stage of a run must use the split it was trained on." >&2
+    exit 2
+  fi
+fi
+unset _named_split _run_record _trained_split
+
 # Every stage shares these, so an accidental divergence between stage 1 and the
 # stages that read its checkpoint is impossible.
 # Staged data pre-flight. The extractor falls back to reading raw parquet when
@@ -134,6 +188,13 @@ COMMON_ARGS=(
 )
 if [[ -n "$EXPERIMENT_NAME" ]]; then
   COMMON_ARGS+=(experiment_name="$EXPERIMENT_NAME")
+fi
+if (( DATA_SPLIT_SEED != 42 )); then
+  COMMON_ARGS+=(
+    data.data_mlready.seed="$DATA_SPLIT_SEED"
+    data.data_mlready.split_suffix="_split${DATA_SPLIT_SEED}"
+    data.data_mlready.require_split_info=true
+  )
 fi
 
 # --- model hyperparameters --------------------------------------------------
@@ -212,6 +273,7 @@ stage_banner() {
   echo "   experiment:  $EXPERIMENT"
   echo "   exp. name:   ${EXPERIMENT_NAME:-<from the $EXPERIMENT config>}"
   echo "   trainer:     $TRAINER  (threads=$CPU_THREADS, workers=$DATA_WORKERS)"
+  echo "   data split:  seed $DATA_SPLIT_SEED$( (( DATA_SPLIT_SEED == 42 )) && echo ' (original)' || echo " (cache suffix _split$DATA_SPLIT_SEED)")"
   echo "   raw data:    $RAW_DATA_DIR"
   echo "   output root: $ADL1T_OUTPUT_ROOT"
   echo "   checkpoints: $ADL1T_OUTPUT_ROOT/checkpoints/${EXPERIMENT_NAME:-<experiment_name>}/$RUN_NAME"

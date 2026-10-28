@@ -1,0 +1,37 @@
+# Build the data caches of new train/valid/test splits, ONE job per split seed.
+#
+#   condor_submit batch/prepare_split.sub
+#
+# Run it, and wait until every job has finished, BEFORE submitting any study job
+# with DATA_SPLIT_SEED: those jobs refuse to start until the job here has written
+# mlready/<processor>_default_split<seed>/splits/split_info.yaml. The jobs of
+# different seeds write different cache folders, so they run side by side.
+#
+# They write straight into the staged data on EOS (PROJECT_ROOT in
+# batch/_stage_env.sh), about 15-20 GB per split.
+
+executable = batch/prepare_split.sh
+
+log    = batch/logs/prepare_split.$(ClusterId).log
+output = batch/logs/prepare_split.$(ClusterId).$(ProcId).out
+error  = batch/logs/prepare_split.$(ClusterId).$(ProcId).err
+
+MY.SingularityImage = "/eos/user/l/lbehrens/containers/adl1t_lab-dev.sif"
+
+environment = "DATA_SPLIT_SEED=$(DATA_SPLIT_SEED) TRAINER=cpu CPU_THREADS=6 DATA_WORKERS=3"
+
+request_gpus   = 0
+# Sized like stage 1 (measured 15273 MB with train + valid + auxiliary data
+# resident). This job holds one folder at a time, so it needs less; not measured.
+request_cpus   = 6
+request_memory = 18000
+request_disk   = 10GB
+
+# Normalising and writing a full split plus 21 auxiliary samples, then the
+# torch caches. Not measured; stage 1 spends ~12 min on loading alone.
++MaxRuntime = 21600
+
+# EOS returns transient I/O errors under load; a rerun reuses what is finished.
+on_exit_remove = (ExitBySignal == False && ExitCode == 0) || (NumJobStarts >= 3)
+
+queue DATA_SPLIT_SEED in (666, 1)

@@ -16,7 +16,11 @@ error  = batch/logs/runprobes_pareto.$(ClusterId).$(ProcId).err
 
 MY.SingularityImage = "/eos/user/l/lbehrens/containers/adl1t_lab-dev.sif"
 
-environment = "SEED=$(SEED) MI_GAMMA=$(GAMMA) MI_NUM_BINS=$(BINS) ARCHITECTURE_ID=$(ARCH) ENCODER_NODES_US=$(NODES) RUN_NAME=$(RUN_NAME) EXPERIMENT_NAME=$(EXPERIMENT_NAME) TRAINER=cpu CPU_THREADS=8 DATA_WORKERS=3"
+# DATA_SPLIT_SEED: empty = the original data split (42). Another split needs its
+# cache built first (condor_submit batch/prepare_split.sub) and an EXPERIMENT_NAME
+# naming it, e.g.
+#   condor_submit EXPERIMENT_NAME=Pareto-Front-261015-split666 DATA_SPLIT_SEED=666 batch/runprobes_pareto.sub
+environment = "SEED=$(SEED) MI_GAMMA=$(GAMMA) MI_NUM_BINS=$(BINS) ARCHITECTURE_ID=$(ARCH) ENCODER_NODES_US=$(NODES) RUN_NAME=$(RUN_NAME) EXPERIMENT_NAME=$(EXPERIMENT_NAME) DATA_SPLIT_SEED=$(DATA_SPLIT_SEED) TRAINER=cpu CPU_THREADS=8 DATA_WORKERS=3"
 
 # No transfer_output_files: this job writes its JSON and PNGs straight into the
 # existing checkpoint tree on EOS, so there is nothing in the sandbox to return.

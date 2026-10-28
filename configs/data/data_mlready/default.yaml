@@ -14,5 +14,13 @@ split:
 split_aux: 0.6
 
 cache_root_dir: ${paths.data_dir}
-name: ${data.data_processor.name}_default
+# Seed of the train/valid/test permutation (and of the aux valid/test split). 42 is
+# the split of every study so far. Another seed needs its own cache, so the name
+# carries split_suffix ("" for 42, "_split<seed>" otherwise). Build such a cache once
+# with scripts/physics/prepare_split.sh; the stage scripts then set seed,
+# split_suffix and require_split_info from DATA_SPLIT_SEED. The frozen split records
+# its seed and fractions, so asking a cache for another split fails loudly.
 seed: 42
+split_suffix: ""
+require_split_info: false
+name: ${data.data_processor.name}_default${.split_suffix}

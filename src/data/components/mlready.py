@@ -13,6 +13,7 @@ from colorama import Fore
 
 from src.utils import pylogger
 from . import plots
+from . import split_info as split_record
 from .normalization import L1DataNormalizer
 
 log = pylogger.RankedLogger(__name__)
@@ -26,6 +27,14 @@ class L1DataMLReady:
     cache_root_dir: str = "data/"
     name: str = "default"
     seed: int = 42
+    # Part of ``name`` in configs/data/data_mlready/default.yaml, so every split
+    # other than the original seed-42 one gets its own cache (e.g. "_split666").
+    # Kept as a field only so the resolved config records it.
+    split_suffix: str = ""
+    # Refuse to run unless scripts/physics/prepare_split.sh has built and checked
+    # this cache (splits/split_info.yaml). Set by DATA_SPLIT_SEED in the stage
+    # scripts, so training jobs never build a new split's cache themselves.
+    require_split_info: bool = False
     verbose: bool = False
 
     def prepare(self, normalizer: L1DataNormalizer, select_feats: dict, flag: str = ""):
@@ -49,6 +58,8 @@ class L1DataMLReady:
         # The split does not depend on the normalizer, so it is frozen one level above it
         # and shared by every normalizer variant.
         self.splits_dir = self.cache_folder / "splits"
+        if self.require_split_info:
+            split_record.require_split_info(self.splits_dir, self.split_settings(), self.name)
         self.cache_folder /= normalizer.name
         self.flag = flag
 
@@ -62,6 +73,10 @@ class L1DataMLReady:
         self._prepare_maindata()
         self._prepare_auxdata()
 
+    def split_settings(self) -> dict:
+        """Seed and fractions that decide the split, as recorded with it."""
+        return split_record.split_settings(self.seed, self.split, self.split_aux)
+
     def _frozen_split(self, name: str, drawn: tuple) -> tuple:
         """Return the split stored under splits/<name>.npz, writing it on first use.
 
@@ -69,12 +84,17 @@ class L1DataMLReady:
         exists, so the random stream advances identically whether or not the cache is
         populated. Without that, deleting one .npz would silently change every split
         drawn after it.
+
+        The file also records the seed and fractions it was drawn with. Loading it
+        for other settings raises, instead of silently reusing the old split; a file
+        without that record is the original seed-42 60/20/20 split.
         """
         self.splits_dir.mkdir(parents=True, exist_ok=True)
         cache_file = self.splits_dir / f"{name}.npz"
 
         if cache_file.is_file():
             with np.load(cache_file) as frozen:
+                split_record.check_frozen(frozen, self.split_settings(), cache_file)
                 loaded = tuple(frozen[f"i{k}"] for k in ("train", "valid", "test")[-len(drawn):])
             if sum(len(i) for i in loaded) != sum(len(i) for i in drawn):
                 raise ValueError(
@@ -84,7 +104,11 @@ class L1DataMLReady:
             return loaded
 
         keys = ("train", "valid", "test")[-len(drawn):]
-        np.savez(cache_file, **{f"i{k}": i for k, i in zip(keys, drawn)})
+        np.savez(
+            cache_file,
+            **{f"i{k}": i for k, i in zip(keys, drawn)},
+            **split_record.npz_fields(self.split_settings()),
+        )
         log.info(Fore.GREEN + f"Froze the {name} split at: {cache_file}")
 
         return drawn

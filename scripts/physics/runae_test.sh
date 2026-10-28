@@ -104,6 +104,8 @@ for key, expected in (("experiment_name", experiment_name), ("run_name", run_nam
 
 algorithm = config.get("algorithm") or {}
 pareto = "pareto" in (config.get("tags") or [])
+# The data split the run was trained on: its test set is the one to use.
+emit("RUN_DATA_SPLIT_SEED", int(((config.get("data") or {}).get("data_mlready") or {}).get("seed", 42)))
 emit("MANIFEST_EXPERIMENT", "physics/pareto_fet" if pareto else "physics/ae")
 emit("MANIFEST_PARETO", int(pareto))
 if pareto:
@@ -137,6 +139,10 @@ PY
   exit 2
 }
 eval "$RUN_SETTINGS"
+# Test the run on the test set of its own data split. Setting DATA_SPLIT_SEED to
+# anything else is refused by _stage_common.sh.
+: "${DATA_SPLIT_SEED:=$RUN_DATA_SPLIT_SEED}"
+export DATA_SPLIT_SEED
 
 EXPERIMENT="${TEST_EXPERIMENT:-$MANIFEST_EXPERIMENT}"
 PARETO_CANDIDATE="$MANIFEST_PARETO"

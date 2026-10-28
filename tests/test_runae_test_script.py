@@ -96,3 +96,23 @@ def test_runs_without_checkpoint_or_record_are_refused(tmp_path, missing):
     result = _run(tmp_path, PARETO_CONFIG, files=files)
     assert result.returncode == 2
     assert f"missing" in result.stderr and missing in result.stderr
+
+
+def test_split_run_is_tested_on_the_test_set_of_its_own_split(tmp_path):
+    config = {**PARETO_CONFIG, "data": {"data_mlready": {"seed": 666}}}
+    args = _overrides(_run(tmp_path, config, experiment="Exp-split666"))
+    for expected in ("data.data_mlready.seed=666", "data.data_mlready.split_suffix=_split666",
+                     "data.data_mlready.require_split_info=true"):
+        assert expected in args
+
+
+def test_original_split_run_gets_no_split_overrides(tmp_path):
+    args = _overrides(_run(tmp_path, PARETO_CONFIG))
+    assert not any(a.startswith("data.data_mlready.") for a in args)
+
+
+def test_testing_a_run_on_another_split_is_refused(tmp_path):
+    config = {**PARETO_CONFIG, "data": {"data_mlready": {"seed": 666}}}
+    result = _run(tmp_path, config, experiment="Exp-split666", DATA_SPLIT_SEED="1")
+    assert result.returncode == 2
+

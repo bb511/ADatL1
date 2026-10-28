@@ -18,18 +18,18 @@ error  = batch/logs/prepare_split.$(ClusterId).$(ProcId).err
 
 MY.SingularityImage = "/eos/user/l/lbehrens/containers/adl1t_lab-dev.sif"
 
-environment = "DATA_SPLIT_SEED=$(DATA_SPLIT_SEED) TRAINER=cpu CPU_THREADS=6 DATA_WORKERS=3"
+environment = "DATA_SPLIT_SEED=$(DATA_SPLIT_SEED) TRAINER=cpu CPU_THREADS=4 DATA_WORKERS=3"
 
 request_gpus   = 0
-# Sized like stage 1 (measured 15273 MB with train + valid + auxiliary data
-# resident). This job holds one folder at a time, so it needs less; not measured.
-request_cpus   = 6
-request_memory = 18000
+# Measured on cluster 835372 (seeds 666 and 1, 2026-10-28): peak 10941 MB and
+# 10754 MB, CPU use 0.7-0.9 cores (bound by EOS I/O), 28-33 min wall time.
+# 12000 MB = 4 x 3000 MB per core keeps CERN from rescaling the request.
+request_cpus   = 4
+request_memory = 12000
 request_disk   = 10GB
 
-# Normalising and writing a full split plus 21 auxiliary samples, then the
-# torch caches. Not measured; stage 1 spends ~12 min on loading alone.
-+MaxRuntime = 21600
+# About 30 min measured; EOS can be much slower under load.
++MaxRuntime = 10800
 
 # EOS returns transient I/O errors under load; a rerun reuses what is finished.
 on_exit_remove = (ExitBySignal == False && ExitCode == 0) || (NumJobStarts >= 3)

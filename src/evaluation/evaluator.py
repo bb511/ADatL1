@@ -398,6 +398,7 @@ class Evaluator:
         workers: int = 1,
         threads: int = 1,
         tracking_uri: str | None = None,
+        resume: bool = True,
     ) -> list[dict]:
         """Evaluate every run of a lattice by ``dump.evaluate_lattice``."""
         settings = self._dump_settings()
@@ -411,6 +412,7 @@ class Evaluator:
             workers,
             threads,
             tracking_uri,
+            resume,
         )
 
     def evaluate_dump(

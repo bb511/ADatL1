@@ -21,6 +21,9 @@ SPLITS = ("val", "test")
 
 def write_outputs(out: Path, tables: dict[str, list[dict]], run: dict) -> None:
     out.mkdir(parents=True, exist_ok=True)
+    # Removed first and written last, so that a run.json on disk vouches for the tables
+    # beside it however the writing was cut (the resume of src.evaluation.dump).
+    (out / "run.json").unlink(missing_ok=True)
     for name, rows in tables.items():
         columns = list(dict.fromkeys(key for row in rows for key in row))
         with open(out / f"{name}.csv", "w", newline="") as file:

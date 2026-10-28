@@ -47,6 +47,7 @@ def main(cfg: DictConfig) -> None:
         workers=cfg.workers,
         threads=cfg.worker_threads,
         tracking_uri=cfg.tracking_uri,
+        resume=cfg.resume,
     )
 
     log.info(f"Selecting on the lattice into {cfg.out_dir}")

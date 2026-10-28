@@ -1,5 +1,6 @@
 import csv
 import json
+import logging
 import math
 import re
 import shutil
@@ -25,6 +26,7 @@ from src.evaluation.callbacks.utils.mlflow import log_metrics_to_mlflow
 from src.evaluation.callbacks.wasserstein import _wasserstein_1d
 from src.evaluation.components.pairing import hyperpoint
 from src.evaluation.components.rebuild import null_sets, signal_sets
+from src.evaluation.components.tables import write_outputs
 from src.evaluation.dump import RunEvaluation, _init_worker
 from src.evaluation.evaluator import Evaluator
 from src.evaluation.lattice import select_lattice
@@ -589,6 +591,96 @@ def test_worker_threads_leave_the_tables_unchanged(lattices, tmp_path):
     assert set(outputs[1]) == set(outputs[2])
     for path, content in outputs[1].items():
         assert outputs[2][path] == content, path
+
+
+def _cifar10_evaluator() -> Evaluator:
+    cfg = _compose("cifar10")
+    drop_absent_sets(cfg, TOY_SETS)
+    return hydra.utils.instantiate(cfg.evaluation.evaluator)
+
+
+@pytest.fixture(scope="module")
+def evaluated(lattices, tmp_path_factory) -> SimpleNamespace:
+    out = tmp_path_factory.mktemp("evaluated")
+    evaluator = _cifar10_evaluator()
+    runs = evaluator.evaluate_lattice(lattices.full, out, "toy")
+    tables = _outputs(out)
+    return SimpleNamespace(evaluator=evaluator, out=out, runs=runs, tables=tables)
+
+
+def _edit_run(path: Path, **changes) -> None:
+    run = json.loads((path / "run.json").read_text())
+    (path / "run.json").write_text(json.dumps({**run, **changes}))
+
+
+@pytest.mark.parametrize(
+    "changes, cut, removed",
+    [
+        # What a kill leaves while the tables are written, and while run.json is.
+        ({}, "val.csv", "run.json"),
+        ({}, "run.json", None),
+        ({}, None, "picks.csv"),
+        # The complete files of another evaluation.
+        ({"dump": "elsewhere"}, None, None),
+        ({"typical": TYPICAL}, None, None),
+        ({"epochs": 1}, None, None),
+    ],
+)
+def test_resume_redoes_a_run_cut_or_evaluated_otherwise(
+    lattices, evaluated, tmp_path, changes, cut, removed
+):
+    out = tmp_path / "eval"
+    shutil.copytree(evaluated.out, out)
+    run_a, run_b = out / "runs" / "run_a", out / "runs" / "run_b"
+    # A replay of run_a would write its run.json again, without the mark.
+    _edit_run(run_a, mlflow_run_id="stored")
+    _edit_run(run_b, **changes)
+    if cut is not None:
+        content = (run_b / cut).read_bytes()
+        (run_b / cut).write_bytes(content[: len(content) // 2])
+    if removed is not None:
+        (run_b / removed).unlink()
+    runs = evaluated.evaluator.evaluate_lattice(lattices.full, out, "toy")
+    assert runs == [{**evaluated.runs[0], "mlflow_run_id": "stored"}, evaluated.runs[1]]
+    outputs = _outputs(out)
+    for path in [f"runs/run_b/{table}" for table in TABLES]:
+        assert outputs[path] == evaluated.tables[path], path
+
+
+def test_a_rewrite_cut_in_its_tables_leaves_no_run_json(tmp_path, monkeypatch):
+    tables, run = {"val": [{"epoch": -1}], "test": [{"epoch": -1}]}, {"run": "run_a"}
+    write_outputs(tmp_path, tables, run)
+
+    def kill(self, rows):
+        raise RuntimeError("killed")
+
+    monkeypatch.setattr(csv.DictWriter, "writerows", kill)
+    with pytest.raises(RuntimeError, match="killed"):
+        write_outputs(tmp_path, tables, run)
+    assert (tmp_path / "val.csv").exists() and not (tmp_path / "run.json").exists()
+
+
+def test_resume_logs_only_the_runs_it_replays_to_mlflow(lattices, tmp_path, caplog):
+    uri, out = f"file:{tmp_path / 'mlruns'}", tmp_path / "eval"
+    evaluator = _cifar10_evaluator()
+
+    def evaluate(resume: bool = True) -> list[dict]:
+        return evaluator.evaluate_lattice(
+            lattices.full, out, "toy", tracking_uri=uri, resume=resume
+        )
+
+    first = evaluate()
+    (out / "runs" / "run_b" / "run.json").unlink()
+    caplog.set_level(logging.INFO, logger="src.evaluation.dump")
+    resumed, redone = evaluate(), evaluate(resume=False)
+    assert resumed[0] == first[0]
+    assert caplog.text.count("Skipping") == 1 and "Skipping run_a" in caplog.text
+    # Each run's first evaluation, run_b's resumed one and both redone.
+    assert len({run["mlflow_run_id"] for run in first + resumed + redone}) == 5
+    client = MlflowClient(uri)
+    experiment_id = client.get_experiment_by_name("toy_eval").experiment_id
+    names = [run.info.run_name for run in client.search_runs([experiment_id])]
+    assert sorted(names) == ["run_a"] * 2 + ["run_b"] * 3
 
 
 def test_hyperpoint_takes_the_swept_overrides(tmp_path):

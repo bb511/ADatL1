@@ -6,7 +6,6 @@
 # For the different available options, look through ~/src/data/components/normalization.py
 
 _target_: src.data.components.normalization.L1DataNormalizer
-# Feature-wise standard scaling, fitted on the training split only. Used by the
-# DTE algorithm, whose additive corruption assumes unit-variance features.
+# Feature-wise standard scaling, fitted on the training split only.
 name: standard
 hyperparams: null

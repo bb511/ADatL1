@@ -130,8 +130,7 @@ callbacks:
   # The weights and the three probes' scores at every epoch, for CAP read offline, and
   # validation normal and the single-neutrino gun at the sanity pass alone. aux_seed,
   # aux_size and aux_batch_size keep npd's aux_seed, aux_size and batch_size (0,
-  # 10,000, 1,024), so that the dumped autouad scores are NPD's: DTE fixes its
-  # evaluation noise per position in a batch.
+  # 10,000, 1,024), so that the dumped autouad scores are NPD's.
   score_dump:
     keys: ["ascore/full", "fit/full"]
     stored_sets: []

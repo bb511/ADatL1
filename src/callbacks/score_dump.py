@@ -10,20 +10,28 @@ evaluation on top of it:
 
 - ``config.yaml``, ``overrides.yaml``: the run's Hydra files.
 - ``meta.pt``: ``target_rate``, ``base_rate``, ``target_fpr`` and ``module`` (the class
-  of the LightningModule); for each split (``val``, ``test``, ``aux`` and, with the
-  training pass, ``train``) the ``names`` of its loaders, the ``keys`` the files hold,
-  and the ``batch_sizes`` and ``labels`` of every set; ``stored``, the val and test
-  sets whose scores are kept at every pass; ``initial_sets``, the val sets kept at the
-  sanity pass alone; ``aux_seed``, ``aux_size`` and the training moments
-  ``aux_lower``, ``aux_upper``, ``aux_mean``, ``aux_std``, each of the shape of one
-  input; ``aux_masked``, whether the auxiliary points carry data masks.
+  of the LightningModule); for each split (``val``, ``test``, ``aux``, with the
+  training pass ``train`` and with the callback's ``sds`` the pseudo-sets' ``sds``)
+  the ``names`` of its loaders, the ``keys`` the files hold, and the ``batch_sizes``
+  and ``labels`` of every set; ``stored``, the val and test sets whose scores are kept
+  at every pass; ``initial_sets``, the val sets kept at the sanity pass alone;
+  ``aux_seed``, ``aux_size`` and the training moments ``aux_lower``, ``aux_upper``,
+  ``aux_mean``, ``aux_std``, each of the shape of one input; ``aux_masked``, whether
+  the auxiliary points carry data masks; with ``sds``, its ``max_rows`` and
+  ``row_seed`` as ``sds_max_rows`` and ``sds_row_seed``.
 - ``initial.pt``: the sanity pass on the untrained weights (``epoch: -1``), which must
   cover the whole validation set (``num_sanity_val_steps=-1``); its ``val`` holds the
   ``initial_sets`` besides the stored sets.
 - ``epoch_<nnnn>.pt``: ``epoch``; ``val`` and ``test``, ``{set: {key: (n,)}}`` for the
   stored sets; ``aux``, the scores of ``gaussian``, ``uniform`` and ``autouad``;
   ``train``, with the training pass only, the per-sample ``loss/full`` in the row order
-  of ``data_train``; ``state_dict``, every weight and buffer on CPU.
+  of ``data_train``; ``sds``, with ``sds`` only, the scores of ``sds_targets`` and
+  ``sds_outliers``; ``state_dict``, every weight and buffer on CPU.
+
+With ``sds``, the pseudo-sets are those of ``src.callbacks.sds.sds_inputs`` over the
+training inputs, without their data mask, as the replay (``src/evaluation/dump.py``)
+builds them; it serves their stored scores where ``max_rows`` and ``row_seed`` match
+its own, and raises otherwise.
 
 On data with a mask (the L1AD data), the i-th point of each auxiliary set takes the
 mask of the i-th training row that ``drawn_masks(mask, aux_size, aux_seed)`` draws and
@@ -45,6 +53,8 @@ from src.data.utils import unpack_batch
 # The per-sample loss, the only quantity stored for the training set.
 TRAIN_KEYS = ["loss/full"]
 HYDRA_FILES = ["config.yaml", "overrides.yaml"]
+# What builds the SDS pseudo-sets besides the training inputs, as meta.pt records it.
+SDS_PARAMS = ("max_rows", "row_seed")
 
 
 def _per_event(score, key: str, n: int) -> torch.Tensor:
@@ -195,6 +205,9 @@ class ScoreDumpCallback(Callback):
     :param initial_sets: Validation sets whose scores are stored at the sanity pass
         alone, besides the stored sets.
     :param train_pass: Whether every pass stores the per-sample training loss.
+    :param sds: ``max_rows`` and ``row_seed`` of the SDS pseudo-sets whose scores every
+        pass stores, as ``extra_sets.sds`` of the evaluation configs gives them; None
+        stores none, and the replay rescores them from the weights.
     """
 
     def __init__(
@@ -208,6 +221,7 @@ class ScoreDumpCallback(Callback):
         aux_batch_size: int = 1024,
         initial_sets: list[str] | None = None,
         train_pass: bool = True,
+        sds: dict | None = None,
     ):
         super().__init__()
         self.dirpath = Path(dirpath)
@@ -219,6 +233,7 @@ class ScoreDumpCallback(Callback):
         self.aux_batch_size = aux_batch_size
         self.initial_sets = list(initial_sets or [])
         self.train_pass = train_pass
+        self.sds = None if sds is None else {k: sds[k] for k in SDS_PARAMS}
         self._meta_written = False
 
     def on_fit_start(self, trainer, pl_module):
@@ -268,6 +283,9 @@ class ScoreDumpCallback(Callback):
             "aux_size": self.aux_size,
             "aux_masked": aux_masked,
             **input_moments(x_train),
+            **(
+                {} if self.sds is None else {f"sds_{k}": v for k, v in self.sds.items()}
+            ),
         }
 
     def _build_loaders(self, data_train, test: dict, mask: torch.Tensor | None) -> dict:
@@ -279,7 +297,16 @@ class ScoreDumpCallback(Callback):
         if self.train_pass:
             # Unshuffled, so that the losses follow the rows of data_train.
             loaders["train"] = {"train": DataLoader(data_train, batch_size=batch_size)}
+        if self.sds is not None:
+            loaders["sds"] = self._sds_loaders(unpack_batch(data_train.tensors).x)
         return loaders
+
+    def _sds_loaders(self, x_train: torch.Tensor) -> dict:
+        # Imported here: src.callbacks.sds imports this module.
+        from src.callbacks.sds import SDS_SETS, sds_inputs
+
+        inputs = sds_inputs(x_train, self.sds["max_rows"], self.sds["row_seed"])
+        return {n: placeholder_loader(inputs[n], self.aux_batch_size) for n in SDS_SETS}
 
     def on_validation_epoch_start(self, trainer, pl_module):
         stored = self._stored["val"]

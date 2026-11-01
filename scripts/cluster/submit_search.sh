@@ -21,7 +21,7 @@
 #   bash scripts/cluster/submit_search.sh --list    scripts/physics/runsvdd_search.sh
 #   bash scripts/cluster/submit_search.sh --dry-run scripts/physics/runsvdd_search.sh
 #   bash scripts/cluster/submit_search.sh           scripts/physics/runsvdd_search.sh
-#   bash scripts/cluster/submit_search.sh --only 1,3 scripts/physics/rundte_search.sh
+#   bash scripts/cluster/submit_search.sh --only 1,3 scripts/physics/runddl_search.sh
 #   bash scripts/cluster/submit_search.sh --gpus 4 --wait scripts/cifar10/runae_search.sh
 #
 #   --list              list the drivers in the file (with their launcher) and exit

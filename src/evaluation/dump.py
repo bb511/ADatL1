@@ -25,6 +25,7 @@ from src.callbacks.components.selection import (
     epoch_pick,
     smoothed,
 )
+from src.callbacks.score_dump import SDS_PARAMS
 from src.evaluation.components.pairing import hyperpoint
 from src.evaluation.components.rebuild import (
     ROOT,
@@ -73,6 +74,19 @@ def _experiment_id(client: MlflowClient, name: str) -> str:
     if experiment is not None:
         return experiment.experiment_id
     return client.create_experiment(name)
+
+
+def _check_stored_sds(meta: dict, sds: dict) -> None:
+    """Raise ValueError where the dump stores the scores of pseudo-sets that ``sds``
+    would build otherwise."""
+    if "sds" not in meta:
+        return
+    stored = {k: meta[f"sds_{k}"] for k in SDS_PARAMS}
+    if stored != {k: sds[k] for k in SDS_PARAMS}:
+        raise ValueError(
+            f"The dump stores the SDS pseudo-sets of {stored}, the evaluation would "
+            f"build those of {dict(sds)}."
+        )
 
 
 class RunEvaluation:
@@ -149,6 +163,7 @@ class RunEvaluation:
         val, data_train = datamodule.val_dataloader(), datamodule.data_train
         sds = self.extra_sets.get("sds")
         if sds:
+            _check_stored_sds(self.meta, sds)
             sds = cached_sds(data_train.tensors[0], sds["max_rows"], sds["row_seed"])
         train = data_train if self.extra_sets.get("train") else None
         aux = bool(self.extra_sets.get("aux"))

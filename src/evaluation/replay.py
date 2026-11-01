@@ -11,7 +11,8 @@ epoch file without ``state_dict``, as in a scores-only copy of a dump, is replay
 from its stored scores alone: a set or key that would be rescored from its weights
 raises. The extra sets of the validation pass (the auxiliary sets, the training set
 and the SDS pseudo-sets) are wrapped here in the loaders that pass appends to the
-validation loaders.
+validation loaders; the pseudo-sets are served from the dump where it stores their
+scores (``ScoreDumpCallback``'s ``sds``) and rescored otherwise.
 """
 
 from pathlib import Path
@@ -27,6 +28,9 @@ from src.data.utils import unpack_batch
 # The parts of an epoch's record that each pass serves; the loader names of one pass
 # are unique across its parts.
 PASS_PARTS = {"val": ("val", "aux", "train"), "test": ("test",)}
+# The parts served where an epoch's record holds them: dumps written without the SDS
+# pseudo-sets lack theirs.
+OPTIONAL_PARTS = {"val": ("sds",), "test": ()}
 # The keys rescored from the weights, by part and stored set, where the dump lacks them,
 # as dumps written before fit/full joined the dump keys do: the fit callback reads
 # validation normal alone.
@@ -143,7 +147,8 @@ class ReplayModule(LightningModule):
 
     def serve(self, split: str) -> None:
         """Serve the stored sets of the 'val' or the 'test' pass."""
-        parts = PASS_PARTS[split]
+        optional = [part for part in OPTIONAL_PARTS[split] if part in self.record]
+        parts = (*PASS_PARTS[split], *optional)
         self._served = {
             name: scores for part in parts for name, scores in self.record[part].items()
         }
@@ -211,7 +216,7 @@ def extra_loaders(meta: dict, data_train, sds: dict | None, aux: bool = True):
     (when ``aux``); ``train``, the training set unshuffled with the dump's batch size
     (when ``data_train`` is not None); ``sds_targets`` and ``sds_outliers`` (when
     ``sds``, a result of ``src.callbacks.sds.sds_inputs``, is not None). Every set
-    carries label 0; the dump's batch sizes make the stored scores of the first four
+    carries label 0; the dump's batch sizes make the stored scores of every set
     servable.
     """
     sizes = {**meta["aux"]["batch_sizes"], **meta["train"]["batch_sizes"]}

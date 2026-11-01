@@ -5,7 +5,7 @@ from src.data.utils import unpack_batch
 
 
 class ImageDeepSVDD(DeepSVDD):
-    """Image Deep SVDD sharing the constrained implementation with tabular SVDD."""
+    """Deep SVDD on images of shape (batch, channels, height, width), unflattened."""
 
     def __init__(self, *args, target_rate: float = 0.01, **kwargs):
         super().__init__(*args, target_rate=target_rate, **kwargs)

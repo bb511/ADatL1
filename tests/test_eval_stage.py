@@ -520,10 +520,19 @@ def lattices(tmp_path_factory) -> SimpleNamespace:
     return SimpleNamespace(full=root / "full", stripped=root / "stripped")
 
 
+def _drop_image_bank(cfg) -> None:
+    # colour_spectral reads [n, C, H, W] images, which the toy's vectors are not.
+    callbacks = cfg.evaluation.evaluator.dump_callbacks
+    with open_dict(cfg):
+        for name in [n for n, c in callbacks.items() if "representation" in c]:
+            del callbacks[name]
+
+
 def _evaluate_and_select(scores_dir: Path, out: Path, *overrides: str, **pool) -> None:
     # The two steps of src/eval.py, on the CIFAR-10 evaluation.
     cfg = _compose("cifar10", *overrides)
     drop_absent_sets(cfg, TOY_SETS)
+    _drop_image_bank(cfg)
     evaluator = hydra.utils.instantiate(cfg.evaluation.evaluator)
     evaluator.evaluate_lattice(scores_dir, out, "toy", **pool)
     selection = OmegaConf.to_container(cfg.selection, resolve=True)
@@ -596,6 +605,7 @@ def test_worker_threads_leave_the_tables_unchanged(lattices, tmp_path):
 def _cifar10_evaluator() -> Evaluator:
     cfg = _compose("cifar10")
     drop_absent_sets(cfg, TOY_SETS)
+    _drop_image_bank(cfg)
     return hydra.utils.instantiate(cfg.evaluation.evaluator)
 
 

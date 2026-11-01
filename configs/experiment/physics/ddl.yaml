@@ -4,8 +4,7 @@ defaults:
   - /cap: provisional
   - /callbacks/util@callbacks.score_dump: score_dump
   - override /data: basis
-  - override /data/data_normalizer: standard
-  - override /algorithm: dte
+  - override /algorithm: ddl
   - override /callbacks: default
   - override /trainer: cpu
   - override /evaluation: default
@@ -13,9 +12,9 @@ defaults:
   - override /logger: mlflow
 
 seed: 123
-tags: ["dte", "pool"]
+tags: ["ddl", "pool"]
 
-experiment_name: physics_dte_pool
+experiment_name: physics_ddl_pool
 run_name: ${short_hash:${hydra:runtime.output_dir},12}
 
 data:
@@ -47,23 +46,35 @@ optimized_metric_config:
     callback:
       name: fit
       params:
-        ckpt_name: null
+        ckpt_name: null # This will be filled in with the best ckpt of the main metric.
     direction: minimize
 
+# Every default lies inside hparams_search/physics/ddl_optuna.yaml.
 algorithm:
+  # What rate is the AD algorithm supposed to work at, in kHz.
   target_rate: 0.25
   base_rate: 28608.8064
-  # The basis data processing returns 117 features.
-  predictor:
-    in_dim: 117
-  # In the search space, unlike the shared default of 7.
-  n_bins: 5
+  # The basis data processing returns 117 features. Physics batches carry the data
+  # mask, so the noise and the loss cover the present features alone.
+  in_dim: 117
+
+  denoiser:
+    width: 128
+    depth: 2
+    time_dim: 32
+    dropout: 0.0
+    activation: silu
+
+  n_steps: 100
+  beta_end: 0.02
+  n_score_steps: 10
 
   optimizer:
     _partial_: true
     _target_: torch.optim.AdamW
-    lr: 1.0e-4
-    weight_decay: 5.0e-4
+    lr: 1.0e-3
+    # The physics MLP families' value, unlike the template's 1e-4.
+    weight_decay: 1.0e-3
     betas: [0.9, 0.999]
     eps: 1e-8
 
@@ -120,8 +131,7 @@ callbacks:
   # The weights and the three probes' scores at every epoch, for CAP read offline, and
   # validation normal and the single-neutrino gun at the sanity pass alone. aux_seed,
   # aux_size and aux_batch_size keep npd's aux_seed, aux_size and batch_size (0,
-  # 10,000, 1,024), so that the dumped autouad scores are NPD's: DTE fixes its
-  # evaluation noise per position in a batch.
+  # 10,000, 1,024), so that the dumped autouad scores are NPD's.
   score_dump:
     keys: ["ascore/full", "fit/full"]
     stored_sets: []

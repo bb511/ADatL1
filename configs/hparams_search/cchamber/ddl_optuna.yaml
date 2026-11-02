@@ -20,7 +20,9 @@ hydra:
     n_trials: 50
     storage: sqlite:///logs/optuna/cchamber/ddl_pool.db?timeout=600
     params:
-      algorithm.optimizer.lr: tag(log, interval(3e-5, 1e-2))
+      # Ceiling 5e-3: at 1e-2 the top corner (width 128, depth 3, no clip, SiLU) collapsed to
+      # one constant score after 46-76 epochs on both tunnels (2 Nov 2026).
+      algorithm.optimizer.lr: tag(log, interval(3e-5, 5e-3))
       trainer.gradient_clip_val: choice(0.0, 0.5, 1.0, 2.0)
       algorithm.n_steps: choice(100, 200, 500, 1000)
       algorithm.beta_end: tag(log, interval(5e-3, 5e-2))

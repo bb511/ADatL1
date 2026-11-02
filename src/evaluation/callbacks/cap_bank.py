@@ -4,6 +4,7 @@ from pathlib import Path
 import torch
 from pytorch_lightning.callbacks import Callback
 
+from src.callbacks.components.utils import disjoint_rows, row_subset
 from src.data.utils import unpack_batch
 from src.evaluation.callbacks import utils
 from src.evaluation.callbacks.components.cap.bank import build_couplings
@@ -19,7 +20,12 @@ FIT_SET = "train"
 
 
 def _inputs(batch) -> torch.Tensor:
-    return unpack_batch(batch).x.detach().cpu()
+    """The inputs of a batch, zero wherever a data mask marks them padded."""
+    view = unpack_batch(batch)
+    x = view.x.detach().cpu()
+    if view.mask is None:
+        return x
+    return torch.where(view.mask.detach().cpu().bool(), x, torch.zeros_like(x))
 
 
 class CAPBankCallback(Callback):
@@ -37,7 +43,13 @@ class CAPBankCallback(Callback):
     The scores of the two sets at the checkpoint named ``initial``, which the dump
     stage replays first, are kept: ``disp`` reads them as the initial state's at that
     checkpoint and every later one. Before such a checkpoint they are NaN, and so are
-    disp's values. Nothing is plotted.
+    disp's values. With ``max_rows_1`` or ``max_rows_2``, the scores and inputs of the
+    set are cut to ``row_subset(n, max_rows, row_seed)`` of its n rows, the same rows
+    at every checkpoint, and so are the reference's where it is dataset_2. A reference
+    that is dataset_1 takes the next max_rows_1 rows of the same permutation, disjoint
+    from X1's, and so needs max_rows_1 at most half of dataset_1's rows. Inputs with a
+    data mask (the L1AD data) are zero wherever it marks them padded.
+    Nothing is plotted.
 
     :param output_name: Name of the model output used as anomaly score.
     :param dataset_1: Name of the test dataloader of X1.
@@ -56,6 +68,10 @@ class CAPBankCallback(Callback):
     :param x2_blocks: With k, dataset_2's rows are read as k equal consecutive blocks,
         each one ot subsample (the members of a pool, each a changed copy of X1), as
         ``bank.build_couplings`` takes its ``blocks``.
+    :param max_rows_1: Rows of dataset_1 kept, a seeded subset; None keeps every row.
+        ot needs N2 >= N1 and builds an N1 x N1 cost matrix.
+    :param max_rows_2: Rows of dataset_2 kept, likewise.
+    :param row_seed: Seed of both subsets.
     """
 
     def __init__(
@@ -70,6 +86,9 @@ class CAPBankCallback(Callback):
         representation: str = "identity",
         representation_params: dict | None = None,
         x2_blocks: int | None = None,
+        max_rows_1: int | None = None,
+        max_rows_2: int | None = None,
+        row_seed: int = 0,
     ):
         super().__init__()
         if representation not in REPRESENTATIONS:
@@ -79,6 +98,8 @@ class CAPBankCallback(Callback):
         self.x2_blocks = x2_blocks
         self.output_name = output_name
         self.datasets, self.reference = (dataset_1, dataset_2), reference
+        self.max_rows = {dataset_1: max_rows_1, dataset_2: max_rows_2}
+        self.row_seed = row_seed
         self.bank_config = bank_config
         self.name = name
         self.couplings = None
@@ -108,7 +129,7 @@ class CAPBankCallback(Callback):
         ckpt_name = Path(pl_module._ckpt_path).stem
         if self.couplings is None:
             self.couplings = self._build_couplings(trainer)
-        scores = [torch.cat(self.scores[name]) for name in self.datasets]
+        scores = [self._capped(n, torch.cat(self.scores[n])) for n in self.datasets]
         if ckpt_name == "initial":
             self.initial = scores
         bank = CAPBank(**self.bank_config)
@@ -116,6 +137,23 @@ class CAPBankCallback(Callback):
         utils.mlflow.log_metrics_to_mlflow(
             trainer, bank.compute(), ckpt_name=ckpt_name, cb_name=self.name
         )
+
+    def _capped(self, name: str, values: torch.Tensor) -> torch.Tensor:
+        """The rows of a set's scores or inputs that its cap keeps."""
+        rows = row_subset(len(values), self.max_rows.get(name), self.row_seed)
+        return values if rows is None else values[rows]
+
+    def _reference_inputs(self, raw: dict, inputs: dict) -> torch.Tensor:
+        """The reference's inputs.
+
+        As dataset_1 itself, its rows are the next max_rows_1 of the permutation that
+        cuts X1, since X1 against itself puts every nearest neighbour at distance 0 and
+        the caliper with it.
+        """
+        if self.reference != self.datasets[0]:
+            return inputs[self.reference]
+        x = raw[self.reference]
+        return x[disjoint_rows(len(x), self.max_rows[self.reference], self.row_seed)]
 
     def _initial(self, scores: list[torch.Tensor]) -> list[torch.Tensor]:
         # NaN initial scores give disp NaN values under its usual keys.
@@ -133,10 +171,12 @@ class CAPBankCallback(Callback):
     def _represented(self, names: tuple[str, ...]) -> tuple[list, dict | None]:
         """Return the inputs of names in the representation, and its record for the
         cache, None for the identity; the collected inputs are dropped."""
-        inputs = {name: torch.cat(batches) for name, batches in self.inputs.items()}
+        raw = {n: torch.cat(b) for n, b in self.inputs.items()}
         self.inputs = {}
+        inputs = {n: self._capped(n, x) for n, x in raw.items()}
         fit = FIT_SET if FIT_SET in inputs else names[0]
-        sets = [inputs[name] for name in names]
+        reference = self._reference_inputs(raw, inputs)
+        sets = [inputs[name] for name in self.datasets] + [reference]
         params = self.representation_params
         represented = represent(self.representation, params, sets, inputs[fit])
         if self.representation == "identity":

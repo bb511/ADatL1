@@ -9,7 +9,7 @@ import numpy as np
 import yaml
 
 from src.evaluation.components.rebuild import ROOT
-from src.evaluation.components.tables import normal_scores
+from src.evaluation.components.tables import run_normal
 
 log = logging.getLogger(__name__)
 
@@ -117,14 +117,20 @@ def partner_scores(
     names: list[str],
     info: list,
     drop_unpaired: bool = False,
+    normal_dir: Path | None = None,
+    rows: dict | None = None,
 ) -> list[np.ndarray | None] | None:
-    """Stored validation normal scores of each run's partner, aligned with the runs,
-    None for a run left without one; None without a partner lattice."""
+    """Stored validation normal scores of each run's partner, aligned with the runs.
+
+    A run left without a partner has None, and so has the whole list without a partner
+    lattice. The runs pair by the dumps of ``scores_dir``; the scores are read from
+    ``normal_dir``, the dumps when None, by ``run_normal`` with ``rows``.
+    """
     if partner is None:
         return None
     keys = set().union(*(run["hyperpoint"] for run in info))
     pairs = pair_lattice(scores_dir, lattice, partner, names, keys, drop_unpaired)
+    normal_dir = Path(scores_dir if normal_dir is None else normal_dir) / partner
     return [
-        normal_scores(scores_dir / partner / pairs[n]) if n in pairs else None
-        for n in names
+        run_normal(normal_dir / pairs[n], rows) if n in pairs else None for n in names
     ]

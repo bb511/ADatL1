@@ -1,5 +1,7 @@
 """Evaluate the per-epoch score dumps of a lattice, one run at a time."""
 
+import contextlib
+import functools
 import json
 import logging
 import math
@@ -17,6 +19,7 @@ from mlflow.entities import Metric, Param
 from mlflow.tracking import MlflowClient
 from omegaconf import OmegaConf
 from pytorch_lightning import LightningDataModule, LightningModule
+from torch.utils.data import DataLoader, Subset
 
 from src.callbacks.components.selection import (
     W_STEPS,
@@ -25,24 +28,38 @@ from src.callbacks.components.selection import (
     epoch_pick,
     smoothed,
 )
+from src.callbacks.components.utils import row_subset
 from src.callbacks.score_dump import SDS_PARAMS
+from src.data.utils import unpack_batch
+from src.evaluation.callbacks.sds import PREFIXES
 from src.evaluation.components.pairing import hyperpoint
 from src.evaluation.components.rebuild import (
     ROOT,
     SDS_CACHE,
     cached_sds,
+    capped_loader,
+    capped_meta,
+    capped_record,
+    loader_inputs,
     loader_layouts,
     null_sets,
+    reads_hub,
     rebuild,
     signal_sets,
 )
-from src.evaluation.components.tables import load_record, write_outputs
-from src.evaluation.replay import ReplayModule, as_typical, extra_loaders
+from src.evaluation.components.tables import load_record, write_outputs, write_partial
+from src.evaluation.replay import (
+    ReplayModule,
+    ScoresCallback,
+    as_typical,
+    extra_loaders,
+)
 from src.utils.omegaconf import register_resolvers
 
 log = logging.getLogger(__name__)
 
-# The key of the training efficiency callback for one set's validation efficiency.
+# The key of the training efficiency callback for one set's validation efficiency at
+# the operational rate; the registry's efficiency_key replaces it.
 SET_EFFICIENCY_KEY = "val/{}/eff__ascore_full__brate_operational"
 # The most metrics MLflow accepts in one log_batch call.
 MLFLOW_BATCH = 1000
@@ -54,6 +71,8 @@ REPLAY_TRAINER = {
     "enable_model_summary": False,
     "enable_checkpointing": False,
 }
+# What becomes of a run with fewer epoch files than its max_epochs (LatticeEvaluation).
+PARTIAL_MODES = (None, "skip", "replay")
 
 
 def _strategies(selection: dict) -> dict[str, dict]:
@@ -89,6 +108,38 @@ def _check_stored_sds(meta: dict, sds: dict) -> None:
         )
 
 
+def _rates(callbacks: dict) -> list[float]:
+    """Every target rate an evaluation callback's config names, whose cuts on validation
+    normal the replay sets as training set them."""
+    rates = {
+        r for config in callbacks.values() for r in config.get("target_rates") or ()
+    }
+    return sorted(map(float, rates))
+
+
+def _sds_val_sets(normal: DataLoader, spec: dict) -> dict:
+    """The SDS pseudo-sets of the inputs of validation normal, as ``SDSCallback`` with
+    ``source="normal"`` builds them, under the names its mirror reads."""
+    view, prefix = loader_inputs(normal), PREFIXES["normal"]
+    sets = cached_sds(view.x, spec["max_rows"], spec["row_seed"], view.mask)
+    return {name.replace("sds", prefix, 1): x for name, x in sets.items()}
+
+
+def _train_loader(data_train, spec, meta: dict) -> DataLoader | None:
+    """The loader of ``extra_sets.train``: None for false; for true, every training row
+    with the dump's batch size; for ``{max_rows, row_seed, batch_size}``, the seeded
+    subset of rows that ``LossEntropyCallback`` draws with the same parameters."""
+    if not spec:
+        return None
+    if spec is True:
+        return DataLoader(
+            data_train, batch_size=meta["train"]["batch_sizes"]["train"][0]
+        )
+    rows = row_subset(len(data_train), spec["max_rows"], spec["row_seed"])
+    rows = data_train if rows is None else Subset(data_train, rows.tolist())
+    return DataLoader(rows, batch_size=spec["batch_size"])
+
+
 class RunEvaluation:
     """The replay of one dumped run through the evaluation callbacks, and its tables.
 
@@ -98,12 +149,14 @@ class RunEvaluation:
     under every evaluation callback, then the test loaders under the test callbacks.
     The scalars the callbacks record, named '<callback>/<scalar>', make the rows of the
     run's tables. Both trainers carry ``out_dir``, the evaluation directory, where a
-    callback may cache what the runs share. The keyword-only arguments are the
-    Evaluator's of the same names, apart from ``sets``, the data config whose signals
-    and nulls replaced the run's in ``datamodule`` (``rebuild``). With it, the signal
-    sets are read from the datamodule's loaders instead of ``meta.pt``: a stored set
-    outside the new lists is never served, and a set the dump does not store is
-    rescored from the weights.
+    callback may cache what the runs share, and ``rows``, the rows kept of each capped
+    set by split. The keyword-only arguments are the Evaluator's of the same names,
+    apart from ``sets``, the data config whose signals and nulls replaced the run's in
+    ``datamodule`` (``rebuild``). With it, the signal sets are read from the
+    datamodule's loaders instead of ``meta.pt``: a stored set outside the new lists is
+    never served, and a set the dump does not store is rescored from the weights.
+    The cuts of every ``target_rates`` of the callbacks' configs are set on validation
+    normal (``ReplayModule``), which an epoch file that lacks it has rescored first.
     """
 
     def __init__(
@@ -118,15 +171,18 @@ class RunEvaluation:
         selection: dict,
         sets: str | None = None,
         typical: str | None = None,
+        row_caps: dict | None = None,
     ):
         self.run_dir = Path(run_dir)
         self.meta = torch.load(self.run_dir / "meta.pt", weights_only=True)
-        self.replay = ReplayModule(module, self.meta, typical)
         self.dump_callbacks, self.extra_sets = dump_callbacks, extra_sets
         self.selection, self.strategies = selection, _strategies(selection)
         self.passes = {"val": list(dump_callbacks), "test": test_callbacks}
         self.trainers = {split: self._trainer(split) for split in self.passes}
-        self.loaders = self._loaders(datamodule)
+        self.loaders = self._loaders(datamodule, typical)
+        self.rows = self._cap(row_caps or {})
+        meta = capped_meta(self.meta, self.loaders, self.rows)
+        self.replay = ReplayModule(module, meta, typical, _rates(dump_callbacks))
         layouts = self.meta if sets is None else loader_layouts(datamodule)
         self.signals = {split: signal_sets(layouts[split]) for split in self.passes}
         self.nulls = null_sets(self.trainers["test"].callbacks)
@@ -140,7 +196,7 @@ class RunEvaluation:
         """
         out = Path(out_dir) / "runs" / self.run_dir.name
         for trainer in self.trainers.values():
-            trainer.out_dir = Path(out_dir)
+            trainer.out_dir, trainer.rows = Path(out_dir), self.rows
         rows = self._replay(out)
         run, tables = self._summary(lattice), self._tables(rows)
         if tracking_uri is not None:
@@ -157,20 +213,44 @@ class RunEvaluation:
         trainer.strat_name = trainer.metric_name = trainer.criterion_name = None
         return trainer
 
-    def _loaders(self, datamodule: LightningDataModule) -> dict:
+    def _loaders(self, datamodule: LightningDataModule, typical: str | None) -> dict:
         """The validation loaders followed by the extra sets, and the test loaders."""
+        datamodule.prepare_data()
         datamodule.setup("fit")
         val, data_train = datamodule.val_dataloader(), datamodule.data_train
-        sds = self.extra_sets.get("sds")
+        train = unpack_batch(data_train.tensors)
+        loader = _train_loader(data_train, self.extra_sets.get("train"), self.meta)
+        aux = bool(self.extra_sets.get("aux"))
+        pseudo = self._pseudo_sets(train, val)
+        extra = extra_loaders(self.meta, loader, pseudo, aux, train.mask)
+        datamodule.setup("test")
+        val = {**as_typical(val, typical), **extra}
+        return {"val": val, "test": datamodule.test_dataloader()}
+
+    def _pseudo_sets(self, train, val: dict) -> dict:
+        """The SDS pseudo-sets of ``extra_sets.sds`` (from the training rows) and of
+        ``extra_sets.sds_val`` (from validation normal), each point with the mask of the
+        row it was shifted from where the data carry one."""
+        pseudo, sds = {}, self.extra_sets.get("sds")
         if sds:
             _check_stored_sds(self.meta, sds)
-            sds = cached_sds(data_train.tensors[0], sds["max_rows"], sds["row_seed"])
-        train = data_train if self.extra_sets.get("train") else None
-        aux = bool(self.extra_sets.get("aux"))
-        val = as_typical(val, self.replay.typical)
-        val = {**val, **extra_loaders(self.meta, train, sds, aux=aux)}
-        datamodule.setup("test")
-        return {"val": val, "test": datamodule.test_dataloader()}
+            rows = sds["max_rows"], sds["row_seed"]
+            pseudo |= cached_sds(train.x, *rows, train.mask)
+        if self.extra_sets.get("sds_val"):
+            pseudo |= _sds_val_sets(val["normal"], self.extra_sets["sds_val"])
+        return pseudo
+
+    def _cap(self, row_caps: dict) -> dict[str, dict[str, torch.Tensor]]:
+        """Replace the loader of every set ``row_caps`` caps by one of its seeded row
+        subset; return the rows kept, by split and set, for the sets it cuts."""
+        rows, seed = {}, row_caps.get("seed", 0)
+        for split in ("val", "test"):
+            for name, cap in (row_caps.get(split) or {}).items():
+                loader, kept = capped_loader(self.loaders[split][name], cap, seed)
+                self.loaders[split][name] = loader
+                if kept is not None:
+                    rows.setdefault(split, {})[name] = kept
+        return rows
 
     def _epoch_files(self) -> list[Path]:
         return [self.run_dir / "initial.pt", *sorted(self.run_dir.glob("epoch_*.pt"))]
@@ -179,10 +259,29 @@ class RunEvaluation:
         """The rows of both passes over every epoch file, -1 first."""
         rows = {split: [] for split in self.trainers}
         for epoch, path in enumerate(self._epoch_files(), start=-1):
-            self.replay.load_epoch(load_record(path, epoch), out / path.name)
+            record = capped_record(load_record(path, epoch), self.rows)
+            self.replay.load_epoch(record, out / path.name)
+            self._score_normal()
             for split in self.trainers:
                 rows[split].append(self._row(split, epoch))
         return rows
+
+    def _score_normal(self) -> None:
+        """Rescore validation normal from the epoch's weights where its file lacks it,
+        in a pass of its own before those that read its cuts."""
+        if "normal" in self.replay.record["val"]:
+            return
+        scores, scorer = self._normal_scorer
+        self.replay.serve("val")
+        normal = {"normal": self.loaders["val"]["normal"]}
+        scorer.test(self.replay, dataloaders=normal, verbose=False)
+        self.replay.add_scores(scores.collector.scores())
+
+    @functools.cached_property
+    def _normal_scorer(self) -> tuple[ScoresCallback, pytorch_lightning.Trainer]:
+        """A CPU trainer that collects the keys the dump stores, built at first use."""
+        scores = ScoresCallback(self.meta["val"]["keys"])
+        return scores, pytorch_lightning.Trainer(callbacks=[scores], **REPLAY_TRAINER)
 
     def _row(self, split: str, epoch: int) -> dict:
         """The epoch and the scalars every callback of a pass records."""
@@ -283,7 +382,8 @@ class RunEvaluation:
             if spec.get("raw_key"):
                 columns.append((spec["raw_key"], spec["column"]))
         prefix, signals = self.selection["efficiency"], self.signals["val"]
-        return columns + [(SET_EFFICIENCY_KEY.format(s), prefix + s) for s in signals]
+        key = self.selection.get("efficiency_key", SET_EFFICIENCY_KEY)
+        return columns + [(key.format(s), prefix + s) for s in signals]
 
     def _mlflow_metrics(self, val: list[dict]) -> list[Metric]:
         # As log_metrics_to_mlflow, non-finite values are left out; epoch -1 is too, as
@@ -354,21 +454,72 @@ def _stored_run(
     return run if tables and all(run.get(k) == v for k, v in same.items()) else None
 
 
+def _max_epochs(run_dir: Path) -> int | None:
+    """``trainer.max_epochs`` of a run's config.yaml, None where it gives none."""
+    path = run_dir / "config.yaml"
+    if not path.is_file():
+        return None
+    return OmegaConf.select(
+        OmegaConf.load(path), "trainer.max_epochs", throw_on_resolution_failure=False
+    )
+
+
+def partial_runs(runs: list[Path]) -> dict[Path, tuple[int, int]]:
+    """The runs with fewer epoch files than their ``trainer.max_epochs``, as a trial
+    stopped at a time limit leaves them, with both numbers."""
+    partial = {}
+    for run in runs:
+        epochs, max_epochs = len(list(run.glob("epoch_*.pt"))), _max_epochs(run)
+        if max_epochs is not None and epochs < max_epochs:
+            partial[run] = (epochs, max_epochs)
+    return partial
+
+
+def _partial_split(runs: list[Path], mode: str | None) -> tuple[dict, list[Path]]:
+    """The partial runs under ``mode`` (none for None) and the runs replayed."""
+    if mode not in PARTIAL_MODES:
+        raise ValueError(f"partial_runs is one of {PARTIAL_MODES}, not {mode!r}.")
+    partial = {} if mode is None else partial_runs(runs)
+    return partial, [run for run in runs if mode != "skip" or run not in partial]
+
+
+@contextlib.contextmanager
+def _offline_hub(offline: bool):
+    """HF_HUB_OFFLINE=1 inside, where ``offline``, for the processes spawned there;
+    huggingface_hub reads it at import, so this process is unaffected."""
+    before = os.environ.get("HF_HUB_OFFLINE")
+    if offline:
+        os.environ["HF_HUB_OFFLINE"] = "1"
+    try:
+        yield
+    finally:
+        os.environ.pop("HF_HUB_OFFLINE", None)
+        if before is not None:
+            os.environ["HF_HUB_OFFLINE"] = before
+
+
 class LatticeEvaluation:
     """The runs of one lattice, each evaluated by ``RunEvaluation``.
 
     The runs are the directories of ``<scores_dir>/<lattice>`` that hold a ``meta.pt``,
     in name order. Each run's module and datamodule are rebuilt from its
-    ``config.yaml``, with ``data.data_dir`` replaced by ``data_dir`` and the signals
-    and nulls by those of ``configs/data/<sets>.yaml`` when given, in a spawn pool of
-    ``workers`` processes of ``threads`` torch threads each (in this process, on one
-    thread, for one worker). One thread is the reference: more may change float32
-    results in the last bits. ``settings`` holds the keyword-only arguments of
-    ``evaluate_dump``. With ``resume``, a run complete in ``out_dir`` (``_stored_run``)
-    is neither replayed nor logged to MLflow again, and its stored run.json takes its
-    place in the returned list. Only what run.json records is compared, so an
-    ``out_dir`` written under another evaluation config or other ``sets`` needs
-    ``resume`` off, or a fresh ``out_dir``.
+    ``config.yaml``, with its data directory replaced by ``data_dir`` and the signals
+    and nulls by those of ``configs/data/<sets>.yaml`` when given (``rebuild``), in a
+    spawn pool of ``workers`` processes of ``threads`` torch threads each (in this
+    process, on one thread, for one worker). One thread is the reference: more may
+    change float32 results in the last bits. Before the pool, this process prepares
+    the first run's data once: the SDS pseudo-sets, which the workers receive, and a
+    record of the hub (``rebuild.HUB_DATAMODULES``), which the workers then read
+    offline. ``settings`` holds the keyword-only arguments of ``evaluate_dump``. With
+    ``resume``, a run complete in ``out_dir`` (``_stored_run``) is neither replayed nor
+    logged to MLflow again, and its stored run.json takes its place in the returned
+    list. Only what run.json records is compared, so an ``out_dir`` written under
+    another evaluation config or other ``sets`` needs ``resume`` off, or a fresh
+    ``out_dir``. With ``partial`` None every run is replayed and selected. With
+    ``"skip"`` or ``"replay"``, a run with fewer epoch files than its
+    ``trainer.max_epochs`` (``partial_runs``) is listed in
+    ``<out_dir>/partial_runs.csv`` (run, epochs, max_epochs), which the lattice step
+    reads to leave it out, and is replayed only with ``"replay"``.
     """
 
     def __init__(
@@ -382,33 +533,42 @@ class LatticeEvaluation:
         threads: int = 1,
         tracking_uri: str | None = None,
         resume: bool = True,
+        partial: str | None = None,
     ):
         self.lattice, self.settings, self.data_dir = lattice, settings, data_dir
         self.sets, self.workers, self.tracking_uri = sets, workers, tracking_uri
-        self.threads, self.resume = threads, resume
+        self.threads, self.resume, self.partial_mode = threads, resume, partial
         paths = (Path(scores_dir) / lattice).iterdir()
         self.runs = sorted(p for p in paths if (p / "meta.pt").is_file())
+        self.partial, self.replayed = _partial_split(self.runs, partial)
 
     def evaluate(self, out_dir: Path) -> list[dict]:
-        """Evaluate every run into ``out_dir``; return their run.json."""
+        """Evaluate the runs into ``out_dir``; return their run.json."""
+        self._prepare_out(Path(out_dir))
+        stored = self._stored(out_dir)
+        task = (out_dir, self.lattice, self.data_dir, self.sets, self.tracking_uri)
+        runs = [run for run in self.replayed if run not in stored]
+        evaluated = iter(self._map([(run, *task, self.settings) for run in runs]))
+        return [stored.get(run) or next(evaluated) for run in self.replayed]
+
+    def _prepare_out(self, out_dir: Path) -> None:
+        """Create the MLflow experiment and write the table of partial runs."""
         # Created once, before the pool: workers creating one name at once make
         # duplicate experiments.
         if self.tracking_uri is not None:
             _experiment_id(MlflowClient(self.tracking_uri), f"{self.lattice}_eval")
         # The run configs read ${oc.env:PROJECT_ROOT}; spawned workers inherit it.
         os.environ.setdefault("PROJECT_ROOT", str(ROOT))
-        stored = self._stored(out_dir)
-        task = (out_dir, self.lattice, self.data_dir, self.sets, self.tracking_uri)
-        tasks = [(run, *task, self.settings) for run in self.runs if run not in stored]
-        evaluated = iter(self._map(tasks))
-        return [stored[run] if run in stored else next(evaluated) for run in self.runs]
+        if self.partial_mode is not None:
+            rows = [[r.name, *counts] for r, counts in self.partial.items()]
+            write_partial(out_dir, rows)
 
     def _stored(self, out_dir: Path) -> dict[Path, dict]:
         """The stored run.json of every run complete in ``out_dir``, with ``resume``."""
         if not self.resume:
             return {}
         stored = {}
-        for run in self.runs:
+        for run in self.replayed:
             info = _stored_run(run, out_dir, self.lattice, self.settings["typical"])
             if info is not None:
                 log.info(f"Skipping {run.name}, complete in {out_dir}")
@@ -423,25 +583,41 @@ class LatticeEvaluation:
         if self.workers <= 1:
             _init_worker()
             return [_evaluate_task(task) for task in tasks]
-        self._prebuild_sds()
+        offline = self._prepare()
         # Spawned, not forked: torch's thread pools do not survive a fork once the
         # parent has used them.
         context = multiprocessing.get_context("spawn")
         initargs = (dict(SDS_CACHE), self.threads)
-        with context.Pool(
+        with _offline_hub(offline), context.Pool(
             self.workers, initializer=_init_worker, initargs=initargs
         ) as pool:
             return list(pool.imap(_evaluate_task, tasks))
 
-    def _prebuild_sds(self) -> None:
-        sds = self.settings["extra_sets"].get("sds")
-        if not sds:
-            return
+    def _prepare(self) -> bool:
+        """Prepare the first run's data here, once: the hub record where its datamodule
+        reads one, and the SDS pseudo-sets; return whether it reads one."""
+        extra, hub = self.settings["extra_sets"], reads_hub(self.runs[0])
+        if not (hub or extra.get("sds") or extra.get("sds_val")):
+            return False
         if not OmegaConf.has_resolver("reverse"):
             register_resolvers()
         datamodule = rebuild(self.runs[0], self.data_dir, self.sets)[1]
-        datamodule.setup("fit")
-        cached_sds(datamodule.data_train.tensors[0], sds["max_rows"], sds["row_seed"])
+        datamodule.prepare_data()
+        _prebuild_sds(datamodule, extra)
+        return hub
+
+
+def _prebuild_sds(datamodule: LightningDataModule, extra: dict) -> None:
+    """Build the pseudo-sets of ``extra_sets`` into ``SDS_CACHE``."""
+    sds, sds_val = extra.get("sds"), extra.get("sds_val")
+    if not (sds or sds_val):
+        return
+    datamodule.setup("fit")
+    train = unpack_batch(datamodule.data_train.tensors)
+    if sds:
+        cached_sds(train.x, sds["max_rows"], sds["row_seed"], train.mask)
+    if sds_val:
+        _sds_val_sets(datamodule.val_dataloader()["normal"], sds_val)
 
 
 def evaluate_lattice(
@@ -455,11 +631,13 @@ def evaluate_lattice(
     threads: int = 1,
     tracking_uri: str | None = None,
     resume: bool = True,
+    partial: str | None = None,
 ) -> list[dict]:
     """Evaluate every run of a lattice; return their run.json, in name order.
 
     With ``resume``, a run whose four files in ``out_dir`` are complete is not
-    evaluated again (``LatticeEvaluation``).
+    evaluated again; ``partial`` says what becomes of a partial run
+    (``LatticeEvaluation``).
     """
     evaluation = LatticeEvaluation(
         scores_dir,
@@ -471,6 +649,7 @@ def evaluate_lattice(
         threads,
         tracking_uri,
         resume,
+        partial,
     )
     return evaluation.evaluate(out_dir)
 
@@ -488,6 +667,7 @@ def evaluate_dump(
     extra_sets: dict,
     selection: dict,
     typical: str | None = None,
+    row_caps: dict | None = None,
 ) -> dict:
     """Evaluate every epoch of one dumped run; write its four files, return run.json.
 
@@ -514,5 +694,6 @@ def evaluate_dump(
         extra_sets=extra_sets,
         selection=selection,
         typical=typical,
+        row_caps=row_caps,
     )
     return run.evaluate(out_dir, lattice, tracking_uri)

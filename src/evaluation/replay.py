@@ -11,26 +11,31 @@ epoch file without ``state_dict``, as in a scores-only copy of a dump, is replay
 from its stored scores alone: a set or key that would be rescored from its weights
 raises. The extra sets of the validation pass (the auxiliary sets, the training set
 and the SDS pseudo-sets) are wrapped here in the loaders that pass appends to the
-validation loaders; the pseudo-sets are served from the dump where it stores their
-scores (``ScoreDumpCallback``'s ``sds``) and rescored otherwise.
+validation loaders; the pseudo-sets and the training set are served from the dump
+where it stores their scores and rescored otherwise. An epoch file without validation
+normal (the physics dumps store it at the sanity pass alone) has it rescored before
+the passes, in a pass of its own that ``ScoresCallback`` collects, and handed to the
+module by ``add_scores``.
 """
 
 from pathlib import Path
 
 import torch
-from pytorch_lightning import LightningModule
-from torch.utils.data import DataLoader, TensorDataset
+from pytorch_lightning import Callback, LightningModule
+from torch.utils.data import DataLoader
 
+from src.algorithms.utils.object_feature_map_loader import maybe_get_object_feature_map
 from src.callbacks.components.rate import AnomalyRate
-from src.callbacks.score_dump import aux_inputs
+from src.callbacks.components.utils import drawn_masks, placeholder_loader
+from src.callbacks.score_dump import _Collector, aux_inputs
 from src.data.utils import unpack_batch
 
 # The parts of an epoch's record that each pass serves; the loader names of one pass
 # are unique across its parts.
-PASS_PARTS = {"val": ("val", "aux", "train"), "test": ("test",)}
-# The parts served where an epoch's record holds them: dumps written without the SDS
-# pseudo-sets lack theirs.
-OPTIONAL_PARTS = {"val": ("sds",), "test": ()}
+PASS_PARTS = {"val": ("val", "aux"), "test": ("test",)}
+# The parts served where an epoch's record holds them: dumps written without the
+# training pass or the SDS pseudo-sets lack theirs.
+OPTIONAL_PARTS = {"val": ("train", "sds"), "test": ()}
 # The keys rescored from the weights, by part and stored set, where the dump lacks them,
 # as dumps written before fit/full joined the dump keys do: the fit callback reads
 # validation normal alone.
@@ -84,12 +89,46 @@ def _typical_meta(meta: dict, typical: str | None) -> dict:
     return {**meta, "val": val}
 
 
-def operational_cut(scores: torch.Tensor, meta: dict) -> tuple[torch.Tensor, ...]:
-    """Threshold and tie weight at the run's target rate, as the training efficiency
-    callback sets them on validation normal."""
-    rate = AnomalyRate(meta["target_rate"], meta["base_rate"])
+def operational_cut(
+    scores: torch.Tensor, meta: dict, target_rate: float | None = None
+) -> tuple[torch.Tensor, ...]:
+    """Threshold and tie weight at ``target_rate``, the run's target rate when None, as
+    the training efficiency callback sets them on validation normal."""
+    target_rate = meta["target_rate"] if target_rate is None else target_rate
+    rate = AnomalyRate(target_rate, meta["base_rate"])
     rate.set_threshold(scores)
     return rate.threshold.clone(), rate.tie_weight.clone()
+
+
+def cut_rates(meta: dict, rates: list[float]) -> dict[str, float]:
+    """Every rate whose cut the replay sets, by the suffix of its ``thres_<suffix>`` and
+    ``tie_<suffix>``: ``operational`` for the run's target rate and, for each other
+    rate, the suffix of the training efficiency callback's buffers (286.088064 ->
+    ``286_088064kHz``), which ``AnomalyEfficiencyCallback._get_thres`` reads."""
+    target = float(meta["target_rate"])
+    suffixes = {"operational": target}
+    for rate in map(float, rates):
+        if abs(rate - target) >= 1e-12:
+            suffixes[f"{rate}kHz".replace(".", "_")] = rate
+    return suffixes
+
+
+class ScoresCallback(Callback):
+    """Collect the per-event outputs under ``keys`` of every batch of a test pass, in
+    ``collector``, a ``_Collector`` of the score dump."""
+
+    def __init__(self, keys: list[str]):
+        super().__init__()
+        self.keys = list(keys)
+
+    def on_test_epoch_start(self, trainer, pl_module):
+        self.collector = _Collector(self.keys)
+
+    def on_test_batch_end(
+        self, trainer, pl_module, outputs, batch, batch_idx, dataloader_idx=0
+    ):
+        name = list(trainer.test_dataloaders)[dataloader_idx]
+        self.collector.add(name, outputs, batch)
 
 
 class ReplayModule(LightningModule):
@@ -101,23 +140,33 @@ class ReplayModule(LightningModule):
     raises, since it means the rebuilt loader is not the dump's. A record without
     ``state_dict`` leaves the weights unloaded, and a batch that would be rescored from
     them, of a set the record does not store or for a key of ``RESCORED_KEYS`` it
-    lacks, raises RuntimeError naming the set and the epoch file. ``thres_operational``
-    and ``tie_operational`` are set from the epoch's validation normal ``ascore/full``,
-    and ``aux_lower`` and ``aux_upper`` from ``meta``, for the callbacks that read them.
+    lacks, raises RuntimeError naming the set and the epoch file. ``thres_<suffix>``
+    and ``tie_<suffix>`` of every rate of ``cut_rates`` are set from the epoch's
+    validation normal ``ascore/full`` (None while the record lacks it), and
+    ``aux_lower`` and ``aux_upper`` from ``meta``, for the callbacks that read them.
 
     :param module: The run's LightningModule, freshly built from its configuration.
     :param meta: The dump's ``meta.pt``.
     :param typical: A stored validation set served as ``normal`` in place of the
         dump's, which the validation pass then leaves out; the cut and the rescored
         keys of ``normal`` follow it. None serves the dump's ``normal``.
+    :param rates: Target rates besides the run's own whose cuts are set as well, as the
+        training efficiency callback sets those of its ``target_rates``.
     """
 
-    def __init__(self, module: LightningModule, meta: dict, typical: str | None = None):
+    def __init__(
+        self,
+        module: LightningModule,
+        meta: dict,
+        typical: str | None = None,
+        rates: list[float] = (),
+    ):
         super().__init__()
-        rates = {"target_rate": meta["target_rate"], "base_rate": meta["base_rate"]}
-        self.save_hyperparameters(rates, logger=False)
+        hparams = {"target_rate": meta["target_rate"], "base_rate": meta["base_rate"]}
+        self.save_hyperparameters(hparams, logger=False)
         self.module = module
         self.typical, self.meta = typical, _typical_meta(meta, typical)
+        self.cuts = cut_rates(meta, rates)
         self.aux_lower, self.aux_upper = meta["aux_lower"], meta["aux_upper"]
         # The VAE builds its KL schedule at fit start; its scores do not depend on it.
         if hasattr(module, "_setup_kl_annealing"):
@@ -130,20 +179,45 @@ class ReplayModule(LightningModule):
     def compute_operational_ascore(self, ascore: torch.Tensor) -> float:
         return self.module.compute_operational_ascore(ascore)
 
+    def on_test_start(self) -> None:
+        # Lightning calls the hooks of this module alone. The wrapped module's hook
+        # injects the object feature map of the L1AD loaders, which DSAE reads, and
+        # raises where the loaders carry none.
+        if maybe_get_object_feature_map(self) is not None:
+            self.module.on_test_start()
+
     def load_epoch(self, record: dict, ckpt_path: Path) -> None:
         """Load an epoch's scores and, where the record holds them, its weights;
         ``ckpt_path`` names the epoch to the callbacks, which take ``initial`` or
-        ``epoch_<nnnn>`` from its stem."""
+        ``epoch_<nnnn>`` from its stem.
+
+        A record without validation normal must hold
+        the weights, from which normal is rescored for ``add_scores``.
+        """
         self._has_weights = "state_dict" in record
         if self._has_weights:
             _load_weights(self.module, record["state_dict"])
         record = {**record, "val": as_typical(record["val"], self.typical)}
         self.record = record
         self._ckpt_path = Path(ckpt_path)
-        if "normal" not in record["val"]:
+        if "normal" not in record["val"] and not self._has_weights:
             raise ValueError("The dump does not store validation normal.")
-        cut = operational_cut(record["val"]["normal"]["ascore/full"], self.meta)
-        self.thres_operational, self.tie_operational = cut
+        self._set_cuts()
+
+    def add_scores(self, scores: dict[str, dict[str, torch.Tensor]]) -> None:
+        """Add the scores of validation sets rescored from the epoch's weights to its
+        record, served from then on as stored ones, and set the cuts again."""
+        self.record = {**self.record, "val": {**self.record["val"], **scores}}
+        self._set_cuts()
+
+    def _set_cuts(self) -> None:
+        normal = self.record["val"].get("normal")
+        for suffix, rate in self.cuts.items():
+            cut = (None, None)
+            if normal is not None:
+                cut = operational_cut(normal["ascore/full"], self.meta, rate)
+            setattr(self, f"thres_{suffix}", cut[0])
+            setattr(self, f"tie_{suffix}", cut[1])
 
     def serve(self, split: str) -> None:
         """Serve the stored sets of the 'val' or the 'test' pass."""
@@ -204,28 +278,36 @@ class ReplayModule(LightningModule):
             )
 
 
-def _zero_labelled(x: torch.Tensor, batch_size: int) -> DataLoader:
-    labels = torch.zeros(len(x), dtype=torch.long)
-    return DataLoader(TensorDataset(x, labels), batch_size=batch_size)
-
-
-def extra_loaders(meta: dict, data_train, sds: dict | None, aux: bool = True):
+def extra_loaders(
+    meta: dict,
+    train: DataLoader | None,
+    pseudo: dict | None,
+    aux: bool = True,
+    mask: torch.Tensor | None = None,
+) -> dict:
     """The loaders the validation pass appends after the validation loaders.
 
     In order: ``gaussian``, ``uniform`` and ``autouad``, regenerated from ``meta``
-    (when ``aux``); ``train``, the training set unshuffled with the dump's batch size
-    (when ``data_train`` is not None); ``sds_targets`` and ``sds_outliers`` (when
-    ``sds``, a result of ``src.callbacks.sds.sds_inputs``, is not None). Every set
-    carries label 0; the dump's batch sizes make the stored scores of every set
-    servable.
+    (when ``aux``), each point masked as the dump masked it where ``meta`` has
+    ``aux_masked``, with the masks of the training rows that ``drawn_masks(mask,
+    aux_size, aux_seed)`` draws from the training masks ``mask``; ``train``, a loader
+    of training rows, when not None; and the pseudo-sets of ``pseudo``, whose
+    ``<set>_mask`` entries, as ``src.callbacks.sds.sds_inputs`` returns them, are the
+    data masks of their points. The made-up points carry label 0 and the dump's
+    auxiliary batch size, which makes the stored scores of every set servable.
     """
-    sizes = {**meta["aux"]["batch_sizes"], **meta["train"]["batch_sizes"]}
+    sizes = meta["aux"]["batch_sizes"]
     loaders = {}
     if aux:
+        masks = None
+        if meta.get("aux_masked"):
+            masks = drawn_masks(mask, meta["aux_size"], meta["aux_seed"])
         for name, x in aux_inputs(meta).items():
-            loaders[name] = _zero_labelled(x, sizes[name][0])
-    if data_train is not None:
-        loaders["train"] = DataLoader(data_train, batch_size=sizes["train"][0])
-    for name, x in (sds or {}).items():
-        loaders[name] = _zero_labelled(x, sizes["gaussian"][0])
+            loaders[name] = placeholder_loader(x, sizes[name][0], masks)
+    if train is not None:
+        loaders["train"] = train
+    for name, x in (pseudo or {}).items():
+        if not name.endswith("_mask"):
+            point_masks = pseudo.get(f"{name}_mask")
+            loaders[name] = placeholder_loader(x, sizes["gaussian"][0], point_masks)
     return loaders

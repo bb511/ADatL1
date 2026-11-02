@@ -1,22 +1,48 @@
 """The per-run tables of the evaluation and the stored scores of the dumps.
 
 ``write_outputs`` writes a run's val.csv, test.csv, picks.csv and run.json, whose
-columns ``src.evaluation.dump.evaluate_dump`` lists; the readers load them and the
-dumps for ``src.evaluation.lattice``.
+columns ``src.evaluation.dump.evaluate_dump`` lists, and ``write_partial`` the table
+of the runs left partial; the readers load them and the dumps for
+``src.evaluation.lattice``.
 """
 
 import csv
 import json
+import logging
 from pathlib import Path
 
 import numpy as np
 import pandas as pd
 import torch
 
+from src.callbacks.components.utils import row_subset
+
+log = logging.getLogger(__name__)
+
 SCORE_KEY = "ascore/full"
 SCORE_SPLITS = ("val", "test", "aux", "train")
 # The per-run tables of the evaluation, val.csv and test.csv.
 SPLITS = ("val", "test")
+# The table of the runs with fewer epoch files than their max_epochs, in out_dir.
+PARTIAL_RUNS = "partial_runs.csv"
+
+
+def write_partial(out_dir: Path, rows: list[list]) -> None:
+    """Write ``PARTIAL_RUNS`` (run, epochs, max_epochs) where a run is partial, and
+    remove an earlier one otherwise."""
+    path = Path(out_dir) / PARTIAL_RUNS
+    if not rows:
+        path.unlink(missing_ok=True)
+        return
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with open(path, "w", newline="") as file:
+        csv.writer(file).writerows([["run", "epochs", "max_epochs"], *rows])
+
+
+def read_partial(out_dir: Path) -> set[str]:
+    """The runs that ``PARTIAL_RUNS`` lists, none without the table."""
+    path = Path(out_dir) / PARTIAL_RUNS
+    return set(pd.read_csv(path, dtype=str)["run"]) if path.is_file() else set()
 
 
 def write_outputs(out: Path, tables: dict[str, list[dict]], run: dict) -> None:
@@ -110,8 +136,57 @@ def normal_scores(run_dir: Path) -> np.ndarray:
     return np.stack([scores[epoch]["val"]["normal"][SCORE_KEY] for epoch in scores])
 
 
-def load_lattice(lattice_dir: Path, names: list[str]) -> tuple[np.ndarray, list]:
-    """Stored validation normal scores, (runs, epochs + 1, n), and every meta.pt."""
-    normal = np.stack([normal_scores(lattice_dir / name) for name in names])
+def _normal_at(path: Path, epoch: int, max_rows: int, row_seed: int):
+    """The validation normal scores of an epoch file at its seeded row subset, None
+    where the file lacks them."""
+    record = load_record(path, epoch)
+    if "normal" not in record.get("val", {}):
+        return None
+    scores = record["val"]["normal"][SCORE_KEY]
+    subset = row_subset(len(scores), max_rows, row_seed)
+    return (scores if subset is None else scores[subset]).numpy()
+
+
+def normal_rows(run_dir: Path, max_rows: int, row_seed: int) -> np.ndarray | None:
+    """The validation normal scores at ``row_subset(n, max_rows, row_seed)`` of every
+    epoch file of a run, (epochs + 1, rows), -1 first, or None where the run or a file
+    lacks them; each file is cut as it is read, so that no full epoch stays held."""
+    run_dir = Path(run_dir)
+    if not (run_dir / "initial.pt").is_file():
+        return None
+    paths = [run_dir / "initial.pt", *sorted(run_dir.glob("epoch_*.pt"))]
+    rows = []
+    for epoch, path in enumerate(paths, start=-1):
+        rows.append(_normal_at(path, epoch, max_rows, row_seed))
+        if rows[-1] is None:
+            return None
+    return np.stack(rows)
+
+
+def run_normal(run_dir: Path, rows: dict | None = None) -> np.ndarray | None:
+    """``normal_scores`` of a run or, with ``rows`` (``max_rows``, ``row_seed``),
+    ``normal_rows``."""
+    if rows is None:
+        return normal_scores(run_dir)
+    return normal_rows(run_dir, rows["max_rows"], rows["row_seed"])
+
+
+def load_lattice(
+    lattice_dir: Path,
+    names: list[str],
+    scores_dir: Path | None = None,
+    rows: dict | None = None,
+) -> tuple[np.ndarray | None, list]:
+    """Validation normal scores, (runs, epochs + 1, n), and every meta.pt.
+
+    The scores are read from ``scores_dir``, ``lattice_dir`` when None, by
+    ``run_normal``; they are None where, with ``rows``, a run lacks them, as the dumps
+    of the physics lattices do.
+    """
+    scores_dir = lattice_dir if scores_dir is None else Path(scores_dir)
     metas = [torch.load(lattice_dir / n / "meta.pt", weights_only=True) for n in names]
-    return normal, metas
+    normal = [run_normal(scores_dir / name, rows) for name in names]
+    if any(scores is None for scores in normal):
+        log.warning(f"{scores_dir} lacks validation normal: UDR and MC are left out.")
+        return None, metas
+    return np.stack(normal), metas

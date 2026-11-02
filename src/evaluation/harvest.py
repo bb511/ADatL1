@@ -60,8 +60,11 @@ class Harvest:
 
     @functools.cached_property
     def fixed(self) -> dict:
+        # The tier of the registry's efficiency columns, the run's target rate unless
+        # the registry names another (efficiency_rate).
         meta = self.lattice.metas[0]
-        tier = _tier_name(meta["target_rate"], meta["base_rate"])
+        rate = self.lattice.selection.get("efficiency_rate") or meta["target_rate"]
+        tier = _tier_name(rate, meta["base_rate"])
         fixed = {"experiment": self.name, "tier": tier, "ckpt": "epoch"}
         return {**fixed, "q_source": "eval", "is_pareto": None}
 

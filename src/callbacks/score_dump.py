@@ -29,9 +29,10 @@ evaluation on top of it:
   ``sds_outliers``; ``state_dict``, every weight and buffer on CPU.
 
 With ``sds``, the pseudo-sets are those of ``src.callbacks.sds.sds_inputs`` over the
-training inputs, without their data mask, as the replay (``src/evaluation/dump.py``)
-builds them; it serves their stored scores where ``max_rows`` and ``row_seed`` match
-its own, and raises otherwise.
+training inputs and their data mask, if any, each point with the mask of the row it was
+shifted from, as ``SDSCallback`` and the replay (``src/evaluation/dump.py``) build them;
+the replay serves their stored scores where ``max_rows`` and ``row_seed`` match its
+own, and raises otherwise.
 
 On data with a mask (the L1AD data), the i-th point of each auxiliary set takes the
 mask of the i-th training row that ``drawn_masks(mask, aux_size, aux_seed)`` draws and
@@ -298,15 +299,21 @@ class ScoreDumpCallback(Callback):
             # Unshuffled, so that the losses follow the rows of data_train.
             loaders["train"] = {"train": DataLoader(data_train, batch_size=batch_size)}
         if self.sds is not None:
-            loaders["sds"] = self._sds_loaders(unpack_batch(data_train.tensors).x)
+            loaders["sds"] = self._sds_loaders(unpack_batch(data_train.tensors))
         return loaders
 
-    def _sds_loaders(self, x_train: torch.Tensor) -> dict:
+    def _sds_loaders(self, train) -> dict:
         # Imported here: src.callbacks.sds imports this module.
         from src.callbacks.sds import SDS_SETS, sds_inputs
 
-        inputs = sds_inputs(x_train, self.sds["max_rows"], self.sds["row_seed"])
-        return {n: placeholder_loader(inputs[n], self.aux_batch_size) for n in SDS_SETS}
+        rows = self.sds["max_rows"], self.sds["row_seed"]
+        inputs = sds_inputs(train.x, *rows, train.mask)
+        return {
+            n: placeholder_loader(
+                inputs[n], self.aux_batch_size, inputs.get(f"{n}_mask")
+            )
+            for n in SDS_SETS
+        }
 
     def on_validation_epoch_start(self, trainer, pl_module):
         stored = self._stored["val"]

@@ -31,7 +31,17 @@ out_dir: ${paths.log_dir}/eval/${lattice}
 # lattice, run, dump, typical set and number of epochs; nothing else is compared, so an
 # out_dir written under another eval config or other sets needs resume=false.
 resume: true
-# Replaces data.data_dir of every run's configuration; null keeps it.
+# What becomes of a run with fewer epoch files than its trainer.max_epochs (a trial
+# stopped at a time limit): null replays and selects it as any other run; skip lists it
+# in <out_dir>/partial_runs.csv and leaves it out of the replay and the selection;
+# replay lists it and replays it, but leaves it out of the selection. physics sets skip.
+partial_runs: null
+# The root of the validation scores that the replay writes in the dumps' layout
+# (src/evaluation/callbacks/score_writer.py), <rescored_dir>/<lattice>/<run>/, from
+# which the selection reads normal for UDR and MC; null reads the dumps.
+rescored_dir: null
+# Replaces data.data_dir of every run's configuration (data.cache_dir on basis_hf);
+# null keeps it.
 data_dir: null
 # Replaces every run's signals and nulls by those of data/<sets>.yaml; null keeps them.
 sets: null

@@ -43,3 +43,19 @@ def row_subset(n: int, max_rows: int | None, seed: int) -> torch.Tensor | None:
         return None
     generator = torch.Generator().manual_seed(seed)
     return torch.randperm(n, generator=generator)[:max_rows].sort().values
+
+
+def disjoint_rows(n: int, max_rows: int | None, seed: int) -> torch.Tensor:
+    """Sorted indices of max_rows of n rows, none among ``row_subset(n, max_rows,
+    seed)``: the next max_rows of the same permutation.
+
+    Raises:
+        ValueError: If max_rows is None or more than half of n.
+    """
+    if max_rows is None or 2 * max_rows > n:
+        raise ValueError(
+            f"Two disjoint subsets need max_rows <= {n // 2}, not {max_rows}."
+        )
+    generator = torch.Generator().manual_seed(seed)
+    rows = torch.randperm(n, generator=generator)[max_rows : 2 * max_rows]
+    return rows.sort().values

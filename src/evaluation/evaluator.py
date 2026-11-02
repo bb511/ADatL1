@@ -66,13 +66,19 @@ class Evaluator:
     :param test_callbacks: Names among dump_callbacks of those that run in the test
         pass of the dump path.
     :param extra_sets: The sets the validation pass of the dump path appends to the
-        validation sets: 'aux' (bool), the three auxiliary sets; 'train' (bool), the
-        training set; 'sds' ({max_rows, row_seed} or None), the SDS pseudo-sets.
+        validation sets: 'aux' (bool), the three auxiliary sets; 'train' (bool, or
+        {max_rows, row_seed, batch_size} for a seeded subset of rows), the training
+        set; 'sds' and 'sds_val' ({max_rows, row_seed} or None), the SDS pseudo-sets
+        of the training rows and of validation normal.
     :param selection: The registry of strategies of the dump path ('criteria',
         'q_sec', 'labelled', 'efficiency', as in configs/eval/<domain>.yaml).
     :param typical: A stored validation set that the dump path serves as 'normal' in
         place of the run's, the operational cut included (src.evaluation.replay); None
         keeps 'normal'.
+    :param row_caps: The rows the dump path keeps of the validation and test sets,
+        {'seed': s, 'val': {set: n}, 'test': {set: n}}: n rows drawn with s, the same
+        for every run and epoch; a set left unnamed, or with n None, keeps every row,
+        and so does every set for None.
     :param trainer_kwargs: The other arguments that are given to the trainer object,
         kept the same as the training, e.g., which device to run the computations on.
     """
@@ -88,6 +94,7 @@ class Evaluator:
         extra_sets: dict | None = None,
         selection: dict | None = None,
         typical: str | None = None,
+        row_caps: dict | None = None,
         **trainer_kwargs,
     ):
         self.ckpts = ckpts or {}
@@ -96,6 +103,7 @@ class Evaluator:
         self.test_callbacks = list(test_callbacks)
         self.extra_sets = _container(extra_sets) or {}
         self.selection, self.typical = _container(selection), typical
+        self.row_caps = _container(row_caps)
         self.optimized_metric_config = optimized_metric_config or None
         if self.optimized_metric_config is not None:
             candidate = self.optimized_metric_config.get("candidate")
@@ -399,6 +407,7 @@ class Evaluator:
         threads: int = 1,
         tracking_uri: str | None = None,
         resume: bool = True,
+        partial: str | None = None,
     ) -> list[dict]:
         """Evaluate every run of a lattice by ``dump.evaluate_lattice``."""
         settings = self._dump_settings()
@@ -413,6 +422,7 @@ class Evaluator:
             threads,
             tracking_uri,
             resume,
+            partial,
         )
 
     def evaluate_dump(
@@ -439,4 +449,5 @@ class Evaluator:
             "extra_sets": self.extra_sets,
             "selection": self.selection,
             "typical": self.typical,
+            "row_caps": self.row_caps,
         }

@@ -36,14 +36,34 @@ from src.callbacks.components.selection import W_STEPS, ema, epoch_pick, pick, r
 from src.evaluation.components.pairing import partner_scores
 from src.evaluation.components.statistics import at, spearman_test
 from src.evaluation.components.tables import (
+    PARTIAL_RUNS,
     SPLITS,
     load_lattice,
+    read_partial,
     read_picks,
     read_values,
 )
 from src.evaluation.components.udr import LATTICE_CRITERIA
 
 BOOTSTRAP_DRAWS, BOOTSTRAP_SEED = 10_000, 20261020
+
+
+def _run_dirs(out_dir: Path) -> list[Path]:
+    """The per-run outputs in ``<out_dir>/runs``, in name order, less the runs that
+    ``partial_runs.csv`` lists.
+
+    Raises:
+        ValueError: If no run is left, as when every run of the lattice is partial.
+    """
+    partial, runs = read_partial(out_dir), out_dir / "runs"
+    paths = runs.iterdir() if runs.is_dir() else ()
+    dirs = sorted(p for p in paths if p.is_dir() and p.name not in partial)
+    if not dirs:
+        raise ValueError(
+            f"No run of {out_dir} is left to select: {len(partial)} partial runs are "
+            f"listed in {out_dir / PARTIAL_RUNS}, and {runs} holds no other."
+        )
+    return dirs
 
 
 @dataclass(frozen=True, eq=False)
@@ -184,14 +204,16 @@ class Lattice:
     values: pd.DataFrame
     picks: pd.DataFrame
     selection: dict  # the selection node of the eval domain config
-    normal: np.ndarray  # stored validation normal scores, (runs, epochs + 1, n)
+    # Stored validation normal scores, (runs, epochs + 1, n); None where the runs'
+    # files lack them, which leaves UDR and MC out.
+    normal: np.ndarray | None
     # Those of each run's partner, (epochs + 1, n) or None for a run left without one;
     # None without a partner lattice.
     partner: list[np.ndarray | None] | None
     metas: list[dict]  # meta.pt, in run order
 
     def __post_init__(self) -> None:
-        if self.partner is None:
+        if self.partner is None or self.normal is None:
             return
         shapes = {scores.shape for scores in self.partner if scores is not None}
         if len(self.partner) != len(self.normal) or shapes - {self.normal.shape[1:]}:
@@ -209,16 +231,17 @@ class Lattice:
         lattice: str,
         partner: str | None,
         drop_unpaired: bool = False,
+        rescored_dir: Path | None = None,
     ) -> "Lattice":
         """Read a lattice; the arguments are those of ``select_lattice``."""
-        dirs = sorted(path for path in (out_dir / "runs").iterdir() if path.is_dir())
+        dirs = _run_dirs(out_dir)
         names = [path.name for path in dirs]
         info = [json.loads((path / "run.json").read_text()) for path in dirs]
         values, picks = read_values(dirs, info), read_picks(dirs)
-        normal, metas = load_lattice(scores_dir / lattice, names)
-        paired = partner_scores(
-            scores_dir, lattice, partner, names, info, drop_unpaired
-        )
+        root, rows = Path(rescored_dir or scores_dir), selection.get("lattice_rows")
+        normal, metas = load_lattice(scores_dir / lattice, names, root / lattice, rows)
+        pairing = (scores_dir, lattice, partner, names, info, drop_unpaired, root, rows)
+        paired = None if normal is None else partner_scores(*pairing)
         return cls(info, values, picks, selection, normal, paired, metas)
 
     @functools.cached_property
@@ -292,6 +315,8 @@ class Lattice:
         return Strategy(name, mode, q_main, self.q_sec, ema_values, picks, key)
 
     def _criterion_strategies(self) -> list[Strategy]:
+        if self.normal is None:
+            return []
         modes = self.selection["lattice_criteria"]
         values = {n: LATTICE_CRITERIA[n](self.normal, self.partner) for n in modes}
         return [
@@ -375,27 +400,37 @@ def select_lattice(
     lattice: str,
     partner: str | None,
     drop_unpaired: bool = False,
+    rescored_dir: Path | None = None,
 ) -> None:
     """Compute the lattice criteria, apply every strategy and write the tables.
 
     :param out_dir: The stage's output directory of the lattice, whose ``runs/``
-        holds the per-run outputs of ``Evaluator.evaluate_lattice``.
+        holds the per-run outputs of ``Evaluator.evaluate_lattice``; the runs that its
+        ``partial_runs.csv`` lists are left out.
     :param selection: The ``selection`` node of the eval domain config: ``criteria``,
         ``q_sec``, ``labelled``, ``efficiency``, ``clusters`` (a CSV with columns
-        intervention and target_cluster, or None), ``lattice_criteria`` (name: mode)
-        and ``limits`` (strategy: note).
+        intervention and target_cluster, or None), ``lattice_criteria`` (name: mode),
+        ``limits`` (strategy: note) and, optionally, ``lattice_rows`` (``max_rows``,
+        ``row_seed``), the seeded subset of validation normal's rows that UDR and MC
+        read, every row when absent.
     :param scores_dir: The root of the dumps, ``<scores_dir>/<lattice>/<run>/``.
     :param lattice: The lattice's name, its directory under ``scores_dir``.
     :param partner: The lattice whose runs, paired by hyperpoint, give UDR; None
         leaves UDR out.
     :param drop_unpaired: Whether a run without a partner run of equal hyperpoint is
         left out of UDR (its UDR NaN) instead of raising ValueError.
+    :param rescored_dir: The root of the validation scores that UDR and MC read, in
+        the dumps' layout (``src.evaluation.callbacks.score_writer``), for the lattice
+        and its partner; None reads the dumps. With ``lattice_rows``, the two criteria
+        are left out where these files lack validation normal.
     """
     # Imported here, since both modules import this one.
     from src.evaluation.harvest import Harvest
     from src.evaluation.report import Report
 
     out_dir, scores_dir = Path(out_dir), Path(scores_dir)
-    lat = Lattice.read(out_dir, selection, scores_dir, lattice, partner, drop_unpaired)
+    lat = Lattice.read(
+        out_dir, selection, scores_dir, lattice, partner, drop_unpaired, rescored_dir
+    )
     Report(lat).write(out_dir)
     Harvest(lat, lattice).write(out_dir)

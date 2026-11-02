@@ -1,5 +1,7 @@
 """The SDS error as an evaluation callback, the mirror of src/callbacks/sds.py over the
-``sds_targets`` and ``sds_outliers`` loaders of a test loop.
+loaders of the pseudo-sets of a test loop: ``sds_targets`` and ``sds_outliers``, built
+from the training rows, or ``sds_val_targets`` and ``sds_val_outliers``, built from
+validation normal (the training callback's ``source="normal"``).
 
 Without a target rate, the cut is ``pl_module.thres_operational`` with
 ``pl_module.tie_operational``, the threshold and tie weight set on the epoch's
@@ -16,9 +18,12 @@ from pathlib import Path
 import torch
 from pytorch_lightning.callbacks import Callback
 
-from src.callbacks.sds import rate_cut, sds_error, tiered_name
+from src.callbacks.sds import SDS_SETS, SOURCES, rate_cut, sds_error, tiered_name
 from src.evaluation.callbacks import utils
 from src.plot import horizontal_bar
+
+# The prefix that replaces 'sds' in the loader names of the pseudo-sets of each source.
+PREFIXES = {"train": "sds", "normal": "sds_val"}
 
 
 class SDS(Callback):
@@ -29,6 +34,8 @@ class SDS(Callback):
         carries its rate token, as ``tiered_name`` forms it.
     :param target_rate: Rate of the cut, in the unit of the module's target rate (kHz
         on the LHC); None takes the module's operational cut.
+    :param source: "train" or "normal", the rows the pseudo-sets were built from, which
+        name their loaders (``PREFIXES``).
     """
 
     def __init__(
@@ -36,13 +43,16 @@ class SDS(Callback):
         output_name: str = "ascore/full",
         name: str | None = None,
         target_rate: float | None = None,
+        source: str = "train",
     ):
         super().__init__()
+        if source not in SOURCES:
+            raise ValueError(f"source must be one of {SOURCES}, got '{source}'.")
         self.output_name = output_name
         self.name = tiered_name("sds" if name is None else name, target_rate)
         self.target_rate = target_rate
-        self.sets = ("sds_targets", "sds_outliers")
-        self.sets += () if target_rate is None else ("normal",)
+        self.pseudo = tuple(n.replace("sds", PREFIXES[source], 1) for n in SDS_SETS)
+        self.sets = self.pseudo + (() if target_rate is None else ("normal",))
         self.summary = {}
 
     def on_test_epoch_start(self, trainer, pl_module):
@@ -73,8 +83,7 @@ class SDS(Callback):
         """Compute, store and log the SDS error of the current checkpoint."""
         ckpt_name = Path(pl_module._ckpt_path).stem
         threshold, tie_weight = self._cut(pl_module)
-        a_targets = torch.cat(self.scores["sds_targets"])
-        a_outliers = torch.cat(self.scores["sds_outliers"])
+        a_targets, a_outliers = (torch.cat(self.scores[n]) for n in self.pseudo)
         sds_value = sds_error(a_targets, a_outliers, threshold, tie_weight)
         self._store_summary(sds_value, utils.misc.get_ckpt_ds_name(ckpt_name))
         utils.mlflow.log_metrics_to_mlflow(

@@ -48,6 +48,7 @@ def main(cfg: DictConfig) -> None:
         threads=cfg.worker_threads,
         tracking_uri=cfg.tracking_uri,
         resume=cfg.resume,
+        partial=cfg.partial_runs,
     )
 
     log.info(f"Selecting on the lattice into {cfg.out_dir}")
@@ -58,6 +59,7 @@ def main(cfg: DictConfig) -> None:
         lattice=cfg.lattice,
         partner=cfg.partner,
         drop_unpaired=cfg.drop_unpaired,
+        rescored_dir=cfg.rescored_dir,
     )
 
 

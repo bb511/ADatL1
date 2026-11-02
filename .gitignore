@@ -185,8 +185,6 @@ outputs
 /results/
 /checkpoints/
 /lattices/
-# The NeurIPS submission's models and logs, kept on olgpu alone.
-/neurips_submission/
 .env
 
 # Fix exceptions

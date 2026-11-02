@@ -9,7 +9,13 @@ import torch
 from PIL import Image
 
 from src.data.components import mscct
-from src.data.components.mscct_pairing import oracle_partners, slide_affine
+from src.data.components.mscct_pairing import (
+    agrees_with_oracle,
+    map_points,
+    oracle_partners,
+    overlap_partners,
+    slide_affine,
+)
 from src.data.MSCCT_datamodule import MSCCTDataModule
 
 # The split recorded in plans/adl1t/01_data.md (26 Oct 2026).
@@ -30,6 +36,10 @@ RECORDED_COUNTS = {
     ("p1000", "dermis"): (29514, 15703, 11316),
     ("gt450", "dermis"): (28611, 15259, 10529),
 }
+
+# Validation rows of CS2's normal whose mapped footprint overlaps a row of each
+# scanner's validation dermis (2 Nov 2026), of 8,320.
+RECORDED_OVERLAPS = {"nz20": 8316, "nz210": 8316, "p1000": 7606, "gt450": 8248}
 
 # The toy set: six slides on two scanners, page 0 of 192 x 256, patches of 8 at level
 # 1, so 16 x 16 page-0 footprints on a 12 x 16 grid.
@@ -295,6 +305,135 @@ def test_oracle_on_identical_geometry_pairs_each_cell_with_itself(toy_dir):
     assert np.array_equal(target[partners], source)
 
 
+def _mapped(affines: dict[int, np.ndarray]) -> dict:
+    vertices = np.array(_rect(0, 0, 400, 300), float).reshape(-1, 2)
+    annotations = {}
+    for slide, affine in affines.items():
+        annotations[mscct.file_name(slide, "cs2")] = {"polygons": [(3, vertices)]}
+        mapped = map_points(vertices, affine)
+        annotations[mscct.file_name(slide, "nz20")] = {"polygons": [(3, mapped)]}
+    return annotations
+
+
+def _affine(shift, matrix=np.eye(2)) -> np.ndarray:
+    return np.column_stack([matrix, shift])
+
+
+def _grid(slide: int, rows: range, cols: range) -> np.ndarray:
+    return np.array([[slide, r, c] for r in rows for c in cols])
+
+
+def _overlap(annotations: dict, source: np.ndarray, target: np.ndarray):
+    return overlap_partners(annotations, source, target, ("cs2", "nz20"), FOOTPRINT)
+
+
+def _overlapped(annotations: dict, source: np.ndarray, target: np.ndarray) -> list:
+    offsets, rows = _overlap(annotations, source, target)
+    segments = zip(offsets[:-1], offsets[1:])
+    return [[tuple(target[j].tolist()) for j in rows[a:b]] for a, b in segments]
+
+
+def test_overlap_of_a_grid_aligned_footprint_is_one_cell():
+    annotations = _mapped({1: _affine((2 * FOOTPRINT, FOOTPRINT))})
+    source = np.array([[1, 2, 3], [1, 5, 5]])
+    overlapped = _overlapped(annotations, source, _grid(1, range(12), range(12)))
+    assert overlapped == [[(1, 3, 5)], [(1, 6, 7)]]
+
+
+def test_overlap_on_identical_geometry_is_the_cell_itself(toy_dir):
+    dm = _toy(toy_dir)
+    annotations = mscct.annotations_by_file(toy_dir / mscct.ANNOTATIONS)
+    source, target = dm.provenance["valid"]["normal"], dm.provenance["valid"]["nz20"]
+    offsets, rows = overlap_partners(annotations, source, target, ("cs2", "nz20"), 16)
+    assert np.array_equal(offsets, np.arange(len(source) + 1))
+    assert np.array_equal(target[rows], source)
+
+
+def test_a_half_cell_shift_overlaps_two_or_four_cells():
+    source, target = np.array([[1, 2, 3]]), _grid(1, range(12), range(12))
+    half = FOOTPRINT / 2
+    two = _overlapped(_mapped({1: _affine((half, 0))}), source, target)
+    assert two == [[(1, 2, 3), (1, 2, 4)]]
+    four = _overlapped(_mapped({1: _affine((half, half))}), source, target)
+    assert four == [[(1, 2, 3), (1, 2, 4), (1, 3, 3), (1, 3, 4)]]
+
+
+def test_a_contact_within_the_tolerance_reaches_no_cell():
+    source, target = np.array([[1, 2, 3]]), _grid(1, range(12), range(12))
+    grazing = _overlapped(_mapped({1: _affine((1e-9, -1e-9))}), source, target)
+    assert grazing == [[(1, 2, 3)]]
+    entering = _overlapped(_mapped({1: _affine((1e-3, 0))}), source, target)
+    assert entering == [[(1, 2, 3), (1, 2, 4)]]
+
+
+def test_a_contraction_overlaps_fewer_cells_than_a_dilation():
+    source, target = _grid(1, range(20), range(20)), _grid(1, range(40), range(40))
+    counts = {}
+    for scale in (0.9, 1.1):
+        annotations = _mapped({1: _affine((3.3, 7.1), scale * np.eye(2))})
+        counts[scale] = np.diff(_overlap(annotations, source, target)[0])
+    # Each axis of a footprint scaled by s spans 1 or 2 cells for s < 1 and 2 or 3
+    # for 1 < s < 2, whatever its offset.
+    assert set(counts[0.9].tolist()) == {1, 2, 4}
+    assert set(counts[1.1].tolist()) == {4, 6, 9}
+
+
+def test_a_rotation_by_45_degrees_about_a_cell_centre_spans_three_by_three():
+    centre = np.full(2, 5 * FOOTPRINT + (FOOTPRINT - 1) / 2)
+    cos, sin = np.cos(np.pi / 4), np.sin(np.pi / 4)
+    rotation = np.array([[cos, -sin], [sin, cos]])
+    annotations = _mapped({1: _affine(centre - rotation @ centre, rotation)})
+    source, target = np.array([[1, 5, 5]]), _grid(1, range(12), range(12))
+    # The corners land 0.71 cells from the centre along the axes, so the ranges also
+    # hold the block's four corner cells, which the footprint misses.
+    block = [(1, r, c) for r in (4, 5, 6) for c in (4, 5, 6)]
+    assert _overlapped(annotations, source, target) == [block]
+
+
+def test_the_oracle_cell_is_always_overlapped():
+    rng = np.random.default_rng(2)
+    source = _grid(1, range(10, 30), range(10, 30))
+    cells = _grid(1, range(-90, 90), range(-90, 90))
+    for _ in range(20):
+        angle = rng.uniform(0, 2 * np.pi)
+        rotation = np.array(
+            [[np.cos(angle), -np.sin(angle)], [np.sin(angle), np.cos(angle)]]
+        )
+        shear = np.array([[1, rng.uniform(-0.3, 0.3)], [0, 1]])
+        matrix = rng.uniform(0.7, 1.4) * rotation @ shear
+        annotations = _mapped({1: _affine(rng.uniform(-50, 50, 2), matrix)})
+        target = cells[rng.random(len(cells)) < 0.5]
+        oracle = oracle_partners(annotations, source, target, ("cs2", "nz20"), 16)
+        agrees = agrees_with_oracle(*_overlap(annotations, source, target), oracle)
+        assert np.array_equal(agrees, oracle >= 0)
+
+
+def test_cells_absent_from_the_target_contribute_no_row():
+    shift = 0.6 * FOOTPRINT
+    annotations = _mapped({1: _affine((shift, shift))})
+    source = np.array([[1, 2, 3], [1, 8, 8]])
+    target = np.array([[1, 3, 4], [1, 0, 0], [1, 2, 3]])
+    offsets, rows = _overlap(annotations, source, target)
+    assert offsets.tolist() == [0, 2, 2] and rows.tolist() == [2, 0]
+    oracle = oracle_partners(annotations, source, target, ("cs2", "nz20"), 16)
+    assert oracle.tolist() == [0, -1]
+    assert agrees_with_oracle(offsets, rows, oracle).tolist() == [True, False]
+    assert not agrees_with_oracle(offsets, rows, np.array([1, 1])).any()
+
+
+def test_slides_are_mapped_independently():
+    half = FOOTPRINT / 2
+    annotations = _mapped({1: _affine((half, 0)), 2: _affine((0, 2 * FOOTPRINT))})
+    source = np.array([[2, 1, 1], [1, 1, 1], [2, 4, 4], [1, 4, 4]])
+    target = np.concatenate([_grid(s, range(12), range(12)) for s in (1, 2)])
+    assert _overlapped(annotations, source, target) == [
+        [(2, 3, 1)],
+        [(1, 1, 1), (1, 1, 2)],
+        [(2, 6, 4)],
+        [(1, 4, 4), (1, 4, 5)],
+    ]
+
+
 @pytest.mark.skipif(
     "ADL1T_MSCCT_DIR" not in os.environ,
     reason="needs the MS-CCT record (or its patch caches) in ADL1T_MSCCT_DIR",
@@ -315,3 +454,23 @@ def test_counts_match_the_record_of_26_october():
         else:
             train = len(dm._raw(scanner, [name], parts["train"])[0])
             assert (train, *(len(sets[name]) for sets in evaluation)) == counts
+
+
+@pytest.mark.skipif(
+    "ADL1T_MSCCT_DIR" not in os.environ,
+    reason="needs the MS-CCT record (or its patch caches) in ADL1T_MSCCT_DIR",
+)
+def test_the_oracle_partner_is_overlapped_on_the_record():
+    data_dir = Path(os.environ["ADL1T_MSCCT_DIR"])
+    dm = MSCCTDataModule(data_dir=str(data_dir))
+    dm.setup()
+    annotations = mscct.annotations_by_file(data_dir / mscct.ANNOTATIONS)
+    footprint = dm.hparams.patch_size << dm.hparams.level
+    source = dm.provenance["valid"]["normal"]
+    for scanner, overlapped in RECORDED_OVERLAPS.items():
+        target = dm.provenance["valid"][scanner]
+        args = (annotations, source, target, ("cs2", scanner), footprint)
+        offsets, rows = overlap_partners(*args)
+        oracle = oracle_partners(*args)
+        assert np.array_equal(agrees_with_oracle(offsets, rows, oracle), oracle >= 0)
+        assert int((np.diff(offsets) > 0).sum()) == overlapped

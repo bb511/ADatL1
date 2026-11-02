@@ -35,7 +35,14 @@ from src.utils.omegaconf import register_resolvers
 from tests.test_score_dump import PASSES, ToyAE, ToyDataModule, dump_callback, fit, load
 
 CONFIGS = Path(__file__).resolve().parents[1] / "configs"
-DOMAINS = ["cchamber", "cchamber_typical", "cchamber_wt", "cifar10", "mscct"]
+DOMAINS = [
+    "cchamber",
+    "cchamber_typical",
+    "cchamber_wt",
+    "cifar10",
+    "cifar10_typical",
+    "mscct",
+]
 # The sets of the toy dump, which has none of the chamber's null pools.
 TOY_SETS = {"normal", "reference_normal", "sig_a", "sig_b"}
 # The toy's one stored set of label 0 besides normal, served as the typical set.
@@ -580,6 +587,33 @@ def test_a_scores_only_copy_raises_where_a_score_is_rescored(lattices, tmp_path)
             _test(replay, split, ToyDataModule().loaders(split), [])
 
 
+def test_cifar10_typical_replays_a_scores_only_lattice(lattices, tmp_path):
+    cfg = _compose("cifar10_typical", *SCORES_ONLY)
+    drop_absent_sets(cfg, TOY_SETS - {TYPICAL})
+    # As on CIFAR-10, whose null_ds names the pool served as normal.
+    cfg.evaluation.evaluator.dump_callbacks.anomaly_efficiency.null_ds = [TYPICAL]
+    evaluator = hydra.utils.instantiate(cfg.evaluation.evaluator, typical=TYPICAL)
+    out, plain = tmp_path / "typical", tmp_path / "plain"
+    runs = evaluator.evaluate_lattice(lattices.stripped, out, "toy")
+    selection = OmegaConf.to_container(cfg.selection, resolve=True)
+    select_lattice(out, selection, lattices.stripped, "toy", None)
+    _evaluate_and_select(lattices.stripped, plain, *SCORES_ONLY)
+
+    tables = {f"runs/{run}/{table}" for run in ("run_a", "run_b") for table in TABLES}
+    assert set(_outputs(out)) == tables | SELECTION_TABLES
+    assert all(run["typical"] == TYPICAL and run["nulls"] == [TYPICAL] for run in runs)
+    for run in ("run_a", "run_b"):
+        val, plain_val = (_read_csv(d / "runs" / run / "val.csv") for d in (out, plain))
+        assert EFF + TYPICAL not in val[0]
+        # Entropy reads the training losses alone, Q'' the set served as normal.
+        for column, equal in [("entropy/entropy", True), ("fit/normal", False)]:
+            values = [[row[column] for row in rows] for rows in (val, plain_val)]
+            assert (values[0] == values[1]) == equal, column
+        test = _read_csv(out / "runs" / run / "test.csv")
+        null_rates = [row["null_rate"] for row in test]
+        assert null_rates == [row[EFF + TYPICAL] for row in test]
+
+
 def test_the_worker_initialiser_sets_the_thread_count():
     before = torch.get_num_threads()
     try:
@@ -728,6 +762,7 @@ def test_eval_configs_build_the_evaluator(domain):
         "cchamber_typical": 9,
         "cchamber_wt": 2,
         "cifar10": 3,
+        "cifar10_typical": 3,
         "mscct": 4,
     }
     assert len(null_ds) == sizes[domain]

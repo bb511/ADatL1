@@ -2,6 +2,9 @@
 /trigger_models
 /qmodel_analysis
 
+# Ignore neurips_submission
+/neurips_submission
+
 # Ignore notebook stuff
 notebooks/paretos
 notebooks/effs

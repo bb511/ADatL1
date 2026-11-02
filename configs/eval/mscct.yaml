@@ -217,7 +217,7 @@ selection:
     w1: favours a small score spread; a constant score gives 0, its best value
     rtm: on RealNVP its sign carries no meaning where the median NLL is at or below zero
     entropy: on RealNVP undefined, its per-sample loss can be negative; its RealNVP picks can fall on epochs where it is NaN
-    sds: in-sample, the pseudo-sets come from the training inputs
+    sds: in-sample, the pseudo-sets come from the training inputs; on images the edge test keeps nearly every training row, so the pseudo-outliers are the training set pushed one nearest-neighbour distance outward and SDS reads the score's response to that push
     udr: selects the untrained model where its scores do not depend on the seed
     mc: selects the untrained model where its scores do not depend on the seed
     q_sec: on AE valid as an epoch rule and invalid as a hyperpoint rule on the retrained light tunnel (rho -0.26 at both epochs), and expected so on NAE, scored by the same reconstruction error; the SVDD distance is taken per latent coordinate, since its sum grows with the latent width

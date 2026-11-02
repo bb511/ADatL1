@@ -12,6 +12,69 @@ from .binary import get_normalizer_fn as get_normalizer_fn_binary
 from .kernel import posterior_agreement_curve
 
 
+def energy_gaps(
+    prob1: Tensor, prob2: Tensor, energy_type: str, energy_params: dict
+) -> tuple[Tensor, Tensor]:
+    """Return the energy gaps D_k = E_k(1) - E_k(0) of two normalised score samples.
+
+    The mean and the standard deviation of the pooled samples, which the adaptive
+    energy reads, are written into energy_params first.
+    """
+    pooled = torch.cat([prob1, prob2], dim=0)
+    energy_params.update({"mean": pooled.mean().item(), "std": pooled.std().item()})
+    energy_fn = get_energy_fn_binary(energy_type, energy_params)
+    ones, zeros = torch.ones_like(prob1), torch.zeros_like(prob1)
+    gap1 = energy_fn(prob1, ones) - energy_fn(prob1, zeros)
+    return gap1, energy_fn(prob2, ones) - energy_fn(prob2, zeros)
+
+
+def consistency_limit(
+    scores_1: Tensor,
+    scores_2: Tensor,
+    normalization_type: str = "minmax",
+    normalization_params: dict | None = None,
+    energy_type: str = "baseline",
+    energy_params: dict | None = None,
+    **unused,
+) -> float:
+    """Return the small-beta limit of the consistency of two paired score samples.
+
+    Each sample gives pair i a two-state Gibbs posterior,
+    p_k(y) = exp(-beta E_k(y)) / Z_k, and CAP averages the log overlap of the two,
+    which factorises as::
+
+        log <p1, p2> = log cos(p1, p2) + log |p1| + log |p2|.
+
+    The norms grow as each posterior sharpens, whatever the other says, while the
+    log-cosine, the consistency, measures agreement alone. It vanishes at beta = 0
+    and is nowhere positive, so its maximum over beta lies at beta = 0, where every
+    model scores the same. In the energy gaps D_k = E_k(1) - E_k(0) it expands as
+
+        log cos(p1, p2) = -(beta**2 / 8) (D1_i - D2_i)**2 + O(beta**4),
+
+    so beta enters the leading term as a factor common to every model, and
+
+        consistency = -mean_i (D1_i - D2_i)**2 <= 0
+
+    ranks models as the consistency does at small beta, with no beta to choose. It is
+    zero only when the two samples give every pair equal gaps.
+
+    The scores are normalised and turned into gaps as in ApproximationCapacity, from
+    the same configuration.
+
+    :param unused: The other entries of a CAP configuration, the beta grid among
+        them, which are accepted and ignored.
+    """
+    normalize = get_normalizer_fn_binary(normalization_type, normalization_params)
+    with torch.no_grad():
+        prob1, prob2 = normalize(scores_1, scores_2)
+        # Not cast to float64 as CAP's are: the logged consistency values were
+        # computed in the dtype of the scores, and the cast would change their last
+        # bits.
+        gaps = energy_gaps(prob1, prob2, energy_type, dict(energy_params or {}))
+        return (-torch.mean((gaps[0] - gaps[1]) ** 2)).item()
+
+
 class ApproximationCapacity(Metric):
     """Approximation Capacity (CAP) Metric for classification tasks.
 
@@ -110,31 +173,15 @@ class ApproximationCapacity(Metric):
             self.normalization_type, self.normalization_params
         )
 
-    def _get_energy_fn(self):
-        return get_energy_fn_binary(self.energy_type, self.energy_params)
-
-    def _energy_gaps(self, prob1: Tensor, prob2: Tensor) -> tuple[Tensor, Tensor]:
-        """Return the energy gaps D_k = E_k(1) - E_k(0) of the normalised pairs."""
-        combined = torch.cat([prob1, prob2], dim=0)
-        self.energy_params.update(
-            {
-                "mean": combined.mean().item(),
-                "std": combined.std().item(),
-            }
-        )
-        energy_fn = self._get_energy_fn()
-        ones = torch.ones_like(prob1)
-        zeros = torch.zeros_like(prob1)
-        gap1 = energy_fn(prob1, ones) - energy_fn(prob1, zeros)
-        gap2 = energy_fn(prob2, ones) - energy_fn(prob2, zeros)
-        return gap1, gap2
-
     def update(self, logits1: Tensor, logits2: Tensor, **kwargs):
         """Evaluate the mean kernel on the beta grid and keep its maximum."""
         with torch.no_grad():
             prob1, prob2 = self.normalizer_fn(logits1, logits2)
-            gap1, gap2 = self._energy_gaps(
-                prob1.to(torch.float64), prob2.to(torch.float64)
+            gap1, gap2 = energy_gaps(
+                prob1.to(torch.float64),
+                prob2.to(torch.float64),
+                self.energy_type,
+                self.energy_params,
             )
             curve = posterior_agreement_curve(gap1, gap2, self.betas.to(gap1.device))
 
@@ -151,57 +198,6 @@ class ApproximationCapacity(Metric):
 
     def compute(self) -> Tensor:
         """Return the computed CAP value."""
-        return self.cap.item()
-
-
-class PosteriorConsistency(ApproximationCapacity):
-    """Consistency-only CAP: the beta-free limit of CAP's posterior log-cosine.
-
-    CAP is, per paired sample, the log overlap of the two-state Gibbs posteriors
-    `p_k = softmax(-beta * E_k(.))` induced by the two score sets. Normalising
-    that inner product splits it exactly into a consistency and a confidence
-    term,
-
-        CAP_i = log <p1, p2> = log cos(p1, p2) + log|p1| + log|p2|,
-
-    where the norm term depends only on how peaked each posterior is and is
-    blind to whether the two agree. That is the informative half. The log-cosine
-    is the consistency half, but it cannot serve as an objective on its own: it
-    is identically zero at beta = 0, so any beta chosen to maximise it collapses
-    onto the uninformative solution where every model ties at zero.
-
-    Expanding around beta = 0 removes the ambiguity. Writing
-    `D_k = E_k(1) - E_k(0)` for the per-sample energy gap,
-
-        log cos(p1, p2) = -(beta**2 / 8) * sum_i (D1_i - D2_i)**2 + O(beta**4),
-
-    so beta enters only through a common prefactor and drops out of any ranking
-    of models. This metric reports that beta-free limit, up to that constant,
-
-        consistency = -mean_i (D1_i - D2_i)**2,
-
-    which is <= 0, is maximised (zero only when the two paired score sets induce
-    identical energy gaps), and requires no inner optimisation at all.
-
-    The normalisation and energy front-end is inherited from CAP unchanged, so
-    the same `cap_metric_config` block can be reused verbatim. The `beta_min`,
-    `beta_max` and `n_beta` entries of that config are accepted for drop-in
-    compatibility and have no effect here; `curve`, `beta_star` and `at_bound`
-    stay None.
-    """
-
-    def update(self, logits1: Tensor, logits2: Tensor, **kwargs):
-        """Compute the beta-free consistency limit over the paired scores."""
-        with torch.no_grad():
-            # In the dtype of the normalised scores rather than CAP's float64, so that
-            # the consistency values of earlier runs are reproduced bit for bit.
-            gap1, gap2 = self._energy_gaps(*self.normalizer_fn(logits1, logits2))
-            consistency = (-torch.mean((gap1 - gap2) ** 2)).item()
-            # Assigned, not filled in place, for the reason given in ApproximationCapacity.update.
-            self.cap = torch.full_like(self.cap, consistency)
-
-    def compute(self) -> Tensor:
-        """Return the computed consistency value."""
         return self.cap.item()
 
 

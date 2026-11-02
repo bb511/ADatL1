@@ -142,7 +142,7 @@ class CIFARADDataset(IterableDataset):
             nb += 1
 
 
-class CausalChamberDataset(IterableDataset):
+class ChamberRowsDataset(IterableDataset):
     """Causal Chamber rows already in memory, served as (x, y) batches.
 
     Without a shuffler, batch i has rows i * batch_size to (i + 1) * batch_size, the

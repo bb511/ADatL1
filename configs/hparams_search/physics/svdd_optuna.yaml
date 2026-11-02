@@ -25,7 +25,7 @@ hydra:
     # total number of runs that will be executed
     n_trials: 40
 
-    # Bias-free one-class Deep SVDD search space.
+    # The objective (one_class) and the encoder's biases (off) are not searched.
     params:
       algorithm.optimizer.lr: tag(log, interval(3e-5, 1e-2))
       trainer.gradient_clip_val: choice(0.0, 0.5, 1.0, 2.0)

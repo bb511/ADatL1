@@ -11,7 +11,7 @@ from pyarrow import csv as pa_csv
 from pytorch_lightning import LightningDataModule
 from torch.utils.data import DataLoader, TensorDataset
 
-from src.data.components.dataset import CausalChamberDataset
+from src.data.components.dataset import ChamberRowsDataset
 from src.data.utils import check_md5, download, extract, seeded_permutation, to_device
 from src.utils import pylogger
 
@@ -135,7 +135,7 @@ class CausalChamberDataModule(LightningDataModule):
         )
 
         self.median: torch.Tensor | None = None
-        self.scale: torch.Tensor | None = None
+        self.spread: torch.Tensor | None = None
         self.data_train: TensorDataset | None = None
         self._main: dict[str, SplitTensors] = {}
         self._aux: dict[str, dict[str, SplitTensors]] = {}
@@ -209,7 +209,7 @@ class CausalChamberDataModule(LightningDataModule):
         if self.hparams.train_fold is not None:
             train_idx = train_idx[self.hparams.train_fold :: self.hparams.n_train_folds]
         self._fit_normalization(reference[train_idx])
-        reference = self._normalize(reference)
+        reference = self._robust_scale(reference)
         y_train = torch.zeros(train_idx.numel(), dtype=torch.int64)
         self.data_train = TensorDataset(reference[train_idx], y_train)
         for split, idx in (("valid", valid_idx), ("test", test_idx)):
@@ -228,15 +228,17 @@ class CausalChamberDataModule(LightningDataModule):
         return train, rest[:n_valid], rest[n_valid:]
 
     def _fit_normalization(self, x_train: torch.Tensor) -> None:
-        q_low, q_high = self.hparams.robust_quantiles
-        qs = torch.quantile(x_train, torch.tensor([q_low, 0.5, q_high]), dim=0)
-        self.median = qs[1]
-        # Floor for a readout that is constant over the bulk of the training rows.
-        self.scale = (qs[2] - qs[0]).clamp_min(1e-6)
+        """Set each readout's training median and its inter-quantile spread."""
+        low, high = self.hparams.robust_quantiles
+        levels = torch.tensor([low, 0.5, high])
+        lower, self.median, upper = torch.quantile(x_train, levels, dim=0)
+        # A readout constant over the bulk of the training rows has zero spread.
+        self.spread = (upper - lower).clamp_min(1e-6)
 
-    def _normalize(self, x: torch.Tensor) -> torch.Tensor:
-        clip = self.hparams.clip_value
-        return ((x - self.median) / self.scale).clamp(-clip, clip)
+    def _robust_scale(self, x: torch.Tensor) -> torch.Tensor:
+        """Return x less the median, in units of the spread, within ±clip_value."""
+        bound = self.hparams.clip_value
+        return ((x - self.median) / self.spread).clamp(-bound, bound)
 
     def _split_main_and_reference(
         self, x: torch.Tensor
@@ -265,7 +267,7 @@ class CausalChamberDataModule(LightningDataModule):
 
     def _split_set(self, spec: dict) -> tuple[torch.Tensor, torch.Tensor]:
         """Return the validation and test rows of a plain set."""
-        x = self._normalize(self._read_set(spec))
+        x = self._robust_scale(self._read_set(spec))
         n = x.size(0)
         n_valid = round(self.hparams.signal_val_fraction * n)
         perm = seeded_permutation(n, self.hparams.seed + n)
@@ -289,7 +291,7 @@ class CausalChamberDataModule(LightningDataModule):
         max_batches: int | None = None,
         shuffler: torch.Generator | None = None,
     ) -> DataLoader:
-        dataset = CausalChamberDataset(
+        dataset = ChamberRowsDataset(
             split.x,
             split.y,
             batch_size=batch_size,

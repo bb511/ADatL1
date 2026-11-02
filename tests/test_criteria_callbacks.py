@@ -15,7 +15,7 @@ from src.callbacks.cap import CAPCallback
 from src.callbacks.components import selection
 from src.callbacks.components.rate import AnomalyRate
 from src.callbacks.components.utils import row_subset
-from src.callbacks.consistency import PosteriorConsistencyCallback
+from src.callbacks.consistency_limit import ConsistencyLimitCallback
 from src.callbacks.efficiency import AnomalyEfficiencyCallback
 from src.callbacks.entropy import LossEntropyCallback, loss_entropy
 from src.callbacks.goix import (
@@ -242,7 +242,7 @@ def test_existing_callbacks_skip_the_sanity_pass(tmp_path):
         ThresholdDriftCallback(output_name=KEY),
         WassersteinCallback(output_name=KEY, **pair),
         CAPCallback(output_name=KEY, **pair, **cap),
-        PosteriorConsistencyCallback(output_name=KEY, **pair, **cap),
+        ConsistencyLimitCallback(output_name=KEY, **pair, **cap),
         AnomalyEfficiencyCallback(output_name=KEY),
     ]
     baseline, guarded = Recorder(), Recorder()

@@ -276,7 +276,7 @@ def _legacy_gaps(paired_1: Tensor, paired_2: Tensor, legacy) -> tuple[Tensor, Te
 
     The scores are normalised in their own dtype, jointly unless the parameters say
     otherwise, and the energy reads the mean and the standard deviation of the pooled
-    normalised scores, as in ApproximationCapacity._energy_gaps.
+    normalised scores, as in metric.energy_gaps.
     """
     params = legacy["normalization_params"]
     normalize = get_normalizer_fn(legacy["normalization_type"], params)

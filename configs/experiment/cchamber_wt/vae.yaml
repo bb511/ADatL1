@@ -31,7 +31,7 @@ trainer:
 
 test: false
 
-# Candidate 000 of Victor's chamber panel, with a constant KL weight.
+# The KL weight is constant.
 algorithm:
   target_rate: 0.01
   base_rate: null

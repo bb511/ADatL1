@@ -18,6 +18,7 @@ class MLP(nn.Module):
     :param out_dim: Int of the output dimension.
     :param batchnorm: Whether to use batch normalization after each layer or not.
     :param affine: Bool whether the batchnorm is affine if used.
+    :param bias: Bool whether the linear layers carry an additive bias.
     :param activation: Pytorch module that defines the activation function.
     :param final_activation: Bool whether to attach an activation after the final layer.
     :param init_weight: Callable method to initialize the weights of the decoder nodes.
@@ -46,11 +47,10 @@ class MLP(nn.Module):
 
         self.batchnorm = batchnorm
         self.affine = affine
-        self.bias = bias
         self.init_weight = init_weight
         self.init_bias = init_bias
 
-        self.net = self._construct_net()
+        self.net = self._construct_net(bias)
         self._apply_weight_init()
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
@@ -67,7 +67,7 @@ class MLP(nn.Module):
 
         raise ValueError(f"Unsupported activation: {activation}")
 
-    def _construct_net(self):
+    def _construct_net(self, bias: bool):
         """Build the neural network."""
         layers: list[nn.Module] = []
 
@@ -75,7 +75,7 @@ class MLP(nn.Module):
 
         # Hidden layers
         for hidden_dim in self.hidden_dims:
-            layers.append(nn.Linear(current_dim, hidden_dim, bias=self.bias))
+            layers.append(nn.Linear(current_dim, hidden_dim, bias=bias))
             layers.append(
                 nn.BatchNorm1d(hidden_dim, affine=self.affine)
                 if self.batchnorm
@@ -85,7 +85,7 @@ class MLP(nn.Module):
             current_dim = hidden_dim
 
         # Output layer
-        layers.append(nn.Linear(current_dim, self.out_dim, bias=self.bias))
+        layers.append(nn.Linear(current_dim, self.out_dim, bias=bias))
         if self.final_activation:
             layers.append(self.activation)
 
@@ -120,6 +120,7 @@ class ImageMLP(nn.Module):
     :param transpose: If True, use ConvTranspose2d instead of Conv2d.
     :param batchnorm: Whether to use BatchNorm2d after each layer.
     :param affine: Whether BatchNorm2d is affine if used.
+    :param bias: Whether the convolutions carry an additive bias.
     :param activation: Activation function name.
     :param final_activation: Whether to apply activation after the last layer.
     :param init_weight: Callable method to initialize the weights.
@@ -155,13 +156,12 @@ class ImageMLP(nn.Module):
         self.transpose = transpose
         self.batchnorm = batchnorm
         self.affine = affine
-        self.bias = bias
         self.activation = self._get_activation(activation)
         self.final_activation = final_activation
         self.init_weight = init_weight
         self.init_bias = init_bias
 
-        self.net = self._construct_net()
+        self.net = self._construct_net(bias)
         self._apply_weight_init()
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
@@ -182,6 +182,7 @@ class ImageMLP(nn.Module):
         in_channels: int,
         out_channels: int,
         stride: int,
+        bias: bool,
     ) -> nn.Module:
         if not self.transpose:
             return nn.Conv2d(
@@ -190,7 +191,7 @@ class ImageMLP(nn.Module):
                 kernel_size=self.kernel_size,
                 stride=stride,
                 padding=self.kernel_size // 2,
-                bias=self.bias,
+                bias=bias,
             )
 
         return nn.ConvTranspose2d(
@@ -200,15 +201,15 @@ class ImageMLP(nn.Module):
             stride=stride,
             padding=self.kernel_size // 2,
             output_padding=stride - 1 if stride > 1 else 0,
-            bias=self.bias,
+            bias=bias,
         )
 
-    def _construct_net(self):
+    def _construct_net(self, bias: bool):
         layers: list[nn.Module] = []
         current_channels = self.in_channels
 
         for i, (hidden_dim, stride) in enumerate(zip(self.hidden_dims, self.strides)):
-            layers.append(self._make_layer(current_channels, hidden_dim, stride))
+            layers.append(self._make_layer(current_channels, hidden_dim, stride, bias))
             layers.append(
                 nn.BatchNorm2d(hidden_dim, affine=self.affine)
                 if self.batchnorm

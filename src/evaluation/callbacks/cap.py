@@ -1,16 +1,12 @@
 # Compute the approximation capacity metric.
-import pickle
-from collections import defaultdict
 from pathlib import Path
 
 import numpy as np
 import torch
 from pytorch_lightning.callbacks import Callback
 
-from src.evaluation.callbacks import utils
-from src.evaluation.callbacks.components.cap.binary import get_pairing_fn
 from src.evaluation.callbacks.components.cap.metric import ApproximationCapacity
-from src.plot import horizontal_bar
+from src.evaluation.callbacks.components.paired_scores import PairedScores
 
 
 class CAP(Callback):
@@ -27,12 +23,7 @@ class CAP(Callback):
     For every checkpoint the CAP(beta) curve is written to `cap_curve.npz` (arrays
     `betas`, `curve`) in the checkpoint's plot folder, unless the trainer's
     `plot_checkpoints` is False, and the maximising beta and whether it sits at the
-    upper bound of the grid are logged beside CAP. Metrics without a beta curve, such
-    as PosteriorConsistency, log only their value.
-
-    Subclasses select a different metric by overriding `metric_cls`, and a
-    different plot label by overriding `metric_label`; see
-    src.evaluation.callbacks.consistency.PosteriorConsistency.
+    upper bound of the grid are logged beside CAP.
 
     :param output_name: Key in outputs dict containing per-event anomaly scores / losses.
     :param dataset_1: Name of the first validation dataloader.
@@ -45,9 +36,6 @@ class CAP(Callback):
         later methods that manipulate callbacks.
     """
 
-    metric_cls = ApproximationCapacity
-    metric_label = "CAP"
-
     def __init__(
         self,
         output_name: str,
@@ -59,26 +47,17 @@ class CAP(Callback):
         name: str = "cap",
     ):
         super().__init__()
-        self.device = None
-        self.output_name = output_name
-        self.dataset_1_name = dataset_1
-        self.dataset_2_name = dataset_2
         self.cap_metric_config = cap_metric_config
-        self.pairing_fn = get_pairing_fn(pairing_type)
         self.name = name
-
-        self.cap_summary = defaultdict(float)
-
-    def on_test_start(self, trainer, pl_module):
-        """Set the right device at start of testing."""
-        self.device = pl_module.device
+        self.pairs = PairedScores(
+            name, "CAP", output_name, dataset_1, dataset_2, pairing_type
+        )
 
     def on_test_epoch_start(self, trainer, pl_module):
         """Initialise useful quantities."""
-        self.dataset_1_scores = []
-        self.dataset_2_scores = []
-        self.capmetric = self.metric_cls(**self.cap_metric_config)
-        self.capmetric.to(self.device)
+        self.pairs.reset()
+        self.capmetric = ApproximationCapacity(**self.cap_metric_config)
+        self.capmetric.to(pl_module.device)
 
     def on_test_batch_end(
         self, trainer, pl_module, outputs, batch, batch_idx, dataloader_idx=0
@@ -89,45 +68,24 @@ class CAP(Callback):
         not compatible with the lightning workflow, and hence we cache the whole data
         sets here.
         """
-        self.dataset_name = list(trainer.test_dataloaders.keys())[dataloader_idx]
-        if self.dataset_name == self.dataset_1_name:
-            self.dataset_1_scores.append(outputs[self.output_name])
-        if self.dataset_name == self.dataset_2_name:
-            self.dataset_2_scores.append(outputs[self.output_name])
+        self.pairs.collect(trainer, outputs, dataloader_idx)
 
-    def _compute_cap(self):
+    def _compute_cap(self) -> float:
         """Compute the cap metric between the two given data sets."""
-        self.dataset_1_scores = torch.cat(self.dataset_1_scores, dim=0)
-        self.dataset_2_scores = torch.cat(self.dataset_2_scores, dim=0)
-        idxs1, idxs2 = self.pairing_fn(self.dataset_1_scores, self.dataset_2_scores)
-        ds1_scores = self.dataset_1_scores[idxs1]
-        ds2_scores = self.dataset_2_scores[idxs2]
-
-        n = min(len(ds1_scores), len(ds2_scores))
-        ds1_scores = ds1_scores[:n]
-        ds2_scores = ds2_scores[:n]
-
+        ds1_scores, ds2_scores = self.pairs.paired()
         with torch.inference_mode(False):
             with torch.enable_grad():
                 # If capmetric needs gradients w.r.t. these tensors, they must require grad
                 ds1 = ds1_scores.clone().requires_grad_(True)
                 ds2 = ds2_scores.clone().requires_grad_(True)
                 self.capmetric.update(ds1, ds2)
+        return self.capmetric.compute()
 
     def on_test_epoch_end(self, trainer, pl_module):
         """Compute the CAP metric on the designated dataset."""
-        ckpt_name = Path(pl_module._ckpt_path).stem
-        self._compute_cap()
-        cap_metric_value = self.capmetric.compute()
-
-        ckpt_ds = utils.misc.get_ckpt_ds_name(ckpt_name)
-        self._store_summary(cap_metric_value, ckpt_ds)
-        metrics = {self.name: self.cap_summary[ckpt_ds]}
-        if self.capmetric.curve is not None:
-            metrics |= self._store_curve(trainer, pl_module)
-        utils.mlflow.log_metrics_to_mlflow(
-            trainer, metrics, ckpt_name=ckpt_name, cb_name=self.name
-        )
+        cap_metric_value = self._compute_cap()
+        curve = self._store_curve(trainer, pl_module)
+        self.pairs.record(trainer, pl_module, cap_metric_value, curve)
 
     def _store_curve(self, trainer, pl_module) -> dict:
         """Save the checkpoint's curve; return its maximising beta and bound flag."""
@@ -146,31 +104,9 @@ class CAP(Callback):
             f"{self.name}_at_bound": float(self.capmetric.at_bound),
         }
 
-    def _store_summary(self, cap_metric_value: float, ckpt_ds: str):
-        """Store the summary statistic for the cap for one checkpoint.
-
-        Here, it is the metric itself, but this is implemented to be consistent with the
-        other evaluation callbacks.
-        """
-        self.cap_summary[ckpt_ds] = cap_metric_value
-
-    def _plot(self, data: dict, xlabel: str, plot_folder: Path, percent: bool = False):
-        """Plot the efficiency per data set for an anomaly metric at target rate."""
-        ylabel = " "
-        horizontal_bar.plot_yright(data, data, xlabel, ylabel, plot_folder, percent)
-
     def plot_summary(self, trainer, root_folder: Path):
-        """Plot the summary metrics accummulated in eff_summary and reset this attr."""
-        split = trainer.split
-        plot_folder = root_folder / "plots" / split / f"{self.name}_summary"
-        plot_folder.mkdir(parents=True, exist_ok=True)
-        self._cache_summary(plot_folder)
-
-        # Configure plot.
-        xlabel = f"{self.metric_label}({self.dataset_1_name},\n{self.dataset_2_name})"
-        self._plot(self.cap_summary, xlabel, plot_folder)
-
-        utils.mlflow.log_plots_to_mlflow(trainer, None, self.name, plot_folder)
+        """Plot the CAP of every evaluated checkpoint."""
+        self.pairs.plot_summary(trainer, root_folder)
 
     def get_optimized_metric(self):
         """Get one number that one should optimize on this callback.
@@ -178,15 +114,7 @@ class CAP(Callback):
         Here, it's the maximum of the summary metric across checkpoints corresponding to
         a certain checkpointing criterion.
         """
-        max_ckpt_ds = max(self.cap_summary, key=self.cap_summary.get)
-        max_metric_value = self.cap_summary[max_ckpt_ds]
-        return max_ckpt_ds, max_metric_value
+        return self.pairs.best()
 
     def clear_crit_summary(self):
-        self.cap_summary.clear()
-
-    def _cache_summary(self, cache_folder: Path):
-        """Cache the summary metric dictionary."""
-        with open(cache_folder / "summary.pkl", "wb") as f:
-            plain_dict = utils.misc.to_plain_dict(self.cap_summary)
-            pickle.dump(plain_dict, f, protocol=pickle.HIGHEST_PROTOCOL)
+        self.pairs.summary.clear()

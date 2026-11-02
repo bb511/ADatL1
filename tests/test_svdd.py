@@ -79,7 +79,7 @@ def test_coordinates_nearer_zero_than_eps_move_to_eps():
 
 def test_centre_is_the_mean_representation_over_every_batch():
     model, x = _model(center_eps=0.0), _x()
-    model.initialize_center(_batches(x))
+    model._fix_center(_batches(x))
     with torch.no_grad():
         expected = model(x).mean(dim=0)
     torch.testing.assert_close(model.center, expected)
@@ -87,7 +87,7 @@ def test_centre_is_the_mean_representation_over_every_batch():
 
 def test_center_max_batches_limits_the_pass():
     model, x = _model(center_eps=0.0, center_max_batches=1), _x()
-    model.initialize_center(_batches(x))
+    model._fix_center(_batches(x))
     with torch.no_grad():
         expected = model(x[:32]).mean(dim=0)
     torch.testing.assert_close(model.center, expected)
@@ -96,7 +96,7 @@ def test_center_max_batches_limits_the_pass():
 def test_fit_fixes_the_centre_from_the_untrained_network_and_keeps_it():
     model = _model()
     untrained = copy.deepcopy(model)
-    untrained.initialize_center(_batches(_x()))
+    untrained._fix_center(_batches(_x()))
     with torch.no_grad():
         before = untrained.model_step(_batches(_x())[0])["ascore/full"].mean()
     _fit(model)
@@ -108,7 +108,7 @@ def test_fit_fixes_the_centre_from_the_untrained_network_and_keeps_it():
 
 def test_one_class_loss_is_equation_4():
     model = _model(objective="one_class", network_weight_decay=0.3)
-    model.initialize_center(_batches(_x()))
+    model._fix_center(_batches(_x()))
     batch = _batches(_x(seed=2))[0]
     outputs = model.model_step(batch)
     with torch.no_grad():
@@ -124,7 +124,7 @@ def test_one_class_loss_is_equation_4():
 
 def test_soft_boundary_loss_is_equation_3():
     model = _model(objective="soft_boundary", nu=0.2, network_weight_decay=0.0)
-    model.initialize_center(_batches(_x()))
+    model._fix_center(_batches(_x()))
     model.radius.fill_(0.5)
     batch = _batches(_x(seed=2))[0]
     outputs = model.model_step(batch)
@@ -202,7 +202,7 @@ def test_image_module_scores_unflattened_images():
     model = ImageDeepSVDD(encoder=encoder)
     images = torch.randn(10, 3, 8, 8, generator=torch.Generator().manual_seed(1))
     batches = [(images, torch.zeros(10))]
-    model.initialize_center(batches)
+    model._fix_center(batches)
     with torch.no_grad():
         outputs = model.eval().model_step(batches[0])
         expected = ((encoder(images) - model.center) ** 2).sum(dim=1)

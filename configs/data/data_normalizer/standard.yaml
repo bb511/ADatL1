@@ -6,6 +6,6 @@
 # For the different available options, look through ~/src/data/components/normalization.py
 
 _target_: src.data.components.normalization.L1DataNormalizer
-# Feature-wise standard scaling, fitted on the training split only.
+# Each feature less its training mean, over its training standard deviation.
 name: standard
 hyperparams: null

@@ -89,6 +89,9 @@ class DeepSVDD(ADLightningModule):
     Lightning checkpoint whose weights, centre and radius are loaded.
     """
 
+    # Subclasses whose encoder reads (batch, channels, height, width) set this False.
+    _flat_input = True
+
     def __init__(
         self,
         encoder: nn.Module,
@@ -119,41 +122,42 @@ class DeepSVDD(ADLightningModule):
             self._load_checkpoint(ckpt)
 
     @property
-    def center_initialized(self) -> bool:
-        return self.center.numel() > 0
+    def _has_center(self) -> bool:
+        return len(self.center) > 0
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         """The representation φ(x; W), shape (batch, latent)."""
         return self.encoder(self.features(x))
 
-    def _prepare_input(self, batch) -> torch.Tensor:
-        return torch.flatten(unpack_batch(batch).x, start_dim=1)
+    def _encoder_input(self, batch) -> torch.Tensor:
+        x = unpack_batch(batch).x
+        return torch.flatten(x, start_dim=1) if self._flat_input else x
 
     def on_fit_start(self) -> None:
         # Before the sanity pass, so that the untrained scores have a centre too.
-        if not self.center_initialized:
-            self.initialize_center(self.trainer.datamodule.train_dataloader())
+        if not self._has_center:
+            self._fix_center(self.trainer.datamodule.train_dataloader())
 
-    @torch.no_grad()
-    def initialize_center(self, train_dataloader) -> None:
-        """Fix c as the mean representation over the training batches (Sec. 3.3).
+    def _fix_center(self, loader) -> None:
+        """Set c to the mean eval-mode representation of the training rows (Sec. 3.3).
 
-        The network runs in eval mode over the first ``center_max_batches`` batches, or
-        every batch when it is None; iterating the loader draws once from its shuffler.
+        Only the first ``center_max_batches`` batches are read, all of them when it is
+        None. Iterating ``loader`` draws one permutation from its shuffler, if any.
         """
         was_training = self.training
         self.eval()
-        total, count = 0.0, 0
-        for batch in islice(train_dataloader, self.hparams.center_max_batches):
-            z = self(self._prepare_input(batch).to(self.device))
-            total, count = total + z.sum(dim=0), count + z.shape[0]
-        self.center = _away_from_zero(total / count, self.hparams.center_eps)
+        z_sum, n_rows = 0.0, 0
+        with torch.no_grad():
+            for batch in islice(loader, self.hparams.center_max_batches):
+                z = self(self._encoder_input(batch).to(self.device))
+                z_sum, n_rows = z_sum + z.sum(dim=0), n_rows + len(z)
         self.train(was_training)
+        self.center = _away_from_zero(z_sum / n_rows, self.hparams.center_eps)
 
     def model_step(self, batch) -> dict[str, torch.Tensor]:
-        if not self.center_initialized:
+        if not self._has_center:
             raise RuntimeError("The centre is unset: fit first, or load a state.")
-        z = self(self._prepare_input(batch))
+        z = self(self._encoder_input(batch))
         distance = _squared_distance(z, self.center)
         data_loss = self._data_loss(distance)
         weight_decay = self._weight_decay()
@@ -164,7 +168,7 @@ class DeepSVDD(ADLightningModule):
             "loss/mean": loss.detach(),
             "loss/distance_raw/mean": ascore.mean(),
             "loss/reg_scaled/mean": weight_decay.detach(),
-            **self._diagnostics(z.detach(), ascore),
+            **self._summaries(z.detach(), ascore),
             "loss/full": data_loss.detach(),
             "ascore/full": ascore,
             "fit/full": ascore / z.shape[1],
@@ -180,7 +184,7 @@ class DeepSVDD(ADLightningModule):
         squares = sum(p.pow(2).sum() for p in self.encoder.parameters())
         return 0.5 * self.hparams.network_weight_decay * squares
 
-    def _diagnostics(self, z: torch.Tensor, ascore: torch.Tensor) -> dict:
+    def _summaries(self, z: torch.Tensor, ascore: torch.Tensor) -> dict:
         q50, q99 = self.compute_score_quantiles(ascore)
         return {
             "ascore/operational": self.compute_operational_ascore(ascore),
@@ -204,9 +208,12 @@ class DeepSVDD(ADLightningModule):
         return {name: outdict.get(key) for name, key in _LOGGED.items()}
 
     def _load_from_state_dict(self, state_dict, prefix, *args, **kwargs) -> None:
-        stored = state_dict.get(f"{prefix}center")
-        if stored is not None:
-            self.center = torch.empty_like(stored, device=self.center.device)
+        # The parent copies the stored centre in place, into a buffer that must already
+        # have its shape and dtype; an unfitted module's centre is empty.
+        key = prefix + "center"
+        if key in state_dict:
+            stored = state_dict[key]
+            self.center = stored.new_empty(stored.shape, device=self.center.device)
         super()._load_from_state_dict(state_dict, prefix, *args, **kwargs)
 
     def _load_checkpoint(self, path: str) -> None:

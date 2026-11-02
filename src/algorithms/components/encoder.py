@@ -14,6 +14,9 @@ class Encoder(nn.Module):
     :param nodes: List of ints, each int specifying the width of a layer, includes the
         output layer, i.e., the latent dimension.
     :param activation: Pytorch module that defines the activation function.
+    :param bias: Bool whether the linear layers carry an additive bias.
+    :param batchnorm: Bool whether batch normalization follows each hidden layer.
+    :param affine: Bool whether that batch normalization has a learned scale and shift.
     :param init_weight: Callable method to initialize the weights of the encoder nodes.
     :param init_bias: Callable method to initialize the biases of the encoder nodes.
     """
@@ -265,6 +268,8 @@ class ImageEncoder(nn.Module):
     :param init_weight: Callable method to initialize the weights.
     :param init_bias: Callable method to initialize the biases.
     :param batchnorm: Whether to use batch normalization or not.
+    :param affine: Whether that batch normalization has a learned scale and shift.
+    :param bias: Whether the convolutions and the latent projection carry a bias.
     """
 
     def __init__(

@@ -73,8 +73,8 @@ def test_ema_skipping_non_finite_values_is_the_cap_average():
     values = [math.nan, 0.3, math.inf, 0.1]
     expected = []
     for value in values:
-        callback._compute_cap_ema(value)
-        expected.append(callback.cap_ema)
+        callback.pairs.average(value)
+        expected.append(callback.pairs.ema)
     smoothed = selection.ema(values, skip_nonfinite=True)
     assert math.isnan(smoothed[0]) and math.isnan(expected[0])
     assert smoothed[1:] == expected[1:]

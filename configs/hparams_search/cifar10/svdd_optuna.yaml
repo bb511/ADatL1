@@ -27,7 +27,7 @@ hydra:
     # for example, you can use SQLite if you set 'sqlite:///example.db'
     storage: sqlite:///logs/optuna/cifar10/svdd_pool.db?timeout=600
 
-    # Bias-free one-class Deep SVDD search space.
+    # The objective (one_class) and the encoder's biases (off) are not searched.
     # CIFAR-10 space
     params:
       # From lr 3e-3 up the network dies within two epochs and scores every image alike.

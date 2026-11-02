@@ -67,7 +67,7 @@ def _raw(dm: CausalChamberDataModule, name: str) -> torch.Tensor:
 
 
 def _raw_indices(dm, x: torch.Tensor, raw: torch.Tensor) -> torch.Tensor:
-    restored = x.double() * dm.scale.double() + dm.median.double()
+    restored = x.double() * dm.spread.double() + dm.median.double()
     distance, index = torch.cdist(restored, raw).min(dim=1)
     assert distance.max() < 1e-3
     return index
@@ -111,9 +111,9 @@ def test_normalization_is_fitted_on_the_training_rows_and_clipped(
     quantiles = torch.tensor([0.05, 0.5, 0.95], dtype=torch.float64)
     q = torch.quantile(raw_train, quantiles, dim=0)
 
-    median, scale = datamodule.median.double(), datamodule.scale.double()
+    median, spread = datamodule.median.double(), datamodule.spread.double()
     torch.testing.assert_close(median, q[1], rtol=0, atol=1e-4)
-    torch.testing.assert_close(scale, q[2] - q[0], rtol=0, atol=1e-4)
+    torch.testing.assert_close(spread, q[2] - q[0], rtol=0, atol=1e-4)
     assert (median - torch.quantile(raw, 0.5, dim=0)).abs().max() > 1e-2
 
     clipped = _batches(datamodule.val_dataloader()[cchamber_data.clipped])[0]
@@ -244,7 +244,7 @@ def _assert_reads_the_served_rows(
         for name in names:
             raw = read_columns(dm, name, split, list(dm.hparams.readouts))
             assert raw.dtype == torch.float64
-            x = ((raw.float() - dm.median) / dm.scale).clamp(-clip, clip)
+            x = ((raw.float() - dm.median) / dm.spread).clamp(-clip, clip)
             assert torch.equal(x, _batches(loaders[split][name])[0])
 
 
@@ -294,7 +294,7 @@ def test_relative_to_off_leaves_every_tensor_unchanged(cchamber_wt_data, monkeyp
 
     for dm in current:
         assert torch.equal(dm.median, before.median)
-        assert torch.equal(dm.scale, before.scale)
+        assert torch.equal(dm.spread, before.spread)
         for x, x_before in zip(_tensors(dm), _tensors(before), strict=True):
             assert torch.equal(x, x_before)
 

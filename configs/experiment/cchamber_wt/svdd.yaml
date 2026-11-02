@@ -30,7 +30,7 @@ trainer:
 
 test: false
 
-# Candidate 000 of Victor's chamber panel, with the encoder at the template's [64, 32, 16], a level of the width list.
+# The encoder has the template's widths [64, 32, 16], one level of the width list.
 algorithm:
   target_rate: 0.01
   base_rate: null

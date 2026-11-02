@@ -15,7 +15,7 @@ from pytorch_lightning.loggers import MLFlowLogger
 from src.callbacks.autouad import EAGCallback, NPDCallback, RTMCallback
 from src.callbacks.cap import CAPCallback
 from src.callbacks.components.selection import W_STEPS
-from src.callbacks.consistency import PosteriorConsistencyCallback
+from src.callbacks.consistency_limit import ConsistencyLimitCallback
 from src.callbacks.efficiency import AnomalyEfficiencyCallback
 from src.callbacks.entropy import LossEntropyCallback
 from src.callbacks.goix import ExcessMassCallback, MassVolumeCallback
@@ -83,7 +83,7 @@ def _strategy_callbacks(cap: dict) -> list:
         ),
         WassersteinCallback(**PAIR, apply_log1p=True),
         CAPCallback(**paired),
-        PosteriorConsistencyCallback(**paired),
+        ConsistencyLimitCallback(**paired),
         NPDCallback(**aux),
         RTMCallback(),
         EAGCallback(),

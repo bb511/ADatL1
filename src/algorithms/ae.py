@@ -110,21 +110,28 @@ class AE(ADLightningModule):
         _, reconstruction = self.forward(x)
         return x - reconstruction
 
-    def set_residual_state(self, location: torch.Tensor, precision: torch.Tensor):
+    def set_residual_whitening(self, location: torch.Tensor, precision: torch.Tensor):
+        """Store the training residuals' mean and OAS-shrunk precision matrix.
+
+        Shapes (features,) and (features, features); the in-place copies cast both to
+        the dtype and device of the buffers.
+        """
         self.residual_oas_location.copy_(location)
         self.residual_oas_precision.copy_(precision)
         self.residual_oas_ready.fill_(True)
 
-    def residual_oas_score(
-        self, residual: torch.Tensor, mask: torch.Tensor | None = None
+    def _residual_energy(
+        self, residual: torch.Tensor, mask: torch.Tensor | None
     ) -> torch.Tensor:
-        if not bool(self.residual_oas_ready):
+        """Return the whitened energy of each residual under the stored state."""
+        if not self.residual_oas_ready:
             raise RuntimeError(
                 "The residual_oas score needs a fitted residual state: add the "
                 "residual_state callback, or load a checkpoint written with it."
             )
-        location, precision = self.residual_oas_location, self.residual_oas_precision
-        return _whitened_energy(residual, location, precision, mask)
+        return _whitened_energy(
+            residual, self.residual_oas_location, self.residual_oas_precision, mask
+        )
 
     def model_step(self, batch: torch.Tensor) -> torch.Tensor:
         b = unpack_batch(batch)
@@ -180,7 +187,7 @@ class AE(ADLightningModule):
         scores = {"mse": self.ascore(x, reconstruction, mask)}
         fitted = bool(self.residual_oas_ready)
         if not self.training and (fitted or self.anomaly_score == "residual_oas"):
-            scores["residual_oas"] = self.residual_oas_score(x - reconstruction, mask)
+            scores["residual_oas"] = self._residual_energy(x - reconstruction, mask)
         return scores
 
     def outlog(self, outdict: dict) -> dict:

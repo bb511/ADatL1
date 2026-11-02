@@ -9,23 +9,20 @@ import torch
 from src.callbacks.cap import CAPCallback
 from src.callbacks.components.cap import kernel
 from src.callbacks.components.cap.binary import get_pairing_fn
-from src.callbacks.components.cap.metric import (
-    ApproximationCapacity,
-    PosteriorConsistency,
-)
+from src.callbacks.components.cap.metric import ApproximationCapacity, consistency_limit
 from src.evaluation.callbacks.components.cap import kernel as evaluation_kernel
 from src.evaluation.callbacks.components.cap.metric import (
     ApproximationCapacity as EvaluationCapacity,
 )
 from src.evaluation.callbacks.components.cap.metric import (
-    PosteriorConsistency as EvaluationConsistency,
+    consistency_limit as evaluation_consistency_limit,
 )
 
 CAP_CLASSES = [ApproximationCapacity, EvaluationCapacity]
-CONSISTENCY_CLASSES = [PosteriorConsistency, EvaluationConsistency]
+CONSISTENCY_LIMITS = [consistency_limit, evaluation_consistency_limit]
 KERNELS = [kernel, evaluation_kernel]
 
-# PosteriorConsistency of _regression_pairs() at 7ee010d, before the beta grid
+# The consistency limit of _regression_pairs() at 7ee010d, before the beta grid
 # replaced the Adam loop (olgpu, CPU, torch 2.7.1).
 CONSISTENCY_AT_7EE010D = -0.00288588460534811
 PAIR = {"dataset_1": "normal", "dataset_2": "reference_normal"}
@@ -81,12 +78,11 @@ def test_cap_is_the_maximum_of_the_stored_curve(metric_cls):
     assert abs(metric.curve[0].item() + math.log(2.0)) < 1e-6
 
 
-@pytest.mark.parametrize("metric_cls", CONSISTENCY_CLASSES)
-def test_consistency_value_is_unchanged(metric_cls):
-    metric = _updated(metric_cls, *_regression_pairs())
+@pytest.mark.parametrize("limit", CONSISTENCY_LIMITS)
+def test_consistency_value_is_unchanged(limit):
+    value = limit(*_regression_pairs(), **_config())
 
-    assert metric.compute() == pytest.approx(CONSISTENCY_AT_7EE010D, abs=1e-9)
-    assert metric.curve is None
+    assert value == pytest.approx(CONSISTENCY_AT_7EE010D, abs=1e-9)
 
 
 @pytest.mark.parametrize("module", KERNELS)
@@ -171,7 +167,7 @@ def test_training_callback_stores_one_curve_per_epoch(tmp_path):
     assert stored["curves"].shape == (3, 50)
     np.testing.assert_array_equal(stored["curves"][-1], callback.capmetric.curve)
     assert logged[-1] == {
-        "val/summary/cap_ema_normal_vs_reference_normal": callback.cap_ema,
+        "val/summary/cap_ema_normal_vs_reference_normal": callback.pairs.ema,
         "val/summary/cap_beta_star_normal_vs_reference_normal": (
             callback.capmetric.beta_star
         ),

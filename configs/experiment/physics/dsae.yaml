@@ -111,7 +111,7 @@ callbacks:
     cap_metric_config: ${cap}
 
   consistency_sn_zb:
-    _target_: src.callbacks.consistency.PosteriorConsistencyCallback
+    _target_: src.callbacks.consistency_limit.ConsistencyLimitCallback
     output_name: "ascore/full"
     dataset_1: normal
     dataset_2: SingleNeutrino_E-10-gun
@@ -458,7 +458,7 @@ evaluation:
       cap_metric_config: ${cap}
 
     consistency_sn_zb:
-      _target_: src.evaluation.callbacks.consistency.PosteriorConsistency
+      _target_: src.evaluation.callbacks.consistency_limit.ConsistencyLimit
       name: consistency
       output_name: "ascore/full"
       dataset_1: normal

@@ -76,27 +76,24 @@ class L1DataNormalizer:
             self.norm_params[self.obj_name][feat] = {"shift": median, "scale": scale}
 
     def _standard(self, data: ak.Array, obj_name: str) -> ak.Array:
-        """Apply train-split mean and standard-deviation normalization."""
+        """Z-score each feature with the mean and standard deviation of its fit."""
         return self._affine(data, obj_name)
 
     def _standard_fit(self, data: ak.Array):
-        """Fit feature-wise standard scaling on active training objects only."""
+        """Take each feature's mean as its shift and its standard deviation as scale.
+
+        Both are computed in the feature's dtype over every object of every event in
+        ``data``, the deviation with ddof = 0, and stored as Python floats. A constant
+        feature gets the scale 1e-12.
+        """
         self.norm_params[self.obj_name] = {}
         for feat in ak.fields(data):
-            feature_data = ak.to_numpy(ak.flatten(data[feat]))
-            mean = float(np.mean(feature_data))
-            scale = float(np.std(feature_data))
-            if not np.isfinite(mean) or not np.isfinite(scale):
-                raise ValueError(
-                    f"Non-finite standard normalization parameters for "
-                    f"{self.obj_name}/{feat}."
-                )
-            if scale <= 0.0:
-                scale = 1e-12
-            self.norm_params[self.obj_name][feat] = {
-                "shift": mean,
-                "scale": scale,
-            }
+            values = ak.to_numpy(ak.flatten(data[feat]))
+            shift, scale = float(np.mean(values)), float(np.std(values))
+            if not (np.isfinite(shift) and np.isfinite(scale)):
+                raise ValueError(f"{self.obj_name}/{feat}: mean or std is not finite.")
+            scale = scale if scale > 0.0 else 1e-12
+            self.norm_params[self.obj_name][feat] = {"shift": shift, "scale": scale}
 
     def _robust_axov4_fit(self, data: ak.Array, percentiles: list, scale: list):
         """Determines the parameters for the special kind of robust norm in axov4.

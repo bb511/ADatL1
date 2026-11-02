@@ -1,0 +1,32 @@
+# Template image diffusion denoising loss (DDL) configuration.
+defaults:
+  - _self_
+
+_target_: src.algorithms.image_ddl.ImageDDL
+
+target_rate: 0.01
+base_rate: null
+
+# (channels, height, width), the shape of the fixed noise of the score.
+input_shape: [3, 32, 32]
+
+denoiser:
+  _target_: src.algorithms.components.ddl.ImageDenoiser
+  in_channels: 3
+  nodes: [16, 32]
+  time_dim: 32
+  dropout: 0.0
+  activation: silu
+
+# T = 100 as in TabADM; beta_end 0.02 as in Ho et al. at their T = 1000, the reference
+# to which src/algorithms/components/ddl.py scales the schedule.
+n_steps: 100
+beta_end: 0.02
+n_score_steps: 4
+noise_seed: 0
+
+optimizer:
+  _partial_: true
+  _target_: torch.optim.AdamW
+  lr: 1.0e-3
+  weight_decay: 1.0e-4

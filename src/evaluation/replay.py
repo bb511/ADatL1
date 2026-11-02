@@ -6,10 +6,13 @@ layout). ``ReplayModule`` wraps the run's own LightningModule, loads the weights
 one epoch at a time, and answers ``trainer.test`` batch by batch: with the stored
 scores of a set the files hold, and with ``model_step`` of the loaded weights for any
 other set, so that every evaluation callback runs unchanged over both. A key of
-``RESCORED_KEYS`` that a stored set lacks is rescored from the weights as well. The
-extra sets of the validation pass (the auxiliary sets, the training set and the SDS
-pseudo-sets) are wrapped here in the loaders that pass appends to the validation
-loaders.
+``RESCORED_KEYS`` that a stored set lacks is rescored from the weights as well. An
+epoch file without ``state_dict``, as in a scores-only copy of a dump, is replayed
+from its stored scores alone: a set or key that would be rescored from its weights
+raises. The extra sets of the validation pass (the auxiliary sets, the training set
+and the SDS pseudo-sets) are wrapped here in the loaders that pass appends to the
+validation loaders; the pseudo-sets are served from the dump where it stores their
+scores (``ScoreDumpCallback``'s ``sds``) and rescored otherwise.
 """
 
 from pathlib import Path
@@ -25,6 +28,9 @@ from src.data.utils import unpack_batch
 # The parts of an epoch's record that each pass serves; the loader names of one pass
 # are unique across its parts.
 PASS_PARTS = {"val": ("val", "aux", "train"), "test": ("test",)}
+# The parts served where an epoch's record holds them: dumps written without the SDS
+# pseudo-sets lack theirs.
+OPTIONAL_PARTS = {"val": ("sds",), "test": ()}
 # The keys rescored from the weights, by part and stored set, where the dump lacks them,
 # as dumps written before fit/full joined the dump keys do: the fit callback reads
 # validation normal alone.
@@ -60,13 +66,6 @@ def _missing_keys(record: dict, parts: tuple[str, ...]) -> dict[str, list[str]]:
     }
 
 
-def _rescored(module: LightningModule, batch, keys: list[str]) -> dict:
-    if not keys:
-        return {}
-    outputs = module.model_step(batch)
-    return {key: outputs[key] for key in keys}
-
-
 def as_typical(sets: dict, typical: str | None) -> dict:
     """``sets`` with the set ``typical`` renamed ``normal`` and placed first, the
     original ``normal`` left out; ``sets`` itself for ``typical`` None."""
@@ -99,7 +98,10 @@ class ReplayModule(LightningModule):
     Call ``load_epoch`` with an epoch's record and ``serve`` with the pass's split
     before each ``trainer.test``. The loaders of a stored set must be those of the
     dump, batch for batch: a batch whose length or position differs from ``meta``
-    raises, since it means the rebuilt loader is not the dump's. ``thres_operational``
+    raises, since it means the rebuilt loader is not the dump's. A record without
+    ``state_dict`` leaves the weights unloaded, and a batch that would be rescored from
+    them, of a set the record does not store or for a key of ``RESCORED_KEYS`` it
+    lacks, raises RuntimeError naming the set and the epoch file. ``thres_operational``
     and ``tie_operational`` are set from the epoch's validation normal ``ascore/full``,
     and ``aux_lower`` and ``aux_upper`` from ``meta``, for the callbacks that read them.
 
@@ -129,9 +131,12 @@ class ReplayModule(LightningModule):
         return self.module.compute_operational_ascore(ascore)
 
     def load_epoch(self, record: dict, ckpt_path: Path) -> None:
-        """Load an epoch's weights and scores; ``ckpt_path`` names the epoch to the
-        callbacks, which take ``initial`` or ``epoch_<nnnn>`` from its stem."""
-        _load_weights(self.module, record["state_dict"])
+        """Load an epoch's scores and, where the record holds them, its weights;
+        ``ckpt_path`` names the epoch to the callbacks, which take ``initial`` or
+        ``epoch_<nnnn>`` from its stem."""
+        self._has_weights = "state_dict" in record
+        if self._has_weights:
+            _load_weights(self.module, record["state_dict"])
         record = {**record, "val": as_typical(record["val"], self.typical)}
         self.record = record
         self._ckpt_path = Path(ckpt_path)
@@ -142,7 +147,8 @@ class ReplayModule(LightningModule):
 
     def serve(self, split: str) -> None:
         """Serve the stored sets of the 'val' or the 'test' pass."""
-        parts = PASS_PARTS[split]
+        optional = [part for part in OPTIONAL_PARTS[split] if part in self.record]
+        parts = (*PASS_PARTS[split], *optional)
         self._served = {
             name: scores for part in parts for name, scores in self.record[part].items()
         }
@@ -157,17 +163,35 @@ class ReplayModule(LightningModule):
     def test_step(self, batch, batch_idx: int, dataloader_idx: int = 0) -> dict:
         name = list(self.trainer.test_dataloaders)[dataloader_idx]
         if name not in self._served:
-            return self.module.model_step(batch)
+            return self._model_step(batch, f"'{name}'")
 
         n = len(unpack_batch(batch).y)
         self._check_batch(name, batch_idx, n, dataloader_idx)
         start = self._offsets[name][batch_idx]
         out = {key: s[start : start + n] for key, s in self._served[name].items()}
-        out.update(_rescored(self.module, batch, self._missing[name]))
+        out.update(self._rescored(name, batch))
         if "ascore/full" in out:
             ascore = self.compute_operational_ascore(out["ascore/full"])
             out["ascore/operational"] = ascore
         return out
+
+    def _model_step(self, batch, rescored: str) -> dict:
+        """``model_step`` of the epoch's weights, which raises RuntimeError naming
+        ``rescored`` where the record holds none."""
+        if not self._has_weights:
+            epoch_file = Path(self._ckpt_path.parent.name, self._ckpt_path.name)
+            raise RuntimeError(
+                f"Rescoring {rescored} needs the weights, which {epoch_file} does not "
+                "hold: a scores-only dump serves its stored scores alone."
+            )
+        return self.module.model_step(batch)
+
+    def _rescored(self, name: str, batch) -> dict:
+        keys = self._missing[name]
+        if not keys:
+            return {}
+        outputs = self._model_step(batch, f"{keys} of '{name}'")
+        return {key: outputs[key] for key in keys}
 
     def _check_batch(self, name: str, batch_idx: int, n: int, dataloader_idx: int):
         sizes = self._sizes[name]
@@ -192,7 +216,7 @@ def extra_loaders(meta: dict, data_train, sds: dict | None, aux: bool = True):
     (when ``aux``); ``train``, the training set unshuffled with the dump's batch size
     (when ``data_train`` is not None); ``sds_targets`` and ``sds_outliers`` (when
     ``sds``, a result of ``src.callbacks.sds.sds_inputs``, is not None). Every set
-    carries label 0; the dump's batch sizes make the stored scores of the first four
+    carries label 0; the dump's batch sizes make the stored scores of every set
     servable.
     """
     sizes = {**meta["aux"]["batch_sizes"], **meta["train"]["batch_sizes"]}

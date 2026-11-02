@@ -1,5 +1,6 @@
 """Evaluate the per-epoch score dumps of a lattice, one run at a time."""
 
+import json
 import logging
 import math
 import multiprocessing
@@ -24,6 +25,7 @@ from src.callbacks.components.selection import (
     epoch_pick,
     smoothed,
 )
+from src.callbacks.score_dump import SDS_PARAMS
 from src.evaluation.components.pairing import hyperpoint
 from src.evaluation.components.rebuild import (
     ROOT,
@@ -37,6 +39,8 @@ from src.evaluation.components.rebuild import (
 from src.evaluation.components.tables import load_record, write_outputs
 from src.evaluation.replay import ReplayModule, as_typical, extra_loaders
 from src.utils.omegaconf import register_resolvers
+
+log = logging.getLogger(__name__)
 
 # The key of the training efficiency callback for one set's validation efficiency.
 SET_EFFICIENCY_KEY = "val/{}/eff__ascore_full__brate_operational"
@@ -70,6 +74,19 @@ def _experiment_id(client: MlflowClient, name: str) -> str:
     if experiment is not None:
         return experiment.experiment_id
     return client.create_experiment(name)
+
+
+def _check_stored_sds(meta: dict, sds: dict) -> None:
+    """Raise ValueError where the dump stores the scores of pseudo-sets that ``sds``
+    would build otherwise."""
+    if "sds" not in meta:
+        return
+    stored = {k: meta[f"sds_{k}"] for k in SDS_PARAMS}
+    if stored != {k: sds[k] for k in SDS_PARAMS}:
+        raise ValueError(
+            f"The dump stores the SDS pseudo-sets of {stored}, the evaluation would "
+            f"build those of {dict(sds)}."
+        )
 
 
 class RunEvaluation:
@@ -146,6 +163,7 @@ class RunEvaluation:
         val, data_train = datamodule.val_dataloader(), datamodule.data_train
         sds = self.extra_sets.get("sds")
         if sds:
+            _check_stored_sds(self.meta, sds)
             sds = cached_sds(data_train.tensors[0], sds["max_rows"], sds["row_seed"])
         train = data_train if self.extra_sets.get("train") else None
         aux = bool(self.extra_sets.get("aux"))
@@ -292,9 +310,9 @@ class RunEvaluation:
         return run_id
 
 
-def _init_worker(sds_cache: dict | None = None) -> None:
+def _init_worker(sds_cache: dict | None = None, threads: int = 1) -> None:
     SDS_CACHE.update(sds_cache or {})
-    torch.set_num_threads(1)
+    torch.set_num_threads(threads)
     # The run configs call ${reverse:...} and the like; a second registration raises.
     if not OmegaConf.has_resolver("reverse"):
         register_resolvers()
@@ -311,6 +329,31 @@ def _evaluate_task(task: tuple) -> dict:
     return run.evaluate(out_dir, lattice, tracking_uri)
 
 
+def _stored_run(
+    run_dir: Path, out_dir: Path, lattice: str, typical: str | None
+) -> dict | None:
+    """The run.json of a run whose four files in ``out_dir`` are complete, else None.
+
+    Complete means that the three tables exist and that run.json parses and names this
+    lattice, run, dump and typical set and the number of epoch files the dump holds.
+    ``write_outputs`` removes run.json before it writes the tables and writes it after
+    them, so a run.json that parses vouches for tables of the same write wherever a
+    kill cut it, and an earlier run.json never sits beside tables being rewritten. A
+    check of the tables' contents would not do: a val.csv cut within its last row
+    still holds a row per epoch.
+    """
+    out = Path(out_dir) / "runs" / run_dir.name
+    try:
+        run = json.loads((out / "run.json").read_text())
+    except (FileNotFoundError, ValueError):
+        return None
+    epochs = len(list(run_dir.glob("epoch_*.pt")))
+    same = {"lattice": lattice, "run": run_dir.name, "dump": str(run_dir)}
+    same.update(typical=typical, epochs=epochs)
+    tables = all((out / f"{name}.csv").is_file() for name in ("val", "test", "picks"))
+    return run if tables and all(run.get(k) == v for k, v in same.items()) else None
+
+
 class LatticeEvaluation:
     """The runs of one lattice, each evaluated by ``RunEvaluation``.
 
@@ -318,8 +361,14 @@ class LatticeEvaluation:
     in name order. Each run's module and datamodule are rebuilt from its
     ``config.yaml``, with ``data.data_dir`` replaced by ``data_dir`` and the signals
     and nulls by those of ``configs/data/<sets>.yaml`` when given, in a spawn pool of
-    ``workers`` single-threaded processes (in this process for one). ``settings``
-    holds the keyword-only arguments of ``evaluate_dump``.
+    ``workers`` processes of ``threads`` torch threads each (in this process, on one
+    thread, for one worker). One thread is the reference: more may change float32
+    results in the last bits. ``settings`` holds the keyword-only arguments of
+    ``evaluate_dump``. With ``resume``, a run complete in ``out_dir`` (``_stored_run``)
+    is neither replayed nor logged to MLflow again, and its stored run.json takes its
+    place in the returned list. Only what run.json records is compared, so an
+    ``out_dir`` written under another evaluation config or other ``sets`` needs
+    ``resume`` off, or a fresh ``out_dir``.
     """
 
     def __init__(
@@ -330,10 +379,13 @@ class LatticeEvaluation:
         data_dir: str | None = None,
         sets: str | None = None,
         workers: int = 1,
+        threads: int = 1,
         tracking_uri: str | None = None,
+        resume: bool = True,
     ):
         self.lattice, self.settings, self.data_dir = lattice, settings, data_dir
         self.sets, self.workers, self.tracking_uri = sets, workers, tracking_uri
+        self.threads, self.resume = threads, resume
         paths = (Path(scores_dir) / lattice).iterdir()
         self.runs = sorted(p for p in paths if (p / "meta.pt").is_file())
 
@@ -345,10 +397,29 @@ class LatticeEvaluation:
             _experiment_id(MlflowClient(self.tracking_uri), f"{self.lattice}_eval")
         # The run configs read ${oc.env:PROJECT_ROOT}; spawned workers inherit it.
         os.environ.setdefault("PROJECT_ROOT", str(ROOT))
+        stored = self._stored(out_dir)
         task = (out_dir, self.lattice, self.data_dir, self.sets, self.tracking_uri)
-        return self._map([(run, *task, self.settings) for run in self.runs])
+        tasks = [(run, *task, self.settings) for run in self.runs if run not in stored]
+        evaluated = iter(self._map(tasks))
+        return [stored[run] if run in stored else next(evaluated) for run in self.runs]
+
+    def _stored(self, out_dir: Path) -> dict[Path, dict]:
+        """The stored run.json of every run complete in ``out_dir``, with ``resume``."""
+        if not self.resume:
+            return {}
+        stored = {}
+        for run in self.runs:
+            info = _stored_run(run, out_dir, self.lattice, self.settings["typical"])
+            if info is not None:
+                log.info(f"Skipping {run.name}, complete in {out_dir}")
+                stored[run] = info
+        return stored
 
     def _map(self, tasks: list[tuple]) -> list[dict]:
+        # A resumed lattice may have no run left, which would spend the SDS prebuild
+        # (75 s on CIFAR-10) and the pool's spawn for nothing.
+        if not tasks:
+            return []
         if self.workers <= 1:
             _init_worker()
             return [_evaluate_task(task) for task in tasks]
@@ -356,7 +427,7 @@ class LatticeEvaluation:
         # Spawned, not forked: torch's thread pools do not survive a fork once the
         # parent has used them.
         context = multiprocessing.get_context("spawn")
-        initargs = (dict(SDS_CACHE),)
+        initargs = (dict(SDS_CACHE), self.threads)
         with context.Pool(
             self.workers, initializer=_init_worker, initargs=initargs
         ) as pool:
@@ -381,11 +452,25 @@ def evaluate_lattice(
     data_dir: str | None = None,
     sets: str | None = None,
     workers: int = 1,
+    threads: int = 1,
     tracking_uri: str | None = None,
+    resume: bool = True,
 ) -> list[dict]:
-    """Evaluate every run of a lattice; return their run.json, in name order."""
+    """Evaluate every run of a lattice; return their run.json, in name order.
+
+    With ``resume``, a run whose four files in ``out_dir`` are complete is not
+    evaluated again (``LatticeEvaluation``).
+    """
     evaluation = LatticeEvaluation(
-        scores_dir, lattice, settings, data_dir, sets, workers, tracking_uri
+        scores_dir,
+        lattice,
+        settings,
+        data_dir,
+        sets,
+        workers,
+        threads,
+        tracking_uri,
+        resume,
     )
     return evaluation.evaluate(out_dir)
 

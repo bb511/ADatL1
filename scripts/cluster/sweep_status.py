@@ -1,10 +1,12 @@
 #!/usr/bin/env python3
 """Status of every Optuna sweep on this machine, and the commands to finish it.
 
-For each study: how many COMPLETE trials it has against the n_trials its
-run*_search.sh drivers ask for between them, and which of those drivers are
-still alive to produce the rest. Prints a table, then a submit_search.sh
-command per study that needs one.
+For each study and storage: how many COMPLETE trials it has against the
+n_trials its run*_search.sh drivers ask for between them, and which of those
+drivers are still alive to produce the rest. Prints a table, then a
+submit_search.sh command per row that needs one. The drivers of a catalogue
+that share one sqlite file make one row; a driver with a file of its own (the
+physics pools) makes a row of its own, labelled '<study>:<file stem>'.
 
     python3 scripts/cluster/sweep_status.py            # table + commands
     python3 scripts/cluster/sweep_status.py --commands # commands only
@@ -24,7 +26,7 @@ actual exception. A 'stopped: signal' line anywhere in the log also means DEAD:
 submit_search.sh --wait writes it when a signal, such as a slurm time limit,
 stops the driver, which can keep printing for a while after it.
 
-A study below target with no live driver is topped up by relaunching its first
+A row below target with no live driver is topped up by relaunching its first
 driver for the shortfall. The random sampler replays its draws from the seed,
 so the relaunch takes a fresh one: 1000 times the driver's seed plus the
 COMPLETE count, which differs from the seed of every earlier top-up that
@@ -158,24 +160,34 @@ def complete_of(db, study, writable=False):
     return n
 
 
+def row_label(study: str, storage: str, n_storages: int) -> str:
+    """The study's name, or '<study>:<file stem>' if it has more than one storage."""
+    if n_storages == 1:
+        return study
+    return f"{study}:{Path(db_path(storage, None)).stem}"
+
+
 def grouped_drivers(path: Path) -> dict[str, list[dict]]:
-    """The catalogue's drivers grouped by study, each with its log's state."""
+    """The catalogue's drivers grouped by study and storage under the rows' labels, each
+    with its log's state."""
     domain, stem = path.parent.name, path.stem
-    studies = {}
+    groups = {}
     for d in drivers(path):
         log = "logs/searches/%s_%s/%d_%s.log" % (domain, stem, d["index"], d["study"])
         d["state"], d["age"] = classify(log)
-        studies.setdefault(d["study"], []).append(d)
-    return studies
+        groups.setdefault((d["study"], d["storage"]), []).append(d)
+    n_storages = Counter(study for study, _ in groups)
+    return {row_label(*key, n_storages[key[0]]): ds for key, ds in groups.items()}
 
 
 def study_rows(path: Path, db_root: str | None) -> list[dict]:
-    """One row per study of a catalogue, with its drivers' n_trials summed."""
+    """One row per study and storage of a catalogue, with its drivers' n_trials
+    summed."""
     domain, model = path.parent.name, STEM_RE.match(path.stem).group(1)
     rows = []
-    for study, ds in grouped_drivers(path).items():
-        db = db_path(ds[0]["storage"], db_root)
-        row = dict(domain=domain, model=model, study=study, drivers=ds)
+    for name, ds in grouped_drivers(path).items():
+        study, db = ds[0]["study"], db_path(ds[0]["storage"], db_root)
+        row = dict(domain=domain, model=model, study=study, label=name, drivers=ds)
         row["script"] = f"scripts/{domain}/{path.stem}.sh"
         row["target"] = sum(d["target"] for d in ds)
         row["done"] = complete_of(db, study, writable=bool(db_root))
@@ -236,7 +248,7 @@ def print_table(rows: list[dict]) -> None:
     for r in rows:
         if r["status"] != "DONE":
             todo = max(r["target"] - r["done"], 0) or ""
-            cols = (r["domain"], r["model"], r["study"], r["target"], r["done"], todo)
+            cols = (r["domain"], r["model"], r["label"], r["target"], r["done"], todo)
             print(hdr % (*cols, r["status"], driver_states(r)))
     tally = Counter(r["status"] for r in rows)
     print("\n" + "  ".join("%s=%d" % kv for kv in sorted(tally.items())) + "\n")
@@ -249,8 +261,9 @@ def print_new(rows: list[dict]) -> None:
     if new:
         print("# %d study(ies) never launched on this machine:" % len(new))
         print("# (append the venue's launcher overrides from the catalogue header)")
-        for r in new:
-            print("#   bash scripts/cluster/submit_search.sh %s" % r["script"])
+        # The rows of one catalogue's per-driver files share its one command.
+        for script in dict.fromkeys(r["script"] for r in new):
+            print("#   bash scripts/cluster/submit_search.sh %s" % script)
         print()
 
 
@@ -264,7 +277,7 @@ def print_topups(rows: list[dict]) -> None:
     for r in need:
         print(
             "# %-9s %-8s %-10s %d/%d complete"
-            % (r["domain"], r["model"], r["study"], r["done"], r["target"])
+            % (r["domain"], r["model"], r["label"], r["done"], r["target"])
         )
         print(launch_command(r))
 

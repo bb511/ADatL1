@@ -6,12 +6,16 @@ import torch
 from torch.utils.data import DataLoader, TensorDataset
 
 from src.algorithms import ADLightningModule
+from src.callbacks import autouad
+from src.callbacks.autouad import NPDCallback
+from src.callbacks.components.utils import drawn_masks, placeholder_loader
 from src.callbacks.score_dump import (
     ScoreDumpCallback,
     aux_inputs,
     input_moments,
     score_in_eval_mode,
 )
+from src.data.utils import unpack_batch
 
 N_FEATURES = 4
 KEYS = ["ascore/full", "ascore/mse", "ascore/kl", "fit/full"]
@@ -22,8 +26,10 @@ META_KEYS = {
     "target_fpr",
     "module",
     "stored",
+    "initial_sets",
     "aux_seed",
     "aux_size",
+    "aux_masked",
     "aux_lower",
     "aux_upper",
     "aux_mean",
@@ -183,6 +189,7 @@ def test_files_keys_and_shapes(tmp_path):
     assert meta["target_fpr"] == pytest.approx(0.1)
     assert meta["module"].endswith("ToyAE")
     assert meta["aux_seed"] == 7 and meta["aux_size"] == 50
+    assert meta["initial_sets"] == [] and meta["aux_masked"] is False
     for split in ("val", "test"):
         assert meta["stored"][split] == list(datamodule.sets[split])
         assert meta[split]["names"] == list(datamodule.sets[split])
@@ -354,3 +361,122 @@ def test_autouad_set_follows_the_training_moments(tmp_path):
     uniform = lower + (upper - lower) * torch.rand((size, N_FEATURES), generator=gen)
     assert torch.equal(inputs["gaussian"], gaussian)
     assert torch.equal(inputs["uniform"], uniform)
+
+
+@pytest.mark.parametrize("stored", [[], ["reference_normal"]])
+def test_initial_sets_are_stored_at_the_sanity_pass_alone(tmp_path, stored):
+    initial = ["sig_a", "normal"]
+    paths = {"all": tmp_path / "all", "lean": tmp_path / "lean"}
+    fit(tmp_path, [dump_callback(paths["all"])])
+    kwargs = {"stored_sets": stored, "initial_sets": initial, "train_pass": False}
+    fit(tmp_path, [dump_callback(paths["lean"], **kwargs)])
+    meta = {k: load(p / "meta.pt") for k, p in paths.items()}
+    assert meta["lean"]["stored"] == {"val": stored, "test": stored}
+    assert meta["lean"]["initial_sets"] == initial
+    assert "train" not in meta["lean"]
+    assert_identical(meta["lean"]["aux"], meta["all"]["aux"])
+    for key in ("names", "batch_sizes", "labels"):
+        assert meta["lean"]["val"][key] == meta["all"]["val"][key]
+
+    for name in PASSES:
+        lean, full = load(paths["lean"] / name), load(paths["all"] / name)
+        assert set(lean) == {"epoch", "val", "test", "aux", "state_dict"}
+        kept = stored + initial if name == "initial.pt" else stored
+        expected_val = {n: s for n, s in full["val"].items() if n in kept}
+        assert_identical(lean["val"], expected_val)
+        assert_identical(lean["test"], {n: full["test"][n] for n in stored})
+        assert_identical(lean["aux"], full["aux"])
+        assert_identical(lean["state_dict"], full["state_dict"])
+
+
+def test_initial_set_outside_validation_raises(tmp_path):
+    callback = dump_callback(tmp_path / "scores", initial_sets=["normal", "sig_c"])
+    with pytest.raises(ValueError, match="sig_c"):
+        fit(tmp_path, [callback], epochs=1)
+
+
+def test_maskless_probes_are_the_unmasked_points(tmp_path):
+    callback = dump_callback(tmp_path / "scores")
+    fit(tmp_path, [callback], epochs=1)
+    meta = load(tmp_path / "scores" / "meta.pt")
+    for name, x in aux_inputs(meta).items():
+        tensors = callback._loaders["aux"][name].dataset.tensors
+        assert len(tensors) == 2 and torch.equal(tensors[0], x)
+
+
+def masked_sets(sets: dict, seed: int = 3) -> dict:
+    # The L1AD layout (x, mask, l1bit, y) with two objects of two features: an object
+    # is present or padded whole, and padding is +0.
+    gen = torch.Generator().manual_seed(seed)
+
+    def with_mask(x, y):
+        n = len(x)
+        mask = (torch.rand(n, 2, 1, generator=gen) < 0.6).expand(n, 2, 2).clone()
+        x = torch.where(mask, x.reshape(n, 2, 2), torch.zeros(n, 2, 2))
+        return x, mask, torch.zeros(n, dtype=torch.bool), y
+
+    masked = {"train": with_mask(*sets["train"])}
+    for split in ("val", "test"):
+        masked[split] = {name: with_mask(*xy) for name, xy in sets[split].items()}
+    return masked
+
+
+class MaskedDataModule(ToyDataModule):
+    def __init__(self):
+        super().__init__()
+        self.sets = masked_sets(self.sets)
+
+
+class MaskedToyAE(ToyAE):
+    def model_step(self, batch):
+        view = unpack_batch(batch)
+        return super().model_step((view.x.reshape(len(view.x), -1), view.y))
+
+
+def fit_masked(root, callbacks):
+    return fit(root, callbacks, module=MaskedToyAE(), datamodule=MaskedDataModule())
+
+
+def test_masked_probes_take_the_masks_of_training_rows(tmp_path):
+    callback = dump_callback(tmp_path / "scores")
+    _, datamodule = fit_masked(tmp_path, [callback])
+    meta = load(tmp_path / "scores" / "meta.pt")
+    assert meta["aux_masked"] is True
+    train_mask = datamodule.sets["train"][1]
+    mask = drawn_masks(train_mask, meta["aux_size"], meta["aux_seed"])
+    inputs = aux_inputs(meta)
+    for name, loader in callback._loaders["aux"].items():
+        x, probe_mask, l1bit, _ = loader.dataset.tensors
+        assert torch.equal(probe_mask, mask) and not l1bit.any()
+        assert not x[~mask].any() and not x[~mask].signbit().any()
+        assert torch.equal(x[mask], inputs[name][mask])
+
+    # A reader rebuilds the probes from meta.pt and the training masks.
+    for name in PASSES:
+        record = load(tmp_path / "scores" / name)
+        module = MaskedToyAE()
+        module.load_state_dict(record["state_dict"])
+        module.eval()
+        for set_name, x in inputs.items():
+            with torch.no_grad():
+                batches = placeholder_loader(x, 16, mask)
+                scores = [module.model_step(b)["ascore/full"] for b in batches]
+            expected = record["aux"][set_name]["ascore/full"]
+            torch.testing.assert_close(torch.cat(scores), expected)
+
+
+def test_dumped_autouad_scores_are_the_ones_npd_reads(tmp_path, monkeypatch):
+    seen, npd = [], autouad.npd
+
+    def recording_npd(normal, noise, eps=autouad.EPS):
+        seen.append(torch.as_tensor(noise).clone())
+        return npd(normal, noise, eps)
+
+    monkeypatch.setattr(autouad, "npd", recording_npd)
+    npd_callback = NPDCallback(aux_seed=7, aux_size=50, batch_size=16)
+    fit_masked(tmp_path, [npd_callback, dump_callback(tmp_path / "scores")])
+    dumped = [load(tmp_path / "scores" / name)["aux"]["autouad"] for name in PASSES]
+    # NPD skips the sanity pass.
+    assert len(seen) == len(dumped) - 1
+    for scores, record in zip(seen, dumped[1:]):
+        assert torch.equal(scores, record["ascore/full"])

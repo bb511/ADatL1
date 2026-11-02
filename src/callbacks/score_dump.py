@@ -10,17 +10,33 @@ evaluation on top of it:
 
 - ``config.yaml``, ``overrides.yaml``: the run's Hydra files.
 - ``meta.pt``: ``target_rate``, ``base_rate``, ``target_fpr`` and ``module`` (the class
-  of the LightningModule); for each split (``val``, ``test``, ``aux``, ``train``) the
-  ``names`` of its loaders, the ``keys`` the files hold, and the ``batch_sizes`` and
-  ``labels`` of every set; ``stored``, the val and test sets whose scores are kept;
+  of the LightningModule); for each split (``val``, ``test``, ``aux``, with the
+  training pass ``train`` and with the callback's ``sds`` the pseudo-sets' ``sds``)
+  the ``names`` of its loaders, the ``keys`` the files hold, and the ``batch_sizes``
+  and ``labels`` of every set; ``stored``, the val and test sets whose scores are kept
+  at every pass; ``initial_sets``, the val sets kept at the sanity pass alone;
   ``aux_seed``, ``aux_size`` and the training moments ``aux_lower``, ``aux_upper``,
-  ``aux_mean``, ``aux_std``, each of the shape of one input.
+  ``aux_mean``, ``aux_std``, each of the shape of one input; ``aux_masked``, whether
+  the auxiliary points carry data masks; with ``sds``, its ``max_rows`` and
+  ``row_seed`` as ``sds_max_rows`` and ``sds_row_seed``.
 - ``initial.pt``: the sanity pass on the untrained weights (``epoch: -1``), which must
-  cover the whole validation set (``num_sanity_val_steps=-1``).
+  cover the whole validation set (``num_sanity_val_steps=-1``); its ``val`` holds the
+  ``initial_sets`` besides the stored sets.
 - ``epoch_<nnnn>.pt``: ``epoch``; ``val`` and ``test``, ``{set: {key: (n,)}}`` for the
   stored sets; ``aux``, the scores of ``gaussian``, ``uniform`` and ``autouad``;
-  ``train``, the per-sample ``loss/full`` in the row order of ``data_train``;
-  ``state_dict``, every weight and buffer on CPU.
+  ``train``, with the training pass only, the per-sample ``loss/full`` in the row order
+  of ``data_train``; ``sds``, with ``sds`` only, the scores of ``sds_targets`` and
+  ``sds_outliers``; ``state_dict``, every weight and buffer on CPU.
+
+With ``sds``, the pseudo-sets are those of ``src.callbacks.sds.sds_inputs`` over the
+training inputs, without their data mask, as the replay (``src/evaluation/dump.py``)
+builds them; it serves their stored scores where ``max_rows`` and ``row_seed`` match
+its own, and raises otherwise.
+
+On data with a mask (the L1AD data), the i-th point of each auxiliary set takes the
+mask of the i-th training row that ``drawn_masks(mask, aux_size, aux_seed)`` draws and
+is +0 wherever that mask is 0, as the points of ``NPDCallback`` are; ``aux_inputs`` and
+``drawn_masks`` over the training masks rebuild them.
 """
 
 import os
@@ -31,12 +47,14 @@ import torch
 from pytorch_lightning import Callback
 from torch.utils.data import DataLoader
 
-from src.callbacks.components.utils import placeholder_loader
+from src.callbacks.components.utils import drawn_masks, placeholder_loader
 from src.data.utils import unpack_batch
 
 # The per-sample loss, the only quantity stored for the training set.
 TRAIN_KEYS = ["loss/full"]
 HYDRA_FILES = ["config.yaml", "overrides.yaml"]
+# What builds the SDS pseudo-sets besides the training inputs, as meta.pt records it.
+SDS_PARAMS = ("max_rows", "row_seed")
 
 
 def _per_event(score, key: str, n: int) -> torch.Tensor:
@@ -163,6 +181,12 @@ def _save_atomic(obj: dict, path: Path) -> None:
     os.replace(tmp, path)
 
 
+def _check_names(names: list[str], available: set[str], kind: str) -> None:
+    missing = set(names) - available
+    if missing:
+        raise ValueError(f"No {kind} loader carries {sorted(missing)}.")
+
+
 class ScoreDumpCallback(Callback):
     """Store the per-event scores and the weights at every validation pass.
 
@@ -173,11 +197,17 @@ class ScoreDumpCallback(Callback):
         copied into ``dirpath``.
     :param keys: Per-event output keys to store; keys a module does not emit are
         skipped.
-    :param stored_sets: Validation and test sets whose scores are stored; None stores
-        every set. The auxiliary sets, the training loss and the weights are always
+    :param stored_sets: Validation and test sets whose scores are stored at every
+        pass; None stores every set. The auxiliary sets and the weights are always
         stored.
     :param aux_batch_size: Batch size of the passes over the auxiliary sets and the
         training set.
+    :param initial_sets: Validation sets whose scores are stored at the sanity pass
+        alone, besides the stored sets.
+    :param train_pass: Whether every pass stores the per-sample training loss.
+    :param sds: ``max_rows`` and ``row_seed`` of the SDS pseudo-sets whose scores every
+        pass stores, as ``extra_sets.sds`` of the evaluation configs gives them; None
+        stores none, and the replay rescores them from the weights.
     """
 
     def __init__(
@@ -189,6 +219,9 @@ class ScoreDumpCallback(Callback):
         stored_sets: list[str] | None = None,
         aux_size: int = 10000,
         aux_batch_size: int = 1024,
+        initial_sets: list[str] | None = None,
+        train_pass: bool = True,
+        sds: dict | None = None,
     ):
         super().__init__()
         self.dirpath = Path(dirpath)
@@ -198,6 +231,9 @@ class ScoreDumpCallback(Callback):
         self.stored_sets = None if stored_sets is None else list(stored_sets)
         self.aux_size = aux_size
         self.aux_batch_size = aux_batch_size
+        self.initial_sets = list(initial_sets or [])
+        self.train_pass = train_pass
+        self.sds = None if sds is None else {k: sds[k] for k in SDS_PARAMS}
         self._meta_written = False
 
     def on_fit_start(self, trainer, pl_module):
@@ -208,8 +244,10 @@ class ScoreDumpCallback(Callback):
         test = datamodule.test_dataloader()
         self._stored = self._stored_names(list(datamodule.val_dataloader()), list(test))
         self._test_layout = _layout(test)
-        self._meta = self._run_meta(pl_module, datamodule.data_train)
-        self._loaders = self._build_loaders(datamodule.data_train, test)
+        train = unpack_batch(datamodule.data_train.tensors)
+        mask = drawn_masks(train.mask, self.aux_size, self.aux_seed)
+        self._meta = self._run_meta(pl_module, train.x, mask is not None)
+        self._loaders = self._build_loaders(datamodule.data_train, test, mask)
 
     def _prepare_dir(self, trainer) -> None:
         if trainer.world_size > 1:
@@ -224,16 +262,15 @@ class ScoreDumpCallback(Callback):
                 shutil.copy(source, self.dirpath / source.name)
 
     def _stored_names(self, val: list[str], test: list[str]) -> dict[str, list[str]]:
-        missing = set(self.stored_sets or []) - {*val, *test}
-        if missing:
-            raise ValueError(f"No validation or test loader carries {sorted(missing)}.")
+        _check_names(self.stored_sets or [], {*val, *test}, "validation or test")
+        _check_names(self.initial_sets, set(val), "validation")
         stored = self.stored_sets
         return {
             "val": [n for n in val if stored is None or n in stored],
             "test": [n for n in test if stored is None or n in stored],
         }
 
-    def _run_meta(self, pl_module, data_train) -> dict:
+    def _run_meta(self, pl_module, x_train: torch.Tensor, aux_masked: bool) -> dict:
         module_cls = type(pl_module)
         return {
             "target_rate": pl_module.hparams.target_rate,
@@ -241,25 +278,41 @@ class ScoreDumpCallback(Callback):
             "target_fpr": pl_module.compute_target_fpr(),
             "module": f"{module_cls.__module__}.{module_cls.__qualname__}",
             "stored": self._stored,
+            "initial_sets": self.initial_sets,
             "aux_seed": self.aux_seed,
             "aux_size": self.aux_size,
-            **input_moments(data_train.tensors[0]),
+            "aux_masked": aux_masked,
+            **input_moments(x_train),
+            **(
+                {} if self.sds is None else {f"sds_{k}": v for k, v in self.sds.items()}
+            ),
         }
 
-    def _build_loaders(self, data_train, test: dict) -> dict:
-        batch_size = self.aux_batch_size
-        return {
+    def _build_loaders(self, data_train, test: dict, mask: torch.Tensor | None) -> dict:
+        batch_size, aux = self.aux_batch_size, aux_inputs(self._meta)
+        loaders = {
             "test": {name: test[name] for name in self._stored["test"]},
-            "aux": {
-                n: placeholder_loader(x, batch_size)
-                for n, x in aux_inputs(self._meta).items()
-            },
-            # Unshuffled, so that the losses follow the rows of data_train.
-            "train": {"train": DataLoader(data_train, batch_size=batch_size)},
+            "aux": {n: placeholder_loader(x, batch_size, mask) for n, x in aux.items()},
         }
+        if self.train_pass:
+            # Unshuffled, so that the losses follow the rows of data_train.
+            loaders["train"] = {"train": DataLoader(data_train, batch_size=batch_size)}
+        if self.sds is not None:
+            loaders["sds"] = self._sds_loaders(unpack_batch(data_train.tensors).x)
+        return loaders
+
+    def _sds_loaders(self, x_train: torch.Tensor) -> dict:
+        # Imported here: src.callbacks.sds imports this module.
+        from src.callbacks.sds import SDS_SETS, sds_inputs
+
+        inputs = sds_inputs(x_train, self.sds["max_rows"], self.sds["row_seed"])
+        return {n: placeholder_loader(inputs[n], self.aux_batch_size) for n in SDS_SETS}
 
     def on_validation_epoch_start(self, trainer, pl_module):
-        self._val = _Collector(self.keys, self._stored["val"])
+        stored = self._stored["val"]
+        if trainer.sanity_checking:
+            stored = stored + self.initial_sets
+        self._val = _Collector(self.keys, stored)
 
     def on_validation_batch_end(
         self, trainer, pl_module, outputs, batch, batch_idx, dataloader_idx=0
@@ -268,7 +321,7 @@ class ScoreDumpCallback(Callback):
         self._val.add(name, outputs, batch)
 
     def on_validation_epoch_end(self, trainer, pl_module):
-        """Score the test, auxiliary and training sets, then write the pass's file."""
+        """Score the extra loaders, then write the pass's file."""
         collectors = {"val": self._val}
         for split, loaders in self._loaders.items():
             keys = TRAIN_KEYS if split == "train" else self.keys

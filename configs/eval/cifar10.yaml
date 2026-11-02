@@ -3,6 +3,16 @@
 # CIFAR-10: every validation and test set is stored in the dump; the signals are the
 # classes 1-9 against class 0.
 
+defaults:
+  - /cap: bank
+  - _self_
+
+# The bank's beta_fix, declared on CIFAR-10's own lattices by the light tunnel's rule
+# (scripts/analysis/cap_beta_fix.py over the five pool lattices; 08_tests.md, section R,
+# Part 3); a null entry makes a bank callback raise at its first computation.
+cap_bank:
+  beta_fix: { std: 0.7153, rank: 3.0932, sq: 3.8071, disp: 2.1391 }
+
 evaluation:
   evaluator:
     _target_: src.evaluation.evaluator.Evaluator
@@ -40,6 +50,54 @@ evaluation:
         apply_log1p: true
         log_raw_mlflow: false
         name: wasserstein
+      # The CAP bank of normal against the control and each corruption pool, with the
+      # couplings in colour_spectral, standardised on the training normals. A pool's
+      # six members are copies of normal under one corruption each, so each is one ot
+      # subsample.
+      cap_bank_reference_normal:
+        _target_: src.evaluation.callbacks.cap_bank.CAPBankCallback
+        output_name: ascore/full
+        dataset_1: normal
+        dataset_2: reference_normal
+        reference: reference_normal
+        bank_config: ${cap_bank}
+        log_raw_mlflow: false
+        name: cap_bank_reference_normal
+        representation: colour_spectral
+        x2_blocks: null
+      cap_bank_sensor_weak:
+        _target_: src.evaluation.callbacks.cap_bank.CAPBankCallback
+        output_name: ascore/full
+        dataset_1: normal
+        dataset_2: sensor_weak
+        reference: reference_normal
+        bank_config: ${cap_bank}
+        log_raw_mlflow: false
+        name: cap_bank_sensor_weak
+        representation: colour_spectral
+        x2_blocks: 6
+      cap_bank_sensor_mid:
+        _target_: src.evaluation.callbacks.cap_bank.CAPBankCallback
+        output_name: ascore/full
+        dataset_1: normal
+        dataset_2: sensor_mid
+        reference: reference_normal
+        bank_config: ${cap_bank}
+        log_raw_mlflow: false
+        name: cap_bank_sensor_mid
+        representation: colour_spectral
+        x2_blocks: 6
+      cap_bank_sensor_strong:
+        _target_: src.evaluation.callbacks.cap_bank.CAPBankCallback
+        output_name: ascore/full
+        dataset_1: normal
+        dataset_2: sensor_strong
+        reference: reference_normal
+        bank_config: ${cap_bank}
+        log_raw_mlflow: false
+        name: cap_bank_sensor_strong
+        representation: colour_spectral
+        x2_blocks: 6
       # The operational score of normal, a diagnostic column beside Q'', the fit.
       ascore_operational:
         _target_: src.evaluation.callbacks.output.OutputCallback
@@ -79,8 +137,9 @@ evaluation:
 
 # The registry of strategies: column in val.csv, mode and MLflow keys per criterion.
 selection:
-  # CAP and consistency are left out until CAP is redefined, and EM and MV because
-  # they are degenerate on images (NaN on CIFAR-10).
+  # The CAP bank enters no criterion: the reading takes its columns directly. CAP and
+  # consistency are left out until CAP is redefined, and EM and MV because they are
+  # degenerate on images (NaN on CIFAR-10).
   criteria:
     drift:
       column: thres_drift/drift_operational

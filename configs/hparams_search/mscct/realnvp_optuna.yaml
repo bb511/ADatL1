@@ -28,11 +28,14 @@ hydra:
     storage: sqlite:///logs/optuna/mscct/realnvp_pool.db?timeout=600
 
     # define hyperparameter search space. Assumes using torch.optim.AdamW
-    # CIFAR-10's space, carried unchanged: there, above lr 5e-4 or without gradient
+    # CIFAR-10's space but for the clip: there, above lr 5e-4 or without gradient
     # clipping, the larger flows diverged within ten epochs even with identity_init.
     params:
       algorithm.optimizer.lr: tag(log, interval(3e-5, 5e-4))
-      trainer.gradient_clip_val: choice(0.5, 1.0, 2.0)
+      # At clip 1 and 2 one flow diverged within 200 epochs (lr 4.4e-4) and three more
+      # from lr 2.2e-4 spiked past a loss of 1e6; every run at clip 0.5 was clean, lr
+      # 5e-4 at the largest flow included (27 Oct 2026).
+      trainer.gradient_clip_val: choice(0.5)
       algorithm.flow.n_flows: choice(4, 6, 8)
       algorithm.flow.hidden_dim: choice(256, 512, 1024)
       algorithm.flow.n_hidden_layers: choice(1, 2)

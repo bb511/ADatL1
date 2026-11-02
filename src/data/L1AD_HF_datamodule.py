@@ -92,9 +92,9 @@ class L1ADHFDataModule(LightningDataModule):
     :param cache_dir: Where the record's derived caches go, its paths.base_data_dir.
         None leaves the record's own default, which honours ADL1T_CACHE.
     :param data_normalizer: Read for its name alone, which picks the matching scheme in
-        the record. It is here so that an experiment overriding /data/data_normalizer,
-        as the dte ones do, composes against this config as well; the record runs its
-        own normalizer and this object is never used to normalize anything.
+        the record. It is here so that an experiment overriding /data/data_normalizer
+        composes against this config as well; the record runs its own normalizer and
+        this object is never used to normalize anything.
     :param overrides: Anything else to override when composing the record's
         configuration, e.g. ['data/data_awkward2torch=minimal'].
     :param max_val_batches: Batches to keep per auxiliary val/test set. -1 keeps all.

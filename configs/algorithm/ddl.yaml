@@ -1,0 +1,33 @@
+# Template diffusion denoising loss (DDL) configuration.
+defaults:
+  - _self_
+
+_target_: src.algorithms.ddl.DDL
+
+target_rate: 0.25 # nominal rate
+base_rate: 28608.8064 # bunch crossing rate in kHz
+
+# The input width, read by the denoiser and by the fixed noise of the score.
+in_dim: 117
+
+denoiser:
+  _target_: src.algorithms.components.ddl.DenoiserMLP
+  in_dim: ${algorithm.in_dim}
+  width: 128
+  depth: 2
+  time_dim: 32
+  dropout: 0.0
+  activation: silu
+
+# T = 100 as in TabADM; beta_end 0.02 as in Ho et al. at their T = 1000, the reference
+# to which src/algorithms/components/ddl.py scales the schedule.
+n_steps: 100
+beta_end: 0.02
+n_score_steps: 10
+noise_seed: 0
+
+optimizer:
+  _partial_: true
+  _target_: torch.optim.AdamW
+  lr: 1.0e-3
+  weight_decay: 1.0e-4

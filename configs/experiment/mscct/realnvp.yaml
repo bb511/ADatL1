@@ -20,7 +20,8 @@ data:
 
 trainer:
   gradient_clip_algorithm: norm
-  gradient_clip_val: 1.0
+  # The one clip of the search space (configs/hparams_search/mscct/realnvp_optuna.yaml).
+  gradient_clip_val: 0.5
   min_epochs: 1
   max_epochs: 200
   # The full sanity pass is the untrained state the dump stores; no checkpoint is kept.

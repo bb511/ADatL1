@@ -1,6 +1,9 @@
 import csv
 import json
+import logging
 import math
+import re
+import shutil
 from collections import defaultdict
 from pathlib import Path
 from types import SimpleNamespace
@@ -23,8 +26,10 @@ from src.evaluation.callbacks.utils.mlflow import log_metrics_to_mlflow
 from src.evaluation.callbacks.wasserstein import _wasserstein_1d
 from src.evaluation.components.pairing import hyperpoint
 from src.evaluation.components.rebuild import null_sets, signal_sets
-from src.evaluation.dump import RunEvaluation
+from src.evaluation.components.tables import write_outputs
+from src.evaluation.dump import RunEvaluation, _init_worker
 from src.evaluation.evaluator import Evaluator
+from src.evaluation.lattice import select_lattice
 from src.evaluation.replay import ReplayModule, as_typical
 from src.utils.omegaconf import register_resolvers
 from tests.test_score_dump import PASSES, ToyAE, ToyDataModule, dump_callback, fit, load
@@ -57,6 +62,27 @@ RUN_KEYS = {
     "stored",
     "typical",
 }
+# The overrides of a replay from a scores-only copy of a dump, which leaves SDS out:
+# its pseudo-sets are not stored, so they would be rescored from the weights.
+SCORES_ONLY = [
+    "evaluation.evaluator.extra_sets.sds=null",
+    "~evaluation.evaluator.dump_callbacks.sds",
+    "~selection.criteria.sds",
+]
+SELECTION_TABLES = {
+    "consensus.csv",
+    "selection.csv",
+    "validity.csv",
+    "tradeoff.csv",
+    "oracle_position.csv",
+    "interventions.csv",
+    "toy.csv",
+    "toy_eval.csv",
+}
+TOY_RUN_CONFIG = {
+    "data": {"_target_": "tests.test_score_dump.ToyDataModule"},
+    "algorithm": {"_target_": "tests.test_score_dump.ToyAE"},
+}
 SMOKE_OVERRIDES = [
     "trainer.gradient_clip_val=2.0",
     "algorithm.delta=5.0",
@@ -77,9 +103,10 @@ def _resolvers() -> None:
         register_resolvers()
 
 
-def _compose(domain: str):
+def _compose(domain: str, *overrides: str):
     with initialize_config_dir(version_base="1.3", config_dir=str(CONFIGS)):
-        return compose(config_name="eval", overrides=[f"eval={domain}", "lattice=x"])
+        overrides = [f"eval={domain}", "lattice=x", *overrides]
+        return compose(config_name="eval", overrides=overrides)
 
 
 def drop_absent_sets(cfg, sets: set[str]) -> None:
@@ -472,6 +499,198 @@ def test_evaluate_lattice_rebuilds_each_run(chamber, tmp_path):
     assert [run["run"] for run in runs] == ["run_b"]
     assert runs[0]["hyperpoint"] == {"algorithm.delta": "5.0"}
     assert sorted(p.name for p in (out / "runs" / "run_b").iterdir()) == TABLES
+
+
+def _strip_weights(src: Path, dst: Path) -> None:
+    shutil.copytree(src, dst)
+    for path in dst.glob("*/epoch_*.pt"):
+        record = load(path)
+        del record["state_dict"]
+        torch.save(record, path)
+
+
+@pytest.fixture(scope="module")
+def lattices(tmp_path_factory) -> SimpleNamespace:
+    root = tmp_path_factory.mktemp("lattices")
+    for seed, run in enumerate(["run_a", "run_b"]):
+        path = root / "full" / "toy" / run
+        fit(root, [dump_callback(path)], seed=seed)
+        (path / "config.yaml").write_text(yaml.safe_dump(TOY_RUN_CONFIG))
+    _strip_weights(root / "full" / "toy", root / "stripped" / "toy")
+    return SimpleNamespace(full=root / "full", stripped=root / "stripped")
+
+
+def _drop_image_bank(cfg) -> None:
+    # colour_spectral reads [n, C, H, W] images, which the toy's vectors are not.
+    callbacks = cfg.evaluation.evaluator.dump_callbacks
+    with open_dict(cfg):
+        for name in [n for n, c in callbacks.items() if "representation" in c]:
+            del callbacks[name]
+
+
+def _evaluate_and_select(scores_dir: Path, out: Path, *overrides: str, **pool) -> None:
+    # The two steps of src/eval.py, on the CIFAR-10 evaluation.
+    cfg = _compose("cifar10", *overrides)
+    drop_absent_sets(cfg, TOY_SETS)
+    _drop_image_bank(cfg)
+    evaluator = hydra.utils.instantiate(cfg.evaluation.evaluator)
+    evaluator.evaluate_lattice(scores_dir, out, "toy", **pool)
+    selection = OmegaConf.to_container(cfg.selection, resolve=True)
+    select_lattice(out, selection, scores_dir, "toy", None)
+
+
+def _outputs(out: Path) -> dict[str, bytes]:
+    paths = [path for path in out.rglob("*") if path.is_file()]
+    return {str(path.relative_to(out)): path.read_bytes() for path in paths}
+
+
+def test_a_scores_only_copy_replays_to_the_same_tables(lattices, tmp_path):
+    stripped = load(lattices.stripped / "toy" / "run_a" / "epoch_0000.pt")
+    initial = load(lattices.stripped / "toy" / "run_a" / "initial.pt")
+    assert "state_dict" not in stripped and "state_dict" in initial
+    outputs = {}
+    for name in ("full", "stripped"):
+        _evaluate_and_select(getattr(lattices, name), tmp_path / name, *SCORES_ONLY)
+        outputs[name] = _outputs(tmp_path / name)
+
+    runs = [f"runs/{run}/{table}" for run in ("run_a", "run_b") for table in TABLES]
+    assert set(outputs["full"]) == set(runs) | SELECTION_TABLES
+    for path, content in outputs["full"].items():
+        if not path.endswith("run.json"):
+            assert outputs["stripped"][path] == content, path
+            continue
+        info = {n: json.loads(outputs[n][path]) for n in outputs}
+        assert {**info["full"], "dump": None} == {**info["stripped"], "dump": None}
+    assert b"sds/" not in outputs["full"]["runs/run_a/val.csv"]
+
+
+def test_a_scores_only_copy_raises_where_a_score_is_rescored(lattices, tmp_path):
+    message = "Rescoring 'sds_targets' needs the weights, which run_a/epoch_0000.pt"
+    with pytest.raises(RuntimeError, match=re.escape(message)):
+        _evaluate_and_select(lattices.stripped, tmp_path)
+
+    run_dir = lattices.stripped / "toy" / "run_a"
+    replay = ReplayModule(ToyAE(), load(run_dir / "meta.pt"))
+    record = load(run_dir / "epoch_0001.pt")
+    del record["test"]["sig_a"], record["val"]["normal"]["fit/full"]
+    replay.load_epoch(record, tmp_path / "run_a" / "epoch_0001.pt")
+    for split, rescored in [("test", "'sig_a'"), ("val", "['fit/full'] of 'normal'")]:
+        message = f"Rescoring {rescored} needs the weights, which run_a/epoch_0001.pt"
+        with pytest.raises(RuntimeError, match=re.escape(message)):
+            _test(replay, split, ToyDataModule().loaders(split), [])
+
+
+def test_the_worker_initialiser_sets_the_thread_count():
+    before = torch.get_num_threads()
+    try:
+        _init_worker(threads=3)
+        assert torch.get_num_threads() == 3
+    finally:
+        torch.set_num_threads(before)
+
+
+def test_worker_threads_leave_the_tables_unchanged(lattices, tmp_path):
+    # The toy's tensors sit below torch's parallel grain, so equal tables here show
+    # the plumbing, not the bitwise equality of a real lattice's threaded replay.
+    outputs = {}
+    for threads in (1, 2):
+        out = tmp_path / f"threads_{threads}"
+        _evaluate_and_select(lattices.full, out, workers=2, threads=threads)
+        outputs[threads] = _outputs(out)
+    assert set(outputs[1]) == set(outputs[2])
+    for path, content in outputs[1].items():
+        assert outputs[2][path] == content, path
+
+
+def _cifar10_evaluator() -> Evaluator:
+    cfg = _compose("cifar10")
+    drop_absent_sets(cfg, TOY_SETS)
+    _drop_image_bank(cfg)
+    return hydra.utils.instantiate(cfg.evaluation.evaluator)
+
+
+@pytest.fixture(scope="module")
+def evaluated(lattices, tmp_path_factory) -> SimpleNamespace:
+    out = tmp_path_factory.mktemp("evaluated")
+    evaluator = _cifar10_evaluator()
+    runs = evaluator.evaluate_lattice(lattices.full, out, "toy")
+    tables = _outputs(out)
+    return SimpleNamespace(evaluator=evaluator, out=out, runs=runs, tables=tables)
+
+
+def _edit_run(path: Path, **changes) -> None:
+    run = json.loads((path / "run.json").read_text())
+    (path / "run.json").write_text(json.dumps({**run, **changes}))
+
+
+@pytest.mark.parametrize(
+    "changes, cut, removed",
+    [
+        # What a kill leaves while the tables are written, and while run.json is.
+        ({}, "val.csv", "run.json"),
+        ({}, "run.json", None),
+        ({}, None, "picks.csv"),
+        # The complete files of another evaluation.
+        ({"dump": "elsewhere"}, None, None),
+        ({"typical": TYPICAL}, None, None),
+        ({"epochs": 1}, None, None),
+    ],
+)
+def test_resume_redoes_a_run_cut_or_evaluated_otherwise(
+    lattices, evaluated, tmp_path, changes, cut, removed
+):
+    out = tmp_path / "eval"
+    shutil.copytree(evaluated.out, out)
+    run_a, run_b = out / "runs" / "run_a", out / "runs" / "run_b"
+    # A replay of run_a would write its run.json again, without the mark.
+    _edit_run(run_a, mlflow_run_id="stored")
+    _edit_run(run_b, **changes)
+    if cut is not None:
+        content = (run_b / cut).read_bytes()
+        (run_b / cut).write_bytes(content[: len(content) // 2])
+    if removed is not None:
+        (run_b / removed).unlink()
+    runs = evaluated.evaluator.evaluate_lattice(lattices.full, out, "toy")
+    assert runs == [{**evaluated.runs[0], "mlflow_run_id": "stored"}, evaluated.runs[1]]
+    outputs = _outputs(out)
+    for path in [f"runs/run_b/{table}" for table in TABLES]:
+        assert outputs[path] == evaluated.tables[path], path
+
+
+def test_a_rewrite_cut_in_its_tables_leaves_no_run_json(tmp_path, monkeypatch):
+    tables, run = {"val": [{"epoch": -1}], "test": [{"epoch": -1}]}, {"run": "run_a"}
+    write_outputs(tmp_path, tables, run)
+
+    def kill(self, rows):
+        raise RuntimeError("killed")
+
+    monkeypatch.setattr(csv.DictWriter, "writerows", kill)
+    with pytest.raises(RuntimeError, match="killed"):
+        write_outputs(tmp_path, tables, run)
+    assert (tmp_path / "val.csv").exists() and not (tmp_path / "run.json").exists()
+
+
+def test_resume_logs_only_the_runs_it_replays_to_mlflow(lattices, tmp_path, caplog):
+    uri, out = f"file:{tmp_path / 'mlruns'}", tmp_path / "eval"
+    evaluator = _cifar10_evaluator()
+
+    def evaluate(resume: bool = True) -> list[dict]:
+        return evaluator.evaluate_lattice(
+            lattices.full, out, "toy", tracking_uri=uri, resume=resume
+        )
+
+    first = evaluate()
+    (out / "runs" / "run_b" / "run.json").unlink()
+    caplog.set_level(logging.INFO, logger="src.evaluation.dump")
+    resumed, redone = evaluate(), evaluate(resume=False)
+    assert resumed[0] == first[0]
+    assert caplog.text.count("Skipping") == 1 and "Skipping run_a" in caplog.text
+    # Each run's first evaluation, run_b's resumed one and both redone.
+    assert len({run["mlflow_run_id"] for run in first + resumed + redone}) == 5
+    client = MlflowClient(uri)
+    experiment_id = client.get_experiment_by_name("toy_eval").experiment_id
+    names = [run.info.run_name for run in client.search_runs([experiment_id])]
+    assert sorted(names) == ["run_a"] * 2 + ["run_b"] * 3
 
 
 def test_hyperpoint_takes_the_swept_overrides(tmp_path):

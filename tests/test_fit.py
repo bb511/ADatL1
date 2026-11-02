@@ -1,5 +1,4 @@
 import math
-from functools import partial
 from types import SimpleNamespace
 
 import pytest
@@ -10,11 +9,6 @@ from torch.utils.data import DataLoader, TensorDataset
 
 from src.algorithms.ae import AE
 from src.algorithms.components.decoder import Decoder, ImageDecoder
-from src.algorithms.components.dte import (
-    DTEPredictor,
-    ImageDTEPredictor,
-    eval_corruption,
-)
 from src.algorithms.components.encoder import (
     DeepSetsEncoder,
     Encoder,
@@ -24,9 +18,7 @@ from src.algorithms.components.encoder import (
 )
 from src.algorithms.components.flow import RealNVP as Flow
 from src.algorithms.dsae import DeepSetsAE
-from src.algorithms.dte import DTE
 from src.algorithms.image_ae import ImageAE
-from src.algorithms.image_dte import ImageDTE
 from src.algorithms.image_svdd import ImageDeepSVDD
 from src.algorithms.image_vae import ImageVAE
 from src.algorithms.nae import NAE
@@ -243,60 +235,6 @@ def test_image_svdd_fit_is_the_distance_per_latent_coordinate():
     torch.testing.assert_close(outputs["fit/full"], expected)
 
 
-def _dte(image: bool):
-    torch.manual_seed(0)
-    if image:
-        predictor = ImageDTEPredictor(3, [4, 3], 5, (8, 8), [2])
-        return ImageDTE(predictor, n_steps=300, n_bins=5, base_rate=None), _images()
-    predictor = DTEPredictor(in_dim=DIM, hidden_dims=[8, 8], out_dim=5, dropout=0.0)
-    return DTE(predictor, n_steps=300, n_bins=5, target_rate=0.01), _x()
-
-
-def _cross_entropy(module, x, timesteps, noise=None) -> torch.Tensor:
-    with torch.no_grad():
-        logits = module(module.corrupt(x, timesteps, noise=noise))
-    targets = module.time_to_bin(timesteps)
-    return F.cross_entropy(logits, targets, reduction="none")
-
-
-@pytest.mark.parametrize("image", [False, True])
-def test_dte_training_fit_is_the_cross_entropy_at_a_random_timestep(image):
-    module, x = _dte(image)
-    module.train()
-    torch.manual_seed(3)
-    with torch.no_grad():
-        outputs = module.model_step((x, _labels(x)))
-        again = module.model_step((x, _labels(x)))
-    torch.manual_seed(3)
-    timesteps = torch.randint(0, 300, (len(x),))
-    assert torch.equal(outputs["fit/full"], outputs["loss/full"])
-    torch.testing.assert_close(
-        outputs["fit/full"], _cross_entropy(module, x, timesteps)
-    )
-    assert not torch.equal(outputs["fit/full"], again["fit/full"])
-
-
-@pytest.mark.parametrize("image", [False, True])
-def test_dte_eval_fit_is_the_cross_entropy_at_a_fixed_corruption(image):
-    module, x = _dte(image)
-    first, second = (_step(module, (x, _labels(x)))["fit/full"] for _ in range(2))
-    expected = _cross_entropy(module, x, *eval_corruption(x, 300))
-    assert torch.equal(first, second)
-    torch.testing.assert_close(first, expected)
-
-
-@pytest.mark.parametrize("x", [_x(64), _images(64)], ids=["tabular", "image"])
-def test_eval_timesteps_are_a_function_of_each_event(x):
-    timesteps, noise = eval_corruption(x, 300)
-    order = torch.randperm(len(x), generator=torch.Generator().manual_seed(4))
-    batched = torch.cat([eval_corruption(part, 300)[0] for part in x.split(24)])
-    assert torch.equal(batched, timesteps)
-    assert torch.equal(eval_corruption(x[order], 300)[0], timesteps[order])
-    assert 0 <= timesteps.min() and timesteps.max() < 300
-    assert len(timesteps.unique()) > len(x) // 2
-    assert noise.shape == x.shape and torch.equal(noise, eval_corruption(x, 300)[1])
-
-
 def test_neutral_fit_is_the_normalised_contrastive_loss():
     torch.manual_seed(0)
     encoder = Encoder(in_dim=DIM, nodes=[8, 4])
@@ -442,28 +380,6 @@ def test_replay_rescores_the_fit_of_normal_where_the_dump_lacks_it(tmp_path):
     test = _served(_replay(path, "epoch_0001.pt"), "test")
     for outputs in [*served.values(), *test.values()]:
         assert not [o for o in outputs if "fit/full" in o]
-
-
-def _toy_dte() -> DTE:
-    predictor = DTEPredictor(in_dim=N_FEATURES, hidden_dims=[8], out_dim=5)
-    optimizer = partial(torch.optim.SGD, lr=0.05)
-    return DTE(predictor, n_bins=5, target_rate=0.1, optimizer=optimizer)
-
-
-def test_replay_reproduces_the_rescored_dte_fit(tmp_path):
-    path = tmp_path / "scores"
-    keys = [key for key in KEYS if key != "fit/full"]
-    sizes = {"aux_seed": 7, "aux_size": 50, "aux_batch_size": 16}
-    dump = ScoreDumpCallback(str(path), str(tmp_path), keys, **sizes)
-    fit(tmp_path, [dump], module=_toy_dte())
-    meta, record = load(path / "meta.pt"), load(path / "epoch_0001.pt")
-    fits = []
-    for _ in range(2):
-        replay = ReplayModule(_toy_dte(), meta)
-        replay.load_epoch(record, tmp_path / "epoch_0001.pt")
-        served = _served(replay, "val")["normal"]
-        fits.append(torch.cat([outputs["fit/full"] for outputs in served]))
-    assert torch.equal(*fits)
 
 
 def test_replay_serves_a_stored_fit(tmp_path):

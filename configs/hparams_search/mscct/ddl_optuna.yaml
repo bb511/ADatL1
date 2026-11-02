@@ -1,0 +1,39 @@
+# @package _global_
+
+# The DDL lattice space; the ladders are those of every domain, the U-Net widths per
+# domain. beta_end is the end of the schedule at the reference T of 1000, to which
+# src/algorithms/components/ddl.py scales it, so the noise reached at the last step
+# depends little on T: alpha_bar_T is about 0.08 at 5e-3 and below 1e-10 at 5e-2.
+# The U-Net's depth is the length of its channel list.
+
+defaults:
+  - override /hydra/sweeper: optuna
+  - override /hydra/sweeper/sampler: random
+
+hydra:
+  mode: "MULTIRUN"
+  sweeper:
+    _target_: hydra_plugins.hydra_optuna_sweeper.optuna_sweeper.OptunaSweeper
+    study_name: pool
+    n_jobs: 1
+    # Placeholder: a dump-only run reports the worst value of each direction.
+    direction: [maximize, minimize]
+    n_trials: 23
+    storage: sqlite:///logs/optuna/mscct/ddl_pool.db?timeout=600
+    params:
+      # Ceiling 5e-3: at 1e-2 the top corner ([16, 32, 64], no clip, SiLU) stayed on the
+      # untrained plateau through 3 epochs, the collapse bar of the validation (2 Nov 2026).
+      algorithm.optimizer.lr: tag(log, interval(3e-5, 5e-3))
+      trainer.gradient_clip_val: choice(0.0, 0.5, 1.0, 2.0)
+      algorithm.n_steps: choice(100, 200, 500, 1000)
+      algorithm.beta_end: tag(log, interval(5e-3, 5e-2))
+      # Fewer timesteps and narrower U-Nets than on tabular data: each score evaluates
+      # the U-Net once per timestep at full resolution on about 60,000 images per epoch
+      # (CIFAR-10), where [32, 64] at 10 timesteps took 24 s per epoch on a V100S, and
+      # one timestep's loss already averages 3,072 pixels.
+      # n_score_steps stays at the experiment's 4: it changes the score alone, and a
+      # sampled value would shift Q'' between runs (1 Nov 2026).
+      algorithm.denoiser.time_dim: choice(16, 32, 64)
+      algorithm.denoiser.nodes: choice([8, 16], [16, 32], [8, 16, 32], [16, 32, 64])
+      algorithm.denoiser.dropout: choice(0.0, 0.25, 0.5)
+      algorithm.denoiser.activation: choice(relu, gelu, silu)

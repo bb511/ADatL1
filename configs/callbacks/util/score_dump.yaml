@@ -11,6 +11,8 @@ keys:
   ["ascore/full", "ascore/mse", "ascore/kl", "ascore/residual_oas", "fit/full"]
 # Sets whose scores are stored; null stores every set, the rest are rescored offline.
 stored_sets: null
+# An experiment may add sds: {max_rows, row_seed} to store the scores of the SDS
+# pseudo-sets too (configs/experiment/cifar10/ddl.yaml); left out, they are rescored.
 aux_seed: 0
 aux_size: 10000
 aux_batch_size: 1024

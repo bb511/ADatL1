@@ -5,15 +5,15 @@
 defaults:
   - /cap: provisional
   - override /data: cchamber
-  - override /algorithm: dte
+  - override /algorithm: ddl
   - override /callbacks: dump
   - override /trainer: cpu
   - override /logger: mlflow
 
 seed: 123
-tags: ["dte", "cchamber", "pool"]
+tags: ["ddl", "cchamber", "pool"]
 
-experiment_name: cchamber_dte_pool
+experiment_name: cchamber_ddl_pool
 run_name: ${short_hash:${hydra:runtime.output_dir},12}
 
 data:
@@ -30,22 +30,22 @@ trainer:
 
 test: false
 
-# The optimiser of the other chamber families and a level of the AE and SVDD width list,
-# every value inside the space; dropout keeps the algorithm's default.
+# Every default lies inside hparams_search/cchamber/ddl_optuna.yaml.
 algorithm:
   target_rate: 0.01
   base_rate: null
-  n_bins: 5
-  # The noise is added to the chamber's own normalisation (median 0, 5-95 % spread 1, a
-  # standard deviation of about 0.31 per readout), so beta_end sets the noise on that
-  # scale: the last step's standard deviation is 0.37, 0.88 and 1.0 at beta_end 1e-3,
-  # 1e-2 and 1e-1.
-  beta_end: 0.01
+  in_dim: 10
 
-  predictor:
-    in_dim: 10
-    hidden_dims: [32, 16, 8]
-    activation: gelu
+  denoiser:
+    width: 64
+    depth: 2
+    time_dim: 32
+    dropout: 0.0
+    activation: silu
+
+  n_steps: 100
+  beta_end: 0.02
+  n_score_steps: 10
 
   optimizer:
     _partial_: true

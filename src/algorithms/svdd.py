@@ -1,43 +1,98 @@
-from typing import Optional
+"""Deep SVDD: a bias-free network that maps typical inputs close to a fixed centre.
+
+Ruff et al., "Deep One-Class Classification", ICML 2018, PMLR 80:4393-4402. The
+anomaly score is the squared distance of the representation to the centre (eq. 5). The
+centre rule (the mean output of an untrained forward pass over the training data, with
+coordinates nearer zero than eps moved to +-eps) and the soft-boundary radius rule (the
+(1 - nu) quantile of each training batch's distances once a warm-up has passed) follow
+the authors' code, github.com/lukasruff/Deep-SVDD-PyTorch, MIT License, Copyright (c)
+2018 Lukas Ruff.
+"""
+
+from itertools import islice
 
 import torch
-import torch.distributed as dist
 from torch import nn
 
 from src.algorithms import ADLightningModule
-from src.algorithms.losses.svdd import SVDDLoss
+from src.algorithms.losses.svdd import soft_boundary_loss
 from src.data.utils import unpack_batch
+
+OBJECTIVES = ("one_class", "soft_boundary")
+
+# Logged name of every model_step value that outlog passes on; the physics loss
+# checkpoint monitors val/normal/loss_distance_raw.
+_LOGGED = {
+    "loss": "loss",
+    "loss_mean": "loss/mean",
+    "loss_distance_raw": "loss/distance_raw/mean",
+    "loss_reg_scaled": "loss/reg_scaled/mean",
+    "ascore_operational": "ascore/operational",
+    "ascore_q50": "ascore/q50",
+    "ascore_q99": "ascore/q99",
+    "z_squared": "z_squared",
+    "center_norm": "center_norm",
+    "radius": "radius",
+}
 
 # (failed, message) pairs over the saved hyperparameters, checked in this order.
 _HPARAM_CHECKS = (
+    (lambda hp: not 0.0 < hp.nu <= 1.0, "nu must lie in (0, 1]."),
+    (lambda hp: hp.center_init_method != "mean", "center_init_method must be 'mean'."),
+    (lambda hp: hp.center_eps < 0.0, "center_eps must not be negative."),
     (
-        lambda hp: hp.center_init_method != "mean",
-        "Deep SVDD requires center_init_method='mean'; a zero center permits "
-        "the trivial all-zero solution.",
+        lambda hp: hp.center_max_batches is not None and hp.center_max_batches < 1,
+        "center_max_batches must be None (every batch) or at least 1.",
     ),
-    (lambda hp: hp.center_eps < 0.0, "center_eps must be non-negative."),
-    (
-        lambda hp: hp.center_max_batches is not None and hp.center_max_batches <= 0,
-        "center_max_batches must be positive or None.",
-    ),
-    (
-        lambda hp: hp.network_weight_decay < 0.0,
-        "network_weight_decay must be non-negative.",
-    ),
-    (
-        lambda hp: hp.radius_warmup_epochs < 0,
-        "radius_warmup_epochs must be non-negative.",
-    ),
+    (lambda hp: hp.radius_warmup_epochs < 0, "radius_warmup_epochs must be >= 0."),
 )
 
 
+def _objective(objective: str | None, soft_boundary: bool) -> str:
+    """The objective's name; without one, the boolean flag chooses it."""
+    if objective is None:
+        return "soft_boundary" if soft_boundary else "one_class"
+    if objective not in OBJECTIVES or (soft_boundary and objective != "soft_boundary"):
+        raise ValueError(
+            f"objective must be one of {OBJECTIVES} and agree with soft_boundary, got "
+            f"{objective!r} with soft_boundary={soft_boundary}."
+        )
+    return objective
+
+
+def _squared_distance(z: torch.Tensor, center: torch.Tensor) -> torch.Tensor:
+    """||z - c||² per event: z has shape (batch, latent), the result (batch,)."""
+    return ((z - center) ** 2).sum(dim=1)
+
+
+def _away_from_zero(center: torch.Tensor, eps: float) -> torch.Tensor:
+    """Move every coordinate with abs(c_i) < eps to -eps if negative, else to +eps.
+
+    A coordinate at zero can be met by all-zero weights, the trivial solution of Ruff et
+    al., Prop. 1. The authors' code leaves an exact zero in place.
+    """
+    pushed = torch.where(center < 0, -eps, eps).to(center.dtype)
+    return torch.where(center.abs() < eps, pushed, center)
+
+
 class DeepSVDD(ADLightningModule):
-    """Deep SVDD with a fixed nominal-data center."""
+    """Deep SVDD on flattened inputs, one-class (eq. 4) or soft-boundary (eq. 3).
+
+    The centre c is fixed at the start of the first fit and never trained. A bias lets
+    the network map every input onto c (Ruff et al., Prop. 2), so the encoder's config
+    sets bias off, and batch normalisation too, whose affine shift is a bias. The
+    weight decay (λ/2) Σ ||W||² is part of the loss, with λ =
+    ``network_weight_decay``, apart from any decay the optimiser applies. For both
+    objectives the anomaly score is the squared distance, so a soft-boundary score is
+    eq. 5's adjusted score plus R², the same ranking. ``target_rate`` is the FPR when
+    ``base_rate`` is None, else a rate that ``base_rate`` divides. ``ckpt`` names a
+    Lightning checkpoint whose weights, centre and radius are loaded.
+    """
 
     def __init__(
         self,
         encoder: nn.Module,
-        features: Optional[nn.Module] = None,
+        features: nn.Module | None = None,
         center_init_method: str = "mean",
         center_eps: float = 0.1,
         center_max_batches: int | None = None,
@@ -53,256 +108,117 @@ class DeepSVDD(ADLightningModule):
     ):
         super().__init__(model=None, **kwargs)
         self.save_hyperparameters(ignore=["model", "features", "encoder"])
+        self.objective = _objective(objective, soft_boundary)
         self._check_hparams()
-
-        inferred_objective = "soft_boundary" if soft_boundary else "one_class"
-        if objective is None:
-            objective = inferred_objective
-
         self.encoder = encoder
-        self.features = features if features is not None else nn.Identity()
-        self.features.eval()
-
-        self.center_eps = float(center_eps)
-        self.center_max_batches = center_max_batches
-        self.ckpt_path = ckpt
-        self.network_weight_decay = float(network_weight_decay)
-        self.radius_warmup_epochs = int(radius_warmup_epochs)
-
-        self.loss = SVDDLoss(objective=objective, nu=nu)
+        self.features = nn.Identity() if features is None else features
+        # Empty until the first fit fixes it; loading a state resizes it.
         self.register_buffer("center", torch.empty(0))
-        self.register_buffer("radius", torch.tensor(0.0, dtype=torch.float32))
-        self._training_distances: list[torch.Tensor] = []
-
-    @property
-    def objective(self) -> str:
-        return self.loss.objective
+        self.register_buffer("radius", torch.tensor(0.0))
+        if ckpt:
+            self._load_checkpoint(ckpt)
 
     @property
     def center_initialized(self) -> bool:
         return self.center.numel() > 0
 
-    def on_fit_start(self) -> None:
-        self.features.to(self.device)
-
-        if self.ckpt_path:
-            self._load_checkpoint()
-
-        if not self.center_initialized:
-            datamodule = getattr(self.trainer, "datamodule", None)
-            if datamodule is None:
-                raise RuntimeError(
-                    "Deep SVDD center initialization requires a trainer datamodule."
-                )
-            self.initialize_center(datamodule.train_dataloader())
-
     def forward(self, x: torch.Tensor) -> torch.Tensor:
-        x = self.features(x)
-        return self.encoder(x)
+        """The representation φ(x; W), shape (batch, latent)."""
+        return self.encoder(self.features(x))
 
     def _prepare_input(self, batch) -> torch.Tensor:
         return torch.flatten(unpack_batch(batch).x, start_dim=1)
 
+    def on_fit_start(self) -> None:
+        # Before the sanity pass, so that the untrained scores have a centre too.
+        if not self.center_initialized:
+            self.initialize_center(self.trainer.datamodule.train_dataloader())
+
     @torch.no_grad()
     def initialize_center(self, train_dataloader) -> None:
-        """Compute a fixed center from the complete nominal training loader."""
-        encoder_was_training = self.encoder.training
-        features_were_training = self.features.training
-        self.encoder.eval()
-        self.features.eval()
+        """Fix c as the mean representation over the training batches (Sec. 3.3).
 
-        representation_sum = None
-        count = 0
-        try:
-            for batch_idx, batch in enumerate(train_dataloader):
-                if (
-                    self.center_max_batches is not None
-                    and batch_idx >= self.center_max_batches
-                ):
-                    break
-                x = self._prepare_input(batch).to(self.device)
-                z = self.forward(x)
-                if z.ndim != 2:
-                    raise ValueError(
-                        "SVDD encoder must return [batch, latent_dim], got "
-                        f"{tuple(z.shape)}."
-                    )
-                batch_sum = z.detach().sum(dim=0)
-                representation_sum = (
-                    batch_sum
-                    if representation_sum is None
-                    else representation_sum + batch_sum
-                )
-                count += z.shape[0]
-        finally:
-            self.encoder.train(encoder_was_training)
-            self.features.train(features_were_training)
-
-        if representation_sum is None or count == 0:
-            raise RuntimeError(
-                "Cannot initialize the SVDD center from an empty loader."
-            )
-
-        count_tensor = representation_sum.new_tensor(float(count))
-        if dist.is_available() and dist.is_initialized():
-            dist.all_reduce(representation_sum, op=dist.ReduceOp.SUM)
-            dist.all_reduce(count_tensor, op=dist.ReduceOp.SUM)
-
-        center = representation_sum / count_tensor
-        if self.center_eps > 0.0:
-            small = center.abs() < self.center_eps
-            center = center.clone()
-            center[small & (center >= 0)] = self.center_eps
-            center[small & (center < 0)] = -self.center_eps
-        self.center = center.detach()
-
-    def _compute_distance(self, z: torch.Tensor) -> torch.Tensor:
-        if not self.center_initialized:
-            raise RuntimeError("SVDD center has not been initialized.")
-        return torch.sum((z - self.center) ** 2, dim=1)
-
-    def _network_regularization(self) -> torch.Tensor:
-        weights = [
-            parameter
-            for parameter in self.encoder.parameters()
-            if parameter.requires_grad and parameter.ndim > 1
-        ]
-        if not weights or self.network_weight_decay == 0.0:
-            return self.radius.new_zeros(())
-        squared_norm = torch.stack([weight.square().sum() for weight in weights]).sum()
-        return 0.5 * self.network_weight_decay * squared_norm
+        The network runs in eval mode over the first ``center_max_batches`` batches, or
+        every batch when it is None; iterating the loader draws once from its shuffler.
+        """
+        was_training = self.training
+        self.eval()
+        total, count = 0.0, 0
+        for batch in islice(train_dataloader, self.hparams.center_max_batches):
+            z = self(self._prepare_input(batch).to(self.device))
+            total, count = total + z.sum(dim=0), count + z.shape[0]
+        self.center = _away_from_zero(total / count, self.hparams.center_eps)
+        self.train(was_training)
 
     def model_step(self, batch) -> dict[str, torch.Tensor]:
-        x = self._prepare_input(batch)
-        z = self.forward(x)
-        ascore = self._compute_distance(z)
-        if ascore.ndim != 1:
-            raise ValueError(f"Expected per-event ascores, got {tuple(ascore.shape)}.")
-
-        data_loss = self.loss(
-            distances=ascore,
-            radius=self.radius if self.objective == "soft_boundary" else None,
-        )
-        regularization = self._network_regularization()
-        loss_mean = self._add_hgq_loss(data_loss.mean() + regularization)
-
-        if self.training and self.objective == "soft_boundary":
-            self._training_distances.append(ascore.detach().cpu())
-
-        with torch.no_grad():
-            operational_ascore = self.compute_operational_ascore(ascore)
-            q50, q99 = self.compute_score_quantiles(ascore)
-            z_squared = torch.square(z).sum(dim=1).mean().item()
-            center_norm = torch.square(self.center).sum().item()
-
+        if not self.center_initialized:
+            raise RuntimeError("The centre is unset: fit first, or load a state.")
+        z = self(self._prepare_input(batch))
+        distance = _squared_distance(z, self.center)
+        data_loss = self._data_loss(distance)
+        weight_decay = self._weight_decay()
+        loss = self._add_hgq_loss(data_loss.mean() + weight_decay)
+        ascore = distance.detach()
         return {
-            "loss": loss_mean,
-            "loss/mean": loss_mean,
+            "loss": loss,
+            "loss/mean": loss.detach(),
             "loss/distance_raw/mean": ascore.mean(),
-            "loss/reg_scaled/mean": regularization,
-            "ascore/operational": operational_ascore,
+            "loss/reg_scaled/mean": weight_decay.detach(),
+            **self._diagnostics(z.detach(), ascore),
+            "loss/full": data_loss.detach(),
+            "ascore/full": ascore,
+            "fit/full": ascore / z.shape[1],
+        }
+
+    def _data_loss(self, distance: torch.Tensor) -> torch.Tensor:
+        if self.objective == "one_class":
+            return distance
+        return soft_boundary_loss(distance, self.radius, self.hparams.nu)
+
+    def _weight_decay(self) -> torch.Tensor:
+        """Return (λ/2) Σ_l ||W^l||_F², the weight decay of the encoder."""
+        squares = sum(p.pow(2).sum() for p in self.encoder.parameters())
+        return 0.5 * self.hparams.network_weight_decay * squares
+
+    def _diagnostics(self, z: torch.Tensor, ascore: torch.Tensor) -> dict:
+        q50, q99 = self.compute_score_quantiles(ascore)
+        return {
+            "ascore/operational": self.compute_operational_ascore(ascore),
             "ascore/q50": q50,
             "ascore/q99": q99,
-            "z_squared": z_squared,
-            "center_norm": center_norm,
-            "radius": self.radius.detach(),
-            "loss/full": data_loss.detach(),
-            "ascore/full": ascore.detach(),
-            # Per latent coordinate, since the squared distance sums over them.
-            "fit/full": (ascore / z.shape[1]).detach(),
+            "z_squared": (z**2).sum(dim=1).mean(),
+            "center_norm": self.center.norm(),
+            "radius": self.radius.clone(),
         }
 
-    def on_train_epoch_end(self) -> None:
-        if (
-            self.objective == "soft_boundary"
-            and self.current_epoch >= self.radius_warmup_epochs
-            and self._training_distances
-        ):
-            local_distances = torch.cat(self._training_distances)
-            gathered = [local_distances]
-            distributed = dist.is_available() and dist.is_initialized()
-            if distributed:
-                gathered_objects = [None] * dist.get_world_size()
-                dist.all_gather_object(gathered_objects, local_distances)
-                gathered = gathered_objects
-            if not distributed or dist.get_rank() == 0:
-                all_distances = torch.cat(gathered)
-                new_radius = torch.quantile(
-                    torch.sqrt(all_distances), 1.0 - self.loss.nu
-                ).to(self.radius.device)
-                self.radius.copy_(new_radius)
-            if distributed:
-                dist.broadcast(self.radius, src=0)
-
-        self._training_distances.clear()
-        super().on_train_epoch_end()
+    def on_train_batch_end(self, outputs, batch, batch_idx) -> None:
+        super().on_train_batch_end(outputs, batch, batch_idx)
+        warm = self.current_epoch >= self.hparams.radius_warmup_epochs
+        if self.objective == "soft_boundary" and warm:
+            # For fixed W, eq. 3 is minimised at the (1 - ν) quantile of the distances
+            # (Prop. 4); the authors' code solves it on each batch after its step.
+            radii = outputs["ascore/full"].sqrt()
+            self.radius.copy_(torch.quantile(radii, 1.0 - self.hparams.nu))
 
     def outlog(self, outdict: dict) -> dict:
-        return {
-            "loss": outdict.get("loss"),
-            "loss_mean": outdict.get("loss/mean"),
-            "loss_distance_raw": outdict.get("loss/distance_raw/mean"),
-            "loss_reg_scaled": outdict.get("loss/reg_scaled/mean"),
-            "ascore_operational": outdict.get("ascore/operational"),
-            "ascore_q50": outdict.get("ascore/q50"),
-            "ascore_q99": outdict.get("ascore/q99"),
-            "z_squared": outdict.get("z_squared"),
-            "center_norm": outdict.get("center_norm"),
-            "radius": outdict.get("radius"),
-        }
+        return {name: outdict.get(key) for name, key in _LOGGED.items()}
 
-    def _load_checkpoint(self) -> None:
-        """Load matching weights from an SVDD or encoder-compatible checkpoint."""
-        checkpoint = torch.load(self.ckpt_path, map_location="cpu", weights_only=False)
-        state_dict = checkpoint["state_dict"]
-        if "center" in state_dict:
-            self.center = state_dict["center"].detach().clone()
-        self.load_state_dict(state_dict, strict=False)
+    def _load_from_state_dict(self, state_dict, prefix, *args, **kwargs) -> None:
+        stored = state_dict.get(f"{prefix}center")
+        if stored is not None:
+            self.center = torch.empty_like(stored, device=self.center.device)
+        super()._load_from_state_dict(state_dict, prefix, *args, **kwargs)
 
-    def _load_from_state_dict(
-        self,
-        state_dict,
-        prefix,
-        local_metadata,
-        strict,
-        missing_keys,
-        unexpected_keys,
-        error_msgs,
-    ) -> None:
-        center_key = prefix + "center"
-        if (
-            center_key in state_dict
-            and self.center.shape != state_dict[center_key].shape
-        ):
-            self.center = torch.empty_like(state_dict[center_key])
-        super()._load_from_state_dict(
-            state_dict,
-            prefix,
-            local_metadata,
-            strict,
-            missing_keys,
-            unexpected_keys,
-            error_msgs,
-        )
+    def _load_checkpoint(self, path: str) -> None:
+        checkpoint = torch.load(path, map_location="cpu", weights_only=False)
+        self.load_state_dict(checkpoint["state_dict"], strict=False)
 
     def _add_hgq_loss(self, loss: torch.Tensor) -> torch.Tensor:
-        if hasattr(self.encoder, "losses") and len(self.encoder.losses) > 0:
-            extra = torch.stack(
-                [
-                    torch.as_tensor(value, device=loss.device)
-                    for value in self.encoder.losses
-                ]
-            ).sum()
-            return loss + extra
-        return loss
+        """Add the quantisation losses that an HGQ encoder collects, if any."""
+        extra = list(getattr(self.encoder, "losses", []))
+        return loss + torch.stack(extra).sum() if extra else loss
 
     def _check_hparams(self) -> None:
-        hp = self.hparams
         for failed, message in _HPARAM_CHECKS:
-            if failed(hp):
+            if failed(self.hparams):
                 raise ValueError(message)
-        if hp.soft_boundary and hp.objective not in (None, "soft_boundary"):
-            raise ValueError(
-                "soft_boundary=True conflicts with objective="
-                f"{hp.objective!r}; use objective='soft_boundary'."
-            )

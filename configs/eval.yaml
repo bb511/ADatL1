@@ -25,6 +25,12 @@ drop_unpaired: false
 # cchamber_typical sets the light tunnel's.
 scores_dir: ${paths.root_dir}/lattices/${hydra:runtime.choices.eval}
 out_dir: ${paths.log_dir}/eval/${lattice}
+# Whether a run whose four files in <out_dir>/runs/<run>/ are complete is left out of
+# the replay, its run.json read back for the selection: a rerun after a time limit
+# replays the open runs alone. Complete means that run.json, written last, names this
+# lattice, run, dump, typical set and number of epochs; nothing else is compared, so an
+# out_dir written under another eval config or other sets needs resume=false.
+resume: true
 # Replaces data.data_dir of every run's configuration; null keeps it.
 data_dir: null
 # Replaces every run's signals and nulls by those of data/<sets>.yaml; null keeps them.
@@ -35,4 +41,8 @@ sets: null
 # same names to <lattice>_eval.
 typical: null
 workers: 1
+# The torch threads of each worker when workers > 1 (one worker replays in this process
+# on one thread). One thread is the reference: more may change float32 results in the
+# last bits, the class of difference accepted between platforms on 26 Oct 2026.
+worker_threads: 1
 tracking_uri: file:${paths.log_dir}/mlflow/mlruns

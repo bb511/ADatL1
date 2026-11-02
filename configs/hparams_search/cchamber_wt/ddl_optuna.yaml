@@ -1,0 +1,35 @@
+# @package _global_
+
+# The DDL lattice space; the ladders are the same in every domain, the widths per
+# domain. beta_end is the end of the schedule at the reference T of 1000, to which
+# src/algorithms/components/ddl.py scales it, so the noise reached at the last step
+# depends little on T: alpha_bar_T is about 0.08 at 5e-3 and below 1e-10 at 5e-2.
+
+defaults:
+  - override /hydra/sweeper: optuna
+  - override /hydra/sweeper/sampler: random
+
+hydra:
+  mode: "MULTIRUN"
+  sweeper:
+    _target_: hydra_plugins.hydra_optuna_sweeper.optuna_sweeper.OptunaSweeper
+    study_name: pool
+    n_jobs: 1
+    # Placeholder: a dump-only run reports the worst value of each direction.
+    direction: minimize
+    n_trials: 50
+    storage: sqlite:///logs/optuna/cchamber_wt/ddl_pool.db?timeout=600
+    params:
+      # Ceiling 5e-3: at 1e-2 the top corner (width 128, depth 3, no clip, SiLU) collapsed to
+      # one constant score after 46-76 epochs on both tunnels (2 Nov 2026).
+      algorithm.optimizer.lr: tag(log, interval(3e-5, 5e-3))
+      trainer.gradient_clip_val: choice(0.0, 0.5, 1.0, 2.0)
+      algorithm.n_steps: choice(100, 200, 500, 1000)
+      algorithm.beta_end: tag(log, interval(5e-3, 5e-2))
+      # n_score_steps stays at the experiment's 10: it changes the score alone, and a
+      # sampled value would shift Q'' between runs (1 Nov 2026).
+      algorithm.denoiser.time_dim: choice(16, 32, 64)
+      algorithm.denoiser.width: choice(32, 64, 128)
+      algorithm.denoiser.depth: choice(1, 2, 3)
+      algorithm.denoiser.dropout: choice(0.0, 0.25, 0.5)
+      algorithm.denoiser.activation: choice(relu, gelu, silu)

@@ -1,41 +1,51 @@
 # @package _global_
 
+# Train and dump only; selection and evaluation run offline.
+
 defaults:
   - /cap: provisional
-  - override /data: cifar10
-  - override /algorithm: image_dte
+  - override /data: cchamber_wt
+  - override /algorithm: ddl
   - override /callbacks: dump
   - override /trainer: cpu
   - override /logger: mlflow
 
 seed: 123
-tags: ["dte", "pool"]
+tags: ["ddl", "cchamber_wt", "pool"]
 
-experiment_name: cifar10_dte_pool
+experiment_name: cchamber_wt_ddl_pool
 run_name: ${short_hash:${hydra:runtime.output_dir},12}
 
 data:
-  batch_size: 256
   max_val_batches: -1
 
 trainer:
   gradient_clip_algorithm: norm
   gradient_clip_val: 0.0
   min_epochs: 1
-  max_epochs: 200
+  max_epochs: 150
   # The full sanity pass is the untrained state the dump stores; no checkpoint is kept.
   num_sanity_val_steps: -1
   enable_checkpointing: false
 
 test: false
 
+# Every default lies inside hparams_search/cchamber_wt/ddl_optuna.yaml.
 algorithm:
   target_rate: 0.01
   base_rate: null
+  in_dim: 10
 
-  predictor:
-    in_channels: 3
-    input_size: [32, 32]
+  denoiser:
+    width: 64
+    depth: 2
+    time_dim: 32
+    dropout: 0.0
+    activation: silu
+
+  n_steps: 100
+  beta_end: 0.02
+  n_score_steps: 10
 
   optimizer:
     _partial_: true
@@ -44,3 +54,8 @@ algorithm:
     weight_decay: 1.0e-4
     betas: [0.9, 0.999]
     eps: 1e-8
+
+# Only the normal sets are stored; the regimes are rescored from the weights.
+callbacks:
+  score_dump:
+    stored_sets: [normal, reference_normal]

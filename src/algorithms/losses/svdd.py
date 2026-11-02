@@ -1,42 +1,20 @@
+"""Per-event data terms of the Deep SVDD objectives.
+
+Ruff et al., "Deep One-Class Classification", ICML 2018, PMLR 80:4393-4402, eqs. 3 and
+4. The one-class term is the squared distance itself. The weight-decay term of both
+objectives reads the network, so the module adds it.
+"""
+
 import torch
-from torch import nn
 
 
-class SVDDLoss(nn.Module):
-    """Stateless Deep SVDD data term.
+def soft_boundary_loss(
+    distances: torch.Tensor, radius: torch.Tensor, nu: float
+) -> torch.Tensor:
+    """Return R² + max(0, d - R²) / ν per event; the batch mean is eq. 3's term.
 
-    Center/radius lifecycle management belongs to the Lightning module. Network
-    regularization is computed from encoder parameters, never latent vectors.
+    ``distances`` holds the squared distances d to the centre, shape (batch,). The
+    radius enters as a constant, since the quantile rule sets it, not the gradient.
     """
-
-    def __init__(self, objective: str = "one_class", nu: float = 0.1):
-        super().__init__()
-        if objective not in {"one_class", "soft_boundary"}:
-            raise ValueError(
-                "objective must be 'one_class' or 'soft_boundary', "
-                f"got {objective!r}."
-            )
-        if not (0.0 < nu <= 1.0):
-            raise ValueError(f"nu must satisfy 0 < nu <= 1, got {nu}.")
-        self.objective = objective
-        self.nu = float(nu)
-
-    def forward(
-        self,
-        distances: torch.Tensor,
-        radius: torch.Tensor | None = None,
-    ) -> torch.Tensor:
-        """Return the per-event one-class or soft-boundary data term."""
-        if distances.ndim != 1:
-            raise ValueError(
-                f"distances must have shape [B], got shape {tuple(distances.shape)}"
-            )
-        if self.objective == "one_class":
-            return distances
-        if radius is None or radius.ndim != 0:
-            raise ValueError("soft_boundary requires a scalar radius.")
-
-        radius_squared = radius.square()
-        return (
-            radius_squared + torch.clamp(distances - radius_squared, min=0.0) / self.nu
-        )
+    squared_radius = radius.detach() ** 2
+    return squared_radius + torch.relu(distances - squared_radius) / nu

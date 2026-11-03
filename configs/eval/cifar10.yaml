@@ -8,10 +8,11 @@ defaults:
   - _self_
 
 # The bank's beta_fix, declared on CIFAR-10's own lattices by the light tunnel's rule
-# (scripts/analysis/cap_beta_fix.py over the five pool lattices; 08_tests.md, section R,
-# Part 3); a null entry makes a bank callback raise at its first computation.
+# (scripts/analysis/cap_beta_fix.py over the roster's five lattices, AE, VAE, SVDD,
+# RealNVP and DDL; 08_tests.md 6.10, recorded 3 Nov 2026); a null entry makes a bank
+# callback raise at its first computation.
 cap_bank:
-  beta_fix: { std: 0.7153, rank: 3.0932, sq: 3.8071, disp: 2.1391 }
+  beta_fix: { std: 0.9929, rank: 3.0932, sq: 4.6738, disp: 2.1417 }
 
 evaluation:
   evaluator:

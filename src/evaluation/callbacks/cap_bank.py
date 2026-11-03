@@ -2,6 +2,7 @@ import math
 from pathlib import Path
 
 import torch
+from omegaconf import OmegaConf
 from pytorch_lightning.callbacks import Callback
 
 from src.callbacks.components.utils import disjoint_rows, row_subset
@@ -10,7 +11,9 @@ from src.evaluation.callbacks import utils
 from src.evaluation.callbacks.components.cap.bank import build_couplings
 from src.evaluation.callbacks.components.cap.metric import CAPBank
 from src.evaluation.callbacks.components.cap.representation import (
+    READS_MASK,
     REPRESENTATIONS,
+    UNSTANDARDISED,
     represent,
 )
 
@@ -19,13 +22,14 @@ from src.evaluation.callbacks.components.cap.representation import (
 FIT_SET = "train"
 
 
-def _inputs(batch) -> torch.Tensor:
-    """The inputs of a batch, zero wherever a data mask marks them padded."""
+def _inputs(batch, padded: float = 0.0) -> torch.Tensor:
+    """The inputs of a batch, `padded` wherever a data mask marks them padded."""
     view = unpack_batch(batch)
     x = view.x.detach().cpu()
     if view.mask is None:
         return x
-    return torch.where(view.mask.detach().cpu().bool(), x, torch.zeros_like(x))
+    fill = torch.full_like(x, padded)
+    return torch.where(view.mask.detach().cpu().bool(), x, fill)
 
 
 class CAPBankCallback(Callback):
@@ -48,7 +52,8 @@ class CAPBankCallback(Callback):
     at every checkpoint, and so are the reference's where it is dataset_2. A reference
     that is dataset_1 takes the next max_rows_1 rows of the same permutation, disjoint
     from X1's, and so needs max_rows_1 at most half of dataset_1's rows. Inputs with a
-    data mask (the L1AD data) are zero wherever it marks them padded.
+    data mask (the L1AD data) are zero wherever it marks them padded, NaN for a
+    representation that reads the mask (``representation.READS_MASK``).
     Nothing is plotted.
 
     :param output_name: Name of the model output used as anomaly score.
@@ -60,10 +65,11 @@ class CAPBankCallback(Callback):
     :param name: Callback name, the prefix of the recorded scalars.
     :param representation: Name in ``representation.REPRESENTATIONS`` of the fixed map
         from the inputs to the coordinates the couplings read; the identity flattens
-        them. Every other representation is standardised on the inputs of the
-        dataloader named 'train', which the dump stage appends when
-        ``extra_sets.train`` is set, otherwise on X1's; its name, parameters and fit
-        set enter the coupling cache's hash and label.
+        them. Every representation outside ``representation.UNSTANDARDISED`` is
+        standardised on the inputs of the dataloader named 'train', which the dump
+        stage appends when ``extra_sets.train`` is set, otherwise on X1's. The name,
+        parameters and fit set (None for an unstandardised one) of every
+        representation but the identity enter the coupling cache's hash and label.
     :param representation_params: Keyword arguments of the representation.
     :param x2_blocks: With k, dataset_2's rows are read as k equal consecutive blocks,
         each one ot subsample (the members of a pool, each a changed copy of X1), as
@@ -94,7 +100,9 @@ class CAPBankCallback(Callback):
         if representation not in REPRESENTATIONS:
             raise ValueError(f"Unknown representation '{representation}'.")
         self.representation = representation
-        self.representation_params = dict(representation_params or {})
+        params = OmegaConf.create(representation_params or {})
+        self.representation_params = OmegaConf.to_container(params, resolve=True)
+        self.padded = math.nan if representation in READS_MASK else 0.0
         self.x2_blocks = x2_blocks
         self.output_name = output_name
         self.datasets, self.reference = (dataset_1, dataset_2), reference
@@ -122,7 +130,7 @@ class CAPBankCallback(Callback):
             score = outputs[self.output_name].detach().reshape(-1)
             self.scores[dataset_name].append(score)
         if dataset_name in self.inputs:
-            self.inputs[dataset_name].append(_inputs(batch))
+            self.inputs[dataset_name].append(_inputs(batch, self.padded))
 
     def on_test_epoch_end(self, trainer, pl_module):
         """Compute the bank for the current checkpoint and record every value."""
@@ -164,7 +172,7 @@ class CAPBankCallback(Callback):
     def _coupling_sets(self, loaders: list[str]) -> tuple[str, ...]:
         """Return the sets whose inputs the couplings read, the fit set included."""
         sets = (*self.datasets, self.reference)
-        if self.representation != "identity" and FIT_SET in loaders:
+        if self.representation not in UNSTANDARDISED and FIT_SET in loaders:
             return (*sets, FIT_SET)
         return sets
 
@@ -181,6 +189,7 @@ class CAPBankCallback(Callback):
         represented = represent(self.representation, params, sets, inputs[fit])
         if self.representation == "identity":
             return represented, None
+        fit = None if self.representation in UNSTANDARDISED else fit
         return represented, {"name": self.representation, "params": params, "fit": fit}
 
     def _build_couplings(self, trainer) -> dict:

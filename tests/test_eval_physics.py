@@ -83,6 +83,9 @@ ENTROPY_ROWS = 100
 BANK_ROWS = 20
 TOY_BETA_FIX = {"std": 1.0, "rank": 3.0, "sq": 4.0, "disp": 2.0}
 CAPS = {"seed": 0, "val": {"normal": 50, SN: 60}, "test": {"normal": 60}}
+# The toy keeps every row unless a test caps them, and its inputs are not the record's
+# 39 x 3 layout, so its bank reads the identity rather than physics.yaml's l1_summary.
+UNCAPPED = {"seed": 0, "val": {"normal": None, SN: None}, "test": {"normal": None}}
 
 
 def physics_sets(seed: int = 0) -> dict:
@@ -157,10 +160,11 @@ def _dump(path: Path) -> ScoreDumpCallback:
 def _stage_config(root: Path, row_caps: dict | None = None):
     cfg = _compose("physics", f"rescored_dir={root / 'rescored'}")
     with open_dict(cfg):
-        if row_caps is not None:
-            cfg.evaluation.evaluator.row_caps = row_caps
+        cfg.evaluation.evaluator.row_caps = row_caps or UNCAPPED
         cfg.cap_bank.beta_fix = TOY_BETA_FIX
-        cfg.evaluation.evaluator.dump_callbacks.cap_bank_sn.max_rows_1 = BANK_ROWS
+        bank = cfg.evaluation.evaluator.dump_callbacks.cap_bank_sn
+        bank.max_rows_1, bank.max_rows_2 = BANK_ROWS, None
+        bank.representation, bank.representation_params = "identity", None
         train = cfg.evaluation.evaluator.extra_sets.train
         train.max_rows, train.batch_size = ENTROPY_ROWS, BATCH
     return cfg

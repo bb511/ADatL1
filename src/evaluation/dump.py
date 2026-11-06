@@ -30,6 +30,7 @@ from src.callbacks.components.selection import (
 )
 from src.callbacks.components.utils import row_subset
 from src.callbacks.score_dump import SDS_PARAMS
+from src.callbacks.sds import SDS_PUSH_SCALE
 from src.data.utils import unpack_batch
 from src.evaluation.callbacks.sds import PREFIXES
 from src.evaluation.components.pairing import hyperpoint
@@ -97,11 +98,16 @@ def _experiment_id(client: MlflowClient, name: str) -> str:
 
 def _check_stored_sds(meta: dict, sds: dict) -> None:
     """Raise ValueError where the dump stores the scores of pseudo-sets that ``sds``
-    would build otherwise."""
+    would build otherwise.
+
+    ``meta.pt`` holds no push scale, since every dump stores its pseudo-sets at the
+    default: only an entry of ``sds`` at the default, or without a scale, matches them.
+    """
     if "sds" not in meta:
         return
     stored = {k: meta[f"sds_{k}"] for k in SDS_PARAMS}
-    if stored != {k: sds[k] for k in SDS_PARAMS}:
+    same_rows = stored == {k: sds[k] for k in SDS_PARAMS}
+    if not same_rows or sds.get("push_scale", SDS_PUSH_SCALE) != SDS_PUSH_SCALE:
         raise ValueError(
             f"The dump stores the SDS pseudo-sets of {stored}, the evaluation would "
             f"build those of {dict(sds)}."
@@ -117,11 +123,17 @@ def _rates(callbacks: dict) -> list[float]:
     return sorted(map(float, rates))
 
 
+def _spec_sds(x: torch.Tensor, mask: torch.Tensor | None, spec: dict) -> dict:
+    """``cached_sds`` of the rows x under one entry of ``extra_sets``."""
+    push_scale = spec.get("push_scale", SDS_PUSH_SCALE)
+    return cached_sds(x, spec["max_rows"], spec["row_seed"], mask, push_scale)
+
+
 def _sds_val_sets(normal: DataLoader, spec: dict) -> dict:
     """The SDS pseudo-sets of the inputs of validation normal, as ``SDSCallback`` with
     ``source="normal"`` builds them, under the names its mirror reads."""
     view, prefix = loader_inputs(normal), PREFIXES["normal"]
-    sets = cached_sds(view.x, spec["max_rows"], spec["row_seed"], view.mask)
+    sets = _spec_sds(view.x, view.mask, spec)
     return {name.replace("sds", prefix, 1): x for name, x in sets.items()}
 
 
@@ -246,8 +258,7 @@ class RunEvaluation:
         pseudo, sds = {}, self.extra_sets.get("sds")
         if sds:
             _check_stored_sds(self.meta, sds)
-            rows = sds["max_rows"], sds["row_seed"]
-            pseudo |= cached_sds(train.x, *rows, train.mask)
+            pseudo |= _spec_sds(train.x, train.mask, sds)
         if self.extra_sets.get("sds_val"):
             pseudo |= _sds_val_sets(val["normal"], self.extra_sets["sds_val"])
         return pseudo
@@ -629,7 +640,7 @@ def _prebuild_sds(datamodule: LightningDataModule, extra: dict) -> None:
     datamodule.setup("fit")
     train = unpack_batch(datamodule.data_train.tensors)
     if sds:
-        cached_sds(train.x, sds["max_rows"], sds["row_seed"], train.mask)
+        _spec_sds(train.x, train.mask, sds)
     if sds_val:
         _sds_val_sets(datamodule.val_dataloader()["normal"], sds_val)
 

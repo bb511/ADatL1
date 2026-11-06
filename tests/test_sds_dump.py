@@ -2,10 +2,13 @@ import json
 import re
 
 import pytest
+import torch
 import yaml
 from omegaconf import OmegaConf
 
 from src.callbacks.sds import SDS_SETS
+from src.evaluation.components import rebuild
+from src.evaluation.dump import _check_stored_sds
 from src.utils.omegaconf import register_resolvers
 from tests.test_eval_stage import (
     SELECTION_TABLES,
@@ -20,6 +23,7 @@ from tests.test_score_dump import PASSES, assert_identical, dump_callback, fit, 
 # As extra_sets.sds of configs/eval/cifar10.yaml and the image DDL experiments.
 SDS = {"max_rows": 10000, "row_seed": 0}
 RUNS = ["run_a", "run_b"]
+PUSH_SCALE = "+evaluation.evaluator.extra_sets.sds.push_scale={}"
 
 
 @pytest.fixture(scope="module", autouse=True)
@@ -93,3 +97,38 @@ def test_stored_sds_scores_of_other_pseudo_sets_raise(sds_lattices, tmp_path):
     with pytest.raises(ValueError, match=re.escape(message)):
         override = "evaluation.evaluator.extra_sets.sds.row_seed=1"
         _replayed(sds_lattices, tmp_path, "stored", override)
+
+
+def test_stored_sds_scores_at_another_push_scale_raise(sds_lattices, tmp_path):
+    for lattice in ("stored", "stripped"):
+        with pytest.raises(ValueError, match="push_scale"):
+            _replayed(sds_lattices, tmp_path, lattice, PUSH_SCALE.format(2))
+
+
+def test_a_meta_without_a_push_scale_passes_the_check(sds_lattices):
+    meta = load(sds_lattices / "stored" / "toy" / "run_a" / "meta.pt")
+    assert not [key for key in meta if "scale" in key]
+    _check_stored_sds(meta, SDS)
+    _check_stored_sds(meta, {**SDS, "push_scale": 1})
+    with pytest.raises(ValueError, match="push_scale"):
+        _check_stored_sds(meta, {**SDS, "push_scale": 0.5})
+
+
+def test_rescored_sds_replays_at_another_push_scale(sds_lattices, tmp_path):
+    default = _replayed(sds_lattices, tmp_path / "default", "rescored")
+    pushed = _replayed(
+        sds_lattices, tmp_path / "pushed", "rescored", PUSH_SCALE.format(0.5)
+    )
+    assert default.keys() == pushed.keys()
+    assert default["runs/run_a/val.csv"] != pushed["runs/run_a/val.csv"]
+
+
+def test_the_sds_cache_key_carries_a_scale_other_than_the_default(monkeypatch):
+    monkeypatch.setattr(rebuild, "SDS_CACHE", {})
+    x = torch.randn(64, 3, generator=torch.Generator().manual_seed(0))
+    default = rebuild.cached_sds(x, 100, 0)
+    assert rebuild.cached_sds(x, 100, 0, None, 1) is default
+    pushed = rebuild.cached_sds(x, 100, 0, None, 2.0)
+    assert sorted(map(len, rebuild.SDS_CACHE)) == [5, 6]
+    assert torch.equal(default["sds_targets"], pushed["sds_targets"])
+    assert not torch.equal(default["sds_outliers"], pushed["sds_outliers"])

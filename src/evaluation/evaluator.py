@@ -68,8 +68,8 @@ class Evaluator:
     :param extra_sets: The sets the validation pass of the dump path appends to the
         validation sets: 'aux' (bool), the three auxiliary sets; 'train' (bool, or
         {max_rows, row_seed, batch_size} for a seeded subset of rows), the training
-        set; 'sds' and 'sds_val' ({max_rows, row_seed} or None), the SDS pseudo-sets
-        of the training rows and of validation normal.
+        set; 'sds' and 'sds_val' ({max_rows, row_seed, optional push_scale} or None),
+        the SDS pseudo-sets of the training rows and of validation normal.
     :param selection: The registry of strategies of the dump path ('criteria',
         'q_sec', 'labelled', 'efficiency', as in configs/eval/<domain>.yaml).
     :param typical: A stored validation set that the dump path serves as 'normal' in

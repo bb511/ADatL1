@@ -13,7 +13,7 @@ from torch.utils.data import BatchSampler, DataLoader, SequentialSampler, Tensor
 
 from src.callbacks.components.utils import row_subset
 from src.callbacks.score_dump import _layout
-from src.callbacks.sds import sds_inputs
+from src.callbacks.sds import SDS_PUSH_SCALE, sds_inputs
 from src.data.utils import BatchView, unpack_batch
 from src.evaluation.callbacks.efficiency import AnomalyEfficiencyCallback
 
@@ -87,14 +87,20 @@ def _digest(tensor: torch.Tensor | None) -> str:
 
 
 def cached_sds(
-    x: torch.Tensor, max_rows: int, row_seed: int, mask: torch.Tensor | None = None
+    x: torch.Tensor,
+    max_rows: int,
+    row_seed: int,
+    mask: torch.Tensor | None = None,
+    push_scale: float = SDS_PUSH_SCALE,
 ) -> dict:
     """``sds_inputs`` of the rows x and their data mask, through ``SDS_CACHE``."""
     key = (_digest(x), _digest(mask), tuple(x.shape), max_rows, row_seed)
+    if push_scale != SDS_PUSH_SCALE:
+        key += (push_scale,)
     if key not in SDS_CACHE:
         if len(SDS_CACHE) >= SDS_CACHE_SIZE:
             SDS_CACHE.clear()
-        SDS_CACHE[key] = sds_inputs(x, max_rows, row_seed, mask)
+        SDS_CACHE[key] = sds_inputs(x, max_rows, row_seed, mask, push_scale)
     return SDS_CACHE[key]
 
 

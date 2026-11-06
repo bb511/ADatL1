@@ -175,6 +175,25 @@ def test_sds_pseudo_sets_are_unchanged_and_return_their_source_rows():
         np.testing.assert_allclose(direction, x[rows] - centre, atol=1e-9)
 
 
+def test_sds_default_push_scale_is_the_unchanged_outliers():
+    x = np.random.default_rng(3).normal(size=(60, 5))
+    expected = reference_pseudo_sets(x)
+    for scale in (sds.SDS_PUSH_SCALE, 1):
+        pushed = sds.sds_pseudo_sets(x, push_scale=scale)
+        assert all(np.array_equal(a, b) for a, b in zip(pushed, expected))
+
+
+def test_sds_push_scale_moves_the_outliers_alone():
+    x = np.random.default_rng(3).normal(size=(60, 5))
+    once = sds.sds_pseudo_sets(x, return_rows=True)
+    twice = sds.sds_pseudo_sets(x, return_rows=True, push_scale=2.0)
+    assert np.array_equal(once[0], twice[0])
+    assert np.array_equal(once[2], twice[2]) and np.array_equal(once[3], twice[3])
+    assert len(once[3]) > 0
+    source = x[once[3]]
+    np.testing.assert_allclose(twice[1] - source, 2 * (once[1] - source), rtol=1e-12)
+
+
 def test_sds_error_counts_ties_with_the_weight():
     x = circle()
     targets, outliers = sds.sds_pseudo_sets(x)

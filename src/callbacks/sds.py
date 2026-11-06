@@ -26,6 +26,10 @@ from src.data.utils import unpack_batch
 # sds.m's default edge threshold; the Python port
 # bzantium/OCSVM-hyperparameter-selection defaults to 0.01 with a strict inequality.
 SDS_THRESHOLD = 0.1
+# The push of the pseudo-outliers, in units of sds.m's shift. 1 is the registered
+# reference of ANCAP (08_tests.md, block of 6 Nov 03:14); no other value is used without
+# a recorded amendment.
+SDS_PUSH_SCALE = 1.0
 SOURCES = ("train", "normal")
 SDS_SETS = ("sds_targets", "sds_outliers")
 
@@ -67,14 +71,19 @@ def _pseudo_outliers(
     unit: np.ndarray,
     distances: np.ndarray,
     threshold: float,
+    push_scale: float,
 ) -> tuple[np.ndarray, np.ndarray]:
     edge = _edge_patterns(v, threshold)
-    shift = distances[edge].mean(axis=1).mean()
+    shift = push_scale * distances[edge].mean(axis=1).mean()
     return x[edge] + unit[edge] * shift, np.flatnonzero(edge)
 
 
 def sds_pseudo_sets(
-    x, k: int | None = None, threshold: float = SDS_THRESHOLD, return_rows: bool = False
+    x,
+    k: int | None = None,
+    threshold: float = SDS_THRESHOLD,
+    return_rows: bool = False,
+    push_scale: float = SDS_PUSH_SCALE,
 ) -> tuple[np.ndarray, ...]:
     """Pseudo-targets and pseudo-outliers of self-adaptive data shifting, as sds.m.
 
@@ -82,12 +91,12 @@ def sds_pseudo_sets(
     k = ceil(5 log10 n) neighbours: v_ij = (x_i - x_j) / norm(x_i - x_j) and
     n_i = sum_j v_ij, and the row is an edge pattern when the fraction of j with
     v_ij . n_i >= 0 is at least 1 - threshold. Pseudo-outliers shift every edge pattern
-    along n_i / norm(n_i) by the mean, over the edge patterns, of their mean neighbour
-    distance. Pseudo-targets shift every row along -n_i / norm(n_i) by the smallest
-    positive projection of its neighbour offsets on that direction. The generation is
-    deterministic. Return (targets, outliers), (n_t, d) and (n_o, d), followed, with
-    ``return_rows``, by the index in x of the row each was shifted from, (n_t,) and
-    (n_o,).
+    along n_i / norm(n_i) by ``push_scale`` times the mean, over the edge patterns, of
+    their mean neighbour distance. Pseudo-targets shift every row along
+    -n_i / norm(n_i) by the smallest positive projection of its neighbour offsets on
+    that direction. The generation is deterministic. Return (targets, outliers), (n_t,
+    d) and (n_o, d), followed, with ``return_rows``, by the index in x of the row each
+    was shifted from, (n_t,) and (n_o,).
     """
     x = np.asarray(x, dtype=np.float64)
     k = math.ceil(5 * math.log10(len(x))) if k is None else k
@@ -96,7 +105,9 @@ def sds_pseudo_sets(
     v = offsets / distances[:, :, None]
     unit = _unit_normals(v)
     targets, target_rows = _pseudo_targets(x, unit, offsets)
-    outliers, outlier_rows = _pseudo_outliers(x, v, unit, distances, threshold)
+    outliers, outlier_rows = _pseudo_outliers(
+        x, v, unit, distances, threshold, push_scale
+    )
     rows = (target_rows, outlier_rows) if return_rows else ()
     return targets, outliers, *rows
 
@@ -152,6 +163,7 @@ def sds_inputs(
     max_rows: int | None,
     row_seed: int,
     mask: torch.Tensor | None = None,
+    push_scale: float = SDS_PUSH_SCALE,
 ) -> dict[str, torch.Tensor]:
     """Pseudo-targets and pseudo-outliers of ``sds_pseudo_sets`` from the rows of x, (n,
     *s).
@@ -161,10 +173,13 @@ def sds_inputs(
     most ``max_rows`` are kept, drawn without replacement with ``row_seed``. Return
     ``sds_targets`` and ``sds_outliers``, (m, *s) each, in the dtype of x. With a data
     mask of the shape of x, every pseudo-point also takes the mask of the row it was
-    shifted from, under ``sds_targets_mask`` and ``sds_outliers_mask``.
+    shifted from, under ``sds_targets_mask`` and ``sds_outliers_mask``. ``push_scale``
+    scales the shift of the pseudo-outliers alone.
     """
     rows, masks = _distinct_rows(x, mask, max_rows, row_seed)
-    sets = sds_pseudo_sets(rows.double().numpy(), return_rows=masks is not None)
+    sets = sds_pseudo_sets(
+        rows.double().numpy(), return_rows=masks is not None, push_scale=push_scale
+    )
     inputs = {
         name: torch.from_numpy(points).to(x.dtype).reshape(-1, *x.shape[1:])
         for name, points in zip(SDS_SETS, sets)

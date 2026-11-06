@@ -32,7 +32,8 @@ With ``sds``, the pseudo-sets are those of ``src.callbacks.sds.sds_inputs`` over
 training inputs and their data mask, if any, each point with the mask of the row it was
 shifted from, as ``SDSCallback`` and the replay (``src/evaluation/dump.py``) build them;
 the replay serves their stored scores where ``max_rows`` and ``row_seed`` match its
-own, and raises otherwise.
+own and its ``push_scale`` is the default, at which every dump builds them, and raises
+otherwise.
 
 On data with a mask (the L1AD data), the i-th point of each auxiliary set takes the
 mask of the i-th training row that ``drawn_masks(mask, aux_size, aux_seed)`` draws and

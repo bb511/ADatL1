@@ -12,7 +12,7 @@
 # features), which makes both NaN. CAP and consistency (cap_sn_zb of training) are out.
 
 defaults:
-  - /cap: bank
+  - /cap: [bank, posterior]
   - _self_
 
 # The dumps sit under the name of the training data config.
@@ -114,6 +114,29 @@ evaluation:
         max_rows_1: 8000
         max_rows_2: 16000
         row_seed: 0
+      # ANCAP of normal against the single-neutrino gun, with no control; its reference,
+      # the SDS pseudo-outliers of the training rows, is the set that extra_sets.sds
+      # serves, so that it adds no model pass.
+      ancap:
+        _target_: src.evaluation.callbacks.threshold_posterior.ThresholdPosterior
+        output_name: ascore/full
+        dataset_1: normal
+        views:
+          sn: SingleNeutrino_E-10-gun
+        posterior_config: ${cap_posterior}
+        name: ancap
+      # The same against the pseudo-outliers of validation normal, which
+      # extra_sets.sds_val serves: a descriptor beside ancap (08_tests.md, 6 Nov 15:23,
+      # clause 3).
+      ancap_val:
+        _target_: src.evaluation.callbacks.threshold_posterior.ThresholdPosterior
+        output_name: ascore/full
+        dataset_1: normal
+        views:
+          sn: SingleNeutrino_E-10-gun
+        posterior_config: ${cap_posterior}
+        reference: sds_val_outliers
+        name: ancap_val
       # The operational score of normal, a diagnostic column beside Q'', the fit.
       ascore_operational:
         _target_: src.evaluation.callbacks.output.OutputCallback
@@ -185,7 +208,8 @@ evaluation:
 # The registry of strategies: column in val.csv, mode and MLflow keys per criterion, the
 # keys those the physics training logs.
 selection:
-  # The CAP bank enters no criterion: the reading takes its columns directly.
+  # The CAP bank enters no criterion: the reading takes its columns directly. ANCAP
+  # enters none until the rules of its pick-level reading are recorded.
   criteria:
     drift:
       column: thres_drift/drift_trate286_088064kHz

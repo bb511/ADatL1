@@ -36,6 +36,7 @@ from tests.test_eval_b9 import (
     _stage_config,
     _train,
 )
+from tests.test_eval_physics import SN, PhysicsDataModule, _dump, _module
 from tests.test_eval_stage import (
     SELECTION_TABLES,
     TOY_POSTERIOR,
@@ -96,6 +97,46 @@ REFERENCE_ONLY = [
     ),
     *(f"~selection.criteria.{n}" for n in "drift w1 npd rtm eag entropy sds".split()),
 ]
+# The reference of each ANCAP callback of eval=physics.
+PHYSICS_REFERENCES = {"ancap": REFERENCE, "ancap_val": "sds_val_outliers"}
+PHYSICS_VIEWS = {"sn": SN}
+RESCORED_VIEWS = f"+evaluation.evaluator.rescored_sets=[normal,{SN}]"
+# The ANCAP pass of eval=physics: the efficiency stays, since the tables index its
+# columns, and each pseudo-target set is cut to one row, since nothing reads it.
+PHYSICS_REDUCED = [
+    "tracking_uri=null",
+    "evaluation.evaluator.extra_sets.aux=false",
+    "evaluation.evaluator.extra_sets.train=false",
+    "+evaluation.evaluator.row_caps.val.sds_targets=1",
+    "+evaluation.evaluator.row_caps.val.sds_val_targets=1",
+    "evaluation.evaluator.dump_callbacks.score_writer.keys=[ascore/full]",
+    "evaluation.evaluator.dump_callbacks.score_writer.sets="
+    f"[normal,{SN},sds_outliers,sds_val_outliers]",
+    *(
+        f"~evaluation.evaluator.dump_callbacks.{name}"
+        for name in (
+            "thres_drift wasserstein cap_bank_sn ascore_operational "
+            "npd rtm eag entropy sds sds_val"
+        ).split()
+    ),
+    *(
+        f"~selection.criteria.{name}"
+        for name in "drift w1 npd rtm eag entropy sds sds_val".split()
+    ),
+]
+# Stands for the 50,000 rows per view of the LHC pass; the toy holds 120 and 80.
+PHYSICS_CAPS = {"normal": 50, SN: 60}
+PHYSICS_PASSES = {
+    "stored": [],
+    "rescored": [RESCORED_VIEWS],
+    "capped": [
+        RESCORED_VIEWS,
+        *(
+            f"evaluation.evaluator.row_caps.val.{k}={n}"
+            for k, n in PHYSICS_CAPS.items()
+        ),
+    ],
+}
 
 
 @pytest.fixture(scope="module", autouse=True)
@@ -293,7 +334,7 @@ def test_the_image_views_are_sets_of_the_data_config(domain):
     callback.on_test_epoch_start(SimpleNamespace(test_dataloaders=loaders), None)
 
 
-@pytest.mark.parametrize("domain", DOMAINS)
+@pytest.mark.parametrize("domain", [*DOMAINS, "physics"])
 def test_ancap_enters_no_criterion(domain):
     criteria = _compose(domain).selection.criteria
     assert not [n for n in criteria if n.startswith(("posterior", "ancap"))]
@@ -460,3 +501,128 @@ def test_a_scores_only_dump_serves_its_stored_pseudo_sets_to_ancap(domain, tmp_p
         expected = ancap(normal, {"control": control}, reference, SMALL)
         for key, value in expected.items():
             assert float(row[f"ancap/{key}"]) == pytest.approx(value, nan_ok=True), key
+
+
+def test_physics_composes_ancap_beside_its_validation_reference():
+    cfg = _compose("physics")
+    assert OmegaConf.to_container(cfg.cap_posterior) == POSTERIOR
+    callbacks = cfg.evaluation.evaluator.dump_callbacks
+    callbacks = OmegaConf.to_container(callbacks, resolve=True)
+    names = [name for name, c in callbacks.items() if c["_target_"] == TARGET]
+    assert names == list(PHYSICS_REFERENCES)
+    for name, reference in PHYSICS_REFERENCES.items():
+        instance = hydra.utils.instantiate(callbacks[name])
+        assert instance.name == name and instance.dataset_1 == "normal"
+        assert instance.views == PHYSICS_VIEWS and instance.reference == reference
+        assert instance.config == POSTERIOR
+
+
+@pytest.fixture(scope="module")
+def physics_dump(tmp_path_factory) -> Path:
+    # The physics form, its stored scores doubled so that a served file shows.
+    root = tmp_path_factory.mktemp("physics")
+    path = root / "scores" / "toy" / RUNS[0]
+    fit(root, [_dump(path)], module=_module(), datamodule=PhysicsDataModule())
+    (path / "config.yaml").write_text(yaml.safe_dump(TOY_RUN_CONFIG))
+    record = load(path / "initial.pt")
+    for scores in record["val"].values():
+        scores["ascore/full"] *= 2.0
+    torch.save(record, path / "initial.pt")
+    return path
+
+
+def test_the_physics_pass_serves_the_view_and_both_references(physics_dump):
+    evaluator = hydra.utils.instantiate(_compose("physics").evaluation.evaluator)
+    settings = evaluator._dump_settings()
+    run = RunEvaluation(physics_dump, _module(), PhysicsDataModule(), **settings)
+    callbacks = run.trainers["val"].callbacks
+    callbacks = [cb for cb in callbacks if isinstance(cb, ThresholdPosterior)]
+    assert [cb.name for cb in callbacks] == list(PHYSICS_REFERENCES)
+    served = SimpleNamespace(test_dataloaders=run.loaders["val"])
+    for callback in callbacks:
+        callback.on_test_epoch_start(served, None)
+
+
+def _physics_pass(dump: Path, root: Path, overrides: list[str]) -> SimpleNamespace:
+    written, out = root / "rescored", root / "eval"
+    cfg = _compose(
+        "physics",
+        "lattice=toy",
+        f"rescored_dir={written}",
+        *PHYSICS_REDUCED,
+        *overrides,
+    )
+    cfg.cap_posterior.merge_with(TOY_POSTERIOR)
+    evaluator = hydra.utils.instantiate(cfg.evaluation.evaluator)
+    evaluator.evaluate_dump(dump, _module(), PhysicsDataModule(), out, "toy")
+    selection = OmegaConf.to_container(cfg.selection, resolve=True)
+    select_lattice(out, selection, dump.parents[1], "toy", None, rescored_dir=written)
+    return SimpleNamespace(
+        settings=evaluator._dump_settings(),
+        out=out,
+        scores=load_scores(written / "toy" / dump.name),
+        val=_read_csv(out / "runs" / dump.name / "val.csv"),
+    )
+
+
+@pytest.fixture(scope="module")
+def physics_passes(physics_dump, tmp_path_factory) -> dict[str, SimpleNamespace]:
+    root = tmp_path_factory.mktemp("passes")
+    return {
+        name: _physics_pass(physics_dump, root / name, overrides)
+        for name, overrides in PHYSICS_PASSES.items()
+    }
+
+
+def _written(scores: dict, name: str) -> torch.Tensor:
+    return torch.as_tensor(scores["val"][name]["ascore/full"])
+
+
+@pytest.mark.parametrize("name", PHYSICS_PASSES)
+def test_physics_columns_are_ancap_of_the_rows_the_pass_wrote(physics_passes, name):
+    run = physics_passes[name]
+    assert len(run.val) == len(PASSES)
+    for row in run.val:
+        scores = run.scores[int(row["epoch"])]
+        normal, views = _written(scores, "normal"), {"sn": _written(scores, SN)}
+        for callback, reference in PHYSICS_REFERENCES.items():
+            expected = ancap(normal, views, _written(scores, reference), SMALL)
+            for key, value in expected.items():
+                column = float(row[f"{callback}/{key}"])
+                assert column == pytest.approx(value, nan_ok=True), key
+
+
+def test_physics_views_are_rescored_at_the_sanity_pass_on_request(
+    physics_dump, physics_passes
+):
+    initial = load(physics_dump / "initial.pt")["val"]
+    for name in ("normal", SN):
+        stored = initial[name]["ascore/full"]
+        assert torch.equal(_written(physics_passes["stored"].scores[-1], name), stored)
+        rescored = _written(physics_passes["rescored"].scores[-1], name)
+        torch.testing.assert_close(rescored, stored / 2.0)
+
+
+def test_physics_caps_reach_the_views_and_leave_the_references_whole(physics_passes):
+    capped, whole = physics_passes["capped"], physics_passes["rescored"]
+    for epoch, scores in capped.scores.items():
+        for name, rows in PHYSICS_CAPS.items():
+            assert len(_written(scores, name)) == rows
+        for reference in PHYSICS_REFERENCES.values():
+            expected = _written(whole.scores[epoch], reference)
+            assert torch.equal(_written(scores, reference), expected)
+
+
+def test_the_physics_pass_keeps_its_callbacks_and_survives_the_selection(
+    physics_passes,
+):
+    run = physics_passes["capped"]
+    assert list(run.settings["dump_callbacks"]) == [
+        "anomaly_efficiency",
+        "ancap",
+        "ancap_val",
+        "fit",
+        "score_writer",
+    ]
+    assert run.settings["selection"]["criteria"] == {}
+    assert SELECTION_TABLES <= {path.name for path in run.out.iterdir()}

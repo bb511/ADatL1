@@ -24,7 +24,8 @@ redraw of P at P's size, and the thresholds of the observed pair serve every pai
 
     Abar(beta)  = mean over the pairs of A(beta), on n_beta log-spaced betas
     I           = max over beta of Abar, in nats, at most log|T|
-    beta_star   = the beta of I, the smallest at a tie: an output, never declared
+    beta_star   = the smallest beta whose Abar lies within TIE_TOLERANCE of I, so that
+                  rounding cannot settle it: an output, never declared
     I_0         = I on pairs of its own, both views redrawn from the pooled typical
                   sample at their own sizes, as if the two views came from one source
     confidence  = I_0
@@ -97,6 +98,9 @@ PAIR_CHUNK = 8
 # -745.13), and torch's exp takes about ten times as long there (12 against 1 ns per
 # element on olgpu), whereas a third of the exponents of a curve lie below it.
 UNDERFLOW = -746.0
+# Points of the mean curve this close, in nats, are tied: on a plateau flat to rounding
+# the arithmetic alone would decide an exact maximum, and so beta_star.
+TIE_TOLERANCE = 1e-9
 LOG_KWARGS = dict(
     prog_bar=False,
     on_step=False,
@@ -241,15 +245,16 @@ def _mean_curve(cost_1: Tensor, cost_2: Tensor, betas: Tensor) -> Tensor:
 
 
 def _first_maximum(curve: Tensor, betas: Tensor) -> tuple[float, float]:
-    """Return the maximum of curve and the smallest beta that reaches it.
+    """Return the maximum of curve and the smallest beta within ``TIE_TOLERANCE`` of it.
 
-    A saturated curve rises to its limit in steps that fall below the resolution of
-    float64 with exp(-beta d), d the smallest step of the costs, near beta = 36 / d. Its
-    beta_star marks the start of that plateau, flat to rounding, not the end of the
-    grid.
+    A saturated curve rises to its limit in steps that shrink with exp(-beta d), d the
+    smallest step of the costs: they fall below the tolerance near beta = 21 / d and
+    below the resolution of float64 near beta = 36 / d. Its beta_star marks the start of
+    that plateau, not the end of the grid.
     """
-    best = int(torch.argmax(curve))
-    return curve[best].item(), betas[best].item()
+    maximum = curve.max()
+    best = int((curve >= maximum - TIE_TOLERANCE).int().argmax())
+    return maximum.item(), betas[best].item()
 
 
 def _capacity(

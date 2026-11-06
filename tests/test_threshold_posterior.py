@@ -230,6 +230,24 @@ def test_the_first_maximum_takes_the_smallest_beta_at_a_tie():
     assert tp._first_maximum(curve, betas) == (1.5, betas[100].item())
 
 
+def test_the_first_maximum_starts_a_curve_flat_to_rounding_at_its_plateau():
+    betas = tp.beta_grid(CONFIG)
+    curve = torch.full_like(betas, 2.0)
+    # The last point before the plateau lies just outside the tolerance.
+    curve[:50] = 2.0 - 2 * tp.TIE_TOLERANCE
+    curve[200] += tp.TIE_TOLERANCE / 2
+    assert int(curve.argmax()) == 200
+    assert tp._first_maximum(curve, betas) == (curve[200].item(), betas[50].item())
+
+
+def test_the_first_maximum_of_one_clear_maximum_is_the_exact_argmax():
+    betas = tp.beta_grid(CONFIG)
+    curve = -((betas.log10() - 1.0) ** 2)
+    best = int(curve.argmax())
+    assert 0 < best < len(betas) - 1
+    assert tp._first_maximum(curve, betas) == (curve[best].item(), betas[best].item())
+
+
 def test_flat_posteriors_give_no_capacity_at_the_smallest_beta():
     constant = torch.ones(40, dtype=torch.float64)
     reference = torch.full((30,), 2.0, dtype=torch.float64)

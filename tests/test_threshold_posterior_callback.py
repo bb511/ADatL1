@@ -1,3 +1,4 @@
+import csv
 import math
 from pathlib import Path
 from types import SimpleNamespace
@@ -7,17 +8,22 @@ import numpy as np
 import pytest
 import pytorch_lightning as pl
 import torch
+import yaml
 from mlflow.tracking import MlflowClient
 from omegaconf import OmegaConf
 from torch.utils.data import DataLoader, TensorDataset
 
+from src.callbacks import threshold_posterior as tp
 from src.callbacks.components.selection import smoothed
-from src.callbacks.threshold_posterior import (
-    KEYS,
-    ThresholdPosteriorCallback,
-    threshold_posterior,
-)
+from src.callbacks.components.utils import placeholder_loader
+from src.callbacks.sds import sds_inputs
+from src.callbacks.threshold_posterior import ThresholdPosteriorCallback, ancap
+from src.data.utils import unpack_batch
 from src.evaluation.callbacks.threshold_posterior import ThresholdPosterior
+from src.evaluation.components.tables import load_scores
+from src.evaluation.dump import RunEvaluation
+from src.evaluation.lattice import select_lattice
+from src.evaluation.replay import _load_weights
 from src.utils.omegaconf import register_resolvers
 from tests.test_eval_b9 import (
     AUX,
@@ -30,24 +36,59 @@ from tests.test_eval_b9 import (
     _stage_config,
     _train,
 )
-from tests.test_eval_stage import TOY_BETA_FIX, _compose
-from tests.test_score_dump import ToyAE, ToyDataModule, dump_callback, fit
+from tests.test_eval_stage import (
+    SELECTION_TABLES,
+    TOY_POSTERIOR,
+    TOY_RUN_CONFIG,
+    TOY_SETS,
+    TOY_VIEWS,
+    _compose,
+    drop_absent_sets,
+)
+from tests.test_score_dump import PASSES, ToyAE, ToyDataModule, dump_callback, fit, load
 
 CONFIGS = Path(__file__).resolve().parents[1] / "configs"
 POSTERIOR = OmegaConf.to_container(OmegaConf.load(CONFIGS / "cap" / "posterior.yaml"))
-PROBES = ["autouad", "uniform", "gaussian"]
-CONTROL = "posterior_reference_normal"
 TARGET = "src.evaluation.callbacks.threshold_posterior.ThresholdPosterior"
-TRAINING_ARGS = ["output_name", "dataset_1", "dataset_2", "posterior_config"]
-# Fewer draws than registered, for speed.
-DECLARED = POSTERIOR | {"beta_fix": TOY_BETA_FIX, "n_draws": 20}
-SHIFTS = {
-    "normal": 0.0,
-    "sensor_weak": 0.4,
-    "gaussian": 1.0,
-    "uniform": 2.5,
-    "autouad": 1.5,
+# Fewer pairs and draws than registered, for speed.
+SMALL = POSTERIOR | TOY_POSTERIOR
+VIEWS = {"weak": "sensor_weak", "mid": "sensor_mid"}
+REFERENCE = "sds_outliers"
+SHIFTS = {"normal": 0.0, "sensor_weak": 0.4, "sensor_mid": 0.8, REFERENCE: 2.5}
+TUNNELS = {
+    "cchamber": {
+        "weak": "sensor_weak",
+        "mid": "sensor_mid",
+        "strong": "sensor_strong",
+    },
+    "cchamber_wt": {"osr": "sensor_osr"},
 }
+# As extra_sets.sds of configs/eval/mscct.yaml.
+SDS = {"max_rows": 10000, "row_seed": 0}
+RUNS = ["run_a", "run_b"]
+# The cheapest evaluation of eval=mscct that stores the reference's scores: the
+# efficiency and the fit stay, for the per-run tables, and nothing else is computed.
+# rescored_dir and lattice_rows make the selection find no normal in the writer's files,
+# so that it leaves UDR and MC out without reading the dumps again.
+REFERENCE_ONLY = [
+    "tracking_uri=null",
+    "+selection.lattice_rows={max_rows:1,row_seed:0}",
+    "evaluation.evaluator.extra_sets.aux=false",
+    "evaluation.evaluator.extra_sets.train=false",
+    "+evaluation.evaluator.row_caps={seed:0,val:{sds_targets:1}}",
+    "+evaluation.evaluator.dump_callbacks.score_writer={"
+    "_target_:src.evaluation.callbacks.score_writer.ScoreWriter,"
+    "dirpath:'${rescored_dir}/${lattice}',sets:[sds_outliers],keys:[ascore/full]}",
+    *(
+        f"~evaluation.evaluator.dump_callbacks.{name}"
+        for name in (
+            "thres_drift wasserstein cap_bank_reference_normal cap_bank_nz20 "
+            "cap_bank_nz210 cap_bank_p1000 cap_bank_gt450 ascore_operational npd rtm "
+            "eag entropy sds"
+        ).split()
+    ),
+    *(f"~selection.criteria.{n}" for n in "drift w1 npd rtm eag entropy sds".split()),
+]
 
 
 @pytest.fixture(scope="module", autouse=True)
@@ -100,11 +141,11 @@ def trained(tmp_path_factory) -> SimpleNamespace:
     root = tmp_path_factory.mktemp("trained")
     uri, dump = f"file:{root / 'mlruns'}", root / "scores" / LATTICE / RUN
     cfg = _stage_config()
-    control = OmegaConf.to_container(cfg.evaluation.evaluator.dump_callbacks[CONTROL])
     callback = ThresholdPosteriorCallback(
-        **{key: control[key] for key in TRAINING_ARGS},
-        aux_seed=AUX["aux_seed"],
-        aux_size=AUX["aux_size"],
+        "ascore/full",
+        "normal",
+        TOY_VIEWS,
+        OmegaConf.to_container(cfg.cap_posterior),
         batch_size=BATCH,
     )
     callbacks = [dump_callback(dump, aux_batch_size=BATCH, **AUX), callback]
@@ -119,115 +160,231 @@ def trained(tmp_path_factory) -> SimpleNamespace:
     )
 
 
-def test_evaluation_records_every_key_of_every_probe():
-    loaders = _loaders(["normal", "sensor_weak", *PROBES])
-    callback = ThresholdPosterior(
-        "ascore/full", "normal", "sensor_weak", DECLARED, name="posterior_x"
-    )
+def test_evaluation_records_exactly_ancap_of_the_collected_scores():
+    loaders = _loaders(["normal", *VIEWS.values(), REFERENCE])
+    callback = ThresholdPosterior("ascore/full", "normal", VIEWS, SMALL, name="x")
     records = _evaluate(callback, loaders)
-    assert set(records) == {f"posterior_x/{p}_{key}" for p in PROBES for key in KEYS}
     scores = {name: _scores(loader) for name, loader in loaders.items()}
-    for probe in PROBES:
-        beta = TOY_BETA_FIX[probe]
-        expected = threshold_posterior(
-            scores["normal"], scores["sensor_weak"], scores[probe], beta, DECLARED
-        )
-        for key, value in expected.items():
-            assert math.isfinite(value), (probe, key)
-            assert records[f"posterior_x/{probe}_{key}"] == value, (probe, key)
+    views = {grade: scores[name] for grade, name in VIEWS.items()}
+    expected = ancap(scores["normal"], views, scores[REFERENCE], SMALL)
+    assert records == {f"x/{key}": value for key, value in expected.items()}
+    assert all(math.isfinite(value) for value in records.values())
 
 
-def test_evaluation_names_the_missing_loaders():
-    loaders = _loaders(["normal", "sensor_weak", "autouad", "gaussian"])
-    callback = ThresholdPosterior("ascore/full", "normal", "sensor_weak", DECLARED)
-    with pytest.raises(ValueError, match=r"\['uniform'\].*Available test dataloaders"):
-        _evaluate(callback, loaders)
+@pytest.mark.parametrize("missing", ["sensor_mid", REFERENCE, "normal"])
+def test_evaluation_names_a_missing_loader(missing):
+    sets = {"normal", *VIEWS.values(), REFERENCE} - {missing}
+    callback = ThresholdPosterior("ascore/full", "normal", VIEWS, SMALL)
+    expected = rf"\['{missing}'\].*Available test dataloaders"
+    with pytest.raises(ValueError, match=expected):
+        _evaluate(callback, _loaders(sets))
 
 
-def test_a_null_beta_fix_raises_at_the_first_computation_only(tmp_path):
-    loaders = _loaders(["normal", "sensor_weak", *PROBES])
-    undeclared = DECLARED | {"beta_fix": TOY_BETA_FIX | {"uniform": None}}
-    callback = ThresholdPosterior("ascore/full", "normal", "sensor_weak", undeclared)
-    with pytest.raises(ValueError, match=r"\['uniform'\].*declares it"):
-        _evaluate(callback, loaders)
-
-    undeclared = POSTERIOR | {"beta_fix": dict.fromkeys(PROBES)}
-    training = ThresholdPosteriorCallback(
-        "ascore/full", "normal", "reference_normal", undeclared, aux_size=50
+def test_an_empty_reference_leaves_nan_in_the_evaluation():
+    loaders = _loaders(["normal", *VIEWS.values(), REFERENCE])
+    empty = TensorDataset(torch.zeros(0, 3), torch.zeros(0, dtype=torch.long))
+    loaders[REFERENCE] = DataLoader(empty, batch_size=16)
+    records = _evaluate(
+        ThresholdPosterior("ascore/full", "normal", VIEWS, SMALL), loaders
     )
-    with pytest.raises(ValueError, match="before any label"):
-        fit(tmp_path, [training], epochs=1)
+    assert len(records) == 5 * len(VIEWS) + 1
+    assert all(math.isnan(value) for value in records.values())
 
 
-def test_training_logs_the_stage_values(trained):
-    assert len(trained.keys) == 2 * len(PROBES)
-    key = "val/summary/posterior_uniform_D-fix_ema_normal_vs_reference_normal"
-    assert trained.keys[("uniform", "D-fix")] == key
-    for (probe, statistic), key in trained.keys.items():
-        steps, logged = trained.train(key)
-        assert len(steps) == EPOCHS, key
-        column = f"{CONTROL}/{probe}_{statistic}"
-        raw = [float(row[column]) for row in trained.val[1:]]
-        assert all(math.isfinite(value) for value in raw), key
-        expected = smoothed(raw, skip_nonfinite=True)
-        np.testing.assert_array_equal(np.float32(logged), expected, err_msg=key)
+def test_a_non_default_reference_is_read():
+    loaders = _loaders(["normal", *VIEWS.values(), REFERENCE])
+    loaders["other"] = loaders.pop(REFERENCE)
+    callback = ThresholdPosterior(
+        "ascore/full", "normal", VIEWS, SMALL, reference="other"
+    )
+    assert math.isfinite(_evaluate(callback, loaders)["ancap/ancap_dir"])
 
 
-def test_stage_writes_every_control_column(trained):
-    columns = {f"{CONTROL}/{p}_{key}" for p in PROBES for key in KEYS}
+def test_training_builds_the_reference_as_sds_does(tmp_path):
+    callback = ThresholdPosteriorCallback(
+        "ascore/full", "normal", TOY_VIEWS, SMALL, batch_size=BATCH
+    )
+    _, datamodule = fit(tmp_path, [callback], epochs=1)
+    train = unpack_batch(datamodule.data_train.tensors)
+    expected = sds_inputs(train.x, 10000, 0, train.mask)[REFERENCE]
+    assert list(callback.loaders) == [REFERENCE]
+    assert torch.equal(callback.loaders[REFERENCE].dataset.tensors[0], expected)
+    assert math.isfinite(callback.emas["control"])
+
+
+def test_training_names_a_missing_loader(tmp_path):
+    views = {"weak": "sensor_weak"}
+    callback = ThresholdPosteriorCallback("ascore/full", "normal", views, SMALL)
+    with pytest.raises(ValueError, match=r"\['sensor_weak'\].*Available validation"):
+        fit(tmp_path, [callback], epochs=1)
+
+
+def test_an_empty_reference_leaves_the_training_average_nan(tmp_path, monkeypatch):
+    def empty(x, max_rows, row_seed, mask=None):
+        return {REFERENCE: x[:0]}
+
+    monkeypatch.setattr(tp, "sds_inputs", empty)
+    callback = ThresholdPosteriorCallback("ascore/full", "normal", TOY_VIEWS, SMALL)
+    fit(tmp_path, [callback], epochs=1)
+    assert math.isnan(callback.emas["control"])
+
+
+def test_training_logs_the_moving_average_of_the_stage_values(trained):
+    assert trained.keys == {"control": "val/summary/ancap_control_ema"}
+    steps, logged = trained.train("val/summary/ancap_control_ema")
+    assert len(steps) == EPOCHS
+    raw = [float(row["ancap/ancap_control"]) for row in trained.val[1:]]
+    assert all(math.isfinite(value) for value in raw)
+    expected = smoothed(raw, skip_nonfinite=True)
+    np.testing.assert_array_equal(np.float32(logged), expected)
+
+
+def test_stage_writes_every_column(trained):
+    suffix = "_control"
+    columns = {f"ancap/{p}{suffix}" for p in tp.COLUMNS.values()} | {"ancap/ancap_dir"}
+    assert {key for key in trained.val[0] if key.startswith("ancap/")} == columns
     for row in trained.val:
-        assert columns <= row.keys()
-        for probe in PROBES:
-            values = {key: float(row[f"{CONTROL}/{probe}_{key}"]) for key in KEYS}
-            assert all(math.isfinite(value) for value in values.values()), probe
-            assert values["beta_fix"] == TOY_BETA_FIX[probe]
-            assert values["D-fix"] == pytest.approx(values["A-fix"] - values["A_pi"])
-            assert values["A-fix"] == pytest.approx(values["C"] + values["F"])
+        values = {key: float(row[key]) for key in columns}
+        assert all(math.isfinite(value) for value in values.values()), row["epoch"]
+        capacity = values["ancap/ancap_control"]
+        confidence = values["ancap/ancap_conf_control"]
+        assert values["ancap/ancap_cons_control"] == capacity - confidence
+        assert values["ancap/ancap_sat_control"] in (0.0, 1.0)
 
 
-@pytest.mark.parametrize(
-    "domain, sets",
-    [
-        ("cchamber", ["sensor_weak", "sensor_mid", "sensor_strong"]),
-    ],
-)
-def test_posterior_instances_copy_the_control_and_feed_the_registry(domain, sets):
+@pytest.mark.parametrize("domain", TUNNELS)
+def test_each_tunnel_composes_one_callback_of_every_grade(domain):
     cfg = _compose(domain)
-    posterior = OmegaConf.to_container(cfg.cap_posterior)
-    assert posterior == POSTERIOR
+    assert OmegaConf.to_container(cfg.cap_posterior) == POSTERIOR
     callbacks = cfg.evaluation.evaluator.dump_callbacks
     callbacks = OmegaConf.to_container(callbacks, resolve=True)
-    control = callbacks[CONTROL]
-    assert control["dataset_1"] == "normal"
-    assert control["dataset_2"] == "reference_normal"
-    assert control["posterior_config"] == posterior
-    instances = {name for name, c in callbacks.items() if c["_target_"] == TARGET}
-    assert instances == {CONTROL, *(f"posterior_{x2}" for x2 in sets)}
-    for x2 in sets:
-        name = f"posterior_{x2}"
-        assert callbacks[name] == {**control, "dataset_2": x2, "name": name}
-        assert hydra.utils.instantiate(callbacks[name]).name == name
+    assert [name for name, c in callbacks.items() if c["_target_"] == TARGET] == [
+        "ancap"
+    ]
+    assert not [name for name in callbacks if name.startswith("posterior_")]
+    assert callbacks["ancap"] == {
+        "_target_": TARGET,
+        "output_name": "ascore/full",
+        "dataset_1": "normal",
+        "views": TUNNELS[domain],
+        "posterior_config": POSTERIOR,
+        "name": "ancap",
+    }
+    instance = hydra.utils.instantiate(callbacks["ancap"])
+    assert instance.reference == REFERENCE and instance.views == TUNNELS[domain]
+    assert cfg.evaluation.evaluator.extra_sets.sds == SDS
 
-    criteria = {
-        name: OmegaConf.to_container(spec)
-        for name, spec in cfg.selection.criteria.items()
-        if name.startswith("posterior")
-    }
-    produced = {
-        f"{name}/{probe}_{key}"
-        for name in instances
-        for probe in PROBES
-        for key in KEYS
-    }
-    registered = set()
-    for x2 in sets:
-        keys = ThresholdPosteriorCallback("ascore/full", "normal", x2, posterior).keys
-        grade = x2.removeprefix("sensor_")
-        for (probe, statistic), key in keys.items():
-            name = f"posterior_{probe}_{statistic.replace('-', '').lower()}_{grade}"
-            column = f"posterior_{x2}/{probe}_{statistic}"
-            spec = {"column": column, "mode": "max", "key": key}
-            assert criteria[name] == spec | {"skip_nonfinite": True}, name
-            assert column in produced
-            registered.add(name)
-    assert registered == criteria.keys() and len(registered) == 6 * len(sets)
+
+@pytest.mark.parametrize("domain", TUNNELS)
+def test_ancap_enters_no_criterion(domain):
+    criteria = _compose(domain).selection.criteria
+    assert not [n for n in criteria if n.startswith(("posterior", "ancap"))]
+    columns = [spec.column for spec in criteria.values()]
+    assert not [c for c in columns if c.startswith(("posterior", "ancap"))]
+
+
+@pytest.fixture(scope="module")
+def lattice(tmp_path_factory) -> Path:
+    # A dump without the pseudo-sets, whose scores the replay rescores from the weights.
+    root = tmp_path_factory.mktemp("reference")
+    for seed, run in enumerate(RUNS):
+        path = root / "scores" / "toy" / run
+        fit(root, [dump_callback(path)], seed=seed)
+        (path / "config.yaml").write_text(yaml.safe_dump(TOY_RUN_CONFIG))
+    return root / "scores"
+
+
+def _reference_only(rescored: Path):
+    cfg = _compose("mscct", "lattice=toy", f"rescored_dir={rescored}", *REFERENCE_ONLY)
+    # The toy has none of the four scanners of null_ds; the callbacks stay as composed.
+    drop_absent_sets(cfg, TOY_SETS)
+    return cfg
+
+
+def _module_scores(state_dict: dict, batch_size: int) -> torch.Tensor:
+    # The scores of the module on the pseudo-outliers, apart from any replay.
+    datamodule = ToyDataModule()
+    datamodule.setup("fit")
+    train = unpack_batch(datamodule.data_train.tensors)
+    points = sds_inputs(train.x, SDS["max_rows"], SDS["row_seed"], train.mask)[
+        REFERENCE
+    ]
+    module = ToyAE()
+    _load_weights(module, state_dict)
+    module.eval()
+    with torch.no_grad():
+        loader = placeholder_loader(points, batch_size)
+        return torch.cat([module.model_step(batch)["ascore/full"] for batch in loader])
+
+
+def test_a_replay_stores_the_reference_scores_of_every_epoch(lattice, tmp_path):
+    rescored, out = tmp_path / "rescored", tmp_path / "eval"
+    cfg = _reference_only(rescored)
+    hydra.utils.instantiate(cfg.evaluation.evaluator).evaluate_lattice(
+        lattice, out, "toy"
+    )
+    for run in RUNS:
+        written = load_scores(rescored / "toy" / run)
+        assert list(written) == [-1, 0, 1]
+        meta = load(rescored / "toy" / run / "meta.pt")
+        assert meta["stored"] == {"val": [REFERENCE], "test": []}
+        assert meta["keys"] == ["ascore/full"] and meta["rows"] == {REFERENCE: None}
+        batch_size = load(lattice / "toy" / run / "meta.pt")["aux"]["batch_sizes"]
+        for epoch, name in zip(written, PASSES):
+            record = load(lattice / "toy" / run / name)
+            assert "sds" not in record
+            scores = written[epoch]["val"]
+            assert list(scores) == [REFERENCE]
+            expected = _module_scores(record["state_dict"], batch_size["gaussian"][0])
+            assert torch.equal(
+                torch.as_tensor(scores[REFERENCE]["ascore/full"]), expected
+            )
+
+
+def test_the_stored_reference_scores_are_those_of_a_training_dump(tmp_path):
+    # A twin that stored the pseudo-sets while training, the same seed and weights.
+    root = tmp_path / "scores" / "toy"
+    fit(tmp_path, [dump_callback(root / "run_a")])
+    fit(tmp_path, [dump_callback(tmp_path / "twin", sds=SDS)])
+    (root / "run_a" / "config.yaml").write_text(yaml.safe_dump(TOY_RUN_CONFIG))
+    cfg = _reference_only(tmp_path / "rescored")
+    evaluator = hydra.utils.instantiate(cfg.evaluation.evaluator)
+    evaluator.evaluate_lattice(tmp_path / "scores", tmp_path / "eval", "toy")
+    for name in PASSES:
+        written = load(tmp_path / "rescored" / "toy" / "run_a" / name)["val"]
+        stored = load(tmp_path / "twin" / name)["sds"]
+        assert torch.equal(
+            written[REFERENCE]["ascore/full"], stored[REFERENCE]["ascore/full"]
+        )
+
+
+def test_the_recipe_leaves_the_efficiency_the_fit_and_the_writer_alone(
+    lattice, tmp_path
+):
+    cfg = _reference_only(tmp_path / "rescored")
+    evaluator = hydra.utils.instantiate(cfg.evaluation.evaluator)
+    settings = evaluator._dump_settings()
+    assert list(settings["dump_callbacks"]) == [
+        "anomaly_efficiency",
+        "fit",
+        "score_writer",
+    ]
+    assert settings["selection"]["criteria"] == {}
+    run = RunEvaluation(lattice / "toy" / RUNS[0], ToyAE(), ToyDataModule(), **settings)
+    sizes = {name: len(loader.dataset) for name, loader in run.loaders["val"].items()}
+    assert sizes["sds_targets"] == 1 and sizes[REFERENCE] > 1
+    assert not {"gaussian", "uniform", "autouad", "train"} & sizes.keys()
+
+
+def test_the_recipe_survives_the_tables_and_the_selection(lattice, tmp_path, caplog):
+    rescored, out = tmp_path / "rescored", tmp_path / "eval"
+    cfg = _reference_only(rescored)
+    evaluator = hydra.utils.instantiate(cfg.evaluation.evaluator)
+    evaluator.evaluate_lattice(lattice, out, "toy")
+    selection = OmegaConf.to_container(cfg.selection, resolve=True)
+    select_lattice(out, selection, lattice, "toy", None, rescored_dir=rescored)
+    assert "UDR and MC are left out" in caplog.text
+    assert SELECTION_TABLES <= {path.name for path in out.iterdir()}
+    with open(out / "runs" / RUNS[0] / "picks.csv", newline="") as file:
+        picked = [row["strategy"] for row in csv.DictReader(file)]
+    assert picked == ["oracle", "cvar25", "cvar10", "q_sec"]

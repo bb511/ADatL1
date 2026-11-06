@@ -125,6 +125,12 @@ def _sds_val_sets(normal: DataLoader, spec: dict) -> dict:
     return {name.replace("sds", prefix, 1): x for name, x in sets.items()}
 
 
+def _check_rescored(names: list[str], loaders: dict) -> None:
+    unknown = sorted(set(names) - loaders.keys())
+    if unknown:
+        raise ValueError(f"rescored_sets names no validation loader: {unknown}.")
+
+
 def _train_loader(data_train, spec, meta: dict) -> DataLoader | None:
     """The loader of ``extra_sets.train``: None for false; for true, every training row
     with the dump's batch size; for ``{max_rows, row_seed, batch_size}``, the seeded
@@ -157,6 +163,9 @@ class RunEvaluation:
     never served, and a set the dump does not store is rescored from the weights.
     The cuts of every ``target_rates`` of the callbacks' configs are set on validation
     normal (``ReplayModule``), which an epoch file that lacks it has rescored first.
+    A set of ``rescored_sets`` is replayed as if its file lacked it, so that a callback
+    reads it from the same arithmetic as the sets the dump never stored; listing a set
+    the dump does not store changes nothing.
     """
 
     def __init__(
@@ -172,6 +181,7 @@ class RunEvaluation:
         sets: str | None = None,
         typical: str | None = None,
         row_caps: dict | None = None,
+        rescored_sets: list[str] | None = None,
     ):
         self.run_dir = Path(run_dir)
         self.meta = torch.load(self.run_dir / "meta.pt", weights_only=True)
@@ -180,6 +190,8 @@ class RunEvaluation:
         self.passes = {"val": list(dump_callbacks), "test": test_callbacks}
         self.trainers = {split: self._trainer(split) for split in self.passes}
         self.loaders = self._loaders(datamodule, typical)
+        self.rescored_sets = list(rescored_sets or [])
+        _check_rescored(self.rescored_sets, self.loaders["val"])
         self.rows = self._cap(row_caps or {})
         meta = capped_meta(self.meta, self.loaders, self.rows)
         self.replay = ReplayModule(module, meta, typical, _rates(dump_callbacks))
@@ -260,7 +272,9 @@ class RunEvaluation:
         rows = {split: [] for split in self.trainers}
         for epoch, path in enumerate(self._epoch_files(), start=-1):
             record = capped_record(load_record(path, epoch), self.rows)
-            self.replay.load_epoch(record, out / path.name)
+            val = record["val"].items()
+            stored = {k: v for k, v in val if k not in self.rescored_sets}
+            self.replay.load_epoch({**record, "val": stored}, out / path.name)
             self._score_normal()
             for split in self.trainers:
                 rows[split].append(self._row(split, epoch))
@@ -668,6 +682,7 @@ def evaluate_dump(
     selection: dict,
     typical: str | None = None,
     row_caps: dict | None = None,
+    rescored_sets: list[str] | None = None,
 ) -> dict:
     """Evaluate every epoch of one dumped run; write its four files, return run.json.
 
@@ -695,5 +710,6 @@ def evaluate_dump(
         selection=selection,
         typical=typical,
         row_caps=row_caps,
+        rescored_sets=rescored_sets,
     )
     return run.evaluate(out_dir, lattice, tracking_uri)

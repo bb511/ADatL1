@@ -5,7 +5,7 @@
 # data/cchamber_wt.yaml, whatever lists it was trained with.
 
 defaults:
-  - /cap: bank
+  - /cap: [bank, posterior]
   - _self_
 
 sets: cchamber_wt
@@ -94,6 +94,16 @@ evaluation:
         bank_config: ${cap_bank}
         log_raw_mlflow: false
         name: cap_bank_sensor_osr
+      # ANCAP of normal against sensor_osr; its reference, the SDS pseudo-outliers, is the
+      # set that extra_sets.sds serves, so that it adds no model pass.
+      ancap:
+        _target_: src.evaluation.callbacks.threshold_posterior.ThresholdPosterior
+        output_name: ascore/full
+        dataset_1: normal
+        views:
+          osr: sensor_osr
+        posterior_config: ${cap_posterior}
+        name: ancap
       # The operational score of normal, a diagnostic column beside Q'', the fit.
       ascore_operational:
         _target_: src.evaluation.callbacks.output.OutputCallback
@@ -138,7 +148,8 @@ evaluation:
 selection:
   # The CAP bank enters no criterion: the reading takes its columns directly.
   # Consistency is left out until CAP is redefined, and EM because it is degenerate on
-  # both tunnels: em_reached is 0 in every AE, VAE and SVDD run.
+  # both tunnels: em_reached is 0 in every AE, VAE and SVDD run. ANCAP enters none until
+  # the rules of its pick-level reading are recorded.
   criteria:
     drift:
       column: thres_drift/drift_operational
@@ -187,8 +198,6 @@ selection:
       mode: min
       key: val/summary/sds_ema
       raw_key: val/summary/sds
-    # Track 2, the threshold posterior, left the wind tunnel on 26 Oct, closed by the
-    # register's decision of 17:56: no candidate was admissible on the light tunnel.
   # Q'', the mean fit of validation normal, minimised; se is the gate's standard error.
   q_sec:
     column: fit/normal

@@ -21,6 +21,10 @@ from torch.utils.data import DataLoader, TensorDataset
 
 from src.callbacks.components.rate import AnomalyRate
 from src.callbacks.components.selection import W_STEPS, best_epoch, ema, smoothed
+from src.callbacks.components.utils import placeholder_loader
+from src.callbacks.sds import sds_inputs
+from src.callbacks.threshold_posterior import ancap
+from src.data.utils import unpack_batch
 from src.evaluation.callbacks.efficiency import AnomalyEfficiencyCallback
 from src.evaluation.callbacks.utils.mlflow import log_metrics_to_mlflow
 from src.evaluation.callbacks.wasserstein import _wasserstein_1d
@@ -30,7 +34,7 @@ from src.evaluation.components.tables import write_outputs
 from src.evaluation.dump import RunEvaluation, _init_worker
 from src.evaluation.evaluator import Evaluator
 from src.evaluation.lattice import select_lattice
-from src.evaluation.replay import ReplayModule, as_typical
+from src.evaluation.replay import ReplayModule, _load_weights, as_typical
 from src.utils.omegaconf import register_resolvers
 from tests.test_score_dump import PASSES, ToyAE, ToyDataModule, dump_callback, fit, load
 
@@ -141,19 +145,28 @@ def toy_bank(cfg) -> None:
     control.reference = "normal"
 
 
-# Placeholders for the beta_fix that the test bed declares, without which every
-# posterior callback raises; one per probe, so that a probe read at another's shows.
-TOY_BETA_FIX = {"autouad": 3.0, "uniform": 12.0, "gaussian": 40.0}
+# The toy has no sensor pool, so reference_normal stands in for a grade; fewer pairs and
+# draws than registered keep its many replays short.
+TOY_VIEWS = {"control": "reference_normal"}
+TOY_POSTERIOR = {"n_pairs": 5, "n_draws": 5}
+# The sets rescored in the tests of rescored_sets, written back through ScoreWriter.
+RESCORED = ["normal", "reference_normal"]
+WRITER = {
+    "_target_": "src.evaluation.callbacks.score_writer.ScoreWriter",
+    "sets": RESCORED,
+    "keys": ["ascore/full"],
+}
 
 
-def toy_posterior(cfg) -> None:
-    cfg.cap_posterior.beta_fix = TOY_BETA_FIX
+def toy_ancap(cfg) -> None:
+    cfg.evaluation.evaluator.dump_callbacks.ancap.views = TOY_VIEWS
+    cfg.cap_posterior.merge_with(TOY_POSTERIOR)
 
 
 def _evaluator(sets: set[str]) -> Evaluator:
     cfg = _compose("cchamber")
     drop_absent_sets(cfg, sets)
-    toy_posterior(cfg)
+    toy_ancap(cfg)
     if sets == TOY_SETS:
         toy_bank(cfg)
     return hydra.utils.instantiate(cfg.evaluation.evaluator)
@@ -773,13 +786,7 @@ def test_pairings_copy_the_control(domain):
     evaluator = hydra.utils.instantiate(_compose(domain).evaluation.evaluator)
     configs, criteria = evaluator.dump_callbacks, evaluator.selection["criteria"]
     specs = {spec["column"].split("/")[0]: spec for spec in criteria.values()}
-    # The posterior's pairings copy a control that no criterion registers; their test
-    # is in test_threshold_posterior_callback.py.
-    pairings = [
-        n
-        for n, c in configs.items()
-        if "dataset_2" in c and n in specs and not n.startswith("posterior_")
-    ]
+    pairings = [n for n, c in configs.items() if "dataset_2" in c and n in specs]
     assert len(pairings) == (4 if domain == "cchamber" else 3)
     for name in pairings:
         config, spec = configs[name], specs[name]
@@ -845,3 +852,138 @@ def test_sets_replace_the_lists_of_a_dump(cchamber_data, monkeypatch, tmp_path):
         pool = torch.cat([stored[member]["ascore/full"] for member in POOL])
         w1 = _wasserstein_1d(_signed_log1p(normal), _signed_log1p(pool))
         assert float(row["wasserstein_weak/w1dist"]) == pytest.approx(w1, rel=1e-5)
+
+
+def _perturbed(src: Path, dst: Path) -> Path:
+    # Stored scores that no model gives, so that a served value shows itself.
+    shutil.copytree(src, dst)
+    for path in dst.glob("*/[ie]*.pt"):
+        record = load(path)
+        for name in RESCORED:
+            record["val"][name]["ascore/full"] += 100.0
+        torch.save(record, path)
+    return dst / "run_a"
+
+
+def _rescored_replay(dump: Path, out: Path, sets: list[str] | None) -> list[dict]:
+    evaluator = _evaluator(TOY_SETS)
+    evaluator.rescored_sets = sets
+    writer = {**WRITER, "dirpath": str(out / "written")}
+    evaluator.dump_callbacks["score_writer"] = writer
+    evaluator.evaluate_dump(dump, ToyAE(), ToyDataModule(), out, "toy")
+    return _read_csv(out / "runs" / dump.name / "val.csv")
+
+
+def _model_scores(state_dict: dict, loader: DataLoader) -> torch.Tensor:
+    module = ToyAE()
+    _load_weights(module, state_dict)
+    module.eval()
+    with torch.no_grad():
+        return torch.cat([module.model_step(batch)["ascore/full"] for batch in loader])
+
+
+def _outlier_loader(batch_size: int) -> DataLoader:
+    datamodule = ToyDataModule()
+    datamodule.setup("fit")
+    train = unpack_batch(datamodule.data_train.tensors)
+    points = sds_inputs(train.x, 10000, 0, train.mask)["sds_outliers"]
+    return placeholder_loader(points, batch_size)
+
+
+def test_rescored_sets_replace_the_stored_scores(lattices, tmp_path):
+    dump = _perturbed(lattices.full / "toy", tmp_path / "toy")
+    val = _rescored_replay(dump, tmp_path / "on", RESCORED)
+    loaders = ToyDataModule().loaders("val")
+    written = tmp_path / "on" / "written" / "run_a"
+    outliers = _outlier_loader(
+        load(dump / "meta.pt")["aux"]["batch_sizes"]["gaussian"][0]
+    )
+    config = OmegaConf.load(CONFIGS / "cap" / "posterior.yaml")
+    config = OmegaConf.to_container(config) | TOY_POSTERIOR
+    for row, name in zip(val, PASSES):
+        record = load(dump / name)
+        state = record["state_dict"]
+        scores = {set_: _model_scores(state, loaders[set_]) for set_ in RESCORED}
+        for set_, expected in scores.items():
+            assert torch.equal(
+                load(written / name)["val"][set_]["ascore/full"], expected
+            )
+            assert not torch.allclose(record["val"][set_]["ascore/full"], expected)
+        views = {"control": scores["reference_normal"]}
+        reference = _model_scores(state, outliers)
+        expected = ancap(scores["normal"], views, reference, config)
+        for key, value in expected.items():
+            assert float(row[f"ancap/{key}"]) == value, (name, key)
+
+
+def test_without_rescored_sets_the_stored_scores_are_served(lattices, tmp_path):
+    dump = _perturbed(lattices.full / "toy", tmp_path / "toy")
+    _rescored_replay(dump, tmp_path / "off", None)
+    for name in PASSES:
+        stored = load(dump / name)["val"]
+        written = load(tmp_path / "off" / "written" / "run_a" / name)["val"]
+        for set_ in RESCORED:
+            assert torch.equal(
+                written[set_]["ascore/full"], stored[set_]["ascore/full"]
+            )
+
+
+def test_the_cuts_follow_a_rescored_normal(lattices, tmp_path):
+    dump = _perturbed(lattices.full / "toy", tmp_path / "toy")
+    rescored = _rescored_replay(dump, tmp_path / "on", RESCORED)
+    served = _rescored_replay(dump, tmp_path / "off", None)
+    normal = ToyDataModule().loaders("val")["normal"]
+    for row, stale, name in zip(rescored, served, PASSES):
+        record = load(dump / name)
+        rate = AnomalyRate(0.1, None)
+        rate.set_threshold(_model_scores(record["state_dict"], normal))
+        rate.update(record["val"]["sig_a"]["ascore/full"])
+        efficiency = rate.compute("efficiency").item()
+        assert efficiency > 0.0
+        assert float(row[EFF + "sig_a"]) == pytest.approx(efficiency)
+        # The perturbed normal puts its cut above every signal score.
+        assert float(stale[EFF + "sig_a"]) == 0.0
+
+
+def test_a_listed_set_the_dump_does_not_store_changes_nothing(tmp_path):
+    path = tmp_path / "dump" / "run_a"
+    fit(tmp_path, [dump_callback(path, stored_sets=RESCORED)])
+    assert "sig_a" not in load(path / "epoch_0000.pt")["val"]
+    plain = _rescored_replay(path, tmp_path / "plain", ["normal"])
+    listed = _rescored_replay(path, tmp_path / "listed", ["normal", "sig_a"])
+    assert listed == plain
+
+
+def test_a_name_that_is_no_validation_loader_raises(dump, tmp_path):
+    with pytest.raises(ValueError, match=r"no validation loader: \['no_such_set'\]"):
+        _rescored_replay(dump.path, tmp_path, ["no_such_set"])
+
+
+def test_the_set_served_as_typical_cannot_be_listed(dump):
+    cfg = _compose("cchamber_typical")
+    drop_absent_sets(cfg, TOY_SETS - {TYPICAL})
+    evaluator = hydra.utils.instantiate(
+        cfg.evaluation.evaluator, typical=TYPICAL, rescored_sets=[TYPICAL]
+    )
+    settings = evaluator._dump_settings()
+    with pytest.raises(ValueError, match="no validation loader"):
+        RunEvaluation(dump.path, ToyAE(), ToyDataModule(), **settings)
+
+
+@pytest.mark.parametrize(
+    "name, error, message",
+    [
+        (
+            "reference_normal",
+            RuntimeError,
+            "Rescoring 'reference_normal' needs the weights, which run_a/epoch_0000.pt",
+        ),
+        ("normal", ValueError, "The dump does not store validation normal."),
+    ],
+)
+def test_a_scores_only_dump_raises_on_a_rescored_set(
+    lattices, tmp_path, name, error, message
+):
+    override = f"+evaluation.evaluator.rescored_sets=[{name}]"
+    with pytest.raises(error, match=re.escape(message)):
+        _evaluate_and_select(lattices.stripped, tmp_path, *SCORES_ONLY, override)

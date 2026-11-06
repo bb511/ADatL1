@@ -79,6 +79,10 @@ class Evaluator:
         {'seed': s, 'val': {set: n}, 'test': {set: n}}: n rows drawn with s, the same
         for every run and epoch; a set left unnamed, or with n None, keeps every row,
         and so does every set for None.
+    :param rescored_sets: The validation sets whose stored scores the dump path ignores
+        and rescores from each epoch's weights, stored or not, 'normal' first for the
+        cuts, so that a callback reads them from the same arithmetic as the sets the
+        dump never stored; None serves every stored set.
     :param trainer_kwargs: The other arguments that are given to the trainer object,
         kept the same as the training, e.g., which device to run the computations on.
     """
@@ -95,6 +99,7 @@ class Evaluator:
         selection: dict | None = None,
         typical: str | None = None,
         row_caps: dict | None = None,
+        rescored_sets: Sequence[str] | None = None,
         **trainer_kwargs,
     ):
         self.ckpts = ckpts or {}
@@ -104,6 +109,7 @@ class Evaluator:
         self.extra_sets = _container(extra_sets) or {}
         self.selection, self.typical = _container(selection), typical
         self.row_caps = _container(row_caps)
+        self.rescored_sets = _container(rescored_sets)
         self.optimized_metric_config = optimized_metric_config or None
         if self.optimized_metric_config is not None:
             candidate = self.optimized_metric_config.get("candidate")
@@ -450,4 +456,5 @@ class Evaluator:
             "selection": self.selection,
             "typical": self.typical,
             "row_caps": self.row_caps,
+            "rescored_sets": self.rescored_sets,
         }

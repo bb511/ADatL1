@@ -1,95 +1,122 @@
-"""The threshold posterior with a probe, track 2 of the CAP test bed, as functions of
-scores and as a training callback.
+"""ANCAP, CAP for anomaly detection: the capacity of a detector's threshold posterior,
+as functions of scores and as a training callback.
 
-Registered in the test plan 08_tests.md (part C and its amendments of 24 Oct, evening,
-and 26 Oct, 02:25). One model's scores on two typical views, s_1 (X1) and s_2 (X2), and
-on a probe set P define, on a grid T of thresholds::
+A detector proposes one region per threshold, and the cost of a threshold is the typical
+events it rejects plus the reference points it accepts. One model's scores on two
+typical views, s_1 (X1) and s_2 (X2), and on a reference P define, on a grid T of
+thresholds::
 
     T        = {u_(floor(j (n - 1) / L)) : j = 0, ..., L}, u the n pooled scores of the
                two views in ascending order, duplicates kept: the 'lower' order
-               statistics of torch.quantile at the levels j / L
+               statistics of torch.quantile at the levels j / L; P is not pooled
     R_d(tau) = mean(s_d > tau) + mean(s_P < tau), d = 1, 2, both inequalities strict
     p_d(tau) = exp(-beta R_d(tau)) / sum over T
-    A(beta)  = log(|T| sum_T p_1 p_2) = C + F, zero for two flat posteriors
-    C(beta)  = log cos(p_1, p_2) <= 0, the consistency
-    F(beta)  = log(|T| |p_1| |p_2|), the confidence
-    A-fix = A(beta_fix); A-sup = max of A over the beta grid, at beta_star;
-    D-fix = A-fix - A_pi, A_pi the mean of A over the transfer null.
+    A(beta)  = log(|T| sum_T p_1 p_2), zero for two flat posteriors, at most log|T|
 
-T and every R_d read the scores through their order alone, so that every output is
-unchanged by one strictly increasing map applied to the three sets. Two permutation
-nulls, each of n_draws draws, give A, C and F per draw at beta_fix:
+P is the set of SDS pseudo-outliers (``src/callbacks/sds.py``): built from the training
+inputs alone, it sits at the edge of the typical data and states no signal model.
 
-- transfer: the two views' scores are pooled and the view label is reassigned with the
-  counts kept; T and the probe term are those of the observed sets.
-- content: on each view apart, its scores are pooled with the probe's and the probe
-  label is reassigned with the counts kept; T is rebuilt from the draw's two typical
-  sets.
+The capacity is the supremum over the resolution beta of the expected log agreement of
+the posteriors of two instances of the data (Buhmann, Dumazert, Gronskiy and
+Szpankowski, Theor. Comput. Sci. 745 (2018), Definition 3). The instances are n_pairs
+bootstrap pairs: each view is redrawn with replacement at its own size and takes its own
+redraw of P at P's size, and the thresholds of the observed pair serve every pair::
 
-A draw relabels a pool cat(first, second) by ``torch.randperm``, whose first len(first)
-entries make the first set; a content draw takes view 1's permutation, then view 2's.
-Each null seeds a generator of its own with ``seed`` at every call, so that every probe,
-epoch and run sees the same permutations. The spreads are standard deviations over the
-draws with ddof 1, as the CAP bank's sigma_pi. Everything is computed in float64 on the
-CPU.
+    Abar(beta)  = mean over the pairs of A(beta), on n_beta log-spaced betas
+    I           = max over beta of Abar, in nats, at most log|T|
+    beta_star   = the beta of I, the smallest at a tie: an output, never declared
+    I_0         = I on pairs of its own, both views redrawn from the pooled typical
+                  sample at their own sizes, as if the two views came from one source
+    confidence  = I_0
+    consistency = I - I_0
+    saturated   = 1.0 if beta_star >= min(n_1, n_2, n_P), else 0.0
+
+The capacity sees neither the direction nor the level of the separation. The direction
+check reads them on view 1 and P alone, so it does not depend on the grade::
+
+    depth = 1 - min of R_1(tau) over every real tau
+    t     = (depth - mean of the null's depths) / their standard deviation, ddof 1
+
+The content null reassigns the reference label at random within the pooled scores of
+view 1 and P, counts kept. A null of zero spread gives NaN (0/0).
+
+T and every R read the scores through their order alone, so that every output is
+unchanged by one strictly increasing map applied to the sets. A set that is empty or
+holds a non-finite score makes NaN of every column that reads it, and of no other.
+
+A redraw is one multinomial draw of the counts in the len(T) + 1 cells that T cuts the
+line into. Those counts fix R and have the law of the cell counts of a redraw of the
+rows, at a cost independent of the number of rows.
+
+Seed rule. Three streams ``numpy.random.default_rng([seed, k])`` are created afresh at
+every call: k = 0 draws the pairs of I, k = 1 the pairs of I_0 and k = 2 the content
+null. In streams 0 and 1 the draws come in the order view 1, the reference for view 1,
+view 2, the reference for view 2, each of size n_pairs. Stream 2 makes n_draws
+sequential ``rng.permutation(n_1 + n_P)`` over cat(view 1, P), the first n_1 entries
+being view 1's relabelled scores and the rest the reference's. Every column is therefore
+a pure function of the scores and the configuration, and no grade depends on another.
+Since every candidate shares these draws, the error of a finite n_pairs or n_draws is
+common to the candidates and does not average out over them: it enters a comparison with
+an absolute bar in full. Everything is computed in float64 on the CPU.
 
 The entry points on plain scores, which the callbacks call and the test bed reads
-offline, are ``agreement`` (A, C and F at any betas), ``null_draws`` (A, C and F of
-every draw of both nulls) and ``threshold_posterior`` (every statistic at beta_fix);
-``half_entropy_beta`` gives the beta of the beta_fix rule.
+offline, are ``capacity`` (one grade), ``direction``, ``depth`` and ``ancap`` (every
+column of a set of grades).
 """
 
 import math
-from collections.abc import Iterator
 
+import numpy as np
 import torch
 from pytorch_lightning import Callback
 from torch import Tensor
 
 from src.callbacks.components.selection import EMA_WEIGHT, ema_update
-from src.callbacks.components.utils import drawn_masks, placeholder_loader
-from src.callbacks.score_dump import aux_inputs, input_moments, score_in_eval_mode
+from src.callbacks.components.utils import placeholder_loader
+from src.callbacks.score_dump import score_in_eval_mode
+from src.callbacks.sds import sds_inputs
 from src.data.utils import unpack_batch
 
-# The keys of threshold_posterior, in order.
-KEYS = (
-    "A-fix",
-    "D-fix",
-    "C",
-    "F",
-    "beta_fix",
-    "A_pi",
-    "sigma_pi",
-    "C_pi",
-    "sigma_C_pi",
-    "F_pi",
-    "sigma_F_pi",
-    "A_content",
-    "sigma_A_content",
-    "C_content",
-    "sigma_C_content",
-    "F_content",
-    "sigma_F_content",
-    "A-sup",
-    "beta_star",
-    "at_bound",
-)
-# The keys of the mean and of the spread of A, C and F over each null.
-TRANSFER_KEYS = {
-    "A": ("A_pi", "sigma_pi"),
-    "C": ("C_pi", "sigma_C_pi"),
-    "F": ("F_pi", "sigma_F_pi"),
+# The reference's name among the sets of the SDS pseudo-sets.
+REFERENCE = "sds_outliers"
+# The keys of capacity, in order, with the prefix of each one's column in ancap.
+COLUMNS = {
+    "capacity": "ancap",
+    "beta_star": "ancap_beta",
+    "confidence": "ancap_conf",
+    "consistency": "ancap_cons",
+    "saturated": "ancap_sat",
 }
-CONTENT_KEYS = {q: (f"{q}_content", f"sigma_{q}_content") for q in ("A", "C", "F")}
-# The statistics whose moving averages the training callback logs.
-LOGGED = ("A-fix", "D-fix")
-# The entries of one chunk of draws [draws, values]: each int64 array of a chunk holds
-# about 8 MB, which bounds the memory of the nulls on the wind tunnel's pools.
-CHUNK_ELEMENTS = 2**20
+KEYS = tuple(COLUMNS)
+# The streams of the seed rule.
+PAIRS_STREAM, POOLED_STREAM, NULL_STREAM = 0, 1, 2
+# The pairs of one chunk: an array [pairs, n_beta, len(T)] holds about 8 MB at the
+# registered sizes.
+PAIR_CHUNK = 8
+# In float64 exp is exactly 0 below this exponent (the last non-zero value is at
+# -745.13), and torch's exp takes about ten times as long there (12 against 1 ns per
+# element on olgpu), whereas a third of the exponents of a curve lie below it.
+UNDERFLOW = -746.0
+LOG_KWARGS = dict(
+    prog_bar=False,
+    on_step=False,
+    on_epoch=True,
+    logger=True,
+    sync_dist=True,
+    add_dataloader_idx=False,
+)
 
 
 def _as_scores(scores) -> Tensor:
     return torch.as_tensor(scores).detach().reshape(-1).to("cpu", torch.float64)
+
+
+def _usable(*sets: Tensor) -> bool:
+    return all(len(s) > 0 and bool(torch.isfinite(s).all()) for s in sets)
+
+
+def _stream(config, k: int) -> np.random.Generator:
+    return np.random.default_rng([config["seed"], k])
 
 
 def grid_positions(n: int, levels: int) -> Tensor:
@@ -108,373 +135,304 @@ def threshold_grid(scores_1, scores_2, levels: int) -> Tensor:
     return pooled[grid_positions(len(pooled), levels)]
 
 
-def costs(scores, probe, grid: Tensor) -> Tensor:
-    """Return R(tau) = mean(scores > tau) + mean(probe < tau) at every tau of grid."""
-    scores, probe = _as_scores(scores).sort().values, _as_scores(probe).sort().values
+def costs(scores, reference, grid: Tensor) -> Tensor:
+    """Return R(tau) = mean(scores > tau) + mean(reference < tau) at every tau of
+    grid."""
+    scores = _as_scores(scores).sort().values
+    reference = _as_scores(reference).sort().values
     above = len(scores) - torch.searchsorted(scores, grid, right=True)
-    below = torch.searchsorted(probe, grid)
-    return above.double() / len(scores) + below.double() / len(probe)
+    below = torch.searchsorted(reference, grid)
+    return above.double() / len(scores) + below.double() / len(reference)
 
 
 def beta_grid(config) -> Tensor:
-    """Return the grid of A-sup, that of the CAP bank."""
+    """Return the n_beta log-spaced betas of the curve."""
     low, high = math.log10(config["beta_min"]), math.log10(config["beta_max"])
     return torch.logspace(low, high, config["n_beta"], dtype=torch.float64)
 
 
-def _log_posterior(cost: Tensor, beta) -> Tensor:
-    logits = -beta * cost
-    return logits - torch.logsumexp(logits, dim=-1, keepdim=True)
+def _cells(scores: Tensor, grid: Tensor, right: bool) -> np.ndarray:
+    """Return the number of scores in each of the len(grid) + 1 cells of grid.
 
-
-def kernel(cost_1: Tensor, cost_2: Tensor, beta) -> dict[str, Tensor]:
-    """Return A, C and F of the posteriors of two costs over T, their last axis.
-
-    beta is a float or a tensor that broadcasts against the costs; betas [n_beta, 1]
-    against costs [len(T)] give curves [n_beta].
+    The first j + 1 cells hold the scores at most tau_j with ``right`` False and the
+    scores below tau_j with it True: the two counts of R, whatever the ties and the
+    duplicated thresholds.
     """
-    log_p1, log_p2 = _log_posterior(cost_1, beta), _log_posterior(cost_2, beta)
-    log_size = math.log(cost_1.shape[-1])
-    overlap = torch.logsumexp(log_p1 + log_p2, dim=-1)
-    norms = 0.5 * (torch.logsumexp(2 * log_p1, -1) + torch.logsumexp(2 * log_p2, -1))
-    return {"A": log_size + overlap, "C": overlap - norms, "F": log_size + norms}
+    cell = torch.searchsorted(grid, scores, right=right)
+    return torch.bincount(cell, minlength=len(grid) + 1).numpy()
 
 
-def entropy(cost: Tensor, beta: float) -> float:
-    """Return the entropy in nats of the posterior of a cost at beta."""
-    log_p = _log_posterior(cost, beta)
-    return -(log_p.exp() * log_p).sum().item()
+def _cell_costs(typical: np.ndarray, reference: np.ndarray) -> Tensor:
+    """Return R [B, len(T)] of the redrawn cell counts of the typical and reference
+    sets, each [B, len(T) + 1].
 
-
-def _bracket(cost: Tensor, target: float) -> tuple[float, float]:
-    """Return beta_low < beta_high with H(beta_low) > target >= H(beta_high), doubling
-    or halving from beta = 1."""
-    low = high = 1.0
-    while entropy(cost, high) > target:
-        low, high = high, 2.0 * high
-    while entropy(cost, low) <= target:
-        low, high = low / 2.0, low
-    return low, high
-
-
-def half_entropy_beta(cost: Tensor, rtol: float = 1e-10) -> float:
-    """Return the beta at which the posterior of cost has half the entropy of the flat.
-
-    H(beta) falls from log|T| at beta = 0 (dH/dbeta = -beta Var_p(R)) to the log of the
-    number of minimisers of R as beta grows; where that limit is at least (1/2) log|T|
-    the level is never reached and +inf is returned. Otherwise the root is bracketed and
-    bisected in log beta to the relative tolerance rtol.
+    The arithmetic is that of ``costs``, so that the two agree to the last bit.
     """
-    target = 0.5 * math.log(cost.numel())
-    if math.log(int((cost == cost.min()).sum())) >= target:
-        return math.inf
-    low, high = _bracket(cost, target)
-    while high > low * (1.0 + rtol):
-        middle = math.sqrt(low * high)
-        low, high = (middle, high) if entropy(cost, middle) > target else (low, middle)
-    return math.sqrt(low * high)
+    n, n_reference = int(typical[0].sum()), int(reference[0].sum())
+    above = n - torch.from_numpy(typical).cumsum(dim=1)[:, :-1]
+    below = torch.from_numpy(reference).cumsum(dim=1)[:, :-1]
+    return above.double() / n + below.double() / n_reference
 
 
-def _ranked(values: Tensor) -> tuple[Tensor, Tensor, Tensor, Tensor]:
-    """Return the values in ascending order [N], the position of every value in that
-    order [N], and per position the number of values below it and at most it [N]."""
-    ordered, order = torch.sort(values, stable=True)
-    position = torch.empty_like(order)
-    position[order] = torch.arange(len(values))
-    below = torch.searchsorted(ordered, ordered)
-    return ordered, position, below, torch.searchsorted(ordered, ordered, right=True)
+def _redrawn_costs(
+    rng: np.random.Generator,
+    sources: list[np.ndarray],
+    sizes: list[int],
+    reference: np.ndarray,
+    n_pairs: int,
+) -> list[Tensor]:
+    """Return R [n_pairs, len(T)] of each view, redrawn at sizes from the cell counts of
+    sources, each view with its own redraw of the reference's cell counts."""
+    n_reference, drawn = int(reference.sum()), []
+    for cells, n in zip(sources, sizes):
+        typical = rng.multinomial(n, cells / cells.sum(), size=n_pairs)
+        references = rng.multinomial(n_reference, reference / n_reference, size=n_pairs)
+        drawn.append(_cell_costs(typical, references))
+    return drawn
 
 
-def _counts(positions: Tensor, size: int) -> Tensor:
-    """Return per row of positions [B, m] the number of its entries below each of the
-    positions 0, ..., size, [B, size + 1]."""
-    hits = torch.zeros(len(positions), size + 1, dtype=torch.int64)
-    hits.scatter_add_(1, positions + 1, torch.ones_like(positions))
-    return hits.cumsum(dim=1)
+def _from_zero(cost: Tensor) -> Tensor:
+    return cost - cost.amin(dim=-1, keepdim=True)
 
 
-def _view_cost(counts: Tensor, probe: Tensor, upper: Tensor, lower: Tensor) -> Tensor:
-    """Return R of one view [B, levels + 1] from the counts of its typical set and its
-    probe, read at the numbers of values at most (upper) and below (lower) each
-    threshold."""
-    n_draws, n = len(upper), int(counts[0, -1])
-    above = n - counts.expand(n_draws, -1).gather(1, upper)
-    under = probe.expand(n_draws, -1).gather(1, lower)
-    return above.double() / n + under.double() / int(probe[0, -1])
+def _log_partition(cost: Tensor, betas: Tensor) -> Tensor:
+    """Return log sum_T exp(-beta R) [..., n_beta] of a cost [..., len(T)] with a zero
+    in every row, so that no exponent is positive and the sum is at least one.
 
-
-def _drawn_costs(ranked, typical, probes, levels: int) -> tuple[Tensor, Tensor, Tensor]:
-    """Return R_1, R_2 and the thresholds, each [B, levels + 1], of B draws.
-
-    typical and probes hold per view the counts of ``_counts`` over the positions of
-    ``ranked``, [B, N + 1], or [1, N + 1] when every draw shares them. A threshold is
-    the value at the first position where the joint count of the typical sets exceeds
-    its grid position, the order statistic that ``threshold_grid`` takes; counting at
-    the ends of its run of tied values keeps both inequalities of R strict.
+    An exponent below ``UNDERFLOW`` sits at 0 during the exp and is zeroed after it,
+    which gives the bits of the plain sum at a third of its cost.
     """
-    ordered, _, below, at_most = ranked
-    joint = typical[0] + typical[1]
-    targets = (grid_positions(int(joint[0, -1]), levels) + 1).repeat(len(joint), 1)
-    index = torch.searchsorted(joint, targets) - 1
-    upper, lower = at_most[index], below[index]
-    cost_1, cost_2 = (_view_cost(t, p, upper, lower) for t, p in zip(typical, probes))
-    return cost_1, cost_2, ordered[index]
+    exponents = cost.unsqueeze(-2) * -betas.unsqueeze(-1)
+    underflowing = exponents < UNDERFLOW
+    exponents.masked_fill_(underflowing, 0.0).exp_().masked_fill_(underflowing, 0.0)
+    return exponents.sum(dim=-1).log_()
 
 
-def _chunk_sizes(n_draws: int, n_values: int) -> list[int]:
-    size = max(1, CHUNK_ELEMENTS // n_values)
-    return [min(size, n_draws - start) for start in range(0, n_draws, size)]
+def agreement(cost_1: Tensor, cost_2: Tensor, betas: Tensor) -> Tensor:
+    """Return A(beta) [..., n_beta] of the posteriors of two costs over T, their last
+    axis.
 
-
-def _split(pool: Tensor, perms: list[Tensor], n_first: int, n_values: int) -> list:
-    """Return the counts of the first n_first entries of pool under every permutation of
-    perms, and those of the rest, each [len(perms), n_values + 1]."""
-    first = _counts(pool[torch.stack(perms)[:, :n_first]], n_values)
-    # The rest by difference from the whole pool, which halves the scatters.
-    return [first, _counts(pool[None], n_values) - first]
-
-
-def _transfer_counts(ranked, n_1: int, n_2: int, n_draws: int, seed: int) -> Iterator:
-    """Yield per chunk of draws the counts of the two typical sets and of the probe."""
-    position, n_values = ranked[1], len(ranked[0])
-    probe = _counts(position[None, n_1 + n_2 :], n_values)
-    generator = torch.Generator().manual_seed(seed)
-    for size in _chunk_sizes(n_draws, n_values):
-        perms = [torch.randperm(n_1 + n_2, generator=generator) for _ in range(size)]
-        yield _split(position[: n_1 + n_2], perms, n_1, n_values), [probe, probe]
-
-
-def _view_permutations(pools: list[Tensor], size: int, generator) -> list[list]:
-    """Return per pool the permutations of size draws, drawn draw by draw and, within a
-    draw, in the order of the pools."""
-    draws = [
-        [torch.randperm(len(pool), generator=generator) for pool in pools]
-        for _ in range(size)
-    ]
-    return [list(view) for view in zip(*draws)]
-
-
-def _content_counts(ranked, n_1: int, n_2: int, n_draws: int, seed: int) -> Iterator:
-    """Yield per chunk of draws the counts of the two typical sets and of the two
-    probes."""
-    position, n_values = ranked[1], len(ranked[0])
-    typical, probe = position[: n_1 + n_2], position[n_1 + n_2 :]
-    pools = [torch.cat([typical[:n_1], probe]), torch.cat([typical[n_1:], probe])]
-    generator = torch.Generator().manual_seed(seed)
-    for size in _chunk_sizes(n_draws, n_values):
-        perms = _view_permutations(pools, size, generator)
-        views = zip(pools, perms, (n_1, n_2))
-        splits = [_split(pool, p, n, n_values) for pool, p, n in views]
-        yield [split[0] for split in splits], [split[1] for split in splits]
-
-
-def _draws(counts: Iterator, ranked, beta: float, levels: int) -> dict[str, Tensor]:
-    """Return A, C and F at beta of every draw of a null, [n_draws] each."""
-    chunks = []
-    for typical, probes in counts:
-        cost_1, cost_2, _ = _drawn_costs(ranked, typical, probes, levels)
-        chunks.append(kernel(cost_1, cost_2, beta))
-    return {q: torch.cat([chunk[q] for chunk in chunks]) for q in ("A", "C", "F")}
-
-
-def _summary(draws: dict[str, Tensor], names: dict) -> dict[str, float]:
-    # torch's default std, ddof 1, as the CAP bank's sigma_pi.
-    values = {}
-    for q, (mean_key, sigma_key) in names.items():
-        values |= {mean_key: draws[q].mean().item(), sigma_key: draws[q].std().item()}
-    return values
-
-
-def agreement(scores_1, scores_2, probe, betas, levels: int) -> dict[str, Tensor]:
-    """Return A, C and F of the observed posteriors at every beta, [n_beta] each.
-
-    The scores are not checked for finiteness, which ``threshold_posterior`` does.
+    A = log|T| + z_12 - z_1 - z_2, with z = log sum_T exp(-beta R) and z_12 on
+    R_1 + R_2. A posterior keeps its value when its cost loses a constant, so that each
+    cost enters from zero and exactly flat posteriors give exactly zero. The minimum of
+    their sum is taken out by hand: disjoint minimisers leave it above zero, and at
+    beta = 1e6 every term of z_12 would underflow.
 
     Args:
-        scores_1: Scores of X1 [n_1], as anything ``torch.as_tensor`` accepts.
-        scores_2: Scores of X2 [n_2].
-        probe: Scores of the probe set [n_P].
-        betas: One beta or a 1-D grid of them [n_beta].
-        levels: L, the grid T holding L + 1 thresholds.
+        cost_1: R_1 [..., len(T)].
+        cost_2: R_2 [..., len(T)].
+        betas: The betas [n_beta].
     """
-    sets = [_as_scores(s) for s in (scores_1, scores_2, probe)]
-    grid = threshold_grid(sets[0], sets[1], levels)
-    cost_1, cost_2 = (costs(s, sets[2], grid) for s in sets[:2])
-    betas = torch.as_tensor(betas, dtype=torch.float64).reshape(-1, 1)
-    return kernel(cost_1, cost_2, betas)
+    cost_1, cost_2 = _from_zero(cost_1), _from_zero(cost_2)
+    joint = cost_1 + cost_2
+    floor = joint.amin(dim=-1, keepdim=True)
+    z_12 = _log_partition(joint - floor, betas) - betas * floor
+    z_1, z_2 = _log_partition(cost_1, betas), _log_partition(cost_2, betas)
+    return math.log(cost_1.shape[-1]) + z_12 - z_1 - z_2
 
 
-def null_draws(
-    scores_1, scores_2, probe, beta: float, config, seed: int | None = None
-) -> dict[str, dict[str, Tensor]]:
-    """Return A, C and F at beta of every draw of each null, [n_draws] each.
+def _mean_curve(cost_1: Tensor, cost_2: Tensor, betas: Tensor) -> Tensor:
+    """Return the mean over the pairs [n_pairs] of each pair's log agreement, [n_beta].
 
-    The keys are 'transfer' and 'content'. The draws are those that
-    ``threshold_posterior`` summarises when seed is None, which takes
-    ``config["seed"]``; ``config["n_draws"]`` and ``config["levels"]`` are read too.
-    The arguments are otherwise those of ``agreement``, and as there the scores are
-    not checked for finiteness.
+    This is the expectation of the log, not the log of the mean agreement.
     """
-    sets = [_as_scores(s) for s in (scores_1, scores_2, probe)]
-    ranked = _ranked(torch.cat(sets))
-    seed = config["seed"] if seed is None else seed
-    args = (ranked, len(sets[0]), len(sets[1]), config["n_draws"], seed)
-    nulls = {"transfer": _transfer_counts, "content": _content_counts}
-    return {
-        name: _draws(counts(*args), ranked, beta, config["levels"])
-        for name, counts in nulls.items()
-    }
+    chunks = zip(cost_1.split(PAIR_CHUNK), cost_2.split(PAIR_CHUNK))
+    return torch.cat([agreement(*chunk, betas) for chunk in chunks]).mean(dim=0)
 
 
-def _nulls(sets: list[Tensor], beta: float, config) -> dict[str, float]:
-    """Return the means and spreads of A, C and F over the transfer and content
-    nulls."""
-    draws = null_draws(*sets, beta, config)
-    transfer = _summary(draws["transfer"], TRANSFER_KEYS)
-    return transfer | _summary(draws["content"], CONTENT_KEYS)
+def _first_maximum(curve: Tensor, betas: Tensor) -> tuple[float, float]:
+    """Return the maximum of curve and the smallest beta that reaches it.
 
-
-def _supremum(curve: Tensor, betas: Tensor) -> dict[str, float]:
-    """Return the maximum of curve, its beta, and 1.0 if that beta ends the grid."""
+    A saturated curve rises to its limit in steps that fall below the resolution of
+    float64 with exp(-beta d), d the smallest step of the costs, near beta = 36 / d. Its
+    beta_star marks the start of that plateau, flat to rounding, not the end of the
+    grid.
+    """
     best = int(torch.argmax(curve))
-    at_bound = float(best in (0, len(betas) - 1))
-    return {
-        "A-sup": curve[best].item(),
-        "beta_star": betas[best].item(),
-        "at_bound": at_bound,
-    }
+    return curve[best].item(), betas[best].item()
 
 
-def _observed(sets: list[Tensor], beta: float, config) -> dict[str, float]:
-    """Return A-fix, C and F at beta, and A-sup with its beta_star and at_bound."""
+def _capacity(
+    rng: np.random.Generator,
+    sources: list[np.ndarray],
+    sizes: list[int],
+    reference: np.ndarray,
+    config,
+) -> tuple[float, float]:
+    """Return the maximum of the mean curve of one stream's pairs, and its beta."""
     betas = beta_grid(config)
-    at_betas = torch.cat([torch.tensor([beta], dtype=torch.float64), betas])
-    curves = agreement(*sets, at_betas, config["levels"])
-    at_beta = {q: v[0].item() for q, v in curves.items()}
-    values = _supremum(curves["A"][1:], betas)
-    return values | {"A-fix": at_beta["A"], "C": at_beta["C"], "F": at_beta["F"]}
+    cost_1, cost_2 = _redrawn_costs(rng, sources, sizes, reference, config["n_pairs"])
+    return _first_maximum(_mean_curve(cost_1, cost_2, betas), betas)
 
 
-def threshold_posterior(
-    scores_1, scores_2, probe, beta_fix: float, config
-) -> dict[str, float]:
-    """Return every statistic of the threshold posterior of two views and one probe.
+def _capacities(sets: list[Tensor], config) -> tuple[float, float, float]:
+    """Return I, beta_star and I_0 of the three sets, each usable."""
+    grid = threshold_grid(sets[0], sets[1], config["levels"])
+    cells = [_cells(s, grid, right=False) for s in sets[:2]]
+    args = ([len(s) for s in sets[:2]], _cells(sets[2], grid, right=True), config)
+    own, beta_star = _capacity(_stream(config, PAIRS_STREAM), cells, *args)
+    pooled = [cells[0] + cells[1]] * 2
+    return own, beta_star, _capacity(_stream(config, POOLED_STREAM), pooled, *args)[0]
 
-    The keys are those of ``KEYS``: A-fix, D-fix, C and F at beta_fix, and beta_fix;
-    the means and spreads over the transfer null of A (A_pi, sigma_pi), C (C_pi,
-    sigma_C_pi) and F (F_pi, sigma_F_pi) and over the content null of each
-    (<q>_content, sigma_<q>_content), at beta_fix; A-sup, its beta_star and at_bound,
-    1.0 if beta_star is either end of the grid. If a score of the three sets is not
-    finite, every value but beta_fix is NaN.
+
+def capacity(scores_1, scores_2, reference, config) -> dict[str, float]:
+    """Return the capacity of one grade and what is reported beside it.
+
+    The keys are those of ``KEYS``. If one of the three sets is empty or holds a
+    non-finite score, every value is NaN.
 
     Args:
         scores_1: Scores of X1 [n_1], as anything ``torch.as_tensor`` accepts.
         scores_2: Scores of X2 [n_2].
-        probe: Scores of the probe set [n_P].
-        beta_fix: The fixed beta of the probe.
-        config: The posterior's configuration, as in ``configs/cap/posterior.yaml``;
-            its own ``beta_fix`` is not read.
+        reference: Scores of the reference [n_P].
+        config: The posterior's configuration, as in ``configs/cap/posterior.yaml``.
     """
-    sets = [_as_scores(s) for s in (scores_1, scores_2, probe)]
-    if not all(bool(torch.isfinite(s).all()) for s in sets):
-        return dict.fromkeys(KEYS, math.nan) | {"beta_fix": beta_fix}
-    values = _observed(sets, beta_fix, config) | _nulls(sets, beta_fix, config)
-    values |= {"D-fix": values["A-fix"] - values["A_pi"], "beta_fix": beta_fix}
-    return {key: values[key] for key in KEYS}
+    sets = [_as_scores(s) for s in (scores_1, scores_2, reference)]
+    if not _usable(*sets):
+        return dict.fromkeys(KEYS, math.nan)
+    own, beta_star, confidence = _capacities(sets, config)
+    saturated = float(beta_star >= min(len(s) for s in sets))
+    return dict(zip(KEYS, (own, beta_star, confidence, own - confidence, saturated)))
 
 
-def declared_betas(config) -> dict[str, float]:
-    """Return the fixed beta of every registered probe.
+def depth(scores, reference) -> float:
+    """Return 1 - min R(tau) over every real tau, for finite, non-empty sets.
 
-    Raises:
-        ValueError: If a registered probe's beta_fix is null.
+    A tie between the two sets counts as no error at that tau, by the strict
+    inequalities. The pooled values suffice: above a pooled value v and below the next
+    one, R has lost no score above v and may have gained a reference point below, so
+    that R(v) is no larger; and beyond either end R is 1, no less than at the end.
     """
-    betas = {probe: config["beta_fix"].get(probe) for probe in config["probes"]}
-    missing = [probe for probe, beta in betas.items() if beta is None]
-    if missing:
-        raise ValueError(
-            f"beta_fix of the probes {missing} is null. The test bed declares it, by "
-            "the rule of 08_tests.md (amendment of 26 Oct, 02:25), before any label "
-            "is read; set it under cap_posterior.beta_fix."
-        )
-    return {probe: float(beta) for probe, beta in betas.items()}
+    scores, reference = _as_scores(scores), _as_scores(reference)
+    points = torch.cat([scores, reference])
+    return 1.0 - costs(scores, reference, points).min().item()
 
 
-def _logged_keys(probes, dataset_1: str, dataset_2: str) -> dict[tuple, str]:
-    """Return the logged key of every probe and statistic of ``LOGGED``."""
-    pair_name = "_vs_".join(name.replace("/", "_") for name in (dataset_1, dataset_2))
-    prefix = "val/summary/posterior"
-    return {
-        (probe, statistic): f"{prefix}_{probe}_{statistic}_ema_{pair_name}"
-        for probe in probes
-        for statistic in LOGGED
-    }
+def _ranked(pool: Tensor) -> tuple[Tensor, Tensor, Tensor]:
+    """Return the position of every value of pool in ascending order [N], and per
+    position the number of values below it and at most it [N]."""
+    ordered, order = torch.sort(pool, stable=True)
+    position = torch.empty_like(order)
+    position[order] = torch.arange(len(pool))
+    below = torch.searchsorted(ordered, ordered)
+    return position, below, torch.searchsorted(ordered, ordered, right=True)
+
+
+def _relabelled_depth(ranked: tuple, view: np.ndarray, n_reference: int) -> float:
+    """Return ``depth`` of a relabelled pool, the indices view [n] being the view's.
+
+    R at every pooled value is read off a running count of the view's positions, which
+    spares two sorts per draw; the arithmetic is that of ``costs``, so that the two
+    agree to the last bit.
+    """
+    position, below, at_most = ranked
+    hits = torch.zeros(len(position) + 1, dtype=torch.int64)
+    hits[position[view] + 1] = 1
+    # count[i] is the number of the view's values among the i smallest of the pool.
+    count = hits.cumsum(dim=0)
+    above, under = len(view) - count[at_most], below - count[below]
+    cost = above.double() / len(view) + under.double() / n_reference
+    return 1.0 - cost.min().item()
+
+
+def _null_depths(scores: Tensor, reference: Tensor, config) -> Tensor:
+    """Return the depth of each draw of the content null, [n_draws]."""
+    rng, n, n_reference = _stream(config, NULL_STREAM), len(scores), len(reference)
+    ranked = _ranked(torch.cat([scores, reference]))
+    drawn = (rng.permutation(n + n_reference) for _ in range(config["n_draws"]))
+    depths = [_relabelled_depth(ranked, perm[:n], n_reference) for perm in drawn]
+    return torch.tensor(depths, dtype=torch.float64)
+
+
+def direction(scores_1, reference, config) -> float:
+    """Return t, the depth of view 1 against the content null in units of its spread.
+
+    The value is NaN if either set is empty or holds a non-finite score, and for a null
+    of zero spread.
+
+    Args:
+        scores_1: Scores of X1 [n_1], as anything ``torch.as_tensor`` accepts.
+        reference: Scores of the reference [n_P].
+        config: The posterior's configuration, as in ``configs/cap/posterior.yaml``.
+    """
+    scores, reference = _as_scores(scores_1), _as_scores(reference)
+    if not _usable(scores, reference):
+        return math.nan
+    draws = _null_depths(scores, reference, config)
+    # Tensors, since a Python float raises on the division by a zero spread.
+    return ((depth(scores, reference) - draws.mean()) / draws.std()).item()
+
+
+def ancap(scores_1, views: dict, reference, config) -> dict[str, float]:
+    """Return every column of a set of grades.
+
+    The keys are ``ancap_<grade>`` (the capacity), ``ancap_beta_<grade>``,
+    ``ancap_conf_<grade>``, ``ancap_cons_<grade>``, ``ancap_sat_<grade>`` and
+    ``ancap_dir``. A grade's columns read view 1, its own view and the reference;
+    ``ancap_dir`` reads view 1 and the reference.
+
+    Args:
+        scores_1: Scores of X1 [n_1], as anything ``torch.as_tensor`` accepts.
+        views: The scores of X2 of each grade, by grade.
+        reference: Scores of the reference [n_P].
+        config: The posterior's configuration, as in ``configs/cap/posterior.yaml``.
+    """
+    values = {}
+    for grade, scores_2 in views.items():
+        stats = capacity(scores_1, scores_2, reference, config)
+        values |= {f"{COLUMNS[key]}_{grade}": stats[key] for key in KEYS}
+    return values | {"ancap_dir": direction(scores_1, reference, config)}
 
 
 class ThresholdPosteriorCallback(Callback):
-    """Log the moving averages of A-fix and D-fix of the threshold posterior.
+    """Log the moving average of the capacity of every grade.
 
-    The scores of dataset_1 and dataset_2 are collected batch by batch at every
-    validation epoch after the sanity pass. The probes, the auxiliary sets of the score
-    dump named in ``posterior_config["probes"]``, are drawn once at fit start as
-    NPDCallback draws ``autouad`` and scored at every epoch end in eval mode under
-    forked RNG streams. Every epoch logs, for each probe,
-    ``val/summary/posterior_<probe>_<A-fix|D-fix>_ema_<dataset_1>_vs_<dataset_2>``,
-    averaged as CAPBankCallback averages: a non-finite value leaves the average
-    unchanged.
+    The scores of dataset_1 and of the views are collected batch by batch at every
+    validation epoch after the sanity pass. The reference, the pseudo-outliers of
+    ``sds_inputs`` over the training inputs, is built once at fit start as SDSCallback
+    builds it and scored at every epoch end in eval mode under forked RNG streams. Every
+    epoch logs ``val/summary/ancap_<grade>_ema`` for each grade, averaged as
+    CAPBankCallback averages: a non-finite value leaves the average unchanged.
 
     Args:
         output_name: Key in the outputs dict of the per-event anomaly scores.
         dataset_1: Name of the validation dataloader of X1.
-        dataset_2: Name of the validation dataloader of X2.
+        views: Name of the validation dataloader of X2, by grade.
         posterior_config: The posterior's configuration, as in
-            ``configs/cap/posterior.yaml``. A null beta_fix of a registered probe
-            raises at the first epoch end, so that the configuration composes before
-            the test bed declares it.
+            ``configs/cap/posterior.yaml``.
         ema_weight: Weight of the previous value in the exponential moving average.
-        aux_seed: Seed of the auxiliary sets, as ScoreDumpCallback's, and of the
-            training rows whose masks the points take.
-        aux_size: Number of points in each auxiliary set.
-        batch_size: Batch size of the passes over the probes.
+        max_rows: Largest number of distinct training rows the reference is built from.
+        row_seed: Seed of the subset of rows.
+        batch_size: Batch size of the pass over the reference.
     """
 
     def __init__(
         self,
         output_name: str,
         dataset_1: str,
-        dataset_2: str,
+        views: dict[str, str],
         posterior_config: dict,
         ema_weight: float = EMA_WEIGHT,
-        aux_seed: int = 0,
-        aux_size: int = 10000,
+        max_rows: int | None = 10000,
+        row_seed: int = 0,
         batch_size: int = 1024,
     ):
         super().__init__()
         self.output_name, self.ema_weight = output_name, ema_weight
-        self.datasets, self.config = (dataset_1, dataset_2), posterior_config
-        self.probes = list(posterior_config["probes"])
-        self.aux_seed, self.aux_size, self.batch_size = aux_seed, aux_size, batch_size
-        self.keys = _logged_keys(self.probes, dataset_1, dataset_2)
-        self.log_kwargs = dict(
-            prog_bar=False,
-            on_step=False,
-            on_epoch=True,
-            logger=True,
-            sync_dist=True,
-            add_dataloader_idx=False,
-        )
+        self.dataset_1, self.views = dataset_1, dict(views)
+        self.datasets = [dataset_1, *self.views.values()]
+        self.config, self.max_rows = posterior_config, max_rows
+        self.row_seed, self.batch_size = row_seed, batch_size
+        self.keys = {grade: f"val/summary/ancap_{grade}_ema" for grade in self.views}
 
     def on_fit_start(self, trainer, pl_module):
-        """Instantiate the moving averages and draw the probes."""
-        self.emas = {name: math.nan for name in self.keys}
+        """Instantiate the moving averages and build the reference's loader."""
+        self.emas = dict.fromkeys(self.views, math.nan)
         train = unpack_batch(trainer.datamodule.data_train.tensors)
-        meta = {"aux_seed": self.aux_seed, "aux_size": self.aux_size}
-        inputs = aux_inputs({**meta, **input_moments(train.x)})
-        mask = drawn_masks(train.mask, self.aux_size, self.aux_seed)
-        self.loaders = {
-            probe: placeholder_loader(inputs[probe], self.batch_size, mask)
-            for probe in self.probes
-        }
+        inputs = sds_inputs(train.x, self.max_rows, self.row_seed, train.mask)
+        mask = inputs.get(f"{REFERENCE}_mask")
+        loader = placeholder_loader(inputs[REFERENCE], self.batch_size, mask)
+        self.loaders = {REFERENCE: loader}
 
     def on_validation_epoch_start(self, trainer, pl_module):
         """Check the dataloaders and reset the scores."""
@@ -490,7 +448,7 @@ class ThresholdPosteriorCallback(Callback):
     def on_validation_batch_end(
         self, trainer, pl_module, outputs, batch, batch_idx, dataloader_idx=0
     ):
-        """Collect the scores of the two sets."""
+        """Collect the scores of the views."""
         if trainer.sanity_checking:
             return
         dset_name = list(trainer.val_dataloaders.keys())[dataloader_idx]
@@ -499,25 +457,26 @@ class ThresholdPosteriorCallback(Callback):
             self.scores[dset_name].append(score.cpu())
 
     def on_validation_epoch_end(self, trainer, pl_module):
-        """Score the probes, compute the posterior per probe and log the averages."""
+        """Score the reference, compute each grade's capacity and log the averages."""
         if trainer.sanity_checking:
             return
-        betas = declared_betas(self.config)
-        typical = [torch.cat(self.scores[name]) for name in self.datasets]
-        for probe, scores in self._probe_scores(trainer, pl_module).items():
-            values = threshold_posterior(*typical, scores, betas[probe], self.config)
-            self._average(probe, values)
-        logged = {key: self.emas[name] for name, key in self.keys.items()}
-        pl_module.log_dict(logged, **self.log_kwargs)
+        reference = self._reference_scores(trainer, pl_module)
+        scores = {name: torch.cat(self.scores[name]) for name in self.datasets}
+        for grade, name in self.views.items():
+            view_1, view_2 = scores[self.dataset_1], scores[name]
+            self._average(grade, capacity(view_1, view_2, reference, self.config))
+        logged = {self.keys[grade]: value for grade, value in self.emas.items()}
+        pl_module.log_dict(logged, **LOG_KWARGS)
 
-    def _probe_scores(self, trainer, pl_module) -> dict[str, Tensor]:
+    def _average(self, grade: str, stats: dict[str, float]) -> None:
+        self.emas[grade] = ema_update(
+            self.emas[grade], stats["capacity"], self.ema_weight, skip_nonfinite=True
+        )
+
+    def _reference_scores(self, trainer, pl_module) -> Tensor:
         keys = [self.output_name]
         scored = score_in_eval_mode(trainer, pl_module, self.loaders, keys).scores()
-        return {probe: scored[probe][self.output_name] for probe in self.probes}
-
-    def _average(self, probe: str, values: dict[str, float]) -> None:
-        for statistic in LOGGED:
-            name = (probe, statistic)
-            self.emas[name] = ema_update(
-                self.emas[name], values[statistic], self.ema_weight, skip_nonfinite=True
-            )
+        # An empty pseudo-set serves no batch and so leaves no entry.
+        if REFERENCE not in scored:
+            return torch.empty(0)
+        return scored[REFERENCE][self.output_name]

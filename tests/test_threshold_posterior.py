@@ -1,28 +1,27 @@
-import importlib.util
 import math
+from decimal import Context, Decimal, localcontext
 from pathlib import Path
 
+import numpy as np
 import pytest
 import torch
 from omegaconf import OmegaConf
-from scipy.optimize import brentq
 
 from src.callbacks import threshold_posterior as tp
-from src.callbacks.components.cap import bank
 
 ROOT = Path(__file__).resolve().parents[1]
 CONFIG = OmegaConf.to_container(OmegaConf.load(ROOT / "configs/cap/posterior.yaml"))
-BANK = OmegaConf.to_container(OmegaConf.load(ROOT / "configs/cap/bank.yaml"))
-SCRIPT = ROOT / "scripts/analysis/posterior_beta_fix.py"
-# Fewer draws than registered, for speed; the nulls' code paths are the same.
-SMALL = CONFIG | {"n_draws": 30}
-BETA = 7.5
+# Fewer pairs and draws than registered, for speed; the code paths are the same.
+SMALL = CONFIG | {"n_pairs": 20, "n_draws": 30}
 SIZES = (37, 55, 29)
+LOG_T = math.log(401)
 MAPS = {
     "exp": torch.exp,
     "cubic": lambda x: x**3 + x,
     "affine": lambda x: 3.0 * x - 2.0,
 }
+# Every way a set can make a column NaN; None empties the set.
+BAD_VALUES = [math.inf, -math.inf, math.nan, None]
 
 
 def _scores(n, seed, shift=0.0):
@@ -37,99 +36,66 @@ def _case(seed=0):
     return _scores(n_1, seed), _scores(n_2, seed + 1, 0.3), _scores(n_p, seed + 2, 1.5)
 
 
-def _ranked(sets):
-    return tp._ranked(torch.cat(sets))
+def _spoiled(scores, value):
+    if value is None:
+        return scores[:0]
+    scores = scores.clone()
+    scores[3] = value
+    return scores
 
 
-def _stacked(chunks):
-    # The counts of the two typical sets and the two probes of every draw, [n, N + 1].
-    arrays = [[], [], [], []]
-    for typical, probes in chunks:
-        size = len(typical[0])
-        for k, counts in enumerate([*typical, *probes]):
-            arrays[k].append(counts.expand(size, -1))
-    return [torch.cat(array) for array in arrays]
+def _resampled(scores, generator):
+    return scores[torch.randint(len(scores), (len(scores),), generator=generator)]
 
 
-def _reference_cost(scores, probe, grid):
-    scores, probe = scores.tolist(), probe.tolist()
-    return [
+def _literal_agreement(cost_1, cost_2, beta):
+    # Decimal, whose range holds exp(-2e6): no minimum is taken out, unlike the code.
+    with localcontext(Context(prec=60, Emin=-(10**12), Emax=10**12)):
+        beta = Decimal(beta)
+        w_1 = [(-beta * Decimal(r)).exp() for r in cost_1]
+        w_2 = [(-beta * Decimal(r)).exp() for r in cost_2]
+        overlap = sum(a * b for a, b in zip(w_1, w_2)) / (sum(w_1) * sum(w_2))
+        return float((len(cost_1) * overlap).ln())
+
+
+def _literal_costs(sets, config, k, pooled):
+    # The specification's cells and draws, written apart from the code under test.
+    s_1, s_2, reference = (s.numpy() for s in sets)
+    rng = np.random.default_rng([config["seed"], k])
+    grid = tp.threshold_grid(s_1, s_2, config["levels"]).numpy()
+    cells = len(grid) + 1
+    h_1 = np.bincount(np.searchsorted(grid, s_1, "left"), minlength=cells)
+    h_2 = np.bincount(np.searchsorted(grid, s_2, "left"), minlength=cells)
+    g = np.bincount(np.searchsorted(grid, reference, "right"), minlength=cells)
+    sources = (h_1 + h_2, h_1 + h_2) if pooled else (h_1, h_2)
+    n_p, drawn = len(reference), []
+    for source, n in zip(sources, (len(s_1), len(s_2))):
+        h = rng.multinomial(n, source / source.sum(), size=config["n_pairs"])
+        p = rng.multinomial(n_p, g / n_p, size=config["n_pairs"])
+        drawn.append(1 - h.cumsum(1)[:, :-1] / n + p.cumsum(1)[:, :-1] / n_p)
+    return drawn
+
+
+def _per_pair_agreement(cost_1, cost_2, betas):
+    # Each pair's log(|T| sum_T p_1 p_2), [n_pairs, n_beta], by plain log-softmaxes.
+    curves = []
+    for r_1, r_2 in zip(torch.as_tensor(cost_1), torch.as_tensor(cost_2)):
+        log_p_1 = torch.log_softmax(-betas[:, None] * r_1, dim=-1)
+        log_p_2 = torch.log_softmax(-betas[:, None] * r_2, dim=-1)
+        curves.append(LOG_T + torch.logsumexp(log_p_1 + log_p_2, dim=-1))
+    return torch.stack(curves)
+
+
+def _brute_depth(scores, reference):
+    values = sorted({*scores, *reference})
+    between = [(a + b) / 2 for a, b in zip(values, values[1:])]
+    taus = [values[0] - 1.0, *values, *between, values[-1] + 1.0]
+    risks = [
         sum(s > t for s in scores) / len(scores)
-        + sum(p < t for p in probe) / len(probe)
-        for t in grid.tolist()
+        + sum(p < t for p in reference) / len(reference)
+        for t in taus
     ]
-
-
-def _reference_kernel(cost_1, cost_2, beta):
-    posteriors = []
-    for cost in (cost_1, cost_2):
-        weights = [math.exp(-beta * r) for r in cost]
-        posteriors.append([w / sum(weights) for w in weights])
-    p_1, p_2 = posteriors
-    overlap = sum(a * b for a, b in zip(p_1, p_2))
-    norms = math.sqrt(sum(a * a for a in p_1)) * math.sqrt(sum(b * b for b in p_2))
-    size = len(cost_1)
-    return math.log(size * overlap), math.log(overlap / norms), math.log(size * norms)
-
-
-def _reference_transfer(s_1, s_2, probe, beta, n_draws, seed):
-    generator = torch.Generator().manual_seed(seed)
-    pool, n_1 = torch.cat([s_1, s_2]), len(s_1)
-    draws = []
-    for _ in range(n_draws):
-        perm = torch.randperm(len(pool), generator=generator)
-        view_1, view_2 = pool[perm[:n_1]], pool[perm[n_1:]]
-        grid = tp.threshold_grid(view_1, view_2, 400)
-        cost = [tp.costs(view, probe, grid) for view in (view_1, view_2)]
-        draws.append({**tp.kernel(*cost, beta), "grid": grid})
-    return draws
-
-
-def _reference_content(s_1, s_2, probe, beta, n_draws, seed):
-    generator = torch.Generator().manual_seed(seed)
-    pools = [torch.cat([s_1, probe]), torch.cat([s_2, probe])]
-    sizes = [len(s_1), len(s_2)]
-    draws = []
-    for _ in range(n_draws):
-        perms = [torch.randperm(len(pool), generator=generator) for pool in pools]
-        typical = [pool[p[:n]] for pool, p, n in zip(pools, perms, sizes)]
-        probes = [pool[p[n:]] for pool, p, n in zip(pools, perms, sizes)]
-        grid = tp.threshold_grid(*typical, 400)
-        cost = [tp.costs(t, q, grid) for t, q in zip(typical, probes)]
-        draws.append({**tp.kernel(*cost, beta), "grid": grid})
-    return draws
-
-
-REFERENCES = {"transfer": _reference_transfer, "content": _reference_content}
-NULLS = {"transfer": tp._transfer_counts, "content": tp._content_counts}
-
-
-def _two_level_entropy(beta, m, size):
-    # m entries of the cost at 0 and the rest at 1: H = log Z + beta <R>.
-    z = m + (size - m) * math.exp(-beta)
-    return math.log(z) + beta * (size - m) * math.exp(-beta) / z
-
-
-def _two_level_cost(m, size=401):
-    return torch.cat([torch.zeros(m), torch.ones(size - m)]).double()
-
-
-def _load_script():
-    spec = importlib.util.spec_from_file_location("posterior_beta_fix", SCRIPT)
-    module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
-    return module
-
-
-def _write_run(directory, epochs):
-    directory.mkdir()
-    torch.save({}, directory / "meta.pt")
-    for epoch, (normal, x2, probes) in enumerate(epochs):
-        record = {
-            "val": {"normal": {"ascore/full": normal}, "x2": {"ascore/full": x2}},
-            "aux": {name: {"ascore/full": s} for name, s in probes.items()},
-        }
-        torch.save(record, directory / f"epoch_{epoch:04d}.pt")
+    return 1.0 - min(risks)
 
 
 def test_grid_is_the_lower_order_statistic_of_the_pooled_scores():
@@ -149,262 +115,390 @@ def test_grid_is_the_lower_order_statistic_of_the_pooled_scores():
 
 def test_costs_count_both_inequalities_strictly():
     scores = torch.tensor([1.0, 2.0, 2.0, 3.0])
-    probe = torch.tensor([2.0, 3.0, 3.0])
+    reference = torch.tensor([2.0, 3.0, 3.0])
     grid = torch.tensor([2.0, 3.0, 2.5], dtype=torch.float64)
     expected = torch.tensor([1 / 4, 1 / 3, 1 / 4 + 1 / 3], dtype=torch.float64)
-    torch.testing.assert_close(tp.costs(scores, probe, grid), expected, rtol=0, atol=0)
+    cost = tp.costs(scores, reference, grid)
+    torch.testing.assert_close(cost, expected, rtol=0, atol=0)
 
 
-@pytest.mark.parametrize("beta", [0.05, 1.0, 7.5, 60.0])
-def test_agreement_is_that_of_a_double_loop_over_the_thresholds(beta):
-    s_1, s_2, probe = _case(seed=3)
+@pytest.mark.parametrize("seed", range(4))
+def test_cell_counts_reproduce_costs_exactly_on_any_resample(seed):
+    s_1, s_2, reference = _case(seed)
     grid = tp.threshold_grid(s_1, s_2, 400)
-    cost_1, cost_2 = (_reference_cost(s, probe, grid) for s in (s_1, s_2))
-    a, c, f = _reference_kernel(cost_1, cost_2, beta)
-
-    values = tp.threshold_posterior(s_1, s_2, probe, beta, SMALL)
-    assert values["A-fix"] == pytest.approx(a, rel=0, abs=1e-12)
-    assert values["C"] == pytest.approx(c, rel=0, abs=1e-12)
-    assert values["F"] == pytest.approx(f, rel=0, abs=1e-12)
-    assert values["A-fix"] == pytest.approx(values["C"] + values["F"], abs=1e-12)
-    assert values["C"] <= 1e-15
-
-
-def test_agreement_takes_one_beta_or_a_grid_and_gives_a_sup():
-    sets = _case(seed=3)
-    betas = torch.tensor([0.05, 1.0, 7.5, 60.0], dtype=torch.float64)
-    curves = tp.agreement(*sets, betas, 400)
-    assert {q: v.shape for q, v in curves.items()} == dict.fromkeys("ACF", (4,))
-    grid = tp.threshold_grid(sets[0], sets[1], 400)
-    cost_1, cost_2 = (_reference_cost(s, sets[2], grid) for s in sets[:2])
-    for k, beta in enumerate(betas.tolist()):
-        expected = _reference_kernel(cost_1, cost_2, beta)
-        for q, value in zip("ACF", expected):
-            assert curves[q][k].item() == pytest.approx(value, rel=0, abs=1e-12)
-        single = tp.agreement(*sets, beta, 400)["A"]
-        assert single.shape == (1,)
-        assert single.item() == pytest.approx(curves["A"][k].item(), rel=0, abs=1e-14)
-
-    values = tp.threshold_posterior(*sets, BETA, SMALL)
-    curve = tp.agreement(*sets, tp.beta_grid(CONFIG), 400)["A"]
-    assert values["A-sup"] == pytest.approx(curve.max().item(), rel=0, abs=1e-14)
-    assert values["beta_star"] == tp.beta_grid(CONFIG)[curve.argmax()].item()
+    # The grid holds duplicates and the reference ties with it, by the rounding.
+    assert grid.unique().numel() < 401
+    assert set(reference.tolist()) & set(grid.tolist())
+    g = torch.Generator().manual_seed(seed)
+    for _ in range(50):
+        sample, points = _resampled(s_1, g), _resampled(reference, g)
+        typical = tp._cells(sample, grid, right=False)[None]
+        probes = tp._cells(points, grid, right=True)[None]
+        cost = tp._cell_costs(typical, probes)[0]
+        assert torch.equal(cost, tp.costs(sample, points, grid))
 
 
-def test_flat_posteriors_give_zero():
-    cost = torch.linspace(0.0, 2.0, 401, dtype=torch.float64)
-    flat = torch.full_like(cost, 0.7)
-    for values in (tp.kernel(flat, flat, 30.0), tp.kernel(cost, cost.flip(0), 0.0)):
-        for value in values.values():
-            assert value.item() == pytest.approx(0.0, abs=1e-12)
+def test_a_multinomial_redraw_has_the_moments_of_a_redraw_of_the_rows():
+    s_1, s_2, reference = _case(seed=2)
+    grid, n_draws = tp.threshold_grid(s_1, s_2, 400), 4000
+    cells = tp._cells(s_1, grid, right=False)
+    probes = tp._cells(reference, grid, right=True)
+    rng = np.random.default_rng(1)
+    drawn = tp._redrawn_costs(rng, [cells], [len(s_1)], probes, n_draws)[0]
+    g = torch.Generator().manual_seed(1)
+    rows = torch.stack(
+        [
+            tp.costs(_resampled(s_1, g), _resampled(reference, g), grid)
+            for _ in range(n_draws)
+        ]
+    )
+    for j in (40, 120, 200, 280, 360):
+        var_cells, var_rows = drawn[:, j].var().item(), rows[:, j].var().item()
+        spread = math.sqrt((var_cells + var_rows) / n_draws)
+        difference = abs(drawn[:, j].mean().item() - rows[:, j].mean().item())
+        assert difference < 5 * spread, j
+        # The relative error of a variance is about sqrt(2 / n) per sample.
+        assert abs(var_cells / var_rows - 1) < 5 * math.sqrt(4 / n_draws), j
 
 
-def test_a_sup_reads_the_bank_grid_and_flags_either_end():
+@pytest.mark.parametrize("beta", [0.01, 7.5, 1000.0, 1e6])
+def test_agreement_is_that_of_a_plain_loop_over_the_thresholds(beta):
+    s_1, s_2, reference = _case(seed=3)
+    grid = tp.threshold_grid(s_1, s_2, 400)
+    cost_1, cost_2 = (tp.costs(s, reference, grid) for s in (s_1, s_2))
+    value = tp.agreement(cost_1, cost_2, torch.tensor([beta], dtype=torch.float64))
+    expected = _literal_agreement(cost_1.tolist(), cost_2.tolist(), beta)
+    assert value.item() == pytest.approx(expected, rel=0, abs=1e-8)
+
+
+def test_the_underflow_cut_keeps_every_bit_of_the_partition():
+    s_1, s_2, reference = _case(seed=3)
+    grid = tp.threshold_grid(s_1, s_2, 400)
+    cost = tp._from_zero(tp.costs(s_1, reference, grid))
     betas = tp.beta_grid(CONFIG)
-    assert torch.equal(betas, bank._betas(BANK))
-    log_beta = betas.log()
-    rising = tp._supremum(log_beta, betas)
-    falling = tp._supremum(-log_beta, betas)
-    peaked = tp._supremum(-((log_beta - 1.0) ** 2), betas)
-    assert rising["beta_star"] == betas[-1].item() and rising["at_bound"] == 1.0
-    assert falling["beta_star"] == betas[0].item() and falling["at_bound"] == 1.0
-    assert peaked["at_bound"] == 0.0
-    assert peaked["beta_star"] == pytest.approx(math.e, rel=0.05)
+    plain = (cost * -betas[:, None]).exp().sum(dim=-1).log()
+    assert ((cost * -betas[:, None]) < tp.UNDERFLOW).any()
+    assert torch.equal(tp._log_partition(cost, betas), plain)
+    assert torch.tensor(tp.UNDERFLOW, dtype=torch.float64).exp().item() == 0.0
+
+
+def test_agreement_stays_finite_at_the_largest_beta_with_disjoint_minimisers():
+    cost_1, cost_2 = torch.ones(401).double(), torch.ones(401).double()
+    cost_1[10], cost_2[300] = 0.0, 0.25
+    beta = torch.tensor([1e6], dtype=torch.float64)
+    value = tp.agreement(cost_1, cost_2, beta).item()
+    expected = _literal_agreement(cost_1.tolist(), cost_2.tolist(), 1e6)
+    assert math.isfinite(value) and value < -1e5
+    assert value == pytest.approx(expected, rel=1e-12)
+
+
+def test_agreement_is_exactly_zero_at_flat_posteriors():
+    betas = tp.beta_grid(CONFIG)
+    flat = torch.full((401,), 0.7, dtype=torch.float64)
+    assert torch.equal(tp.agreement(flat, flat, betas), torch.zeros_like(betas))
+    cost = torch.linspace(0.0, 2.0, 401, dtype=torch.float64)
+    no_beta = torch.zeros(1, dtype=torch.float64)
+    assert torch.equal(tp.agreement(cost, cost.flip(0), no_beta), no_beta)
+
+
+def test_agreement_is_at_most_log_t():
+    betas = tp.beta_grid(CONFIG)
+    peaked = torch.ones(401, dtype=torch.float64)
+    peaked[7] = 0.0
+    assert tp.agreement(peaked, peaked, betas)[-1].item() == LOG_T
+    s_1, s_2, reference = _case(seed=6)
+    grid = tp.threshold_grid(s_1, s_2, 400)
+    cost_1, cost_2 = (tp.costs(s, reference, grid) for s in (s_1, s_2))
+    assert tp.agreement(cost_1, cost_2, betas).max().item() <= LOG_T + 1e-12
+
+
+def test_beta_grid_has_forty_values_per_decade_from_end_to_end():
+    betas = tp.beta_grid(CONFIG)
+    assert betas.shape == (321,) and betas.dtype == torch.float64
+    assert betas[0].item() == pytest.approx(0.01, rel=1e-12)
+    assert betas[-1].item() == pytest.approx(1e6, rel=1e-12)
+    steps = betas.log10().diff()
+    torch.testing.assert_close(steps, torch.full_like(steps, 1 / 40))
+
+
+def test_the_first_maximum_takes_the_smallest_beta_at_a_tie():
+    betas = tp.beta_grid(CONFIG)
+    flat = tp._first_maximum(torch.zeros_like(betas), betas)
+    assert flat == (0.0, betas[0].item())
+    curve = torch.zeros_like(betas)
+    curve[[100, 200]] = 1.5
+    assert tp._first_maximum(curve, betas) == (1.5, betas[100].item())
+
+
+def test_flat_posteriors_give_no_capacity_at_the_smallest_beta():
+    constant = torch.ones(40, dtype=torch.float64)
+    reference = torch.full((30,), 2.0, dtype=torch.float64)
+    stats = tp.capacity(constant, constant, reference, SMALL)
+    assert stats["capacity"] == 0.0 and stats["confidence"] == 0.0
+    assert stats["beta_star"] == tp.beta_grid(SMALL)[0].item()
+    assert stats["saturated"] == 0.0
+
+
+def test_the_curve_is_the_mean_of_the_logs_not_the_log_of_the_mean():
+    # One pair whose posteriors share their peak and one whose peaks are disjoint: the
+    # agreements are about 401 and 1e-6, so the two means sit nine nats apart.
+    first, second = torch.ones(401).double(), torch.ones(401).double()
+    first[10], second[300] = 0.0, 0.0
+    cost_1, cost_2 = torch.stack([first, first]), torch.stack([first, second])
+    betas = torch.tensor([20.0], dtype=torch.float64)
+    per_pair = _per_pair_agreement(cost_1, cost_2, betas)
+    curve = tp._mean_curve(cost_1, cost_2, betas)
+    log_of_mean = per_pair.exp().mean(dim=0).log()
+    torch.testing.assert_close(curve, per_pair.mean(dim=0), rtol=0, atol=1e-12)
+    assert (log_of_mean - curve).abs().item() > 5.0
+
+
+def test_capacity_and_confidence_are_literal_maxima_of_the_mean_over_pairs():
+    # Well-shifted views give pairs that disagree by a varying amount, where the mean of
+    # the logs and the log of the mean part.
+    sets = [_scores(400, 1), _scores(400, 2, 0.5), _scores(300, 3, 2.5)]
+    config = CONFIG | {"n_pairs": 40, "n_beta": 81}
+    betas = tp.beta_grid(config)
+    stats = tp.capacity(*sets, config)
+    per_pair = {
+        pooled: _per_pair_agreement(*_literal_costs(sets, config, k, pooled), betas)
+        for k, pooled in ((0, False), (1, True))
+    }
+    own, confidence = (per_pair[pooled].mean(dim=0) for pooled in (False, True))
+    assert stats["capacity"] == pytest.approx(own.max().item(), rel=0, abs=1e-8)
+    assert stats["confidence"] == pytest.approx(confidence.max().item(), abs=1e-8)
+    # Each maximum is its own: the confidence is not read at I's beta_star.
+    assert stats["beta_star"] == betas[own.argmax()].item()
+    assert own.argmax() != confidence.argmax()
+    log_of_mean = per_pair[False].exp().mean(dim=0).log().max().item()
+    assert log_of_mean - stats["capacity"] > 0.05
+
+
+def test_chunks_leave_the_result_unchanged(monkeypatch):
+    sets = _case(seed=1)
+    whole = tp.capacity(*sets, SMALL)
+    monkeypatch.setattr(tp, "PAIR_CHUNK", 3)
+    assert tp.capacity(*sets, SMALL) == whole
+
+
+def test_the_streams_follow_the_seed_rule():
+    for k in (tp.PAIRS_STREAM, tp.POOLED_STREAM, tp.NULL_STREAM):
+        drawn = tp._stream(SMALL, k).integers(2**31, size=8)
+        expected = np.random.default_rng([SMALL["seed"], k]).integers(2**31, size=8)
+        assert np.array_equal(drawn, expected)
+    assert (tp.PAIRS_STREAM, tp.POOLED_STREAM, tp.NULL_STREAM) == (0, 1, 2)
+    first, second = (tp._stream(SMALL, k).integers(2**31, size=8) for k in (0, 1))
+    assert not np.array_equal(first, second)
+
+
+def test_the_same_call_gives_the_same_result():
+    s_1, s_2, reference = _case(seed=4)
+    views = {"a": s_2}
+    assert tp.ancap(s_1, views, reference, SMALL) == tp.ancap(
+        s_1, views, reference, SMALL
+    )
+
+
+def test_a_grade_depends_neither_on_the_others_nor_on_their_order():
+    s_1, s_2, reference = _case(seed=4)
+    other = _scores(41, 9, 0.8)
+    both = tp.ancap(s_1, {"a": s_2, "b": other}, reference, SMALL)
+    swapped = tp.ancap(s_1, {"b": other, "a": s_2}, reference, SMALL)
+    alone = tp.ancap(s_1, {"a": s_2}, reference, SMALL)
+    assert both == swapped
+    assert alone == {key: v for key, v in both.items() if not key.endswith("_b")}
+
+
+def test_ancap_holds_the_named_columns_of_capacity_and_direction():
+    s_1, s_2, reference = _case(seed=4)
+    values = tp.ancap(s_1, {"weak": s_2}, reference, SMALL)
+    stats = tp.capacity(s_1, s_2, reference, SMALL)
+    assert values == {
+        "ancap_weak": stats["capacity"],
+        "ancap_beta_weak": stats["beta_star"],
+        "ancap_conf_weak": stats["confidence"],
+        "ancap_cons_weak": stats["consistency"],
+        "ancap_sat_weak": stats["saturated"],
+        "ancap_dir": tp.direction(s_1, reference, SMALL),
+    }
+    assert list(stats) == list(tp.KEYS)
+
+
+def test_both_views_of_the_confidence_are_drawn_from_the_pool(monkeypatch):
+    calls, redrawn = [], tp._redrawn_costs
+
+    def spy(rng, sources, sizes, reference, n_pairs):
+        calls.append((sources, sizes, reference))
+        return redrawn(rng, sources, sizes, reference, n_pairs)
+
+    monkeypatch.setattr(tp, "_redrawn_costs", spy)
+    s_1, s_2, reference = _case()
+    tp.capacity(s_1, s_2, reference, SMALL)
+    grid = tp.threshold_grid(s_1, s_2, 400)
+    h_1, h_2 = (tp._cells(s, grid, right=False) for s in (s_1, s_2))
+    probes = tp._cells(reference, grid, right=True)
+    (own, own_sizes, own_probes), (pool, pool_sizes, pool_probes) = calls
+    assert np.array_equal(own[0], h_1) and np.array_equal(own[1], h_2)
+    assert all(np.array_equal(cells, h_1 + h_2) for cells in pool)
+    assert own_sizes == pool_sizes == [len(s_1), len(s_2)]
+    # The observed pair's thresholds serve both: the reference's cells are the same.
+    assert np.array_equal(own_probes, probes)
+    assert np.array_equal(pool_probes, probes)
+
+
+def test_identical_views_give_a_consistency_near_zero():
+    scores, reference = _scores(500, 0), _scores(400, 1, 2.0)
+    stats = tp.capacity(scores, scores, reference, CONFIG | {"n_beta": 81})
+    assert abs(stats["consistency"]) < 0.1
+    # Streams 0 and 1 give the two their own pairs, though the sources coincide.
+    assert stats["consistency"] != 0.0
+
+
+def test_well_shifted_views_give_a_negative_consistency():
+    views = _scores(500, 0), _scores(500, 1, 1.0)
+    stats = tp.capacity(*views, _scores(400, 2, 2.5), CONFIG | {"n_beta": 81})
+    assert stats["consistency"] < -0.5
+    assert stats["capacity"] <= LOG_T and stats["confidence"] <= LOG_T
+
+
+@pytest.mark.parametrize("seed", range(3))
+def test_consistency_is_exactly_capacity_less_confidence(seed):
+    stats = tp.capacity(*_case(seed), SMALL)
+    assert stats["consistency"] == stats["capacity"] - stats["confidence"]
+
+
+@pytest.mark.parametrize("seed", range(4))
+def test_depth_is_that_of_a_loop_over_every_tau(seed):
+    s_1, _, reference = _case(seed)
+    expected = _brute_depth(s_1.tolist(), reference.tolist())
+    assert tp.depth(s_1, reference) == pytest.approx(expected, rel=0, abs=1e-12)
+
+
+def test_a_tie_between_the_sets_counts_as_no_error():
+    scores = torch.tensor([0.0, 1.0, 2.0], dtype=torch.float64)
+    reference = torch.tensor([2.0, 2.0, 3.0], dtype=torch.float64)
+    # At tau = 2 no score lies above it and no reference point below it.
+    assert tp.depth(scores, reference) == 1.0
+
+
+def test_depth_reads_every_tau_and_not_the_grid_of_thresholds():
+    # Far more scores than thresholds, and a reference at one point between two of them:
+    # the cost's minimum sits there, and 678 of the 5,000 scores lie above it.
+    scores = torch.arange(5000, dtype=torch.float64)
+    reference = torch.full((100,), 4321.5, dtype=torch.float64)
+    grid = tp.threshold_grid(scores, scores, 400)
+    on_the_grid = 1.0 - tp.costs(scores, reference, grid).min().item()
+    assert tp.depth(scores, reference) == pytest.approx(1 - 678 / 5000, abs=1e-12)
+    assert tp.depth(scores, reference) > on_the_grid + 1e-3
+
+
+def test_depth_at_both_ends():
+    scores = torch.zeros(10, dtype=torch.float64)
+    assert tp.depth(scores, torch.ones(10, dtype=torch.float64)) == 1.0
+    assert tp.depth(scores, -torch.ones(10, dtype=torch.float64)) == 0.0
+
+
+def test_the_content_null_keeps_the_counts_and_follows_the_seed_rule():
+    s_1, _, reference = _case(seed=2)
+    draws = tp._null_depths(s_1, reference, SMALL)
+    rng = np.random.default_rng([SMALL["seed"], 2])
+    pool, n = torch.cat([s_1, reference]), len(s_1)
+    expected = []
+    for _ in range(SMALL["n_draws"]):
+        perm = rng.permutation(len(pool))
+        view, rest = pool[perm[:n]], pool[perm[n:]]
+        assert (len(view), len(rest)) == (n, len(reference))
+        assert torch.equal(torch.cat([view, rest]).sort().values, pool.sort().values)
+        expected.append(_brute_depth(view.tolist(), rest.tolist()))
+        # The running count of a draw agrees with the sorted depth to the last bit.
+        assert draws[len(expected) - 1].item() == tp.depth(view, rest)
+    assert draws.shape == (SMALL["n_draws"],) and draws.dtype == torch.float64
+    expected = torch.tensor(expected, dtype=torch.float64)
+    torch.testing.assert_close(draws, expected, rtol=0, atol=1e-12)
+    assert torch.equal(tp._null_depths(s_1, reference, SMALL), draws)
+    other = tp._null_depths(s_1, reference, SMALL | {"seed": 1})
+    assert not torch.equal(other, draws)
+
+
+def test_direction_is_the_depth_in_units_of_the_null():
+    s_1, _, reference = _case(seed=2)
+    draws = tp._null_depths(s_1, reference, SMALL).tolist()
+    mean = sum(draws) / len(draws)
+    sigma = math.sqrt(sum((d - mean) ** 2 for d in draws) / (len(draws) - 1))
+    t = (tp.depth(s_1, reference) - mean) / sigma
+    assert tp.direction(s_1, reference, SMALL) == pytest.approx(t, rel=1e-10)
+
+
+def test_a_reference_above_the_scores_gives_a_large_t():
+    scores = _scores(300, 0)
+    assert tp.direction(scores, _scores(300, 1, 8.0), SMALL) > 10.0
+
+
+def test_a_reference_below_the_scores_gives_no_large_t():
+    scores = _scores(300, 0)
+    assert tp.direction(scores, _scores(300, 1, -8.0), SMALL) < 0.0
+
+
+def test_constant_scores_give_a_nan_direction():
+    scores, reference = torch.ones(50), torch.ones(30)
+    assert tp.depth(scores, reference) == 1.0
+    assert math.isnan(tp.direction(scores, reference, SMALL))
+
+
+@pytest.mark.parametrize("offset, expected", [(0.0, 1.0), (1.0, 1.0), (-1e-9, 0.0)])
+def test_the_saturation_mark_reads_the_smallest_size(monkeypatch, offset, expected):
+    sets = _case()
+    beta_star = min(SIZES) + offset
+    monkeypatch.setattr(tp, "_capacities", lambda *args: (1.0, beta_star, 0.5))
+    assert tp.capacity(*sets, SMALL)["saturated"] == expected
+
+
+def test_a_reference_above_every_score_saturates():
+    scores = _scores(300, 0)
+    stats = tp.capacity(scores, _scores(300, 1, 0.25), _scores(300, 2, 8.0), SMALL)
+    assert stats["beta_star"] >= 300 and stats["saturated"] == 1.0
 
 
 @pytest.mark.parametrize("name", MAPS)
-def test_every_output_is_invariant_under_one_increasing_map(name):
-    sets = _case(seed=5)
-    values = tp.threshold_posterior(*sets, BETA, SMALL)
-    mapped = tp.threshold_posterior(*(MAPS[name](s) for s in sets), BETA, SMALL)
-    assert list(values) == list(tp.KEYS)
-    for key in tp.KEYS:
-        assert math.isfinite(values[key]), key
-        assert mapped[key] == pytest.approx(values[key], rel=0, abs=1e-10), key
+def test_every_column_is_exactly_invariant_under_one_increasing_map(name):
+    s_1, s_2, reference = _case(seed=5)
+    values = tp.ancap(s_1, {"a": s_2}, reference, SMALL)
+    f = MAPS[name]
+    mapped = tp.ancap(f(s_1), {"a": f(s_2)}, f(reference), SMALL)
+    assert all(math.isfinite(value) for value in values.values())
+    assert mapped == values
 
 
-def test_outputs_change_under_different_maps_on_the_two_views():
-    s_1, s_2, probe = _case(seed=5)
-    values = tp.threshold_posterior(s_1, s_2, probe, BETA, SMALL)
-    mapped = tp.threshold_posterior(s_1, MAPS["affine"](s_2), probe, BETA, SMALL)
-    for key in ("A-fix", "C", "F", "A_pi", "A_content"):
+def test_the_columns_change_under_different_maps_on_the_two_views():
+    s_1, s_2, reference = _case(seed=5)
+    values = tp.capacity(s_1, s_2, reference, SMALL)
+    mapped = tp.capacity(s_1, MAPS["affine"](s_2), reference, SMALL)
+    for key in ("capacity", "confidence", "consistency"):
         assert abs(mapped[key] - values[key]) > 1e-6, key
 
 
-@pytest.mark.parametrize("which", NULLS)
-def test_nulls_are_seeded_and_keep_the_counts(which):
-    sets, null = _case(), NULLS[which]
-    ranked, (n_1, n_2, n_p) = _ranked(sets), SIZES
-    first = _stacked(null(ranked, n_1, n_2, 25, 0))
-    again = _stacked(null(ranked, n_1, n_2, 25, 0))
-    other = _stacked(null(ranked, n_1, n_2, 25, 1))
-    assert all(torch.equal(a, b) for a, b in zip(first, again))
-    assert not all(torch.equal(a, b) for a, b in zip(first, other))
-    for counts, n in zip(first, (n_1, n_2, n_p, n_p)):
-        assert counts.shape == (25, sum(SIZES) + 1)
-        assert torch.equal(counts[:, -1], torch.full((25,), n))
-    # Every draw relabels anew.
-    assert len(first[0].unique(dim=0)) == 25
+@pytest.mark.parametrize("value", BAD_VALUES)
+def test_a_bad_view_2_touches_its_own_grade_alone(value):
+    s_1, s_2, reference = _case(seed=4)
+    other = _scores(41, 9, 0.8)
+    clean = tp.ancap(s_1, {"a": s_2, "b": other}, reference, SMALL)
+    bad = tp.ancap(s_1, {"a": s_2, "b": _spoiled(other, value)}, reference, SMALL)
+    assert set(bad) == set(clean)
+    for key, column in bad.items():
+        if key.endswith("_b"):
+            assert math.isnan(column), key
+        else:
+            assert column == clean[key], key
 
 
-def test_transfer_null_keeps_the_grid_and_the_probe_term():
-    sets = _case()
-    ranked, (n_1, n_2, _) = _ranked(sets), SIZES
-    position, size = ranked[1], len(ranked[1])
-    typical_1, typical_2, probe_1, probe_2 = _stacked(
-        tp._transfer_counts(ranked, n_1, n_2, 25, 0)
-    )
-    pooled = tp._counts(position[None, : n_1 + n_2], size)
-    probe = tp._counts(position[None, n_1 + n_2 :], size)
-    assert torch.equal(typical_1 + typical_2, pooled.expand(25, -1))
-    assert torch.equal(probe_1, probe.expand(25, -1)) and torch.equal(probe_2, probe_1)
-    grid = tp.threshold_grid(sets[0], sets[1], 400)
-    for chunk in tp._transfer_counts(ranked, n_1, n_2, 25, 0):
-        thresholds = tp._drawn_costs(ranked, *chunk, 400)[2]
-        assert torch.equal(thresholds, grid.expand(len(thresholds), -1))
-
-
-def test_content_null_keeps_each_pool_and_rebuilds_the_grid():
-    sets = _case()
-    ranked, (n_1, n_2, _) = _ranked(sets), SIZES
-    position, size = ranked[1], len(ranked[1])
-    typical_1, typical_2, probe_1, probe_2 = _stacked(
-        tp._content_counts(ranked, n_1, n_2, 25, 0)
-    )
-    probe = position[n_1 + n_2 :]
-    pool_1 = tp._counts(torch.cat([position[:n_1], probe])[None], size)
-    pool_2 = tp._counts(torch.cat([position[n_1 : n_1 + n_2], probe])[None], size)
-    assert torch.equal(typical_1 + probe_1, pool_1.expand(25, -1))
-    assert torch.equal(typical_2 + probe_2, pool_2.expand(25, -1))
-    chunks = tp._content_counts(ranked, n_1, n_2, 25, 0)
-    thresholds = torch.cat([tp._drawn_costs(ranked, *c, 400)[2] for c in chunks])
-    reference = _reference_content(*sets, BETA, 25, 0)
-    assert torch.equal(thresholds, torch.stack([draw["grid"] for draw in reference]))
-    grid = tp.threshold_grid(sets[0], sets[1], 400)
-    assert any(not torch.equal(row, grid) for row in thresholds)
-
-
-@pytest.mark.parametrize("chunked", [False, True])
-@pytest.mark.parametrize("which", NULLS)
-def test_vectorised_nulls_equal_a_draw_by_draw_reference(which, chunked, monkeypatch):
-    if chunked:
-        # Chunks of three draws, so that the generator runs on across chunks.
-        monkeypatch.setattr(tp, "CHUNK_ELEMENTS", 3 * sum(SIZES))
-        assert tp._chunk_sizes(40, sum(SIZES)) == [3] * 13 + [1]
-    sets = _case(seed=2)
-    config = CONFIG | {"n_draws": 40, "seed": 11}
-    draws = tp.null_draws(*sets, BETA, config, seed=3)[which]
-    expected = REFERENCES[which](*sets, BETA, 40, 3)
-    for q in ("A", "C", "F"):
-        column = torch.stack([draw[q] for draw in expected])
-        torch.testing.assert_close(draws[q], column, rtol=0, atol=1e-12)
-    # Without a seed, the configuration's.
-    default = tp.null_draws(*sets, BETA, config)[which]
-    expected = REFERENCES[which](*sets, BETA, 40, 11)
-    torch.testing.assert_close(default["A"], torch.stack([d["A"] for d in expected]))
-
-
-def test_null_summaries_are_the_moments_of_the_reference_draws():
-    sets, n_draws = _case(seed=4), SMALL["n_draws"]
-    values = tp.threshold_posterior(*sets, BETA, SMALL)
-    for which, names in (("transfer", tp.TRANSFER_KEYS), ("content", tp.CONTENT_KEYS)):
-        draws = REFERENCES[which](*sets, BETA, n_draws, 0)
-        for q, (mean_key, sigma_key) in names.items():
-            column = [draw[q].item() for draw in draws]
-            mean = sum(column) / n_draws
-            # ddof 1, as the CAP bank's sigma_pi.
-            sigma = math.sqrt(sum((v - mean) ** 2 for v in column) / (n_draws - 1))
-            assert values[mean_key] == pytest.approx(mean, rel=0, abs=1e-12)
-            assert values[sigma_key] == pytest.approx(sigma, rel=1e-9, abs=1e-14)
-    assert values["D-fix"] == values["A-fix"] - values["A_pi"]
-    assert values["beta_fix"] == BETA
-
-
-@pytest.mark.parametrize("which, value", [(0, math.inf), (1, math.nan), (2, -math.inf)])
-def test_non_finite_scores_give_nan_for_every_output(which, value):
-    sets = [s.clone() for s in _case()]
-    sets[which][3] = value
-    values = tp.threshold_posterior(*sets, BETA, SMALL)
-    assert list(values) == list(tp.KEYS) and values["beta_fix"] == BETA
-    assert all(math.isnan(values[key]) for key in tp.KEYS if key != "beta_fix")
-
-
-@pytest.mark.parametrize("m", [1, 5, 20])
-def test_half_entropy_beta_of_a_two_level_cost(m):
-    cost, size = _two_level_cost(m), 401
-    for beta in (0.1, 1.0, 10.0, 100.0):
-        expected = _two_level_entropy(beta, m, size)
-        assert tp.entropy(cost, beta) == pytest.approx(expected, rel=1e-12, abs=1e-13)
-    target = 0.5 * math.log(size)
-    root = brentq(
-        lambda b: _two_level_entropy(b, m, size) - target, 1e-6, 1e6, xtol=1e-14
-    )
-    beta = tp.half_entropy_beta(cost)
-    assert beta == pytest.approx(root, rel=1e-9)
-    assert tp.entropy(cost, beta) == pytest.approx(target, abs=1e-9)
-
-
-def test_entropy_falls_with_beta():
-    s_1, s_2, probe = _case(seed=7)
-    cost = tp.costs(s_1, probe, tp.threshold_grid(s_1, s_2, 400))
-    betas = torch.logspace(-3, 4, 300, dtype=torch.float64).tolist()
-    entropies = [tp.entropy(cost, beta) for beta in betas]
-    assert entropies[0] == pytest.approx(math.log(401), abs=1e-3)
-    assert all(b <= a + 1e-12 for a, b in zip(entropies, entropies[1:]))
-    beta = tp.half_entropy_beta(cost)
-    assert math.isfinite(beta)
-    assert tp.entropy(cost, beta) == pytest.approx(0.5 * math.log(401), abs=1e-9)
-
-
-@pytest.mark.parametrize("m", [21, 200, 401])
-def test_half_entropy_beta_is_infinite_with_enough_minimisers(m):
-    # (1/2) log 401 lies between log 20 and log 21.
-    assert tp.half_entropy_beta(_two_level_cost(m)) == math.inf
-
-
-def test_beta_fix_script_pools_the_last_epochs_and_lets_inf_into_the_median(
-    tmp_path,
-):
-    script = _load_script()
-    config = {"levels": 400, "probes": ["autouad", "uniform"]}
-    # uniform lies above every typical score, so that R_1 is zero on every threshold
-    # of x2 and p_1 keeps more than half the entropy; a NaN leaves run_c's autouad
-    # value out.
-    constant = torch.zeros(10)
-    expected = []
-    for seed, run in enumerate(("run_a", "run_b", "run_c")):
-        g = torch.Generator().manual_seed(seed)
-        normal, x2 = torch.randn(200, generator=g), torch.randn(300, generator=g) + 100
-        autouad = torch.randn(150, generator=g) + 3.0
-        if run == "run_c":
-            autouad[0] = math.nan
-        probes = {"autouad": autouad, "uniform": torch.full((80,), 1e3)}
-        old = (constant, constant, {"autouad": constant, "uniform": constant})
-        _write_run(tmp_path / run, [old, (normal, x2, probes)])
-        grid = tp.threshold_grid(normal, x2, 400)
-        expected.append(tp.half_entropy_beta(tp.costs(normal, autouad, grid)))
-    (tmp_path / "no_meta").mkdir()
-
-    runs = script._runs([tmp_path])
-    assert [run.name for run in runs] == ["run_a", "run_b", "run_c"]
-    values = script.betas(runs, ["x2"], config)
-    assert all(math.isfinite(beta) for beta in expected[:2])
-    assert values["autouad"][:2] == expected[:2] and math.isnan(values["autouad"][2])
-    assert values["uniform"] == [math.inf] * 3
-    median = (expected[0] + expected[1]) / 2
-    lines = script.report(values).splitlines()
-    assert lines[0] == (
-        "autouad: 2 values (1 non-finite left out, 0 +inf), "
-        f"median beta = {median:.6g}"
-    )
-    assert lines[1] == (
-        "uniform: 3 values (0 non-finite left out, 3 +inf), median beta = inf"
-    )
-    assert lines[2] == f"beta_fix: {{ autouad: {median:.6g}, uniform: .inf }}"
-
-
-def test_beta_fix_median_takes_inf_as_the_largest_value():
-    script = _load_script()
-    assert script._summary("p", [1.0, math.inf, 2.0, math.nan])[1] == 2.0
-    assert script._summary("p", [1.0, math.inf, math.inf, 2.0])[1] == math.inf
-    assert script._yaml(math.inf) == ".inf" and script._yaml(2.5) == "2.5"
+@pytest.mark.parametrize("value", BAD_VALUES)
+@pytest.mark.parametrize("which", ["view_1", "reference"])
+def test_a_bad_set_read_by_every_column_makes_each_nan(which, value):
+    s_1, s_2, reference = _case(seed=4)
+    if which == "view_1":
+        s_1 = _spoiled(s_1, value)
+    else:
+        reference = _spoiled(reference, value)
+    values = tp.ancap(s_1, {"a": s_2}, reference, SMALL)
+    assert len(values) == 6
+    assert all(math.isnan(column) for column in values.values())

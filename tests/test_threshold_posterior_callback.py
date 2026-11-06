@@ -63,9 +63,16 @@ TUNNELS = {
     },
     "cchamber_wt": {"osr": "sensor_osr"},
 }
+IMAGES = {
+    "cifar10": {name: name for name in ("sensor_weak", "sensor_mid", "sensor_strong")},
+    "mscct": {name: name for name in ("nz20", "nz210", "p1000", "gt450")},
+}
+DOMAINS = TUNNELS | IMAGES
 # As extra_sets.sds of configs/eval/mscct.yaml.
 SDS = {"max_rows": 10000, "row_seed": 0}
 RUNS = ["run_a", "run_b"]
+# The callbacks of the reduced pass: the tables need the efficiency and the fit.
+REDUCED_KEEP = ("anomaly_efficiency", "ancap", "fit")
 # The cheapest evaluation of eval=mscct that stores the reference's scores: the
 # efficiency and the fit stay, for the per-run tables, and nothing else is computed.
 # rescored_dir and lattice_rows make the selection find no normal in the writer's files,
@@ -83,8 +90,8 @@ REFERENCE_ONLY = [
         f"~evaluation.evaluator.dump_callbacks.{name}"
         for name in (
             "thres_drift wasserstein cap_bank_reference_normal cap_bank_nz20 "
-            "cap_bank_nz210 cap_bank_p1000 cap_bank_gt450 ascore_operational npd rtm "
-            "eag entropy sds"
+            "cap_bank_nz210 cap_bank_p1000 cap_bank_gt450 ancap ascore_operational "
+            "npd rtm eag entropy sds"
         ).split()
     ),
     *(f"~selection.criteria.{n}" for n in "drift w1 npd rtm eag entropy sds".split()),
@@ -252,8 +259,8 @@ def test_stage_writes_every_column(trained):
         assert values["ancap/ancap_sat_control"] in (0.0, 1.0)
 
 
-@pytest.mark.parametrize("domain", TUNNELS)
-def test_each_tunnel_composes_one_callback_of_every_grade(domain):
+@pytest.mark.parametrize("domain", DOMAINS)
+def test_each_domain_composes_one_callback_of_every_grade(domain):
     cfg = _compose(domain)
     assert OmegaConf.to_container(cfg.cap_posterior) == POSTERIOR
     callbacks = cfg.evaluation.evaluator.dump_callbacks
@@ -266,16 +273,27 @@ def test_each_tunnel_composes_one_callback_of_every_grade(domain):
         "_target_": TARGET,
         "output_name": "ascore/full",
         "dataset_1": "normal",
-        "views": TUNNELS[domain],
+        "views": DOMAINS[domain],
         "posterior_config": POSTERIOR,
         "name": "ancap",
     }
     instance = hydra.utils.instantiate(callbacks["ancap"])
-    assert instance.reference == REFERENCE and instance.views == TUNNELS[domain]
+    assert instance.reference == REFERENCE and instance.views == DOMAINS[domain]
     assert cfg.evaluation.evaluator.extra_sets.sds == SDS
 
 
-@pytest.mark.parametrize("domain", TUNNELS)
+@pytest.mark.parametrize("domain", IMAGES)
+def test_the_image_views_are_sets_of_the_data_config(domain):
+    data = OmegaConf.load(CONFIGS / "data" / f"{domain}.yaml")
+    served = list(data.shifts if domain == "cifar10" else data.shift_scanners)
+    config = _compose(domain).evaluation.evaluator.dump_callbacks.ancap
+    callback = hydra.utils.instantiate(config)
+    assert list(callback.views.values()) == served
+    loaders = dict.fromkeys(["normal", *served, REFERENCE])
+    callback.on_test_epoch_start(SimpleNamespace(test_dataloaders=loaders), None)
+
+
+@pytest.mark.parametrize("domain", DOMAINS)
 def test_ancap_enters_no_criterion(domain):
     criteria = _compose(domain).selection.criteria
     assert not [n for n in criteria if n.startswith(("posterior", "ancap"))]
@@ -388,3 +406,57 @@ def test_the_recipe_survives_the_tables_and_the_selection(lattice, tmp_path, cap
     with open(out / "runs" / RUNS[0] / "picks.csv", newline="") as file:
         picked = [row["strategy"] for row in csv.DictReader(file)]
     assert picked == ["oracle", "cvar25", "cvar10", "q_sec"]
+
+
+def _reduced(domain: str) -> list[str]:
+    config = OmegaConf.load(CONFIGS / "eval" / f"{domain}.yaml")
+    callbacks = config.evaluation.evaluator.dump_callbacks
+    return [
+        "tracking_uri=null",
+        "+selection.lattice_rows={max_rows:1,row_seed:0}",
+        "evaluation.evaluator.extra_sets.aux=false",
+        "evaluation.evaluator.extra_sets.train=false",
+        *(
+            f"~evaluation.evaluator.dump_callbacks.{name}"
+            for name in callbacks
+            if name not in REDUCED_KEEP
+        ),
+        *(f"~selection.criteria.{name}" for name in config.selection.criteria),
+    ]
+
+
+@pytest.mark.parametrize("domain", IMAGES)
+def test_a_scores_only_dump_serves_its_stored_pseudo_sets_to_ancap(domain, tmp_path):
+    scores = tmp_path / "scores"
+    path = scores / "toy" / RUNS[0]
+    fit(tmp_path, [dump_callback(path, sds=SDS)])
+    (path / "config.yaml").write_text(yaml.safe_dump(TOY_RUN_CONFIG))
+    for name in PASSES:
+        record = load(path / name)
+        # Doubled, so that a rescored reference would give other columns.
+        record["sds"][REFERENCE]["ascore/full"] *= 2.0
+        if name != "initial.pt":
+            del record["state_dict"]
+        torch.save(record, path / name)
+
+    cfg = _compose(domain, "lattice=toy", *_reduced(domain))
+    drop_absent_sets(cfg, TOY_SETS)
+    cfg.evaluation.evaluator.dump_callbacks.ancap.views = TOY_VIEWS
+    cfg.cap_posterior.merge_with(TOY_POSTERIOR)
+    out = tmp_path / "eval"
+    evaluator = hydra.utils.instantiate(cfg.evaluation.evaluator)
+    evaluator.evaluate_lattice(scores, out, "toy")
+    selection = OmegaConf.to_container(cfg.selection, resolve=True)
+    select_lattice(out, selection, scores, "toy", None)
+
+    rows = _read_csv(out / "runs" / RUNS[0] / "val.csv")
+    assert len(rows) == len(PASSES)
+    for row, name in zip(rows, PASSES):
+        record = load(path / name)
+        normal, control = (
+            record["val"][s]["ascore/full"] for s in ("normal", "reference_normal")
+        )
+        reference = record["sds"][REFERENCE]["ascore/full"]
+        expected = ancap(normal, {"control": control}, reference, SMALL)
+        for key, value in expected.items():
+            assert float(row[f"ancap/{key}"]) == pytest.approx(value, nan_ok=True), key

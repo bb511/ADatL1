@@ -541,11 +541,13 @@ def lattices(tmp_path_factory) -> SimpleNamespace:
 
 
 def _drop_image_bank(cfg) -> None:
-    # colour_spectral reads [n, C, H, W] images, which the toy's vectors are not.
+    # colour_spectral reads [n, C, H, W] images, which the toy's vectors are not, and
+    # ANCAP's views are pools the toy lacks.
     callbacks = cfg.evaluation.evaluator.dump_callbacks
     with open_dict(cfg):
         for name in [n for n, c in callbacks.items() if "representation" in c]:
             del callbacks[name]
+        del callbacks["ancap"]
 
 
 def _evaluate_and_select(scores_dir: Path, out: Path, *overrides: str, **pool) -> None:

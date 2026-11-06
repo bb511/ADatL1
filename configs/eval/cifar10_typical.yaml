@@ -4,11 +4,11 @@
 # label-free criterion: run with typical=sensor_<grade>, one out_dir per grade and
 # tracking_uri=null. Only the validation typical set is replaced: the probes of NPD, the
 # SDS pseudo-sets and the training losses that entropy reads still come from the
-# training set, so entropy is the same at every grade. Left out of cifar10.yaml is the
-# CAP bank: it pairs normal with each corruption pool, so the evaluation of cifar10.yaml
-# already reads it across the grades, and the pool served as normal would leave its own
-# pairing without X2. A scores-only lattice cannot rescore the SDS pseudo-sets, so its
-# replays add
+# training set, so entropy is the same at every grade. Left out of cifar10.yaml are the
+# CAP bank and ANCAP: each pairs normal with each corruption pool, so the evaluation of
+# cifar10.yaml already reads them across the grades, and the pool served as normal would
+# leave its own pairing without X2. A scores-only lattice cannot rescore the SDS
+# pseudo-sets, so its replays add
 #   evaluation.evaluator.extra_sets.sds=null '~evaluation.evaluator.dump_callbacks.sds'
 #   '~selection.criteria.sds'
 # while DDL's dumps store the pseudo-sets' scores, which serve its SDS.

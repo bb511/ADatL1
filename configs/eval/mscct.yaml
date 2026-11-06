@@ -5,7 +5,7 @@
 # reported per set.
 
 defaults:
-  - /cap: bank
+  - /cap: [bank, posterior]
   - _self_
 
 # The bank's beta_fix, declared on MS-CCT's own lattices by the light tunnel's rule
@@ -104,6 +104,20 @@ evaluation:
         log_raw_mlflow: false
         name: cap_bank_gt450
         representation: colour_spectral
+      # ANCAP of normal against each scanner's dermis, with no control; its reference,
+      # the SDS pseudo-outliers, is the set that extra_sets.sds serves, so that it adds
+      # no model pass.
+      ancap:
+        _target_: src.evaluation.callbacks.threshold_posterior.ThresholdPosterior
+        output_name: ascore/full
+        dataset_1: normal
+        views:
+          nz20: nz20
+          nz210: nz210
+          p1000: p1000
+          gt450: gt450
+        posterior_config: ${cap_posterior}
+        name: ancap
       # The operational score of normal, a diagnostic column beside Q'', the fit.
       ascore_operational:
         _target_: src.evaluation.callbacks.output.OutputCallback
@@ -147,6 +161,7 @@ selection:
   # consistency are left out until the declared CAP enters at the read, as on
   # CIFAR-10, and EM and MV because they are NaN on MS-CCT: the uniform box over the
   # 3,072 inputs has a volume of about 1e2664, beyond float64 (measured 26 Oct 2026).
+  # ANCAP enters none until the rules of its pick-level reading are recorded.
   criteria:
     drift:
       column: thres_drift/drift_operational

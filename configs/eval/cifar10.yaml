@@ -4,7 +4,7 @@
 # classes 1-9 against class 0.
 
 defaults:
-  - /cap: bank
+  - /cap: [bank, posterior]
   - _self_
 
 # The bank's beta_fix, declared on CIFAR-10's own lattices by the light tunnel's rule
@@ -99,6 +99,19 @@ evaluation:
         name: cap_bank_sensor_strong
         representation: colour_spectral
         x2_blocks: 6
+      # ANCAP of normal against each corruption pool, its six members as one view, with
+      # no control; its reference, the SDS pseudo-outliers, is the set that
+      # extra_sets.sds serves, so that it adds no model pass.
+      ancap:
+        _target_: src.evaluation.callbacks.threshold_posterior.ThresholdPosterior
+        output_name: ascore/full
+        dataset_1: normal
+        views:
+          sensor_weak: sensor_weak
+          sensor_mid: sensor_mid
+          sensor_strong: sensor_strong
+        posterior_config: ${cap_posterior}
+        name: ancap
       # The operational score of normal, a diagnostic column beside Q'', the fit.
       ascore_operational:
         _target_: src.evaluation.callbacks.output.OutputCallback
@@ -140,7 +153,8 @@ evaluation:
 selection:
   # The CAP bank enters no criterion: the reading takes its columns directly. CAP and
   # consistency are left out until CAP is redefined, and EM and MV because they are
-  # degenerate on images (NaN on CIFAR-10).
+  # degenerate on images (NaN on CIFAR-10). ANCAP enters none until the rules of its
+  # pick-level reading are recorded.
   criteria:
     drift:
       column: thres_drift/drift_operational

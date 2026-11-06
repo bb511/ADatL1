@@ -10,6 +10,6 @@ beta_max: 1000000.0
 n_beta: 321
 # The bootstrap pairs of the capacity, and of the confidence apart.
 n_pairs: 200
-# The draws of the content null of the direction check.
-n_draws: 200
+# The draws of the content null of the direction check, by the record of 6 Nov 04:41.
+n_draws: 1000
 seed: 0

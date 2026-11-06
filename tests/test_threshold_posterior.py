@@ -324,6 +324,15 @@ def test_ancap_holds_the_named_columns_of_capacity_and_direction():
     assert list(stats) == list(tp.KEYS)
 
 
+def test_the_number_of_draws_moves_the_direction_check_alone():
+    s_1, s_2, reference = _case(seed=4)
+    few = tp.ancap(s_1, {"weak": s_2}, reference, SMALL)
+    more = SMALL | {"n_draws": 2 * SMALL["n_draws"]}
+    many = tp.ancap(s_1, {"weak": s_2}, reference, more)
+    assert few.pop("ancap_dir") != many.pop("ancap_dir")
+    assert len(few) == 5 and few == many
+
+
 def test_both_views_of_the_confidence_are_drawn_from_the_pool(monkeypatch):
     calls, redrawn = [], tp._redrawn_costs
 

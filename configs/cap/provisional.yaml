@@ -1,7 +1,7 @@
 # @package cap
 
 # The CAP metric parameters, shared by every CAP and consistency callback through
-# cap_metric_config: ${cap}; the chamber freeze replaces this file with frozen.yaml.
+# cap_metric_config: ${cap}.
 beta_min: 0.01
 beta_max: 1000.0
 n_beta: 200

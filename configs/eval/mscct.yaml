@@ -158,8 +158,8 @@ evaluation:
 # The registry of strategies: column in val.csv, mode and MLflow keys per criterion.
 selection:
   # The CAP bank enters no criterion: the reading takes its columns directly. CAP and
-  # consistency are left out until the declared CAP enters at the read, as on
-  # CIFAR-10, and EM and MV because they are NaN on MS-CCT: the uniform box over the
+  # consistency are left out because section R of the register reads those columns, as
+  # on CIFAR-10, and EM and MV because they are NaN on MS-CCT: the uniform box over the
   # 3,072 inputs has a volume of about 1e2664, beyond float64 (measured 26 Oct 2026).
   # ANCAP enters none until the rules of its pick-level reading are recorded.
   criteria:

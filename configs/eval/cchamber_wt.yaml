@@ -147,9 +147,9 @@ evaluation:
 # The registry of strategies: column in val.csv, mode and MLflow keys per criterion.
 selection:
   # The CAP bank enters no criterion: the reading takes its columns directly.
-  # Consistency is left out until CAP is redefined, and EM because it is degenerate on
-  # both tunnels: em_reached is 0 in every AE, VAE and SVDD run. ANCAP enters none until
-  # the rules of its pick-level reading are recorded.
+  # Consistency is left out because section R of the register reads those columns, and
+  # EM because it is degenerate on both tunnels: em_reached is 0 in every AE, VAE and
+  # SVDD run. ANCAP enters none until the rules of its pick-level reading are recorded.
   criteria:
     drift:
       column: thres_drift/drift_operational

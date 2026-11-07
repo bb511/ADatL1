@@ -152,9 +152,9 @@ evaluation:
 # The registry of strategies: column in val.csv, mode and MLflow keys per criterion.
 selection:
   # The CAP bank enters no criterion: the reading takes its columns directly. CAP and
-  # consistency are left out until CAP is redefined, and EM and MV because they are
-  # degenerate on images (NaN on CIFAR-10). ANCAP enters none until the rules of its
-  # pick-level reading are recorded.
+  # consistency are left out because section R of the register reads those columns, and
+  # EM and MV because they are degenerate on images (NaN on CIFAR-10). ANCAP enters none
+  # until the rules of its pick-level reading are recorded.
   criteria:
     drift:
       column: thres_drift/drift_operational

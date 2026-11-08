@@ -9,7 +9,7 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 
-from src.evaluation.lattice import Lattice, Strategy
+from src.evaluation.lattice import BandedStrategy, Lattice, Strategy
 
 
 def _holm(p: np.ndarray) -> np.ndarray:
@@ -33,7 +33,8 @@ def _write(path: Path, table: pd.DataFrame) -> None:
 
 @dataclass(frozen=True, eq=False)
 class Report:
-    """The six tables of the lattice step, built row by row by the strategies."""
+    """The six tables of the lattice step, and band.csv where a strategy is banded,
+    built row by row by the strategies."""
 
     lattice: Lattice
 
@@ -63,8 +64,13 @@ class Report:
         return pd.DataFrame([s.selection_row(k, self.lattice) for s, k in self.pairs])
 
     def validity(self) -> pd.DataFrame:
+        """The validity rows, Holm's adjustment over those of the strategies that are
+        not banded, so that adding a banded strategy leaves every earlier p_holm."""
         table = pd.DataFrame([s.validity_row(k, self.lattice) for s, k in self.pairs])
-        table["p_holm"] = _holm(table["p"].to_numpy(dtype=np.float64))
+        banded = {s.name for s, _ in self.banded}
+        family = ~table["strategy"].isin(banded).to_numpy()
+        p = table["p"].to_numpy(dtype=np.float64)
+        table["p_holm"] = _holm(np.where(family, p, math.nan))
         return table
 
     def tradeoff(self) -> pd.DataFrame:
@@ -79,8 +85,17 @@ class Report:
         rows = [r for s, k in self.pairs for r in s.intervention_rows(k, self.lattice)]
         return pd.DataFrame(rows)
 
+    @functools.cached_property
+    def banded(self) -> list[tuple[BandedStrategy, int]]:
+        return [(s, k) for s, k in self.grid if isinstance(s, BandedStrategy)]
+
+    def band(self) -> pd.DataFrame:
+        table = pd.DataFrame([s.band_row(k, self.lattice) for s, k in self.banded])
+        return table.astype({"top_group": "Int64"})
+
     def write(self, out_dir: Path) -> None:
-        """Write ``<out_dir>/<table>.csv``, once every table is built."""
+        """Write ``<out_dir>/<table>.csv``, once every table is built; band.csv only
+        where a strategy is banded."""
         tables = {
             "consensus": self.consensus(),
             "selection": self.selection(),
@@ -89,5 +104,6 @@ class Report:
             "oracle_position": self.oracle_position(),
             "interventions": self.interventions(),
         }
+        tables |= {"band": self.band()} if self.banded else {}
         for name, table in tables.items():
             _write(out_dir / f"{name}.csv", table)

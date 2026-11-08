@@ -96,6 +96,7 @@ REFERENCE_ONLY = [
         ).split()
     ),
     *(f"~selection.criteria.{n}" for n in "drift w1 npd rtm eag entropy sds".split()),
+    *(f"~selection.criteria.ancap3_{grade}" for grade in IMAGES["mscct"]),
 ]
 # The reference of each ANCAP callback of eval=physics.
 PHYSICS_REFERENCES = {"ancap": REFERENCE, "ancap_val": "sds_val_outliers"}
@@ -121,7 +122,7 @@ PHYSICS_REDUCED = [
     ),
     *(
         f"~selection.criteria.{name}"
-        for name in "drift w1 npd rtm eag entropy sds sds_val".split()
+        for name in "drift w1 npd rtm eag entropy sds sds_val ancap3_sn".split()
     ),
 ]
 # Stands for the 50,000 rows per view of the LHC pass; the toy holds 120 and 80.
@@ -317,6 +318,7 @@ def test_each_domain_composes_one_callback_of_every_grade(domain):
         "views": DOMAINS[domain],
         "posterior_config": POSTERIOR,
         "name": "ancap",
+        "working_point": False,
     }
     instance = hydra.utils.instantiate(callbacks["ancap"])
     assert instance.reference == REFERENCE and instance.views == DOMAINS[domain]
@@ -335,11 +337,27 @@ def test_the_image_views_are_sets_of_the_data_config(domain):
 
 
 @pytest.mark.parametrize("domain", [*DOMAINS, "physics"])
-def test_ancap_enters_no_criterion(domain):
-    criteria = _compose(domain).selection.criteria
-    assert not [n for n in criteria if n.startswith(("posterior", "ancap"))]
-    columns = [spec.column for spec in criteria.values()]
-    assert not [c for c in columns if c.startswith(("posterior", "ancap"))]
+def test_ancap_enters_only_as_one_banded_criterion_per_grade(domain):
+    cfg = _compose(domain)
+    criteria = OmegaConf.to_container(cfg.selection.criteria, resolve=True)
+    grades = PHYSICS_VIEWS if domain == "physics" else DOMAINS[domain]
+    names = [n for n, s in criteria.items() if s["column"].startswith("ancap")]
+    assert names == [f"ancap3_{grade}" for grade in grades]
+    assert not [n for n in criteria if n.startswith("posterior")]
+    for grade in grades:
+        assert criteria[f"ancap3_{grade}"] == {
+            "column": f"ancap/ancapw_{grade}",
+            "mode": "max",
+            "key": f"val/summary/ancapw_{grade}_ema",
+            "skip_nonfinite": True,
+            "band": {
+                "level": "ancap/ancapw_f1",
+                "level_se": "ancap/ancapw_f1_se",
+                "se": f"ancap/ancapw_se_{grade}",
+                "band_se": POSTERIOR["band_se"],
+            },
+        }
+    assert not cfg.evaluation.evaluator.dump_callbacks.ancap.working_point
 
 
 @pytest.fixture(scope="module")

@@ -23,8 +23,11 @@ from torch.utils.data import DataLoader, Subset
 
 from src.callbacks.components.selection import (
     W_STEPS,
+    BandPick,
+    band_columns,
     best_epoch,
     ema,
+    epoch_band_pick,
     epoch_pick,
     smoothed,
 )
@@ -87,6 +90,19 @@ def _strategies(selection: dict) -> dict[str, dict]:
         strategies[name] = {**spec, "column": name, "mode": "max"}
     strategies["q_sec"] = {**selection["q_sec"], "mode": "min"}
     return strategies
+
+
+def _available(strategies: dict, rows: list[dict], run: str) -> dict[str, dict]:
+    """The strategies less every banded one whose columns the validation rows lack, as
+    where the ancap callback runs without working_point; each is logged once."""
+    present, kept = set(rows[0]) if rows else set(), {}
+    for name, spec in strategies.items():
+        missing = sorted(set(band_columns(spec)) - present) if "band" in spec else []
+        if missing:
+            log.info(f"{run}: {name} is skipped, its columns {missing} are absent.")
+        else:
+            kept[name] = spec
+    return kept
 
 
 def _experiment_id(client: MlflowClient, name: str) -> str:
@@ -318,6 +334,7 @@ class RunEvaluation:
 
     def _tables(self, rows: dict[str, list[dict]]) -> dict[str, list[dict]]:
         """The rows of val.csv, test.csv and picks.csv."""
+        self.strategies = _available(self.strategies, rows["val"], self.run_dir.name)
         val = self._val_rows(rows["val"])
         test = [{**row, **self._test_summary(row)} for row in rows["test"]]
         return {"val": val, "test": test, "picks": self._picks(val)}
@@ -353,16 +370,30 @@ class RunEvaluation:
         return val
 
     def _pick(self, name: str, trained: list[dict], k: int | None) -> int:
-        """The epoch of the epoch rule at k or, for k None, of its best logged EMA."""
+        """The epoch of the epoch rule at k or, for k None, of its best logged EMA; a
+        banded strategy's by its band rule."""
         spec = self.strategies[name]
         skip = spec.get("skip_nonfinite", False)
         q_main = [row[spec["column"]] for row in trained]
         if k is None:
             index = best_epoch(smoothed(q_main, skip_nonfinite=skip), spec["mode"])
+        elif "band" in spec:
+            index = self._band_pick(spec, trained, k).index
         else:
-            q_sec = [row[self.strategies["q_sec"]["column"]] for row in trained]
-            index = epoch_pick(q_main, q_sec, k, spec["mode"], skip)
+            index = epoch_pick(q_main, self._q_sec(trained), k, spec["mode"], skip)
         return trained[index]["epoch"]
+
+    def _q_sec(self, trained: list[dict]) -> list[float]:
+        return [row[self.strategies["q_sec"]["column"]] for row in trained]
+
+    def _band_pick(self, spec: dict, trained: list[dict], k: int) -> BandPick:
+        """The band rule's pick at k, on the columns that the entry's ``band`` names."""
+        band = spec["band"]
+        columns = (band["level"], band["level_se"], spec["column"], band["se"])
+        level, level_se, q_main, q_main_se = ([r[c] for r in trained] for c in columns)
+        skip = spec.get("skip_nonfinite", False)
+        args = (level, level_se, q_main, q_main_se, self._q_sec(trained), k)
+        return epoch_band_pick(*args, band["band_se"], spec["mode"], skip)
 
     def _picks(self, val: list[dict]) -> list[dict]:
         """A row per criterion and k of the w grid, one per other strategy (k None)."""

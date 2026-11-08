@@ -43,9 +43,11 @@ DOMAINS = [
     "cchamber",
     "cchamber_typical",
     "cchamber_wt",
+    "cchamber_wt_typical",
     "cifar10",
     "cifar10_typical",
     "mscct",
+    "mscct_typical",
 ]
 # The sets of the toy dump, which has none of the chamber's null pools.
 TOY_SETS = {"normal", "reference_normal", "sig_a", "sig_b"}
@@ -441,7 +443,10 @@ def test_evaluate_dump_writes_the_four_files(dump, chamber, tmp_path):
     assert run["typical"] is None
 
     val, test = _read_csv(out / "val.csv"), _read_csv(out / "test.csv")
-    selection = chamber.selection
+    # The banded criteria are skipped: the toy runs ancap without working_point.
+    criteria = chamber.selection["criteria"].items()
+    criteria = {n: s for n, s in criteria if "band" not in s}
+    selection = chamber.selection | {"criteria": criteria}
     assert [row["epoch"] for row in val] == [row["epoch"] for row in test]
     assert [row["epoch"] for row in val] == ["-1", "0", "1"]
     columns = [spec["column"] for spec in selection["criteria"].values()]
@@ -501,6 +506,30 @@ def test_evaluate_dump_with_a_typical_set(dump, tmp_path):
         rate.update(stored["sig_a"]["ascore/full"])
         efficiency = rate.compute("efficiency").item()
         assert float(row[EFF + "sig_a"]) == pytest.approx(efficiency)
+
+
+def _typical_val(path: Path, out: Path) -> list[dict]:
+    cfg = _compose("cchamber_typical")
+    drop_absent_sets(cfg, TOY_SETS - {TYPICAL})
+    evaluator = hydra.utils.instantiate(cfg.evaluation.evaluator, typical=TYPICAL)
+    run = RunEvaluation(path, ToyAE(), ToyDataModule(), **evaluator._dump_settings())
+    run.evaluate(out, "toy")
+    return _read_csv(out / "runs" / path.name / "val.csv")
+
+
+def test_a_typical_set_the_dump_lacks_is_rescored(dump, tmp_path):
+    path = tmp_path / "scores" / "toy" / "run_a"
+    shutil.copytree(dump.path, path)
+    for file in [path / "initial.pt", *path.glob("epoch_*.pt")]:
+        record = load(file)
+        record.get("val", {}).pop(TYPICAL, None)
+        torch.save(record, file)
+    stored = _typical_val(dump.path, tmp_path / "stored")
+    rescored = _typical_val(path, tmp_path / "rescored")
+    assert [row["epoch"] for row in rescored] == [row["epoch"] for row in stored]
+    for got, want in zip(rescored, stored):
+        for key in ("fit/normal", EFF + "sig_a"):
+            assert float(got[key]) == pytest.approx(float(want[key]))
 
 
 def test_evaluate_lattice_rebuilds_each_run(chamber, tmp_path):
@@ -776,9 +805,11 @@ def test_eval_configs_build_the_evaluator(domain):
         "cchamber": 9,
         "cchamber_typical": 9,
         "cchamber_wt": 2,
+        "cchamber_wt_typical": 2,
         "cifar10": 3,
         "cifar10_typical": 3,
         "mscct": 4,
+        "mscct_typical": 4,
     }
     assert len(null_ds) == sizes[domain]
 

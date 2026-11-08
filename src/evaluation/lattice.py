@@ -7,24 +7,33 @@
 - selection.csv: strategy, k, w, point, epoch, q_main, q_sec, test_eff,
   oracle_test_eff, regret, regret_lo, regret_hi, regret_epoch, regret_point,
   realised_fpr, null_rate, floor_mean, floor_p05, floor_p95, limit, best_test_eff
-- validity.csv: strategy, k, rho, p, p_holm, n
+- validity.csv: strategy, k, rho, p, p_holm, n (p_holm over the rows of the strategies
+  that are not banded, empty for a banded one)
 - tradeoff.csv: strategy, k_epoch, k_point (0 to 10, gate), point, epoch, test_eff,
   regret, joint_only
 - oracle_position.csv: strategy, k_epoch, oracle_point, rank_q_main, rank_q_sec, n
 - interventions.csv: strategy, k, intervention, target_cluster, test_eff,
   oracle_test_eff
+- band.csv, written only where a banded criterion is selected: strategy, k,
+  point, epoch, eligible_epochs (in the picked run, at the epoch stage), eligible_runs,
+  top_group, level_decided (both empty at k < W_STEPS)
 
 and those of ``src.evaluation.harvest``:
 
 - <lattice>.csv, <lattice>_eval.csv: the schema of scripts/analysis/harvest_pool_effs.py
+
+A banded criterion whose columns or picks the per-run tables lack, as where the ancap
+callback ran without working_point, is skipped with a logged note.
 
 The readers of the per-run outputs and the dumps, the pairing with the partner
 lattice, the lattice criteria and the statistics of the tables are in
 ``src.evaluation.components`` (``tables``, ``pairing``, ``udr``, ``statistics``).
 """
 
+import dataclasses
 import functools
 import json
+import logging
 import math
 from dataclasses import dataclass
 from pathlib import Path
@@ -32,7 +41,18 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 
-from src.callbacks.components.selection import W_STEPS, ema, epoch_pick, pick, ranks
+from src.callbacks.components.selection import (
+    W_STEPS,
+    BandPick,
+    band,
+    band_columns,
+    banded_pick,
+    ema,
+    epoch_pick,
+    pick,
+    ranks,
+    smoothed,
+)
 from src.evaluation.components.pairing import partner_scores
 from src.evaluation.components.statistics import at, spearman_test
 from src.evaluation.components.tables import (
@@ -44,6 +64,8 @@ from src.evaluation.components.tables import (
     read_values,
 )
 from src.evaluation.components.udr import LATTICE_CRITERIA
+
+log = logging.getLogger(__name__)
 
 BOOTSTRAP_DRAWS, BOOTSTRAP_SEED = 10_000, 20261020
 
@@ -189,6 +211,51 @@ class Strategy:
         return [{"strategy": self.name, "k": k, **dict(zip(keys, v))} for v in values]
 
 
+@dataclass(frozen=True, eq=False, kw_only=True)
+class BandedStrategy(Strategy):
+    """A strategy of the band rule (``ancap_v3_spec.md``, section 2.3), whose epochs
+    ``epoch_band_pick`` gives: every pick over the runs is ``banded_pick`` of the runs
+    at their epochs, with the values the other strategies compare there. The gate of
+    tradeoff.csv and the ranking of validity.csv stay those of Q' and Q''.
+
+    The level, its standard error and that of Q' are (runs, epochs + 1), epoch -1 first.
+    """
+
+    level: np.ndarray
+    level_se: np.ndarray
+    q_main_se: np.ndarray
+    band_se: float
+    skip_nonfinite: bool = False
+
+    def banded(
+        self, k_epoch: int, k_point: int | None = None
+    ) -> tuple[int, int, BandPick]:
+        """(run index, epoch, the band rule's pick over the runs), at k_point = k_epoch
+        unless given."""
+        k_point = k_epoch if k_point is None else k_point
+        epochs, arrays = self.picks[k_epoch], (self.level, self.level_se, self.q_main)
+        values = (at(a, epochs) for a in (*arrays, self.q_main_se, self.q_sec))
+        chosen = banded_pick(*values, k_point, self.band_se, self.mode)
+        return chosen.index, int(epochs[chosen.index]), chosen
+
+    def choose(
+        self, k_epoch: int | None, k_point: int | None = None
+    ) -> tuple[int, int]:
+        return self.banded(k_epoch, k_point)[:2]
+
+    def eligible_epochs(self, run: int) -> int:
+        """The number of a run's trained epochs in the band of the epoch stage."""
+        level = smoothed(self.level[run, 1:], skip_nonfinite=self.skip_nonfinite)
+        return len(band(level, self.level_se[run, 1:], self.band_se))
+
+    def band_row(self, k: int, lattice: "Lattice") -> dict:
+        point, epoch, chosen = self.banded(k)
+        row = {"strategy": self.name, "k": k, "point": lattice.names[point]}
+        row.update(epoch=epoch, eligible_epochs=self.eligible_epochs(point))
+        row.update(eligible_runs=chosen.eligible, top_group=chosen.top)
+        return {**row, "level_decided": chosen.level_decided}
+
+
 @dataclass(frozen=True, eq=False)
 class Lattice:
     """The per-run outputs of a lattice and the stored scores of its dumps.
@@ -314,6 +381,32 @@ class Lattice:
         q_main, ema_values = (self.column("val", c) for c in (column, f"ema/{name}"))
         return Strategy(name, mode, q_main, self.q_sec, ema_values, picks, key)
 
+    def _criterion(self, name: str, spec: dict) -> Strategy | None:
+        """The strategy of a criterion of the registry, banded where it names a
+        ``band``; None for a banded one whose columns or picks the tables lack."""
+        if "band" in spec and not self._tabled(name, spec):
+            return None
+        base = self._column_strategy(name, spec["column"], spec["mode"], spec["key"])
+        return self._banded(base, spec) if "band" in spec else base
+
+    def _tabled(self, name: str, spec: dict) -> bool:
+        """Whether the per-run tables hold a banded criterion's columns and picks, as
+        where the ancap callback ran with working_point; logged where they do not."""
+        absent = [c for c in band_columns(spec) if ("val", c) not in self.values]
+        picked = name in set(self.picks.index.get_level_values("strategy"))
+        if absent or not picked:
+            log.info(f"{name} is skipped: the tables lack {absent or 'its picks'}.")
+        return not absent and picked
+
+    def _banded(self, base: Strategy, spec: dict) -> "BandedStrategy":
+        """``base`` with the band of its registry entry, read from val.csv."""
+        band_spec, shared = spec["band"], dataclasses.fields(Strategy)
+        fields = {field.name: getattr(base, field.name) for field in shared}
+        names = {"level": "level", "level_se": "level_se", "q_main_se": "se"}
+        fields |= {f: self.column("val", band_spec[c]) for f, c in names.items()}
+        skip, band_se = spec.get("skip_nonfinite", False), float(band_spec["band_se"])
+        return BandedStrategy(**fields, band_se=band_se, skip_nonfinite=skip)
+
     def _criterion_strategies(self) -> list[Strategy]:
         if self.normal is None:
             return []
@@ -329,8 +422,8 @@ class Lattice:
     def strategies(self) -> list[Strategy]:
         """The criteria, the lattice criteria, the labelled rows and q_sec, in order."""
         criteria = self.selection["criteria"].items()
-        specs = [(name, c["column"], c["mode"], c["key"]) for name, c in criteria]
-        strategies = [self._column_strategy(*spec) for spec in specs]
+        chosen = (self._criterion(name, spec) for name, spec in criteria)
+        strategies = [strategy for strategy in chosen if strategy is not None]
         strategies += self._criterion_strategies()
         labelled = self.selection["labelled"].items()
         specs = [(name, name, "max", c["key"]) for name, c in labelled]
@@ -407,7 +500,11 @@ def select_lattice(
     :param out_dir: The stage's output directory of the lattice, whose ``runs/``
         holds the per-run outputs of ``Evaluator.evaluate_lattice``; the runs that its
         ``partial_runs.csv`` lists are left out.
-    :param selection: The ``selection`` node of the eval domain config: ``criteria``,
+    :param selection: The ``selection`` node of the eval domain config: ``criteria``
+        (name: ``column``, ``mode``, ``key``, optionally ``raw_key``,
+        ``skip_nonfinite`` and ``band``, whose ``level``, ``level_se`` and ``se`` name
+        the columns of the level, its standard error and that of Q', and ``band_se``
+        the band's width in standard errors, which makes the criterion banded),
         ``q_sec``, ``labelled``, ``efficiency``, ``clusters`` (a CSV with columns
         intervention and target_cluster, or None), ``lattice_criteria`` (name: mode),
         ``limits`` (strategy: note) and, optionally, ``lattice_rows`` (``max_rows``,

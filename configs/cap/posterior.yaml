@@ -13,3 +13,10 @@ n_pairs: 200
 # The draws of the content null of the direction check, by the record of 6 Nov 04:41.
 n_draws: 1000
 seed: 0
+# ANCAP-W's working rate: each view's cut is its 1 - alpha quantile, and alpha is the
+# prior probability of a flag (ancap_wp_spec.md, user 2 Nov 16:02).
+alpha: 0.01
+# The width of ancap3's bands, in bootstrap standard errors of the level f1 and of the
+# agreement I_W (ancap_v3_spec.md, section 2.3; user, 8 Nov); the gate of lattice.py
+# takes one standard error of Q''.
+band_se: 2

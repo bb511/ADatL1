@@ -104,6 +104,10 @@ evaluation:
           osr: sensor_osr
         posterior_config: ${cap_posterior}
         name: ancap
+        # ANCAP-W's columns, which the ancap3 criteria read, are off: the override
+        # evaluation.evaluator.dump_callbacks.ancap.working_point=true turns them and
+        # the ancap3 picks on; without them the selection skips ancap3.
+        working_point: false
       # The operational score of normal, a diagnostic column beside Q'', the fit.
       ascore_operational:
         _target_: src.evaluation.callbacks.output.OutputCallback
@@ -149,7 +153,8 @@ selection:
   # The CAP bank enters no criterion: the reading takes its columns directly.
   # Consistency is left out because section R of the register reads those columns, and
   # EM because it is degenerate on both tunnels: em_reached is 0 in every AE, VAE and
-  # SVDD run. ANCAP enters none until the rules of its pick-level reading are recorded.
+  # SVDD run. ANCAP and ANCAP-W enter only through ancap3, the band rule on ANCAP-W's
+  # columns.
   criteria:
     drift:
       column: thres_drift/drift_operational
@@ -198,6 +203,20 @@ selection:
       mode: min
       key: val/summary/sds_ema
       raw_key: val/summary/sds
+    # ANCAP v3 (ancap_v3_spec.md, section 2.3), one entry per grade: Q' is ANCAP-W's
+    # agreement I_W of the grade, compared only among the candidates whose level f1
+    # lies within band_se standard errors of the best level, at the epoch and at the
+    # hyperpoint stage. The columns are those of the ancap callback with working_point.
+    ancap3_osr:
+      column: ancap/ancapw_osr
+      mode: max
+      key: val/summary/ancapw_osr_ema
+      skip_nonfinite: true
+      band:
+        level: ancap/ancapw_f1
+        level_se: ancap/ancapw_f1_se
+        se: ancap/ancapw_se_osr
+        band_se: ${cap_posterior.band_se}
   # Q'', the mean fit of validation normal, minimised; se is the gate's standard error.
   q_sec:
     column: fit/normal

@@ -63,9 +63,56 @@ an absolute bar in full. Everything is computed in float64 on the CPU.
 The entry points on plain scores, which the callbacks call and the test bed reads
 offline, are ``capacity`` (one grade), ``direction``, ``depth`` and ``ancap`` (every
 column of a set of grades).
+
+ANCAP-W, the capacity at the working point (``scratchpad/adl1t/theoryx/ancap_wp_spec.md``
+and its rulings), poses the learning problem as the labelling of the reference points,
+flagged or not, at the working rate alpha. View d sets its own cut and view 1 the scale::
+
+    tau_d   = Q_{1 - alpha}(s_d), torch.quantile's linear interpolation
+    scale   = Q_0.75(s_1) - Q_0.25(s_1)
+    m_i^d   = (s_i - tau_d) / scale, i over P
+    p_i^d   = sigmoid(beta m_i^d + c), c = logit(alpha): the prior at beta = 0
+    a_i     = log[p_i^1 p_i^2 / alpha + (1 - p_i^1)(1 - p_i^2) / (1 - alpha)]
+            = sp(beta (m_i^1 + m_i^2) + c) - sp(beta m_i^1 + c) - sp(beta m_i^2 + c)
+              - log(1 - alpha), sp the softplus
+    A(beta) = mean over P of a_i, zero for the prior and at most log(1 / alpha)
+
+The bootstrap pairs redraw view 1, view 2 and P, P once per pair for both views; each
+pair takes its cuts and scale from its redrawn views and its margins over its redrawn P.
+I_W and beta_star follow from the mean curve as I and beta_star do. I_0 takes both cuts
+from redraws of the pooled typical sample at sizes n_1 and n_2 and the scale from a redraw
+of view 1 itself. Beside them stand the consistency I_W - I_0, the levels at the observed
+cuts f_1 = mean(s_P > tau_1) and f_2 = mean(s_P > max(tau_1, tau_2)), and a mark where
+beta_star is the grid's last point. An observed scale of zero makes NaN of every column.
+
+Three more columns read the draws of I_W and add none (``ancap_v3_spec.md``, section
+2.2, and ruling 1 of its rulings)::
+
+    f1_se = standard deviation, ddof 1, over the pairs of stream 0 of each pair's f_1,
+            its redrawn P's share above its redrawn tau_1; one per call, as f_1
+    se    = standard deviation, ddof 1, over the pairs of each pair's A(beta_star),
+            beta_star that of I_W
+    r_2   = mean(s_2 > tau_1), view 2's share above view 1's observed float64 cut; NaN
+            where tau_1 lies below view 2's smallest kept value
+
+View 2 and the pool enter through their largest ceil(n / 20) values alone (``Tail``),
+whether a set arrives whole or as a quantile record's kept tail, so that both give the
+same bits. A redraw of n_s values from a source of n sorted values draws n_s indices
+uniformly in [0, n) and counts them per cell: one cell per kept value and one lump cell
+below for the rest. A cut whose interpolation reaches the lump is NaN, and so is any
+column that reads it. The pool keeps view 1's values at least view 2's smallest kept value
+and view 2's kept values; above that value its order is exact.
+
+Seed rule of ANCAP-W. Two streams ``numpy.random.default_rng([seed, k])`` are created
+afresh for every grade: in k = 0 (the pairs of I_W) the redraws of view 1, P and view 2,
+in k = 1 (the pairs of I_0) those of view 1, P, the pool at size n_1 and the pool at size
+n_2, each one ``rng.integers`` of shape [n_pairs, n_s]. View 1 and P come first in both
+streams, so that their draws are common to the grades; ``ancap_w`` draws them once and
+restores the stream's state for each grade, which gives the bits of fresh streams.
 """
 
 import math
+from typing import NamedTuple
 
 import numpy as np
 import torch
@@ -101,6 +148,23 @@ UNDERFLOW = -746.0
 # Points of the mean curve this close, in nats, are tied: on a plateau flat to rounding
 # the arithmetic alone would decide an exact maximum, and so beta_star.
 TIE_TOLERANCE = 1e-9
+# The columns of ancap_w per grade, by key of _grade_w.
+W_COLUMNS = {
+    "capacity": "ancapw",
+    "beta_star": "ancapw_beta",
+    "confidence": "ancapw_conf",
+    "consistency": "ancapw_cons",
+    "f2": "ancapw_f2",
+    "end": "ancapw_end",
+    "se": "ancapw_se",
+    "r2": "ancapw_r2",
+}
+W_KEYS = tuple(W_COLUMNS)
+# The columns of ancap_w that read no grade.
+W_LEVELS = ("ancapw_f1", "ancapw_f1_se")
+# The pairs of one call of the agreement sums: each temporary [pairs, n_beta, n_P] holds
+# about 23 MB at the light tunnel's sizes. A caller that compiles the sums may raise it.
+W_PAIR_CHUNK = 2
 LOG_KWARGS = dict(
     prog_bar=False,
     on_step=False,
@@ -387,6 +451,297 @@ def ancap(scores_1, views: dict, reference, config) -> dict[str, float]:
         stats = capacity(scores_1, scores_2, reference, config)
         values |= {f"{COLUMNS[key]}_{grade}": stats[key] for key in KEYS}
     return values | {"ancap_dir": direction(scores_1, reference, config)}
+
+
+class Tail(NamedTuple):
+    """The largest ``kept_size(n)`` scores of a set of n, in any order, and n: what a
+    quantile record keeps of a view."""
+
+    top: Tensor
+    n: int
+
+
+class _Redraws(NamedTuple):
+    """The cuts and scale of each pair [n_pairs] and its redrawn P's counts [n_pairs,
+    n_P], P ascending."""
+
+    tau_1: Tensor
+    tau_2: Tensor
+    scale: Tensor
+    weights: Tensor
+
+
+class _Shared(NamedTuple):
+    """One stream after the redraws of view 1 and P, which every grade shares."""
+
+    rng: np.random.Generator
+    state: dict
+    tau: Tensor
+    scale: Tensor
+    weights: Tensor
+
+
+def kept_size(n: int) -> int:
+    """Return ceil(n / 20), in integers, the number of values a tail keeps."""
+    return -(-n // 20)
+
+
+def tail_of(scores) -> Tail:
+    """Return the tail of a whole set."""
+    ordered = _as_scores(scores).sort().values
+    return Tail(ordered[len(ordered) - kept_size(len(ordered)) :], len(ordered))
+
+
+def _as_tail(view) -> Tail:
+    """Return a view as a tail with its kept values ascending; raise on a record that
+    keeps other than ``kept_size(n)`` values.
+
+    A whole set with a non-finite score anywhere gives a tail of NaN, so that its grade
+    is NaN as in ``capacity``, although its tail alone may be finite.
+    """
+    if not isinstance(view, Tail):
+        whole = _as_scores(view)
+        if _usable(whole):
+            return tail_of(whole)
+        nan = torch.full((kept_size(len(whole)),), math.nan, dtype=torch.float64)
+        return Tail(nan, len(whole))
+    if len(view.top) != kept_size(int(view.n)):
+        raise ValueError(f"A tail of {view.n} keeps {kept_size(int(view.n))} values.")
+    return Tail(_as_scores(view.top).sort().values, int(view.n))
+
+
+def _rank(q: float, n: int) -> tuple[int, int, Tensor]:
+    """Return the two positions among n ascending values and the weight of
+    torch.quantile's linear interpolation at q, by its own arithmetic."""
+    rank = torch.tensor(q, dtype=torch.float64) * (n - 1)
+    below = rank.long()
+    return int(below), int(rank.ceil().long()), rank - below
+
+
+def _cell_values(kept: Tensor) -> Tensor:
+    """Return the value of each cell: NaN for the lump, then the kept values."""
+    return torch.cat([torch.full((1,), math.nan, dtype=torch.float64), kept])
+
+
+def _observed_quantile(kept: Tensor, n: int, q: float) -> Tensor:
+    """Return torch.quantile at q of a set of n whose largest values kept holds
+    ascending, NaN where the interpolation reaches below them."""
+    low, high, weight = _rank(q, n)
+    values, offset = _cell_values(kept), n - len(kept)
+    below, above = (values[max(p - offset + 1, 0)] for p in (low, high))
+    return torch.lerp(below, above, weight)
+
+
+def _redraw_cells(
+    rng: np.random.Generator, n: int, n_lump: int, size: int, n_pairs: int
+) -> np.ndarray:
+    """Return the cell counts [n_pairs, n - n_lump + 1] of size indices drawn
+    uniformly in [0, n) per pair, cell 0 being the lump of the n_lump smallest
+    values."""
+    width = n - n_lump + 1
+    cells = np.maximum(rng.integers(0, n, size=(n_pairs, size)) - n_lump + 1, 0)
+    cells += width * np.arange(n_pairs)[:, None]
+    counts = np.bincount(cells.ravel(), minlength=n_pairs * width)
+    return counts.reshape(n_pairs, width)
+
+
+def _redrawn_quantile(counts: np.ndarray, values: Tensor, q: float) -> Tensor:
+    """Return torch.quantile at q of each redraw [n_pairs] from its cell counts."""
+    cumulative = torch.from_numpy(counts.cumsum(axis=1))
+    low, high, weight = _rank(q, int(counts[0].sum()))
+    positions = torch.tensor([low, high]).expand(len(counts), 2).contiguous()
+    cells = torch.searchsorted(cumulative, positions, right=True)
+    return torch.lerp(values[cells[:, 0]], values[cells[:, 1]], weight)
+
+
+def _shared(config, k: int, view_1: Tensor, n_reference: int) -> _Shared:
+    """Return stream k after its redraws of view 1, ascending, and of P.
+
+    A redrawn scale of zero is NaN, as the observed one makes every column NaN.
+    """
+    rng, n_1, n_pairs = _stream(config, k), len(view_1), config["n_pairs"]
+    counts = _redraw_cells(rng, n_1, 0, n_1, n_pairs)
+    weights = _redraw_cells(rng, n_reference, 0, n_reference, n_pairs)[:, 1:]
+    values = _cell_values(view_1)
+    tau, upper, lower = (
+        _redrawn_quantile(counts, values, q)
+        for q in (1.0 - config["alpha"], 0.75, 0.25)
+    )
+    scale = torch.where(upper > lower, upper - lower, math.nan)
+    weights = torch.from_numpy(weights).double()
+    return _Shared(rng, rng.bit_generator.state, tau, scale, weights)
+
+
+def _restored(shared: _Shared) -> np.random.Generator:
+    shared.rng.bit_generator.state = shared.state
+    return shared.rng
+
+
+def _tail_cut(rng: np.random.Generator, tail: Tail, size: int, config) -> Tensor:
+    """Return the cut of each redraw at size from a tail [n_pairs]."""
+    n_lump = tail.n - len(tail.top)
+    counts = _redraw_cells(rng, tail.n, n_lump, size, config["n_pairs"])
+    return _redrawn_quantile(counts, _cell_values(tail.top), 1.0 - config["alpha"])
+
+
+def _pool(view_1: Tensor, tail: Tail) -> Tail:
+    """Return the pooled typical sample above view 2's lump, ascending."""
+    above = view_1[view_1 >= tail.top[0]]
+    return Tail(torch.cat([above, tail.top]).sort().values, len(view_1) + tail.n)
+
+
+def _log1p_exp(x: Tensor) -> Tensor:
+    return torch.log1p(torch.exp(-x.abs()))
+
+
+def _agreement_sums(m_1, m_2, weights, betas, alpha: float) -> Tensor:
+    """Return the sum over P of w_i a_i(beta) [pairs, n_beta], of margins and weights
+    [pairs, n_P] and betas [n_beta].
+
+    sp(x) = max(x, 0) + log(1 + exp(-abs(x))), and the three max terms are combined
+    by case: where both points are flagged (x >= 0) they give -c exactly, which spares
+    the cancellation of terms of order beta abs(m) at large beta.
+    """
+    c = math.log(alpha / (1.0 - alpha))
+    u, v = betas[:, None] * m_1[:, None, :], betas[:, None] * m_2[:, None, :]
+    x_1, x_2, x_12 = u + c, v + c, u + v + c
+    linear = torch.where(
+        x_1 >= 0,
+        torch.where(x_2 >= 0, -c, torch.maximum(v, -x_1)),
+        torch.where(x_2 >= 0, torch.maximum(u, -x_2), x_12.clamp_min(0.0)),
+    )
+    curved = _log1p_exp(x_12) - _log1p_exp(x_1) - _log1p_exp(x_2)
+    return ((linear + curved - math.log1p(-alpha)) * weights[:, None, :]).sum(dim=-1)
+
+
+def _chunk_sums(tau_1, tau_2, scale, weights, reference, betas, alpha) -> Tensor:
+    """Return the agreement sums of a chunk of pairs, on the reference's device."""
+    on = [t.to(reference.device) for t in (tau_1, tau_2, scale, weights)]
+    m_1 = (reference - on[0][:, None]) / on[2][:, None]
+    m_2 = (reference - on[1][:, None]) / on[2][:, None]
+    return _agreement_sums(m_1, m_2, on[3], betas, alpha)
+
+
+def _sample_sd(values: Tensor) -> float:
+    """Return the standard deviation, ddof 1, of values [n_pairs], by numpy."""
+    return float(np.std(values.cpu().numpy(), ddof=1))
+
+
+def _pair_curves(redraws: _Redraws, reference: Tensor, config, device) -> Tensor:
+    """Return each pair's mean over its redrawn P of a_i(beta) [n_pairs, n_beta], on
+    device."""
+    betas, on = beta_grid(config).to(device), reference.to(device)
+    chunks = zip(*(t.split(W_PAIR_CHUNK) for t in redraws))
+    sums = [_chunk_sums(*chunk, on, betas, config["alpha"]) for chunk in chunks]
+    return torch.cat(sums) / len(reference)
+
+
+def _capacity_w(redraws: _Redraws, reference: Tensor, config, device) -> tuple:
+    """Return the maximum of the mean curve over the pairs, its beta and the standard
+    deviation over the pairs of their curves at that beta, all three NaN where the mean
+    curve holds a non-finite value."""
+    curves = _pair_curves(redraws, reference, config, device)
+    curve = curves.mean(dim=0).cpu()
+    if not bool(torch.isfinite(curve).all()):
+        return math.nan, math.nan, math.nan
+    betas = beta_grid(config)
+    capacity, beta_star = _first_maximum(curve, betas)
+    at_star = curves[:, int(torch.nonzero(betas == beta_star)[0, 0])]
+    return capacity, beta_star, _sample_sd(at_star)
+
+
+def _share_above(tail: Tail, cut: Tensor) -> float:
+    """Return the share of a tail's set strictly above cut, NaN where cut lies below the
+    smallest kept value.
+
+    At or above it the share is exact, since no value of the lump exceeds that value.
+    """
+    if not bool(cut >= tail.top[0]):
+        return math.nan
+    return (tail.top > cut).sum().item() / tail.n
+
+
+def _levels(view_1: Tensor, tail: Tail, reference: Tensor, alpha: float) -> tuple:
+    """Return f_1 and f_2 at the observed cuts, and r_2."""
+    tau_1 = _observed_quantile(view_1, len(view_1), 1.0 - alpha)
+    tau_2 = _observed_quantile(tail.top, tail.n, 1.0 - alpha)
+    f_1, f_2 = (reference > tau_1).double().mean().item(), math.nan
+    if not torch.isnan(tau_2):
+        f_2 = (reference > torch.maximum(tau_1, tau_2)).double().mean().item()
+    return f_1, f_2, _share_above(tail, tau_1)
+
+
+def _level_columns(view_1, reference, own: _Shared, alpha: float) -> dict[str, float]:
+    """Return f_1 and f1_se, the spread of each pair's f_1 in stream ``own``."""
+    tau_1 = _observed_quantile(view_1, len(view_1), 1.0 - alpha)
+    above = (reference > own.tau[:, None]).double()
+    shares = (own.weights * above).sum(dim=1) / len(reference)
+    f_1 = (reference > tau_1).double().mean().item()
+    return dict(zip(W_LEVELS, (f_1, _sample_sd(shares))))
+
+
+def _confidence_w(pooled: _Shared, sets: tuple, config, device) -> float:
+    """Return I_0: both cuts from the pool, at sizes n_1 and n_2 in that order."""
+    view_1, tail, reference = sets
+    rng, pool = _restored(pooled), _pool(view_1, tail)
+    cuts = [_tail_cut(rng, pool, size, config) for size in (len(view_1), tail.n)]
+    redraws = _Redraws(*cuts, pooled.scale, pooled.weights)
+    return _capacity_w(redraws, reference, config, device)[0]
+
+
+def _grade_w(streams: list[_Shared], sets: tuple, config, device) -> dict[str, float]:
+    """Return the columns of one grade, by key of ``W_KEYS``."""
+    (own, pooled), (view_1, tail, reference) = streams, sets
+    tau_2 = _tail_cut(_restored(own), tail, tail.n, config)
+    redraws = _Redraws(own.tau, tau_2, own.scale, own.weights)
+    capacity, beta_star, se = _capacity_w(redraws, reference, config, device)
+    confidence = _confidence_w(pooled, sets, config, device)
+    end = float(beta_star == beta_grid(config)[-1].item())
+    end = math.nan if math.isnan(beta_star) else end
+    f_2, r_2 = _levels(view_1, tail, reference, config["alpha"])[1:]
+    stats = (capacity, beta_star, confidence, capacity - confidence, f_2, end, se, r_2)
+    return dict(zip(W_KEYS, stats))
+
+
+def _undefined(view_1: Tensor, reference: Tensor) -> bool:
+    """Return whether view 1 or P make every column NaN, the scale of zero included."""
+    if not _usable(view_1, reference):
+        return True
+    n = len(view_1)
+    scale = _observed_quantile(view_1, n, 0.75) - _observed_quantile(view_1, n, 0.25)
+    return not bool(scale > 0)
+
+
+def ancap_w(scores_1, views: dict, reference, config, device="cpu") -> dict[str, float]:
+    """Return every column of ANCAP-W of a set of grades.
+
+    The keys are ``<prefix>_<grade>`` for each prefix of ``W_COLUMNS`` and those of
+    ``W_LEVELS``. A grade whose view is empty or holds a non-finite kept value has NaN
+    columns; an unusable view 1 or P, or an observed scale of zero, makes every column
+    NaN. The bootstrap draws run on the CPU and the agreement sums on ``device``.
+
+    Args:
+        scores_1: Scores of X1 [n_1], as anything ``torch.as_tensor`` accepts.
+        views: The scores of X2 of each grade, by grade, each whole or as a ``Tail``.
+        reference: Scores of the reference [n_P].
+        config: The posterior's configuration, as in ``configs/cap/posterior.yaml``.
+        device: Where the agreement sums are computed, in float64.
+    """
+    view_1 = _as_scores(scores_1).sort().values
+    reference = _as_scores(reference).sort().values
+    tails = {grade: _as_tail(view) for grade, view in views.items()}
+    names = [f"{W_COLUMNS[k]}_{g}" for g in tails for k in W_KEYS] + [*W_LEVELS]
+    if _undefined(view_1, reference):
+        return dict.fromkeys(names, math.nan)
+    n_reference, values = len(reference), dict.fromkeys(names, math.nan)
+    streams = [
+        _shared(config, k, view_1, n_reference) for k in (PAIRS_STREAM, POOLED_STREAM)
+    ]
+    for grade, tail in tails.items():
+        if _usable(tail.top):
+            stats = _grade_w(streams, (view_1, tail, reference), config, device)
+            values |= {f"{W_COLUMNS[k]}_{grade}": stats[k] for k in W_KEYS}
+    return values | _level_columns(view_1, reference, streams[0], config["alpha"])
 
 
 class ThresholdPosteriorCallback(Callback):

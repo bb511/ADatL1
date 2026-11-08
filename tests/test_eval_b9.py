@@ -64,8 +64,10 @@ def _stage_config():
 
 def _trained(selection: dict) -> dict[str, dict]:
     # As the stage reads the registry: a labelled row is the val.csv column of its own
-    # name and is maximised, Q'' is minimised.
-    strategies = dict(selection["criteria"])
+    # name and is maximised, Q'' is minimised. A banded criterion has no training
+    # callback, so no checkpoint to reproduce.
+    criteria = selection["criteria"].items()
+    strategies = {name: spec for name, spec in criteria if "band" not in spec}
     for name in LABELLED:
         spec = selection["labelled"][name]
         strategies[name] = {**spec, "column": name, "mode": "max"}
@@ -209,7 +211,9 @@ def test_stage_reproduces_the_logged_values(b9):
 def test_untrained_epoch_is_a_row_without_emas(b9):
     initial = b9.val[0]
     assert initial["epoch"] == "-1"
-    names = {*b9.selection["criteria"], *b9.selection["labelled"], "q_sec"}
+    # The banded criteria are skipped: the toy runs ancap without working_point.
+    criteria = [n for n, s in b9.selection["criteria"].items() if "band" not in s]
+    names = {*criteria, *b9.selection["labelled"], "q_sec"}
     assert all(initial[f"ema/{name}"] == "" for name in names)
     for _, column in _pairs(b9):
         if not column.startswith("ema/"):

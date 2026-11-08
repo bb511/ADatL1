@@ -125,6 +125,10 @@ evaluation:
           sn: SingleNeutrino_E-10-gun
         posterior_config: ${cap_posterior}
         name: ancap
+        # ANCAP-W's columns, which the ancap3 criteria read, are off: the override
+        # evaluation.evaluator.dump_callbacks.ancap.working_point=true turns them and
+        # the ancap3 picks on; without them the selection skips ancap3.
+        working_point: false
       # The same against the pseudo-outliers of validation normal, which
       # extra_sets.sds_val serves: a descriptor beside ancap (08_tests.md, 6 Nov 15:23,
       # clause 3).
@@ -208,8 +212,8 @@ evaluation:
 # The registry of strategies: column in val.csv, mode and MLflow keys per criterion, the
 # keys those the physics training logs.
 selection:
-  # The CAP bank enters no criterion: the reading takes its columns directly. ANCAP
-  # enters none until the rules of its pick-level reading are recorded.
+  # The CAP bank enters no criterion: the reading takes its columns directly. ANCAP and
+  # ANCAP-W enter only through ancap3, the band rule on ANCAP-W's columns.
   criteria:
     drift:
       column: thres_drift/drift_trate286_088064kHz
@@ -250,6 +254,20 @@ selection:
       mode: min
       key: val/summary/sds_val_286_088064_ema
       raw_key: val/summary/sds_val_286_088064
+    # ANCAP v3 (ancap_v3_spec.md, section 2.3), one entry per grade: Q' is ANCAP-W's
+    # agreement I_W of the grade, compared only among the candidates whose level f1
+    # lies within band_se standard errors of the best level, at the epoch and at the
+    # hyperpoint stage. The columns are those of the ancap callback with working_point.
+    ancap3_sn:
+      column: ancap/ancapw_sn
+      mode: max
+      key: val/summary/ancapw_sn_ema
+      skip_nonfinite: true
+      band:
+        level: ancap/ancapw_f1
+        level_se: ancap/ancapw_f1_se
+        se: ancap/ancapw_se_sn
+        band_se: ${cap_posterior.band_se}
   # Q'', the mean fit of validation normal, minimised; se is the gate's standard error.
   q_sec:
     column: fit/normal

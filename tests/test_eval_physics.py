@@ -582,7 +582,9 @@ def test_physics_config_keys_are_those_training_monitors(tmp_path):
     assert {column.split("/")[0] for column in columns} <= names
     experiment = yaml.safe_load((CONFIGS / "experiment/physics/ae.yaml").read_text())
     monitors = {c.get("monitor") for c in experiment["callbacks"].values() if c}
-    specs = [*selection["criteria"].values(), selection["q_sec"]]
+    # The banded criteria have no training callback; ANCAP-W is computed offline alone.
+    criteria = [s for s in selection["criteria"].values() if "band" not in s]
+    specs = [*criteria, selection["q_sec"]]
     specs += [selection["labelled"][name] for name in ("cvar25", "cvar10")]
     assert {spec["key"] for spec in specs} <= monitors
 

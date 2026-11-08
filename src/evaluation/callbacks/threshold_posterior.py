@@ -6,7 +6,7 @@ from pathlib import Path
 import torch
 from pytorch_lightning.callbacks import Callback
 
-from src.callbacks.threshold_posterior import REFERENCE, ancap
+from src.callbacks.threshold_posterior import REFERENCE, ancap, ancap_w
 from src.evaluation.callbacks import utils
 
 
@@ -15,8 +15,9 @@ class ThresholdPosterior(Callback):
 
     The scores of dataset_1, of the views and of the reference, a loader that
     ``extra_sets.sds`` of the dump stage appends to its validation pass, are collected
-    batch by batch at every test epoch. Every key of ``ancap`` is recorded under
-    '<name>/<key>' through ``log_metrics_to_mlflow``. Nothing is plotted.
+    batch by batch at every test epoch. Every key of ``ancap``, and with
+    ``working_point`` every key of ``ancap_w``, is recorded under '<name>/<key>'
+    through ``log_metrics_to_mlflow``. Nothing is plotted.
 
     Args:
         output_name: Name of the model output used as anomaly score.
@@ -26,6 +27,8 @@ class ThresholdPosterior(Callback):
             ``configs/cap/posterior.yaml``.
         reference: Name of the test dataloader of the reference.
         name: Callback name, the prefix of the recorded scalars.
+        working_point: Whether ANCAP-W's columns, which the ``ancap3`` strategy reads,
+            are recorded too.
     """
 
     def __init__(
@@ -36,12 +39,14 @@ class ThresholdPosterior(Callback):
         posterior_config: dict,
         reference: str = REFERENCE,
         name: str = "ancap",
+        working_point: bool = False,
     ):
         super().__init__()
         self.output_name, self.name = output_name, name
         self.dataset_1, self.views = dataset_1, dict(views)
         self.reference, self.config = reference, posterior_config
         self.sets = [dataset_1, *self.views.values(), reference]
+        self.working_point = working_point
 
     def on_test_epoch_start(self, trainer, pl_module):
         """Check that every required dataloader is present and reset the scores."""
@@ -74,4 +79,6 @@ class ThresholdPosterior(Callback):
     def _values(self) -> dict[str, float]:
         scores = {name: torch.cat(batches) for name, batches in self.scores.items()}
         views = {grade: scores[name] for grade, name in self.views.items()}
-        return ancap(scores[self.dataset_1], views, scores[self.reference], self.config)
+        args = (scores[self.dataset_1], views, scores[self.reference], self.config)
+        values = ancap(*args)
+        return values | ancap_w(*args) if self.working_point else values

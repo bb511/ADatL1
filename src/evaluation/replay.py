@@ -80,6 +80,15 @@ def as_typical(sets: dict, typical: str | None) -> dict:
     return {"normal": sets[typical], **rest}
 
 
+def _typical_record(val: dict, typical: str | None) -> dict:
+    """``as_typical`` of an epoch's stored validation sets; where the dump does not
+    store ``typical`` (the wind tunnel's ``sensor_osr``), the stored normal is left out
+    instead, so that the set served as normal is rescored from the epoch's weights."""
+    if typical is None or typical in val:
+        return as_typical(val, typical)
+    return {name: s for name, s in val.items() if name != "normal"}
+
+
 def _typical_meta(meta: dict, typical: str | None) -> dict:
     if typical is None:
         return meta
@@ -197,7 +206,7 @@ class ReplayModule(LightningModule):
         self._has_weights = "state_dict" in record
         if self._has_weights:
             _load_weights(self.module, record["state_dict"])
-        record = {**record, "val": as_typical(record["val"], self.typical)}
+        record = {**record, "val": _typical_record(record["val"], self.typical)}
         self.record = record
         self._ckpt_path = Path(ckpt_path)
         if "normal" not in record["val"] and not self._has_weights:

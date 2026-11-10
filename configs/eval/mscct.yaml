@@ -12,7 +12,7 @@ defaults:
 # (scripts/analysis/cap_beta_fix.py over the five pool lattices; 08_tests.md, section R,
 # Part 3); a null entry makes a bank callback raise at its first computation.
 cap_bank:
-  beta_fix: { std: null, rank: null, sq: null, disp: null }
+  beta_fix: { std: 1.0715, rank: 3.0994, sq: 4.9400, disp: 2.6369 }
 
 evaluation:
   evaluator:

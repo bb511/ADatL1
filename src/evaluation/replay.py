@@ -9,13 +9,16 @@ other set, so that every evaluation callback runs unchanged over both. A key of
 ``RESCORED_KEYS`` that a stored set lacks is rescored from the weights as well. An
 epoch file without ``state_dict``, as in a scores-only copy of a dump, is replayed
 from its stored scores alone: a set or key that would be rescored from its weights
-raises. The extra sets of the validation pass (the auxiliary sets, the training set
-and the SDS pseudo-sets) are wrapped here in the loaders that pass appends to the
-validation loaders; the pseudo-sets and the training set are served from the dump
-where it stores their scores and rescored otherwise. An epoch file without validation
-normal (the physics dumps store it at the sanity pass alone, a dump of no stored set
-never) has it rescored before the passes, in a pass of its own that ``ScoresCallback``
-collects, and handed to the module by ``add_scores``.
+raises. The extra sets of the validation pass (the auxiliary sets, the training set,
+the SDS pseudo-sets and the points files) are wrapped here in the loaders that pass
+appends to the validation loaders; the pseudo-sets and the training set are served
+from the dump where it stores their scores and rescored otherwise. The points are
+rescored from the weights at every epoch: a dump made with score_dump's ``points``
+stores their scores under the split ``points``, which no pass serves (``PASS_PARTS``,
+``OPTIONAL_PARTS``). An epoch file without validation normal (the physics dumps store
+it at the sanity pass alone, a dump of no stored set never) has it rescored before the
+passes, in a pass of its own that ``ScoresCallback`` collects, and handed to the
+module by ``add_scores``.
 """
 
 from pathlib import Path
@@ -287,12 +290,23 @@ class ReplayModule(LightningModule):
             )
 
 
+def _point_loaders(points: dict, batch_size: int, taken: dict) -> dict:
+    clash = sorted(points.keys() & taken.keys())
+    if clash:
+        raise ValueError(f"The points {clash} take the names of other extra sets.")
+    return {
+        name: placeholder_loader(x, batch_size, mask)
+        for name, (x, mask) in points.items()
+    }
+
+
 def extra_loaders(
     meta: dict,
     train: DataLoader | None,
     pseudo: dict | None,
     aux: bool = True,
     mask: torch.Tensor | None = None,
+    points: dict | None = None,
 ) -> dict:
     """The loaders the validation pass appends after the validation loaders.
 
@@ -300,10 +314,17 @@ def extra_loaders(
     (when ``aux``), each point masked as the dump masked it where ``meta`` has
     ``aux_masked``, with the masks of the training rows that ``drawn_masks(mask,
     aux_size, aux_seed)`` draws from the training masks ``mask``; ``train``, a loader
-    of training rows, when not None; and the pseudo-sets of ``pseudo``, whose
+    of training rows, when not None; the pseudo-sets of ``pseudo``, whose
     ``<set>_mask`` entries, as ``src.callbacks.sds.sds_inputs`` returns them, are the
-    data masks of their points. The made-up points carry label 0 and the dump's
-    auxiliary batch size, which makes the stored scores of every set servable.
+    data masks of their points; and a loader per entry ``{name: (x, mask)}`` of
+    ``points`` (``rebuild.cached_points``), in file order, each point with its own
+    mask, or none. The made-up points carry label 0 and the dump's auxiliary batch
+    size, which makes the stored scores of every set servable and scores the points
+    in the batches of score_dump's ``points``.
+
+    Raises:
+        ValueError: If a name of ``points`` is already that of another loader, whose
+            stored scores it would be served.
     """
     sizes = meta["aux"]["batch_sizes"]
     loaders = {}
@@ -319,4 +340,4 @@ def extra_loaders(
         if not name.endswith("_mask"):
             point_masks = pseudo.get(f"{name}_mask")
             loaders[name] = placeholder_loader(x, sizes["gaussian"][0], point_masks)
-    return loaders
+    return loaders | _point_loaders(points or {}, sizes["gaussian"][0], loaders)

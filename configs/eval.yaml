@@ -45,7 +45,20 @@ rescored_dir: null
 # null keeps it.
 data_dir: null
 # Replaces every run's signals and nulls by those of data/<sets>.yaml; null keeps them.
+# Refused for the L1AD data, whose pipeline fixes its sets.
 sets: null
+# Appended to every run's data.overrides, the overrides of the record's own
+# configuration that data=basis_hf composes; null keeps them, and any other data config
+# refuses them. With data.signal={} the record extracts no signal set, but its later
+# stages and its reader take every simulated set its cache holds: data_dir must then
+# name a cache built with the same override, which the replay checks where val_sets is
+# given (check_record_cache in src/evaluation/components/rebuild.py).
+data_overrides: null
+# Whether every run's data.signals is emptied, after sets, so that the datamodule reads
+# no signal set; on the dijet and blood-count data every other set keeps its rows.
+# Refused for the L1AD data, whose record drops its signal sets through data_overrides,
+# and for a data config without signals.
+empty_signals: false
 # A stored validation set (a sensor pool, say) served as normal in place of every run's,
 # the operational cut included; null keeps normal. The columns still say normal, so give
 # each set its own out_dir, and pass tracking_uri=null: MLflow would add runs of the

@@ -1,0 +1,82 @@
+# @package _global_
+
+# ANCAP v8 on the wind tunnel's pool lattices, label-free: the capacity of validation
+# normal (S1) against the oversampling pool and the regimes without intervention (S2)
+# on the tunnel's pushed points, with the condition reported beside it (V8.md of Theory
+# XXXI, step 4, sections 2 and 3, as amended by FREEZE_2.md of Theory XXXII). The dumps
+# are those that configs/eval/cchamber_wt.yaml reads; this config does not compose that
+# one, and none of its callbacks runs here. No signal set is served or scored
+# (val_sets), and no test pass runs.
+#   python src/eval.py eval=cchamber_wt_ancap8 lattice=cchamber_wt_<family>_pool[_b64]
+
+# The dumps sit under the name of the training data config.
+scores_dir: ${paths.root_dir}/lattices/cchamber_wt
+# An out_dir of its own: in eval=cchamber_wt's, a resume would take that config's
+# complete runs for this one's (the lattice step refuses a run without v8's columns).
+# Nothing goes to MLflow per epoch, so no run is logged there.
+out_dir: ${paths.log_dir}/eval/${lattice}_ancap8
+tracking_uri: null
+# Every run is evaluated on the sets of data/cchamber_wt.yaml, as in eval=cchamber_wt,
+# whatever lists it was trained with. The seven regimes with an intervention, labelled
+# development sets, are built and their loaders' labels read for the signal list;
+# val_sets drops their loaders before any pass.
+sets: cchamber_wt
+# The frozen file of pushed points (RESULTS.md of Theory XXXII's redo, "The points").
+ancap8_points_dir: ${paths.root_dir}/pushed_points/cchamber_wt
+
+evaluation:
+  evaluator:
+    _target_: src.evaluation.evaluator.Evaluator
+    # The callback configs pass through uninstantiated: every run builds its own.
+    _recursive_: false
+    accelerator: cpu
+    devices: 1
+    logger: false
+    enable_progress_bar: false
+    enable_model_summary: false
+
+    # The only callback. S1 is validation normal and the cells sensor_osr and
+    # walk_null; the reference is the one file of pushed points, without kinds. sizes
+    # are the declared sample sizes, 1,000 rows of normal and 1,420 points; n2 is left
+    # undeclared, since the cells differ (60,000 and 30,000 rows).
+    dump_callbacks:
+      ancap8:
+        _target_: src.evaluation.callbacks.ancap8.ANCAP8
+        output_name: ascore/full
+        dataset_1: normal
+        views:
+          sensor_osr: sensor_osr
+          walk_null: walk_null
+        points: [push]
+        kinds: false
+        sizes: { n1: 1000, n_p: 1420 }
+        name: ancap8
+    # No test pass, so no test loader is built.
+    test_callbacks: []
+
+    # S1 and the cells alone are served: reference_normal is dropped before any pass.
+    # normal is served from the dumps, which store it, and the two pools are rescored
+    # from the weights of every epoch, as in eval=cchamber_wt.
+    val_sets: [normal, sensor_osr, walk_null]
+
+    # The pushed points alone: no auxiliary probe, training set or SDS pseudo-set. The
+    # file holds no mask and is refused unless its x has the md5 of RESULTS.md.
+    extra_sets:
+      points:
+        push:
+          path: ${ancap8_points_dir}/cchamber_wt_pushed.npz
+          md5_x: f9cd543df9b09be292b607122d9c8ec3
+          md5_mask: null
+
+    selection: ${selection}
+
+# ANCAP v8 alone: no criterion, Q'' or labelled row, so the lattice step writes v8's
+# five tables (src/evaluation/lattice.py) and no labelled table; the points have no
+# kinds, so the kinds table is empty. cells are the keys of the callback's views;
+# domain leads every table beside the lattice's name.
+selection:
+  ancap8:
+    name: ancap8
+    cells: [sensor_osr, walk_null]
+    n_kinds: 0
+    domain: cchamber_wt

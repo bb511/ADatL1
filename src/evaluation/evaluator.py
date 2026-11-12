@@ -64,14 +64,19 @@ class Evaluator:
         name: every run instantiates its own, and all of them run in the validation
         pass.
     :param test_callbacks: Names among dump_callbacks of those that run in the test
-        pass of the dump path.
+        pass of the dump path; with none, no test loader is built and no test pass
+        runs.
     :param extra_sets: The sets the validation pass of the dump path appends to the
         validation sets: 'aux' (bool), the three auxiliary sets; 'train' (bool, or
         {max_rows, row_seed, batch_size} for a seeded subset of rows), the training
         set; 'sds' and 'sds_val' ({max_rows, row_seed, optional push_scale} or None),
-        the SDS pseudo-sets of the training rows and of validation normal.
+        the SDS pseudo-sets of the training rows and of validation normal; 'points'
+        ({name: {path, md5_x, md5_mask}} or None), a loader per .npz file of points
+        in the model's input space, each point with its own mask, rescored at every
+        epoch (src.evaluation.components.rebuild.load_points gives the checks).
     :param selection: The registry of strategies of the dump path ('criteria',
-        'q_sec', 'labelled', 'efficiency', as in configs/eval/<domain>.yaml).
+        'q_sec', 'labelled', 'efficiency', as in configs/eval/<domain>.yaml), any of
+        which may be absent, as in configs/eval/physics_ancap8.yaml.
     :param typical: A stored validation set that the dump path serves as 'normal' in
         place of the run's, the operational cut included (src.evaluation.replay); None
         keeps 'normal'.
@@ -83,6 +88,9 @@ class Evaluator:
         and rescores from each epoch's weights, stored or not, 'normal' first for the
         cuts, so that a callback reads them from the same arithmetic as the sets the
         dump never stored; None serves every stored set.
+    :param val_sets: The validation sets the dump path keeps, by name; every other
+        validation loader is dropped before any pass, so that it is neither scored nor
+        read. None keeps every set.
     :param trainer_kwargs: The other arguments that are given to the trainer object,
         kept the same as the training, e.g., which device to run the computations on.
     """
@@ -100,6 +108,7 @@ class Evaluator:
         typical: str | None = None,
         row_caps: dict | None = None,
         rescored_sets: Sequence[str] | None = None,
+        val_sets: Sequence[str] | None = None,
         **trainer_kwargs,
     ):
         self.ckpts = ckpts or {}
@@ -110,6 +119,7 @@ class Evaluator:
         self.selection, self.typical = _container(selection), typical
         self.row_caps = _container(row_caps)
         self.rescored_sets = _container(rescored_sets)
+        self.val_sets = _container(val_sets)
         self.optimized_metric_config = optimized_metric_config or None
         if self.optimized_metric_config is not None:
             candidate = self.optimized_metric_config.get("candidate")
@@ -414,6 +424,8 @@ class Evaluator:
         tracking_uri: str | None = None,
         resume: bool = True,
         partial: str | None = None,
+        data_overrides: Sequence[str] | None = None,
+        empty_signals: bool = False,
     ) -> list[dict]:
         """Evaluate every run of a lattice by ``dump.evaluate_lattice``."""
         settings = self._dump_settings()
@@ -429,6 +441,8 @@ class Evaluator:
             tracking_uri,
             resume,
             partial,
+            _container(data_overrides),
+            empty_signals,
         )
 
     def evaluate_dump(
@@ -457,4 +471,5 @@ class Evaluator:
             "typical": self.typical,
             "row_caps": self.row_caps,
             "rescored_sets": self.rescored_sets,
+            "val_sets": self.val_sets,
         }

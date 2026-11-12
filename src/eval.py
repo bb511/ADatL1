@@ -49,6 +49,8 @@ def main(cfg: DictConfig) -> None:
         tracking_uri=cfg.tracking_uri,
         resume=cfg.resume,
         partial=cfg.partial_runs,
+        data_overrides=cfg.data_overrides,
+        empty_signals=cfg.empty_signals,
     )
 
     log.info(f"Selecting on the lattice into {cfg.out_dir}")

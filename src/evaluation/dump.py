@@ -38,12 +38,15 @@ from src.data.utils import unpack_batch
 from src.evaluation.callbacks.sds import PREFIXES
 from src.evaluation.components.pairing import hyperpoint
 from src.evaluation.components.rebuild import (
+    POINTS_CACHE,
     ROOT,
     SDS_CACHE,
+    cached_points,
     cached_sds,
     capped_loader,
     capped_meta,
     capped_record,
+    check_record_cache,
     loader_inputs,
     loader_layouts,
     null_sets,
@@ -83,12 +86,15 @@ def _strategies(selection: dict) -> dict[str, dict]:
     """Every strategy of the registry with its column in val.csv and its mode.
 
     The labelled rows are columns under their own names and are maximised; Q'' is
-    minimised.
+    minimised. A registry may name none of the three, as that of ANCAP v8 alone
+    (``configs/eval/physics_ancap8.yaml``).
     """
-    strategies = {name: dict(spec) for name, spec in selection["criteria"].items()}
-    for name, spec in selection["labelled"].items():
+    criteria = selection.get("criteria") or {}
+    strategies = {name: dict(spec) for name, spec in criteria.items()}
+    for name, spec in (selection.get("labelled") or {}).items():
         strategies[name] = {**spec, "column": name, "mode": "max"}
-    strategies["q_sec"] = {**selection["q_sec"], "mode": "min"}
+    if selection.get("q_sec"):
+        strategies["q_sec"] = {**selection["q_sec"], "mode": "min"}
     return strategies
 
 
@@ -159,6 +165,35 @@ def _check_rescored(names: list[str], loaders: dict) -> None:
         raise ValueError(f"rescored_sets names no validation loader: {unknown}.")
 
 
+def _kept(loaders: dict, names: list[str] | None) -> dict:
+    """The loaders that ``val_sets`` names, in the datamodule's order; all for None."""
+    if names is None:
+        return loaders
+    unknown = sorted(set(names) - loaders.keys())
+    if unknown:
+        raise ValueError(f"val_sets names no validation loader: {unknown}.")
+    return {name: loader for name, loader in loaders.items() if name in names}
+
+
+def _check_point_names(points: dict, val: dict) -> None:
+    # A points loader under a stored set's name would be served that set's scores.
+    clash = sorted(points.keys() & val.keys())
+    if clash:
+        raise ValueError(f"The points {clash} take the names of validation loaders.")
+
+
+def _served_signals(layout: dict | None, loaders: dict) -> list[str]:
+    """The signal sets of a layout among the loaders served.
+
+    The labels of no other set are read: none where ``val_sets`` leaves them out, and
+    none at all for a split without loaders, whose layout may be None.
+    """
+    if not loaders:
+        return []
+    served = [name for name in layout["names"] if name in loaders]
+    return signal_sets({**layout, "names": served})
+
+
 def _train_loader(data_train, spec, meta: dict) -> DataLoader | None:
     """The loader of ``extra_sets.train``: None for false; for true, every training row
     with the dump's batch size; for ``{max_rows, row_seed, batch_size}``, the seeded
@@ -193,7 +228,10 @@ class RunEvaluation:
     normal (``ReplayModule``), which an epoch file that lacks it has rescored first.
     A set of ``rescored_sets`` is replayed as if its file lacked it, so that a callback
     reads it from the same arithmetic as the sets the dump never stored; listing a set
-    the dump does not store changes nothing.
+    the dump does not store changes nothing. With ``val_sets``, the validation loaders
+    it does not name are dropped before any pass, so that none of them is scored or
+    read, and the signal sets are those it names. Without test callbacks no test
+    loader is built and no test pass runs: the rows of test.csv hold the epoch alone.
     """
 
     def __init__(
@@ -210,21 +248,21 @@ class RunEvaluation:
         typical: str | None = None,
         row_caps: dict | None = None,
         rescored_sets: list[str] | None = None,
+        val_sets: list[str] | None = None,
     ):
         self.run_dir = Path(run_dir)
         self.meta = torch.load(self.run_dir / "meta.pt", weights_only=True)
         self.dump_callbacks, self.extra_sets = dump_callbacks, extra_sets
         self.selection, self.strategies = selection, _strategies(selection)
-        self.passes = {"val": list(dump_callbacks), "test": test_callbacks}
+        self.passes = {"val": list(dump_callbacks), "test": list(test_callbacks)}
         self.trainers = {split: self._trainer(split) for split in self.passes}
-        self.loaders = self._loaders(datamodule, typical)
+        self.loaders = self._loaders(datamodule, typical, val_sets)
         self.rescored_sets = list(rescored_sets or [])
         _check_rescored(self.rescored_sets, self.loaders["val"])
         self.rows = self._cap(row_caps or {})
         meta = capped_meta(self.meta, self.loaders, self.rows)
         self.replay = ReplayModule(module, meta, typical, _rates(dump_callbacks))
-        layouts = self.meta if sets is None else loader_layouts(datamodule)
-        self.signals = {split: signal_sets(layouts[split]) for split in self.passes}
+        self.signals = self._signals(datamodule, sets)
         self.nulls = null_sets(self.trainers["test"].callbacks)
 
     def evaluate(
@@ -253,19 +291,41 @@ class RunEvaluation:
         trainer.strat_name = trainer.metric_name = trainer.criterion_name = None
         return trainer
 
-    def _loaders(self, datamodule: LightningDataModule, typical: str | None) -> dict:
+    def _loaders(
+        self,
+        datamodule: LightningDataModule,
+        typical: str | None,
+        val_sets: list[str] | None,
+    ) -> dict:
         """The validation loaders followed by the extra sets, and the test loaders."""
         datamodule.prepare_data()
         datamodule.setup("fit")
         val, data_train = datamodule.val_dataloader(), datamodule.data_train
         train = unpack_batch(data_train.tensors)
         loader = _train_loader(data_train, self.extra_sets.get("train"), self.meta)
-        aux = bool(self.extra_sets.get("aux"))
-        pseudo = self._pseudo_sets(train, val)
-        extra = extra_loaders(self.meta, loader, pseudo, aux, train.mask)
+        aux, pseudo = bool(self.extra_sets.get("aux")), self._pseudo_sets(train, val)
+        points = cached_points(self.extra_sets.get("points"))
+        extra = extra_loaders(self.meta, loader, pseudo, aux, train.mask, points)
+        val = _kept(as_typical(val, typical), val_sets)
+        _check_point_names(points, val)
+        return {"val": {**val, **extra}, "test": self._test_loaders(datamodule)}
+
+    def _signals(self, datamodule: LightningDataModule, sets: str | None) -> dict:
+        """The signal sets that each pass serves.
+
+        From meta.pt's layouts or, with ``sets``, from the datamodule's loaders of the
+        splits that have loaders, so that no test loader is built without a test pass.
+        """
+        splits = tuple(split for split in self.passes if self.loaders[split])
+        layouts = self.meta if sets is None else loader_layouts(datamodule, splits)
+        served = self.loaders
+        return {s: _served_signals(layouts.get(s), served[s]) for s in self.passes}
+
+    def _test_loaders(self, datamodule: LightningDataModule) -> dict:
+        if not self.passes["test"]:
+            return {}
         datamodule.setup("test")
-        val = {**as_typical(val, typical), **extra}
-        return {"val": val, "test": datamodule.test_dataloader()}
+        return datamodule.test_dataloader()
 
     def _pseudo_sets(self, train, val: dict) -> dict:
         """The SDS pseudo-sets of ``extra_sets.sds`` (from the training rows) and of
@@ -329,7 +389,10 @@ class RunEvaluation:
         return scores, pytorch_lightning.Trainer(callbacks=[scores], **REPLAY_TRAINER)
 
     def _row(self, split: str, epoch: int) -> dict:
-        """The epoch and the scalars every callback of a pass records."""
+        """The epoch and the scalars every callback of a pass records; the epoch alone
+        for a pass without callbacks, which is not run."""
+        if not self.passes[split]:
+            return {"epoch": epoch}
         trainer = self.trainers[split]
         self.replay.serve(split)
         trainer.metric_records = {}
@@ -349,11 +412,12 @@ class RunEvaluation:
         As the training efficiency callback computes its CVaR: in float32, without the
         non-finite values, the mean of the ceil(alpha n) lowest.
         """
-        prefix, values = self.selection["efficiency"], {}
-        effs = [row[prefix + s] for s in self.signals["val"]]
+        labelled = self.selection.get("labelled") or {}
+        prefix, values = self.selection.get("efficiency"), {}
+        effs = [row[prefix + s] for s in self.signals["val"]] if labelled else []
         x = torch.as_tensor(effs, dtype=torch.float32)
         x = torch.sort(x[torch.isfinite(x)]).values
-        for name, spec in self.selection["labelled"].items():
+        for name, spec in labelled.items():
             if spec["statistic"] not in ("mean", "cvar"):
                 raise ValueError(f"Unknown labelled statistic '{spec['statistic']}'.")
             cvar = spec["statistic"] == "cvar"
@@ -402,7 +466,7 @@ class RunEvaluation:
     def _picks(self, val: list[dict]) -> list[dict]:
         """A row per criterion and k of the w grid, one per other strategy (k None)."""
         trained = [row for row in val if row["epoch"] >= 0]
-        criteria, picks = self.selection["criteria"], []
+        criteria, picks = self.selection.get("criteria") or {}, []
         for name in self.strategies:
             for k in range(W_STEPS + 1) if name in criteria else [None]:
                 epoch = self._pick(name, trained, k)
@@ -410,6 +474,9 @@ class RunEvaluation:
         return picks
 
     def _test_summary(self, row: dict) -> dict:
+        # Without test callbacks no test pass runs, and the row holds the epoch alone.
+        if row.keys() == {"epoch"}:
+            return {}
         prefix = self.selection["efficiency"]
         signal_effs = [row[prefix + name] for name in self.signals["test"]]
         null_rates = [row[prefix + name] for name in self.nulls]
@@ -441,7 +508,8 @@ class RunEvaluation:
             columns.append((spec["key"], f"ema/{name}"))
             if spec.get("raw_key"):
                 columns.append((spec["raw_key"], spec["column"]))
-        prefix, signals = self.selection["efficiency"], self.signals["val"]
+        prefix = self.selection.get("efficiency")
+        signals = [] if prefix is None else self.signals["val"]
         key = self.selection.get("efficiency_key", SET_EFFICIENCY_KEY)
         return columns + [(key.format(s), prefix + s) for s in signals]
 
@@ -470,8 +538,11 @@ class RunEvaluation:
         return run_id
 
 
-def _init_worker(sds_cache: dict | None = None, threads: int = 1) -> None:
+def _init_worker(
+    sds_cache: dict | None = None, threads: int = 1, points_cache: dict | None = None
+) -> None:
     SDS_CACHE.update(sds_cache or {})
+    POINTS_CACHE.update(points_cache or {})
     torch.set_num_threads(threads)
     # The run configs call ${reverse:...} and the like; a second registration raises.
     if not OmegaConf.has_resolver("reverse"):
@@ -483,8 +554,9 @@ def _init_worker(sds_cache: dict | None = None, threads: int = 1) -> None:
 
 
 def _evaluate_task(task: tuple) -> dict:
-    run_dir, out_dir, lattice, data_dir, sets, tracking_uri, settings = task
-    module, datamodule = rebuild(run_dir, data_dir, sets)
+    run_dir, out_dir, lattice, data, tracking_uri, settings = task
+    data_dir, sets, data_overrides, empty_signals = data
+    module, datamodule = rebuild(run_dir, data_dir, sets, data_overrides, empty_signals)
     run = RunEvaluation(run_dir, module, datamodule, sets=sets, **settings)
     return run.evaluate(out_dir, lattice, tracking_uri)
 
@@ -563,14 +635,19 @@ class LatticeEvaluation:
 
     The runs are the directories of ``<scores_dir>/<lattice>`` that hold a ``meta.pt``,
     in name order. Each run's module and datamodule are rebuilt from its
-    ``config.yaml``, with its data directory replaced by ``data_dir`` and the signals
-    and nulls by those of ``configs/data/<sets>.yaml`` when given (``rebuild``), in a
-    spawn pool of ``workers`` processes of ``threads`` torch threads each (in this
-    process, on one thread, for one worker). One thread is the reference: more may
-    change float32 results in the last bits. Before the pool, this process prepares
-    the first run's data once: the SDS pseudo-sets, which the workers receive, and a
-    record of the hub (``rebuild.HUB_DATAMODULES``), which the workers then read
-    offline. ``settings`` holds the keyword-only arguments of ``evaluate_dump``. With
+    ``config.yaml``, with its data directory replaced by ``data_dir``, the signals and
+    nulls by those of ``configs/data/<sets>.yaml``, the signals emptied with
+    ``empty_signals`` and the record's ``data_overrides`` appended, when given
+    (``rebuild``), in a spawn pool of ``workers`` processes of ``threads`` torch
+    threads each (in this process, on one thread, for one worker). One thread is the
+    reference: more may change float32 results in the last bits. Before the pool, this
+    process prepares the first run's data once: the SDS pseudo-sets, which the workers
+    receive, and a record of the hub (``rebuild.HUB_DATAMODULES``), which the workers
+    then read offline. The points files of ``extra_sets.points`` are loaded and
+    checked against their md5s here once, before any run is replayed, and handed to
+    the workers; ``data_overrides`` without ``data_dir`` are refused, and with
+    ``val_sets`` every hub run's record cache is checked by ``check_record_cache``.
+    ``settings`` holds the keyword-only arguments of ``evaluate_dump``. With
     ``resume``, a run complete in ``out_dir`` (``_stored_run``) is neither replayed nor
     logged to MLflow again, and its stored run.json takes its place in the returned
     list. Only what run.json records is compared, so an ``out_dir`` written under
@@ -594,9 +671,13 @@ class LatticeEvaluation:
         tracking_uri: str | None = None,
         resume: bool = True,
         partial: str | None = None,
+        data_overrides: list[str] | None = None,
+        empty_signals: bool = False,
     ):
-        self.lattice, self.settings, self.data_dir = lattice, settings, data_dir
-        self.sets, self.workers, self.tracking_uri = sets, workers, tracking_uri
+        self.lattice, self.settings = lattice, settings
+        # What rebuild takes besides the run, in its order.
+        self.data = (data_dir, sets, data_overrides, empty_signals)
+        self.workers, self.tracking_uri = workers, tracking_uri
         self.threads, self.resume, self.partial_mode = threads, resume, partial
         paths = (Path(scores_dir) / lattice).iterdir()
         self.runs = sorted(p for p in paths if (p / "meta.pt").is_file())
@@ -605,11 +686,30 @@ class LatticeEvaluation:
     def evaluate(self, out_dir: Path) -> list[dict]:
         """Evaluate the runs into ``out_dir``; return their run.json."""
         self._prepare_out(Path(out_dir))
+        self._preflight()
         stored = self._stored(out_dir)
-        task = (out_dir, self.lattice, self.data_dir, self.sets, self.tracking_uri)
+        task = (out_dir, self.lattice, self.data, self.tracking_uri)
         runs = [run for run in self.replayed if run not in stored]
         evaluated = iter(self._map([(run, *task, self.settings) for run in runs]))
         return [stored.get(run) or next(evaluated) for run in self.replayed]
+
+    def _preflight(self) -> None:
+        """Refuse a configuration, points file or record cache unlike its declaration.
+
+        Before any datamodule is built: ``data_overrides`` without ``data_dir``, which
+        would leave in use the run's own record cache, built without them; a points
+        file whose md5 differs; and a hub run's record cache that holds a simulated set
+        outside ``val_sets``.
+        """
+        data_dir, _, data_overrides, _ = self.data
+        if data_overrides and data_dir is None:
+            raise ValueError(
+                "data_overrides need data_dir, a record cache built with the same "
+                "overrides."
+            )
+        cached_points(self.settings["extra_sets"].get("points"))
+        for run in self.runs:
+            check_record_cache(run, data_dir, self.settings.get("val_sets"))
 
     def _prepare_out(self, out_dir: Path) -> None:
         """Create the MLflow experiment and write the table of partial runs."""
@@ -647,7 +747,7 @@ class LatticeEvaluation:
         # Spawned, not forked: torch's thread pools do not survive a fork once the
         # parent has used them.
         context = multiprocessing.get_context("spawn")
-        initargs = (dict(SDS_CACHE), self.threads)
+        initargs = (dict(SDS_CACHE), self.threads, dict(POINTS_CACHE))
         with _offline_hub(offline), context.Pool(
             self.workers, initializer=_init_worker, initargs=initargs
         ) as pool:
@@ -661,7 +761,7 @@ class LatticeEvaluation:
             return False
         if not OmegaConf.has_resolver("reverse"):
             register_resolvers()
-        datamodule = rebuild(self.runs[0], self.data_dir, self.sets)[1]
+        datamodule = rebuild(self.runs[0], *self.data)[1]
         datamodule.prepare_data()
         _prebuild_sds(datamodule, extra)
         return hub
@@ -692,12 +792,15 @@ def evaluate_lattice(
     tracking_uri: str | None = None,
     resume: bool = True,
     partial: str | None = None,
+    data_overrides: list[str] | None = None,
+    empty_signals: bool = False,
 ) -> list[dict]:
     """Evaluate every run of a lattice; return their run.json, in name order.
 
     With ``resume``, a run whose four files in ``out_dir`` are complete is not
-    evaluated again; ``partial`` says what becomes of a partial run
-    (``LatticeEvaluation``).
+    evaluated again; ``partial`` says what becomes of a partial run, ``data_overrides``
+    what is appended to the record's overrides, and ``empty_signals`` whether every
+    run's signals are emptied (``LatticeEvaluation``).
     """
     evaluation = LatticeEvaluation(
         scores_dir,
@@ -710,6 +813,8 @@ def evaluate_lattice(
         tracking_uri,
         resume,
         partial,
+        data_overrides,
+        empty_signals,
     )
     return evaluation.evaluate(out_dir)
 
@@ -729,6 +834,7 @@ def evaluate_dump(
     typical: str | None = None,
     row_caps: dict | None = None,
     rescored_sets: list[str] | None = None,
+    val_sets: list[str] | None = None,
 ) -> dict:
     """Evaluate every epoch of one dumped run; write its four files, return run.json.
 
@@ -737,9 +843,9 @@ def evaluate_dump(
 
     - ``val.csv``: ``epoch``, validation scalars, labelled rows, ``ema/<strategy>``.
     - ``test.csv``: ``epoch``, test scalars, ``test_mean_eff``, ``realised_fpr``,
-      ``null_rate``.
+      ``null_rate``; ``epoch`` alone without test callbacks.
     - ``picks.csv``: ``strategy``, ``k`` (0..W_STEPS for a criterion, else empty),
-      ``epoch``.
+      ``epoch``; no row where the registry names no strategy.
     - ``run.json``: ``run``, ``lattice``, ``dump``, ``hyperpoint``, ``mlflow_run_id``,
       ``epochs``, ``module``, ``signals``, ``nulls``, ``stored``, ``typical``.
 
@@ -757,5 +863,6 @@ def evaluate_dump(
         typical=typical,
         row_caps=row_caps,
         rescored_sets=rescored_sets,
+        val_sets=val_sets,
     )
     return run.evaluate(out_dir, lattice, tracking_uri)

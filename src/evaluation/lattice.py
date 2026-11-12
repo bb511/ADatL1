@@ -23,7 +23,17 @@ and those of ``src.evaluation.harvest``:
 - <lattice>.csv, <lattice>_eval.csv: the schema of scripts/analysis/harvest_pool_effs.py
 
 A banded criterion whose columns or picks the per-run tables lack, as where the ancap
-callback ran without working_point, is skipped with a logged note.
+callback ran without working_point, is skipped with a logged note. A registry without
+labelled rows gets none of these tables, which all compare with the oracle's pick.
+
+Where the registry holds ``ancap8`` (``name``, ``cells``, ``n_kinds``, ``domain``),
+ANCAP v8's tables are written first, from the columns '<name>/<key>_<cell>' of every
+run's val.csv for every key of ``src.callbacks.ancap8.keys(n_kinds)`` and every cell,
+by ``src.evaluation.components.ancap8.tables``. A run whose val.csv lacks one of them
+raises ValueError, as where an out_dir written under another eval config is resumed:
+
+- <name>_candidates.csv, <name>_picks.csv, <name>_beside.csv, <name>_kinds.csv,
+  <name>_condition.csv: domain, lattice, then the columns of that module's tables
 
 The readers of the per-run outputs and the dumps, the pairing with the partner
 lattice, the lattice criteria and the statistics of the tables are in
@@ -41,6 +51,7 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 
+from src.callbacks.ancap8 import keys as ancap8_keys
 from src.callbacks.components.selection import (
     W_STEPS,
     BandPick,
@@ -53,15 +64,18 @@ from src.callbacks.components.selection import (
     ranks,
     smoothed,
 )
+from src.evaluation.components import ancap8
 from src.evaluation.components.pairing import partner_scores
 from src.evaluation.components.statistics import at, spearman_test
 from src.evaluation.components.tables import (
     PARTIAL_RUNS,
     SPLITS,
     load_lattice,
+    read_callback_rows,
     read_partial,
     read_picks,
     read_values,
+    write_table,
 )
 from src.evaluation.components.udr import LATTICE_CRITERIA
 
@@ -486,6 +500,28 @@ class Lattice:
         return {"floor_mean": values.mean(), "floor_p05": p05, "floor_p95": p95}
 
 
+def _labelled_tables(lat: Lattice, out_dir: Path, lattice: str) -> None:
+    # Imported here, since both modules import this one.
+    from src.evaluation.harvest import Harvest
+    from src.evaluation.report import Report
+
+    Report(lat).write(out_dir)
+    Harvest(lat, lattice).write(out_dir)
+
+
+def _ancap8_tables(out_dir: Path, spec: dict, lattice: str) -> None:
+    """Write ANCAP v8's tables, '<name>_<table>.csv', with ``domain`` and ``lattice`` as
+    their first columns."""
+    cells, n_kinds = list(spec["cells"]), int(spec["n_kinds"])
+    keys = [f"{key}_{cell}" for cell in cells for key in ancap8_keys(n_kinds)]
+    rows = read_callback_rows(_run_dirs(out_dir), spec["name"], keys)
+    for name, table in ancap8.tables(rows, cells, n_kinds).items():
+        table = table.copy()
+        table.insert(0, "lattice", lattice)
+        table.insert(0, "domain", spec["domain"])
+        write_table(out_dir / f"{spec['name']}_{name}.csv", table)
+
+
 def select_lattice(
     out_dir: Path,
     selection: dict,
@@ -500,8 +536,10 @@ def select_lattice(
     :param out_dir: The stage's output directory of the lattice, whose ``runs/``
         holds the per-run outputs of ``Evaluator.evaluate_lattice``; the runs that its
         ``partial_runs.csv`` lists are left out.
-    :param selection: The ``selection`` node of the eval domain config: ``criteria``
-        (name: ``column``, ``mode``, ``key``, optionally ``raw_key``,
+    :param selection: The ``selection`` node of the eval domain config: ``ancap8``
+        (the module docstring), where ANCAP v8's tables are written, and the
+        labelled selection's ``criteria`` (name: ``column``, ``mode``, ``key``,
+        optionally ``raw_key``,
         ``skip_nonfinite`` and ``band``, whose ``level``, ``level_se`` and ``se`` name
         the columns of the level, its standard error and that of Q', and ``band_se``
         the band's width in standard errors, which makes the criterion banded),
@@ -509,7 +547,8 @@ def select_lattice(
         intervention and target_cluster, or None), ``lattice_criteria`` (name: mode),
         ``limits`` (strategy: note) and, optionally, ``lattice_rows`` (``max_rows``,
         ``row_seed``), the seeded subset of validation normal's rows that UDR and MC
-        read, every row when absent.
+        read, every row when absent. The labelled selection runs only where
+        ``labelled`` names a row.
     :param scores_dir: The root of the dumps, ``<scores_dir>/<lattice>/<run>/``.
     :param lattice: The lattice's name, its directory under ``scores_dir``.
     :param partner: The lattice whose runs, paired by hyperpoint, give UDR; None
@@ -521,13 +560,13 @@ def select_lattice(
         and its partner; None reads the dumps. The two criteria are left out, with a
         logged warning, where these files lack validation normal.
     """
-    # Imported here, since both modules import this one.
-    from src.evaluation.harvest import Harvest
-    from src.evaluation.report import Report
-
     out_dir, scores_dir = Path(out_dir), Path(scores_dir)
+    if "ancap8" in selection:
+        _ancap8_tables(out_dir, selection["ancap8"], lattice)
+    if not selection.get("labelled"):
+        log.info(f"No labelled row in the registry: no labelled table in {out_dir}.")
+        return
     lat = Lattice.read(
         out_dir, selection, scores_dir, lattice, partner, drop_unpaired, rescored_dir
     )
-    Report(lat).write(out_dir)
-    Harvest(lat, lattice).write(out_dir)
+    _labelled_tables(lat, out_dir, lattice)

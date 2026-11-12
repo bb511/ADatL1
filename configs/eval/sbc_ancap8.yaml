@@ -1,0 +1,83 @@
+# @package _global_
+
+# ANCAP v8 on the blood counts' pool lattices, label-free: the capacity of Leipzig's
+# training controls (normal, S1) against each second source's controls (S2) on the
+# domain's pushed points, with the condition reported beside it (V8.md of Theory XXXI,
+# step 4, sections 2 and 3, as amended by FREEZE_2.md of Theory XXXII). The dumps are
+# those that configs/eval/sbc.yaml reads; this config does not compose that one, and
+# none of its callbacks runs here. No signal set is read (empty_signals), and no test
+# pass runs.
+#   python src/eval.py eval=sbc_ancap8 lattice=sbc_<family>_pool \
+#       data_dir=<the directory that holds extdata/>
+
+# The dumps sit under the name of the training data config.
+scores_dir: ${paths.root_dir}/lattices/sbc
+# An out_dir of its own: in eval=sbc's, a resume would take that config's complete runs
+# for this one's (the lattice step refuses a run without v8's columns). Nothing goes to
+# MLflow per epoch, so no run is logged there.
+out_dir: ${paths.log_dir}/eval/${lattice}_ancap8
+tracking_uri: null
+# Every run is evaluated on the null sets of data/sbc.yaml, whatever lists it was
+# trained with, as step 5's store was scored (the scoring pass's --data-sets).
+sets: sbc
+# The six signal sets, sepsis and SIRS, are neither selected from the file nor split
+# nor served: the domain's labelled read is made once, apart from this evaluation.
+empty_signals: true
+# The frozen file of pushed points (RESULTS.md of Theory XXXII's redo, "The points").
+ancap8_points_dir: ${paths.root_dir}/pushed_points/sbc
+
+evaluation:
+  evaluator:
+    _target_: src.evaluation.evaluator.Evaluator
+    # The callback configs pass through uninstantiated: every run builds its own.
+    _recursive_: false
+    accelerator: cpu
+    devices: 1
+    logger: false
+    enable_progress_bar: false
+    enable_model_summary: false
+
+    # The only callback. S1 is validation normal and the cells the two second sources;
+    # the reference is the one file of pushed points, without kinds. n1 and n2 are the
+    # rows that configs/data/sbc.yaml draws (eval_size, null_size), n_p the points.
+    dump_callbacks:
+      ancap8:
+        _target_: src.evaluation.callbacks.ancap8.ANCAP8
+        output_name: ascore/full
+        dataset_1: normal
+        views:
+          leipzig_validation: leipzig_validation
+          greifswald: greifswald
+        points: [push]
+        kinds: false
+        sizes: { n1: 50000, n2: 50000, n_p: 3822 }
+        name: ancap8
+    # No test pass, so no test loader is built.
+    test_callbacks: []
+
+    # S1 and the cells alone are served: reference_normal is dropped before any pass.
+    # The dumps store no validation set, so all three are rescored from the weights at
+    # every epoch, initial.pt included.
+    val_sets: [normal, leipzig_validation, greifswald]
+
+    # The pushed points alone: no auxiliary probe, training set or SDS pseudo-set. The
+    # file holds no mask and is refused unless its x has the md5 of RESULTS.md.
+    extra_sets:
+      points:
+        push:
+          path: ${ancap8_points_dir}/sbc_pushed.npz
+          md5_x: 26649eab4670ca52b41c5986a3a0d987
+          md5_mask: null
+
+    selection: ${selection}
+
+# ANCAP v8 alone: no criterion, Q'' or labelled row, so the lattice step writes v8's
+# five tables (src/evaluation/lattice.py) and no labelled table; the points have no
+# kinds, so the kinds table is empty. cells are the keys of the callback's views;
+# domain leads every table beside the lattice's name.
+selection:
+  ancap8:
+    name: ancap8
+    cells: [leipzig_validation, greifswald]
+    n_kinds: 0
+    domain: sbc

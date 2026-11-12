@@ -1,6 +1,10 @@
-"""A dumped run rebuilt from its configuration, and what its evaluation takes from
-the rebuilt datamodule and callbacks: the signal and null sets, the loader layouts,
-the row-capped loaders and the SDS pseudo-sets, cached across the runs of a worker."""
+"""A dumped run rebuilt from its configuration, and what its evaluation takes from it.
+
+From the rebuilt datamodule and callbacks: the signal and null sets, the loader
+layouts, the row-capped loaders, and the SDS pseudo-sets and the points files, each
+cached across the runs of a worker. Before any datamodule is built, the check of a hub
+run's record cache (``check_record_cache``).
+"""
 
 import hashlib
 from pathlib import Path
@@ -11,6 +15,7 @@ from omegaconf import OmegaConf
 from pytorch_lightning import LightningDataModule
 from torch.utils.data import BatchSampler, DataLoader, SequentialSampler, TensorDataset
 
+from src.callbacks.components.points import load_points
 from src.callbacks.components.utils import row_subset
 from src.callbacks.score_dump import _layout
 from src.callbacks.sds import SDS_PUSH_SCALE, sds_inputs
@@ -48,13 +53,93 @@ def _replace_data_dir(cfg, data_dir: str) -> None:
     cfg.data["cache_dir" if target in HUB_DATAMODULES else "data_dir"] = str(data_dir)
 
 
-def rebuild(run_dir: Path, data_dir: str | None, sets: str | None = None) -> tuple:
+# The record's simulated categories, cached per data set under its cache_dir as its
+# loader lays them out (adl1t_datamaker 97b465d, publish/assets/loader):
+# <data>/extracted/<stage>/<category>/<set>, <data>/processed/<stage>/<category>/<set>
+# and <data>/mlready/<stage>/<normaliser>/aux/<set>, <data> being its paths.data_dir.
+SIMULATED = ("background", "signal")
+
+
+def _simulated_sets(cache: Path) -> list[Path]:
+    staged = [f"*/{s}/*/{c}/*" for s in ("extracted", "processed") for c in SIMULATED]
+    globs = [*staged, "*/mlready/*/*/aux/*"]
+    return sorted(p for glob in globs for p in cache.glob(glob) if p.is_dir())
+
+
+def _record_cache(run_dir: Path, cfg, data_dir: str | None) -> Path:
+    cache = data_dir or OmegaConf.select(cfg, "data.cache_dir")
+    if cache is None:
+        raise ValueError(f"{run_dir.name} names no record cache to check.")
+    return Path(cache)
+
+
+def check_record_cache(
+    run_dir: Path, data_dir: str | None, val_sets: list[str] | None
+) -> None:
+    """Refuse a hub run's record cache that holds a simulated set outside ``val_sets``.
+
+    The record's reader loads every simulated set of its ml-ready cache, and its
+    pipeline carries every set of an earlier stage on to the next, so a set outside
+    ``val_sets`` at any stage would be read. Directory names alone are listed, before
+    any datamodule is built; no file of the cache is opened. The cache is
+    ``data_dir``, else the run's ``data.cache_dir``. A run of another datamodule, or
+    ``val_sets`` None, passes unchecked.
+
+    Raises:
+        ValueError: Naming the cache and the sets it holds outside ``val_sets``, or
+            where the run names no cache.
+    """
+    cfg = OmegaConf.load(run_dir / "config.yaml")
+    if val_sets is None or _data_target(cfg) not in HUB_DATAMODULES:
+        return
+    cache = _record_cache(run_dir, cfg, data_dir)
+    found = _simulated_sets(cache)
+    outside = [str(p.relative_to(cache)) for p in found if p.name not in val_sets]
+    if outside:
+        raise ValueError(
+            f"The record cache {cache} holds sets outside val_sets: {outside}."
+        )
+
+
+def _add_record_overrides(cfg, data_overrides: list[str]) -> None:
+    if not data_overrides:
+        return
+    if _data_target(cfg) not in HUB_DATAMODULES:
+        raise ValueError("data_overrides apply to the hub datamodule's record alone.")
+    cfg.data.overrides = [*(cfg.data.get("overrides") or []), *data_overrides]
+
+
+def _empty_signals(cfg, empty_signals: bool) -> None:
+    if not empty_signals:
+        return
+    if _data_target(cfg) in L1AD_DATAMODULES:
+        raise ValueError(
+            "empty_signals cannot apply to the L1AD data: data_overrides compose its "
+            "record without signal sets."
+        )
+    if "signals" not in cfg.data:
+        raise ValueError(f"empty_signals: {_data_target(cfg)} takes no signals.")
+    cfg.data.signals = {}
+
+
+def rebuild(
+    run_dir: Path,
+    data_dir: str | None,
+    sets: str | None = None,
+    data_overrides: list[str] | None = None,
+    empty_signals: bool = False,
+) -> tuple:
     """The run's module and datamodule, instantiated from its ``config.yaml``.
 
     With ``data_dir``, the data config's ``data_dir`` is replaced (``cache_dir`` for
     the hub datamodule of the L1AD data). With ``sets``, the ``signals`` and ``nulls``
     of ``configs/data/<sets>.yaml`` replace the run's; the rest of the run's data
     configuration is kept. Both raise ValueError where the L1AD data has no such field.
+    With ``empty_signals``, ``signals`` is then emptied, so that the datamodule reads
+    no signal set; it raises ValueError for the L1AD data and for a data config without
+    ``signals``. ``data_overrides`` are appended to the hub datamodule's ``overrides``,
+    those of the record's own configuration (``data.signal={}`` composes the record
+    without its signal sets), and raise ValueError for any other datamodule.
     """
     cfg = OmegaConf.load(run_dir / "config.yaml")
     if data_dir is not None:
@@ -64,6 +149,8 @@ def rebuild(run_dir: Path, data_dir: str | None, sets: str | None = None) -> tup
             raise ValueError("sets cannot replace the sets of the L1AD data pipeline.")
         lists = OmegaConf.load(DATA_CONFIGS / f"{sets}.yaml")
         cfg.data.signals, cfg.data.nulls = lists.signals, lists.get("nulls")
+    _empty_signals(cfg, empty_signals)
+    _add_record_overrides(cfg, list(data_overrides or []))
     return hydra.utils.instantiate(cfg.algorithm), hydra.utils.instantiate(cfg.data)
 
 
@@ -102,6 +189,24 @@ def cached_sds(
             SDS_CACHE.clear()
         SDS_CACHE[key] = sds_inputs(x, max_rows, row_seed, mask, push_scale)
     return SDS_CACHE[key]
+
+
+# The points files of ``extra_sets.points``, keyed by path and declared md5s: loaded and
+# checked once per lattice, in the process that maps the runs, whose pool initialiser
+# copies them into every worker, as SDS_CACHE.
+POINTS_CACHE: dict = {}
+
+
+def cached_points(points: dict | None) -> dict[str, tuple]:
+    """``load_points`` of every entry ``{name: {path, md5_x, md5_mask}}`` of
+    ``extra_sets.points``, through ``POINTS_CACHE``."""
+    loaded = {}
+    for name, spec in (points or {}).items():
+        key = (str(spec["path"]), spec["md5_x"], spec.get("md5_mask"))
+        if key not in POINTS_CACHE:
+            POINTS_CACHE[key] = load_points(*key)
+        loaded[name] = POINTS_CACHE[key]
+    return loaded
 
 
 def loader_inputs(loader: DataLoader) -> BatchView:
@@ -166,10 +271,12 @@ def signal_sets(layout: dict) -> list[str]:
     return [name for name in layout["names"] if min(layout["labels"][name]) > 0]
 
 
-def loader_layouts(datamodule: LightningDataModule) -> dict[str, dict]:
-    """The validation and test layouts of a set-up datamodule, in meta.pt's form."""
-    loaders = {"val": datamodule.val_dataloader(), "test": datamodule.test_dataloader()}
-    return {split: _layout(split_loaders) for split, split_loaders in loaders.items()}
+def loader_layouts(
+    datamodule: LightningDataModule, splits: tuple[str, ...] = ("val", "test")
+) -> dict[str, dict]:
+    """The layouts of a set-up datamodule's loaders of ``splits``, in meta.pt's form."""
+    loaders = {"val": datamodule.val_dataloader, "test": datamodule.test_dataloader}
+    return {split: _layout(loaders[split]()) for split in splits}
 
 
 def null_sets(callbacks: list) -> list[str]:

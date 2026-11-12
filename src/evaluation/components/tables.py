@@ -3,12 +3,13 @@
 ``write_outputs`` writes a run's val.csv, test.csv, picks.csv and run.json, whose
 columns ``src.evaluation.dump.evaluate_dump`` lists, and ``write_partial`` the table
 of the runs left partial; the readers load them and the dumps for
-``src.evaluation.lattice``.
+``src.evaluation.lattice``, and ``write_table`` writes a table of the lattice step.
 """
 
 import csv
 import json
 import logging
+import os
 from pathlib import Path
 
 import numpy as np
@@ -117,6 +118,49 @@ def read_values(dirs: list[Path], info: list[dict]) -> pd.DataFrame:
             raise ValueError(f"The runs' {split}.csv hold different columns.")
     runs = [pd.concat(dict(zip(splits, run)), axis=1) for run in zip(*splits.values())]
     return pd.concat(runs, keys=[path.name for path in dirs], names=["run"])
+
+
+def _check_columns(
+    path: Path, table: pd.DataFrame, columns: list[str], name: str
+) -> None:
+    missing = [column for column in columns if column not in table]
+    if missing:
+        raise ValueError(
+            f"{path.name}'s val.csv lacks {len(missing)} columns of {name}, "
+            f"{missing[0]} first."
+        )
+
+
+def read_callback_rows(dirs: list[Path], name: str, keys: list[str]) -> pd.DataFrame:
+    """The columns '<name>/<key>' of every run's val.csv, renamed ``keys``.
+
+    ``run`` and ``epoch`` lead them, and the runs follow the order of ``dirs``.
+
+    Raises:
+        ValueError: Naming the first run whose val.csv lacks one of the columns, as
+            where an ``out_dir`` written under another evaluation config is resumed.
+    """
+    columns, tables = [f"{name}/{key}" for key in keys], []
+    for path in dirs:
+        table = _epoch_table(path / "val.csv").reset_index()
+        _check_columns(path, table, columns, name)
+        tables.append(table[["epoch", *columns]].assign(run=path.name))
+    rows = pd.concat(tables, ignore_index=True)[["run", "epoch", *columns]]
+    return rows.set_axis(["run", "epoch", *keys], axis="columns")
+
+
+def write_table(path: Path, table: pd.DataFrame) -> None:
+    """Write a table under a temporary name and rename it, so that a table on disk is
+    whole; each float as its repr, which reads back exactly, and None or NaN empty, as
+    ``DataFrame.to_csv`` writes them."""
+    tmp = path.with_name(path.name + ".tmp")
+    rows = table.astype(object).to_dict("records")
+    records = [{k: None if pd.isna(v) else v for k, v in row.items()} for row in rows]
+    with open(tmp, "w", newline="") as file:
+        writer = csv.DictWriter(file, fieldnames=list(table.columns))
+        writer.writeheader()
+        writer.writerows(records)
+    os.replace(tmp, path)
 
 
 def read_picks(dirs: list[Path]) -> pd.DataFrame:

@@ -33,7 +33,9 @@ to each point's start row, and ``scale``. The log ``<domain>_log.json`` records 
 sizes of X_train, R, X_H and RH, the possible events (flags counted, bounds and flags
 by md5), the rows of X_train and of RH outside them, the entries of RH that the
 projection changes, the pushed points outside them (expected 0), the md5 of R, RH,
-``x`` and ``rows``, and whether the signal sets were emptied.
+``x`` and ``rows``, and whether the signal sets were emptied. Points whose ``x`` or
+``rows`` differ from the frozen file's are refused before anything is written
+(``push_plain.check_frozen``).
 
 Usage::
 
@@ -51,15 +53,13 @@ import rootutils
 import torch
 from hydra import compose, initialize_config_dir
 from hydra.utils import instantiate
-from omegaconf import DictConfig
+from omegaconf import DictConfig, OmegaConf
 from pytorch_lightning import LightningDataModule, seed_everything
 
 ROOT = rootutils.setup_root(__file__, indicator=".project-root", pythonpath=True)
 
 from src.data.components import push_lhc, push_plain
 from src.utils.omegaconf import register_resolvers
-
-register_resolvers()
 
 
 def _md5(a: np.ndarray) -> str:
@@ -144,6 +144,9 @@ def _flat(x: torch.Tensor) -> np.ndarray:
 
 
 def _compose(domain: str, data_root: Path) -> DictConfig:
+    # register_resolvers raises where its resolvers are registered already.
+    if not OmegaConf.has_resolver("smaller_decoder"):
+        register_resolvers()
     overrides = [f"experiment={domain}/ae", f"paths.base_data_dir={data_root}"]
     with initialize_config_dir(config_dir=str(ROOT / "configs"), version_base="1.3"):
         return compose(config_name="train.yaml", overrides=overrides)
@@ -219,16 +222,12 @@ def _events_log(
 ) -> dict:
     """Return the log's entries on the possible events; the rows are float32 (n, d)."""
     changed = push_plain.project(rh.astype(np.float64), events).astype(np.float32) != rh
-    return {
-        "n_never_negative": int(events.never_negative.sum()),
-        "n_integer": int(events.integer.sum()),
-        "md5_lo": _md5(events.lo),
-        "md5_hi": _md5(events.hi),
-        "md5_integer": _md5(events.integer),
-        "train_violations": push_plain.n_violations(x_train, events),
-        "h_violations": push_plain.n_violations(rh, events),
-        "h_changed": int(changed.sum()),
-    }
+    log = {"n_never_negative": int(events.never_negative.sum())}
+    log |= {"n_integer": int(events.integer.sum())}
+    log |= {f"md5_{k}": _md5(getattr(events, k)) for k in ("lo", "hi", "integer")}
+    log |= {"train_violations": push_plain.n_violations(x_train, events)}
+    log |= {"h_violations": push_plain.n_violations(rh, events)}
+    return log | {"h_changed": int(changed.sum())}
 
 
 def _push_log(
@@ -244,11 +243,18 @@ def _push_log(
     rows = push_plain.first_rows(_flat(x_h), rh.numpy())[start_rows]
     log = {"scale": scale, "n_points": len(x), "md5_x": _md5(x), "md5_rows": _md5(rows)}
     log["violations_projected"] = push_plain.n_violations(x, events)
+    push_plain.check_frozen(domain, log["md5_x"], log["md5_rows"])
+    _write_points(out, domain, x, rows, scale)
+    return log
+
+
+def _write_points(
+    out: Path, domain: str, x: np.ndarray, rows: np.ndarray, scale: float
+) -> None:
     if domain in push_plain.IMAGE_DOMAINS:
         x = x.reshape(len(x), *push_plain.IMAGE_SHAPE)
     out.mkdir(parents=True, exist_ok=True)
     np.savez(out / f"{domain}_pushed.npz", x=x, rows=rows, scale=scale)
-    return log
 
 
 def build_plain(args: argparse.Namespace) -> None:
@@ -265,8 +271,7 @@ def build_plain(args: argparse.Namespace) -> None:
     print(text)
 
 
-def _add_plain(domains: argparse._SubParsersAction, domain: str) -> None:
-    plain = domains.add_parser(domain, help=f"The pushed points of {domain}.")
+def _add_plain(plain: argparse.ArgumentParser) -> None:
     plain.add_argument(
         "--data-root", type=Path, required=True, help="paths.base_data_dir."
     )
@@ -283,7 +288,7 @@ def _parse_args(argv: list[str] | None) -> argparse.Namespace:
     lhc.add_argument("--out", type=Path, required=True, help="The output directory.")
     lhc.set_defaults(build=build_lhc)
     for domain in push_plain.SCALES:
-        _add_plain(domains, domain)
+        _add_plain(domains.add_parser(domain, help=f"The pushed points of {domain}."))
     return parser.parse_args(argv)
 
 

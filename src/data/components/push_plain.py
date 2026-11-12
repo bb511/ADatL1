@@ -5,8 +5,9 @@ The definition is the frozen page
 "Domains", "Rows" and "The possible events", which ``theory_xxxii/redo/FREEZE_2.md``
 takes into the freeze. ``SCALES`` holds the scales read there (``RESULTS.md``, "Per
 domain"). At these scales the points built here are the reference files of
-``theory_xxxii/reference/`` byte for byte. The yardstick that read the scales and the
-page's other statistics are not implemented.
+``theory_xxxii/reference/`` byte for byte, and ``check_frozen`` compares their md5s
+with those files'. The yardstick that read the scales and the page's other statistics
+are not implemented.
 
 A detector's input x has the raw value ``v = a x + b``: a and b are the robust spread
 and median of a tabular domain, and 255 times the channel's std and mean of an image
@@ -49,6 +50,24 @@ SCALES = {
     "mscct": 1.414,
     "dijet": 2.0,
     "sbc": 4.0,
+}
+# The md5 of the bytes of x and of rows in the frozen files (RESULTS.md, "The points"):
+# another data tree or code would write other points under the same name.
+FROZEN_MD5_X = {
+    "cchamber": "7d24bd0aeb57732bad11ebff54c5706c",
+    "cchamber_wt": "f9cd543df9b09be292b607122d9c8ec3",
+    "cifar10": "5df052e03d8e16d4bd5adad6f881d8e1",
+    "mscct": "7d70156467d1509b6b484e28f6713959",
+    "dijet": "15152a32cdf170061bad273f3b2e129d",
+    "sbc": "26649eab4670ca52b41c5986a3a0d987",
+}
+FROZEN_MD5_ROWS = {
+    "cchamber": "3b6d8a722e8bf3558306afc393dc74d8",
+    "cchamber_wt": "b1b8431f731090a02e8812175f823c08",
+    "cifar10": "dc91f0b4243109a647d85609da28b9eb",
+    "mscct": "aa3ab0b183c69dd6da8867b29fa09324",
+    "dijet": "5d4bfaee1e0da611fc5a054fa571f836",
+    "sbc": "1aa4deb35c3926fc306b4abab94f82d3",
 }
 # The test sets whose rows, concatenated in this order, are X_H.
 HELD_OUT = {
@@ -178,9 +197,21 @@ def push(
     ``rh`` is RH in float64 (m, d). The points are float32 (n, d), and the start rows
     their indices in RH, (n,).
     """
-    _, out, _, start_rows = sds_pseudo_sets(rh, return_rows=True)
+    # SDS's own push at its scale 1, fixed here so that a change of SDS's default
+    # cannot rescale the frozen points.
+    _, out, _, start_rows = sds_pseudo_sets(rh, return_rows=True, push_scale=1.0)
     start = rh[start_rows]
     return project(start + scale * (out - start), events).astype(np.float32), start_rows
+
+
+def check_frozen(domain: str, md5_x: str, md5_rows: str) -> None:
+    """Raise ValueError unless the md5 of x and rows are those of the frozen file."""
+    frozen = FROZEN_MD5_X[domain], FROZEN_MD5_ROWS[domain]
+    if (md5_x, md5_rows) != frozen:
+        raise ValueError(
+            f"{domain}: x and rows of md5 {md5_x} and {md5_rows}, not the frozen "
+            f"{frozen[0]} and {frozen[1]}: another data tree or code."
+        )
 
 
 def first_rows(x: np.ndarray, rows: np.ndarray) -> np.ndarray:

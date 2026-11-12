@@ -109,6 +109,15 @@ def _add_record_overrides(cfg, data_overrides: list[str]) -> None:
     cfg.data.overrides = [*(cfg.data.get("overrides") or []), *data_overrides]
 
 
+def _replace_sets(cfg, sets: str | None) -> None:
+    if sets is None:
+        return
+    if _data_target(cfg) in L1AD_DATAMODULES:
+        raise ValueError("sets cannot replace the sets of the L1AD data pipeline.")
+    lists = OmegaConf.load(DATA_CONFIGS / f"{sets}.yaml")
+    cfg.data.signals, cfg.data.nulls = lists.signals, lists.get("nulls")
+
+
 def _empty_signals(cfg, empty_signals: bool) -> None:
     if not empty_signals:
         return
@@ -144,11 +153,7 @@ def rebuild(
     cfg = OmegaConf.load(run_dir / "config.yaml")
     if data_dir is not None:
         _replace_data_dir(cfg, data_dir)
-    if sets is not None:
-        if _data_target(cfg) in L1AD_DATAMODULES:
-            raise ValueError("sets cannot replace the sets of the L1AD data pipeline.")
-        lists = OmegaConf.load(DATA_CONFIGS / f"{sets}.yaml")
-        cfg.data.signals, cfg.data.nulls = lists.signals, lists.get("nulls")
+    _replace_sets(cfg, sets)
     _empty_signals(cfg, empty_signals)
     _add_record_overrides(cfg, list(data_overrides or []))
     return hydra.utils.instantiate(cfg.algorithm), hydra.utils.instantiate(cfg.data)

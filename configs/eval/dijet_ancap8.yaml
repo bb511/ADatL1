@@ -54,9 +54,11 @@ evaluation:
     test_callbacks: []
 
     # S1 and the cell alone are served: reference_normal is dropped before any pass.
-    # The dumps store no validation set, so both are rescored from the weights at every
-    # epoch, initial.pt included.
     val_sets: [normal, simulation]
+    # S1 and the cell rescored from the weights at every epoch, initial.pt included, in
+    # the pass that rescores the points (the ruling of 6 Nov 04:00 in
+    # plans/adl1t/08_tests.md); the dumps store no validation set anyway.
+    rescored_sets: [normal, simulation]
 
     # The pushed points alone: no auxiliary probe, training set or SDS pseudo-set. The
     # file holds no mask and is refused unless its x has the md5 of RESULTS.md.

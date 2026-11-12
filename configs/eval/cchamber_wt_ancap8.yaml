@@ -1,12 +1,13 @@
 # @package _global_
 
-# ANCAP v8 on the wind tunnel's pool lattices, label-free: the capacity of validation
-# normal (S1) against the oversampling pool and the regimes without intervention (S2)
-# on the tunnel's pushed points, with the condition reported beside it (V8.md of Theory
-# XXXI, step 4, sections 2 and 3, as amended by FREEZE_2.md of Theory XXXII). The dumps
-# are those that configs/eval/cchamber_wt.yaml reads; this config does not compose that
-# one, and none of its callbacks runs here. No signal set is served or scored
-# (val_sets), and no test pass runs.
+# ANCAP v8 on the wind tunnel's pool lattices: the capacity of validation normal (S1)
+# against the oversampling pool and the regimes without intervention (S2) on the
+# tunnel's pushed points, with the condition reported beside it (V8.md of Theory XXXI,
+# step 4, sections 2 and 3, as amended by FREEZE_2.md of Theory XXXII). The dumps are
+# those that configs/eval/cchamber_wt.yaml reads; this config does not compose that
+# one, and none of its callbacks runs here. The regimes with an intervention are built
+# and their labels read (sets); none is served or scored (val_sets), and no test pass
+# runs.
 #   python src/eval.py eval=cchamber_wt_ancap8 lattice=cchamber_wt_<family>_pool[_b64]
 
 # The dumps sit under the name of the training data config.
@@ -37,8 +38,7 @@ evaluation:
 
     # The only callback. S1 is validation normal and the cells sensor_osr and
     # walk_null; the reference is the one file of pushed points, without kinds. sizes
-    # are the declared sample sizes, 1,000 rows of normal and 1,420 points; n2 is left
-    # undeclared, since the cells differ (60,000 and 30,000 rows).
+    # are the declared sample sizes: 1,000 rows of normal, n2 per cell, 1,420 points.
     dump_callbacks:
       ancap8:
         _target_: src.evaluation.callbacks.ancap8.ANCAP8
@@ -49,15 +49,20 @@ evaluation:
           walk_null: walk_null
         points: [push]
         kinds: false
-        sizes: { n1: 1000, n_p: 1420 }
+        sizes:
+          n1: 1000
+          n2: { sensor_osr: 60000, walk_null: 30000 }
+          n_p: 1420
         name: ancap8
     # No test pass, so no test loader is built.
     test_callbacks: []
 
     # S1 and the cells alone are served: reference_normal is dropped before any pass.
-    # normal is served from the dumps, which store it, and the two pools are rescored
-    # from the weights of every epoch, as in eval=cchamber_wt.
     val_sets: [normal, sensor_osr, walk_null]
+    # S1 and the cells rescored from the weights at every epoch, initial.pt included,
+    # in the pass that rescores the points, as step 5's store read them (the ruling of
+    # 6 Nov 04:00 in plans/adl1t/08_tests.md); the dumps store normal alone.
+    rescored_sets: [normal, sensor_osr, walk_null]
 
     # The pushed points alone: no auxiliary probe, training set or SDS pseudo-set. The
     # file holds no mask and is refused unless its x has the md5 of RESULTS.md.

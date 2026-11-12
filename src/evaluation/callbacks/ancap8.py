@@ -26,8 +26,8 @@ class ANCAP8(Callback):
         points: Names of the test dataloaders of the points, joined in list order.
         kinds: Whether the k-th loader of points holds the points of kind k, counted
             from 1.
-        sizes: Declared sizes, any of ``n1``, ``n2`` and ``n_p``; an array of another
-            length makes its candidate unusable.
+        sizes: Declared sizes, any of ``n1``, ``n2`` and ``n_p``, ``n2`` one size or
+            one per cell; an array of another length makes its candidate unusable.
         name: Callback name, the prefix of the recorded scalars.
     """
 
@@ -38,7 +38,7 @@ class ANCAP8(Callback):
         views: dict[str, str],
         points: list[str],
         kinds: bool = False,
-        sizes: dict[str, int] | None = None,
+        sizes: dict[str, int | dict[str, int]] | None = None,
         name: str = "ancap8",
     ):
         super().__init__()

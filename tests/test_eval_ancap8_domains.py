@@ -13,7 +13,7 @@ import yaml
 from omegaconf import OmegaConf
 from pytorch_lightning.callbacks import Callback
 
-from src.callbacks.ancap8 import keys
+from src.callbacks.ancap8 import ancap8, keys
 from src.data.Dijet_datamodule import DijetDataModule
 from src.data.SBC_datamodule import SBCDataModule
 from src.evaluation.components.rebuild import L1AD_DATAMODULES, rebuild
@@ -51,7 +51,11 @@ DOMAINS = {
     ),
     "cchamber_wt": SimpleNamespace(
         cells=["sensor_osr", "walk_null"],
-        sizes={"n1": 1000, "n_p": 1420},
+        sizes={
+            "n1": 1000,
+            "n2": {"sensor_osr": 60000, "walk_null": 30000},
+            "n_p": 1420,
+        },
         md5_x="f9cd543df9b09be292b607122d9c8ec3",
         sets="cchamber_wt",
         empty_signals=False,
@@ -154,10 +158,23 @@ def test_each_config_runs_ancap8_alone_on_its_cells(domain):
     assert Path(push.pop("path")) == path
     assert push == {"md5_x": spec.md5_x, "md5_mask": None}
     assert evaluator.val_sets == ["normal", *spec.cells]
-    assert evaluator.row_caps is None and evaluator.rescored_sets is None
+    assert evaluator.row_caps is None
+    assert evaluator.rescored_sets == ["normal", *spec.cells]
     entry = {"name": "ancap8", "cells": spec.cells, "n_kinds": 0, "domain": domain}
     assert evaluator.selection == {"ancap8": entry}
     assert isinstance(hydra.utils.instantiate(callback), Callback)
+
+
+@pytest.mark.parametrize(
+    "path", sorted((CONFIGS / "eval").glob("*_ancap8.yaml")), ids=lambda p: p.stem
+)
+def test_every_v8_config_rescores_its_views_in_the_pass_of_its_points(path):
+    # The ruling of 6 Nov 04:00 (plans/adl1t/08_tests.md): the points are rescored at
+    # every replay, so S1 and the cells must be too, never served from the dump.
+    evaluator = _compose(path.stem).evaluation.evaluator
+    callback = evaluator.dump_callbacks.ancap8
+    views = {callback.dataset_1, *callback.views.values()}
+    assert views <= set(evaluator.rescored_sets or [])
 
 
 def test_dijet_rows_do_not_depend_on_the_signals(dijet_data):
@@ -210,6 +227,38 @@ def test_empty_signals_is_refused_without_a_signal_list(tmp_path, data, message)
     (tmp_path / "config.yaml").write_text(yaml.safe_dump(run))
     with pytest.raises(ValueError, match=message):
         rebuild(tmp_path, None, None, None, True)
+
+
+def test_emptied_signals_fetch_no_signal_archive(dijet_data, tmp_path, monkeypatch):
+    fetched = []
+
+    def fake_download(url: str, path: Path) -> None:
+        fetched.append(path.name)
+
+    module = "src.data.Dijet_datamodule"
+    monkeypatch.setattr(f"{module}.download", fake_download)
+    monkeypatch.setattr(f"{module}.check_md5", lambda path, md5: None)
+    monkeypatch.setattr(f"{module}._extract_folders", lambda *args: None)
+    # The record's two archives, on a data directory that lacks the signal folder.
+    ignored = shutil.ignore_patterns("sig_samples")
+    shutil.copytree(dijet_data["data_dir"], tmp_path / "data", ignore=ignored)
+    archives = OmegaConf.load(CONFIGS / "data" / "dijet.yaml").archives
+    kwargs = _kwargs(dijet_data) | {"data_dir": str(tmp_path / "data")}
+    kwargs |= {"archives": OmegaConf.to_container(archives)}
+    DijetDataModule(**kwargs | {"signals": {}}).prepare_data()
+    assert fetched == []
+    DijetDataModule(**kwargs).prepare_data()
+    assert fetched == ["sig_samples.zip"]
+
+
+def test_n2_may_be_declared_per_cell():
+    rng = np.random.default_rng(0)
+    scores_1, points = rng.normal(size=400), rng.normal(1.0, 1.0, size=200)
+    views = {"a": rng.normal(size=300), "b": rng.normal(size=250)}
+    sizes = {"n1": 400, "n2": {"a": 300, "b": 200}, "n_p": 200}
+    values = ancap8(scores_1, views, [points], sizes=sizes)
+    assert (values["usable_a"], values["usable_b"]) == (1, 0)
+    assert values["n2_a"] == 300
 
 
 @pytest.fixture(scope="module")

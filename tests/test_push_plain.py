@@ -126,3 +126,16 @@ def test_points_pushed_beyond_a_floor_are_projected_onto_it():
     floor = replace(_unbounded(2, True), lo=np.zeros(2))
     x, _ = pp.push(rows, 4.0, floor)
     assert (x == 0).any() and pp.n_violations(x, floor) == 0
+
+
+def test_every_domain_has_a_scale_held_out_sets_and_frozen_md5s():
+    domains = set(pp.SCALES)
+    assert domains == set(pp.HELD_OUT) == set(pp.FROZEN_MD5_X)
+    assert domains == set(pp.FROZEN_MD5_ROWS)
+
+
+def test_points_other_than_the_frozen_ones_are_refused():
+    md5_x, md5_rows = pp.FROZEN_MD5_X["sbc"], pp.FROZEN_MD5_ROWS["sbc"]
+    pp.check_frozen("sbc", md5_x, md5_rows)
+    with pytest.raises(ValueError, match="sbc: x and rows"):
+        pp.check_frozen("sbc", md5_x, "0" * 32)

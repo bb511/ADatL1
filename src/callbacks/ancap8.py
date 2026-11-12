@@ -109,6 +109,7 @@ float64 first. Every value is a float: booleans 1.0 or 0.0, NaN where undefined.
 
 import functools
 import math
+from collections.abc import Mapping
 from fractions import Fraction
 
 import numpy as np
@@ -550,6 +551,13 @@ def candidate(
     return {key: float(values[key]) for key in names}
 
 
+def _cell_sizes(sizes: dict | None, cell: str) -> dict | None:
+    # The cells of one domain can differ in n2 (the wind tunnel's 60,000 and 30,000).
+    if sizes is None or not isinstance(sizes.get("n2"), Mapping):
+        return sizes
+    return {**sizes, "n2": sizes["n2"].get(cell)}
+
+
 def ancap8(
     scores_1: np.ndarray | torch.Tensor,
     views: dict[str, np.ndarray | torch.Tensor],
@@ -565,7 +573,8 @@ def ancap8(
         points: The scores of each set of points, joined in list order into P.
         kinds: Whether the k-th set holds the points of kind k, counted from 1; every
             set keeps its kind's keys, an empty one included.
-        sizes: Declared sizes, as ``candidate`` takes them.
+        sizes: Declared sizes, as ``candidate`` takes them, but ``n2`` may also map
+            each cell to its own size.
     """
     sets = [np.asarray(x, dtype=np.float64).reshape(-1) for x in points]
     joined = np.concatenate(sets) if sets else np.empty(0)
@@ -573,7 +582,8 @@ def ancap8(
     labels, n_kinds = (labels, len(sets)) if kinds else (None, None)
     values = {}
     for cell, scores_2 in views.items():
-        stats = candidate(scores_1, scores_2, joined, labels, sizes, n_kinds)
+        cell_sizes = _cell_sizes(sizes, cell)
+        stats = candidate(scores_1, scores_2, joined, labels, cell_sizes, n_kinds)
         values |= {f"{key}_{cell}": value for key, value in stats.items()}
     return values
 
@@ -619,7 +629,8 @@ class ANCAP8Callback(Callback):
             for a file without a mask).
         kinds: Whether the k-th entry of points holds the points of kind k, counted
             from 1.
-        sizes: Declared sizes, any of ``n1``, ``n2`` and ``n_p``.
+        sizes: Declared sizes, any of ``n1``, ``n2`` and ``n_p``; ``n2`` one size or
+            one per cell.
         batch_size: Batch size of the passes over the points: the LHC dump's auxiliary
             batch size, at which the evaluation scores them.
         name: The callback's name, a segment of every logged key.
@@ -632,7 +643,7 @@ class ANCAP8Callback(Callback):
         views: dict[str, str],
         points: dict[str, dict],
         kinds: bool = False,
-        sizes: dict[str, int] | None = None,
+        sizes: dict[str, int | dict[str, int]] | None = None,
         batch_size: int = 1024,
         name: str = "ancap8",
     ):

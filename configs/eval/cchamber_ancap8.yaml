@@ -1,12 +1,12 @@
 # @package _global_
 
-# ANCAP v8 on the light tunnel's pool lattices, label-free: the capacity of validation
-# normal (S1) against each grade of the sensor pools (S2) on the tunnel's pushed points,
-# with the condition reported beside it (V8.md of Theory XXXI, step 4, sections 2 and 3,
-# as amended by FREEZE_2.md of Theory XXXII). The dumps are those that
+# ANCAP v8 on the light tunnel's pool lattices: the capacity of validation normal (S1)
+# against each grade of the sensor pools (S2) on the tunnel's pushed points, with the
+# condition reported beside it (V8.md of Theory XXXI, step 4, sections 2 and 3, as
+# amended by FREEZE_2.md of Theory XXXII). The dumps are those that
 # configs/eval/cchamber.yaml reads; this config does not compose that one, and none of
-# its callbacks runs here. No signal set is served or scored (val_sets), and no test
-# pass runs.
+# its callbacks runs here. The interventions are built and their labels read (sets);
+# none is served or scored (val_sets), and no test pass runs.
 #   python src/eval.py eval=cchamber_ancap8 lattice=cchamber_<family>_pool[_b64]
 
 # The dumps sit under the name of the training data config.
@@ -54,10 +54,13 @@ evaluation:
     # No test pass, so no test loader is built.
     test_callbacks: []
 
-    # S1 and the cells alone are served. Their stored scores are served as eval=cchamber
-    # serves them; a dump of the older list (58 single interventions) has its sensor
-    # pools rescored from the weights of every epoch.
+    # S1 and the cells alone are served.
     val_sets: [normal, sensor_weak, sensor_mid, sensor_strong]
+    # S1 and the cells rescored from the weights at every epoch, initial.pt included,
+    # in the pass that rescores the points, as step 5's store read them (the ruling of
+    # 6 Nov 04:00 in plans/adl1t/08_tests.md): stored and rescored normal differ on
+    # this tunnel by up to 5 % (RealNVP), and a dump of the older list stores no pool.
+    rescored_sets: [normal, sensor_weak, sensor_mid, sensor_strong]
 
     # The pushed points alone: no auxiliary probe, training set or SDS pseudo-set. The
     # file holds no mask and is refused unless its x has the md5 of RESULTS.md.

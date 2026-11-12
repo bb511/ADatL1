@@ -55,6 +55,13 @@ def _extract_folders(archive: Path, dataset_dir: Path, folders: list[str]) -> No
                     raise
 
 
+def _folders_read(hparams) -> set[str]:
+    """Return the top-level folder of every file that the configured sets read."""
+    specs = [hparams.reference, hparams.test_reference]
+    specs += [*(hparams.signals or {}).values(), *(hparams.nulls or {}).values()]
+    return {Path(f).parts[0] for spec in specs for f in spec["files"]}
+
+
 class DijetDataModule(LightningDataModule):
     """The dijet data of Zenodo record 11109786 (arXiv:2311.12924).
 
@@ -138,9 +145,15 @@ class DijetDataModule(LightningDataModule):
         self.counts: dict[str, dict[str, int]] = {}
 
     def prepare_data(self) -> None:
-        """Download, verify and extract every archive whose folders are missing."""
+        """Download, verify and extract every archive whose folders are missing and hold
+        a file of the configured sets.
+
+        With the signals emptied, the signal archive is never fetched.
+        """
+        read = _folders_read(self.hparams)
         for stem, spec in self.hparams.archives.items():
-            if all((self.dataset_dir / f).exists() for f in spec["folders"]):
+            present = all((self.dataset_dir / f).exists() for f in spec["folders"])
+            if present or read.isdisjoint(spec["folders"]):
                 continue
             archive = self.dataset_dir / f"{stem}.zip"
             if not archive.exists():

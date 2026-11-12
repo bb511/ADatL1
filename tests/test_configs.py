@@ -110,9 +110,11 @@ def test_dumped_runs_train_and_dump_only(experiments, experiment):
 
     dump = callbacks["score_dump"]
     stored_sets = ["normal", "reference_normal"] if domain == "cchamber_wt" else None
+    stored_sets = [] if domain in TABULAR else stored_sets
     assert dump["stored_sets"] == stored_sets
     assert "initial_sets" not in dump
-    # Every set at every epoch, so two keys; the training loss is rescored offline.
+    # The tabular dumps hold the auxiliary and SDS sets alone, under two keys; every
+    # validation and test set and the training loss are rescored offline.
     if domain in TABULAR:
         assert dump["keys"] == ["ascore/full", "fit/full"]
         assert dump["train_pass"] is False

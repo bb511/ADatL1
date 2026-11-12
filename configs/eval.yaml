@@ -38,7 +38,8 @@ resume: true
 partial_runs: null
 # The root of the validation scores that the replay writes in the dumps' layout
 # (src/evaluation/callbacks/score_writer.py), <rescored_dir>/<lattice>/<run>/, from
-# which the selection reads normal for UDR and MC; null reads the dumps.
+# which the selection reads normal for UDR and MC; null reads the dumps. Where the files
+# read lack normal, UDR and MC are left out with a logged warning.
 rescored_dir: null
 # Replaces data.data_dir of every run's configuration (data.cache_dir on basis_hf);
 # null keeps it.

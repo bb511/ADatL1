@@ -1,8 +1,9 @@
 # @package _global_
 
-# The dijet domain: the dump stores every validation and test set, the scores of the SDS
-# pseudo-sets and the weights; the training losses are rescored from the weights. The
-# evaluation rebuilds the data from each run's configuration (override data_dir).
+# The dijet domain: the dump stores the weights and the scores of the auxiliary sets and
+# the SDS pseudo-sets alone; every validation and test set and the training losses are
+# rescored from the weights of every epoch. The evaluation rebuilds the data from each
+# run's configuration (override data_dir).
 
 defaults:
   - /cap: [bank, posterior]
@@ -10,8 +11,16 @@ defaults:
 
 sets: null
 
+# The rescored validation normal (score_writer below), the only copy of its scores: the
+# selection computes UDR and MC from it, and cap_beta_fix.py the bank's beta_fix. 50,000
+# float32 scores per epoch file, about 8 GB per lattice of 200 runs of 200 epochs;
+# rescored_dir=null needs '~evaluation.evaluator.dump_callbacks.score_writer' as well,
+# and leaves UDR and MC out.
+rescored_dir: ${paths.root_dir}/rescored/dijet
+
 # The bank's beta_fix is the light tunnel's, inherited from cap/bank.yaml: provisional
-# until declared on this domain's own lattices by scripts/analysis/cap_beta_fix.py.
+# until declared by scripts/analysis/cap_beta_fix.py on this domain's lattices under
+# rescored_dir, since the dumps hold no validation normal.
 
 evaluation:
   evaluator:
@@ -129,6 +138,12 @@ evaluation:
       sds:
         _target_: src.evaluation.callbacks.sds.SDS
         name: sds
+      # Validation normal as the pass serves it, for UDR, MC and beta_fix.
+      score_writer:
+        _target_: src.evaluation.callbacks.score_writer.ScoreWriter
+        dirpath: ${rescored_dir}/${lattice}
+        sets: [normal]
+        keys: [ascore/full]
     test_callbacks: [anomaly_efficiency]
 
     # The sets the validation pass appends after the validation loaders: entropy on

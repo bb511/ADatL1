@@ -518,8 +518,8 @@ def select_lattice(
         left out of UDR (its UDR NaN) instead of raising ValueError.
     :param rescored_dir: The root of the validation scores that UDR and MC read, in
         the dumps' layout (``src.evaluation.callbacks.score_writer``), for the lattice
-        and its partner; None reads the dumps. With ``lattice_rows``, the two criteria
-        are left out where these files lack validation normal.
+        and its partner; None reads the dumps. The two criteria are left out, with a
+        logged warning, where these files lack validation normal.
     """
     # Imported here, since both modules import this one.
     from src.evaluation.harvest import Harvest

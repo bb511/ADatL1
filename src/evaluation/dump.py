@@ -320,8 +320,12 @@ class RunEvaluation:
 
     @functools.cached_property
     def _normal_scorer(self) -> tuple[ScoresCallback, pytorch_lightning.Trainer]:
-        """A CPU trainer that collects the keys the dump stores, built at first use."""
-        scores = ScoresCallback(self.meta["val"]["keys"])
+        """A CPU trainer that collects the keys the dump stores, built at first use.
+
+        A dump that stores no validation set records no validation keys; its auxiliary
+        sets, scored by the same ``model_step`` at every pass, hold the dump's keys.
+        """
+        scores = ScoresCallback(self.meta["val"]["keys"] or self.meta["aux"]["keys"])
         return scores, pytorch_lightning.Trainer(callbacks=[scores], **REPLAY_TRAINER)
 
     def _row(self, split: str, epoch: int) -> dict:

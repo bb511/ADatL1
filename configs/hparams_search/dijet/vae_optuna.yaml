@@ -20,4 +20,5 @@ hydra:
       algorithm.optimizer.lr: tag(log, interval(3e-5, 3e-3))
       trainer.gradient_clip_val: choice(0.0, 0.5, 1.0, 2.0)
       algorithm.encoder.nodes: choice([16, 4], [16, 8], [24, 8], [32, 16, 4], [32, 16, 8], [48, 24, 8], [48, 24, 16], [64, 32, 16])
-      algorithm.kl_scale: choice(3e-5, 1e-4, 3e-4, 1e-3, 3e-3, 1e-2, 3e-2, 1e-1)
+      # The posterior collapses at 1e-1 (rungs, 12 Nov); 3e-2 goes too, as on physics.
+      algorithm.kl_scale: choice(3e-5, 1e-4, 3e-4, 1e-3, 3e-3, 1e-2)

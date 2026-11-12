@@ -1,16 +1,25 @@
 # @package _global_
 
-# The blood counts (sbcdata): the dump stores every validation and test set and the SDS
-# pseudo-sets' scores; the training rows are rescored from the weights of every epoch.
-# The second sources, Leipzig's validation controls and Greifswald's controls, are the
-# nulls: X2 of each pairing beside reference_normal.
+# The blood counts (sbcdata): the dump stores the weights and the scores of the
+# auxiliary sets and the SDS pseudo-sets alone; every validation and test set and the
+# training rows are rescored from the weights of every epoch. The second sources,
+# Leipzig's validation controls and Greifswald's controls, are the nulls: X2 of each
+# pairing beside reference_normal.
 
 defaults:
   - /cap: [bank, posterior]
   - _self_
 
+# The rescored validation normal (score_writer below), the only copy of its scores: the
+# selection computes UDR and MC from it, and cap_beta_fix.py the bank's beta_fix. 50,000
+# float32 scores per epoch file, about 8 GB per lattice of 200 runs of 200 epochs;
+# rescored_dir=null needs '~evaluation.evaluator.dump_callbacks.score_writer' as well,
+# and leaves UDR and MC out.
+rescored_dir: ${paths.root_dir}/rescored/sbc
+
 # The bank's beta_fix is the light tunnel's, inherited from cap/bank.yaml: provisional
-# until scripts/analysis/cap_beta_fix.py declares it on this domain's own lattices.
+# until scripts/analysis/cap_beta_fix.py declares it on this domain's lattices under
+# rescored_dir, since the dumps hold no validation normal.
 
 evaluation:
   evaluator:
@@ -150,6 +159,12 @@ evaluation:
       sds:
         _target_: src.evaluation.callbacks.sds.SDS
         name: sds
+      # Validation normal as the pass serves it, for UDR, MC and beta_fix.
+      score_writer:
+        _target_: src.evaluation.callbacks.score_writer.ScoreWriter
+        dirpath: ${rescored_dir}/${lattice}
+        sets: [normal]
+        keys: [ascore/full]
     test_callbacks: [anomaly_efficiency]
 
     # The sets the validation pass appends after the validation loaders.

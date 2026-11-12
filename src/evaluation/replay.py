@@ -13,9 +13,9 @@ raises. The extra sets of the validation pass (the auxiliary sets, the training 
 and the SDS pseudo-sets) are wrapped here in the loaders that pass appends to the
 validation loaders; the pseudo-sets and the training set are served from the dump
 where it stores their scores and rescored otherwise. An epoch file without validation
-normal (the physics dumps store it at the sanity pass alone) has it rescored before
-the passes, in a pass of its own that ``ScoresCallback`` collects, and handed to the
-module by ``add_scores``.
+normal (the physics dumps store it at the sanity pass alone, a dump of no stored set
+never) has it rescored before the passes, in a pass of its own that ``ScoresCallback``
+collects, and handed to the module by ``add_scores``.
 """
 
 from pathlib import Path

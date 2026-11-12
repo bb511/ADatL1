@@ -131,12 +131,7 @@ def read_picks(dirs: list[Path]) -> pd.DataFrame:
     return picks.astype(np.int64)
 
 
-def normal_scores(run_dir: Path) -> np.ndarray:
-    scores = load_scores(run_dir)
-    return np.stack([scores[epoch]["val"]["normal"][SCORE_KEY] for epoch in scores])
-
-
-def _normal_at(path: Path, epoch: int, max_rows: int, row_seed: int):
+def _normal_at(path: Path, epoch: int, max_rows: int | None, row_seed: int):
     """The validation normal scores of an epoch file at its seeded row subset, None
     where the file lacks them."""
     record = load_record(path, epoch)
@@ -147,7 +142,9 @@ def _normal_at(path: Path, epoch: int, max_rows: int, row_seed: int):
     return (scores if subset is None else scores[subset]).numpy()
 
 
-def normal_rows(run_dir: Path, max_rows: int, row_seed: int) -> np.ndarray | None:
+def normal_rows(
+    run_dir: Path, max_rows: int | None, row_seed: int
+) -> np.ndarray | None:
     """The validation normal scores at ``row_subset(n, max_rows, row_seed)`` of every
     epoch file of a run, (epochs + 1, rows), -1 first, or None where the run or a file
     lacks them; each file is cut as it is read, so that no full epoch stays held."""
@@ -164,10 +161,9 @@ def normal_rows(run_dir: Path, max_rows: int, row_seed: int) -> np.ndarray | Non
 
 
 def run_normal(run_dir: Path, rows: dict | None = None) -> np.ndarray | None:
-    """``normal_scores`` of a run or, with ``rows`` (``max_rows``, ``row_seed``),
-    ``normal_rows``."""
-    if rows is None:
-        return normal_scores(run_dir)
+    """``normal_rows`` of a run at ``rows`` (``max_rows``, ``row_seed``), every row for
+    None."""
+    rows = rows or {"max_rows": None, "row_seed": 0}
     return normal_rows(run_dir, rows["max_rows"], rows["row_seed"])
 
 
@@ -180,8 +176,8 @@ def load_lattice(
     """Validation normal scores, (runs, epochs + 1, n), and every meta.pt.
 
     The scores are read from ``scores_dir``, ``lattice_dir`` when None, by
-    ``run_normal``; they are None where, with ``rows``, a run lacks them, as the dumps
-    of the physics lattices do.
+    ``run_normal``; they are None where a run lacks them, as the dumps of the physics
+    lattices and of every lattice trained with ``stored_sets: []`` do.
     """
     scores_dir = lattice_dir if scores_dir is None else Path(scores_dir)
     metas = [torch.load(lattice_dir / n / "meta.pt", weights_only=True) for n in names]

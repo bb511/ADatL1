@@ -31,11 +31,14 @@ trainer:
 test: false
 
 callbacks:
-  # Both keys of every set at every epoch, and the scores of the SDS pseudo-sets; the
-  # training loss and every other key are rescored offline from the stored weights.
+  # The weights and both keys of the auxiliary sets and the SDS pseudo-sets at every
+  # epoch, no validation or test set: src/eval.py rescores each of them, the training
+  # loss and every other key from the weights. Every set stored took 3.73 to 3.90 MB
+  # per epoch file, against 0.37 to 0.54 MB, and 1,336 GB against 125 GB for the eight
+  # planned dijet and sbc lattices (12 Nov 2026).
   score_dump:
     keys: ["ascore/full", "fit/full"]
-    stored_sets: null
+    stored_sets: []
     train_pass: false
     sds:
       max_rows: 10000

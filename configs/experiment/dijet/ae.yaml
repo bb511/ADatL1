@@ -20,12 +20,15 @@ run_name: ${short_hash:${hydra:runtime.output_dir},12}
 data:
   max_val_batches: -1
 
-# Every validation and test set at every epoch, and the scores of the SDS pseudo-sets;
-# the training losses are rescored offline from the weights (extra_sets.train).
+# The weights and the scores of the auxiliary sets and the SDS pseudo-sets at every
+# epoch, no validation or test set: src/eval.py rescores each of them, and the training
+# losses (extra_sets.train), from the weights. Every set stored took 4.54 to 4.72 MB
+# per epoch file, against 0.39 to 0.57 MB, and 1,336 GB against 125 GB for the eight
+# planned dijet and sbc lattices (12 Nov 2026).
 callbacks:
   score_dump:
     keys: ["ascore/full", "fit/full"]
-    stored_sets: null
+    stored_sets: []
     train_pass: false
     sds:
       max_rows: 10000

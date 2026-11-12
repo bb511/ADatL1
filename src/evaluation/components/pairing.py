@@ -122,9 +122,10 @@ def partner_scores(
 ) -> list[np.ndarray | None] | None:
     """Stored validation normal scores of each run's partner, aligned with the runs.
 
-    A run left without a partner has None, and so has the whole list without a partner
-    lattice. The runs pair by the dumps of ``scores_dir``; the scores are read from
-    ``normal_dir``, the dumps when None, by ``run_normal`` with ``rows``.
+    A run left without a partner, or whose partner's files lack validation normal, has
+    None, and so has the whole list without a partner lattice. The runs pair by the
+    dumps of ``scores_dir``; the scores are read from ``normal_dir``, the dumps when
+    None, by ``run_normal`` with ``rows``.
     """
     if partner is None:
         return None

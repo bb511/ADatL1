@@ -11,14 +11,19 @@ evaluation on top of it:
 - ``config.yaml``, ``overrides.yaml``: the run's Hydra files.
 - ``meta.pt``: ``target_rate``, ``base_rate``, ``target_fpr`` and ``module`` (the class
   of the LightningModule); for each split (``val``, ``test``, ``aux``, with the
-  training pass ``train`` and with the callback's ``sds`` the pseudo-sets' ``sds``)
-  the ``names`` of its loaders, the ``keys`` the files hold, and the ``batch_sizes``
-  and ``labels`` of every set; ``stored``, the val and test sets whose scores are kept
-  at every pass; ``initial_sets``, the val sets kept at the sanity pass alone;
-  ``aux_seed``, ``aux_size`` and the training moments ``aux_lower``, ``aux_upper``,
-  ``aux_mean``, ``aux_std``, each of the shape of one input; ``aux_masked``, whether
-  the auxiliary points carry data masks; with ``sds``, its ``max_rows`` and
-  ``row_seed`` as ``sds_max_rows`` and ``sds_row_seed``.
+  training pass ``train``, with the callback's ``sds`` the pseudo-sets' ``sds`` and
+  with its ``points`` the points' ``points``) the ``names`` of its loaders, the
+  ``keys`` the files hold, and the ``batch_sizes`` and ``labels`` of every set;
+  ``stored``, the val and test sets whose scores are kept at every pass;
+  ``initial_sets``, the val sets kept at the sanity pass alone; ``aux_seed``,
+  ``aux_size`` and the training moments ``aux_lower``, ``aux_upper``, ``aux_mean``,
+  ``aux_std``, each of the shape of one input; ``aux_masked``, whether the auxiliary
+  points carry data masks; with ``sds``, its ``max_rows`` and ``row_seed`` as
+  ``sds_max_rows`` and ``sds_row_seed``; with ``points``,
+  ``points_files``, ``{name: {path, md5, x_md5}}``: the path as given, the md5 of the
+  file's bytes and the md5 of ``x`` as scored, that is of ``x.tobytes()`` for ``x``
+  as a C-contiguous float32 array (the row-major values alone, without shape, dtype
+  or header).
 - ``initial.pt``: the sanity pass on the untrained weights (``epoch: -1``), which must
   cover the whole validation set (``num_sanity_val_steps=-1``); its ``val`` holds the
   ``initial_sets`` besides the stored sets.
@@ -26,7 +31,9 @@ evaluation on top of it:
   stored sets; ``aux``, the scores of ``gaussian``, ``uniform`` and ``autouad``;
   ``train``, with the training pass only, the per-sample ``loss/full`` in the row order
   of ``data_train``; ``sds``, with ``sds`` only, the scores of ``sds_targets`` and
-  ``sds_outliers``; ``state_dict``, every weight and buffer on CPU.
+  ``sds_outliers``; ``points``, with ``points`` only, ``{name: {key: (N,)}}``, the
+  scores of each points file in its row order; ``state_dict``, every weight and buffer
+  on CPU, left out with ``keep_weights`` False (``initial.pt`` always holds it).
 
 With ``sds``, the pseudo-sets are those of ``src.callbacks.sds.sds_inputs`` over the
 training inputs and their data mask, if any, each point with the mask of the row it was
@@ -39,12 +46,20 @@ On data with a mask (the L1AD data), the i-th point of each auxiliary set takes 
 mask of the i-th training row that ``drawn_masks(mask, aux_size, aux_seed)`` draws and
 is +0 wherever that mask is 0, as the points of ``NPDCallback`` are; ``aux_inputs`` and
 ``drawn_masks`` over the training masks rebuild them.
+
+With ``points``, each named ``.npz`` file holds in ``x`` fixed inputs in the model's
+(normalised) input space, of shape (N, *input shape), scored at every pass as the
+auxiliary sets are. Points carry no data mask, so a run on data with one (the L1AD
+data) raises. The replay reads no ``points`` split.
 """
 
+import hashlib
+import io
 import os
 import shutil
 from pathlib import Path
 
+import numpy as np
 import torch
 from pytorch_lightning import Callback
 from torch.utils.data import DataLoader
@@ -189,6 +204,29 @@ def _check_names(names: list[str], available: set[str], kind: str) -> None:
         raise ValueError(f"No {kind} loader carries {sorted(missing)}.")
 
 
+def _check_points(x: np.ndarray, path: str, input_shape: tuple[int, ...]) -> None:
+    # A cast would score other points than the file's.
+    if x.dtype != np.float32:
+        raise ValueError(f"{path} holds x of dtype {x.dtype}, not float32.")
+    if x.shape[1:] != input_shape:
+        raise ValueError(
+            f"{path} holds inputs of shape {x.shape[1:]}, the training data of shape "
+            f"{input_shape}."
+        )
+
+
+def _load_points(path: str, input_shape: tuple[int, ...]) -> tuple[torch.Tensor, dict]:
+    """The inputs ``x`` of a points file and its entry of ``points_files``."""
+    # Parsed from the bytes it hashes, so that md5 is that of the file as read.
+    raw = Path(path).read_bytes()
+    with np.load(io.BytesIO(raw)) as npz:
+        x = np.ascontiguousarray(npz["x"])
+    _check_points(x, path, input_shape)
+    md5 = hashlib.md5(raw).hexdigest()
+    x_md5 = hashlib.md5(x.tobytes()).hexdigest()
+    return torch.from_numpy(x), {"path": str(path), "md5": md5, "x_md5": x_md5}
+
+
 class ScoreDumpCallback(Callback):
     """Store the per-event scores and the weights at every validation pass.
 
@@ -200,16 +238,21 @@ class ScoreDumpCallback(Callback):
     :param keys: Per-event output keys to store; keys a module does not emit are
         skipped.
     :param stored_sets: Validation and test sets whose scores are stored at every
-        pass; None stores every set. The auxiliary sets and the weights are always
-        stored.
-    :param aux_batch_size: Batch size of the passes over the auxiliary sets and the
-        training set.
+        pass; None stores every set. The auxiliary sets are always stored.
+    :param aux_batch_size: Batch size of the passes over the auxiliary sets, the
+        training set, the SDS pseudo-sets and the points.
     :param initial_sets: Validation sets whose scores are stored at the sanity pass
         alone, besides the stored sets.
     :param train_pass: Whether every pass stores the per-sample training loss.
     :param sds: ``max_rows`` and ``row_seed`` of the SDS pseudo-sets whose scores every
         pass stores, as ``extra_sets.sds`` of the evaluation configs gives them; None
         stores none, and the replay rescores them from the weights.
+    :param points: Name to path of an ``.npz`` file whose ``x``, of shape
+        (N, *input shape) in the model's input space, every pass scores in eval mode;
+        None or empty scores none. A shape other than that of one training input, or
+        training data with a mask, raises ValueError at fit start.
+    :param keep_weights: Whether the epoch files hold ``state_dict``; ``initial.pt``
+        holds it either way, so that the untrained state stays rescorable.
     """
 
     def __init__(
@@ -224,6 +267,8 @@ class ScoreDumpCallback(Callback):
         initial_sets: list[str] | None = None,
         train_pass: bool = True,
         sds: dict | None = None,
+        points: dict[str, str] | None = None,
+        keep_weights: bool = True,
     ):
         super().__init__()
         self.dirpath = Path(dirpath)
@@ -236,6 +281,8 @@ class ScoreDumpCallback(Callback):
         self.initial_sets = list(initial_sets or [])
         self.train_pass = train_pass
         self.sds = None if sds is None else {k: sds[k] for k in SDS_PARAMS}
+        self.points = dict(points or {})
+        self.keep_weights = keep_weights
         self._meta_written = False
 
     def on_fit_start(self, trainer, pl_module):
@@ -247,6 +294,7 @@ class ScoreDumpCallback(Callback):
         self._stored = self._stored_names(list(datamodule.val_dataloader()), list(test))
         self._test_layout = _layout(test)
         train = unpack_batch(datamodule.data_train.tensors)
+        self._points = self._read_points(train)
         mask = drawn_masks(train.mask, self.aux_size, self.aux_seed)
         self._meta = self._run_meta(pl_module, train.x, mask is not None)
         self._loaders = self._build_loaders(datamodule.data_train, test, mask)
@@ -272,6 +320,12 @@ class ScoreDumpCallback(Callback):
             "test": [n for n in test if stored is None or n in stored],
         }
 
+    def _read_points(self, train) -> dict[str, tuple[torch.Tensor, dict]]:
+        if self.points and train.mask is not None:
+            raise ValueError("Points carry no data mask, which the training data do.")
+        shape = tuple(train.x.shape[1:])
+        return {name: _load_points(p, shape) for name, p in self.points.items()}
+
     def _run_meta(self, pl_module, x_train: torch.Tensor, aux_masked: bool) -> dict:
         module_cls = type(pl_module)
         return {
@@ -288,6 +342,11 @@ class ScoreDumpCallback(Callback):
             **(
                 {} if self.sds is None else {f"sds_{k}": v for k, v in self.sds.items()}
             ),
+            **(
+                {"points_files": {n: f for n, (_, f) in self._points.items()}}
+                if self._points
+                else {}
+            ),
         }
 
     def _build_loaders(self, data_train, test: dict, mask: torch.Tensor | None) -> dict:
@@ -301,6 +360,11 @@ class ScoreDumpCallback(Callback):
             loaders["train"] = {"train": DataLoader(data_train, batch_size=batch_size)}
         if self.sds is not None:
             loaders["sds"] = self._sds_loaders(unpack_batch(data_train.tensors))
+        if self._points:
+            points = self._points.items()
+            loaders["points"] = {
+                n: placeholder_loader(x, batch_size) for n, (x, _) in points
+            }
         return loaders
 
     def _sds_loaders(self, train) -> dict:
@@ -336,9 +400,11 @@ class ScoreDumpCallback(Callback):
             collectors[split] = score_in_eval_mode(trainer, pl_module, loaders, keys)
         epoch = -1 if trainer.sanity_checking else trainer.current_epoch
         record = {split: c.scores() for split, c in collectors.items()}
-        state = {k: v.detach().cpu() for k, v in pl_module.state_dict().items()}
+        if self.keep_weights or epoch < 0:
+            state = pl_module.state_dict().items()
+            record["state_dict"] = {k: v.detach().cpu() for k, v in state}
         path = self.dirpath / ("initial.pt" if epoch < 0 else f"epoch_{epoch:04d}.pt")
-        _save_atomic({"epoch": epoch, **record, "state_dict": state}, path)
+        _save_atomic({"epoch": epoch, **record}, path)
         self._write_meta(collectors)
 
     def _write_meta(self, collectors: dict) -> None:

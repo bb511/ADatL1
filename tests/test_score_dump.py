@@ -1,5 +1,7 @@
+import hashlib
 from types import SimpleNamespace
 
+import numpy as np
 import pytest
 import pytorch_lightning as pl
 import torch
@@ -480,3 +482,88 @@ def test_dumped_autouad_scores_are_the_ones_npd_reads(tmp_path, monkeypatch):
     assert len(seen) == len(dumped) - 1
     for scores, record in zip(seen, dumped[1:]):
         assert torch.equal(scores, record["ascore/full"])
+
+
+def _points_x(file) -> np.ndarray:
+    with np.load(file) as npz:
+        return npz["x"]
+
+
+def as_points(points_files: dict) -> dict[str, str]:
+    return {name: str(file) for name, file in points_files.items()}
+
+
+def test_points_are_scored_at_every_pass(tmp_path, points_files):
+    path = tmp_path / "scores"
+    fit(tmp_path, [dump_callback(path, points=as_points(points_files))])
+    meta = load(path / "meta.pt")
+    assert meta["points"]["names"] == list(points_files)
+    for name, file in points_files.items():
+        x_md5 = hashlib.md5(_points_x(file).tobytes()).hexdigest()
+        md5 = hashlib.md5(file.read_bytes()).hexdigest()
+        expected = {"path": str(file), "md5": md5, "x_md5": x_md5}
+        assert meta["points_files"][name] == expected
+
+    stored = {"ascore/full", "ascore/mse", "fit/full"}
+    for name in PASSES:
+        record = load(path / name)
+        module = ToyAE()
+        module.load_state_dict(record["state_dict"])
+        module.eval()
+        assert list(record["points"]) == list(points_files)
+        for set_name, file in points_files.items():
+            x = torch.from_numpy(_points_x(file))
+            with torch.no_grad():
+                outputs = module.model_step((x, torch.zeros(len(x))))
+            scores = record["points"][set_name]
+            assert set(scores) == stored
+            for key in stored:
+                torch.testing.assert_close(scores[key], outputs[key])
+
+
+def test_points_leave_the_trajectory_unchanged(tmp_path, points_files):
+    paths = {"off": tmp_path / "off", "on": tmp_path / "on"}
+    off, _ = fit(tmp_path, [dump_callback(paths["off"])])
+    callback = dump_callback(paths["on"], points=as_points(points_files))
+    on, _ = fit(tmp_path, [callback])
+    assert_identical(on.state_dict(), off.state_dict())
+    for file in ["meta.pt", *PASSES]:
+        without, with_points = load(paths["off"] / file), load(paths["on"] / file)
+        added = {"points", "points_files"} if file == "meta.pt" else {"points"}
+        assert set(with_points) - set(without) == added
+        assert_identical(without, {key: with_points[key] for key in without})
+
+
+def test_points_of_another_input_shape_raise(tmp_path):
+    path = tmp_path / "wide.npz"
+    np.savez(path, x=np.zeros((5, N_FEATURES + 1), dtype=np.float32))
+    callback = dump_callback(tmp_path / "scores", points={"wide": str(path)})
+    message = r"of shape \(5,\), the training data of shape \(4,\)"
+    with pytest.raises(ValueError, match=message):
+        fit(tmp_path, [callback], epochs=1)
+
+
+def test_points_other_than_float32_raise(tmp_path):
+    path = tmp_path / "double.npz"
+    np.savez(path, x=np.zeros((5, N_FEATURES), dtype=np.float64))
+    callback = dump_callback(tmp_path / "scores", points={"double": str(path)})
+    with pytest.raises(ValueError, match="not float32"):
+        fit(tmp_path, [callback], epochs=1)
+
+
+def test_points_on_masked_data_raise(tmp_path, points_files):
+    callback = dump_callback(tmp_path / "scores", points=as_points(points_files))
+    with pytest.raises(ValueError, match="data mask"):
+        fit_masked(tmp_path, [callback])
+
+
+def test_without_kept_weights_only_initial_holds_them(tmp_path):
+    paths = {"kept": tmp_path / "kept", "lean": tmp_path / "lean"}
+    fit(tmp_path, [dump_callback(paths["kept"])])
+    fit(tmp_path, [dump_callback(paths["lean"], keep_weights=False)])
+    assert_identical(load(paths["lean"] / "meta.pt"), load(paths["kept"] / "meta.pt"))
+    for name in PASSES:
+        kept, lean = load(paths["kept"] / name), load(paths["lean"] / name)
+        dropped = set() if name == "initial.pt" else {"state_dict"}
+        assert set(kept) - set(lean) == dropped
+        assert_identical(lean, {key: kept[key] for key in lean})

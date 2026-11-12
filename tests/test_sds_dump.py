@@ -18,7 +18,14 @@ from tests.test_eval_stage import (
     _outputs,
     _strip_weights,
 )
-from tests.test_score_dump import PASSES, assert_identical, dump_callback, fit, load
+from tests.test_score_dump import (
+    PASSES,
+    as_points,
+    assert_identical,
+    dump_callback,
+    fit,
+    load,
+)
 
 # As extra_sets.sds of configs/eval/cifar10.yaml and the image DDL experiments.
 SDS = {"max_rows": 10000, "row_seed": 0}
@@ -42,6 +49,20 @@ def sds_lattices(tmp_path_factory):
             fit(root, [dump_callback(path, sds=sds)], seed=seed)
             (path / "config.yaml").write_text(yaml.safe_dump(TOY_RUN_CONFIG))
     _strip_weights(root / "stored" / "toy", root / "stripped" / "toy")
+    return root
+
+
+@pytest.fixture(scope="module")
+def lean_lattice(tmp_path_factory, points_files):
+    # The CIFAR-10 retraining's dumps: every set and the SDS pseudo-sets stored, the
+    # points scored and the weights kept in initial.pt alone.
+    root = tmp_path_factory.mktemp("lean_lattice")
+    points = as_points(points_files)
+    for seed, run in enumerate(RUNS):
+        path = root / "toy" / run
+        callback = dump_callback(path, sds=SDS, points=points, keep_weights=False)
+        fit(root, [callback], seed=seed)
+        (path / "config.yaml").write_text(yaml.safe_dump(TOY_RUN_CONFIG))
     return root
 
 
@@ -132,3 +153,22 @@ def test_the_sds_cache_key_carries_a_scale_other_than_the_default(monkeypatch):
     assert sorted(map(len, rebuild.SDS_CACHE)) == [5, 6]
     assert torch.equal(default["sds_targets"], pushed["sds_targets"])
     assert not torch.equal(default["sds_outliers"], pushed["sds_outliers"])
+
+
+def test_a_dump_of_points_without_weights_replays_to_the_tables_of_one_with(
+    sds_lattices, lean_lattice, tmp_path
+):
+    # Without weights after initial.pt, any score rescored from them would raise.
+    record = load(lean_lattice / "toy" / "run_a" / "epoch_0000.pt")
+    assert "points" in record and "state_dict" not in record
+    outputs = {"stored": _replayed(sds_lattices, tmp_path, "stored")}
+    _evaluate_and_select(lean_lattice, tmp_path / "lean")
+    outputs["lean"] = _outputs(tmp_path / "lean")
+    assert outputs["lean"].keys() == outputs["stored"].keys()
+    assert b"sds/sds" in outputs["lean"]["runs/run_a/val.csv"]
+    for path, content in outputs["stored"].items():
+        if not path.endswith("run.json"):
+            assert outputs["lean"][path] == content, path
+            continue
+        info = {n: json.loads(outputs[n][path]) for n in outputs}
+        assert {**info["stored"], "dump": None} == {**info["lean"], "dump": None}

@@ -16,3 +16,7 @@ stored_sets: null
 aux_seed: 0
 aux_size: 10000
 aux_batch_size: 1024
+# {name: path to .npz}: each file's x, in the model's input space, is scored every pass.
+points: null
+# False leaves state_dict out of the epoch files; initial.pt keeps it.
+keep_weights: true

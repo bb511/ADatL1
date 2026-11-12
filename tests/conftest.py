@@ -163,3 +163,20 @@ def cchamber_wt_data(tmp_path: Path) -> SimpleNamespace:
         null_blocks={"null_regime_02": 2, "null_regime_05": 5},
         raw=raw,
     )
+
+
+# The toy inputs of tests/test_score_dump.py have four features.
+TOY_N_FEATURES = 4
+
+
+@pytest.fixture(scope="session")
+def points_files(tmp_path_factory) -> dict[str, Path]:
+    # Row counts that the toy dump's batch size of 16 does not divide.
+    rng = np.random.default_rng(5)
+    root = tmp_path_factory.mktemp("points")
+    files = {}
+    for name, n, shift in (("near", 37, 0.0), ("far", 20, 4.0)):
+        x = rng.standard_normal((n, TOY_N_FEATURES)).astype(np.float32) + shift
+        np.savez(root / f"{name}.npz", x=x)
+        files[name] = root / f"{name}.npz"
+    return files

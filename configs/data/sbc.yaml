@@ -1,0 +1,52 @@
+# @package data
+
+defaults:
+  - _self_
+
+_target_: src.data.SBC_datamodule.SBCDataModule
+
+# sbcdata 1.0.1 (Zenodo 10781419, CC BY 4.0); the CSV sits at <data_dir>/extdata.
+data_dir: ${paths.base_data_dir}/sbc
+url: https://zenodo.org/api/records/10781419/files/ampel-leipzig/sbcdata-1.0.1.zip/content
+md5: 35b39850a9b8a1e67bd631b207e9dc01
+
+batch_size: 1024
+eval_batch_size: 1024
+max_val_batches: -1
+num_workers: 0
+
+# Rows per set, one per case: training, then each of validation and test normal and
+# reference_normal; each second source gives null_size rows to validation and to test.
+train_size: 300000
+eval_size: 50000
+null_size: 50000
+signal_val_fraction: 0.6
+
+robust_quantiles: [0.05, 0.95]
+clip_value: 10.0
+
+# Fixed apart from the training seed, so that every run sees the same rows.
+seed: 314159
+# The training batches follow the global training seed.
+train_seed: ${seed}
+
+# The five blood counts, in model-input order; CRP, PCT, age and sex are not inputs.
+inputs: [HGB, MCV, PLT, RBC, WBC]
+# Platelet and white-cell counts span orders of magnitude; their logs are scaled.
+log_inputs: [PLT, WBC]
+
+# Source 1, the typical rows.
+reference: { Center: Leipzig, Set: Training, Diagnosis: Control }
+# Labels 1-6 in order; lt, lv and gw are Leipzig Training, Leipzig Validation and
+# Greifswald.
+signals:
+  sepsis_lt: { Center: Leipzig, Set: Training, Diagnosis: Sepsis }
+  sirs_lt: { Center: Leipzig, Set: Training, Diagnosis: SIRS }
+  sepsis_lv: { Center: Leipzig, Set: Validation, Diagnosis: Sepsis }
+  sirs_lv: { Center: Leipzig, Set: Validation, Diagnosis: SIRS }
+  sepsis_gw: { Center: Greifswald, Set: Validation, Diagnosis: Sepsis }
+  sirs_gw: { Center: Greifswald, Set: Validation, Diagnosis: SIRS }
+# Label 0: the controls of the second sources.
+nulls:
+  leipzig_validation: { Center: Leipzig, Set: Validation, Diagnosis: Control }
+  greifswald: { Center: Greifswald, Set: Validation, Diagnosis: Control }

@@ -9,9 +9,12 @@ from omegaconf import DictConfig, OmegaConf
 from src.utils.omegaconf import register_resolvers
 
 CONFIGS = Path(__file__).resolve().parents[1] / "configs"
+DOMAINS = ("physics", "cifar10", "mscct", "cchamber", "cchamber_wt", "dijet", "sbc")
+# The held-out labelled domains at the LHC's sample size.
+TABULAR = ("dijet", "sbc")
 EXPERIMENTS = sorted(
     f"{domain}/{path.stem}"
-    for domain in ("physics", "cifar10", "mscct", "cchamber", "cchamber_wt")
+    for domain in DOMAINS
     for path in (CONFIGS / "experiment" / domain).glob("*.yaml")
 )
 # The LHC keeps the checkpoint regime; every other domain trains and dumps its scores.
@@ -105,10 +108,19 @@ def test_dumped_runs_train_and_dump_only(experiments, experiment):
     assert cfg["trainer"]["enable_checkpointing"] is False
     assert cfg["test"] is False
 
+    dump = callbacks["score_dump"]
     stored_sets = ["normal", "reference_normal"] if domain == "cchamber_wt" else None
-    assert callbacks["score_dump"]["stored_sets"] == stored_sets
-    assert not {"initial_sets", "train_pass"} & callbacks["score_dump"].keys()
-    residual = domain.startswith("cchamber") and model in ("ae", "vae")
+    assert dump["stored_sets"] == stored_sets
+    assert "initial_sets" not in dump
+    # Every set at every epoch, so two keys; the training loss is rescored offline.
+    if domain in TABULAR:
+        assert dump["keys"] == ["ascore/full", "fit/full"]
+        assert dump["train_pass"] is False
+        assert dump["sds"] == {"max_rows": 10000, "row_seed": 0}
+    else:
+        assert "train_pass" not in dump
+    residual = domain.startswith("cchamber") or domain in TABULAR
+    residual = residual and model in ("ae", "vae")
     assert ("residual_state" in callbacks) == residual
 
 

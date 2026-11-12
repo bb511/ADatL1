@@ -1,0 +1,26 @@
+# @package _global_
+
+# The light tunnel's RealNVP lattice space, unchanged on the blood counts.
+
+defaults:
+  - override /hydra/sweeper: optuna
+  - override /hydra/sweeper/sampler: random
+
+hydra:
+  mode: "MULTIRUN"
+  sweeper:
+    _target_: hydra_plugins.hydra_optuna_sweeper.optuna_sweeper.OptunaSweeper
+    study_name: pool
+    n_jobs: 1
+    # Placeholder: a dump-only run reports the worst value of each direction.
+    direction: minimize
+    n_trials: 50
+    storage: sqlite:///logs/optuna/sbc/realnvp_pool.db?timeout=600
+    params:
+      algorithm.optimizer.lr: tag(log, interval(3e-5, 3e-3))
+      trainer.gradient_clip_val: choice(0.0, 0.5, 1.0, 2.0)
+      algorithm.flow.n_flows: choice(4, 6, 8)
+      algorithm.flow.hidden_dim: choice(24, 32, 48, 64)
+      algorithm.flow.n_hidden_layers: choice(1, 2)
+      algorithm.flow.activation: choice(relu, gelu, silu)
+      algorithm.flow.noise_scale: choice(0.0, 1e-3, 1e-2, 3e-2)

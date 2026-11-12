@@ -1,0 +1,68 @@
+# @package data
+
+defaults:
+  - _self_
+
+_target_: src.data.Dijet_datamodule.DijetDataModule
+
+# The four folders of the two archives sit in <data_dir>/dijet.
+data_dir: ${paths.base_data_dir}
+dataset_name: dijet
+url: https://zenodo.org/api/records/11109786/files/{name}/content
+archives:
+  qcd_dijet_samples:
+    md5: 550f846898536f1924a912bf82c8bbdd
+    folders: [qcd_data_samples, qcd_mc_samples, qcd_test_samples]
+  sig_samples:
+    md5: f3b10bb0dcb802d41101f3bec6e9d21e
+    folders: [sig_samples]
+
+batch_size: 1024
+eval_batch_size: 1024
+max_val_batches: -1
+num_workers: 0
+
+# Model inputs in order; the three energy scales enter as their natural log.
+inputs: [ht, met, m_jj, tau21_j1, tau21_j2, tau32_j1, tau32_j2]
+log_inputs: [ht, met, m_jj]
+# Unused columns: pT_j1, eta_j1, phi_j1, pT_j2, eta_j2, phi_j2, phi_met, min_dPhi. A row
+# with a non-finite input after the log is dropped from every set (user, 12 Nov 2026):
+# in the background a NaN tau ratio; in rinv0_pTmin200GeV (22 rows) and
+# rinv23_pTmin200GeV (16 of 19) a non-positive ht, met or m_jj, which no background row
+# of the files read has.
+
+robust_quantiles: [0.05, 0.95]
+clip_value: 10.0
+
+# Fixed apart from the training seed, so that every run sees the same rows.
+seed: 314159
+# The training batches follow the global training seed.
+train_seed: ${seed}
+
+# The rows read are a subset of the record, chosen here. Left unused: qcd_data_samples
+# qcd_2 to qcd_19, qcd_test_samples qcd_1 to qcd_45, qcd_mc_samples qcd_1 to qcd_19, the
+# signals rinv13_2TeV_100GeV and rinv13_2TeV_300GeV, and the rows of the files read
+# beyond the counts drawn (logged at setup).
+# Source 1, the data-like background: training, validation normal and reference_normal.
+reference:
+  files: [qcd_data_samples/qcd_0.txt, qcd_data_samples/qcd_1.txt]
+  n_train: 300000
+  n_valid: 50000
+# Held out from source 1: test normal and reference_normal, n_test each.
+test_reference:
+  files: [qcd_test_samples/qcd_0.txt]
+  n_test: 50000
+# The five parameter points of the record; labels 1-5 in order, 60 % validation.
+signal_val_fraction: 0.6
+signals:
+  rinv0_pTmin200GeV: { files: [sig_samples/rinv0_pTmin200GeV.txt] }
+  rinv13_2TeV_200GeV: { files: [sig_samples/rinv13_2TeV_200GeV.txt] }
+  rinv13_3TeV_300GeV: { files: [sig_samples/rinv13_3TeV_300GeV.txt] }
+  rinv13_pTmin200GeV: { files: [sig_samples/rinv13_pTmin200GeV.txt] }
+  rinv23_pTmin200GeV: { files: [sig_samples/rinv23_pTmin200GeV.txt] }
+# Label 0: the simulated background, the second typical domain.
+nulls:
+  simulation:
+    files: [qcd_mc_samples/qcd_0.txt]
+    n_valid: 50000
+    n_test: 50000

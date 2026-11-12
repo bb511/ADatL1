@@ -1,0 +1,253 @@
+# @package _global_
+
+# The dijet domain: the dump stores every validation and test set, the scores of the SDS
+# pseudo-sets and the weights; the training losses are rescored from the weights. The
+# evaluation rebuilds the data from each run's configuration (override data_dir).
+
+defaults:
+  - /cap: [bank, posterior]
+  - _self_
+
+sets: null
+
+# The bank's beta_fix is the light tunnel's, inherited from cap/bank.yaml: provisional
+# until declared on this domain's own lattices by scripts/analysis/cap_beta_fix.py.
+
+evaluation:
+  evaluator:
+    _target_: src.evaluation.evaluator.Evaluator
+    # The callback configs pass through uninstantiated: every run builds its own.
+    _recursive_: false
+    accelerator: cpu
+    devices: 1
+    logger: false
+    enable_progress_bar: false
+    enable_model_summary: false
+
+    # The callbacks of the validation pass; the test pass runs test_callbacks.
+    dump_callbacks:
+      anomaly_efficiency:
+        _target_: src.evaluation.callbacks.efficiency.AnomalyEfficiencyCallback
+        output_name: ascore/full
+        ds: null
+        # The simulated background: its pass rate is the false-positive rate on the
+        # second typical domain.
+        null_ds: [simulation]
+        cvar_summary: 0.25
+        log_raw_mlflow: false
+      thres_drift:
+        _target_: src.evaluation.callbacks.thres_drift.ThresholdDriftCallback
+        output_name: ascore/full
+        calibration_fraction: 0.5
+        split_seed: 12345
+        log_raw_mlflow: false
+        name: thres_drift
+      wasserstein:
+        _target_: src.evaluation.callbacks.wasserstein.Wasserstein
+        output_name: ascore/full
+        dataset_1: normal
+        dataset_2: reference_normal
+        apply_log1p: true
+        log_raw_mlflow: false
+        name: wasserstein
+      # The pairing of normal with the simulation, a copy of wasserstein.
+      wasserstein_simulation:
+        _target_: src.evaluation.callbacks.wasserstein.Wasserstein
+        output_name: ascore/full
+        dataset_1: normal
+        dataset_2: simulation
+        apply_log1p: true
+        log_raw_mlflow: false
+        name: wasserstein_simulation
+      # The CAP bank of normal against the control and the simulation: every pairing,
+      # evidence map and statistic of cap/bank.yaml, the nn caliper set on the control.
+      # ot builds an N1 x N1 matrix: uncapped, 50,000 rows a side took about 20 GB per
+      # worker, hence physics's caps.
+      cap_bank_reference_normal:
+        _target_: src.evaluation.callbacks.cap_bank.CAPBankCallback
+        output_name: ascore/full
+        dataset_1: normal
+        dataset_2: reference_normal
+        reference: reference_normal
+        bank_config: ${cap_bank}
+        log_raw_mlflow: false
+        name: cap_bank_reference_normal
+        max_rows_1: 8000
+        max_rows_2: 16000
+        row_seed: 0
+      cap_bank_simulation:
+        _target_: src.evaluation.callbacks.cap_bank.CAPBankCallback
+        output_name: ascore/full
+        dataset_1: normal
+        dataset_2: simulation
+        reference: reference_normal
+        bank_config: ${cap_bank}
+        log_raw_mlflow: false
+        name: cap_bank_simulation
+        max_rows_1: 8000
+        max_rows_2: 16000
+        row_seed: 0
+      # ANCAP of normal against the simulation; its reference, the SDS pseudo-outliers,
+      # is the set that extra_sets.sds serves, so that it adds no model pass.
+      ancap:
+        _target_: src.evaluation.callbacks.threshold_posterior.ThresholdPosterior
+        output_name: ascore/full
+        dataset_1: normal
+        views:
+          simulation: simulation
+        posterior_config: ${cap_posterior}
+        name: ancap
+        # ANCAP-W's columns, which the ancap3 criteria read, are off: the override
+        # evaluation.evaluator.dump_callbacks.ancap.working_point=true turns them and
+        # the ancap3 picks on; without them the selection skips ancap3.
+        working_point: false
+      # The operational score of normal, a diagnostic column beside Q'', the fit.
+      ascore_operational:
+        _target_: src.evaluation.callbacks.output.OutputCallback
+        output_name: ascore/operational
+        ds: [normal]
+        log_raw_mlflow: false
+        name: ascore_operational
+      fit:
+        _target_: src.evaluation.callbacks.fit.Fit
+        name: fit
+      npd:
+        _target_: src.evaluation.callbacks.autouad.NPD
+        name: npd
+      rtm:
+        _target_: src.evaluation.callbacks.autouad.RTM
+        name: rtm
+      eag:
+        _target_: src.evaluation.callbacks.autouad.EAG
+        name: eag
+      mv:
+        _target_: src.evaluation.callbacks.goix.MassVolume
+        name: mv
+      entropy:
+        _target_: src.evaluation.callbacks.entropy.LossEntropy
+        name: entropy
+      sds:
+        _target_: src.evaluation.callbacks.sds.SDS
+        name: sds
+    test_callbacks: [anomaly_efficiency]
+
+    # The sets the validation pass appends after the validation loaders: entropy on
+    # 100,000 training rows rescored from the weights, as on physics, since the dump
+    # holds no training pass.
+    extra_sets:
+      aux: true
+      train:
+        max_rows: 100000
+        row_seed: 0
+        batch_size: 1024
+      sds:
+        max_rows: 10000
+        row_seed: 0
+
+    selection: ${selection}
+
+# The registry of strategies: column in val.csv, mode and MLflow keys per criterion.
+selection:
+  # The CAP bank and consistency enter no criterion because section R of the register
+  # reads the bank's columns directly, and EM is left out as on the chamber, where it is
+  # degenerate (em_reached 0 in every AE, VAE and SVDD run); untested here. ANCAP and
+  # ANCAP-W enter only through ancap3, the band rule on ANCAP-W's columns.
+  criteria:
+    drift:
+      column: thres_drift/drift_operational
+      mode: min
+      key: val/summary/operational_drift_ema
+    w1:
+      column: wasserstein/w1dist
+      mode: min
+      key: val/summary/w1dist_ema_normal_vs_reference_normal
+    w1_simulation:
+      column: wasserstein_simulation/w1dist
+      mode: min
+      key: val/summary/w1dist_ema_normal_vs_simulation
+    npd:
+      column: npd/npd
+      mode: max
+      key: val/summary/npd_ema
+      raw_key: val/summary/npd
+    rtm:
+      column: rtm/rtm
+      mode: max
+      key: val/summary/rtm_ema
+      raw_key: val/summary/rtm
+    eag:
+      column: eag/eag
+      mode: max
+      key: val/summary/eag_ema
+      raw_key: val/summary/eag
+    mv:
+      column: mv/mv
+      mode: min
+      key: val/summary/mv_ema
+      raw_key: val/summary/mv
+    entropy:
+      column: entropy/entropy
+      mode: min
+      key: val/summary/entropy_ema
+      raw_key: val/summary/entropy
+      skip_nonfinite: true
+    sds:
+      column: sds/sds
+      mode: min
+      key: val/summary/sds_ema
+      raw_key: val/summary/sds
+    # ANCAP v3 (ancap_v3_spec.md, section 2.3), one entry per view: Q' is ANCAP-W's
+    # agreement I_W of the view, compared only among the candidates whose level f1
+    # lies within band_se standard errors of the best level, at the epoch and at the
+    # hyperpoint stage. The columns are those of the ancap callback with working_point.
+    ancap3_simulation:
+      column: ancap/ancapw_simulation
+      mode: max
+      key: val/summary/ancapw_simulation_ema
+      skip_nonfinite: true
+      band:
+        level: ancap/ancapw_f1
+        level_se: ancap/ancapw_f1_se
+        se: ancap/ancapw_se_simulation
+        band_se: ${cap_posterior.band_se}
+  # Q'', the mean fit of validation normal, minimised; se is the gate's standard error.
+  q_sec:
+    column: fit/normal
+    se: fit/normal_se
+    key: val/summary/fit_ema
+    raw_key: val/summary/fit
+  # Q' alone, from the per-set validation efficiencies of the signal sets.
+  labelled:
+    oracle:
+      statistic: mean
+      key: val/summary/eff_mean_ema_operational
+      raw_key: val/summary/eff_mean_operational
+    cvar25:
+      statistic: cvar
+      alpha: 0.25
+      key: val/summary/eff_cvar25_ema_operational
+      raw_key: val/summary/eff_cvar25_operational
+    cvar10:
+      statistic: cvar
+      alpha: 0.10
+      key: val/summary/eff_cvar10_ema_operational
+      raw_key: val/summary/eff_cvar10_operational
+  # The prefix of the per-set efficiency columns.
+  efficiency: eff/eff_operational_
+  # Columns intervention and target_cluster; null makes every set its own cluster.
+  clusters: null
+  lattice_criteria:
+    udr: max
+    mc: max
+  # The known limit of each strategy, for the tables.
+  limits:
+    drift: distribution-free on i.i.d. normal rows, split with a fixed seed; a dozen or so distinct values, so ties decide its picks
+    w1: favours a small score spread; a constant score gives 0, its best value
+    w1_simulation: favours a small score spread; a constant score gives 0, its best value
+    rtm: on RealNVP its sign carries no meaning where the median NLL is at or below zero
+    mv: degenerate above about eight input dimensions (Goix); the dijet domain has seven
+    entropy: on RealNVP undefined, its per-sample loss can be negative; its RealNVP picks can fall on epochs where it is NaN
+    sds: in-sample, the pseudo-sets come from the training inputs
+    udr: selects the untrained model where its scores do not depend on the seed
+    mc: selects the untrained model where its scores do not depend on the seed
+    q_sec: the SVDD distance is taken per latent coordinate, since its sum grows with the latent width

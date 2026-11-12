@@ -1,0 +1,7 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(ssh -o ControlMaster=no -o BatchMode=yes -o ConnectTimeout=20 lxplus \"kubectl exec -i * -c container -- bash -c 'bash /shared/claude/adl1t/theory_xxvii/step5/*/scripts/*/*.sh'\")"
+    ]
+  }
+}

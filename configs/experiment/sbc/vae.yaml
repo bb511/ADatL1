@@ -1,0 +1,68 @@
+# @package _global_
+
+# Train and dump only; selection and evaluation run offline.
+
+defaults:
+  - /cap: provisional
+  - /callbacks/util@callbacks.residual_state: residual_state
+  - override /data: sbc
+  - override /algorithm: vae
+  - override /callbacks: dump
+  - override /trainer: cpu
+  - override /logger: mlflow
+
+seed: 123
+tags: ["vae", "sbc", "pool"]
+
+experiment_name: sbc_vae_pool
+run_name: ${short_hash:${hydra:runtime.output_dir},12}
+
+data:
+  max_val_batches: -1
+
+trainer:
+  gradient_clip_algorithm: norm
+  gradient_clip_val: 0.0
+  min_epochs: 1
+  max_epochs: 200
+  # The full sanity pass is the untrained state the dump stores; no checkpoint is kept.
+  num_sanity_val_steps: -1
+  enable_checkpointing: false
+
+test: false
+
+callbacks:
+  # Both keys of every set at every epoch, and the scores of the SDS pseudo-sets; the
+  # training loss and every other key are rescored offline from the stored weights.
+  score_dump:
+    keys: ["ascore/full", "fit/full"]
+    stored_sets: null
+    train_pass: false
+    sds:
+      max_rows: 10000
+      row_seed: 0
+
+# The KL weight is constant.
+algorithm:
+  target_rate: 0.01
+  base_rate: null
+  anomaly_score: residual_oas
+  kl_scale: 1.0e-2
+  kl_warmup_frac: 0.0
+  # The decoder reads the posterior mean in eval mode, so that loss/full, which the
+  # entropy criterion reads, is deterministic.
+  eval_mean: true
+
+  encoder:
+    in_dim: 5
+    nodes: [32, 16, 4]
+    activation: relu
+    clamp_zlogvar_range: [-10.0, 6.0]
+
+  optimizer:
+    _partial_: true
+    _target_: torch.optim.AdamW
+    lr: 1.0e-3
+    weight_decay: 1.0e-4
+    betas: [0.9, 0.999]
+    eps: 1e-8

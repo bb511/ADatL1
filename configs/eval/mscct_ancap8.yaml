@@ -1,0 +1,85 @@
+# @package _global_
+
+# ANCAP v8 on MS-CCT's pool lattices: the capacity of validation normal, CS2 dermis
+# (S1), against each of the four shift scanners' sets (S2) on the domain's pushed
+# points, with the condition reported beside it (V8.md of Theory XXXI, step 4, sections
+# 2 and 3, as amended by FREEZE_2.md of Theory XXXII; the cells of DECLARATION_5A.md's
+# amendment of 13 Nov, 03:36). The dumps are those that configs/eval/mscct.yaml reads;
+# this config does not compose that one, and none of its callbacks runs here. The
+# tumour and background sets are built as configured, since the patch caches are keyed
+# on the class list; none is served or scored (val_sets), and no test pass runs. On
+# 8,320 rows of S1 the condition is reported as not read (sample size).
+#   python src/eval.py eval=mscct_ancap8 lattice=mscct_<family>_pool
+
+# The dumps sit under the name of the training data config.
+scores_dir: ${paths.root_dir}/lattices/mscct
+# An out_dir of its own: in eval=mscct's, a resume would take that config's complete
+# runs for this one's (the lattice step refuses a run without v8's columns). Nothing
+# goes to MLflow per epoch, so no run is logged there.
+out_dir: ${paths.log_dir}/eval/${lattice}_ancap8
+tracking_uri: null
+# The frozen file of pushed points (RESULTS.md of Theory XXXII's redo, "The points").
+ancap8_points_dir: ${paths.root_dir}/pushed_points/mscct
+
+evaluation:
+  evaluator:
+    _target_: src.evaluation.evaluator.Evaluator
+    # The callback configs pass through uninstantiated: every run builds its own.
+    _recursive_: false
+    accelerator: cpu
+    devices: 1
+    logger: false
+    enable_progress_bar: false
+    enable_model_summary: false
+
+    # The only callback. S1 is validation normal and the cells the four shift scanners'
+    # sets; the reference is the one file of pushed points, without kinds. sizes are the
+    # declared sample sizes: 8,320 patches of normal, n2 per cell, 9,999 points.
+    dump_callbacks:
+      ancap8:
+        _target_: src.evaluation.callbacks.ancap8.ANCAP8
+        output_name: ascore/full
+        dataset_1: normal
+        views:
+          nz20: nz20
+          nz210: nz210
+          p1000: p1000
+          gt450: gt450
+        points: [push]
+        kinds: false
+        sizes:
+          n1: 8320
+          n2: { nz20: 21112, nz210: 22425, p1000: 15703, gt450: 15259 }
+          n_p: 9999
+        name: ancap8
+    # No test pass, so no test loader is built.
+    test_callbacks: []
+
+    # S1 and the cells alone are served.
+    val_sets: [normal, nz20, nz210, p1000, gt450]
+    # S1 and the cells rescored from the weights at every epoch, initial.pt included,
+    # in the pass that rescores the points, as step 5's store read them (the ruling of
+    # 6 Nov 04:00 in plans/adl1t/08_tests.md); the dumps store every set.
+    rescored_sets: [normal, nz20, nz210, p1000, gt450]
+
+    # The pushed points alone: no auxiliary probe, training set or SDS pseudo-set. The
+    # file holds no mask and is refused unless its x has the md5 of RESULTS.md.
+    extra_sets:
+      points:
+        push:
+          path: ${ancap8_points_dir}/mscct_pushed.npz
+          md5_x: 7d70156467d1509b6b484e28f6713959
+          md5_mask: null
+
+    selection: ${selection}
+
+# ANCAP v8 alone: no criterion, Q'' or labelled row, so the lattice step writes v8's
+# five tables (src/evaluation/lattice.py) and no labelled table; the points have no
+# kinds, so the kinds table is empty. cells are the keys of the callback's views;
+# domain leads every table beside the lattice's name.
+selection:
+  ancap8:
+    name: ancap8
+    cells: [nz20, nz210, p1000, gt450]
+    n_kinds: 0
+    domain: mscct

@@ -60,6 +60,17 @@ DOMAINS = {
         sets="cchamber_wt",
         empty_signals=False,
     ),
+    "mscct": SimpleNamespace(
+        cells=["nz20", "nz210", "p1000", "gt450"],
+        sizes={
+            "n1": 8320,
+            "n2": {"nz20": 21112, "nz210": 22425, "p1000": 15703, "gt450": 15259},
+            "n_p": 9999,
+        },
+        md5_x="7d70156467d1509b6b484e28f6713959",
+        sets=None,
+        empty_signals=False,
+    ),
 }
 # Rows per file of a toy dijet record, every one finite, so that S1 and the cell are
 # large enough for the criterion's cuts.
